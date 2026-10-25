@@ -45,6 +45,10 @@ export const GRID_KEY = `${MEMORY_KEY}.gantt.grid`
 const FALLBACK_WIDTH = 900
 /** The `‹ ›` marks sit this far inside the dates' visible edge. */
 const CLIP_INSET = 2
+/** The window drawn around what is in view: this many rows more above and below, and a view's width more either side. */
+const OVERSCAN_ROWS = 10
+/** The height assumed while the pane has none (hidden, or not laid out yet), as the keys' page size assumes. */
+const FALLBACK_HEIGHT = 720
 
 /** A field the row may carry as text: the text, or null. */
 const text = (value: unknown): string | null => (typeof value === 'string' ? value : null)
@@ -83,11 +87,15 @@ interface Model {
 }
 
 interface Built {
-  /** Per line: the grid row and the date lane. */
-  rows: HTMLElement[]
-  lanes: HTMLElement[]
-  /** Per line: the `‹` and `›` marks of the lane, hidden until the dates scroll past the row. */
-  clips: Array<{ left: HTMLElement; right: HTMLElement } | null>
+  /**
+   * Per line number, the grid row and the date lane — **only the lines in (or near) the window** (moai-vj8w.2fh): the
+   * rest are not nodes at all, as the list draws only the rows in view.
+   */
+  rows: Map<number, HTMLElement>
+  lanes: Map<number, HTMLElement>
+  /** Per drawn line: the `‹` and `›` marks of the lane, hidden until the dates scroll past the row. */
+  clips: Map<number, { left: HTMLElement; right: HTMLElement }>
+  /** Per line, drawn or not: where its bars stand. */
   placed: Array<Placed | null>
   /** The header's top ticks, to keep their label in view while the dates scroll. */
   top: Array<{ el: HTMLElement; from: number; to: number }>
@@ -109,6 +117,8 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
   let model: Model | null = null
   let axis: Axis | null = null
   let built: Built | null = null
+  /** The window the nodes were built for: lines `[r0, r1)` and the dates' pixels `[x0, x1]`. */
+  let drawn: { r0: number; r1: number; x0: number; x1: number } | null = null
   let positioned = false
   let shownCursor: string | null | undefined
   /** A bar was dragged: the click the release sends is the drag's, not a choice of the row. Every press clears it. */
@@ -243,39 +253,103 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
     const a = axis
     // The bars this hovered bubble spoke of are about to be replaced, and a removed node sends no mouseleave.
     bubble.hidden = true
-    const cursor = state.cursor
-    const rows: HTMLElement[] = []
-    const lanes: HTMLElement[] = []
-    const clips: Built['clips'] = []
-
     const wide = widthOf(a)
     right.style.width = `${wide}px`
     lanesBox.style.height = `${m.lines.length * ROW_H}px`
+    rowsBox.style.height = `${m.lines.length * ROW_H}px`
     // An axis that grew at its start (a new row reaches earlier) moves every date right: the same dates stay in view.
     // A new step is setZoom's and fit's to place.
     if (was && was.zoom === a.zoom && was.from !== a.from) scroll.scrollLeft = Math.max(0, scroll.scrollLeft + xOf(a, was.from))
 
+    const svg = doc.createElementNS(SVG, 'svg')
+    svg.setAttribute('class', 'links')
+    svg.setAttribute('width', String(wide))
+    svg.setAttribute('height', String(m.lines.length * ROW_H))
+    svg.setAttribute('aria-hidden', 'true')
+    built = { rows: new Map(), lanes: new Map(), clips: new Map(), placed, top: [], svg }
+    drawn = null
+    paintWindow()
+
+    empty.hidden = m.lines.length > 0
+    empty.replaceChildren(...(m.lines.length ? [] : [emptyState(doc, { icon: 'gantt-chart', title: words.empty })]))
+    for (const [z, b] of zoomButtons) b.setAttribute('aria-pressed', String(z === zoom))
+    paintArrows()
+    paintView()
+  }
+
+  /** What is in view now: the lines `[r0, r1)` and the dates' pixels `[x0, x1]`, with no margin. */
+  function inView(): NonNullable<typeof drawn> {
+    const total = model ? model.lines.length : 0
+    const top = scroll.scrollTop - HEAD_H
+    const height = scroll.clientHeight || FALLBACK_HEIGHT
+    const x0 = scroll.scrollLeft
+    return {
+      r0: Math.max(0, Math.min(total, Math.floor(top / ROW_H))),
+      r1: Math.max(0, Math.min(total, Math.ceil((top + height) / ROW_H))),
+      x0,
+      x1: x0 + viewWidth(),
+    }
+  }
+
+  /** Whether everything in view stands among the nodes built. */
+  function covered(): boolean {
+    if (!drawn) return false
+    const v = inView()
+    return v.r0 >= drawn.r0 && v.r1 <= drawn.r1 && v.x0 >= drawn.x0 && v.x1 <= drawn.x1
+  }
+
+  /**
+   * Build the nodes of the window: the lines in view and ten more either side, the weekend blocks and header ticks of
+   * the dates in view and a view's width more either side, and the bars that reach into those dates. Nothing outside is
+   * a node, so a long axis or a long list costs what the screen shows (moai-vj8w.2fh). Drawn again when a scroll leaves it.
+   */
+  function paintWindow(): void {
+    if (!model || !state || !built || !axis) return
+    if (holding) return void (drawLater = true)
+    const m = model
+    const a = axis
+    const b = built
+    const now = nowWall()
+    const cursor = state.cursor
+    const v = inView()
+    const view = Math.max(v.x1 - v.x0, 120)
+    const win = {
+      r0: Math.max(0, v.r0 - OVERSCAN_ROWS),
+      r1: Math.min(m.lines.length, v.r1 + OVERSCAN_ROWS),
+      x0: Math.max(0, v.x0 - view),
+      x1: Math.min(widthOf(a), v.x1 + view),
+    }
+    // The dates' margin is kept unclamped: a view at the axis' edge is covered by a window that ends there.
+    drawn = { ...win, x0: v.x0 - view, x1: v.x1 + view }
+    // A bubble over a bar about to go has no mouseleave to take it down.
+    bubble.hidden = true
+    const wall: [number, number] = [wallAt(a, win.x0), wallAt(a, win.x1)]
+
     // Weekends, behind everything. Not at the month step, where a day is 4px.
     const shade: HTMLElement[] = []
     if (a.zoom !== 'month') {
-      for (const [from, to] of weekends(a)) {
+      for (const [from, to] of weekends(a, wall)) {
         const col = el(doc, 'div', { class: 'col-we' })
         col.style.left = `${xOf(a, from)}px`
         col.style.width = `${xOf(a, to) - xOf(a, from)}px`
         shade.push(col)
       }
     }
-    const svg = doc.createElementNS(SVG, 'svg')
-    svg.setAttribute('class', 'links')
-    svg.setAttribute('width', String(wide))
-    svg.setAttribute('height', String(m.lines.length * ROW_H))
-    svg.setAttribute('aria-hidden', 'true')
-
-    m.lines.forEach((line, n) => {
+    b.rows.clear()
+    b.lanes.clear()
+    b.clips.clear()
+    const rows: HTMLElement[] = []
+    const lanes: HTMLElement[] = []
+    for (let n = win.r0; n < win.r1; n++) {
+      const line = m.lines[n]!
       const g = line.kind === 'row' ? m.index.rows[line.at]!.gantt : undefined
-      const p = placed[n] ?? null
-      rows.push(gridRow(m, line, g, cursor))
+      const p = b.placed[n] ?? null
+      const grid = gridRow(m, line, g, cursor)
+      grid.style.top = `${n * ROW_H}px`
+      rows.push(grid)
+      b.rows.set(n, grid)
       const lane = el(doc, 'div', { class: `lane${g?.deferred ? ' dim' : ''}`, 'data-id': line.kind === 'row' ? m.index.rows[line.at]!.id : null, 'data-key': line.key, 'aria-selected': String(line.key === cursor) })
+      lane.style.top = `${n * ROW_H}px`
       lane.addEventListener('click', () => {
         // The click that ends a bar's drag is the drag's, not a choice.
         if (dragged) return void (dragged = false)
@@ -284,48 +358,30 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
       })
       if (line.kind === 'row') plannable(lane, m.index.rows[line.at]!, g)
       if (p && g) {
-        const hover = (node: HTMLElement) => tip(node, m, line, g)
-        let planBar: HTMLElement | null = null
-        let dueMark: HTMLElement | null = null
-        if (p.plan) {
-          const plan = (planBar = bars(lane, `b-plan${p.plan.origin === 'members' ? ' members' : ''}${g.deferred ? ' deferred' : ''}`, p.plan.from, p.plan.to, a))
-          // A group's plan carries how far its members are, as a fill from the left.
-          if (line.dir && g.progress.kind === 'rollup' && g.progress.total > 0) {
-            const fillBar = el(doc, 'div', { class: 'b-fill' })
-            fillBar.style.width = `${(g.progress.done / g.progress.total) * 100}%`
-            plan.append(fillBar)
-          }
-          hover(plan)
-        }
-        if (p.actual) hover(bars(lane, `b-act a-${statusGlyph(p.status, m.boot).tone}`, p.actual.from, p.actual.to, a))
-        if (p.over) {
-          hover(bars(lane, 'b-over', p.over.from, p.over.to, a))
-          mark(lane, 'over', '!', xOf(a, p.over.to) + 3)
-        }
-        if (p.due !== null) hover((dueMark = mark(lane, 'due', '◆', xOf(a, p.due))))
-        if (line.kind === 'row') movable(lane, m.index.rows[line.at]!, g, planBar, dueMark)
+        // A row whose dates all lie outside the window draws no bars: there is nothing of them to see.
+        if (p.span && xOf(a, p.span[1]) >= win.x0 && xOf(a, p.span[0]) <= win.x1) drawBars(lane, m, line, g, p, a)
         const l = mark(lane, 'clip', '‹', 0)
         const r = mark(lane, 'clip', '›', 0)
         l.hidden = r.hidden = true
-        clips.push(p.span ? { left: l, right: r } : null)
-      } else clips.push(null)
+        if (p.span) b.clips.set(n, { left: l, right: r })
+      }
       lanes.push(lane)
-    })
+      b.lanes.set(n, lane)
+    }
     const today = el(doc, 'div', { class: 'todayline' })
     today.style.left = `${xOf(a, now)}px`
-    lanesBox.replaceChildren(...shade, ...lanes, svg, today)
+    lanesBox.replaceChildren(...shade, ...lanes, b.svg, today)
     rowsBox.replaceChildren(...rows)
-    rowsBox.style.height = `${m.lines.length * ROW_H}px`
 
     // The header; its today cap stands over the day's line.
-    const top: Built['top'] = []
-    const header = headerOf(a, now, words)
+    b.top = []
+    const header = headerOf(a, now, words, wall)
     const ticks = (box: HTMLElement, list: Tick[], keep: boolean) => {
       box.replaceChildren(...list.map((tick) => {
         const node = el(doc, 'div', { class: `tick${tick.cls ? ` ${tick.cls}` : ''}` }, tick.text)
         node.style.left = `${xOf(a, tick.from)}px`
         node.style.width = `${xOf(a, tick.to) - xOf(a, tick.from)}px`
-        if (keep) top.push({ el: node, from: xOf(a, tick.from), to: xOf(a, tick.to) })
+        if (keep) b.top.push({ el: node, from: xOf(a, tick.from), to: xOf(a, tick.to) })
         return node
       }))
     }
@@ -334,13 +390,30 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
     const cap = el(doc, 'div', { class: 'todaycap', 'aria-hidden': 'true' })
     cap.style.left = `${xOf(a, now)}px`
     hd1.append(cap)
+  }
 
-    built = { rows, lanes, clips, placed, top, svg }
-    empty.hidden = m.lines.length > 0
-    empty.replaceChildren(...(m.lines.length ? [] : [emptyState(doc, { icon: 'gantt-chart', title: words.empty })]))
-    for (const [z, b] of zoomButtons) b.setAttribute('aria-pressed', String(z === zoom))
-    paintArrows()
-    paintView()
+  /** The bars of one row: planned, actual, late, the `◆`, and what drags. */
+  function drawBars(lane: HTMLElement, m: Model, line: GanttLine, g: GanttRow, p: Placed, a: Axis): void {
+    const hover = (node: HTMLElement) => tip(node, m, line, g)
+    let planBar: HTMLElement | null = null
+    let dueMark: HTMLElement | null = null
+    if (p.plan) {
+      const plan = (planBar = bars(lane, `b-plan${p.plan.origin === 'members' ? ' members' : ''}${g.deferred ? ' deferred' : ''}`, p.plan.from, p.plan.to, a))
+      // A group's plan carries how far its members are, as a fill from the left.
+      if (line.dir && g.progress.kind === 'rollup' && g.progress.total > 0) {
+        const fillBar = el(doc, 'div', { class: 'b-fill' })
+        fillBar.style.width = `${(g.progress.done / g.progress.total) * 100}%`
+        plan.append(fillBar)
+      }
+      hover(plan)
+    }
+    if (p.actual) hover(bars(lane, `b-act a-${statusGlyph(p.status, m.boot).tone}`, p.actual.from, p.actual.to, a))
+    if (p.over) {
+      hover(bars(lane, 'b-over', p.over.from, p.over.to, a))
+      mark(lane, 'over', '!', xOf(a, p.over.to) + 3)
+    }
+    if (p.due !== null) hover((dueMark = mark(lane, 'due', '◆', xOf(a, p.due))))
+    if (line.kind === 'row') movable(lane, m.index.rows[line.at]!, g, planBar, dueMark)
   }
 
   /** The axis stands while the lines' dates still fit in it; a draw because the index was read again does not shift it. */
@@ -379,6 +452,8 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
   /** What depends on the scroll offset: the `‹ ›` marks, the header labels kept in view, the range. */
   function paintView(): void {
     if (!built || !axis) return
+    // A scroll, a resize or a step that left the window builds the one around where the view is now.
+    if (!covered()) paintWindow()
     const v0 = scroll.scrollLeft
     const v1 = v0 + viewWidth()
     built.clips.forEach((pair, n) => {
@@ -399,10 +474,10 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
   function paintCursor(): void {
     if (!built || !model || !state) return
     const cursor = state.cursor
-    model.lines.forEach((line, n) => {
-      const on = String(line.key === cursor)
-      for (const node of [built!.rows[n]!, built!.lanes[n]!]) if (node.getAttribute('aria-selected') !== on) node.setAttribute('aria-selected', on)
-    })
+    for (const [n, lane] of built.lanes) {
+      const on = String(model.lines[n]!.key === cursor)
+      for (const node of [built.rows.get(n)!, lane]) if (node.getAttribute('aria-selected') !== on) node.setAttribute('aria-selected', on)
+    }
     paintArrows()
     reveal()
   }
@@ -414,6 +489,8 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
     if (at < 0 || !height) return
     const next = revealOffset(scroll.scrollTop, height, HEAD_H + at * ROW_H, ROW_H, HEAD_H)
     if (next !== scroll.scrollTop) scroll.scrollTop = next
+    // The cursor may have gone to a line the window has not reached (the scroll event comes later): build around the view now.
+    if (!covered()) paintView()
   }
 
   // ── the bubble ──
