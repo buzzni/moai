@@ -175,7 +175,7 @@ fn tokens(s: &str) -> Vec<Tok> {
 
 /// 두 글이 같은 토큰을 같은 차례로 내는가 — 머리글과 페이지 제목을 마크다운 기호와 상관없이 견준다. 제목은
 /// 기호를 걷은 글이고(`# The \`moai\` CLI` → `The moai CLI`) 머리글은 원문이라 글자째로는 못 견준다.
-fn same_words(a: &str, b: &str) -> bool {
+pub(crate) fn same_words(a: &str, b: &str) -> bool {
     tokens(a).into_iter().map(|t| t.text).eq(tokens(b).into_iter().map(|t| t.text))
 }
 

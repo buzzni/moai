@@ -27082,9 +27082,15 @@ fn the_wiki_json_is_the_contract_the_skill_reads() {
     );
     let want_guide = r#"{"slug":"guide/a","title":"A guide","path":"docs/guide/a.md","bytes":32,"issues":[],"links":[{"text":"home","to":"README","resolved":true}],"linked_from":["README"],"conflict":false"#;
     // 목록은 페이지마다 `seen_count` 를 늘 낸다(moai-4s5n.c0n), `show` 는 `seen` 을 늘 낸다.
+    // `dir_abs` 는 이 체크아웃의 위키 자리다(moai-xp7l.ml4) — 시험 자리의 절대 경로라 읽어서 견준다.
+    let abs = serde_json::from_str::<serde_json::Value>(ls.trim()).unwrap()["dir_abs"].as_str().unwrap().to_string();
+    assert!(abs.starts_with('/') && abs.ends_with("/docs"), "{abs}");
     assert_eq!(
         ls.trim_end(),
-        format!(r#"{{"dir":"docs","pages":[{want_home},"seen_count":0}},{want_guide},"seen_count":0}}]}}"#)
+        format!(
+            r#"{{"dir":"docs","dir_abs":{},"pages":[{want_home},"seen_count":0}},{want_guide},"seen_count":0}}]}}"#,
+            serde_json::to_string(&abs).unwrap()
+        )
     );
 
     let show = ok(s.path(), &["wiki", "show", "README", "--json"]);
@@ -27191,6 +27197,24 @@ fn the_wiki_rides_the_branch_while_the_tracker_goes_to_the_root() {
     assert!(!away.contains("dir_abs"), "체크아웃 밖을 쓸 자리로 내밀었다 — {away}");
 }
 
+/// 제목 절의 머리글은 `› 머리글` 로 다시 안 선다 — 백틱이 든 맨 위 `#` 여도(moai-xp7l.teh). 제목은 기호를 걷은 글이라
+/// 글자째 견주던 판은 `The moai CLI › The `moai` CLI` 를 냈다. 아래 절의 머리글은 그대로 선다.
+#[test]
+fn wiki_search_does_not_repeat_a_title_with_backticks() {
+    let s = init("wiki-search-title-ticks");
+    std::fs::create_dir_all(s.path().join("docs")).unwrap();
+    std::fs::write(
+        s.path().join("docs/cli.md"),
+        "# The `moai` CLI\n\nThe zebra word.\n\n## Zebra *notes*\n\nMore zebra here.\n",
+    )
+    .unwrap();
+    let out = ok(s.path(), &["wiki", "search", "zebra"]);
+    let heads: Vec<&str> = out.lines().filter(|l| l.contains("docs/cli.md:")).collect();
+    assert_eq!(heads.len(), 2, "{out}");
+    assert!(heads.iter().any(|l| l.ends_with("The moai CLI")), "제목 절이 머리글을 또 댔다\n{out}");
+    assert!(heads.iter().any(|l| l.contains(" › ")), "아래 절의 머리글이 빠졌다\n{out}");
+}
+
 /// `moai wiki search` — 화면의 `path:line`·`제목 › 머리글`·발췌·끝 줄, `--json` 의 키와 **1 부터** 세는 줄(moai-g8pt.ryi).
 /// 절의 머리글 줄은 5 줄(`## Merging…`), 발췌는 7 줄이다 — 0 부터 세거나 1 을 두 번 더하면 이 수가 어긋난다.
 #[test]
@@ -27246,7 +27270,9 @@ fn wiki_search_exit_codes_follow_wiki_ls() {
     // 위키 없음 — 0, `--json` 은 `{"dir","error"}`.
     let none = moai(s.path(), &["wiki", "search", "merge", "--json"]);
     assert!(none.status.success(), "{}", text(&none));
-    assert!(String::from_utf8_lossy(&none.stdout).starts_with(r#"{"dir":"docs","error":{"kind":"no_dir""#));
+    let v: serde_json::Value = serde_json::from_str(String::from_utf8_lossy(&none.stdout).trim()).unwrap();
+    assert_eq!((v["dir"].as_str(), v["error"]["kind"].as_str()), (Some("docs"), Some("no_dir")), "{v}");
+    assert!(v["dir_abs"].as_str().is_some_and(|a| a.ends_with("/docs")), "{v}");
 
     std::fs::create_dir_all(s.path().join("docs")).unwrap();
     std::fs::write(s.path().join("docs/a.md"), "# A\n\nmerge driver\n").unwrap();
@@ -27957,7 +27983,9 @@ fn a_wiki_dir_typo_stands_up_nothing_but_the_wiki() {
     let s = init("wiki-dir");
     let none = moai(s.path(), &["wiki", "ls", "--json"]);
     assert!(none.status.success(), "안 쓴 위키를 실패로 냈다\n{}", text(&none));
-    assert!(String::from_utf8_lossy(&none.stdout).starts_with(r#"{"dir":"docs","error":{"kind":"no_dir","said":"#));
+    let v: serde_json::Value = serde_json::from_str(String::from_utf8_lossy(&none.stdout).trim()).unwrap();
+    assert_eq!((v["dir"].as_str(), v["error"]["kind"].as_str()), (Some("docs"), Some("no_dir")), "{v}");
+    assert!(v["dir_abs"].as_str().is_some_and(|a| a.ends_with("/docs")), "{v}");
     assert!(moai(s.path(), &["wiki", "ls"]).status.success());
     let asked = moai(s.path(), &["wiki", "show", "README", "--json"]);
     assert!(!asked.status.success(), "없는 위키의 페이지를 0 으로 냈다\n{}", text(&asked));
