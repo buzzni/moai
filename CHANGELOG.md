@@ -27,6 +27,16 @@ does not tag — see `CONTRIBUTING.md`.
   each row's `gantt` — the planned and actual spans, progress, overdue days and live
   blockers — so another program can draw the same chart. (moai-d86e.b2m,
   moai-d86e.5wj, moai-d86e.en8, moai-d86e.jmq)
+- **A Gantt bar in the web page can be dragged to new days.** The middle moves the
+  start and the deadline together, either end moves one of them, by whole days, and
+  the row is written once, on release — as `moai edit <id> --start <day> --due
+  <day>`, with only the side that moved. A double-click on a day of a row with no
+  days plans that one day. A refusal (a start after the deadline, a day past the
+  deadline above) is shown in moai's words and the bar goes back; a move that went
+  through names the `moai edit` line that puts the days back. A bar an epic or
+  milestone counts from its members does not move. This is the page's first write
+  to the tracker, taken only from the page itself, like the read marks.
+  (moai-d86e.3ud)
 
 ## [0.24.0] - 2026-10-25
 
