@@ -98,6 +98,50 @@ class Send(unittest.TestCase):
         self.assertIn(b'filename="01-keys.png"', seen[2].data)
         self.assertIn(b'"content": "Keys"', seen[2].data)
 
+    def test_a_rate_limit_without_a_wait_still_waits(self):
+        replies = [429, None]
+
+        def opener(req, timeout=None):
+            if replies.pop(0) == 429:
+                body = io.BytesIO(json.dumps({"retry_after": None}).encode())
+                raise urllib.error.HTTPError(req.full_url, 429, "Too Many Requests", {}, body)
+            return FakeResponse(b"{}")
+
+        slept = []
+        with tempfile.TemporaryDirectory() as tmp:
+            make(tmp)
+            post.send(HOOK, post.messages(tmp), opener=opener, sleep=slept.append)
+        self.assertEqual(slept, [1.0])
+
+    def test_a_run_can_start_part_way_so_a_retry_does_not_post_twice(self):
+        seen = []
+
+        def opener(req, timeout=None):
+            seen.append(req)
+            return FakeResponse(b"{}")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            make(tmp, media={"01-a.png": b"\x89PNG", "02-b.png": b"\x89PNG"})
+            post.send(HOOK, post.messages(tmp), start=2, opener=opener, sleep=lambda s: None)
+        self.assertEqual(len(seen), 2, "message 1 went out again")
+        self.assertIn(b'filename="01-a.png"', seen[0].data)
+
+    def test_a_failure_part_way_names_where_to_start_again(self):
+        calls = []
+
+        def opener(req, timeout=None):
+            calls.append(req)
+            if len(calls) == 2:
+                raise urllib.error.HTTPError(req.full_url, 502, "Bad Gateway", {}, io.BytesIO(b"upstream"))
+            return FakeResponse(b"{}")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            make(tmp, media={"01-a.png": b"\x89PNG", "02-b.png": b"\x89PNG"})
+            with self.assertRaises(post.PostError) as ctx:
+                post.send(HOOK, post.messages(tmp), opener=opener, sleep=lambda s: None)
+        self.assertIn("1 of 3 already posted", str(ctx.exception))
+        self.assertIn("start at 2", str(ctx.exception))
+
     def test_a_refusal_says_the_status_but_not_the_address(self):
         def opener(req, timeout=None):
             raise urllib.error.HTTPError(req.full_url, 404, "Not Found", {}, io.BytesIO(b'{"message": "Unknown Webhook"}'))

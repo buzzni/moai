@@ -18,15 +18,17 @@
 //
 // 찾으라는 글이 화면에 없으면 멈추고 그 장면의 글을 찍어 준다 — 엉뚱한 장면을 상자 없이 내보내지 않게.
 // playwright 는 이 저장소의 의존이 아니다 — record-web.mjs 처럼 부르는 쪽이 NODE_PATH 로 건넨다.
-import { mkdirSync, readFileSync, renameSync, rmSync } from 'node:fs'
+import { mkdirSync, readFileSync, rmSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import os from 'node:os'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 const require = createRequire(import.meta.url)
 const { chromium } = require('playwright')
 
-const here = path.dirname(new URL(import.meta.url).pathname)
+// URL 의 pathname 은 퍼센트 부호화된 채라, 빈칸이나 한글이 든 경로에서 site 자산을 못 찾는다
+const here = path.dirname(fileURLToPath(import.meta.url))
 const site = path.join(here, '../../site/assets')
 const ACCENT = '#f08a4b'
 
@@ -65,6 +67,10 @@ function parse(argv) {
   if (o.video && !(o.from >= 0 && o.to > o.from)) throw new Error('a .webm needs --from <s> --to <s>')
   if (o.video && o.mode === 'web') throw new Error('web takes stills only; record a web scene with scripts/site-demo/record-web.mjs')
   for (const c of o.cells) if (c.length !== 4 || c.some((n) => !Number.isFinite(n))) throw new Error('--cells is row,col,width,height')
+  // 빈 글은 어디에나 맞아 --mark-all 이 같은 자리를 끝없이 돌고, --speed 0 은 영상의 끝 시각을 무한으로 만든다
+  for (const t of [...o.mark, ...o.line]) if (!t.trim()) throw new Error('--mark and --line need some text')
+  for (const k of ['width', 'speed']) if (!(Number.isFinite(o[k]) && o[k] > 0)) throw new Error(`--${k} must be a number above 0`)
+  for (const k of ['wait', 'lines']) if (!(Number.isFinite(o[k]) && o[k] >= 0)) throw new Error(`--${k} must be a number, 0 or more`)
   return o
 }
 
@@ -131,8 +137,12 @@ window.__boxes = function ({ mark, line: whole = [], markAll, cells, select, col
         range.setStart(sn, at - so)
         range.setEnd(en, end - eo)
         const r = range.getBoundingClientRect()
-        if (r.width > 0 && r.height > 0) { found.push(r); hit++ }
-        if (!markAll) break
+        // 숨은 자리(크기 0)는 건너뛰고 다음 자리를 본다 — 첫 자리가 숨어 있다고 "화면에 없다" 로 멈추지 않게
+        if (r.width > 0 && r.height > 0) {
+          found.push(r)
+          hit++
+          if (!markAll) break
+        }
         from = end
       }
       if (hit && !markAll) break
@@ -140,9 +150,10 @@ window.__boxes = function ({ mark, line: whole = [], markAll, cells, select, col
     if (!hit) missing.push(needle)
   }
   for (const css of select) {
-    const els = [...document.querySelectorAll(css)]
-    if (!els.length) missing.push(css)
-    for (const el of markAll ? els : els.slice(0, 1)) found.push(el.getBoundingClientRect())
+    // 보이는 요소만 — 숨은 요소의 사각형(0,0,0,0)에 치면 상자가 화면 왼쪽 위 구석에 선다
+    const shown = [...document.querySelectorAll(css)].map((el) => el.getBoundingClientRect()).filter((r) => r.width > 0 && r.height > 0)
+    if (!shown.length) missing.push(css)
+    found.push(...(markAll ? shown : shown.slice(0, 1)))
   }
   if (cells.length) {
     // 줄의 자리는 그 줄 요소에서, 칸의 너비는 글자 하나를 재어 얻는다 — 터미널 요소에는 안쪽 여백이
@@ -183,6 +194,11 @@ function castSize(text) {
   return { cols, rows }
 }
 
+// <script> 안에 JSON 을 넣는다. 녹화된 출력에 `</script>` 가 들면 그 자리에서 스크립트가 끝나므로 `<` 를 풀어 쓴다
+function inScript(value) {
+  return JSON.stringify(value).replace(/</g, '\\u003c')
+}
+
 function tuiPage(o, cast, { cols, rows }) {
   const css = readFileSync(path.join(site, 'vendor/asciinema-player.css'), 'utf8')
   const js = readFileSync(path.join(site, 'vendor/asciinema-player.min.js'), 'utf8')
@@ -210,7 +226,7 @@ html,body{margin:0;background:#0e0f0e}
 #cast .ap-overlay,#cast .ap-control-bar{display:none!important}
 </style></head><body><div id="shot"><div class="window"><div class="bar"><i></i><i></i><i></i><span>${title.replace(/</g, '&lt;')}</span></div><div id="cast"></div></div></div>
 <script>${js}</script>
-<script>window.__player = AsciinemaPlayer.create({ data: ${JSON.stringify(cast)} }, document.getElementById('cast'), ${JSON.stringify(opts)});</script>
+<script>window.__player = AsciinemaPlayer.create({ data: ${inScript(cast)} }, document.getElementById('cast'), ${inScript(opts)});</script>
 <script>${IN_PAGE}</script>
 <script>window.__lines = function (n) {
   const term = document.querySelector('#cast .ap-term') || document.querySelector('#cast pre')
@@ -259,28 +275,32 @@ async function tui(o) {
     const box = await shot.boundingBox()
     await probe.close()
     const dir = mkdtemp()
-    const vsize = { width: Math.ceil(box.width / 2) * 2, height: Math.ceil(box.height / 2) * 2 }
-    const ctx = await browser.newContext({ viewport: vsize, recordVideo: { dir, size: vsize }, colorScheme: 'dark' })
-    const page = await ctx.newPage()
-    await page.setContent(html)
-    await page.waitForSelector('#cast .ap-line', { timeout: 10000 })
-    await page.evaluate((n) => window.__lines(n), o.lines)
-    // 상자는 재생 내내 다시 친다 — 글이 화면에 나오면 그 자리에, 밀려 올라가면 따라서. 한 번이라도
-    // 나온 글은 찾은 것으로 센다. 끝까지 한 번도 안 나온 글이 있으면 그 영상은 버린다
-    const until = Date.now() + ((o.to - o.from) / o.speed) * 1000 + 600
-    const seen = new Set()
     let res = { boxed: 0, missing: [], visible: '' }
-    while (Date.now() < until) {
-      const got = await boxes(page, o, size, '#cast')
-      for (const m of [...o.mark, ...o.line]) if (!got.missing.includes(m)) seen.add(m)
-      res = { boxed: Math.max(res.boxed, got.boxed), missing: [], visible: got.visible }
-      await page.waitForTimeout(120)
+    try {
+      const vsize = { width: Math.ceil(box.width / 2) * 2, height: Math.ceil(box.height / 2) * 2 }
+      const ctx = await browser.newContext({ viewport: vsize, recordVideo: { dir, size: vsize }, colorScheme: 'dark' })
+      const page = await ctx.newPage()
+      await page.setContent(html)
+      await page.waitForSelector('#cast .ap-line', { timeout: 10000 })
+      await page.evaluate((n) => window.__lines(n), o.lines)
+      // 상자는 재생 내내 다시 친다 — 글이 화면에 나오면 그 자리에, 밀려 올라가면 따라서. 한 번이라도
+      // 나온 글은 찾은 것으로 센다. 끝까지 한 번도 안 나온 글이 있으면 그 영상은 버린다
+      const until = Date.now() + ((o.to - o.from) / o.speed) * 1000 + 600
+      const seen = new Set()
+      while (Date.now() < until) {
+        const got = await boxes(page, o, size, '#cast')
+        for (const m of [...o.mark, ...o.line]) if (!got.missing.includes(m)) seen.add(m)
+        res = { boxed: Math.max(res.boxed, got.boxed), missing: [], visible: got.visible }
+        await page.waitForTimeout(120)
+      }
+      res.missing = [...o.mark, ...o.line].filter((m) => !seen.has(m))
+      const video = page.video()
+      await ctx.close()
+      // 옮기지 않고 베낀다 — 임시 디렉터리(/tmp)와 -o 가 다른 파일 시스템이면 rename 이 EXDEV 로 진다
+      if (!res.missing.length) await video.saveAs(o.out)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
     }
-    res.missing = [...o.mark, ...o.line].filter((m) => !seen.has(m))
-    const video = page.video()
-    await ctx.close()
-    if (!res.missing.length) renameSync(await video.path(), o.out)
-    rmSync(dir, { recursive: true, force: true })
     return report(res, o)
   } finally {
     await browser.close()
@@ -291,7 +311,8 @@ async function web(o) {
   const [width, height] = o.size.split('x').map(Number)
   const browser = await chromium.launch()
   try {
-    const page = await browser.newPage({ viewport: { width, height }, deviceScaleFactor: 2, colorScheme: 'dark' })
+    // moai web 의 CSP(script-src 'self')가 addScriptTag 의 인라인 스크립트를 막는다 — 찍는 쪽이 그 금을 비켜 간다
+    const page = await browser.newPage({ viewport: { width, height }, deviceScaleFactor: 2, colorScheme: 'dark', bypassCSP: true })
     await page.goto(o.target, { waitUntil: 'networkidle' })
     await page.waitForTimeout(o.wait)
     await page.addScriptTag({ content: IN_PAGE })

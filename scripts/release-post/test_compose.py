@@ -113,6 +113,27 @@ class Summarize(unittest.TestCase):
         self.assertLessEqual(len(out), compose.ITEM_CHARS)
         self.assertTrue(out.endswith("…"))
 
+    def test_a_cut_never_leaves_a_marker_open(self):
+        # 0.7.0·0.11.0·0.17.0 의 굵은 머리말이 160자를 넘어, 닫는 ** 가 잘린 채 나갔다
+        item = "**`moai tui --json` puts `progress` on every folder row " + "and more words " * 12 + "here.** Rest."
+        out = compose.summarize(item)
+        self.assertLessEqual(len(out), compose.ITEM_CHARS)
+        self.assertTrue(out.endswith("…**"), out)
+        out = compose.summarize("Some `code with a long span " + "y" * 200 + "` end.")
+        self.assertEqual(out.count("`") % 2, 0, out)
+        self.assertLessEqual(len(out), compose.ITEM_CHARS)
+
+    def test_an_aside_cut_inside_bold_closes_it(self):
+        item = "**A long bold headline about something important: with colon inside** then text."
+        self.assertEqual(compose.summarize(item), "**A long bold headline about something important**")
+
+    def test_a_hyphenated_word_in_parentheses_is_not_an_id(self):
+        self.assertEqual(compose.summarize("Adds a (read-only) page. More."), "Adds a (read-only) page")
+
+    def test_an_abbreviation_does_not_end_the_sentence(self):
+        self.assertEqual(compose.summarize("Use a filter, e.g. `-s todo`, to narrow it. More."),
+                         "Use a filter, e.g. `-s todo`, to narrow it")
+
 
 class Render(unittest.TestCase):
     def test_big_changes_come_before_fixes(self):

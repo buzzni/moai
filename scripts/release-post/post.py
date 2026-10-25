@@ -105,8 +105,11 @@ def encode(message):
     return body, f"multipart/form-data; boundary={bound}"
 
 
-def send(url, msgs, opener=urllib.request.urlopen, sleep=time.sleep):
+def send(url, msgs, start=1, opener=urllib.request.urlopen, sleep=time.sleep):
+    """차례대로 보낸다. start 는 몇 번째부터인가 — 중간에 멈춘 판을 다시 돌릴 때 앞의 것이 두 번 안 나가게."""
     for i, m in enumerate(msgs, 1):
+        if i < start:
+            continue
         body, kind = encode(m)
         for attempt in range(6):
             req = urllib.request.Request(url + "?wait=true", data=body, method="POST",
@@ -120,11 +123,11 @@ def send(url, msgs, opener=urllib.request.urlopen, sleep=time.sleep):
                 if e.code == 429 and attempt < 5:
                     try:
                         wait = float(json.loads(said).get("retry_after", 1))
-                    except (ValueError, AttributeError):
+                    except (ValueError, AttributeError, TypeError):  # 글이 JSON 이 아니거나, 값이 없거나 null
                         wait = 1.0
                     sleep(wait)
                     continue
-                done = f" ({i - 1} of {len(msgs)} already posted)" if i > 1 else ""
+                done = f" ({i - 1} of {len(msgs)} already posted — start at {i} to post the rest)" if i > 1 else ""
                 raise PostError(f"message {i} of {len(msgs)}: Discord answered {e.code} {e.reason}: {said[:300]}{done}") from None
             except urllib.error.URLError as e:
                 raise PostError(f"message {i} of {len(msgs)}: cannot reach Discord ({e.reason})") from None
@@ -196,6 +199,8 @@ def main(argv=None):
     ap.add_argument("dir", help="release-posts/<version>")
     ap.add_argument("--dry-run", action="store_true", help="print what would be posted; send nothing")
     ap.add_argument("--preview", metavar="FILE", help="write an HTML preview of the messages; send nothing")
+    ap.add_argument("--start", type=int, default=1, metavar="N",
+                    help="begin at message N; the ones before it went out on an earlier run")
     args = ap.parse_args(argv)
     try:
         msgs = messages(args.dir)
@@ -204,7 +209,9 @@ def main(argv=None):
             if args.preview:
                 preview(msgs, args.preview)
             return 0
-        send(webhook_url(os.environ), msgs)
+        if not 1 <= args.start <= len(msgs):
+            raise PostError(f"--start {args.start}: there are {len(msgs)} messages")
+        send(webhook_url(os.environ), msgs, start=args.start)
     except PostError as e:
         print(f"post.py: {e}", file=sys.stderr)
         return 1

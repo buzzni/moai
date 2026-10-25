@@ -230,11 +230,11 @@ moai archive                                      # refresh .moai/archive/<year>
 git add .moai/archive                             # a new year's file is not tracked yet
 git commit -m "chore(tracker): archive closed bundles" -- .moai/   # the journals' notes too
 scripts/bump-version.sh --next                    # prints 0.2.0 and why; writes nothing
-scripts/release-post/compose.py v0.2.0 --out release-posts/v0.2.0   # the Discord post, from the changelog
-scripts/release-post/post.py release-posts/v0.2.0 --preview /tmp/post.html   # look at it before it goes out
-git add release-posts && git commit -m "docs(release-posts): v0.2.0" -- release-posts
 scripts/bump-version.sh auto                      # Cargo.toml, Cargo.lock, CHANGELOG.md
 git commit -m "chore(release): 0.2.0" -- Cargo.toml Cargo.lock CHANGELOG.md
+scripts/release-post/compose.py v0.2.0 --out release-posts/v0.2.0   # the Discord post, from the section auto just opened
+scripts/release-post/post.py release-posts/v0.2.0 --preview /tmp/post.html   # look at it before it goes out
+git add release-posts && git commit -m "docs(release-posts): v0.2.0" -- release-posts
 git push origin develop
 gh pr create --base main --head develop --title "v0.2.0"   # merge it, no squash
 git fetch origin && git tag v0.2.0 origin/main
@@ -308,7 +308,11 @@ that went out before this — v0.23.0 was the first — run it by hand:
 ```sh
 gh workflow run discord.yml -f version=v0.2.0                # post it
 gh workflow run discord.yml -f version=v0.2.0 -f dry_run=true   # print what it would post
+gh workflow run discord.yml -f version=v0.2.0 -f start=3        # a run that stopped after message 2
 ```
+
+A run that fails part way says how many messages went out and where to start again,
+so a retry does not post the first ones twice.
 
 Before `auto`, the `moai-wiki` skill's sweep can be called once: it walks the work
 closed since the last tag and lists the wiki pages it left behind. It is not a

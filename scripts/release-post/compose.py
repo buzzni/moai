@@ -24,8 +24,12 @@ SITE = "https://moai.buzzni.com"
 BIG = ("Added", "Changed", "Deprecated", "Removed")
 KNOWN = BIG + ("Fixed", "Security")
 
-# `(moai-pxiy)`, `(moai-ab12, moai-cd34.x9z)` — 트래커 id 만 든 괄호. Discord 에서 읽는 사람에게는 뜻이 없다
-IDS = re.compile(r"\s*\((?:[a-z][a-z0-9]*-[0-9a-z]{4}(?:\.[0-9a-z]{3})*(?:\s*[,·]\s*|\s+)?)+\)")
+# `(moai-pxiy)`, `(moai-ab12, moai-cd34.x9z)` — 트래커 id 만 든 괄호. Discord 에서 읽는 사람에게는 뜻이 없다.
+# 접두는 이 저장소의 것(`moai-`)만 본다 — `(read-only)`·`(per-user)` 도 "낱말-네 글자" 꼴이라, 아무 접두나 받으면
+# 본문의 낱말이 id 로 읽혀 깎인다
+IDS = re.compile(r"\s*\((?:moai-[0-9a-z]{4}(?:\.[0-9a-z]{3})*(?:\s*[,·]\s*|\s+)?)+\)")
+# 마침표가 문장 끝이 아닌 줄임말 — `e.g. ` 에서 끊으면 요약이 "Use e.g" 가 된다
+ABBREV = re.compile(r"(?:^|[\s(])(?:e\.g|i\.e|vs)\.$", re.IGNORECASE)
 
 
 class NoRelease(Exception):
@@ -82,6 +86,8 @@ def first_sentence(text):
         if ch == "`":
             code = not code
         elif ch in ".!?" and not code and (i + 1 == len(text) or text[i + 1] == " "):
+            if ABBREV.search(text[: i + 1]):
+                continue
             return text[:i]
     return text
 
@@ -101,12 +107,23 @@ def drop_aside(text):
     return text
 
 
+def balance(text):
+    """끊은 자리가 코드(`) 나 굵게(**) 안이면 닫는다 — 열린 채 두면 Discord 가 표식을 글자 그대로 찍는다."""
+    if text.count("`") % 2:
+        text += "`"
+    if re.sub(r"`[^`]*`", "", text).count("**") % 2:
+        text += "**"
+    return text
+
+
 def cut(text, limit=ITEM_CHARS):
+    """상한 안으로 줄인다. 덧붙임을 걷거나 꼬리를 자른 자리에서 열린 표식은 닫는다."""
+    text = balance(text)
     if len(text) <= limit:
         return text
-    head = text[: limit - 1]
+    head = text[: limit - 4]  # … 하나와, 닫을 표식(` 하나·** 하나) 셋의 자리를 남긴다
     space = head.rfind(" ")
-    return (head[:space] if space > 0 else head).rstrip(" ,;:—-") + "…"
+    return balance((head[:space] if space > 0 else head).rstrip(" ,;:—-") + "…")
 
 
 def summarize(item):

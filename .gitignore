@@ -26,5 +26,8 @@
 # auto-added by aplus-dev-studio (block env secrets)
 .env.*
 
+# 릴리스 소식 스크립트의 시험이 남기는 바이트코드(scripts/release-post/, moai-hwl4)
+__pycache__/
+
 # moai web 의 Node 도구. 번들(src/web/dist/)은 커밋한다 — scripts/gen-web.sh
 /web/node_modules/

@@ -28,13 +28,17 @@ on:
         description: "보낼 것만 찍고 올리지 않는다"
         type: boolean
         default: false
+      start:
+        description: "몇 번째 메시지부터 (앞 판이 중간에 멈췄을 때 — 실패 줄이 그 수를 댄다)"
+        default: "1"
 
 permissions:
   contents: read
 
-# 한 판을 두 번 겹쳐 올리지 않는다 — 앞의 것이 끝난 뒤에 돈다
+# 한 판을 두 번 겹쳐 올리지 않는다 — 앞의 것이 끝난 뒤에 돈다. 손으로 준 `0.23.0` 과 태그의 `v0.23.0` 이
+# 같은 무리에 서도록 `v` 를 붙여 맞춘다(판을 고르는 스텝과 같은 규칙)
 concurrency:
-  group: discord-${{ inputs.version }}
+  group: discord-${{ startsWith(inputs.version, 'v') && inputs.version || format('v{0}', inputs.version) }}
   cancel-in-progress: false
 
 jobs:
@@ -80,6 +84,7 @@ jobs:
         env:
           VERSION: ${{ steps.pick.outputs.version }}
           DRY_RUN: ${{ inputs.dry_run }}
+          START: ${{ inputs.start || '1' }}
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
         run: |
           set -euo pipefail
@@ -93,4 +98,8 @@ jobs:
             python3 -I scripts/release-post/post.py "$dir" --dry-run
             exit 0
           fi
-          python3 -I scripts/release-post/post.py "$dir"
+          if ! [[ $START =~ ^[0-9]+$ ]]; then
+            printf 'start 는 수여야 한다: %s\n' "$START" >&2
+            exit 1
+          fi
+          python3 -I scripts/release-post/post.py "$dir" --start "$START"
