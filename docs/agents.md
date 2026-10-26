@@ -586,7 +586,10 @@ this happens.
   an error. It never answers in your place
 - **No idle worker.** It asks you whether to open new worker panes; on a yes it
   splits a pane running `claude --model <model>` in the root — an ordinary
-  interactive session you can see and type into
+  interactive session you can see and type into. The pane is opened with
+  `remain-on-exit`, so when `claude` exits its last screen stays and tmux
+  refuses keys sent there, rather than a shell taking them; close a dead pane
+  yourself when you are done reading it
 
 **If anything stands in a worker's input box, or you are scrolling that pane
 (copy mode), or the session map no longer reads that pane's session alive, it
@@ -633,8 +636,10 @@ it tells you and goes on as if it were not there. Updating restarts cmux and
 every session in it, so when to update is yours.
 
 - **Which tab is which worker.** The same records and the same session map; in
-  cmux the map asks `cmux top` which surface each live session runs in. Every
-  cmux call names that surface by its UUID, `--surface <UUID>`
+  cmux the map asks `cmux top` which surface each live session runs in — a
+  worker `cmux claude-teams` started gets its tab too: the tmux its record names
+  is the stand-in's answer, not a tmux pane. Every cmux call names that surface
+  by its UUID, `--surface <UUID>`
 - **A label on the tab.** Once a round it asks whether worker tabs should carry
   labels; on a yes it names the tab `<worker> <id>` (`cmux rpc tab.action`,
   action `rename`), and takes the name off once the report is checked (action
@@ -655,7 +660,7 @@ every session in it, so when to update is yours.
 - **A stalled worker.** It reads the tab once (`cmux read-screen`) and tells you
   what stands there
 - **No idle worker.** On your yes it opens a split beside its own tab running
-  `cd <root> && claude --model <model>`, without taking focus, and evens the
+  `cd "<root>" && claude --model <model>`, without taking focus, and evens the
   splits out. When cmux has no room for another pane it stops and tells you
 
 It never closes a tab, a workspace or a window, never moves focus, and never
@@ -723,7 +728,8 @@ to bring them back ("recover the sessions", "되살려"). It loads `moai-recover
 
 - **Which died.** It reads the same records under `~/.claude/sessions/` and
   takes the dead ones standing in the root or a worktree, leaving out any that
-  is already back and older crashes you did not name. When several stand in one
+  is already back, any whose conversation ends in `/clear` (it went on under a
+  new id), and older crashes you did not name. When several stand in one
   directory it asks you once which to bring back
 - **What each was doing.** From each session's transcript under
   `~/.claude/projects/` it reads its role (supervisor or worker), the issue it
@@ -733,12 +739,13 @@ to bring them back ("recover the sessions", "되살려"). It loads `moai-recover
   back, and a `target` link whose `/tmp/cargo-target/<name>` was wiped — it
   makes that directory again; the build output is gone, so the session rebuilds
 - **Bringing them back, workers first and the supervisor last.** Inside tmux it
-  splits a pane per session running `claude --resume <id>` and pastes a short
-  note on what happened once the input box is empty; the supervisor is told its
+  splits a pane per session running `claude --resume <id>` (with
+  `remain-on-exit`, as above) and pastes a short note on what happened once
+  the input box is empty; the supervisor is told its
   workers' names may have changed. Inside cmux (0.65.0 or later) it does the
   same with a split tab per session, and when cmux has no room for another pane
   the sessions left get the lines to type. Outside both it prints, per session,
-  `cd <dir> && claude --resume <id>` and the note to paste
+  `cd "<dir>" && claude --resume <id>` and the note to paste
 
 A session Saycode ran is not resumed in a pane — that would run its
 conversation outside Saycode. It tells such a session from its transcript,
