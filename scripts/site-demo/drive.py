@@ -72,6 +72,20 @@ def scenes(repo):
             *drag(42, 20, 58, wait=1.8),
             (3.5, None),
         ],
+        # v0.27.0 의 소식(moai-0fai): 간트 머리의 달 이름이 화면의 말을 따른다. make.sh 가 DEMO_LANG=ko 로 찍는다.
+        # 계획한 날은 gantt 처럼 plan.sh 가 단다. 주 걸음(-)으로 밀면 머리에 달 이름이 선다
+        'gantt-months': [
+            (2.0, SPC), (0.7, 'g'), (0.6, 'g'),
+            (2.5, 't'), (2.0, '-'),
+            (3.0, None),
+        ],
+        # v0.27.0 의 소식(moai-0fai): 위키 탭(SPC g w)의 / 가 moai wiki search 의 차례로 페이지를 세운다 —
+        # 그 낱말을 든 절이 높은 페이지가 먼저, 글자만 든 페이지가 뒤에
+        'wiki-search': [
+            (2.0, SPC), (0.7, 'g'), (0.6, 'w'),
+            (2.0, '/'), *typed('sync worker', gap=0.12),
+            (3.0, None),
+        ],
     }
 
 def main():
@@ -81,7 +95,7 @@ def main():
     moai = os.path.abspath(moai) if os.sep in moai else (shutil.which(moai) or moai)
     os.environ['MOAI'] = moai   # 장면의 뒤쪽 명령(sh)도 같은 바이너리를 부른다
     # 녹화하는 사람의 환경이 화면에 새지 않게: 정체·키·색·말은 데모의 것으로
-    env = dict(os.environ, TERM='xterm-256color', MOAI_NO_UPDATE_CHECK='1', COLORTERM='truecolor', MOAI_LANG='en',
+    env = dict(os.environ, TERM='xterm-256color', MOAI_NO_UPDATE_CHECK='1', COLORTERM='truecolor', MOAI_LANG=os.environ.get('DEMO_LANG', 'en'),
                MOAI=moai, MOAI_CONFIG=os.path.join(repo, '.demo-home', 'config.toml'))
     for k in ('MOAI_NOW', 'MOAI_ACTOR', 'MOAI_KEYS', 'NO_COLOR'):
         env.pop(k, None)
