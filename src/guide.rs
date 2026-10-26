@@ -3019,6 +3019,60 @@ for alive, pane, r in rows:
     print("\t".join(["alive" if alive else "dead"] + [str(c or "-") for c in cols]))
 PY"##;
 
+/// **죽은 뒤 `/clear` 된 대화는 후보가 아니다**(moai-jn8d.vyh). 죽은 기록(id A)을 새 프로세스가 되살린 뒤 그 창에서
+/// `/clear` 를 치면 그 프로세스의 기록은 새 id B 를 들어, A 를 든 산 줄이 없어진다 — A 를 되살리면 이미 떠난 대화가
+/// 돌아온다. 2026-10-26 에 잰 것이 셋이다.
+/// - **대화 기록에는 고리가 없다.** `/clear` 의 두 줄은 A 의 끝이 아니라 B 의 머리(6~8줄)에 서고, B 의 첫 줄
+///   `parentUuid` 는 B 안을 가리킨다. A 의 끝에는 `cost-state` 한 줄이 붙지만 `timestamp` 가 없고, 감독은 일꾼 여럿을
+///   1초 안에 잇달아 비워(그날 06:46:40~49 에 넷) 파일의 mtime 과 B 의 첫 줄을 때로 짝지으면 엇갈린다. 첫 규칙은 대화
+///   기록의 끝을 읽어 틀렸다(리뷰 moai-jn8d.d79 1번, 커밋 32c0e0ae 로 걷었다)
+/// - **`~/.claude/history.jsonl` 이 고리다.** 입력 하나가 한 줄이고, `/clear` 는 **비운 쪽의 id**(A)를 `sessionId` 로
+///   든다 — 2.1.310 의 `history.jsonl` 2,773줄 중 `/clear` 530줄이 모두 그 칸을 들었다. 이 세션 제 것도 그렇다: 기록은
+///   새 id 를 들고 `history.jsonl` 의 `/clear` 는 옛 id 를 들었다
+/// - **산 기록은 제가 비운 id 를 들지 않는다.** 그날 기록 39개 중 제 `sessionId` 에 `/clear` 가 선 것은 일곱이었고 모두
+///   죽은 기록이었다. 일곱 다 기록이 마지막으로 쓰인 때(`updatedAt`)보다 하루까지 뒤에 비워졌고, 대화 기록이 남은 셋은
+///   비운 때가 대화의 마지막 줄 뒤였다(`d2e57059` 는 10-09 23:09 에 죽어 10-10 05:18 까지 이어지다 05:20 에 비워졌다)
+///
+/// 잣대를 기록의 `updatedAt` 이 아니라 대화 기록의 마지막 `timestamp` 에 둔 것은 둘째 짝을 안 세우기 위해서다 — 기록을
+/// 읽는 것은 [`SESSIONS`] 하나여야 한다. 그 잣대가 비운 뒤 `/resume A` 로 같은 프로세스가 A 로 돌아온 판도 가른다: 그
+/// 대화는 비운 뒤에도 움직여 후보로 남는다. 대화 기록이 지워진 id 는 비운 것으로 낸다 — 되살릴 대화가 없다.
+pub const CLEARED: &str = r##"python3 - <sessionId> … <<'PY'
+import glob, json, os, sys
+wanted = set(sys.argv[1:])
+cleared = {}
+try:
+    with open(os.path.expanduser("~/.claude/history.jsonl")) as f:
+        for line in f:
+            try:
+                h = json.loads(line)
+                if str(h.get("display", "")).split()[:1] == ["/clear"] and h.get("sessionId") in wanted:
+                    cleared[h["sessionId"]] = max(cleared.get(h["sessionId"], 0), int(h["timestamp"]))
+            except (ValueError, KeyError, TypeError, AttributeError):
+                continue
+except OSError:
+    pass
+def moved(sid):
+    last = ""
+    for path in glob.glob(os.path.expanduser(f"~/.claude/projects/*/{sid}.jsonl")):
+        with open(path, errors="replace") as f:
+            for line in f:
+                if '"timestamp"' not in line:
+                    continue
+                try:
+                    t = json.loads(line).get("timestamp")
+                except ValueError:
+                    continue
+                if isinstance(t, str) and t > last:
+                    last = t
+    if not last:
+        return 0
+    from datetime import datetime
+    return datetime.fromisoformat(last.replace("Z", "+00:00")).timestamp() * 1000
+for sid in sorted(cleared):
+    if cleared[sid] > moved(sid):
+        print(sid)
+PY"##;
+
 /// **빈 입력 칸의 잣대는 이 글 하나다.** `moai-tmux` 와 `moai-recover` 가 `format!` 으로 같은 글을 싣는다 —
 /// 되살리기는 모두에게 심기고 `moai-tmux` 는 고른 사람에게만 서니(moai-3r7l), 되살리기가 `moai-tmux` 의 절을 가리키면
 /// 그것이 없는 자리에서 없는 글을 댄다(moai-o9je). 둘째 잣대를 적으면 Claude Code 의 입력 칸 꼴이 바뀌는 날 한쪽만
@@ -4307,6 +4361,20 @@ leaves its record behind. The lines below print one row per record, tab-separate
   worktree, also drop it when a live row other than your own stands in that same `cwd`. The
   root is not such a place — several live sessions stand there at once, and one of them being
   alive says nothing about the dead one
+- **Drop it when its conversation was cleared after it died.** Another process resumed it and
+  ran `/clear` there: that process went on under a new `sessionId` and its own record carries
+  the new one, so no live row carries the old id any more — and resuming it brings back a
+  conversation already left behind. Its transcript does not say so (the `/clear` lines open the
+  new id's transcript, not the end of the old one); `~/.claude/history.jsonl` does — it logs
+  every `/clear` under the id it cleared. Give the lines below the candidates' `sessionId`s;
+  they print the ones cleared after their transcript last moved, and you drop those. A
+  conversation that moved again after its `/clear` (it was resumed back) is not printed. Two
+  dead records with the same `sessionId` are one candidate
+
+```sh
+{CLEARED}
+```
+
 - **Drop old crashes.** Records of earlier deaths stay too. Keep the candidates whose
   transcript (below) last moved around the same time; name an older one to the person apart,
   and bring it back only if they say so
@@ -8230,6 +8298,71 @@ stop sending outside work while a release runs",
             head.contains("**A `$TMUX` that starts with `/tmp/cmux-` is cmux's own stand-in**"),
             "감독이 cmux 의 가짜 TMUX 를 tmux 로 읽는다"
         );
+    }
+
+    /// **죽은 뒤 `/clear` 된 대화는 되살리지 않는다**(moai-jn8d.vyh). 고리는 `history.jsonl` 의 `/clear` 줄이 든 옛 id 다 —
+    /// 대화 기록의 끝을 읽던 첫 규칙은 틀려 걷었다. 비운 뒤 다시 움직인 대화는 남고, 대화 기록이 없는 id 는 비운 것이다.
+    #[test]
+    #[cfg(unix)]
+    fn the_recover_skill_drops_a_conversation_cleared_after_it_died() {
+        let text = recover();
+        let dead = section(&text, "## 1. Find the dead");
+        assert!(
+            dead.contains("**Drop it when its conversation was cleared after it died.**") && dead.contains(CLEARED),
+            "되살린 뒤 /clear 한 대화를 후보로 둔다"
+        );
+        // 고리는 `history.jsonl` 이다 — 첫 규칙은 대화 기록의 끝을 읽어 틀렸다(리뷰 moai-jn8d.d79 1번).
+        assert!(!text.contains("<command-name>/clear</command-name>"), "대화 기록의 끝에서 /clear 를 찾는다");
+        // 기록을 읽는 것은 짝 하나다.
+        assert!(!CLEARED.contains("sessions/"), "비운 대화를 가르는 줄이 둘째 짝이 됐다");
+        let s = crate::scratch::Scratch::new("guide-recover-cleared");
+        let home = s.path();
+        let projects = home.join("projects/-repo");
+        std::fs::create_dir_all(&projects).unwrap();
+        let line = |t: &str| format!("{{\"type\":\"user\",\"timestamp\":\"{t}\"}}\n");
+        // 죽은 뒤 되살아나 10:00 까지 움직이다 11:00 에 비워진 대화 — 끝에는 `timestamp` 없는 `cost-state` 가 붙는다.
+        std::fs::write(
+            projects.join("s-cleared.jsonl"),
+            line("2026-10-26T10:00:00.000Z") + "{\"type\":\"cost-state\",\"sessionId\":\"s-cleared\"}\n",
+        )
+        .unwrap();
+        // 비운 뒤 `/resume` 으로 같은 대화로 돌아와 12:00 까지 움직였다 — 후보로 남는다.
+        std::fs::write(
+            projects.join("s-back.jsonl"),
+            line("2026-10-26T10:00:00.000Z") + &line("2026-10-26T12:00:00.000Z"),
+        )
+        .unwrap();
+        std::fs::write(projects.join("s-plain.jsonl"), line("2026-10-26T10:00:00.000Z")).unwrap();
+        let at = |t: &str| chrono_ms(t);
+        let clear = |sid: &str, t: &str| {
+            format!(
+                "{{\"display\":\"/clear\",\"pastedContents\":{{}},\"timestamp\":{},\"project\":\"/repo\",\"sessionId\":\"{sid}\"}}\n",
+                at(t)
+            )
+        };
+        let history = clear("s-cleared", "2026-10-26T11:00:00.000Z")
+            + &clear("s-back", "2026-10-26T11:00:00.000Z")
+            + &clear("s-gone", "2026-10-26T11:00:00.000Z")
+            + &clear("s-other", "2026-10-26T11:00:00.000Z")
+            + "{\"display\":\"/clearly not\",\"timestamp\":1,\"sessionId\":\"s-plain\"}\n"
+            + "not json\n";
+        std::fs::write(home.join("history.jsonl"), history).unwrap();
+        let shell = CLEARED
+            .replace("~/.claude", &home.display().to_string())
+            .replace("<sessionId> …", "s-cleared s-back s-plain s-gone");
+        let out = std::process::Command::new("sh").arg("-c").arg(shell).output().unwrap();
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        // 대화 기록이 지워진 id 는 되살릴 대화가 없으니 비운 것으로 낸다. 안 물은 id(`s-other`)는 안 낸다.
+        assert_eq!(String::from_utf8(out.stdout).unwrap(), "s-cleared\ns-gone\n", "비운 대화를 못 갈랐다");
+    }
+
+    /// `2026-10-26T11:00:00.000Z` 꼴을 유닉스 밀리초로 — 시험이 `history.jsonl` 의 `timestamp` 를 짓는 데만 쓴다.
+    fn chrono_ms(t: &str) -> i64 {
+        let day: i64 = t[8..10].parse().unwrap();
+        let hour: i64 = t[11..13].parse().unwrap();
+        assert!(t.starts_with("2026-10-") && t.ends_with(":00:00.000Z"), "시험의 때 꼴이 아니다 — {t}");
+        // 2026-10-01T00:00:00Z
+        (1_790_812_800 + (day - 1) * 86_400 + hour * 3_600) * 1_000
     }
 
     /// **`ListAgents` 의 이름과 tmux 칸을 잇는 짝은 한 자리에 선다**(moai-u99i.xo8). 감독의 tmux 스킬이 그 상수를 그대로

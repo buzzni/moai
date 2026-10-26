@@ -178,6 +178,55 @@ PY
   worktree, also drop it when a live row other than your own stands in that same `cwd`. The
   root is not such a place — several live sessions stand there at once, and one of them being
   alive says nothing about the dead one
+- **Drop it when its conversation was cleared after it died.** Another process resumed it and
+  ran `/clear` there: that process went on under a new `sessionId` and its own record carries
+  the new one, so no live row carries the old id any more — and resuming it brings back a
+  conversation already left behind. Its transcript does not say so (the `/clear` lines open the
+  new id's transcript, not the end of the old one); `~/.claude/history.jsonl` does — it logs
+  every `/clear` under the id it cleared. Give the lines below the candidates' `sessionId`s;
+  they print the ones cleared after their transcript last moved, and you drop those. A
+  conversation that moved again after its `/clear` (it was resumed back) is not printed. Two
+  dead records with the same `sessionId` are one candidate
+
+```sh
+python3 - <sessionId> … <<'PY'
+import glob, json, os, sys
+wanted = set(sys.argv[1:])
+cleared = {}
+try:
+    with open(os.path.expanduser("~/.claude/history.jsonl")) as f:
+        for line in f:
+            try:
+                h = json.loads(line)
+                if str(h.get("display", "")).split()[:1] == ["/clear"] and h.get("sessionId") in wanted:
+                    cleared[h["sessionId"]] = max(cleared.get(h["sessionId"], 0), int(h["timestamp"]))
+            except (ValueError, KeyError, TypeError, AttributeError):
+                continue
+except OSError:
+    pass
+def moved(sid):
+    last = ""
+    for path in glob.glob(os.path.expanduser(f"~/.claude/projects/*/{sid}.jsonl")):
+        with open(path, errors="replace") as f:
+            for line in f:
+                if '"timestamp"' not in line:
+                    continue
+                try:
+                    t = json.loads(line).get("timestamp")
+                except ValueError:
+                    continue
+                if isinstance(t, str) and t > last:
+                    last = t
+    if not last:
+        return 0
+    from datetime import datetime
+    return datetime.fromisoformat(last.replace("Z", "+00:00")).timestamp() * 1000
+for sid in sorted(cleared):
+    if cleared[sid] > moved(sid):
+        print(sid)
+PY
+```
+
 - **Drop old crashes.** Records of earlier deaths stay too. Keep the candidates whose
   transcript (below) last moved around the same time; name an older one to the person apart,
   and bring it back only if they say so
