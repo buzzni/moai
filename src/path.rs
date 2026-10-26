@@ -456,7 +456,8 @@ mod tests {
         assert_eq!(from_posix("/home/me", || None), None);
         // 뿌리는 그 밖의 `/…` 에서만 묻는다(리뷰 moai-yc8r.itq) — 운영의 뿌리는 `PATH` 를 훑는 일이다. 늘 물으면
         // (인자로 미리 셈하면) 여기서 패닉한다.
-        let unasked = || -> Option<PathBuf> { panic!("드라이브·UNC·바꿀 것 아닌 글에서 뿌리를 물었다") };
+        let unasked =
+            || -> Option<PathBuf> { panic!("드라이브·UNC·바꿀 것 아닌 글에서 뿌리를 물었다") };
         assert_eq!(from_posix("/c/x", unasked).unwrap(), PathBuf::from(r"C:\x"));
         assert_eq!(from_posix("/cygdrive/d/y", unasked).unwrap(), PathBuf::from(r"D:\y"));
         assert_eq!(from_posix("//srv/share", unasked).unwrap(), PathBuf::from(r"\\srv\share"));
