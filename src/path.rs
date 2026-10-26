@@ -137,6 +137,47 @@ fn plain_part(part: &[u8]) -> bool {
     !device
 }
 
+/// **MSYS2 의 POSIX 철자를 Windows 의 철자로**(moai-yc8r.3ie, 2026-10-26 사용자 결정). MSYS2 의 git 은 제 런타임의
+/// 눈으로 경로를 댄다 — `rev-parse --show-toplevel`·`worktree list` 의 답과, 그 git 이 써 둔 `.git` 의 `gitdir:`·
+/// `worktrees/<이름>/gitdir` 가 `/c/Users/me/proj` 꼴이다. `moai.exe` 는 그것을 `\c\Users\me\proj`(지금 드라이브의
+/// 뿌리 밑)로 읽어 워크트리 겹쳐 보기와 `init` 이 엉뚱한 자리를 봤다.
+///
+/// - `//서버/공유/…` 는 `\\서버\공유\…`
+/// - `/c/…`·`/cygdrive/c/…` 는 `C:\…` — MSYS2 가 드라이브를 뿌리 밑 한 글자 이름으로 건다
+/// - 그 밖의 `/…`(`/home/me`·`/tmp`)는 MSYS2 가 깔린 자리(`root`) 밑이다. `root` 가 없으면 `None`
+/// - `/` 로 서지 않은 글은 `None` — 바꿀 것이 아니다
+///
+/// **`/etc/fstab` 은 안 읽는다** — 거기서 따로 건 자리(`/work` → `D:\work`)는 `root` 밑으로 잘못 읽힌다. 알고 둔
+/// 구멍이다(사용자 결정). 글자만 보는 순수 함수라 리눅스에서 잰다 — 운영에서 부르는 자는 [`crate::git::native`] 다.
+#[cfg(any(not(unix), test))]
+pub(crate) fn from_posix(text: &str, root: Option<&Path>) -> Option<PathBuf> {
+    let rest = text.strip_prefix('/')?;
+    let back = |s: &str| s.replace('/', "\\");
+    if let Some(unc) = rest.strip_prefix('/') {
+        return (!unc.is_empty() && !unc.starts_with('/')).then(|| PathBuf::from(format!(r"\\{}", back(unc))));
+    }
+    let drive = |s: &str| {
+        let (letter, tail) = s.split_once('/').unwrap_or((s, ""));
+        match letter.as_bytes() {
+            [d] if d.is_ascii_alphabetic() => {
+                Some(PathBuf::from(format!(r"{}:\{}", d.to_ascii_uppercase() as char, back(tail))))
+            }
+            _ => None,
+        }
+    };
+    if let Some(p) = drive(rest.strip_prefix("cygdrive/").unwrap_or(rest)) {
+        return Some(p);
+    }
+    let mut out = root?.as_os_str().to_owned();
+    if !rest.is_empty() {
+        if !out.as_encoded_bytes().ends_with(b"\\") {
+            out.push("\\");
+        }
+        out.push(back(rest));
+    }
+    Some(PathBuf::from(out))
+}
+
 /// `.` 을 버리고 `..` 은 앞 조각을 뗀다. **파일 시스템을 안 본다** — 아직 없는 자리도 접어야 하고
 /// (훅은 이제 만들 파일을 판정한다), 접는 값이 얻는 값보다 크면 안 된다(시간대 이름 하나).
 ///
@@ -383,6 +424,36 @@ mod tests {
         ] {
             assert_eq!(settle_verbatim(OsStr::new(v), elsewhere), OsStr::new(v), "{v}");
         }
+    }
+
+    /// **MSYS2 의 철자를 Windows 의 철자로**(moai-yc8r.3ie) — 드라이브·cygdrive·UNC·MSYS2 뿌리 밑, 그리고 바꿀 것이 아닌 글.
+    #[test]
+    fn an_msys_spelling_becomes_a_windows_path() {
+        let root = Path::new(r"C:\msys64");
+        let conv = |t: &str| from_posix(t, Some(root)).map(|p| p.to_string_lossy().into_owned());
+        assert_eq!(conv("/c/Users/me/proj").as_deref(), Some(r"C:\Users\me\proj"));
+        assert_eq!(conv("/d").as_deref(), Some(r"D:\"));
+        assert_eq!(conv("/c/").as_deref(), Some(r"C:\"));
+        assert_eq!(conv("/cygdrive/e/w/.git/worktrees/a").as_deref(), Some(r"E:\w\.git\worktrees\a"));
+        assert_eq!(conv("//srv/share/proj").as_deref(), Some(r"\\srv\share\proj"));
+        assert_eq!(conv("/home/me/proj").as_deref(), Some(r"C:\msys64\home\me\proj"));
+        assert_eq!(conv("/").as_deref(), Some(r"C:\msys64"));
+        assert_eq!(from_posix("/c/x", Some(Path::new(r"C:\msys64\"))).unwrap(), PathBuf::from(r"C:\x"));
+        assert_eq!(
+            from_posix("/tmp/x", Some(Path::new(r"C:\msys64\"))).unwrap().to_string_lossy(),
+            r"C:\msys64\tmp\x",
+            "가름선을 두 번 붙였다"
+        );
+        // 두 글자 이름은 드라이브가 아니다.
+        assert_eq!(conv("/cd/x").as_deref(), Some(r"C:\msys64\cd\x"));
+        // MSYS2 뿌리를 모르면 드라이브 밖은 못 바꾼다.
+        assert_eq!(from_posix("/home/me", None), None);
+        assert_eq!(from_posix("/c/x", None).unwrap(), PathBuf::from(r"C:\x"));
+        // 바꿀 것이 아닌 글.
+        assert_eq!(conv(r"C:/Users/me"), None);
+        assert_eq!(conv("relative/x"), None);
+        assert_eq!(conv("///x"), None);
+        assert_eq!(conv("//"), None);
     }
 
     /// **Windows 의 철자는 `/` 로, 유닉스의 것은 그대로**(moai-j9gv.4c1).

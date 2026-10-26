@@ -178,7 +178,7 @@ pub fn parse(porcelain: &str) -> Vec<Tree> {
         for field in record.split('\0') {
             let (key, value) = field.split_once(' ').unwrap_or((field, ""));
             match key {
-                "worktree" => path = Some(PathBuf::from(value)),
+                "worktree" => path = Some(crate::git::native(value)),
                 "HEAD" => head = Some(value),
                 "branch" => branch = Some(value.strip_prefix("refs/heads/").unwrap_or(value)),
                 "bare" | "prunable" => skip = true,
@@ -609,7 +609,7 @@ pub fn heads(root: &Path) -> Vec<(PathBuf, crate::store::Stamp)> {
     let Ok(common) = git(root, &["rev-parse", "--git-common-dir"]) else {
         return Vec::new();
     };
-    head_marks(&root.join(common.trim_end_matches('\n')))
+    head_marks(&root.join(crate::git::native(common.trim_end_matches('\n'))))
 }
 
 /// [`heads`] 의 표식을 공용 디렉터리에서 바로 잰다 — `stat` 과 작은 파일 읽기뿐이라 프로세스를 안 띄운다.
@@ -646,7 +646,7 @@ fn head_marks(common: &Path) -> Vec<(PathBuf, crate::store::Stamp)> {
 /// 같은 저장소의 워크트리는 같은 나무 모양이다.
 fn others_of(root: &Path) -> Result<(Option<Tree>, Vec<(Tree, PathBuf)>), Trouble> {
     let top = git(root, &["rev-parse", "--show-toplevel"])?;
-    let top = real(Path::new(top.trim_end_matches('\n')));
+    let top = real(&crate::git::native(top.trim_end_matches('\n')));
     let rel = real(root).strip_prefix(&top).map(Path::to_path_buf).unwrap_or_default();
     // `-z` 는 git 2.36 부터다. 그 전 git 에서 거절되면 줄로 가른 것을 NUL 로 바꿔
     // 같은 파서로 읽는다 — 줄바꿈 든 경로만 잃고, 겹쳐 보기 전체를 잃지는 않는다.
@@ -894,7 +894,7 @@ fn own_git(root: &Path) -> Option<(&Path, PathBuf, bool)> {
         return Some((top, dotgit, false));
     }
     let text = std::fs::read_to_string(&dotgit).ok()?;
-    Some((top, real(&top.join(text.trim_end().strip_prefix("gitdir:")?.trim())), true))
+    Some((top, real(&top.join(crate::git::native(text.trim_end().strip_prefix("gitdir:")?.trim()))), true))
 }
 
 /// 이 체크아웃이 딸린 워크트리면 git 이 그 몫으로 들고 있는 디렉터리(`<공용>/worktrees/<이름>`) —
@@ -1149,7 +1149,7 @@ fn on_disk(root: &Path) -> Option<Disk> {
             // 자리로 풀면 멀쩡한 워크트리가 "사라졌다" 로 빠진다(`join` 은 절대 경로면 그대로 둔다).
             let Some(path) = std::fs::read_to_string(dir.join("gitdir"))
                 .ok()
-                .and_then(|g| real(&dir.join(g.trim_end())).parent().map(Path::to_path_buf))
+                .and_then(|g| real(&dir.join(crate::git::native(g.trim_end()))).parent().map(Path::to_path_buf))
                 .filter(|p| p.exists())
             else {
                 continue;
@@ -1322,7 +1322,7 @@ fn git_dirs(root: &Path) -> Option<(&Path, PathBuf)> {
     }
     let up = std::fs::read_to_string(own.join("commondir")).ok()?;
     // `commondir` 는 대개 `../..` 다 — 풀지 않으면 끝 이름이 `..` 라 주 워크트리를 못 알아본다.
-    Some((top, real(&own.join(up.trim_end()))))
+    Some((top, real(&own.join(crate::git::native(up.trim_end())))))
 }
 
 /// 두 뿌리가 **같은 git 저장소의 워크트리에서 같은 자리의 트래커인가** — 공용 git 디렉터리가
