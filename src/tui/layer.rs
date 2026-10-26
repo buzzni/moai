@@ -15,7 +15,7 @@
 //! 조각이 아니다 — 저장소와 사용자 설정을 연다(`input::NOT_COMPONENTS`).
 
 use super::form::{Form, Target};
-use super::keys::{BROWSE, Browse, JOT, Jot, label};
+use super::keys::{Browse, JOT, Jot, said};
 use super::{App, Row, Stamp};
 use crate::i18n::{Lang, say};
 use crate::nav::Index;
@@ -1084,7 +1084,7 @@ impl App {
             // 문구 속 키 이름은 표에서 읽는다 — 키를 옮기면 이 말도 따라온다.
             None => crate::i18n::fill(
                 say(lang, "tui.jot.no_place"),
-                &[("close", &label(JOT, Jot::Close)), ("jot", &label(BROWSE, Browse::Jot))],
+                &[("close", &said(JOT, Jot::Close)), ("jot", &said(self.keys.browse, Browse::Jot))],
             ),
             Some(t) if self.on_layer() => {
                 let name = crate::text::one_line(&t.name);
@@ -1103,7 +1103,7 @@ impl App {
                     }
                     None => crate::i18n::fill(
                         say(lang, "tui.layer.dropped"),
-                        &[("name", &name), ("close", &label(JOT, Jot::Close))],
+                        &[("name", &name), ("close", &said(JOT, Jot::Close))],
                     ),
                 }
             }
@@ -1111,8 +1111,8 @@ impl App {
                 say(lang, "tui.jot.elsewhere"),
                 &[
                     ("name", &crate::text::one_line(&t.name)),
-                    ("close", &label(JOT, Jot::Close)),
-                    ("jot", &label(BROWSE, Browse::Jot)),
+                    ("close", &said(JOT, Jot::Close)),
+                    ("jot", &said(self.keys.browse, Browse::Jot)),
                 ],
             ),
         };
@@ -1321,6 +1321,7 @@ impl App {
         parked.path.clear();
         parked.remembered.clear();
         parked.expanded.clear();
+        parked.gantt_shut.clear();
         // **거름망 마스크도 푼다**(리뷰). 아래에서 `hung` 을 비우므로 걸린 글은 사라지는데,
         // 마스크를 두고 가면 그 프로젝트의 줄은 한눈 보기에서 걸러진 채 서고 — 경로 줄에 뱃지도
         // 없고 Esc 로 풀 것도 없어 — 왜 줄이 적은지 말할 자리가 도구 안에 안 남는다.
@@ -1352,6 +1353,7 @@ impl App {
         // 정체와 같은 자리), 바구니 마디(`Milestone(None)`·`Lost`)는 id 조차 없어 prefix 가 달라도
         // 그대로 샌다. 세션 내내 쌓이기도 한다.
         self.site.expanded.clear();
+        self.site.gantt_shut.clear();
         // 펴 둔 본문도 그 프로젝트에 매인 것이다(리뷰) — 글과 id 가 떠난 줄의 것이다. 상세를
         // 연 채면 다음 프레임의 `draw::fill_body` 가 곧 갈아 끼우지만, `SPC v d` 로 상세를
         // 닫아 둔 채 떠나면 그리는 쪽이 안 돌아 큰 본문 한 벌이 세션 내내 남는다.

@@ -38,7 +38,7 @@
 //! 프로젝트의 위키를 한 목록에 섞지 않는다.
 
 use super::input::Input;
-use super::keys::{self, Browse, Chord, LEADER, LINKS, Lookup, PROMPT, Prompt, WIKI};
+use super::keys::{self, Browse, Chord, LEADER, Lookup, PROMPT, Prompt};
 use super::layer::Depth;
 use super::menu;
 use super::scroll::{self, Move, Scroll};
@@ -102,6 +102,10 @@ pub struct Window {
     pub(super) laid: Option<super::draw::WikiLaid>,
     /// 걸린 찾기 — 친 글 그대로. 비면 없다.
     search: Option<String>,
+    /// 찾는 글 하나로 매긴 목록의 차례와 그 글 — 글이 바뀌면 [`Window::refilter`] 가 다시 매긴다(그림 한 번에 여러 번
+    /// 부르는 [`Window::shown`] 은 든 것을 쓴다). **`RefCell` 로 숨기지 않는다**(`draw::fill_body` 와 같은 자, 리뷰
+    /// moai-xp7l.mug) — 다시 매기는 때가 코드에서 보여야 한다. 든 글이 지금 글과 다르면 `shown` 이 그 자리에서 매긴다.
+    order: Option<(String, Vec<usize>)>,
     /// 찾는 글을 치는 중 — 칸과, 칸을 열기 전의 찾기. Esc 가 그 찾기로 돌아간다.
     pub typing: Option<Typing>,
     /// 연 순간의 id 제목.
@@ -117,6 +121,8 @@ pub struct Window {
     /// 잊은 새 길 하나가 다른 페이지의 같은 차례 링크로 `Enter` 를 보낸다. 슬러그가 지금 페이지가 아니면 없는 고름이다
     /// ([`Window::picked`]). 페이지를 바꾸는 길이 걷는 것은 그대로 둔다 — 같은 페이지로 돌아왔을 때 옛 고름이 살지 않게.
     picked: Option<(String, usize)>,
+    /// 열 때 든 쪽이 건넨 실행 중의 키 표(moai-bzm3) — 창과 고르기 창의 키 바·안내가 이것으로 이름을 댄다.
+    pub keys: keys::Keymap,
 }
 
 /// 링크와 id, 이 페이지를 가리키는 페이지를 고르는 창 — 연 순간의 페이지에서 지은 고를 것과 커서.
@@ -169,7 +175,14 @@ pub struct Typing {
 }
 
 impl Window {
-    fn new(project: String, dir: String, from: Option<PathBuf>, wiki: Wiki, titles: Titles) -> Window {
+    fn new(
+        project: String,
+        dir: String,
+        from: Option<PathBuf>,
+        wiki: Wiki,
+        titles: Titles,
+        keys: keys::Keymap,
+    ) -> Window {
         let folded =
             wiki.pages.iter().map(|p| (p.title.to_lowercase(), p.body.as_deref().map(str::to_lowercase))).collect();
         Window {
@@ -189,10 +202,12 @@ impl Window {
             chord: Chord::default(),
             laid: None,
             search: None,
+            order: None,
             typing: None,
             titles,
             choose: None,
             picked: None,
+            keys,
         }
     }
 
@@ -334,16 +349,41 @@ impl Window {
         self.typing.is_none() && self.query().is_some()
     }
 
-    /// 목록에 선 페이지들, 차례대로 — 찾는 글이 있으면 **제목이나 본문에 그 글이 든** 페이지만이다. 견주는 법은
-    /// 거름망과 같은 `to_lowercase` 다(`query::Filter`) — 페이지 쪽은 연 순간 접어 둔 것([`Window::folded`])이다. 못
-    /// 읽은 페이지는 제목으로만 걸린다.
+    /// 목록에 선 페이지들, 차례대로 — 찾는 글이 있으면 **`moai wiki search` 가 맞힌 페이지가 그 순위대로 먼저**
+    /// 서고(moai-xp7l.nyi, 페이지마다 가장 높은 절의 자리), 그다음 **제목이나 본문에 그 글이 든** 페이지가 위키 차례로
+    /// 선다. 세 표면(CLI·TUI·web)이 같은 질의에 다른 차례를 내지 않게 순위는 같은 자([`crate::wiki::search::rank`])다.
+    /// 글자 거름을 남기는 까닭은 치는 중이라서다 — 순위는 낱말로 맞히니 `gui` 는 `guide` 를 못 맞히는데, 치는 대로
+    /// 좁히던 목록이 낱말을 다 칠 때까지 비면 안 된다. 견주는 법은 거름망과 같은 `to_lowercase` 다(`query::Filter`) —
+    /// 페이지 쪽은 연 순간 접어 둔 것([`Window::folded`])이다. 못 읽은 페이지는 제목으로만 걸린다.
     pub fn shown(&self) -> Vec<&Page> {
-        let Some(q) = self.query().map(str::to_lowercase) else { return self.pages.iter().collect() };
-        self.pages
+        let Some(q) = self.query() else { return self.pages.iter().collect() };
+        let fresh;
+        let order = match &self.order {
+            Some((was, order)) if was == q => order,
+            _ => {
+                fresh = self.order_for(q);
+                &fresh
+            }
+        };
+        order.iter().map(|&i| &self.pages[i]).collect()
+    }
+
+    /// [`Window::shown`] 의 차례를 매긴다 — 순위로 맞힌 페이지, 그다음 글자로만 든 페이지. 겹치면 앞의 것이다. 낱말이
+    /// 없는 글이면 순위가 아무것도 안 맞힌다([`crate::wiki::search::rank`]).
+    fn order_for(&self, q: &str) -> Vec<usize> {
+        let at: std::collections::HashMap<&str, usize> =
+            self.pages.iter().enumerate().map(|(i, p)| (p.slug.as_str(), i)).collect();
+        let ranked = crate::wiki::search::rank(&self.pages, q, usize::MAX).hits;
+        let folded = q.to_lowercase();
+        let typed = self.folded.iter().enumerate().filter(|(_, (title, body))| {
+            title.contains(&folded) || body.as_deref().is_some_and(|b| b.contains(&folded))
+        });
+        let mut seen = vec![false; self.pages.len()];
+        ranked
             .iter()
-            .zip(&self.folded)
-            .filter(|(_, (title, body))| title.contains(&q) || body.as_deref().is_some_and(|b| b.contains(&q)))
-            .map(|(p, _)| p)
+            .filter_map(|h| at.get(h.page.slug.as_str()).copied())
+            .chain(typed.map(|(i, _)| i))
+            .filter(|&i| !std::mem::replace(&mut seen[i], true))
             .collect()
     }
 
@@ -351,7 +391,14 @@ impl Window {
     /// 첫 줄로 돌아간다.
     ///
     /// 굴려 떼어 둔 화면([`Window::adrift`])은 걷는다 — 굴린 자리는 좁히기 전 목록의 줄이다.
+    ///
+    /// **차례도 여기서 다시 매긴다**([`Window::order`]) — 글이 바뀐 때만이다. 치는 칸은 커서만 옮긴 키(`←`)에도 여기를
+    /// 부르는데, 그때마다 위키 전부에 순위를 다시 매길 까닭이 없다.
     fn refilter(&mut self, was: Option<String>) {
+        if self.order.as_ref().map(|(q, _)| q.as_str()) != self.query() {
+            let order = self.query().map(|q| (q.to_string(), self.order_for(q)));
+            self.order = order;
+        }
         self.adrift = false;
         let at = was.and_then(|slug| self.shown().iter().position(|p| p.slug == slug));
         match at {
@@ -592,6 +639,10 @@ impl App {
     /// `SPC g w` — 창을 연다. 읽을 위키를 못 정하거나 못 읽으면, 또 페이지가 하나도 없으면 알림 한 줄로 까닭을 대고
     /// 안 연다 — 통계 창이 못 셀 때와 같다(2026-10-04, 일꾼이 정했다 — 빈 창에는 할 일이 없다).
     pub(super) fn open_wiki(&mut self) {
+        // **상세의 Wiki 토막도 다시 읽게 한다**(리뷰 moai-xp7l.mug) — 창은 열 때마다 위키를 새로 읽는데, 상세가 체크아웃마다
+        // 한 번 읽어 둔 것([`App::wiki_pages`])을 두면 창에 선 페이지가 상세에는 세션 내내 안 선다. 다음 그림이 다시 읽는다.
+        self.wiki_pages.clear();
+        self.wiki_about = None;
         let lang = self.site.lang;
         if !self.on_layer() {
             let Some(repo) = self.site.repo.as_ref() else {
@@ -662,7 +713,7 @@ impl App {
             }
         };
         if wiki.pages.is_empty() {
-            let mut said = crate::view::wiki::list(lang, &dir, &wiki).join(" ");
+            let mut said = crate::view::wiki::list(lang, &dir, &wiki, &Default::default()).join(" ");
             // **못 걸은 자리가 있으면 그 수도 댄다** — 창이 안 서니 목록 밑의 수([`Window::skipped`])가 설 자리가 없다.
             // 빼면 "첫 페이지는 README.md" 만 남아, 디렉터리 링크 밑에 둔 페이지가 정말 없는 줄 안다.
             if !wiki.skipped.is_empty() {
@@ -673,7 +724,7 @@ impl App {
             return;
         }
         // **연 키는 탐색의 열을 비운 뒤에 온다** — 메뉴로 열었으면 메뉴가 이미 닫혔다(`menu::feed`).
-        self.mode = Mode::Wiki(Box::new(Window::new(name, dir, from, wiki, titles)));
+        self.mode = Mode::Wiki(Box::new(Window::new(name, dir, from, wiki, titles, self.keys)));
     }
 
     /// 고르기 창의 키 하나(본문 칸의 `Enter` 가 연 창). 고른 것이 페이지면 그리로 건너가고, id 면 창을 닫고 그 줄에 서며,
@@ -683,7 +734,7 @@ impl App {
     fn choose_key(&mut self, k: KeyEvent) -> bool {
         let Mode::Wiki(w) = &mut self.mode else { return false };
         let Some(c) = &mut w.choose else { return false };
-        let picked = match c.chord.feed(LINKS, k) {
+        let picked = match c.chord.feed(self.keys.links, k) {
             Some(keys::Link::Step(m)) => {
                 let len = c.items.len();
                 c.cursor = scroll::cursor(m, c.cursor, || len);
@@ -771,7 +822,7 @@ impl App {
         match self.land(id) {
             Landing::Shown => {}
             Landing::Hidden => {
-                let clear = keys::label(keys::BROWSE, Browse::ClearFilter);
+                let clear = keys::said(self.keys.browse, Browse::ClearFilter);
                 let filtered = || fill(say(lang, "tui.wiki.veiled_filter"), &[("id", id), ("clear", &clear)]);
                 let told = match self.site.index.find(id).map(|at| (at, self.site.veil(at))) {
                     // **둘 다 가렸으면 둘 다 댄다** — 하나만 대면 그 키를 눌러도 다른 쪽에 여전히 가린다(moai-2kyl).
@@ -823,7 +874,7 @@ impl App {
                 self.chord.clear();
                 if let Mode::Wiki(w) = &mut self.mode {
                     for k in held {
-                        w.chord.feed(WIKI, k);
+                        w.chord.feed(self.keys.wiki, k);
                     }
                 }
             }
@@ -831,6 +882,11 @@ impl App {
                 Some(Browse::Go(to)) => {
                     self.go(to, &rows);
                     true
+                }
+                // 키 목록 창을 연 키는 알림을 안 걷는다 — 읽기만 하는 창이다(`App::key` 의 같은 갈래, 리뷰).
+                Some(Browse::Help) => {
+                    self.open_help(&rows);
+                    false
                 }
                 Some(Browse::Step(m)) => {
                     if let Mode::Wiki(w) = &mut self.mode {
@@ -856,7 +912,7 @@ impl App {
             };
         }
         let Mode::Wiki(w) = &mut self.mode else { return false };
-        match w.chord.feed(WIKI, k) {
+        match w.chord.feed(self.keys.wiki, k) {
             Some(keys::Wiki::Step(m)) => w.step(m),
             // 목록에서는 본문 칸으로 — 본문은 이미 커서의 페이지다. 본문에서는 골라진 링크로 가고, 안 골라졌으면 고르기
             // 창이다(2026-10-04 사용자 결정, moai-p61w).
@@ -871,9 +927,14 @@ impl App {
             Some(act @ (keys::Wiki::NextLink | keys::Wiki::PrevLink)) => {
                 if !w.pick_step(act == keys::Wiki::PrevLink) {
                     let lang = self.site.lang;
-                    let said =
-                        if w.raw_here() { say(lang, "tui.wiki.raw_no_marks") } else { say(lang, "tui.wiki.no_marks") };
-                    self.notice = Some(said.to_string());
+                    let enter = keys::said(w.keys.wiki, keys::Wiki::Enter);
+                    let said = if w.raw_here() {
+                        let raw = keys::said(w.keys.browse, Browse::Raw);
+                        fill(say(lang, "tui.wiki.raw_no_marks"), &[("raw", &raw), ("enter", &enter)])
+                    } else {
+                        fill(say(lang, "tui.wiki.no_marks"), &[("enter", &enter)])
+                    };
+                    self.notice = Some(said);
                 }
             }
             // 자취가 없으면 아무 일도 없다 — 바도 그때는 `Bksp` 를 안 댄다.
@@ -1084,7 +1145,7 @@ pub(super) mod tests {
         let ctx = a.key_ctx(&a.rows());
         assert_eq!(ctx.screen(), Screen::Wiki);
         let root = menu::entries(a.chord.held(), &ctx, &[]);
-        assert_eq!(root.iter().map(menu::Entry::text).collect::<Vec<_>>(), ["+화면 [위키]", "+보기"]);
+        assert_eq!(root.iter().map(menu::Entry::text).collect::<Vec<_>>(), ["+화면 [위키]", "+보기", "키 목록"]);
         a.hit("v");
         let v = menu::entries(a.chord.held(), &a.key_ctx(&a.rows()), &[]);
         assert_eq!(v.iter().map(|e| e.key.as_str()).collect::<Vec<_>>(), ["r"], "SPC v 밑에 원문 말고 다른 것이 섰다");
@@ -1476,6 +1537,25 @@ pub(super) mod tests {
         assert_eq!(a.mode, Mode::Browse);
     }
 
+    /// **`/` 의 차례는 `moai wiki search` 의 순위다**(moai-xp7l.nyi) — 낱말로 맞은 페이지가 순위대로 먼저 서고, 글자로만 든
+    /// 페이지(`zebras`)는 그 뒤에 위키 차례로 선다. 위키 차례(홈 먼저, 제목 차례)와 다르다.
+    #[test]
+    fn slash_orders_the_pages_by_the_search_rank() {
+        let pages: &[(&str, &str)] = &[
+            ("README.md", "# Home\n\nA zebra once.\n"),
+            ("a.md", "# Zebra\n\nzebra zebra zebra\n"),
+            ("b.md", "# B\n\nMany zebras.\n"),
+        ];
+        let (_s, mut a) = wiki_app("search-rank", pages);
+        a.hit("SPC g w");
+        assert_eq!(slugs(&a), ["README", "b", "a"], "위키 차례가 바뀌었다");
+        a.hit("/ z e b r a Enter");
+        assert_eq!(slugs(&a), ["a", "README", "b"], "순위대로 안 섰다");
+        // 낱말을 다 치기 전에도 글자로 좁힌다.
+        a.hit("/ Bksp Bksp");
+        assert_eq!(slugs(&a), ["README", "b", "a"], "치는 중의 글자 거름이 빠졌다");
+    }
+
     /// **찾는 동안의 화면** — 아래에 칸이 서고, 하나도 안 걸리면 목록과 칸 곁이 그렇다고 댄다. 걸린 찾기는 목록 머리에
     /// 서고, 본문은 맞은 글을 칠한다(글자만 보는 이 시험은 칠은 못 보고 머리를 본다). 치는 동안은 마우스를 놓는다.
     #[test]
@@ -1496,7 +1576,8 @@ pub(super) mod tests {
         assert!(lines.last().unwrap().contains("Esc 풀기"), "Esc 가 찾기를 푼다고 안 댔다: {:?}", lines.last());
         // 붙여넣기는 치는 칸에만 들어간다.
         a.paste("x");
-        assert_eq!(slugs(&a), ["README", "guide"], "칸 없이 붙여넣기가 찾기를 바꿨다");
+        // 순위가 먼저다 — 제목이 `Guide` 인 페이지가 본문에만 든 README 앞에 선다(moai-xp7l.nyi).
+        assert_eq!(slugs(&a), ["guide", "README"], "칸 없이 붙여넣기가 찾기를 바꿨다");
         a.hit("/ Bksp Bksp Bksp Bksp Bksp");
         a.paste("deep");
         assert_eq!(slugs(&a), ["notes/deep", "guide"]);

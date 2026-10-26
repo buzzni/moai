@@ -333,11 +333,19 @@ gets through — run it as given. None of them waits on a person except rule 5.
    rule never stops; nor does it stop a whole plan created with `moai add --from`
 2. **Pick something up before you change the repository.** A file edit
    (`Edit`, `Write`, Codex's `apply_patch`, Antigravity's file-writing tools) or
-   a shell write (`>`, `>>`, `sed -i`, `tee`) to a file in the checkout needs a
+   a shell write (`>`, `>>`, `sed -i`, `tee`, the destination of `cp`, `mv` or
+   `install`) to a file in the checkout needs a
    held issue — `moai mv <id> in_progress`, or `moai add` first if it was not in
    the plan. Not counted: `.moai/`, `.claude/`, `.agents/`, `.codex/`,
    `.worktrees/`, `.git/`, `target/`, `node_modules/`, and anything outside the
-   repository
+   repository. A session whose held work all has a worktree standing
+   (`.worktrees/<epic>`) is refused a write that lands in the main checkout —
+   wherever its shell stands, and also when the write comes after a pick-up on the
+   same line — and a write into another epic's worktree; the refusal names the same
+   file inside its own worktree. Workers stay in the root and reach their worktree
+   by absolute path, so this is what keeps a relative path from landing in the
+   checkout every session shares. `git apply`, `patch` and what a script writes are
+   not seen (moai-qrja)
 3. **A review is an issue too.** `/code-review` needs an open review issue tied to
    the held work, and that issue needs an angle in its body (`-b`) — what is being
    looked for and why. Moving it to `done` needs a closing line (`-m`) saying what
@@ -346,9 +354,10 @@ gets through — run it as given. None of them waits on a person except rule 5.
    without `-L`/`-S`, and `pkill`/`killall` aimed at tmux, are refused even
    outside a tracker. A tmux under test gets its own server:
    `env -u TMUX tmux -L <unique name> …`. Inside `cmux claude-teams` (`$TMUX`
-   starts with `/tmp/cmux-`) the `tmux` on `PATH` is cmux's shim and drops
-   `-L`/`-S`, so there its `kill-*` and `new-session` are refused whatever socket
-   the line names. Every rule-4 refusal there hands
+   starts with `/tmp/cmux-`, or cmux has announced the shim in
+   `CMUX_CLAUDE_TEAMS_TMUX_SHIM`) the `tmux` on `PATH` is cmux's shim and drops
+   `-L`/`-S`, so there its `kill-*`, `new-session`, `new-window`, `split-window`,
+   `send-keys` and `respawn-pane` are refused whatever socket the line names. Every rule-4 refusal there hands
    `env -u TMUX <real tmux> -L <unique name> …` on the real tmux's absolute
    path — `type -a tmux` lists the candidates; take one whose `readlink -f` has
    no `cmux` in it (moai-e7vm)
@@ -399,8 +408,17 @@ next one. A grade or an effort that is not one of the five words falls back to i
 default with one line on stderr, and an unknown key is named and skipped. A
 model name is not checked: the Claude roles go to Claude Code's `Agent` as written,
 so write a name it raises a subagent on, and the supervisor tells you when one is
-refused. The repository's `.moai/config.toml` does not carry models — what each
-one costs is yours.
+refused.
+
+A repository can recommend models too — a `[models]` table in its
+`.moai/config.toml`, with the same keys. It overrides the defaults, and your user
+config overrides it: the repository recommends, you choose. `moai models` marks a
+value that came from there `repo` and names the file on its last line; a bad value
+there is named and skipped, and no other command stops on it.
+
+`moai models` marks each line for its own value only. The level lines name the
+roles they pair with — `effort` goes with `develop`, `docs` and `bulk`,
+`effort_complex` with `complex`, `review_grade` with `review`.
 
 ### One round
 
@@ -412,23 +430,32 @@ one costs is yours.
    backlog items that do not collide with the work open. For each one that
    carries no deadline it asks you when it is due — never required, and with no
    answer it sends none
-2. **It picks a role and raises a worker.** Each backlog item goes to one role —
+2. **The `plan` role unfolds it first.** The supervisor raises a subagent on the
+   `plan` role's model to split the backlog item into an epic and its issues,
+   hang the milestone and the deadline on the epic, and give every member a body
+   the worker can start from; it hands back the epic and a difficulty per member.
+   The worker is then sent that epic from step 2
+3. **It picks a role and raises a worker.** Each backlog item goes to one role —
    `develop` or `complex` by one word of difficulty, `docs` for the wiki and the
    CHANGELOG, `bulk` for mechanical work — and the supervisor raises a subagent
    on that role's model and effort. How many run side by side it asks you once a
    round. Raised inside the supervisor's session, the worker stands in the root,
-   so it works its worktree by absolute paths
-3. **The prompt carries the assignment and names the steps.** It opens with a
+   so it works its worktree by absolute paths. The role is measured on the members
+   the `plan` subagent wrote
+4. **The prompt carries the assignment and names the steps.** It opens with a
    line naming the work and telling the worker to read the
    [brief](glossary.md#brief) — the worker's numbered steps, a file of the
    supervisor skill (`references/worker.md`) given by its absolute path — and
-   from which step to follow it. The lines after that fill this assignment — the
+   from which step to follow it. The rare branches (you away, a subdirectory
+   project, carrying on stalled work, a review the hook keeps refusing, the review
+   brief) stand beside it in `references/worker-branches.md`, which the worker
+   reads when its assignment takes one. The lines after that fill this assignment — the
    backlog, the model, the effort and the difficulty, whether the worker is a
    subagent or a session, the models and efforts per role it may hand pieces of
    its work to (`Subagents:` — `none` for a Codex worker), the work running alongside, the root branch and the
    base branch, the milestone, the deadline (`Due:`), the root and whether the person is away
-4. **The worker does the work in a worktree** — unfolds the backlog into an epic
-   and hangs the milestone and the deadline on it, picks the members up, works in
+5. **The worker does the work in a worktree** — picks the members up (a backlog
+   sent to it directly it unfolds first, as the `plan` subagent would), works in
    `<root>/.worktrees/<epic>`, has the epic reviewed, merges, closes, leaves a `Next:` note and, last of all, reports. A
    subagent leaves the report on the epic as a `report:` note first and then
    hands it back — the notice that it ended is the report, and the note is what
@@ -438,12 +465,13 @@ one costs is yours.
    raised on comes back, before anything is picked up, as
    `Model: raise to complex`, and the supervisor raises a new worker on that model,
    its message's `Model:` and `Effort:` lines changed to match
-5. **The supervisor checks the report** — the merge is on that work's base branch, the
+6. **The supervisor checks the report** — the merge is on that work's base branch, the
    epic is done, the worktree is gone — writes the
    [model line](glossary.md#model-line) of a subagent worker from the report's
    `Model ran:` and `Subagent ran:` lines, looks for members a session worker
-   closed without one, unfolds a `member refused:` backlog item into its epic, and
-   sends the next backlog item to a new worker
+   closed without one — all before it marks the report `Report-checked:`, since a
+   supervisor that starts again reads only that mark — unfolds a `member refused:`
+   backlog item into its epic, and sends the next backlog item to a new worker
 
 **The epic-end review is the epic's only one, on the review model.** The worker
 reviews the whole epic once, at the end, with `/code-review` at `review_grade` —
@@ -582,12 +610,16 @@ this happens.
   an error. It never answers in your place
 - **No idle worker.** It asks you whether to open new worker panes; on a yes it
   splits a pane running `claude --model <model>` in the root — an ordinary
-  interactive session you can see and type into
+  interactive session you can see and type into. The pane is opened with
+  `remain-on-exit`, so when `claude` exits its last screen stays and tmux
+  drops keys and refuses pastes sent there, rather than a shell taking them;
+  close a dead pane yourself when you are done reading it
 
 **If anything stands in a worker's input box, or you are scrolling that pane
 (copy mode), or the session map no longer reads that pane's session alive, it
-does not type** — it tells you. A killed Claude Code leaves its last screen, box
-and all, above the shell, so the screen alone is not enough (moai-xpa8.p56).
+does not type** — it tells you. In a pane you opened yourself, a killed Claude
+Code leaves its last screen, box and all, above the shell, so the screen alone
+is not enough (moai-xpa8.p56).
 It never kills a pane, a session or the server, and never runs `claude -p` or a
 `--dangerously-*` flag.
 
@@ -629,8 +661,10 @@ it tells you and goes on as if it were not there. Updating restarts cmux and
 every session in it, so when to update is yours.
 
 - **Which tab is which worker.** The same records and the same session map; in
-  cmux the map asks `cmux top` which surface each live session runs in. Every
-  cmux call names that surface by its UUID, `--surface <UUID>`
+  cmux the map asks `cmux top` which surface each live session runs in — a
+  worker `cmux claude-teams` started gets its tab too: the tmux its record names
+  is the stand-in's answer, not a tmux pane. Every cmux call names that surface
+  by its UUID, `--surface <UUID>`
 - **A label on the tab.** Once a round it asks whether worker tabs should carry
   labels; on a yes it names the tab `<worker> <id>` (`cmux rpc tab.action`,
   action `rename`), and takes the name off once the report is checked (action
@@ -651,7 +685,7 @@ every session in it, so when to update is yours.
 - **A stalled worker.** It reads the tab once (`cmux read-screen`) and tells you
   what stands there
 - **No idle worker.** On your yes it opens a split beside its own tab running
-  `cd <root> && claude --model <model>`, without taking focus, and evens the
+  `cd "<root>" && claude --model <model>`, without taking focus, and evens the
   splits out. When cmux has no room for another pane it stops and tells you
 
 It never closes a tab, a workspace or a window, never moves focus, and never
@@ -719,7 +753,9 @@ to bring them back ("recover the sessions", "되살려"). It loads `moai-recover
 
 - **Which died.** It reads the same records under `~/.claude/sessions/` and
   takes the dead ones standing in the root or a worktree, leaving out any that
-  is already back and older crashes you did not name. When several stand in one
+  is already back, any that another window resumed and then cleared with
+  `/clear` or its aliases `/new` and `/reset` (`~/.claude/history.jsonl` logs
+  each under the id it left behind), and older crashes you did not name. When several stand in one
   directory it asks you once which to bring back
 - **What each was doing.** From each session's transcript under
   `~/.claude/projects/` it reads its role (supervisor or worker), the issue it
@@ -729,12 +765,13 @@ to bring them back ("recover the sessions", "되살려"). It loads `moai-recover
   back, and a `target` link whose `/tmp/cargo-target/<name>` was wiped — it
   makes that directory again; the build output is gone, so the session rebuilds
 - **Bringing them back, workers first and the supervisor last.** Inside tmux it
-  splits a pane per session running `claude --resume <id>` and pastes a short
-  note on what happened once the input box is empty; the supervisor is told its
+  splits a pane per session running `claude --resume <id>` (with
+  `remain-on-exit`, as above) and pastes a short note on what happened once
+  the input box is empty; the supervisor is told its
   workers' names may have changed. Inside cmux (0.65.0 or later) it does the
   same with a split tab per session, and when cmux has no room for another pane
   the sessions left get the lines to type. Outside both it prints, per session,
-  `cd <dir> && claude --resume <id>` and the note to paste
+  `cd "<dir>" && claude --resume <id>` and the note to paste
 
 A session Saycode ran is not resumed in a pane — that would run its
 conversation outside Saycode. It tells such a session from its transcript,

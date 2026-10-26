@@ -11,15 +11,16 @@ import { IssueIndex, type Row } from './data/index.js'
 import { createMemory, queryKeyOf, remember, settingsStorage, sortDefault } from './data/memory.js'
 import { useNaming } from './data/people.js'
 import { headerProjects, projectHref, type ProjectEntry } from './data/projects.js'
+import { writePlan, type PlanChange } from './data/plan.js'
 import { isUnread, readMarks } from './data/read.js'
 import { createRefresher } from './data/refresh.js'
 import { sortQuery, useVocabulary } from './data/query.js'
 import {
-  archiveDue, loadAllRows, loadArchived, loadBoot, loadDetail, loadGroups, loadMatches, loadProjects, loadTree, loadWikiListing, loadWikiPage, matchEndpoints, sameGroups, withArchive,
+  archiveDue, loadAllRows, loadArchived, loadBoot, loadDetail, loadGroups, loadMatches, loadProjects, loadTree, loadWikiListing, loadWikiPage, loadWikiSearch, matchEndpoints, sameGroups, withArchive,
   type Boot, type Loaded,
 } from './data/source.js'
-import { effectiveZone, useZone } from './data/zone.js'
-import { copyFor, speaks } from './i18n/index.js'
+import { effectiveZone, useZone, zoneNow } from './data/zone.js'
+import { copyFor, fill, speaks } from './i18n/index.js'
 import { wireKeys } from './keys/wiring.js'
 import { createStore, matchKey, type BoardData, type State } from './store.js'
 import { listLines, narrow } from './view/list-model.js'
@@ -152,9 +153,10 @@ async function start(): Promise<void> {
     // are put on them when they come.
     // Each load is a change seen through: a read of it is never handed a run another load started before it.
     const { sort, view } = store.getState()
+    const zone = zoneNow()
     // `SPC v w` (on by default): the other worktrees' rows over the list, as the TUI's explorer opens.
     const listing = loadAllRows(client, PRIORITY.list, load, view.worktree)
-    const placing = loadTree(client, sortQuery(sort), PRIORITY.list, load, view.worktree, view.showArchived)
+    const placing = loadTree(client, sortQuery(sort), PRIORITY.list, load, view.worktree, view.showArchived, zone)
     const counting = loadGroups(client, PRIORITY.list, load, view.worktree)
     let counted: Awaited<typeof counting> | undefined
     void counting.then((groups) => (counted = groups))
@@ -198,8 +200,9 @@ async function start(): Promise<void> {
     // The order changed while this read ran: the refresh it asked for joined this one (data/refresh.ts), which read
     // the tree in the order before. Read it again in the order on screen.
     // So does the worktree overlay, or the archive shown, turned while it ran (the tree is asked for both).
+    // The zone picked while it ran is the same: the tree's `overdue` was judged in the zone before.
     const after = store.getState()
-    if (after.sort !== sort || after.view.worktree !== view.worktree || after.view.showArchived !== view.showArchived) setTimeout(() => void refresher.refresh(), 0)
+    if (zoneNow() !== zone || after.sort !== sort || after.view.worktree !== view.worktree || after.view.showArchived !== view.showArchived) setTimeout(() => void refresher.refresh(), 0)
     return true
   }
 
@@ -234,6 +237,8 @@ async function start(): Promise<void> {
     if (loaded.ok) store.dispatch({ type: 'matched', key, ids: loaded.value })
     else store.dispatch({ type: 'match-failed', key, problem: loaded.outcome })
   }
+  /** The zone the page drew in at the last change — followZone (subscribed before the listener below) moves it first. */
+  let zoneSeen = zoneNow()
   store.subscribe((state, previous) => {
     if (matchKey(state) !== matchKey(previous)) {
       clearTimeout(asking)
@@ -245,6 +250,13 @@ async function start(): Promise<void> {
     if (state.sort !== previous.sort && state.board.value) void refresher.refresh()
     // The worktree overlay turned on or off: the rows are read again with it or without it.
     if (state.view.worktree !== previous.view.worktree && state.board.value) void refresher.refresh()
+    // The zone the page draws in turned (`SPC o t`, or the boot's arrived): the tree's `overdue` is judged in it. What
+    // followZone set is compared, not worked out again — that asks Intl for a zone on every dispatch, every j and k.
+    const zone = zoneNow()
+    if (zone !== zoneSeen) {
+      zoneSeen = zone
+      if (state.board.value) void refresher.refresh()
+    }
   })
 
   // The archive is read when archived rows are shown (`SPC v o`), each time they are turned on, once the active
@@ -351,6 +363,23 @@ async function start(): Promise<void> {
     ])
   }, () => store.getState().view.worktree)
 
+  /**
+   * The gantt's move of a row's planned days (data/plan.ts, moai-d86e.3ud). One that went through reads the rows again —
+   * the bar comes back from moai at its new days — and the detail when it shows that row, then says what moved and the
+   * `moai edit` line that puts it back, with what moai said beside it (rows a pulled-in deadline now overtakes). A
+   * refusal is told in moai's words.
+   */
+  async function movePlan(id: string, change: PlanChange, undo: string): Promise<void> {
+    const done = await writePlan(client, id, change)
+    if (!done.ok) return shell.refuse(done.outcome)
+    await Promise.all([
+      refresher.refresh({ fresh: true }),
+      store.getState().shown.value?.id === id ? rereadDetail(id, loads + 1) : undefined,
+    ])
+    const words = copy.gantt.move
+    shell.say([fill(words.moved, { id }), fill(words.undo, { cmd: undo }), ...(done.said ?? [])].join(' · '))
+  }
+
   /** What an outcome says, as one line of text (the wiki's error state takes a string). */
   function said(loaded: Extract<Loaded<unknown>, { ok: false }>): string {
     const parts = describe(loaded.outcome, copy)?.parts ?? [copy.failed]
@@ -366,6 +395,7 @@ async function start(): Promise<void> {
   const wiki: WikiSource = {
     list: async () => answer(await loadWikiListing(client)),
     page: async (slug) => answer(await loadWikiPage(client, slug)),
+    search: async (query) => answer(await loadWikiSearch(client, query)),
   }
 
   function activity(): Activity {
@@ -388,6 +418,7 @@ async function start(): Promise<void> {
     index: indexOf,
     activity,
     wiki,
+    movePlan,
     intents: {
       refresh: () => void refresher.refresh(),
       choose: (id) => void choose(id),

@@ -160,6 +160,12 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
     let at = model::now();
     // `--due +N` 은 락 밖에서 날짜로 바꾼다 — 시간대를 풀면 tzdb 를 연다([`super::due_arg`]).
     let due = args.due.as_deref().map(|d| super::due_arg(ctx, d, &at));
+    let start = args.start.as_deref().map(|d| super::due_arg(ctx, d, &at));
+    // 옮기는 뜻 — 날은 락 안에서 그때의 줄로 잰다(아래). clap 이 셋 가운데 하나만 받는다.
+    let shift =
+        [(model::Edge::Body, args.shift), (model::Edge::Start, args.shift_start), (model::Edge::End, args.shift_due)]
+            .into_iter()
+            .find_map(|(edge, days)| days.map(|d| (edge, d)));
     // **말도 락 밖에서 묻는다**(리뷰) — `ctx.lang()` 의 첫 부름은 사용자 설정을 열어 파싱한다.
     // 락 안에서 부르면 그 읽기가 트래커 락을 쥔 채로 서서, 옆 세션의 집기가 그만큼 기다린다.
     // `cmd/mv.rs` 가 `model::actor` 를 밖으로 뺀 것과 같은 자다.
@@ -210,18 +216,35 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
                 i.priority = Some(p);
             }
             // 기한 둘(moai-tfcp). **`none` 은 비우는 것이다** — 소속·담당과 같은 낱말을 쓴다.
-            // 꼴과 종류와 앞뒤 차례는 아래 `validate_keeping` 이 한자리에서 거절한다.
-            if let Some(d) = &args.start {
-                i.starts_on = super::clearable(d);
+            // 꼴과 앞뒤 차례는 아래 `settle` 이 한자리에서 거절한다. 두 날은 이제 모든 종류의 줄에 서고
+            // (moai-xf0p.6d5), 조상의 기한을 넘는 시작·기한은 쓰기(`store::write_locked`)가 거절한다(moai-xf0p.cbu).
+            // 탐색기의 막대 끌기도 같은 몸을 지난다(`Issue::set_dates`, moai-i4hf.9xi).
+            //
+            // **옮기기(`--shift*`)와 하루 세우기(`--if-unplanned`)는 여기서, 락 안에서 다시 읽은 줄로 잰다**(moai-vj8w.02c) —
+            // web 간트의 끌기가 이 길을 부른다. 화면이 읽은 날에서 미리 센 날을 들고 오면, 그 읽기와 이 쓰기 사이에 옆
+            // 세션이 옮긴 날 위에 화면의 옛 날에서 센 값을 덮어 그 고침이 말없이 사라진다. TUI 의 `Plan::Shift`·`Plan::Day`
+            // 와 같은 자(`Issue::shifted`·`Issue::has_days`)다.
+            if args.if_unplanned && i.has_days() {
+                return Err(Fail::new(crate::i18n::fill(
+                    crate::i18n::say(lang, "refuse.edit_planned"),
+                    &[("id", &args.id)],
+                )));
             }
-            if let Some(d) = &due {
-                i.due_on = super::clearable(d);
-            }
+            let dates = match shift {
+                Some((edge, days)) => match i.shifted(edge, days) {
+                    Ok(dates) => dates,
+                    // 0 날 옮기기는 고칠 것이 없는 것이다 — 같은 부름을 되풀이해도 0 으로 끝나는 `edit` 의 자다.
+                    Err(model::Unshifted::Still) => (None, None),
+                    // 까닭의 말은 탐색기의 끌기와 한 자다(`view::unshifted`) — 두 표면이 같은 까닭에 같은 길을 댄다.
+                    Err(why) => return Err(Fail::new(crate::view::unshifted(lang, why, &args.id))),
+                },
+                None => (start.as_deref().map(super::clearable), due.as_deref().map(super::clearable)),
+            };
+            i.set_dates(dates.0, dates.1);
             if let Some(who) = assignee {
                 (i.assignee, i.assignee_email) = who;
             }
 
-            i.normalize();
             // **안 바꾼 칸은 다시 안 묻는다 — `store::with_write` 와 한 자다**(moai-hym7).
             // 여기서만 엄하면 그쪽을 푼 것이 헛일이 된다: `config` 에서 칸 이름을 고친 뒤
             // 옛 이름에 선 줄은 제목 하나 못 고쳐 도구 안에서 영영 못 만진다 — 풀려던 바로
@@ -230,15 +253,13 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
             // 그 오타가 조용히 지나간다.
             // **말은 여기서 편다**(moai-yve0) — 검사는 자료로 거절하고(`model::Invalid`), 이미 선
             // 줄이라 가리키는 말은 그 id 다. `lang` 은 위에서 락 밖에 풀어 둔 값이다.
-            i.validate_keeping(cfg, i.status == before.status)
-                .map_err(|why| Fail::new(crate::view::invalid(lang, &crate::store::At::Id(i.id.clone()), &why)))?;
+            // 정규화·검사·`updated_at` 의 차례는 `Issue::settle` 하나다 — 탐색기의 쓰기와 갈리지 않게(moai-i4hf.9xi).
             // 바뀐 것이 없어도 실패가 아니다. `mv` 가 이미 그 칸일 때 0 으로
             // 끝나는 것과 같아야 한다 — 되풀이해 부르는 것이 흔하고, 그때
             // 한쪽만 1 로 끝나면 받는 쪽이 재시도를 못 짠다.
-            let changed = *i != before;
-            if changed {
-                i.updated_at = at.clone();
-            }
+            let changed = i
+                .settle(&before, cfg, &at)
+                .map_err(|why| Fail::new(crate::view::invalid(lang, &crate::store::At::Id(i.id.clone()), &why)))?;
             let out = i.clone();
             // **조상을 당긴 쓰기는 자식을 안 막는다**(moai-ghkp.cb3) — 자식은 남의 줄이라, 막으면 제 기한
             // 하나 못 옮긴다. 넘친 줄을 대기만 한다.
@@ -249,36 +270,8 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
             // 잠시 되돌려 잰다 — 다른 줄은 이 쓰기가 안 건드린다. 계획 밖의 줄(미룬 것과 그 밑)과 멤버가 다 닫힌 묶음은
             // 빼고 댄다: `status` 의 `due_beyond_parent` 가 안 세는 줄을 "센다" 고 하면 거짓말이다. 묶음의 칸은 멤버에서
             // 읽는다(`report::group_states_of` — 묶음이 섞였을 때만 센다).
-            let moved = before.due_on != out.due_on || before.epic != out.epic || before.milestone != out.milestone;
-            let overflow: Vec<String> = match moved {
-                false => Vec::new(),
-                true => {
-                    let now: Vec<String> =
-                        crate::report::due_overflow_of(issues, &out.id).into_iter().map(|i| i.id.clone()).collect();
-                    match now.is_empty() {
-                        true => now,
-                        false => {
-                            let k = issues.iter().position(|x| x.id == out.id).expect("방금 고친 줄이다");
-                            let edited = std::mem::replace(&mut issues[k], before.clone());
-                            let was: std::collections::BTreeSet<String> =
-                                crate::report::due_overflow_of(issues, &out.id)
-                                    .into_iter()
-                                    .map(|i| i.id.clone())
-                                    .collect();
-                            issues[k] = edited;
-                            let off = crate::report::deferred_roots(issues);
-                            let ids: Vec<&str> = now.iter().map(String::as_str).collect();
-                            let states = crate::report::group_states_of(issues, cfg, &ids);
-                            let shut =
-                                |id: &str| states.iter().any(|((_, g), col)| *g == id && *col == crate::config::DONE);
-                            now.iter()
-                                .filter(|id| !was.contains(*id) && !off.contains_key(id.as_str()) && !shut(id))
-                                .cloned()
-                                .collect()
-                        }
-                    }
-                }
-            };
+            // 재는 자는 `report::overflow_by` 하나다 — 탐색기의 막대 끌기도 같은 줄을 댄다(moai-i4hf.9xi).
+            let overflow = crate::report::overflow_by(issues, &before, &out, cfg);
             // **아래의 판단은 아카이브로 옮긴 줄까지 겹쳐 읽는다**(moai-tzzt) — `-e` 로 적은 에픽이나 이 줄의 부모·
             // 막는 줄이 아카이브에 있으면 산 줄만으로는 "없는 에픽" 이 되는데, 보드는 같은 줄을 멀쩡하다고 센다.
             // 고친 줄은 산 파일의 것이 이긴다([`super::in_context`]).
@@ -548,7 +541,10 @@ fn fail_if_nothing(args: &EditArgs, ctx: &Ctx) -> R<()> {
         || args.priority.is_some()
         || args.assignee.is_some()
         || args.start.is_some()
-        || args.due.is_some();
+        || args.due.is_some()
+        || args.shift.is_some()
+        || args.shift_start.is_some()
+        || args.shift_due.is_some();
     touched.then_some(()).ok_or_else(|| Fail::new(crate::i18n::say(ctx.lang(), "refuse.edit_nothing")))
 }
 

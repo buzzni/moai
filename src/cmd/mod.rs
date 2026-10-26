@@ -12,6 +12,7 @@ pub mod due;
 pub mod edit;
 pub mod hook;
 pub mod init;
+pub mod keys;
 pub mod link;
 pub mod merge_driver;
 pub mod models;
@@ -165,7 +166,7 @@ pub(crate) fn tell_after(line: String) {
     AFTER.lock().unwrap_or_else(|e| e.into_inner()).push(line);
 }
 
-/// `--due` 에 친 값 — `+N` 이면 **오늘에서 N 일 뒤**의 날짜로 바꾼다(moai-ghkp.kz7, [`crate::model::relative_due`]).
+/// `--due`·`--start` 에 친 값 — `+N` 이면 **오늘에서 N 일 뒤**의 날짜로 바꾼다(moai-ghkp.kz7, [`crate::model::relative_due`]).
 /// 오늘은 읽는 사람의 달이다 — 보드가 남은 날수를 재는 그 달이라야 `+1` 이 "내일" 로 선다.
 ///
 /// **락 밖에서 부른다** — 시간대를 풀면 tzdb 를 연다([`Ctx::zone`]). `+` 로 시작하지 않으면 안 연다:
@@ -640,6 +641,8 @@ fn dispatch(ctx: &Ctx, cli: Cli) -> R<Vec<String>> {
         Cmd::Project(ProjectCmd::Add { path }) => project::add(ctx, &path),
         Cmd::Project(ProjectCmd::Ls) => project::ls(ctx),
         Cmd::Models => models::run(ctx),
+        // 사람의 키 파일을 읽기만 한다(moai-so7w) — 트래커를 안 찾는다.
+        Cmd::Keys(a) => keys::run(ctx, a),
         Cmd::Config => config::run(ctx),
         Cmd::Project(ProjectCmd::Rm { path }) => project::rm(ctx, &path),
         Cmd::Project(ProjectCmd::Color { path, hue }) => project::color(ctx, &path, &hue),
@@ -672,6 +675,8 @@ fn dispatch(ctx: &Ctx, cli: Cli) -> R<Vec<String>> {
         Cmd::Backlog(BacklogCmd::Promote(a)) => backlog::promote(ctx, a),
         Cmd::Wiki(WikiCmd::Ls) => wiki::ls(ctx),
         Cmd::Wiki(WikiCmd::Show { slug }) => wiki::show(ctx, &slug),
+        Cmd::Wiki(WikiCmd::Search { words, limit }) => wiki::search(ctx, &words, limit),
+        Cmd::Wiki(WikiCmd::Learn(a)) => wiki::learn(ctx, a),
     }
 }
 
@@ -683,7 +688,6 @@ fn dispatch(ctx: &Ctx, cli: Cli) -> R<Vec<String>> {
 /// 처음 만난 쪽이 알아야 할 것은 둘이다: 지금 무슨 상태인가, 다음에 무엇을
 /// 치는가. 둘 다 여기서 준다.
 fn opening(ctx: &Ctx) -> R<Vec<String>> {
-    use clap::CommandFactory;
     let found = crate::store::Repo::find(|| ctx.lang());
     // `.moai` 밖이어도 등록한 프로젝트가 있으면 한눈 보기가 곧 시작점이다 (`status` 가
     // 그 길로 간다).
@@ -696,7 +700,9 @@ fn opening(ctx: &Ctx) -> R<Vec<String>> {
     let registered = reg.is_some_and(|r| !r.projects.is_empty());
     if outside && !registered {
         let mut help = Vec::new();
-        crate::cli::Cli::command().write_help(&mut help).map_err(|e| Fail::new(e.to_string()))?;
+        // 도움말은 사람의 키로 그린다(moai-aqmg) — `moai --help` 와 같은 글이어야 한다.
+        let (_, keys, _) = crate::tui::keymap::load_from(|k| std::env::var_os(k));
+        crate::cli::command(&keys).write_help(&mut help).map_err(|e| Fail::new(e.to_string()))?;
         let mut out: Vec<String> = String::from_utf8_lossy(&help).lines().map(str::to_string).collect();
         out.push(String::new());
         // **이 에픽이 내건 첫 화면이 이것이다**(리뷰 moai-hom6.qd9 4번). `.moai` 밖에서 맨 `moai` 를
@@ -781,7 +787,10 @@ pub fn refuse_if_flag_like(value: &str, at: FlagLike<'_>, lang: crate::i18n::Lan
         FlagLike::EditTitle(_) => a.strip_prefix("--title=").is_some_and(|v| v.trim() == value),
         _ => a == "--",
     };
-    if std::env::args().any(|a| escaped(&a)) {
+    // **`args_os` 로 훑는다**(리뷰 moai-xp7l.mug) — `args` 는 UTF-8 이 아닌 인자 하나에 패닉한다. `-C <dir>` 는 아무
+    // 바이트나 받는 경로라, 그 자리에 선 저장소에서 `wiki learn`·`add`·`note` 가 101 로 죽었다. UTF-8 이 아닌 인자는
+    // `--` 도 붙여 쓴 값도 아니다.
+    if std::env::args_os().any(|a| a.to_str().is_some_and(&escaped)) {
         return Ok(());
     }
     let flag_like = value.starts_with('-') && value.chars().count() > 1 && !value.contains(char::is_whitespace);
@@ -973,6 +982,9 @@ pub const OURS: &[&str] = &[
     "journal_error",
     "work",
     "spent",
+    // `show <id> --json` 이 덧붙이는 위키(moai-g8pt.5aw).
+    "wiki",
+    "wiki_error",
     // `show --json`(목록도 하나도)이 안 읽은 줄에 다는 것(moai-cqwy).
     "unread",
     // `show --json`(목록도 하나도)이 곁들이는 선 마일스톤과 아카이브(moai-wk7i.rmc).

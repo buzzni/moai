@@ -21,7 +21,7 @@
 //! - **탐색기가 든 줄을 센다** — 옆 워크트리를 겹쳐 보고 있으면 거기서 온 줄도 든다. CLI 의 `moai stats` 는
 //!   안 겹치므로, 그때는 제목이 그렇다고 말한다
 
-use super::keys::{Browse, LEADER, STATS, Stat};
+use super::keys::{Browse, LEADER, Stat};
 use super::layer::{Depth, Told};
 use super::menu;
 use super::scroll::Scroll;
@@ -52,6 +52,8 @@ pub struct Window {
     pub scroll: Scroll,
     /// 접두어(`gg` 의 첫 `g`)를 기다리는 열.
     pub chord: super::keys::Chord,
+    /// 열 때 든 쪽이 건넨 실행 중의 키 표(moai-bzm3) — 창의 키 바가 이것으로 이름을 댄다.
+    pub keys: super::keys::Keymap,
 }
 
 impl Window {
@@ -153,7 +155,7 @@ impl App {
                 &zone,
                 &site.now,
             );
-            self.mode = Mode::Stats(Box::new(Window::new(project, shown, overlaid, week, day)));
+            self.mode = Mode::Stats(Box::new(Window::new(project, shown, overlaid, week, day, self.keys)));
             return;
         }
         // **한눈 보기에는 "지금 선 프로젝트" 가 없다 — 커서가 댄다**(`App::open_form` 과 같은 규칙).
@@ -175,7 +177,7 @@ impl App {
             let now = crate::model::now();
             let (week, day) =
                 count(&site.issues, &site.cfg, &site.ground, site.repo.as_ref(), &site.origin, &filter, &zone, &now);
-            self.mode = Mode::Stats(Box::new(Window::new(name, None, overlaid, week, day)));
+            self.mode = Mode::Stats(Box::new(Window::new(name, None, overlaid, week, day, self.keys)));
             return;
         }
         // **접혀 아직 안 읽은 프로젝트는 그 자리에서 읽는다** — 누른 사람은 결과를 기다리고 있다(들어가는 길
@@ -210,7 +212,7 @@ impl App {
                     &zone,
                     &fresh.now,
                 );
-                self.mode = Mode::Stats(Box::new(Window::new(name, None, overlaid, week, day)));
+                self.mode = Mode::Stats(Box::new(Window::new(name, None, overlaid, week, day, self.keys)));
             }
             Err(e) => {
                 self.notice = Some(fill(say(lang, "tui.stats.unread"), &[("name", &name), ("why", &e.message)]));
@@ -238,7 +240,8 @@ impl App {
     ///
     /// **이 키가 알림을 걷는가**를 답한다 — 부르는 쪽([`App::key`])이 거짓이면 알림을 도로 세운다. 거짓은 아무 동작도
     /// 안 돈 키다: 메뉴만 만진 키(열기·닫기·한 층 오르내리기·모르는 키), 메뉴를 닫은 이동키(그 닫는 몫, moai-y8v2),
-    /// 그리고 둘째 키를 기다리는 `g` — 탐색의 규칙과 같다(`a_prefix_waiting_for_its_next_key_keeps_the_notice`). 화면을
+    /// 둘째 키를 기다리는 `g`, 그리고 키 목록 창을 연 `SPC h`(읽기만 하는 창이다) — 탐색의 규칙과 같다
+    /// (`a_prefix_waiting_for_its_next_key_keeps_the_notice`). 화면을
     /// 고른 키와 창의 키(굴리기·`b`·Esc), 모르는 키는 참이다.
     pub(super) fn stats_key(&mut self, k: KeyEvent) -> bool {
         if menu::open(&self.chord) || LEADER.matches(k) {
@@ -254,7 +257,7 @@ impl App {
                 self.chord.clear();
                 if let Mode::Stats(w) = &mut self.mode {
                     for k in held {
-                        w.chord.feed(STATS, k);
+                        w.chord.feed(self.keys.stats, k);
                     }
                 }
             }
@@ -262,6 +265,11 @@ impl App {
                 Some(Browse::Go(to)) => {
                     self.go(to, &rows);
                     true
+                }
+                // 키 목록 창을 연 키는 알림을 안 걷는다 — 읽기만 하는 창이다(`App::key` 의 같은 갈래, 리뷰).
+                Some(Browse::Help) => {
+                    self.open_help(&rows);
+                    false
                 }
                 Some(Browse::Step(m)) => {
                     if let Mode::Stats(w) = &mut self.mode {
@@ -273,7 +281,7 @@ impl App {
             };
         }
         let Mode::Stats(w) = &mut self.mode else { return false };
-        match w.chord.feed(STATS, k) {
+        match w.chord.feed(self.keys.stats, k) {
             Some(Stat::Step(m)) => w.scroll.go(m),
             Some(Stat::Bucket) => w.switch(),
             Some(Stat::Close) => self.mode = Mode::Browse,
@@ -285,7 +293,14 @@ impl App {
 }
 
 impl Window {
-    fn new(project: String, filter: Option<String>, overlaid: bool, week: Stats, day: Stats) -> Window {
+    fn new(
+        project: String,
+        filter: Option<String>,
+        overlaid: bool,
+        week: Stats,
+        day: Stats,
+        keys: super::keys::Keymap,
+    ) -> Window {
         Window {
             project,
             filter,
@@ -295,6 +310,7 @@ impl Window {
             bucket: Bucket::Week,
             scroll: Scroll::default(),
             chord: super::keys::Chord::default(),
+            keys,
         }
     }
 }
@@ -346,6 +362,22 @@ mod tests {
         }
     }
 
+    /// **창은 열 때 든 쪽의 키 표를 받는다**(moai-bzm3) — 사람의 키 파일이 바꾼 `b` 가 창 안에서 듣고, 옛 `b` 는
+    /// 안 듣는다. 창이 기본 표를 바로 읽으면 바는 바꾼 키를 대는데 누르면 아무 일이 없다.
+    #[test]
+    fn the_window_runs_on_the_keys_it_was_opened_with() {
+        let (map, problems) = super::super::keymap::build("[stats]\nbucket = \"w\"\n");
+        assert!(problems.is_empty(), "{problems:?}");
+        let mut a = app();
+        a.adopt_keys(map, &problems, None);
+        a.hit("SPC g s");
+        assert_eq!(window(&a).keys, a.keys);
+        a.hit("b");
+        assert_eq!(window(&a).bucket, Bucket::Week, "옛 b 가 칸 너비를 바꿨다");
+        a.hit("w");
+        assert_eq!(window(&a).bucket, Bucket::Day, "바꾼 w 가 안 들었다");
+    }
+
     /// **`SPC g s` 가 창을 열고, Esc 는 보던 화면을 그대로 돌려준다** — 커서·포커스·상세의 굴린 자리·걸린
     /// 거름망을 창이 안 건드린다. 창 안의 `b` 는 흐름을 주와 날 사이에서 바꾼다.
     #[test]
@@ -379,6 +411,13 @@ mod tests {
     /// 메뉴의 Esc 는 메뉴만 닫고 창은 남는다.
     #[test]
     fn spc_over_the_window_opens_only_the_screen_menu() {
+        // 키 목록(moai-ucyr)은 통계 창 위에 뜨고, 닫으면 통계 창이 그대로 선다.
+        let mut b = app();
+        b.hit("SPC g s SPC h");
+        assert!(b.help.is_some() && matches!(b.mode, Mode::Stats(_)), "통계 창 위에서 SPC h 가 키 목록을 안 열었다");
+        b.hit("Esc");
+        assert!(b.help.is_none() && matches!(b.mode, Mode::Stats(_)), "키 목록을 닫는 Esc 가 통계 창까지 닫았다");
+
         use super::super::{keys::Screen, menu, view::Layout};
         let mut a = app();
         a.hit("SPC g s SPC");
@@ -388,8 +427,8 @@ mod tests {
         let root = menu::entries(a.chord.held(), &ctx, &[]);
         assert_eq!(
             root.iter().map(menu::Entry::text).collect::<Vec<_>>(),
-            ["+화면 [통계]"],
-            "화면 묶음 말고 다른 것이 섰다"
+            ["+화면 [통계]", "키 목록"],
+            "화면 묶음과 키 목록(moai-ucyr) 말고 다른 것이 섰다"
         );
         a.hit("p");
         assert_eq!(menu::title(a.chord.held()), "SPC", "통계 창 위에서 SPC p 가 열렸다");
@@ -433,8 +472,7 @@ mod tests {
         assert!(screen.contains("l : 목록") && screen.contains("s : 통계"), "SPC g 층이 안 섰다\n{screen}");
     }
 
-    /// **메뉴를 닫는 이동키는 창을 굴린다**(moai-y8v2 를 통계 창에서) — `gg` 는 메뉴가 닫힌 뒤 창의 열로 이어진다.
-    /// 메뉴를 여는 SPC 는 창이 기다리던 `g` 를 버리고, Bksp 는 한 층 오르다 뿌리에서 메뉴만 닫는다. 메뉴가 뜬 동안의
+    /// **메뉴를 닫는 이동키는 창을 굴린다**(moai-y8v2 를 통계 창에서). 메뉴를 여는 SPC 는 창이 기다리던 `g` 를 버리고, Bksp 는 한 층 오르다 뿌리에서 메뉴만 닫는다. 메뉴가 뜬 동안의
     /// 휠은 `mouse::tests::the_wheel_scrolls_the_stats_window_and_nothing_over_a_picker` 가 본다.
     #[test]
     fn a_move_key_closes_the_menu_over_the_window_and_scrolls_it() {
@@ -449,13 +487,7 @@ mod tests {
         assert!(window(&a).scroll.offset() > 1, "Ctrl-d 가 창을 안 굴렸다");
         a.hit("SPC s");
         assert!(menu::open(&a.chord), "시험의 전제 — 통계 창 위의 SPC s 는 모르는 키라 메뉴가 남는다");
-        a.hit("Esc SPC g");
-        assert_eq!(menu::title(a.chord.held()), "SPC g");
-        a.hit("g");
-        assert!(!menu::open(&a.chord), "SPC g 층의 g 가 메뉴를 안 닫았다");
-        a.hit("g");
-        assert_eq!(window(&a).scroll.offset(), 0, "메뉴에서 시작한 gg 가 창의 맨 위로 안 갔다");
-        assert!(a.chord.held().is_empty(), "탐색의 열에 g 가 남았다");
+        a.hit("Esc");
 
         // **메뉴를 열면 창이 기다리던 `g` 를 버린다** — 메뉴를 사이에 둔 `g` 와 `g` 가 `gg` 로 이으면 사람이 친 적 없는
         // 맨 위로 가기가 선다(휠의 `Window::roll` 과 같은 까닭).
@@ -470,6 +502,13 @@ mod tests {
         a.hit("Bksp");
         assert!(!menu::open(&a.chord), "뿌리의 Bksp 가 메뉴를 안 닫았다");
         assert_eq!(window(&a).scroll.offset(), bottom, "메뉴의 Bksp 가 창을 건드렸다");
+
+        // **`SPC g` 층의 `g` 는 메뉴 항목이다**(moai-i4hf) — 메뉴를 닫고 `gg` 를 시작하던 길은 간트 고르기가 이긴다.
+        // 고르면 창을 닫고 간트로 선다.
+        a.hit("SPC g g");
+        assert!(!menu::open(&a.chord), "SPC g g 가 메뉴를 열어 뒀다");
+        assert!(!matches!(a.mode, Mode::Stats(_)), "SPC g g 가 통계 창을 안 닫았다");
+        assert_eq!(a.layout, crate::tui::view::Layout::Gantt);
     }
 
     /// **바로 친 Ctrl·Alt 화살표와 쪽 키도 창을 굴린다**(moai-ug6x.3ip) — 메뉴를 거친 같은 키는 탐색의 표(`Key::any`)로

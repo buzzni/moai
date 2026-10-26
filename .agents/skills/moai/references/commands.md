@@ -11,9 +11,10 @@ them, so where they differ the help wins.
     moai show <epic|milestone id>                  what stands under it
     moai show --milestone <id>                     everything attached to that milestone
 
-**Any row can carry a deadline; only a milestone carries a start.** `--due` takes a
-calendar day, `YYYY-MM-DD`, or `+N` days from today (stored as the day it lands on),
-and `moai edit <id> --due none` clears one. `--start` stands on a milestone row only.
+**Any row can carry a deadline and a start.** `--due` and `--start` take a calendar day,
+`YYYY-MM-DD`, or `+N` days from today (stored as the day it lands on), and
+`moai edit <id> --due none` clears one (`--start none` the same). The start is the
+planned day to begin; a start after the deadline is refused.
 A milestone's deadline that has passed, and one falling due within `status_due_days`
 (3 unless your config says otherwise), is one warning line on the board, and so is
 an open issue or epic whose own deadline has passed (`overdue`); **nothing is blocked and
@@ -24,8 +25,10 @@ write that gives a row a later day than the earliest of those, or moves a row th
 carries a deadline under one due earlier, is refused, and the refusal names the day to
 give instead. Pulling the one above in is never refused: the rows it overtakes are
 named in one line on stderr and stand as `due_beyond_parent` on the board until their
-own deadlines come in. `moai show --sort due` puts the nearest first, and
-`--filter due_on=<from>~<to>` picks rows by their own deadline.
+own deadlines come in. A start obeys the same ceiling: it cannot be later than the
+earliest deadline above it, but it may be earlier than the parent's start. `moai show --sort due` puts the nearest first, and
+`--filter due_on=<from>~<to>` picks rows by their own deadline (`starts_on=` by their
+own start).
 
 **A near deadline raises priority, by one verb.** `moai due apply` (`--dry-run` shows it
 first) raises an open, not deferred issue or backlog item by the deadline it follows —
@@ -543,6 +546,8 @@ in `.moai/config.toml` says otherwise. `moai wiki ls` lists them and `moai wiki 
 prints one. When an epic changes what a person does, the window that did it fixes the page
 on its branch before the merge, and `moai skill install` plants a skill for it, `moai-wiki`,
 that says how — and sweeps the wiki when a person calls it. Nothing checks this.
+Before you touch a place, `moai wiki search '<words>'` finds it; read the sections under the
+`Wiki` block of `moai show <id>` (`wiki` in `--json`) first.
 
 ## How to find what a review said
 

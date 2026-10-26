@@ -65,6 +65,34 @@ committed tracker.
 4. `moai mv <id> review`, then `done` — the columns are `todo`, `in_progress`,
    `review` and `done` unless `statuses` in `.moai/config.toml` says otherwise
 
+**Read what the wiki says before you start.** `moai show <id>` shows a `Wiki`
+block above its history: the lessons noted on the row, the pages that name the
+row's id or its epic's, and up to three sections whose words match the row's
+title — each as `path:line`, ready to open, with `lesson` beside a page under
+`lessons/`. To look something up yourself, `moai wiki search <words>` lists the
+sections that hold those words, best first; several words are one query, and a
+section holding more of them comes first. Both read the wiki of the checkout you
+are in, so in a worktree they see that branch's pages.
+
+**Write down a mistake the next session would make too.** A lesson is one page under
+`lessons/` in the wiki, written by `moai wiki learn` — it makes the page and notes
+`Lesson: lessons/<slug>` on the row it came from:
+
+    moai wiki search '<a word of the mistake>'          is it written already?
+    moai note <id> 'Lesson: lessons/<slug>'             yes: it was met again
+    moai wiki learn '<the lesson, as an instruction>' --issue <id> -b - <<'LESSON'
+    ## What happened
+    ...
+    ## Do this instead
+    ...
+    LESSON
+
+The body must hold `## Do this instead`. A page that already stands is never
+overwritten. Nothing is committed: commit the page on the branch, like any wiki page.
+`moai wiki ls` puts `×N` beside a lesson — the number of rows that noted it — and
+`moai wiki show lessons/<slug>` lists those rows. The `moai-wiki` skill says which
+mistakes count and how a person sweeps the lessons.
+
 Work that belongs to someone else, or to nobody, stands apart under `others` in
 `moai ready`. Ask its person before you [take it over](glossary.md#take-over) —
 the [agents page](agents.md#the-five-rules) has the `--take` line, and why it is
@@ -102,11 +130,16 @@ it belongs to, and `--due` covers every epic the plan creates that has no `@` of
     - recover a truncated line
     PLAN
 
-A row made alone takes the same `--due` on `moai add` or `moai backlog add`; an `@` is
+When the person also names a day to begin, write the range — `@2026-10-25~2026-10-31` is a
+start and a deadline, `@2026-10-25~` a start alone — and `--start <day>` covers the epics
+that have no `@` of their own, as `--due` does. A start is never made up either.
+
+A row made alone takes the same `--due` and `--start` on `moai add` or `moai backlog add`; an `@` is
 read on a plan line only.
 
 A member's deadline cannot pass its epic's, nor an epic's its milestone's — the write
-is refused and names the day to give instead. As deadlines near, `moai due apply`
+is refused and names the day to give instead. A start is held to the same ceiling: it cannot
+fall after the deadline above it, though it may begin before the parent does. As deadlines near, `moai due apply`
 raises the priority of each open, not deferred issue and backlog item by the deadline
 it follows — the earliest of its own and those of its milestone, epic and open parent (one day
 left or less — today and past included — is `p0`, two or less `p1`, seven or less `p2`)
@@ -137,9 +170,21 @@ and wait on each other to merge.
 - **Worktrees stand in `<root>/.worktrees/`**, the place Claude Code, Codex and
   Antigravity share (moai-5s9l); `moai init` keeps it out of git. It stays inside
   the repository because Codex's trust and Antigravity's workspace go by the
-  root's path. Claude Code enters one from the root (`EnterWorktree` with its
-  path) — come back to the root before entering another. Worktrees made earlier
-  under `.claude/worktrees/` keep working
+  root's path. Worktrees made earlier under `.claude/worktrees/` keep working
+- **Claude Code does not enter it.** Every `EnterWorktree` into `.worktrees/`
+  asks the person to approve it, and no allow rule turns that off, so a Claude
+  session — a worker or a person's own — stays in the root and reaches the
+  worktree by absolute path (`git -C <root>/.worktrees/<epic> …`, absolute paths
+  for every file edit, and `(cd <root>/.worktrees/<epic> && …)` for a tool that
+  needs the directory) (moai-9js2). The parentheses matter in a session: its
+  shell keeps a `cd` into the next call, while a subagent's starts in the root
+  again every time. The hook's rule 2 takes over part of the isolation guard it
+  gives up: while everything the session holds has its worktree standing, a
+  write that lands in the root checkout — an edit, or a shell redirect, `sed -i`,
+  `tee` or a `cp`/`mv`/`install` destination, wherever the shell stands — is
+  refused, and so is a write into another epic's worktree; the refusal names the
+  same file in the worktree (in each worktree, when the work held stands in
+  several)
 - **Work a supervisor hands out inside a milestone branches from that
   milestone's branch**, `milestone/<milestone id>`, instead of the root branch,
   and merges back into it; the branch lives in its own worktree,
@@ -278,4 +323,4 @@ where its contributors read them rather than repeated here:
   broken data, the same as a broken line in `issues.jsonl` — see [An archive file
   cannot be read](recovery.md#an-archive-file-cannot-be-read)
 
-Decided in: moai-0zjo moai-40ht moai-bx6t moai-9793 moai-ug3j moai-gelm moai-tllo moai-snyk moai-zynt moai-j9nf moai-jtvp moai-fx9t moai-bth3 moai-r0x8 moai-9tqo
+Decided in: moai-0zjo moai-40ht moai-bx6t moai-9793 moai-ug3j moai-gelm moai-tllo moai-snyk moai-zynt moai-j9nf moai-jtvp moai-fx9t moai-bth3 moai-r0x8 moai-9tqo moai-g8pt

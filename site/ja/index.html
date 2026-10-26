@@ -1,0 +1,218 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>moai — コーディングエージェントのためのイシュートラッカー</title>
+  <meta name="description" content="moai は、人とコーディングエージェントが一緒に使うイシュートラッカーです。サーバーなしでリポジトリの中にあり、複数のエージェントがひとつの計画で動きます。">
+  <link rel="canonical" href="https://moai.buzzni.com/ja/">
+  <!-- 링크 미리보기: og:image 가 없으면 미리보기 쪽이 페이지의 첫 그림(로고 띠)을 고른다. SVG 를 못 읽는 곳이 많아 PNG 다 -->
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="moai">
+  <meta property="og:title" content="moai — コーディングエージェントのためのイシュートラッカー">
+  <meta property="og:description" content="moai は、人とコーディングエージェントが一緒に使うイシュートラッカーです。サーバーなしでリポジトリの中にあり、複数のエージェントがひとつの計画で動きます。">
+  <meta property="og:url" content="https://moai.buzzni.com/ja/">
+  <meta property="og:locale" content="ja_JP">
+  <meta property="og:image" content="https://moai.buzzni.com/assets/og.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="moai — Issue tracker for AI agents">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="moai — コーディングエージェントのためのイシュートラッカー">
+  <meta name="twitter:description" content="moai は、人とコーディングエージェントが一緒に使うイシュートラッカーです。サーバーなしでリポジトリの中にあり、複数のエージェントがひとつの計画で動きます。">
+  <meta name="twitter:image" content="https://moai.buzzni.com/assets/og.png">
+  <link rel="alternate" hreflang="en" href="https://moai.buzzni.com/">
+  <link rel="alternate" hreflang="ko" href="https://moai.buzzni.com/ko/">
+  <link rel="alternate" hreflang="ja" href="https://moai.buzzni.com/ja/">
+  <link rel="alternate" hreflang="x-default" href="https://moai.buzzni.com/">
+  <link rel="icon" href="../assets/mark.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="../assets/vendor/asciinema-player.css">
+  <link rel="stylesheet" href="../assets/site.css">
+</head>
+<body>
+
+<nav>
+  <div class="wrap">
+    <a class="brand" href="./" aria-label="moai"><img src="../assets/logo.svg" alt="moai"></a>
+    <div class="links">
+      <a href="#see">画面を見る</a>
+      <a href="guide/">使い方</a>
+      <a href="../docs/" hreflang="en">ドキュメント</a>
+      <a href="../changelog/" hreflang="en">変更履歴</a>
+    </div>
+    <div class="right">
+      <div class="lang" role="navigation" aria-label="Language">
+        <a href="../?lang=en" hreflang="en" lang="en" data-lang="en">English</a><span aria-hidden="true">|</span><a href="../ko/" hreflang="ko" lang="ko" data-lang="ko">한국어</a><span aria-hidden="true">|</span><a href="./" hreflang="ja" lang="ja" data-lang="ja" aria-current="page">日本語</a>
+      </div>
+      <a class="gh" href="https://discord.gg/hCfQ76uX3t" aria-label="Discord">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M20.317 4.3698a19.7913 19.7913 0 00-4.8851-1.5152.0741.0741 0 00-.0785.0371c-.211.3753-.4447.8648-.6083 1.2495-1.8447-.2762-3.68-.2762-5.4868 0-.1636-.3933-.4058-.8742-.6177-1.2495a.077.077 0 00-.0785-.037 19.7363 19.7363 0 00-4.8852 1.515.0699.0699 0 00-.0321.0277C.5334 9.0458-.319 13.5799.0992 18.0578a.0824.0824 0 00.0312.0561c2.0528 1.5076 4.0413 2.4228 5.9929 3.0294a.0777.0777 0 00.0842-.0276c.4616-.6304.8731-1.2952 1.226-1.9942a.076.076 0 00-.0416-.1057c-.6528-.2476-1.2743-.5495-1.8722-.8923a.077.077 0 01-.0076-.1277c.1258-.0943.2517-.1923.3718-.2914a.0743.0743 0 01.0776-.0105c3.9278 1.7933 8.18 1.7933 12.0614 0a.0739.0739 0 01.0785.0095c.1202.099.246.1981.3728.2924a.077.077 0 01-.0066.1276 12.2986 12.2986 0 01-1.873.8914.0766.0766 0 00-.0407.1067c.3604.698.7719 1.3628 1.225 1.9932a.076.076 0 00.0842.0286c1.961-.6067 3.9495-1.5219 6.0023-3.0294a.077.077 0 00.0313-.0552c.5004-5.177-.8382-9.6739-3.5485-13.6604a.061.061 0 00-.0312-.0286zM8.02 15.3312c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9555-2.4189 2.157-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.9555 2.4189-2.1569 2.4189zm7.9748 0c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9554-2.4189 2.1569-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.946 2.4189-2.1568 2.4189Z"/></svg>
+        <span>Discord</span>
+      </a>
+      <a class="gh" href="https://github.com/buzzni/moai" aria-label="GitHub">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+        <span>buzzni/moai</span>
+      </a>
+    </div>
+  </div>
+</nav>
+
+<header class="hero">
+  <div class="wrap">
+    <h1 class="eyebrow">人とコーディングエージェントが一緒に使うイシュートラッカー</h1>
+    <section class="rotator" aria-roledescription="carousel" aria-label="moai がすること">
+      <div class="rot-stage">
+        <span class="spin" aria-hidden="true"><svg viewBox="0 0 10 15"><circle class="d1" cx="2.6" cy="2.6" r="1.8"/><circle class="d2" cx="2.6" cy="7.5" r="1.8"/><circle class="d3" cx="2.6" cy="12.4" r="1.8"/><circle class="d4" cx="7.4" cy="2.6" r="1.8"/><circle class="d5" cx="7.4" cy="7.5" r="1.8"/><circle class="d6" cx="7.4" cy="12.4" r="1.8"/></svg></span>
+      <div class="rot-slides">
+        <div class="slide is-on" id="slide-1" role="tabpanel" aria-roledescription="slide" aria-label="1 / 5" aria-labelledby="tab-1" style="--glint-time: 6120ms">
+          <p class="headline"><span class="held-body"><span class="held-text">コーディングエージェントも<br><em>アジャイルに。</em></span><span class="held-glint" aria-hidden="true"><span>コーディングエージェントも<br><em>アジャイルに。</em></span></span></span></p>
+          <p class="lede">人がアイデアを出せば、エージェントが計画を立てます。<br>大きな依頼は小さな作業に分け、優先度の順に進めます。<br>要件が変われば、計画も柔軟に組み直します。</p>
+        </div>
+        <div class="slide" id="slide-2" role="tabpanel" aria-roledescription="slide" aria-label="2 / 5" aria-labelledby="tab-2" hidden style="--glint-time: 5640ms">
+          <p class="headline"><span class="held-body"><span class="held-text">サーバーなしで、<br><em>リポジトリひとつで。</em></span><span class="held-glint" aria-hidden="true"><span>サーバーなしで、<br><em>リポジトリひとつで。</em></span></span></span></p>
+          <p class="lede">やることもコードと一緒にコミットされ、ブランチに沿ってマージされます。<br>アカウントも、Web サービスも、データベースもいりません。<br>リポジトリを Push・Pull して、作業の状態を仲間と同期します。</p>
+        </div>
+        <div class="slide" id="slide-3" role="tabpanel" aria-roledescription="slide" aria-label="3 / 5" aria-labelledby="tab-3" hidden style="--glint-time: 6120ms">
+          <p class="headline"><span class="held-body"><span class="held-text">複数のエージェントを、<br><em>ひとつのチームに。</em></span><span class="held-glint" aria-hidden="true"><span>複数のエージェントを、<br><em>ひとつのチームに。</em></span></span></span></p>
+          <p class="lede">監督役のエージェントが仕事を分け、複数のエージェントが分担します。<br>それぞれが自分の worktree で、互いの作業に影響せず同時に進めます。<br>終わった作業はレビューを経て、ひとつにまとめます。</p>
+        </div>
+        <div class="slide" id="slide-4" role="tabpanel" aria-roledescription="slide" aria-label="4 / 5" aria-labelledby="tab-4" hidden style="--glint-time: 4680ms">
+          <p class="headline"><span class="held-body"><span class="held-text">どの仕事も<br><em>仕様書から始まる。</em></span><span class="held-glint" aria-hidden="true"><span>どの仕事も<br><em>仕様書から始まる。</em></span></span></span></p>
+          <p class="lede">何を、なぜ、どこまでやるかをイシューにはっきり書きます。<br>エージェントは前のセッションのメモとコミットもあわせて確認します。<br>文脈を一から探し直さず、続きから作業します。</p>
+        </div>
+        <div class="slide" id="slide-5" role="tabpanel" aria-roledescription="slide" aria-label="5 / 5" aria-labelledby="tab-5" hidden style="--glint-time: 5160ms">
+          <p class="headline"><span class="held-body"><span class="held-text">説明し直さなくても、<br><em>自分で動く。</em></span><span class="held-glint" aria-hidden="true"><span>説明し直さなくても、<br><em>自分で動く。</em></span></span></span></p>
+          <p class="lede">エージェントは作業履歴から、これまでの決定とその理由を確かめます。<br>メモリ wiki でやり方を調べるので、同じ失敗を繰り返しません。<br>時間がたつほど賢くなります。</p>
+        </div>
+      </div>
+      </div>
+      <div class="rot-tabs" role="tablist" aria-label="moai がすること">
+      <button class="rot-tab" id="tab-1" role="tab" aria-controls="slide-1" aria-selected="true" style="--rot-time: 9120ms"><span class="rot-n">01</span><span class="rot-name">アジャイル</span><i class="rot-bar" aria-hidden="true"></i></button>
+      <button class="rot-tab" id="tab-2" role="tab" aria-controls="slide-2" aria-selected="false" tabindex="-1" style="--rot-time: 8640ms"><span class="rot-n">02</span><span class="rot-name">サーバー不要</span><i class="rot-bar" aria-hidden="true"></i></button>
+      <button class="rot-tab" id="tab-3" role="tab" aria-controls="slide-3" aria-selected="false" tabindex="-1" style="--rot-time: 9120ms"><span class="rot-n">03</span><span class="rot-name">マルチエージェント</span><i class="rot-bar" aria-hidden="true"></i></button>
+      <button class="rot-tab" id="tab-4" role="tab" aria-controls="slide-4" aria-selected="false" tabindex="-1" style="--rot-time: 8000ms"><span class="rot-n">04</span><span class="rot-name">仕様書</span><i class="rot-bar" aria-hidden="true"></i></button>
+      <button class="rot-tab" id="tab-5" role="tab" aria-controls="slide-5" aria-selected="false" tabindex="-1" style="--rot-time: 8160ms"><span class="rot-n">05</span><span class="rot-name">記憶</span><i class="rot-bar" aria-hidden="true"></i></button>
+      </div>
+    </section>
+
+    <div class="install">
+      <code><span class="p">$ </span>curl -fsSL https://raw.githubusercontent.com/buzzni/moai/main/install.sh | sh</code>
+      <button class="copy" data-copy="curl -fsSL https://raw.githubusercontent.com/buzzni/moai/main/install.sh | sh" data-copied="コピーしました">コピー</button>
+    </div>
+    <p class="meta">macOS · Linux · Windows · MIT ライセンス · <code>SHA256SUMS</code> で確認できないものはインストールしません · <a href="https://github.com/buzzni/moai#install">ほかのインストール方法</a></p>
+  </div>
+</header>
+
+<section class="team" id="team">
+  <div class="wrap">
+    <div class="window term">
+      <div class="bar"><i></i><i></i><i></i><span>tmux · moai tui · Claude Code · Codex · Antigravity</span></div>
+      <div class="cast" data-cast="../assets/media/tui-team.cast" data-cols="200" data-rows="56" data-speed="2" role="figure" aria-label="tmux の4ペイン: moai tui、Claude Code の監督、Codex と Antigravity の作業者"></div>
+    </div>
+    <div class="sec-head">
+      <h2 class="big">ベンダーが違っても、ひとつのチームで。</h2>
+      <p>ベンダーの違うエージェントも、監督と作業者に分かれて一緒に働きます。監督は手の空いた作業者に残りの仕事を配り、いくつもの作業を同時に進めます。作業者は必要なだけ立ち上げてください。それぞれが自分の worktree で作業するのでぶつからず、監督が間に立って最後まで仕上げます。</p>
+    </div>
+    <ul class="team-points">
+      <li>指示はひと言で十分です。<q>たまったバックログを、手の空いたセッションに配って。</q></li>
+      <li>作業者のウィンドウを片付け、次の仕事を送り、報告を確かめるところまで監督がやります。</li>
+      <li>計画は Claude Fable、開発は Codex Sol、雑務は Antigravity Gemini、レビューは Claude Opus に。仕事ごとに得意なモデルへ任せてみてください。</li>
+    </ul>
+  </div>
+</section>
+
+<section class="logos" aria-label="Moai と共に動くプロダクト">
+  <div class="wrap">
+    <h2>Moai と共に動くプロダクト</h2>
+    <div class="marquee">
+      <div class="track">
+        <a class="slot" href="https://viskits.ai" target="_blank" rel="noopener"><img src="../assets/logos/viskits.png" alt="VISKIT AI" height="26"></a><a class="slot" href="https://fitcl.ai" target="_blank" rel="noopener"><img src="../assets/logos/fitcl.png" alt="FitCL" height="26"></a><a class="slot dark" href="https://datahub.hsmoa.com" target="_blank" rel="noopener"><img src="../assets/logos/datahub.png" alt="Homeshopping Moa Data HUB" height="26"></a><a class="slot" href="https://www.knoi.ai" target="_blank" rel="noopener"><img src="../assets/logos/knoi.png" alt="Knoi.ai" height="26"></a><a class="slot" href="https://saycode.ai" target="_blank" rel="noopener"><img src="../assets/logos/saycode.png" alt="Saycode" height="26"></a>
+        <a class="slot" href="https://viskits.ai" target="_blank" rel="noopener" aria-hidden="true" tabindex="-1"><img src="../assets/logos/viskits.png" alt="" height="26"></a><a class="slot" href="https://fitcl.ai" target="_blank" rel="noopener" aria-hidden="true" tabindex="-1"><img src="../assets/logos/fitcl.png" alt="" height="26"></a><a class="slot dark" href="https://datahub.hsmoa.com" target="_blank" rel="noopener" aria-hidden="true" tabindex="-1"><img src="../assets/logos/datahub.png" alt="" height="26"></a><a class="slot" href="https://www.knoi.ai" target="_blank" rel="noopener" aria-hidden="true" tabindex="-1"><img src="../assets/logos/knoi.png" alt="" height="26"></a><a class="slot" href="https://saycode.ai" target="_blank" rel="noopener" aria-hidden="true" tabindex="-1"><img src="../assets/logos/saycode.png" alt="" height="26"></a>
+        <a class="slot" href="https://viskits.ai" target="_blank" rel="noopener" aria-hidden="true" tabindex="-1"><img src="../assets/logos/viskits.png" alt="" height="26"></a><a class="slot" href="https://fitcl.ai" target="_blank" rel="noopener" aria-hidden="true" tabindex="-1"><img src="../assets/logos/fitcl.png" alt="" height="26"></a><a class="slot dark" href="https://datahub.hsmoa.com" target="_blank" rel="noopener" aria-hidden="true" tabindex="-1"><img src="../assets/logos/datahub.png" alt="" height="26"></a><a class="slot" href="https://www.knoi.ai" target="_blank" rel="noopener" aria-hidden="true" tabindex="-1"><img src="../assets/logos/knoi.png" alt="" height="26"></a><a class="slot" href="https://saycode.ai" target="_blank" rel="noopener" aria-hidden="true" tabindex="-1"><img src="../assets/logos/saycode.png" alt="" height="26"></a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="see" id="see">
+  <div class="wrap">
+    <article class="scene">
+      <div class="scene-text">
+        <div class="n">01</div>
+        <h3>すべての画面を、ターミナルひとつで。</h3>
+        <p>一覧、マイルストーンごとのカンバン、wiki を1画面で行き来します。カーソルの下にある仕事の詳細は、いつも横に出ています。ターミナルなのに、マウスも完全に使えます。</p>
+        <p class="run"><span class="tag">ターミナル</span><code>$ moai tui</code></p>
+      </div>
+      <div class="scene-media">
+        <div class="window term"><div class="bar"><i></i><i></i><i></i><span>moai tui</span></div>
+          <div class="cast" data-cast="../assets/media/tui-tour.cast" data-cols="120" data-rows="34" role="figure" aria-label="moai tui で一覧からカンバン、wiki へ移る画面"></div></div>
+      </div>
+    </article>
+    <article class="scene">
+      <div class="scene-text">
+        <div class="n">02</div>
+        <h3>既存のイシュートラッカーと比べても、引けを取りません。</h3>
+        <p>詳しい作業指示、作業の途中で残したメモ、コミットと日程まで、ひと目で確認できます。</p>
+        <p class="run"><span class="tag">ブラウザ</span><code>$ moai web</code></p>
+      </div>
+      <div class="scene-media">
+        <div class="window browser"><div class="bar"><i></i><i></i><i></i><span class="addr">127.0.0.1:6624</span></div>
+          <video class="clip" muted loop playsinline preload="none" poster="../assets/media/web-detail.png" data-src="../assets/media/web-detail.webm" aria-label="moai web でイシューの説明、コミット、履歴を読む画面"></video></div>
+      </div>
+    </article>
+    <article class="scene">
+      <div class="scene-text">
+        <div class="n">03</div>
+        <h3>ドキュメントのために、別の製品を使うのはやめましょう。</h3>
+        <p>エージェントは作業しながら、moai に内蔵された wiki に文書を書きます。一部でも全体でも手軽に書かせることができ、エージェントはそれを頼りに動きます。</p>
+        <p class="run"><span class="tag">ブラウザ</span><code>$ moai web</code></p>
+      </div>
+      <div class="scene-media">
+        <div class="window browser"><div class="bar"><i></i><i></i><i></i><span class="addr">127.0.0.1:6624</span></div>
+          <video class="clip" muted loop playsinline preload="none" poster="../assets/media/web-wiki.png" data-src="../assets/media/web-wiki.webm" aria-label="moai web の wiki でリンクをたどり、イシューへ飛ぶ画面"></video></div>
+      </div>
+    </article>
+    <article class="scene">
+      <div class="scene-text">
+        <div class="n">04</div>
+        <h3>仕事の進み具合と流れが、ひと目でわかる。</h3>
+        <p>ユーザーのアイデアはバックログから始まり、マイルストーン、エピックからタスクへと分けられ、レビューと完了まで、エージェントがすべて自分で動かして進めます。</p>
+        <p class="run"><span class="tag">ターミナル</span><code>$ moai tui</code></p>
+      </div>
+      <div class="scene-media">
+        <div class="window term"><div class="bar"><i></i><i></i><i></i><span>moai tui</span></div>
+          <div class="cast" data-cast="../assets/media/tui-lifecycle.cast" data-cols="120" data-rows="34" role="figure" aria-label="バックログに入ったカードがボードを横切って Done まで進む画面"></div></div>
+      </div>
+    </article>
+  </div>
+</section>
+
+<section class="cta">
+  <div class="wrap">
+    <h2>エージェントに、<br>働く場所を。</h2>
+    <p>インストールは1行です。あとはターミナルで <code>moai tui</code>、ブラウザなら <code>moai web</code> を開きます。</p>
+    <div class="install">
+      <code><span class="p">$ </span>curl -fsSL https://raw.githubusercontent.com/buzzni/moai/main/install.sh | sh</code>
+      <button class="copy" data-copy="curl -fsSL https://raw.githubusercontent.com/buzzni/moai/main/install.sh | sh" data-copied="コピーしました">コピー</button>
+    </div>
+    <p class="meta" style="margin-top:14px">Windows では <a href="https://github.com/buzzni/moai#windows"><code>install.ps1</code></a> を使います。</p>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <img src="../assets/logo.svg" alt="moai">
+    <span>MIT · © 2026 Buzzni Inc.</span>
+    <div class="links">
+      <a href="../docs/" hreflang="en">ドキュメント</a>
+      <a href="../changelog/" hreflang="en">変更履歴</a>
+      <a href="guide/">使い方</a>
+      <a href="https://discord.gg/hCfQ76uX3t">Discord</a>
+      <a href="https://github.com/buzzni/moai">GitHub</a>
+    </div>
+  </div>
+</footer>
+
+<script src="../assets/vendor/asciinema-player.min.js"></script>
+<script src="../assets/site.js"></script>
+</body>
+</html>

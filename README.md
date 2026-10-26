@@ -6,6 +6,10 @@ working in the same tree.
 No approval gate. Anything can be created and anything can be moved. Discipline
 is something `moai status` reflects back at you, never something it enforces.
 
+See it on the [website](https://moai.buzzni.com/) — in English, 한국어 and
+日本語: the terminal explorer, the browser view, and a Claude Code supervisor
+handing work to Codex and Antigravity workers in one tmux window.
+
 ```
 $ moai
 Issues 941  · Epics 148       .moai/issues.jsonl
@@ -210,10 +214,11 @@ the keys it takes and a few examples stand above the field, and in the value of
 `assignee=`, `tag=`, `no-tag=` or `milestone=` the values this tracker holds
 do — typing narrows them, Up and Down pick one and Enter puts it in.
 
-`moai web` serves the same tracker as a page in a browser tab, read-only, on
-`127.0.0.1:6624` (`--port`, `--port 0` for a free one, `--host`): a board, a list
-and the wiki, with the keys of the explorer. It never opens a browser and never
-writes; see [the manual page](docs/web.md).
+`moai web` serves the same tracker as a page in a browser tab on
+`127.0.0.1:6624` (`--port`, `--port 0` for a free one, `--host`): a board, a list,
+a Gantt chart and the wiki, with the keys of the explorer. It never opens a
+browser, and the one change it makes to the tracker is a Gantt bar dragged to new
+days; see [the manual page](docs/web.md).
 
 Done work that has sat in done for two weeks is the archive. It is not removed
 and nothing is stored for it — moai reads it off the column and the clock each
@@ -522,6 +527,44 @@ over it. `en`, `ko`, `zh`, `ja` and `es` are recognised; anything not yet transl
 falls back to English, and the system locale (`LANG`, `LC_ALL`) is not read.
 `i18n/README.md` describes how to add a language.
 
+## The website
+
+The website lives in `site/`: a home page and a guide per language (`/`, `/ko/`,
+`/ja/`, each with `guide/`), English by default. On the root page a Korean or
+Japanese browser is sent to its own page, unless the visitor has picked a language
+in the header.
+
+Those pages are built, not edited. `scripts/site/` holds one template per page
+(`layout.html`, `home.html`, `guide.html`) and one text bundle per language
+(`text/en.toml`, `ko.toml`, `ja.toml`); change either and run
+`python3 scripts/site/gen.py`, then commit what it wrote. The CI job `site` runs
+`gen.py --check` and fails when a committed page differs from what the templates
+build. The generator is standard-library Python (3.11 or later).
+
+The manual (`/docs/`) and the changelog (`/changelog/`) stand in English only and are
+not committed. `.github/workflows/pages.yml` builds them from the `docs/` and
+`CHANGELOG.md` of the release GitHub marks latest — the one `install.sh` installs — and
+runs again whenever the release workflow finishes. To look at them locally:
+
+    python3 scripts/site/gen.py --docs docs --changelog CHANGELOG.md
+
+The workflow publishes `site/` to GitHub Pages on every push to `develop` that
+touches `site/` or `scripts/site/`. CI skips the binary jobs (msrv, windows,
+size-budget, web) for changes under `site/`, `scripts/site/` and
+`scripts/site-demo/`; `ci-gate` still runs.
+
+The page talks about what people see. How things work belongs here and in `docs/`.
+
+The recordings on it are recorded, not drawn. `scripts/site-demo/` builds a demo
+repository — Lantern, a made-up notes app, with its own config so nothing of the
+recording machine shows — and records it:
+
+- `seed.sh` — the demo tracker: two milestones, four epics, a backlog and a wiki
+- `record-tui.sh` — the terminal scenes, with asciinema
+- `record-web.mjs` — the browser scenes, with Playwright
+- `record-team.sh` — the tmux window for the supervisor scene. Real agents do the
+  work there, so it sets the window up and prints the steps a person takes
+
 ## Budgets
 
 | What | Limit |
@@ -544,6 +587,7 @@ eventually needs.
 - `SECURITY.md` — reporting a vulnerability
 - `docs/recovery.md` — what to do when the tracker files get into a bad state
 - `CHANGELOG.md` — what changed, per release
+- [The website](https://moai.buzzni.com/) — what moai looks like, in English, Korean and Japanese
 
 ## License
 

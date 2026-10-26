@@ -7,10 +7,13 @@ pub mod board;
 pub mod draw;
 pub mod edit;
 pub mod form;
+mod gantt;
+mod help;
 mod hint;
 pub mod init_screen;
 pub mod input;
 pub mod jotfile;
+pub mod keymap;
 pub mod keys;
 pub mod layer;
 pub mod menu;
@@ -379,8 +382,11 @@ impl Pane {
     /// (moai-9nfw) — 화면에 선 것과 다른 이름을 대면 그 키가 어디로 가는지 못 읽는다.
     pub fn word(self, lang: crate::i18n::Lang, layout: view::Layout) -> &'static str {
         match self {
-            Pane::Explorer if layout == view::Layout::Board => crate::i18n::say(lang, "tui.pane.board"),
-            Pane::Explorer => crate::i18n::say(lang, "tui.pane.list"),
+            Pane::Explorer => match layout {
+                view::Layout::Board => crate::i18n::say(lang, "tui.pane.board"),
+                view::Layout::Gantt => crate::i18n::say(lang, "tui.pane.gantt"),
+                view::Layout::List => crate::i18n::say(lang, "tui.pane.list"),
+            },
             Pane::Detail => crate::i18n::say(lang, "tui.pane.detail"),
         }
     }
@@ -1319,6 +1325,9 @@ pub struct Site {
     /// 접어도 **밑의 펼침은 기억한다** — 접었다 다시 펼치면 안이 그대로 선다. `Tab`
     /// (다 펼침)의 두 번째 누름만 밑까지 걷는다([`App::expand_all`]).
     expanded: std::collections::HashSet<Path>,
+    /// 간트에서 **접어 둔** 묶음의 자리(moai-i4hf). 목록의 `expanded` 와 따로 들고 뜻이 거꾸로다 — 간트는 모두
+    /// 펼친 채로 서니(비면 "모두"), 사람이 접은 자리만 적는다. 들어갈 때마다 비운다([`App::open_gantt`]).
+    gantt_shut: std::collections::HashSet<Path>,
     /// 겹쳐 본 줄의 출처. 꺼져 있으면 비었다.
     pub origin: crate::worktree::Origin,
     /// 옆 워크트리에서 만난 문제. **배너로 말만 한다** — CLI 가 stderr 로 흘리는
@@ -1359,6 +1368,10 @@ pub struct App {
     /// `trouble` 과 **따로 든다.** 쓰기 뒤 다시 읽기가 실패하면 둘이 함께 참이다 —
     /// 파일에는 담겼고 화면은 못 읽었다. 한 칸에 담으면 어느 한쪽이 거짓말을 한다.
     pub notice: Option<String>,
+    /// 실행 중의 키 표(moai-bzm3) — 띄울 때 사람의 `keys.toml` 을 한 번 읽어 짓는다([`keymap::load`]). 핫리로드는
+    /// 없다. 시험과 [`App::new`] 는 기본 표다. 키 처리·바·메뉴·거절문·창이 **모두 이것을** 읽는다 — 한 자리라도 기본
+    /// 표를 바로 읽으면 바꾼 키를 바는 옛 이름으로 댄다.
+    pub keys: keys::Keymap,
     /// 상세에 선 본문을 펼쳐 둔 한 벌(moai-fauw, [`draw::Body`]) — **그리기 전에** `draw::fill_body`
     /// 가 채운다. 그리는 쪽은 `&App` 만 빌려 제자리에서 못 넣고, 안 넣으면 프레임마다 같은 본문을
     /// 다시 판다. 값일 뿐이라 비어 있어도 그림은 같다 — 그때는 그리는 쪽이 그 자리에서 편다.
@@ -1366,6 +1379,13 @@ pub struct App {
     /// 상세의 "걸린 노트" 절을 펼쳐 둔 한 벌(리뷰 moai-wcy8.rbj, [`draw::NoteHits`]) — [`App::body`] 와 같은
     /// 까닭으로 `draw::fill_note_hits` 가 그리기 전에 채운다. 값일 뿐이다.
     note_hits: Option<draw::NoteHits>,
+    /// 상세의 Wiki 토막을 지어 둔 한 벌(moai-xp7l.vyw, [`draw::WikiAbout`]) — [`App::body`] 와 같은 까닭으로
+    /// `draw::fill_wiki` 가 그리기 전에 채운다. 커서가 선 줄의 것 하나다.
+    wiki_about: Option<draw::WikiAbout>,
+    /// 상세의 Wiki 토막이 읽은 위키 — 체크아웃(`Repo::here`)마다 한 번, 처음 그 토막을 그릴 때 읽는다. 커서를 옮길
+    /// 때마다 위키 전부를 다시 읽지 않는다. 연 뒤에 쓴 페이지는 위키 창(`SPC g w`)을 열면 — 창이 위키를 새로 읽으며 이것을
+    /// 비운다 — 아니면 탐색기를 다시 열면 선다. 못 읽은 위키는 안 담는다(리뷰 moai-xp7l.mug).
+    wiki_pages: std::collections::HashMap<std::path::PathBuf, Vec<crate::wiki::Page>>,
     /// 사용자 설정을 못 읽어 **층을 안 세운** 까닭. 층이 서면 아래의 [`App::held`] 가 대므로
     /// (moai-23pm) 층이 없을 때만 든다. 붙박이다 — 다시 읽기가 걷는 `trouble` 에 두면 700ms 뒤에
     /// 사라져 사람은 층이 왜 없는지 끝내 모른다. 설정 파일이 바뀌면 걸음이 다시 읽어([`App::follow_config`])
@@ -1501,6 +1521,20 @@ pub struct App {
     /// 보기·상세는 둘이 한 벌이고, 이것은 [`App::rows`] 가 무엇을 내고 그림과 이동이 그것을 어디에 세우는가만
     /// 가른다. 한눈 보기에서는 프로젝트마다 머리줄이 서는 보드다(moai-oagj.vcj). 설정에 남는다.
     pub layout: view::Layout,
+    /// 간트의 보기(moai-i4hf) — 가로 축·확대·고정 칸 폭·맞춤. 세로 자리는 목록의 것(`list`)을 그대로 쓴다. **화면에만
+    /// 산다** — 처음에는 맞춤이 서서 보이는 줄의 날이 한 화면에 든다.
+    pub chart: moai_gantt::GanttState,
+    /// 쓰려다 누군지 물으러 간 계획 옮기기(moai-i4hf.9xi) — 답을 받으면 [`gantt::commit_plan`] 이 이것을 다시 쓴다.
+    /// 쓰기가 끝나면(됐든 거절됐든) 비운다.
+    plan_move: Option<gantt::PlanMove>,
+    /// 간트 위의 끌기(moai-i4hf.exq) — 막대·날짜 머리·나눔 선. 목록·상세 사이 선의 끌기(`dragging`)와 따로 든다.
+    chart_drag: Option<gantt::ChartDrag>,
+    /// 간트의 고정 칸 폭을 끈 값(칸, moai-i4hf.exq) — 끈 적 없으면 없고, 그때는 설정에 안 적힌다(`list_width` 와 같은 결).
+    /// 그리는 값은 `chart.label_width` 다.
+    gantt_label: Option<u16>,
+    /// 간트에서 상세 칸이 서는 자리(moai-i4hf.sas) — **처음은 아래다**: 간트는 가로로 넓어야 날짜가 보인다. 목록의
+    /// 자리(`detail_at`)와 따로 들고, 간트 안의 `SPC o d` 가 이것을 돌린다. 화면에만 산다.
+    gantt_detail_at: view::DetailAt,
     /// 보드에서 커서가 마지막으로 선 카드의 칸 — 칸이 없는 프로젝트 머리줄에서 `j`·`k` 가 걸을 칸이다
     /// (moai-oagj.vcj, [`App::board_step`]). 화면의 손버릇이라 설정에 안 남는다.
     ///
@@ -1577,6 +1611,9 @@ pub struct App {
     /// 0 번 줄부터 다시 세어 커서를 늘 맨 아랫줄에 붙이고, 그러면 커서 아래를
     /// 한 줄도 못 본다. 상세와 **같은 조각**이다([`Scroll`]).
     pub list: Scroll,
+    /// 열린 키 목록 창(`?`·`SPC h`, moai-ucyr). **모드가 아니라 위에 뜨는 창이다** — 통계·위키 창 위에서도 열리고, 닫으면
+    /// 덮였던 창이 그대로 선다. 열린 동안 키는 이 창이 먼저 받는다([`App::help_key`]).
+    pub help: Option<help::Sheet>,
     pub quit: bool,
     /// 도는 글리프의 걸음. **그린 횟수가 아니라 시계가 올린다** — 그릴 때마다
     /// 올리면 키를 누르는 동안에는 타이핑 속도로 돌고 가만히 두면 파일을 보러
@@ -1711,6 +1748,7 @@ impl Site {
             lit: Default::default(),
             unread: Default::default(),
             expanded: Default::default(),
+            gantt_shut: Default::default(),
             origin: crate::worktree::Origin::default(),
             elsewhere: Vec::new(),
             unfound: None,
@@ -2097,8 +2135,11 @@ impl App {
             held: None,
             write_failed: false,
             notice: None,
+            keys: keys::Keymap::default(),
             body: None,
             note_hits: None,
+            wiki_about: None,
+            wiki_pages: Default::default(),
             user: None,
             identify: crate::model::actor,
             journals: if cfg!(test) { || Vec::new() } else { crate::store::journal_unread_now },
@@ -2130,6 +2171,11 @@ impl App {
             detail_open: true,
             detail_at: view::DetailAt::default(),
             layout: view::Layout::default(),
+            chart: moai_gantt::GanttState { fitting: true, ..Default::default() },
+            plan_move: None,
+            chart_drag: None,
+            gantt_label: None,
+            gantt_detail_at: view::DetailAt::Bottom,
             board_column: None,
             adrift: None,
             mouse_on: true,
@@ -2149,6 +2195,7 @@ impl App {
             saved_zone: None,
             saved: Default::default(),
             list: Scroll::default(),
+            help: None,
             quit: false,
             spin: 0,
             spun: false,
@@ -2366,8 +2413,8 @@ impl App {
                     // (moai-2kyl 단계 리뷰) — 하나만 대면 그 키를 눌러도 다른 쪽에 여전히 가린다.
                     Landing::Hidden => {
                         let veil = self.site.index.find(&id).map(|at| self.site.veil(at)).unwrap_or_default();
-                        let clear = keys::label(keys::BROWSE, keys::Browse::ClearFilter);
-                        let show = keys::label(keys::BROWSE, keys::Browse::ShowAll);
+                        let clear = keys::said(self.keys.browse, keys::Browse::ClearFilter);
+                        let show = keys::said(self.keys.browse, keys::Browse::ShowAll);
                         match veil {
                             Veil { filtered: true, viewed: true } => fill(
                                 say(lang, "tui.write.veiled_both"),
@@ -2768,7 +2815,9 @@ impl App {
         // **보드는 지금 디렉터리 밑의 줄을 이미 카드로 세운다**(moai-9nfw) — 그 집으로 들어가면 뿌리에서 담은 생각
         // 하나(`SPC n`)로 마일스톤 레인 전부가 `(마일스톤 없음)` 한 레인으로 줄어든다. 보드를 오가는 길(`flip_layout`)이
         // 같은 까닭으로 디렉터리를 지킨다. 지금 자리 밖의 줄이면 목록처럼 그리로 간다 — 여기서는 카드가 안 선다.
-        if self.board() && home.starts_with(&self.site.path) {
+        // 간트도 같다(moai-i4hf) — 지금 디렉터리 밑을 다 펼쳐 세우니, 막대를 옮긴 쓰기가 그 줄의 에픽으로 들어가면 보던
+        // 차트가 에픽 하나로 줄어든다.
+        if (self.board() || self.gantt()) && home.starts_with(&self.site.path) {
             home = self.site.path.clone();
         }
         let was = std::mem::replace(&mut self.site.path, home);
@@ -3412,7 +3461,7 @@ impl App {
     /// 차례 편집 창(`SPC s e`, moai-r170.x22)의 키 하나. 창이 고친 차례를 내면 입히고 적는다.
     pub(super) fn edit_sort(&mut self, k: KeyEvent) {
         let Mode::Sort(e) = &mut self.mode else { return };
-        let Lookup::Run(act) = keys::lookup(keys::SORTER, &[k]) else { return };
+        let Lookup::Run(act) = keys::lookup(self.keys.sorter, &[k]) else { return };
         match e.act(act) {
             sorter::Done::Stay => {}
             sorter::Done::Cancel => self.mode = Mode::Browse,
@@ -3581,6 +3630,19 @@ impl App {
         self.see();
     }
 
+    /// 사람의 키 파일(`keys.toml`)이 지은 표를 입힌다(moai-bzm3) — 띄울 때 한 번이고 핫리로드는 없다. 버린 줄이 있으면
+    /// **알림에 한 줄을 잇는다** — 보기 설정의 탈([`App::adopt_look`])이 먼저 섰으면 그 뒤에 선다. 덮으면 하나를 잃는다.
+    /// TUI 는 그대로 열린다: 버린 줄은 기본 키로 남았다.
+    pub fn adopt_keys(&mut self, keys: keys::Keymap, problems: &[keymap::Problem], file: Option<&std::path::Path>) {
+        self.keys = keys;
+        if let Some(said) = keymap::notice(problems, file, self.site.lang) {
+            self.notice = Some(match self.notice.take() {
+                Some(before) => format!("{before} · {said}"),
+                None => said,
+            });
+        }
+    }
+
     fn apply_look(&mut self, look: &crate::user_config::Look, problems: &mut Vec<String>) {
         if let Some(hidden) = &look.hidden {
             // **겹쳐 적힌 이름은 하나로 든다**(moai-2kyl 단계 리뷰) — 토글(`View::toggle`)은 한 번에 하나를
@@ -3722,6 +3784,11 @@ impl App {
         self.list_width = look.list_width.map(draw::share);
         self.list_height = look.list_height.map(draw::share);
         self.wiki_width = look.wiki_width.map(draw::share);
+        // 간트의 고정 칸 폭은 칸 수다(moai-i4hf.exq) — 0 과 음수는 1 로, 터무니없이 큰 값은 그릴 때 위젯이 창에 맞춘다.
+        self.gantt_label = look.gantt_label.map(|w| w.clamp(1, i64::from(u16::MAX)) as u16);
+        if let Some(w) = self.gantt_label {
+            self.chart.set_label_width(w);
+        }
     }
 
     /// 지금 보기를 설정에 적을 모양으로.
@@ -3751,6 +3818,7 @@ impl App {
             list_width: self.list_width.map(i64::from),
             list_height: self.list_height.map(i64::from),
             wiki_width: self.wiki_width.map(i64::from),
+            gantt_label: self.gantt_label.map(i64::from),
         }
     }
 
@@ -4875,7 +4943,7 @@ impl App {
         rows.extend(
             site.index
                 .entries_tree(&site.issues, &site.path, keep, &|a, b| self.order_in(site, a, b), &|under| {
-                    site.expanded.contains(under) || found_under.contains(under)
+                    self.opened(site, under) || found_under.contains(under)
                 })
                 .into_iter()
                 .map(|(e, twig)| Row::Item(seat, e, twig)),
@@ -4908,6 +4976,23 @@ impl App {
     /// 서고, 펼친 프로젝트 밑에 그 프로젝트의 마일스톤 레인이 선다.
     pub fn board(&self) -> bool {
         self.layout == view::Layout::Board
+    }
+
+    /// 간트로 세우는가(moai-i4hf). 줄은 목록과 같이 세우되 펼침만 간트의 것(`Site::gantt_shut`)을 읽는다.
+    pub fn gantt(&self) -> bool {
+        self.layout == view::Layout::Gantt
+    }
+
+    /// 상세 칸이 지금 서는 자리 — 간트면 간트의 자리(`gantt_detail_at`), 아니면 사람이 고른 자리다(moai-i4hf.sas).
+    /// **그리기·마우스·칸 옮기기·키 바가 이 하나를 읽는다** — 한쪽만 간트의 자리를 보면 아래에 선 상세를 `Ctrl-w l` 이
+    /// 오른쪽에서 찾는다.
+    pub fn detail_side(&self) -> view::DetailAt {
+        if self.gantt() { self.gantt_detail_at } else { self.detail_at }
+    }
+
+    /// 줄로 세우는가 — 보드도 간트도 아니다.
+    pub fn list(&self) -> bool {
+        self.layout == view::Layout::List
     }
 
     /// 보드의 카드 — 지금 디렉터리를 **통째로 펼친** 줄 가운데 묶음이 아닌 것(일과 backlog)이다(moai-9nfw).
@@ -5079,31 +5164,37 @@ impl App {
             keys::Screen::Wiki => return self.open_wiki(),
             keys::Screen::List => view::Layout::List,
             keys::Screen::Board => view::Layout::Board,
+            keys::Screen::Gantt => view::Layout::Gantt,
         };
         if self.layout != layout {
-            self.flip_layout(rows);
+            self.set_layout(layout, rows);
         }
     }
 
-    /// 목록과 보드를 오간다 — [`App::go`] 가 다른 배치를 고를 때(moai-9nfw). **고른 줄을 그대로 든다.**
+    /// 배치를 바꾼다 — [`App::go`] 가 다른 배치를 고를 때(moai-9nfw·moai-i4hf). **고른 줄을 그대로 든다.**
     ///
     /// - 목록 → 보드: 그 줄이 카드면 그 카드에, 폴더(에픽·마일스톤·바구니)면 그 밑의 첫 카드에 선다
-    /// - 보드 → 목록: **같은 디렉터리에 남고** 그 카드를 품은 폴더를 연다. 그 카드의 집으로 들어가면(`land`)
-    ///   한 번 오간 것만으로 뿌리의 보드가 에픽 하나의 보드로 줄어 돌아온다
+    /// - 보드·간트 → 목록: **같은 디렉터리에 남고** 그 줄을 품은 폴더를 연다. 그 줄의 집으로 들어가면(`land`)
+    ///   한 번 오간 것만으로 뿌리의 보드가 에픽 하나의 보드로 줄어 돌아온다. 간트는 제 펼침을 따로 들어
+    ///   목록이 접어 둔 폴더 안의 줄에도 커서가 설 수 있다 — 그 폴더만 연다
+    /// - → 간트: **모두 펼친 채로 선다**([`App::open_gantt`]). 목록의 접기는 건드리지 않는다
     ///
     /// 굴린 자리는 첫 줄로 돌린다 — 목록의 줄 수와 보드 캔버스의 줄 수는 다른 자다. 화면을 떼어 둔 줄
     /// ([`App::adrift`])도 함께 걷는다: 남기면 첫 줄로 돌아간 보드나 목록에서 그 줄이 안 보여도 그림이 안 드러낸다.
-    fn flip_layout(&mut self, rows: &[Row]) {
+    fn set_layout(&mut self, to: view::Layout, rows: &[Row]) {
         let current = self.current_of(rows);
         let held = current.as_ref().map(|r| self.anchor_of(r));
         let under = self.dir_of(current.clone());
-        // 보드에서 고른 카드 — 목록으로 오면 그 카드를 품은 폴더를 연다. **그 카드의 프로젝트에서** 연다: 한눈 보기의
+        // 보드·간트에서 고른 줄 — 목록으로 오면 그 줄을 품은 폴더를 연다. **그 줄의 프로젝트에서** 연다: 한눈 보기의
         // 카드는 남의 프로젝트의 것이라(moai-oagj.vcj) 지금 선 것에 열면 엉뚱한 프로젝트의 폴더가 열린다.
         let card = match &current {
-            Some(Row::Item(seat, e, _)) if self.board() => e.at().map(|at| (*seat, at)),
+            Some(Row::Item(seat, e, _)) if to == view::Layout::List && !self.list() => e.at().map(|at| (*seat, at)),
             _ => None,
         };
-        self.layout = self.layout.flip();
+        if to == view::Layout::Gantt {
+            self.open_gantt();
+        }
+        self.layout = to;
         self.list.rewind();
         self.adrift = None;
         if let Some((seat, at)) = card
@@ -5212,7 +5303,7 @@ impl App {
     fn open_seat_at(&self, rows: &[Row]) -> Option<(Seat, Path)> {
         let (seat, path) = self.dir_seat_at(rows)?;
         let site = self.site_of_seat(seat)?;
-        (site.expanded.contains(&path) || self.searched_into(seat, &path)).then_some((seat, path))
+        (self.opened(site, &path) || self.searched_into(seat, &path)).then_some((seat, path))
     }
 
     /// 검색이 **이 자리를** 저절로 열었는가 — [`App::searched_open`] 의 한 자리 판이다. 집합을
@@ -5244,10 +5335,11 @@ impl App {
     /// 자리를 잃는다. 멤버 줄이 아니면 거짓 — 그때는 한 층 나간다.
     fn fold_parent(&mut self, rows: &[Row]) -> bool {
         let Some(up) = self.parent_row(rows) else { return false };
+        let gantt = self.gantt();
         if let Some((seat, path)) = self.dir_of(rows.get(up).cloned())
             && let Some(site) = self.site_mut(seat)
         {
-            site.expanded.remove(&path);
+            site.set_open(gantt, path, false);
         }
         // 부모 줄 위의 줄은 안 바뀐다 — 번호가 그대로 그 줄이다.
         let rows = self.rows();
@@ -5300,7 +5392,12 @@ impl App {
     /// 그 프로젝트의 묶음을 **다 편다**(`Tab`). 아직 줄이 없으면 아무 일도 안 한다 — 읽어 온
     /// 뒤에 [`App::follow_site`] 가 다시 부른다.
     fn open_all(&mut self, seat: Seat) {
+        let gantt = self.gantt();
         let Some(site) = self.site_mut(seat) else { return };
+        if gantt {
+            site.gantt_shut.clear();
+            return;
+        }
         let dirs: Vec<Path> = (0..site.issues.len())
             .filter(|&n| site.index.is_dir(&site.issues, n))
             .map(|n| site.index.dir_path(&site.issues, n))
@@ -5312,11 +5409,17 @@ impl App {
     /// 그대로 서고, 낡았으면 표식과 시계가 다시 읽는다. 굴려 떼어 둔 화면은 [`App::unfold`] 처럼 [`App::key`] 가 걷는다.
     fn fold(&mut self, rows: &[Row]) {
         let Some(at) = self.head_at(rows) else { return };
+        let gantt = self.gantt();
         if let Some(path) = self.place_path(at).map(std::path::Path::to_path_buf) {
             // 밑의 펼침까지 걷는다 — 다 접기(`Tab`)와 같은 자다: 접힌 것을 다시 펼 때 접기 전
             // 모양이 아니라 그 이전 모양이 서면, 같은 자리로 오는 데 두 번을 눌러야 한다.
+            // **간트에서 접으면 간트의 것만 걷는다**(moai-i4hf) — 목록의 펼침은 목록의 것이라, 간트의 머리줄 `Tab` 하나에
+            // 목록으로 돌아온 사람이 펼쳐 두었던 그 프로젝트의 폴더를 잃으면 안 된다.
             if let Some(site) = self.site_mut(Seat::Place(at)) {
-                site.expanded.clear();
+                if !gantt {
+                    site.expanded.clear();
+                }
+                site.gantt_shut.clear();
             }
             self.deep.remove(&path);
             self.folded.insert(path);
@@ -5330,10 +5433,11 @@ impl App {
 
     /// 한 단계 펼친다(`l`·`→`). 이미 펼쳐져 있으면 아무 일도 없다 — 들어가는 것은 `Enter` 다.
     fn expand(&mut self, rows: &[Row]) {
+        let gantt = self.gantt();
         if let Some((seat, path)) = self.dir_seat_at(rows)
             && let Some(site) = self.site_mut(seat)
         {
-            site.expanded.insert(path);
+            site.set_open(gantt, path, true);
         }
     }
 
@@ -5344,8 +5448,9 @@ impl App {
     /// 아무 일도 안 하는 것보다 나쁘다. 그 펼침은 검색을 풀 때 함께 걷힌다.
     fn collapse(&mut self, rows: &[Row]) -> bool {
         let Some((seat, path)) = self.open_seat_at(rows) else { return false };
+        let gantt = self.gantt();
         let Some(site) = self.site_mut(seat) else { return false };
-        site.expanded.remove(&path);
+        site.set_open(gantt, path, false);
         true
     }
 
@@ -5360,7 +5465,24 @@ impl App {
     /// 누름이 하나 생겼다 — 펼치려면 두 번을 눌러야 했고, 그것이 이 함수가 막으려던 바로 그것이다.
     fn expand_all(&mut self, rows: &[Row]) {
         let Some((seat, path)) = self.dir_seat_at(rows) else { return };
-        if self.open_at(rows).is_some() {
+        let (open, gantt) = (self.open_at(rows).is_some(), self.gantt());
+        if gantt {
+            // 간트는 접은 자리를 적는다 — 다 접기는 그 자리와 밑의 묶음 전부를 넣고, 다 펼치기는 그것을 걷는다.
+            let Some(site) = self.site_mut(seat) else { return };
+            let mut under: Vec<Path> = site
+                .index
+                .descendants(&path)
+                .into_iter()
+                .filter(|&at| site.index.is_dir(&site.issues, at))
+                .map(|at| site.index.dir_path(&site.issues, at))
+                .collect();
+            under.push(path);
+            for p in under {
+                site.set_open(true, p, !open);
+            }
+            return;
+        }
+        if open {
             let Some(site) = self.site_mut(seat) else { return };
             let under: Vec<Path> = site.expanded.iter().filter(|p| p.starts_with(&path)).cloned().collect();
             for p in under {
@@ -5397,6 +5519,41 @@ impl App {
         rows.get(self.cursor).cloned()
     }
 
+    /// 키 목록 창을 연다 — 지금 자리의 낱말([`App::key_ctx`])로 짓는다. 켜고 끄는 항목의 낱말이 지금 상태를 따라가므로
+    /// 연 때의 것이다.
+    pub(super) fn open_help(&mut self, rows: &[Row]) {
+        self.chord.clear();
+        self.help = Some(help::Sheet::open(&self.key_ctx(rows)));
+    }
+
+    /// 키 목록 창의 키 하나. **탐색의 표로 읽는다** — 이동키가 굴리고(`gg` 의 기다림도 그대로), 연 키(`?`·`SPC h`)와
+    /// Esc·Bksp·끝내기 키가 닫는다. 그 밖은 아무 일도 없다: 읽기만 하는 창이라 틀린 키 하나에 사라지면 보던 자리를 잃는다.
+    ///
+    /// **SPC 뒤에 SPC 열을 못 잇는 키는 메뉴처럼 받는다**(리뷰, [`menu::feed`]) — 메뉴 창은 이 창 위에 안 서서 SPC 가
+    /// 기다리는 것이 화면에 안 보인다. 그대로 버리면 손이 미끄러져 SPC 를 친 뒤의 `j` 가 말없이 사라진다. SPC 와 메뉴의
+    /// 닫기 키(Esc·Bksp)는 그 기다림만 걷고, 그 밖의 키는 처음부터 다시 읽는다 — 이동키면 굴리고 `?` 면 닫는다.
+    /// `gg` 의 첫 `g` 뒤에 온 뜻 없는 키는 여태처럼 함께 버린다([`keys::Chord`]).
+    pub(super) fn help_key(&mut self, k: KeyEvent) {
+        use keys::Browse as B;
+        let spc = menu::open(&self.chord);
+        let mut act = self.chord.feed(self.keys.browse, k);
+        if spc
+            && act.is_none()
+            && self.chord.held().is_empty()
+            && !keys::LEADER.matches(k)
+            && !matches!(keys::lookup(self.keys.menu, &[k]), Lookup::Run(_))
+        {
+            act = self.chord.feed(self.keys.browse, k);
+        }
+        let Some(sheet) = &mut self.help else { return };
+        // 동작이 나왔으면 열은 이미 비었다([`keys::Chord::feed`]).
+        match act {
+            Some(B::Step(m)) => sheet.step(m),
+            Some(B::Help | B::ClearFilter | B::Leave | B::Quit) => self.help = None,
+            _ => {}
+        }
+    }
+
     pub fn key(&mut self, k: KeyEvent) {
         // 쓰기의 알림은 **다음 키 하나에 걷힌다.** 읽었으면 할 일을 다 했고, 이 키가 또
         // 쓰기라면 그 쓰기가 제 알림을 새로 단다.
@@ -5418,6 +5575,13 @@ impl App {
         // 나갈 길이 없다. 적던 것은 그 길로 날아간다.
         if let Lookup::Run(keys::Anywhere::Quit) = keys::lookup(keys::ANYWHERE, &[k]) {
             self.quit = true;
+            return;
+        }
+        // **키 목록 창이 먼저 받는다**(moai-ucyr) — 덮인 창(통계·위키)이나 목록에 키가 새지 않는다. 읽기만 하는 창이라
+        // 알림은 걷지 않는다: 창을 닫은 뒤에도 연 앞의 알림이 그대로 선다.
+        if self.help.is_some() {
+            self.help_key(k);
+            self.notice = carried;
             return;
         }
         // **통계 창은 SPC 메뉴를 연다**(moai-z46r) — 그래서 탐색의 열을 비우지 않고 넘긴다. 메뉴가 열린 동안 그 열이
@@ -5466,7 +5630,10 @@ impl App {
         // 로 목록에 가는 흐름에서 알림이 메뉴 창이 떠 있는 동안만 산다. SPC 밑에는 이동 항목이
         // 없으므로([`keys::Browse::moves`]) 열린 메뉴에서 이동이 나왔으면 그 키가 메뉴를 닫은 것이다.
         // 이동이 제 알림을 달면(`enabled` 의 까닭) 그것이 덮는다.
-        if in_menu && act.moves() {
+        //
+        // **키 목록 창을 연 키도 도로 세운다**(리뷰, moai-ucyr) — 읽기만 하는 창이라 아무 동작도 안 돈 키다. 걷으면 쓰기의
+        // 알림을 읽다 키를 찾으러 연 창이 그 알림을 지운다. 창 안의 키도 걷지 않는다(위의 가로챔).
+        if (in_menu && act.moves()) || act == keys::Browse::Help {
             self.notice = carried;
         }
         // **되는지는 한 판정이 가른다**([`keys::Browse::enabled`]) — 키 바가 같은 판정으로
@@ -5489,10 +5656,11 @@ impl App {
         }
         match act {
             B::Quit => self.quit = true,
+            B::Help => self.open_help(&rows),
             B::FocusPrev => self.focus = self.focus.prev(),
             B::FocusNext => self.focus = self.focus.next(),
             // **끝에서는 제자리다** — 목록에서 `Ctrl-w h` 를 눌러도 상세로 돌지 않는다.
-            B::Focus(side) => self.focus = self.focus.step(side, self.detail_at),
+            B::Focus(side) => self.focus = self.focus.step(side, self.detail_side()),
             B::Step(m) => self.step(m, &rows),
             // **드나드는 키도 포커스를 탄다**(`enabled`). 상세를 읽다가 누른 Enter·←가 목록을
             // 옮기면 보던 이슈가 바뀌고 굴린 자리도 첫 줄로 돌아간다 — ↑↓ 를 포커스에
@@ -5567,6 +5735,8 @@ impl App {
             // **화면 고르기는 포커스와 상관이 없다**(moai-z46r) — 배치는 목록 칸 하나의 것이 아니고, 통계가 세는 것은
             // 프로젝트라 어느 칸을 보고 있었는지와 상관이 없다(moai-1hka.bq9).
             B::Go(s) => self.go(s, &rows),
+            B::Gantt(p) => self.pan(p, &rows),
+            B::Plan(n) => self.nudge(n, &rows),
             // 거름망이 걸려 있으면 Esc 가 그것을 푼다. 아니면 아무 일도 없다 —
             // Esc 로 화면이 꺼지면 실수 한 번에 하던 것이 날아간다.
             // **검색이 아니어도 커서를 다시 세운다**(리뷰 moai-r1ly.f2x) — `after_search` 는 검색을 풀 때만 세우므로,
@@ -5626,6 +5796,8 @@ impl App {
             }
             // **자리만 돌린다 — 켜지도 끄지도 않는다**(moai-e7r3). 숨긴 상세의 자리를 돌리는 길은
             // 아예 막혀 있다(`Browse::enabled`). 메뉴는 열린 채로 남아 눌러 보며 자리를 맞춘다.
+            // 간트는 제 자리를 돌린다 — 화면에만 사는 값이라 설정에 안 적는다(`App::detail_side`).
+            B::DetailAt if self.gantt() => self.gantt_detail_at = self.gantt_detail_at.next(),
             B::DetailAt => {
                 self.detail_at = self.detail_at.next();
                 self.save_look();
@@ -5699,8 +5871,9 @@ impl App {
             deferred_hidden: self.view.hide_deferred,
             backlog_hidden: self.view.hide_backlog,
             archived_hidden: !self.view.show_archived,
-            detail_at: self.detail_at,
+            detail_at: self.detail_side(),
             board: self.board(),
+            gantt: self.gantt(),
             stats: matches!(self.mode, Mode::Stats(_)),
             wiki: matches!(self.mode, Mode::Wiki(_)),
             head: self.head_at(rows).is_some(),
@@ -5710,10 +5883,11 @@ impl App {
             detail: self.detail_open,
             next_pane: self.focus.next().word(self.site.lang, layout),
             prev_pane: self.focus.prev().word(self.site.lang, layout),
-            left_pane: self.focus.step(keys::Side::Left, self.detail_at).word(self.site.lang, layout),
-            right_pane: self.focus.step(keys::Side::Right, self.detail_at).word(self.site.lang, layout),
-            up_pane: self.focus.step(keys::Side::Up, self.detail_at).word(self.site.lang, layout),
-            down_pane: self.focus.step(keys::Side::Down, self.detail_at).word(self.site.lang, layout),
+            left_pane: self.focus.step(keys::Side::Left, self.detail_side()).word(self.site.lang, layout),
+            right_pane: self.focus.step(keys::Side::Right, self.detail_side()).word(self.site.lang, layout),
+            up_pane: self.focus.step(keys::Side::Up, self.detail_side()).word(self.site.lang, layout),
+            down_pane: self.focus.step(keys::Side::Down, self.detail_side()).word(self.site.lang, layout),
+            keys: self.keys,
         }
     }
 
@@ -6058,11 +6232,11 @@ impl App {
     /// 빼고 보기가 그 줄을 보이는가([`view::View::shows`]).
     fn veiled_row(&self, id: &str, at: usize) -> String {
         let (site, lang) = (&self.site, self.site.lang);
-        let show = keys::label(keys::BROWSE, keys::Browse::ShowAll);
+        let show = keys::said(self.keys.browse, keys::Browse::ShowAll);
         if self.view.show_archived || !site.archived(at) {
             return fill(say(lang, "tui.veiled_row"), &[("id", id), ("show", &show)]);
         }
-        let old = keys::label(keys::BROWSE, keys::Browse::Archived);
+        let old = keys::said(self.keys.browse, keys::Browse::Archived);
         let backlog = crate::report::is_backlog(&site.issues[at]);
         match self.view.shows(site.column(at), site.index.shelved_at(at).is_some(), backlog, &site.cfg.statuses) {
             true => fill(say(lang, "tui.veiled_archived"), &[("id", id), ("old", &old)]),
@@ -6102,7 +6276,7 @@ impl App {
         let open: Vec<String> = [keys::Browse::Grep, keys::Browse::Filter, keys::Browse::Jot]
             .into_iter()
             .filter(|a| a.enabled(&ctx).is_ok())
-            .map(|a| format!("`{}`", keys::label(keys::BROWSE, a)))
+            .map(|a| format!("`{}`", keys::said(self.keys.browse, a)))
             .collect();
         let open = open.join("·");
         match &mut self.mode {
@@ -6179,9 +6353,9 @@ impl App {
     /// Ctrl-C 는 폼보다 먼저 [`App::key`] 가 받는다 — 어느 모드에서든 나가는 길이다. 적던 것은
     /// 그 길로 날아가지만, raw mode 에서 Ctrl-C 를 막으면 멈춘 화면에서 나갈 길이 없어진다.
     fn jot(&mut self, k: KeyEvent) {
-        let lang = self.site.lang;
+        let (lang, confirm) = (self.site.lang, self.keys.confirm);
         let Mode::Backlog(form) = &mut self.mode else { return };
-        match form.key(k, lang) {
+        match form.key(k, confirm, lang) {
             Act::Stay => {}
             Act::Save => save_backlog(self),
             Act::Close => {
@@ -8825,6 +8999,82 @@ mod tests {
         a.cursor = 0; // `..`
         a.key(key(KeyCode::Enter));
         assert!(a.site.path.is_empty());
+    }
+
+    /// **탐색기가 사람의 키 파일이 지은 표로 돈다**(moai-bzm3) — 키 처리·메뉴·이동이 한 표를 읽는다. 한 자리라도 기본
+    /// 표를 바로 읽으면 옛 키가 그대로 듣거나, 메뉴가 안 듣는 키를 댄다.
+    #[test]
+    fn the_explorer_runs_on_the_keys_the_file_built() {
+        let (map, problems) = keymap::build(
+            "[browse]\nquit = \"SPC x\"\nfilter = \"none\"\n[menu]\nclose = \"none\"\n[moves]\nline_down = \"n\"\n",
+        );
+        assert!(problems.is_empty(), "{problems:?}");
+        let mut a = app();
+        a.adopt_keys(map, &problems, None);
+        assert_eq!(a.notice, None, "버린 줄이 없는데 알림이 섰다");
+        // 메뉴의 뿌리가 바뀐 키를 댄다 — `q` 는 없고 `x` 가 끝내기다. 뗀 거름망(`f`)은 안 선다.
+        let rows = a.rows();
+        let ctx = a.key_ctx(&rows);
+        let root: Vec<String> = menu::entries(&[keys::LEADER.event()], &ctx, &[]).into_iter().map(|e| e.key).collect();
+        assert!(root.contains(&"x".to_string()) && !root.contains(&"q".to_string()), "{root:?}");
+        assert!(!root.contains(&"f".to_string()), "뗀 키가 메뉴에 섰다: {root:?}");
+        // 옛 키는 안 듣는다. 메뉴의 Esc 를 뗐어도 연 키(SPC)는 닫는다.
+        a.hit("SPC q");
+        assert!(!a.quit, "옛 SPC q 가 끝냈다");
+        a.hit("Esc");
+        assert!(menu::open(&a.chord), "뗀 Esc 가 메뉴를 닫았다");
+        a.hit("SPC");
+        assert!(!menu::open(&a.chord), "SPC 가 메뉴를 못 닫았다");
+        // **메뉴의 나가는 법을 뗐어도 그림이 선다** — 그 칸이 댈 키가 없을 뿐이다.
+        a.hit("SPC v");
+        let _ = super::draw::tests::render(&mut a, 100, 30);
+        a.hit("SPC");
+        // 이동도 바뀐 표다 — `n` 이 내리고 `j` 는 안 듣는다.
+        let at = a.cursor;
+        a.hit("n");
+        assert_eq!(a.cursor, at + 1, "n 이 안 내렸다");
+        a.hit("j");
+        assert_eq!(a.cursor, at + 1, "옛 j 가 내렸다");
+        a.hit("SPC x");
+        assert!(a.quit, "SPC x 로 못 나갔다");
+    }
+
+    /// **키를 뗀 동작은 키 바에 안 선다**(moai-pxiy) — 이름 없는 칸은 눌러 볼 키가 없는 낱말뿐이다. 뗀 `/` 가 바에서 빠지고,
+    /// 나머지(`SPC 메뉴`)는 그대로 선다.
+    #[test]
+    fn an_unbound_action_leaves_the_key_bar() {
+        let (map, problems) = keymap::build("[browse]\ngrep = \"none\"\n");
+        assert!(problems.is_empty(), "{problems:?}");
+        let mut a = app();
+        a.site.lang = crate::i18n::Lang::En;
+        let before = super::draw::tests::render(&mut a, 120, 20);
+        let bar = before.last().expect("바가 없다").clone();
+        assert!(bar.contains(" / search"), "전제: 기본 바가 `/` 를 댄다 — {bar}");
+        a.adopt_keys(map, &problems, None);
+        let after = super::draw::tests::render(&mut a, 120, 20);
+        let bar = after.last().expect("바가 없다");
+        assert!(!bar.contains("search"), "뗀 키의 칸이 바에 섰다 — {bar}");
+        assert!(bar.contains("SPC"), "바가 통째로 사라졌다 — {bar}");
+    }
+
+    /// **버린 줄은 알림 한 줄로 선다**(moai-bzm3) — 파일과 줄과 동작을 대고, 보기 설정의 탈이 먼저 섰으면 그 뒤에
+    /// 잇는다. 덮으면 하나를 잃는다. 버린 줄의 동작은 기본 키로 남는다.
+    #[test]
+    fn dropped_key_lines_stand_as_one_notice() {
+        let (map, problems) = keymap::build("[browse]\ngrep = \"r\"\n");
+        let mut a = app();
+        a.site.lang = crate::i18n::Lang::Ko;
+        a.notice = Some("보기 설정 — 무엇".into());
+        a.adopt_keys(map, &problems, Some(std::path::Path::new("/k/keys.toml")));
+        assert_eq!(
+            a.notice.as_deref(),
+            Some(
+                "보기 설정 — 무엇 · 키 파일 — /k/keys.toml:2 browse.grep: `r` 가 browse.read 와 겹친다 — 그 줄은 기본 키로 남는다"
+            )
+        );
+        a.notice = None;
+        a.hit("/");
+        assert!(matches!(a.mode, Mode::Grep(..)), "버린 줄의 동작이 기본 키로 안 남았다: {:?}", a.mode);
     }
 
     #[test]

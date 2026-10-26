@@ -138,6 +138,15 @@ test('what `show --json` really sends: children are ids, a due date is due_on, a
   assert.match(F.workOf(row)[0], /^anthropic\/opus-5 tokens=12345 \(medium — wrote the list view\)  Tester · 2026-10-14/)
 })
 
+test('the due field reads the planned span as the TUI and the CLI write it (view::due_of)', () => {
+  const due = (row) => F.fieldsOf(row, null, en).find((f) => f.key === 'due')?.value
+  assert.equal(due({ id: 'a', due_on: '2026-10-28' }), '2026-10-28')
+  assert.equal(due({ id: 'a', starts_on: '2026-10-25', due_on: '2026-10-28' }), '2026-10-25 → 2026-10-28')
+  assert.equal(due({ id: 'a', starts_on: '2026-10-25' }), '2026-10-25 → —')
+  assert.equal(due({ id: 'm', kind: 'milestone', due_on: '2026-10-28' }), '— → 2026-10-28')
+  assert.equal(due({ id: 'a' }), undefined)
+})
+
 test('journal, commits and work lines', () => {
   const row = {
     id: 'a',
@@ -155,6 +164,35 @@ test('journal, commits and work lines', () => {
   assert.match(lines[0].meta, /^dev · 2026-/)
   assert.deepEqual(F.commitsOf(row), [{ hash: '0123456', subject: '' }, { hash: 'abcdef0', subject: 'fix it' }])
   assert.deepEqual(F.workOf(row), ['ran  ai', 'plain'])
+})
+
+// moai-xp7l.vyw: `show <id> --json`'s `wiki` as the CLI's detail draws it. Whether a heading is the title again is
+// moai's call (`title_heading`, review moai-xp7l.mug), and so is the lesson mark — the page re-derives neither.
+test('wiki: lessons, pages naming the id and related sections; a heading that is the title again is left off', () => {
+  const row = {
+    id: 'x',
+    wiki: {
+      lessons: ['lessons/keep-it'],
+      named_in: [{ slug: 'guide', path: 'docs/guide.md', title: 'Guide', via: 'x' }],
+      related: [
+        { slug: 'cli', path: 'docs/cli.md', title: 'The moai CLI', heading: 'The `moai` CLI', anchor: 'the-moai-cli', line: 1, score: 2, title_heading: true },
+        { slug: 'ko', path: 'docs/ko.md', title: 'moai의 위키', heading: '`moai`의 위키', line: 1, score: 2, title_heading: true },
+        { slug: 'lessons/near', path: 'docs/lessons/near.md', title: 'Near', heading: 'Why', line: 5, score: 1, lesson: true },
+        { slug: 'lessons/unmarked', path: 'docs/lessons/unmarked.md', title: 'Unmarked', heading: 'Unmarked', line: 1, score: 1 },
+      ],
+    },
+  }
+  assert.deepEqual(F.wikiOf(row), {
+    lessons: [{ at: 'lessons/keep-it', title: '', lesson: true }],
+    named: [{ at: 'docs/guide.md', title: 'Guide', lesson: false }],
+    related: [
+      { at: 'docs/cli.md:1', title: 'The moai CLI', lesson: false },
+      { at: 'docs/ko.md:1', title: 'moai의 위키', lesson: false },
+      { at: 'docs/lessons/near.md:5', title: 'Near › Why', lesson: true },
+      { at: 'docs/lessons/unmarked.md:1', title: 'Unmarked › Unmarked', lesson: false },
+    ],
+  })
+  assert.deepEqual(F.wikiOf({ id: 'y' }), { lessons: [], named: [], related: [] })
 })
 
 test('problem text uses the shell words', () => {
@@ -246,6 +284,26 @@ test('pane: a group shows head, fields, roll-up, body as text, and close reports
   root.querySelector('button').click()
   assert.deepEqual(calls, ['close'])
   assert.equal(renderBody(doc, 'a<b').textContent, 'a<b')
+})
+
+// review moai-xp7l.mug: a row with a hash is a two-column grid in detail.css (hash, words) — the wiki rows keep to it,
+// with each group's word on a row of its own, so a title never lands in the hash's column.
+test('pane: the wiki rows are a hash and its words, under the word of their group', () => {
+  const { root, view } = mount()
+  const row = {
+    ...ROWS[3],
+    wiki: {
+      lessons: [],
+      named_in: [{ slug: 'guide', path: 'docs/guide.md', title: 'Guide', via: ROWS[3].id }],
+      related: [{ slug: 'lessons/near', path: 'docs/lessons/near.md', title: 'Near', heading: 'Why', line: 5, score: 1, lesson: true }],
+    },
+  }
+  view.render(stateWith({ value: { id: row.id, row } }), index)
+  const items = [...root.querySelectorAll('.moai-detail-wiki > li')]
+  assert.deepEqual(items.map((li) => li.textContent), ['Named in', 'docs/guide.mdGuide', 'Related', 'docs/lessons/near.md:5Near › Why lesson'])
+  for (const li of items.filter((li) => li.querySelector('.moai-detail-hash'))) {
+    assert.equal(li.children.length, 2, `a wiki row has ${li.children.length} children: ${li.innerHTML}`)
+  }
 })
 
 test('pane: an unrelated store change leaves the pane alone (its text selection and focus survive)', () => {

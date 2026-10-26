@@ -1,0 +1,83 @@
+# 소개 홈페이지(site/)를 GitHub Pages 에 낸다 — buzzni.github.io/moai.
+#
+# **Pages 의 "Deploy from branch" 와 /docs 방식을 안 쓴다.** docs/ 는 위키 자리라
+# 거기를 Pages 에 내주면 두 쓰임이 한 폴더를 다툰다. 그래서 source 는 "GitHub
+# Actions" 이고 이 workflow 가 site/ 만 올린다.
+#
+# **develop 에서 낸다.** github-pages environment 의 배포 가지 규칙이 기본 가지만
+# 받고, 이 저장소의 기본 가지가 develop 이다. 사이트는 판에 묶인 문서가 아니라
+# 소개 글이고, 설치 한 줄은 늘 최신 릴리스를 받으니 develop 이 앞서도 어긋나지 않는다.
+#
+# **문서·변경 기록 페이지(site/docs/, site/changelog/)는 여기서 짓는다 — 가장 새 릴리스 태그의 docs/ 와
+# CHANGELOG.md 에서**(2026-10-26 사람 결정, moai-s7f7). develop 의 docs/ 는 아직 안 나간 기능을 적고, 매뉴얼은
+# install.sh 가 까는 바이너리와 맞아야 한다. 지은 것은 커밋하지 않는다(.gitignore) — 둘 다 에픽마다 바뀌어, 커밋하면 에픽마다 사이트를 다시
+# 짓거나 CI 가 붉어진다. 그래서 릴리스가 나가면 다시 지어야 하고, 그것을 workflow_run 이 한다: release 가
+# 끝난 뒤 기본 가지(develop)의 문맥으로 돌아, 위의 배포 가지 규칙에도 걸리지 않는다. 태그 push 로 직접
+# 돌리면 그 규칙이 막는다.
+#
+# **"가장 새 릴리스" 는 GitHub 가 latest 로 단 릴리스다 — install.sh 가 묻는 releases/latest 와 같은 답.**
+# 태그를 판 순서로 고르면 guard 에서 멈춰 릴리스가 안 나간 태그가 다음 배포에 문서로 선다. release 의 결론도
+# 안 본다: 릴리스가 나간 뒤 discord 잡만 붉어도 그 run 은 failure 라, 결론으로 거르면 나간 판의 문서가 안
+# 선다. 릴리스가 안 나갔으면 latest 가 그대로라 같은 문서를 다시 낼 뿐이다.
+name: pages
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - "site/**"
+      - "scripts/site/**"
+      - ".github/workflows/pages.yml"
+  workflow_run:
+    workflows: [release]
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# 배포는 하나씩. 도는 배포를 끊으면 반쯤 올라간 판이 남으니 끊지 않는다.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: site/ 를 Pages 에 낸다
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # git archive 가 그 릴리스의 태그를 읽는다
+      - name: 가장 새 릴리스의 docs/ 와 CHANGELOG.md 로 문서·변경 기록 페이지를 짓는다
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          # 미리 판(-rc.1)과 초안은 latest 가 될 수 없다 — install.sh 가 받는 것은 정식 판이다. API 를 못 읽으면
+          # 여기서 멈춘다: 문서 없이 내면 앞 배포의 문서까지 사이트에서 사라진다
+          tag=$(gh release list --exclude-drafts --exclude-pre-releases --json tagName,isLatest \
+            --jq '.[] | select(.isLatest) | .tagName')
+          if [ -z "$tag" ]; then
+            echo '::warning::낸 릴리스가 없어 문서·변경 기록 페이지 없이 낸다'
+            python3 -I -B scripts/site/gen.py
+            exit 0
+          fi
+          release="$RUNNER_TEMP/release"
+          mkdir -p "$release"
+          git archive "$tag" docs CHANGELOG.md | tar -x -C "$release"
+          python3 -I -B scripts/site/gen.py --docs "$release/docs" --changelog "$release/CHANGELOG.md" --ref "$tag"
+          printf '문서·변경 기록 페이지: %s\n' "$tag" >>"$GITHUB_STEP_SUMMARY"
+      - uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: site
+      - id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1

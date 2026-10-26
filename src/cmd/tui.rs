@@ -25,7 +25,10 @@ pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
         return Err(Fail::coded(
             format!(
                 "{}\n      {}",
-                crate::i18n::fill(crate::i18n::say(ctx.lang(), "refuse.tui_shape_on_screen"), &[("flag", flag)]),
+                crate::i18n::fill(
+                    crate::i18n::say(ctx.lang(), "refuse.tui_shape_on_screen"),
+                    &[("flag", flag), ("filter", &screen_key(crate::tui::keys::Browse::Filter))]
+                ),
                 crate::i18n::fill(crate::i18n::say(ctx.lang(), "refuse.tui_shape_on_screen_how"), &[("flag", flag)]),
             ),
             super::code::BAD_FILTER,
@@ -78,9 +81,23 @@ pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
         // 그 이슈가 없다고 읽는다. 다른 읽기 명령과 같은 길로 간다.
         super::report_load_errors(ctx.lang(), &repo.issues_path(), &load.errors);
         let states = ground.columns();
+        let deep = args.deep;
         let entries = listing(ctx, &repo, &load.issues, &origin, &live, (&index, &ground), &path, args)?;
-        let rows: Vec<Row> =
-            entries.into_iter().map(|(e, home)| Row::of(&index, &load.issues, &states, &e, home, ctx.lang())).collect();
+        // **간트는 `--deep` 에만 싣는다**(moai-d86e.b2m) — 그것을 읽는 자는 web 의 간트 탭(`/api/tree`)이고, 한 자리의
+        // 목록을 묻는 쪽에 저장소 전부의 구간 셈을 물리지 않는다. 판단은 `report::gantt` 가 하고 여기는 줄에 얹기만 한다.
+        // 거르개 문맥도 `--deep` 에만 짓는다 — 한 자리 목록은 그것을 읽는 자가 없다.
+        let wh = deep.then(|| ground.here(&load.issues));
+        let gantt = wh.as_ref().map(|wh| {
+            crate::report::gantt::gantt(&load.issues, &index, wh, &repo.config, &crate::model::now(), ctx.zone())
+        });
+        let rows: Vec<Row> = entries
+            .into_iter()
+            .map(|(e, home)| {
+                let mut row = Row::of(&index, &load.issues, &states, &e, home, ctx.lang());
+                row.gantt = gantt.as_ref().zip(e.at()).map(|(g, at)| &g.rows[at]);
+                row
+            })
+            .collect();
         return super::json_line(&rows);
     }
 
@@ -137,11 +154,29 @@ pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
     let mut app = app.attach_layer(layer);
     app.launched_at = std::env::current_dir().ok();
     app.editor = editor();
+    // **키 파일의 알림은 띄우는 걸음의 맨 끝에 잇는다**(리뷰 moai-pxiy.bfb 8번) — 알림을 세우는 걸음(보기·읽음·층)이
+    // 앞에 서면 그것이 덮어 키의 한 줄이 첫 화면 앞에서 사라진다. [`crate::tui::App::adopt_keys`] 는 덮지 않고 잇는다.
+    adopt_keys(&mut app);
     let config = app.user_config.clone();
     // 설정이 무엇이라 했는지는 **위에서 한 번 읽은 것**을 그대로 든다(moai-d74q). `reg.read` 가
     // 옮겨 간 뒤에도 이 필드는 그대로 읽힌다 — 옮긴 것은 그 필드 하나다.
     ask_latest(ctx, &mut app, config.as_deref(), reg.update_check, reg.update_repo.as_deref(), repo_ok);
     screen(app)
+}
+
+/// 화면의 키 이름 하나 — 화면을 켜기 **전에** 그 키를 대는 거절문이 쓴다(moai-aqmg). 탐색기를 부른 판이라 사람의 키 파일을
+/// 읽는다: 화면에서 누를 키와 거절문이 대는 키가 같아야 한다.
+fn screen_key(act: crate::tui::keys::Browse) -> String {
+    let (_, keys, _) = crate::tui::keymap::load_from(|k| std::env::var_os(k));
+    crate::tui::keys::said(keys.browse, act)
+}
+
+/// 사람의 키 파일을 읽어 입힌다(moai-bzm3) — 안에서 띄운 길과 밖에서 띄운 길이 같은 자를 지난다. **알림을 세우는 걸음
+/// 모두의 뒤에 부른다**: 키 쪽은 앞의 알림 뒤에 잇고([`crate::tui::App::adopt_keys`]), 앞의 걸음은 덮는다. 보통 명령은
+/// 이 파일을 안 연다.
+fn adopt_keys(app: &mut App) {
+    let (file, keys, problems) = crate::tui::keymap::load_from(|k| std::env::var_os(k));
+    app.adopt_keys(keys, &problems, file.as_deref());
 }
 
 /// 새 판을 묻는 실을 띄운다 — **문을 지날 때만**(moai-3gia, 사용자 결정 2026-09-21).
@@ -284,6 +319,8 @@ fn outside(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
     app.load_read();
     app.launched_at = std::env::current_dir().ok();
     app.editor = editor();
+    // 키 파일의 알림은 맨 끝에 잇는다 — 안에서 띄운 길과 같은 까닭이다.
+    adopt_keys(&mut app);
     let config = app.user_config.clone();
     ask_latest(ctx, &mut app, config.as_deref(), reg.update_check, reg.update_repo.as_deref(), repo_ok);
     screen(app)
@@ -576,7 +613,7 @@ fn handle(seg: &Seg) -> String {
 
 /// `--json` 한 줄의 원소. 파일의 키 순서와 같은 뜻으로 앞에서부터 읽힌다.
 #[derive(serde::Serialize)]
-struct Row {
+struct Row<'g> {
     #[serde(skip_serializing_if = "Option::is_none")]
     id: Option<String>,
     title: String,
@@ -605,6 +642,10 @@ struct Row {
     /// 절대 자리라 `--path` 를 줘도 뿌리에서부터다 — 보는 쪽이 자리 규칙을 다시 짓지 않게 하는 값이다.
     #[serde(skip_serializing_if = "Option::is_none")]
     home: Option<Vec<String>>,
+    /// `--deep` 일 때 id 가 있는 줄마다 서는 계획·실제 구간 — [`crate::report::gantt::Row`] 의 꼴 그대로다(moai-d86e.b2m).
+    /// 바구니에는 없다. 그 안의 키는 늘 선다 — 값이 없으면 `null` 이다(`planned`·`overdue`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    gantt: Option<&'g crate::report::gantt::Row<'g>>,
 }
 
 #[derive(serde::Serialize)]
@@ -613,7 +654,7 @@ struct Tally {
     total: usize,
 }
 
-impl Row {
+impl<'g> Row<'g> {
     fn of(
         index: &Index,
         issues: &[Issue],
@@ -621,7 +662,7 @@ impl Row {
         e: &Entry,
         home: Option<Vec<String>>,
         lang: crate::i18n::Lang,
-    ) -> Row {
+    ) -> Row<'g> {
         let dir = matches!(e, Entry::Dir { .. });
         let title = index.label(issues, e, lang);
         match e.at() {
@@ -642,6 +683,7 @@ impl Row {
                     Tally { done, total }
                 }),
                 home,
+                gantt: None,
             },
             None => Row {
                 id: None,
@@ -659,6 +701,7 @@ impl Row {
                 priority: None,
                 progress: None,
                 home,
+                gantt: None,
             },
         }
     }
@@ -1464,7 +1507,10 @@ fn keep_unsaved(app: &App) {
                 crate::i18n::say(app.site.lang, "tui.unsaved_kept"),
                 &[("at", &path.display().to_string())]
             ),
-            crate::i18n::say(app.site.lang, "tui.unsaved_kept_how")
+            crate::i18n::fill(
+                crate::i18n::say(app.site.lang, "tui.unsaved_kept_how"),
+                &[("jot", &crate::tui::keys::said(app.keys.browse, crate::tui::keys::Browse::Jot))]
+            )
         ),
         Err(e) => eprintln!(
             "moai: {}\n{title}\n\n{}",

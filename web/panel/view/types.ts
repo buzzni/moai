@@ -20,6 +20,7 @@
  *   on (the wiki's Esc with nothing left to clear moves the focus to the tab bar).
  */
 import type { IssueIndex, Path } from '../data/index.js'
+import type { PlanChange } from '../data/plan.js'
 import type { Copy } from '../i18n/index.js'
 import type { Action, DetailPosition, Focus, State } from '../store.js'
 
@@ -58,12 +59,14 @@ export interface PaneLayout {
 }
 
 /**
- * Where the wiki tab reads from: `moai wiki ls --json` and `moai wiki show <slug> --json`, parsed or not
+ * Where the wiki tab reads from: `moai wiki ls --json`, `moai wiki show <slug> --json` and `moai wiki search --json`, parsed or not
  * (view/wiki.ts parseWikiLs / parseWikiShow read either). Without one the wiki tab says it cannot read the wiki.
  */
 export interface WikiSource {
   list(): Promise<unknown>
   page(slug: string): Promise<unknown>
+  /** `moai wiki search <query> --json` — the list's order while a query is typed (moai-xp7l.nyi). */
+  search?(query: string): Promise<unknown>
 }
 
 export interface ViewContext {
@@ -77,6 +80,13 @@ export interface ViewContext {
   focusPane(area: Focus): void
   /** The wiki's reads; absent until the data layer gives them (main.ts). */
   wiki?: WikiSource
+  /** One line under the banners (the shell's result line): what a gantt move did, or why it did nothing. */
+  say?(text: string, problem?: boolean): void
+  /**
+   * Write a row's planned days (data/plan.ts, moai-d86e.3ud) and say how it went; `undo` is the `moai edit` line that
+   * puts them back. Absent where nothing writes (the tests' shell): the gantt then moves no bar.
+   */
+  movePlan?(id: string, change: PlanChange, undo: string): Promise<void>
 }
 
 export interface PaneView {
@@ -112,4 +122,6 @@ export interface Panes {
   board: MountPane
   detail: MountPane
   wiki?: MountPane
+  /** The gantt tab (view/gantt.ts); like the list and board it fills the main pane, with the detail beside it. */
+  gantt?: MountPane
 }

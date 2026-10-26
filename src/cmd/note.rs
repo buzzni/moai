@@ -47,24 +47,8 @@ pub fn run(ctx: &Ctx, args: NoteArgs) -> R<Vec<String>> {
     if text.is_empty() {
         return Err(empty(ctx.lang()));
     }
-    let at = model::now();
     let by = model::actor(ctx.user.as_deref(), &repo.root).map_err(|e| Fail::no_actor(&e, ctx.lang()))?;
-    let entry = JournalEntry::note(&args.id, &text, &at, &by);
-
-    // **말은 락 밖에서 한 번 푼다**(리뷰 moai-t6z9.bd6 11번, `edit` 이 이미 그 꼴이다).
-    // 닫힘 안에서 `ctx.lang()` 을 처음 부르면 그 첫 부름이 사용자 설정을 여는데, 그 자리는
-    // `.moai/lock` 을 쥔 채다 — `with_write` 가 `lang` 을 **묻는 길**로 받는 까닭이 그것이라
-    // 닫힘 쪽만 그대로 두면 그 약속이 반쪽이 된다. 값은 `OnceLock` 하나라 뒤의 부름은 공짜다.
-    let lang = ctx.lang();
-    repo.with_write(
-        || lang,
-        |issues, _, _| {
-            if !issues.iter().any(|i| i.id == args.id) {
-                return Err(Fail::not_found(&args.id, lang));
-            }
-            Ok((vec![entry.clone()], ()))
-        },
-    )?;
+    let entry = append(&repo, ctx.lang(), &args.id, &text, &by)?;
 
     // 저널에 적은 **그 줄을 그대로** 낸다. `serde_json::json!` 은 `Value` 를
     // 거치고 `Value` 의 맵은 알파벳 순이라, 파일과 `--json` 이 서로 다른
@@ -81,6 +65,51 @@ pub fn run(ctx: &Ctx, args: NoteArgs) -> R<Vec<String>> {
             _ => format!("{}  {}", " ".repeat(args.id.chars().count()), paint(style::DIM, l)),
         })
         .collect())
+}
+
+/// 줄 `id` 에 노트 한 줄을 단다 — 저널에 적은 그 줄을 낸다. `moai note` 와 `moai wiki learn` 의 `Lesson:` 노트가
+/// 이 하나로 쓴다(moai-4s5n.n7j): 노트를 다는 길이 둘이면 한쪽만 고쳐지는 날 두 노트가 다른 꼴로 선다.
+///
+/// 글은 부르는 쪽이 이미 다듬은 것이다. 없는 줄이면 `not_found` 로 거절하고 아무것도 안 쓴다.
+///
+/// **아카이브로 옮긴 줄에도 단다**(moai-xp7l.82p) — 노트는 저널에만 서고 스냅샷의 줄을 안 고치니, 줄을 산 파일로
+/// 되돌릴 까닭이 없다. `moai show <id>` 가 아카이브된 줄을 열고 그 저널을 읽는다. 거절하던 판은 오래전 교훈에
+/// 되풀이(`Lesson:`)를 못 달았다 — 교훈의 `Learned in:` 이슈는 닫힌 지 오래면 아카이브에 있다. 묻는 자는 쓰기가 건네는
+/// [`crate::store::Reserved`] 다(리뷰 moai-xp7l.mug) — 이 바이너리가 못 읽는 산 줄과 아카이브의 id 이고, 아카이브는 산
+/// 파일에 없을 때만 한 번 훑는다(줄을 풀지 않고 id 만 본다). `wiki ls` 가 "있는 id" 로 세는 자와 같다.
+pub(crate) fn append(
+    repo: &crate::store::Repo,
+    lang: crate::i18n::Lang,
+    id: &str,
+    text: &str,
+    by: &model::Actor,
+) -> R<JournalEntry> {
+    let entry = JournalEntry::note(id, text, &model::now(), by);
+    // **말은 락 밖에서 한 번 푼다**(리뷰 moai-t6z9.bd6 11번, `edit` 이 이미 그 꼴이다).
+    // 닫힘 안에서 `ctx.lang()` 을 처음 부르면 그 첫 부름이 사용자 설정을 여는데, 그 자리는
+    // `.moai/lock` 을 쥔 채다 — `with_write` 가 `lang` 을 **묻는 길**로 받는 까닭이 그것이라
+    // 닫힘 쪽만 그대로 두면 그 약속이 반쪽이 된다. 그래서 `lang` 은 이미 푼 값으로 받는다.
+    // **노트가 저널에 못 들었으면 실패다**(moai-xp7l.c4h) — `with_write` 는 스냅샷을 썼으면 저널 실패를 성공으로 낸다
+    // (다시 부르면 `add` 가 둘 선다, moai-52z9). 노트는 스냅샷을 안 고치지만, 손으로 고친 파일이면 같은 쓰기가 표준형으로
+    // 다시 써 "썼다" 가 되고, 노트를 잃은 채 성공으로 끝났다 — `wiki learn` 은 `noted: true` 를 냈다. 노트는 저널이
+    // 전부라 다시 부르는 것이 맞다. 잃은 것은 [`crate::store::journal_misses`] 에 이 뿌리로 쌓인다 — **이 쓰기 뒤에 이
+    // 저장소에 새로 선 것만** 이 쓰기의 것이다(탐색기의 쓰기와 같은 자, `tui::App` 의 `missed_before`). 그 통은 비우지 않는다.
+    let missed = crate::store::journal_misses().len();
+    repo.with_write(
+        || lang,
+        |issues, _, reserved| {
+            if !issues.iter().any(|i| i.id == id) && !reserved.contains(id) {
+                return Err(Fail::not_found(id, lang));
+            }
+            Ok((vec![entry.clone()], ()))
+        },
+    )?;
+    if let Some((_, said)) =
+        crate::store::journal_misses().into_iter().skip(missed).find(|(root, _)| *root == repo.root)
+    {
+        return Err(Fail::coded(said, super::code::ERROR));
+    }
+    Ok(entry)
 }
 
 /// 빈 메모는 이력을 더럽히기만 한다. `defer` 의 빈 까닭을 안 적기로 한 것과

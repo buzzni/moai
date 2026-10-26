@@ -70,7 +70,7 @@ under `~/.claude/sessions/`, and the lines below print one row per record, tab-s
 
 ```sh
 python3 - <<'PY'
-import glob, json, os, subprocess, sys
+import glob, json, os, re, subprocess, sys
 def out(*cmd, **env):
     try:
         return subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, universal_newlines=True, env=dict(os.environ, **env), timeout=10).stdout.strip()
@@ -129,8 +129,9 @@ for path in sorted(glob.glob(os.path.expanduser("~/.claude/sessions/*.json"))):
         continue
     start = started(pid)
     alive = bool(start) and start == " ".join(str(r.get("procStart")).split())
-    tmux = r.get("tmux") or ""
-    pane = tmux.rpartition(".")[2] if "%" in tmux else ""
+    told = r.get("tmux") or ""
+    tmux = told if re.search(r":@\d{1,6}\.%\d{1,6}$", told) else ""
+    pane = tmux.rpartition(".")[2] if tmux else ""
     if r.get("entrypoint") == "remote_mobile":
         pane = ""
     elif alive and (mine or cmux) and r.get("kind") not in (None, "interactive"):
@@ -140,7 +141,7 @@ for path in sorted(glob.glob(os.path.expanduser("~/.claude/sessions/*.json"))):
         if not here or here != device(out("tmux", "display", "-p", "-t", pane, "#{pane_tty}")):
             pane = ""
     elif alive and cmux:
-        pane = "" if tmux else surfaces.get(pid)
+        pane = "" if told and not told.startswith("cmux:") else surfaces.get(pid)
     rows.append((alive, pane, r))
 if rows and not any(alive for alive, _, _ in rows):
     sys.exit("no record reads alive, not even this session's own: this shell cannot read process start times (a sandbox, or no ps), so act on no row")
@@ -161,8 +162,8 @@ PY
   in a cmux tab of yours — another terminal, or tmux, tmux inside a cmux tab included — when it
   shares its tab with another live session, or when cmux gave no answer (a line on its own says
   so), and then this skill has nothing for that worker. A session started with cmux's
-  `claude-teams` can read `-` too: its record may carry the tmux that launcher's stand-in
-  answered, and a record with tmux in it is not matched to a surface
+  `claude-teams` is matched like any other: the tmux its record carries is the stand-in's
+  answer, not a tmux pane, so the map leaves it out
 - **No row at all, and a line saying no record reads alive:** this shell cannot tell live from
   dead — act on no row, and tell the person what it said
 - **A row whose `saycode` is not `-` is a Saycode session** — one Saycode started, so its pane
@@ -171,8 +172,7 @@ PY
   names — wherever they stand. A row standing elsewhere is not a worker of this repository, whatever its name
 - `status` is `idle`, `busy` or another word. It has to agree with `ListAgents` where a step
   below asks for `idle`
-- Your own row is the one whose pane is `$CMUX_SURFACE_ID` — when you were started with cmux's
-  `claude-teams` it may read `-` instead (above)
+- Your own row is the one whose pane is `$CMUX_SURFACE_ID`
 
 Run it when a step below needs a surface, and once more just before you type into one — a
 reading from earlier in the round may be a worker that has died since (the next section).
@@ -299,7 +299,7 @@ When the supervisor's 2 finds no worker, ask the person **once** whether to open
 tabs, and how many — one question covers several. Open one only on their yes, or when they
 asked you for it. On a yes, for each:
 
-    cmux --id-format both new-split right --surface "$CMUX_SURFACE_ID" --command 'cd <root> && claude --model <model>'
+    cmux --id-format both new-split right --surface "$CMUX_SURFACE_ID" --command 'cd "<root>" && claude --model <model>'
 
 `<root>` is the `root dir` of the supervisor's 2 and `<model>` the model picked in 2-1. **No
 other flag** on `claude`. It prints `OK surface:<n> (<UUID>) workspace:<n> (<UUID>)` — the first
@@ -345,7 +345,7 @@ It waits for the supervisor's review and the second assignment; it does not revi
 When `Review-ready:` arrives, read its whole note. Pick the review issue up
 (`moai -C <root> mv <review id> in_progress`) and run a review subagent in the reported
 worktree with its configured `review` model and "The review brief" in
-`references/worker.md`; refer to that brief, do not copy it here. Once the review has ended and its words are on the review issue, send
+`references/worker-branches.md`; refer to that brief, do not copy it here. Once the review has ended and its words are on the review issue, send
 "merge and close — review <id> done" with the same file-paste path and fresh input checks.
 Leave the review issue open: Codex takes the fixes in and closes it (worker.md 7 and 10).
 Do not clear the conversation between these two assignments. Watch for the final report,
@@ -431,7 +431,7 @@ Re-run this check just before each input; never trust a tab title or an earlier 
 
 Ask once before opening new tabs, as above. On a yes, open an ordinary interactive Codex:
 
-    cmux --id-format both new-split right --surface "$CMUX_SURFACE_ID" --command 'cd <root> && codex --model <codex>'
+    cmux --id-format both new-split right --surface "$CMUX_SURFACE_ID" --command 'cd "<root>" && codex --model <codex>'
 
 Keep the returned surface UUID. The same split refusal rule applies: stop opening and tell
 the person. Read its startup screen in a separate call; folder trust, hooks trust and any

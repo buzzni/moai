@@ -1,0 +1,18 @@
+[package]
+name = "moai-gantt"
+version = "0.1.0"
+edition = "2024"
+description = "ratatui 용 간트 차트 위젯. 시각은 지역 기준 초, 날짜는 날 번호로 받는다."
+license = "MIT"
+repository = "https://github.com/buzzni/moai"
+# 루트 `moai` 와 같은 바닥이다 — 이름은 가칭이고 crates.io 에 낼지는 사람이 나중에 정한다.
+rust-version = "1.88"
+publish = false
+
+[dependencies]
+# 루트와 같은 판·같은 기본 기능 꺼짐이라 의존 그래프에 크레이트가 하나도 안 는다. crossterm 은
+# 끌지 않는다 — 마우스 사건은 크레이트 제 꼴로 받는다.
+ratatui = { version = "0.30", default-features = false }
+
+[lints]
+workspace = true

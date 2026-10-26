@@ -1,0 +1,388 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>moai の使い方</title>
+  <meta name="description" content="moai のインストールから始め方、tui と web、開発の指示、監督とワーカー、複数ベンダーのエージェントを一緒に使う方法まで。">
+  <link rel="canonical" href="https://moai.buzzni.com/ja/guide/">
+  <!-- 링크 미리보기: og:image 가 없으면 미리보기 쪽이 페이지의 첫 그림(로고 띠)을 고른다. SVG 를 못 읽는 곳이 많아 PNG 다 -->
+  <meta property="og:type" content="article">
+  <meta property="og:site_name" content="moai">
+  <meta property="og:title" content="moai の使い方">
+  <meta property="og:description" content="moai のインストールから始め方、tui と web、開発の指示、監督とワーカー、複数ベンダーのエージェントを一緒に使う方法まで。">
+  <meta property="og:url" content="https://moai.buzzni.com/ja/guide/">
+  <meta property="og:locale" content="ja_JP">
+  <meta property="og:image" content="https://moai.buzzni.com/assets/og.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="moai — Issue tracker for AI agents">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="moai の使い方">
+  <meta name="twitter:description" content="moai のインストールから始め方、tui と web、開発の指示、監督とワーカー、複数ベンダーのエージェントを一緒に使う方法まで。">
+  <meta name="twitter:image" content="https://moai.buzzni.com/assets/og.png">
+  <link rel="alternate" hreflang="en" href="https://moai.buzzni.com/guide/">
+  <link rel="alternate" hreflang="ko" href="https://moai.buzzni.com/ko/guide/">
+  <link rel="alternate" hreflang="ja" href="https://moai.buzzni.com/ja/guide/">
+  <link rel="alternate" hreflang="x-default" href="https://moai.buzzni.com/guide/">
+  <link rel="icon" href="../../assets/mark.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="../../assets/vendor/asciinema-player.css">
+  <link rel="stylesheet" href="../../assets/site.css">
+</head>
+<body>
+
+<nav>
+  <div class="wrap">
+    <a class="brand" href="../" aria-label="moai"><img src="../../assets/logo.svg" alt="moai"></a>
+    <div class="links">
+      <a href="../#see">画面を見る</a>
+      <a href="./" aria-current="page">使い方</a>
+      <a href="../../docs/" hreflang="en">ドキュメント</a>
+      <a href="../../changelog/" hreflang="en">変更履歴</a>
+    </div>
+    <div class="right">
+      <div class="lang" role="navigation" aria-label="Language">
+        <a href="../../guide/" hreflang="en" lang="en" data-lang="en">English</a><span aria-hidden="true">|</span><a href="../../ko/guide/" hreflang="ko" lang="ko" data-lang="ko">한국어</a><span aria-hidden="true">|</span><a href="./" hreflang="ja" lang="ja" data-lang="ja" aria-current="page">日本語</a>
+      </div>
+      <a class="gh" href="https://discord.gg/hCfQ76uX3t" aria-label="Discord">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M20.317 4.3698a19.7913 19.7913 0 00-4.8851-1.5152.0741.0741 0 00-.0785.0371c-.211.3753-.4447.8648-.6083 1.2495-1.8447-.2762-3.68-.2762-5.4868 0-.1636-.3933-.4058-.8742-.6177-1.2495a.077.077 0 00-.0785-.037 19.7363 19.7363 0 00-4.8852 1.515.0699.0699 0 00-.0321.0277C.5334 9.0458-.319 13.5799.0992 18.0578a.0824.0824 0 00.0312.0561c2.0528 1.5076 4.0413 2.4228 5.9929 3.0294a.0777.0777 0 00.0842-.0276c.4616-.6304.8731-1.2952 1.226-1.9942a.076.076 0 00-.0416-.1057c-.6528-.2476-1.2743-.5495-1.8722-.8923a.077.077 0 01-.0076-.1277c.1258-.0943.2517-.1923.3718-.2914a.0743.0743 0 01.0776-.0105c3.9278 1.7933 8.18 1.7933 12.0614 0a.0739.0739 0 01.0785.0095c.1202.099.246.1981.3728.2924a.077.077 0 01-.0066.1276 12.2986 12.2986 0 01-1.873.8914.0766.0766 0 00-.0407.1067c.3604.698.7719 1.3628 1.225 1.9932a.076.076 0 00.0842.0286c1.961-.6067 3.9495-1.5219 6.0023-3.0294a.077.077 0 00.0313-.0552c.5004-5.177-.8382-9.6739-3.5485-13.6604a.061.061 0 00-.0312-.0286zM8.02 15.3312c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9555-2.4189 2.157-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.9555 2.4189-2.1569 2.4189zm7.9748 0c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9554-2.4189 2.1569-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.946 2.4189-2.1568 2.4189Z"/></svg>
+        <span>Discord</span>
+      </a>
+      <a class="gh" href="https://github.com/buzzni/moai" aria-label="GitHub">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+        <span>buzzni/moai</span>
+      </a>
+    </div>
+  </div>
+</nav>
+
+<div class="wrap doc">
+  <aside class="doc-toc" aria-label="目次">
+    <ol>
+      <li><a href="#install">インストール</a></li>
+      <li><a href="#start">はじめに</a></li>
+      <li><a href="#screens">tui と web</a>
+        <ol>
+          <li><a href="#list">一覧</a></li>
+          <li><a href="#board">カンバン</a></li>
+          <li><a href="#gantt">ガント</a></li>
+          <li><a href="#stats">統計</a></li>
+          <li><a href="#wiki">Wiki</a></li>
+        </ol>
+      </li>
+      <li><a href="#develop">moai で始める開発の指示</a></li>
+      <li><a href="#examples">使用例</a></li>
+      <li><a href="#env">対応する作業環境</a>
+        <ol>
+          <li><a href="#hooks">フックについて</a></li>
+          <li><a href="#supervise">監督とワーカー</a></li>
+          <li><a href="#vendors">複数ベンダーのエージェント</a></li>
+        </ol>
+      </li>
+    </ol>
+  </aside>
+
+  <main class="doc-body">
+    <h1>moai の使い方</h1>
+
+    <h2 id="install">インストール</h2>
+    <p>インストールスクリプトはリリースファイルと <code>SHA256SUMS</code> を一緒にダウンロードし、チェックサムが合わなければインストールしません。この検査を無効にするオプションはありません。</p>
+
+    <h3 id="install-unix">macOS · Linux</h3>
+    <pre><code>curl -fsSL https://raw.githubusercontent.com/buzzni/moai/main/install.sh | sh</code></pre>
+    <ul>
+      <li>インストール先は <code>~/.local/bin</code> です。このディレクトリが <code>PATH</code> に含まれていれば <code>moai</code> で呼び出せます。</li>
+      <li>別の場所や特定のバージョンでインストールするには、<code>-s --</code> の後にオプションを付けます。
+        <pre><code>curl -fsSL https://raw.githubusercontent.com/buzzni/moai/main/install.sh \
+  | sh -s -- --dir ~/bin --version v0.1.0</code></pre>
+      </li>
+    </ul>
+
+    <h3 id="install-windows">Windows</h3>
+    <p>PowerShell でスクリプトをダウンロードし、ファイルとして実行します。</p>
+    <pre><code>Invoke-WebRequest -UseBasicParsing -OutFile install.ps1 https://raw.githubusercontent.com/buzzni/moai/main/install.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File install.ps1</code></pre>
+    <ul>
+      <li>インストール先は <code>%LOCALAPPDATA%\Programs\moai</code> です。<code>-Dir</code> で場所を、<code>-Version</code> でバージョンを選べます。</li>
+      <li>インストールスクリプトは <code>PATH</code> を変更しません。インストール先が <code>PATH</code> にない場合は一行で知らせます。</li>
+      <li><code>irm … | iex</code> のようにパイプで実行する方法には対応していません。スクリプトの終了とともに PowerShell のウィンドウも閉じてしまうためです。</li>
+      <li>Visual C++ 再頒布可能パッケージのないクリーンな PC でもそのまま動きます。</li>
+    </ul>
+
+    <h3 id="update">アップデート</h3>
+    <pre><code>moai update</code></pre>
+    <p>実行中の moai を最新リリースに置き換えます。新しいバージョンが出ると <code>moai tui</code> の画面上部にも表示されます。最初にインストールしたときのコマンドをもう一度実行してもアップデートできます。</p>
+
+    <h3 id="platforms">対応プラットフォーム</h3>
+    <p>ビルド済みバイナリは Linux（x86_64）、macOS（Apple Silicon）、Windows（x86_64・ARM64）向けがあります。それ以外の環境ではソースから <code>cargo build --release</code> でビルドします。</p>
+
+    <h2 id="start">はじめに</h2>
+    <p>moai で管理するプロジェクトのルートで一度実行します。</p>
+    <pre><code>cd &lt;プロジェクト&gt;
+moai init</code></pre>
+    <p>ターミナルで実行すると、まず設定画面が表示されます。各項目にはデフォルト値が選ばれています。Enter を押すと選んだ設定で初期化し、Esc を押すと何も変更せずに終了します。</p>
+    <div class="window term"><div class="bar"><i></i><i></i><i></i><span>moai init</span></div>
+      <div class="cast" data-cast="../../assets/media/guide-init.cast" data-cols="100" data-rows="30" role="figure" aria-label="moai init の設定画面：項目を移動して選び、Enter で導入した後に作られたものを確認する画面"></div></div>
+    <div class="table">
+      <table>
+        <thead><tr><th>項目</th><th>何を決めるか</th><th>選び方</th></tr></thead>
+        <tbody>
+          <tr><td><strong>id プレフィックス</strong></td><td>イシュー id の先頭部分です（<code>moai-ae8y</code> の <code>moai</code>）。デフォルトはディレクトリ名です</td><td><strong>後から変更できないので</strong>、短く分かりやすい名前にします</td></tr>
+          <tr><td><strong>トラッカーを git に載せるか</strong></td><td><code>commit</code>：リポジトリにコミットしてチームと共有します（デフォルト）<br><code>exclude</code>：自分のクローンだけに置き、<code>.git/info/exclude</code> で隠します<br><code>gitignore</code>：自分のクローンだけに置き、<code>.gitignore</code> で隠します</td><td>チームで使うなら <code>commit</code>、他人のリポジトリで自分の作業だけを管理するなら <code>exclude</code></td></tr>
+          <tr><td><strong>エージェント向けガイドの置き場所</strong></td><td><code>block</code>：<code>AGENTS.md</code> の中にガイド全体を入れます<br><code>file</code>：ガイドは <code>.moai/guide.md</code> に置き、<code>AGENTS.md</code> にはリンクだけを残します<br><code>hook</code>：<code>AGENTS.md</code> には触れず、フックが Claude に伝えます<br><code>none</code>：何も書きません</td><td><code>AGENTS.md</code> を短く保ちたいなら <code>file</code>。トラッカーを git に載せないなら <code>hook</code></td></tr>
+          <tr><td><strong>フックとスキルのインストール</strong></td><td>Claude Code プラグイン（スキルとフック）をインストールします</td><td>エージェントと一緒に使うならオンにします。下の<a href="#hooks">フックについて</a>を参照</td></tr>
+          <tr><td>└ オプションのスキル</td><td><code>moai-tmux</code> · <code>moai-cmux</code> · <code>moai-saycode</code> が一行ずつ表示されます</td><td>使っている作業環境に合わせてオンにします。いま tmux・cmux・Saycode の中で実行していれば、その行は最初からオンになっています</td></tr>
+          <tr><td><strong>マージドライバー</strong></td><td>二つのブランチが別々のイシューを変更したとき、git がイシュー単位で自動的にマージします</td><td>トラッカーを git に載せるならオンにします（クローンごとに一度必要です）</td></tr>
+          <tr><td><strong>プロジェクト一覧に追加</strong></td><td>このリポジトリを自分のプロジェクト一覧に登録します</td><td>複数のプロジェクトを扱うならオンにします。プロジェクトの外で <code>moai</code> を実行すると、登録したプロジェクトを一画面にまとめて表示します</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <ul>
+      <li>Claude Code は <code>AGENTS.md</code> ではなく <code>CLAUDE.md</code> を読みます。<code>CLAUDE.md</code> に <code>@AGENTS.md</code> の一行を入れておけば両方が読まれます。</li>
+      <li>Codex・Antigravity でも使うには、<code>moai skill install --agent codex</code>、<code>--agent antigravity</code> でそれぞれのスキルとフックをインストールします。</li>
+      <li>moai をアップデートしたら <code>moai init</code> をもう一度実行し、ガイドを新しいバージョンにします。イシューと履歴には触れません。</li>
+    </ul>
+    <p>インストールが済んだら、エージェントのセッションを開き、いつものように言葉で仕事を頼めば大丈夫です。エージェントはセッションの開始時に <code>moai status</code> で現在のボードを読み、イシューの作成や移動を自分で行います。</p>
+
+    <h2 id="screens">tui と web</h2>
+    <p>moai の画面は二つあります。エージェントは画面を開かなくてもトラッカーのファイルを直接読み書きします。ユーザーは進み具合を確認したいときに好きな画面を開けば十分です。</p>
+
+    <h3 id="tui">moai tui — ターミナルで</h3>
+    <pre><code>moai tui</code></pre>
+    <p>一覧、カンバン、ガント、統計、Wiki をターミナルで見ます。<code>SPC g</code> を押してから画面ごとのキーを一つ押すと切り替わります。次に起動すると、最後に見ていた一覧、カンバン、ガントの画面が開きます。</p>
+    <div class="window term"><div class="bar"><i></i><i></i><i></i><span>moai tui</span></div>
+      <div class="cast" data-cast="../../assets/media/tui-tour.cast" data-cols="120" data-rows="34" role="figure" aria-label="moai tui で一覧、カンバン、Wiki へと移る画面"></div></div>
+    <ul>
+      <li>マウスで行をクリックしたりスクロールしたり、ペインの幅を変えたりできます。すべてのキーの一覧は <code>moai tui --help</code> で確認します。</li>
+      <li><code>SPC n</code> を押すと、思いついたことをすぐバックログに書き留められます。</li>
+    </ul>
+
+    <h3 id="web">moai web — ブラウザで</h3>
+    <pre><code>moai web</code></pre>
+    <p><code>127.0.0.1:6624</code> で一覧、カンバン、ガント、Wiki を見ます。ブラウザは自分で開きます。ターミナルに慣れていないメンバーと進み具合を共有するときに使えます。</p>
+    <ul>
+      <li>キーは tui とほぼ同じです。ペインの間を移るときだけ <code>Ctrl-w</code> の代わりに <code>SPC w</code> を使います。統計は tui でだけ見られます。</li>
+      <li>ガントのバーをドラッグして日付を変えられます。それ以外のトラッカーの内容は読むだけです。</li>
+      <li>ポートがすでに使われている場合は <code>--port</code> で別のポートを指定します。<code>--port 0</code> を渡すと空いているポートを選びます。</li>
+      <li>止めるときは <code>Ctrl-C</code> を押します。</li>
+    </ul>
+
+    <h3 id="list">一覧 — マイルストーンとエピックをフォルダのように</h3>
+    <p>マイルストーンとエピックを展開したり、その中に入ったりしてイシューを探します。カーソルのあるイシューの説明、サブイシュー、コミット、履歴は横に表示されます。tui と web のどちらも <code>SPC g l</code> で開きます。</p>
+    <div class="window term"><div class="bar"><i></i><i></i><i></i><span>moai tui</span></div>
+      <div class="cast" data-cast="../../assets/media/tui-list.cast" data-cols="120" data-rows="34" role="figure" aria-label="tui の一覧でマイルストーンを展開し、検索し、絞り込み、期限で並べ替える画面"></div></div>
+    <div class="window browser"><div class="bar"><i></i><i></i><i></i><span class="addr">127.0.0.1:6624</span></div>
+      <video class="clip" muted loop playsinline preload="none" poster="../../assets/media/web-detail.png" data-src="../../assets/media/web-detail.webm" aria-label="moai web でイシューの説明、コミット、履歴を読む画面"></video></div>
+    <ul>
+      <li><code>Enter</code> でマイルストーンやエピックに入り、<code>Backspace</code> で出ます。<code>l</code> は一段展開し、<code>h</code> は折りたたみます。<code>Tab</code> は配下をすべて展開します。</li>
+      <li><code>/</code> を押して検索語を入力すると、タイトル、タグ、本文、ノートからすぐに探します。隠したイシューも検索されます。アーカイブしたイシューは、web では <code>SPC v o</code> でアーカイブを表示しているときだけ検索されます。</li>
+      <li><code>SPC f</code> で状態、担当者、タグ、マイルストーンなどの条件をかけられます。入力中は選べる値が上に表示されます。</li>
+      <li><code>SPC s</code> で優先度、期限、更新時刻など複数の基準を組み合わせて並べ替えます。並べ替えの設定は次に起動したときも残ります。</li>
+      <li>自分に割り当てられたイシューに変更があると <code>[NEW]</code> が付きます。<code>r</code> で既読にします。</li>
+    </ul>
+
+    <h3 id="board">カンバン — 状態別のボード</h3>
+    <p>イシューを状態ごとに分けてカードで表示します。マイルストーンごとに一行ずつ並ぶので、リリースごとの進み具合が分かります。tui と web のどちらも <code>SPC g b</code> で開きます。</p>
+    <div class="window term"><div class="bar"><i></i><i></i><i></i><span>moai tui</span></div>
+      <div class="cast" data-cast="../../assets/media/tui-board.cast" data-cols="120" data-rows="34" role="figure" aria-label="tui のカンバンでマイルストーンごとの行の列を移りながらカードを選ぶ画面"></div></div>
+    <div class="window browser"><div class="bar"><i></i><i></i><i></i><span class="addr">127.0.0.1:6624</span></div>
+      <video class="clip" muted loop playsinline preload="none" poster="../../assets/media/web-board.png" data-src="../../assets/media/web-board.webm" aria-label="web のカンバンで列を移り、カードを押して詳細を読む画面"></video></div>
+    <ul>
+      <li>バックログと先送りした作業も別の列に表示されます。先送りの列は最初は隠れていて、<code>SPC v l</code> で表示します。</li>
+      <li>tui では他の人のカードに担当者が表示されます。web では <code>SPC c a</code> で担当者を表示します。</li>
+      <li><code>h</code>、<code>l</code> で列を移り、<code>j</code>、<code>k</code> で列の中のカードを行き来します。</li>
+      <li>一覧とカーソル位置、フィルター、表示設定を共有します。二つの画面を行き来しても見ていた位置はそのままです。</li>
+      <li>カードを手で動かすことはできません。状態はエージェントが作業しながら変えます。</li>
+    </ul>
+
+    <h3 id="gantt">ガント — 予定をバーで</h3>
+    <p>一覧の横に日付の軸を付け、イシューごとに計画した期間と実際に作業した期間をバーで表示します。tui と web のどちらも <code>SPC g g</code> で開きます。</p>
+    <div class="window term"><div class="bar"><i></i><i></i><i></i><span>moai tui</span></div>
+      <video class="clip" muted loop playsinline preload="none" poster="../../assets/media/tui-gantt.png" data-src="../../assets/media/tui-gantt.webm" aria-label="tui のガントで、計画した期間と作業した期間のバーを広げたり縮めたりする画面"></video></div>
+    <div class="window browser"><div class="bar"><i></i><i></i><i></i><span class="addr">127.0.0.1:6624</span></div>
+      <video class="clip" muted loop playsinline preload="none" poster="../../assets/media/web-gantt.png" data-src="../../assets/media/web-gantt.webm" aria-label="web のガントで、単位を変え、今日に戻りながらバーを見る画面"></video></div>
+    <ul>
+      <li>薄いバーは計画した開始日から期限まで、色付きのバーは実際に作業した期間です。期限を過ぎた部分は赤い斜線で表示されます。</li>
+      <li>エピックとマイルストーンは、メンバーの期間をまとめて斜線のバーで表示します。</li>
+      <li>時間・日・週・月の単位で広げたり縮めたりできます。<code>t</code> で今日に戻り、<code>z</code> ですべてのバーを一画面に収めます。</li>
+      <li>カーソルのあるイシューをブロックしているイシューは矢印でつながります。</li>
+      <li>バーをマウスでドラッグすると開始日と期限が変わります。手を離したときに一度だけ保存され、上のエピックやマイルストーンの期限を超える場合は保存せずに理由を知らせます。</li>
+    </ul>
+
+    <h3 id="stats">統計 — 流れとかかった時間</h3>
+    <p>プロジェクトの作業状況を棒グラフと数値で見ます。tui では <code>SPC g s</code> で開きます。web にはありません。</p>
+    <div class="window term"><div class="bar"><i></i><i></i><i></i><span>moai tui</span></div>
+      <div class="cast" data-cast="../../assets/media/tui-stats.cast" data-cols="120" data-rows="34" role="figure" aria-label="tui の統計で週ごとの流れ、状態と優先度、かかった時間、AI の作業を見る画面"></div></div>
+    <ul>
+      <li>週ごとに作った作業と終えた作業を並べて表示します。<code>b</code> で週単位と日単位を切り替えます。</li>
+      <li>状態別、優先度別のイシュー数を確認できます。</li>
+      <li>作成から完了まで、作業開始から完了までにかかった時間の中央値と p90 を表示します。開始時刻が分からない作業は 0 として数えず、別に数えます。</li>
+      <li>イシューに記録されたモデル名をもとに、AI モデルごとの作業数を集計します。</li>
+      <li>フィルターが設定されていれば、条件に合うイシューだけを集計します。</li>
+    </ul>
+
+    <h3 id="wiki">Wiki — リポジトリのマニュアル</h3>
+    <p>リポジトリのマークダウン文書を画面の中で読みます。tui と web のどちらも <code>SPC g w</code> で開きます。</p>
+    <div class="window term"><div class="bar"><i></i><i></i><i></i><span>moai tui</span></div>
+      <div class="cast" data-cast="../../assets/media/tui-wiki.cast" data-cols="120" data-rows="34" role="figure" aria-label="tui の Wiki でページを開き、リンクをたどって戻ったあと検索する画面"></div></div>
+    <div class="window browser"><div class="bar"><i></i><i></i><i></i><span class="addr">127.0.0.1:6624</span></div>
+      <video class="clip" muted loop playsinline preload="none" poster="../../assets/media/web-wiki.png" data-src="../../assets/media/web-wiki.webm" aria-label="web の Wiki でリンクをたどり、イシューへ飛ぶ画面"></video></div>
+    <ul>
+      <li>片側にページの一覧、もう片側に選んだページの内容が表示されます。</li>
+      <li><code>/</code> でタイトルと本文を検索します。検索語によく合うページから表示されます。</li>
+      <li>ページ内のリンクは <code>Tab</code> で選んで <code>Enter</code> で開きます。<code>Backspace</code> を押すと前に読んでいた行に戻ります。</li>
+      <li>イシューの詳細では、コミットの下にそのイシューを扱う Wiki ページと関連する節も表示されます。</li>
+      <li>Wiki は読み取り専用です。ページはリポジトリのファイルとして管理し、エージェントが作業を終えるときに編集してコミットします。</li>
+    </ul>
+
+    <h2 id="develop">moai で始める開発の指示</h2>
+
+    <h3 id="milestones">大きな作業はマイルストーンとエピックに分けます</h3>
+    <p>moai ではエピックとマイルストーンでイシューをまとめて管理します。</p>
+    <ul>
+      <li><strong>エピック</strong> — 一つの目的のためのイシューのまとまりです。複数のファイルを変更する依頼なら、エージェントがエピック一つとイシュー 3〜7 個に分けた計画をまず見せ、承認すると一度に作成します。</li>
+      <li><strong>マイルストーン</strong> — 一度にリリースする単位です。エピックをマイルストーンにつなぐと、その下のイシューも一緒に含まれます。</li>
+    </ul>
+    <p>エピックとマイルストーンの状態は手で動かしません。配下の作業を一つでも始めれば進行中に、すべて終われば完了に自動で変わります。</p>
+    <p>マイルストーンが進行中のあいだは、その中の作業が優先です。<code>moai ready</code> は進行中のマイルストーンの作業と <code>p0</code>（緊急）だけを渡し、残りは後回しにします。進行中のマイルストーンに作業を追加するかどうかはユーザーが決めます。</p>
+    <p>計画を見せるとき、エージェントは期限も一緒に尋ねます。答えがなければ期限なしのままにします。</p>
+
+    <h3 id="worktrees">ワークツリーを作ってマージするまで</h3>
+    <p>複数のセッションが一つのブランチにコミットを積むと、マージのときにお互いを待つことになります。moai のエージェントは作業ごとに別のブランチを作ります。</p>
+    <ol>
+      <li><strong>作業を引き受けます。</strong>イシューを <code>in_progress</code> に移します（<code>moai mv &lt;id&gt; in_progress --from todo</code>）。ほかのセッションがすでに引き受けていれば移さず、次の作業に進みます。</li>
+      <li><strong>ワークツリーを作ります。</strong>リポジトリ内の <code>.worktrees/&lt;エピック&gt;</code> に新しいブランチでチェックアウトします。Claude Code・Codex・Antigravity がすべて同じ場所を使います。</li>
+      <li><strong>その中で作業してコミットします。</strong>コミットの件名にイシュー id を書いておくと、<code>moai show &lt;id&gt;</code> がそのイシューのコミットを見つけて表示します。</li>
+      <li><strong>レビューを受けます。</strong>エピックが終わったらエピック全体を一度レビューし、指摘を反映します。</li>
+      <li><strong>マージして片付けます。</strong>ベースブランチに <code>--no-ff</code> でマージし、ワークツリーとブランチを削除してからイシューを <code>done</code> に移します。</li>
+    </ol>
+    <ul>
+      <li><strong>トラッカーは常にルートにあります。</strong>ワークツリーの中で <code>moai</code> を実行しても、ルートの <code>.moai/</code> を読み書きします。ほかのセッションからも誰が何を引き受けたかがすぐ分かり、マージのときにトラッカーのファイルが衝突しません。</li>
+      <li><strong>マイルストーンに属する作業はマイルストーンのブランチから始めます。</strong><code>milestone/&lt;マイルストーン id&gt;</code> ブランチからエピックのブランチを作り、作業が終わったらマイルストーンのブランチにマージし直します。マイルストーンのブランチはリリースのときに一度にベースブランチへ入ります。</li>
+      <li>隣のワークツリーが何をしているかは <code>moai ready --worktree</code> で確認します。</li>
+    </ul>
+
+    <h3 id="backlog">バックログ</h3>
+    <p>いますぐやらないことはバックログに入れます。</p>
+    <pre><code>moai backlog add 'ボードをエピックごとに折りたためたらどうか'
+moai backlog ls</code></pre>
+    <div class="window term"><div class="bar"><i></i><i></i><i></i><span>moai backlog</span></div>
+      <div class="cast" data-cast="../../assets/media/guide-backlog.cast" data-cols="100" data-rows="30" role="figure" aria-label="思いついたことをバックログに入れ、エピックとイシュー三つに展開する画面"></div></div>
+    <ul>
+      <li>バックログは、まだ実行する作業として確定していないアイデアです。ボードと <code>moai ready</code> には表示されません。</li>
+      <li>作業中に思いついたアイデアがいまの範囲を外れるなら、バックログに残しておきます。</li>
+      <li>時が来たら <code>moai backlog promote &lt;id&gt;</code> でエピックとイシューを作ります。元のバックログは閉じられ、新しい作業の履歴から元のメモをたどれます。</li>
+      <li>すでに作った作業をいまはやらないと決めたなら、バックログではなく <code>moai defer &lt;id&gt; -m '理由'</code> で先送りします。<code>--undo</code> でそのまま元に戻せます。</li>
+    </ul>
+
+    <h2 id="examples">使用例</h2>
+    <p>エージェントには言葉で指示します。たとえば次のように頼めます。</p>
+
+    <h3 id="ex-backlog">バックログの整理</h3>
+    <blockquote><p>たまったバックログを整理して。重なっているものはまとめて、もう終わったものは閉じて、いまやる価値があるものには優先度を付けて。</p></blockquote>
+    <blockquote><p>たまったバックログを空いているセッションに配って。</p></blockquote>
+    <p>二つ目の頼み方は監督（<code>/moai-supervise</code>）を呼び出します。下の<a href="#supervise">監督とワーカー</a>を参照。</p>
+
+    <h3 id="ex-plan">計画は Fable で、詳しく</h3>
+    <blockquote><p>この作業の計画は Claude Fable で立てて、ほかのエージェントがすぐ参照できるように説明を詳しく書いて。</p></blockquote>
+    <p>計画の段階で、イシューの本文に何をなぜするのか、どこまで進めるのか、どのファイルを変更するのかをまとめておけば、ほかのエージェントも文脈をつかんで作業を引き継げます。</p>
+
+    <h3 id="ex-models">開発とレビューに別のモデルを使う</h3>
+    <blockquote><p>各ワーカーセッションでサブエージェントを使って、Sonnet 5.5 medium で開発し、Opus 5.5 high でレビューして。</p></blockquote>
+    <p>毎回言わずに済ませるには、役割ごとのモデルをユーザー設定に書いておきます。監督は作業を配るたびにこの値を読みます。<code>moai models</code> でいまの値を確認できます。</p>
+    <pre><code>[models]
+plan    = "fable"    # 計画
+develop = "sonnet"   # 開発 — ほとんどの作業
+complex = "opus"     # 書き込み経路・並行性・複数ファイルにまたがる作業
+review  = "opus"     # エピック終了時のレビュー
+review_grade = "high"
+effort       = "medium"</code></pre>
+
+    <h2 id="env">対応する作業環境</h2>
+    <p>監督がワーカーのウィンドウを確認・操作できる環境では、セッションの管理まで任せられます。使っている環境に合ったオプションのスキルをオンにします（<code>moai init</code> のオプションのスキルの行、または <code>moai skill install --with &lt;スキル&gt;</code>）。</p>
+    <ul>
+      <li><strong>tmux</strong> — <code>moai-tmux</code>。監督がワーカーのペインにラベルを付け、報告が終わったペインを <code>/clear</code> で空にし、届かなかったメッセージを貼り付けます。ワーカーが足りなければ、許可を得てから新しいペインを開きます。</li>
+      <li><strong>cmux</strong> — <code>moai-cmux</code>（cmux 0.65.0 以上）。tmux と同じことを cmux のタブで行います。</li>
+      <li><strong>Saycode</strong> — <code>moai-saycode</code>。Saycode のセッションの中で、監督が <code>happy agent</code> でワーカーのセッションを確認し、作業を送り、新しいセッションを開きます。</li>
+    </ul>
+    <p>どの環境でも、監督はユーザーのペイン・タブ・セッションを閉じず、入力欄に人が書きかけた文字があれば触れません。</p>
+
+    <h3 id="hooks">フックについて</h3>
+    <p><code>moai skill install</code>（または <code>moai init</code> のフック・スキルのインストール）を行うと、エージェントのセッションの要所で moai のフックが実行されます。</p>
+    <div class="table">
+      <table>
+        <thead><tr><th>いつ</th><th>何をするか</th></tr></thead>
+        <tbody>
+          <tr><td>セッション開始</td><td>警告の基準点を記録します。コンテキストが圧縮された後は、進めていた作業をもう一度伝えます</td></tr>
+          <tr><td>最初のプロンプト</td><td><code>moai status</code> のボードを一度読み込ませます</td></tr>
+          <tr><td>ツール実行の前</td><td>下の五つのルールを確認します</td></tr>
+          <tr><td>ターン終了</td><td>進行中の作業が残っていれば、次のセッションのために <code>Next:</code> メモを残すよう促します</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>フックが守る五つのルール：</p>
+    <ol>
+      <li><strong>新しいイシューはいま引き受けている作業の範囲内で作ります。</strong>範囲外ならバックログに送ります。</li>
+      <li><strong>リポジトリを変更する前に作業を引き受けます。</strong></li>
+      <li><strong>レビューもイシューとして残します。</strong>何を見るのか、何を反映したのかを書きます。</li>
+      <li><strong>ユーザーの tmux サーバーを止めません。</strong></li>
+      <li><strong>ほかのエージェントの作業を引き受けるときは先に確認します。</strong></li>
+    </ol>
+    <p>拒否するときは通るコマンドをそのまま示すので、エージェントは人を待たずにすぐ直します（人に尋ねるのは 5 番だけです）。フックがセッションを失敗させることはなく、ターミナルで人が直接打つ <code>moai</code> はフックを通りません。</p>
+
+    <h3 id="supervise">監督とワーカー</h3>
+    <p>Claude Code のセッションの一つで <code>/moai-supervise</code> を呼び出すと、そのセッションが<strong>監督</strong>になります。監督はリポジトリごとに一つだけ置きます。</p>
+    <div class="window term"><div class="bar"><i></i><i></i><i></i><span>tmux · moai tui · Claude Code · Codex · Antigravity</span></div>
+      <div class="cast" data-cast="../../assets/media/tui-team.cast" data-cols="200" data-rows="56" data-speed="2" role="figure" aria-label="tmux の四つのペイン：moai tui、Claude Code の監督、Codex と Antigravity のワーカー"></div></div>
+    <ol>
+      <li>監督が互いに重ならないバックログを選びます。期限がなければ尋ねます。</li>
+      <li>作業の難しさに合った役割（開発・複雑な作業・ドキュメント・雑務）を選び、その役割のモデルで<strong>ワーカー</strong>を立ち上げます。デフォルトは監督セッション内のサブエージェントです。</li>
+      <li>ワーカーはバックログをエピックに具体化し、ワークツリーで作業し、レビュー・マージ・片付けまで済ませてから報告します。</li>
+      <li>監督はマージされたか、エピックが閉じたか、ワークツリーが削除されたかを確認し、次の作業を送ります。</li>
+    </ol>
+    <ul>
+      <li>ワーカーのウィンドウを自分で見たいなら、サブエージェントの代わりに<strong>セッションワーカー</strong>を使います。リポジトリのルートで Claude Code のセッションをいくつか開いておけば、監督が空いているセッションに作業を送ります。</li>
+      <li>設計上の判断が必要になるとワーカーが止まり、監督が人に尋ねます。席を外すときに監督へ伝えておけば、ワーカーが推奨案で決めて理由をイシューに残します。</li>
+      <li>監督は作業の選定と割り当て、結果の確認を担当します。コードの変更とマージはワーカーが担当します。</li>
+    </ul>
+
+    <h3 id="vendors">複数ベンダーのエージェントを一緒に使う</h3>
+    <p>Claude Code・Codex・Antigravity が一つのトラッカーを共有します。それぞれリポジトリのルートで、いつも通り対話型で開きます。</p>
+    <div class="table">
+      <table>
+        <thead><tr><th></th><th>Claude Code</th><th>Codex</th><th>Antigravity</th></tr></thead>
+        <tbody>
+          <tr><td>起動</td><td><code>claude</code></td><td><code>codex</code></td><td><code>agy</code></td></tr>
+          <tr><td>インストール</td><td><code>moai skill install</code></td><td><code>moai skill install --agent codex</code></td><td><code>moai skill install --agent antigravity</code></td></tr>
+          <tr><td>フック</td><td>プラグインに含まれる</td><td><code>.codex/hooks.json</code> — <code>/hooks</code> で一度信頼すると動作</td><td><code>.agents/hooks.json</code></td></tr>
+          <tr><td>監督</td><td>可能（<code>/moai-supervise</code>）</td><td>ワーカーのみ</td><td>ワーカーのみ</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <ul>
+      <li>監督を務めるのは Claude Code だけです。Codex は tmux のペインや cmux のタブのワーカーとして作業を受け取ります。Codex のワーカーはテストとコミットを終えると待機し、監督側のレビューが終わるとマージの指示を受けます。</li>
+      <li><code>moai skill install --agent auto</code> は <code>PATH</code> にある <code>claude</code> · <code>codex</code> · <code>agy</code> を見つけて一度にインストールします。</li>
+      <li>Codex と Antigravity は同じ <code>.agents/skills/</code> を読むので、コミットしておけばチーム全員が同じスキルを使えます。</li>
+      <li>作業を終えたエージェントはイシューに <code>model: &lt;会社&gt;/&lt;モデル&gt;</code> の一行を残します。<code>moai stats</code> がこの記録を集めて、モデルごとの作業量を表示します。</li>
+    </ul>
+  </main>
+</div>
+
+<footer>
+  <div class="wrap">
+    <img src="../../assets/logo.svg" alt="moai">
+    <span>MIT · © 2026 Buzzni Inc.</span>
+    <div class="links">
+      <a href="../../docs/" hreflang="en">ドキュメント</a>
+      <a href="../../changelog/" hreflang="en">変更履歴</a>
+      <a href="./">使い方</a>
+      <a href="https://discord.gg/hCfQ76uX3t">Discord</a>
+      <a href="https://github.com/buzzni/moai">GitHub</a>
+    </div>
+  </div>
+</footer>
+
+<script src="../../assets/vendor/asciinema-player.min.js"></script>
+<script src="../../assets/site.js"></script>
+</body>
+</html>

@@ -1197,8 +1197,8 @@ impl Repo {
         for i in issues.iter_mut() {
             i.normalize();
             let was = original_by_id.get(i.id.as_str()).copied();
-            // **이번에 쓴 기한과 자리만 잰다**(2026-10-16 사용자 결정) — `due_on`·`epic`·`milestone` 이
-            // 바뀐 줄이다. 기한 든 줄을 더 이른 에픽으로 옮기는 것도 이 줄의 쓰기다. 부모를 당겨 넘친
+            // **이번에 쓴 기한·시작일과 자리만 잰다**(2026-10-16 사용자 결정, 시작일은 moai-xf0p.cbu) —
+            // `due_on`·`starts_on`·`epic`·`milestone` 이 바뀐 줄이다. 기한 든 줄을 더 이른 에픽으로 옮기는 것도 이 줄의 쓰기다. 부모를 당겨 넘친
             // 자식은 남의 줄이라 막지 않는다 — `status` 의 `due_beyond_parent` 가 비춘다.
             //
             // **아카이브에서 되살린 줄은 이번에 쓴 줄이 아니다**(리뷰) — `mv --from done`·`defer --undo` 가 아카이브의
@@ -1208,10 +1208,17 @@ impl Repo {
             //
             // 마일스톤 줄은 조상이 없으니 안 잰다([`crate::report::DueLadder`]) — 기한을 드는 쓰기가 가장 흔한 줄이라,
             // 재면 락을 쥔 채 지도를 짓고 늘 `None` 을 받는다.
-            let measured = i.due_on.is_some()
+            // 잴 날은 [`crate::model::Issue::plan_days`] 하나가 댄다 — 꼴이 틀린 날은 아래 `validate_keeping` 이 이 줄을
+            // 먼저 거절하므로 여기서 빠져도 받는 쓰기가 없다.
+            let measured = i.plan_days().next().is_some()
                 && i.kind != crate::model::Kind::Milestone
                 && match was {
-                    Some(o) => o.due_on != i.due_on || o.epic != i.epic || o.milestone != i.milestone,
+                    Some(o) => {
+                        o.due_on != i.due_on
+                            || o.starts_on != i.starts_on
+                            || o.epic != i.epic
+                            || o.milestone != i.milestone
+                    }
                     None => !reserved.contains(&i.id),
                 };
             if measured {
@@ -2495,8 +2502,9 @@ fn atomic(path: &Path, bytes: &[u8], within: Option<&Path>, stage: Option<&Path>
 }
 
 /// 임시 자리 `dir` 이 링크를 다 푼 뒤 체크아웃 `root` 안이고 그 `.git` 밖인가 — 대상의 디렉터리를 재는 [`resolve`] 와 같은
-/// 자다. 없는 자리는 아니다 — 거기서는 어차피 못 짓는다.
-fn stage_inside(dir: &Path, root: &Path) -> bool {
+/// 자다. 없는 자리는 아니다 — 거기서는 어차피 못 짓는다. `wiki learn` 의 교훈 페이지도 이 자로 임시 자리를 고른다
+/// (`cmd::wiki::write_new`).
+pub(crate) fn stage_inside(dir: &Path, root: &Path) -> bool {
     let root = crate::path::real(root);
     crate::path::canonical(dir).is_ok_and(|dir| dir.strip_prefix(&root).is_ok_and(|rest| !crate::held::into_git(rest)))
 }

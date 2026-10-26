@@ -1,4 +1,4 @@
-<!-- moai:begin v:0.18.0 hash:117d9520 -->
+<!-- moai:begin v:0.27.0 hash:7f3cadf2 -->
 ## Issue tracker — moai
 
 This repository's work lives in `.moai/issues.jsonl`.
@@ -11,6 +11,7 @@ Start a session by running `moai status`. The board and the warnings come up on 
     moai ready                             what you can pick up right now
     moai show <id>                         body, children, history. Why it was decided is here
     moai show -g <keyword>                 find out whether it is written down already
+    moai wiki search '<words>'             what the manual (and the lessons) say about it
     moai show -s todo -t bug               filters (comma = or, repeated flag = and, except -a: or)
     moai show --tree                       epic → issue → child
     moai ready --worktree                  overlay what the other worktrees picked up
@@ -129,8 +130,11 @@ always asked about — for a plan, an epic, an issue or a backlog item that come
 the person's own request. Write the answer as `@YYYY-MM-DD` at the end of the plan line
 it belongs to (`# Epic title @2026-10-31`, `- [p1] first issue @2026-10-20`), or give
 `--due <day>` to put it on every epic the plan creates that carries no `@` of its own.
-A row made alone takes the same `--due` on `moai add` or `moai backlog add` — an `@` in
-a single title stays text. `--due +3` is three days from today.
+When the person also names a day to begin, write the range — `@2026-10-25~2026-10-31`
+(start to deadline), or `@2026-10-25~` for a start alone — and `--start <day>` goes on
+epics the way `--due` does. A start is the person's too: never make one up.
+A row made alone takes the same `--due` on `moai add` or `moai backlog add` (and
+`--start` likewise) — an `@` in a single title stays text. `--due +3` is three days from today.
 **No answer, no deadline** — leave it empty, never make one up. A review issue and a
 backlog item you park mid-work are not asked about.
 Nothing checks this: it is a question for you to ask, not a gate.
@@ -246,9 +250,10 @@ the work under it drops out with it.
     moai show <epic|milestone id>                  what stands under it
     moai show --milestone <id>                     everything attached to that milestone
 
-**Any row can carry a deadline; only a milestone carries a start.** `--due` takes a
-calendar day, `YYYY-MM-DD`, or `+N` days from today (stored as the day it lands on),
-and `moai edit <id> --due none` clears one. `--start` stands on a milestone row only.
+**Any row can carry a deadline and a start.** `--due` and `--start` take a calendar day,
+`YYYY-MM-DD`, or `+N` days from today (stored as the day it lands on), and
+`moai edit <id> --due none` clears one (`--start none` the same). The start is the
+planned day to begin; a start after the deadline is refused.
 A milestone's deadline that has passed, and one falling due within `status_due_days`
 (3 unless your config says otherwise), is one warning line on the board, and so is
 an open issue or epic whose own deadline has passed (`overdue`); **nothing is blocked and
@@ -259,8 +264,10 @@ write that gives a row a later day than the earliest of those, or moves a row th
 carries a deadline under one due earlier, is refused, and the refusal names the day to
 give instead. Pulling the one above in is never refused: the rows it overtakes are
 named in one line on stderr and stand as `due_beyond_parent` on the board until their
-own deadlines come in. `moai show --sort due` puts the nearest first, and
-`--filter due_on=<from>~<to>` picks rows by their own deadline.
+own deadlines come in. A start obeys the same ceiling: it cannot be later than the
+earliest deadline above it, but it may be earlier than the parent's start. `moai show --sort due` puts the nearest first, and
+`--filter due_on=<from>~<to>` picks rows by their own deadline (`starts_on=` by their
+own start).
 
 **A near deadline raises priority, by one verb.** `moai due apply` (`--dry-run` shows it
 first) raises an open, not deferred issue or backlog item by the deadline it follows —
@@ -388,7 +395,7 @@ source and a directory you cannot write are refused before anything is fetched.
 
 ### When a feature request comes in
 
-1. Look at the epics that already exist with `moai status`. If it may overlap, `moai show -g <keyword>`.
+1. Look at the epics that already exist with `moai status`. If it may overlap, `moai show -g <keyword>`, and `moai wiki search <keyword>` for what the manual says.
 2. Show a plan split the way fork 3 says, once, ask when it is due in the same breath,
    and on a "yes" create it in one go. No answer leaves the deadline empty.
 3. Pick it up with `moai mv <id> in_progress`, and move it to `done` when it is finished.
@@ -512,8 +519,11 @@ even when you cannot do it now (fork 1). If it is not for now, park it with
 **2. Pick something up before you change the repository.** `moai mv <id> in_progress`.
 What counts is work inside the repository — `.moai/`, `.claude/`, `.agents/`, `.codex/`,
 `.worktrees/`, `target/` and anything outside the repository (scratchpad, temporary
-files) do not. Shell writes (`>`, `>>`, `sed -i`, `tee`) count as much as `Edit` and
-`Write`. If it was not in the plan, create it with `moai add 'a title'` and pick that up.
+files) do not. Shell writes (`>`, `>>`, `sed -i`, `tee`, the destination of `cp`·`mv`·`install`)
+count as much as `Edit` and `Write`. If it was not in the plan, create it with `moai add 'a title'`
+and pick that up. A session that holds only work whose worktree stands is refused a write that
+lands in the main checkout — wherever its shell stands — and a write into another epic's worktree;
+the refusal names the same file in its own worktree.
 
 **3. A review is an issue too.** Before you call a review, create a review issue tied to
 what you are reviewing. The review is `/code-review` in Claude Code; in Codex and
@@ -546,8 +556,9 @@ own server.
     env -u TMUX tmux -L <unique name> …
 
 Under cmux claude-teams (`$TMUX` starts with `/tmp/cmux-`) the `tmux` on `PATH` is cmux's shim: it
-drops `-L`, `-S` and `-f`, so `new-session` and the `kill-*` commands open and close workspaces and
-tabs in the person's cmux, and `env -u TMUX` takes away only the fake `$TMUX`. The hook refuses
+drops `-L`, `-S` and `-f`, so `new-session`, `new-window`, `split-window`, `send-keys`,
+`respawn-pane` and the `kill-*` commands open, close and type into workspaces and tabs in the
+person's cmux, and `env -u TMUX` takes away only the fake `$TMUX`. The hook refuses
 those through the shim. Call a real tmux by its absolute path instead — `type -a tmux` lists the
 candidates; take one whose `readlink -f` has no `cmux` in it:
 
@@ -600,6 +611,8 @@ in `.moai/config.toml` says otherwise. `moai wiki ls` lists them and `moai wiki 
 prints one. When an epic changes what a person does, the window that did it fixes the page
 on its branch before the merge, and `moai skill install` plants a skill for it, `moai-wiki`,
 that says how — and sweeps the wiki when a person calls it. Nothing checks this.
+Before you touch a place, `moai wiki search '<words>'` finds it; read the sections under the
+`Wiki` block of `moai show <id>` (`wiki` in `--json`) first.
 
 ### Before you close the session
 
@@ -613,4 +626,8 @@ the next session to take over from. The next session reads it in the history und
 `moai show <id>`.
 
     moai note <id> 'Next: <what comes next>'
+
+If this session made a mistake the next one would make too, write it down as a lesson while
+you still hold the row it came from (the page is a change to the repository, as rule 2 counts it) —
+`moai wiki search '<its words>'` first, then `moai wiki learn`; `moai-wiki` says which mistakes count.
 <!-- moai:end -->

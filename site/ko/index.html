@@ -1,0 +1,218 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>moai — 코딩 에이전트를 위한 이슈 트래커</title>
+  <meta name="description" content="moai는 사람과 코딩 에이전트가 같이 쓰는 이슈 트래커입니다. 서버 없이 저장소 안에 있고, 여러 에이전트가 하나의 계획으로 일합니다.">
+  <link rel="canonical" href="https://moai.buzzni.com/ko/">
+  <!-- 링크 미리보기: og:image 가 없으면 미리보기 쪽이 페이지의 첫 그림(로고 띠)을 고른다. SVG 를 못 읽는 곳이 많아 PNG 다 -->
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="moai">
+  <meta property="og:title" content="moai — 코딩 에이전트를 위한 이슈 트래커">
+  <meta property="og:description" content="moai는 사람과 코딩 에이전트가 같이 쓰는 이슈 트래커입니다. 서버 없이 저장소 안에 있고, 여러 에이전트가 하나의 계획으로 일합니다.">
+  <meta property="og:url" content="https://moai.buzzni.com/ko/">
+  <meta property="og:locale" content="ko_KR">
+  <meta property="og:image" content="https://moai.buzzni.com/assets/og.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="moai — Issue tracker for AI agents">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="moai — 코딩 에이전트를 위한 이슈 트래커">
+  <meta name="twitter:description" content="moai는 사람과 코딩 에이전트가 같이 쓰는 이슈 트래커입니다. 서버 없이 저장소 안에 있고, 여러 에이전트가 하나의 계획으로 일합니다.">
+  <meta name="twitter:image" content="https://moai.buzzni.com/assets/og.png">
+  <link rel="alternate" hreflang="en" href="https://moai.buzzni.com/">
+  <link rel="alternate" hreflang="ko" href="https://moai.buzzni.com/ko/">
+  <link rel="alternate" hreflang="ja" href="https://moai.buzzni.com/ja/">
+  <link rel="alternate" hreflang="x-default" href="https://moai.buzzni.com/">
+  <link rel="icon" href="../assets/mark.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="../assets/vendor/asciinema-player.css">
+  <link rel="stylesheet" href="../assets/site.css">
+</head>
+<body>
+
+<nav>
+  <div class="wrap">
+    <a class="brand" href="./" aria-label="moai"><img src="../assets/logo.svg" alt="moai"></a>
+    <div class="links">
+      <a href="#see">화면 보기</a>
+      <a href="guide/">사용 방법</a>
+      <a href="../docs/" hreflang="en">문서</a>
+      <a href="../changelog/" hreflang="en">변경 기록</a>
+    </div>
+    <div class="right">
+      <div class="lang" role="navigation" aria-label="Language">
+        <a href="../?lang=en" hreflang="en" lang="en" data-lang="en">English</a><span aria-hidden="true">|</span><a href="./" hreflang="ko" lang="ko" data-lang="ko" aria-current="page">한국어</a><span aria-hidden="true">|</span><a href="../ja/" hreflang="ja" lang="ja" data-lang="ja">日本語</a>
+      </div>
+      <a class="gh" href="https://discord.gg/hCfQ76uX3t" aria-label="Discord">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M20.317 4.3698a19.7913 19.7913 0 00-4.8851-1.5152.0741.0741 0 00-.0785.0371c-.211.3753-.4447.8648-.6083 1.2495-1.8447-.2762-3.68-.2762-5.4868 0-.1636-.3933-.4058-.8742-.6177-1.2495a.077.077 0 00-.0785-.037 19.7363 19.7363 0 00-4.8852 1.515.0699.0699 0 00-.0321.0277C.5334 9.0458-.319 13.5799.0992 18.0578a.0824.0824 0 00.0312.0561c2.0528 1.5076 4.0413 2.4228 5.9929 3.0294a.0777.0777 0 00.0842-.0276c.4616-.6304.8731-1.2952 1.226-1.9942a.076.076 0 00-.0416-.1057c-.6528-.2476-1.2743-.5495-1.8722-.8923a.077.077 0 01-.0076-.1277c.1258-.0943.2517-.1923.3718-.2914a.0743.0743 0 01.0776-.0105c3.9278 1.7933 8.18 1.7933 12.0614 0a.0739.0739 0 01.0785.0095c.1202.099.246.1981.3728.2924a.077.077 0 01-.0066.1276 12.2986 12.2986 0 01-1.873.8914.0766.0766 0 00-.0407.1067c.3604.698.7719 1.3628 1.225 1.9932a.076.076 0 00.0842.0286c1.961-.6067 3.9495-1.5219 6.0023-3.0294a.077.077 0 00.0313-.0552c.5004-5.177-.8382-9.6739-3.5485-13.6604a.061.061 0 00-.0312-.0286zM8.02 15.3312c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9555-2.4189 2.157-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.9555 2.4189-2.1569 2.4189zm7.9748 0c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9554-2.4189 2.1569-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.946 2.4189-2.1568 2.4189Z"/></svg>
+        <span>Discord</span>
+      </a>
+      <a class="gh" href="https://github.com/buzzni/moai" aria-label="GitHub">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+        <span>buzzni/moai</span>
+      </a>
+    </div>
+  </div>
+</nav>
+
+<header class="hero">
+  <div class="wrap">
+    <h1 class="eyebrow">코딩 에이전트와 같이 쓰는 이슈 트래커</h1>
+    <section class="rotator" aria-roledescription="carousel" aria-label="moai가 하는 일">
+      <div class="rot-stage">
+        <span class="spin" aria-hidden="true"><svg viewBox="0 0 10 15"><circle class="d1" cx="2.6" cy="2.6" r="1.8"/><circle class="d2" cx="2.6" cy="7.5" r="1.8"/><circle class="d3" cx="2.6" cy="12.4" r="1.8"/><circle class="d4" cx="7.4" cy="2.6" r="1.8"/><circle class="d5" cx="7.4" cy="7.5" r="1.8"/><circle class="d6" cx="7.4" cy="12.4" r="1.8"/></svg></span>
+      <div class="rot-slides">
+        <div class="slide is-on" id="slide-1" role="tabpanel" aria-roledescription="slide" aria-label="1 / 5" aria-labelledby="tab-1" style="--glint-time: 4440ms">
+          <p class="headline"><span class="held-body"><span class="held-text">코딩 에이전트도<br><em>애자일하게.</em></span><span class="held-glint" aria-hidden="true"><span>코딩 에이전트도<br><em>애자일하게.</em></span></span></span></p>
+          <p class="lede">사람이 아이디어를 내면 에이전트가 구체적인 계획을 세웁니다.<br>큰 작업은 실행하기 좋은 단위로 나눠 중요한 일부터 진행하고,<br>중간에 요구사항이 바뀌면 그에 맞춰 계획을 조정합니다.</p>
+        </div>
+        <div class="slide" id="slide-2" role="tabpanel" aria-roledescription="slide" aria-label="2 / 5" aria-labelledby="tab-2" hidden style="--glint-time: 4200ms">
+          <p class="headline"><span class="held-body"><span class="held-text">서버 없이,<br><em>저장소 하나로.</em></span><span class="held-glint" aria-hidden="true"><span>서버 없이,<br><em>저장소 하나로.</em></span></span></span></p>
+          <p class="lede">할 일도 코드처럼 커밋하고, 브랜치와 함께 머지합니다.<br>별도 계정이나 웹 서비스, 데이터베이스 없이도 사용할 수 있습니다.<br>저장소를 통하여 동료와 작업 상태를 공유할 수 있습니다.</p>
+        </div>
+        <div class="slide" id="slide-3" role="tabpanel" aria-roledescription="slide" aria-label="3 / 5" aria-labelledby="tab-3" hidden style="--glint-time: 4320ms">
+          <p class="headline"><span class="held-body"><span class="held-text">에이전트 여럿을<br><em>한 팀처럼.</em></span><span class="held-glint" aria-hidden="true"><span>에이전트 여럿을<br><em>한 팀처럼.</em></span></span></span></p>
+          <p class="lede">감독 에이전트가 작업을 나누면 여러 에이전트가 각자 맡아 진행합니다.<br>각자의 워크트리에서 서로의 작업에 영향을 주지 않고 동시에 작업합니다.<br>완료된 작업은 리뷰를 거쳐 하나로 합칩니다.</p>
+        </div>
+        <div class="slide" id="slide-4" role="tabpanel" aria-roledescription="slide" aria-label="4 / 5" aria-labelledby="tab-4" hidden style="--glint-time: 5280ms">
+          <p class="headline"><span class="held-body"><span class="held-text">모든 작업은<br><em>명세서에서 시작합니다.</em></span><span class="held-glint" aria-hidden="true"><span>모든 작업은<br><em>명세서에서 시작합니다.</em></span></span></span></p>
+          <p class="lede">무엇을 왜 하는지, 어디까지 진행할지 이슈에 정리합니다.<br>에이전트는 이전 세션의 메모와 커밋을 확인하고,<br>그동안의 맥락을 바탕으로 작업을 이어갑니다.</p>
+        </div>
+        <div class="slide" id="slide-5" role="tabpanel" aria-roledescription="slide" aria-label="5 / 5" aria-labelledby="tab-5" hidden style="--glint-time: 5760ms">
+          <p class="headline"><span class="held-body"><span class="held-text">다시 설명하지 않아도,<br><em>알아서 일합니다.</em></span><span class="held-glint" aria-hidden="true"><span>다시 설명하지 않아도,<br><em>알아서 일합니다.</em></span></span></span></p>
+          <p class="lede">에이전트는 작업 이력을 살펴보며 이전에 어떤 결정을 내렸고, 왜 그랬는지 확인합니다.<br>메모리 위키에 쌓인 작업 방법과 주의점을 참고해 같은 실수를 줄입니다.<br>경험이 쌓일수록 더 능숙하게 일합니다.</p>
+        </div>
+      </div>
+      </div>
+      <div class="rot-tabs" role="tablist" aria-label="moai가 하는 일">
+      <button class="rot-tab" id="tab-1" role="tab" aria-controls="slide-1" aria-selected="true" style="--rot-time: 8000ms"><span class="rot-n">01</span><span class="rot-name">애자일</span><i class="rot-bar" aria-hidden="true"></i></button>
+      <button class="rot-tab" id="tab-2" role="tab" aria-controls="slide-2" aria-selected="false" tabindex="-1" style="--rot-time: 8000ms"><span class="rot-n">02</span><span class="rot-name">서버 없음</span><i class="rot-bar" aria-hidden="true"></i></button>
+      <button class="rot-tab" id="tab-3" role="tab" aria-controls="slide-3" aria-selected="false" tabindex="-1" style="--rot-time: 8000ms"><span class="rot-n">03</span><span class="rot-name">멀티 에이전트</span><i class="rot-bar" aria-hidden="true"></i></button>
+      <button class="rot-tab" id="tab-4" role="tab" aria-controls="slide-4" aria-selected="false" tabindex="-1" style="--rot-time: 8280ms"><span class="rot-n">04</span><span class="rot-name">작업 명세</span><i class="rot-bar" aria-hidden="true"></i></button>
+      <button class="rot-tab" id="tab-5" role="tab" aria-controls="slide-5" aria-selected="false" tabindex="-1" style="--rot-time: 8760ms"><span class="rot-n">05</span><span class="rot-name">기억</span><i class="rot-bar" aria-hidden="true"></i></button>
+      </div>
+    </section>
+
+    <div class="install">
+      <code><span class="p">$ </span>curl -fsSL https://raw.githubusercontent.com/buzzni/moai/main/install.sh | sh</code>
+      <button class="copy" data-copy="curl -fsSL https://raw.githubusercontent.com/buzzni/moai/main/install.sh | sh" data-copied="복사됨">복사</button>
+    </div>
+    <p class="meta">macOS · Linux · Windows · MIT 라이선스 · <code>SHA256SUMS</code>로 확인되지 않으면 설치하지 않습니다 · <a href="https://github.com/buzzni/moai#install">다른 설치 방법</a></p>
+  </div>
+</header>
+
+<section class="team" id="team">
+  <div class="wrap">
+    <div class="window term">
+      <div class="bar"><i></i><i></i><i></i><span>tmux · moai tui · Claude Code · Codex · Antigravity</span></div>
+      <div class="cast" data-cast="../assets/media/tui-team.cast" data-cols="200" data-rows="56" data-speed="2" role="figure" aria-label="tmux 네 칸: moai tui, Claude Code 감독, Codex와 Antigravity 일꾼"></div>
+    </div>
+    <div class="sec-head">
+      <h2 class="big">벤더가 달라도 한 팀으로 일합니다.</h2>
+      <p>서로 다른 벤더의 에이전트가 감독과 일꾼을 맡아 함께 일합니다. 감독은 대기 중인 일꾼에게 작업을 나눠 주고 진행 상황을 조율합니다. 일꾼은 필요한 만큼 띄우면 됩니다. 각자 별도의 워크트리에서 작업하고, 감독은 결과를 확인하며 끝까지 마무리합니다.</p>
+    </div>
+    <ul class="team-points">
+      <li><q>쌓인 백로그를 쉬고 있는 세션에 나눠 줘.</q> 말로 지시하면 됩니다.</li>
+      <li>일꾼 창을 비우고 다음 작업을 보내는 일부터, 보고를 받고 결과를 확인하는 일까지 감독이 맡습니다.</li>
+      <li>계획은 Claude Fable, 개발은 Codex Sol, 잔일은 Antigravity Gemini, 리뷰는 Claude Opus에게. 작업에 맞춰 모델을 골라 맡겨 보세요.</li>
+    </ul>
+  </div>
+</section>
+
+<section class="logos" aria-label="Moai와 함께하는 제품">
+  <div class="wrap">
+    <h2>Moai와 함께하는 제품</h2>
+    <div class="marquee">
+      <div class="track">
+        <a class="slot" href="https://viskits.ai" target="_blank" rel="noopener"><img src="../assets/logos/viskits.png" alt="VISKIT AI" height="26"></a><a class="slot" href="https://fitcl.ai" target="_blank" rel="noopener"><img src="../assets/logos/fitcl.png" alt="FitCL" height="26"></a><a class="slot dark" href="https://datahub.hsmoa.com" target="_blank" rel="noopener"><img src="../assets/logos/datahub.png" alt="Homeshopping Moa Data HUB" height="26"></a><a class="slot" href="https://www.knoi.ai" target="_blank" rel="noopener"><img src="../assets/logos/knoi.png" alt="Knoi.ai" height="26"></a><a class="slot" href="https://saycode.ai" target="_blank" rel="noopener"><img src="../assets/logos/saycode.png" alt="Saycode" height="26"></a>
+        <a class="slot" href="https://viskits.ai" target="_blank" rel="noopener" aria-hidden="true" tabindex="-1"><img src="../assets/logos/viskits.png" alt="" height="26"></a><a class="slot" href="https://fitcl.ai" target="_blank" rel="noopener" aria-hidden="true" tabindex="-1"><img src="../assets/logos/fitcl.png" alt="" height="26"></a><a class="slot dark" href="https://datahub.hsmoa.com" target="_blank" rel="noopener" aria-hidden="true" tabindex="-1"><img src="../assets/logos/datahub.png" alt="" height="26"></a><a class="slot" href="https://www.knoi.ai" target="_blank" rel="noopener" aria-hidden="true" tabindex="-1"><img src="../assets/logos/knoi.png" alt="" height="26"></a><a class="slot" href="https://saycode.ai" target="_blank" rel="noopener" aria-hidden="true" tabindex="-1"><img src="../assets/logos/saycode.png" alt="" height="26"></a>
+        <a class="slot" href="https://viskits.ai" target="_blank" rel="noopener" aria-hidden="true" tabindex="-1"><img src="../assets/logos/viskits.png" alt="" height="26"></a><a class="slot" href="https://fitcl.ai" target="_blank" rel="noopener" aria-hidden="true" tabindex="-1"><img src="../assets/logos/fitcl.png" alt="" height="26"></a><a class="slot dark" href="https://datahub.hsmoa.com" target="_blank" rel="noopener" aria-hidden="true" tabindex="-1"><img src="../assets/logos/datahub.png" alt="" height="26"></a><a class="slot" href="https://www.knoi.ai" target="_blank" rel="noopener" aria-hidden="true" tabindex="-1"><img src="../assets/logos/knoi.png" alt="" height="26"></a><a class="slot" href="https://saycode.ai" target="_blank" rel="noopener" aria-hidden="true" tabindex="-1"><img src="../assets/logos/saycode.png" alt="" height="26"></a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="see" id="see">
+  <div class="wrap">
+    <article class="scene">
+      <div class="scene-text">
+        <div class="n">01</div>
+        <h3>터미널 하나에서 모든 화면을.</h3>
+        <p>목록부터 마일스톤별 칸반, 위키까지 터미널 안에서 오갈 수 있습니다. 선택한 작업의 상세 내용은 옆에 표시돼 바로 확인할 수 있습니다. 마우스로도 편하게 사용할 수 있습니다.</p>
+        <p class="run"><span class="tag">터미널</span><code>$ moai tui</code></p>
+      </div>
+      <div class="scene-media">
+        <div class="window term"><div class="bar"><i></i><i></i><i></i><span>moai tui</span></div>
+          <div class="cast" data-cast="../assets/media/tui-tour.cast" data-cols="120" data-rows="34" role="figure" aria-label="moai tui에서 목록, 칸반, 위키로 옮겨 가는 화면"></div></div>
+      </div>
+    </article>
+    <article class="scene">
+      <div class="scene-text">
+        <div class="n">02</div>
+        <h3>이슈 관리에 필요한 기능을 갖췄습니다.</h3>
+        <p>상세한 작업 지시부터 작업 중 남긴 메모, 관련 커밋과 일정까지 한눈에 확인할 수 있습니다.</p>
+        <p class="run"><span class="tag">브라우저</span><code>$ moai web</code></p>
+      </div>
+      <div class="scene-media">
+        <div class="window browser"><div class="bar"><i></i><i></i><i></i><span class="addr">127.0.0.1:6624</span></div>
+          <video class="clip" muted loop playsinline preload="none" poster="../assets/media/web-detail.png" data-src="../assets/media/web-detail.webm" aria-label="moai web에서 이슈의 설명, 커밋, 이력을 읽는 화면"></video></div>
+      </div>
+    </article>
+    <article class="scene">
+      <div class="scene-text">
+        <div class="n">03</div>
+        <h3>문서도 moai 안에서 관리하세요.</h3>
+        <p>에이전트가 작업하면서 내장 위키에 문서를 남깁니다. 필요한 부분만 골라 정리하거나 전체 내용을 한 번에 작성할 수 있습니다. 쌓인 문서는 이후 작업에서 에이전트가 참고합니다.</p>
+        <p class="run"><span class="tag">브라우저</span><code>$ moai web</code></p>
+      </div>
+      <div class="scene-media">
+        <div class="window browser"><div class="bar"><i></i><i></i><i></i><span class="addr">127.0.0.1:6624</span></div>
+          <video class="clip" muted loop playsinline preload="none" poster="../assets/media/web-wiki.png" data-src="../assets/media/web-wiki.webm" aria-label="moai web 위키에서 링크를 따라가다 이슈로 건너가는 화면"></video></div>
+      </div>
+    </article>
+    <article class="scene">
+      <div class="scene-text">
+        <div class="n">04</div>
+        <h3>일이 어디까지 진행됐는지 한눈에 보입니다.</h3>
+        <p>아이디어를 백로그에 담으면 에이전트가 마일스톤과 에픽, 태스크로 구체화합니다. 작업이 진행되면 리뷰와 완료까지 상태를 업데이트해 전체 흐름을 확인할 수 있습니다.</p>
+        <p class="run"><span class="tag">터미널</span><code>$ moai tui</code></p>
+      </div>
+      <div class="scene-media">
+        <div class="window term"><div class="bar"><i></i><i></i><i></i><span>moai tui</span></div>
+          <div class="cast" data-cast="../assets/media/tui-lifecycle.cast" data-cols="120" data-rows="34" role="figure" aria-label="백로그에 생긴 카드가 보드를 가로질러 Done까지 가는 화면"></div></div>
+      </div>
+    </article>
+  </div>
+</section>
+
+<section class="cta">
+  <div class="wrap">
+    <h2>에이전트에게<br>일할 자리를 주세요.</h2>
+    <p>한 줄로 설치하고, 터미널에서는 <code>moai tui</code>, 브라우저에서는 <code>moai web</code>으로 시작하세요.</p>
+    <div class="install">
+      <code><span class="p">$ </span>curl -fsSL https://raw.githubusercontent.com/buzzni/moai/main/install.sh | sh</code>
+      <button class="copy" data-copy="curl -fsSL https://raw.githubusercontent.com/buzzni/moai/main/install.sh | sh" data-copied="복사됨">복사</button>
+    </div>
+    <p class="meta" style="margin-top:14px">Windows는 <a href="https://github.com/buzzni/moai#windows"><code>install.ps1</code></a>을 씁니다.</p>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <img src="../assets/logo.svg" alt="moai">
+    <span>MIT · © 2026 Buzzni Inc.</span>
+    <div class="links">
+      <a href="../docs/" hreflang="en">문서</a>
+      <a href="../changelog/" hreflang="en">변경 기록</a>
+      <a href="guide/">사용 방법</a>
+      <a href="https://discord.gg/hCfQ76uX3t">Discord</a>
+      <a href="https://github.com/buzzni/moai">GitHub</a>
+    </div>
+  </div>
+</footer>
+
+<script src="../assets/vendor/asciinema-player.min.js"></script>
+<script src="../assets/site.js"></script>
+</body>
+</html>

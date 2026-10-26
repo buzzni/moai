@@ -88,25 +88,53 @@ impl Key {
         KeyEvent::new(self.code, self.want)
     }
 
-    /// 사람에게 대는 한 키의 이름 — 메뉴의 줄과 테두리(`SPC v`).
-    pub fn name(self) -> String {
-        name_of(self.code)
+    /// 사람이 파일(`keys.toml`, moai-l8qb)에 적은 키 하나를 표의 키로 — [`parse`] 가 읽은 모양이다.
+    ///
+    /// - **글자는 Ctrl·Alt 를 정확히 견준다** — [`Key::plain`]·[`Key::chord`] 와 같은 자다. `Alt-x` 도 그렇게 선다
+    /// - **수식키 없는 비글자 키는 그 표의 꼴(`plain`)을 따른다.** 탐색·통계·위키는 [`Key::any`], 고르기 창은
+    ///   [`Key::bare`] 다 — 그 갈림에는 까닭이 있다([`STATS`] 의 글). 파일이 `Down` 을 적었다고 그 까닭을 지우지 않는다.
+    ///   `Tab` 만은 늘 [`Key::unshift`] 다 — Shift-Tab 은 다른 키다
+    /// - 수식키가 붙은 비글자 키(`Ctrl-Down`·`Shift-Tab`)는 Ctrl·Alt·SHIFT 를 다 정확히 견준다
+    pub fn written(k: KeyEvent, plain: fn(KeyCode) -> Key) -> Key {
+        let (code, mods) = normal(k);
+        match code {
+            KeyCode::Char(_) => Key { code, want: mods.intersection(CTRL_ALT), care: CTRL_ALT },
+            KeyCode::Tab if mods.is_empty() => Key::unshift(KeyCode::Tab),
+            _ if mods.is_empty() => plain(code),
+            _ => Key { code, want: mods, care: CTRL_ALT.union(KeyModifiers::SHIFT) },
+        }
     }
 }
 
 /// 누른 꼴 그대로의 한 키 이름 — **수식키까지** 적는다(`Ctrl-w`). [`name_of`] 는 글자만 읽으므로,
 /// 수식키가 붙은 접두어를 기다리는 동안 그것으로 적으면 바가 `Ctrl-w` 를 맨 `w` 라고 대고(그 키는
 /// 아무 일도 안 한다), 읽은 사람은 안 듣는 키를 누른다(리뷰). [`parse`] 가 거꾸로 읽는 이름과 같다.
+///
+/// **SHIFT 는 비글자 키에만 적는다**(`Shift-Tab`) — 글자는 대문자가 곧 SHIFT 다([`Key`]).
 pub fn name_of_key(k: KeyEvent) -> String {
+    let (code, mods) = normal(k);
     let mut out = String::new();
-    if k.modifiers.contains(KeyModifiers::CONTROL) {
+    if mods.contains(KeyModifiers::CONTROL) {
         out.push_str("Ctrl-");
     }
-    if k.modifiers.contains(KeyModifiers::ALT) {
+    if mods.contains(KeyModifiers::ALT) {
         out.push_str("Alt-");
     }
-    out.push_str(&name_of(k.code));
+    if mods.contains(KeyModifiers::SHIFT) {
+        out.push_str("Shift-");
+    }
+    out.push_str(&name_of(code));
     out
+}
+
+/// 키 열 하나의 이름 — 키마다 [`name_of_key`] 를 띄어 잇는다(`SPC v d`·`Ctrl-w w`). **같은 맨 글자 둘은 붙인다**
+/// (`gg`) — 표의 이름이 그렇게 적혀 있고, [`parse_seq`] 가 둘 다 읽는다. 파일에서 온 줄(moai-l8qb)의 이름이 이것이다.
+pub fn name_of_seq(seq: &[Key]) -> String {
+    let names: Vec<String> = seq.iter().map(|k| name_of_key(k.event())).collect();
+    match &names[..] {
+        [a, b] if a == b && a.len() == 1 && a.chars().all(|c| c.is_ascii_alphabetic()) => format!("{a}{b}"),
+        _ => names.join(" "),
+    }
 }
 
 /// 한 키의 이름. [`parse`] 가 거꾸로 읽는 이름과 같다 — SPC 는 `SPC`, 글자는 그 글자.
@@ -118,6 +146,8 @@ pub fn name_of(code: KeyCode) -> String {
         KeyCode::Esc => "Esc".into(),
         KeyCode::Backspace => "Bksp".into(),
         KeyCode::Tab => "Tab".into(),
+        // `F(5)` 가 아니라 `F5` — [`parse`] 가 읽는 철자다.
+        KeyCode::F(n) => format!("F{n}"),
         other => format!("{other:?}"),
     }
 }
@@ -239,7 +269,9 @@ pub fn next_keys<A: Copy + PartialEq>(table: &[Bind<A>], held: &[KeyEvent]) -> V
     for b in table.iter().filter(|b| {
         b.label.is_some() && b.seq.len() == held.len() + 1 && b.seq.iter().zip(held).all(|(key, k)| key.matches(*k))
     }) {
-        let name = b.seq[held.len()].name();
+        // **수식키까지 댄다**(`name_of_key`) — 사람의 키 파일(moai-pxiy)이 접두어 뒤에 `Alt-x` 를 두면 `x` 로 대는 이름은
+        // 안 듣는 키다.
+        let name = name_of_key(b.seq[held.len()].event());
         if !out.iter().any(|(n, _)| *n == name) {
             out.push((name, b.act));
         }
@@ -265,6 +297,14 @@ pub fn move_word(m: Move, lang: Lang) -> &'static str {
 /// 동작에 붙은 키 이름. 여럿이면 `·` 로 잇는다(`j·k`).
 pub fn label<A: Copy + PartialEq>(table: &[Bind<A>], act: A) -> String {
     labels(table, &[act])
+}
+
+/// **말 속에 넣는** 동작의 키 이름 — [`label`] 과 같되, 사람의 키 파일이 그 동작의 키를 뗐으면(`"none"`, moai-pxiy)
+/// `(none)` 이다. 바의 칸은 [`label`] 을 쓴다: 빈 이름의 칸은 안 선다. 말은 빈 이름으로 두면 "`  로 다시 담는다`" 처럼
+/// 낱말이 빠진 글이 된다. 도움말의 틀(`keymap::fill_names`)과 같은 낱말이다.
+pub fn said<A: Copy + PartialEq>(table: &[Bind<A>], act: A) -> String {
+    let l = label(table, act);
+    if l.is_empty() && !table.iter().any(|b| b.act == act) { "(none)".to_string() } else { l }
 }
 
 /// 동작 여럿의 키 이름을 `·` 로 잇는다(`j·k`).
@@ -359,16 +399,82 @@ pub enum Browse {
     ReadAll,
     /// 커서가 선 줄이 든 묶음(에픽·마일스톤)의 멤버 전부.
     ReadGroup,
+    /// 간트의 날짜 축을 움직인다(moai-i4hf.27r). **간트 배치에서만 선다** — 목록·보드에서는 조용하다.
+    Gantt(Pan),
+    /// 커서 줄의 계획을 하루 옮긴다(moai-i4hf.9xi) — **트래커에 쓴다**. 간트 배치에서만 선다.
+    Plan(Nudge),
+    /// 키 목록 창을 연다 — `?`·`SPC h`(moai-ucyr). SPC 로 시작하지 않는 키(`r`·`h`·`Tab`·간트의 키)는 이 창 말고는
+    /// 화면 어디에도 안 선다.
+    Help,
+}
+
+/// 계획을 하루 옮기는 쪽(moai-i4hf.9xi). **조각이라 줄을 모른다** — 어느 날이 옮는지는 `model::Issue::shifted` 가 정한다.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Nudge {
+    /// 막대 전체를 하루 앞으로.
+    Earlier,
+    Later,
+    /// 시작만 하루 앞으로.
+    StartEarlier,
+    StartLater,
+}
+
+impl Nudge {
+    /// 키 파일의 이름과 화면 낱말의 열쇠가 함께 쓰는 꼬리.
+    pub fn name(self) -> &'static str {
+        match self {
+            Nudge::Earlier => "earlier",
+            Nudge::Later => "later",
+            Nudge::StartEarlier => "start_earlier",
+            Nudge::StartLater => "start_later",
+        }
+    }
+}
+
+/// 간트의 날짜 축 — 확대·좌우·오늘·맞춤(moai-i4hf.27r). **조각이라 위젯의 상태를 모른다** — `App` 이 잇는다.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Pan {
+    /// 한 단계 곱게(Month → Week → Day → Hour).
+    ZoomIn,
+    ZoomOut,
+    /// 한 칸 과거 쪽으로.
+    Left,
+    Right,
+    /// 한 쪽(날짜 칸 폭에서 한 칸 뺀 만큼) 과거 쪽으로.
+    PageLeft,
+    PageRight,
+    /// 오늘을 가운데로.
+    Today,
+    /// 보이는 줄의 날이 한 화면에 들게 — 범위가 바뀌면 다시 맞춘다.
+    Fit,
+}
+
+impl Pan {
+    /// 키 파일의 이름과 화면 낱말의 열쇠가 함께 쓰는 꼬리.
+    pub fn name(self) -> &'static str {
+        match self {
+            Pan::ZoomIn => "zoom_in",
+            Pan::ZoomOut => "zoom_out",
+            Pan::Left => "left",
+            Pan::Right => "right",
+            Pan::PageLeft => "page_left",
+            Pan::PageRight => "page_right",
+            Pan::Today => "today",
+            Pan::Fit => "fit",
+        }
+    }
 }
 
 /// 탐색기가 보이는 화면(moai-z46r) — `SPC g` 가 고른다. 다음 화면은 여기 하나와 `SPC g <글자>` 줄 하나를 더해 든다.
 ///
-/// **목록과 보드는 한 화면의 두 배치다**(moai-9nfw) — 커서·거름망·보기·상세가 한 벌이고, 고른 배치는
-/// `[tui] layout` 에 남는다. **통계와 위키는 열 때마다 새로 여는 창이다** — 설정에 안 남아, 껐다 켜면 목록이나 보드다.
+/// **목록·보드·간트는 한 화면의 세 배치다**(moai-9nfw·moai-i4hf) — 커서·거름망·보기·상세가 한 벌이고, 고른 배치는
+/// `[tui] layout` 에 남는다. **통계와 위키는 열 때마다 새로 여는 창이다** — 설정에 안 남아, 껐다 켜면 고른 배치다.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Screen {
     List,
     Board,
+    /// 펼친 목록 옆에 날짜 축과 막대(moai-i4hf).
+    Gantt,
     Stats,
     /// 프로젝트의 위키(moai-o3cb) — 읽기만 한다(2026-10-04 사용자 결정).
     Wiki,
@@ -380,6 +486,7 @@ impl Screen {
         match self {
             Screen::List => say(lang, "tui.menu.list"),
             Screen::Board => say(lang, "tui.menu.board"),
+            Screen::Gantt => say(lang, "tui.menu.gantt"),
             Screen::Stats => say(lang, "tui.menu.stats"),
             Screen::Wiki => say(lang, "tui.menu.wiki"),
         }
@@ -390,6 +497,7 @@ impl Screen {
         match self {
             Screen::List => say(lang, "tui.state.list"),
             Screen::Board => say(lang, "tui.state.board"),
+            Screen::Gantt => say(lang, "tui.state.gantt"),
             Screen::Stats => say(lang, "tui.state.stats"),
             Screen::Wiki => say(lang, "tui.state.wiki"),
         }
@@ -724,6 +832,7 @@ pub const BROWSE: &[Bind<Browse>] = {
         // 읽음은 손이 제일 자주 가는 것이라 **바로 누른다**(moai-z9pc). 옛 `r`(다시 읽기)은
         // moai-7sjm 이 `SPC r` 로 옮겨 이 자리가 비어 있었고, 그 `SPC r` 도 뒤에 걷었다(moai-en4u).
         row!(Read, Some("r"), Key::plain('r')),
+        row!(Help, Some("?"), Key::plain('?')),
         row!(ClearFilter, Some("Esc"), Key::any(C::Esc)),
         // `/` 는 바로 누르는 키이면서 메뉴에도 선다 — 이름은 바로 누르는 쪽 하나만 댄다.
         row!(Grep, None, LEADER, Key::plain('/')),
@@ -741,6 +850,9 @@ pub const BROWSE: &[Bind<Browse>] = {
         // — 화면들이 서로 오가는 자리라서다.
         row!(Go(Screen::List), Some("SPC g l"), LEADER, Key::plain('g'), Key::plain('l')),
         row!(Go(Screen::Board), Some("SPC g b"), LEADER, Key::plain('g'), Key::plain('b')),
+        // 간트는 `g`(gantt, moai-i4hf). 맨 `gg`(맨 위로)와는 리더가 달라 안 부딪는다 — `SPC g` 메뉴 안의 `g` 는
+        // 메뉴 항목이 이긴다.
+        row!(Go(Screen::Gantt), Some("SPC g g"), LEADER, Key::plain('g'), Key::plain('g')),
         row!(Go(Screen::Stats), Some("SPC g s"), LEADER, Key::plain('g'), Key::plain('s')),
         // 위키는 `w`(wiki, moai-o3cb) — 다음 화면은 이렇게 한 줄을 더해 든다(moai-z46r).
         row!(Go(Screen::Wiki), Some("SPC g w"), LEADER, Key::plain('g'), Key::plain('w')),
@@ -768,7 +880,7 @@ pub const BROWSE: &[Bind<Browse>] = {
         row!(Archived, Some("SPC v o"), LEADER, Key::plain('v'), Key::plain('o')),
         row!(ShowAll, Some("SPC v a"), LEADER, Key::plain('v'), Key::plain('a')),
         // 번호 줄은 첫 줄만 이름을 단다 — 도움말이 `SPC v 1` 과 "번호가 차례로 는다" 로 한 번에
-        // 대고, 메뉴는 이름이 아니라 키(`next.name()`)와 설정의 칸 이름을 세운다.
+        // 대고, 메뉴는 이름이 아니라 키(`name_of_key`)와 설정의 칸 이름을 세운다.
         row!(Column(0), Some("SPC v 1"), LEADER, Key::plain('v'), Key::plain('1')),
         row!(Column(1), None, LEADER, Key::plain('v'), Key::plain('2')),
         row!(Column(2), None, LEADER, Key::plain('v'), Key::plain('3')),
@@ -838,6 +950,10 @@ pub const BROWSE: &[Bind<Browse>] = {
         row!(Timezone, Some("SPC o t"), LEADER, Key::plain('o'), Key::plain('t')),
         // **마우스도 여기다** — 이슈도 줄도 안 건드리고 이 사람 화면을 어떻게 다루는가만 바꾼다(위의 자).
         row!(Mouse, Some("SPC o m"), LEADER, Key::plain('o'), Key::plain('m')),
+        // **키 목록은 두 키로 연다**(moai-ucyr, 2026-10-26 사용자 결정) — `?` 는 lazygit·k9s 의 버릇이고 `SPC h` 는
+        // doom 의 help 접두어다. 이름은 바로 누르는 `?` 하나만 댄다 — `/` 와 `SPC /` 처럼. **뿌리 메뉴의 끝 칸이다** —
+        // 가장 드물게 누르는 것이고, 낮은 창에서 메뉴가 한 줄로 접힐 때 앞 칸들을 밀어내지 않는다.
+        row!(Help, None, LEADER, Key::plain('h')),
     ]
 };
 
@@ -892,6 +1008,8 @@ pub struct Ctx {
     /// 목록을 보드로 세웠는가(moai-9nfw). `h`·`l` 이 옆 칸으로 가고 `Tab` 이 조용해진다 — 프로젝트 머리줄(`head`)만
     /// 빼고다.
     pub board: bool,
+    /// 목록을 간트로 세웠는가(moai-i4hf). 줄 키(`j`·`k`·`h`·`l`·`Tab`)는 목록과 같고, 날짜 축의 키가 이때만 선다.
+    pub gantt: bool,
     /// 통계 창이 떠 있는가(moai-z46r). **메뉴에는 화면 고르기(`SPC g`)만 서고**, 메뉴를 닫는 이동키는 창을 굴린다 —
     /// 창이 목록과 상세를 통째로 덮어, 그 밖의 항목은 눌러도 보이는 것이 없다.
     pub stats: bool,
@@ -917,17 +1035,61 @@ pub struct Ctx {
     pub right_pane: &'static str,
     pub up_pane: &'static str,
     pub down_pane: &'static str,
+    /// 실행 중의 키 표(moai-bzm3) — 사람의 `keys.toml` 이 바꾼 것. 거절문과 메뉴가 **누르는 표와 같은 표**의
+    /// 이름을 댄다. 기본값은 기본 표다.
+    pub keys: Keymap,
+}
+
+/// 실행 중의 키 표 — 사람의 키 파일(`keys.toml`, [`super::keymap`])이 바꾼 표는 새로 짓고, 안 바꾼 표는 기본 표
+/// 그대로다. **`&'static` 이다**: 시작 때 한 번 지어 새게 둔다 — 한 프로세스에 한 번이라 샘이 아니고, 그래야
+/// [`lookup`]·[`label`] 이 오늘의 서명 그대로 받는다.
+///
+/// **든 쪽이 들고 건넨다**(`App::keys` → [`Ctx::keys`]·창). 전역에 두지 않는다 — 이 조각은 `KeyEvent` 와 넘겨받은
+/// 값만 안다(맨 위의 글). 못 바꾸는 표(Ctrl-C·글칸·경로 칸·담기 폼)는 여기 없다.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Keymap {
+    pub browse: &'static [Bind<Browse>],
+    /// 간트 배치에서만 먼저 찾는 표(moai-l80o) — [`GANTT`].
+    pub gantt: &'static [Bind<Browse>],
+    pub menu: &'static [Bind<Menu>],
+    pub sorter: &'static [Bind<Sorter>],
+    pub pick: &'static [Bind<Pick>],
+    pub stats: &'static [Bind<Stat>],
+    pub wiki: &'static [Bind<Wiki>],
+    pub links: &'static [Bind<Link>],
+    pub confirm: &'static [Bind<Confirm>],
+}
+
+impl Default for Keymap {
+    fn default() -> Keymap {
+        Keymap {
+            browse: BROWSE,
+            gantt: GANTT,
+            menu: MENU,
+            sorter: SORTER,
+            pick: PICK,
+            stats: STATS,
+            wiki: WIKI,
+            links: LINKS,
+            confirm: CONFIRM,
+        }
+    }
 }
 
 impl Ctx {
     /// 지금 화면 — 덮는 창(통계·위키)이 떠 있으면 그 창, 아니면 고른 배치다. **따로 들지 않는다**: 창과 배치가 이미
     /// 그 답을 든다. 두 창은 한 모드라 함께 서지 않는다(`Mode::Stats`·`Mode::Wiki`).
     pub fn screen(&self) -> Screen {
-        match (self.stats, self.wiki, self.board) {
-            (true, _, _) => Screen::Stats,
-            (false, true, _) => Screen::Wiki,
-            (false, false, true) => Screen::Board,
-            (false, false, false) => Screen::List,
+        if self.stats {
+            Screen::Stats
+        } else if self.wiki {
+            Screen::Wiki
+        } else if self.board {
+            Screen::Board
+        } else if self.gantt {
+            Screen::Gantt
+        } else {
+            Screen::List
         }
     }
 }
@@ -962,9 +1124,18 @@ impl Browse {
             //
             // **위키 창도 같고, 원문·그린 글 하나가 더 선다**(moai-o3cb) — 창의 본문이 마크다운이다. 아래 상세 칸의
             // 갈래(`!c.detail`)보다 먼저 선다: 상세를 숨긴 사람의 위키 창에서도 그 토글은 본문을 바꾼다.
-            Go(_) | Step(_) if c.stats || c.wiki => Ok(()),
+            // 키 목록(`SPC h`)도 선다(moai-ucyr) — 창 위에 뜨는 창이라 덮인 창을 안 걷는다.
+            Go(_) | Step(_) | Help if c.stats || c.wiki => Ok(()),
             Raw if c.wiki => Ok(()),
             _ if c.stats || c.wiki => Err(Off::Quiet),
+            // 간트의 날짜 축은 간트에서만 — 포커스와 상관없다: 상세를 읽다가도 축은 옮긴다(moai-i4hf.27r).
+            Gantt(_) if c.gantt => Ok(()),
+            Gantt(_) => Err(Off::Quiet),
+            // 계획 옮기기는 **목록 칸의 줄에** 쓴다 — 상세를 읽다 누른 `>` 가 보이지 않는 막대를 옮기면 안 된다. 한눈 보기의
+            // 줄은 남의 프로젝트라 그 안으로 들어가서 옮긴다.
+            Plan(_) if !c.gantt || !c.list_focus => Err(Off::Quiet),
+            Plan(_) if c.layer => Err(Off::Why(say(c.lang, "tui.gantt.layer").into())),
+            Plan(_) => Ok(()),
             Enter | Leave | Expand | Collapse | ExpandAll if !c.list_focus => Err(Off::Quiet),
             // **보드에서 `h`·`l` 은 옆 칸이고 `Tab` 은 펼칠 것이 없다**(moai-9nfw) — 보드에는 카드만 서고 묶음 줄이
             // 없다. 펼침의 켜짐(`group`·`expanded`)으로 가르면 카드 위에서 `l` 이 늘 꺼져 옆 칸으로 못 간다.
@@ -995,7 +1166,7 @@ impl Browse {
             // 애초에 위가 없던 자리다: 거기서 말하면 있지도 않은 길을 말하는 셈이다.
             Leave if c.root && c.projects > 0 => Err(Off::Why(fill(
                 say(c.lang, "tui.off.leave_dir_only"),
-                &[("leave", &label(BROWSE, Leave)), ("project", &label(BROWSE, Project(0)))],
+                &[("leave", &said(c.keys.browse, Leave)), ("project", &said(c.keys.browse, Project(0)))],
             ))),
             Leave if c.root => Err(Off::Quiet),
             // **머리줄에서만 선다**(리뷰) — 뺄 것은 프로젝트고, 한눈 보기의 이슈 줄에서 누르면
@@ -1003,7 +1174,7 @@ impl Browse {
             // 메뉴에 안 세운다(아래 `Raw` 와 같은 까닭).
             Unregister if !(c.layer && c.list_focus && !c.on_row) => Err(Off::Quiet),
             Grep | Filter if c.layer => {
-                Err(Off::Why(fill(say(c.lang, "tui.off.filter_inside"), &[("enter", &label(BROWSE, Enter))])))
+                Err(Off::Why(fill(say(c.lang, "tui.off.filter_inside"), &[("enter", &said(c.keys.browse, Enter))])))
             }
             Worktree if c.layer => Err(Off::Quiet),
             // **층에는 읽을 줄이 없다**(moai-j038.vna) — 층의 줄은 프로젝트고 안 읽은 줄은 들어간 프로젝트의
@@ -1188,6 +1359,7 @@ impl Browse {
             Unregister => say(c.lang, "tui.act.unregister"),
             Go(Screen::List) => say(c.lang, "tui.act.list"),
             Go(Screen::Board) => say(c.lang, "tui.act.board"),
+            Go(Screen::Gantt) => say(c.lang, "tui.act.gantt"),
             Go(Screen::Stats) => say(c.lang, "tui.act.stats"),
             Go(Screen::Wiki) => say(c.lang, "tui.act.wiki"),
             ClearFilter => say(c.lang, "tui.act.clear_filter"),
@@ -1211,6 +1383,19 @@ impl Browse {
             Timezone => say(c.lang, "tui.act.timezone"),
             Mouse => say(c.lang, "tui.act.mouse"),
             Read | ReadAll | ReadGroup => say(c.lang, "tui.act.read"),
+            Help => say(c.lang, "tui.act.help"),
+            Gantt(Pan::ZoomIn) => say(c.lang, "tui.act.gantt_zoom_in"),
+            Gantt(Pan::ZoomOut) => say(c.lang, "tui.act.gantt_zoom_out"),
+            Gantt(Pan::Left) => say(c.lang, "tui.act.gantt_left"),
+            Gantt(Pan::Right) => say(c.lang, "tui.act.gantt_right"),
+            Gantt(Pan::PageLeft) => say(c.lang, "tui.act.gantt_page_left"),
+            Gantt(Pan::PageRight) => say(c.lang, "tui.act.gantt_page_right"),
+            Gantt(Pan::Today) => say(c.lang, "tui.act.gantt_today"),
+            Gantt(Pan::Fit) => say(c.lang, "tui.act.gantt_fit"),
+            Plan(Nudge::Earlier) => say(c.lang, "tui.act.nudge_earlier"),
+            Plan(Nudge::Later) => say(c.lang, "tui.act.nudge_later"),
+            Plan(Nudge::StartEarlier) => say(c.lang, "tui.act.nudge_start_earlier"),
+            Plan(Nudge::StartLater) => say(c.lang, "tui.act.nudge_start_later"),
         }
     }
 }
@@ -1381,6 +1566,32 @@ pub enum Stat {
     Bucket,
     Close,
 }
+
+/// 간트 배치의 키(moai-i4hf.27r·9xi) — 날짜 축과 계획 옮기기. **탐색의 표([`BROWSE`])와 따로다**(moai-l80o, 사람 결정
+/// 2026-10-25): 간트에서는 이 표를 먼저 찾고(`menu::feed`), 목록·보드에서는 안 찾는다. 그래서 겹침도 이 표 안에서만
+/// 센다 — `keys.toml` 의 `[browse] expand = "L"` 은 목록·보드에서 그대로 살고, 간트에서는 `L` 이 간트의 키다.
+///
+/// **한 키씩만 받는다** — 간트에서 이 표가 탐색의 표보다 먼저 한 키로 찾기 때문이다. 키 열을 주면 그 줄은 첫 키에서
+/// 탐색의 표로 넘어가 영영 안 듣는다. 바로 누르는 키라 이동키처럼 손이 자주 간다. `+` 는 `=` 와 같다 — 같은 자판의
+/// Shift 다. 기한만 옮기는 것은 끌기(오른쪽 끝)다.
+pub const GANTT: &[Bind<Browse>] = {
+    use Browse::{Gantt, Plan};
+    &[
+        row!(Gantt(Pan::ZoomOut), Some("-"), Key::plain('-')),
+        row!(Gantt(Pan::ZoomIn), Some("="), Key::plain('=')),
+        row!(Gantt(Pan::ZoomIn), None, Key::plain('+')),
+        row!(Gantt(Pan::Left), Some("H"), Key::plain('H')),
+        row!(Gantt(Pan::Right), Some("L"), Key::plain('L')),
+        row!(Gantt(Pan::PageLeft), Some("["), Key::plain('[')),
+        row!(Gantt(Pan::PageRight), Some("]"), Key::plain(']')),
+        row!(Gantt(Pan::Today), Some("t"), Key::plain('t')),
+        row!(Gantt(Pan::Fit), Some("z"), Key::plain('z')),
+        row!(Plan(Nudge::Earlier), Some("<"), Key::plain('<')),
+        row!(Plan(Nudge::Later), Some(">"), Key::plain('>')),
+        row!(Plan(Nudge::StartEarlier), Some("{"), Key::plain('{')),
+        row!(Plan(Nudge::StartLater), Some("}"), Key::plain('}')),
+    ]
+};
 
 /// **`q` 는 안 둔다** — 고르기 창에서 걷은 까닭(moai-en4u)이 여기도 선다: 탐색에서 `q` 가 아무것도 안 하는데
 /// 창에서만 닫으면 같은 글자가 자리마다 뜻이 갈린다. 닫는 것은 다른 창과 같은 Esc 다.
@@ -1634,7 +1845,9 @@ pub const CONFIRM: &[Bind<Confirm>] =
 /// 사람이 적는 키 이름을 키 **열**로 푼다 — `g p` 는 띄어 적은 둘, `gg` 는 같은 글자 둘.
 /// 키 이름이 아니면 `None`. 같은 글자 둘만 붙여 읽는다 — `Tab` 같은 이름을 글자 셋으로 읽지
 /// 않고, 도움말의 낱말(`to`)이 키 열로 잡히지 않게.
-#[cfg(test)]
+///
+/// **키 이름을 읽는 자는 이것 하나다**(moai-l8qb) — 시험이 표의 이름을 재는 것도, `keys.toml` 을 읽는 것도
+/// 이것이다. 둘이 갈리면 표에 적힌 이름을 파일에 옮겨 적었는데 안 읽히는 판이 선다.
 pub fn parse_seq(name: &str) -> Option<Vec<KeyEvent>> {
     if name.contains(' ') {
         return name.split(' ').map(parse).collect();
@@ -1653,45 +1866,58 @@ pub fn parse_seq(name: &str) -> Option<Vec<KeyEvent>> {
 
 /// 사람이 적는 키 이름을 키로 푼다 — 표의 이름과 도움말의 낱말이 정말 그 키인지 시험이 잰다.
 /// 키 이름이 아니면 `None`.
-#[cfg(test)]
+///
+/// - 수식키는 앞에 붙는다: `Ctrl-`·`Alt-`·`Shift-`. [`name_of_key`] 가 적는 차례(`Ctrl-Alt-x`)로 다시 읽힌다
+/// - **철자는 표의 이름 그대로다**(`Enter`·`Esc`·`SPC`) — `enter` 는 키가 아니다. 관대하게 읽으면 도움말 시험
+///   (`every_key_the_help_names_is_in_a_table`)이 글 속의 `end`·`up` 을 키로 읽는다. 틀린 철자는 파일을 읽을 때
+///   그 줄을 대며 알린다(moai-l8qb)
+/// - Ctrl 뒤의 글자는 소문자로 읽는다 — 터미널이 Ctrl-S 를 `s` 로 보낸다
+/// - **글자에 `Shift-` 를 붙이지 않는다** — 대문자가 곧 그 키다([`Key`]). 붙이면 키가 아니다
 pub fn parse(name: &str) -> Option<KeyEvent> {
     use KeyModifiers as M;
-    let named = |code| Some(KeyEvent::new(code, M::NONE));
-    if let Some(rest) = name.strip_prefix("Ctrl-") {
-        let mut cs = rest.chars();
-        return match (cs.next(), cs.next()) {
-            (Some(c), None) => Some(KeyEvent::new(KeyCode::Char(c.to_ascii_lowercase()), M::CONTROL)),
-            _ => None,
+    let mut mods = M::NONE;
+    let mut rest = name;
+    while let Some((head, tail)) = rest.split_once('-').filter(|(_, tail)| !tail.is_empty()) {
+        let m = match head {
+            "Ctrl" => M::CONTROL,
+            "Alt" => M::ALT,
+            "Shift" => M::SHIFT,
+            _ => break,
         };
+        mods |= m;
+        rest = tail;
     }
-    match name {
-        "Enter" => named(KeyCode::Enter),
-        "Esc" => named(KeyCode::Esc),
-        "Tab" => named(KeyCode::Tab),
-        "Shift-Tab" => Some(KeyEvent::new(KeyCode::Tab, M::SHIFT)),
-        "BackTab" => named(KeyCode::BackTab),
-        "Bksp" | "Backspace" => named(KeyCode::Backspace),
-        "Delete" => named(KeyCode::Delete),
-        "Up" => named(KeyCode::Up),
-        "Down" => named(KeyCode::Down),
-        "Left" => named(KeyCode::Left),
-        "Right" => named(KeyCode::Right),
-        "Home" => named(KeyCode::Home),
-        "End" => named(KeyCode::End),
-        "PageUp" | "PgUp" => named(KeyCode::PageUp),
-        "PageDown" | "PgDn" => named(KeyCode::PageDown),
-        "SPC" => named(KeyCode::Char(' ')),
+    let code = match rest {
+        "Enter" => KeyCode::Enter,
+        "Esc" => KeyCode::Esc,
+        "Tab" => KeyCode::Tab,
+        "BackTab" => KeyCode::BackTab,
+        "Bksp" | "Backspace" => KeyCode::Backspace,
+        "Delete" => KeyCode::Delete,
+        "Insert" => KeyCode::Insert,
+        "Up" => KeyCode::Up,
+        "Down" => KeyCode::Down,
+        "Left" => KeyCode::Left,
+        "Right" => KeyCode::Right,
+        "Home" => KeyCode::Home,
+        "End" => KeyCode::End,
+        "PageUp" | "PgUp" => KeyCode::PageUp,
+        "PageDown" | "PgDn" => KeyCode::PageDown,
+        "SPC" => KeyCode::Char(' '),
         _ => {
-            if let Some(n) = name.strip_prefix('F').and_then(|n| n.parse::<u8>().ok()) {
-                return named(KeyCode::F(n));
-            }
-            let mut cs = name.chars();
+            let mut cs = rest.chars();
             match (cs.next(), cs.next()) {
-                (Some(c), None) if c.is_ascii_graphic() => named(KeyCode::Char(c)),
-                _ => None,
+                (Some(c), None) if c.is_ascii_graphic() => {
+                    if mods.contains(M::SHIFT) {
+                        return None;
+                    }
+                    KeyCode::Char(if mods.contains(M::CONTROL) { c.to_ascii_lowercase() } else { c })
+                }
+                _ => KeyCode::F(rest.strip_prefix('F')?.parse::<u8>().ok()?),
             }
         }
-    }
+    };
+    Some(KeyEvent::new(code, mods))
 }
 
 #[cfg(test)]
@@ -2043,6 +2269,7 @@ mod tests {
         }
         each("anywhere", ANYWHERE);
         each("browse", BROWSE);
+        each("gantt", GANTT);
         each("prompt", PROMPT);
         each("pick", PICK);
         each("path", PATH);
@@ -2052,6 +2279,23 @@ mod tests {
         each("stats", STATS);
         each("wiki", WIKI);
         each("links", LINKS);
+    }
+
+    /// **기본 간트 키는 기본 탐색 키를 안 가린다**(moai-l80o 리뷰) — 간트에서는 [`GANTT`] 를 먼저 한 키로 찾으니, 두 표가
+    /// 따로 서면서 놓친 겹침(같은 표일 때 위 시험이 재던 것)을 여기서 잰다. 사람의 줄은 `keymap` 이 런타임에 잰다.
+    #[test]
+    fn the_default_gantt_keys_hide_no_default_browse_key() {
+        for g in GANTT {
+            for b in BROWSE {
+                let (gk, bk) = (g.seq[0], b.seq[0]);
+                assert!(
+                    !bk.matches(gk.event()) && !gk.matches(bk.event()),
+                    "간트의 {:?} 가 탐색의 {:?} 를 가린다",
+                    g.act,
+                    b.act
+                );
+            }
+        }
     }
 
     /// **화면은 `SPC g` 가 고른다**(moai-z46r, 2026-10-04 사용자 결정) — `l` 목록·`b` 보드·`s` 통계. 옛 자리
@@ -2133,6 +2377,7 @@ mod tests {
         }
         each("anywhere", ANYWHERE);
         each("browse", BROWSE);
+        each("gantt", GANTT);
         each("prompt", PROMPT);
         each("pick", PICK);
         each("path", PATH);
@@ -2349,7 +2594,7 @@ mod tests {
             "SPC s p",
             "SPC",
             "Enter",
-            "Backspace",
+            "Bksp",
             "Shift-Tab",
             "j",
             "k",
@@ -2374,8 +2619,8 @@ mod tests {
     /// **표에 이름 붙은 키는 `moai tui --help` 가 댄다**(moai-3l4l) — 위 시험의 거꾸로다. 위만 있으면
     /// 표에 키를 더하고 도움말을 안 고쳐도 지나가, 도움말이 표의 절반만 대는 채로 낡는다(F5·F3·`/`·
     /// `f`·`w` 가 그렇게 빠져 있었다). 숨은 별칭(`label: None`)은 안 본다 — 바에도 메뉴에도 안
-    /// 서는 키라 도움말이 대지 않는 것이 맞다. 이름은 **키 열로** 견준다: 표의 `Bksp` 를 도움말은
-    /// `Backspace` 로 적는다.
+    /// 서는 키라 도움말이 대지 않는 것이 맞다. 이름은 **키 열로** 견준다 — 도움말의 이름은 이제 표에서
+    /// 채운다(moai-aqmg, `{key:…}` 틀)지만, 틀 밖에 남은 글(검색 칸의 키)은 사람이 적은 그대로다.
     ///
     /// **표마다 그 표를 말하는 문단 안에서만 찾는다**(moai-psqc). 도움말 어디에든 있으면 되던
     /// 때는 여러 표가 함께 쓰는 Enter·Esc·Tab·Bksp 가 한 번만 적혀도 모든 표에서 지나가, 검색
@@ -2434,10 +2679,10 @@ mod tests {
                 &["Enter", "Esc"][..],
                 &["PATH: Enter", "PATH: Esc"][..],
             ),
-            // 거꾸로 — 목록이 검색 칸 문장의 Enter, SPC 메뉴 문장의 Backspace 로 지나가면 안 된다.
+            // 거꾸로 — 목록이 검색 칸 문장의 Enter, SPC 메뉴 문장의 Bksp 로 지나가면 안 된다.
             (
-                &[("Enter goes in, Backspace comes back out", "it goes in and comes back out")][..],
-                &["Enter", "Backspace"][..],
+                &[("Enter goes in, Bksp comes back out", "it goes in and comes back out")][..],
+                &["Enter", "Bksp"][..],
                 &["BROWSE: Enter", "BROWSE: Bksp"][..],
             ),
             // 거꾸로 — 고르기 창이 경로 칸 문장의 Esc 로 지나가면 안 된다.
@@ -2476,6 +2721,8 @@ mod tests {
     const LIST: &str = "j and k or the arrow keys move";
     /// SPC 메뉴 문단.
     const SPC: &str = "The rest lives in the menu";
+    /// 간트 배치 문단 — 날짜 축 키가 여기 선다(moai-i4hf.27r).
+    const GANTT_PAR: &str = "SPC g g lays the same rows out as a gantt chart";
     /// 고르기 창·경로 칸·목록에서 빼기 문단.
     const PICKER: &str = "SPC p a opens a window";
     /// 생각 담기 문단.
@@ -2530,6 +2777,7 @@ mod tests {
     const SECTIONS: &[(&str, &[&str])] = &[
         ("ANYWHERE", &[SPC]),
         ("BROWSE", &[LIST, SPC]),
+        ("GANTT", &[GANTT_PAR]),
         ("PICK", &[PICKER]),
         ("JOT", &[JOTTING]),
         ("CONFIRM", &[PICKER, JOTTING]),
@@ -2572,9 +2820,10 @@ mod tests {
 
     /// `help` 에서 표마다 제 범위([`SENTENCES`]·[`SECTIONS`])가 안 대는 이름 붙은 키 — `표: 이름`.
     fn missing_in(help: &str) -> Vec<String> {
-        let tables: [(&str, Vec<(&'static str, &'static [Key])>); 12] = [
+        let tables: [(&str, Vec<(&'static str, &'static [Key])>); 13] = [
             ("ANYWHERE", named(ANYWHERE)),
             ("BROWSE", named(BROWSE)),
+            ("GANTT", named(GANTT)),
             ("MENU", named(MENU)),
             ("PROMPT", named(PROMPT)),
             ("PICK", named(PICK)),
@@ -2625,8 +2874,8 @@ mod tests {
     }
 
     fn tui_help() -> String {
-        use clap::CommandFactory;
-        let cli = crate::cli::Cli::command();
+        // 기본 표로 채운 글이다(moai-aqmg) — 틀(`{key:…}`) 그대로 재면 이름 붙은 키가 글에서 다 사라진다.
+        let cli = crate::cli::command(&Keymap::default());
         cli.find_subcommand("tui").and_then(|c| c.get_after_help()).map(|h| h.to_string()).expect("tui 도움말이 없다")
     }
 
@@ -2662,11 +2911,12 @@ mod tests {
         every(k).contains(&Lookup::Pending)
     }
 
-    fn every(k: &[KeyEvent]) -> [Lookup<()>; 12] {
+    fn every(k: &[KeyEvent]) -> [Lookup<()>; 13] {
         [
             bare(lookup(ANYWHERE, k)),
             bare(lookup(MENU, k)),
             bare(lookup(BROWSE, k)),
+            bare(lookup(GANTT, k)),
             bare(lookup(PICK, k)),
             bare(lookup(JOT, k)),
             bare(lookup(PROMPT, k)),

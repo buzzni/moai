@@ -36,6 +36,8 @@ export interface Row {
   assignee?: string
   assignee_email?: string
   blocked_by?: string[]
+  /** The gantt's values for this row (`tui --json --deep`'s `gantt`, carried over from the tree line; the gantt tab places them). */
+  gantt?: GanttRow
   /** CLI's unread verdict: `true` or absent (see read.ts). */
   unread?: boolean
   /** The nearest row that took this one out of the plan (`report::Shelf`): its own id when deferred itself. */
@@ -58,6 +60,28 @@ export interface TreeRow {
   progress?: { done: number; total: number }
   /** The handles from the root down to where it stands: ids, `none`, `lost`. */
   home?: string[]
+  /** The planned and actual spans (`report::gantt::Row`), on every row with an id. The page only places them. */
+  gantt?: GanttRow
+}
+
+/** `report::gantt::Row` as serialized. Every key stands; a value that is not there is `null`. */
+export interface GanttRow {
+  id: string
+  kind: string
+  /** Calendar days, either end may be missing; `from` is `own` or, on a group that wrote no day, `members`. */
+  planned: { start: string | null; end: string | null; from: 'own' | 'members' } | null
+  /** UTC instants. `unknown` is a start nobody recorded — not zero, not never. An open span has `end: null`. */
+  actual: { kind: 'not_started' } | { kind: 'unknown' } | { kind: 'span'; start: string; end: string | null }
+  progress: { kind: 'rollup'; done: number; total: number } | { kind: 'column'; name: string }
+  /**
+   * Days past the row's own deadline, `null` when not overdue. moai counts them in the zone the tree was asked in
+   * (`/api/tree?tz=`, the zone this page draws in, `SPC o t`) — or in its own zone when the machine it runs on cannot
+   * read that one (an offset, a name its tzdb lacks: src/web/mod.rs zone_for_child); the page places the verdict and
+   * never recounts it.
+   */
+  overdue: number | null
+  deferred: boolean
+  blocked_by: { id: string; state: string; root?: string; aside?: string[] }[]
 }
 
 /**
@@ -125,7 +149,7 @@ interface Place {
   under: number[]
 }
 
-const TREE_KEYS = ['title', 'kind', 'status', 'derived_status', 'priority'] as const
+const TREE_KEYS = ['title', 'kind', 'status', 'derived_status', 'priority', 'gantt'] as const
 
 export class IssueIndex {
   readonly rows: readonly Row[]
@@ -202,7 +226,8 @@ export class IssueIndex {
       }
       const own = printedFor(line.id, line)
       const row: Row = own ? { ...own } : { id: line.id, archived: true }
-      // The tree's keys fill what the list did not print (an archived row), never what it did.
+      // The tree's keys fill what the list did not print (an archived row; `gantt` on every row, as only the tree
+      // carries it), never what it did.
       for (const key of TREE_KEYS) if (row[key] === undefined && line[key] !== undefined) (row as Record<string, unknown>)[key] = line[key]
       placed.add(line.id)
       stand(row, home, line.dir === true, line.progress, segFor(line.id, kindOf(line)))

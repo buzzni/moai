@@ -23,7 +23,7 @@
 //! **조각이다.** `App`·터미널을 모른다. 켜짐([`Ctx`])은 든 쪽이 재서 넘긴다. 격자를 어떻게
 //! 놓는가([`grid`])도 여기서 폭과 높이만 받아 정하고, `draw.rs` 는 그 격자를 칠하기만 한다.
 
-use super::keys::{BROWSE, Bind, Browse, Chord, Ctx, LEADER, Lookup, MENU, Menu, Off, lookup, name_of_key};
+use super::keys::{Bind, Browse, Chord, Ctx, LEADER, Lookup, Menu, Off, lookup, name_of_key};
 use crate::i18n::{Lang, say};
 use crate::text::{clip, width};
 use ratatui::crossterm::event::KeyEvent;
@@ -39,7 +39,15 @@ pub fn open(chord: &Chord) -> bool {
 /// 이동키는 메뉴를 닫고 그 이동([`moves`]), **그 밖은 아무 일도 없다.**
 pub fn feed(chord: &mut Chord, c: &Ctx, k: KeyEvent) -> Option<Browse> {
     if !open(chord) {
-        return chord.feed(BROWSE, k);
+        // **간트에서는 간트의 표가 먼저다**(moai-l80o, 사람 결정 2026-10-25) — 기다리는 열이 없을 때 한 키로 찾는다. 그
+        // 표는 한 키씩만 받으니 열을 들 일이 없다. 목록·보드에서는 안 찾는다: 그래서 `[browse]` 에 같은 키를 쓴 줄이
+        // 거기서 그대로 산다.
+        if chord.held().is_empty()
+            && let Some(act) = gantt_first(c, k)
+        {
+            return Some(act);
+        }
+        return chord.feed(c.keys.browse, k);
     }
     // **연 키가 닫는다**(사용자 결정 2026-09-19) — doom·helix 의 버릇이고, 토글 층이 ESC 까지
     // 기다리면서 실제로 필요해졌다. 전에는 메뉴 안의 SPC 가 모르는 키라 아무 일도 없어, 눌러 본
@@ -50,7 +58,7 @@ pub fn feed(chord: &mut Chord, c: &Ctx, k: KeyEvent) -> Option<Browse> {
         chord.clear();
         return None;
     }
-    match lookup(MENU, &[k]) {
+    match lookup(c.keys.menu, &[k]) {
         Lookup::Run(Menu::Close) => {
             chord.clear();
             return None;
@@ -63,7 +71,7 @@ pub fn feed(chord: &mut Chord, c: &Ctx, k: KeyEvent) -> Option<Browse> {
     }
     let mut seq = chord.held().to_vec();
     seq.push(k);
-    match lookup(BROWSE, &seq) {
+    match lookup(c.keys.browse, &seq) {
         Lookup::Run(act) if act.enabled(c).is_ok() => {
             // **상태를 대는 동작은 메뉴를 안 닫는다**(사용자 결정 2026-09-19) — 눌러 보며
             // 맞추는 것이라, 한 번 받고 닫으면 `SPC v 1`·`SPC v w` 를 맞출 때마다 메뉴를 다시
@@ -91,7 +99,7 @@ pub fn feed(chord: &mut Chord, c: &Ctx, k: KeyEvent) -> Option<Browse> {
         // 메뉴만 지우고 아무 일도 안 하면 먹통으로 보인다. 까닭을 대는 것(`Off::Why`)은 닫고 알린다.
         Lookup::Unknown if moves(k, c) => {
             chord.clear();
-            chord.feed(BROWSE, k)
+            chord.feed(c.keys.browse, k)
         }
         _ => None,
     }
@@ -102,10 +110,27 @@ pub fn feed(chord: &mut Chord, c: &Ctx, k: KeyEvent) -> Option<Browse> {
 /// 안 든다. 판정은 키 표에서 읽고, 무엇이 이동인가는 [`Browse::moves`] 가 가른다 — 이동키를
 /// 더하면 여기도 따라온다.
 fn moves(k: KeyEvent, c: &Ctx) -> bool {
-    match lookup(BROWSE, &[k]) {
+    // 간트에서 간트의 키는 이동으로 안 샌다(moai-l80o 리뷰) — 메뉴 밖에서 그 키는 간트의 것이라, 메뉴를 닫으며 탐색의 표로
+    // 먹이면 `[browse] expand = "L"` 이 간트에서 메뉴를 거쳐서만 펼친다.
+    if gantt_first(c, k).is_some() {
+        return false;
+    }
+    match lookup(c.keys.browse, &[k]) {
         Lookup::Run(act) => act.moves() && act.enabled(c) != Err(Off::Quiet),
-        Lookup::Pending => BROWSE.iter().filter(|b| b.seq.len() > 1 && under(b, &[k])).all(|b| b.act.moves()),
+        Lookup::Pending => c.keys.browse.iter().filter(|b| b.seq.len() > 1 && under(b, &[k])).all(|b| b.act.moves()),
         Lookup::Unknown => false,
+    }
+}
+
+/// 간트에서 이 한 키가 간트의 표에서 무엇인가 — 탐색의 표보다 먼저 찾는다(moai-l80o). 통계·위키 창은 간트 위에 떠도
+/// 제 표로 받으니 안 찾는다.
+fn gantt_first(c: &Ctx, k: KeyEvent) -> Option<Browse> {
+    if !c.gantt || c.stats || c.wiki {
+        return None;
+    }
+    match lookup(c.keys.gantt, &[k]) {
+        Lookup::Run(act) => Some(act),
+        _ => None,
     }
 }
 
@@ -141,7 +166,9 @@ impl Entry {
 pub fn entries(held: &[KeyEvent], c: &Ctx, columns: &[String]) -> Vec<Entry> {
     let mut seen = Vec::new();
     let mut out = Vec::new();
-    for b in BROWSE.iter().filter(|b| b.seq.len() > held.len() && under(b, held)) {
+    for b in c.keys.browse.iter().filter(|b| b.seq.len() > held.len() && under(b, held)) {
+        // 칸의 이름은 **수식키까지** 댄다(`name_of_key`) — 사람의 키 파일(moai-pxiy)이 `SPC Alt-f` 를 두면 `f` 로 대는
+        // 칸은 눌러도 안 듣는다.
         let next = b.seq[held.len()];
         if seen.contains(&next) {
             continue;
@@ -149,18 +176,23 @@ pub fn entries(held: &[KeyEvent], c: &Ctx, columns: &[String]) -> Vec<Entry> {
         seen.push(next);
         let mut seq = held.to_vec();
         seq.push(next.event());
-        match lookup(BROWSE, &seq) {
+        match lookup(c.keys.browse, &seq) {
             Lookup::Run(act) if act.enabled(c).is_ok() => {
                 let what = match act {
                     // 설정에 이름이 없으면 표의 낱말로 — 낱말은 표 한 곳에만 둔다.
                     Browse::Column(n) => columns.get(usize::from(n)).map_or(act.menu_word(c), String::as_str),
                     _ => act.menu_word(c),
                 };
-                out.push(Entry { key: next.name(), event: next.event(), what: what.into(), state: act.state(c) });
+                out.push(Entry {
+                    key: name_of_key(next.event()),
+                    event: next.event(),
+                    what: what.into(),
+                    state: act.state(c),
+                });
             }
             Lookup::Pending if live(&seq, c) => {
                 let what = format!("+{}", group(&seq, c.lang));
-                out.push(Entry { key: next.name(), event: next.event(), what, state: here(&seq, c) });
+                out.push(Entry { key: name_of_key(next.event()), event: next.event(), what, state: here(&seq, c) });
             }
             _ => {}
         }
@@ -294,7 +326,7 @@ pub fn grid(items: &[Entry], room: usize, max_rows: usize) -> Grid {
 /// **`(접두어, 키)` 표로 두지 않는다.** 표에 키를 담고 `say(lang, key)` 를 한 번만 부르면
 /// `english_has_every_key_the_source_asks_for` 의 읽는 자가 그 키들을 못 봐, 표에만 있고
 /// 아무도 안 부르는 키로 선다.
-fn group(seq: &[KeyEvent], lang: Lang) -> &'static str {
+pub(super) fn group(seq: &[KeyEvent], lang: Lang) -> &'static str {
     match title(seq).as_str() {
         "SPC p" => say(lang, "tui.group.project"),
         "SPC g" => say(lang, "tui.group.screen"),
@@ -313,7 +345,7 @@ fn group(seq: &[KeyEvent], lang: Lang) -> &'static str {
 /// 화면 묶음인지는 **표에서 읽는다** — 그 밑의 줄이 모두 화면 고르기([`Browse::Go`])인 묶음이다. 접두어 글자로 가르면
 /// 글자를 옮기는 날 상태가 말없이 사라진다.
 fn here(seq: &[KeyEvent], c: &Ctx) -> Option<&'static str> {
-    let mut below = BROWSE.iter().filter(|b| b.seq.len() > seq.len() && under(b, seq)).peekable();
+    let mut below = c.keys.browse.iter().filter(|b| b.seq.len() > seq.len() && under(b, seq)).peekable();
     let screens = below.peek().is_some() && below.all(|b| matches!(b.act, Browse::Go(_)));
     screens.then(|| c.screen().state(c.lang))
 }
@@ -332,7 +364,8 @@ fn under(b: &Bind<Browse>, seq: &[KeyEvent]) -> bool {
 /// 아무 토글도 없는 층이 ESC 를 기다린다. 하위 층의 토글은 안 센다: 그 층은 제 차례에 스스로
 /// 답한다.
 pub fn waits(held: &[KeyEvent], c: &Ctx) -> bool {
-    BROWSE
+    c.keys
+        .browse
         .iter()
         .filter(|b| b.seq.len() == held.len() + 1 && under(b, held))
         .any(|b| b.act.stateful() && b.act.enabled(c).is_ok())
@@ -340,12 +373,13 @@ pub fn waits(held: &[KeyEvent], c: &Ctx) -> bool {
 
 /// 이 접두어 밑에 켜진 동작이 하나라도 있나 — 없으면 하위 접두어도 안 선다.
 fn live(seq: &[KeyEvent], c: &Ctx) -> bool {
-    BROWSE.iter().any(|b| b.seq.len() > seq.len() && under(b, seq) && b.act.enabled(c).is_ok())
+    c.keys.browse.iter().any(|b| b.seq.len() > seq.len() && under(b, seq) && b.act.enabled(c).is_ok())
 }
 
 #[cfg(test)]
 mod tests {
     use super::super::keys::Screen;
+    use super::super::keys::{BROWSE, MENU};
     use super::*;
     use ratatui::crossterm::event::{KeyCode, KeyModifiers};
 
@@ -368,6 +402,39 @@ mod tests {
         Ctx { layer: true, ..inside() }
     }
 
+    /// **수식키가 붙은 키는 그 이름으로 선다**(moai-pxiy) — 사람의 키 파일이 `SPC Alt-f` 를 두면 칸은 `Alt-f` 다. `f` 로
+    /// 대면 그 칸을 보고 누른 `f` 는 아무 일도 안 한다. 접두어를 기다리는 바(`next_keys`)도 같다.
+    #[test]
+    fn a_key_with_a_modifier_is_named_with_it() {
+        let (map, problems) =
+            super::super::keymap::build("[browse]\nfilter = \"SPC Alt-f\"\n[moves]\ntop = \"g Ctrl-g\"\n");
+        assert!(problems.is_empty(), "{problems:?}");
+        let c = Ctx { keys: map, ..inside() };
+        let root = entries(&[LEADER.event()], &c, &[]);
+        let filter = root.iter().find(|e| e.event.code == KeyCode::Char('f')).expect("거름망 칸이 없다");
+        assert_eq!((filter.key.as_str(), filter.event.modifiers), ("Alt-f", KeyModifiers::ALT));
+        let next = super::super::keys::next_keys(map.browse, &[k('g')]);
+        assert_eq!(next.iter().map(|(k, _)| k.as_str()).collect::<Vec<_>>(), ["Ctrl-g"]);
+    }
+
+    /// **간트에서 간트의 키는 메뉴를 거쳐서도 탐색의 동작으로 안 샌다**(moai-l80o 리뷰). `[browse] expand = "L"` 이면 메뉴
+    /// 밖의 `L` 은 간트의 것인데, 열린 메뉴의 이동키 갈래가 탐색의 표로 먹여 간트에서 펼쳤다. 목록에서는 그대로 닫고 편다.
+    #[test]
+    fn a_gantt_key_does_not_leak_through_the_menu_as_a_move() {
+        let (map, problems) = super::super::keymap::build("[browse]\nexpand = \"L\"\n");
+        assert!(problems.is_empty(), "{problems:?}");
+        let shift_l = KeyEvent::new(KeyCode::Char('L'), KeyModifiers::SHIFT);
+        let gantt = Ctx { keys: map, gantt: true, group: true, ..inside() };
+        let mut ch = Chord::default();
+        assert_eq!(feed(&mut ch, &gantt, k(' ')), None);
+        assert_eq!(feed(&mut ch, &gantt, shift_l), None, "간트의 L 이 메뉴를 거쳐 펼쳤다");
+        let list = Ctx { keys: map, group: true, ..inside() };
+        let mut ch = Chord::default();
+        assert_eq!(feed(&mut ch, &list, k(' ')), None);
+        assert_eq!(feed(&mut ch, &list, shift_l), Some(Browse::Expand), "목록의 L 이 메뉴를 닫고 안 폈다");
+        assert!(!open(&ch));
+    }
+
     fn keys_of(e: &[Entry]) -> Vec<&str> {
         e.iter().map(|e| e.key.as_str()).collect()
     }
@@ -383,11 +450,24 @@ mod tests {
         // **`+옵션` 은 끝이다**(moai-2g7d) — 표의 차례가 곧 메뉴의 차례고, 가장 드물게 누르는 묶음을
         // 끝에 둔다. 보기·정렬·열이 *무엇이 서는가* 라면 옵션은 *선 것을 이 사람에게 어떻게 그릴까* 다.
         // **`+화면` 은 프로젝트 곁이다**(moai-z46r) — 무엇을 보나(화면)를 고른 뒤 그 화면의 보기·정렬·열을 고른다.
-        assert_eq!(keys_of(&root), ["/", "f", "n", "q", "p", "g", "v", "s", "c", "m", "o"]);
+        assert_eq!(keys_of(&root), ["/", "f", "n", "q", "p", "g", "v", "s", "c", "m", "o", "h"]);
         let what: Vec<&str> = root.iter().map(|e| e.what.as_str()).collect();
         assert_eq!(
             what,
-            ["검색", "거름망", "생각 담기", "끝내기", "+프로젝트", "+화면", "+보기", "+정렬", "+열", "+읽음", "+옵션"]
+            [
+                "검색",
+                "거름망",
+                "생각 담기",
+                "끝내기",
+                "+프로젝트",
+                "+화면",
+                "+보기",
+                "+정렬",
+                "+열",
+                "+읽음",
+                "+옵션",
+                "키 목록"
+            ]
         );
     }
 
@@ -661,6 +741,10 @@ mod tests {
         // 화면 묶음이 쥐어(moai-z46r) `gg` 는 `g` 가 빈 층에서만 재고, 뿌리에서는 그 묶음으로 내려가는지를 잰다.
         for layer in [&[][..], &[k('s')][..], &[k('p')][..]] {
             for (x, want) in cases {
+                // 뿌리의 `h` 는 키 목록(`SPC h`, moai-ucyr)이 쥔다 — 항목이 이긴다(`an_item_on_the_layer_wins_over_the_move`).
+                if layer.is_empty() && x == k('h') {
+                    continue;
+                }
                 let mut ch = Chord::default();
                 feed(&mut ch, &c, k(' '));
                 for &l in layer {
@@ -690,14 +774,16 @@ mod tests {
     }
 
     /// **그 층에 선 항목이 이긴다**(moai-y8v2, 사용자 결정) — 메뉴 창에 적힌 키가 다른 일을 하는
-    /// 판이 없다. 오늘 부딪치는 자리는 넷이다: `SPC g l`(목록, moai-z46r)·`SPC c h`(이름 열)·`SPC v l`(미룸)·`SPC m g`(묶음
-    /// 읽음). 뿌리의 `g` 도 묶음(화면)이 쥔다 — `a_move_key_closes_the_menu_and_moves`. 같은 글자가 **그 층 밖**에서는 이동이다.
+    /// 판이 없다. 오늘 부딪치는 자리는 다섯이다: `SPC g l`(목록, moai-z46r)·`SPC g g`(간트 — 맨 위로 가는 `gg` 의 첫 `g`,
+    /// moai-i4hf)·`SPC c h`(이름 열)·`SPC v l`(미룸)·`SPC m g`(묶음 읽음). 뿌리의 `g` 도 묶음(화면)이 쥔다 —
+    /// `a_move_key_closes_the_menu_and_moves`. 같은 글자가 **그 층 밖**에서는 이동이다.
     #[test]
     fn an_item_on_the_layer_wins_over_the_move() {
         use super::super::scroll::Move;
         let c = inside();
         for (layer, x, item) in [
             ('g', 'l', Browse::Go(super::super::keys::Screen::List)),
+            ('g', 'g', Browse::Go(super::super::keys::Screen::Gantt)),
             ('c', 'h', Browse::Cell(super::super::view::Field::Names)),
             ('v', 'l', Browse::Deferred),
             ('m', 'g', Browse::ReadGroup),
@@ -711,9 +797,14 @@ mod tests {
             );
             assert_eq!(feed(&mut ch, &c, k(x)), Some(item), "SPC {layer} {x} 가 항목을 안 했다");
         }
-        // 그 글자가 안 선 층에서는 이동이다 — 뿌리의 `h`·`l`, `SPC s` 의 `g`.
+        // 뿌리의 `h` 도 항목이다 — 키 목록(moai-ucyr, 2026-10-26 사용자 결정. 그 전에는 메뉴를 닫고 접었다).
         let mut ch = Chord::default();
         feed(&mut ch, &c, k(' '));
+        assert_eq!(feed(&mut ch, &c, k('h')), Some(Browse::Help));
+        // 그 글자가 안 선 층에서는 이동이다 — `SPC s` 의 `h`·`g`.
+        let mut ch = Chord::default();
+        feed(&mut ch, &c, k(' '));
+        feed(&mut ch, &c, k('s'));
         assert_eq!(feed(&mut ch, &c, k('h')), Some(Browse::Collapse));
         feed(&mut ch, &c, k(' '));
         feed(&mut ch, &c, k('s'));
@@ -760,7 +851,7 @@ mod tests {
         // `SPC m a` 가 늘 "적을 것이 없다" 로 답하면서 그 프로젝트의 [NEW] 는 그대로 남는다.
         // 옵션(`o`)은 층에서도 선다 — 상세 칸은 층에도 있고, 그리는 자리는 프로젝트의 것이 아니라
         // 보는 사람의 것이다.
-        assert_eq!(keys_of(&root_layer), ["n", "q", "p", "g", "v", "o"], "층에서 검색·거름망·정렬·열·읽음이 섰다");
+        assert_eq!(keys_of(&root_layer), ["n", "q", "p", "g", "v", "o", "h"], "층에서 검색·거름망·정렬·열·읽음이 섰다");
         assert!(keys_of(&root_in).contains(&"m"), "프로젝트 안에서 읽음이 안 섰다");
         assert!(keys_of(&root_in).contains(&"f"));
         // 통계는 `p` 밑을 떠났다(moai-z46r) — 화면 고르기(`SPC g s`)다. 그 화면 묶음은 층에서도 선다(위의 `g`).
@@ -818,16 +909,20 @@ mod tests {
         };
         assert_eq!(at(inside()), "+화면 [목록]");
         assert_eq!(at(Ctx { board: true, ..inside() }), "+화면 [보드]");
+        assert_eq!(at(Ctx { gantt: true, ..inside() }), "+화면 [간트]");
         assert_eq!(at(Ctx { stats: true, board: true, ..inside() }), "+화면 [통계]", "통계 창이 배치에 가렸다");
         assert_eq!(at(Ctx { wiki: true, board: true, ..inside() }), "+화면 [위키]", "위키 창이 배치에 가렸다");
+        assert_eq!(at(Ctx { stats: true, gantt: true, ..inside() }), "+화면 [통계]", "통계 창이 간트에 가렸다");
         let root = entries(&[k(' ')], &inside(), &[]);
         assert!(root.iter().filter(|e| e.key != "g").all(|e| e.state.is_none()), "다른 묶음이 상태를 달았다");
         let screens = entries(&[k(' '), k('g')], &Ctx { board: true, ..inside() }, &[]);
-        assert_eq!(keys_of(&screens), ["l", "b", "s", "w"]);
-        assert_eq!(screens.iter().map(Entry::text).collect::<Vec<_>>(), ["목록", "보드", "통계", "위키"]);
+        assert_eq!(keys_of(&screens), ["l", "b", "g", "s", "w"]);
+        assert_eq!(screens.iter().map(Entry::text).collect::<Vec<_>>(), ["목록", "보드", "간트", "통계", "위키"]);
         // 고르면 메뉴를 닫는다 — 토글처럼 열어 두지 않는다.
         assert!(!waits(&[k(' '), k('g')], &inside()), "SPC g 가 Esc 를 기다린다");
-        for (x, to) in [('l', Screen::List), ('b', Screen::Board), ('s', Screen::Stats), ('w', Screen::Wiki)] {
+        for (x, to) in
+            [('l', Screen::List), ('b', Screen::Board), ('g', Screen::Gantt), ('s', Screen::Stats), ('w', Screen::Wiki)]
+        {
             let mut ch = Chord::default();
             for y in [' ', 'g'] {
                 feed(&mut ch, &inside(), k(y));

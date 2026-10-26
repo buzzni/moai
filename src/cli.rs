@@ -16,6 +16,46 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 // 줄로 돌아온다. clap 에는 문단 하나만 안 접는 설정이 없어 전체를 끈다 — `help_template`
 // 에 적은 글자는 안 접히지만, 그리로 옮기면 명령마다 도움말을 손으로 그려야 한다.
 // `narrow_terminals_keep_heredoc_openers_whole` 가 좁은 `COLUMNS` 로 모든 도움말을 통째로 견준다.
+/// 도움말을 그 키 표로 채운 명령(moai-aqmg). 글에 선 키 틀(`{key:browse.quit}`)을 [`crate::tui::keymap::fill_names`] 가
+/// 채운다 — `moai tui --help` 가 사람이 `keys.toml` 에서 바꾼 키를 댄다. **모든 마디를 훑는다**: 어느 명령의 글이 탐색기
+/// 키를 대는지 손으로 세면, 새로 댄 글 하나가 틀 그대로 화면에 나간다.
+///
+/// 틀이 깨졌으면 그 글을 그대로 둔다 — 도움말 하나로 도구가 멈추면 안 된다. 기본 표로 모든 글을 그리는 시험
+/// (`every_help_template_names_a_key`)이 깨진 틀을 먼저 잡는다.
+pub fn command(keys: &crate::tui::keys::Keymap) -> clap::Command {
+    use clap::CommandFactory;
+    filled(Cli::command(), keys)
+}
+
+fn filled(mut c: clap::Command, keys: &crate::tui::keys::Keymap) -> clap::Command {
+    let fill = |h: Option<&clap::builder::StyledStr>| {
+        h.map(|h| {
+            let h = h.to_string();
+            crate::tui::keymap::fill_names(&h, keys).unwrap_or(h)
+        })
+    };
+    if let Some(h) = fill(c.get_about()) {
+        c = c.about(h);
+    }
+    if let Some(h) = fill(c.get_long_about()) {
+        c = c.long_about(h);
+    }
+    if let Some(h) = fill(c.get_before_help()) {
+        c = c.before_help(h);
+    }
+    if let Some(h) = fill(c.get_after_help()) {
+        c = c.after_help(h);
+    }
+    if let Some(h) = fill(c.get_after_long_help()) {
+        c = c.after_long_help(h);
+    }
+    let names: Vec<String> = c.get_subcommands().map(|s| s.get_name().to_string()).collect();
+    for n in names {
+        c = c.mut_subcommand(n, |s| filled(s, keys));
+    }
+    c
+}
+
 #[derive(Parser, Debug)]
 #[command(
     name = "moai",
@@ -30,7 +70,7 @@ Start a session like this:
   moai mv <id> in_progress      pick it up.  done when finished
   moai note <id> 'what I found' a note for whoever comes next
   moai tui                      explorer - epics open like directories.
-                                SPC n jots a thought down
+                                {key:browse.jot} jots a thought down
   moai web                      the same tracker as a page in a browser
 
 When something not for now comes to mind:
@@ -47,6 +87,8 @@ To read the project manual:
 
   moai wiki ls                  the markdown pages under docs/ - the wiki
   moai wiki show <slug>         one page
+  moai wiki search <words...>   the sections that match, best first
+  moai wiki learn '<lesson>'    write a lesson page and note it on the issue
 
 To watch several projects from one place:
 
@@ -242,15 +284,17 @@ BODY
 Several at once (`--from`):
 
 moai add --from - <<'PLAN'
-# Storage layer @2026-10-31
-- [p1] write atomically #bug @2026-10-20
-- recover a truncated line
+# Storage layer @2026-10-25~2026-10-31
+- [p1] write atomically #bug @2026-10-26~2026-10-28
+- recover a truncated line @2026-10-29
 - \\[WIP] issue \\#12
 PLAN
 
   A `#` line is an epic, a `-` line is an issue of the epic above it.
-  [pN], #tag and @YYYY-MM-DD (the deadline) are optional. --due goes on
-  each epic the plan creates that carries no @date of its own.
+  [pN], #tag and @date are optional. @YYYY-MM-DD is a deadline,
+  @YYYY-MM-DD~YYYY-MM-DD a start to a deadline, @YYYY-MM-DD~ a start only.
+  --due and --start go on each epic the plan creates that carries no
+  @date of its own.
   Put \\ in front of a leading [, a trailing #word or @digit in a title.
   --dry-run keeps a heredoc typo from creating six wrong issues.
 
@@ -428,7 +472,7 @@ BACKLOG
     )]
     Backlog(BacklogCmd),
 
-    /// Read the project wiki - the markdown pages under `docs/`
+    /// The project wiki - the markdown pages under `docs/`, and lessons
     #[command(
         subcommand,
         after_help = "  The wiki is the markdown files under one directory of this checkout -
@@ -441,6 +485,10 @@ BACKLOG
   moai wiki ls                  every page, and what does not resolve
   moai wiki show <slug>         one page, drawn, and the pages linking to it.
                                 `--json` gives the raw body
+  moai wiki search <words...>   the sections that match, best first, with the
+                                line to open
+  moai wiki learn '<lesson>'    a new lesson page under lessons/, noted on the
+                                issue it came from
 
   **Nothing is stored.** The tracker holds no page and no index - the list,
   the links, the pages linking to each page (`linked_from`) and the ids are
@@ -449,39 +497,42 @@ BACKLOG
   the tracker still goes to the main checkout. Git merges them like any
   other file.
 
-  There is no command that writes a page - edit the file and commit it. A
-  page names an issue by its bare id, as a commit subject does, and another
-  page by a relative link: `[the explorer](explorer.md)`. A link can land on
-  a heading - `glossary.md#epic`, or `#epic` on the same page. The anchor is
-  the heading as GitHub makes it (lowercase, punctuation dropped, each space
-  a `-`, a repeated heading `-1`, `-2`), so the same link works there too."
+  No command edits a page - edit the file and commit it. `learn` only
+  creates a new lesson page and never touches one that stands. A page names
+  an issue by its bare id, as a commit subject does, and another page by a
+  relative link: `[the explorer](explorer.md)`. A link can land on a heading
+  - `glossary.md#epic`, or `#epic` on the same page. The anchor is the
+  heading as GitHub makes it (lowercase, punctuation dropped, each space a
+  `-`, a repeated heading `-1`, `-2`), so the same link works there too."
     )]
     Wiki(WikiCmd),
 
-    /// Open the explorer (the one write to an issue is `SPC n`, jot)
+    /// Open the explorer (the one write to an issue is `{key:browse.jot}`, jot)
     #[command(after_help = "  Milestones and epics behave like directories. Move around on the left and
   what the cursor rests on is described on the right.
 
-  j and k or the arrow keys move, Enter goes in, Backspace comes back out.
-  On a milestone or epic row, l and the right arrow unfold one step there and
-  h and the left arrow fold it. On an unfolded member row, h folds its parent
+  {key:moves.line_down} and {key:moves.line_up} or the arrow keys move, {key:browse.enter} goes in, {key:browse.leave} comes back out.
+  On a milestone or epic row, {key:browse.expand} and the right arrow unfold one step there and
+  {key:browse.collapse} and the left arrow fold it. On an unfolded member row, {key:browse.collapse} folds its parent
   and lands on the parent; with nothing to fold it leaves one level. On a
-  project header row, l and the right arrow unfold and h and the left arrow
-  fold. Tab unfolds everything under it recursively and folds it again on a
+  project header row, {key:browse.expand} and the right arrow unfold and {key:browse.collapse} and the left arrow
+  fold. {key:browse.expand_all} unfolds everything under it recursively and folds it again on a
   second press. Unfolded members stand with branch marks in the title column,
-  and that unfolding is not kept in the config. gg and Home go to the top,
-  G and End to the bottom. Ctrl-d and Ctrl-u scroll half a page, Ctrl-f and
-  Ctrl-b (PageDown and PageUp) a whole page and the wheel three rows — the
+  and that unfolding is not kept in the config. {key:moves.top} and Home go to the top,
+  {key:moves.bottom} and End to the bottom. {key:moves.half_down} and {key:moves.half_up} scroll half a page, {key:moves.page_down} and
+  {key:moves.page_up} (PageDown and PageUp) a whole page and the wheel three rows — the
   list, not the cursor: the chosen row and the detail stay put even once the
   row is off screen, and the next cursor key moves from that row and scrolls
   back to it.
-  Ctrl-w w moves the focus between the list and the detail (Ctrl-w W goes the
-  other way; Ctrl-w h and Ctrl-w l pick the left and right pane, Ctrl-w k and
-  Ctrl-w j the top and bottom one when the detail is split that way), and every
+  {key:browse.focus_next} moves the focus between the list and the detail ({key:browse.focus_prev} goes the
+  other way; {key:browse.focus_left} and {key:browse.focus_right} pick the left and right pane, {key:browse.focus_up} and
+  {key:browse.focus_down} the top and bottom one when the detail is split that way), and every
   movement key moves the focused pane — to scroll the detail, go there with
-  Ctrl-w w.
-  / searches, Esc clears the filter you set. r marks the row under the cursor
-  as read (see [NEW] below).
+  {key:browse.focus_next}.
+  {key:browse.grep} searches, {key:browse.clear_filter} clears the filter you set. {key:browse.read} marks the row under the cursor
+  as read (see [NEW] below). {key:browse.help} (or SPC h) opens a window listing every
+  key, read from the same table as moai keys. The movement keys scroll
+  it and {key:browse.help} closes it again.
   The search and filter fields take Enter to apply and Esc to give up, the
   search filters the list as you type, and Tab and Shift-Tab pick where it
   looks: everything, id, title, tag, body or note (everything reads the
@@ -500,53 +551,54 @@ BACKLOG
 
   The rest lives in the menu that opens the moment you press SPC. The menu
   stands up only what works where you are, ignores keys it does not know,
-  closes on Esc or SPC and goes one level up on Backspace. Keys that move
+  closes on {key:menu.close} or SPC and goes one level up on {key:menu.up}. Keys that move
   the focused pane close the menu and make that move in the same press,
-  unless a key on that level holds the letter (SPC g, SPC g l, SPC c h,
-  SPC v l, SPC m g).
+  unless a key on that level holds the letter (SPC g, SPC h,
+  {key:browse.go_list}, {key:browse.cell_names}, {key:browse.deferred}, {key:browse.read_group}).
   Toggles and sorts (SPC v, SPC c, SPC s) do not close it — try them, watch
-  the state, and leave with Esc. That level says so at the bottom right with a
+  the state, and leave with {key:menu.close}. That level says so at the bottom right with a
   close hint.
-    SPC /    search              SPC f    filter             SPC n    jot
-    SPC q    quit
-    SPC p a  register            SPC p d  drop from the list
+    SPC /    search              {key:browse.filter}    filter             {key:browse.jot}    jot
+    SPC h    keys                {key:browse.quit}    quit
+    {key:browse.pick}  register            {key:browse.unregister}  drop from the list
   Screen — which one stands; the root menu names it, as in [board]:
-    SPC g l  list                SPC g b  board — described below
-    SPC g s  statistics — the numbers `moai stats` gives, drawn (see below)
-    SPC g w  wiki — the project's manual pages, read only (see below)
+    {key:browse.go_list}  list                {key:browse.go_board}  board — described below
+    {key:browse.go_gantt}  gantt — the list opened out beside a date axis (see below)
+    {key:browse.go_stats}  statistics — the numbers `moai stats` gives, drawn (see below)
+    {key:browse.go_wiki}  wiki — the project's manual pages, read only (see below)
   View — every toggle except the list columns (SPC c) is here:
-    SPC v l  deferred         SPC v b  backlog        SPC v a  show all
-    SPC v o  the archive — done that has sat a while [shown/hidden]; SPC v a
+    {key:browse.deferred}  deferred         {key:browse.backlog}  backlog        {key:browse.show_all}  show all
+    {key:browse.archived}  the archive — done that has sat a while [shown/hidden]; {key:browse.show_all}
              leaves it as it is
     SPC v 1  first column of the config [shown/hidden] — the next ones count up
              done has no letter of its own: the column that holds it does
-    SPC v d  detail pane [shown/hidden]
-    SPC v w  overlay worktrees [on/off]
-    SPC v r  raw or rendered
+    {key:browse.detail}  detail pane [shown/hidden]
+    {key:browse.worktree}  overlay worktrees [on/off]
+    {key:browse.raw}  raw or rendered
   Sorts and columns call priority, created, updated and assignee by the same
-  letter — only title (SPC s t) and tag (SPC c t) split one letter:
-    SPC s p  priority            SPC s c  created            SPC s u  updated
-    SPC s s  column              SPC s a  assignee           SPC s t  title
-    SPC s w  due (when) — earliest first, no deadline last
-    SPC s P, SPC s C, SPC s U, SPC s S, SPC s A, SPC s T, SPC s W  the same
+  letter — only title ({key:browse.sort_title}) and tag ({key:browse.cell_tags}) split one letter:
+    {key:browse.sort_priority}  priority            {key:browse.sort_created}  created            {key:browse.sort_updated}  updated
+    {key:browse.sort_column}  column              {key:browse.sort_assignee}  assignee           {key:browse.sort_title}  title
+    {key:browse.sort_due}  due (when) — earliest first, no deadline last
+    {key:browse.sort_add_priority}, {key:browse.sort_add_created}, {key:browse.sort_add_updated}, {key:browse.sort_add_column}, {key:browse.sort_add_assignee}, {key:browse.sort_add_title}, {key:browse.sort_add_due}  the same
              field added at the end of the order [↑ asc/↓ desc]
-    SPC s e  edit the order in a window — described below
-    SPC c i  id                  SPC c p  priority           SPC c a  assignee
-    SPC c c  created             SPC c u  updated            SPC c n  counts
-    SPC c t  tag                 SPC c h  column names [shown/hidden]
-    SPC c e  epic — the name of the epic the row is in; off to begin with
-    SPC c w  branch mark [shown/hidden] — needs SPC v w to overlay first
+    {key:browse.sort_edit}  edit the order in a window — described below
+    {key:browse.cell_id}  id                  {key:browse.cell_priority}  priority           {key:browse.cell_assignee}  assignee
+    {key:browse.cell_created}  created             {key:browse.cell_updated}  updated            {key:browse.cell_tally}  counts
+    {key:browse.cell_tags}  tag                 {key:browse.cell_names}  column names [shown/hidden]
+    {key:browse.cell_epic}  epic — the name of the epic the row is in; off to begin with
+    {key:browse.cell_branch}  branch mark [shown/hidden] — needs {key:browse.worktree} to overlay first
   Read:
-    SPC m a  everything unread   SPC m g  every member of this group
+    {key:browse.read_all}  everything unread   {key:browse.read_group}  every member of this group
   Options — how this screen draws what stands, not which rows stand:
-    SPC o d  detail pane goes right, bottom, left, top — press again to turn
-             it. Whether it stands at all is SPC v d
-    SPC o t  the timezone times are written in. It opens a window with the
+    {key:browse.detail_at}  detail pane goes right, bottom, left, top — press again to turn
+             it. Whether it stands at all is {key:browse.detail}
+    {key:browse.timezone}  the timezone times are written in. It opens a window with the
              names this machine knows. Type to narrow it down and pick one.
              Stored times stay UTC, and so does --json; a bare day or a
-             minute in an SPC f filter (created=2026-10-01,
+             minute in an {key:browse.filter} filter (created=2026-10-01,
              done_at=\"2026-10-03 00:00~2026-10-05 23:59\") is on this clock too
-    SPC o m  mouse [on/off] — on to begin with, and the choice is kept.
+    {key:browse.mouse}  mouse [on/off] — on to begin with, and the choice is kept.
              Clicking puts the focus on the pane and the cursor on the row
              under it. The wheel scrolls the pane under the pointer, and
              neither the focus nor a cursor follows: the list, the detail, the
@@ -558,7 +610,7 @@ BACKLOG
              keeps a share of its own as wiki_width — until it is dragged it
              splits by list_width. With the SPC menu open, a
              click on an item is its key — a group goes down a level, a
-             toggle keeps the menu open, and Esc and Bksp on the bottom line
+             toggle keeps the menu open, and {key:menu.close} and {key:menu.up} on the bottom line
              close it or go up — and a click or a roll outside the menu closes
              it and does what it does there. While a form, a picker or
              a prompt is up the mouse is the terminal's again — selecting and
@@ -588,8 +640,8 @@ BACKLOG
   Done that has sat in done for a while is the archive (archive_days in
   .moai/config.toml, 14 unless written; 0 turns it off). It stays hidden on
   the list and the board even with done shown, and the path line counts it
-  — [archive 312 hidden]. SPC v o shows it and is kept under [tui] as
-  show_archived; SPC v a (all) leaves it hidden. / search finds it anyway.
+  — [archive 312 hidden]. {key:browse.archived} shows it and is kept under [tui] as
+  show_archived; {key:browse.show_all} (all) leaves it hidden. {key:browse.grep} search finds it anyway.
   Sorting puts urgent, new, earlier column and alphabetical on top. The order
   is a list of fields, like ORDER BY: the next field decides only where the
   ones before it tie. Each lowercase SPC s key makes the order that one field,
@@ -612,24 +664,24 @@ BACKLOG
   is still read where order is absent and written beside it from the first
   field, for an older moai.
 
-  SPC s e opens the sort window over the list. All six fields stand in it:
+  {key:browse.sort_edit} opens the sort window over the list. All six fields stand in it:
   the ones in the order first, numbered and marked ↑ asc or ↓ desc, then the
-  rest marked with a dot. j and k move, J and K move the field down or up the
-  order, SPC puts it in at the end or takes it out (the last one stays), and
-  d turns its direction. Enter applies the order where you stand and keeps it
-  there — inside a project for that project, in 0 as the default. D applies
+  rest marked with a dot. {key:sorter.down} and {key:sorter.up} move, {key:sorter.lower} and {key:sorter.raise} move the field down or up the
+  order, {key:sorter.toggle} puts it in at the end or takes it out (the last one stays), and
+  {key:sorter.flip} turns its direction. {key:sorter.apply} applies the order where you stand and keeps it
+  there — inside a project for that project, in 0 as the default. {key:sorter.default} applies
   it and keeps it as the default, the order under [tui], even inside a
-  project; a project that has an order of its own gets this one too. Esc
+  project; a project that has an order of its own gets this one too. {key:sorter.close}
   leaves without a change.
 
-  SPC g b lays the same rows out as a kanban board instead of a list, and
-  SPC g l brings the list back. It is the list's layout, not another window:
+  {key:browse.go_board} lays the same rows out as a kanban board instead of a list, and
+  {key:browse.go_list} brings the list back. It is the list's layout, not another window:
   the cursor, the filter, the view, search, [NEW] and the detail are the
   list's, and the choice is kept under [tui] as layout. The menu's root names
   the screen that stands, as in +screen [board]. The columns are backlog,
   deferred and the config's columns in order — backlog is a kind and deferred
   an axis, so nothing is stored for them.
-  SPC v b hides backlog items in both the board and the list, and is kept
+  {key:browse.backlog} hides backlog items in both the board and the list, and is kept
   under [tui] as hide_backlog.
   At the project root every milestone is a lane, with (no milestone) last;
   inside a milestone or an epic there is one lane. Epics and milestones are
@@ -637,27 +689,65 @@ BACKLOG
   and the cursor's card is marked and drawn reversed. Cards Enter can go
   into end their title with /, as in the list. The foot, a third line,
   stands while SPC c has tag, epic, assignee or a date on — an epic shows up on
-  the board only as the name in that foot (SPC c e). Cards that are not yours
+  the board only as the name in that foot ({key:browse.cell_epic}). Cards that are not yours
   grow that foot anyway and say whose they are, dimmed — → name, or unowned —
   in the assignee's place; your own cards stay two lines. Whose is decided the
   way `moai ready` decides it, and when who you are is unknown no card is set
   apart. On a narrow card the tags and the epic name shrink, longest first, so
-  whose it is and the dates still show. j and k move within the
-  column, h and l go to the next column at the nearest height, gg and G go to
-  the column's ends, Enter and Backspace go in and out as in the list, and Tab
+  whose it is and the dates still show. {key:moves.line_down} and {key:moves.line_up} move within the
+  column, {key:browse.collapse} and {key:browse.expand} go to the next column at the nearest height, {key:moves.top} and {key:moves.bottom} go to
+  the column's ends, {key:browse.enter} and {key:browse.leave} go in and out as in the list, and {key:browse.expand_all}
   does nothing. The whole board scrolls as one; the column names stay on top.
   When the columns do not fit, the column the cursor stands in always stands
   and the frame title names the rest with their counts. Clicking a card puts
-  the cursor on it. The wheel, Ctrl-d and Ctrl-u, Ctrl-f and Ctrl-b, and
+  the cursor on it. The wheel, {key:moves.half_down} and {key:moves.half_up}, {key:moves.page_down} and {key:moves.page_up}, and
   PageDown and PageUp scroll the board, not the cursor: the chosen card and
   the detail stay put even once the card is off screen, and the board scrolls
   to its end. The next cursor key moves from that card and scrolls back to
   it. In the overview (0) every project stands as a header
   across the columns, the same line the list gives it, and an unfolded project
   has its milestone lanes under it; the columns are those of every project
-  shown, together. The cursor stands on a header too — k from the project's
-  top card in a column goes up to it — and there l unfolds, h folds, Tab
-  unfolds everything and Enter goes in, as in the list.
+  shown, together. The cursor stands on a header too — {key:moves.line_up} from the project's
+  top card in a column goes up to it — and there {key:browse.expand} unfolds, {key:browse.collapse} folds, {key:browse.expand_all}
+  unfolds everything and {key:browse.enter} goes in, as in the list.
+
+  {key:browse.go_gantt} lays the same rows out as a gantt chart: the list, every group opened
+  out, stays fixed on the left and a date axis with bars stands on the right.
+  It is the list's layout too — the cursor, the filter, the view, search and
+  the detail are the list's — but it holds its own folds: it opens with
+  everything unfolded, {key:browse.collapse}, {key:browse.expand} and {key:browse.expand_all} fold and unfold only inside it,
+  and the list keeps the folds it had. Coming back to the list opens the
+  folder that holds the row you stood on. The detail stands below the gantt at
+  first; {key:browse.detail_at} there moves the gantt's detail only, for this session.
+  The planned bar (░, ▒ on a group)
+  runs from the start to the deadline and ◆ marks the row's own deadline; █
+  over it is when the work actually ran, ▓ is the time past a deadline, ┄ is
+  a deferred row's plan, and ▼ over a dotted line marks today.
+  Groups that wrote no days of their own span their members' days. Planned days
+  are calendar days; actual times are shown in your time zone.
+  Keys that stand only in the gantt move the date axis:
+    {key:gantt.zoom_in} {key:gantt.zoom_out}  zoom in and out — hour, day, week, month
+    {key:gantt.left} {key:gantt.right}  one cell earlier and later   {key:gantt.page_left} {key:gantt.page_right}  a page earlier and later
+    {key:gantt.today}    today in the middle           {key:gantt.fit}    fit every row on one screen
+  It opens fitted, and stays fitted as rows come and go until you move it.
+  These keys are under [gantt] in keys.toml and win only inside the gantt: a
+  [browse] line that uses one of them still works in the list and the board.
+  On a narrow window the rows give up their columns first and then the dates
+  are hidden, which the header says; a low window folds the ▼ row away.
+  Moving a plan writes the row, the way `moai edit --start --due` does. The
+  keys move the cursor row's plan by a day: {key:gantt.nudge_earlier} and {key:gantt.nudge_later} the whole plan,
+  {key:gantt.nudge_start_earlier} and {key:gantt.nudge_start_later} only its start.
+  With the mouse, drag a bar's middle to move the plan, its left end to move
+  the start and its right end to move the deadline; it snaps to whole days and
+  is written once, when you let go. Clicking an empty day on a row with no
+  planned days plans that one day. Groups whose bar spans their members are
+  not moved — move the members. When a move is refused (a start after the
+  deadline, a day past the deadline above) the refusal is on the banner; a
+  move that went through names the `moai edit` line that puts it back.
+  Clicking a row puts the cursor on it and the wheel scrolls the rows; a
+  sideways wheel, or Shift and the wheel, slides the dates, and so does
+  dragging the date header. Dragging the line between the rows and the dates
+  widens the rows, and that width is kept under [tui] as gantt_label.
 
   With registered projects (`moai project add`), 0 lists them all — a header
   row per project with that project's rows under it. Started outside a
@@ -665,84 +755,84 @@ BACKLOG
   Coming out through 0 leaves the project you were in unfolded and the rest
   as header rows only — a project is read the moment it unfolds (its header
   spins while it reads).
-  Enter on a header row goes into that project, Backspace only goes up a
-  directory. Enter on a group row under it goes into that project and lands
+  {key:browse.enter} on a header row goes into that project, {key:browse.leave} only goes up a
+  directory. {key:browse.enter} on a group row under it goes into that project and lands
   there — you never drill down in the one list; drilling down always happens
   inside a project.
   View, sort and columns apply to every unfolded project while search and
-  filter apply inside one project only — jotting (SPC n) and read (r) go to
+  filter apply inside one project only — jotting ({key:browse.jot}) and read ({key:browse.read}) go to
   the project of the row under the cursor. With nothing registered and
   started outside, an empty list stands and says to add the first project
-  with SPC p a (`--json` gives an empty `projects` array and exits 0).
+  with {key:browse.pick} (`--json` gives an empty `projects` array and exits 0).
 
-  SPC p a opens a window to pick a directory and register it as a project —
-  it walks in and out one level at a time (Enter and Backspace, moving with
-  the same j, k, gg and G as the list), and directories with a `.moai` and those
-  already registered are marked. Inside the window, a registers the directory
-  under the cursor, `.` shows or hides dotted directories, and g p opens a
-  field to type a path (Enter goes, Esc gives up). The window closes on Esc.
+  {key:browse.pick} opens a window to pick a directory and register it as a project —
+  it walks in and out one level at a time ({key:picker.enter} and {key:picker.up}, moving with
+  the same {key:moves.line_down}, {key:moves.line_up}, {key:moves.top} and {key:moves.bottom} as the list), and directories with a `.moai` and those
+  already registered are marked. Inside the window, {key:picker.register} registers the directory
+  under the cursor, `{key:picker.hidden}` shows or hides dotted directories, and {key:picker.path} opens a
+  field to type a path (Enter goes, Esc gives up). The window closes on {key:picker.close}.
   Any subdirectory of a monorepo stands on its own exactly as picked. It is
   taken even without a `.moai`. The window opens inside a project too, so the
   first project can be added with nothing registered.
-  On a header row, SPC p d asks once and then only drops it from the list —
-  y is yes and any other key gives up. The directory and its `.moai` stay.
+  On a header row, {key:browse.unregister} asks once and then only drops it from the list —
+  {key:confirm.yes} is yes and any other key gives up. The directory and its `.moai` stay.
   It writes where `moai project add|rm` writes.
 
-  SPC g s opens the statistics window in place of the list and the detail —
+  {key:browse.go_stats} opens the statistics window in place of the list and the detail —
   the numbers `moai stats` gives, drawn as bars: the flow per week, the
   columns and priorities, lead and cycle time, and AI work by model. It
   counts the project you are in, or on the one list (0) the project of the
-  row under the cursor. With a filter hung (SPC f or /) it counts only what
-  passes, and the title says so. b switches the flow between weeks and
-  days; j and k, Ctrl-d and Ctrl-u, Ctrl-f and Ctrl-b, gg and G scroll it;
-  Esc goes back to where you were, with the cursor, the filter and the
+  row under the cursor. With a filter hung ({key:browse.filter} or {key:browse.grep}) it counts only what
+  passes, and the title says so. {key:stats.bucket} switches the flow between weeks and
+  days; {key:moves.line_down} and {key:moves.line_up}, {key:moves.half_down} and {key:moves.half_up}, {key:moves.page_down} and {key:moves.page_up}, {key:moves.top} and {key:moves.bottom} scroll it;
+  {key:stats.close} goes back to where you were, with the cursor, the filter and the
   detail as they were. SPC opens the menu over it with the screens alone:
-  SPC g l and SPC g b close it onto the list or the board, and SPC g s
+  {key:browse.go_list} and {key:browse.go_board} close it onto the list or the board, and {key:browse.go_stats}
   counts again from scratch — the window is opened fresh every time and
   nothing of it is kept. On a narrow screen it shows the same figures as
   text.
 
-  SPC g w opens the wiki window in place of the list and the detail — the
+  {key:browse.go_wiki} opens the wiki window in place of the list and the detail — the
   project's manual, the markdown pages `moai wiki ls` lists (under docs/
   unless wiki_dir in .moai/config.toml says otherwise). It reads the project
   you are in, or on the one list (0) the project of the row under the
   cursor, and it only reads: pages are files you edit and commit. The pages
   stand on the left, the home page (README or index) first, and the right
-  pane shows the page under the cursor. j and k, Ctrl-d and Ctrl-u, Ctrl-f
-  and Ctrl-b, gg and G move the focused pane — on the list, Ctrl-d, Ctrl-u,
-  Ctrl-f, Ctrl-b and the wheel scroll it and leave the cursor and the page
-  where they are, as in the explorer's list. Enter on the list goes to the
-  page and Ctrl-w w goes back and forth. Tab picks the links drawn on the
+  pane shows the page under the cursor. {key:moves.line_down} and {key:moves.line_up}, {key:moves.half_down} and {key:moves.half_up}, {key:moves.page_down}
+  and {key:moves.page_up}, {key:moves.top} and {key:moves.bottom} move the focused pane — on the list, {key:moves.half_down}, {key:moves.half_up},
+  {key:moves.page_down}, {key:moves.page_up} and the wheel scroll it and leave the cursor and the page
+  where they are, as in the explorer's list. {key:wiki.enter} on the list goes to the
+  page and {key:wiki.focus_next} goes back and forth. {key:wiki.next_link} picks the links drawn on the
   page in turn, from the first one on screen and round from the last to the
-  first, and Shift-Tab goes the other way from the last one on screen: the
-  picked link shows reversed, the key bar names where it goes, Enter follows
+  first, and {key:wiki.prev_link} goes the other way from the last one on screen: the
+  picked link shows reversed, the key bar names where it goes, {key:wiki.enter} follows
   it, and once it leaves the pane it is dropped. Clicking a link follows it
-  at once. On the page with no link picked, Enter opens
+  at once. On the page with no link picked, {key:wiki.enter} opens
   a list of its links and the issue ids it names, then the pages linking to
-  it (marked ←), which moves with j, k, gg, G, Ctrl-d, Ctrl-u, Ctrl-f and
-  Ctrl-b, takes one with Enter and closes on Esc. Taking a page link or a
-  page linking here goes there and Bksp comes back the way you came. Links
+  it (marked ←), which moves with {key:moves.line_down}, {key:moves.line_up}, {key:moves.top}, {key:moves.bottom}, {key:moves.half_down}, {key:moves.half_up}, {key:moves.page_down} and
+  {key:moves.page_up}, takes one with {key:links.enter} and closes on {key:links.close}. Taking a page link or a
+  page linking here goes there and {key:wiki.back} comes back the way you came. Links
   to a heading (page.md#anchor) open at that heading, its line marked ▸
   until you scroll; one to a heading the page does not have is marked and
   opens the page at its top. Taking an id closes
   the window onto that row (from the one list, inside that project). Links
   that lead nowhere, addresses outside the wiki and ids the tracker does not
-  hold are marked and only say so. The page as written (SPC v r) marks no
-  link — Tab says so. / searches the titles and bodies of the pages and
-  narrows the list as you type, and Esc drops a picked link, then clears
+  hold are marked and only say so. The page as written ({key:browse.raw}) marks no
+  link — {key:wiki.next_link} says so. {key:wiki.search} searches the titles and bodies of the pages and
+  narrows the list as you type, and {key:wiki.close} drops a picked link, then clears
   that search, and then closes the window, with the cursor, the filter and
   the detail as they were. SPC opens the menu over it with the screens and
-  SPC v r (raw or rendered). The window is read fresh every time and nothing
+  {key:browse.raw} (raw or rendered). The window is read fresh every time and nothing
   of it is kept.
 
-  SPC n opens the jot form anywhere inside a project. It keeps a backlog item
+  {key:browse.jot} opens the jot form anywhere inside a project. It keeps a backlog item
   with no epic. If an editor is there ($VISUAL, $EDITOR, or vi or nano on
   PATH) it opens like a git commit message: the first line is the title, then
   a blank line, then the body, and comment lines are guidance to be deleted.
   Leave the title empty, or end the editor with an error, and nothing is
   kept. With no editor the built-in form opens — one title line and a body,
   Tab moves between them (Enter in the title goes to the body) and Ctrl-S
-  keeps it. Esc closes it, asking once if you had typed something (y throws
+  keeps it. Esc closes it, asking once if you had typed something ({key:confirm.yes} throws
   it away). This is the one write to an issue — editing is done on the CLI.
   `--json` prints only that directory's listing, with no screen (outside a
   `.moai`, the rows of the layer). Each folder row (a milestone, an epic,
@@ -773,9 +863,10 @@ BACKLOG
   tool uses for them: none (no milestone) and lost.")]
     Tui(TuiArgs),
 
-    // **트래커를 읽기만 하는 서버다**(moai-0aa7). 데이터는 요청마다 띄우는 자식 `moai --json …` 의 stdout 이라
-    // 서버가 짓는 뜻이 없다 — 받고 옮기는 길은 `crate::web`, 묶고 첫 줄을 내는 길은 `cmd::web` 이다.
-    /// Serve this tracker as a page on 127.0.0.1, read-only
+    // **트래커를 읽는 서버다**(moai-0aa7) — 쓰는 것은 간트 막대의 계획 날 하나다(자식 `moai edit`, moai-d86e.3ud).
+    // 데이터는 요청마다 띄우는 자식 `moai --json …` 의 stdout 이라 서버가 짓는 뜻이 없다 — 받고 옮기는 길은
+    // `crate::web`, 묶고 첫 줄을 내는 길은 `cmd::web` 이다.
+    /// Serve this tracker as a page on 127.0.0.1
     #[command(after_help = "  moai web                  http://127.0.0.1:6624/ - open it in a browser
   moai web --port 0         let the system pick a free port
   moai web --dry-run        say where it would serve; bind nothing
@@ -784,17 +875,18 @@ BACKLOG
   The first line names the address and the tracker. Ctrl-C stops it; there
   is nothing to clean up. It never opens a browser.
 
-  It never writes the tracker. Each list, issue and wiki page it serves is
-  the answer of `moai --json <command>`, run in a child process for that
-  request, so the page sees exactly what the CLI says. Writing stays with the
-  CLI and the explorer; the one write the page makes is your read marks
-  (`moai read`), taken only from the page itself. Registered projects
+  Each list, issue and wiki page it serves is the answer of `moai --json
+  <command>`, run in a child process for that request, so the page sees
+  exactly what the CLI says. Writing stays with the CLI and the explorer; the
+  page writes two things, taken only from the page itself: a Gantt bar dragged
+  to new days, run as `moai edit --shift`, and your read marks (`moai
+  read`). Registered projects
   (`moai project ls`) can be read too, by `?project=<path>`.
 
   --port is 6624 unless given. --host is 127.0.0.1 unless given; another
   address than a loopback one is served with a warning, because anyone who
-  reaches that port can read the tracker. Whatever it binds, it answers only
-  requests whose Host is localhost or an IP address.
+  reaches that port can read the tracker and move its planned days. Whatever
+  it binds, it answers only requests whose Host is localhost or an IP address.
 
   A port already in use stops it with the code port_in_use. Run inside a
   linked worktree, it serves the main checkout's tracker, as other commands
@@ -964,24 +1056,69 @@ Examples:
   status_* thresholds and the due_* rule that `moai due apply` reads. These
   are the values this binary acts on, so a surface drawing the board reads
   them here instead of parsing the file again. --json adds path, the file it
-  read.
+  read. A [models] table is left to `moai models`, which lays it under your
+  user config.
 
   It only reads; edit the file by hand to change a setting.")]
     Config,
 
-    /// Read the model per role from your user config
-    #[command(after_help = "  moai models           the model per role, with defaults marked
-  moai models --json    one object for skills, including written keys and path
+    /// Read the model per role from your config and the repository's
+    #[command(after_help = "  moai models           the model per role, where each value came from
+  moai models --json    one object for skills, including written keys and paths
 
-  Reads [models] in your user config. No .moai is needed; repository config
-  is not read. The place is MOAI_CONFIG, then $XDG_CONFIG_HOME/moai/config.toml,
-  then ~/.config/moai/config.toml. Missing files use the built-in defaults.
+  Reads [models] in your user config. No .moai is needed. The place is
+  MOAI_CONFIG, then $XDG_CONFIG_HOME/moai/config.toml, then
+  ~/.config/moai/config.toml. Missing files use the built-in defaults.
+
+  Inside a repository, a [models] table in .moai/config.toml recommends values
+  for that repository: it overrides the defaults, and your user config
+  overrides it. A line says repo when its value came from there, default when
+  nothing set it. A broken .moai/config.toml leaves the table as your user
+  config gives it.
 
   Model names are strings. review_grade, effort and effort_complex accept
   low, medium, high, xhigh or max. Invalid values fall back per key and warn;
-  unknown keys warn. written lists only valid, known keys from the config.
-  This command only reads; edit the user config by hand to change the table.")]
+  unknown keys warn. written lists the valid, known keys from your user config,
+  repo the ones the repository table set that your config did not, and
+  repo_path that file (null when it set none). The level lines name the roles
+  they pair with. This command only reads; edit the files by hand.")]
     Models,
+
+    /// Show the explorer's keys and what your keys.toml changed
+    #[command(after_help = "  moai keys               every key the explorer runs on, changed ones marked
+  moai keys --template    a keys.toml with every action, commented out
+  moai keys --json        one object: the file, the dropped lines, every action
+
+  The keys of `moai tui` live in their own file next to your user config:
+  MOAI_KEYS, else keys.toml beside the config (MOAI_CONFIG, then
+  $XDG_CONFIG_HOME/moai/config.toml, then ~/.config/moai/config.toml). It is
+  read once when the explorer starts, when help is printed and by this
+  command; no other command opens it.
+
+    [browse]
+    quit = \"SPC x\"            one key sequence
+    grep = [\"/\", \"SPC /\"]     several: the first is the name shown
+    jot  = \"none\"             unbind it; [] does the same
+    [moves]
+    line_down = \"n\"           j, k, gg and the rest move every window at once
+
+  Write only what you change. A line replaces every key of that action, the
+  hidden ones too (the arrows) — list them again to keep them. Key names are
+  spelt as the explorer shows them: SPC, Enter, Esc, Tab, Shift-Tab, Bksp, Up,
+  Down, Home, End, PageUp, PageDown, F1, Ctrl-x, Alt-x, and a capital letter
+  for Shift; a sequence is names apart by spaces (SPC v d), or a doubled letter
+  (gg).
+  A line that is wrong is dropped alone and that action keeps its default:
+  an unknown section or action, a name that is not a key, or a key that
+  clashes with another or waits for a longer one. The explorer says so in one
+  line and still opens; this command lists them on stderr and exits 0. A file
+  that is not TOML is dropped whole. Ctrl-C, the digits 0-9, SPC v 1-9, SPC
+  itself and keys inside text fields cannot be changed, and a window's close
+  key can move but not be set to none.
+
+  --template prints a starter file; save it yourself, nothing is written:
+    moai keys --template > ~/.config/moai/keys.toml")]
+    Keys(KeysArgs),
 
     // **받고 돌리는 길은 `cmd::update`, 고르는 길은 `update` 다**(moai-zsfr.2p9). 저장소의 `.moai` 를 안
     // 찾는다 — 올리는 것은 이 바이너리지 트래커가 아니다.
@@ -1151,8 +1288,13 @@ pub enum DueCmd {
     },
 }
 
-/// 위키를 읽는다(moai-ihu4). **쓰는 동사는 없다** — 페이지는 파일로 직접 쓰고 git 이 합친다. `put` 을 두면
-/// `store::with_write` 곁에 둘째 쓰기 경로가 선다(설계 노트 moai-qunn).
+/// 위키를 읽는다(moai-ihu4). **페이지를 고치는 동사는 없다** — 페이지는 파일로 직접 쓰고 git 이 합친다. `put` 을
+/// 두면 `store::with_write` 곁에 둘째 쓰기 경로가 선다(설계 노트 moai-qunn).
+///
+/// **`learn` 은 그 결정의 예외가 아니다**(moai-4s5n.n7j). 그것은 교훈 페이지를 **새로 짓기만** 한다 — 파일을
+/// `create_new` 로 열어, 있으면 거절하고 덮어쓰지도 고치지도 않는다. 고칠 페이지는 여전히 파일로 고치고 git 이
+/// 합친다. 함께 다는 `Lesson:` 노트는 트래커의 쓰기라 `store::with_write` 하나를 지난다 — 쓰기 경로는 둘이 되지
+/// 않는다.
 #[derive(Subcommand, Debug)]
 pub enum WikiCmd {
     /// Every page - slug, title, and what does not resolve
@@ -1166,13 +1308,20 @@ pub enum WikiCmd {
   `..`, leads out of the checkout or into `.git/`, or is not a directory is.
 
   Under the list, notices count pages with conflict markers, links leading to
-  no page, links to a heading the page does not have, and ids naming no
-  issue. They block nothing and leave the exit code alone.
+  no page, links to a heading the page does not have, ids naming no issue,
+  and `Lesson:` notes on open work naming a page this checkout does not have.
+  They block nothing and leave the exit code alone. A lesson page
+  (`lessons/<slug>`) shows `×N`, the number of different rows whose notes name
+  it.
 
-  --json gives {\"dir\",\"pages\":[{\"slug\",\"title\",\"path\",\"bytes\",\"issues\",
-  \"links\",\"linked_from\",\"conflict\"}]}. `issues` is [{\"id\",\"exists\"}] - the
-  ids with this tracker's prefix the page names outside code blocks; the name
-  of a skill moai plants (`moai-wiki`) is never one. `links` is
+  --json gives {\"dir\",\"dir_abs\",\"pages\":[{\"slug\",\"title\",\"path\",
+  \"bytes\",\"issues\",\"links\",\"linked_from\",\"conflict\",\"seen_count\"}]}.
+  `dir_abs` is `dir` as an absolute path in this checkout - absent when
+  `wiki_dir` points outside it or that path is not UTF-8. `seen_count` is that
+  `×N` - always there, 0 on a page that is not a lesson. `issues` is
+  [{\"id\",\"exists\"}] - the ids with this tracker's prefix the page names
+  outside code blocks; the name of a skill moai plants (`moai-wiki`) is never
+  one. `links` is
   [{\"text\",\"to\",\"anchor\",\"resolved\",\"anchor_resolved\"}] - relative links to a
   `.md` page of this wiki, `to` being the target slug (the page itself for a
   bare `#anchor`). `anchor` is the part after `#` and `anchor_resolved` says
@@ -1190,10 +1339,13 @@ pub enum WikiCmd {
     #[command(after_help = "  The slug is what `moai wiki ls` prints - matched letter for letter, so
   `Guide` is not `guide`.
 
-  --json gives the page as `ls` does plus `body`, the file as written.
+  --json gives the page as `ls` does, with `seen` in place of `seen_count`,
+  plus `body`, the file as written. `seen` is always there:
+  [{\"id\",\"at\",\"by\",\"by_email\"}], the rows whose `Lesson:` notes name this
+  lesson, latest note first ([] on a page that is not a lesson).
   A page that could not be read has no `body`, carries `error`, and the exit
   code is non-zero. When the wiki directory itself cannot be used - not there
-  yet included - it gives {\"dir\",\"error\"} as `ls` does, non-zero.
+  yet included - it gives {\"dir\",\"dir_abs\",\"error\"} as `ls` does, non-zero.
 
   `linked_from` counts only the pages that could be read. When another page
   could not be read, or the walk left a name or directory out, the count may
@@ -1205,6 +1357,103 @@ pub enum WikiCmd {
         #[arg(value_name = "slug")]
         slug: String,
     },
+    /// Find the sections that match some words, best first
+    #[command(after_help = "  moai wiki search merge driver          several words, one query
+  moai wiki search '병합 드라이버' -n 5   -n/--limit, 10 unless given
+  moai wiki search merge --json
+
+  Every heading, at any level, starts a section; the text before the first
+  heading is one too. Words are lowercased and split at anything that is not a
+  letter, digit or `_`, and Korean, Chinese and Japanese text also matches two
+  letters at a time - such a word counts as matched where half its two-letter
+  pieces are; there is no stemming. A title or heading counts more than the
+  body, and a section matching more of the distinct words comes first. A
+  screen line is `path:line  Page title › Heading`, with the best line of the
+  section under it - the matched words in bold, which is decoration only. The
+  last line says how many of how many are shown and the command that opens a
+  page.
+
+  Nothing matching is not an error: the exit code is 0, as it is when the wiki
+  directory is not there yet. A page that could not be read makes it non-zero
+  once everything found is out, as `moai wiki ls` does.
+
+  --json gives {\"dir\",\"dir_abs\",\"query\",\"terms\",\"hits\":[{\"slug\",\"path\",\"title\",
+  \"heading\",\"anchor\",\"line\",\"score\",\"snippet\",\"snippet_line\"}],
+  \"total\"}. `hits` is always there, `[]` when nothing matched; `total` counts
+  the matches before `--limit` cut the list. `line` and `snippet_line` count
+  from 1, the line to open in an editor. `heading` and `anchor` are absent on
+  the section before a page's first heading; `snippet` and `snippet_line` are
+  absent when the page could not be read. `score` shows the ranking, not a
+  contract - trust the order, not the values, and never compare them across
+  queries. A page whose text could not be read is matched by its title alone
+  and named in `unread`, [{\"slug\",\"path\",\"error\"}] with `error` as `ls`
+  gives it; a place the walk left out is in `skipped`, as in `ls`. Each key
+  stands only when it has something. When the wiki directory cannot be used
+  it gives {\"dir\",\"dir_abs\",\"error\"} as `ls` does.")]
+    Search {
+        /// What to look for - several words are one query
+        #[arg(value_name = "words", required = true, num_args = 1..)]
+        words: Vec<String>,
+        /// How many sections to show, best first
+        #[arg(short = 'n', long, default_value_t = 10)]
+        limit: usize,
+    },
+    /// Write a new lesson page and note it on the issue it came from
+    #[command(after_help = "moai wiki learn 'End a check on the step that must pass' -b - <<'LESSON'
+## What happened
+...
+## Why
+...
+## Do this instead
+...
+LESSON
+
+  It writes a new page, <wiki_dir>/lessons/<slug>.md - `# <title>`, the body as
+  given, and `Learned in: <id>` - and, in the same call, a note on that issue:
+  `Lesson: lessons/<slug>`. The body needs a `## Do this instead` heading and
+  does not open with a `# ` title of its own: the title is the argument.
+  `## What happened` and `## Why` are worth writing too.
+
+  --slug names the file, in lowercase ASCII kebab case. An ASCII title makes
+  one by itself; any other title needs --slug. --issue is the issue the lesson
+  came out of. Without it, the one row you have picked up is used - with none
+  or several picked up, it is refused and asks for --issue. --issue none writes
+  the page alone, and then who you are is not asked.
+
+  It only creates: a page already standing at that path is refused and left
+  as it is. If the lesson is the same, note it again - `moai note <id>
+  'Lesson: lessons/<slug>'`; if the page is wrong, edit the file. The page is
+  written in this checkout - in a linked worktree, in that worktree, to ride
+  the branch - while the note goes to the main checkout's tracker. Nothing is
+  committed: the last lines say how. When the note cannot be written the page
+  stays, the exit code is non-zero, and the line to note it again is given.
+  The wiki directory itself is never made - a missing one is refused.
+
+  --dry-run prints the path and the text and writes nothing. --json gives
+  {\"path\",\"slug\",\"issue\",\"noted\"}: `path` from the checkout, `slug` as
+  `moai wiki show` takes it, `issue` absent under --issue none, and `noted`
+  true once the note is written. --dry-run adds \"dry_run\":true and `text`.")]
+    Learn(LearnArgs),
+}
+
+/// `moai wiki learn` 의 인자(moai-4s5n.n7j).
+#[derive(Args, Debug)]
+pub struct LearnArgs {
+    /// The lesson in one line, the page's title. A lone `-x` needs `--`
+    #[arg(value_name = "lesson", allow_hyphen_values = true)]
+    pub title: String,
+    /// The file name, in lowercase ASCII kebab case
+    #[arg(long, value_name = "kebab")]
+    pub slug: Option<String>,
+    /// The page body, markdown. `-` reads stdin
+    #[arg(short = 'b', long, value_name = "text")]
+    pub body: Option<String>,
+    /// The issue it came from; `none` for the page alone
+    #[arg(long, value_name = "id")]
+    pub issue: Option<String>,
+    /// Print the path and the text; write nothing
+    #[arg(long)]
+    pub dry_run: bool,
 }
 
 /// 등록한 프로젝트 목록을 고치고 본다. 이슈의 동사(`add`·`show`·`rm`)와 이름이
@@ -1395,7 +1644,7 @@ pub struct AddArgs {
     #[arg(short, long, value_name = "who|none")]
     pub assignee: Option<String>,
 
-    /// Start of a milestone, `YYYY-MM-DD` (milestone rows only)
+    /// Start, `YYYY-MM-DD` or `+N` days from today. Any row
     #[arg(long, value_name = "date")]
     pub start: Option<String>,
 
@@ -1534,10 +1783,11 @@ const SHOW_LIST: &str = "  Order: --sort takes fields separated by commas, like 
   is unknown and falls in no range. done_at stays when a row is reopened,
   so add status=done for what is closed now; done= keeps the meaning of
   --done. updated_at= with a single day is that day, where since= runs on
-  from it. In the explorer (SPC f) a value right after = may be quoted.
-  due_on= is the row's own deadline, read as calendar days with both ends
-  in (2026-10-01~2026-10-05, ~2026-10-05, or one day); a row without one
-  falls in none. It is not a time item and opens nothing hidden.
+  from it. In the explorer ({key:browse.filter}) a value right after = may be quoted.
+  due_on= is the row's own deadline and starts_on= its planned start, read
+  as calendar days with both ends in (2026-10-01~2026-10-05, ~2026-10-05,
+  or one day); a row without one falls in none. They are not time items
+  and open nothing hidden.
 
     moai show --filter 'done_at=2026-10-03 00:00~2026-10-05 23:59'
     moai show -a raven -a joshep --filter started_at=2026-10-01~
@@ -1671,6 +1921,14 @@ const STATS_HELP: &str = "  Counts the rows the filters pick - the same filters 
                           \"lines\":31}],
              \"by_grade\":[{\"grade\":\"high\",\"lines\":12,...},...]},
      \"reviews\":{\"rows\":6,\"work\":{...the same keys as work...}}}";
+
+/// `moai keys` 가 받는 것(moai-so7w).
+#[derive(Args, Debug)]
+pub struct KeysArgs {
+    /// Print a starter keys.toml (nothing is written)
+    #[arg(long)]
+    pub template: bool,
+}
 
 /// `moai stats` 가 받는 것(moai-1hka.k16). **거르개는 `show` 의 것을 그대로 받는다**(`FilterArgs`) — 차례와 쪽
 /// (`PageArgs`)·겹쳐 보기(`WorktreeArg`)는 안 받는다: 세는 자리에 세울 차례도 자를 목록도 없고, 겹쳐 본 줄을
@@ -1938,6 +2196,7 @@ pub struct MvArgs {
 }
 
 #[derive(Args, Debug)]
+#[command(group(clap::ArgGroup::new("dates").args(["start", "due"]).multiple(true)))]
 pub struct EditArgs {
     #[arg(value_name = "id")]
     pub id: String,
@@ -1973,13 +2232,41 @@ pub struct EditArgs {
     #[arg(short, long, value_name = "who|none")]
     pub assignee: Option<String>,
 
-    /// Start of a milestone. `none` clears it
+    /// Start, a day or `+N` days. `none` clears it
     #[arg(long, value_name = "date|none")]
     pub start: Option<String>,
 
     /// Deadline, a day or `+N` days. `none` clears it
     #[arg(long, value_name = "date|none")]
     pub due: Option<String>,
+
+    /// Move the planned days N days, as the row
+    /// holds them when written
+    #[arg(long, value_name = "±N", allow_negative_numbers = true, verbatim_doc_comment, value_parser = shift_days(),
+          conflicts_with_all = ["start", "due", "shift_start", "shift_due", "if_unplanned"])]
+    pub shift: Option<i64>,
+
+    /// Move the start alone (none: from the due)
+    #[arg(long, value_name = "±N", allow_negative_numbers = true, value_parser = shift_days(),
+          conflicts_with_all = ["start", "due", "shift_due", "if_unplanned"])]
+    pub shift_start: Option<i64>,
+
+    /// Move the deadline alone (none: from start)
+    #[arg(long, value_name = "±N", allow_negative_numbers = true, value_parser = shift_days(),
+          conflicts_with_all = ["start", "due", "if_unplanned"])]
+    pub shift_due: Option<i64>,
+
+    /// Write `--start`/`--due` only on a row
+    /// with no planned day; else refuse
+    #[arg(long, requires = "dates", verbatim_doc_comment)]
+    pub if_unplanned: bool,
+}
+
+/// `edit --shift*` 의 날 수 — **web 의 끌기가 받는 폭과 같다**(여섯 자리, `web::api::is_days`, moai-vj8w 리뷰). 막지 않으면
+/// `Issue::shifted` 의 덧셈이 넘친다: 시험 판(overflow-checks)은 쓰기 안에서 넘어지고, 릴리스 판은 돌아 아무도 안 친
+/// 해를 거절문에 댄다. 여섯 자리는 이천칠백 해 남짓이라 손으로 옮길 날은 다 든다.
+fn shift_days() -> clap::builder::RangedI64ValueParser<i64> {
+    clap::value_parser!(i64).range(-999_999..=999_999)
 }
 
 #[derive(Args, Debug)]

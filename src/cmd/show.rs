@@ -140,6 +140,7 @@ pub(crate) fn filter_of(
         started_at: Vec::new(),
         done_at: Vec::new(),
         due_on: Vec::new(),
+        starts_on: Vec::new(),
         all: a.all,
         archived: a.archived,
         backlog: false,
@@ -855,8 +856,9 @@ fn plan(ctx: &Ctx, all: &[Issue], epic: &Issue, raw: bool) -> R<Vec<String>> {
         return super::json_line(&serde_json::json!({ "id": epic.id, "plan": md, "lossy": lossy }));
     }
     for id in &lossy {
-        // 앞머리 `[`·끝의 `#낱말` 은 render 가 이스케이프한다(moai-a5pz). 여기 오는 것은 원래
-        // 역슬래시를 든 제목처럼 이스케이프로도 못 담는 것뿐이라 까닭을 하나로 단정하지 않는다.
+        // 앞머리 `[`·끝의 `#낱말`·`@날짜` 는 render 가 이스케이프한다(moai-a5pz). 여기 오는 것은 원래
+        // 역슬래시를 든 제목처럼 이스케이프로도 못 담는 것과, 꼴이 틀리거나 에픽의 기한을 넘는 기한·시작(`draft::lossy`)
+        // 이라 까닭을 하나로 단정하지 않는다.
         eprintln!("moai: {}", crate::i18n::fill(crate::i18n::say(ctx.lang(), "show.lossy_title"), &[("id", id)]));
     }
     Ok(md.lines().map(str::to_string).collect())
@@ -883,9 +885,18 @@ fn one(
     // 없어 상세의 머리글과 이력이 서로 다른 말을 한다.
     let journal_root = home(repo, origin, &issue.id);
     // `journal_error` 는 읽은 **뒤에** 못 읽은 파일을 묻는 키라 그것을 고른 판도 읽는다.
-    let journal = match wants(&["journal", "work", "journal_error"]) {
-        true => at_home(repo, journal_root).journal_of(&issue.id),
-        false => Vec::new(),
+    // `wiki` 도 고른다 — 이 줄의 `Lesson:` 노트가 거기 선다(moai-4s5n.c0n).
+    // **`wiki` 만 고르면 `Lesson:` 이 들 수 있는 줄만 푼다**(moai-xp7l.c4h) — 그 키가 읽는 것은 교훈 노트뿐이다.
+    // 이력 전부를 풀던 판은 `--fields wiki` 에 그 줄의 저널을 통째 풀었다(답은 같다, 값만 비쌌다).
+    let journal = if wants(&["journal", "work", "journal_error"]) {
+        at_home(repo, journal_root).journal_of(&issue.id)
+    } else if wants(&["wiki"]) {
+        at_home(repo, journal_root)
+            .journal_by_id(&BTreeSet::from([issue.id.as_str()]), model::may_hold_lesson)
+            .remove(&issue.id)
+            .unwrap_or_default()
+    } else {
+        Vec::new()
     };
     // 이 줄과 자식을 계획에서 뺀 줄. **물려받은 미룸까지** — 미룬 에픽의 멤버를
     // 펼쳤을 때 표가 없으면 상세가 답하기로 한 "왜 ready 에 안 나오나" 가 빈다.
@@ -956,6 +967,22 @@ fn one(
             Err(e) => (Vec::new(), Some(e.told(root, ctx.lang()))),
         },
     };
+    // **이 이슈에 관한 위키**(moai-g8pt.5aw) — 집는 순간 읽는 자리라 에이전트가 따로 찾지 않아도 본다. 위키는 이
+    // 체크아웃의 것을 읽고(트래커는 루트, 위키는 가지를 탄다), 무엇을 낼지는 순수 함수(`wiki::about`)가 가른다.
+    // 커밋과 같은 약속이다 — `--json` 의 `wiki` 는 늘 서고, 디렉터리를 못 썼을 때만 `wiki_error` 가 붙는다. 없는
+    // 디렉터리는 안 쓴 위키라 까닭이 아니다. 사람 화면은 못 읽었어도 말없이 페이지를 비운다(커밋 칸과 같다) — 이 줄의
+    // 노트가 가리킨 교훈 슬러그만은 노트에서 읽어 그대로 선다.
+    // 페이지가 댄 id 가 트래커에 있는가(`IssueRef::exists`)는 `wiki::about` 이 안 읽는다 — 저장소의 id 를 다 모아
+    // 건네던 판은 펼칠 때마다 버릴 모음을 지었다.
+    let wiki_read = wants(&["wiki", "wiki_error"]).then(|| super::wiki::read_in(repo, &|_| true));
+    let (pages, wiki_error): (&[crate::wiki::Page], _) = match &wiki_read {
+        Some((_, Ok(w))) => (&w.pages, None),
+        Some((dir, Err(t))) => (&[], super::wiki::trouble_told(ctx.lang(), dir, t)),
+        None => (&[], None),
+    };
+    // 이 이슈의 `Lesson:` 노트가 가리킨 교훈 — 저널의 노트를 읽은 값이다. 하위의 노트는 하위의 것이다.
+    let own_lessons = crate::wiki::seen::lessons_of(&journal);
+    let about = crate::wiki::about::about(pages, issue, stood_in, &own_lessons);
 
     if ctx.json {
         let ids: Vec<&str> = children.iter().map(|c| c.id.as_str()).collect();
@@ -1029,6 +1056,15 @@ fn one(
         extra.push(("commits", serde_json::to_string(&commits).map_err(|e| Fail::new(e.to_string()))?));
         if let Some(why) = &commits_error {
             extra.push(("commits_error", serde_json::to_string(why).map_err(|e| Fail::new(e.to_string()))?));
+        }
+        // **키는 늘 선다**(moai-g8pt.5aw) — 두 배열이고, 위키가 없거나 비면 둘 다 `[]` 다. 그것과 "위키 디렉터리를
+        // 못 읽었다" 를 가르는 것이 `wiki_error` 다. 목록(`show [거르개] --json`)에는 안 싣는다 — 줄마다 위키를 걷는다.
+        extra.push((
+            "wiki",
+            serde_json::to_string(&super::wiki::AboutOut::of(&about)).map_err(|e| Fail::new(e.to_string()))?,
+        ));
+        if let Some(why) = &wiki_error {
+            extra.push(("wiki_error", serde_json::to_string(why).map_err(|e| Fail::new(e.to_string()))?));
         }
         // **이력이 덜 왔으면 그렇다고 말한다**(moai-f2lc). 여기까지 오면 저널은 이미 읽혔다 —
         // 못 읽은 파일은 `journal` 에서 말없이 빠져 있고, 그 침묵을 가르는 자가 이 키다.
@@ -1160,6 +1196,8 @@ fn one(
     // **말은 명령 층이 한 번 풀어 준다**(`Ctx::lang`) — 위의 `seen.screen` 이 든 것과 같은
     // 값이다. 머리글만 다른 말로 서면 한 번 펼친 화면 안에서 말이 갈린다.
     out.extend(view::commits(&commits, ctx.lang()));
+    // 이력 바로 앞이다 — 둘 다 비면 토막째 안 선다(`view::wiki::about`).
+    out.extend(view::wiki::about(ctx.lang(), &about));
     out.extend(view::history(&journal, &repo.config, seen.screen));
     Ok(out)
 }

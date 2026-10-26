@@ -44,8 +44,9 @@ pub const COLOUR: &str = "colour";
 /// 적혀 있어도 같은 뜻으로 읽는다.
 pub const AUTO: &str = "auto";
 
-/// 역할별 모델은 사람의 비용 선택이라 사용자 설정에만 둔다(moai-9tqo.3la).
-/// 나중에 저장소 표가 생겨도 사용자 설정이 이긴다. 기본값과 사람 화면(`view::models`)의 차례는 이 한 자리다 —
+/// 역할별 모델은 사람의 비용 선택이라 사용자 설정이 정한다(moai-9tqo.3la). **저장소는 권할 수 있다** —
+/// `.moai/config.toml` 의 `[models]` 표(moai-w25x.jud, [`Models::with_repo`])가 기본값을 덮고, 사용자 설정이 그것을
+/// 덮는다. 기본값과 사람 화면(`view::models`)의 차례는 이 한 자리다 —
 /// `--json` 의 키 차례는 [`Models::values`] 의 `BTreeMap` 이라 이름순이다.
 pub const MODELS_DEFAULT: &[(&str, &str)] = &[
     ("plan", "fable"),
@@ -62,12 +63,14 @@ pub const MODELS_DEFAULT: &[(&str, &str)] = &[
 pub const MODELS: &str = "models";
 pub const MODEL_LEVELS: &[&str] = &["low", "medium", "high", "xhigh", "max"];
 
-/// 유효한 키만 덮어쓴 완성된 표. `written`은 유효하게 읽힌 키만 담는다.
+/// 유효한 키만 덮어쓴 완성된 표. `written`은 사용자 설정에서 유효하게 읽힌 키만 담는다.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct Models {
     #[serde(flatten)]
     pub values: BTreeMap<&'static str, String>,
     pub written: Vec<String>,
+    /// 값이 **저장소의 표**에서 온 키 — 사용자 설정이 덮은 키는 안 든다(moai-w25x.jud). 늘 싣는다.
+    pub repo: Vec<String>,
 }
 
 impl Default for Models {
@@ -75,7 +78,69 @@ impl Default for Models {
         Self {
             values: MODELS_DEFAULT.iter().map(|&(key, value)| (key, value.to_string())).collect(),
             written: Vec::new(),
+            repo: Vec::new(),
         }
+    }
+}
+
+impl Models {
+    /// 키 하나를 얹는다 — **사용자 설정과 저장소의 표가 같은 자로 잰다.** 등급·effort 는 닫힌 낱말이고 모델 이름은
+    /// moai 가 모른다. `word` 는 글로 읽힌 값(아니면 `None`), `shown` 은 탈을 댈 때 쓸 적힌 그대로다. 받으면 그 키를 낸다.
+    pub fn put(
+        &mut self,
+        key: &str,
+        word: Option<&str>,
+        shown: impl FnOnce() -> String,
+    ) -> Result<&'static str, ModelsTrouble> {
+        let Some(&(key, _)) = MODELS_DEFAULT.iter().find(|&&(known, _)| known == key) else {
+            return Err(ModelsTrouble::UnknownKey { key: key.to_string() });
+        };
+        let level = is_level_key(key);
+        if level && !word.is_some_and(|w| MODEL_LEVELS.contains(&w)) {
+            let raw = word.map_or_else(shown, String::from);
+            return Err(if key == "review_grade" {
+                ModelsTrouble::NotAGrade { key: key.into(), raw }
+            } else {
+                ModelsTrouble::NotAnEffort { key: key.into(), raw }
+            });
+        }
+        let Some(word) = word else {
+            return Err(ModelsTrouble::NotAWord { key: key.into(), found: shown() });
+        };
+        self.values.insert(key, word.to_string());
+        Ok(key)
+    }
+
+    /// 저장소의 `[models]` 를 밑에 깐 표 — **사용자 설정이 이긴다**(moai-w25x.jud, 2026-10-26 사용자 결정). 기본값 위에
+    /// 저장소의 값을 얹고, 그 위에 사람이 적은 키(`self.written`)를 다시 얹는다. 저장소 줄의 탈은 둘째 값이다 —
+    /// 사용자 설정의 탈과 같은 꼴이라 같은 말로 편다.
+    ///
+    /// **아는 키의 값이 큰따옴표 글이 아니면 그 말을 한다**(리뷰 moai-w25x.54r) — 이 파일의 글 키와 같은 자다. 그대로
+    /// `put` 에 넘기던 판은 `effort = high` 에 "low|…|max 중 하나여야 한다 — 지금은 \"high\"" 라는 제 말과 어긋난 탈을
+    /// 대고, 적힌 날 글(받은 저장소의 제어문자까지)을 탈의 `found` 에 실었다.
+    pub fn with_repo(&self, repo: &[crate::config::ModelEntry]) -> (Models, Vec<ModelsTrouble>) {
+        let mut out = Models::default();
+        let mut problems = Vec::new();
+        for e in repo {
+            let word = e.word();
+            if word.is_none() && MODELS_DEFAULT.iter().any(|&(known, _)| known == e.key) {
+                problems.push(ModelsTrouble::NotQuoted { key: e.key.clone(), raw: e.raw.clone(), line: e.line });
+                continue;
+            }
+            match out.put(&e.key, word, || e.raw.clone()) {
+                Ok(key) if !out.repo.iter().any(|k| k == key) => out.repo.push(key.to_string()),
+                Ok(_) => {}
+                Err(why) => problems.push(why),
+            }
+        }
+        for key in &self.written {
+            if let Some((&k, v)) = self.values.get_key_value(key.as_str()) {
+                out.values.insert(k, v.clone());
+            }
+        }
+        out.repo.retain(|k| !self.written.contains(k));
+        out.written = self.written.clone();
+        (out, problems)
     }
 }
 
@@ -87,6 +152,14 @@ pub enum ModelsTrouble {
     NotAGrade { key: String, raw: String },
     NotAnEffort { key: String, raw: String },
     UnknownKey { key: String },
+    // 저장소의 `.moai/config.toml` 에서만 — 아는 키의 값이 큰따옴표 글이 아니다(그 줄의 번호와 적힌 그대로).
+    NotQuoted { key: String, raw: String, line: usize },
+}
+
+/// 값이 등급 낱말([`MODEL_LEVELS`])인 키인가 — `review_grade`·`effort`·`effort_complex`. 키를 재는 [`Models::put`] 과
+/// 탈의 글을 고르는 사용자 설정의 읽기가 이 하나로 가른다.
+pub fn is_level_key(key: &str) -> bool {
+    matches!(key, "review_grade" | "effort" | "effort_complex")
 }
 
 /// 설정 파일의 자리. `MOAI_CONFIG` → `$XDG_CONFIG_HOME/moai/config.toml` →
@@ -1135,27 +1208,13 @@ impl Doc {
             return (models, problems);
         };
         for (key, item) in table.iter() {
-            let Some(&(key, _)) = MODELS_DEFAULT.iter().find(|&&(known, _)| known == key) else {
-                problems.push(ModelsTrouble::UnknownKey { key: key.to_string() });
-                continue;
-            };
-            let raw = item.as_str();
-            let level = matches!(key, "review_grade" | "effort" | "effort_complex");
-            if level && !raw.is_some_and(|word| MODEL_LEVELS.contains(&word)) {
-                let raw = raw.map_or_else(|| item.to_string().trim().to_string(), String::from);
-                problems.push(if key == "review_grade" {
-                    ModelsTrouble::NotAGrade { key: key.into(), raw }
-                } else {
-                    ModelsTrouble::NotAnEffort { key: key.into(), raw }
-                });
-                continue;
+            let level = is_level_key(key);
+            // 탈을 댈 때의 글은 둘이다 — 등급 자리는 적힌 값을, 글 자리는 그 값의 꼴(`boolean`)을 댄다.
+            let shown = || if level { item.to_string().trim().to_string() } else { item.type_name().to_string() };
+            match models.put(key, item.as_str(), shown) {
+                Ok(key) => models.written.push(key.to_string()),
+                Err(why) => problems.push(why),
             }
-            let Some(raw) = raw else {
-                problems.push(ModelsTrouble::NotAWord { key: key.into(), found: item.type_name().to_string() });
-                continue;
-            };
-            models.values.insert(key, raw.to_string());
-            models.written.push(key.to_string());
         }
         (models, problems)
     }
@@ -1197,6 +1256,7 @@ impl Doc {
             list_width: look_one(t, LIST_WIDTH, Want::Number, Item::as_integer, &mut problems),
             list_height: look_one(t, LIST_HEIGHT, Want::Number, Item::as_integer, &mut problems),
             wiki_width: look_one(t, WIKI_WIDTH, Want::Number, Item::as_integer, &mut problems),
+            gantt_label: look_one(t, GANTT_LABEL, Want::Number, Item::as_integer, &mut problems),
         };
         // **차례를 못 읽었으면 방향도 버린다**(moai-ys7c) — 둘은 한 벌이다. `sort = 3` 을 없는 키로 넘기고
         // 방향만 내면, 탐색기가 처음 차례(우선순위)에 그 방향을 입혀 아무도 안 고른 거꾸로가 선다. 모르는
@@ -1267,6 +1327,7 @@ impl Doc {
         let mut list_width = base.list_width != new.list_width;
         let mut list_height = base.list_height != new.list_height;
         let mut wiki_width = base.wiki_width != new.wiki_width;
+        let mut gantt_label = base.gantt_label != new.gantt_label;
         // **이 세션이 적을 키가 손으로 적은 표 모양이면 그 키만 안 적는다**(moai-j7r3, moai-jr3z) — 무엇을 덮지
         // 않는가는 `set_hue` 와 같은 자다([`plain`]). `sort.by = "title"`·`[tui.sort]`·`sort = { … }` 은 무엇을
         // 적어 둔 것인지 모르는 채 낱값으로 덮이면 사라진다(`put_value` 는 값이 아닌 자리를 그대로 갈아 끼운다).
@@ -1319,6 +1380,7 @@ impl Doc {
         odd(&[LIST_WIDTH], false, &mut list_width);
         odd(&[LIST_HEIGHT], false, &mut list_height);
         odd(&[WIKI_WIDTH], false, &mut wiki_width);
+        odd(&[GANTT_LABEL], false, &mut gantt_label);
         let t = self.doc.get_mut(TUI).and_then(Item::as_table_like_mut).expect("방금 표로 섰다");
         let mut changed = false;
         let mut left = String::new();
@@ -1382,6 +1444,9 @@ impl Doc {
         }
         if wiki_width {
             changed |= put_value(t, WIKI_WIDTH, new.wiki_width.map(toml_edit::Value::from), &mut left);
+        }
+        if gantt_label {
+            changed |= put_value(t, GANTT_LABEL, new.gantt_label.map(toml_edit::Value::from), &mut left);
         }
         // 프로젝트마다의 차례 — 이 세션이 바꾼 프로젝트만. **지우지 않는다**: 탐색기는 한 프로젝트의 차례를 걷는
         // 길을 안 내니(`App::keep_order`), `new` 에 없는 열쇠는 이 세션이 안 읽은(못 읽은) 표다.
@@ -1465,6 +1530,8 @@ const LIST_WIDTH: &str = "list_width";
 const LIST_HEIGHT: &str = "list_height";
 /// 위키 창의 페이지 목록이 가져가는 폭의 몫(%) — 창의 칸 사이 선을 끌어 정한다(moai-p61w). 목록·상세의 몫과 따로다.
 const WIKI_WIDTH: &str = "wiki_width";
+/// 간트(`SPC g g`)의 고정 칸 폭 — 몫이 아니라 **칸 수**다(moai-i4hf.exq). 고정 칸과 날짜 칸 사이 선을 끌어 정한다.
+const GANTT_LABEL: &str = "gantt_label";
 const FIELDS_KNOWN: &str = "fields_known";
 
 /// 탐색기의 보기 — 사람이 마지막으로 고른 것(moai-2bzp). **낱말로 든다** — 무슨 낱말이 있는지는
@@ -1494,6 +1561,8 @@ const FIELDS_KNOWN: &str = "fields_known";
 /// list_height = 70
 /// # 위키 창의 페이지 목록이 가져가는 몫(%) — 그 창의 선을 끈 적이 있을 때만 선다. 없으면 list_width 를 따른다.
 /// wiki_width = 30
+/// # 간트의 고정 칸 폭(칸) — 그 나눔 선을 끈 적이 있을 때만 선다.
+/// gantt_label = 48
 ///
 /// # 그 프로젝트 안에서는 이 차례가 이긴다(moai-r170.8dz).
 /// [tui.project."/home/me/work/argos"]
@@ -1563,6 +1632,9 @@ pub struct Look {
     /// [`Look::list_width`] 와 **따로다**(2026-10-04 사용자 결정): 위키는 읽는 창이라 본문을 넓게, 탐색기는 목록을 넓게
     /// 둘 수 있다. 끈 적 없으면 안 적히고, 그동안은 위키 창도 `list_width` 를 따른다.
     pub wiki_width: Option<i64>,
+    /// 간트의 고정 칸 폭(칸) — 나눔 선을 끌어 정한다(moai-i4hf.exq). 몫이 아니라 칸이다: 고정 칸은 줄의 id·제목을
+    /// 담는 자리라 창이 넓어져도 같은 폭이어야 날짜 칸이 넓어진다. 끈 적 없으면 안 적힌다.
+    pub gantt_label: Option<i64>,
 }
 
 /// 설정에서 보기만 읽는다. 파일이 없으면 빈 `Look` 이고 문제도 아니다. 깨진 파일도 까닭 없이 빈 `Look` 이다 —
@@ -3517,6 +3589,7 @@ mod tests {
             list_width: Some(40),
             list_height: Some(60),
             wiki_width: Some(30),
+            gantt_label: Some(48),
         };
         upd(&path, |doc| doc.merge_look(&Look::default(), &look)).unwrap();
         let (back, problems) = read_look(Some(&path));
@@ -3958,6 +4031,7 @@ mod tests {
             list_width: None,
             list_height: None,
             wiki_width: None,
+            gantt_label: None,
         };
         let a = Look { fields: Some(vec!["id".into(), "assignee".into()]), ..base.clone() };
         let b = Look { hide_deferred: Some(true), ..base.clone() };

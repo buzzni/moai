@@ -40,7 +40,7 @@ export interface TipsCopy {
 export interface ShellCopy {
   /** Accessible name of the tab strip. */
   tabsLabel: string
-  tabs: { board: string; list: string; wiki: string }
+  tabs: { board: string; list: string; wiki: string; gantt: string }
   /** The position toggle's name says what pressing does; under 640px it says why it is off. */
   detailToLeft: string
   detailToBottom: string
@@ -111,6 +111,49 @@ export interface BoardCopy {
   noCards: string
 }
 
+export interface GanttCopy {
+  /** Accessible name of the gantt. */
+  label: string
+  /** No line to draw. */
+  empty: string
+  /** The grid's head line. */
+  heads: { id: string; title: string; progress: string; assignee: string }
+  zoomLabel: string
+  /** The four steps' names. */
+  zoom: { hour: string; day: string; week: string; month: string }
+  today: string
+  fit: string
+  /** Accessible name of the handle between the grid and the dates. */
+  resizer: string
+  /** Sunday first. */
+  weekdays: readonly string[]
+  /** The date header's lines (`{year}`, `{month}`, `{day}`, `{weekday}`, `{week}`). */
+  axis: { year: string; yearMonth: string; month: string; day: string; hourDay: string; week: string }
+  /** The bubble over a bar. */
+  tip: {
+    planned: string
+    plannedMembers: string
+    actual: string
+    now: string
+    unknown: string
+    notStarted: string
+    overdue: string
+    /** One day past the deadline (`{n}` is 1). */
+    overdueDay: string
+    /** `{n}` days past the deadline. */
+    overdueDays: string
+    progress: string
+    blockedBy: string
+    deferred: string
+    deferredNote: string
+    assignee: string
+  }
+  /** The legend under the dates; each entry is drawn with the class of the bar it names. */
+  legend: { planned: string; members: string; deferred: string; actual: string; overdue: string; due: string; today: string; clipped: string; blocker: string }
+  /** Moving a bar (moai-d86e.3ud): `{id}` the row, `{cmd}` the `moai edit` line that puts its days back. */
+  move: { moved: string; undo: string; members: string; none: string }
+}
+
 export interface DetailCopy {
   /** Accessible name of the detail pane. */
   label: string
@@ -142,6 +185,12 @@ export interface DetailCopy {
   rollupTextPercent: string
   body: string
   commits: string
+  /** The wiki pages about the row (`show <id> --json`'s `wiki`): the section and its three groups, and a lesson's mark. */
+  wiki: string
+  wikiNamed: string
+  wikiRelated: string
+  wikiLessons: string
+  wikiLesson: string
   journal: string
   noJournal: string
   work: string
@@ -316,6 +365,7 @@ export interface Copy {
   shell: ShellCopy
   list: ListCopy
   board: BoardCopy
+  gantt: GanttCopy
   detail: DetailCopy
   toolbar: ToolbarCopy
   keys: KeysCopy

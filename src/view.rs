@@ -2126,15 +2126,13 @@ pub struct Due {
 
 /// [`Due`] 를 짓는다. 둘 다 없으면 없다 — 세울 줄이 없다.
 pub fn due_of(i: &Issue, now: &str, z: &crate::tz::Zone, lang: Lang) -> Option<Due> {
-    // **종료 기한은 모든 줄의 것이다**(moai-ghkp.kz7) — 쓰기가 정한 규칙을 따른다. 시작 기한은
-    // 여전히 마일스톤 줄에만 서므로(`Issue::validate_fields` 의 `Field::StartsOn`), 다른 종류의 줄에
-    // 남은 값(손으로 푼 충돌·머지 드라이버가 넘긴 낡은 줄)은 그리지 않는다 — 그리면 쓰기가 안 받는
-    // 값이 화면에 선다(moai-x04r.fn4 가 종료 기한에 대해 세운 그 까닭이다).
+    // **시작도 종료 기한도 모든 줄의 것이다**(moai-ghkp.kz7 이 종료를, moai-xf0p.6d5 가 시작을 열었다)
+    // — 쓰기가 정한 규칙을 따른다(moai-x04r.fn4 의 까닭: 쓰기가 안 받는 값을 그리지 않는다).
     //
     // **보드가 세는 것과 같아지려는 줄이 아니다**(리뷰). 보드(`report::Dues`)는 종류·계획 밖·
     // 가려짐·닫힌 칸으로 거르는데 여기서는 **일부러** 안 본다: 닫히거나 미뤄 둔 줄의 날은 사람이
     // 적어 둔 이력이라, 보드가 조용한 것과 맞추려고 지우면 그 값이 어느 화면에도 안 서게 된다.
-    let start = i.starts_on.as_deref().filter(|_| i.kind == Kind::Milestone);
+    let start = i.starts_on.as_deref();
     let due = i.due_on.as_deref();
     if start.is_none() && due.is_none() {
         return None;
@@ -2144,10 +2142,11 @@ pub fn due_of(i: &Issue, now: &str, z: &crate::tz::Zone, lang: Lang) -> Option<D
     // (`report::Dues::split`, moai-fgjj 가 `status_in` 에서 그리로 옮겼다). 둘이 갈리면 보드는
     // "지남" 이라 세고 이 줄은 "오늘까지" 라 말한다.
     let left = due.and_then(|d| crate::model::days_until(d, &z.shift(now)));
-    // 시작 기한이 설 수 없는 줄은 날 하나만 든다 — `— → 2026-09-30` 의 빈 자리는 "아직 안 정했다"
-    // 로 읽히는데, 그 줄에는 정할 자리가 없다.
-    let span = match i.kind {
-        Kind::Milestone => format!("{} → {}", start.unwrap_or(dash), due.unwrap_or(dash)),
+    // 마일스톤은 늘 `시작 → 기한` 으로 그린다(빈 자리는 `—`). 다른 줄은 시작을 적은 줄만 그렇게 그리고,
+    // 기한만 든 줄은 날 하나만 든다 — 시작을 한 번도 안 적은 줄의 `— → 2026-09-30` 은 쓰는 사람이 없는
+    // 자리를 비워 둔 것처럼 읽힌다.
+    let span = match (i.kind, start) {
+        (Kind::Milestone, _) | (_, Some(_)) => format!("{} → {}", start.unwrap_or(dash), due.unwrap_or(dash)),
         _ => due.unwrap_or(dash).to_string(),
     };
     Some(Due { span, left: left.map(|d| due_tail(d, lang)), past: left.is_some_and(|d| d < 0) })
@@ -3273,6 +3272,19 @@ pub fn look_problems(reg: &crate::user_config::Registry, lang: Lang) -> Vec<Stri
     looks.chain(reads).chain(updates).chain(models_problems(reg, lang)).collect()
 }
 
+/// 계획을 못 옮기는 까닭의 글([`crate::model::Unshifted`]) — **한 자리다**(moai-vj8w 리뷰). 탐색기의 키·끌기 알림과
+/// 쓰기 안의 거절(`moai edit --shift*`, 그 길로 쓰는 web 간트의 끌기)이 같은 말을 댄다 — 따로 적으면 한쪽 말만 고쳐 두
+/// 표면이 같은 까닭에 다른 길을 일러 준다. 0 날 옮기기(`Still`)는 `edit` 이 먼저 걸러 고칠 것이 없는 것으로 치고 탐색기는
+/// 그런 옮기기를 안 낸다 — 여기까지 오면 옮길 날이 없는 것과 같은 말이다.
+pub fn unshifted(lang: Lang, why: crate::model::Unshifted, id: &str) -> String {
+    use crate::model::Unshifted;
+    let said = match why {
+        Unshifted::Members => say(lang, "tui.gantt.members"),
+        Unshifted::NoPlan | Unshifted::Still => say(lang, "tui.gantt.no_plan"),
+    };
+    fill(said, &[("id", id)])
+}
+
 /// 쓰기가 거절한 까닭의 글([`crate::model::Invalid`], moai-yve0).
 ///
 /// **가리키는 말은 부르는 쪽이 준다**(`at`) — 이번 쓰기가 짓는 줄은 거절 뒤에 그 id 가 어디에도
@@ -3284,6 +3296,16 @@ pub fn invalid(lang: Lang, at: &crate::store::At, why: &crate::model::Invalid) -
         crate::store::At::Unwritten(title) => fill(say(lang, "invalid.unwritten"), &[("title", title)]),
     };
     invalid_at(lang, &at, why)
+}
+
+/// 천장이 된 조상을 가리키는 말 — 위계 거절 셋(기한·시작·둘 다)이 한 자로 짓는다. **이번 쓰기가 짓는 조상은 제목으로**
+/// 가리킨다 — 거절당한 줄 자신을 가리키는 말(`invalid.unwritten`)과 같은 자다(moai-1rkl, 리뷰). 그 id 는 거절 뒤에
+/// 어디에도 안 남는다. 갈래마다 적던 판은 이 규칙을 고치는 날 한 거절만 옛 말로 남을 길이 열려 있었다.
+fn beyond_whom(lang: Lang, above: &str, above_new: bool) -> String {
+    match above_new {
+        true => fill(say(lang, "invalid.unwritten"), &[("title", above)]),
+        false => above.to_string(),
+    }
 }
 
 /// [`invalid`] 의 속 — 가리키는 말이 이미 지어졌을 때.
@@ -3318,17 +3340,20 @@ fn invalid_at(lang: Lang, at: &str, why: &crate::model::Invalid) -> String {
         Invalid::Date { id, field: f, value } => {
             fill(say(lang, "invalid.date"), &[("id", id), ("field", field(f)), ("value", value)])
         }
-        Invalid::DateNotMilestone { id, field: f } => {
-            fill(say(lang, "invalid.date_not_milestone"), &[("id", id), ("field", field(f))])
-        }
         Invalid::DueBeyond { due, above, above_new, above_due } => {
-            // 이번 쓰기가 짓는 조상은 제목으로 가리킨다 — 거절당한 줄 자신을 가리키는 말(`invalid.unwritten`)과
-            // 같은 자다(moai-1rkl, 리뷰). 그 id 는 거절 뒤에 어디에도 안 남는다.
-            let above = match above_new {
-                true => fill(say(lang, "invalid.unwritten"), &[("title", above)]),
-                false => above.clone(),
-            };
+            let above = beyond_whom(lang, above, *above_new);
             fill(say(lang, "invalid.due_beyond"), &[("due", due), ("above", &above), ("above_due", above_due)])
+        }
+        Invalid::StartBeyond { start, above, above_new, above_due } => {
+            let above = beyond_whom(lang, above, *above_new);
+            fill(say(lang, "invalid.start_beyond"), &[("start", start), ("above", &above), ("above_due", above_due)])
+        }
+        Invalid::DatesBeyond { start, due, above, above_new, above_due } => {
+            let above = beyond_whom(lang, above, *above_new);
+            fill(
+                say(lang, "invalid.dates_beyond"),
+                &[("start", start), ("due", due), ("above", &above), ("above_due", above_due)],
+            )
         }
         Invalid::DateOrder { starts_on, due_on } => {
             fill(say(lang, "invalid.date_order"), &[("starts_on", starts_on), ("due_on", due_on)])
@@ -3439,7 +3464,9 @@ pub fn models_trouble(lang: Lang, why: &crate::user_config::ModelsTrouble) -> St
     };
     match why {
         ModelsTrouble::NotATable { found } => fill(say(lang, "look.not_a_table"), &[("key", MODELS), ("found", found)]),
-        ModelsTrouble::NotAWord { key, found } => want(key, say(lang, "look.want_word"), found),
+        // **적힌 글을 걸러 싣는다**(리뷰 moai-w25x.54r) — 사용자 설정은 여기 값의 꼴(`boolean`)만 실었지만, 남의 손이 든
+        // 글이 이 자리에 오는 날 그 제어문자가 터미널을 다시 칠한다. 다른 갈래가 `one_line` 을 지나는 것과 같은 자다.
+        ModelsTrouble::NotAWord { key, found } => want(key, say(lang, "look.want_word"), &crate::text::one_line(found)),
         ModelsTrouble::NotAGrade { key, raw } | ModelsTrouble::NotAnEffort { key, raw } => {
             let levels = fill(say(lang, "models.want_level"), &[("known", &MODEL_LEVELS.join("|"))]);
             want(key, &levels, &crate::text::one_line(&format!("{raw:?}")))
@@ -3447,6 +3474,15 @@ pub fn models_trouble(lang: Lang, why: &crate::user_config::ModelsTrouble) -> St
         ModelsTrouble::UnknownKey { key } => {
             fill(say(lang, "models.unknown_key"), &[("key", &crate::text::one_line(&format!("{MODELS}.{key}")))])
         }
+        // 저장소 파일의 글 키와 같은 말이다(`config_trouble` 의 `NotQuoted`) — 그 파일은 글을 큰따옴표로만 받는다.
+        ModelsTrouble::NotQuoted { key, raw, line } => fill(
+            say(lang, "config.not_quoted"),
+            &[
+                ("line", &line.to_string()),
+                ("key", &crate::text::one_line(&format!("{MODELS}.{key}"))),
+                ("raw", &crate::text::one_line(&format!("{raw:?}"))),
+            ],
+        ),
     }
 }
 
@@ -3464,32 +3500,91 @@ pub fn models_problems(reg: &crate::user_config::Registry, lang: Lang) -> Vec<St
         .collect()
 }
 
+/// `moai keys` 의 사람 화면(moai-so7w) — 파일의 자리 한 줄, 그리고 절마다 동작과 키. **바꾼 줄은 `*` 와 옛 키를 단다**
+/// — 색이 혼자 뜻을 지지 않는다. 키가 여럿이면 `·` 로 잇고 첫째가 바·메뉴의 이름이다.
+pub fn keys(
+    file: Option<&std::path::Path>,
+    found: bool,
+    listed: &[crate::tui::keymap::Listed],
+    lang: Lang,
+) -> Vec<String> {
+    let mut out = Vec::new();
+    out.push(match file {
+        Some(f) if found => fill(say(lang, "keys.file"), &[("path", &crate::text::one_line(&f.display().to_string()))]),
+        Some(f) => fill(say(lang, "keys.file_missing"), &[("path", &crate::text::one_line(&f.display().to_string()))]),
+        None => say(lang, "keys.no_place").to_string(),
+    });
+    let shown =
+        |keys: &[String]| if keys.is_empty() { say(lang, "keys.unbound").to_string() } else { keys.join(" · ") };
+    let mut section = "";
+    // 칸은 절마다 맞춘다 — 탐색의 긴 이름(`sort_add_assignee`)이 한 글자 창의 줄까지 밀지 않게.
+    let (mut wide, mut keys_wide) = (0, 0);
+    for l in listed {
+        if l.section != section {
+            section = l.section;
+            let here = || listed.iter().filter(|m| m.section == section);
+            wide = here().map(|m| m.action.len()).max().unwrap_or(0);
+            keys_wide = here().map(|m| crate::text::width(&shown(&m.keys))).max().unwrap_or(0);
+            out.push(String::new());
+            out.push(format!("[{section}]"));
+        }
+        let now = shown(&l.keys);
+        if l.changed() {
+            let pad = keys_wide.saturating_sub(crate::text::width(&now));
+            let was = fill(say(lang, "keys.was"), &[("keys", &shown(&l.default))]);
+            out.push(format!("* {:<wide$}  {now}{}  {was}", l.action, " ".repeat(pad)));
+        } else {
+            out.push(format!("  {:<wide$}  {now}", l.action));
+        }
+    }
+    out
+}
+
 /// 사람이 읽는 표. 등급·effort도 제 줄에 서야 어느 값이 기본값인지 가를 수 있다.
-pub fn models(reg: &crate::user_config::Registry, lang: Lang) -> Vec<String> {
+///
+/// **줄마다 그 줄의 값 하나만 표한다**(moai-w25x.yrm, 리뷰 moai-9tqo.jdi 14번). 역할 줄 꼬리에 effort 값을 싣던 판은
+/// `default` 를 그 역할의 모델 키 하나로 달아, effort 만 적은 사람이 `develop  sonnet  (high)  default` 를 보고 줄 전체를
+/// 기본값으로 읽었다. 이제 짝은 등급 줄이 거꾸로 댄다(`effort  medium  default  develop · docs · bulk`) — 값과 표가
+/// 한 키의 것이다. 값이 온 자리는 셋이다: 사람(표 없음), 저장소(`repo`, moai-w25x.jud), 기본값(`default`, 흐리게).
+pub fn models(
+    models: &crate::user_config::Models,
+    path: Option<&std::path::Path>,
+    repo_path: Option<&std::path::Path>,
+    lang: Lang,
+) -> Vec<String> {
     use crate::user_config::MODELS_DEFAULT;
+    let pairs = |key: &str| -> &'static [&'static str] {
+        match key {
+            "effort" => &["develop", "docs", "bulk"],
+            "effort_complex" => &["complex"],
+            "review_grade" => &["review"],
+            _ => &[],
+        }
+    };
     let mut out = Vec::new();
     for &(key, _) in MODELS_DEFAULT {
-        let value = crate::text::one_line(&reg.models.values[key]);
-        let effort = match key {
-            "develop" | "docs" | "bulk" => Some("effort"),
-            "complex" => Some("effort_complex"),
-            "review" => Some("review_grade"),
-            _ => None,
+        let value = crate::text::one_line(&models.values[key]);
+        let roles = pairs(key);
+        let tail = if roles.is_empty() { String::new() } else { format!("  {}", roles.join(" · ")) };
+        let line = |mark: &str| {
+            let mark = if mark.is_empty() { String::new() } else { format!("  {mark}") };
+            format!("{key:14}  {value}{mark}{tail}")
         };
-        let tail = effort.map(|k| format!("  ({})", reg.models.values[k])).unwrap_or_default();
-        let line = format!("{key:14}  {value}{tail}");
-        out.push(if reg.models.written.iter().any(|k| k == key) {
-            line
+        out.push(if models.written.iter().any(|k| k == key) {
+            line("")
+        } else if models.repo.iter().any(|k| k == key) {
+            line(say(lang, "models.repo"))
         } else {
-            crate::style::paint(crate::style::DIM, &format!("{line}  {}", say(lang, "models.default")))
+            crate::style::paint(crate::style::DIM, &line(say(lang, "models.default")))
         });
     }
-    let path = reg
-        .path
-        .as_deref()
+    let path = path
         .map(|p| crate::text::one_line(&p.display().to_string()))
         .unwrap_or_else(|| say(lang, "models.no_path").to_string());
     out.push(fill(say(lang, "models.path"), &[("path", &path)]));
+    if let Some(repo) = repo_path {
+        out.push(fill(say(lang, "models.repo_path"), &[("path", &crate::text::one_line(&repo.display().to_string()))]));
+    }
     out
 }
 
@@ -5120,11 +5215,10 @@ mod tests {
         assert!(back.contains("(1일 남음)"), "{back}");
     }
 
-    /// **종료 기한은 모든 줄에 선다**(moai-ghkp.kz7) — 쓰기가 받으므로 상세도 그린다. **시작 기한은
-    /// 마일스톤 줄에만 선다**(moai-x04r.fn4) — 쓰기가 다른 종류에 거절하는 값이라, 손으로 푼 충돌이
-    /// 남긴 것이 서면 한 줄이 두 표면에서 다르게 읽힌다.
+    /// **두 날짜는 모든 줄에 선다**(moai-ghkp.kz7 이 종료를, moai-xf0p.6d5 가 시작을 열었다) — 쓰기가
+    /// 받으므로 상세도 그린다. 기한만 든 줄은 날 하나만, 시작을 적은 줄은 `시작 → 기한` 이다.
     #[test]
-    fn a_deadline_is_drawn_on_every_row_and_a_start_on_a_milestone_only() {
+    fn a_start_and_a_deadline_are_drawn_on_every_row() {
         let now = "2026-09-23T00:00:00Z";
         let z = crate::tz::Zone::utc();
         let mut stone = issue("argos-0001", "v0.1", "todo");
@@ -5138,15 +5232,19 @@ mod tests {
             let mut row = issue("argos-0002", "기한 든 줄", "todo");
             row.kind = kind;
             row.due_on = Some("2026-09-20".into());
-            // 손으로 푼 충돌이 남긴 시작 기한 — 그리지 않는다.
-            row.starts_on = Some("2026-09-05".into());
             let d = due_of(&row, now, &z, Lang::Ko).unwrap_or_else(|| panic!("{kind:?} 줄의 기한이 빠졌다"));
             assert_eq!(d.span, "2026-09-20", "{kind:?}");
             assert!(d.past, "{kind:?}");
 
-            // 시작만 남은 줄은 그릴 것이 없다.
+            row.starts_on = Some("2026-09-05".into());
+            let d = due_of(&row, now, &z, Lang::Ko).unwrap_or_else(|| panic!("{kind:?} 줄의 시작이 빠졌다"));
+            assert_eq!(d.span, "2026-09-05 → 2026-09-20", "{kind:?}");
+
+            // 시작만 적은 줄도 선다 — 기한 자리는 `—` 이고 남은 날수는 없다.
             row.due_on = None;
-            assert!(due_of(&row, now, &z, Lang::Ko).is_none(), "{kind:?} 줄에 시작 기한이 섰다");
+            let d = due_of(&row, now, &z, Lang::Ko).unwrap_or_else(|| panic!("{kind:?} 줄의 시작이 빠졌다"));
+            assert_eq!(d.span, "2026-09-05 → —", "{kind:?}");
+            assert!(d.left.is_none() && !d.past, "{kind:?}");
         }
     }
 

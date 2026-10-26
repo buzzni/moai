@@ -27,7 +27,7 @@ To read the same tracker in a browser tab instead, run `moai web` — see
 ## Find your way around
 
 [Milestones](glossary.md#milestone) and [epics](glossary.md#epic) behave like
-directories.
+directories. Forgot a key? `?` (or `SPC h`) opens [the key list](#the-key-list).
 
 - `j`/`k` move, `Enter` goes into a milestone or an epic, `Backspace` comes back
   out. Rows you can go into end their title with `/`
@@ -38,7 +38,14 @@ directories.
   chose and its detail stay put even off screen, and the next `j` or `k` brings
   the list back to it
 - The detail describes the row under the cursor. `Ctrl-w w` moves the focus there
-  so the same keys scroll it, and back again
+  so the same keys scroll it, and back again. After the commits it lists the
+  wiki about the row, as `moai show <id>` does: the pages that name the row or
+  its epic, then the related sections its title finds, `path:line` first. It
+  leaves out the lessons the row's own notes point at (it does not read the
+  notes), so such a lesson can stand among the related sections here while
+  `moai show <id>` lists it as a lesson. The
+  wiki is read once per checkout, so a page written after the explorer opened
+  shows once `SPC g w` has read the wiki again, or the next time it opens
 
 **What the list shows is the view.** To begin with every column is shown,
 done included, and [deferred](glossary.md#deferred) work is hidden; the path
@@ -103,6 +110,8 @@ remain readable; if both keys exist, `hide_backlog` wins.
   one, and the wheel and `Ctrl-d`/`Ctrl-u` scroll the board without moving the
   cursor. The cursor, filter, view and detail are the list's, so switching keeps
   your place. The board does not move cards — `moai mv` does
+- **`SPC g g` — the gantt.** The same rows opened out on the left and a date axis
+  with bars on the right — see [the gantt](#the-gantt) below
 - **`SPC g s` — statistics.** The numbers `moai stats` gives, drawn: the flow per
   week, the columns and priorities, lead and cycle time, and AI work by model. It
   counts the project you are in, and only what passes the filter when one is set.
@@ -129,7 +138,9 @@ remain readable; if both keys exist, `hide_backlog` wins.
   overview. A link that leads nowhere, an address outside the wiki and
   an id the tracker does not hold stay in that list marked `(none)` or
   `(outside)`, and taking one only says so — picking or clicking one does the
-  same. `/` searches the titles and bodies and narrows the list. `Esc` drops a
+  same. `/` searches the titles and bodies and narrows the list, in
+  `moai wiki search`'s order: the pages its words rank, best first, then the
+  pages that only contain the letters typed so far. `Esc` drops a
   picked link first, then clears that search, then goes back to where you were.
   `SPC v r` shows the page as written, where no link is marked for `Tab`. It
   reads the pages afresh each time it opens and writes none of them — a page is
@@ -141,7 +152,46 @@ cannot be opened, the one you are in stays as it was and only the notice stands.
 In both windows the arrows, `Home`/`End` and the page keys move with `Ctrl` or
 `Alt` held too, as on the list; letter keys do not.
 
-The list or the board you leave on is the one the next run opens with.
+The list, the board or the gantt you leave on is the one the next run opens with.
+
+## The gantt
+
+Reach for it when you want to see the plan against the calendar: what starts when,
+what runs late, and what is moving right now. It is the list's layout, not a window
+of its own, so the cursor, filter, view, search and detail carry over and `SPC g l`
+brings you back to the same row.
+
+**Reading it.** Every group opens out when you enter, and the left column is the
+list's row. On the right, `░` is the planned start to deadline (`▒` on an epic or a
+milestone), `◆` the row's own deadline, `█` over it when the work actually ran,
+`▓` the time past a deadline, `┄` a deferred row's plan, and `▼` over a dotted line
+today. An epic that wrote no days of its own spans its members' days. Planned days
+are calendar days; actual times are shown in your time zone. With no planned days
+anywhere, the date side says how to add them: `moai edit <id> --start <day> --due
+<day>`, or `@start~due` at the end of a plan line.
+
+**Folding.** `h`, `l` and `Tab` fold and unfold inside the gantt only — the list
+keeps the folds it had, and the next time you enter, everything is open again.
+
+**Moving the dates.** `=` and `-` zoom in and out (hour, day, week, month), `H` and
+`L` slide one cell, `[` and `]` a page, `t` puts today in the middle and `z` fits
+every row on one screen. It opens fitted and stays fitted until you move it.
+
+**Moving a plan.** `<` and `>` move the cursor row's whole plan a day, `{` and `}`
+only its start. With the mouse, drag a bar's middle, its left end (the start) or its
+right end (the deadline); it snaps to whole days and is written once, when you let
+go. Click an empty day on a row with no plan to plan that one day. The write is the
+same as `moai edit --start --due`: a start after the deadline, or a day past the
+deadline above, is refused and the refusal stands on the banner. A move that went
+through names the `moai edit` line that puts it back, and the rows it pushed past
+this deadline. An epic whose bar spans its members does not move — move the members.
+On the overview, enter the project first.
+
+**The detail** stands below the gantt at first, so the dates keep the width.
+`SPC o d` there moves only the gantt's detail, for this session.
+
+**Small windows.** On a narrow window the left column gives up its columns first,
+then the dates are hidden and the header says so; a low window folds the `▼` row.
 
 ## The menu
 
@@ -153,13 +203,89 @@ not know.
 - `Esc` or `SPC` closes it, and `Backspace` goes one level up
 - Toggles and sorts leave it open so you can try one and watch the screen change;
   that level says so with an `Esc` hint
-- A movement key closes it and makes the move in the same press
+- A movement key closes it and makes the move in the same press, unless an item
+  on that level holds the letter: `SPC h` opens [the key list](#the-key-list)
+  rather than folding the row, and `SPC g` opens the screens
 
 The mouse works on the open menu too. Click an item and it is as if you pressed
 its key — a group goes one level down and a toggle keeps the menu open. `Esc` and
 `Bksp` on the bottom line close it or go up. A click or the wheel outside the menu
 closes it and does what it does there, so clicking a row closes the menu and puts
 the cursor on that row. Empty space inside the menu does nothing.
+
+## The key list
+
+`?`, or `SPC h` from the menu, opens a window over the screen that lists every
+key: the keys you press straight away (`r`, `h`, `l`, `Tab` and the rest), the
+movement keys, every menu item with its group (`view › deferred`), and the keys
+of the gantt, the stats window and the wiki window. It reads the same table as
+`moai keys`, so a key you changed in `keys.toml` shows as you changed it.
+
+The list takes one to three columns, by the size of the screen: the fewest
+columns that show it whole, or, when no number of columns fits the height, as many
+as fit the width. A screen wide and tall enough shows it all at once; an 80-column
+one shows one column to scroll.
+
+- The movement keys and the mouse wheel scroll it; the bottom right corner says
+  where you are (`16/103`). With more than one column the columns scroll together,
+  and the count is the rows of the longest column, not every line (`1/35`)
+- `?`, `SPC h`, `Esc` or `Backspace` closes it. While it is open, `Esc` belongs
+  to the window: it does not clear the filter you set
+- It opens over the stats and wiki windows too (`SPC h`), and closing it leaves
+  that window as it was
+- The bottom bar names `?` while there is room. On a narrow screen it is the
+  first hint to drop; `SPC h` in the menu is always there
+
+## Change the keys
+
+The keys are yours to change, in a file of their own: `keys.toml` next to your
+user config — `~/.config/moai/keys.toml`, or under `$XDG_CONFIG_HOME/moai/`
+when that is set, unless `MOAI_CONFIG` or `MOAI_KEYS` points elsewhere. Write only the lines you change; every other key keeps its
+default.
+
+1. Get a starter file. `moai keys --template` prints every action under its
+   section with its default keys, commented out — save it where the file lives:
+
+       moai keys --template > ~/.config/moai/keys.toml
+
+2. Uncomment the lines you want and change them:
+
+   ```toml
+   [browse]
+   quit = "SPC x"
+   grep = ["/", "SPC /"]   # several keys: the first is the one the bar and the menu show
+   jot = "none"            # unbind it
+   [moves]
+   line_down = "n"         # moves are shared by the list, the picker, the statistics and the wiki
+   ```
+
+3. Start `moai tui` again — the file is read once, when the explorer starts. Run
+   `moai keys` to see the keys in force: the ones you changed are marked with
+   `*` and the old key.
+
+A line replaces **every** key of that action, the hidden ones too — `line_down
+= "n"` leaves the down arrow doing nothing, so list it again
+(`["n", "Down"]`) to keep it. Key names are spelt the way the explorer shows
+them: `SPC`, `Enter`, `Esc`, `Tab`, `Bksp`, `Ctrl-w w`, `gg`, `Alt-x`, and a
+capital letter for Shift.
+
+A line that cannot work is dropped on its own and that action keeps its default
+key; the explorer still opens and says so in one line. Swapping two keys is
+fine — clashes are measured after every line is in. Some keys cannot be changed:
+`Ctrl-C`, the digits `0`–`9` that jump to a project, `SPC v 1`–`9`, `SPC`
+itself, and the keys inside a text field (search, filter, the jot form). A
+window's `close` key can move to another key but cannot be set to `none` — it
+is the only way out of that window.
+
+The gantt's own keys live under `[gantt]`, one key per line, and are looked up
+first only while the gantt stands. A `[browse]` line that uses one of them
+(`expand = "L"`) keeps working in the list and the board, and in the gantt that
+key does the gantt's thing. A `[gantt]` line that would hide a list key inside
+the gantt — `fit = "j"` — is the one dropped.
+
+`moai tui --help` and the menu name the keys you set. The help's sentences about
+the arrows, `Home` and the page keys still describe the defaults; `moai keys`
+lists every key exactly.
 
 ## The mouse
 
@@ -177,6 +303,10 @@ kept.
 - **Dragging the line** between the list and the detail resizes them, and the
   share is kept. The wiki window's line drags the same way and keeps a share of
   its own (`wiki_width`); until you drag it, the wiki splits like the list
+- **In the gantt**, a sideways wheel or `Shift` and the wheel slide the dates, and
+  so does dragging the date header. Dragging a bar moves its plan — see
+  [the gantt](#the-gantt). Dragging the line between the rows and the dates widens
+  the rows, and that width is kept (`gantt_label`)
 - **To select or paste with the terminal**, hold `Shift` over the list and the
   detail (`Option` in iTerm2), or turn the mouse off. While a form, a picker or a
   prompt is open, the mouse is the terminal's again
@@ -303,8 +433,12 @@ write there either.
   turn the mouse off with `SPC o m`
 - **Parking a thought says another moai is writing** — the form stays open; wait
   a moment and keep it again
+- **A key from `keys.toml` does nothing** — that line was dropped. The notice
+  line at start names it, and `moai keys` lists every dropped line with the
+  reason. Most often the key is already taken, or it starts a longer key and so
+  waits for the rest (`g` waits for `gg`)
 - **It asks who you are when you park a thought** — the tracker records a name and
   an email on every write and `git config` had none. The answer holds for this
   run; set `user.name` and `user.email` to stop it asking
 
-Decided in: moai-z46r moai-9nfw moai-47mz moai-irrj moai-ucx8 moai-1hka moai-h2rh moai-gelm moai-m6ni moai-p3r9 moai-o3cb moai-fyul moai-ogaw moai-tllo moai-fc97 moai-jtvp moai-bth3 moai-9tqo moai-wk7i
+Decided in: moai-z46r moai-9nfw moai-47mz moai-irrj moai-ucx8 moai-1hka moai-h2rh moai-gelm moai-m6ni moai-p3r9 moai-o3cb moai-fyul moai-ogaw moai-tllo moai-fc97 moai-jtvp moai-bth3 moai-9tqo moai-wk7i moai-pxiy moai-i4hf

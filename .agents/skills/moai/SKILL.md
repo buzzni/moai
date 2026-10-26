@@ -12,6 +12,7 @@ The work lives in `.moai/issues.jsonl`. There is no approval gate — create any
     moai ready                             what you can pick up right now
     moai show <id>                         body, children, history. Why it was decided is here
     moai show -g <keyword>                 find out whether it is written down already
+    moai wiki search '<words>'             what the manual (and the lessons) say about it
     moai show -s todo -t bug               filters (comma = or, repeated flag = and, except -a: or)
     moai show --tree                       epic → issue → child
     moai ready --worktree                  overlay what the other worktrees picked up
@@ -113,8 +114,11 @@ always asked about — for a plan, an epic, an issue or a backlog item that come
 the person's own request. Write the answer as `@YYYY-MM-DD` at the end of the plan line
 it belongs to (`# Epic title @2026-10-31`, `- [p1] first issue @2026-10-20`), or give
 `--due <day>` to put it on every epic the plan creates that carries no `@` of its own.
-A row made alone takes the same `--due` on `moai add` or `moai backlog add` — an `@` in
-a single title stays text. `--due +3` is three days from today.
+When the person also names a day to begin, write the range — `@2026-10-25~2026-10-31`
+(start to deadline), or `@2026-10-25~` for a start alone — and `--start <day>` goes on
+epics the way `--due` does. A start is the person's too: never make one up.
+A row made alone takes the same `--due` on `moai add` or `moai backlog add` (and
+`--start` likewise) — an `@` in a single title stays text. `--due +3` is three days from today.
 **No answer, no deadline** — leave it empty, never make one up. A review issue and a
 backlog item you park mid-work are not asked about.
 Nothing checks this: it is a question for you to ask, not a gate.
@@ -154,8 +158,11 @@ even when you cannot do it now (fork 1). If it is not for now, park it with
 **2. Pick something up before you change the repository.** `moai mv <id> in_progress`.
 What counts is work inside the repository — `.moai/`, `.claude/`, `.agents/`, `.codex/`,
 `.worktrees/`, `target/` and anything outside the repository (scratchpad, temporary
-files) do not. Shell writes (`>`, `>>`, `sed -i`, `tee`) count as much as `Edit` and
-`Write`. If it was not in the plan, create it with `moai add 'a title'` and pick that up.
+files) do not. Shell writes (`>`, `>>`, `sed -i`, `tee`, the destination of `cp`·`mv`·`install`)
+count as much as `Edit` and `Write`. If it was not in the plan, create it with `moai add 'a title'`
+and pick that up. A session that holds only work whose worktree stands is refused a write that
+lands in the main checkout — wherever its shell stands — and a write into another epic's worktree;
+the refusal names the same file in its own worktree.
 
 **3. A review is an issue too.** Before you call a review, create a review issue tied to
 what you are reviewing. The review is `/code-review` in Claude Code; in Codex and
@@ -188,8 +195,9 @@ own server.
     env -u TMUX tmux -L <unique name> …
 
 Under cmux claude-teams (`$TMUX` starts with `/tmp/cmux-`) the `tmux` on `PATH` is cmux's shim: it
-drops `-L`, `-S` and `-f`, so `new-session` and the `kill-*` commands open and close workspaces and
-tabs in the person's cmux, and `env -u TMUX` takes away only the fake `$TMUX`. The hook refuses
+drops `-L`, `-S` and `-f`, so `new-session`, `new-window`, `split-window`, `send-keys`,
+`respawn-pane` and the `kill-*` commands open, close and type into workspaces and tabs in the
+person's cmux, and `env -u TMUX` takes away only the fake `$TMUX`. The hook refuses
 those through the shim. Call a real tmux by its absolute path instead — `type -a tmux` lists the
 candidates; take one whose `readlink -f` has no `cmux` in it:
 
@@ -223,8 +231,8 @@ its own way — read your own column.
 
 | Step | Claude Code | Codex | Antigravity |
 |---|---|---|---|
-| Enter the worktree | `EnterWorktree(path)` from the root | `cd` into it and run every command there | `cd` into it and run every command there |
-| Come back to the root | `ExitWorktree(keep)` | `cd` to the root and run every command there | `cd` to the root and run every command there |
+| Work in the worktree | stay in the root and aim every call at its absolute path — not `EnterWorktree`, which asks the person to approve each call into `.worktrees/` | `cd` into it and run every command there | `cd` into it and run every command there |
+| Come back to the root | nothing if the shell never left; `cd` to the root if a `cd` moved it — the shell keeps it — and `ExitWorktree(keep)` only after an `EnterWorktree` | `cd` to the root and run every command there | `cd` to the root and run every command there |
 | Ask the person watching | `AskUserQuestion` | `request_user_input` | ask in the conversation and wait |
 | Review the work | `/code-review` | the review this session has, else read the diff yourself | the review this session has, else read the diff yourself |
 | Change the model (the person does it) | `/model` | `/model` | — |
@@ -247,5 +255,9 @@ the next session to take over from. The next session reads it in the history und
 `moai show <id>`.
 
     moai note <id> 'Next: <what comes next>'
+
+If this session made a mistake the next one would make too, write it down as a lesson while
+you still hold the row it came from (the page is a change to the repository, as rule 2 counts it) —
+`moai wiki search '<its words>'` first, then `moai wiki learn`; `moai-wiki` says which mistakes count.
 
 Every command and the `--from` syntax are in `references/commands.md`.

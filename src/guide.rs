@@ -82,6 +82,10 @@ pub fn make_review(anchor: &str) -> String {
     )
 }
 
+/// 리뷰를 닫기 앞에서 묻는 한 줄(moai-4s5n.svp). 위키 스킬의 "Lessons" 와 같은 물음이다 — 리뷰가 낸 지적 가운데
+/// 규칙 하나로 막을 수 있었던 것이 있는가. 아무것도 막지 않는다: 답이 "없다" 면 그대로 닫는다.
+const LESSON_ASK: &str = "Could one rule have stopped any finding above? If so, write the lesson on the branch before it merges — `moai wiki search` it, then follow Lessons in `moai-wiki`";
+
 /// 리뷰를 닫는 두 걸음 — `REVIEW_STEPS` 에서 시작 걸음을 빼고 **실제 id** 를 넣은
 /// 것. 닫기 거절문과 세션을 닫을 때의 붙듦이 쓴다. 손으로 다시 적던 두 자리는
 /// 이미 서로 다른 글을 내고 있었다.
@@ -94,12 +98,14 @@ pub fn close_steps(id: &str, moai: &str) -> String {
     // 바꾼다: `REVIEW_STEPS` 의 줄은 들여쓰기 뒤 곧바로 그 낱말로 시작한다
     // (`the_skill_names_each_rule_as_the_hook_does` 가 그것을 못박는다).
     let head = format!("{moai} ");
-    REVIEW_STEPS
-        .lines()
-        .skip(1)
-        .map(|l| l.replace("<id>", id).replacen("moai ", &head, 1))
-        .collect::<Vec<_>>()
-        .join("\n")
+    let mut steps: Vec<String> =
+        REVIEW_STEPS.lines().skip(1).map(|l| l.replace("<id>", id).replacen("moai ", &head, 1)).collect();
+    // 물음은 닫는 명령 바로 앞이다 — 리뷰 원문과 판단을 두 노트로 가르는 걸음은 그대로고, 닫는 줄이 늘 마지막이다
+    // (`closing_offers_a_held_review_the_steps_rule_three_lets_through` 가 마지막 줄을 닫는 명령으로 친다).
+    // 명령이 아니라 물음이라 `moai ` 머리를 갈지 않는다.
+    let at = steps.len().saturating_sub(1);
+    steps.insert(at, format!("  {LESSON_ASK}"));
+    steps.join("\n")
 }
 
 /// 난이도 한 낱말 — **개발의 역할과 에픽 끝 리뷰의 `max` 를 함께 가르는 그 축**이다. 낱말·역할·잣대 셋.
@@ -166,7 +172,7 @@ fn roles_table() -> String {
 fn models_defaults() -> String {
     let pairs: Vec<String> =
         crate::user_config::MODELS_DEFAULT.iter().map(|(key, value)| format!("`{key}` `{value}`")).collect();
-    format!("With nothing written, the defaults are {}.", pairs.join(" · "))
+    format!("With nothing written and no repository table, the defaults are {}.", pairs.join(" · "))
 }
 
 /// 서브에이전트 일꾼이 모델이 모자라 집기 전에 멈출 때 내는 머리(moai-9tqo.rsl·p1p). 감독의 4 가 이 머리로 읽고
@@ -358,11 +364,13 @@ stop. A merge that lands on the wrong HEAD leaves no reference at all once `bran
 Work inside a milestone merges in the milestone's worktree, not in the root, and that worktree
 gets the same check before the merge ("The milestone branch").
 
-**Ask it where you already are.** The merge and the tracker commits (8, 11) come after
-`ExitWorktree(keep)`, so you are back in the root and it is one command. From inside the
-worktree, do not ask with `git -C <root> …` — that shape is
-refused there (the git shapes below): `ExitWorktree(keep)`, ask, and if work is left in that
-worktree go back in with `EnterWorktree(path)`"#;
+**Ask it where you already are.** You stay in the root ("Stay in the root" — in a session,
+as long as every `cd` into the worktree stood in parentheses), so the merge and the tracker
+commits (8, 11) and this check are plain commands there.
+Before a tracker commit in the root, look at `git status -- .moai/` first. The path keeps the
+commit from sealing someone's open merge; the rows other sessions have not committed yet ride
+along, and that is expected — they stand in the shared file already, and the next tracker
+commit is where they go into history"#;
 
 /// 트래커가 git 밖인지 묻는 한 줄(moai-nzmp.ush). `.moai` 를 `.gitignore` 나 `.git/info/exclude` 에 둔 저장소가 있다 —
 /// 2026-10-14 saycode-extensions 회차의 감독이 일꾼마다 "트래커 커밋을 건너뛰라" 를 손으로 덧붙였다. 거기서 경로를 준
@@ -393,36 +401,47 @@ usual case, and every step stands as written"#
     )
 }
 
-/// **격리 가드가 읽을 수 있는 꼴로 이른다**(moai-rgp9). `EnterWorktree` 로 들어간 세션의 Bash
-/// 호출은 하네스가 정적으로 읽고, git 이 그 워크트리를 겨눈다는 것을 증명 못 하면 거절한다 —
-/// 판정은 "위험하다" 가 아니라 **"확인 불가"** 다.
+/// **루트에 서서 워크트리를 절대 경로로 다룬다**(moai-9js2, 2026-10-25 사용자 결정) — 세션 일꾼도 서브에이전트처럼.
+/// `.worktrees/` 로 드는 `EnterWorktree` 는 부를 때마다 사람에게 "permission-root relocation" 승인을 묻는다(Claude Code
+/// v2.1.206 부터) — allow 규칙도 "don't ask again" 도 안 끄고 `bypassPermissions` 만 건너뛴다. 자리는 세 벤더가 함께 쓰는
+/// `.worktrees/`(moai-5s9l)라 되돌리지 않는다. 그래서 감독이 보낼 때부터 들지 말라고 시킨다.
 ///
-/// 2026-09-29 에 이 저장소의 전사 246개(561MB)를 훑어 **714건**을 셌다. 복합 명령이 든 것이
-/// 608건(85%)이고, 꾸밈 하나 없는 단일 명령 28건은 전부 `git -C <루트>` 처럼 **과녁이 밖**인
-/// 것이었다. 그 28건 안에 옛 [`BRANCH_CHECK`] 가 이르던 `git -C <root> symbolic-ref -q HEAD`
-/// 가 있었다 — 심은 글이 거절되는 명령을 시키고 있었다.
+/// **들지 않으니 격리 가드도 안 선다** — 가드는 워크트리에 든 세션의 것이다. 옛 글(`GIT_SHAPES`, moai-rgp9)은 그 가드가
+/// 거절하는 git 꼴(복합 명령·heredoc·치환·`git -C <루트>`)을 일렀는데, 루트에 선 세션에는 그 거절이 없어 걷었다.
+/// 가드의 몫 — 루트 소스에 잘못 쓰는 것 — 은 훅의 규칙 2 가 진다(moai-9js2.3xn, `hook::homed`).
 ///
-/// **Claude Code 의 것이다**(moai-snyk) — 그 하네스의 격리 가드가 거절한 꼴을 센 글이라, Codex·Antigravity 창은
-/// 이 걸음 없이 `cd` 로 든다. 일꾼 글에 한 번 서서 새 일과 거둔 일이 같은 글을 읽는다.
-const GIT_SHAPES: &str = r#"**Git in a Claude Code worktree session: one plain command per call.** The harness reads each Bash call
-and refuses what it cannot prove stays inside your worktree, so the shape matters more than the
-intent.
-- One command per call. `git add X && git commit …` is refused whole — so is anything with
-  `&&`, `;` or `||`
-- `-m "…"` on one plain command is fine; a **heredoc** message is refused.
-  When the message runs past one line, write it with Write and use `git commit -F <that file>`
-- Several git steps in a row: put them in a script file and call it as a bare
-  `bash /abs/path/script.sh` with literal arguments and nothing appended — `&&`, a pipe or
-  `$PWD` after it is refused
-- Never build a command or a path with a variable or `$(…)` — that is refused as
-  `computed at runtime`
-- **Do not aim git at the root from inside the worktree.** `git -C <root> status`, `commit` and
-  `symbolic-ref` are refused even as single plain commands. Root work happens after
-  ExitWorktree(keep), and the tracker needs no `-C` at all — `moai` moves that by itself
-- Before a tracker commit in the root, look at `git status -- .moai/` first. The path keeps the
-  commit from sealing someone's open merge; the rows other sessions have not committed yet ride
-  along, and that is expected — they stand in the shared file already, and the next tracker
-  commit is where they go into history"#;
+/// **루트로 돌아오는 것은 서브에이전트뿐이다**(리뷰 moai-9js2.s4s). 서브에이전트의 Bash 는 부름마다 루트에서 다시
+/// 서지만, 세션의 셸은 `cd` 가 옮긴 자리에 다음 부름까지 남는다(Claude Code 의 기본값이고, 훅의 `cwd` 도 따라간다).
+/// "부름마다 루트로 돌아간다" 를 둘에게 함께 이르던 판은 세션이 8 의 대조·병합, 9 의 워크트리 지우기, 11 의 트래커
+/// 커밋을 워크트리 안에서 치게 두었고 — 병합은 "Already up to date" 로 지나가 10 이 안 든 멤버를 닫는다 — 그 셸에서는
+/// 절대 경로로 루트를 고쳐도 규칙 2 가 안 섰다. 그래서 세션은 `cd` 를 하위 셸에 가둔다. 하위 셸의 `cd` 는 훅도 뒤로 안
+/// 잇는다(`hook::aimed`). `cd` 로 옮긴 창에 `ExitWorktree` 는 아무것도 안 한다 — 그 도구는 `EnterWorktree` 가 연 판만 닫는다.
+const STAY_IN_ROOT: &str = r#"## Stay in the root
+
+**Never call `EnterWorktree` — in a session or in a subagent.** Every call into `.worktrees/`
+asks the person watching to approve it, and no allow rule turns that off; a subagent has no
+such tool at all. You stay in the root, so where a step goes into the worktree, aim at it
+instead: `cd <root>/.worktrees/<epic> && …` or `git -C <root>/.worktrees/<epic> …`, and every
+Read and Edit takes an absolute path under it. That holds for resolving a conflict too.
+
+**Only a subagent's Bash starts in the root again on every call. A session's shell stays
+wherever a `cd` left it**, so in a session put that `cd` in parentheses —
+`(cd <root>/.worktrees/<epic> && …)` — and the shell itself never leaves the root. Where a
+step says you are back in the root, you are there only if it never left: if a session's
+shell did stay in the worktree, `cd <root>` before the step. The branch check, the merge,
+removing the worktree and the tracker commit all run in the root — merged from inside the
+worktree, the merge says "Already up to date" and lands nothing, and a shell standing in the
+worktree you remove is left in a directory that is gone.
+
+**Rule 2 of the hook watches the root for you** while the shell stands there. While everything
+you hold has its worktree standing, a write to the root checkout — a relative `src/x.rs`, say
+— is refused, and the refusal names the same file inside the worktree (each worktree, when
+what you hold stands in several — write in the one your work is in). Write there instead;
+never work around it.
+
+A window that already stands inside a worktree comes out first, as "The assignment" says —
+`ExitWorktree(keep)` if this session went in with `EnterWorktree`, `cd <root>` if a `cd`
+took it there (`ExitWorktree` does nothing then)."#;
 
 /// 밖의 backlog 를 도는 마일스톤 안으로 들이는 한 줄(moai-6qgz). 감독의 1 과 일꾼의 1 이 **같은 줄**을
 /// 받는다 — 감독은 "들일 것인가" 를 정하고 일꾼이 실제로 단다. 한쪽만 고치면 감독이 들이기로 한
@@ -442,12 +461,14 @@ const MILESTONE_FROM: &str = "the release `moai show --milestone` stands that ba
 /// 거둔 일은 3 을 안 받아(4-1 부터), 여기 없으면 이어받은 일꾼만 워크트리 꼭대기에 선다.
 ///
 /// **자리를 감독이 채운다**(리뷰 moai-rgp9.sdj 1번). 옛 줄은
-/// `cd "$(git -C <root> rev-parse --show-prefix)"` 였는데, 그 한 줄이 [`GIT_SHAPES`] 가 거절된다고
-/// 적어 둔 두 꼴을 동시에 든다 — `$(…)` 로 만든 명령과 워크트리 밖을 겨눈 `git -C <root>` 다.
-/// 게다가 이 걸음은 **워크트리 안으로** 드는 것이라 `ExitWorktree` 로 피할 수도 없었다. 감독은
+/// `cd "$(git -C <root> rev-parse --show-prefix)"` 였는데, 그 한 줄이 격리 가드가 거절하는 두 꼴을
+/// 동시에 들었다 — `$(…)` 로 만든 명령과 워크트리 밖을 겨눈 `git -C <root>` 다. 감독은
 /// 2 의 스크립트에서 이미 그 상대 경로를 `subdir` 줄로 읽으므로, 값을 채워 보내면 일꾼은 `cd` 만
 /// 한다. 꼭대기 프로젝트에는 그 줄이 안 서고 이 걸음도 없다.
-const SUBDIR: &str = "cd <subdir>";
+///
+/// **절대 경로로 겨눈다**(moai-9js2) — 일꾼은 워크트리에 들지 않고 루트에 서므로([`STAY_IN_ROOT`]), Bash 마다
+/// 워크트리 안의 그 하위를 `cd` 로 겨눈 뒤 명령을 잇는다.
+const SUBDIR: &str = "cd <root>/.worktrees/<epic>/<subdir> && …";
 
 /// **`moai read` 는 여기에 안 든다**(사용자 결정 2026-09-18, `moai-ha5d`). 이 저장소의 에이전트는
 /// 사람과 같은 git 신원·HOME 으로 돌아 사람의 `[read]` 표를 같이 쓴다 — 브리프가 `moai read --all`
@@ -459,6 +480,7 @@ const CHEATSHEET: &str = r#"    moai status                            board · 
     moai ready                             what you can pick up right now
     moai show <id>                         body, children, history. Why it was decided is here
     moai show -g <keyword>                 find out whether it is written down already
+    moai wiki search '<words>'             what the manual (and the lessons) say about it
     moai show -s todo -t bug               filters (comma = or, repeated flag = and, except -a: or)
     moai show --tree                       epic → issue → child
     moai ready --worktree                  overlay what the other worktrees picked up
@@ -561,8 +583,11 @@ always asked about — for a plan, an epic, an issue or a backlog item that come
 the person's own request. Write the answer as `@YYYY-MM-DD` at the end of the plan line
 it belongs to (`# Epic title @2026-10-31`, `- [p1] first issue @2026-10-20`), or give
 `--due <day>` to put it on every epic the plan creates that carries no `@` of its own.
-A row made alone takes the same `--due` on `moai add` or `moai backlog add` — an `@` in
-a single title stays text. `--due +3` is three days from today.
+When the person also names a day to begin, write the range — `@2026-10-25~2026-10-31`
+(start to deadline), or `@2026-10-25~` for a start alone — and `--start <day>` goes on
+epics the way `--due` does. A start is the person's too: never make one up.
+A row made alone takes the same `--due` on `moai add` or `moai backlog add` (and
+`--start` likewise) — an `@` in a single title stays text. `--due +3` is three days from today.
 **No answer, no deadline** — leave it empty, never make one up. A review issue and a
 backlog item you park mid-work are not asked about.
 Nothing checks this: it is a question for you to ask, not a gate.
@@ -762,9 +787,10 @@ const GROUPS: &str = r#"    moai epic add '<storage layer>'                an ep
     moai show <epic|milestone id>                  what stands under it
     moai show --milestone <id>                     everything attached to that milestone
 
-**Any row can carry a deadline; only a milestone carries a start.** `--due` takes a
-calendar day, `YYYY-MM-DD`, or `+N` days from today (stored as the day it lands on),
-and `moai edit <id> --due none` clears one. `--start` stands on a milestone row only.
+**Any row can carry a deadline and a start.** `--due` and `--start` take a calendar day,
+`YYYY-MM-DD`, or `+N` days from today (stored as the day it lands on), and
+`moai edit <id> --due none` clears one (`--start none` the same). The start is the
+planned day to begin; a start after the deadline is refused.
 A milestone's deadline that has passed, and one falling due within `status_due_days`
 (3 unless your config says otherwise), is one warning line on the board, and so is
 an open issue or epic whose own deadline has passed (`overdue`); **nothing is blocked and
@@ -775,8 +801,10 @@ write that gives a row a later day than the earliest of those, or moves a row th
 carries a deadline under one due earlier, is refused, and the refusal names the day to
 give instead. Pulling the one above in is never refused: the rows it overtakes are
 named in one line on stderr and stand as `due_beyond_parent` on the board until their
-own deadlines come in. `moai show --sort due` puts the nearest first, and
-`--filter due_on=<from>~<to>` picks rows by their own deadline.
+own deadlines come in. A start obeys the same ceiling: it cannot be later than the
+earliest deadline above it, but it may be earlier than the parent's start. `moai show --sort due` puts the nearest first, and
+`--filter due_on=<from>~<to>` picks rows by their own deadline (`starts_on=` by their
+own start).
 
 **A near deadline raises priority, by one verb.** `moai due apply` (`--dry-run` shows it
 first) raises an open, not deferred issue or backlog item by the deadline it follows —
@@ -1016,7 +1044,11 @@ If you end the session still holding something, leave one line on that issue for
 the next session to take over from. The next session reads it in the history under
 `moai show <id>`.
 
-    moai note <id> 'Next: <what comes next>'"#;
+    moai note <id> 'Next: <what comes next>'
+
+If this session made a mistake the next one would make too, write it down as a lesson while
+you still hold the row it came from (the page is a change to the repository, as rule 2 counts it) —
+`moai wiki search '<its words>'` first, then `moai wiki learn`; `moai-wiki` says which mistakes count."#;
 
 /// 위키를 AGENTS 블록과 참고 문서에 알리는 조각(moai-bl3x). **짧게 둔다** — 어떻게 쓰는가는
 /// 셋째 스킬 [`wiki`] 에 있고, 언제나 읽히는 블록에 그 본문을 얹으면 모든 세션이 그 값을 낸다.
@@ -1025,7 +1057,9 @@ const WIKI: &str = r#"The repository's manual is markdown pages under one direct
 in `.moai/config.toml` says otherwise. `moai wiki ls` lists them and `moai wiki show <slug>`
 prints one. When an epic changes what a person does, the window that did it fixes the page
 on its branch before the merge, and `moai skill install` plants a skill for it, `moai-wiki`,
-that says how — and sweeps the wiki when a person calls it. Nothing checks this."#;
+that says how — and sweeps the wiki when a person calls it. Nothing checks this.
+Before you touch a place, `moai wiki search '<words>'` finds it; read the sections under the
+`Wiki` block of `moai show <id>` (`wiki` in `--json`) first."#;
 
 /// 위키를 고칠지 가르는 물음의 낱말 — **에픽이 사람의 쓰임을 바꿨는가.** 일꾼 브리프 7-4 와 위키
 /// 스킬이 같은 물음을 묻는다. 두 벌로 적으면 한쪽에만 낱말이 늘어, 브리프로 물은 일꾼과 스킬로
@@ -1043,6 +1077,12 @@ const CHANGED_USE: &str = "a key, a command, a flag, a file, a format, a procedu
 /// 워크트리 세션의 셸 가드가 통째로 거절해서다.
 const WIKI_COMMIT: &str = r#"git add -- <wiki dir>
 git commit -m "docs(wiki): <what changed> (<epic>)" -- <wiki dir>"#;
+
+/// [`WIKI_COMMIT`] 에 위키 디렉터리를 채운 것 — `moai wiki learn` 이 페이지를 쓴 뒤 끝 줄로 낸다(moai-4s5n.n7j).
+/// 브리프 7-4·위키 스킬과 같은 줄이라야 교훈 페이지도 같은 제목·같은 경로로 머지에 실린다.
+pub fn wiki_commit(dir: &str) -> String {
+    WIKI_COMMIT.replace("<wiki dir>", dir)
+}
 
 /// 집은 채 닫을 때 남기는 한 줄. `CLOSING` 과 세션을 닫을 때의 붙듦이 같은
 /// 글을 내야 한다 — 안내가 가르친 줄과 훅이 내민 줄이 다르면 둘 다 안 믿는다.
@@ -1098,10 +1138,12 @@ const REVIEW_IN_SESSION: &str = "the review this session has, else read the diff
 /// 표를 싣는 것은 `moai` 스킬 하나다([`verbs_section`]) — 세 벤더에 다 심기는 스킬이다. 감독 스킬과 그 일꾼 글은
 /// Claude Code 에만 가니(moai-obxm) 도구를 바로 적는다.
 pub const VERBS: [Verb; 8] = [
+    // **Claude 는 들지 않는다**(moai-9js2, 2026-10-25 사용자 결정) — `.worktrees/` 로 드는 `EnterWorktree` 는 부를
+    // 때마다 사람에게 승인을 묻고, allow 규칙으로 안 꺼진다. 그래서 칸이 도구가 아니라 "들지 말고 겨눈다" 다.
     Verb {
-        step: "Enter the worktree",
+        step: "Work in the worktree",
         words: [
-            "`EnterWorktree(path)` from the root",
+            "stay in the root and aim every call at its absolute path — not `EnterWorktree`, which asks the person to approve each call into `.worktrees/`",
             "`cd` into it and run every command there",
             "`cd` into it and run every command there",
         ],
@@ -1109,7 +1151,7 @@ pub const VERBS: [Verb; 8] = [
     Verb {
         step: "Come back to the root",
         words: [
-            "`ExitWorktree(keep)`",
+            "nothing if the shell never left; `cd` to the root if a `cd` moved it — the shell keeps it — and `ExitWorktree(keep)` only after an `EnterWorktree`",
             "`cd` to the root and run every command there",
             "`cd` to the root and run every command there",
         ],
@@ -1175,8 +1217,11 @@ even when you cannot do it now (fork 1). If it is not for now, park it with
 **2. {two}.** `moai mv <id> in_progress`.
 What counts is work inside the repository — `.moai/`, `.claude/`, `.agents/`, `.codex/`,
 `.worktrees/`, `target/` and anything outside the repository (scratchpad, temporary
-files) do not. Shell writes (`>`, `>>`, `sed -i`, `tee`) count as much as `Edit` and
-`Write`. If it was not in the plan, create it with `moai add 'a title'` and pick that up.
+files) do not. Shell writes (`>`, `>>`, `sed -i`, `tee`, the destination of `cp`·`mv`·`install`)
+count as much as `Edit` and `Write`. If it was not in the plan, create it with `moai add 'a title'`
+and pick that up. A session that holds only work whose worktree stands is refused a write that
+lands in the main checkout — wherever its shell stands — and a write into another epic's worktree;
+the refusal names the same file in its own worktree.
 
 **3. {three}.** Before you call a review, create a review issue tied to
 what you are reviewing. The review is {claude} in Claude Code; in Codex and
@@ -1206,8 +1251,9 @@ own server.
     {TMUX_OWN}
 
 Under cmux claude-teams (`$TMUX` starts with `{stand_in}`) the `tmux` on `PATH` is cmux's shim: it
-drops `-L`, `-S` and `-f`, so `new-session` and the `kill-*` commands open and close workspaces and
-tabs in the person's cmux, and `env -u TMUX` takes away only the fake `$TMUX`. The hook refuses
+drops `-L`, `-S` and `-f`, so `new-session`, `new-window`, `split-window`, `send-keys`,
+`respawn-pane` and the `kill-*` commands open, close and type into workspaces and tabs in the
+person's cmux, and `env -u TMUX` takes away only the fake `$TMUX`. The hook refuses
 those through the shim. Call a real tmux by its absolute path instead — `type -a tmux` lists the
 candidates; take one whose `readlink -f` has no `cmux` in it:
 
@@ -1337,7 +1383,7 @@ Start a session by running `moai status`. The board and the warnings come up on 
 
 ### When a feature request comes in
 
-1. Look at the epics that already exist with `moai status`. If it may overlap, `moai show -g <keyword>`.
+1. Look at the epics that already exist with `moai status`. If it may overlap, `moai show -g <keyword>`, and `moai wiki search <keyword>` for what the manual says.
 2. Show a plan split the way fork 3 says, once, ask when it is due in the same breath,
    and on a "yes" create it in one go. No answer leaves the deadline empty.
 3. Pick it up with `moai mv <id> in_progress`, and move it to `done` when it is finished.
@@ -1753,10 +1799,12 @@ write that repository's name.
 pub fn wiki() -> String {
     let [one, two, ..] = RULES;
     let commit = indent(WIKI_COMMIT, "       ");
+    // 새 파일 이름의 자는 `moai wiki learn` 이 재는 자와 한 글이다 — 스킬이 가르친 이름을 명령이 거절하지 않게.
+    let slug_rule = crate::wiki::learn::SLUG_RULE;
     format!(
         r#"---
 name: moai-wiki
-description: Use when the repository's manual (its wiki) has to catch up with what the work changed — at the end of an epic, or when a person asks. "update the wiki", "write the manual", "document this", "위키 갱신", "매뉴얼 써", "문서화해 줘", "wiki 정리". The pages are markdown files in the repository, listed by `moai wiki ls`; nothing checks them.
+description: Use when the repository's manual (its wiki) has to catch up with what the work changed — at the end of an epic, or when a person asks. "update the wiki", "write the manual", "document this", "record a lesson", "위키 갱신", "매뉴얼 써", "문서화해 줘", "wiki 정리", "교훈 남겨", "실수 기록". The pages are markdown files in the repository, listed by `moai wiki ls`; nothing checks them.
 ---
 
 # moai-wiki — keep the manual in step with the work
@@ -1771,14 +1819,17 @@ that changed nothing a person does writes nothing.
     moai wiki ls                           the pages: slug and title, and what does not resolve
     moai wiki ls --json                    the same with each page's path, for a machine
     moai wiki show <slug>                  one page, and the pages that link to it
+    moai wiki search <words>               the sections that hold those words, best first (`--json`)
 
 - **One directory.** `dir` in `moai wiki ls --json` names it — `docs` unless
-  `wiki_dir` in `.moai/config.toml` says otherwise. When it cannot be read, `error`
+  `wiki_dir` in `.moai/config.toml` says otherwise — relative to the checkout, and
+  `dir_abs` is the same directory as an absolute path in this checkout (absent for
+  `outside`, and where that path is not UTF-8). When it cannot be read, `error`
   stands in place of `pages`, and its `kind` says why: `no_dir` is a repository with
   no wiki yet, `outside` and `not_a_dir` are a `wiki_dir` pointing where moai will
   not read — fix the key, not the pages — and `failed` is the disk refusing to open it
 - **One page is one `.md` file** — `path` in the list. Its `slug` is that path below
-  `dir` without `.md`. Name a new file in lowercase ASCII kebab case
+  `dir` without `.md`. Name a new file in {slug_rule}
   (`merge-driver.md`) so its slug reads the same on every machine. `README.md` or
   `index.md` at the top of `dir` is the home page
 - **One `# Title` line opens the page.** It is the `title` the list shows; without it
@@ -1861,6 +1912,67 @@ one — after the review and the CHANGELOG line and before the merge.
    behind without a word
 5. Name the pages you changed in your report, or say that none changed
 
+## Lessons
+
+A lesson is a mistake written down so the next window does not make it. It is a wiki
+page of its own, `lessons/<slug>.md` below `dir`, one lesson to a file — so lessons
+written on two branches never meet in the same lines. There is no index page: the list
+is `moai wiki ls`, the search is `moai wiki search`. `moai show <id>`
+puts the lessons that bear on a row under its `Wiki` block (`lessons` in `wiki`, and
+`lesson: true` on a search hit); read them when you pick the row up.
+
+**Write one when**, and only when:
+
+- a review finding was one a single rule would have stopped
+- a person corrected you — so they never have to say it twice
+- the same hook refusal caught you twice
+- a test failed because of a premise that was wrong
+
+**Search first**: `moai wiki search '<a word of the mistake>'`. If the lesson stands
+already, write nothing new — it was met again, and that goes on the issue, not the page:
+
+    moai note <id> 'Lesson: lessons/<slug>'
+
+If none stands, write it. The same call makes the page and then puts the note on the
+issue:
+
+    moai wiki learn 'End a check on the step that must pass' --issue <id> -b - <<'LESSON'
+    ## What happened
+    ...
+    ## Why
+    ...
+    ## Do this instead
+    ...
+    LESSON
+
+- The title is one line, as an instruction. The body must hold `## Do this instead` —
+  it is the part the next window reads. `## What happened` and `## Why` are worth a
+  few lines. Do not tell it as a narrative: a list, as in an issue body
+- `--slug` names the file in {slug_rule} when the title is not ASCII; `--issue`
+  names the row it came from — pass it every time: without it the note goes to the one row
+  held under your name, and sessions sharing one git identity hold each other's rows. `--dry-run` shows
+  the page first
+- Nothing is committed. The page rides the branch like any other: commit it with the
+  same `docs(wiki):` commit as the end of an epic, `add` first
+- A page already standing is never overwritten. Edit the file if it is wrong
+
+**Do not write**:
+
+- a failure that was the machine's — a binary that was not installed, credentials that
+  were missing
+- a flat "this tool does not work" — a negative claim goes stale the day the tool is fixed
+- a transient error that a retry cleared
+- a story tied to one PR or one error string
+- logs or code pasted whole
+- what CLAUDE.md, AGENTS or the wiki already say
+
+**The page is never marked when a lesson is met again** — the note on the issue is the
+mark, so two branches never edit one line. How often a lesson stood is read from those
+notes: `seen_count` on each page of `moai wiki ls --json` (`0` for a lesson nobody has
+noted), and `seen` on `moai wiki show lessons/<slug> --json` — one entry per issue,
+newest first, each with the issue's `id` and the day (`at`) and person (`by`) of its
+latest `Lesson:` note.
+
 ## When a person asks you to sweep
 
 A person calls this skill to catch the wiki up — before a release, or after work
@@ -1895,6 +2007,14 @@ merged without touching it.
 6. Write the pages where this repository does its work — in a worktree if it uses
    them — commit with `docs(wiki): <what> (<id>)`, a `git add` first as in step 4 of
    the end of an epic, and move the issue to `done`
+7. Sweep the lessons too. `moai wiki ls --json` gives each `lessons/…` page a `seen_count`;
+   read the pages with `moai wiki show <slug> --json` (`seen`). Then
+   - merge two lessons that say one thing into one page, and remove the other. A note that
+     names the removed slug stays as it is — it is history
+   - take out a lesson the code now prevents: the mistake can no longer be made
+   - a lesson with a `seen_count` over three has outgrown a page. **Ask the person**
+     whether it becomes a rule — in CLAUDE.md, in the AGENTS block, a hook or a test.
+     Promoting it is the person's decision, never yours
 
 ## A new page
 
@@ -1990,6 +2110,9 @@ pub fn supervise() -> String {
     let roles = roles_table();
     let defaults = models_defaults();
     let epic_rule = epic_review_rule();
+    let plan = indent(&plan_brief(), "    ");
+    // 5 의 4-3 멤버 보내기는 `<id>` 를 에픽으로 채운다고 이른다 — 같은 줄을 그 자리 이름으로.
+    let plan_first_id = PLAN_FIRST.replace("<epic>", "<id>");
     format!(
         r#"---
 name: moai-supervise
@@ -2016,12 +2139,18 @@ headless: `Agent` is Claude Code's tool, and this skill is what calls it.
 
 **The models are the person's, read once a round.** Which model each role runs on is the
 person's own choice, kept in their user config (`[models]`), so it is not written into this
-skill — a skill planted at project scope is committed and shared. Read it at the start of
-every round; a value changed mid-round counts from the next one.
+skill — a skill planted at project scope is committed and shared. A repository may recommend
+values in a `[models]` table of its `.moai/config.toml`; the person's own keys win over it.
+Read it at the start of every round; a value changed mid-round counts from the next one.
 
     moai models --json      one object: a model per role (plan, develop, complex, review,
-                            docs, bulk, codex), review_grade, effort, effort_complex, and
-                            written — the keys the person set; the rest are defaults
+                            docs, bulk, codex), review_grade, effort, effort_complex,
+                            written — the keys the person set — and repo — the keys the
+                            repository recommended, read from repo_path; the rest are defaults
+
+When a value has to change, the person changes it — in their user config for a key in `written`
+or a default, and over a `repo` key by writing the same key there. The repository's file is
+committed and shared: changing it changes the recommendation for everyone, so name it as that.
 
 **One supervisor per repository.** A supervisor waiting for reports reads `idle` in
 `ListAgents` like any worker, so a second one sends it backlog, and the two keep separate
@@ -2175,7 +2304,7 @@ a worker with a message, any other window through the person.
 
 The `Place` line (`place` under `--json`) has three values. **Only `none` is handed on.**
 
-    <path> (<branch>)  at        it runs there. Go in and carry on
+    <path> (<branch>)  at        it runs there. Aim at it and carry on
     not showing yet    fresh     just picked up — the gap while the worker raises its worktree. Leave it
     none               lost      it lost its place — only this one is reclaimed
 
@@ -2212,7 +2341,8 @@ refusal — to the new name (2).
 - When there is such work, hand carrying it on to one idle worker **before any new
   backlog**. Send the message in 3 with its first two lines changed to the two below, and
   the rest filled as 3 says (`<other work>` too — 4-3 points at that line). The steps file
-  has the section the first line names
+  sends the worker on to the section the first line names, which stands beside it in
+  `references/worker-branches.md`
 
       You are handed the stalled work in <epic> — the previous session did not finish it. Read <steps file> and follow its steps from "Carrying on stalled work".
       Read first: moai show <epic> (history and notes) · moai show <member> (the place too — a place stands on work only)
@@ -2260,8 +2390,9 @@ backlog parked outside the release unfolds into an epic that stands outside it, 
 stays. What you send while a release runs is work that already stands in it; a backlog item from
 outside waits for the next round, unless it should stand as `p0` or the person attaches
 the release themselves. **So `<milestone>` in 3 is the release that backlog already stands
-under, never one you picked for it**: the line the worker runs in its step 1 —
-`{MILESTONE_ATTACH}` — re-affirms what `promote` carried and is not a door you open. With
+under, never one you picked for it**: the line the plan subagent runs (2-2) — or the worker,
+in its step 1, when you send it the backlog — `{MILESTONE_ATTACH}` re-affirms what `promote`
+carried and is not a door you open. With
 nothing running, and for a backlog item that stands under no release, it is `none`.
 The 2026-09-21 round is why both halves are written down: a worker picked up a row outside
 the running release, and the person, not the tool, is what caught it. The answer is to
@@ -2349,7 +2480,7 @@ worker, and the message is the whole assignment.
 Either way, the root checkout and, for a subdirectory project in a monorepo, the path down
 to it come from the lines below. The root is where `.moai` stands, so for a monorepo it is the
 subdirectory that has `.moai`, and a worktree stands for the whole repository — the worker
-has to go into the same subdirectory inside it (its step 3). The first line is `root dir`;
+has to aim at the same subdirectory inside it (its step 3). The first line is `root dir`;
 a `subdir` line stands only when the root is not the top of the repository.
 
 ```sh
@@ -2398,11 +2529,56 @@ and cannot be changed by config — the person in that window changes it with `/
 subagent's model is fixed when you raise it: a worker that finds the work heavier hands back
 `{RAISE_HEAD}` before it picks anything up (4).
 
+**2-2. Unfold with the `plan` role.** A backlog item goes to its worker already unfolded.
+Splitting work into an epic and its issues is the `plan` role's (2-1) — a worker on `develop`
+or `complex` would otherwise plan on its own model. So before you send a backlog item, raise one
+subagent on the `plan` role's model — the role has no effort key, so pass none — on the brief
+below, every slot filled as in 3:
+
+    Agent(subagent_type: "general-purpose", model: <plan model>, description: "plan <id>", prompt: <the plan brief>)
+
+**Mark the backlog the moment you raise it** — `moai note <id> 'Sent: plan <agentId>'`, as 1 says
+for a send: until the plan hands back, that backlog still stands in `moai backlog ls`, and a
+second plan subagent raised for it unfolds it twice (`promote` unfolds a closed backlog too).
+The word is `plan`, not `subagent` — no worker holds this backlog, so it is not stalled work.
+
+{plan}
+
+It hands back the epic it unfolded and a difficulty per member. Then
+
+- **write its `model:` line on the epic** — `moai note <epic> 'model: anthropic/<model ran> (<heaviest difficulty> — plan: unfolded <id>)'`;
+  `<model ran>` is the name after `anthropic/` on its `Model ran:` line — copy the vendor once
+- **measure the role (2-1) on the members it handed back**, not on the backlog — the members
+  are written now: `docs` or `bulk` when every member's reason opens with that word, else the
+  heaviest of them picks `develop` or `complex`
+- **tell the person each `not hung:` line** — a deadline they gave that did not land, or a dead
+  release the plan cleared off the epic; nothing else carries it to them
+- **send that epic `from step 2`**: the message of 3 with its first two lines swapped for the two below,
+  and the `Sent:` mark (1) on the epic. The backlog is done once unfolded and leaves the candidates by itself
+
+      {PLAN_FIRST}
+      Read first: moai show <epic>
+
+**When you start again (4)**, a backlog whose last `Sent:` is `plan <agentId>`, with no
+`Plan stopped:` after it, lost its plan subagent with the round: once the person agrees that the
+session it ran in is gone, raise a new one for it. An epic whose last `Sent:` is `plan <backlog id>`
+— the plan marks it last, once the epic is whole — was unfolded and never sent: measure the role
+from its members' bodies (2-1) and send it from step 2. Its plan's `model:` line went with the
+notification; do not write one from memory.
+
+If it hands back `already unfolded:` or `not unfolded:`, send nothing for that backlog — someone
+unfolded it, or the plan subagent could not; read its reason and tell the person. On
+`not unfolded:` also close the backlog's mark — `moai note <id> 'Plan stopped: <its reason>'` —
+or every start again sends it to a new plan; it is a candidate again when the person says so. **A worker
+you send a backlog to directly** (the message of 3 as it stands, `from step 1`) still unfolds it
+itself — that is the path when the person asks for it, not the usual one.
+
 **3. Send.** Send **one** backlog to one worker. The message is the lines below, every
 slot filled. The worker knows nothing of this conversation, so what is not in the message
 does not reach it — except the worker's steps: they stand in this skill's
 `references/worker.md`, and the first line tells the worker to `Read` that file and follow
-it. The worker stands in this same repository with the same plugin loaded, so the file is
+it. Its rare branches stand beside it in `references/worker-branches.md`, and the worker
+reads the section it needs by itself — you name only the first file. The worker stands in this same repository with the same plugin loaded, so the file is
 there for it. **Do not copy the file into the message** — name it.
 
 To a subagent the message is the `prompt` of the `Agent` call in 2, with `Worker: subagent`.
@@ -2430,8 +2606,8 @@ and if the message does not arrive, deliver it into the tab —
 Inside Saycode, a worker Saycode lists gets the message as a prompt instead of `SendMessage` —
 `moai-saycode`, "Send work".
 Fill in `<id>`, `<title>`, `<steps file>`, `<root branch>`, `<base branch>`, `<milestone>`, `<due>`, `<model>`, `<difficulty>`, `<why>`, `<effort>`, `<worker kind>`, `<subagent ladder>`, `<other work>`, `<root>`, `<person>` and — only for a subdirectory project — `<subdir>`.
-`<root>` is the `root dir` from 2. **Leave it unfilled** and the worker, inside its worktree,
-reads its own place as the root. With no `subdir` line in 2, leave the `Subdir:` line out
+`<root>` is the `root dir` from 2. **Leave it unfilled** and a worker that stands in a
+worktree reads its own place as the root. With no `subdir` line in 2, leave the `Subdir:` line out
 of the message.
 `<milestone>` is the release that backlog already stands under **and that is still alive**,
 read in 1 — `none` when it stands under none, `none` when the one it stands under has
@@ -2451,13 +2627,16 @@ carries none** — never required, always asked; the backlog's own is an answer 
 already gave. A day given as "in three days" you write as the day it lands on.
 It is `none` when neither stands — with `Person: away` there is nobody to ask, so it is
 the backlog's own `due_on` or `none`: a deadline is the person's, and you never make one
-up. The worker hangs it on the epic it unfolds; the epic's deadline then bounds every
-member's, and `moai due apply` raises the members' priority as it nears.
+up. The plan subagent (2-2) — or a worker you send the backlog itself — hangs it on the epic it
+unfolds; the epic's deadline then bounds every member's, and `moai due apply`
+raises the members' priority as it nears.
 `<model>`, `<difficulty>` and `<why>` are the role's model you read in 2-1, the difficulty
 you measured and your reason; `<effort>` is that role's effort (2-1), the same value you pass
 to `Agent`. **Leave them unfilled** and those placeholders travel as they are, so the note
 left at the close says `<model>` instead of what actually did the work.
 `<worker kind>` is `subagent` or `session` — how you raised it in 2.
+The `Worktree:` line goes as written to both: a session's `EnterWorktree` into
+`.worktrees/` asks its person to approve every call, and no allow rule turns that off.
 `<subagent ladder>` is the models the worker may hand pieces of the work to, copied from the
 `moai models --json` of this round, each role with the effort 2-1 reads for it —
 `bulk <model> (<effort>) · develop <model> (<effort>) · complex <model> (<effort>)`, the
@@ -2519,7 +2698,8 @@ head. So when you start or resume, before waiting, read what the tracker holds:
 
     moai show -s in_progress,review        the work sent and picked up, not done
     moai show -g 'Sent:'                   sent and not done — a backlog not unfolded yet, or an
-                                           epic not picked up yet; neither is a candidate
+                                           epic not picked up yet; neither is a candidate, and
+                                           a last `Sent: plan …` goes back to 2-2
     moai show -g 'report:' --all           the epics carrying a report nobody received
 
 **Only a note that opens with the marker counts** — `-g` matches any text, and a body or a
@@ -2551,7 +2731,7 @@ idle worker after that other work's report is checked. Send the message of 3 wit
 filled with the epic and its first line changed to the one below. Until then, count it in 1
 as work holding that file.
 
-    You are handed epic <id> — <title>. It is already unfolded; do not promote. Read <steps file> and follow its steps from step 2.
+    {plan_first_id}
 
 Like the ones from 7-1, that member is right even when it is not done — it keeps the epic
 open, so the epic is not done either.
@@ -2577,10 +2757,9 @@ unfolded and it does not show its members, so `moai show <id>` cannot tell you w
 the work finished — when the report does not carry it, read it from that backlog's history
 line about being unfolded.
 
-If the three hold, mark the report checked on the epic — a supervisor that starts again reads
-that line, not this conversation (4). It needs no commit of its own ("The shared root").
-
-    moai note <epic> 'Report-checked: <merge hash>'
+**Before you mark it checked, settle the `model:` lines** — a supervisor that starts again
+reads `Report-checked:` alone and does not go round these again, so a line missed before the mark
+is missed for good, and a session worker told its window can be cleared is gone by then.
 
 **For a subagent worker, write the `model:` line yourself**, one per member it did — not the
 members it left in the first column — the same way, with no commit of their own. `<model ran>` is
@@ -2602,6 +2781,12 @@ it missed: ask the worker with a message to write it. Do not write it in its pla
 that ran in that window is the worker's to name.
 
     {UNWRITTEN}
+
+If the three hold and no line is missing — none is owed by a member left in the first column or
+one finished before this worker was sent, as above — mark the report checked on the epic — a
+supervisor that starts again reads that line, not this conversation (4). It needs no commit of its own ("The shared root").
+
+    moai note <epic> 'Report-checked: <merge hash>'
 
 Then send the next backlog to a worker. **A subagent needs no clearing** — it ended with its
 hand-back. Raise a new one for the next backlog rather than waking a finished one with new
@@ -2711,8 +2896,15 @@ subject — that has actually happened. So in the root, supervisor and worker al
 ///   v0.65.0 의 `configureTmuxCompatEnvironment`). 그 `PATH` 의 `tmux` 는 cmux 의 shim 이라 `set-option` 을 말없이
 ///   받아넘기고 `load-buffer` 를 거절해, tmux 로 읽던 판은 감독이 일꾼 칸에 아무것도 못 했다. 그 값은 없는 것으로 보고
 ///   cmux 갈래를 탄다. 진짜 tmux 의 소켓은 그 자리에 서지 않으니 잘못 읽을 길이 없고, cmux 가 그 꼴을 바꾸면 옛
-///   쓸모없는 쪽으로 돌아갈 뿐이다. 그렇게 띄운 일꾼의 기록에는 그 가짜에서 온 `tmux` 가 서서 아래 갈래로 `-` 다 —
-///   감독이 여는 일꾼은 맨 `claude` 라 거기 안 걸린다
+///   쓸모없는 쪽으로 돌아갈 뿐이다
+/// - **기록의 `tmux` 는 진짜 tmux 꼴일 때만 tmux 다**(moai-jn8d.mxb) — Claude Code 는 그것을 `tmux display-message` 로
+///   적는데, `claude-teams` 의 shim 은 `cmux:@<19자리>.%<19자리>` 로 답한다. 그것을 tmux 로 친 판은 claude-teams 로 띄운
+///   일꾼(그리고 감독 제 줄)을 cmux 갈래에서 늘 `-` 로 냈다. 진짜 tmux 의 창·칸 id 는 서버가 0 부터 세는 작은 수라,
+///   끝이 `:@<1~6자리>.%<1~6자리>` 일 때만 tmux 칸으로 읽는다. cmux 갈래가 기록의 `tmux` 를 없는 것으로 보는 것은
+///   `cmux:` 로 여는 shim 의 답뿐이다 — 꼴이 깨진 다른 값(2026-10-26 에 기록 39개 중 둘이 `:.` 였다)은 tmux 에 섰을 수
+///   있으니 surface 를 대지 않는다(리뷰 moai-jn8d.d79 6번). 진짜 tmux 를 cmux 탭에서 돌리며 그
+///   안에서 claude-teams 를 띄운 판도 이것으로 선다 — 그 일꾼의 기록은 가짜를 들어 tmux 갈래에서는 `-`, cmux 갈래에서는
+///   제 surface 다
 /// - **cmux 가 `top` 을 모르면 칸이 모두 `-` 다** — `top` 은 v0.64.0, `moai-cmux` 가 기대는 나머지는 v0.65.0 부터다.
 ///   판을 재는 것은 스킬의 몫이고(`moai-cmux` 의 첫 절), 짝은 모르는 판에서 아무 surface 도 대지 않는다. 답이 없으면
 ///   (옛 판, 닿지 않는 소켓, 샌드박스) stderr 에 한 줄을 남긴다 — 모든 칸의 `-` 가 "cmux 탭 밖" 이 아니라 "cmux 가 답하지
@@ -2743,7 +2935,7 @@ subject — that has actually happened. So in the root, supervisor and worker al
 /// 칸은 탭으로 가른다 — tmux 세션 이름에 빈칸이 들 수 있다(`Shopping Crawler:@16.%39`). 줄의 꼴이 계약이다:
 /// `state  name  pane  status  cwd  sessionId  saycode`. `the_session_map_reads_the_records` 가 실제 기록 꼴로 돌려 잰다.
 pub const SESSIONS: &str = r##"python3 - <<'PY'
-import glob, json, os, subprocess, sys
+import glob, json, os, re, subprocess, sys
 def out(*cmd, **env):
     try:
         return subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, universal_newlines=True, env=dict(os.environ, **env), timeout=10).stdout.strip()
@@ -2802,8 +2994,9 @@ for path in sorted(glob.glob(os.path.expanduser("~/.claude/sessions/*.json"))):
         continue
     start = started(pid)
     alive = bool(start) and start == " ".join(str(r.get("procStart")).split())
-    tmux = r.get("tmux") or ""
-    pane = tmux.rpartition(".")[2] if "%" in tmux else ""
+    told = r.get("tmux") or ""
+    tmux = told if re.search(r":@\d{1,6}\.%\d{1,6}$", told) else ""
+    pane = tmux.rpartition(".")[2] if tmux else ""
     if r.get("entrypoint") == "remote_mobile":
         pane = ""
     elif alive and (mine or cmux) and r.get("kind") not in (None, "interactive"):
@@ -2813,7 +3006,7 @@ for path in sorted(glob.glob(os.path.expanduser("~/.claude/sessions/*.json"))):
         if not here or here != device(out("tmux", "display", "-p", "-t", pane, "#{pane_tty}")):
             pane = ""
     elif alive and cmux:
-        pane = "" if tmux else surfaces.get(pid)
+        pane = "" if told and not told.startswith("cmux:") else surfaces.get(pid)
     rows.append((alive, pane, r))
 if rows and not any(alive for alive, _, _ in rows):
     sys.exit("no record reads alive, not even this session's own: this shell cannot read process start times (a sandbox, or no ps), so act on no row")
@@ -2826,20 +3019,94 @@ for alive, pane, r in rows:
     print("\t".join(["alive" if alive else "dead"] + [str(c or "-") for c in cols]))
 PY"##;
 
+/// **죽은 뒤 `/clear` 된 대화는 후보가 아니다**(moai-jn8d.vyh). 죽은 기록(id A)을 새 프로세스가 되살린 뒤 그 창에서
+/// `/clear` 를 치면 그 프로세스의 기록은 새 id B 를 들어, A 를 든 산 줄이 없어진다 — A 를 되살리면 이미 떠난 대화가
+/// 돌아온다. 2026-10-26 에 잰 것이 셋이다.
+/// - **대화 기록에는 고리가 없다.** `/clear` 의 두 줄은 A 의 끝이 아니라 B 의 머리(6~8줄)에 서고, B 의 첫 줄
+///   `parentUuid` 는 B 안을 가리킨다. A 의 끝에는 `cost-state` 한 줄이 붙지만 `timestamp` 가 없고, 감독은 일꾼 여럿을
+///   1초 안에 잇달아 비워(그날 06:46:40~49 에 넷) 파일의 mtime 과 B 의 첫 줄을 때로 짝지으면 엇갈린다. 첫 규칙은 대화
+///   기록의 끝을 읽어 틀렸다(리뷰 moai-jn8d.d79 1번, 커밋 32c0e0ae 로 걷었다)
+/// - **`~/.claude/history.jsonl` 이 고리다.** 입력 하나가 한 줄이고, `/clear` 는 **비운 쪽의 id**(A)를 `sessionId` 로
+///   든다 — 2.1.310 의 `history.jsonl` 2,773줄 중 `/clear` 530줄이 모두 그 칸을 들었다. 이 세션 제 것도 그렇다: 기록은
+///   새 id 를 들고 `history.jsonl` 의 `/clear` 는 옛 id 를 들었다
+/// - **산 기록은 제가 비운 id 를 들지 않는다.** 그날 기록 39개 중 제 `sessionId` 에 `/clear` 가 선 것은 일곱이었고 모두
+///   죽은 기록이었다. 일곱 다 기록이 마지막으로 쓰인 때(`updatedAt`)보다 하루까지 뒤에 비워졌고, 대화 기록이 남은 셋은
+///   비운 때가 대화의 마지막 줄 뒤였다(`d2e57059` 는 10-09 23:09 에 죽어 10-10 05:18 까지 이어지다 05:20 에 비워졌다)
+///
+/// 잣대를 기록의 `updatedAt` 이 아니라 대화 기록의 마지막 `timestamp` 에 둔 것은 둘째 짝을 안 세우기 위해서다 — 기록을
+/// 읽는 것은 [`SESSIONS`] 하나여야 한다. 그 잣대가 비운 뒤 `/resume A` 로 같은 프로세스가 A 로 돌아온 판도 가른다: 그
+/// 대화는 비운 뒤에도 움직여 후보로 남는다. 대화 기록이 지워진 id 는 비운 것으로 낸다 — 되살릴 대화가 없다.
+///
+/// 에픽 끝 리뷰가 더한 둘이다.
+/// - **`/new`·`/reset` 도 `/clear` 다.** 2.1.310 의 명령 정의가 `aliases:["reset","new"]` 를 들고, `history.jsonl` 은
+///   친 글 그대로(`/claer` 같은 오타까지) 적는다. `/clear` 만 찾으면 `/new` 로 비운 대화가 후보로 남는다
+/// - **비운 뒤 10초 안의 움직임은 비운 것의 일부다.** 도는 턴이나 허락 창 위에서 `/clear` 를 치면 Claude Code 가 A 에
+///   `[Request interrupted by user for tool use]` 와 거절된 `tool_result` 를 적는데, 그 `timestamp` 가 `history.jsonl` 의
+///   `/clear` 보다 늦다(2026-10-26 에 잰 `/clear` id 299개 중 하나, `f59364af` 가 0.58초 뒤). 그대로 견주면 그 대화가
+///   비운 뒤 움직인 것으로 읽혀 후보로 남는다. 되돌아온 대화는 `/resume` 과 새 입력이 들어야 움직이니 10초 안에 못 선다
+pub const CLEARED: &str = r##"python3 - <sessionId> … <<'PY'
+import glob, json, os, sys
+from datetime import datetime
+wanted = set(sys.argv[1:])
+cleared = {}
+try:
+    with open(os.path.expanduser("~/.claude/history.jsonl"), encoding="utf-8", errors="replace") as f:
+        for line in f:
+            try:
+                h = json.loads(line)
+                if str(h.get("display", "")).split()[:1] in (["/clear"], ["/new"], ["/reset"]) and h.get("sessionId") in wanted:
+                    cleared[h["sessionId"]] = max(cleared.get(h["sessionId"], 0), int(h["timestamp"]))
+            except (ValueError, KeyError, TypeError, AttributeError):
+                continue
+except OSError:
+    pass
+def moved(sid):
+    last = ""
+    for path in glob.glob(os.path.expanduser(f"~/.claude/projects/*/{sid}.jsonl")):
+        try:
+            with open(path, encoding="utf-8", errors="replace") as f:
+                for line in f:
+                    if '"timestamp"' not in line:
+                        continue
+                    try:
+                        t = json.loads(line).get("timestamp")
+                    except (ValueError, AttributeError):
+                        continue
+                    if isinstance(t, str) and t > last:
+                        last = t
+        except OSError:
+            continue
+    if not last:
+        return 0
+    return datetime.fromisoformat(last.replace("Z", "+00:00")).timestamp() * 1000
+for sid in sorted(cleared):
+    if cleared[sid] + 10000 > moved(sid):
+        print(sid)
+PY"##;
+
 /// **빈 입력 칸의 잣대는 이 글 하나다.** `moai-tmux` 와 `moai-recover` 가 `format!` 으로 같은 글을 싣는다 —
 /// 되살리기는 모두에게 심기고 `moai-tmux` 는 고른 사람에게만 서니(moai-3r7l), 되살리기가 `moai-tmux` 의 절을 가리키면
 /// 그것이 없는 자리에서 없는 글을 댄다(moai-o9je). 둘째 잣대를 적으면 Claude Code 의 입력 칸 꼴이 바뀌는 날 한쪽만
 /// 고쳐진다. 비었을 때 무엇을 하는가(안 친다·사람에게 말한다)는 스킬마다 제 글이 잇는다.
 ///
 /// **화면만으로는 빈 칸이 아니다**(moai-xpa8.p56) — 짝([`SESSIONS`])을 새로 봐 그 세션이 그 칸에 `alive` 일 때만이다.
-/// 죽임을 당한 Claude 는 마지막 화면(칸까지)을 `exec bash` 의 셸 위에 남겨, 닿지 않은 메시지(세션이 죽어 `SendMessage` 가
+/// 죽임을 당한 Claude 는 마지막 화면(칸까지)을 셸 위에 남겨, 닿지 않은 메시지(세션이 죽어 `SendMessage` 가
 /// 실패하는 흔한 자리다)가 셸에 스크립트로 쳐진다. cmux 쪽이 리뷰(moai-p5sz.tkn 2번)에서 받은 고침을 tmux 로 옮긴
 /// 것이고, 2026-10-11 cmux 실기에서 `kill -9` 한 탭이 마지막 화면을 남기는 것을 봤다.
-pub const EMPTY_BOX: &str = "    tmux display -p -t <pane> '#{pane_in_mode}'
+///
+/// **스킬이 여는 칸은 셸 대신 `remain-on-exit` 를 둔다**(moai-jn8d.ni8). `'claude …; exec bash'` 로 열던 판은 죽은
+/// Claude 밑에 늘 산 셸이 서서, 짝을 다시 보는 글의 걸음을 건너뛰면 막는 것이 없었다. 이제 그 칸은 죽으면
+/// `#{pane_dead}` 가 1 이 되고, tmux 가 `paste-buffer` 는 거절하고(`target pane has exited`) 키는 말없이 버린다 —
+/// `send-keys` 는 0 으로 끝나니 조용한 보내기가 닿았다는 표가 아니다(2026-10-26 tmux 3.4 에서 쟀다). 사람이 연 칸에는
+/// 셸이 남으니 짝 재확인은 그대로 선다. 사라진 칸에는 `display` 가 거절 없이 빈 값을 낸다(`-t` 가 못 찾아도 되는 명령이다).
+pub const EMPTY_BOX: &str = "    tmux display -p -t <pane> '#{pane_in_mode} #{pane_dead}'
     tmux capture-pane -p -e -t <pane>
 
-The first line prints `1` while the person is scrolling the pane (copy mode) — keys you send
-then go to tmux's copy mode, not to Claude Code, so a pane in a mode is theirs: do not type.
+The first line prints two values. The first is `1` while the person is scrolling the pane (copy
+mode) — keys you send then go to tmux's copy mode, not to Claude Code, so a pane in a mode is
+theirs: do not type. The second is `1` once the pane's program has exited — a pane a moai skill
+opened keeps its last screen under `remain-on-exit` and takes no keys: the session there is
+dead, so do not type. When it prints neither value, the pane is gone: do not type either.
 Claude Code's input box is the line that starts with `❯`, under the conversation, between two
 `─` rules. **Empty** is `❯` followed by nothing, or by Claude Code's dim placeholder — `-e`
 keeps the colours, and the placeholder is drawn dim (SGR `2`, or a grey foreground) where the
@@ -2847,9 +3114,9 @@ person's text is not. Anything else — a word, a pasted block, a half-typed com
 person's, and if you cannot tell the placeholder from their draft, it is theirs. A pane with
 no `❯` box at all (a shell prompt, a dialog) is not a box to type into either. **Even an empty
 box counts only while the session map, run again just before, still reads that session
-`alive` in that pane** — the screen alone cannot tell: a pane whose Claude Code was killed keeps
-its last frame, box and all, above the shell `exec bash` started, and the keys go to that
-shell.";
+`alive` in that pane** — the screen alone cannot tell: in a pane the person opened, a Claude
+Code that was killed keeps its last frame, box and all, above the shell it ran in, the second
+value stays `0`, and the keys go to that shell.";
 
 /// Codex 일꾼의 모델·리뷰·멈춤 규약은 한 글이다(moai-uzhx.2mq). cmux 와 tmux 가
 /// `format!` 으로 그대로 싣는다 — 자리마다 다른 명령은 각 절에 남긴다.
@@ -2872,7 +3139,7 @@ It waits for the supervisor's review and the second assignment; it does not revi
 When `Review-ready:` arrives, read its whole note. Pick the review issue up
 (`moai -C <root> mv <review id> in_progress`) and run a review subagent in the reported
 worktree with its configured `review` model and "The review brief" in
-`references/worker.md`; refer to that brief, do not copy it here. Once the review has ended and its words are on the review issue, send
+`references/worker-branches.md`; refer to that brief, do not copy it here. Once the review has ended and its words are on the review issue, send
 "merge and close — review <id> done" with the same file-paste path and fresh input checks.
 Leave the review issue open: Codex takes the fixes in and closes it (worker.md 7 and 10).
 Do not clear the conversation between these two assignments. Watch for the final report,
@@ -3068,7 +3335,8 @@ has read `busy` far longer than its work should take, look at its pane once:
 
 and read why it stopped — a permission prompt, a question (`AskUserQuestion`), an API or
 rate-limit error, or a process that ended (a shell prompt where the box was, or under its last
-box — a killed Claude Code leaves its last screen behind); whether the session is still alive,
+box — a killed Claude Code leaves its last screen behind — or, in a pane you opened, a last line
+`Pane is dead (…)` that `remain-on-exit` left under it); whether the session is still alive,
 the session map says. **Tell the person** what the pane shows and which pane it is. Do not answer the prompt, do not press a
 key, and do not look again in a loop. A process that ended is a dead session: bringing it
 back is `moai-recover`, once the person asks for it.
@@ -3079,12 +3347,17 @@ When the supervisor's 2 finds no worker, ask the person **once** whether to open
 panes, and how many — one question covers several panes. Open a pane only on their yes, or
 when they asked you for it. On a yes, for each pane:
 
-    tmux split-window -P -F '#{{pane_id}}' -t "$TMUX_PANE" -c <root> 'claude --model <model>; exec bash'
+    tmux split-window -P -F '#{{pane_id}}' -t "$TMUX_PANE" -c "<root>" 'claude --model <model>' \; set-option -p remain-on-exit on
     tmux select-layout -t "$TMUX_PANE" tiled
 
-`<root>` is the `root dir` of the supervisor's 2 and `<model>` the model picked in 2-1. **No
-other flag.** The first line prints the new pane's id; `exec bash` keeps a shell in the pane
-when `claude` exits, so what it said stays readable. The pane belongs to the same person —
+`<root>` is the `root dir` of the supervisor's 2 and `<model>` the model picked in 2-1 — keep
+the double quotes, so a path with a space stays one argument. **No other flag.** The first line
+prints the new pane's id. The `set-option` after `\;` runs in the same tmux call, on the new
+pane, before `claude` can exit — set in a call of its own, a `claude` that ended at once would
+have taken its pane, and what it said, with it. `remain-on-exit` keeps the pane when `claude`
+exits: its last screen stays readable, `#{{pane_dead}}` reads `1`, and tmux refuses pastes
+aimed at it and drops keys — nothing you send lands in a shell under a dead session, though
+`send-keys` still exits `0`. A dead pane stays until the person closes it; never kill it. The pane belongs to the same person —
 it is their interactive session like any other.
 
 Once it has started (a separate call: `capture-pane` of the new pane shows the `❯` box), look
@@ -3121,10 +3394,12 @@ Codex can leave its last frame over a shell. Never use another server's pane ids
 
 ### Read the Codex input box
 
-    tmux display -p -t <pane> '#{{pane_in_mode}}'
+    tmux display -p -t <pane> '#{{pane_in_mode}} #{{pane_dead}}'
     tmux capture-pane -p -e -t <pane>
 
-If the first line prints `1`, the person is in copy mode: the pane is theirs, so do not type.
+If the first value is `1`, the person is in copy mode: the pane is theirs, so do not type.
+If the second is `1`, Codex has exited and the pane kept its last screen: no box, do not type.
+If it prints neither value, the pane is gone: do not type.
 
 {CODEX_EMPTY_BOX}
 
@@ -3133,11 +3408,13 @@ If the first line prints `1`, the person is in copy mode: the pane is theirs, so
 When no idle Codex worker is left, ask the person **once** whether to open new panes and
 how many. Open one only on their yes, or when they asked for it. On a yes:
 
-    tmux split-window -P -F '#{{pane_id}}' -t "$TMUX_PANE" -c <root> 'codex --model <codex>; exec bash'
+    tmux split-window -P -F '#{{pane_id}}' -t "$TMUX_PANE" -c "<root>" 'codex --model <codex>' \; set-option -p remain-on-exit on
     tmux select-layout -t "$TMUX_PANE" tiled
 
-The first line prints the new pane id. This is an ordinary interactive session; `exec bash`
-keeps its final screen readable after Codex exits. Read the new pane separately and confirm
+The first line prints the new pane id; its `set-option` lands on the new pane in the same tmux
+call, before Codex can exit. This is an ordinary interactive session; `remain-on-exit` keeps
+its final screen readable after Codex exits, and the dead pane takes no keys — tmux refuses
+pastes and drops keys. Read the new pane separately and confirm
 the live process and empty composer above. Folder trust and hook trust prompts belong to
 the person; tell them what the pane shows. Do not assume cmux's wrapper enabled or trusted
 hooks here. The person checks moai in `/hooks`; the worker keeps the five rules even when
@@ -3706,8 +3983,8 @@ under `~/.claude/sessions/`, and the lines below print one row per record, tab-s
   in a cmux tab of yours — another terminal, or tmux, tmux inside a cmux tab included — when it
   shares its tab with another live session, or when cmux gave no answer (a line on its own says
   so), and then this skill has nothing for that worker. A session started with cmux's
-  `claude-teams` can read `-` too: its record may carry the tmux that launcher's stand-in
-  answered, and a record with tmux in it is not matched to a surface
+  `claude-teams` is matched like any other: the tmux its record carries is the stand-in's
+  answer, not a tmux pane, so the map leaves it out
 - **No row at all, and a line saying no record reads alive:** this shell cannot tell live from
   dead — act on no row, and tell the person what it said
 - **A row whose `saycode` is not `-` is a Saycode session** — one Saycode started, so its pane
@@ -3716,8 +3993,7 @@ under `~/.claude/sessions/`, and the lines below print one row per record, tab-s
   names — wherever they stand. A row standing elsewhere is not a worker of this repository, whatever its name
 - `status` is `idle`, `busy` or another word. It has to agree with `ListAgents` where a step
   below asks for `idle`
-- Your own row is the one whose pane is `$CMUX_SURFACE_ID` — when you were started with cmux's
-  `claude-teams` it may read `-` instead (above)
+- Your own row is the one whose pane is `$CMUX_SURFACE_ID`
 
 Run it when a step below needs a surface, and once more just before you type into one — a
 reading from earlier in the round may be a worker that has died since (the next section).
@@ -3833,7 +4109,7 @@ When the supervisor's 2 finds no worker, ask the person **once** whether to open
 tabs, and how many — one question covers several. Open one only on their yes, or when they
 asked you for it. On a yes, for each:
 
-    cmux --id-format both new-split right --surface "$CMUX_SURFACE_ID" --command 'cd <root> && claude --model <model>'
+    cmux --id-format both new-split right --surface "$CMUX_SURFACE_ID" --command 'cd "<root>" && claude --model <model>'
 
 `<root>` is the `root dir` of the supervisor's 2 and `<model>` the model picked in 2-1. **No
 other flag** on `claude`. It prints `OK surface:<n> (<UUID>) workspace:<n> (<UUID>)` — the first
@@ -3936,7 +4212,7 @@ Re-run this check just before each input; never trust a tab title or an earlier 
 
 Ask once before opening new tabs, as above. On a yes, open an ordinary interactive Codex:
 
-    cmux --id-format both new-split right --surface "$CMUX_SURFACE_ID" --command 'cd <root> && codex --model <codex>'
+    cmux --id-format both new-split right --surface "$CMUX_SURFACE_ID" --command 'cd "<root>" && codex --model <codex>'
 
 Keep the returned surface UUID. The same split refusal rule applies: stop opening and tell
 the person. Read its startup screen in a separate call; folder trust, hooks trust and any
@@ -4096,6 +4372,22 @@ leaves its record behind. The lines below print one row per record, tab-separate
   worktree, also drop it when a live row other than your own stands in that same `cwd`. The
   root is not such a place — several live sessions stand there at once, and one of them being
   alive says nothing about the dead one
+- **Drop it when its conversation was cleared after it died.** Another process resumed it and
+  ran `/clear` there: that process went on under a new `sessionId` and its own record carries
+  the new one, so no live row carries the old id any more — and resuming it brings back a
+  conversation already left behind. Its transcript does not say so (the `/clear` lines open the
+  new id's transcript, not the end of the old one); `~/.claude/history.jsonl` does — it logs
+  every `/clear` (and its aliases `/new` and `/reset`) under the id it cleared. Give the lines
+  below the candidates' `sessionId`s; they print the ones cleared after their transcript last
+  moved, and you drop those. The lines a `/clear` writes as it interrupts a running turn land
+  within seconds of it and do not count as moving. A conversation that moved again after its
+  `/clear` (it was resumed back) is not printed. Two dead records with the same `sessionId`
+  are one candidate
+
+```sh
+{CLEARED}
+```
+
 - **Drop old crashes.** Records of earlier deaths stay too. Keep the candidates whose
   transcript (below) last moved around the same time; name an older one to the person apart,
   and bring it back only if they say so
@@ -4205,11 +4497,16 @@ supervisor's pane — or print its line — only after they say that worker is b
 the window of `$TMUX_PANE` — inside a session Saycode's daemon started, that is the daemon's
 pane, not yours — so say which window they are in:
 
-    tmux split-window -P -F '#{{pane_id}}' -t "$TMUX_PANE" -c <cwd> 'claude --resume <sessionId>; exec bash'
+    tmux split-window -P -F '#{{pane_id}}' -t "$TMUX_PANE" -c "<cwd>" 'claude --resume <sessionId>' \; set-option -p remain-on-exit on
     tmux select-layout -t "$TMUX_PANE" tiled
 
-**No other flag.** The first line prints the new pane's `%N`; `exec bash` keeps a shell there
-when `claude` exits. Then, as a separate call, look once: when its `❯` box shows and is empty
+**No other flag**, and keep the double quotes around `<cwd>` — a path with a space stays one
+argument. The first line prints the new pane's `%N`, the `<pane>` below. The `set-option` after
+`\;` runs in the same tmux call, on the new pane, before `claude` can exit — a `--resume` that
+fails at once (no such conversation) keeps its pane and its error.
+`remain-on-exit` keeps the pane when `claude` exits: its last screen stays, `#{{pane_dead}}`
+reads `1`, and tmux refuses pastes aimed at it and drops keys, so nothing lands in a shell. A
+dead pane stays until the person closes it; never kill it. Then, as a separate call, look once: when its `❯` box shows and is empty
 ("Is the input box empty" above), paste the block:
 
     tmux load-buffer -b moai-recover <file>
@@ -4232,9 +4529,9 @@ person that this way needs cmux 0.65.0, and go to 7; when it prints an error ins
 `methods` list, tell them what it said, and go to 7. For each session that is not a Saycode
 session (8), in that order:
 
-    cmux --id-format both new-split right --surface "$CMUX_SURFACE_ID" --command 'cd <cwd> && claude --resume <sessionId>'
+    cmux --id-format both new-split right --surface "$CMUX_SURFACE_ID" --command 'cd "<cwd>" && claude --resume <sessionId>'
 
-**No other flag.** It prints `OK surface:<n> (<UUID>) workspace:<n> (<UUID>)` — the first UUID
+**No other flag**, and keep the double quotes around `<cwd>` inside the single ones. It prints `OK surface:<n> (<UUID>) workspace:<n> (<UUID>)` — the first UUID
 is the new tab, the second your workspace. The command is typed into the tab's shell, so the
 shell stays when `claude` exits, and the split does not take focus. **If cmux refuses a split**
 — no space for a new pane, as every split lands in your row, or it cannot find your tab in the
@@ -4261,7 +4558,7 @@ person which tab is which session.
 Neither way above stands: open nothing. Print, per session in the same order, the line the
 person types in a terminal of their own, and under it the block to paste once its box shows:
 
-    cd <cwd> && claude --resume <sessionId>
+    cd "<cwd>" && claude --resume <sessionId>
 
 A Saycode session gets the line of 8 instead.
 
@@ -4289,7 +4586,7 @@ before it sends.
 ///
 /// **`-C <루트>` 를 줄에 박는다.** 7-1 은 워크트리에서 치는데, 글로만 "4-1 대로" 라고 적고 줄을
 /// 맨 `moai` 로 두면 그대로 옮겨 친 줄이 워크트리의 `.moai` 에 멤버를 세운다 — 병합에서 스냅샷이
-/// 부딪히거나, 4-1 이 시키는 `git checkout -- .moai` 로 그 멤버가 사라진 채 에픽이 닫힌다.
+/// 부딪히거나, 4-1 이 시키는 `git -C <워크트리> checkout -- .moai` 로 그 멤버가 사라진 채 에픽이 닫힌다.
 /// `<루트>` 는 감독이 채우는 자리라 받은 줄에 실제 자리가 박혀 온다. 다른 자리 이름은 그 목록과
 /// 겹치지 않는다 — 겹치면 맡긴 backlog 의 값이 이 줄에 미리 박힌다(`<등급>` 와 같은 덫).
 const RECALL: &str = "moai -C <root> backlog promote <backlog id> -e <epic> --from -";
@@ -4337,6 +4634,14 @@ const TO_REVIEW: &str = "moai -C <root> mv <member> review --from in_progress";
 /// `the_brief_stands_members_in_review` 가 이 글을 `refuse.no_column` 의 영어 글과 견준다.
 const NO_REVIEW_COLUMN: &str = "`review` is not a column";
 
+/// 메시지의 한 줄 — **워크트리에 들지 말라**(moai-9js2.3tl, 2026-10-25 사용자 결정). 걸음 파일의 "Stay in the root"
+/// 절이 같은 말을 하지만, 그 절을 읽기 전에 `EnterWorktree` 를 부르는 창이 있다 — 그 한 번이 사람에게 승인 창을 띄운다.
+/// 새 일과 거둔 일(감독 0)이 같은 줄을 싣는다: 거둔 일은 첫 두 줄만 바꿔 보낸다.
+///
+/// **[`message`] 의 글 위에 둔다**(리뷰 moai-9js2.s4s) — 그 글과 `fn message` 사이에 끼우면 rustdoc 이 메시지의 계약
+/// 글 전부를 이 상수에 달고 `fn message` 는 글 없이 남는다.
+const STAY_LINE: &str = "Worktree: stay in the root and reach it by absolute path — never EnterWorktree, every call into .worktrees/ asks the person to approve it";
+
 /// 감독이 일꾼에게 `SendMessage` 로 보내는 메시지 — 맡길 일(첫 줄)과 감독이 채운 자리들(moai-obxm). 첫 줄이
 /// [`worker`] 의 파일(`<steps file>`)을 읽고 몇째 걸음부터 할지를 댄다(moai-fim6). **일꾼이 아는 것은 이 메시지와 그 파일뿐이다** — 감독 스킬의 다른 절을 가리키면 일꾼에게
 /// 없는 글을 가리키는 것이라(첫 판의 "아래 공유 main" 이 그랬다), 감독만 아는 값은 모두 자리로 싣는다. 자리마다 읽는
@@ -4362,9 +4667,83 @@ fn message() -> String {
     Due: <due>
     Root: <root>
     Subdir: <subdir>
-    Person: <person>"#
+    Person: <person>
+    {STAY_LINE}"#
     )
 }
+
+/// 감독의 2-2 가 펼치기를 맡기는 메시지의 첫 줄(moai-w25x.jby) — 이미 펼친 에픽을 걸음 2 부터. 4-3 으로 남은 멤버를
+/// 보낼 때(감독 5)와 한 줄이라 한 자리에 둔다.
+const PLAN_FIRST: &str = "You are handed epic <epic> — <title>. It is already unfolded; do not promote. Read <steps file> and follow its steps from step 2.";
+
+/// 감독이 `plan` 역할의 모델로 세우는 펼치기 서브에이전트의 프롬프트(moai-w25x.jby, 2026-10-26 사용자 결정). 역할 표의
+/// `plan` 이 어디에도 안 쓰였다 — 일꾼은 제 모델로 펼쳐, 사람이 그 키를 적어도 안 들었다(리뷰 moai-9tqo.jdi 15번).
+///
+/// **일꾼의 걸음 1 이 하던 것을 그대로 옮긴다** — `--dry-run` 을 먼저 보고, 짧은 새 제목, 마일스톤과 기한을 에픽에,
+/// **죽은 릴리스는 걷는다**(리뷰 moai-w25x.54r) — 일꾼은 걸음 2 부터 받아 걸음 1 의 그 줄을 안 지난다. 걷던 판은 닫힌
+/// 릴리스를 `promote` 가 데려온 채 두어, 집는 순간 그 릴리스가 다시 돌아 `ready` 가 밖의 일을 통째로 감췄다.
+/// 그 위에 **멤버의 본문을 채운다** — 펼치는 손이 코드를 읽은 손이라, 일꾼이 같은 조사를 다시 안 하게 한다. 난이도를
+/// 멤버마다 돌려줘 감독이 역할(2-1)을 백로그가 아니라 멤버로 잰다. 집기·워크트리·코드는 일꾼의 몫이라 안 한다.
+///
+/// **펼치기가 쓸 자리는 3 의 자리 이름을 안 쓴다**(같은 리뷰) — 감독은 이 글을 "3 처럼 채워" 보내므로, `<title>`·`<why>`
+/// 를 여기서 펼치기의 몫으로 쓰면 감독이 backlog 제목과 제 까닭으로 채워 버린다. 감독이 채우는 것은 머리의 자리뿐이다.
+/// **다 지은 에픽에 `Sent:` 를 단다** — 감독이 그 사이에 다시 서면 보내지 않은 에픽을 아무 읽기도 못 찾는다. 걸음 3·4
+/// (릴리스·기한·본문) 뒤에 단다: 다시 선 감독은 그 표가 선 에픽을 곧장 걸음 2 부터 보내므로, 앞에 달면 덜 지은 에픽이
+/// 간다. 릴리스를 기한보다 먼저 건다 — 죽은 릴리스의 이른 기한이 사람의 기한을 거절한다(일꾼의 걸음 1 과 같은 차례).
+fn plan_brief() -> String {
+    format!(
+        r#"You unfold backlog <id> — <title> — for the supervisor of this repository. You split it
+into an epic and its issues; you do not develop it, pick anything up, raise a worktree or
+change a repository file — the tracker and your scratchpad are yours.
+Root: <root>
+Milestone: <milestone>
+Due: <due>
+Person: <person>
+
+1. Read it — moai -C <root> show <id> — and as much of the code as the split needs. If it
+   already stands done, hand back `already unfolded: <id>` and stop: unfolding again puts up
+   two epics.
+2. Write the plan: one `# <epic title>` line and one `- [pN] <member title>` line per issue. A plan
+   line becomes the title verbatim, so write short new titles. Look first, then unfold:
+   moai -C <root> backlog promote <id> --dry-run --from -
+   moai -C <root> backlog promote <id> --from -
+3. Hang the release on the epic, then the deadline, each unless its slot says `none` — the
+   release first, as a dead one's earlier deadline refuses the person's. `Milestone: none`
+   clears nothing `promote` carried, but for a dead release: when a line `promote` printed
+   names the release it carried as already closed or deferred, clear it — left on, it
+   re-opens a release that is out, or takes the whole plan out of the plan:
+   {MILESTONE_ATTACH}
+   {MILESTONE_CLEAR}
+   moai -C <root> edit <epic> --due <due>
+   A refusal because the day is later than the milestone's leaves the epic as it stands.
+4. Give every member a body the worker can start from without searching again — what is
+   wrong, where (file and function), what to change, how to test it. A design question the
+   backlog and its notes do not settle goes in it, open, for the worker to ask — do not
+   settle it here. Write it to a file in your scratchpad and run
+   moai -C <root> edit <member> -b - < <that file>
+5. Mark the epic, last — a supervisor that starts again sends an epic it finds marked so, so
+   mark it only once 3 and 4 stand:
+   {PLAN_SENT}
+   Then hand back. The first line is Model ran: anthropic/<your real model name> — the name in
+   your system prompt, not an alias. The second is epic: <epic id>. Then one line per member,
+   <member> <{levels}> — <reason>, on this rubric:
+{rubric}
+   Open the reason with `docs` for a member that only touches the wiki or the CHANGELOG, and
+   with `bulk` for sorting, summing up or the same mechanical fix many times. Then a line
+   `not hung: <what and why>` for each release or deadline 3 left as it was or cleared.
+   If you could not unfold, the first line after Model ran: is `not unfolded: <reason>`."#,
+        levels = DIFFICULTY.iter().map(|(level, _, _)| *level).collect::<Vec<_>>().join("|"),
+        rubric = indent(&difficulty_rubric(), "   - "),
+    )
+}
+
+/// 펼치기가 걷는 죽은 릴리스의 줄(리뷰 moai-w25x.54r) — 일꾼의 걸음 1 이 같은 일을 `moai edit <epic> --milestone none` 으로
+/// 한다. 펼치기는 루트를 자리로 받으므로 `-C <root>` 를 단다.
+const MILESTONE_CLEAR: &str = "moai -C <root> edit <epic> --milestone none";
+
+/// 펼치기가 펼친 에픽에 다는 보낸 표(리뷰 moai-w25x.54r) — 감독의 1 이 `moai show -g 'Sent:'` 로 다시 읽는 그 낱말이다.
+/// 감독이 일꾼에게 보내면 그 일꾼의 `Sent:` 가 뒤에 선다.
+const PLAN_SENT: &str = "moai -C <root> note <epic> 'Sent: plan <id>'";
 
 /// 서브에이전트 일꾼이 7 에서 세우는 리뷰 서브에이전트의 프롬프트(moai-9tqo.p1p). **리뷰는 일꾼의 중첩
 /// 서브에이전트로 돈다**(2026-10-12 사용자 결정 5) — 일꾼 안에서 부른 리뷰는 일꾼의 모델을 물려받으니(moai-9tqo.fxp
@@ -4410,13 +4789,18 @@ Root: <root>
     )
 }
 
+/// 일꾼의 걸음 파일 둘의 이름(moai-w25x.mgu) — 본 글과 갈래 글이 서로를 이 이름으로 가리킨다.
+pub const STEPS_FILE: &str = "worker.md";
+pub const BRANCHES_FILE: &str = "worker-branches.md";
+
 /// 일꾼의 걸음 — 감독 스킬의 `references/worker.md`(moai-obxm). 감독의 [`message`] 가 첫 줄에서 이 파일을 읽으라고 이른다
 /// (moai-fim6). 일꾼이 하는 일을 바꾸지 않는 내력·측정 글은 여기 안 싣는다 — 그것은 이 주석과 커밋 메시지에 선다.
 /// 일꾼 스킬(`moai-work`)을 걷었으니 일꾼이 지킬 것은 모두 여기 적는다.
 ///
 /// **Claude Code 의 것이다**(2026-10-06 사용자 결정). 감독 스킬이 Claude Code 에만 심기니 이 글을 받는 창도 Claude
-/// Code 다 — 낱말표의 *기울인* 걸음 이름을 걷고 도구를 바로 적는다(`EnterWorktree(path)`·`ExitWorktree(keep)`·
-/// `AskUserQuestion`·`/code-review`·`/model`·`TaskStop`·`/clear`). Codex·Antigravity 를 위한 갈래 글도 걷었다.
+/// Code 다 — 낱말표의 *기울인* 걸음 이름을 걷고 도구를 바로 적는다(`ExitWorktree(keep)`·`AskUserQuestion`·
+/// `/code-review`·`/model`·`TaskStop`·`/clear`). Codex·Antigravity 를 위한 갈래 글도 걷었다. `EnterWorktree` 는 부르지
+/// 말라는 말로만 선다(moai-9js2) — 시험이 `EnterWorktree(path)` 가 다시 서면 붉어진다.
 ///
 /// **고리가 없다.** 출석·기다림·편지(`moai hello`·`moai inbox`·`moai send`)를 걷었다 — 메시지가 창을 깨우고, 일꾼은
 /// 보고하고 턴을 끝낸다. 다음 메시지가 다음 일이다.
@@ -4426,12 +4810,16 @@ Root: <root>
 ///
 /// **닫기는 워크트리를 지운 뒤다.** 워크트리가 남아 있으면 훅이 그 에픽을 옆 워크트리의 일로 읽을 수 있어
 /// (`worktree::away`) — 이 세션이 집은 줄이 아니면 — `-m` 없는 리뷰 닫기를 못 막는다. 충돌과 시험은 워크트리에서
-/// 풀고, 루트 병합이 막히면 되돌리고 돌아간다. 루트를 고치지 않는 것은 이제 글이 지킨다 — 이 세션이 집은 줄은 옆
-/// 이름이 가리켜도 제 것이라(moai-pxui) 규칙 2 가 루트의 편집을 안 막는다.
+/// 풀고, 루트 병합이 막히면 되돌리고 돌아간다. 루트를 고치지 않는 것은 규칙 2 가 다시 지킨다 — 쥔 줄이 모두 제
+/// 워크트리를 가지면 루트 체크아웃에 쓰는 것을 막고 같은 파일의 워크트리 경로를 낸다(moai-9js2.3xn, `hook::homed`).
+///
+/// **워크트리에는 세션도 서브에이전트도 들지 않는다**(moai-9js2, 2026-10-25 사용자 결정) — 그 절([`STAY_IN_ROOT`])이
+/// 둘의 걸음 앞에 한 번 선다. `.worktrees/` 로 드는 `EnterWorktree` 는 부를 때마다 사람에게 승인을 물었다.
 ///
 /// **서브에이전트 길은 한 절과 걸음마다 한 줄이다**(moai-9tqo.p1p). 서브에이전트에는 `EnterWorktree`·`AskUserQuestion`·
 /// `/model` 이 없다(moai-9tqo.fxp) — 걸음을 두 벌로 적으면 한쪽만 고쳐지니, 규칙은 "In a subagent" 절에 한 번 서고
-/// 더 할 말이 있는 걸음(1·2·3·4·7·9-1·10·12)만 **In a subagent** 줄을 단다. 보고는 노트가 먼저다 — 감독이 다시
+/// 더 할 말이 있는 걸음(1·2·4·7·9-1·10·12)만 **In a subagent** 줄을 단다 — 3 은 세션도 루트에서 띄우고 안 들게 되어
+/// 두 길이 같은 걸음이 되었다(moai-9js2). 보고는 노트가 먼저다 — 감독이 다시
 /// 섰으면 끝난 알림이 사라진다.
 ///
 /// **보고가 마지막이다**(moai-snyk). 감독은 보고를 받고서야 다음을 보낸다 — 보고 뒤에 `Next:` 노트를 적던 판은
@@ -4443,8 +4831,8 @@ Root: <root>
 ///
 /// **마일스톤 일은 마일스톤 가지로 병합한다**(2026-10-08 사용자 결정, moai-nvju). 그 가지는 루트 밖의 오래 사는
 /// 워크트리(`.worktrees/milestone-<id>`)에 체크아웃돼 있어, 병합과 그 HEAD 대조와 `branch -d` 를 **루트에서
-/// `git -C <그 워크트리>`** 로 친다 — 격리 가드는 `EnterWorktree` 로 든 세션에만 서므로 `ExitWorktree(keep)` 뒤의
-/// 루트에서는 한 줄 맨 명령으로 지나간다. 그 워크트리에 `EnterWorktree` 로 드는 판은 충돌을 풀 때만이다.
+/// `git -C <그 워크트리>`** 로 친다. 충돌도 그 워크트리를 절대 경로로 겨눠 푼다 — 일꾼은 어느 워크트리에도 들지 않는다
+/// ([`STAY_IN_ROOT`], moai-9js2).
 /// `branch -d` 를 루트에서 치면 루트의 가지가 아직 그 병합을 안 들어 "not fully merged" 로 거절한다(재 봤다).
 pub fn worker() -> String {
     let rule = indent(&model_rule(), "  ");
@@ -4458,7 +4846,6 @@ pub fn worker() -> String {
     let angle = indent(REVIEW_ANGLE, "   ");
     // 7-4 는 목록 밖의 문단이라 명령 줄이 네 칸이다(`the_worker_steps_follow_the_markdown_list_rules`).
     let wiki_commit = indent(WIKI_COMMIT, "    ");
-    let brief = indent(&review_brief(), "    ");
     let untracked = tracker_out_of_git();
     let stand_in = crate::skill::CMUX_STAND_IN;
     format!(
@@ -4472,8 +4859,15 @@ person comes first** — this window is theirs; when they speak, answer them.
 ## The assignment
 
 The message's first line names the work and the step of this file to start from —
-`from step 1` for a new backlog, `from "Carrying on stalled work"` for work a session left
-behind, `from step 2` for an epic already unfolded whose first-column members are left.
+`from step 1` for a new backlog, `from step 2` for an epic already unfolded, or
+`from "Carrying on stalled work"` for work a session left behind.
+
+**This file is the path every assignment takes.** The rare branches stand in
+`{BRANCHES_FILE}` beside it — read that file too, the section a line here names, when your
+assignment takes one: `Person: away` ("When the person is away"), a `Subdir:` line ("A
+subdirectory project"), `from "Carrying on stalled work"`, a review rule 3 keeps refusing
+("When the review stays refused"), and, in a subagent, the review brief of 7 ("The review
+brief").
 The message's `from` is the supervisor — `<supervisor>` below; "tell the supervisor" is `SendMessage(to: <supervisor>, …)`.
 A message the supervisor pasted into this window (`moai-tmux` or `moai-cmux`) or sent as a Saycode prompt
 (`moai-saycode`) carries no `from`; its last line,
@@ -4510,7 +4904,9 @@ said yes to taking over a row that is not yours, say — belongs to the assignme
 - `Root:` — `<root>`, the root checkout's place (4-1)
 - `Subdir:` — `<subdir>`, only for a subdirectory project in a monorepo (3). Without it the
   root is the top of the repository
-- `Person:` — `here`, or `away` (below)
+- `Person:` — `here`, or `away` ("When the person is away" in `{BRANCHES_FILE}`)
+- `Worktree:` — the same words to every worker: you never go into the worktree, you aim at it
+  ("Stay in the root")
 
 Ask two things where the window stands now, before you move anywhere.
 **If this window runs `moai-supervise` itself**, it is a supervisor, not a worker: do
@@ -4520,10 +4916,13 @@ of its worktrees — the supervisor took you for a worker by a name that only lo
 repository's. Do nothing of it: reply to its `from` that you stand in another repository, and
 end the turn.
 The steps begin in the root the message names (`Root:`) — if this window stands anywhere
-else in that repository, go there first: `cd` from a subdirectory, `ExitWorktree(keep)` from
-a worktree.
+else in that repository, go there first: `cd <root>` from a subdirectory or from a worktree
+a `cd` moved into, `ExitWorktree(keep)` from a worktree this session entered with
+`EnterWorktree`.
 A message that hands over no work is not work: if it asks something, answer it with
 `SendMessage` to its `from`, and end the turn.
+
+{STAY_IN_ROOT}
 
 ## In a subagent
 
@@ -4531,14 +4930,11 @@ When `Worker:` says `subagent`, the supervisor raised you with `Agent` inside it
 and four things a session has are not yours. The rule for each stands here once; a step that
 needs more says so in a line of its own, **In a subagent**.
 
-- **No `EnterWorktree` or `ExitWorktree`.** You stay in the root — every Bash call starts
-  there again, whatever an earlier call moved into. So where a step goes into the worktree,
-  aim at it instead: `cd <root>/.worktrees/<epic> && …` or `git -C <root>/.worktrees/<epic> …`,
-  and every Read and Edit takes an absolute path under it. Where a step comes back to the root
-  with `ExitWorktree(keep)`, you are there already. The git shapes in "Before the steps" bind a
-  session that went into a worktree, not you
+- **No `EnterWorktree` or `ExitWorktree`.** A session does without them too ("Stay in the
+  root"); for you they do not exist
 - **No `AskUserQuestion`, and nobody watches you.** Where a step asks the person, hand back
-  instead and end (4). `Person: away` still decides by recommendation, as below
+  instead and end (4). `Person: away` still decides by recommendation —
+  "When the person is away" in `{BRANCHES_FILE}`
 - **No `/model`.** The model and the effort you were raised on stay (`Model:` above)
 - **What you hand back is the report** (12) — `SubagentHandback`, and your turn ends with it.
   Where a step says to tell the supervisor and stop, that is your hand-back; where it says to
@@ -4548,30 +4944,11 @@ needs more says so in a line of its own, **In a subagent**.
   pick-ups are recorded as the supervisor's, its rules see what the supervisor's other workers
   hold, and the supervisor's turn-end holds what you hold
 
-## When the person is away
-
-When the message says `Person: away`, decide by recommendation. A design question the notes
-do not settle is not asked (4) — settle it the way you would have recommended, and write it
-on the issue where the next person reads it
-
-    moai note <id> 'Decided alone: <what you chose> — <why>, and what the other way was'
-
-Nothing else waits on the person either. A model the window is not on is not asked for —
-work on the window's model and say so in the reason of 9-1. A row that is someone else's or
-nobody's (rule 5) is taken over only on a yes the message carries; without one, leave that row
-and name it in the report.
-
-**Stop at what cannot be undone** — deleting what is not yours, rewriting history someone
-else has, a release, anything outside this repository — and report that instead of doing
-it. When the person is back in the window, what they say overrides what you decided alone.
-
 ## Before the steps
 
 {BRANCH_CHECK}
 
 {untracked}
-
-{GIT_SHAPES}
 
 ## The milestone branch
 
@@ -4598,10 +4975,8 @@ first — look at `git worktree list` again and carry on with what stands
 If the repository's own worktree convention adds something to a new worktree (a link for
 the build output, say), add it to this one too.
 
-**Git aimed at the milestone's worktree runs from the root**, after `ExitWorktree(keep)` —
-there `git -C .worktrees/milestone-<milestone id> …` is one plain command and goes
-through. From inside your epic's worktree it is refused like any git aimed outside it (the
-git shapes above), so do not try it there. That worktree is shared by every worker of the
+**Git aimed at the milestone's worktree runs from the root**, where you stand —
+`git -C .worktrees/milestone-<milestone id> …`. That worktree is shared by every worker of the
 milestone, like the root: if git refuses a merge there because one is already open
 (`MERGE_HEAD`), it is another worker's — never `merge --abort` it; wait for it to finish
 and run yours again. Before you merge into it, check its HEAD the way
@@ -4612,8 +4987,8 @@ supervisor
 **The milestone branch takes `<root branch>` in only at the release.** If this epic needs a
 fix that landed on `<root branch>` after the milestone branch split off, take it in at that
 moment, from the root, and then pull the milestone branch in 6 as usual. If it stops on a
-conflict, resolve it inside the milestone's worktree (`EnterWorktree(path)` from the root),
-never in the root
+conflict, resolve it inside the milestone's worktree, by its absolute path ("Stay in the
+root"), never in the root
 
     git -C .worktrees/milestone-<milestone id> merge --no-ff <root branch> -m "merge: take <root branch> in for <epic>"
 
@@ -4671,26 +5046,20 @@ never in the root
    and name it in the report. Handed an epic `from step 2`, measure first as 1 does, before
    you pick anything up
 3. Right after 2, branch from the local <base branch> with
-   `git worktree add -b worktree-<epic> .worktrees/<epic> <base branch>` and go in with
-   `EnterWorktree(path)` from the root. The name is the unfolded epic's id, not the backlog's.
+   `git worktree add -b worktree-<epic> .worktrees/<epic> <base branch>` from the root, and do
+   not go in: from here on aim every command at `<root>/.worktrees/<epic>` ("Stay in the
+   root"). If the repository's CLAUDE.md says what a new worktree gets (a link for the build
+   output, say), do that first. The name is the unfolded epic's id, not the backlog's.
    Inside a milestone the milestone branch has to stand first — raise it if it is missing
    ("The milestone branch").
    Until the worktree stands, the other sessions in the root read this member as their own focus.
-   **If the root is not the top of the repository** (a subdirectory project in a monorepo) the
-   worktree stands for the whole repository, so once inside, move to the same subdirectory in
-   it and work there — standing at the worktree top, `moai` walks up and finds the root's
-   `.moai` to write, and the hook does not count edits under `.worktrees/`. `<subdir>` is that
-   relative path, filled in by the supervisor; if the message carries no `Subdir:`, the root
-   **is** the top and this step does not exist
-
-       {SUBDIR}
-   **In a subagent** raise it with the same line — you are in the root — and do not go in:
-   from here on aim every command at `<root>/.worktrees/<epic>` ("In a subagent"), or at
-   `<root>/.worktrees/<epic>/<subdir>` for a subdirectory project. If the repository's
-   CLAUDE.md says what a new worktree gets (a link for the build output, say), do that first
-4. Do not guess a design decision that is not in the notes — ask with `AskUserQuestion`;
+   **If the message carries `Subdir:`**, the root is a subdirectory of the repository — work
+   in that subdirectory of the worktree, as "A subdirectory project" in `{BRANCHES_FILE}` says.
+4. Before you ask about a design decision, read the `Wiki` block of `moai show <member>` and
+   `moai wiki search '<that place>'`; do not ask a person what the wiki already answers.
+   Do not guess a design decision that is not in the notes — ask with `AskUserQuestion`;
    a person is watching the worker's window. With `Person: away` in the message, decide by
-   recommendation instead ("When the person is away").
+   recommendation instead ("When the person is away" in `{BRANCHES_FILE}`).
    **In a subagent** there is no `AskUserQuestion`: hand back with `SubagentHandback`, its
    head `{DECISION_HEAD}`, then the situation, options A and B, and your recommendation —
    and end. The supervisor asks the person and wakes you with the answer (`SendMessage`);
@@ -4707,8 +5076,10 @@ never in the root
    Put `-e <epic>` on a backlog item you park mid-epic — it does not keep the epic open, and 7-1
    reclaims it through that even if the window is cleared or the work is taken over.
    **Give a review subagent the same words.** If that worktree's `.moai` changed anyway,
-   undo it with `git checkout -- .moai`, and if the row was already committed, undo that
-   commit too and park it again from the root
+   undo it with `git -C <root>/.worktrees/<epic> checkout -- .moai` — aimed at the worktree:
+   the same line in the root throws away every session's rows not committed yet, yours
+   included — and if the row was already committed, undo that commit too and park it again
+   from the root
 
 4-2. **If you test tmux, do it on a separate server only** — `env -u TMUX tmux -L <unique name>`
    on every call. Put the epic id in the name so it cannot collide with the test servers of
@@ -4758,12 +5129,14 @@ never in the root
 {rubric}
 6. When the members' work is all done, pull <base branch> into the worktree, resolve the
    conflicts and run the tests. Fix things here, never in the root — the root is shared and
-   stands on `<root branch>`, and the hook does not stop the session that holds this work
-   from editing there. Inside a milestone that is the milestone branch, not `<root branch>`
-   — the epics merged beside you are there
-7. Before merging, review the whole epic with `/code-review <grade> --fix` — the members were
-   not reviewed separately, so this once is the only review. **It runs inside this session** —
-   never start another agent program for it.
+   stands on `<root branch>`; the hook refuses a write there only while everything you hold
+   has its worktree standing ("Stay in the root"), and this line is what holds the rest.
+   Inside a milestone that is the milestone branch, not `<root branch>` — the epics merged
+   beside you are there
+7. Before merging, review the whole epic with `/code-review <grade> --fix <root>/.worktrees/<epic>`
+   — aimed at the worktree: you stand in the root, and a call with no target reviews the
+   root's diff. The members were not reviewed separately, so this once is the only review.
+   **It runs inside this session** — never start another agent program for it.
 {epic_rule}
    If the window is not on that model, ask the person watching it to change it before you
    call — `/model <that model>` (a review agent inherits the window's model).
@@ -4772,19 +5145,19 @@ never in the root
    model from `moai models --json`, create the review issue and stand the members in `review`
    as below, **pick the review issue up** —
    `moai -C <root> mv <review id> in_progress --from todo` — and only then raise it on the
-   review brief (the last section of this file), every slot filled. You stand in the root, so
-   the hook reads a review issue nobody picked up under `.worktrees/<epic>` as that worktree's,
-   and rule 3 refuses the review it raises. It leaves its fixes uncommitted and the reviewer's
+   review brief ("The review brief" in `{BRANCHES_FILE}`), every slot filled, for the reason below.
+   It leaves its fixes uncommitted and the reviewer's
    words on the review issue, and hands back what it fixed and what it left — take that in as
    below
 
        Agent(subagent_type: "general-purpose", model: <review model>, description: "review <epic>", prompt: <the review brief>)
    Write the grade you picked and why in one line in the angle (`-b`). The diff runs from
-   where the branch left <base branch> (`git merge-base <base branch> HEAD`). You pulled it
+   where the branch left <base branch> — `git -C <root>/.worktrees/<epic> merge-base <base branch> HEAD`;
+   asked in the root, `HEAD` is the root's own tip and the range comes out empty. You pulled it
    in 6, so the conflict resolution is inside it too. Create the review issue (rule 3)
 
        {review}
-   This line is called from the worktree too, so run it as `moai -C <root>`, per 4-1.
+   Run this line as `moai -C <root>`, per 4-1, wherever the shell stands.
    **In the same breath, stand the finished members in `review`** — while the review runs
    nobody is working on them, and `in_progress` on the board says somebody is. One id per
    call, as in 2
@@ -4800,22 +5173,17 @@ never in the root
    does not exist here: leave the members where they stand and go on. If it answers that the
    member already stands `review`, you came back from 8 — leave it. What you take in goes in
    a separate fix: commit; what you hand on goes in a note with the issue id.
+   **Then pick the review issue up, and only then call the review** — in a session as in a
+   subagent: `moai -C <root> mv <review id> in_progress --from todo`. You stand in the root,
+   so the hook reads a review issue nobody picked up under `.worktrees/<epic>` as that
+   worktree's, and rule 3 refuses the review — asking for another review issue, which it
+   reads the same way, while the first one stays open and keeps the epic from closing.
    A refusal from the hook, such as a missing angle, is not worked around: fix it the way the
    refusal's own command says.
-   **If the review stays refused** — the review issue stands with its angle, you picked it up
-   (`moai -C <root> mv <review id> in_progress --from todo`), you ran what each refusal handed
-   you, and rule 3 still ties the review to a row that is not this epic's (its
-   `Why this session holds them:` lines, when it carries them, say which and why) —
-   do not work around the hook and do not start another agent program.
-   **Review by hand, in this session**: read the diff from the
-   merge-base yourself at the grade you picked, against the angle and the five places below, fix
-   what you find in the working tree, and write your words to a file whose first line is
-
-       {MANUAL_REVIEW}
-   That file is the review text 10 leaves on the review issue — without the line, the next
-   person reads your own sweep as what the review command found. The rest goes on as written: the
-   fixes in a `fix:` commit of their own, the close in 10, and the model line of 10 naming this
-   window's model with `manual` in its reason
+   **If the review stays refused** — the review issue picked up, every refusal's command run,
+   and rule 3 still ties the review to a row that is not this epic's — do not work around the hook
+   and do not start another agent program: review by hand, as
+   "When the review stays refused" in `{BRANCHES_FILE}` says.
 
 {angle}
 
@@ -4877,7 +5245,9 @@ never in the root
    for the release being prepared**, and write it if it does not. Write it **here, in the
    worktree, before the merge**: after 8 the worktree is gone and the only checkout left is
    the root, which every session shares and where the only commits that belong are the
-   tracker's and the merge itself. Committed here it rides the merge commit instead.
+   tracker's and the merge itself. Committed here it rides the merge commit instead. Aim the
+   line below at the worktree like every step there (`git -C <root>/.worktrees/<epic> commit …`,
+   "Stay in the root") — and 7-4's two lines the same way.
    **One commit for the epic**, written once the members and the review's fixes are in —
    every line the epic needs goes into it. If a fix lands after it and changes what the epic
    ships, put the CHANGELOG line in that fix's own commit rather than raising a second
@@ -4894,14 +5264,14 @@ never in the root
 
 7-4. **If the repository keeps a wiki** (`moai wiki ls` lists pages), ask once whether this
    epic changed what a person does — {CHANGED_USE}.
-   If it did, follow the `moai-wiki` skill and commit what it wrote for the same reason as
-   7-3 — here, in the worktree, before the merge. `<wiki dir>` is `dir` in `moai wiki ls --json`
+   If it did, follow the `moai-wiki` skill, its `moai wiki` calls aimed at the worktree (`moai -C <root>/.worktrees/<epic> wiki ls` —
+   bare, they read the root's pages), and commit what it wrote for the same reason as 7-3 — here, in the worktree, before the merge. `<wiki dir>` is `dir` in `moai wiki ls --json`
 
 {wiki_commit}
    If it did not, write nothing. **Nothing checks this**
+   Also ask whether a finding of this epic's review is one a single rule would have stopped — if so, follow Lessons in `moai-wiki`, in the same commit
 
-8. Come back to the root with `ExitWorktree(keep)` — remove the worktree from inside it and
-   this window stands in a directory that is gone.
+8. Merge from the root, where you stand ("Stay in the root").
    Before merging outside a milestone, check that the root stands on <root branch> — if it
    does not, do not merge: tell the supervisor
 
@@ -4919,8 +5289,8 @@ never in the root
    If the merge is refused over the root's uncommitted `.moai` — yours since 2 or another
    session's — take them in first with a commit with a path, as in 11, its subject
    `chore(tracker): take the root's rows in before <epic> merges`. If it stops on a conflict,
-   do not resolve it where it stopped — undo with `git merge --abort`, go back into the worktree with
-   `EnterWorktree(path)` and run again from 6
+   do not resolve it where it stopped — undo with `git merge --abort`, aim at the worktree again
+   and run again from 6
 9. Once the merge has really landed, remove the worktree and the branch from the root with
    `git worktree remove .worktrees/<epic>` and `git branch -d worktree-<epic>`.
    **Inside a milestone delete the branch in the milestone's worktree** —
@@ -5002,7 +5372,9 @@ never in the root
     the members left in 4-3 because the work beside you held the file, with that other work
     named, the `member refused:` lines of 4-3,
     the wiki pages 7-4 changed — or that it changed none — and anything still running that 11
-    could not finish.
+    could not finish. **A subagent worker adds a `Lessons:` piece** — the slug of each new
+    lesson page and each `Lesson:` note that met an old one, or `Lessons: none` — so
+    what the epic learned stands in the report as well as on the branch.
     **If that send fails** — the supervisor restarted, so its old name is gone — the report
     must not be lost: leave the same text, `report: <epic>` at its head, on the epic with
     `moai note <epic> -b -` — it stands in the root's file, where the next supervisor reads it,
@@ -5025,6 +5397,67 @@ never in the root
     from it. Below it goes one `Subagent ran: anthropic/<its real name> on <member>` line for each
     subagent of your own (`Subagents:`) that did a share of a member — 9-1's line of its own.
     Nothing about clearing a window is yours
+"#
+    )
+}
+
+/// 일꾼 걸음의 **드문 갈래** — 감독 스킬의 `references/worker-branches.md`(moai-w25x.mgu, 2026-10-26 사용자 결정).
+/// 일꾼은 매번 `worker.md` 전부를 읽었다(사용후기 2026-10-12: 규칙 글이 1,568줄). 늘 타는 길(1→12)은 [`worker`] 에 두고,
+/// 갈래 — 사람이 비운 판, 모노레포의 하위 디렉터리, 멈춘 일 잇기, 거절이 안 풀리는 리뷰, 서브에이전트의 리뷰 브리프 —
+/// 는 여기로 옮겼다. 본 글의 줄이 어느 절을 읽을지 이름으로 댄다. 걸음 번호는 본 글의 것이다 — 여기는 번호를 안 매긴다.
+pub fn worker_branches() -> String {
+    let brief = indent(&review_brief(), "    ");
+    format!(
+        r#"# Worker steps — the rare branches
+
+This file stands beside `{STEPS_FILE}`, the steps every assignment takes; a line there names
+the section here that your assignment needs. Read only that section.
+
+## When the person is away
+
+When the message says `Person: away`, decide by recommendation. A design question the notes
+do not settle is not asked (step 4) — settle it the way you would have recommended, and write it
+on the issue where the next person reads it
+
+    moai note <id> 'Decided alone: <what you chose> — <why>, and what the other way was'
+
+Nothing else waits on the person either. A model the window is not on is not asked for —
+work on the window's model and say so in the reason of 9-1. A row that is someone else's or
+nobody's (rule 5) is taken over only on a yes the message carries; without one, leave that row
+and name it in the report.
+
+**Stop at what cannot be undone** — deleting what is not yours, rewriting history someone
+else has, a release, anything outside this repository — and report that instead of doing
+it. When the person is back in the window, what they say overrides what you decided alone.
+
+## A subdirectory project
+
+When the message carries `Subdir:`, the root is not the top of the repository (a
+subdirectory project in a monorepo). In step 3 the
+worktree stands for the whole repository, so aim at the same subdirectory in it and work
+there — standing at the worktree top, `moai` walks up and finds the root's
+`.moai` to write, and the hook does not count edits under `.worktrees/`. `<subdir>` is that
+relative path, filled in by the supervisor; with no `Subdir:` line the root **is** the top and this
+section does not exist
+
+    {SUBDIR}
+
+## When the review stays refused
+
+Step 7 sends you here: the review issue stands with its angle, you picked it up
+(`moai -C <root> mv <review id> in_progress --from todo`), you ran what each refusal handed
+you, and rule 3 still ties the review to a row that is not this epic's (its
+`Why this session holds them:` lines, when it carries them, say which and why).
+Do not work around the hook and do not start another agent program.
+**Review by hand, in this session**: read the diff from the
+merge-base yourself at the grade you picked, against the angle and the five places of step 7, fix
+what you find in the working tree, and write your words to a file whose first line is
+
+    {MANUAL_REVIEW}
+That file is the review text 10 leaves on the review issue — without the line, the next
+person reads your own sweep as what the review command found. The rest goes on as written: the
+fixes in a `fix:` commit of their own, the close in 10, and the model line of 10 naming this
+window's model with `manual` in its reason
 
 ## Carrying on stalled work
 
@@ -5032,25 +5465,32 @@ A session died holding a member of `<epic>`, the epic the message's first line n
 member still stands picked up. Read how far it got (`moai show <epic>`, its history and
 notes), then
 
-- If the worktree is there, go in with `EnterWorktree(path)` — in a subagent, aim at it
-  ("In a subagent") — read how far it got with `git log <base branch>..HEAD` and
-  `git status`, and carry on
+- If the worktree is there, aim at it ("Stay in the root" in `{STEPS_FILE}`) — read how far it got with
+  `git -C <root>/.worktrees/<epic> log <base branch>..HEAD` and `git -C <root>/.worktrees/<epic> status`
+  (asked in the root, both read the root and show nothing of it), and carry on
 - If it is not, raise it again from the root. If the branch survives, on that branch
   (`git worktree add .worktrees/<epic> worktree-<epic>`); if it does not,
   `git worktree add -b worktree-<epic> .worktrees/<epic> <base branch>` — inside a milestone,
-  raise the milestone branch first if it is missing ("The milestone branch")
+  raise the milestone branch first if it is missing ("The milestone branch" in `{STEPS_FILE}`)
 - **If the root is not the top of the repository** (a subdirectory project in a
-  monorepo), go into the worktree and then move to the same subdirectory inside it and
-  work there — standing at the top, `moai` finds and writes the root's `.moai`, and the
-  hook does not count edits under `.worktrees/`. `<subdir>` is that relative path, filled in
+  monorepo), aim at the same subdirectory inside the worktree and work there — standing
+  at the top, `moai` finds and writes the root's `.moai`, and the hook does not count edits
+  under `.worktrees/`. `<subdir>` is that relative path, filled in
   by the supervisor; with no `Subdir:` in the message, the root is the top and this step
   does not exist
 
       {SUBDIR}
-- The member's column is already picked up — do not pick it up again. **If its assignee
+- The member's column is already picked up — do not move it to another column, but **record
+  it as this session's** with a move to the column it stands in, on a line of its own:
+  `moai mv <member> <its column> --from <its column>` — nothing moves; the pick-up is
+  written down for this session (`moai mv` records it itself). Standing in the root, the hook reads a member this session never picked up
+  under `.worktrees/<epic>` as that worktree's, so without it you hold nothing: rule 1 stops
+  fencing what you create, rule 3 refuses the review, and the turn's end does not hold the
+  member for you. **If its assignee
   is not you** (`moai show <member>`), ask the person watching before you carry it on; on
   a yes, `moai mv <member> <its column> --from <its column> --take -m '<who said yes>'` — the
-  column stays, the assignee becomes you, and a note keeps whose it was
+  column stays, the assignee becomes you, a note keeps whose it was, and the pick-up is
+  written down the same way
 - The note in 9-1 records this window's share only. Append `reclaimed work, the previous
   session's share is unknown` to the end of the reason — the previous session's model is
   written nowhere, and without it the whole member reads as this window's work
@@ -5078,8 +5518,8 @@ The supervisor skill remains Claude Code only; reading this file does not instal
 
 | Instead of (worker.md) | Do this here |
 |---|---|
-| `EnterWorktree(path)` | Work in the worktree's absolute path on every command call (`workdir` or `cd`). |
-| `ExitWorktree(keep)` | Return to the assignment's `Root:` absolute path on every root command call. |
+| Never `EnterWorktree` ("Stay in the root") | The same: aim at the worktree's absolute path on every command call (`workdir` or `cd`). |
+| `ExitWorktree(keep)` | Run every root command at the assignment's `Root:` absolute path. |
 | `AskUserQuestion` | Ask this window's person with the available question tool; otherwise ask in conversation and wait. |
 | `/code-review` (7) | Send the review readiness note below and wait for the supervisor's review. |
 | `TaskStop` | No equivalent step here; the supervisor manages its review subagent. |
@@ -5141,7 +5581,7 @@ CODEX_REVIEW
 
 The note stands in the root's file, where the supervisor reads it — it needs no commit.
 Stop until the supervisor pastes "merge and close — review <id> done"; its reviewer used
-"The review brief" in `references/worker.md` and its review model in this worktree. Then finish 7 as worker.md says — the
+"The review brief" in `references/worker-branches.md` and its review model in this worktree. Then finish 7 as worker.md says — the
 review's fixes stand uncommitted in the worktree: take them in as a separate `fix:` commit
 and note what you hand on with the issue id — and go on with 7-1 to 11, and 12 below.
 
@@ -5271,6 +5711,7 @@ mod tests {
             ("감독 스킬", supervise()),
             ("위키 스킬", wiki()),
             ("일꾼 글", worker()),
+            ("일꾼 갈래 글", worker_branches()),
         ] {
             for gone in ["Korean text", "korean-skills", "humanize-korean", "_workspace", "korean-terms"] {
                 assert!(!text.contains(gone), "{surface} 에 걷은 한국어 글 절이 남았다 — {gone}");
@@ -5340,6 +5781,7 @@ mod tests {
             ("감독 스킬", supervise()),
             ("tmux 스킬", tmux()),
             ("일꾼 글", worker()),
+            ("일꾼 갈래 글", worker_branches()),
         ] {
             let found: String = text.chars().filter(|c| emoji(*c)).collect();
             assert!(found.is_empty(), "{surface} 이 이모지를 쓴다 — {found}");
@@ -5367,6 +5809,7 @@ mod tests {
             ("tmux 스킬", tmux()),
             ("Saycode 스킬", saycode()),
             ("일꾼 글", worker()),
+            ("일꾼 갈래 글", worker_branches()),
         ] {
             for gone in ["examples/bash-agent", "examples/python-agents", "runs without a person"] {
                 assert!(!text.contains(gone), "{surface} 이 걷은 헤드리스 예제를 아직 가리킨다 — {gone}");
@@ -5410,6 +5853,7 @@ mod tests {
             ("tmux 스킬", tmux()),
             ("Saycode 스킬", saycode()),
             ("일꾼 글", worker()),
+            ("일꾼 갈래 글", worker_branches()),
         ] {
             for spawn in spawns {
                 assert!(!text.contains(spawn), "{surface} 이 새 에이전트를 띄우는 {spawn} 를 가르친다");
@@ -5506,6 +5950,7 @@ mod tests {
             ("참고 문서", reference()),
             ("감독 스킬", supervise()),
             ("일꾼 글", worker()),
+            ("일꾼 갈래 글", worker_branches()),
         ] {
             for said in stated(&text) {
                 assert_eq!(
@@ -5820,7 +6265,8 @@ mod tests {
         // 거둔 일의 절은 4-1 부터 끝까지 잇는다 — 그 범위가 4-1 위에서 끊기면 이어받은 일꾼만 워크트리의
         // `.moai` 를 고친다. **끝은 번호로 적지 않는다**: `11 까지` 로 적어 둔 뒤 12 가 붙자 이어받은 일꾼만 12 를
         // 못 받았다.
-        let stalled = &work[work.find("## Carrying on stalled work").expect("거둔 일의 절이 없다")..];
+        let branches = worker_branches();
+        let stalled = &branches[branches.find("## Carrying on stalled work").expect("거둔 일의 절이 없다")..];
         assert!(stalled.contains("from 4-1 to the end"), "거둔 일이 4-1 을 빼거나 끝을 자른다");
         // 거둔 일도 새 일과 같은 메시지를 받는다 — 모델 줄은 그 머리의 한 줄이고, 읽는 법은 일꾼 글에 한 번 선다.
         assert!(message().contains(MODEL_SLOT), "메시지에 모델 줄이 없다");
@@ -5836,7 +6282,8 @@ mod tests {
             (".claude/worktrees", "거둔 일이 옛 워크트리 자리를 싣는다"),
             ("that has happened", "걸음이 일어난 일의 내력을 싣는다"),
         ] {
-            assert!(!work.contains(gone), "{why} — {gone}");
+            // 거둔 일은 곁 글로 옮겼다(moai-w25x.mgu) — 그 절을 겨눈 줄도 그 글에서 잰다.
+            assert!(!work.contains(gone) && !branches.contains(gone), "{why} — {gone}");
         }
     }
 
@@ -6087,6 +6534,66 @@ stop sending outside work while a release runs",
         assert!(worker().contains(RAISE_HEAD), "일꾼이 {RAISE_HEAD} 를 안 낸다");
     }
 
+    /// **`plan` 역할이 감독의 펼치기를 맡는다**(moai-w25x.jby, 2026-10-26 사용자 결정) — 표에 적어도 아무 데서 안 듣던
+    /// 키였다. 감독이 그 모델로 펼치기 서브에이전트를 세우고, 일꾼은 펼친 에픽을 걸음 2 부터 받는다.
+    ///
+    /// **브리프 자체를 잰다**(리뷰 moai-w25x.54r) — 감독 글 전체에서 찾던 판은 1 의 문단이 `MILESTONE_ATTACH` 를 이미 들어,
+    /// 브리프에서 빠져도 푸르렀다. 일꾼은 걸음 1 을 안 지나므로 그 걸음이 하던 것 — 죽은 릴리스 걷기까지 — 이 여기 서야 한다.
+    #[test]
+    fn the_plan_role_unfolds_before_the_send() {
+        let s = supervise();
+        let plan = s.find("model: <plan model>").expect("감독이 plan 모델로 펼치기를 안 세운다");
+        assert!(plan < s.find("**3. Send.**").unwrap(), "펼치기가 보내기 뒤에 선다");
+        let brief = plan_brief();
+        for step in [
+            "backlog promote <id> --dry-run --from -",
+            "backlog promote <id> --from -",
+            MILESTONE_ATTACH,
+            "moai -C <root> edit <epic> --due <due>",
+            MILESTONE_CLEAR,
+            PLAN_SENT,
+        ] {
+            assert!(brief.contains(step), "펼치기 브리프가 일꾼 걸음 1 의 {step} 를 안 옮겼다");
+        }
+        // **차례도 잰다**(리뷰 moai-w25x.54r) — 릴리스를 기한보다 먼저 건다(죽은 릴리스의 이른 기한이 사람의 기한을
+        // 거절한다), 에픽의 표는 본문까지 다 지은 뒤다(다시 선 감독은 표가 선 에픽을 곧장 보낸다).
+        let at = |piece: &str| brief.find(piece).unwrap_or_else(|| panic!("브리프에 {piece} 가 없다"));
+        assert!(at(MILESTONE_CLEAR) < at("--due <due>"), "죽은 릴리스를 걷기 전에 기한을 건다");
+        assert!(at("-b - < <that file>") < at(PLAN_SENT), "에픽을 다 짓기 전에 보낸 표를 단다");
+        assert!(s.contains(&indent(&brief, "    ")), "감독 글에 펼치기 브리프가 없다");
+        assert!(s.contains(PLAN_FIRST), "펼친 에픽을 걸음 2 부터 보내지 않는다");
+        let two = &s[s.find("**2-2.").unwrap()..s.find("**3. Send.**").unwrap()];
+        // 회사는 한 번 선다 — `Model ran:` 은 이미 `anthropic/<이름>` 이다(리뷰 moai-9tqo.jdi 3번과 같은 덫).
+        assert!(two.contains("the name after `anthropic/`"), "펼치기의 모델 줄에 회사가 두 번 선다");
+        // 보내기 전에 backlog 에 표를 단다 — 없으면 같은 backlog 가 펼치기 둘에게 간다.
+        assert!(two.contains("'Sent: plan <agentId>'"), "펼치기를 세우며 backlog 에 표를 안 단다");
+        for line in ["`not hung:`", "`docs` or `bulk`", "'Plan stopped: <its reason>'"] {
+            assert!(two.contains(line), "감독이 펼치기의 {line} 를 안 읽는다");
+        }
+        // **감독이 채우는 자리만 3 의 이름을 쓴다** — 펼치기가 쓸 자리가 3 의 이름이면 감독이 그것까지 채운다.
+        let list = slot_list(&s);
+        let inputs = ["id", "title", "root", "milestone", "due", "person"];
+        for slot in brief.split('<').skip(1).filter_map(|x| x.split_once('>')).map(|(x, _)| x) {
+            if list.contains(&format!("`<{slot}>`")) {
+                assert!(inputs.contains(&slot), "펼치기가 쓸 자리 <{slot}> 가 감독이 채우는 3 의 자리다");
+            }
+        }
+        assert_eq!(brief.matches("<title>").count(), 1, "감독이 채울 `<title>` 이 머리 밖에도 선다");
+    }
+
+    /// **`model:` 줄을 다 본 뒤에 보고를 확인했다고 적는다**(moai-w25x.qi8, 리뷰 moai-nzmp.nfj 12번). 다시 선 감독은
+    /// `Report-checked:` 만 읽고 확인을 다시 안 돈다 — 그 뒤에 두면 놓친 줄이 영영 빈다.
+    #[test]
+    fn the_model_lines_are_settled_before_the_report_is_marked_checked() {
+        let s = supervise();
+        let mark = s.find("moai note <epic> 'Report-checked: <merge hash>'").unwrap();
+        assert!(s.find(UNWRITTEN).unwrap() < mark, "세션 일꾼의 줄 확인이 확인 표 뒤에 선다");
+        assert!(
+            s.find("write the `model:` line yourself").unwrap() < mark,
+            "서브에이전트 일꾼의 줄이 확인 표 뒤에 선다"
+        );
+    }
+
     /// **역할 표의 이름은 설정의 키다**(moai-9tqo.rsl). 감독이 표에서 고른 역할로 `moai models --json` 을 읽으니,
     /// 철자가 하나라도 다르면 그 역할의 모델이 없는 키를 찾는다. 난이도 표의 역할도 그 안에 선다.
     #[test]
@@ -6102,6 +6609,15 @@ stop sending outside work while a release runs",
         assert_eq!(models, ROLES.len(), "설정의 역할과 표의 역할 수가 다르다");
         for (level, role, _) in DIFFICULTY {
             assert!(ROLES.iter().any(|(r, _, _)| *r == role), "난이도 {level} 의 역할 {role} 이 표에 없다");
+        }
+    }
+
+    /// **에이전트가 읽는 글 셋이 모두 `moai wiki search` 를 댄다**(moai-g8pt.y1u). 명령이 있어도 글이 안 대면
+    /// 에이전트는 모르고, 모르면 안 부른다. 한 글에서 빠지면 그 글만 읽는 창이 위키를 못 찾는다.
+    #[test]
+    fn the_wiki_search_stands_in_the_block_the_skill_and_the_worker_steps() {
+        for (name, text) in [("AGENTS 블록", agents()), ("SKILL.md", skill()), ("worker.md", worker())] {
+            assert!(text.contains("moai wiki search"), "{name} 이 moai wiki search 를 안 댄다");
         }
     }
 
@@ -6259,6 +6775,7 @@ stop sending outside work while a release runs",
     /// 그대로다.
     const WIKI_KEYS: &[&str] = &[
         "dir",
+        "dir_abs",
         "pages",
         "slug",
         "title",
@@ -6280,6 +6797,10 @@ stop sending outside work while a release runs",
         "linked_from",
         "linked_from_partial",
         "conflict",
+        "seen_count",
+        "seen",
+        "at",
+        "by",
         "too_large",
         "refused",
         "failed",
@@ -6291,10 +6812,11 @@ stop sending outside work while a release runs",
 
     /// 위키 명령이 내는데 스킬이 **일부러 안 대는** 키 — `bytes` 는 고칠 것을 안 말하고, `said` 는 사람이 읽는
     /// 말이라 가르면 안 되며("Branch on `kind`, not on the words beside it"), `body` 는 원문이라 페이지 파일을 읽는
-    /// 것과 같다. 명령이 새 키를 더하면 [`the_wiki_skill_teaches_the_keys_the_wiki_prints`] 가 붉어지고, 스킬에 적을지
-    /// 여기 둘지를 그때 정한다.
+    /// 것과 같다. `by_email` 은 `seen` 의 `by` 곁에 선 메일이다 — 스킬은 사람을 `by` 로 대고, 메일은 이름이 같은 두 사람을
+    /// 가를 때만 읽는다. 명령이 새 키를 더하면 [`the_wiki_skill_teaches_the_keys_the_wiki_prints`] 가 붉어지고, 스킬에
+    /// 적을지 여기 둘지를 그때 정한다.
     #[cfg(unix)]
-    const WIKI_UNTAUGHT: &[&str] = &["bytes", "said", "body"];
+    const WIKI_UNTAUGHT: &[&str] = &["bytes", "said", "body", "by_email"];
 
     /// **`WIKI_KEYS` 를 실제 `moai wiki --json` 에 묶는다**(moai-ihu4.l2e). 손으로 옮긴 목록만 보던 판은 명령이
     /// 키를 바꿔도 초록이라, 심긴 스킬이 `jq` 에서 `null` 이 되는 키를 가르칠 수 있었다(리뷰 moai-bl3x.vbw 4번).
@@ -6336,17 +6858,27 @@ stop sending outside work while a release runs",
         let lang = crate::i18n::Lang::En;
         let known = |id: &str| id == "moai-ab12";
         let read = crate::wiki::load(s.path(), "docs", "moai", &known);
-        let mut printed = crate::cmd::wiki::listed_json(lang, "docs", &read).unwrap();
+        let mut printed = crate::cmd::wiki::listed_json(lang, s.path(), "docs", &read, &Default::default()).unwrap();
         let loaded = read.unwrap();
-        printed.extend(crate::cmd::wiki::page_json(lang, &loaded, loaded.find("README").unwrap()).unwrap());
+        // 교훈이 선 이슈 하나 — `seen` 안쪽의 `at`·`by` 가 출력에 서야 스킬이 그것을 대도 붉지 않다. 꼴은 바이너리가 내는
+        // 그대로다: `at` 은 저널의 도장, 사람은 이름과 메일로 갈라 든다.
+        let seen = [crate::wiki::seen::Seen {
+            id: "moai-ab12".into(),
+            title: "t".into(),
+            at: "2026-10-25T12:00:00Z".into(),
+            by: "A".into(),
+            by_email: Some("a@b.c".into()),
+            open: true,
+        }];
+        printed.extend(crate::cmd::wiki::page_json(lang, &loaded, loaded.find("README").unwrap(), &seen).unwrap());
         for raw in ["missing", "/etc", "file"] {
             let read = crate::wiki::load(s.path(), raw, "moai", &known);
             assert!(read.is_err(), "{raw} 가 디렉터리 거절이 아니다");
-            printed.extend(crate::cmd::wiki::listed_json(lang, raw, &read).unwrap());
+            printed.extend(crate::cmd::wiki::listed_json(lang, s.path(), raw, &read, &Default::default()).unwrap());
         }
         // 디렉터리를 못 연 `failed` 는 픽스처로 못 세운다(권한은 root 에서 안 먹는다) — 갈래로 지어 넣는다.
         let failed = Err(DirTrouble::Failed("permission denied".into()));
-        printed.extend(crate::cmd::wiki::listed_json(lang, "docs", &failed).unwrap());
+        printed.extend(crate::cmd::wiki::listed_json(lang, s.path(), "docs", &failed, &Default::default()).unwrap());
         let unreadable = crate::wiki::Skipped {
             path: "docs/locked".into(),
             why: crate::wiki::Skip::Unreadable("permission denied".into()),
@@ -6356,7 +6888,8 @@ stop sending outside work while a release runs",
             skipped.push(crate::wiki::Skipped { path: "docs/caf?.md".into(), why: crate::wiki::Skip::NotUtf8 });
         }
         let walked = crate::wiki::Wiki { pages: Vec::new(), skipped };
-        printed.extend(crate::cmd::wiki::listed_json(lang, "docs", &Ok(walked)).unwrap());
+        printed
+            .extend(crate::cmd::wiki::listed_json(lang, s.path(), "docs", &Ok(walked), &Default::default()).unwrap());
 
         // 출력에 선 키와 `kind` 값을 모은다.
         fn gather(v: &serde_json::Value, keys: &mut BTreeSet<String>, kinds: &mut BTreeSet<String>) {
@@ -6399,7 +6932,7 @@ stop sending outside work while a release runs",
             assert!(wiki().contains(&format!("`{home}.md`")), "스킬이 홈 페이지 `{home}.md` 를 안 댄다");
         }
         // 사람 화면이 대는 것만 가르친다 — 목록은 슬러그와 제목이고 경로는 `--json` 에만 선다.
-        let drawn = crate::view::wiki::list(lang, "docs", &loaded).join("\n");
+        let drawn = crate::view::wiki::list(lang, "docs", &loaded, &Default::default()).join("\n");
         assert!(!drawn.contains("docs/README.md"), "사람 목록에 경로가 섰다 — 스킬의 `moai wiki ls` 줄을 고친다");
         assert!(wiki().contains("moai wiki ls                           the pages: slug and title"));
     }
@@ -6441,6 +6974,73 @@ stop sending outside work while a release runs",
         // 아무것도 막지 않는다 — "하지 않는 것" 의 첫 줄이 게이트다.
         let not = &wiki[wiki.find("## What this skill does not do").expect("하지 않는 것 절이 없다")..];
         assert!(not.contains("**No gate.**"), "위키 스킬이 게이트를 안 걷는다");
+    }
+
+    /// **교훈을 쓰고 읽는 걸음이 글에 선다**(moai-4s5n.svp). 명령(`moai wiki learn`)이 서도 에이전트가 읽는 글에 없으면
+    /// 고리가 안 돈다. 안 쓰는 것의 목록은 에픽 본문(moai-4s5n)의 것이고, 발동어는 늘 켜진 비용이라 셋뿐이다.
+    #[test]
+    fn the_wiki_skill_teaches_lessons() {
+        let wiki = wiki();
+        let lessons = &wiki[wiki.find("## Lessons").expect("교훈 절이 없다")
+            ..wiki.find("## When a person asks you to sweep").unwrap()];
+        for (piece, why) in [
+            ("a review finding was one a single rule would have stopped", "언제 쓰는가: 리뷰 지적"),
+            ("a person corrected you", "언제 쓰는가: 사람의 고침"),
+            ("the same hook refusal caught you twice", "언제 쓰는가: 두 번 걸린 거절"),
+            ("a premise that was wrong", "언제 쓰는가: 틀린 전제"),
+            ("moai wiki search '<a word of the mistake>'", "먼저 찾는다"),
+            ("moai note <id> 'Lesson: lessons/<slug>'", "되풀이는 노트로"),
+            ("moai wiki learn", "새로 쓰는 명령"),
+            ("## Do this instead", "핵심 절"),
+            ("same `docs(wiki):` commit", "에픽 끝 위키 커밋에 태운다"),
+            ("**Do not write**", "안 쓰는 것의 목록"),
+            ("the machine's", "기계 탓"),
+            ("this tool does not work", "부정 단정"),
+            ("transient error that a retry cleared", "재시도로 풀린 오류"),
+            ("one PR or one error string", "한 PR 에 묶인 서사"),
+            ("logs or code pasted whole", "로그·코드 통째"),
+            ("CLAUDE.md, AGENTS or the wiki already say", "이미 말하는 것"),
+            (crate::wiki::learn::SLUG_RULE, "슬러그의 자"),
+        ] {
+            assert!(lessons.contains(piece), "교훈 절에 {why} 가 없다 — {piece}");
+        }
+        // 거두기: 훑기의 한 걸음이 `seen_count` 로 겹침·막힘·세 번 넘게 선 것을 가르고, 올리는 것은 사람이 정한다.
+        let sweep =
+            &wiki[wiki.find("## When a person asks you to sweep").unwrap()..wiki.find("## A new page").unwrap()];
+        for piece in ["`seen_count`", "merge two lessons", "the code now prevents", "over three", "**Ask the person**"]
+        {
+            assert!(sweep.contains(piece), "훑기가 교훈을 거두지 않는다 — {piece}");
+        }
+        assert!(sweep.contains("CLAUDE.md, in the AGENTS block, a hook or a test"), "올릴 자리 넷을 안 댄다");
+    }
+
+    /// **발동어는 늘어난 셋뿐이다** — 설명은 세션마다 읽히는 비용이라(moai-4s5n.svp) 넷째를 더하려면 이 시험부터 고친다.
+    #[test]
+    fn the_wiki_skill_adds_exactly_three_lesson_triggers() {
+        let head = wiki().lines().find(|l| l.starts_with("description: ")).unwrap().to_string();
+        for trigger in ["record a lesson", "교훈 남겨", "실수 기록"] {
+            assert!(head.contains(trigger), "위키 스킬의 발동어에서 {trigger} 가 빠졌다");
+        }
+        let quoted = head.matches('"').count() / 2;
+        assert_eq!(quoted, 7 + 3, "발동어가 열 개가 아니다 — 늘리지 않는다\n{head}");
+    }
+
+    /// 닫기 안내와 일꾼 브리프, 리뷰를 닫는 걸음이 같은 물음을 한 번씩 싣는다 — 그리고 아무것도 막지 않는다.
+    #[test]
+    fn the_lesson_question_stands_in_closing_the_brief_and_the_review_close() {
+        assert!(agents().contains("moai wiki learn"), "AGENTS 닫기가 교훈을 안 댄다");
+        assert!(CLOSING.contains("`moai wiki search"), "닫기가 먼저 찾으라고 안 한다");
+        let brief = worker();
+        let step = &brief[step_at(&brief, "7-4")..step_at(&brief, "8")];
+        assert!(step.contains("a finding of this epic's review is one a single rule would have stopped"), "{step}");
+        assert!(step.contains("Lessons in `moai-wiki`") && step.contains("same commit"), "{step}");
+        assert!(brief[step_at(&brief, "12")..].contains("`Lessons:`"), "보고가 교훈 토막을 안 싣는다");
+        let steps = close_steps("t-r", "moai");
+        let lines: Vec<&str> = steps.lines().collect();
+        assert!(lines[lines.len() - 2].contains("Could one rule have stopped any finding above?"), "{steps}");
+        // 닫는 줄이 마지막이고, 원문 노트와 판단 노트를 가르는 걸음은 그대로다.
+        assert!(lines.last().unwrap().trim_start().starts_with("moai mv t-r done -m"), "{steps}");
+        assert!(lines[0].contains("moai note t-r -b -"), "{steps}");
     }
 
     /// **에픽 끝의 위키 걸음(7-4)은 짧게 두고 본문은 스킬로 보낸다**(moai-bl3x, 사용자 결정 2026-10-04).
@@ -6646,7 +7246,7 @@ stop sending outside work while a release runs",
         // 닫을 때만 적어(결정 4), 앞 세션이 하다 죽은 멤버를 거둔 창이 닫으면 통째로 제 몫이 된다.
         // 집을 때도 적게 넓히지 않고, 통계가 그 줄을 가를 수 있게 까닭에 표시만 한다. 그 걸음은 일꾼
         // 글의 한 절이고, 감독의 메시지는 첫 줄로 그 절을 이름 짓는다(moai-snyk).
-        let (supervise, work) = (supervise(), worker());
+        let (supervise, work) = (supervise(), worker_branches());
         let title = "Carrying on stalled work";
         assert!(supervise.contains(&format!("from \"{title}\"")), "거둔 일의 메시지가 일꾼 글의 그 절을 안 댄다");
         let at = work.find(&format!("## {title}")).expect("거둔 일의 절이 없다");
@@ -6763,12 +7363,14 @@ stop sending outside work while a release runs",
         for tool in ["`EnterWorktree`", "`ExitWorktree`", "`AskUserQuestion`", "`/model`", "`SubagentHandback`"] {
             assert!(section.contains(tool), "서브에이전트 절이 {tool} 를 다루지 않는다");
         }
-        assert!(section.contains("`cd <root>/.worktrees/<epic> && …`"), "워크트리를 겨누는 길이 없다");
+        // 워크트리를 겨누는 길은 세션과 함께 쓰는 절에 선다(moai-9js2) — 세션도 이제 들지 않는다.
+        assert!(STAY_IN_ROOT.contains("`cd <root>/.worktrees/<epic> && …`"), "워크트리를 겨누는 길이 없다");
         // 걸음마다 그 줄이 선다 — 걸음이 서브에이전트에서 다르게 돌아가는 자리다.
         let steps = ["1", "2", "3", "4", "4-1", "7", "7-1", "9-1", "10", "11", "12"];
         for pair in steps.windows(2) {
             let (n, next) = (pair[0], pair[1]);
-            if matches!(n, "4-1" | "7-1" | "11") {
+            // 3 은 세션과 서브에이전트가 같은 걸음이 되었다(moai-9js2) — 루트에서 띄우고 들지 않는다.
+            if matches!(n, "3" | "4-1" | "7-1" | "11") {
                 continue;
             }
             let step = &brief[step_at(&brief, n)..step_at(&brief, next)];
@@ -6791,7 +7393,7 @@ stop sending outside work while a release runs",
         let four = &brief[step_at(&brief, "4")..step_at(&brief, "4-1")];
         assert!(four.contains(DECISION_HEAD) && four.contains("`SubagentHandback`"), "4 가 결정을 돌려주지 않는다");
         // 보고 — 노트가 handback 보다 먼저다. 둘째 줄이 실제로 돈 모델이다(감독이 9-1 의 줄을 적는다).
-        let twelve = &brief[step_at(&brief, "12")..brief.find("## Carrying on stalled work").unwrap()];
+        let twelve = &brief[step_at(&brief, "12")..];
         let sub = &twelve[twelve.find("**In a subagent**").expect("12 에 서브에이전트 줄이 없다")..];
         let note = sub.find("moai note <epic> -b -").expect("서브에이전트의 보고가 노트로 안 남는다");
         let back = sub.find("`SubagentHandback`").expect("서브에이전트가 보고를 돌려주지 않는다");
@@ -6821,7 +7423,7 @@ stop sending outside work while a release runs",
             seven.contains("still this session, not another"),
             "중첩 서브에이전트가 딴 에이전트 프로그램으로 읽힌다"
         );
-        assert!(brief.contains(&indent(&prompt, "    ")), "일꾼 글에 리뷰 브리프가 없다");
+        assert!(worker_branches().contains(&indent(&prompt, "    ")), "일꾼 글에 리뷰 브리프가 없다");
         for piece in ["Skill(code-review, \"<grade> --fix <root>/.worktrees/<epic>\")", "TaskStop", "background fork"] {
             assert!(prompt.contains(piece), "리뷰 브리프에 {piece} 가 없다");
         }
@@ -6859,6 +7461,7 @@ stop sending outside work while a release runs",
             ("참고 문서", reference()),
             ("감독", supervise()),
             ("일꾼", worker()),
+            ("일꾼 갈래", worker_branches()),
         ];
         for (whose, text) in &texts {
             for line in text.lines().filter(|l| l.contains("moai ")) {
@@ -6885,7 +7488,12 @@ stop sending outside work while a release runs",
     /// `the_frontmatter_opens_the_skill` 이 붉어진다.
     #[test]
     fn the_supervisor_names_no_issue_of_this_repo() {
-        for (whose, text) in [("감독 스킬", supervise()), ("위키 스킬", wiki()), ("일꾼 글", worker())] {
+        for (whose, text) in [
+            ("감독 스킬", supervise()),
+            ("위키 스킬", wiki()),
+            ("일꾼 글", worker()),
+            ("일꾼 갈래 글", worker_branches()),
+        ] {
             let ids: Vec<&str> = text
                 .split(|c: char| !(c.is_ascii_alphanumeric() || c == '-'))
                 .filter(|w| !crate::skill::ever_planted(w))
@@ -7013,13 +7621,19 @@ stop sending outside work while a release runs",
         // 워크트리 꼭대기에 선 일꾼은 `moai` 가 공유 루트의 `.moai` 를 찾아 쓰고, 훅 규칙 2 는
         // `.worktrees/` 아래라 편집을 안 센다(moai-5s9l — 옛 자리 `.claude/` 도 같다).
         let (supervise, brief) = (supervise(), worker());
-        let work = &brief;
         assert!(supervise.contains("print(\"subdir\", os.path.relpath(here, top))"), "감독이 하위 경로를 안 낸다");
         assert!(message().contains("Subdir: <subdir>"), "메시지에 하위 경로 자리가 없다");
         let three = &brief[step_at(&brief, "3")..step_at(&brief, "4")];
-        assert!(three.contains(SUBDIR), "일꾼이 워크트리 안의 하위로 안 들어간다");
+        // 하위 디렉터리는 드문 갈래라 곁 글에 선다(moai-w25x.mgu) — 3 은 그 절을 이름으로 댄다. **그 절에서 끊는다**
+        // (리뷰 moai-w25x.54r) — 끝까지 자르면 뒤의 "Carrying on stalled work" 가 같은 줄을 들어, 이 절에서 줄이 빠져도 푸르다.
+        let branches = worker_branches();
+        let sub = section(&branches, "## A subdirectory project");
+        assert!(
+            three.contains("\"A subdirectory project\"") && sub.contains(SUBDIR),
+            "일꾼이 워크트리 안의 하위로 안 들어간다"
+        );
         // 거둔 일은 3 을 안 지나 4-1 부터 잇는다 — 그 절에도 같은 줄이 서야 이어받은 일꾼이 꼭대기에 안 선다.
-        let stalled = &work[work.find("## Carrying on stalled work").expect("거둔 일의 절이 없다")..];
+        let stalled = &branches[branches.find("## Carrying on stalled work").expect("거둔 일의 절이 없다")..];
         assert!(stalled.contains(SUBDIR), "거둔 일의 일꾼이 워크트리 꼭대기에 선다");
         // 글머리(`- `) 안의 코드 블록이다 — 빈 줄 뒤에 글 칸(2)에서 네 칸 더(moai-bkn4.9no). 빈 줄 없이 들여 쓰면 GitHub 에서
         // 글머리 문단 끝에 `cd` 가 붙는다(리뷰 moai-bkn4.c3d — 브리프만 재는 시험이 이 자리를 못 본다).
@@ -7173,15 +7787,17 @@ stop sending outside work while a release runs",
         // 커밋 전의 대조는 걸음 앞에 한 번 선다 — 새 일과 거둔 일이 같은 글을 읽는다(moai-snyk).
         let steps = work.find("## The steps").expect("일꾼 글에 걸음 절이 없다");
         assert!(work[..steps].contains(BRANCH_CHECK), "걸음 앞에 루트 대조가 없다");
-        assert!(work[..steps].contains(GIT_SHAPES), "걸음 앞에 git 꼴이 없다");
+        // **루트에 선다**(moai-9js2) — 세션 일꾼도 워크트리에 안 든다. 격리 가드의 꼴(옛 `GIT_SHAPES`)은 걷었고,
+        // 트래커 커밋 앞의 `git status -- .moai/` 만 루트 대조 곁에 남았다.
+        assert!(work[..steps].contains(STAY_IN_ROOT), "걸음 앞에 루트에 서라는 절이 없다");
+        assert!(BRANCH_CHECK.contains("`git status -- .moai/`"), "남의 트래커 줄을 쓸어 가는 자리를 안 적었다");
+        assert!(!work.contains("EnterWorktree(path)"), "일꾼 글이 아직 워크트리에 들라고 한다");
         // **대조를 루트에서 한다**(moai-rgp9) — 워크트리 안에서 `-C <루트>` 로 묻는 꼴은 격리
         // 가드가 거절한다. 그 명령이 다시 글에 서면 일꾼이 필수 검사에서 막힌다.
         assert!(!work.contains("git -C <root> symbolic-ref"), "거절되는 꼴로 루트의 가지를 묻는다");
         // **심은 글이 거절되는 꼴을 아무 걸음에서도 시키지 않는다**(리뷰 moai-rgp9.sdj 1번) —
         // `SUBDIR` 이 `$(git -C <root> …)` 이던 자리가 그것이었고, 그 걸음은 워크트리 **안으로**
         // 드는 것이라 ExitWorktree 로 피할 수도 없었다.
-        // 꼴을 **이르는** 자리만 잰다 — `GIT_SHAPES` 는 거절되는 꼴의 이름을 대야 하므로 그 글자가
-        // 그 안에 서는 것은 맞다.
         for shape in ["$(git -C", "git -C <root> rev-parse"] {
             assert!(!work.contains(shape), "일꾼 글이 거절되는 꼴을 시킨다 — {shape}");
             assert!(!supervise.contains(shape), "감독 글이 거절되는 꼴을 시킨다 — {shape}");
@@ -7190,17 +7806,6 @@ stop sending outside work while a release runs",
             BRANCH_CHECK.contains("run `git symbolic-ref -q HEAD` **in the root**"),
             "대조를 어디서 하는지 안 적었다"
         );
-        for (piece, why) in [
-            ("One command per call", "한 호출에 한 명령이라는 줄이 없다"),
-            ("`git commit -F <that file>`", "긴 커밋 글을 파일로 주라는 줄이 없다"),
-            ("`-m \"…\"` on one plain command is fine", "-m 이 되는 것을 안 적어 브리프의 걸음과 어긋난다"),
-            ("`bash /abs/path/script.sh`", "여러 걸음을 스크립트로 빼라는 줄이 없다"),
-            ("computed at runtime", "치환으로 만든 명령이 거절되는 것을 안 적었다"),
-            ("Do not aim git at the root from inside the worktree", "루트를 겨누지 말라는 줄이 없다"),
-            ("`git status -- .moai/`", "남의 트래커 줄을 쓸어 가는 자리를 안 적었다"),
-        ] {
-            assert!(GIT_SHAPES.contains(piece), "{why} — {piece}");
-        }
     }
 
     /// **heredoc 은 들여쓰지 않는다.** 4칸 들여쓴 블록을 그대로 복사하면 닫는 표시도
@@ -7328,7 +7933,7 @@ stop sending outside work while a release runs",
         assert!(text.contains(&make_review("--parent <epic>")));
         assert!(!text.contains("tokens="), "사람이 걷은 토큰 항목이 남았다");
         assert!(!text.contains("gpt-"), "모델 이름을 구웠다");
-        assert!(text.contains("`/model` exists") && text.contains("Return to the assignment's `Root:`"));
+        assert!(text.contains("`/model` exists") && text.contains("at the assignment's `Root:` absolute path"));
     }
 
     #[test]
@@ -7435,7 +8040,8 @@ stop sending outside work while a release runs",
         assert!(skill().contains(&section), "moai 스킬에 낱말표가 없다");
         // **감독과 일꾼 글은 표 없이 도구를 바로 적는다**(moai-obxm) — 둘 다 Claude Code 에만 가니, 표를 실으면 받는 창이
         // 없는 열을 읽고 *기울인* 걸음 이름은 한 번 더 건너뛰는 길이 된다.
-        for (whose, text) in [("감독 스킬", supervise()), ("일꾼 글", worker())] {
+        for (whose, text) in [("감독 스킬", supervise()), ("일꾼 글", worker()), ("일꾼 갈래 글", worker_branches())]
+        {
             assert!(!text.contains(title), "{whose} 에 낱말표가 섰다");
             for v in &VERBS {
                 let step = v.step.split(" (").next().unwrap_or(v.step);
@@ -7563,9 +8169,12 @@ stop sending outside work while a release runs",
     #[test]
     fn the_supervisor_and_the_workers_talk_through_claude_code() {
         let (supervise, brief) = (supervise(), worker());
-        for (whose, text) in
-            [("감독 스킬", supervise.as_str()), ("일꾼 글", brief.as_str()), ("AGENTS 블록", &agents())]
-        {
+        for (whose, text) in [
+            ("감독 스킬", supervise.as_str()),
+            ("일꾼 글", brief.as_str()),
+            ("일꾼 갈래 글", &worker_branches()),
+            ("AGENTS 블록", &agents()),
+        ] {
             for gone in ["moai hello", "moai send", "moai inbox", "moai agents", "any-idle-worker", "moai-work"] {
                 assert!(!text.contains(gone), "{whose} 이 걷은 {gone} 를 가르친다");
             }
@@ -7704,6 +8313,88 @@ stop sending outside work while a release runs",
         );
     }
 
+    /// **죽은 뒤 `/clear` 된 대화는 되살리지 않는다**(moai-jn8d.vyh). 고리는 `history.jsonl` 의 `/clear` 줄이 든 옛 id 다 —
+    /// 대화 기록의 끝을 읽던 첫 규칙은 틀려 걷었다. 비운 뒤 다시 움직인 대화는 남고, 대화 기록이 없는 id 는 비운 것이다.
+    /// `/new` 도 비운 것이고, 끊긴 턴이 비운 직후에 적는 줄은 움직인 것이 아니다.
+    #[test]
+    #[cfg(unix)]
+    fn the_recover_skill_drops_a_conversation_cleared_after_it_died() {
+        let text = recover();
+        let dead = section(&text, "## 1. Find the dead");
+        assert!(
+            dead.contains("**Drop it when its conversation was cleared after it died.**") && dead.contains(CLEARED),
+            "되살린 뒤 /clear 한 대화를 후보로 둔다"
+        );
+        // 고리는 `history.jsonl` 이다 — 첫 규칙은 대화 기록의 끝을 읽어 틀렸다(리뷰 moai-jn8d.d79 1번).
+        assert!(!text.contains("<command-name>/clear</command-name>"), "대화 기록의 끝에서 /clear 를 찾는다");
+        // 기록을 읽는 것은 짝 하나다.
+        assert!(!CLEARED.contains("sessions/"), "비운 대화를 가르는 줄이 둘째 짝이 됐다");
+        let s = crate::scratch::Scratch::new("guide-recover-cleared");
+        let home = s.path();
+        let projects = home.join("projects/-repo");
+        std::fs::create_dir_all(&projects).unwrap();
+        let line = |t: &str| format!("{{\"type\":\"user\",\"timestamp\":\"{t}\"}}\n");
+        // 죽은 뒤 되살아나 10:00 까지 움직이다 11:00 에 비워진 대화 — 끝에는 `timestamp` 없는 `cost-state` 가 붙는다.
+        std::fs::write(
+            projects.join("s-cleared.jsonl"),
+            line("2026-10-26T10:00:00.000Z") + "{\"type\":\"cost-state\",\"sessionId\":\"s-cleared\"}\n",
+        )
+        .unwrap();
+        // 비운 뒤 `/resume` 으로 같은 대화로 돌아와 12:00 까지 움직였다 — 후보로 남는다.
+        std::fs::write(
+            projects.join("s-back.jsonl"),
+            line("2026-10-26T10:00:00.000Z") + &line("2026-10-26T12:00:00.000Z"),
+        )
+        .unwrap();
+        std::fs::write(projects.join("s-plain.jsonl"), line("2026-10-26T10:00:00.000Z")).unwrap();
+        // `/new` 로 비운 대화 — `/clear` 의 다른 이름이다.
+        std::fs::write(projects.join("s-new.jsonl"), line("2026-10-26T10:00:00.000Z")).unwrap();
+        // 도는 턴 위에서 비운 대화 — 끊긴 턴의 두 줄이 `/clear` 보다 0.6초 늦게 선다. 움직인 것이 아니다.
+        std::fs::write(
+            projects.join("s-busy.jsonl"),
+            line("2026-10-26T10:00:00.000Z") + &line("2026-10-26T11:00:00.600Z") + &line("2026-10-26T11:00:00.610Z"),
+        )
+        .unwrap();
+        let at = |t: &str| chrono_ms(t);
+        let typed = |display: &str, sid: &str, t: &str| {
+            format!(
+                "{{\"display\":\"{display}\",\"pastedContents\":{{}},\"timestamp\":{},\"project\":\"/repo\",\"sessionId\":\"{sid}\"}}\n",
+                at(t)
+            )
+        };
+        let clear = |sid: &str, t: &str| typed("/clear", sid, t);
+        let history = clear("s-cleared", "2026-10-26T11:00:00.000Z")
+            + &clear("s-back", "2026-10-26T11:00:00.000Z")
+            + &clear("s-gone", "2026-10-26T11:00:00.000Z")
+            + &clear("s-other", "2026-10-26T11:00:00.000Z")
+            + &clear("s-busy", "2026-10-26T11:00:00.000Z")
+            + &typed("/new", "s-new", "2026-10-26T11:00:00.000Z")
+            + "{\"display\":\"/clearly not\",\"timestamp\":1,\"sessionId\":\"s-plain\"}\n"
+            + "not json\n";
+        std::fs::write(home.join("history.jsonl"), history).unwrap();
+        let shell = CLEARED
+            .replace("~/.claude", &home.display().to_string())
+            .replace("<sessionId> …", "s-cleared s-back s-plain s-gone s-new s-busy");
+        let out = std::process::Command::new("sh").arg("-c").arg(shell).output().unwrap();
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        // 대화 기록이 지워진 id 는 되살릴 대화가 없으니 비운 것으로 낸다. 안 물은 id(`s-other`)는 안 낸다.
+        assert_eq!(
+            String::from_utf8(out.stdout).unwrap(),
+            "s-busy\ns-cleared\ns-gone\ns-new\n",
+            "비운 대화를 못 갈랐다"
+        );
+    }
+
+    /// `2026-10-26T11:00:00.000Z` 꼴을 유닉스 밀리초로 — 시험이 `history.jsonl` 의 `timestamp` 를 짓는 데만 쓴다.
+    #[cfg(unix)]
+    fn chrono_ms(t: &str) -> i64 {
+        let day: i64 = t[8..10].parse().unwrap();
+        let hour: i64 = t[11..13].parse().unwrap();
+        assert!(t.starts_with("2026-10-") && t.ends_with(":00:00.000Z"), "시험의 때 꼴이 아니다 — {t}");
+        // 2026-10-01T00:00:00Z
+        (1_790_812_800 + (day - 1) * 86_400 + hour * 3_600) * 1_000
+    }
+
     /// **`ListAgents` 의 이름과 tmux 칸을 잇는 짝은 한 자리에 선다**(moai-u99i.xo8). 감독의 tmux 스킬이 그 상수를 그대로
     /// 싣고, 되살리기 스킬(moai-uqf7)도 같은 것을 싣는다. 실제 기록의 꼴로 돌려, 산 기록과 죽은 기록(pid 가 없거나
     /// 다른 프로세스가 그 pid 를 다시 쓴 것)을 가르는지, 칸 id 를 `%N` 으로 뽑는지 잰다. 다른 tmux 서버에서 도는 산 세션의
@@ -7745,7 +8436,7 @@ stop sending outside work while a release runs",
             );
         }
         // 이름과 Saycode id 를 잇는 짝은 없다 — 어느 글도 남의 환경에서 id 를 읽으라고 안 가르친다.
-        for skill in [tmux(), cmux(), recover(), saycode(), supervise(), worker()] {
+        for skill in [tmux(), cmux(), recover(), saycode(), supervise(), worker(), worker_branches()] {
             assert!(
                 !skill.contains("APLUS_SESSION_ID") && !skill.contains("ps eww"),
                 "글이 남의 프로세스 환경을 읽으라고 가르친다"
@@ -7848,6 +8539,32 @@ stop sending outside work while a release runs",
             run_in(Some("/tmp/cmux-claude-teams/WS-UUID,WIN-UUID,6958867214691921188"), true),
             run_in(None, true),
             "cmux 의 가짜 TMUX 를 tmux 로 읽었다"
+        );
+        // `claude-teams` 로 띄운 세션의 기록은 그 shim 이 답한 가짜 `tmux` 를 든다 — 진짜 tmux 꼴이 아니니 없는 것으로
+        // 읽고, cmux 갈래에서 제 surface 를 받는다(moai-jn8d.mxb).
+        let teams = s.path().join("teams");
+        std::fs::create_dir_all(&teams).unwrap();
+        let fake = "cmux:@6958867214691921188.%6958867214691921188";
+        std::fs::write(teams.join("1.json"), record(me, &start, "plain", Some(fake))).unwrap();
+        let out = map(&teams, None, true);
+        assert_eq!(
+            String::from_utf8(out.stdout).unwrap(),
+            "alive\tplain\tCMUX-SURFACE-A\tidle\t/repo\ts-plain\t-\n",
+            "claude-teams 의 가짜 tmux 를 든 세션에 surface 를 못 냈다"
+        );
+        let out = map(&teams, None, false);
+        assert_eq!(
+            String::from_utf8(out.stdout).unwrap(),
+            "alive\tplain\t-\tidle\t/repo\ts-plain\t-\n",
+            "claude-teams 의 가짜 tmux 를 칸으로 냈다"
+        );
+        // shim 의 답이 아닌 깨진 `tmux`(`:.`)는 tmux 에 섰을 수 있다 — cmux 갈래가 surface 를 안 댄다(리뷰 moai-jn8d.d79 6번).
+        std::fs::write(teams.join("1.json"), record(me, &start, "plain", Some(":."))).unwrap();
+        let out = map(&teams, None, true);
+        assert_eq!(
+            String::from_utf8(out.stdout).unwrap(),
+            "alive\tplain\t-\tidle\t/repo\ts-plain\t-\n",
+            "꼴이 깨진 tmux 를 든 세션에 surface 를 냈다"
         );
         // 한 탭을 둘이 대면 둘 다 `-` 다 — 다리는 물려받은 환경뿐이라(cmux 탭 안의 zellij·screen) 그 탭에 친 것은 앞에 선
         // 세션 하나에만 간다. `bg` 기록은 띄운 세션의 탭을 물려받을 뿐 그 입력을 받지 않아 탭을 안 대고, 대는 쪽도 막지 않는다.
@@ -8167,7 +8884,7 @@ stop sending outside work while a release runs",
         let launches: Vec<&str> = text.lines().filter(|l| l.contains("claude ") && l.contains("--command")).collect();
         assert_eq!(launches.len(), 1, "claude 를 띄우는 줄이 하나가 아니다 — {launches:?}");
         assert!(
-            launches[0].ends_with("--command 'cd <root> && claude --model <model>'"),
+            launches[0].ends_with("--command 'cd \"<root>\" && claude --model <model>'"),
             "띄우는 줄에 다른 깃발이 섰다"
         );
         assert!(launches[0].contains("--surface \"$CMUX_SURFACE_ID\""), "새 칸이 감독 곁에 안 선다");
@@ -8197,9 +8914,9 @@ stop sending outside work while a release runs",
         let codex = section(&text, "## Codex workers");
         assert!(codex.contains(CODEX_EMPTY_BOX) && codex.contains(REPORT_WATCH));
         assert!(codex.contains(CODEX_WORKER_RULES), "Codex 모델·리뷰 규약이 공용 글과 다르다");
-        assert!(worker().contains("## The review brief\n"), "Codex가 가리키는 리뷰 브리프가 없다");
+        assert!(worker_branches().contains("## The review brief\n"), "Codex가 가리키는 리뷰 브리프가 없다");
         for part in [
-            "codex --model <codex>",
+            "--command 'cd \"<root>\" && codex --model <codex>'",
             "moai models --json",
             "WebSearch",
             "-o args=",
@@ -8267,7 +8984,23 @@ stop sending outside work while a release runs",
         // 띄우는 줄은 하나고, 깃발은 모델 하나다.
         let launches: Vec<&str> = text.lines().filter(|l| l.contains("'claude ")).collect();
         assert_eq!(launches.len(), 1, "claude 를 띄우는 줄이 하나가 아니다 — {launches:?}");
-        assert!(launches[0].contains("'claude --model <model>; exec bash'"), "띄우는 줄에 다른 깃발이 섰다");
+        assert!(
+            launches[0].ends_with("-c \"<root>\" 'claude --model <model>' \\; set-option -p remain-on-exit on"),
+            "띄우는 줄에 다른 깃발이 섰다"
+        );
+        // 스킬이 연 칸은 셸 대신 remain-on-exit 다 — 죽은 칸에 붙이는 것을 tmux 가 거절한다(moai-jn8d.ni8). 그 옵션은
+        // 칸을 여는 같은 tmux 부름에 선다 — 따로 부르면 그 사이에 끝난 프로세스가 칸과 제 말을 함께 가져간다.
+        assert!(!text.contains("exec bash"), "칸이 죽은 Claude 밑에 셸을 남긴다");
+        assert_eq!(
+            text.matches("' \\; set-option -p remain-on-exit on\n").count(),
+            2,
+            "여는 칸마다 remain-on-exit 가 같은 부름에 안 선다"
+        );
+        assert!(!text.contains("set-option -p -t <pane> remain-on-exit"), "remain-on-exit 를 칸을 연 뒤에 따로 건다");
+        assert!(
+            text.contains(EMPTY_BOX) && EMPTY_BOX.contains("#{pane_dead}"),
+            "빈 입력 칸의 잣대가 죽은 칸을 안 읽는다"
+        );
         // 입력 칸이 비어야 친다 — 옛 5-1 이 사람의 초안을 건지느라 480줄이었다.
         assert!(text.contains("**Then do not type. Tell the person"), "빈 입력 칸의 잣대가 없다");
         let clear = &text[text.find("## Clear a worker's window").unwrap()..text.find("## When a message").unwrap()];
@@ -8347,7 +9080,7 @@ stop sending outside work while a release runs",
         assert!(codex.contains(CODEX_EMPTY_BOX), "Codex 입력창 잣대가 공용 글과 다르다");
         assert!(codex.contains(REPORT_WATCH), "Codex 보고 기다리기가 공용 글과 다르다");
         assert!(codex.contains(CODEX_WORKER_RULES), "Codex 모델·리뷰 규약이 공용 글과 다르다");
-        assert!(worker().contains("## The review brief\n"), "Codex가 가리키는 리뷰 브리프가 없다");
+        assert!(worker_branches().contains("## The review brief\n"), "Codex가 가리키는 리뷰 브리프가 없다");
         for part in [
             "moai models --json",
             "WebSearch",
@@ -8361,11 +9094,11 @@ stop sending outside work while a release runs",
             "a shell such as `zsh`",
             "Repeat this check just before each input",
             "`$TMUX_PANE`",
-            "tmux display -p -t <pane> '#{pane_in_mode}'",
+            "tmux display -p -t <pane> '#{pane_in_mode} #{pane_dead}'",
             "tmux capture-pane -p -e -t <pane>",
             "ask the person **once**",
             "only on their yes",
-            "'codex --model <codex>; exec bash'",
+            "-c \"<root>\" 'codex --model <codex>' \\; set-option -p remain-on-exit on\n",
             "`Report-checked:`",
             "tmux send-keys -t <pane> /new\n",
             "text and Enter in separate calls",
@@ -8562,15 +9295,17 @@ stop sending outside work while a release runs",
         // 산 줄이 하나도 없다고 짝이 멈추면 아무것도 안 되살린다 — 그 판의 `dead` 를 믿으면 산 세션을 한 번 더 띄운다.
         let dead = section(&text, "## 1. Find the dead");
         assert!(dead.contains("Bring nothing back"), "짝이 산 줄을 못 읽는 판에도 되살린다");
+        // 되살리기가 연 칸도 셸 대신 remain-on-exit 다(moai-jn8d.ni8).
+        assert!(!text.contains("exec bash") && !text.contains("set-option -p -t <pane> remain-on-exit"));
         // 띄우는 줄은 셋 — tmux 칸, cmux 탭(moai-p5sz.kfi), 둘 밖에서 사람이 칠 줄. 깃발은 `--resume` 하나다. 코드 줄에서
         // `claude ` 를 든 줄을 다 센다 — `--resume` 앞에 다른 깃발(`--model …`)을 끼운 줄도 걸려야 한다.
         let launches: Vec<&str> = text.lines().filter(|l| l.starts_with("    ") && l.contains("claude ")).collect();
         assert_eq!(
             launches,
             [
-                "    tmux split-window -P -F '#{pane_id}' -t \"$TMUX_PANE\" -c <cwd> 'claude --resume <sessionId>; exec bash'",
-                "    cmux --id-format both new-split right --surface \"$CMUX_SURFACE_ID\" --command 'cd <cwd> && claude --resume <sessionId>'",
-                "    cd <cwd> && claude --resume <sessionId>",
+                "    tmux split-window -P -F '#{pane_id}' -t \"$TMUX_PANE\" -c \"<cwd>\" 'claude --resume <sessionId>' \\; set-option -p remain-on-exit on",
+                "    cmux --id-format both new-split right --surface \"$CMUX_SURFACE_ID\" --command 'cd \"<cwd>\" && claude --resume <sessionId>'",
+                "    cd \"<cwd>\" && claude --resume <sessionId>",
             ],
             "claude 를 띄우는 줄이 셋이 아니거나 다른 깃발이 섰다"
         );
@@ -8734,7 +9469,11 @@ stop sending outside work while a release runs",
         let steps = numbered_steps(&work);
         let seven = &steps[step_at(steps, "7")..steps.find("\n7-1. ").unwrap()];
         assert!(seven.contains("**If the review stays refused**"), "7 에 막힌 리뷰의 길이 없다");
-        assert!(seven.contains(MANUAL_REVIEW), "7 의 손 리뷰가 머리를 안 단다");
+        let branches = worker_branches();
+        // 그 절에서 끊는다(리뷰 moai-w25x.54r) — 뒤의 리뷰 브리프가 같은 머리를 들어, 끝까지 자르면 이 절에서 빠져도 푸르다.
+        let by_hand = section(&branches, "## When the review stays refused");
+        assert!(seven.contains("\"When the review stays refused\""), "7 이 막힌 리뷰의 절을 안 댄다");
+        assert!(by_hand.contains(MANUAL_REVIEW), "7 의 손 리뷰가 머리를 안 단다");
         assert!(seven.contains("do not work around the hook"), "7 이 훅을 비켜 가지 말라고 안 한다");
         assert!(review_brief().contains(MANUAL_REVIEW), "리뷰 브리프가 손 리뷰의 머리를 안 싣는다");
         assert!(!MANUAL_REVIEW.contains("/code-review"), "머리가 리뷰 명령을 글자로 들어 브리프의 셈을 늘린다");

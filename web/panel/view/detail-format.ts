@@ -157,6 +157,13 @@ export function rollupOf(row: Row, index: IssueIndex | null, groups?: ReadonlyMa
   return { done, work: total, percent: total ? Math.floor((done * 100) / total) : undefined, byStatus }
 }
 
+/** The planned span the due field shows, `—` standing for a missing end; '' when the row carries neither day. */
+export function dueSpan(row: Row): string {
+  const start = formatDate(row.starts_on), due = formatDate(row.due_on ?? row.due)
+  if (!start && !due) return ''
+  return start || row.kind === 'milestone' ? `${start || '—'} → ${due || '—'}` : due
+}
+
 export interface Field {
   key: string
   label: string
@@ -177,8 +184,9 @@ export function fieldsOf(row: Row, index: IssueIndex | null, copy: Copy): Field[
     ['assignee', d.assignee, assigneeOf(row)],
     ['epic', d.epic, epic ? titled(epic) : ''],
     ['milestone', d.milestone, milestone ? titled(milestone) : ''],
-    // The CLI's key is `due_on` (and `starts_on`); `due` is what an older row may carry.
-    ['due', d.due, formatDate(row.due_on ?? row.due)],
+    // The CLI's key is `due_on`; `due` is what an older row may carry. The span reads as the TUI and the CLI write it
+    // (`view::due_of`): `start → due` once a start is written or on a milestone, the deadline alone otherwise.
+    ['due', d.due, dueSpan(row)],
     ['created', d.created, formatDate(row.created_at)],
     ['updated', d.updated, formatDate(row.updated_at)],
     ['started', d.started, formatDate(row.started_at)],
@@ -233,6 +241,42 @@ export function commitsOf(row: Row): { hash: string; subject: string }[] {
     .filter((item) => !(isRecord(item) && item.tracker === true))
     .map(commitLine)
     .filter((line): line is { hash: string; subject: string } => line !== null)
+}
+
+/** One line of the wiki section: where (`path` or `path:line`), the page title (and `› heading` for a section). */
+export interface WikiLine {
+  at: string
+  title: string
+  lesson: boolean
+}
+
+/**
+ * The wiki pages about the row, from `show <id> --json`'s `wiki` (moai-xp7l.vyw): the lessons this row's notes
+ * point at, the pages that name the id (or its epic), and the sections its title's words rank. As the CLI's detail
+ * draws them, a section's heading is left off when it is the page title again — moai says so with `title_heading`
+ * (review moai-xp7l.mug): comparing the words here took a second tokenizer that split `` `moai`의 `` and escapes
+ * differently from moai's. `lesson` is moai's mark as sent, for the same reason. Empty when moai sent no `wiki`.
+ */
+export function wikiOf(row: Row): { lessons: WikiLine[]; named: WikiLine[]; related: WikiLine[] } {
+  const wiki = isRecord(row.wiki) ? row.wiki : {}
+  const list = (value: unknown): Record<string, unknown>[] => (Array.isArray(value) ? value.filter(isRecord) : [])
+  const lessons = strings(wiki.lessons).map((slug) => ({ at: slug, title: '', lesson: true }))
+  const named = list(wiki.named_in).map((page) => ({
+    at: text(page.path) || text(page.slug),
+    title: text(page.title),
+    lesson: page.lesson === true,
+  }))
+  const related = list(wiki.related).map((hit) => {
+    const title = text(hit.title)
+    const heading = text(hit.heading)
+    const line = typeof hit.line === 'number' ? `:${hit.line}` : ''
+    return {
+      at: `${text(hit.path) || text(hit.slug)}${line}`,
+      title: heading && hit.title_heading !== true ? `${title} › ${heading}` : title,
+      lesson: hit.lesson === true,
+    }
+  })
+  return { lessons, named, related }
 }
 
 /**

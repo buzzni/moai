@@ -2,6 +2,9 @@
 //!
 //! **요청에서 온 값은 틀의 자리에만 든다.** 쿼리의 값은 늘 `--긴이름=값` 한 토막이고 경로의 값(id·위키 쪽)은 `--`
 //! 뒤의 한 토막이라, `-` 로 시작해도 플래그로 안 읽히고 셸을 안 지난다(자식은 `Command::args` 로 뜬다).
+//! **하나만 argv 밖으로 간다** — `/api/tree` 의 `tz`(moai-vj8w.7sh)는 자식의 환경 `TZ` 가 된다. 모양은 [`zone_shape`] 가
+//! 재고(`.` 이 없고 첫 글자가 `/`·`:` 가 아니라 tzdb 밖의 파일을 못 가리킨다), 이 기계가 못 여는 이름은 서버가 안
+//! 넘긴다(`super::zone_for_child`).
 //! 거르개·찾기·정렬의 **뜻**과 거절(`bad_filter` 와 그 말)은 moai 가 낸다 — 서버는 모양(비지 않음·길이·제어 문자·
 //! 이름)만 보고 옮긴다. 모양이 틀리면 자식을 띄우기 전에 400 `bad_input` 이다.
 //!
@@ -13,7 +16,7 @@ use crate::i18n::{Lang, fill, say};
 
 /// `/api/rows` 가 싣는 키 — 본문은 안 싣는다(상세가 따로 읽는다). `branch` 는 옆 워크트리에서 온 줄에만 선다
 /// (`--worktree`, `cmd::Row::on`) — 빼면 `--fields` 가 그것을 걷어 페이지의 `⎇` 가 영영 안 섰다. 없는 줄에는 키가 없다.
-pub const ROW_FIELDS: &str = "id,title,kind,status,derived_status,priority,epic,derived_epic,milestone,derived_milestone,deferred_at,shelved_by,status_since,created_at,updated_at,started_at,done_at,due_on,tags,assignee,assignee_email,blocked_by,unread,archived,branch";
+pub const ROW_FIELDS: &str = "id,title,kind,status,derived_status,priority,epic,derived_epic,milestone,derived_milestone,deferred_at,shelved_by,status_since,created_at,updated_at,started_at,done_at,due_on,starts_on,tags,assignee,assignee_email,blocked_by,unread,archived,branch";
 
 /// 받는 값의 이름.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -25,6 +28,10 @@ pub enum Param {
     Sort,
     Reverse,
     Worktree,
+    /// 위키 검색의 낱말(`wiki search -- <q>`, moai-xp7l.nyi) — 이름은 `q` 지만 `--grep` 이 아니라 자리 인자다.
+    Words,
+    /// 페이지가 날짜를 그리는 시간대 이름 — 자식의 `TZ` 로 간다([`zone_of`]), argv 에는 안 든다.
+    Tz,
 }
 
 impl Param {
@@ -37,6 +44,8 @@ impl Param {
             Param::Sort => "sort",
             Param::Reverse => "reverse",
             Param::Worktree => "worktree",
+            Param::Words => "q",
+            Param::Tz => "tz",
         }
     }
 }
@@ -65,10 +74,19 @@ pub const PROFILES: &[Profile] = &[
     Profile {
         route: "/api/tree",
         head: &["tui", "--deep"],
-        params: &[Param::Sort, Param::Reverse, Param::Worktree, Param::Archived],
+        params: &[Param::Sort, Param::Reverse, Param::Worktree, Param::Archived, Param::Tz],
         without_archive: true,
     },
     Profile { route: "/api/wiki", head: &["wiki", "ls"], params: &[], without_archive: false },
+    // 위키 탭의 찾기가 순위를 받는 자리(moai-xp7l.nyi) — CLI·TUI 와 같은 자로 매긴다. 상한은 페이지의 목록이 다 서도록
+    // 넉넉히 둔다(순위는 절마다라 한 페이지가 여러 번 선다). `/api/wiki/<slug>` 밑에 두지 않는다 — `search` 라는 페이지와
+    // 겹친다.
+    Profile {
+        route: "/api/wiki-search",
+        head: &["wiki", "search", "-n", "2000"],
+        params: &[Param::Words],
+        without_archive: false,
+    },
     // 걸어 둔 프로젝트들 — 사용자 설정을 읽으니 어느 자리에서 돌아도 같은 답이다. 페이지는 그 `path` 를
     // `project=` 로 되돌려 보내 그 프로젝트를 읽는다([`super::project_of`]).
     Profile { route: "/api/projects", head: &["project", "ls"], params: &[], without_archive: false },
@@ -78,6 +96,8 @@ pub const PROFILES: &[Profile] = &[
 const FILTER_MAX: usize = 2048;
 /// 그 밖의 값 하나의 상한(바이트).
 const VALUE_MAX: usize = 512;
+/// 시간대 이름의 상한(바이트) — 가장 긴 tzdb 이름도 40자 안이다.
+const ZONE_MAX: usize = 64;
 
 /// 서버가 자식을 띄우기 전에 거절하는 모양 — 말은 [`Bad::said`] 가 고른다.
 #[derive(Debug, PartialEq, Eq)]
@@ -94,6 +114,9 @@ pub enum Bad {
     Control(String),
     /// 값이 그 이름이 받는 모양이 아니다 — 불린은 `1`, `fields` 는 `id`, id 는 이슈 id 의 꼴.
     Shape(String),
+    /// 둘 다 이 길이 받는 이름인데 같이는 못 준다 — `/api/plan` 의 옮기기(`edge`·`days`)와 하루 세우기(`day`).
+    /// 모르는 이름(`Unknown`)으로 대면 "이 길은 그 이름을 안 받는다" 는 거짓말이 된다(moai-vj8w 리뷰).
+    Mixed(String, String),
 }
 
 impl Bad {
@@ -105,6 +128,7 @@ impl Bad {
             Bad::Long(n, max) => fill(say(lang, "web.bad_long"), &[("name", n), ("max", &max.to_string())]),
             Bad::Control(n) => fill(say(lang, "web.bad_control"), &[("name", n)]),
             Bad::Shape(n) => fill(say(lang, "web.bad_shape"), &[("name", n)]),
+            Bad::Mixed(n, other) => fill(say(lang, "web.bad_mixed"), &[("name", n), ("other", other)]),
         }
     }
 }
@@ -163,10 +187,16 @@ pub fn split_project(query: &[(String, String)]) -> Result<(Option<String>, Vec<
     Ok((project, rest))
 }
 
-/// 쓰는 길 — **읽음 표시 셋뿐이다**(2026-10-22 사람 결정, moai-ly88). 읽음은 사용자 설정 곁의 제 파일에만 적히고
-/// 트래커에는 안 적힌다(`moai read --help`) — 트래커를 바꾸는 길은 여전히 CLI 와 탐색기다. 끝점이 아니면 `None`.
+/// 쓰는 길 — **읽음 표시 셋과 계획 날 하나다**. 읽음은 사용자 설정 곁의 제 파일에만 적히고 트래커에는 안
+/// 적힌다(`moai read --help`, 2026-10-22 사람 결정, moai-ly88). **계획 날(`/api/plan/<id>`)은 트래커에 쓰는 하나뿐인
+/// 길이다**(moai-d86e.3ud) — 간트의 막대 끌기가 `moai edit <id> --shift*=<N>`(하루 세우기는 `--start --due
+/// --if-unplanned`, moai-vj8w.02c)을 자식으로 부르니 `store::with_write` 를 지나고, 거절(시작이 기한 뒤·위 기한 넘김·그새
+/// 날이 선 줄)도 `edit` 의 말 그대로다. 끝점이 아니면 `None`.
 pub fn write_argv_of(path: &str, query: &[(String, String)]) -> Option<Result<Vec<String>, Bad>> {
     let strs = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+    if let Some(id) = path.strip_prefix("/api/plan/") {
+        return Some(issue_id(id).and_then(|()| plan_argv(id, query)));
+    }
     let built = match (path, path.strip_prefix("/api/read/"), path.strip_prefix("/api/read-group/")) {
         ("/api/read-all", _, _) => Ok(strs(&["read", "--all"])),
         (_, Some(id), _) => issue_id(id).map(|()| strs(&["read", "--", id])),
@@ -182,6 +212,69 @@ pub fn write_argv_of(path: &str, query: &[(String, String)]) -> Option<Result<Ve
         }
         Ok(args)
     }))
+}
+
+/// `/api/plan/<id>` 의 argv — **날이 아니라 옮기는 뜻을 받는다**(moai-vj8w.02c). 날은 `edit` 이 락 안에서 그때의 줄로
+/// 잰다(`Issue::shifted`) — 페이지가 읽은 날에서 센 날을 들고 오면, 그 읽기와 이 쓰기 사이에 옆 세션이 옮긴 날을
+/// 화면의 옛 날에서 센 값이 말없이 덮는다. TUI 의 끌기(`tui::gantt::Plan`)와 한 자다.
+///
+/// - `edge=start|body|end&days=N` — 막대를 옮긴다: `edit --shift-start=N`·`--shift=N`·`--shift-due=N`. `N` 은 0 아닌
+///   정수(여섯 자리까지, 앞에 `-` 하나)다
+/// - `day=YYYY-MM-DD` — 날이 없는 줄에 그 하루를 세운다: `edit --start=<날> --due=<날> --if-unplanned`. 그새 날이 섰으면
+///   `edit` 이 안 쓰고 거절한다
+///
+/// 둘을 섞으면 거절이다([`Bad::Mixed`]). 겹쳐 보기(`worktree`)는 안 받는다: 쓰기는 늘 주 체크아웃의 트래커에 간다.
+fn plan_argv(id: &str, query: &[(String, String)]) -> Result<Vec<String>, Bad> {
+    let (mut edge, mut days, mut day) = (None, None, None);
+    for (name, value) in query {
+        let (slot, fits) = match name.as_str() {
+            "edge" => (&mut edge, shift_flag(value).is_some()),
+            "days" => (&mut days, is_days(value)),
+            "day" => (&mut day, crate::model::parse_date(value).is_some()),
+            _ => return Err(Bad::Unknown(name.clone())),
+        };
+        if !fits {
+            return Err(Bad::Shape(name.clone()));
+        }
+        if slot.replace(value.clone()).is_some() {
+            return Err(Bad::Twice(name.clone()));
+        }
+    }
+    let mixed = |name: &str| Bad::Mixed(name.to_string(), "day".to_string());
+    let flags = match (edge, days, day) {
+        (None, None, Some(d)) => vec![format!("--start={d}"), format!("--due={d}"), "--if-unplanned".to_string()],
+        (Some(_), _, Some(_)) => return Err(mixed("edge")),
+        (None, Some(_), Some(_)) => return Err(mixed("days")),
+        (Some(e), Some(n), None) => {
+            let Some(flag) = shift_flag(&e) else { return Err(Bad::Shape("edge".to_string())) };
+            vec![format!("{flag}={n}")]
+        }
+        (Some(_), None, None) => return Err(Bad::Empty("days".to_string())),
+        (None, _, None) => return Err(Bad::Empty("edge".to_string())),
+    };
+    let mut out = vec!["edit".to_string()];
+    out.extend(flags);
+    out.extend(["--".to_string(), id.to_string()]);
+    Ok(out)
+}
+
+/// 막대의 어느 쪽을 옮기나(`edge`) → `edit` 의 플래그. **잇는 자리는 여기 하나다**(moai-vj8w 리뷰) — 모양 검사와 플래그
+/// 고르기가 글자를 따로 가르면, 검사에만 낱말을 더한 날 그 낱말이 나머지 갈래(`--shift`)로 떨어져 끝 하나를 끈 것이 막대
+/// 통째를 옮긴다([`argv`] 의 글이 적어 둔 그 덫이다).
+fn shift_flag(edge: &str) -> Option<&'static str> {
+    match edge {
+        "start" => Some("--shift-start"),
+        "body" => Some("--shift"),
+        "end" => Some("--shift-due"),
+        _ => None,
+    }
+}
+
+/// 옮기는 날 수의 꼴 — 0 아닌 정수, 여섯 자리까지, 앞에 `-` 하나. `+N` 은 안 받는다(페이지가 안 낸다). 폭은 `edit --shift*`
+/// 가 받는 것과 같다(`cli::shift_days`).
+fn is_days(v: &str) -> bool {
+    let digits = v.strip_prefix('-').unwrap_or(v);
+    (1..=6).contains(&digits.len()) && digits.bytes().all(|b| b.is_ascii_digit()) && digits.bytes().any(|b| b != b'0')
 }
 
 /// 쿼리가 `worktree=1` 하나뿐이거나 비었는가 — 받는 이름이 이것뿐인 끝점(`/api/stamp`·`/api/issue/<id>`·읽음 길)이
@@ -234,6 +327,32 @@ fn shape(name: &str, value: &str, max: usize) -> Result<(), Bad> {
     Ok(())
 }
 
+/// 시간대 이름의 모양 — tzdb 이름의 글자(`Asia/Seoul`·`Etc/GMT+9`·`America/Port-au-Prince`)만, 첫 글자는 영숫자다.
+/// 첫 글자가 `/` 면 자식의 `TZ` 가 경로로 읽고(`tz::tz_name`), `:` 는 떼어 버리니 둘 다 안 받는다.
+///
+/// **브라우저가 내는 오프셋(`+09:00`)도 받는다**(moai-vj8w 리뷰) — Intl 이 ES2024 부터 그 꼴을 시간대로 받아, `[tui]
+/// timezone = "+09:00"` 이나 `TZ=GMT` 로 뜬 브라우저(`+00:00` 이라 댄다)의 페이지가 그대로 보낸다. 막으면 이 끝점이 400 이고
+/// 페이지는 목록 전체를 못 읽는다. 받아도 그 꼴은 이 기계가 여는 이름이 아니라 자식에게는 안 간다 — 모르는 이름처럼
+/// 서버의 시간대로 잰다([`super::zone_for_child`]).
+fn zone_shape(name: &str, value: &str) -> Result<(), Bad> {
+    shape(name, value, ZONE_MAX)?;
+    let b = value.as_bytes();
+    let offset = b.len() == 6
+        && matches!(b[0], b'+' | b'-')
+        && b[3] == b':'
+        && [b[1], b[2], b[4], b[5]].iter().all(u8::is_ascii_digit);
+    let first = b.first().is_some_and(u8::is_ascii_alphanumeric);
+    let fits = b.iter().all(|c| c.is_ascii_alphanumeric() || matches!(c, b'_' | b'+' | b'-' | b'/'));
+    (offset || (first && fits)).then_some(()).ok_or_else(|| Bad::Shape(name.to_string()))
+}
+
+/// 쿼리가 낸 시간대 — 모양은 [`argv`] 가 이미 쟀다. 자식은 이것을 `TZ` 로 받아, 늦었는가(`overdue`)를 페이지가 그리는
+/// 시간대로 잰다(moai-vj8w.7sh). 안 줬으면 `None` 이고 자식은 서버의 시간대 그대로다. 이 기계가 못 여는 이름을 거르는 것은
+/// 자식을 띄우는 쪽이다([`super::zone_for_child`]) — 여기는 파일을 안 연다.
+pub fn zone_of(query: &[(String, String)]) -> Option<&str> {
+    query.iter().find(|(n, _)| n == Param::Tz.name()).map(|(_, v)| v.as_str())
+}
+
 /// 틀에 쿼리를 채운다. **틀이 안 받는 이름과 두 번 준 이름은 거절**이다 — 하나를 조용히 버리면 페이지가 낸
 /// 거르개가 안 먹은 채 전체 목록이 돌아온다.
 ///
@@ -272,12 +391,21 @@ pub fn argv(profile: &Profile, query: &[(String, String)]) -> Result<Vec<String>
                 shape(name, value, VALUE_MAX)?;
                 out.push(format!("--grep={value}"));
             }
+            // `--` 뒤에 선다 — `-` 로 여는 낱말도 깃발로 안 읽힌다. 틀이 받는 이름이 이것 하나라 끝에 선다.
+            Param::Words => {
+                shape(name, value, VALUE_MAX)?;
+                out.push("--".to_string());
+                out.push(value.clone());
+            }
             Param::Fields => {
                 shape(name, value, VALUE_MAX)?;
                 if value != "id" {
                     return Err(Bad::Shape(name.clone()));
                 }
                 fields = Some("id");
+            }
+            Param::Tz => {
+                zone_shape(name, value)?;
             }
             Param::Sort => {
                 shape(name, value, VALUE_MAX)?;
@@ -367,6 +495,39 @@ mod tests {
         let mut out = strs(&v);
         out.push(format!("--fields={ROW_FIELDS}"));
         out
+    }
+
+    /// **`tz` 는 `/api/tree` 만 받고 argv 에는 안 든다**(moai-vj8w.7sh) — 자식의 `TZ` 로 가니 틀이 바뀌면 안 된다.
+    /// 모양은 tzdb 이름의 글자뿐이다.
+    #[test]
+    fn tz_is_a_zone_name_for_the_tree_alone_and_leaves_the_argv_as_it_was() {
+        let plain = argv_of("/api/tree", &[]).unwrap().unwrap();
+        let asked = q(&[("tz", "Asia/Seoul")]);
+        assert_eq!(argv_of("/api/tree", &asked).unwrap().unwrap(), plain);
+        assert_eq!(zone_of(&asked), Some("Asia/Seoul"));
+        assert_eq!(zone_of(&[]), None);
+        // 브라우저가 내는 오프셋(`+09:00`)도 받는다 — 막으면 그 페이지는 목록 전체를 못 읽는다(moai-vj8w 리뷰).
+        for ok in ["UTC", "Etc/GMT+9", "America/Port-au-Prince", "America/Argentina/Buenos_Aires", "+09:00", "-05:30"] {
+            assert!(argv_of("/api/tree", &q(&[("tz", ok)])).unwrap().is_ok(), "{ok}");
+        }
+        for bad in [
+            "/etc/localtime",
+            ":Asia/Seoul",
+            "Asia Seoul",
+            "JST-9<",
+            "a\nb",
+            "한국",
+            "../x?",
+            &"A".repeat(65),
+            "+0900",
+            "09:00",
+            "+09:00:00",
+        ] {
+            assert!(argv_of("/api/tree", &q(&[("tz", bad)])).unwrap().is_err(), "{bad}");
+        }
+        assert!(matches!(argv_of("/api/tree", &q(&[("tz", "")])).unwrap(), Err(Bad::Empty(_))));
+        assert!(matches!(argv_of("/api/tree", &q(&[("tz", "UTC"), ("tz", "UTC")])).unwrap(), Err(Bad::Twice(_))));
+        assert!(matches!(argv_of("/api/rows", &asked).unwrap(), Err(Bad::Unknown(_))));
     }
 
     #[test]
@@ -480,6 +641,13 @@ mod tests {
             strs(&["tui", "--deep", "--worktree", "--no-archive"])
         );
         assert!(matches!(argv_of("/api/wiki", &q(&[("q", "x")])).unwrap(), Err(Bad::Unknown(_))));
+        // 위키 찾기의 낱말은 `--` 뒤의 자리 인자다(moai-xp7l.nyi).
+        assert_eq!(
+            argv_of("/api/wiki-search", &q(&[("q", "-x merge")])).unwrap().unwrap(),
+            strs(&["wiki", "search", "-n", "2000", "--", "-x merge"])
+        );
+        assert!(matches!(argv_of("/api/wiki-search", &q(&[("q", " ")])).unwrap(), Err(Bad::Empty(_))));
+        assert!(matches!(argv_of("/api/wiki-search", &q(&[("worktree", "1")])).unwrap(), Err(Bad::Unknown(_))));
         // 받는 이름이 없는 끝점도 같은 자로 잰다 — 말없이 버리면 `?archived=1` 이 맨 보드로 답했다.
         assert!(matches!(argv_of("/api/wiki", &q(&[("worktree", "1")])).unwrap(), Err(Bad::Unknown(_))));
         assert!(matches!(argv_of("/api/status", &q(&[("archived", "1")])).unwrap(), Err(Bad::Unknown(_))));
@@ -499,9 +667,9 @@ mod tests {
         assert!(rows(&[("filter", &"a".repeat(2048))]).is_ok());
     }
 
-    /// **쓰는 길은 읽음 셋뿐이고, 값은 `--` 뒤나 `--epic=` 한 토막에 든다**(moai-ly88).
+    /// **쓰는 길은 읽음 셋과 계획 날 하나이고, 값은 `--` 뒤나 `--플래그=` 한 토막에 든다**(moai-ly88, moai-d86e.3ud).
     #[test]
-    fn writes_are_the_three_read_marks() {
+    fn writes_are_the_three_read_marks_and_the_plan() {
         let w = |path: &str| write_argv_of(path, &[]).map(|r| r.unwrap());
         assert_eq!(w("/api/read/moai-1abc"), Some(strs(&["read", "--", "moai-1abc"])));
         assert_eq!(w("/api/read-all"), Some(strs(&["read", "--all"])));
@@ -521,7 +689,44 @@ mod tests {
         assert_eq!(overlay_of(&[]), Ok(false));
         assert_eq!(overlay_of(&on), Ok(true));
         assert!(matches!(overlay_of(&q(&[("archived", "1")])), Err(Bad::Unknown(_))));
-        for none in ["/api/rows", "/api/status", "/api/readall", "/api/read"] {
+        // 계획 날 — 날이 아니라 옮기는 뜻이 실린다(moai-vj8w.02c). 날은 `edit` 이 락 안에서 잰다.
+        let plan = |query: &[(&str, &str)]| write_argv_of("/api/plan/moai-1abc", &q(query)).unwrap();
+        assert_eq!(plan(&[("edge", "body"), ("days", "3")]), Ok(strs(&["edit", "--shift=3", "--", "moai-1abc"])));
+        assert_eq!(
+            plan(&[("days", "-2"), ("edge", "start")]),
+            Ok(strs(&["edit", "--shift-start=-2", "--", "moai-1abc"]))
+        );
+        assert_eq!(plan(&[("edge", "end"), ("days", "10")]), Ok(strs(&["edit", "--shift-due=10", "--", "moai-1abc"])));
+        assert_eq!(
+            plan(&[("day", "2026-10-26")]),
+            Ok(strs(&["edit", "--start=2026-10-26", "--due=2026-10-26", "--if-unplanned", "--", "moai-1abc"]))
+        );
+        assert_eq!(plan(&[]), Err(Bad::Empty("edge".into())));
+        assert_eq!(plan(&[("days", "3")]), Err(Bad::Empty("edge".into())));
+        assert_eq!(plan(&[("edge", "body")]), Err(Bad::Empty("days".into())));
+        // 섞은 것은 "모르는 이름" 이 아니다 — 둘 다 이 길이 받는 이름이다(moai-vj8w 리뷰).
+        let mixed = |name: &str| Err(Bad::Mixed(name.into(), "day".into()));
+        assert_eq!(plan(&[("edge", "body"), ("days", "3"), ("day", "2026-10-26")]), mixed("edge"));
+        assert_eq!(plan(&[("edge", "end"), ("day", "2026-10-26")]), mixed("edge"));
+        assert_eq!(plan(&[("days", "3"), ("day", "2026-10-26")]), mixed("days"));
+        assert!(Bad::Mixed("edge".into(), "day".into()).said(Lang::En).contains("does not go with"));
+        for v in ["0", "-0", "+3", "3.5", "", "-", "1234567", "--3", "3d"] {
+            assert_eq!(plan(&[("edge", "body"), ("days", v)]), Err(Bad::Shape("days".into())), "{v:?}");
+        }
+        for v in ["both", "", "Body"] {
+            assert_eq!(plan(&[("edge", v), ("days", "1")]), Err(Bad::Shape("edge".into())), "{v:?}");
+        }
+        for v in ["none", "+3", "2026-1-1", "2026-13-01", "-e", ""] {
+            assert_eq!(plan(&[("day", v)]), Err(Bad::Shape("day".into())), "{v:?}");
+        }
+        assert_eq!(plan(&[("day", "2026-10-30"), ("day", "2026-10-31")]), Err(Bad::Twice("day".into())));
+        // 옛 꼴(날을 들고 오는 `start`·`due`)은 이제 모르는 이름이다 — 쓰는 날을 페이지가 세지 않는다.
+        assert_eq!(plan(&[("due", "2026-10-30")]), Err(Bad::Unknown("due".into())));
+        assert_eq!(plan(&[("worktree", "1")]), Err(Bad::Unknown("worktree".into())));
+        for bad in ["/api/plan/issue", "/api/plan/--due", "/api/plan/"] {
+            assert!(matches!(write_argv_of(bad, &q(&[("day", "2026-10-30")])), Some(Err(Bad::Shape(_)))), "{bad}");
+        }
+        for none in ["/api/rows", "/api/status", "/api/readall", "/api/read", "/api/plan"] {
             assert!(write_argv_of(none, &[]).is_none(), "{none}");
         }
     }

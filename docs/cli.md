@@ -40,16 +40,17 @@ Commands:
   epic          The verbs above, pinned to `--type epic`
   milestone     The verbs above, pinned to `--type milestone`
   backlog       Jot a passing thought down where you are (`--type backlog`)
-  wiki          Read the project wiki - the markdown pages under `docs/`
+  wiki          The project wiki - the markdown pages under `docs/`, and lessons
   tui           Open the explorer (the one write to an issue is `SPC n`, jot)
-  web           Serve this tracker as a page on 127.0.0.1, read-only
+  web           Serve this tracker as a page on 127.0.0.1
   hook          Called by an agent's hook. Reads an event on stdin
   merge-driver  Called by git. Merges issues.jsonl per issue, three-way
   skill         Plant skills for Claude, Codex, Antigravity (safe to run again)
   project       Register a directory to watch several projects from one moai
   due           Raise priorities a deadline has caught up with
   config        Read this repository's settings, defaults filled in
-  models        Read the model per role from your user config
+  models        Read the model per role from your config and the repository's
+  keys          Show the explorer's keys and what your keys.toml changed
   update        Upgrade the moai you are running with install.sh
   init          Put a .moai/ into this repository (safe to run again)
   help          Print this message or the help of the given subcommand(s)
@@ -88,6 +89,8 @@ To read the project manual:
 
   moai wiki ls                  the markdown pages under docs/ - the wiki
   moai wiki show <slug>         one page
+  moai wiki search <words...>   the sections that match, best first
+  moai wiki learn '<lesson>'    write a lesson page and note it on the issue
 
 To watch several projects from one place:
 
@@ -285,7 +288,7 @@ Options:
           Assignee. The creator when absent; `none` clears it, `me` is you
 
       --start <date>
-          Start of a milestone, `YYYY-MM-DD` (milestone rows only)
+          Start, `YYYY-MM-DD` or `+N` days from today. Any row
 
       --due <date>
           Deadline, `YYYY-MM-DD` or `+N` days from today. Not past a parent
@@ -359,15 +362,17 @@ BODY
 Several at once (`--from`):
 
 moai add --from - <<'PLAN'
-# Storage layer @2026-10-31
-- [p1] write atomically #bug @2026-10-20
-- recover a truncated line
+# Storage layer @2026-10-25~2026-10-31
+- [p1] write atomically #bug @2026-10-26~2026-10-28
+- recover a truncated line @2026-10-29
 - \[WIP] issue \#12
 PLAN
 
   A `#` line is an epic, a `-` line is an issue of the epic above it.
-  [pN], #tag and @YYYY-MM-DD (the deadline) are optional. --due goes on
-  each epic the plan creates that carries no @date of its own.
+  [pN], #tag and @date are optional. @YYYY-MM-DD is a deadline,
+  @YYYY-MM-DD~YYYY-MM-DD a start to a deadline, @YYYY-MM-DD~ a start only.
+  --due and --start go on each epic the plan creates that carries no
+  @date of its own.
   Put \ in front of a leading [, a trailing #word or @digit in a title.
   --dry-run keeps a heredoc typo from creating six wrong issues.
 
@@ -499,9 +504,10 @@ Order and paging:
   so add status=done for what is closed now; done= keeps the meaning of
   --done. updated_at= with a single day is that day, where since= runs on
   from it. In the explorer (SPC f) a value right after = may be quoted.
-  due_on= is the row's own deadline, read as calendar days with both ends
-  in (2026-10-01~2026-10-05, ~2026-10-05, or one day); a row without one
-  falls in none. It is not a time item and opens nothing hidden.
+  due_on= is the row's own deadline and starts_on= its planned start, read
+  as calendar days with both ends in (2026-10-01~2026-10-05, ~2026-10-05,
+  or one day); a row without one falls in none. They are not time items
+  and open nothing hidden.
 
     moai show --filter 'done_at=2026-10-03 00:00~2026-10-05 23:59'
     moai show -a raven -a joshep --filter started_at=2026-10-01~
@@ -792,8 +798,14 @@ Options:
       --milestone <id|none>  Move the milestone (`none` clears its own field)
   -p, --priority <0-3>       
   -a, --assignee <who|none>  Give `name (email)`. `none` clears it, `me` is you
-      --start <date|none>    Start of a milestone. `none` clears it
+      --start <date|none>    Start, a day or `+N` days. `none` clears it
       --due <date|none>      Deadline, a day or `+N` days. `none` clears it
+      --shift <±N>           Move the planned days N days, as the row
+                             holds them when written
+      --shift-start <±N>     Move the start alone (none: from the due)
+      --shift-due <±N>       Move the deadline alone (none: from start)
+      --if-unplanned         Write `--start`/`--due` only on a row
+                             with no planned day; else refuse
       --json                 Machine-readable output. Every human line goes away
       --no-color             Turn colour off (same as `--color never`)
       --color <how>          auto|always|never (auto by default, off when piped)
@@ -1117,7 +1129,7 @@ Options:
           Assignee. The creator when absent; `none` clears it, `me` is you
 
       --start <date>
-          Start of a milestone, `YYYY-MM-DD` (milestone rows only)
+          Start, `YYYY-MM-DD` or `+N` days from today. Any row
 
       --due <date>
           Deadline, `YYYY-MM-DD` or `+N` days from today. Not past a parent
@@ -1296,9 +1308,10 @@ Order and paging:
   so add status=done for what is closed now; done= keeps the meaning of
   --done. updated_at= with a single day is that day, where since= runs on
   from it. In the explorer (SPC f) a value right after = may be quoted.
-  due_on= is the row's own deadline, read as calendar days with both ends
-  in (2026-10-01~2026-10-05, ~2026-10-05, or one day); a row without one
-  falls in none. It is not a time item and opens nothing hidden.
+  due_on= is the row's own deadline and starts_on= its planned start, read
+  as calendar days with both ends in (2026-10-01~2026-10-05, ~2026-10-05,
+  or one day); a row without one falls in none. They are not time items
+  and open nothing hidden.
 
     moai show --filter 'done_at=2026-10-03 00:00~2026-10-05 23:59'
     moai show -a raven -a joshep --filter started_at=2026-10-01~
@@ -1421,7 +1434,7 @@ Options:
           Assignee. The creator when absent; `none` clears it, `me` is you
 
       --start <date>
-          Start of a milestone, `YYYY-MM-DD` (milestone rows only)
+          Start, `YYYY-MM-DD` or `+N` days from today. Any row
 
       --due <date>
           Deadline, `YYYY-MM-DD` or `+N` days from today. Not past a parent
@@ -1600,9 +1613,10 @@ Order and paging:
   so add status=done for what is closed now; done= keeps the meaning of
   --done. updated_at= with a single day is that day, where since= runs on
   from it. In the explorer (SPC f) a value right after = may be quoted.
-  due_on= is the row's own deadline, read as calendar days with both ends
-  in (2026-10-01~2026-10-05, ~2026-10-05, or one day); a row without one
-  falls in none. It is not a time item and opens nothing hidden.
+  due_on= is the row's own deadline and starts_on= its planned start, read
+  as calendar days with both ends in (2026-10-01~2026-10-05, ~2026-10-05,
+  or one day); a row without one falls in none. They are not time items
+  and open nothing hidden.
 
     moai show --filter 'done_at=2026-10-03 00:00~2026-10-05 23:59'
     moai show -a raven -a joshep --filter started_at=2026-10-01~
@@ -1725,7 +1739,7 @@ Options:
           Assignee. The creator when absent; `none` clears it, `me` is you
 
       --start <date>
-          Start of a milestone, `YYYY-MM-DD` (milestone rows only)
+          Start, `YYYY-MM-DD` or `+N` days from today. Any row
 
       --due <date>
           Deadline, `YYYY-MM-DD` or `+N` days from today. Not past a parent
@@ -1904,9 +1918,10 @@ Order and paging:
   so add status=done for what is closed now; done= keeps the meaning of
   --done. updated_at= with a single day is that day, where since= runs on
   from it. In the explorer (SPC f) a value right after = may be quoted.
-  due_on= is the row's own deadline, read as calendar days with both ends
-  in (2026-10-01~2026-10-05, ~2026-10-05, or one day); a row without one
-  falls in none. It is not a time item and opens nothing hidden.
+  due_on= is the row's own deadline and starts_on= its planned start, read
+  as calendar days with both ends in (2026-10-01~2026-10-05, ~2026-10-05,
+  or one day); a row without one falls in none. They are not time items
+  and open nothing hidden.
 
     moai show --filter 'done_at=2026-10-03 00:00~2026-10-05 23:59'
     moai show -a raven -a joshep --filter started_at=2026-10-01~
@@ -2050,7 +2065,7 @@ Options:
           Assignee. The creator when absent; `none` clears it, `me` is you
 
       --start <date>
-          Start of a milestone, `YYYY-MM-DD` (milestone rows only)
+          Start, `YYYY-MM-DD` or `+N` days from today. Any row
 
       --due <date>
           Deadline, `YYYY-MM-DD` or `+N` days from today. Not past a parent
@@ -2229,9 +2244,10 @@ Order and paging:
   so add status=done for what is closed now; done= keeps the meaning of
   --done. updated_at= with a single day is that day, where since= runs on
   from it. In the explorer (SPC f) a value right after = may be quoted.
-  due_on= is the row's own deadline, read as calendar days with both ends
-  in (2026-10-01~2026-10-05, ~2026-10-05, or one day); a row without one
-  falls in none. It is not a time item and opens nothing hidden.
+  due_on= is the row's own deadline and starts_on= its planned start, read
+  as calendar days with both ends in (2026-10-01~2026-10-05, ~2026-10-05,
+  or one day); a row without one falls in none. They are not time items
+  and open nothing hidden.
 
     moai show --filter 'done_at=2026-10-03 00:00~2026-10-05 23:59'
     moai show -a raven -a joshep --filter started_at=2026-10-01~
@@ -2348,14 +2364,16 @@ PLAN
 ## `moai wiki`
 
 ```
-Read the project wiki - the markdown pages under `docs/`
+The project wiki - the markdown pages under `docs/`, and lessons
 
 Usage: moai wiki [OPTIONS] <COMMAND>
 
 Commands:
-  ls    Every page - slug, title, and what does not resolve
-  show  One page, drawn (`--json` gives the raw body)
-  help  Print this message or the help of the given subcommand(s)
+  ls      Every page - slug, title, and what does not resolve
+  show    One page, drawn (`--json` gives the raw body)
+  search  Find the sections that match some words, best first
+  learn   Write a new lesson page and note it on the issue it came from
+  help    Print this message or the help of the given subcommand(s)
 
 Options:
       --json                 Machine-readable output. Every human line goes away
@@ -2375,6 +2393,10 @@ Options:
   moai wiki ls                  every page, and what does not resolve
   moai wiki show <slug>         one page, drawn, and the pages linking to it.
                                 `--json` gives the raw body
+  moai wiki search <words...>   the sections that match, best first, with the
+                                line to open
+  moai wiki learn '<lesson>'    a new lesson page under lessons/, noted on the
+                                issue it came from
 
   **Nothing is stored.** The tracker holds no page and no index - the list,
   the links, the pages linking to each page (`linked_from`) and the ids are
@@ -2383,12 +2405,13 @@ Options:
   the tracker still goes to the main checkout. Git merges them like any
   other file.
 
-  There is no command that writes a page - edit the file and commit it. A
-  page names an issue by its bare id, as a commit subject does, and another
-  page by a relative link: `[the explorer](explorer.md)`. A link can land on
-  a heading - `glossary.md#epic`, or `#epic` on the same page. The anchor is
-  the heading as GitHub makes it (lowercase, punctuation dropped, each space
-  a `-`, a repeated heading `-1`, `-2`), so the same link works there too.
+  No command edits a page - edit the file and commit it. `learn` only
+  creates a new lesson page and never touches one that stands. A page names
+  an issue by its bare id, as a commit subject does, and another page by a
+  relative link: `[the explorer](explorer.md)`. A link can land on a heading
+  - `glossary.md#epic`, or `#epic` on the same page. The anchor is the
+  heading as GitHub makes it (lowercase, punctuation dropped, each space a
+  `-`, a repeated heading `-1`, `-2`), so the same link works there too.
 ```
 
 ## `moai wiki ls`
@@ -2416,13 +2439,20 @@ Options:
   `..`, leads out of the checkout or into `.git/`, or is not a directory is.
 
   Under the list, notices count pages with conflict markers, links leading to
-  no page, links to a heading the page does not have, and ids naming no
-  issue. They block nothing and leave the exit code alone.
+  no page, links to a heading the page does not have, ids naming no issue,
+  and `Lesson:` notes on open work naming a page this checkout does not have.
+  They block nothing and leave the exit code alone. A lesson page
+  (`lessons/<slug>`) shows `×N`, the number of different rows whose notes name
+  it.
 
-  --json gives {"dir","pages":[{"slug","title","path","bytes","issues",
-  "links","linked_from","conflict"}]}. `issues` is [{"id","exists"}] - the
-  ids with this tracker's prefix the page names outside code blocks; the name
-  of a skill moai plants (`moai-wiki`) is never one. `links` is
+  --json gives {"dir","dir_abs","pages":[{"slug","title","path",
+  "bytes","issues","links","linked_from","conflict","seen_count"}]}.
+  `dir_abs` is `dir` as an absolute path in this checkout - absent when
+  `wiki_dir` points outside it or that path is not UTF-8. `seen_count` is that
+  `×N` - always there, 0 on a page that is not a lesson. `issues` is
+  [{"id","exists"}] - the ids with this tracker's prefix the page names
+  outside code blocks; the name of a skill moai plants (`moai-wiki`) is never
+  one. `links` is
   [{"text","to","anchor","resolved","anchor_resolved"}] - relative links to a
   `.md` page of this wiki, `to` being the target slug (the page itself for a
   bare `#anchor`). `anchor` is the part after `#` and `anchor_resolved` says
@@ -2458,16 +2488,130 @@ Options:
   The slug is what `moai wiki ls` prints - matched letter for letter, so
   `Guide` is not `guide`.
 
-  --json gives the page as `ls` does plus `body`, the file as written.
+  --json gives the page as `ls` does, with `seen` in place of `seen_count`,
+  plus `body`, the file as written. `seen` is always there:
+  [{"id","at","by","by_email"}], the rows whose `Lesson:` notes name this
+  lesson, latest note first ([] on a page that is not a lesson).
   A page that could not be read has no `body`, carries `error`, and the exit
   code is non-zero. When the wiki directory itself cannot be used - not there
-  yet included - it gives {"dir","error"} as `ls` does, non-zero.
+  yet included - it gives {"dir","dir_abs","error"} as `ls` does, non-zero.
 
   `linked_from` counts only the pages that could be read. When another page
   could not be read, or the walk left a name or directory out, the count may
   be short: `--json` adds `linked_from_partial` (true) and a line under the
   page says how many places were not read. With every page read, neither
   stands. It leaves the exit code alone - `moai wiki ls` names those places.
+```
+
+## `moai wiki search`
+
+```
+Find the sections that match some words, best first
+
+Usage: moai wiki search [OPTIONS] <words>...
+
+Arguments:
+  <words>...  What to look for - several words are one query
+
+Options:
+  -n, --limit <LIMIT>        How many sections to show, best first [default: 10]
+      --json                 Machine-readable output. Every human line goes away
+      --no-color             Turn colour off (same as `--color never`)
+      --color <how>          auto|always|never (auto by default, off when piped)
+  -C, --dir <path>           Run in this directory (same as `git -C`)
+      --user <name (email)>  Who is doing this (from `git config` when absent)
+  -h, --help                 Print help
+
+  moai wiki search merge driver          several words, one query
+  moai wiki search '병합 드라이버' -n 5   -n/--limit, 10 unless given
+  moai wiki search merge --json
+
+  Every heading, at any level, starts a section; the text before the first
+  heading is one too. Words are lowercased and split at anything that is not a
+  letter, digit or `_`, and Korean, Chinese and Japanese text also matches two
+  letters at a time - such a word counts as matched where half its two-letter
+  pieces are; there is no stemming. A title or heading counts more than the
+  body, and a section matching more of the distinct words comes first. A
+  screen line is `path:line  Page title › Heading`, with the best line of the
+  section under it - the matched words in bold, which is decoration only. The
+  last line says how many of how many are shown and the command that opens a
+  page.
+
+  Nothing matching is not an error: the exit code is 0, as it is when the wiki
+  directory is not there yet. A page that could not be read makes it non-zero
+  once everything found is out, as `moai wiki ls` does.
+
+  --json gives {"dir","dir_abs","query","terms","hits":[{"slug","path","title",
+  "heading","anchor","line","score","snippet","snippet_line"}],
+  "total"}. `hits` is always there, `[]` when nothing matched; `total` counts
+  the matches before `--limit` cut the list. `line` and `snippet_line` count
+  from 1, the line to open in an editor. `heading` and `anchor` are absent on
+  the section before a page's first heading; `snippet` and `snippet_line` are
+  absent when the page could not be read. `score` shows the ranking, not a
+  contract - trust the order, not the values, and never compare them across
+  queries. A page whose text could not be read is matched by its title alone
+  and named in `unread`, [{"slug","path","error"}] with `error` as `ls`
+  gives it; a place the walk left out is in `skipped`, as in `ls`. Each key
+  stands only when it has something. When the wiki directory cannot be used
+  it gives {"dir","dir_abs","error"} as `ls` does.
+```
+
+## `moai wiki learn`
+
+```
+Write a new lesson page and note it on the issue it came from
+
+Usage: moai wiki learn [OPTIONS] <lesson>
+
+Arguments:
+  <lesson>  The lesson in one line, the page's title. A lone `-x` needs `--`
+
+Options:
+      --slug <kebab>         The file name, in lowercase ASCII kebab case
+  -b, --body <text>          The page body, markdown. `-` reads stdin
+      --issue <id>           The issue it came from; `none` for the page alone
+      --dry-run              Print the path and the text; write nothing
+      --json                 Machine-readable output. Every human line goes away
+      --no-color             Turn colour off (same as `--color never`)
+      --color <how>          auto|always|never (auto by default, off when piped)
+  -C, --dir <path>           Run in this directory (same as `git -C`)
+      --user <name (email)>  Who is doing this (from `git config` when absent)
+  -h, --help                 Print help
+
+moai wiki learn 'End a check on the step that must pass' -b - <<'LESSON'
+## What happened
+...
+## Why
+...
+## Do this instead
+...
+LESSON
+
+  It writes a new page, <wiki_dir>/lessons/<slug>.md - `# <title>`, the body as
+  given, and `Learned in: <id>` - and, in the same call, a note on that issue:
+  `Lesson: lessons/<slug>`. The body needs a `## Do this instead` heading and
+  does not open with a `# ` title of its own: the title is the argument.
+  `## What happened` and `## Why` are worth writing too.
+
+  --slug names the file, in lowercase ASCII kebab case. An ASCII title makes
+  one by itself; any other title needs --slug. --issue is the issue the lesson
+  came out of. Without it, the one row you have picked up is used - with none
+  or several picked up, it is refused and asks for --issue. --issue none writes
+  the page alone, and then who you are is not asked.
+
+  It only creates: a page already standing at that path is refused and left
+  as it is. If the lesson is the same, note it again - `moai note <id>
+  'Lesson: lessons/<slug>'`; if the page is wrong, edit the file. The page is
+  written in this checkout - in a linked worktree, in that worktree, to ride
+  the branch - while the note goes to the main checkout's tracker. Nothing is
+  committed: the last lines say how. When the note cannot be written the page
+  stays, the exit code is non-zero, and the line to note it again is given.
+  The wiki directory itself is never made - a missing one is refused.
+
+  --dry-run prints the path and the text and writes nothing. --json gives
+  {"path","slug","issue","noted"}: `path` from the checkout, `slug` as
+  `moai wiki show` takes it, `issue` absent under --issue none, and `noted`
+  true once the note is written. --dry-run adds "dry_run":true and `text`.
 ```
 
 ## `moai tui`
@@ -2516,7 +2660,7 @@ Order:
   Milestones and epics behave like directories. Move around on the left and
   what the cursor rests on is described on the right.
 
-  j and k or the arrow keys move, Enter goes in, Backspace comes back out.
+  j and k or the arrow keys move, Enter goes in, Bksp comes back out.
   On a milestone or epic row, l and the right arrow unfold one step there and
   h and the left arrow fold it. On an unfolded member row, h folds its parent
   and lands on the parent; with nothing to fold it leaves one level. On a
@@ -2535,7 +2679,9 @@ Order:
   movement key moves the focused pane — to scroll the detail, go there with
   Ctrl-w w.
   / searches, Esc clears the filter you set. r marks the row under the cursor
-  as read (see [NEW] below).
+  as read (see [NEW] below). ? (or SPC h) opens a window listing every
+  key, read from the same table as moai keys. The movement keys scroll
+  it and ? closes it again.
   The search and filter fields take Enter to apply and Esc to give up, the
   search filters the list as you type, and Tab and Shift-Tab pick where it
   looks: everything, id, title, tag, body or note (everything reads the
@@ -2554,18 +2700,19 @@ Order:
 
   The rest lives in the menu that opens the moment you press SPC. The menu
   stands up only what works where you are, ignores keys it does not know,
-  closes on Esc or SPC and goes one level up on Backspace. Keys that move
+  closes on Esc or SPC and goes one level up on Bksp. Keys that move
   the focused pane close the menu and make that move in the same press,
-  unless a key on that level holds the letter (SPC g, SPC g l, SPC c h,
-  SPC v l, SPC m g).
+  unless a key on that level holds the letter (SPC g, SPC h,
+  SPC g l, SPC c h, SPC v l, SPC m g).
   Toggles and sorts (SPC v, SPC c, SPC s) do not close it — try them, watch
   the state, and leave with Esc. That level says so at the bottom right with a
   close hint.
     SPC /    search              SPC f    filter             SPC n    jot
-    SPC q    quit
+    SPC h    keys                SPC q    quit
     SPC p a  register            SPC p d  drop from the list
   Screen — which one stands; the root menu names it, as in [board]:
     SPC g l  list                SPC g b  board — described below
+    SPC g g  gantt — the list opened out beside a date axis (see below)
     SPC g s  statistics — the numbers `moai stats` gives, drawn (see below)
     SPC g w  wiki — the project's manual pages, read only (see below)
   View — every toggle except the list columns (SPC c) is here:
@@ -2698,7 +2845,7 @@ Order:
   apart. On a narrow card the tags and the epic name shrink, longest first, so
   whose it is and the dates still show. j and k move within the
   column, h and l go to the next column at the nearest height, gg and G go to
-  the column's ends, Enter and Backspace go in and out as in the list, and Tab
+  the column's ends, Enter and Bksp go in and out as in the list, and Tab
   does nothing. The whole board scrolls as one; the column names stay on top.
   When the columns do not fit, the column the cursor stands in always stands
   and the frame title names the rest with their counts. Clicking a card puts
@@ -2713,13 +2860,51 @@ Order:
   top card in a column goes up to it — and there l unfolds, h folds, Tab
   unfolds everything and Enter goes in, as in the list.
 
+  SPC g g lays the same rows out as a gantt chart: the list, every group opened
+  out, stays fixed on the left and a date axis with bars stands on the right.
+  It is the list's layout too — the cursor, the filter, the view, search and
+  the detail are the list's — but it holds its own folds: it opens with
+  everything unfolded, h, l and Tab fold and unfold only inside it,
+  and the list keeps the folds it had. Coming back to the list opens the
+  folder that holds the row you stood on. The detail stands below the gantt at
+  first; SPC o d there moves the gantt's detail only, for this session.
+  The planned bar (░, ▒ on a group)
+  runs from the start to the deadline and ◆ marks the row's own deadline; █
+  over it is when the work actually ran, ▓ is the time past a deadline, ┄ is
+  a deferred row's plan, and ▼ over a dotted line marks today.
+  Groups that wrote no days of their own span their members' days. Planned days
+  are calendar days; actual times are shown in your time zone.
+  Keys that stand only in the gantt move the date axis:
+    = -  zoom in and out — hour, day, week, month
+    H L  one cell earlier and later   [ ]  a page earlier and later
+    t    today in the middle           z    fit every row on one screen
+  It opens fitted, and stays fitted as rows come and go until you move it.
+  These keys are under [gantt] in keys.toml and win only inside the gantt: a
+  [browse] line that uses one of them still works in the list and the board.
+  On a narrow window the rows give up their columns first and then the dates
+  are hidden, which the header says; a low window folds the ▼ row away.
+  Moving a plan writes the row, the way `moai edit --start --due` does. The
+  keys move the cursor row's plan by a day: < and > the whole plan,
+  { and } only its start.
+  With the mouse, drag a bar's middle to move the plan, its left end to move
+  the start and its right end to move the deadline; it snaps to whole days and
+  is written once, when you let go. Clicking an empty day on a row with no
+  planned days plans that one day. Groups whose bar spans their members are
+  not moved — move the members. When a move is refused (a start after the
+  deadline, a day past the deadline above) the refusal is on the banner; a
+  move that went through names the `moai edit` line that puts it back.
+  Clicking a row puts the cursor on it and the wheel scrolls the rows; a
+  sideways wheel, or Shift and the wheel, slides the dates, and so does
+  dragging the date header. Dragging the line between the rows and the dates
+  widens the rows, and that width is kept under [tui] as gantt_label.
+
   With registered projects (`moai project add`), 0 lists them all — a header
   row per project with that project's rows under it. Started outside a
   `.moai` it begins there; started inside one it begins in that project.
   Coming out through 0 leaves the project you were in unfolded and the rest
   as header rows only — a project is read the moment it unfolds (its header
   spins while it reads).
-  Enter on a header row goes into that project, Backspace only goes up a
+  Enter on a header row goes into that project, Bksp only goes up a
   directory. Enter on a group row under it goes into that project and lands
   there — you never drill down in the one list; drilling down always happens
   inside a project.
@@ -2730,7 +2915,7 @@ Order:
   with SPC p a (`--json` gives an empty `projects` array and exits 0).
 
   SPC p a opens a window to pick a directory and register it as a project —
-  it walks in and out one level at a time (Enter and Backspace, moving with
+  it walks in and out one level at a time (Enter and Bksp, moving with
   the same j, k, gg and G as the list), and directories with a `.moai` and those
   already registered are marked. Inside the window, a registers the directory
   under the cursor, `.` shows or hides dotted directories, and g p opens a
@@ -2830,7 +3015,7 @@ Order:
 ## `moai web`
 
 ```
-Serve this tracker as a page on 127.0.0.1, read-only
+Serve this tracker as a page on 127.0.0.1
 
 Usage: moai web [OPTIONS]
 
@@ -2853,17 +3038,18 @@ Options:
   The first line names the address and the tracker. Ctrl-C stops it; there
   is nothing to clean up. It never opens a browser.
 
-  It never writes the tracker. Each list, issue and wiki page it serves is
-  the answer of `moai --json <command>`, run in a child process for that
-  request, so the page sees exactly what the CLI says. Writing stays with the
-  CLI and the explorer; the one write the page makes is your read marks
-  (`moai read`), taken only from the page itself. Registered projects
+  Each list, issue and wiki page it serves is the answer of `moai --json
+  <command>`, run in a child process for that request, so the page sees
+  exactly what the CLI says. Writing stays with the CLI and the explorer; the
+  page writes two things, taken only from the page itself: a Gantt bar dragged
+  to new days, run as `moai edit --shift`, and your read marks (`moai
+  read`). Registered projects
   (`moai project ls`) can be read too, by `?project=<path>`.
 
   --port is 6624 unless given. --host is 127.0.0.1 unless given; another
   address than a loopback one is served with a warning, because anyone who
-  reaches that port can read the tracker. Whatever it binds, it answers only
-  requests whose Host is localhost or an IP address.
+  reaches that port can read the tracker and move its planned days. Whatever
+  it binds, it answers only requests whose Host is localhost or an IP address.
 
   A port already in use stops it with the code port_in_use. Run inside a
   linked worktree, it serves the main checkout's tracker, as other commands
@@ -3437,7 +3623,8 @@ Options:
   status_* thresholds and the due_* rule that `moai due apply` reads. These
   are the values this binary acts on, so a surface drawing the board reads
   them here instead of parsing the file again. --json adds path, the file it
-  read.
+  read. A [models] table is left to `moai models`, which lays it under your
+  user config.
 
   It only reads; edit the file by hand to change a setting.
 ```
@@ -3445,7 +3632,7 @@ Options:
 ## `moai models`
 
 ```
-Read the model per role from your user config
+Read the model per role from your config and the repository's
 
 Usage: moai models [OPTIONS]
 
@@ -3457,17 +3644,76 @@ Options:
       --user <name (email)>  Who is doing this (from `git config` when absent)
   -h, --help                 Print help
 
-  moai models           the model per role, with defaults marked
-  moai models --json    one object for skills, including written keys and path
+  moai models           the model per role, where each value came from
+  moai models --json    one object for skills, including written keys and paths
 
-  Reads [models] in your user config. No .moai is needed; repository config
-  is not read. The place is MOAI_CONFIG, then $XDG_CONFIG_HOME/moai/config.toml,
-  then ~/.config/moai/config.toml. Missing files use the built-in defaults.
+  Reads [models] in your user config. No .moai is needed. The place is
+  MOAI_CONFIG, then $XDG_CONFIG_HOME/moai/config.toml, then
+  ~/.config/moai/config.toml. Missing files use the built-in defaults.
+
+  Inside a repository, a [models] table in .moai/config.toml recommends values
+  for that repository: it overrides the defaults, and your user config
+  overrides it. A line says repo when its value came from there, default when
+  nothing set it. A broken .moai/config.toml leaves the table as your user
+  config gives it.
 
   Model names are strings. review_grade, effort and effort_complex accept
   low, medium, high, xhigh or max. Invalid values fall back per key and warn;
-  unknown keys warn. written lists only valid, known keys from the config.
-  This command only reads; edit the user config by hand to change the table.
+  unknown keys warn. written lists the valid, known keys from your user config,
+  repo the ones the repository table set that your config did not, and
+  repo_path that file (null when it set none). The level lines name the roles
+  they pair with. This command only reads; edit the files by hand.
+```
+
+## `moai keys`
+
+```
+Show the explorer's keys and what your keys.toml changed
+
+Usage: moai keys [OPTIONS]
+
+Options:
+      --template             Print a starter keys.toml (nothing is written)
+      --json                 Machine-readable output. Every human line goes away
+      --no-color             Turn colour off (same as `--color never`)
+      --color <how>          auto|always|never (auto by default, off when piped)
+  -C, --dir <path>           Run in this directory (same as `git -C`)
+      --user <name (email)>  Who is doing this (from `git config` when absent)
+  -h, --help                 Print help
+
+  moai keys               every key the explorer runs on, changed ones marked
+  moai keys --template    a keys.toml with every action, commented out
+  moai keys --json        one object: the file, the dropped lines, every action
+
+  The keys of `moai tui` live in their own file next to your user config:
+  MOAI_KEYS, else keys.toml beside the config (MOAI_CONFIG, then
+  $XDG_CONFIG_HOME/moai/config.toml, then ~/.config/moai/config.toml). It is
+  read once when the explorer starts, when help is printed and by this
+  command; no other command opens it.
+
+    [browse]
+    quit = "SPC x"            one key sequence
+    grep = ["/", "SPC /"]     several: the first is the name shown
+    jot  = "none"             unbind it; [] does the same
+    [moves]
+    line_down = "n"           j, k, gg and the rest move every window at once
+
+  Write only what you change. A line replaces every key of that action, the
+  hidden ones too (the arrows) — list them again to keep them. Key names are
+  spelt as the explorer shows them: SPC, Enter, Esc, Tab, Shift-Tab, Bksp, Up,
+  Down, Home, End, PageUp, PageDown, F1, Ctrl-x, Alt-x, and a capital letter
+  for Shift; a sequence is names apart by spaces (SPC v d), or a doubled letter
+  (gg).
+  A line that is wrong is dropped alone and that action keeps its default:
+  an unknown section or action, a name that is not a key, or a key that
+  clashes with another or waits for a longer one. The explorer says so in one
+  line and still opens; this command lists them on stderr and exits 0. A file
+  that is not TOML is dropped whole. Ctrl-C, the digits 0-9, SPC v 1-9, SPC
+  itself and keys inside text fields cannot be changed, and a window's close
+  key can move but not be set to none.
+
+  --template prints a starter file; save it yourself, nothing is written:
+    moai keys --template > ~/.config/moai/keys.toml
 ```
 
 ## `moai update`

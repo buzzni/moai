@@ -12,6 +12,341 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+## [0.29.0] - 2026-10-26
+
+### Added
+
+- **A repository can recommend models per role.** A `[models]` table in
+  `.moai/config.toml` overrides the built-in defaults, and `[models]` in your
+  user config overrides it — the repository recommends, you choose. `moai models`
+  marks a value that came from there `repo` and names the file; `--json` adds
+  `repo` (the keys it set) and `repo_path`. A bad value there is named with the
+  file and skipped, and never stops another command. (moai-w25x.jud)
+- **The first `moai init` names `moai models`** in one line; it asks nothing.
+  (moai-w25x.1ar)
+
+### Changed
+
+- **`moai models` marks each line for its own value.** A role line no longer
+  carries its effort in a tail that the `default` mark then covered; the level
+  lines (`effort`, `effort_complex`, `review_grade`) name the roles they pair
+  with instead. (moai-w25x.yrm)
+- **The supervisor unfolds a backlog item on the `plan` role's model** and sends
+  the worker the unfolded epic from step 2; the role is then measured on the
+  members it wrote. Before, the `plan` key was read by nothing. (moai-w25x.jby)
+- **The supervisor settles the `model:` lines before it writes
+  `Report-checked:`**, so a supervisor that starts again does not skip them.
+  (moai-w25x.qi8)
+- **The worker's steps are two files**: `references/worker.md` holds the path
+  every assignment takes, and `references/worker-branches.md` the rare branches
+  (person away, a subdirectory project, carrying on stalled work, a review rule 3
+  keeps refusing, the review brief). (moai-w25x.mgu)
+- **Panes that `moai-tmux` and `moai-recover` open keep no shell under the
+  session.** They open with `remain-on-exit` instead of `; exec bash`: when
+  `claude` (or Codex) exits, its last screen stays and tmux drops keys and
+  refuses pastes aimed at it, so a message meant for a dead session no longer
+  runs in a shell. The input-box check reads `#{pane_dead}` beside
+  `#{pane_in_mode}`. Panes a person opened keep the session-map check as before.
+  (moai-jn8d)
+
+### Fixed
+
+- **A pick-up the hook cannot read is recorded anyway.** `moai mv` now writes
+  its own pick-up for the Claude Code session after the write, so
+  `$M mv <id> in_progress` and `moai mv "$R" …` count as that session's — before,
+  with other sessions running, such a row belonged to nobody and rule 3 refused
+  the review. Only rows that are the caller's after `--take` are recorded, and
+  Codex and Antigravity shells record nothing. (moai-w25x.831)
+- **A repository path with a space no longer breaks the launch lines** in
+  `moai-tmux`, `moai-cmux` and `moai-recover` — `<root>` and `<cwd>` are quoted
+  in `split-window -c`, in cmux's `--command 'cd …'` and in the line printed to
+  type outside both. (moai-jn8d)
+- **A worker started with cmux `claude-teams` gets its tab in the session map.**
+  Its record carries the shim's stand-in (`cmux:@….%…`) as `tmux`, which the map
+  read as a tmux pane, so the cmux branch gave that worker — and a supervisor
+  started that way — `-`. Only a real tmux pane id (`:@<n>.%<n>`) counts as tmux
+  now. (moai-jn8d)
+- **`moai-recover` no longer brings back a conversation already left behind.** A
+  dead session that another window resumed and then cleared with `/clear` (or
+  its aliases `/new` and `/reset`) stayed a candidate, since no live row carried
+  its old id. It now reads `~/.claude/history.jsonl`, which logs each `/clear`
+  under the id it cleared, and drops a candidate cleared after its transcript
+  last moved — the lines a `/clear` writes as it interrupts a running turn do not
+  count as moving. (moai-jn8d.vyh)
+- **Hook rule 2 judges where a write lands, not where the shell stands.** A
+  session whose held work all has a worktree is now refused a root write made by
+  absolute path after its shell `cd`'d into the worktree, a write chained after a
+  pick-up on the same line, and a write into another epic's worktree; the refusal
+  names the same file in its own worktree. Rule 2 also counts the destination of
+  `cp`, `mv` and `install`. (moai-qrja)
+- **Hook rule 4 under cmux `claude-teams` also stops `send-keys`, `split-window`,
+  `new-window` and `respawn-pane`**, which cmux's tmux shim sends to the person's
+  cmux, and knows the shim after `unset TMUX` or with a real tmux ahead on `PATH`.
+  A single quoted command string (`tmux 'ls; kill-server'`) is read as commands,
+  and the line a rule-4 refusal hands back keeps the quoting that was typed.
+  (moai-qrja)
+- **The hook reads the session pick-up records only when they can change the
+  answer**, once per call, instead of on every tool call. (moai-qrja)
+
+## [0.28.0] - 2026-10-26
+
+### Added
+
+- **`?` (or `SPC h`) in the explorer opens a window that lists every key** —
+  the keys you press straight away (`r`, `h`, `l`, `Tab`), the movement keys,
+  every menu item with its group, and the keys of the gantt, the stats window and
+  the wiki window, in one to three columns by the size of the screen. It reads
+  the same table as `moai keys`, so a key changed in
+  `keys.toml` shows as changed. The movement keys and the wheel scroll it and `?`,
+  `Esc` or `Backspace` close it; `SPC h` opens it over the stats and wiki windows
+  too. The bottom bar names `?` while there is room, and the root menu gains `h`
+  as its last item. (moai-ucyr)
+
+### Changed
+
+- **`SPC h` in the explorer opens the key list instead of closing the menu and
+  folding the row**, and `?` is now a key of its own. A `keys.toml` line that
+  gives `?`, `SPC h` or a key starting with `SPC h` to another action now clashes
+  with `browse.help` and is dropped, as any clash with a default is — move that
+  line to another key, or rebind `help` first. (moai-ucyr)
+
+## [0.27.0] - 2026-10-26
+
+### Added
+
+- **`moai wiki ls --json` and `moai wiki search --json` carry `dir_abs`**, the
+  wiki directory as an absolute path in this checkout, beside `dir` (which is
+  relative to it). It is absent when `wiki_dir` points outside the checkout and
+  when that path is not UTF-8. (moai-xp7l)
+- **The explorer's detail and the `moai web` issue panel show the wiki about the
+  issue**, after its commits: the pages that name it or its epic and the related
+  sections, as `moai show <id>` lists them (the web panel adds the lessons its
+  notes point at). The explorer reads the wiki once per checkout, so a page
+  written after it opened shows once `SPC g w` has read the wiki again, or the
+  next time it opens. In `moai show <id> --json`, a related section whose
+  heading is the page title itself carries `title_heading: true`, so a screen
+  leaves that heading off. (moai-xp7l)
+- **`moai edit --shift <±N>`, `--shift-start <±N>` and `--shift-due <±N>`** move
+  a row's planned days by whole days, measured from the days the row holds when
+  it is written — the whole plan, the start alone, or the deadline alone, as a
+  Gantt drag does. `--if-unplanned` writes `--start`/`--due` only on a row with
+  no planned day and refuses one that has some. (moai-vj8w)
+
+### Changed
+
+- **The wiki search in the explorer (`/` in `SPC g w`) and in `moai web`'s wiki
+  tab puts pages in `moai wiki search`'s order** — the pages its words rank,
+  best first, then the pages that only contain the typed letters. (moai-xp7l)
+- **The web Gantt's drag writes the move, not the days.** `/api/plan/<id>` takes
+  `edge`/`days` or `day` and runs `moai edit --shift…` or
+  `--if-unplanned`, so a row another session moved after the page read it moves
+  on from there instead of being given the dragged days, and planning a day on a
+  row that gained days meanwhile is refused. `start`/`due` on that path are
+  refused now. (moai-vj8w)
+- **The web Gantt judges lateness in the zone it draws in.** `/api/tree` takes
+  `tz=<zone>` and the page sends the zone picked with `SPC o t`; a name this
+  machine's tzdata cannot open leaves the server's zone. (moai-vj8w)
+- **The TUI Gantt's month names follow the screen language** (`10월`, not
+  `Oct`, on a Korean screen). (moai-vj8w)
+- **The web Gantt draws only the rows and dates in view**, and does not let you
+  drag a row shown only from a sibling worktree, an archived row, or a `◆` whose
+  day it cannot read. The TUI's dependency arrows no longer map the off-screen
+  part of a long path. (moai-vj8w)
+
+### Fixed
+
+- **`moai note` takes an issue `moai archive` moved away**, and so does
+  `moai wiki learn --issue`; the note goes to the journal and the row stays in
+  the archive. Before, both said the issue was not found, so a lesson learned
+  on old work could not be noted where it came from. (moai-xp7l)
+- **`moai note` and `moai wiki learn` no longer pass a note the journal lost as
+  written** — a hand-edited snapshot made the note's write count as a write,
+  and a journal that could not be written then passed as success: `moai note`
+  ended 0 saying not to call it again, and `wiki learn` reported `noted: true`.
+  Both now fail and print the `moai note` line to run again. (moai-xp7l)
+- **`moai wiki learn` writes the title so it reads back as given** — `<Foo>`,
+  `&amp;`, `*` and a trailing `#` stay text, where `<Foo>` vanished from the
+  title and `&amp;` read as `&`. A `_` inside a word is left as it is. (moai-xp7l)
+- **`moai wiki learn` takes a lesson that starts with `-`** when it has a space
+  in it; a lone `-x` goes after `--`. Before, it was refused as an unknown flag.
+  (moai-xp7l)
+- **A `moai wiki learn` killed halfway no longer leaves a page blocking that
+  name** — the page appears whole or not at all. The unfinished copy is written
+  under `.moai/`, where git ignores it, so it never rides the `git add -- docs`
+  the command prints. (moai-xp7l)
+- **`moai wiki search` and the wiki in `moai show <id>` no longer repeat a page's
+  title as its heading** when the title line carries markup — an escape,
+  emphasis, a link or an entity (`Set wiki_dir › Set wiki\_dir`). The heading is
+  compared with the title as it is drawn, and the title section's words are no
+  longer counted twice in its score. (moai-xp7l)
+
+## [0.26.0] - 2026-10-25
+
+### Added
+
+- **`moai wiki search <words…>`** finds the wiki's sections for some words and
+  lists them best first, each with the `path:line` to open. `--json` gives the
+  same hits with a `total`, and names the pages it could not read (`unread`)
+  and the places it left out (`skipped`) the way `moai wiki ls --json` does.
+  (moai-g8pt)
+- **`moai show <id>` shows the wiki about that issue** above its history: the
+  pages that name the issue or its epic, and up to three related sections found
+  from the title, one per page. `--json` carries it as `wiki` (`named_in`,
+  `related`), with `wiki_error` when the wiki directory cannot be read; the list
+  form `moai show [filters] --json` does not carry it. (moai-g8pt)
+- **`moai wiki learn '<lesson>'`** writes a new lesson page,
+  `<wiki_dir>/lessons/<slug>.md` (`# <lesson>`, the body from `-b`, and
+  `Learned in: <id>`), and in the same call notes `Lesson: lessons/<slug>` on the
+  issue it came from — `--issue <id>`, or the one row you have picked up, or
+  `--issue none` for the page alone. The body needs a `## Do this instead`
+  section and must close any code fence or HTML comment it opens. A non-ASCII
+  title needs `--slug` (lowercase ASCII kebab case). It only
+  creates: a page already standing there is refused and left as it is. The page
+  is written in the checkout you are in, so in a worktree it rides that branch;
+  nothing is committed. `--dry-run` shows the path and the text, and asks no
+  one who you are. Run without
+  picking anything up, the hooks now count it as a change to the repository
+  (rule 2). (moai-4s5n)
+- **Where a lesson stood is read from its `Lesson: lessons/<slug>` notes.**
+  `moai wiki show lessons/<slug>` ends with a `Seen in` list (row, title, day,
+  latest first), `moai wiki ls` puts `×N` (different rows) beside each lesson
+  and says in one line when a note on open work names a page this checkout
+  does not have,
+  and `moai show <id>` lists the lessons the row's own notes point at and marks
+  lesson pages with a `lesson` word. `--json` carries `seen_count` (`wiki ls`),
+  `seen` (`wiki show`) and `wiki.lessons` and `lesson: true` (`show <id>`).
+  Archived rows count; nothing is stored and nothing is blocked. (moai-4s5n)
+- **The texts agents read now say when to write a lesson and how to read one.** The
+  `moai-wiki` skill has a Lessons section (four occasions, search first, a list of
+  what not to write, and a sweep step that merges, retires and asks about rules);
+  the AGENTS block closes with a line for it, the worker steps ask at 7-4 and a
+  subagent worker reports a `Lessons:` piece, and closing a review asks the same
+  question. Nothing checks it and no hook asks. (moai-4s5n)
+
+## [0.25.0] - 2026-10-25
+
+### Added
+
+- **The web page has a Gantt tab (`SPC g g`).** The tree, every folder open, stays on
+  the left; the dates scroll on the right at four zoom steps (hour, day, week, month;
+  `-`/`=`, `t` today, `z` fit). It draws what the TUI's Gantt draws, with the same
+  meaning: the planned span (hatched when an epic or milestone counts it from its
+  members), the actual span laid over it in the column's colour, the overdue stretch
+  in red with `!`, `◆` on a deadline-only row, the today line, `‹ ›` for what lies off
+  screen, `n/m` progress, and arrows from the rows that block the one under the cursor.
+  Click a row or a bar for its detail; Shift+wheel or dragging the date header moves
+  the dates; Ctrl+wheel over the dates zooms; the grid's width is dragged and kept.
+  The web detail now shows `start → deadline` too. `moai tui --deep --json` carries
+  each row's `gantt` — the planned and actual spans, progress, overdue days and live
+  blockers — so another program can draw the same chart. (moai-d86e.b2m,
+  moai-d86e.5wj, moai-d86e.en8, moai-d86e.jmq)
+- **A Gantt bar in the web page can be dragged to new days.** The middle moves the
+  start and the deadline together, either end moves one of them, by whole days, and
+  the row is written once, on release — as `moai edit <id> --start <day> --due
+  <day>`, with only the side that moved. A double-click on a day of a row with no
+  days plans that one day. A refusal (a start after the deadline, a day past the
+  deadline above) is shown in moai's words and the bar goes back; a move that went
+  through names the `moai edit` line that puts the days back. A bar an epic or
+  milestone counts from its members does not move. This is the page's first write
+  to the tracker, taken only from the page itself, like the read marks.
+  (moai-d86e.3ud)
+
+## [0.24.0] - 2026-10-25
+
+### Added
+
+- **Any row can carry a planned start, not only a milestone.** `--start` works
+  on `add`, `edit`, `epic add` and `backlog add` the way `--due` does, and `+N`
+  means N days from today in your time zone (stored as the date). A start after
+  the row's own deadline is refused, and so is a start later than the deadline of
+  the milestone, epic or parent above it — the message names that ancestor and the
+  latest day it can take; when the start and the deadline both pass it, the
+  message names both flags so one write fixes them. A start earlier than the
+  parent's start is never refused. Only the row being written is checked: pulling
+  an ancestor's deadline in below a child's start never blocks, it prints one line
+  naming the rows it pushed past, and `moai status` counts them in
+  `due_beyond_parent` (its text now says "deadlines or starts"). The CLI and
+  explorer detail show `start → deadline` (the web detail does not yet), and
+  `--filter starts_on=2026-10-01~2026-10-05` keeps rows by their own start.
+  (moai-xf0p.6d5, moai-xf0p.cbu)
+- **A plan line can end in `@start~deadline`.** `@2026-10-25~2026-10-30` is a
+  start and a deadline, `@2026-10-25~` a start alone, and `@2026-10-30` stays a
+  deadline as before; epic lines and issue lines both take them, and a start after
+  its deadline stops the plan with the line number — so does `@~2026-10-30`, a
+  range with no start, instead of staying in the title (`\@~` keeps it as text).
+  `add --from --start` puts the start on each epic the plan creates that has no
+  `@` of its own — a line that writes any `@` keeps both flags off it.
+  `backlog promote` carries the backlog item's start onto the epic as it does its
+  deadline, and `--dry-run` and `show --as-plan` print the same range.
+  (moai-xf0p.due)
+- **A gantt layout in the explorer — `SPC g g`.** The list, every group opened
+  out, stays fixed on the left and a date axis with bars stands on the right:
+  the planned start to deadline, when the work actually ran, the time past a
+  deadline, and today. Groups that wrote no days of their own span their
+  members. `-` and `=` zoom, `H` `L` `[` `]` slide the dates, `t` centres today
+  and `z` fits every row. `<` `>` move the cursor row's plan a day and `{` `}`
+  its start; with the mouse, drag a bar's middle or either end, or click an
+  empty day on a row with no plan. A move is written the way `moai edit --start
+  --due` writes it — refused past the deadline above — and the notice names the
+  `moai edit` line that puts it back. The gantt keeps its own folds, its detail
+  stands below at first, and the width of its fixed column is kept under `[tui]`
+  as `gantt_label`. (moai-i4hf)
+
+### Changed
+
+- **`-` `=` `+` `H` `L` `[` `]` `t` `z` `<` `>` `{` `}` are now the gantt's keys
+  in the explorer** — in the gantt only. A `keys.toml` line under `[browse]` that
+  gives one of them to another action keeps working in the list and the board;
+  in the gantt that key does the gantt's thing. The gantt's keys have a section
+  of their own, `[gantt]`, one key per line, and a line there that would hide a
+  list key in the gantt is the one that is dropped. (moai-i4hf, moai-l80o)
+- **`starts_on` is no longer refused on rows that are not milestones.** A binary
+  from before this release still refuses it: it cannot edit an issue, epic or
+  backlog item that carries a start — not even its title, and not `defer` — and
+  says to clear it with `moai edit <id> --start none`. Upgrade every binary that
+  writes the tracker before giving such a row a start. (moai-xf0p.6d5)
+- **Claude workers no longer go into their worktree.** Every `EnterWorktree`
+  into `.worktrees/` made Claude Code ask the person to approve it, and no allow
+  rule turned that off. The worker steps (`moai-supervise`'s `references/worker.md`)
+  now have session workers stay in the root and reach the worktree by absolute
+  path, as subagent workers already did; the supervisor's message carries a
+  `Worktree:` line saying so, and the `moai` skill's "Words per agent" table says
+  the same for Claude. (moai-9js2)
+- **Hook rule 2 now also refuses a write to the main checkout while everything
+  you hold has its worktree standing.** A session in the root no longer gets
+  Claude Code's worktree isolation guard, so a relative `src/x.rs` would land in
+  the checkout every session shares; the refusal names the same file inside the
+  worktree. Work with no worktree, a session inside a linked worktree and a person
+  at a terminal are not affected. (moai-9js2.3xn)
+### Fixed
+
+- `moai backlog promote` left its history notes in Korean whatever the screen
+  language — `<id> 에서 펼쳤다` on the new epic (on each new issue with `-e`) and
+  `… 로 펼쳤다` on the backlog item it closed. They are now written in English
+  (`Unfolded from <id> — <title>`, and `Unfolded into <ids>, N issues` or, with `-e`,
+  `Unfolded into <epic> as <ids>`), like the other notes moai writes itself
+  (`Taken-over:`, `Due-priority:`). Notes written before keep their words.
+- The backlog title `promote` copies into that note is folded onto one line. A title
+  hand-edited to hold a line break reached the note when an already closed backlog item
+  was unfolded again, and a `model: …` line in it counted as AI work in `moai stats`.
+
+## [0.23.0] - 2026-10-23
+
+### Added
+
+- **Your own keys for the explorer.** A `keys.toml` next to your user config
+  (or wherever `MOAI_KEYS` points) changes the keys of `moai tui` line by line —
+  `[browse] quit = "SPC x"`, several keys as a list, `"none"` to unbind, and one
+  `[moves]` section for the movement keys of every window. Only the lines you
+  write change. A line that is wrong or clashes with another key is dropped on
+  its own, that action keeps its default, and the explorer opens and says so in
+  one line. The menu, the key bar and `moai tui --help` name the keys you set.
+  Other commands never open the file. (moai-pxiy)
+- **`moai keys`** shows the keys the explorer runs on, marks the ones your file
+  changed and lists the lines it dropped and why (on stderr, exit 0).
+  `--template` prints a starter `keys.toml` with every action commented out;
+  `--json` gives the same as one object. (moai-so7w)
+
 ## [0.22.0] - 2026-10-22
 
 ### Added

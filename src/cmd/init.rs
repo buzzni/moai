@@ -2433,6 +2433,9 @@ pub fn run(ctx: &Ctx, flags: &Choice, yes: bool) -> R<Vec<String>> {
     if !again {
         out.push(String::new());
         out.push(say(lang, "init.next").to_string());
+        // **모델은 묻지 않고 이른다**(moai-w25x.1ar, 2026-10-26 사용자 결정) — `[models]` 는 사람의 설정이라 저장소를
+        // 세우는 자리에서 물으면 두 번째 저장소에서 같은 것을 또 묻는다. 처음 세울 때 한 줄로 자리만 댄다.
+        out.push(say(lang, "init.models").to_string());
     }
     Ok(out)
 }

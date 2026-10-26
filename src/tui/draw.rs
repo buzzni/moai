@@ -7,8 +7,7 @@
 use super::Surfaced;
 use super::form::{Field, Form, Target};
 use super::keys::{
-    self, BROWSE, Browse, CONFIRM, Confirm, Ctx, Goto, JOT, Jot, LEADER, MENU, Menu, PATH, PICK, PROMPT, Pick, Prompt,
-    label, labels,
+    self, Browse, Confirm, Ctx, Goto, JOT, Jot, LEADER, Menu, PATH, PROMPT, Pick, Prompt, label, labels, said,
 };
 use super::layer::{Look, Place, Shut};
 use super::menu;
@@ -158,7 +157,11 @@ pub fn screen(f: &mut Frame, app: &mut App) {
     // 굴리지 않는다. 격자에 줄 높이는 몸통의 몫([`menu::BODY_MIN`])을 먼저 남기고 정하고, 그것도
     // 없으면 격자 없이 접두어 줄 한 줄로 접는다([`menu_line`]). 헤더의 높이(`header_h`)는 위에서 이미 셌다.
     let open_menu =
-        (matches!(app.mode, Mode::Browse | Mode::Stats(_) | Mode::Wiki(_)) && menu::open(&app.chord)).then(|| {
+        // 키 목록 창이 떠 있으면 메뉴는 안 선다 — 그 창이 `SPC h` 를 기다리는 동안에도 열이 SPC 로 선다(`App::help_key`).
+        (matches!(app.mode, Mode::Browse | Mode::Stats(_) | Mode::Wiki(_))
+            && app.help.is_none()
+            && menu::open(&app.chord))
+            .then(|| {
             let ctx = app.key_ctx(&rows);
             let items = menu::entries(app.chord.held(), &ctx, &app.screen_statuses());
             let left = area.height.saturating_sub(header_h + 1 + banner_h + keys_h) as usize;
@@ -217,9 +220,14 @@ pub fn screen(f: &mut Frame, app: &mut App) {
         f.render_widget(Paragraph::new(banner_line(&text, note.width as usize, style, dimmed)), note);
     }
     // **보드는 목록 자리에 선다**(moai-9nfw) — 새 창이 아니라 목록의 배치라 상세·포커스·마우스의 칸은 그대로다.
+    let mut chart = None;
     let (rows_at, cards, columns) = if app.board() {
         let b = board(f, app, left, &rows);
         (Rect::default(), b.cards, b.columns)
+    } else if app.gantt() {
+        let (rows_at, at) = gantt(f, app, left, &rows);
+        chart = Some(at);
+        (rows_at, Vec::new(), Vec::new())
     } else {
         (list(f, app, left, &rows), Vec::new(), Vec::new())
     };
@@ -239,6 +247,7 @@ pub fn screen(f: &mut Frame, app: &mut App) {
         menu,
         menu_keys: Vec::new(),
         wiki: None,
+        chart,
     };
     if let Some(right) = right {
         detail(f, app, right, &rows);
@@ -283,6 +292,10 @@ pub fn screen(f: &mut Frame, app: &mut App) {
         }
         _ => {}
     }
+    // 키 목록 창은 무엇을 그렸든 그 위에 선다(moai-ucyr) — 통계·위키 창 위에서도 연다.
+    if let Some(sheet) = &mut app.help {
+        help_sheet(f, sheet, body, lang);
+    }
     // 위키 창의 칸 자리 — 마우스가 맞힌다(moai-o3cb). 창이 몸통을 덮으므로 목록·상세의 자리 대신 이것을 읽는다.
     app.drawn.wiki = wiki_at;
     // 메뉴에서 누를 수 있는 칸 — 격자 창과 접두어 줄이 칠한 자리에서 저마다 낸다(moai-m6ni). 다 그린 뒤 한 번 남긴다.
@@ -312,6 +325,7 @@ pub fn screen(f: &mut Frame, app: &mut App) {
 
     // 맨 아랫줄은 하나다 — 글을 받는 중이면 프롬프트가, 아니면 키 바가 선다.
     match &app.mode {
+        _ if app.help.is_some() => help_keys(f, app.keys.browse, keys, app.site.lang),
         Mode::Browse => match &open_menu {
             Some((items, grid, waits)) => menu_keys.extend(menu_line(f, app, items, grid, *waits, keys)),
             None => fkeys(f, app, &rows, keys, !header_numbered),
@@ -337,8 +351,8 @@ pub fn screen(f: &mut Frame, app: &mut App) {
                     say(lang, "tui.hint.pick"),
                     &[
                         ("keys", &labels(PROMPT, &[Prompt::NextScope, Prompt::PrevScope, Prompt::Up, Prompt::Down])),
-                        ("ok", &label(PROMPT, Prompt::Apply)),
-                        ("cancel", &label(PROMPT, Prompt::Cancel)),
+                        ("ok", &said(PROMPT, Prompt::Apply)),
+                        ("cancel", &said(PROMPT, Prompt::Cancel)),
                     ],
                 )
             } else {
@@ -366,13 +380,13 @@ pub fn screen(f: &mut Frame, app: &mut App) {
             );
             prompt(f, line, say(lang, "tui.prompt.who"), &ask.input, ask.error.clone(), &help);
         }
-        Mode::Backlog(form) => jot_keys(f, form, keys, app.site.lang),
+        Mode::Backlog(form) => jot_keys(f, form, app.keys.confirm, keys, app.site.lang),
         Mode::Pick(p) => match &p.typing {
             Some(input) => {
                 let lang = app.site.lang;
                 let help = fill(
                     say(lang, "tui.pick.goto_help"),
-                    &[("go", &label(PATH, Goto::Go)), ("cancel", &label(PATH, Goto::Cancel))],
+                    &[("go", &said(PATH, Goto::Go)), ("cancel", &said(PATH, Goto::Cancel))],
                 );
                 prompt(f, keys, say(lang, "tui.prompt.path"), input, p.error.clone(), &help)
             }
@@ -384,7 +398,7 @@ pub fn screen(f: &mut Frame, app: &mut App) {
             let help = prompt_help(say(lang, "tui.prompt.hang"), lang);
             prompt(f, keys, say(lang, "tui.tz.title"), &z.typing, None, &help)
         }
-        Mode::Sort(_) => sort_keys(f, keys, app.site.lang),
+        Mode::Sort(_) => sort_keys(f, app.keys.sorter, keys, app.site.lang),
         Mode::Stats(w) => match &open_menu {
             Some((items, grid, waits)) => menu_keys.extend(menu_line(f, app, items, grid, *waits, keys)),
             None => stats_keys(f, w, keys, app.site.lang),
@@ -402,7 +416,7 @@ pub fn screen(f: &mut Frame, app: &mut App) {
             let name = clip(&crate::text::one_line(&u.name), (room / 2).max(1));
             let asked = fill(
                 say(app.site.lang, "tui.unregister.confirm"),
-                &[("name", &name), ("yes", &label(CONFIRM, Confirm::Yes))],
+                &[("name", &name), ("yes", &said(app.keys.confirm, Confirm::Yes))],
             );
             let line = Line::from(Span::styled(asked, ask));
             f.render_widget(Paragraph::new(fit(line, keys.width as usize)), keys);
@@ -474,13 +488,13 @@ fn pick(f: &mut Frame, p: &mut Picker, at: Rect, lang: Lang) {
     if p.at.hidden > 0 {
         foot.push(fill(
             say(lang, "tui.pick.hidden_count"),
-            &[("n", &p.at.hidden.to_string()), ("key", &label(PICK, Pick::Hidden))],
+            &[("n", &p.at.hidden.to_string()), ("key", &said(p.keys, Pick::Hidden))],
         ));
     }
     if p.at.cut > 0 {
         foot.push(fill(
             say(lang, "tui.pick.cut_count"),
-            &[("n", &p.at.cut.to_string()), ("key", &label(PICK, Pick::Path))],
+            &[("n", &p.at.cut.to_string()), ("key", &said(p.keys, Pick::Path))],
         ));
     }
     let mut block = Block::default()
@@ -567,12 +581,97 @@ fn sort_edit(f: &mut Frame, e: &super::sorter::Editor, at: Rect, lang: Lang) {
     );
 }
 
+/// 키 목록 창(`?`·`SPC h`, moai-ucyr) — 몸통 가운데 뜨는 상자. 열마다 왼쪽이 키, 오른쪽이 낱말이고 절의 머리가 굵게
+/// 선다. 키 색은 SPC 메뉴의 키 칸과 같다 — 같은 것을 같은 색으로 댄다.
+///
+/// **화면 크기에 따라 한 열에서 세 열까지 선다**(moai-c4tz, 2026-10-26 사용자 요청) — 높이에 다 드는 가장 적은 열,
+/// 안 들면 폭에 드는 가장 많은 열이다([`super::help::lay_out`]). 굴리기는 열들을 함께 굴린다.
+///
+/// **그린 높이와 판의 줄 수를 창에 적는다** — 반 쪽·한 쪽 굴리기와 끝이 그것으로 잰다([`super::help::Sheet::step`]),
+/// 창이 줄어 굴린 자리가 끝을 넘었으면 여기서 당긴다.
+fn help_sheet(f: &mut Frame, s: &mut super::help::Sheet, at: Rect, lang: Lang) {
+    use super::help::{GAP, Line as L, lay_out};
+    use crate::text::width;
+    // 테두리 둘과 옆 여백 둘.
+    let room = at.width.saturating_sub(4) as usize;
+    let laid = lay_out(&s.lines, room, at.height.saturating_sub(2) as usize);
+    // `clamp(24, room)` 이 아니다(리뷰) — 28칸보다 좁은 창에서 `room` 이 24 밑이라 `clamp` 가 패닉한다. 바닥 24 를 먼저
+    // 대고 폭으로 누른다: 좁으면 폭이 이긴다.
+    let inner = laid.width().max(24).min(room.max(1));
+    let w = (inner as u16).saturating_add(4).min(at.width);
+    let h = (laid.rows as u16).saturating_add(2).min(at.height);
+    let area = Rect { x: at.x + (at.width - w) / 2, y: at.y + (at.height - h) / 2, width: w, height: h };
+    f.render_widget(Clear, area);
+    let rows = h.saturating_sub(2) as usize;
+    (s.height, s.span) = (rows, laid.rows);
+    s.top = s.top.min(laid.rows.saturating_sub(rows));
+    let cell = |l: Option<&&L>, cw: usize, kw: usize| -> Vec<Span<'static>> {
+        let mut spans = match l {
+            Some(L::Head(t)) => vec![Span::styled(clip(t, cw), bold())],
+            Some(L::Key { keys, what }) => {
+                let k = clip(keys, kw);
+                let pad = " ".repeat(kw.saturating_sub(width(&k)));
+                vec![
+                    Span::raw(" "),
+                    Span::styled(k, bold().fg(MENU_KEY)),
+                    Span::raw(format!("{pad}  ")),
+                    Span::raw(clip(what, cw.saturating_sub(kw + 3))),
+                ]
+            }
+            None => Vec::new(),
+        };
+        let used: usize = spans.iter().map(|s| width(&s.content)).sum();
+        spans.push(Span::raw(" ".repeat(cw.saturating_sub(used))));
+        spans
+    };
+    // 열마다 (그릴 폭, 키 칸). 한 열도 폭에 안 들면(좁은 창) 그 열을 폭까지 자르고, **그때만** 키 칸이 반을 넘지 않는다 —
+    // 낱말이 통째로 밀려나면 키만 남아 뜻이 없다. 제 폭에 다 드는 열까지 반으로 누르면(리뷰) 키가 낱말보다 긴 열에서
+    // 자리가 있는데도 키가 `…` 로 잘린다.
+    let dims: Vec<(usize, usize)> = laid
+        .columns
+        .iter()
+        .map(|c| {
+            let cw = c.width.min(inner);
+            (cw, if cw < c.width { c.key_w.min(cw.saturating_sub(1) / 2) } else { c.key_w })
+        })
+        .collect();
+    let lines: Vec<Line> = (s.top..s.top + rows)
+        .map(|r| {
+            let mut spans = Vec::new();
+            for (n, (c, &(cw, kw))) in laid.columns.iter().zip(&dims).enumerate() {
+                if n > 0 {
+                    spans.push(Span::raw(" ".repeat(GAP)));
+                }
+                spans.extend(cell(c.lines.get(r), cw, kw));
+            }
+            Line::from(spans)
+        })
+        .collect();
+    let at_of = fill(say(lang, "tui.help.at"), &[("at", &(s.top + 1).to_string()), ("of", &laid.rows.to_string())]);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Thick)
+        .border_style(from_anstyle(style::FOCUS))
+        .padding(Padding::horizontal(1))
+        .title(format!(" {} ", say(lang, "tui.help.title")))
+        .title_bottom(Line::from(Span::styled(format!(" {at_of} "), dim())).right_aligned());
+    f.render_widget(Paragraph::new(lines).block(block), area);
+}
+
+/// 키 목록 창의 키 바 — 굴리기와 닫기. 키 이름은 탐색의 표에서 읽는다(창이 그 표로 키를 받는다, `App::help_key`).
+fn help_keys(f: &mut Frame, table: &[keys::Bind<keys::Browse>], at: Rect, lang: Lang) {
+    use keys::Browse as B;
+    let scroll = labels(table, &[B::Step(Move::LineDown), B::Step(Move::LineUp)]);
+    let close = labels(table, &[B::Help, B::ClearFilter]);
+    bar(f, at, vec![key(&scroll, say(lang, "tui.help.scroll"))], vec![key(&close, say(lang, "tui.act.close"))]);
+}
+
 /// 차례 편집 창의 키 바 — 키 이름은 표([`super::keys::SORTER`])에서 읽는다. 좁으면 걷기·옮기기부터 뺀다 — 입히고
 /// 그만두는 길이 끝까지 선다.
-fn sort_keys(f: &mut Frame, at: Rect, lang: Lang) {
-    use super::keys::{SORTER, Sorter};
-    let hint = |a: Sorter| key(&label(SORTER, a), a.what(lang));
-    let pair = |a: Sorter, b: Sorter| key(&labels(SORTER, &[a, b]), a.what(lang));
+fn sort_keys(f: &mut Frame, table: &[keys::Bind<super::keys::Sorter>], at: Rect, lang: Lang) {
+    use super::keys::Sorter;
+    let hint = |a: Sorter| key(&label(table, a), a.what(lang));
+    let pair = |a: Sorter, b: Sorter| key(&labels(table, &[a, b]), a.what(lang));
     let optional = vec![pair(Sorter::Down, Sorter::Up), pair(Sorter::Lower, Sorter::Raise), hint(Sorter::Flip)];
     bar(f, at, optional, vec![hint(Sorter::Toggle), hint(Sorter::Apply), hint(Sorter::Default), hint(Sorter::Close)]);
 }
@@ -1071,18 +1170,18 @@ fn stats_text(st: &crate::report::stats::Stats, width: u16, lang: Lang) -> Vec<S
 /// 통계 창의 키 바 — 칸 너비 바꾸기·굴리기·닫기, 그리고 화면을 고르는 SPC 메뉴(moai-z46r). 이름과 낱말은 키 표
 /// ([`keys::STATS`])에서 읽는다.
 fn stats_keys(f: &mut Frame, w: &super::stats::Window, at: Rect, lang: Lang) {
-    use super::keys::{STATS, Stat};
+    use super::keys::Stat;
     let weekly = w.bucket == crate::report::stats::Bucket::Week;
     if !w.chord.held().is_empty() {
-        let next = keys::next_keys(STATS, w.chord.held())
+        let next = keys::next_keys(w.keys.stats, w.chord.held())
             .into_iter()
             .map(|(k, a)| (k, if let Stat::Step(m) = a { keys::move_word(m, lang) } else { a.what(weekly, lang) }))
             .collect();
         return bar(f, at, Vec::new(), vec![waiting(w.chord.held(), next)]);
     }
-    let scroll = labels(STATS, &[Stat::Step(Move::LineDown), Stat::Step(Move::LineUp)]);
+    let scroll = labels(w.keys.stats, &[Stat::Step(Move::LineDown), Stat::Step(Move::LineUp)]);
     let optional = vec![key(&scroll, Stat::Step(Move::LineDown).what(weekly, lang))];
-    let hint = |a: Stat| key(&label(STATS, a), a.what(weekly, lang));
+    let hint = |a: Stat| key(&label(w.keys.stats, a), a.what(weekly, lang));
     let menu = key(&menu::title(&[LEADER.event()]), menu::root(lang));
     bar(f, at, optional, vec![hint(Stat::Bucket), hint(Stat::Close), menu]);
 }
@@ -1197,7 +1296,7 @@ fn wiki_list(f: &mut Frame, w: &mut super::wiki::Window, at: Rect, lang: Lang) -
         at,
         &mut state,
     );
-    let hint = if focused { String::new() } else { format!(" ({})", label(keys::WIKI, keys::Wiki::FocusNext)) };
+    let hint = if focused { String::new() } else { format!(" ({})", said(w.keys.wiki, keys::Wiki::FocusNext)) };
     scroll_mark(f, &w.list, at, &hint, focused, lang);
     // 찾기에 하나도 안 걸렸으면 빈 칸 대신 그렇다고 말한다 — 빈 목록은 위키가 사라진 것으로 읽힌다.
     if n == 0 && inner.height > 0 {
@@ -1346,9 +1445,9 @@ fn wiki_page(f: &mut Frame, w: &mut super::wiki::Window, at: Rect, raw: bool, la
         .collect();
     f.render_widget(block.title(clip(&title, at.width.saturating_sub(2) as usize)), at);
     let hint = if focused {
-        labels(keys::WIKI, &[keys::Wiki::Step(Move::LineDown), keys::Wiki::Step(Move::LineUp)])
+        labels(w.keys.wiki, &[keys::Wiki::Step(Move::LineDown), keys::Wiki::Step(Move::LineUp)])
     } else {
-        label(keys::WIKI, keys::Wiki::FocusNext)
+        said(w.keys.wiki, keys::Wiki::FocusNext)
     };
     scroll_mark(f, &w.page, at, &format!(" ({hint})"), focused, lang);
     f.render_widget(Paragraph::new(visible), inner);
@@ -1500,7 +1599,7 @@ fn link_aim(t: &super::wiki::Target, lang: Lang) -> Option<(String, Option<&'sta
 /// `Bksp` 를 안 댄다(눌러도 아무 일이 없다). 본문의 링크가 골라졌으면 `Enter` 곁에 그 대상이 낱말로 선다(2026-10-04
 /// 사용자 결정, moai-p61w) — 반전 하나로는 어디로 가는지가 안 읽힌다.
 fn wiki_keys(f: &mut Frame, w: &super::wiki::Window, at: Rect, lang: Lang) {
-    use super::keys::{WIKI, Wiki};
+    use super::keys::Wiki;
     // **치는 동안은 칸이 선다** — 하나도 안 걸렸으면 칸 곁에서 그렇다고 댄다(글을 버리지 않는다).
     if let Some(t) = &w.typing {
         let none = w.shown().is_empty().then(|| say(lang, "tui.wiki.no_match").to_string());
@@ -1510,16 +1609,16 @@ fn wiki_keys(f: &mut Frame, w: &super::wiki::Window, at: Rect, lang: Lang) {
     // 고르기 창이 떠 있으면 그 창의 키 — 이름과 낱말은 그 표([`keys::LINKS`])에서 읽는다. `gg` 의 첫 `g` 를 들고
     // 있으면 이을 키를 댄다(아래 창의 열과 같다).
     if let Some(c) = &w.choose {
-        use super::keys::{LINKS, Link};
+        use super::keys::Link;
         if !c.chord.held().is_empty() {
-            let next = keys::next_keys(LINKS, c.chord.held())
+            let next = keys::next_keys(w.keys.links, c.chord.held())
                 .into_iter()
                 .map(|(k, a)| (k, if let Link::Step(m) = a { keys::move_word(m, lang) } else { a.what(lang) }))
                 .collect();
             return bar(f, at, Vec::new(), vec![waiting(c.chord.held(), next)]);
         }
-        let moves = labels(LINKS, &[Link::Step(Move::LineDown), Link::Step(Move::LineUp)]);
-        let hint = |a: Link| key(&label(LINKS, a), a.what(lang));
+        let moves = labels(w.keys.links, &[Link::Step(Move::LineDown), Link::Step(Move::LineUp)]);
+        let hint = |a: Link| key(&label(w.keys.links, a), a.what(lang));
         let optional = vec![key(&moves, Link::Step(Move::LineDown).what(lang))];
         return bar(f, at, optional, vec![hint(Link::Enter), hint(Link::Close)]);
     }
@@ -1530,14 +1629,14 @@ fn wiki_keys(f: &mut Frame, w: &super::wiki::Window, at: Rect, lang: Lang) {
     let aim = picked.filter(|_| on_page).and_then(|k| w.link_target(k)).and_then(|t| link_aim(&t, lang));
     let what = |a: Wiki| a.what(on_page, w.searched(), picked.is_some(), lang);
     if !w.chord.held().is_empty() {
-        let next = keys::next_keys(WIKI, w.chord.held())
+        let next = keys::next_keys(w.keys.wiki, w.chord.held())
             .into_iter()
             .map(|(k, a)| (k, if let Wiki::Step(m) = a { keys::move_word(m, lang) } else { what(a) }))
             .collect();
         return bar(f, at, Vec::new(), vec![waiting(w.chord.held(), next)]);
     }
-    let hint = |a: Wiki| key(&label(WIKI, a), what(a));
-    let moves = labels(WIKI, &[Wiki::Step(Move::LineDown), Wiki::Step(Move::LineUp)]);
+    let hint = |a: Wiki| key(&label(w.keys.wiki, a), what(a));
+    let moves = labels(w.keys.wiki, &[Wiki::Step(Move::LineDown), Wiki::Step(Move::LineUp)]);
     let optional = vec![key(&moves, what(Wiki::Step(Move::LineDown))), hint(Wiki::FocusNext), hint(Wiki::NextLink)];
     let mut rest = Vec::new();
     if w.can_go_back() {
@@ -1550,7 +1649,7 @@ fn wiki_keys(f: &mut Frame, w: &super::wiki::Window, at: Rect, lang: Lang) {
         // **대상이 길면 줄인다** — 밖 주소는 수십 칸이라 그대로 대면 뒤의 `Esc`·`SPC 메뉴` 가 바 밖으로 밀려 말없이
         // 잘린다(나갈 길을 못 찾는 것이 [`key`] 가 막는 일이다). 줄인 자리는 `…` 가 댄다.
         Some((to, tail)) => {
-            let name = label(WIKI, Wiki::Enter);
+            let name = said(w.keys.wiki, Wiki::Enter);
             let tail = tail.map(|t| format!(" {t}")).unwrap_or_default();
             let fixed = crate::text::width(&format!(" {name} → {tail}")) + spans_width(&rest);
             let to = clip(to, (at.width as usize).saturating_sub(fixed).max(1));
@@ -1607,7 +1706,7 @@ fn pick_keys(f: &mut Frame, p: &Picker, at: Rect, lang: Lang) {
     }
     // `g` 가 기다리는 동안은 무엇을 기다리는지 댄다 — 탐색의 바와 같은 모양이다.
     if !p.chord.held().is_empty() {
-        let next = keys::next_keys(PICK, p.chord.held())
+        let next = keys::next_keys(p.keys, p.chord.held())
             .into_iter()
             .map(|(k, a)| {
                 (k, if let Pick::Step(m) = a { keys::move_word(m, lang) } else { a.what(p.show_hidden, lang) })
@@ -1616,7 +1715,7 @@ fn pick_keys(f: &mut Frame, p: &Picker, at: Rect, lang: Lang) {
         return bar(f, at, Vec::new(), vec![waiting(p.chord.held(), next)]);
     }
     // 이름과 낱말은 키 표([`PICK`])에서 읽는다. 여기서 정하는 것은 차례뿐이다.
-    let hint = |a: Pick| key(&label(PICK, a), a.what(p.show_hidden, lang));
+    let hint = |a: Pick| key(&label(p.keys, a), a.what(p.show_hidden, lang));
     let optional = vec![hint(Pick::Hidden), hint(Pick::Path), hint(Pick::Up), hint(Pick::Enter)];
     bar(f, at, optional, vec![hint(Pick::Register), hint(Pick::Close)]);
 }
@@ -1720,10 +1819,10 @@ fn jot_head<'a>(into: &Target, w: usize, tint: Style, lang: Lang) -> Line<'a> {
 ///
 /// 거절된 까닭(빈 제목)과 버릴지 묻는 말은 이 줄을 차지한다 — 키 안내는 폼을 연
 /// 순간 이미 봤고, 지금 답해야 할 것은 그 말이다.
-fn jot_keys(f: &mut Frame, form: &Form, at: Rect, lang: Lang) {
+fn jot_keys(f: &mut Frame, form: &Form, confirm: &[keys::Bind<Confirm>], at: Rect, lang: Lang) {
     let line = if form.leaving {
         let ask = Style::new().fg(Color::Black).bg(Color::LightYellow);
-        let asked = fill(say(lang, "tui.jot.discard"), &[("yes", &label(CONFIRM, Confirm::Yes))]);
+        let asked = fill(say(lang, "tui.jot.discard"), &[("yes", &said(confirm, Confirm::Yes))]);
         Line::from(Span::styled(asked, ask))
     } else if let Some(e) = &form.error {
         Line::from(vec![
@@ -2297,7 +2396,7 @@ fn split_body(body: Rect, app: &App) -> (Rect, Option<Rect>) {
     if !app.detail_open {
         return (body, None);
     }
-    let at = app.detail_at;
+    let at = app.detail_side();
     if at.vertical() && body.height < LIST_MIN_V + DETAIL_MIN_V {
         return (body, None);
     }
@@ -2329,7 +2428,7 @@ fn crumbs(f: &mut Frame, app: &App, rows: &[Row], at: Rect) {
     let hung = app.hung.as_ref().map(|h| {
         let said = fill(
             say(lang, "tui.crumbs.filter"),
-            &[("text", &badge(h, lang)), ("key", &label(BROWSE, Browse::ClearFilter))],
+            &[("text", &badge(h, lang)), ("key", &said(app.keys.browse, Browse::ClearFilter))],
         );
         clip(&said, w)
     });
@@ -2350,7 +2449,7 @@ fn crumbs(f: &mut Frame, app: &App, rows: &[Row], at: Rect) {
     let overlay = (app.worktree && !trees.is_empty()).then(|| {
         let names = trees.join(", ");
         let off = match Browse::Worktree.enabled(&app.key_ctx(rows)) {
-            Ok(()) => fill(say(lang, "tui.crumbs.overlay_off"), &[("key", &label(BROWSE, Browse::Worktree))]),
+            Ok(()) => fill(say(lang, "tui.crumbs.overlay_off"), &[("key", &said(app.keys.browse, Browse::Worktree))]),
             Err(_) => String::new(),
         };
         clip(&format!("{} {names}{off}", style::BRANCH_GLYPH), w / 2)
@@ -2506,9 +2605,9 @@ fn prompt_room(avail: usize, error: usize) -> (usize, usize) {
 
 /// 목록을 그리고 **줄이 선 자리**를 낸다 — 테두리와 열 이름 줄을 뗀 안쪽이다. 마우스가 누른 줄을 그것으로 센다
 /// (`mouse::Drawn::rows`).
-fn list(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) -> Rect {
-    // 테두리 두 칸을 뺀 안쪽 폭. 좁은 창에서도 음수가 되지 않게 막는다.
-    let inner = at.width.saturating_sub(2) as usize;
+/// 목록의 열을 잰다 — 줄마다의 셈 글, 왼쪽 열의 폭, 걷고 남은 열. 목록과 간트의 고정 칸이 같은 자로 잰다(moai-i4hf):
+/// 둘이 따로 재면 `SPC g l` ↔ `SPC g g` 를 오갈 때 같은 줄이 다른 열로 선다. `inner` 는 줄 하나에 줄 폭이다.
+fn measure(app: &App, rows: &[Row], inner: usize) -> (Vec<String>, Head, super::view::Fields) {
     // **셈은 줄마다 한 번만 센다** — 머리를 걷는 셈(`Head::of`)·오른쪽 열 걷기·이름 줄·줄(`row_line`)이
     // 같은 글을 본다. 셈 자체는 적재 때 센 것을 읽지만(`Index::tally`, moai-m7iy) 줄마다 경로를 짓고 글을
     // 지으므로, 자리마다 다시 부르면 그 값을 프레임마다 여러 번 치른다.
@@ -2534,7 +2633,11 @@ fn list(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) -> Rect {
         },
         Row::Up | Row::Project(_) => common,
     });
+    (tallies, cols, common)
+}
 
+/// 목록 칸의 제목 — 칸별 건수나 줄 수. 간트도 같은 제목을 단다(moai-i4hf).
+fn list_title<'a>(app: &App, rows: &[Row]) -> Line<'a> {
     // 제목에 칸별 건수를 **config 차례로** 낸다. 칸 이름과 순서는 저장소가
     // 정하는 것이라(`config.statuses`) 여기서 다시 정하지 않는다.
     //
@@ -2580,7 +2683,7 @@ fn list(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) -> Rect {
     // `..` 은 줄로 안 센다 — 층이 있으면 프로젝트 뿌리에도 서므로, 세면 빈 프로젝트가
     // " 1줄 " 로 서고 "비었다" 에 영영 못 닿는다.
     let lines = rows.iter().filter(|r| !matches!(r, Row::Up)).count();
-    let title: Line = match (counts.is_empty(), lines == 0) {
+    match (counts.is_empty(), lines == 0) {
         // 층의 줄은 일이 아니라 프로젝트다 — 칸 셈은 줄마다 곁에 선다.
         // 한눈 보기의 제목은 **프로젝트 수**다 — 줄 수로 세면 펼친 프로젝트의 이슈까지 프로젝트로
         // 읽혀 "프로젝트 40곳" 이 선다(moai-3f1b).
@@ -2610,7 +2713,14 @@ fn list(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) -> Rect {
             spans.push(Span::raw(" "));
             Line::from(spans)
         }
-    };
+    }
+}
+
+fn list(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) -> Rect {
+    // 테두리 두 칸을 뺀 안쪽 폭. 좁은 창에서도 음수가 되지 않게 막는다.
+    let inner = at.width.saturating_sub(2) as usize;
+    let (tallies, cols, common) = measure(app, rows, inner);
+    let title = list_title(app, rows);
     // **자리는 프레임을 넘어 산다**(`App::list`). 매번 새로 세면 훑는 자리가 0 으로
     // 돌아가, 커서를 보이게 하려고 커서를 늘 맨 아랫줄에 붙인다 — 커서 아래를 한
     // 줄도 못 보게 된다. 굴리는 셈은 상세와 같은 조각이 하고, 위젯은 그 자리를 받아
@@ -2682,6 +2792,75 @@ fn list(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) -> Rect {
     );
     scroll_mark(f, &app.list, at, "", app.focus == Pane::Explorer, app.site.lang);
     list_at
+}
+
+/// 간트를 그린다(moai-i4hf) — **목록 자리에** 고정 칸과 날짜 칸을 세운다. 테두리·제목·굴린 자리(`App::list`)가
+/// 목록과 한 벌이고, 고정 칸의 줄은 목록의 줄(`row_line`)을 같은 자로 잰 것이다 — `SPC g l` ↔ `SPC g g` 를 오가도
+/// 같은 줄이 같은 열로 선다. 날짜 칸은 위젯(`moai_gantt::Gantt`)이 그린다.
+///
+/// 낸 값은 줄의 자리(고정 칸부터 날짜 칸 끝까지 — 마우스가 그 안의 줄을 누르면 목록처럼 커서가 그 줄로 간다)와 위젯이
+/// 선 자리다(`mouse::Drawn::chart`).
+fn gantt(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) -> (Rect, Rect) {
+    let block = frame(app, Pane::Explorer).title(list_title(app, rows));
+    let inner_at = block.inner(at);
+    f.render_widget(block, at);
+    // 창에 맞춘 보기로 잰다(moai-i4hf.25n) — 좁으면 고정 칸이 줄고, 낮으면 머리글이 두 줄이다. 키와 마우스도 이 자로 잰다.
+    let laid = moai_gantt::Layout::of(inner_at, &app.chart_view(inner_at));
+    let body = laid.labels_body;
+    app.list.fit(body.height as usize, rows.len());
+    let selected = (!rows.is_empty()).then_some(app.cursor.min(rows.len().saturating_sub(1)));
+    if let Some(at) = selected
+        && !app.rolled_off(rows)
+    {
+        app.list.reveal(at);
+    }
+    let window = app.list.offset()..app.list.offset() + body.height as usize;
+    // 커서 칸(`> `)은 목록처럼 늘 자리를 둔다 — 안 두면 커서가 움직일 때마다 줄이 그 폭만큼 들썩인다. **잴 폭은 고정 칸
+    // 전부다** — 목록의 `inner` 와 같은 자: `row_line` 은 커서 칸을 제 몫에서 빼고 재고, `names_line` 은 그 칸을 비워 두고
+    // 시작한다. 커서 칸을 한 번 더 빼면 줄은 두 칸 좁게 잘리고 열 이름은 값보다 두 칸 오른쪽에 선다.
+    let pad = CURSOR.chars().count();
+    let budget = body.width as usize;
+    let (tallies, cols, common) = measure(app, rows, budget);
+    let chart = app.chart_of(rows, window, &|n, r| {
+        let mark = if selected == Some(n) { CURSOR.to_string() } else { " ".repeat(pad) };
+        let mut line = row_line(app, r, &tallies[n], budget, common, cols);
+        line.spans.insert(0, Span::raw(mark));
+        line
+    });
+    // 열 이름 줄은 목록과 같은 때에만 선다 — 사람이 끈 이름 줄(`Field::Names`)과 이슈 줄 없는 한눈 보기에서는 비운다.
+    let tallied = tallies.iter().any(|t| !t.is_empty());
+    let named = common.shows(super::view::Field::Names) && rows.iter().any(|r| matches!(r, Row::Item(..)));
+    let title = if named { names_line(common, cols, tallied, budget) } else { Line::default() };
+    app.chart.first_row = app.list.offset();
+    app.chart.refit(chart.range, laid.dates_width());
+    let mut view = app.chart_view(inner_at);
+    let month_names = super::gantt::names_in(app.site.lang);
+    let widget = moai_gantt::Gantt {
+        rows: &chart.rows,
+        links: &chart.links,
+        now: chart.now,
+        focus: selected,
+        title,
+        names: Some(&month_names),
+        palette: moai_gantt::Palette::default(),
+        glyphs: moai_gantt::Glyphs::default(),
+    };
+    f.render_stateful_widget(widget, inner_at, &mut view);
+    // **빈 날짜 칸과 감춘 날짜 칸은 그렇다고 한 줄로 댄다**(moai-i4hf.25n) — 빈 칸만 서면 고장 난 줄 안다. 날 든 줄이 하나도
+    // 없으면 날을 넣는 길을, 창이 좁아 날짜 칸을 감췄으면 그 까닭을 댄다. 고정 칸은 그대로 선다.
+    let lang = app.site.lang;
+    let dim_line = |text: &str, w: u16| Paragraph::new(Line::from(Span::styled(clip(text, w as usize), dim())));
+    if app.dates_hidden(inner_at) {
+        let note = Rect::new(laid.labels_header.x, laid.labels_header.y + 1, inner_at.width, 1);
+        if laid.labels_header.height > 1 {
+            f.render_widget(dim_line(say(lang, "tui.gantt.narrow"), note.width), note);
+        }
+    } else if chart.range.is_none() && laid.dates_body.height > 0 {
+        let note = Rect::new(laid.dates_body.x, laid.dates_body.y, laid.dates_body.width, 1);
+        f.render_widget(dim_line(say(lang, "tui.gantt.no_dates"), note.width), note);
+    }
+    scroll_mark(f, &app.list, at, "", app.focus == Pane::Explorer, lang);
+    (Rect::new(body.x, body.y, inner_at.width, body.height), inner_at)
 }
 
 /// 보드가 그린 자리 — 마우스가 맞히는 바탕이다(`mouse::Drawn::cards`·`columns`).
@@ -3643,6 +3822,8 @@ fn detail(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) {
     fill_body(app, rows, inner.width as usize);
     // **걸린 노트 줄도 그리기 전에 편다**(리뷰 moai-wcy8.rbj) — 본문과 같은 까닭이고, 노트는 본문보다 크다.
     fill_note_hits(app, rows, inner.width as usize);
+    // **Wiki 토막도 그리기 전에 짓는다**(moai-xp7l.vyw) — 위키를 읽고 순위를 매기는 값이라 프레임마다 못 한다.
+    fill_wiki(app, rows);
 
     let lines = match app.current_of(rows) {
         // **빈 층은 할 일을 댄다**(moai-r8kl). 등록이 0 인 채 `.moai` 밖에서 띄운 자리다 — "없다"
@@ -3650,7 +3831,7 @@ fn detail(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) {
         None if app.on_layer() => {
             let lang = app.site.lang;
             let mut out = vec![Line::from(Span::styled(say(lang, "tui.layer.no_projects"), bold())), Line::from("")];
-            let how = fill(say(lang, "tui.layer.how_to_register"), &[("key", &label(BROWSE, Browse::Pick))]);
+            let how = fill(say(lang, "tui.layer.how_to_register"), &[("key", &said(app.keys.browse, Browse::Pick))]);
             out.extend(wrapped(&how, inner.width as usize, dim()));
             out
         }
@@ -3698,9 +3879,9 @@ fn detail(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) {
     // 움직이므로(moai-ob4c) 목록에 선 사람에게 `j·k` 라 적으면 누른 대로 커서가 옮겨 가고
     // 보던 상세가 바뀐다. 목록에서는 상세로 가는 키를 댄다.
     let hint = if app.focus == Pane::Detail {
-        labels(BROWSE, &[Browse::Step(Move::LineDown), Browse::Step(Move::LineUp)])
+        labels(app.keys.browse, &[Browse::Step(Move::LineDown), Browse::Step(Move::LineUp)])
     } else {
-        label(BROWSE, Browse::FocusNext)
+        said(app.keys.browse, Browse::FocusNext)
     };
     let hint = format!(" ({hint})");
     scroll_mark(f, &app.detail, at, &hint, app.focus == Pane::Detail, app.site.lang);
@@ -4180,6 +4361,138 @@ fn about<'a>(app: &App, site: &Site, idx: usize, e: &Entry, w: usize) -> Vec<Lin
         for (short, subject) in drawn {
             // 제목은 폭에서 잘린다(`fit`) — 한 커밋이 한 줄이어야 해시와 제목이 짝으로 읽힌다.
             out.push(Line::from(vec![Span::styled(short.to_string(), dim()), Span::raw("  "), Span::raw(subject)]));
+        }
+    }
+    // **위키 토막은 커밋 뒤다**(moai-xp7l.vyw) — CLI 상세(`moai show <id>`)의 토막과 같은 고름이다(`wiki::about`): 이
+    // id·에픽 id 를 댄 페이지, 제목 낱말로 선 관련 절. 지은 것은 [`fill_wiki`] 가 들여 둔다.
+    if let Some(wiki) =
+        app.wiki_about.as_ref().filter(|a| site.repo.as_ref().is_some_and(|r| a.fits(r.here(), i, wiki_epic(site, i))))
+    {
+        out.extend(about_wiki_lines(site.lang, wiki));
+    }
+    out
+}
+
+/// 상세의 Wiki 토막(moai-xp7l.vyw) — 커서가 선 줄의 것 하나를 지어 든다([`Body`] 와 같은 까닭). 줄이 아니라 글을
+/// 든다: 폭이 바뀌어도 다시 지을 것이 없고, 자르기는 그리는 쪽이 한 번에 한다. 교훈(`lessons`)은 안 든다 — 그 줄의
+/// 저널을 읽어야 하는데 탐색기는 노트를 찾을 때만 읽는다. CLI 상세와 `show --json` 의 `wiki.lessons` 가 낸다.
+pub(super) struct WikiAbout {
+    /// 지은 재료 — 체크아웃, id, 제목(관련 절의 질의), 에픽(댄 페이지의 둘째 id). [`WikiAbout::fits`] 가 견준다.
+    root: std::path::PathBuf,
+    id: String,
+    title: String,
+    epic: Option<String>,
+    named: Vec<WikiLine>,
+    related: Vec<WikiLine>,
+}
+
+impl WikiAbout {
+    /// 이 토막이 그 체크아웃의 그 줄을 **지금의 제목과 에픽으로** 지은 것인가 — 짓는 쪽([`fill_wiki`])과 그리는
+    /// 쪽([`about`])이 같은 자로 묻는다. **제목과 에픽도 견준다**(리뷰 moai-xp7l.mug) — 옆 세션이 커서 밑 줄의 제목이나
+    /// 에픽을 바꾸면 다시 읽기가 커서를 그 줄에 두니, 체크아웃과 id 만 보던 판은 옛 제목의 관련 절과 옛 에픽을 댄 페이지를
+    /// 커서가 떠날 때까지 그렸다. [`Body::fits`] 가 글 자체를 견주는 것과 같은 까닭이다.
+    fn fits(&self, root: &std::path::Path, i: &crate::model::Issue, epic: Option<&str>) -> bool {
+        self.root == root && self.id == i.id && self.title == i.title && self.epic.as_deref() == epic
+    }
+}
+
+/// 상세의 Wiki 토막이 대는 에픽 — `moai show` 의 자(`report::stands_in`, `derived_epic` 과 같은 답)다(리뷰
+/// moai-xp7l.mug): 묶음 줄은 없고, 종류가 다른 쌍둥이에게 id 가 가려진 줄(트리가 `(길 잃음)` 에 두는 줄)도 적힌 `epic`
+/// 과 상관없이 없다. 그 밖에는 적힌 `epic` 이 먼저, 없으면 물려받은 것이다. 상세의 에픽 칸(적힌 값을 먼저 대어 끊긴
+/// 참조를 드러낸다)과는 묻는 것이 다르다 — 여기는 소속이다.
+fn wiki_epic<'s>(site: &'s Site, i: &'s crate::model::Issue) -> Option<&'s str> {
+    if crate::report::is_group(i) {
+        return None;
+    }
+    crate::report::stands_in(&site.ground.kinds(), i, site.ground.epic.get(i.id.as_str()).map(String::as_str))
+}
+
+/// 토막의 한 줄 — `path` 나 `path:line`, 제목(관련 절이면 `› 머리글` 까지), 교훈 페이지인가.
+struct WikiLine {
+    at: String,
+    title: String,
+    lesson: bool,
+}
+
+/// 커서가 선 줄의 [`WikiAbout`] 를 짓는다 — 든 것이 그 줄에 맞으면([`WikiAbout::fits`]) 그대로다. 위키는 체크아웃마다
+/// 한 번 읽는다([`App::wiki_pages`]). 못 읽은 위키는 빈 토막이다 — CLI 상세의 사람 화면과 같다.
+fn fill_wiki(app: &mut App, rows: &[Row]) {
+    let Some(Row::Item(seat, e, _)) = app.current_of(rows) else { return };
+    let Some(at) = e.at() else { return };
+    // 먼저 위키를 들인다 — 읽은 페이지를 `App` 에 넣는 동안은 줄을 빌려 둘 수 없다.
+    let read = {
+        let Some(site) = app.site_of_seat(seat) else { return };
+        let (Some(repo), Some(i)) = (site.repo.as_ref(), site.issues.get(at)) else { return };
+        if app.wiki_about.as_ref().is_some_and(|w| w.fits(repo.here(), i, wiki_epic(site, i))) {
+            return;
+        }
+        let root = repo.here().to_path_buf();
+        (!app.wiki_pages.contains_key(&root))
+            .then(|| (root, crate::cmd::wiki::read_in(repo, &|_| true).1.map(|w| w.pages)))
+    };
+    // **못 읽은 위키는 안 담는다**(리뷰 moai-xp7l.mug) — 담으면 그 세션 내내 빈 토막이다. 없던 위키 디렉터리를 지으면
+    // 다음 줄에서 선다. 못 읽은 자리를 다시 묻는 값은 `stat` 하나다.
+    if let Some((root, Ok(pages))) = read {
+        app.wiki_pages.insert(root, pages);
+    }
+    let built = {
+        let Some(site) = app.site_of_seat(seat) else { return };
+        let (Some(repo), Some(i)) = (site.repo.as_ref(), site.issues.get(at)) else { return };
+        let unread = Vec::new();
+        let pages = app.wiki_pages.get(repo.here()).unwrap_or(&unread);
+        let epic = wiki_epic(site, i);
+        let about = crate::wiki::about::about(pages, i, epic, &[]);
+        let line =
+            |at: String, title: String, slug: &str| WikiLine { at, title, lesson: crate::wiki::seen::is_lesson(slug) };
+        let named =
+            about.named_in.iter().map(|n| line(n.page.path.clone(), n.page.title.clone(), &n.page.slug)).collect();
+        // 머리글을 다는 자는 CLI 상세와 한 자다(`view::wiki::section_of`) — 제목 절의 머리글은 제목 그 자체라 안 단다.
+        let related = about
+            .related
+            .iter()
+            .map(|h| {
+                let title = match crate::view::wiki::section_of(h) {
+                    Some(t) => format!("{} › {t}", h.page.title),
+                    None => h.page.title.clone(),
+                };
+                line(format!("{}:{}", h.page.path, h.line), title, &h.page.slug)
+            })
+            .collect();
+        WikiAbout {
+            root: repo.here().to_path_buf(),
+            id: i.id.clone(),
+            title: i.title.clone(),
+            epic: epic.map(str::to_string),
+            named,
+            related,
+        }
+    };
+    app.wiki_about = Some(built);
+}
+
+/// [`WikiAbout`] 를 줄로 — 빈 줄, 머리, 댄 페이지, 관련 절. 둘 다 비면 아무 줄도 없다. 낱말 칸은 둘 가운데 넓은 쪽에
+/// 맞추고 같은 묶음의 둘째 줄부터는 비운다(CLI 의 `view::wiki::about` 과 같은 꼴). 교훈은 색 없이도 `[교훈]` 이 선다.
+fn about_wiki_lines<'a>(lang: crate::i18n::Lang, a: &WikiAbout) -> Vec<Line<'a>> {
+    if a.named.is_empty() && a.related.is_empty() {
+        return Vec::new();
+    }
+    let (named, related) = (say(lang, "wiki.about_named"), say(lang, "wiki.about_related"));
+    let wide = crate::text::width(named).max(crate::text::width(related));
+    let mut out = vec![Line::from(""), Line::from(Span::styled(say(lang, "wiki.about_head"), bold()))];
+    for (word, list) in [(named, &a.named), (related, &a.related)] {
+        for (n, l) in list.iter().enumerate() {
+            let w = if n == 0 { word } else { "" };
+            let mut spans = vec![
+                Span::styled(format!("{w}{}", " ".repeat(wide - crate::text::width(w))), dim()),
+                Span::raw("  "),
+                Span::styled(crate::text::one_line(&l.at), dim()),
+                Span::raw("  "),
+                Span::raw(crate::text::one_line(&l.title)),
+            ];
+            if l.lesson {
+                spans.push(Span::styled(format!("  [{}]", say(lang, "wiki.lesson_mark")), dim()));
+            }
+            out.push(Line::from(spans));
         }
     }
     out
@@ -4743,7 +5056,7 @@ fn place_about<'a>(app: &App, at: usize, w: usize) -> Vec<Line<'a>> {
                 out.extend(wrapped(&said, w, dim()));
             }
             out.push(Line::from(""));
-            let how = fill(say(lang, "tui.place.enter"), &[("key", &label(BROWSE, Browse::Enter))]);
+            let how = fill(say(lang, "tui.place.enter"), &[("key", &said(app.keys.browse, Browse::Enter))]);
             out.push(Line::from(Span::styled(how, dim())));
         }
     }
@@ -4766,7 +5079,7 @@ fn fkeys(f: &mut Frame, app: &App, rows: &[Row], at: Rect, unnumbered: bool) {
     // `g` 가 기다리는 동안은 메뉴와 같은 자리에서 **무엇을 기다리는지** 댄다(moai-k3yi). 뜻 없는
     // 키를 누르면 열이 버려져([`keys::Chord::feed`]) 바가 저절로 돌아온다.
     if !app.chord.held().is_empty() {
-        let next = keys::next_keys(BROWSE, app.chord.held())
+        let next = keys::next_keys(app.keys.browse, app.chord.held())
             .into_iter()
             .filter(|(_, a)| a.enabled(&c).is_ok())
             .map(|(k, a)| (k, if let Browse::Step(m) = a { keys::move_word(m, c.lang) } else { a.what(&c) }))
@@ -4796,7 +5109,11 @@ fn waiting(held: &[ratatui::crossterm::event::KeyEvent], next: Vec<Hint>) -> Spa
 /// 키 처리와 바가 한 판정을 읽고, 둘이 갈릴 수 없다.
 fn browse_hints(app: &App, c: &Ctx, unnumbered: bool) -> (Vec<Hint>, Vec<Hint>) {
     use Browse as B;
-    let hint = |acts: &[Browse]| -> Hint { (labels(BROWSE, acts), acts[0].what(c)) };
+    // 간트의 키는 제 표에서 이름을 읽는다(moai-l80o) — 탐색의 표에는 없다.
+    let hint = |acts: &[Browse]| -> Hint {
+        let table = if matches!(acts[0], B::Gantt(_) | B::Plan(_)) { app.keys.gantt } else { app.keys.browse };
+        (labels(table, acts), acts[0].what(c))
+    };
     let shown = |order: &[&[Browse]]| -> Vec<Hint> {
         order.iter().filter(|acts| acts[0].enabled(c).is_ok()).map(|acts| hint(acts)).collect()
     };
@@ -4827,7 +5144,20 @@ fn browse_hints(app: &App, c: &Ctx, unnumbered: bool) -> (Vec<Hint>, Vec<Hint>) 
         shown(&[&[B::Step(Move::LineDown), B::Step(Move::LineUp)], &[B::FocusNext], &[B::Enter]])
     } else {
         // 층에 선 갈래는 위에서 이미 갈렸다 — 여기 오면 층 밖이다.
-        let mut order: Vec<&[Browse]> = if unnumbered { vec![&[B::Project(0)]] } else { Vec::new() };
+        // **키 목록(`?`, moai-ucyr)이 가장 먼저 떨어진다** — 바가 못 대는 키를 찾아갈 길이지만, 지금 목록을 쓰는 키와
+        // 층으로 가는 `0`(뿌리에서는 그것이 위로 가는 하나뿐인 길이다)을 밀어낼 만큼은 아니다. 메뉴의 `SPC h` 가 늘 남는다.
+        let mut order: Vec<&[Browse]> = vec![&[B::Help]];
+        if unnumbered {
+            order.push(&[B::Project(0)]);
+        }
+        // **간트의 날짜 축 키는 간트에서만 선다**(moai-i4hf.27r, `Browse::enabled`) — 목록의 키보다 먼저 떨어진다. 다
+        // 적지 않는다: 확대·오늘·맞춤만 대고, 좌우와 쪽 넘기기는 `moai tui --help` 가 댄다.
+        order.extend([
+            &[B::Gantt(keys::Pan::ZoomIn)][..],
+            &[B::Gantt(keys::Pan::ZoomOut)],
+            &[B::Gantt(keys::Pan::Today)],
+            &[B::Gantt(keys::Pan::Fit)],
+        ]);
         order.extend([
             &[B::Step(Move::LineDown), B::Step(Move::LineUp)][..],
             // **`Tab` 은 가는 곳을 댄다** — 가는 곳을 적으면 이 줄도 글자로 지금 자리를 말한다.
@@ -5055,10 +5385,14 @@ fn menu_line(
     // 닫지만(연 키 SPC 도, 하위 층이면 Bksp 도), 안 기다리는 층에서 그것을 대면 고르면 닫힌다는
     // 뜻이 흐려진다. **모르는 키는 그래도 무시한다**(`menu::feed`) — 아무것도 안 고르고 나가는 길은
     // `moai tui --help` 가 댄다.
-    let exit = |m: Menu| (key(&label(MENU, m), m.what(app.site.lang)), menu_event(m));
-    let mut exits = if waits { vec![exit(Menu::Close)] } else { Vec::new() };
+    //
+    // **키를 뗀 나가는 법은 안 댄다**(moai-bzm3) — 사람의 `keys.toml` 이 `menu.close = "none"` 이면 그 칸이 누를 키가
+    // 없다. 메뉴는 그래도 연 키(SPC)로 닫힌다.
+    let exit =
+        |m: Menu| menu_event(app.keys.menu, m).map(|k| (key(&label(app.keys.menu, m), m.what(app.site.lang)), k));
+    let mut exits: Vec<_> = if waits { exit(Menu::Close).into_iter().collect() } else { Vec::new() };
     if held.len() > 1 {
-        exits.push(exit(Menu::Up));
+        exits.extend(exit(Menu::Up));
     }
     let used = spans_width(&spans) + exits.iter().map(|(s, _)| crate::text::width(&s.content)).sum::<usize>();
     if used <= room {
@@ -5074,13 +5408,18 @@ fn menu_line(
     hits
 }
 
-/// 메뉴의 나가는 법 하나를 누른 모양 — 표([`MENU`])의 첫 키다. 표가 키를 옮기면 따라온다.
-fn menu_event(m: Menu) -> KeyEvent {
-    MENU.iter().find(|b| b.act == m).map(|b| b.seq[0].event()).expect("MENU 표에 없는 나가는 법")
+/// 메뉴의 나가는 법 하나를 누른 모양 — 실행 중의 메뉴 표([`keys::Keymap::menu`])의 첫 키다. 표가 키를 옮기면 따라오고,
+/// 키를 뗐으면 없다.
+fn menu_event(table: &[keys::Bind<Menu>], m: Menu) -> Option<KeyEvent> {
+    table.iter().find(|b| b.act == m).map(|b| b.seq[0].event())
 }
 
 /// 키 바를 폭에 맞춰 놓는다. `optional` 은 **뒤에서부터** 들어가고 모자라면 앞쪽이 떨어진다.
-fn bar(f: &mut Frame, at: Rect, mut optional: Vec<Span<'_>>, keep: Vec<Span<'_>>) {
+fn bar(f: &mut Frame, at: Rect, mut optional: Vec<Span<'_>>, mut keep: Vec<Span<'_>>) {
+    // **키를 뗀 동작은 안 댄다**(moai-pxiy) — [`key`] 가 이름 없는 칸을 빈 칸으로 내고 여기서 걷는다. 사람의 `keys.toml`
+    // 이 `grep = "none"` 이면 그 칸은 누를 키가 없는 낱말뿐이다(맨 아래 바의 "아직 없는 것은 적지 않는다").
+    optional.retain(|s| !s.content.is_empty());
+    keep.retain(|s| !s.content.is_empty());
     let room = at.width as usize;
     let mut spans: Vec<Span> = Vec::new();
     while let Some(next) = optional.pop() {
@@ -5096,7 +5435,12 @@ fn bar(f: &mut Frame, at: Rect, mut optional: Vec<Span<'_>>, keep: Vec<Span<'_>>
 /// 바의 키 하나. **뒤에 공백을 두지 않는다** — 앞뒤로 두면 칸 사이가 두 칸이 되고,
 /// 그 여섯 칸 때문에 80칸 터미널에서 줄이 넘쳐 맨 끝의 `SPC 메뉴` 가 말없이
 /// 잘린다. 나갈 길을 못 찾는 것이 빽빽한 줄보다 나쁘다.
+///
+/// **이름이 비면 빈 칸이다** — 키를 뗀 동작이다([`bar`] 가 걷는다).
 fn key(k: &str, what: &str) -> Span<'static> {
+    if k.is_empty() {
+        return Span::raw("");
+    }
     Span::styled(format!(" {k} {what}"), dim())
 }
 
@@ -5104,7 +5448,7 @@ fn key(k: &str, what: &str) -> Span<'static> {
 fn prompt_help(apply: &str, lang: Lang) -> String {
     fill(
         say(lang, "tui.prompt.help"),
-        &[("ok", &label(PROMPT, Prompt::Apply)), ("apply", apply), ("cancel", &label(PROMPT, Prompt::Cancel))],
+        &[("ok", &said(PROMPT, Prompt::Apply)), ("apply", apply), ("cancel", &said(PROMPT, Prompt::Cancel))],
     )
 }
 
@@ -5402,6 +5746,7 @@ fn mend(prev: &ratatui::buffer::Buffer, next: &mut ratatui::buffer::Buffer) {
 
 #[cfg(test)]
 pub(super) mod tests {
+    use super::super::keys::BROWSE;
     use super::super::tests::old_look;
     use super::*;
     use crate::config::Config;
@@ -7462,8 +7807,8 @@ pub(super) mod tests {
         let narrow = about_text(&render(&mut a, 80, 24));
         assert!(narrow.contains("(9일 남음)"), "좁은 창이 남은 날수를 잘라 냈다\n{narrow}");
 
-        // **에픽에는 든 시간을 안 내고, 기한은 낸다**(moai-ghkp.kz7) — 종료 기한은 모든 줄에 선다.
-        // 시작 기한은 마일스톤 줄의 것이라(moai-x04r.fn4) 손으로 남은 값이어도 안 그린다.
+        // **에픽에는 든 시간을 안 내고, 시작·기한은 낸다**(moai-ghkp.kz7, moai-xf0p.6d5) — 두 날짜는
+        // 모든 줄에 선다.
         let mut epic = issues();
         epic[0].due_on = Some("2026-09-20".into());
         epic[0].starts_on = Some("2026-09-05".into());
@@ -7474,8 +7819,8 @@ pub(super) mod tests {
         // **없다는 것만 재지 않는다**(리뷰) — 이 패널이 아예 안 그려졌거나 커서가 딴 줄에 섰어도
         // 없다는 말은 지난다. 그 에픽을 그렸다는 것부터 박는다.
         assert!(pane.contains("argos-0001"), "에픽의 상세가 안 그려졌다\n{pane}");
-        assert!(pane.contains("2026-09-20") && pane.contains("(9일 남음)"), "에픽의 기한이 안 섰다\n{pane}");
-        assert!(!pane.contains("2026-09-05"), "마일스톤 아닌 줄에 시작 기한이 섰다\n{pane}");
+        assert!(pane.contains("2026-09-05 → 2026-09-20"), "에픽의 시작·기한이 안 섰다\n{pane}");
+        assert!(pane.contains("(9일 남음)"), "에픽의 남은 날수가 안 섰다\n{pane}");
         assert!(!pane.contains("중앙값"), "에픽에 든 시간이 섰다\n{pane}");
     }
 
@@ -7517,6 +7862,52 @@ pub(super) mod tests {
             !lines.contains("aaaaaaa") && !lines.contains("bbbbbbb2"),
             "트래커 커밋을 그렸거나 해시를 안 줄였다\n{lines}"
         );
+    }
+
+    /// 상세가 `moai show <id>` 의 Wiki 토막을 그린다(moai-xp7l.vyw) — 이 id 를 댄 페이지와 제목 낱말로 선 관련 절, 커밋 뒤.
+    /// 위키는 체크아웃마다 한 번 읽는다 — 연 뒤에 쓴 페이지는 안 선다.
+    #[test]
+    fn detail_draws_the_wiki_pages_about_the_line() {
+        let mut a = every(issues());
+        a.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        let (id, title) = a
+            .current()
+            .and_then(|r| match r {
+                Row::Item(_, e, _) => e.at().map(|at| (a.site.issues[at].id.clone(), a.site.issues[at].title.clone())),
+                _ => None,
+            })
+            .expect("에픽 안의 첫 줄이 이슈가 아니다");
+        let s = crate::scratch::Scratch::new("tui-detail-wiki");
+        std::fs::create_dir_all(s.path().join("docs/lessons")).unwrap();
+        std::fs::write(s.path().join("docs/own.md"), format!("# Own page\n\n{id} is here.\n")).unwrap();
+        let word = title.split_whitespace().next().unwrap().to_string();
+        std::fs::write(s.path().join("docs/lessons/near.md"), format!("# Near\n\n## About {word}\n\n{word} {word}.\n"))
+            .unwrap();
+        std::fs::write(s.path().join("docs/okapi.md"), "# Okapi\n\n## About okapi\n\nokapi okapi.\n").unwrap();
+        // 낱말이 흔해지지 않게 — 절의 넷에 하나보다 많은 곳에 들면 관련 절로 안 선다(`wiki::search::COMMON_SHARE`).
+        for n in 0..8 {
+            std::fs::write(s.path().join(format!("docs/fill{n}.md")), format!("# Fill {n}\n\nunrelated\n")).unwrap();
+        }
+        a.site.repo = Some(crate::store::Repo::at(s.path().to_path_buf(), a.site.cfg.clone()));
+        let lines = render(&mut a, 160, 80).join("\n");
+        assert!(lines.contains("위키") && lines.contains("docs/own.md") && lines.contains("Own page"), "{lines}");
+        assert!(lines.contains("docs/lessons/near.md:") && lines.contains("[교훈]"), "관련 절이 없다\n{lines}");
+        assert!(!lines.contains("docs/okapi.md"), "{lines}");
+        std::fs::write(s.path().join("docs/late.md"), format!("# Late\n\n{id}\n")).unwrap();
+        assert!(!render(&mut a, 160, 80).join("\n").contains("docs/late.md"), "프레임마다 위키를 다시 읽었다");
+        // **제목이 바뀌면 관련 절도 바뀐다**(리뷰 moai-xp7l.mug) — 옆 세션이 커서 밑 줄의 제목을 고치고 다시 읽기가 커서를 그
+        // 줄에 둔 판이다. 체크아웃과 id 만 보던 판은 옛 제목의 관련 절을 그렸다.
+        let at = a.site.issues.iter().position(|i| i.id == id).unwrap();
+        a.site.issues[at].title = "okapi".into();
+        let lines = render(&mut a, 160, 80).join("\n");
+        assert!(
+            lines.contains("docs/okapi.md:") && !lines.contains("docs/lessons/near.md:"),
+            "옛 제목의 관련 절\n{lines}"
+        );
+        // 위키 창은 열 때마다 위키를 새로 읽는다 — 상세도 그 뒤로는 새 페이지를 댄다.
+        a.open_wiki();
+        a.mode = Mode::Browse;
+        assert!(render(&mut a, 160, 80).join("\n").contains("docs/late.md"), "위키 창이 읽은 페이지를 상세가 안 댔다");
     }
 
     /// 본문에 든 ESC 가 화면을 다시 칠하지 못한다.
@@ -9981,6 +10372,9 @@ pub(super) mod tests {
                     // 맨 앞에 두므로 폭이 모자라면 이것이 먼저 떨어진다: 80칸에서는 `Bksp 나가기`
                     // 가 함께 설 자리가 없다: 드나드는 키 **둘 다** 선 줄에서만 이 칸이 빠진다.
                     (c.projects > 0 && (c.leaf || c.root)).then_some("0 프로젝트"),
+                    // 키 목록은 그 앞에서 먼저 떨어진다(moai-ucyr) — 드나드는 키가 하나 빠지고, `0` 이 안 서거나 둘 다 빠진
+                    // 줄에서만 자리가 난다.
+                    ((c.leaf || c.root) && (c.projects == 0 || (c.leaf && c.root))).then_some("? 키 목록"),
                     Some("Esc 풀기"),
                     Some("SPC 메뉴"),
                 ]
@@ -10016,8 +10410,106 @@ pub(super) mod tests {
         }
     }
 
+    /// **`?`·`SPC h` 가 키 목록 창을 열고, 이동키가 굴리고, 연 키·Esc 가 닫는다**(moai-ucyr). 창이 떠 있는 동안 Esc 는
+    /// 창의 것이다 — 걸어 둔 거름망을 같이 풀면 창을 닫으려던 사람이 목록까지 잃는다. 첫 화면의 바는 `?` 를 댄다.
+    /// **키 목록 창은 화면 크기에 따라 열을 나눈다**(moai-c4tz) — 넓고 낮은 창에서는 첫 줄에 첫 절의 머리와 다른 열의
+    /// SPC 줄이 함께 서고, 80칸에서는 한 열이다. 굴리기는 가장 긴 열에서 멈추고, 좁은 창도 무너지지 않으며, 다 드는
+    /// 열은 잘리지 않는다.
+    #[test]
+    fn the_help_sheet_splits_into_columns_by_the_screen_size() {
+        let mut a = app();
+        a.hit("?");
+        let lines = render(&mut a, 200, 40);
+        let top = lines.iter().position(|l| l.contains("┏ 키 목록")).expect("창이 안 섰다");
+        assert!(
+            lines[top + 1].contains("탐색") && lines[top + 1].contains("SPC"),
+            "200칸에서 열이 안 갈렸다\n{}",
+            lines.join("\n")
+        );
+        let lines = render(&mut a, 80, 20);
+        let top = lines.iter().position(|l| l.contains("┏ 키 목록")).expect("창이 안 섰다");
+        assert!(!lines[top + 1].contains("SPC"), "80칸에서 열이 갈렸다\n{}", lines.join("\n"));
+        // 여러 열이면 굴리기의 끝은 줄 전부가 아니라 가장 긴 열의 바닥이다(`Sheet::span`) — 구석도 그 수를 댄다.
+        render(&mut a, 200, 40);
+        a.hit("G");
+        let s = a.help.as_ref().expect("`G` 가 창을 닫았다");
+        assert!(s.span < s.lines.len(), "200칸에서 열이 안 갈렸다");
+        assert_eq!(s.top, s.span - s.height, "여러 열의 끝이 가장 긴 열의 바닥이 아니다");
+        let corner = format!("{}/{}", s.top + 1, s.span);
+        assert!(render(&mut a, 200, 40).join("\n").contains(&corner), "구석이 {corner} 를 안 댄다");
+        // 28칸보다 좁은 창도 무너지지 않는다(리뷰 — `clamp(24, room)` 이 패닉했다). 열이 제 폭에 다 드는 크기에서는 상자
+        // 안에 잘린 글(`…`)이 없다 — 버퍼에서 읽은 줄은 늘 화면 폭 안이라 넘침을 폭으로는 못 잰다. 잘림으로 잰다.
+        for (w, h) in [(200u16, 40u16), (120, 30), (80, 20), (40, 12), (27, 10), (20, 8), (10, 8)] {
+            let buf = render_buf(&mut a, w, h);
+            if w < 80 {
+                continue;
+            }
+            let lines = lines_of(&buf);
+            let top = lines.iter().position(|l| l.contains("┏ 키 목록")).expect("창이 안 섰다") as u16;
+            let x0 = (0..w).rev().find(|&x| buf[(x, top)].symbol() == "┏").expect("왼쪽 위 모서리가 없다");
+            let x1 = (x0..w).find(|&x| buf[(x, top)].symbol() == "┓").expect("오른쪽 위 모서리가 없다");
+            let bottom = (top + 1..h).find(|&y| buf[(x0, y)].symbol() == "┗").expect("바닥이 없다");
+            for y in top + 1..bottom {
+                let row: String = (x0 + 1..x1).map(|x| buf[(x, y)].symbol()).collect();
+                assert!(!row.contains('…'), "{w}x{h} 에서 다 드는 열이 잘렸다: {row:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn the_help_sheet_opens_scrolls_and_closes() {
+        let mut a = app();
+        let bar = render(&mut a, 80, 20).last().cloned().unwrap_or_default();
+        assert!(bar.contains("? 키 목록"), "80칸 첫 화면 바가 키 목록을 안 댄다 — {bar:?}");
+        a.hung = Some(Hung::Filter { text: "tag=x".into(), grep: None });
+        a.hit("?");
+        let screen = render(&mut a, 80, 20).join("\n");
+        assert!(a.help.is_some(), "`?` 가 창을 안 열었다");
+        for want in ["키 목록", "탐색", "다 펼침", "Tab"] {
+            assert!(screen.contains(want), "{want:?} 가 창에 없다\n{screen}");
+        }
+        assert_eq!(render(&mut a, 80, 20).last().map(String::as_str), Some(" j·k 굴리기 ?·Esc 닫기"));
+        a.hit("j");
+        assert_eq!(a.help.as_ref().map(|s| s.top), Some(1), "`j` 가 창을 안 굴렸다");
+        a.hit("Esc");
+        assert!(a.help.is_none(), "Esc 가 창을 안 닫았다");
+        assert!(a.hung.is_some(), "창을 닫는 Esc 가 거름망까지 풀었다");
+        a.hit("SPC h");
+        assert!(a.help.is_some(), "`SPC h` 가 창을 안 열었다");
+        a.hit("SPC h");
+        assert!(a.help.is_none(), "`SPC h` 가 창을 안 닫았다");
+    }
+
+    /// **창 위의 SPC 는 메뉴처럼 받는다**(리뷰) — SPC 뒤에 SPC 열을 못 잇는 이동키는 버려지지 않고 창을 굴리고, Esc 는
+    /// 기다림만 걷는다. 창을 여닫는 키는 쓰기의 알림을 안 걷는다 — 읽기만 하는 창이다.
+    #[test]
+    fn spc_over_the_help_sheet_keeps_the_next_key_and_the_notice_survives() {
+        let mut a = app();
+        a.notice = Some("적었다".into());
+        a.hit("?");
+        assert!(a.help.is_some());
+        assert_eq!(a.notice.as_deref(), Some("적었다"), "`?` 가 알림을 걷었다");
+        a.hit("j SPC SPC Esc");
+        assert!(a.help.is_none());
+        assert_eq!(a.notice.as_deref(), Some("적었다"), "창을 여닫는 동안 알림이 걷혔다");
+
+        let mut a = app();
+        a.hit("?");
+        render(&mut a, 80, 20);
+        a.hit("SPC j");
+        assert_eq!(a.help.as_ref().map(|s| s.top), Some(1), "SPC 뒤의 `j` 가 버려졌다");
+        // 두 층 기다리던 `SPC g` 뒤도 같다.
+        a.hit("SPC g j");
+        assert_eq!(a.help.as_ref().map(|s| s.top), Some(2), "SPC g 뒤의 `j` 가 버려졌다");
+        a.hit("SPC Esc");
+        assert!(a.help.is_some(), "SPC 뒤의 Esc 가 기다림 말고 창까지 닫았다");
+        assert!(a.chord.held().is_empty(), "SPC 뒤의 Esc 가 기다림을 안 걷었다");
+        a.hit("SPC ?");
+        assert!(a.help.is_none(), "SPC 뒤의 `?` 가 창을 안 닫았다");
+    }
+
     /// **80칸에서 바의 키가 하나도 안 떨어진다** — 옮긴 키가 빠져 자리가 났다(moai-7sjm). 상세
-    /// 포커스에서는 드나드는 키가 빠진다.
+    /// 포커스에서는 드나드는 키가 빠진다. 키 목록(`?`)은 여기서 먼저 떨어지는 칸이라 안 센다.
     ///
     /// 드나드는 키가 둘 다 듣는 자리(층이 있는 프로젝트의 에픽 안 `..`)에서 잰다 — 바가 가장 긴 곳이다.
     #[test]

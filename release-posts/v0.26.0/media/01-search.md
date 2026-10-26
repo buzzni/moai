@@ -1,0 +1,1 @@
+**`moai wiki search <words…>` finds the wiki's sections, best first.** Every hit names the `path:line` to open and shows the line that matched, and lessons rank with the rest of the manual. `--json` gives the same hits for an agent.
