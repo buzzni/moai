@@ -240,7 +240,8 @@ impl App {
     ///
     /// **이 키가 알림을 걷는가**를 답한다 — 부르는 쪽([`App::key`])이 거짓이면 알림을 도로 세운다. 거짓은 아무 동작도
     /// 안 돈 키다: 메뉴만 만진 키(열기·닫기·한 층 오르내리기·모르는 키), 메뉴를 닫은 이동키(그 닫는 몫, moai-y8v2),
-    /// 그리고 둘째 키를 기다리는 `g` — 탐색의 규칙과 같다(`a_prefix_waiting_for_its_next_key_keeps_the_notice`). 화면을
+    /// 둘째 키를 기다리는 `g`, 그리고 키 목록 창을 연 `SPC h`(읽기만 하는 창이다) — 탐색의 규칙과 같다
+    /// (`a_prefix_waiting_for_its_next_key_keeps_the_notice`). 화면을
     /// 고른 키와 창의 키(굴리기·`b`·Esc), 모르는 키는 참이다.
     pub(super) fn stats_key(&mut self, k: KeyEvent) -> bool {
         if menu::open(&self.chord) || LEADER.matches(k) {
@@ -264,6 +265,11 @@ impl App {
                 Some(Browse::Go(to)) => {
                     self.go(to, &rows);
                     true
+                }
+                // 키 목록 창을 연 키는 알림을 안 걷는다 — 읽기만 하는 창이다(`App::key` 의 같은 갈래, 리뷰).
+                Some(Browse::Help) => {
+                    self.open_help(&rows);
+                    false
                 }
                 Some(Browse::Step(m)) => {
                     if let Mode::Stats(w) = &mut self.mode {
@@ -405,6 +411,13 @@ mod tests {
     /// 메뉴의 Esc 는 메뉴만 닫고 창은 남는다.
     #[test]
     fn spc_over_the_window_opens_only_the_screen_menu() {
+        // 키 목록(moai-ucyr)은 통계 창 위에 뜨고, 닫으면 통계 창이 그대로 선다.
+        let mut b = app();
+        b.hit("SPC g s SPC h");
+        assert!(b.help.is_some() && matches!(b.mode, Mode::Stats(_)), "통계 창 위에서 SPC h 가 키 목록을 안 열었다");
+        b.hit("Esc");
+        assert!(b.help.is_none() && matches!(b.mode, Mode::Stats(_)), "키 목록을 닫는 Esc 가 통계 창까지 닫았다");
+
         use super::super::{keys::Screen, menu, view::Layout};
         let mut a = app();
         a.hit("SPC g s SPC");
@@ -414,8 +427,8 @@ mod tests {
         let root = menu::entries(a.chord.held(), &ctx, &[]);
         assert_eq!(
             root.iter().map(menu::Entry::text).collect::<Vec<_>>(),
-            ["+화면 [통계]"],
-            "화면 묶음 말고 다른 것이 섰다"
+            ["+화면 [통계]", "키 목록"],
+            "화면 묶음과 키 목록(moai-ucyr) 말고 다른 것이 섰다"
         );
         a.hit("p");
         assert_eq!(menu::title(a.chord.held()), "SPC", "통계 창 위에서 SPC p 가 열렸다");

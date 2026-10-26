@@ -8,6 +8,7 @@ pub mod draw;
 pub mod edit;
 pub mod form;
 mod gantt;
+mod help;
 mod hint;
 pub mod init_screen;
 pub mod input;
@@ -1610,6 +1611,9 @@ pub struct App {
     /// 0 번 줄부터 다시 세어 커서를 늘 맨 아랫줄에 붙이고, 그러면 커서 아래를
     /// 한 줄도 못 본다. 상세와 **같은 조각**이다([`Scroll`]).
     pub list: Scroll,
+    /// 열린 키 목록 창(`?`·`SPC h`, moai-ucyr). **모드가 아니라 위에 뜨는 창이다** — 통계·위키 창 위에서도 열리고, 닫으면
+    /// 덮였던 창이 그대로 선다. 열린 동안 키는 이 창이 먼저 받는다([`App::help_key`]).
+    pub help: Option<help::Sheet>,
     pub quit: bool,
     /// 도는 글리프의 걸음. **그린 횟수가 아니라 시계가 올린다** — 그릴 때마다
     /// 올리면 키를 누르는 동안에는 타이핑 속도로 돌고 가만히 두면 파일을 보러
@@ -2191,6 +2195,7 @@ impl App {
             saved_zone: None,
             saved: Default::default(),
             list: Scroll::default(),
+            help: None,
             quit: false,
             spin: 0,
             spun: false,
@@ -5514,6 +5519,41 @@ impl App {
         rows.get(self.cursor).cloned()
     }
 
+    /// 키 목록 창을 연다 — 지금 자리의 낱말([`App::key_ctx`])로 짓는다. 켜고 끄는 항목의 낱말이 지금 상태를 따라가므로
+    /// 연 때의 것이다.
+    pub(super) fn open_help(&mut self, rows: &[Row]) {
+        self.chord.clear();
+        self.help = Some(help::Sheet::open(&self.key_ctx(rows)));
+    }
+
+    /// 키 목록 창의 키 하나. **탐색의 표로 읽는다** — 이동키가 굴리고(`gg` 의 기다림도 그대로), 연 키(`?`·`SPC h`)와
+    /// Esc·Bksp·끝내기 키가 닫는다. 그 밖은 아무 일도 없다: 읽기만 하는 창이라 틀린 키 하나에 사라지면 보던 자리를 잃는다.
+    ///
+    /// **SPC 뒤에 SPC 열을 못 잇는 키는 메뉴처럼 받는다**(리뷰, [`menu::feed`]) — 메뉴 창은 이 창 위에 안 서서 SPC 가
+    /// 기다리는 것이 화면에 안 보인다. 그대로 버리면 손이 미끄러져 SPC 를 친 뒤의 `j` 가 말없이 사라진다. SPC 와 메뉴의
+    /// 닫기 키(Esc·Bksp)는 그 기다림만 걷고, 그 밖의 키는 처음부터 다시 읽는다 — 이동키면 굴리고 `?` 면 닫는다.
+    /// `gg` 의 첫 `g` 뒤에 온 뜻 없는 키는 여태처럼 함께 버린다([`keys::Chord`]).
+    pub(super) fn help_key(&mut self, k: KeyEvent) {
+        use keys::Browse as B;
+        let spc = menu::open(&self.chord);
+        let mut act = self.chord.feed(self.keys.browse, k);
+        if spc
+            && act.is_none()
+            && self.chord.held().is_empty()
+            && !keys::LEADER.matches(k)
+            && !matches!(keys::lookup(self.keys.menu, &[k]), Lookup::Run(_))
+        {
+            act = self.chord.feed(self.keys.browse, k);
+        }
+        let Some(sheet) = &mut self.help else { return };
+        // 동작이 나왔으면 열은 이미 비었다([`keys::Chord::feed`]).
+        match act {
+            Some(B::Step(m)) => sheet.step(m),
+            Some(B::Help | B::ClearFilter | B::Leave | B::Quit) => self.help = None,
+            _ => {}
+        }
+    }
+
     pub fn key(&mut self, k: KeyEvent) {
         // 쓰기의 알림은 **다음 키 하나에 걷힌다.** 읽었으면 할 일을 다 했고, 이 키가 또
         // 쓰기라면 그 쓰기가 제 알림을 새로 단다.
@@ -5535,6 +5575,13 @@ impl App {
         // 나갈 길이 없다. 적던 것은 그 길로 날아간다.
         if let Lookup::Run(keys::Anywhere::Quit) = keys::lookup(keys::ANYWHERE, &[k]) {
             self.quit = true;
+            return;
+        }
+        // **키 목록 창이 먼저 받는다**(moai-ucyr) — 덮인 창(통계·위키)이나 목록에 키가 새지 않는다. 읽기만 하는 창이라
+        // 알림은 걷지 않는다: 창을 닫은 뒤에도 연 앞의 알림이 그대로 선다.
+        if self.help.is_some() {
+            self.help_key(k);
+            self.notice = carried;
             return;
         }
         // **통계 창은 SPC 메뉴를 연다**(moai-z46r) — 그래서 탐색의 열을 비우지 않고 넘긴다. 메뉴가 열린 동안 그 열이
@@ -5583,7 +5630,10 @@ impl App {
         // 로 목록에 가는 흐름에서 알림이 메뉴 창이 떠 있는 동안만 산다. SPC 밑에는 이동 항목이
         // 없으므로([`keys::Browse::moves`]) 열린 메뉴에서 이동이 나왔으면 그 키가 메뉴를 닫은 것이다.
         // 이동이 제 알림을 달면(`enabled` 의 까닭) 그것이 덮는다.
-        if in_menu && act.moves() {
+        //
+        // **키 목록 창을 연 키도 도로 세운다**(리뷰, moai-ucyr) — 읽기만 하는 창이라 아무 동작도 안 돈 키다. 걷으면 쓰기의
+        // 알림을 읽다 키를 찾으러 연 창이 그 알림을 지운다. 창 안의 키도 걷지 않는다(위의 가로챔).
+        if (in_menu && act.moves()) || act == keys::Browse::Help {
             self.notice = carried;
         }
         // **되는지는 한 판정이 가른다**([`keys::Browse::enabled`]) — 키 바가 같은 판정으로
@@ -5606,6 +5656,7 @@ impl App {
         }
         match act {
             B::Quit => self.quit = true,
+            B::Help => self.open_help(&rows),
             B::FocusPrev => self.focus = self.focus.prev(),
             B::FocusNext => self.focus = self.focus.next(),
             // **끝에서는 제자리다** — 목록에서 `Ctrl-w h` 를 눌러도 상세로 돌지 않는다.

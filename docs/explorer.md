@@ -27,7 +27,7 @@ To read the same tracker in a browser tab instead, run `moai web` — see
 ## Find your way around
 
 [Milestones](glossary.md#milestone) and [epics](glossary.md#epic) behave like
-directories.
+directories. Forgot a key? `?` (or `SPC h`) opens [the key list](#the-key-list).
 
 - `j`/`k` move, `Enter` goes into a milestone or an epic, `Backspace` comes back
   out. Rows you can go into end their title with `/`
@@ -203,13 +203,38 @@ not know.
 - `Esc` or `SPC` closes it, and `Backspace` goes one level up
 - Toggles and sorts leave it open so you can try one and watch the screen change;
   that level says so with an `Esc` hint
-- A movement key closes it and makes the move in the same press
+- A movement key closes it and makes the move in the same press, unless an item
+  on that level holds the letter: `SPC h` opens [the key list](#the-key-list)
+  rather than folding the row, and `SPC g` opens the screens
 
 The mouse works on the open menu too. Click an item and it is as if you pressed
 its key — a group goes one level down and a toggle keeps the menu open. `Esc` and
 `Bksp` on the bottom line close it or go up. A click or the wheel outside the menu
 closes it and does what it does there, so clicking a row closes the menu and puts
 the cursor on that row. Empty space inside the menu does nothing.
+
+## The key list
+
+`?`, or `SPC h` from the menu, opens a window over the screen that lists every
+key: the keys you press straight away (`r`, `h`, `l`, `Tab` and the rest), the
+movement keys, every menu item with its group (`view › deferred`), and the keys
+of the gantt, the stats window and the wiki window. It reads the same table as
+`moai keys`, so a key you changed in `keys.toml` shows as you changed it.
+
+The list takes one to three columns, by the size of the screen: the fewest
+columns that show it whole, or, when no number of columns fits the height, as many
+as fit the width. A screen wide and tall enough shows it all at once; an 80-column
+one shows one column to scroll.
+
+- The movement keys and the mouse wheel scroll it; the bottom right corner says
+  where you are (`16/103`). With more than one column the columns scroll together,
+  and the count is the rows of the longest column, not every line (`1/35`)
+- `?`, `SPC h`, `Esc` or `Backspace` closes it. While it is open, `Esc` belongs
+  to the window: it does not clear the filter you set
+- It opens over the stats and wiki windows too (`SPC h`), and closing it leaves
+  that window as it was
+- The bottom bar names `?` while there is room. On a narrow screen it is the
+  first hint to drop; `SPC h` in the menu is always there
 
 ## Change the keys
 
