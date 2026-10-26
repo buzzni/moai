@@ -245,6 +245,19 @@ const scenes = {
     if (await history.count()) { await glide(page, history); await page.waitForTimeout(800); await wheel(page, 120, 6, 450) }
     await page.waitForTimeout(2200)
   },
+  // 사용 방법의 칸반 절(moai-vlq7): 마일스톤마다 한 줄의 보드에서 칸을 건너고 카드를 골라 상세를 읽는다
+  async board(page) {
+    await page.goto(url)
+    await page.waitForTimeout(1200)
+    await keys(page, 'Space', 'g', 'b')
+    await page.waitForTimeout(2000)
+    for (const k of ['l', 'l', 'j', 'l', 'j', 'j', 'h']) { await page.keyboard.press(k); await page.waitForTimeout(800) }
+    await page.waitForTimeout(800)
+    await glide(page, page.getByText('Resolve conflicts when two devices edit the same note', { exact: true }).first())
+    await page.waitForTimeout(2600)
+    await glide(page, page.getByText('Invite people to a notebook by email', { exact: true }).first())
+    await page.waitForTimeout(2600)
+  },
   // 위키: 첫 페이지에서 링크를 따라가고, 본문의 이슈 id 를 눌러 그 이슈로 건너간다
   async wiki(page) {
     await page.goto(url)
