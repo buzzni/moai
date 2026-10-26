@@ -8482,3 +8482,5 @@
 {"ts":"2026-10-26T04:28:25Z","id":"moai-8kvc","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 (medium — 데모 장면과 소식 그림)"}
 {"ts":"2026-10-26T04:28:25Z","id":"moai-8kvc","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Report-ready: v0.28.0 소식 그림 병합 6b55f899 (develop, push·tag 안 함). media 셋 — 01-wide.png(160x40 세 열), 02-mid.png(120x34 두 열, 1/52), 03-scroll.webm(창에서 j 로 굴림). 바닥 줄 그림은 목록 제목의 shimmer 를 TUI 에서 끌 수 없어 안 넣었다. 장면 keys 는 site-demo 에 더했고 make.sh 가 다시 짓는다"}
 {"ts":"2026-10-26T04:29:04Z","id":"moai-8kvc","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Report-checked: 6b55f899 (PNG 둘 열어 봄 — Lantern 데모만, [NEW] 없음. webm 은 프레임까지 안 봄)"}
+{"ts":"2026-10-26T04:40:11Z","id":"moai-8kvc","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 (medium — 감독이 PR 받기·리뷰·릴리스 절차를 돌렸다)"}
+{"ts":"2026-10-26T04:40:12Z","id":"moai-8kvc","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"v0.28.0 나감 — PR #50 들임, PR #51, 자산 7, Discord 잡 성공(그림 셋)"}
