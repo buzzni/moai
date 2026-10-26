@@ -49,7 +49,8 @@ fn value(raw: &str) -> Option<&str> {
 /// `키 = 값` 줄 하나의 **쓰인 그대로**. 따옴표는 안 벗긴다 — 글([`scalar`])과
 /// 수([`count`]·[`days`]·[`ratio`])가 따옴표를 서로 반대로 요구하므로, 벗기는 일은 읽는 쪽이 한다.
 ///
-/// `table` 은 그 줄 위의 마지막 `[…]` 머리다. 이 파서는 테이블을 안 읽으므로 그런 줄은 값으로
+/// `table` 은 그 줄 위의 마지막 `[…]` 머리다. 이 파서는 테이블을 안 읽으므로(`[models]` 만 적힌 그대로 모아
+/// `moai models` 에 넘긴다, [`ModelEntry`]) 그런 줄은 값으로
 /// 안 쓰이는데, **안 쓰인다는 것을 아는 자리가 있어야** [`Thresholds::check_keys`] 가 그것을
 /// 댈 수 있다 — 조용히 넘기면 `[status]` 밑에 적은 문턱이 영영 안 먹고 까닭이 어디에도 없다.
 struct Entry<'s> {
@@ -440,6 +441,31 @@ pub struct Config {
     pub wiki_dir: String,
     /// 기한이 우선순위를 올리는 규칙(moai-dr8a) — 평평한 키 `due_priority`·`due_p0_days`·`due_p1_days`·`due_p2_days`.
     pub due: DueRule,
+    /// `[models]` 표 — **이 저장소가 권하는** 역할별 모델(moai-w25x.jud, 2026-10-26 사용자 결정). 적힌 그대로다.
+    pub models: Vec<ModelEntry>,
+}
+
+/// `.moai/config.toml` 의 `[models]` 한 줄 — **값은 여기서 재지 않는다.** 아는 키인가·등급 낱말인가·큰따옴표 글인가는
+/// 사용자 설정의 `[models]` 와 같은 자([`crate::user_config::Models::put`])가 `moai models` 에서 잰다. 이 파일은 모든
+/// 명령이 지나므로 여기서 거절하면 모델 이름 오타 하나가 `moai status` 까지 세운다 — `wiki_dir` 과 같은 까닭이다.
+/// **줄의 꼴은 다르다**(리뷰 moai-w25x.54r) — 따옴표의 짝과 `키 = 값` 은 이 파일의 모든 줄과 같이 [`entries`] 가 재어,
+/// 거기서 틀리면 테이블 안의 줄이어도 모든 명령이 선다. 그 엄함은 이 표 전부터 파일 전체의 것이다.
+///
+/// **사람이 이긴다** — 사용자 설정의 키가 이 값을 덮는다(`MOAI_LANG` > `[i18n] lang` 과 같은 결). 저장소는 권하고
+/// 사람이 고른다. 이 표를 아는 판보다 옛 바이너리는 테이블 안의 모르는 키로 넘겨, 적은 저장소에서도 안 선다.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModelEntry {
+    pub key: String,
+    /// 줄의 값 쪽, 주석을 뗀 그대로 — 따옴표도 안 벗겼다([`ModelEntry::word`]).
+    pub raw: String,
+    pub line: usize,
+}
+
+impl ModelEntry {
+    /// 큰따옴표로 감싼 글이면 그 속 — 이 파일의 다른 글 키와 같은 자다. 아니면 `None`.
+    pub fn word(&self) -> Option<&str> {
+        value(&self.raw)
+    }
 }
 
 /// [`Config::archive_days`] 를 안 적은 저장소가 받는 날수 — 두 주(2026-10-03 사용자 결정).
@@ -454,6 +480,9 @@ pub const WIKI_DIR: &str = "docs";
 
 /// [`Config::wiki_dir`] 를 적는 키.
 pub const WIKI_KEY: &str = "wiki_dir";
+
+/// [`Config::models`] 의 표 이름 — 사용자 설정과 같은 이름이다([`crate::user_config::MODELS`]).
+pub const MODELS_TABLE: &str = crate::user_config::MODELS;
 
 impl Config {
     /// **저장소가 든 파일이라 그 체크아웃 안에서만 읽는다**([`crate::held`], moai-itsu). 받은 저장소가
@@ -511,7 +540,13 @@ impl Config {
         let wiki_dir = text(es, WIKI_KEY)?.unwrap_or_else(|| WIKI_DIR.into());
         let due = DueRule::parse(es)?;
 
-        Ok(Config { prefix, statuses, naming, status, archive_days, wiki_dir, due })
+        let models = es
+            .iter()
+            .filter(|e| e.table == Some(MODELS_TABLE))
+            .map(|e| ModelEntry { key: e.key.to_string(), raw: e.value.to_string(), line: e.line })
+            .collect();
+
+        Ok(Config { prefix, statuses, naming, status, archive_days, wiki_dir, due, models })
     }
 
     /// 새 이슈가 놓이는 칸. 목록의 첫 칸이다.
@@ -860,6 +895,14 @@ status_due_days      = 17
         }
         // 다른 테이블의 같은 낱말은 남의 것이다.
         assert!(Config::parse("prefix = \"a\"\n[models]\npriority = \"x\"\n").is_ok());
+        // `[models]` 는 재지 않고 적힌 그대로 든다(moai-w25x.jud) — 모르는 키도, 따옴표 없는 값도 설정을 안 세운다.
+        let c = Config::parse(
+            "prefix = \"a\"\n[models]\ndevelop = \"opus\"  # 쓰기가 잦다\neffort = 3\n[x]\nplan = \"y\"\n",
+        )
+        .expect("[models] 의 값에 섰다");
+        let got: Vec<(&str, Option<&str>, usize)> =
+            c.models.iter().map(|m| (m.key.as_str(), m.word(), m.line)).collect();
+        assert_eq!(got, [("develop", Some("opus"), 3), ("effort", None, 4)]);
         // `[due]` 밑의 **모르는 키**도 남의 것이다 — 아는 이름(`due_<키>`)이 아니면 소리낼 까닭이 없고, 막으면 옛
         // 바이너리가 읽는 파일 하나로 모든 명령이 선다(리뷰).
         let kept = Config::parse("prefix = \"a\"\n[due]\ncalendar = \"kr\"\n").expect("[due] 의 모르는 키에 섰다");
