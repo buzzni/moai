@@ -204,6 +204,9 @@ fn isolated(program: impl AsRef<std::ffi::OsStr>) -> Command {
         .env_remove("SAYCODE_AGENT_ENV")
         // cmux 가 제 탭의 셸에 세우는 표식(moai-p5sz) — 새면 cmux 탭 안에서 돌린 `init` 화면이 `moai-cmux` 칸을 켜 둔다.
         .env_remove("CMUX_SURFACE_ID")
+        // claude-teams 가 세우는 shim 의 자리(moai-qrja.o3l) — 새면 훅이 모든 맨 `tmux` 를 shim 으로 읽어, claude-teams
+        // 안에서 돌린 규칙 4 의 시험이 제 서버를 가리킨 줄까지 막는다(리뷰 moai-qrja.pwh).
+        .env_remove("CMUX_CLAUDE_TEAMS_TMUX_SHIM")
         .env_remove("CLAUDE_CODE_SESSION_ID")
         // Codex 가 셸에 세우는 세션 id(moai-u5wr.7xr).
         .env_remove("CODEX_THREAD_ID")
@@ -17713,6 +17716,31 @@ fn a_root_session_holding_worktree_work_is_sent_to_the_worktree() {
     assert!(there.trim().is_empty(), "워크트리 안의 쓰기를 막았다\n{there}");
     // 아무것도 안 쥔 세션은 전처럼 빈손으로 막힌다 — 그 멤버는 옆 워크트리의 일이다.
     assert!(refusal(&at("c", "Edit", edit(&main.join("src/x.rs")))).contains("holding nothing"));
+}
+
+/// **아무것도 안 벌인 트래커에서도 집기 뒤의 쓰기는 워크트리 물음에 든다**(리뷰 moai-qrja.pwh) — 훅은 벌인 줄이 없으면
+/// 워크트리 목록을 안 읽어(`away_of`), 집으면서 루트에 쓴 줄이 그 물음에 한 번도 안 닿았다. 같은 줄이 딴 줄 하나가
+/// 벌여져 있으면 막혔다 — 옆 상태가 답을 바꿨다.
+#[test]
+fn a_pick_up_with_nothing_started_still_meets_the_worktree_question() {
+    let s = Scratch::new("hookfirstpick");
+    let main = s.path().join("main");
+    std::fs::create_dir_all(main.join("src")).unwrap();
+    git(&main, &["init", "-q"]);
+    ok(&main, &["init", "argos"]);
+    let epic = field(&ok(&main, &["epic", "add", "에픽", "--json"]), "id");
+    let mine = field(&ok(&main, &["add", "내가 할 멤버", "-e", &epic, "--json"]), "id");
+    std::fs::write(main.join("src/x.rs"), "").unwrap();
+    git(&main, &["add", "-A"]);
+    git(&main, &["commit", "-q", "-m", "세운다"]);
+    git(&main, &["worktree", "add", "-q", &format!(".worktrees/{epic}"), "-b", &format!("worktree-{epic}")]);
+    let input = format!(
+        "{{\"session_id\":\"a\",\"cwd\":{},\"tool_name\":\"Bash\",\"tool_input\":{{\"command\":{}}}}}",
+        json_str(&main.display().to_string()),
+        json_str(&format!("moai mv {mine} in_progress --from todo && echo x > src/x.rs"))
+    );
+    let out = String::from_utf8(hook_in(&s, &main, "pre-tool-use", &input).stdout).unwrap();
+    assert!(refusal(&out).contains("worktree stands at"), "아무것도 안 벌였다고 집기 뒤의 루트 쓰기를 넘겼다\n{out}");
 }
 
 /// **겨루다 질 집기는 적지 않는다**(리뷰 moai-3k2d.1df). 훅은 명령이 돌기 전에 적으므로, 낡은 `--from` 으로

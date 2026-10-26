@@ -33,6 +33,20 @@ does not tag — see `CONTRIBUTING.md`.
   read as a tmux pane, so the cmux branch gave that worker — and a supervisor
   started that way — `-`. Only a real tmux pane id (`:@<n>.%<n>`) counts as tmux
   now. (moai-jn8d)
+- **Hook rule 2 judges where a write lands, not where the shell stands.** A
+  session whose held work all has a worktree is now refused a root write made by
+  absolute path after its shell `cd`'d into the worktree, a write chained after a
+  pick-up on the same line, and a write into another epic's worktree; the refusal
+  names the same file in its own worktree. Rule 2 also counts the destination of
+  `cp`, `mv` and `install`. (moai-qrja)
+- **Hook rule 4 under cmux `claude-teams` also stops `send-keys`, `split-window`,
+  `new-window` and `respawn-pane`**, which cmux's tmux shim sends to the person's
+  cmux, and knows the shim after `unset TMUX` or with a real tmux ahead on `PATH`.
+  A single quoted command string (`tmux 'ls; kill-server'`) is read as commands,
+  and the line a rule-4 refusal hands back keeps the quoting that was typed.
+  (moai-qrja)
+- **The hook reads the session pick-up records only when they can change the
+  answer**, once per call, instead of on every tool call. (moai-qrja)
 
 ## [0.27.0] - 2026-10-26
 
