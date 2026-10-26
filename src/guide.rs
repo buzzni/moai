@@ -4170,13 +4170,6 @@ is already in the box: do not paste again. Tell the person which tab holds it un
 /// 띄운 세션은 `remote_mobile`, 터미널에서 띄운 세션은 `cli` 다. `lastAgentText` 는 도는 턴 동안 비어(2026-10-10 에
 /// `responding` 줄이 `null` 이었다) 턴 가운데 죽은 일꾼 — OOM 의 흔한 꼴 — 은 짝이 안 지어지고, Saycode 밖에서 부른
 /// 되살리기는 `ls` 를 못 부른다. 짝으로만 가르던 판은 그 둘을 칸에서 `claude --resume` 으로 되살렸다.
-///
-/// **`/clear` 로 끝난 대화 기록은 후보가 아니다**(moai-jn8d.vyh). 죽은 기록(id A)을 새 프로세스가 되살린 뒤 그 창에서
-/// `/clear` 를 치면 그 프로세스의 기록은 B 를 들어, A 를 든 산 줄이 없어진다. A 의 대화 기록은 `/clear` 까지 움직여
-/// "같은 때 움직였다" 는 잣대로는 못 걸러, 둘째로 죽으면 낡은 대화를 되살렸다. 표는 그 대화 기록의 끝에 있다 — 마지막
-/// 사용자 줄이 `<command-name>/clear</command-name>` 이고 `commandRun.command` 가 `clear` 인 `system` 줄이 뒤따른다
-/// (2026-10-26 에 2.1.306 의 기록에서 봤다). 기록 파일에는 이어 준 프로세스를 가리키는 칸이 없어, 죽은 때를 어림하는
-/// 잣대(기록의 `updatedAt` 뒤에 대화가 움직였나)는 턴 가운데 죽은 흔한 판을 거꾸로 버린다 — 그래서 대화 기록의 표를 쓴다.
 pub fn recover() -> String {
     format!(
         r#"---
@@ -4248,13 +4241,6 @@ leaves its record behind. The lines below print one row per record, tab-separate
   worktree, also drop it when a live row other than your own stands in that same `cwd`. The
   root is not such a place — several live sessions stand there at once, and one of them being
   alive says nothing about the dead one
-- **Drop it when its conversation was cleared.** Read the end of its transcript (below): when
-  the last user line is the `/clear` command — `<command-name>/clear</command-name>`, followed
-  by a `system` line whose `commandRun.command` is `clear` — the process that ran it went on
-  under a new `sessionId`, and its own record carries that one. This catches a record that was
-  resumed by another process which then ran `/clear`: no live row carries the old id any more,
-  and resuming it brings back a conversation already left behind. Two dead records with the
-  same `sessionId` are one candidate
 - **Drop old crashes.** Records of earlier deaths stay too. Keep the candidates whose
   transcript (below) last moved around the same time; name an older one to the person apart,
   and bring it back only if they say so
@@ -8877,13 +8863,6 @@ stop sending outside work while a release runs",
         // 산 줄이 하나도 없다고 짝이 멈추면 아무것도 안 되살린다 — 그 판의 `dead` 를 믿으면 산 세션을 한 번 더 띄운다.
         let dead = section(&text, "## 1. Find the dead");
         assert!(dead.contains("Bring nothing back"), "짝이 산 줄을 못 읽는 판에도 되살린다");
-        // 되살린 뒤 `/clear` 한 기록은 낡은 대화다 — 대화 기록의 끝이 가른다(moai-jn8d.vyh).
-        assert!(
-            dead.contains("**Drop it when its conversation was cleared.**")
-                && dead.contains("`<command-name>/clear</command-name>`")
-                && dead.contains("`commandRun.command` is `clear`"),
-            "/clear 로 넘어간 대화를 후보로 둔다"
-        );
         // 되살리기가 연 칸도 셸 대신 remain-on-exit 다(moai-jn8d.ni8).
         assert!(!text.contains("exec bash") && !text.contains("set-option -p -t <pane> remain-on-exit"));
         // 띄우는 줄은 셋 — tmux 칸, cmux 탭(moai-p5sz.kfi), 둘 밖에서 사람이 칠 줄. 깃발은 `--resume` 하나다. 코드 줄에서

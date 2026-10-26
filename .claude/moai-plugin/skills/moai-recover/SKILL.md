@@ -179,13 +179,6 @@ PY
   worktree, also drop it when a live row other than your own stands in that same `cwd`. The
   root is not such a place — several live sessions stand there at once, and one of them being
   alive says nothing about the dead one
-- **Drop it when its conversation was cleared.** Read the end of its transcript (below): when
-  the last user line is the `/clear` command — `<command-name>/clear</command-name>`, followed
-  by a `system` line whose `commandRun.command` is `clear` — the process that ran it went on
-  under a new `sessionId`, and its own record carries that one. This catches a record that was
-  resumed by another process which then ran `/clear`: no live row carries the old id any more,
-  and resuming it brings back a conversation already left behind. Two dead records with the
-  same `sessionId` are one candidate
 - **Drop old crashes.** Records of earlier deaths stay too. Keep the candidates whose
   transcript (below) last moved around the same time; name an older one to the person apart,
   and bring it back only if they say so
