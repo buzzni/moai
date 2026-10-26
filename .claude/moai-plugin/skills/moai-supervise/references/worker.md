@@ -8,8 +8,15 @@ person comes first** — this window is theirs; when they speak, answer them.
 ## The assignment
 
 The message's first line names the work and the step of this file to start from —
-`from step 1` for a new backlog, `from "Carrying on stalled work"` for work a session left
-behind, `from step 2` for an epic already unfolded whose first-column members are left.
+`from step 1` for a new backlog, `from step 2` for an epic already unfolded, or
+`from "Carrying on stalled work"` for work a session left behind.
+
+**This file is the path every assignment takes.** The rare branches stand in
+`worker-branches.md` beside it — read that file too, the section a line here names, when your
+assignment takes one: `Person: away` ("When the person is away"), a `Subdir:` line ("A
+subdirectory project"), `from "Carrying on stalled work"`, a review rule 3 keeps refusing
+("When the review stays refused"), and, in a subagent, the review brief of 7 ("The review
+brief").
 The message's `from` is the supervisor — `<supervisor>` below; "tell the supervisor" is `SendMessage(to: <supervisor>, …)`.
 A message the supervisor pasted into this window (`moai-tmux` or `moai-cmux`) or sent as a Saycode prompt
 (`moai-saycode`) carries no `from`; its last line,
@@ -57,7 +64,7 @@ said yes to taking over a row that is not yours, say — belongs to the assignme
 - `Root:` — `<root>`, the root checkout's place (4-1)
 - `Subdir:` — `<subdir>`, only for a subdirectory project in a monorepo (3). Without it the
   root is the top of the repository
-- `Person:` — `here`, or `away` (below)
+- `Person:` — `here`, or `away` ("When the person is away" in `worker-branches.md`)
 - `Worktree:` — the same words to every worker: you never go into the worktree, you aim at it
   ("Stay in the root")
 
@@ -111,7 +118,8 @@ needs more says so in a line of its own, **In a subagent**.
 - **No `EnterWorktree` or `ExitWorktree`.** A session does without them too ("Stay in the
   root"); for you they do not exist
 - **No `AskUserQuestion`, and nobody watches you.** Where a step asks the person, hand back
-  instead and end (4). `Person: away` still decides by recommendation, as below
+  instead and end (4). `Person: away` still decides by recommendation —
+  "When the person is away" in `worker-branches.md`
 - **No `/model`.** The model and the effort you were raised on stay (`Model:` above)
 - **What you hand back is the report** (12) — `SubagentHandback`, and your turn ends with it.
   Where a step says to tell the supervisor and stop, that is your hand-back; where it says to
@@ -120,23 +128,6 @@ needs more says so in a line of its own, **In a subagent**.
 - **Your tool calls carry the supervisor's session.** The hook reads you two as one: your
   pick-ups are recorded as the supervisor's, its rules see what the supervisor's other workers
   hold, and the supervisor's turn-end holds what you hold
-
-## When the person is away
-
-When the message says `Person: away`, decide by recommendation. A design question the notes
-do not settle is not asked (4) — settle it the way you would have recommended, and write it
-on the issue where the next person reads it
-
-    moai note <id> 'Decided alone: <what you chose> — <why>, and what the other way was'
-
-Nothing else waits on the person either. A model the window is not on is not asked for —
-work on the window's model and say so in the reason of 9-1. A row that is someone else's or
-nobody's (rule 5) is taken over only on a yes the message carries; without one, leave that row
-and name it in the report.
-
-**Stop at what cannot be undone** — deleting what is not yours, rewriting history someone
-else has, a release, anything outside this repository — and report that instead of doing
-it. When the person is back in the window, what they say overrides what you decided alone.
 
 ## Before the steps
 
@@ -268,19 +259,13 @@ root"), never in the root
    Inside a milestone the milestone branch has to stand first — raise it if it is missing
    ("The milestone branch").
    Until the worktree stands, the other sessions in the root read this member as their own focus.
-   **If the root is not the top of the repository** (a subdirectory project in a monorepo) the
-   worktree stands for the whole repository, so aim at the same subdirectory in it and work
-   there — standing at the worktree top, `moai` walks up and finds the root's
-   `.moai` to write, and the hook does not count edits under `.worktrees/`. `<subdir>` is that
-   relative path, filled in by the supervisor; if the message carries no `Subdir:`, the root
-   **is** the top and this step does not exist
-
-       cd <root>/.worktrees/<epic>/<subdir> && …
+   **If the message carries `Subdir:`**, the root is a subdirectory of the repository — work
+   in that subdirectory of the worktree, as "A subdirectory project" in `worker-branches.md` says.
 4. Before you ask about a design decision, read the `Wiki` block of `moai show <member>` and
    `moai wiki search '<that place>'`; do not ask a person what the wiki already answers.
    Do not guess a design decision that is not in the notes — ask with `AskUserQuestion`;
    a person is watching the worker's window. With `Person: away` in the message, decide by
-   recommendation instead ("When the person is away").
+   recommendation instead ("When the person is away" in `worker-branches.md`).
    **In a subagent** there is no `AskUserQuestion`: hand back with `SubagentHandback`, its
    head `decision needed: <id>`, then the situation, options A and B, and your recommendation —
    and end. The supervisor asks the person and wakes you with the answer (`SendMessage`);
@@ -372,7 +357,7 @@ root"), never in the root
    model from `moai models --json`, create the review issue and stand the members in `review`
    as below, **pick the review issue up** —
    `moai -C <root> mv <review id> in_progress --from todo` — and only then raise it on the
-   review brief (the last section of this file), every slot filled, for the reason below.
+   review brief ("The review brief" in `worker-branches.md`), every slot filled, for the reason below.
    It leaves its fixes uncommitted and the reviewer's
    words on the review issue, and hands back what it fixed and what it left — take that in as
    below
@@ -407,20 +392,10 @@ root"), never in the root
    reads the same way, while the first one stays open and keeps the epic from closing.
    A refusal from the hook, such as a missing angle, is not worked around: fix it the way the
    refusal's own command says.
-   **If the review stays refused** — the review issue stands with its angle, you picked it up
-   (`moai -C <root> mv <review id> in_progress --from todo`), you ran what each refusal handed
-   you, and rule 3 still ties the review to a row that is not this epic's (its
-   `Why this session holds them:` lines, when it carries them, say which and why) —
-   do not work around the hook and do not start another agent program.
-   **Review by hand, in this session**: read the diff from the
-   merge-base yourself at the grade you picked, against the angle and the five places below, fix
-   what you find in the working tree, and write your words to a file whose first line is
-
-       Manual review: the review command was refused by rule 3 — <the refusal's first line>
-   That file is the review text 10 leaves on the review issue — without the line, the next
-   person reads your own sweep as what the review command found. The rest goes on as written: the
-   fixes in a `fix:` commit of their own, the close in 10, and the model line of 10 naming this
-   window's model with `manual` in its reason
+   **If the review stays refused** — the review issue picked up, every refusal's command run,
+   and rule 3 still ties the review to a row that is not this epic's — do not work around the hook
+   and do not start another agent program: review by hand, as
+   "When the review stays refused" in `worker-branches.md` says.
 
    **Five places the review keeps finding.** They do not stand in for the angle — what this
    epic actually did is the angle, and these go on top of it
@@ -654,73 +629,3 @@ root"), never in the root
     from it. Below it goes one `Subagent ran: anthropic/<its real name> on <member>` line for each
     subagent of your own (`Subagents:`) that did a share of a member — 9-1's line of its own.
     Nothing about clearing a window is yours
-
-## Carrying on stalled work
-
-A session died holding a member of `<epic>`, the epic the message's first line names; that
-member still stands picked up. Read how far it got (`moai show <epic>`, its history and
-notes), then
-
-- If the worktree is there, aim at it ("Stay in the root") — read how far it got with
-  `git -C <root>/.worktrees/<epic> log <base branch>..HEAD` and `git -C <root>/.worktrees/<epic> status`
-  (asked in the root, both read the root and show nothing of it), and carry on
-- If it is not, raise it again from the root. If the branch survives, on that branch
-  (`git worktree add .worktrees/<epic> worktree-<epic>`); if it does not,
-  `git worktree add -b worktree-<epic> .worktrees/<epic> <base branch>` — inside a milestone,
-  raise the milestone branch first if it is missing ("The milestone branch")
-- **If the root is not the top of the repository** (a subdirectory project in a
-  monorepo), aim at the same subdirectory inside the worktree and work there — standing
-  at the top, `moai` finds and writes the root's `.moai`, and the hook does not count edits
-  under `.worktrees/`. `<subdir>` is that relative path, filled in
-  by the supervisor; with no `Subdir:` in the message, the root is the top and this step
-  does not exist
-
-      cd <root>/.worktrees/<epic>/<subdir> && …
-- The member's column is already picked up — do not move it to another column, but **record
-  it as this session's** with a move to the column it stands in, on a line of its own:
-  `moai mv <member> <its column> --from <its column>` — nothing moves; the hook writes the
-  pick-up down. Standing in the root, the hook reads a member this session never picked up
-  under `.worktrees/<epic>` as that worktree's, so without it you hold nothing: rule 1 stops
-  fencing what you create, rule 3 refuses the review, and the turn's end does not hold the
-  member for you. **If its assignee
-  is not you** (`moai show <member>`), ask the person watching before you carry it on; on
-  a yes, `moai mv <member> <its column> --from <its column> --take -m '<who said yes>'` — the
-  column stays, the assignee becomes you, a note keeps whose it was, and the pick-up is
-  written down the same way
-- The note in 9-1 records this window's share only. Append `reclaimed work, the previous
-  session's share is unknown` to the end of the reason — the previous session's model is
-  written nowhere, and without it the whole member reads as this window's work
-- Then go on with the steps from 4-1 to the end
-
-## The review brief
-
-In a subagent, 7 raises the review on this prompt — copy it whole and fill every slot.
-
-    You run the epic-end review of <epic> — <title> — for the worker that raised you. You are a
-    subagent of the same session, so the hook reads you as that worker.
-    Worktree: <root>/.worktrees/<epic>, on branch worktree-<epic>
-    Range: from <merge-base hash> (where the branch left <base branch>) to HEAD
-    Review issue: <review id>, picked up already; its body is the angle — moai -C <root> show <review id>
-    Grade: <grade>
-    Root: <root>
-
-    1. Run the review on that worktree: Skill(code-review, "<grade> --fix <root>/.worktrees/<epic>").
-       It runs as a background fork of its own — wait for the notice that it ended, and do not
-       hand back before it. If the hook refuses it (rule 3) and the review issue above is picked
-       up, do not work around the hook: review the range by hand at that grade, fix in the working
-       tree, and open the text of 4 with the line below — "If the review stays refused" in
-       <steps file>, 7
-       Manual review: the review command was refused by rule 3 — <the refusal's first line>
-    2. Its fixes stay in the worktree's working tree, uncommitted. Do not commit, reset, rebase
-       or amend there — the worker takes them in. If anything you started still runs, stop it
-       with TaskStop
-    3. Hold what came back against "Five places the review keeps finding" in <steps file>, and
-       look yourself at any of the five the review left out
-    4. Leave the reviewer's own words on the review issue — write them to a file in your
-       scratchpad and run moai -C <root> note <review id> -b - < <that file>
-       If the text runs past 64KB, summarize it — put `Summary: original <size>KB agent-<task-id>` on
-       the first line, keep every finding's number and place, and shorten only the sentences. Leave fences and indentation alone
-    5. Hand back with SubagentHandback. The first line is Model ran: anthropic/<your real model
-       name> — the name in your system prompt, not an alias. When 1 ran the review by hand, the
-       second line is Manual review. Then what was fixed (finding number, file) and what was left,
-       by finding number

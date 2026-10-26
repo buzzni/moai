@@ -408,8 +408,17 @@ next one. A grade or an effort that is not one of the five words falls back to i
 default with one line on stderr, and an unknown key is named and skipped. A
 model name is not checked: the Claude roles go to Claude Code's `Agent` as written,
 so write a name it raises a subagent on, and the supervisor tells you when one is
-refused. The repository's `.moai/config.toml` does not carry models — what each
-one costs is yours.
+refused.
+
+A repository can recommend models too — a `[models]` table in its
+`.moai/config.toml`, with the same keys. It overrides the defaults, and your user
+config overrides it: the repository recommends, you choose. `moai models` marks a
+value that came from there `repo` and names the file on its last line; a bad value
+there is named and skipped, and no other command stops on it.
+
+`moai models` marks each line for its own value only. The level lines name the
+roles they pair with — `effort` goes with `develop`, `docs` and `bulk`,
+`effort_complex` with `complex`, `review_grade` with `review`.
 
 ### One round
 
@@ -421,23 +430,32 @@ one costs is yours.
    backlog items that do not collide with the work open. For each one that
    carries no deadline it asks you when it is due — never required, and with no
    answer it sends none
-2. **It picks a role and raises a worker.** Each backlog item goes to one role —
+2. **The `plan` role unfolds it first.** The supervisor raises a subagent on the
+   `plan` role's model to split the backlog item into an epic and its issues,
+   hang the milestone and the deadline on the epic, and give every member a body
+   the worker can start from; it hands back the epic and a difficulty per member.
+   The worker is then sent that epic from step 2
+3. **It picks a role and raises a worker.** Each backlog item goes to one role —
    `develop` or `complex` by one word of difficulty, `docs` for the wiki and the
    CHANGELOG, `bulk` for mechanical work — and the supervisor raises a subagent
    on that role's model and effort. How many run side by side it asks you once a
    round. Raised inside the supervisor's session, the worker stands in the root,
-   so it works its worktree by absolute paths
-3. **The prompt carries the assignment and names the steps.** It opens with a
+   so it works its worktree by absolute paths. The role is measured on the members
+   the `plan` subagent wrote
+4. **The prompt carries the assignment and names the steps.** It opens with a
    line naming the work and telling the worker to read the
    [brief](glossary.md#brief) — the worker's numbered steps, a file of the
    supervisor skill (`references/worker.md`) given by its absolute path — and
-   from which step to follow it. The lines after that fill this assignment — the
+   from which step to follow it. The rare branches (you away, a subdirectory
+   project, carrying on stalled work, a review the hook keeps refusing, the review
+   brief) stand beside it in `references/worker-branches.md`, which the worker
+   reads when its assignment takes one. The lines after that fill this assignment — the
    backlog, the model, the effort and the difficulty, whether the worker is a
    subagent or a session, the models and efforts per role it may hand pieces of
    its work to (`Subagents:` — `none` for a Codex worker), the work running alongside, the root branch and the
    base branch, the milestone, the deadline (`Due:`), the root and whether the person is away
-4. **The worker does the work in a worktree** — unfolds the backlog into an epic
-   and hangs the milestone and the deadline on it, picks the members up, works in
+5. **The worker does the work in a worktree** — picks the members up (a backlog
+   sent to it directly it unfolds first, as the `plan` subagent would), works in
    `<root>/.worktrees/<epic>`, has the epic reviewed, merges, closes, leaves a `Next:` note and, last of all, reports. A
    subagent leaves the report on the epic as a `report:` note first and then
    hands it back — the notice that it ended is the report, and the note is what
@@ -447,12 +465,13 @@ one costs is yours.
    raised on comes back, before anything is picked up, as
    `Model: raise to complex`, and the supervisor raises a new worker on that model,
    its message's `Model:` and `Effort:` lines changed to match
-5. **The supervisor checks the report** — the merge is on that work's base branch, the
+6. **The supervisor checks the report** — the merge is on that work's base branch, the
    epic is done, the worktree is gone — writes the
    [model line](glossary.md#model-line) of a subagent worker from the report's
    `Model ran:` and `Subagent ran:` lines, looks for members a session worker
-   closed without one, unfolds a `member refused:` backlog item into its epic, and
-   sends the next backlog item to a new worker
+   closed without one — all before it marks the report `Report-checked:`, since a
+   supervisor that starts again reads only that mark — unfolds a `member refused:`
+   backlog item into its epic, and sends the next backlog item to a new worker
 
 **The epic-end review is the epic's only one, on the review model.** The worker
 reviews the whole epic once, at the end, with `/code-review` at `review_grade` —

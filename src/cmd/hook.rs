@@ -992,11 +992,47 @@ fn picks_key(root: &Path) -> u64 {
 /// 이 세션이 `ids` 를 지금 집었다고 적는다. 못 적으면 조용히 넘어간다 — 빠진 기록은 기록 없는 줄의 판정이다: 다른
 /// 세션의 기록이 없는 판에서는 전과 같고, 있는 판에서는 그 줄이 누구의 것인지 모른다(`hook::Picks::crowded`).
 fn record_picks(input: &Input, repo: &Repo, ids: &[(String, bool)]) {
+    // 적을 것이 없으면 세션 id 도 안 푼다 — 훅이 지나보내는 셸 부름마다 이 자리를 지난다.
+    if ids.is_empty() {
+        return;
+    }
+    if let Some(sid) = safe_sid(input) {
+        record_picks_as(&sid, repo, ids);
+    }
+}
+
+/// 다른 에이전트가 제 셸에 세우는 세션 표 — 이것이 서면 그 셸의 `CLAUDE_CODE_SESSION_ID` 는 물려받은 남의 값이다.
+const OTHER_AGENT_SESSIONS: [&str; 2] = ["CODEX_THREAD_ID", "ANTIGRAVITY_CONVERSATION_ID"];
+
+/// **`moai mv` 가 쓰기 뒤 제 집기를 적는다**(moai-w25x.831). 훅은 명령줄의 글자로 id 를 읽어, 껍데기가 풀 낱말
+/// (`$M mv …`·`moai mv "$R" …`)의 옮김은 적지 못했다 — 그 줄은 여러 세션이 도는 판에서 누구의 것인지 모르는
+/// 줄이 되어 규칙 3 이 리뷰를 막았다(moai-scb6). 옮긴 프로세스는 무엇을 옮겼는지 안다. **확실한 집기로 적는다** —
+/// 쓰기가 정말 선 뒤다. 훅이 앞서 적은 줄(`?` 든 것까지)은 그대로 두고, 이 줄이 더 늦어 이긴다. `add -s <시작 칸>`
+/// 은 여기를 안 지나 아직 안 적힌다.
+///
+/// **세션은 `CLAUDE_CODE_SESSION_ID` 로 안다** — `claude` 가 훅 입력의 `session_id` 와 같은 값으로 셸에 세운다
+/// (`skill::command` 의 2026-09-23 측정). 서브에이전트의 셸도 부모의 값이라 훅이 읽는 자와 같다.
+/// **다른 에이전트의 셸에서는 안 적는다** — 그 값은 그 셸이 물려받은 남의 세션 것이다: Codex 는 공용 데몬의 환경을
+/// 물려받았고(moai-sile), Antigravity 도 Claude 세션 안의 셸에서 띄우면 그렇다(리뷰 moai-w25x.54r 가 재현했다 — 그
+/// 세션이 남의 줄을 붙들고 규칙 1 로 막았다). 그 에이전트가 제 셸에 세우는 표([`OTHER_AGENT_SESSIONS`])로 가르고,
+/// 빈 값은 없는 것이다(환경변수의 관례). 물려받은 값이 남는 길은 하나 더 있다 — Claude 세션의 셸에서 띄운 tmux 서버의
+/// 칸이다. 거기서 사람이 친 집기는 그 세션의 것으로 적힌다.
+pub(crate) fn record_own_picks(repo: &Repo, ids: &[String]) {
+    let other_agent = OTHER_AGENT_SESSIONS.iter().any(|k| std::env::var_os(k).is_some_and(|v| !v.is_empty()));
+    if ids.is_empty() || other_agent {
+        return;
+    }
+    let Some(sid) = std::env::var("CLAUDE_CODE_SESSION_ID").ok().as_deref().and_then(safe_sid_of) else { return };
+    let ids: Vec<(String, bool)> = ids.iter().map(|id| (id.clone(), true)).collect();
+    record_picks_as(&sid, repo, &ids);
+}
+
+/// [`record_picks`] 의 몸통 — 세션 id 를 이미 경로 조각으로 받는다([`safe_sid_of`]).
+fn record_picks_as(sid: &str, repo: &Repo, ids: &[(String, bool)]) {
     use std::io::Write;
     if ids.is_empty() {
         return;
     }
-    let Some(sid) = safe_sid(input) else { return };
     let Some(dir) = picks_dir(repo) else { return };
     let Some(home) = dir.parent() else { return };
     // **남이 못 쓰는 자리에 짓는다**(리뷰 moai-59k3.4c3) — 설정 디렉터리가 그룹에 열려 있고 umask 가
@@ -1024,11 +1060,11 @@ fn record_picks(input: &Input, repo: &Repo, ids: &[(String, bool)]) {
     // **링크를 따라 쓰지 않는다**(리뷰 moai-59k3.4c3) — 심어 둔 링크 하나가 남의 파일에 이 줄을 덧붙인다.
     #[cfg(unix)]
     std::os::unix::fs::OpenOptionsExt::custom_flags(&mut open, libc::O_NOFOLLOW);
-    if let Ok(mut f) = open.open(dir.join(&sid)) {
+    if let Ok(mut f) = open.open(dir.join(sid)) {
         let _ = f.write_all(lines.as_bytes());
     }
     PICKS_READ.lock().unwrap_or_else(std::sync::PoisonError::into_inner).retain(|(at, _)| *at != dir);
-    prune_picks(home, &dir, &sid);
+    prune_picks(home, &dir, sid);
 }
 
 /// **오래 안 적힌 세션의 기록은 치운다**(리뷰 moai-3k2d.1df). 읽는 쪽([`read_picks`])은 판정마다 이 디렉터리를
@@ -1130,12 +1166,13 @@ thread_local! {
 
 /// 세션 id 를 경로 조각으로 — 사람이 준 글자를 그대로 쓰지 않는다.
 fn safe_sid(input: &Input) -> Option<String> {
-    let safe: String = input
-        .session_id
-        .as_deref()?
-        .chars()
-        .map(|c| if c.is_ascii_alphanumeric() || c == '-' { c } else { '_' })
-        .collect();
+    safe_sid_of(input.session_id.as_deref()?)
+}
+
+/// [`safe_sid`] 의 속 — 훅 입력이 아닌 자리(`moai mv` 의 환경, [`record_own_picks`])도 **같은 조각**을 지어야
+/// 훅이 그 기록을 제 세션의 것으로 읽는다.
+fn safe_sid_of(sid: &str) -> Option<String> {
+    let safe: String = sid.chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' { c } else { '_' }).collect();
     (!safe.is_empty()).then_some(safe)
 }
 
