@@ -8534,3 +8534,5 @@
 {"ts":"2026-10-26T07:31:33Z","id":"moai-jn8d","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Report-checked: c8758d93"}
 {"ts":"2026-10-26T07:41:24Z","id":"moai-yqgk","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"v0.29.0 릴리스"}
 {"ts":"2026-10-26T07:41:24Z","id":"moai-yqgk","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-26T08:04:35Z","id":"moai-yqgk","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 (medium — 감독이 릴리스 절차와 Windows clippy 고침을 돌렸다)"}
+{"ts":"2026-10-26T08:04:35Z","id":"moai-yqgk","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"v0.29.0 나감 — PR #52, 자산 7, Discord 잡 성공(글만 — 화면 변화 거의 없음). Windows clippy 고침 b77f8508"}
