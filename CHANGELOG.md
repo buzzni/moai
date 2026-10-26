@@ -12,6 +12,17 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+### Added
+
+- **`?` (or `SPC h`) in the explorer opens a window that lists every key** —
+  the keys you press straight away (`r`, `h`, `l`, `Tab`), the movement keys,
+  every menu item with its group, and the keys of the gantt, the stats window and
+  the wiki window. It reads the same table as `moai keys`, so a key changed in
+  `keys.toml` shows as changed. The movement keys scroll it and `?`, `Esc` or
+  `Backspace` close it; it opens over the stats and wiki windows too. The bottom
+  bar names `?` while there is room, and the root menu gains `h` as its last item
+  — `SPC h` used to close the menu and fold the row. (moai-ucyr)
+
 ## [0.27.0] - 2026-10-26
 
 ### Added
