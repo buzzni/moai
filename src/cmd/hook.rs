@@ -736,6 +736,7 @@ fn settle<'a>(
                 me: base.me.clone(),
                 archive: base.archive.clone(),
                 homes: base.homes.clone(),
+                main: base.main.clone(),
                 ..beside
             };
             add_picked(input, repo, &mut away);
