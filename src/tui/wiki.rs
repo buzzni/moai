@@ -883,6 +883,11 @@ impl App {
                     self.go(to, &rows);
                     true
                 }
+                // 키 목록 창을 연 키는 알림을 안 걷는다 — 읽기만 하는 창이다(`App::key` 의 같은 갈래, 리뷰).
+                Some(Browse::Help) => {
+                    self.open_help(&rows);
+                    false
+                }
                 Some(Browse::Step(m)) => {
                     if let Mode::Wiki(w) = &mut self.mode {
                         w.step(m);
@@ -1140,7 +1145,7 @@ pub(super) mod tests {
         let ctx = a.key_ctx(&a.rows());
         assert_eq!(ctx.screen(), Screen::Wiki);
         let root = menu::entries(a.chord.held(), &ctx, &[]);
-        assert_eq!(root.iter().map(menu::Entry::text).collect::<Vec<_>>(), ["+화면 [위키]", "+보기"]);
+        assert_eq!(root.iter().map(menu::Entry::text).collect::<Vec<_>>(), ["+화면 [위키]", "+보기", "키 목록"]);
         a.hit("v");
         let v = menu::entries(a.chord.held(), &a.key_ctx(&a.rows()), &[]);
         assert_eq!(v.iter().map(|e| e.key.as_str()).collect::<Vec<_>>(), ["r"], "SPC v 밑에 원문 말고 다른 것이 섰다");
