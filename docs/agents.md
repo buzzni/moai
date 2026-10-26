@@ -753,7 +753,9 @@ to bring them back ("recover the sessions", "되살려"). It loads `moai-recover
 
 - **Which died.** It reads the same records under `~/.claude/sessions/` and
   takes the dead ones standing in the root or a worktree, leaving out any that
-  is already back and older crashes you did not name. When several stand in one
+  is already back, any that another window resumed and then cleared with
+  `/clear` (`~/.claude/history.jsonl` logs each `/clear` under the id it left
+  behind), and older crashes you did not name. When several stand in one
   directory it asks you once which to bring back
 - **What each was doing.** From each session's transcript under
   `~/.claude/projects/` it reads its role (supervisor or worker), the issue it
