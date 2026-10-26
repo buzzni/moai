@@ -333,15 +333,19 @@ gets through — run it as given. None of them waits on a person except rule 5.
    rule never stops; nor does it stop a whole plan created with `moai add --from`
 2. **Pick something up before you change the repository.** A file edit
    (`Edit`, `Write`, Codex's `apply_patch`, Antigravity's file-writing tools) or
-   a shell write (`>`, `>>`, `sed -i`, `tee`) to a file in the checkout needs a
+   a shell write (`>`, `>>`, `sed -i`, `tee`, the destination of `cp`, `mv` or
+   `install`) to a file in the checkout needs a
    held issue — `moai mv <id> in_progress`, or `moai add` first if it was not in
    the plan. Not counted: `.moai/`, `.claude/`, `.agents/`, `.codex/`,
    `.worktrees/`, `.git/`, `target/`, `node_modules/`, and anything outside the
-   repository. A session that stands in the main checkout while everything it
-   holds has a worktree standing (`.worktrees/<epic>`) is refused a write to the
-   main checkout, and the refusal names the same file inside that worktree —
-   workers stay in the root and reach their worktree by absolute path, so this is
-   what keeps a relative path from landing in the checkout every session shares
+   repository. A session whose held work all has a worktree standing
+   (`.worktrees/<epic>`) is refused a write that lands in the main checkout —
+   wherever its shell stands, and also when the write comes after a pick-up on the
+   same line — and a write into another epic's worktree; the refusal names the same
+   file inside its own worktree. Workers stay in the root and reach their worktree
+   by absolute path, so this is what keeps a relative path from landing in the
+   checkout every session shares. `git apply`, `patch` and what a script writes are
+   not seen (moai-qrja)
 3. **A review is an issue too.** `/code-review` needs an open review issue tied to
    the held work, and that issue needs an angle in its body (`-b`) — what is being
    looked for and why. Moving it to `done` needs a closing line (`-m`) saying what
@@ -350,9 +354,10 @@ gets through — run it as given. None of them waits on a person except rule 5.
    without `-L`/`-S`, and `pkill`/`killall` aimed at tmux, are refused even
    outside a tracker. A tmux under test gets its own server:
    `env -u TMUX tmux -L <unique name> …`. Inside `cmux claude-teams` (`$TMUX`
-   starts with `/tmp/cmux-`) the `tmux` on `PATH` is cmux's shim and drops
-   `-L`/`-S`, so there its `kill-*` and `new-session` are refused whatever socket
-   the line names. Every rule-4 refusal there hands
+   starts with `/tmp/cmux-`, or cmux has announced the shim in
+   `CMUX_CLAUDE_TEAMS_TMUX_SHIM`) the `tmux` on `PATH` is cmux's shim and drops
+   `-L`/`-S`, so there its `kill-*`, `new-session`, `new-window`, `split-window`,
+   `send-keys` and `respawn-pane` are refused whatever socket the line names. Every rule-4 refusal there hands
    `env -u TMUX <real tmux> -L <unique name> …` on the real tmux's absolute
    path — `type -a tmux` lists the candidates; take one whose `readlink -f` has
    no `cmux` in it (moai-e7vm)

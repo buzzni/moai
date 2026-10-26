@@ -179,10 +179,12 @@ and wait on each other to merge.
   needs the directory) (moai-9js2). The parentheses matter in a session: its
   shell keeps a `cd` into the next call, while a subagent's starts in the root
   again every time. The hook's rule 2 takes over part of the isolation guard it
-  gives up: while the shell stands in the root and everything the session holds
-  has its worktree standing, a write to the root checkout — an edit, or a shell
-  redirect, `sed -i` or `tee` — is refused, and the refusal names the same file
-  in the worktree (in each worktree, when the work held stands in several)
+  gives up: while everything the session holds has its worktree standing, a
+  write that lands in the root checkout — an edit, or a shell redirect, `sed -i`,
+  `tee` or a `cp`/`mv`/`install` destination, wherever the shell stands — is
+  refused, and so is a write into another epic's worktree; the refusal names the
+  same file in the worktree (in each worktree, when the work held stands in
+  several)
 - **Work a supervisor hands out inside a milestone branches from that
   milestone's branch**, `milestone/<milestone id>`, instead of the root branch,
   and merges back into it; the branch lives in its own worktree,
