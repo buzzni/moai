@@ -6960,10 +6960,27 @@ impl TmuxEnv {
 /// 가짜 `$TMUX` 아래에서 shim 이 사람의 cmux 를 건드리게 하는 하위 명령인가 — 만들기(`new-session`·`new`)와
 /// 죽이기(`kill-server`·`kill-session`·`kill-window`·`kill-pane` 과 `killw`·`killp`). tmux 는 모호하지 않은
 /// 앞머리도 받으니 `kill-w`·`new-s` 도 센다 — 모호한 앞머리(`kill-s`)는 tmux 가 어차피 거절하니 같이 막아도 잃는 것이 없다.
+///
+/// **사람의 창에 치거나 창을 여는 것도 든다**(moai-qrja.pre, cmux 0.65.0 소스 `runClaudeTeamsTmuxCompat`) —
+/// `send-keys`·`send` 는 `surface.send_text`(사람의 칸에 글을 친다), `split-window`·`splitw` 는 사람의 워크스페이스를
+/// 가르고, `new-window`·`neww` 는 `workspace.create`, `respawn-pane`·`respawnp` 는 `surface.respawn` 이다. shim 은 이
+/// 넷을 **이름 그대로만** 받는다 — 앞머리는 "Unsupported" 로 끝나니 안 센다.
 fn cmux_touching(w: &str) -> bool {
-    matches!(w, "new" | "killw" | "killp")
-        || (w.len() >= "kill-s".len()
-            && ["kill-server", "kill-session", "kill-window", "kill-pane"].iter().any(|k| k.starts_with(w)))
+    matches!(
+        w,
+        "new"
+            | "killw"
+            | "killp"
+            | "send-keys"
+            | "send"
+            | "split-window"
+            | "splitw"
+            | "new-window"
+            | "neww"
+            | "respawn-pane"
+            | "respawnp"
+    ) || (w.len() >= "kill-s".len()
+        && ["kill-server", "kill-session", "kill-window", "kill-pane"].iter().any(|k| k.starts_with(w)))
         || (w.len() >= "new-s".len() && "new-session".starts_with(w))
 }
 
@@ -6993,16 +7010,50 @@ fn tmux_sub(rest: &[String]) -> Option<usize> {
 /// **명령 묶음의 뒤 명령도 본다**(리뷰 moai-e7vm.rl8). tmux 는 `;` 로 끝나는 낱말(`\;`·`';'`)에서 다음 명령을
 /// 받으니 그 뒤의 첫 낱말도 하위 명령이다 — 첫 명령만 보던 판은 `tmux -L x ls \; kill-session` 을 지나보냈다.
 /// 인자 자리의 낱말(`tmux display new`)은 하위 명령이 아니다.
+///
+/// **하위 명령을 shim 의 눈으로도 찾는다**(moai-qrja.pre) — shim 이 값을 받는다고 보는 전역 플래그는 `-L`·`-S`·`-f`
+/// 뿐이라([`shim_sub`]) `tmux -c <하위 명령>` 의 그 낱말을 하위 명령으로 읽는다. 진짜 tmux 의 눈([`tmux_sub`])으로만
+/// 찾던 판은 그것을 `-c` 의 값으로 보아 넘겼다. **공백 든 낱말 하나는 명령 글이다** — tmux 도 shim 도 그 자리의 낱말을
+/// 갈라 읽는다([`spoken`]). 하위 명령이 없는 줄(`env -u TMUX tmux -L x`)은 shim 이 "requires a command" 로 끝내 아무것도
+/// 안 건드리니 지난다.
 fn cmux_hit(rest: &[String]) -> Option<(usize, usize)> {
-    let first = tmux_sub(rest)?;
-    let mut head = true;
-    for (n, w) in rest.iter().enumerate().skip(first) {
-        if head && cmux_touching(w.strip_suffix(';').unwrap_or(w)) {
-            return Some((first, n));
+    let mut starts = [tmux_sub(rest), shim_sub(rest)];
+    if starts[0] == starts[1] {
+        starts[1] = None;
+    }
+    starts.into_iter().flatten().find_map(|first| {
+        let mut head = true;
+        for (n, w) in rest.iter().enumerate().skip(first) {
+            let name = w.strip_suffix(';').unwrap_or(w);
+            if head && (cmux_touching(name) || spoken(name).is_some_and(cmux_touching)) {
+                return Some((first, n));
+            }
+            head = w.ends_with(';');
         }
-        head = w.ends_with(';');
+        None
+    })
+}
+
+/// shim 이 하위 명령으로 읽는 자리(cmux 0.65.0 `splitTmuxCommand`) — 값을 받는 전역 플래그는 `-L`·`-S`·`-f` 뿐이고(붙여
+/// 쓴 `-Lx` 도 받는다), `-V`·`-v` 와 `--` 뒤는 명령이 아니다. 그 밖의 `-` 낱말은 값 없이 건너뛴다.
+fn shim_sub(rest: &[String]) -> Option<usize> {
+    let mut n = 0;
+    while n < rest.len() {
+        let w = rest[n].as_str();
+        if !w.starts_with('-') || w == "-" {
+            return Some(n);
+        }
+        if matches!(w, "--" | "-V" | "-v") {
+            return None;
+        }
+        n += if matches!(w, "-L" | "-S" | "-f") { 2 } else { 1 };
     }
     None
+}
+
+/// 공백 든 낱말 하나가 명령 글일 때 그 첫 낱말 — tmux 와 shim 은 하위 명령 자리의 그런 낱말을 갈라 읽는다(moai-qrja.pre).
+fn spoken(w: &str) -> Option<&str> {
+    w.contains(char::is_whitespace).then(|| w.split_whitespace().next()).flatten()
 }
 
 /// 거절문이 내미는 시험용 tmux 줄(moai-e7vm.83t) — 가짜 `$TMUX` 아래에서는 진짜 tmux 의 절대 경로로 짠 줄이고
@@ -7046,7 +7097,9 @@ pub fn guard_tmux_in(line: &Line<'_>, env: &impl std::ops::Deref<Target = TmuxEn
                             ),
                         );
                     }
-                    let Some(at) = rest.iter().position(|w| kills(w)) else { continue };
+                    // 하위 명령 자리의 공백 든 낱말 하나는 명령 글이다([`spoken`], moai-qrja.pre) — 그 자리만 본다.
+                    let said = tmux_sub(rest).filter(|&n| spoken(&rest[n]).is_some_and(kills));
+                    let Some(at) = said.or_else(|| rest.iter().position(|w| kills(w))) else { continue };
                     // `-L default` 는 이름을 댔어도 사람의 기본 서버다 — 맨 tmux 가 붙는 바로 그 소켓이다.
                     let own = rest[..at].iter().enumerate().any(|(n, f)| match f.as_str() {
                         "-L" => rest.get(n + 1).is_none_or(|v| v != "default"),
@@ -12611,6 +12664,8 @@ mod tests {
             // `-L default` 는 맨 tmux 가 붙는 바로 그 서버다.
             "tmux -L default kill-server",
             "tmux -Ldefault kill-session",
+            // 하위 명령 자리의 공백 든 낱말 하나는 명령 글이다(moai-qrja.pre).
+            "tmux 'kill-session -t x'",
         ] {
             for all in [&held, &idle] {
                 let why = denied(&guard_shell(all, &cfg(), &here(), root, root, cmd)).to_string();
@@ -12728,6 +12783,18 @@ mod tests {
             "tmux -L x ls \\; kill-session -t foo",
             "tmux -L x ls ';' new-session -d",
             "tmux -L x display -p x\\; killp",
+            // 사람의 칸에 치고, 가르고, 열고, 다시 띄운다(moai-qrja.pre, cmux 0.65.0 소스).
+            "env -u TMUX tmux -L t send-keys -t x 'ls' Enter",
+            "tmux -L x send -t 1 q",
+            "tmux -L x split-window -h",
+            "tmux -L x splitw",
+            "tmux -L x new-window -n w",
+            "tmux neww",
+            "tmux -L x respawn-pane -k",
+            "tmux respawnp -k",
+            // shim 이 하위 명령으로 읽는 자리 — `-c` 는 값을 안 받는다. 공백 든 낱말은 명령 글이다.
+            "tmux -c kill-session",
+            "tmux -L x 'send-keys -t 1 q'",
         ] {
             let why = denied(&run(&inside, cmd)).to_string();
             assert!(why.starts_with(&crate::guide::rule_head(4)), "규칙 4 가 안 섰다 — {cmd}\n{why}");
@@ -12742,6 +12809,12 @@ mod tests {
             "echo 'tmux -L x kill-session'",
             "tmux -L x ls \\; display -p new",
             "tmux -Lx list-sessions",
+            // 하위 명령이 없으면 shim 은 아무것도 안 하고 끝난다. 앞머리는 shim 이 안 받는다.
+            "env -u TMUX tmux -L x",
+            "tmux -L x -f kill-server",
+            "tmux -V",
+            "tmux -L x send-k -t 1 q",
+            "tmux display-message 'send-keys now'",
         ] {
             assert_eq!(run(&inside, cmd), Decision::Pass, "막혔다 — {cmd}");
         }
