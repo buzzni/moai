@@ -483,7 +483,8 @@ itself — that is the path when the person asks for it, not the usual one.
 slot filled. The worker knows nothing of this conversation, so what is not in the message
 does not reach it — except the worker's steps: they stand in this skill's
 `references/worker.md`, and the first line tells the worker to `Read` that file and follow
-it. The worker stands in this same repository with the same plugin loaded, so the file is
+it. Its rare branches stand beside it in `references/worker-branches.md`, and the worker
+reads the section it needs by itself — you name only the first file. The worker stands in this same repository with the same plugin loaded, so the file is
 there for it. **Do not copy the file into the message** — name it.
 
 To a subagent the message is the `prompt` of the `Agent` call in 2, with `Worker: subagent`.

@@ -345,7 +345,7 @@ It waits for the supervisor's review and the second assignment; it does not revi
 When `Review-ready:` arrives, read its whole note. Pick the review issue up
 (`moai -C <root> mv <review id> in_progress`) and run a review subagent in the reported
 worktree with its configured `review` model and "The review brief" in
-`references/worker.md`; refer to that brief, do not copy it here. Once the review has ended and its words are on the review issue, send
+`references/worker-branches.md`; refer to that brief, do not copy it here. Once the review has ended and its words are on the review issue, send
 "merge and close — review <id> done" with the same file-paste path and fresh input checks.
 Leave the review issue open: Codex takes the fixes in and closes it (worker.md 7 and 10).
 Do not clear the conversation between these two assignments. Watch for the final report,

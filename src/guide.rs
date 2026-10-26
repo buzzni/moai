@@ -2553,7 +2553,8 @@ itself — that is the path when the person asks for it, not the usual one.
 slot filled. The worker knows nothing of this conversation, so what is not in the message
 does not reach it — except the worker's steps: they stand in this skill's
 `references/worker.md`, and the first line tells the worker to `Read` that file and follow
-it. The worker stands in this same repository with the same plugin loaded, so the file is
+it. Its rare branches stand beside it in `references/worker-branches.md`, and the worker
+reads the section it needs by itself — you name only the first file. The worker stands in this same repository with the same plugin loaded, so the file is
 there for it. **Do not copy the file into the message** — name it.
 
 To a subagent the message is the `prompt` of the `Agent` call in 2, with `Worker: subagent`.
@@ -3046,7 +3047,7 @@ It waits for the supervisor's review and the second assignment; it does not revi
 When `Review-ready:` arrives, read its whole note. Pick the review issue up
 (`moai -C <root> mv <review id> in_progress`) and run a review subagent in the reported
 worktree with its configured `review` model and "The review brief" in
-`references/worker.md`; refer to that brief, do not copy it here. Once the review has ended and its words are on the review issue, send
+`references/worker-branches.md`; refer to that brief, do not copy it here. Once the review has ended and its words are on the review issue, send
 "merge and close — review <id> done" with the same file-paste path and fresh input checks.
 Leave the review issue open: Codex takes the fixes in and closes it (worker.md 7 and 10).
 Do not clear the conversation between these two assignments. Watch for the final report,
@@ -4656,6 +4657,10 @@ Root: <root>
     )
 }
 
+/// 일꾼의 걸음 파일 둘의 이름(moai-w25x.mgu) — 본 글과 갈래 글이 서로를 이 이름으로 가리킨다.
+pub const STEPS_FILE: &str = "worker.md";
+pub const BRANCHES_FILE: &str = "worker-branches.md";
+
 /// 일꾼의 걸음 — 감독 스킬의 `references/worker.md`(moai-obxm). 감독의 [`message`] 가 첫 줄에서 이 파일을 읽으라고 이른다
 /// (moai-fim6). 일꾼이 하는 일을 바꾸지 않는 내력·측정 글은 여기 안 싣는다 — 그것은 이 주석과 커밋 메시지에 선다.
 /// 일꾼 스킬(`moai-work`)을 걷었으니 일꾼이 지킬 것은 모두 여기 적는다.
@@ -4709,7 +4714,6 @@ pub fn worker() -> String {
     let angle = indent(REVIEW_ANGLE, "   ");
     // 7-4 는 목록 밖의 문단이라 명령 줄이 네 칸이다(`the_worker_steps_follow_the_markdown_list_rules`).
     let wiki_commit = indent(WIKI_COMMIT, "    ");
-    let brief = indent(&review_brief(), "    ");
     let untracked = tracker_out_of_git();
     let stand_in = crate::skill::CMUX_STAND_IN;
     format!(
@@ -4723,8 +4727,15 @@ person comes first** — this window is theirs; when they speak, answer them.
 ## The assignment
 
 The message's first line names the work and the step of this file to start from —
-`from step 1` for a new backlog, `from "Carrying on stalled work"` for work a session left
-behind, `from step 2` for an epic already unfolded whose first-column members are left.
+`from step 1` for a new backlog, `from step 2` for an epic already unfolded, or
+`from "Carrying on stalled work"` for work a session left behind.
+
+**This file is the path every assignment takes.** The rare branches stand in
+`{BRANCHES_FILE}` beside it — read that file too, the section a line here names, when your
+assignment takes one: `Person: away` ("When the person is away"), a `Subdir:` line ("A
+subdirectory project"), `from "Carrying on stalled work"`, a review rule 3 keeps refusing
+("When the review stays refused"), and, in a subagent, the review brief of 7 ("The review
+brief").
 The message's `from` is the supervisor — `<supervisor>` below; "tell the supervisor" is `SendMessage(to: <supervisor>, …)`.
 A message the supervisor pasted into this window (`moai-tmux` or `moai-cmux`) or sent as a Saycode prompt
 (`moai-saycode`) carries no `from`; its last line,
@@ -4761,7 +4772,7 @@ said yes to taking over a row that is not yours, say — belongs to the assignme
 - `Root:` — `<root>`, the root checkout's place (4-1)
 - `Subdir:` — `<subdir>`, only for a subdirectory project in a monorepo (3). Without it the
   root is the top of the repository
-- `Person:` — `here`, or `away` (below)
+- `Person:` — `here`, or `away` ("When the person is away" in `{BRANCHES_FILE}`)
 - `Worktree:` — the same words to every worker: you never go into the worktree, you aim at it
   ("Stay in the root")
 
@@ -4799,23 +4810,6 @@ needs more says so in a line of its own, **In a subagent**.
 - **Your tool calls carry the supervisor's session.** The hook reads you two as one: your
   pick-ups are recorded as the supervisor's, its rules see what the supervisor's other workers
   hold, and the supervisor's turn-end holds what you hold
-
-## When the person is away
-
-When the message says `Person: away`, decide by recommendation. A design question the notes
-do not settle is not asked (4) — settle it the way you would have recommended, and write it
-on the issue where the next person reads it
-
-    moai note <id> 'Decided alone: <what you chose> — <why>, and what the other way was'
-
-Nothing else waits on the person either. A model the window is not on is not asked for —
-work on the window's model and say so in the reason of 9-1. A row that is someone else's or
-nobody's (rule 5) is taken over only on a yes the message carries; without one, leave that row
-and name it in the report.
-
-**Stop at what cannot be undone** — deleting what is not yours, rewriting history someone
-else has, a release, anything outside this repository — and report that instead of doing
-it. When the person is back in the window, what they say overrides what you decided alone.
 
 ## Before the steps
 
@@ -4926,14 +4920,8 @@ root"), never in the root
    Inside a milestone the milestone branch has to stand first — raise it if it is missing
    ("The milestone branch").
    Until the worktree stands, the other sessions in the root read this member as their own focus.
-   **If the root is not the top of the repository** (a subdirectory project in a monorepo) the
-   worktree stands for the whole repository, so aim at the same subdirectory in it and work
-   there — standing at the worktree top, `moai` walks up and finds the root's
-   `.moai` to write, and the hook does not count edits under `.worktrees/`. `<subdir>` is that
-   relative path, filled in by the supervisor; if the message carries no `Subdir:`, the root
-   **is** the top and this step does not exist
-
-       {SUBDIR}
+   **If the message carries `Subdir:`**, the root is a subdirectory of the repository — work
+   in that subdirectory of the worktree, as "A subdirectory project" in `{BRANCHES_FILE}` says.
 4. Before you ask about a design decision, read the `Wiki` block of `moai show <member>` and
    `moai wiki search '<that place>'`; do not ask a person what the wiki already answers.
    Do not guess a design decision that is not in the notes — ask with `AskUserQuestion`;
@@ -5024,7 +5012,7 @@ root"), never in the root
    model from `moai models --json`, create the review issue and stand the members in `review`
    as below, **pick the review issue up** —
    `moai -C <root> mv <review id> in_progress --from todo` — and only then raise it on the
-   review brief (the last section of this file), every slot filled, for the reason below.
+   review brief ("The review brief" in `{BRANCHES_FILE}`), every slot filled, for the reason below.
    It leaves its fixes uncommitted and the reviewer's
    words on the review issue, and hands back what it fixed and what it left — take that in as
    below
@@ -5059,20 +5047,10 @@ root"), never in the root
    reads the same way, while the first one stays open and keeps the epic from closing.
    A refusal from the hook, such as a missing angle, is not worked around: fix it the way the
    refusal's own command says.
-   **If the review stays refused** — the review issue stands with its angle, you picked it up
-   (`moai -C <root> mv <review id> in_progress --from todo`), you ran what each refusal handed
-   you, and rule 3 still ties the review to a row that is not this epic's (its
-   `Why this session holds them:` lines, when it carries them, say which and why) —
-   do not work around the hook and do not start another agent program.
-   **Review by hand, in this session**: read the diff from the
-   merge-base yourself at the grade you picked, against the angle and the five places below, fix
-   what you find in the working tree, and write your words to a file whose first line is
-
-       {MANUAL_REVIEW}
-   That file is the review text 10 leaves on the review issue — without the line, the next
-   person reads your own sweep as what the review command found. The rest goes on as written: the
-   fixes in a `fix:` commit of their own, the close in 10, and the model line of 10 naming this
-   window's model with `manual` in its reason
+   **If the review stays refused** — the review issue picked up, every refusal's command run,
+   and rule 3 still ties the review to a row that is not this epic's — do not work around the hook
+   and do not start another agent program: review by hand, as
+   "When the review stays refused" in `{BRANCHES_FILE}` says.
 
 {angle}
 
@@ -5287,19 +5265,81 @@ root"), never in the root
     subagent of your own (`Subagents:`) that did a share of a member — 9-1's line of its own.
     Nothing about clearing a window is yours
 
+"#
+    )
+}
+
+/// 일꾼 걸음의 **드문 갈래** — 감독 스킬의 `references/worker-branches.md`(moai-w25x.mgu, 2026-10-26 사용자 결정).
+/// 일꾼은 매번 `worker.md` 전부를 읽었다(사용후기 2026-10-12: 규칙 글이 1,568줄). 늘 타는 길(1→12)은 [`worker`] 에 두고,
+/// 갈래 — 사람이 비운 판, 모노레포의 하위 디렉터리, 멈춘 일 잇기, 거절이 안 풀리는 리뷰, 서브에이전트의 리뷰 브리프 —
+/// 는 여기로 옮겼다. 본 글의 줄이 어느 절을 읽을지 이름으로 댄다. 걸음 번호는 본 글의 것이다 — 여기는 번호를 안 매긴다.
+pub fn worker_branches() -> String {
+    let brief = indent(&review_brief(), "    ");
+    format!(
+        r#"# Worker steps — the rare branches
+
+This file stands beside `{STEPS_FILE}`, the steps every assignment takes; a line there names
+the section here that your assignment needs. Read only that section.
+
+## When the person is away
+
+When the message says `Person: away`, decide by recommendation. A design question the notes
+do not settle is not asked (step 4) — settle it the way you would have recommended, and write it
+on the issue where the next person reads it
+
+    moai note <id> 'Decided alone: <what you chose> — <why>, and what the other way was'
+
+Nothing else waits on the person either. A model the window is not on is not asked for —
+work on the window's model and say so in the reason of 9-1. A row that is someone else's or
+nobody's (rule 5) is taken over only on a yes the message carries; without one, leave that row
+and name it in the report.
+
+**Stop at what cannot be undone** — deleting what is not yours, rewriting history someone
+else has, a release, anything outside this repository — and report that instead of doing
+it. When the person is back in the window, what they say overrides what you decided alone.
+
+## A subdirectory project
+
+When the message carries `Subdir:`, the root is not the top of the repository (a
+subdirectory project in a monorepo). In step 3 the
+worktree stands for the whole repository, so aim at the same subdirectory in it and work
+there — standing at the worktree top, `moai` walks up and finds the root's
+`.moai` to write, and the hook does not count edits under `.worktrees/`. `<subdir>` is that
+relative path, filled in by the supervisor; with no `Subdir:` line the root **is** the top and this
+section does not exist
+
+    {SUBDIR}
+
+## When the review stays refused
+
+Step 7 sends you here: the review issue stands with its angle, you picked it up
+(`moai -C <root> mv <review id> in_progress --from todo`), you ran what each refusal handed
+you, and rule 3 still ties the review to a row that is not this epic's (its
+`Why this session holds them:` lines, when it carries them, say which and why).
+Do not work around the hook and do not start another agent program.
+**Review by hand, in this session**: read the diff from the
+merge-base yourself at the grade you picked, against the angle and the five places of step 7, fix
+what you find in the working tree, and write your words to a file whose first line is
+
+    {MANUAL_REVIEW}
+That file is the review text 10 leaves on the review issue — without the line, the next
+person reads your own sweep as what the review command found. The rest goes on as written: the
+fixes in a `fix:` commit of their own, the close in 10, and the model line of 10 naming this
+window's model with `manual` in its reason
+
 ## Carrying on stalled work
 
 A session died holding a member of `<epic>`, the epic the message's first line names; that
 member still stands picked up. Read how far it got (`moai show <epic>`, its history and
 notes), then
 
-- If the worktree is there, aim at it ("Stay in the root") — read how far it got with
+- If the worktree is there, aim at it ("Stay in the root" in `{STEPS_FILE}`) — read how far it got with
   `git -C <root>/.worktrees/<epic> log <base branch>..HEAD` and `git -C <root>/.worktrees/<epic> status`
   (asked in the root, both read the root and show nothing of it), and carry on
 - If it is not, raise it again from the root. If the branch survives, on that branch
   (`git worktree add .worktrees/<epic> worktree-<epic>`); if it does not,
   `git worktree add -b worktree-<epic> .worktrees/<epic> <base branch>` — inside a milestone,
-  raise the milestone branch first if it is missing ("The milestone branch")
+  raise the milestone branch first if it is missing ("The milestone branch" in `{STEPS_FILE}`)
 - **If the root is not the top of the repository** (a subdirectory project in a
   monorepo), aim at the same subdirectory inside the worktree and work there — standing
   at the top, `moai` finds and writes the root's `.moai`, and the hook does not count edits
@@ -5310,8 +5350,8 @@ notes), then
       {SUBDIR}
 - The member's column is already picked up — do not move it to another column, but **record
   it as this session's** with a move to the column it stands in, on a line of its own:
-  `moai mv <member> <its column> --from <its column>` — nothing moves; the hook writes the
-  pick-up down. Standing in the root, the hook reads a member this session never picked up
+  `moai mv <member> <its column> --from <its column>` — nothing moves; the pick-up is
+  written down for this session (`moai mv` records it itself). Standing in the root, the hook reads a member this session never picked up
   under `.worktrees/<epic>` as that worktree's, so without it you hold nothing: rule 1 stops
   fencing what you create, rule 3 refuses the review, and the turn's end does not hold the
   member for you. **If its assignee
@@ -5328,8 +5368,7 @@ notes), then
 
 In a subagent, 7 raises the review on this prompt — copy it whole and fill every slot.
 
-{brief}
-"#
+{brief}"#
     )
 }
 
@@ -5409,7 +5448,7 @@ CODEX_REVIEW
 
 The note stands in the root's file, where the supervisor reads it — it needs no commit.
 Stop until the supervisor pastes "merge and close — review <id> done"; its reviewer used
-"The review brief" in `references/worker.md` and its review model in this worktree. Then finish 7 as worker.md says — the
+"The review brief" in `references/worker-branches.md` and its review model in this worktree. Then finish 7 as worker.md says — the
 review's fixes stand uncommitted in the worktree: take them in as a separate `fix:` commit
 and note what you hand on with the issue id — and go on with 7-1 to 11, and 12 below.
 
@@ -6088,7 +6127,8 @@ mod tests {
         // 거둔 일의 절은 4-1 부터 끝까지 잇는다 — 그 범위가 4-1 위에서 끊기면 이어받은 일꾼만 워크트리의
         // `.moai` 를 고친다. **끝은 번호로 적지 않는다**: `11 까지` 로 적어 둔 뒤 12 가 붙자 이어받은 일꾼만 12 를
         // 못 받았다.
-        let stalled = &work[work.find("## Carrying on stalled work").expect("거둔 일의 절이 없다")..];
+        let branches = worker_branches();
+        let stalled = &branches[branches.find("## Carrying on stalled work").expect("거둔 일의 절이 없다")..];
         assert!(stalled.contains("from 4-1 to the end"), "거둔 일이 4-1 을 빼거나 끝을 자른다");
         // 거둔 일도 새 일과 같은 메시지를 받는다 — 모델 줄은 그 머리의 한 줄이고, 읽는 법은 일꾼 글에 한 번 선다.
         assert!(message().contains(MODEL_SLOT), "메시지에 모델 줄이 없다");
@@ -7034,7 +7074,7 @@ stop sending outside work while a release runs",
         // 닫을 때만 적어(결정 4), 앞 세션이 하다 죽은 멤버를 거둔 창이 닫으면 통째로 제 몫이 된다.
         // 집을 때도 적게 넓히지 않고, 통계가 그 줄을 가를 수 있게 까닭에 표시만 한다. 그 걸음은 일꾼
         // 글의 한 절이고, 감독의 메시지는 첫 줄로 그 절을 이름 짓는다(moai-snyk).
-        let (supervise, work) = (supervise(), worker());
+        let (supervise, work) = (supervise(), worker_branches());
         let title = "Carrying on stalled work";
         assert!(supervise.contains(&format!("from \"{title}\"")), "거둔 일의 메시지가 일꾼 글의 그 절을 안 댄다");
         let at = work.find(&format!("## {title}")).expect("거둔 일의 절이 없다");
@@ -7181,7 +7221,7 @@ stop sending outside work while a release runs",
         let four = &brief[step_at(&brief, "4")..step_at(&brief, "4-1")];
         assert!(four.contains(DECISION_HEAD) && four.contains("`SubagentHandback`"), "4 가 결정을 돌려주지 않는다");
         // 보고 — 노트가 handback 보다 먼저다. 둘째 줄이 실제로 돈 모델이다(감독이 9-1 의 줄을 적는다).
-        let twelve = &brief[step_at(&brief, "12")..brief.find("## Carrying on stalled work").unwrap()];
+        let twelve = &brief[step_at(&brief, "12")..];
         let sub = &twelve[twelve.find("**In a subagent**").expect("12 에 서브에이전트 줄이 없다")..];
         let note = sub.find("moai note <epic> -b -").expect("서브에이전트의 보고가 노트로 안 남는다");
         let back = sub.find("`SubagentHandback`").expect("서브에이전트가 보고를 돌려주지 않는다");
@@ -7211,7 +7251,7 @@ stop sending outside work while a release runs",
             seven.contains("still this session, not another"),
             "중첩 서브에이전트가 딴 에이전트 프로그램으로 읽힌다"
         );
-        assert!(brief.contains(&indent(&prompt, "    ")), "일꾼 글에 리뷰 브리프가 없다");
+        assert!(worker_branches().contains(&indent(&prompt, "    ")), "일꾼 글에 리뷰 브리프가 없다");
         for piece in ["Skill(code-review, \"<grade> --fix <root>/.worktrees/<epic>\")", "TaskStop", "background fork"] {
             assert!(prompt.contains(piece), "리뷰 브리프에 {piece} 가 없다");
         }
@@ -7407,9 +7447,15 @@ stop sending outside work while a release runs",
         assert!(supervise.contains("print(\"subdir\", os.path.relpath(here, top))"), "감독이 하위 경로를 안 낸다");
         assert!(message().contains("Subdir: <subdir>"), "메시지에 하위 경로 자리가 없다");
         let three = &brief[step_at(&brief, "3")..step_at(&brief, "4")];
-        assert!(three.contains(SUBDIR), "일꾼이 워크트리 안의 하위로 안 들어간다");
+        // 하위 디렉터리는 드문 갈래라 곁 글에 선다(moai-w25x.mgu) — 3 은 그 절을 이름으로 댄다.
+        let branches = worker_branches();
+        let sub = &branches[branches.find("## A subdirectory project").expect("하위 디렉터리 절이 없다")..];
+        assert!(
+            three.contains("\"A subdirectory project\"") && sub.contains(SUBDIR),
+            "일꾼이 워크트리 안의 하위로 안 들어간다"
+        );
         // 거둔 일은 3 을 안 지나 4-1 부터 잇는다 — 그 절에도 같은 줄이 서야 이어받은 일꾼이 꼭대기에 안 선다.
-        let stalled = &work[work.find("## Carrying on stalled work").expect("거둔 일의 절이 없다")..];
+        let stalled = &branches[branches.find("## Carrying on stalled work").expect("거둔 일의 절이 없다")..];
         assert!(stalled.contains(SUBDIR), "거둔 일의 일꾼이 워크트리 꼭대기에 선다");
         // 글머리(`- `) 안의 코드 블록이다 — 빈 줄 뒤에 글 칸(2)에서 네 칸 더(moai-bkn4.9no). 빈 줄 없이 들여 쓰면 GitHub 에서
         // 글머리 문단 끝에 `cd` 가 붙는다(리뷰 moai-bkn4.c3d — 브리프만 재는 시험이 이 자리를 못 본다).
@@ -8604,7 +8650,7 @@ stop sending outside work while a release runs",
         let codex = section(&text, "## Codex workers");
         assert!(codex.contains(CODEX_EMPTY_BOX) && codex.contains(REPORT_WATCH));
         assert!(codex.contains(CODEX_WORKER_RULES), "Codex 모델·리뷰 규약이 공용 글과 다르다");
-        assert!(worker().contains("## The review brief\n"), "Codex가 가리키는 리뷰 브리프가 없다");
+        assert!(worker_branches().contains("## The review brief\n"), "Codex가 가리키는 리뷰 브리프가 없다");
         for part in [
             "--command 'cd \"<root>\" && codex --model <codex>'",
             "moai models --json",
@@ -8770,7 +8816,7 @@ stop sending outside work while a release runs",
         assert!(codex.contains(CODEX_EMPTY_BOX), "Codex 입력창 잣대가 공용 글과 다르다");
         assert!(codex.contains(REPORT_WATCH), "Codex 보고 기다리기가 공용 글과 다르다");
         assert!(codex.contains(CODEX_WORKER_RULES), "Codex 모델·리뷰 규약이 공용 글과 다르다");
-        assert!(worker().contains("## The review brief\n"), "Codex가 가리키는 리뷰 브리프가 없다");
+        assert!(worker_branches().contains("## The review brief\n"), "Codex가 가리키는 리뷰 브리프가 없다");
         for part in [
             "moai models --json",
             "WebSearch",
@@ -9159,7 +9205,10 @@ stop sending outside work while a release runs",
         let steps = numbered_steps(&work);
         let seven = &steps[step_at(steps, "7")..steps.find("\n7-1. ").unwrap()];
         assert!(seven.contains("**If the review stays refused**"), "7 에 막힌 리뷰의 길이 없다");
-        assert!(seven.contains(MANUAL_REVIEW), "7 의 손 리뷰가 머리를 안 단다");
+        let branches = worker_branches();
+        let by_hand = &branches[branches.find("## When the review stays refused").expect("막힌 리뷰의 절이 없다")..];
+        assert!(seven.contains("\"When the review stays refused\""), "7 이 막힌 리뷰의 절을 안 댄다");
+        assert!(by_hand.contains(MANUAL_REVIEW), "7 의 손 리뷰가 머리를 안 단다");
         assert!(seven.contains("do not work around the hook"), "7 이 훅을 비켜 가지 말라고 안 한다");
         assert!(review_brief().contains(MANUAL_REVIEW), "리뷰 브리프가 손 리뷰의 머리를 안 싣는다");
         assert!(!MANUAL_REVIEW.contains("/code-review"), "머리가 리뷰 명령을 글자로 들어 브리프의 셈을 늘린다");

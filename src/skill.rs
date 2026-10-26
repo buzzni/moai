@@ -151,7 +151,10 @@ pub fn picked(all: &[Skill], optional: &[&str]) -> Vec<Skill> {
 /// 스킬과 그 파일이 모두 여기 들었는지는 시험이 잰다(`cmd::skill::tests::every_planted_skill_is_on_the_list`).
 pub const EVER_PLANTED: [(&str, &[&str]); 8] = [
     ("moai", &["SKILL.md", "references/commands.md"]),
-    ("moai-supervise", &["SKILL.md", "references/worker.md", "references/worker-codex.md"]),
+    (
+        "moai-supervise",
+        &["SKILL.md", "references/worker.md", "references/worker-branches.md", "references/worker-codex.md"],
+    ),
     ("moai-wiki", &["SKILL.md"]),
     ("moai-tmux", &["SKILL.md"]),
     ("moai-cmux", &["SKILL.md"]),
@@ -208,6 +211,8 @@ pub fn skills() -> Vec<Skill> {
             files: vec![
                 ("SKILL.md", crate::guide::supervise()),
                 ("references/worker.md", crate::guide::worker()),
+                // 드문 갈래는 곁 파일이다(moai-w25x.mgu) — 본 글이 절 이름으로 가리킨다.
+                ("references/worker-branches.md", crate::guide::worker_branches()),
                 ("references/worker-codex.md", crate::guide::worker_codex()),
             ],
             claude_only: true,
@@ -1499,6 +1504,7 @@ mod tests {
             crate::guide::saycode(),
             crate::guide::recover(),
             crate::guide::worker(),
+            crate::guide::worker_branches(),
         ];
         // **걸음 글 안에 박힌 `` `moai …` `` 도 뽑는다**(moai-8na5). 줄 머리만 보던 판은 브리프 2·10·12
         // 의 멤버를 옮기는 줄과 에픽에 남기는 노트를 훅 시험 밖에 두었다 — 거기서 무엇을 바꿔도 초록이었다.
@@ -1567,6 +1573,8 @@ mod tests {
                     .replace("<slug>", "cli")
                     // 위키 검색의 낱말 자리(moai-g8pt.y1u).
                     .replace("<words>", "parser")
+                    // 감독 2-2 의 펼치기 브리프가 멤버 본문을 파일에서 흘려 넣는 자리(moai-w25x.jby).
+                    .replace("<that text, written to a file in your scratchpad>", "/tmp/body.md")
             })
             .collect();
         // **자리표시자가 남으면 시끄럽게 진다**(moai-8na5). 남은 `<…>` 는 셸 읽기가 리다이렉션으로
@@ -1626,6 +1634,7 @@ mod tests {
             "skills/moai/references/commands.md",
             "skills/moai-supervise/SKILL.md",
             "skills/moai-supervise/references/worker.md",
+            "skills/moai-supervise/references/worker-branches.md",
             "skills/moai-supervise/references/worker-codex.md",
             "skills/moai-wiki/SKILL.md",
             "skills/moai-tmux/SKILL.md",
@@ -1802,8 +1811,8 @@ mod tests {
             })
             .count();
         assert_eq!(
-            only_claude, 7,
-            "감독 스킬은 SKILL.md 와 일꾼 글 둘, tmux·cmux·Saycode·되살리기 스킬은 SKILL.md 하나씩이다"
+            only_claude, 8,
+            "감독 스킬은 SKILL.md 와 일꾼 글 셋, tmux·cmux·Saycode·되살리기 스킬은 SKILL.md 하나씩이다"
         );
         assert_eq!(
             shared.len() + 2 + only_claude,
