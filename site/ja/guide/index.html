@@ -144,7 +144,7 @@ moai init</code></pre>
 
     <h3 id="tui">moai tui — ターミナルで</h3>
     <pre><code>moai tui</code></pre>
-    <p>一覧、カンバン、ガント、統計、Wiki をターミナルで見ます。<code>SPC g</code> を押してから画面ごとのキーを一つ押すと切り替わります。次に起動すると、最後に見ていた画面が開きます。</p>
+    <p>一覧、カンバン、ガント、統計、Wiki をターミナルで見ます。<code>SPC g</code> を押してから画面ごとのキーを一つ押すと切り替わります。次に起動すると、最後に見ていた一覧、カンバン、ガントの画面が開きます。</p>
     <div class="window term"><div class="bar"><i></i><i></i><i></i><span>moai tui</span></div>
       <div class="cast" data-cast="../../assets/media/tui-tour.cast" data-cols="120" data-rows="34" role="figure" aria-label="moai tui で一覧、カンバン、Wiki へと移る画面"></div></div>
     <ul>
@@ -156,7 +156,7 @@ moai init</code></pre>
     <pre><code>moai web</code></pre>
     <p><code>127.0.0.1:6624</code> で一覧、カンバン、ガント、Wiki を見ます。ブラウザは自分で開きます。ターミナルに慣れていないメンバーと進み具合を共有するときに使えます。</p>
     <ul>
-      <li>キーは tui と同じです。統計は tui でだけ見られます。</li>
+      <li>キーは tui とほぼ同じです。ペインの間を移るときだけ <code>Ctrl-w</code> の代わりに <code>SPC w</code> を使います。統計は tui でだけ見られます。</li>
       <li>ガントのバーをドラッグして日付を変えられます。それ以外のトラッカーの内容は読むだけです。</li>
       <li>ポートがすでに使われている場合は <code>--port</code> で別のポートを指定します。<code>--port 0</code> を渡すと空いているポートを選びます。</li>
       <li>止めるときは <code>Ctrl-C</code> を押します。</li>
@@ -170,7 +170,7 @@ moai init</code></pre>
       <video class="clip" muted loop playsinline preload="none" poster="../../assets/media/web-detail.png" data-src="../../assets/media/web-detail.webm" aria-label="moai web でイシューの説明、コミット、履歴を読む画面"></video></div>
     <ul>
       <li><code>Enter</code> でマイルストーンやエピックに入り、<code>Backspace</code> で出ます。<code>l</code> は一段展開し、<code>h</code> は折りたたみます。<code>Tab</code> は配下をすべて展開します。</li>
-      <li><code>/</code> を押して検索語を入力すると、タイトル、タグ、本文、ノートからすぐに探します。隠したイシューやアーカイブしたイシューも検索されます。</li>
+      <li><code>/</code> を押して検索語を入力すると、タイトル、タグ、本文、ノートからすぐに探します。隠したイシューも検索されます。アーカイブしたイシューは、web では <code>SPC v o</code> でアーカイブを表示しているときだけ検索されます。</li>
       <li><code>SPC f</code> で状態、担当者、タグ、マイルストーンなどの条件をかけられます。入力中は選べる値が上に表示されます。</li>
       <li><code>SPC s</code> で優先度、期限、更新時刻など複数の基準を組み合わせて並べ替えます。並べ替えの設定は次に起動したときも残ります。</li>
       <li>自分に割り当てられたイシューに変更があると <code>[NEW]</code> が付きます。<code>r</code> で既読にします。</li>
@@ -184,7 +184,7 @@ moai init</code></pre>
       <video class="clip" muted loop playsinline preload="none" poster="../../assets/media/web-board.png" data-src="../../assets/media/web-board.webm" aria-label="web のカンバンで列を移り、カードを押して詳細を読む画面"></video></div>
     <ul>
       <li>バックログと先送りした作業も別の列に表示されます。先送りの列は最初は隠れていて、<code>SPC v l</code> で表示します。</li>
-      <li>他の人のカードには担当者が表示されます。</li>
+      <li>tui では他の人のカードに担当者が表示されます。web では <code>SPC c a</code> で担当者を表示します。</li>
       <li><code>h</code>、<code>l</code> で列を移り、<code>j</code>、<code>k</code> で列の中のカードを行き来します。</li>
       <li>一覧とカーソル位置、フィルター、表示設定を共有します。二つの画面を行き来しても見ていた位置はそのままです。</li>
       <li>カードを手で動かすことはできません。状態はエージェントが作業しながら変えます。</li>
