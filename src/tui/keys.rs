@@ -403,6 +403,9 @@ pub enum Browse {
     Gantt(Pan),
     /// 커서 줄의 계획을 하루 옮긴다(moai-i4hf.9xi) — **트래커에 쓴다**. 간트 배치에서만 선다.
     Plan(Nudge),
+    /// 키 목록 창을 연다 — `?`·`SPC h`(moai-ucyr). SPC 로 시작하지 않는 키(`r`·`h`·`Tab`·간트의 키)는 이 창 말고는
+    /// 화면 어디에도 안 선다.
+    Help,
 }
 
 /// 계획을 하루 옮기는 쪽(moai-i4hf.9xi). **조각이라 줄을 모른다** — 어느 날이 옮는지는 `model::Issue::shifted` 가 정한다.
@@ -829,6 +832,7 @@ pub const BROWSE: &[Bind<Browse>] = {
         // 읽음은 손이 제일 자주 가는 것이라 **바로 누른다**(moai-z9pc). 옛 `r`(다시 읽기)은
         // moai-7sjm 이 `SPC r` 로 옮겨 이 자리가 비어 있었고, 그 `SPC r` 도 뒤에 걷었다(moai-en4u).
         row!(Read, Some("r"), Key::plain('r')),
+        row!(Help, Some("?"), Key::plain('?')),
         row!(ClearFilter, Some("Esc"), Key::any(C::Esc)),
         // `/` 는 바로 누르는 키이면서 메뉴에도 선다 — 이름은 바로 누르는 쪽 하나만 댄다.
         row!(Grep, None, LEADER, Key::plain('/')),
@@ -946,6 +950,10 @@ pub const BROWSE: &[Bind<Browse>] = {
         row!(Timezone, Some("SPC o t"), LEADER, Key::plain('o'), Key::plain('t')),
         // **마우스도 여기다** — 이슈도 줄도 안 건드리고 이 사람 화면을 어떻게 다루는가만 바꾼다(위의 자).
         row!(Mouse, Some("SPC o m"), LEADER, Key::plain('o'), Key::plain('m')),
+        // **키 목록은 두 키로 연다**(moai-ucyr, 2026-10-26 사용자 결정) — `?` 는 lazygit·k9s 의 버릇이고 `SPC h` 는
+        // doom 의 help 접두어다. 이름은 바로 누르는 `?` 하나만 댄다 — `/` 와 `SPC /` 처럼. **뿌리 메뉴의 끝 칸이다** —
+        // 가장 드물게 누르는 것이고, 낮은 창에서 메뉴가 한 줄로 접힐 때 앞 칸들을 밀어내지 않는다.
+        row!(Help, None, LEADER, Key::plain('h')),
     ]
 };
 
@@ -1116,7 +1124,8 @@ impl Browse {
             //
             // **위키 창도 같고, 원문·그린 글 하나가 더 선다**(moai-o3cb) — 창의 본문이 마크다운이다. 아래 상세 칸의
             // 갈래(`!c.detail`)보다 먼저 선다: 상세를 숨긴 사람의 위키 창에서도 그 토글은 본문을 바꾼다.
-            Go(_) | Step(_) if c.stats || c.wiki => Ok(()),
+            // 키 목록(`SPC h`)도 선다(moai-ucyr) — 창 위에 뜨는 창이라 덮인 창을 안 걷는다.
+            Go(_) | Step(_) | Help if c.stats || c.wiki => Ok(()),
             Raw if c.wiki => Ok(()),
             _ if c.stats || c.wiki => Err(Off::Quiet),
             // 간트의 날짜 축은 간트에서만 — 포커스와 상관없다: 상세를 읽다가도 축은 옮긴다(moai-i4hf.27r).
@@ -1374,6 +1383,7 @@ impl Browse {
             Timezone => say(c.lang, "tui.act.timezone"),
             Mouse => say(c.lang, "tui.act.mouse"),
             Read | ReadAll | ReadGroup => say(c.lang, "tui.act.read"),
+            Help => say(c.lang, "tui.act.help"),
             Gantt(Pan::ZoomIn) => say(c.lang, "tui.act.gantt_zoom_in"),
             Gantt(Pan::ZoomOut) => say(c.lang, "tui.act.gantt_zoom_out"),
             Gantt(Pan::Left) => say(c.lang, "tui.act.gantt_left"),

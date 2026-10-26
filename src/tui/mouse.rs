@@ -134,6 +134,16 @@ impl App {
         if m.column == u16::MAX || m.row == u16::MAX {
             return;
         }
+        // **키 목록 창이 떠 있으면 휠만 듣고 그 창을 굴린다**(moai-ucyr) — 누르기가 창 밑의 줄을 고르거나 칸을 끌면 안
+        // 보이는 자리가 바뀐다. 걸음은 목록·상세와 같은 [`WHEEL`] 줄이다(리뷰) — 한 줄씩이면 같은 손짓이 창마다 달리 구른다.
+        if let Some(sheet) = &mut self.help {
+            match m.kind {
+                MouseEventKind::ScrollUp => sheet.roll(-WHEEL),
+                MouseEventKind::ScrollDown => sheet.roll(WHEEL),
+                _ => {}
+            }
+            return;
+        }
         let at = Position::new(m.column, m.row);
         // **가로 휠은 간트의 날짜 축만 받는다**(moai-i4hf.exq) — 가로 휠이 없는 마우스를 위해 Shift+휠도 가로다. 다른
         // 자리에서는 가로로 구를 것이 없어 버린다. 한 번에 한 칸 — 축의 한 칸은 확대에 따라 한 시간~한 주다.
