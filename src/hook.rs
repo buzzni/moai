@@ -1151,7 +1151,7 @@ pub struct Scan<'a> {
     line: &'a Line<'a>,
     cfg: &'a Config,
     /// 토막을 안 가리고 훑은 한 벌 — 처음 묻는 쪽이 훑고 그다음부터는 그것을 본다.
-    whole: std::cell::OnceCell<(Vec<String>, Vec<(usize, bool)>)>,
+    whole: std::cell::OnceCell<Scanned>,
 }
 
 impl<'a> Scan<'a> {
@@ -1170,7 +1170,7 @@ impl<'a> Scan<'a> {
     }
 
     /// 토막을 안 가리고 훑은 한 벌.
-    fn whole(&self) -> &(Vec<String>, Vec<(usize, bool)>) {
+    fn whole(&self) -> &Scanned {
         self.whole.get_or_init(|| shell_scan(self.line, self.cfg, &|_| true))
     }
 
@@ -1195,17 +1195,38 @@ impl<'a> Scan<'a> {
     /// 쓰는 파일들([`shell_writes`]) — `only` 가 훑기의 답을 안 바꾸면([`Scan::whole_for`]) 갈무리한
     /// 벌에서 **빌리고**, 바꾸면 그 `only` 로 다시 훑는다. 빌려 주는 것이 요점이다: 통째로 베끼면
     /// 아낀 것을 도로 치른다.
-    fn writes(&self, only: &dyn Fn(usize) -> bool) -> std::borrow::Cow<'_, [String]> {
+    #[cfg(test)]
+    fn writes(&self, only: &dyn Fn(usize) -> bool) -> Vec<String> {
+        self.scanned(only).writes.clone()
+    }
+
+    /// 훑은 한 벌([`Scanned`]) — [`Scan::writes`] 와 같은 자로 빌린다. **쓰기와 집기 뒤의 쓰기를 한 번에 받는다**
+    /// (moai-qrja.ub5) — 따로 받으면 `only` 가 답을 바꾸는 줄을 두 번 훑는다.
+    fn scanned(&self, only: &dyn Fn(usize) -> bool) -> std::borrow::Cow<'_, Scanned> {
         match self.whole_for(only) {
-            true => std::borrow::Cow::Borrowed(&self.whole().0),
-            false => std::borrow::Cow::Owned(shell_writes(self.line, self.cfg, only)),
+            true => std::borrow::Cow::Borrowed(self.whole()),
+            false => std::borrow::Cow::Owned(shell_scan(self.line, self.cfg, only)),
         }
     }
 
     /// 집기로 센 토막들 — [`picked_in`] 은 **늘** 안 가린 벌을 본다.
     fn picks(&self) -> &[(usize, bool)] {
-        &self.whole().1
+        &self.whole().picks
     }
+}
+
+/// [`shell_scan`] 의 답 — 이름을 달아 둔다. 같은 형의 두 목록이 자리로만 갈리면 바꿔 적어도 컴파일이 된다
+/// ([`Bailout`] 과 같은 까닭이다).
+#[derive(Debug, Default, Clone)]
+struct Scanned {
+    /// 쓰는 파일들([`shell_writes`]).
+    writes: Vec<String>,
+    /// **집기 뒤에 `&&` 로 이어 쓰는 파일들**(moai-qrja.ub5, 2026-10-26 사용자 결정) — 빈손 거절에는 안 센다(시킨 차례를
+    /// 한 줄로 친 것이다). 규칙 2 의 둘째 물음([`homed`])에만 센다 — 빼던 판은 `moai mv X in_progress && sed -i … src/x.rs`
+    /// 를 그 물음에도 안 닿게 해, 워크트리가 선 일을 쥔 세션의 루트 쓰기가 샜다.
+    after: Vec<String>,
+    /// 집기로 센 토막의 번호와 확실히 도는가.
+    picks: Vec<(usize, bool)>,
 }
 
 /// 지금 무엇의 안에 있는가.
@@ -6128,10 +6149,7 @@ pub fn picked_in(
         // **argv 가 뒤로 자라면 이 세션의 집기로 안 적는다**(moai-ctn2) — [`picks_up`] 과 같은
         // 까닭이고 같은 답이어야 한다. 여기만 적으면 규칙 2 가 안 센 집기를 장부가 들고, 그것이
         // `Away::picked` 로 흘러 남이 쥔 줄을 제 것으로 붙든다.
-        let Some((args, _)) = moai_call(seg).filter(|&(_, grows)| !grows) else { continue };
-        let seen = flag_values(args, &["--from"]).pop();
-        let verbs = positionals(args);
-        let Some((_, ids)) = verbs.get(1..).and_then(<[&str]>::split_last) else { continue };
+        let Some((seen, ids)) = pick_targets(seg) else { continue };
         // **껍데기가 풀 낱말은 id 로 안 적는다**(moai-pyi4) — `moai mv $R review` 의 `$R` 는 훅이 못 푼 값이다.
         // 그것을 id 로 적던 판은 아무 줄도 안 가리키는 기록을 남겼다 — `since` 가 없어 끝난 것으로도 안 버려지고
         // 다른 세션의 `theirs` 에 두 주를 섰다. **그 자리에는 [`Picks::UNNAMED`] 를 적는다** — 이 세션이 무언가를
@@ -6157,6 +6175,33 @@ pub fn picked_in(
                 .is_none_or(|from| stands(k, id).is_none_or(|now| now == from))
                 .then(|| (id.to_string(), sure))
         }));
+    }
+    out
+}
+
+/// 집기 토막이 겨눈 id 들과 본 칸(`--from`) — [`picked_in`] 과 [`after_picked`] 가 **한 자로** 읽는다. 둘이 따로 읽으면
+/// 한쪽만 고쳐지는 날 규칙 2 가 기록과 다른 줄을 집은 것으로 센다. argv 가 뒤로 자라면 없다([`picks_up`] 과 같은 까닭).
+fn pick_targets(seg: &Seg) -> Option<(Option<String>, Vec<&str>)> {
+    let (args, _) = moai_call(seg).filter(|&(_, grows)| !grows)?;
+    let seen = flag_values(args, &["--from"]).pop();
+    let verbs = positionals(args);
+    let (_, ids) = verbs.get(1..).and_then(<[&str]>::split_last)?;
+    Some((seen, ids.to_vec()))
+}
+
+/// 이 줄의 집기가 겨눈 줄 id — [`Scanned::after`] 의 쓰기를 워크트리 물음에 댈 때 초점에 더한다(moai-qrja.ub5). 칸을
+/// 안 견준다: 진 집기 뒤의 `&&` 는 안 돌고, 이긴 집기면 그 줄이 곧 초점이다. 껍데기가 풀 낱말은 id 가 아니다.
+fn after_picked(scan: &Scan<'_>, only: &dyn Fn(usize) -> bool) -> Vec<String> {
+    let picked: BTreeSet<usize> = scan.picks().iter().map(|&(n, _)| n).collect();
+    let mut out = Vec::new();
+    for (k, seg) in scan.line().used().enumerate() {
+        if !picked.contains(&k) || !only(k) {
+            continue;
+        }
+        let Some((_, ids)) = pick_targets(seg) else { continue };
+        out.extend(
+            ids.into_iter().filter(|id| !id.is_empty() && id.chars().all(crate::git::id_char)).map(str::to_string),
+        );
     }
     out
 }
@@ -6631,11 +6676,8 @@ fn beside_text(found: &[(&Issue, &Path)], beside: &Path, real: &Path, typed: &st
     let spell = |p: &Path| crate::path::slashed(&p.to_string_lossy(), cfg!(windows));
     let rel = real.strip_prefix(beside).ok();
     let there = |home: &Path| rel.map_or_else(|| spell(home), |rel| spell(&home.join(rel)));
-    let places = found
-        .iter()
-        .map(|&(row, home)| format!("\x20 {}   ({})", there(home), row.id))
-        .collect::<Vec<_>>()
-        .join("\n");
+    let places =
+        found.iter().map(|&(row, home)| format!("\x20 {}   ({})", there(home), row.id)).collect::<Vec<_>>().join("\n");
     format!(
         "Changing {typed} in the worktree at {}, which none of the work you hold lives in.\n\
      That branch is another epic's. Write the same file in the worktree of the work it belongs to:\n\
@@ -6697,7 +6739,8 @@ fn guard_writes_in(
     // **훑기는 한 벌을 빌린다**([`Scan::writes`], moai-44wr) — `settle` 이 막는 판에서 이 판정을
     // 세 번까지 다시 부르고, 그 뒤로 기록([`picked_in`])이 또 한 번 묻는다. **빌리는 것은 `only` 가
     // 집기 토막을 다 고를 때다** — 남의 트래커를 겨눈 집기가 섞인 줄은 그 셋을 저마다 다시 훑는다.
-    let writes = scan.writes(only);
+    let scanned = scan.scanned(only);
+    let (writes, after) = (&scanned.writes, &scanned.after);
     // **저장소 안에 닿는 쓰기만 남기고 초점을 묻는다**(moai-0zjo 리뷰) — [`held`] 는 사람을 풀 수 있어([`Person`])
     // `git` 을 두 번 띄운다. `2>/dev/null`·`| tee /tmp/…` 처럼 저장소 밖에 쓰는 흔한 줄이 그 값을 안 치르게,
     // 경로를 푸는 것(파일 계통만 묻는다)이 먼저다.
@@ -6714,7 +6757,13 @@ fn guard_writes_in(
             false => astray_at(away, root, &at).then_some((at, path, false)),
         })
         .collect();
-    if inside.is_empty() {
+    // **집기 뒤의 쓰기는 둘째 물음에만 든다**([`Scanned::after`], moai-qrja.ub5) — 셀 자리든 그 밖이든 같다.
+    let later: Vec<(PathBuf, &String)> = after
+        .iter()
+        .map(|path| (resolve_path(&cwd.join(&*native(path, cfg!(windows))), root), path))
+        .filter(|(at, _)| (!away.homes.is_empty() && counted(at, root)) || astray_at(away, root, at))
+        .collect();
+    if inside.is_empty() && later.is_empty() {
         return Decision::Pass;
     }
     // **지을 것은 한 번, 묻는 것은 경로마다**(리뷰 moai-9js2.s4s) — 초점과 그 자리([`homes_of`])는 경로에 안 달려
@@ -6729,6 +6778,19 @@ fn guard_writes_in(
             false => homed(away, &homes, root, at, path),
         };
         if let deny @ Decision::Deny(_) = said {
+            return deny;
+        }
+    }
+    if later.is_empty() {
+        return Decision::Pass;
+    }
+    // 집기 뒤의 초점은 **이 줄이 집을 줄을 더한 것**이다 — 방금 집는 줄에 워크트리가 없으면 [`homes_of`] 가 비어 지난다.
+    let picking = after_picked(scan, only);
+    let mut ahead = focus.clone();
+    ahead.extend(issues.iter().filter(|i| picking.contains(&i.id) && !focus.iter().any(|f| f.id == i.id)));
+    let homes = homes_of(issues, away, &ahead);
+    for (at, path) in &later {
+        if let deny @ Decision::Deny(_) = homed(away, &homes, root, at, path) {
             return deny;
         }
     }
@@ -7028,10 +7090,11 @@ pub fn guard_tmux_in(line: &Line<'_>, env: &impl std::ops::Deref<Target = TmuxEn
 }
 
 /// 이 명령이 **쓰는 파일들.** 흔한 모양만 본다 — `>`·`>>` 리다이렉션,
-/// `sed -i`, `tee`.
+/// `sed -i`, `tee`, `find` 의 `-fprint` 무리, `cp`·`mv`·`install` 의 목적지([`copy_dest`], moai-qrja.ub5).
 ///
-/// **완벽을 노리지 않는다.** 껍데기가 파일을 쓰는 길은 `cp`·`mv`·`install`·
-/// `truncate`·`python -c "open(...)"` 까지 끝이 없고, 그 목록은 반드시 샌다.
+/// **완벽을 노리지 않는다.** 껍데기가 파일을 쓰는 길은 `truncate`·`python -c "open(...)"` 까지
+/// 끝이 없고, 그 목록은 반드시 샌다. **`git apply`·`patch`·스크립트 안의 쓰기는 안 본다** — 무엇을 쓰는지가
+/// 명령줄에 안 나오고, 읽으려면 훅이 패치 파일을 새로 열어야 한다(2026-10-26 사용자 결정).
 /// 그 대신 **잘못 막지 않는다** — 못 잡는 것보다 엉뚱한 것을 막는 쪽이 훨씬
 /// 나쁘다. 규칙 1 이 명령줄 글자를 훑다가 `moai note` 를 막던 때가 그 증거다.
 /// 그래서 어디인지 모르는 과녁은 버린다: 변수·틸드·글롭·프로세스 치환이 든
@@ -7063,13 +7126,13 @@ pub fn guard_tmux_in(line: &Line<'_>, env: &impl std::ops::Deref<Target = TmuxEn
 /// 안 쥐어 준다)와 `! moai mv …`·`! ( moai mv … )` (집기가 져야 뒤가 돈다), `a || moai mv …` (앞이
 /// 이기면 집기가 안 돈다 — 앞도 집기면 어느 쪽이든 하나를 쥔다).
 fn shell_writes(line: &Line<'_>, cfg: &Config, only: &dyn Fn(usize) -> bool) -> Vec<String> {
-    shell_scan(line, cfg, only).0
+    shell_scan(line, cfg, only).writes
 }
 
 /// [`shell_writes`] 의 한 걸음 — 쓰는 파일들과 함께 **집기로 센 토막의 번호**([`Line::used`] 의 번호)를 낸다.
 /// [`picked_in`] 이 그 번호로 세션의 집기를 적는다(moai-m5mg) — 집기를 두 자리에서 따로 가르면 한쪽만
 /// 고쳐지는 날 `! moai mv …` 가 쓰기에는 빈손인데 기록에는 제 집기로 선다.
-fn shell_scan(line: &Line<'_>, cfg: &Config, only: &dyn Fn(usize) -> bool) -> (Vec<String>, Vec<(usize, bool)>) {
+fn shell_scan(line: &Line<'_>, cfg: &Config, only: &dyn Fn(usize) -> bool) -> Scanned {
     #[cfg(test)]
     SCANS.with(|n| n.set(n.get() + 1));
     /// **집기로 센 토막 하나**([`picked`]) — 그 번호와 선 묶음 깊이, 그리고 확실히 도는가다.
@@ -7302,6 +7365,8 @@ fn shell_scan(line: &Line<'_>, cfg: &Config, only: &dyn Fn(usize) -> bool) -> (V
         }
     }
     let mut out = Vec::new();
+    // 집기 뒤에 이어 쓰는 파일들([`Scanned::after`]).
+    let mut after = Vec::new();
     // `cd` 를 지난 하위 셸의 깊이 — 그 뒤의 상대 경로는 어디인지 모른다. **하위 셸을 나오면
     // 걷는다**: 치환(moai-xe6e)과 `( cd … )` 의 `cd` 는 괄호 밖으로 안 이어진다. 안 걷던 판은 그
     // 뒤의 상대 경로 쓰기를 모른다며 버려 샜다. `{ cd …; }` 는 하위 셸이 아니라 안 걷는다.
@@ -7833,6 +7898,10 @@ fn shell_scan(line: &Line<'_>, cfg: &Config, only: &dyn Fn(usize) -> bool) -> (V
             // 규칙 2 밖이지만([`SKIP`]), 이것은 위키 밑에 새 페이지를 짓는다. 셈하지 않던 판은 아무것도 안 쥔 채
             // 친 `moai wiki learn` 이 `docs/lessons/` 에 파일을 남겼다.
             Some("moai") => found.extend(learn_writes(&words[1..], cfg).into_iter().map(|p| (p, off_site))),
+            // **옮기고 베끼는 것의 목적지**(moai-qrja.ub5, 2026-10-26 사용자 결정) — [`copy_dest`].
+            Some(verb @ ("cp" | "mv" | "install")) => {
+                found.extend(copy_dest(verb, &words[1..]).into_iter().map(|p| (p, off_site)))
+            }
             _ => {}
         }
         // `cd` 뒤는 과녁이 어느 쪽이든 자리를 모른다 — 리다이렉션도 옮긴 자리에서 열린다.
@@ -7842,9 +7911,11 @@ fn shell_scan(line: &Line<'_>, cfg: &Config, only: &dyn Fn(usize) -> bool) -> (V
             // **뿌리부터 친 경로는 자리를 안 탄다**(moai-lag7.951) — Windows 의 `is_absolute` 는 드라이브가 없는
             // `/repo/x` 를 상대로 읽지만, 껍데기(Git Bash)에서 그것은 어디서 쳐도 같은 자리다.
             let relative = !Path::new(&*native(&path, cfg!(windows))).has_root();
-            if gate.is_some() || unknowable(&path) || (nowhere_known && relative) {
+            if unknowable(&path) || (nowhere_known && relative) {
                 continue;
             }
+            // **집기 뒤의 쓰기는 따로 든다**([`Scanned::after`], moai-qrja.ub5) — 빈손 거절에는 안 세고 워크트리 물음에만 센다.
+            let sink = if gate.is_some() { &mut after } else { &mut out };
             // **`-execdir` 이 절대 자리에서 도는 글이면 그 밑의 절대 경로로 낸다**(moai-xk0q,
             // [`Seg::under`]) — 여기의 상대 경로로 내면 부른 자리에 대고 풀려, `find /tmp -execdir
             // tee src/x.rs \;` 가 이 저장소의 쓰기로 막힌다. 버리면 `find /repo/src -execdir tee x \;`
@@ -7860,14 +7931,14 @@ fn shell_scan(line: &Line<'_>, cfg: &Config, only: &dyn Fn(usize) -> bool) -> (V
             // **시작 자리가 저장소의 윗자리면 여기서 못 잰다** — `find / -execdir tee x \;` 는 저장소
             // 안에도 쓰는데 `/x` 로 읽힌다. 옛 판도 버리던 자리라 새로 난 구멍은 아니다.
             if relative && !seg.under.is_empty() {
-                out.extend(
+                sink.extend(
                     (seg.under.iter())
                         .map(|d| Path::new(d).join(&path).to_string_lossy().into_owned())
                         .filter(|p| !unknowable(p)),
                 );
                 continue;
             }
-            out.push(path);
+            sink.push(path);
         }
         // **하위 셸의 `cd` 는 바깥 자리를 안 옮긴다**(리뷰 moai-k8j1.udq 의 6번) — 파이프의 칸이나
         // 뒤로 띄운 것은 제 셸에서 돌고 끝난다. 여기만 그 둘을 안 보던 판은 `{ cd /tmp; } & sed -i
@@ -8080,7 +8151,7 @@ fn shell_scan(line: &Line<'_>, cfg: &Config, only: &dyn Fn(usize) -> bool) -> (V
     if let Some((c, from)) = orelse {
         prune(&mut picked, from, c.saturating_sub(1));
     }
-    (out, picked.into_iter().map(|p| (p.at, p.sure)).collect())
+    Scanned { writes: out, after, picks: picked.into_iter().map(|p| (p.at, p.sure)).collect() }
 }
 
 /// 글자만으로는 **어디인지 모르는 경로** — 변수·틸드·글롭·프로세스 치환·`-`. 모르는 자리는
@@ -8432,6 +8503,60 @@ fn picks_up(seg: &Seg, cfg: &Config) -> bool {
             cfg.knows(to) && cfg.is_started(to)
         }
         _ => false,
+    }
+}
+
+/// `cp`·`mv`·`install` 이 **쓰는 자리** — `-t <dir>`(`--target-directory`)이 서면 그것, 아니면 마지막 자리 인자다(자리
+/// 인자가 둘 넘을 때만 — 하나뿐이면 쓸 곳을 못 댄 줄이다). `install -d` 는 자리 인자 모두가 짓는 디렉터리다.
+///
+/// **떠나는 자리는 안 센다** — `mv src/x.rs /tmp/` 도 저장소를 바꾸지만, 사람이 정한 것은 목적지다(moai-qrja.ub5). 값을
+/// 받는 짧은 깃발(`-S`·`-m`·`-o`·`-g`)은 그 값을 건너뛴다 — 세면 `install -m 644 a b` 의 `644` 가 파일이 된다. 디렉터리
+/// 목적지는 그 디렉터리를 쓰는 것으로 센다: 그 밑 어딘가에 떨어지니, 셈하는 자([`counted`])가 묻는 어느 저장소 밑인가는
+/// 같다. `git mv` 는 머리가 `git` 이라 여기 안 온다.
+fn copy_dest(verb: &str, args: &[String]) -> Vec<String> {
+    let valued: &[&str] = match verb {
+        "install" => &["-S", "-m", "-o", "-g", "-t", "--suffix", "--mode", "--owner", "--group", "--target-directory"],
+        _ => &["-S", "-t", "--suffix", "--target-directory"],
+    };
+    let (mut target, mut dirs, mut spots, mut opts) = (None, false, Vec::new(), true);
+    let mut words = args.iter();
+    while let Some(w) = words.next() {
+        if opts && w == "--" {
+            opts = false;
+        } else if opts && let Some(dir) = w.strip_prefix("--target-directory=") {
+            target = Some(dir.to_string());
+        } else if opts && w.starts_with("--") {
+            if valued.contains(&w.as_str()) {
+                let value = words.next();
+                if w == "--target-directory" {
+                    target = value.cloned();
+                }
+            }
+        } else if opts && w.starts_with('-') && w.len() > 1 {
+            // **getopt 처럼 읽는다**([`tmux_sub`] 와 같은 자) — 값을 받는 글자가 묶음 안에 서면 그 뒤 글자가 값이고
+            // (`-tdir`·`-m644`), 끝에 서면 다음 낱말이 값이다(`-dm 755`).
+            let cluster = &w[1..];
+            let found = cluster.char_indices().find(|&(_, c)| valued.iter().any(|v| v.len() == 2 && v.ends_with(c)));
+            // 값 앞의 글자만 깃발이다 — `-m0d` 의 `d` 는 값이다.
+            dirs |= verb == "install" && cluster[..found.map_or(cluster.len(), |(at, _)| at)].contains('d');
+            let Some((at, letter)) = found else { continue };
+            let tail = &cluster[at + letter.len_utf8()..];
+            let value = match tail.is_empty() {
+                true => words.next().cloned(),
+                false => Some(tail.to_string()),
+            };
+            if letter == 't' {
+                target = value;
+            }
+        } else {
+            spots.push(w.clone());
+        }
+    }
+    match (target, dirs) {
+        (Some(dir), _) => vec![dir],
+        (None, true) => spots,
+        (None, false) if spots.len() > 1 => spots.pop().into_iter().collect(),
+        _ => Vec::new(),
     }
 }
 
@@ -10652,7 +10777,7 @@ mod tests {
         for picks in asked {
             let fresh = Scan::new(&line, &cfg);
             assert_eq!(
-                fresh.writes(picks).into_owned(),
+                fresh.writes(picks),
                 super::shell_writes(&line, &cfg, picks),
                 "빌려 준 벌이 그 `only` 로 훑은 것과 다르다"
             );
@@ -13107,9 +13232,69 @@ mod tests {
             "cd /repo && echo x > /repo/src/store.rs",
             "echo x >| src/store.rs",
             "FOO=1 sed -i s/a/b/ src/store.rs",
+            // 옮기고 베끼는 것의 목적지(moai-qrja.ub5).
+            "cp /tmp/a src/store.rs",
+            "mv /tmp/a /repo/src/",
+            "install -m 644 /tmp/a src/store.rs",
+            "cp -t src /tmp/a /tmp/b",
+            "mv --target-directory=src /tmp/a",
+            "install -d src/new",
         ] {
             assert!(matches!(guard_writes(&all, &cfg(), &here(), root, root, cmd), Decision::Deny(_)), "샜다 — {cmd}");
         }
+    }
+
+    /// **`cp`·`mv`·`install` 은 목적지만 센다**(moai-qrja.ub5, 2026-10-26 사용자 결정) — 떠나는 자리와 깃발의 값은 쓰기가
+    /// 아니다. 쓸 곳을 못 댄 줄(자리 인자 하나)은 아무것도 안 낸다.
+    #[test]
+    fn copy_and_move_count_only_where_they_land() {
+        let w = |line: &str| line.split_whitespace().map(str::to_string).collect::<Vec<_>>();
+        assert_eq!(copy_dest("cp", &w("-r src/a /tmp/b")), ["/tmp/b"]);
+        assert_eq!(copy_dest("install", &w("-m 644 -o me src/a /tmp/x")), ["/tmp/x"]);
+        assert_eq!(copy_dest("install", &w("-m644 src/a /tmp/x")), ["/tmp/x"]);
+        assert_eq!(copy_dest("cp", &w("-tsrc /tmp/a")), ["src"]);
+        assert_eq!(copy_dest("cp", &w("-S .bak a b")), ["b"]);
+        assert_eq!(copy_dest("install", &w("-dm 755 a b")), ["a", "b"]);
+        assert_eq!(copy_dest("mv", &w("-- -x y")), ["y"]);
+        assert!(copy_dest("cp", &w("src/a")).is_empty());
+        assert!(copy_dest("mv", &w("-é")).is_empty());
+    }
+
+    /// **집기 뒤에 이어 쓴 것도 워크트리 물음에는 든다**(moai-qrja.ub5, 2026-10-26 사용자 결정). 빈손 거절은 전처럼 안
+    /// 선다 — 규칙이 시킨 차례를 한 줄로 친 것이다. 빼던 판은 그 쓰기를 둘째 물음에도 안 닿게 해, 워크트리가 선 일을
+    /// 쥐거나 집으면서 루트를 고친 줄이 샜다. 집는 줄을 초점에 더해 잰다 — 그 줄에 워크트리가 없으면 지난다.
+    #[test]
+    fn a_write_after_a_pick_up_still_meets_the_worktree_question() {
+        let root = abs("/repo");
+        let all = vec![
+            epic("t-e"),
+            under("t-e.aa", "in_progress", "t-e"),
+            under("t-e.bb", "todo", "t-e"),
+            issue("t-2", "todo"),
+        ];
+        let homed = Away {
+            names: set(&["t-e", "worktree-t-e"]),
+            own: set(&["develop"]),
+            sure: set(&["t-e.aa"]).into(),
+            homes: vec![(abs("/repo/.worktrees/t-e"), set(&["t-e", "worktree-t-e"]))],
+            ..Away::default()
+        };
+        let line = "moai mv t-e.bb in_progress --from todo && sed -i s/a/b/ src/store.rs";
+        let why = denied(&guard_writes(&all, &cfg(), &homed, &root, &root, line)).to_string();
+        assert!(why.contains(&format!("{}/src/store.rs", spelt("/repo/.worktrees/t-e"))), "{why}");
+        // 아무것도 안 쥔 세션이 워크트리가 선 줄을 집으며 루트를 고쳐도 같다.
+        let empty = Away { sure: Sure::default(), ..homed.clone() };
+        let picking = "moai mv t-e.aa in_progress && echo x > src/store.rs";
+        assert!(denied(&guard_writes(&all, &cfg(), &empty, &root, &root, picking)).contains("worktree stands at"));
+        // 집는 줄에 워크트리가 없으면 지난다 — 그 일은 루트에서 하는 것일 수 있다.
+        let bare = "moai mv t-2 in_progress && echo x > src/store.rs";
+        assert_eq!(guard_writes(&all, &cfg(), &empty, &root, &root, bare), Decision::Pass);
+        // 워크트리 안에 쓰는 것은 지난다.
+        let inside = "moai mv t-e.bb in_progress && echo x > /repo/.worktrees/t-e/src/store.rs";
+        assert_eq!(guard_writes(&all, &cfg(), &homed, &root, &root, inside), Decision::Pass);
+        // 딸린 워크트리가 없으면 집기 뒤의 쓰기는 전처럼 안 센다.
+        let alone = Away { homes: Vec::new(), ..homed.clone() };
+        assert_eq!(guard_writes(&all, &cfg(), &alone, &root, &root, line), Decision::Pass);
     }
 
     /// **잘못 막지 않는다.** 못 잡는 것보다 엉뚱한 것을 막는 쪽이 훨씬 나쁘다 —
@@ -13120,6 +13305,8 @@ mod tests {
         let all = vec![epic("t-e"), under("t-1", "todo", "t-e")];
         for cmd in [
             "grep -rn x src > /dev/null",
+            "cp src/a.rs /tmp/b",
+            "install -m 644 src/a /tmp/x",
             "cargo test 2>&1 | tail -20",
             "cargo build >&2",
             "echo x > /tmp/scratch/memo.md",

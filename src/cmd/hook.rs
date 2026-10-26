@@ -529,9 +529,31 @@ fn antigravity_answer(decision: Decision) -> Option<String> {
 fn arrived(dialect: Dialect, event: Event, raw: &str) -> Vec<Input> {
     match dialect {
         Dialect::Claude => vec![serde_json::from_str(raw).unwrap_or_default()],
-        Dialect::Codex => patched(serde_json::from_str(raw).unwrap_or_default()),
+        Dialect::Codex => patched(worked_in(serde_json::from_str(raw).unwrap_or_default())),
         Dialect::Antigravity => from_antigravity(event, raw).into_iter().collect(),
     }
+}
+
+/// Codex 의 셸 부름이 **도는 자리** — `tool_input.workdir` 이 서면 그것이 세션의 자리(`cwd`) 대신이다(moai-qrja.ub5).
+///
+/// Codex 의 셸 도구는 `workdir` 로 명령이 돌 자리를 따로 받는다(Codex 일꾼 글이 `cd` 와 나란히 그것을 이른다,
+/// `guide::worker_codex`). 안 읽던 판은 워크트리에 떨어질 상대 경로의 쓰기를 세션의 자리(루트)에 대고 풀어, 규칙 2 가
+/// 루트의 같은 파일을 막을 수 있었다. **훅의 입력에 그 칸이 실리는지는 재지 못했다** — 없으면 아무것도 안 바뀐다.
+/// 상대 경로는 세션의 자리에 붙인다. 자리를 모르는 상대 경로는 안 쓴다 — 어디인지 지어내지 않는다.
+fn worked_in(mut input: Input) -> Input {
+    if input.tool_name.as_deref() != Some("Bash") {
+        return input;
+    }
+    let Some(dir) = input.tool_input.get("workdir").and_then(|v| v.as_str()).filter(|d| !d.is_empty()) else {
+        return input;
+    };
+    let dir = Path::new(dir);
+    input.cwd = match input.cwd.as_deref() {
+        Some(cwd) => Some(Path::new(cwd).join(dir).display().to_string()),
+        None if dir.is_absolute() => Some(dir.display().to_string()),
+        None => None,
+    };
+    input
 }
 
 /// Codex 의 패치를 고치는 파일마다 `Edit` 하나로 편다 — 패치 글은 `tool_input.command` 에 든다(Codex 의 훅 문서).
@@ -1448,6 +1470,29 @@ mod tests {
     use super::*;
     use crate::hook::{CODEX_HOLD, Carry, Unit};
     use clap::ValueEnum;
+
+    /// **Codex 의 `workdir` 이 셸 부름의 자리다**(moai-qrja.ub5) — 상대 경로는 세션의 자리에 붙이고, 없으면 그대로다.
+    #[test]
+    fn a_codex_shell_call_stands_in_its_workdir() {
+        let call = |cwd: Option<&str>, input: serde_json::Value| Input {
+            cwd: cwd.map(str::to_string),
+            tool_name: Some("Bash".into()),
+            tool_input: input,
+            ..Input::default()
+        };
+        let at = |i: Input| worked_in(i).cwd;
+        let repo = Some("/repo");
+        let wt = serde_json::json!({ "command": "ls", "workdir": ".worktrees/t-e" });
+        assert_eq!(at(call(repo, wt.clone())).as_deref(), Some("/repo/.worktrees/t-e"));
+        assert_eq!(
+            at(call(repo, serde_json::json!({ "command": "ls", "workdir": "/elsewhere" }))).as_deref(),
+            Some("/elsewhere")
+        );
+        assert_eq!(at(call(repo, serde_json::json!({ "command": "ls" }))).as_deref(), repo);
+        assert_eq!(at(call(None, wt.clone())), None, "자리를 모르는 상대 경로를 지어냈다");
+        let edit = Input { tool_name: Some("apply_patch".into()), ..call(repo, wt) };
+        assert_eq!(at(edit).as_deref(), repo, "셸 아닌 부름의 자리를 옮겼다");
+    }
 
     /// **기록 디렉터리는 한 부름에 한 번만 훑는다**(moai-qrja.12h) — 막힌 부름은 기록을 셋까지 다시 가르는데, 읽은 글을
     /// 나눠 쓴다. 적으면 그 자리를 비워 다음 읽기가 새 줄을 본다.
