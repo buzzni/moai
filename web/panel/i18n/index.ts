@@ -185,6 +185,12 @@ export interface DetailCopy {
   rollupTextPercent: string
   body: string
   commits: string
+  /** The wiki pages about the row (`show <id> --json`'s `wiki`): the section and its three groups, and a lesson's mark. */
+  wiki: string
+  wikiNamed: string
+  wikiRelated: string
+  wikiLessons: string
+  wikiLesson: string
   journal: string
   noJournal: string
   work: string

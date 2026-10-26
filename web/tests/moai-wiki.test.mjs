@@ -176,6 +176,50 @@ test('filterPages: title and known bodies, case-insensitive', () => {
   assert.deepEqual(wiki.filterPages(pages, 'before-input-event', { 'moai-panel/keybindings': 'x before-input-event' }).map((p) => p.slug), ['moai-panel/keybindings'])
 })
 
+// moai-xp7l.nyi: the list for a query is moai's own rank first, then what the substring finds that it did not rank.
+test('rankPages and parseWikiSearch: moai\'s rank, then the substring', () => {
+  const pages = [
+    { slug: 'README', title: 'Home' },
+    { slug: 'a', title: 'A zebra page' },
+    { slug: 'b', title: 'Zebras' },
+    { slug: 'c', title: 'Other', body: 'zebra once' },
+  ]
+  const hits = { dir: 'docs', query: 'zebra', terms: ['zebra'], hits: [{ slug: 'c' }, { slug: 'a' }, { slug: 'c' }, { slug: 'gone' }], total: 4 }
+  assert.deepEqual(wiki.parseWikiSearch(hits), ['c', 'a', 'gone'], 'each slug once, best first')
+  assert.deepEqual(wiki.parseWikiSearch(JSON.stringify(hits)), ['c', 'a', 'gone'], 'printed text reads the same')
+  assert.equal(wiki.parseWikiSearch({ dir: 'docs', error: { kind: 'no_dir' } }), null)
+  const ranked = wiki.parseWikiSearch(hits)
+  assert.deepEqual(wiki.rankPages(pages, 'zebra', undefined, ranked).map((p) => p.slug), ['c', 'a', 'b'], 'a slug the list lacks is passed over')
+  assert.deepEqual(wiki.rankPages(pages, 'zebra', undefined, null).map((p) => p.slug), ['a', 'b', 'c'])
+  assert.deepEqual(wiki.rankPages(pages, '', undefined, ranked).map((p) => p.slug), ['README', 'a', 'b', 'c'], 'no query, no rank')
+})
+
+test('the search field asks moai for the rank once the keys stop and drops a stale answer', async () => {
+  const asked = []
+  const answers = {}
+  const { view } = makeView({
+    searchPages: (q) => {
+      asked.push(q)
+      return answers[q] ?? Promise.reject(new Error('no words'))
+    },
+  })
+  view.setPages(ls.pages, 'docs')
+  await tick()
+  const before = rowSlugs(view)
+  answers['moai'] = Promise.resolve({ hits: [...before].reverse().map((slug) => ({ slug })) })
+  view.setQuery('mo')
+  view.setQuery('moai')
+  await new Promise((resolve) => setTimeout(resolve, wiki.RANK_DELAY_MS + 20))
+  assert.deepEqual(asked, ['moai'], 'asked once, for the last query')
+  const ranked = rowSlugs(view)
+  assert.equal(ranked[0], [...before].reverse().find((slug) => ranked.includes(slug)), 'the rank leads the list')
+  // A failed rank (a query with no words) keeps the substring list.
+  view.setQuery('!!!')
+  await new Promise((resolve) => setTimeout(resolve, wiki.RANK_DELAY_MS + 20))
+  assert.deepEqual(rowSlugs(view), wiki.filterPages(ls.pages, '!!!').map((p) => p.slug))
+  view.destroy()
+})
+
 test('trail and link cycling helpers', () => {
   let trail = wiki.pushTrail([], { slug: 'a', scrollTop: 10 })
   trail = wiki.pushTrail(trail, { slug: 'b', scrollTop: -5 })

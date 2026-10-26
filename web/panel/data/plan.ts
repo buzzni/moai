@@ -1,27 +1,27 @@
 /**
  * The gantt's one write to the tracker: a row's planned days (moai-d86e.3ud). No DOM here.
  *
- * `POST /api/plan/<id>?start=<day>&due=<day>` runs `moai edit --start=<day> --due=<day> -- <id>` (src/web/api.rs
- * `write_argv_of`), so the write goes the CLI's way — `store::with_write`, the same normalising and the same refusals
- * (a start after the deadline, a day past the deadline above). Only the side that changes travels: a side left out is
- * left as it is, and rewriting a side the page could not read would wipe what is written there. Which side changes is
- * view/gantt-model.ts `shiftPlan`, the page's copy of `Issue::shifted`.
+ * The write carries the move, not the days (moai-vj8w.02c): `POST /api/plan/<id>?edge=<start|body|end>&days=<N>` runs
+ * `moai edit --shift-start=N | --shift=N | --shift-due=N -- <id>`, and `?day=<day>` runs
+ * `moai edit --start=<day> --due=<day> --if-unplanned -- <id>` (src/web/api.rs `write_argv_of`). moai measures the days
+ * inside its write lock from the row as it stands then (`Issue::shifted`), the way the TUI's drag does — so a row
+ * another session moved after the page read it moves on from there instead of being given the days drawn here, and a
+ * day planned on a row that gained days meanwhile is refused rather than written over them. The write goes the CLI's
+ * way — `store::with_write`, the same normalising and the same refusals (a start after the deadline, a day past the
+ * deadline above, no days to move).
  *
- * The write carries days, not a shift: a row another session moved after it was drawn is given the days drawn here.
- * The rows are read again every couple of seconds (data/refresh.ts) and after every write, so the window is that short.
+ * view/gantt-model.ts `shiftPlan` still draws the bar while it is dragged and says why a press moves nothing; it never
+ * decides what is written.
  */
 import { PRIORITY, type Client, type Endpoint, type Outcome } from './client.js'
 
-/** The days to write: `YYYY-MM-DD`, the changing side only. */
-export interface PlanChange {
-  start?: string
-  due?: string
-}
+/** What to write: a move of the plan by whole days, or one day planned on a row with none. */
+export type PlanChange = { edge: 'start' | 'body' | 'end'; days: number } | { day: string }
 
 export const planEndpoint = (id: string, change: PlanChange): Endpoint => ({
   path: `/api/plan/${encodeURIComponent(id)}`,
   method: 'POST',
-  query: { ...(change.start ? { start: change.start } : {}), ...(change.due ? { due: change.due } : {}) },
+  query: 'day' in change ? { day: change.day } : { edge: change.edge, days: String(change.days) },
 })
 
 /** `said`: what moai wrote on stderr beside the answer — the rows a pulled-in deadline now overtakes. */
@@ -34,6 +34,9 @@ export async function writePlan(client: Client, id: string, change: PlanChange):
   return { ok: false, outcome }
 }
 
-/** The `moai edit` line that puts the days back, as the TUI's notice names it. A day never written is `none`. */
+/**
+ * The `moai edit` line that puts the days back, as the TUI's notice names it. A day never written is `none`. Built from
+ * the days the page read: moai's answer carries the row after the write, not before it.
+ */
 export const undoLine = (id: string, start: string | null | undefined, due: string | null | undefined): string =>
   `moai edit ${id} --start ${start || 'none'} --due ${due || 'none'}`

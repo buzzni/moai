@@ -3272,6 +3272,19 @@ pub fn look_problems(reg: &crate::user_config::Registry, lang: Lang) -> Vec<Stri
     looks.chain(reads).chain(updates).chain(models_problems(reg, lang)).collect()
 }
 
+/// 계획을 못 옮기는 까닭의 글([`crate::model::Unshifted`]) — **한 자리다**(moai-vj8w 리뷰). 탐색기의 키·끌기 알림과
+/// 쓰기 안의 거절(`moai edit --shift*`, 그 길로 쓰는 web 간트의 끌기)이 같은 말을 댄다 — 따로 적으면 한쪽 말만 고쳐 두
+/// 표면이 같은 까닭에 다른 길을 일러 준다. 0 날 옮기기(`Still`)는 `edit` 이 먼저 걸러 고칠 것이 없는 것으로 치고 탐색기는
+/// 그런 옮기기를 안 낸다 — 여기까지 오면 옮길 날이 없는 것과 같은 말이다.
+pub fn unshifted(lang: Lang, why: crate::model::Unshifted, id: &str) -> String {
+    use crate::model::Unshifted;
+    let said = match why {
+        Unshifted::Members => say(lang, "tui.gantt.members"),
+        Unshifted::NoPlan | Unshifted::Still => say(lang, "tui.gantt.no_plan"),
+    };
+    fill(said, &[("id", id)])
+}
+
 /// 쓰기가 거절한 까닭의 글([`crate::model::Invalid`], moai-yve0).
 ///
 /// **가리키는 말은 부르는 쪽이 준다**(`at`) — 이번 쓰기가 짓는 줄은 거절 뒤에 그 id 가 어디에도

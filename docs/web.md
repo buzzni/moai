@@ -54,7 +54,9 @@ Click a tab, or use the keys. Switching tabs keeps the list's cursor, filter and
 sort.
 
 Choosing an issue shows its detail: column, priority, assignee, tags, what blocks
-it, the body, its children and its history. The detail sits below the list, or on
+it, the body, its children, its commits, the wiki about it (the lessons its notes
+point at, the pages that name it, the related sections — as `moai show <id>`
+lists them) and its history. The detail sits below the list, or on
 its left when the window is wide enough; `SPC o d` moves it and `SPC v d` hides
 it. `SPC v r` switches the body between rendered markdown and the raw text.
 `Enter` on an issue moves the focus to the detail, and `SPC w w` moves it back.
@@ -80,7 +82,11 @@ view toggles of the list applied; the dates scroll on the right.
 
 The page only places these: which span a group covers and whether a row is late is
 decided by moai (`moai tui --deep --json` carries it as `gantt`). Lateness is counted
-in the time zone moai runs in.
+in the time zone the page draws in ([Time zone](#time-zone)): the page asks for the
+tree in it. A zone the machine `moai web` runs on cannot read is counted in the zone
+moai runs in instead — an offset such as `+09:00`, a name its time zone data leaves
+out (browsers spell `Asia/Kolkata` as the older `Asia/Calcutta`, which newer data
+packages no longer carry), or any name on a machine with no time zone data.
 
 | Key / mouse | Does |
 |---|---|
@@ -94,13 +100,17 @@ in the time zone moai runs in.
 | double-click a day on a row with no days | Plan that one day as its start and deadline |
 
 A bar moves by whole days and is written once, when you let go — the same write as
-`moai edit <id> --start <day> --due <day>`, and only the side that moved is sent.
+`moai edit <id> --shift <N>` (`--shift-start` or `--shift-due` for an end). What is
+sent is the move, not the days: moai counts them inside its write from the row as it
+stands then, so a row someone moved in the two seconds before the page read it again
+moves on from where they put it. A double-click plans its day as `moai edit <id>
+--start <day> --due <day> --if-unplanned`, refused if the row gained days meanwhile.
 A move moai refuses (a start after the deadline, a day past the deadline of the
 epic, milestone or parent above) is told in moai's own words under the banners and
-the bar goes back. A move that went through says the `moai edit` line that puts the
-days back. A bar an epic or milestone counts from its members (hatched) does not
-move — move the members. The days written are the ones drawn: a row someone moved
-in the two seconds before the page read it again is given the days you dragged to.
+the bar goes back. A move that went through says the `moai edit` line that puts back
+the days the page had read. A bar an epic or milestone counts from its members
+(hatched) does not move — move the members. Nor does a row the write cannot reach:
+one the worktree overlay shows from another worktree, and an archived row.
 
 ## Theme
 
@@ -147,8 +157,8 @@ remembers them until the tab is closed.
 Dates are drawn in the zone the explorer uses (`[tui] timezone` in your user
 config), or the browser's own when you have not picked one. `SPC o t` opens a
 list of zones to pick from — type to narrow it, `Enter` to take one. The choice
-only changes what this page draws and is kept in the browser; it never touches
-your user config.
+only changes what this page draws — the Gantt tab's lateness included, read again in
+the new zone — and is kept in the browser; it never touches your user config.
 
 ## What it writes
 
@@ -159,9 +169,9 @@ moving, editing and noting, and the explorer's `SPC n` for a thought you want to
 park.
 
 The one write to the tracker is a Gantt bar's days ([above](#gantt)): the server
-runs `moai edit --start --due` for it, so it goes through the same lock, checks and
-refusals as the CLI. The server takes it only from the page itself: a request
-another site sends is refused.
+runs `moai edit --shift` for it (`--start --due --if-unplanned` for a double-click),
+so it goes through the same lock, checks and refusals as the CLI. The server takes
+it only from the page itself: a request another site sends is refused.
 
 The other write is read marks. `r` marks the issue under the cursor read,
 `SPC m a` everything new to you and `SPC m g` the group under the cursor — the
@@ -230,7 +240,7 @@ comes from the start. The rest come from the server while it runs:
 | `not_registered` | `?project=` names a directory that is not a registered project |
 | `not_a_project` | `?project=` names a registered directory that has no `.moai` of its own (`moai init` it); the server does not read a parent's tracker in its place |
 | `method_not_allowed` | Anything but `GET`, except the `POST` that marks rows read or moves a Gantt bar's days; the `Allow` header names the method the path takes (`POST` on those write paths, `GET` elsewhere) |
-| `bad_input` | A request the server could not read, one carrying a body, or a query this path does not take or whose value is the wrong shape (a `sort` moai does not know, a flag other than `1`, a Gantt day that is not `YYYY-MM-DD`) |
+| `bad_input` | A request the server could not read, one carrying a body, or a query this path does not take or whose value is the wrong shape (a `sort` moai does not know, a flag other than `1`, a Gantt move that is not an edge and a whole number of days, a Gantt day that is not `YYYY-MM-DD`, a time zone that is not a zone name or an offset) |
 | `not_found` | No such path |
 | `busy` | Too many requests at once; try again |
 | `timeout` | The child `moai` did not answer in time |
@@ -331,7 +341,7 @@ once and the keys reach it.
 | `Enter` | Open the page (list); follow the chosen link (page) |
 | `Tab` / `Shift-Tab` | Next / previous link in the page |
 | `Backspace` `h` `Left` | Back along the path you came by |
-| `/` | Search titles and bodies |
+| `/` | Search titles and bodies, in `moai wiki search`'s order |
 | `SPC v r` | Raw / rendered page |
 
 The page does not show the stats screen, and what it writes is a Gantt bar's days

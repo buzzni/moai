@@ -66,6 +66,9 @@ cat >"$repo/.moai/issues.jsonl" <<EOF
 {"id":"fx-ms01","title":"v1","kind":"milestone","status":"todo","due_on":"2026-10-30",$who,$t,"status_since":"2026-10-10T09:00:00Z"}
 EOF
 (cd "$repo" && git init -q && git config user.name Fixture && git config user.email fixture@example.com)
+# `wiki ls --json` 의 `dir_abs` 는 이 스크래치의 자리를 싣는다 — 판마다 다른 `mktemp` 자리를 고정된 글로 바꿔 담는다(리뷰
+# moai-xp7l.mug). 바이너리는 `-C` 로 든 자리를 풀어 대니(`pwd -P`) 그 철자를 바꾼다.
+real=$(cd "$repo" && pwd -P)
 # `moai init` 이 쓰는 규칙을 미리 세운다 — 없으면 `status` 가 고칠 명령에 스크래치의 경로를 실어 자료가 판마다 달라진다.
 "$moai" -C "$repo" init >/dev/null
 "$moai" -C "$repo" note fx-is01 'the parser drops the last column' >/dev/null
@@ -77,7 +80,7 @@ mkdir -p "$out"
 run() {
   local name=$1
   shift
-  "$moai" -C "$repo" --json "$@" >"$out/$name.json"
+  "$moai" -C "$repo" --json "$@" | sed "s|$real|/fixture|g" >"$out/$name.json"
 }
 run tree tui --deep
 run tree-updated tui --deep --sort=updated --reverse
