@@ -410,6 +410,13 @@ jobs:
   # 다른 자리가 섞여, 열 넘게 가르면 멈추자던 선(moai-j9gv.ae7)을 크게 넘었다. 지금 이 잡이 지키는
   # 것은 "유닉스 전용 API 하나가 든 PR 이 초록으로 들어가지 않는다" 하나고, 그것은 clippy 와
   # `--no-run` 이 잡는다. 시험을 Windows 에서 돌리는 일은 실기에서 잰 뒤 따로 연다.
+  #
+  # **ARM64 판도 clippy 로 본다**(moai-yc8r.nuu, 2026-10-26 사용자 결정). 그 타깃은 릴리스 태그만 지어, 그것을
+  # 깨는 PR 이 초록으로 들어가 태그에서 처음 붉어졌다. 러너를 하나 더 세우지 않고 이 잡에 스텝 하나를 더한다 —
+  # clippy 는 `ring` 의 build.rs 를 돌려 릴리스가 기대는 ARM64 MSVC 도구와 clang 의 길까지 지나지만, 링크는 안 한다.
+  # 링크까지 재는 것은 여전히 태그의 몫이다. 툴체인·cargo 캐시의 열쇠에 그 타깃이 든다 — 타깃의 표준 라이브러리와
+  # `target/aarch64-pc-windows-msvc` 가 그 캐시에 담기는데, 열쇠가 그것을 모르면 그것 없이 담긴 옛 캐시를 맞혀
+  # 새로 안 담는다.
   windows:
     name: Windows 에서 clippy · 시험 컴파일
     needs: changes
@@ -440,7 +447,7 @@ jobs:
         if: steps.toolchain.outputs.channel != ''
         with:
           path: ~/.rustup/toolchains/${{ steps.toolchain.outputs.channel }}-*
-          key: rustup-${{ runner.os }}-${{ hashFiles('rust-toolchain.toml') }}
+          key: rustup-${{ runner.os }}-aarch64-pc-windows-msvc-${{ hashFiles('rust-toolchain.toml') }}
 
       - name: 도구 판을 적는다
         run: |
@@ -453,11 +460,19 @@ jobs:
         id: cargo-cache
         with:
           path: ${{ env.CACHED_PATHS }}
-          key: cargo-dev-${{ runner.os }}-${{ steps.toolchain.outputs.channel }}-${{ hashFiles('**/Cargo.lock', 'rust-toolchain.toml', '.cargo/config.toml') }}
-          restore-keys: cargo-dev-${{ runner.os }}-${{ steps.toolchain.outputs.channel }}-
+          key: cargo-dev-${{ runner.os }}-aarch64-pc-windows-msvc-${{ steps.toolchain.outputs.channel }}-${{ hashFiles('**/Cargo.lock', 'rust-toolchain.toml', '.cargo/config.toml') }}
+          restore-keys: cargo-dev-${{ runner.os }}-aarch64-pc-windows-msvc-${{ steps.toolchain.outputs.channel }}-
 
       - name: clippy
         run: cargo clippy --all-targets --workspace --locked -- -D warnings
+
+      # ARM64 판 — 머리글의 "ARM64 판도 clippy 로 본다" 를 본다. `rustup target add` 는 `rust-toolchain.toml` 이 박은
+      # 판에 붙는다.
+      - name: clippy (aarch64-pc-windows-msvc)
+        run: |
+          set -euo pipefail
+          rustup target add aarch64-pc-windows-msvc
+          cargo clippy --target aarch64-pc-windows-msvc --all-targets --workspace --locked -- -D warnings
 
       - name: test 를 짓는다
         run: cargo test --workspace --locked --no-run
@@ -479,7 +494,10 @@ jobs:
       # 담는 것은 develop 푸시뿐이고, 담기 전에 이 크레이트의 산출물을 걷는다 — 까닭은 `ci-gate` 의 같은 자리에 있다.
       - name: 이 크레이트의 산출물을 걷는다
         if: github.ref == 'refs/heads/develop' && steps.cargo-cache.outputs.cache-hit != 'true'
-        run: cargo clean -p moai -p moai-gantt
+        # ARM64 판의 것도 걷는다 — `-p` 는 호스트 타깃의 것만 걷는다.
+        run: |
+          cargo clean -p moai -p moai-gantt
+          cargo clean -p moai -p moai-gantt --target aarch64-pc-windows-msvc
 
       - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         if: github.ref == 'refs/heads/develop' && steps.cargo-cache.outputs.cache-hit != 'true'
