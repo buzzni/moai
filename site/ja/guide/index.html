@@ -58,7 +58,11 @@
       <li><a href="#start">はじめに</a></li>
       <li><a href="#screens">tui と web</a>
         <ol>
+          <li><a href="#list">一覧</a></li>
+          <li><a href="#board">カンバン</a></li>
           <li><a href="#gantt">ガント</a></li>
+          <li><a href="#stats">統計</a></li>
+          <li><a href="#wiki">Wiki</a></li>
         </ol>
       </li>
       <li><a href="#develop">moai で始める開発の指示</a></li>
@@ -140,23 +144,50 @@ moai init</code></pre>
 
     <h3 id="tui">moai tui — ターミナルで</h3>
     <pre><code>moai tui</code></pre>
+    <p>一覧、カンバン、ガント、統計、Wiki をターミナルで見ます。<code>SPC g</code> を押してから画面ごとのキーを一つ押すと切り替わります。次に起動すると、最後に見ていた画面が開きます。</p>
     <div class="window term"><div class="bar"><i></i><i></i><i></i><span>moai tui</span></div>
       <div class="cast" data-cast="../../assets/media/tui-tour.cast" data-cols="120" data-rows="34" role="figure" aria-label="moai tui で一覧、カンバン、Wiki へと移る画面"></div></div>
     <ul>
-      <li>左に一覧、右に選んだイシューの詳細が表示されます。</li>
-      <li><code>SPC g b</code> でマイルストーンごとのカンバンボード、<code>SPC g l</code> で一覧、<code>SPC g w</code> で Wiki を開きます。</li>
-      <li>マウスでも行のクリック、スクロール、ペインの幅の調整ができます。キーの一覧は <code>moai tui --help</code> にあります。</li>
-      <li><code>SPC n</code> で思いついたことをすぐバックログに書き留められます。</li>
+      <li>マウスで行をクリックしたりスクロールしたり、ペインの幅を変えたりできます。キーの一覧は <code>moai tui --help</code> で確認します。</li>
+      <li><code>SPC n</code> を押すと、思いついたことをすぐバックログに書き留められます。</li>
     </ul>
 
     <h3 id="web">moai web — ブラウザで</h3>
     <pre><code>moai web</code></pre>
+    <p><code>127.0.0.1:6624</code> で一覧、カンバン、ガント、Wiki を見ます。ブラウザは自分で開きます。ターミナルに慣れていないメンバーと進み具合を共有するときに使えます。</p>
+    <ul>
+      <li>キーは tui と同じです。統計は tui でだけ見られます。</li>
+      <li>ガントのバーをドラッグして日付を変えられます。それ以外のトラッカーの内容は読むだけです。</li>
+      <li>ポートがすでに使われている場合は <code>--port</code> で別のポートを指定します。<code>--port 0</code> を渡すと空いているポートを選びます。</li>
+      <li>止めるときは <code>Ctrl-C</code> を押します。</li>
+    </ul>
+
+    <h3 id="list">一覧 — マイルストーンとエピックをフォルダのように</h3>
+    <p>マイルストーンとエピックを展開したり、その中に入ったりしてイシューを探します。カーソルのあるイシューの説明、サブイシュー、コミット、履歴は横に表示されます。tui と web のどちらも <code>SPC g l</code> で開きます。</p>
+    <div class="window term"><div class="bar"><i></i><i></i><i></i><span>moai tui</span></div>
+      <div class="cast" data-cast="../../assets/media/tui-list.cast" data-cols="120" data-rows="34" role="figure" aria-label="tui の一覧でマイルストーンを展開し、検索し、絞り込み、期限で並べ替える画面"></div></div>
     <div class="window browser"><div class="bar"><i></i><i></i><i></i><span class="addr">127.0.0.1:6624</span></div>
       <video class="clip" muted loop playsinline preload="none" poster="../../assets/media/web-detail.png" data-src="../../assets/media/web-detail.webm" aria-label="moai web でイシューの説明、コミット、履歴を読む画面"></video></div>
     <ul>
-      <li><code>127.0.0.1:6624</code> にボード、一覧、Wiki を表示します。ブラウザは自分で開きます。</li>
-      <li>ガントでバーをドラッグして日付を変えること以外は、トラッカーを読むだけです。ターミナルに慣れていないメンバーも進み具合を確認できます。</li>
-      <li>ポートが使われている場合は <code>--port</code> で変えるか、<code>--port 0</code> で空いているポートを選びます。止めるときは <code>Ctrl-C</code> です。</li>
+      <li><code>Enter</code> でマイルストーンやエピックに入り、<code>Backspace</code> で出ます。<code>l</code> は一段展開し、<code>h</code> は折りたたみます。<code>Tab</code> は配下をすべて展開します。</li>
+      <li><code>/</code> を押して検索語を入力すると、タイトル、タグ、本文、ノートからすぐに探します。隠したイシューやアーカイブしたイシューも検索されます。</li>
+      <li><code>SPC f</code> で状態、担当者、タグ、マイルストーンなどの条件をかけられます。入力中は選べる値が上に表示されます。</li>
+      <li><code>SPC s</code> で優先度、期限、更新時刻など複数の基準を組み合わせて並べ替えます。並べ替えの設定は次に起動したときも残ります。</li>
+      <li>自分に割り当てられたイシューに変更があると <code>[NEW]</code> が付きます。<code>r</code> で既読にします。</li>
+    </ul>
+
+    <h3 id="board">カンバン — 状態別のボード</h3>
+    <p>イシューを状態ごとに分けてカードで表示します。マイルストーンごとに一行ずつ並ぶので、リリースごとの進み具合が分かります。tui と web のどちらも <code>SPC g b</code> で開きます。</p>
+    <div class="window term"><div class="bar"><i></i><i></i><i></i><span>moai tui</span></div>
+      <div class="cast" data-cast="../../assets/media/tui-board.cast" data-cols="120" data-rows="34" role="figure" aria-label="tui のカンバンでマイルストーンごとの行の列を移りながらカードを選ぶ画面"></div></div>
+    <div class="window browser"><div class="bar"><i></i><i></i><i></i><span class="addr">127.0.0.1:6624</span></div>
+      <video class="clip" muted loop playsinline preload="none" poster="../../assets/media/web-board.png" data-src="../../assets/media/web-board.webm" aria-label="web のカンバンで列を移り、カードを押して詳細を読む画面"></video></div>
+    <ul>
+      <li>バックログと先送りした作業も別の列に表示されます。先送りの列は最初は隠れていて、<code>SPC v l</code> で表示します。</li>
+      <li>他の人のカードには担当者が表示されます。</li>
+      <li><code>h</code>、<code>l</code> で列を移り、<code>j</code>、<code>k</code> で列の中のカードを行き来します。</li>
+      <li>一覧とカーソル位置、フィルター、表示設定を共有します。二つの画面を行き来しても見ていた位置はそのままです。</li>
+      <li>カードを手で動かすことはできません。状態はエージェントが作業しながら変えます。</li>
     </ul>
 
     <h3 id="gantt">ガント — 予定をバーで</h3>
@@ -171,6 +202,32 @@ moai init</code></pre>
       <li>時間・日・週・月の単位で広げたり縮めたりできます。<code>t</code> で今日に戻り、<code>z</code> ですべてのバーを一画面に収めます。</li>
       <li>カーソルのあるイシューをブロックしているイシューは矢印でつながります。</li>
       <li>バーをマウスでドラッグすると開始日と期限が変わります。手を離したときに一度だけ保存され、上のエピックやマイルストーンの期限を超える場合は保存せずに理由を知らせます。</li>
+    </ul>
+
+    <h3 id="stats">統計 — 流れとかかった時間</h3>
+    <p>プロジェクトの作業状況を棒グラフと数値で見ます。tui で <code>SPC g s</code> で開きます。web にはありません。</p>
+    <div class="window term"><div class="bar"><i></i><i></i><i></i><span>moai tui</span></div>
+      <div class="cast" data-cast="../../assets/media/tui-stats.cast" data-cols="120" data-rows="34" role="figure" aria-label="tui の統計で週ごとの流れ、状態と優先度、かかった時間、AI の作業を見る画面"></div></div>
+    <ul>
+      <li>週ごとに作った作業と終えた作業を並べて表示します。<code>b</code> で週単位と日単位を切り替えます。</li>
+      <li>状態別、優先度別のイシュー数を確認できます。</li>
+      <li>作成から完了まで、作業開始から完了までにかかった時間の中央値と p90 を表示します。開始時刻が分からない作業は 0 として数えず、別に数えます。</li>
+      <li>イシューに記録されたモデル名をもとに、AI モデルごとの作業数を集計します。</li>
+      <li>フィルターが設定されていれば、条件に合うイシューだけを集計します。</li>
+    </ul>
+
+    <h3 id="wiki">Wiki — リポジトリのマニュアル</h3>
+    <p>リポジトリのマークダウン文書を画面の中で読みます。tui と web のどちらも <code>SPC g w</code> で開きます。</p>
+    <div class="window term"><div class="bar"><i></i><i></i><i></i><span>moai tui</span></div>
+      <div class="cast" data-cast="../../assets/media/tui-wiki.cast" data-cols="120" data-rows="34" role="figure" aria-label="tui の Wiki でページを開き、リンクをたどって戻ったあと検索する画面"></div></div>
+    <div class="window browser"><div class="bar"><i></i><i></i><i></i><span class="addr">127.0.0.1:6624</span></div>
+      <video class="clip" muted loop playsinline preload="none" poster="../../assets/media/web-wiki.png" data-src="../../assets/media/web-wiki.webm" aria-label="web の Wiki でリンクをたどり、イシューへ飛ぶ画面"></video></div>
+    <ul>
+      <li>片側にページの一覧、もう片側に選んだページの内容が表示されます。</li>
+      <li><code>/</code> でタイトルと本文を検索します。検索語によく合うページから表示されます。</li>
+      <li>ページ内のリンクは <code>Tab</code> で選んで <code>Enter</code> で開きます。<code>Backspace</code> を押すと前に読んでいた行に戻ります。</li>
+      <li>イシューの詳細では、コミットの下にそのイシューを扱う Wiki ページと関連する節も表示されます。</li>
+      <li>Wiki は読み取り専用です。ページはリポジトリのファイルとして管理し、エージェントが作業を終えるときに編集してコミットします。</li>
     </ul>
 
     <h2 id="develop">moai で始める開発の指示</h2>

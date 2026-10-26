@@ -58,7 +58,11 @@
       <li><a href="#start">Getting started</a></li>
       <li><a href="#screens">tui and web</a>
         <ol>
+          <li><a href="#list">List</a></li>
+          <li><a href="#board">Kanban</a></li>
           <li><a href="#gantt">Gantt</a></li>
+          <li><a href="#stats">Statistics</a></li>
+          <li><a href="#wiki">Wiki</a></li>
         </ol>
       </li>
       <li><a href="#develop">Directing development with moai</a></li>
@@ -140,23 +144,50 @@ moai init</code></pre>
 
     <h3 id="tui">moai tui — in the terminal</h3>
     <pre><code>moai tui</code></pre>
+    <p>See the list, the kanban board, the Gantt, statistics and the wiki in your terminal. Press <code>SPC g</code>, then one key for the screen you want. The next time you run it, the screen you were last on opens.</p>
     <div class="window term"><div class="bar"><i></i><i></i><i></i><span>moai tui</span></div>
       <div class="cast" data-cast="../assets/media/tui-tour.cast" data-cols="120" data-rows="34" role="figure" aria-label="moai tui moving from the list to the kanban board and the wiki"></div></div>
     <ul>
-      <li>The list is on the left and the selected issue's detail on the right.</li>
-      <li><code>SPC g b</code> opens the kanban board by milestone, <code>SPC g l</code> the list and <code>SPC g w</code> the wiki.</li>
-      <li>The mouse works too — click rows, scroll, resize the panes. The keys are listed in <code>moai tui --help</code>.</li>
-      <li><code>SPC n</code> writes a thought straight into the backlog.</li>
+      <li>The mouse works too — click rows, scroll, resize the panes. The full list of keys is in <code>moai tui --help</code>.</li>
+      <li>Press <code>SPC n</code> to write a thought straight into the backlog.</li>
     </ul>
 
     <h3 id="web">moai web — in the browser</h3>
     <pre><code>moai web</code></pre>
+    <p>See the list, the kanban board, the Gantt and the wiki on <code>127.0.0.1:6624</code>. Open the browser yourself. Use it to share progress with teammates who are not at home in a terminal.</p>
+    <ul>
+      <li>The keys are the same as in tui. Statistics are only in tui.</li>
+      <li>You can drag a Gantt bar to change its dates. Everything else in the tracker is read only.</li>
+      <li>If the port is already in use, pick another with <code>--port</code>. <code>--port 0</code> picks a free one.</li>
+      <li>Press <code>Ctrl-C</code> to stop it.</li>
+    </ul>
+
+    <h3 id="list">List — milestones and epics as folders</h3>
+    <p>Unfold milestones and epics, or step inside them, to find issues. The description, sub-issues, commits and history of the issue under the cursor show beside it. Open it with <code>SPC g l</code> in both tui and web.</p>
+    <div class="window term"><div class="bar"><i></i><i></i><i></i><span>moai tui</span></div>
+      <div class="cast" data-cast="../assets/media/tui-list.cast" data-cols="120" data-rows="34" role="figure" aria-label="tui list: unfolding a milestone, searching, filtering and sorting by deadline"></div></div>
     <div class="window browser"><div class="bar"><i></i><i></i><i></i><span class="addr">127.0.0.1:6624</span></div>
       <video class="clip" muted loop playsinline preload="none" poster="../assets/media/web-detail.png" data-src="../assets/media/web-detail.webm" aria-label="moai web showing an issue's description, commits and history"></video></div>
     <ul>
-      <li>Serves the board, the list and the wiki on <code>127.0.0.1:6624</code>. Open the browser yourself.</li>
-      <li>Apart from dragging a bar in the Gantt to change its dates, it only reads the tracker. Teammates who are not at home in a terminal can follow along too.</li>
-      <li>If the port is taken, change it with <code>--port</code>, or let <code>--port 0</code> pick a free one. <code>Ctrl-C</code> stops it.</li>
+      <li><code>Enter</code> steps into a milestone or an epic and <code>Backspace</code> steps back out. <code>l</code> unfolds one level and <code>h</code> folds. <code>Tab</code> unfolds everything below.</li>
+      <li>Press <code>/</code> and type to search titles, tags, bodies and notes as you go. Hidden and archived issues are searched too.</li>
+      <li><code>SPC f</code> sets conditions such as status, assignee, tag or milestone. While you type, the values you can pick show above.</li>
+      <li><code>SPC s</code> sorts by several criteria combined — priority, deadline, last update and more. The sort stays for the next run.</li>
+      <li>When an issue assigned to you changes, it gets a <code>[NEW]</code> mark. <code>r</code> marks it read.</li>
+    </ul>
+
+    <h3 id="board">Kanban — a board by status</h3>
+    <p>Issues are laid out as cards by status. Each milestone gets a row of its own, so you can see how each release is coming along. Open it with <code>SPC g b</code> in both tui and web.</p>
+    <div class="window term"><div class="bar"><i></i><i></i><i></i><span>moai tui</span></div>
+      <div class="cast" data-cast="../assets/media/tui-board.cast" data-cols="120" data-rows="34" role="figure" aria-label="tui kanban: moving across the columns of each milestone row and picking cards"></div></div>
+    <div class="window browser"><div class="bar"><i></i><i></i><i></i><span class="addr">127.0.0.1:6624</span></div>
+      <video class="clip" muted loop playsinline preload="none" poster="../assets/media/web-board.png" data-src="../assets/media/web-board.webm" aria-label="web kanban: moving across columns and clicking cards to read their detail"></video></div>
+    <ul>
+      <li>The backlog and deferred work have columns of their own. The deferred column is hidden by default; <code>SPC v l</code> shows it.</li>
+      <li>Someone else's card shows its assignee.</li>
+      <li><code>h</code> and <code>l</code> move across columns, <code>j</code> and <code>k</code> move between cards in a column.</li>
+      <li>It shares the cursor, filter and view settings with the list, so you keep your place when you switch between the two.</li>
+      <li>You cannot move cards by hand. The agents change the status as they work.</li>
     </ul>
 
     <h3 id="gantt">Gantt — your schedule as bars</h3>
@@ -171,6 +202,32 @@ moai init</code></pre>
       <li>Zoom in and out by hour, day, week and month. <code>t</code> brings you back to today, and <code>z</code> fits every bar on one screen.</li>
       <li>Issues blocking the one under the cursor are joined to it by arrows.</li>
       <li>Drag a bar with the mouse to change its start and deadline. It saves once, when you let go, and if that would pass the deadline of the epic or milestone above, it does not save and tells you why.</li>
+    </ul>
+
+    <h3 id="stats">Statistics — flow and time taken</h3>
+    <p>See the state of the project's work as bar charts and numbers. Open it with <code>SPC g s</code> in tui. It is not in web.</p>
+    <div class="window term"><div class="bar"><i></i><i></i><i></i><span>moai tui</span></div>
+      <div class="cast" data-cast="../assets/media/tui-stats.cast" data-cols="120" data-rows="34" role="figure" aria-label="tui statistics: weekly flow, status and priority, time taken and AI work"></div></div>
+    <ul>
+      <li>Shows the work created and the work finished each week side by side. <code>b</code> switches between weeks and days.</li>
+      <li>See how many issues stand in each status and each priority.</li>
+      <li>Shows the median and p90 of the time from creation to done, and from the start of work to done. Work whose start is unknown is not counted as zero; it is counted separately.</li>
+      <li>Counts the work per AI model, from the model names recorded on the issues.</li>
+      <li>With a filter set, it counts only the issues that match.</li>
+    </ul>
+
+    <h3 id="wiki">Wiki — the repository's manual</h3>
+    <p>Read the repository's markdown documents on screen. Open it with <code>SPC g w</code> in both tui and web.</p>
+    <div class="window term"><div class="bar"><i></i><i></i><i></i><span>moai tui</span></div>
+      <div class="cast" data-cast="../assets/media/tui-wiki.cast" data-cols="120" data-rows="34" role="figure" aria-label="tui wiki: opening a page, following a link and back, then searching"></div></div>
+    <div class="window browser"><div class="bar"><i></i><i></i><i></i><span class="addr">127.0.0.1:6624</span></div>
+      <video class="clip" muted loop playsinline preload="none" poster="../assets/media/web-wiki.png" data-src="../assets/media/web-wiki.webm" aria-label="web wiki: following links between pages and into an issue"></video></div>
+    <ul>
+      <li>The list of pages is on one side and the selected page on the other.</li>
+      <li><code>/</code> searches titles and bodies. The pages that match your words best come first.</li>
+      <li>Pick a link on the page with <code>Tab</code> and open it with <code>Enter</code>. <code>Backspace</code> takes you back to the line you were reading.</li>
+      <li>An issue's detail also shows, below its commits, the wiki pages about that issue and the related sections.</li>
+      <li>The wiki is read only. The pages are files in the repository; the agents edit and commit them when they finish a piece of work.</li>
     </ul>
 
     <h2 id="develop">Directing development with moai</h2>
