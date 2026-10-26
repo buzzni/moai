@@ -1,0 +1,108 @@
+<header class="hero">
+  <div class="wrap">
+    <h1 class="eyebrow">{{home.eyebrow}}</h1>
+{{rotator}}
+
+    <div class="install">
+      <code><span class="p">$ </span>curl -fsSL https://raw.githubusercontent.com/buzzni/moai/main/install.sh | sh</code>
+      <button class="copy" data-copy="curl -fsSL https://raw.githubusercontent.com/buzzni/moai/main/install.sh | sh" data-copied="{{common.copied}}">{{common.copy}}</button>
+    </div>
+    <p class="meta">{{home.install_meta}}</p>
+  </div>
+</header>
+
+<section class="team" id="team">
+  <div class="wrap">
+    <div class="window term">
+      <div class="bar"><i></i><i></i><i></i><span>tmux · moai tui · Claude Code · Codex · Antigravity</span></div>
+      <div class="cast" data-cast="{{root}}assets/media/tui-team.cast" data-cols="200" data-rows="56" data-speed="2" role="figure" aria-label="{{home.team.cast_label}}"></div>
+    </div>
+    <div class="sec-head">
+      <h2 class="big">{{home.team.heading}}</h2>
+      <p>{{home.team.body}}</p>
+    </div>
+    <ul class="team-points">
+      <li>{{home.team.point1}}</li>
+      <li>{{home.team.point2}}</li>
+      <li>{{home.team.point3}}</li>
+    </ul>
+  </div>
+</section>
+
+<section class="logos" aria-label="{{home.logos}}">
+  <div class="wrap">
+    <h2>{{home.logos}}</h2>
+    <div class="marquee">
+      <div class="track">
+        <a class="slot" href="https://viskits.ai" target="_blank" rel="noopener"><img src="{{root}}assets/logos/viskits.png" alt="VISKIT AI" height="26"></a><a class="slot" href="https://fitcl.ai" target="_blank" rel="noopener"><img src="{{root}}assets/logos/fitcl.png" alt="FitCL" height="26"></a><a class="slot dark" href="https://datahub.hsmoa.com" target="_blank" rel="noopener"><img src="{{root}}assets/logos/datahub.png" alt="Homeshopping Moa Data HUB" height="26"></a><a class="slot" href="https://www.knoi.ai" target="_blank" rel="noopener"><img src="{{root}}assets/logos/knoi.png" alt="Knoi.ai" height="26"></a><a class="slot" href="https://saycode.ai" target="_blank" rel="noopener"><img src="{{root}}assets/logos/saycode.png" alt="Saycode" height="26"></a>
+        <a class="slot" href="https://viskits.ai" target="_blank" rel="noopener" aria-hidden="true" tabindex="-1"><img src="{{root}}assets/logos/viskits.png" alt="" height="26"></a><a class="slot" href="https://fitcl.ai" target="_blank" rel="noopener" aria-hidden="true" tabindex="-1"><img src="{{root}}assets/logos/fitcl.png" alt="" height="26"></a><a class="slot dark" href="https://datahub.hsmoa.com" target="_blank" rel="noopener" aria-hidden="true" tabindex="-1"><img src="{{root}}assets/logos/datahub.png" alt="" height="26"></a><a class="slot" href="https://www.knoi.ai" target="_blank" rel="noopener" aria-hidden="true" tabindex="-1"><img src="{{root}}assets/logos/knoi.png" alt="" height="26"></a><a class="slot" href="https://saycode.ai" target="_blank" rel="noopener" aria-hidden="true" tabindex="-1"><img src="{{root}}assets/logos/saycode.png" alt="" height="26"></a>
+        <a class="slot" href="https://viskits.ai" target="_blank" rel="noopener" aria-hidden="true" tabindex="-1"><img src="{{root}}assets/logos/viskits.png" alt="" height="26"></a><a class="slot" href="https://fitcl.ai" target="_blank" rel="noopener" aria-hidden="true" tabindex="-1"><img src="{{root}}assets/logos/fitcl.png" alt="" height="26"></a><a class="slot dark" href="https://datahub.hsmoa.com" target="_blank" rel="noopener" aria-hidden="true" tabindex="-1"><img src="{{root}}assets/logos/datahub.png" alt="" height="26"></a><a class="slot" href="https://www.knoi.ai" target="_blank" rel="noopener" aria-hidden="true" tabindex="-1"><img src="{{root}}assets/logos/knoi.png" alt="" height="26"></a><a class="slot" href="https://saycode.ai" target="_blank" rel="noopener" aria-hidden="true" tabindex="-1"><img src="{{root}}assets/logos/saycode.png" alt="" height="26"></a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="see" id="see">
+  <div class="wrap">
+    <article class="scene">
+      <div class="scene-text">
+        <div class="n">01</div>
+        <h3>{{home.scene1.heading}}</h3>
+        <p>{{home.scene1.body}}</p>
+        <p class="run"><span class="tag">{{common.tag_terminal}}</span><code>$ moai tui</code></p>
+      </div>
+      <div class="scene-media">
+        <div class="window term"><div class="bar"><i></i><i></i><i></i><span>moai tui</span></div>
+          <div class="cast" data-cast="{{root}}assets/media/tui-tour.cast" data-cols="120" data-rows="34" role="figure" aria-label="{{home.scene1.media_label}}"></div></div>
+      </div>
+    </article>
+    <article class="scene">
+      <div class="scene-text">
+        <div class="n">02</div>
+        <h3>{{home.scene2.heading}}</h3>
+        <p>{{home.scene2.body}}</p>
+        <p class="run"><span class="tag">{{common.tag_browser}}</span><code>$ moai web</code></p>
+      </div>
+      <div class="scene-media">
+        <div class="window browser"><div class="bar"><i></i><i></i><i></i><span class="addr">127.0.0.1:6624</span></div>
+          <video class="clip" muted loop playsinline preload="none" poster="{{root}}assets/media/web-detail.png" data-src="{{root}}assets/media/web-detail.webm" aria-label="{{home.scene2.media_label}}"></video></div>
+      </div>
+    </article>
+    <article class="scene">
+      <div class="scene-text">
+        <div class="n">03</div>
+        <h3>{{home.scene3.heading}}</h3>
+        <p>{{home.scene3.body}}</p>
+        <p class="run"><span class="tag">{{common.tag_browser}}</span><code>$ moai web</code></p>
+      </div>
+      <div class="scene-media">
+        <div class="window browser"><div class="bar"><i></i><i></i><i></i><span class="addr">127.0.0.1:6624</span></div>
+          <video class="clip" muted loop playsinline preload="none" poster="{{root}}assets/media/web-wiki.png" data-src="{{root}}assets/media/web-wiki.webm" aria-label="{{home.scene3.media_label}}"></video></div>
+      </div>
+    </article>
+    <article class="scene">
+      <div class="scene-text">
+        <div class="n">04</div>
+        <h3>{{home.scene4.heading}}</h3>
+        <p>{{home.scene4.body}}</p>
+        <p class="run"><span class="tag">{{common.tag_terminal}}</span><code>$ moai tui</code></p>
+      </div>
+      <div class="scene-media">
+        <div class="window term"><div class="bar"><i></i><i></i><i></i><span>moai tui</span></div>
+          <div class="cast" data-cast="{{root}}assets/media/tui-lifecycle.cast" data-cols="120" data-rows="34" role="figure" aria-label="{{home.scene4.media_label}}"></div></div>
+      </div>
+    </article>
+  </div>
+</section>
+
+<section class="cta">
+  <div class="wrap">
+    <h2>{{home.cta.heading}}</h2>
+    <p>{{home.cta.body}}</p>
+    <div class="install">
+      <code><span class="p">$ </span>curl -fsSL https://raw.githubusercontent.com/buzzni/moai/main/install.sh | sh</code>
+      <button class="copy" data-copy="curl -fsSL https://raw.githubusercontent.com/buzzni/moai/main/install.sh | sh" data-copied="{{common.copied}}">{{common.copy}}</button>
+    </div>
+    <p class="meta" style="margin-top:14px">{{home.cta.windows}}</p>
+  </div>
+</section>
