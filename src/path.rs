@@ -67,28 +67,74 @@ pub(crate) fn real(p: &Path) -> PathBuf {
 ///
 /// **걷은 철자가 같은 파일을 열 때만 걷는다**(moai-vjdq.lk8, 리뷰 moai-lag7.482 14번). `\\?\` 는 Windows 가 이름을
 /// 손대지 않고 여는 꼴이라, 끝이 점이나 빈칸인 이름(`x.`)과 장치 이름(`aux`)은 접두어를 떼면 API 가 `x`·장치로 읽어 다른
-/// 것을 연다. 그래서 걷은 철자를 한 번 더 풀어([`settle_verbatim`]) 처음 값과 같을 때만 쓴다. 유닉스에서는 걷을 것이
-/// 없어 다시 푸는 일도 없다.
+/// 것을 연다. 그래서 그럴 수 있는 철자만 한 번 더 풀어([`settle_verbatim`]) 처음 값과 같을 때만 쓴다. **다시 푸는 것은
+/// 글자로 가른 뒤다**(moai-yc8r.ffj) — [`real`] 을 부르는 자리가 여든 곳 가깝고 훅이 도구 호출마다 지나는 길도 그 안이라,
+/// 보통 이름까지 늘 두 번 풀던 판은 Windows 의 경로마다 파일 시스템을 한 번 더 물었다. 유닉스에서는 걷을 것이 없어 다시
+/// 푸는 일도 없다.
 pub(crate) fn canonical(p: impl AsRef<Path>) -> std::io::Result<PathBuf> {
     let real = std::fs::canonicalize(p)?;
     Ok(PathBuf::from(settle_verbatim(real.as_os_str(), |plain| std::fs::canonicalize(plain))))
 }
 
 /// [`canonical`] 의 판정 — `verbatim` 을 걷은 철자를 `recanon` 으로 다시 풀어 `verbatim` 과 같은 자리를 가리킬 때만 걷은
-/// 철자를 내고, 아니면(풀지 못했거나 다른 자리) `verbatim` 그대로 낸다. 걷을 접두어가 없으면 `recanon` 을 부르지 않는다.
-/// 닫는 함수를 받아 파일 시스템 없이 리눅스에서도 잰다.
+/// 철자를 내고, 아니면(풀지 못했거나 다른 자리) `verbatim` 그대로 낸다. 걷을 접두어가 없으면 `recanon` 을 부르지 않고,
+/// **걷은 철자를 Win32 가 글자 그대로 읽으면**([`reads_as_spelt`]) 다시 풀지 않고 걷는다(moai-yc8r.ffj). 닫는 함수를 받아
+/// 파일 시스템 없이 리눅스에서도 잰다.
 pub(crate) fn settle_verbatim(
     verbatim: &std::ffi::OsStr,
     recanon: impl FnOnce(&std::ffi::OsStr) -> std::io::Result<PathBuf>,
 ) -> std::ffi::OsString {
     let plain = unverbatim(verbatim);
-    if plain == verbatim {
+    if plain == verbatim || reads_as_spelt(&plain) {
         return plain;
     }
     match recanon(&plain) {
         Ok(back) if back.as_os_str() == verbatim => plain,
         _ => verbatim.to_owned(),
     }
+}
+
+/// 접두어를 걷은 철자를 **Win32 가 손대지 않고 그대로 여는가** — 글자만 보고 가른다(moai-yc8r.ffj). `true` 면 접두어가
+/// 있든 없든 같은 파일이라 [`settle_verbatim`] 이 다시 풀지 않는다. 모르는 꼴은 `false` 다 — 그러면 전처럼 파일 시스템에
+/// 묻는다. **틀려도 되는 쪽은 `false` 뿐이다**: 여기서 `true` 를 잘못 내면 다른 파일을 가리키는 철자를 답으로 낸다.
+///
+/// Win32 가 이름을 바꾸는 자리를 다 `false` 로 든다.
+///
+/// - 머리가 드라이브(`C:\`)나 UNC(`\\서버\`)가 아니다 — `\\?\Volume{…}\` 를 걷으면 상대 경로가 된다
+/// - 조각이 `.`·`..` 이거나 끝이 점·빈칸이다 — Win32 가 접거나 떼어 낸다
+/// - 조각에 `/`·`:`·`*`·`?`·`"`·`<`·`>`·`|`·제어 글자가 있다 — 가름선·스트림·와일드카드로 읽힌다
+/// - 조각이 장치 이름이다(`CON`·`PRN`·`AUX`·`NUL`·`COM0`~`COM9`·`LPT0`~`LPT9`·위 첨자 `¹²³`·`CONIN$`·`CONOUT$`) — 첫
+///   점 앞을 끝 빈칸을 떼고 대소문자 없이 견준다(`aux.txt`·`Nul .md` 도 장치다)
+///
+/// **바이트로 본다** — 견주는 글자가 다 ASCII 거나(위 첨자는 UTF-8 두 바이트) 그 앞뒤에서 갈라, Windows 의 짝 없는
+/// 서로게이트가 든 철자도 그 조각만 보통 이름으로 지나간다.
+fn reads_as_spelt(plain: &std::ffi::OsStr) -> bool {
+    let spelt = plain.as_encoded_bytes();
+    let body = match spelt {
+        [b'\\', b'\\', rest @ ..] if rest.first().is_some_and(|b| *b != b'\\') => rest,
+        [d, b':', b'\\', rest @ ..] if d.is_ascii_alphabetic() => rest,
+        _ => return false,
+    };
+    body.split(|b| *b == b'\\').filter(|part| !part.is_empty()).all(plain_part)
+}
+
+/// [`reads_as_spelt`] 의 조각 하나 — Win32 가 이 이름을 바꾸지 않는가.
+fn plain_part(part: &[u8]) -> bool {
+    if part == b"." || part == b".." || matches!(part.last(), Some(b'.' | b' ')) {
+        return false;
+    }
+    if part.iter().any(|b| *b < 0x20 || matches!(b, b'/' | b':' | b'*' | b'?' | b'"' | b'<' | b'>' | b'|')) {
+        return false;
+    }
+    let stem = part.split(|b| *b == b'.').next().unwrap_or_default();
+    let stem = stem.trim_ascii_end().to_ascii_uppercase();
+    let numbered = |head: &[u8]| {
+        stem.strip_prefix(head).is_some_and(|n| matches!(n, [b'0'..=b'9']) || matches!(n, [0xC2, 0xB9 | 0xB2 | 0xB3]))
+    };
+    let device = matches!(&stem[..], b"CON" | b"PRN" | b"AUX" | b"NUL" | b"CONIN$" | b"CONOUT$")
+        || numbered(b"COM")
+        || numbered(b"LPT");
+    !device
 }
 
 /// `.` 을 버리고 `..` 은 앞 조각을 뗀다. **파일 시스템을 안 본다** — 아직 없는 자리도 접어야 하고
@@ -299,6 +345,44 @@ mod tests {
         // 걸 것이 없으면 다시 풀지 않는다.
         let never = |_: &OsStr| -> std::io::Result<PathBuf> { panic!("recanon") };
         assert_eq!(settle_verbatim(OsStr::new("/a/b"), never), OsStr::new("/a/b"));
+    }
+
+    /// **보통 이름은 다시 풀지 않고 걷는다**(moai-yc8r.ffj) — Win32 가 이름을 바꿀 수 있는 철자만 파일 시스템에 다시
+    /// 묻는다. 글자 판정을 걷으면(늘 다시 풀면) 첫 묶음의 `never` 가 패닉하고, 판정이 넓어지면(장치·끝 점을 놓치면)
+    /// 둘째 묶음이 다른 파일의 철자를 받아 붉어진다.
+    #[test]
+    fn only_a_spelling_win32_would_rename_is_resolved_again() {
+        use std::ffi::OsStr;
+        let never = |_: &OsStr| -> std::io::Result<PathBuf> { panic!("보통 이름을 다시 풀었다") };
+        for (v, want) in [
+            (r"\\?\C:\Users\me\proj\.moai\issues.jsonl", r"C:\Users\me\proj\.moai\issues.jsonl"),
+            (r"\\?\C:\", r"C:\"),
+            (r"\\?\UNC\srv\share\a.b.c", r"\\srv\share\a.b.c"),
+            (r"\\?\D:\com10\lpt\console\nul_x\auxiliary.rs", r"D:\com10\lpt\console\nul_x\auxiliary.rs"),
+            (r"\\?\C:\한글\ 앞빈칸", r"C:\한글\ 앞빈칸"),
+        ] {
+            assert_eq!(settle_verbatim(OsStr::new(v), never), OsStr::new(want), "{v}");
+        }
+        // 이름을 바꿀 수 있는 철자 — 다시 풀어 다른 자리로 오면 접두어를 남긴다.
+        let elsewhere = |_: &OsStr| Ok(PathBuf::from(r"\\?\C:\elsewhere"));
+        for v in [
+            r"\\?\C:\d\x.",
+            r"\\?\C:\d\x \y",
+            r"\\?\C:\d\aux",
+            r"\\?\C:\d\AUX.txt\y",
+            r"\\?\C:\d\Nul .md",
+            r"\\?\C:\d\com1",
+            r"\\?\C:\d\LPT0",
+            r"\\?\C:\d\com¹",
+            r"\\?\C:\d\conout$",
+            r"\\?\C:\d\a:stream",
+            r"\\?\C:\d\..\x",
+            r"\\?\C:\d\a/b",
+            r"\\?\Volume{0f0e}\d\x",
+            r"\\?\UNC\",
+        ] {
+            assert_eq!(settle_verbatim(OsStr::new(v), elsewhere), OsStr::new(v), "{v}");
+        }
     }
 
     /// **Windows 의 철자는 `/` 로, 유닉스의 것은 그대로**(moai-j9gv.4c1).
