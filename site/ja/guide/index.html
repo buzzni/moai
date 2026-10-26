@@ -56,7 +56,11 @@
     <ol>
       <li><a href="#install">インストール</a></li>
       <li><a href="#start">はじめに</a></li>
-      <li><a href="#screens">tui と web</a></li>
+      <li><a href="#screens">tui と web</a>
+        <ol>
+          <li><a href="#gantt">ガント</a></li>
+        </ol>
+      </li>
       <li><a href="#develop">moai で始める開発の指示</a></li>
       <li><a href="#examples">使用例</a></li>
       <li><a href="#env">対応する作業環境</a>
@@ -151,8 +155,22 @@ moai init</code></pre>
       <video class="clip" muted loop playsinline preload="none" poster="../../assets/media/web-detail.png" data-src="../../assets/media/web-detail.webm" aria-label="moai web でイシューの説明、コミット、履歴を読む画面"></video></div>
     <ul>
       <li><code>127.0.0.1:6624</code> にボード、一覧、Wiki を表示します。ブラウザは自分で開きます。</li>
-      <li>トラッカーを読むだけで書き込みません。ターミナルに慣れていないメンバーも進み具合を確認できます。</li>
+      <li>ガントでバーをドラッグして日付を変えること以外は、トラッカーを読むだけです。ターミナルに慣れていないメンバーも進み具合を確認できます。</li>
       <li>ポートが使われている場合は <code>--port</code> で変えるか、<code>--port 0</code> で空いているポートを選びます。止めるときは <code>Ctrl-C</code> です。</li>
+    </ul>
+
+    <h3 id="gantt">ガント — 予定をバーで</h3>
+    <p>一覧の横に日付の軸を付け、イシューごとに計画した期間と実際に作業した期間をバーで表示します。tui と web のどちらも <code>SPC g g</code> で開きます。</p>
+    <div class="window term"><div class="bar"><i></i><i></i><i></i><span>moai tui</span></div>
+      <video class="clip" muted loop playsinline preload="none" poster="../../assets/media/tui-gantt.png" data-src="../../assets/media/tui-gantt.webm" aria-label="tui のガントで、計画した期間と作業した期間のバーを広げたり縮めたりする画面"></video></div>
+    <div class="window browser"><div class="bar"><i></i><i></i><i></i><span class="addr">127.0.0.1:6624</span></div>
+      <video class="clip" muted loop playsinline preload="none" poster="../../assets/media/web-gantt.png" data-src="../../assets/media/web-gantt.webm" aria-label="web のガントで、単位を変え、今日に戻りながらバーを見る画面"></video></div>
+    <ul>
+      <li>薄いバーは計画した開始日から期限まで、色付きのバーは実際に作業した期間です。期限を過ぎた部分は赤い斜線で表示されます。</li>
+      <li>エピックとマイルストーンは、メンバーの期間をまとめて斜線のバーで表示します。</li>
+      <li>時間・日・週・月の単位で広げたり縮めたりできます。<code>t</code> で今日に戻り、<code>z</code> ですべてのバーを一画面に収めます。</li>
+      <li>カーソルのあるイシューをブロックしているイシューは矢印でつながります。</li>
+      <li>バーをマウスでドラッグすると開始日と期限が変わります。手を離したときに一度だけ保存され、上のエピックやマイルストーンの期限を超える場合は保存せずに理由を知らせます。</li>
     </ul>
 
     <h2 id="develop">moai で始める開発の指示</h2>
