@@ -3036,16 +3036,25 @@ PY"##;
 /// 잣대를 기록의 `updatedAt` 이 아니라 대화 기록의 마지막 `timestamp` 에 둔 것은 둘째 짝을 안 세우기 위해서다 — 기록을
 /// 읽는 것은 [`SESSIONS`] 하나여야 한다. 그 잣대가 비운 뒤 `/resume A` 로 같은 프로세스가 A 로 돌아온 판도 가른다: 그
 /// 대화는 비운 뒤에도 움직여 후보로 남는다. 대화 기록이 지워진 id 는 비운 것으로 낸다 — 되살릴 대화가 없다.
+///
+/// 에픽 끝 리뷰가 더한 둘이다.
+/// - **`/new`·`/reset` 도 `/clear` 다.** 2.1.310 의 명령 정의가 `aliases:["reset","new"]` 를 들고, `history.jsonl` 은
+///   친 글 그대로(`/claer` 같은 오타까지) 적는다. `/clear` 만 찾으면 `/new` 로 비운 대화가 후보로 남는다
+/// - **비운 뒤 10초 안의 움직임은 비운 것의 일부다.** 도는 턴이나 허락 창 위에서 `/clear` 를 치면 Claude Code 가 A 에
+///   `[Request interrupted by user for tool use]` 와 거절된 `tool_result` 를 적는데, 그 `timestamp` 가 `history.jsonl` 의
+///   `/clear` 보다 늦다(2026-10-26 에 잰 `/clear` id 299개 중 하나, `f59364af` 가 0.58초 뒤). 그대로 견주면 그 대화가
+///   비운 뒤 움직인 것으로 읽혀 후보로 남는다. 되돌아온 대화는 `/resume` 과 새 입력이 들어야 움직이니 10초 안에 못 선다
 pub const CLEARED: &str = r##"python3 - <sessionId> … <<'PY'
 import glob, json, os, sys
+from datetime import datetime
 wanted = set(sys.argv[1:])
 cleared = {}
 try:
-    with open(os.path.expanduser("~/.claude/history.jsonl")) as f:
+    with open(os.path.expanduser("~/.claude/history.jsonl"), encoding="utf-8", errors="replace") as f:
         for line in f:
             try:
                 h = json.loads(line)
-                if str(h.get("display", "")).split()[:1] == ["/clear"] and h.get("sessionId") in wanted:
+                if str(h.get("display", "")).split()[:1] in (["/clear"], ["/new"], ["/reset"]) and h.get("sessionId") in wanted:
                     cleared[h["sessionId"]] = max(cleared.get(h["sessionId"], 0), int(h["timestamp"]))
             except (ValueError, KeyError, TypeError, AttributeError):
                 continue
@@ -3054,22 +3063,24 @@ except OSError:
 def moved(sid):
     last = ""
     for path in glob.glob(os.path.expanduser(f"~/.claude/projects/*/{sid}.jsonl")):
-        with open(path, errors="replace") as f:
-            for line in f:
-                if '"timestamp"' not in line:
-                    continue
-                try:
-                    t = json.loads(line).get("timestamp")
-                except ValueError:
-                    continue
-                if isinstance(t, str) and t > last:
-                    last = t
+        try:
+            with open(path, encoding="utf-8", errors="replace") as f:
+                for line in f:
+                    if '"timestamp"' not in line:
+                        continue
+                    try:
+                        t = json.loads(line).get("timestamp")
+                    except (ValueError, AttributeError):
+                        continue
+                    if isinstance(t, str) and t > last:
+                        last = t
+        except OSError:
+            continue
     if not last:
         return 0
-    from datetime import datetime
     return datetime.fromisoformat(last.replace("Z", "+00:00")).timestamp() * 1000
 for sid in sorted(cleared):
-    if cleared[sid] > moved(sid):
+    if cleared[sid] + 10000 > moved(sid):
         print(sid)
 PY"##;
 
@@ -4366,10 +4377,12 @@ leaves its record behind. The lines below print one row per record, tab-separate
   the new one, so no live row carries the old id any more — and resuming it brings back a
   conversation already left behind. Its transcript does not say so (the `/clear` lines open the
   new id's transcript, not the end of the old one); `~/.claude/history.jsonl` does — it logs
-  every `/clear` under the id it cleared. Give the lines below the candidates' `sessionId`s;
-  they print the ones cleared after their transcript last moved, and you drop those. A
-  conversation that moved again after its `/clear` (it was resumed back) is not printed. Two
-  dead records with the same `sessionId` are one candidate
+  every `/clear` (and its aliases `/new` and `/reset`) under the id it cleared. Give the lines
+  below the candidates' `sessionId`s; they print the ones cleared after their transcript last
+  moved, and you drop those. The lines a `/clear` writes as it interrupts a running turn land
+  within seconds of it and do not count as moving. A conversation that moved again after its
+  `/clear` (it was resumed back) is not printed. Two dead records with the same `sessionId`
+  are one candidate
 
 ```sh
 {CLEARED}
@@ -8302,6 +8315,7 @@ stop sending outside work while a release runs",
 
     /// **죽은 뒤 `/clear` 된 대화는 되살리지 않는다**(moai-jn8d.vyh). 고리는 `history.jsonl` 의 `/clear` 줄이 든 옛 id 다 —
     /// 대화 기록의 끝을 읽던 첫 규칙은 틀려 걷었다. 비운 뒤 다시 움직인 대화는 남고, 대화 기록이 없는 id 는 비운 것이다.
+    /// `/new` 도 비운 것이고, 끊긴 턴이 비운 직후에 적는 줄은 움직인 것이 아니다.
     #[test]
     #[cfg(unix)]
     fn the_recover_skill_drops_a_conversation_cleared_after_it_died() {
@@ -8333,27 +8347,42 @@ stop sending outside work while a release runs",
         )
         .unwrap();
         std::fs::write(projects.join("s-plain.jsonl"), line("2026-10-26T10:00:00.000Z")).unwrap();
+        // `/new` 로 비운 대화 — `/clear` 의 다른 이름이다.
+        std::fs::write(projects.join("s-new.jsonl"), line("2026-10-26T10:00:00.000Z")).unwrap();
+        // 도는 턴 위에서 비운 대화 — 끊긴 턴의 두 줄이 `/clear` 보다 0.6초 늦게 선다. 움직인 것이 아니다.
+        std::fs::write(
+            projects.join("s-busy.jsonl"),
+            line("2026-10-26T10:00:00.000Z") + &line("2026-10-26T11:00:00.600Z") + &line("2026-10-26T11:00:00.610Z"),
+        )
+        .unwrap();
         let at = |t: &str| chrono_ms(t);
-        let clear = |sid: &str, t: &str| {
+        let typed = |display: &str, sid: &str, t: &str| {
             format!(
-                "{{\"display\":\"/clear\",\"pastedContents\":{{}},\"timestamp\":{},\"project\":\"/repo\",\"sessionId\":\"{sid}\"}}\n",
+                "{{\"display\":\"{display}\",\"pastedContents\":{{}},\"timestamp\":{},\"project\":\"/repo\",\"sessionId\":\"{sid}\"}}\n",
                 at(t)
             )
         };
+        let clear = |sid: &str, t: &str| typed("/clear", sid, t);
         let history = clear("s-cleared", "2026-10-26T11:00:00.000Z")
             + &clear("s-back", "2026-10-26T11:00:00.000Z")
             + &clear("s-gone", "2026-10-26T11:00:00.000Z")
             + &clear("s-other", "2026-10-26T11:00:00.000Z")
+            + &clear("s-busy", "2026-10-26T11:00:00.000Z")
+            + &typed("/new", "s-new", "2026-10-26T11:00:00.000Z")
             + "{\"display\":\"/clearly not\",\"timestamp\":1,\"sessionId\":\"s-plain\"}\n"
             + "not json\n";
         std::fs::write(home.join("history.jsonl"), history).unwrap();
         let shell = CLEARED
             .replace("~/.claude", &home.display().to_string())
-            .replace("<sessionId> …", "s-cleared s-back s-plain s-gone");
+            .replace("<sessionId> …", "s-cleared s-back s-plain s-gone s-new s-busy");
         let out = std::process::Command::new("sh").arg("-c").arg(shell).output().unwrap();
         assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
         // 대화 기록이 지워진 id 는 되살릴 대화가 없으니 비운 것으로 낸다. 안 물은 id(`s-other`)는 안 낸다.
-        assert_eq!(String::from_utf8(out.stdout).unwrap(), "s-cleared\ns-gone\n", "비운 대화를 못 갈랐다");
+        assert_eq!(
+            String::from_utf8(out.stdout).unwrap(),
+            "s-busy\ns-cleared\ns-gone\ns-new\n",
+            "비운 대화를 못 갈랐다"
+        );
     }
 
     /// `2026-10-26T11:00:00.000Z` 꼴을 유닉스 밀리초로 — 시험이 `history.jsonl` 의 `timestamp` 를 짓는 데만 쓴다.

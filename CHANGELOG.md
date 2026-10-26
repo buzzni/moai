@@ -65,10 +65,12 @@ does not tag — see `CONTRIBUTING.md`.
   started that way — `-`. Only a real tmux pane id (`:@<n>.%<n>`) counts as tmux
   now. (moai-jn8d)
 - **`moai-recover` no longer brings back a conversation already left behind.** A
-  dead session that another window resumed and then cleared with `/clear` stayed
-  a candidate, since no live row carried its old id. It now reads
-  `~/.claude/history.jsonl`, which logs each `/clear` under the id it cleared, and
-  drops a candidate cleared after its transcript last moved. (moai-jn8d.vyh)
+  dead session that another window resumed and then cleared with `/clear` (or
+  its aliases `/new` and `/reset`) stayed a candidate, since no live row carried
+  its old id. It now reads `~/.claude/history.jsonl`, which logs each `/clear`
+  under the id it cleared, and drops a candidate cleared after its transcript
+  last moved — the lines a `/clear` writes as it interrupts a running turn do not
+  count as moving. (moai-jn8d.vyh)
 - **Hook rule 2 judges where a write lands, not where the shell stands.** A
   session whose held work all has a worktree is now refused a root write made by
   absolute path after its shell `cd`'d into the worktree, a write chained after a
