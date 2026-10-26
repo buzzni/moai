@@ -529,12 +529,29 @@ falls back to English, and the system locale (`LANG`, `LC_ALL`) is not read.
 
 ## The website
 
-The website lives in `site/`: one static page per language (`/`, `/ko/`, `/ja/`),
-English by default. On the root page a Korean or Japanese browser is sent to its
-own page, unless the visitor has picked a language in the header.
-`.github/workflows/pages.yml` publishes `site/` to GitHub Pages on every push to
-`develop` that touches it. CI skips the binary jobs (msrv, windows, size-budget,
-web) for changes under `site/` and `scripts/site-demo/`; `ci-gate` still runs.
+The website lives in `site/`: a home page and a guide per language (`/`, `/ko/`,
+`/ja/`, each with `guide/`), English by default. On the root page a Korean or
+Japanese browser is sent to its own page, unless the visitor has picked a language
+in the header.
+
+Those pages are built, not edited. `scripts/site/` holds one template per page
+(`layout.html`, `home.html`, `guide.html`) and one text bundle per language
+(`text/en.toml`, `ko.toml`, `ja.toml`); change either and run
+`python3 scripts/site/gen.py`, then commit what it wrote. The CI job `site` runs
+`gen.py --check` and fails when a committed page differs from what the templates
+build. The generator is standard-library Python (3.11 or later).
+
+The manual (`/docs/`) and the changelog (`/changelog/`) stand in English only and are
+not committed. `.github/workflows/pages.yml` builds them from the newest `v*` tag's
+`docs/` and `CHANGELOG.md`, so they describe the release `install.sh` installs, and
+runs again when the release workflow finishes. To look at them locally:
+
+    python3 scripts/site/gen.py --docs docs --changelog CHANGELOG.md
+
+The workflow publishes `site/` to GitHub Pages on every push to `develop` that
+touches `site/` or `scripts/site/`. CI skips the binary jobs (msrv, windows,
+size-budget, web) for changes under `site/`, `scripts/site/` and
+`scripts/site-demo/`; `ci-gate` still runs.
 
 The page talks about what people see. How things work belongs here and in `docs/`.
 
