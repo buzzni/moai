@@ -28,7 +28,8 @@ where `owner` says `theirs` or `unowned` — see [take over](#take-over).
 
 The numbered steps a [worker](#worker) follows for work a
 [supervisor](#supervisor) sent, from [pick up](#pick-up) to merge and report.
-They stand in a file of the supervisor skill, `references/worker.md`, and a step
+They stand in a file of the supervisor skill, `references/worker.md` — its rare branches
+beside it in `references/worker-branches.md` — and a step
 that goes differently for a subagent worker says so in a line of its own. Each
 assignment message carries the lines for this assignment — the backlog, the
 model and the effort, whether the worker is a subagent or a session, the work
@@ -246,7 +247,9 @@ whole under a lock. More in [Recovery](recovery.md#the-files).
 `develop`, `complex`, `review`, `docs`, `bulk`, `codex` — with `review_grade`,
 `effort` and `effort_complex` beside them. A key left out keeps its default.
 `moai models` shows it and the [supervisor](#supervisor) reads
-`moai models --json` once a round; the repository's config does not carry it.
+`moai models --json` once a round. A repository can recommend values in a
+`[models]` table of its `.moai/config.toml`: they override the defaults, and your
+user config overrides them — `moai models` marks such a value `repo`.
 More in [working with agents](agents.md#the-models-are-yours).
 
 ## Supervisor

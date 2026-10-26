@@ -543,8 +543,8 @@ haiku 는 개발·문서에 배정하지 않는다. 그래서 난이도의 둘�
 ## 막혔을 때
 
 추측해서 진행하지 않는다. 다음 형식으로 보고하고 멈춘다. 감독의 메시지가 `Person: away` 를 이른
-일꾼만 예외다 — 그 메시지가 이름을 대는 일꾼 걸음 파일(moai-supervise 스킬의 references/worker.md)의
-"When the person is away" 대로 권장안으로 정하고
+일꾼만 예외다 — 그 메시지가 이름을 대는 일꾼 걸음 파일(moai-supervise 스킬의 references/worker.md) 곁의
+references/worker-branches.md 에 선 "When the person is away" 대로 권장안으로 정하고
 `Decided alone:` 노트를 남기며, 되돌릴 수 없는 것에서만 멈춘다(`moai-snyk`).
 
     <id> 진행 중 결정이 필요합니다.

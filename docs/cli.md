@@ -49,7 +49,7 @@ Commands:
   project       Register a directory to watch several projects from one moai
   due           Raise priorities a deadline has caught up with
   config        Read this repository's settings, defaults filled in
-  models        Read the model per role from your user config
+  models        Read the model per role from your config and the repository's
   keys          Show the explorer's keys and what your keys.toml changed
   update        Upgrade the moai you are running with install.sh
   init          Put a .moai/ into this repository (safe to run again)
@@ -3623,7 +3623,8 @@ Options:
   status_* thresholds and the due_* rule that `moai due apply` reads. These
   are the values this binary acts on, so a surface drawing the board reads
   them here instead of parsing the file again. --json adds path, the file it
-  read.
+  read. A [models] table is left to `moai models`, which lays it under your
+  user config.
 
   It only reads; edit the file by hand to change a setting.
 ```
@@ -3631,7 +3632,7 @@ Options:
 ## `moai models`
 
 ```
-Read the model per role from your user config
+Read the model per role from your config and the repository's
 
 Usage: moai models [OPTIONS]
 
@@ -3643,17 +3644,25 @@ Options:
       --user <name (email)>  Who is doing this (from `git config` when absent)
   -h, --help                 Print help
 
-  moai models           the model per role, with defaults marked
-  moai models --json    one object for skills, including written keys and path
+  moai models           the model per role, where each value came from
+  moai models --json    one object for skills, including written keys and paths
 
-  Reads [models] in your user config. No .moai is needed; repository config
-  is not read. The place is MOAI_CONFIG, then $XDG_CONFIG_HOME/moai/config.toml,
-  then ~/.config/moai/config.toml. Missing files use the built-in defaults.
+  Reads [models] in your user config. No .moai is needed. The place is
+  MOAI_CONFIG, then $XDG_CONFIG_HOME/moai/config.toml, then
+  ~/.config/moai/config.toml. Missing files use the built-in defaults.
+
+  Inside a repository, a [models] table in .moai/config.toml recommends values
+  for that repository: it overrides the defaults, and your user config
+  overrides it. A line says repo when its value came from there, default when
+  nothing set it. A broken .moai/config.toml leaves the table as your user
+  config gives it.
 
   Model names are strings. review_grade, effort and effort_complex accept
   low, medium, high, xhigh or max. Invalid values fall back per key and warn;
-  unknown keys warn. written lists only valid, known keys from the config.
-  This command only reads; edit the user config by hand to change the table.
+  unknown keys warn. written lists the valid, known keys from your user config,
+  repo the ones the repository table set that your config did not, and
+  repo_path that file (null when it set none). The level lines name the roles
+  they pair with. This command only reads; edit the files by hand.
 ```
 
 ## `moai keys`

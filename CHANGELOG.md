@@ -12,6 +12,82 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+## [0.29.0] - 2026-10-26
+
+### Added
+
+- **A repository can recommend models per role.** A `[models]` table in
+  `.moai/config.toml` overrides the built-in defaults, and `[models]` in your
+  user config overrides it — the repository recommends, you choose. `moai models`
+  marks a value that came from there `repo` and names the file; `--json` adds
+  `repo` (the keys it set) and `repo_path`. A bad value there is named with the
+  file and skipped, and never stops another command. (moai-w25x.jud)
+- **The first `moai init` names `moai models`** in one line; it asks nothing.
+  (moai-w25x.1ar)
+
+### Changed
+
+- **`moai models` marks each line for its own value.** A role line no longer
+  carries its effort in a tail that the `default` mark then covered; the level
+  lines (`effort`, `effort_complex`, `review_grade`) name the roles they pair
+  with instead. (moai-w25x.yrm)
+- **The supervisor unfolds a backlog item on the `plan` role's model** and sends
+  the worker the unfolded epic from step 2; the role is then measured on the
+  members it wrote. Before, the `plan` key was read by nothing. (moai-w25x.jby)
+- **The supervisor settles the `model:` lines before it writes
+  `Report-checked:`**, so a supervisor that starts again does not skip them.
+  (moai-w25x.qi8)
+- **The worker's steps are two files**: `references/worker.md` holds the path
+  every assignment takes, and `references/worker-branches.md` the rare branches
+  (person away, a subdirectory project, carrying on stalled work, a review rule 3
+  keeps refusing, the review brief). (moai-w25x.mgu)
+- **Panes that `moai-tmux` and `moai-recover` open keep no shell under the
+  session.** They open with `remain-on-exit` instead of `; exec bash`: when
+  `claude` (or Codex) exits, its last screen stays and tmux drops keys and
+  refuses pastes aimed at it, so a message meant for a dead session no longer
+  runs in a shell. The input-box check reads `#{pane_dead}` beside
+  `#{pane_in_mode}`. Panes a person opened keep the session-map check as before.
+  (moai-jn8d)
+
+### Fixed
+
+- **A pick-up the hook cannot read is recorded anyway.** `moai mv` now writes
+  its own pick-up for the Claude Code session after the write, so
+  `$M mv <id> in_progress` and `moai mv "$R" …` count as that session's — before,
+  with other sessions running, such a row belonged to nobody and rule 3 refused
+  the review. Only rows that are the caller's after `--take` are recorded, and
+  Codex and Antigravity shells record nothing. (moai-w25x.831)
+- **A repository path with a space no longer breaks the launch lines** in
+  `moai-tmux`, `moai-cmux` and `moai-recover` — `<root>` and `<cwd>` are quoted
+  in `split-window -c`, in cmux's `--command 'cd …'` and in the line printed to
+  type outside both. (moai-jn8d)
+- **A worker started with cmux `claude-teams` gets its tab in the session map.**
+  Its record carries the shim's stand-in (`cmux:@….%…`) as `tmux`, which the map
+  read as a tmux pane, so the cmux branch gave that worker — and a supervisor
+  started that way — `-`. Only a real tmux pane id (`:@<n>.%<n>`) counts as tmux
+  now. (moai-jn8d)
+- **`moai-recover` no longer brings back a conversation already left behind.** A
+  dead session that another window resumed and then cleared with `/clear` (or
+  its aliases `/new` and `/reset`) stayed a candidate, since no live row carried
+  its old id. It now reads `~/.claude/history.jsonl`, which logs each `/clear`
+  under the id it cleared, and drops a candidate cleared after its transcript
+  last moved — the lines a `/clear` writes as it interrupts a running turn do not
+  count as moving. (moai-jn8d.vyh)
+- **Hook rule 2 judges where a write lands, not where the shell stands.** A
+  session whose held work all has a worktree is now refused a root write made by
+  absolute path after its shell `cd`'d into the worktree, a write chained after a
+  pick-up on the same line, and a write into another epic's worktree; the refusal
+  names the same file in its own worktree. Rule 2 also counts the destination of
+  `cp`, `mv` and `install`. (moai-qrja)
+- **Hook rule 4 under cmux `claude-teams` also stops `send-keys`, `split-window`,
+  `new-window` and `respawn-pane`**, which cmux's tmux shim sends to the person's
+  cmux, and knows the shim after `unset TMUX` or with a real tmux ahead on `PATH`.
+  A single quoted command string (`tmux 'ls; kill-server'`) is read as commands,
+  and the line a rule-4 refusal hands back keeps the quoting that was typed.
+  (moai-qrja)
+- **The hook reads the session pick-up records only when they can change the
+  answer**, once per call, instead of on every tool call. (moai-qrja)
+
 ## [0.28.0] - 2026-10-26
 
 ### Added

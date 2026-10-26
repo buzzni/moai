@@ -34,11 +34,14 @@ the person can watch.
 
 Inside tmux:
 
-    tmux display -p -t <pane> '#{pane_in_mode}'
+    tmux display -p -t <pane> '#{pane_in_mode} #{pane_dead}'
     tmux capture-pane -p -e -t <pane>
 
-The first line prints `1` while the person is scrolling the pane (copy mode) — keys you send
-then go to tmux's copy mode, not to Claude Code, so a pane in a mode is theirs: do not type.
+The first line prints two values. The first is `1` while the person is scrolling the pane (copy
+mode) — keys you send then go to tmux's copy mode, not to Claude Code, so a pane in a mode is
+theirs: do not type. The second is `1` once the pane's program has exited — a pane a moai skill
+opened keeps its last screen under `remain-on-exit` and takes no keys: the session there is
+dead, so do not type. When it prints neither value, the pane is gone: do not type either.
 Claude Code's input box is the line that starts with `❯`, under the conversation, between two
 `─` rules. **Empty** is `❯` followed by nothing, or by Claude Code's dim placeholder — `-e`
 keeps the colours, and the placeholder is drawn dim (SGR `2`, or a grey foreground) where the
@@ -46,9 +49,9 @@ person's text is not. Anything else — a word, a pasted block, a half-typed com
 person's, and if you cannot tell the placeholder from their draft, it is theirs. A pane with
 no `❯` box at all (a shell prompt, a dialog) is not a box to type into either. **Even an empty
 box counts only while the session map, run again just before, still reads that session
-`alive` in that pane** — the screen alone cannot tell: a pane whose Claude Code was killed keeps
-its last frame, box and all, above the shell `exec bash` started, and the keys go to that
-shell.
+`alive` in that pane** — the screen alone cannot tell: in a pane the person opened, a Claude
+Code that was killed keeps its last frame, box and all, above the shell it ran in, the second
+value stays `0`, and the keys go to that shell.
 
 Inside cmux:
 
@@ -79,7 +82,7 @@ leaves its record behind. The lines below print one row per record, tab-separate
 
 ```sh
 python3 - <<'PY'
-import glob, json, os, subprocess, sys
+import glob, json, os, re, subprocess, sys
 def out(*cmd, **env):
     try:
         return subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, universal_newlines=True, env=dict(os.environ, **env), timeout=10).stdout.strip()
@@ -138,8 +141,9 @@ for path in sorted(glob.glob(os.path.expanduser("~/.claude/sessions/*.json"))):
         continue
     start = started(pid)
     alive = bool(start) and start == " ".join(str(r.get("procStart")).split())
-    tmux = r.get("tmux") or ""
-    pane = tmux.rpartition(".")[2] if "%" in tmux else ""
+    told = r.get("tmux") or ""
+    tmux = told if re.search(r":@\d{1,6}\.%\d{1,6}$", told) else ""
+    pane = tmux.rpartition(".")[2] if tmux else ""
     if r.get("entrypoint") == "remote_mobile":
         pane = ""
     elif alive and (mine or cmux) and r.get("kind") not in (None, "interactive"):
@@ -149,7 +153,7 @@ for path in sorted(glob.glob(os.path.expanduser("~/.claude/sessions/*.json"))):
         if not here or here != device(out("tmux", "display", "-p", "-t", pane, "#{pane_tty}")):
             pane = ""
     elif alive and cmux:
-        pane = "" if tmux else surfaces.get(pid)
+        pane = "" if told and not told.startswith("cmux:") else surfaces.get(pid)
     rows.append((alive, pane, r))
 if rows and not any(alive for alive, _, _ in rows):
     sys.exit("no record reads alive, not even this session's own: this shell cannot read process start times (a sandbox, or no ps), so act on no row")
@@ -174,6 +178,60 @@ PY
   worktree, also drop it when a live row other than your own stands in that same `cwd`. The
   root is not such a place — several live sessions stand there at once, and one of them being
   alive says nothing about the dead one
+- **Drop it when its conversation was cleared after it died.** Another process resumed it and
+  ran `/clear` there: that process went on under a new `sessionId` and its own record carries
+  the new one, so no live row carries the old id any more — and resuming it brings back a
+  conversation already left behind. Its transcript does not say so (the `/clear` lines open the
+  new id's transcript, not the end of the old one); `~/.claude/history.jsonl` does — it logs
+  every `/clear` (and its aliases `/new` and `/reset`) under the id it cleared. Give the lines
+  below the candidates' `sessionId`s; they print the ones cleared after their transcript last
+  moved, and you drop those. The lines a `/clear` writes as it interrupts a running turn land
+  within seconds of it and do not count as moving. A conversation that moved again after its
+  `/clear` (it was resumed back) is not printed. Two dead records with the same `sessionId`
+  are one candidate
+
+```sh
+python3 - <sessionId> … <<'PY'
+import glob, json, os, sys
+from datetime import datetime
+wanted = set(sys.argv[1:])
+cleared = {}
+try:
+    with open(os.path.expanduser("~/.claude/history.jsonl"), encoding="utf-8", errors="replace") as f:
+        for line in f:
+            try:
+                h = json.loads(line)
+                if str(h.get("display", "")).split()[:1] in (["/clear"], ["/new"], ["/reset"]) and h.get("sessionId") in wanted:
+                    cleared[h["sessionId"]] = max(cleared.get(h["sessionId"], 0), int(h["timestamp"]))
+            except (ValueError, KeyError, TypeError, AttributeError):
+                continue
+except OSError:
+    pass
+def moved(sid):
+    last = ""
+    for path in glob.glob(os.path.expanduser(f"~/.claude/projects/*/{sid}.jsonl")):
+        try:
+            with open(path, encoding="utf-8", errors="replace") as f:
+                for line in f:
+                    if '"timestamp"' not in line:
+                        continue
+                    try:
+                        t = json.loads(line).get("timestamp")
+                    except (ValueError, AttributeError):
+                        continue
+                    if isinstance(t, str) and t > last:
+                        last = t
+        except OSError:
+            continue
+    if not last:
+        return 0
+    return datetime.fromisoformat(last.replace("Z", "+00:00")).timestamp() * 1000
+for sid in sorted(cleared):
+    if cleared[sid] + 10000 > moved(sid):
+        print(sid)
+PY
+```
+
 - **Drop old crashes.** Records of earlier deaths stay too. Keep the candidates whose
   transcript (below) last moved around the same time; name an older one to the person apart,
   and bring it back only if they say so
@@ -283,11 +341,16 @@ supervisor's pane — or print its line — only after they say that worker is b
 the window of `$TMUX_PANE` — inside a session Saycode's daemon started, that is the daemon's
 pane, not yours — so say which window they are in:
 
-    tmux split-window -P -F '#{pane_id}' -t "$TMUX_PANE" -c <cwd> 'claude --resume <sessionId>; exec bash'
+    tmux split-window -P -F '#{pane_id}' -t "$TMUX_PANE" -c "<cwd>" 'claude --resume <sessionId>' \; set-option -p remain-on-exit on
     tmux select-layout -t "$TMUX_PANE" tiled
 
-**No other flag.** The first line prints the new pane's `%N`; `exec bash` keeps a shell there
-when `claude` exits. Then, as a separate call, look once: when its `❯` box shows and is empty
+**No other flag**, and keep the double quotes around `<cwd>` — a path with a space stays one
+argument. The first line prints the new pane's `%N`, the `<pane>` below. The `set-option` after
+`\;` runs in the same tmux call, on the new pane, before `claude` can exit — a `--resume` that
+fails at once (no such conversation) keeps its pane and its error.
+`remain-on-exit` keeps the pane when `claude` exits: its last screen stays, `#{pane_dead}`
+reads `1`, and tmux refuses pastes aimed at it and drops keys, so nothing lands in a shell. A
+dead pane stays until the person closes it; never kill it. Then, as a separate call, look once: when its `❯` box shows and is empty
 ("Is the input box empty" above), paste the block:
 
     tmux load-buffer -b moai-recover <file>
@@ -310,9 +373,9 @@ person that this way needs cmux 0.65.0, and go to 7; when it prints an error ins
 `methods` list, tell them what it said, and go to 7. For each session that is not a Saycode
 session (8), in that order:
 
-    cmux --id-format both new-split right --surface "$CMUX_SURFACE_ID" --command 'cd <cwd> && claude --resume <sessionId>'
+    cmux --id-format both new-split right --surface "$CMUX_SURFACE_ID" --command 'cd "<cwd>" && claude --resume <sessionId>'
 
-**No other flag.** It prints `OK surface:<n> (<UUID>) workspace:<n> (<UUID>)` — the first UUID
+**No other flag**, and keep the double quotes around `<cwd>` inside the single ones. It prints `OK surface:<n> (<UUID>) workspace:<n> (<UUID>)` — the first UUID
 is the new tab, the second your workspace. The command is typed into the tab's shell, so the
 shell stays when `claude` exits, and the split does not take focus. **If cmux refuses a split**
 — no space for a new pane, as every split lands in your row, or it cannot find your tab in the
@@ -339,7 +402,7 @@ person which tab is which session.
 Neither way above stands: open nothing. Print, per session in the same order, the line the
 person types in a terminal of their own, and under it the block to paste once its box shows:
 
-    cd <cwd> && claude --resume <sessionId>
+    cd "<cwd>" && claude --resume <sessionId>
 
 A Saycode session gets the line of 8 instead.
 
