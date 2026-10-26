@@ -157,7 +157,11 @@ pub fn screen(f: &mut Frame, app: &mut App) {
     // 굴리지 않는다. 격자에 줄 높이는 몸통의 몫([`menu::BODY_MIN`])을 먼저 남기고 정하고, 그것도
     // 없으면 격자 없이 접두어 줄 한 줄로 접는다([`menu_line`]). 헤더의 높이(`header_h`)는 위에서 이미 셌다.
     let open_menu =
-        (matches!(app.mode, Mode::Browse | Mode::Stats(_) | Mode::Wiki(_)) && menu::open(&app.chord)).then(|| {
+        // 키 목록 창이 떠 있으면 메뉴는 안 선다 — 그 창이 `SPC h` 를 기다리는 동안에도 열이 SPC 로 선다(`App::help_key`).
+        (matches!(app.mode, Mode::Browse | Mode::Stats(_) | Mode::Wiki(_))
+            && app.help.is_none()
+            && menu::open(&app.chord))
+            .then(|| {
             let ctx = app.key_ctx(&rows);
             let items = menu::entries(app.chord.held(), &ctx, &app.screen_statuses());
             let left = area.height.saturating_sub(header_h + 1 + banner_h + keys_h) as usize;
@@ -288,6 +292,10 @@ pub fn screen(f: &mut Frame, app: &mut App) {
         }
         _ => {}
     }
+    // 키 목록 창은 무엇을 그렸든 그 위에 선다(moai-ucyr) — 통계·위키 창 위에서도 연다.
+    if let Some(sheet) = &mut app.help {
+        help_sheet(f, sheet, body, lang);
+    }
     // 위키 창의 칸 자리 — 마우스가 맞힌다(moai-o3cb). 창이 몸통을 덮으므로 목록·상세의 자리 대신 이것을 읽는다.
     app.drawn.wiki = wiki_at;
     // 메뉴에서 누를 수 있는 칸 — 격자 창과 접두어 줄이 칠한 자리에서 저마다 낸다(moai-m6ni). 다 그린 뒤 한 번 남긴다.
@@ -317,6 +325,7 @@ pub fn screen(f: &mut Frame, app: &mut App) {
 
     // 맨 아랫줄은 하나다 — 글을 받는 중이면 프롬프트가, 아니면 키 바가 선다.
     match &app.mode {
+        _ if app.help.is_some() => help_keys(f, app.keys.browse, keys, app.site.lang),
         Mode::Browse => match &open_menu {
             Some((items, grid, waits)) => menu_keys.extend(menu_line(f, app, items, grid, *waits, keys)),
             None => fkeys(f, app, &rows, keys, !header_numbered),
@@ -570,6 +579,76 @@ fn sort_edit(f: &mut Frame, e: &super::sorter::Editor, at: Rect, lang: Lang) {
         at,
         &mut state,
     );
+}
+
+/// 키 목록 창(`?`·`SPC h`, moai-ucyr) — 몸통 가운데 뜨는 상자. 왼쪽 열이 키, 오른쪽이 낱말이고 절의 머리가 굵게 선다.
+/// 키 색은 SPC 메뉴의 키 칸과 같다 — 같은 것을 같은 색으로 댄다.
+///
+/// **그린 높이를 창에 적는다** — 반 쪽·한 쪽 굴리기가 그것으로 재고([`super::help::Sheet::step`]), 창이 줄어 굴린 자리가
+/// 끝을 넘었으면 여기서 당긴다.
+fn help_sheet(f: &mut Frame, s: &mut super::help::Sheet, at: Rect, lang: Lang) {
+    use super::help::Line as L;
+    use crate::text::width;
+    let (mut key_w, mut what_w, mut head_w) = (0, 0, 0);
+    for l in &s.lines {
+        match l {
+            L::Head(t) => head_w = head_w.max(width(t)),
+            L::Key { keys, what } => {
+                key_w = key_w.max(width(keys));
+                what_w = what_w.max(width(what));
+            }
+        }
+    }
+    // 키 열은 머리보다 한 칸 들어간다 — 절의 머리가 눈에 먼저 선다.
+    let inner = (1 + key_w + 2 + what_w).max(head_w).max(24);
+    // 테두리 둘과 옆 여백 둘.
+    let w = (inner as u16).saturating_add(4).min(at.width);
+    let h = (s.lines.len() as u16).saturating_add(2).min(at.height);
+    let area = Rect { x: at.x + (at.width - w) / 2, y: at.y + (at.height - h) / 2, width: w, height: h };
+    f.render_widget(Clear, area);
+    let rows = h.saturating_sub(2) as usize;
+    s.height = rows;
+    s.top = s.top.min(s.lines.len().saturating_sub(rows));
+    let room = w.saturating_sub(4) as usize;
+    // 좁으면 키 열이 반을 넘지 않는다 — 낱말이 통째로 밀려나면 키만 남아 뜻이 없다.
+    let kw = key_w.min(room.saturating_sub(1) / 2);
+    let lines: Vec<Line> = s
+        .lines
+        .iter()
+        .skip(s.top)
+        .take(rows)
+        .map(|l| match l {
+            L::Head(t) => Line::from(Span::styled(clip(t, room), bold())),
+            L::Key { keys, what } => {
+                let k = clip(keys, kw);
+                let pad = " ".repeat(kw.saturating_sub(width(&k)));
+                Line::from(vec![
+                    Span::raw(" "),
+                    Span::styled(k, bold().fg(MENU_KEY)),
+                    Span::raw(pad),
+                    Span::raw("  "),
+                    Span::raw(clip(what, room.saturating_sub(kw + 3))),
+                ])
+            }
+        })
+        .collect();
+    let at_of = fill(say(lang, "tui.help.at"), &[("at", &(s.top + 1).to_string()), ("of", &s.lines.len().to_string())]);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Thick)
+        .border_style(from_anstyle(style::FOCUS))
+        .padding(Padding::horizontal(1))
+        .title(format!(" {} ", say(lang, "tui.help.title")))
+        .title_bottom(Line::from(Span::styled(format!(" {at_of} "), dim())).right_aligned());
+    f.render_widget(Paragraph::new(lines).block(block), area);
+}
+
+/// 키 목록 창의 키 바 — 굴리기와 닫기. 키 이름은 탐색의 표에서 읽는다(창이 그 표로 키를 받는다, `App::help_key`).
+fn help_keys(f: &mut Frame, table: &[keys::Bind<keys::Browse>], at: Rect, lang: Lang) {
+    use keys::Browse as B;
+    let scroll = labels(table, &[B::Step(Move::LineDown), B::Step(Move::LineUp)]);
+    let close = labels(table, &[B::Help, B::ClearFilter]);
+    bar(f, at, vec![key(&scroll, say(lang, "tui.help.scroll"))], vec![key(&close, say(lang, "tui.act.close"))]);
 }
 
 /// 차례 편집 창의 키 바 — 키 이름은 표([`super::keys::SORTER`])에서 읽는다. 좁으면 걷기·옮기기부터 뺀다 — 입히고

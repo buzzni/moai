@@ -530,7 +530,9 @@ BACKLOG
   movement key moves the focused pane — to scroll the detail, go there with
   {key:browse.focus_next}.
   {key:browse.grep} searches, {key:browse.clear_filter} clears the filter you set. {key:browse.read} marks the row under the cursor
-  as read (see [NEW] below).
+  as read (see [NEW] below). {key:browse.help} (or SPC h) opens a window listing every
+  key, read from the same table as moai keys. The movement keys scroll
+  it and {key:browse.help} closes it again.
   The search and filter fields take Enter to apply and Esc to give up, the
   search filters the list as you type, and Tab and Shift-Tab pick where it
   looks: everything, id, title, tag, body or note (everything reads the
@@ -557,7 +559,7 @@ BACKLOG
   the state, and leave with {key:menu.close}. That level says so at the bottom right with a
   close hint.
     SPC /    search              {key:browse.filter}    filter             {key:browse.jot}    jot
-    {key:browse.quit}    quit
+    SPC h    keys                {key:browse.quit}    quit
     {key:browse.pick}  register            {key:browse.unregister}  drop from the list
   Screen — which one stands; the root menu names it, as in [board]:
     {key:browse.go_list}  list                {key:browse.go_board}  board — described below

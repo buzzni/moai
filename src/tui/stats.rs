@@ -265,6 +265,10 @@ impl App {
                     self.go(to, &rows);
                     true
                 }
+                Some(Browse::Help) => {
+                    self.open_help(&rows);
+                    true
+                }
                 Some(Browse::Step(m)) => {
                     if let Mode::Stats(w) = &mut self.mode {
                         w.scroll.go(m);
@@ -414,8 +418,8 @@ mod tests {
         let root = menu::entries(a.chord.held(), &ctx, &[]);
         assert_eq!(
             root.iter().map(menu::Entry::text).collect::<Vec<_>>(),
-            ["+화면 [통계]"],
-            "화면 묶음 말고 다른 것이 섰다"
+            ["+화면 [통계]", "키 목록"],
+            "화면 묶음과 키 목록(moai-ucyr) 말고 다른 것이 섰다"
         );
         a.hit("p");
         assert_eq!(menu::title(a.chord.held()), "SPC", "통계 창 위에서 SPC p 가 열렸다");

@@ -326,7 +326,7 @@ pub fn grid(items: &[Entry], room: usize, max_rows: usize) -> Grid {
 /// **`(접두어, 키)` 표로 두지 않는다.** 표에 키를 담고 `say(lang, key)` 를 한 번만 부르면
 /// `english_has_every_key_the_source_asks_for` 의 읽는 자가 그 키들을 못 봐, 표에만 있고
 /// 아무도 안 부르는 키로 선다.
-fn group(seq: &[KeyEvent], lang: Lang) -> &'static str {
+pub(super) fn group(seq: &[KeyEvent], lang: Lang) -> &'static str {
     match title(seq).as_str() {
         "SPC p" => say(lang, "tui.group.project"),
         "SPC g" => say(lang, "tui.group.screen"),
@@ -450,11 +450,24 @@ mod tests {
         // **`+옵션` 은 끝이다**(moai-2g7d) — 표의 차례가 곧 메뉴의 차례고, 가장 드물게 누르는 묶음을
         // 끝에 둔다. 보기·정렬·열이 *무엇이 서는가* 라면 옵션은 *선 것을 이 사람에게 어떻게 그릴까* 다.
         // **`+화면` 은 프로젝트 곁이다**(moai-z46r) — 무엇을 보나(화면)를 고른 뒤 그 화면의 보기·정렬·열을 고른다.
-        assert_eq!(keys_of(&root), ["/", "f", "n", "q", "p", "g", "v", "s", "c", "m", "o"]);
+        assert_eq!(keys_of(&root), ["/", "f", "n", "q", "p", "g", "v", "s", "c", "m", "o", "h"]);
         let what: Vec<&str> = root.iter().map(|e| e.what.as_str()).collect();
         assert_eq!(
             what,
-            ["검색", "거름망", "생각 담기", "끝내기", "+프로젝트", "+화면", "+보기", "+정렬", "+열", "+읽음", "+옵션"]
+            [
+                "검색",
+                "거름망",
+                "생각 담기",
+                "끝내기",
+                "+프로젝트",
+                "+화면",
+                "+보기",
+                "+정렬",
+                "+열",
+                "+읽음",
+                "+옵션",
+                "키 목록"
+            ]
         );
     }
 
@@ -728,6 +741,10 @@ mod tests {
         // 화면 묶음이 쥐어(moai-z46r) `gg` 는 `g` 가 빈 층에서만 재고, 뿌리에서는 그 묶음으로 내려가는지를 잰다.
         for layer in [&[][..], &[k('s')][..], &[k('p')][..]] {
             for (x, want) in cases {
+                // 뿌리의 `h` 는 키 목록(`SPC h`, moai-ucyr)이 쥔다 — 항목이 이긴다(`an_item_on_the_layer_wins_over_the_move`).
+                if layer.is_empty() && x == k('h') {
+                    continue;
+                }
                 let mut ch = Chord::default();
                 feed(&mut ch, &c, k(' '));
                 for &l in layer {
@@ -780,9 +797,14 @@ mod tests {
             );
             assert_eq!(feed(&mut ch, &c, k(x)), Some(item), "SPC {layer} {x} 가 항목을 안 했다");
         }
-        // 그 글자가 안 선 층에서는 이동이다 — 뿌리의 `h`·`l`, `SPC s` 의 `g`.
+        // 뿌리의 `h` 도 항목이다 — 키 목록(moai-ucyr, 2026-10-26 사용자 결정. 그 전에는 메뉴를 닫고 접었다).
         let mut ch = Chord::default();
         feed(&mut ch, &c, k(' '));
+        assert_eq!(feed(&mut ch, &c, k('h')), Some(Browse::Help));
+        // 그 글자가 안 선 층에서는 이동이다 — `SPC s` 의 `h`·`g`.
+        let mut ch = Chord::default();
+        feed(&mut ch, &c, k(' '));
+        feed(&mut ch, &c, k('s'));
         assert_eq!(feed(&mut ch, &c, k('h')), Some(Browse::Collapse));
         feed(&mut ch, &c, k(' '));
         feed(&mut ch, &c, k('s'));
@@ -829,7 +851,7 @@ mod tests {
         // `SPC m a` 가 늘 "적을 것이 없다" 로 답하면서 그 프로젝트의 [NEW] 는 그대로 남는다.
         // 옵션(`o`)은 층에서도 선다 — 상세 칸은 층에도 있고, 그리는 자리는 프로젝트의 것이 아니라
         // 보는 사람의 것이다.
-        assert_eq!(keys_of(&root_layer), ["n", "q", "p", "g", "v", "o"], "층에서 검색·거름망·정렬·열·읽음이 섰다");
+        assert_eq!(keys_of(&root_layer), ["n", "q", "p", "g", "v", "o", "h"], "층에서 검색·거름망·정렬·열·읽음이 섰다");
         assert!(keys_of(&root_in).contains(&"m"), "프로젝트 안에서 읽음이 안 섰다");
         assert!(keys_of(&root_in).contains(&"f"));
         // 통계는 `p` 밑을 떠났다(moai-z46r) — 화면 고르기(`SPC g s`)다. 그 화면 묶음은 층에서도 선다(위의 `g`).

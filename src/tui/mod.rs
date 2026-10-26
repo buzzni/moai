@@ -8,6 +8,7 @@ pub mod draw;
 pub mod edit;
 pub mod form;
 mod gantt;
+mod help;
 mod hint;
 pub mod init_screen;
 pub mod input;
@@ -1610,6 +1611,9 @@ pub struct App {
     /// 0 번 줄부터 다시 세어 커서를 늘 맨 아랫줄에 붙이고, 그러면 커서 아래를
     /// 한 줄도 못 본다. 상세와 **같은 조각**이다([`Scroll`]).
     pub list: Scroll,
+    /// 열린 키 목록 창(`?`·`SPC h`, moai-ucyr). **모드가 아니라 위에 뜨는 창이다** — 통계·위키 창 위에서도 열리고, 닫으면
+    /// 덮였던 창이 그대로 선다. 열린 동안 키는 이 창이 먼저 받는다([`App::help_key`]).
+    pub help: Option<help::Sheet>,
     pub quit: bool,
     /// 도는 글리프의 걸음. **그린 횟수가 아니라 시계가 올린다** — 그릴 때마다
     /// 올리면 키를 누르는 동안에는 타이핑 속도로 돌고 가만히 두면 파일을 보러
@@ -2191,6 +2195,7 @@ impl App {
             saved_zone: None,
             saved: Default::default(),
             list: Scroll::default(),
+            help: None,
             quit: false,
             spin: 0,
             spun: false,
@@ -5514,6 +5519,31 @@ impl App {
         rows.get(self.cursor).cloned()
     }
 
+    /// 키 목록 창을 연다 — 지금 자리의 낱말([`App::key_ctx`])로 짓는다. 켜고 끄는 항목의 낱말이 지금 상태를 따라가므로
+    /// 연 때의 것이다.
+    pub(super) fn open_help(&mut self, rows: &[Row]) {
+        self.chord.clear();
+        self.help = Some(help::Sheet::open(&self.keys, &self.key_ctx(rows)));
+    }
+
+    /// 키 목록 창의 키 하나. **탐색의 표로 읽는다** — 이동키가 굴리고(`gg` 의 기다림도 그대로), 연 키(`?`·`SPC h`)와
+    /// Esc·Bksp·끝내기 키가 닫는다. 그 밖은 아무 일도 없다: 읽기만 하는 창이라 틀린 키 하나에 사라지면 보던 자리를 잃는다.
+    pub(super) fn help_key(&mut self, k: KeyEvent) {
+        use keys::Browse as B;
+        let act = self.chord.feed(self.keys.browse, k);
+        let Some(sheet) = &mut self.help else { return };
+        match act {
+            Some(B::Step(m)) => sheet.step(m),
+            Some(B::Help | B::ClearFilter | B::Leave | B::Quit) => {
+                self.chord.clear();
+                self.help = None;
+            }
+            // SPC 는 `SPC h` 를 기다린다 — 다른 둘째 키면 그 열을 버린다(메뉴 창은 이 창 위에 안 선다).
+            Some(_) => self.chord.clear(),
+            None => {}
+        }
+    }
+
     pub fn key(&mut self, k: KeyEvent) {
         // 쓰기의 알림은 **다음 키 하나에 걷힌다.** 읽었으면 할 일을 다 했고, 이 키가 또
         // 쓰기라면 그 쓰기가 제 알림을 새로 단다.
@@ -5535,6 +5565,13 @@ impl App {
         // 나갈 길이 없다. 적던 것은 그 길로 날아간다.
         if let Lookup::Run(keys::Anywhere::Quit) = keys::lookup(keys::ANYWHERE, &[k]) {
             self.quit = true;
+            return;
+        }
+        // **키 목록 창이 먼저 받는다**(moai-ucyr) — 덮인 창(통계·위키)이나 목록에 키가 새지 않는다. 읽기만 하는 창이라
+        // 알림은 걷지 않는다: 창을 닫은 뒤에도 연 앞의 알림이 그대로 선다.
+        if self.help.is_some() {
+            self.help_key(k);
+            self.notice = carried;
             return;
         }
         // **통계 창은 SPC 메뉴를 연다**(moai-z46r) — 그래서 탐색의 열을 비우지 않고 넘긴다. 메뉴가 열린 동안 그 열이
@@ -5606,6 +5643,7 @@ impl App {
         }
         match act {
             B::Quit => self.quit = true,
+            B::Help => self.open_help(&rows),
             B::FocusPrev => self.focus = self.focus.prev(),
             B::FocusNext => self.focus = self.focus.next(),
             // **끝에서는 제자리다** — 목록에서 `Ctrl-w h` 를 눌러도 상세로 돌지 않는다.
