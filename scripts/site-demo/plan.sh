@@ -46,6 +46,10 @@ plan 'Invite people' -3 12
 plan 'Per-notebook' 10 20
 plan 'Read-only links' 14 24
 plan 'Activity feed' 20 30
+# 막는 줄 둘 — 간트는 커서 줄을 막는 줄에서 화살표를 긋는다(web 의 간트 장면이 그것을 보인다, moai-vj8w.fuh)
+idof() { "$moai" show -g "$1" --type issue --archived --json | jq -r '.[0].id'; }
+"$moai" link "$(idof 'Retry with backoff')" --blocks "$(idof 'larger than 10 MB')" --user "$MIRA" >/dev/null
+"$moai" link "$(idof 'Resolve conflicts')" --blocks "$(idof 'larger than 10 MB')" --user "$MIRA" >/dev/null
 # seed.sh 는 모두 읽은 채로 두었다 — 녹화에서 새로 생긴 카드만 [NEW] 로 서게. 위의 edit 은 Mira 의 에픽 멤버를 다시
 # 안 읽음으로 세워, 간트의 제목마다 [NEW] 가 붙어 잘린다. 한 번 더 읽는다
 "$moai" read --all --user "$MIRA" >/dev/null

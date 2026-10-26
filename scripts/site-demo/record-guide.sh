@@ -3,7 +3,7 @@
 #
 #     MOAI=<moai 바이너리> scripts/site-demo/record-guide.sh <내보낼 디렉터리> [장면...]
 #
-# 장면은 shell.py 의 scenes(init, backlog, keys). init 은 아직 moai 가 없는 저장소에서, 나머지는 seed.sh 가
+# 장면은 shell.py 의 scenes(init, backlog, keys, wiki). init 은 아직 moai 가 없는 저장소에서, 나머지는 seed.sh 가
 # 지은 Lantern 에서 찍는다. 장면을 주지 않으면 사용 방법 페이지의 둘(init, backlog)만 찍는다.
 #
 # init 은 저장소·바이너리·사용자 설정의 절대 경로를 화면에 찍는다. 그래서 데모 사람의 HOME 을 고정된
@@ -43,6 +43,19 @@ for scene in "${scenes[@]}"; do
     cd - >/dev/null
   else
     bash "$here/seed.sh" "$repo" >/dev/null
+  fi
+  if [ "$scene" = wiki ]; then
+    # 이미 선 교훈 하나: 두 줄의 노트가 가리켜 `moai wiki ls` 에 ×2 로 선다. 장면에서 적는 새 교훈은 ×1 이다
+    ( cd "$repo" && . ./.demo-ids
+      export MOAI_CONFIG=$repo/.demo-home/config.toml MOAI_LANG=en MOAI_NO_UPDATE_CHECK=1
+      "$MOAI" wiki learn 'Keep the main thread off the index' --issue "$search" -b - >/dev/null <<'LESSON'
+## What happened
+Indexing on launch froze the note list for two seconds on large notebooks.
+
+## Do this instead
+Hand indexing to the search worker and let the list draw from what is there.
+LESSON
+      "$MOAI" note "$editor" 'Lesson: lessons/keep-the-main-thread-off-the-index' >/dev/null )
   fi
   if [ "$scene" = keys ]; then
     # 바꾼 줄 둘과, 기본 키(정렬)와 부딪혀 빠질 줄 하나
