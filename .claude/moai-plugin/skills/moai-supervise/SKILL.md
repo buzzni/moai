@@ -267,8 +267,9 @@ backlog parked outside the release unfolds into an epic that stands outside it, 
 stays. What you send while a release runs is work that already stands in it; a backlog item from
 outside waits for the next round, unless it should stand as `p0` or the person attaches
 the release themselves. **So `<milestone>` in 3 is the release that backlog already stands
-under, never one you picked for it**: the line the worker runs in its step 1 —
-`moai edit <epic> --milestone <milestone>` — re-affirms what `promote` carried and is not a door you open. With
+under, never one you picked for it**: the line the plan subagent runs (2-2) — or the worker,
+in its step 1, when you send it the backlog — `moai edit <epic> --milestone <milestone>` re-affirms what `promote`
+carried and is not a door you open. With
 nothing running, and for a backlog item that stands under no release, it is `none`.
 The 2026-09-21 round is why both halves are written down: a worker picked up a row outside
 the running release, and the person, not the tool, is what caught it. The answer is to
@@ -420,6 +421,63 @@ belongs to the worker who read the issue. A session's model cannot be changed by
 and cannot be changed by config — the person in that window changes it with `/model`. A
 subagent's model is fixed when you raise it: a worker that finds the work heavier hands back
 `Model: raise to complex` before it picks anything up (4).
+
+**2-2. Unfold with the `plan` role.** A backlog item goes to its worker already unfolded.
+Splitting work into an epic and its issues is the `plan` role's (2-1) — a worker on `develop`
+or `complex` would otherwise plan on its own model. So before you send a backlog item, raise one
+subagent on the `plan` role's model — the role has no effort key, so pass none — on the brief
+below, every slot filled as in 3:
+
+    Agent(subagent_type: "general-purpose", model: <plan model>, description: "plan <id>", prompt: <the plan brief>)
+
+    You unfold backlog <id> — <title> — for the supervisor of this repository. You split it
+    into an epic and its issues; you do not develop it, pick anything up, raise a worktree or
+    change a file outside the tracker.
+    Root: <root>
+    Milestone: <milestone>
+    Due: <due>
+    Person: <person>
+
+    1. Read it — moai -C <root> show <id> — and as much of the code as the split needs. If it
+       already stands done, hand back `already unfolded: <id>` and stop: unfolding again puts up
+       two epics.
+    2. Write the plan: one `# <epic title>` line and one `- [pN] <title>` line per issue. A plan
+       line becomes the title verbatim, so write short new titles. Look first, then unfold:
+       moai -C <root> backlog promote <id> --dry-run --from -
+       moai -C <root> backlog promote <id> --from -
+       A design question the backlog and its notes do not settle stays open: write it in the
+       body of the member it belongs to, for the worker to ask — do not settle it here.
+    3. Hang the release and the deadline on the epic, unless the slot says `none`:
+       moai edit <epic> --milestone <milestone>
+       moai -C <root> edit <epic> --due <due>
+       A refusal because the day is later than the milestone's leaves the epic as it stands —
+       name it in the hand-back.
+    4. Give every member a body the worker can start from without searching again — what is
+       wrong, where (file and function), what to change, how to test it:
+       moai -C <root> edit <member> -b - < <that text, written to a file in your scratchpad>
+    5. Hand back. The first line is Model ran: anthropic/<your real model name> — the name in
+       your system prompt, not an alias. The second is epic: <epic id>. Then one line per member,
+       <member> <low|medium|high> — <why>, on this rubric:
+       - `low` — text, comments, a one-line fix; behaviour unchanged
+       - `medium` — a behaviour change inside one file, ringed by tests
+       - `high` — several files, the write path, concurrency, the storage format, hooks; hard to undo
+       If you could not unfold, the first line after Model ran: is `not unfolded: <why>`.
+
+It hands back the epic it unfolded and a difficulty per member. Then
+
+- **write its `model:` line on the epic** — `moai note <epic> 'model: anthropic/<model ran> (<heaviest difficulty> — plan: unfolded <id>)'`, the name off its `Model ran:` line
+- **measure the role (2-1) on the members it handed back**, not on the backlog — the members
+  are written now, so the heaviest of them picks `develop` or `complex`
+- **send that epic `from step 2`**: the message of 3 with its first two lines swapped for the two below,
+  and the `Sent:` mark (1) on the epic. The backlog is done once unfolded and leaves the candidates by itself
+
+      You are handed epic <epic> — <title>. It is already unfolded; do not promote. Read <steps file> and follow its steps from step 2.
+      Read first: moai show <epic>
+
+If it hands back `already unfolded:` or `not unfolded:`, send nothing for that backlog — someone
+unfolded it, or the plan subagent could not; read its reason and tell the person. **A worker
+you send a backlog to directly** (the message of 3 as it stands, `from step 1`) still unfolds it
+itself — that is the path when the person asks for it, not the usual one.
 
 **3. Send.** Send **one** backlog to one worker. The message is the lines below, every
 slot filled. The worker knows nothing of this conversation, so what is not in the message
@@ -616,10 +674,9 @@ unfolded and it does not show its members, so `moai show <id>` cannot tell you w
 the work finished — when the report does not carry it, read it from that backlog's history
 line about being unfolded.
 
-If the three hold, mark the report checked on the epic — a supervisor that starts again reads
-that line, not this conversation (4). It needs no commit of its own ("The shared root").
-
-    moai note <epic> 'Report-checked: <merge hash>'
+**Before you mark it checked, settle the `model:` lines** — a supervisor that starts again
+reads `Report-checked:` alone and does not go round these again, so a line missed before the mark
+is missed for good, and a session worker told its window can be cleared is gone by then.
 
 **For a subagent worker, write the `model:` line yourself**, one per member it did — not the
 members it left in the first column — the same way, with no commit of their own. `<model ran>` is
@@ -641,6 +698,11 @@ it missed: ask the worker with a message to write it. Do not write it in its pla
 that ran in that window is the worker's to name.
 
     moai -C <root> show -e <epic> --all --json | jq -r '.[] | select(.work == []) | .id'
+
+If the three hold and every member's line stands, mark the report checked on the epic — a
+supervisor that starts again reads that line, not this conversation (4). It needs no commit of its own ("The shared root").
+
+    moai note <epic> 'Report-checked: <merge hash>'
 
 Then send the next backlog to a worker. **A subagent needs no clearing** — it ended with its
 hand-back. Raise a new one for the next backlog rather than waking a finished one with new

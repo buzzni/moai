@@ -2110,6 +2110,10 @@ pub fn supervise() -> String {
     let roles = roles_table();
     let defaults = models_defaults();
     let epic_rule = epic_review_rule();
+    let plan = indent(&plan_brief(), "    ");
+    let plan_first = PLAN_FIRST;
+    // 5 의 4-3 멤버 보내기는 `<id>` 를 에픽으로 채운다고 이른다 — 같은 줄을 그 자리 이름으로.
+    let plan_first_id = PLAN_FIRST.replace("<epic>", "<id>");
     format!(
         r#"---
 name: moai-supervise
@@ -2380,8 +2384,9 @@ backlog parked outside the release unfolds into an epic that stands outside it, 
 stays. What you send while a release runs is work that already stands in it; a backlog item from
 outside waits for the next round, unless it should stand as `p0` or the person attaches
 the release themselves. **So `<milestone>` in 3 is the release that backlog already stands
-under, never one you picked for it**: the line the worker runs in its step 1 —
-`{MILESTONE_ATTACH}` — re-affirms what `promote` carried and is not a door you open. With
+under, never one you picked for it**: the line the plan subagent runs (2-2) — or the worker,
+in its step 1, when you send it the backlog — `{MILESTONE_ATTACH}` re-affirms what `promote`
+carried and is not a door you open. With
 nothing running, and for a backlog item that stands under no release, it is `none`.
 The 2026-09-21 round is why both halves are written down: a worker picked up a row outside
 the running release, and the person, not the tool, is what caught it. The answer is to
@@ -2517,6 +2522,32 @@ belongs to the worker who read the issue. A session's model cannot be changed by
 and cannot be changed by config — the person in that window changes it with `/model`. A
 subagent's model is fixed when you raise it: a worker that finds the work heavier hands back
 `{RAISE_HEAD}` before it picks anything up (4).
+
+**2-2. Unfold with the `plan` role.** A backlog item goes to its worker already unfolded.
+Splitting work into an epic and its issues is the `plan` role's (2-1) — a worker on `develop`
+or `complex` would otherwise plan on its own model. So before you send a backlog item, raise one
+subagent on the `plan` role's model — the role has no effort key, so pass none — on the brief
+below, every slot filled as in 3:
+
+    Agent(subagent_type: "general-purpose", model: <plan model>, description: "plan <id>", prompt: <the plan brief>)
+
+{plan}
+
+It hands back the epic it unfolded and a difficulty per member. Then
+
+- **write its `model:` line on the epic** — `moai note <epic> 'model: anthropic/<model ran> (<heaviest difficulty> — plan: unfolded <id>)'`, the name off its `Model ran:` line
+- **measure the role (2-1) on the members it handed back**, not on the backlog — the members
+  are written now, so the heaviest of them picks `develop` or `complex`
+- **send that epic `from step 2`**: the message of 3 with its first two lines swapped for the two below,
+  and the `Sent:` mark (1) on the epic. The backlog is done once unfolded and leaves the candidates by itself
+
+      {plan_first}
+      Read first: moai show <epic>
+
+If it hands back `already unfolded:` or `not unfolded:`, send nothing for that backlog — someone
+unfolded it, or the plan subagent could not; read its reason and tell the person. **A worker
+you send a backlog to directly** (the message of 3 as it stands, `from step 1`) still unfolds it
+itself — that is the path when the person asks for it, not the usual one.
 
 **3. Send.** Send **one** backlog to one worker. The message is the lines below, every
 slot filled. The worker knows nothing of this conversation, so what is not in the message
@@ -2673,7 +2704,7 @@ idle worker after that other work's report is checked. Send the message of 3 wit
 filled with the epic and its first line changed to the one below. Until then, count it in 1
 as work holding that file.
 
-    You are handed epic <id> — <title>. It is already unfolded; do not promote. Read <steps file> and follow its steps from step 2.
+    {plan_first_id}
 
 Like the ones from 7-1, that member is right even when it is not done — it keeps the epic
 open, so the epic is not done either.
@@ -2699,10 +2730,9 @@ unfolded and it does not show its members, so `moai show <id>` cannot tell you w
 the work finished — when the report does not carry it, read it from that backlog's history
 line about being unfolded.
 
-If the three hold, mark the report checked on the epic — a supervisor that starts again reads
-that line, not this conversation (4). It needs no commit of its own ("The shared root").
-
-    moai note <epic> 'Report-checked: <merge hash>'
+**Before you mark it checked, settle the `model:` lines** — a supervisor that starts again
+reads `Report-checked:` alone and does not go round these again, so a line missed before the mark
+is missed for good, and a session worker told its window can be cleared is gone by then.
 
 **For a subagent worker, write the `model:` line yourself**, one per member it did — not the
 members it left in the first column — the same way, with no commit of their own. `<model ran>` is
@@ -2724,6 +2754,11 @@ it missed: ask the worker with a message to write it. Do not write it in its pla
 that ran in that window is the worker's to name.
 
     {UNWRITTEN}
+
+If the three hold and every member's line stands, mark the report checked on the epic — a
+supervisor that starts again reads that line, not this conversation (4). It needs no commit of its own ("The shared root").
+
+    moai note <epic> 'Report-checked: <merge hash>'
 
 Then send the next backlog to a worker. **A subagent needs no clearing** — it ended with its
 hand-back. Raise a new one for the next backlog rather than waking a finished one with new
@@ -4528,6 +4563,55 @@ fn message() -> String {
     )
 }
 
+/// 감독의 2-2 가 펼치기를 맡기는 메시지의 첫 줄(moai-w25x.jby) — 이미 펼친 에픽을 걸음 2 부터. 4-3 으로 남은 멤버를
+/// 보낼 때(감독 5)와 한 줄이라 한 자리에 둔다.
+const PLAN_FIRST: &str = "You are handed epic <epic> — <title>. It is already unfolded; do not promote. Read <steps file> and follow its steps from step 2.";
+
+/// 감독이 `plan` 역할의 모델로 세우는 펼치기 서브에이전트의 프롬프트(moai-w25x.jby, 2026-10-26 사용자 결정). 역할 표의
+/// `plan` 이 어디에도 안 쓰였다 — 일꾼은 제 모델로 펼쳐, 사람이 그 키를 적어도 안 들었다(리뷰 moai-9tqo.jdi 15번).
+///
+/// **일꾼의 걸음 1 이 하던 것을 그대로 옮긴다** — `--dry-run` 을 먼저 보고, 짧은 새 제목, 마일스톤과 기한을 에픽에.
+/// 그 위에 **멤버의 본문을 채운다** — 펼치는 손이 코드를 읽은 손이라, 일꾼이 같은 조사를 다시 안 하게 한다. 난이도를
+/// 멤버마다 돌려줘 감독이 역할(2-1)을 백로그가 아니라 멤버로 잰다. 집기·워크트리·코드는 일꾼의 몫이라 안 한다.
+fn plan_brief() -> String {
+    format!(
+        r#"You unfold backlog <id> — <title> — for the supervisor of this repository. You split it
+into an epic and its issues; you do not develop it, pick anything up, raise a worktree or
+change a file outside the tracker.
+Root: <root>
+Milestone: <milestone>
+Due: <due>
+Person: <person>
+
+1. Read it — moai -C <root> show <id> — and as much of the code as the split needs. If it
+   already stands done, hand back `already unfolded: <id>` and stop: unfolding again puts up
+   two epics.
+2. Write the plan: one `# <epic title>` line and one `- [pN] <title>` line per issue. A plan
+   line becomes the title verbatim, so write short new titles. Look first, then unfold:
+   moai -C <root> backlog promote <id> --dry-run --from -
+   moai -C <root> backlog promote <id> --from -
+   A design question the backlog and its notes do not settle stays open: write it in the
+   body of the member it belongs to, for the worker to ask — do not settle it here.
+3. Hang the release and the deadline on the epic, unless the slot says `none`:
+   {MILESTONE_ATTACH}
+   moai -C <root> edit <epic> --due <due>
+   A refusal because the day is later than the milestone's leaves the epic as it stands —
+   name it in the hand-back.
+4. Give every member a body the worker can start from without searching again — what is
+   wrong, where (file and function), what to change, how to test it:
+   moai -C <root> edit <member> -b - < <that text, written to a file in your scratchpad>
+5. Hand back. The first line is Model ran: anthropic/<your real model name> — the name in
+   your system prompt, not an alias. The second is epic: <epic id>. Then one line per member,
+   <member> <low|medium|high> — <why>, on this rubric:
+{rubric}
+   If you could not unfold, the first line after Model ran: is `not unfolded: <why>`."#,
+        rubric = indent(
+            &DIFFICULTY.iter().map(|(level, _, what)| format!("- `{level}` — {what}")).collect::<Vec<_>>().join("\n"),
+            "   "
+        )
+    )
+}
+
 /// 서브에이전트 일꾼이 7 에서 세우는 리뷰 서브에이전트의 프롬프트(moai-9tqo.p1p). **리뷰는 일꾼의 중첩
 /// 서브에이전트로 돈다**(2026-10-12 사용자 결정 5) — 일꾼 안에서 부른 리뷰는 일꾼의 모델을 물려받으니(moai-9tqo.fxp
 /// 4: `code-review` 포크의 모델이 부른 쪽의 것이었다), `review` 역할의 모델로 따로 세워야 그 모델로 돈다.
@@ -6273,6 +6357,33 @@ stop sending outside work while a release runs",
 
     /// **역할 표의 이름은 설정의 키다**(moai-9tqo.rsl). 감독이 표에서 고른 역할로 `moai models --json` 을 읽으니,
     /// 철자가 하나라도 다르면 그 역할의 모델이 없는 키를 찾는다. 난이도 표의 역할도 그 안에 선다.
+    /// **`plan` 역할이 감독의 펼치기를 맡는다**(moai-w25x.jby, 2026-10-26 사용자 결정) — 표에 적어도 아무 데서 안 듣던
+    /// 키였다. 감독이 그 모델로 펼치기 서브에이전트를 세우고, 일꾼은 펼친 에픽을 걸음 2 부터 받는다.
+    #[test]
+    fn the_plan_role_unfolds_before_the_send() {
+        let s = supervise();
+        let plan = s.find("model: <plan model>").expect("감독이 plan 모델로 펼치기를 안 세운다");
+        assert!(plan < s.find("**3. Send.**").unwrap(), "펼치기가 보내기 뒤에 선다");
+        for step in ["backlog promote <id> --dry-run --from -", "backlog promote <id> --from -", MILESTONE_ATTACH] {
+            assert!(s.contains(step), "펼치기 브리프가 일꾼 걸음 1 의 {step} 를 안 옮겼다");
+        }
+        assert!(s.contains(PLAN_FIRST), "펼친 에픽을 걸음 2 부터 보내지 않는다");
+        assert!(worker().contains("from step 2"), "일꾼 글이 걸음 2 부터 받는 길을 안 댄다");
+    }
+
+    /// **`model:` 줄을 다 본 뒤에 보고를 확인했다고 적는다**(moai-w25x.qi8, 리뷰 moai-nzmp.nfj 12번). 다시 선 감독은
+    /// `Report-checked:` 만 읽고 확인을 다시 안 돈다 — 그 뒤에 두면 놓친 줄이 영영 빈다.
+    #[test]
+    fn the_model_lines_are_settled_before_the_report_is_marked_checked() {
+        let s = supervise();
+        let mark = s.find("moai note <epic> 'Report-checked: <merge hash>'").unwrap();
+        assert!(s.find(UNWRITTEN).unwrap() < mark, "세션 일꾼의 줄 확인이 확인 표 뒤에 선다");
+        assert!(
+            s.find("write the `model:` line yourself").unwrap() < mark,
+            "서브에이전트 일꾼의 줄이 확인 표 뒤에 선다"
+        );
+    }
+
     #[test]
     fn the_roles_are_the_models_table() {
         let keys: Vec<&str> = crate::user_config::MODELS_DEFAULT.iter().map(|(key, _)| *key).collect();
