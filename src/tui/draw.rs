@@ -157,7 +157,11 @@ pub fn screen(f: &mut Frame, app: &mut App) {
     // 굴리지 않는다. 격자에 줄 높이는 몸통의 몫([`menu::BODY_MIN`])을 먼저 남기고 정하고, 그것도
     // 없으면 격자 없이 접두어 줄 한 줄로 접는다([`menu_line`]). 헤더의 높이(`header_h`)는 위에서 이미 셌다.
     let open_menu =
-        (matches!(app.mode, Mode::Browse | Mode::Stats(_) | Mode::Wiki(_)) && menu::open(&app.chord)).then(|| {
+        // 키 목록 창이 떠 있으면 메뉴는 안 선다 — 그 창이 `SPC h` 를 기다리는 동안에도 열이 SPC 로 선다(`App::help_key`).
+        (matches!(app.mode, Mode::Browse | Mode::Stats(_) | Mode::Wiki(_))
+            && app.help.is_none()
+            && menu::open(&app.chord))
+            .then(|| {
             let ctx = app.key_ctx(&rows);
             let items = menu::entries(app.chord.held(), &ctx, &app.screen_statuses());
             let left = area.height.saturating_sub(header_h + 1 + banner_h + keys_h) as usize;
@@ -288,6 +292,10 @@ pub fn screen(f: &mut Frame, app: &mut App) {
         }
         _ => {}
     }
+    // 키 목록 창은 무엇을 그렸든 그 위에 선다(moai-ucyr) — 통계·위키 창 위에서도 연다.
+    if let Some(sheet) = &mut app.help {
+        help_sheet(f, sheet, body, lang);
+    }
     // 위키 창의 칸 자리 — 마우스가 맞힌다(moai-o3cb). 창이 몸통을 덮으므로 목록·상세의 자리 대신 이것을 읽는다.
     app.drawn.wiki = wiki_at;
     // 메뉴에서 누를 수 있는 칸 — 격자 창과 접두어 줄이 칠한 자리에서 저마다 낸다(moai-m6ni). 다 그린 뒤 한 번 남긴다.
@@ -317,6 +325,7 @@ pub fn screen(f: &mut Frame, app: &mut App) {
 
     // 맨 아랫줄은 하나다 — 글을 받는 중이면 프롬프트가, 아니면 키 바가 선다.
     match &app.mode {
+        _ if app.help.is_some() => help_keys(f, app.keys.browse, keys, app.site.lang),
         Mode::Browse => match &open_menu {
             Some((items, grid, waits)) => menu_keys.extend(menu_line(f, app, items, grid, *waits, keys)),
             None => fkeys(f, app, &rows, keys, !header_numbered),
@@ -570,6 +579,76 @@ fn sort_edit(f: &mut Frame, e: &super::sorter::Editor, at: Rect, lang: Lang) {
         at,
         &mut state,
     );
+}
+
+/// 키 목록 창(`?`·`SPC h`, moai-ucyr) — 몸통 가운데 뜨는 상자. 왼쪽 열이 키, 오른쪽이 낱말이고 절의 머리가 굵게 선다.
+/// 키 색은 SPC 메뉴의 키 칸과 같다 — 같은 것을 같은 색으로 댄다.
+///
+/// **그린 높이를 창에 적는다** — 반 쪽·한 쪽 굴리기가 그것으로 재고([`super::help::Sheet::step`]), 창이 줄어 굴린 자리가
+/// 끝을 넘었으면 여기서 당긴다.
+fn help_sheet(f: &mut Frame, s: &mut super::help::Sheet, at: Rect, lang: Lang) {
+    use super::help::Line as L;
+    use crate::text::width;
+    let (mut key_w, mut what_w, mut head_w) = (0, 0, 0);
+    for l in &s.lines {
+        match l {
+            L::Head(t) => head_w = head_w.max(width(t)),
+            L::Key { keys, what } => {
+                key_w = key_w.max(width(keys));
+                what_w = what_w.max(width(what));
+            }
+        }
+    }
+    // 키 열은 머리보다 한 칸 들어간다 — 절의 머리가 눈에 먼저 선다.
+    let inner = (1 + key_w + 2 + what_w).max(head_w).max(24);
+    // 테두리 둘과 옆 여백 둘.
+    let w = (inner as u16).saturating_add(4).min(at.width);
+    let h = (s.lines.len() as u16).saturating_add(2).min(at.height);
+    let area = Rect { x: at.x + (at.width - w) / 2, y: at.y + (at.height - h) / 2, width: w, height: h };
+    f.render_widget(Clear, area);
+    let rows = h.saturating_sub(2) as usize;
+    s.height = rows;
+    s.top = s.top.min(s.lines.len().saturating_sub(rows));
+    let room = w.saturating_sub(4) as usize;
+    // 좁으면 키 열이 반을 넘지 않는다 — 낱말이 통째로 밀려나면 키만 남아 뜻이 없다.
+    let kw = key_w.min(room.saturating_sub(1) / 2);
+    let lines: Vec<Line> = s
+        .lines
+        .iter()
+        .skip(s.top)
+        .take(rows)
+        .map(|l| match l {
+            L::Head(t) => Line::from(Span::styled(clip(t, room), bold())),
+            L::Key { keys, what } => {
+                let k = clip(keys, kw);
+                let pad = " ".repeat(kw.saturating_sub(width(&k)));
+                Line::from(vec![
+                    Span::raw(" "),
+                    Span::styled(k, bold().fg(MENU_KEY)),
+                    Span::raw(pad),
+                    Span::raw("  "),
+                    Span::raw(clip(what, room.saturating_sub(kw + 3))),
+                ])
+            }
+        })
+        .collect();
+    let at_of = fill(say(lang, "tui.help.at"), &[("at", &(s.top + 1).to_string()), ("of", &s.lines.len().to_string())]);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Thick)
+        .border_style(from_anstyle(style::FOCUS))
+        .padding(Padding::horizontal(1))
+        .title(format!(" {} ", say(lang, "tui.help.title")))
+        .title_bottom(Line::from(Span::styled(format!(" {at_of} "), dim())).right_aligned());
+    f.render_widget(Paragraph::new(lines).block(block), area);
+}
+
+/// 키 목록 창의 키 바 — 굴리기와 닫기. 키 이름은 탐색의 표에서 읽는다(창이 그 표로 키를 받는다, `App::help_key`).
+fn help_keys(f: &mut Frame, table: &[keys::Bind<keys::Browse>], at: Rect, lang: Lang) {
+    use keys::Browse as B;
+    let scroll = labels(table, &[B::Step(Move::LineDown), B::Step(Move::LineUp)]);
+    let close = labels(table, &[B::Help, B::ClearFilter]);
+    bar(f, at, vec![key(&scroll, say(lang, "tui.help.scroll"))], vec![key(&close, say(lang, "tui.act.close"))]);
 }
 
 /// 차례 편집 창의 키 바 — 키 이름은 표([`super::keys::SORTER`])에서 읽는다. 좁으면 걷기·옮기기부터 뺀다 — 입히고
@@ -5050,7 +5129,12 @@ fn browse_hints(app: &App, c: &Ctx, unnumbered: bool) -> (Vec<Hint>, Vec<Hint>) 
         shown(&[&[B::Step(Move::LineDown), B::Step(Move::LineUp)], &[B::FocusNext], &[B::Enter]])
     } else {
         // 층에 선 갈래는 위에서 이미 갈렸다 — 여기 오면 층 밖이다.
-        let mut order: Vec<&[Browse]> = if unnumbered { vec![&[B::Project(0)]] } else { Vec::new() };
+        // **키 목록(`?`, moai-ucyr)이 가장 먼저 떨어진다** — 바가 못 대는 키를 찾아갈 길이지만, 지금 목록을 쓰는 키와
+        // 층으로 가는 `0`(뿌리에서는 그것이 위로 가는 하나뿐인 길이다)을 밀어낼 만큼은 아니다. 메뉴의 `SPC h` 가 늘 남는다.
+        let mut order: Vec<&[Browse]> = vec![&[B::Help]];
+        if unnumbered {
+            order.push(&[B::Project(0)]);
+        }
         // **간트의 날짜 축 키는 간트에서만 선다**(moai-i4hf.27r, `Browse::enabled`) — 목록의 키보다 먼저 떨어진다. 다
         // 적지 않는다: 확대·오늘·맞춤만 대고, 좌우와 쪽 넘기기는 `moai tui --help` 가 댄다.
         order.extend([
@@ -10273,6 +10357,9 @@ pub(super) mod tests {
                     // 맨 앞에 두므로 폭이 모자라면 이것이 먼저 떨어진다: 80칸에서는 `Bksp 나가기`
                     // 가 함께 설 자리가 없다: 드나드는 키 **둘 다** 선 줄에서만 이 칸이 빠진다.
                     (c.projects > 0 && (c.leaf || c.root)).then_some("0 프로젝트"),
+                    // 키 목록은 그 앞에서 먼저 떨어진다(moai-ucyr) — 드나드는 키가 하나 빠지고, `0` 이 안 서거나 둘 다 빠진
+                    // 줄에서만 자리가 난다.
+                    ((c.leaf || c.root) && (c.projects == 0 || (c.leaf && c.root))).then_some("? 키 목록"),
                     Some("Esc 풀기"),
                     Some("SPC 메뉴"),
                 ]
@@ -10308,8 +10395,62 @@ pub(super) mod tests {
         }
     }
 
+    /// **`?`·`SPC h` 가 키 목록 창을 열고, 이동키가 굴리고, 연 키·Esc 가 닫는다**(moai-ucyr). 창이 떠 있는 동안 Esc 는
+    /// 창의 것이다 — 걸어 둔 거름망을 같이 풀면 창을 닫으려던 사람이 목록까지 잃는다. 첫 화면의 바는 `?` 를 댄다.
+    #[test]
+    fn the_help_sheet_opens_scrolls_and_closes() {
+        let mut a = app();
+        let bar = render(&mut a, 80, 20).last().cloned().unwrap_or_default();
+        assert!(bar.contains("? 키 목록"), "80칸 첫 화면 바가 키 목록을 안 댄다 — {bar:?}");
+        a.hung = Some(Hung::Filter { text: "tag=x".into(), grep: None });
+        a.hit("?");
+        let screen = render(&mut a, 80, 20).join("\n");
+        assert!(a.help.is_some(), "`?` 가 창을 안 열었다");
+        for want in ["키 목록", "탐색", "다 펼침", "Tab"] {
+            assert!(screen.contains(want), "{want:?} 가 창에 없다\n{screen}");
+        }
+        assert_eq!(render(&mut a, 80, 20).last().map(String::as_str), Some(" j·k 굴리기 ?·Esc 닫기"));
+        a.hit("j");
+        assert_eq!(a.help.as_ref().map(|s| s.top), Some(1), "`j` 가 창을 안 굴렸다");
+        a.hit("Esc");
+        assert!(a.help.is_none(), "Esc 가 창을 안 닫았다");
+        assert!(a.hung.is_some(), "창을 닫는 Esc 가 거름망까지 풀었다");
+        a.hit("SPC h");
+        assert!(a.help.is_some(), "`SPC h` 가 창을 안 열었다");
+        a.hit("SPC h");
+        assert!(a.help.is_none(), "`SPC h` 가 창을 안 닫았다");
+    }
+
+    /// **창 위의 SPC 는 메뉴처럼 받는다**(리뷰) — SPC 뒤에 SPC 열을 못 잇는 이동키는 버려지지 않고 창을 굴리고, Esc 는
+    /// 기다림만 걷는다. 창을 여닫는 키는 쓰기의 알림을 안 걷는다 — 읽기만 하는 창이다.
+    #[test]
+    fn spc_over_the_help_sheet_keeps_the_next_key_and_the_notice_survives() {
+        let mut a = app();
+        a.notice = Some("적었다".into());
+        a.hit("?");
+        assert!(a.help.is_some());
+        assert_eq!(a.notice.as_deref(), Some("적었다"), "`?` 가 알림을 걷었다");
+        a.hit("j SPC SPC Esc");
+        assert!(a.help.is_none());
+        assert_eq!(a.notice.as_deref(), Some("적었다"), "창을 여닫는 동안 알림이 걷혔다");
+
+        let mut a = app();
+        a.hit("?");
+        render(&mut a, 80, 20);
+        a.hit("SPC j");
+        assert_eq!(a.help.as_ref().map(|s| s.top), Some(1), "SPC 뒤의 `j` 가 버려졌다");
+        // 두 층 기다리던 `SPC g` 뒤도 같다.
+        a.hit("SPC g j");
+        assert_eq!(a.help.as_ref().map(|s| s.top), Some(2), "SPC g 뒤의 `j` 가 버려졌다");
+        a.hit("SPC Esc");
+        assert!(a.help.is_some(), "SPC 뒤의 Esc 가 기다림 말고 창까지 닫았다");
+        assert!(a.chord.held().is_empty(), "SPC 뒤의 Esc 가 기다림을 안 걷었다");
+        a.hit("SPC ?");
+        assert!(a.help.is_none(), "SPC 뒤의 `?` 가 창을 안 닫았다");
+    }
+
     /// **80칸에서 바의 키가 하나도 안 떨어진다** — 옮긴 키가 빠져 자리가 났다(moai-7sjm). 상세
-    /// 포커스에서는 드나드는 키가 빠진다.
+    /// 포커스에서는 드나드는 키가 빠진다. 키 목록(`?`)은 여기서 먼저 떨어지는 칸이라 안 센다.
     ///
     /// 드나드는 키가 둘 다 듣는 자리(층이 있는 프로젝트의 에픽 안 `..`)에서 잰다 — 바가 가장 긴 곳이다.
     #[test]
