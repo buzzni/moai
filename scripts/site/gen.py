@@ -49,6 +49,7 @@ OG_TYPE = {"home": "website", "guide": "article"}
 # and a committed copy would have every epic regenerate the site or turn CI red. They stand in English
 # only — the wiki is written in English — and the Korean and Japanese menus point at them.
 DOCS_DIR = "docs/"
+CHANGELOG_DIR = "changelog/"
 REPO_URL = "https://github.com/buzzni/moai"
 # the order the manual's pages stand in; a page not named here follows, by name
 # a page whose first paragraph is not about the page (cli.md opens with a note to contributors)
@@ -199,10 +200,7 @@ def chrome(page: str, lang: str, here: str, bundle: dict, *, langs: dict[str, st
         return f'      <a href="{href}"{lang_attr}>{label}</a>'
 
     docs = link(DOCS_DIR, lookup(bundle, "nav.docs", lang), english=True)
-    changelog = (
-        f'      <a href="https://github.com/buzzni/moai/blob/main/CHANGELOG.md" hidden>{lookup(bundle, "nav.changelog", lang)}</a>'
-        "<!-- 변경 기록 페이지가 서면 hidden 을 걷는다: moai-gw11 -->"
-    )
+    changelog = link(CHANGELOG_DIR, lookup(bundle, "nav.changelog", lang), english=True)
     nav = "\n".join(
         [
             link(home_dir, lookup(bundle, "nav.see", lang), anchor="#see"),
@@ -214,7 +212,7 @@ def chrome(page: str, lang: str, here: str, bundle: dict, *, langs: dict[str, st
     footer = "\n".join(
         [
             link(DOCS_DIR, lookup(bundle, "nav.docs", lang), mark=False, english=True),
-            changelog,
+            link(CHANGELOG_DIR, lookup(bundle, "nav.changelog", lang), mark=False, english=True),
             link(guide_dir, lookup(bundle, "nav.guide", lang), mark=False),
         ]
     )
@@ -312,14 +310,17 @@ def doc_pages(docs_dir: Path) -> list[tuple[str, str, str, str]]:
     return [found[s] for s in order]
 
 
-def resolve_doc_link(href: str, *, here: str, slugs: set[str], ref: str) -> str:
-    """Where a link in a wiki page goes on the site. A link to another page of the manual stays on the
-    site; a link to anything else in the repository goes to it on GitHub, at the release it was read from."""
+def resolve_doc_link(href: str, *, here: str, slugs: set[str], ref: str, base: str = "docs") -> str:
+    """Where a link in a wiki page (or, with base "", in CHANGELOG.md) goes on the site. A link to a page
+    of the manual stays on the site; a link to anything else in the repository goes to it on GitHub, at
+    the release it was read from."""
     if re.match(r"^[a-z][a-z0-9+.-]*:", href, re.I) or href.startswith("#"):
         return href
     path, _, frag = href.partition("#")
     frag = "#" + frag if frag else ""
-    norm = posixpath.normpath(posixpath.join("docs", path)) if path else ""
+    norm = posixpath.normpath(posixpath.join(base, path)) if path else ""
+    if base == "" and "/" not in norm and norm.endswith(".md") and norm[:-3] in slugs:
+        norm = "docs/" + norm  # the changelog names a wiki page by its file name alone
     if norm.startswith("docs/") and norm.endswith(".md") and norm[5:-3] in slugs:
         return rel(here, f"{DOCS_DIR}{norm[5:-3]}/") + frag
     if norm.startswith("../") or norm == "..":
@@ -366,9 +367,21 @@ def build_release_pages(docs_dir: Path | None, changelog: Path | None, ref: str)
         )
         out[Path(here) / "index.html"] = fill(layout, values, bundle, lang)
 
+    pages = doc_pages(docs_dir) if docs_dir is not None else []
+    slugs = {p[0] for p in pages}
+    if changelog is not None:
+        toc, content = changelog_page(changelog.read_text(encoding="utf-8"), slugs=slugs, ref=ref)
+        page(
+            CHANGELOG_DIR,
+            "moai changelog",
+            f"What changed in each release of moai, up to {release_label(ref)}.",
+            {
+                "toc": toc,
+                "crumb": f'{escape(release_label(ref))} · <a href="{REPO_URL}/blob/{ref}/CHANGELOG.md">source</a>',
+                "content": content,
+            },
+        )
     if docs_dir is not None:
-        pages = doc_pages(docs_dir)
-        slugs = {p[0] for p in pages}
         source = f'<a href="{REPO_URL}/tree/{ref}/docs">source</a>'
         index = "\n".join(
             [
@@ -407,6 +420,52 @@ def build_release_pages(docs_dir: Path | None, changelog: Path | None, ref: str)
     return out
 
 
+RELEASE_HEAD = re.compile(r"^\[([^\]]+)\](?:\s+-\s+(\d{4}-\d{2}-\d{2}))?\s*$")
+
+
+def changelog_sections(src: str) -> list[tuple[str, str, str]]:
+    """CHANGELOG.md's releases as (version, date, body), newest first. The text above the first release
+    (the note to contributors on how versions are picked) and [Unreleased] stay out — a reader of the
+    site wants what shipped."""
+    out = []
+    for chunk in re.split(r"^## ", src, flags=re.M)[1:]:
+        head, _, body = chunk.partition("\n")
+        m = RELEASE_HEAD.match(head.strip())
+        if not m or m.group(1).lower() == "unreleased":
+            continue
+        out.append((m.group(1), m.group(2) or "", body.strip("\n")))
+    return out
+
+
+def changelog_page(src: str, *, slugs: set[str], ref: str) -> tuple[str, str]:
+    """(toc, content) of the changelog page. Each release is rendered on its own, so its `### Added`
+    takes the release's id in front of its own — the anchors stay unique down the page."""
+    here = CHANGELOG_DIR
+    toc, parts = [], []
+    for version, date, body in changelog_sections(src):
+        vid = "v" + re.sub(r"[^\w.-]", "-", version)
+        html, _ = mdhtml.render(
+            body, lambda href: resolve_doc_link(href, here=here, slugs=slugs, ref=ref, base="")
+        )
+        html = re.sub(r'<(h[3-6]) id="([^"]+)">', lambda m: f'<{m.group(1)} id="{vid}-{m.group(2)}">', html)
+        when = f' <span class="release-date">{escape(date)}</span>' if date else ""
+        parts.append(
+            f'    <section class="release" aria-labelledby="{vid}">\n'
+            f'    <h2 id="{vid}"><a href="#{vid}">{escape(version)}</a>{when}</h2>\n{html}\n    </section>'
+        )
+        toc.append(f'      <li><a href="#{vid}">{escape(version)}</a></li>')
+    if not parts:
+        raise BuildError("CHANGELOG.md holds no released version")
+    toc_html = "    <ol>\n" + "\n".join(toc) + "\n    </ol>"
+    lede = (
+        "    <h1>Changelog</h1>\n"
+        f"    <p>What changed in each release of moai, newest first — <code>CHANGELOG.md</code> as of "
+        f"{escape(release_label(ref))}. Releases and their files are on "
+        f'<a href="{REPO_URL}/releases">GitHub</a>.</p>'
+    )
+    return toc_html, lede + "\n" + "\n".join(parts)
+
+
 def write(pages: dict[Path, str], *, check: bool) -> list[Path]:
     stale = []
     for rel_path, text in sorted(pages.items()):
@@ -427,11 +486,12 @@ def main(argv: list[str] | None = None) -> int:
     )
     ap.add_argument("--check", action="store_true", help="write nothing; exit 1 if a committed page is stale")
     ap.add_argument("--docs", type=Path, metavar="DIR", help="also build the manual (site/docs/) from this wiki directory")
+    ap.add_argument("--changelog", type=Path, metavar="FILE", help="also build the changelog (site/changelog/) from this file")
     ap.add_argument("--ref", default="develop", help="the release the manual is read from (links and the label)")
     args = ap.parse_args(argv)
     try:
         pages = build_pages()
-        release = build_release_pages(args.docs, None, args.ref) if args.docs else {}
+        release = build_release_pages(args.docs, args.changelog, args.ref)
     except BuildError as e:
         print(f"gen.py: {e}", file=sys.stderr)
         return 2

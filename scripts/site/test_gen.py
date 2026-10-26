@@ -124,6 +124,52 @@ class Docs(unittest.TestCase):
         self.assertNotIn("{{", page)
 
 
+class Changelog(unittest.TestCase):
+    SRC = """# Changelog
+
+How versions are picked — a note to contributors.
+
+## [Unreleased]
+
+### Added
+
+- not shipped yet
+
+## [0.2.0] - 2026-10-02
+
+**One thing breaks a caller.**
+
+### Added
+
+- a page of the [manual](glossary.md#epic) and [the guide](docs/workflow.md)
+
+## [0.1.0] - 2026-09-01
+
+### Added
+
+- the first, with <id> as text
+"""
+
+    def test_released_versions_only_newest_first(self):
+        self.assertEqual([v for v, _d, _b in gen.changelog_sections(self.SRC)], ["0.2.0", "0.1.0"])
+
+    def test_each_release_keeps_its_own_anchors(self):
+        toc, html = gen.changelog_page(self.SRC, slugs={"glossary", "workflow"}, ref="v0.2.0")
+        self.assertIn('href="#v0.2.0"', toc)
+        self.assertIn('id="v0.2.0-added"', html)
+        self.assertIn('id="v0.1.0-added"', html)
+        self.assertNotIn("not shipped yet", html)
+        self.assertNotIn("note to contributors", html)
+        self.assertIn('href="../docs/glossary/#epic"', html)
+        self.assertIn('href="../docs/workflow/"', html)
+        self.assertIn("&lt;id&gt;", html)
+        self.assertIn('<span class="release-date">2026-10-02</span>', html)
+
+    def test_a_changelog_with_no_release_stops_the_build(self):
+        with self.assertRaises(gen.BuildError):
+            gen.changelog_page("# Changelog\n\n## [Unreleased]\n", slugs=set(), ref="v0")
+
+
 class Site(unittest.TestCase):
     def test_the_committed_pages_are_what_the_generator_builds(self):
         # CI runs `gen.py --check` too; here it fails with the page named.

@@ -227,6 +227,10 @@ nav .links a[aria-current="page"] { color: var(--ink); }
 .doc-index a { font-weight: 600; font-size: 1.08rem; text-decoration: none; }
 .doc-index a:hover { text-decoration: underline; }
 .doc-index span { color: var(--muted); font-size: 15px; }
+.release h2 a { text-decoration: none; }
+.release h2 a:hover { text-decoration: underline; text-decoration-color: var(--accent); }
+.release-date { margin-left: .5em; font: 400 14px var(--mono); color: var(--faint); letter-spacing: 0; vertical-align: middle; }
+.release h3 { font-size: .8rem; text-transform: uppercase; letter-spacing: .08em; color: var(--accent); margin: 28px 0 8px; }
 .doc-body { min-width: 0; max-width: 780px; overflow-wrap: anywhere; }
 .doc-body h1 { font-size: clamp(2rem, 4.6vw, 3rem); letter-spacing: -.025em; line-height: 1.15; margin: 0 0 32px; }
 .doc-body h2 { font-size: clamp(1.4rem, 2.6vw, 1.8rem); letter-spacing: -.015em; line-height: 1.25; margin: 72px 0 16px; padding-top: 24px; border-top: 1px solid var(--line); scroll-margin-top: 76px; }
