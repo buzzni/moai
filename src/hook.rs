@@ -7133,6 +7133,203 @@ fn own_line(env: &TmuxEnv, tail: &str) -> String {
     }
 }
 
+/// **친 그대로의 철자**(moai-qrja.4ke, 리뷰 moai-e7vm.ez3 9·10번) — `words` 가 명령줄의 맨 바깥에 이어 선 자리를 찾아 그 낱말들의
+/// 원래 철자를 낸다. 렉서는 따옴표를 벗긴 낱말만 들어, 거절문이 낱말마다 다시 감싸면 `-c "$HOME"` 이 `-c '$HOME'` 이 되고
+/// (`$HOME` 이 안 풀린다) `~/x` 가 `'~/x'` 가 됐다. 이어 붙이기만 하던 갈래는 `-t "a b"` 를 `-t a b` 로 냈다.
+///
+/// **못 찾으면 없다** — 셸에 넘긴 글(`bash -c '…'`)·치환 안의 줄, 같은 낱말이 두 자리에 철자를 달리해 선 줄, 풀지 못할
+/// 따옴표(`$'…'`)가 든 줄이다. 부르는 쪽은 그때 전처럼 낱말에서 짓는다. 맨 바깥의 따옴표 없는 줄은 철자가 낱말과 같아
+/// 거절문이 글자째 그대로다.
+fn spelt_as_typed(text: &str, words: &[String]) -> Option<Vec<String>> {
+    let toks = typed_words(text);
+    let n = words.len();
+    let mut found: Option<Vec<String>> = None;
+    for at in 0..toks.len() {
+        let Some(run) = toks.get(at..at + n) else { break };
+        let same = run
+            .iter()
+            .zip(words)
+            .all(|(t, w)| t.as_ref().is_some_and(|(_, cooked)| cooked.as_deref() == Some(w.as_str())));
+        if !same {
+            continue;
+        }
+        let raw: Vec<String> = run.iter().filter_map(|t| t.as_ref().map(|(r, _)| r.clone())).collect();
+        match &found {
+            Some(seen) if *seen != raw => return None,
+            _ => found = Some(raw),
+        }
+    }
+    found
+}
+
+/// 명령줄의 맨 바깥 낱말 — `(친 철자, 따옴표를 벗긴 낱말)`, 껍데기의 가르개 자리는 `None` 이다. 벗긴 낱말을 못 짓는 것
+/// (`$'…'`)은 `None` 이라 어느 낱말과도 안 맞는다. [`spelt_as_typed`] 가 쓴다 — 판정은 렉서([`Line`])가 하고, 이것은
+/// 거절문의 철자만 찾는다.
+fn typed_words(text: &str) -> Vec<Option<(String, Option<String>)>> {
+    let mut out = Vec::new();
+    let (mut raw, mut cooked, mut open) = (String::new(), Some(String::new()), false);
+    let mut chars = text.chars().peekable();
+    let end = |out: &mut Vec<_>, raw: &mut String, cooked: &mut Option<String>, open: &mut bool| {
+        if *open {
+            out.push(Some((std::mem::take(raw), cooked.replace(String::new()))));
+        }
+        *open = false;
+    };
+    // 치환(`$( … )`·백틱)은 통째로 옮긴다 — 안의 따옴표는 바깥 낱말을 안 연다.
+    fn copy_subst(
+        chars: &mut std::iter::Peekable<std::str::Chars<'_>>,
+        raw: &mut String,
+        cooked: &mut Option<String>,
+        close: char,
+    ) {
+        // `$(` 의 여는 괄호는 아직 안 읽혔다 — 그것부터 센다. 백틱은 이미 열렸다.
+        let mut depth = usize::from(close == '`');
+        for c in chars.by_ref() {
+            raw.push(c);
+            if let Some(k) = cooked.as_mut() {
+                k.push(c);
+            }
+            match c {
+                '(' if close == ')' => depth += 1,
+                c if c == close => {
+                    depth -= 1;
+                    if depth == 0 {
+                        return;
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    while let Some(c) = chars.next() {
+        match c {
+            ' ' | '\t' => end(&mut out, &mut raw, &mut cooked, &mut open),
+            '\n' | ';' | '&' | '|' | '(' | ')' | '<' | '>' => {
+                end(&mut out, &mut raw, &mut cooked, &mut open);
+                out.push(None);
+            }
+            '#' if !open => {
+                for c in chars.by_ref() {
+                    if c == '\n' {
+                        break;
+                    }
+                }
+                out.push(None);
+            }
+            '\\' => {
+                open = true;
+                raw.push(c);
+                match chars.next() {
+                    Some('\n') => {
+                        raw.pop();
+                    }
+                    Some(n) => {
+                        raw.push(n);
+                        if let Some(k) = cooked.as_mut() {
+                            k.push(n);
+                        }
+                    }
+                    None => {}
+                }
+            }
+            '\'' => {
+                open = true;
+                raw.push(c);
+                for c in chars.by_ref() {
+                    raw.push(c);
+                    if c == '\'' {
+                        break;
+                    }
+                    if let Some(k) = cooked.as_mut() {
+                        k.push(c);
+                    }
+                }
+            }
+            '"' => {
+                open = true;
+                raw.push(c);
+                while let Some(c) = chars.next() {
+                    raw.push(c);
+                    match c {
+                        '"' => break,
+                        '\\' => {
+                            if let Some(n) = chars.next() {
+                                raw.push(n);
+                                let k = cooked.as_mut();
+                                match n {
+                                    '$' | '`' | '"' | '\\' => k.map(|k| k.push(n)),
+                                    '\n' => None,
+                                    n => k.map(|k| {
+                                        k.push('\\');
+                                        k.push(n)
+                                    }),
+                                };
+                            }
+                        }
+                        '$' if chars.peek() == Some(&'(') => {
+                            if let Some(k) = cooked.as_mut() {
+                                k.push(c);
+                            }
+                            copy_subst(&mut chars, &mut raw, &mut cooked, ')');
+                        }
+                        '`' => {
+                            if let Some(k) = cooked.as_mut() {
+                                k.push(c);
+                            }
+                            copy_subst(&mut chars, &mut raw, &mut cooked, '`');
+                        }
+                        c => {
+                            if let Some(k) = cooked.as_mut() {
+                                k.push(c);
+                            }
+                        }
+                    }
+                }
+            }
+            '$' if chars.peek() == Some(&'\'') => {
+                // `$'…'` — 벗긴 낱말을 안 짓는다. 어느 낱말과도 안 맞게 둔다.
+                open = true;
+                cooked = None;
+                raw.push(c);
+                raw.push(chars.next().unwrap_or_default());
+                while let Some(c) = chars.next() {
+                    raw.push(c);
+                    match c {
+                        '\\' => raw.extend(chars.next()),
+                        '\'' => break,
+                        _ => {}
+                    }
+                }
+            }
+            '$' if chars.peek() == Some(&'(') => {
+                open = true;
+                raw.push(c);
+                if let Some(k) = cooked.as_mut() {
+                    k.push(c);
+                }
+                copy_subst(&mut chars, &mut raw, &mut cooked, ')');
+            }
+            '`' => {
+                open = true;
+                raw.push(c);
+                if let Some(k) = cooked.as_mut() {
+                    k.push(c);
+                }
+                copy_subst(&mut chars, &mut raw, &mut cooked, '`');
+            }
+            c => {
+                open = true;
+                raw.push(c);
+                if let Some(k) = cooked.as_mut() {
+                    k.push(c);
+                }
+            }
+        }
+    }
+    end(&mut out, &mut raw, &mut cooked, &mut open);
+    out
+}
+
 /// [`guard_tmux`] 의 순수한 몸 — 환경은 인자로 받는다. 받는 것은 [`TmuxEnv`] 로 풀리는 무엇이든이라
 /// `guard_tmux` 는 게으른 칸을, 시험은 손으로 세운 값을 건넨다.
 pub fn guard_tmux_in(line: &Line<'_>, env: &impl std::ops::Deref<Target = TmuxEnv>) -> Decision {
@@ -7148,8 +7345,12 @@ pub fn guard_tmux_in(line: &Line<'_>, env: &impl std::ops::Deref<Target = TmuxEn
                         && env.stand_in
                         && env.is_shim(word)
                     {
-                        // 낱말마다 감싼다 — 껍데기가 벗긴 따옴표를 되살려야 `'sleep 60'`·`';'` 가 그 낱말 하나로 돌아간다.
-                        let tail = rest[first..].iter().map(|w| crate::text::quoted(w)).collect::<Vec<_>>().join(" ");
+                        // **친 철자가 먼저다**([`spelt_as_typed`], moai-qrja.4ke). 못 찾으면 낱말마다 감싼다 — 껍데기가 벗긴
+                        // 따옴표를 되살려야 `'sleep 60'`·`';'` 가 그 낱말 하나로 돌아간다.
+                        let tail = match spelt_as_typed(line.text(), &seg[i..]) {
+                            Some(raw) => raw[1 + first..].join(" "),
+                            None => rest[first..].iter().map(|w| crate::text::quoted(w)).collect::<Vec<_>>().join(" "),
+                        };
                         let handed = own_line(env, &tail);
                         return refuse(
                             4,
@@ -7182,7 +7383,12 @@ pub fn guard_tmux_in(line: &Line<'_>, env: &impl std::ops::Deref<Target = TmuxEn
                          and run it there.\n\
                          \x20 {}",
                             rest[at],
-                            own_line(env, &rest[at..].join(" "))
+                            // 친 철자가 먼저다([`spelt_as_typed`]) — 이어 붙이기만 하면 `-t "a b"` 가 `-t a b` 가 된다.
+                            own_line(
+                                env,
+                                &spelt_as_typed(line.text(), &seg[i..])
+                                    .map_or_else(|| rest[at..].join(" "), |raw| raw[1 + at..].join(" "))
+                            )
                         ),
                     );
                 }
@@ -12892,7 +13098,12 @@ mod tests {
             ("env -u TMUX tmux -L t kill-session -t x", "kill-session -t x"),
             ("tmux new -d", "new -d"),
             // 따옴표와 묶음의 `;` 는 되살아난다 — 벗긴 채 내면 `;` 가 껍데기의 토막 가르개가 된다.
-            ("tmux -L x new-session -d 'sleep 60' \\; kill-pane", "new-session -d 'sleep 60' ';' kill-pane"),
+            ("tmux -L x new-session -d 'sleep 60' \\; kill-pane", "new-session -d 'sleep 60' \\; kill-pane"),
+            // 친 철자를 못 찾는 줄(셸에 넘긴 글 안)은 낱말마다 감싼다(moai-qrja.4ke).
+            (
+                "bash -c \"tmux -L x new-session -d 'sleep 60' \\\\; kill-pane\"",
+                "new-session -d 'sleep 60' ';' kill-pane",
+            ),
         ] {
             let why = denied(&run(&inside, cmd)).to_string();
             assert!(why.contains("cmux's shim"), "{why}");
@@ -12978,6 +13189,71 @@ mod tests {
         let big = s.path().join("big");
         std::fs::write(&big, format!("{}__tmux-compat", "x".repeat(70 * 1024))).unwrap();
         assert!(!shim_text(&big), "64KB 넘는 파일을 읽었다");
+    }
+
+    /// **규칙 4 의 거절문은 친 철자를 되살린다**(moai-qrja.4ke, 리뷰 moai-e7vm.ez3 9·10번) — `"$HOME"` 은 풀리는 채, `~/x` 는
+    /// 틸드가 사는 채, `-t "a b"` 는 한 낱말인 채다. 셸에 넘긴 글 안의 줄처럼 철자를 못 찾는 판은 전처럼 낱말에서 짓는다.
+    #[test]
+    fn the_rule_four_line_keeps_the_spelling_that_was_typed() {
+        let outside = TmuxEnv { stand_in: false, shim: None, real: None, canon: |_| None, looks: |_| false };
+        let inside = TmuxEnv {
+            stand_in: true,
+            shim: Some("/opt/cmux/bin/tmux".into()),
+            real: Some("/usr/bin/tmux".into()),
+            canon: |_| None,
+            looks: |_| false,
+        };
+        let handed = |e: &TmuxEnv, cmd: &str| {
+            let why = denied(&guard_tmux_in(&Line::new(cmd), &e)).to_string();
+            why.lines().last().unwrap().trim().replace("<unique name>", "t").to_string()
+        };
+        // 가짜 밖의 옛 갈래 — 한 낱말이 한 낱말로 남는다.
+        let bare = ["tmux", "kill-session"].join(" ");
+        assert_eq!(handed(&outside, &format!("{bare} -t \"a b\"")), "env -u TMUX tmux -L t kill-session -t \"a b\"");
+        // 따옴표 없는 줄은 글자째 그대로다.
+        assert_eq!(handed(&outside, &format!("{bare} -t x")), "env -u TMUX tmux -L t kill-session -t x");
+        // 가짜 아래의 갈래 — 풀릴 것은 풀리는 채다.
+        assert_eq!(
+            handed(&inside, "tmux -L x new-session -d -c \"$HOME\" -s ~/x"),
+            "env -u TMUX /usr/bin/tmux -L t new-session -d -c \"$HOME\" -s ~/x"
+        );
+        assert_eq!(
+            handed(&inside, "tmux -L x new-session -d 'sleep 60' \\; kill-pane"),
+            "env -u TMUX /usr/bin/tmux -L t new-session -d 'sleep 60' \\; kill-pane"
+        );
+        // 셸에 넘긴 글 안의 줄 — 철자를 못 찾아 전처럼 낱말에서 짓는다.
+        assert_eq!(
+            handed(&inside, "bash -c 'tmux -L x new-session -d \"sleep 60\"'"),
+            "env -u TMUX /usr/bin/tmux -L t new-session -d 'sleep 60'"
+        );
+        // 같은 줄이 두 자리에 철자를 달리해 서면 어느 것인지 모른다 — 낱말에서 짓는다.
+        let two = "tmux -L x new-session -d 'a b'; tmux -L x new-session -d \"a b\"";
+        assert_eq!(handed(&inside, two), "env -u TMUX /usr/bin/tmux -L t new-session -d 'a b'");
+    }
+
+    /// 친 철자를 찾는 자 — 맨 바깥 낱말만 보고, 가르개는 이음을 끊는다.
+    #[test]
+    fn the_typed_words_keep_their_spelling() {
+        let toks = typed_words("a \"b c\" 'd'e f\\ g $(h 'i') `j k` # l\nm|n");
+        let raw: Vec<Option<&str>> = toks.iter().map(|t| t.as_ref().map(|(r, _)| r.as_str())).collect();
+        assert_eq!(
+            raw,
+            [
+                Some("a"),
+                Some("\"b c\""),
+                Some("'d'e"),
+                Some("f\\ g"),
+                Some("$(h 'i')"),
+                Some("`j k`"),
+                None,
+                Some("m"),
+                None,
+                Some("n")
+            ]
+        );
+        let cooked: Vec<Option<&str>> = toks.iter().map(|t| t.as_ref().and_then(|(_, c)| c.as_deref())).collect();
+        assert_eq!(cooked[1..4], [Some("b c"), Some("de"), Some("f g")]);
+        assert_eq!(typed_words("$'a\\nb'")[0].as_ref().map(|(_, c)| c.is_none()), Some(true));
     }
 
     /// **`hook --help` 의 이벤트 목록은 `Event` 의 글과 같다**(moai-h0r2) — clap 의 값 목록을 숨기고
