@@ -12,6 +12,8 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+## [0.28.0] - 2026-10-26
+
 ### Added
 
 - **`?` (or `SPC h`) in the explorer opens a window that lists every key** —
