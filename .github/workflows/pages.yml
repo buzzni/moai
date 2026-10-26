@@ -7,6 +7,13 @@
 # **develop 에서 낸다.** github-pages environment 의 배포 가지 규칙이 기본 가지만
 # 받고, 이 저장소의 기본 가지가 develop 이다. 사이트는 판에 묶인 문서가 아니라
 # 소개 글이고, 설치 한 줄은 늘 최신 릴리스를 받으니 develop 이 앞서도 어긋나지 않는다.
+#
+# **문서 페이지(site/docs/)는 여기서 짓는다 — 가장 새 릴리스 태그의 docs/ 에서**(2026-10-26 사람 결정,
+# moai-s7f7). develop 의 docs/ 는 아직 안 나간 기능을 적고, 매뉴얼은 install.sh 가 까는 바이너리와 맞아야
+# 한다. 지은 것은 커밋하지 않는다(.gitignore) — docs/ 는 에픽마다 바뀌어, 커밋하면 에픽마다 사이트를 다시
+# 짓거나 CI 가 붉어진다. 그래서 릴리스가 나가면 다시 지어야 하고, 그것을 workflow_run 이 한다: release 가
+# 끝난 뒤 기본 가지(develop)의 문맥으로 돌아, 위의 배포 가지 규칙에도 걸리지 않는다. 태그 push 로 직접
+# 돌리면 그 규칙이 막는다.
 name: pages
 
 on:
@@ -14,7 +21,11 @@ on:
     branches: [develop]
     paths:
       - "site/**"
+      - "scripts/site/**"
       - ".github/workflows/pages.yml"
+  workflow_run:
+    workflows: [release]
+    types: [completed]
   workflow_dispatch:
 
 permissions:
@@ -30,6 +41,8 @@ concurrency:
 jobs:
   deploy:
     name: site/ 를 Pages 에 낸다
+    # 릴리스가 실패했으면 새 태그의 문서를 낼 까닭이 없다 — 그때는 앞 배포가 그대로 선다
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     environment:
@@ -37,6 +50,22 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # 태그를 읽어야 가장 새 릴리스를 고른다
+      - name: 가장 새 릴리스의 docs/ 로 문서 페이지를 짓는다
+        run: |
+          # -rc.1 같은 미리 판은 건너뛴다 — install.sh 가 받는 것은 정식 판이다
+          tag=$(git tag -l 'v*' --sort=-v:refname | grep -v -e '-' | head -n 1 || true)
+          if [ -z "$tag" ]; then
+            echo '::warning::v* 태그가 없어 문서 페이지 없이 낸다'
+            python3 -I -B scripts/site/gen.py
+            exit 0
+          fi
+          release="$RUNNER_TEMP/release"
+          mkdir -p "$release"
+          git archive "$tag" docs | tar -x -C "$release"
+          python3 -I -B scripts/site/gen.py --docs "$release/docs" --ref "$tag"
+          printf '문서 페이지: %s\n' "$tag" >>"$GITHUB_STEP_SUMMARY"
       - uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
       - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:

@@ -216,6 +216,17 @@ nav .links a[aria-current="page"] { color: var(--ink); }
 .doc-toc ol ol { margin: 8px 0 0; padding-left: 14px; border-left: 1px solid var(--line); }
 .doc-toc a { color: var(--muted); text-decoration: none; }
 .doc-toc a:hover { color: var(--ink); }
+/* 문서·변경 기록(site/docs/, site/changelog/ — Pages 가 릴리스 태그에서 짓는다): 목차가 길어(cli 는 절이 쉰 넘는다)
+   화면 높이를 넘으면 목차 안에서 굴린다. 지금 페이지는 목차에서 밝힌다 */
+@media (min-width: 960px) { .doc-toc { max-height: calc(100vh - 116px); overflow-y: auto; overscroll-behavior: contain; padding-bottom: 16px; } }
+.doc-toc a[aria-current="page"] { color: var(--ink); font-weight: 600; }
+.doc-crumb { margin: 0 0 20px; font-size: 13px; color: var(--faint); }
+.doc-crumb a { color: var(--muted); }
+.doc-index { list-style: none; padding: 0 !important; margin: 28px 0 0; display: grid; gap: 4px; }
+.doc-index li { margin: 0 !important; padding: 16px 0; border-top: 1px solid var(--line); display: grid; gap: 4px; }
+.doc-index a { font-weight: 600; font-size: 1.08rem; text-decoration: none; }
+.doc-index a:hover { text-decoration: underline; }
+.doc-index span { color: var(--muted); font-size: 15px; }
 .doc-body { min-width: 0; max-width: 780px; overflow-wrap: anywhere; }
 .doc-body h1 { font-size: clamp(2rem, 4.6vw, 3rem); letter-spacing: -.025em; line-height: 1.15; margin: 0 0 32px; }
 .doc-body h2 { font-size: clamp(1.4rem, 2.6vw, 1.8rem); letter-spacing: -.015em; line-height: 1.25; margin: 72px 0 16px; padding-top: 24px; border-top: 1px solid var(--line); scroll-margin-top: 76px; }

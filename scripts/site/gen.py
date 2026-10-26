@@ -22,9 +22,14 @@ import posixpath
 import re
 import sys
 import tomllib
+from html import escape
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))  # `python3 -I` leaves the script's own directory off the path
+
+import mdhtml  # noqa: E402
+
 REPO = HERE.parent.parent
 SITE = REPO / "site"
 BASE_URL = "https://moai.buzzni.com/"
@@ -38,6 +43,17 @@ PAGES = {
     "guide": {"en": "guide/", "ko": "ko/guide/", "ja": "ja/guide/"},
 }
 OG_TYPE = {"home": "website", "guide": "article"}
+
+# The manual (docs/*.md) and the changelog are built from the newest release tag by the Pages workflow
+# and are not committed (2026-10-26, the person's decision on moai-s7f7): they change with every epic,
+# and a committed copy would have every epic regenerate the site or turn CI red. They stand in English
+# only — the wiki is written in English — and the Korean and Japanese menus point at them.
+DOCS_DIR = "docs/"
+REPO_URL = "https://github.com/buzzni/moai"
+# the order the manual's pages stand in; a page not named here follows, by name
+# a page whose first paragraph is not about the page (cli.md opens with a note to contributors)
+DOC_LEDE = {"cli": "Every moai command and its flags, as moai --help prints them."}
+DOC_ORDER = ["workflow", "explorer", "web", "agents", "cli", "json", "recovery", "windows", "glossary"]
 
 # The English home is the root, and it sends a visitor on to /ko/ or /ja/ before it draws — by the
 # language picked by hand before (site.js keeps it), else by the browser's. Only that page carries it.
@@ -173,29 +189,32 @@ def chrome(page: str, lang: str, here: str, bundle: dict, *, langs: dict[str, st
     home_dir = PAGES["home"][lang]
     guide_dir = PAGES["guide"][lang]
 
-    def link(to_dir: str, label: str, *, anchor: str = "", mark: bool = True) -> str:
-        # the nav marks the page you are on; the footer only links to it
+    def link(to_dir: str, label: str, *, anchor: str = "", mark: bool = True, english: bool = False) -> str:
+        # the nav marks the page you are on; the footer only links to it. A page that stands in English
+        # only says so to the browser, so a Korean or Japanese menu can point at it honestly
+        lang_attr = ' hreflang="en"' if english and lang != "en" else ""
         if to_dir == here and not anchor:
-            return f'      <a href="./"{" aria-current=\"page\"" if mark else ""}>{label}</a>'
+            return f'      <a href="./"{lang_attr}{" aria-current=\"page\"" if mark else ""}>{label}</a>'
         href = anchor if to_dir == here else page_href(here, to_dir) + anchor
-        return f'      <a href="{href}">{label}</a>'
+        return f'      <a href="{href}"{lang_attr}>{label}</a>'
 
+    docs = link(DOCS_DIR, lookup(bundle, "nav.docs", lang), english=True)
+    changelog = (
+        f'      <a href="https://github.com/buzzni/moai/blob/main/CHANGELOG.md" hidden>{lookup(bundle, "nav.changelog", lang)}</a>'
+        "<!-- 변경 기록 페이지가 서면 hidden 을 걷는다: moai-gw11 -->"
+    )
     nav = "\n".join(
         [
             link(home_dir, lookup(bundle, "nav.see", lang), anchor="#see"),
             link(guide_dir, lookup(bundle, "nav.guide", lang)),
-            f'      <a href="https://github.com/buzzni/moai/tree/main/docs" hidden>{lookup(bundle, "nav.docs", lang)}</a>'
-            "<!-- 문서 페이지가 서면 hidden 을 걷는다: moai-qrxu -->",
-            f'      <a href="https://github.com/buzzni/moai/blob/main/CHANGELOG.md" hidden>{lookup(bundle, "nav.changelog", lang)}</a>'
-            "<!-- 변경 기록 페이지가 서면 hidden 을 걷는다: moai-gw11 -->",
+            docs,
+            changelog,
         ]
     )
     footer = "\n".join(
         [
-            f'      <a href="https://github.com/buzzni/moai/tree/main/docs" hidden>{lookup(bundle, "nav.docs", lang)}</a>'
-            "<!-- 문서 페이지가 서면 hidden 을 걷는다: moai-qrxu -->",
-            f'      <a href="https://github.com/buzzni/moai/blob/main/CHANGELOG.md" hidden>{lookup(bundle, "nav.changelog", lang)}</a>'
-            "<!-- 변경 기록 페이지가 서면 hidden 을 걷는다: moai-gw11 -->",
+            link(DOCS_DIR, lookup(bundle, "nav.docs", lang), mark=False, english=True),
+            changelog,
             link(guide_dir, lookup(bundle, "nav.guide", lang), mark=False),
         ]
     )
@@ -256,15 +275,139 @@ def build_pages() -> dict[Path, str]:
     return out
 
 
-def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    ap.add_argument("--check", action="store_true", help="write nothing; exit 1 if a committed page is stale")
-    args = ap.parse_args(argv)
-    try:
-        pages = build_pages()
-    except BuildError as e:
-        print(f"gen.py: {e}", file=sys.stderr)
-        return 2
+def _plain(md: str) -> str:
+    """A markdown line's text as a person reads it: links to their words, code and emphasis bare."""
+    md = re.sub(r"!?\[([^\]]*)\]\([^)]*\)", r"\1", md)
+    md = re.sub(r"\*+|`+|(?<!\w)_+|_+(?!\w)", "", md)  # `x86_64` keeps its underscore
+    return md.strip()
+
+
+def doc_pages(docs_dir: Path) -> list[tuple[str, str, str, str]]:
+    """The manual's top-level pages as (slug, title, lede, source), in DOC_ORDER. docs/lessons/ and
+    any other subdirectory stay out — they are this repository's notes to its agents, not the manual."""
+    found = {}
+    for path in sorted(docs_dir.glob("*.md")):
+        src = path.read_text(encoding="utf-8")
+        lines = src.split("\n")
+        title = next((_plain(l[2:]) for l in lines if l.startswith("# ")), path.stem)
+        para, seen_h1 = [], False
+        for line in lines:
+            if line.startswith("# "):
+                seen_h1 = True
+                continue
+            if not seen_h1:
+                continue
+            if not line.strip():
+                if para:
+                    break
+                continue
+            if line.startswith(("#", "    ", "```", "|", "- ", "* ")):
+                if para:
+                    break
+                continue
+            para.append(line.strip())
+        lede = DOC_LEDE.get(path.stem) or _plain(" ".join(para))
+        found[path.stem] = (path.stem, title, lede, src)
+    order = [s for s in DOC_ORDER if s in found] + sorted(s for s in found if s not in DOC_ORDER)
+    return [found[s] for s in order]
+
+
+def resolve_doc_link(href: str, *, here: str, slugs: set[str], ref: str) -> str:
+    """Where a link in a wiki page goes on the site. A link to another page of the manual stays on the
+    site; a link to anything else in the repository goes to it on GitHub, at the release it was read from."""
+    if re.match(r"^[a-z][a-z0-9+.-]*:", href, re.I) or href.startswith("#"):
+        return href
+    path, _, frag = href.partition("#")
+    frag = "#" + frag if frag else ""
+    norm = posixpath.normpath(posixpath.join("docs", path)) if path else ""
+    if norm.startswith("docs/") and norm.endswith(".md") and norm[5:-3] in slugs:
+        return rel(here, f"{DOCS_DIR}{norm[5:-3]}/") + frag
+    if norm.startswith("../") or norm == "..":
+        return href  # outside the repository: leave it as written
+    kind = "tree" if path.endswith("/") or "." not in posixpath.basename(norm) else "blob"
+    return f"{REPO_URL}/{kind}/{ref}/{norm}{frag}"
+
+
+def doc_toc(pages, here: str, current: str | None, headings) -> str:
+    items = []
+    for slug, title, _lede, _src in pages:
+        to = f"{DOCS_DIR}{slug}/"
+        if slug == current:
+            sub = "".join(
+                f'\n          <li><a href="#{h.anchor}">{escape(h.text)}</a></li>' for h in headings if h.level == 2
+            )
+            nested = f"\n        <ol>{sub}\n        </ol>\n      " if sub else ""
+            items.append(f'      <li><a href="./" aria-current="page">{escape(title)}</a>{nested}</li>')
+        else:
+            items.append(f'      <li><a href="{rel(here, to)}">{escape(title)}</a></li>')
+    return "    <ol>\n" + "\n".join(items) + "\n    </ol>"
+
+
+def release_label(ref: str) -> str:
+    return f"moai {ref}" if re.fullmatch(r"v\d+\.\d+\.\d+.*", ref) else f"moai at {ref}"
+
+
+def build_release_pages(docs_dir: Path | None, changelog: Path | None, ref: str) -> dict[Path, str]:
+    """The manual and the changelog, read from a release (the Pages workflow hands in the newest v* tag's
+    files). English only. Not committed — `.gitignore` keeps them out of git."""
+    layout = (HERE / "layout.html").read_text(encoding="utf-8")
+    doc_tmpl = (HERE / "doc.html").read_text(encoding="utf-8").strip("\n")
+    lang, bundle = "en", load_bundle("en")
+    out: dict[Path, str] = {}
+
+    def page(here: str, title: str, description: str, body: dict[str, str]) -> None:
+        values = chrome("doc", lang, here, bundle, langs={"en": here})
+        values.update(
+            title=escape(title),
+            description=escape(description, quote=True),
+            styles=f'  <link rel="stylesheet" href="{values["root"]}assets/site.css">',
+            scripts=f'<script src="{values["root"]}assets/site.js"></script>',
+            main=fill(doc_tmpl, body, bundle, lang),
+        )
+        out[Path(here) / "index.html"] = fill(layout, values, bundle, lang)
+
+    if docs_dir is not None:
+        pages = doc_pages(docs_dir)
+        slugs = {p[0] for p in pages}
+        source = f'<a href="{REPO_URL}/tree/{ref}/docs">source</a>'
+        index = "\n".join(
+            [
+                "    <h1>moai documentation</h1>",
+                f"    <p>The manual of {escape(release_label(ref))}: the same pages <code>moai wiki</code> reads "
+                "in the repository. Start with the day-to-day workflow; the CLI reference lists every command and flag.</p>",
+                '    <ul class="doc-index">',
+                *[
+                    f'      <li><a href="{slug}/">{escape(title)}</a><span>{escape(lede)}</span></li>'
+                    for slug, title, lede, _src in pages
+                ],
+                "    </ul>",
+            ]
+        )
+        page(
+            DOCS_DIR,
+            "moai documentation",
+            f"The manual of {release_label(ref)}: workflow, the explorer, moai web, agents, the CLI and recovery.",
+            {"toc": doc_toc(pages, DOCS_DIR, None, []), "crumb": f"{escape(release_label(ref))} · {source}", "content": index},
+        )
+        for slug, title, lede, src in pages:
+            here = f"{DOCS_DIR}{slug}/"
+            html, headings = mdhtml.render(
+                src, lambda href, here=here: resolve_doc_link(href, here=here, slugs=slugs, ref=ref)
+            )
+            crumb = (
+                f'<a href="../">Docs</a> · {escape(release_label(ref))} · '
+                f'<a href="{REPO_URL}/blob/{ref}/docs/{slug}.md">source</a>'
+            )
+            page(
+                here,
+                f"{title} — moai docs",
+                lede or title,
+                {"toc": doc_toc(pages, here, slug, headings), "crumb": crumb, "content": html},
+            )
+    return out
+
+
+def write(pages: dict[Path, str], *, check: bool) -> list[Path]:
     stale = []
     for rel_path, text in sorted(pages.items()):
         path = SITE / rel_path
@@ -272,14 +415,32 @@ def main(argv: list[str] | None = None) -> int:
         if old == text:
             continue
         stale.append(rel_path)
-        if not args.check:
+        if not check:
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(text, encoding="utf-8")
+    return stale
+
+
+def main(argv: list[str] | None = None) -> int:
+    ap = argparse.ArgumentParser(
+        description=__doc__.split("\n\n")[0], formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    ap.add_argument("--check", action="store_true", help="write nothing; exit 1 if a committed page is stale")
+    ap.add_argument("--docs", type=Path, metavar="DIR", help="also build the manual (site/docs/) from this wiki directory")
+    ap.add_argument("--ref", default="develop", help="the release the manual is read from (links and the label)")
+    args = ap.parse_args(argv)
+    try:
+        pages = build_pages()
+        release = build_release_pages(args.docs, None, args.ref) if args.docs else {}
+    except BuildError as e:
+        print(f"gen.py: {e}", file=sys.stderr)
+        return 2
+    stale = write(pages, check=args.check)
     if args.check:
         for p in stale:
             print(f"site/{p} is stale — run python3 scripts/site/gen.py and commit it", file=sys.stderr)
         return 1 if stale else 0
-    for p in stale:
+    for p in stale + write(release, check=False):
         print(f"wrote site/{p}")
     return 0
 

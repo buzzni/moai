@@ -31,3 +31,6 @@ __pycache__/
 
 # moai web 의 Node 도구. 번들(src/web/dist/)은 커밋한다 — scripts/gen-web.sh
 /web/node_modules/
+
+# 소개 홈페이지의 문서·변경 기록 페이지 — pages.yml 이 릴리스 태그에서 짓는다. 커밋하지 않는다(moai-s7f7)
+/site/docs/

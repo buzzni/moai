@@ -83,6 +83,47 @@ class Rotator(unittest.TestCase):
         self.assertEqual(gen.glint_ms("a<br><em>b</em>"), (2 + 11) * 120)
 
 
+class Docs(unittest.TestCase):
+    def link(self, href, here="docs/workflow/"):
+        return gen.resolve_doc_link(href, here=here, slugs={"workflow", "cli", "glossary"}, ref="v1.2.3")
+
+    def test_a_link_to_another_page_of_the_manual_stays_on_the_site(self):
+        self.assertEqual(self.link("cli.md"), "../cli/")
+        self.assertEqual(self.link("glossary.md#epic"), "../glossary/#epic")
+        self.assertEqual(self.link("cli.md", here="docs/"), "cli/")
+        self.assertEqual(self.link("#plant-the-tracker"), "#plant-the-tracker")
+
+    def test_anything_else_in_the_repository_goes_to_github_at_the_release(self):
+        self.assertEqual(self.link("lessons/grep-exit-code.md"), f"{gen.REPO_URL}/blob/v1.2.3/docs/lessons/grep-exit-code.md")
+        self.assertEqual(self.link("../CONTRIBUTING.md#releasing"), f"{gen.REPO_URL}/blob/v1.2.3/CONTRIBUTING.md#releasing")
+        self.assertEqual(self.link("../scripts/"), f"{gen.REPO_URL}/tree/v1.2.3/scripts")
+        self.assertEqual(self.link("https://example.com/a.md"), "https://example.com/a.md")
+
+    def test_the_manual_leaves_lessons_out_and_keeps_its_order(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            (root / "lessons").mkdir()
+            (root / "lessons" / "x.md").write_text("# Lesson\n\nNo.\n")
+            (root / "zeta.md").write_text("# Zeta\n\nLast, by name.\n")
+            (root / "workflow.md").write_text("# Day-to-day\n\nHow work *moves* in `x86_64` [land](cli.md).\n\n## A\n")
+            pages = gen.doc_pages(root)
+        self.assertEqual([p[0] for p in pages], ["workflow", "zeta"])
+        self.assertEqual(pages[0][1], "Day-to-day")
+        self.assertEqual(pages[0][2], "How work moves in x86_64 land.")
+
+    def test_the_manual_builds_from_this_checkout(self):
+        pages = gen.build_release_pages(gen.REPO / "docs", None, "v1.2.3")
+        self.assertIn(Path("docs/index.html"), pages)
+        self.assertIn(Path("docs/workflow/index.html"), pages)
+        self.assertFalse(any("lessons" in str(p) for p in pages))
+        page = pages[Path("docs/workflow/index.html")]
+        self.assertIn('<html lang="en">', page)
+        self.assertIn(f"{gen.REPO_URL}/blob/v1.2.3/docs/workflow.md", page)
+        self.assertNotIn("{{", page)
+
+
 class Site(unittest.TestCase):
     def test_the_committed_pages_are_what_the_generator_builds(self):
         # CI runs `gen.py --check` too; here it fails with the page named.
