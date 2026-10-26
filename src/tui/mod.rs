@@ -1378,6 +1378,13 @@ pub struct App {
     /// 상세의 "걸린 노트" 절을 펼쳐 둔 한 벌(리뷰 moai-wcy8.rbj, [`draw::NoteHits`]) — [`App::body`] 와 같은
     /// 까닭으로 `draw::fill_note_hits` 가 그리기 전에 채운다. 값일 뿐이다.
     note_hits: Option<draw::NoteHits>,
+    /// 상세의 Wiki 토막을 지어 둔 한 벌(moai-xp7l.vyw, [`draw::WikiAbout`]) — [`App::body`] 와 같은 까닭으로
+    /// `draw::fill_wiki` 가 그리기 전에 채운다. 커서가 선 줄의 것 하나다.
+    wiki_about: Option<draw::WikiAbout>,
+    /// 상세의 Wiki 토막이 읽은 위키 — 체크아웃(`Repo::here`)마다 한 번, 처음 그 토막을 그릴 때 읽는다. 커서를 옮길
+    /// 때마다 위키 전부를 다시 읽지 않는다. 연 뒤에 쓴 페이지는 위키 창(`SPC g w`)을 열면 — 창이 위키를 새로 읽으며 이것을
+    /// 비운다 — 아니면 탐색기를 다시 열면 선다. 못 읽은 위키는 안 담는다(리뷰 moai-xp7l.mug).
+    wiki_pages: std::collections::HashMap<std::path::PathBuf, Vec<crate::wiki::Page>>,
     /// 사용자 설정을 못 읽어 **층을 안 세운** 까닭. 층이 서면 아래의 [`App::held`] 가 대므로
     /// (moai-23pm) 층이 없을 때만 든다. 붙박이다 — 다시 읽기가 걷는 `trouble` 에 두면 700ms 뒤에
     /// 사라져 사람은 층이 왜 없는지 끝내 모른다. 설정 파일이 바뀌면 걸음이 다시 읽어([`App::follow_config`])
@@ -2127,6 +2134,8 @@ impl App {
             keys: keys::Keymap::default(),
             body: None,
             note_hits: None,
+            wiki_about: None,
+            wiki_pages: Default::default(),
             user: None,
             identify: crate::model::actor,
             journals: if cfg!(test) { || Vec::new() } else { crate::store::journal_unread_now },

@@ -877,7 +877,7 @@ BACKLOG
   <command>`, run in a child process for that request, so the page sees
   exactly what the CLI says. Writing stays with the CLI and the explorer; the
   page writes two things, taken only from the page itself: a Gantt bar dragged
-  to new days, run as `moai edit --start --due`, and your read marks (`moai
+  to new days, run as `moai edit --shift`, and your read marks (`moai
   read`). Registered projects
   (`moai project ls`) can be read too, by `?project=<path>`.
 
@@ -1303,8 +1303,10 @@ pub enum WikiCmd {
   (`lessons/<slug>`) shows `×N`, the number of different rows whose notes name
   it.
 
-  --json gives {\"dir\",\"pages\":[{\"slug\",\"title\",\"path\",\"bytes\",\"issues\",
-  \"links\",\"linked_from\",\"conflict\",\"seen_count\"}]}. `seen_count` is that
+  --json gives {\"dir\",\"dir_abs\",\"pages\":[{\"slug\",\"title\",\"path\",
+  \"bytes\",\"issues\",\"links\",\"linked_from\",\"conflict\",\"seen_count\"}]}.
+  `dir_abs` is `dir` as an absolute path in this checkout - absent when
+  `wiki_dir` points outside it or that path is not UTF-8. `seen_count` is that
   `×N` - always there, 0 on a page that is not a lesson. `issues` is
   [{\"id\",\"exists\"}] - the ids with this tracker's prefix the page names
   outside code blocks; the name of a skill moai plants (`moai-wiki`) is never
@@ -1332,7 +1334,7 @@ pub enum WikiCmd {
   lesson, latest note first ([] on a page that is not a lesson).
   A page that could not be read has no `body`, carries `error`, and the exit
   code is non-zero. When the wiki directory itself cannot be used - not there
-  yet included - it gives {\"dir\",\"error\"} as `ls` does, non-zero.
+  yet included - it gives {\"dir\",\"dir_abs\",\"error\"} as `ls` does, non-zero.
 
   `linked_from` counts only the pages that could be read. When another page
   could not be read, or the walk left a name or directory out, the count may
@@ -1364,7 +1366,7 @@ pub enum WikiCmd {
   directory is not there yet. A page that could not be read makes it non-zero
   once everything found is out, as `moai wiki ls` does.
 
-  --json gives {\"dir\",\"query\",\"terms\",\"hits\":[{\"slug\",\"path\",\"title\",
+  --json gives {\"dir\",\"dir_abs\",\"query\",\"terms\",\"hits\":[{\"slug\",\"path\",\"title\",
   \"heading\",\"anchor\",\"line\",\"score\",\"snippet\",\"snippet_line\"}],
   \"total\"}. `hits` is always there, `[]` when nothing matched; `total` counts
   the matches before `--limit` cut the list. `line` and `snippet_line` count
@@ -1376,7 +1378,7 @@ pub enum WikiCmd {
   and named in `unread`, [{\"slug\",\"path\",\"error\"}] with `error` as `ls`
   gives it; a place the walk left out is in `skipped`, as in `ls`. Each key
   stands only when it has something. When the wiki directory cannot be used
-  it gives {\"dir\",\"error\"} as `ls` does.")]
+  it gives {\"dir\",\"dir_abs\",\"error\"} as `ls` does.")]
     Search {
         /// What to look for - several words are one query
         #[arg(value_name = "words", required = true, num_args = 1..)]
@@ -1426,8 +1428,8 @@ LESSON
 /// `moai wiki learn` 의 인자(moai-4s5n.n7j).
 #[derive(Args, Debug)]
 pub struct LearnArgs {
-    /// The lesson in one line, as an instruction - the page's title
-    #[arg(value_name = "lesson")]
+    /// The lesson in one line, the page's title. A lone `-x` needs `--`
+    #[arg(value_name = "lesson", allow_hyphen_values = true)]
     pub title: String,
     /// The file name, in lowercase ASCII kebab case
     #[arg(long, value_name = "kebab")]
@@ -2183,6 +2185,7 @@ pub struct MvArgs {
 }
 
 #[derive(Args, Debug)]
+#[command(group(clap::ArgGroup::new("dates").args(["start", "due"]).multiple(true)))]
 pub struct EditArgs {
     #[arg(value_name = "id")]
     pub id: String,
@@ -2225,6 +2228,34 @@ pub struct EditArgs {
     /// Deadline, a day or `+N` days. `none` clears it
     #[arg(long, value_name = "date|none")]
     pub due: Option<String>,
+
+    /// Move the planned days N days, as the row
+    /// holds them when written
+    #[arg(long, value_name = "±N", allow_negative_numbers = true, verbatim_doc_comment, value_parser = shift_days(),
+          conflicts_with_all = ["start", "due", "shift_start", "shift_due", "if_unplanned"])]
+    pub shift: Option<i64>,
+
+    /// Move the start alone (none: from the due)
+    #[arg(long, value_name = "±N", allow_negative_numbers = true, value_parser = shift_days(),
+          conflicts_with_all = ["start", "due", "shift_due", "if_unplanned"])]
+    pub shift_start: Option<i64>,
+
+    /// Move the deadline alone (none: from start)
+    #[arg(long, value_name = "±N", allow_negative_numbers = true, value_parser = shift_days(),
+          conflicts_with_all = ["start", "due", "if_unplanned"])]
+    pub shift_due: Option<i64>,
+
+    /// Write `--start`/`--due` only on a row
+    /// with no planned day; else refuse
+    #[arg(long, requires = "dates", verbatim_doc_comment)]
+    pub if_unplanned: bool,
+}
+
+/// `edit --shift*` 의 날 수 — **web 의 끌기가 받는 폭과 같다**(여섯 자리, `web::api::is_days`, moai-vj8w 리뷰). 막지 않으면
+/// `Issue::shifted` 의 덧셈이 넘친다: 시험 판(overflow-checks)은 쓰기 안에서 넘어지고, 릴리스 판은 돌아 아무도 안 친
+/// 해를 거절문에 댄다. 여섯 자리는 이천칠백 해 남짓이라 손으로 옮길 날은 다 든다.
+fn shift_days() -> clap::builder::RangedI64ValueParser<i64> {
+    clap::value_parser!(i64).range(-999_999..=999_999)
 }
 
 #[derive(Args, Debug)]

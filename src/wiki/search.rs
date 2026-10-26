@@ -173,10 +173,29 @@ fn tokens(s: &str) -> Vec<Tok> {
     out
 }
 
-/// 두 글이 같은 토큰을 같은 차례로 내는가 — 머리글과 페이지 제목을 마크다운 기호와 상관없이 견준다. 제목은
-/// 기호를 걷은 글이고(`# The \`moai\` CLI` → `The moai CLI`) 머리글은 원문이라 글자째로는 못 견준다.
-fn same_words(a: &str, b: &str) -> bool {
-    tokens(a).into_iter().map(|t| t.text).eq(tokens(b).into_iter().map(|t| t.text))
+/// 머리글 원문(`heading`)이 페이지 제목(`title`)과 같은 토큰을 같은 차례로 내는가 — 제목은 기호를 걷은 글이고
+/// (`# The \`moai\` CLI` → `The moai CLI`) 머리글은 원문이라 글자째로는 못 견준다.
+///
+/// **머리글은 그려질 글로 바꿔 견준다**([`drawn`], 리뷰 moai-xp7l.mug) — 원문의 토큰을 견주던 판은 기호가 토큰을 가르는
+/// 자리에서 같은 제목을 다른 글로 읽었다. 이스케이프(`wiki\_dir` 은 `wiki`·`_dir`), 강조(`_zebra_`, `**중요**한` 은
+/// 한글 둘씩의 토큰이 갈린다), 링크의 주소(`[a](u.md)` 의 `u`·`md`), 엔티티(`&amp;` 의 `amp`)다. 제목 절이 `제목 ›
+/// 원문 머리글` 로 같은 말을 두 번 세우고, 점수는 그 낱말을 제목 위에 또 셌다.
+pub(crate) fn same_words(heading: &str, title: &str) -> bool {
+    tokens(&drawn(heading)).into_iter().map(|t| t.text).eq(tokens(title).into_iter().map(|t| t.text))
+}
+
+/// 머리글 원문을 그려질 글로 — 페이지 제목을 짓는 자([`super::parse`])와 같이 `# ` 줄의 글(Text)과 코드(Code)만 잇는다.
+/// 같은 옵션([`crate::markdown::OPTIONS`])으로 `# ` 를 앞에 붙여 읽는다 — 머리글 안의 글은 줄 머리의 `1.`·`-`·`>` 를
+/// 목록·인용으로 안 읽으니, 그냥 읽으면 그 글자가 사라진다.
+fn drawn(heading: &str) -> String {
+    use pulldown_cmark::{Event, Parser};
+    let mut out = String::new();
+    for e in Parser::new_ext(&format!("# {heading}"), crate::markdown::OPTIONS) {
+        if let Event::Text(t) | Event::Code(t) = e {
+            out.push_str(&t);
+        }
+    }
+    out
 }
 
 /// 머리글 줄의 글 — 인용의 `>`, 여는 `#` 와 닫는 `#` 를 걷는다(밑줄 꼴이면 그 줄 그대로다). 닫는 `#` 는
@@ -504,6 +523,27 @@ mod tests {
 
     fn top<'a>(pages: &'a [Page], q: &str) -> Vec<(&'a str, Option<String>)> {
         search(pages, q, 50).hits.into_iter().map(|h| (h.page.slug.as_str(), h.heading)).collect()
+    }
+
+    /// 제목 절의 원문 머리글은 그려진 글로 제목과 견준다(리뷰 moai-xp7l.mug) — 이스케이프·강조·링크·엔티티·HTML 이 든
+    /// 맨 위 `# ` 도 제목 그 자체다. 다른 글의 머리글은 그대로 다르다.
+    #[test]
+    fn a_title_heading_matches_its_title_as_drawn() {
+        for line in [
+            "# Set wiki\\_dir before reading",
+            "# The _zebra_ CLI",
+            "# Use [the zebra](u.md) guide",
+            "# Tom &amp; zebra",
+            "# Keep \\<Foo\\> and <kbd>Ctrl</kbd> in mind",
+            "# **중요**한 규칙",
+            "# `moai`의 위키",
+            "# 1. Intro",
+            "# Ends with \\#",
+        ] {
+            let title = parse("t", &format!("{line}\n\nx\n"), "moai").title.expect(line);
+            assert!(same_words(&heading_text(line), &title), "{line} → {title:?}");
+        }
+        assert!(!same_words("Other things", "The zebra CLI"));
     }
 
     /// 토큰 — 가르는 곳, 접기(ASCII 와 그 밖), 한글 글자 둘씩, 원문 범위. 버퍼를 돌려 쓰는 걸음이 낱말마다 String 을

@@ -59,12 +59,14 @@ export interface PaneLayout {
 }
 
 /**
- * Where the wiki tab reads from: `moai wiki ls --json` and `moai wiki show <slug> --json`, parsed or not
+ * Where the wiki tab reads from: `moai wiki ls --json`, `moai wiki show <slug> --json` and `moai wiki search --json`, parsed or not
  * (view/wiki.ts parseWikiLs / parseWikiShow read either). Without one the wiki tab says it cannot read the wiki.
  */
 export interface WikiSource {
   list(): Promise<unknown>
   page(slug: string): Promise<unknown>
+  /** `moai wiki search <query> --json` — the list's order while a query is typed (moai-xp7l.nyi). */
+  search?(query: string): Promise<unknown>
 }
 
 export interface ViewContext {

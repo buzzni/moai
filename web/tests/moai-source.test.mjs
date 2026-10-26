@@ -139,6 +139,14 @@ test('the tree asks for the archive only while archived rows are shown (moai-m4e
   assert.deepEqual(client.calls.map((call) => call.url), ['/api/tree', '/api/tree?archived=1', '/api/tree?archived=1&worktree=1'])
 })
 
+test('the tree is asked in the zone the page draws in, so moai judges overdue there (moai-vj8w.7sh)', async () => {
+  const client = fakeClient({ '/api/tree': passed(TREE), '/api/tree?tz=Asia%2FSeoul': passed(TREE), '/api/tree?archived=1&tz=UTC&worktree=1': passed(TREE) })
+  assert.deepEqual((await loadTree(client)).value, TREE)
+  assert.deepEqual((await loadTree(client, {}, undefined, undefined, false, false, 'Asia/Seoul')).value, TREE)
+  assert.deepEqual((await loadTree(client, {}, undefined, undefined, true, true, 'UTC')).value, TREE)
+  assert.deepEqual(client.calls.map((call) => call.url), ['/api/tree', '/api/tree?tz=Asia%2FSeoul', '/api/tree?archived=1&tz=UTC&worktree=1'])
+})
+
 test('the detail of a row only another worktree holds is asked with worktree=1 while the overlay is on (moai-m4ez.yb1)', async () => {
   const client = fakeClient({ '/api/issue/a.b': passed({ id: 'a.b' }), '/api/issue/a.b?worktree=1': passed({ id: 'a.b', branch: 'feat/x' }) })
   assert.deepEqual(await loadDetail(client, 'a.b'), { ok: true, value: { id: 'a.b' } })

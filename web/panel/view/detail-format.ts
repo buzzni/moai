@@ -243,6 +243,42 @@ export function commitsOf(row: Row): { hash: string; subject: string }[] {
     .filter((line): line is { hash: string; subject: string } => line !== null)
 }
 
+/** One line of the wiki section: where (`path` or `path:line`), the page title (and `› heading` for a section). */
+export interface WikiLine {
+  at: string
+  title: string
+  lesson: boolean
+}
+
+/**
+ * The wiki pages about the row, from `show <id> --json`'s `wiki` (moai-xp7l.vyw): the lessons this row's notes
+ * point at, the pages that name the id (or its epic), and the sections its title's words rank. As the CLI's detail
+ * draws them, a section's heading is left off when it is the page title again — moai says so with `title_heading`
+ * (review moai-xp7l.mug): comparing the words here took a second tokenizer that split `` `moai`의 `` and escapes
+ * differently from moai's. `lesson` is moai's mark as sent, for the same reason. Empty when moai sent no `wiki`.
+ */
+export function wikiOf(row: Row): { lessons: WikiLine[]; named: WikiLine[]; related: WikiLine[] } {
+  const wiki = isRecord(row.wiki) ? row.wiki : {}
+  const list = (value: unknown): Record<string, unknown>[] => (Array.isArray(value) ? value.filter(isRecord) : [])
+  const lessons = strings(wiki.lessons).map((slug) => ({ at: slug, title: '', lesson: true }))
+  const named = list(wiki.named_in).map((page) => ({
+    at: text(page.path) || text(page.slug),
+    title: text(page.title),
+    lesson: page.lesson === true,
+  }))
+  const related = list(wiki.related).map((hit) => {
+    const title = text(hit.title)
+    const heading = text(hit.heading)
+    const line = typeof hit.line === 'number' ? `:${hit.line}` : ''
+    return {
+      at: `${text(hit.path) || text(hit.slug)}${line}`,
+      title: heading && hit.title_heading !== true ? `${title} › ${heading}` : title,
+      lesson: hit.lesson === true,
+    }
+  })
+  return { lessons, named, related }
+}
+
 /**
  * A work record as one line. moai's is {provider, model, tokens, grade, why, at, by}: it reads like the note
  * it was written from, `anthropic/opus-5 tokens=12345 (medium — wrote the list view)`, then who and when.

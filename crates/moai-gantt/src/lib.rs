@@ -146,7 +146,7 @@ impl Gantt<'_> {
         };
         let today = ctx.glyphs.today;
         let occupied = |row: usize, col: i64| at(row, col).is_some_and(|(x, y)| !draw::is_empty_cell(buf, x, y, today));
-        let route = links::route(focus, self.links, ext, vis, occupied);
+        let route = links::route(focus, self.links, ext, vis, 0..i64::from(area.width), occupied);
         let (st, g) = (ctx.palette.link, &ctx.glyphs.link);
         let put = |buf: &mut Buffer, row: usize, col: i64, ch: char| {
             if let Some((x, y)) = at(row, col)
