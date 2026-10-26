@@ -682,6 +682,7 @@ pub fn away(root: &Path) -> crate::hook::Away {
             own: names(d.mine()),
             homes: d.homes(),
             main: d.main_root(),
+            linked: d.linked(),
             ..Default::default()
         })
         .unwrap_or_default()
@@ -732,11 +733,21 @@ impl Disk {
 
     /// 이 자리가 딸린 워크트리일 때 main 체크아웃의 moai 뿌리([`crate::hook::Away::main`], moai-qrja.kb4). main 에 선
     /// 자리와 맨몸 저장소는 없다.
+    ///
+    /// **맨 저장소인가는 git 에게 묻는다**([`is_bare`], 리뷰 moai-qrja.pwh) — 공용 디렉터리의 이름이 `.git` 이면 [`on_disk`]
+    /// 는 그 부모를 main 으로 적는데, `git clone --bare <url> bin/.git` 의 `bin` 은 체크아웃이 아니다. 안 묻던 판은 그 없는
+    /// 체크아웃을 루트로 재어 거기 떨어진 쓰기를 막았다. [`main_root`](fn@main_root) 와 같은 자다 — 트래커를 옮기는 길이 이미
+    /// 물어 담아 두었으면([`is_bare`] 의 칸) git 을 다시 안 띄운다.
     fn main_root(&self) -> Option<PathBuf> {
-        if !self.all.iter().any(|(_, linked, me)| *me && *linked) {
+        if !self.linked() {
             return None;
         }
-        self.main().map(|t| root_in(self, t))
+        self.main().filter(|_| !is_bare(&self.common)).map(|t| root_in(self, t))
+    }
+
+    /// 이 자리가 딸린 워크트리인가([`crate::hook::Away::linked`]) — main 이 없는 맨몸 저장소에서도 선다.
+    fn linked(&self) -> bool {
+        self.all.iter().any(|(_, linked, me)| *me && *linked)
     }
 
     /// main 워크트리. 맨몸 저장소면 없다.
@@ -2198,12 +2209,39 @@ mod tests {
         assert_eq!(at, [e.as_os_str(), f.as_os_str()], "{homes:?}");
         assert!(homes[0].1.contains("t-eeee") && homes[1].1.contains("t-ffff"), "{homes:?}");
         assert_eq!(away(&main).main, None, "main 에 선 세션에 main 의 뿌리를 따로 실었다");
+        assert!(!away(&main).linked, "main 에 선 세션을 딸린 워크트리의 것으로 봤다");
         let inside = away(&base.join("t-eeee"));
         let at: Vec<&std::ffi::OsStr> = inside.homes.iter().map(|(p, _)| p.as_os_str()).collect();
         assert_eq!(at, [e.as_os_str(), f.as_os_str()], "딸린 워크트리의 세션이 자리를 잃었다 — {inside:?}");
         assert_eq!(inside.main.as_deref(), Some(real(&main).as_path()), "{inside:?}");
+        assert!(inside.linked, "{inside:?}");
         let sub = away(&main.join("app")).homes;
         assert_eq!(sub.first().map(|(p, _)| p.as_os_str()), Some(e.join("app").as_os_str()), "{sub:?}");
+    }
+
+    /// **맨 저장소의 부모는 main 이 아니다**(리뷰 moai-qrja.pwh) — 공용 디렉터리의 이름이 `.git` 이면 [`on_disk`] 는 그 부모를
+    /// main 으로 적는다. `git clone --bare <url> bin/.git` 에 딸린 워크트리의 세션에 그 `bin` 을 main 으로 싣던 판은 훅이 없는
+    /// 체크아웃을 루트로 재었다. 트래커를 옮기는 길([`main_root`])과 같은 답이어야 한다 — main 은 없고, 세션은 딸린 워크트리에 섰다.
+    #[test]
+    fn a_bare_dot_git_gives_the_hook_no_main_checkout() {
+        let scratch = crate::scratch::Scratch::fenced("away-bare");
+        let base = real(scratch.path());
+        let run = |dir: &Path, args: &[&str]| {
+            let out = crate::git::isolated(dir).args(args).output().unwrap();
+            assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+        };
+        let src = base.join("src");
+        std::fs::create_dir_all(&src).unwrap();
+        run(&src, &["init", "-q"]);
+        run(&src, &["commit", "-q", "--allow-empty", "-m", "a"]);
+        std::fs::create_dir_all(base.join("bin")).unwrap();
+        run(&base, &["clone", "-q", "--bare", "src", "bin/.git"]);
+        run(&base.join("bin/.git"), &["worktree", "add", "-q", "../../wt-bin"]);
+        let wt = base.join("wt-bin");
+        let seen = away(&wt);
+        assert_eq!(seen.main, None, "맨 저장소의 부모를 main 으로 실었다 — {seen:?}");
+        assert_eq!(main_root(&wt), None);
+        assert!(seen.linked, "{seen:?}");
     }
 
     /// **마일스톤 가지의 워크트리는 일하는 자리가 아니다**(moai-nvju.ztj, 2026-10-08 사용자 결정). 그
