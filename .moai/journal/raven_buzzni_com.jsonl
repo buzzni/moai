@@ -8516,3 +8516,6 @@
 {"ts":"2026-10-26T06:39:37Z","id":"moai-w25x.qi8","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
 {"ts":"2026-10-26T06:39:37Z","id":"moai-w25x.yrm","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
 {"ts":"2026-10-26T06:39:44Z","id":"moai-w25x","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: merged into milestone/moai-b54s as e4c7a8c2; all seven members done. Backlog moai-zyvk (moai add -s records no pick-up) left outside. moai-scb6 carries its solved-by note for the supervisor to close with the person."}
+{"ts":"2026-10-26T06:40:20Z","id":"moai-w25x","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Report-checked: e4c7a8c2"}
+{"ts":"2026-10-26T06:46:41Z","id":"moai-scb6","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"사람 결정(2026-10-26): moai-w25x.831 (06fc8e59) 이 moai mv 가 제 집기를 스스로 적게 해 풀렸다"}
+{"ts":"2026-10-26T06:47:04Z","id":"moai-jn8d","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Sent: moa-issue-ba (vyh 다시, 사람 결정 2026-10-26)"}
