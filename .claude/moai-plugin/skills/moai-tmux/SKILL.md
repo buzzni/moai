@@ -165,7 +165,7 @@ The first line prints two values. The first is `1` while the person is scrolling
 mode) — keys you send then go to tmux's copy mode, not to Claude Code, so a pane in a mode is
 theirs: do not type. The second is `1` once the pane's program has exited — a pane a moai skill
 opened keeps its last screen under `remain-on-exit` and takes no keys: the session there is
-dead, so do not type.
+dead, so do not type. When it prints neither value, the pane is gone: do not type either.
 Claude Code's input box is the line that starts with `❯`, under the conversation, between two
 `─` rules. **Empty** is `❯` followed by nothing, or by Claude Code's dim placeholder — `-e`
 keeps the colours, and the placeholder is drawn dim (SGR `2`, or a grey foreground) where the
@@ -261,8 +261,8 @@ has read `busy` far longer than its work should take, look at its pane once:
 
 and read why it stopped — a permission prompt, a question (`AskUserQuestion`), an API or
 rate-limit error, or a process that ended (a shell prompt where the box was, or under its last
-box — a killed Claude Code leaves its last screen behind — or `#{pane_dead}` reading `1` in a
-pane you opened); whether the session is still alive,
+box — a killed Claude Code leaves its last screen behind — or, in a pane you opened, a last line
+`Pane is dead (…)` that `remain-on-exit` left under it); whether the session is still alive,
 the session map says. **Tell the person** what the pane shows and which pane it is. Do not answer the prompt, do not press a
 key, and do not look again in a loop. A process that ended is a dead session: bringing it
 back is `moai-recover`, once the person asks for it.
@@ -273,16 +273,17 @@ When the supervisor's 2 finds no worker, ask the person **once** whether to open
 panes, and how many — one question covers several panes. Open a pane only on their yes, or
 when they asked you for it. On a yes, for each pane:
 
-    tmux split-window -P -F '#{pane_id}' -t "$TMUX_PANE" -c "<root>" 'claude --model <model>'
-    tmux set-option -p -t <pane> remain-on-exit on
+    tmux split-window -P -F '#{pane_id}' -t "$TMUX_PANE" -c "<root>" 'claude --model <model>' \; set-option -p remain-on-exit on
     tmux select-layout -t "$TMUX_PANE" tiled
 
 `<root>` is the `root dir` of the supervisor's 2 and `<model>` the model picked in 2-1 — keep
 the double quotes, so a path with a space stays one argument. **No other flag.** The first line
-prints the new pane's id, the `<pane>` of the second. `remain-on-exit` keeps the pane when
-`claude` exits: its last screen stays readable, `#{pane_dead}` reads `1`, and tmux refuses
-keys and pastes aimed at it — nothing you send lands in a shell under a dead session. A dead
-pane stays until the person closes it; never kill it. The pane belongs to the same person —
+prints the new pane's id. The `set-option` after `\;` runs in the same tmux call, on the new
+pane, before `claude` can exit — set in a call of its own, a `claude` that ended at once would
+have taken its pane, and what it said, with it. `remain-on-exit` keeps the pane when `claude`
+exits: its last screen stays readable, `#{pane_dead}` reads `1`, and tmux refuses pastes
+aimed at it and drops keys — nothing you send lands in a shell under a dead session, though
+`send-keys` still exits `0`. A dead pane stays until the person closes it; never kill it. The pane belongs to the same person —
 it is their interactive session like any other.
 
 Once it has started (a separate call: `capture-pane` of the new pane shows the `❯` box), look
@@ -353,6 +354,7 @@ Codex can leave its last frame over a shell. Never use another server's pane ids
 
 If the first value is `1`, the person is in copy mode: the pane is theirs, so do not type.
 If the second is `1`, Codex has exited and the pane kept its last screen: no box, do not type.
+If it prints neither value, the pane is gone: do not type.
 
 The lowest current composer starts with `›` (U+203A) and an ordinary space (U+0020).
 Its empty placeholder is `Ask Codex to do anything`. A past user message also starts with
@@ -384,13 +386,13 @@ If any check is unclear or any input is refused, do not type again; ask the pers
 When no idle Codex worker is left, ask the person **once** whether to open new panes and
 how many. Open one only on their yes, or when they asked for it. On a yes:
 
-    tmux split-window -P -F '#{pane_id}' -t "$TMUX_PANE" -c "<root>" 'codex --model <codex>'
-    tmux set-option -p -t <pane> remain-on-exit on
+    tmux split-window -P -F '#{pane_id}' -t "$TMUX_PANE" -c "<root>" 'codex --model <codex>' \; set-option -p remain-on-exit on
     tmux select-layout -t "$TMUX_PANE" tiled
 
-The first line prints the new pane id, the `<pane>` of the second. This is an ordinary
-interactive session; `remain-on-exit` keeps its final screen readable after Codex exits, and
-the dead pane takes no keys — tmux refuses them. Read the new pane separately and confirm
+The first line prints the new pane id; its `set-option` lands on the new pane in the same tmux
+call, before Codex can exit. This is an ordinary interactive session; `remain-on-exit` keeps
+its final screen readable after Codex exits, and the dead pane takes no keys — tmux refuses
+pastes and drops keys. Read the new pane separately and confirm
 the live process and empty composer above. Folder trust and hook trust prompts belong to
 the person; tell them what the pane shows. Do not assume cmux's wrapper enabled or trusted
 hooks here. The person checks moai in `/hooks`; the worker keeps the five rules even when

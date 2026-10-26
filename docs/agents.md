@@ -588,13 +588,14 @@ this happens.
   splits a pane running `claude --model <model>` in the root — an ordinary
   interactive session you can see and type into. The pane is opened with
   `remain-on-exit`, so when `claude` exits its last screen stays and tmux
-  refuses keys sent there, rather than a shell taking them; close a dead pane
-  yourself when you are done reading it
+  drops keys and refuses pastes sent there, rather than a shell taking them;
+  close a dead pane yourself when you are done reading it
 
 **If anything stands in a worker's input box, or you are scrolling that pane
 (copy mode), or the session map no longer reads that pane's session alive, it
-does not type** — it tells you. A killed Claude Code leaves its last screen, box
-and all, above the shell, so the screen alone is not enough (moai-xpa8.p56).
+does not type** — it tells you. In a pane you opened yourself, a killed Claude
+Code leaves its last screen, box and all, above the shell, so the screen alone
+is not enough (moai-xpa8.p56).
 It never kills a pane, a session or the server, and never runs `claude -p` or a
 `--dangerously-*` flag.
 

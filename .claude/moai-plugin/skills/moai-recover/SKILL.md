@@ -41,7 +41,7 @@ The first line prints two values. The first is `1` while the person is scrolling
 mode) — keys you send then go to tmux's copy mode, not to Claude Code, so a pane in a mode is
 theirs: do not type. The second is `1` once the pane's program has exited — a pane a moai skill
 opened keeps its last screen under `remain-on-exit` and takes no keys: the session there is
-dead, so do not type.
+dead, so do not type. When it prints neither value, the pane is gone: do not type either.
 Claude Code's input box is the line that starts with `❯`, under the conversation, between two
 `─` rules. **Empty** is `❯` followed by nothing, or by Claude Code's dim placeholder — `-e`
 keeps the colours, and the placeholder is drawn dim (SGR `2`, or a grey foreground) where the
@@ -295,15 +295,16 @@ supervisor's pane — or print its line — only after they say that worker is b
 the window of `$TMUX_PANE` — inside a session Saycode's daemon started, that is the daemon's
 pane, not yours — so say which window they are in:
 
-    tmux split-window -P -F '#{pane_id}' -t "$TMUX_PANE" -c "<cwd>" 'claude --resume <sessionId>'
-    tmux set-option -p -t <pane> remain-on-exit on
+    tmux split-window -P -F '#{pane_id}' -t "$TMUX_PANE" -c "<cwd>" 'claude --resume <sessionId>' \; set-option -p remain-on-exit on
     tmux select-layout -t "$TMUX_PANE" tiled
 
 **No other flag**, and keep the double quotes around `<cwd>` — a path with a space stays one
-argument. The first line prints the new pane's `%N`, the `<pane>` of the second.
+argument. The first line prints the new pane's `%N`, the `<pane>` below. The `set-option` after
+`\;` runs in the same tmux call, on the new pane, before `claude` can exit — a `--resume` that
+fails at once (no such conversation) keeps its pane and its error.
 `remain-on-exit` keeps the pane when `claude` exits: its last screen stays, `#{pane_dead}`
-reads `1`, and tmux refuses keys and pastes aimed at it, so nothing lands in a shell. A dead
-pane stays until the person closes it; never kill it. Then, as a separate call, look once: when its `❯` box shows and is empty
+reads `1`, and tmux refuses pastes aimed at it and drops keys, so nothing lands in a shell. A
+dead pane stays until the person closes it; never kill it. Then, as a separate call, look once: when its `❯` box shows and is empty
 ("Is the input box empty" above), paste the block:
 
     tmux load-buffer -b moai-recover <file>
