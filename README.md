@@ -542,9 +542,9 @@ Those pages are built, not edited. `scripts/site/` holds one template per page
 build. The generator is standard-library Python (3.11 or later).
 
 The manual (`/docs/`) and the changelog (`/changelog/`) stand in English only and are
-not committed. `.github/workflows/pages.yml` builds them from the newest `v*` tag's
-`docs/` and `CHANGELOG.md`, so they describe the release `install.sh` installs, and
-runs again when the release workflow finishes. To look at them locally:
+not committed. `.github/workflows/pages.yml` builds them from the `docs/` and
+`CHANGELOG.md` of the release GitHub marks latest — the one `install.sh` installs — and
+runs again whenever the release workflow finishes. To look at them locally:
 
     python3 scripts/site/gen.py --docs docs --changelog CHANGELOG.md
 

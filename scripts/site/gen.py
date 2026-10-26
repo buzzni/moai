@@ -22,8 +22,9 @@ import posixpath
 import re
 import sys
 import tomllib
-from html import escape
+from html import escape, unescape
 from pathlib import Path
+from urllib.parse import quote
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))  # `python3 -I` leaves the script's own directory off the path
@@ -44,16 +45,16 @@ PAGES = {
 }
 OG_TYPE = {"home": "website", "guide": "article"}
 
-# The manual (docs/*.md) and the changelog are built from the newest release tag by the Pages workflow
+# The manual (docs/*.md) and the changelog are built from the release GitHub marks latest by the Pages workflow
 # and are not committed (2026-10-26, the person's decision on moai-s7f7): they change with every epic,
 # and a committed copy would have every epic regenerate the site or turn CI red. They stand in English
 # only — the wiki is written in English — and the Korean and Japanese menus point at them.
 DOCS_DIR = "docs/"
 CHANGELOG_DIR = "changelog/"
 REPO_URL = "https://github.com/buzzni/moai"
-# the order the manual's pages stand in; a page not named here follows, by name
 # a page whose first paragraph is not about the page (cli.md opens with a note to contributors)
 DOC_LEDE = {"cli": "Every moai command and its flags, as moai --help prints them."}
+# the order the manual's pages stand in; a page not named here follows, by name
 DOC_ORDER = ["workflow", "explorer", "web", "agents", "cli", "json", "recovery", "windows", "glossary"]
 
 # The English home is the root, and it sends a visitor on to /ko/ or /ja/ before it draws — by the
@@ -85,6 +86,11 @@ SPINNER = (
     )
     + "</svg></span>"
 )
+
+# Attribute snippets the f-strings below drop in. Python 3.11 refuses a backslash inside an f-string's
+# expression part, so a quoted attribute cannot be written inline there (3.12 lifted that, 3.11 is the floor).
+CURRENT = ' aria-current="page"'
+UNFOCUSED = ' tabindex="-1"'
 
 SLOT = re.compile(r"\{\{([\w.-]+)\}\}")
 _WIDE = re.compile(r"[ᄀ-ᅟ⺀-〾ぁ-㏿㐀-䶿一-鿿가-힣豈-﫿︰-﹏＀-｠￠-￦]")
@@ -166,7 +172,7 @@ def rotator(bundle: dict, lang: str) -> str:
         )
         tabs.append(
             f'      <button class="rot-tab" id="tab-{i + 1}" role="tab" aria-controls="slide-{i + 1}" aria-selected="{"true" if on else "false"}"'
-            f'{"" if on else " tabindex=\"-1\""} style="--rot-time: {max(8000, ms + 3000)}ms"><span class="rot-n">{i + 1:02d}</span>'
+            f'{"" if on else UNFOCUSED} style="--rot-time: {max(8000, ms + 3000)}ms"><span class="rot-n">{i + 1:02d}</span>'
             f'<span class="rot-name">{s["tab"]}</span><i class="rot-bar" aria-hidden="true"></i></button>\n'
         )
     return (
@@ -189,14 +195,21 @@ def chrome(page: str, lang: str, here: str, bundle: dict, *, langs: dict[str, st
         root = ""
     home_dir = PAGES["home"][lang]
     guide_dir = PAGES["guide"][lang]
+    # ?lang=en keeps someone who chose English there. A page that stands in English only was chosen by nobody —
+    # a Korean or Japanese visitor reaches it from their own menu — so its links into the home leave it off and
+    # the home's redirect sends that visitor back to their language.
+    english_only = len(langs) == 1
+
+    def to_page(to_dir: str) -> str:
+        return rel(here, to_dir) if english_only else page_href(here, to_dir)
 
     def link(to_dir: str, label: str, *, anchor: str = "", mark: bool = True, english: bool = False) -> str:
         # the nav marks the page you are on; the footer only links to it. A page that stands in English
         # only says so to the browser, so a Korean or Japanese menu can point at it honestly
         lang_attr = ' hreflang="en"' if english and lang != "en" else ""
         if to_dir == here and not anchor:
-            return f'      <a href="./"{lang_attr}{" aria-current=\"page\"" if mark else ""}>{label}</a>'
-        href = anchor if to_dir == here else page_href(here, to_dir) + anchor
+            return f'      <a href="./"{lang_attr}{CURRENT if mark else ""}>{label}</a>'
+        href = anchor if to_dir == here else to_page(to_dir) + anchor
         return f'      <a href="{href}"{lang_attr}>{label}</a>'
 
     docs = link(DOCS_DIR, lookup(bundle, "nav.docs", lang), english=True)
@@ -222,7 +235,7 @@ def chrome(page: str, lang: str, here: str, bundle: dict, *, langs: dict[str, st
         cur = code == lang
         href = "./" if cur else page_href(here, to)
         switch.append(
-            f'<a href="{href}" hreflang="{code}" lang="{code}" data-lang="{code}"{" aria-current=\"page\"" if cur else ""}>'
+            f'<a href="{href}" hreflang="{code}" lang="{code}" data-lang="{code}"{CURRENT if cur else ""}>'
             f"{LANG_NAMES[code]}</a>"
         )
     alternates = ""
@@ -238,7 +251,7 @@ def chrome(page: str, lang: str, here: str, bundle: dict, *, langs: dict[str, st
         "og_type": OG_TYPE.get(page, "article"),
         "alternates": alternates,
         "redirect": REDIRECT if page == "home" and lang == "en" else "",
-        "home_href": rel(here, home_dir) if here == home_dir else page_href(here, home_dir),
+        "home_href": to_page(home_dir),
         "nav_links": nav,
         "footer_links": footer,
         "lang_switch": '<span aria-hidden="true">|</span>'.join(switch),
@@ -273,38 +286,29 @@ def build_pages() -> dict[Path, str]:
     return out
 
 
-def _plain(md: str) -> str:
-    """A markdown line's text as a person reads it: links to their words, code and emphasis bare."""
-    md = re.sub(r"!?\[([^\]]*)\]\([^)]*\)", r"\1", md)
-    md = re.sub(r"\*+|`+|(?<!\w)_+|_+(?!\w)", "", md)  # `x86_64` keeps its underscore
-    return md.strip()
+# a paragraph at the top level of mdhtml's output (one in a list item or a table cell does not open a line)
+_TOP_PARA = re.compile(r"^<p>(.*?)</p>$", re.M | re.S)
+
+
+def _fold(s: str) -> str:
+    return " ".join(s.split())
 
 
 def doc_pages(docs_dir: Path) -> list[tuple[str, str, str, str]]:
     """The manual's top-level pages as (slug, title, lede, source), in DOC_ORDER. docs/lessons/ and
-    any other subdirectory stay out — they are this repository's notes to its agents, not the manual."""
+    any other subdirectory stay out — they are this repository's notes to its agents, not the manual.
+
+    The title is the page's first `#` heading and the lede the first paragraph after it, both read from
+    what mdhtml renders: a fence, a list or a code span then reads the way the page draws it."""
     found = {}
     for path in sorted(docs_dir.glob("*.md")):
         src = path.read_text(encoding="utf-8")
-        lines = src.split("\n")
-        title = next((_plain(l[2:]) for l in lines if l.startswith("# ")), path.stem)
-        para, seen_h1 = [], False
-        for line in lines:
-            if line.startswith("# "):
-                seen_h1 = True
-                continue
-            if not seen_h1:
-                continue
-            if not line.strip():
-                if para:
-                    break
-                continue
-            if line.startswith(("#", "    ", "```", "|", "- ", "* ")):
-                if para:
-                    break
-                continue
-            para.append(line.strip())
-        lede = DOC_LEDE.get(path.stem) or _plain(" ".join(para))
+        html, headings = mdhtml.render(src)
+        title = next((_fold(h.text) for h in headings if h.level == 1), path.stem)
+        h1_end = html.find("</h1>")
+        para = _TOP_PARA.search(html, h1_end) if h1_end >= 0 else None
+        text = unescape(re.sub(r"<[^>]+>", "", para.group(1).replace("<br>", " "))) if para else ""
+        lede = DOC_LEDE.get(path.stem) or _fold(text)
         found[path.stem] = (path.stem, title, lede, src)
     order = [s for s in DOC_ORDER if s in found] + sorted(s for s in found if s not in DOC_ORDER)
     return [found[s] for s in order]
@@ -318,15 +322,27 @@ def resolve_doc_link(href: str, *, here: str, slugs: set[str], ref: str, base: s
         return href
     path, _, frag = href.partition("#")
     frag = "#" + frag if frag else ""
-    norm = posixpath.normpath(posixpath.join(base, path)) if path else ""
-    if base == "" and "/" not in norm and norm.endswith(".md") and norm[:-3] in slugs:
-        norm = "docs/" + norm  # the changelog names a wiki page by its file name alone
+    if path.startswith("/"):
+        # `/docs/cli.md` is read from the repository's root, the way GitHub reads it in a file
+        norm = posixpath.normpath(path.lstrip("/") or ".")
+    else:
+        norm = posixpath.normpath(posixpath.join(base, path)) if path else ""
+        if base == "" and "/" not in norm and norm.endswith(".md") and norm[:-3] in slugs:
+            norm = "docs/" + norm  # the changelog names a wiki page by its file name alone
     if norm.startswith("docs/") and norm.endswith(".md") and norm[5:-3] in slugs:
         return rel(here, f"{DOCS_DIR}{norm[5:-3]}/") + frag
     if norm.startswith("../") or norm == "..":
         return href  # outside the repository: leave it as written
+    if norm in ("", "."):
+        return repo_url("tree", ref) + frag
     kind = "tree" if path.endswith("/") or "." not in posixpath.basename(norm) else "blob"
-    return f"{REPO_URL}/{kind}/{ref}/{norm}{frag}"
+    return repo_url(kind, ref, norm) + frag
+
+
+def repo_url(kind: str, ref: str, path: str = "") -> str:
+    """A file (`blob`) or directory (`tree`) of the repository on GitHub at `ref`. git lets a tag name hold
+    `"`, `<` or `&`, so the name is quoted before it goes into an href."""
+    return f"{REPO_URL}/{kind}/{quote(ref, safe='/')}" + (f"/{path}" if path else "")
 
 
 def doc_toc(pages, here: str, current: str | None, headings) -> str:
@@ -349,7 +365,7 @@ def release_label(ref: str) -> str:
 
 
 def build_release_pages(docs_dir: Path | None, changelog: Path | None, ref: str) -> dict[Path, str]:
-    """The manual and the changelog, read from a release (the Pages workflow hands in the newest v* tag's
+    """The manual and the changelog, read from a release (the Pages workflow hands in the latest release's
     files). English only. Not committed — `.gitignore` keeps them out of git."""
     layout = (HERE / "layout.html").read_text(encoding="utf-8")
     doc_tmpl = (HERE / "doc.html").read_text(encoding="utf-8").strip("\n")
@@ -377,12 +393,12 @@ def build_release_pages(docs_dir: Path | None, changelog: Path | None, ref: str)
             f"What changed in each release of moai, up to {release_label(ref)}.",
             {
                 "toc": toc,
-                "crumb": f'{escape(release_label(ref))} · <a href="{REPO_URL}/blob/{ref}/CHANGELOG.md">source</a>',
+                "crumb": f'{escape(release_label(ref))} · <a href="{repo_url("blob", ref, "CHANGELOG.md")}">source</a>',
                 "content": content,
             },
         )
     if docs_dir is not None:
-        source = f'<a href="{REPO_URL}/tree/{ref}/docs">source</a>'
+        source = f'<a href="{repo_url("tree", ref, "docs")}">source</a>'
         index = "\n".join(
             [
                 "    <h1>moai documentation</h1>",
@@ -409,7 +425,7 @@ def build_release_pages(docs_dir: Path | None, changelog: Path | None, ref: str)
             )
             crumb = (
                 f'<a href="../">Docs</a> · {escape(release_label(ref))} · '
-                f'<a href="{REPO_URL}/blob/{ref}/docs/{slug}.md">source</a>'
+                f'<a href="{repo_url("blob", ref, f"docs/{slug}.md")}">source</a>'
             )
             page(
                 here,
@@ -428,7 +444,9 @@ def changelog_sections(src: str) -> list[tuple[str, str, str]]:
     (the note to contributors on how versions are picked) and [Unreleased] stay out — a reader of the
     site wants what shipped."""
     out = []
-    for chunk in re.split(r"^## ", src, flags=re.M)[1:]:
+    # Only `## [` opens a release — the same line release.yml's note picker splits on. Splitting on every
+    # `## ` would cut a release at a `## Upgrade notes` of its own and drop what stands under it.
+    for chunk in re.split(r"^## (?=\[)", src, flags=re.M)[1:]:
         head, _, body = chunk.partition("\n")
         m = RELEASE_HEAD.match(head.strip())
         if not m or m.group(1).lower() == "unreleased":
@@ -438,8 +456,9 @@ def changelog_sections(src: str) -> list[tuple[str, str, str]]:
 
 
 def changelog_page(src: str, *, slugs: set[str], ref: str) -> tuple[str, str]:
-    """(toc, content) of the changelog page. Each release is rendered on its own, so its `### Added`
-    takes the release's id in front of its own — the anchors stay unique down the page."""
+    """(toc, content) of the changelog page. Each release is rendered on its own, so every heading in it
+    (its `### Added`, and a `##` or setext heading of its own) takes the release's id in front of its own —
+    the anchors stay unique down the page."""
     here = CHANGELOG_DIR
     toc, parts = [], []
     for version, date, body in changelog_sections(src):
@@ -447,7 +466,7 @@ def changelog_page(src: str, *, slugs: set[str], ref: str) -> tuple[str, str]:
         html, _ = mdhtml.render(
             body, lambda href: resolve_doc_link(href, here=here, slugs=slugs, ref=ref, base="")
         )
-        html = re.sub(r'<(h[3-6]) id="([^"]+)">', lambda m: f'<{m.group(1)} id="{vid}-{m.group(2)}">', html)
+        html = re.sub(r'<(h[1-6]) id="([^"]+)">', lambda m: f'<{m.group(1)} id="{vid}-{m.group(2)}">', html)
         when = f' <span class="release-date">{escape(date)}</span>' if date else ""
         parts.append(
             f'    <section class="release" aria-labelledby="{vid}">\n'
