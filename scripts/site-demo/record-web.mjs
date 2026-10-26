@@ -3,8 +3,11 @@
 //     MOAI=<moai 바이너리> node scripts/site-demo/record-web.mjs <seed 저장소> <내보낼 디렉터리>
 //
 // playwright 는 이 저장소의 의존이 아니다 — 부르는 쪽이 NODE_PATH 로 건넨다. 장면마다 브라우저
-// 문맥을 하나씩 열어 webm 하나와 첫 화면 png(포스터) 하나를 낸다. 녹화에는 마우스가 안 찍혀서
+// 문맥을 하나씩 열어 webm 하나와, 장면이 끝난 화면의 png(포스터) 하나를 낸다. 녹화에는 마우스가 안 찍혀서
 // 가짜 커서를 페이지에 얹는다 — 보는 사람이 무엇을 눌렀는지 따라올 수 있게.
+// site/assets/media 의 클립은 이것이 낸 그대로가 아니다(moai-vlq7): VP9 crf 40 으로 다시 굽고 앞의 빈 화면을
+// 잘랐으며, web-wiki.png 는 끝 화면(이슈로 건너간 목록)이 아니라 위키 페이지가 선 한 장면을 클립에서 떠 왔다.
+// 다시 찍으면 그 손질도 다시 한다 — 그대로 덮으면 위키의 포스터가 목록 화면이 된다.
 import { execFileSync, spawn } from 'node:child_process'
 import { createInterface } from 'node:readline'
 import { mkdirSync, readFileSync, renameSync } from 'node:fs'
