@@ -5129,7 +5129,12 @@ fn browse_hints(app: &App, c: &Ctx, unnumbered: bool) -> (Vec<Hint>, Vec<Hint>) 
         shown(&[&[B::Step(Move::LineDown), B::Step(Move::LineUp)], &[B::FocusNext], &[B::Enter]])
     } else {
         // 층에 선 갈래는 위에서 이미 갈렸다 — 여기 오면 층 밖이다.
-        let mut order: Vec<&[Browse]> = if unnumbered { vec![&[B::Project(0)]] } else { Vec::new() };
+        // **키 목록(`?`, moai-ucyr)이 가장 먼저 떨어진다** — 바가 못 대는 키를 찾아갈 길이지만, 지금 목록을 쓰는 키와
+        // 층으로 가는 `0`(뿌리에서는 그것이 위로 가는 하나뿐인 길이다)을 밀어낼 만큼은 아니다. 메뉴의 `SPC h` 가 늘 남는다.
+        let mut order: Vec<&[Browse]> = vec![&[B::Help]];
+        if unnumbered {
+            order.push(&[B::Project(0)]);
+        }
         // **간트의 날짜 축 키는 간트에서만 선다**(moai-i4hf.27r, `Browse::enabled`) — 목록의 키보다 먼저 떨어진다. 다
         // 적지 않는다: 확대·오늘·맞춤만 대고, 좌우와 쪽 넘기기는 `moai tui --help` 가 댄다.
         order.extend([
@@ -10352,6 +10357,9 @@ pub(super) mod tests {
                     // 맨 앞에 두므로 폭이 모자라면 이것이 먼저 떨어진다: 80칸에서는 `Bksp 나가기`
                     // 가 함께 설 자리가 없다: 드나드는 키 **둘 다** 선 줄에서만 이 칸이 빠진다.
                     (c.projects > 0 && (c.leaf || c.root)).then_some("0 프로젝트"),
+                    // 키 목록은 그 앞에서 먼저 떨어진다(moai-ucyr) — 드나드는 키가 하나 빠지고, `0` 이 안 서거나 둘 다 빠진
+                    // 줄에서만 자리가 난다.
+                    ((c.leaf || c.root) && (c.projects == 0 || (c.leaf && c.root))).then_some("? 키 목록"),
                     Some("Esc 풀기"),
                     Some("SPC 메뉴"),
                 ]
@@ -10387,8 +10395,34 @@ pub(super) mod tests {
         }
     }
 
+    /// **`?`·`SPC h` 가 키 목록 창을 열고, 이동키가 굴리고, 연 키·Esc 가 닫는다**(moai-ucyr). 창이 떠 있는 동안 Esc 는
+    /// 창의 것이다 — 걸어 둔 거름망을 같이 풀면 창을 닫으려던 사람이 목록까지 잃는다. 첫 화면의 바는 `?` 를 댄다.
+    #[test]
+    fn the_help_sheet_opens_scrolls_and_closes() {
+        let mut a = app();
+        let bar = render(&mut a, 80, 20).last().cloned().unwrap_or_default();
+        assert!(bar.contains("? 키 목록"), "80칸 첫 화면 바가 키 목록을 안 댄다 — {bar:?}");
+        a.hung = Some(Hung::Filter { text: "tag=x".into(), grep: None });
+        a.hit("?");
+        let screen = render(&mut a, 80, 20).join("\n");
+        assert!(a.help.is_some(), "`?` 가 창을 안 열었다");
+        for want in ["키 목록", "탐색", "다 펼침", "Tab"] {
+            assert!(screen.contains(want), "{want:?} 가 창에 없다\n{screen}");
+        }
+        assert_eq!(render(&mut a, 80, 20).last().map(String::as_str), Some(" j·k 굴리기 ?·Esc 닫기"));
+        a.hit("j");
+        assert_eq!(a.help.as_ref().map(|s| s.top), Some(1), "`j` 가 창을 안 굴렸다");
+        a.hit("Esc");
+        assert!(a.help.is_none(), "Esc 가 창을 안 닫았다");
+        assert!(a.hung.is_some(), "창을 닫는 Esc 가 거름망까지 풀었다");
+        a.hit("SPC h");
+        assert!(a.help.is_some(), "`SPC h` 가 창을 안 열었다");
+        a.hit("SPC h");
+        assert!(a.help.is_none(), "`SPC h` 가 창을 안 닫았다");
+    }
+
     /// **80칸에서 바의 키가 하나도 안 떨어진다** — 옮긴 키가 빠져 자리가 났다(moai-7sjm). 상세
-    /// 포커스에서는 드나드는 키가 빠진다.
+    /// 포커스에서는 드나드는 키가 빠진다. 키 목록(`?`)은 여기서 먼저 떨어지는 칸이라 안 센다.
     ///
     /// 드나드는 키가 둘 다 듣는 자리(층이 있는 프로젝트의 에픽 안 `..`)에서 잰다 — 바가 가장 긴 곳이다.
     #[test]

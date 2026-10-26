@@ -409,6 +409,13 @@ mod tests {
     /// 메뉴의 Esc 는 메뉴만 닫고 창은 남는다.
     #[test]
     fn spc_over_the_window_opens_only_the_screen_menu() {
+        // 키 목록(moai-ucyr)은 통계 창 위에 뜨고, 닫으면 통계 창이 그대로 선다.
+        let mut b = app();
+        b.hit("SPC g s SPC h");
+        assert!(b.help.is_some() && matches!(b.mode, Mode::Stats(_)), "통계 창 위에서 SPC h 가 키 목록을 안 열었다");
+        b.hit("Esc");
+        assert!(b.help.is_none() && matches!(b.mode, Mode::Stats(_)), "키 목록을 닫는 Esc 가 통계 창까지 닫았다");
+
         use super::super::{keys::Screen, menu, view::Layout};
         let mut a = app();
         a.hit("SPC g s SPC");
