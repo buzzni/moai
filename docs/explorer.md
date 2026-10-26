@@ -203,7 +203,9 @@ not know.
 - `Esc` or `SPC` closes it, and `Backspace` goes one level up
 - Toggles and sorts leave it open so you can try one and watch the screen change;
   that level says so with an `Esc` hint
-- A movement key closes it and makes the move in the same press
+- A movement key closes it and makes the move in the same press, unless an item
+  on that level holds the letter: `SPC h` opens [the key list](#the-key-list)
+  rather than folding the row, and `SPC g` opens the screens
 
 The mouse works on the open menu too. Click an item and it is as if you pressed
 its key — a group goes one level down and a toggle keeps the menu open. `Esc` and

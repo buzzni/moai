@@ -553,8 +553,8 @@ BACKLOG
   stands up only what works where you are, ignores keys it does not know,
   closes on {key:menu.close} or SPC and goes one level up on {key:menu.up}. Keys that move
   the focused pane close the menu and make that move in the same press,
-  unless a key on that level holds the letter (SPC g, {key:browse.go_list}, {key:browse.cell_names},
-  {key:browse.deferred}, {key:browse.read_group}).
+  unless a key on that level holds the letter (SPC g, SPC h,
+  {key:browse.go_list}, {key:browse.cell_names}, {key:browse.deferred}, {key:browse.read_group}).
   Toggles and sorts (SPC v, SPC c, SPC s) do not close it — try them, watch
   the state, and leave with {key:menu.close}. That level says so at the bottom right with a
   close hint.

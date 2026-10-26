@@ -240,7 +240,8 @@ impl App {
     ///
     /// **이 키가 알림을 걷는가**를 답한다 — 부르는 쪽([`App::key`])이 거짓이면 알림을 도로 세운다. 거짓은 아무 동작도
     /// 안 돈 키다: 메뉴만 만진 키(열기·닫기·한 층 오르내리기·모르는 키), 메뉴를 닫은 이동키(그 닫는 몫, moai-y8v2),
-    /// 그리고 둘째 키를 기다리는 `g` — 탐색의 규칙과 같다(`a_prefix_waiting_for_its_next_key_keeps_the_notice`). 화면을
+    /// 둘째 키를 기다리는 `g`, 그리고 키 목록 창을 연 `SPC h`(읽기만 하는 창이다) — 탐색의 규칙과 같다
+    /// (`a_prefix_waiting_for_its_next_key_keeps_the_notice`). 화면을
     /// 고른 키와 창의 키(굴리기·`b`·Esc), 모르는 키는 참이다.
     pub(super) fn stats_key(&mut self, k: KeyEvent) -> bool {
         if menu::open(&self.chord) || LEADER.matches(k) {
@@ -265,9 +266,10 @@ impl App {
                     self.go(to, &rows);
                     true
                 }
+                // 키 목록 창을 연 키는 알림을 안 걷는다 — 읽기만 하는 창이다(`App::key` 의 같은 갈래, 리뷰).
                 Some(Browse::Help) => {
                     self.open_help(&rows);
-                    true
+                    false
                 }
                 Some(Browse::Step(m)) => {
                     if let Mode::Stats(w) = &mut self.mode {

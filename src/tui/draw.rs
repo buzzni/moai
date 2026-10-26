@@ -10421,6 +10421,34 @@ pub(super) mod tests {
         assert!(a.help.is_none(), "`SPC h` 가 창을 안 닫았다");
     }
 
+    /// **창 위의 SPC 는 메뉴처럼 받는다**(리뷰) — SPC 뒤에 SPC 열을 못 잇는 이동키는 버려지지 않고 창을 굴리고, Esc 는
+    /// 기다림만 걷는다. 창을 여닫는 키는 쓰기의 알림을 안 걷는다 — 읽기만 하는 창이다.
+    #[test]
+    fn spc_over_the_help_sheet_keeps_the_next_key_and_the_notice_survives() {
+        let mut a = app();
+        a.notice = Some("적었다".into());
+        a.hit("?");
+        assert!(a.help.is_some());
+        assert_eq!(a.notice.as_deref(), Some("적었다"), "`?` 가 알림을 걷었다");
+        a.hit("j SPC SPC Esc");
+        assert!(a.help.is_none());
+        assert_eq!(a.notice.as_deref(), Some("적었다"), "창을 여닫는 동안 알림이 걷혔다");
+
+        let mut a = app();
+        a.hit("?");
+        render(&mut a, 80, 20);
+        a.hit("SPC j");
+        assert_eq!(a.help.as_ref().map(|s| s.top), Some(1), "SPC 뒤의 `j` 가 버려졌다");
+        // 두 층 기다리던 `SPC g` 뒤도 같다.
+        a.hit("SPC g j");
+        assert_eq!(a.help.as_ref().map(|s| s.top), Some(2), "SPC g 뒤의 `j` 가 버려졌다");
+        a.hit("SPC Esc");
+        assert!(a.help.is_some(), "SPC 뒤의 Esc 가 기다림 말고 창까지 닫았다");
+        assert!(a.chord.held().is_empty(), "SPC 뒤의 Esc 가 기다림을 안 걷었다");
+        a.hit("SPC ?");
+        assert!(a.help.is_none(), "SPC 뒤의 `?` 가 창을 안 닫았다");
+    }
+
     /// **80칸에서 바의 키가 하나도 안 떨어진다** — 옮긴 키가 빠져 자리가 났다(moai-7sjm). 상세
     /// 포커스에서는 드나드는 키가 빠진다. 키 목록(`?`)은 여기서 먼저 떨어지는 칸이라 안 센다.
     ///

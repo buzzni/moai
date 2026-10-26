@@ -1489,7 +1489,7 @@ mod tests {
         assert!(!help.contains("SPC q"), "옛 이름이 남았다");
         assert!(help.contains("\n    L        list                SPC g b  board"), "칸 맞춤이 무너졌다:\n{help}");
         // 글 속의 이름은 안 채운다 — `L, SPC c h` 처럼 선다.
-        assert!(help.contains("(SPC g, L, SPC c h,"), "{help}");
+        assert!(help.contains("\n  L, SPC c h,"), "{help}");
         assert!(help.contains("(none)"), "뗀 키를 안 댔다");
         // 위의 줄 글(`moai --help` 의 명령 목록)도 바뀐다.
         let top = crate::cli::command(&map);

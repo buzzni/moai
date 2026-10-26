@@ -9,10 +9,10 @@
 //!
 //! **조각이다.** 표와 [`Ctx`] 만 받는다. 연 동안 키를 받고 그리는 것은 든 쪽(`App::help_key`, `draw::help_sheet`)이다.
 
-use super::keys::{Bind, Browse, Ctx, Keymap, LEADER, Side, Stat, Wiki, move_word, name_of_seq};
+use super::keys::{Bind, Browse, Ctx, Key, LEADER, Side, Stat, Wiki, move_word, name_of_seq};
 use super::scroll::Move;
 use crate::i18n::say;
-use ratatui::crossterm::event::KeyEvent;
+use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 /// 창의 한 줄.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -34,9 +34,10 @@ pub struct Sheet {
 }
 
 impl Sheet {
-    /// 지금 표와 자리로 짓는다. 연 뒤에 키 파일이 바뀌어도 이 창은 연 때의 것이다 — 다시 열면 새로 읽는다.
-    pub fn open(keys: &Keymap, c: &Ctx) -> Sheet {
-        Sheet { lines: lines(keys, c), top: 0, height: 0 }
+    /// 지금 자리로 짓는다 — 키 표는 [`Ctx::keys`] 다. 연 뒤에 키 파일이 바뀌어도 이 창은 연 때의 것이다 — 다시 열면
+    /// 새로 읽는다.
+    pub fn open(c: &Ctx) -> Sheet {
+        Sheet { lines: lines(c), top: 0, height: 0 }
     }
 
     /// 굴린다. 끝을 넘지 않는다 — 마지막 줄이 창 바닥에 서면 더 안 내려간다.
@@ -55,6 +56,12 @@ impl Sheet {
         }
         .min(last);
     }
+
+    /// 휠 — `by` 줄을 굴린다(음수면 위로). 목록·상세와 같은 걸음([`super::mouse::WHEEL`])을 부르는 쪽이 준다.
+    pub fn roll(&mut self, by: isize) {
+        let last = self.lines.len().saturating_sub(self.height.max(1));
+        self.top = self.top.saturating_add_signed(by).min(last);
+    }
 }
 
 /// 줄이 SPC 로 시작하나.
@@ -65,25 +72,38 @@ fn leader<A>(b: &Bind<A>) -> bool {
 /// 그 동작의 키들 가운데 `pick` 이 고른 것 — **키 열에서 이름을 짓는다**(`moai keys` 와 같다). 표의 이름(`label`)은
 /// 바가 대는 첫 키라, 그것만 읽으면 이름 없이 도는 `l`·`h`·`Tab`·화살표가 이 창에서 빠진다.
 ///
-/// **같은 접두어의 같은 길이 열은 첫째만 댄다** — `Ctrl-w w` 곁의 `Ctrl-w Ctrl-w` 는 Ctrl 을 쥔 채 누른 꼴을 받아 주는
-/// 것이지 따로 익힐 키가 아니다. 한 키짜리(`=`·`+`)는 다 댄다.
+/// **Ctrl 을 쥔 채 이어 누른 꼴은 첫째만 댄다** — `Ctrl-w w` 곁의 `Ctrl-w Ctrl-w`·`Ctrl-w W` 는 손이 Ctrl·Shift 를 놓지
+/// 않은 꼴을 받아 주는 것이지 따로 익힐 키가 아니다([`held_down`]). 접두어와 길이가 같아도 뒤 키가 다르면 다 댄다(리뷰) —
+/// `keys.toml` 의 `top = ["g g", "g t"]` 는 둘 다 사람이 고른 키다. 한 키짜리(`=`·`+`)도 다 댄다.
 fn names<A: Copy + PartialEq>(table: &[Bind<A>], act: A, pick: impl Fn(&Bind<A>) -> bool) -> String {
     let mut out: Vec<String> = Vec::new();
-    let mut heads: Vec<(usize, KeyEvent)> = Vec::new();
+    let mut seen: Vec<&[Key]> = Vec::new();
     for b in table.iter().filter(|b| b.act == act && pick(b)) {
-        if b.seq.len() > 1 {
-            let head = (b.seq.len(), b.seq[0].event());
-            if heads.contains(&head) {
-                continue;
-            }
-            heads.push(head);
+        if b.seq.len() > 1 && seen.iter().any(|s| held_down(s, b.seq)) {
+            continue;
         }
+        seen.push(b.seq);
         let n = name_of_seq(b.seq);
         if !out.contains(&n) {
             out.push(n);
         }
     }
     out.join("·")
+}
+
+/// 두 열이 **Ctrl·Shift 를 쥐었는가만** 다른가 — 첫 키(접두어)가 같고, 뒤 키들이 Ctrl·Shift 와 글자의 대소문자를 빼면 같다.
+fn held_down(a: &[Key], b: &[Key]) -> bool {
+    fn loose(k: &Key) -> (KeyCode, KeyModifiers) {
+        let e = k.event();
+        let code = match e.code {
+            KeyCode::Char(c) => KeyCode::Char(c.to_ascii_lowercase()),
+            code => code,
+        };
+        (code, e.modifiers.difference(KeyModifiers::CONTROL | KeyModifiers::SHIFT))
+    }
+    a.len() == b.len()
+        && a.first().map(|k| k.event()) == b.first().map(|k| k.event())
+        && a[1..].iter().zip(&b[1..]).all(|(x, y)| loose(x) == loose(y))
 }
 
 /// 칸 옮기기의 낱말 — 바는 **지금 가는 칸의 이름**(`상세`)을 대지만, 목록에서는 어느 쪽으로 가는 키인지를 댄다.
@@ -109,9 +129,9 @@ fn once<A: Copy + PartialEq>(table: &[Bind<A>], keep: impl Fn(&Bind<A>) -> bool)
     seen
 }
 
-/// 창의 줄 전부. 키가 다 떼인 동작(`"none"`)은 안 선다 — 누를 키가 없다.
-pub fn lines(keys: &Keymap, c: &Ctx) -> Vec<Line> {
-    let lang = c.lang;
+/// 창의 줄 전부 — 키 표는 [`Ctx::keys`] 에서 읽는다. 키가 다 떼인 동작(`"none"`)은 안 선다 — 누를 키가 없다.
+pub fn lines(c: &Ctx) -> Vec<Line> {
+    let (lang, keys) = (c.lang, &c.keys);
     let mut out = Vec::new();
     let mut section = |head: &str, rows: Vec<(String, String)>| {
         let rows: Vec<_> = rows.into_iter().filter(|(k, _)| !k.is_empty()).collect();
@@ -179,9 +199,13 @@ pub fn lines(keys: &Keymap, c: &Ctx) -> Vec<Line> {
     section(say(lang, "tui.help.gantt"), rows);
 
     // 통계·위키 창의 이동은 탐색과 같은 키라 이동 절이 이미 댄다.
+    //
+    // **자리마다 갈리는 낱말은 둘을 다 댄다**(리뷰) — 이 창은 그 창의 지금 상태를 모른다. 바의 낱말(`b 날마다`)은 누르면
+    // 갈 곳이라, 하나만 박으면 주마다로 연 통계 창에서 `b` 가 이 창이 대는 것과 거꾸로 간다.
+    let both = |a: &str, b: &str| if a == b { a.to_string() } else { format!("{a} / {b}") };
     let rows = once(keys.stats, |b| !matches!(b.act, Stat::Step(_)))
         .into_iter()
-        .map(|a| (names(keys.stats, a, |_| true), a.what(false, lang).to_string()))
+        .map(|a| (names(keys.stats, a, |_| true), both(a.what(true, lang), a.what(false, lang))))
         .collect();
     section(say(lang, "tui.help.stats"), rows);
 
@@ -189,11 +213,12 @@ pub fn lines(keys: &Keymap, c: &Ctx) -> Vec<Line> {
         .into_iter()
         .map(|a| {
             let what = match a {
-                Wiki::FocusNext => focus_word(true, None, lang),
-                Wiki::Focus(s) => focus_word(true, Some(s), lang),
-                _ => a.what(true, false, false, lang),
+                Wiki::FocusNext => focus_word(true, None, lang).to_string(),
+                Wiki::Focus(s) => focus_word(true, Some(s), lang).to_string(),
+                // 목록에서는 읽기, 본문에서는 링크 고르기 — 둘 다 댄다(위의 `both`).
+                _ => both(a.what(false, false, false, lang), a.what(true, false, false, lang)),
             };
-            (names(keys.wiki, a, |_| true), what.to_string())
+            (names(keys.wiki, a, |_| true), what)
         })
         .collect();
     section(say(lang, "tui.help.wiki"), rows);
@@ -204,6 +229,8 @@ pub fn lines(keys: &Keymap, c: &Ctx) -> Vec<Line> {
 mod tests {
     use super::*;
     use crate::i18n::Lang;
+
+    use super::super::keys::Keymap;
 
     fn ctx() -> Ctx {
         Ctx { lang: Lang::En, keys: Keymap::default(), ..Ctx::default() }
@@ -224,7 +251,7 @@ mod tests {
     #[test]
     fn the_sheet_names_the_keys_that_start_without_spc() {
         let c = ctx();
-        let lines = lines(&Keymap::default(), &c);
+        let lines = lines(&c);
         let keys: Vec<&str> = lines
             .iter()
             .filter_map(|l| match l {
@@ -244,10 +271,40 @@ mod tests {
         assert!(lines.iter().any(|l| matches!(l, Line::Head(h) if h == "SPC menu")));
     }
 
+    /// **Ctrl·Shift 를 쥔 꼴만 접고, 사람이 고른 다른 키는 다 댄다**(리뷰) — 기본 표의 `Ctrl-w Ctrl-w` 는 접히고,
+    /// `keys.toml` 이 한 동작에 준 같은 접두어·같은 길이의 두 열(`g g`·`g t`)은 둘 다 선다.
+    #[test]
+    fn a_held_ctrl_variant_folds_but_a_second_key_of_your_own_stands() {
+        let c = ctx();
+        let base = lines(&c);
+        // 탐색과 위키 창이 저마다 한 줄씩 — 둘 다 `Ctrl-w Ctrl-w`·`Ctrl-w W` 를 접는다.
+        assert_eq!(keys_of(&base, "next pane"), ["Ctrl-w w", "Ctrl-w w"], "기본 표의 Ctrl 쥔 꼴이 따로 섰다");
+        let (keys, problems) = super::super::keymap::build("[moves]\ntop = [\"g g\", \"g t\"]\n");
+        assert_eq!(problems, Vec::new(), "시험의 전제 — 키 파일이 성하다");
+        let mine = lines(&Ctx { keys, ..ctx() });
+        assert!(
+            mine.iter().any(|l| matches!(l, Line::Key { keys, .. } if keys.split('·').any(|n| n == "g t"))),
+            "사람이 더한 `g t` 가 창에서 빠졌다: {mine:?}"
+        );
+    }
+
+    /// **휠은 `by` 줄씩 굴리고 끝을 안 넘는다** — 걸음은 목록·상세와 같은 수를 부르는 쪽이 준다.
+    #[test]
+    fn the_wheel_rolls_by_its_step_and_stops_at_the_ends() {
+        let mut s = Sheet::open(&ctx());
+        s.height = 10;
+        s.roll(3);
+        assert_eq!(s.top, 3);
+        s.roll(-5);
+        assert_eq!(s.top, 0);
+        s.roll(isize::MAX);
+        assert_eq!(s.top, s.lines.len() - 10);
+    }
+
     /// **굴리기는 끝을 넘지 않는다** — 마지막 줄이 바닥에 서면 더 안 내려가고, 맨 위에서 위로 가도 0 이다.
     #[test]
     fn scrolling_stops_at_both_ends() {
-        let mut s = Sheet::open(&Keymap::default(), &ctx());
+        let mut s = Sheet::open(&ctx());
         s.height = 10;
         let last = s.lines.len() - 10;
         s.step(Move::Bottom);
