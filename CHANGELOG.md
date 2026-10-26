@@ -12,6 +12,28 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+### Changed
+
+- **Panes that `moai-tmux` and `moai-recover` open keep no shell under the
+  session.** They open with `remain-on-exit` instead of `; exec bash`: when
+  `claude` (or Codex) exits, its last screen stays and tmux drops keys and
+  refuses pastes aimed at it, so a message meant for a dead session no longer
+  runs in a shell. The input-box check reads `#{pane_dead}` beside
+  `#{pane_in_mode}`. Panes a person opened keep the session-map check as before.
+  (moai-jn8d)
+
+### Fixed
+
+- **A repository path with a space no longer breaks the launch lines** in
+  `moai-tmux`, `moai-cmux` and `moai-recover` — `<root>` and `<cwd>` are quoted
+  in `split-window -c`, in cmux's `--command 'cd …'` and in the line printed to
+  type outside both. (moai-jn8d)
+- **A worker started with cmux `claude-teams` gets its tab in the session map.**
+  Its record carries the shim's stand-in (`cmux:@….%…`) as `tmux`, which the map
+  read as a tmux pane, so the cmux branch gave that worker — and a supervisor
+  started that way — `-`. Only a real tmux pane id (`:@<n>.%<n>`) counts as tmux
+  now. (moai-jn8d)
+
 ## [0.27.0] - 2026-10-26
 
 ### Added

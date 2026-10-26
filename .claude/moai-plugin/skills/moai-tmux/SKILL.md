@@ -45,7 +45,7 @@ under `~/.claude/sessions/`, and the lines below print one row per record, tab-s
 
 ```sh
 python3 - <<'PY'
-import glob, json, os, subprocess, sys
+import glob, json, os, re, subprocess, sys
 def out(*cmd, **env):
     try:
         return subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, universal_newlines=True, env=dict(os.environ, **env), timeout=10).stdout.strip()
@@ -104,8 +104,9 @@ for path in sorted(glob.glob(os.path.expanduser("~/.claude/sessions/*.json"))):
         continue
     start = started(pid)
     alive = bool(start) and start == " ".join(str(r.get("procStart")).split())
-    tmux = r.get("tmux") or ""
-    pane = tmux.rpartition(".")[2] if "%" in tmux else ""
+    told = r.get("tmux") or ""
+    tmux = told if re.search(r":@\d{1,6}\.%\d{1,6}$", told) else ""
+    pane = tmux.rpartition(".")[2] if tmux else ""
     if r.get("entrypoint") == "remote_mobile":
         pane = ""
     elif alive and (mine or cmux) and r.get("kind") not in (None, "interactive"):
@@ -115,7 +116,7 @@ for path in sorted(glob.glob(os.path.expanduser("~/.claude/sessions/*.json"))):
         if not here or here != device(out("tmux", "display", "-p", "-t", pane, "#{pane_tty}")):
             pane = ""
     elif alive and cmux:
-        pane = "" if tmux else surfaces.get(pid)
+        pane = "" if told and not told.startswith("cmux:") else surfaces.get(pid)
     rows.append((alive, pane, r))
 if rows and not any(alive for alive, _, _ in rows):
     sys.exit("no record reads alive, not even this session's own: this shell cannot read process start times (a sandbox, or no ps), so act on no row")
@@ -156,11 +157,14 @@ from earlier in the round may be a worker that has died since (the next section)
 
 ## Is the input box empty
 
-    tmux display -p -t <pane> '#{pane_in_mode}'
+    tmux display -p -t <pane> '#{pane_in_mode} #{pane_dead}'
     tmux capture-pane -p -e -t <pane>
 
-The first line prints `1` while the person is scrolling the pane (copy mode) — keys you send
-then go to tmux's copy mode, not to Claude Code, so a pane in a mode is theirs: do not type.
+The first line prints two values. The first is `1` while the person is scrolling the pane (copy
+mode) — keys you send then go to tmux's copy mode, not to Claude Code, so a pane in a mode is
+theirs: do not type. The second is `1` once the pane's program has exited — a pane a moai skill
+opened keeps its last screen under `remain-on-exit` and takes no keys: the session there is
+dead, so do not type. When it prints neither value, the pane is gone: do not type either.
 Claude Code's input box is the line that starts with `❯`, under the conversation, between two
 `─` rules. **Empty** is `❯` followed by nothing, or by Claude Code's dim placeholder — `-e`
 keeps the colours, and the placeholder is drawn dim (SGR `2`, or a grey foreground) where the
@@ -168,9 +172,9 @@ person's text is not. Anything else — a word, a pasted block, a half-typed com
 person's, and if you cannot tell the placeholder from their draft, it is theirs. A pane with
 no `❯` box at all (a shell prompt, a dialog) is not a box to type into either. **Even an empty
 box counts only while the session map, run again just before, still reads that session
-`alive` in that pane** — the screen alone cannot tell: a pane whose Claude Code was killed keeps
-its last frame, box and all, above the shell `exec bash` started, and the keys go to that
-shell.
+`alive` in that pane** — the screen alone cannot tell: in a pane the person opened, a Claude
+Code that was killed keeps its last frame, box and all, above the shell it ran in, the second
+value stays `0`, and the keys go to that shell.
 
 **Then do not type. Tell the person which pane holds what, and go on as if this skill were not
 here.**
@@ -256,7 +260,8 @@ has read `busy` far longer than its work should take, look at its pane once:
 
 and read why it stopped — a permission prompt, a question (`AskUserQuestion`), an API or
 rate-limit error, or a process that ended (a shell prompt where the box was, or under its last
-box — a killed Claude Code leaves its last screen behind); whether the session is still alive,
+box — a killed Claude Code leaves its last screen behind — or, in a pane you opened, a last line
+`Pane is dead (…)` that `remain-on-exit` left under it); whether the session is still alive,
 the session map says. **Tell the person** what the pane shows and which pane it is. Do not answer the prompt, do not press a
 key, and do not look again in a loop. A process that ended is a dead session: bringing it
 back is `moai-recover`, once the person asks for it.
@@ -267,12 +272,17 @@ When the supervisor's 2 finds no worker, ask the person **once** whether to open
 panes, and how many — one question covers several panes. Open a pane only on their yes, or
 when they asked you for it. On a yes, for each pane:
 
-    tmux split-window -P -F '#{pane_id}' -t "$TMUX_PANE" -c <root> 'claude --model <model>; exec bash'
+    tmux split-window -P -F '#{pane_id}' -t "$TMUX_PANE" -c "<root>" 'claude --model <model>' \; set-option -p remain-on-exit on
     tmux select-layout -t "$TMUX_PANE" tiled
 
-`<root>` is the `root dir` of the supervisor's 2 and `<model>` the model picked in 2-1. **No
-other flag.** The first line prints the new pane's id; `exec bash` keeps a shell in the pane
-when `claude` exits, so what it said stays readable. The pane belongs to the same person —
+`<root>` is the `root dir` of the supervisor's 2 and `<model>` the model picked in 2-1 — keep
+the double quotes, so a path with a space stays one argument. **No other flag.** The first line
+prints the new pane's id. The `set-option` after `\;` runs in the same tmux call, on the new
+pane, before `claude` can exit — set in a call of its own, a `claude` that ended at once would
+have taken its pane, and what it said, with it. `remain-on-exit` keeps the pane when `claude`
+exits: its last screen stays readable, `#{pane_dead}` reads `1`, and tmux refuses pastes
+aimed at it and drops keys — nothing you send lands in a shell under a dead session, though
+`send-keys` still exits `0`. A dead pane stays until the person closes it; never kill it. The pane belongs to the same person —
 it is their interactive session like any other.
 
 Once it has started (a separate call: `capture-pane` of the new pane shows the `❯` box), look
@@ -338,10 +348,12 @@ Codex can leave its last frame over a shell. Never use another server's pane ids
 
 ### Read the Codex input box
 
-    tmux display -p -t <pane> '#{pane_in_mode}'
+    tmux display -p -t <pane> '#{pane_in_mode} #{pane_dead}'
     tmux capture-pane -p -e -t <pane>
 
-If the first line prints `1`, the person is in copy mode: the pane is theirs, so do not type.
+If the first value is `1`, the person is in copy mode: the pane is theirs, so do not type.
+If the second is `1`, Codex has exited and the pane kept its last screen: no box, do not type.
+If it prints neither value, the pane is gone: do not type.
 
 The lowest current composer starts with `›` (U+203A) and an ordinary space (U+0020).
 Its empty placeholder is `Ask Codex to do anything`. A past user message also starts with
@@ -373,11 +385,13 @@ If any check is unclear or any input is refused, do not type again; ask the pers
 When no idle Codex worker is left, ask the person **once** whether to open new panes and
 how many. Open one only on their yes, or when they asked for it. On a yes:
 
-    tmux split-window -P -F '#{pane_id}' -t "$TMUX_PANE" -c <root> 'codex --model <codex>; exec bash'
+    tmux split-window -P -F '#{pane_id}' -t "$TMUX_PANE" -c "<root>" 'codex --model <codex>' \; set-option -p remain-on-exit on
     tmux select-layout -t "$TMUX_PANE" tiled
 
-The first line prints the new pane id. This is an ordinary interactive session; `exec bash`
-keeps its final screen readable after Codex exits. Read the new pane separately and confirm
+The first line prints the new pane id; its `set-option` lands on the new pane in the same tmux
+call, before Codex can exit. This is an ordinary interactive session; `remain-on-exit` keeps
+its final screen readable after Codex exits, and the dead pane takes no keys — tmux refuses
+pastes and drops keys. Read the new pane separately and confirm
 the live process and empty composer above. Folder trust and hook trust prompts belong to
 the person; tell them what the pane shows. Do not assume cmux's wrapper enabled or trusted
 hooks here. The person checks moai in `/hooks`; the worker keeps the five rules even when
