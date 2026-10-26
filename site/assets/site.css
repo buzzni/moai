@@ -19,6 +19,10 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 a { color: inherit; }
+/* 한국어는 낱말 단위로 줄을 바꾼다 — 페이지 전체에(히어로·장면·사용 방법). 기본값은 한글 음절마다 끊어 폰 폭에서
+   "어/떤" 처럼 낱말 가운데가 갈렸다(moai-s7f7.xqm). 일본어는 낱말 사이에 빈칸이 없어 keep-all 이면 구두점에서만
+   끊기니 걸지 않는다. 빈칸 없이 긴 덩이(경로·명령)는 overflow-wrap 이 칸 끝에서 끊어 가로 넘침을 막는다 */
+html[lang="ko"] body { word-break: keep-all; overflow-wrap: break-word; }
 code, pre, kbd { font-family: var(--mono); }
 p code, li code, figcaption code {
   font-size: .9em; background: var(--surface-2); border: 1px solid var(--line);
@@ -213,8 +217,6 @@ nav .links a[aria-current="page"] { color: var(--ink); }
 .doc-toc a { color: var(--muted); text-decoration: none; }
 .doc-toc a:hover { color: var(--ink); }
 .doc-body { min-width: 0; max-width: 780px; overflow-wrap: anywhere; }
-/* 한국어만 낱말 단위로 줄을 바꾼다 — 일본어는 낱말 사이에 빈칸이 없어 keep-all 이면 구두점에서만 끊긴다 */
-html[lang="ko"] .doc-body { word-break: keep-all; }
 .doc-body h1 { font-size: clamp(2rem, 4.6vw, 3rem); letter-spacing: -.025em; line-height: 1.15; margin: 0 0 32px; }
 .doc-body h2 { font-size: clamp(1.4rem, 2.6vw, 1.8rem); letter-spacing: -.015em; line-height: 1.25; margin: 72px 0 16px; padding-top: 24px; border-top: 1px solid var(--line); scroll-margin-top: 76px; }
 .doc-body h3 { font-size: 1.15rem; line-height: 1.35; margin: 40px 0 12px; scroll-margin-top: 76px; }
