@@ -403,7 +403,7 @@ fn git_place(root: &Path, budget: Option<std::time::Duration>) -> Option<GitPlac
     if own.is_empty() || dir.is_empty() {
         return None;
     }
-    let (own, dir) = (root.join(own), root.join(dir));
+    let (own, dir) = (root.join(crate::git::native(own)), root.join(crate::git::native(dir)));
     let linked = crate::path::real(&own) != crate::path::real(&dir);
     Some(GitPlace { dir, under, linked })
 }

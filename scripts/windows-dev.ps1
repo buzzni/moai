@@ -6,10 +6,16 @@
 # Run it from a clone. It is safe to run again: what already stands is skipped.
 #
 # 1. Looks for Git for Windows, the Visual Studio C++ build tools (`ring` builds C
-#    with cl.exe) and rustup. **It installs nothing.** What is missing is printed as
-#    a `winget` command for the person to run, and the script stops there.
+#    with cl.exe) and rustup. On an ARM64 machine it looks for the ARM64 build tools
+#    and clang instead (moai-yc8r.tre): there the host target is
+#    aarch64-pc-windows-msvc, and `ring` compiles its C with `clang` from PATH.
+#    **It installs nothing.** What is missing is printed as a `winget` command (for a
+#    Visual Studio that already stands, its installer's `modify` command; for clang that
+#    stands off PATH, the directory to add) for the person to run, and the script stops
+#    there.
 # 2. `cargo --version` from the clone -- rustup reads rust-toolchain.toml and fetches
-#    the pinned toolchain for the host target (x86_64-pc-windows-msvc) by itself.
+#    the pinned toolchain for the host target (x86_64-pc-windows-msvc, or
+#    aarch64-pc-windows-msvc on ARM64) by itself.
 # 3. `cargo build --release`, `cargo clippy --all-targets --workspace -- -D warnings` and
 #    `cargo test --workspace --no-fail-fast`, one line each. Full output goes to
 #    target\windows-dev\*.log.
@@ -50,16 +56,69 @@ if (Get-Command git -ErrorAction SilentlyContinue) {
   $missing += 'winget install --id Git.Git -e'
 }
 
+# The machine's own architecture, not this shell's: an x64 PowerShell emulated on ARM64
+# Windows reads AMD64 in PROCESSOR_ARCHITECTURE, while rustup on that machine builds for
+# aarch64-pc-windows-msvc. Win32_Processor answers from the native WMI host (12 is ARM64);
+# where it cannot be asked, the environment is the best there is.
+$arm64 = $env:PROCESSOR_ARCHITECTURE -eq 'ARM64' -or $env:PROCESSOR_ARCHITEW6432 -eq 'ARM64'
+try {
+  if ((Get-CimInstance -ClassName Win32_Processor -ErrorAction Stop | Select-Object -First 1).Architecture -eq 12) {
+    $arm64 = $true
+  }
+} catch {}
+
 # vswhere ships with every Visual Studio installer, Build Tools included.
-$vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+# On ARM64 the host compiler is the ARM64 one, and `ring` needs clang for that target --
+# Visual Studio's own clang component is enough, once its bin directory is on PATH.
+$vcTools = if ($arm64) { 'Microsoft.VisualStudio.Component.VC.Tools.ARM64' } else { 'Microsoft.VisualStudio.Component.VC.Tools.x86.x64' }
+$vcAdd = '--add Microsoft.VisualStudio.Workload.VCTools --includeRecommended'
+if ($arm64) {
+  $vcAdd += ' --add Microsoft.VisualStudio.Component.VC.Tools.ARM64 --add Microsoft.VisualStudio.Component.VC.Llvm.Clang'
+  Say 'ARM64 machine -- looking for the ARM64 C++ build tools and clang'
+}
+$installer = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer'
+$vswhere = Join-Path $installer 'vswhere.exe'
 $vc = $null
+$anyVs = $null
 if (Test-Path -LiteralPath $vswhere) {
-  $vc = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+  $vc = & $vswhere -latest -products * -requires $vcTools -property installationPath
+  $anyVs = & $vswhere -latest -products * -property installationPath
+}
+# winget does nothing for a Visual Studio that already stands, so one that lacks the
+# components is told to add them through its own installer instead.
+$vcCommand = if ($anyVs) {
+  "& `"$(Join-Path $installer 'setup.exe')`" modify --installPath `"$anyVs`" $vcAdd --passive"
+} else {
+  "winget install --id Microsoft.VisualStudio.2022.BuildTools -e --override `"--quiet --wait $vcAdd`""
 }
 if ($vc) {
   Say "C++ build tools ok ($vc)"
 } else {
-  $missing += 'winget install --id Microsoft.VisualStudio.2022.BuildTools -e --override "--quiet --wait --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"'
+  $missing += $vcCommand
+}
+
+if ($arm64) {
+  if (Get-Command clang -ErrorAction SilentlyContinue) {
+    Say 'clang ok'
+  } else {
+    # Visual Studio installs clang without putting it on PATH. Point at it when it stands.
+    $llvm = $null
+    if (Test-Path -LiteralPath $vswhere) {
+      $vs = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Llvm.Clang -property installationPath
+      if ($vs) {
+        foreach ($llvmHost in 'ARM64', 'x64') {
+          $bin = Join-Path $vs "VC\Tools\Llvm\$llvmHost\bin"
+          if (Test-Path -LiteralPath (Join-Path $bin 'clang.exe')) { $llvm = $bin; break }
+        }
+      }
+    }
+    if ($llvm) {
+      $missing += "add $llvm to PATH (System Properties -> Environment Variables) -- ring builds its C with clang on ARM64"
+    } elseif ($vc) {
+      # Without the build tools the line above already adds clang along with them.
+      $missing += $vcCommand
+    }
+  }
 }
 
 if (Get-Command rustup -ErrorAction SilentlyContinue) {

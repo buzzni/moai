@@ -129,7 +129,15 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\windows-dev.ps1
 
 - It looks for Git for Windows, the Visual Studio C++ build tools (the `ring`
   crate builds C with `cl.exe`) and rustup. **It installs nothing**: what is
-  missing is printed as a `winget` command for you to run, and it stops there
+  missing is printed as a `winget` command for you to run (or, for a Visual
+  Studio that is already installed, its installer's `modify` command), and it
+  stops there
+- On an ARM64 machine it looks for the ARM64 build tools and `clang` instead —
+  the host target there is `aarch64-pc-windows-msvc`, and `ring` builds its C
+  for that target with `clang` from `PATH`. Visual Studio's clang component
+  does not put itself on `PATH`; when it stands, the script names the directory
+  to add. It reads the machine's architecture, so an x64 PowerShell running
+  emulated there gets the same check
 - rustup reads `rust-toolchain.toml` and fetches the pinned toolchain for the
   host target by itself; the script only checks `cargo --version`
 - It runs `cargo build --release`, `cargo clippy --all-targets -- -D warnings`
