@@ -144,13 +144,18 @@ fn plain_part(part: &[u8]) -> bool {
 ///
 /// - `//서버/공유/…` 는 `\\서버\공유\…`
 /// - `/c/…`·`/cygdrive/c/…` 는 `C:\…` — MSYS2 가 드라이브를 뿌리 밑 한 글자 이름으로 건다
-/// - 그 밖의 `/…`(`/home/me`·`/tmp`)는 MSYS2 가 깔린 자리(`root`) 밑이다. `root` 가 없으면 `None`
+/// - 그 밖의 `/…`(`/home/me`·`/tmp`)는 MSYS2 가 깔린 자리(`root` 가 대는 곳) 밑이다. `root` 가 없다고 하면 `None`
 /// - `/` 로 서지 않은 글은 `None` — 바꿀 것이 아니다
+///
+/// **`root` 는 그 밖의 `/…` 에서만 묻는다**(리뷰 moai-yc8r.itq). 운영의 `root` 는 `PATH` 의 디렉터리마다 `git.exe` 를
+/// 찾아 보는 일이라([`crate::git::native`]), 늘 물으면 `C:/…`·`../..` 만 받는 Git for Windows 의 기계에서도 `.git` 을
+/// 읽는 길(훅이 지나는 `worktree::own_git` 등)마다 프로세스에 한 번 `PATH` 를 훑는다 — 이 판 전에는 git 을 띄울 때만
+/// 훑었다. `PATH` 에 끊긴 네트워크 자리가 있으면 그 한 번이 훅을 세운다.
 ///
 /// **`/etc/fstab` 은 안 읽는다** — 거기서 따로 건 자리(`/work` → `D:\work`)는 `root` 밑으로 잘못 읽힌다. 알고 둔
 /// 구멍이다(사용자 결정). 글자만 보는 순수 함수라 리눅스에서 잰다 — 운영에서 부르는 자는 [`crate::git::native`] 다.
 #[cfg(any(not(unix), test))]
-pub(crate) fn from_posix(text: &str, root: Option<&Path>) -> Option<PathBuf> {
+pub(crate) fn from_posix(text: &str, root: impl FnOnce() -> Option<PathBuf>) -> Option<PathBuf> {
     let rest = text.strip_prefix('/')?;
     let back = |s: &str| s.replace('/', "\\");
     if let Some(unc) = rest.strip_prefix('/') {
@@ -168,7 +173,7 @@ pub(crate) fn from_posix(text: &str, root: Option<&Path>) -> Option<PathBuf> {
     if let Some(p) = drive(rest.strip_prefix("cygdrive/").unwrap_or(rest)) {
         return Some(p);
     }
-    let mut out = root?.as_os_str().to_owned();
+    let mut out = root()?.into_os_string();
     if !rest.is_empty() {
         if !out.as_encoded_bytes().ends_with(b"\\") {
             out.push("\\");
@@ -430,7 +435,7 @@ mod tests {
     #[test]
     fn an_msys_spelling_becomes_a_windows_path() {
         let root = Path::new(r"C:\msys64");
-        let conv = |t: &str| from_posix(t, Some(root)).map(|p| p.to_string_lossy().into_owned());
+        let conv = |t: &str| from_posix(t, || Some(root.to_path_buf())).map(|p| p.to_string_lossy().into_owned());
         assert_eq!(conv("/c/Users/me/proj").as_deref(), Some(r"C:\Users\me\proj"));
         assert_eq!(conv("/d").as_deref(), Some(r"D:\"));
         assert_eq!(conv("/c/").as_deref(), Some(r"C:\"));
@@ -438,17 +443,25 @@ mod tests {
         assert_eq!(conv("//srv/share/proj").as_deref(), Some(r"\\srv\share\proj"));
         assert_eq!(conv("/home/me/proj").as_deref(), Some(r"C:\msys64\home\me\proj"));
         assert_eq!(conv("/").as_deref(), Some(r"C:\msys64"));
-        assert_eq!(from_posix("/c/x", Some(Path::new(r"C:\msys64\"))).unwrap(), PathBuf::from(r"C:\x"));
+        let slashed = || Some(PathBuf::from(r"C:\msys64\"));
+        assert_eq!(from_posix("/c/x", slashed).unwrap(), PathBuf::from(r"C:\x"));
         assert_eq!(
-            from_posix("/tmp/x", Some(Path::new(r"C:\msys64\"))).unwrap().to_string_lossy(),
+            from_posix("/tmp/x", slashed).unwrap().to_string_lossy(),
             r"C:\msys64\tmp\x",
             "가름선을 두 번 붙였다"
         );
         // 두 글자 이름은 드라이브가 아니다.
         assert_eq!(conv("/cd/x").as_deref(), Some(r"C:\msys64\cd\x"));
         // MSYS2 뿌리를 모르면 드라이브 밖은 못 바꾼다.
-        assert_eq!(from_posix("/home/me", None), None);
-        assert_eq!(from_posix("/c/x", None).unwrap(), PathBuf::from(r"C:\x"));
+        assert_eq!(from_posix("/home/me", || None), None);
+        // 뿌리는 그 밖의 `/…` 에서만 묻는다(리뷰 moai-yc8r.itq) — 운영의 뿌리는 `PATH` 를 훑는 일이다. 늘 물으면
+        // (인자로 미리 셈하면) 여기서 패닉한다.
+        let unasked = || -> Option<PathBuf> { panic!("드라이브·UNC·바꿀 것 아닌 글에서 뿌리를 물었다") };
+        assert_eq!(from_posix("/c/x", unasked).unwrap(), PathBuf::from(r"C:\x"));
+        assert_eq!(from_posix("/cygdrive/d/y", unasked).unwrap(), PathBuf::from(r"D:\y"));
+        assert_eq!(from_posix("//srv/share", unasked).unwrap(), PathBuf::from(r"\\srv\share"));
+        assert_eq!(from_posix("C:/Users/me", unasked), None);
+        assert_eq!(from_posix("../..", unasked), None);
         // 바꿀 것이 아닌 글.
         assert_eq!(conv(r"C:/Users/me"), None);
         assert_eq!(conv("relative/x"), None);

@@ -209,7 +209,8 @@ fn argv<'a>(root: &'a Path, args: &'a [&str]) -> impl Iterator<Item = &'a std::f
 /// `PATH` 에서 처음 닿는 `git.exe` 가 **MSYS2 의 런타임으로 지은 것인가** — 그 옆에 `msys-2.0.dll` 이 있으면 그렇다
 /// (`pacman -S git`). Git for Windows 의 `git.exe` 는 네이티브라 옆에 그 DLL 이 없다(moai-vjdq.ch3).
 ///
-/// 디렉터리 목록과 파일 있음은 부르는 쪽이 건넨다 — 리눅스에서 시험하려는 것이다. 못 찾으면 `false`(MSVC 꼴 그대로).
+/// 디렉터리 목록과 파일 있음은 부르는 쪽이 건넨다 — 리눅스에서 시험하려는 것이다. 그렇다면 그 `git.exe` 의 디렉터리를
+/// 내고, 아니면 `None`(MSVC 꼴 그대로)이다.
 #[cfg(any(not(unix), test))]
 fn msys_runtime(path: &std::ffi::OsStr, exists: impl Fn(&Path) -> bool) -> Option<PathBuf> {
     std::env::split_paths(path).find(|dir| exists(&dir.join("git.exe"))).filter(|dir| exists(&dir.join("msys-2.0.dll")))
@@ -246,10 +247,11 @@ fn msys_git() -> bool {
 ///
 /// Windows 에서 `/` 로 선 글은 MSYS2 의 git 이 댄 것이다 — Git for Windows 는 `C:/…` 를 댄다. 드라이브·UNC 꼴은 늘
 /// 바꾸고, 그 밖은 `PATH` 의 git 이 MSYS2 의 것일 때 그 뿌리 밑으로 바꾼다([`crate::path::from_posix`]). 못 바꾸면
-/// 받은 글 그대로다 — 이 판 전과 같은 답이다.
+/// 받은 글 그대로다 — 이 판 전과 같은 답이다. **`PATH` 는 그 밖의 `/…` 를 받았을 때만 훑는다** — 그 까닭은
+/// [`crate::path::from_posix`] 에 있다.
 pub(crate) fn native(text: &str) -> PathBuf {
     #[cfg(not(unix))]
-    if let Some(p) = crate::path::from_posix(text, msys_bin().and_then(msys_root).as_deref()) {
+    if let Some(p) = crate::path::from_posix(text, || msys_bin().and_then(msys_root)) {
         return p;
     }
     PathBuf::from(text)

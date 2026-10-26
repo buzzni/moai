@@ -9,8 +9,10 @@
 #    with cl.exe) and rustup. On an ARM64 machine it looks for the ARM64 build tools
 #    and clang instead (moai-yc8r.tre): there the host target is
 #    aarch64-pc-windows-msvc, and `ring` compiles its C with `clang` from PATH.
-#    **It installs nothing.** What is missing is printed as a `winget` command (or the
-#    directory to add to PATH) for the person to run, and the script stops there.
+#    **It installs nothing.** What is missing is printed as a `winget` command (for a
+#    Visual Studio that already stands, its installer's `modify` command; for clang that
+#    stands off PATH, the directory to add) for the person to run, and the script stops
+#    there.
 # 2. `cargo --version` from the clone -- rustup reads rust-toolchain.toml and fetches
 #    the pinned toolchain for the host target (x86_64-pc-windows-msvc, or
 #    aarch64-pc-windows-msvc on ARM64) by itself.
