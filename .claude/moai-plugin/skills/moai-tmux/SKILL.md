@@ -104,9 +104,8 @@ for path in sorted(glob.glob(os.path.expanduser("~/.claude/sessions/*.json"))):
         continue
     start = started(pid)
     alive = bool(start) and start == " ".join(str(r.get("procStart")).split())
-    tmux = r.get("tmux") or ""
-    if not re.search(r":@\d{1,6}\.%\d{1,6}$", tmux):
-        tmux = ""
+    told = r.get("tmux") or ""
+    tmux = told if re.search(r":@\d{1,6}\.%\d{1,6}$", told) else ""
     pane = tmux.rpartition(".")[2] if tmux else ""
     if r.get("entrypoint") == "remote_mobile":
         pane = ""
@@ -117,7 +116,7 @@ for path in sorted(glob.glob(os.path.expanduser("~/.claude/sessions/*.json"))):
         if not here or here != device(out("tmux", "display", "-p", "-t", pane, "#{pane_tty}")):
             pane = ""
     elif alive and cmux:
-        pane = "" if tmux else surfaces.get(pid)
+        pane = "" if told and not told.startswith("cmux:") else surfaces.get(pid)
     rows.append((alive, pane, r))
 if rows and not any(alive for alive, _, _ in rows):
     sys.exit("no record reads alive, not even this session's own: this shell cannot read process start times (a sandbox, or no ps), so act on no row")

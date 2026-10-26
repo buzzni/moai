@@ -2835,7 +2835,9 @@ subject — that has actually happened. So in the root, supervisor and worker al
 /// - **기록의 `tmux` 는 진짜 tmux 꼴일 때만 tmux 다**(moai-jn8d.mxb) — Claude Code 는 그것을 `tmux display-message` 로
 ///   적는데, `claude-teams` 의 shim 은 `cmux:@<19자리>.%<19자리>` 로 답한다. 그것을 tmux 로 친 판은 claude-teams 로 띄운
 ///   일꾼(그리고 감독 제 줄)을 cmux 갈래에서 늘 `-` 로 냈다. 진짜 tmux 의 창·칸 id 는 서버가 0 부터 세는 작은 수라,
-///   끝이 `:@<1~6자리>.%<1~6자리>` 일 때만 tmux 로 읽고 아니면 없는 것으로 본다. 진짜 tmux 를 cmux 탭에서 돌리며 그
+///   끝이 `:@<1~6자리>.%<1~6자리>` 일 때만 tmux 칸으로 읽는다. cmux 갈래가 기록의 `tmux` 를 없는 것으로 보는 것은
+///   `cmux:` 로 여는 shim 의 답뿐이다 — 꼴이 깨진 다른 값(2026-10-26 에 기록 39개 중 둘이 `:.` 였다)은 tmux 에 섰을 수
+///   있으니 surface 를 대지 않는다(리뷰 moai-jn8d.d79 6번). 진짜 tmux 를 cmux 탭에서 돌리며 그
 ///   안에서 claude-teams 를 띄운 판도 이것으로 선다 — 그 일꾼의 기록은 가짜를 들어 tmux 갈래에서는 `-`, cmux 갈래에서는
 ///   제 surface 다
 /// - **cmux 가 `top` 을 모르면 칸이 모두 `-` 다** — `top` 은 v0.64.0, `moai-cmux` 가 기대는 나머지는 v0.65.0 부터다.
@@ -2927,9 +2929,8 @@ for path in sorted(glob.glob(os.path.expanduser("~/.claude/sessions/*.json"))):
         continue
     start = started(pid)
     alive = bool(start) and start == " ".join(str(r.get("procStart")).split())
-    tmux = r.get("tmux") or ""
-    if not re.search(r":@\d{1,6}\.%\d{1,6}$", tmux):
-        tmux = ""
+    told = r.get("tmux") or ""
+    tmux = told if re.search(r":@\d{1,6}\.%\d{1,6}$", told) else ""
     pane = tmux.rpartition(".")[2] if tmux else ""
     if r.get("entrypoint") == "remote_mobile":
         pane = ""
@@ -2940,7 +2941,7 @@ for path in sorted(glob.glob(os.path.expanduser("~/.claude/sessions/*.json"))):
         if not here or here != device(out("tmux", "display", "-p", "-t", pane, "#{pane_tty}")):
             pane = ""
     elif alive and cmux:
-        pane = "" if tmux else surfaces.get(pid)
+        pane = "" if told and not told.startswith("cmux:") else surfaces.get(pid)
     rows.append((alive, pane, r))
 if rows and not any(alive for alive, _, _ in rows):
     sys.exit("no record reads alive, not even this session's own: this shell cannot read process start times (a sandbox, or no ps), so act on no row")
@@ -8133,6 +8134,14 @@ stop sending outside work while a release runs",
             String::from_utf8(out.stdout).unwrap(),
             "alive\tplain\t-\tidle\t/repo\ts-plain\t-\n",
             "claude-teams 의 가짜 tmux 를 칸으로 냈다"
+        );
+        // shim 의 답이 아닌 깨진 `tmux`(`:.`)는 tmux 에 섰을 수 있다 — cmux 갈래가 surface 를 안 댄다(리뷰 moai-jn8d.d79 6번).
+        std::fs::write(teams.join("1.json"), record(me, &start, "plain", Some(":."))).unwrap();
+        let out = map(&teams, None, true);
+        assert_eq!(
+            String::from_utf8(out.stdout).unwrap(),
+            "alive\tplain\t-\tidle\t/repo\ts-plain\t-\n",
+            "꼴이 깨진 tmux 를 든 세션에 surface 를 냈다"
         );
         // 한 탭을 둘이 대면 둘 다 `-` 다 — 다리는 물려받은 환경뿐이라(cmux 탭 안의 zellij·screen) 그 탭에 친 것은 앞에 선
         // 세션 하나에만 간다. `bg` 기록은 띄운 세션의 탭을 물려받을 뿐 그 입력을 받지 않아 탭을 안 대고, 대는 쪽도 막지 않는다.
