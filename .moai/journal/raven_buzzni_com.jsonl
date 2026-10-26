@@ -8531,3 +8531,6 @@
 {"ts":"2026-10-26T07:31:07Z","id":"moai-jn8d.msb","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 (xhigh — epic-end review)"}
 {"ts":"2026-10-26T07:31:08Z","id":"moai-jn8d.msb","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"Took in 1-4 (aa0ce7bd: interrupted-turn 10s window, /new and /reset, utf-8 reads, unreadable transcript). Handed on 5 and 6 as backlog moai-zouz. Left 7-9 as cosmetic."}
 {"ts":"2026-10-26T07:31:08Z","id":"moai-jn8d","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: done — vyh merged into milestone/moai-b54s (c8758d93) with the history.jsonl /clear rule; review moai-jn8d.msb took 1-4 in; /resume-away parked as moai-zouz."}
+{"ts":"2026-10-26T07:31:33Z","id":"moai-jn8d","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Report-checked: c8758d93"}
+{"ts":"2026-10-26T07:41:24Z","id":"moai-yqgk","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"v0.29.0 릴리스"}
+{"ts":"2026-10-26T07:41:24Z","id":"moai-yqgk","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
