@@ -387,6 +387,14 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
         },
         |m| crate::archive::remove_ids(&repo.root, &m.restored),
     )?;
+    // **시작 칸으로 옮겼으면 이 세션의 집기로 적는다**(moai-w25x.831) — 훅은 명령줄의 글자로만 집기를 읽어
+    // `$M mv …` 처럼 껍데기가 풀 낱말로 친 집기를 놓쳤다. 이미 그 칸이던 줄도 적는다: 멈춘 일을 이어받는
+    // 세션이 `mv <id> <그 칸> --from <그 칸>` 으로 제 것이라 적는 자리다. 진 줄(`stale`)은 안 옮겼으니 안 든다.
+    if repo.config.is_started(to.as_str()) {
+        let picked: Vec<String> =
+            moved.done.iter().map(|(i, _)| i.id.clone()).chain(moved.already.iter().cloned()).collect();
+        super::hook::record_own_picks(&repo, &picked);
+    }
 
     // **`-m` 이 파일 이름이면 한 줄로 알린다**(moai-yivo.xe9) — **그 글이 저널에 든 판에만**: 옮긴 줄의 칸 줄과
     // 이미 그 칸이던 줄의 노트다. 진 줄·없는 줄뿐인 부름에 "저널에 남는 것은 …" 을 대면 없던 쓰기를 말한다(리뷰

@@ -17558,6 +17558,50 @@ fn the_hook_leaves_a_row_another_session_picked_to_that_session() {
     assert!(why.contains(&theirs) && why.contains(&mine), "다시 집은 줄을 제 초점으로 안 본다\n{why}");
 }
 
+/// **`moai mv` 가 쓰기 뒤 제 세션의 집기를 스스로 적는다**(moai-w25x.831). 훅은 명령줄의 글자로 id 를 읽어
+/// `$M mv <id> in_progress` 를 못 적었고(moai-scb6), 다른 세션이 도는 판에서 그 줄은 누구의 것인지 모르는 줄이
+/// 되어 `Stop` 이 안 붙들고 규칙 3 이 리뷰를 막았다. 여기서는 훅을 아예 안 지나고 옮긴다 — 기록이 서는 길은
+/// `mv` 자신뿐이다. Codex 의 셸(`CODEX_THREAD_ID`)은 물려받은 남의 세션 id 를 들고 있어 안 적는다(moai-sile).
+#[test]
+fn moai_mv_records_its_own_pick_for_the_session() {
+    let s = Scratch::new("mvpicks");
+    let main = s.path().join("main");
+    std::fs::create_dir_all(&main).unwrap();
+    git(&main, &["init", "-q"]);
+    ok(&main, &["init", "argos"]);
+    let theirs = field(&ok(&main, &["add", "남이 할 일", "--json"]), "id");
+    let mine = field(&ok(&main, &["add", "내가 할 일", "--json"]), "id");
+    let codex = field(&ok(&main, &["add", "Codex 가 할 일", "--json"]), "id");
+    git(&main, &["add", "-A"]);
+    git(&main, &["commit", "-q", "-m", "세운다"]);
+    let at = |session: &str, event: &str, cmd: Option<&str>| {
+        let body = cmd.map_or(String::new(), |c| {
+            format!(",\"tool_name\":\"Bash\",\"tool_input\":{{\"command\":{}}}", json_str(c))
+        });
+        let input = format!("{{\"session_id\":\"{session}\",\"cwd\":{}{body}}}", json_str(&main.display().to_string()));
+        String::from_utf8(hook_in(&s, &main, event, &input).stdout).unwrap()
+    };
+    let cfg = s.path().join("hookcfg").join("config.toml");
+    let cfg = cfg.to_str().unwrap();
+    // 남(b)이 훅을 지나 집는다 — 이제 여러 세션이 도는 판이라 기록 없는 집힌 줄은 누구의 것인지 모른다.
+    let pick = format!("moai mv {theirs} in_progress --from todo");
+    assert!(at("b", "pre-tool-use", Some(&pick)).trim().is_empty());
+    ok(&main, &["mv", &theirs, "in_progress", "--from", "todo"]);
+
+    // a 가 훅이 못 읽는 꼴로 집는다 — 옮긴 `moai` 가 a 의 세션 id 로 적는다.
+    let env = [("MOAI_CONFIG", cfg), ("CLAUDE_CODE_SESSION_ID", "a")];
+    ok_env(&main, NOW, &env, &["mv", &mine, "in_progress", "--from", "todo"]);
+    let held = at("a", "stop", None);
+    assert!(held.contains(&format!("moai mv {mine}")), "mv 가 적은 집기를 훅이 이 세션의 것으로 안 읽는다\n{held}");
+    assert!(!held.contains(&theirs), "남이 집은 줄로 붙든다\n{held}");
+
+    // Codex 의 셸은 남의 Claude 세션 id 를 물려받는다 — 그 값으로 적으면 그 세션이 남의 줄을 든다.
+    let env = [("MOAI_CONFIG", cfg), ("CLAUDE_CODE_SESSION_ID", "c"), ("CODEX_THREAD_ID", "t")];
+    ok_env(&main, NOW, &env, &["mv", &codex, "in_progress", "--from", "todo"]);
+    let held = at("c", "stop", None);
+    assert!(!held.contains(&codex), "Codex 의 셸에서 물려받은 세션 id 로 집기를 적었다\n{held}");
+}
+
 /// **다른 세션이 부모를 집어도 이 세션이 집은 자식은 제 것이다**(리뷰 moai-3k2d.1df). 모르는 줄은 그 밑의
 /// 자식까지 빼는데, 남이 부모를 집고 이 세션이 `--parent` 로 세운 리뷰 줄을 집으면 그 리뷰까지 빠져
 /// `Stop` 이 안 붙들고, 좁혀 다시 본 판정이 `-m` 없는 리뷰 닫기를 넘겼다.
