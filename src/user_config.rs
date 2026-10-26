@@ -44,8 +44,9 @@ pub const COLOUR: &str = "colour";
 /// 적혀 있어도 같은 뜻으로 읽는다.
 pub const AUTO: &str = "auto";
 
-/// 역할별 모델은 사람의 비용 선택이라 사용자 설정에만 둔다(moai-9tqo.3la).
-/// 나중에 저장소 표가 생겨도 사용자 설정이 이긴다. 기본값과 사람 화면(`view::models`)의 차례는 이 한 자리다 —
+/// 역할별 모델은 사람의 비용 선택이라 사용자 설정이 정한다(moai-9tqo.3la). **저장소는 권할 수 있다** —
+/// `.moai/config.toml` 의 `[models]` 표(moai-w25x.jud, [`Models::with_repo`])가 기본값을 덮고, 사용자 설정이 그것을
+/// 덮는다. 기본값과 사람 화면(`view::models`)의 차례는 이 한 자리다 —
 /// `--json` 의 키 차례는 [`Models::values`] 의 `BTreeMap` 이라 이름순이다.
 pub const MODELS_DEFAULT: &[(&str, &str)] = &[
     ("plan", "fable"),
@@ -62,12 +63,14 @@ pub const MODELS_DEFAULT: &[(&str, &str)] = &[
 pub const MODELS: &str = "models";
 pub const MODEL_LEVELS: &[&str] = &["low", "medium", "high", "xhigh", "max"];
 
-/// 유효한 키만 덮어쓴 완성된 표. `written`은 유효하게 읽힌 키만 담는다.
+/// 유효한 키만 덮어쓴 완성된 표. `written`은 사용자 설정에서 유효하게 읽힌 키만 담는다.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct Models {
     #[serde(flatten)]
     pub values: BTreeMap<&'static str, String>,
     pub written: Vec<String>,
+    /// 값이 **저장소의 표**에서 온 키 — 사용자 설정이 덮은 키는 안 든다(moai-w25x.jud). 늘 싣는다.
+    pub repo: Vec<String>,
 }
 
 impl Default for Models {
@@ -75,7 +78,60 @@ impl Default for Models {
         Self {
             values: MODELS_DEFAULT.iter().map(|&(key, value)| (key, value.to_string())).collect(),
             written: Vec::new(),
+            repo: Vec::new(),
         }
+    }
+}
+
+impl Models {
+    /// 키 하나를 얹는다 — **사용자 설정과 저장소의 표가 같은 자로 잰다.** 등급·effort 는 닫힌 낱말이고 모델 이름은
+    /// moai 가 모른다. `word` 는 글로 읽힌 값(아니면 `None`), `shown` 은 탈을 댈 때 쓸 적힌 그대로다. 받으면 그 키를 낸다.
+    pub fn put(
+        &mut self,
+        key: &str,
+        word: Option<&str>,
+        shown: impl FnOnce() -> String,
+    ) -> Result<&'static str, ModelsTrouble> {
+        let Some(&(key, _)) = MODELS_DEFAULT.iter().find(|&&(known, _)| known == key) else {
+            return Err(ModelsTrouble::UnknownKey { key: key.to_string() });
+        };
+        let level = matches!(key, "review_grade" | "effort" | "effort_complex");
+        if level && !word.is_some_and(|w| MODEL_LEVELS.contains(&w)) {
+            let raw = word.map_or_else(shown, String::from);
+            return Err(if key == "review_grade" {
+                ModelsTrouble::NotAGrade { key: key.into(), raw }
+            } else {
+                ModelsTrouble::NotAnEffort { key: key.into(), raw }
+            });
+        }
+        let Some(word) = word else {
+            return Err(ModelsTrouble::NotAWord { key: key.into(), found: shown() });
+        };
+        self.values.insert(key, word.to_string());
+        Ok(key)
+    }
+
+    /// 저장소의 `[models]` 를 밑에 깐 표 — **사용자 설정이 이긴다**(moai-w25x.jud, 2026-10-26 사용자 결정). 기본값 위에
+    /// 저장소의 값을 얹고, 그 위에 사람이 적은 키(`self.written`)를 다시 얹는다. 저장소 줄의 탈은 둘째 값이다 —
+    /// 사용자 설정의 탈과 같은 꼴이라 같은 말로 편다.
+    pub fn with_repo(&self, repo: &[crate::config::ModelEntry]) -> (Models, Vec<ModelsTrouble>) {
+        let mut out = Models::default();
+        let mut problems = Vec::new();
+        for e in repo {
+            match out.put(&e.key, e.word(), || e.raw.clone()) {
+                Ok(key) if !out.repo.iter().any(|k| k == key) => out.repo.push(key.to_string()),
+                Ok(_) => {}
+                Err(why) => problems.push(why),
+            }
+        }
+        for key in &self.written {
+            if let Some((&k, v)) = self.values.get_key_value(key.as_str()) {
+                out.values.insert(k, v.clone());
+            }
+        }
+        out.repo.retain(|k| !self.written.contains(k));
+        out.written = self.written.clone();
+        (out, problems)
     }
 }
 
@@ -1135,27 +1191,13 @@ impl Doc {
             return (models, problems);
         };
         for (key, item) in table.iter() {
-            let Some(&(key, _)) = MODELS_DEFAULT.iter().find(|&&(known, _)| known == key) else {
-                problems.push(ModelsTrouble::UnknownKey { key: key.to_string() });
-                continue;
-            };
-            let raw = item.as_str();
             let level = matches!(key, "review_grade" | "effort" | "effort_complex");
-            if level && !raw.is_some_and(|word| MODEL_LEVELS.contains(&word)) {
-                let raw = raw.map_or_else(|| item.to_string().trim().to_string(), String::from);
-                problems.push(if key == "review_grade" {
-                    ModelsTrouble::NotAGrade { key: key.into(), raw }
-                } else {
-                    ModelsTrouble::NotAnEffort { key: key.into(), raw }
-                });
-                continue;
+            // 탈을 댈 때의 글은 둘이다 — 등급 자리는 적힌 값을, 글 자리는 그 값의 꼴(`boolean`)을 댄다.
+            let shown = || if level { item.to_string().trim().to_string() } else { item.type_name().to_string() };
+            match models.put(key, item.as_str(), shown) {
+                Ok(key) => models.written.push(key.to_string()),
+                Err(why) => problems.push(why),
             }
-            let Some(raw) = raw else {
-                problems.push(ModelsTrouble::NotAWord { key: key.into(), found: item.type_name().to_string() });
-                continue;
-            };
-            models.values.insert(key, raw.to_string());
-            models.written.push(key.to_string());
         }
         (models, problems)
     }

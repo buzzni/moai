@@ -1060,17 +1060,25 @@ Examples:
     Config,
 
     /// Read the model per role from your user config
-    #[command(after_help = "  moai models           the model per role, with defaults marked
-  moai models --json    one object for skills, including written keys and path
+    #[command(after_help = "  moai models           the model per role, where each value came from
+  moai models --json    one object for skills, including written keys and paths
 
-  Reads [models] in your user config. No .moai is needed; repository config
-  is not read. The place is MOAI_CONFIG, then $XDG_CONFIG_HOME/moai/config.toml,
-  then ~/.config/moai/config.toml. Missing files use the built-in defaults.
+  Reads [models] in your user config. No .moai is needed. The place is
+  MOAI_CONFIG, then $XDG_CONFIG_HOME/moai/config.toml, then
+  ~/.config/moai/config.toml. Missing files use the built-in defaults.
+
+  Inside a repository, a [models] table in .moai/config.toml recommends values
+  for that repository: it overrides the defaults, and your user config
+  overrides it. A line says repo when its value came from there, default when
+  nothing set it. A broken .moai/config.toml leaves the table as your user
+  config gives it.
 
   Model names are strings. review_grade, effort and effort_complex accept
   low, medium, high, xhigh or max. Invalid values fall back per key and warn;
-  unknown keys warn. written lists only valid, known keys from the config.
-  This command only reads; edit the user config by hand to change the table.")]
+  unknown keys warn. written lists the valid, known keys from your user config,
+  repo the ones the repository table set that your config did not, and
+  repo_path that file (null when it set none). The level lines name the roles
+  they pair with. This command only reads; edit the files by hand.")]
     Models,
 
     /// Show the explorer's keys and what your keys.toml changed

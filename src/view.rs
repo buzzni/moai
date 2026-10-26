@@ -3530,31 +3530,50 @@ pub fn keys(
 }
 
 /// 사람이 읽는 표. 등급·effort도 제 줄에 서야 어느 값이 기본값인지 가를 수 있다.
-pub fn models(reg: &crate::user_config::Registry, lang: Lang) -> Vec<String> {
+///
+/// **줄마다 그 줄의 값 하나만 표한다**(moai-w25x.yrm, 리뷰 moai-9tqo.jdi 14번). 역할 줄 꼬리에 effort 값을 싣던 판은
+/// `default` 를 그 역할의 모델 키 하나로 달아, effort 만 적은 사람이 `develop  sonnet  (high)  default` 를 보고 줄 전체를
+/// 기본값으로 읽었다. 이제 짝은 등급 줄이 거꾸로 댄다(`effort  medium  default  develop · docs · bulk`) — 값과 표가
+/// 한 키의 것이다. 값이 온 자리는 셋이다: 사람(표 없음), 저장소(`repo`, moai-w25x.jud), 기본값(`default`, 흐리게).
+pub fn models(
+    models: &crate::user_config::Models,
+    path: Option<&std::path::Path>,
+    repo_path: Option<&std::path::Path>,
+    lang: Lang,
+) -> Vec<String> {
     use crate::user_config::MODELS_DEFAULT;
+    let pairs = |key: &str| -> &'static [&'static str] {
+        match key {
+            "effort" => &["develop", "docs", "bulk"],
+            "effort_complex" => &["complex"],
+            "review_grade" => &["review"],
+            _ => &[],
+        }
+    };
     let mut out = Vec::new();
     for &(key, _) in MODELS_DEFAULT {
-        let value = crate::text::one_line(&reg.models.values[key]);
-        let effort = match key {
-            "develop" | "docs" | "bulk" => Some("effort"),
-            "complex" => Some("effort_complex"),
-            "review" => Some("review_grade"),
-            _ => None,
+        let value = crate::text::one_line(&models.values[key]);
+        let roles = pairs(key);
+        let tail = if roles.is_empty() { String::new() } else { format!("  {}", roles.join(" · ")) };
+        let line = |mark: &str| {
+            let mark = if mark.is_empty() { String::new() } else { format!("  {mark}") };
+            format!("{key:14}  {value}{mark}{tail}")
         };
-        let tail = effort.map(|k| format!("  ({})", reg.models.values[k])).unwrap_or_default();
-        let line = format!("{key:14}  {value}{tail}");
-        out.push(if reg.models.written.iter().any(|k| k == key) {
-            line
+        out.push(if models.written.iter().any(|k| k == key) {
+            line("")
+        } else if models.repo.iter().any(|k| k == key) {
+            line(say(lang, "models.repo"))
         } else {
-            crate::style::paint(crate::style::DIM, &format!("{line}  {}", say(lang, "models.default")))
+            crate::style::paint(crate::style::DIM, &line(say(lang, "models.default")))
         });
     }
-    let path = reg
-        .path
-        .as_deref()
+    let path = path
         .map(|p| crate::text::one_line(&p.display().to_string()))
         .unwrap_or_else(|| say(lang, "models.no_path").to_string());
     out.push(fill(say(lang, "models.path"), &[("path", &path)]));
+    if let Some(repo) = repo_path {
+        out.push(fill(say(lang, "models.repo_path"), &[("path", &crate::text::one_line(&repo.display().to_string()))]));
+    }
     out
 }
 

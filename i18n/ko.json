@@ -1302,6 +1302,8 @@
   "models.default": "기본값 (default)",
   "models.path": "설정  {path}",
   "models.no_path": "자리 모름",
+  "models.repo": "저장소 (repo)",
+  "models.repo_path": "저장소  {path}",
   "web.serving": "{root} 을 {url} 에서 낸다 — Ctrl-C 로 끈다",
   "web.would_serve": "{root} 을 {url} 에서 낼 것이다 (--dry-run: 아무것도 안 묶었다)",
   "web.from_worktree": "워크트리 {here} 에서 불렀다 — 트래커는 주 체크아웃의 것이다",

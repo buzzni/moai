@@ -30995,13 +30995,13 @@ fn models_json_reads_user_config_outside_a_tracker_and_only_reads() {
             "plan": "fable", "develop": "opus-6", "complex": "opus", "review": "opus",
             "docs": "sonnet", "bulk": "haiku", "codex": "future-model",
             "review_grade": "xhigh", "effort": "max", "effort_complex": "high",
-            "written": ["develop", "codex", "effort"], "path": cfg,
+            "written": ["develop", "codex", "effort"], "repo": [], "path": cfg, "repo_path": null,
         })
     );
     assert_eq!(std::fs::read_to_string(&cfg).unwrap(), src);
     assert!(!s.path().join(".moai").exists());
 
-    // 저장소 설정과 -C는 모델의 선택에 닿지 않는다.
+    // 깨진 저장소 설정은 사람의 표를 못 건드린다 — 그 탈은 다른 명령이 댄다.
     let other = s.path().join("other");
     std::fs::create_dir_all(other.join(".moai")).unwrap();
     std::fs::write(other.join(".moai/config.toml"), "invalid = [\n").unwrap();
@@ -31023,7 +31023,7 @@ fn models_missing_file_uses_all_defaults_and_keeps_the_path() {
             "plan": "fable", "develop": "sonnet", "complex": "opus", "review": "opus",
             "docs": "sonnet", "bulk": "haiku", "codex": "gpt-6.1-sol",
             "review_grade": "xhigh", "effort": "medium", "effort_complex": "high",
-            "written": [], "path": cfg,
+            "written": [], "repo": [], "path": cfg, "repo_path": null,
         })
     );
     assert!(!cfg.exists());
@@ -31077,17 +31077,67 @@ fn models_human_output_marks_defaults_and_shows_efforts_and_path() {
     let out = ok_with(s.path(), &cfg, &["models"]);
     assert_eq!(out.lines().count(), 11, "{out}");
     assert_eq!(out.matches("default").count(), 8, "{out}");
-    let develop = out.lines().find(|line| line.starts_with("develop ")).unwrap();
-    assert!(develop.contains("sonnet  (high)"));
-    assert!(!develop.contains("default"), "기본값과 같아도 사람이 적은 키다");
-    assert!(out.lines().find(|line| line.starts_with("complex ")).unwrap().contains("opus  (high)"));
-    assert!(out.lines().find(|line| line.starts_with("review ")).unwrap().contains("opus  (xhigh)"));
+    let line = |key: &str| out.lines().find(|line| line.starts_with(&format!("{key} "))).unwrap().to_string();
+    assert!(
+        line("develop").contains("sonnet") && !line("develop").contains("default"),
+        "기본값과 같아도 사람이 적은 키다"
+    );
+    // **줄마다 제 값 하나만 표한다**(moai-w25x.yrm) — effort 만 적었으면 그 줄만 사람의 것이다. 역할 줄 꼬리에
+    // effort 를 싣던 판은 `complex  opus  (high)  default` 처럼 남의 값까지 한 표로 덮었다.
+    assert!(line("effort").contains("high") && !line("effort").contains("default"), "{out}");
+    assert!(line("effort").contains("develop · docs · bulk"), "등급 줄이 짝을 안 댄다\n{out}");
+    // 표의 낱말은 화면의 말을 따른다 — `default` 는 어느 말에도 선다(`기본값 (default)`).
+    let marked = |key: &str, value: &str, pair: &str| {
+        let l = line(key);
+        l.contains(&format!("  {value}  ")) && l.contains("default") && l.ends_with(pair)
+    };
+    assert!(marked("complex", "opus", "") && !line("complex").contains("high"), "{out}");
+    assert!(marked("effort_complex", "high", "  complex"), "{out}");
+    assert!(marked("review_grade", "xhigh", "  review"), "{out}");
     assert!(out.lines().last().unwrap().contains(cfg.to_str().unwrap()));
 
     // 허용한 모델 이름의 줄바꿈도 표에서는 한 줄로 그린다.
     std::fs::write(&cfg, "[models]\nplan = \"a\\nb\"\n").unwrap();
     let out = ok_with(s.path(), &cfg, &["models"]);
     assert_eq!(out.lines().count(), 11, "{out}");
+}
+
+/// **저장소는 권하고 사람이 고른다**(moai-w25x.jud, 2026-10-26 사용자 결정) — `.moai/config.toml` 의 `[models]` 가
+/// 기본값을 덮고 사용자 설정이 그것을 덮는다. `MOAI_LANG` > `[i18n] lang` 과 같은 결이다. 저장소 표의 틀린 값은 그
+/// 파일을 대며 한 줄로 알리고 나머지는 산다 — 이 파일은 모든 명령이 지나니 `status` 는 그것으로 서지 않는다.
+#[test]
+fn a_repository_models_table_sits_under_the_person() {
+    let s = Scratch::new("models-repo");
+    git(s.path(), &["init", "-q"]);
+    ok(s.path(), &["init", "argos"]);
+    let repo_cfg = s.path().join(".moai/config.toml");
+    let mut src = std::fs::read_to_string(&repo_cfg).unwrap();
+    src.push_str("\n[models]\ncomplex = \"opus-6\"\ndevelop = \"opus\"\neffort = \"ultra\"\n");
+    std::fs::write(&repo_cfg, &src).unwrap();
+    let cfg = s.path().join("user.toml");
+    std::fs::write(&cfg, "[models]\ndevelop = \"sonnet\"\n").unwrap();
+    let out = moai_with(s.path(), &cfg, &["models", "--json"]);
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let got: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(got["complex"], "opus-6", "저장소의 값이 기본값을 안 덮는다\n{got}");
+    assert_eq!(got["develop"], "sonnet", "사람의 값이 저장소에 졌다\n{got}");
+    assert_eq!(got["effort"], "medium", "틀린 저장소 값이 섰다\n{got}");
+    assert_eq!(got["written"], serde_json::json!(["develop"]));
+    assert_eq!(got["repo"], serde_json::json!(["complex"]), "사람이 덮은 키를 저장소의 것으로 댄다\n{got}");
+    let canon_cfg = canon(&repo_cfg).unwrap();
+    let repo_path = std::path::PathBuf::from(got["repo_path"].as_str().unwrap());
+    assert_eq!(canon(&repo_path).unwrap(), canon_cfg);
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(err.lines().count(), 1, "{err}");
+    assert!(err.contains("models.effort") && err.contains(".moai/config.toml"), "{err}");
+    // 다른 명령은 그 표에 서지 않는다.
+    ok(s.path(), &["status"]);
+
+    let human = ok_with(s.path(), &cfg, &["models"]);
+    let line = |key: &str| human.lines().find(|l| l.starts_with(&format!("{key} "))).unwrap().to_string();
+    assert!(line("complex").contains("opus-6  ") && line("complex").contains("repo"), "{human}");
+    assert!(!line("develop").contains("repo") && !line("develop").contains("default"), "{human}");
+    assert!(human.lines().last().unwrap().contains(".moai/config.toml"), "저장소 파일을 안 댄다\n{human}");
 }
 
 #[test]
