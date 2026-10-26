@@ -1,0 +1,357 @@
+# English text for the site. scripts/site/gen.py fills the templates beside it (layout.html,
+# home.html, guide.html) with these, then `python3 scripts/site/gen.py` writes site/.
+#
+# `{{guide.start.3}}` in a template is key `3` of table [guide.start] here. Tables under [guide]
+# take the id of the section they sit in; the numbers only name a slot — a new paragraph takes the
+# next free number, in any order. Every language carries the same keys (test_gen.py checks).
+# Values are HTML: inline markup (<code>, <strong>, <a>) goes inside, structure stays in the template.
+
+[meta]
+locale = 'en_US'
+
+[nav]
+see = 'See it'
+guide = 'Guide'
+docs = 'Docs'
+changelog = 'Changelog'
+
+[common]
+copied = 'Copied'
+copy = 'Copy'
+tag_terminal = 'Terminal'
+tag_browser = 'Browser'
+
+[home]
+eyebrow = 'An issue tracker for people and coding agents'
+install_meta = 'macOS · Linux · Windows · MIT · refuses to install anything it cannot verify against <code>SHA256SUMS</code> · <a href="https://github.com/buzzni/moai#install">other ways to install</a>'
+logos = 'Products that work with Moai'
+title = 'moai — an issue tracker for coding agents'
+description = 'moai is an issue tracker for people and coding agents. It lives in your repository, needs no server, and lets several agents work from one plan.'
+
+[home.rotator]
+label = 'What moai does'
+
+[[home.rotator.slides]]
+tab = 'Agile'
+headline = 'Agile, for your<br><em>coding agents.</em>'
+lede = 'You bring the idea, and the agent makes the plan.<br>Big requests are split into small tasks and worked through by priority.<br>When requirements change, the plan changes with them.'
+
+[[home.rotator.slides]]
+tab = 'No server'
+headline = 'No server.<br><em>Just your repo.</em>'
+lede = 'The to-do list is committed with the code and merges along with your branches.<br>No accounts, no web service, no database.<br>Push and pull the repository to keep your teammates in sync on where the work stands.'
+
+[[home.rotator.slides]]
+tab = 'Multi-agent'
+headline = 'Many agents.<br><em>One team.</em>'
+lede = '''A supervisor agent splits up the work, and several agents take their share.<br>Each works in its own worktree, side by side, without getting in the others' way.<br>Finished work goes through review and is brought back together.'''
+
+[[home.rotator.slides]]
+tab = 'Specs'
+headline = 'Every task starts<br><em>with a spec.</em>'
+lede = 'What to do, why, and where to stop is written plainly on the issue.<br>The agent checks the notes and commits from earlier sessions.<br>It carries on from there instead of rebuilding the context from scratch.'
+
+[[home.rotator.slides]]
+tab = 'Memory'
+headline = 'Explain it once.<br><em>They take it from there.</em>'
+lede = 'Agents look up earlier decisions, and the reasons behind them, in the work history.<br>They find how things are done in the memory wiki, so the same mistakes are not repeated.<br>They get smarter as time goes on.'
+
+[home.team]
+cast_label = 'Four tmux panes: moai tui, a Claude Code supervisor, and Codex and Antigravity workers'
+heading = 'Different vendors. One team.'
+body = 'Agents from different vendors work together as a supervisor and its workers. The supervisor hands the remaining work to whichever workers are idle, so several tasks move at once. Start as many workers as you need: each one works in its own worktree, so nobody steps on anyone else, and the supervisor keeps things moving until the work is done.'
+point1 = 'One sentence is enough: <q>Hand the backlog out to the idle sessions.</q>'
+point2 = '''Clearing a worker's window, sending the next task, checking the report: the supervisor does all of it.'''
+point3 = 'Planning to Claude Fable, development to Codex Sol, chores to Antigravity Gemini, review to Claude Opus. Give each job to the model that does it best.'
+
+[home.scene1]
+heading = 'Every view, in one terminal.'
+body = 'The list, a kanban board with a lane per milestone, and the wiki, all on one screen. Whatever sits under the cursor shows its detail beside it. It is a terminal, and the mouse still works everywhere.'
+media_label = 'moai tui moving from the list to the kanban board and the wiki'
+
+[home.scene2]
+heading = 'Holds its own against any issue tracker.'
+body = 'Detailed work orders, the notes left along the way, commits and dates: all of it at a glance.'
+media_label = 'moai web showing an issue with its description, commits and history'
+
+[home.scene3]
+heading = 'Stop using another product just to keep your docs.'
+body = 'Agents write into the wiki built into moai as they work. Have them write up one part or the whole thing in a few words, and they lean on it from then on.'
+media_label = 'moai web wiki: following links between pages and into an issue'
+
+[home.scene4]
+heading = 'See progress and flow at a glance.'
+body = 'An idea starts in the backlog, gets split from milestone and epic down into tasks, and goes through review to done. Agents move every card along the way.'
+media_label = 'A card created in the backlog moving across the board to done'
+
+[home.cta]
+heading = 'Give your agents<br>a place to work.'
+body = 'Installing is one line. Then open <code>moai tui</code> in the terminal, or <code>moai web</code> in the browser.'
+windows = 'On Windows, use <a href="https://github.com/buzzni/moai#windows"><code>install.ps1</code></a>.'
+
+[guide]
+toc_label = 'Contents'
+h1 = 'How to use moai'
+title = 'How to use moai'
+description = 'Installing moai, getting started, tui and web, directing development, the supervisor and its workers, and agents from several vendors working together.'
+
+[guide.toc]
+install = 'Install'
+start = 'Getting started'
+screens = 'tui and web'
+list = 'List'
+board = 'Kanban'
+gantt = 'Gantt'
+stats = 'Statistics'
+wiki = 'Wiki'
+develop = 'Directing development with moai'
+examples = 'Examples'
+env = 'Supported environments'
+hooks = 'Hooks'
+supervise = 'The supervisor and workers'
+vendors = 'Agents from several vendors'
+
+[guide.install]
+1 = 'Install'
+2 = 'The installer downloads the release archive together with <code>SHA256SUMS</code>, and installs nothing whose checksum does not match. There is no option to turn this check off.'
+
+[guide.install-unix]
+1 = 'It installs to <code>~/.local/bin</code>. That directory has to be on your <code>PATH</code> for <code>moai</code> to run.'
+2 = 'To install somewhere else or a specific version, add the options after <code>-s --</code>.'
+
+[guide.install-windows]
+1 = 'Download the script in PowerShell, then run it as a file.'
+2 = 'It installs to <code>%LOCALAPPDATA%\Programs\moai</code>. Pick the directory with <code>-Dir</code> and the version with <code>-Version</code>.'
+3 = 'The installer does not edit your <code>PATH</code>. When the directory is not on it, it says so in one line.'
+4 = 'Piping it, as in <code>irm … | iex</code>, is not supported: the PowerShell window would close along with the script.'
+5 = 'It runs as is on a clean PC without the Visual C++ redistributable.'
+
+[guide.update]
+1 = 'Update'
+2 = 'Replaces the moai you are running with the latest release. When a new version is out, the top of the <code>moai tui</code> screen says so too. Running the install line again also updates.'
+
+[guide.platforms]
+1 = 'Supported platforms'
+2 = 'Prebuilt binaries are published for Linux (x86_64), macOS (Apple Silicon) and Windows (x86_64 · ARM64). Anywhere else, build from source with <code>cargo build --release</code>.'
+
+[guide.start]
+1 = 'Getting started'
+2 = 'Run this once in the root of the project you want moai to track.'
+3 = 'cd &lt;project&gt;'
+4 = 'In a terminal, a setup screen comes up first. Each row has its default already picked. Enter initializes with what is picked, and Esc quits without changing anything.'
+5 = 'moai init setup screen: moving between rows, changing a choice, and what it planted'
+6 = 'Row'
+7 = 'What it decides'
+8 = 'How to pick'
+9 = '<strong>id prefix</strong>'
+10 = 'The front of every issue id (the <code>moai</code> in <code>moai-ae8y</code>). It defaults to the directory name'
+11 = '<strong>It cannot change later</strong>, so pick something short and easy to recognize'
+12 = '<strong>Whether git tracks the tracker</strong>'
+13 = '<code>commit</code>: committed to the repository and shared with your team (the default)<br><code>exclude</code>: kept in your clone only, hidden through <code>.git/info/exclude</code><br><code>gitignore</code>: kept in your clone only, hidden through <code>.gitignore</code>'
+14 = '''<code>commit</code> for a team; <code>exclude</code> to track only your own work in someone else's repository'''
+15 = '<strong>Where the agent guide goes</strong>'
+16 = '<code>block</code>: the whole guide inside <code>AGENTS.md</code><br><code>file</code>: the guide in <code>.moai/guide.md</code>, and only a link in <code>AGENTS.md</code><br><code>hook</code>: <code>AGENTS.md</code> is left alone and the hooks tell Claude<br><code>none</code>: nothing is written'
+17 = '<code>file</code> to keep <code>AGENTS.md</code> short; <code>hook</code> when git does not track the tracker'
+18 = '<strong>Install the hooks and skills</strong>'
+19 = 'Installs the Claude Code plugin (skills and hooks)'
+20 = 'Turn it on if you work with agents. See <a href="#hooks">Hooks</a> below'
+21 = '└ Optional skills'
+22 = 'One row each for <code>moai-tmux</code> · <code>moai-cmux</code> · <code>moai-saycode</code>'
+23 = 'Turn on the ones for the environment you use. If you are running inside tmux, cmux or Saycode right now, that row starts checked'
+24 = '<strong>Merge driver</strong>'
+25 = 'When two branches changed different issues, git merges them issue by issue on its own'
+26 = 'Turn it on when git tracks the tracker (it is needed once per clone)'
+27 = '<strong>Add to the project list</strong>'
+28 = 'Registers this repository in your project list'
+29 = 'Turn it on if you work on several projects. Running <code>moai</code> outside a project then shows every registered project on one screen'
+30 = 'Claude Code reads <code>CLAUDE.md</code>, not <code>AGENTS.md</code>. Put one <code>@AGENTS.md</code> line in <code>CLAUDE.md</code> and both are read.'
+31 = 'To use it from Codex or Antigravity as well, install their skills and hooks with <code>moai skill install --agent codex</code> or <code>--agent antigravity</code>.'
+32 = 'After updating moai, run <code>moai init</code> again to bring the guide up to the new version. It does not touch your issues or their history.'
+33 = 'Once that is done, open an agent session and ask for work in plain words as you always do. The agent reads the current board with <code>moai status</code> when the session starts, and creates and moves issues on its own.'
+
+[guide.screens]
+1 = 'tui and web'
+2 = 'moai has two screens. Agents read and change the tracker file directly without opening either. Open whichever you like when you want to see how the work stands.'
+
+[guide.tui]
+1 = 'moai tui — in the terminal'
+2 = 'See the list, the kanban board, the Gantt, statistics and the wiki in your terminal. Press <code>SPC g</code>, then one key for the screen you want. The next time you run it, the list, kanban board or Gantt you were last on opens.'
+3 = 'moai tui moving from the list to the kanban board and the wiki'
+4 = 'The mouse works too — click rows, scroll, resize the panes. The full list of keys is in <code>moai tui --help</code>.'
+5 = 'Press <code>SPC n</code> to write a thought straight into the backlog.'
+
+[guide.web]
+1 = 'moai web — in the browser'
+2 = 'See the list, the kanban board, the Gantt and the wiki on <code>127.0.0.1:6624</code>. Open the browser yourself. Use it to share progress with teammates who are not at home in a terminal.'
+3 = 'The keys are nearly the same as in tui. Only moving between panes uses <code>SPC w</code> instead of <code>Ctrl-w</code>. Statistics are only in tui.'
+4 = 'You can drag a Gantt bar to change its dates. Everything else in the tracker is read only.'
+5 = 'If the port is already in use, pick another with <code>--port</code>. <code>--port 0</code> picks a free one.'
+6 = 'Press <code>Ctrl-C</code> to stop it.'
+
+[guide.list]
+1 = 'List — milestones and epics as folders'
+2 = 'Unfold milestones and epics, or step inside them, to find issues. The description, sub-issues, commits and history of the issue under the cursor show beside it. Open it with <code>SPC g l</code> in both tui and web.'
+3 = 'tui list: unfolding a milestone, searching, filtering and sorting by deadline'
+4 = '''moai web showing an issue's description, commits and history'''
+5 = '<code>Enter</code> steps into a milestone or an epic and <code>Backspace</code> steps back out. <code>l</code> unfolds one level and <code>h</code> folds. <code>Tab</code> unfolds everything below.'
+6 = 'Press <code>/</code> and type to search titles, tags, bodies and notes as you go. Hidden issues are searched too. In web, archived issues are searched only while the archive is shown with <code>SPC v o</code>.'
+7 = '<code>SPC f</code> sets conditions such as status, assignee, tag or milestone. While you type, the values you can pick show above.'
+8 = '<code>SPC s</code> sorts by several criteria combined — priority, deadline, last update and more. The sort stays for the next run.'
+9 = 'When an issue assigned to you changes, it gets a <code>[NEW]</code> mark. <code>r</code> marks it read.'
+
+[guide.board]
+1 = 'Kanban — a board by status'
+2 = 'Issues are laid out as cards by status. Each milestone gets a row of its own, so you can see how each release is coming along. Open it with <code>SPC g b</code> in both tui and web.'
+3 = 'tui kanban: moving across the columns of each milestone row and picking cards'
+4 = 'web kanban: moving across columns and clicking cards to read their detail'
+5 = 'The backlog and deferred work have columns of their own. The deferred column is hidden by default; <code>SPC v l</code> shows it.'
+6 = '''In tui, someone else's card shows its assignee. In web, turn the assignee on with <code>SPC c a</code>.'''
+7 = '<code>h</code> and <code>l</code> move across columns, <code>j</code> and <code>k</code> move between cards in a column.'
+8 = 'It shares the cursor, filter and view settings with the list, so you keep your place when you switch between the two.'
+9 = 'You cannot move cards by hand. The agents change the status as they work.'
+
+[guide.gantt]
+1 = 'Gantt — your schedule as bars'
+2 = 'A date axis sits beside the list, and every issue shows the span you planned and the span actually worked as bars. Open it with <code>SPC g g</code> in both tui and web.'
+3 = 'The Gantt in tui, zooming the planned and worked bars in and out'
+4 = 'The Gantt in web, changing the scale, coming back to today and reading the bars'
+5 = 'The faint bar runs from the planned start to the deadline, and the coloured bar is the time actually worked. The part past the deadline shows as red hatching.'
+6 = '''Epics and milestones gather their members' spans into one hatched bar.'''
+7 = 'Zoom in and out by hour, day, week and month. <code>t</code> brings you back to today, and <code>z</code> fits every bar on one screen.'
+8 = 'Issues blocking the one under the cursor are joined to it by arrows.'
+9 = 'Drag a bar with the mouse to change its start and deadline. It saves once, when you let go, and if that would pass the deadline of the epic or milestone above, it does not save and tells you why.'
+
+[guide.stats]
+1 = 'Statistics — flow and time taken'
+2 = '''See the state of the project's work as bar charts and numbers. Open it with <code>SPC g s</code> in tui. It is not in web.'''
+3 = 'tui statistics: weekly flow, status and priority, time taken and AI work'
+4 = 'Shows the work created and the work finished each week side by side. <code>b</code> switches between weeks and days.'
+5 = 'See how many issues stand in each status and each priority.'
+6 = 'Shows the median and p90 of the time from creation to done, and from the start of work to done. Work whose start is unknown is not counted as zero; it is counted separately.'
+7 = 'Counts the work per AI model, from the model names recorded on the issues.'
+8 = 'With a filter set, it counts only the issues that match.'
+
+[guide.wiki]
+1 = '''Wiki — the repository's manual'''
+2 = '''Read the repository's markdown documents on screen. Open it with <code>SPC g w</code> in both tui and web.'''
+3 = 'tui wiki: opening a page, following a link and back, then searching'
+4 = 'web wiki: following links between pages and into an issue'
+5 = 'The list of pages is on one side and the selected page on the other.'
+6 = '<code>/</code> searches titles and bodies. The pages that match your words best come first.'
+7 = 'Pick a link on the page with <code>Tab</code> and open it with <code>Enter</code>. <code>Backspace</code> takes you back to the line you were reading.'
+8 = '''An issue's detail also shows, below its commits, the wiki pages about that issue and the related sections.'''
+9 = 'The wiki is read only. The pages are files in the repository; the agents edit and commit them when they finish a piece of work.'
+
+[guide.develop]
+1 = 'Directing development with moai'
+
+[guide.milestones]
+1 = 'Split big work into milestones and epics'
+2 = 'moai groups issues into epics and milestones.'
+3 = '<strong>Epic</strong> — a bundle of issues serving one purpose. When a request touches several files, the agent first shows you a plan split into one epic and three to seven issues, and creates it in one go once you approve.'
+4 = '<strong>Milestone</strong> — what ships together in one release. Attach an epic to a milestone and the issues under it come along.'
+5 = 'You never move an epic or a milestone yourself. Start any member and it becomes in progress; finish them all and it becomes done, automatically.'
+6 = '''While a milestone is running, the work inside it comes first. <code>moai ready</code> hands out only the running milestone's work and <code>p0</code> (urgent), and leaves the rest for later. Whether to add work to a running milestone is your decision.'''
+7 = 'When the agent shows a plan, it also asks for a deadline. With no answer, there is no deadline.'
+
+[guide.worktrees]
+1 = 'How worktrees are made and merged'
+2 = '''When several sessions pile commits onto one branch, they end up waiting on each other to merge. So moai's agents make a separate branch for each piece of work.'''
+3 = '<strong>Pick up the work.</strong> The issue moves to <code>in_progress</code> (<code>moai mv &lt;id&gt; in_progress --from todo</code>). If another session already took it, nothing moves and the agent goes on to the next one.'
+4 = '<strong>Make a worktree.</strong> A new branch is checked out at <code>.worktrees/&lt;epic&gt;</code> inside the repository. Claude Code, Codex and Antigravity all use the same place.'
+5 = '''<strong>Work and commit there.</strong> With the issue id in the commit subject, <code>moai show &lt;id&gt;</code> finds and shows that issue's commits.'''
+6 = '''<strong>Get it reviewed.</strong> When the epic is finished, the whole epic is reviewed once and the review's findings are taken in.'''
+7 = '<strong>Merge and clean up.</strong> It is merged into the base branch with <code>--no-ff</code>, the worktree and branch are removed, and the issue moves to <code>done</code>.'
+8 = '''<strong>The tracker always stays in the root.</strong> Run <code>moai</code> inside a worktree and it still reads and writes the root's <code>.moai/</code>. Other sessions see who took what right away, and the tracker file never conflicts on a merge.'''
+9 = '<strong>Work in a milestone starts from the milestone branch.</strong> Epic branches are made from <code>milestone/&lt;milestone id&gt;</code> and merged back into it when done. The milestone branch goes into the base branch in one go at the release.'
+10 = '<code>moai ready --worktree</code> shows what the neighbouring worktrees are doing.'
+
+[guide.backlog]
+1 = 'Backlog'
+2 = 'What is not for now goes into the backlog.'
+3 = "moai backlog add 'what if the board could fold by epic'"
+4 = 'A thought added to the backlog, then unfolded into an epic with three issues'
+5 = 'A backlog item is an idea not yet settled as work. It does not show on the board or in <code>moai ready</code>.'
+6 = 'When an idea that comes up mid-work falls outside the current scope, leave it in the backlog.'
+7 = '''When its time comes, <code>moai backlog promote &lt;id&gt;</code> turns it into an epic and issues. The original backlog item closes, and the new work's history leads back to the old note.'''
+8 = '''Work already created that you have decided not to do right now is deferred, not sent to the backlog: <code>moai defer &lt;id&gt; -m 'why'</code>. <code>--undo</code> brings it back exactly as it was.'''
+
+[guide.examples]
+1 = 'Examples'
+2 = 'You direct agents in plain words. You can ask like this.'
+
+[guide.ex-backlog]
+1 = 'Tidying the backlog'
+2 = 'Tidy up the backlog. Merge what overlaps, close what is already done, and prioritize what is worth doing now.'
+3 = 'Hand the piled-up backlog to the idle sessions.'
+4 = 'The second one calls the supervisor (<code>/moai-supervise</code>). See <a href="#supervise">The supervisor and workers</a> below.'
+
+[guide.ex-plan]
+1 = 'Plan with Fable, in detail'
+2 = 'Plan this work with Claude Fable, and write the descriptions in detail so other agents can pick them up right away.'
+3 = 'If the plan writes into each issue what is done and why, how far it goes and which files change, another agent can understand the context and carry the work on.'
+
+[guide.ex-models]
+1 = 'Different models for development and review'
+2 = 'In each worker session, use subagents — develop with Sonnet 5.5 at medium, and review with Opus 5.5 at high.'
+3 = 'To avoid saying this every time, write the model for each role into your user config. The supervisor reads it every time it hands out work. <code>moai models</code> shows the current values.'
+4 = 'plan    = "fable"    # planning'
+5 = 'develop = "sonnet"   # development — most work'
+6 = 'complex = "opus"     # the write path, concurrency, work across several files'
+7 = 'review  = "opus"     # the epic-end review'
+
+[guide.env]
+1 = 'Supported environments'
+2 = '''Where the supervisor can see and work the workers' windows, you can leave managing the sessions to it as well. Turn on the optional skill for your environment (the optional-skill rows of <code>moai init</code>, or <code>moai skill install --with &lt;skill&gt;</code>).'''
+3 = '<strong>tmux</strong> — <code>moai-tmux</code>. The supervisor labels the worker panes, clears a reported pane with <code>/clear</code>, and pastes in a message that did not arrive. When workers run short, it asks before opening new panes.'
+4 = '<strong>cmux</strong> — <code>moai-cmux</code> (cmux 0.65.0 or later). The same as tmux, on cmux tabs.'
+5 = '<strong>Saycode</strong> — <code>moai-saycode</code>. Inside a Saycode session, the supervisor sees the worker sessions through <code>happy agent</code>, sends them work and opens new sessions.'
+6 = 'In every environment, the supervisor never closes your panes, tabs or sessions, and leaves an input box alone when someone has typed in it.'
+
+[guide.hooks]
+1 = 'Hooks'
+2 = '''After <code>moai skill install</code> (or the hooks and skills row of <code>moai init</code>), moai's hooks run at key moments of an agent session.'''
+3 = 'When'
+4 = 'What happens'
+5 = 'The session starts'
+6 = 'A baseline of the warnings is written. After the context is compacted, the work in progress is told again'
+7 = 'The first prompt'
+8 = 'The <code>moai status</code> board is read in once'
+9 = 'Before a tool runs'
+10 = 'The five rules below are checked'
+11 = 'The turn ends'
+12 = 'If work in progress is left, the agent is asked to leave a <code>Next:</code> note for the next session'
+13 = 'The five rules the hooks keep:'
+14 = '<strong>New issues are created inside the work in hand.</strong> Anything out of scope goes to the backlog.'
+15 = '<strong>Pick up work before changing the repository.</strong>'
+16 = '<strong>A review is recorded as an issue too.</strong> It says what is being looked at and what was taken in.'
+17 = '<strong>Never kill your tmux server.</strong>'
+18 = '''<strong>Check first before taking over another agent's work.</strong>'''
+19 = 'A refusal hands over the command that gets through, so the agent fixes it right away instead of waiting on a person (only rule 5 asks one). The hooks never fail the session, and a <code>moai</code> a person types in a terminal does not go through them.'
+
+[guide.supervise]
+1 = 'The supervisor and workers'
+2 = 'Call <code>/moai-supervise</code> in one Claude Code session and that session becomes the <strong>supervisor</strong>. Keep one supervisor per repository.'
+3 = 'Four tmux panes: moai tui, a Claude Code supervisor, and Codex and Antigravity workers'
+4 = 'The supervisor picks backlog items that do not collide. It asks for a deadline where there is none.'
+5 = '''It picks the role that fits the work's difficulty (development, complex work, docs, chores) and raises a <strong>worker</strong> on that role's model. By default the worker is a subagent inside the supervisor's session.'''
+6 = 'The worker turns the backlog item into an epic, works in a worktree, and reports once review, merge and clean-up are done.'
+7 = 'The supervisor checks that the merge happened, the epic closed and the worktree is gone, then sends the next item.'
+8 = '''To watch the workers' windows yourself, use <strong>session workers</strong> instead of subagents. Open a few Claude Code sessions in the repository's root, and the supervisor sends work to the idle ones.'''
+9 = 'When a design decision is needed, the worker stops and the supervisor asks you. If you tell the supervisor you are stepping away, workers decide by their recommendation and leave the reason on the issue.'
+10 = '''The supervisor picks and assigns work and checks the results. Changing code and merging are the workers' job.'''
+
+[guide.vendors]
+1 = 'Using agents from several vendors together'
+2 = '''Claude Code, Codex and Antigravity share one tracker. Open each one interactively in the repository's root, as you always do.'''
+3 = 'Run'
+5 = 'Hooks'
+6 = 'In the plugin'
+7 = '<code>.codex/hooks.json</code> — runs once trusted in <code>/hooks</code>'
+8 = 'Supervisor'
+9 = 'Yes (<code>/moai-supervise</code>)'
+10 = 'Worker only'
+12 = '''Only Claude Code supervises. Codex takes work as a worker in a tmux pane or cmux tab. A Codex worker waits after its tests and commits, and gets the merge instruction once the supervisor's review is done.'''
+13 = '<code>moai skill install --agent auto</code> finds <code>claude</code> · <code>codex</code> · <code>agy</code> on your <code>PATH</code> and installs for each at once.'
+14 = 'Codex and Antigravity read the same <code>.agents/skills/</code>, so commit it and the whole team uses the same skills.'
+15 = 'An agent that finishes work leaves one line on the issue: <code>model: &lt;vendor&gt;/&lt;model&gt;</code>. <code>moai stats</code> gathers these lines and shows how much work each model did.'
