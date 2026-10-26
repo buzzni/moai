@@ -34,11 +34,14 @@ the person can watch.
 
 Inside tmux:
 
-    tmux display -p -t <pane> '#{pane_in_mode}'
+    tmux display -p -t <pane> '#{pane_in_mode} #{pane_dead}'
     tmux capture-pane -p -e -t <pane>
 
-The first line prints `1` while the person is scrolling the pane (copy mode) — keys you send
-then go to tmux's copy mode, not to Claude Code, so a pane in a mode is theirs: do not type.
+The first line prints two values. The first is `1` while the person is scrolling the pane (copy
+mode) — keys you send then go to tmux's copy mode, not to Claude Code, so a pane in a mode is
+theirs: do not type. The second is `1` once the pane's program has exited — a pane a moai skill
+opened keeps its last screen under `remain-on-exit` and takes no keys: the session there is
+dead, so do not type.
 Claude Code's input box is the line that starts with `❯`, under the conversation, between two
 `─` rules. **Empty** is `❯` followed by nothing, or by Claude Code's dim placeholder — `-e`
 keeps the colours, and the placeholder is drawn dim (SGR `2`, or a grey foreground) where the
@@ -46,9 +49,9 @@ person's text is not. Anything else — a word, a pasted block, a half-typed com
 person's, and if you cannot tell the placeholder from their draft, it is theirs. A pane with
 no `❯` box at all (a shell prompt, a dialog) is not a box to type into either. **Even an empty
 box counts only while the session map, run again just before, still reads that session
-`alive` in that pane** — the screen alone cannot tell: a pane whose Claude Code was killed keeps
-its last frame, box and all, above the shell `exec bash` started, and the keys go to that
-shell.
+`alive` in that pane** — the screen alone cannot tell: in a pane the person opened, a Claude
+Code that was killed keeps its last frame, box and all, above the shell it ran in, the second
+value stays `0`, and the keys go to that shell.
 
 Inside cmux:
 
@@ -79,7 +82,7 @@ leaves its record behind. The lines below print one row per record, tab-separate
 
 ```sh
 python3 - <<'PY'
-import glob, json, os, subprocess, sys
+import glob, json, os, re, subprocess, sys
 def out(*cmd, **env):
     try:
         return subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, universal_newlines=True, env=dict(os.environ, **env), timeout=10).stdout.strip()
@@ -139,7 +142,9 @@ for path in sorted(glob.glob(os.path.expanduser("~/.claude/sessions/*.json"))):
     start = started(pid)
     alive = bool(start) and start == " ".join(str(r.get("procStart")).split())
     tmux = r.get("tmux") or ""
-    pane = tmux.rpartition(".")[2] if "%" in tmux else ""
+    if not re.search(r":@\d{1,6}\.%\d{1,6}$", tmux):
+        tmux = ""
+    pane = tmux.rpartition(".")[2] if tmux else ""
     if r.get("entrypoint") == "remote_mobile":
         pane = ""
     elif alive and (mine or cmux) and r.get("kind") not in (None, "interactive"):
@@ -174,6 +179,13 @@ PY
   worktree, also drop it when a live row other than your own stands in that same `cwd`. The
   root is not such a place — several live sessions stand there at once, and one of them being
   alive says nothing about the dead one
+- **Drop it when its conversation was cleared.** Read the end of its transcript (below): when
+  the last user line is the `/clear` command — `<command-name>/clear</command-name>`, followed
+  by a `system` line whose `commandRun.command` is `clear` — the process that ran it went on
+  under a new `sessionId`, and its own record carries that one. This catches a record that was
+  resumed by another process which then ran `/clear`: no live row carries the old id any more,
+  and resuming it brings back a conversation already left behind. Two dead records with the
+  same `sessionId` are one candidate
 - **Drop old crashes.** Records of earlier deaths stay too. Keep the candidates whose
   transcript (below) last moved around the same time; name an older one to the person apart,
   and bring it back only if they say so
@@ -283,11 +295,15 @@ supervisor's pane — or print its line — only after they say that worker is b
 the window of `$TMUX_PANE` — inside a session Saycode's daemon started, that is the daemon's
 pane, not yours — so say which window they are in:
 
-    tmux split-window -P -F '#{pane_id}' -t "$TMUX_PANE" -c <cwd> 'claude --resume <sessionId>; exec bash'
+    tmux split-window -P -F '#{pane_id}' -t "$TMUX_PANE" -c "<cwd>" 'claude --resume <sessionId>'
+    tmux set-option -p -t <pane> remain-on-exit on
     tmux select-layout -t "$TMUX_PANE" tiled
 
-**No other flag.** The first line prints the new pane's `%N`; `exec bash` keeps a shell there
-when `claude` exits. Then, as a separate call, look once: when its `❯` box shows and is empty
+**No other flag**, and keep the double quotes around `<cwd>` — a path with a space stays one
+argument. The first line prints the new pane's `%N`, the `<pane>` of the second.
+`remain-on-exit` keeps the pane when `claude` exits: its last screen stays, `#{pane_dead}`
+reads `1`, and tmux refuses keys and pastes aimed at it, so nothing lands in a shell. A dead
+pane stays until the person closes it; never kill it. Then, as a separate call, look once: when its `❯` box shows and is empty
 ("Is the input box empty" above), paste the block:
 
     tmux load-buffer -b moai-recover <file>
@@ -310,9 +326,9 @@ person that this way needs cmux 0.65.0, and go to 7; when it prints an error ins
 `methods` list, tell them what it said, and go to 7. For each session that is not a Saycode
 session (8), in that order:
 
-    cmux --id-format both new-split right --surface "$CMUX_SURFACE_ID" --command 'cd <cwd> && claude --resume <sessionId>'
+    cmux --id-format both new-split right --surface "$CMUX_SURFACE_ID" --command 'cd "<cwd>" && claude --resume <sessionId>'
 
-**No other flag.** It prints `OK surface:<n> (<UUID>) workspace:<n> (<UUID>)` — the first UUID
+**No other flag**, and keep the double quotes around `<cwd>` inside the single ones. It prints `OK surface:<n> (<UUID>) workspace:<n> (<UUID>)` — the first UUID
 is the new tab, the second your workspace. The command is typed into the tab's shell, so the
 shell stays when `claude` exits, and the split does not take focus. **If cmux refuses a split**
 — no space for a new pane, as every split lands in your row, or it cannot find your tab in the
@@ -339,7 +355,7 @@ person which tab is which session.
 Neither way above stands: open nothing. Print, per session in the same order, the line the
 person types in a terminal of their own, and under it the block to paste once its box shows:
 
-    cd <cwd> && claude --resume <sessionId>
+    cd "<cwd>" && claude --resume <sessionId>
 
 A Saycode session gets the line of 8 instead.
 

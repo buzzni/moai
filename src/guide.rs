@@ -2831,8 +2831,13 @@ subject — that has actually happened. So in the root, supervisor and worker al
 ///   v0.65.0 의 `configureTmuxCompatEnvironment`). 그 `PATH` 의 `tmux` 는 cmux 의 shim 이라 `set-option` 을 말없이
 ///   받아넘기고 `load-buffer` 를 거절해, tmux 로 읽던 판은 감독이 일꾼 칸에 아무것도 못 했다. 그 값은 없는 것으로 보고
 ///   cmux 갈래를 탄다. 진짜 tmux 의 소켓은 그 자리에 서지 않으니 잘못 읽을 길이 없고, cmux 가 그 꼴을 바꾸면 옛
-///   쓸모없는 쪽으로 돌아갈 뿐이다. 그렇게 띄운 일꾼의 기록에는 그 가짜에서 온 `tmux` 가 서서 아래 갈래로 `-` 다 —
-///   감독이 여는 일꾼은 맨 `claude` 라 거기 안 걸린다
+///   쓸모없는 쪽으로 돌아갈 뿐이다
+/// - **기록의 `tmux` 는 진짜 tmux 꼴일 때만 tmux 다**(moai-jn8d.mxb) — Claude Code 는 그것을 `tmux display-message` 로
+///   적는데, `claude-teams` 의 shim 은 `cmux:@<19자리>.%<19자리>` 로 답한다. 그것을 tmux 로 친 판은 claude-teams 로 띄운
+///   일꾼(그리고 감독 제 줄)을 cmux 갈래에서 늘 `-` 로 냈다. 진짜 tmux 의 창·칸 id 는 서버가 1 부터 세는 작은 수라,
+///   끝이 `:@<1~6자리>.%<1~6자리>` 일 때만 tmux 로 읽고 아니면 없는 것으로 본다. 진짜 tmux 를 cmux 탭에서 돌리며 그
+///   안에서 claude-teams 를 띄운 판도 이것으로 선다 — 그 일꾼의 기록은 가짜를 들어 tmux 갈래에서는 `-`, cmux 갈래에서는
+///   제 surface 다
 /// - **cmux 가 `top` 을 모르면 칸이 모두 `-` 다** — `top` 은 v0.64.0, `moai-cmux` 가 기대는 나머지는 v0.65.0 부터다.
 ///   판을 재는 것은 스킬의 몫이고(`moai-cmux` 의 첫 절), 짝은 모르는 판에서 아무 surface 도 대지 않는다. 답이 없으면
 ///   (옛 판, 닿지 않는 소켓, 샌드박스) stderr 에 한 줄을 남긴다 — 모든 칸의 `-` 가 "cmux 탭 밖" 이 아니라 "cmux 가 답하지
@@ -2863,7 +2868,7 @@ subject — that has actually happened. So in the root, supervisor and worker al
 /// 칸은 탭으로 가른다 — tmux 세션 이름에 빈칸이 들 수 있다(`Shopping Crawler:@16.%39`). 줄의 꼴이 계약이다:
 /// `state  name  pane  status  cwd  sessionId  saycode`. `the_session_map_reads_the_records` 가 실제 기록 꼴로 돌려 잰다.
 pub const SESSIONS: &str = r##"python3 - <<'PY'
-import glob, json, os, subprocess, sys
+import glob, json, os, re, subprocess, sys
 def out(*cmd, **env):
     try:
         return subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, universal_newlines=True, env=dict(os.environ, **env), timeout=10).stdout.strip()
@@ -2923,7 +2928,9 @@ for path in sorted(glob.glob(os.path.expanduser("~/.claude/sessions/*.json"))):
     start = started(pid)
     alive = bool(start) and start == " ".join(str(r.get("procStart")).split())
     tmux = r.get("tmux") or ""
-    pane = tmux.rpartition(".")[2] if "%" in tmux else ""
+    if not re.search(r":@\d{1,6}\.%\d{1,6}$", tmux):
+        tmux = ""
+    pane = tmux.rpartition(".")[2] if tmux else ""
     if r.get("entrypoint") == "remote_mobile":
         pane = ""
     elif alive and (mine or cmux) and r.get("kind") not in (None, "interactive"):
@@ -2952,14 +2959,22 @@ PY"##;
 /// 고쳐진다. 비었을 때 무엇을 하는가(안 친다·사람에게 말한다)는 스킬마다 제 글이 잇는다.
 ///
 /// **화면만으로는 빈 칸이 아니다**(moai-xpa8.p56) — 짝([`SESSIONS`])을 새로 봐 그 세션이 그 칸에 `alive` 일 때만이다.
-/// 죽임을 당한 Claude 는 마지막 화면(칸까지)을 `exec bash` 의 셸 위에 남겨, 닿지 않은 메시지(세션이 죽어 `SendMessage` 가
+/// 죽임을 당한 Claude 는 마지막 화면(칸까지)을 셸 위에 남겨, 닿지 않은 메시지(세션이 죽어 `SendMessage` 가
 /// 실패하는 흔한 자리다)가 셸에 스크립트로 쳐진다. cmux 쪽이 리뷰(moai-p5sz.tkn 2번)에서 받은 고침을 tmux 로 옮긴
 /// 것이고, 2026-10-11 cmux 실기에서 `kill -9` 한 탭이 마지막 화면을 남기는 것을 봤다.
-pub const EMPTY_BOX: &str = "    tmux display -p -t <pane> '#{pane_in_mode}'
+///
+/// **스킬이 여는 칸은 셸 대신 `remain-on-exit` 를 둔다**(moai-jn8d.ni8). `'claude …; exec bash'` 로 열던 판은 죽은
+/// Claude 밑에 늘 산 셸이 서서, 짝을 다시 보는 글의 걸음을 건너뛰면 막는 것이 없었다. 이제 그 칸은 죽으면
+/// `#{pane_dead}` 가 1 이 되고 tmux 가 그 칸으로 가는 키와 `paste-buffer` 를 스스로 거절한다. 사람이 연 칸에는 셸이
+/// 남으니 짝 재확인은 그대로 선다.
+pub const EMPTY_BOX: &str = "    tmux display -p -t <pane> '#{pane_in_mode} #{pane_dead}'
     tmux capture-pane -p -e -t <pane>
 
-The first line prints `1` while the person is scrolling the pane (copy mode) — keys you send
-then go to tmux's copy mode, not to Claude Code, so a pane in a mode is theirs: do not type.
+The first line prints two values. The first is `1` while the person is scrolling the pane (copy
+mode) — keys you send then go to tmux's copy mode, not to Claude Code, so a pane in a mode is
+theirs: do not type. The second is `1` once the pane's program has exited — a pane a moai skill
+opened keeps its last screen under `remain-on-exit` and takes no keys: the session there is
+dead, so do not type.
 Claude Code's input box is the line that starts with `❯`, under the conversation, between two
 `─` rules. **Empty** is `❯` followed by nothing, or by Claude Code's dim placeholder — `-e`
 keeps the colours, and the placeholder is drawn dim (SGR `2`, or a grey foreground) where the
@@ -2967,9 +2982,9 @@ person's text is not. Anything else — a word, a pasted block, a half-typed com
 person's, and if you cannot tell the placeholder from their draft, it is theirs. A pane with
 no `❯` box at all (a shell prompt, a dialog) is not a box to type into either. **Even an empty
 box counts only while the session map, run again just before, still reads that session
-`alive` in that pane** — the screen alone cannot tell: a pane whose Claude Code was killed keeps
-its last frame, box and all, above the shell `exec bash` started, and the keys go to that
-shell.";
+`alive` in that pane** — the screen alone cannot tell: in a pane the person opened, a Claude
+Code that was killed keeps its last frame, box and all, above the shell it ran in, the second
+value stays `0`, and the keys go to that shell.";
 
 /// Codex 일꾼의 모델·리뷰·멈춤 규약은 한 글이다(moai-uzhx.2mq). cmux 와 tmux 가
 /// `format!` 으로 그대로 싣는다 — 자리마다 다른 명령은 각 절에 남긴다.
@@ -3188,7 +3203,8 @@ has read `busy` far longer than its work should take, look at its pane once:
 
 and read why it stopped — a permission prompt, a question (`AskUserQuestion`), an API or
 rate-limit error, or a process that ended (a shell prompt where the box was, or under its last
-box — a killed Claude Code leaves its last screen behind); whether the session is still alive,
+box — a killed Claude Code leaves its last screen behind — or `#{{pane_dead}}` reading `1` in a
+pane you opened); whether the session is still alive,
 the session map says. **Tell the person** what the pane shows and which pane it is. Do not answer the prompt, do not press a
 key, and do not look again in a loop. A process that ended is a dead session: bringing it
 back is `moai-recover`, once the person asks for it.
@@ -3199,12 +3215,16 @@ When the supervisor's 2 finds no worker, ask the person **once** whether to open
 panes, and how many — one question covers several panes. Open a pane only on their yes, or
 when they asked you for it. On a yes, for each pane:
 
-    tmux split-window -P -F '#{{pane_id}}' -t "$TMUX_PANE" -c <root> 'claude --model <model>; exec bash'
+    tmux split-window -P -F '#{{pane_id}}' -t "$TMUX_PANE" -c "<root>" 'claude --model <model>'
+    tmux set-option -p -t <pane> remain-on-exit on
     tmux select-layout -t "$TMUX_PANE" tiled
 
-`<root>` is the `root dir` of the supervisor's 2 and `<model>` the model picked in 2-1. **No
-other flag.** The first line prints the new pane's id; `exec bash` keeps a shell in the pane
-when `claude` exits, so what it said stays readable. The pane belongs to the same person —
+`<root>` is the `root dir` of the supervisor's 2 and `<model>` the model picked in 2-1 — keep
+the double quotes, so a path with a space stays one argument. **No other flag.** The first line
+prints the new pane's id, the `<pane>` of the second. `remain-on-exit` keeps the pane when
+`claude` exits: its last screen stays readable, `#{{pane_dead}}` reads `1`, and tmux refuses
+keys and pastes aimed at it — nothing you send lands in a shell under a dead session. A dead
+pane stays until the person closes it; never kill it. The pane belongs to the same person —
 it is their interactive session like any other.
 
 Once it has started (a separate call: `capture-pane` of the new pane shows the `❯` box), look
@@ -3241,10 +3261,11 @@ Codex can leave its last frame over a shell. Never use another server's pane ids
 
 ### Read the Codex input box
 
-    tmux display -p -t <pane> '#{{pane_in_mode}}'
+    tmux display -p -t <pane> '#{{pane_in_mode}} #{{pane_dead}}'
     tmux capture-pane -p -e -t <pane>
 
-If the first line prints `1`, the person is in copy mode: the pane is theirs, so do not type.
+If the first value is `1`, the person is in copy mode: the pane is theirs, so do not type.
+If the second is `1`, Codex has exited and the pane kept its last screen: no box, do not type.
 
 {CODEX_EMPTY_BOX}
 
@@ -3253,11 +3274,13 @@ If the first line prints `1`, the person is in copy mode: the pane is theirs, so
 When no idle Codex worker is left, ask the person **once** whether to open new panes and
 how many. Open one only on their yes, or when they asked for it. On a yes:
 
-    tmux split-window -P -F '#{{pane_id}}' -t "$TMUX_PANE" -c <root> 'codex --model <codex>; exec bash'
+    tmux split-window -P -F '#{{pane_id}}' -t "$TMUX_PANE" -c "<root>" 'codex --model <codex>'
+    tmux set-option -p -t <pane> remain-on-exit on
     tmux select-layout -t "$TMUX_PANE" tiled
 
-The first line prints the new pane id. This is an ordinary interactive session; `exec bash`
-keeps its final screen readable after Codex exits. Read the new pane separately and confirm
+The first line prints the new pane id, the `<pane>` of the second. This is an ordinary
+interactive session; `remain-on-exit` keeps its final screen readable after Codex exits, and
+the dead pane takes no keys — tmux refuses them. Read the new pane separately and confirm
 the live process and empty composer above. Folder trust and hook trust prompts belong to
 the person; tell them what the pane shows. Do not assume cmux's wrapper enabled or trusted
 hooks here. The person checks moai in `/hooks`; the worker keeps the five rules even when
@@ -3826,8 +3849,8 @@ under `~/.claude/sessions/`, and the lines below print one row per record, tab-s
   in a cmux tab of yours — another terminal, or tmux, tmux inside a cmux tab included — when it
   shares its tab with another live session, or when cmux gave no answer (a line on its own says
   so), and then this skill has nothing for that worker. A session started with cmux's
-  `claude-teams` can read `-` too: its record may carry the tmux that launcher's stand-in
-  answered, and a record with tmux in it is not matched to a surface
+  `claude-teams` is matched like any other: the tmux its record carries is the stand-in's
+  answer, not a tmux pane, so the map leaves it out
 - **No row at all, and a line saying no record reads alive:** this shell cannot tell live from
   dead — act on no row, and tell the person what it said
 - **A row whose `saycode` is not `-` is a Saycode session** — one Saycode started, so its pane
@@ -3836,8 +3859,7 @@ under `~/.claude/sessions/`, and the lines below print one row per record, tab-s
   names — wherever they stand. A row standing elsewhere is not a worker of this repository, whatever its name
 - `status` is `idle`, `busy` or another word. It has to agree with `ListAgents` where a step
   below asks for `idle`
-- Your own row is the one whose pane is `$CMUX_SURFACE_ID` — when you were started with cmux's
-  `claude-teams` it may read `-` instead (above)
+- Your own row is the one whose pane is `$CMUX_SURFACE_ID`
 
 Run it when a step below needs a surface, and once more just before you type into one — a
 reading from earlier in the round may be a worker that has died since (the next section).
@@ -3953,7 +3975,7 @@ When the supervisor's 2 finds no worker, ask the person **once** whether to open
 tabs, and how many — one question covers several. Open one only on their yes, or when they
 asked you for it. On a yes, for each:
 
-    cmux --id-format both new-split right --surface "$CMUX_SURFACE_ID" --command 'cd <root> && claude --model <model>'
+    cmux --id-format both new-split right --surface "$CMUX_SURFACE_ID" --command 'cd "<root>" && claude --model <model>'
 
 `<root>` is the `root dir` of the supervisor's 2 and `<model>` the model picked in 2-1. **No
 other flag** on `claude`. It prints `OK surface:<n> (<UUID>) workspace:<n> (<UUID>)` — the first
@@ -4056,7 +4078,7 @@ Re-run this check just before each input; never trust a tab title or an earlier 
 
 Ask once before opening new tabs, as above. On a yes, open an ordinary interactive Codex:
 
-    cmux --id-format both new-split right --surface "$CMUX_SURFACE_ID" --command 'cd <root> && codex --model <codex>'
+    cmux --id-format both new-split right --surface "$CMUX_SURFACE_ID" --command 'cd "<root>" && codex --model <codex>'
 
 Keep the returned surface UUID. The same split refusal rule applies: stop opening and tell
 the person. Read its startup screen in a separate call; folder trust, hooks trust and any
@@ -4141,6 +4163,13 @@ is already in the box: do not paste again. Tell the person which tab holds it un
 /// 맞춘다 — [`SESSIONS`] 의 `saycode` 칸은 기록의 표일 뿐 Saycode id 가 아니다. 같은 Saycode id 로
 /// 돌아오는지는 재 보지 못했다.
 ///
+/// **`/clear` 로 끝난 대화 기록은 후보가 아니다**(moai-jn8d.vyh). 죽은 기록(id A)을 새 프로세스가 되살린 뒤 그 창에서
+/// `/clear` 를 치면 그 프로세스의 기록은 B 를 들어, A 를 든 산 줄이 없어진다. A 의 대화 기록은 `/clear` 까지 움직여
+/// "같은 때 움직였다" 는 잣대로는 못 걸러, 둘째로 죽으면 낡은 대화를 되살렸다. 표는 그 대화 기록의 끝에 있다 — 마지막
+/// 사용자 줄이 `<command-name>/clear</command-name>` 이고 `commandRun.command` 가 `clear` 인 `system` 줄이 뒤따른다
+/// (2026-10-26 에 2.1.306 의 기록에서 봤다). 기록 파일에는 이어 준 프로세스를 가리키는 칸이 없어, 죽은 때를 어림하는
+/// 잣대(기록의 `updatedAt` 뒤에 대화가 움직였나)는 턴 가운데 죽은 흔한 판을 거꾸로 버린다 — 그래서 대화 기록의 표를 쓴다.
+///
 /// **Saycode 세션인지는 짝이 아니라 대화 기록이 가른다**(리뷰 moai-l244) — 줄마다 `entrypoint` 가 서고, happy 의 데몬이
 /// 띄운 세션은 `remote_mobile`, 터미널에서 띄운 세션은 `cli` 다. `lastAgentText` 는 도는 턴 동안 비어(2026-10-10 에
 /// `responding` 줄이 `null` 이었다) 턴 가운데 죽은 일꾼 — OOM 의 흔한 꼴 — 은 짝이 안 지어지고, Saycode 밖에서 부른
@@ -4216,6 +4245,13 @@ leaves its record behind. The lines below print one row per record, tab-separate
   worktree, also drop it when a live row other than your own stands in that same `cwd`. The
   root is not such a place — several live sessions stand there at once, and one of them being
   alive says nothing about the dead one
+- **Drop it when its conversation was cleared.** Read the end of its transcript (below): when
+  the last user line is the `/clear` command — `<command-name>/clear</command-name>`, followed
+  by a `system` line whose `commandRun.command` is `clear` — the process that ran it went on
+  under a new `sessionId`, and its own record carries that one. This catches a record that was
+  resumed by another process which then ran `/clear`: no live row carries the old id any more,
+  and resuming it brings back a conversation already left behind. Two dead records with the
+  same `sessionId` are one candidate
 - **Drop old crashes.** Records of earlier deaths stay too. Keep the candidates whose
   transcript (below) last moved around the same time; name an older one to the person apart,
   and bring it back only if they say so
@@ -4325,11 +4361,15 @@ supervisor's pane — or print its line — only after they say that worker is b
 the window of `$TMUX_PANE` — inside a session Saycode's daemon started, that is the daemon's
 pane, not yours — so say which window they are in:
 
-    tmux split-window -P -F '#{{pane_id}}' -t "$TMUX_PANE" -c <cwd> 'claude --resume <sessionId>; exec bash'
+    tmux split-window -P -F '#{{pane_id}}' -t "$TMUX_PANE" -c "<cwd>" 'claude --resume <sessionId>'
+    tmux set-option -p -t <pane> remain-on-exit on
     tmux select-layout -t "$TMUX_PANE" tiled
 
-**No other flag.** The first line prints the new pane's `%N`; `exec bash` keeps a shell there
-when `claude` exits. Then, as a separate call, look once: when its `❯` box shows and is empty
+**No other flag**, and keep the double quotes around `<cwd>` — a path with a space stays one
+argument. The first line prints the new pane's `%N`, the `<pane>` of the second.
+`remain-on-exit` keeps the pane when `claude` exits: its last screen stays, `#{{pane_dead}}`
+reads `1`, and tmux refuses keys and pastes aimed at it, so nothing lands in a shell. A dead
+pane stays until the person closes it; never kill it. Then, as a separate call, look once: when its `❯` box shows and is empty
 ("Is the input box empty" above), paste the block:
 
     tmux load-buffer -b moai-recover <file>
@@ -4352,9 +4392,9 @@ person that this way needs cmux 0.65.0, and go to 7; when it prints an error ins
 `methods` list, tell them what it said, and go to 7. For each session that is not a Saycode
 session (8), in that order:
 
-    cmux --id-format both new-split right --surface "$CMUX_SURFACE_ID" --command 'cd <cwd> && claude --resume <sessionId>'
+    cmux --id-format both new-split right --surface "$CMUX_SURFACE_ID" --command 'cd "<cwd>" && claude --resume <sessionId>'
 
-**No other flag.** It prints `OK surface:<n> (<UUID>) workspace:<n> (<UUID>)` — the first UUID
+**No other flag**, and keep the double quotes around `<cwd>` inside the single ones. It prints `OK surface:<n> (<UUID>) workspace:<n> (<UUID>)` — the first UUID
 is the new tab, the second your workspace. The command is typed into the tab's shell, so the
 shell stays when `claude` exits, and the split does not take focus. **If cmux refuses a split**
 — no space for a new pane, as every split lands in your row, or it cannot find your tab in the
@@ -4381,7 +4421,7 @@ person which tab is which session.
 Neither way above stands: open nothing. Print, per session in the same order, the line the
 person types in a terminal of their own, and under it the block to paste once its box shows:
 
-    cd <cwd> && claude --resume <sessionId>
+    cd "<cwd>" && claude --resume <sessionId>
 
 A Saycode session gets the line of 8 instead.
 
@@ -8086,6 +8126,24 @@ stop sending outside work while a release runs",
             run_in(None, true),
             "cmux 의 가짜 TMUX 를 tmux 로 읽었다"
         );
+        // `claude-teams` 로 띄운 세션의 기록은 그 shim 이 답한 가짜 `tmux` 를 든다 — 진짜 tmux 꼴이 아니니 없는 것으로
+        // 읽고, cmux 갈래에서 제 surface 를 받는다(moai-jn8d.mxb).
+        let teams = s.path().join("teams");
+        std::fs::create_dir_all(&teams).unwrap();
+        let fake = "cmux:@6958867214691921188.%6958867214691921188";
+        std::fs::write(teams.join("1.json"), record(me, &start, "plain", Some(fake))).unwrap();
+        let out = map(&teams, None, true);
+        assert_eq!(
+            String::from_utf8(out.stdout).unwrap(),
+            "alive\tplain\tCMUX-SURFACE-A\tidle\t/repo\ts-plain\t-\n",
+            "claude-teams 의 가짜 tmux 를 든 세션에 surface 를 못 냈다"
+        );
+        let out = map(&teams, None, false);
+        assert_eq!(
+            String::from_utf8(out.stdout).unwrap(),
+            "alive\tplain\t-\tidle\t/repo\ts-plain\t-\n",
+            "claude-teams 의 가짜 tmux 를 칸으로 냈다"
+        );
         // 한 탭을 둘이 대면 둘 다 `-` 다 — 다리는 물려받은 환경뿐이라(cmux 탭 안의 zellij·screen) 그 탭에 친 것은 앞에 선
         // 세션 하나에만 간다. `bg` 기록은 띄운 세션의 탭을 물려받을 뿐 그 입력을 받지 않아 탭을 안 대고, 대는 쪽도 막지 않는다.
         let shared = s.path().join("shared");
@@ -8404,7 +8462,7 @@ stop sending outside work while a release runs",
         let launches: Vec<&str> = text.lines().filter(|l| l.contains("claude ") && l.contains("--command")).collect();
         assert_eq!(launches.len(), 1, "claude 를 띄우는 줄이 하나가 아니다 — {launches:?}");
         assert!(
-            launches[0].ends_with("--command 'cd <root> && claude --model <model>'"),
+            launches[0].ends_with("--command 'cd \"<root>\" && claude --model <model>'"),
             "띄우는 줄에 다른 깃발이 섰다"
         );
         assert!(launches[0].contains("--surface \"$CMUX_SURFACE_ID\""), "새 칸이 감독 곁에 안 선다");
@@ -8504,7 +8562,18 @@ stop sending outside work while a release runs",
         // 띄우는 줄은 하나고, 깃발은 모델 하나다.
         let launches: Vec<&str> = text.lines().filter(|l| l.contains("'claude ")).collect();
         assert_eq!(launches.len(), 1, "claude 를 띄우는 줄이 하나가 아니다 — {launches:?}");
-        assert!(launches[0].contains("'claude --model <model>; exec bash'"), "띄우는 줄에 다른 깃발이 섰다");
+        assert!(launches[0].ends_with("-c \"<root>\" 'claude --model <model>'"), "띄우는 줄에 다른 깃발이 섰다");
+        // 스킬이 연 칸은 셸 대신 remain-on-exit 다 — 죽은 칸에 친 키를 tmux 가 거절한다(moai-jn8d.ni8).
+        assert!(!text.contains("exec bash"), "칸이 죽은 Claude 밑에 셸을 남긴다");
+        assert_eq!(
+            text.matches("    tmux set-option -p -t <pane> remain-on-exit on").count(),
+            2,
+            "여는 칸마다 remain-on-exit 가 안 선다"
+        );
+        assert!(
+            text.contains(EMPTY_BOX) && EMPTY_BOX.contains("#{pane_dead}"),
+            "빈 입력 칸의 잣대가 죽은 칸을 안 읽는다"
+        );
         // 입력 칸이 비어야 친다 — 옛 5-1 이 사람의 초안을 건지느라 480줄이었다.
         assert!(text.contains("**Then do not type. Tell the person"), "빈 입력 칸의 잣대가 없다");
         let clear = &text[text.find("## Clear a worker's window").unwrap()..text.find("## When a message").unwrap()];
@@ -8598,11 +8667,11 @@ stop sending outside work while a release runs",
             "a shell such as `zsh`",
             "Repeat this check just before each input",
             "`$TMUX_PANE`",
-            "tmux display -p -t <pane> '#{pane_in_mode}'",
+            "tmux display -p -t <pane> '#{pane_in_mode} #{pane_dead}'",
             "tmux capture-pane -p -e -t <pane>",
             "ask the person **once**",
             "only on their yes",
-            "'codex --model <codex>; exec bash'",
+            "-c \"<root>\" 'codex --model <codex>'\n    tmux set-option -p -t <pane> remain-on-exit on",
             "`Report-checked:`",
             "tmux send-keys -t <pane> /new\n",
             "text and Enter in separate calls",
@@ -8799,15 +8868,24 @@ stop sending outside work while a release runs",
         // 산 줄이 하나도 없다고 짝이 멈추면 아무것도 안 되살린다 — 그 판의 `dead` 를 믿으면 산 세션을 한 번 더 띄운다.
         let dead = section(&text, "## 1. Find the dead");
         assert!(dead.contains("Bring nothing back"), "짝이 산 줄을 못 읽는 판에도 되살린다");
+        // 되살린 뒤 `/clear` 한 기록은 낡은 대화다 — 대화 기록의 끝이 가른다(moai-jn8d.vyh).
+        assert!(
+            dead.contains("**Drop it when its conversation was cleared.**")
+                && dead.contains("`<command-name>/clear</command-name>`")
+                && dead.contains("`commandRun.command` is `clear`"),
+            "/clear 로 넘어간 대화를 후보로 둔다"
+        );
+        // 되살리기가 연 칸도 셸 대신 remain-on-exit 다(moai-jn8d.ni8).
+        assert!(text.contains("    tmux set-option -p -t <pane> remain-on-exit on") && !text.contains("exec bash"));
         // 띄우는 줄은 셋 — tmux 칸, cmux 탭(moai-p5sz.kfi), 둘 밖에서 사람이 칠 줄. 깃발은 `--resume` 하나다. 코드 줄에서
         // `claude ` 를 든 줄을 다 센다 — `--resume` 앞에 다른 깃발(`--model …`)을 끼운 줄도 걸려야 한다.
         let launches: Vec<&str> = text.lines().filter(|l| l.starts_with("    ") && l.contains("claude ")).collect();
         assert_eq!(
             launches,
             [
-                "    tmux split-window -P -F '#{pane_id}' -t \"$TMUX_PANE\" -c <cwd> 'claude --resume <sessionId>; exec bash'",
-                "    cmux --id-format both new-split right --surface \"$CMUX_SURFACE_ID\" --command 'cd <cwd> && claude --resume <sessionId>'",
-                "    cd <cwd> && claude --resume <sessionId>",
+                "    tmux split-window -P -F '#{pane_id}' -t \"$TMUX_PANE\" -c \"<cwd>\" 'claude --resume <sessionId>'",
+                "    cmux --id-format both new-split right --surface \"$CMUX_SURFACE_ID\" --command 'cd \"<cwd>\" && claude --resume <sessionId>'",
+                "    cd \"<cwd>\" && claude --resume <sessionId>",
             ],
             "claude 를 띄우는 줄이 셋이 아니거나 다른 깃발이 섰다"
         );
