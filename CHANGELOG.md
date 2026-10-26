@@ -12,6 +12,8 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+## [0.29.1] - 2026-10-26
+
 ### Fixed
 
 - **Windows: moai reads the paths MSYS2's git hands back.** MSYS2's `git`
