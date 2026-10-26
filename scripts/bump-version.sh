@@ -6,9 +6,9 @@
 #     scripts/bump-version.sh 0.2.0     판을 그대로 준다 — 1.0 은 이 길로만 연다
 #     scripts/bump-version.sh --next    auto 가 고를 판만 찍는다. 아무것도 안 쓴다
 #
-# **태그는 사람이 단다.** 이 스크립트는 커밋도 태그도 하지 않고 파일만 고친다 —
-# 무엇이 바뀌었는지 사람이 보고 커밋하는 자리를 남긴다. 태그를 여기서 달면
-# `check-version.sh` 가 재는 두 값을 한 손이 같이 써, 어긋남을 잡을 눈이 없어진다.
+# **커밋도 태그도 하지 않고 파일만 고친다.** 무엇이 바뀌었는지 사람이 보고 커밋하는 자리를
+# 남긴다. 태그는 main 에 머지된 뒤 관리자가 승인하면 tag-on-merge.yml 이 단다(moai-i5so).
+# 태그를 여기서 달면 `check-version.sh` 가 재는 두 값을 한 손이 같이 써, 어긋남을 잡을 눈이 없어진다.
 #
 # 날짜는 `MOAI_NOW` 가 서 있으면 그것을 쓴다 (시험이 시계를 고정하는 자리).
 set -euo pipefail
@@ -272,8 +272,8 @@ if [ "$locked" = 0 ]; then
 
 다음
   cargo update --workspace                 먼저 Cargo.lock 을 맞추고 자기 줄이 $want 인지 본다
-  그 뒤에 커밋하고 태그를 단다 — 릴리스는 \`--locked\` 로 짓는다
-  태그는 develop 끝이 아니라 main 의 머지 커밋에 — 차례는 CONTRIBUTING.md 의 Releasing 에 있다
+  그 뒤에 커밋하고 main 으로 PR 을 낸다 — 릴리스는 \`--locked\` 로 짓는다
+  태그는 손으로 안 단다 — 차례는 CONTRIBUTING.md 의 Releasing 에 있다
 NEXT
   exit 0
 fi
@@ -281,12 +281,16 @@ fi
 # **태그는 develop 끝이 아니라 main 의 머지 커밋에 단다**(moai-ltsv.3qk) — CONTRIBUTING.md 의
 # Releasing 과 같은 차례다. 앞의 판은 커밋 바로 뒤 지금 가지 끝에 태그를 달라고 일러, 그대로
 # 친 사람이 main 에 없는 것을 릴리스로 지었다.
+#
+# **그 태그는 사람이 안 친다**(moai-i5so). 관리자가 environment release 를 승인하면
+# tag-on-merge.yml 이 머지 커밋에 달고 release.yml 을 부른다. 여기서 손 태그를 일러 두면
+# 워크플로와 둘이 같은 태그를 겨룬다 — 손으로 내는 길은 CONTRIBUTING.md 에만 둔다.
 cat <<NEXT
 
 다음 — 차례 전체는 CONTRIBUTING.md 의 Releasing 에 있다
   git commit -m "chore(release): $want" -- Cargo.toml Cargo.lock CHANGELOG.md
   git push origin develop
   gh pr create --base main --head develop --title "v$want"    머지한다, squash 하지 않는다
-  git fetch origin && git tag v$want origin/main
-  git push origin v$want
+  Actions 의 "tag on merge" 를 관리자가 승인한다 (environment release)
+                                           v$want 태그와 릴리스가 그 뒤를 따른다
 NEXT

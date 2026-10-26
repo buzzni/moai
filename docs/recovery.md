@@ -352,6 +352,16 @@ The tag is what the release workflow trusts.
 - **Tag disagrees with `Cargo.toml`** — the workflow's first job and the pre-push
   hook both stop before anything is built. Run `scripts/bump-version.sh <version>`,
   commit, delete the bad tag locally and on the remote, and tag again.
+- **The merge into `main` brought no tag** — the `tag on merge` run is waiting
+  for an admin to approve the `release` environment, it was rejected, or it
+  stopped. It stops before asking when `CHANGELOG.md` has no section for that
+  version. It stops after approval when no admin approved. Then check that
+  Settings → Environments → `release` still lists the admins as required
+  reviewers. If the tag already stood on an earlier commit, the merge simply did
+  not bump the version. Tagging by hand, as in `CONTRIBUTING.md`'s Releasing,
+  still works. If the tag is on the merge commit but no release ran,
+  `gh workflow run release.yml --ref v<version>` starts it, and
+  `gh workflow run smoke.yml --ref v<version>` starts the smoke test.
 - **Artifacts are wrong but published** — delete the release and its tag, fix,
   and release a new patch version rather than replacing artifacts under a tag
   someone may already have downloaded. `install.sh` and `install.ps1` verify

@@ -10,7 +10,7 @@
 
 use crate::git_leaks::swept;
 use std::collections::BTreeMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug)]
 pub enum Error {
@@ -91,7 +91,7 @@ fn in_repo(root: &Path) -> bool {
         if dotgit.exists() {
             return std::fs::read_to_string(&dotgit)
                 .ok()
-                .and_then(|t| t.trim_end().strip_prefix("gitdir:").map(|g| dir.join(g.trim())))
+                .and_then(|t| t.trim_end().strip_prefix("gitdir:").map(|g| dir.join(native(g.trim()))))
                 .is_some_and(|g| g.join("HEAD").is_file());
         }
     }
@@ -209,19 +209,52 @@ fn argv<'a>(root: &'a Path, args: &'a [&str]) -> impl Iterator<Item = &'a std::f
 /// `PATH` 에서 처음 닿는 `git.exe` 가 **MSYS2 의 런타임으로 지은 것인가** — 그 옆에 `msys-2.0.dll` 이 있으면 그렇다
 /// (`pacman -S git`). Git for Windows 의 `git.exe` 는 네이티브라 옆에 그 DLL 이 없다(moai-vjdq.ch3).
 ///
-/// 디렉터리 목록과 파일 있음은 부르는 쪽이 건넨다 — 리눅스에서 시험하려는 것이다. 못 찾으면 `false`(MSVC 꼴 그대로).
+/// 디렉터리 목록과 파일 있음은 부르는 쪽이 건넨다 — 리눅스에서 시험하려는 것이다. 그렇다면 그 `git.exe` 의 디렉터리를
+/// 내고, 아니면 `None`(MSVC 꼴 그대로)이다.
 #[cfg(any(not(unix), test))]
-fn msys_runtime(path: &std::ffi::OsStr, exists: impl Fn(&Path) -> bool) -> bool {
-    std::env::split_paths(path)
-        .find(|dir| exists(&dir.join("git.exe")))
-        .is_some_and(|dir| exists(&dir.join("msys-2.0.dll")))
+fn msys_runtime(path: &std::ffi::OsStr, exists: impl Fn(&Path) -> bool) -> Option<PathBuf> {
+    std::env::split_paths(path).find(|dir| exists(&dir.join("git.exe"))).filter(|dir| exists(&dir.join("msys-2.0.dll")))
 }
 
-/// [`msys_runtime`] 을 프로세스에 한 번만 묻는다 — 부를 때마다 `PATH` 를 훑지 않는다.
+/// MSYS2 가 깔린 자리 — [`msys_runtime`] 이 찾은 `git.exe` 의 디렉터리에서 `usr\bin`(없으면 `bin`)을 뗀 곳이다
+/// (`C:\msys64\usr\bin` → `C:\msys64`, moai-yc8r.3ie). POSIX 뿌리 `/` 가 거기 걸린다. 그 꼴이 아니면 `None` 이다 —
+/// 지어낸 뿌리 밑으로 읽느니 받은 철자 그대로가 낫다.
+#[cfg(any(not(unix), test))]
+fn msys_root(bin: &Path) -> Option<PathBuf> {
+    let named = |p: &Path, n: &str| p.file_name().is_some_and(|f| f.eq_ignore_ascii_case(n));
+    if !named(bin, "bin") {
+        return None;
+    }
+    let up = bin.parent()?;
+    Some(if named(up, "usr") { up.parent()? } else { up }.to_path_buf())
+}
+
+/// [`msys_runtime`] 을 프로세스에 한 번만 묻는다 — 부를 때마다 `PATH` 를 훑지 않는다. MSYS2 의 git 이면 그 디렉터리다.
+#[cfg(not(unix))]
+fn msys_bin() -> Option<&'static Path> {
+    static MSYS: std::sync::OnceLock<Option<PathBuf>> = std::sync::OnceLock::new();
+    MSYS.get_or_init(|| std::env::var_os("PATH").and_then(|p| msys_runtime(&p, |f| f.is_file()))).as_deref()
+}
+
 #[cfg(not(unix))]
 fn msys_git() -> bool {
-    static MSYS: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *MSYS.get_or_init(|| std::env::var_os("PATH").is_some_and(|p| msys_runtime(&p, |f| f.is_file())))
+    msys_bin().is_some()
+}
+
+/// **git 이 댄 경로 글을 이 기계의 경로로**(moai-yc8r.3ie) — 출력(`rev-parse`·`worktree list`)과 git 이 써 둔 파일
+/// (`.git` 의 `gitdir:`, `worktrees/<이름>/gitdir`·`commondir`)을 읽는 자리가 다 이것을 지난다. 유닉스에서는 받은 글
+/// 그대로다.
+///
+/// Windows 에서 `/` 로 선 글은 MSYS2 의 git 이 댄 것이다 — Git for Windows 는 `C:/…` 를 댄다. 드라이브·UNC 꼴은 늘
+/// 바꾸고, 그 밖은 `PATH` 의 git 이 MSYS2 의 것일 때 그 뿌리 밑으로 바꾼다([`crate::path::from_posix`]). 못 바꾸면
+/// 받은 글 그대로다 — 이 판 전과 같은 답이다. **`PATH` 는 그 밖의 `/…` 를 받았을 때만 훑는다** — 그 까닭은
+/// [`crate::path::from_posix`] 에 있다.
+pub(crate) fn native(text: &str) -> PathBuf {
+    #[cfg(not(unix))]
+    if let Some(p) = crate::path::from_posix(text, || msys_bin().and_then(msys_root)) {
+        return p;
+    }
+    PathBuf::from(text)
 }
 
 /// `root` 에서 git 을 한 번 부르고 표준 출력을 받는다. 글자가 깨졌으면 실패다 —
@@ -705,11 +738,20 @@ pub(crate) mod tests {
         let files = |set: &'static [&'static str]| move |p: &Path| set.contains(&p.to_str().unwrap());
         // 가르는 글자는 기계마다 다르다(`:`·`;`) — 시험이 Windows 에서도 서게 `join_paths` 로 잇는다.
         let path = std::env::join_paths(["/a", "/b", "/c"]).unwrap();
-        assert!(msys_runtime(&path, files(&["/b/git.exe", "/b/msys-2.0.dll"])));
-        assert!(!msys_runtime(&path, files(&["/b/git.exe"])));
+        assert_eq!(msys_runtime(&path, files(&["/b/git.exe", "/b/msys-2.0.dll"])), Some(PathBuf::from("/b")));
+        assert!(msys_runtime(&path, files(&["/b/git.exe"])).is_none());
         // 앞선 네이티브 git 이 이긴다 — 뒤 디렉터리의 DLL 은 상관없다.
-        assert!(!msys_runtime(&path, files(&["/a/git.exe", "/c/git.exe", "/c/msys-2.0.dll"])));
-        assert!(!msys_runtime(&path, files(&[])));
+        assert!(msys_runtime(&path, files(&["/a/git.exe", "/c/git.exe", "/c/msys-2.0.dll"])).is_none());
+        assert!(msys_runtime(&path, files(&[])).is_none());
+    }
+
+    /// MSYS2 의 뿌리는 `git.exe` 의 디렉터리에서 `usr/bin`(없으면 `bin`)을 뗀 곳이다(moai-yc8r.3ie). 그 꼴이 아니면 모른다.
+    #[test]
+    fn the_msys_root_sits_above_usr_bin() {
+        assert_eq!(msys_root(Path::new("/msys64/usr/bin")), Some(PathBuf::from("/msys64")));
+        assert_eq!(msys_root(Path::new("/msys64/USR/Bin")), Some(PathBuf::from("/msys64")));
+        assert_eq!(msys_root(Path::new("/cygwin/bin")), Some(PathBuf::from("/cygwin")));
+        assert_eq!(msys_root(Path::new("/msys64/mingw64/libexec")), None);
     }
 
     /// 따옴표 든 뿌리는 MSYS2 꼴로 싸야 `'` 가 안 먹힌다 — 싸는 자는 jotfile 의 것을 그대로 쓰고, 낱말은 두 갈래가 함께

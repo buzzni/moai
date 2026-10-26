@@ -12,6 +12,25 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+## [0.29.1] - 2026-10-26
+
+### Fixed
+
+- **Windows: moai reads the paths MSYS2's git hands back.** MSYS2's `git`
+  answers in its own spelling (`/c/Users/me/proj`), both on the command line and
+  in the `.git` files it writes for a linked worktree, and `moai.exe` read that
+  as a path under the current drive's root — the worktree overlay, the hooks'
+  worktree checks and `moai init` looked in the wrong place. `/c/…` and
+  `/cygdrive/c/…` now read as `C:\…`, `//server/share` as `\\server\share`, and
+  any other `/…` as a place under the MSYS2 install (found from the `git.exe` on
+  `PATH`). Mounts added in MSYS2's `/etc/fstab` are not read. Git for Windows was
+  never affected. (moai-yc8r.3ie)
+- **Windows: a daylight-saving period the system gives as fixed dates is drawn
+  in daylight time.** When Windows describes the current year's change-over as
+  two dates rather than a yearly rule, every time inside that period was shown
+  an hour off. That year now switches on those two dates; other years stay on
+  standard time, as the system names no rule for them. (moai-yc8r.da6)
+
 ## [0.29.0] - 2026-10-26
 
 ### Added
