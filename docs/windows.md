@@ -107,6 +107,14 @@ Windows (below).
   `merge-driver --install --as` is kept as you typed it. **The hooks need Git
   for Windows** — without Git Bash, Claude Code runs hooks in PowerShell, which
   cannot run them
+- **MSYS2's git works too.** It hands back paths in its own spelling
+  (`/c/Users/you/proj`), on the command line and in the `.git` files it writes
+  for a linked worktree, and moai reads them as Windows paths: `/c/…` and
+  `/cygdrive/c/…` are `C:\…`, `//server/share/…` is `\\server\share\…`, and any
+  other `/…` is under the MSYS2 install, found from the `git.exe` first on
+  `PATH` (`C:\msys64\usr\bin\git.exe` puts `/` at `C:\msys64`). Mounts you add
+  in MSYS2's `/etc/fstab` are not read — a worktree under such a mount is looked
+  for under the install instead
 - **Claude Code's plugin records** are read from `%USERPROFILE%\.claude`, the
   place `claude` itself uses, even when `HOME` points somewhere else — unless
   `CLAUDE_CODE_PLUGIN_CACHE_DIR` or `CLAUDE_CONFIG_DIR` names another place, as
@@ -115,15 +123,23 @@ Windows (below).
 ## Build from source
 
 `scripts/windows-dev.ps1` checks for Git for Windows, the Visual Studio C++
-build tools and rustup, prints a `winget` command for whatever is missing, then
+build tools and rustup, prints a `winget` command for whatever is missing (or,
+for a Visual Studio already installed, its installer's `modify` command), then
 builds, lints and tests the clone and installs the merge driver:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\windows-dev.ps1
 ```
 
+On an ARM64 machine it checks for the ARM64 build tools and `clang` instead:
+the build there targets `aarch64-pc-windows-msvc`, and the `ring` crate compiles
+its C for that target with the `clang` on `PATH`. Visual Studio's clang does not
+put itself on `PATH`, so when it is installed the script names the directory to
+add. It looks at the machine, so an x64 PowerShell running emulated on ARM64 gets
+the same check.
+
 It installs nothing on its own and never edits `PATH`. What it does step by step,
 and what to check on a real machine, is in `CONTRIBUTING.md` under "Developing on
 Windows".
 
-Decided in: moai-l3mn moai-j9gv moai-uwzg
+Decided in: moai-l3mn moai-j9gv moai-uwzg moai-yc8r
