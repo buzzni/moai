@@ -221,6 +221,11 @@ movement keys, every menu item with its group (`view › deferred`), and the key
 of the gantt, the stats window and the wiki window. It reads the same table as
 `moai keys`, so a key you changed in `keys.toml` shows as you changed it.
 
+The list takes one to three columns, by the size of the screen: the fewest
+columns that show it whole, or, when no number of columns fits the height, as many
+as fit the width. A wide screen shows it all at once; an 80-column one shows one
+column to scroll.
+
 - The movement keys and the mouse wheel scroll it; the bottom right corner says
   where you are (`16/103`)
 - `?`, `SPC h`, `Esc` or `Backspace` closes it. While it is open, `Esc` belongs

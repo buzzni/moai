@@ -581,58 +581,64 @@ fn sort_edit(f: &mut Frame, e: &super::sorter::Editor, at: Rect, lang: Lang) {
     );
 }
 
-/// 키 목록 창(`?`·`SPC h`, moai-ucyr) — 몸통 가운데 뜨는 상자. 왼쪽 열이 키, 오른쪽이 낱말이고 절의 머리가 굵게 선다.
-/// 키 색은 SPC 메뉴의 키 칸과 같다 — 같은 것을 같은 색으로 댄다.
+/// 키 목록 창(`?`·`SPC h`, moai-ucyr) — 몸통 가운데 뜨는 상자. 열마다 왼쪽이 키, 오른쪽이 낱말이고 절의 머리가 굵게
+/// 선다. 키 색은 SPC 메뉴의 키 칸과 같다 — 같은 것을 같은 색으로 댄다.
 ///
-/// **그린 높이를 창에 적는다** — 반 쪽·한 쪽 굴리기가 그것으로 재고([`super::help::Sheet::step`]), 창이 줄어 굴린 자리가
-/// 끝을 넘었으면 여기서 당긴다.
+/// **화면 크기에 따라 한 열에서 세 열까지 선다**(moai-c4tz, 2026-10-26 사용자 요청) — 높이에 다 드는 가장 적은 열,
+/// 안 들면 폭에 드는 가장 많은 열이다([`super::help::lay_out`]). 굴리기는 열들을 함께 굴린다.
+///
+/// **그린 높이와 판의 줄 수를 창에 적는다** — 반 쪽·한 쪽 굴리기와 끝이 그것으로 잰다([`super::help::Sheet::step`]),
+/// 창이 줄어 굴린 자리가 끝을 넘었으면 여기서 당긴다.
 fn help_sheet(f: &mut Frame, s: &mut super::help::Sheet, at: Rect, lang: Lang) {
-    use super::help::Line as L;
+    use super::help::{GAP, Line as L, lay_out};
     use crate::text::width;
-    let (mut key_w, mut what_w, mut head_w) = (0, 0, 0);
-    for l in &s.lines {
-        match l {
-            L::Head(t) => head_w = head_w.max(width(t)),
-            L::Key { keys, what } => {
-                key_w = key_w.max(width(keys));
-                what_w = what_w.max(width(what));
-            }
-        }
-    }
-    // 키 열은 머리보다 한 칸 들어간다 — 절의 머리가 눈에 먼저 선다.
-    let inner = (1 + key_w + 2 + what_w).max(head_w).max(24);
     // 테두리 둘과 옆 여백 둘.
+    let room = at.width.saturating_sub(4) as usize;
+    let laid = lay_out(&s.lines, room, at.height.saturating_sub(2) as usize);
+    let inner = laid.width().clamp(24, room.max(1));
     let w = (inner as u16).saturating_add(4).min(at.width);
-    let h = (s.lines.len() as u16).saturating_add(2).min(at.height);
+    let h = (laid.rows as u16).saturating_add(2).min(at.height);
     let area = Rect { x: at.x + (at.width - w) / 2, y: at.y + (at.height - h) / 2, width: w, height: h };
     f.render_widget(Clear, area);
     let rows = h.saturating_sub(2) as usize;
-    s.height = rows;
-    s.top = s.top.min(s.lines.len().saturating_sub(rows));
-    let room = w.saturating_sub(4) as usize;
-    // 좁으면 키 열이 반을 넘지 않는다 — 낱말이 통째로 밀려나면 키만 남아 뜻이 없다.
-    let kw = key_w.min(room.saturating_sub(1) / 2);
-    let lines: Vec<Line> = s
-        .lines
-        .iter()
-        .skip(s.top)
-        .take(rows)
-        .map(|l| match l {
-            L::Head(t) => Line::from(Span::styled(clip(t, room), bold())),
-            L::Key { keys, what } => {
+    (s.height, s.span) = (rows, laid.rows);
+    s.top = s.top.min(laid.rows.saturating_sub(rows));
+    let cell = |l: Option<&&L>, cw: usize, key_w: usize| -> Vec<Span<'static>> {
+        // 한 열도 폭에 안 들면(좁은 창) 그 열을 폭까지 자른다 — 키 칸은 반을 넘지 않는다: 낱말이 통째로 밀려나면
+        // 키만 남아 뜻이 없다.
+        let kw = key_w.min(cw.saturating_sub(1) / 2);
+        let spans = match l {
+            Some(L::Head(t)) => vec![Span::styled(clip(t, cw), bold())],
+            Some(L::Key { keys, what }) => {
                 let k = clip(keys, kw);
                 let pad = " ".repeat(kw.saturating_sub(width(&k)));
-                Line::from(vec![
+                vec![
                     Span::raw(" "),
                     Span::styled(k, bold().fg(MENU_KEY)),
-                    Span::raw(pad),
-                    Span::raw("  "),
-                    Span::raw(clip(what, room.saturating_sub(kw + 3))),
-                ])
+                    Span::raw(format!("{pad}  ")),
+                    Span::raw(clip(what, cw.saturating_sub(kw + 3))),
+                ]
             }
+            None => Vec::new(),
+        };
+        let used: usize = spans.iter().map(|s| width(&s.content)).sum();
+        let mut spans = spans;
+        spans.push(Span::raw(" ".repeat(cw.saturating_sub(used))));
+        spans
+    };
+    let lines: Vec<Line> = (s.top..s.top + rows)
+        .map(|r| {
+            let mut spans = Vec::new();
+            for (n, c) in laid.columns.iter().enumerate() {
+                if n > 0 {
+                    spans.push(Span::raw(" ".repeat(GAP)));
+                }
+                spans.extend(cell(c.lines.get(r), c.width.min(inner), c.key_w));
+            }
+            Line::from(spans)
         })
         .collect();
-    let at_of = fill(say(lang, "tui.help.at"), &[("at", &(s.top + 1).to_string()), ("of", &s.lines.len().to_string())]);
+    let at_of = fill(say(lang, "tui.help.at"), &[("at", &(s.top + 1).to_string()), ("of", &laid.rows.to_string())]);
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Thick)
@@ -10397,6 +10403,29 @@ pub(super) mod tests {
 
     /// **`?`·`SPC h` 가 키 목록 창을 열고, 이동키가 굴리고, 연 키·Esc 가 닫는다**(moai-ucyr). 창이 떠 있는 동안 Esc 는
     /// 창의 것이다 — 걸어 둔 거름망을 같이 풀면 창을 닫으려던 사람이 목록까지 잃는다. 첫 화면의 바는 `?` 를 댄다.
+    /// **키 목록 창은 화면 크기에 따라 열을 나눈다**(moai-c4tz) — 넓고 낮은 창에서는 첫 줄에 첫 절의 머리와 다른 열의
+    /// SPC 줄이 함께 서고, 80칸에서는 한 열이다. 어느 줄도 폭을 넘지 않는다.
+    #[test]
+    fn the_help_sheet_splits_into_columns_by_the_screen_size() {
+        let mut a = app();
+        a.hit("?");
+        let lines = render(&mut a, 200, 40);
+        let top = lines.iter().position(|l| l.contains("┏ 키 목록")).expect("창이 안 섰다");
+        assert!(
+            lines[top + 1].contains("탐색") && lines[top + 1].contains("SPC"),
+            "200칸에서 열이 안 갈렸다\n{}",
+            lines.join("\n")
+        );
+        let lines = render(&mut a, 80, 20);
+        let top = lines.iter().position(|l| l.contains("┏ 키 목록")).expect("창이 안 섰다");
+        assert!(!lines[top + 1].contains("SPC"), "80칸에서 열이 갈렸다\n{}", lines.join("\n"));
+        for (w, h) in [(200u16, 40u16), (120, 30), (80, 20), (40, 12)] {
+            for l in render(&mut a, w, h) {
+                assert!(crate::text::width(&l) <= w as usize, "{w}x{h} 넘쳤다: {l:?}");
+            }
+        }
+    }
+
     #[test]
     fn the_help_sheet_opens_scrolls_and_closes() {
         let mut a = app();

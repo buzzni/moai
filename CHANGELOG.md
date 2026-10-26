@@ -17,7 +17,8 @@ does not tag — see `CONTRIBUTING.md`.
 - **`?` (or `SPC h`) in the explorer opens a window that lists every key** —
   the keys you press straight away (`r`, `h`, `l`, `Tab`), the movement keys,
   every menu item with its group, and the keys of the gantt, the stats window and
-  the wiki window. It reads the same table as `moai keys`, so a key changed in
+  the wiki window, in one to three columns by the size of the screen. It reads
+  the same table as `moai keys`, so a key changed in
   `keys.toml` shows as changed. The movement keys and the wheel scroll it and `?`,
   `Esc` or `Backspace` close it; `SPC h` opens it over the stats and wiki windows
   too. The bottom bar names `?` while there is room, and the root menu gains `h`

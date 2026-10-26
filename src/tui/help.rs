@@ -31,19 +31,27 @@ pub struct Sheet {
     pub top: usize,
     /// 마지막으로 그린 높이(줄 수). 반 쪽·한 쪽 굴리기가 이것으로 잰다 — 그리는 쪽이 적는다.
     pub height: usize,
+    /// 마지막으로 그린 판의 줄 수 — 여러 열로 나눴으면 가장 긴 열의 길이다([`lay_out`]). 굴리기의 끝이 이것이다.
+    /// 아직 안 그렸으면 0 이고, 그때는 한 열로 친다.
+    pub span: usize,
 }
 
 impl Sheet {
     /// 지금 자리로 짓는다 — 키 표는 [`Ctx::keys`] 다. 연 뒤에 키 파일이 바뀌어도 이 창은 연 때의 것이다 — 다시 열면
     /// 새로 읽는다.
     pub fn open(c: &Ctx) -> Sheet {
-        Sheet { lines: lines(c), top: 0, height: 0 }
+        Sheet { lines: lines(c), top: 0, height: 0, span: 0 }
+    }
+
+    /// 굴릴 판의 줄 수 — 그린 판이 있으면 그 열의 길이, 없으면 줄 전부.
+    fn rows(&self) -> usize {
+        if self.span == 0 { self.lines.len() } else { self.span }
     }
 
     /// 굴린다. 끝을 넘지 않는다 — 마지막 줄이 창 바닥에 서면 더 안 내려간다.
     pub fn step(&mut self, m: Move) {
         let page = self.height.max(1);
-        let last = self.lines.len().saturating_sub(page);
+        let last = self.rows().saturating_sub(page);
         self.top = match m {
             Move::LineDown => self.top + 1,
             Move::LineUp => self.top.saturating_sub(1),
@@ -59,9 +67,97 @@ impl Sheet {
 
     /// 휠 — `by` 줄을 굴린다(음수면 위로). 목록·상세와 같은 걸음([`super::mouse::WHEEL`])을 부르는 쪽이 준다.
     pub fn roll(&mut self, by: isize) {
-        let last = self.lines.len().saturating_sub(self.height.max(1));
+        let last = self.rows().saturating_sub(self.height.max(1));
         self.top = self.top.saturating_add_signed(by).min(last);
     }
+}
+
+/// 열의 수 상한(2026-10-26 사용자 요청 — 화면 크기에 따라 두 열 또는 세 열).
+pub const MAX_COLUMNS: usize = 3;
+
+/// 열 사이의 빈칸.
+pub const GAP: usize = 3;
+
+/// 놓인 열 하나 — 줄과, 그 열의 키 칸 폭·열 폭. 폭은 열마다 제 것이다: 긴 SPC 줄이 든 열이 짧은 이동 열까지
+/// 넓히면 세 열이 들 폭에서 두 열밖에 못 선다.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Column<'a> {
+    pub lines: Vec<&'a Line>,
+    pub key_w: usize,
+    pub width: usize,
+}
+
+/// 여러 열로 놓은 판 — 열들과 가장 긴 열의 줄 수.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Laid<'a> {
+    pub columns: Vec<Column<'a>>,
+    pub rows: usize,
+}
+
+impl Laid<'_> {
+    /// 열 폭과 사이 빈칸을 더한 폭.
+    pub fn width(&self) -> usize {
+        self.columns.iter().map(|c| c.width).sum::<usize>() + GAP * self.columns.len().saturating_sub(1)
+    }
+}
+
+/// 줄을 `n` 열로 나눈다 — **열 우선**(위에서 아래로 채우고 다음 열로), 열마다 `ceil(줄 수 / n)` 줄. 열이 절의
+/// 머리로 끝나면 그 머리를 다음 열로 넘긴다 — 바닥에 홀로 선 머리는 무엇의 머리인지 안 보인다. 넘긴 만큼 다음
+/// 열이 길어질 수 있고, 마지막 열은 남은 줄을 다 받는다.
+pub fn split(lines: &[Line], n: usize) -> Vec<Vec<&Line>> {
+    let n = n.max(1);
+    let per = lines.len().div_ceil(n).max(1);
+    let mut out: Vec<Vec<&Line>> = vec![Vec::new()];
+    for l in lines {
+        let more = out.len() < n;
+        let col = out.last_mut().expect("늘 한 열은 있다");
+        if col.len() >= per && more {
+            let carry = if col.len() > 1 && matches!(col.last(), Some(Line::Head(_))) { col.pop() } else { None };
+            out.push(carry.into_iter().collect());
+        }
+        out.last_mut().expect("늘 한 열은 있다").push(l);
+    }
+    out
+}
+
+/// 폭 `room`·높이 `rows` 안에 놓는다. **다 드는 가장 적은 열**을 고른다 — 한 열로 다 들면 한 열이다. 어느 수로도
+/// 높이에 다 안 들면 **폭에 드는 가장 많은 열**이다(굴리는 줄이 가장 적다). 한 열도 폭에 안 들면 한 열이고, 그리는
+/// 쪽이 자른다.
+pub fn lay_out(lines: &[Line], room: usize, rows: usize) -> Laid<'_> {
+    use crate::text::width;
+    let laid = |n: usize| {
+        let columns: Vec<Column> = split(lines, n)
+            .into_iter()
+            .map(|col| {
+                let (mut key_w, mut what_w, mut head_w) = (0, 0, 0);
+                for l in &col {
+                    match l {
+                        Line::Head(t) => head_w = head_w.max(width(t)),
+                        Line::Key { keys, what } => {
+                            key_w = key_w.max(width(keys));
+                            what_w = what_w.max(width(what));
+                        }
+                    }
+                }
+                // 키 칸은 머리보다 한 칸 들어간다 — 절의 머리가 눈에 먼저 선다.
+                Column { lines: col, key_w, width: (1 + key_w + 2 + what_w).max(head_w) }
+            })
+            .collect();
+        let rows = columns.iter().map(|c| c.lines.len()).max().unwrap_or(0);
+        Laid { columns, rows }
+    };
+    let mut widest = None;
+    for n in 1..=MAX_COLUMNS {
+        let l = laid(n);
+        if l.width() > room {
+            break;
+        }
+        if l.rows <= rows {
+            return l;
+        }
+        widest = Some(l);
+    }
+    widest.unwrap_or_else(|| laid(1))
 }
 
 /// 줄이 SPC 로 시작하나.
@@ -318,5 +414,50 @@ mod tests {
         assert_eq!(s.top, 10);
         s.step(Move::HalfUp);
         assert_eq!(s.top, 5);
+    }
+
+    /// **열은 위에서 아래로 채우고, 머리로 끝나지 않는다**(moai-c4tz) — 줄의 차례가 열을 건너도 그대로고, 바닥에
+    /// 홀로 선 머리는 다음 열의 첫 줄로 넘어간다.
+    #[test]
+    fn columns_fill_downwards_and_never_end_on_a_head() {
+        let lines = lines(&ctx());
+        for n in 1..=MAX_COLUMNS {
+            let cols = split(&lines, n);
+            assert!(cols.len() <= n, "{n} 열이 {} 열로 섰다", cols.len());
+            let flat: Vec<&Line> = cols.iter().flatten().copied().collect();
+            assert_eq!(flat, lines.iter().collect::<Vec<_>>(), "{n} 열이 줄의 차례를 바꿨다");
+            for (k, col) in cols.iter().enumerate().take(cols.len() - 1) {
+                assert!(!matches!(col.last(), Some(Line::Head(_))), "{n} 열의 {k} 번째 열이 머리로 끝난다");
+            }
+        }
+        // 손으로 지은 판 — 셋째 줄이 머리라 첫 열(두 줄)의 바닥에 안 남는다.
+        let key = |k: &str| Line::Key { keys: k.into(), what: "w".into() };
+        let small = [Line::Head("a".into()), key("1"), Line::Head("b".into()), key("2")];
+        let cols = split(&small, 2);
+        assert_eq!(cols, [vec![&small[0], &small[1]], vec![&small[2], &small[3]]]);
+        let odd = [Line::Head("a".into()), key("1"), key("2"), Line::Head("b".into()), key("3")];
+        let cols = split(&odd, 2);
+        assert_eq!(cols, [vec![&odd[0], &odd[1], &odd[2]], vec![&odd[3], &odd[4]]]);
+    }
+
+    /// **높이에 다 드는 가장 적은 열, 안 들면 폭에 드는 가장 많은 열**(moai-c4tz, 사용자 요청: 화면 크기에 따라 두
+    /// 열 또는 세 열) — 폭을 넘는 판은 안 고르고, 한 열도 안 들면 한 열이다.
+    #[test]
+    fn the_layout_takes_the_fewest_columns_that_fit_else_the_most_that_are_wide_enough() {
+        let lines = lines(&ctx());
+        let n = |room: usize, rows: usize| lay_out(&lines, room, rows).columns.len();
+        assert_eq!(n(400, 1000), 1, "한 열로 다 드는데 나눴다");
+        let two = lay_out(&lines, 400, 1000).rows.div_ceil(2) + 2;
+        assert_eq!(n(400, two), 2);
+        assert_eq!(n(400, 10), MAX_COLUMNS, "높이가 모자라면 폭에 드는 가장 많은 열이다");
+        let one = lay_out(&lines, 400, 1000).width();
+        let width2 = lay_out(&lines, 400, two).width();
+        assert!(width2 > one, "두 열이 한 열보다 좁다");
+        assert_eq!(n(width2, 10), 2, "세 열이 안 드는 폭에서 두 열이 아니다");
+        assert_eq!(n(10, 10), 1, "한 열도 안 드는 폭은 한 열이다");
+        for room in [10, width2, 400] {
+            let l = lay_out(&lines, room, 10);
+            assert!(l.columns.len() == 1 || l.width() <= room, "{room} 칸을 넘는 판을 골랐다");
+        }
     }
 }
