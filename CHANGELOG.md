@@ -12,8 +12,33 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+### Added
+
+- **A repository can recommend models per role.** A `[models]` table in
+  `.moai/config.toml` overrides the built-in defaults, and `[models]` in your
+  user config overrides it — the repository recommends, you choose. `moai models`
+  marks a value that came from there `repo` and names the file; `--json` adds
+  `repo` (the keys it set) and `repo_path`. A bad value there is named with the
+  file and skipped, and never stops another command. (moai-w25x.jud)
+- **The first `moai init` names `moai models`** in one line; it asks nothing.
+  (moai-w25x.1ar)
+
 ### Changed
 
+- **`moai models` marks each line for its own value.** A role line no longer
+  carries its effort in a tail that the `default` mark then covered; the level
+  lines (`effort`, `effort_complex`, `review_grade`) name the roles they pair
+  with instead. (moai-w25x.yrm)
+- **The supervisor unfolds a backlog item on the `plan` role's model** and sends
+  the worker the unfolded epic from step 2; the role is then measured on the
+  members it wrote. Before, the `plan` key was read by nothing. (moai-w25x.jby)
+- **The supervisor settles the `model:` lines before it writes
+  `Report-checked:`**, so a supervisor that starts again does not skip them.
+  (moai-w25x.qi8)
+- **The worker's steps are two files**: `references/worker.md` holds the path
+  every assignment takes, and `references/worker-branches.md` the rare branches
+  (person away, a subdirectory project, carrying on stalled work, a review rule 3
+  keeps refusing, the review brief). (moai-w25x.mgu)
 - **Panes that `moai-tmux` and `moai-recover` open keep no shell under the
   session.** They open with `remain-on-exit` instead of `; exec bash`: when
   `claude` (or Codex) exits, its last screen stays and tmux drops keys and
@@ -24,6 +49,12 @@ does not tag — see `CONTRIBUTING.md`.
 
 ### Fixed
 
+- **A pick-up the hook cannot read is recorded anyway.** `moai mv` now writes
+  its own pick-up for the Claude Code session after the write, so
+  `$M mv <id> in_progress` and `moai mv "$R" …` count as that session's — before,
+  with other sessions running, such a row belonged to nobody and rule 3 refused
+  the review. Only rows that are the caller's after `--take` are recorded, and
+  Codex and Antigravity shells record nothing. (moai-w25x.831)
 - **A repository path with a space no longer breaks the launch lines** in
   `moai-tmux`, `moai-cmux` and `moai-recover` — `<root>` and `<cwd>` are quoted
   in `split-window -c`, in cmux's `--command 'cd …'` and in the line printed to
