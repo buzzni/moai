@@ -178,6 +178,55 @@ const scenes = {
     await page.waitForTimeout(2400)
   },
 
+  // 막대 끌기만 (v0.27.0 의 소식, moai-0fai). 놓으면 날이 아니라 옮긴 만큼을 쓴다(moai edit --shift) — 그래서 그림은
+  // v0.25.0 의 끌기와 같고, 다른 것은 뒤에서 옮겨진 줄도 거기서부터 옮겨 간다는 것이다. 계획한 날은 plan.sh 가 단다
+  async drag(page) {
+    const TARGET = 'Sync attachments larger than 10 MB'
+    await page.goto(url)
+    await page.waitForTimeout(1000)
+    await keys(page, 'Space', 'g', 'g')
+    await page.waitForSelector('.m-gantt .lane .bar')
+    await page.keyboard.press('t'); await page.waitForTimeout(1000)
+    const gridRow = page.locator(`.m-gantt .g-row:has(.c-title[title="${TARGET}"])`).first()
+    await gridRow.evaluate((n) => {
+      const box = n.closest('.g-scroll')
+      const head = box.querySelector('.g-left .g-head').getBoundingClientRect().bottom
+      box.scrollTop += n.getBoundingClientRect().top - head - 28 * 4
+    })
+    await page.waitForTimeout(600)
+    await glide(page, gridRow)
+    await page.waitForTimeout(1000)
+    const id = await gridRow.getAttribute('data-id')
+    const plan = page.locator(`.m-gantt .lane[data-id="${id}"] .bar.b-plan`).first()
+    const p = await center(plan)
+    await page.mouse.move(p.x, p.y, { steps: 20 })
+    await page.waitForTimeout(1200)
+    // 하루 뒤로(날 걸음에서 하루는 40px) — 이틀이면 에픽의 마감을 넘어 거절된다. 그다음 하루 앞으로 되돌린다
+    await dragBy(page, p.x, p.y, 40, 0, 24)
+    await page.waitForTimeout(1500)
+    readAll()
+    await page.waitForTimeout(1200)
+    await still(page, 'web-drag-mark.png', gridRow, page.locator(`.m-gantt .lane[data-id="${id}"]`))
+    const q = await center(plan)
+    await dragBy(page, q.x, q.y, -40, 0, 24)
+    await page.waitForTimeout(1500)
+    readAll()
+    await page.waitForTimeout(1500)
+  },
+  // 이슈 패널의 Wiki 토막 (v0.27.0 의 소식, moai-0fai): 커밋 뒤에 그 이슈를 이름 댄 페이지와 관련 절이 선다
+  async wikipanel(page) {
+    await page.goto(url)
+    await page.waitForTimeout(1200)
+    await glide(page, row(page, 'v1.4 — Sync'))
+    await keys(page, 'Tab', 'Space', 'o', 'd', 'Escape')
+    await page.waitForTimeout(1200)
+    await glide(page, row(page, 'Resolve conflicts when two devices edit the same note'))
+    await page.waitForTimeout(2000)
+    const wiki = page.locator('.moai-detail-wiki').first()
+    await wiki.scrollIntoViewIfNeeded()
+    await page.waitForTimeout(800)
+    await still(page, 'web-wikipanel-mark.png', wiki)
+  },
   // 이슈 상세 읽기: 트리를 펼쳐 에픽과 이슈를 차례로 고르고, 본문·커밋·이력까지 내려 읽는다
   async detail(page) {
     await page.goto(url)
