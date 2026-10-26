@@ -1573,8 +1573,6 @@ mod tests {
                     .replace("<slug>", "cli")
                     // 위키 검색의 낱말 자리(moai-g8pt.y1u).
                     .replace("<words>", "parser")
-                    // 감독 2-2 의 펼치기 브리프가 멤버 본문을 파일에서 흘려 넣는 자리(moai-w25x.jby).
-                    .replace("<that text, written to a file in your scratchpad>", "/tmp/body.md")
             })
             .collect();
         // **자리표시자가 남으면 시끄럽게 진다**(moai-8na5). 남은 `<…>` 는 셸 읽기가 리다이렉션으로

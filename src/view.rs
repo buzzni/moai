@@ -3464,7 +3464,9 @@ pub fn models_trouble(lang: Lang, why: &crate::user_config::ModelsTrouble) -> St
     };
     match why {
         ModelsTrouble::NotATable { found } => fill(say(lang, "look.not_a_table"), &[("key", MODELS), ("found", found)]),
-        ModelsTrouble::NotAWord { key, found } => want(key, say(lang, "look.want_word"), found),
+        // **적힌 글을 걸러 싣는다**(리뷰 moai-w25x.54r) — 사용자 설정은 여기 값의 꼴(`boolean`)만 실었지만, 남의 손이 든
+        // 글이 이 자리에 오는 날 그 제어문자가 터미널을 다시 칠한다. 다른 갈래가 `one_line` 을 지나는 것과 같은 자다.
+        ModelsTrouble::NotAWord { key, found } => want(key, say(lang, "look.want_word"), &crate::text::one_line(found)),
         ModelsTrouble::NotAGrade { key, raw } | ModelsTrouble::NotAnEffort { key, raw } => {
             let levels = fill(say(lang, "models.want_level"), &[("known", &MODEL_LEVELS.join("|"))]);
             want(key, &levels, &crate::text::one_line(&format!("{raw:?}")))
@@ -3472,6 +3474,15 @@ pub fn models_trouble(lang: Lang, why: &crate::user_config::ModelsTrouble) -> St
         ModelsTrouble::UnknownKey { key } => {
             fill(say(lang, "models.unknown_key"), &[("key", &crate::text::one_line(&format!("{MODELS}.{key}")))])
         }
+        // 저장소 파일의 글 키와 같은 말이다(`config_trouble` 의 `NotQuoted`) — 그 파일은 글을 큰따옴표로만 받는다.
+        ModelsTrouble::NotQuoted { key, raw, line } => fill(
+            say(lang, "config.not_quoted"),
+            &[
+                ("line", &line.to_string()),
+                ("key", &crate::text::one_line(&format!("{MODELS}.{key}"))),
+                ("raw", &crate::text::one_line(&format!("{raw:?}"))),
+            ],
+        ),
     }
 }
 

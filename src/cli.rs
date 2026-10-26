@@ -1054,12 +1054,13 @@ Examples:
   status_* thresholds and the due_* rule that `moai due apply` reads. These
   are the values this binary acts on, so a surface drawing the board reads
   them here instead of parsing the file again. --json adds path, the file it
-  read.
+  read. A [models] table is left to `moai models`, which lays it under your
+  user config.
 
   It only reads; edit the file by hand to change a setting.")]
     Config,
 
-    /// Read the model per role from your user config
+    /// Read the model per role from your config and the repository's
     #[command(after_help = "  moai models           the model per role, where each value came from
   moai models --json    one object for skills, including written keys and paths
 

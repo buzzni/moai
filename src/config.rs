@@ -49,7 +49,8 @@ fn value(raw: &str) -> Option<&str> {
 /// `키 = 값` 줄 하나의 **쓰인 그대로**. 따옴표는 안 벗긴다 — 글([`scalar`])과
 /// 수([`count`]·[`days`]·[`ratio`])가 따옴표를 서로 반대로 요구하므로, 벗기는 일은 읽는 쪽이 한다.
 ///
-/// `table` 은 그 줄 위의 마지막 `[…]` 머리다. 이 파서는 테이블을 안 읽으므로 그런 줄은 값으로
+/// `table` 은 그 줄 위의 마지막 `[…]` 머리다. 이 파서는 테이블을 안 읽으므로(`[models]` 만 적힌 그대로 모아
+/// `moai models` 에 넘긴다, [`ModelEntry`]) 그런 줄은 값으로
 /// 안 쓰이는데, **안 쓰인다는 것을 아는 자리가 있어야** [`Thresholds::check_keys`] 가 그것을
 /// 댈 수 있다 — 조용히 넘기면 `[status]` 밑에 적은 문턱이 영영 안 먹고 까닭이 어디에도 없다.
 struct Entry<'s> {
@@ -444,9 +445,11 @@ pub struct Config {
     pub models: Vec<ModelEntry>,
 }
 
-/// `.moai/config.toml` 의 `[models]` 한 줄 — **여기서는 재지 않는다.** 아는 키인가·등급 낱말인가는 사용자 설정의
-/// `[models]` 와 같은 자([`crate::user_config::Models::put`])가 `moai models` 에서 잰다. 이 파일은 모든 명령이
-/// 지나므로 여기서 거절하면 모델 이름 오타 하나가 `moai status` 까지 세운다 — `wiki_dir` 과 같은 까닭이다.
+/// `.moai/config.toml` 의 `[models]` 한 줄 — **값은 여기서 재지 않는다.** 아는 키인가·등급 낱말인가·큰따옴표 글인가는
+/// 사용자 설정의 `[models]` 와 같은 자([`crate::user_config::Models::put`])가 `moai models` 에서 잰다. 이 파일은 모든
+/// 명령이 지나므로 여기서 거절하면 모델 이름 오타 하나가 `moai status` 까지 세운다 — `wiki_dir` 과 같은 까닭이다.
+/// **줄의 꼴은 다르다**(리뷰 moai-w25x.54r) — 따옴표의 짝과 `키 = 값` 은 이 파일의 모든 줄과 같이 [`entries`] 가 재어,
+/// 거기서 틀리면 테이블 안의 줄이어도 모든 명령이 선다. 그 엄함은 이 표 전부터 파일 전체의 것이다.
 ///
 /// **사람이 이긴다** — 사용자 설정의 키가 이 값을 덮는다(`MOAI_LANG` > `[i18n] lang` 과 같은 결). 저장소는 권하고
 /// 사람이 고른다. 이 표를 아는 판보다 옛 바이너리는 테이블 안의 모르는 키로 넘겨, 적은 저장소에서도 안 선다.
@@ -540,7 +543,7 @@ impl Config {
         let models = es
             .iter()
             .filter(|e| e.table == Some(MODELS_TABLE))
-            .map(|e| ModelEntry { key: e.key.to_string(), raw: e.value.trim().to_string(), line: e.line })
+            .map(|e| ModelEntry { key: e.key.to_string(), raw: e.value.to_string(), line: e.line })
             .collect();
 
         Ok(Config { prefix, statuses, naming, status, archive_days, wiki_dir, due, models })

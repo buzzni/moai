@@ -95,7 +95,7 @@ impl Models {
         let Some(&(key, _)) = MODELS_DEFAULT.iter().find(|&&(known, _)| known == key) else {
             return Err(ModelsTrouble::UnknownKey { key: key.to_string() });
         };
-        let level = matches!(key, "review_grade" | "effort" | "effort_complex");
+        let level = is_level_key(key);
         if level && !word.is_some_and(|w| MODEL_LEVELS.contains(&w)) {
             let raw = word.map_or_else(shown, String::from);
             return Err(if key == "review_grade" {
@@ -114,11 +114,20 @@ impl Models {
     /// 저장소의 `[models]` 를 밑에 깐 표 — **사용자 설정이 이긴다**(moai-w25x.jud, 2026-10-26 사용자 결정). 기본값 위에
     /// 저장소의 값을 얹고, 그 위에 사람이 적은 키(`self.written`)를 다시 얹는다. 저장소 줄의 탈은 둘째 값이다 —
     /// 사용자 설정의 탈과 같은 꼴이라 같은 말로 편다.
+    ///
+    /// **아는 키의 값이 큰따옴표 글이 아니면 그 말을 한다**(리뷰 moai-w25x.54r) — 이 파일의 글 키와 같은 자다. 그대로
+    /// `put` 에 넘기던 판은 `effort = high` 에 "low|…|max 중 하나여야 한다 — 지금은 \"high\"" 라는 제 말과 어긋난 탈을
+    /// 대고, 적힌 날 글(받은 저장소의 제어문자까지)을 탈의 `found` 에 실었다.
     pub fn with_repo(&self, repo: &[crate::config::ModelEntry]) -> (Models, Vec<ModelsTrouble>) {
         let mut out = Models::default();
         let mut problems = Vec::new();
         for e in repo {
-            match out.put(&e.key, e.word(), || e.raw.clone()) {
+            let word = e.word();
+            if word.is_none() && MODELS_DEFAULT.iter().any(|&(known, _)| known == e.key) {
+                problems.push(ModelsTrouble::NotQuoted { key: e.key.clone(), raw: e.raw.clone(), line: e.line });
+                continue;
+            }
+            match out.put(&e.key, word, || e.raw.clone()) {
                 Ok(key) if !out.repo.iter().any(|k| k == key) => out.repo.push(key.to_string()),
                 Ok(_) => {}
                 Err(why) => problems.push(why),
@@ -143,6 +152,14 @@ pub enum ModelsTrouble {
     NotAGrade { key: String, raw: String },
     NotAnEffort { key: String, raw: String },
     UnknownKey { key: String },
+    // 저장소의 `.moai/config.toml` 에서만 — 아는 키의 값이 큰따옴표 글이 아니다(그 줄의 번호와 적힌 그대로).
+    NotQuoted { key: String, raw: String, line: usize },
+}
+
+/// 값이 등급 낱말([`MODEL_LEVELS`])인 키인가 — `review_grade`·`effort`·`effort_complex`. 키를 재는 [`Models::put`] 과
+/// 탈의 글을 고르는 사용자 설정의 읽기가 이 하나로 가른다.
+pub fn is_level_key(key: &str) -> bool {
+    matches!(key, "review_grade" | "effort" | "effort_complex")
 }
 
 /// 설정 파일의 자리. `MOAI_CONFIG` → `$XDG_CONFIG_HOME/moai/config.toml` →
@@ -1191,7 +1208,7 @@ impl Doc {
             return (models, problems);
         };
         for (key, item) in table.iter() {
-            let level = matches!(key, "review_grade" | "effort" | "effort_complex");
+            let level = is_level_key(key);
             // 탈을 댈 때의 글은 둘이다 — 등급 자리는 적힌 값을, 글 자리는 그 값의 꼴(`boolean`)을 댄다.
             let shown = || if level { item.to_string().trim().to_string() } else { item.type_name().to_string() };
             match models.put(key, item.as_str(), shown) {

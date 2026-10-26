@@ -992,22 +992,34 @@ fn picks_key(root: &Path) -> u64 {
 /// 이 세션이 `ids` 를 지금 집었다고 적는다. 못 적으면 조용히 넘어간다 — 빠진 기록은 기록 없는 줄의 판정이다: 다른
 /// 세션의 기록이 없는 판에서는 전과 같고, 있는 판에서는 그 줄이 누구의 것인지 모른다(`hook::Picks::crowded`).
 fn record_picks(input: &Input, repo: &Repo, ids: &[(String, bool)]) {
+    // 적을 것이 없으면 세션 id 도 안 푼다 — 훅이 지나보내는 셸 부름마다 이 자리를 지난다.
+    if ids.is_empty() {
+        return;
+    }
     if let Some(sid) = safe_sid(input) {
         record_picks_as(&sid, repo, ids);
     }
 }
 
+/// 다른 에이전트가 제 셸에 세우는 세션 표 — 이것이 서면 그 셸의 `CLAUDE_CODE_SESSION_ID` 는 물려받은 남의 값이다.
+const OTHER_AGENT_SESSIONS: [&str; 2] = ["CODEX_THREAD_ID", "ANTIGRAVITY_CONVERSATION_ID"];
+
 /// **`moai mv` 가 쓰기 뒤 제 집기를 적는다**(moai-w25x.831). 훅은 명령줄의 글자로 id 를 읽어, 껍데기가 풀 낱말
-/// (`$M mv …`·`moai mv "$R" …`)과 TUI 의 옮김은 적지 못했다 — 그 줄은 여러 세션이 도는 판에서 누구의 것인지 모르는
+/// (`$M mv …`·`moai mv "$R" …`)의 옮김은 적지 못했다 — 그 줄은 여러 세션이 도는 판에서 누구의 것인지 모르는
 /// 줄이 되어 규칙 3 이 리뷰를 막았다(moai-scb6). 옮긴 프로세스는 무엇을 옮겼는지 안다. **확실한 집기로 적는다** —
-/// 쓰기가 정말 선 뒤다. 훅이 앞서 적은 줄(`?` 든 것까지)은 그대로 두고, 이 줄이 더 늦어 이긴다.
+/// 쓰기가 정말 선 뒤다. 훅이 앞서 적은 줄(`?` 든 것까지)은 그대로 두고, 이 줄이 더 늦어 이긴다. `add -s <시작 칸>`
+/// 은 여기를 안 지나 아직 안 적힌다.
 ///
 /// **세션은 `CLAUDE_CODE_SESSION_ID` 로 안다** — `claude` 가 훅 입력의 `session_id` 와 같은 값으로 셸에 세운다
 /// (`skill::command` 의 2026-09-23 측정). 서브에이전트의 셸도 부모의 값이라 훅이 읽는 자와 같다.
-/// **Codex 의 셸에서는 안 적는다** — 공용 데몬의 환경을 물려받아 거기 선 그 값은 남의 세션 것이다(moai-sile).
-/// Codex 가 제 셸에 세우는 `CODEX_THREAD_ID` 로 가른다. 터미널의 사람은 값이 없어 안 적힌다 — 전과 같다.
+/// **다른 에이전트의 셸에서는 안 적는다** — 그 값은 그 셸이 물려받은 남의 세션 것이다: Codex 는 공용 데몬의 환경을
+/// 물려받았고(moai-sile), Antigravity 도 Claude 세션 안의 셸에서 띄우면 그렇다(리뷰 moai-w25x.54r 가 재현했다 — 그
+/// 세션이 남의 줄을 붙들고 규칙 1 로 막았다). 그 에이전트가 제 셸에 세우는 표([`OTHER_AGENT_SESSIONS`])로 가르고,
+/// 빈 값은 없는 것이다(환경변수의 관례). 물려받은 값이 남는 길은 하나 더 있다 — Claude 세션의 셸에서 띄운 tmux 서버의
+/// 칸이다. 거기서 사람이 친 집기는 그 세션의 것으로 적힌다.
 pub(crate) fn record_own_picks(repo: &Repo, ids: &[String]) {
-    if ids.is_empty() || std::env::var_os("CODEX_THREAD_ID").is_some() {
+    let other_agent = OTHER_AGENT_SESSIONS.iter().any(|k| std::env::var_os(k).is_some_and(|v| !v.is_empty()));
+    if ids.is_empty() || other_agent {
         return;
     }
     let Some(sid) = std::env::var("CLAUDE_CODE_SESSION_ID").ok().as_deref().and_then(safe_sid_of) else { return };

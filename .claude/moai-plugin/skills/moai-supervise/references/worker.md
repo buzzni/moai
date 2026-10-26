@@ -118,7 +118,8 @@ needs more says so in a line of its own, **In a subagent**.
 - **No `EnterWorktree` or `ExitWorktree`.** A session does without them too ("Stay in the
   root"); for you they do not exist
 - **No `AskUserQuestion`, and nobody watches you.** Where a step asks the person, hand back
-  instead and end (4). `Person: away` still decides by recommendation, as below
+  instead and end (4). `Person: away` still decides by recommendation —
+  "When the person is away" in `worker-branches.md`
 - **No `/model`.** The model and the effort you were raised on stay (`Model:` above)
 - **What you hand back is the report** (12) — `SubagentHandback`, and your turn ends with it.
   Where a step says to tell the supervisor and stop, that is your hand-back; where it says to
@@ -264,7 +265,7 @@ root"), never in the root
    `moai wiki search '<that place>'`; do not ask a person what the wiki already answers.
    Do not guess a design decision that is not in the notes — ask with `AskUserQuestion`;
    a person is watching the worker's window. With `Person: away` in the message, decide by
-   recommendation instead ("When the person is away").
+   recommendation instead ("When the person is away" in `worker-branches.md`).
    **In a subagent** there is no `AskUserQuestion`: hand back with `SubagentHandback`, its
    head `decision needed: <id>`, then the situation, options A and B, and your recommendation —
    and end. The supervisor asks the person and wakes you with the answer (`SendMessage`);
@@ -628,4 +629,3 @@ root"), never in the root
     from it. Below it goes one `Subagent ran: anthropic/<its real name> on <member>` line for each
     subagent of your own (`Subagents:`) that did a share of a member — 9-1's line of its own.
     Nothing about clearing a window is yours
-

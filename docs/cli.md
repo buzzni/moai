@@ -49,7 +49,7 @@ Commands:
   project       Register a directory to watch several projects from one moai
   due           Raise priorities a deadline has caught up with
   config        Read this repository's settings, defaults filled in
-  models        Read the model per role from your user config
+  models        Read the model per role from your config and the repository's
   keys          Show the explorer's keys and what your keys.toml changed
   update        Upgrade the moai you are running with install.sh
   init          Put a .moai/ into this repository (safe to run again)
@@ -3621,7 +3621,8 @@ Options:
   status_* thresholds and the due_* rule that `moai due apply` reads. These
   are the values this binary acts on, so a surface drawing the board reads
   them here instead of parsing the file again. --json adds path, the file it
-  read.
+  read. A [models] table is left to `moai models`, which lays it under your
+  user config.
 
   It only reads; edit the file by hand to change a setting.
 ```
@@ -3629,7 +3630,7 @@ Options:
 ## `moai models`
 
 ```
-Read the model per role from your user config
+Read the model per role from your config and the repository's
 
 Usage: moai models [OPTIONS]
 

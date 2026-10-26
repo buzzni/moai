@@ -172,7 +172,7 @@ fn roles_table() -> String {
 fn models_defaults() -> String {
     let pairs: Vec<String> =
         crate::user_config::MODELS_DEFAULT.iter().map(|(key, value)| format!("`{key}` `{value}`")).collect();
-    format!("With nothing written, the defaults are {}.", pairs.join(" · "))
+    format!("With nothing written and no repository table, the defaults are {}.", pairs.join(" · "))
 }
 
 /// 서브에이전트 일꾼이 모델이 모자라 집기 전에 멈출 때 내는 머리(moai-9tqo.rsl·p1p). 감독의 4 가 이 머리로 읽고
@@ -2111,7 +2111,6 @@ pub fn supervise() -> String {
     let defaults = models_defaults();
     let epic_rule = epic_review_rule();
     let plan = indent(&plan_brief(), "    ");
-    let plan_first = PLAN_FIRST;
     // 5 의 4-3 멤버 보내기는 `<id>` 를 에픽으로 채운다고 이른다 — 같은 줄을 그 자리 이름으로.
     let plan_first_id = PLAN_FIRST.replace("<epic>", "<id>");
     format!(
@@ -2140,12 +2139,18 @@ headless: `Agent` is Claude Code's tool, and this skill is what calls it.
 
 **The models are the person's, read once a round.** Which model each role runs on is the
 person's own choice, kept in their user config (`[models]`), so it is not written into this
-skill — a skill planted at project scope is committed and shared. Read it at the start of
-every round; a value changed mid-round counts from the next one.
+skill — a skill planted at project scope is committed and shared. A repository may recommend
+values in a `[models]` table of its `.moai/config.toml`; the person's own keys win over it.
+Read it at the start of every round; a value changed mid-round counts from the next one.
 
     moai models --json      one object: a model per role (plan, develop, complex, review,
-                            docs, bulk, codex), review_grade, effort, effort_complex, and
-                            written — the keys the person set; the rest are defaults
+                            docs, bulk, codex), review_grade, effort, effort_complex,
+                            written — the keys the person set — and repo — the keys the
+                            repository recommended, read from repo_path; the rest are defaults
+
+When a value has to change, the person changes it — in their user config for a key in `written`
+or a default, and over a `repo` key by writing the same key there. The repository's file is
+committed and shared: changing it changes the recommendation for everyone, so name it as that.
 
 **One supervisor per repository.** A supervisor waiting for reports reads `idle` in
 `ListAgents` like any worker, so a second one sends it backlog, and the two keep separate
@@ -2336,7 +2341,8 @@ refusal — to the new name (2).
 - When there is such work, hand carrying it on to one idle worker **before any new
   backlog**. Send the message in 3 with its first two lines changed to the two below, and
   the rest filled as 3 says (`<other work>` too — 4-3 points at that line). The steps file
-  has the section the first line names
+  sends the worker on to the section the first line names, which stands beside it in
+  `references/worker-branches.md`
 
       You are handed the stalled work in <epic> — the previous session did not finish it. Read <steps file> and follow its steps from "Carrying on stalled work".
       Read first: moai show <epic> (history and notes) · moai show <member> (the place too — a place stands on work only)
@@ -2531,21 +2537,39 @@ below, every slot filled as in 3:
 
     Agent(subagent_type: "general-purpose", model: <plan model>, description: "plan <id>", prompt: <the plan brief>)
 
+**Mark the backlog the moment you raise it** — `moai note <id> 'Sent: plan <agentId>'`, as 1 says
+for a send: until the plan hands back, that backlog still stands in `moai backlog ls`, and a
+second plan subagent raised for it unfolds it twice (`promote` unfolds a closed backlog too).
+The word is `plan`, not `subagent` — no worker holds this backlog, so it is not stalled work.
+
 {plan}
 
 It hands back the epic it unfolded and a difficulty per member. Then
 
-- **write its `model:` line on the epic** — `moai note <epic> 'model: anthropic/<model ran> (<heaviest difficulty> — plan: unfolded <id>)'`, the name off its `Model ran:` line
+- **write its `model:` line on the epic** — `moai note <epic> 'model: anthropic/<model ran> (<heaviest difficulty> — plan: unfolded <id>)'`;
+  `<model ran>` is the name after `anthropic/` on its `Model ran:` line — copy the vendor once
 - **measure the role (2-1) on the members it handed back**, not on the backlog — the members
-  are written now, so the heaviest of them picks `develop` or `complex`
+  are written now: `docs` or `bulk` when every member's reason opens with that word, else the
+  heaviest of them picks `develop` or `complex`
+- **tell the person each `not hung:` line** — a deadline they gave that did not land, or a dead
+  release the plan cleared off the epic; nothing else carries it to them
 - **send that epic `from step 2`**: the message of 3 with its first two lines swapped for the two below,
   and the `Sent:` mark (1) on the epic. The backlog is done once unfolded and leaves the candidates by itself
 
-      {plan_first}
+      {PLAN_FIRST}
       Read first: moai show <epic>
 
+**When you start again (4)**, a backlog whose last `Sent:` is `plan <agentId>`, with no
+`Plan stopped:` after it, lost its plan subagent with the round: once the person agrees that the
+session it ran in is gone, raise a new one for it. An epic whose last `Sent:` is `plan <backlog id>`
+— the plan marks it last, once the epic is whole — was unfolded and never sent: measure the role
+from its members' bodies (2-1) and send it from step 2. Its plan's `model:` line went with the
+notification; do not write one from memory.
+
 If it hands back `already unfolded:` or `not unfolded:`, send nothing for that backlog — someone
-unfolded it, or the plan subagent could not; read its reason and tell the person. **A worker
+unfolded it, or the plan subagent could not; read its reason and tell the person. On
+`not unfolded:` also close the backlog's mark — `moai note <id> 'Plan stopped: <its reason>'` —
+or every start again sends it to a new plan; it is a candidate again when the person says so. **A worker
 you send a backlog to directly** (the message of 3 as it stands, `from step 1`) still unfolds it
 itself — that is the path when the person asks for it, not the usual one.
 
@@ -2603,8 +2627,9 @@ carries none** — never required, always asked; the backlog's own is an answer 
 already gave. A day given as "in three days" you write as the day it lands on.
 It is `none` when neither stands — with `Person: away` there is nobody to ask, so it is
 the backlog's own `due_on` or `none`: a deadline is the person's, and you never make one
-up. The worker hangs it on the epic it unfolds; the epic's deadline then bounds every
-member's, and `moai due apply` raises the members' priority as it nears.
+up. The plan subagent (2-2) — or a worker you send the backlog itself — hangs it on the epic it
+unfolds; the epic's deadline then bounds every member's, and `moai due apply`
+raises the members' priority as it nears.
 `<model>`, `<difficulty>` and `<why>` are the role's model you read in 2-1, the difficulty
 you measured and your reason; `<effort>` is that role's effort (2-1), the same value you pass
 to `Agent`. **Leave them unfilled** and those placeholders travel as they are, so the note
@@ -2673,7 +2698,8 @@ head. So when you start or resume, before waiting, read what the tracker holds:
 
     moai show -s in_progress,review        the work sent and picked up, not done
     moai show -g 'Sent:'                   sent and not done — a backlog not unfolded yet, or an
-                                           epic not picked up yet; neither is a candidate
+                                           epic not picked up yet; neither is a candidate, and
+                                           a last `Sent: plan …` goes back to 2-2
     moai show -g 'report:' --all           the epics carrying a report nobody received
 
 **Only a note that opens with the marker counts** — `-g` matches any text, and a body or a
@@ -2756,7 +2782,8 @@ that ran in that window is the worker's to name.
 
     {UNWRITTEN}
 
-If the three hold and every member's line stands, mark the report checked on the epic — a
+If the three hold and no line is missing — none is owed by a member left in the first column or
+one finished before this worker was sent, as above — mark the report checked on the epic — a
 supervisor that starts again reads that line, not this conversation (4). It needs no commit of its own ("The shared root").
 
     moai note <epic> 'Report-checked: <merge hash>'
@@ -4571,14 +4598,22 @@ const PLAN_FIRST: &str = "You are handed epic <epic> — <title>. It is already 
 /// 감독이 `plan` 역할의 모델로 세우는 펼치기 서브에이전트의 프롬프트(moai-w25x.jby, 2026-10-26 사용자 결정). 역할 표의
 /// `plan` 이 어디에도 안 쓰였다 — 일꾼은 제 모델로 펼쳐, 사람이 그 키를 적어도 안 들었다(리뷰 moai-9tqo.jdi 15번).
 ///
-/// **일꾼의 걸음 1 이 하던 것을 그대로 옮긴다** — `--dry-run` 을 먼저 보고, 짧은 새 제목, 마일스톤과 기한을 에픽에.
+/// **일꾼의 걸음 1 이 하던 것을 그대로 옮긴다** — `--dry-run` 을 먼저 보고, 짧은 새 제목, 마일스톤과 기한을 에픽에,
+/// **죽은 릴리스는 걷는다**(리뷰 moai-w25x.54r) — 일꾼은 걸음 2 부터 받아 걸음 1 의 그 줄을 안 지난다. 걷던 판은 닫힌
+/// 릴리스를 `promote` 가 데려온 채 두어, 집는 순간 그 릴리스가 다시 돌아 `ready` 가 밖의 일을 통째로 감췄다.
 /// 그 위에 **멤버의 본문을 채운다** — 펼치는 손이 코드를 읽은 손이라, 일꾼이 같은 조사를 다시 안 하게 한다. 난이도를
 /// 멤버마다 돌려줘 감독이 역할(2-1)을 백로그가 아니라 멤버로 잰다. 집기·워크트리·코드는 일꾼의 몫이라 안 한다.
+///
+/// **펼치기가 쓸 자리는 3 의 자리 이름을 안 쓴다**(같은 리뷰) — 감독은 이 글을 "3 처럼 채워" 보내므로, `<title>`·`<why>`
+/// 를 여기서 펼치기의 몫으로 쓰면 감독이 backlog 제목과 제 까닭으로 채워 버린다. 감독이 채우는 것은 머리의 자리뿐이다.
+/// **다 지은 에픽에 `Sent:` 를 단다** — 감독이 그 사이에 다시 서면 보내지 않은 에픽을 아무 읽기도 못 찾는다. 걸음 3·4
+/// (릴리스·기한·본문) 뒤에 단다: 다시 선 감독은 그 표가 선 에픽을 곧장 걸음 2 부터 보내므로, 앞에 달면 덜 지은 에픽이
+/// 간다. 릴리스를 기한보다 먼저 건다 — 죽은 릴리스의 이른 기한이 사람의 기한을 거절한다(일꾼의 걸음 1 과 같은 차례).
 fn plan_brief() -> String {
     format!(
         r#"You unfold backlog <id> — <title> — for the supervisor of this repository. You split it
 into an epic and its issues; you do not develop it, pick anything up, raise a worktree or
-change a file outside the tracker.
+change a repository file — the tracker and your scratchpad are yours.
 Root: <root>
 Milestone: <milestone>
 Due: <due>
@@ -4587,31 +4622,47 @@ Person: <person>
 1. Read it — moai -C <root> show <id> — and as much of the code as the split needs. If it
    already stands done, hand back `already unfolded: <id>` and stop: unfolding again puts up
    two epics.
-2. Write the plan: one `# <epic title>` line and one `- [pN] <title>` line per issue. A plan
+2. Write the plan: one `# <epic title>` line and one `- [pN] <member title>` line per issue. A plan
    line becomes the title verbatim, so write short new titles. Look first, then unfold:
    moai -C <root> backlog promote <id> --dry-run --from -
    moai -C <root> backlog promote <id> --from -
-   A design question the backlog and its notes do not settle stays open: write it in the
-   body of the member it belongs to, for the worker to ask — do not settle it here.
-3. Hang the release and the deadline on the epic, unless the slot says `none`:
+3. Hang the release on the epic, then the deadline, each unless its slot says `none` — the
+   release first, as a dead one's earlier deadline refuses the person's. `Milestone: none`
+   clears nothing `promote` carried, but for a dead release: when a line `promote` printed
+   names the release it carried as already closed or deferred, clear it — left on, it
+   re-opens a release that is out, or takes the whole plan out of the plan:
    {MILESTONE_ATTACH}
+   {MILESTONE_CLEAR}
    moai -C <root> edit <epic> --due <due>
-   A refusal because the day is later than the milestone's leaves the epic as it stands —
-   name it in the hand-back.
+   A refusal because the day is later than the milestone's leaves the epic as it stands.
 4. Give every member a body the worker can start from without searching again — what is
-   wrong, where (file and function), what to change, how to test it:
-   moai -C <root> edit <member> -b - < <that text, written to a file in your scratchpad>
-5. Hand back. The first line is Model ran: anthropic/<your real model name> — the name in
+   wrong, where (file and function), what to change, how to test it. A design question the
+   backlog and its notes do not settle goes in it, open, for the worker to ask — do not
+   settle it here. Write it to a file in your scratchpad and run
+   moai -C <root> edit <member> -b - < <that file>
+5. Mark the epic, last — a supervisor that starts again sends an epic it finds marked so, so
+   mark it only once 3 and 4 stand:
+   {PLAN_SENT}
+   Then hand back. The first line is Model ran: anthropic/<your real model name> — the name in
    your system prompt, not an alias. The second is epic: <epic id>. Then one line per member,
-   <member> <low|medium|high> — <why>, on this rubric:
+   <member> <{levels}> — <reason>, on this rubric:
 {rubric}
-   If you could not unfold, the first line after Model ran: is `not unfolded: <why>`."#,
-        rubric = indent(
-            &DIFFICULTY.iter().map(|(level, _, what)| format!("- `{level}` — {what}")).collect::<Vec<_>>().join("\n"),
-            "   "
-        )
+   Open the reason with `docs` for a member that only touches the wiki or the CHANGELOG, and
+   with `bulk` for sorting, summing up or the same mechanical fix many times. Then a line
+   `not hung: <what and why>` for each release or deadline 3 left as it was or cleared.
+   If you could not unfold, the first line after Model ran: is `not unfolded: <reason>`."#,
+        levels = DIFFICULTY.iter().map(|(level, _, _)| *level).collect::<Vec<_>>().join("|"),
+        rubric = indent(&difficulty_rubric(), "   - "),
     )
 }
+
+/// 펼치기가 걷는 죽은 릴리스의 줄(리뷰 moai-w25x.54r) — 일꾼의 걸음 1 이 같은 일을 `moai edit <epic> --milestone none` 으로
+/// 한다. 펼치기는 루트를 자리로 받으므로 `-C <root>` 를 단다.
+const MILESTONE_CLEAR: &str = "moai -C <root> edit <epic> --milestone none";
+
+/// 펼치기가 펼친 에픽에 다는 보낸 표(리뷰 moai-w25x.54r) — 감독의 1 이 `moai show -g 'Sent:'` 로 다시 읽는 그 낱말이다.
+/// 감독이 일꾼에게 보내면 그 일꾼의 `Sent:` 가 뒤에 선다.
+const PLAN_SENT: &str = "moai -C <root> note <epic> 'Sent: plan <id>'";
 
 /// 서브에이전트 일꾼이 7 에서 세우는 리뷰 서브에이전트의 프롬프트(moai-9tqo.p1p). **리뷰는 일꾼의 중첩
 /// 서브에이전트로 돈다**(2026-10-12 사용자 결정 5) — 일꾼 안에서 부른 리뷰는 일꾼의 모델을 물려받으니(moai-9tqo.fxp
@@ -4801,7 +4852,8 @@ needs more says so in a line of its own, **In a subagent**.
 - **No `EnterWorktree` or `ExitWorktree`.** A session does without them too ("Stay in the
   root"); for you they do not exist
 - **No `AskUserQuestion`, and nobody watches you.** Where a step asks the person, hand back
-  instead and end (4). `Person: away` still decides by recommendation, as below
+  instead and end (4). `Person: away` still decides by recommendation —
+  "When the person is away" in `{BRANCHES_FILE}`
 - **No `/model`.** The model and the effort you were raised on stay (`Model:` above)
 - **What you hand back is the report** (12) — `SubagentHandback`, and your turn ends with it.
   Where a step says to tell the supervisor and stop, that is your hand-back; where it says to
@@ -4926,7 +4978,7 @@ root"), never in the root
    `moai wiki search '<that place>'`; do not ask a person what the wiki already answers.
    Do not guess a design decision that is not in the notes — ask with `AskUserQuestion`;
    a person is watching the worker's window. With `Person: away` in the message, decide by
-   recommendation instead ("When the person is away").
+   recommendation instead ("When the person is away" in `{BRANCHES_FILE}`).
    **In a subagent** there is no `AskUserQuestion`: hand back with `SubagentHandback`, its
    head `{DECISION_HEAD}`, then the situation, options A and B, and your recommendation —
    and end. The supervisor asks the person and wakes you with the answer (`SendMessage`);
@@ -5264,7 +5316,6 @@ root"), never in the root
     from it. Below it goes one `Subagent ran: anthropic/<its real name> on <member>` line for each
     subagent of your own (`Subagents:`) that did a share of a member — 9-1's line of its own.
     Nothing about clearing a window is yours
-
 "#
     )
 }
@@ -5368,7 +5419,8 @@ notes), then
 
 In a subagent, 7 raises the review on this prompt — copy it whole and fill every slot.
 
-{brief}"#
+{brief}
+"#
     )
 }
 
@@ -5578,6 +5630,7 @@ mod tests {
             ("감독 스킬", supervise()),
             ("위키 스킬", wiki()),
             ("일꾼 글", worker()),
+            ("일꾼 갈래 글", worker_branches()),
         ] {
             for gone in ["Korean text", "korean-skills", "humanize-korean", "_workspace", "korean-terms"] {
                 assert!(!text.contains(gone), "{surface} 에 걷은 한국어 글 절이 남았다 — {gone}");
@@ -5647,6 +5700,7 @@ mod tests {
             ("감독 스킬", supervise()),
             ("tmux 스킬", tmux()),
             ("일꾼 글", worker()),
+            ("일꾼 갈래 글", worker_branches()),
         ] {
             let found: String = text.chars().filter(|c| emoji(*c)).collect();
             assert!(found.is_empty(), "{surface} 이 이모지를 쓴다 — {found}");
@@ -5674,6 +5728,7 @@ mod tests {
             ("tmux 스킬", tmux()),
             ("Saycode 스킬", saycode()),
             ("일꾼 글", worker()),
+            ("일꾼 갈래 글", worker_branches()),
         ] {
             for gone in ["examples/bash-agent", "examples/python-agents", "runs without a person"] {
                 assert!(!text.contains(gone), "{surface} 이 걷은 헤드리스 예제를 아직 가리킨다 — {gone}");
@@ -5717,6 +5772,7 @@ mod tests {
             ("tmux 스킬", tmux()),
             ("Saycode 스킬", saycode()),
             ("일꾼 글", worker()),
+            ("일꾼 갈래 글", worker_branches()),
         ] {
             for spawn in spawns {
                 assert!(!text.contains(spawn), "{surface} 이 새 에이전트를 띄우는 {spawn} 를 가르친다");
@@ -5813,6 +5869,7 @@ mod tests {
             ("참고 문서", reference()),
             ("감독 스킬", supervise()),
             ("일꾼 글", worker()),
+            ("일꾼 갈래 글", worker_branches()),
         ] {
             for said in stated(&text) {
                 assert_eq!(
@@ -6144,7 +6201,8 @@ mod tests {
             (".claude/worktrees", "거둔 일이 옛 워크트리 자리를 싣는다"),
             ("that has happened", "걸음이 일어난 일의 내력을 싣는다"),
         ] {
-            assert!(!work.contains(gone), "{why} — {gone}");
+            // 거둔 일은 곁 글로 옮겼다(moai-w25x.mgu) — 그 절을 겨눈 줄도 그 글에서 잰다.
+            assert!(!work.contains(gone) && !branches.contains(gone), "{why} — {gone}");
         }
     }
 
@@ -6395,20 +6453,51 @@ stop sending outside work while a release runs",
         assert!(worker().contains(RAISE_HEAD), "일꾼이 {RAISE_HEAD} 를 안 낸다");
     }
 
-    /// **역할 표의 이름은 설정의 키다**(moai-9tqo.rsl). 감독이 표에서 고른 역할로 `moai models --json` 을 읽으니,
-    /// 철자가 하나라도 다르면 그 역할의 모델이 없는 키를 찾는다. 난이도 표의 역할도 그 안에 선다.
     /// **`plan` 역할이 감독의 펼치기를 맡는다**(moai-w25x.jby, 2026-10-26 사용자 결정) — 표에 적어도 아무 데서 안 듣던
     /// 키였다. 감독이 그 모델로 펼치기 서브에이전트를 세우고, 일꾼은 펼친 에픽을 걸음 2 부터 받는다.
+    ///
+    /// **브리프 자체를 잰다**(리뷰 moai-w25x.54r) — 감독 글 전체에서 찾던 판은 1 의 문단이 `MILESTONE_ATTACH` 를 이미 들어,
+    /// 브리프에서 빠져도 푸르렀다. 일꾼은 걸음 1 을 안 지나므로 그 걸음이 하던 것 — 죽은 릴리스 걷기까지 — 이 여기 서야 한다.
     #[test]
     fn the_plan_role_unfolds_before_the_send() {
         let s = supervise();
         let plan = s.find("model: <plan model>").expect("감독이 plan 모델로 펼치기를 안 세운다");
         assert!(plan < s.find("**3. Send.**").unwrap(), "펼치기가 보내기 뒤에 선다");
-        for step in ["backlog promote <id> --dry-run --from -", "backlog promote <id> --from -", MILESTONE_ATTACH] {
-            assert!(s.contains(step), "펼치기 브리프가 일꾼 걸음 1 의 {step} 를 안 옮겼다");
+        let brief = plan_brief();
+        for step in [
+            "backlog promote <id> --dry-run --from -",
+            "backlog promote <id> --from -",
+            MILESTONE_ATTACH,
+            "moai -C <root> edit <epic> --due <due>",
+            MILESTONE_CLEAR,
+            PLAN_SENT,
+        ] {
+            assert!(brief.contains(step), "펼치기 브리프가 일꾼 걸음 1 의 {step} 를 안 옮겼다");
         }
+        // **차례도 잰다**(리뷰 moai-w25x.54r) — 릴리스를 기한보다 먼저 건다(죽은 릴리스의 이른 기한이 사람의 기한을
+        // 거절한다), 에픽의 표는 본문까지 다 지은 뒤다(다시 선 감독은 표가 선 에픽을 곧장 보낸다).
+        let at = |piece: &str| brief.find(piece).unwrap_or_else(|| panic!("브리프에 {piece} 가 없다"));
+        assert!(at(MILESTONE_CLEAR) < at("--due <due>"), "죽은 릴리스를 걷기 전에 기한을 건다");
+        assert!(at("-b - < <that file>") < at(PLAN_SENT), "에픽을 다 짓기 전에 보낸 표를 단다");
+        assert!(s.contains(&indent(&brief, "    ")), "감독 글에 펼치기 브리프가 없다");
         assert!(s.contains(PLAN_FIRST), "펼친 에픽을 걸음 2 부터 보내지 않는다");
-        assert!(worker().contains("from step 2"), "일꾼 글이 걸음 2 부터 받는 길을 안 댄다");
+        let two = &s[s.find("**2-2.").unwrap()..s.find("**3. Send.**").unwrap()];
+        // 회사는 한 번 선다 — `Model ran:` 은 이미 `anthropic/<이름>` 이다(리뷰 moai-9tqo.jdi 3번과 같은 덫).
+        assert!(two.contains("the name after `anthropic/`"), "펼치기의 모델 줄에 회사가 두 번 선다");
+        // 보내기 전에 backlog 에 표를 단다 — 없으면 같은 backlog 가 펼치기 둘에게 간다.
+        assert!(two.contains("'Sent: plan <agentId>'"), "펼치기를 세우며 backlog 에 표를 안 단다");
+        for line in ["`not hung:`", "`docs` or `bulk`", "'Plan stopped: <its reason>'"] {
+            assert!(two.contains(line), "감독이 펼치기의 {line} 를 안 읽는다");
+        }
+        // **감독이 채우는 자리만 3 의 이름을 쓴다** — 펼치기가 쓸 자리가 3 의 이름이면 감독이 그것까지 채운다.
+        let list = slot_list(&s);
+        let inputs = ["id", "title", "root", "milestone", "due", "person"];
+        for slot in brief.split('<').skip(1).filter_map(|x| x.split_once('>')).map(|(x, _)| x) {
+            if list.contains(&format!("`<{slot}>`")) {
+                assert!(inputs.contains(&slot), "펼치기가 쓸 자리 <{slot}> 가 감독이 채우는 3 의 자리다");
+            }
+        }
+        assert_eq!(brief.matches("<title>").count(), 1, "감독이 채울 `<title>` 이 머리 밖에도 선다");
     }
 
     /// **`model:` 줄을 다 본 뒤에 보고를 확인했다고 적는다**(moai-w25x.qi8, 리뷰 moai-nzmp.nfj 12번). 다시 선 감독은
@@ -6424,6 +6513,8 @@ stop sending outside work while a release runs",
         );
     }
 
+    /// **역할 표의 이름은 설정의 키다**(moai-9tqo.rsl). 감독이 표에서 고른 역할로 `moai models --json` 을 읽으니,
+    /// 철자가 하나라도 다르면 그 역할의 모델이 없는 키를 찾는다. 난이도 표의 역할도 그 안에 선다.
     #[test]
     fn the_roles_are_the_models_table() {
         let keys: Vec<&str> = crate::user_config::MODELS_DEFAULT.iter().map(|(key, _)| *key).collect();
@@ -7289,6 +7380,7 @@ stop sending outside work while a release runs",
             ("참고 문서", reference()),
             ("감독", supervise()),
             ("일꾼", worker()),
+            ("일꾼 갈래", worker_branches()),
         ];
         for (whose, text) in &texts {
             for line in text.lines().filter(|l| l.contains("moai ")) {
@@ -7315,7 +7407,12 @@ stop sending outside work while a release runs",
     /// `the_frontmatter_opens_the_skill` 이 붉어진다.
     #[test]
     fn the_supervisor_names_no_issue_of_this_repo() {
-        for (whose, text) in [("감독 스킬", supervise()), ("위키 스킬", wiki()), ("일꾼 글", worker())] {
+        for (whose, text) in [
+            ("감독 스킬", supervise()),
+            ("위키 스킬", wiki()),
+            ("일꾼 글", worker()),
+            ("일꾼 갈래 글", worker_branches()),
+        ] {
             let ids: Vec<&str> = text
                 .split(|c: char| !(c.is_ascii_alphanumeric() || c == '-'))
                 .filter(|w| !crate::skill::ever_planted(w))
@@ -7443,13 +7540,13 @@ stop sending outside work while a release runs",
         // 워크트리 꼭대기에 선 일꾼은 `moai` 가 공유 루트의 `.moai` 를 찾아 쓰고, 훅 규칙 2 는
         // `.worktrees/` 아래라 편집을 안 센다(moai-5s9l — 옛 자리 `.claude/` 도 같다).
         let (supervise, brief) = (supervise(), worker());
-        let work = &brief;
         assert!(supervise.contains("print(\"subdir\", os.path.relpath(here, top))"), "감독이 하위 경로를 안 낸다");
         assert!(message().contains("Subdir: <subdir>"), "메시지에 하위 경로 자리가 없다");
         let three = &brief[step_at(&brief, "3")..step_at(&brief, "4")];
-        // 하위 디렉터리는 드문 갈래라 곁 글에 선다(moai-w25x.mgu) — 3 은 그 절을 이름으로 댄다.
+        // 하위 디렉터리는 드문 갈래라 곁 글에 선다(moai-w25x.mgu) — 3 은 그 절을 이름으로 댄다. **그 절에서 끊는다**
+        // (리뷰 moai-w25x.54r) — 끝까지 자르면 뒤의 "Carrying on stalled work" 가 같은 줄을 들어, 이 절에서 줄이 빠져도 푸르다.
         let branches = worker_branches();
-        let sub = &branches[branches.find("## A subdirectory project").expect("하위 디렉터리 절이 없다")..];
+        let sub = section(&branches, "## A subdirectory project");
         assert!(
             three.contains("\"A subdirectory project\"") && sub.contains(SUBDIR),
             "일꾼이 워크트리 안의 하위로 안 들어간다"
@@ -7862,7 +7959,8 @@ stop sending outside work while a release runs",
         assert!(skill().contains(&section), "moai 스킬에 낱말표가 없다");
         // **감독과 일꾼 글은 표 없이 도구를 바로 적는다**(moai-obxm) — 둘 다 Claude Code 에만 가니, 표를 실으면 받는 창이
         // 없는 열을 읽고 *기울인* 걸음 이름은 한 번 더 건너뛰는 길이 된다.
-        for (whose, text) in [("감독 스킬", supervise()), ("일꾼 글", worker())] {
+        for (whose, text) in [("감독 스킬", supervise()), ("일꾼 글", worker()), ("일꾼 갈래 글", worker_branches())]
+        {
             assert!(!text.contains(title), "{whose} 에 낱말표가 섰다");
             for v in &VERBS {
                 let step = v.step.split(" (").next().unwrap_or(v.step);
@@ -7990,9 +8088,12 @@ stop sending outside work while a release runs",
     #[test]
     fn the_supervisor_and_the_workers_talk_through_claude_code() {
         let (supervise, brief) = (supervise(), worker());
-        for (whose, text) in
-            [("감독 스킬", supervise.as_str()), ("일꾼 글", brief.as_str()), ("AGENTS 블록", &agents())]
-        {
+        for (whose, text) in [
+            ("감독 스킬", supervise.as_str()),
+            ("일꾼 글", brief.as_str()),
+            ("일꾼 갈래 글", &worker_branches()),
+            ("AGENTS 블록", &agents()),
+        ] {
             for gone in ["moai hello", "moai send", "moai inbox", "moai agents", "any-idle-worker", "moai-work"] {
                 assert!(!text.contains(gone), "{whose} 이 걷은 {gone} 를 가르친다");
             }
@@ -8172,7 +8273,7 @@ stop sending outside work while a release runs",
             );
         }
         // 이름과 Saycode id 를 잇는 짝은 없다 — 어느 글도 남의 환경에서 id 를 읽으라고 안 가르친다.
-        for skill in [tmux(), cmux(), recover(), saycode(), supervise(), worker()] {
+        for skill in [tmux(), cmux(), recover(), saycode(), supervise(), worker(), worker_branches()] {
             assert!(
                 !skill.contains("APLUS_SESSION_ID") && !skill.contains("ps eww"),
                 "글이 남의 프로세스 환경을 읽으라고 가르친다"
@@ -9206,7 +9307,8 @@ stop sending outside work while a release runs",
         let seven = &steps[step_at(steps, "7")..steps.find("\n7-1. ").unwrap()];
         assert!(seven.contains("**If the review stays refused**"), "7 에 막힌 리뷰의 길이 없다");
         let branches = worker_branches();
-        let by_hand = &branches[branches.find("## When the review stays refused").expect("막힌 리뷰의 절이 없다")..];
+        // 그 절에서 끊는다(리뷰 moai-w25x.54r) — 뒤의 리뷰 브리프가 같은 머리를 들어, 끝까지 자르면 이 절에서 빠져도 푸르다.
+        let by_hand = section(&branches, "## When the review stays refused");
         assert!(seven.contains("\"When the review stays refused\""), "7 이 막힌 리뷰의 절을 안 댄다");
         assert!(by_hand.contains(MANUAL_REVIEW), "7 의 손 리뷰가 머리를 안 단다");
         assert!(seven.contains("do not work around the hook"), "7 이 훅을 비켜 가지 말라고 안 한다");
