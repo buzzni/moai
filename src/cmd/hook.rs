@@ -738,7 +738,7 @@ fn settle<'a>(
                 homes: base.homes.clone(),
                 ..beside
             };
-            add_picked(input, repo, &fresh, &mut away);
+            add_picked(input, repo, &mut away);
             (std::borrow::Cow::Owned(fresh), away)
         }
         None => (std::borrow::Cow::Borrowed(issues), base),
@@ -837,17 +837,23 @@ fn away_of(input: &Input, repo: &Repo, issues: &[model::Issue], me: &crate::hook
     // 이름을 읽으면 워크트리 안에서 도는 세션이 제 이름을 잃고, 제 워크트리가 쥔 일이 통째로 "옆의
     // 것" 이 되어 규칙 2 가 그 자리의 쓰기를 막는다.
     let mut away = crate::hook::Away { me: me.clone(), archive, ..crate::worktree::away(repo.here()) };
-    add_picked(input, repo, issues, &mut away);
+    add_picked(input, repo, &mut away);
     away
 }
 
-/// 옆 이름이 서면 이 세션이 **확실히** 집은 줄을 `away` 에 싣는다(moai-pxui, [`crate::hook::Away::sure`]) —
+/// 옆 이름이 서면 이 세션이 **확실히** 집은 줄을 읽는 손을 `away` 에 싣는다(moai-pxui, [`crate::hook::Away::sure`]) —
 /// [`away_of`] 와 겹쳐 본 판([`settle`])이 같은 자로 잰다. 겹친 판의 이름은 옆 스냅샷에서 다시 읽으므로, 거기서
-/// 처음 이름이 서면 그때 읽는다.
-fn add_picked(input: &Input, repo: &Repo, issues: &[model::Issue], away: &mut crate::hook::Away) {
-    if !away.names.is_empty() {
-        away.sure.extend(read_picks(input, repo, issues).sure);
+/// 처음 이름이 서면 그때 싣는다.
+///
+/// **싣는 것은 손이지 답이 아니다**(moai-qrja.12h) — 기록은 옆 이름이 집힌 줄을 가리켜 판정이 그것을 물을 때 처음
+/// 읽힌다([`crate::hook::Sure`]). 미리 읽던 판은 늘 지나가는 도구 부름마다 기록 디렉터리를 훑었다. 줄은 묻는 판정의
+/// 것을 받는다 — `issues` 를 붙들지 않는다.
+fn add_picked(input: &Input, repo: &Repo, away: &mut crate::hook::Away) {
+    if away.names.is_empty() {
+        return;
     }
+    let (Some(sid), Some(dir)) = (safe_sid(input), picks_dir(repo)) else { return };
+    away.sure = crate::hook::Sure::asked(move |issues| picks_at(&sid, &dir, issues).sure);
 }
 
 /// `away` 에 **누구의 것인지 모르는** 집은 줄(`hook::unsure`)을 더한다 — 옆 딸린 워크트리가 쥐었을 수
@@ -973,6 +979,7 @@ fn record_picks(input: &Input, repo: &Repo, ids: &[(String, bool)]) {
     if let Ok(mut f) = open.open(dir.join(&sid)) {
         let _ = f.write_all(lines.as_bytes());
     }
+    PICKS_READ.lock().unwrap_or_else(std::sync::PoisonError::into_inner).retain(|(at, _)| *at != dir);
     prune_picks(home, &dir, &sid);
 }
 
@@ -1018,21 +1025,59 @@ fn prune_picks(home: &Path, dir: &Path, sid: &str) {
 /// 적어 둔 집기를 읽어 이 세션의 눈으로 가른다 — 가르는 자는 `hook::Picks::fold` 다. 여기는 읽기만 한다.
 /// 기록이 끝났는지는 `issues` 의 칸 시각으로 잰다.
 fn read_picks(input: &Input, repo: &Repo, issues: &[model::Issue]) -> crate::hook::Picks {
-    let Some(me) = safe_sid(input) else { return Default::default() };
-    let Some(Ok(dir)) = picks_dir(repo).map(std::fs::read_dir) else { return Default::default() };
-    // **보통 파일만 읽는다** — 파이프가 서 있으면 여는 자리에서 훅이 멈추고, 링크는 남의 파일을
-    // 읽힌다(리뷰 moai-3k2d.1df). 설정 곁으로 옮긴 뒤에도 손으로 놓을 수 있는 자리라 그대로 둔다.
-    // 적는 쪽은 보통 파일만 만든다.
-    let files =
-        dir.filter_map(Result::ok).filter(|entry| entry.file_type().is_ok_and(|t| t.is_file())).filter_map(|entry| {
-            let text = std::fs::read_to_string(entry.path()).ok()?;
-            Some((entry.file_name().to_string_lossy().into_owned(), text))
-        });
+    let (Some(me), Some(dir)) = (safe_sid(input), picks_dir(repo)) else { return Default::default() };
+    picks_at(&me, &dir, issues)
+}
+
+/// [`read_picks`] 의 속 — 세션 `me` 의 눈으로 `dir` 의 기록을 가른다. [`add_picked`] 가 싣는 손도 이것을 부른다.
+fn picks_at(me: &str, dir: &Path, issues: &[model::Issue]) -> crate::hook::Picks {
+    let files = picks_files(dir);
     let since: std::collections::BTreeMap<&str, i64> =
         issues.iter().filter_map(|i| Some((i.id.as_str(), crate::model::parse_rfc3339(&i.status_since)?))).collect();
     // 기록과 같은 벽시계다([`record_picks`]) — 못 읽으면 0 이라 아무 기록도 최근이 아니다.
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos());
-    crate::hook::Picks::fold(&me, files, &|id| since.get(id).copied(), now)
+    crate::hook::Picks::fold(me, files.iter().map(|(sid, text)| (sid, text)), &|id| since.get(id).copied(), now)
+}
+
+/// `dir` 의 세션 기록 — **한 부름에 한 번만 읽는다**(moai-qrja.12h). 막힌 부름은 [`settle`] 이 판정을 다시 부를 때마다
+/// 기록을 다시 가르는데(이 세션이 확실히 집은 줄, 모르는 줄), 그때마다 디렉터리를 훑던 판은 한 부름에 셋까지 읽었다.
+/// 가르는 것은 줄마다 다르니(칸 시각) 접힌 답이 아니라 읽은 글을 나눠 쓴다. 훅은 부름마다 새 프로세스라 이 칸은 그
+/// 부름 하나의 것이다 — [`record_picks`] 가 적으면 그 자리를 비운다.
+fn picks_files(dir: &Path) -> std::sync::Arc<Vec<(String, String)>> {
+    let mut read = PICKS_READ.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    if let Some((_, files)) = read.iter().find(|(at, _)| at == dir) {
+        return files.clone();
+    }
+    // **보통 파일만 읽는다** — 파이프가 서 있으면 여는 자리에서 훅이 멈추고, 링크는 남의 파일을
+    // 읽힌다(리뷰 moai-3k2d.1df). 설정 곁으로 옮긴 뒤에도 손으로 놓을 수 있는 자리라 그대로 둔다.
+    // 적는 쪽은 보통 파일만 만든다.
+    #[cfg(test)]
+    PICKS_READS.with(|n| n.set(n.get() + 1));
+    let files: Vec<(String, String)> = std::fs::read_dir(dir)
+        .map(|entries| {
+            entries
+                .filter_map(Result::ok)
+                .filter(|entry| entry.file_type().is_ok_and(|t| t.is_file()))
+                .filter_map(|entry| {
+                    let text = std::fs::read_to_string(entry.path()).ok()?;
+                    Some((entry.file_name().to_string_lossy().into_owned(), text))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    let files = std::sync::Arc::new(files);
+    read.push((dir.to_path_buf(), files.clone()));
+    files
+}
+
+/// [`picks_files`] 가 읽어 둔 것 — 자리마다 한 벌이다.
+static PICKS_READ: std::sync::Mutex<Vec<(PathBuf, std::sync::Arc<Vec<(String, String)>>)>> =
+    std::sync::Mutex::new(Vec::new());
+
+#[cfg(test)]
+thread_local! {
+    /// [`picks_files`] 가 디렉터리를 정말 훑은 횟수 — `hook::READS` 와 같은 꼴, 같은 까닭이다.
+    static PICKS_READS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 /// 세션 id 를 경로 조각으로 — 사람이 준 글자를 그대로 쓰지 않는다.
@@ -1402,6 +1447,25 @@ mod tests {
     use super::*;
     use crate::hook::{CODEX_HOLD, Carry, Unit};
     use clap::ValueEnum;
+
+    /// **기록 디렉터리는 한 부름에 한 번만 훑는다**(moai-qrja.12h) — 막힌 부름은 기록을 셋까지 다시 가르는데, 읽은 글을
+    /// 나눠 쓴다. 적으면 그 자리를 비워 다음 읽기가 새 줄을 본다.
+    #[test]
+    fn the_picks_directory_is_read_once_per_call() {
+        let dir = std::env::temp_dir().join(format!("moai-picks-once-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("other"), crate::hook::Picks::line(1, None, "t-1", true)).unwrap();
+        let n = || PICKS_READS.with(std::cell::Cell::get);
+        let before = n();
+        let first = picks_files(&dir);
+        let again = picks_files(&dir);
+        assert_eq!(n() - before, 1, "같은 부름에 디렉터리를 다시 훑었다");
+        assert_eq!(first, again);
+        PICKS_READ.lock().unwrap().retain(|(at, _)| *at != dir);
+        let _ = picks_files(&dir);
+        assert_eq!(n() - before, 2, "비운 자리를 다시 안 읽었다");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     /// **훅의 답은 심은 Codex 파일이 연 칸에만 글을 싣는다**(moai-dp35) — 비추는 줄을 내는 이벤트와 `additionalContextLimit`
     /// 을 적은 이벤트가 같고, 글이 드는 자리는 그 이벤트가 Codex 에서 받는 상한 안에 든다. 셋을 따로 들던 판은 한쪽만

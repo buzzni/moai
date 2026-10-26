@@ -5572,7 +5572,9 @@ pub struct Away {
     /// 그것을 "빈손" 으로 막던 것은 이름이 낳은 부산물이었다(사용자 결정, 초점은 한 자다). **둘째 대가는 걷혔다**
     /// (moai-9js2.3xn, 2026-10-25 사용자 결정) — 쥔 줄이 모두 제 워크트리를 가지면 규칙 2 가 루트 쓰기를 빈손이
     /// 아니라 그 워크트리의 자리를 대며 막는다([`homed`], [`Away::homes`]).
-    pub sure: BTreeSet<String>,
+    ///
+    /// **처음 묻는 자리에서 한 번 읽는다**([`Sure`], moai-qrja.12h) — 옆 이름이 그 줄을 가리킬 때만 묻는다.
+    pub sure: Sure,
     /// 이 세션의 사람(moai-0zjo, 2026-10-02 사용자 결정) — **담당이 내가 아닌 줄**은 초점([`held`])에서 뺀다.
     /// 남이 집은 줄도, 담당 없이 시작 칸에 선 줄도 내 일이 아니다. 담당은 줄마다 보고 묶음에서 물려받지
     /// 않는다. 규칙 5 가 남의 줄 집기를 가르는 자도 이것이다.
@@ -5614,6 +5616,71 @@ impl Away {
     /// 뺄 것이 없다 — 옆 이름도 모르는 줄도 없고 물을 사람도 없다. **사람을 풀지 않고 답한다.**
     fn is_empty(&self) -> bool {
         self.nameless() && !self.me.may_know()
+    }
+}
+
+/// 이 세션이 **확실히** 집은 줄([`Away::sure`]) — **처음 묻는 자리에서 한 번 읽는다**(moai-qrja.12h, 리뷰 moai-9tqo.jdi 11번).
+///
+/// 값으로 들던 판은 옆 이름이 서고 집힌 줄이 있으면 `PreToolUse` 마다 집기 기록 디렉터리(세션 파일 전부)를 미리
+/// 읽었다 — 늘 지나가는 `ls`·`cargo test` 도. 묻는 자리는 [`theirs`] 하나고, 옆 이름이 그 줄을 가리킬 때만 묻는다:
+/// 그 밖의 줄에서는 이 값이 답을 못 바꾼다. [`Person`] 과 같은 꼴이다.
+///
+/// 읽는 손은 `cmd/hook.rs` 가 건넨다 — 이 모듈은 파일을 안 연다(모듈 머리). 손은 **묻는 판정의 줄**을 받는다: 기록이
+/// 끝났는지를 그 줄의 칸 시각으로 잰다([`Picks::fold`]). 한 `Away` 는 한 벌의 줄로만 판정되니 처음 답이 그대로 선다.
+/// 기본값은 집은 줄이 없는 것이다.
+#[derive(Clone, Default)]
+pub struct Sure(Option<std::sync::Arc<SureAsked>>);
+
+/// [`Sure`] 의 속 — 읽은 답과 읽는 손.
+struct SureAsked {
+    seen: std::sync::OnceLock<BTreeSet<String>>,
+    find: Box<dyn Fn(&[Issue]) -> BTreeSet<String> + Send + Sync>,
+}
+
+impl Sure {
+    /// 이미 아는 줄 — 시험과, 읽을 것이 없는 자리가 쓴다.
+    pub fn known(ids: BTreeSet<String>) -> Sure {
+        let seen = std::sync::OnceLock::new();
+        let _ = seen.set(ids);
+        Sure(Some(std::sync::Arc::new(SureAsked { seen, find: Box::new(|_| BTreeSet::new()) })))
+    }
+
+    /// 물을 때 `find` 로 읽는 줄. `find` 는 한 번만 불린다.
+    pub fn asked(find: impl Fn(&[Issue]) -> BTreeSet<String> + Send + Sync + 'static) -> Sure {
+        Sure(Some(std::sync::Arc::new(SureAsked { seen: std::sync::OnceLock::new(), find: Box::new(find) })))
+    }
+
+    /// `id` 가 이 세션이 확실히 집은 줄인가 — 처음 부를 때 `issues` 로 읽는다.
+    fn contains(&self, issues: &[Issue], id: &str) -> bool {
+        self.0.as_ref().is_some_and(|a| a.seen.get_or_init(|| (a.find)(issues)).contains(id))
+    }
+
+    /// 이미 읽은 답 — 읽지 않는다. 비교와 찍기가 쓴다.
+    fn settled(&self) -> Option<&BTreeSet<String>> {
+        self.0.as_ref().and_then(|a| a.seen.get())
+    }
+}
+
+impl From<BTreeSet<String>> for Sure {
+    fn from(ids: BTreeSet<String>) -> Sure {
+        Sure::known(ids)
+    }
+}
+
+/// **비교는 기록을 안 읽는다** — [`Person`] 과 같은 까닭이다. 읽을 길의 있고 없음과 이미 읽은 답을 견준다.
+impl PartialEq for Sure {
+    fn eq(&self, other: &Sure) -> bool {
+        self.0.is_some() == other.0.is_some() && self.settled() == other.settled()
+    }
+}
+
+impl std::fmt::Debug for Sure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match (self.0.is_some(), self.settled()) {
+            (false, _) => f.write_str("Sure(none)"),
+            (true, None) => f.write_str("Sure(not read yet)"),
+            (true, Some(ids)) => write!(f, "Sure({ids:?})"),
+        }
     }
 }
 
@@ -5716,7 +5783,7 @@ pub fn held<'a>(issues: &'a [Issue], cfg: &Config, away: &Away) -> Vec<&'a Issue
 fn theirs<'a>(issues: &'a [Issue], away: &'a Away) -> impl Fn(&'a Issue) -> bool + 'a {
     let ties = if away.nameless() { report::Ties::default() } else { report::Ties::of(issues) };
     move |i: &'a Issue| {
-        (report::claims_over(&ties, &away.names, &away.own, i) && !away.sure.contains(&i.id))
+        (report::claims_over(&ties, &away.names, &away.own, i) && !away.sure.contains(issues, &i.id))
             || (report::claims(&ties, &away.unsure, i) && !away.picked.contains(&i.id))
     }
 }
@@ -9219,6 +9286,33 @@ mod tests {
     /// **루트에 선 세션이 워크트리가 선 일을 쥔 채 루트를 고치면 규칙 2 가 그 워크트리로 돌린다**(moai-9js2.3xn,
     /// 2026-10-25 사용자 결정). 세션 일꾼이 `EnterWorktree` 없이 루트에 서면 격리 가드가 안 서서, 상대 경로 한 줄이
     /// 모두의 루트 소스에 떨어졌다. 워크트리가 없는 줄이 하나라도 초점에 서면 지난다 — 집고 `worktree add` 하는 사이다.
+    /// **이 세션이 확실히 집은 줄은 옆 이름이 그 줄을 가리킬 때만 읽는다**(moai-qrja.12h) — 읽는 손은 부름마다 디렉터리를
+    /// 훑으니, 옆 이름이 아무 집힌 줄도 안 가리키는 판(늘 지나가는 부름)에서는 손대지 않고, 가리키면 한 번만 읽는다.
+    #[test]
+    fn the_sure_picks_are_read_only_where_a_name_beside_points_at_a_held_row() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let all = vec![epic("t-e"), under("t-e.aa", "in_progress", "t-e"), epic("t-f")];
+        let asked = std::sync::Arc::new(AtomicUsize::new(0));
+        let count = asked.clone();
+        let reader = move || {
+            let count = count.clone();
+            Sure::asked(move |_| {
+                count.fetch_add(1, Ordering::SeqCst);
+                set(&["t-e.aa"])
+            })
+        };
+        // 옆 이름이 딴 에픽을 가리킨다 — 집힌 줄은 그 이름에 안 걸리니 읽을 까닭이 없다.
+        let aside = Away { names: set(&["t-f"]), own: set(&["develop"]), sure: reader(), ..Away::default() };
+        assert_eq!(held(&all, &cfg(), &aside).len(), 1);
+        assert_eq!(asked.load(Ordering::SeqCst), 0, "옆 이름이 안 가리키는데 기록을 읽었다");
+        // 옆 이름이 집힌 줄을 가리킨다 — 처음 물을 때 한 번 읽고, 다시 물어도 그 답이다.
+        let over = Away { names: set(&["t-e"]), own: set(&["develop"]), sure: reader(), ..Away::default() };
+        for _ in 0..3 {
+            assert_eq!(held(&all, &cfg(), &over).len(), 1, "확실히 집은 줄을 옆 이름에 내줬다");
+        }
+        assert_eq!(asked.load(Ordering::SeqCst), 1, "물을 때마다 기록을 다시 읽는다");
+    }
+
     #[test]
     fn a_root_session_holding_worktree_work_is_sent_to_the_worktree() {
         let all = vec![epic("t-e"), under("t-e.aa", "in_progress", "t-e")];
@@ -9227,7 +9321,7 @@ mod tests {
         let homed = Away {
             names: set(&["t-e", "worktree-t-e"]),
             own: set(&["develop"]),
-            sure: set(&["t-e.aa"]),
+            sure: set(&["t-e.aa"]).into(),
             homes: vec![(home.clone(), set(&["t-e", "worktree-t-e"]))],
             ..Away::default()
         };
@@ -9269,7 +9363,7 @@ mod tests {
         two.extend([epic("t-f"), under("t-f.bb", "in_progress", "t-f")]);
         let pair = Away {
             names: set(&["t-e", "worktree-t-e", "t-f", "worktree-t-f"]),
-            sure: set(&["t-e.aa", "t-f.bb"]),
+            sure: set(&["t-e.aa", "t-f.bb"]).into(),
             homes: vec![
                 (home.clone(), set(&["t-e", "worktree-t-e"])),
                 (abs("/repo/.worktrees/t-f"), set(&["t-f", "worktree-t-f"])),
@@ -9309,7 +9403,7 @@ mod tests {
         let homed = Away {
             names: set(&["t-e"]),
             own: set(&["develop"]),
-            sure: set(&["t-e.aa"]),
+            sure: set(&["t-e.aa"]).into(),
             homes: vec![(home.clone(), set(&["t-e"]))],
             ..Away::default()
         };
@@ -10174,7 +10268,7 @@ mod tests {
         let maybe = Away { picked: set(&["t-e.aa", "t-e.r"]), ..root.clone() };
         assert!(held(&all, &cfg(), &maybe).is_empty(), "돌았는지 모르는 집기가 옆 이름을 이겼다");
         assert_eq!(guard_create(&all, &cfg(), &maybe, "moai add '딴 일'"), Decision::Pass);
-        let mine = Away { sure: set(&["t-e.aa", "t-e.r"]), ..root };
+        let mine = Away { sure: set(&["t-e.aa", "t-e.r"]).into(), ..root };
         let focus: Vec<&str> = held(&all, &cfg(), &mine).iter().map(|i| i.id.as_str()).collect();
         assert_eq!(focus, ["t-e.aa", "t-e.r"], "제가 집은 줄을 옆 이름에 내줬다");
         // 규칙 1 이 다시 선다 — 맨 `add` 는 막고, 그 에픽 안은 지난다.
