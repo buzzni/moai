@@ -52,18 +52,28 @@ pub(super) enum Plan {
     Day(i64),
 }
 
-/// 줄에 계획 날이 **적혀** 있는가 — 못 읽는 글도 적힌 날이다. 하루 세우기가 그것을 덮으면 그 글이 사라진다.
-fn has_days(i: &crate::model::Issue) -> bool {
-    i.starts_on.is_some() || i.due_on.is_some()
-}
-
-/// 옮길 수 없는 까닭의 글 — 키·끌기의 알림과 쓰기 안의 거절이 같은 말을 댄다.
-fn unshifted(lang: crate::i18n::Lang, why: Unshifted, id: &str) -> String {
-    let said = match why {
-        Unshifted::Members => say(lang, "tui.gantt.members"),
-        Unshifted::NoPlan | Unshifted::Still => say(lang, "tui.gantt.no_plan"),
-    };
-    fill(said, &[("id", id)])
+/// 간트 머리의 달 이름과 그것을 엮는 차례를 화면 말로 채운다. 위젯의 기본은 영어 약어다.
+pub(super) fn names_in(lang: crate::i18n::Lang) -> moai_gantt::Names {
+    moai_gantt::Names {
+        // 키는 `say` 에 글자째 적어야 번역표 시험이 부르는 키로 센다 — 반복문으로 만들지 않는다.
+        months: [
+            say(lang, "tui.gantt.month_1"),
+            say(lang, "tui.gantt.month_2"),
+            say(lang, "tui.gantt.month_3"),
+            say(lang, "tui.gantt.month_4"),
+            say(lang, "tui.gantt.month_5"),
+            say(lang, "tui.gantt.month_6"),
+            say(lang, "tui.gantt.month_7"),
+            say(lang, "tui.gantt.month_8"),
+            say(lang, "tui.gantt.month_9"),
+            say(lang, "tui.gantt.month_10"),
+            say(lang, "tui.gantt.month_11"),
+            say(lang, "tui.gantt.month_12"),
+        ]
+        .map(String::from),
+        month_year: say(lang, "tui.gantt.month_year").to_string(),
+        month_day: say(lang, "tui.gantt.month_day").to_string(),
+    }
 }
 
 /// 잡은 막대의 부분 → 옮기는 날.
@@ -253,7 +263,7 @@ impl App {
         match i.shifted(edge, days) {
             Ok(_) => self.write_plan(PlanMove { id: i.id.clone(), plan: Plan::Shift(edge, days) }),
             Err(Unshifted::Still) => {}
-            Err(why) => self.notice = Some(unshifted(self.site.lang, why, &i.id)),
+            Err(why) => self.notice = Some(crate::view::unshifted(self.site.lang, why, &i.id)),
         }
     }
 
@@ -346,7 +356,7 @@ impl App {
     /// 칸을 누른 것이다) 멤버에서 센 묶음이면 커서만 옮긴 것이다.
     fn plan_day(&mut self, at: usize, day: i64) {
         let i = &self.site.issues[at];
-        if has_days(i) || crate::report::is_group(i) {
+        if i.has_days() || crate::report::is_group(i) {
             return;
         }
         self.write_plan(PlanMove { id: i.id.clone(), plan: Plan::Day(day) });
@@ -484,9 +494,9 @@ pub(super) fn commit_plan(app: &mut App) {
         let before = i.clone();
         let (start, due) = match plan {
             Plan::Shift(edge, days) => {
-                i.shifted(edge, days).map_err(|why| crate::fail::Fail::new(unshifted(lang, why, &id)))?
+                i.shifted(edge, days).map_err(|why| crate::fail::Fail::new(crate::view::unshifted(lang, why, &id)))?
             }
-            Plan::Day(_) if has_days(i) => {
+            Plan::Day(_) if i.has_days() => {
                 return Err(crate::fail::Fail::new(fill(say(lang, "tui.gantt.planned"), &[("id", &id)])));
             }
             Plan::Day(day) => {
@@ -786,6 +796,20 @@ mod tests {
         assert!(!screen.contains("아직 계획 날짜가 없다"), "날이 있는데 없다고 했다");
     }
 
+    /// **머리의 달 이름은 화면 말이다**(moai-9p7z) — 한국어 화면에 "Oct 2026" 이 서지 않고, 영어 화면은 옛 그대로다.
+    #[test]
+    fn the_header_months_follow_the_screen_language() {
+        let mut a = app();
+        a.site.lang = crate::i18n::Lang::Ko;
+        a.hit("SPC g g");
+        let ko = draw::tests::render(&mut a, 160, 20).join("\n");
+        assert!(ko.contains("10월"), "한국어 화면의 머리에 10월 이 없다\n{ko}");
+        assert!(!ko.contains("Oct"), "한국어 화면에 영어 달 이름이 남았다\n{ko}");
+        a.site.lang = crate::i18n::Lang::En;
+        let en = draw::tests::render(&mut a, 160, 20).join("\n");
+        assert!(en.contains("Oct"), "영어 화면의 머리에 Oct 가 없다\n{en}");
+    }
+
     /// 낮은 창에서는 머리의 오늘(`▼`) 줄을 접고 그 줄을 본문에 준다. 높은 창에서는 선다.
     #[test]
     fn a_low_window_folds_the_today_row() {
@@ -992,7 +1016,7 @@ mod tests {
         a.hit("SPC g g");
         let screen = draw::tests::render(&mut a, 140, 20).join("\n");
         assert!(screen.contains("argos-0003"), "고정 칸에 줄이 안 섰다\n{screen}");
-        assert!(screen.contains("Oct"), "날짜 머리가 안 섰다\n{screen}");
+        assert!(screen.contains("2026년 10월"), "날짜 머리가 안 섰다\n{screen}");
         // 간트 칸만 본다 — 오른쪽 상세의 진척 막대도 `░` 다.
         let pane = |id: &str| {
             let left = |l: &str| l.split("┃│").next().unwrap().to_string();

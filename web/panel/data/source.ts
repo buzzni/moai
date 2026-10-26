@@ -38,6 +38,7 @@ export const ENDPOINT = {
   projects: '/api/projects',
   wiki: '/api/wiki',
   wikiPage: (slug: string): Endpoint => ({ path: `/api/wiki/${slug.split('/').map(encodeURIComponent).join('/')}` }),
+  wikiSearch: (query: string): Endpoint => ({ path: '/api/wiki-search', query: { q: query } }),
 } as const
 
 export interface Rows {
@@ -145,9 +146,12 @@ export async function loadGroups(client: Client, priority: number = PRIORITY.lis
  * missing from the tree. `archived` (the view's `SPC v o`) asks for the archive's lines too: without it the server
  * leaves them out, and they were 95% of a 3 000-row tracker's 689 KB answer, read again on every write
  * (moai-m4ez.4zq). The page reads the tree again when `SPC v o` turns, so the lines are there when the archive is drawn.
+ * `zone` (data/zone.ts zoneNow) is the zone the page draws in: moai judges a row late (`gantt.overdue`) in the zone it is
+ * told, not the server machine's, so the count agrees with the today line drawn beside it (moai-vj8w.7sh). A zone that
+ * machine cannot read (an offset, an Intl name its tzdb lacks) is judged in the server's own zone instead.
  */
-export async function loadTree(client: Client, query: Record<string, string> = {}, priority: number = PRIORITY.list, epoch?: number, worktree = false, archived = false): Promise<Loaded<TreeRow[]>> {
-  const asked = { ...query, ...(worktree ? { worktree: '1' } : {}), ...(archived ? { archived: '1' } : {}) }
+export async function loadTree(client: Client, query: Record<string, string> = {}, priority: number = PRIORITY.list, epoch?: number, worktree = false, archived = false, zone?: string): Promise<Loaded<TreeRow[]>> {
+  const asked = { ...query, ...(worktree ? { worktree: '1' } : {}), ...(archived ? { archived: '1' } : {}), ...(zone ? { tz: zone } : {}) }
   const outcome = await client.request({ path: ENDPOINT.tree, query: asked }, { priority, epoch })
   const output = answerOf(outcome)
   if (output === undefined) return { ok: false, outcome }
@@ -243,6 +247,13 @@ export async function loadArchived(client: Client, options: { priority?: number;
 /** `moai wiki ls` as printed (a skipped page's partial answer included); the wiki view parses it. */
 export async function loadWikiListing(client: Client): Promise<Loaded<unknown>> {
   const outcome = await client.request({ path: ENDPOINT.wiki }, { priority: PRIORITY.wiki })
+  const output = answerOf(outcome)
+  return output === undefined ? { ok: false, outcome } : { ok: true, value: output }
+}
+
+/** `moai wiki search <query>` as printed; the wiki view reads its order (moai-xp7l.nyi). */
+export async function loadWikiSearch(client: Client, query: string): Promise<Loaded<unknown>> {
+  const outcome = await client.request(ENDPOINT.wikiSearch(query), { priority: PRIORITY.wiki })
   const output = answerOf(outcome)
   return output === undefined ? { ok: false, outcome } : { ok: true, value: output }
 }

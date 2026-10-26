@@ -50,7 +50,18 @@ const build = () => {
   return new IssueIndex(ROWS, tree)
 }
 
-const mount = (cursor = null, index = build()) => {
+/**
+ * jsdom lays nothing out, and a pane with no size draws the window a 900 x 720 box would (moai-vj8w.2fh): these tests
+ * look at bars all over a month, so the box they mount in is as big as the page they draw.
+ */
+const size = (root, width = 4000, height = 2000) => {
+  const box = root.querySelector('.g-scroll')
+  Object.defineProperty(box, 'clientWidth', { get: () => width, configurable: true })
+  Object.defineProperty(box, 'clientHeight', { get: () => height, configurable: true })
+  return box
+}
+
+const mount = (cursor = null, index = build(), dims = []) => {
   const dom = new JSDOM('<!doctype html><body><div id="r"></div></body>')
   const calls = []
   const root = dom.window.document.getElementById('r')
@@ -60,6 +71,7 @@ const mount = (cursor = null, index = build()) => {
     layout: () => ({ detailVisible: false }), focusPane: () => {},
   }
   const view = mountGantt(root, ctx)
+  size(root, ...dims)
   const at = (c) => view.render({ ...initialState(), tab: 'gantt', cursor: c }, index)
   at(cursor)
   return { root, view, calls, dom, at, index }
@@ -303,7 +315,8 @@ test('the bubble is the panel\'s own element, with the title, planned, actual, l
 })
 
 test('keys: j/k move the cursor, Enter opens the detail, - and = change the step, H/L move the dates', () => {
-  const { root, view, calls } = mount('e1.a')
+  const { root, view, calls, dom } = mount('e1.a')
+  const box = scrollable(root)
   assert.equal(view.command('move.down'), true)
   assert.equal(view.command('move.up'), true)
   assert.equal(view.command('move.top'), true)
@@ -313,7 +326,7 @@ test('keys: j/k move the cursor, Enter opens the detail, - and = change the step
   assert.equal(calls.at(-1), 'choose:e1.a')
   assert.equal(view.command('expand'), false, 'not a gantt action')
   // = goes finer: the day step (40px) becomes the hour step (480px a day); - goes back.
-  const planWidth = () => px(lane(root, 'e1.c').querySelector('.b-plan'), 'width')
+  const planWidth = () => planWidthAt(root, box, dom)
   assert.equal(planWidth(), 80)
   view.command('gantt.zoomIn')
   assert.equal(planWidth(), 960)
@@ -390,6 +403,23 @@ const scrollable = (root) => {
   return box
 }
 
+/**
+ * e1.c's planned bar width, with the dates scrolled to it and back: at the hour step a month is thousands of pixels,
+ * and only the bars near the window are nodes (moai-vj8w.2fh).
+ */
+const planWidthAt = (root, box, dom) => {
+  const keep = box.scrollLeft
+  const ppd = { month: 4, week: 14, day: 40, hour: 480 }[root.querySelector('.g-seg [aria-pressed="true"]').dataset.zoom]
+  const scrollTo = (x) => {
+    box.scrollLeft = x
+    box.dispatchEvent(new dom.window.Event('scroll'))
+  }
+  scrollTo(days('2026-10-26') / 40 * ppd - 50)
+  const width = px(lane(root, 'e1.c').querySelector('.b-plan'), 'width')
+  scrollTo(keep)
+  return width
+}
+
 test('mouse: a click on a bar or a row chooses it, a bucket row only moves the cursor', () => {
   const { root, calls } = mount()
   lane(root, 'e1.a').querySelector('.b-act').click()
@@ -453,7 +483,7 @@ test('mouse: Ctrl+wheel steps the zoom over the dates only, keeping the date und
     target.dispatchEvent(event)
     return event
   }
-  const planWidth = () => px(lane(root, 'e1.c').querySelector('.b-plan'), 'width')
+  const planWidth = () => planWidthAt(root, box, dom)
   const grid = Number.parseFloat(root.querySelector('.g-inner').style.getPropertyValue('--grid-w'))
   // Over the grid the browser keeps its zoom.
   assert.equal(wheel(root.querySelector('.g-left'), { deltaY: -100 }).defaultPrevented, false)
@@ -520,6 +550,13 @@ test('a read that reaches an earlier day grows the axis at its start, and the da
 
 // ── moving a plan (moai-d86e.3ud) ──
 
+test('the plan write carries the move, not the days: moai measures them inside its lock (moai-vj8w.02c)', async () => {
+  const { planEndpoint } = await panelModule('data/plan.ts')
+  assert.deepEqual(planEndpoint('e1.c', { edge: 'body', days: -2 }), { path: '/api/plan/e1.c', method: 'POST', query: { edge: 'body', days: '-2' } })
+  assert.deepEqual(planEndpoint('e1.c', { edge: 'end', days: 3 }).query, { edge: 'end', days: '3' })
+  assert.deepEqual(planEndpoint('z', { day: '2026-10-30' }).query, { day: '2026-10-30' })
+})
+
 test('shiftPlan is Issue::shifted: the changing side only, own days only', () => {
   const { shiftPlan, dragDays, movedPlan } = model
   assert.deepEqual(shiftPlan(own('2026-10-26', '2026-10-27'), 'body', 2), { start: '2026-10-28', due: '2026-10-29' })
@@ -574,6 +611,7 @@ const writing = (rows = ROWS, gantt = GANTT, answer = async () => {}) => {
     },
   }
   const view = mountGantt(root, ctx)
+  size(root)
   const state = { ...initialState(), tab: 'gantt', cursor: null }
   view.render(state, indexOf(rows, gantt))
   return { root, dom, calls, moves, said, view, state }
@@ -603,7 +641,7 @@ test('dragging a bar\'s middle moves the plan by whole days, once, on release; t
   assert.deepEqual(moves, [], 'nothing is written while it moves')
   press(dom, l, 'pointerup', mid + 70)
   l.click()
-  assert.deepEqual(moves, [{ id: 'e1.c', change: { start: '2026-10-28', due: '2026-10-29' }, undo: 'moai edit e1.c --start 2026-10-26 --due 2026-10-27' }])
+  assert.deepEqual(moves, [{ id: 'e1.c', change: { edge: 'body', days: 2 }, undo: 'moai edit e1.c --start 2026-10-26 --due 2026-10-27' }])
   assert.deepEqual(calls, [], 'the click a drag ends with chose the row')
   l.click()
   assert.deepEqual(calls, ['choose:e1.c'], 'the next click chooses as before')
@@ -625,7 +663,7 @@ test('the ends move the start or the deadline alone; a press that does not move 
   await drag((x0) => x0 + 40, (x0) => x0 + 45)
   // A press outside the bar is the lane's: a choice, never a move.
   await drag((x0, w) => x0 + w + 200, (x0, w) => x0 + w + 400)
-  assert.deepEqual(moves.map((m) => m.change), [{ start: '2026-10-25' }, { due: '2026-10-28' }])
+  assert.deepEqual(moves.map((m) => m.change), [{ edge: 'start', days: -1 }, { edge: 'end', days: 1 }])
 })
 
 test('a read that lands while a bar is dragged waits for the release, and the drag goes on', async () => {
@@ -641,7 +679,7 @@ test('a read that lands while a bar is dragged waits for the release, and the dr
   press(dom, l, 'pointermove', x0 + 120)
   assert.equal(px(bar, 'left'), x0 + 80)
   press(dom, l, 'pointerup', x0 + 120)
-  assert.deepEqual(moves.map((m) => m.change), [{ start: '2026-10-28', due: '2026-10-29' }])
+  assert.deepEqual(moves.map((m) => m.change), [{ edge: 'body', days: 2 }])
   await tick()
   assert.notEqual(lane(root, 'e1.c'), l, 'the read that waited is drawn after the release')
   assert.match(root.querySelector('.g-row[data-id="e1.a"]').textContent, /renamed/)
@@ -714,7 +752,7 @@ test('a deadline-only row drags its diamond; a group counted from its members sa
   const x = px(due, 'left')
   press(dom, l, 'pointerdown', x + 2)
   press(dom, l, 'pointerup', x + 42)
-  assert.deepEqual(moves.map((m) => m.change), [{ due: '2026-10-28' }])
+  assert.deepEqual(moves.map((m) => m.change), [{ edge: 'body', days: 1 }], 'a diamond drags as the whole plan: its deadline')
   const e = lane(root, 'e1')
   const hatched = laidOut(e.querySelector('.b-plan'))
   assert.equal(hatched.classList.contains('movable'), false)
@@ -733,7 +771,140 @@ test('a double click on a day of a row with no days plans that day; a group or a
   const { root, dom, moves } = writing(rows, gantt)
   const day = days('2026-10-30') + 5
   for (const id of ['z', 'y', 'e1.c']) press(dom, lane(root, id), 'dblclick', day)
-  assert.deepEqual(moves, [{ id: 'z', change: { start: '2026-10-30', due: '2026-10-30' }, undo: 'moai edit z --start none --due none' }])
+  assert.deepEqual(moves, [{ id: 'z', change: { day: '2026-10-30' }, undo: 'moai edit z --start none --due none' }])
+})
+
+test('a row only a sibling worktree shows is not drawn movable, and a double click plans nothing (moai-vj8w.93u)', () => {
+  const rows = [
+    ...ROWS.map((row) => (row.id === 'e1.c' ? { ...row, starts_on: '2026-10-26', due_on: '2026-10-27', branch: 'worktree-moai-e1c' } : row)),
+    { id: 'z', kind: 'issue', title: 'Loose', status: 'todo', branch: 'worktree-moai-z' },
+  ]
+  const { root, dom, moves, said, calls } = writing(rows, { ...GANTT, z: g('z') })
+  const l = lane(root, 'e1.c')
+  const bar = laidOut(l.querySelector('.b-plan'))
+  assert.equal(bar.classList.contains('movable'), false)
+  const x0 = px(bar, 'left')
+  press(dom, l, 'pointerdown', x0 + 40)
+  press(dom, l, 'pointermove', x0 + 120)
+  assert.equal(px(bar, 'left'), x0, 'the bar is not drawn moving')
+  press(dom, l, 'pointerup', x0 + 120)
+  press(dom, lane(root, 'z'), 'dblclick', days('2026-10-30') + 5)
+  assert.deepEqual([moves, said], [[], []])
+  // A row the main checkout holds still moves.
+  const other = lane(root, 'e1.b')
+  assert.equal(laidOut(other.querySelector('.b-plan')).classList.contains('movable'), true)
+  l.click()
+  assert.deepEqual(calls, ['choose:e1.c'], 'it still chooses')
+})
+
+test('a diamond the plan has no day for is not grabbed: there is nothing to move (moai-vj8w.93u)', () => {
+  const rows = ROWS.map((row) => (row.id === 'm1' ? { ...row, due_on: '2026-10-28' } : row))
+  const gantt = { ...GANTT, m1: { ...GANTT.m1, planned: { start: null, end: null, from: 'own' } } }
+  const { root, dom, moves, said } = writing(rows, gantt)
+  const l = lane(root, 'm1')
+  const due = laidOut(l.querySelector('.mk.due'))
+  assert.ok(due, 'the diamond is drawn')
+  assert.equal(due.classList.contains('movable'), false)
+  const x = px(due, 'left')
+  press(dom, l, 'pointerdown', x + 2)
+  press(dom, l, 'pointerup', x + 42)
+  assert.deepEqual([moves, said], [[], []], 'no write, and no "double-click a day" refusal')
+})
+
+test('an archived row is not drawn movable either, and a double click plans nothing: moai edit finds live rows only (moai-vj8w review)', () => {
+  const rows = [
+    ...ROWS.map((row) => (row.id === 'e1.c' ? { ...row, starts_on: '2026-10-26', due_on: '2026-10-27', archived: true } : row)),
+    { id: 'z', kind: 'issue', title: 'Loose', status: 'todo', archived: true },
+  ]
+  const gantt = { ...GANTT, z: g('z') }
+  const { root, dom, moves, said, view, state } = writing(rows, gantt)
+  // Archived rows are drawn while `SPC v o` shows the archive.
+  view.render({ ...state, view: { ...state.view, showArchived: true } }, indexOf(rows, gantt))
+  const l = lane(root, 'e1.c')
+  const bar = laidOut(l.querySelector('.b-plan'))
+  assert.equal(bar.classList.contains('movable'), false)
+  const x0 = px(bar, 'left')
+  press(dom, l, 'pointerdown', x0 + 40)
+  press(dom, l, 'pointermove', x0 + 120)
+  assert.equal(px(bar, 'left'), x0, 'the bar is not drawn moving')
+  press(dom, l, 'pointerup', x0 + 120)
+  press(dom, lane(root, 'z'), 'dblclick', days('2026-10-30') + 5)
+  assert.deepEqual([moves, said], [[], []])
+  assert.equal(laidOut(lane(root, 'e1.b').querySelector('.b-plan')).classList.contains('movable'), true, 'a live row still moves')
+})
+
+test('a scroll while a bar is held leaves the dropped bar where it was dropped (moai-vj8w review)', async () => {
+  const rows = [
+    ...ROWS.map((row) => (row.id === 'e1.c' ? { ...row, starts_on: '2026-10-26', due_on: '2026-10-27' } : row)),
+    ...Array.from({ length: 80 }, (_, i) => ({ id: `r${String(i).padStart(2, '0')}`, kind: 'issue', title: `Row ${i}`, status: 'todo' })),
+  ]
+  const gantt = { ...GANTT, ...Object.fromEntries(rows.filter((row) => row.id.startsWith('r')).map((row) => [row.id, g(row.id)])) }
+  // The write stays unanswered: the bar must keep the days it was dropped on meanwhile.
+  const { root, dom, moves } = writing(rows, gantt, () => new Promise(() => {}))
+  const box = root.querySelector('.g-scroll')
+  Object.defineProperty(box, 'clientHeight', { get: () => 300, configurable: true })
+  let top = 0
+  Object.defineProperty(box, 'scrollTop', { get: () => top, set: (v) => { top = Math.max(0, v) }, configurable: true })
+  const scrolled = () => box.dispatchEvent(new dom.window.Event('scroll'))
+  const l = lane(root, 'e1.c')
+  const bar = laidOut(l.querySelector('.b-plan'))
+  const x0 = px(bar, 'left')
+  press(dom, l, 'pointerdown', x0 + 40)
+  press(dom, l, 'pointermove', x0 + 120)
+  // Far down past the window and back up, the button still held.
+  top = 200 * 28
+  scrolled()
+  top = 0
+  scrolled()
+  press(dom, l, 'pointerup', x0 + 120)
+  assert.deepEqual(moves.map((m) => m.change), [{ edge: 'body', days: 2 }])
+  await tick()
+  assert.equal(lane(root, 'e1.c'), l, 'the lane was rebuilt though the view came back inside the window')
+  assert.equal(px(bar, 'left'), x0 + 80, 'the dropped bar went back to its old days while its write ran')
+})
+
+test('a window built later keeps the clock the bars were placed at: the today line stays where an open bar ends (moai-vj8w review)', () => {
+  const rows = Array.from({ length: 200 }, (_, i) => ({ id: `r${String(i).padStart(3, '0')}`, kind: 'issue', title: `Row ${i}`, status: i === 0 ? 'in_progress' : 'todo' }))
+  const gantt = Object.fromEntries(rows.map((row) => [row.id, g(row.id)]))
+  gantt.r000 = g('r000', { actual: span('2026-10-24T09:00:00Z'), progress: { kind: 'column', name: 'in_progress' } })
+  const { root, dom } = mount(null, indexOf(rows, gantt), [1600, 560])
+  const box = root.querySelector('.g-scroll')
+  let top = 0
+  Object.defineProperty(box, 'scrollTop', { get: () => top, set: (v) => { top = Math.max(0, v) }, configurable: true })
+  const end = () => {
+    const b = lane(root, 'r000').querySelector('.b-act')
+    return px(b, 'left') + px(b, 'width')
+  }
+  const today = () => px(root.querySelector('.todayline'), 'left')
+  const meet = () => Math.abs(end() - today()) < 0.01
+  assert.ok(meet(), `the open bar ends on the today line: ${end()} ${today()}`)
+  const before = clock.now
+  try {
+    // Six hours pass with no read (rows are read again only when the tracker changes); a scroll builds new windows.
+    clock.now = () => NOW + 6 * 3600e3
+    top = 150 * 28
+    box.dispatchEvent(new dom.window.Event('scroll'))
+    top = 0
+    box.dispatchEvent(new dom.window.Event('scroll'))
+    assert.ok(meet(), `the today line moved away from the bars it was drawn with: ${end()} ${today()}`)
+  } finally {
+    clock.now = before
+  }
+})
+
+test('the window\'s options say where they stand in the whole list (moai-vj8w review)', () => {
+  const rows = Array.from({ length: 400 }, (_, i) => ({ id: `r${String(i).padStart(3, '0')}`, kind: 'issue', title: `Row ${i}`, status: 'todo' }))
+  const gantt = Object.fromEntries(rows.map((row) => [row.id, g(row.id)]))
+  const { root, dom } = mount(null, indexOf(rows, gantt), [1000, 560])
+  const box = root.querySelector('.g-scroll')
+  let top = 0
+  Object.defineProperty(box, 'scrollTop', { get: () => top, set: (v) => { top = Math.max(0, v) }, configurable: true })
+  top = 300 * 28 + 44
+  box.dispatchEvent(new dom.window.Event('scroll'))
+  const option = root.querySelector('.g-row[data-id="r305"]')
+  assert.equal(option.getAttribute('role'), 'option')
+  assert.equal(option.getAttribute('aria-setsize'), '400')
+  assert.equal(option.getAttribute('aria-posinset'), '306')
 })
 
 test('without a writer the bars do not move', () => {
@@ -764,4 +935,66 @@ test('a cancelled or lost drag puts the bar back and writes nothing', () => {
   press(dom, l, 'pointerdown', x0 + 40, { button: 2 })
   press(dom, l, 'pointerup', x0 + 160)
   assert.deepEqual(moves, [])
+})
+
+test('only the window is drawn: a long list and a multi-year axis at the hour step stay bounded, and a scroll brings the rest in (moai-vj8w.2fh)', () => {
+  const rows = Array.from({ length: 400 }, (_, i) => ({ id: `r${String(i).padStart(3, '0')}`, kind: 'issue', title: `Row ${i}`, status: 'todo' }))
+  const gantt = Object.fromEntries(rows.map((row) => [row.id, g(row.id)]))
+  gantt.r000 = g('r000', { planned: own('2024-01-01', '2024-01-02') })
+  gantt.r399 = g('r399', { planned: own('2027-06-01', '2027-06-02') })
+  const { root, dom, view } = mount(null, indexOf(rows, gantt), [1000, 560])
+  const box = scrollable(root)
+  let top = 0
+  Object.defineProperty(box, 'scrollTop', { get: () => top, set: (v) => { top = Math.max(0, v) }, configurable: true })
+  const scrolled = () => box.dispatchEvent(new dom.window.Event('scroll'))
+  const count = (selector) => root.querySelectorAll(selector).length
+
+  // The list: a screen of rows and the margin, not four hundred.
+  assert.ok(count('.lane') > 0 && count('.lane') <= 60, `lanes: ${count('.lane')}`)
+  assert.equal(count('.g-row'), count('.lane'))
+  assert.ok(lane(root, 'r000') && !lane(root, 'r300'))
+  assert.equal(root.querySelector('.g-rows').style.height, `${400 * 28}px`, 'the box keeps the whole height, so the scrollbar is true')
+  assert.equal(lane(root, 'r000').style.top, '0px')
+
+  // The axis at the hour step: three and a half years is ten thousand header nodes unwindowed.
+  view.command('gantt.zoomIn')
+  assert.equal(root.querySelector('.g-seg [aria-pressed="true"]').dataset.zoom, 'hour')
+  assert.ok(count('.tick') > 0 && count('.tick') < 150, `ticks: ${count('.tick')}`)
+  assert.ok(count('.col-we') <= 4, `weekend blocks: ${count('.col-we')}`)
+
+  // Scrolling down brings the rows in and lets the first go.
+  top = 300 * 28 + 44
+  scrolled()
+  assert.ok(lane(root, 'r300') && !lane(root, 'r000'))
+  assert.equal(lane(root, 'r300').style.top, `${300 * 28}px`)
+  assert.equal(root.querySelector(`.g-row[data-id="r300"]`).style.top, `${300 * 28}px`)
+  assert.ok(count('.lane') <= 60)
+
+  // Scrolling sideways draws the header and the bars of those dates only.
+  top = 399 * 28 - 400
+  box.scrollLeft = (Date.UTC(2027, 5, 1) - Date.UTC(2023, 11, 25)) / 864e5 * 480 - 100
+  scrolled()
+  const bar = lane(root, 'r399').querySelector('.b-plan')
+  assert.ok(bar, 'the bar of the dates in view is drawn')
+  assert.ok(count('.tick') < 150, `ticks: ${count('.tick')}`)
+  const lefts = [...root.querySelectorAll('.hd2 .tick')].map((node) => px(node, 'left'))
+  assert.ok(lefts.every((x) => x > box.scrollLeft - 3000 && x < box.scrollLeft + 4000), 'no tick far from the view')
+  box.scrollLeft = 0
+  scrolled()
+  assert.equal(lane(root, 'r399').querySelector('.b-plan'), null, 'a bar far from the view is not a node')
+  assert.ok(lane(root, 'r399').querySelector('.mk.clip:not([hidden])'), 'its mark says it lies off to the side')
+})
+
+test('a cursor sent to a row beyond the window brings that row in (moai-vj8w.2fh)', () => {
+  const rows = Array.from({ length: 200 }, (_, i) => ({ id: `r${String(i).padStart(3, '0')}`, kind: 'issue', title: `Row ${i}`, status: 'todo' }))
+  const gantt = Object.fromEntries(rows.map((row) => [row.id, g(row.id)]))
+  const { root, at, dom } = mount(null, indexOf(rows, gantt), [1000, 560])
+  const box = scrollable(root)
+  let top = 0
+  Object.defineProperty(box, 'scrollTop', { get: () => top, set: (v) => { top = Math.max(0, v) }, configurable: true })
+  assert.equal(lane(root, 'r150'), null)
+  at('r150')
+  assert.ok(top > 100 * 28, 'the pane scrolled to it')
+  assert.equal(lane(root, 'r150').getAttribute('aria-selected'), 'true')
+  assert.equal(dom.window.document.querySelectorAll('.lane[aria-selected="true"]').length, 1)
 })

@@ -146,13 +146,15 @@ export function placeRow(g: GanttRow | undefined, row: Row | undefined, now: num
 /** Which part of a planned bar is dragged: the start alone, the whole bar, the deadline alone. */
 export type Edge = 'start' | 'body' | 'end'
 
-/** What a move writes (data/plan.ts PlanChange), or why it writes nothing. */
+/** The days a move would land on — drawn while a bar is dragged; moai measures the written ones itself (data/plan.ts). */
 export type Shifted = { start?: string; due?: string } | { why: 'members' | 'none' | 'still' }
 
 /**
- * A plan moved `days` days: the days to write, **the changing side only** — the page's copy of `Issue::shifted`
- * (src/model.rs), which the TUI's drag and keys write through. Only a row's own days move: a plan a group counts from
- * its members is not that row's days (`members`), and a row with no day has no bar (`none`).
+ * A plan moved `days` days: the days it lands on, **the changing side only** — the page's copy of `Issue::shifted`
+ * (src/model.rs), which the TUI's drag and keys write through. It draws the bar while it is dragged and says why a press
+ * moves nothing; the page never writes these days — moai measures them inside its write (data/plan.ts, moai-vj8w.02c).
+ * Only a row's own days move: a plan a group counts from its members is not that row's days (`members`), and a row with
+ * no day has no bar (`none`).
  *
  * - `body` moves every day written — a row with a deadline alone moves its deadline
  * - `start` moves the start; with none, it sets out from the deadline (the `◆`'s left end was dragged)
@@ -242,16 +244,25 @@ export interface Header {
   bottom: Tick[]
 }
 
-/** The two header lines at a step (month / day and weekday, day / 3 hours, month / ISO week, year / month). */
-export function headerOf(axis: Axis, now: number, words: GanttCopy): Header {
-  const { zoom, from, to } = axis
+/**
+ * The two header lines at a step (month / day and weekday, day / 3 hours, month / ISO week, year / month). `win` (wall
+ * ms, `[from, to)`) draws only the ticks that touch it — a tick that starts before it but reaches in is kept whole, so
+ * a label can be held in view — as a multi-year axis at the hour step is ten thousand ticks (moai-vj8w.2fh).
+ */
+export function headerOf(axis: Axis, now: number, words: GanttCopy, win?: [number, number]): Header {
+  const { zoom, to: axisTo } = axis
+  const from = axis.from
+  const lo = win ? Math.max(from, win[0]) : from
+  const to = win ? Math.min(axisTo, win[1]) : axisTo
+  /** The first day start at or before `lo`, on the axis' own day grid. */
+  const dayFrom = from + Math.floor((lo - from) / DAY) * DAY
   const top: Tick[] = []
   const bottom: Tick[] = []
   const today = floorDay(now)
   const weekday = (wall: number) => words.weekdays[new Date(wall).getUTCDay()] ?? ''
   const weekend = (wall: number) => new Date(wall).getUTCDay() % 6 === 0
   const each = (step: (start: number) => number, unit: (start: number) => number, push: (start: number, end: number) => void) => {
-    for (let at = unit(from); at < to; at = step(at)) push(Math.max(at, from), Math.min(step(at), to))
+    for (let at = unit(lo); at < to; at = step(at)) push(Math.max(at, from), Math.min(step(at), axisTo))
   }
   const monthStart = (wall: number) => {
     const d = new Date(wall)
@@ -268,14 +279,14 @@ export function headerOf(axis: Axis, now: number, words: GanttCopy): Header {
     return fill(words.axis.yearMonth, { year: d.getUTCFullYear(), month: d.getUTCMonth() + 1 })
   }
   if (zoom === 'hour') {
-    for (let day = from; day < to; day += DAY) {
+    for (let day = dayFrom; day < to; day += DAY) {
       const d = new Date(day)
       top.push({ from: day, to: day + DAY, text: fill(words.axis.hourDay, { month: d.getUTCMonth() + 1, day: d.getUTCDate(), weekday: weekday(day) }), cls: day === today ? 'today' : '' })
       for (let h = 0; h < 24; h += 3) bottom.push({ from: day + h * HOUR, to: day + (h + 3) * HOUR, text: String(h).padStart(2, '0'), cls: '' })
     }
   } else if (zoom === 'day') {
     months(top, ym)
-    for (let day = from; day < to; day += DAY) {
+    for (let day = dayFrom; day < to; day += DAY) {
       const d = new Date(day)
       bottom.push({ from: day, to: day + DAY, text: fill(words.axis.day, { day: d.getUTCDate(), weekday: weekday(day) }), cls: day === today ? 'today' : weekend(day) ? 'we' : '' })
     }
@@ -292,10 +303,12 @@ export function headerOf(axis: Axis, now: number, words: GanttCopy): Header {
   return { top, bottom }
 }
 
-/** The Saturdays and Sundays inside the axis, as [from, to) in wall ms. */
-export function weekends(axis: Axis): Array<[number, number]> {
+/** The Saturdays and Sundays inside the axis (and inside `win`, wall ms, when given), as [from, to) in wall ms. */
+export function weekends(axis: Axis, win?: [number, number]): Array<[number, number]> {
   const out: Array<[number, number]> = []
-  for (let day = axis.from; day < axis.to; day += DAY) if (new Date(day).getUTCDay() % 6 === 0) out.push([day, day + DAY])
+  const lo = win ? Math.max(axis.from, win[0]) : axis.from
+  const hi = win ? Math.min(axis.to, win[1]) : axis.to
+  for (let day = axis.from + Math.floor((lo - axis.from) / DAY) * DAY; day < hi; day += DAY) if (new Date(day).getUTCDay() % 6 === 0) out.push([day, day + DAY])
   return out
 }
 
