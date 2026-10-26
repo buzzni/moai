@@ -223,11 +223,12 @@ of the gantt, the stats window and the wiki window. It reads the same table as
 
 The list takes one to three columns, by the size of the screen: the fewest
 columns that show it whole, or, when no number of columns fits the height, as many
-as fit the width. A wide screen shows it all at once; an 80-column one shows one
-column to scroll.
+as fit the width. A screen wide and tall enough shows it all at once; an 80-column
+one shows one column to scroll.
 
 - The movement keys and the mouse wheel scroll it; the bottom right corner says
-  where you are (`16/103`)
+  where you are (`16/103`). With more than one column the columns scroll together,
+  and the count is the rows of the longest column, not every line (`1/35`)
 - `?`, `SPC h`, `Esc` or `Backspace` closes it. While it is open, `Esc` belongs
   to the window: it does not clear the filter you set
 - It opens over the stats and wiki windows too (`SPC h`), and closing it leaves

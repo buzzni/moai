@@ -32,7 +32,7 @@ pub struct Sheet {
     /// 마지막으로 그린 높이(줄 수). 반 쪽·한 쪽 굴리기가 이것으로 잰다 — 그리는 쪽이 적는다.
     pub height: usize,
     /// 마지막으로 그린 판의 줄 수 — 여러 열로 나눴으면 가장 긴 열의 길이다([`lay_out`]). 굴리기의 끝이 이것이다.
-    /// 아직 안 그렸으면 0 이고, 그때는 한 열로 친다.
+    /// 아직 안 그렸으면 한 열의 줄 수(줄 전부)다.
     pub span: usize,
 }
 
@@ -40,18 +40,14 @@ impl Sheet {
     /// 지금 자리로 짓는다 — 키 표는 [`Ctx::keys`] 다. 연 뒤에 키 파일이 바뀌어도 이 창은 연 때의 것이다 — 다시 열면
     /// 새로 읽는다.
     pub fn open(c: &Ctx) -> Sheet {
-        Sheet { lines: lines(c), top: 0, height: 0, span: 0 }
-    }
-
-    /// 굴릴 판의 줄 수 — 그린 판이 있으면 그 열의 길이, 없으면 줄 전부.
-    fn rows(&self) -> usize {
-        if self.span == 0 { self.lines.len() } else { self.span }
+        let lines = lines(c);
+        Sheet { span: lines.len(), lines, top: 0, height: 0 }
     }
 
     /// 굴린다. 끝을 넘지 않는다 — 마지막 줄이 창 바닥에 서면 더 안 내려간다.
     pub fn step(&mut self, m: Move) {
         let page = self.height.max(1);
-        let last = self.rows().saturating_sub(page);
+        let last = self.span.saturating_sub(page);
         self.top = match m {
             Move::LineDown => self.top + 1,
             Move::LineUp => self.top.saturating_sub(1),
@@ -67,7 +63,7 @@ impl Sheet {
 
     /// 휠 — `by` 줄을 굴린다(음수면 위로). 목록·상세와 같은 걸음([`super::mouse::WHEEL`])을 부르는 쪽이 준다.
     pub fn roll(&mut self, by: isize) {
-        let last = self.rows().saturating_sub(self.height.max(1));
+        let last = self.span.saturating_sub(self.height.max(1));
         self.top = self.top.saturating_add_signed(by).min(last);
     }
 }
@@ -121,7 +117,7 @@ pub fn split(lines: &[Line], n: usize) -> Vec<Vec<&Line>> {
 }
 
 /// 폭 `room`·높이 `rows` 안에 놓는다. **다 드는 가장 적은 열**을 고른다 — 한 열로 다 들면 한 열이다. 어느 수로도
-/// 높이에 다 안 들면 **폭에 드는 가장 많은 열**이다(굴리는 줄이 가장 적다). 한 열도 폭에 안 들면 한 열이고, 그리는
+/// 높이에 다 안 들면 **폭에 드는 가장 많은 열**이다(굴리는 줄이 가장 적다). 어느 수도 폭에 안 들면 한 열이고, 그리는
 /// 쪽이 자른다.
 pub fn lay_out(lines: &[Line], room: usize, rows: usize) -> Laid<'_> {
     use crate::text::width;
@@ -146,18 +142,21 @@ pub fn lay_out(lines: &[Line], room: usize, rows: usize) -> Laid<'_> {
         let rows = columns.iter().map(|c| c.lines.len()).max().unwrap_or(0);
         Laid { columns, rows }
     };
-    let mut widest = None;
+    // **열을 늘린다고 판이 늘 넓어지지는 않는다**(리뷰) — 열 폭은 열마다 제 줄의 최댓값이라, 넓은 줄이 한 열에 모이면 세
+    // 열이 두 열보다 좁을 수 있다. 그래서 폭을 넘은 수에서 멈추지 않고 셋을 다 잰다. 한 열은 폭에 안 들어도 쥐고 있는다 —
+    // 아무 수도 안 들면 그것이 답이다.
+    let mut best: Option<Laid> = None;
     for n in 1..=MAX_COLUMNS {
         let l = laid(n);
-        if l.width() > room {
-            break;
-        }
-        if l.rows <= rows {
+        let fits = l.width() <= room;
+        if fits && l.rows <= rows {
             return l;
         }
-        widest = Some(l);
+        if fits || best.is_none() {
+            best = Some(l);
+        }
     }
-    widest.unwrap_or_else(|| laid(1))
+    best.expect("한 열은 늘 잰다")
 }
 
 /// 줄이 SPC 로 시작하나.
@@ -459,5 +458,11 @@ mod tests {
             let l = lay_out(&lines, room, 10);
             assert!(l.columns.len() == 1 || l.width() <= room, "{room} 칸을 넘는 판을 골랐다");
         }
+        // 넓은 줄이 한 열에 모이면 세 열이 두 열보다 좁다(리뷰) — 두 열(34+3+34=71)이 60 칸을 넘어도 세 열(5+3+34+3+5=50)을
+        // 잰다. 두 열에서 멈추면 높이에 다 드는 판을 두고 한 열로 굴린다.
+        let key = |what: usize| Line::Key { keys: "k".into(), what: "w".repeat(what) };
+        let lumpy = [key(1), key(1), key(30), key(30), key(1), key(1)];
+        let l = lay_out(&lumpy, 60, 2);
+        assert_eq!((l.columns.len(), l.width(), l.rows), (3, 50, 2), "두 열이 폭을 넘자 세 열을 안 쟀다");
     }
 }

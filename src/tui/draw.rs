@@ -595,7 +595,9 @@ fn help_sheet(f: &mut Frame, s: &mut super::help::Sheet, at: Rect, lang: Lang) {
     // 테두리 둘과 옆 여백 둘.
     let room = at.width.saturating_sub(4) as usize;
     let laid = lay_out(&s.lines, room, at.height.saturating_sub(2) as usize);
-    let inner = laid.width().clamp(24, room.max(1));
+    // `clamp(24, room)` 이 아니다(리뷰) — 28칸보다 좁은 창에서 `room` 이 24 밑이라 `clamp` 가 패닉한다. 바닥 24 를 먼저
+    // 대고 폭으로 누른다: 좁으면 폭이 이긴다.
+    let inner = laid.width().max(24).min(room.max(1));
     let w = (inner as u16).saturating_add(4).min(at.width);
     let h = (laid.rows as u16).saturating_add(2).min(at.height);
     let area = Rect { x: at.x + (at.width - w) / 2, y: at.y + (at.height - h) / 2, width: w, height: h };
@@ -603,11 +605,8 @@ fn help_sheet(f: &mut Frame, s: &mut super::help::Sheet, at: Rect, lang: Lang) {
     let rows = h.saturating_sub(2) as usize;
     (s.height, s.span) = (rows, laid.rows);
     s.top = s.top.min(laid.rows.saturating_sub(rows));
-    let cell = |l: Option<&&L>, cw: usize, key_w: usize| -> Vec<Span<'static>> {
-        // 한 열도 폭에 안 들면(좁은 창) 그 열을 폭까지 자른다 — 키 칸은 반을 넘지 않는다: 낱말이 통째로 밀려나면
-        // 키만 남아 뜻이 없다.
-        let kw = key_w.min(cw.saturating_sub(1) / 2);
-        let spans = match l {
+    let cell = |l: Option<&&L>, cw: usize, kw: usize| -> Vec<Span<'static>> {
+        let mut spans = match l {
             Some(L::Head(t)) => vec![Span::styled(clip(t, cw), bold())],
             Some(L::Key { keys, what }) => {
                 let k = clip(keys, kw);
@@ -622,18 +621,28 @@ fn help_sheet(f: &mut Frame, s: &mut super::help::Sheet, at: Rect, lang: Lang) {
             None => Vec::new(),
         };
         let used: usize = spans.iter().map(|s| width(&s.content)).sum();
-        let mut spans = spans;
         spans.push(Span::raw(" ".repeat(cw.saturating_sub(used))));
         spans
     };
+    // 열마다 (그릴 폭, 키 칸). 한 열도 폭에 안 들면(좁은 창) 그 열을 폭까지 자르고, **그때만** 키 칸이 반을 넘지 않는다 —
+    // 낱말이 통째로 밀려나면 키만 남아 뜻이 없다. 제 폭에 다 드는 열까지 반으로 누르면(리뷰) 키가 낱말보다 긴 열에서
+    // 자리가 있는데도 키가 `…` 로 잘린다.
+    let dims: Vec<(usize, usize)> = laid
+        .columns
+        .iter()
+        .map(|c| {
+            let cw = c.width.min(inner);
+            (cw, if cw < c.width { c.key_w.min(cw.saturating_sub(1) / 2) } else { c.key_w })
+        })
+        .collect();
     let lines: Vec<Line> = (s.top..s.top + rows)
         .map(|r| {
             let mut spans = Vec::new();
-            for (n, c) in laid.columns.iter().enumerate() {
+            for (n, (c, &(cw, kw))) in laid.columns.iter().zip(&dims).enumerate() {
                 if n > 0 {
                     spans.push(Span::raw(" ".repeat(GAP)));
                 }
-                spans.extend(cell(c.lines.get(r), c.width.min(inner), c.key_w));
+                spans.extend(cell(c.lines.get(r), cw, kw));
             }
             Line::from(spans)
         })
@@ -10404,7 +10413,8 @@ pub(super) mod tests {
     /// **`?`·`SPC h` 가 키 목록 창을 열고, 이동키가 굴리고, 연 키·Esc 가 닫는다**(moai-ucyr). 창이 떠 있는 동안 Esc 는
     /// 창의 것이다 — 걸어 둔 거름망을 같이 풀면 창을 닫으려던 사람이 목록까지 잃는다. 첫 화면의 바는 `?` 를 댄다.
     /// **키 목록 창은 화면 크기에 따라 열을 나눈다**(moai-c4tz) — 넓고 낮은 창에서는 첫 줄에 첫 절의 머리와 다른 열의
-    /// SPC 줄이 함께 서고, 80칸에서는 한 열이다. 어느 줄도 폭을 넘지 않는다.
+    /// SPC 줄이 함께 서고, 80칸에서는 한 열이다. 굴리기는 가장 긴 열에서 멈추고, 좁은 창도 무너지지 않으며, 다 드는
+    /// 열은 잘리지 않는다.
     #[test]
     fn the_help_sheet_splits_into_columns_by_the_screen_size() {
         let mut a = app();
@@ -10419,9 +10429,29 @@ pub(super) mod tests {
         let lines = render(&mut a, 80, 20);
         let top = lines.iter().position(|l| l.contains("┏ 키 목록")).expect("창이 안 섰다");
         assert!(!lines[top + 1].contains("SPC"), "80칸에서 열이 갈렸다\n{}", lines.join("\n"));
-        for (w, h) in [(200u16, 40u16), (120, 30), (80, 20), (40, 12)] {
-            for l in render(&mut a, w, h) {
-                assert!(crate::text::width(&l) <= w as usize, "{w}x{h} 넘쳤다: {l:?}");
+        // 여러 열이면 굴리기의 끝은 줄 전부가 아니라 가장 긴 열의 바닥이다(`Sheet::span`) — 구석도 그 수를 댄다.
+        render(&mut a, 200, 40);
+        a.hit("G");
+        let s = a.help.as_ref().expect("`G` 가 창을 닫았다");
+        assert!(s.span < s.lines.len(), "200칸에서 열이 안 갈렸다");
+        assert_eq!(s.top, s.span - s.height, "여러 열의 끝이 가장 긴 열의 바닥이 아니다");
+        let corner = format!("{}/{}", s.top + 1, s.span);
+        assert!(render(&mut a, 200, 40).join("\n").contains(&corner), "구석이 {corner} 를 안 댄다");
+        // 28칸보다 좁은 창도 무너지지 않는다(리뷰 — `clamp(24, room)` 이 패닉했다). 열이 제 폭에 다 드는 크기에서는 상자
+        // 안에 잘린 글(`…`)이 없다 — 버퍼에서 읽은 줄은 늘 화면 폭 안이라 넘침을 폭으로는 못 잰다. 잘림으로 잰다.
+        for (w, h) in [(200u16, 40u16), (120, 30), (80, 20), (40, 12), (27, 10), (20, 8), (10, 8)] {
+            let buf = render_buf(&mut a, w, h);
+            if w < 80 {
+                continue;
+            }
+            let lines = lines_of(&buf);
+            let top = lines.iter().position(|l| l.contains("┏ 키 목록")).expect("창이 안 섰다") as u16;
+            let x0 = (0..w).rev().find(|&x| buf[(x, top)].symbol() == "┏").expect("왼쪽 위 모서리가 없다");
+            let x1 = (x0..w).find(|&x| buf[(x, top)].symbol() == "┓").expect("오른쪽 위 모서리가 없다");
+            let bottom = (top + 1..h).find(|&y| buf[(x0, y)].symbol() == "┗").expect("바닥이 없다");
+            for y in top + 1..bottom {
+                let row: String = (x0 + 1..x1).map(|x| buf[(x, y)].symbol()).collect();
+                assert!(!row.contains('…'), "{w}x{h} 에서 다 드는 열이 잘렸다: {row:?}");
             }
         }
     }
