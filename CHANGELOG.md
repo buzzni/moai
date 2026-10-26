@@ -12,6 +12,8 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+## [0.29.0] - 2026-10-26
+
 ### Added
 
 - **A repository can recommend models per role.** A `[models]` table in
