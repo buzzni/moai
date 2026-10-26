@@ -158,10 +158,11 @@ even when you cannot do it now (fork 1). If it is not for now, park it with
 **2. Pick something up before you change the repository.** `moai mv <id> in_progress`.
 What counts is work inside the repository — `.moai/`, `.claude/`, `.agents/`, `.codex/`,
 `.worktrees/`, `target/` and anything outside the repository (scratchpad, temporary
-files) do not. Shell writes (`>`, `>>`, `sed -i`, `tee`) count as much as `Edit` and
-`Write`. If it was not in the plan, create it with `moai add 'a title'` and pick that up.
-A session standing in the main checkout that holds only work whose worktree stands is
-refused a write to the main checkout too — the refusal names the same file in that worktree.
+files) do not. Shell writes (`>`, `>>`, `sed -i`, `tee`, the destination of `cp`·`mv`·`install`)
+count as much as `Edit` and `Write`. If it was not in the plan, create it with `moai add 'a title'`
+and pick that up. A session that holds only work whose worktree stands is refused a write that
+lands in the main checkout — wherever its shell stands — and a write into another epic's worktree;
+the refusal names the same file in its own worktree.
 
 **3. A review is an issue too.** Before you call a review, create a review issue tied to
 what you are reviewing. The review is `/code-review` in Claude Code; in Codex and
@@ -194,8 +195,9 @@ own server.
     env -u TMUX tmux -L <unique name> …
 
 Under cmux claude-teams (`$TMUX` starts with `/tmp/cmux-`) the `tmux` on `PATH` is cmux's shim: it
-drops `-L`, `-S` and `-f`, so `new-session` and the `kill-*` commands open and close workspaces and
-tabs in the person's cmux, and `env -u TMUX` takes away only the fake `$TMUX`. The hook refuses
+drops `-L`, `-S` and `-f`, so `new-session`, `new-window`, `split-window`, `send-keys`,
+`respawn-pane` and the `kill-*` commands open, close and type into workspaces and tabs in the
+person's cmux, and `env -u TMUX` takes away only the fake `$TMUX`. The hook refuses
 those through the shim. Call a real tmux by its absolute path instead — `type -a tmux` lists the
 candidates; take one whose `readlink -f` has no `cmux` in it:
 

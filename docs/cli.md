@@ -49,7 +49,7 @@ Commands:
   project       Register a directory to watch several projects from one moai
   due           Raise priorities a deadline has caught up with
   config        Read this repository's settings, defaults filled in
-  models        Read the model per role from your user config
+  models        Read the model per role from your config and the repository's
   keys          Show the explorer's keys and what your keys.toml changed
   update        Upgrade the moai you are running with install.sh
   init          Put a .moai/ into this repository (safe to run again)
@@ -2679,7 +2679,9 @@ Order:
   movement key moves the focused pane — to scroll the detail, go there with
   Ctrl-w w.
   / searches, Esc clears the filter you set. r marks the row under the cursor
-  as read (see [NEW] below).
+  as read (see [NEW] below). ? (or SPC h) opens a window listing every
+  key, read from the same table as moai keys. The movement keys scroll
+  it and ? closes it again.
   The search and filter fields take Enter to apply and Esc to give up, the
   search filters the list as you type, and Tab and Shift-Tab pick where it
   looks: everything, id, title, tag, body or note (everything reads the
@@ -2700,13 +2702,13 @@ Order:
   stands up only what works where you are, ignores keys it does not know,
   closes on Esc or SPC and goes one level up on Bksp. Keys that move
   the focused pane close the menu and make that move in the same press,
-  unless a key on that level holds the letter (SPC g, SPC g l, SPC c h,
-  SPC v l, SPC m g).
+  unless a key on that level holds the letter (SPC g, SPC h,
+  SPC g l, SPC c h, SPC v l, SPC m g).
   Toggles and sorts (SPC v, SPC c, SPC s) do not close it — try them, watch
   the state, and leave with Esc. That level says so at the bottom right with a
   close hint.
     SPC /    search              SPC f    filter             SPC n    jot
-    SPC q    quit
+    SPC h    keys                SPC q    quit
     SPC p a  register            SPC p d  drop from the list
   Screen — which one stands; the root menu names it, as in [board]:
     SPC g l  list                SPC g b  board — described below
@@ -3621,7 +3623,8 @@ Options:
   status_* thresholds and the due_* rule that `moai due apply` reads. These
   are the values this binary acts on, so a surface drawing the board reads
   them here instead of parsing the file again. --json adds path, the file it
-  read.
+  read. A [models] table is left to `moai models`, which lays it under your
+  user config.
 
   It only reads; edit the file by hand to change a setting.
 ```
@@ -3629,7 +3632,7 @@ Options:
 ## `moai models`
 
 ```
-Read the model per role from your user config
+Read the model per role from your config and the repository's
 
 Usage: moai models [OPTIONS]
 
@@ -3641,17 +3644,25 @@ Options:
       --user <name (email)>  Who is doing this (from `git config` when absent)
   -h, --help                 Print help
 
-  moai models           the model per role, with defaults marked
-  moai models --json    one object for skills, including written keys and path
+  moai models           the model per role, where each value came from
+  moai models --json    one object for skills, including written keys and paths
 
-  Reads [models] in your user config. No .moai is needed; repository config
-  is not read. The place is MOAI_CONFIG, then $XDG_CONFIG_HOME/moai/config.toml,
-  then ~/.config/moai/config.toml. Missing files use the built-in defaults.
+  Reads [models] in your user config. No .moai is needed. The place is
+  MOAI_CONFIG, then $XDG_CONFIG_HOME/moai/config.toml, then
+  ~/.config/moai/config.toml. Missing files use the built-in defaults.
+
+  Inside a repository, a [models] table in .moai/config.toml recommends values
+  for that repository: it overrides the defaults, and your user config
+  overrides it. A line says repo when its value came from there, default when
+  nothing set it. A broken .moai/config.toml leaves the table as your user
+  config gives it.
 
   Model names are strings. review_grade, effort and effort_complex accept
   low, medium, high, xhigh or max. Invalid values fall back per key and warn;
-  unknown keys warn. written lists only valid, known keys from the config.
-  This command only reads; edit the user config by hand to change the table.
+  unknown keys warn. written lists the valid, known keys from your user config,
+  repo the ones the repository table set that your config did not, and
+  repo_path that file (null when it set none). The level lines name the roles
+  they pair with. This command only reads; edit the files by hand.
 ```
 
 ## `moai keys`

@@ -42,6 +42,9 @@ struct Moved {
     taken: Vec<Whose>,
     /// `--take` 없이 **시작 칸으로 옮긴** 내 것 아닌 줄 — 막지 않고 한 줄로 알린다(moai-0zjo).
     theirs: Vec<Whose>,
+    /// 시작 칸에 서서 **이 쓰기 뒤 부른 사람의 것인** 줄 — 옮긴 줄이든 이미 그 칸이던 줄이든, `--take` 로 넘겨받은
+    /// 줄까지. 이 세션의 집기로 적는 것은 이것뿐이다(moai-w25x.831, 리뷰 moai-w25x.54r).
+    picked: Vec<String>,
 }
 
 /// 내 것이 아니던 줄 하나 — `--take` 가 넘겨받았거나 그것 없이 옮긴 것(moai-0zjo). `--json` 의 `taken`·
@@ -276,6 +279,12 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
                         i.normalize();
                         m.taken.push(whose);
                     }
+                    // **남의 줄은 제 집기로 안 적는다**(리뷰 moai-w25x.54r) — 훅은 `--take` 없는 그 집기를 규칙 5 로 막아 안
+                    // 적는다. 훅이 못 읽는 꼴(`$M mv X …`)로 쳤다고 적으면, 그 줄을 쥔 세션은 제 일을 잃고 이 세션은 그 줄의
+                    // 워크트리에 쓰는 길까지 얻는다. 넘겨받았으면 이제 제 것이다.
+                    if picks_up && crate::report::owner(&me, i).is_none() {
+                        m.picked.push(i.id.clone());
+                    }
                     m.already.push(i.id.clone());
                     continue;
                 }
@@ -298,6 +307,10 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
                     }
                     (Some(owner), false) if picks_up => m.theirs.push(Whose::of(i, owner, cfg.naming)),
                     _ => {}
+                }
+                // 옮긴 줄도 같은 자다 — `--take` 없이 옮긴 남의 줄(`theirs`)은 적지 않는다.
+                if picks_up && crate::report::owner(&me, i).is_none() {
+                    m.picked.push(i.id.clone());
                 }
                 // 저장 직전의 모습으로 맞춰 두고 뜬다 — 안 그러면 `--json` 이
                 // 파일에 없는 값(기본 우선순위, 정렬 전 태그)을 말한다.
@@ -387,6 +400,11 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
         },
         |m| crate::archive::remove_ids(&repo.root, &m.restored),
     )?;
+    // **시작 칸으로 옮겼으면 이 세션의 집기로 적는다**(moai-w25x.831) — 훅은 명령줄의 글자로만 집기를 읽어
+    // `$M mv …` 처럼 껍데기가 풀 낱말로 친 집기를 놓쳤다. 이미 그 칸이던 줄도 적는다: 멈춘 일을 이어받는
+    // 세션이 `mv <id> <그 칸> --from <그 칸>` 으로 제 것이라 적는 자리다. 진 줄(`stale`)은 안 옮겼으니 안 들고,
+    // 남의 줄은 `--take` 로 넘겨받았을 때만 든다(`Moved::picked`).
+    super::hook::record_own_picks(&repo, &moved.picked);
 
     // **`-m` 이 파일 이름이면 한 줄로 알린다**(moai-yivo.xe9) — **그 글이 저널에 든 판에만**: 옮긴 줄의 칸 줄과
     // 이미 그 칸이던 줄의 노트다. 진 줄·없는 줄뿐인 부름에 "저널에 남는 것은 …" 을 대면 없던 쓰기를 말한다(리뷰

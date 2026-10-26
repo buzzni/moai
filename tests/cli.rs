@@ -204,10 +204,15 @@ fn isolated(program: impl AsRef<std::ffi::OsStr>) -> Command {
         .env_remove("SAYCODE_AGENT_ENV")
         // cmux 가 제 탭의 셸에 세우는 표식(moai-p5sz) — 새면 cmux 탭 안에서 돌린 `init` 화면이 `moai-cmux` 칸을 켜 둔다.
         .env_remove("CMUX_SURFACE_ID")
+        // claude-teams 가 세우는 shim 의 자리(moai-qrja.o3l) — 새면 훅이 모든 맨 `tmux` 를 shim 으로 읽어, claude-teams
+        // 안에서 돌린 규칙 4 의 시험이 제 서버를 가리킨 줄까지 막는다(리뷰 moai-qrja.pwh).
+        .env_remove("CMUX_CLAUDE_TEAMS_TMUX_SHIM")
         .env_remove("CLAUDE_CODE_SESSION_ID")
         // Codex 가 셸에 세우는 세션 id(moai-u5wr.7xr).
         .env_remove("CODEX_THREAD_ID")
         .env_remove("CODEX_SESSION_ID")
+        // Antigravity 의 것도 — 서면 `moai mv` 가 제 집기를 안 적어(리뷰 moai-w25x.54r), Antigravity 창에서 돌린 시험이 붉어진다.
+        .env_remove("ANTIGRAVITY_CONVERSATION_ID")
         .env_remove("MOAI_AGENT")
         // **시험은 한국어 화면을 본다**(moai-zeyv). 기본은 영어지만(사용자 결정) 이 저장소의
         // 시험은 글자를 그대로 견주는 것이 수백 줄이라, 여기서 언어를 못 박는다 — 안 박으면
@@ -1297,6 +1302,18 @@ fn a_repository_can_say_in_gitattributes_that_it_does_not_want_the_driver() {
     // (여기서는 위에서 제대로 심어 둔 판이라 `current` 로 선다. `off` 면 넷이 다 잠든 것이다).
     let json = ok(root, &["init", "--check", "--json"]);
     assert!(json.contains("\"driver\":\"current\""), "union 이 선언을 재웠다\n{json}");
+}
+
+/// **처음 세울 때 역할별 모델의 자리를 한 줄로 댄다 — 묻지 않는다**(moai-w25x.1ar, 2026-10-26 사용자 결정). `[models]` 는
+/// 사람의 설정이라 저장소마다 물으면 두 번째 저장소에서 같은 것을 또 묻는다. 다시 부른 `init` 은 그 줄을 안 낸다.
+#[test]
+fn init_names_moai_models_once_without_asking() {
+    let s = Scratch::new("initmodels");
+    git(s.path(), &["init", "-q"]);
+    let first = ok(s.path(), &["init", "argos"]);
+    assert!(first.contains("moai models"), "처음 세울 때 모델의 자리를 안 댄다\n{first}");
+    let again = ok(s.path(), &["init"]);
+    assert!(!again.contains("moai models"), "다시 부를 때마다 모델 줄을 낸다\n{again}");
 }
 
 /// 도구가 자라면 AGENTS.md 블록은 반드시 낡는다. 다시 쓸 길이 없으면 새
@@ -17555,6 +17572,77 @@ fn the_hook_leaves_a_row_another_session_picked_to_that_session() {
     assert!(why.contains(&theirs) && why.contains(&mine), "다시 집은 줄을 제 초점으로 안 본다\n{why}");
 }
 
+/// **`moai mv` 가 쓰기 뒤 제 세션의 집기를 스스로 적는다**(moai-w25x.831). 훅은 명령줄의 글자로 id 를 읽어
+/// `$M mv <id> in_progress` 를 못 적었고(moai-scb6), 다른 세션이 도는 판에서 그 줄은 누구의 것인지 모르는 줄이
+/// 되어 `Stop` 이 안 붙들고 규칙 3 이 리뷰를 막았다. 여기서는 훅을 아예 안 지나고 옮긴다 — 기록이 서는 길은
+/// `mv` 자신뿐이다. Codex 의 셸(`CODEX_THREAD_ID`)은 물려받은 남의 세션 id 를 들고 있어 안 적는다(moai-sile).
+#[test]
+fn moai_mv_records_its_own_pick_for_the_session() {
+    let s = Scratch::new("mvpicks");
+    let main = s.path().join("main");
+    std::fs::create_dir_all(&main).unwrap();
+    git(&main, &["init", "-q"]);
+    ok(&main, &["init", "argos"]);
+    let theirs = field(&ok(&main, &["add", "남이 할 일", "--json"]), "id");
+    let mine = field(&ok(&main, &["add", "내가 할 일", "--json"]), "id");
+    let codex = field(&ok(&main, &["add", "Codex 가 할 일", "--json"]), "id");
+    git(&main, &["add", "-A"]);
+    git(&main, &["commit", "-q", "-m", "세운다"]);
+    let at = |session: &str, event: &str, cmd: Option<&str>| {
+        let body = cmd.map_or(String::new(), |c| {
+            format!(",\"tool_name\":\"Bash\",\"tool_input\":{{\"command\":{}}}", json_str(c))
+        });
+        let input = format!("{{\"session_id\":\"{session}\",\"cwd\":{}{body}}}", json_str(&main.display().to_string()));
+        String::from_utf8(hook_in(&s, &main, event, &input).stdout).unwrap()
+    };
+    let cfg = s.path().join("hookcfg").join("config.toml");
+    let cfg = cfg.to_str().unwrap();
+    // 남(b)이 훅을 지나 집는다 — 이제 여러 세션이 도는 판이라 기록 없는 집힌 줄은 누구의 것인지 모른다.
+    let pick = format!("moai mv {theirs} in_progress --from todo");
+    assert!(at("b", "pre-tool-use", Some(&pick)).trim().is_empty());
+    ok(&main, &["mv", &theirs, "in_progress", "--from", "todo"]);
+
+    // a 가 훅이 못 읽는 꼴로 집는다 — 옮긴 `moai` 가 a 의 세션 id 로 적는다.
+    let env = [("MOAI_CONFIG", cfg), ("CLAUDE_CODE_SESSION_ID", "a")];
+    ok_env(&main, NOW, &env, &["mv", &mine, "in_progress", "--from", "todo"]);
+    let held = at("a", "stop", None);
+    assert!(held.contains(&format!("moai mv {mine}")), "mv 가 적은 집기를 훅이 이 세션의 것으로 안 읽는다\n{held}");
+    assert!(!held.contains(&theirs), "남이 집은 줄로 붙든다\n{held}");
+
+    // Codex 의 셸은 남의 Claude 세션 id 를 물려받는다 — 그 값으로 적으면 그 세션이 남의 줄을 든다.
+    let env = [("MOAI_CONFIG", cfg), ("CLAUDE_CODE_SESSION_ID", "c"), ("CODEX_THREAD_ID", "t")];
+    ok_env(&main, NOW, &env, &["mv", &codex, "in_progress", "--from", "todo"]);
+    let held = at("c", "stop", None);
+    assert!(!held.contains(&codex), "Codex 의 셸에서 물려받은 세션 id 로 집기를 적었다\n{held}");
+
+    // **Antigravity 의 셸도 같다**(리뷰 moai-w25x.54r) — Claude 세션 안에서 띄우면 그 값을 물려받는다. 빈 표는 없는 것이다.
+    let recorded = |session: &str| -> String {
+        pick_dirs(&s).iter().filter_map(|d| std::fs::read_to_string(d.join(session)).ok()).collect()
+    };
+    let agy = field(&ok(&main, &["add", "Antigravity 가 할 일", "--json"]), "id");
+    let env = [("MOAI_CONFIG", cfg), ("CLAUDE_CODE_SESSION_ID", "g"), ("ANTIGRAVITY_CONVERSATION_ID", "v")];
+    ok_env(&main, NOW, &env, &["mv", &agy, "in_progress", "--from", "todo"]);
+    assert!(recorded("g").is_empty(), "Antigravity 의 셸에서 물려받은 세션 id 로 집기를 적었다\n{}", recorded("g"));
+    let blank = field(&ok(&main, &["add", "빈 표의 셸이 할 일", "--json"]), "id");
+    let env = [("MOAI_CONFIG", cfg), ("CLAUDE_CODE_SESSION_ID", "e"), ("CODEX_THREAD_ID", "")];
+    ok_env(&main, NOW, &env, &["mv", &blank, "in_progress", "--from", "todo"]);
+    assert!(recorded("e").contains(&blank), "빈 CODEX_THREAD_ID 를 Codex 의 셸로 읽었다");
+
+    // **남의 줄은 `--take` 없이 제 집기로 안 적는다**(같은 리뷰) — 훅은 그 집기를 규칙 5 로 막아 안 적는다. 훅이 못 읽는
+    // 꼴로 다시 집었다고 적으면 그 줄을 쥔 세션이 제 일을 잃는다. 넘겨받으면 제 것이다.
+    let other = field(&ok(&main, &["add", "남의 담당", "-a", "Other (other@example.com)", "--json"]), "id");
+    ok(&main, &["mv", &other, "in_progress"]);
+    let env = [("MOAI_CONFIG", cfg), ("CLAUDE_CODE_SESSION_ID", "a")];
+    ok_env(&main, NOW, &env, &["mv", &other, "in_progress"]);
+    assert!(!recorded("a").contains(&other), "남의 줄을 --take 없이 제 집기로 적었다\n{}", recorded("a"));
+    ok_env(&main, NOW, &env, &["mv", &other, "in_progress", "--take", "-m", "사람이 그러라 했다"]);
+    assert!(recorded("a").contains(&other), "넘겨받은 줄을 제 집기로 안 적었다\n{}", recorded("a"));
+    // 옮기는 갈래도 같은 자다 — 남의 첫 칸 줄을 `--take` 없이 옮기면 옮기기는 하되 제 집기로는 안 적는다.
+    let moved = field(&ok(&main, &["add", "남의 첫 칸 일", "-a", "Other (other@example.com)", "--json"]), "id");
+    ok_env(&main, NOW, &env, &["mv", &moved, "in_progress", "--from", "todo"]);
+    assert!(!recorded("a").contains(&moved), "옮긴 남의 줄을 --take 없이 제 집기로 적었다\n{}", recorded("a"));
+}
+
 /// **다른 세션이 부모를 집어도 이 세션이 집은 자식은 제 것이다**(리뷰 moai-3k2d.1df). 모르는 줄은 그 밑의
 /// 자식까지 빼는데, 남이 부모를 집고 이 세션이 `--parent` 로 세운 리뷰 줄을 집으면 그 리뷰까지 빠져
 /// `Stop` 이 안 붙들고, 좁혀 다시 본 판정이 `-m` 없는 리뷰 닫기를 넘겼다.
@@ -17713,6 +17801,31 @@ fn a_root_session_holding_worktree_work_is_sent_to_the_worktree() {
     assert!(there.trim().is_empty(), "워크트리 안의 쓰기를 막았다\n{there}");
     // 아무것도 안 쥔 세션은 전처럼 빈손으로 막힌다 — 그 멤버는 옆 워크트리의 일이다.
     assert!(refusal(&at("c", "Edit", edit(&main.join("src/x.rs")))).contains("holding nothing"));
+}
+
+/// **아무것도 안 벌인 트래커에서도 집기 뒤의 쓰기는 워크트리 물음에 든다**(리뷰 moai-qrja.pwh) — 훅은 벌인 줄이 없으면
+/// 워크트리 목록을 안 읽어(`away_of`), 집으면서 루트에 쓴 줄이 그 물음에 한 번도 안 닿았다. 같은 줄이 딴 줄 하나가
+/// 벌여져 있으면 막혔다 — 옆 상태가 답을 바꿨다.
+#[test]
+fn a_pick_up_with_nothing_started_still_meets_the_worktree_question() {
+    let s = Scratch::new("hookfirstpick");
+    let main = s.path().join("main");
+    std::fs::create_dir_all(main.join("src")).unwrap();
+    git(&main, &["init", "-q"]);
+    ok(&main, &["init", "argos"]);
+    let epic = field(&ok(&main, &["epic", "add", "에픽", "--json"]), "id");
+    let mine = field(&ok(&main, &["add", "내가 할 멤버", "-e", &epic, "--json"]), "id");
+    std::fs::write(main.join("src/x.rs"), "").unwrap();
+    git(&main, &["add", "-A"]);
+    git(&main, &["commit", "-q", "-m", "세운다"]);
+    git(&main, &["worktree", "add", "-q", &format!(".worktrees/{epic}"), "-b", &format!("worktree-{epic}")]);
+    let input = format!(
+        "{{\"session_id\":\"a\",\"cwd\":{},\"tool_name\":\"Bash\",\"tool_input\":{{\"command\":{}}}}}",
+        json_str(&main.display().to_string()),
+        json_str(&format!("moai mv {mine} in_progress --from todo && echo x > src/x.rs"))
+    );
+    let out = String::from_utf8(hook_in(&s, &main, "pre-tool-use", &input).stdout).unwrap();
+    assert!(refusal(&out).contains("worktree stands at"), "아무것도 안 벌였다고 집기 뒤의 루트 쓰기를 넘겼다\n{out}");
 }
 
 /// **겨루다 질 집기는 적지 않는다**(리뷰 moai-3k2d.1df). 훅은 명령이 돌기 전에 적으므로, 낡은 `--from` 으로
@@ -30923,13 +31036,13 @@ fn models_json_reads_user_config_outside_a_tracker_and_only_reads() {
             "plan": "fable", "develop": "opus-6", "complex": "opus", "review": "opus",
             "docs": "sonnet", "bulk": "haiku", "codex": "future-model",
             "review_grade": "xhigh", "effort": "max", "effort_complex": "high",
-            "written": ["develop", "codex", "effort"], "path": cfg,
+            "written": ["develop", "codex", "effort"], "repo": [], "path": cfg, "repo_path": null,
         })
     );
     assert_eq!(std::fs::read_to_string(&cfg).unwrap(), src);
     assert!(!s.path().join(".moai").exists());
 
-    // 저장소 설정과 -C는 모델의 선택에 닿지 않는다.
+    // 깨진 저장소 설정은 사람의 표를 못 건드린다 — 그 탈은 다른 명령이 댄다.
     let other = s.path().join("other");
     std::fs::create_dir_all(other.join(".moai")).unwrap();
     std::fs::write(other.join(".moai/config.toml"), "invalid = [\n").unwrap();
@@ -30951,7 +31064,7 @@ fn models_missing_file_uses_all_defaults_and_keeps_the_path() {
             "plan": "fable", "develop": "sonnet", "complex": "opus", "review": "opus",
             "docs": "sonnet", "bulk": "haiku", "codex": "gpt-6.1-sol",
             "review_grade": "xhigh", "effort": "medium", "effort_complex": "high",
-            "written": [], "path": cfg,
+            "written": [], "repo": [], "path": cfg, "repo_path": null,
         })
     );
     assert!(!cfg.exists());
@@ -31005,17 +31118,86 @@ fn models_human_output_marks_defaults_and_shows_efforts_and_path() {
     let out = ok_with(s.path(), &cfg, &["models"]);
     assert_eq!(out.lines().count(), 11, "{out}");
     assert_eq!(out.matches("default").count(), 8, "{out}");
-    let develop = out.lines().find(|line| line.starts_with("develop ")).unwrap();
-    assert!(develop.contains("sonnet  (high)"));
-    assert!(!develop.contains("default"), "기본값과 같아도 사람이 적은 키다");
-    assert!(out.lines().find(|line| line.starts_with("complex ")).unwrap().contains("opus  (high)"));
-    assert!(out.lines().find(|line| line.starts_with("review ")).unwrap().contains("opus  (xhigh)"));
+    let line = |key: &str| out.lines().find(|line| line.starts_with(&format!("{key} "))).unwrap().to_string();
+    assert!(
+        line("develop").contains("sonnet") && !line("develop").contains("default"),
+        "기본값과 같아도 사람이 적은 키다"
+    );
+    // **줄마다 제 값 하나만 표한다**(moai-w25x.yrm) — effort 만 적었으면 그 줄만 사람의 것이다. 역할 줄 꼬리에
+    // effort 를 싣던 판은 `complex  opus  (high)  default` 처럼 남의 값까지 한 표로 덮었다.
+    assert!(line("effort").contains("high") && !line("effort").contains("default"), "{out}");
+    assert!(line("effort").contains("develop · docs · bulk"), "등급 줄이 짝을 안 댄다\n{out}");
+    // 표의 낱말은 화면의 말을 따른다 — `default` 는 어느 말에도 선다(`기본값 (default)`).
+    let marked = |key: &str, value: &str, pair: &str| {
+        let l = line(key);
+        l.contains(&format!("  {value}  ")) && l.contains("default") && l.ends_with(pair)
+    };
+    assert!(marked("complex", "opus", "") && !line("complex").contains("high"), "{out}");
+    assert!(marked("effort_complex", "high", "  complex"), "{out}");
+    assert!(marked("review_grade", "xhigh", "  review"), "{out}");
     assert!(out.lines().last().unwrap().contains(cfg.to_str().unwrap()));
 
     // 허용한 모델 이름의 줄바꿈도 표에서는 한 줄로 그린다.
     std::fs::write(&cfg, "[models]\nplan = \"a\\nb\"\n").unwrap();
     let out = ok_with(s.path(), &cfg, &["models"]);
     assert_eq!(out.lines().count(), 11, "{out}");
+}
+
+/// **저장소는 권하고 사람이 고른다**(moai-w25x.jud, 2026-10-26 사용자 결정) — `.moai/config.toml` 의 `[models]` 가
+/// 기본값을 덮고 사용자 설정이 그것을 덮는다. `MOAI_LANG` > `[i18n] lang` 과 같은 결이다. 저장소 표의 틀린 값은 그
+/// 파일을 대며 한 줄로 알리고 나머지는 산다 — 이 파일은 모든 명령이 지나니 `status` 는 그것으로 서지 않는다.
+#[test]
+fn a_repository_models_table_sits_under_the_person() {
+    let s = Scratch::new("models-repo");
+    git(s.path(), &["init", "-q"]);
+    ok(s.path(), &["init", "argos"]);
+    let repo_cfg = s.path().join(".moai/config.toml");
+    let mut src = std::fs::read_to_string(&repo_cfg).unwrap();
+    src.push_str("\n[models]\ncomplex = \"opus-6\"\ndevelop = \"opus\"\neffort = \"ultra\"\n");
+    std::fs::write(&repo_cfg, &src).unwrap();
+    let cfg = s.path().join("user.toml");
+    std::fs::write(&cfg, "[models]\ndevelop = \"sonnet\"\n").unwrap();
+    let out = moai_with(s.path(), &cfg, &["models", "--json"]);
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let got: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(got["complex"], "opus-6", "저장소의 값이 기본값을 안 덮는다\n{got}");
+    assert_eq!(got["develop"], "sonnet", "사람의 값이 저장소에 졌다\n{got}");
+    assert_eq!(got["effort"], "medium", "틀린 저장소 값이 섰다\n{got}");
+    assert_eq!(got["written"], serde_json::json!(["develop"]));
+    assert_eq!(got["repo"], serde_json::json!(["complex"]), "사람이 덮은 키를 저장소의 것으로 댄다\n{got}");
+    let canon_cfg = canon(&repo_cfg).unwrap();
+    let repo_path = std::path::PathBuf::from(got["repo_path"].as_str().unwrap());
+    assert_eq!(canon(&repo_path).unwrap(), canon_cfg);
+    // 자리는 조각마다 이은 철자로 댄다(moai-lag7.951) — `/` 를 박아 견주면 Windows 에서 섞인 철자에만 맞는다.
+    let file = std::path::Path::new(".moai").join("config.toml").display().to_string();
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(err.lines().count(), 1, "{err}");
+    assert!(err.contains("models.effort") && err.contains(&file), "{err}");
+    // 다른 명령은 그 표에 서지 않는다.
+    ok(s.path(), &["status"]);
+
+    let human = ok_with(s.path(), &cfg, &["models"]);
+    let line = |key: &str| human.lines().find(|l| l.starts_with(&format!("{key} "))).unwrap().to_string();
+    assert!(line("complex").contains("opus-6  ") && line("complex").contains("repo"), "{human}");
+    assert!(!line("develop").contains("repo") && !line("develop").contains("default"), "{human}");
+    assert!(human.lines().last().unwrap().contains(&file), "저장소 파일을 안 댄다\n{human}");
+
+    // **따옴표 없는 값은 따옴표를 말한다**(리뷰 moai-w25x.54r) — 그대로 재던 판은 `effort = high` 에 "low|…|max 중
+    // 하나여야 한다 — 지금은 \"high\"" 라고 제 말과 어긋났고, 받은 저장소의 제어문자를 탈에 실어 터미널을 다시 칠했다.
+    src.push_str("bulk = high\ndocs = \u{1b}]0;x\u{7}\n");
+    std::fs::write(&repo_cfg, &src).unwrap();
+    let out = moai_with(s.path(), &cfg, &["models", "--json"]);
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(!err.contains('\u{1b}') && !err.contains('\u{7}'), "저장소의 제어문자가 터미널로 샜다\n{err:?}");
+    let quoted: Vec<&str> = err.lines().filter(|l| l.contains("큰따옴표")).collect();
+    assert_eq!(quoted.len(), 2, "따옴표 없는 값 둘을 따옴표로 안 댄다\n{err}");
+    assert!(
+        quoted.iter().any(|l| l.contains("models.bulk")) && quoted.iter().any(|l| l.contains("models.docs")),
+        "{err}"
+    );
+    let got: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!((&got["bulk"], &got["docs"]), (&serde_json::json!("haiku"), &serde_json::json!("sonnet")), "{got}");
 }
 
 #[test]
