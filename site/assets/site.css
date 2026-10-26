@@ -19,6 +19,10 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 a { color: inherit; }
+/* 한국어는 낱말 단위로 줄을 바꾼다 — 페이지 전체에(히어로·장면·사용 방법). 기본값은 한글 음절마다 끊어 폰 폭에서
+   "어/떤" 처럼 낱말 가운데가 갈렸다(moai-s7f7.xqm). 일본어는 낱말 사이에 빈칸이 없어 keep-all 이면 구두점에서만
+   끊기니 걸지 않는다. 빈칸 없이 긴 덩이(경로·명령)는 overflow-wrap 이 칸 끝에서 끊어 가로 넘침을 막는다 */
+html[lang="ko"] body { word-break: keep-all; overflow-wrap: break-word; }
 code, pre, kbd { font-family: var(--mono); }
 p code, li code, figcaption code {
   font-size: .9em; background: var(--surface-2); border: 1px solid var(--line);
@@ -212,9 +216,22 @@ nav .links a[aria-current="page"] { color: var(--ink); }
 .doc-toc ol ol { margin: 8px 0 0; padding-left: 14px; border-left: 1px solid var(--line); }
 .doc-toc a { color: var(--muted); text-decoration: none; }
 .doc-toc a:hover { color: var(--ink); }
+/* 문서·변경 기록(site/docs/, site/changelog/ — Pages 가 릴리스 태그에서 짓는다): 목차가 길어(cli 는 절이 쉰 넘는다)
+   화면 높이를 넘으면 목차 안에서 굴린다. 지금 페이지는 목차에서 밝힌다 */
+@media (min-width: 960px) { .doc-toc { max-height: calc(100vh - 116px); overflow-y: auto; overscroll-behavior: contain; padding-bottom: 16px; } }
+.doc-toc a[aria-current="page"] { color: var(--ink); font-weight: 600; }
+.doc-crumb { margin: 0 0 20px; font-size: 13px; color: var(--faint); }
+.doc-crumb a { color: var(--muted); }
+.doc-index { list-style: none; padding: 0 !important; margin: 28px 0 0; display: grid; gap: 4px; }
+.doc-index li { margin: 0 !important; padding: 16px 0; border-top: 1px solid var(--line); display: grid; gap: 4px; }
+.doc-index a { font-weight: 600; font-size: 1.08rem; text-decoration: none; }
+.doc-index a:hover { text-decoration: underline; }
+.doc-index span { color: var(--muted); font-size: 15px; }
+.release h2 a { text-decoration: none; }
+.release h2 a:hover { text-decoration: underline; text-decoration-color: var(--accent); }
+.release-date { margin-left: .5em; font: 400 14px var(--mono); color: var(--faint); letter-spacing: 0; vertical-align: middle; }
+.release h3 { font-size: .8rem; text-transform: uppercase; letter-spacing: .08em; color: var(--accent); margin: 28px 0 8px; }
 .doc-body { min-width: 0; max-width: 780px; overflow-wrap: anywhere; }
-/* 한국어만 낱말 단위로 줄을 바꾼다 — 일본어는 낱말 사이에 빈칸이 없어 keep-all 이면 구두점에서만 끊긴다 */
-html[lang="ko"] .doc-body { word-break: keep-all; }
 .doc-body h1 { font-size: clamp(2rem, 4.6vw, 3rem); letter-spacing: -.025em; line-height: 1.15; margin: 0 0 32px; }
 .doc-body h2 { font-size: clamp(1.4rem, 2.6vw, 1.8rem); letter-spacing: -.015em; line-height: 1.25; margin: 72px 0 16px; padding-top: 24px; border-top: 1px solid var(--line); scroll-margin-top: 76px; }
 .doc-body h3 { font-size: 1.15rem; line-height: 1.35; margin: 40px 0 12px; scroll-margin-top: 76px; }
