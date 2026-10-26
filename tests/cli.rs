@@ -1304,6 +1304,18 @@ fn a_repository_can_say_in_gitattributes_that_it_does_not_want_the_driver() {
 
 /// 도구가 자라면 AGENTS.md 블록은 반드시 낡는다. 다시 쓸 길이 없으면 새
 /// 세션의 에이전트가 없는 명령을 쓰고 있는 명령을 모른다.
+/// **처음 세울 때 역할별 모델의 자리를 한 줄로 댄다 — 묻지 않는다**(moai-w25x.1ar, 2026-10-26 사용자 결정). `[models]` 는
+/// 사람의 설정이라 저장소마다 물으면 두 번째 저장소에서 같은 것을 또 묻는다. 다시 부른 `init` 은 그 줄을 안 낸다.
+#[test]
+fn init_names_moai_models_once_without_asking() {
+    let s = Scratch::new("initmodels");
+    git(s.path(), &["init", "-q"]);
+    let first = ok(s.path(), &["init", "argos"]);
+    assert!(first.contains("moai models"), "처음 세울 때 모델의 자리를 안 댄다\n{first}");
+    let again = ok(s.path(), &["init"]);
+    assert!(!again.contains("moai models"), "다시 부를 때마다 모델 줄을 낸다\n{again}");
+}
+
 #[test]
 fn init_can_be_run_again_to_refresh() {
     let s = init("twice");

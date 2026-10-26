@@ -734,6 +734,7 @@
   "init.all_current": "  everything is already in line",
   "init.claude_pointer": "There is a CLAUDE.md. Put one `@AGENTS.md` line in it and both get read",
   "init.next": "Next:  moai add 'first issue'",
+  "init.models": "Models per role are yours, in your user config — `moai models` shows them",
   "init.block_missing_local": "AGENTS.md block: none — this tracker is kept out of git, so init leaves the committed AGENTS.md alone (`moai init --guide block` or `file` plants one)",
   "init.ask_skill": "hooks · skills",
   "init.ask_skill_on": "install (this clone)",
