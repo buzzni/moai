@@ -72,6 +72,65 @@ def scenes(repo):
             *drag(42, 20, 58, wait=1.8),
             (3.5, None),
         ],
+        # v0.27.0 의 소식(moai-0fai): 간트 머리의 달 이름이 화면의 말을 따른다. make.sh 가 DEMO_LANG=ko 로 찍는다.
+        # 계획한 날은 gantt 처럼 plan.sh 가 단다. 주 걸음(-)으로 밀면 머리에 달 이름이 선다
+        'gantt-months': [
+            (2.0, SPC), (0.7, 'g'), (0.6, 'g'),
+            (2.5, 't'), (2.0, '-'),
+            (3.0, None),
+        ],
+        # v0.27.0 의 소식(moai-0fai): 위키 탭(SPC g w)의 / 가 moai wiki search 의 차례로 페이지를 세운다 —
+        # 그 낱말을 든 절이 높은 페이지가 먼저, 글자만 든 페이지가 뒤에
+        'wiki-search': [
+            (2.0, SPC), (0.7, 'g'), (0.6, 'w'),
+            (2.0, '/'), *typed('sync worker', gap=0.12),
+            (3.0, None),
+        ],
+        # 사용 방법의 화면별 절(moai-vlq7). 목록: 펼치고 내려가며 상세를 읽고, 찾고, 거르고, 기한으로 세운다.
+        # 거른 목록은 접힌 마일스톤 한 줄로 서니 Tab 으로 펼쳐 걸린 이슈를 보인다
+        'list': [
+            (2.0, TAB), (1.2, 'j'), *key('j', 'j', 'j', gap=0.9),
+            (1.8, '/'), *typed('conflict', gap=0.12), (1.4, ENTER),
+            (2.6, ESC),
+            (1.6, SPC), (0.7, 'f'), *typed('tag=sy', gap=0.12), (0.9, TAB), (1.2, ENTER),
+            (1.2, TAB),
+            (2.6, ESC),
+            (1.4, SPC), (0.7, 's'), (0.7, 'w'),
+            (3.0, None),
+        ],
+        # 칸반: 마일스톤마다 한 줄, 칸을 건너고 칸 안을 오간다
+        'board': [
+            (1.8, SPC), (0.7, 'g'), (0.6, 'b'),
+            (1.6, SPC), (0.7, 'v'), (0.6, 'd'), (0.5, ESC),
+            (1.8, 'l'), *key('l', 'j', 'l', 'j', 'j', 'l', 'h', gap=0.9),
+            (3.0, None),
+        ],
+        # 통계: 주마다의 흐름, 칸·우선순위, 걸린 시간, AI 작업. b 로 날 단위와 주 단위를 바꾼다
+        'stats': [
+            (1.8, SPC), (0.7, 'g'), (0.6, 's'),
+            (3.5, 'b'), (3.0, 'b'),
+            (2.0, 'j'), *key('j', 'j', 'j', 'j', 'j', 'j', 'j', 'j', 'j', gap=0.3),
+            (3.5, None),
+        ],
+        # 위키: 페이지를 열고, 링크를 골라 따라가고, 돌아온다. 그다음 위키 안에서 찾는다.
+        # 돌아온 뒤에는 고른 링크도 걸린 찾기도 없어 Esc 가 창을 닫는다(wiki.rs 의 Close) — 치지 않는다. / 는 어느 칸에서나 연다.
+        # 끝은 Enter 로 건다 — 칸이 열린 채면 main() 의 q 가 거기 찍혀 마지막 화면이 0 hits 가 된다
+        'wiki': [
+            (1.8, SPC), (0.7, 'g'), (0.6, 'w'),
+            (1.6, 'j'), (1.2, ENTER),
+            (2.2, TAB), (1.2, TAB), (1.4, ENTER),
+            (2.6, BKSP),
+            (2.4, '/'), *typed('conflict', gap=0.12), (1.4, ENTER),
+            (3.0, None),
+        ],
+        # v0.28.0 의 소식(moai-8kvc): ? 가 키 목록 창을 연다 — 화면 크기에 따라 한~세 열. make.sh 가 창 크기를 바꿔
+        # 두 번 찍는다. 열고 굴리고(j) 다시 ? 로 닫는다
+        'keys': [
+            (2.5, '?'),
+            (3.0, 'j'), *key('j', 'j', 'j', 'j', 'j', 'j', 'j', gap=0.25),
+            (2.0, '?'),
+            (2.0, None),
+        ],
     }
 
 def main():
@@ -81,7 +140,7 @@ def main():
     moai = os.path.abspath(moai) if os.sep in moai else (shutil.which(moai) or moai)
     os.environ['MOAI'] = moai   # 장면의 뒤쪽 명령(sh)도 같은 바이너리를 부른다
     # 녹화하는 사람의 환경이 화면에 새지 않게: 정체·키·색·말은 데모의 것으로
-    env = dict(os.environ, TERM='xterm-256color', MOAI_NO_UPDATE_CHECK='1', COLORTERM='truecolor', MOAI_LANG='en',
+    env = dict(os.environ, TERM='xterm-256color', MOAI_NO_UPDATE_CHECK='1', COLORTERM='truecolor', MOAI_LANG=os.environ.get('DEMO_LANG', 'en'),
                MOAI=moai, MOAI_CONFIG=os.path.join(repo, '.demo-home', 'config.toml'))
     for k in ('MOAI_NOW', 'MOAI_ACTOR', 'MOAI_KEYS', 'NO_COLOR'):
         env.pop(k, None)

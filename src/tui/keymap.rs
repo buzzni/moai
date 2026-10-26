@@ -488,6 +488,7 @@ impl Named for Browse {
             ReadGroup => own("read_group"),
             // `[gantt]` 절의 이름이라 앞말을 안 단다(moai-l80o) — `gantt.zoom_in`.
             Gantt(p) => own(p.name()),
+            Help => own("help"),
             Plan(n) => Name::Own(format!("nudge_{}", n.name())),
         }
     }
@@ -1022,7 +1023,7 @@ mod tests {
             each(LINKS),
             each(CONFIRM),
         ];
-        assert_eq!(counts, [61, 8, 12, 2, 9, 6, 2, 9, 2, 1]);
+        assert_eq!(counts, [62, 8, 12, 2, 9, 6, 2, 9, 2, 1]);
         // 이동은 다섯 표 모두에서 여덟이 다 선다 — `[moves]` 의 한 줄이 어느 표에서는 없는 동작이면 안 된다.
         fn moves<A: Named>(table: &[Bind<A>]) -> usize {
             names(table).iter().filter(|(n, _)| matches!(n, Name::Move(_))).count()
@@ -1108,8 +1109,8 @@ mod tests {
         // 안 바꾼 표는 기본 표 그대로다.
         assert_eq!(map.pick, PICK);
         // 별칭까지 간다 — `/` 하나만 적으면 메뉴의 `SPC /` 도 떨어진다.
-        let (map, _) = build("[browse]\ngrep = \"?\"\n");
-        assert_eq!(run(map.browse, "?"), Lookup::Run(Browse::Grep));
+        let (map, _) = build("[browse]\ngrep = \"!\"\n");
+        assert_eq!(run(map.browse, "!"), Lookup::Run(Browse::Grep));
         assert_eq!(run(map.browse, "SPC /"), Lookup::Unknown);
     }
 
@@ -1488,7 +1489,7 @@ mod tests {
         assert!(!help.contains("SPC q"), "옛 이름이 남았다");
         assert!(help.contains("\n    L        list                SPC g b  board"), "칸 맞춤이 무너졌다:\n{help}");
         // 글 속의 이름은 안 채운다 — `L, SPC c h` 처럼 선다.
-        assert!(help.contains("(SPC g, L, SPC c h,"), "{help}");
+        assert!(help.contains("\n  L, SPC c h,"), "{help}");
         assert!(help.contains("(none)"), "뗀 키를 안 댔다");
         // 위의 줄 글(`moai --help` 의 명령 목록)도 바뀐다.
         let top = crate::cli::command(&map);
@@ -1597,7 +1598,7 @@ mod tests {
         let (map, problems) = build(&open);
         assert_eq!(problems, Vec::new());
         assert_eq!(listing(&map), listing(&Keymap::default()));
-        assert_eq!(open.matches(" = ").count(), 112, "틀이 동작을 빠뜨렸다");
+        assert_eq!(open.matches(" = ").count(), 113, "틀이 동작을 빠뜨렸다");
         // 주석 그대로면 아무것도 안 바뀐다.
         assert_eq!(build(&t), (Keymap::default(), Vec::new()));
     }

@@ -2679,7 +2679,9 @@ Order:
   movement key moves the focused pane — to scroll the detail, go there with
   Ctrl-w w.
   / searches, Esc clears the filter you set. r marks the row under the cursor
-  as read (see [NEW] below).
+  as read (see [NEW] below). ? (or SPC h) opens a window listing every
+  key, read from the same table as moai keys. The movement keys scroll
+  it and ? closes it again.
   The search and filter fields take Enter to apply and Esc to give up, the
   search filters the list as you type, and Tab and Shift-Tab pick where it
   looks: everything, id, title, tag, body or note (everything reads the
@@ -2700,13 +2702,13 @@ Order:
   stands up only what works where you are, ignores keys it does not know,
   closes on Esc or SPC and goes one level up on Bksp. Keys that move
   the focused pane close the menu and make that move in the same press,
-  unless a key on that level holds the letter (SPC g, SPC g l, SPC c h,
-  SPC v l, SPC m g).
+  unless a key on that level holds the letter (SPC g, SPC h,
+  SPC g l, SPC c h, SPC v l, SPC m g).
   Toggles and sorts (SPC v, SPC c, SPC s) do not close it — try them, watch
   the state, and leave with Esc. That level says so at the bottom right with a
   close hint.
     SPC /    search              SPC f    filter             SPC n    jot
-    SPC q    quit
+    SPC h    keys                SPC q    quit
     SPC p a  register            SPC p d  drop from the list
   Screen — which one stands; the root menu names it, as in [board]:
     SPC g l  list                SPC g b  board — described below

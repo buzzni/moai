@@ -3,8 +3,11 @@
 //     MOAI=<moai 바이너리> node scripts/site-demo/record-web.mjs <seed 저장소> <내보낼 디렉터리>
 //
 // playwright 는 이 저장소의 의존이 아니다 — 부르는 쪽이 NODE_PATH 로 건넨다. 장면마다 브라우저
-// 문맥을 하나씩 열어 webm 하나와 첫 화면 png(포스터) 하나를 낸다. 녹화에는 마우스가 안 찍혀서
+// 문맥을 하나씩 열어 webm 하나와, 장면이 끝난 화면의 png(포스터) 하나를 낸다. 녹화에는 마우스가 안 찍혀서
 // 가짜 커서를 페이지에 얹는다 — 보는 사람이 무엇을 눌렀는지 따라올 수 있게.
+// site/assets/media 의 클립은 이것이 낸 그대로가 아니다(moai-vlq7): VP9 crf 40 으로 다시 굽고 앞의 빈 화면을
+// 잘랐으며, web-wiki.png 는 끝 화면(이슈로 건너간 목록)이 아니라 위키 페이지가 선 한 장면을 클립에서 떠 왔다.
+// 다시 찍으면 그 손질도 다시 한다 — 그대로 덮으면 위키의 포스터가 목록 화면이 된다.
 import { execFileSync, spawn } from 'node:child_process'
 import { createInterface } from 'node:readline'
 import { mkdirSync, readFileSync, renameSync } from 'node:fs'
@@ -178,6 +181,55 @@ const scenes = {
     await page.waitForTimeout(2400)
   },
 
+  // 막대 끌기만 (v0.27.0 의 소식, moai-0fai). 놓으면 날이 아니라 옮긴 만큼을 쓴다(moai edit --shift) — 그래서 그림은
+  // v0.25.0 의 끌기와 같고, 다른 것은 뒤에서 옮겨진 줄도 거기서부터 옮겨 간다는 것이다. 계획한 날은 plan.sh 가 단다
+  async drag(page) {
+    const TARGET = 'Sync attachments larger than 10 MB'
+    await page.goto(url)
+    await page.waitForTimeout(1000)
+    await keys(page, 'Space', 'g', 'g')
+    await page.waitForSelector('.m-gantt .lane .bar')
+    await page.keyboard.press('t'); await page.waitForTimeout(1000)
+    const gridRow = page.locator(`.m-gantt .g-row:has(.c-title[title="${TARGET}"])`).first()
+    await gridRow.evaluate((n) => {
+      const box = n.closest('.g-scroll')
+      const head = box.querySelector('.g-left .g-head').getBoundingClientRect().bottom
+      box.scrollTop += n.getBoundingClientRect().top - head - 28 * 4
+    })
+    await page.waitForTimeout(600)
+    await glide(page, gridRow)
+    await page.waitForTimeout(1000)
+    const id = await gridRow.getAttribute('data-id')
+    const plan = page.locator(`.m-gantt .lane[data-id="${id}"] .bar.b-plan`).first()
+    const p = await center(plan)
+    await page.mouse.move(p.x, p.y, { steps: 20 })
+    await page.waitForTimeout(1200)
+    // 하루 뒤로(날 걸음에서 하루는 40px) — 이틀이면 에픽의 마감을 넘어 거절된다. 그다음 하루 앞으로 되돌린다
+    await dragBy(page, p.x, p.y, 40, 0, 24)
+    await page.waitForTimeout(1500)
+    readAll()
+    await page.waitForTimeout(1200)
+    await still(page, 'web-drag-mark.png', gridRow, page.locator(`.m-gantt .lane[data-id="${id}"]`))
+    const q = await center(plan)
+    await dragBy(page, q.x, q.y, -40, 0, 24)
+    await page.waitForTimeout(1500)
+    readAll()
+    await page.waitForTimeout(1500)
+  },
+  // 이슈 패널의 Wiki 토막 (v0.27.0 의 소식, moai-0fai): 커밋 뒤에 그 이슈를 이름 댄 페이지와 관련 절이 선다
+  async wikipanel(page) {
+    await page.goto(url)
+    await page.waitForTimeout(1200)
+    await glide(page, row(page, 'v1.4 — Sync'))
+    await keys(page, 'Tab', 'Space', 'o', 'd', 'Escape')
+    await page.waitForTimeout(1200)
+    await glide(page, row(page, 'Resolve conflicts when two devices edit the same note'))
+    await page.waitForTimeout(2000)
+    const wiki = page.locator('.moai-detail-wiki').first()
+    await wiki.scrollIntoViewIfNeeded()
+    await page.waitForTimeout(800)
+    await still(page, 'web-wikipanel-mark.png', wiki)
+  },
   // 이슈 상세 읽기: 트리를 펼쳐 에픽과 이슈를 차례로 고르고, 본문·커밋·이력까지 내려 읽는다
   async detail(page) {
     await page.goto(url)
@@ -195,6 +247,19 @@ const scenes = {
     const history = page.getByText('History', { exact: true }).first()
     if (await history.count()) { await glide(page, history); await page.waitForTimeout(800); await wheel(page, 120, 6, 450) }
     await page.waitForTimeout(2200)
+  },
+  // 사용 방법의 칸반 절(moai-vlq7): 마일스톤마다 한 줄의 보드에서 칸을 건너고 카드를 골라 상세를 읽는다
+  async board(page) {
+    await page.goto(url)
+    await page.waitForTimeout(1200)
+    await keys(page, 'Space', 'g', 'b')
+    await page.waitForTimeout(2000)
+    for (const k of ['l', 'l', 'j', 'l', 'j', 'j', 'h']) { await page.keyboard.press(k); await page.waitForTimeout(800) }
+    await page.waitForTimeout(800)
+    await glide(page, page.getByText('Resolve conflicts when two devices edit the same note', { exact: true }).first())
+    await page.waitForTimeout(2600)
+    await glide(page, page.getByText('Invite people to a notebook by email', { exact: true }).first())
+    await page.waitForTimeout(2600)
   },
   // 위키: 첫 페이지에서 링크를 따라가고, 본문의 이슈 id 를 눌러 그 이슈로 건너간다
   async wiki(page) {
