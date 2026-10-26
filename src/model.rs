@@ -1478,6 +1478,12 @@ pub enum Unshifted {
 }
 
 impl Issue {
+    /// 계획 날이 **적혀** 있는가 — 못 읽는 글도 적힌 날이다. 하루 세우기(TUI 의 `Plan::Day`, `edit --if-unplanned`)가
+    /// 그것을 덮으면 그 글이 사라진다.
+    pub fn has_days(&self) -> bool {
+        self.starts_on.is_some() || self.due_on.is_some()
+    }
+
     /// 계획을 `days` 날 옮긴 새 (시작, 기한)(moai-i4hf.9xi). **제 날만 옮긴다** — 날이 한 덩이라는 규칙
     /// (`report::gantt`)대로, 하나라도 적었으면 그 줄의 것이고 비었으면 막대가 없거나 멤버에서 센 것이다.
     ///

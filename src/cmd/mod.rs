@@ -787,7 +787,10 @@ pub fn refuse_if_flag_like(value: &str, at: FlagLike<'_>, lang: crate::i18n::Lan
         FlagLike::EditTitle(_) => a.strip_prefix("--title=").is_some_and(|v| v.trim() == value),
         _ => a == "--",
     };
-    if std::env::args().any(|a| escaped(&a)) {
+    // **`args_os` 로 훑는다**(리뷰 moai-xp7l.mug) — `args` 는 UTF-8 이 아닌 인자 하나에 패닉한다. `-C <dir>` 는 아무
+    // 바이트나 받는 경로라, 그 자리에 선 저장소에서 `wiki learn`·`add`·`note` 가 101 로 죽었다. UTF-8 이 아닌 인자는
+    // `--` 도 붙여 쓴 값도 아니다.
+    if std::env::args_os().any(|a| a.to_str().is_some_and(&escaped)) {
         return Ok(());
     }
     let flag_like = value.starts_with('-') && value.chars().count() > 1 && !value.contains(char::is_whitespace);

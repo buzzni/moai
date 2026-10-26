@@ -110,14 +110,20 @@ fn side(others: &[usize], vis: &Range<usize>, focus: usize, ext: &impl Fn(usize)
 /// - `ext(row)`: 줄의 막대가 차지하는 칸 `[시작, 끝)` — 맞히기와 같은 합집합([`crate::GanttRow::span`])이라
 ///   끝은 계획·실제·기한 넘김(`!`) 가운데 가장 늦은 쪽이다. 없으면(날짜 없는 줄) 길을 못 그린다.
 /// - `vis`: 화면에 든 줄 번호.
+/// - `cols`: 화면에 든 날짜 칸 `[0, 너비)`. 긴 길(시 단위 막대가 한 해면 한 줄에 수천 칸)의 화면 밖 칸을
+///   지도에 담지 않는다 — 그리는 쪽이 어차피 자르고, 화면 밖 칸은 `occupied` 도 늘 거짓이다. 연결 칸 같은
+///   낱칸(꺾는 칸·화살촉)은 밖이어도 담는다 — 개수 글의 자리를 `spine` 이 그 칸에서 읽기 때문이다.
 /// - `occupied(row, col)`: 그 칸에 이미 막대나 표식이 있나. 길이 지날 칸이 막혔는지만 본다.
 pub(crate) fn route(
     focus: usize,
     links: &[Link],
     ext: impl Fn(usize) -> Option<(i64, i64)>,
     vis: Range<usize>,
+    cols: Range<i64>,
     occupied: impl Fn(usize, i64) -> bool,
 ) -> Route {
+    // 구간 `[a, b)` 중 화면에 드는 칸만.
+    let inside = |a: i64, b: i64| a.max(cols.start)..b.min(cols.end);
     let mut out = Route::default();
     let Some((fs, fe)) = ext(focus).filter(|_| vis.contains(&focus)) else { return out };
     let pick = |is_to: bool| {
@@ -142,10 +148,10 @@ pub(crate) fn route(
     for &(r, e) in &sd.seen {
         rows.push(r);
         // 길 = 막대 끝 다음 칸부터 연결 칸까지. 끝이 연결 칸을 넘으면(겹친 일정) 지날 자리가 없다.
-        let free = e.is_some_and(|(_, end)| end <= c && (end..=c).all(|x| !occupied(r, x)));
+        let free = e.is_some_and(|(_, end)| end <= c && inside(end, c + 1).all(|x| !occupied(r, x)));
         if free {
             let end = e.map_or(c, |p| p.1);
-            for x in end..c {
+            for x in inside(end, c) {
                 out.arm(r, x, L | R);
             }
             out.arm(r, c, L);
@@ -168,10 +174,10 @@ pub(crate) fn route(
     for &(r, e) in &sd.seen {
         rows.push(r);
         // 목표 줄: 연결 칸 다음부터 시작 앞 칸의 화살촉까지. 시작이 너무 가까우면 못 닿는다.
-        let free = e.is_some_and(|(start, _)| start >= c2 + 2 && (c2..start).all(|x| !occupied(r, x)));
+        let free = e.is_some_and(|(start, _)| start >= c2 + 2 && inside(c2, start).all(|x| !occupied(r, x)));
         if let Some((start, _)) = e.filter(|_| free) {
             out.arm(r, c2, R);
-            for x in c2 + 1..start - 1 {
+            for x in inside(c2 + 1, start - 1) {
                 out.arm(r, x, L | R);
             }
             out.cells.entry((r, start - 1)).or_default().arrow = true;
@@ -180,7 +186,7 @@ pub(crate) fn route(
         }
     }
     if !sd.seen.is_empty() || sd.above + sd.below > 0 {
-        for x in fe..c2 {
+        for x in inside(fe, c2) {
             out.arm(focus, x, L | R);
         }
         out.arm(focus, c2, L);
@@ -243,7 +249,7 @@ mod tests {
         wall: &[(usize, i64)],
     ) -> Route {
         let links: Vec<Link> = links.iter().map(|&(from_row, to_row)| Link { from_row, to_row }).collect();
-        route(focus, &links, |r| bars.get(r).copied().flatten(), vis, |r, c| wall.contains(&(r, c)))
+        route(focus, &links, |r| bars.get(r).copied().flatten(), vis, -1000..1000, |r, c| wall.contains(&(r, c)))
     }
 
     fn arms(r: &Route, row: usize, col: i64) -> u8 {
@@ -365,5 +371,23 @@ mod tests {
         let bars = [None, Some((9, 12))];
         let r = run(1, &[(0, 1)], &bars, 0..2, &[]);
         assert_eq!(r.marks, vec![(0, Dir::Down)]);
+    }
+}
+
+#[cfg(test)]
+mod window_tests {
+    use super::*;
+
+    #[test]
+    fn a_year_long_path_keeps_only_the_cells_inside_the_window() {
+        // 막는 줄 0 은 칸 0 에서 끝나고 커서 줄 1 은 칸 100_000 에서 시작한다 — 화면은 [0, 80) 뿐이다.
+        let bars = [Some((0, 1)), Some((100_000, 100_010))];
+        let links = [Link { from_row: 0, to_row: 1 }];
+        let r = route(1, &links, |r| bars[r], 0..2, 0..80, |_, _| false);
+        assert!(r.cells.keys().all(|&(_, c)| (0..80).contains(&c) || c >= 99_998), "{:?}", r.cells.len());
+        assert!(r.cells.len() < 200, "{}", r.cells.len());
+        assert_eq!(r.cells.get(&(0, 40)).map(|p| p.arms), Some(L | R));
+        // 연결 칸은 밖이어도 담긴다.
+        assert_eq!(r.cells.get(&(0, 99_998)).map(|p| p.arms), Some(L | D));
     }
 }

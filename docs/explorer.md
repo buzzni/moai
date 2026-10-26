@@ -38,7 +38,14 @@ directories.
   chose and its detail stay put even off screen, and the next `j` or `k` brings
   the list back to it
 - The detail describes the row under the cursor. `Ctrl-w w` moves the focus there
-  so the same keys scroll it, and back again
+  so the same keys scroll it, and back again. After the commits it lists the
+  wiki about the row, as `moai show <id>` does: the pages that name the row or
+  its epic, then the related sections its title finds, `path:line` first. It
+  leaves out the lessons the row's own notes point at (it does not read the
+  notes), so such a lesson can stand among the related sections here while
+  `moai show <id>` lists it as a lesson. The
+  wiki is read once per checkout, so a page written after the explorer opened
+  shows once `SPC g w` has read the wiki again, or the next time it opens
 
 **What the list shows is the view.** To begin with every column is shown,
 done included, and [deferred](glossary.md#deferred) work is hidden; the path
@@ -131,7 +138,9 @@ remain readable; if both keys exist, `hide_backlog` wins.
   overview. A link that leads nowhere, an address outside the wiki and
   an id the tracker does not hold stay in that list marked `(none)` or
   `(outside)`, and taking one only says so — picking or clicking one does the
-  same. `/` searches the titles and bodies and narrows the list. `Esc` drops a
+  same. `/` searches the titles and bodies and narrows the list, in
+  `moai wiki search`'s order: the pages its words rank, best first, then the
+  pages that only contain the letters typed so far. `Esc` drops a
   picked link first, then clears that search, then goes back to where you were.
   `SPC v r` shows the page as written, where no link is marked for `Tab`. It
   reads the pages afresh each time it opens and writes none of them — a page is
