@@ -6895,7 +6895,9 @@ pub fn guard_tmux(line: &Line<'_>) -> Decision {
 /// 규칙 4 가 보는 **환경**(moai-e7vm) — `guard_tmux` 가 게으른 칸에 담아 [`guard_tmux_in`] 에 넘긴다. 판정이
 /// 그것에 달린 줄에서 한 번 읽히고, 지나가는 줄에서는 안 읽힌다.
 pub struct TmuxEnv {
-    /// `$TMUX` 가 cmux 의 가짜([`crate::skill::CMUX_STAND_IN`])로 시작하는가.
+    /// **cmux 의 shim 이 `PATH` 에 섰는가** — `$TMUX` 가 cmux 의 가짜([`crate::skill::CMUX_STAND_IN`])로 시작하거나, cmux 가
+    /// 알린 shim 자리(`CMUX_CLAUDE_TEAMS_TMUX_SHIM`)가 서거나, cmux 의 탭(`CMUX_SURFACE_ID`)에서 `PATH` 의 첫 tmux 가 shim 으로
+    /// 보인다([`TmuxEnv::sense`], moai-qrja.o3l). 이름은 처음 잣대의 것이다.
     pub stand_in: bool,
     /// shim 의 정규 경로 — `PATH` 의 `tmux` 가운데 정규 경로에 `cmux` 가 든 첫 것, 없으면 첫 것.
     /// `None` 이면 못 풀었다 — 모든 `tmux` 를 shim 으로 읽는다.
@@ -6904,6 +6906,30 @@ pub struct TmuxEnv {
     pub real: Option<String>,
     /// 절대 경로 낱말을 정규 경로로 푸는 자 — 시험이 가짜로 갈아 끼운다.
     pub canon: fn(&str) -> Option<std::path::PathBuf>,
+    /// 그 정규 경로의 파일이 shim 의 글로 보이는가([`shim_text`]) — 시험이 가짜로 갈아 끼운다.
+    pub looks: fn(&std::path::Path) -> bool,
+}
+
+/// cmux 의 shim 이 알리는 제 자리(cmux 0.65.0 `configureClaudeTeamsEnvironment`) — claude-teams 가 세우고 `unset TMUX` 로는 안
+/// 걷힌다.
+const SHIM_VAR: &str = "CMUX_CLAUDE_TEAMS_TMUX_SHIM";
+
+/// **이 파일이 cmux 의 shim 의 글인가**(moai-qrja.o3l) — shim 은 `~/.cmuxterm/<자리>/tmux` 에 놓이는 작은 bash 글이고
+/// `cmux __tmux-compat "$@"` 로 넘긴다(cmux 0.65.0 `createTmuxCompatShimDirectory`). 자리 이름에 기대지 않는 셋째 잣대다 —
+/// 자리를 옮긴 shim 도 글은 같다.
+///
+/// **보통 파일만, 64KB 까지만 연다** — `PATH` 의 칸은 손으로 놓을 수 있는 자리라, 파이프가 서 있으면 여는 자리에서 훅이
+/// 멈춘다. 진짜 tmux 는 메가바이트를 넘는 실행 파일이라 크기에서 걸러져 안 읽힌다.
+fn shim_text(at: &std::path::Path) -> bool {
+    use std::io::Read;
+    const MOST: u64 = 64 * 1024;
+    let Ok(meta) = std::fs::metadata(at) else { return false };
+    if !meta.is_file() || meta.len() > MOST {
+        return false;
+    }
+    let mut text = Vec::new();
+    std::fs::File::open(at).and_then(|f| f.take(MOST).read_to_end(&mut text)).is_ok()
+        && text.windows(b"__tmux-compat".len()).any(|w| w == b"__tmux-compat")
 }
 
 /// 이 정규 경로가 cmux 의 것으로 보이는가 — `PATH` 의 차례가 틀려도 거절문이 shim 을 "진짜 tmux" 로 내지 않게
@@ -6926,22 +6952,61 @@ impl TmuxEnv {
     /// - **shim 을 `PATH` 의 차례 하나로만 가리지 않는다** — 훅의 `PATH` 에서 첫 `tmux` 가 진짜이고 cmux 의 것이
     ///   뒤에 서면, 차례로만 가리는 판은 그 cmux 의 것을 `real` 로 내 거절문이 바로 그 shim 을 지나가는 줄로 건넨다
     pub fn read() -> Self {
-        let stand_in = std::env::var("TMUX").is_ok_and(|t| t.starts_with(crate::skill::CMUX_STAND_IN));
-        let mut env = TmuxEnv { stand_in, shim: None, real: None, canon: Self::canon_fs };
-        if !stand_in {
-            return env;
-        }
-        let found: Vec<(std::path::PathBuf, std::path::PathBuf)> =
+        let fake = std::env::var("TMUX").is_ok_and(|t| t.starts_with(crate::skill::CMUX_STAND_IN));
+        let named = std::env::var_os(SHIM_VAR).map(std::path::PathBuf::from).filter(|p| p.is_absolute());
+        let surface = std::env::var_os("CMUX_SURFACE_ID").is_some_and(|v| !v.is_empty());
+        let found = || {
             std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())
                 .filter(|dir| dir.is_absolute())
                 .map(|dir| dir.join("tmux"))
                 .filter(|cand| crate::cmd::runnable(cand))
                 .filter_map(|cand| std::fs::canonicalize(&cand).ok().map(|c| (cand, c)))
-                .collect();
-        env.shim = found.iter().find(|(_, c)| cmux_path(c)).or(found.first()).map(|(_, c)| c.clone());
+                .collect()
+        };
+        Self::sense(
+            fake,
+            named.map(|p| std::fs::canonicalize(&p).unwrap_or(p)),
+            surface,
+            found,
+            Self::canon_fs,
+            shim_text,
+        )
+    }
+
+    /// [`TmuxEnv::read`] 의 판단 — 읽은 환경과 `PATH` 의 tmux 들(`(그 자리, 정규 경로)`, 차례대로)을 받는다. `found` 는
+    /// 셋째 잣대가 설 때만 부른다 — **cmux 의 표식이 하나도 없으면 파일 시스템을 안 건드린다**.
+    ///
+    /// **가짜 `$TMUX` 하나로 가르지 않는다**(moai-qrja.o3l, 리뷰 moai-e7vm.ez3 2·13번). `unset TMUX` 뒤에 띄운 claude 는 shim 을
+    /// `PATH` 앞에 든 채 가짜만 잃어, 그 판의 `tmux -L x kill-session` 이 사람의 워크스페이스를 닫았다. shim 이 알린 자리
+    /// ([`SHIM_VAR`])와 cmux 의 탭 표식 아래 `PATH` 의 첫 tmux 가 shim 인가도 본다. cmux 의 탭이어도 shim 이 앞에 안 섰으면
+    /// 진짜 tmux 다(claude-teams 밖의 탭).
+    ///
+    /// **shim 은 차례 하나로만 가리지 않는다** — 알린 자리, 정규 경로에 `cmux` 가 든 것, 글이 shim 의 것([`shim_text`]) 셋 중
+    /// 하나면 shim 이다. 차례로 가리던 판은 진짜 tmux 가 앞에 서고 shim 이 cmux 밖의 자리에 놓이면 그 shim 을 `real` 로 내,
+    /// 거절문이 바로 그 shim 을 지나가는 줄로 건넸다. 가짜 `$TMUX` 아래에서 아무것도 shim 으로 안 보이면 전처럼 첫 것이다.
+    pub fn sense(
+        fake: bool,
+        named: Option<std::path::PathBuf>,
+        surface: bool,
+        found: impl FnOnce() -> Vec<(std::path::PathBuf, std::path::PathBuf)>,
+        canon: fn(&str) -> Option<std::path::PathBuf>,
+        looks: fn(&std::path::Path) -> bool,
+    ) -> Self {
+        let mut env = TmuxEnv { stand_in: false, shim: None, real: None, canon, looks };
+        if !fake && named.is_none() && !surface {
+            return env;
+        }
+        let found = found();
+        let shimmy = |c: &std::path::PathBuf| Some(c) == named.as_ref() || cmux_path(c) || looks(c);
+        env.stand_in = fake || named.is_some() || found.first().is_some_and(|(_, c)| shimmy(c));
+        if !env.stand_in {
+            return env;
+        }
+        env.shim =
+            named.clone().or_else(|| found.iter().find(|(_, c)| shimmy(c)).or(found.first()).map(|(_, c)| c.clone()));
         env.real = found
             .iter()
-            .find(|(_, c)| Some(c) != env.shim.as_ref() && !cmux_path(c))
+            .find(|(_, c)| Some(c) != env.shim.as_ref() && !shimmy(c))
             .map(|(cand, _)| cand.display().to_string());
         env
     }
@@ -6953,7 +7018,7 @@ impl TmuxEnv {
             return true;
         }
         let Some(shim) = &self.shim else { return true };
-        (self.canon)(word).is_some_and(|c| c == *shim || cmux_path(&c))
+        (self.canon)(word).is_some_and(|c| c == *shim || cmux_path(&c) || (self.looks)(&c))
     }
 }
 
@@ -12674,7 +12739,7 @@ mod tests {
         }
         // 통과 쪽은 시험 프로세스의 `$TMUX` 를 안 읽는다 — 가짜 밖의 환경을 손으로 세워 순수한 몸에 건넨다.
         // (가짜 아래는 아래 시험이 환경을 갈아 끼워 잰다.)
-        let outside = TmuxEnv { stand_in: false, shim: None, real: None, canon: |_| None };
+        let outside = TmuxEnv { stand_in: false, shim: None, real: None, canon: |_| None, looks: |_| false };
         let pass = |cmd: &str| guard_tmux_in(&Line::new(cmd), &&outside);
         for cmd in [
             "tmux -L moai-ju21 kill-server",
@@ -12717,7 +12782,10 @@ mod tests {
             }
         }
         let reads = |cmd: &str| {
-            let env = Counted(Default::default(), TmuxEnv { stand_in: true, shim: None, real: None, canon: |_| None });
+            let env = Counted(
+                Default::default(),
+                TmuxEnv { stand_in: true, shim: None, real: None, canon: |_| None, looks: |_| false },
+            );
             let _ = guard_tmux_in(&Line::new(cmd), &env);
             env.0.get()
         };
@@ -12754,6 +12822,7 @@ mod tests {
             shim: Some("/opt/cmux/bin/tmux".into()),
             real: real.map(String::from),
             canon,
+            looks: |_| false,
         };
         let inside = env(true, Some("/usr/bin/tmux"));
         let run = |e: &TmuxEnv, cmd: &str| guard_tmux_in(&Line::new(cmd), &e);
@@ -12857,6 +12926,58 @@ mod tests {
             assert_eq!(run(&outside, cmd), Decision::Pass, "막혔다 — {cmd}");
         }
         assert!(matches!(run(&outside, "tmux kill-server"), Decision::Deny(_)));
+    }
+
+    /// **shim 을 가짜 `$TMUX` 와 `PATH` 차례 말고도 알아본다**(moai-qrja.o3l, 리뷰 moai-e7vm.ez3 2·13번) — `unset TMUX` 뒤의
+    /// claude 는 shim 이 알린 자리로, cmux 탭 아래 shim 이 앞에 선 `PATH` 는 그 글로 안다. 진짜 tmux 가 앞에 서고 shim 이 cmux
+    /// 밖에 놓인 `PATH` 에서 shim 을 `real` 로 안 낸다. cmux 의 표식이 없으면 `PATH` 를 안 읽는다.
+    #[test]
+    fn the_shim_is_known_by_more_than_the_stand_in_and_the_path_order() {
+        use std::path::{Path, PathBuf};
+        fn looks(c: &Path) -> bool {
+            c == Path::new("/home/me/.local/shims/tmux")
+        }
+        let pb = |s: &str| PathBuf::from(s);
+        let path =
+            || vec![(pb("/usr/bin/tmux"), pb("/usr/bin/tmux")), (pb("/opt/s/tmux"), pb("/home/me/.local/shims/tmux"))];
+        // 진짜 tmux 가 앞에 서고 shim 이 cmux 밖에 놓였다 — 글로 shim 을 알아 `real` 로 안 낸다.
+        let ahead = TmuxEnv::sense(true, None, false, path, |_| None, looks);
+        assert_eq!(ahead.shim.as_deref(), Some(Path::new("/home/me/.local/shims/tmux")), "{:?}", ahead.real);
+        assert_eq!(ahead.real.as_deref(), Some("/usr/bin/tmux"));
+        // `unset TMUX` 뒤 — 가짜는 없어도 shim 이 알린 자리가 선다.
+        let named = TmuxEnv::sense(false, Some(pb("/home/me/.local/shims/tmux")), false, path, |_| None, |_| false);
+        assert!(named.stand_in, "알린 shim 자리를 못 봤다");
+        assert_eq!(named.real.as_deref(), Some("/usr/bin/tmux"));
+        let run = |e: &TmuxEnv, cmd: &str| guard_tmux_in(&Line::new(cmd), &e);
+        assert!(matches!(run(&named, "tmux -L x kill-session"), Decision::Deny(_)), "가짜 없는 shim 아래 -L 을 믿었다");
+        // cmux 의 탭 — shim 이 `PATH` 앞에 서면 shim 아래고, 아니면 진짜 tmux 다.
+        let front =
+            || vec![(pb("/opt/s/tmux"), pb("/home/me/.local/shims/tmux")), (pb("/usr/bin/tmux"), pb("/usr/bin/tmux"))];
+        assert!(TmuxEnv::sense(false, None, true, front, |_| None, looks).stand_in);
+        assert!(
+            !TmuxEnv::sense(false, None, true, path, |_| None, looks).stand_in,
+            "shim 이 뒤에 선 탭을 shim 아래로 봤다"
+        );
+        // cmux 의 표식이 없으면 `PATH` 를 안 읽는다.
+        let plain = TmuxEnv::sense(false, None, false, || panic!("PATH 를 읽었다"), |_| None, looks);
+        assert!(!plain.stand_in);
+    }
+
+    /// **shim 의 글은 그 글로 알아본다**(moai-qrja.o3l) — 큰 실행 파일과 보통 파일 아닌 것은 안 연다.
+    #[test]
+    fn a_shim_script_is_read_by_its_text() {
+        let s = crate::scratch::Scratch::real("hookshim");
+        let shim = s.path().join("tmux");
+        std::fs::write(&shim, "#!/usr/bin/env bash\nexec \"${CMUX_OMO_CMUX_BIN:-cmux}\" __tmux-compat \"$@\"\n")
+            .unwrap();
+        assert!(shim_text(&shim));
+        let real = s.path().join("real");
+        std::fs::write(&real, "#!/bin/sh\nexec /usr/bin/tmux \"$@\"\n").unwrap();
+        assert!(!shim_text(&real));
+        assert!(!shim_text(s.path()), "디렉터리를 열었다");
+        let big = s.path().join("big");
+        std::fs::write(&big, format!("{}__tmux-compat", "x".repeat(70 * 1024))).unwrap();
+        assert!(!shim_text(&big), "64KB 넘는 파일을 읽었다");
     }
 
     /// **`hook --help` 의 이벤트 목록은 `Event` 의 글과 같다**(moai-h0r2) — clap 의 값 목록을 숨기고
