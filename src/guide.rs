@@ -8386,6 +8386,7 @@ stop sending outside work while a release runs",
     }
 
     /// `2026-10-26T11:00:00.000Z` 꼴을 유닉스 밀리초로 — 시험이 `history.jsonl` 의 `timestamp` 를 짓는 데만 쓴다.
+    #[cfg(unix)]
     fn chrono_ms(t: &str) -> i64 {
         let day: i64 = t[8..10].parse().unwrap();
         let hour: i64 = t[11..13].parse().unwrap();
