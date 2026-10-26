@@ -12,6 +12,8 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+## [0.27.0] - 2026-10-26
+
 ### Added
 
 - **`moai wiki ls --json` and `moai wiki search --json` carry `dir_abs`**, the
