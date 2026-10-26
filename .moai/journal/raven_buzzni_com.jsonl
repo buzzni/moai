@@ -8343,3 +8343,20 @@
 {"ts":"2026-10-26T00:07:15Z","id":"moai-m8jo","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"develop 816d17da 로 들이고 push"}
 {"ts":"2026-10-26T00:08:49Z","id":"moai-0fai","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"v0.27.0 릴리스"}
 {"ts":"2026-10-26T00:08:49Z","id":"moai-0fai","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-26T00:16:08Z","id":"moai-0fai","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Sent: moa-issue-4d (그림)"}
+{"ts":"2026-10-26T00:16:34Z","id":"moai-qrja","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Sent: moa-issue-37"}
+{"ts":"2026-10-26T00:16:34Z","id":"moai-jn8d","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Sent: moa-issue-ba"}
+{"ts":"2026-10-26T00:17:22Z","id":"moai-qrja.12h","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-26T00:17:22Z","id":"moai-qrja.4ke","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-26T00:17:22Z","id":"moai-qrja.kb4","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-26T00:17:23Z","id":"moai-qrja.o3l","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-26T00:17:23Z","id":"moai-qrja.pre","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-26T00:17:23Z","id":"moai-qrja.ub5","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-26T00:18:47Z","id":"moai-jn8d.imu","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-26T00:18:47Z","id":"moai-jn8d.mxb","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-26T00:18:47Z","id":"moai-jn8d.ni8","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-26T00:18:48Z","id":"moai-jn8d.vyh","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-26T00:19:23Z","id":"moai-scb6","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: moai-w25x 와 함께 본다 — w25x.831 이 moai mv 가 제 집기를 스스로 적게 하면 $M mv 도 적힌다(moai-qrja 일꾼 37 의 판단, 감독 동의 2026-10-26)"}
+{"ts":"2026-10-26T00:42:13Z","id":"moai-0fai","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 (medium — 데모 장면과 소식 그림)"}
+{"ts":"2026-10-26T00:42:13Z","id":"moai-0fai","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Report-ready: v0.27.0 소식 그림 병합 c7eb9df5 (develop, push·tag 안 함). media 넷 — 01-drag.webm(web 간트 막대 끌기), 02-months.png(한국어 TUI 간트 달 이름), 03-wiki-panel.png(web 이슈 패널 Wiki 토막), 04-wiki-search.png(TUI 위키 찾기 차례, sync worker). 장면은 site-demo 에 더했고 make.sh 가 다시 짓는다"}
+{"ts":"2026-10-26T00:42:46Z","id":"moai-0fai","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Report-checked: c7eb9df5 (PNG 셋 열어 봄 — Lantern 데모만, [NEW]·반짝임 없음. webm 은 프레임까지 안 봄)"}
