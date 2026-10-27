@@ -99,15 +99,19 @@ def scenes(repo, env):
 def main():
     scene, repo = sys.argv[1], os.path.abspath(sys.argv[2])
     cols, rows = os.get_terminal_size(sys.stdout.fileno()) if sys.stdout.isatty() else (100, 30)
-    # 녹화하는 사람의 환경이 화면에 새지 않게: 정체·키·색·말·설정은 데모의 것으로. HOME 과 moai 의 자리는
+    # 녹화하는 사람의 환경이 화면에 새지 않게: 정체·키·색·말·시간대·설정은 데모의 것으로. HOME 과 moai 의 자리는
     # record-guide.sh 가 데모 전용 디렉터리(DEMO_HOME)에 지어 둔다 — init 이 적는 경로가 화면에 그대로 서기 때문이다
     home = os.environ['DEMO_HOME']
     bindir = os.path.join(home, '.local', 'bin')
     moai = os.path.join(bindir, 'moai')
-    env = dict(TERM='xterm-256color', COLORTERM='truecolor', LANG='C.UTF-8', MOAI_LANG='en', MOAI_NO_UPDATE_CHECK='1',
+    env = dict(TZ='UTC', TERM='xterm-256color', COLORTERM='truecolor', LANG='C.UTF-8', MOAI_LANG='en', MOAI_NO_UPDATE_CHECK='1',
                MOAI=moai, MOAI_CONFIG=os.path.join(home, '.config', 'moai', 'config.toml'),
                HOME=home, PATH=bindir + ':/usr/local/bin:/usr/bin:/bin',
                PS1='\\[\\e[38;5;245m\\]lantern\\[\\e[0m\\] \\[\\e[38;5;209m\\]$\\[\\e[0m\\] ')
+    if os.environ.get('DEMO_NOW'):
+        # seed.sh 가 DEMO_NOW 로 날을 옮겼으면 셸의 moai 도 그날에 선다 — drive.py 와 같은 자와 꼴로
+        env['MOAI_NOW'] = subprocess.run(['date', '-u', '-d', os.environ['DEMO_NOW'], '+%Y-%m-%dT%H:%M:%SZ'],
+                                         check=True, capture_output=True, text=True).stdout.strip()
     pid, fd = pty.fork()
     if pid == 0:
         fcntl.ioctl(0, termios.TIOCSWINSZ, struct.pack('HHHH', rows, cols, 0, 0))

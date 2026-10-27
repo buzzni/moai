@@ -12,6 +12,109 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+### Added
+
+- **`moai tui --json --deep --no-gantt` reads the tree without chart values.**
+  The web page now asks `/api/tree?gantt=1` only while Gantt is active, and
+  fetches the values when that tab opens after a tree-only read. Other tabs
+  skip the chart calculation and its response data. (moai-ijjd.i7v)
+
+### Changed
+
+- Deferred ancestors, including ancestors under a deferred group, no longer cap
+  a descendant's planned dates, and `moai due apply` no longer raises a row by
+  their deadlines. Restoring them restores their deadline ceilings; rows that now
+  pass one stand as `due_beyond_parent` on `moai status`.
+  Plan words beginning with `@` and a fullwidth digit are treated as dates and
+  rejected with a line number unless escaped as title text. (moai-lj8g.qrb)
+
+- **Open web tabs follow theme and time zone choices made in another tab.**
+  Each keeps its current tab, layout and query. (moai-ijjd.46f)
+
+### Fixed
+
+- **TUI Gantt headers leave a space between date labels.** At month zoom,
+  languages whose month names fill the shortest month use numbers across the
+  whole row; English abbreviations stay as they are. (moai-ijjd.5u9)
+- **TUI Gantt plans shown from a sibling worktree stay unchanged here.** Date
+  keys name the source snapshot and explain its recovery; dragging a bar or
+  clicking an empty day only selects the row. Plans from the current checkout
+  still move. (moai-ijjd.r7u)
+
+- `moai web` briefly drains a delayed request before closing a busy connection,
+  so a client can receive the 503 response without a broken pipe while sending
+  its request. The response ends immediately; at most four background drainers
+  wait up to 200ms each, keeping silent clients off the accept loop. When all
+  drainers are busy, further overflow connections close immediately, and a
+  request sent after that may still see a broken pipe.
+  (moai-n8po.7e1)
+
+- **Skill shell commands keep repository paths together.** Supervisor, worker
+  and recovery commands quote paths with spaces. A path holding `"`, `$`, a
+  backtick or `\` (a Windows path's separators aside) is handed to the person
+  instead of building a shell command;
+  cmux commands explain how to escape an apostrophe inside their outer single
+  quotes. (moai-1m21.cqb)
+- **`moai-recover` leaves conversations moved off with `/resume` or `/continue`
+  out of automatic recovery.** Under its table it names skipped conversations
+  with their command and UTC time, and older crashes, so the person can ask
+  one back even after a cancelled picker or a resume that died before writing
+  a line. (moai-1m21.hxm)
+
+- The explorer header marks the current project with `▸`, so its position stays
+  visible without colour or shimmer. (moai-lj8g.wxt)
+
+- Invalid `--due` and `--start` values mention the accepted `+N` form. The board's
+  `due_beyond_parent` preview shows the row's dates and the ancestor deadline
+  they exceed. (moai-lj8g.qrb)
+
+- The board's `wip_overload` line says an epic counts as one bundle, explaining
+  why the count can be smaller than the list of picked-up rows. (moai-lj8g.vnc)
+
+- The explorer opens the key list over the stats and wiki windows with `?` or
+  a custom help key. Pasting over the list preserves pending keys and notices,
+  and `moai tui --help` names the configured menu keys and explains that the
+  quit key closes the list. (moai-lj8g.oln)
+
+- `moai tui --help` describes both explorer writes: parking a thought and
+  moving a plan on the Gantt. (moai-lj8g.w3a)
+
+- `moai show --fields` keeps the order of keys inside the values it keeps.
+  Nested objects such as `journal`, `work`, `commits` and `wiki` previously
+  came out with keys sorted by name, unlike the same row without `--fields`.
+  (moai-b4dc.0ia)
+
+- **Web Gantt bars keep the dropped plan while a write is pending.** Scrolling,
+  resizing or receiving an older read no longer snaps a moved bar back before
+  its write and refresh finish. (moai-ijjd.qe4)
+- **Web Gantt undo reverses the move.** The notice gives an inverse shift for
+  the moved edge, preserving changes to the other edge made since the page read
+  it. An edge absent at read time is cleared instead. (moai-ijjd.h55)
+- **Web timestamp filters use the page's time zone.** Days in `created`, `since`
+  and the other timestamp filters now agree with the dates drawn on the page
+  and the Gantt's lateness count. (moai-ijjd.7af)
+- **Web tabs preserve each other's saved settings.** Each tab patches only the
+  settings it changes, including per-project filter, sort, columns and view.
+  (moai-ijjd.46f)
+- A message given to `mv -m` or `defer -m` on a row that does not move is no
+  longer lost in silence. When history cannot be written after only tidying the
+  file, the call fails and names `moai note` to write the message again. A failed
+  archive cleanup after such tidying also fails, and committed-write notices and
+  session pick-ups survive a lost message. (moai-jdwk.xf0, moai-jdwk.87u)
+- `moai add -s <started column>` records the pick-up for the Claude Code session,
+  as `moai mv` does. Both count only work owned by the actor; group and backlog
+  rows do not become session pick-ups. (moai-jdwk.323, moai-jdwk.87u)
+- Rule 3 says why a started review is not counted as yours. With nothing held,
+  the refusal names reviews it set aside and gives a quoted command to record a
+  missing pick-up when that is safe. A row excluded through an ancestor keeps
+  that ancestor's reason and is not offered as work to claim from another
+  session. (moai-jdwk.1a5, moai-jdwk.87u)
+- A refusal says why a started row of yours is not counted as this session's,
+  and a row this worktree's name points at is no longer set aside because its
+  ancestor was. Rule 2 uses the same cause for its guidance and explanation,
+  including the focus after a preceding pick-up in the command.
+  (moai-jdwk.mvy, moai-jdwk.87u)
+
 ## [0.29.1] - 2026-10-26
 
 ### Fixed

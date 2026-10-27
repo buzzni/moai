@@ -641,7 +641,7 @@ test('dragging a bar\'s middle moves the plan by whole days, once, on release; t
   assert.deepEqual(moves, [], 'nothing is written while it moves')
   press(dom, l, 'pointerup', mid + 70)
   l.click()
-  assert.deepEqual(moves, [{ id: 'e1.c', change: { edge: 'body', days: 2 }, undo: 'moai edit e1.c --start 2026-10-26 --due 2026-10-27' }])
+  assert.deepEqual(moves, [{ id: 'e1.c', change: { edge: 'body', days: 2 }, undo: 'moai edit e1.c --shift -2' }])
   assert.deepEqual(calls, [], 'the click a drag ends with chose the row')
   l.click()
   assert.deepEqual(calls, ['choose:e1.c'], 'the next click chooses as before')
@@ -724,7 +724,7 @@ test('a drag that ends without a click does not take the next press\'s click', (
   assert.deepEqual(calls, ['choose:e1.a'])
 })
 
-test('a milestone\'s own diamond moves with its bar\'s end; the undo names the days the bar was drawn from', () => {
+test('a milestone\'s own diamond moves with its bar\'s end; the undo inverts the move', () => {
   const rows = ROWS.map((row) => (row.id === 'm1' ? { ...row, starts_on: '2026-10-26' } : row))
   const gantt = { ...GANTT, m1: { ...GANTT.m1, planned: own('2026-10-26', '2026-10-28') } }
   const { root, dom, moves } = writing(rows, gantt)
@@ -737,12 +737,12 @@ test('a milestone\'s own diamond moves with its bar\'s end; the undo names the d
   assert.deepEqual([px(bar, 'left'), px(due, 'left')], [x0 + 40, d0 + 40])
   press(dom, l, 'pointercancel', x0 + 80)
   assert.deepEqual([px(bar, 'left'), px(due, 'left')], [x0, d0], 'a cancel puts both back')
-  // e1.c: the list printed no days for it, the tree drew 10-26 ~ 10-27 — the undo puts back what was drawn.
+  // e1.c: the list printed no days, but the tree drew its plan: the undo still inverts the move.
   const c = lane(root, 'e1.c')
   const cb = laidOut(c.querySelector('.b-plan'))
   press(dom, c, 'pointerdown', px(cb, 'left') + 40)
   press(dom, c, 'pointerup', px(cb, 'left') + 80)
-  assert.equal(moves.at(-1).undo, 'moai edit e1.c --start 2026-10-26 --due 2026-10-27')
+  assert.equal(moves.at(-1).undo, 'moai edit e1.c --shift -1')
 })
 
 test('a deadline-only row drags its diamond; a group counted from its members says why and moves nothing', () => {
@@ -861,6 +861,75 @@ test('a scroll while a bar is held leaves the dropped bar where it was dropped (
   await tick()
   assert.equal(lane(root, 'e1.c'), l, 'the lane was rebuilt though the view came back inside the window')
   assert.equal(px(bar, 'left'), x0 + 80, 'the dropped bar went back to its old days while its write ran')
+})
+
+test('a pending move survives a new window and an old read, then drops its overlay after refresh', async () => {
+  let answer
+  const rows = [...ROWS, ...Array.from({ length: 100 }, (_, i) => ({ id: `r${i}`, kind: 'issue', status: 'todo' }))]
+  const gantt = { ...GANTT, ...Object.fromEntries(rows.filter((r) => r.id.startsWith('r')).map((r) => [r.id, g(r.id)])) }
+  const { root, dom, view, state } = writing(rows, gantt, () => new Promise((resolve) => { answer = resolve }))
+  const box = size(root, 4000, 300)
+  const l = lane(root, 'e1.c')
+  const bar = laidOut(l.querySelector('.b-plan'))
+  const x0 = px(bar, 'left')
+  press(dom, l, 'pointerdown', x0 + 40)
+  // A stale render arrives during the drag and is drawn after the release.
+  view.render(state, indexOf(rows, gantt))
+  press(dom, l, 'pointermove', x0 + 120)
+  press(dom, l, 'pointerup', x0 + 120)
+  await tick()
+  assert.equal(px(lane(root, 'e1.c').querySelector('.b-plan'), 'left'), x0 + 80)
+  box.scrollTop = 80 * 28
+  box.dispatchEvent(new dom.window.Event('scroll'))
+  assert.equal(lane(root, 'e1.c'), null)
+  box.scrollTop = 0
+  box.dispatchEvent(new dom.window.Event('scroll'))
+  assert.equal(px(lane(root, 'e1.c').querySelector('.b-plan'), 'left'), x0 + 80)
+  view.render(state, indexOf(rows, gantt))
+  assert.equal(px(lane(root, 'e1.c').querySelector('.b-plan'), 'left'), x0 + 80)
+  // The locked write saw a different day than this page: its answer wins after the overlay goes.
+  const refreshed = { ...gantt, 'e1.c': g('e1.c', { planned: own('2026-10-29', '2026-10-30') }) }
+  view.render(state, indexOf(rows, refreshed))
+  answer()
+  await tick()
+  assert.equal(px(lane(root, 'e1.c').querySelector('.b-plan'), 'left'), x0 + 120)
+  view.render(state, indexOf(rows, gantt))
+  assert.equal(px(lane(root, 'e1.c').querySelector('.b-plan'), 'left'), x0, 'no overlay remains')
+})
+
+test('an answered refusal removes the dropped plan without a refresh', async () => {
+  let answer
+  const { root, dom } = writing(ROWS, GANTT, () => new Promise((resolve) => { answer = resolve }))
+  const l = lane(root, 'e1.c')
+  const bar = laidOut(l.querySelector('.b-plan'))
+  const x0 = px(bar, 'left')
+  press(dom, l, 'pointerdown', x0 + 40)
+  press(dom, l, 'pointermove', x0 + 120)
+  press(dom, l, 'pointerup', x0 + 120)
+  answer()
+  await tick()
+  assert.equal(px(lane(root, 'e1.c').querySelector('.b-plan'), 'left'), x0)
+})
+
+test('a pending milestone move keeps its own diamond at the dropped deadline through an old read', async () => {
+  let answer
+  const rows = ROWS.map((row) => (row.id === 'm1' ? { ...row, starts_on: '2026-10-26' } : row))
+  const gantt = { ...GANTT, m1: { ...GANTT.m1, planned: own('2026-10-26', '2026-10-28') } }
+  const { root, dom, view, state } = writing(rows, gantt, () => new Promise((resolve) => { answer = resolve }))
+  const l = lane(root, 'm1')
+  const bar = laidOut(l.querySelector('.b-plan'))
+  const [x0, d0] = [px(bar, 'left'), px(l.querySelector('.mk.due'), 'left')]
+  press(dom, l, 'pointerdown', x0 + 40)
+  press(dom, l, 'pointermove', x0 + 120)
+  press(dom, l, 'pointerup', x0 + 120)
+  await tick()
+  view.render(state, indexOf(rows, gantt))
+  const after = lane(root, 'm1')
+  assert.deepEqual([px(after.querySelector('.b-plan'), 'left'), px(after.querySelector('.mk.due'), 'left')], [x0 + 80, d0 + 80])
+  answer()
+  await tick()
+  const back = lane(root, 'm1')
+  assert.deepEqual([px(back.querySelector('.b-plan'), 'left'), px(back.querySelector('.mk.due'), 'left')], [x0, d0], 'the read answers once the overlay goes')
 })
 
 test('a window built later keeps the clock the bars were placed at: the today line stays where an open bar ends (moai-vj8w review)', () => {
@@ -997,4 +1066,58 @@ test('a cursor sent to a row beyond the window brings that row in (moai-vj8w.2fh
   assert.ok(top > 100 * 28, 'the pane scrolled to it')
   assert.equal(lane(root, 'r150').getAttribute('aria-selected'), 'true')
   assert.equal(dom.window.document.querySelectorAll('.lane[aria-selected="true"]').length, 1)
+})
+
+test('undo inverts each move, clearing an edge only when it was absent at read time', async () => {
+  const { undoOf } = await panelModule('data/plan.ts')
+  const read = { start: '2026-10-26', due: '2026-10-27' }
+  assert.equal(undoOf('x', { edge: 'body', days: 2 }, read), 'moai edit x --shift -2')
+  assert.equal(undoOf('x', { edge: 'start', days: -3 }, read), 'moai edit x --shift-start 3')
+  assert.equal(undoOf('x', { edge: 'end', days: 1 }, read), 'moai edit x --shift-due -1')
+  assert.equal(undoOf('x', { edge: 'start', days: 1 }, { ...read, start: null }), 'moai edit x --start none')
+  assert.equal(undoOf('x', { edge: 'end', days: 1 }, { ...read, due: null }), 'moai edit x --due none')
+  assert.equal(undoOf('x', { day: '2026-10-27' }, { start: null, due: null }), 'moai edit x --start none --due none')
+})
+
+test('zoom, fit with a new step and Ctrl+wheel each build one window at their final scroll position', () => {
+  const { root, view, dom } = mount(null, build(), [1000, 560])
+  const box = scrollable(root)
+  const lanes = root.querySelector('.g-lanes')
+  const replace = lanes.replaceChildren.bind(lanes)
+  let builds = 0
+  lanes.replaceChildren = (...nodes) => { builds++; replace(...nodes) }
+  const once = (action) => {
+    builds = 0
+    action()
+    assert.equal(builds, 1)
+    // A delivered native scroll at the final position is already covered too.
+    box.dispatchEvent(new dom.window.Event('scroll'))
+    assert.equal(builds, 1)
+  }
+  once(() => view.command('gantt.zoomIn'))
+  assert.equal(root.querySelector('.g-seg [aria-pressed="true"]').dataset.zoom, 'hour')
+  once(() => view.command('gantt.fit'))
+  assert.notEqual(root.querySelector('.g-seg [aria-pressed="true"]').dataset.zoom, 'hour')
+  once(() => root.querySelector('.g-right').dispatchEvent(new dom.window.WheelEvent('wheel', {
+    bubbles: true, cancelable: true, ctrlKey: true, deltaY: -100, clientX: 800,
+  })))
+})
+
+test('edge undo uses the tree plan even when the list read disagrees about absent edges', async () => {
+  for (const [planned, fields, grip, expected] of [
+    [own('2026-10-26', null), { due_on: '2026-10-30' }, 'end', '--due none'],
+    [own('2026-10-26', '2026-10-27'), { starts_on: '' }, 'start', '--shift-start 1'],
+    [own('2026-10-26', '2026-10-27'), {}, 'end', '--shift-due -1'],
+  ]) {
+    const rows = ROWS.map((r) => r.id === 'e1.c' ? { ...r, ...fields } : r)
+    const gantt = { ...GANTT, 'e1.c': g('e1.c', { planned }) }
+    const { root, dom, moves } = writing(rows, gantt)
+    const l = lane(root, 'e1.c')
+    const bar = laidOut(l.querySelector('.b-plan'))
+    const from = grip === 'start' ? px(bar, 'left') + 1 : px(bar, 'left') + px(bar, 'width') - 1
+    press(dom, l, 'pointerdown', from)
+    press(dom, l, 'pointerup', from + (grip === 'start' ? -40 : 40))
+    assert.equal(moves.at(-1)?.undo, `moai edit e1.c ${expected}`)
+    await tick()
+  }
 })

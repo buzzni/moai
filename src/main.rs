@@ -32,6 +32,8 @@ mod scratch;
 mod skill;
 mod store;
 mod style;
+#[cfg(test)]
+mod test_shell;
 mod text;
 mod tui;
 mod tz;
@@ -200,6 +202,8 @@ fn main() -> ExitCode {
                 //
                 // **`redirected` 보다 먼저다** — 성공한 길과 같은 차례다. 이쪽이 `Repo::find` 를
                 // 한 번 더 지나므로, 뒤에 두면 그 찾기가 적은 자리가 이미 지나간 줄 뒤에 남는다.
+                // 실패한 메모도 스냅샷 정규화가 못 읽는 줄을 들고 썼을 수 있다(moai-jdwk.87u).
+                carried();
                 unread_journals();
                 redirected(!quiet);
             }

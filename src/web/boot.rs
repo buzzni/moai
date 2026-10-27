@@ -116,7 +116,7 @@ pub fn boot(cwd: &Path, user: Option<&str>, lang: Lang, registered: &[std::path:
         project: root.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
         root: root.display().to_string(),
         statuses,
-        naming: crate::cmd::config::naming(repo.config.naming),
+        naming: repo.config.naming.as_str(),
         glyphs: Ordered(glyphs),
         unknown_glyph: style::glyph(""),
         columns: Columns {

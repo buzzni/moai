@@ -41,7 +41,7 @@ Commands:
   milestone     The verbs above, pinned to `--type milestone`
   backlog       Jot a passing thought down where you are (`--type backlog`)
   wiki          The project wiki - the markdown pages under `docs/`, and lessons
-  tui           Open the explorer (the one write to an issue is `SPC n`, jot)
+  tui           Open the explorer (writes a jot, `SPC n`, and gantt plans)
   web           Serve this tracker as a page on 127.0.0.1
   hook          Called by an agent's hook. Reads an event on stdin
   merge-driver  Called by git. Merges issues.jsonl per issue, three-way
@@ -2617,7 +2617,7 @@ LESSON
 ## `moai tui`
 
 ```
-Open the explorer (the one write to an issue is `SPC n`, jot)
+Open the explorer (writes a jot, `SPC n`, and gantt plans)
 
 Usage: moai tui [OPTIONS]
 
@@ -2626,6 +2626,7 @@ Options:
       --deep                 With --json, list every row below, with its home
       --worktree             With --json, overlay other worktrees' rows
       --no-archive           With --json, leave out the archive
+      --no-gantt             Leave out gantt values - requires --json --deep
       --json                 Machine-readable output. Every human line goes away
       --no-color             Turn colour off (same as `--color never`)
       --color <how>          auto|always|never (auto by default, off when piped)
@@ -2679,9 +2680,10 @@ Order:
   movement key moves the focused pane — to scroll the detail, go there with
   Ctrl-w w.
   / searches, Esc clears the filter you set. r marks the row under the cursor
-  as read (see [NEW] below). ? (or SPC h) opens a window listing every
-  key, read from the same table as moai keys. The movement keys scroll
-  it and ? closes it again.
+  as read (see [NEW] below). ? opens a window listing every key
+  (SPC h from the menu), read from the same table as moai keys.
+  The movement keys scroll it; ? or SPC q closes it
+  rather than quitting (Ctrl-C quits from anywhere).
   The search and filter fields take Enter to apply and Esc to give up, the
   search filters the list as you type, and Tab and Shift-Tab pick where it
   looks: everything, id, title, tag, body or note (everything reads the
@@ -2890,9 +2892,11 @@ Order:
   the start and its right end to move the deadline; it snaps to whole days and
   is written once, when you let go. Clicking an empty day on a row with no
   planned days plans that one day. Groups whose bar spans their members are
-  not moved — move the members. When a move is refused (a start after the
-  deadline, a day past the deadline above) the refusal is on the banner; a
-  move that went through names the `moai edit` line that puts it back.
+  not moved — move the members. Neither is a row whose copy the worktree
+  overlay took from another worktree; the notice names that worktree. When a
+  move is refused (a start after the deadline, a day past the deadline above)
+  the refusal is on the banner; a move that went through names the
+  `moai edit` line that puts it back.
   Clicking a row puts the cursor on it and the wheel scrolls the rows; a
   sideways wheel, or Shift and the wheel, slides the dates, and so does
   dragging the date header. Dragging the line between the rows and the dates
@@ -2982,7 +2986,8 @@ Order:
   kept. With no editor the built-in form opens — one title line and a body,
   Tab moves between them (Enter in the title goes to the body) and Ctrl-S
   keeps it. Esc closes it, asking once if you had typed something (y throws
-  it away). This is the one write to an issue — editing is done on the CLI.
+  it away). Besides moving a plan on the gantt (above), this is the only
+  write — moving, editing and noting are done on the CLI.
   `--json` prints only that directory's listing, with no screen (outside a
   `.moai`, the rows of the layer). Each folder row (a milestone, an epic,
   an issue with children) carries progress, {"done": 3, "total": 5} —

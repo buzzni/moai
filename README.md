@@ -16,7 +16,7 @@ Issues 941  · Epics 148       .moai/issues.jsonl
 
   · todo 36    ▸ in_progress 5    ? review 0    ✓ done 900
 
-! Started at once 5 — finishing one at a time goes better
+! Started at once 5 (an epic counts as one) — one at a time goes better
 
 + Backlog 36 (oldest 4 days)
     → `moai backlog ls`
@@ -562,6 +562,8 @@ recording machine shows — and records it:
 - `seed.sh` — the demo tracker: two milestones, four epics, a backlog and a wiki
 - `record-tui.sh` — the terminal scenes, with asciinema
 - `record-web.mjs` — the browser scenes, with Playwright
+- `record-site.sh` — every recording the site's pages use, in one run, into a
+  directory you name; the supervisor scene below is left as it is
 - `record-team.sh` — the tmux window for the supervisor scene. Real agents do the
   work there, so it sets the window up and prints the steps a person takes
 

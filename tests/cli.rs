@@ -7085,6 +7085,21 @@ fn show_fields_keeps_only_the_keys_asked_for() {
     let one = ok(s.path(), &["show", &a, "--fields", "id,derived_status,priority", "--json"]);
     assert_eq!(one.trim(), format!("{{\"id\":\"{a}\",\"priority\":2}}"), "{one}");
 
+    // 고른 값은 전체 줄 안의 그 조각과 바이트째 같다 — 안쪽 키를 다시 정렬하지 않는다.
+    let full = ok(s.path(), &["show", &b, "--json"]);
+    let picked = ok(s.path(), &["show", &b, "--fields", "journal", "--json"]);
+    let inside = picked.trim().strip_prefix('{').unwrap().strip_suffix('}').unwrap();
+    assert!(full.contains(inside), "전체: {full}\n고른 값: {picked}");
+    ok(s.path(), &["note", &a, "model: anthropic/opus-5.5 (high — 시험)"]);
+    let full = ok(s.path(), &["show", "--all", "--json"]);
+    let picked = ok(s.path(), &["show", "--all", "--fields", "id,work", "--json"]);
+    let rows: Vec<Box<serde_json::value::RawValue>> = serde_json::from_str(&picked).unwrap();
+    let row = rows.iter().find(|r| r.get().contains(&a)).unwrap();
+    let values: std::collections::BTreeMap<String, Box<serde_json::value::RawValue>> =
+        serde_json::from_str(row.get()).unwrap();
+    let work = format!("\"work\":{}", values["work"].get());
+    assert!(full.contains(&work), "전체: {full}\n고른 값: {picked}");
+
     // 키는 --json 에만 있다 — 말없이 먹지 않는다.
     let refused = moai(s.path(), &["show", "--fields", "id"]);
     assert!(!refused.status.success());
@@ -10674,6 +10689,47 @@ fn a_deadline_cannot_pass_its_ancestors() {
     add(s.path(), &["기한 없음", "-e", &e]);
 }
 
+#[test]
+fn deferred_deadline_ceilings_release_writes_and_return_on_restore() {
+    let s = init("duedeferred");
+    let m = add(s.path(), &["release", "--type", "milestone", "--due", "2026-10-20"]);
+    let e = add(s.path(), &["epic", "--type", "epic", "--milestone", &m, "--due", "2026-10-19"]);
+    let p = add(s.path(), &["parent", "--parent", &e, "--due", "2026-10-18"]);
+    ok(s.path(), &["defer", &m, "-m", "later"]);
+    ok(s.path(), &["edit", &p, "--start", "2026-10-25", "--due", "2026-10-30"]);
+    let child = add(s.path(), &["child", "--parent", &p, "--due", "2026-10-31"]);
+    let plan = "# new epic @2026-10-30\n- new task\n";
+    for extra in [vec!["--dry-run"], vec![]] {
+        let mut args = vec!["add", "--from", "-", "--milestone", &m];
+        args.extend(extra);
+        let out = from_stdin(s.path(), &args, plan);
+        assert!(out.status.success(), "{}", text(&out));
+    }
+    assert!(!ok(s.path(), &["status", "--json"]).contains("due_beyond_parent"));
+    ok(s.path(), &["defer", &m, "--undo"]);
+    let board = ok(s.path(), &["status"]);
+    assert!(board.contains("2026-10-25~2026-10-30") && board.contains("2026-10-20"), "{board}");
+    assert!(board.contains(&p) && board.contains(&child), "{board}");
+    let saved = issues(s.path());
+    let out = moai(s.path(), &["edit", &p, "--due", "2026-10-29"]);
+    assert!(!out.status.success(), "restored ceiling did not refuse the write");
+    assert_eq!(issues(s.path()), saved, "refused write changed the snapshot");
+}
+
+#[test]
+fn fullwidth_plan_dates_are_refused_before_any_write() {
+    let s = init("duefullwidth");
+    let before = issues(s.path());
+    let out = from_stdin(s.path(), &["add", "--from", "-"], "# epic\n- task @２０２６-10-30\n");
+    assert!(!out.status.success());
+    let said = String::from_utf8_lossy(&out.stderr);
+    assert!(said.contains("2줄") && said.contains("@２０２６-10-30"), "{said}");
+    assert_eq!(issues(s.path()), before);
+    let out = moai(s.path(), &["add", "bad start", "--start", "+3d"]);
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("+N"), "{}", text(&out));
+}
+
 /// **조상을 당긴 쓰기는 자식을 안 막는다**(moai-ghkp.cb3) — 자식은 남의 줄이다. 쓰기 뒤에 stderr 한
 /// 줄로 넘친 줄을 대고, `status` 가 `due_beyond_parent` 로 비춘다. 경고는 종료 코드를 안 바꾼다.
 #[test]
@@ -10695,7 +10751,11 @@ fn pulling_a_parent_deadline_in_warns_about_the_children() {
     assert!(out.status.success(), "경고가 종료 코드를 바꿨다");
     let board = String::from_utf8_lossy(&out.stdout).to_string();
     assert!(board.contains("due_beyond_parent") && board.contains(&i), "{board}");
-    assert!(ok(s.path(), &["status"]).contains(&i), "보드가 넘친 줄을 안 댄다");
+    let preview = ok(s.path(), &["status"]);
+    assert!(preview.contains(&i) && preview.contains("2026-09-28") && preview.contains("2026-09-20"), "{preview}");
+    let json: serde_json::Value = serde_json::from_str(&board).unwrap();
+    let warning = json["warnings"].as_array().unwrap().iter().find(|w| w["kind"] == "due_beyond_parent").unwrap();
+    assert!(warning.get("ceilings").is_none(), "{warning}");
 
     // **에픽을 더 이른 마일스톤으로 옮겨도** 멤버가 넘치면 그 쓰기가 댄다 — 천장은 에픽이 아니라 마일스톤이다.
     ok(s.path(), &["edit", &i, "--due", "2026-09-20"]);
@@ -10985,9 +11045,10 @@ fn a_relative_deadline_is_stored_as_a_day() {
         assert!(line_of(s.path(), &id).contains(r#""due_on":"2026-09-12""#), "{}", line_of(s.path(), &id));
     }
 
-    for bad in ["+", "+x", "++3", "+-1"] {
+    for bad in ["+", "+x", "++3", "+-1", "+3d"] {
         let out = moai(s.path(), &["edit", &id, "--due", bad]);
         assert!(!out.status.success(), "{bad} 를 날짜로 받았다");
+        assert!(String::from_utf8_lossy(&out.stderr).contains("+N"), "{}", text(&out));
     }
     // **네 자리 해를 넘는 날은 친 글 그대로 거절한다**(리뷰) — 날수로 상한을 박던 판은 다섯 자리 해를 지어, 거절문이
     // 사람이 안 친 날을 댔다.
@@ -13222,6 +13283,19 @@ fn what_came_from_what_lives_in_the_journal() {
     let shown = ok(s.path(), &["show", &id]);
     assert!(shown.contains(&epic), "이력이 무엇이 나왔는지 안 말한다 — {shown}");
     assert!(!line_of(s.path(), &id).contains("spawned"), "파생값을 줄에 적었다");
+    // guide::REPORT_WATCH reserves this colon for the Codex worker, not tool-generated history.
+    // The watch reads `kind == "note"` entries and their `text`; count what it would read so the
+    // loop cannot pass by finding nothing (the epic's `Unfolded from` note must be among them).
+    let mut unfolded = 0;
+    for row_id in [&id, &epic] {
+        let row: serde_json::Value = serde_json::from_str(&ok(s.path(), &["show", row_id, "--json"])).unwrap();
+        for note in row["journal"].as_array().unwrap().iter().filter(|n| n["kind"] == "note") {
+            let head = note["text"].as_str().unwrap_or_default().lines().next().unwrap_or_default();
+            assert!(!head.starts_with("Unfolded:"), "tool history looks like a worker report: {note}");
+            unfolded += usize::from(head.starts_with("Unfolded"));
+        }
+    }
+    assert!(unfolded > 0, "no tool-written `Unfolded` note was read — the guard above checked nothing");
 }
 
 /// `--dry-run` 은 아무것도 만들지 않는다. AI 가 펼친 안을 사람이 한 번 보고
@@ -14318,6 +14392,104 @@ fn an_add_whose_journal_fails_succeeds_and_says_so() {
     let err = String::from_utf8_lossy(&mv.stderr);
     assert!(mv.status.success(), "{err}");
     assert!(err.contains("moai note") && err.contains(&id), "잃은 말을 안 댔다 — {err}");
+}
+
+/// 정규화만 한 쓰기는 `-m` 을 잃었으면 실패하고 다시 적을 길을 댄다(moai-jdwk.xf0).
+#[cfg(unix)]
+#[test]
+fn a_message_lost_to_the_journal_on_a_tidied_snapshot_fails() {
+    use std::os::unix::fs::PermissionsExt;
+    let s = init("tidied-message");
+    let id = add(s.path(), &["row"]);
+    let deferred = add(s.path(), &["deferred"]);
+    ok(s.path(), &["defer", &deferred, "-m", "later"]);
+    let snap = s.path().join(".moai/issues.jsonl");
+    let skew = |id: &str| {
+        let text = issues(s.path());
+        let skewed = text.replace(&format!(r#""id":"{id}","#), &format!(r#""id":"{id}","priority":2,"#));
+        assert_ne!(skewed, text);
+        std::fs::write(&snap, skewed).unwrap();
+    };
+    let journal = s.path().join(".moai/journal");
+    for e in std::fs::read_dir(&journal).unwrap() {
+        std::fs::set_permissions(e.unwrap().path(), std::fs::Permissions::from_mode(0o444)).unwrap();
+    }
+    struct RestoreDir(PathBuf, std::fs::Permissions);
+    impl Drop for RestoreDir {
+        fn drop(&mut self) {
+            let _ = std::fs::set_permissions(&self.0, self.1.clone());
+        }
+    }
+    let _restore = RestoreDir(journal.clone(), std::fs::metadata(&journal).unwrap().permissions());
+    std::fs::set_permissions(&journal, std::fs::Permissions::from_mode(0o555)).unwrap();
+    if std::fs::File::create(journal.join("probe")).is_ok() {
+        std::fs::set_permissions(&journal, std::fs::Permissions::from_mode(0o755)).unwrap();
+        return;
+    }
+    for (row, args) in [
+        (&id, vec!["mv", id.as_str(), "todo", "-m", "reason"]),
+        (&deferred, vec!["defer", deferred.as_str(), "-m", "reason"]),
+    ] {
+        skew(row);
+        let out = moai(s.path(), &args);
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert!(!out.status.success(), "잃은 말을 삼켰다: {err}");
+        assert!(err.contains("moai note") && err.contains(row), "{err}");
+        assert!(!err.contains("다시 부르지") && !err.contains("do not call it again"), "{err}");
+        assert!(!issues(s.path()).contains(r#""priority":2"#), "정규화 갈래를 안 지났다");
+    }
+    skew(&id);
+    let out = moai(s.path(), &["mv", &id, "in_progress", "-m", "reason"]);
+    std::fs::set_permissions(&journal, std::fs::Permissions::from_mode(0o755)).unwrap();
+    assert!(out.status.success(), "{}", text(&out));
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("moai note") && err.contains(&id), "{err}");
+}
+
+/// 메모는 실패해도 실제 정리 쓰기·못 읽는 줄·집기는 잃지 않는다(moai-jdwk.87u).
+#[cfg(unix)]
+#[test]
+fn a_failed_message_keeps_the_committed_write_diagnostics_and_pick() {
+    use std::os::unix::fs::PermissionsExt;
+    let s = Scratch::new("failed-message-pick");
+    let main = s.path().join("main");
+    std::fs::create_dir_all(&main).unwrap();
+    git(&main, &["init", "-q"]);
+    ok(&main, &["init", "argos"]);
+    let id = add(&main, &["row", "-s", "in_progress"]);
+    git(&main, &["add", "-A"]);
+    git(&main, &["commit", "-qm", "setup"]);
+    git(&main, &["worktree", "add", "-q", ".worktrees/worker", "-b", "worker"]);
+    let snap = main.join(".moai/issues.jsonl");
+    let text = issues(&main).replace(&format!(r#""id":"{id}","#), &format!(r#""id":"{id}","priority":2,"#));
+    std::fs::write(&snap, format!("{text}broken\n")).unwrap();
+    let journal = main.join(".moai/journal");
+    struct RestoreDir(PathBuf, std::fs::Permissions);
+    impl Drop for RestoreDir {
+        fn drop(&mut self) {
+            let _ = std::fs::set_permissions(&self.0, self.1.clone());
+        }
+    }
+    let _restore = RestoreDir(journal.clone(), std::fs::metadata(&journal).unwrap().permissions());
+    for e in std::fs::read_dir(&journal).unwrap() {
+        std::fs::set_permissions(e.unwrap().path(), std::fs::Permissions::from_mode(0o444)).unwrap();
+    }
+    std::fs::set_permissions(&journal, std::fs::Permissions::from_mode(0o555)).unwrap();
+    if std::fs::File::create(journal.join("probe")).is_ok() {
+        return;
+    }
+    let config = s.path().join("hookcfg/config.toml");
+    let out = staged(&["mv", &id, "in_progress", "--from", "in_progress", "-m", "reason"])
+        .current_dir(main.join(".worktrees/worker"))
+        .env("MOAI_CONFIG", &config)
+        .env("CLAUDE_CODE_SESSION_ID", "a")
+        .output()
+        .unwrap();
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success() && err.contains("moai note"), "{err}");
+    assert!(err.contains("그대로 두고 썼다") && err.contains("트래커"), "실제 쓰기를 알리지 않았다: {err}");
+    let recorded: String = pick_dirs(&s).iter().filter_map(|d| std::fs::read_to_string(d.join("a")).ok()).collect();
+    assert!(recorded.contains(&id), "메모 실패로 이미 집은 기록을 잃었다: {recorded}");
 }
 
 /// **못 읽는 줄이 산 줄의 id 를 들고 있으면 `status` 가 중복이라 말한다.**
@@ -16627,6 +16799,8 @@ fn picking_up_a_whole_epic_is_not_started_at_once() {
     let board: serde_json::Value = serde_json::from_str(&ok(s.path(), &["status", "--json"])).unwrap();
     let w = board["warnings"].as_array().unwrap().iter().find(|w| w["kind"] == "wip_overload").expect("경고가 없다");
     assert_eq!((w["count"].as_u64(), w["ids"].as_array().unwrap().len()), (Some(5), 8), "{w}");
+    let board = ok(s.path(), &["status"]);
+    assert!(board.contains("5묶음") && board.contains("에픽은 하나로"), "{board}");
 }
 
 /// `SessionStart` 는 아무것도 싣지 않고 기준선만 적는다.
@@ -17429,6 +17603,23 @@ fn another_running_session_frees_rows_nobody_recorded() {
     assert!(!why.contains(&loose) && !why.contains(&other), "일꾼에게 남의 줄 밑 리뷰를 시킨다 — {why}");
 }
 
+/// 좁힌 초점이 규칙 1 대신 규칙 2 를 내도, 빠진 줄의 까닭을 거절 자리에서 댄다(moai-jdwk.mvy).
+#[test]
+fn a_refusal_says_why_an_unrecorded_row_of_yours_is_not_counted() {
+    let s = init("unrecorded-refusal");
+    let loose = add(s.path(), &["unrecorded"]);
+    let other = add(s.path(), &["other session"]);
+    let pick = format!("moai mv {other} in_progress --from todo");
+    let out = call(&s, "Bash", &format!("{{\"command\":{}}}", json_str(&pick)), "b");
+    assert!(out.trim().is_empty(), "{out}");
+    ok(s.path(), &["mv", &other, "in_progress", "--from", "todo"]);
+    ok(s.path(), &["mv", &loose, "in_progress", "--from", "todo"]);
+    let why = refusal(&call(&s, "Bash", "{\"command\":\"moai add x && echo y >> src/a.rs\"}", "a"));
+    assert!(why.contains("Rule 2") && why.contains(&loose), "{why}");
+    assert!(why.contains("Not counted as this session's work:") && why.contains("in the last 12 hours"), "{why}");
+    assert!(!why.contains("Why this session holds them:"), "{why}");
+}
+
 /// **제 이름 워크트리가 옆 에픽 워크트리를 이긴다**(moai-m62u·moai-cle9, 사용자 결정). 에픽
 /// 워크트리가 살아 있거나 머지하고 안 치운 채 그 에픽에 새 멤버를 집으면, 그 멤버를 제 이름
 /// 워크트리에서 하는 세션이 에픽 이름에 초점을 뺏겨 규칙 2 에 막혔다. 워크트리 목록을 읽는 배선
@@ -17643,6 +17834,51 @@ fn moai_mv_records_its_own_pick_for_the_session() {
     assert!(!recorded("a").contains(&moved), "옮긴 남의 줄을 --take 없이 제 집기로 적었다\n{}", recorded("a"));
 }
 
+/// 시작 칸에 바로 세운 제 일도 `mv` 처럼 제 집기로 적는다(moai-jdwk.323).
+#[test]
+fn moai_add_into_a_started_column_records_its_own_pick() {
+    let s = init("addpicks");
+    let theirs = add(s.path(), &["other session"]);
+    let pick = format!("moai mv {theirs} in_progress --from todo");
+    assert!(call(&s, "Bash", &format!("{{\"command\":{}}}", json_str(&pick)), "b").trim().is_empty());
+    ok(s.path(), &["mv", &theirs, "in_progress", "--from", "todo"]);
+    let cfg = s.path().join("hookcfg/config.toml");
+    let cfg = cfg.to_str().unwrap();
+    let env = [("MOAI_CONFIG", cfg), ("CLAUDE_CODE_SESSION_ID", "a")];
+    let mine = field(&ok_env(s.path(), NOW, &env, &["add", "mine", "-s", "in_progress", "--json"]), "id");
+    let held = hook_out(&s, "stop", &event(&s, "a"));
+    assert!(held.contains(&format!("moai mv {mine}")), "{held}");
+    assert!(!held.contains(&theirs), "{held}");
+    let recorded = |session: &str| -> String {
+        pick_dirs(&s).iter().filter_map(|d| std::fs::read_to_string(d.join(session)).ok()).collect()
+    };
+    // `-q` 도 일찍 돌아가기 전에 적는다.
+    let quiet = ok_env(s.path(), NOW, &env, &["add", "quiet", "-s", "review", "-q"]);
+    assert!(recorded("a").contains(quiet.trim()));
+    for args in [
+        vec!["add", "theirs", "-s", "in_progress", "-a", "Other (other@example.com)", "--json"],
+        vec!["add", "unowned", "-s", "in_progress", "-a", "none", "--json"],
+        vec!["epic", "add", "group", "-s", "in_progress", "--json"],
+        vec!["milestone", "add", "release", "-s", "in_progress", "--json"],
+        vec!["backlog", "add", "later", "-s", "in_progress", "--json"],
+        vec!["add", "todo", "--json"],
+        vec!["add", "done", "-s", "done", "--json"],
+    ] {
+        let id = field(&ok_env(s.path(), NOW, &env, &args), "id");
+        assert!(!recorded("a").contains(&id), "non-pick recorded: {args:?}");
+        if matches!(args[0], "epic" | "milestone" | "backlog") {
+            ok_env(s.path(), NOW, &env, &["mv", &id, "review"]);
+            ok_env(s.path(), NOW, &env, &["mv", &id, "review"]);
+            assert!(!recorded("a").contains(&id), "mv recorded non-work: {args:?}");
+        }
+    }
+    for (session, agent) in [("c", "CODEX_THREAD_ID"), ("g", "ANTIGRAVITY_CONVERSATION_ID")] {
+        let env = [("MOAI_CONFIG", cfg), ("CLAUDE_CODE_SESSION_ID", session), (agent, "other-agent")];
+        ok_env(s.path(), NOW, &env, &["add", "other agent", "-s", "in_progress", "--json"]);
+        assert!(recorded(session).is_empty(), "inherited session recorded: {agent}");
+    }
+}
+
 /// **다른 세션이 부모를 집어도 이 세션이 집은 자식은 제 것이다**(리뷰 moai-3k2d.1df). 모르는 줄은 그 밑의
 /// 자식까지 빼는데, 남이 부모를 집고 이 세션이 `--parent` 로 세운 리뷰 줄을 집으면 그 리뷰까지 빠져
 /// `Stop` 이 안 붙들고, 좁혀 다시 본 판정이 `-m` 없는 리뷰 닫기를 넘겼다.
@@ -17750,6 +17986,44 @@ fn a_row_this_session_picked_stays_its_own_beside_its_epics_worktree() {
     );
     let held = at("c", "stop", None);
     assert!(held.trim().is_empty(), "옆 워크트리의 일로 남을 붙든다\n{held}");
+}
+
+/// 옛 바이너리·셸 변수로 집어 기록이 빠진 리뷰를 거절 자리에서 되살린다(moai-jdwk.1a5).
+#[test]
+fn a_review_picked_outside_the_hook_passes_rule_3_beside_its_epics_worktree() {
+    let s = Scratch::new("review-outside-hook");
+    let main = s.path().join("main");
+    std::fs::create_dir_all(&main).unwrap();
+    git(&main, &["init", "-q"]);
+    ok(&main, &["init", "argos"]);
+    let epic = field(&ok(&main, &["epic", "add", "epic", "--json"]), "id");
+    let review = field(
+        &ok(&main, &["add", "review", "-t", "review", "--parent", &epic, "-b", "write path and hooks", "--json"]),
+        "id",
+    );
+    git(&main, &["add", "-A"]);
+    git(&main, &["commit", "-q", "-m", "setup"]);
+    git(&main, &["worktree", "add", "-q", &format!(".worktrees/{epic}"), "-b", &format!("worktree-{epic}")]);
+    ok(&main, &["mv", &review, "in_progress", "--from", "todo"]);
+    let skill = |session: &str| {
+        let input = format!(
+            "{{\"session_id\":{},\"cwd\":{},\"tool_name\":\"Skill\",\"tool_input\":{{\"skill\":\"code-review\",\"args\":\"max\"}}}}",
+            json_str(session),
+            json_str(&main.display().to_string())
+        );
+        String::from_utf8(hook_in(&s, &main, "pre-tool-use", &input).stdout).unwrap()
+    };
+    let why = refusal(&skill("a"));
+    let command = format!("moai mv {review} in_progress --from in_progress");
+    assert!(why.contains(&command) && why.contains("sibling worktree"), "{why}");
+    let cfg = s.path().join("hookcfg/config.toml");
+    let env = [("MOAI_CONFIG", cfg.to_str().unwrap()), ("CLAUDE_CODE_SESSION_ID", "a")];
+    ok_env(&main, NOW, &env, &["mv", &review, "in_progress", "--from", "in_progress"]);
+    let allowed = skill("a");
+    assert!(allowed.trim().is_empty(), "{allowed}");
+    let why = refusal(&skill("c"));
+    assert!(why.contains("another session picked it up last"), "{why}");
+    assert!(!why.contains(&command), "남의 집기를 뺏으라고 했다: {why}");
 }
 
 /// **루트에 선 세션이 워크트리가 선 일을 쥐면 루트 체크아웃의 쓰기를 그 워크트리로 돌린다**(moai-9js2.3xn, 리뷰
@@ -22400,7 +22674,20 @@ fn the_worktree_you_stand_in_is_not_overlaid_even_through_dash_c() {
 /// 번이 그 도장을 조용히 걷는다.
 #[test]
 fn reading_in_a_worktree_keeps_a_stamp_on_a_row_only_its_own_copy_holds() {
-    let t = trees("wtprune");
+    keeps_a_stamp_only_its_own_copy_holds("wtprune", &[]);
+}
+
+/// 겹쳐 읽은 판도 제 사본에서만 보이는 줄의 도장을 지킨다(moai-b4dc.gqd) — 그 걸음은 화면에 안 겹친 제 사본을
+/// 걷기에 넘긴다(`worktree::gather_reading`). 빠뜨리면 이 판만 그 도장을 걷는다.
+#[test]
+fn reading_with_worktree_keeps_a_stamp_on_a_row_only_its_own_copy_holds() {
+    keeps_a_stamp_only_its_own_copy_holds("wtprune-overlay", &["--worktree"]);
+}
+
+/// 위 둘의 몸 — 루트에서 연 탐색기가 워크트리의 사본에만 있는 줄에 찍은 도장을 앉히고, 그 워크트리에서 `read` 를
+/// `flags` 와 함께 친 뒤에도 그 도장이 남는가를 본다.
+fn keeps_a_stamp_only_its_own_copy_holds(name: &str, flags: &[&str]) {
+    let t = trees(name);
     let (main, feat) = (t.main(), t.feat());
     let cfg = t.s.path().join("user.toml");
     ok_with(&main, &cfg, &["read", &t.tied]);
@@ -22412,10 +22699,11 @@ fn reading_in_a_worktree_keeps_a_stamp_on_a_row_only_its_own_copy_holds() {
     std::fs::write(&sheet, format!("{}\n\"{}\" = \"{LATER}\"\n", text.trim_end(), t.made)).unwrap();
     assert!(read_sheet(&cfg, &main).contains(&t.made), "시험의 전제 — 도장을 앉혔다");
 
-    ok_with(&feat, &cfg, &["read", &t.picked]);
+    let args: Vec<&str> = ["read"].into_iter().chain(flags.iter().copied()).chain([t.picked.as_str()]).collect();
+    ok_with(&feat, &cfg, &args);
     let after = read_sheet(&cfg, &main);
-    assert!(after.contains(&t.picked), "{after}");
-    assert!(after.contains(&t.made), "워크트리에서 친 `read` 가 거기에만 있는 줄의 도장을 걷었다\n{after}");
+    assert!(after.contains(&t.picked), "{flags:?}: {after}");
+    assert!(after.contains(&t.made), "{flags:?}: 워크트리에서 친 `read` 가 거기에만 있는 줄의 도장을 걷었다\n{after}");
 }
 
 /// **`tui --json --deep --worktree` 는 옆에만 있는 줄을 `show --worktree` 가 놓는 자리에 놓는다**(moai-m4ez.gcp) —
@@ -28188,10 +28476,11 @@ fn show_names_the_wiki_pages_about_the_issue() {
 
     // 목록에는 안 싣는다 — 줄마다 위키를 걷게 된다.
     assert!(!ok(s.path(), &["show", "--json"]).contains(r#""wiki""#));
-    // `--fields` 로 고를 수 있다.
-    assert!(
-        ok(s.path(), &["show", &id, "--json", "--fields", "wiki"]).starts_with(r#"{"wiki":{"lessons":[],"named_in":"#)
-    );
+    // `--fields` 로 고른 값은 안쪽 키 차례까지 전체 줄의 것 그대로다(moai-b4dc.0ia).
+    let picked = ok(s.path(), &["show", &id, "--json", "--fields", "wiki"]);
+    let inside = picked.trim().strip_prefix('{').unwrap().strip_suffix('}').unwrap();
+    assert!(json.contains(inside), "전체: {json}\n고른 값: {picked}");
+    assert_eq!(json_of(&picked)["wiki"], v["wiki"]);
 }
 
 /// 문턱 밑이면 `related` 가 비고, 둘 다 비면 사람 화면에 토막이 없다. 위키 디렉터리가 없으면 두 빈 배열이고
@@ -31231,6 +31520,9 @@ struct Served {
 
 impl Drop for Served {
     fn drop(&mut self) {
+        if let Ok(Some(status)) = self.child.try_wait() {
+            eprintln!("moai web 이 시험보다 먼저 끝났다 — {status:?}");
+        }
         let _ = self.child.kill();
         let _ = self.child.wait();
     }
@@ -31275,10 +31567,30 @@ fn serve_with(dir: &Path, tweak: impl FnOnce(&mut Command)) -> Served {
     Served { child, port, first }
 }
 
+/// 부하 때문에 한 번의 connect 가 지더라도 10초 안에서 다시 붙고, 끝내 못 붙으면 errno 를 남긴다.
+/// **connect 한 번도 남은 시한 안에서 끊는다** — 맨 `connect` 는 버려진 SYN 을 다시 보내며 2분 넘게 선다.
+fn dial(port: u16) -> std::net::TcpStream {
+    let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
+    let until = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    let mut attempts = 0;
+    loop {
+        attempts += 1;
+        // 0 은 `connect_timeout` 이 거절한다 — 시한을 넘긴 판도 한 번 더 재고 아래 단언으로 넘어진다.
+        let left = until.saturating_duration_since(std::time::Instant::now()).max(std::time::Duration::from_millis(1));
+        match std::net::TcpStream::connect_timeout(&addr, left) {
+            Ok(stream) => return stream,
+            Err(error) => {
+                assert!(std::time::Instant::now() < until, "127.0.0.1:{port} 에 {attempts}번 붙지 못했다 — {error:?}");
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+        }
+    }
+}
+
 /// 날 요청 하나 — `(상태, 머리, 본문)`. dev-dependency 없이 std `TcpStream` 으로.
 fn http(port: u16, method: &str, path: &str, host: Option<&str>) -> (u16, String, String) {
     use std::io::{Read as _, Write as _};
-    let mut s = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+    let mut s = dial(port);
     s.set_read_timeout(Some(std::time::Duration::from_secs(60))).unwrap();
     let host = host.map(|h| format!("Host: {h}\r\n")).unwrap_or_default();
     write!(s, "{method} {path} HTTP/1.1\r\n{host}\r\n").unwrap();
@@ -31297,7 +31609,7 @@ fn get(port: u16, path: &str) -> (u16, String, String) {
 /// 본문 없는 POST 하나 — `Origin` 을 줄 때만 싣는다. 브라우저가 보내는 꼴이다(읽음 표시, moai-ly88).
 fn post(port: u16, path: &str, origin: Option<&str>) -> (u16, String, String) {
     use std::io::{Read as _, Write as _};
-    let mut s = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+    let mut s = dial(port);
     s.set_read_timeout(Some(std::time::Duration::from_secs(60))).unwrap();
     let origin = origin.map(|o| format!("Origin: {o}\r\n")).unwrap_or_default();
     write!(s, "POST {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n{origin}Content-Length: 0\r\n\r\n").unwrap();
@@ -31596,7 +31908,7 @@ fn web_rows_are_moais_show() {
     assert_eq!(json_of(&body)["exit"], 0, "{body}");
 }
 
-/// **`/api/tree` 는 `moai tui --deep --json` 이다**(moai-0aa7.a0l) — 정렬도 같은 낱말로 옮긴다.
+/// **`/api/tree?gantt=1` 는 `moai tui --deep --json` 이다**(moai-0aa7.a0l) — 정렬도 같은 낱말로 옮긴다.
 #[test]
 fn web_tree_is_tui_deep() {
     let s = init("web-tree");
@@ -31604,14 +31916,14 @@ fn web_tree_is_tui_deep() {
     ok(s.path(), &["add", "a 일"]);
     let web = serve(s.path());
     let direct = ok(s.path(), &["tui", "--deep", "--json"]);
-    let (status, _, body) = get(web.port, "/api/tree");
+    let (status, _, body) = get(web.port, "/api/tree?gantt=1");
     assert_eq!(status, 200, "{body}");
     assert_eq!(envelope_out(&body, &direct), direct.trim());
     let direct = ok(s.path(), &["tui", "--deep", "--sort", "title", "--json"]);
-    let (_, _, body) = get(web.port, "/api/tree?sort=title");
+    let (_, _, body) = get(web.port, "/api/tree?sort=title&gantt=1");
     assert_eq!(envelope_out(&body, &direct), direct.trim());
     let direct = ok(s.path(), &["tui", "--deep", "--sort", "title", "--reverse", "--json"]);
-    let (_, _, body) = get(web.port, "/api/tree?sort=title&reverse=1");
+    let (_, _, body) = get(web.port, "/api/tree?sort=title&reverse=1&gantt=1");
     assert_eq!(envelope_out(&body, &direct), direct.trim());
 }
 
@@ -31661,7 +31973,7 @@ fn web_tree_judges_overdue_in_the_zone_the_page_draws() {
         })
     };
     let overdue = |port: u16, query: &str| {
-        let (status, _, body) = get(port, &format!("/api/tree{query}"));
+        let (status, _, body) = get(port, &format!("/api/tree?gantt=1{}", query.replace('?', "&")));
         assert_eq!(status, 200, "{body}");
         let env = json_of(&body);
         assert_eq!(env["exit"], 0, "{body}");
@@ -31687,6 +31999,34 @@ fn web_tree_judges_overdue_in_the_zone_the_page_draws() {
         assert_eq!(overdue(seoul.port, "?tz=Nowhere%2FAtAll"), serde_json::json!(1), "못 여는 이름이 UTC 로 떨어졌다");
         assert_eq!(overdue(seoul.port, "?tz=%2B09%3A00"), serde_json::json!(1));
         assert_eq!(overdue(seoul.port, "?tz=UTC"), serde_json::Value::Null, "여는 이름은 그대로 페이지의 시간대다");
+    }
+}
+
+/// Timestamp filters and the drawn dates use the same page zone; calendar plan days stay zone independent.
+#[test]
+fn web_rows_filter_judges_days_in_the_zone_the_page_draws() {
+    let s = init("web-filter-zone");
+    let row = json_of(&ok_at(s.path(), "2026-10-10T20:00:00Z", &["add", "Zone row", "--json"]));
+    let id = row["id"].as_str().unwrap();
+    let thought = json_of(&ok_at(s.path(), "2026-10-10T20:00:00Z", &["backlog", "add", "Zone thought", "--json"]));
+    let backlog_id = thought["id"].as_str().unwrap();
+    let web = serve_with(s.path(), |cmd| {
+        cmd.env("TZ", "UTC");
+    });
+    let found = |path: &str, zone: &str, id: &str| {
+        let (status, _, body) = get(web.port, &format!("{path}?filter=created%3D2026-10-11&fields=id{zone}"));
+        assert_eq!(status, 200, "{body}");
+        let env = json_of(&body);
+        assert_eq!(env["exit"], 0, "{body}");
+        env["out"].as_array().unwrap().iter().any(|r| r["id"] == id)
+    };
+    for (path, id) in [("/api/rows", id), ("/api/backlog", backlog_id)] {
+        assert!(!found(path, "", id));
+        assert!(!found(path, "&tz=UTC", id));
+        let tzdb = std::env::var_os("TZDIR").map_or_else(|| PathBuf::from("/usr/share/zoneinfo"), PathBuf::from);
+        if tzdb.join("Asia/Seoul").exists() {
+            assert!(found(path, "&tz=Asia%2FSeoul", id));
+        }
     }
 }
 
@@ -32141,8 +32481,7 @@ fn web_speaks_the_language_the_user_config_says_now() {
 fn web_answers_busy_past_the_cap_and_frees_the_slots() {
     let s = init("web-busy");
     let web = serve(s.path());
-    let idle: Vec<std::net::TcpStream> =
-        (0..32).map(|_| std::net::TcpStream::connect(("127.0.0.1", web.port)).unwrap()).collect();
+    let idle: Vec<_> = (0..32).map(|_| dial(web.port)).collect();
     let (status, _, body) = get(web.port, "/api/stamp");
     assert_eq!(status, 503, "{body}");
     assert_eq!(json_of(&body)["code"], "busy", "{body}");
@@ -32157,6 +32496,54 @@ fn web_answers_busy_past_the_cap_and_frees_the_slots() {
         assert!(std::time::Instant::now() < until, "자리가 안 돌아왔다 — {status} {body}");
         std::thread::sleep(std::time::Duration::from_millis(50));
     }
+}
+
+/// 503 뒤에 도착하는 요청도 끝까지 쓸 수 있다 — 받는 쪽이 이미 온 바이트만 비우고 닫으면 BrokenPipe 다.
+#[test]
+fn web_busy_waits_briefly_for_a_request_that_arrives_after_its_answer() {
+    use std::io::{Read as _, Write as _};
+    let s = init("web-busy-delayed");
+    let web = serve(s.path());
+    let _idle: Vec<_> = (0..32).map(|_| dial(web.port)).collect();
+    let mut client = dial(web.port);
+    client.set_read_timeout(Some(std::time::Duration::from_secs(10))).unwrap();
+    // 503 을 먼저 받았는지 확인한다 — connect 뒤 잠만 자면 서버가 아직 accept 전일 수도 있다.
+    let mut got = Vec::new();
+    while !got.ends_with(b"\r\n\r\n") {
+        let mut byte = [0];
+        client.read_exact(&mut byte).unwrap();
+        got.push(byte[0]);
+    }
+    assert!(got.starts_with(b"HTTP/1.1 503 "), "{}", String::from_utf8_lossy(&got));
+    // 503 을 읽었으니 요청은 이미 답 뒤에 간다. 쉬는 것은 짧게 둔다 — 서버가 기다리는 200ms 를 이 시험이 먼저
+    // 먹으면, CPU 할당이 막히는 부하에서 남은 몫 안에 못 닿아 고친 서버도 BrokenPipe 로 진다.
+    std::thread::sleep(std::time::Duration::from_millis(10));
+    // write! 도 여러 번 쓸 수 있다 — 첫 조각이 RST 를 부르면 다음 조각이 BrokenPipe 다.
+    for part in [b"GET ".as_slice(), b"/api/stamp", b" HTTP/1.1\r\n", b"Host: 127.0.0.1\r\n\r\n"] {
+        client.write_all(part).expect("503 뒤에 도착한 요청을 못 썼다");
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+    client.read_to_end(&mut got).expect("503 이 RST 로 덮였다");
+    let text = String::from_utf8(got).unwrap();
+    assert_eq!(json_of(text.split_once("\r\n\r\n").unwrap().1)["code"], "busy", "{text}");
+}
+
+/// 조용한 초과 연결이 쌓여도 다음 연결은 바로 503 을 받는다 — 받기 고리에서 200ms 씩 비우면 줄을 세운다.
+#[test]
+fn web_silent_overflow_clients_do_not_delay_the_next_accept() {
+    use std::io::Read as _;
+    let s = init("web-busy-accept");
+    let web = serve(s.path());
+    let _idle: Vec<_> = (0..32).map(|_| dial(web.port)).collect();
+    // 한 연결의 짧은 시한과 스케줄링 오차를 견주지 않는다. 직렬로 기다리면 총 6.4초인 줄을 만든다.
+    let _overflow: Vec<_> = (0..32).map(|_| dial(web.port)).collect();
+    let mut next = dial(web.port);
+    next.set_read_timeout(Some(std::time::Duration::from_secs(2))).unwrap();
+    let mut got = Vec::new();
+    next.read_to_end(&mut got).expect("조용한 초과 연결이 다음 accept 를 세웠다");
+    let text = String::from_utf8(got).unwrap();
+    assert!(text.starts_with("HTTP/1.1 503 "), "{text}");
+    assert_eq!(json_of(text.split_once("\r\n\r\n").unwrap().1)["code"], "busy", "{text}");
 }
 
 /// **위키의 낱말은 `wiki ls` 가 낸 그대로 연다** — 디렉터리 밑의 쪽(`guide/start`)과 한글 이름을 id 의 모양으로
@@ -32197,4 +32584,87 @@ fn web_children_do_not_repeat_the_climb_notice() {
     let env = json_of(&get(web.port, "/api/status").2);
     assert_eq!(env["exit"], 0, "{env}");
     assert!(env.get("said").is_none(), "{env}");
+}
+
+/// Gantt values are optional for JSON consumers; the web only asks when its chart tab is active.
+#[test]
+fn tui_no_gantt_omits_values_and_web_tree_opts_in() {
+    let s = init("tui-no-gantt");
+    let id = add(s.path(), &["Planned row", "--start", "2026-10-26", "--due", "2026-10-28"]);
+    let full = json_of(&ok(s.path(), &["tui", "--json", "--deep"]));
+    let lean = json_of(&ok(s.path(), &["tui", "--json", "--deep", "--no-gantt"]));
+    let row = |values: &serde_json::Value| values.as_array().unwrap().iter().find(|r| r["id"] == id).unwrap().clone();
+    assert!(row(&full).get("gantt").is_some());
+    assert!(row(&lean).get("gantt").is_none());
+    assert!(row(&lean).get("home").is_some());
+    let mut without = full.clone();
+    for row in without.as_array_mut().unwrap() {
+        row.as_object_mut().unwrap().remove("gantt");
+    }
+    assert_eq!(lean, without, "no-gantt must leave the tree and every other field intact");
+    let refused = moai(s.path(), &["tui", "--no-gantt"]);
+    assert!(!refused.status.success());
+    assert!(text(&refused).contains("--no-gantt"));
+
+    let web = serve(s.path());
+    for (query, wanted) in [("", false), ("?gantt=1", true)] {
+        let (status, _, body) = get(web.port, &format!("/api/tree{query}"));
+        assert_eq!(status, 200, "{body}");
+        let env = json_of(&body);
+        assert_eq!(env["exit"], 0, "{body}");
+        assert_eq!(row(&env["out"]).get("gantt").is_some(), wanted, "{body}");
+    }
+    let (status, _, body) = get(web.port, "/api/tree?gantt=0");
+    assert_eq!((status, json_of(&body)["code"].as_str()), (400, Some("bad_input")));
+}
+
+/// A shape flag that would be a no-op is refused with the same coded contract as the TUI's other JSON shapes.
+#[test]
+fn tui_no_gantt_requires_deep_and_json() {
+    let s = init("tui-no-gantt-shape");
+    for args in [&["tui", "--no-gantt"][..], &["tui", "--deep", "--no-gantt"][..]] {
+        let out = moai(s.path(), args);
+        assert!(!out.status.success(), "{out:?}");
+        assert!(text(&out).contains("--json"), "{out:?}");
+    }
+    let out = moai(s.path(), &["tui", "--json", "--no-gantt"]);
+    assert!(!out.status.success(), "{out:?}");
+    assert!(out.stdout.is_empty(), "a refusal must not print a successful listing");
+    let failure = json_of(&String::from_utf8_lossy(&out.stderr));
+    assert_eq!(failure["code"], "bad_filter", "{failure}");
+    let message = failure["error"].as_str().unwrap();
+    assert!(message.contains("--no-gantt") && message.contains("--deep"), "{message}");
+    let valid = ok(s.path(), &["tui", "--json", "--deep", "--no-gantt"]);
+    assert!(json_of(&valid).is_array());
+    let outside = Scratch::new("tui-no-gantt-outside");
+    let out = moai(outside.path(), &["tui", "--json", "--no-gantt"]);
+    assert!(!out.status.success());
+    assert!(text(&out).contains("--no-gantt"));
+}
+
+/// Single-row optimization must retain list semantics, especially rolled-up group archive age.
+#[test]
+fn show_one_where_agrees_with_lists_for_issues_and_groups() {
+    let s = init("one-where");
+    std::fs::write(s.path().join(".moai/config.toml"), "prefix = \"argos\"\narchive_days = 1\n").unwrap();
+    let stone = field(&ok(s.path(), &["milestone", "add", "release", "--json"]), "id");
+    let epic = field(&ok(s.path(), &["epic", "add", "bundle", "--milestone", &stone, "--json"]), "id");
+    let member = add(s.path(), &["live member", "-e", &epic]);
+    let old_epic = field(&ok(s.path(), &["epic", "add", "old bundle", "--json"]), "id");
+    let old = add(s.path(), &["old member", "-e", &old_epic]);
+    ok_at(s.path(), "2026-01-01T00:00:00Z", &["mv", &old, "done"]);
+    // The epic's stored column is todo; its members make it archived.
+    let fields = "id,derived_milestone,archived";
+    let list: Vec<serde_json::Value> =
+        serde_json::from_str(&ok(s.path(), &["show", "--archived", "--json", "--fields", fields])).unwrap();
+    for id in [&member, &old, &old_epic, &stone] {
+        let row = list.iter().find(|r| r["id"] == id.as_str()).unwrap();
+        for args in [vec!["show", id, "--json"], vec!["show", id, "--json", "--fields", fields]] {
+            let one: serde_json::Value = serde_json::from_str(&ok(s.path(), &args)).unwrap();
+            for key in ["derived_milestone", "archived"] {
+                assert_eq!(one.get(key), row.get(key), "{id}: {key}");
+            }
+        }
+    }
+    assert_eq!(list.iter().find(|r| r["id"] == old_epic).unwrap()["archived"], true);
 }

@@ -105,7 +105,7 @@ def encode(message):
     return body, f"multipart/form-data; boundary={bound}"
 
 
-def send(url, msgs, start=1, opener=urllib.request.urlopen, sleep=time.sleep):
+def send(url, msgs, start=1, opener=urllib.request.urlopen, sleep=time.sleep, out=None):
     """차례대로 보낸다. start 는 몇 번째부터인가 — 중간에 멈춘 판을 다시 돌릴 때 앞의 것이 두 번 안 나가게."""
     for i, m in enumerate(msgs, 1):
         if i < start:
@@ -132,7 +132,7 @@ def send(url, msgs, start=1, opener=urllib.request.urlopen, sleep=time.sleep):
             except urllib.error.URLError as e:
                 raise PostError(f"message {i} of {len(msgs)}: cannot reach Discord ({e.reason})") from None
         what = os.path.basename(m["file"]) if m["file"] else f"text, {len(m['content'])} characters"
-        print(f"posted {i}/{len(msgs)}: {what}")
+        print(f"posted {i}/{len(msgs)}: {what}", file=out)
 
 
 def describe(msgs):

@@ -240,7 +240,8 @@ impl App {
     ///
     /// **이 키가 알림을 걷는가**를 답한다 — 부르는 쪽([`App::key`])이 거짓이면 알림을 도로 세운다. 거짓은 아무 동작도
     /// 안 돈 키다: 메뉴만 만진 키(열기·닫기·한 층 오르내리기·모르는 키), 메뉴를 닫은 이동키(그 닫는 몫, moai-y8v2),
-    /// 둘째 키를 기다리는 `g`, 그리고 키 목록 창을 연 `SPC h`(읽기만 하는 창이다) — 탐색의 규칙과 같다
+    /// 둘째 키를 기다리는 `g`, 그리고 키 목록 창을 연 키(`SPC h`, 창의 표가 안 받은 `?` 같은 도움말 키 — 읽기만 하는
+    /// 창이다, [`App::help_from_window`]) — 탐색의 규칙과 같다
     /// (`a_prefix_waiting_for_its_next_key_keeps_the_notice`). 화면을
     /// 고른 키와 창의 키(굴리기·`b`·Esc), 모르는 키는 참이다.
     pub(super) fn stats_key(&mut self, k: KeyEvent) -> bool {
@@ -286,7 +287,10 @@ impl App {
             Some(Stat::Bucket) => w.switch(),
             Some(Stat::Close) => self.mode = Mode::Browse,
             // 뜻 없는 키는 열을 버리므로([`super::keys::Chord::feed`]) 남은 열이 곧 "기다린다" 다.
-            None => return w.chord.held().is_empty(),
+            None => {
+                let idle = w.chord.held().is_empty();
+                return idle && !self.help_from_window(k);
+            }
         }
         true
     }
@@ -404,6 +408,32 @@ mod tests {
         a.hit("Esc");
         assert_eq!(a.mode, Mode::Browse);
         assert_eq!((a.cursor, a.focus, a.hung.clone(), a.detail_open, a.detail), before, "창이 보던 자리를 바꿨다");
+    }
+
+    #[test]
+    fn the_help_key_opens_over_stats_and_the_window_keys_win() {
+        let mut a = app();
+        a.hit("SPC g s");
+        a.notice = Some("kept".into());
+        a.hit("?");
+        assert!(a.help.is_some());
+        assert_eq!(a.notice.as_deref(), Some("kept"));
+        a.hit("Esc");
+        assert!(a.help.is_none() && matches!(a.mode, Mode::Stats(_)));
+        let (map, problems) = super::super::keymap::build("[browse]\nhelp = \"F1\"\n");
+        assert!(problems.is_empty());
+        a.adopt_keys(map, &problems, None);
+        a.hit("?");
+        assert!(a.help.is_none());
+        a.hit("F1");
+        assert!(a.help.is_some());
+        a.hit("Esc");
+        let (map, problems) = super::super::keymap::build("[browse]\nhelp = \"b\"\n");
+        assert!(problems.is_empty());
+        a.adopt_keys(map, &problems, None);
+        a.hit("b");
+        assert!(a.help.is_none());
+        assert_eq!(window(&a).bucket, Bucket::Day);
     }
 
     /// **통계 창 위의 SPC 는 화면 고르기만 연다**(moai-z46r, 사용자 결정) — `SPC g l`·`b` 는 창을 닫고 그 배치로 서고,

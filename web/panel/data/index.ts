@@ -36,7 +36,7 @@ export interface Row {
   assignee?: string
   assignee_email?: string
   blocked_by?: string[]
-  /** The gantt's values for this row (`tui --json --deep`'s `gantt`, carried over from the tree line; the gantt tab places them). */
+  /** The gantt's values for this row (`tui --json --deep`'s `gantt`, carried over from the tree line; the gantt tab places them). Absent until a tree read asked with `gantt=1`. */
   gantt?: GanttRow
   /** CLI's unread verdict: `true` or absent (see read.ts). */
   unread?: boolean
@@ -60,7 +60,7 @@ export interface TreeRow {
   progress?: { done: number; total: number }
   /** The handles from the root down to where it stands: ids, `none`, `lost`. */
   home?: string[]
-  /** The planned and actual spans (`report::gantt::Row`), on every row with an id. The page only places them. */
+  /** The planned and actual spans (`report::gantt::Row`), on every row with an id when the tree was asked with `gantt=1` (only while the Gantt tab is active); absent otherwise. The page only places them. */
   gantt?: GanttRow
 }
 

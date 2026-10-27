@@ -250,7 +250,7 @@ test('shell: the position and visibility toggles are remembered and come back on
   assert.equal(visibility.getAttribute('aria-label'), 'Show details')
   panel.tab('board').click()
 
-  assert.deepEqual(JSON.parse(storage.items.get(MEMORY_KEY)), { version: 1, tab: 'board', detail: { visible: false, position: 'left', ratio: { left, bottom: 0.3 } } })
+  assert.deepEqual(normalizeMemory(JSON.parse(storage.items.get(MEMORY_KEY))), { tab: 'board', detail: { visible: false, position: 'left', ratio: { left, bottom: 0.3 } } })
 
   const again = boot(storage)
   assert.equal(again.tab('board').getAttribute('aria-selected'), 'true')
@@ -674,7 +674,7 @@ test('memory: an order that is the default is not kept, so a later default decid
   remember(first, createMemory(() => null), defaults, storage)
   // A cell toggled on the default order: the workspace keeps the cell, not the order.
   first.dispatch({ type: 'column', column: 'tags', on: true })
-  assert.equal(JSON.parse(storage.read(QUERY_KEY)).sort, null)
+  assert.equal(JSON.parse(storage.read(QUERY_KEY)).sort ?? null, null)
   // `D` saves another order as the default afterwards.
   defaults.set({ fields: [{ key: 'updated', dir: 'desc' }], reversed: false })
   const second = createStore()

@@ -54,10 +54,12 @@ The day a row is due — its own `due_on` field, set with `--due YYYY-MM-DD`, `-
 carry one, and it is asked about but never required. It cannot pass the deadline of
 the [milestone](#milestone), [epic](#epic) or parent above it: such a write is refused,
 and a row the one above overtook by being pulled in is a [warning](#warning),
-`due_beyond_parent`. It is not inherited — a member is bounded by its epic's deadline
+`due_beyond_parent`. A deferred ancestor, or an ancestor under a deferred group,
+sets no ceiling while deferred; undoing the deferral restores it, and plans now
+beyond it stand as that same warning — the undo itself names none. It is not inherited — a member is bounded by its epic's deadline
 without carrying it. A row's planned start (`--start`, `starts_on`) is held to the same ceiling: a start later than the deadline above it is refused, and one overtaken by pulling that deadline in is the same `due_beyond_parent` warning. A start earlier than the parent's start is never refused. `moai due apply` raises an open, not deferred issue's or backlog
 item's priority as the deadline it follows nears — the earliest of its own and those of
-the rows above it, a parent already closed lending none (one day left or less, today and
+the rows above it, a parent already closed or a deferred ancestor lending none (one day left or less, today and
 past included, `p0`; two or less `p1`; seven or less `p2`), never lowers it, and leaves a
 `Due-priority:` note. A group row is never raised itself; its members are. An open
 issue or epic whose own deadline has passed is a [warning](#warning), `overdue`, and a priority
@@ -91,16 +93,26 @@ at is that worktree's, unless this worktree's name points at it as closely or th
 session picked it up for certain. A row another session picked up last is not
 counted, and nor — once another session has recorded a pick in the same tracker
 within the last 12 hours — is a started row no session's hook recorded picking up:
-moved in a terminal, by a session that runs without the moai hook, or through a
-shell variable such as `moai mv "$id" …`. Such an unrecorded row still counts when
-this worktree's name points at it, or when it sits under a row this session
-picked up or in that row's epic. Leaving rows out only ever lets a call through
+moved in a terminal, by a session without the moai hook, or by a moai older than
+0.29. `moai mv` and `moai add -s <started column>` record their own pick-ups for
+the Claude Code session, including when the shell expands a variable. Such an
+unrecorded row still counts when this worktree's name points at it — and so does
+a row under it that this worktree's name points at more closely — or when it
+sits under a row this session picked up or in that row's epic. Leaving rows out
+only ever lets a call through
 or holds the turn end less — it never adds a refusal. The session before a
 `/clear` counts as another session; with no other session's pick recorded in that
 window, an unrecorded row is still yours. A rule 1 or rule 3 refusal and the
 turn-end question end with one line per held row on why this session holds it —
 it picked the row up, this worktree's name points at it, or nobody recorded the
-pick — when the lines fit.
+pick — when the lines fit. A rule 3 refusal with nothing held also names up to
+three started review rows of yours it did not count, and why. When a rule 1, 2
+or 3 refusal names a started row of yours that it did not count, it says why.
+A row another session picked up last is left to that session; for an unrecorded
+review the refusal gives a line that records the pick-up without moving it.
+The reason follows the decision, including a cause inherited from an ancestor;
+a pick marked “may not have run” is described that way. A recovery command is
+offered only for a known column and a row in the tracker the command will write.
 
 ## Group
 
@@ -313,4 +325,4 @@ not pile commits onto one branch. The tracker stays in the main checkout; the
 wiki pages ride the branch. More in
 [the workflow](workflow.md#work-in-a-worktree).
 
-Decided in: moai-tllo moai-snyk moai-u5wr moai-dhxm moai-kxkw moai-jtvp moai-bth3 moai-obxm moai-9tqo moai-uzhx moai-pyi4
+Decided in: moai-tllo moai-snyk moai-u5wr moai-dhxm moai-kxkw moai-jtvp moai-bth3 moai-obxm moai-9tqo moai-uzhx moai-pyi4 moai-jdwk moai-lj8g

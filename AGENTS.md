@@ -1,4 +1,4 @@
-<!-- moai:begin v:0.27.0 hash:7f3cadf2 -->
+<!-- moai:begin v:0.29.1 hash:7c159031 -->
 ## Issue tracker — moai
 
 This repository's work lives in `.moai/issues.jsonl`.
@@ -267,7 +267,9 @@ named in one line on stderr and stand as `due_beyond_parent` on the board until 
 own deadlines come in. A start obeys the same ceiling: it cannot be later than the
 earliest deadline above it, but it may be earlier than the parent's start. `moai show --sort due` puts the nearest first, and
 `--filter due_on=<from>~<to>` picks rows by their own deadline (`starts_on=` by their
-own start).
+own start). A deferred ancestor, or one under a deferred group, sets no ceiling and lends
+`moai due apply` no deadline until its deferral is undone — the rows past it then stand
+as `due_beyond_parent`.
 
 **A near deadline raises priority, by one verb.** `moai due apply` (`--dry-run` shows it
 first) raises an open, not deferred issue or backlog item by the deadline it follows —

@@ -46,8 +46,14 @@ inside a basket), always counted from the root even when `--path` starts the
 walk lower. `--deep` needs `--json` and a
 `.moai`, and one-level listings carry no `home`.
 
-Under `--deep` every row with an id also carries `gantt`, what the Gantt charts
-draw, decided by moai so that a program drawing it judges no dates itself. Basket
+Add `--no-gantt` to `moai tui --deep --json` when only the tree is needed. It skips
+calculating the chart values and omits the `gantt` key, leaving the tree, its order
+and every other field intact. Both `--json` and `--deep` are required with
+`--no-gantt`; omitting either is refused.
+
+Under `--deep` without `--no-gantt`, every row with an id also carries `gantt`,
+what the Gantt charts draw, decided by moai so that a program drawing it judges no
+dates itself. Basket
 rows have none, and every key inside it always stands (`null` when there is no value):
 
 - `planned` — `{start, end, from}`: calendar days, either end may be `null`; `from`
@@ -167,12 +173,12 @@ A whole tracker with bodies runs to megabytes — this repository's
 `moai show --archived --json` is over 2 MB. Two things cut it down:
 
 - `--fields id,title,status` keeps only those keys of each row, in that order
-  and each once. The costly keys it leaves out are not worked out: without
-  `work` a list skips the journals, and `moai show <id>` reads the wiki only
-  for `wiki` and asks git only for
-  `commits`. `moai show -g <word> --all --fields id --json` is a small list of
-  the ids a search found, notes included — `-g` still reads the notes it
-  searches
+  and each once. Values inside a kept key come out byte for byte as in the full
+  row, including the order of nested keys. The costly keys it leaves out are
+  not worked out: without `work` a list skips the journals, and `moai show <id>`
+  reads the wiki only for `wiki` and asks git only for `commits`.
+  `moai show -g <word> --all --fields id --json` is a small list of the ids a
+  search found, notes included — `-g` still reads the notes it searches
 - Paging: `--sort id -n <count> --after <last id>` reads the list a page at a
   time. Archived rows and live rows share one order, and an edit between pages
   does not move a row in id order, so the pages join into the whole list
@@ -187,4 +193,4 @@ A whole tracker with bodies runs to megabytes — this repository's
 - **Pages repeat or skip a row** — the order moved under you. Page in `id` or
   `created` order; priority and title move when someone edits a row
 
-Decided in: moai-wk7i, moai-g8pt
+Decided in: moai-b4dc, moai-ijjd, moai-wk7i, moai-g8pt

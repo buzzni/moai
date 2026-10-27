@@ -5,7 +5,7 @@
 //! 어긋나는 날 화면이 거짓말한다. 여기서 낸 값이 이 바이너리가 실제로 쓰는 값이다.
 
 use super::{Ctx, R};
-use crate::config::{Config, Naming, Thresholds};
+use crate::config::{Config, Thresholds};
 
 /// `config --json` 한 객체. **키는 파일의 키와 같은 이름이다** — 문턱도 파일처럼 평평하게
 /// (`status_review_days`) 낸다. 읽은 값을 그대로 파일에 옮겨 적을 수 있어야 두 이름을 안 외운다.
@@ -50,7 +50,7 @@ impl<'a> Out<'a> {
         Out {
             prefix: &cfg.prefix,
             statuses: &cfg.statuses,
-            naming: naming(cfg.naming),
+            naming: cfg.naming.as_str(),
             archive_days: cfg.archive_days,
             wiki_dir: &cfg.wiki_dir,
             status_review_days: review_days,
@@ -68,15 +68,6 @@ impl<'a> Out<'a> {
             due_p2_days: cfg.due.p2_days,
             path,
         }
-    }
-}
-
-/// 파일에 적는 낱말 그대로다(`Naming::ALL`). `moai web` 의 `/api/boot` 도 이것을 낸다.
-pub(crate) fn naming(n: Naming) -> &'static str {
-    match n {
-        Naming::Full => Naming::ALL[0],
-        Naming::Name => Naming::ALL[1],
-        Naming::Email => Naming::ALL[2],
     }
 }
 

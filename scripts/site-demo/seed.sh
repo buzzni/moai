@@ -15,9 +15,9 @@ dir=${1:?usage: seed.sh <empty dir>}
 moai=${MOAI:-$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)/target/release/moai}
 case $moai in */*) moai=$(realpath -- "$moai") ;; *) moai=$(command -v -- "$moai") ;; esac
 [ -x "$moai" ] || { echo "seed.sh: no moai binary at $moai" >&2; exit 1; }
-# 녹화하는 사람의 환경이 화면에 새지 않게: 정체(MOAI_ACTOR)·키·색·말은 데모의 것으로
+# 녹화하는 사람의 환경이 화면에 새지 않게: 정체(MOAI_ACTOR)·키·색·말·시간대는 데모의 것으로
 unset MOAI_ACTOR MOAI_KEYS NO_COLOR
-export MOAI_LANG=en
+export TZ=UTC MOAI_LANG=en
 mkdir -p "$dir"
 cd "$dir"
 [ -z "$(ls -A .)" ] || { echo "seed.sh: $dir is not empty" >&2; exit 1; }
@@ -27,8 +27,12 @@ JONAS='Jonas Weber (jonas@example.com)'
 AIKO='Aiko Tanaka (aiko@example.com)'
 SAM='Sam Rivera (sam@example.com)'
 
-# 오늘에서 N일 H시 전의 RFC3339
-ago() { date -u -d "-$1 days -${2:-0} hours" +%Y-%m-%dT%H:%M:%SZ; }
+# DEMO_NOW 를 주면 소식 그림을 나중에 다시 지어도 같은 날에 선다. 기본은 녹화하는 오늘이다.
+# 꼴은 여기서 RFC3339 UTC 로 맞춘다 — moai 는 MOAI_NOW 를 글자 그대로 저장된 시각과 견주니, drive.py·plan.sh 도
+# 같은 자(GNU date)로 같은 꼴에 맞춘다. 못 읽는 값은 여기서 멈춘다(아래 "$(day …)" 처럼 인자 안의 치환은 set -e 가 못 잡는다)
+demo_now=$(date -u -d "${DEMO_NOW:-now}" +%Y-%m-%dT%H:%M:%SZ)
+ago() { date -u -d "$demo_now -$1 days -${2:-0} hours" +%Y-%m-%dT%H:%M:%SZ; }
+day() { date -u -d "$demo_now $1 days" +%F; }
 
 git init -q -b main
 # 녹화용 부속은 데모 저장소의 이력에 안 싣는다 — 첫 커밋의 git add -A 보다 먼저 적는다
@@ -54,8 +58,8 @@ note() { local who=$1 id=$2; shift 2; "$moai" note "$id" "$@" --user "$who" >/de
 walk() { local who=$1 id=$2; shift 2; for step in "$@"; do MOAI_NOW=$(ago "${step#*:}"); mv_ "$who" "$id" "${step%%:*}"; done; }
 
 MOAI_NOW=$(ago 21)
-m14=$("$moai" milestone add 'v1.4 — Sync' --start "$(date -u -d '-20 days' +%F)" --due "$(date -u -d '+6 days' +%F)" --user "$MIRA" --json | jq -r .id)
-m15=$("$moai" milestone add 'v1.5 — Sharing' --start "$(date -u -d '+7 days' +%F)" --due "$(date -u -d '+34 days' +%F)" --user "$MIRA" --json | jq -r .id)
+m14=$("$moai" milestone add 'v1.4 — Sync' --start "$(day -20)" --due "$(day +6)" --user "$MIRA" --json | jq -r .id)
+m15=$("$moai" milestone add 'v1.5 — Sharing' --start "$(day +7)" --due "$(day +34)" --user "$MIRA" --json | jq -r .id)
 
 e_sync=$("$moai" epic add 'Offline sync' --milestone "$m14" --user "$MIRA" --json -b - <<'EOF' | jq -r .id
 Notes written on a plane should be there when you land, on every device.

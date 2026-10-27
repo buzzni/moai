@@ -89,12 +89,7 @@ pub(crate) fn append(
     // 닫힘 안에서 `ctx.lang()` 을 처음 부르면 그 첫 부름이 사용자 설정을 여는데, 그 자리는
     // `.moai/lock` 을 쥔 채다 — `with_write` 가 `lang` 을 **묻는 길**로 받는 까닭이 그것이라
     // 닫힘 쪽만 그대로 두면 그 약속이 반쪽이 된다. 그래서 `lang` 은 이미 푼 값으로 받는다.
-    // **노트가 저널에 못 들었으면 실패다**(moai-xp7l.c4h) — `with_write` 는 스냅샷을 썼으면 저널 실패를 성공으로 낸다
-    // (다시 부르면 `add` 가 둘 선다, moai-52z9). 노트는 스냅샷을 안 고치지만, 손으로 고친 파일이면 같은 쓰기가 표준형으로
-    // 다시 써 "썼다" 가 되고, 노트를 잃은 채 성공으로 끝났다 — `wiki learn` 은 `noted: true` 를 냈다. 노트는 저널이
-    // 전부라 다시 부르는 것이 맞다. 잃은 것은 [`crate::store::journal_misses`] 에 이 뿌리로 쌓인다 — **이 쓰기 뒤에 이
-    // 저장소에 새로 선 것만** 이 쓰기의 것이다(탐색기의 쓰기와 같은 자, `tui::App` 의 `missed_before`). 그 통은 비우지 않는다.
-    let missed = crate::store::journal_misses().len();
+    // 저널 실패는 `write_locked` 가 가른다(moai-jdwk.xf0).
     repo.with_write(
         || lang,
         |issues, _, reserved| {
@@ -104,11 +99,6 @@ pub(crate) fn append(
             Ok((vec![entry.clone()], ()))
         },
     )?;
-    if let Some((_, said)) =
-        crate::store::journal_misses().into_iter().skip(missed).find(|(root, _)| *root == repo.root)
-    {
-        return Err(Fail::coded(said, super::code::ERROR));
-    }
     Ok(entry)
 }
 

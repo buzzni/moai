@@ -2,8 +2,9 @@
 
 `moai tui` walks the tracker on one screen: the list on one side, the row under
 the cursor described on the other. It is for reading — finding work, seeing how a
-milestone stands, catching up on what changed — and the one thing it writes to
-the tracker is a thought you park (`SPC n`). Moving, editing and noting are done
+milestone stands, catching up on what changed — and it writes two things to
+the tracker: a thought you park (`SPC n`) and a plan you move on [the Gantt](#the-gantt).
+Moving, editing and noting are done
 with the CLI. Every key is in `moai tui --help`; this page says which ones to
 reach for, and [the glossary](glossary.md) says what the words mean.
 
@@ -185,7 +186,15 @@ same as `moai edit --start --due`: a start after the deadline, or a day past the
 deadline above, is refused and the refusal stands on the banner. A move that went
 through names the `moai edit` line that puts it back, and the rows it pushed past
 this deadline. An epic whose bar spans its members does not move — move the members.
-On the overview, enter the project first.
+A row whose copy the overlay took from another worktree's tracker file does not
+move here — the notice and the detail (after `⎇`) name that worktree. Its plan
+lives in that worktree's own snapshot. Follow [A worktree wrote the tracker in
+the wrong place](recovery.md#a-worktree-wrote-the-tracker-in-the-wrong-place):
+apply the same `moai` commands against the main checkout and drop the worktree's
+copy. Running `moai` in that worktree also writes the main checkout's tracker,
+so it does not repair the copy the overlay shows. The list's `⎇ <branch>` marks
+rows a worktree is working on, and those move as usual. On the overview, enter
+the project first.
 
 **The detail** stands below the gantt at first, so the dates keep the width.
 `SPC o d` there moves only the gantt's detail, for this session.
@@ -229,9 +238,10 @@ one shows one column to scroll.
 - The movement keys and the mouse wheel scroll it; the bottom right corner says
   where you are (`16/103`). With more than one column the columns scroll together,
   and the count is the rows of the longest column, not every line (`1/35`)
-- `?`, `SPC h`, `Esc` or `Backspace` closes it. While it is open, `Esc` belongs
-  to the window: it does not clear the filter you set
-- It opens over the stats and wiki windows too (`SPC h`), and closing it leaves
+- `?`, `SPC h`, `Esc` or `Backspace` closes it, and so does `SPC q`: over the
+  list it closes rather than quits (`Ctrl-C` quits from anywhere). While it is
+  open, `Esc` belongs to the window: it does not clear the filter you set
+- It opens over the stats and wiki windows too (`?` or `SPC h`), and closing it leaves
   that window as it was
 - The bottom bar names `?` while there is room. On a narrow screen it is the
   first hint to drop; `SPC h` in the menu is always there
@@ -398,7 +408,8 @@ the shell when you quit — open it, save it as UTF-8, and park it again.
 
 Register a project once with `moai project add <dir>`, or from inside the explorer
 with `SPC p a`, which opens a window to walk to the directory. The header numbers
-every registered project; press that number to jump there, and `0` for one list
+every registered project and marks the one you are in with `▸`; press its number
+to jump there, and `0` for one list
 of them all, a header row per project. `Enter` on a header goes into that project.
 `SPC p d` on a header drops the project from the list and leaves its files alone.
 
@@ -441,4 +452,4 @@ write there either.
   an email on every write and `git config` had none. The answer holds for this
   run; set `user.name` and `user.email` to stop it asking
 
-Decided in: moai-z46r moai-9nfw moai-47mz moai-irrj moai-ucx8 moai-1hka moai-h2rh moai-gelm moai-m6ni moai-p3r9 moai-o3cb moai-fyul moai-ogaw moai-tllo moai-fc97 moai-jtvp moai-bth3 moai-9tqo moai-wk7i moai-pxiy moai-i4hf
+Decided in: moai-724f moai-z46r moai-9nfw moai-47mz moai-irrj moai-ucx8 moai-1hka moai-h2rh moai-gelm moai-m6ni moai-p3r9 moai-o3cb moai-fyul moai-ogaw moai-tllo moai-fc97 moai-jtvp moai-bth3 moai-9tqo moai-wk7i moai-pxiy moai-i4hf moai-lj8g

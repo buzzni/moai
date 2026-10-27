@@ -35,8 +35,14 @@ export async function writePlan(client: Client, id: string, change: PlanChange):
 }
 
 /**
- * The `moai edit` line that puts the days back, as the TUI's notice names it. A day never written is `none`. Built from
- * the days the page read: moai's answer carries the row after the write, not before it.
+ * Undo the same move, preserving changes to the other edge since the page read it. The write's answer carries only
+ * the resulting row, so when an edge was absent at read time, clearing it is approximate: another writer may have
+ * set that edge before this move landed. A new one-day plan is guarded by --if-unplanned and can clear both edges.
  */
-export const undoLine = (id: string, start: string | null | undefined, due: string | null | undefined): string =>
-  `moai edit ${id} --start ${start || 'none'} --due ${due || 'none'}`
+export function undoOf(id: string, change: PlanChange, read: { start: string | null; due: string | null }): string {
+  const cmd = `moai edit ${id}`
+  if ('day' in change) return `${cmd} --start none --due none`
+  if (change.edge === 'body') return `${cmd} --shift ${-change.days}`
+  if (change.edge === 'start') return read.start ? `${cmd} --shift-start ${-change.days}` : `${cmd} --start none`
+  return read.due ? `${cmd} --shift-due ${-change.days}` : `${cmd} --due none`
+}

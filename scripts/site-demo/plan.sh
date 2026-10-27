@@ -13,9 +13,13 @@ moai=${MOAI:-$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)/target/re
 case $moai in */*) moai=$(realpath -- "$moai") ;; *) moai=$(command -v -- "$moai") ;; esac
 [ -x "$moai" ] || { echo "plan.sh: no moai binary at $moai" >&2; exit 1; }
 unset MOAI_ACTOR MOAI_NOW
-export MOAI_LANG=en MOAI_NO_UPDATE_CHECK=1 MOAI_CONFIG=$repo/.demo-home/config.toml
+export TZ=UTC MOAI_LANG=en MOAI_NO_UPDATE_CHECK=1 MOAI_CONFIG=$repo/.demo-home/config.toml
 cd "$repo"
-day() { date -u -d "$1 days" +%F; }
+# seed.sh 와 같은 날·같은 꼴. 쓰기의 시각도 그날로 둔다 — 벽시계로 쓰면 소식 그림을 나중에 다시 지을 때 아래 edit 의
+# updated_at 이 TUI 의 지금(drive.py 가 DEMO_NOW 로 고정한다)보다 뒤에 선다
+demo_now=$(date -u -d "${DEMO_NOW:-now}" +%Y-%m-%dT%H:%M:%SZ)
+export MOAI_NOW=$demo_now
+day() { date -u -d "$demo_now $1 days" +%F; }
 MIRA='Mira Chen (mira@example.com)'
 # plan <제목의 일부> <시작: 오늘에서 며칠> <마감: 오늘에서 며칠>. -g 는 본문·노트까지 찾으니 한 줄만 맞아야 한다 —
 # 둘 맞는 것을 앞의 것으로 고르면 seed.sh 의 글 한 줄에 막대가 말없이 옆 줄로 가고, drive.py 의 마우스가 빈 칸을 끈다

@@ -76,7 +76,7 @@ of its worktrees — the supervisor took you for a worker by a name that only lo
 repository's. Do nothing of it: reply to its `from` that you stand in another repository, and
 end the turn.
 The steps begin in the root the message names (`Root:`) — if this window stands anywhere
-else in that repository, go there first: `cd <root>` from a subdirectory or from a worktree
+else in that repository, go there first: `cd "<root>"` from a subdirectory or from a worktree
 a `cd` moved into, `ExitWorktree(keep)` from a worktree this session entered with
 `EnterWorktree`.
 A message that hands over no work is not work: if it asks something, answer it with
@@ -87,14 +87,14 @@ A message that hands over no work is not work: if it asks something, answer it w
 **Never call `EnterWorktree` — in a session or in a subagent.** Every call into `.worktrees/`
 asks the person watching to approve it, and no allow rule turns that off; a subagent has no
 such tool at all. You stay in the root, so where a step goes into the worktree, aim at it
-instead: `cd <root>/.worktrees/<epic> && …` or `git -C <root>/.worktrees/<epic> …`, and every
+instead: `cd "<root>/.worktrees/<epic>" && …` or `git -C "<root>/.worktrees/<epic>" …`, and every
 Read and Edit takes an absolute path under it. That holds for resolving a conflict too.
 
 **Only a subagent's Bash starts in the root again on every call. A session's shell stays
 wherever a `cd` left it**, so in a session put that `cd` in parentheses —
-`(cd <root>/.worktrees/<epic> && …)` — and the shell itself never leaves the root. Where a
+`(cd "<root>/.worktrees/<epic>" && …)` — and the shell itself never leaves the root. Where a
 step says you are back in the root, you are there only if it never left: if a session's
-shell did stay in the worktree, `cd <root>` before the step. The branch check, the merge,
+shell did stay in the worktree, `cd "<root>"` before the step. The branch check, the merge,
 removing the worktree and the tracker commit all run in the root — merged from inside the
 worktree, the merge says "Already up to date" and lands nothing, and a shell standing in the
 worktree you remove is left in a directory that is gone.
@@ -106,7 +106,7 @@ what you hold stands in several — write in the one your work is in). Write the
 never work around it.
 
 A window that already stands inside a worktree comes out first, as "The assignment" says —
-`ExitWorktree(keep)` if this session went in with `EnterWorktree`, `cd <root>` if a `cd`
+`ExitWorktree(keep)` if this session went in with `EnterWorktree`, `cd "<root>"` if a `cd`
 took it there (`ExitWorktree` does nothing then).
 
 ## In a subagent
@@ -150,7 +150,7 @@ commit is where they go into history
 `.git/info/exclude`. Ask once, in the root, before your first tracker commit — the one in 11,
 or one an earlier step makes (8 can call for it)
 
-    git -C <root> ls-files --error-unmatch -- .moai/issues.jsonl      a non-zero code: the tracker is not in git
+    git -C "<root>" ls-files --error-unmatch -- .moai/issues.jsonl      a non-zero code: the tracker is not in git
 On a non-zero code every tracker commit in these steps — each "commit with a path, as in 11" —
 does not exist: the `moai` writes still land in the root's file, and there is nothing to commit.
 Skip them and nothing else; the merge and the branches still go through git. A zero code is the
@@ -274,7 +274,7 @@ root"), never in the root
 4-1. **The tracker you edit is always the root's.** `<root>` is the root checkout's place,
    filled in by the supervisor — do not guess it from inside the worktree. **The tool moves
    that by itself** — even a bare `moai` typed inside the worktree reads and writes the
-   root's tracker, and when it writes, one line says where. `moai -C <root> <command>` lands
+   root's tracker, and when it writes, one line says where. `moai -C "<root>" <command>` lands
    in the same place, so writing it that way is fine too. Short of a branch with no tracker
    in the root, the only thing that stops the move is `MOAI_HERE`, so **do not turn it on** —
    turn it on and that worktree's `.moai` changes, and the snapshots conflict on the merge
@@ -282,7 +282,7 @@ root"), never in the root
    Put `-e <epic>` on a backlog item you park mid-epic — it does not keep the epic open, and 7-1
    reclaims it through that even if the window is cleared or the work is taken over.
    **Give a review subagent the same words.** If that worktree's `.moai` changed anyway,
-   undo it with `git -C <root>/.worktrees/<epic> checkout -- .moai` — aimed at the worktree:
+   undo it with `git -C "<root>/.worktrees/<epic>" checkout -- .moai` — aimed at the worktree:
    the same line in the root throws away every session's rows not committed yet, yours
    included — and if the row was already committed, undo that commit too and park it again
    from the root
@@ -311,7 +311,7 @@ root"), never in the root
    (`git diff --name-only <base branch>...<sibling branch>`). When two of them change the
    same place, one waits for the other at the merge. If this epic cannot deliver what it
    promised without that, it is not a backlog item but a member — create it with
-   `moai -C <root> add '<what>' -e <epic>`, leave it in the first column, and name it in 12
+   `moai -C "<root>" add '<what>' -e <epic>`, leave it in the first column, and name it in 12
    as **a member left because the work beside it holds the file**, together with that other
    work. The supervisor sends it once that work is done. Do not defer it.
    **If the hook refuses that line** (rule 1), read the refusal's `Why this session holds them:`
@@ -319,7 +319,7 @@ root"), never in the root
    screen's language, and a refusal that would run too long carries none. Do not take the
    `-e` or `--parent` it offers for another epic or another row, and do not work around it.
    Park it instead — a backlog item is free of rule 1, and `-e <epic>` lets 7-1 find it
-   (`moai -C <root> backlog add '<what>' -e <epic>`), then name it in 12 in one line
+   (`moai -C "<root>" backlog add '<what>' -e <epic>`), then name it in 12 in one line
 
     member refused: <backlog id> for <epic> — rule 1 read <ids> as this session's (<their why lines>)
    The supervisor makes it a member from its own window, with the line of 7-1. In 7-1 it is
@@ -356,7 +356,7 @@ root"), never in the root
    agent program — because a review called from you runs on your model. Read the `review`
    model from `moai models --json`, create the review issue and stand the members in `review`
    as below, **pick the review issue up** —
-   `moai -C <root> mv <review id> in_progress --from todo` — and only then raise it on the
+   `moai -C "<root>" mv <review id> in_progress --from todo` — and only then raise it on the
    review brief ("The review brief" in `worker-branches.md`), every slot filled, for the reason below.
    It leaves its fixes uncommitted and the reviewer's
    words on the review issue, and hands back what it fixed and what it left — take that in as
@@ -364,17 +364,17 @@ root"), never in the root
 
        Agent(subagent_type: "general-purpose", model: <review model>, description: "review <epic>", prompt: <the review brief>)
    Write the grade you picked and why in one line in the angle (`-b`). The diff runs from
-   where the branch left <base branch> — `git -C <root>/.worktrees/<epic> merge-base <base branch> HEAD`;
+   where the branch left <base branch> — `git -C "<root>/.worktrees/<epic>" merge-base <base branch> HEAD`;
    asked in the root, `HEAD` is the root's own tip and the range comes out empty. You pulled it
    in 6, so the conflict resolution is inside it too. Create the review issue (rule 3)
 
        moai add 'review — <what you are looking at>' -t review --parent <epic> -b '<what you are looking for and why>'
-   Run this line as `moai -C <root>`, per 4-1, wherever the shell stands.
+   Run this line as `moai -C "<root>"`, per 4-1, wherever the shell stands.
    **In the same breath, stand the finished members in `review`** — while the review runs
    nobody is working on them, and `in_progress` on the board says somebody is. One id per
    call, as in 2
 
-       moai -C <root> mv <member> review --from in_progress
+       moai -C "<root>" mv <member> review --from in_progress
    `--from in_progress` passes over the members left in the first column by 4-3 (and by 7-1
    when you came back from 8) — this review does not see them, so they do not stand in it.
    moai answers that such a member already stands in the first column and moves nothing, with
@@ -386,7 +386,7 @@ root"), never in the root
    member already stands `review`, you came back from 8 — leave it. What you take in goes in
    a separate fix: commit; what you hand on goes in a note with the issue id.
    **Then pick the review issue up, and only then call the review** — in a session as in a
-   subagent: `moai -C <root> mv <review id> in_progress --from todo`. You stand in the root,
+   subagent: `moai -C "<root>" mv <review id> in_progress --from todo`. You stand in the root,
    so the hook reads a review issue nobody picked up under `.worktrees/<epic>` as that
    worktree's, and rule 3 refuses the review — asking for another review issue, which it
    reads the same way, while the first one stays open and keeps the epic from closing.
@@ -432,7 +432,7 @@ root"), never in the root
    `cargo test` after that measures that agent's files rather than yours.
 
 7-1. Before merging, go back over the backlog parked mid-epic
-   (`moai -C <root> show --type backlog -e <epic>` and what this window remembers) and what the
+   (`moai -C "<root>" show --type backlog -e <epic>` and what this window remembers) and what the
    review handed on — **can the epic deliver what it promised without them.** If not, it is
    not a backlog item but an unfinished member. What you sorted as "not for now" while parking has
    these mixed in — the one waiting on a person's decision, the one pushed out because a
@@ -443,7 +443,7 @@ root"), never in the root
    not unfold it** — someone unfolded it, or you came back from 8 and are going round again.
    promote unfolds a closed backlog too, and the same member stands twice
 
-    moai -C <root> backlog promote <backlog id> -e <epic> --from -
+    moai -C "<root>" backlog promote <backlog id> -e <epic> --from -
    Do not do a reclaimed member here: merge with it left in the first column — work that has
    not been through 7's review does not get mixed into the merge, and a member still standing
    keeps the epic open. Do not `defer` that member. Deferring it closes the epic without its
@@ -459,7 +459,7 @@ root"), never in the root
    milestone. **What this release can do without goes outside** — not "not doing it", but
    "not in this release"
 
-    moai -C <root> edit <that row> -e none --milestone none
+    moai -C "<root>" edit <that row> -e none --milestone none
    **Pass `-e none` with it.** A milestone is inherited from the epic, so on an epic member
    `--milestone none` alone changes nothing and comes back with one line saying the place
    comes from the epic and cannot be cut — a row 7-1 reclaimed stands as that epic's member,
@@ -474,7 +474,7 @@ root"), never in the root
    worktree, before the merge**: after 8 the worktree is gone and the only checkout left is
    the root, which every session shares and where the only commits that belong are the
    tracker's and the merge itself. Committed here it rides the merge commit instead. Aim the
-   line below at the worktree like every step there (`git -C <root>/.worktrees/<epic> commit …`,
+   line below at the worktree like every step there (`git -C "<root>/.worktrees/<epic>" commit …`,
    "Stay in the root") — and 7-4's two lines the same way.
    **One commit for the epic**, written once the members and the review's fixes are in —
    every line the epic needs goes into it. If a fix lands after it and changes what the epic
@@ -492,7 +492,7 @@ root"), never in the root
 
 7-4. **If the repository keeps a wiki** (`moai wiki ls` lists pages), ask once whether this
    epic changed what a person does — a key, a command, a flag, a file, a format, a procedure.
-   If it did, follow the `moai-wiki` skill, its `moai wiki` calls aimed at the worktree (`moai -C <root>/.worktrees/<epic> wiki ls` —
+   If it did, follow the `moai-wiki` skill, its `moai wiki` calls aimed at the worktree (`moai -C "<root>/.worktrees/<epic>" wiki ls` —
    bare, they read the root's pages), and commit what it wrote for the same reason as 7-3 — here, in the worktree, before the merge. `<wiki dir>` is `dir` in `moai wiki ls --json`
 
     git add -- <wiki dir>
@@ -582,7 +582,7 @@ root"), never in the root
     line — your model on it is a false line. In a subagent skip this — the members' lines are
     the supervisor's, from your report's `Model ran:`
 
-        moai -C <root> show -e <epic> --all --json | jq -r '.[] | select(.work == []) | .id'
+        moai -C "<root>" show -e <epic> --all --json | jq -r '.[] | select(.work == []) | .id'
     Leave the tests passing in the root
 11. Leave the line to take over from — `moai note <epic> 'Next: …'`. If anything is left (a
     background review, say), finish it before the note — the supervisor reads the note as this
