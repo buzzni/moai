@@ -71,6 +71,19 @@ pub struct Names {
     pub month_day: String,
 }
 
+impl Names {
+    /// 가장 짧은 달에도 이름 뒤 한 칸을 남긴다. 하나가 길면 달 줄 전체를 숫자로 쓴다 —
+    /// 화면에 보이는 달이나 가로로 민 자리에 따라 이름과 숫자가 섞이지 않는다.
+    fn month_cell_label(&self, month: u32) -> String {
+        let cells = (28 * DAY / Zoom::Month.secs_per_cell()) as usize;
+        if self.months.iter().any(|name| Span::raw(name.as_str()).width() >= cells) {
+            month.to_string()
+        } else {
+            self.months[month as usize - 1].clone()
+        }
+    }
+}
+
 impl Default for Names {
     fn default() -> Self {
         const EN: [&str; 12] = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -163,6 +176,10 @@ impl Axis {
     }
 
     /// [`labels`](Self::labels) 에 라벨이 속한 단위의 시작 시각을 곁들인다.
+    ///
+    /// **이웃한 라벨 사이에는 한 칸을 남긴다** — 붙으면 앞 라벨을 뺀다. 견주는 것은 **실제로 선** 뒤 라벨이다: 다음
+    /// 단위가 화면에 보여도 그 라벨이 끝에 못 들어 안 서면 앞 라벨은 붙을 데가 없다. 다음 단위가 보이는지로 가르면
+    /// 그 판에 앞 라벨까지 빠져, 넓힌 화면이 좁은 화면보다 위 줄을 덜 댄다(폭 8 은 `Dec 2026`, 9~15 는 빈 줄).
     fn labels_at(&self, unit: Unit, width: u16, names: &Names) -> Vec<(Label, i64)> {
         let spc = self.zoom.secs_per_cell();
         let end = self.origin + i64::from(width) * spc;
@@ -182,7 +199,17 @@ impl Axis {
             }
             start = next;
         }
-        out
+        // 뒤에서부터 남은 뒤 라벨과만 견준다 — 뒤 라벨이 빠지면 그 앞 라벨은 그다음 라벨과 견주어 산다.
+        let mut kept: Vec<(Label, i64)> = Vec::with_capacity(out.len());
+        for (label, start) in out.into_iter().rev() {
+            let end = i64::from(label.col) + Span::raw(label.text.as_str()).width() as i64;
+            if kept.last().is_some_and(|(next, _)| end >= i64::from(next.col)) {
+                continue;
+            }
+            kept.push((label, start));
+        }
+        kept.reverse();
+        kept
     }
 }
 
@@ -306,7 +333,7 @@ impl Unit {
             Unit::Day => d.to_string(),
             Unit::DayHead => names.month_day.replace("{month}", mon).replace("{day}", &d.to_string()),
             Unit::IsoWeek => format!("W{}", iso_week(day).1),
-            Unit::Month => mon.clone(),
+            Unit::Month => names.month_cell_label(m),
             Unit::MonthYear => names.month_year.replace("{month}", mon).replace("{year}", &y.to_string()),
             Unit::Year => y.to_string(),
         }
@@ -470,10 +497,26 @@ mod tests {
 
     #[test]
     fn year_rollover_keeps_both_labels_when_both_fit() {
-        let a = Axis::new(Zoom::Day, d(2026, 12, 30) * DAY);
+        let a = Axis::new(Zoom::Day, d(2026, 12, 29) * DAY);
         let h = a.header(24, 0, &Names::default());
         let up: Vec<_> = h.upper.iter().map(|l| (l.col, l.text.as_str())).collect();
-        assert_eq!(up, vec![(0, "Dec 2026"), (8, "Jan 2027")]);
+        assert_eq!(up, vec![(0, "Dec 2026"), (12, "Jan 2027")]);
+    }
+
+    #[test]
+    fn year_rollover_drops_a_label_that_would_touch_the_next() {
+        let a = Axis::new(Zoom::Day, d(2026, 12, 30) * DAY);
+        assert_eq!(a.header(24, 0, &Names::default()).upper, vec![Label { col: 8, text: "Jan 2027".into() }]);
+        // 다음 단위가 화면 안에 없으면 끝 칸까지 써도 된다.
+        assert_eq!(a.header(8, 0, &Names::default()).upper, vec![Label { col: 0, text: "Dec 2026".into() }]);
+        // 다음 단위가 보여도 그 라벨이 못 들어 안 서면 붙을 데가 없다 — 넓힌 화면이 위 줄을 비우지 않는다.
+        for width in 9..16 {
+            assert_eq!(
+                a.header(width, 0, &Names::default()).upper,
+                vec![Label { col: 0, text: "Dec 2026".into() }],
+                "폭 {width}"
+            );
+        }
     }
 
     #[test]
@@ -520,6 +563,58 @@ mod tests {
         assert!(h.upper.iter().any(|l| l.text == "2027"));
         let low: Vec<_> = h.lower.iter().map(|l| l.text.as_str()).collect();
         assert_eq!(&low[..3], ["Oct", "Nov", "Dec"]);
+    }
+
+    fn korean_names() -> Names {
+        Names {
+            months: std::array::from_fn(|i| format!("{}월", i + 1)),
+            month_year: "{year}년 {month}".into(),
+            month_day: "{month} {day}일".into(),
+        }
+    }
+
+    fn assert_label_gaps(labels: &[Label]) {
+        for pair in labels.windows(2) {
+            let end = usize::from(pair[0].col) + Span::raw(pair[0].text.as_str()).width();
+            assert!(end < usize::from(pair[1].col), "labels touch: {pair:?}");
+        }
+    }
+
+    #[test]
+    fn wide_month_names_use_numbers_for_the_whole_month_row() {
+        for suffix in ["월", "月"] {
+            let mut names = korean_names();
+            names.months = std::array::from_fn(|i| format!("{}{suffix}", i + 1));
+            let a = Axis::new(Zoom::Month, d(2026, 1, 1) * DAY);
+            let h = a.header(52, 0, &names);
+            assert_eq!(
+                h.lower.iter().map(|l| l.text.clone()).collect::<Vec<_>>(),
+                (1..=12).map(|m| m.to_string()).collect::<Vec<_>>()
+            );
+            assert_label_gaps(&h.lower);
+            // 긴 이름(10~12월)이 안 보여도 같은 숫자 줄이다.
+            assert_eq!(
+                a.header(12, 0, &names).lower.iter().map(|l| l.text.as_str()).collect::<Vec<_>>(),
+                ["1", "2", "3"]
+            );
+        }
+    }
+
+    #[test]
+    fn header_labels_stay_separated_across_zooms_languages_widths_and_origins() {
+        for names in [Names::default(), korean_names()] {
+            for zoom in Zoom::ALL {
+                for width in [0, 1, 2, 3, 4, 7, 8, 12, 16, 24, 40, 80, 160] {
+                    for day in [d(2024, 2, 28), d(2026, 9, 30), d(2026, 10, 5), d(2026, 12, 29), d(2026, 12, 30)] {
+                        for offset in [0, 5 * 3_600, 23 * 3_600] {
+                            let h = Axis::new(zoom, day * DAY + offset).header(width, 0, &names);
+                            assert_label_gaps(&h.upper);
+                            assert_label_gaps(&h.lower);
+                        }
+                    }
+                }
+            }
+        }
     }
 
     #[test]

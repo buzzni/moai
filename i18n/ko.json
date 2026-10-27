@@ -449,6 +449,7 @@
   "tui.gantt.overflow": " · 이 기한을 넘는 줄: {ids}",
   "tui.gantt.no_plan": "{id} 에는 옮길 계획 날짜가 없다 — `moai edit {id} --start <날> --due <날>` 로 적는다",
   "tui.gantt.planned": "{id} 에는 그새 계획 날짜가 섰다 — 안 썼다. 막대를 옮긴다",
+  "tui.gantt.elsewhere": "{id} 의 계획은 워크트리 {branch} 의 자체 스냅샷에서 왔다 — 안 썼다. 주 체크아웃에서 같은 moai 명령을 실행하고 워크트리 사본을 버린다 (docs/recovery.md)",
   "tui.gantt.members": "{id} 는 제 날을 안 적었다 — 막대는 멤버의 날이라 멤버를 옮긴다",
   "tui.gantt.layer": "계획은 그 프로젝트 안에서 옮긴다 — Enter 로 들어간다",
   "tui.gantt.month_1": "1월",

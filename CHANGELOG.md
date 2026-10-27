@@ -33,6 +33,14 @@ does not tag — see `CONTRIBUTING.md`.
 
 ### Fixed
 
+- **TUI Gantt headers leave a space between date labels.** At month zoom,
+  languages whose month names fill the shortest month use numbers across the
+  whole row; English abbreviations stay as they are. (moai-ijjd.5u9)
+- **TUI Gantt plans shown from a sibling worktree stay unchanged here.** Date
+  keys name the source snapshot and explain its recovery; dragging a bar or
+  clicking an empty day only selects the row. Plans from the current checkout
+  still move. (moai-ijjd.r7u)
+
 - `moai web` briefly drains a delayed request before closing a busy connection,
   so a client can receive the 503 response without a broken pipe while sending
   its request. The response ends immediately; at most four background drainers
