@@ -139,8 +139,8 @@ def main():
     moai = os.environ.get('MOAI', 'moai')
     moai = os.path.abspath(moai) if os.sep in moai else (shutil.which(moai) or moai)
     os.environ['MOAI'] = moai   # 장면의 뒤쪽 명령(sh)도 같은 바이너리를 부른다
-    # 녹화하는 사람의 환경이 화면에 새지 않게: 정체·키·색·말은 데모의 것으로
-    env = dict(os.environ, TERM='xterm-256color', MOAI_NO_UPDATE_CHECK='1', COLORTERM='truecolor', MOAI_LANG=os.environ.get('DEMO_LANG', 'en'),
+    # 녹화하는 사람의 환경이 화면에 새지 않게: 정체·키·색·말·시간대는 데모의 것으로
+    env = dict(os.environ, TZ='UTC', TERM='xterm-256color', MOAI_NO_UPDATE_CHECK='1', COLORTERM='truecolor', MOAI_LANG=os.environ.get('DEMO_LANG', 'en'),
                MOAI=moai, MOAI_CONFIG=os.path.join(repo, '.demo-home', 'config.toml'))
     for k in ('MOAI_NOW', 'MOAI_ACTOR', 'MOAI_KEYS', 'NO_COLOR'):
         env.pop(k, None)

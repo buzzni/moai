@@ -13,7 +13,7 @@ moai=${MOAI:-$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)/target/re
 case $moai in */*) moai=$(realpath -- "$moai") ;; *) moai=$(command -v -- "$moai") ;; esac
 [ -x "$moai" ] || { echo "plan.sh: no moai binary at $moai" >&2; exit 1; }
 unset MOAI_ACTOR MOAI_NOW
-export MOAI_LANG=en MOAI_NO_UPDATE_CHECK=1 MOAI_CONFIG=$repo/.demo-home/config.toml
+export TZ=UTC MOAI_LANG=en MOAI_NO_UPDATE_CHECK=1 MOAI_CONFIG=$repo/.demo-home/config.toml
 cd "$repo"
 day() { date -u -d "$1 days" +%F; }
 MIRA='Mira Chen (mira@example.com)'

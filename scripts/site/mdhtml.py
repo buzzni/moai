@@ -1,7 +1,7 @@
 """A small, safe Markdown -> HTML renderer (Python 3.11+, standard library only).
 
 A port of web/panel/view/markdown.ts (the renderer `moai web` uses for wiki pages): the same block pass
-(fences, indented code, headings, lists, tables, quotes, paragraphs) and the same inline pass (code spans,
+(fences, indented code, headings, lists, task-list items, tables, quotes, paragraphs) and the same inline pass (code spans,
 escapes, entities, links, reference links, emphasis, strikethrough). Where the TS builds DOM nodes this returns
 an HTML string, and everything that reaches the output is escaped: raw HTML stays literal text, images are never
 emitted (their alt text is), and a link whose scheme is not http, https or mailto is drawn as plain text.
@@ -175,6 +175,7 @@ _SETEXT = re.compile(r"^ {0,3}(=+|-+)[ \t]*$")
 _HR = re.compile(r"^ {0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*$")
 _QUOTE = re.compile(r"^ {0,3}>")
 _LIST = re.compile(r"^( *)([-+*]|\d{1,9}[.)])( +|$)")
+_TASK = re.compile(r"^\[([ xX])\][ \t]+(?=\S)")
 _DELIM_CELL = re.compile(r"^:?-+:?$")
 
 
@@ -473,9 +474,25 @@ def _parse_list(ctx: _Ctx, lines: list[str], start: int, out: list[tuple[bool, s
     open_tag = f'<ol start="{first_num}">' if ordered and first_num != 1 else f"<{tag}>"
     lis: list[str] = []
     for item in items:
+        task = _TASK.match(item[0]) if item else None
+        if task:
+            item[0] = item[0][task.end():]
         pieces: list[tuple[bool, str]] = []
         _parse_blocks(ctx, item, pieces, not loose)
-        lis.append(f"<li>{_compose(pieces)}</li>")
+        if task:
+            checked = "false" if task.group(1) == " " else "true"
+            mark = (
+                f'<span class="task" role="checkbox" data-checked="{checked}" '
+                f'aria-checked="{checked}" aria-disabled="true"></span> '
+            )
+            if pieces and not pieces[0][0]:
+                pieces[0] = (False, mark + pieces[0][1])
+            elif pieces and pieces[0][1].startswith("<p>"):
+                pieces[0] = (True, "<p>" + mark + pieces[0][1][3:])
+            else:
+                pieces.insert(0, (False, mark))
+        li = '<li class="task-item">' if task else "<li>"
+        lis.append(f"{li}{_compose(pieces)}</li>")
     out.append((True, open_tag + "\n" + "\n".join(lis) + f"\n</{tag}>"))
     return i
 

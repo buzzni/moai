@@ -99,12 +99,12 @@ def scenes(repo, env):
 def main():
     scene, repo = sys.argv[1], os.path.abspath(sys.argv[2])
     cols, rows = os.get_terminal_size(sys.stdout.fileno()) if sys.stdout.isatty() else (100, 30)
-    # 녹화하는 사람의 환경이 화면에 새지 않게: 정체·키·색·말·설정은 데모의 것으로. HOME 과 moai 의 자리는
+    # 녹화하는 사람의 환경이 화면에 새지 않게: 정체·키·색·말·시간대·설정은 데모의 것으로. HOME 과 moai 의 자리는
     # record-guide.sh 가 데모 전용 디렉터리(DEMO_HOME)에 지어 둔다 — init 이 적는 경로가 화면에 그대로 서기 때문이다
     home = os.environ['DEMO_HOME']
     bindir = os.path.join(home, '.local', 'bin')
     moai = os.path.join(bindir, 'moai')
-    env = dict(TERM='xterm-256color', COLORTERM='truecolor', LANG='C.UTF-8', MOAI_LANG='en', MOAI_NO_UPDATE_CHECK='1',
+    env = dict(TZ='UTC', TERM='xterm-256color', COLORTERM='truecolor', LANG='C.UTF-8', MOAI_LANG='en', MOAI_NO_UPDATE_CHECK='1',
                MOAI=moai, MOAI_CONFIG=os.path.join(home, '.config', 'moai', 'config.toml'),
                HOME=home, PATH=bindir + ':/usr/local/bin:/usr/bin:/bin',
                PS1='\\[\\e[38;5;245m\\]lantern\\[\\e[0m\\] \\[\\e[38;5;209m\\]$\\[\\e[0m\\] ')
