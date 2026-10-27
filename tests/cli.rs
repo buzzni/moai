@@ -14320,6 +14320,51 @@ fn an_add_whose_journal_fails_succeeds_and_says_so() {
     assert!(err.contains("moai note") && err.contains(&id), "잃은 말을 안 댔다 — {err}");
 }
 
+/// 정규화만 한 쓰기는 `-m` 을 잃었으면 실패하고 다시 적을 길을 댄다(moai-jdwk.xf0).
+#[cfg(unix)]
+#[test]
+fn a_message_lost_to_the_journal_on_a_tidied_snapshot_fails() {
+    use std::os::unix::fs::PermissionsExt;
+    let s = init("tidied-message");
+    let id = add(s.path(), &["row"]);
+    let deferred = add(s.path(), &["deferred"]);
+    ok(s.path(), &["defer", &deferred, "-m", "later"]);
+    let snap = s.path().join(".moai/issues.jsonl");
+    let skew = |id: &str| {
+        let text = issues(s.path());
+        let skewed = text.replace(&format!(r#""id":"{id}","#), &format!(r#""id":"{id}","priority":2,"#));
+        assert_ne!(skewed, text);
+        std::fs::write(&snap, skewed).unwrap();
+    };
+    let journal = s.path().join(".moai/journal");
+    for e in std::fs::read_dir(&journal).unwrap() {
+        std::fs::set_permissions(e.unwrap().path(), std::fs::Permissions::from_mode(0o444)).unwrap();
+    }
+    std::fs::set_permissions(&journal, std::fs::Permissions::from_mode(0o555)).unwrap();
+    if std::fs::File::create(journal.join("probe")).is_ok() {
+        std::fs::set_permissions(&journal, std::fs::Permissions::from_mode(0o755)).unwrap();
+        return;
+    }
+    for (row, args) in [
+        (&id, vec!["mv", id.as_str(), "todo", "-m", "reason"]),
+        (&deferred, vec!["defer", deferred.as_str(), "-m", "reason"]),
+    ] {
+        skew(row);
+        let out = moai(s.path(), &args);
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert!(!out.status.success(), "잃은 말을 삼켰다: {err}");
+        assert!(err.contains("moai note") && err.contains(row), "{err}");
+        assert!(!err.contains("다시 부르지") && !err.contains("do not call it again"), "{err}");
+        assert!(!issues(s.path()).contains(r#""priority":2"#), "정규화 갈래를 안 지났다");
+    }
+    skew(&id);
+    let out = moai(s.path(), &["mv", &id, "in_progress", "-m", "reason"]);
+    std::fs::set_permissions(&journal, std::fs::Permissions::from_mode(0o755)).unwrap();
+    assert!(out.status.success(), "{}", text(&out));
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("moai note") && err.contains(&id), "{err}");
+}
+
 /// **못 읽는 줄이 산 줄의 id 를 들고 있으면 `status` 가 중복이라 말한다.**
 /// 줄 번호만 보던 때는 `읽을 수 없는 줄` 만 서고 중복은 안 서서, 그 줄이
 /// 읽히게 되는 날에야 모든 쓰기가 막혔다(moai-4dk4). 쓰기는 여전히 안 막는다.
