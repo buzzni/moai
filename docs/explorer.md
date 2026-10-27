@@ -187,9 +187,14 @@ deadline above, is refused and the refusal stands on the banner. A move that wen
 through names the `moai edit` line that puts it back, and the rows it pushed past
 this deadline. An epic whose bar spans its members does not move — move the members.
 A row whose copy the overlay took from another worktree's tracker file does not
-move here — the notice and the detail (after `⎇`) name that worktree; move it in
-that worktree. The list's `⎇ <branch>` marks rows a worktree is working on, and
-those move as usual. On the overview, enter the project first.
+move here — the notice and the detail (after `⎇`) name that worktree. Its plan
+lives in that worktree's own snapshot. Follow [A worktree wrote the tracker in
+the wrong place](recovery.md#a-worktree-wrote-the-tracker-in-the-wrong-place):
+apply the same `moai` commands against the main checkout and drop the worktree's
+copy. Running `moai` in that worktree also writes the main checkout's tracker,
+so it does not repair the copy the overlay shows. The list's `⎇ <branch>` marks
+rows a worktree is working on, and those move as usual. On the overview, enter
+the project first.
 
 **The detail** stands below the gantt at first, so the dates keep the width.
 `SPC o d` there moves only the gantt's detail, for this session.

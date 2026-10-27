@@ -37,7 +37,8 @@ does not tag — see `CONTRIBUTING.md`.
   languages whose month names fill the shortest month use numbers across the
   whole row; English abbreviations stay as they are. (moai-ijjd.5u9)
 - **TUI Gantt plans shown from a sibling worktree stay unchanged here.** Date
-  keys name the worktree to use; dragging a bar or clicking an empty day only
+  keys name the source snapshot and explain its recovery; dragging a bar or
+  clicking an empty day only
   selects the row. Plans from the current checkout still move. (moai-ijjd.r7u)
 
 - **Skill shell commands keep repository paths together.** Supervisor, worker
