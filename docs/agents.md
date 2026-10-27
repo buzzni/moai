@@ -754,9 +754,14 @@ to bring them back ("recover the sessions", "되살려"). It loads `moai-recover
 - **Which died.** It reads the same records under `~/.claude/sessions/` and
   takes the dead ones standing in the root or a worktree, leaving out any that
   is already back, any that another window resumed and then cleared with
-  `/clear` or its aliases `/new` and `/reset` (`~/.claude/history.jsonl` logs
-  each under the id it left behind), and older crashes you did not name. When several stand in one
-  directory it asks you once which to bring back
+  `/clear` or its aliases `/new` and `/reset`, any left for another conversation
+  with `/resume` or `/continue` (`~/.claude/history.jsonl` logs each under the id
+  it left behind), and older crashes you did not name. Below its table it names
+  what it left out with the session id and `cwd`, plus the command and UTC time
+  when a conversation was left. You can name one to bring it back: a cancelled
+  `/resume` picker, or a deliberate resume that died before writing a line, can
+  look left too. When several stand in one directory it asks you once which to
+  bring back
 - **What each was doing.** From each session's transcript under
   `~/.claude/projects/` it reads its role (supervisor or worker), the issue it
   held and what it was waiting for, adds the uncommitted files and the issue's
@@ -881,7 +886,7 @@ worker's line is written by the supervisor.
   where an incoming message waits for its person's approval — look at that
   window
 
-Decided in: moai-2w0s moai-hxma moai-0zjo moai-nqdc moai-bl3x moai-gelm moai-tllo moai-mdzx moai-xs2h moai-h8tn moai-snyk moai-u5wr moai-b6cw moai-ew4o moai-dhxm moai-ml0d moai-nas5 moai-kxkw moai-dj4j moai-54yc moai-bkn4 moai-084j moai-keka moai-zynt moai-j9nf moai-jtvp moai-obxm moai-six5 moai-iu73 moai-r0x8 moai-u99i moai-uqf7 moai-p5sz moai-xpa8 moai-9tqo moai-pxui moai-uzhx moai-wk7i moai-jdwk
+Decided in: moai-2w0s moai-hxma moai-0zjo moai-nqdc moai-bl3x moai-gelm moai-tllo moai-mdzx moai-xs2h moai-h8tn moai-snyk moai-u5wr moai-b6cw moai-ew4o moai-dhxm moai-ml0d moai-nas5 moai-kxkw moai-dj4j moai-54yc moai-bkn4 moai-084j moai-keka moai-zynt moai-j9nf moai-jtvp moai-obxm moai-six5 moai-iu73 moai-r0x8 moai-u99i moai-uqf7 moai-p5sz moai-xpa8 moai-9tqo moai-pxui moai-uzhx moai-wk7i moai-jdwk moai-1m21
 
 ## Archive storage
 
