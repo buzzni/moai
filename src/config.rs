@@ -152,15 +152,19 @@ pub enum Naming {
 }
 
 impl Naming {
-    pub const ALL: [&'static str; 3] = ["full", "name", "email"];
+    const EVERY: [Naming; 3] = [Naming::Full, Naming::Name, Naming::Email];
+    pub const ALL: [&'static str; 3] = [Naming::Full.as_str(), Naming::Name.as_str(), Naming::Email.as_str()];
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Naming::Full => "full",
+            Naming::Name => "name",
+            Naming::Email => "email",
+        }
+    }
 
     fn parse(raw: &str) -> Option<Naming> {
-        match raw {
-            "full" => Some(Naming::Full),
-            "name" => Some(Naming::Name),
-            "email" => Some(Naming::Email),
-            _ => None,
-        }
+        Naming::EVERY.into_iter().find(|n| n.as_str() == raw)
     }
 }
 
@@ -720,6 +724,14 @@ pub struct NoSuchColumn {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn naming_words_round_trip() {
+        for n in Naming::EVERY {
+            assert_eq!(Naming::parse(n.as_str()), Some(n));
+        }
+        assert_eq!(Naming::ALL, Naming::EVERY.map(Naming::as_str));
+    }
 
     /// 안 적으면 `full` 이다. 옛 저장소의 설정 파일에는 이 키가 없다.
     #[test]

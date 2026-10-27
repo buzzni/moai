@@ -50,7 +50,7 @@ impl<'a> Out<'a> {
         Out {
             prefix: &cfg.prefix,
             statuses: &cfg.statuses,
-            naming: naming(cfg.naming),
+            naming: cfg.naming.as_str(),
             archive_days: cfg.archive_days,
             wiki_dir: &cfg.wiki_dir,
             status_review_days: review_days,
@@ -73,11 +73,7 @@ impl<'a> Out<'a> {
 
 /// 파일에 적는 낱말 그대로다(`Naming::ALL`). `moai web` 의 `/api/boot` 도 이것을 낸다.
 pub(crate) fn naming(n: Naming) -> &'static str {
-    match n {
-        Naming::Full => Naming::ALL[0],
-        Naming::Name => Naming::ALL[1],
-        Naming::Email => Naming::ALL[2],
-    }
+    n.as_str()
 }
 
 pub fn run(ctx: &Ctx) -> R<Vec<String>> {
