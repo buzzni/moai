@@ -28,9 +28,11 @@ use std::time::{Duration, Instant};
 pub const BUSY_MAX: usize = 32;
 /// 요청 머리 **전체**를 읽는 시한 — `read` 한 번의 시한이 아니다([`read_head`]).
 const READ_LIMIT: Duration = Duration::from_secs(5);
-/// 503 뒤에 늦게 오는 요청 머리를 비우는 전체 시한. 받기 고리에서 돌므로 조용하거나 한 바이트씩 보내는
-/// 상대도 200ms 뒤에는 놓는다 — 정상 요청의 5초 시한으로 다른 연결을 세우지 않는다.
+/// 503 뒤에 늦게 오는 요청 머리를 별도 스레드에서 비우는 전체 시한. 조용하거나 한 바이트씩 보내는
+/// 상대도 200ms 뒤에는 놓는다 — 받기 고리는 이 시한을 기다리지 않는다.
 const BUSY_READ_LIMIT: Duration = Duration::from_millis(200);
+/// 초과 연결을 비우는 스레드의 상한. 정상 연결의 자리와 따로 세며, 다 차면 기다리지 않고 닫는다.
+const BUSY_DRAIN_MAX: usize = 4;
 /// 쓰기 한 번이 나아가지 못하고 기다리는 시한.
 const WRITE_LIMIT: Duration = Duration::from_secs(10);
 /// 답 **전체**를 쓰는 시한 — 쓰기마다 조금씩 나아가는 느린 상대가 큰 답 하나로 한 자리를 몇 시간 쥐지 않게
@@ -103,6 +105,7 @@ impl Site {
 pub fn serve(listener: TcpListener, site: Site) -> ! {
     let site = Arc::new(site);
     let busy = Arc::new(AtomicUsize::new(0));
+    let draining = Arc::new(AtomicUsize::new(0));
     loop {
         let stream = match listener.accept() {
             Ok((stream, _)) => stream,
@@ -116,7 +119,7 @@ pub fn serve(listener: TcpListener, site: Site) -> ! {
         };
         if busy.fetch_add(1, Ordering::SeqCst) >= BUSY_MAX {
             busy.fetch_sub(1, Ordering::SeqCst);
-            turn_away(&stream, site.started_in);
+            turn_away(stream, site.started_in, &draining);
             continue;
         }
         // **센 것은 실을 띄우기 전에 쥔다** — `std::thread::spawn` 은 OS 가 실을 못 내면 이 고리에서 패닉해 서버가
@@ -132,12 +135,12 @@ pub fn serve(listener: TcpListener, site: Site) -> ! {
         if spawned.is_err()
             && let Some(spare) = spare
         {
-            turn_away(&spare, site.started_in);
+            turn_away(spare, site.started_in, &draining);
         }
     }
 }
 
-/// 연결 하나가 쥔 자리 — 스레드가 어떻게 끝나든(패닉도, 못 띄운 판도) 센 것을 돌려놓는다.
+/// 연결이나 drainer 하나가 쥔 자리 — 스레드가 어떻게 끝나든(패닉도, 못 띄운 판도) 센 것을 돌려놓는다.
 struct Leave(Arc<AtomicUsize>);
 
 impl Drop for Leave {
@@ -146,17 +149,26 @@ impl Drop for Leave {
     }
 }
 
-/// 받을 자리가 없는 연결에 503 `busy` 를 쓰고 닫는다. 받는 고리에서 쓰므로 짧게 기다린다 — 안 읽는 상대 하나가
-/// 받기를 세우면 안 된다.
-fn turn_away(stream: &TcpStream, lang: Lang) {
+/// 받을 자리가 없는 연결에 503 `busy` 와 FIN 을 쓰고, 늦은 요청은 별도 스레드에서 짧게 비운다.
+/// drainer 의 자리도 다 찼으면 즉시 놓는다 — 조용한 초과 연결들이 받기 고리를 줄 세우면 안 된다.
+fn turn_away(stream: TcpStream, lang: Lang, draining: &Arc<AtomicUsize>) {
     let _ = stream.set_write_timeout(Some(Duration::from_secs(1)));
-    let _ = http::write(&mut &*stream, &refuse(503, say(lang, "web.busy"), code::BUSY), true);
+    let _ = http::write(&mut &stream, &refuse(503, say(lang, "web.busy"), code::BUSY), true);
     // 요청을 비우는 동안에도 상대는 답 끝을 바로 본다. 읽기 쪽은 늦은 요청을 받을 수 있게 열어 둔다.
     let _ = stream.shutdown(std::net::Shutdown::Write);
-    // 이미 온 것만 비우고 닫으면 connect 뒤 밀린 상대가 요청을 쓰다가 BrokenPipe 를 받는다.
-    // 답은 이미 정했다. 머리를 제한된 크기·시간 안에서 읽고 버리며, 해석 결과로 다시 답하지 않는다.
-    let _ = read_head(stream, BUSY_READ_LIMIT);
-    close(stream);
+    if draining.fetch_add(1, Ordering::SeqCst) >= BUSY_DRAIN_MAX {
+        draining.fetch_sub(1, Ordering::SeqCst);
+        return;
+    }
+    let leave = Leave(draining.clone());
+    // 이미 온 것만 비우고 닫으면 connect 뒤 밀린 상대가 요청을 쓰다가 BrokenPipe 를 받는다. 받기 고리에서는
+    // 기다리지 않는다. spawn 실패도 닫힘과 자리 반환으로 끝나며, 스레드를 무제한 띄우거나 대기열을 만들지 않는다.
+    let _ = std::thread::Builder::new().name("moai-web-drain".into()).spawn(move || {
+        let _leave = leave;
+        // 답은 이미 정했다. 제한된 크기·시간 안에서 머리를 버리고, 해석 결과로 다시 답하지 않는다.
+        let _ = read_head(&stream, BUSY_READ_LIMIT);
+        close(&stream);
+    });
 }
 
 fn handle(stream: TcpStream, site: &Site) {
@@ -224,7 +236,8 @@ impl std::io::Write for Within<'_> {
 /// 답을 쓴 뒤 닫는다. **안 읽은 바이트를 둔 채 닫으면 커널이 FIN 대신 RST 를 보낸다** — 머리를 안 읽은 503 과
 /// 머리를 다 안 읽은 400 이 그 꼴이라, 상대는 방금 쓴 답 대신 "연결이 끊겼다" 를 받았다(503 을 스무 번 불러 열여덟
 /// 번이 `ECONNRESET` 이었다). 쓰기를 닫아 FIN 을 보낸 뒤 이미 와 있는 것만 기다리지 않고 비운다.
-/// 503 은 [`turn_away`] 에서 답 직후에 쓰기를 닫고 늦은 요청을 짧게 기다린다 — 여기서는 그 닫기를 거듭해도 같다.
+/// 503 은 [`turn_away`] 에서 답 직후에 쓰기를 닫고 별도 drainer 가 늦은 요청을 짧게 기다린다 — 여기서는
+/// 그 닫기를 거듭해도 같다.
 fn close(stream: &TcpStream) {
     let _ = stream.shutdown(std::net::Shutdown::Write);
     if stream.set_nonblocking(true).is_err() {
@@ -528,8 +541,7 @@ mod tests {
             client.write_all(b"GET / HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n").unwrap();
             // 요청이 받은 쪽에 닿을 틈 — 닿기 전에 닫으면 RST 를 부르는 안 읽은 바이트가 없다.
             std::thread::sleep(Duration::from_millis(5));
-            turn_away(&server, Lang::En);
-            drop(server);
+            turn_away(server, Lang::En, &Arc::new(AtomicUsize::new(0)));
             let mut got = Vec::new();
             client.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
             client.read_to_end(&mut got).expect("답 대신 RST 를 받았다");
@@ -537,16 +549,29 @@ mod tests {
         }
     }
 
-    /// 503 을 받은 뒤 요청을 안 보내는 상대도 받기 고리를 붙잡지 못한다.
+    /// 503 을 받은 뒤 요청을 안 보내는 상대도 drainer 의 자리를 끝없이 붙잡지 못한다.
     #[test]
     fn a_silent_overflow_client_is_only_waited_for_briefly() {
         let (_client, server) = pair();
-        let (tx, rx) = std::sync::mpsc::channel();
-        let worker = std::thread::spawn(move || {
-            turn_away(&server, Lang::En);
-            tx.send(()).unwrap();
-        });
-        rx.recv_timeout(Duration::from_secs(2)).expect("조용한 상대가 503 뒤 받기 고리를 세웠다");
-        worker.join().unwrap();
+        let draining = Arc::new(AtomicUsize::new(0));
+        turn_away(server, Lang::En, &draining);
+        let until = Instant::now() + Duration::from_secs(2);
+        while draining.load(Ordering::SeqCst) != 0 {
+            assert!(Instant::now() < until, "조용한 상대가 drainer 의 자리를 안 놓았다");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    /// 비우는 자리도 다 찼으면 대기하거나 스레드를 더 띄우지 않고 FIN 과 함께 닫는다.
+    #[test]
+    fn overflow_past_the_drainer_cap_is_closed_without_waiting() {
+        let (mut client, server) = pair();
+        let draining = Arc::new(AtomicUsize::new(BUSY_DRAIN_MAX));
+        turn_away(server, Lang::En, &draining);
+        assert_eq!(draining.load(Ordering::SeqCst), BUSY_DRAIN_MAX);
+        client.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+        let mut got = Vec::new();
+        client.read_to_end(&mut got).unwrap();
+        assert!(got.starts_with(b"HTTP/1.1 503 "), "{}", String::from_utf8_lossy(&got));
     }
 }

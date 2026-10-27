@@ -35,7 +35,9 @@ does not tag — see `CONTRIBUTING.md`.
 
 - `moai web` briefly drains a delayed request before closing a busy connection,
   so a client can receive the 503 response without a broken pipe while sending
-  its request. Silent or slow clients are waited for at most 200ms.
+  its request. The response ends immediately; at most four background drainers
+  wait up to 200ms each, keeping silent clients off the accept loop. When all
+  drainers are busy, further overflow connections close immediately.
   (moai-n8po.7e1)
 
 - **Skill shell commands keep repository paths together.** Supervisor, worker

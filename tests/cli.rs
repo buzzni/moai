@@ -32528,6 +32528,24 @@ fn web_busy_waits_briefly_for_a_request_that_arrives_after_its_answer() {
     assert_eq!(json_of(text.split_once("\r\n\r\n").unwrap().1)["code"], "busy", "{text}");
 }
 
+/// 조용한 초과 연결이 쌓여도 다음 연결은 바로 503 을 받는다 — 받기 고리에서 200ms 씩 비우면 줄을 세운다.
+#[test]
+fn web_silent_overflow_clients_do_not_delay_the_next_accept() {
+    use std::io::Read as _;
+    let s = init("web-busy-accept");
+    let web = serve(s.path());
+    let _idle: Vec<_> = (0..32).map(|_| dial(web.port)).collect();
+    // 한 연결의 짧은 시한과 스케줄링 오차를 견주지 않는다. 직렬로 기다리면 총 6.4초인 줄을 만든다.
+    let _overflow: Vec<_> = (0..32).map(|_| dial(web.port)).collect();
+    let mut next = dial(web.port);
+    next.set_read_timeout(Some(std::time::Duration::from_secs(2))).unwrap();
+    let mut got = Vec::new();
+    next.read_to_end(&mut got).expect("조용한 초과 연결이 다음 accept 를 세웠다");
+    let text = String::from_utf8(got).unwrap();
+    assert!(text.starts_with("HTTP/1.1 503 "), "{text}");
+    assert_eq!(json_of(text.split_once("\r\n\r\n").unwrap().1)["code"], "busy", "{text}");
+}
+
 /// **위키의 낱말은 `wiki ls` 가 낸 그대로 연다** — 디렉터리 밑의 쪽(`guide/start`)과 한글 이름을 id 의 모양으로
 /// 재어 400 으로 막던 판은 위키 쪽이 그 쪽을 하나도 못 열었다. 없는 낱말은 moai 가 `not_found` 로 답한다.
 #[test]
