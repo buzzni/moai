@@ -73,8 +73,9 @@ pub struct Window {
     /// **첨자가 아니라 경로다** — 창이 떠 있는 동안 층의 줄이 다시 서면 첨자는 다른 프로젝트를 가리킨다.
     pub from: Option<PathBuf>,
     pages: Vec<Page>,
-    /// Built and invalidated together with the pages when this window is opened.
-    index: crate::wiki::search::Index,
+    /// 순위 색인 — 이 창의 페이지에서 **처음 찾을 때** 한 번 짓는다. 창을 다시 열면 페이지와 함께 새로 선다. 연 순간 짓던
+    /// 판은 찾지 않고 페이지만 넘겨 보는 창에도 위키 전부를 토큰으로 풀었다.
+    index: std::cell::OnceCell<crate::wiki::search::Index>,
     /// 찾기가 견줄 글 — 페이지마다 `(제목, 본문)` 을 소문자로 접은 것, [`Window::pages`] 와 같은 차례. **연 순간 한 번
     /// 접는다** — 창은 그 사이 글이 안 바뀌는데, 견줄 때마다 접으면 커서·그림·치는 키마다 위키 전부(생성 페이지
     /// `docs/cli.md` 만 128KB)를 몇 번씩 다시 접는다.
@@ -187,13 +188,12 @@ impl Window {
     ) -> Window {
         let folded =
             wiki.pages.iter().map(|p| (p.title.to_lowercase(), p.body.as_deref().map(str::to_lowercase))).collect();
-        let index = crate::wiki::search::Index::of(&wiki.pages);
         Window {
             project,
             dir,
             from,
             pages: wiki.pages,
-            index,
+            index: std::cell::OnceCell::new(),
             folded,
             skipped: wiki.skipped.len(),
             cursor: 0,
@@ -377,7 +377,8 @@ impl Window {
     fn order_for(&self, q: &str) -> Vec<usize> {
         let at: std::collections::HashMap<&str, usize> =
             self.pages.iter().enumerate().map(|(i, p)| (p.slug.as_str(), i)).collect();
-        let ranked = self.index.rank(&self.pages, q, usize::MAX).hits;
+        let index = self.index.get_or_init(|| crate::wiki::search::Index::of(&self.pages));
+        let ranked = index.rank(&self.pages, q, usize::MAX).hits;
         let folded = q.to_lowercase();
         let typed = self.folded.iter().enumerate().filter(|(_, (title, body))| {
             title.contains(&folded) || body.as_deref().is_some_and(|b| b.contains(&folded))
@@ -2167,11 +2168,16 @@ mod ranking_cache_tests {
     fn reopening_the_window_rebuilds_the_ranking_index() {
         let (s, mut app) =
             wiki_app("ranking-reopen", &[("a.md", "# Zebra\n\nzebra zebra zebra\n"), ("b.md", "# B\n\nzebra\n")]);
-        app.hit("SPC g w / z e b r a Enter");
+        app.hit("SPC g w");
+        assert!(window(&app).index.get().is_none(), "opening without searching must not build an index");
+        app.hit("/ z e b r a Enter");
+        assert!(window(&app).index.get().is_some(), "the first search must build the index");
         assert_eq!(window(&app).shown()[0].slug, "a");
         std::fs::write(s.path().join("docs/a.md"), "# A\n\nzebra\n").unwrap();
         std::fs::write(s.path().join("docs/b.md"), "# Zebra\n\nzebra zebra zebra\n").unwrap();
-        app.hit("Esc Esc SPC g w / z e b r a Enter");
+        app.hit("Esc Esc SPC g w");
+        assert!(window(&app).index.get().is_none(), "reopening must discard the previous index");
+        app.hit("/ z e b r a Enter");
         assert_eq!(window(&app).shown()[0].slug, "b");
     }
 

@@ -35,6 +35,13 @@ fn checkout_index_matches_the_previous_algorithm() {
                 legacy(&wiki.pages, query, limit, false),
                 "{query:?}, {limit}"
             );
+            // The one-shot wrappers count only the query's tokens; the answer must not move.
+            assert_eq!(
+                search(&wiki.pages, query, limit),
+                legacy(&wiki.pages, query, limit, true),
+                "{query:?}, {limit}"
+            );
+            assert_eq!(rank(&wiki.pages, query, limit), legacy(&wiki.pages, query, limit, false), "{query:?}, {limit}");
         }
     }
 }
@@ -136,12 +143,12 @@ fn legacy<'a>(pages: &'a [Page], query: &str, limit: usize, snippets: bool) -> F
             Hit {
                 page: s.page,
                 heading: s.heading.clone(),
-                anchor: s.anchor,
+                anchor: s.anchor.map(|a| s.page.headings[a].anchor.as_str()),
                 line: s.start + 1,
                 distinct,
                 rare,
                 score,
-                snippet: if snippets { snippet(s, &want) } else { None },
+                snippet: if snippets { snippet(s.lines, s.start, &want) } else { None },
             }
         })
         .collect();

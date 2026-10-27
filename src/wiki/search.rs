@@ -209,11 +209,12 @@ fn heading_text(line: &str) -> String {
     rest.trim().to_string()
 }
 
-/// 절 하나 — 색인을 짓거나 남길 발췌를 고를 때만 산다. 줄은 페이지 글을 빌린다(`'t`) — 절마다 줄을 베끼지 않는다.
+/// 절 하나 — 색인을 지을 때만 산다. 줄은 페이지 글을 빌린다(`'t`) — 절마다 줄을 베끼지 않는다.
 struct Section<'a, 't> {
     page: &'a Page,
     heading: Option<String>,
-    anchor: Option<&'a str>,
+    /// 절 머리글의 [`Page::headings`] 속 자리 — 앵커는 그 머리글의 것이다. 첫 머리글 앞의 절이면 없다.
+    anchor: Option<usize>,
     /// 절의 첫 줄(0 부터)과 그 줄들. 본문을 못 읽은 페이지의 절은 줄이 없다.
     start: usize,
     lines: &'t [&'t str],
@@ -222,7 +223,7 @@ struct Section<'a, 't> {
 /// 페이지를 절로 자른다. 첫 머리글 앞의 글이 있거나(또는 머리글이 아예 없으면) 페이지 제목의 절이 먼저 선다.
 /// `all` 은 그 페이지 본문의 줄이고, 본문을 못 읽었으면 `None` 이다.
 fn sections<'a, 't>(page: &'a Page, all: Option<&'t [&'t str]>) -> Vec<Section<'a, 't>> {
-    let mk = |heading: Option<String>, anchor: Option<&'a str>, start: usize, lines: &'t [&'t str]| Section {
+    let mk = |heading: Option<String>, anchor: Option<usize>, start: usize, lines: &'t [&'t str]| Section {
         page,
         heading,
         anchor,
@@ -242,20 +243,20 @@ fn sections<'a, 't>(page: &'a Page, all: Option<&'t [&'t str]>) -> Vec<Section<'
         let to = page.headings.get(n + 1).map_or(all.len(), |x| x.line.clamp(from, all.len()));
         let lines = &all[from..to];
         let text = lines.first().map(|l| heading_text(l)).unwrap_or_default();
-        out.push(mk(Some(text), Some(h.anchor.as_str()), from, lines));
+        out.push(mk(Some(text), Some(n), from, lines));
     }
     out
 }
 
 /// 질의 `query` 로 `pages` 의 절을 찾아 순위대로 `limit` 개까지 낸다. **순수 함수다.**
 pub fn search<'a>(pages: &'a [Page], query: &str, limit: usize) -> Found<'a> {
-    Index::of(pages).search(pages, query, limit)
+    Index::for_query(pages, query).search(pages, query, limit)
 }
 
 /// [`search`] 와 같은 순위를 **발췌 없이** 낸다 — 모든 hit 의 `snippet` 이 없다. 순위를 다 받아 다시 고르는 쪽
 /// (`show <id>` 의 관련 절, [`super::about`])이 버릴 hit 의 발췌까지 짓지 않게. **순수 함수다.**
 pub fn rank<'a>(pages: &'a [Page], query: &str, limit: usize) -> Found<'a> {
-    Index::of(pages).rank(pages, query, limit)
+    Index::for_query(pages, query).rank(pages, query, limit)
 }
 
 /// 질의를 토큰으로 푼 것 — [`Found::terms`] 와 같다. 비었으면 찾을 것이 없는 질의다. **순수 함수다.**
@@ -306,10 +307,13 @@ fn parse_query(query: &str) -> (Vec<String>, Vec<Word>) {
     (terms, words)
 }
 
-/// Query-independent section counts for one immutable set of checkout pages.
+/// Section counts for one immutable set of checkout pages — [`Index::of`] keys every token so any query can read
+/// it; the one-shot [`search`]/[`rank`] key only their own query's tokens.
 /// Rebuild together with the pages; nothing is persisted or shared between checkouts.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Index {
+    /// Detect a mismatched page count; callers keep the index paired with its immutable pages.
+    pages: usize,
     sections: Vec<IndexedSection>,
 }
 
@@ -320,25 +324,45 @@ struct IndexedSection {
     anchor: Option<usize>,
     start: usize,
     end: usize,
-    // Integer counts preserve the old f64 arithmetic exactly when a query reads them.
-    counts: HashMap<Box<str>, (usize, usize)>,
+    // Integer counts preserve the old f64 arithmetic; wiki pages are bounded by super::TOO_LARGE (1 MiB).
+    counts: HashMap<Box<str>, (u32, u32)>,
     head_len: usize,
     body_len: usize,
 }
 
 impl Index {
     pub fn of(pages: &[Page]) -> Self {
+        Self::counting(pages, None)
+    }
+
+    /// One query's index — counts only that query's tokens. [`search`] and [`rank`] answer once and drop it, so
+    /// keying every distinct token of every section (one allocation each) would cost more than the ranking itself.
+    /// The lengths still count every token, so the answer is the same as [`Index::of`]'s.
+    fn for_query(pages: &[Page], query: &str) -> Self {
+        let terms = terms(query);
+        if terms.is_empty() {
+            // Nothing to find — `run` answers before it reads a section, so do not read the pages either.
+            return Self { pages: pages.len(), sections: Vec::new() };
+        }
+        let keep: HashSet<&str> = terms.iter().map(String::as_str).collect();
+        Self::counting(pages, Some(&keep))
+    }
+
+    fn counting(pages: &[Page], keep: Option<&HashSet<&str>>) -> Self {
         let mut indexed = Vec::new();
         let mut buf = String::new();
         for (page_at, page) in pages.iter().enumerate() {
             let text = page.body.as_deref().map(|b| unified(unmarked(b)));
             let lines = text.as_deref().map(|t| t.split('\n').collect::<Vec<_>>());
             for s in sections(page, lines.as_deref()) {
-                let mut counts: HashMap<Box<str>, (usize, usize)> = HashMap::new();
+                let mut counts: HashMap<Box<str>, (u32, u32)> = HashMap::new();
                 let (mut head_len, mut body_len) = (0, 0);
                 let mut count = |text: &str, heading: bool, len: &mut usize| {
                     each_token(text, &mut buf, |t, _| {
                         *len += 1;
+                        if keep.is_some_and(|k| !k.contains(t)) {
+                            return;
+                        }
                         let entry = match counts.get_mut(t) {
                             Some(entry) => entry,
                             None => counts.entry(t.into()).or_default(),
@@ -355,7 +379,7 @@ impl Index {
                 }
                 indexed.push(IndexedSection {
                     page: page_at,
-                    anchor: s.anchor.map(|a| page.headings.iter().position(|h| h.anchor == a).unwrap()),
+                    anchor: s.anchor,
                     heading: s.heading,
                     start: s.start,
                     end: s.start + s.lines.len(),
@@ -365,7 +389,7 @@ impl Index {
                 });
             }
         }
-        Self { sections: indexed }
+        Self { pages: pages.len(), sections: indexed }
     }
 
     /// Rank with the pages this index was built from; only query tokens are counted here.
@@ -382,6 +406,7 @@ impl Index {
         if terms.is_empty() {
             return Found { terms, words: Vec::new(), common: Vec::new(), hits: Vec::new(), total: 0 };
         }
+        debug_assert_eq!(self.pages, pages.len(), "a wiki index ranks only the pages it was built from");
         let want: HashSet<&str> = terms.iter().map(String::as_str).collect();
         let secs = &self.sections;
         let weighted = |s: &IndexedSection, i: usize| {
@@ -457,14 +482,7 @@ impl Index {
                     rare,
                     score,
                     snippet: if snippets {
-                        let section = Section {
-                            page: &pages[s.page],
-                            heading: s.heading.clone(),
-                            anchor: s.anchor.map(|a| pages[s.page].headings[a].anchor.as_str()),
-                            start: s.start,
-                            lines: lines.get(&s.page).map_or(&[], |l| &l[s.start..s.end]),
-                        };
-                        snippet(&section, &want)
+                        snippet(lines.get(&s.page).map_or(&[], |l| &l[s.start..s.end]), s.start, &want)
                     } else {
                         None
                     },
@@ -478,10 +496,10 @@ impl Index {
 }
 
 /// 절에서 서로 다른 질의 낱말이 가장 많이 든 줄 하나 — 같으면 앞 줄. 맞은 줄이 없으면(제목으로만 맞았다) 절의 첫
-/// 빈 줄 아닌 줄이고, 보일 줄이 없으면 없다.
-fn snippet(s: &Section, want: &HashSet<&str>) -> Option<Snippet> {
+/// 빈 줄 아닌 줄이고, 보일 줄이 없으면 없다. `lines` 는 절의 줄이고 `start` 는 그 첫 줄의 자리(0 부터)다.
+fn snippet(lines: &[&str], start: usize, want: &HashSet<&str>) -> Option<Snippet> {
     let mut best: Option<(usize, usize)> = None; // (줄, 서로 다른 낱말 수)
-    for (n, l) in s.lines.iter().enumerate() {
+    for (n, l) in lines.iter().enumerate() {
         let hit: HashSet<String> =
             tokens(l).into_iter().map(|t| t.text).filter(|t| want.contains(t.as_str())).collect();
         if !hit.is_empty() && best.is_none_or(|(_, d)| hit.len() > d) {
@@ -490,10 +508,10 @@ fn snippet(s: &Section, want: &HashSet<&str>) -> Option<Snippet> {
     }
     let n = match best {
         Some((n, _)) => n,
-        None => s.lines.iter().position(|l| !l.trim().is_empty())?,
+        None => lines.iter().position(|l| !l.trim().is_empty())?,
     };
-    let (text, marks) = fit(s.lines[n], want);
-    Some(Snippet { line: s.start + n + 1, text, marks })
+    let (text, marks) = fit(lines[n], want);
+    Some(Snippet { line: start + n + 1, text, marks })
 }
 
 /// 한 줄을 발췌로 다듬는다 — 앞뒤 빈칸을 걷고, 표시 폭 160 칸을 넘으면 첫 맞은 자리 둘레로 자르고 `…` 를 붙인다.
