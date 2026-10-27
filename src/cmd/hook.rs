@@ -764,6 +764,7 @@ fn settle<'a>(
             // 그 물음이 안 선다 — 그 판은 제 스냅샷으로는 아무것도 안 쥐었다.
             let mut away = crate::hook::Away {
                 me: base.me.clone(),
+                recordable: Some(issues.iter().map(|i| i.id.clone()).collect()),
                 archive: base.archive.clone(),
                 homes: base.homes.clone(),
                 main: base.main.clone(),

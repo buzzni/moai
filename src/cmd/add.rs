@@ -549,10 +549,7 @@ pub fn run(ctx: &Ctx, args: AddArgs, kind_override: Option<Kind>) -> R<Vec<Strin
     )?;
 
     // `mv` 와 같은 자로, 시작 칸에 세운 제 일만 이 세션의 집기로 적는다(moai-jdwk.323).
-    if repo.config.is_started(made.status.as_str())
-        && crate::report::is_work(&made)
-        && crate::report::owner(&crate::query::Me::of(&by), &made).is_none()
-    {
+    if crate::report::picks_up(&made, &repo.config, &crate::query::Me::of(&by)) {
         super::hook::record_own_picks(&repo, std::slice::from_ref(&made.id));
     }
 

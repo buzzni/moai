@@ -1195,6 +1195,8 @@ impl Repo {
 
         // 기한의 위계(moai-ghkp.33i)를 잴 줄 — 아래 고리가 줄마다 고르고, 고리 뒤에 한꺼번에 잰다.
         let mut due_measured: Vec<String> = Vec::new();
+        // 바뀐 줄을 검증하는 같은 비교로 잰다. 길이는 쌍둥이·못 읽는 줄을 지운 것도 센다.
+        let mut touched = issues.len() != original.len() || unread.len() != unread_before;
         for i in issues.iter_mut() {
             i.normalize();
             let was = original_by_id.get(i.id.as_str()).copied();
@@ -1226,6 +1228,7 @@ impl Repo {
                 due_measured.push(i.id.clone());
             }
             if was != Some(&*i) {
+                touched = true;
                 // 제목과 본문은 **이번에 바뀌었을 때만** 잰다 — 이미 큰 것을 든 줄도 옮기고 고칠 수 있다.
                 //
                 // **제목도 여기서 막아야 저널이 막힌다.** `create`·`rm` 이 제목을 저널의 `title` 로
@@ -1339,15 +1342,10 @@ impl Repo {
             true => reserved.unread().into_iter().map(|said| Trouble::ArchiveUnread { said }).collect(),
             false => Vec::new(),
         };
+        let mut failed = None;
         if !filed.is_empty()
             && let Err(e) = self.append_journal(&filed)
         {
-            // 성공하는 흔한 판에는 셈을 더하지 않는다. 쌍둥이·못 읽는 줄을 치운 쓰기도
-            // 길이로 잡고, 값은 정규화된 원본과 견준다 — 정규화만 한 쓰기는 다시 불러도 안전하다.
-            let touched = wrote
-                && (issues.len() != original.len()
-                    || unread.len() != unread_before
-                    || issues.iter().any(|i| original_by_id.get(i.id.as_str()) != Some(&i)));
             // **적어 온 말은 저널에만 산다**(`mv -m`·`defer -m`·`promote` 의 메모). 스냅샷이
             // 담겼다고 "다시 부르지 않는다" 만 말하면 그 말은 영영 사라진다 — 어느 이슈의
             // 말이었는지 대어 `moai note` 로 다시 적게 한다.
@@ -1364,21 +1362,23 @@ impl Repo {
                 .map(|j| j.id.clone())
                 .collect();
             worded.dedup();
-            if !touched {
-                return Err(if worded.is_empty() {
+            let lost = Trouble::JournalLost { said: e.message.clone(), ids: worded };
+            if touched {
+                note.push(lost);
+            } else {
+                failed = Some(if matches!(&lost, Trouble::JournalLost { ids, .. } if ids.is_empty()) {
                     e.into()
                 } else {
-                    Stop::Refused(Trouble::JournalLost { said: e.message, ids: worded })
+                    Stop::Refused(lost)
                 });
             }
-            note.push(Trouble::JournalLost { said: e.message, ids: worded });
         }
         // **어디에 썼는지 담아 둔다**(moai-y7go) — 딸린 워크트리에서 친 `moai` 는 루트의 트래커를
         // 고친다([`Repo::find_from`]). 조용히 옮기면 시킨 쪽은 제가 선 자리에 썼다고 믿고, 그
         // 워크트리의 `.moai` 가 왜 안 바뀌는지를 딴 데서 찾는다. **정말 담긴 뒤에** 담는다 — 락·검증에
-        // 걸린 쓰기는 위에서 물러났고, 저널만 적는 `note` 는 그 적기가 실패하면 바로 위에서 `Err` 다
+        // 걸린 쓰기는 위에서 물러났고, 저널만 적는 `note` 가 실패하면 파일도 안 쓴 한 여기 안 선다
         // (저널 앞에서 담던 판은 탐색기가 그 실패를 배너로 삼키고 끝에 "썼다" 를 냈다).
-        if (wrote || !entries.is_empty())
+        if (wrote || (!entries.is_empty() && failed.is_none()))
             && let Some(from) = &self.moved_from
         {
             let mut moved = MOVED.lock().unwrap_or_else(|e| e.into_inner());
@@ -1388,10 +1388,14 @@ impl Repo {
             }
         }
         if let Err(e) = after_commit(&out) {
-            if !wrote && filed.is_empty() {
+            if !touched && filed.is_empty() {
                 return Err(e.into());
             }
             note.push(Trouble::ArchiveCleanup { said: e.message });
+        }
+        // 정규화가 쓴 자리와 후속 처리를 남긴 뒤 실패한다. 저널만 실패한 집기도 부르는 쪽이 안다.
+        if let Some(e) = failed {
+            return Err(e);
         }
         Ok((out, note))
     }
@@ -4690,23 +4694,39 @@ mod tests {
     #[test]
     fn a_tidying_rewrite_does_not_swallow_a_lost_note() {
         use std::os::unix::fs::PermissionsExt;
-        let (r, d) = repo("tidy-journalfail");
+        let (mut r, d) = repo("tidy-journalfail");
         let mut row = serde_json::to_value(issue("argos-4aex")).unwrap();
         row["priority"] = 2.into();
         std::fs::write(r.issues_path(), format!("{}\n", row)).unwrap();
         let journal = d.join(".moai/journal");
         std::fs::create_dir_all(&journal).unwrap();
+        struct RestoreDir(PathBuf, std::fs::Permissions);
+        impl Drop for RestoreDir {
+            fn drop(&mut self) {
+                let _ = std::fs::set_permissions(&self.0, self.1.clone());
+            }
+        }
+        let _restore = RestoreDir(journal.clone(), std::fs::metadata(&journal).unwrap().permissions());
         std::fs::set_permissions(&journal, std::fs::Permissions::from_mode(0o555)).unwrap();
         if std::fs::File::create(journal.join("probe")).is_ok() {
             return;
         }
         let by = crate::model::someone("raven");
+        let from = d.join("linked");
+        r.moved_from = Some(from.clone());
+        let finished = std::cell::Cell::new(false);
         let e = r
-            .with_write(
+            .with_write_after(
                 || crate::i18n::Lang::En,
-                |_, _, _| Ok((vec![JournalEntry::note("argos-4aex", "kept?", T, &by)], ())),
+                |_, _, _, _| Ok((vec![JournalEntry::note("argos-4aex", "kept?", T, &by)], ())),
+                |_| {
+                    finished.set(true);
+                    Ok(())
+                },
             )
             .expect_err("정규화만 한 쓰기가 노트를 잃고 성공했다");
+        assert!(finished.get(), "정규화로 파일을 쓴 뒤 후속 처리를 건너뛰었다");
+        assert!(redirects().contains(&(from, r.dir())), "실제로 쓴 자리를 잃었다");
         assert!(e.message.contains("moai note") && e.message.contains("argos-4aex"), "{e:?}");
         assert!(!std::fs::read_to_string(r.issues_path()).unwrap().contains("\"priority\":2"));
         r.with_write(
@@ -4719,6 +4739,21 @@ mod tests {
         .expect("줄을 더한 쓰기는 다시 부르면 안 된다");
         assert_eq!(r.read().unwrap().issues.len(), 2);
         assert!(journal_misses().iter().any(|(root, _)| root == d.path()));
+    }
+
+    #[test]
+    fn a_tidying_rewrite_does_not_swallow_a_failed_cleanup() {
+        let (r, _d) = repo("tidy-cleanupfail");
+        let mut row = serde_json::to_value(issue("argos-4aex")).unwrap();
+        row["priority"] = 2.into();
+        std::fs::write(r.issues_path(), format!("{row}\n")).unwrap();
+        let result = r.with_write_after(
+            || crate::i18n::Lang::En,
+            |_, _, _, _| Ok((Vec::new(), ())),
+            |_| Err(Fail::new("cleanup failed")),
+        );
+        assert!(result.is_err(), "정규화만 하고 아카이브 정리 실패를 삼켰다");
+        assert!(!std::fs::read_to_string(r.issues_path()).unwrap().contains("\"priority\":2"));
     }
 
     /// **여러 번 쓴 프로세스는 한 번이라도 쓴 것을 잊지 않는다**(moai-2v3w). 탐색기가

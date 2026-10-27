@@ -14340,6 +14340,13 @@ fn a_message_lost_to_the_journal_on_a_tidied_snapshot_fails() {
     for e in std::fs::read_dir(&journal).unwrap() {
         std::fs::set_permissions(e.unwrap().path(), std::fs::Permissions::from_mode(0o444)).unwrap();
     }
+    struct RestoreDir(PathBuf, std::fs::Permissions);
+    impl Drop for RestoreDir {
+        fn drop(&mut self) {
+            let _ = std::fs::set_permissions(&self.0, self.1.clone());
+        }
+    }
+    let _restore = RestoreDir(journal.clone(), std::fs::metadata(&journal).unwrap().permissions());
     std::fs::set_permissions(&journal, std::fs::Permissions::from_mode(0o555)).unwrap();
     if std::fs::File::create(journal.join("probe")).is_ok() {
         std::fs::set_permissions(&journal, std::fs::Permissions::from_mode(0o755)).unwrap();
@@ -14363,6 +14370,52 @@ fn a_message_lost_to_the_journal_on_a_tidied_snapshot_fails() {
     assert!(out.status.success(), "{}", text(&out));
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(err.contains("moai note") && err.contains(&id), "{err}");
+}
+
+/// 메모는 실패해도 실제 정리 쓰기·못 읽는 줄·집기는 잃지 않는다(moai-jdwk.87u).
+#[cfg(unix)]
+#[test]
+fn a_failed_message_keeps_the_committed_write_diagnostics_and_pick() {
+    use std::os::unix::fs::PermissionsExt;
+    let s = Scratch::new("failed-message-pick");
+    let main = s.path().join("main");
+    std::fs::create_dir_all(&main).unwrap();
+    git(&main, &["init", "-q"]);
+    ok(&main, &["init", "argos"]);
+    let id = add(&main, &["row", "-s", "in_progress"]);
+    git(&main, &["add", "-A"]);
+    git(&main, &["commit", "-qm", "setup"]);
+    git(&main, &["worktree", "add", "-q", ".worktrees/worker", "-b", "worker"]);
+    let snap = main.join(".moai/issues.jsonl");
+    let text = issues(&main).replace(&format!(r#""id":"{id}","#), &format!(r#""id":"{id}","priority":2,"#));
+    std::fs::write(&snap, format!("{text}broken\n")).unwrap();
+    let journal = main.join(".moai/journal");
+    struct RestoreDir(PathBuf, std::fs::Permissions);
+    impl Drop for RestoreDir {
+        fn drop(&mut self) {
+            let _ = std::fs::set_permissions(&self.0, self.1.clone());
+        }
+    }
+    let _restore = RestoreDir(journal.clone(), std::fs::metadata(&journal).unwrap().permissions());
+    for e in std::fs::read_dir(&journal).unwrap() {
+        std::fs::set_permissions(e.unwrap().path(), std::fs::Permissions::from_mode(0o444)).unwrap();
+    }
+    std::fs::set_permissions(&journal, std::fs::Permissions::from_mode(0o555)).unwrap();
+    if std::fs::File::create(journal.join("probe")).is_ok() {
+        return;
+    }
+    let config = s.path().join("hookcfg/config.toml");
+    let out = staged(&["mv", &id, "in_progress", "--from", "in_progress", "-m", "reason"])
+        .current_dir(main.join(".worktrees/worker"))
+        .env("MOAI_CONFIG", &config)
+        .env("CLAUDE_CODE_SESSION_ID", "a")
+        .output()
+        .unwrap();
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success() && err.contains("moai note"), "{err}");
+    assert!(err.contains("그대로 두고 썼다") && err.contains("트래커"), "실제 쓰기를 알리지 않았다: {err}");
+    let recorded: String = pick_dirs(&s).iter().filter_map(|d| std::fs::read_to_string(d.join("a")).ok()).collect();
+    assert!(recorded.contains(&id), "메모 실패로 이미 집은 기록을 잃었다: {recorded}");
 }
 
 /// **못 읽는 줄이 산 줄의 id 를 들고 있으면 `status` 가 중복이라 말한다.**
@@ -17737,6 +17790,11 @@ fn moai_add_into_a_started_column_records_its_own_pick() {
     ] {
         let id = field(&ok_env(s.path(), NOW, &env, &args), "id");
         assert!(!recorded("a").contains(&id), "non-pick recorded: {args:?}");
+        if matches!(args[0], "epic" | "milestone" | "backlog") {
+            ok_env(s.path(), NOW, &env, &["mv", &id, "review"]);
+            ok_env(s.path(), NOW, &env, &["mv", &id, "review"]);
+            assert!(!recorded("a").contains(&id), "mv recorded non-work: {args:?}");
+        }
     }
     for (session, agent) in [("c", "CODEX_THREAD_ID"), ("g", "ANTIGRAVITY_CONVERSATION_ID")] {
         let env = [("MOAI_CONFIG", cfg), ("CLAUDE_CODE_SESSION_ID", session), (agent, "other-agent")];
