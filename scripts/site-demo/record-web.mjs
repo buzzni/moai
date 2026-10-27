@@ -121,6 +121,8 @@ let t0 = 0, lead = 0, posterTaken = false, sceneName = ''
 async function open(page) {
   await page.goto(url)
   await page.waitForSelector('[role="row"]')
+  // DOM 에 줄이 생긴 뒤 첫 그림까지 기다린다 — 녹화에 loading 프레임이 남지 않게.
+  await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))))
   lead = (Date.now() - t0) / 1000
 }
 
@@ -301,8 +303,9 @@ try {
     if (process.env.SCENE && process.env.SCENE !== name) continue
     const context = await browser.newContext({ viewport: SIZE, recordVideo: { dir: outDir, size: SIZE }, colorScheme: 'dark', deviceScaleFactor: 1, timezoneId: 'UTC' })
     await context.addInitScript(CURSOR)
-    const page = await context.newPage()
+    // newPage 를 기다리는 동안에도 영상이 시작된다 — 그 앞에서 재야 처음의 빈 화면을 다 자른다.
     t0 = Date.now(); lead = 0; posterTaken = false; sceneName = name
+    const page = await context.newPage()
     await play(page)
     if (!posterTaken) await poster(page)
     const video = page.video()
