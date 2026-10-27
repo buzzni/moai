@@ -33,6 +33,13 @@ does not tag — see `CONTRIBUTING.md`.
 
 ### Fixed
 
+- **TUI Gantt headers leave a space between date labels.** At month zoom,
+  languages whose month names fill the shortest month use numbers across the
+  whole row; English abbreviations stay as they are. (moai-ijjd.5u9)
+- **TUI Gantt plans shown from a sibling worktree stay unchanged here.** Date
+  keys name the worktree to use; dragging a bar or clicking an empty day only
+  selects the row. Plans from the current checkout still move. (moai-ijjd.r7u)
+
 - **Skill shell commands keep repository paths together.** Supervisor, worker
   and recovery commands quote paths with spaces. A path holding `"`, `$`, a
   backtick or `\` (a Windows path's separators aside) is handed to the person
