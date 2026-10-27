@@ -7085,6 +7085,21 @@ fn show_fields_keeps_only_the_keys_asked_for() {
     let one = ok(s.path(), &["show", &a, "--fields", "id,derived_status,priority", "--json"]);
     assert_eq!(one.trim(), format!("{{\"id\":\"{a}\",\"priority\":2}}"), "{one}");
 
+    // 고른 값은 전체 줄 안의 그 조각과 바이트째 같다 — 안쪽 키를 다시 정렬하지 않는다.
+    let full = ok(s.path(), &["show", &b, "--json"]);
+    let picked = ok(s.path(), &["show", &b, "--fields", "journal", "--json"]);
+    let inside = picked.trim().strip_prefix('{').unwrap().strip_suffix('}').unwrap();
+    assert!(full.contains(inside), "전체: {full}\n고른 값: {picked}");
+    ok(s.path(), &["note", &a, "model: anthropic/opus-5.5 (high — 시험)"]);
+    let full = ok(s.path(), &["show", "--all", "--json"]);
+    let picked = ok(s.path(), &["show", "--all", "--fields", "id,work", "--json"]);
+    let rows: Vec<Box<serde_json::value::RawValue>> = serde_json::from_str(&picked).unwrap();
+    let row = rows.iter().find(|r| r.get().contains(&a)).unwrap();
+    let values: std::collections::BTreeMap<String, Box<serde_json::value::RawValue>> =
+        serde_json::from_str(row.get()).unwrap();
+    let work = format!("\"work\":{}", values["work"].get());
+    assert!(full.contains(&work), "전체: {full}\n고른 값: {picked}");
+
     // 키는 --json 에만 있다 — 말없이 먹지 않는다.
     let refused = moai(s.path(), &["show", "--fields", "id"]);
     assert!(!refused.status.success());
@@ -22598,7 +22613,20 @@ fn the_worktree_you_stand_in_is_not_overlaid_even_through_dash_c() {
 /// 번이 그 도장을 조용히 걷는다.
 #[test]
 fn reading_in_a_worktree_keeps_a_stamp_on_a_row_only_its_own_copy_holds() {
-    let t = trees("wtprune");
+    keeps_a_stamp_only_its_own_copy_holds("wtprune", &[]);
+}
+
+/// 겹쳐 읽은 판도 제 사본에서만 보이는 줄의 도장을 지킨다(moai-b4dc.gqd) — 그 걸음은 화면에 안 겹친 제 사본을
+/// 걷기에 넘긴다(`worktree::gather_reading`). 빠뜨리면 이 판만 그 도장을 걷는다.
+#[test]
+fn reading_with_worktree_keeps_a_stamp_on_a_row_only_its_own_copy_holds() {
+    keeps_a_stamp_only_its_own_copy_holds("wtprune-overlay", &["--worktree"]);
+}
+
+/// 위 둘의 몸 — 루트에서 연 탐색기가 워크트리의 사본에만 있는 줄에 찍은 도장을 앉히고, 그 워크트리에서 `read` 를
+/// `flags` 와 함께 친 뒤에도 그 도장이 남는가를 본다.
+fn keeps_a_stamp_only_its_own_copy_holds(name: &str, flags: &[&str]) {
+    let t = trees(name);
     let (main, feat) = (t.main(), t.feat());
     let cfg = t.s.path().join("user.toml");
     ok_with(&main, &cfg, &["read", &t.tied]);
@@ -22610,10 +22638,11 @@ fn reading_in_a_worktree_keeps_a_stamp_on_a_row_only_its_own_copy_holds() {
     std::fs::write(&sheet, format!("{}\n\"{}\" = \"{LATER}\"\n", text.trim_end(), t.made)).unwrap();
     assert!(read_sheet(&cfg, &main).contains(&t.made), "시험의 전제 — 도장을 앉혔다");
 
-    ok_with(&feat, &cfg, &["read", &t.picked]);
+    let args: Vec<&str> = ["read"].into_iter().chain(flags.iter().copied()).chain([t.picked.as_str()]).collect();
+    ok_with(&feat, &cfg, &args);
     let after = read_sheet(&cfg, &main);
-    assert!(after.contains(&t.picked), "{after}");
-    assert!(after.contains(&t.made), "워크트리에서 친 `read` 가 거기에만 있는 줄의 도장을 걷었다\n{after}");
+    assert!(after.contains(&t.picked), "{flags:?}: {after}");
+    assert!(after.contains(&t.made), "{flags:?}: 워크트리에서 친 `read` 가 거기에만 있는 줄의 도장을 걷었다\n{after}");
 }
 
 /// **`tui --json --deep --worktree` 는 옆에만 있는 줄을 `show --worktree` 가 놓는 자리에 놓는다**(moai-m4ez.gcp) —
@@ -28386,10 +28415,11 @@ fn show_names_the_wiki_pages_about_the_issue() {
 
     // 목록에는 안 싣는다 — 줄마다 위키를 걷게 된다.
     assert!(!ok(s.path(), &["show", "--json"]).contains(r#""wiki""#));
-    // `--fields` 로 고를 수 있다.
-    assert!(
-        ok(s.path(), &["show", &id, "--json", "--fields", "wiki"]).starts_with(r#"{"wiki":{"lessons":[],"named_in":"#)
-    );
+    // `--fields` 로 고른 값은 안쪽 키 차례까지 전체 줄의 것 그대로다(moai-b4dc.0ia).
+    let picked = ok(s.path(), &["show", &id, "--json", "--fields", "wiki"]);
+    let inside = picked.trim().strip_prefix('{').unwrap().strip_suffix('}').unwrap();
+    assert!(json.contains(inside), "전체: {json}\n고른 값: {picked}");
+    assert_eq!(json_of(&picked)["wiki"], v["wiki"]);
 }
 
 /// 문턱 밑이면 `related` 가 비고, 둘 다 비면 사람 화면에 토막이 없다. 위키 디렉터리가 없으면 두 빈 배열이고

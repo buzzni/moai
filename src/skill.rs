@@ -132,8 +132,9 @@ pub fn misnamed<'a>(with: &[&'a str], without: &[&'a str]) -> Option<Misnamed<'a
 }
 
 /// `all` 가운데 늘 심는 것과 `optional` 에 든 선택 스킬만 — 저장소의 트리 둘([`tree`]·[`agents_tree`])이 이것을 받는다.
-pub fn picked(all: &[Skill], optional: &[&str]) -> Vec<Skill> {
-    all.iter().filter(|s| !is_optional(s.name) || optional.contains(&s.name)).cloned().collect()
+/// 복사하지 않는다 — 글은 `skill_files` 가 트리에 담을 때 한 번 복사된다.
+pub fn picked<'a>(all: &'a [Skill], optional: &[&str]) -> Vec<&'a Skill> {
+    all.iter().filter(|s| !is_optional(s.name) || optional.contains(&s.name)).collect()
 }
 
 /// **moai 가 한 번이라도 심은 스킬**과 그 디렉터리 안에 심은 파일 — 지금 심는 것([`NAMES`]·[`OPTIONAL`])에 걷은 것이
@@ -176,7 +177,6 @@ pub const AGENTS_DIR: &str = ".agents/skills";
 
 /// 심는 스킬 하나 — 이름([`NAMES`]·[`OPTIONAL`] 의 한 칸)과 그 디렉터리 안에 심을 글. 경로는 스킬 디렉터리부터의
 /// 상대고 첫 글이 `SKILL.md` 다.
-#[derive(Clone)]
 pub struct Skill {
     pub name: &'static str,
     pub files: Vec<(&'static str, String)>,
@@ -256,8 +256,12 @@ where
 /// [`AGENTS_DIR`] 에 심을 파일들. 경로는 그 자리부터의 상대다. **Claude 의 트리와 글이 같다** — 다른 것은 매니페스트가
 /// 없다는 것과 Claude 에만 서는 스킬([`Skill::claude_only`], 감독)이 빠진다는 것뿐이고, 에이전트마다 다른 걸음은 글
 /// 안의 낱말표(`guide::VERBS`)가 열로 가른다(사용자 결정 2026-10-04).
-pub fn agents_tree(skills: &[Skill]) -> Vec<(PathBuf, String)> {
-    skill_files(skills.iter().filter(|s| !s.claude_only)).map(|(p, b)| (PathBuf::from(p), b)).collect()
+pub fn agents_tree<'a, I>(skills: I) -> Vec<(PathBuf, String)>
+where
+    I: IntoIterator<Item = &'a Skill>,
+    I::IntoIter: 'a,
+{
+    skill_files(skills.into_iter().filter(|s| !s.claude_only)).map(|(p, b)| (PathBuf::from(p), b)).collect()
 }
 
 /// 마켓플레이스 이름. `claude plugin install moai@<이것>` 의 뒷부분이다.
@@ -901,14 +905,22 @@ fn shell_line(exe: &str, event: &str, dialect: Dialect) -> String {
 ///
 /// 판이 **내려가도** 괜찮은 까닭은 [`version_of`] 에 있다. 두 자리에 나눠 적으면
 /// 한쪽만 고쳐져 갈라진다 — 실제로 여기 적혀 있던 까닭이 틀린 채로 남아 있었다.
-pub fn tree(prefix: &str, root: &Path, exe: &str, skills: &[Skill]) -> Vec<(PathBuf, String)> {
+pub fn tree<'a, I>(prefix: &str, root: &Path, exe: &str, skills: I) -> Vec<(PathBuf, String)>
+where
+    I: IntoIterator<Item = &'a Skill>,
+    I::IntoIter: 'a,
+{
     tree_named(&market(prefix, root), exe, skills)
 }
 
 /// `tree` 의 몸통. 저장소 자리는 마켓플레이스 이름으로만 들어오므로, 이름을
 /// 받아 두면 **커밋된 트리를 그 트리가 적힌 자리 그대로** 다시 낼 수 있다 —
 /// 다른 체크아웃(워크트리)에서 부른 시험이 남의 자리를 안 섞는다.
-fn tree_named(market: &str, exe: &str, skills: &[Skill]) -> Vec<(PathBuf, String)> {
+fn tree_named<'a, I>(market: &str, exe: &str, skills: I) -> Vec<(PathBuf, String)>
+where
+    I: IntoIterator<Item = &'a Skill>,
+    I::IntoIter: 'a,
+{
     let mut files: Vec<(PathBuf, String)> =
         skill_files(skills).map(|(p, b)| (PathBuf::from(format!("skills/{p}")), b)).collect();
     let market = (PathBuf::from(".claude-plugin/marketplace.json"), marketplace_json(market));
@@ -1650,7 +1662,7 @@ mod tests {
     /// 이름을 다시 이슈 id 로 센다(moai-mdzx.3pm). 선택 스킬을 다 빼고 지은 트리는 [`NAMES`] 만 심는다(moai-3r7l).
     #[test]
     fn the_tree_plants_every_skill_name() {
-        let dirs = |skills: &[Skill]| -> Vec<String> {
+        let dirs = |skills: Vec<&Skill>| -> Vec<String> {
             tree("t", Path::new("/repo"), "/bin/moai", skills)
                 .into_iter()
                 .filter_map(|(p, _)| {
@@ -1661,16 +1673,16 @@ mod tests {
         };
         let all = fake("스킬", "감독", "위키");
         let every: Vec<&str> = NAMES.into_iter().chain(optional_names()).collect();
-        assert_eq!(dirs(&all), every);
-        assert_eq!(dirs(&picked(&all, &[])), NAMES, "고르지 않은 선택 스킬을 심었다");
-        assert_eq!(dirs(&picked(&all, &["moai-tmux", "moai-cmux", "moai-saycode"])), every);
+        assert_eq!(dirs(all.iter().collect()), every);
+        assert_eq!(dirs(picked(&all, &[])), NAMES, "고르지 않은 선택 스킬을 심었다");
+        assert_eq!(dirs(picked(&all, &["moai-tmux", "moai-cmux", "moai-saycode"])), every);
         assert_eq!(
-            dirs(&picked(&all, &["moai-cmux"])),
+            dirs(picked(&all, &["moai-cmux"])),
             [&NAMES[..], &["moai-cmux"]].concat(),
             "고른 하나만 심지 않았다"
         );
         let tmux_only: Vec<&str> = NAMES.into_iter().chain(["moai-tmux"]).collect();
-        assert_eq!(dirs(&picked(&all, &["moai-tmux"])), tmux_only, "고르지 않은 Saycode 스킬을 심었다");
+        assert_eq!(dirs(picked(&all, &["moai-tmux"])), tmux_only, "고르지 않은 Saycode 스킬을 심었다");
     }
 
     /// **두 목록은 겹치지 않고, 선택 스킬도 [`EVER_PLANTED`] 에 든다**(moai-3r7l) — 겹치면 늘 심는 스킬을 `--without` 으로

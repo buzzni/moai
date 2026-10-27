@@ -7198,12 +7198,15 @@ impl TmuxEnv {
         let named = std::env::var_os(SHIM_VAR).map(std::path::PathBuf::from).filter(|p| p.is_absolute());
         let surface = std::env::var_os("CMUX_SURFACE_ID").is_some_and(|v| !v.is_empty());
         let found = || {
-            std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())
-                .filter(|dir| dir.is_absolute())
-                .map(|dir| dir.join("tmux"))
-                .filter(|cand| crate::cmd::runnable(cand))
-                .filter_map(|cand| std::fs::canonicalize(&cand).ok().map(|c| (cand, c)))
-                .collect()
+            let path = std::env::var_os("PATH").unwrap_or_default();
+            crate::cmd::hits_in(
+                std::env::split_paths(&path).filter(|dir| dir.is_absolute()),
+                "tmux",
+                &[],
+                crate::cmd::runnable,
+            )
+            .filter_map(|cand| std::fs::canonicalize(&cand).ok().map(|c| (cand, c)))
+            .collect()
         };
         Self::sense(
             fake,
