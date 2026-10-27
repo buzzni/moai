@@ -7085,6 +7085,21 @@ fn show_fields_keeps_only_the_keys_asked_for() {
     let one = ok(s.path(), &["show", &a, "--fields", "id,derived_status,priority", "--json"]);
     assert_eq!(one.trim(), format!("{{\"id\":\"{a}\",\"priority\":2}}"), "{one}");
 
+    // 고른 값은 전체 줄 안의 그 조각과 바이트째 같다 — 안쪽 키를 다시 정렬하지 않는다.
+    let full = ok(s.path(), &["show", &b, "--json"]);
+    let picked = ok(s.path(), &["show", &b, "--fields", "journal", "--json"]);
+    let inside = picked.trim().strip_prefix('{').unwrap().strip_suffix('}').unwrap();
+    assert!(full.contains(inside), "전체: {full}\n고른 값: {picked}");
+    ok(s.path(), &["note", &a, "model: anthropic/opus-5.5 (high — 시험)"]);
+    let full = ok(s.path(), &["show", "--all", "--json"]);
+    let picked = ok(s.path(), &["show", "--all", "--fields", "id,work", "--json"]);
+    let rows: Vec<Box<serde_json::value::RawValue>> = serde_json::from_str(&picked).unwrap();
+    let row = rows.iter().find(|r| r.get().contains(&a)).unwrap();
+    let values: std::collections::BTreeMap<String, Box<serde_json::value::RawValue>> =
+        serde_json::from_str(row.get()).unwrap();
+    let work = format!("\"work\":{}", values["work"].get());
+    assert!(full.contains(&work), "전체: {full}\n고른 값: {picked}");
+
     // 키는 --json 에만 있다 — 말없이 먹지 않는다.
     let refused = moai(s.path(), &["show", "--fields", "id"]);
     assert!(!refused.status.success());
