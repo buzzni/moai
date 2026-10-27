@@ -257,7 +257,7 @@ pub fn assignee_arg<E>(
 /// 세 벌 다 그렇게 적혀 있었다.
 ///
 /// **PATH 의 후보를 훑는 걸음은 [`hits_in`] 하나다.** 훅과 `merge_driver` 는 절대 자리만,
-/// [`found_in`] 은 빈 자리를 빼고, 유닉스의 `tui` 는 빈 자리도 그대로 받는다.
+/// [`found_in`] 은 빈 자리를 빼고, `tui` 는 `sh`(유닉스·Git Bash)가 띄우는 판에서 빈 자리도 그대로 받는다.
 /// 훅은 모두 받고 나머지는 첫 것을 받는다. 아래 세 줄은 저마다 묻는 까닭이다.
 ///
 /// - `skill` 은 껍데기의 `command -v` 로 묻는다. 훅이 실제로 치는 것이 그 명령이라 껍데기가 보는
@@ -1529,6 +1529,13 @@ mod tests {
         assert_eq!(
             hits_in(dirs(), "x.exe", &exts, |p| p == Path::new("/a/x.exe")).next(),
             Some(PathBuf::from("/a/x.exe"))
+        );
+        // Git Bash 안의 `tui` 가 부르는 꼴 — 빈 낱말이 이름 그대로고, 자리마다 이름 그대로가 `.exe` 보다 앞선다.
+        let bash = [String::new(), ".exe".to_string()];
+        let have = |p: &Path| ["vi", "/a/vi.exe", "/b/vi"].iter().any(|f| Path::new(f) == p);
+        assert_eq!(
+            hits_in(dirs(), "vi", &bash, have).collect::<Vec<_>>(),
+            ["vi", "/a/vi.exe", "/b/vi"].map(PathBuf::from)
         );
     }
 
