@@ -2626,7 +2626,7 @@ Options:
       --deep                 With --json, list every row below, with its home
       --worktree             With --json, overlay other worktrees' rows
       --no-archive           With --json, leave out the archive
-      --no-gantt             With --json --deep, leave out the gantt values
+      --no-gantt             Leave out gantt values - requires --json --deep
       --json                 Machine-readable output. Every human line goes away
       --no-color             Turn colour off (same as `--color never`)
       --color <how>          auto|always|never (auto by default, off when piped)

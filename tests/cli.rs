@@ -32258,3 +32258,27 @@ fn tui_no_gantt_omits_values_and_web_tree_opts_in() {
     let (status, _, body) = get(web.port, "/api/tree?gantt=0");
     assert_eq!((status, json_of(&body)["code"].as_str()), (400, Some("bad_input")));
 }
+
+/// A shape flag that would be a no-op is refused with the same coded contract as the TUI's other JSON shapes.
+#[test]
+fn tui_no_gantt_requires_deep_and_json() {
+    let s = init("tui-no-gantt-shape");
+    for args in [&["tui", "--no-gantt"][..], &["tui", "--deep", "--no-gantt"][..]] {
+        let out = moai(s.path(), args);
+        assert!(!out.status.success(), "{out:?}");
+        assert!(text(&out).contains("--json"), "{out:?}");
+    }
+    let out = moai(s.path(), &["tui", "--json", "--no-gantt"]);
+    assert!(!out.status.success(), "{out:?}");
+    assert!(out.stdout.is_empty(), "a refusal must not print a successful listing");
+    let failure = json_of(&String::from_utf8_lossy(&out.stderr));
+    assert_eq!(failure["code"], "bad_filter", "{failure}");
+    let message = failure["error"].as_str().unwrap();
+    assert!(message.contains("--no-gantt") && message.contains("--deep"), "{message}");
+    let valid = ok(s.path(), &["tui", "--json", "--deep", "--no-gantt"]);
+    assert!(json_of(&valid).is_array());
+    let outside = Scratch::new("tui-no-gantt-outside");
+    let out = moai(outside.path(), &["tui", "--json", "--no-gantt"]);
+    assert!(!out.status.success());
+    assert!(text(&out).contains("--no-gantt"));
+}

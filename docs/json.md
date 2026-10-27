@@ -48,7 +48,8 @@ walk lower. `--deep` needs `--json` and a
 
 Add `--no-gantt` to `moai tui --deep --json` when only the tree is needed. It skips
 calculating the chart values and omits the `gantt` key, leaving the tree, its order
-and every other field intact. Like `--deep`, it requires `--json`.
+and every other field intact. Both `--json` and `--deep` are required with
+`--no-gantt`; omitting either is refused.
 
 Under `--deep` without `--no-gantt`, every row with an id also carries `gantt`,
 what the Gantt charts draw, decided by moai so that a program drawing it judges no

@@ -2427,7 +2427,7 @@ pub struct TuiArgs {
     #[arg(long)]
     pub no_archive: bool,
 
-    /// With --json --deep, leave out the gantt values
+    /// Leave out gantt values - requires --json --deep
     #[arg(long)]
     pub no_gantt: bool,
 

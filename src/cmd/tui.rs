@@ -34,6 +34,13 @@ pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
             super::code::BAD_FILTER,
         ));
     }
+    // A one-level JSON listing never computes chart values; accepting its off flag there would silently do nothing.
+    if args.no_gantt && !args.deep {
+        return Err(Fail::coded(
+            crate::i18n::say(ctx.lang(), "refuse.tui_no_gantt_needs_deep"),
+            super::code::BAD_FILTER,
+        ));
+    }
     // **재는 것이 읽는 것보다 먼저다.** 읽고 나서 재면 그 사이에 떨어진 쓰기가
     // "이미 본 것" 으로 적혀 그 뒤로 영영 바뀐 줄 모른다. 먼저 재면 최악이
     // 헛 알림 하나고, 빠진 알림보다 헛 알림이 싸다.
