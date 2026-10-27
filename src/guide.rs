@@ -5690,7 +5690,6 @@ mod tests {
     /// "Python was not found" 로 끝난다. bash 는 git 이 선 자리(`git --exec-path` 의 세 층 위 `bin/bash.exe`,
     /// Git for Windows)를 먼저 본다.
     fn tool(name: &str) -> Option<std::path::PathBuf> {
-        use std::process::Command;
         let mut seen = Vec::new();
         if cfg!(windows)
             && name == "bash"
@@ -5701,8 +5700,11 @@ mod tests {
         }
         seen.push(std::path::PathBuf::from(name));
         let probe = if name.starts_with("python") { "pass" } else { "exit 0" };
-        let found =
-            seen.into_iter().find(|at| Command::new(at).args(["-c", probe]).output().is_ok_and(|o| o.status.success()));
+        // bash 의 탐침도 시작 파일을 안 읽는다([`crate::test_shell`]) — 읽으면 판마다 bashrc 가 돌고, 진 bashrc 하나가
+        // `needed("bash")` 를 붉힌다. python3 에는 `BASH_ENV` 를 걷는 것뿐이라 뜻이 안 바뀐다.
+        let found = seen
+            .into_iter()
+            .find(|at| crate::test_shell::shell(at).args(["-c", probe]).output().is_ok_and(|o| o.status.success()));
         if found.is_none() {
             eprintln!("{name} 가 이 기계에서 안 돈다 — 셸 글의 문법은 못 재고 글만 잰다");
         }
@@ -5715,6 +5717,16 @@ mod tests {
         let found = tool(name);
         assert!(found.is_some() || cfg!(windows), "{name} 를 실행하지 못했다 — 이 시험에는 {name} 가 있어야 한다");
         found
+    }
+
+    /// 가짜 도구의 자리를 앞에 두되, UTF-8 이 아닌 PATH 도 그대로 잇는다.
+    #[cfg(unix)]
+    fn path_with(dir: &std::path::Path) -> std::ffi::OsString {
+        std::env::join_paths(
+            std::iter::once(dir.to_path_buf())
+                .chain(std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())),
+        )
+        .expect("PATH 에 넣을 수 없는 자리")
     }
 
     /// 일꾼 글의 번호 걸음 — "The steps" 절 하나. 그 앞(맡은 일·사람이 비울 때·걸음 앞)과 뒤(이어받기)는 번호가
@@ -8059,7 +8071,7 @@ stop sending outside work while a release runs",
     #[test]
     fn codex_report_watch_skips_the_baseline_and_ends_on_a_report() {
         use std::os::unix::fs::PermissionsExt;
-        if std::process::Command::new("python3").arg("-c").arg("pass").output().is_err() {
+        if tool("python3").is_none() {
             return; // python3 가 없는 기계 — 글만 잰다.
         }
         let s = crate::scratch::Scratch::new("codex-watch");
@@ -8080,13 +8092,10 @@ stop sending outside work while a release runs",
         std::fs::write(&fake, format!("#!/bin/sh\ncat '{}'\n", shown.display())).unwrap();
         std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
         let script = REPORT_WATCH.split("```sh\n").nth(1).unwrap().split("```").next().unwrap();
-        let path = format!("{}:{}", bin.display(), std::env::var("PATH").unwrap_or_default());
-        // 자식 bash 가 시작 파일을 읽으면 PATH 의 앞이 바뀌어 가짜 `moai` 가 지고 진짜가 돈다. 길은 둘이다 — 세션의
-        // `BASH_ENV`, 그리고 `SSH_CLIENT` 가 서고 `SHLVL` 이 0 인 자리(`ssh host 'cd … && cargo test'`)에서 Debian 의
-        // bash 가 `-c` 에도 읽는 `~/.bashrc`. 앞은 걷고, 뒤는 `--norc` 가 막는다(재 봤다).
-        let out = std::process::Command::new("bash")
-            .args(["--norc", "-c", script, "watch", "/root", "e", "2026-10-12T00:00:00Z"])
-            .env_remove("BASH_ENV")
+        let path = path_with(&bin);
+        // 시작 파일이 PATH 를 바꾸지 않게 한다 — 두 경로는 crate::test_shell 이 막는다.
+        let out = crate::test_shell::shell("bash")
+            .args(["-c", script, "watch", "/root", "e", "2026-10-12T00:00:00Z"])
             .env("PATH", path)
             .output()
             .unwrap();
@@ -8560,7 +8569,7 @@ stop sending outside work while a release runs",
             );
         }
         assert!(SESSIONS.contains("procStart") && SESSIONS.contains("/proc/{pid}/stat"), "짝이 pid 재사용을 안 거른다");
-        if std::process::Command::new("python3").arg("-c").arg("pass").output().is_err() {
+        if tool("python3").is_none() {
             return; // python3 가 없는 기계 — 글만 잰다.
         }
         let s = crate::scratch::Scratch::new("tmux-session-map");
@@ -8597,7 +8606,7 @@ stop sending outside work while a release runs",
         let fake = format!("#!/bin/sh\n[ \"$*\" = '--json --id-format both top --all' ] || exit 1\necho '{top}'\n");
         std::fs::write(bin.join("cmux"), fake).unwrap();
         std::fs::set_permissions(bin.join("cmux"), std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
-        let path = format!("{}:{}", bin.display(), std::env::var("PATH").unwrap_or_default());
+        let path = path_with(&bin);
         // 시험은 사람의 cmux 안에서 돌 수 있다 — 물려받은 `CMUX_SURFACE_ID` 는 늘 걷고, cmux 를 재는 판만 세운다.
         let map = |records: &std::path::Path, tmux: Option<&str>, cmux: bool| {
             let mut cmd = std::process::Command::new("sh");

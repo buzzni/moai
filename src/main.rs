@@ -32,6 +32,8 @@ mod scratch;
 mod skill;
 mod store;
 mod style;
+#[cfg(test)]
+mod test_shell;
 mod text;
 mod tui;
 mod tz;

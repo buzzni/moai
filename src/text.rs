@@ -283,7 +283,7 @@ mod tests {
     /// 통과한다 — 실제 bash 에 돌려 본다. bash 가 없는 기계에서는 건너뛴다.
     #[test]
     fn shell_word_round_trips_through_bash() {
-        let Ok(probe) = std::process::Command::new("bash").arg("-c").arg("true").status() else { return };
+        let Ok(probe) = crate::test_shell::shell("bash").arg("-c").arg("true").status() else { return };
         if !probe.success() {
             return;
         }
@@ -300,7 +300,7 @@ mod tests {
             "/w/$HOME",
             "/w/`id`",
         ] {
-            let out = std::process::Command::new("bash")
+            let out = crate::test_shell::shell("bash")
                 .arg("-c")
                 .arg(format!("printf %s {}", shell_word(s)))
                 .output()
@@ -324,12 +324,12 @@ mod tests {
         assert_eq!(single_quoted("what are you waiting for"), "'what are you waiting for'");
         assert_eq!(single_quoted("what's blocking"), r"'what'\''s blocking'");
         assert_eq!(single_quoted(""), "''");
-        let Ok(probe) = std::process::Command::new("bash").arg("-c").arg("true").status() else { return };
+        let Ok(probe) = crate::test_shell::shell("bash").arg("-c").arg("true").status() else { return };
         if !probe.success() {
             return;
         }
         for s in ["왜", "what's blocking", "qu'attendez-vous", "a'b'c", "`id`", "$HOME", "무엇을 기다리나"] {
-            let out = std::process::Command::new("bash")
+            let out = crate::test_shell::shell("bash")
                 .arg("-c")
                 .arg(format!("set -- {}; printf '%s|%s' \"$#\" \"$1\"", single_quoted(s)))
                 .output()

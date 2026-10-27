@@ -1,4 +1,5 @@
 """post.py 의 시험 — 네트워크는 안 탄다. 보내는 자리는 가짜 opener 로 갈아 끼운다."""
+import contextlib
 import io
 import json
 import os
@@ -74,8 +75,18 @@ class FakeResponse(io.BytesIO):
 
 
 class Send(unittest.TestCase):
+    def setUp(self):
+        self.stdout = io.StringIO()
+        redirect = contextlib.redirect_stdout(self.stdout)
+        redirect.__enter__()
+        self.addCleanup(redirect.__exit__, None, None, None)
+
+    def tearDown(self):
+        self.assertEqual(self.stdout.getvalue(), "", "test progress leaked to stdout")
+
     def test_it_sends_in_order_and_waits_out_a_rate_limit(self):
         seen, slept = [], []
+        out = io.StringIO()
         replies = [None, 429, None, None]
 
         def opener(req, timeout=None):
@@ -89,7 +100,11 @@ class Send(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             make(tmp, media={"01-keys.png": b"\x89PNG\r\n", "01-keys.md": "Keys"})
             msgs = post.messages(tmp)
-            post.send(HOOK, msgs, opener=opener, sleep=slept.append)
+            post.send(HOOK, msgs, opener=opener, sleep=slept.append, out=out)
+        self.assertEqual(out.getvalue().splitlines(), [
+            f"posted 1/2: text, {len(msgs[0]['content'])} characters",
+            "posted 2/2: 01-keys.png",
+        ])
         self.assertEqual(slept, [0.25])
         self.assertEqual(len(seen), 3)
         self.assertTrue(all(r.full_url == HOOK + "?wait=true" for r in seen))
@@ -110,11 +125,12 @@ class Send(unittest.TestCase):
         slept = []
         with tempfile.TemporaryDirectory() as tmp:
             make(tmp)
-            post.send(HOOK, post.messages(tmp), opener=opener, sleep=slept.append)
+            post.send(HOOK, post.messages(tmp), opener=opener, sleep=slept.append, out=io.StringIO())
         self.assertEqual(slept, [1.0])
 
     def test_a_run_can_start_part_way_so_a_retry_does_not_post_twice(self):
         seen = []
+        out = io.StringIO()
 
         def opener(req, timeout=None):
             seen.append(req)
@@ -122,7 +138,8 @@ class Send(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             make(tmp, media={"01-a.png": b"\x89PNG", "02-b.png": b"\x89PNG"})
-            post.send(HOOK, post.messages(tmp), start=2, opener=opener, sleep=lambda s: None)
+            post.send(HOOK, post.messages(tmp), start=2, opener=opener, sleep=lambda s: None, out=out)
+        self.assertEqual(out.getvalue().splitlines(), ["posted 2/3: 01-a.png", "posted 3/3: 02-b.png"])
         self.assertEqual(len(seen), 2, "message 1 went out again")
         self.assertIn(b'filename="01-a.png"', seen[0].data)
 
@@ -138,7 +155,7 @@ class Send(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             make(tmp, media={"01-a.png": b"\x89PNG", "02-b.png": b"\x89PNG"})
             with self.assertRaises(post.PostError) as ctx:
-                post.send(HOOK, post.messages(tmp), opener=opener, sleep=lambda s: None)
+                post.send(HOOK, post.messages(tmp), opener=opener, sleep=lambda s: None, out=io.StringIO())
         self.assertIn("1 of 3 already posted", str(ctx.exception))
         self.assertIn("start at 2", str(ctx.exception))
 

@@ -2043,7 +2043,7 @@ mod tests {
             nth.set(nth.get() + 1);
             let tmp = at.join(format!("tmp{}", nth.get()));
             std::fs::create_dir_all(&tmp).unwrap();
-            let out = std::process::Command::new(shell)
+            let out = crate::test_shell::shell(shell)
                 .args([flags, &command(exe, "pre-tool-use")])
                 .env("TMPDIR", &tmp)
                 .output()
@@ -2064,7 +2064,7 @@ mod tests {
                 // 읽기로 연 파일을 stdout 으로 준다 — 쓰기가 `EBADF` 로 지고 시그널은 안 온다.
                 std::process::Stdio::from(std::fs::File::open(exe).unwrap())
             };
-            let mut child = std::process::Command::new(shell)
+            let mut child = crate::test_shell::shell(shell)
                 .args([flags, &command(exe, "pre-tool-use")])
                 .env("TMPDIR", &tmp)
                 .stdout(sink)
@@ -2135,7 +2135,7 @@ mod tests {
             // 어느 쪽인지는 정하지 않는다 — dash 와 bash 5.2 는 127, Arch 의 `sh`(bash)는 126 을 냈다.
             // 훅이 지키는 계약은 "껍데기가 낸 값을 그대로 옮긴다" 이니, 같은 껍데기로 맨 실행을 한 번
             // 재어 그 값을 기대한다. 126·127 밖이면 그 판이 못 도는 판을 안 지었다는 뜻이라 멈춘다.
-            let asked = std::process::Command::new(sh)
+            let asked = crate::test_shell::shell(sh)
                 .args(["-c", &crate::text::single_quoted(&gone)])
                 .stderr(std::process::Stdio::null())
                 .status()
@@ -2522,7 +2522,7 @@ mod tests {
         // **껍데기를 하나로 두지 않는다**([`shells`]) — 아래 `true` 의 까닭(특수 내장의 리다이렉션
         // 실패)은 dash 에서만 드러나, `sh` 가 bash 인 기계에서 한 벌만 돌리면 푸르게 지나간다.
         let run = |shell: &str, what: &str, tmp: &std::path::Path| {
-            let out = std::process::Command::new(shell)
+            let out = crate::test_shell::shell(shell)
                 .args(["-c", what])
                 .env("TMPDIR", tmp)
                 .output()
@@ -2631,7 +2631,7 @@ mod tests {
             let tmp = at.join(format!("tmp-{k}"));
             std::fs::create_dir_all(&tmp).unwrap();
             let run = |line: &str| {
-                let out = std::process::Command::new(sh).args(["-c", line]).env("TMPDIR", &tmp).output().unwrap();
+                let out = crate::test_shell::shell(sh).args(["-c", line]).env("TMPDIR", &tmp).output().unwrap();
                 (out.status.code(), String::from_utf8_lossy(&out.stdout).to_string())
             };
             for (dialect, word) in [(Dialect::Codex, "codex"), (Dialect::Antigravity, "antigravity")] {
@@ -2945,7 +2945,7 @@ mod tests {
     fn shells() -> Vec<&'static str> {
         let found: Vec<&str> = ["sh", "bash", "dash"]
             .into_iter()
-            .filter(|s| std::process::Command::new(s).args(["-c", "exit 0"]).output().is_ok())
+            .filter(|s| crate::test_shell::shell(s).args(["-c", "exit 0"]).output().is_ok())
             .collect();
         assert!(!found.is_empty(), "껍데기가 하나도 없다");
         found
@@ -3037,7 +3037,7 @@ mod tests {
         };
         for sh in shells() {
             let tmp = fresh();
-            let out = std::process::Command::new(sh)
+            let out = crate::test_shell::shell(sh)
                 .args(["-c", &command(&board.display().to_string(), "user-prompt-submit")])
                 .env("TMPDIR", &tmp)
                 .output()
@@ -3049,7 +3049,7 @@ mod tests {
             // **받는 쪽이 못 받으면 표식이 안 선다** — `-ec` 에서도 0 이다.
             for flags in ["-c", "-ec"] {
                 let tmp = fresh();
-                let status = std::process::Command::new(sh)
+                let status = crate::test_shell::shell(sh)
                     .args([flags, &command(&board.display().to_string(), "user-prompt-submit")])
                     .env("TMPDIR", &tmp)
                     .stdout(std::process::Stdio::from(std::fs::File::open(&board).unwrap()))
@@ -3061,7 +3061,7 @@ mod tests {
             }
 
             let tmp = fresh();
-            let out = std::process::Command::new(sh)
+            let out = crate::test_shell::shell(sh)
                 .args(["-c", &command(&linked.display().to_string(), "user-prompt-submit")])
                 .env("TMPDIR", &tmp)
                 .output()
@@ -3070,7 +3070,7 @@ mod tests {
             assert!(!tmp.join("mark").exists(), "{sh}: 링크로 선 쪽지를 읽었다");
 
             let tmp = fresh();
-            let out = std::process::Command::new(sh)
+            let out = crate::test_shell::shell(sh)
                 .args(["-c", &command(&felled.display().to_string(), "user-prompt-submit")])
                 .env("TMPDIR", &tmp)
                 .stderr(std::process::Stdio::null())
@@ -3082,7 +3082,7 @@ mod tests {
 
             for flags in ["-c", "-ec"] {
                 let tmp = fresh();
-                let out = std::process::Command::new(sh)
+                let out = crate::test_shell::shell(sh)
                     .args([flags, &command(&astray.display().to_string(), "user-prompt-submit")])
                     .env("TMPDIR", &tmp)
                     .stderr(std::process::Stdio::null())
@@ -3099,7 +3099,7 @@ mod tests {
             assert!(!bare.contains("! [ -e \"$m\" ]"), "빈 자리 확인의 글이 바뀌었다 — 이 시험이 걷을 글을 고친다");
             let tmp = fresh();
             std::fs::write(tmp.join("mark"), "x").unwrap();
-            let out = std::process::Command::new(sh).args(["-c", &bare]).env("TMPDIR", &tmp).output().unwrap();
+            let out = crate::test_shell::shell(sh).args(["-c", &bare]).env("TMPDIR", &tmp).output().unwrap();
             assert_eq!(out.status.code(), Some(0), "{sh}: 선 표식이 게이트가 됐다");
             assert_eq!(
                 std::fs::read_to_string(tmp.join("mark")).unwrap(),
@@ -3112,7 +3112,7 @@ mod tests {
             let tmp = fresh();
             if mkfifo(&tmp.join("mark")) {
                 let out = bounded({
-                    let mut cmd = std::process::Command::new(sh);
+                    let mut cmd = crate::test_shell::shell(sh);
                     cmd.args(["-c", &command(&board.display().to_string(), "user-prompt-submit")]).env("TMPDIR", &tmp);
                     cmd
                 });
@@ -3185,7 +3185,7 @@ mod tests {
             // stderr 는 버린다 — 여덟이 저마다 껍데기의 `Permission denied` 를 시험 출력에 흘린다.
             let kids: Vec<_> = (0..8)
                 .map(|_| {
-                    std::process::Command::new(sh)
+                    crate::test_shell::shell(sh)
                         .args(["-c", &line])
                         .env("TMPDIR", &race)
                         .env("CLAUDE_CODE_SESSION_ID", "race")
@@ -3209,7 +3209,7 @@ mod tests {
             std::fs::write(&mine, "keep").unwrap();
             std::os::unix::fs::symlink(&mine, &mark).unwrap();
             for _ in 0..2 {
-                let out = std::process::Command::new(sh)
+                let out = crate::test_shell::shell(sh)
                     .args(["-c", &line])
                     .env("TMPDIR", &squat)
                     .env("CLAUDE_CODE_SESSION_ID", "squat")
@@ -3231,7 +3231,7 @@ mod tests {
             std::fs::create_dir_all(&held).unwrap();
             let own = mark_in(&held, "held");
             std::fs::write(&own, "x").unwrap();
-            let out = std::process::Command::new(sh)
+            let out = crate::test_shell::shell(sh)
                 .args(["-c", &bare])
                 .env("TMPDIR", &held)
                 .env("CLAUDE_CODE_SESSION_ID", "held")
@@ -3250,7 +3250,7 @@ mod tests {
                 std::os::unix::fs::symlink(&fifo, mark_in(&piped, "linked")).unwrap();
                 for session in ["fifo", "linked"] {
                     let out = bounded({
-                        let mut cmd = std::process::Command::new(sh);
+                        let mut cmd = crate::test_shell::shell(sh);
                         cmd.args(["-c", &line]).env("TMPDIR", &piped).env("CLAUDE_CODE_SESSION_ID", session);
                         cmd
                     });

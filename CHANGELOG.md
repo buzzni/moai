@@ -33,6 +33,13 @@ does not tag — see `CONTRIBUTING.md`.
 
 ### Fixed
 
+- `moai web` briefly drains a delayed request before closing a busy connection,
+  so a client can receive the 503 response without a broken pipe while sending
+  its request. The response ends immediately; at most four background drainers
+  wait up to 200ms each, keeping silent clients off the accept loop. When all
+  drainers are busy, further overflow connections close immediately.
+  (moai-n8po.7e1)
+
 - **Skill shell commands keep repository paths together.** Supervisor, worker
   and recovery commands quote paths with spaces. A path holding `"`, `$`, a
   backtick or `\` (a Windows path's separators aside) is handed to the person
