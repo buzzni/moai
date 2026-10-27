@@ -2132,7 +2132,7 @@ fn header(f: &mut Frame, app: &mut App, at: Rect) -> (bool, bool) {
 /// 돌려주고, [`screen`] 이 그것을 `App::spun` 에 함께 센다 — 안 세면 루프가 빠른 걸음으로 안
 /// 깨어나 빛이 멈춘다. **여기서 `app.spun` 을 켜 봐야 소용없다**: 다 그린 뒤 버퍼를 훑는
 /// `app.spun = spinner_on(…)` 이 그 위에 덮어쓴다. 목록의 빛은 곁의 스피너 글리프가 버퍼에
-/// 남아 대신 말해 주지만, 헤더에는 그 글리프가 없어 빛만으로는 읽히지 않는다.
+/// 남아 대신 말해 주지만, 헤더는 별도로 이 값을 돌려준다. 선 자리는 `▸` 로도 표시해 빛이 쉬거나 색이 없어도 읽힌다.
 fn with_projects<'a>(
     app: &App,
     mut lines: Vec<Line<'a>>,
@@ -2165,7 +2165,13 @@ fn with_projects<'a>(
         let pad = at.saturating_sub(spans_width(&lines[row].spans));
         lines[row].spans.push(Span::raw(" ".repeat(pad)));
         // 번호는 SPC 메뉴의 키와 같은 색으로 잘 보이게 둔다(사용자 결정) — 키라는 것이 색으로도 읽힌다.
-        lines[row].spans.push(Span::styled(tag.key.clone(), Style::new().fg(MENU_KEY)));
+        let mut key = tag.key.clone();
+        if here == Some(n) {
+            // 마지막 공백 한 칸을 바꾼다 — 번호 없는 열째부터도 폭은 그대로다.
+            key.pop();
+            key.push('▸');
+        }
+        lines[row].spans.push(Span::styled(key, Style::new().fg(MENU_KEY)));
         if here == Some(n) {
             glinted = true;
             lines[row].spans.extend(shimmer(tag.name.clone(), app.spin));
@@ -8837,7 +8843,7 @@ pub(super) mod tests {
         };
         let rows = head(&mut a, 80);
         let all = rows.join("\n");
-        assert!(all.contains("<0> all") && all.contains("<1> moai-supervise"), "못 물은 줄이 번호를 밀어냈다\n{all}");
+        assert!(all.contains("<0>▸all") && all.contains("<1> moai-supervise"), "못 물은 줄이 번호를 밀어냈다\n{all}");
         let version = at(&rows, &format!("Version : {mine} · latest not checked (no network)")).expect(&all);
         let folded = at(&rows, tail).unwrap_or_else(|| panic!("들은 때가 잘렸다\n{all}"));
         assert_eq!(folded, version + 1, "꼬리가 판 줄 바로 아래가 아니다\n{all}");
@@ -9394,7 +9400,7 @@ pub(super) mod tests {
             At::Project("/w/one".into()),
         ));
         let head = render(&mut a, 70, 24)[..6].join("\n");
-        assert!(head.contains("<0> 전체") && head.contains("<1> one"), "긴 이름 하나가 남의 번호까지 지웠다\n{head}");
+        assert!(head.contains("<0> 전체") && head.contains("<1>▸one"), "긴 이름 하나가 남의 번호까지 지웠다\n{head}");
 
         // **차례가 바뀌어도 같다**(리뷰). 안 드는 덩이에서 걸음을 멈추면 같은 열의 **뒤에** 선
         // 짧은 이름까지 함께 사라진다 — 한 열의 여섯 줄은 같은 칸에서 시작하므로, 앞 줄이 못
@@ -9404,7 +9410,7 @@ pub(super) mod tests {
             At::Project("/w/one".into()),
         ));
         let head = render(&mut a, 70, 24)[..6].join("\n");
-        assert!(head.contains("<0> 전체") && head.contains("<2> one"), "긴 이름이 뒤에 선 번호까지 지웠다\n{head}");
+        assert!(head.contains("<0> 전체") && head.contains("<2>▸one"), "긴 이름이 뒤에 선 번호까지 지웠다\n{head}");
     }
 
     /// **파이프 오른쪽 셋째 칸은 번호 붙은 프로젝트다**(moai-mr83) — `<0>` 은 전체(층),
@@ -9416,8 +9422,8 @@ pub(super) mod tests {
         let lines = render(&mut a, 120, 24);
         let head = lines[..6].join("\n");
         assert!(head.contains("<0> 전체"), "전체가 없다\n{head}");
-        for (n, name) in [(1, "one"), (2, "bare"), (3, "gone")] {
-            assert!(head.contains(&format!("<{n}> {name}")), "{n}번이 없다\n{head}");
+        for want in ["<1>▸one", "<2> bare", "<3> gone"] {
+            assert!(head.contains(want), "{want} 가 없다\n{head}");
         }
         assert!(a.spun, "선 프로젝트가 안 빛난다 — 루프가 헤더를 안 깨운다");
     }
@@ -9439,6 +9445,14 @@ pub(super) mod tests {
         assert!(head.contains("<9> p9"), "아홉째에 번호가 없다\n{head}");
         assert!(!head.contains("<10>"), "열째에 번호를 줬다\n{head}");
         assert!(head.contains("p10"), "번호 없는 프로젝트가 아예 사라졌다\n{head}");
+        assert!(head.contains("<0>▸전체"), "층의 현재 표시가 없다\n{head}");
+        a.layer = Some(super::super::layer::fake(
+            places.iter().map(|(n, p, _)| (n.as_str(), p.as_str(), shut())).collect(),
+            At::Project("/w/p10".into()),
+        ));
+        let head = render(&mut a, 160, 24)[..6].join("\n");
+        assert!(head.contains(&format!("{}▸p10", " ".repeat(NO_NUMBER_W - 1))), "{head}");
+        assert!(!head.contains("<0>▸"), "{head}");
     }
 
     /// **헤더의 빛은 혼자서도 루프를 깨운다**(리뷰). 목록의 빛은 곁의 스피너 글리프가
@@ -9453,8 +9467,8 @@ pub(super) mod tests {
         a.site.index = crate::nav::Index::of(&[]);
         a.site.keep.clear();
         let lines = render(&mut a, 120, 24);
-        assert!(lines[..6].join("\n").contains("<1> one"), "{:?}", &lines[..6]);
-        assert!(!lines.iter().any(|l| l.contains('▸')), "도는 줄이 남아 시험이 헛돈다");
+        assert!(lines[..6].join("\n").contains("<1>▸one"), "{:?}", &lines[..6]);
+        assert!(!lines[6..].iter().any(|l| l.contains('▸')), "도는 줄이 남아 시험이 헛돈다");
         assert!(a.spun, "헤더의 빛이 혼자면 루프를 안 깨운다 — 빛이 그 자리에서 멈춘다");
     }
 
@@ -10507,6 +10521,23 @@ pub(super) mod tests {
         assert!(a.chord.held().is_empty(), "SPC 뒤의 Esc 가 기다림을 안 걷었다");
         a.hit("SPC ?");
         assert!(a.help.is_none(), "SPC 뒤의 `?` 가 창을 안 닫았다");
+    }
+
+    #[test]
+    fn a_paste_over_the_help_sheet_keeps_the_chord_and_notice() {
+        let mut a = app();
+        a.hit("?");
+        render(&mut a, 80, 20);
+        a.notice = Some("kept".into());
+        a.hit("SPC");
+        let held = a.chord.held().to_vec();
+        assert!(!held.is_empty());
+        a.paste("x");
+        assert!(a.help.is_some());
+        assert_eq!(a.chord.held(), held);
+        assert_eq!(a.notice.as_deref(), Some("kept"));
+        a.hit("j");
+        assert_eq!(a.help.as_ref().unwrap().top, 1);
     }
 
     /// **80칸에서 바의 키가 하나도 안 떨어진다** — 옮긴 키가 빠져 자리가 났다(moai-7sjm). 상세

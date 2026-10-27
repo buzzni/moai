@@ -58,13 +58,15 @@ pub fn at_form(start: Option<&str>, due: Option<&str>) -> Option<String> {
 
 /// 끝 낱말이 날짜 자리인가 — `@` 뒤가 숫자다. 읽는 자와 되뽑는 자가 이 하나로 가른다.
 ///
+/// 전각 숫자로 시작하는 낱말도 날짜 자리로 본다 — 날짜로 풀지 못하면 제목에 남기지 않고 거절한다.
+///
 /// **`@~숫자…` 도 날짜 자리다**(moai-xf0p.due 리뷰) — 시작 자리를 비운 꼴은 받지 않지만, 날짜 자리로 안 보면 그
 /// 낱말이 말없이 제목에 남아 기한만 적으려던 줄이 기한 없이 만들어진다(종료 0). 날짜 자리로 보면 [`split_parts`] 가
 /// 빈 시작을 꼴 틀림으로 줄 번호와 거절하고, 그 글자를 제목으로 쓰려면 다른 날짜 낱말처럼 `\@~…` 로 적는다.
 fn is_due_word(w: &str) -> bool {
     w.strip_prefix('@')
         .map(|d| d.strip_prefix('~').unwrap_or(d))
-        .is_some_and(|d| d.starts_with(|c: char| c.is_ascii_digit()))
+        .is_some_and(|d| d.starts_with(|c: char| c.is_ascii_digit() || ('０'..='９').contains(&c)))
 }
 
 /// 떼어 낸 한 줄 — 제목·우선순위·태그·기한·시작.
@@ -535,6 +537,20 @@ mod tests {
         let mut tail = issue("마감 @2026", Kind::Issue, None, &[]);
         tail.due_on = None;
         assert_eq!(parse(&render(&epic, &[&tail])).unwrap()[1].title, "마감 @2026");
+    }
+
+    #[test]
+    fn fullwidth_digits_start_a_date_word_and_can_be_escaped_in_titles() {
+        for word in ["@２０２６-10-30", "@２026-10-30", "@~２０２６-10-30", "@２０２６-10-25~2026-10-30"] {
+            let err = parse(&format!("# epic\n- task {word}\n")).unwrap_err();
+            assert!(err.contains("2줄") && err.contains(word), "{err}");
+            let parsed = one(&format!("# epic\n- task \\{word}\n"));
+            assert_eq!(parsed[1].title, format!("task {word}"));
+            assert!(parsed[1].due.is_none() && parsed[1].start.is_none());
+            let epic = issue("epic", Kind::Epic, None, &[]);
+            let task = issue(&format!("task {word}"), Kind::Issue, None, &[]);
+            assert_eq!(one(&render(&epic, &[&task]))[1].title, task.title);
+        }
     }
 
     /// **`@` 는 시작~기한 꼴도 받는다**(moai-xf0p.due) — `@시작~기한`, `@시작~`(시작만), `@기한`(전처럼). 에픽 줄과

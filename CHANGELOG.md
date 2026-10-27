@@ -21,6 +21,13 @@ does not tag — see `CONTRIBUTING.md`.
 
 ### Changed
 
+- Deferred ancestors, including ancestors under a deferred group, no longer cap
+  a descendant's planned dates, and `moai due apply` no longer raises a row by
+  their deadlines. Restoring them restores their deadline ceilings; rows that now
+  pass one stand as `due_beyond_parent` on `moai status`.
+  Plan words beginning with `@` and a fullwidth digit are treated as dates and
+  rejected with a line number unless escaped as title text. (moai-lj8g.qrb)
+
 - **Open web tabs follow theme and time zone choices made in another tab.**
   Each keeps its current tab, layout and query. (moai-ijjd.46f)
 
@@ -37,6 +44,24 @@ does not tag — see `CONTRIBUTING.md`.
   with their command and UTC time, and older crashes, so the person can ask
   one back even after a cancelled picker or a resume that died before writing
   a line. (moai-1m21.hxm)
+
+- The explorer header marks the current project with `▸`, so its position stays
+  visible without colour or shimmer. (moai-lj8g.wxt)
+
+- Invalid `--due` and `--start` values mention the accepted `+N` form. The board's
+  `due_beyond_parent` preview shows the row's dates and the ancestor deadline
+  they exceed. (moai-lj8g.qrb)
+
+- The board's `wip_overload` line says an epic counts as one bundle, explaining
+  why the count can be smaller than the list of picked-up rows. (moai-lj8g.vnc)
+
+- The explorer opens the key list over the stats and wiki windows with `?` or
+  a custom help key. Pasting over the list preserves pending keys and notices,
+  and `moai tui --help` names the configured menu keys and explains that the
+  quit key closes the list. (moai-lj8g.oln)
+
+- `moai tui --help` describes both explorer writes: parking a thought and
+  moving a plan on the Gantt. (moai-lj8g.w3a)
 
 - `moai show --fields` keeps the order of keys inside the values it keeps.
   Nested objects such as `journal`, `work`, `commits` and `wiki` previously

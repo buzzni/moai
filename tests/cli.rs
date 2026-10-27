@@ -10689,6 +10689,47 @@ fn a_deadline_cannot_pass_its_ancestors() {
     add(s.path(), &["기한 없음", "-e", &e]);
 }
 
+#[test]
+fn deferred_deadline_ceilings_release_writes_and_return_on_restore() {
+    let s = init("duedeferred");
+    let m = add(s.path(), &["release", "--type", "milestone", "--due", "2026-10-20"]);
+    let e = add(s.path(), &["epic", "--type", "epic", "--milestone", &m, "--due", "2026-10-19"]);
+    let p = add(s.path(), &["parent", "--parent", &e, "--due", "2026-10-18"]);
+    ok(s.path(), &["defer", &m, "-m", "later"]);
+    ok(s.path(), &["edit", &p, "--start", "2026-10-25", "--due", "2026-10-30"]);
+    let child = add(s.path(), &["child", "--parent", &p, "--due", "2026-10-31"]);
+    let plan = "# new epic @2026-10-30\n- new task\n";
+    for extra in [vec!["--dry-run"], vec![]] {
+        let mut args = vec!["add", "--from", "-", "--milestone", &m];
+        args.extend(extra);
+        let out = from_stdin(s.path(), &args, plan);
+        assert!(out.status.success(), "{}", text(&out));
+    }
+    assert!(!ok(s.path(), &["status", "--json"]).contains("due_beyond_parent"));
+    ok(s.path(), &["defer", &m, "--undo"]);
+    let board = ok(s.path(), &["status"]);
+    assert!(board.contains("2026-10-25~2026-10-30") && board.contains("2026-10-20"), "{board}");
+    assert!(board.contains(&p) && board.contains(&child), "{board}");
+    let saved = issues(s.path());
+    let out = moai(s.path(), &["edit", &p, "--due", "2026-10-29"]);
+    assert!(!out.status.success(), "restored ceiling did not refuse the write");
+    assert_eq!(issues(s.path()), saved, "refused write changed the snapshot");
+}
+
+#[test]
+fn fullwidth_plan_dates_are_refused_before_any_write() {
+    let s = init("duefullwidth");
+    let before = issues(s.path());
+    let out = from_stdin(s.path(), &["add", "--from", "-"], "# epic\n- task @２０２６-10-30\n");
+    assert!(!out.status.success());
+    let said = String::from_utf8_lossy(&out.stderr);
+    assert!(said.contains("2줄") && said.contains("@２０２６-10-30"), "{said}");
+    assert_eq!(issues(s.path()), before);
+    let out = moai(s.path(), &["add", "bad start", "--start", "+3d"]);
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("+N"), "{}", text(&out));
+}
+
 /// **조상을 당긴 쓰기는 자식을 안 막는다**(moai-ghkp.cb3) — 자식은 남의 줄이다. 쓰기 뒤에 stderr 한
 /// 줄로 넘친 줄을 대고, `status` 가 `due_beyond_parent` 로 비춘다. 경고는 종료 코드를 안 바꾼다.
 #[test]
@@ -10710,7 +10751,11 @@ fn pulling_a_parent_deadline_in_warns_about_the_children() {
     assert!(out.status.success(), "경고가 종료 코드를 바꿨다");
     let board = String::from_utf8_lossy(&out.stdout).to_string();
     assert!(board.contains("due_beyond_parent") && board.contains(&i), "{board}");
-    assert!(ok(s.path(), &["status"]).contains(&i), "보드가 넘친 줄을 안 댄다");
+    let preview = ok(s.path(), &["status"]);
+    assert!(preview.contains(&i) && preview.contains("2026-09-28") && preview.contains("2026-09-20"), "{preview}");
+    let json: serde_json::Value = serde_json::from_str(&board).unwrap();
+    let warning = json["warnings"].as_array().unwrap().iter().find(|w| w["kind"] == "due_beyond_parent").unwrap();
+    assert!(warning.get("ceilings").is_none(), "{warning}");
 
     // **에픽을 더 이른 마일스톤으로 옮겨도** 멤버가 넘치면 그 쓰기가 댄다 — 천장은 에픽이 아니라 마일스톤이다.
     ok(s.path(), &["edit", &i, "--due", "2026-09-20"]);
@@ -11000,9 +11045,10 @@ fn a_relative_deadline_is_stored_as_a_day() {
         assert!(line_of(s.path(), &id).contains(r#""due_on":"2026-09-12""#), "{}", line_of(s.path(), &id));
     }
 
-    for bad in ["+", "+x", "++3", "+-1"] {
+    for bad in ["+", "+x", "++3", "+-1", "+3d"] {
         let out = moai(s.path(), &["edit", &id, "--due", bad]);
         assert!(!out.status.success(), "{bad} 를 날짜로 받았다");
+        assert!(String::from_utf8_lossy(&out.stderr).contains("+N"), "{}", text(&out));
     }
     // **네 자리 해를 넘는 날은 친 글 그대로 거절한다**(리뷰) — 날수로 상한을 박던 판은 다섯 자리 해를 지어, 거절문이
     // 사람이 안 친 날을 댔다.
@@ -13237,6 +13283,19 @@ fn what_came_from_what_lives_in_the_journal() {
     let shown = ok(s.path(), &["show", &id]);
     assert!(shown.contains(&epic), "이력이 무엇이 나왔는지 안 말한다 — {shown}");
     assert!(!line_of(s.path(), &id).contains("spawned"), "파생값을 줄에 적었다");
+    // guide::REPORT_WATCH reserves this colon for the Codex worker, not tool-generated history.
+    // The watch reads `kind == "note"` entries and their `text`; count what it would read so the
+    // loop cannot pass by finding nothing (the epic's `Unfolded from` note must be among them).
+    let mut unfolded = 0;
+    for row_id in [&id, &epic] {
+        let row: serde_json::Value = serde_json::from_str(&ok(s.path(), &["show", row_id, "--json"])).unwrap();
+        for note in row["journal"].as_array().unwrap().iter().filter(|n| n["kind"] == "note") {
+            let head = note["text"].as_str().unwrap_or_default().lines().next().unwrap_or_default();
+            assert!(!head.starts_with("Unfolded:"), "tool history looks like a worker report: {note}");
+            unfolded += usize::from(head.starts_with("Unfolded"));
+        }
+    }
+    assert!(unfolded > 0, "no tool-written `Unfolded` note was read — the guard above checked nothing");
 }
 
 /// `--dry-run` 은 아무것도 만들지 않는다. AI 가 펼친 안을 사람이 한 번 보고
@@ -16740,6 +16799,8 @@ fn picking_up_a_whole_epic_is_not_started_at_once() {
     let board: serde_json::Value = serde_json::from_str(&ok(s.path(), &["status", "--json"])).unwrap();
     let w = board["warnings"].as_array().unwrap().iter().find(|w| w["kind"] == "wip_overload").expect("경고가 없다");
     assert_eq!((w["count"].as_u64(), w["ids"].as_array().unwrap().len()), (Some(5), 8), "{w}");
+    let board = ok(s.path(), &["status"]);
+    assert!(board.contains("5묶음") && board.contains("에픽은 하나로"), "{board}");
 }
 
 /// `SessionStart` 는 아무것도 싣지 않고 기준선만 적는다.
