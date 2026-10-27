@@ -181,8 +181,8 @@ and wait on each other to merge.
 - **Claude Code does not enter it.** Every `EnterWorktree` into `.worktrees/`
   asks the person to approve it, and no allow rule turns that off, so a Claude
   session — a worker or a person's own — stays in the root and reaches the
-  worktree by absolute path (`git -C <root>/.worktrees/<epic> …`, absolute paths
-  for every file edit, and `(cd <root>/.worktrees/<epic> && …)` for a tool that
+  worktree by absolute path (`git -C "<root>/.worktrees/<epic>" …`, absolute paths
+  for every file edit, and `(cd "<root>/.worktrees/<epic>" && …)` for a tool that
   needs the directory) (moai-9js2). The parentheses matter in a session: its
   shell keeps a `cd` into the next call, while a subagent's starts in the root
   again every time. The hook's rule 2 takes over part of the isolation guard it
@@ -330,4 +330,4 @@ where its contributors read them rather than repeated here:
   broken data, the same as a broken line in `issues.jsonl` — see [An archive file
   cannot be read](recovery.md#an-archive-file-cannot-be-read)
 
-Decided in: moai-0zjo moai-40ht moai-bx6t moai-9793 moai-ug3j moai-gelm moai-tllo moai-snyk moai-zynt moai-j9nf moai-jtvp moai-fx9t moai-bth3 moai-r0x8 moai-9tqo moai-g8pt moai-lj8g
+Decided in: moai-0zjo moai-40ht moai-bx6t moai-9793 moai-ug3j moai-gelm moai-tllo moai-snyk moai-zynt moai-j9nf moai-jtvp moai-fx9t moai-bth3 moai-r0x8 moai-9tqo moai-g8pt moai-lj8g moai-1m21

@@ -382,7 +382,15 @@ commit is where they go into history"#;
 /// 뿌리 밑 어디서든 위로 걸어 올라가니 감독이 하위 디렉터리에 설 수 있고, 거기서 맨 상대 경로는 추적되는 트래커를
 /// "git 밖" 으로 읽어 모든 트래커 커밋을 건너뛴다. 감독과 일꾼이 **같은 줄**을 싣는다 — 한쪽만 건너뛰면 감독의 라운드 끝
 /// 커밋이나 일꾼의 닫기 커밋 하나가 진다.
-const TRACKER_IN_GIT: &str = "git -C <root> ls-files --error-unmatch -- .moai/issues.jsonl";
+const TRACKER_IN_GIT: &str = "git -C \"<root>\" ls-files --error-unmatch -- .moai/issues.jsonl";
+
+/// 셸에 채울 경로의 규칙은 감독과 되살리기가 같은 글로 싣는다(moai-1m21.cqb).
+const PATH_QUOTES: &str = r##"`<root>` and `<cwd>` stand in double quotes on every shell line here, so a path with a
+space stays one word. Double quotes still read `"`, `$`, a backtick and `\`: a path holding
+any of them is not one these lines can carry — build none, and tell the person which path
+it is. A Windows path (`C:\Users\…`) is the one exception for `\`: double quotes keep a
+single `\` between two names as it is. Inside cmux's `--command '…'` the path sits inside
+single quotes as well: write each `'` in it as `'\''` there."##;
 
 /// 그 답을 일꾼이 어떻게 읽는가 — "Before the steps" 에 한 번 선다. **한 걸음의 커밋에 매지 않는다**(리뷰 moai-nzmp.nfj) —
 /// 그때는 2 가 집기를 커밋해 `from "Carrying on stalled work"` 로 든 일꾼은 2 를 안 지나 묻지 않은 채 8·10 의 커밋에서
@@ -421,14 +429,14 @@ const STAY_IN_ROOT: &str = r#"## Stay in the root
 **Never call `EnterWorktree` — in a session or in a subagent.** Every call into `.worktrees/`
 asks the person watching to approve it, and no allow rule turns that off; a subagent has no
 such tool at all. You stay in the root, so where a step goes into the worktree, aim at it
-instead: `cd <root>/.worktrees/<epic> && …` or `git -C <root>/.worktrees/<epic> …`, and every
+instead: `cd "<root>/.worktrees/<epic>" && …` or `git -C "<root>/.worktrees/<epic>" …`, and every
 Read and Edit takes an absolute path under it. That holds for resolving a conflict too.
 
 **Only a subagent's Bash starts in the root again on every call. A session's shell stays
 wherever a `cd` left it**, so in a session put that `cd` in parentheses —
-`(cd <root>/.worktrees/<epic> && …)` — and the shell itself never leaves the root. Where a
+`(cd "<root>/.worktrees/<epic>" && …)` — and the shell itself never leaves the root. Where a
 step says you are back in the root, you are there only if it never left: if a session's
-shell did stay in the worktree, `cd <root>` before the step. The branch check, the merge,
+shell did stay in the worktree, `cd "<root>"` before the step. The branch check, the merge,
 removing the worktree and the tracker commit all run in the root — merged from inside the
 worktree, the merge says "Already up to date" and lands nothing, and a shell standing in the
 worktree you remove is left in a directory that is gone.
@@ -440,7 +448,7 @@ what you hold stands in several — write in the one your work is in). Write the
 never work around it.
 
 A window that already stands inside a worktree comes out first, as "The assignment" says —
-`ExitWorktree(keep)` if this session went in with `EnterWorktree`, `cd <root>` if a `cd`
+`ExitWorktree(keep)` if this session went in with `EnterWorktree`, `cd "<root>"` if a `cd`
 took it there (`ExitWorktree` does nothing then)."#;
 
 /// 밖의 backlog 를 도는 마일스톤 안으로 들이는 한 줄(moai-6qgz). 감독의 1 과 일꾼의 1 이 **같은 줄**을
@@ -468,7 +476,7 @@ const MILESTONE_FROM: &str = "the release `moai show --milestone` stands that ba
 ///
 /// **절대 경로로 겨눈다**(moai-9js2) — 일꾼은 워크트리에 들지 않고 루트에 서므로([`STAY_IN_ROOT`]), Bash 마다
 /// 워크트리 안의 그 하위를 `cd` 로 겨눈 뒤 명령을 잇는다.
-const SUBDIR: &str = "cd <root>/.worktrees/<epic>/<subdir> && …";
+const SUBDIR: &str = "cd \"<root>/.worktrees/<epic>/<subdir>\" && …";
 
 /// **`moai read` 는 여기에 안 든다**(사용자 결정 2026-09-18, `moai-ha5d`). 이 저장소의 에이전트는
 /// 사람과 같은 git 신원·HOME 으로 돌아 사람의 `[read]` 표를 같이 쓴다 — 브리프가 `moai read --all`
@@ -2497,8 +2505,16 @@ root = os.path.realpath(os.path.join(sys.argv[1], os.path.relpath(here, top)))
 print("root dir", root)
 if os.path.relpath(here, top) != ".":
     print("subdir", os.path.relpath(here, top))
+unsafe = ['"', '$', chr(96)] + ([] if os.sep == chr(92) else [chr(92)])
+if any(c in root for c in unsafe) or chr(92) * 2 in root or root.endswith(chr(92)):
+    print("unquotable root", root)
 PY
 ```
+
+{PATH_QUOTES}
+
+If `unquotable root` is printed, stop this round and tell the person that path. Send no
+assignment with that `Root:`; the person handles its quoting.
 
 **2-1. Pick the role, then read its model.** Each backlog goes to one role, and that role's
 model and effort come from the `moai models --json` you read at the start of the round.
@@ -3045,10 +3061,20 @@ PY"##;
 /// - **비운 뒤 10초 안의 움직임은 비운 것의 일부다.** 도는 턴이나 허락 창 위에서 `/clear` 를 치면 Claude Code 가 A 에
 ///   `[Request interrupted by user for tool use]` 와 거절된 `tool_result` 를 적는데, 그 `timestamp` 가 `history.jsonl` 의
 ///   `/clear` 보다 늦다(2026-10-26 에 잰 `/clear` id 299개 중 하나, `f59364af` 가 0.58초 뒤). 그대로 견주면 그 대화가
-///   비운 뒤 움직인 것으로 읽혀 후보로 남는다. 되돌아온 대화는 `/resume` 과 새 입력이 들어야 움직이니 10초 안에 못 선다
+///   비운 뒤 움직인 것으로 읽혀 후보로 남는다. 10초 창은 그대로 두고, 빠른 재개의 오판은 아래 사유 줄로 사람이 되돌린다.
+///
+/// **`/resume`·`/continue` 로 떠난 대화도 같다**(moai-1m21.hxm, moai-jn8d.msb 5·6번). 2026-10-27 에
+/// `history.jsonl` 2,786줄 중 `/resume` 은 다섯, `/continue` 는 없었다. 다섯 다 떠난 쪽 id 를 들고, 다음 입력은 같은
+/// 프로젝트의 이미 있던 다른 대화 id 로 섰다. 남은 대화 기록 2,953개에는 `/resume` 명령 줄이 없었다. 2.1.310 의
+/// 정의는 `name:"resume"`, `aliases:["continue"]`, 인자는 id 나 검색어다 — 첫 낱말로 맞춘다.
+///
+/// 고르기 창을 취소한 판은 재지 못했다. 입력할 때 남는 `/resume` 뒤 한 줄도 못 쓰고 죽으면 떠난 것으로 읽힐 수 있다.
+/// 또 `/clear` 뒤 일부러 되살린 대화도 한 줄 쓰기 전에 죽으면 같은 꼴이다. 그래서 뺀 id 를 명령·UTC 때와 함께 내고,
+/// 스킬은 표 밑에서 이름을 부른다 — 사람이 짚으면 되살린다. `updatedAt` 을 [`SESSIONS`] 의 여덟째 칸으로 내면 뒤의
+/// 판을 가르지만 네 스킬의 일곱 칸 계약을 바꾸므로 쓰지 않는다. 기록 읽기는 그 짝 하나, 10초 창도 그대로다.
 pub const CLEARED: &str = r##"python3 - <sessionId> … <<'PY'
 import glob, json, os, sys
-from datetime import datetime
+from datetime import datetime, timezone
 wanted = set(sys.argv[1:])
 cleared = {}
 try:
@@ -3056,8 +3082,11 @@ try:
         for line in f:
             try:
                 h = json.loads(line)
-                if str(h.get("display", "")).split()[:1] in (["/clear"], ["/new"], ["/reset"]) and h.get("sessionId") in wanted:
-                    cleared[h["sessionId"]] = max(cleared.get(h["sessionId"], 0), int(h["timestamp"]))
+                words = str(h.get("display", "")).split()
+                if words and words[0] in ("/clear", "/new", "/reset", "/resume", "/continue") and h.get("sessionId") in wanted:
+                    sid, stamp = h["sessionId"], int(h["timestamp"])
+                    if sid not in cleared or stamp > cleared[sid][0]:
+                        cleared[sid] = (stamp, words[0])
             except (ValueError, KeyError, TypeError, AttributeError):
                 continue
 except OSError:
@@ -3082,8 +3111,13 @@ def moved(sid):
         return 0
     return datetime.fromisoformat(last.replace("Z", "+00:00")).timestamp() * 1000
 for sid in sorted(cleared):
-    if cleared[sid] + 10000 > moved(sid):
-        print(sid)
+    stamp, command = cleared[sid]
+    if stamp + 10000 > moved(sid):
+        try:
+            when = datetime.fromtimestamp(stamp / 1000, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        except (OverflowError, OSError, ValueError):
+            when = str(stamp)
+        print(f"{sid}\t{command}\t{when}")
 PY"##;
 
 /// **빈 입력 칸의 잣대는 이 글 하나다.** `moai-tmux` 와 `moai-recover` 가 `format!` 으로 같은 글을 싣는다 —
@@ -3120,6 +3154,23 @@ box counts only while the session map, run again just before, still reads that s
 Code that was killed keeps its last frame, box and all, above the shell it ran in, the second
 value stays `0`, and the keys go to that shell.";
 
+/// 칸 여는 조리법은 하나다(moai-jn8d.d79 13번). 경합 고침(2번)이 세 자리에 들었으므로
+/// 다음 고침도 함께 가게 한다. the_tmux_skill_touches_only_named_panes 등이 내는 줄을 글자째 잰다.
+fn open_pane(dir: &str, program: &str) -> String {
+    format!(
+        r#"    tmux split-window -P -F '#{{pane_id}}' -t "$TMUX_PANE" -c "{dir}" '{program}' \; set-option -p remain-on-exit on
+    tmux select-layout -t "$TMUX_PANE" tiled"#
+    )
+}
+
+const KEPT_PANE: &str = r#"The first line prints the new pane's id (`%N`), the `<pane>` below. The `set-option` after
+`\;` runs in the same tmux call, on the new pane, before the program can exit — set in a call
+of its own, a program that ended at once would have taken its pane, and what it said, with it.
+`remain-on-exit` keeps the pane when the program exits: its last screen stays readable,
+`#{pane_dead}` reads `1`, and tmux refuses pastes aimed at it and drops keys — nothing you send
+lands in a shell under a dead session, though `send-keys` still exits `0`. A dead pane stays
+until the person closes it; never kill it."#;
+
 /// Codex 일꾼의 모델·리뷰·멈춤 규약은 한 글이다(moai-uzhx.2mq). cmux 와 tmux 가
 /// `format!` 으로 그대로 싣는다 — 자리마다 다른 명령은 각 절에 남긴다.
 const CODEX_WORKER_RULES: &str = r#"### Model
@@ -3139,7 +3190,7 @@ Codex tests and commits its work, writes `Review-ready:` as an epic note, and st
 It waits for the supervisor's review and the second assignment; it does not review itself.
 
 When `Review-ready:` arrives, read its whole note. Pick the review issue up
-(`moai -C <root> mv <review id> in_progress`) and run a review subagent in the reported
+(`moai -C "<root>" mv <review id> in_progress`) and run a review subagent in the reported
 worktree with its configured `review` model and "The review brief" in
 `references/worker-branches.md`; refer to that brief, do not copy it here. Once the review has ended and its words are on the review issue, send
 "merge and close — review <id> done" with the same file-paste path and fresh input checks.
@@ -3174,6 +3225,8 @@ the person's words. Labels do not grant permission to type."#;
 ///
 /// Claude Code 에만 심는다([`crate::skill::Skill::claude_only`]) — 감독 스킬과 같은 까닭이다.
 pub fn tmux() -> String {
+    let open_claude = open_pane("<root>", "claude --model <model>");
+    let open_codex = open_pane("<root>", "codex --model <codex>");
     format!(
         r#"---
 name: moai-tmux
@@ -3349,18 +3402,14 @@ When the supervisor's 2 finds no worker, ask the person **once** whether to open
 panes, and how many — one question covers several panes. Open a pane only on their yes, or
 when they asked you for it. On a yes, for each pane:
 
-    tmux split-window -P -F '#{{pane_id}}' -t "$TMUX_PANE" -c "<root>" 'claude --model <model>' \; set-option -p remain-on-exit on
-    tmux select-layout -t "$TMUX_PANE" tiled
+{open_claude}
 
 `<root>` is the `root dir` of the supervisor's 2 and `<model>` the model picked in 2-1 — keep
-the double quotes, so a path with a space stays one argument. **No other flag.** The first line
-prints the new pane's id. The `set-option` after `\;` runs in the same tmux call, on the new
-pane, before `claude` can exit — set in a call of its own, a `claude` that ended at once would
-have taken its pane, and what it said, with it. `remain-on-exit` keeps the pane when `claude`
-exits: its last screen stays readable, `#{{pane_dead}}` reads `1`, and tmux refuses pastes
-aimed at it and drops keys — nothing you send lands in a shell under a dead session, though
-`send-keys` still exits `0`. A dead pane stays until the person closes it; never kill it. The pane belongs to the same person —
-it is their interactive session like any other.
+the double quotes, so a path with a space stays one argument. **No other flag.**
+
+{KEPT_PANE}
+
+The pane belongs to the same person — it is their interactive session like any other.
 
 Once it has started (a separate call: `capture-pane` of the new pane shows the `❯` box), look
 at `ListAgents` once more. The new row is a worker like any other (the supervisor's 2) — send
@@ -3410,13 +3459,11 @@ If it prints neither value, the pane is gone: do not type.
 When no idle Codex worker is left, ask the person **once** whether to open new panes and
 how many. Open one only on their yes, or when they asked for it. On a yes:
 
-    tmux split-window -P -F '#{{pane_id}}' -t "$TMUX_PANE" -c "<root>" 'codex --model <codex>' \; set-option -p remain-on-exit on
-    tmux select-layout -t "$TMUX_PANE" tiled
+{open_codex}
 
-The first line prints the new pane id; its `set-option` lands on the new pane in the same tmux
-call, before Codex can exit. This is an ordinary interactive session; `remain-on-exit` keeps
-its final screen readable after Codex exits, and the dead pane takes no keys — tmux refuses
-pastes and drops keys. Read the new pane separately and confirm
+{KEPT_PANE}
+
+This is an ordinary interactive session. Read the new pane separately and confirm
 the live process and empty composer above. Folder trust and hook trust prompts belong to
 the person; tell them what the pane shows. Do not assume cmux's wrapper enabled or trusted
 hooks here. The person checks moai in `/hooks`; the worker keeps the five rules even when
@@ -3763,8 +3810,8 @@ pub const REPORT_WATCH: &str = r#"### Watch the epic for the Codex report
 
 Use one `Monitor` per epic, on the supervisor's side only:
 `Monitor(description: "codex report on <epic>", timeout_ms: 1800000, command: <script below>)`.
-Save the script in the scratchpad; the command is `bash <script> <root> <epic> <last-seen-ts>`.
-Before pasting the assignment, read `moai -C <root> show <epic> --json` once and save the
+Save the script in the scratchpad; the command is `bash "<script>" "<root>" <epic> <last-seen-ts>`.
+Before pasting the assignment, read `moai -C "<root>" show <epic> --json` once and save the
 latest `journal[].ts` as `<last-seen-ts>` (an empty journal uses `1970-01-01T00:00:00Z`).
 Arm the monitor with that cursor so a quick report cannot arrive between send and baseline.
 A backlog sent `from step 1` has no epic yet: watch that backlog id in `<epic>`'s place.
@@ -4114,7 +4161,8 @@ asked you for it. On a yes, for each:
     cmux --id-format both new-split right --surface "$CMUX_SURFACE_ID" --command 'cd "<root>" && claude --model <model>'
 
 `<root>` is the `root dir` of the supervisor's 2 and `<model>` the model picked in 2-1. **No
-other flag** on `claude`. It prints `OK surface:<n> (<UUID>) workspace:<n> (<UUID>)` — the first
+other flag** on `claude`. Keep the double quotes around `<root>` inside the single ones;
+write each `'` in the path as `'\''` there. It prints `OK surface:<n> (<UUID>) workspace:<n> (<UUID>)` — the first
 UUID is the new surface, the second your workspace. `--command` is typed into the new tab's
 shell, so the shell stays when `claude` exits and what it said stays readable, and the split
 does not take focus. **If cmux refuses the split** — no space for a new pane, as every split
@@ -4146,7 +4194,7 @@ Read `cmux --json --id-format both top --all` once. For each surface's `cmux_pro
 check `ps -p <pid> -o args=`: the first executable's basename must be `codex`, including a
 full path ending in `/codex`. `comm` can be truncated; host processes and temporary children
 are not the Codex session. This script prints `surface<TAB>pid<TAB>cwd` for candidates.
-Save it in the scratchpad and run `bash <script> <root>`:
+Save it in the scratchpad and run `bash "<script>" "<root>"`:
 
 ```sh
 python3 - "$1" <<'MOAI_CODEX_SURFACES'
@@ -4216,7 +4264,8 @@ Ask once before opening new tabs, as above. On a yes, open an ordinary interacti
 
     cmux --id-format both new-split right --surface "$CMUX_SURFACE_ID" --command 'cd "<root>" && codex --model <codex>'
 
-Keep the returned surface UUID. The same split refusal rule applies: stop opening and tell
+Keep the double quotes around `<root>` inside the single ones; write each `'` in the path
+as `'\''` there. Keep the returned surface UUID. The same split refusal rule applies: stop opening and tell
 the person. Read its startup screen in a separate call; folder trust, hooks trust and any
 permission prompt belong to the person. The first assignment can use a verified fresh box.
 
@@ -4304,6 +4353,7 @@ is already in the box: do not paste again. Tell the person which tab holds it un
 /// `responding` 줄이 `null` 이었다) 턴 가운데 죽은 일꾼 — OOM 의 흔한 꼴 — 은 짝이 안 지어지고, Saycode 밖에서 부른
 /// 되살리기는 `ls` 를 못 부른다. 짝으로만 가르던 판은 그 둘을 칸에서 `claude --resume` 으로 되살렸다.
 pub fn recover() -> String {
+    let open_resume = open_pane("<cwd>", "claude --resume <sessionId>");
     format!(
         r#"---
 name: moai-recover
@@ -4367,34 +4417,43 @@ leaves its record behind. The lines below print one row per record, tab-separate
   cannot tell live from dead (a sandbox that hides other processes, say). Bring nothing back;
   tell the person what it said
 - A **candidate** is a `dead` row with a `sessionId` whose `cwd` is the root or one of the
-  worktrees `git worktree list` names
+  worktrees `git worktree list` names. Two dead records with the same `sessionId` are one
+  candidate
 - **Drop it when it is back already** — a live row carries the same `sessionId` (`--resume`
   keeps the id), **your own row included**: a session the person resumed first and then asked
   for this is back already, and resuming it again puts one conversation in two windows. In a
   worktree, also drop it when a live row other than your own stands in that same `cwd`. The
   root is not such a place — several live sessions stand there at once, and one of them being
   alive says nothing about the dead one
-- **Drop it when its conversation was cleared after it died.** Another process resumed it and
-  ran `/clear` there: that process went on under a new `sessionId` and its own record carries
-  the new one, so no live row carries the old id any more — and resuming it brings back a
-  conversation already left behind. Its transcript does not say so (the `/clear` lines open the
-  new id's transcript, not the end of the old one); `~/.claude/history.jsonl` does — it logs
-  every `/clear` (and its aliases `/new` and `/reset`) under the id it cleared. Give the lines
-  below the candidates' `sessionId`s; they print the ones cleared after their transcript last
-  moved, and you drop those. The lines a `/clear` writes as it interrupts a running turn land
-  within seconds of it and do not count as moving. A conversation that moved again after its
-  `/clear` (it was resumed back) is not printed. Two dead records with the same `sessionId`
-  are one candidate
+- **Drop it when its conversation was left after it died.** Another process resumed it and
+  ran `/clear` (or `/new` or `/reset`), or moved to another conversation with `/resume`
+  (or `/continue`): that process's record carries the conversation it went to, so no live
+  row carries the old id any more. Resuming it brings back a conversation already left
+  behind. Its transcript does not say so; `~/.claude/history.jsonl` logs the command under
+  the id it left. Give the lines below the candidates' `sessionId`s; they print each id left
+  after its transcript last moved, with the command and its UTC time, tab-separated. Do not
+  resume those, but name them under the table in 2. The lines written while interrupting a
+  running turn within ten seconds of the command do not count as moving; a conversation
+  that moved again later is not printed. A `/resume` picker can be cancelled, and a
+  conversation deliberately resumed after `/clear` can die before writing a line — both
+  can look left here, so bring one back when the person names it
 
 ```sh
 {CLEARED}
 ```
 
 - **Drop old crashes.** Records of earlier deaths stay too. Keep the candidates whose
-  transcript (below) last moved around the same time; name an older one to the person apart,
-  and bring it back only if they say so
+  transcript (below) last moved around the same time; name older ones under the table in 2,
+  and bring one back only if the person says so
 - When several candidates stand in the same `cwd`, ask the person **once** — one question
   for all of them — which to bring back
+
+{PATH_QUOTES}
+
+If a candidate still standing after the drops above has a `cwd` holding any of those
+characters, build no shell line on that `cwd` — no `git -C`, `readlink` or `test -e` in 2
+and 3, no pane or tab, no line of 7. Tell the person its path and `sessionId`, so they can
+quote it by hand and bring it back themselves.
 
 **A Saycode session** comes back through Saycode (8), never in a pane — resumed in a pane, its
 conversation would run outside Saycode while the Saycode session stays ended. Its transcript
@@ -4442,13 +4501,17 @@ line — and look at where it stood:
 - **Work.** The issue or epic id it held, and what it was doing or waiting for — a report,
   a review, a person's decision, a build
 - **Died at** — the `timestamp` of its last line
-- `git -C <cwd> status --short` — what it left uncommitted. In the root, leave `.moai/` out:
+- `git -C "<cwd>" status --short` — what it left uncommitted. In the root, leave `.moai/` out:
   the supervisor's steps commit the tracker once an epic closes or a round stops, so rows wait
   there by design, and they are every session's, not this one's
 - `moai show <id>` — a `Next:` note on that id says where the session meant to go on
 
 Show the person **one table**, a row per session: role, name, `cwd`, work id, what it was
-waiting for, died at, uncommitted files — and the Saycode id of a Saycode session. Then go on — they asked for recovery already.
+waiting for, died at, uncommitted files — and the Saycode id of a Saycode session.
+Under the table, name in one line what 1 dropped as left or as an older crash — not what is
+back already: each `sessionId` and `cwd`, with the command and UTC time for a conversation
+left, or that it is an older crash. Bring one back when the person names it. Then go on —
+they asked for recovery already.
 
 ## 3. Point out what died with it
 
@@ -4464,8 +4527,8 @@ waiting for, died at, uncommitted files — and the Saycode id of a Saycode sess
 - **A broken target link.** In the root and each worktree, `target` may be a link to
   `/tmp/cargo-target/<name>`, and a restart can empty `/tmp`:
 
-      readlink <cwd>/target
-      test -e <cwd>/target || echo dangling
+      readlink "<cwd>/target"
+      test -e "<cwd>/target" || echo dangling
 
   Make the directory again, `mkdir -p /tmp/cargo-target/<name>`, so builds land there. The
   build output is gone: `./target/release/moai` needs `cargo build --release` before anything
@@ -4499,16 +4562,14 @@ supervisor's pane — or print its line — only after they say that worker is b
 the window of `$TMUX_PANE` — inside a session Saycode's daemon started, that is the daemon's
 pane, not yours — so say which window they are in:
 
-    tmux split-window -P -F '#{{pane_id}}' -t "$TMUX_PANE" -c "<cwd>" 'claude --resume <sessionId>' \; set-option -p remain-on-exit on
-    tmux select-layout -t "$TMUX_PANE" tiled
+{open_resume}
 
 **No other flag**, and keep the double quotes around `<cwd>` — a path with a space stays one
-argument. The first line prints the new pane's `%N`, the `<pane>` below. The `set-option` after
-`\;` runs in the same tmux call, on the new pane, before `claude` can exit — a `--resume` that
-fails at once (no such conversation) keeps its pane and its error.
-`remain-on-exit` keeps the pane when `claude` exits: its last screen stays, `#{{pane_dead}}`
-reads `1`, and tmux refuses pastes aimed at it and drops keys, so nothing lands in a shell. A
-dead pane stays until the person closes it; never kill it. Then, as a separate call, look once: when its `❯` box shows and is empty
+argument. A `--resume` that fails at once (no such conversation) keeps its pane and its error.
+
+{KEPT_PANE}
+
+Then, as a separate call, look once: when its `❯` box shows and is empty
 ("Is the input box empty" above), paste the block:
 
     tmux load-buffer -b moai-recover <file>
@@ -4533,7 +4594,8 @@ session (8), in that order:
 
     cmux --id-format both new-split right --surface "$CMUX_SURFACE_ID" --command 'cd "<cwd>" && claude --resume <sessionId>'
 
-**No other flag**, and keep the double quotes around `<cwd>` inside the single ones. It prints `OK surface:<n> (<UUID>) workspace:<n> (<UUID>)` — the first UUID
+**No other flag**, and keep the double quotes around `<cwd>` inside the single ones;
+write each `'` in the path as `'\''` there. It prints `OK surface:<n> (<UUID>) workspace:<n> (<UUID>)` — the first UUID
 is the new tab, the second your workspace. The command is typed into the tab's shell, so the
 shell stays when `claude` exits, and the split does not take focus. **If cmux refuses a split**
 — no space for a new pane, as every split lands in your row, or it cannot find your tab in the
@@ -4591,7 +4653,7 @@ before it sends.
 /// 부딪히거나, 4-1 이 시키는 `git -C <워크트리> checkout -- .moai` 로 그 멤버가 사라진 채 에픽이 닫힌다.
 /// `<루트>` 는 감독이 채우는 자리라 받은 줄에 실제 자리가 박혀 온다. 다른 자리 이름은 그 목록과
 /// 겹치지 않는다 — 겹치면 맡긴 backlog 의 값이 이 줄에 미리 박힌다(`<등급>` 와 같은 덫).
-const RECALL: &str = "moai -C <root> backlog promote <backlog id> -e <epic> --from -";
+const RECALL: &str = "moai -C \"<root>\" backlog promote <backlog id> -e <epic> --from -";
 
 /// 7 이 `/code-review` 를 못 부르고 손으로 돈 리뷰의 첫 줄(moai-nzmp.ayq). 2026-10-14 saycode-extensions 회차에 일꾼 둘의
 /// `/code-review` 가 규칙 3 에 막혀(다른 세션이 집은 줄을 초점으로 읽었다, moai-pyi4) 리뷰를 손으로 돌렸는데, 그 글을 리뷰
@@ -4607,12 +4669,12 @@ const REVIEW_WORK: &str = "moai note <review id> 'model: anthropic/<model it ran
 /// 9-1 이 빠진 멤버를 찾는 줄(moai-nzmp.fi4). 같은 회차에 세션 일꾼의 `model:` 줄이 몇 멤버에 없었다 — 9-1 은 닫기
 /// 바로 앞의 걸음이라 병합이 막혔다 다시 돈 창이 건너뛴다. 노트를 읽은 값(`work`)이 늘 서는 배열이라 빈 배열이 곧
 /// "아무도 안 적었다" 다. `--all` 은 이미 닫은 멤버까지 든다.
-const UNWRITTEN: &str = "moai -C <root> show -e <epic> --all --json | jq -r '.[] | select(.work == []) | .id'";
+const UNWRITTEN: &str = "moai -C \"<root>\" show -e <epic> --all --json | jq -r '.[] | select(.work == []) | .id'";
 
 /// 4-3 의 멤버를 훅이 막았을 때 대신 세우는 줄(moai-nzmp.e05). backlog 는 규칙 1 밖이고 `-e` 가 7-1 의 되찾기
 /// ([`RECALL`])와 감독의 손을 그 에픽으로 잇는다. 2026-10-14 saycode-extensions 회차에 일꾼이 4-3 멤버를 만들다
 /// 거절되자 거절문이 내민 남의 에픽(다른 세션이 집은 줄의 것)에 세울 뻔했다 — 브리프에 갈 길이 없었다.
-const PARKED_MEMBER: &str = "moai -C <root> backlog add '<what>' -e <epic>";
+const PARKED_MEMBER: &str = "moai -C \"<root>\" backlog add '<what>' -e <epic>";
 
 /// 그 줄을 보고(12)에 싣는 꼴 — 감독의 5 가 이 머리로 읽어 멤버로 펼친다. 거절문의 근거 줄을 옮겨 실어야 감독이
 /// 그 줄을 왜 이 세션의 것으로 읽었는지를 사람에게 보인다.
@@ -4626,7 +4688,7 @@ const REFUSED_MEMBER: &str =
 /// **`--from in_progress` 가 첫 칸의 멤버를 거른다.** 4-3·7-1 로 남긴 멤버는 이 리뷰가 안 본
 /// 일이라 `review` 에 서면 안 되는데, 글로 "빼라" 고만 하면 옮겨 친 줄이 그것까지 세운다 —
 /// 본 칸이 다르면 옮기지 않는 `--from` 이 그 판단을 대신 한다.
-const TO_REVIEW: &str = "moai -C <root> mv <member> review --from in_progress";
+const TO_REVIEW: &str = "moai -C \"<root>\" mv <member> review --from in_progress";
 
 /// `review` 칸이 없는 저장소에서 [`TO_REVIEW`] 가 받는 거절의 머리. 칸 이름은 config 가
 /// 정하는데, 브리프는 2 에서 이미 `in_progress`·`todo` 를 이름으로 박았다 — 그래서 칸이 있는지
@@ -4702,13 +4764,13 @@ Milestone: <milestone>
 Due: <due>
 Person: <person>
 
-1. Read it — moai -C <root> show <id> — and as much of the code as the split needs. If it
+1. Read it — moai -C "<root>" show <id> — and as much of the code as the split needs. If it
    already stands done, hand back `already unfolded: <id>` and stop: unfolding again puts up
    two epics.
 2. Write the plan: one `# <epic title>` line and one `- [pN] <member title>` line per issue. A plan
    line becomes the title verbatim, so write short new titles. Look first, then unfold:
-   moai -C <root> backlog promote <id> --dry-run --from -
-   moai -C <root> backlog promote <id> --from -
+   moai -C "<root>" backlog promote <id> --dry-run --from -
+   moai -C "<root>" backlog promote <id> --from -
 3. Hang the release on the epic, then the deadline, each unless its slot says `none` — the
    release first, as a dead one's earlier deadline refuses the person's. `Milestone: none`
    clears nothing `promote` carried, but for a dead release: when a line `promote` printed
@@ -4716,13 +4778,13 @@ Person: <person>
    re-opens a release that is out, or takes the whole plan out of the plan:
    {MILESTONE_ATTACH}
    {MILESTONE_CLEAR}
-   moai -C <root> edit <epic> --due <due>
+   moai -C "<root>" edit <epic> --due <due>
    A refusal because the day is later than the milestone's leaves the epic as it stands.
 4. Give every member a body the worker can start from without searching again — what is
    wrong, where (file and function), what to change, how to test it. A design question the
    backlog and its notes do not settle goes in it, open, for the worker to ask — do not
    settle it here. Write it to a file in your scratchpad and run
-   moai -C <root> edit <member> -b - < <that file>
+   moai -C "<root>" edit <member> -b - < <that file>
 5. Mark the epic, last — a supervisor that starts again sends an epic it finds marked so, so
    mark it only once 3 and 4 stand:
    {PLAN_SENT}
@@ -4741,11 +4803,11 @@ Person: <person>
 
 /// 펼치기가 걷는 죽은 릴리스의 줄(리뷰 moai-w25x.54r) — 일꾼의 걸음 1 이 같은 일을 `moai edit <epic> --milestone none` 으로
 /// 한다. 펼치기는 루트를 자리로 받으므로 `-C <root>` 를 단다.
-const MILESTONE_CLEAR: &str = "moai -C <root> edit <epic> --milestone none";
+const MILESTONE_CLEAR: &str = "moai -C \"<root>\" edit <epic> --milestone none";
 
 /// 펼치기가 펼친 에픽에 다는 보낸 표(리뷰 moai-w25x.54r) — 감독의 1 이 `moai show -g 'Sent:'` 로 다시 읽는 그 낱말이다.
 /// 감독이 일꾼에게 보내면 그 일꾼의 `Sent:` 가 뒤에 선다.
-const PLAN_SENT: &str = "moai -C <root> note <epic> 'Sent: plan <id>'";
+const PLAN_SENT: &str = "moai -C \"<root>\" note <epic> 'Sent: plan <id>'";
 
 /// 서브에이전트 일꾼이 7 에서 세우는 리뷰 서브에이전트의 프롬프트(moai-9tqo.p1p). **리뷰는 일꾼의 중첩
 /// 서브에이전트로 돈다**(2026-10-12 사용자 결정 5) — 일꾼 안에서 부른 리뷰는 일꾼의 모델을 물려받으니(moai-9tqo.fxp
@@ -4765,7 +4827,7 @@ fn review_brief() -> String {
 subagent of the same session, so the hook reads you as that worker.
 Worktree: <root>/.worktrees/<epic>, on branch worktree-<epic>
 Range: from <merge-base hash> (where the branch left <base branch>) to HEAD
-Review issue: <review id>, picked up already; its body is the angle — moai -C <root> show <review id>
+Review issue: <review id>, picked up already; its body is the angle — moai -C "<root>" show <review id>
 Grade: <grade>
 Root: <root>
 
@@ -4782,7 +4844,7 @@ Root: <root>
 3. Hold what came back against "Five places the review keeps finding" in <steps file>, and
    look yourself at any of the five the review left out
 4. Leave the reviewer's own words on the review issue — write them to a file in your
-   scratchpad and run moai -C <root> note <review id> -b - < <that file>
+   scratchpad and run moai -C "<root>" note <review id> -b - < <that file>
 {over}
 5. Hand back with SubagentHandback. The first line is Model ran: anthropic/<your real model
    name> — the name in your system prompt, not an alias. When 1 ran the review by hand, the
@@ -4918,7 +4980,7 @@ of its worktrees — the supervisor took you for a worker by a name that only lo
 repository's. Do nothing of it: reply to its `from` that you stand in another repository, and
 end the turn.
 The steps begin in the root the message names (`Root:`) — if this window stands anywhere
-else in that repository, go there first: `cd <root>` from a subdirectory or from a worktree
+else in that repository, go there first: `cd "<root>"` from a subdirectory or from a worktree
 a `cd` moved into, `ExitWorktree(keep)` from a worktree this session entered with
 `EnterWorktree`.
 A message that hands over no work is not work: if it asks something, answer it with
@@ -5070,7 +5132,7 @@ root"), never in the root
 4-1. **The tracker you edit is always the root's.** `<root>` is the root checkout's place,
    filled in by the supervisor — do not guess it from inside the worktree. **The tool moves
    that by itself** — even a bare `moai` typed inside the worktree reads and writes the
-   root's tracker, and when it writes, one line says where. `moai -C <root> <command>` lands
+   root's tracker, and when it writes, one line says where. `moai -C "<root>" <command>` lands
    in the same place, so writing it that way is fine too. Short of a branch with no tracker
    in the root, the only thing that stops the move is `MOAI_HERE`, so **do not turn it on** —
    turn it on and that worktree's `.moai` changes, and the snapshots conflict on the merge
@@ -5078,7 +5140,7 @@ root"), never in the root
    Put `-e <epic>` on a backlog item you park mid-epic — it does not keep the epic open, and 7-1
    reclaims it through that even if the window is cleared or the work is taken over.
    **Give a review subagent the same words.** If that worktree's `.moai` changed anyway,
-   undo it with `git -C <root>/.worktrees/<epic> checkout -- .moai` — aimed at the worktree:
+   undo it with `git -C "<root>/.worktrees/<epic>" checkout -- .moai` — aimed at the worktree:
    the same line in the root throws away every session's rows not committed yet, yours
    included — and if the row was already committed, undo that commit too and park it again
    from the root
@@ -5107,7 +5169,7 @@ root"), never in the root
    (`git diff --name-only <base branch>...<sibling branch>`). When two of them change the
    same place, one waits for the other at the merge. If this epic cannot deliver what it
    promised without that, it is not a backlog item but a member — create it with
-   `moai -C <root> add '<what>' -e <epic>`, leave it in the first column, and name it in 12
+   `moai -C "<root>" add '<what>' -e <epic>`, leave it in the first column, and name it in 12
    as **a member left because the work beside it holds the file**, together with that other
    work. The supervisor sends it once that work is done. Do not defer it.
    **If the hook refuses that line** (rule 1), read the refusal's `Why this session holds them:`
@@ -5146,7 +5208,7 @@ root"), never in the root
    agent program — because a review called from you runs on your model. Read the `review`
    model from `moai models --json`, create the review issue and stand the members in `review`
    as below, **pick the review issue up** —
-   `moai -C <root> mv <review id> in_progress --from todo` — and only then raise it on the
+   `moai -C "<root>" mv <review id> in_progress --from todo` — and only then raise it on the
    review brief ("The review brief" in `{BRANCHES_FILE}`), every slot filled, for the reason below.
    It leaves its fixes uncommitted and the reviewer's
    words on the review issue, and hands back what it fixed and what it left — take that in as
@@ -5154,12 +5216,12 @@ root"), never in the root
 
        Agent(subagent_type: "general-purpose", model: <review model>, description: "review <epic>", prompt: <the review brief>)
    Write the grade you picked and why in one line in the angle (`-b`). The diff runs from
-   where the branch left <base branch> — `git -C <root>/.worktrees/<epic> merge-base <base branch> HEAD`;
+   where the branch left <base branch> — `git -C "<root>/.worktrees/<epic>" merge-base <base branch> HEAD`;
    asked in the root, `HEAD` is the root's own tip and the range comes out empty. You pulled it
    in 6, so the conflict resolution is inside it too. Create the review issue (rule 3)
 
        {review}
-   Run this line as `moai -C <root>`, per 4-1, wherever the shell stands.
+   Run this line as `moai -C "<root>"`, per 4-1, wherever the shell stands.
    **In the same breath, stand the finished members in `review`** — while the review runs
    nobody is working on them, and `in_progress` on the board says somebody is. One id per
    call, as in 2
@@ -5176,7 +5238,7 @@ root"), never in the root
    member already stands `review`, you came back from 8 — leave it. What you take in goes in
    a separate fix: commit; what you hand on goes in a note with the issue id.
    **Then pick the review issue up, and only then call the review** — in a session as in a
-   subagent: `moai -C <root> mv <review id> in_progress --from todo`. You stand in the root,
+   subagent: `moai -C "<root>" mv <review id> in_progress --from todo`. You stand in the root,
    so the hook reads a review issue nobody picked up under `.worktrees/<epic>` as that
    worktree's, and rule 3 refuses the review — asking for another review issue, which it
    reads the same way, while the first one stays open and keeps the epic from closing.
@@ -5206,7 +5268,7 @@ root"), never in the root
    `cargo test` after that measures that agent's files rather than yours.
 
 7-1. Before merging, go back over the backlog parked mid-epic
-   (`moai -C <root> show --type backlog -e <epic>` and what this window remembers) and what the
+   (`moai -C "<root>" show --type backlog -e <epic>` and what this window remembers) and what the
    review handed on — **can the epic deliver what it promised without them.** If not, it is
    not a backlog item but an unfinished member. What you sorted as "not for now" while parking has
    these mixed in — the one waiting on a person's decision, the one pushed out because a
@@ -5233,7 +5295,7 @@ root"), never in the root
    milestone. **What this release can do without goes outside** — not "not doing it", but
    "not in this release"
 
-    moai -C <root> edit <that row> -e none --milestone none
+    moai -C "<root>" edit <that row> -e none --milestone none
    **Pass `-e none` with it.** A milestone is inherited from the epic, so on an epic member
    `--milestone none` alone changes nothing and comes back with one line saying the place
    comes from the epic and cannot be cut — a row 7-1 reclaimed stands as that epic's member,
@@ -5248,7 +5310,7 @@ root"), never in the root
    worktree, before the merge**: after 8 the worktree is gone and the only checkout left is
    the root, which every session shares and where the only commits that belong are the
    tracker's and the merge itself. Committed here it rides the merge commit instead. Aim the
-   line below at the worktree like every step there (`git -C <root>/.worktrees/<epic> commit …`,
+   line below at the worktree like every step there (`git -C "<root>/.worktrees/<epic>" commit …`,
    "Stay in the root") — and 7-4's two lines the same way.
    **One commit for the epic**, written once the members and the review's fixes are in —
    every line the epic needs goes into it. If a fix lands after it and changes what the epic
@@ -5266,7 +5328,7 @@ root"), never in the root
 
 7-4. **If the repository keeps a wiki** (`moai wiki ls` lists pages), ask once whether this
    epic changed what a person does — {CHANGED_USE}.
-   If it did, follow the `moai-wiki` skill, its `moai wiki` calls aimed at the worktree (`moai -C <root>/.worktrees/<epic> wiki ls` —
+   If it did, follow the `moai-wiki` skill, its `moai wiki` calls aimed at the worktree (`moai -C "<root>/.worktrees/<epic>" wiki ls` —
    bare, they read the root's pages), and commit what it wrote for the same reason as 7-3 — here, in the worktree, before the merge. `<wiki dir>` is `dir` in `moai wiki ls --json`
 
 {wiki_commit}
@@ -5447,7 +5509,7 @@ section does not exist
 ## When the review stays refused
 
 Step 7 sends you here: the review issue stands with its angle, you picked it up
-(`moai -C <root> mv <review id> in_progress --from todo`), you ran what each refusal handed
+(`moai -C "<root>" mv <review id> in_progress --from todo`), you ran what each refusal handed
 you, and rule 3 still ties the review to a row that is not this epic's (its
 `Why this session holds them:` lines, when it carries them, say which and why).
 Do not work around the hook and do not start another agent program.
@@ -5468,7 +5530,7 @@ member still stands picked up. Read how far it got (`moai show <epic>`, its hist
 notes), then
 
 - If the worktree is there, aim at it ("Stay in the root" in `{STEPS_FILE}`) — read how far it got with
-  `git -C <root>/.worktrees/<epic> log <base branch>..HEAD` and `git -C <root>/.worktrees/<epic> status`
+  `git -C "<root>/.worktrees/<epic>" log <base branch>..HEAD` and `git -C "<root>/.worktrees/<epic>" status`
   (asked in the root, both read the root and show nothing of it), and carry on
 - If it is not, raise it again from the root. If the branch survives, on that branch
   (`git worktree add .worktrees/<epic> worktree-<epic>`); if it does not,
@@ -5543,7 +5605,7 @@ One call's `cd` may not persist into the next: always supply the absolute comman
 A backlog has no epic for the supervisor to watch until you unfold it. Right after the
 promote in 1, before 2, name the epic on the backlog `<id>` you were handed:
 
-    moai -C <root> note <id> 'Unfolded: <epic>'
+    moai -C "<root>" note <id> 'Unfolded: <epic>'
 
 Until it is written, a note the steps below put on the epic goes on that backlog instead.
 
@@ -5560,7 +5622,7 @@ check that screen rather than assuming a wrapper or another installation enabled
 ## Step 7: hand the review to the supervisor
 
 When the members are finished, pull the base branch as in 6, test and commit in the worktree.
-Create the review issue using the shared command, called with `moai -C <root>` (4-1):
+Create the review issue using the shared command, called with `moai -C "<root>"` (4-1):
 
     {review}
 
@@ -5574,7 +5636,7 @@ Record the worktree absolute path, branch, `git merge-base <base branch> HEAD` h
 review issue id in a note whose first line is `Review-ready: <epic>`:
 
 ```sh
-moai -C <root> note <epic> -b - <<'CODEX_REVIEW'
+moai -C "<root>" note <epic> -b - <<'CODEX_REVIEW'
 Review-ready: <epic>
 - Worktree: <absolute path>; branch: <branch>; merge-base: <hash>
 - Review issue: <review id>; tested: <checks and results>
@@ -5599,7 +5661,7 @@ Do not write the review issue's model line: the supervisor's reviewer writes its
 ## Step 12: report by epic note
 
 Put worker.md's final report details in `moai note <epic> -b -`, called with
-`moai -C <root>` from the worktree. Its first line is `report: <epic>`.
+`moai -C "<root>"` from the worktree. Its first line is `report: <epic>`.
 It stands in the root's file, where the supervisor reads it — it needs no commit.
 For a decision needed during work, use the same note, starting with
 `Decision needed:` or `진행 중 결정이 필요합니다`, and ask this window's person too.
@@ -6145,7 +6207,7 @@ mod tests {
         // 글이 그 상수를 끼워 넣는 한 늘 참이라, 줄의 모양은 여기서 따로 맨다 — `moai backlog add` 로
         // 바꿔 7-1 이 거꾸로 backlog 로 내보내라고 가르쳐도 다른 시험은 다 초록이었다.
         assert!(
-            RECALL.starts_with("moai -C <root> backlog promote ") && RECALL.contains(" -e <epic> "),
+            RECALL.starts_with("moai -C \"<root>\" backlog promote ") && RECALL.contains(" -e <epic> "),
             "되짚기가 루트의 그 에픽에 promote 로 멤버를 세우지 않는다 — {RECALL}"
         );
         // 되짚기의 자리는 일꾼이 채운다 — 감독이 채우는 목록(3)에 같은 이름이 들면 맡긴 backlog 의 값이
@@ -6551,7 +6613,7 @@ stop sending outside work while a release runs",
             "backlog promote <id> --dry-run --from -",
             "backlog promote <id> --from -",
             MILESTONE_ATTACH,
-            "moai -C <root> edit <epic> --due <due>",
+            "moai -C \"<root>\" edit <epic> --due <due>",
             MILESTONE_CLEAR,
             PLAN_SENT,
         ] {
@@ -7366,7 +7428,7 @@ stop sending outside work while a release runs",
             assert!(section.contains(tool), "서브에이전트 절이 {tool} 를 다루지 않는다");
         }
         // 워크트리를 겨누는 길은 세션과 함께 쓰는 절에 선다(moai-9js2) — 세션도 이제 들지 않는다.
-        assert!(STAY_IN_ROOT.contains("`cd <root>/.worktrees/<epic> && …`"), "워크트리를 겨누는 길이 없다");
+        assert!(STAY_IN_ROOT.contains("`cd \"<root>/.worktrees/<epic>\" && …`"), "워크트리를 겨누는 길이 없다");
         // 걸음마다 그 줄이 선다 — 걸음이 서브에이전트에서 다르게 돌아가는 자리다.
         let steps = ["1", "2", "3", "4", "4-1", "7", "7-1", "9-1", "10", "11", "12"];
         for pair in steps.windows(2) {
@@ -7796,11 +7858,13 @@ stop sending outside work while a release runs",
         assert!(!work.contains("EnterWorktree(path)"), "일꾼 글이 아직 워크트리에 들라고 한다");
         // **대조를 루트에서 한다**(moai-rgp9) — 워크트리 안에서 `-C <루트>` 로 묻는 꼴은 격리
         // 가드가 거절한다. 그 명령이 다시 글에 서면 일꾼이 필수 검사에서 막힌다.
-        assert!(!work.contains("git -C <root> symbolic-ref"), "거절되는 꼴로 루트의 가지를 묻는다");
+        for shape in ["git -C <root> symbolic-ref", "git -C \"<root>\" symbolic-ref"] {
+            assert!(!work.contains(shape), "거절되는 꼴로 루트의 가지를 묻는다 — {shape}");
+        }
         // **심은 글이 거절되는 꼴을 아무 걸음에서도 시키지 않는다**(리뷰 moai-rgp9.sdj 1번) —
         // `SUBDIR` 이 `$(git -C <root> …)` 이던 자리가 그것이었고, 그 걸음은 워크트리 **안으로**
         // 드는 것이라 ExitWorktree 로 피할 수도 없었다.
-        for shape in ["$(git -C", "git -C <root> rev-parse"] {
+        for shape in ["$(git -C", "git -C <root> rev-parse", "git -C \"<root>\" rev-parse"] {
             assert!(!work.contains(shape), "일꾼 글이 거절되는 꼴을 시킨다 — {shape}");
             assert!(!supervise.contains(shape), "감독 글이 거절되는 꼴을 시킨다 — {shape}");
         }
@@ -7924,7 +7988,7 @@ stop sending outside work while a release runs",
             "review by the supervisor's review subagent",
             TO_REVIEW,
             // 감독은 에픽이 서기 전에 받은 backlog 를 지켜본다 — 펼친 에픽을 거기 적어야 보고를 따라간다.
-            "moai -C <root> note <id> 'Unfolded: <epic>'",
+            "moai -C \"<root>\" note <id> 'Unfolded: <epic>'",
             // 리뷰가 남긴 고침은 커밋되지 않았다 — 8 로 건너뛰면 병합에서 빠지고 7-1~7-4 가 안 돈다.
             "take them in as a separate `fix:` commit",
             "go on with 7-1 to 11",
@@ -7966,7 +8030,7 @@ stop sending outside work while a release runs",
         for part in [
             "Monitor(",
             "timeout_ms: 1800000",
-            "moai -C <root> show <epic> --json",
+            "moai -C \"<root>\" show <epic> --json",
             "report:",
             "Review-ready:",
             "Decision needed:",
@@ -8340,16 +8404,32 @@ stop sending outside work while a release runs",
 
     /// **죽은 뒤 `/clear` 된 대화는 되살리지 않는다**(moai-jn8d.vyh). 고리는 `history.jsonl` 의 `/clear` 줄이 든 옛 id 다 —
     /// 대화 기록의 끝을 읽던 첫 규칙은 틀려 걷었다. 비운 뒤 다시 움직인 대화는 남고, 대화 기록이 없는 id 는 비운 것이다.
-    /// `/new` 도 비운 것이고, 끊긴 턴이 비운 직후에 적는 줄은 움직인 것이 아니다.
+    /// `/new` 도 비운 것이고, 끊긴 턴이 비운 직후에 적는 줄은 움직인 것이 아니다. `/resume`·`/continue` 로 떠난 대화도
+    /// 같이 빠지고(moai-1m21.hxm), 뺀 것은 명령·UTC 때와 함께 나와 표 밑에서 이름이 불린다.
     #[test]
     #[cfg(unix)]
-    fn the_recover_skill_drops_a_conversation_cleared_after_it_died() {
+    fn the_recover_skill_drops_a_conversation_left_after_it_died() {
         let text = recover();
         let dead = section(&text, "## 1. Find the dead");
         assert!(
-            dead.contains("**Drop it when its conversation was cleared after it died.**") && dead.contains(CLEARED),
+            dead.contains("**Drop it when its conversation was left after it died.**") && dead.contains(CLEARED),
             "되살린 뒤 /clear 한 대화를 후보로 둔다"
         );
+        for command in ["/resume", "/continue"] {
+            assert!(dead.contains(command));
+        }
+        let table = section(&text, "## 2. Draw the state each was in");
+        for part in [
+            "Under the table",
+            "not what is\nback already",
+            "each `sessionId` and `cwd`",
+            "the command",
+            "UTC time",
+            "older crash",
+            "person names it",
+        ] {
+            assert!(table.contains(part), "제외한 대화의 사유가 안 보인다 — {part}");
+        }
         // 고리는 `history.jsonl` 이다 — 첫 규칙은 대화 기록의 끝을 읽어 틀렸다(리뷰 moai-jn8d.d79 1번).
         assert!(!text.contains("<command-name>/clear</command-name>"), "대화 기록의 끝에서 /clear 를 찾는다");
         // 기록을 읽는 것은 짝 하나다.
@@ -8380,6 +8460,11 @@ stop sending outside work while a release runs",
             line("2026-10-26T10:00:00.000Z") + &line("2026-10-26T11:00:00.600Z") + &line("2026-10-26T11:00:00.610Z"),
         )
         .unwrap();
+        for sid in ["s-moved", "s-continue", "s-reset"] {
+            std::fs::write(projects.join(format!("{sid}.jsonl")), line("2026-10-26T10:00:00.000Z")).unwrap();
+        }
+        // 고르기 창을 취소한 뒤 계속 쓴 대화는 빠지지 않는다.
+        std::fs::write(projects.join("s-looked.jsonl"), line("2026-10-26T12:00:00.000Z")).unwrap();
         let at = |t: &str| chrono_ms(t);
         let typed = |display: &str, sid: &str, t: &str| {
             format!(
@@ -8394,18 +8479,25 @@ stop sending outside work while a release runs",
             + &clear("s-other", "2026-10-26T11:00:00.000Z")
             + &clear("s-busy", "2026-10-26T11:00:00.000Z")
             + &typed("/new", "s-new", "2026-10-26T11:00:00.000Z")
+            + &typed("/resume other-id", "s-moved", "2026-10-26T11:00:00.000Z")
+            // 뒤에 읽은 과거 줄이 최신 명령을 덮지 않는다.
+            + &clear("s-moved", "2026-10-26T09:00:00.000Z")
+            + &typed("/continue some term", "s-continue", "2026-10-26T11:00:00.000Z")
+            + &typed("/resume", "s-looked", "2026-10-26T11:00:00.000Z")
+            + &typed("/reset", "s-reset", "2026-10-26T11:00:00.000Z")
             + "{\"display\":\"/clearly not\",\"timestamp\":1,\"sessionId\":\"s-plain\"}\n"
             + "not json\n";
         std::fs::write(home.join("history.jsonl"), history).unwrap();
-        let shell = CLEARED
-            .replace("~/.claude", &home.display().to_string())
-            .replace("<sessionId> …", "s-cleared s-back s-plain s-gone s-new s-busy");
+        let shell = CLEARED.replace("~/.claude", &home.display().to_string()).replace(
+            "<sessionId> …",
+            "s-cleared s-back s-plain s-gone s-new s-busy s-moved s-continue s-looked s-reset",
+        );
         let out = std::process::Command::new("sh").arg("-c").arg(shell).output().unwrap();
         assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
         // 대화 기록이 지워진 id 는 되살릴 대화가 없으니 비운 것으로 낸다. 안 물은 id(`s-other`)는 안 낸다.
         assert_eq!(
             String::from_utf8(out.stdout).unwrap(),
-            "s-busy\ns-cleared\ns-gone\ns-new\n",
+            "s-busy\t/clear\t2026-10-26T11:00:00Z\ns-cleared\t/clear\t2026-10-26T11:00:00Z\ns-continue\t/continue\t2026-10-26T11:00:00Z\ns-gone\t/clear\t2026-10-26T11:00:00Z\ns-moved\t/resume\t2026-10-26T11:00:00Z\ns-new\t/new\t2026-10-26T11:00:00Z\ns-reset\t/reset\t2026-10-26T11:00:00Z\n",
             "비운 대화를 못 갈랐다"
         );
     }
@@ -8995,6 +9087,23 @@ stop sending outside work while a release runs",
         &text[at..at + heading.len() + rest.find("\n## ").map_or(rest.len(), |end| end + 1)]
     }
 
+    #[test]
+    fn the_three_open_pane_lines_are_one_recipe() {
+        let tmux = tmux();
+        let recover = recover();
+        for program in ["claude --model <model>", "codex --model <codex>"] {
+            assert!(tmux.contains(&open_pane("<root>", program)));
+        }
+        assert!(recover.contains(&open_pane("<cwd>", "claude --resume <sessionId>")));
+        assert_eq!(tmux.matches("tmux split-window").count(), 2);
+        assert_eq!(recover.matches("tmux split-window").count(), 1);
+        assert_eq!(tmux.matches(KEPT_PANE).count(), 2);
+        assert!(recover.contains(KEPT_PANE));
+        for part in ["#{pane_dead}", "send-keys", "never kill"] {
+            assert!(KEPT_PANE.contains(part));
+        }
+    }
+
     /// **`moai-tmux` 는 이름 댄 칸만 만진다**(2026-10-10 사용자 결정, moai-u99i). 사람의 tmux 서버라 맨 `kill-server` 하나가
     /// 그 사람의 세션을 다 죽인다(2026-09-18). 그래서 `tmux` 를 부르는 줄은 모두 칸을 `-t` 로 겨누거나, 칸을 안 건드리는
     /// 읽기(`show`·`list-panes`)·테두리 둘을 쓰는 `set -g`·버퍼에 싣는 `load-buffer` 중 하나다. `kill-*` 은 하지 말라는 줄에만
@@ -9406,6 +9515,102 @@ stop sending outside work while a release runs",
         assert!(tmux().contains("back is `moai-recover`"), "tmux 스킬의 멈춘 일꾼 절이 되살리기를 안 댄다");
     }
 
+    #[test]
+    fn a_path_placeholder_stands_in_double_quotes() {
+        for skill in crate::skill::skills() {
+            for (_, text) in skill.files {
+                for bare in [
+                    "-C <root>",
+                    "-C <cwd>",
+                    "cd <root>",
+                    "cd <cwd>",
+                    "<script> <root>",
+                    "bash <script>",
+                    "readlink <cwd>",
+                    "test -e <cwd>",
+                    "-c <root>",
+                    "-c <cwd>",
+                ] {
+                    assert!(!text.contains(bare), "{} leaves {bare} bare", skill.name);
+                }
+            }
+        }
+        assert!(supervise().contains(PATH_QUOTES));
+        assert!(recover().contains(PATH_QUOTES));
+        assert!(supervise().contains("stop this round"));
+        // 못 싸는 `cwd` 는 빠질 것을 다 뺀 뒤의 후보에만 선다 — 앞에 서면 이미 돌아온 대화까지 사람에게
+        // 손으로 되살리라고 넘긴다. 셸 줄은 2·3 의 읽기까지 안 짓고, `cwd` 가 안 드는 8 은 그대로 둔다.
+        let text = recover();
+        let dead = section(&text, "## 1. Find the dead");
+        let unquotable = dead.find("If a candidate still standing after the drops above").unwrap();
+        assert!(unquotable > dead.find("**Drop old crashes.**").unwrap(), "못 싸는 경로가 빼기보다 앞에 선다");
+        assert!(dead[unquotable..].contains("no `git -C`, `readlink` or `test -e` in 2\nand 3"));
+        assert!(!dead.contains("in 7 or 8"), "cwd 가 안 드는 Saycode 의 줄까지 거둔다");
+        let cmux = cmux();
+        for heading in ["## No idle worker left", "### Open a Codex worker"] {
+            assert!(section(&cmux, heading).contains(r"'\''"));
+        }
+        assert!(section(&recover(), "## 6. Inside cmux — open a tab each").contains(r"'\''"));
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn the_supervisor_names_a_root_its_shell_lines_cannot_quote() {
+        let Some(python3) = tool("python3") else { return };
+        let text = supervise();
+        let at = text.find("python3 - \"$(git worktree list --porcelain | sed").unwrap();
+        let python = text[at..].split_once("<<'PY'\n").unwrap().1.split("\nPY").next().unwrap();
+        // 파이썬은 `realpath` 로 낸다 — macOS 의 임시 자리는 `/private` 로 가는 링크라 푼 자리로 견준다.
+        let scratch = crate::scratch::Scratch::real("root-quotes");
+        for (name, unsafe_path) in [
+            ("space and ' quote", false),
+            ("double\"quote", true),
+            ("dollar$sign", true),
+            ("back`tick", true),
+            ("back\\slash", true),
+        ] {
+            let root = scratch.path().join(name);
+            std::fs::create_dir(&root).unwrap();
+            let out = std::process::Command::new(&python3)
+                .args(["-c", python, root.to_str().unwrap(), root.to_str().unwrap()])
+                .current_dir(&root)
+                .output()
+                .unwrap();
+            assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+            let said = String::from_utf8(out.stdout).unwrap();
+            assert!(said.starts_with(&format!("root dir {}\n", root.display())));
+            assert_eq!(said.contains(&format!("unquotable root {}\n", root.display())), unsafe_path, "{name}");
+        }
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn a_tracker_path_with_spaces_and_an_apostrophe_is_one_shell_word() {
+        let scratch = crate::scratch::Scratch::new("tracker-quoted");
+        let root = scratch.path().join("someone's repo");
+        let below = root.join("src");
+        std::fs::create_dir_all(&below).unwrap();
+        std::fs::create_dir_all(root.join(".moai")).unwrap();
+        std::fs::write(root.join(".moai/issues.jsonl"), "").unwrap();
+        let git = |args: &[&str]| crate::git::isolated(&root).args(args).output().unwrap().status.success();
+        assert!(git(&["init", "-q"]));
+        let command = TRACKER_IN_GIT.replace("<root>", root.to_str().unwrap());
+        let asks = || {
+            std::process::Command::new("sh")
+                .args(["-c", &command])
+                .current_dir(&below)
+                .env("GIT_CONFIG_GLOBAL", "/dev/null")
+                .env("GIT_CONFIG_NOSYSTEM", "1")
+                .output()
+                .unwrap()
+                .status
+                .success()
+        };
+        assert!(!asks(), "an untracked tracker counts as tracked");
+        assert!(git(&["add", ".moai"]));
+        assert!(asks(), "the quoted root split or the apostrophe closed a quote");
+    }
+
     /// **트래커가 git 밖이면 트래커 커밋을 건너뛴다**(moai-nzmp.ush). 감독과 일꾼이 같은 줄로 묻고, 그 줄은 무시되는가가
     /// 아니라 추적되는가를 묻는다 — 제외 줄을 나중에 더해도 이미 추적되던 트래커는 커밋이 돈다. 실제 git 으로 세 판을 잰다.
     #[test]
@@ -9438,7 +9643,7 @@ stop sending outside work while a release runs",
         let root = s.path().to_str().expect("시험 자리가 UTF-8 이 아니다").to_string();
         let below = s.path().join("src");
         let asks = || {
-            let mut words = TRACKER_IN_GIT.split(' ').map(|w| if w == "<root>" { root.as_str() } else { w });
+            let mut words = TRACKER_IN_GIT.split(' ').map(|w| if w == "\"<root>\"" { root.as_str() } else { w });
             assert_eq!(words.next(), Some("git"));
             crate::git::isolated(&below).args(words).output().expect("git 이 없다").status.success()
         };

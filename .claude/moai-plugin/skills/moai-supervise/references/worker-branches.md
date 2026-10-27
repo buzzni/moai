@@ -30,12 +30,12 @@ there — standing at the worktree top, `moai` walks up and finds the root's
 relative path, filled in by the supervisor; with no `Subdir:` line the root **is** the top and this
 section does not exist
 
-    cd <root>/.worktrees/<epic>/<subdir> && …
+    cd "<root>/.worktrees/<epic>/<subdir>" && …
 
 ## When the review stays refused
 
 Step 7 sends you here: the review issue stands with its angle, you picked it up
-(`moai -C <root> mv <review id> in_progress --from todo`), you ran what each refusal handed
+(`moai -C "<root>" mv <review id> in_progress --from todo`), you ran what each refusal handed
 you, and rule 3 still ties the review to a row that is not this epic's (its
 `Why this session holds them:` lines, when it carries them, say which and why).
 Do not work around the hook and do not start another agent program.
@@ -56,7 +56,7 @@ member still stands picked up. Read how far it got (`moai show <epic>`, its hist
 notes), then
 
 - If the worktree is there, aim at it ("Stay in the root" in `worker.md`) — read how far it got with
-  `git -C <root>/.worktrees/<epic> log <base branch>..HEAD` and `git -C <root>/.worktrees/<epic> status`
+  `git -C "<root>/.worktrees/<epic>" log <base branch>..HEAD` and `git -C "<root>/.worktrees/<epic>" status`
   (asked in the root, both read the root and show nothing of it), and carry on
 - If it is not, raise it again from the root. If the branch survives, on that branch
   (`git worktree add .worktrees/<epic> worktree-<epic>`); if it does not,
@@ -69,7 +69,7 @@ notes), then
   by the supervisor; with no `Subdir:` in the message, the root is the top and this step
   does not exist
 
-      cd <root>/.worktrees/<epic>/<subdir> && …
+      cd "<root>/.worktrees/<epic>/<subdir>" && …
 - The member's column is already picked up — do not move it to another column, but **record
   it as this session's** with a move to the column it stands in, on a line of its own:
   `moai mv <member> <its column> --from <its column>` — nothing moves; the pick-up is
@@ -94,7 +94,7 @@ In a subagent, 7 raises the review on this prompt — copy it whole and fill eve
     subagent of the same session, so the hook reads you as that worker.
     Worktree: <root>/.worktrees/<epic>, on branch worktree-<epic>
     Range: from <merge-base hash> (where the branch left <base branch>) to HEAD
-    Review issue: <review id>, picked up already; its body is the angle — moai -C <root> show <review id>
+    Review issue: <review id>, picked up already; its body is the angle — moai -C "<root>" show <review id>
     Grade: <grade>
     Root: <root>
 
@@ -111,7 +111,7 @@ In a subagent, 7 raises the review on this prompt — copy it whole and fill eve
     3. Hold what came back against "Five places the review keeps finding" in <steps file>, and
        look yourself at any of the five the review left out
     4. Leave the reviewer's own words on the review issue — write them to a file in your
-       scratchpad and run moai -C <root> note <review id> -b - < <that file>
+       scratchpad and run moai -C "<root>" note <review id> -b - < <that file>
        If the text runs past 64KB, summarize it — put `Summary: original <size>KB agent-<task-id>` on
        the first line, keep every finding's number and place, and shorten only the sentences. Leave fences and indentation alone
     5. Hand back with SubagentHandback. The first line is Model ran: anthropic/<your real model
