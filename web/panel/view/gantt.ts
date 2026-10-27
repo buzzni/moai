@@ -146,6 +146,12 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
   let paintLater = false
   /** Rows whose planned days are being written: a bar drawn from the read before that write does not move again. */
   const writing = new Set<string>()
+  /** Dropped plans stay visible through window rebuilds until the write and its refresh finish. */
+  const moved = new Map<string, NonNullable<GanttRow['planned']>>()
+  const ganttOf = (row: Row): GanttRow | undefined => {
+    const planned = moved.get(row.id)
+    return planned && row.gantt ? { ...row.gantt, planned } : row.gantt
+  }
 
   // ── frame ──
   const zoomButtons = new Map<Zoom, HTMLButtonElement>()
@@ -257,7 +263,7 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
     const m = model
     const now = nowWall()
     const zone = clock.zone()
-    const placed = m.lines.map((line) => (line.kind === 'row' ? placeRow(m.index.rows[line.at]!.gantt, m.index.rows[line.at], now, zone) : null))
+    const placed = m.lines.map((line) => (line.kind === 'row' ? placeRow(ganttOf(m.index.rows[line.at]!), m.index.rows[line.at], now, zone) : null))
     const was = axis
     if (!axis || axis.zoom !== zoom || !fresh(placed, now)) {
       const [from, to] = rangeOf(placed.map((p) => p?.span ?? null), now)
@@ -358,7 +364,7 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
     const lanes: HTMLElement[] = []
     for (let n = win.r0; n < win.r1; n++) {
       const line = m.lines[n]!
-      const g = line.kind === 'row' ? m.index.rows[line.at]!.gantt : undefined
+      const g = line.kind === 'row' ? ganttOf(m.index.rows[line.at]!) : undefined
       const p = b.placed[n] ?? null
       const grid = gridRow(m, line, g, cursor)
       grid.style.top = `${n * ROW_H}px`
@@ -746,11 +752,11 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
    */
   function write(movePlan: NonNullable<typeof ctx.movePlan>, id: string, change: PlanChange, undo: string): void {
     writing.add(id)
-    // The bar stays where it was dropped until the rows are read again; a refusal draws it back.
-    const read = model
     void movePlan(id, change, undo).finally(() => {
       writing.delete(id)
-      if (model === read) draw()
+      moved.delete(id)
+      // Even a refresh drew the overlay: remove it to show the days moai measured inside its lock.
+      draw()
     })
   }
 
@@ -810,6 +816,9 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
         }
       } else {
         dragged = true
+        moved.set(row.id, { start: change.start ?? g.planned!.start, end: change.due ?? g.planned!.end, from: 'own' })
+        const n = model?.lines.findIndex((line) => line.key === row.id) ?? -1
+        if (built && n >= 0) built.placed[n] = placeRow(ganttOf(row), row, built.now, clock.zone())
         // The undo line puts back the days the page read: as the list printed them, or a row it did not print (one
         // written between its read and the tree's) as the bar was drawn. moai measured the move itself from the row as
         // it stood when written (moai-vj8w.02c), so a day another session moved after this read comes back with the undo.

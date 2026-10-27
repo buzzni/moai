@@ -863,6 +863,54 @@ test('a scroll while a bar is held leaves the dropped bar where it was dropped (
   assert.equal(px(bar, 'left'), x0 + 80, 'the dropped bar went back to its old days while its write ran')
 })
 
+test('a pending move survives a new window and an old read, then drops its overlay after refresh', async () => {
+  let answer
+  const rows = [...ROWS, ...Array.from({ length: 100 }, (_, i) => ({ id: `r${i}`, kind: 'issue', status: 'todo' }))]
+  const gantt = { ...GANTT, ...Object.fromEntries(rows.filter((r) => r.id.startsWith('r')).map((r) => [r.id, g(r.id)])) }
+  const { root, dom, view, state } = writing(rows, gantt, () => new Promise((resolve) => { answer = resolve }))
+  const box = size(root, 4000, 300)
+  const l = lane(root, 'e1.c')
+  const bar = laidOut(l.querySelector('.b-plan'))
+  const x0 = px(bar, 'left')
+  press(dom, l, 'pointerdown', x0 + 40)
+  // A stale render arrives during the drag and is drawn after the release.
+  view.render(state, indexOf(rows, gantt))
+  press(dom, l, 'pointermove', x0 + 120)
+  press(dom, l, 'pointerup', x0 + 120)
+  await tick()
+  assert.equal(px(lane(root, 'e1.c').querySelector('.b-plan'), 'left'), x0 + 80)
+  box.scrollTop = 80 * 28
+  box.dispatchEvent(new dom.window.Event('scroll'))
+  assert.equal(lane(root, 'e1.c'), null)
+  box.scrollTop = 0
+  box.dispatchEvent(new dom.window.Event('scroll'))
+  assert.equal(px(lane(root, 'e1.c').querySelector('.b-plan'), 'left'), x0 + 80)
+  view.render(state, indexOf(rows, gantt))
+  assert.equal(px(lane(root, 'e1.c').querySelector('.b-plan'), 'left'), x0 + 80)
+  // The locked write saw a different day than this page: its answer wins after the overlay goes.
+  const refreshed = { ...gantt, 'e1.c': g('e1.c', { planned: own('2026-10-29', '2026-10-30') }) }
+  view.render(state, indexOf(rows, refreshed))
+  answer()
+  await tick()
+  assert.equal(px(lane(root, 'e1.c').querySelector('.b-plan'), 'left'), x0 + 120)
+  view.render(state, indexOf(rows, gantt))
+  assert.equal(px(lane(root, 'e1.c').querySelector('.b-plan'), 'left'), x0, 'no overlay remains')
+})
+
+test('an answered refusal removes the dropped plan without a refresh', async () => {
+  let answer
+  const { root, dom } = writing(ROWS, GANTT, () => new Promise((resolve) => { answer = resolve }))
+  const l = lane(root, 'e1.c')
+  const bar = laidOut(l.querySelector('.b-plan'))
+  const x0 = px(bar, 'left')
+  press(dom, l, 'pointerdown', x0 + 40)
+  press(dom, l, 'pointermove', x0 + 120)
+  press(dom, l, 'pointerup', x0 + 120)
+  answer()
+  await tick()
+  assert.equal(px(lane(root, 'e1.c').querySelector('.b-plan'), 'left'), x0)
+})
+
 test('a window built later keeps the clock the bars were placed at: the today line stays where an open bar ends (moai-vj8w review)', () => {
   const rows = Array.from({ length: 200 }, (_, i) => ({ id: `r${String(i).padStart(3, '0')}`, kind: 'issue', title: `Row ${i}`, status: i === 0 ? 'in_progress' : 'todo' }))
   const gantt = Object.fromEntries(rows.map((row) => [row.id, g(row.id)]))
