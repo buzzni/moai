@@ -2,7 +2,7 @@
 //!
 //! **요청에서 온 값은 틀의 자리에만 든다.** 쿼리의 값은 늘 `--긴이름=값` 한 토막이고 경로의 값(id·위키 쪽)은 `--`
 //! 뒤의 한 토막이라, `-` 로 시작해도 플래그로 안 읽히고 셸을 안 지난다(자식은 `Command::args` 로 뜬다).
-//! **하나만 argv 밖으로 간다** — `/api/tree` 의 `tz`(moai-vj8w.7sh)는 자식의 환경 `TZ` 가 된다. 모양은 [`zone_shape`] 가
+//! **하나만 argv 밖으로 간다** — 읽기 끝점의 `tz`(moai-vj8w.7sh)는 자식의 환경 `TZ` 가 된다. 모양은 [`zone_shape`] 가
 //! 재고(`.` 이 없고 첫 글자가 `/`·`:` 가 아니라 tzdb 밖의 파일을 못 가리킨다), 이 기계가 못 여는 이름은 서버가 안
 //! 넘긴다(`super::zone_for_child`).
 //! 거르개·찾기·정렬의 **뜻**과 거절(`bad_filter` 와 그 말)은 moai 가 낸다 — 서버는 모양(비지 않음·길이·제어 문자·
@@ -60,9 +60,9 @@ pub struct Profile {
     pub without_archive: bool,
 }
 
-const LIST: &[Param] = &[Param::Archived, Param::Filter, Param::Q, Param::Fields];
+const LIST: &[Param] = &[Param::Archived, Param::Filter, Param::Q, Param::Fields, Param::Tz];
 /// 산 줄의 목록만 옆 워크트리를 겹친다(`--worktree`, 탐색기의 `SPC v w`) — backlog 는 겹칠 줄이 없다.
-const ROWS: &[Param] = &[Param::Archived, Param::Filter, Param::Q, Param::Fields, Param::Worktree];
+const ROWS: &[Param] = &[Param::Archived, Param::Filter, Param::Q, Param::Fields, Param::Worktree, Param::Tz];
 
 /// 자식을 띄우는 끝점들 — **쿼리를 재는 자가 하나다**([`argv`]). 받는 이름이 없는 끝점도 여기 서야 거기 붙인
 /// 쿼리가 거절된다(`/api/wiki?worktree=1` 을 말없이 맨 목록으로 답하던 판이 있었다). 경로에 값이 드는
@@ -346,7 +346,7 @@ fn zone_shape(name: &str, value: &str) -> Result<(), Bad> {
     (offset || (first && fits)).then_some(()).ok_or_else(|| Bad::Shape(name.to_string()))
 }
 
-/// 쿼리가 낸 시간대 — 모양은 [`argv`] 가 이미 쟀다. 자식은 이것을 `TZ` 로 받아, 늦었는가(`overdue`)를 페이지가 그리는
+/// 쿼리가 낸 시간대 — 모양은 [`argv`] 가 이미 쟀다. 자식은 이것을 `TZ` 로 받아, 늦었는가(`overdue`)와 거르개의 날을 페이지가 그리는
 /// 시간대로 잰다(moai-vj8w.7sh). 안 줬으면 `None` 이고 자식은 서버의 시간대 그대로다. 이 기계가 못 여는 이름을 거르는 것은
 /// 자식을 띄우는 쪽이다([`super::zone_for_child`]) — 여기는 파일을 안 연다.
 pub fn zone_of(query: &[(String, String)]) -> Option<&str> {
@@ -497,10 +497,10 @@ mod tests {
         out
     }
 
-    /// **`tz` 는 `/api/tree` 만 받고 argv 에는 안 든다**(moai-vj8w.7sh) — 자식의 `TZ` 로 가니 틀이 바뀌면 안 된다.
+    /// **`tz` 는 트리와 목록이 받고 argv 에는 안 든다**(moai-vj8w.7sh) — 자식의 `TZ` 로 가니 틀이 바뀌면 안 된다.
     /// 모양은 tzdb 이름의 글자뿐이다.
     #[test]
-    fn tz_is_a_zone_name_for_the_tree_alone_and_leaves_the_argv_as_it_was() {
+    fn tz_is_a_zone_name_for_reads_and_leaves_the_argv_as_it_was() {
         let plain = argv_of("/api/tree", &[]).unwrap().unwrap();
         let asked = q(&[("tz", "Asia/Seoul")]);
         assert_eq!(argv_of("/api/tree", &asked).unwrap().unwrap(), plain);
@@ -527,7 +527,12 @@ mod tests {
         }
         assert!(matches!(argv_of("/api/tree", &q(&[("tz", "")])).unwrap(), Err(Bad::Empty(_))));
         assert!(matches!(argv_of("/api/tree", &q(&[("tz", "UTC"), ("tz", "UTC")])).unwrap(), Err(Bad::Twice(_))));
-        assert!(matches!(argv_of("/api/rows", &asked).unwrap(), Err(Bad::Unknown(_))));
+        for path in ["/api/rows", "/api/backlog"] {
+            assert_eq!(argv_of(path, &asked).unwrap().unwrap(), argv_of(path, &[]).unwrap().unwrap());
+        }
+        for path in ["/api/status", "/api/wiki"] {
+            assert!(matches!(argv_of(path, &asked).unwrap(), Err(Bad::Unknown(_))));
+        }
     }
 
     #[test]

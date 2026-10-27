@@ -169,6 +169,8 @@ export interface Question {
    * only another worktree holds can match and an overlaid row is judged by the fields it is drawn with.
    */
   worktree?: boolean
+  /** The zone that judges calendar days in timestamp filters. */
+  zone?: string
 }
 
 /**
@@ -181,6 +183,7 @@ export function matchEndpoints(question: Question): Endpoint[] {
   if (question.filter.trim() !== '') query.filter = question.filter
   if (question.q.trim() !== '') query.q = question.q.trim()
   if (question.archived) query.archived = '1'
+  if (question.zone) query.tz = question.zone
   const typed = splitItems(question.filter).some((item) => item.split('=')[0]!.trim() === 'type')
   // The overlay is `/api/rows`' alone, as on the list's own read: the backlog has none.
   const rows: Endpoint = { path: ENDPOINT.rows, query: question.worktree ? { ...query, worktree: '1' } : query }

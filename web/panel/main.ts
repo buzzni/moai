@@ -224,7 +224,7 @@ async function start(): Promise<void> {
     if (key === '' || (!again && key === state.matched.key && askedAt === loads)) return
     const mine = ++asks
     askedAt = loads
-    const question = { filter: state.filter.applied, q: state.search.text, archived: state.view.showArchived, worktree: state.view.worktree }
+    const question = { filter: state.filter.applied, q: state.search.text, archived: state.view.showArchived, worktree: state.view.worktree, zone: zoneNow() }
     const next = matchEndpoints(question).map(requestKey)
     // The older question's reads this one does not share: their answer would be dropped, and they hold the slots.
     for (const old of askingKeys) if (!next.includes(old)) client.cancel(old)

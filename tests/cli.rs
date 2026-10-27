@@ -31690,6 +31690,34 @@ fn web_tree_judges_overdue_in_the_zone_the_page_draws() {
     }
 }
 
+/// Timestamp filters and the drawn dates use the same page zone; calendar plan days stay zone independent.
+#[test]
+fn web_rows_filter_judges_days_in_the_zone_the_page_draws() {
+    let s = init("web-filter-zone");
+    let row = json_of(&ok_at(s.path(), "2026-10-10T20:00:00Z", &["add", "Zone row", "--json"]));
+    let id = row["id"].as_str().unwrap();
+    let thought = json_of(&ok_at(s.path(), "2026-10-10T20:00:00Z", &["backlog", "add", "Zone thought", "--json"]));
+    let backlog_id = thought["id"].as_str().unwrap();
+    let web = serve_with(s.path(), |cmd| {
+        cmd.env("TZ", "UTC");
+    });
+    let found = |path: &str, zone: &str, id: &str| {
+        let (status, _, body) = get(web.port, &format!("{path}?filter=created%3D2026-10-11&fields=id{zone}"));
+        assert_eq!(status, 200, "{body}");
+        let env = json_of(&body);
+        assert_eq!(env["exit"], 0, "{body}");
+        env["out"].as_array().unwrap().iter().any(|r| r["id"] == id)
+    };
+    for (path, id) in [("/api/rows", id), ("/api/backlog", backlog_id)] {
+        assert!(!found(path, "", id));
+        assert!(!found(path, "&tz=UTC", id));
+        let tzdb = std::env::var_os("TZDIR").map_or_else(|| PathBuf::from("/usr/share/zoneinfo"), PathBuf::from);
+        if tzdb.join("Asia/Seoul").exists() {
+            assert!(found(path, "&tz=Asia%2FSeoul", id));
+        }
+    }
+}
+
 /// **405 의 `Allow` 는 그 길이 받는 메서드다**(moai-m4ez.4zq) — 읽음 표시 길은 `POST` 만 받는다.
 #[test]
 fn web_405_allow_names_the_methods_the_path_takes() {

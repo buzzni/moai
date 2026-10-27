@@ -266,3 +266,9 @@ test('the archive is read after a board read only when that read asked for its l
   assert.equal(archiveDue(true, true, true, false), false)
   assert.equal(archiveDue(true, true, false, true), false)
 })
+
+test('filter days use the page zone for both rows and backlog, without changing plain listing reads', () => {
+  const question = { filter: 'created=2026-10-11', q: '', archived: false }
+  for (const endpoint of matchEndpoints({ ...question, zone: 'Asia/Seoul' })) assert.equal(endpoint.query.tz, 'Asia/Seoul')
+  for (const endpoint of matchEndpoints(question)) assert.equal(endpoint.query.tz, undefined)
+})
