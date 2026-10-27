@@ -34,6 +34,13 @@ pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
             super::code::BAD_FILTER,
         ));
     }
+    // A one-level JSON listing never computes chart values; accepting its off flag there would silently do nothing.
+    if args.no_gantt && !args.deep {
+        return Err(Fail::coded(
+            crate::i18n::say(ctx.lang(), "refuse.tui_no_gantt_needs_deep"),
+            super::code::BAD_FILTER,
+        ));
+    }
     // **재는 것이 읽는 것보다 먼저다.** 읽고 나서 재면 그 사이에 떨어진 쓰기가
     // "이미 본 것" 으로 적혀 그 뒤로 영영 바뀐 줄 모른다. 먼저 재면 최악이
     // 헛 알림 하나고, 빠진 알림보다 헛 알림이 싸다.
@@ -82,11 +89,12 @@ pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
         super::report_load_errors(ctx.lang(), &repo.issues_path(), &load.errors);
         let states = ground.columns();
         let deep = args.deep;
+        let no_gantt = args.no_gantt;
         let entries = listing(ctx, &repo, &load.issues, &origin, &live, (&index, &ground), &path, args)?;
         // **간트는 `--deep` 에만 싣는다**(moai-d86e.b2m) — 그것을 읽는 자는 web 의 간트 탭(`/api/tree`)이고, 한 자리의
         // 목록을 묻는 쪽에 저장소 전부의 구간 셈을 물리지 않는다. 판단은 `report::gantt` 가 하고 여기는 줄에 얹기만 한다.
-        // 거르개 문맥도 `--deep` 에만 짓는다 — 한 자리 목록은 그것을 읽는 자가 없다.
-        let wh = deep.then(|| ground.here(&load.issues));
+        // `--no-gantt` 는 그 값과 거르개 문맥 셈을 함께 뺀다 — 간트를 안 보이는 웹 탭은 트리만 읽는다.
+        let wh = (deep && !no_gantt).then(|| ground.here(&load.issues));
         let gantt = wh.as_ref().map(|wh| {
             crate::report::gantt::gantt(&load.issues, &index, wh, &repo.config, &crate::model::now(), ctx.zone())
         });
@@ -504,6 +512,7 @@ fn shaped(args: &TuiArgs) -> Option<&'static str> {
         .or_else(|| args.order.reverse.then_some("--reverse"))
         .or_else(|| args.deep.then_some("--deep"))
         .or_else(|| args.no_archive.then_some("--no-archive"))
+        .or_else(|| args.no_gantt.then_some("--no-gantt"))
 }
 
 /// `--json` 이 낼 그 자리의 목록(moai-wk7i.5wx).
@@ -526,7 +535,7 @@ fn listing(
     path: &Path,
     args: TuiArgs,
 ) -> R<Vec<(Entry, Option<Vec<String>>)>> {
-    let TuiArgs { path: _, filter, order, deep, worktree: _, no_archive } = args;
+    let TuiArgs { path: _, filter, order, deep, worktree: _, no_archive, no_gantt: _ } = args;
     let given = super::show::first_given(&filter).is_some();
     if !given && order.sort.is_none() && !order.reverse && !no_archive {
         // 거르개도 차례도 없으면 `Index::entries` 의 그 자다 — 다 남기고 목록의 차례로.
@@ -643,7 +652,8 @@ struct Row<'g> {
     #[serde(skip_serializing_if = "Option::is_none")]
     home: Option<Vec<String>>,
     /// `--deep` 일 때 id 가 있는 줄마다 서는 계획·실제 구간 — [`crate::report::gantt::Row`] 의 꼴 그대로다(moai-d86e.b2m).
-    /// 바구니에는 없다. 그 안의 키는 늘 선다 — 값이 없으면 `null` 이다(`planned`·`overdue`).
+    /// 바구니에는 없고, `--no-gantt` 면 어느 줄에도 없다(moai-ijjd.i7v). 그 안의 키는 늘 선다 — 값이 없으면 `null` 이다
+    /// (`planned`·`overdue`).
     #[serde(skip_serializing_if = "Option::is_none")]
     gantt: Option<&'g crate::report::gantt::Row<'g>>,
 }
@@ -1207,28 +1217,29 @@ fn editor() -> Option<String> {
 }
 
 /// PATH 에 그 이름의 실행 파일이 있는가. **실행할 수 있는가는 [`super::runnable`] 이 답한다** —
-/// `skill` 과 같은 자다(moai-p3kb).
+/// `skill` 과 같은 자다(moai-p3kb). 훑는 걸음은 [`super::hits_in`] 이고, 빈 자리는 껍데기처럼 지금 자리로 센다.
 ///
 /// 여기서 `PATH` 를 제 손으로 훑는 것은 껍데기를 띄우지 않으려는 것이다. 편집기 후보가 여럿이고
 /// 띄울 때 한 번 고르는 자리라, 이름마다 `sh -c 'command -v'` 를 띄우면 그 값이 얻는 값보다 크다.
 #[cfg(unix)]
 fn on_path(name: &str) -> bool {
     let Some(dirs) = std::env::var_os("PATH") else { return false };
-    std::env::split_paths(&dirs).any(|d| super::runnable(&d.join(name)))
+    super::hits_in(std::env::split_paths(&dirs), name, &[], super::runnable).next().is_some()
 }
 
 /// 유닉스가 아닌 판의 [`on_path`] — **편집기를 띄울 길([`editor_command`])의 찾기를 그대로 탄다**(리뷰
 /// moai-j9gv.4s3). Git Bash 안이면 그 `sh` 가 띄우니 그 껍데기처럼 이름 그대로와 `.exe` 를 본다 — Git for Windows 의
 /// `vi` 는 확장자 없는 스크립트(`exec vim "$@"`)라 `PATHEXT` 로는 영영 안 잡혀, 이 에픽 전에 고르던 `vi` 를 놓친다.
-/// 그 밖에서는 `PATHEXT` 를 붙여 찾는다([`super::find_on_path`]).
+/// 그 밖에서는 `PATHEXT` 를 붙여 찾는다([`super::find_on_path`]). 훑는 걸음은 유닉스처럼 [`super::hits_in`] 이고 빈
+/// 자리도 그 껍데기처럼 지금 자리로 센다 — 확장자 목록의 빈 낱말이 "이름 그대로" 다.
 #[cfg(not(unix))]
 fn on_path(name: &str) -> bool {
     if msys_sh().is_none() {
         return super::find_on_path(name).is_some();
     }
     let Some(dirs) = std::env::var_os("PATH") else { return false };
-    std::env::split_paths(&dirs)
-        .any(|d| super::runnable(&d.join(name)) || super::runnable(&d.join(format!("{name}.exe"))))
+    let exts = [String::new(), ".exe".to_string()];
+    super::hits_in(std::env::split_paths(&dirs), name, &exts, super::runnable).next().is_some()
 }
 
 /// Git Bash(`MSYSTEM` 이 선다) 안에서 `PATH` 에 선 `sh.exe` — 편집기를 그 껍데기로 띄울지와 기본 편집기를 어떻게 찾을지를

@@ -2,7 +2,7 @@
 //!
 //! **요청에서 온 값은 틀의 자리에만 든다.** 쿼리의 값은 늘 `--긴이름=값` 한 토막이고 경로의 값(id·위키 쪽)은 `--`
 //! 뒤의 한 토막이라, `-` 로 시작해도 플래그로 안 읽히고 셸을 안 지난다(자식은 `Command::args` 로 뜬다).
-//! **하나만 argv 밖으로 간다** — `/api/tree` 의 `tz`(moai-vj8w.7sh)는 자식의 환경 `TZ` 가 된다. 모양은 [`zone_shape`] 가
+//! **하나만 argv 밖으로 간다** — 읽기 끝점의 `tz`(moai-vj8w.7sh)는 자식의 환경 `TZ` 가 된다. 모양은 [`zone_shape`] 가
 //! 재고(`.` 이 없고 첫 글자가 `/`·`:` 가 아니라 tzdb 밖의 파일을 못 가리킨다), 이 기계가 못 여는 이름은 서버가 안
 //! 넘긴다(`super::zone_for_child`).
 //! 거르개·찾기·정렬의 **뜻**과 거절(`bad_filter` 와 그 말)은 moai 가 낸다 — 서버는 모양(비지 않음·길이·제어 문자·
@@ -22,6 +22,7 @@ pub const ROW_FIELDS: &str = "id,title,kind,status,derived_status,priority,epic,
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Param {
     Archived,
+    Gantt,
     Filter,
     Q,
     Fields,
@@ -38,6 +39,7 @@ impl Param {
     fn name(self) -> &'static str {
         match self {
             Param::Archived => "archived",
+            Param::Gantt => "gantt",
             Param::Filter => "filter",
             Param::Q => "q",
             Param::Fields => "fields",
@@ -55,29 +57,31 @@ pub struct Profile {
     pub route: &'static str,
     pub head: &'static [&'static str],
     pub params: &'static [Param],
-    /// 아카이브를 **달라고 한 때만** 싣는 끝점이다(`/api/tree`, moai-m4ez.4zq) — 다른 끝점은 `archived=1` 을 줘야 싣고
-    /// 이쪽도 같은 말이지만, 자식의 기본이 반대라(`tui --json` 은 다 낸다) 안 줬을 때 `--no-archive` 를 얹는다.
-    pub without_archive: bool,
+    /// 자식이 기본으로 싣는 것을 **달라고 한 때만** 싣는 이름과, 안 줬을 때 얹는 끄는 플래그 — 줬으면 아무것도 안
+    /// 얹는다(`--<이름>` 꼴의 플래그는 자식에게 없다). `/api/tree` 의 아카이브(moai-m4ez.4zq)는 다른 끝점처럼 `archived=1`
+    /// 을 줘야 싣지만 자식의 기본이 반대라(`tui --json` 은 다 낸다) 이렇게 뒤집고, 간트 값(moai-ijjd.i7v)은 간트 탭이
+    /// 볼 때만 셈한다. 여기 선 이름은 `params` 에도 서야 받는다.
+    pub opt_in: &'static [(Param, &'static str)],
 }
 
-const LIST: &[Param] = &[Param::Archived, Param::Filter, Param::Q, Param::Fields];
+const LIST: &[Param] = &[Param::Archived, Param::Filter, Param::Q, Param::Fields, Param::Tz];
 /// 산 줄의 목록만 옆 워크트리를 겹친다(`--worktree`, 탐색기의 `SPC v w`) — backlog 는 겹칠 줄이 없다.
-const ROWS: &[Param] = &[Param::Archived, Param::Filter, Param::Q, Param::Fields, Param::Worktree];
+const ROWS: &[Param] = &[Param::Archived, Param::Filter, Param::Q, Param::Fields, Param::Worktree, Param::Tz];
 
 /// 자식을 띄우는 끝점들 — **쿼리를 재는 자가 하나다**([`argv`]). 받는 이름이 없는 끝점도 여기 서야 거기 붙인
 /// 쿼리가 거절된다(`/api/wiki?worktree=1` 을 말없이 맨 목록으로 답하던 판이 있었다). 경로에 값이 드는
 /// `/api/issue/<id>`·`/api/wiki/<slug>` 만 [`argv_of`] 가 따로 짓는다.
 pub const PROFILES: &[Profile] = &[
-    Profile { route: "/api/status", head: &["status"], params: &[Param::Worktree], without_archive: false },
-    Profile { route: "/api/rows", head: &["show", "--all"], params: ROWS, without_archive: false },
-    Profile { route: "/api/backlog", head: &["backlog", "show", "--all"], params: LIST, without_archive: false },
+    Profile { route: "/api/status", head: &["status"], params: &[Param::Worktree], opt_in: &[] },
+    Profile { route: "/api/rows", head: &["show", "--all"], params: ROWS, opt_in: &[] },
+    Profile { route: "/api/backlog", head: &["backlog", "show", "--all"], params: LIST, opt_in: &[] },
     Profile {
         route: "/api/tree",
         head: &["tui", "--deep"],
-        params: &[Param::Sort, Param::Reverse, Param::Worktree, Param::Archived, Param::Tz],
-        without_archive: true,
+        params: &[Param::Sort, Param::Reverse, Param::Worktree, Param::Archived, Param::Tz, Param::Gantt],
+        opt_in: &[(Param::Archived, "--no-archive"), (Param::Gantt, "--no-gantt")],
     },
-    Profile { route: "/api/wiki", head: &["wiki", "ls"], params: &[], without_archive: false },
+    Profile { route: "/api/wiki", head: &["wiki", "ls"], params: &[], opt_in: &[] },
     // 위키 탭의 찾기가 순위를 받는 자리(moai-xp7l.nyi) — CLI·TUI 와 같은 자로 매긴다. 상한은 페이지의 목록이 다 서도록
     // 넉넉히 둔다(순위는 절마다라 한 페이지가 여러 번 선다). `/api/wiki/<slug>` 밑에 두지 않는다 — `search` 라는 페이지와
     // 겹친다.
@@ -85,11 +89,11 @@ pub const PROFILES: &[Profile] = &[
         route: "/api/wiki-search",
         head: &["wiki", "search", "-n", "2000"],
         params: &[Param::Words],
-        without_archive: false,
+        opt_in: &[],
     },
     // 걸어 둔 프로젝트들 — 사용자 설정을 읽으니 어느 자리에서 돌아도 같은 답이다. 페이지는 그 `path` 를
     // `project=` 로 되돌려 보내 그 프로젝트를 읽는다([`super::project_of`]).
-    Profile { route: "/api/projects", head: &["project", "ls"], params: &[], without_archive: false },
+    Profile { route: "/api/projects", head: &["project", "ls"], params: &[], opt_in: &[] },
 ];
 
 /// 거르개 줄 하나의 상한(바이트) — 줄을 나눠 여러 `--filter` 가 된다.
@@ -346,7 +350,7 @@ fn zone_shape(name: &str, value: &str) -> Result<(), Bad> {
     (offset || (first && fits)).then_some(()).ok_or_else(|| Bad::Shape(name.to_string()))
 }
 
-/// 쿼리가 낸 시간대 — 모양은 [`argv`] 가 이미 쟀다. 자식은 이것을 `TZ` 로 받아, 늦었는가(`overdue`)를 페이지가 그리는
+/// 쿼리가 낸 시간대 — 모양은 [`argv`] 가 이미 쟀다. 자식은 이것을 `TZ` 로 받아, 늦었는가(`overdue`)와 거르개의 날을 페이지가 그리는
 /// 시간대로 잰다(moai-vj8w.7sh). 안 줬으면 `None` 이고 자식은 서버의 시간대 그대로다. 이 기계가 못 여는 이름을 거르는 것은
 /// 자식을 띄우는 쪽이다([`super::zone_for_child`]) — 여기는 파일을 안 연다.
 pub fn zone_of(query: &[(String, String)]) -> Option<&str> {
@@ -374,12 +378,12 @@ pub fn argv(profile: &Profile, query: &[(String, String)]) -> Result<Vec<String>
     let mut fields = None;
     for (p, (name, value)) in seen.into_iter().zip(query) {
         match p {
-            Param::Archived | Param::Reverse | Param::Worktree => {
+            Param::Archived | Param::Gantt | Param::Reverse | Param::Worktree => {
                 if value != "1" {
                     return Err(Bad::Shape(name.clone()));
                 }
-                // 아카이브를 기본으로 싣는 자식에게는 달라는 말이 따로 없다 — 안 줄 때만 뺀다(아래).
-                if !(p == Param::Archived && profile.without_archive) {
+                // 기본으로 싣는 자식에게는 달라는 말이 따로 없다 — 안 줄 때만 뺀다(아래, `Profile::opt_in`).
+                if !profile.opt_in.iter().any(|&(o, _)| o == p) {
                     out.push(format!("--{}", p.name()));
                 }
             }
@@ -418,8 +422,10 @@ pub fn argv(profile: &Profile, query: &[(String, String)]) -> Result<Vec<String>
             }
         }
     }
-    if profile.without_archive && !query.iter().any(|(n, _)| n == Param::Archived.name()) {
-        out.push("--no-archive".to_string());
+    for &(p, off) in profile.opt_in {
+        if !query.iter().any(|(n, _)| n == p.name()) {
+            out.push(off.to_string());
+        }
     }
     if profile.params.contains(&Param::Fields) {
         out.push(format!("--fields={}", fields.unwrap_or(ROW_FIELDS)));
@@ -497,10 +503,10 @@ mod tests {
         out
     }
 
-    /// **`tz` 는 `/api/tree` 만 받고 argv 에는 안 든다**(moai-vj8w.7sh) — 자식의 `TZ` 로 가니 틀이 바뀌면 안 된다.
+    /// **`tz` 는 트리와 목록이 받고 argv 에는 안 든다**(moai-vj8w.7sh) — 자식의 `TZ` 로 가니 틀이 바뀌면 안 된다.
     /// 모양은 tzdb 이름의 글자뿐이다.
     #[test]
-    fn tz_is_a_zone_name_for_the_tree_alone_and_leaves_the_argv_as_it_was() {
+    fn tz_is_a_zone_name_for_reads_and_leaves_the_argv_as_it_was() {
         let plain = argv_of("/api/tree", &[]).unwrap().unwrap();
         let asked = q(&[("tz", "Asia/Seoul")]);
         assert_eq!(argv_of("/api/tree", &asked).unwrap().unwrap(), plain);
@@ -527,16 +533,50 @@ mod tests {
         }
         assert!(matches!(argv_of("/api/tree", &q(&[("tz", "")])).unwrap(), Err(Bad::Empty(_))));
         assert!(matches!(argv_of("/api/tree", &q(&[("tz", "UTC"), ("tz", "UTC")])).unwrap(), Err(Bad::Twice(_))));
-        assert!(matches!(argv_of("/api/rows", &asked).unwrap(), Err(Bad::Unknown(_))));
+        for path in ["/api/rows", "/api/backlog"] {
+            assert_eq!(argv_of(path, &asked).unwrap().unwrap(), argv_of(path, &[]).unwrap().unwrap());
+        }
+        for path in ["/api/status", "/api/wiki"] {
+            assert!(matches!(argv_of(path, &asked).unwrap(), Err(Bad::Unknown(_))));
+        }
     }
 
     #[test]
     fn an_empty_query_is_the_bare_template() {
         assert_eq!(rows(&[]).unwrap(), with_fields(vec!["show", "--all"]));
         assert_eq!(argv_of("/api/backlog", &[]).unwrap().unwrap(), with_fields(vec!["backlog", "show", "--all"]));
-        assert_eq!(argv_of("/api/tree", &[]).unwrap().unwrap(), strs(&["tui", "--deep", "--no-archive"]));
+        assert_eq!(argv_of("/api/tree", &[]).unwrap().unwrap(), strs(&["tui", "--deep", "--no-archive", "--no-gantt"]));
         assert_eq!(argv_of("/api/status", &[]).unwrap().unwrap(), strs(&["status"]));
         assert_eq!(argv_of("/api/wiki", &[]).unwrap().unwrap(), strs(&["wiki", "ls"]));
+    }
+
+    /// `opt_in` 의 이름은 그 끝점이 받는 이름이고, `gantt` 는 늘 그 목록에 선다 — 안 서면 [`argv`] 가 자식에게 없는
+    /// `--gantt` 를 지어 clap 이 `code` 없는 글로 거절한다.
+    #[test]
+    fn opt_in_names_are_taken_and_gantt_is_never_a_flag() {
+        for p in PROFILES {
+            assert!(p.opt_in.iter().all(|(o, _)| p.params.contains(o)), "{}", p.route);
+            assert!(
+                !p.params.contains(&Param::Gantt) || p.opt_in.iter().any(|&(o, _)| o == Param::Gantt),
+                "{}",
+                p.route
+            );
+        }
+    }
+
+    #[test]
+    fn gantt_values_are_opt_in_for_the_tree_only() {
+        assert_eq!(
+            argv_of("/api/tree", &q(&[("gantt", "1")])).unwrap().unwrap(),
+            strs(&["tui", "--deep", "--no-archive"])
+        );
+        for value in ["0", "", "true", "2"] {
+            assert!(matches!(argv_of("/api/tree", &q(&[("gantt", value)])).unwrap(), Err(Bad::Shape(_))));
+        }
+        assert!(matches!(argv_of("/api/tree", &q(&[("gantt", "1"), ("gantt", "1")])).unwrap(), Err(Bad::Twice(_))));
+        for path in ["/api/rows", "/api/backlog", "/api/status"] {
+            assert!(matches!(argv_of(path, &q(&[("gantt", "1")])).unwrap(), Err(Bad::Unknown(_))));
+        }
     }
 
     #[test]
@@ -559,10 +599,10 @@ mod tests {
         let v = rows(&[("archived", "1"), ("fields", "id")]).unwrap();
         assert_eq!(v, strs(&["show", "--all", "--archived", "--fields=id"]));
         let v = argv_of("/api/tree", &q(&[("sort", "title"), ("reverse", "1")])).unwrap().unwrap();
-        assert_eq!(v, strs(&["tui", "--deep", "--sort=title", "--reverse", "--no-archive"]));
+        assert_eq!(v, strs(&["tui", "--deep", "--sort=title", "--reverse", "--no-archive", "--no-gantt"]));
         // 아카이브를 보이는 페이지만 달라고 한다 — 안 보이는 동안 3천 줄의 95% 를 싣지 않는다(moai-m4ez.4zq).
         let v = argv_of("/api/tree", &q(&[("archived", "1"), ("worktree", "1")])).unwrap().unwrap();
-        assert_eq!(v, strs(&["tui", "--deep", "--worktree"]));
+        assert_eq!(v, strs(&["tui", "--deep", "--worktree", "--no-gantt"]));
         assert!(matches!(argv_of("/api/tree", &q(&[("archived", "0")])).unwrap(), Err(Bad::Shape(_))));
     }
 
@@ -638,7 +678,7 @@ mod tests {
         assert!(matches!(argv_of("/api/tree", &q(&[("q", "x")])).unwrap(), Err(Bad::Unknown(_))));
         assert_eq!(
             argv_of("/api/tree", &q(&[("worktree", "1")])).unwrap().unwrap(),
-            strs(&["tui", "--deep", "--worktree", "--no-archive"])
+            strs(&["tui", "--deep", "--worktree", "--no-archive", "--no-gantt"])
         );
         assert!(matches!(argv_of("/api/wiki", &q(&[("q", "x")])).unwrap(), Err(Bad::Unknown(_))));
         // 위키 찾기의 낱말은 `--` 뒤의 자리 인자다(moai-xp7l.nyi).

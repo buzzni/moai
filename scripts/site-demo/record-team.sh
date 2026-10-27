@@ -38,7 +38,7 @@ PLAN
 trap 'echo "record-team.sh: failed, undoing the plugin registration" >&2; (cd "$repo" && moai skill uninstall >/dev/null 2>&1) || true' ERR
 
 tmx() {
-  env -i HOME="$HOME" USER="${USER:-coder}" SHELL=/bin/bash LANG=C.UTF-8 TERM=xterm-256color COLORTERM=truecolor \
+  env -i HOME="$HOME" USER="${USER:-coder}" SHELL=/bin/bash LANG=C.UTF-8 TZ=UTC TERM=xterm-256color COLORTERM=truecolor \
     PATH="$PATH" MOAI_CONFIG="$MOAI_CONFIG" MOAI_NO_UPDATE_CHECK=1 MOAI_LANG=en "$tmux_bin" -L moai-demo -f /dev/null "$@"
 }
 # 왼쪽 한 칸 전체가 moai tui, 오른쪽을 셋으로: Claude Code(감독) · Codex · Antigravity

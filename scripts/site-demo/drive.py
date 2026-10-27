@@ -26,6 +26,14 @@ def scenes(repo):
         moves = [(gap, f'\x1b[<32;{x};{y}M') for x in range(x0 + step, x1 + step, step)]
         return [(wait, f'\x1b[<0;{x0};{y}M'), *moves, (0.3, f'\x1b[<0;{x1};{y}m')]
     return {
+        # v0.30.0 소식(moai-87vm): 등록한 프로젝트 둘 중 지금 서 있는 곳에 ▸.
+        # record-tui.sh 가 데모 전용 설정에 프로젝트 둘을 등록해 둔다.
+        'release-header': [(1.5, TAB), (2.5, None)],
+        # 통계 창 위에서도 ? 로 키 목록을 연다. 창 뒤의 통계 머리가 보이게 찍는다.
+        'release-stats-keys': [
+            (2.0, SPC), (0.7, 'g'), (0.6, 's'),
+            (2.0, '?'), (3.0, None),
+        ],
         # 목록 → 칸반 → 위키
         'tour': [
             (2.2, TAB), (1.4, 'j'), *key('j', 'j', 'j', 'j', 'j', 'j', gap=0.85),
@@ -73,7 +81,9 @@ def scenes(repo):
             (3.5, None),
         ],
         # v0.27.0 의 소식(moai-0fai): 간트 머리의 달 이름이 화면의 말을 따른다. make.sh 가 DEMO_LANG=ko 로 찍는다.
-        # 계획한 날은 gantt 처럼 plan.sh 가 단다. 주 걸음(-)으로 밀면 머리에 달 이름이 선다
+        # 계획한 날은 gantt 처럼 plan.sh 가 단다. 주 걸음(-)으로 밀면 머리에 달 이름이 선다.
+        # v0.30.0 의 소식(moai-87vm)도 이 장면이다: 계획을 맞춘 Week 에서 7.8초의 - 로 Month 로 가, 해 아래에 숫자 달이
+        # 한 칸씩 떨어져 선다. 그쪽 make.sh 는 9.7초를 찍는다 — 걸음을 바꾸면 두 make.sh 의 시각을 같이 본다
         'gantt-months': [
             (2.0, SPC), (0.7, 'g'), (0.6, 'g'),
             (2.5, 't'), (2.0, '-'),
@@ -139,11 +149,15 @@ def main():
     moai = os.environ.get('MOAI', 'moai')
     moai = os.path.abspath(moai) if os.sep in moai else (shutil.which(moai) or moai)
     os.environ['MOAI'] = moai   # 장면의 뒤쪽 명령(sh)도 같은 바이너리를 부른다
-    # 녹화하는 사람의 환경이 화면에 새지 않게: 정체·키·색·말은 데모의 것으로
-    env = dict(os.environ, TERM='xterm-256color', MOAI_NO_UPDATE_CHECK='1', COLORTERM='truecolor', MOAI_LANG=os.environ.get('DEMO_LANG', 'en'),
+    # 녹화하는 사람의 환경이 화면에 새지 않게: 정체·키·색·말·시간대는 데모의 것으로
+    env = dict(os.environ, TZ='UTC', TERM='xterm-256color', MOAI_NO_UPDATE_CHECK='1', COLORTERM='truecolor', MOAI_LANG=os.environ.get('DEMO_LANG', 'en'),
                MOAI=moai, MOAI_CONFIG=os.path.join(repo, '.demo-home', 'config.toml'))
     for k in ('MOAI_NOW', 'MOAI_ACTOR', 'MOAI_KEYS', 'NO_COLOR'):
         env.pop(k, None)
+    if os.environ.get('DEMO_NOW'):
+        # seed.sh 가 날을 맞춘 자(GNU date)와 꼴(RFC3339 UTC)로 — moai 는 MOAI_NOW 를 글자 그대로 저장된 시각과 견준다
+        env['MOAI_NOW'] = subprocess.run(['date', '-u', '-d', os.environ['DEMO_NOW'], '+%Y-%m-%dT%H:%M:%SZ'],
+                                         check=True, capture_output=True, text=True).stdout.strip()
     pid, fd = pty.fork()
     if pid == 0:
         # 크기는 자식이 exec 하기 전에 제 터미널에 건다 — 부모가 나중에 걸면 TUI 가 0×0 을 먼저 읽을 수 있다

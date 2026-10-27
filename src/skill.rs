@@ -132,8 +132,9 @@ pub fn misnamed<'a>(with: &[&'a str], without: &[&'a str]) -> Option<Misnamed<'a
 }
 
 /// `all` 가운데 늘 심는 것과 `optional` 에 든 선택 스킬만 — 저장소의 트리 둘([`tree`]·[`agents_tree`])이 이것을 받는다.
-pub fn picked(all: &[Skill], optional: &[&str]) -> Vec<Skill> {
-    all.iter().filter(|s| !is_optional(s.name) || optional.contains(&s.name)).cloned().collect()
+/// 복사하지 않는다 — 글은 `skill_files` 가 트리에 담을 때 한 번 복사된다.
+pub fn picked<'a>(all: &'a [Skill], optional: &[&str]) -> Vec<&'a Skill> {
+    all.iter().filter(|s| !is_optional(s.name) || optional.contains(&s.name)).collect()
 }
 
 /// **moai 가 한 번이라도 심은 스킬**과 그 디렉터리 안에 심은 파일 — 지금 심는 것([`NAMES`]·[`OPTIONAL`])에 걷은 것이
@@ -176,7 +177,6 @@ pub const AGENTS_DIR: &str = ".agents/skills";
 
 /// 심는 스킬 하나 — 이름([`NAMES`]·[`OPTIONAL`] 의 한 칸)과 그 디렉터리 안에 심을 글. 경로는 스킬 디렉터리부터의
 /// 상대고 첫 글이 `SKILL.md` 다.
-#[derive(Clone)]
 pub struct Skill {
     pub name: &'static str,
     pub files: Vec<(&'static str, String)>,
@@ -256,8 +256,12 @@ where
 /// [`AGENTS_DIR`] 에 심을 파일들. 경로는 그 자리부터의 상대다. **Claude 의 트리와 글이 같다** — 다른 것은 매니페스트가
 /// 없다는 것과 Claude 에만 서는 스킬([`Skill::claude_only`], 감독)이 빠진다는 것뿐이고, 에이전트마다 다른 걸음은 글
 /// 안의 낱말표(`guide::VERBS`)가 열로 가른다(사용자 결정 2026-10-04).
-pub fn agents_tree(skills: &[Skill]) -> Vec<(PathBuf, String)> {
-    skill_files(skills.iter().filter(|s| !s.claude_only)).map(|(p, b)| (PathBuf::from(p), b)).collect()
+pub fn agents_tree<'a, I>(skills: I) -> Vec<(PathBuf, String)>
+where
+    I: IntoIterator<Item = &'a Skill>,
+    I::IntoIter: 'a,
+{
+    skill_files(skills.into_iter().filter(|s| !s.claude_only)).map(|(p, b)| (PathBuf::from(p), b)).collect()
 }
 
 /// 마켓플레이스 이름. `claude plugin install moai@<이것>` 의 뒷부분이다.
@@ -901,14 +905,22 @@ fn shell_line(exe: &str, event: &str, dialect: Dialect) -> String {
 ///
 /// 판이 **내려가도** 괜찮은 까닭은 [`version_of`] 에 있다. 두 자리에 나눠 적으면
 /// 한쪽만 고쳐져 갈라진다 — 실제로 여기 적혀 있던 까닭이 틀린 채로 남아 있었다.
-pub fn tree(prefix: &str, root: &Path, exe: &str, skills: &[Skill]) -> Vec<(PathBuf, String)> {
+pub fn tree<'a, I>(prefix: &str, root: &Path, exe: &str, skills: I) -> Vec<(PathBuf, String)>
+where
+    I: IntoIterator<Item = &'a Skill>,
+    I::IntoIter: 'a,
+{
     tree_named(&market(prefix, root), exe, skills)
 }
 
 /// `tree` 의 몸통. 저장소 자리는 마켓플레이스 이름으로만 들어오므로, 이름을
 /// 받아 두면 **커밋된 트리를 그 트리가 적힌 자리 그대로** 다시 낼 수 있다 —
 /// 다른 체크아웃(워크트리)에서 부른 시험이 남의 자리를 안 섞는다.
-fn tree_named(market: &str, exe: &str, skills: &[Skill]) -> Vec<(PathBuf, String)> {
+fn tree_named<'a, I>(market: &str, exe: &str, skills: I) -> Vec<(PathBuf, String)>
+where
+    I: IntoIterator<Item = &'a Skill>,
+    I::IntoIter: 'a,
+{
     let mut files: Vec<(PathBuf, String)> =
         skill_files(skills).map(|(p, b)| (PathBuf::from(format!("skills/{p}")), b)).collect();
     let market = (PathBuf::from(".claude-plugin/marketplace.json"), marketplace_json(market));
@@ -1650,7 +1662,7 @@ mod tests {
     /// 이름을 다시 이슈 id 로 센다(moai-mdzx.3pm). 선택 스킬을 다 빼고 지은 트리는 [`NAMES`] 만 심는다(moai-3r7l).
     #[test]
     fn the_tree_plants_every_skill_name() {
-        let dirs = |skills: &[Skill]| -> Vec<String> {
+        let dirs = |skills: Vec<&Skill>| -> Vec<String> {
             tree("t", Path::new("/repo"), "/bin/moai", skills)
                 .into_iter()
                 .filter_map(|(p, _)| {
@@ -1661,16 +1673,16 @@ mod tests {
         };
         let all = fake("스킬", "감독", "위키");
         let every: Vec<&str> = NAMES.into_iter().chain(optional_names()).collect();
-        assert_eq!(dirs(&all), every);
-        assert_eq!(dirs(&picked(&all, &[])), NAMES, "고르지 않은 선택 스킬을 심었다");
-        assert_eq!(dirs(&picked(&all, &["moai-tmux", "moai-cmux", "moai-saycode"])), every);
+        assert_eq!(dirs(all.iter().collect()), every);
+        assert_eq!(dirs(picked(&all, &[])), NAMES, "고르지 않은 선택 스킬을 심었다");
+        assert_eq!(dirs(picked(&all, &["moai-tmux", "moai-cmux", "moai-saycode"])), every);
         assert_eq!(
-            dirs(&picked(&all, &["moai-cmux"])),
+            dirs(picked(&all, &["moai-cmux"])),
             [&NAMES[..], &["moai-cmux"]].concat(),
             "고른 하나만 심지 않았다"
         );
         let tmux_only: Vec<&str> = NAMES.into_iter().chain(["moai-tmux"]).collect();
-        assert_eq!(dirs(&picked(&all, &["moai-tmux"])), tmux_only, "고르지 않은 Saycode 스킬을 심었다");
+        assert_eq!(dirs(picked(&all, &["moai-tmux"])), tmux_only, "고르지 않은 Saycode 스킬을 심었다");
     }
 
     /// **두 목록은 겹치지 않고, 선택 스킬도 [`EVER_PLANTED`] 에 든다**(moai-3r7l) — 겹치면 늘 심는 스킬을 `--without` 으로
@@ -2031,7 +2043,7 @@ mod tests {
             nth.set(nth.get() + 1);
             let tmp = at.join(format!("tmp{}", nth.get()));
             std::fs::create_dir_all(&tmp).unwrap();
-            let out = std::process::Command::new(shell)
+            let out = crate::test_shell::shell(shell)
                 .args([flags, &command(exe, "pre-tool-use")])
                 .env("TMPDIR", &tmp)
                 .output()
@@ -2052,7 +2064,7 @@ mod tests {
                 // 읽기로 연 파일을 stdout 으로 준다 — 쓰기가 `EBADF` 로 지고 시그널은 안 온다.
                 std::process::Stdio::from(std::fs::File::open(exe).unwrap())
             };
-            let mut child = std::process::Command::new(shell)
+            let mut child = crate::test_shell::shell(shell)
                 .args([flags, &command(exe, "pre-tool-use")])
                 .env("TMPDIR", &tmp)
                 .stdout(sink)
@@ -2123,7 +2135,7 @@ mod tests {
             // 어느 쪽인지는 정하지 않는다 — dash 와 bash 5.2 는 127, Arch 의 `sh`(bash)는 126 을 냈다.
             // 훅이 지키는 계약은 "껍데기가 낸 값을 그대로 옮긴다" 이니, 같은 껍데기로 맨 실행을 한 번
             // 재어 그 값을 기대한다. 126·127 밖이면 그 판이 못 도는 판을 안 지었다는 뜻이라 멈춘다.
-            let asked = std::process::Command::new(sh)
+            let asked = crate::test_shell::shell(sh)
                 .args(["-c", &crate::text::single_quoted(&gone)])
                 .stderr(std::process::Stdio::null())
                 .status()
@@ -2510,7 +2522,7 @@ mod tests {
         // **껍데기를 하나로 두지 않는다**([`shells`]) — 아래 `true` 의 까닭(특수 내장의 리다이렉션
         // 실패)은 dash 에서만 드러나, `sh` 가 bash 인 기계에서 한 벌만 돌리면 푸르게 지나간다.
         let run = |shell: &str, what: &str, tmp: &std::path::Path| {
-            let out = std::process::Command::new(shell)
+            let out = crate::test_shell::shell(shell)
                 .args(["-c", what])
                 .env("TMPDIR", tmp)
                 .output()
@@ -2619,7 +2631,7 @@ mod tests {
             let tmp = at.join(format!("tmp-{k}"));
             std::fs::create_dir_all(&tmp).unwrap();
             let run = |line: &str| {
-                let out = std::process::Command::new(sh).args(["-c", line]).env("TMPDIR", &tmp).output().unwrap();
+                let out = crate::test_shell::shell(sh).args(["-c", line]).env("TMPDIR", &tmp).output().unwrap();
                 (out.status.code(), String::from_utf8_lossy(&out.stdout).to_string())
             };
             for (dialect, word) in [(Dialect::Codex, "codex"), (Dialect::Antigravity, "antigravity")] {
@@ -2933,7 +2945,7 @@ mod tests {
     fn shells() -> Vec<&'static str> {
         let found: Vec<&str> = ["sh", "bash", "dash"]
             .into_iter()
-            .filter(|s| std::process::Command::new(s).args(["-c", "exit 0"]).output().is_ok())
+            .filter(|s| crate::test_shell::shell(s).args(["-c", "exit 0"]).output().is_ok())
             .collect();
         assert!(!found.is_empty(), "껍데기가 하나도 없다");
         found
@@ -3025,7 +3037,7 @@ mod tests {
         };
         for sh in shells() {
             let tmp = fresh();
-            let out = std::process::Command::new(sh)
+            let out = crate::test_shell::shell(sh)
                 .args(["-c", &command(&board.display().to_string(), "user-prompt-submit")])
                 .env("TMPDIR", &tmp)
                 .output()
@@ -3037,7 +3049,7 @@ mod tests {
             // **받는 쪽이 못 받으면 표식이 안 선다** — `-ec` 에서도 0 이다.
             for flags in ["-c", "-ec"] {
                 let tmp = fresh();
-                let status = std::process::Command::new(sh)
+                let status = crate::test_shell::shell(sh)
                     .args([flags, &command(&board.display().to_string(), "user-prompt-submit")])
                     .env("TMPDIR", &tmp)
                     .stdout(std::process::Stdio::from(std::fs::File::open(&board).unwrap()))
@@ -3049,7 +3061,7 @@ mod tests {
             }
 
             let tmp = fresh();
-            let out = std::process::Command::new(sh)
+            let out = crate::test_shell::shell(sh)
                 .args(["-c", &command(&linked.display().to_string(), "user-prompt-submit")])
                 .env("TMPDIR", &tmp)
                 .output()
@@ -3058,7 +3070,7 @@ mod tests {
             assert!(!tmp.join("mark").exists(), "{sh}: 링크로 선 쪽지를 읽었다");
 
             let tmp = fresh();
-            let out = std::process::Command::new(sh)
+            let out = crate::test_shell::shell(sh)
                 .args(["-c", &command(&felled.display().to_string(), "user-prompt-submit")])
                 .env("TMPDIR", &tmp)
                 .stderr(std::process::Stdio::null())
@@ -3070,7 +3082,7 @@ mod tests {
 
             for flags in ["-c", "-ec"] {
                 let tmp = fresh();
-                let out = std::process::Command::new(sh)
+                let out = crate::test_shell::shell(sh)
                     .args([flags, &command(&astray.display().to_string(), "user-prompt-submit")])
                     .env("TMPDIR", &tmp)
                     .stderr(std::process::Stdio::null())
@@ -3087,7 +3099,7 @@ mod tests {
             assert!(!bare.contains("! [ -e \"$m\" ]"), "빈 자리 확인의 글이 바뀌었다 — 이 시험이 걷을 글을 고친다");
             let tmp = fresh();
             std::fs::write(tmp.join("mark"), "x").unwrap();
-            let out = std::process::Command::new(sh).args(["-c", &bare]).env("TMPDIR", &tmp).output().unwrap();
+            let out = crate::test_shell::shell(sh).args(["-c", &bare]).env("TMPDIR", &tmp).output().unwrap();
             assert_eq!(out.status.code(), Some(0), "{sh}: 선 표식이 게이트가 됐다");
             assert_eq!(
                 std::fs::read_to_string(tmp.join("mark")).unwrap(),
@@ -3100,7 +3112,7 @@ mod tests {
             let tmp = fresh();
             if mkfifo(&tmp.join("mark")) {
                 let out = bounded({
-                    let mut cmd = std::process::Command::new(sh);
+                    let mut cmd = crate::test_shell::shell(sh);
                     cmd.args(["-c", &command(&board.display().to_string(), "user-prompt-submit")]).env("TMPDIR", &tmp);
                     cmd
                 });
@@ -3173,7 +3185,7 @@ mod tests {
             // stderr 는 버린다 — 여덟이 저마다 껍데기의 `Permission denied` 를 시험 출력에 흘린다.
             let kids: Vec<_> = (0..8)
                 .map(|_| {
-                    std::process::Command::new(sh)
+                    crate::test_shell::shell(sh)
                         .args(["-c", &line])
                         .env("TMPDIR", &race)
                         .env("CLAUDE_CODE_SESSION_ID", "race")
@@ -3197,7 +3209,7 @@ mod tests {
             std::fs::write(&mine, "keep").unwrap();
             std::os::unix::fs::symlink(&mine, &mark).unwrap();
             for _ in 0..2 {
-                let out = std::process::Command::new(sh)
+                let out = crate::test_shell::shell(sh)
                     .args(["-c", &line])
                     .env("TMPDIR", &squat)
                     .env("CLAUDE_CODE_SESSION_ID", "squat")
@@ -3219,7 +3231,7 @@ mod tests {
             std::fs::create_dir_all(&held).unwrap();
             let own = mark_in(&held, "held");
             std::fs::write(&own, "x").unwrap();
-            let out = std::process::Command::new(sh)
+            let out = crate::test_shell::shell(sh)
                 .args(["-c", &bare])
                 .env("TMPDIR", &held)
                 .env("CLAUDE_CODE_SESSION_ID", "held")
@@ -3238,7 +3250,7 @@ mod tests {
                 std::os::unix::fs::symlink(&fifo, mark_in(&piped, "linked")).unwrap();
                 for session in ["fifo", "linked"] {
                     let out = bounded({
-                        let mut cmd = std::process::Command::new(sh);
+                        let mut cmd = crate::test_shell::shell(sh);
                         cmd.args(["-c", &line]).env("TMPDIR", &piped).env("CLAUDE_CODE_SESSION_ID", session);
                         cmd
                     });

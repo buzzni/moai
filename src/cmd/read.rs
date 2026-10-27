@@ -23,9 +23,12 @@ pub fn run(ctx: &Ctx, args: ReadArgs) -> R<Vec<String>> {
     // 겹치기)에서 id 를 찾아 그 판의 `updated_at` 을 적는다. 옆에만 있는 줄도 적히고, 옆이 더 늦게 고친 줄은 그
     // 늦은 값이 적혀 [NEW] 가 내린다. 쓰는 길은 그대로 [`crate::read_marks::update`] 하나고 옆 워크트리에는 아무것도
     // 안 쓴다. 옆을 못 읽은 까닭은 말하지 않는다 — 이 명령은 읽음을 적을 뿐이고, 못 읽은 옆의 줄은 `missing` 이 된다.
-    let load = match args.worktree.worktree {
-        true => crate::worktree::gather(&repo, true)?.load,
-        false => repo.read()?,
+    let (load, beside) = if args.worktree.worktree {
+        let (seen, own) = crate::worktree::gather_reading(&repo)?;
+        let beside = Beside { seen_all: seen_all(&seen), own };
+        (seen.load, Some(beside))
+    } else {
+        (repo.read()?, None)
     };
     let now = crate::model::now();
     let path = super::project::writable_config(ctx)?;
@@ -107,7 +110,7 @@ pub fn run(ctx: &Ctx, args: ReadArgs) -> R<Vec<String>> {
         Vec::new()
     } else {
         // 걷을 것을 **쓸 때만** 센다 — 적을 것이 없는 판에서 줄 수만큼 집합을 짓지 않는다(리뷰).
-        let keep = keep_for_prune(&repo, &load);
+        let keep = keep_for_prune(&repo, &load, beside);
         // **집합은 닫은 글 밖에서 한 번 짓는다**(리뷰) — [`crate::read_marks::update`] 는 그 글을 두 번
         // 돌릴 수 있어(짓기 전 재 보기), 안에서 지으면 줄 수만큼의 짓기가 판마다 두 번 선다.
         let keep: Option<BTreeSet<&str>> = keep.as_ref().map(|k| k.iter().map(String::as_str).collect());
@@ -198,6 +201,18 @@ fn say_why(whys: &[crate::read_marks::SheetTrouble], ctx: &Ctx, said: &mut BTree
     }
 }
 
+/// `--worktree` 의 한 걸음([`crate::worktree::gather_reading`])이 걷기에 넘기는 것 — 화면에 안 겹친 제 사본과, 옆을
+/// 빠짐없이 봤는가. id 는 여기서 세지 않는다 — 걷기가 쓸 때만 센다([`crate::worktree::Unshown::keep`]).
+struct Beside {
+    own: crate::worktree::Unshown,
+    seen_all: bool,
+}
+
+/// 옆을 **빠짐없이 봤는가** — 못 읽은 옆(`trouble`)도, 아예 못 찾은 옆(`unfound`)도 없다. 걷기의 두 길이 한 자로 가른다.
+fn seen_all(seen: &crate::worktree::Gathered) -> bool {
+    seen.trouble.is_empty() && seen.unfound.is_none()
+}
+
 /// 걷을 때 **지킬 id 전부** — 되면 `Some`, 이 스냅샷이 트래커 전부를 봤다고 말 못 하면 `None` 이고
 /// 그때는 **안 걷는다**(리뷰).
 ///
@@ -215,21 +230,28 @@ fn say_why(whys: &[crate::read_marks::SheetTrouble], ctx: &Ctx, said: &mut BTree
 ///   **아예 못 찾았으면(`unfound`) 도 그렇다**(리뷰) — 그때는 `trouble` 이 빈 채로 옆이 통째로 안 보인다
 ///
 /// 옆을 훑는 값은 **쓸 때만** 치른다(부르는 쪽이 `targets` 가 빈 판에서 안 부른다).
-fn keep_for_prune(repo: &Repo, load: &crate::store::Load) -> Option<BTreeSet<String>> {
+/// `--worktree` 길은 화면을 읽을 때 이미 훑은 것을 쓴다.
+fn keep_for_prune(repo: &Repo, load: &crate::store::Load, beside: Option<Beside>) -> Option<BTreeSet<String>> {
     if load.errors.iter().any(|e| e.id.is_none()) {
         return None;
     }
     // 집은 표식은 `⎇` 이름에만 들고 겹치는 줄은 안 바꾼다 — 여기는 id 만 세니 안 읽는다. **제 워크트리의
     // 사본도 센다** — 화면은 그것을 빼지만, 루트의 탐색기는 그것을 옆으로 겹쳐 도장을 찍는다(`gather_unmarked`).
-    let beside = crate::worktree::gather_unmarked(repo).ok()?;
+    //
     // **못 찾은 것도 못 읽은 것이다**(리뷰) — `unfound` 는 "옆을 아예 못 셌다"(git 이 없거나 저장소가
     // 아니다)는 뜻이라, 이때 `trouble` 은 빌 수밖에 없고 `sides` 도 비어 제 줄만 남는다. 그것을 걷을
     // 기준으로 삼으면 옆에만 있는 줄의 도장이 조용히 지워진다 — 조용한 손실은 이 도구가 못 견디는
     // 유일한 실패다. 못 봤으면 안 걷는다.
-    if !beside.trouble.is_empty() || beside.unfound.is_some() {
-        return None;
-    }
-    Some(beside.load.issues.iter().map(|i| i.id.clone()).chain(load.reserved_ids()).collect())
+    let mut keep: BTreeSet<String> = match beside {
+        // `--worktree` 길 — `load` 가 곧 그 걸음의 화면 판이고, 그 판에 안 겹친 제 사본만 더 센다.
+        Some(beside) => beside.seen_all.then(|| beside.own.keep(load))?,
+        None => {
+            let seen = crate::worktree::gather_unmarked(repo).ok().filter(seen_all)?;
+            seen.load.issues.into_iter().map(|i| i.id).collect()
+        }
+    };
+    keep.extend(load.reserved_ids());
+    Some(keep)
 }
 
 #[derive(serde::Serialize)]

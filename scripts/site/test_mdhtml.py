@@ -12,7 +12,7 @@ from mdhtml import Heading, github_anchor, render  # noqa: E402
 ROOT = Path(__file__).resolve().parents[2]
 ALLOWED_TAGS = {
     "h1", "h2", "h3", "h4", "h5", "h6", "p", "ul", "ol", "li", "pre", "code", "div", "table", "thead",
-    "tbody", "tr", "th", "td", "a", "strong", "em", "br", "hr", "blockquote", "del",
+    "tbody", "tr", "th", "td", "a", "strong", "em", "br", "hr", "blockquote", "del", "span",
 }
 
 
@@ -66,6 +66,48 @@ class Escaping(unittest.TestCase):
 
 
 class Blocks(unittest.TestCase):
+    @staticmethod
+    def task(checked):
+        return (f'<span class="task" role="checkbox" data-checked="{checked}" '
+                f'aria-checked="{checked}" aria-disabled="true"></span>')
+
+    def test_task_markers(self):
+        out = html('- [ ] todo\n- [x] done\n- [X] DONE\n- not [ ] here\n- [ ]\n\ntext [x] y')
+        self.assertEqual(re.findall(r'data-checked="(\w+)"', out), ["false", "true", "true"])
+        self.assertNotIn("<input", out)
+        # whole items: a bare "[ ]" would match inside "not [ ] here" and prove nothing about `- [ ]`
+        for literal in ("<li>not [ ] here</li>", "<li>[ ]</li>", "<p>text [x] y</p>"):
+            self.assertIn(literal, out)
+        self.assertIn(".doc-body .task", (ROOT / "site/assets/site.css").read_text(encoding="utf-8"))
+
+    def test_task_tight_and_loose(self):
+        for separator, paragraph in (("\n", False), ("\n\n", True)):
+            with self.subTest(paragraph=paragraph):
+                items = []
+                for checked, text in (("false", "a"), ("true", "b")):
+                    content = self.task(checked) + " " + text
+                    if paragraph:
+                        content = "<p>" + content + "</p>"
+                    items.append('<li class="task-item">' + content + '</li>')
+                self.assertEqual(html('- [ ] a' + separator + '- [x] b'),
+                                 '<ul>\n' + '\n'.join(items) + '\n</ul>')
+
+    def test_task_ordered_nested_and_escaped(self):
+        self.assertEqual(html('1. [x] a'), '<ol>\n<li class="task-item">' + self.task("true") + ' a</li>\n</ol>')
+        out = html('- [ ] a\n  - [x] b')
+        self.assertEqual(out.count('class="task-item"'), 2)
+        self.assertIn(self.task("true") + ' b</li>', out)
+        self.assertIn(self.task("false") + ' &lt;b&gt;', html('- [ ] <b>'))
+
+    def test_task_block_first_and_empty_items(self):
+        for src, block in (('- [ ] # heading', '<h1'), ('- [x] ```\n  code\n  ```', '<pre>')):
+            with self.subTest(src=src):
+                out = html(src)
+                self.assertIn('<li class="task-item">' + self.task("false" if '[ ]' in src else "true") + ' \n' + block, out)
+        for src in ('- ', '- [ ]', '- [x] ', r'- \[x] escaped'):
+            with self.subTest(src=src):
+                self.assertNotIn('class="task"', html(src))
+
     def test_table_alignment(self):
         src = "| a | b | c |\n|:--|:-:|--:|\n| 1 | 2 | 3 |\n| x | y |\n"
         out = html(src)

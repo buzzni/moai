@@ -317,6 +317,8 @@ the frame the homepage uses and puts a box around what changed — `--mark <text
 scene with a clip) and `release-posts/v0.23.0/make.sh` (a shell scene) are the
 patterns to copy. Playwright is not a dependency of this repository; pass it in with
 `NODE_PATH`, as `scripts/site-demo/record-web.mjs` does.
+Rebuild the site media with `scripts/site-demo/record-site.sh <dir>`; it leaves out
+`tui-team.cast`, the partly manual scene from `record-team.sh`.
 
 The release workflow posts it once the GitHub release is out (`discord.yml`, skipped
 for a pre-release such as `-rc.1`). With no `post.md` committed it posts the text alone,

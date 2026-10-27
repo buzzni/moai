@@ -379,8 +379,21 @@ root = os.path.realpath(os.path.join(sys.argv[1], os.path.relpath(here, top)))
 print("root dir", root)
 if os.path.relpath(here, top) != ".":
     print("subdir", os.path.relpath(here, top))
+unsafe = ['"', '$', chr(96)] + ([] if os.sep == chr(92) else [chr(92)])
+if any(c in root for c in unsafe) or chr(92) * 2 in root or root.endswith(chr(92)):
+    print("unquotable root", root)
 PY
 ```
+
+`<root>` and `<cwd>` stand in double quotes on every shell line here, so a path with a
+space stays one word. Double quotes still read `"`, `$`, a backtick and `\`: a path holding
+any of them is not one these lines can carry — build none, and tell the person which path
+it is. A Windows path (`C:\Users\…`) is the one exception for `\`: double quotes keep a
+single `\` between two names as it is. Inside cmux's `--command '…'` the path sits inside
+single quotes as well: write each `'` in it as `'\''` there.
+
+If `unquotable root` is printed, stop this round and tell the person that path. Send no
+assignment with that `Root:`; the person handles its quoting.
 
 **2-1. Pick the role, then read its model.** Each backlog goes to one role, and that role's
 model and effort come from the `moai models --json` you read at the start of the round.
@@ -450,30 +463,30 @@ The word is `plan`, not `subagent` — no worker holds this backlog, so it is no
     Due: <due>
     Person: <person>
 
-    1. Read it — moai -C <root> show <id> — and as much of the code as the split needs. If it
+    1. Read it — moai -C "<root>" show <id> — and as much of the code as the split needs. If it
        already stands done, hand back `already unfolded: <id>` and stop: unfolding again puts up
        two epics.
     2. Write the plan: one `# <epic title>` line and one `- [pN] <member title>` line per issue. A plan
        line becomes the title verbatim, so write short new titles. Look first, then unfold:
-       moai -C <root> backlog promote <id> --dry-run --from -
-       moai -C <root> backlog promote <id> --from -
+       moai -C "<root>" backlog promote <id> --dry-run --from -
+       moai -C "<root>" backlog promote <id> --from -
     3. Hang the release on the epic, then the deadline, each unless its slot says `none` — the
        release first, as a dead one's earlier deadline refuses the person's. `Milestone: none`
        clears nothing `promote` carried, but for a dead release: when a line `promote` printed
        names the release it carried as already closed or deferred, clear it — left on, it
        re-opens a release that is out, or takes the whole plan out of the plan:
        moai edit <epic> --milestone <milestone>
-       moai -C <root> edit <epic> --milestone none
-       moai -C <root> edit <epic> --due <due>
+       moai -C "<root>" edit <epic> --milestone none
+       moai -C "<root>" edit <epic> --due <due>
        A refusal because the day is later than the milestone's leaves the epic as it stands.
     4. Give every member a body the worker can start from without searching again — what is
        wrong, where (file and function), what to change, how to test it. A design question the
        backlog and its notes do not settle goes in it, open, for the worker to ask — do not
        settle it here. Write it to a file in your scratchpad and run
-       moai -C <root> edit <member> -b - < <that file>
+       moai -C "<root>" edit <member> -b - < <that file>
     5. Mark the epic, last — a supervisor that starts again sends an epic it finds marked so, so
        mark it only once 3 and 4 stand:
-       moai -C <root> note <epic> 'Sent: plan <id>'
+       moai -C "<root>" note <epic> 'Sent: plan <id>'
        Then hand back. The first line is Model ran: anthropic/<your real model name> — the name in
        your system prompt, not an alias. The second is epic: <epic id>. Then one line per member,
        <member> <low|medium|high> — <reason>, on this rubric:
@@ -700,7 +713,7 @@ unfold it** — promote unfolds a closed backlog too, and the same member stands
 hook refuses you as well, pass the line and the refusal to the person; do not create it under
 another epic
 
-    moai -C <root> backlog promote <backlog id> -e <epic> --from -
+    moai -C "<root>" backlog promote <backlog id> -e <epic> --from -
 
 A member the report says was left in the first column by the worker's 7-1 is right even
 when it is not done — that member keeps the epic open, so the epic is not done either. It
@@ -735,7 +748,7 @@ left in the first column or one an earlier worker finished before this one was s
 it missed: ask the worker with a message to write it. Do not write it in its place — the model
 that ran in that window is the worker's to name.
 
-    moai -C <root> show -e <epic> --all --json | jq -r '.[] | select(.work == []) | .id'
+    moai -C "<root>" show -e <epic> --all --json | jq -r '.[] | select(.work == []) | .id'
 
 If the three hold and no line is missing — none is owed by a member left in the first column or
 one finished before this worker was sent, as above — mark the report checked on the epic — a
@@ -786,7 +799,7 @@ subject — that has actually happened. So in the root, supervisor and worker al
   release. Branches go in with `--no-ff` as they stand, never rebased or squashed
 - **A repository can keep the tracker out of git** — `.moai` in `.gitignore` or
   `.git/info/exclude`. Ask once a round, in the root:
-  `git -C <root> ls-files --error-unmatch -- .moai/issues.jsonl`. On a non-zero code every tracker commit here, yours
+  `git -C "<root>" ls-files --error-unmatch -- .moai/issues.jsonl`. On a non-zero code every tracker commit here, yours
   and the worker's, does not exist — the notes stand in the root's file alone. The worker asks the same line itself ("Before the steps"), so the
   message needs no word about it
 

@@ -490,9 +490,15 @@ parks it as a backlog item under its own epic and reports `member refused:`; the
 supervisor unfolds it into that epic.
 
 **A repository can keep `.moai` out of git** (`.gitignore`, `.git/info/exclude`).
-The supervisor and the worker ask `git -C <root> ls-files --error-unmatch --
+The supervisor and the worker ask `git -C "<root>" ls-files --error-unmatch --
 .moai/issues.jsonl` once; on a non-zero code they skip every tracker commit and
 the tracker lives in the root's file alone.
+
+**A root path the shell lines cannot carry stops the round.** Every shell line the
+supervisor and the workers build puts the root in double quotes, so a space in it
+is fine. A root holding `"`, `$`, a backtick or `\` (a Windows path's separators
+aside) is not: the supervisor stops the round, names the path and sends nothing,
+and the quoting is yours.
 
 **The hook reads a subagent worker as the supervisor.** A subagent's tool calls
 carry the supervisor's session, so the rows it picks up are the supervisor's
@@ -754,9 +760,14 @@ to bring them back ("recover the sessions", "되살려"). It loads `moai-recover
 - **Which died.** It reads the same records under `~/.claude/sessions/` and
   takes the dead ones standing in the root or a worktree, leaving out any that
   is already back, any that another window resumed and then cleared with
-  `/clear` or its aliases `/new` and `/reset` (`~/.claude/history.jsonl` logs
-  each under the id it left behind), and older crashes you did not name. When several stand in one
-  directory it asks you once which to bring back
+  `/clear` or its aliases `/new` and `/reset`, any left for another conversation
+  with `/resume` or `/continue` (`~/.claude/history.jsonl` logs each under the id
+  it left behind), and older crashes you did not name. Below its table it names
+  what it left out with the session id and `cwd`, plus the command and UTC time
+  when a conversation was left. You can name one to bring it back: a cancelled
+  `/resume` picker, or a deliberate resume that died before writing a line, can
+  look left too. When several stand in one directory it asks you once which to
+  bring back
 - **What each was doing.** From each session's transcript under
   `~/.claude/projects/` it reads its role (supervisor or worker), the issue it
   held and what it was waiting for, adds the uncommitted files and the issue's
@@ -823,6 +834,16 @@ worker's line is written by the supervisor.
 - **The rules do not seem to stand.** `moai skill status` says whether the plugin
   is registered and whether the binary the hook calls still runs. A session opened
   before the install keeps the old hook until it is reopened
+- **A Claude Code session opened in a linked worktree has no moai hooks.** Run
+  `moai skill status` from that worktree. The default `local` install belongs to
+  one checkout; `git worktree add` does not bring its uncommitted
+  `.claude/settings.local.json` along. Open the session in the main checkout
+  and aim commands at the worktree by absolute path, or copy the main checkout's
+  `.claude/settings.local.json` into the worktree's `.claude/` directory and
+  reopen the session there. For a shared installation, use
+  `moai skill install --scope project`; its `.claude/settings.json` is tracked
+  by git and contains checkout-specific absolute paths that do not work on
+  another machine
 - **Codex runs none of moai's hooks.** Codex has not been told to trust them —
   open `/hooks` in a codex session in the repository and trust them. An install
   that changed them asks for that trust again
@@ -871,7 +892,7 @@ worker's line is written by the supervisor.
   where an incoming message waits for its person's approval — look at that
   window
 
-Decided in: moai-2w0s moai-hxma moai-0zjo moai-nqdc moai-bl3x moai-gelm moai-tllo moai-mdzx moai-xs2h moai-h8tn moai-snyk moai-u5wr moai-b6cw moai-ew4o moai-dhxm moai-ml0d moai-nas5 moai-kxkw moai-dj4j moai-54yc moai-bkn4 moai-084j moai-keka moai-zynt moai-j9nf moai-jtvp moai-obxm moai-six5 moai-iu73 moai-r0x8 moai-u99i moai-uqf7 moai-p5sz moai-xpa8 moai-9tqo moai-pxui moai-uzhx moai-wk7i
+Decided in: moai-2w0s moai-hxma moai-0zjo moai-nqdc moai-bl3x moai-gelm moai-tllo moai-mdzx moai-xs2h moai-h8tn moai-snyk moai-u5wr moai-b6cw moai-ew4o moai-dhxm moai-ml0d moai-nas5 moai-kxkw moai-dj4j moai-54yc moai-bkn4 moai-084j moai-keka moai-zynt moai-j9nf moai-jtvp moai-obxm moai-six5 moai-iu73 moai-r0x8 moai-u99i moai-uqf7 moai-p5sz moai-xpa8 moai-9tqo moai-pxui moai-uzhx moai-wk7i moai-jdwk moai-1m21
 
 ## Archive storage
 

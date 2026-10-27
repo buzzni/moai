@@ -85,7 +85,7 @@ impl Spawner {
         if let Some(user) = &self.user {
             cmd.arg(format!("--user={user}"));
         }
-        // 페이지가 날짜를 그리는 시간대(`/api/tree?tz=`)를 자식의 시간대로 준다 — `tz::Zone::system` 이 읽는 `TZ` 하나다.
+        // 페이지가 날짜를 그리는 시간대(읽기 끝점의 `tz=`)를 자식의 시간대로 준다 — `tz::Zone::system` 이 읽는 `TZ` 하나다.
         // 새 깃발이나 설정이 아니고, 안 준 끝점은 서버의 환경을 그대로 물려받는다. 이 기계가 못 여는 이름은 부르는 쪽이
         // 안 준다(`super::zone_for_child`) — 받으면 자식이 UTC 로 떨어진다.
         if let Some(zone) = zone {

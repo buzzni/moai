@@ -6,7 +6,7 @@ members = ["crates/moai-gantt"]
 
 [package]
 name = "moai"
-version = "0.29.1"
+version = "0.30.0"
 edition = "2024"
 description = "이슈 트래커. 승인 게이트 없음. 규율은 `moai status` 가 비춘다."
 license = "MIT"
@@ -25,7 +25,8 @@ workspace = true
 # 깨진다. 까닭은 src/cli.rs 의 `Cli` 위 주석에 있다 (moai-opjn).
 clap          = { version = "4", features = ["derive", "color", "unicode"] }
 serde         = { version = "1", features = ["derive"] }
-serde_json    = "1"
+# Keep selected values raw; preserve_order would change every Value and generated skill manifest.
+serde_json    = { version = "1", features = ["raw_value"] }
 anstream      = "1"
 anstyle       = "1"
 unicode-width = "0.2"

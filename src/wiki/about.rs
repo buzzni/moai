@@ -16,7 +16,7 @@
 //! 낱말([`super::search::COMMON_SHARE`])을 뺀 낱말로만 센다. 질의에 흔하지 않은 낱말이 하나도 없으면 관련 절이 없다.
 
 use super::Page;
-use super::search::{Hit, rank};
+use super::search::{Found, Hit, Index, rank};
 use crate::model::Issue;
 use std::collections::HashSet;
 
@@ -58,6 +58,27 @@ pub struct Named<'a> {
 /// — 소속은 저장소 전부를 봐야 답하니 부르는 쪽이 읽어 건넨다. `lessons` 는 그 줄의 저널이 가리킨 교훈 슬러그다
 /// ([`super::seen::lessons_of`]) — 저널도 부르는 쪽이 읽는다. **순수 함수다.**
 pub fn about<'a>(pages: &'a [Page], issue: &'a Issue, epic: Option<&'a str>, lessons: &'a [String]) -> About<'a> {
+    selected(pages, issue, epic, lessons, rank(pages, &issue.title, usize::MAX))
+}
+
+/// Reuse the ranking index held with this checkout's immutable pages.
+pub fn indexed<'a>(
+    pages: &'a [Page],
+    index: &Index,
+    issue: &'a Issue,
+    epic: Option<&'a str>,
+    lessons: &'a [String],
+) -> About<'a> {
+    selected(pages, issue, epic, lessons, index.rank(pages, &issue.title, usize::MAX))
+}
+
+fn selected<'a>(
+    pages: &'a [Page],
+    issue: &'a Issue,
+    epic: Option<&'a str>,
+    lessons: &'a [String],
+    found: Found<'a>,
+) -> About<'a> {
     // **한 페이지는 한 묶음에만 선다** — 이 줄의 교훈이 가장 가깝고, 그다음이 댄 페이지, 관련 절이 마지막이다.
     // `moai wiki learn` 은 페이지 끝에 `Learned in: <id>` 를 적어 그 교훈이 이 id 를 댄 페이지로도 걸리므로, 빼지 않던
     // 판은 한 페이지를 `lessons` 와 `named_in` 에 두 번 세웠다(리뷰 moai-4s5n.u8x). `related` 가 `named_in` 을 빼던 그
@@ -73,7 +94,6 @@ pub fn about<'a>(pages: &'a [Page], issue: &'a Issue, epic: Option<&'a str>, les
         })
         .collect();
     // 발췌는 안 짓는다 — 다 받아 페이지당 하나로 거르고 셋에서 자르므로, 버릴 hit 가 거의 전부다.
-    let found = rank(pages, &issue.title, usize::MAX);
     let need = (found.words.len() - found.common.len()).min(MIN_DISTINCT);
     let mut hits: Vec<Hit> = found.hits.into_iter().filter(|h| need > 0 && h.rare >= need).collect();
     // 흔하지 않은 낱말이 많이 맞은 절이 앞이다 — 같으면 `rank` 의 차례 그대로다(안정 정렬).
