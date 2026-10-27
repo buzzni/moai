@@ -12,6 +12,8 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+## [0.30.0] - 2026-10-27
+
 ### Added
 
 - **`moai tui --json --deep --no-gantt` reads the tree without chart values.**
