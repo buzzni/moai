@@ -345,12 +345,17 @@ pane, not yours — so say which window they are in:
     tmux select-layout -t "$TMUX_PANE" tiled
 
 **No other flag**, and keep the double quotes around `<cwd>` — a path with a space stays one
-argument. The first line prints the new pane's `%N`, the `<pane>` below. The `set-option` after
-`\;` runs in the same tmux call, on the new pane, before `claude` can exit — a `--resume` that
-fails at once (no such conversation) keeps its pane and its error.
-`remain-on-exit` keeps the pane when `claude` exits: its last screen stays, `#{pane_dead}`
-reads `1`, and tmux refuses pastes aimed at it and drops keys, so nothing lands in a shell. A
-dead pane stays until the person closes it; never kill it. Then, as a separate call, look once: when its `❯` box shows and is empty
+argument. A `--resume` that fails at once (no such conversation) keeps its pane and its error.
+
+The first line prints the new pane's id (`%N`), the `<pane>` below. The `set-option` after
+`\;` runs in the same tmux call, on the new pane, before the program can exit — set in a call
+of its own, a program that ended at once would have taken its pane, and what it said, with it.
+`remain-on-exit` keeps the pane when the program exits: its last screen stays readable,
+`#{pane_dead}` reads `1`, and tmux refuses pastes aimed at it and drops keys — nothing you send
+lands in a shell under a dead session, though `send-keys` still exits `0`. A dead pane stays
+until the person closes it; never kill it.
+
+Then, as a separate call, look once: when its `❯` box shows and is empty
 ("Is the input box empty" above), paste the block:
 
     tmux load-buffer -b moai-recover <file>

@@ -3118,6 +3118,23 @@ box counts only while the session map, run again just before, still reads that s
 Code that was killed keeps its last frame, box and all, above the shell it ran in, the second
 value stays `0`, and the keys go to that shell.";
 
+/// 칸 여는 조리법은 하나다(moai-jn8d.d79 13번). 경합 고침(2번)이 세 자리에 들었으므로
+/// 다음 고침도 함께 가게 한다. the_tmux_skill_touches_only_named_panes 등이 내는 줄을 글자째 잰다.
+fn open_pane(dir: &str, program: &str) -> String {
+    format!(
+        r#"    tmux split-window -P -F '#{{pane_id}}' -t "$TMUX_PANE" -c "{dir}" '{program}' \; set-option -p remain-on-exit on
+    tmux select-layout -t "$TMUX_PANE" tiled"#
+    )
+}
+
+const KEPT_PANE: &str = r#"The first line prints the new pane's id (`%N`), the `<pane>` below. The `set-option` after
+`\;` runs in the same tmux call, on the new pane, before the program can exit — set in a call
+of its own, a program that ended at once would have taken its pane, and what it said, with it.
+`remain-on-exit` keeps the pane when the program exits: its last screen stays readable,
+`#{pane_dead}` reads `1`, and tmux refuses pastes aimed at it and drops keys — nothing you send
+lands in a shell under a dead session, though `send-keys` still exits `0`. A dead pane stays
+until the person closes it; never kill it."#;
+
 /// Codex 일꾼의 모델·리뷰·멈춤 규약은 한 글이다(moai-uzhx.2mq). cmux 와 tmux 가
 /// `format!` 으로 그대로 싣는다 — 자리마다 다른 명령은 각 절에 남긴다.
 const CODEX_WORKER_RULES: &str = r#"### Model
@@ -3172,6 +3189,8 @@ the person's words. Labels do not grant permission to type."#;
 ///
 /// Claude Code 에만 심는다([`crate::skill::Skill::claude_only`]) — 감독 스킬과 같은 까닭이다.
 pub fn tmux() -> String {
+    let open_claude = open_pane("<root>", "claude --model <model>");
+    let open_codex = open_pane("<root>", "codex --model <codex>");
     format!(
         r#"---
 name: moai-tmux
@@ -3347,18 +3366,14 @@ When the supervisor's 2 finds no worker, ask the person **once** whether to open
 panes, and how many — one question covers several panes. Open a pane only on their yes, or
 when they asked you for it. On a yes, for each pane:
 
-    tmux split-window -P -F '#{{pane_id}}' -t "$TMUX_PANE" -c "<root>" 'claude --model <model>' \; set-option -p remain-on-exit on
-    tmux select-layout -t "$TMUX_PANE" tiled
+{open_claude}
 
 `<root>` is the `root dir` of the supervisor's 2 and `<model>` the model picked in 2-1 — keep
-the double quotes, so a path with a space stays one argument. **No other flag.** The first line
-prints the new pane's id. The `set-option` after `\;` runs in the same tmux call, on the new
-pane, before `claude` can exit — set in a call of its own, a `claude` that ended at once would
-have taken its pane, and what it said, with it. `remain-on-exit` keeps the pane when `claude`
-exits: its last screen stays readable, `#{{pane_dead}}` reads `1`, and tmux refuses pastes
-aimed at it and drops keys — nothing you send lands in a shell under a dead session, though
-`send-keys` still exits `0`. A dead pane stays until the person closes it; never kill it. The pane belongs to the same person —
-it is their interactive session like any other.
+the double quotes, so a path with a space stays one argument. **No other flag.**
+
+{KEPT_PANE}
+
+The pane belongs to the same person — it is their interactive session like any other.
 
 Once it has started (a separate call: `capture-pane` of the new pane shows the `❯` box), look
 at `ListAgents` once more. The new row is a worker like any other (the supervisor's 2) — send
@@ -3408,13 +3423,11 @@ If it prints neither value, the pane is gone: do not type.
 When no idle Codex worker is left, ask the person **once** whether to open new panes and
 how many. Open one only on their yes, or when they asked for it. On a yes:
 
-    tmux split-window -P -F '#{{pane_id}}' -t "$TMUX_PANE" -c "<root>" 'codex --model <codex>' \; set-option -p remain-on-exit on
-    tmux select-layout -t "$TMUX_PANE" tiled
+{open_codex}
 
-The first line prints the new pane id; its `set-option` lands on the new pane in the same tmux
-call, before Codex can exit. This is an ordinary interactive session; `remain-on-exit` keeps
-its final screen readable after Codex exits, and the dead pane takes no keys — tmux refuses
-pastes and drops keys. Read the new pane separately and confirm
+{KEPT_PANE}
+
+This is an ordinary interactive session. Read the new pane separately and confirm
 the live process and empty composer above. Folder trust and hook trust prompts belong to
 the person; tell them what the pane shows. Do not assume cmux's wrapper enabled or trusted
 hooks here. The person checks moai in `/hooks`; the worker keeps the five rules even when
@@ -4302,6 +4315,7 @@ is already in the box: do not paste again. Tell the person which tab holds it un
 /// `responding` 줄이 `null` 이었다) 턴 가운데 죽은 일꾼 — OOM 의 흔한 꼴 — 은 짝이 안 지어지고, Saycode 밖에서 부른
 /// 되살리기는 `ls` 를 못 부른다. 짝으로만 가르던 판은 그 둘을 칸에서 `claude --resume` 으로 되살렸다.
 pub fn recover() -> String {
+    let open_resume = open_pane("<cwd>", "claude --resume <sessionId>");
     format!(
         r#"---
 name: moai-recover
@@ -4497,16 +4511,14 @@ supervisor's pane — or print its line — only after they say that worker is b
 the window of `$TMUX_PANE` — inside a session Saycode's daemon started, that is the daemon's
 pane, not yours — so say which window they are in:
 
-    tmux split-window -P -F '#{{pane_id}}' -t "$TMUX_PANE" -c "<cwd>" 'claude --resume <sessionId>' \; set-option -p remain-on-exit on
-    tmux select-layout -t "$TMUX_PANE" tiled
+{open_resume}
 
 **No other flag**, and keep the double quotes around `<cwd>` — a path with a space stays one
-argument. The first line prints the new pane's `%N`, the `<pane>` below. The `set-option` after
-`\;` runs in the same tmux call, on the new pane, before `claude` can exit — a `--resume` that
-fails at once (no such conversation) keeps its pane and its error.
-`remain-on-exit` keeps the pane when `claude` exits: its last screen stays, `#{{pane_dead}}`
-reads `1`, and tmux refuses pastes aimed at it and drops keys, so nothing lands in a shell. A
-dead pane stays until the person closes it; never kill it. Then, as a separate call, look once: when its `❯` box shows and is empty
+argument. A `--resume` that fails at once (no such conversation) keeps its pane and its error.
+
+{KEPT_PANE}
+
+Then, as a separate call, look once: when its `❯` box shows and is empty
 ("Is the input box empty" above), paste the block:
 
     tmux load-buffer -b moai-recover <file>
@@ -8968,6 +8980,23 @@ stop sending outside work while a release runs",
         let at = text.find(&format!("{heading}\n")).unwrap_or_else(|| panic!("{heading} 절이 없다"));
         let rest = &text[at + heading.len()..];
         &text[at..at + heading.len() + rest.find("\n## ").map_or(rest.len(), |end| end + 1)]
+    }
+
+    #[test]
+    fn the_three_open_pane_lines_are_one_recipe() {
+        let tmux = tmux();
+        let recover = recover();
+        for program in ["claude --model <model>", "codex --model <codex>"] {
+            assert!(tmux.contains(&open_pane("<root>", program)));
+        }
+        assert!(recover.contains(&open_pane("<cwd>", "claude --resume <sessionId>")));
+        assert_eq!(tmux.matches("tmux split-window").count(), 2);
+        assert_eq!(recover.matches("tmux split-window").count(), 1);
+        assert_eq!(tmux.matches(KEPT_PANE).count(), 2);
+        assert!(recover.contains(KEPT_PANE));
+        for part in ["#{pane_dead}", "send-keys", "never kill"] {
+            assert!(KEPT_PANE.contains(part));
+        }
     }
 
     /// **`moai-tmux` 는 이름 댄 칸만 만진다**(2026-10-10 사용자 결정, moai-u99i). 사람의 tmux 서버라 맨 `kill-server` 하나가

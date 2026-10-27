@@ -276,14 +276,17 @@ when they asked you for it. On a yes, for each pane:
     tmux select-layout -t "$TMUX_PANE" tiled
 
 `<root>` is the `root dir` of the supervisor's 2 and `<model>` the model picked in 2-1 — keep
-the double quotes, so a path with a space stays one argument. **No other flag.** The first line
-prints the new pane's id. The `set-option` after `\;` runs in the same tmux call, on the new
-pane, before `claude` can exit — set in a call of its own, a `claude` that ended at once would
-have taken its pane, and what it said, with it. `remain-on-exit` keeps the pane when `claude`
-exits: its last screen stays readable, `#{pane_dead}` reads `1`, and tmux refuses pastes
-aimed at it and drops keys — nothing you send lands in a shell under a dead session, though
-`send-keys` still exits `0`. A dead pane stays until the person closes it; never kill it. The pane belongs to the same person —
-it is their interactive session like any other.
+the double quotes, so a path with a space stays one argument. **No other flag.**
+
+The first line prints the new pane's id (`%N`), the `<pane>` below. The `set-option` after
+`\;` runs in the same tmux call, on the new pane, before the program can exit — set in a call
+of its own, a program that ended at once would have taken its pane, and what it said, with it.
+`remain-on-exit` keeps the pane when the program exits: its last screen stays readable,
+`#{pane_dead}` reads `1`, and tmux refuses pastes aimed at it and drops keys — nothing you send
+lands in a shell under a dead session, though `send-keys` still exits `0`. A dead pane stays
+until the person closes it; never kill it.
+
+The pane belongs to the same person — it is their interactive session like any other.
 
 Once it has started (a separate call: `capture-pane` of the new pane shows the `❯` box), look
 at `ListAgents` once more. The new row is a worker like any other (the supervisor's 2) — send
@@ -388,10 +391,15 @@ how many. Open one only on their yes, or when they asked for it. On a yes:
     tmux split-window -P -F '#{pane_id}' -t "$TMUX_PANE" -c "<root>" 'codex --model <codex>' \; set-option -p remain-on-exit on
     tmux select-layout -t "$TMUX_PANE" tiled
 
-The first line prints the new pane id; its `set-option` lands on the new pane in the same tmux
-call, before Codex can exit. This is an ordinary interactive session; `remain-on-exit` keeps
-its final screen readable after Codex exits, and the dead pane takes no keys — tmux refuses
-pastes and drops keys. Read the new pane separately and confirm
+The first line prints the new pane's id (`%N`), the `<pane>` below. The `set-option` after
+`\;` runs in the same tmux call, on the new pane, before the program can exit — set in a call
+of its own, a program that ended at once would have taken its pane, and what it said, with it.
+`remain-on-exit` keeps the pane when the program exits: its last screen stays readable,
+`#{pane_dead}` reads `1`, and tmux refuses pastes aimed at it and drops keys — nothing you send
+lands in a shell under a dead session, though `send-keys` still exits `0`. A dead pane stays
+until the person closes it; never kill it.
+
+This is an ordinary interactive session. Read the new pane separately and confirm
 the live process and empty composer above. Folder trust and hook trust prompts belong to
 the person; tell them what the pane shows. Do not assume cmux's wrapper enabled or trusted
 hooks here. The person checks moai in `/hooks`; the worker keeps the five rules even when
