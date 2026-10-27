@@ -26,6 +26,17 @@ does not tag — see `CONTRIBUTING.md`.
 
 ### Fixed
 
+- **Skill shell commands keep repository paths together.** Supervisor, worker
+  and recovery commands quote paths with spaces. A path holding `"`, `$`, a
+  backtick or `\` is handed to the person instead of building a shell command;
+  cmux commands explain how to escape an apostrophe inside their outer single
+  quotes. (moai-1m21.cqb)
+- **`moai-recover` leaves conversations moved off with `/resume` or `/continue`
+  out of automatic recovery.** Under its table it names skipped conversations
+  with their command and UTC time, and older crashes, so the person can ask
+  one back even after a cancelled picker or a resume that died before writing
+  a line. (moai-1m21.hxm)
+
 - `moai show --fields` keeps the order of keys inside the values it keeps.
   Nested objects such as `journal`, `work`, `commits` and `wiki` previously
   came out with keys sorted by name, unlike the same row without `--fields`.
