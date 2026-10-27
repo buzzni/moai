@@ -31568,12 +31568,16 @@ fn serve_with(dir: &Path, tweak: impl FnOnce(&mut Command)) -> Served {
 }
 
 /// 부하 때문에 한 번의 connect 가 지더라도 10초 안에서 다시 붙고, 끝내 못 붙으면 errno 를 남긴다.
+/// **connect 한 번도 남은 시한 안에서 끊는다** — 맨 `connect` 는 버려진 SYN 을 다시 보내며 2분 넘게 선다.
 fn dial(port: u16) -> std::net::TcpStream {
+    let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
     let until = std::time::Instant::now() + std::time::Duration::from_secs(10);
     let mut attempts = 0;
     loop {
         attempts += 1;
-        match std::net::TcpStream::connect(("127.0.0.1", port)) {
+        // 0 은 `connect_timeout` 이 거절한다 — 시한을 넘긴 판도 한 번 더 재고 아래 단언으로 넘어진다.
+        let left = until.saturating_duration_since(std::time::Instant::now()).max(std::time::Duration::from_millis(1));
+        match std::net::TcpStream::connect_timeout(&addr, left) {
             Ok(stream) => return stream,
             Err(error) => {
                 assert!(std::time::Instant::now() < until, "127.0.0.1:{port} 에 {attempts}번 붙지 못했다 — {error:?}");
@@ -32511,7 +32515,9 @@ fn web_busy_waits_briefly_for_a_request_that_arrives_after_its_answer() {
         got.push(byte[0]);
     }
     assert!(got.starts_with(b"HTTP/1.1 503 "), "{}", String::from_utf8_lossy(&got));
-    std::thread::sleep(std::time::Duration::from_millis(50));
+    // 503 을 읽었으니 요청은 이미 답 뒤에 간다. 쉬는 것은 짧게 둔다 — 서버가 기다리는 200ms 를 이 시험이 먼저
+    // 먹으면, CPU 할당이 막히는 부하에서 남은 몫 안에 못 닿아 고친 서버도 BrokenPipe 로 진다.
+    std::thread::sleep(std::time::Duration::from_millis(10));
     // write! 도 여러 번 쓸 수 있다 — 첫 조각이 RST 를 부르면 다음 조각이 BrokenPipe 다.
     for part in [b"GET ".as_slice(), b"/api/stamp", b" HTTP/1.1\r\n", b"Host: 127.0.0.1\r\n\r\n"] {
         client.write_all(part).expect("503 뒤에 도착한 요청을 못 썼다");

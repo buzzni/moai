@@ -5690,7 +5690,6 @@ mod tests {
     /// "Python was not found" 로 끝난다. bash 는 git 이 선 자리(`git --exec-path` 의 세 층 위 `bin/bash.exe`,
     /// Git for Windows)를 먼저 본다.
     fn tool(name: &str) -> Option<std::path::PathBuf> {
-        use std::process::Command;
         let mut seen = Vec::new();
         if cfg!(windows)
             && name == "bash"
@@ -5701,8 +5700,11 @@ mod tests {
         }
         seen.push(std::path::PathBuf::from(name));
         let probe = if name.starts_with("python") { "pass" } else { "exit 0" };
-        let found =
-            seen.into_iter().find(|at| Command::new(at).args(["-c", probe]).output().is_ok_and(|o| o.status.success()));
+        // bash 의 탐침도 시작 파일을 안 읽는다([`crate::test_shell`]) — 읽으면 판마다 bashrc 가 돌고, 진 bashrc 하나가
+        // `needed("bash")` 를 붉힌다. python3 에는 `BASH_ENV` 를 걷는 것뿐이라 뜻이 안 바뀐다.
+        let found = seen
+            .into_iter()
+            .find(|at| crate::test_shell::shell(at).args(["-c", probe]).output().is_ok_and(|o| o.status.success()));
         if found.is_none() {
             eprintln!("{name} 가 이 기계에서 안 돈다 — 셸 글의 문법은 못 재고 글만 잰다");
         }
