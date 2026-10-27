@@ -823,6 +823,16 @@ worker's line is written by the supervisor.
 - **The rules do not seem to stand.** `moai skill status` says whether the plugin
   is registered and whether the binary the hook calls still runs. A session opened
   before the install keeps the old hook until it is reopened
+- **A Claude Code session opened in a linked worktree has no moai hooks.** Run
+  `moai skill status` from that worktree. The default `local` install belongs to
+  one checkout; `git worktree add` does not bring its uncommitted
+  `.claude/settings.local.json` along. Open the session in the main checkout
+  and aim commands at the worktree by absolute path, or copy the main checkout's
+  `.claude/settings.local.json` into the worktree's `.claude/` directory and
+  reopen the session there. For a shared installation, use
+  `moai skill install --scope project`; its `.claude/settings.json` is tracked
+  by git and contains checkout-specific absolute paths that do not work on
+  another machine
 - **Codex runs none of moai's hooks.** Codex has not been told to trust them —
   open `/hooks` in a codex session in the repository and trust them. An install
   that changed them asks for that trust again
@@ -871,7 +881,7 @@ worker's line is written by the supervisor.
   where an incoming message waits for its person's approval — look at that
   window
 
-Decided in: moai-2w0s moai-hxma moai-0zjo moai-nqdc moai-bl3x moai-gelm moai-tllo moai-mdzx moai-xs2h moai-h8tn moai-snyk moai-u5wr moai-b6cw moai-ew4o moai-dhxm moai-ml0d moai-nas5 moai-kxkw moai-dj4j moai-54yc moai-bkn4 moai-084j moai-keka moai-zynt moai-j9nf moai-jtvp moai-obxm moai-six5 moai-iu73 moai-r0x8 moai-u99i moai-uqf7 moai-p5sz moai-xpa8 moai-9tqo moai-pxui moai-uzhx moai-wk7i
+Decided in: moai-2w0s moai-hxma moai-0zjo moai-nqdc moai-bl3x moai-gelm moai-tllo moai-mdzx moai-xs2h moai-h8tn moai-snyk moai-u5wr moai-b6cw moai-ew4o moai-dhxm moai-ml0d moai-nas5 moai-kxkw moai-dj4j moai-54yc moai-bkn4 moai-084j moai-keka moai-zynt moai-j9nf moai-jtvp moai-obxm moai-six5 moai-iu73 moai-r0x8 moai-u99i moai-uqf7 moai-p5sz moai-xpa8 moai-9tqo moai-pxui moai-uzhx moai-wk7i moai-jdwk
 
 ## Archive storage
 
