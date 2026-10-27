@@ -1057,3 +1057,27 @@ test('undo inverts each move, clearing an edge only when it was absent at read t
   assert.equal(undoOf('x', { edge: 'end', days: 1 }, { ...read, due: null }), 'moai edit x --due none')
   assert.equal(undoOf('x', { day: '2026-10-27' }, { start: null, due: null }), 'moai edit x --start none --due none')
 })
+
+test('zoom, fit with a new step and Ctrl+wheel each build one window at their final scroll position', () => {
+  const { root, view, dom } = mount(null, build(), [1000, 560])
+  const box = scrollable(root)
+  const lanes = root.querySelector('.g-lanes')
+  const replace = lanes.replaceChildren.bind(lanes)
+  let builds = 0
+  lanes.replaceChildren = (...nodes) => { builds++; replace(...nodes) }
+  const once = (action) => {
+    builds = 0
+    action()
+    assert.equal(builds, 1)
+    // A delivered native scroll at the final position is already covered too.
+    box.dispatchEvent(new dom.window.Event('scroll'))
+    assert.equal(builds, 1)
+  }
+  once(() => view.command('gantt.zoomIn'))
+  assert.equal(root.querySelector('.g-seg [aria-pressed="true"]').dataset.zoom, 'hour')
+  once(() => view.command('gantt.fit'))
+  assert.notEqual(root.querySelector('.g-seg [aria-pressed="true"]').dataset.zoom, 'hour')
+  once(() => root.querySelector('.g-right').dispatchEvent(new dom.window.WheelEvent('wheel', {
+    bubbles: true, cancelable: true, ctrlKey: true, deltaY: -100, clientX: 800,
+  })))
+})

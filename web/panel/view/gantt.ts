@@ -30,7 +30,7 @@ import {
   PX_PER_DAY, rangeOf, MIN_GRID, ROW_H, shiftPlan, wallAt, wallOf, weekends, widthOf, xOf, ZOOMS, zoomToFit, type Axis, type Edge, type GanttLine,
   type Placed, type Tick, type Zoom,
 } from './gantt-model.ts'
-import { narrow, revealOffset, statusGlyph, statusOf, twigParts, TWIG_TEXT } from './list-model.ts'
+import { narrow, revealOffset, statusGlyph, statusOf, twigParts, TWIG_TEXT, windowRange } from './list-model.ts'
 import type { MountPane, PaneView } from './types.ts'
 
 /** What the view reads from outside: the clock and the zone dates are drawn in. Tests replace them. */
@@ -256,7 +256,7 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
     return node
   }
 
-  function draw(): void {
+  function draw(scrollTo?: (a: Axis) => number): void {
     if (!model || !state) return
     if (holding) return void (drawLater = true)
     drawLater = false
@@ -278,7 +278,8 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
     rowsBox.style.height = `${m.lines.length * ROW_H}px`
     // An axis that grew at its start (a new row reaches earlier) moves every date right: the same dates stay in view.
     // A new step is setZoom's and fit's to place.
-    if (was && was.zoom === a.zoom && was.from !== a.from) scroll.scrollLeft = Math.max(0, scroll.scrollLeft + xOf(a, was.from))
+    if (scrollTo) scroll.scrollLeft = scrollTo(a)
+    else if (was && was.zoom === a.zoom && was.from !== a.from) scroll.scrollLeft = Math.max(0, scroll.scrollLeft + xOf(a, was.from))
 
     const svg = doc.createElementNS(SVG, 'svg')
     svg.setAttribute('class', 'links')
@@ -299,16 +300,20 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
   /** What is in view now: the lines `[r0, r1)` and the dates' pixels `[x0, x1]`, with no margin. */
   function inView(): NonNullable<typeof drawn> {
     const total = model ? model.lines.length : 0
-    const top = scroll.scrollTop - HEAD_H
-    const height = scroll.clientHeight || FALLBACK_HEIGHT
+    const { start, end } = rowRange(total, 0)
     const x0 = scroll.scrollLeft
     return {
-      r0: Math.max(0, Math.min(total, Math.floor(top / ROW_H))),
-      r1: Math.max(0, Math.min(total, Math.ceil((top + height) / ROW_H))),
+      r0: start,
+      r1: end,
       x0,
       x1: x0 + viewWidth(),
     }
   }
+
+  const rowRange = (count: number, overscan: number) => windowRange({
+    scrollTop: scroll.scrollTop, viewport: scroll.clientHeight || FALLBACK_HEIGHT,
+    offset: HEAD_H, rowHeight: ROW_H, count, overscan,
+  })
 
   /** Whether everything in view stands among the nodes built. */
   function covered(): boolean {
@@ -335,9 +340,10 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
     const cursor = state.cursor
     const v = inView()
     const view = Math.max(v.x1 - v.x0, 120)
+    const rowsInWindow = rowRange(m.lines.length, OVERSCAN_ROWS)
     const win = {
-      r0: Math.max(0, v.r0 - OVERSCAN_ROWS),
-      r1: Math.min(m.lines.length, v.r1 + OVERSCAN_ROWS),
+      r0: rowsInWindow.start,
+      r1: rowsInWindow.end,
       x0: Math.max(0, v.x0 - view),
       x1: Math.min(widthOf(a), v.x1 + view),
     }
@@ -584,9 +590,7 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
     const centre = wallAt(axis, scroll.scrollLeft + held)
     zoom = next
     axis = { ...axis, zoom }
-    draw()
-    scroll.scrollLeft = Math.max(0, xOf(axis, centre) - held)
-    paintView()
+    draw((a) => Math.max(0, xOf(a, centre) - held))
   }
 
   function goToday(): void {
@@ -603,10 +607,11 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
     if (next !== zoom) {
       zoom = next
       axis = { ...axis, zoom }
-      draw()
+      draw((a) => Math.max(0, xOf(a, span[0]) - 8))
+    } else {
+      scroll.scrollLeft = Math.max(0, xOf(axis, span[0]) - 8)
+      paintView()
     }
-    scroll.scrollLeft = Math.max(0, xOf(axis, span[0]) - 8)
-    paintView()
   }
 
   /** The first time the tab shows, the dates start at today; a hidden pane has no width to place them by. */
