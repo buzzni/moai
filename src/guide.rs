@@ -7937,6 +7937,29 @@ stop sending outside work while a release runs",
     }
 
     #[test]
+    fn the_codex_watch_heads_never_match_what_promote_writes() {
+        // cmd/backlog.rs writes these three forms; only the worker writes `Unfolded: <epic>`.
+        let samples =
+            ["Unfolded from moai-x — t", "Unfolded into moai-e as moai-e.a1b", "Unfolded into moai-e, 2 issues"];
+        for name in ["heads", "ends"] {
+            let prefix = format!("{name} = (");
+            let line = REPORT_WATCH.lines().find(|l| l.starts_with(&prefix)).expect("watch tuple missing");
+            let heads: Vec<_> = line.split('"').skip(1).step_by(2).collect();
+            assert!(!heads.is_empty(), "{line}");
+            assert!(heads.contains(&"Unfolded:"), "{line}");
+            for head in heads {
+                assert!(head.ends_with(':'), "{head}");
+                for sample in samples {
+                    assert!(!sample.starts_with(head), "{sample} matches {name}: {head}");
+                }
+            }
+        }
+        // Keep the matcher tied to those tuples, rather than a looser `startswith("Unfolded")`.
+        assert!(REPORT_WATCH.contains("if head.startswith(heads) or asks in head:"));
+        assert!(REPORT_WATCH.contains("finished = finished or head.startswith(ends)"));
+    }
+
+    #[test]
     fn codex_report_watch_reads_the_actual_journal_and_is_valid_shell() {
         for part in [
             "Monitor(",
