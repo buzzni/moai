@@ -141,17 +141,25 @@ pub fn notice(problems: &[Problem], file: Option<&Path>, lang: Lang) -> Option<S
 /// - **표의 칸 맞춤을 지킨다**: 틀 뒤에 빈칸이 둘 이상이면(`SPC v l  deferred` 같은 표) 기본 이름의 폭까지 채운다.
 ///   길어진 이름은 뒤의 빈칸을 그만큼 먹되 둘은 남긴다. 글 속의 틀은 안 채운다
 /// - 모르는 절·동작은 `Err` 다 — 시험이 기본 표로 모든 도움말을 그려 틀의 오타를 잡는다
-/// - `{key:` 로 시작하는 것만 틀이다. 도움말의 다른 중괄호(`{"done": 3}`)는 그대로다
+/// - `{spc:절.동작}` 은 SPC 로 시작하는 첫 줄의 이름이다. 없으면 `(none)` 이다.
+/// - `{key:`·`{spc:` 로 시작하는 것만 틀이다. 도움말의 다른 중괄호(`{"done": 3}`)는 그대로다
 pub fn fill_names(text: &str, keys: &Keymap) -> Result<String, String> {
-    const OPEN: &str = "{key:";
     let mut out = String::with_capacity(text.len());
     let mut rest = text;
-    while let Some(at) = rest.find(OPEN) {
+    // 틀을 **한 번 앞으로** 찾는다 — 틀마다 두 갈래를 따로 찾으면 마지막 `{spc:` 뒤로는 그 찾기가 남은 글 끝까지를
+    // `{key:` 마다 다시 훑는다(도움말 천 줄에 틀 수백 개).
+    let next = |rest: &str| {
+        rest.match_indices('{').find_map(|(at, _)| {
+            ["{key:", "{spc:"].into_iter().find(|open| rest[at..].starts_with(open)).map(|o| (at, o))
+        })
+    };
+    while let Some((at, open)) = next(rest) {
         out.push_str(&rest[..at]);
-        let after = &rest[at + OPEN.len()..];
+        let after = &rest[at + open.len()..];
         let end = after.find('}').ok_or_else(|| format!("unclosed key template: {}", &rest[at..]))?;
         let want = &after[..end];
-        let (now, default) = shown(want, keys).ok_or_else(|| format!("unknown key template: {{key:{want}}}"))?;
+        let (now, default) =
+            shown(want, keys, open == "{spc:").ok_or_else(|| format!("unknown key template: {open}{want}}}"))?;
         rest = &after[end + 1..];
         out.push_str(&now);
         let gap = rest.len() - rest.trim_start_matches(' ').len();
@@ -170,10 +178,16 @@ pub fn fill_names(text: &str, keys: &Keymap) -> Result<String, String> {
 }
 
 /// `절.동작` 의 지금 이름과 기본 이름.
-fn shown(want: &str, keys: &Keymap) -> Option<(String, String)> {
-    fn of<A: Named>(now: &[Bind<A>], default: &[Bind<A>], want: &Name) -> Option<(String, String)> {
+fn shown(want: &str, keys: &Keymap, spc: bool) -> Option<(String, String)> {
+    fn of<A: Named>(now: &[Bind<A>], default: &[Bind<A>], want: &Name, spc: bool) -> Option<(String, String)> {
         let act = default.iter().find(|b| b.act.name() == *want)?.act;
         let name = |t: &[Bind<A>]| {
+            if spc {
+                return t
+                    .iter()
+                    .find(|b| b.act == act && b.seq.first() == Some(&LEADER))
+                    .map_or_else(|| "(none)".to_string(), |b| name_of_seq(b.seq));
+            }
             let l = label(t, act);
             if !l.is_empty() {
                 return l;
@@ -185,16 +199,16 @@ fn shown(want: &str, keys: &Keymap) -> Option<(String, String)> {
     let (section, action) = want.split_once('.')?;
     let own = Name::Own(action.to_string());
     match section {
-        "browse" => of(keys.browse, BROWSE, &own),
-        "gantt" => of(keys.gantt, GANTT, &own),
-        "moves" => of(keys.browse, BROWSE, &Name::Move(MOVES.iter().find(|(n, _)| *n == action)?.1)),
-        "menu" => of(keys.menu, MENU, &own),
-        "sorter" => of(keys.sorter, SORTER, &own),
-        "picker" => of(keys.pick, PICK, &own),
-        "stats" => of(keys.stats, STATS, &own),
-        "wiki" => of(keys.wiki, WIKI, &own),
-        "links" => of(keys.links, LINKS, &own),
-        "confirm" => of(keys.confirm, CONFIRM, &own),
+        "browse" => of(keys.browse, BROWSE, &own, spc),
+        "gantt" => of(keys.gantt, GANTT, &own, spc),
+        "moves" => of(keys.browse, BROWSE, &Name::Move(MOVES.iter().find(|(n, _)| *n == action)?.1), spc),
+        "menu" => of(keys.menu, MENU, &own, spc),
+        "sorter" => of(keys.sorter, SORTER, &own, spc),
+        "picker" => of(keys.pick, PICK, &own, spc),
+        "stats" => of(keys.stats, STATS, &own, spc),
+        "wiki" => of(keys.wiki, WIKI, &own, spc),
+        "links" => of(keys.links, LINKS, &own, spc),
+        "confirm" => of(keys.confirm, CONFIRM, &own, spc),
         _ => None,
     }
 }
@@ -1474,7 +1488,7 @@ mod tests {
         assert!(texts.iter().any(|(_, t)| t.contains("{key:")), "틀이 하나도 없다 — 훑기가 헛돈다");
         for (name, text) in texts {
             let filled = fill_names(&text, &Keymap::default()).unwrap_or_else(|e| panic!("{name}: {e}"));
-            assert!(!filled.contains("{key:"), "{name}: 안 채운 틀이 남았다");
+            assert!(!filled.contains("{key:") && !filled.contains("{spc:"), "{name}: 안 채운 틀이 남았다");
         }
     }
 
@@ -1495,6 +1509,19 @@ mod tests {
         let top = crate::cli::command(&map);
         let about = top.find_subcommand("tui").and_then(|t| t.get_about()).map(|h| h.to_string()).unwrap();
         assert!(about.contains("`(none)`"), "{about}");
+    }
+
+    #[test]
+    fn the_help_names_only_menu_keys_that_are_bound() {
+        let help = tui_help(&Keymap::default());
+        assert!(help.contains("(SPC h from the menu)"), "{help}");
+        assert!(help.contains("SPC /    search"), "{help}");
+        let (map, problems) = build("[browse]\nhelp = \"F1\"\ngrep = \"F2\"\n");
+        assert!(problems.is_empty(), "{problems:?}");
+        let help = tui_help(&map);
+        assert!(help.contains("F1 opens") && help.contains("((none) from the menu)"), "{help}");
+        assert!(!help.contains("SPC h") && !help.contains("SPC /"), "{help}");
+        assert_eq!(fill_names("{spc:browse.help}    next", &map).unwrap(), "(none)   next");
     }
 
     /// **길어진 이름은 뒤의 빈칸을 먹는다** — 표의 다음 칸이 그만큼 덜 밀리고, 칸 사이의 둘은 남는다.

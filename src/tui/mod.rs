@@ -5527,6 +5527,15 @@ impl App {
         self.help = Some(help::Sheet::open(&self.key_ctx(rows)));
     }
 
+    /// 창의 표가 받지 않은 한 키짜리 도움말만 받는다. 여러 키 열은 창의 `gg` 같은 열과 섞지 않는다.
+    pub(super) fn help_from_window(&mut self, k: KeyEvent) -> bool {
+        if matches!(keys::lookup(self.keys.browse, &[k]), Lookup::Run(keys::Browse::Help)) {
+            self.open_help(&self.rows());
+            return true;
+        }
+        false
+    }
+
     /// 키 목록 창의 키 하나. **탐색의 표로 읽는다** — 이동키가 굴리고(`gg` 의 기다림도 그대로), 연 키(`?`·`SPC h`)와
     /// Esc·Bksp·끝내기 키가 닫는다. 그 밖은 아무 일도 없다: 읽기만 하는 창이라 틀린 키 하나에 사라지면 보던 자리를 잃는다.
     ///
@@ -6267,7 +6276,12 @@ impl App {
     /// 고르기 창의 경로 칸. 무엇으로 받을지(한 줄로 잇기·줄로 가르기·걸러낼 글자)는 칸이 정한다.
     /// 받을 칸이 없으면 삼키고 그렇다고 말한다 — 말없이 삼키면 붙여넣기가 고장 난 줄 안다.
     /// 해제 물음에서는 **다른 키처럼** 물음을 거둔다: 붙인 글 속 `y` 는 답이 아니다.
+    /// **키 목록 창이 떠 있으면 말없이 버린다**(moai-lj8g.oln) — 읽기만 하는 창 위라 받을 칸이 없음이
+    /// 보이고, 그 아래의 알림과 기다리던 열(`SPC …`)을 지운다면 창을 닫은 뒤 보던 것을 잃는다.
     pub fn paste(&mut self, s: &str) {
+        if self.help.is_some() {
+            return;
+        }
         self.notice = None;
         // 기다리던 `g` 는 버린다 — 붙인 뒤의 `g` 하나가 붙이기 전의 `g` 와 이어 맨 위로 뛰지 않게.
         self.chord.clear();

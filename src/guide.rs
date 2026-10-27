@@ -804,7 +804,9 @@ named in one line on stderr and stand as `due_beyond_parent` on the board until 
 own deadlines come in. A start obeys the same ceiling: it cannot be later than the
 earliest deadline above it, but it may be earlier than the parent's start. `moai show --sort due` puts the nearest first, and
 `--filter due_on=<from>~<to>` picks rows by their own deadline (`starts_on=` by their
-own start).
+own start). A deferred ancestor, or one under a deferred group, sets no ceiling and lends
+`moai due apply` no deadline until its deferral is undone — the rows past it then stand
+as `due_beyond_parent`.
 
 **A near deadline raises priority, by one verb.** `moai due apply` (`--dry-run` shows it
 first) raises an open, not deferred issue or backlog item by the deadline it follows —
@@ -7934,6 +7936,29 @@ stop sending outside work while a release runs",
         assert!(!text.contains("tokens="), "사람이 걷은 토큰 항목이 남았다");
         assert!(!text.contains("gpt-"), "모델 이름을 구웠다");
         assert!(text.contains("`/model` exists") && text.contains("at the assignment's `Root:` absolute path"));
+    }
+
+    #[test]
+    fn the_codex_watch_heads_never_match_what_promote_writes() {
+        // cmd/backlog.rs writes these three forms; only the worker writes `Unfolded: <epic>`.
+        let samples =
+            ["Unfolded from moai-x — t", "Unfolded into moai-e as moai-e.a1b", "Unfolded into moai-e, 2 issues"];
+        for name in ["heads", "ends"] {
+            let prefix = format!("{name} = (");
+            let line = REPORT_WATCH.lines().find(|l| l.starts_with(&prefix)).expect("watch tuple missing");
+            let heads: Vec<_> = line.split('"').skip(1).step_by(2).collect();
+            assert!(!heads.is_empty(), "{line}");
+            assert!(heads.contains(&"Unfolded:"), "{line}");
+            for head in heads {
+                assert!(head.ends_with(':'), "{head}");
+                for sample in samples {
+                    assert!(!sample.starts_with(head), "{sample} matches {name}: {head}");
+                }
+            }
+        }
+        // Keep the matcher tied to those tuples, rather than a looser `startswith("Unfolded")`.
+        assert!(REPORT_WATCH.contains("if head.startswith(heads) or asks in head:"));
+        assert!(REPORT_WATCH.contains("finished = finished or head.startswith(ends)"));
     }
 
     #[test]
