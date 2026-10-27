@@ -31596,7 +31596,7 @@ fn web_rows_are_moais_show() {
     assert_eq!(json_of(&body)["exit"], 0, "{body}");
 }
 
-/// **`/api/tree` 는 `moai tui --deep --json` 이다**(moai-0aa7.a0l) — 정렬도 같은 낱말로 옮긴다.
+/// **`/api/tree?gantt=1` 는 `moai tui --deep --json` 이다**(moai-0aa7.a0l) — 정렬도 같은 낱말로 옮긴다.
 #[test]
 fn web_tree_is_tui_deep() {
     let s = init("web-tree");
@@ -31604,14 +31604,14 @@ fn web_tree_is_tui_deep() {
     ok(s.path(), &["add", "a 일"]);
     let web = serve(s.path());
     let direct = ok(s.path(), &["tui", "--deep", "--json"]);
-    let (status, _, body) = get(web.port, "/api/tree");
+    let (status, _, body) = get(web.port, "/api/tree?gantt=1");
     assert_eq!(status, 200, "{body}");
     assert_eq!(envelope_out(&body, &direct), direct.trim());
     let direct = ok(s.path(), &["tui", "--deep", "--sort", "title", "--json"]);
-    let (_, _, body) = get(web.port, "/api/tree?sort=title");
+    let (_, _, body) = get(web.port, "/api/tree?sort=title&gantt=1");
     assert_eq!(envelope_out(&body, &direct), direct.trim());
     let direct = ok(s.path(), &["tui", "--deep", "--sort", "title", "--reverse", "--json"]);
-    let (_, _, body) = get(web.port, "/api/tree?sort=title&reverse=1");
+    let (_, _, body) = get(web.port, "/api/tree?sort=title&reverse=1&gantt=1");
     assert_eq!(envelope_out(&body, &direct), direct.trim());
 }
 
@@ -31661,7 +31661,7 @@ fn web_tree_judges_overdue_in_the_zone_the_page_draws() {
         })
     };
     let overdue = |port: u16, query: &str| {
-        let (status, _, body) = get(port, &format!("/api/tree{query}"));
+        let (status, _, body) = get(port, &format!("/api/tree?gantt=1{}", query.replace('?', "&")));
         assert_eq!(status, 200, "{body}");
         let env = json_of(&body);
         assert_eq!(env["exit"], 0, "{body}");
@@ -32225,4 +32225,36 @@ fn web_children_do_not_repeat_the_climb_notice() {
     let env = json_of(&get(web.port, "/api/status").2);
     assert_eq!(env["exit"], 0, "{env}");
     assert!(env.get("said").is_none(), "{env}");
+}
+
+/// Gantt values are optional for JSON consumers; the web only asks when its chart tab is active.
+#[test]
+fn tui_no_gantt_omits_values_and_web_tree_opts_in() {
+    let s = init("tui-no-gantt");
+    let id = add(s.path(), &["Planned row", "--start", "2026-10-26", "--due", "2026-10-28"]);
+    let full = json_of(&ok(s.path(), &["tui", "--json", "--deep"]));
+    let lean = json_of(&ok(s.path(), &["tui", "--json", "--deep", "--no-gantt"]));
+    let row = |values: &serde_json::Value| values.as_array().unwrap().iter().find(|r| r["id"] == id).unwrap().clone();
+    assert!(row(&full).get("gantt").is_some());
+    assert!(row(&lean).get("gantt").is_none());
+    assert!(row(&lean).get("home").is_some());
+    let mut without = full.clone();
+    for row in without.as_array_mut().unwrap() {
+        row.as_object_mut().unwrap().remove("gantt");
+    }
+    assert_eq!(lean, without, "no-gantt must leave the tree and every other field intact");
+    let refused = moai(s.path(), &["tui", "--no-gantt"]);
+    assert!(!refused.status.success());
+    assert!(text(&refused).contains("--no-gantt"));
+
+    let web = serve(s.path());
+    for (query, wanted) in [("", false), ("?gantt=1", true)] {
+        let (status, _, body) = get(web.port, &format!("/api/tree{query}"));
+        assert_eq!(status, 200, "{body}");
+        let env = json_of(&body);
+        assert_eq!(env["exit"], 0, "{body}");
+        assert_eq!(row(&env["out"]).get("gantt").is_some(), wanted, "{body}");
+    }
+    let (status, _, body) = get(web.port, "/api/tree?gantt=0");
+    assert_eq!((status, json_of(&body)["code"].as_str()), (400, Some("bad_input")));
 }

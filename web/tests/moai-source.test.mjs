@@ -140,11 +140,11 @@ test('the tree asks for the archive only while archived rows are shown (moai-m4e
 })
 
 test('the tree is asked in the zone the page draws in, so moai judges overdue there (moai-vj8w.7sh)', async () => {
-  const client = fakeClient({ '/api/tree': passed(TREE), '/api/tree?tz=Asia%2FSeoul': passed(TREE), '/api/tree?archived=1&tz=UTC&worktree=1': passed(TREE) })
+  const client = fakeClient({ '/api/tree': passed(TREE), '/api/tree?gantt=1&tz=Asia%2FSeoul': passed(TREE), '/api/tree?archived=1&gantt=1&tz=UTC&worktree=1': passed(TREE) })
   assert.deepEqual((await loadTree(client)).value, TREE)
-  assert.deepEqual((await loadTree(client, {}, undefined, undefined, false, false, 'Asia/Seoul')).value, TREE)
-  assert.deepEqual((await loadTree(client, {}, undefined, undefined, true, true, 'UTC')).value, TREE)
-  assert.deepEqual(client.calls.map((call) => call.url), ['/api/tree', '/api/tree?tz=Asia%2FSeoul', '/api/tree?archived=1&tz=UTC&worktree=1'])
+  assert.deepEqual((await loadTree(client, {}, undefined, undefined, false, false, 'Asia/Seoul', true)).value, TREE)
+  assert.deepEqual((await loadTree(client, {}, undefined, undefined, true, true, 'UTC', true)).value, TREE)
+  assert.deepEqual(client.calls.map((call) => call.url), ['/api/tree', '/api/tree?gantt=1&tz=Asia%2FSeoul', '/api/tree?archived=1&gantt=1&tz=UTC&worktree=1'])
 })
 
 test('the detail of a row only another worktree holds is asked with worktree=1 while the overlay is on (moai-m4ez.yb1)', async () => {
@@ -271,4 +271,11 @@ test('filter days use the page zone for both rows and backlog, without changing 
   const question = { filter: 'created=2026-10-11', q: '', archived: false }
   for (const endpoint of matchEndpoints({ ...question, zone: 'Asia/Seoul' })) assert.equal(endpoint.query.tz, 'Asia/Seoul')
   for (const endpoint of matchEndpoints(question)) assert.equal(endpoint.query.tz, undefined)
+})
+
+test('a tree-only read omits both chart values and timezone; a chart read explicitly asks for them', async () => {
+  const client = fakeClient({ '/api/tree': passed(TREE), '/api/tree?gantt=1': passed(TREE) })
+  await loadTree(client, {}, undefined, undefined, false, false, 'Asia/Seoul')
+  await loadTree(client, {}, undefined, undefined, false, false, undefined, true)
+  assert.deepEqual(client.calls.map((c) => c.url), ['/api/tree', '/api/tree?gantt=1'])
 })

@@ -126,6 +126,8 @@ async function start(): Promise<void> {
 
   /** Loads so far: only the latest one's answers count. */
   let loads = 0
+  /** Whether the tree on screen includes the chart values, requested only while its tab is active. */
+  let treeHasGantt = false
   /** The load the clock started on its own, or 0: its reads run without the activity line. */
   let quietLoad = 0
 
@@ -153,11 +155,12 @@ async function start(): Promise<void> {
     // status` prints, side by side. The load does not wait for the counts: rows are drawn at once, and the counts
     // are put on them when they come.
     // Each load is a change seen through: a read of it is never handed a run another load started before it.
-    const { sort, view } = store.getState()
+    const { sort, view, tab } = store.getState()
+    const gantt = tab === 'gantt'
     const zone = zoneNow()
     // `SPC v w` (on by default): the other worktrees' rows over the list, as the TUI's explorer opens.
     const listing = loadAllRows(client, PRIORITY.list, load, view.worktree)
-    const placing = loadTree(client, sortQuery(sort), PRIORITY.list, load, view.worktree, view.showArchived, zone)
+    const placing = loadTree(client, sortQuery(sort), PRIORITY.list, load, view.worktree, view.showArchived, zone, gantt)
     const counting = loadGroups(client, PRIORITY.list, load, view.worktree)
     let counted: Awaited<typeof counting> | undefined
     void counting.then((groups) => (counted = groups))
@@ -180,6 +183,7 @@ async function start(): Promise<void> {
     // (finished, moved away) the pane goes with it, as choose() does for a read still running. A detail the list
     // never held (an issue a wiki page links to that only the archive holds) stays.
     const wasListed = shownBefore !== null && indexOf(before)?.find(shownBefore.id) !== undefined
+    treeHasGantt = gantt
     store.dispatch({ type: 'board-loaded', data, order: drawnOrder() })
     const state = store.getState()
     const shown = state.shown.value
@@ -203,7 +207,7 @@ async function start(): Promise<void> {
     // So does the worktree overlay, or the archive shown, turned while it ran (the tree is asked for both).
     // The zone picked while it ran is the same: the tree's `overdue` was judged in the zone before.
     const after = store.getState()
-    if (zoneNow() !== zone || after.sort !== sort || after.view.worktree !== view.worktree || after.view.showArchived !== view.showArchived) setTimeout(() => void refresher.refresh(), 0)
+    if (zoneNow() !== zone || after.sort !== sort || after.view.worktree !== view.worktree || after.view.showArchived !== view.showArchived || (after.tab === 'gantt' && !gantt)) setTimeout(() => void refresher.refresh(), 0)
     return true
   }
 
@@ -247,6 +251,8 @@ async function start(): Promise<void> {
       if (state.search.text !== previous.search.text) asking = setTimeout(() => void ask(), 150)
       else void ask()
     }
+    // Opening the chart after a tree-only read asks for its values. A transition during a read is caught at loadBoard's end.
+    if (state.tab === 'gantt' && previous.tab !== 'gantt' && !treeHasGantt && state.board.value) void refresher.refresh()
     // A new order is moai's to make: the tree is read again in it.
     if (state.sort !== previous.sort && state.board.value) void refresher.refresh()
     // The worktree overlay turned on or off: the rows are read again with it or without it.

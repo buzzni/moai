@@ -63,6 +63,10 @@ it. `SPC v r` switches the body between rendered markdown and the raw text.
 
 ## Gantt
 
+Chart values are requested only while this tab is active. Opening Gantt after a
+tree-only read requests them once; rows may appear briefly before their bars.
+Other tabs read the same tree without calculating the chart values.
+
 The Gantt tab draws the same chart as the explorer's `SPC g g`, with the same
 meaning. The tree stays on the left with every folder open, the filter, search and
 view toggles of the list applied; the dates scroll on the right.

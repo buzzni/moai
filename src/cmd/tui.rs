@@ -82,11 +82,12 @@ pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
         super::report_load_errors(ctx.lang(), &repo.issues_path(), &load.errors);
         let states = ground.columns();
         let deep = args.deep;
+        let no_gantt = args.no_gantt;
         let entries = listing(ctx, &repo, &load.issues, &origin, &live, (&index, &ground), &path, args)?;
         // **간트는 `--deep` 에만 싣는다**(moai-d86e.b2m) — 그것을 읽는 자는 web 의 간트 탭(`/api/tree`)이고, 한 자리의
         // 목록을 묻는 쪽에 저장소 전부의 구간 셈을 물리지 않는다. 판단은 `report::gantt` 가 하고 여기는 줄에 얹기만 한다.
-        // 거르개 문맥도 `--deep` 에만 짓는다 — 한 자리 목록은 그것을 읽는 자가 없다.
-        let wh = deep.then(|| ground.here(&load.issues));
+        // `--no-gantt` 는 그 값과 거르개 문맥 셈을 함께 뺀다 — 간트를 안 보이는 웹 탭은 트리만 읽는다.
+        let wh = (deep && !no_gantt).then(|| ground.here(&load.issues));
         let gantt = wh.as_ref().map(|wh| {
             crate::report::gantt::gantt(&load.issues, &index, wh, &repo.config, &crate::model::now(), ctx.zone())
         });
@@ -504,6 +505,7 @@ fn shaped(args: &TuiArgs) -> Option<&'static str> {
         .or_else(|| args.order.reverse.then_some("--reverse"))
         .or_else(|| args.deep.then_some("--deep"))
         .or_else(|| args.no_archive.then_some("--no-archive"))
+        .or_else(|| args.no_gantt.then_some("--no-gantt"))
 }
 
 /// `--json` 이 낼 그 자리의 목록(moai-wk7i.5wx).
@@ -526,7 +528,7 @@ fn listing(
     path: &Path,
     args: TuiArgs,
 ) -> R<Vec<(Entry, Option<Vec<String>>)>> {
-    let TuiArgs { path: _, filter, order, deep, worktree: _, no_archive } = args;
+    let TuiArgs { path: _, filter, order, deep, worktree: _, no_archive, no_gantt: _ } = args;
     let given = super::show::first_given(&filter).is_some();
     if !given && order.sort.is_none() && !order.reverse && !no_archive {
         // 거르개도 차례도 없으면 `Index::entries` 의 그 자다 — 다 남기고 목록의 차례로.

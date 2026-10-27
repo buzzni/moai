@@ -12,6 +12,13 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+### Added
+
+- **`moai tui --json --deep --no-gantt` reads the tree without chart values.**
+  The web page now asks `/api/tree?gantt=1` only while Gantt is active, and
+  fetches the values when that tab opens after a tree-only read. Other tabs
+  skip the chart calculation and its response data. (moai-ijjd.i7v)
+
 ### Changed
 
 - **Open web tabs follow theme and time zone choices made in another tab.**
