@@ -140,8 +140,8 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
   let waiting: [State, IssueIndex | null] | null = null
   let drawLater = false
   /**
-   * A scroll left the window while a bar was held: the window is owed, not a draw. A draw() would place every bar again
-   * from the read before the write, the dropped one back at its old days; the window only rebuilds what the view left.
+   * A scroll left the window while a bar was held: the window is owed, not a draw. A draw() would place every bar and
+   * the axis again; the window only rebuilds what the view left.
    */
   let paintLater = false
   /** Rows whose planned days are being written: a bar drawn from the read before that write does not move again. */
@@ -151,6 +151,15 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
   const ganttOf = (row: Row): GanttRow | undefined => {
     const planned = moved.get(row.id)
     return planned && row.gantt ? { ...row.gantt, planned } : row.gantt
+  }
+  /**
+   * Where a row's bars stand, a pending move included. placeRow reads a milestone's `◆` off the row's own `due_on`, not
+   * off its plan, so the dropped deadline goes onto the row too: else the `◆` went back to its old day on the next
+   * window while the bar stayed where it was dropped.
+   */
+  const placeOf = (row: Row, now: number, zone: string | undefined): Placed => {
+    const planned = moved.get(row.id)
+    return placeRow(ganttOf(row), planned ? { ...row, due_on: planned.end ?? undefined } : row, now, zone)
   }
 
   // ── frame ──
@@ -263,7 +272,7 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
     const m = model
     const now = nowWall()
     const zone = clock.zone()
-    const placed = m.lines.map((line) => (line.kind === 'row' ? placeRow(ganttOf(m.index.rows[line.at]!), m.index.rows[line.at], now, zone) : null))
+    const placed = m.lines.map((line) => (line.kind === 'row' ? placeOf(m.index.rows[line.at]!, now, zone) : null))
     const was = axis
     if (!axis || axis.zoom !== zoom || !fresh(placed, now)) {
       const [from, to] = rangeOf(placed.map((p) => p?.span ?? null), now)
@@ -823,7 +832,9 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
         dragged = true
         moved.set(row.id, { start: change.start ?? g.planned!.start, end: change.due ?? g.planned!.end, from: 'own' })
         const n = model?.lines.findIndex((line) => line.key === row.id) ?? -1
-        if (built && n >= 0) built.placed[n] = placeRow(ganttOf(row), row, built.now, clock.zone())
+        if (built && n >= 0) built.placed[n] = placeOf(row, built.now, clock.zone())
+        // The arrows into and out of the dropped bar are drawn from those days.
+        paintArrows()
         // Invert the move rather than restoring the page's stale dates; the other edge stays as moai found it.
         const planned = g.planned?.from === 'own' ? g.planned : null
         write(movePlan, row.id, { edge, days }, undoOf(row.id, { edge, days }, {

@@ -911,6 +911,27 @@ test('an answered refusal removes the dropped plan without a refresh', async () 
   assert.equal(px(lane(root, 'e1.c').querySelector('.b-plan'), 'left'), x0)
 })
 
+test('a pending milestone move keeps its own diamond at the dropped deadline through an old read', async () => {
+  let answer
+  const rows = ROWS.map((row) => (row.id === 'm1' ? { ...row, starts_on: '2026-10-26' } : row))
+  const gantt = { ...GANTT, m1: { ...GANTT.m1, planned: own('2026-10-26', '2026-10-28') } }
+  const { root, dom, view, state } = writing(rows, gantt, () => new Promise((resolve) => { answer = resolve }))
+  const l = lane(root, 'm1')
+  const bar = laidOut(l.querySelector('.b-plan'))
+  const [x0, d0] = [px(bar, 'left'), px(l.querySelector('.mk.due'), 'left')]
+  press(dom, l, 'pointerdown', x0 + 40)
+  press(dom, l, 'pointermove', x0 + 120)
+  press(dom, l, 'pointerup', x0 + 120)
+  await tick()
+  view.render(state, indexOf(rows, gantt))
+  const after = lane(root, 'm1')
+  assert.deepEqual([px(after.querySelector('.b-plan'), 'left'), px(after.querySelector('.mk.due'), 'left')], [x0 + 80, d0 + 80])
+  answer()
+  await tick()
+  const back = lane(root, 'm1')
+  assert.deepEqual([px(back.querySelector('.b-plan'), 'left'), px(back.querySelector('.mk.due'), 'left')], [x0, d0], 'the read answers once the overlay goes')
+})
+
 test('a window built later keeps the clock the bars were placed at: the today line stays where an open bar ends (moai-vj8w review)', () => {
   const rows = Array.from({ length: 200 }, (_, i) => ({ id: `r${String(i).padStart(3, '0')}`, kind: 'issue', title: `Row ${i}`, status: i === 0 ? 'in_progress' : 'todo' }))
   const gantt = Object.fromEntries(rows.map((row) => [row.id, g(row.id)]))

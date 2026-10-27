@@ -149,13 +149,7 @@ export function createMemory(backend: () => Backend | null | undefined, key: str
 
   return {
     load() {
-      const text = read()
-      if (text === null) return normalizeMemory(null)
-      try {
-        return normalizeMemory(JSON.parse(text))
-      } catch {
-        return normalizeMemory(null)
-      }
+      return normalizeMemory(parsed(read()))
     },
     save(settings, before) {
       const text = JSON.stringify(patchMemory(parsed(read()), before, settings))
@@ -415,7 +409,9 @@ export function remember(
   return store.subscribe((state, previous) => {
     const now = rememberedOf(state)
     const before = rememberedOf(previous)
-    if (!sameMemory(now, before)) memory.save(now, before)
+    // Another tab's choice this one follows is that tab's write already: written back, an event that arrives late puts
+    // the older choice over a newer one.
+    if (!sameMemory(now, before) && !following.has(store)) memory.save(now, before)
     // Most changes (the cursor, a read) leave the query alone: nothing is built or compared for them.
     if (sameQuerySlices(state, previous)) return
     const query = queryOf(state)
@@ -429,13 +425,21 @@ export function remember(
   })
 }
 
+/** Stores taking another tab's choice ({@link follow}) right now: {@link remember} does not save what they take. */
+const following = new WeakSet<Store>()
+
 /** Other tabs' theme and zone choices apply here; this tab keeps its own pane, layout and query. */
 export function follow(store: Store, win: Window, key: string = MEMORY_KEY): () => void {
   const changed = (event: StorageEvent) => {
     if (event.key !== key) return
     const settings = normalizeMemory(parsed(event.newValue))
-    store.dispatch({ type: 'theme', theme: settings.theme ?? 'system' })
-    store.dispatch({ type: 'zone', zone: settings.zone ?? null })
+    following.add(store)
+    try {
+      store.dispatch({ type: 'theme', theme: settings.theme ?? 'system' })
+      store.dispatch({ type: 'zone', zone: settings.zone ?? null })
+    } finally {
+      following.delete(store)
+    }
   }
   win.addEventListener('storage', changed)
   return () => win.removeEventListener('storage', changed)

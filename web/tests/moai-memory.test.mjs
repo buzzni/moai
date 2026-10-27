@@ -6,6 +6,9 @@ import { JSDOM } from 'jsdom'
 import { panelModule } from './moai-panel-modules.mjs'
 
 const { MEMORY_KEY, QUERY_KEY, createBrowserStorage, createSortDefault, createMemory, createSessionStorage, normalizeMemory, patchMemory, patchQuery, remember, follow } = await panelModule('data/memory.ts')
+// Every module is loaded before the first test: a test registered after a later await is never run under
+// --test-force-exit, which ends the run once the tests known so far are done.
+const { createStore } = await panelModule('store.ts')
 
 const fakeLocal = () => {
   const items = new Map()
@@ -32,8 +35,6 @@ test('a browser that refuses site data leaves the tab\'s memory, which says it d
   assert.equal(refusing.persistent, false)
   assert.equal(createBrowserStorage(() => null).persistent, false)
 })
-
-const { createStore } = await panelModule('store.ts')
 
 test('stale tabs patch independent settings and preserve unknown nested keys', () => {
   const local = fakeLocal()
@@ -116,6 +117,26 @@ test('storage events follow theme and zone only and can be unsubscribed', () => 
   stop()
   send(MEMORY_KEY, JSON.stringify({ theme: 'dark' }))
   assert.equal(store.getState().theme, 'system')
+  dom.window.close()
+})
+
+test('a tab does not write back the theme it followed, so a late event cannot cover a newer choice', () => {
+  const local = fakeLocal()
+  const dom = new JSDOM('')
+  const a = createStore()
+  const b = createStore()
+  for (const store of [a, b]) remember(store, createMemory(() => local), createSortDefault(createSessionStorage()), createBrowserStorage(() => local))
+  follow(b, dom.window)
+  a.dispatch({ type: 'theme', theme: 'dark' })
+  const first = local.getItem(MEMORY_KEY)
+  a.dispatch({ type: 'theme', theme: 'light' })
+  // B handles the event of A's first write after A's second one landed.
+  dom.window.dispatchEvent(new dom.window.StorageEvent('storage', { key: MEMORY_KEY, newValue: first }))
+  assert.equal(b.getState().theme, 'dark', 'B follows the event it was handed')
+  assert.equal(JSON.parse(local.getItem(MEMORY_KEY)).theme, 'light', 'and does not write it back')
+  // B's own change afterwards writes only what B changed.
+  b.dispatch({ type: 'tab', tab: 'gantt' })
+  assert.deepEqual([JSON.parse(local.getItem(MEMORY_KEY)).theme, JSON.parse(local.getItem(MEMORY_KEY)).tab], ['light', 'gantt'])
   dom.window.close()
 })
 
