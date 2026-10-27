@@ -12,6 +12,11 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+### Changed
+
+- **Open web tabs follow theme and time zone choices made in another tab.**
+  Each keeps its current tab, layout and query. (moai-ijjd.46f)
+
 ### Fixed
 
 - **Web Gantt bars keep the dropped plan while a write is pending.** Scrolling,
@@ -25,8 +30,7 @@ does not tag — see `CONTRIBUTING.md`.
   and the Gantt's lateness count. (moai-ijjd.7af)
 - **Web tabs preserve each other's saved settings.** Each tab patches only the
   settings it changes, including per-project filter, sort, columns and view.
-  Open tabs follow theme and time zone choices without changing each other's
-  current tab, layout or query. (moai-ijjd.46f)
+  (moai-ijjd.46f)
 
 ## [0.29.1] - 2026-10-26
 
