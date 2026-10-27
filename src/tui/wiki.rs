@@ -73,6 +73,8 @@ pub struct Window {
     /// **첨자가 아니라 경로다** — 창이 떠 있는 동안 층의 줄이 다시 서면 첨자는 다른 프로젝트를 가리킨다.
     pub from: Option<PathBuf>,
     pages: Vec<Page>,
+    /// Built and invalidated together with the pages when this window is opened.
+    index: crate::wiki::search::Index,
     /// 찾기가 견줄 글 — 페이지마다 `(제목, 본문)` 을 소문자로 접은 것, [`Window::pages`] 와 같은 차례. **연 순간 한 번
     /// 접는다** — 창은 그 사이 글이 안 바뀌는데, 견줄 때마다 접으면 커서·그림·치는 키마다 위키 전부(생성 페이지
     /// `docs/cli.md` 만 128KB)를 몇 번씩 다시 접는다.
@@ -185,11 +187,13 @@ impl Window {
     ) -> Window {
         let folded =
             wiki.pages.iter().map(|p| (p.title.to_lowercase(), p.body.as_deref().map(str::to_lowercase))).collect();
+        let index = crate::wiki::search::Index::of(&wiki.pages);
         Window {
             project,
             dir,
             from,
             pages: wiki.pages,
+            index,
             folded,
             skipped: wiki.skipped.len(),
             cursor: 0,
@@ -373,7 +377,7 @@ impl Window {
     fn order_for(&self, q: &str) -> Vec<usize> {
         let at: std::collections::HashMap<&str, usize> =
             self.pages.iter().enumerate().map(|(i, p)| (p.slug.as_str(), i)).collect();
-        let ranked = crate::wiki::search::rank(&self.pages, q, usize::MAX).hits;
+        let ranked = self.index.rank(&self.pages, q, usize::MAX).hits;
         let folded = q.to_lowercase();
         let typed = self.folded.iter().enumerate().filter(|(_, (title, body))| {
             title.contains(&folded) || body.as_deref().is_some_and(|b| b.contains(&folded))
@@ -2152,5 +2156,39 @@ pub(super) mod tests {
         assert_eq!(window(&a).picked(), None, "다른 페이지의 같은 차례 링크가 골라진 채 섰다");
         a.hit("Enter");
         assert!(window(&a).choose.is_some() && slug(&a) == "guide", "남의 고름으로 Enter 가 건너갔다");
+    }
+}
+
+#[cfg(test)]
+mod ranking_cache_tests {
+    use super::tests::{wiki_app, window};
+
+    #[test]
+    fn reopening_the_window_rebuilds_the_ranking_index() {
+        let (s, mut app) =
+            wiki_app("ranking-reopen", &[("a.md", "# Zebra\n\nzebra zebra zebra\n"), ("b.md", "# B\n\nzebra\n")]);
+        app.hit("SPC g w / z e b r a Enter");
+        assert_eq!(window(&app).shown()[0].slug, "a");
+        std::fs::write(s.path().join("docs/a.md"), "# A\n\nzebra\n").unwrap();
+        std::fs::write(s.path().join("docs/b.md"), "# Zebra\n\nzebra zebra zebra\n").unwrap();
+        app.hit("Esc Esc SPC g w / z e b r a Enter");
+        assert_eq!(window(&app).shown()[0].slug, "b");
+    }
+
+    #[test]
+    fn detail_holds_separate_ranking_indexes_for_each_checkout() {
+        let (first, mut app) = wiki_app("ranking-first", &[("a.md", "# Zebra\n\nzebra\n")]);
+        let (second, _) = wiki_app("ranking-second", &[("b.md", "# Quokka\n\nquokka\n")]);
+        super::super::draw::tests::render(&mut app, 160, 80);
+        app.site.repo = Some(crate::store::Repo::at(second.path().to_path_buf(), app.site.cfg.clone()));
+        super::super::draw::tests::render(&mut app, 160, 80);
+        assert_eq!(app.wiki_pages.len(), 2);
+        for (root, query, missing) in [(first.path(), "zebra", "quokka"), (second.path(), "quokka", "zebra")] {
+            let (pages, index) = app.wiki_pages.get(root).unwrap();
+            assert!(!index.rank(pages, query, usize::MAX).hits.is_empty());
+            assert!(index.rank(pages, missing, usize::MAX).hits.is_empty());
+        }
+        app.open_wiki();
+        assert!(app.wiki_pages.is_empty(), "reopening must discard pages and their indexes together");
     }
 }

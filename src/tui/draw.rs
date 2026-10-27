@@ -4433,15 +4433,16 @@ fn fill_wiki(app: &mut App, rows: &[Row]) {
     // **못 읽은 위키는 안 담는다**(리뷰 moai-xp7l.mug) — 담으면 그 세션 내내 빈 토막이다. 없던 위키 디렉터리를 지으면
     // 다음 줄에서 선다. 못 읽은 자리를 다시 묻는 값은 `stat` 하나다.
     if let Some((root, Ok(pages))) = read {
-        app.wiki_pages.insert(root, pages);
+        let index = crate::wiki::search::Index::of(&pages);
+        app.wiki_pages.insert(root, (pages, index));
     }
     let built = {
         let Some(site) = app.site_of_seat(seat) else { return };
         let (Some(repo), Some(i)) = (site.repo.as_ref(), site.issues.get(at)) else { return };
-        let unread = Vec::new();
-        let pages = app.wiki_pages.get(repo.here()).unwrap_or(&unread);
+        let unread = (Vec::new(), crate::wiki::search::Index::default());
+        let (pages, index) = app.wiki_pages.get(repo.here()).unwrap_or(&unread);
         let epic = wiki_epic(site, i);
-        let about = crate::wiki::about::about(pages, i, epic, &[]);
+        let about = crate::wiki::about::indexed(pages, index, i, epic, &[]);
         let line =
             |at: String, title: String, slug: &str| WikiLine { at, title, lesson: crate::wiki::seen::is_lesson(slug) };
         let named =
