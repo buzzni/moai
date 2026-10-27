@@ -12,6 +12,22 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Web Gantt bars keep the dropped plan while a write is pending.** Scrolling,
+  resizing or receiving an older read no longer snaps a moved bar back before
+  its write and refresh finish. (moai-ijjd.qe4)
+- **Web Gantt undo reverses the move.** The notice gives an inverse shift for
+  the moved edge, preserving changes to the other edge made since the page read
+  it. An edge absent at read time is cleared instead. (moai-ijjd.h55)
+- **Web timestamp filters use the page's time zone.** Days in `created`, `since`
+  and the other timestamp filters now agree with the dates drawn on the page
+  and the Gantt's lateness count. (moai-ijjd.7af)
+- **Web tabs preserve each other's saved settings.** Each tab patches only the
+  settings it changes, including per-project filter, sort, columns and view.
+  Open tabs follow theme and time zone choices without changing each other's
+  current tab, layout or query. (moai-ijjd.46f)
+
 ## [0.29.1] - 2026-10-26
 
 ### Fixed
