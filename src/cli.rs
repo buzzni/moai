@@ -507,7 +507,7 @@ BACKLOG
     )]
     Wiki(WikiCmd),
 
-    /// Open the explorer (the one write to an issue is `{key:browse.jot}`, jot)
+    /// Open the explorer (writes a jot, `{key:browse.jot}`, and gantt plans)
     #[command(after_help = "  Milestones and epics behave like directories. Move around on the left and
   what the cursor rests on is described on the right.
 
@@ -833,7 +833,8 @@ BACKLOG
   kept. With no editor the built-in form opens — one title line and a body,
   Tab moves between them (Enter in the title goes to the body) and Ctrl-S
   keeps it. Esc closes it, asking once if you had typed something ({key:confirm.yes} throws
-  it away). This is the one write to an issue — editing is done on the CLI.
+  it away). Besides moving a plan on the gantt (above), this is the only write —
+  moving, editing and noting are done on the CLI.
   `--json` prints only that directory's listing, with no screen (outside a
   `.moai`, the rows of the layer). Each folder row (a milestone, an epic,
   an issue with children) carries progress, {\"done\": 3, \"total\": 5} —

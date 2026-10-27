@@ -180,7 +180,7 @@ Each list, issue and wiki page the page shows is the answer of `moai --json
 <command>`, run in a child process for that request and passed on as it is, so
 what you see is exactly what the CLI says. Writing stays where it was: the CLI for
 moving, editing and noting, and the explorer's `SPC n` for a thought you want to
-park.
+park and its Gantt for planned days.
 
 The one write to the tracker is a Gantt bar's days ([above](#gantt)): the server
 runs `moai edit --shift` for it (`--start --due --if-unplanned` for a double-click),

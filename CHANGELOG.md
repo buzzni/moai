@@ -26,6 +26,9 @@ does not tag — see `CONTRIBUTING.md`.
 
 ### Fixed
 
+- `moai tui --help` describes both explorer writes: parking a thought and
+  moving a plan on the Gantt. (moai-lj8g.w3a)
+
 - `moai show --fields` keeps the order of keys inside the values it keeps.
   Nested objects such as `journal`, `work`, `commits` and `wiki` previously
   came out with keys sorted by name, unlike the same row without `--fields`.

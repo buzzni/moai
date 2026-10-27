@@ -2,8 +2,9 @@
 
 `moai tui` walks the tracker on one screen: the list on one side, the row under
 the cursor described on the other. It is for reading — finding work, seeing how a
-milestone stands, catching up on what changed — and the one thing it writes to
-the tracker is a thought you park (`SPC n`). Moving, editing and noting are done
+milestone stands, catching up on what changed — and it writes two things to
+the tracker: a thought you park (`SPC n`) and a plan you move on [the Gantt](#the-gantt).
+Moving, editing and noting are done
 with the CLI. Every key is in `moai tui --help`; this page says which ones to
 reach for, and [the glossary](glossary.md) says what the words mean.
 
