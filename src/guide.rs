@@ -3057,10 +3057,20 @@ PY"##;
 /// - **비운 뒤 10초 안의 움직임은 비운 것의 일부다.** 도는 턴이나 허락 창 위에서 `/clear` 를 치면 Claude Code 가 A 에
 ///   `[Request interrupted by user for tool use]` 와 거절된 `tool_result` 를 적는데, 그 `timestamp` 가 `history.jsonl` 의
 ///   `/clear` 보다 늦다(2026-10-26 에 잰 `/clear` id 299개 중 하나, `f59364af` 가 0.58초 뒤). 그대로 견주면 그 대화가
-///   비운 뒤 움직인 것으로 읽혀 후보로 남는다. 되돌아온 대화는 `/resume` 과 새 입력이 들어야 움직이니 10초 안에 못 선다
+///   비운 뒤 움직인 것으로 읽혀 후보로 남는다. 10초 창은 그대로 두고, 빠른 재개의 오판은 아래 사유 줄로 사람이 되돌린다.
+///
+/// **`/resume`·`/continue` 로 떠난 대화도 같다**(moai-1m21.hxm, moai-jn8d.msb 5·6번). 2026-10-27 에
+/// `history.jsonl` 2,786줄 중 `/resume` 은 다섯, `/continue` 는 없었다. 다섯 다 떠난 쪽 id 를 들고, 다음 입력은 같은
+/// 프로젝트의 이미 있던 다른 대화 id 로 섰다. 남은 대화 기록 2,953개에는 `/resume` 명령 줄이 없었다. 2.1.310 의
+/// 정의는 `name:"resume"`, `aliases:["continue"]`, 인자는 id 나 검색어다 — 첫 낱말로 맞춘다.
+///
+/// 고르기 창을 취소한 판은 재지 못했다. 입력할 때 남는 `/resume` 뒤 한 줄도 못 쓰고 죽으면 떠난 것으로 읽힐 수 있다.
+/// 또 `/clear` 뒤 일부러 되살린 대화도 한 줄 쓰기 전에 죽으면 같은 꼴이다. 그래서 뺀 id 를 명령·UTC 때와 함께 내고,
+/// 스킬은 표 밑에서 이름을 부른다 — 사람이 짚으면 되살린다. `updatedAt` 을 [`SESSIONS`] 의 여덟째 칸으로 내면 뒤의
+/// 판을 가르지만 네 스킬의 일곱 칸 계약을 바꾸므로 쓰지 않는다. 기록 읽기는 그 짝 하나, 10초 창도 그대로다.
 pub const CLEARED: &str = r##"python3 - <sessionId> … <<'PY'
 import glob, json, os, sys
-from datetime import datetime
+from datetime import datetime, timezone
 wanted = set(sys.argv[1:])
 cleared = {}
 try:
@@ -3068,8 +3078,11 @@ try:
         for line in f:
             try:
                 h = json.loads(line)
-                if str(h.get("display", "")).split()[:1] in (["/clear"], ["/new"], ["/reset"]) and h.get("sessionId") in wanted:
-                    cleared[h["sessionId"]] = max(cleared.get(h["sessionId"], 0), int(h["timestamp"]))
+                words = str(h.get("display", "")).split()
+                if words and words[0] in ("/clear", "/new", "/reset", "/resume", "/continue") and h.get("sessionId") in wanted:
+                    sid, stamp = h["sessionId"], int(h["timestamp"])
+                    if sid not in cleared or stamp > cleared[sid][0]:
+                        cleared[sid] = (stamp, words[0])
             except (ValueError, KeyError, TypeError, AttributeError):
                 continue
 except OSError:
@@ -3094,8 +3107,10 @@ def moved(sid):
         return 0
     return datetime.fromisoformat(last.replace("Z", "+00:00")).timestamp() * 1000
 for sid in sorted(cleared):
-    if cleared[sid] + 10000 > moved(sid):
-        print(sid)
+    stamp, command = cleared[sid]
+    if stamp + 10000 > moved(sid):
+        when = datetime.fromtimestamp(stamp / 1000, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        print(f"{sid}\t{command}\t{when}")
 PY"##;
 
 /// **빈 입력 칸의 잣대는 이 글 하나다.** `moai-tmux` 와 `moai-recover` 가 `format!` 으로 같은 글을 싣는다 —
@@ -4395,7 +4410,8 @@ leaves its record behind. The lines below print one row per record, tab-separate
   cannot tell live from dead (a sandbox that hides other processes, say). Bring nothing back;
   tell the person what it said
 - A **candidate** is a `dead` row with a `sessionId` whose `cwd` is the root or one of the
-  worktrees `git worktree list` names
+  worktrees `git worktree list` names. Two dead records with the same `sessionId` are one
+  candidate
 
 {PATH_QUOTES}
 
@@ -4409,25 +4425,26 @@ quote it by hand and bring it back themselves.
   worktree, also drop it when a live row other than your own stands in that same `cwd`. The
   root is not such a place — several live sessions stand there at once, and one of them being
   alive says nothing about the dead one
-- **Drop it when its conversation was cleared after it died.** Another process resumed it and
-  ran `/clear` there: that process went on under a new `sessionId` and its own record carries
-  the new one, so no live row carries the old id any more — and resuming it brings back a
-  conversation already left behind. Its transcript does not say so (the `/clear` lines open the
-  new id's transcript, not the end of the old one); `~/.claude/history.jsonl` does — it logs
-  every `/clear` (and its aliases `/new` and `/reset`) under the id it cleared. Give the lines
-  below the candidates' `sessionId`s; they print the ones cleared after their transcript last
-  moved, and you drop those. The lines a `/clear` writes as it interrupts a running turn land
-  within seconds of it and do not count as moving. A conversation that moved again after its
-  `/clear` (it was resumed back) is not printed. Two dead records with the same `sessionId`
-  are one candidate
+- **Drop it when its conversation was left after it died.** Another process resumed it and
+  ran `/clear` (or `/new` or `/reset`), or moved to another conversation with `/resume`
+  (or `/continue`): that process's record carries the conversation it went to, so no live
+  row carries the old id any more. Resuming it brings back a conversation already left
+  behind. Its transcript does not say so; `~/.claude/history.jsonl` logs the command under
+  the id it left. Give the lines below the candidates' `sessionId`s; they print each id left
+  after its transcript last moved, with the command and its UTC time, tab-separated. Do not
+  resume those, but name them under the table in 2. The lines written while interrupting a
+  running turn within ten seconds of the command do not count as moving; a conversation
+  that moved again later is not printed. A `/resume` picker can be cancelled, and a
+  conversation deliberately resumed after `/clear` can die before writing a line — both
+  can look left here, so bring one back when the person names it
 
 ```sh
 {CLEARED}
 ```
 
 - **Drop old crashes.** Records of earlier deaths stay too. Keep the candidates whose
-  transcript (below) last moved around the same time; name an older one to the person apart,
-  and bring it back only if they say so
+  transcript (below) last moved around the same time; name older ones under the table in 2,
+  and bring one back only if the person says so
 - When several candidates stand in the same `cwd`, ask the person **once** — one question
   for all of them — which to bring back
 
@@ -4483,7 +4500,10 @@ line — and look at where it stood:
 - `moai show <id>` — a `Next:` note on that id says where the session meant to go on
 
 Show the person **one table**, a row per session: role, name, `cwd`, work id, what it was
-waiting for, died at, uncommitted files — and the Saycode id of a Saycode session. Then go on — they asked for recovery already.
+waiting for, died at, uncommitted files — and the Saycode id of a Saycode session.
+Under the table, name what 1 left out in one line: each `sessionId` and `cwd`, the command
+and UTC time for a conversation left, or that it is an older crash. Bring one back when the
+person names it. Then go on — they asked for recovery already.
 
 ## 3. Point out what died with it
 
@@ -8356,13 +8376,22 @@ stop sending outside work while a release runs",
     /// `/new` 도 비운 것이고, 끊긴 턴이 비운 직후에 적는 줄은 움직인 것이 아니다.
     #[test]
     #[cfg(unix)]
-    fn the_recover_skill_drops_a_conversation_cleared_after_it_died() {
+    fn the_recover_skill_drops_a_conversation_left_after_it_died() {
         let text = recover();
         let dead = section(&text, "## 1. Find the dead");
         assert!(
-            dead.contains("**Drop it when its conversation was cleared after it died.**") && dead.contains(CLEARED),
+            dead.contains("**Drop it when its conversation was left after it died.**") && dead.contains(CLEARED),
             "되살린 뒤 /clear 한 대화를 후보로 둔다"
         );
+        for command in ["/resume", "/continue"] {
+            assert!(dead.contains(command));
+        }
+        let table = section(&text, "## 2. Draw the state each was in");
+        for part in
+            ["Under the table", "each `sessionId` and `cwd`", "command", "UTC time", "older crash", "person names it"]
+        {
+            assert!(table.contains(part), "제외한 대화의 사유가 안 보인다 — {part}");
+        }
         // 고리는 `history.jsonl` 이다 — 첫 규칙은 대화 기록의 끝을 읽어 틀렸다(리뷰 moai-jn8d.d79 1번).
         assert!(!text.contains("<command-name>/clear</command-name>"), "대화 기록의 끝에서 /clear 를 찾는다");
         // 기록을 읽는 것은 짝 하나다.
@@ -8393,6 +8422,11 @@ stop sending outside work while a release runs",
             line("2026-10-26T10:00:00.000Z") + &line("2026-10-26T11:00:00.600Z") + &line("2026-10-26T11:00:00.610Z"),
         )
         .unwrap();
+        for sid in ["s-moved", "s-continue", "s-reset"] {
+            std::fs::write(projects.join(format!("{sid}.jsonl")), line("2026-10-26T10:00:00.000Z")).unwrap();
+        }
+        // 고르기 창을 취소한 뒤 계속 쓴 대화는 빠지지 않는다.
+        std::fs::write(projects.join("s-looked.jsonl"), line("2026-10-26T12:00:00.000Z")).unwrap();
         let at = |t: &str| chrono_ms(t);
         let typed = |display: &str, sid: &str, t: &str| {
             format!(
@@ -8407,18 +8441,25 @@ stop sending outside work while a release runs",
             + &clear("s-other", "2026-10-26T11:00:00.000Z")
             + &clear("s-busy", "2026-10-26T11:00:00.000Z")
             + &typed("/new", "s-new", "2026-10-26T11:00:00.000Z")
+            + &typed("/resume other-id", "s-moved", "2026-10-26T11:00:00.000Z")
+            // 뒤에 읽은 과거 줄이 최신 명령을 덮지 않는다.
+            + &clear("s-moved", "2026-10-26T09:00:00.000Z")
+            + &typed("/continue some term", "s-continue", "2026-10-26T11:00:00.000Z")
+            + &typed("/resume", "s-looked", "2026-10-26T11:00:00.000Z")
+            + &typed("/reset", "s-reset", "2026-10-26T11:00:00.000Z")
             + "{\"display\":\"/clearly not\",\"timestamp\":1,\"sessionId\":\"s-plain\"}\n"
             + "not json\n";
         std::fs::write(home.join("history.jsonl"), history).unwrap();
-        let shell = CLEARED
-            .replace("~/.claude", &home.display().to_string())
-            .replace("<sessionId> …", "s-cleared s-back s-plain s-gone s-new s-busy");
+        let shell = CLEARED.replace("~/.claude", &home.display().to_string()).replace(
+            "<sessionId> …",
+            "s-cleared s-back s-plain s-gone s-new s-busy s-moved s-continue s-looked s-reset",
+        );
         let out = std::process::Command::new("sh").arg("-c").arg(shell).output().unwrap();
         assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
         // 대화 기록이 지워진 id 는 되살릴 대화가 없으니 비운 것으로 낸다. 안 물은 id(`s-other`)는 안 낸다.
         assert_eq!(
             String::from_utf8(out.stdout).unwrap(),
-            "s-busy\ns-cleared\ns-gone\ns-new\n",
+            "s-busy\t/clear\t2026-10-26T11:00:00Z\ns-cleared\t/clear\t2026-10-26T11:00:00Z\ns-continue\t/continue\t2026-10-26T11:00:00Z\ns-gone\t/clear\t2026-10-26T11:00:00Z\ns-moved\t/resume\t2026-10-26T11:00:00Z\ns-new\t/new\t2026-10-26T11:00:00Z\ns-reset\t/reset\t2026-10-26T11:00:00Z\n",
             "비운 대화를 못 갈랐다"
         );
     }

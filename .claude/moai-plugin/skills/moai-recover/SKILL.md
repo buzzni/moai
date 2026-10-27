@@ -171,7 +171,8 @@ PY
   cannot tell live from dead (a sandbox that hides other processes, say). Bring nothing back;
   tell the person what it said
 - A **candidate** is a `dead` row with a `sessionId` whose `cwd` is the root or one of the
-  worktrees `git worktree list` names
+  worktrees `git worktree list` names. Two dead records with the same `sessionId` are one
+  candidate
 
 `<root>` and `<cwd>` stand in double quotes on every shell line here, so a path with a
 space stays one word. Double quotes still read `"`, `$`, a backtick and `\`: a path holding
@@ -189,22 +190,23 @@ quote it by hand and bring it back themselves.
   worktree, also drop it when a live row other than your own stands in that same `cwd`. The
   root is not such a place — several live sessions stand there at once, and one of them being
   alive says nothing about the dead one
-- **Drop it when its conversation was cleared after it died.** Another process resumed it and
-  ran `/clear` there: that process went on under a new `sessionId` and its own record carries
-  the new one, so no live row carries the old id any more — and resuming it brings back a
-  conversation already left behind. Its transcript does not say so (the `/clear` lines open the
-  new id's transcript, not the end of the old one); `~/.claude/history.jsonl` does — it logs
-  every `/clear` (and its aliases `/new` and `/reset`) under the id it cleared. Give the lines
-  below the candidates' `sessionId`s; they print the ones cleared after their transcript last
-  moved, and you drop those. The lines a `/clear` writes as it interrupts a running turn land
-  within seconds of it and do not count as moving. A conversation that moved again after its
-  `/clear` (it was resumed back) is not printed. Two dead records with the same `sessionId`
-  are one candidate
+- **Drop it when its conversation was left after it died.** Another process resumed it and
+  ran `/clear` (or `/new` or `/reset`), or moved to another conversation with `/resume`
+  (or `/continue`): that process's record carries the conversation it went to, so no live
+  row carries the old id any more. Resuming it brings back a conversation already left
+  behind. Its transcript does not say so; `~/.claude/history.jsonl` logs the command under
+  the id it left. Give the lines below the candidates' `sessionId`s; they print each id left
+  after its transcript last moved, with the command and its UTC time, tab-separated. Do not
+  resume those, but name them under the table in 2. The lines written while interrupting a
+  running turn within ten seconds of the command do not count as moving; a conversation
+  that moved again later is not printed. A `/resume` picker can be cancelled, and a
+  conversation deliberately resumed after `/clear` can die before writing a line — both
+  can look left here, so bring one back when the person names it
 
 ```sh
 python3 - <sessionId> … <<'PY'
 import glob, json, os, sys
-from datetime import datetime
+from datetime import datetime, timezone
 wanted = set(sys.argv[1:])
 cleared = {}
 try:
@@ -212,8 +214,11 @@ try:
         for line in f:
             try:
                 h = json.loads(line)
-                if str(h.get("display", "")).split()[:1] in (["/clear"], ["/new"], ["/reset"]) and h.get("sessionId") in wanted:
-                    cleared[h["sessionId"]] = max(cleared.get(h["sessionId"], 0), int(h["timestamp"]))
+                words = str(h.get("display", "")).split()
+                if words and words[0] in ("/clear", "/new", "/reset", "/resume", "/continue") and h.get("sessionId") in wanted:
+                    sid, stamp = h["sessionId"], int(h["timestamp"])
+                    if sid not in cleared or stamp > cleared[sid][0]:
+                        cleared[sid] = (stamp, words[0])
             except (ValueError, KeyError, TypeError, AttributeError):
                 continue
 except OSError:
@@ -238,14 +243,16 @@ def moved(sid):
         return 0
     return datetime.fromisoformat(last.replace("Z", "+00:00")).timestamp() * 1000
 for sid in sorted(cleared):
-    if cleared[sid] + 10000 > moved(sid):
-        print(sid)
+    stamp, command = cleared[sid]
+    if stamp + 10000 > moved(sid):
+        when = datetime.fromtimestamp(stamp / 1000, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        print(f"{sid}\t{command}\t{when}")
 PY
 ```
 
 - **Drop old crashes.** Records of earlier deaths stay too. Keep the candidates whose
-  transcript (below) last moved around the same time; name an older one to the person apart,
-  and bring it back only if they say so
+  transcript (below) last moved around the same time; name older ones under the table in 2,
+  and bring one back only if the person says so
 - When several candidates stand in the same `cwd`, ask the person **once** — one question
   for all of them — which to bring back
 
@@ -301,7 +308,10 @@ line — and look at where it stood:
 - `moai show <id>` — a `Next:` note on that id says where the session meant to go on
 
 Show the person **one table**, a row per session: role, name, `cwd`, work id, what it was
-waiting for, died at, uncommitted files — and the Saycode id of a Saycode session. Then go on — they asked for recovery already.
+waiting for, died at, uncommitted files — and the Saycode id of a Saycode session.
+Under the table, name what 1 left out in one line: each `sessionId` and `cwd`, the command
+and UTC time for a conversation left, or that it is an older crash. Bring one back when the
+person names it. Then go on — they asked for recovery already.
 
 ## 3. Point out what died with it
 
