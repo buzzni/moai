@@ -15,7 +15,8 @@ case $moai in */*) moai=$(realpath -- "$moai") ;; *) moai=$(command -v -- "$moai
 unset MOAI_ACTOR MOAI_NOW
 export TZ=UTC MOAI_LANG=en MOAI_NO_UPDATE_CHECK=1 MOAI_CONFIG=$repo/.demo-home/config.toml
 cd "$repo"
-day() { date -u -d "$1 days" +%F; }
+demo_now=${DEMO_NOW:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}
+day() { date -u -d "$demo_now $1 days" +%F; }
 MIRA='Mira Chen (mira@example.com)'
 # plan <제목의 일부> <시작: 오늘에서 며칠> <마감: 오늘에서 며칠>. -g 는 본문·노트까지 찾으니 한 줄만 맞아야 한다 —
 # 둘 맞는 것을 앞의 것으로 고르면 seed.sh 의 글 한 줄에 막대가 말없이 옆 줄로 가고, drive.py 의 마우스가 빈 칸을 끈다

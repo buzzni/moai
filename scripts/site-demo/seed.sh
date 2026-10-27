@@ -27,8 +27,10 @@ JONAS='Jonas Weber (jonas@example.com)'
 AIKO='Aiko Tanaka (aiko@example.com)'
 SAM='Sam Rivera (sam@example.com)'
 
-# 오늘에서 N일 H시 전의 RFC3339
-ago() { date -u -d "-$1 days -${2:-0} hours" +%Y-%m-%dT%H:%M:%SZ; }
+# DEMO_NOW 를 주면 소식 그림을 나중에 다시 지어도 같은 날에 선다. 기본은 녹화하는 오늘이다.
+demo_now=${DEMO_NOW:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}
+ago() { date -u -d "$demo_now -$1 days -${2:-0} hours" +%Y-%m-%dT%H:%M:%SZ; }
+day() { date -u -d "$demo_now $1 days" +%F; }
 
 git init -q -b main
 # 녹화용 부속은 데모 저장소의 이력에 안 싣는다 — 첫 커밋의 git add -A 보다 먼저 적는다
@@ -54,8 +56,8 @@ note() { local who=$1 id=$2; shift 2; "$moai" note "$id" "$@" --user "$who" >/de
 walk() { local who=$1 id=$2; shift 2; for step in "$@"; do MOAI_NOW=$(ago "${step#*:}"); mv_ "$who" "$id" "${step%%:*}"; done; }
 
 MOAI_NOW=$(ago 21)
-m14=$("$moai" milestone add 'v1.4 — Sync' --start "$(date -u -d '-20 days' +%F)" --due "$(date -u -d '+6 days' +%F)" --user "$MIRA" --json | jq -r .id)
-m15=$("$moai" milestone add 'v1.5 — Sharing' --start "$(date -u -d '+7 days' +%F)" --due "$(date -u -d '+34 days' +%F)" --user "$MIRA" --json | jq -r .id)
+m14=$("$moai" milestone add 'v1.4 — Sync' --start "$(day -20)" --due "$(day +6)" --user "$MIRA" --json | jq -r .id)
+m15=$("$moai" milestone add 'v1.5 — Sharing' --start "$(day +7)" --due "$(day +34)" --user "$MIRA" --json | jq -r .id)
 
 e_sync=$("$moai" epic add 'Offline sync' --milestone "$m14" --user "$MIRA" --json -b - <<'EOF' | jq -r .id
 Notes written on a plane should be there when you land, on every device.

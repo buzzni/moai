@@ -26,6 +26,20 @@ def scenes(repo):
         moves = [(gap, f'\x1b[<32;{x};{y}M') for x in range(x0 + step, x1 + step, step)]
         return [(wait, f'\x1b[<0;{x0};{y}M'), *moves, (0.3, f'\x1b[<0;{x1};{y}m')]
     return {
+        # v0.30.0 소식(moai-87vm): 등록한 프로젝트 둘 중 지금 서 있는 곳에 ▸.
+        # record-tui.sh 가 데모 전용 설정에 프로젝트 둘을 등록해 둔다.
+        'release-header': [(1.5, TAB), (2.5, None)],
+        # 통계 창 위에서도 ? 로 키 목록을 연다. 창 뒤의 통계 머리가 보이게 찍는다.
+        'release-stats-keys': [
+            (2.0, SPC), (0.7, 'g'), (0.6, 's'),
+            (2.0, '?'), (3.0, None),
+        ],
+        # 한국어 달 단위: 해 아래에 숫자 달이 한 칸씩 떨어져 선다. 계획을 맞춘 Week 에서
+        # - 로 Month 로 간다. 화면 120x40, make.sh 에서 8.0초를 찍는다.
+        'release-gantt-month': [
+            (2.0, SPC), (0.7, 'g'), (0.6, 'g'),
+            (2.0, 't'), (0.8, '-'), (3.0, None),
+        ],
         # 목록 → 칸반 → 위키
         'tour': [
             (2.2, TAB), (1.4, 'j'), *key('j', 'j', 'j', 'j', 'j', 'j', gap=0.85),
@@ -144,6 +158,9 @@ def main():
                MOAI=moai, MOAI_CONFIG=os.path.join(repo, '.demo-home', 'config.toml'))
     for k in ('MOAI_NOW', 'MOAI_ACTOR', 'MOAI_KEYS', 'NO_COLOR'):
         env.pop(k, None)
+    if os.environ.get('DEMO_NOW'):
+        env['MOAI_NOW'] = os.environ['DEMO_NOW']
+    env['TZ'] = 'UTC'
     pid, fd = pty.fork()
     if pid == 0:
         # 크기는 자식이 exec 하기 전에 제 터미널에 건다 — 부모가 나중에 걸면 TUI 가 0×0 을 먼저 읽을 수 있다
