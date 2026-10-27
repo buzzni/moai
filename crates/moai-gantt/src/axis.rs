@@ -176,6 +176,10 @@ impl Axis {
     }
 
     /// [`labels`](Self::labels) 에 라벨이 속한 단위의 시작 시각을 곁들인다.
+    ///
+    /// **이웃한 라벨 사이에는 한 칸을 남긴다** — 붙으면 앞 라벨을 뺀다. 견주는 것은 **실제로 선** 뒤 라벨이다: 다음
+    /// 단위가 화면에 보여도 그 라벨이 끝에 못 들어 안 서면 앞 라벨은 붙을 데가 없다. 다음 단위가 보이는지로 가르면
+    /// 그 판에 앞 라벨까지 빠져, 넓힌 화면이 좁은 화면보다 위 줄을 덜 댄다(폭 8 은 `Dec 2026`, 9~15 는 빈 줄).
     fn labels_at(&self, unit: Unit, width: u16, names: &Names) -> Vec<(Label, i64)> {
         let spc = self.zoom.secs_per_cell();
         let end = self.origin + i64::from(width) * spc;
@@ -186,19 +190,26 @@ impl Axis {
         while start < end {
             let next = unit.next(start);
             let from = col(start).max(0).max(free);
-            let next_col = col(next);
-            let to = next_col.min(i64::from(width));
+            let to = col(next).min(i64::from(width));
             let text = unit.text(start, names);
             let w = Span::raw(text.as_str()).width() as i64;
-            // 다음 단위가 보이면 사이 한 칸을 남긴다. 화면 오른쪽 끝에는 꽉 차게 놓아도 된다.
-            let fits = if next_col < i64::from(width) { from + w < to } else { from + w <= to };
-            if fits {
+            if from + w <= to {
                 out.push((Label { col: from as u16, text }, start));
                 free = from + w;
             }
             start = next;
         }
-        out
+        // 뒤에서부터 남은 뒤 라벨과만 견준다 — 뒤 라벨이 빠지면 그 앞 라벨은 그다음 라벨과 견주어 산다.
+        let mut kept: Vec<(Label, i64)> = Vec::with_capacity(out.len());
+        for (label, start) in out.into_iter().rev() {
+            let end = i64::from(label.col) + Span::raw(label.text.as_str()).width() as i64;
+            if kept.last().is_some_and(|(next, _)| end >= i64::from(next.col)) {
+                continue;
+            }
+            kept.push((label, start));
+        }
+        kept.reverse();
+        kept
     }
 }
 
@@ -498,6 +509,14 @@ mod tests {
         assert_eq!(a.header(24, 0, &Names::default()).upper, vec![Label { col: 8, text: "Jan 2027".into() }]);
         // 다음 단위가 화면 안에 없으면 끝 칸까지 써도 된다.
         assert_eq!(a.header(8, 0, &Names::default()).upper, vec![Label { col: 0, text: "Dec 2026".into() }]);
+        // 다음 단위가 보여도 그 라벨이 못 들어 안 서면 붙을 데가 없다 — 넓힌 화면이 위 줄을 비우지 않는다.
+        for width in 9..16 {
+            assert_eq!(
+                a.header(width, 0, &Names::default()).upper,
+                vec![Label { col: 0, text: "Dec 2026".into() }],
+                "폭 {width}"
+            );
+        }
     }
 
     #[test]

@@ -719,6 +719,20 @@ mod tests {
         let area = a.drawn.chart.unwrap();
         let laid = moai_gantt::Layout::of(area, &a.chart);
         let ev = |kind, column, row| MouseEvent { kind, column, row, modifiers: KeyModifiers::NONE };
+        // 같은 셈이 이 체크아웃의 막대는 잡는다 — 칸을 빗맞혀 날이 있는 줄의 빈 칸을 누른 판도 끌기가 안 서서, 이것
+        // 없이는 막대를 못 맞힌 시험이 거절을 시험한 것으로 읽힌다. 제자리에서 떼니 날은 안 옮는다.
+        {
+            let rows = a.rows();
+            let n = ids(&a).iter().position(|s| s == "argos-0005").unwrap();
+            let chart = a.chart_of(&rows, 0..0, &|_, _| ratatui::text::Line::default());
+            let (start, end) = moai_gantt::bar_cells(&a.chart, chart.rows[n].planned.unwrap());
+            let (x, y) =
+                (laid.dates_body.x + ((start + end) / 2) as u16, laid.dates_body.y + (n - a.chart.first_row) as u16);
+            a.mouse(ev(K::Down(MouseButton::Left), x, y));
+            assert!(a.chart_drag.is_some(), "전제: 이 체크아웃의 막대를 못 잡았다");
+            a.mouse(ev(K::Up(MouseButton::Left), x, y));
+            assert!(a.chart_drag.is_none());
+        }
         for id in ["argos-0003", "argos-0010"] {
             let rows = a.rows();
             let n = ids(&a).iter().position(|s| s == id).unwrap();

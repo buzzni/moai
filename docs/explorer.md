@@ -186,8 +186,10 @@ same as `moai edit --start --due`: a start after the deadline, or a day past the
 deadline above, is refused and the refusal stands on the banner. A move that went
 through names the `moai edit` line that puts it back, and the rows it pushed past
 this deadline. An epic whose bar spans its members does not move — move the members.
-A row the overlay shows from another worktree (`⎇`) does not move here — move it
-in that worktree. On the overview, enter the project first.
+A row whose copy the overlay took from another worktree's tracker file does not
+move here — the notice and the detail (after `⎇`) name that worktree; move it in
+that worktree. The list's `⎇ <branch>` marks rows a worktree is working on, and
+those move as usual. On the overview, enter the project first.
 
 **The detail** stands below the gantt at first, so the dates keep the width.
 `SPC o d` there moves only the gantt's detail, for this session.
