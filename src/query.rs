@@ -179,7 +179,27 @@ impl<'a> Where<'a> {
     /// 빌려 받으면 그 지도가 사는 동안 거름망도 거기 매인다. 받은 쪽이 옮겨 담는 것은 한 번이고,
     /// 부르는 쪽은 색인처럼 지도를 먼저 쓰는 것을 다 쓴 뒤에 이것을 짓는다.
     pub fn from_soil(all: &'a [Issue], cfg: &'a crate::config::Config, soil: crate::report::Soil<'a>) -> Where<'a> {
-        let stands = soil.stands(all, cfg);
+        Self::build(all, cfg, soil, true)
+    }
+
+    /// Single-row detail uses the same reader as lists, but ordinary issues need no group columns.
+    /// Taking the row here keeps group details on the full path, including their archive age.
+    pub fn for_one(
+        all: &'a [Issue],
+        cfg: &'a crate::config::Config,
+        soil: crate::report::Soil<'a>,
+        issue: &Issue,
+    ) -> Where<'a> {
+        Self::build(all, cfg, soil, crate::report::is_group(issue))
+    }
+
+    fn build(
+        all: &'a [Issue],
+        cfg: &'a crate::config::Config,
+        soil: crate::report::Soil<'a>,
+        groups: bool,
+    ) -> Where<'a> {
+        let stands = if groups { soil.stands(all, cfg) } else { Default::default() };
         let states = stands.iter().map(|(id, s)| (*id, s.column)).collect();
         let since = stands.into_iter().map(|(id, s)| (id, s.entered)).collect();
         let crate::report::Soil { epic, roots, shelved, kinds, folded, lines, .. } = soil;
