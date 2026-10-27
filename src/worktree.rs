@@ -381,22 +381,30 @@ pub fn gather_unmarked(repo: &Repo) -> crate::fail::R<Gathered> {
     gather_with(repo, true, false, false).map(|(seen, _)| seen)
 }
 
-/// 읽을 화면 판과 걷기가 지킬 id 를 한 걸음에서 함께 낸다.
-/// 제 워크트리 사본도 이미 파싱하므로, 화면에는 안 겹치되 숨김 규칙을 지난 id 는 지킨다.
-pub fn gather_reading(repo: &Repo) -> crate::fail::R<(Gathered, BTreeSet<String>)> {
+/// 읽을 화면 판([`gather`] 와 같다)과, 그 걸음이 화면에 안 겹친 제 워크트리 사본을 한 걸음에서 함께 낸다
+/// (`moai read --worktree`, moai-b4dc.gqd). 제 사본은 화면 판도 이미 풀어 읽으니 다시 훑지 않는다 — 걷기가
+/// 지킬 id 는 [`Unshown::keep`] 이 **걷기가 쓸 때만** 센다.
+pub fn gather_reading(repo: &Repo) -> crate::fail::R<(Gathered, Unshown)> {
     let (seen, own) = gather_with(repo, true, true, true)?;
-    let ids = seen
-        .load
-        .issues
-        .iter()
-        .map(|i| i.id.clone())
-        .chain(own.iter().flat_map(|side| side.issues.iter().filter(|i| !hidden(&side.base, i)).map(|i| i.id.clone())))
-        .collect();
-    Ok((seen, ids))
+    Ok((seen, Unshown(own)))
 }
 
-/// [`gather`] 와 [`gather_unmarked`] 의 몸 — `screen` 이 거짓이면 [`marks_of`] 를 안 부르고, 부른 자리의
-/// 워크트리([`callers`])도 옆으로 그대로 겹친다.
+/// 화면 판이 겹치지 않은 제 워크트리 사본([`gather_reading`]) — 걷기가 지킬 id 를 셀 때만 펼친다.
+pub struct Unshown(Vec<Side>);
+
+impl Unshown {
+    /// 걷기가 지킬 id — `shown`(같은 걸음의 화면 판)의 id 에, 숨김 규칙([`hidden`])을 지난 제 사본의 id 를 더한다.
+    /// 겹치기가 세우는 id 는 옆의 차례와 무관하므로(이미 선 id 는 그대로, 아니면 숨김만 거른다) 이것이
+    /// [`gather_unmarked`] 가 겹친 id 와 같다.
+    pub fn keep(&self, shown: &Load) -> BTreeSet<String> {
+        let own = self.0.iter().flat_map(|side| side.issues.iter().filter(|i| !hidden(&side.base, i)));
+        shown.issues.iter().chain(own).map(|i| i.id.clone()).collect()
+    }
+}
+
+/// [`gather`]·[`gather_unmarked`]·[`gather_reading`] 의 몸 — `screen` 이 거짓이면 [`marks_of`] 를 안 부르고, 부른
+/// 자리의 워크트리([`callers`])도 옆으로 그대로 겹친다. `keep_own` 이면 겹치지 않은 그 워크트리의 사본을 둘째 값으로
+/// 낸다(`screen` 일 때만 뜻이 있다 — 아니면 제 워크트리도 옆으로 겹친다).
 fn gather_with(repo: &Repo, worktree: bool, screen: bool, keep_own: bool) -> crate::fail::R<(Gathered, Vec<Side>)> {
     let load = repo.read()?;
     if !worktree {
@@ -2199,7 +2207,8 @@ mod tests {
         // 걷기가 지킬 id 는 제 사본의 것까지다 — 빼면 이 워크트리의 `moai read` 가 루트에서 찍은 도장을 걷는다.
         let kept = gather_unmarked(&open()).unwrap();
         assert!(kept.load.issues.iter().any(|i| i.id == "t-0009"), "걷기가 제 사본에만 있는 줄을 안 셌다");
-        let (seen, ids) = gather_reading(&open()).unwrap();
+        let (seen, own) = gather_reading(&open()).unwrap();
+        let ids = own.keep(&seen.load);
         assert_eq!(ids, kept.load.issues.iter().map(|i| i.id.clone()).collect());
         assert!(!ids.contains("t-0010"), "루트에서 지운 채 안 바뀐 제 사본을 지켰다");
         assert!(ids.contains("t-0011"), "루트에서 지운 뒤 바뀐 제 사본을 빠뜨렸다");

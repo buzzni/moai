@@ -225,9 +225,10 @@ impl Keys {
             return Ok(lines);
         }
         use serde_json::value::RawValue;
-        // 값은 원문 그대로 옮긴다 — 파싱하면 안쪽 객체의 키가 이름순이 된다(moai-b4dc.0ia).
+        // 값은 원문 그대로 옮긴다 — 파싱하면 안쪽 객체의 키가 이름순이 된다(moai-b4dc.0ia). **빌려 받는다** —
+        // `Box<RawValue>` 는 안 고른 키(저널·위키)의 글까지 값마다 한 벌씩 베낀다.
         let one = |raw: &str| -> R<String> {
-            let o: std::collections::BTreeMap<String, Box<RawValue>> =
+            let o: std::collections::BTreeMap<String, &RawValue> =
                 serde_json::from_str(raw).map_err(|e| Fail::new(e.to_string()))?;
             let kept: Vec<String> = self
                 .0
@@ -242,8 +243,7 @@ impl Keys {
                 match line.trim_start().chars().next() {
                     Some('{') => one(&line),
                     Some('[') => {
-                        let rows: Vec<Box<RawValue>> =
-                            serde_json::from_str(&line).map_err(|e| Fail::new(e.to_string()))?;
+                        let rows: Vec<&RawValue> = serde_json::from_str(&line).map_err(|e| Fail::new(e.to_string()))?;
                         let kept = rows
                             .iter()
                             .map(|r| if r.get().starts_with('{') { one(r.get()) } else { Ok(r.get().to_string()) })
@@ -252,7 +252,7 @@ impl Keys {
                     }
                     _ => {
                         // 잘못된 JSON 은 객체·배열이 아닌 줄에서도 전처럼 거절한다.
-                        serde_json::from_str::<Box<RawValue>>(&line).map_err(|e| Fail::new(e.to_string()))?;
+                        serde_json::from_str::<&RawValue>(&line).map_err(|e| Fail::new(e.to_string()))?;
                         Ok(line)
                     }
                 }

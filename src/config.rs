@@ -152,8 +152,17 @@ pub enum Naming {
 }
 
 impl Naming {
+    /// 파일의 차례. 갈래를 적는 자리는 여기와 [`Naming::as_str`] 둘이다 — `ALL` 은 이것에서 짓는다.
     const EVERY: [Naming; 3] = [Naming::Full, Naming::Name, Naming::Email];
-    pub const ALL: [&'static str; 3] = [Naming::Full.as_str(), Naming::Name.as_str(), Naming::Email.as_str()];
+    pub const ALL: [&'static str; 3] = {
+        let mut words = [""; 3];
+        let mut k = 0;
+        while k < words.len() {
+            words[k] = Naming::EVERY[k].as_str();
+            k += 1;
+        }
+        words
+    };
 
     pub const fn as_str(self) -> &'static str {
         match self {

@@ -24,9 +24,9 @@ pub fn run(ctx: &Ctx, args: ReadArgs) -> R<Vec<String>> {
     // 늦은 값이 적혀 [NEW] 가 내린다. 쓰는 길은 그대로 [`crate::read_marks::update`] 하나고 옆 워크트리에는 아무것도
     // 안 쓴다. 옆을 못 읽은 까닭은 말하지 않는다 — 이 명령은 읽음을 적을 뿐이고, 못 읽은 옆의 줄은 `missing` 이 된다.
     let (load, beside) = if args.worktree.worktree {
-        let (seen, ids) = crate::worktree::gather_reading(&repo)?;
-        let seen_all = seen.trouble.is_empty() && seen.unfound.is_none();
-        (seen.load, Some(Beside { ids, seen_all }))
+        let (seen, own) = crate::worktree::gather_reading(&repo)?;
+        let beside = Beside { seen_all: seen_all(&seen), own };
+        (seen.load, Some(beside))
     } else {
         (repo.read()?, None)
     };
@@ -201,10 +201,16 @@ fn say_why(whys: &[crate::read_marks::SheetTrouble], ctx: &Ctx, said: &mut BTree
     }
 }
 
-/// 화면을 겹쳐 읽으면서 이미 센 걷기 자료.
+/// `--worktree` 의 한 걸음([`crate::worktree::gather_reading`])이 걷기에 넘기는 것 — 화면에 안 겹친 제 사본과, 옆을
+/// 빠짐없이 봤는가. id 는 여기서 세지 않는다 — 걷기가 쓸 때만 센다([`crate::worktree::Unshown::keep`]).
 struct Beside {
-    ids: BTreeSet<String>,
+    own: crate::worktree::Unshown,
     seen_all: bool,
+}
+
+/// 옆을 **빠짐없이 봤는가** — 못 읽은 옆(`trouble`)도, 아예 못 찾은 옆(`unfound`)도 없다. 걷기의 두 길이 한 자로 가른다.
+fn seen_all(seen: &crate::worktree::Gathered) -> bool {
+    seen.trouble.is_empty() && seen.unfound.is_none()
 }
 
 /// 걷을 때 **지킬 id 전부** — 되면 `Some`, 이 스냅샷이 트래커 전부를 봤다고 말 못 하면 `None` 이고
@@ -231,24 +237,21 @@ fn keep_for_prune(repo: &Repo, load: &crate::store::Load, beside: Option<Beside>
     }
     // 집은 표식은 `⎇` 이름에만 들고 겹치는 줄은 안 바꾼다 — 여기는 id 만 세니 안 읽는다. **제 워크트리의
     // 사본도 센다** — 화면은 그것을 빼지만, 루트의 탐색기는 그것을 옆으로 겹쳐 도장을 찍는다(`gather_unmarked`).
-    let beside = match beside {
-        Some(beside) => beside,
-        None => {
-            let seen = crate::worktree::gather_unmarked(repo).ok()?;
-            Beside {
-                ids: seen.load.issues.into_iter().map(|i| i.id).collect(),
-                seen_all: seen.trouble.is_empty() && seen.unfound.is_none(),
-            }
-        }
-    };
+    //
     // **못 찾은 것도 못 읽은 것이다**(리뷰) — `unfound` 는 "옆을 아예 못 셌다"(git 이 없거나 저장소가
     // 아니다)는 뜻이라, 이때 `trouble` 은 빌 수밖에 없고 `sides` 도 비어 제 줄만 남는다. 그것을 걷을
     // 기준으로 삼으면 옆에만 있는 줄의 도장이 조용히 지워진다 — 조용한 손실은 이 도구가 못 견디는
     // 유일한 실패다. 못 봤으면 안 걷는다.
-    if !beside.seen_all {
-        return None;
-    }
-    Some(beside.ids.into_iter().chain(load.reserved_ids()).collect())
+    let mut keep: BTreeSet<String> = match beside {
+        // `--worktree` 길 — `load` 가 곧 그 걸음의 화면 판이고, 그 판에 안 겹친 제 사본만 더 센다.
+        Some(beside) => beside.seen_all.then(|| beside.own.keep(load))?,
+        None => {
+            let seen = crate::worktree::gather_unmarked(repo).ok().filter(seen_all)?;
+            seen.load.issues.into_iter().map(|i| i.id).collect()
+        }
+    };
+    keep.extend(load.reserved_ids());
+    Some(keep)
 }
 
 #[derive(serde::Serialize)]

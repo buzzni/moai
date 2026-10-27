@@ -22613,28 +22613,20 @@ fn the_worktree_you_stand_in_is_not_overlaid_even_through_dash_c() {
 /// 번이 그 도장을 조용히 걷는다.
 #[test]
 fn reading_in_a_worktree_keeps_a_stamp_on_a_row_only_its_own_copy_holds() {
-    let t = trees("wtprune");
-    let (main, feat) = (t.main(), t.feat());
-    let cfg = t.s.path().join("user.toml");
-    ok_with(&main, &cfg, &["read", &t.tied]);
-    // 탐색기가 겹쳐 보며 찍은 도장을 손으로 앉힌다 — `moai read` 는 루트에 없는 id 를 안 받는다.
-    let (sheet, text) = read_sheets(&cfg, &main).pop().expect("읽음 파일이 섰다");
-    // 끝에 이어 적으므로 `[read]` 가 마지막 표여야 그 표에 든다 — 아니면 걷기가 안 볼 자리에 앉아 헛 초록이다.
-    let table = text.split_once("[read]").map(|(_, rest)| rest).unwrap_or_else(|| panic!("읽음 표가 없다\n{text}"));
-    assert!(!table.lines().any(|l| l.trim_start().starts_with('[')), "시험의 전제 — `[read]` 가 마지막 표다\n{text}");
-    std::fs::write(&sheet, format!("{}\n\"{}\" = \"{LATER}\"\n", text.trim_end(), t.made)).unwrap();
-    assert!(read_sheet(&cfg, &main).contains(&t.made), "시험의 전제 — 도장을 앉혔다");
-
-    ok_with(&feat, &cfg, &["read", &t.picked]);
-    let after = read_sheet(&cfg, &main);
-    assert!(after.contains(&t.picked), "{after}");
-    assert!(after.contains(&t.made), "워크트리에서 친 `read` 가 거기에만 있는 줄의 도장을 걷었다\n{after}");
+    keeps_a_stamp_only_its_own_copy_holds("wtprune", &[]);
 }
 
-/// 겹쳐 읽은 판도 제 사본에서만 보이는 줄의 도장을 지킨다(moai-b4dc.gqd).
+/// 겹쳐 읽은 판도 제 사본에서만 보이는 줄의 도장을 지킨다(moai-b4dc.gqd) — 그 걸음은 화면에 안 겹친 제 사본을
+/// 걷기에 넘긴다(`worktree::gather_reading`). 빠뜨리면 이 판만 그 도장을 걷는다.
 #[test]
 fn reading_with_worktree_keeps_a_stamp_on_a_row_only_its_own_copy_holds() {
-    let t = trees("wtprune-overlay");
+    keeps_a_stamp_only_its_own_copy_holds("wtprune-overlay", &["--worktree"]);
+}
+
+/// 위 둘의 몸 — 루트에서 연 탐색기가 워크트리의 사본에만 있는 줄에 찍은 도장을 앉히고, 그 워크트리에서 `read` 를
+/// `flags` 와 함께 친 뒤에도 그 도장이 남는가를 본다.
+fn keeps_a_stamp_only_its_own_copy_holds(name: &str, flags: &[&str]) {
+    let t = trees(name);
     let (main, feat) = (t.main(), t.feat());
     let cfg = t.s.path().join("user.toml");
     ok_with(&main, &cfg, &["read", &t.tied]);
@@ -22646,10 +22638,11 @@ fn reading_with_worktree_keeps_a_stamp_on_a_row_only_its_own_copy_holds() {
     std::fs::write(&sheet, format!("{}\n\"{}\" = \"{LATER}\"\n", text.trim_end(), t.made)).unwrap();
     assert!(read_sheet(&cfg, &main).contains(&t.made), "시험의 전제 — 도장을 앉혔다");
 
-    ok_with(&feat, &cfg, &["read", "--worktree", &t.picked]);
+    let args: Vec<&str> = ["read"].into_iter().chain(flags.iter().copied()).chain([t.picked.as_str()]).collect();
+    ok_with(&feat, &cfg, &args);
     let after = read_sheet(&cfg, &main);
-    assert!(after.contains(&t.picked), "{after}");
-    assert!(after.contains(&t.made), "워크트리에서 친 `read` 가 거기에만 있는 줄의 도장을 걷었다\n{after}");
+    assert!(after.contains(&t.picked), "{flags:?}: {after}");
+    assert!(after.contains(&t.made), "{flags:?}: 워크트리에서 친 `read` 가 거기에만 있는 줄의 도장을 걷었다\n{after}");
 }
 
 /// **`tui --json --deep --worktree` 는 옆에만 있는 줄을 `show --worktree` 가 놓는 자리에 놓는다**(moai-m4ez.gcp) —
