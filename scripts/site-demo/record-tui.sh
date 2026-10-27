@@ -3,7 +3,8 @@
 #
 #     MOAI=<moai 바이너리> scripts/site-demo/record-tui.sh <내보낼 디렉터리> [장면...]
 #
-# 장면은 drive.py 의 SCENES(tour, lifecycle, gantt, gantt-months, wiki-search, list, board, stats, wiki, keys). 화면의 말은 DEMO_LANG(기본 en). 주지 않으면 홈페이지의 둘(tour, lifecycle)만 찍는다.
+# 장면은 drive.py 의 scenes 에 있다. 화면의 말은 DEMO_LANG(기본 en), 고정 시각은 DEMO_NOW(기본 오늘).
+# 주지 않으면 홈페이지의 둘(tour, lifecycle)만 찍는다.
 # cast 머리의 command·env·timestamp 는 지운다 —
 # 녹화한 기계의 경로가 공개 페이지에 실리지 않게.
 set -euo pipefail
@@ -23,6 +24,15 @@ for scene in "${scenes[@]}"; do
   if [ "$scene" = gantt ] || [ "$scene" = gantt-months ]; then
     bash "$here/plan.sh" "$repo"
     printf '[tui]\norder = ["priority", "title"]\n' >> "$repo/.demo-home/config.toml"
+  fi
+  if [ "$scene" = release-header ]; then
+    printf '[tui]\norder = ["priority", "title"]\n' >> "$repo/.demo-home/config.toml"
+    other="$work/$scene/atlas"
+    mkdir -p "$other"
+    MOAI_CONFIG="$repo/.demo-home/config.toml" "$MOAI" -C "$other" init atl --yes --guide none --no-skill --no-register --tracking commit >/dev/null
+    for project in "$repo" "$other"; do
+      MOAI_CONFIG="$repo/.demo-home/config.toml" "$MOAI" project add "$project" >/dev/null
+    done
   fi
   asciinema rec --headless --window-size "$size" --overwrite -q \
     -c "$(printf '%q ' "$here/drive.py" "$scene" "$repo")" "$work/$scene.cast" >/dev/null

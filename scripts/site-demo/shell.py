@@ -108,6 +108,10 @@ def main():
                MOAI=moai, MOAI_CONFIG=os.path.join(home, '.config', 'moai', 'config.toml'),
                HOME=home, PATH=bindir + ':/usr/local/bin:/usr/bin:/bin',
                PS1='\\[\\e[38;5;245m\\]lantern\\[\\e[0m\\] \\[\\e[38;5;209m\\]$\\[\\e[0m\\] ')
+    if os.environ.get('DEMO_NOW'):
+        # seed.sh 가 DEMO_NOW 로 날을 옮겼으면 셸의 moai 도 그날에 선다 — drive.py 와 같은 자와 꼴로
+        env['MOAI_NOW'] = subprocess.run(['date', '-u', '-d', os.environ['DEMO_NOW'], '+%Y-%m-%dT%H:%M:%SZ'],
+                                         check=True, capture_output=True, text=True).stdout.strip()
     pid, fd = pty.fork()
     if pid == 0:
         fcntl.ioctl(0, termios.TIOCSWINSZ, struct.pack('HHHH', rows, cols, 0, 0))
