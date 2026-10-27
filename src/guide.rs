@@ -8027,12 +8027,9 @@ stop sending outside work while a release runs",
         std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
         let script = REPORT_WATCH.split("```sh\n").nth(1).unwrap().split("```").next().unwrap();
         let path = path_with(&bin);
-        // 자식 bash 가 시작 파일을 읽으면 PATH 의 앞이 바뀌어 가짜 `moai` 가 지고 진짜가 돈다. 길은 둘이다 — 세션의
-        // `BASH_ENV`, 그리고 `SSH_CLIENT` 가 서고 `SHLVL` 이 0 인 자리(`ssh host 'cd … && cargo test'`)에서 Debian 의
-        // bash 가 `-c` 에도 읽는 `~/.bashrc`. 앞은 걷고, 뒤는 `--norc` 가 막는다(재 봤다).
-        let out = std::process::Command::new("bash")
-            .args(["--norc", "-c", script, "watch", "/root", "e", "2026-10-12T00:00:00Z"])
-            .env_remove("BASH_ENV")
+        // 시작 파일이 PATH 를 바꾸지 않게 한다 — 두 경로는 crate::test_shell 이 막는다.
+        let out = crate::test_shell::shell("bash")
+            .args(["-c", script, "watch", "/root", "e", "2026-10-12T00:00:00Z"])
             .env("PATH", path)
             .output()
             .unwrap();
