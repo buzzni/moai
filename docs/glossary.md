@@ -108,6 +108,9 @@ three started review rows of yours it did not count, and why. When a rule 1, 2
 or 3 refusal names a started row of yours that it did not count, it says why.
 A row another session picked up last is left to that session; for an unrecorded
 review the refusal gives a line that records the pick-up without moving it.
+The reason follows the decision, including a cause inherited from an ancestor;
+a pick marked “may not have run” is described that way. A recovery command is
+offered only for a known column and a row in the tracker the command will write.
 
 ## Group
 
