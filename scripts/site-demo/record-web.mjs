@@ -126,13 +126,9 @@ async function open(page) {
   lead = (Date.now() - t0) / 1000
 }
 
+// 포스터는 상자 없는 정지 그림이다 — 빛줄기 멈춤·커서 숨김·되돌림을 still() 과 함께 쓴다
 async function poster(page) {
-  await page.emulateMedia({ reducedMotion: 'reduce' })
-  await page.evaluate(() => document.getElementById('demo-cursor')?.style.setProperty('visibility', 'hidden'))
-  await page.waitForTimeout(300)
-  await page.screenshot({ path: path.join(outDir, `web-${sceneName}.png`) })
-  await page.evaluate(() => document.getElementById('demo-cursor')?.style.removeProperty('visibility'))
-  await page.emulateMedia({ reducedMotion: 'no-preference' })
+  await still(page, `web-${sceneName}.png`)
   posterTaken = true
 }
 

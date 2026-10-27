@@ -28,8 +28,15 @@ if [ -z "${FFMPEG:-}" ]; then
   fi
 fi
 command -v "${FFMPEG:-}" >/dev/null || { echo 'record-site.sh: ffmpeg not found; set FFMPEG' >&2; exit 1; }
-MOAI=$(realpath -- "${MOAI:-$root/target/release/moai}")
-[ -x "$MOAI" ] || { echo "record-site.sh: no moai binary at $MOAI" >&2; exit 1; }
+# 굽기는 녹화가 다 끝난 뒤라, 인코더가 없으면 몇 분을 찍고 나서야 멈춘다 — 먼저 본다
+encoders=$("$FFMPEG" -hide_banner -encoders 2>/dev/null || true)
+[[ $encoders == *libvpx-vp9* ]] || { echo "record-site.sh: $FFMPEG has no libvpx-vp9 encoder; set FFMPEG" >&2; exit 1; }
+# seed.sh·plan.sh 와 같은 길로 고른다 — 그냥 moai 를 realpath 하면 지금 디렉터리의 moai 를 찾는다
+MOAI=${MOAI:-$root/target/release/moai}
+case $MOAI in */*) MOAI=$(realpath -- "$MOAI") ;; *) MOAI=$(command -v -- "$MOAI" || true) ;; esac
+[ -f "$MOAI" ] && [ -x "$MOAI" ] || { echo "record-site.sh: no moai binary at ${MOAI:-PATH}" >&2; exit 1; }
+# 사이트의 미디어는 화면의 말이 영어다 — 릴리스 소식을 찍던 DEMO_LANG 이 남아 있어도 따르지 않는다
+unset DEMO_LANG
 export MOAI TZ=UTC
 out=$(mkdir -p "$out" && cd "$out" && pwd)
 tmp=$(mktemp -d)

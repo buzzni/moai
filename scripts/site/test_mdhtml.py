@@ -75,9 +75,10 @@ class Blocks(unittest.TestCase):
         out = html('- [ ] todo\n- [x] done\n- [X] DONE\n- not [ ] here\n- [ ]\n\ntext [x] y')
         self.assertEqual(re.findall(r'data-checked="(\w+)"', out), ["false", "true", "true"])
         self.assertNotIn("<input", out)
-        for literal in ("not [ ] here", "[ ]", "text [x] y"):
+        # whole items: a bare "[ ]" would match inside "not [ ] here" and prove nothing about `- [ ]`
+        for literal in ("<li>not [ ] here</li>", "<li>[ ]</li>", "<p>text [x] y</p>"):
             self.assertIn(literal, out)
-        self.assertIn(".doc-body .task", (ROOT / "site/assets/site.css").read_text())
+        self.assertIn(".doc-body .task", (ROOT / "site/assets/site.css").read_text(encoding="utf-8"))
 
     def test_task_tight_and_loose(self):
         for separator, paragraph in (("\n", False), ("\n\n", True)):

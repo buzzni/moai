@@ -216,13 +216,14 @@ class Site(unittest.TestCase):
             for name in re.findall(r"assets/media/([\w.-]+)", template.read_text(encoding="utf-8"))
         }
 
+    def committed_media(self):
+        return {p.name for p in (gen.SITE / "assets/media").iterdir() if p.is_file()}
+
     def test_every_media_file_the_pages_name_is_committed(self):
-        committed = {p.name for p in (gen.SITE / "assets/media").iterdir() if p.is_file()}
-        self.assertEqual(self.media_names() - committed, set())
+        self.assertEqual(self.media_names() - self.committed_media(), set())
 
     def test_no_committed_media_file_is_left_unnamed(self):
-        committed = {p.name for p in (gen.SITE / "assets/media").iterdir() if p.is_file()}
-        self.assertEqual(committed - self.media_names(), set())
+        self.assertEqual(self.committed_media() - self.media_names(), set())
 
     def test_record_site_builds_every_media_but_the_team_scene(self):
         script = (gen.REPO / "scripts/site-demo/record-site.sh").read_text(encoding="utf-8")

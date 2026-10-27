@@ -562,6 +562,8 @@ recording machine shows — and records it:
 - `seed.sh` — the demo tracker: two milestones, four epics, a backlog and a wiki
 - `record-tui.sh` — the terminal scenes, with asciinema
 - `record-web.mjs` — the browser scenes, with Playwright
+- `record-site.sh` — every recording the site's pages use, in one run, into a
+  directory you name; the supervisor scene below is left as it is
 - `record-team.sh` — the tmux window for the supervisor scene. Real agents do the
   work there, so it sets the window up and prints the steps a person takes
 
