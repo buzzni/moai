@@ -256,13 +256,13 @@ pub fn assignee_arg<E>(
 /// 기억하는 한 곳에만 든다. 유닉스가 아닌 데서는 실행 비트가 없어 있는 파일이면 그만이다 —
 /// 세 벌 다 그렇게 적혀 있었다.
 ///
-/// **이름으로 PATH 를 묻는 세 자리는 여기 안 든다 — 유닉스에서는 셋이 저마다 딴 물음이다.** 유닉스가
-/// 아니면 `skill`·`tui` 는 아래 `find_on_path` 하나로 모이고, `merge_driver` 도 그 몸통(`found_in`)을 절대 자리만
-/// 넘겨 쓴다(리뷰 moai-j9gv.4s3). 아래 세 줄은 유닉스의 이야기다.
+/// **PATH 의 후보를 훑는 걸음은 [`hits_in`] 하나다.** 훅과 `merge_driver` 는 절대 자리만,
+/// [`found_in`] 은 빈 자리를 빼고, `tui` 는 `sh`(유닉스·Git Bash)가 띄우는 판에서 빈 자리도 그대로 받는다.
+/// 훅은 모두 받고 나머지는 첫 것을 받는다. 아래 세 줄은 저마다 묻는 까닭이다.
 ///
 /// - `skill` 은 껍데기의 `command -v` 로 묻는다. 훅이 실제로 치는 것이 그 명령이라 껍데기가 보는
 ///   것(함수·별칭까지)과 같아야 한다
-/// - `tui` 는 기본 편집기 둘(`vi`·`nano`)을 고르려고 `PATH` 를 제 손으로 훑는다. 띄우는 것은
+/// - `tui` 는 기본 편집기 둘(`vi`·`nano`)을 고르려고 `PATH` 를 [`hits_in`] 으로 훑는다. 띄우는 것은
 ///   여기도 `sh` 라([`crate::tui::jotfile::argv`]) 껍데기와 답이 같아야 하므로 **빈 자리를 안
 ///   뺀다** — POSIX 가 그 자리를 "지금 자리" 로 읽고, 껍데기도 그렇게 찾는다. `$VISUAL`·`$EDITOR`
 ///   가 둘 다 비었을 때 띄우며 한 번, 많아야 이름 둘이라 `sh` 를 띄우는 값이 아깝다
@@ -335,17 +335,28 @@ pub fn found_in(
     exts: &[String],
     runs: impl Fn(&std::path::Path) -> bool,
 ) -> Option<std::path::PathBuf> {
+    hits_in(dirs.into_iter().filter(|d| !d.as_os_str().is_empty()), name, exts, runs).next()
+}
+
+/// 자리 차례, 그 안에서는 확장자 차례로 실행할 수 있는 후보를 모두 낸다.
+/// 자리 거르기와 몇 개를 받을지는 부르는 쪽의 물음이다.
+pub fn hits_in<'a>(
+    dirs: impl IntoIterator<Item = std::path::PathBuf> + 'a,
+    name: &'a str,
+    exts: &'a [String],
+    runs: impl Fn(&std::path::Path) -> bool + 'a,
+) -> impl Iterator<Item = std::path::PathBuf> + 'a {
     let has_ext = std::path::Path::new(name).extension().is_some_and(|e| {
         let e = e.to_string_lossy();
         exts.iter().any(|x| x.trim_start_matches('.').eq_ignore_ascii_case(&e))
     });
-    dirs.into_iter().filter(|d| !d.as_os_str().is_empty()).find_map(|d| {
-        if has_ext || exts.is_empty() {
-            let p = d.join(name);
-            return runs(&p).then_some(p);
-        }
-        exts.iter().map(|x| d.join(format!("{name}{x}"))).find(|p| runs(p))
-    })
+    let direct = has_ext || exts.is_empty();
+    dirs.into_iter()
+        .flat_map(move |dir| {
+            (0..if direct { 1 } else { exts.len() })
+                .map(move |k| if direct { dir.join(name) } else { dir.join(format!("{name}{}", exts[k])) })
+        })
+        .filter(move |p| runs(p))
 }
 
 /// `PATHEXT` 를 쪼갠다 — **`Command` 가 띄울 수 있는 넷**(`.COM`·`.EXE`·`.BAT`·`.CMD`)만 그 차례대로 남긴다(리뷰
@@ -1502,6 +1513,30 @@ mod tests {
         assert_eq!(found_in(dirs(), "claude", &exts, have(&["/a/claude"])), None);
         // 빈 자리는 "지금 자리" 가 아니다.
         assert_eq!(found_in(dirs(), "x", &exts, have(&["x.EXE"])), None, "빈 자리를 지금 자리로 읽었다");
+    }
+
+    #[test]
+    fn the_path_walk_yields_every_hit_and_keeps_empty_directories() {
+        use std::path::{Path, PathBuf};
+        let dirs = || [PathBuf::from(""), PathBuf::from("/a"), PathBuf::from("/b")];
+        let exts = [".CMD".into(), ".EXE".into()];
+        let have = |p: &Path| ["/a/claude.CMD", "/b/claude.CMD", "/b/claude.EXE"].iter().any(|f| Path::new(f) == p);
+        assert_eq!(
+            hits_in(dirs(), "claude", &exts, have).collect::<Vec<_>>(),
+            ["/a/claude.CMD", "/b/claude.CMD", "/b/claude.EXE"].map(PathBuf::from)
+        );
+        assert_eq!(hits_in(dirs(), "x", &[], |p| p == Path::new("x")).collect::<Vec<_>>(), [PathBuf::from("x")]);
+        assert_eq!(
+            hits_in(dirs(), "x.exe", &exts, |p| p == Path::new("/a/x.exe")).next(),
+            Some(PathBuf::from("/a/x.exe"))
+        );
+        // Git Bash 안의 `tui` 가 부르는 꼴 — 빈 낱말이 이름 그대로고, 자리마다 이름 그대로가 `.exe` 보다 앞선다.
+        let bash = [String::new(), ".exe".to_string()];
+        let have = |p: &Path| ["vi", "/a/vi.exe", "/b/vi"].iter().any(|f| Path::new(f) == p);
+        assert_eq!(
+            hits_in(dirs(), "vi", &bash, have).collect::<Vec<_>>(),
+            ["vi", "/a/vi.exe", "/b/vi"].map(PathBuf::from)
+        );
     }
 
     /// **실행 비트가 답을 가른다.** `is_file` 만 보던 판은 권한이 빠진 파일을 "돈다" 고 했고,

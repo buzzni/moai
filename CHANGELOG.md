@@ -26,6 +26,11 @@ does not tag — see `CONTRIBUTING.md`.
 
 ### Fixed
 
+- `moai show --fields` keeps the order of keys inside the values it keeps.
+  Nested objects such as `journal`, `work`, `commits` and `wiki` previously
+  came out with keys sorted by name, unlike the same row without `--fields`.
+  (moai-b4dc.0ia)
+
 - **Web Gantt bars keep the dropped plan while a write is pending.** Scrolling,
   resizing or receiving an older read no longer snaps a moved bar back before
   its write and refresh finish. (moai-ijjd.qe4)

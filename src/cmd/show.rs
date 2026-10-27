@@ -224,29 +224,38 @@ impl Keys {
         if self.0.is_empty() {
             return Ok(lines);
         }
-        let one = |o: &serde_json::Map<String, serde_json::Value>| -> String {
+        use serde_json::value::RawValue;
+        // 값은 원문 그대로 옮긴다 — 파싱하면 안쪽 객체의 키가 이름순이 된다(moai-b4dc.0ia). **빌려 받는다** —
+        // `Box<RawValue>` 는 안 고른 키(저널·위키)의 글까지 값마다 한 벌씩 베낀다.
+        let one = |raw: &str| -> R<String> {
+            let o: std::collections::BTreeMap<String, &RawValue> =
+                serde_json::from_str(raw).map_err(|e| Fail::new(e.to_string()))?;
             let kept: Vec<String> = self
                 .0
                 .iter()
-                .filter_map(|k| o.get(k).map(|v| format!("{}:{v}", serde_json::Value::from(k.as_str()))))
+                .filter_map(|k| o.get(k).map(|v| format!("{}:{}", serde_json::Value::from(k.as_str()), v.get())))
                 .collect();
-            format!("{{{}}}", kept.join(","))
+            Ok(format!("{{{}}}", kept.join(",")))
         };
         lines
             .into_iter()
             .map(|line| {
-                let v: serde_json::Value = serde_json::from_str(&line).map_err(|e| Fail::new(e.to_string()))?;
-                Ok(match &v {
-                    serde_json::Value::Object(o) => one(o),
-                    serde_json::Value::Array(rows) => format!(
-                        "[{}]",
-                        rows.iter()
-                            .map(|r| r.as_object().map_or_else(|| r.to_string(), one))
-                            .collect::<Vec<_>>()
-                            .join(",")
-                    ),
-                    _ => line,
-                })
+                match line.trim_start().chars().next() {
+                    Some('{') => one(&line),
+                    Some('[') => {
+                        let rows: Vec<&RawValue> = serde_json::from_str(&line).map_err(|e| Fail::new(e.to_string()))?;
+                        let kept = rows
+                            .iter()
+                            .map(|r| if r.get().starts_with('{') { one(r.get()) } else { Ok(r.get().to_string()) })
+                            .collect::<R<Vec<_>>>()?;
+                        Ok(format!("[{}]", kept.join(",")))
+                    }
+                    _ => {
+                        // 잘못된 JSON 은 객체·배열이 아닌 줄에서도 전처럼 거절한다.
+                        serde_json::from_str::<&RawValue>(&line).map_err(|e| Fail::new(e.to_string()))?;
+                        Ok(line)
+                    }
+                }
             })
             .collect()
     }
@@ -1205,6 +1214,31 @@ fn one(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pick_keeps_nested_values_byte_for_byte() {
+        let keys = Keys::of(vec!["b".into(), "a".into()]);
+        let picked = keys
+            .pick(vec![
+                r#"{"a":{"z":1,"y":2},"b":[{"q":1,"p":2}],"c":3}"#.into(),
+                r#"[{"a":{"z":1,"y":2}},7]"#.into(),
+                r#"{"a": { "z": 1e+02, "y": 2.00 }, "b":null}"#.into(),
+                r#"{"\u0061":1,"a":{"z":2,"y":3}}"#.into(),
+            ])
+            .unwrap();
+        assert_eq!(
+            picked,
+            [
+                r#"{"b":[{"q":1,"p":2}],"a":{"z":1,"y":2}}"#,
+                r#"[{"a":{"z":1,"y":2}},7]"#,
+                r#"{"b":null,"a":{ "z": 1e+02, "y": 2.00 }}"#,
+                r#"{"a":{"z":2,"y":3}}"#,
+            ]
+        );
+        assert!(keys.pick(vec!["{".into()]).is_err());
+        assert!(keys.pick(vec!["[7,".into()]).is_err());
+        assert!(keys.pick(vec!["invalid".into()]).is_err());
+    }
 
     /// **`Listed` 가 줄 곁에 다는 키도 `cmd::OURS` 에 있다**(moai-qn5d) — 없으면 `show --json` 을
     /// 되써 넣은 줄의 같은 이름이 안 걷혀 한 객체에 둘 선다. `Listed` 는 `json_with` 를 안 지나
