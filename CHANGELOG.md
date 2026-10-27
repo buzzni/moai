@@ -33,6 +33,11 @@ does not tag — see `CONTRIBUTING.md`.
 
 ### Fixed
 
+- `moai web` briefly drains a delayed request before closing a busy connection,
+  so a client can receive the 503 response without a broken pipe while sending
+  its request. Silent or slow clients are waited for at most 200ms.
+  (moai-n8po.7e1)
+
 - The explorer header marks the current project with `▸`, so its position stays
   visible without colour or shimmer. (moai-lj8g.wxt)
 

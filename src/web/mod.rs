@@ -28,6 +28,9 @@ use std::time::{Duration, Instant};
 pub const BUSY_MAX: usize = 32;
 /// 요청 머리 **전체**를 읽는 시한 — `read` 한 번의 시한이 아니다([`read_head`]).
 const READ_LIMIT: Duration = Duration::from_secs(5);
+/// 503 뒤에 늦게 오는 요청 머리를 비우는 전체 시한. 받기 고리에서 돌므로 조용하거나 한 바이트씩 보내는
+/// 상대도 200ms 뒤에는 놓는다 — 정상 요청의 5초 시한으로 다른 연결을 세우지 않는다.
+const BUSY_READ_LIMIT: Duration = Duration::from_millis(200);
 /// 쓰기 한 번이 나아가지 못하고 기다리는 시한.
 const WRITE_LIMIT: Duration = Duration::from_secs(10);
 /// 답 **전체**를 쓰는 시한 — 쓰기마다 조금씩 나아가는 느린 상대가 큰 답 하나로 한 자리를 몇 시간 쥐지 않게
@@ -148,6 +151,9 @@ impl Drop for Leave {
 fn turn_away(stream: &TcpStream, lang: Lang) {
     let _ = stream.set_write_timeout(Some(Duration::from_secs(1)));
     let _ = http::write(&mut &*stream, &refuse(503, say(lang, "web.busy"), code::BUSY), true);
+    // 이미 온 것만 비우고 닫으면 connect 뒤 밀린 상대가 요청을 쓰다가 BrokenPipe 를 받는다.
+    // 답은 이미 정했다. 머리를 제한된 크기·시간 안에서 읽고 버리며, 해석 결과로 다시 답하지 않는다.
+    let _ = read_head(stream, BUSY_READ_LIMIT);
     close(stream);
 }
 
@@ -526,5 +532,18 @@ mod tests {
             client.read_to_end(&mut got).expect("답 대신 RST 를 받았다");
             assert!(got.starts_with(b"HTTP/1.1 503 "), "{}", String::from_utf8_lossy(&got));
         }
+    }
+
+    /// 503 을 받은 뒤 요청을 안 보내는 상대도 받기 고리를 붙잡지 못한다.
+    #[test]
+    fn a_silent_overflow_client_is_only_waited_for_briefly() {
+        let (_client, server) = pair();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            turn_away(&server, Lang::En);
+            tx.send(()).unwrap();
+        });
+        rx.recv_timeout(Duration::from_secs(2)).expect("조용한 상대가 503 뒤 받기 고리를 세웠다");
+        worker.join().unwrap();
     }
 }

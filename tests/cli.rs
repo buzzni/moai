@@ -31520,6 +31520,9 @@ struct Served {
 
 impl Drop for Served {
     fn drop(&mut self) {
+        if let Ok(Some(status)) = self.child.try_wait() {
+            eprintln!("moai web 이 시험보다 먼저 끝났다 — {status:?}");
+        }
         let _ = self.child.kill();
         let _ = self.child.wait();
     }
@@ -31564,10 +31567,26 @@ fn serve_with(dir: &Path, tweak: impl FnOnce(&mut Command)) -> Served {
     Served { child, port, first }
 }
 
+/// 부하 때문에 한 번의 connect 가 지더라도 10초 안에서 다시 붙고, 끝내 못 붙으면 errno 를 남긴다.
+fn dial(port: u16) -> std::net::TcpStream {
+    let until = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    let mut attempts = 0;
+    loop {
+        attempts += 1;
+        match std::net::TcpStream::connect(("127.0.0.1", port)) {
+            Ok(stream) => return stream,
+            Err(error) => {
+                assert!(std::time::Instant::now() < until, "127.0.0.1:{port} 에 {attempts}번 붙지 못했다 — {error:?}");
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+        }
+    }
+}
+
 /// 날 요청 하나 — `(상태, 머리, 본문)`. dev-dependency 없이 std `TcpStream` 으로.
 fn http(port: u16, method: &str, path: &str, host: Option<&str>) -> (u16, String, String) {
     use std::io::{Read as _, Write as _};
-    let mut s = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+    let mut s = dial(port);
     s.set_read_timeout(Some(std::time::Duration::from_secs(60))).unwrap();
     let host = host.map(|h| format!("Host: {h}\r\n")).unwrap_or_default();
     write!(s, "{method} {path} HTTP/1.1\r\n{host}\r\n").unwrap();
@@ -31586,7 +31605,7 @@ fn get(port: u16, path: &str) -> (u16, String, String) {
 /// 본문 없는 POST 하나 — `Origin` 을 줄 때만 싣는다. 브라우저가 보내는 꼴이다(읽음 표시, moai-ly88).
 fn post(port: u16, path: &str, origin: Option<&str>) -> (u16, String, String) {
     use std::io::{Read as _, Write as _};
-    let mut s = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+    let mut s = dial(port);
     s.set_read_timeout(Some(std::time::Duration::from_secs(60))).unwrap();
     let origin = origin.map(|o| format!("Origin: {o}\r\n")).unwrap_or_default();
     write!(s, "POST {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n{origin}Content-Length: 0\r\n\r\n").unwrap();
@@ -32458,8 +32477,7 @@ fn web_speaks_the_language_the_user_config_says_now() {
 fn web_answers_busy_past_the_cap_and_frees_the_slots() {
     let s = init("web-busy");
     let web = serve(s.path());
-    let idle: Vec<std::net::TcpStream> =
-        (0..32).map(|_| std::net::TcpStream::connect(("127.0.0.1", web.port)).unwrap()).collect();
+    let idle: Vec<_> = (0..32).map(|_| dial(web.port)).collect();
     let (status, _, body) = get(web.port, "/api/stamp");
     assert_eq!(status, 503, "{body}");
     assert_eq!(json_of(&body)["code"], "busy", "{body}");
@@ -32474,6 +32492,34 @@ fn web_answers_busy_past_the_cap_and_frees_the_slots() {
         assert!(std::time::Instant::now() < until, "자리가 안 돌아왔다 — {status} {body}");
         std::thread::sleep(std::time::Duration::from_millis(50));
     }
+}
+
+/// 503 뒤에 도착하는 요청도 끝까지 쓸 수 있다 — 받는 쪽이 이미 온 바이트만 비우고 닫으면 BrokenPipe 다.
+#[test]
+fn web_busy_waits_briefly_for_a_request_that_arrives_after_its_answer() {
+    use std::io::{Read as _, Write as _};
+    let s = init("web-busy-delayed");
+    let web = serve(s.path());
+    let _idle: Vec<_> = (0..32).map(|_| dial(web.port)).collect();
+    let mut client = dial(web.port);
+    client.set_read_timeout(Some(std::time::Duration::from_secs(10))).unwrap();
+    // 503 을 먼저 받았는지 확인한다 — connect 뒤 잠만 자면 서버가 아직 accept 전일 수도 있다.
+    let mut got = Vec::new();
+    while !got.ends_with(b"\r\n\r\n") {
+        let mut byte = [0];
+        client.read_exact(&mut byte).unwrap();
+        got.push(byte[0]);
+    }
+    assert!(got.starts_with(b"HTTP/1.1 503 "), "{}", String::from_utf8_lossy(&got));
+    std::thread::sleep(std::time::Duration::from_millis(50));
+    // write! 도 여러 번 쓸 수 있다 — 첫 조각이 RST 를 부르면 다음 조각이 BrokenPipe 다.
+    for part in [b"GET ".as_slice(), b"/api/stamp", b" HTTP/1.1\r\n", b"Host: 127.0.0.1\r\n\r\n"] {
+        client.write_all(part).expect("503 뒤에 도착한 요청을 못 썼다");
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+    client.read_to_end(&mut got).expect("503 이 RST 로 덮였다");
+    let text = String::from_utf8(got).unwrap();
+    assert_eq!(json_of(text.split_once("\r\n\r\n").unwrap().1)["code"], "busy", "{text}");
 }
 
 /// **위키의 낱말은 `wiki ls` 가 낸 그대로 연다** — 디렉터리 밑의 쪽(`guide/start`)과 한글 이름을 id 의 모양으로
