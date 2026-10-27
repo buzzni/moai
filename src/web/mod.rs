@@ -378,7 +378,7 @@ fn overlay_in_git(mut args: Vec<String>, cwd: &std::path::Path) -> Vec<String> {
     args
 }
 
-/// 페이지가 그리는 시간대(`/api/tree?tz=`, [`api::zone_of`]) 가운데 **이 기계가 여는 것만** 자식의 `TZ` 로 준다
+/// 페이지가 그리는 시간대(읽기 끝점의 `tz=`, [`api::zone_of`]) 가운데 **이 기계가 여는 것만** 자식의 `TZ` 로 준다
 /// (moai-vj8w 리뷰). 브라우저(V8)가 내는 이름은 CLDR 의 정본이라 `Asia/Kolkata` 가 `Asia/Calcutta` 로, `Europe/Kyiv` 가
 /// `Europe/Kiev` 로 오는데, 옛 이름을 따로 까는 tzdata(우분투 24.04 는 `tzdata-legacy`)에는 그 파일이 없다. 그대로 넘기면
 /// 자식이 UTC 로 떨어져(`tz::Zone::named` — 유닉스는 기계로 안 내려간다) 서버의 시간대로 재던 그 전보다 나빠지고, 그 까닭은

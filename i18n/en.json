@@ -1001,6 +1001,7 @@
   "refuse.show_order_how": "to order or page the list, leave the id out: `moai show {flag} …`",
   "refuse.show_raw_on_list": "`--raw` only means something where a body is shown.",
   "refuse.show_raw_how": "pick one out, as in `moai show <id> --raw`",
+  "refuse.tui_no_gantt_needs_deep": "--no-gantt needs --deep; use `moai tui --json --deep --no-gantt` to read the tree without gantt values",
   "refuse.tui_shape_on_screen": "`{flag}` shapes the `--json` listing; on the screen, filter with {filter} and sort with SPC s.",
   "refuse.tui_shape_on_screen_how": "add --json, as in `moai tui {flag} … --json`",
   "refuse.tui_shape_outside": "`{flag}` shapes one project's listing — run it inside a `.moai`, or as `moai -C <dir> tui {flag} … --json`.",

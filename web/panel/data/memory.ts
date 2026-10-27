@@ -69,6 +69,47 @@ export function sameMemory(a: Remembered, b: Remembered): boolean {
   )
 }
 
+/** Parse an untrusted storage value without making a broken setting stop the page. */
+const parsed = (text: string | null): unknown => {
+  try { return text === null ? null : JSON.parse(text) } catch { return null }
+}
+const record = (value: unknown): Record<string, unknown> => isRecord(value) ? { ...value } : {}
+const sameValue = (a: unknown, b: unknown): boolean => JSON.stringify(a) === JSON.stringify(b)
+
+/** Patch only changed leaves, preserving unknown keys and removing leaves explicitly cleared by this tab. */
+function patchLeaves(stored: unknown, before: object | undefined, now: object): Record<string, unknown> {
+  const out = record(stored)
+  const was = before as Record<string, unknown> | undefined
+  const next = now as Record<string, unknown>
+  for (const name of new Set([...Object.keys(was ?? {}), ...Object.keys(next)])) {
+    if (was && sameValue(was[name], next[name])) continue
+    if (next[name] === undefined) delete out[name]
+    else out[name] = next[name]
+  }
+  return out
+}
+
+/** A tab saves only the settings it changed over the value read immediately before writing. */
+export function patchMemory(stored: unknown, before: Remembered | undefined, now: Remembered): Record<string, unknown> {
+  const out = record(stored)
+  const detail = record(out.detail)
+  out.version = MEMORY_VERSION
+  if (!before || before.tab !== now.tab) out.tab = now.tab
+  for (const key of ['visible', 'position'] as const) {
+    if (!before || before.detail[key] !== now.detail[key]) detail[key] = now.detail[key]
+  }
+  detail.ratio = patchLeaves(detail.ratio, before?.detail.ratio, now.detail.ratio)
+  out.detail = detail
+  for (const key of ['zone', 'theme'] as const) {
+    const value = (settings: Remembered) => key === 'theme' && settings[key] === 'system' ? undefined : settings[key]
+    if (before && value(before) === value(now)) continue
+    const next = value(now)
+    if (next === undefined) delete out[key]
+    else out[key] = next
+  }
+  return out
+}
+
 /** The slice of the Web Storage API used here, so tests pass a plain object. */
 export interface Backend {
   getItem(key: string): string | null
@@ -77,7 +118,7 @@ export interface Backend {
 
 export interface Memory {
   load(): Remembered
-  save(settings: Remembered): void
+  save(settings: Remembered, before?: Remembered): void
   /** False once the backend could not be used: the settings then last for this session only. */
   readonly persistent: boolean
 }
@@ -108,16 +149,10 @@ export function createMemory(backend: () => Backend | null | undefined, key: str
 
   return {
     load() {
-      const text = read()
-      if (text === null) return normalizeMemory(null)
-      try {
-        return normalizeMemory(JSON.parse(text))
-      } catch {
-        return normalizeMemory(null)
-      }
+      return normalizeMemory(parsed(read()))
     },
-    save(settings) {
-      const text = JSON.stringify({ version: MEMORY_VERSION, ...settings })
+    save(settings, before) {
+      const text = JSON.stringify(patchMemory(parsed(read()), before, settings))
       session = text
       if (!storage) return
       try {
@@ -298,6 +333,16 @@ export function queryOf(state: State): QuerySettings {
   }
 }
 
+/** Query leaves are independent too: the order is one leaf, each column and view setting its own. */
+export function patchQuery(stored: unknown, before: QuerySettings, now: QuerySettings): Record<string, unknown> {
+  const out = record(stored)
+  if (before.filter !== now.filter) out.filter = now.filter
+  if (!sameValue(before.sort, now.sort)) out.sort = now.sort
+  out.columns = patchLeaves(out.columns, before.columns, now.columns)
+  out.view = patchLeaves(out.view, before.view, now.view)
+  return out
+}
+
 /** The slices {@link queryOf} reads are the ones `previous` had: the reducer keeps an unchanged slice's object. */
 const sameQuerySlices = (a: State, b: State): boolean =>
   a.filter.applied === b.filter.applied && a.sort === b.sort && a.defaultSort === b.defaultSort && a.columns === b.columns && a.view === b.view
@@ -361,20 +406,41 @@ export function remember(
   } catch {
     // Unreadable: the panel starts from its defaults.
   }
-  const written = (state: State) => JSON.stringify(queryOf(state))
-  let last = written(store.getState())
   return store.subscribe((state, previous) => {
     const now = rememberedOf(state)
-    if (!sameMemory(now, rememberedOf(previous))) memory.save(now)
+    const before = rememberedOf(previous)
+    // Another tab's choice this one follows is that tab's write already: written back, an event that arrives late puts
+    // the older choice over a newer one.
+    if (!sameMemory(now, before) && !following.has(store)) memory.save(now, before)
     // Most changes (the cursor, a read) leave the query alone: nothing is built or compared for them.
     if (sameQuerySlices(state, previous)) return
-    const text = written(state)
-    if (text === last) return
-    last = text
+    const query = queryOf(state)
+    const was = queryOf(previous)
+    if (sameValue(query, was)) return
     try {
-      storage.write(queryKey, text)
+      storage.write(queryKey, JSON.stringify(patchQuery(parsed(storage.read(queryKey)), was, query)))
     } catch {
       // Full, or refused: forgotten. A throw here would stop the listeners after this one (the views) drawing.
     }
   })
+}
+
+/** Stores taking another tab's choice ({@link follow}) right now: {@link remember} does not save what they take. */
+const following = new WeakSet<Store>()
+
+/** Other tabs' theme and zone choices apply here; this tab keeps its own pane, layout and query. */
+export function follow(store: Store, win: Window, key: string = MEMORY_KEY): () => void {
+  const changed = (event: StorageEvent) => {
+    if (event.key !== key) return
+    const settings = normalizeMemory(parsed(event.newValue))
+    following.add(store)
+    try {
+      store.dispatch({ type: 'theme', theme: settings.theme ?? 'system' })
+      store.dispatch({ type: 'zone', zone: settings.zone ?? null })
+    } finally {
+      following.delete(store)
+    }
+  }
+  win.addEventListener('storage', changed)
+  return () => win.removeEventListener('storage', changed)
 }

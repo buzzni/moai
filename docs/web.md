@@ -83,10 +83,14 @@ view toggles of the list applied; the dates scroll on the right.
 The page only places these: which span a group covers and whether a row is late is
 decided by moai (`moai tui --deep --json` carries it as `gantt`). Lateness is counted
 in the time zone the page draws in ([Time zone](#time-zone)): the page asks for the
-tree in it. A zone the machine `moai web` runs on cannot read is counted in the zone
+chart values in it. A zone the machine `moai web` runs on cannot read is counted in the zone
 moai runs in instead — an offset such as `+09:00`, a name its time zone data leaves
 out (browsers spell `Asia/Kolkata` as the older `Asia/Calcutta`, which newer data
 packages no longer carry), or any name on a machine with no time zone data.
+
+Chart values are requested only while this tab is active. Opening Gantt after a
+tree-only read requests them once; rows may appear briefly before their bars.
+Other tabs read the same tree without calculating the chart values.
 
 | Key / mouse | Does |
 |---|---|
@@ -107,8 +111,13 @@ moves on from where they put it. A double-click plans its day as `moai edit <id>
 --start <day> --due <day> --if-unplanned`, refused if the row gained days meanwhile.
 A move moai refuses (a start after the deadline, a day past the deadline of the
 epic, milestone or parent above) is told in moai's own words under the banners and
-the bar goes back. A move that went through says the `moai edit` line that puts back
-the days the page had read. A bar an epic or milestone counts from its members
+the bar goes back. While the write and refresh run, the bar keeps the dropped days
+through scrolling and redraws. A move that went through says the `moai edit` line
+that shifts the same edge back by the same number of days. Changes to the other
+edge stay in place. If that edge had no day when the page read it, undo clears it;
+a day another session added to that edge before the write would be cleared too.
+A newly planned day is undone by clearing both days. The TUI's notice instead
+names the dates it read inside the write. A bar an epic or milestone counts from its members
 (hatched) does not move — move the members. Nor does a row the write cannot reach:
 one the worktree overlay shows from another worktree, and an archived row.
 
@@ -149,7 +158,9 @@ system again forgets it.
 The page remembers its tab, where the detail sits, the theme and the time zone, and keeps the
 filter, the sort, the view and the columns apart for each project it reads, in the
 browser's own local storage — one project's filter never lands on another's page.
-The search is not kept. A browser that keeps no site data (a private window)
+Tabs save only the settings they change, preserving choices saved by another tab.
+Open tabs follow each other's theme and time zone; each keeps its own tab, layout
+and query while open. The search is not kept. A browser that keeps no site data (a private window)
 remembers them until the tab is closed.
 
 ## Time zone
@@ -159,6 +170,9 @@ config), or the browser's own when you have not picked one. `SPC o t` opens a
 list of zones to pick from — type to narrow it, `Enter` to take one. The choice
 only changes what this page draws — the Gantt tab's lateness included, read again in
 the new zone — and is kept in the browser; it never touches your user config.
+The filter's days (`created=<day>` and other timestamp keys given a day or local
+time) are judged in that zone too. Plan days (`due_on` and `starts_on`) are calendar
+days and do not change with the zone.
 
 ## What it writes
 
@@ -347,4 +361,4 @@ once and the keys reach it.
 The page does not show the stats screen, and what it writes is a Gantt bar's days
 and your read marks.
 
-Decided in: moai-0aa7, moai-jshy, moai-d86e.3ud
+Decided in: moai-0aa7, moai-jshy, moai-d86e.3ud, moai-ijjd
