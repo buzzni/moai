@@ -286,7 +286,10 @@ impl App {
             Some(Stat::Bucket) => w.switch(),
             Some(Stat::Close) => self.mode = Mode::Browse,
             // 뜻 없는 키는 열을 버리므로([`super::keys::Chord::feed`]) 남은 열이 곧 "기다린다" 다.
-            None => return w.chord.held().is_empty(),
+            None => {
+                let idle = w.chord.held().is_empty();
+                return idle && !self.help_from_window(k);
+            }
         }
         true
     }
@@ -404,6 +407,32 @@ mod tests {
         a.hit("Esc");
         assert_eq!(a.mode, Mode::Browse);
         assert_eq!((a.cursor, a.focus, a.hung.clone(), a.detail_open, a.detail), before, "창이 보던 자리를 바꿨다");
+    }
+
+    #[test]
+    fn the_help_key_opens_over_stats_and_the_window_keys_win() {
+        let mut a = app();
+        a.hit("SPC g s");
+        a.notice = Some("kept".into());
+        a.hit("?");
+        assert!(a.help.is_some());
+        assert_eq!(a.notice.as_deref(), Some("kept"));
+        a.hit("Esc");
+        assert!(a.help.is_none() && matches!(a.mode, Mode::Stats(_)));
+        let (map, problems) = super::super::keymap::build("[browse]\nhelp = \"F1\"\n");
+        assert!(problems.is_empty());
+        a.adopt_keys(map, &problems, None);
+        a.hit("?");
+        assert!(a.help.is_none());
+        a.hit("F1");
+        assert!(a.help.is_some());
+        a.hit("Esc");
+        let (map, problems) = super::super::keymap::build("[browse]\nhelp = \"b\"\n");
+        assert!(problems.is_empty());
+        a.adopt_keys(map, &problems, None);
+        a.hit("b");
+        assert!(a.help.is_none());
+        assert_eq!(window(&a).bucket, Bucket::Day);
     }
 
     /// **통계 창 위의 SPC 는 화면 고르기만 연다**(moai-z46r, 사용자 결정) — `SPC g l`·`b` 는 창을 닫고 그 배치로 서고,

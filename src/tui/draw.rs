@@ -10508,6 +10508,23 @@ pub(super) mod tests {
         assert!(a.help.is_none(), "SPC 뒤의 `?` 가 창을 안 닫았다");
     }
 
+    #[test]
+    fn a_paste_over_the_help_sheet_keeps_the_chord_and_notice() {
+        let mut a = app();
+        a.hit("?");
+        render(&mut a, 80, 20);
+        a.notice = Some("kept".into());
+        a.hit("SPC");
+        let held = a.chord.held().to_vec();
+        assert!(!held.is_empty());
+        a.paste("x");
+        assert!(a.help.is_some());
+        assert_eq!(a.chord.held(), held);
+        assert_eq!(a.notice.as_deref(), Some("kept"));
+        a.hit("j");
+        assert_eq!(a.help.as_ref().unwrap().top, 1);
+    }
+
     /// **80칸에서 바의 키가 하나도 안 떨어진다** — 옮긴 키가 빠져 자리가 났다(moai-7sjm). 상세
     /// 포커스에서는 드나드는 키가 빠진다. 키 목록(`?`)은 여기서 먼저 떨어지는 칸이라 안 센다.
     ///

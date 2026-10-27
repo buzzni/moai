@@ -230,9 +230,10 @@ one shows one column to scroll.
 - The movement keys and the mouse wheel scroll it; the bottom right corner says
   where you are (`16/103`). With more than one column the columns scroll together,
   and the count is the rows of the longest column, not every line (`1/35`)
-- `?`, `SPC h`, `Esc` or `Backspace` closes it. While it is open, `Esc` belongs
-  to the window: it does not clear the filter you set
-- It opens over the stats and wiki windows too (`SPC h`), and closing it leaves
+- `?`, `SPC h`, `Esc` or `Backspace` closes it, and so does `SPC q`: over the
+  list it closes rather than quits (`Ctrl-C` quits from anywhere). While it is
+  open, `Esc` belongs to the window: it does not clear the filter you set
+- It opens over the stats and wiki windows too (`?` or `SPC h`), and closing it leaves
   that window as it was
 - The bottom bar names `?` while there is room. On a narrow screen it is the
   first hint to drop; `SPC h` in the menu is always there

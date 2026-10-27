@@ -41,7 +41,7 @@ Commands:
   milestone     The verbs above, pinned to `--type milestone`
   backlog       Jot a passing thought down where you are (`--type backlog`)
   wiki          The project wiki - the markdown pages under `docs/`, and lessons
-  tui           Open the explorer (the one write to an issue is `SPC n`, jot)
+  tui           Open the explorer (writes a jot, `SPC n`, and gantt plans)
   web           Serve this tracker as a page on 127.0.0.1
   hook          Called by an agent's hook. Reads an event on stdin
   merge-driver  Called by git. Merges issues.jsonl per issue, three-way
@@ -2617,7 +2617,7 @@ LESSON
 ## `moai tui`
 
 ```
-Open the explorer (the one write to an issue is `SPC n`, jot)
+Open the explorer (writes a jot, `SPC n`, and gantt plans)
 
 Usage: moai tui [OPTIONS]
 
@@ -2680,9 +2680,10 @@ Order:
   movement key moves the focused pane — to scroll the detail, go there with
   Ctrl-w w.
   / searches, Esc clears the filter you set. r marks the row under the cursor
-  as read (see [NEW] below). ? (or SPC h) opens a window listing every
-  key, read from the same table as moai keys. The movement keys scroll
-  it and ? closes it again.
+  as read (see [NEW] below). ? opens a window listing every key
+  (SPC h from the menu), read from the same table as moai keys.
+  The movement keys scroll it; ? or SPC q closes it
+  rather than quitting (Ctrl-C quits from anywhere).
   The search and filter fields take Enter to apply and Esc to give up, the
   search filters the list as you type, and Tab and Shift-Tab pick where it
   looks: everything, id, title, tag, body or note (everything reads the
@@ -2983,7 +2984,8 @@ Order:
   kept. With no editor the built-in form opens — one title line and a body,
   Tab moves between them (Enter in the title goes to the body) and Ctrl-S
   keeps it. Esc closes it, asking once if you had typed something (y throws
-  it away). This is the one write to an issue — editing is done on the CLI.
+  it away). Besides moving a plan on the gantt (above), this is the only write —
+  moving, editing and noting are done on the CLI.
   `--json` prints only that directory's listing, with no screen (outside a
   `.moai`, the rows of the layer). Each folder row (a milestone, an epic,
   an issue with children) carries progress, {"done": 3, "total": 5} —

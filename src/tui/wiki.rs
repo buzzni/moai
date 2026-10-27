@@ -952,7 +952,10 @@ impl App {
             Some(keys::Wiki::Close) if w.searched() => w.clear_search(),
             Some(keys::Wiki::Close) => self.mode = Mode::Browse,
             // 뜻 없는 키는 열을 버리므로([`keys::Chord::feed`]) 남은 열이 곧 "기다린다" 다.
-            None => return w.chord.held().is_empty(),
+            None => {
+                let idle = w.chord.held().is_empty();
+                return idle && !self.help_from_window(k);
+            }
         }
         true
     }
@@ -1131,6 +1134,24 @@ pub(super) mod tests {
         w.follow("guide");
         a.hit("Esc");
         assert_eq!(a.mode, Mode::Browse, "자취가 남았다고 Esc 가 창을 안 닫았다");
+    }
+
+    #[test]
+    fn the_help_key_opens_over_wiki_but_typing_keeps_the_question_mark() {
+        let (_s, mut a) = wiki_app("help-key", PAGES);
+        a.hit("SPC g w ?");
+        assert!(a.help.is_some() && matches!(a.mode, Mode::Wiki(_)));
+        a.hit("Esc / ?");
+        assert!(a.help.is_none());
+        assert_eq!(window(&a).typing.as_ref().unwrap().input.text(), "?");
+        a.hit("Esc");
+        let (map, problems) = super::super::keymap::build("[browse]\nhelp = \"F1\"\n");
+        assert!(problems.is_empty());
+        a.adopt_keys(map, &problems, None);
+        a.hit("?");
+        assert!(a.help.is_none());
+        a.hit("F1");
+        assert!(a.help.is_some());
     }
 
     /// **위키 창 위의 SPC 는 화면 고르기와 원문·그린 글만 연다**(통계 창과 같은 자) — `SPC g l`·`b` 는 창을 닫고 그

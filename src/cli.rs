@@ -530,9 +530,10 @@ BACKLOG
   movement key moves the focused pane — to scroll the detail, go there with
   {key:browse.focus_next}.
   {key:browse.grep} searches, {key:browse.clear_filter} clears the filter you set. {key:browse.read} marks the row under the cursor
-  as read (see [NEW] below). {key:browse.help} (or SPC h) opens a window listing every
-  key, read from the same table as moai keys. The movement keys scroll
-  it and {key:browse.help} closes it again.
+  as read (see [NEW] below). {key:browse.help} opens a window listing every key
+  ({spc:browse.help} from the menu), read from the same table as moai keys.
+  The movement keys scroll it; {key:browse.help} or {key:browse.quit} closes it
+  rather than quitting (Ctrl-C quits from anywhere).
   The search and filter fields take Enter to apply and Esc to give up, the
   search filters the list as you type, and Tab and Shift-Tab pick where it
   looks: everything, id, title, tag, body or note (everything reads the
@@ -553,13 +554,13 @@ BACKLOG
   stands up only what works where you are, ignores keys it does not know,
   closes on {key:menu.close} or SPC and goes one level up on {key:menu.up}. Keys that move
   the focused pane close the menu and make that move in the same press,
-  unless a key on that level holds the letter (SPC g, SPC h,
+  unless a key on that level holds the letter (SPC g, {spc:browse.help},
   {key:browse.go_list}, {key:browse.cell_names}, {key:browse.deferred}, {key:browse.read_group}).
   Toggles and sorts (SPC v, SPC c, SPC s) do not close it — try them, watch
   the state, and leave with {key:menu.close}. That level says so at the bottom right with a
   close hint.
-    SPC /    search              {key:browse.filter}    filter             {key:browse.jot}    jot
-    SPC h    keys                {key:browse.quit}    quit
+    {spc:browse.grep}    search              {key:browse.filter}    filter             {key:browse.jot}    jot
+    {spc:browse.help}    keys                {key:browse.quit}    quit
     {key:browse.pick}  register            {key:browse.unregister}  drop from the list
   Screen — which one stands; the root menu names it, as in [board]:
     {key:browse.go_list}  list                {key:browse.go_board}  board — described below
