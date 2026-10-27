@@ -302,7 +302,8 @@ asked you for it. On a yes, for each:
     cmux --id-format both new-split right --surface "$CMUX_SURFACE_ID" --command 'cd "<root>" && claude --model <model>'
 
 `<root>` is the `root dir` of the supervisor's 2 and `<model>` the model picked in 2-1. **No
-other flag** on `claude`. It prints `OK surface:<n> (<UUID>) workspace:<n> (<UUID>)` — the first
+other flag** on `claude`. Keep the double quotes around `<root>` inside the single ones;
+write each `'` in the path as `'\''` there. It prints `OK surface:<n> (<UUID>) workspace:<n> (<UUID>)` — the first
 UUID is the new surface, the second your workspace. `--command` is typed into the new tab's
 shell, so the shell stays when `claude` exits and what it said stays readable, and the split
 does not take focus. **If cmux refuses the split** — no space for a new pane, as every split
@@ -343,7 +344,7 @@ Codex tests and commits its work, writes `Review-ready:` as an epic note, and st
 It waits for the supervisor's review and the second assignment; it does not review itself.
 
 When `Review-ready:` arrives, read its whole note. Pick the review issue up
-(`moai -C <root> mv <review id> in_progress`) and run a review subagent in the reported
+(`moai -C "<root>" mv <review id> in_progress`) and run a review subagent in the reported
 worktree with its configured `review` model and "The review brief" in
 `references/worker-branches.md`; refer to that brief, do not copy it here. Once the review has ended and its words are on the review issue, send
 "merge and close — review <id> done" with the same file-paste path and fresh input checks.
@@ -363,7 +364,7 @@ Read `cmux --json --id-format both top --all` once. For each surface's `cmux_pro
 check `ps -p <pid> -o args=`: the first executable's basename must be `codex`, including a
 full path ending in `/codex`. `comm` can be truncated; host processes and temporary children
 are not the Codex session. This script prints `surface<TAB>pid<TAB>cwd` for candidates.
-Save it in the scratchpad and run `bash <script> <root>`:
+Save it in the scratchpad and run `bash "<script>" "<root>"`:
 
 ```sh
 python3 - "$1" <<'MOAI_CODEX_SURFACES'
@@ -433,7 +434,8 @@ Ask once before opening new tabs, as above. On a yes, open an ordinary interacti
 
     cmux --id-format both new-split right --surface "$CMUX_SURFACE_ID" --command 'cd "<root>" && codex --model <codex>'
 
-Keep the returned surface UUID. The same split refusal rule applies: stop opening and tell
+Keep the double quotes around `<root>` inside the single ones; write each `'` in the path
+as `'\''` there. Keep the returned surface UUID. The same split refusal rule applies: stop opening and tell
 the person. Read its startup screen in a separate call; folder trust, hooks trust and any
 permission prompt belong to the person. The first assignment can use a verified fresh box.
 
@@ -505,8 +507,8 @@ is already in the box: do not paste again. Tell the person which tab holds it un
 
 Use one `Monitor` per epic, on the supervisor's side only:
 `Monitor(description: "codex report on <epic>", timeout_ms: 1800000, command: <script below>)`.
-Save the script in the scratchpad; the command is `bash <script> <root> <epic> <last-seen-ts>`.
-Before pasting the assignment, read `moai -C <root> show <epic> --json` once and save the
+Save the script in the scratchpad; the command is `bash "<script>" "<root>" <epic> <last-seen-ts>`.
+Before pasting the assignment, read `moai -C "<root>" show <epic> --json` once and save the
 latest `journal[].ts` as `<last-seen-ts>` (an empty journal uses `1970-01-01T00:00:00Z`).
 Arm the monitor with that cursor so a quick report cannot arrive between send and baseline.
 A backlog sent `from step 1` has no epic yet: watch that backlog id in `<epic>`'s place.

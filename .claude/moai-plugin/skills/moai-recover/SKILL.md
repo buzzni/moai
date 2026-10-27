@@ -172,6 +172,17 @@ PY
   tell the person what it said
 - A **candidate** is a `dead` row with a `sessionId` whose `cwd` is the root or one of the
   worktrees `git worktree list` names
+
+`<root>` and `<cwd>` stand in double quotes on every shell line here, so a path with a
+space stays one word. Double quotes still read `"`, `$`, a backtick and `\`: a path holding
+any of them is not one these lines can carry — build none, and tell the person which path
+it is. Inside cmux's `--command '…'` the path sits inside single quotes as well: write each
+`'` in it as `'\''` there.
+
+If a candidate's `cwd` holds any of those four characters, open no pane or tab for it and
+print no command for it in 7 or 8. Tell the person its path and `sessionId`, so they can
+quote it by hand and bring it back themselves.
+
 - **Drop it when it is back already** — a live row carries the same `sessionId` (`--resume`
   keeps the id), **your own row included**: a session the person resumed first and then asked
   for this is back already, and resuming it again puts one conversation in two windows. In a
@@ -284,7 +295,7 @@ line — and look at where it stood:
 - **Work.** The issue or epic id it held, and what it was doing or waiting for — a report,
   a review, a person's decision, a build
 - **Died at** — the `timestamp` of its last line
-- `git -C <cwd> status --short` — what it left uncommitted. In the root, leave `.moai/` out:
+- `git -C "<cwd>" status --short` — what it left uncommitted. In the root, leave `.moai/` out:
   the supervisor's steps commit the tracker once an epic closes or a round stops, so rows wait
   there by design, and they are every session's, not this one's
 - `moai show <id>` — a `Next:` note on that id says where the session meant to go on
@@ -306,8 +317,8 @@ waiting for, died at, uncommitted files — and the Saycode id of a Saycode sess
 - **A broken target link.** In the root and each worktree, `target` may be a link to
   `/tmp/cargo-target/<name>`, and a restart can empty `/tmp`:
 
-      readlink <cwd>/target
-      test -e <cwd>/target || echo dangling
+      readlink "<cwd>/target"
+      test -e "<cwd>/target" || echo dangling
 
   Make the directory again, `mkdir -p /tmp/cargo-target/<name>`, so builds land there. The
   build output is gone: `./target/release/moai` needs `cargo build --release` before anything
@@ -380,7 +391,8 @@ session (8), in that order:
 
     cmux --id-format both new-split right --surface "$CMUX_SURFACE_ID" --command 'cd "<cwd>" && claude --resume <sessionId>'
 
-**No other flag**, and keep the double quotes around `<cwd>` inside the single ones. It prints `OK surface:<n> (<UUID>) workspace:<n> (<UUID>)` — the first UUID
+**No other flag**, and keep the double quotes around `<cwd>` inside the single ones;
+write each `'` in the path as `'\''` there. It prints `OK surface:<n> (<UUID>) workspace:<n> (<UUID>)` — the first UUID
 is the new tab, the second your workspace. The command is typed into the tab's shell, so the
 shell stays when `claude` exits, and the split does not take focus. **If cmux refuses a split**
 — no space for a new pane, as every split lands in your row, or it cannot find your tab in the

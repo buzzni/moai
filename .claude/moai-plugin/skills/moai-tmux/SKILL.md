@@ -317,7 +317,7 @@ Codex tests and commits its work, writes `Review-ready:` as an epic note, and st
 It waits for the supervisor's review and the second assignment; it does not review itself.
 
 When `Review-ready:` arrives, read its whole note. Pick the review issue up
-(`moai -C <root> mv <review id> in_progress`) and run a review subagent in the reported
+(`moai -C "<root>" mv <review id> in_progress`) and run a review subagent in the reported
 worktree with its configured `review` model and "The review brief" in
 `references/worker-branches.md`; refer to that brief, do not copy it here. Once the review has ended and its words are on the review issue, send
 "merge and close — review <id> done" with the same file-paste path and fresh input checks.
@@ -448,8 +448,8 @@ applies unchanged: set `@moai` on this `%N`, and ask before showing labels on bo
 
 Use one `Monitor` per epic, on the supervisor's side only:
 `Monitor(description: "codex report on <epic>", timeout_ms: 1800000, command: <script below>)`.
-Save the script in the scratchpad; the command is `bash <script> <root> <epic> <last-seen-ts>`.
-Before pasting the assignment, read `moai -C <root> show <epic> --json` once and save the
+Save the script in the scratchpad; the command is `bash "<script>" "<root>" <epic> <last-seen-ts>`.
+Before pasting the assignment, read `moai -C "<root>" show <epic> --json` once and save the
 latest `journal[].ts` as `<last-seen-ts>` (an empty journal uses `1970-01-01T00:00:00Z`).
 Arm the monitor with that cursor so a quick report cannot arrive between send and baseline.
 A backlog sent `from step 1` has no epic yet: watch that backlog id in `<epic>`'s place.
