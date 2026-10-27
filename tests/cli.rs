@@ -16740,6 +16740,8 @@ fn picking_up_a_whole_epic_is_not_started_at_once() {
     let board: serde_json::Value = serde_json::from_str(&ok(s.path(), &["status", "--json"])).unwrap();
     let w = board["warnings"].as_array().unwrap().iter().find(|w| w["kind"] == "wip_overload").expect("경고가 없다");
     assert_eq!((w["count"].as_u64(), w["ids"].as_array().unwrap().len()), (Some(5), 8), "{w}");
+    let board = ok(s.path(), &["status"]);
+    assert!(board.contains("5묶음") && board.contains("에픽은 하나로"), "{board}");
 }
 
 /// `SessionStart` 는 아무것도 싣지 않고 기준선만 적는다.

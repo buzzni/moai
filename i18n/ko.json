@@ -27,7 +27,7 @@
   "warn.no_epic": "에픽 없는 이슈 {n}건 (열린 것의 {percent}%)",
   "warn.no_milestone": "마일스톤에 안 붙은 이슈 {n}건",
   "warn.stale_review": "review 에 {d}일 넘게 멈춘 것 {n}건",
-  "warn.wip_overload": "한 번에 벌여 놓은 것 {n}건 — 하나씩 끝내는 편이 낫다",
+  "warn.wip_overload": "한 번에 벌여 놓은 것 {n}묶음(에픽은 하나로 센다) — 하나씩 끝내는 편이 낫다",
   "warn.stale_progress": "집어 놓고 {d}일 넘게 안 건드린 것 {n}건",
   "warn.stranded": "집었는데 일하는 워크트리가 없는 것 {n}건 — 이어 하려면 워크트리를 다시 띄운다",
   "warn.blocked_stale": "막힌 채로 {d}일 넘게 멈춰 있는 것 {n}건",

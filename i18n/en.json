@@ -27,7 +27,7 @@
   "warn.no_epic": "Issues with no epic {n} ({percent}% of open)",
   "warn.no_milestone": "Issues on no milestone {n}",
   "warn.stale_review": "Stuck in review over {d} days {n}",
-  "warn.wip_overload": "Started at once {n} — finishing one at a time goes better",
+  "warn.wip_overload": "Started at once {n} (an epic counts as one) — one at a time goes better",
   "warn.stale_progress": "Picked up and untouched over {d} days {n}",
   "warn.stranded": "Picked up with no worktree at work {n} — open a worktree again to carry on",
   "warn.blocked_stale": "Blocked and still over {d} days {n}",
