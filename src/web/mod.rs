@@ -152,12 +152,17 @@ impl Drop for Leave {
 /// 받을 자리가 없는 연결에 503 `busy` 와 FIN 을 쓰고, 늦은 요청은 별도 스레드에서 짧게 비운다.
 /// drainer 의 자리도 다 찼으면 즉시 놓는다 — 조용한 초과 연결들이 받기 고리를 줄 세우면 안 된다.
 fn turn_away(stream: TcpStream, lang: Lang, draining: &Arc<AtomicUsize>) {
+    turn_away_within(stream, lang, draining, BUSY_READ_LIMIT);
+}
+
+fn turn_away_within(stream: TcpStream, lang: Lang, draining: &Arc<AtomicUsize>, limit: Duration) {
     let _ = stream.set_write_timeout(Some(Duration::from_secs(1)));
     let _ = http::write(&mut &stream, &refuse(503, say(lang, "web.busy"), code::BUSY), true);
     // 요청을 비우는 동안에도 상대는 답 끝을 바로 본다. 읽기 쪽은 늦은 요청을 받을 수 있게 열어 둔다.
     let _ = stream.shutdown(std::net::Shutdown::Write);
     if draining.fetch_add(1, Ordering::SeqCst) >= BUSY_DRAIN_MAX {
         draining.fetch_sub(1, Ordering::SeqCst);
+        close(&stream);
         return;
     }
     let leave = Leave(draining.clone());
@@ -166,7 +171,7 @@ fn turn_away(stream: TcpStream, lang: Lang, draining: &Arc<AtomicUsize>) {
     let _ = std::thread::Builder::new().name("moai-web-drain".into()).spawn(move || {
         let _leave = leave;
         // 답은 이미 정했다. 제한된 크기·시간 안에서 머리를 버리고, 해석 결과로 다시 답하지 않는다.
-        let _ = read_head(&stream, BUSY_READ_LIMIT);
+        let _ = read_head(&stream, limit);
         close(&stream);
     });
 }
@@ -546,6 +551,28 @@ mod tests {
             client.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
             client.read_to_end(&mut got).expect("답 대신 RST 를 받았다");
             assert!(got.starts_with(b"HTTP/1.1 503 "), "{}", String::from_utf8_lossy(&got));
+        }
+    }
+
+    /// 요청을 기다리는 drainer 보다 먼저 503 전체와 FIN 이 간다. 상대가 닫으면 긴 시한도 기다리지 않는다.
+    #[test]
+    fn a_busy_response_ends_before_the_request_drain() {
+        let (mut client, server) = pair();
+        let draining = Arc::new(AtomicUsize::new(0));
+        // FIN 을 빼면 30 초 drain 이 끝나기 전에 5 초 읽기 시한에서 실패한다.
+        turn_away_within(server, Lang::En, &draining, Duration::from_secs(30));
+        client.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+        let mut got = Vec::new();
+        client.read_to_end(&mut got).expect("503 과 EOF 는 요청 drain 을 기다리지 않는다");
+        let mut expected = Vec::new();
+        http::write(&mut expected, &refuse(503, say(Lang::En, "web.busy"), code::BUSY), true).unwrap();
+        assert_eq!(got, expected, "503 의 머리와 본문을 끝까지 받는다");
+        assert_eq!(draining.load(Ordering::SeqCst), 1, "조용한 상대의 요청은 아직 기다린다");
+        drop(client);
+        let until = Instant::now() + Duration::from_secs(5);
+        while draining.load(Ordering::SeqCst) != 0 {
+            assert!(Instant::now() < until, "닫힌 상대가 drainer 의 자리를 안 놓았다");
+            std::thread::sleep(Duration::from_millis(10));
         }
     }
 
