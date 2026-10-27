@@ -28422,10 +28422,11 @@ fn show_names_the_wiki_pages_about_the_issue() {
 
     // 목록에는 안 싣는다 — 줄마다 위키를 걷게 된다.
     assert!(!ok(s.path(), &["show", "--json"]).contains(r#""wiki""#));
-    // `--fields` 로 고를 수 있다.
-    assert!(
-        ok(s.path(), &["show", &id, "--json", "--fields", "wiki"]).starts_with(r#"{"wiki":{"lessons":[],"named_in":"#)
-    );
+    // `--fields` 로 고른 값은 안쪽 키 차례까지 전체 줄의 것 그대로다(moai-b4dc.0ia).
+    let picked = ok(s.path(), &["show", &id, "--json", "--fields", "wiki"]);
+    let inside = picked.trim().strip_prefix('{').unwrap().strip_suffix('}').unwrap();
+    assert!(json.contains(inside), "전체: {json}\n고른 값: {picked}");
+    assert_eq!(json_of(&picked)["wiki"], v["wiki"]);
 }
 
 /// 문턱 밑이면 `related` 가 비고, 둘 다 비면 사람 화면에 토막이 없다. 위키 디렉터리가 없으면 두 빈 배열이고
