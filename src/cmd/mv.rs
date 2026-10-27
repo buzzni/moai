@@ -168,7 +168,8 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
     // Reopening an archived row restores only the selected row. The archive
     // command keeps the rest of its former bundle in place by design.
     let wanted: std::collections::BTreeSet<String> = ids.iter().cloned().collect();
-    let moved: Moved = repo.with_write_after(
+    let picked = std::cell::RefCell::new(Vec::new());
+    let outcome: R<Moved> = repo.with_write_after(
         || lang,
         |issues, unread, cfg, _| {
             // **시각은 락을 쥔 뒤에 뜬다**(리뷰 moai-u5bk.3wq). 밖에서 뜨면 먼저 뜨고 늦게 락을 잡은
@@ -282,7 +283,7 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
                     // **남의 줄은 제 집기로 안 적는다**(리뷰 moai-w25x.54r) — 훅은 `--take` 없는 그 집기를 규칙 5 로 막아 안
                     // 적는다. 훅이 못 읽는 꼴(`$M mv X …`)로 쳤다고 적으면, 그 줄을 쥔 세션은 제 일을 잃고 이 세션은 그 줄의
                     // 워크트리에 쓰는 길까지 얻는다. 넘겨받았으면 이제 제 것이다.
-                    if picks_up && crate::report::owner(&me, i).is_none() {
+                    if crate::report::picks_up(i, cfg, &me) {
                         m.picked.push(i.id.clone());
                     }
                     m.already.push(i.id.clone());
@@ -309,7 +310,7 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
                     _ => {}
                 }
                 // 옮긴 줄도 같은 자다 — `--take` 없이 옮긴 남의 줄(`theirs`)은 적지 않는다.
-                if picks_up && crate::report::owner(&me, i).is_none() {
+                if crate::report::picks_up(i, cfg, &me) {
                     m.picked.push(i.id.clone());
                 }
                 // 저장 직전의 모습으로 맞춰 두고 뜬다 — 안 그러면 `--json` 이
@@ -398,13 +399,18 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
             }
             Ok((entries, m))
         },
-        |m| crate::archive::remove_ids(&repo.root, &m.restored),
-    )?;
+        |m| {
+            // 셈과 검증을 지난 집기만 락 밖으로 가져간다. 메모만 실패해도 그 집기는 안 잃는다.
+            picked.borrow_mut().extend(m.picked.iter().cloned());
+            crate::archive::remove_ids(&repo.root, &m.restored)
+        },
+    );
     // **시작 칸으로 옮겼으면 이 세션의 집기로 적는다**(moai-w25x.831) — 훅은 명령줄의 글자로만 집기를 읽어
     // `$M mv …` 처럼 껍데기가 풀 낱말로 친 집기를 놓쳤다. 이미 그 칸이던 줄도 적는다: 멈춘 일을 이어받는
     // 세션이 `mv <id> <그 칸> --from <그 칸>` 으로 제 것이라 적는 자리다. 진 줄(`stale`)은 안 옮겼으니 안 들고,
     // 남의 줄은 `--take` 로 넘겨받았을 때만 든다(`Moved::picked`).
-    super::hook::record_own_picks(&repo, &moved.picked);
+    super::hook::record_own_picks(&repo, &picked.into_inner());
+    let moved = outcome?;
 
     // **`-m` 이 파일 이름이면 한 줄로 알린다**(moai-yivo.xe9) — **그 글이 저널에 든 판에만**: 옮긴 줄의 칸 줄과
     // 이미 그 칸이던 줄의 노트다. 진 줄·없는 줄뿐인 부름에 "저널에 남는 것은 …" 을 대면 없던 쓰기를 말한다(리뷰
