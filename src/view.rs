@@ -1235,6 +1235,27 @@ fn preview(w: &Warning, by_id: &BTreeMap<&str, &Issue>, now: &str, screen: Scree
         out.extend(hint_line(w));
         return out;
     }
+    if w.kind == "due_beyond_parent" {
+        for id in w.ids.iter().take(SHOW) {
+            let Some(i) = by_id.get(id.as_str()) else { continue };
+            let Some((above, due)) = w.ceilings.get(id) else { continue };
+            let dates = crate::draft::at_form(i.starts_on.as_deref(), i.due_on.as_deref()).unwrap_or_default();
+            out.push(format!(
+                "    {}  {}   {}  > {} {}",
+                paint(style::ID, id),
+                marked(screen.branch(id), &i.title, TITLE_CAP, style::PLAIN).0,
+                paint(style::DIM, &dates),
+                paint(style::ID, above),
+                paint(style::DIM, due),
+            ));
+        }
+        let rest = w.ids.len().saturating_sub(SHOW);
+        if rest > 0 {
+            out.push(format!("    {}", paint(style::DIM, &more_of(rest, lang))));
+        }
+        out.extend(hint_line(w));
+        return out;
+    }
     // 에픽에 대한 말은 칸도 나이도 뜻이 없다. 어느 에픽인지만 말한다.
     if matches!(
         w.kind,
@@ -1242,7 +1263,6 @@ fn preview(w: &Warning, by_id: &BTreeMap<&str, &Issue>, now: &str, screen: Scree
             | "unknown_field"
             | "dangling_epic"
             | "dangling_milestone"
-            | "due_beyond_parent"
             | "milestone_focus"
             | "milestones_running"
     ) {

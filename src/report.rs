@@ -3238,15 +3238,31 @@ impl Ceiling<'_> {
 pub struct DueLadder<'m, 'a> {
     lines: &'m Lines<'a>,
     epic_of: &'m Handing<'a>,
+    /// 기한 든 조상 가운데 미룬 줄(물려받은 미룸 포함). 조상은 `Lines::at` 이 고르는 줄이므로 id 로 든다.
+    off: BTreeSet<&'a str>,
 }
 
 impl<'m, 'a> DueLadder<'m, 'a> {
     pub fn over(lines: &'m Lines<'a>, epic_of: &'m Handing<'a>) -> DueLadder<'m, 'a> {
-        DueLadder { lines, epic_of }
+        // 미룬 줄이 없으면 걷지 않는다. 있을 때도 지도를 한 번만 짓고, 천장이 될 기한 든 줄만 잰다.
+        // `Shelf` 를 써야 미룬 마일스톤 밑의 에픽·부모 기한도 함께 빠진다(제 `deferred_at` 만 보면 남는다).
+        let off = if lines.by_id.values().any(|i| is_put_off(i)) {
+            let stones = lines.by_id.iter().filter_map(|(id, i)| epic_of.stood(i, lines).map(|m| (*id, m))).collect();
+            let shelf = Shelf::new(lines, epic_of, &stones);
+            lines
+                .by_id
+                .values()
+                .filter(|i| i.deadline().is_some() && shelf.nearest(i).is_some())
+                .map(|i| i.id.as_str())
+                .collect()
+        } else {
+            BTreeSet::new()
+        };
+        DueLadder { lines, epic_of, off }
     }
 
     /// 그 줄의 조상 가운데 가장 이른 기한. 기한 든 조상이 없으면 `None` 이다. 꼴이 틀린 기한은
-    /// 안 센다 — 그 줄을 고칠 때 제 검사(`Invalid::Date`)가 드러낸다.
+    /// 안 센다 — 그 줄을 고칠 때 제 검사(`Invalid::Date`)가 드러낸다. 미룬 조상과 그 밑의 조상도 안 센다.
     pub fn ceiling(&self, i: &'a Issue) -> Option<Ceiling<'a>> {
         self.lowest(i, &self.above(i))
     }
@@ -3256,7 +3272,7 @@ impl<'m, 'a> DueLadder<'m, 'a> {
         above
             .iter()
             .filter_map(|id| self.lines.at(id))
-            .filter(|a| a.id != i.id)
+            .filter(|a| a.id != i.id && !self.off.contains(a.id.as_str()))
             .filter_map(|a| Some(Ceiling { above: a, due: a.deadline()? }))
             // 날짜는 고정폭이라 글로 견준다. 같은 날이면 먼저 선 조상(마일스톤 → 에픽 → 부모)이 남는다.
             .min_by(|a, b| a.due.cmp(b.due))
@@ -5032,6 +5048,9 @@ pub struct Warning {
     /// 한다 — `ages` 와 같은 자다.
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     pub deadlines: BTreeMap<String, String>,
+    /// id → 넘긴 조상의 id 와 기한. 보드 미리보기만 쓰며 JSON 계약은 그대로다.
+    #[serde(skip)]
+    pub ceilings: BTreeMap<String, (String, String)>,
     /// 고칠 것이 아니라 알려 주는 것. **`fatal` 옆에 데이터로 둔다** —
     /// 이 판단이 `view` 에만 있으면 `view` 를 건너뛴 표면(TUI·`--json`)이
     /// 알림을 경고로 세고, 담을수록 화면이 시끄러워진다.
@@ -5061,6 +5080,7 @@ impl Warning {
             oldest: None,
             ages: BTreeMap::new(),
             deadlines: BTreeMap::new(),
+            ceilings: BTreeMap::new(),
             notice: false,
             fatal: false,
         }
@@ -6254,6 +6274,7 @@ fn status_in_scope<'a, 'c>(
     // 훅의 도구 호출마다 한 벌 더 지었고, 아카이브의 조상까지 세어 쓰기가 받은 줄을 꾸짖었다). 닫힌 줄과 계획 밖의
     // 줄은 안 센다 — 고칠 까닭이 없는 기한이다. 계획 밖인가는 줄에 묻고(`off`, moai-u3ta), 가려진 줄은
     // `duplicate_id` 가 따로 댄다.
+    let mut ceilings = BTreeMap::new();
     let beyond: Vec<&Issue> = match ladder {
         None => Vec::new(),
         Some(ladder) => issues
@@ -6262,11 +6283,17 @@ fn status_in_scope<'a, 'c>(
             .filter(|(k, i)| i.plan_days().next().is_some() && visible(i) && off[*k].is_none() && !eclipsed(i))
             .map(|(_, i)| i)
             .filter(|i| column(i, &states) != crate::config::DONE)
-            .filter(|i| ladder.beyond_row(i).is_some())
+            .filter(|i| {
+                let Some(c) = ladder.beyond_row(i) else { return false };
+                ceilings.insert(i.id.clone(), (c.above.id.clone(), c.due.to_string()));
+                true
+            })
             .collect(),
     };
     if !beyond.is_empty() {
-        warnings.push(Warning::new("due_beyond_parent", ids_of(&beyond)));
+        let mut warning = Warning::new("due_beyond_parent", ids_of(&beyond));
+        warning.ceilings = ceilings;
+        warnings.push(warning);
     }
     let dangling_blockers: Vec<&Issue> =
         issues.iter().filter(|i| visible(i) && i.blocked_by.iter().any(|b| !known.contains(b.as_str()))).collect();
@@ -6584,6 +6611,30 @@ mod tests {
 
     fn make(id: &str, kind: Kind, status: &str) -> Issue {
         Issue::new(id.into(), format!("{id} 제목"), kind, Status::new(status), "2026-09-01T00:00:00Z")
+    }
+
+    #[test]
+    fn deferred_ancestors_release_only_their_own_deadline_ceilings() {
+        for (defer, want) in [(0, None), (1, Some(0)), (2, Some(1)), (3, Some(2))] {
+            let mut m = make("argos-mmmm", Kind::Milestone, "todo");
+            m.due_on = Some("2026-10-24".into());
+            let mut e = make("argos-eeee", Kind::Epic, "todo");
+            e.milestone = Some(m.id.clone());
+            e.due_on = Some("2026-10-23".into());
+            let mut p = make("argos-eeee.aaaa", Kind::Issue, "todo");
+            p.due_on = Some("2026-10-22".into());
+            let mut c = make("argos-eeee.aaaa.bbbb", Kind::Issue, "todo");
+            c.due_on = Some("2026-10-30".into());
+            let mut all = vec![m, e, p, c];
+            all[defer].deferred_at = Some("2026-10-01T00:00:00Z".into());
+            let lines = Lines::of(&all);
+            let epic_of = Handing::over(&all, &lines);
+            let ladder = DueLadder::over(&lines, &epic_of);
+            let expected = want.map(|at: usize| all[at].id.as_str());
+            assert_eq!(ladder.ceiling(&all[3]).map(|c| c.above.id.as_str()), expected, "deferred {defer}");
+            assert_eq!(ladder.open_ceiling(&all[3]).map(|c| c.above.id.as_str()), expected, "priority ceiling");
+            assert_eq!(first_beyond(&all, &[all[3].id.as_str()]).map(|(_, c)| c.above.id.as_str()), expected);
+        }
     }
 
     /// 기한이 부르는 우선순위(moai-dr8a.7rs) — 문턱은 "이하" 고, 올리기만 한다.
