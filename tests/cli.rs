@@ -32480,3 +32480,30 @@ fn tui_no_gantt_requires_deep_and_json() {
     assert!(!out.status.success());
     assert!(text(&out).contains("--no-gantt"));
 }
+
+/// Single-row optimization must retain list semantics, especially rolled-up group archive age.
+#[test]
+fn show_one_where_agrees_with_lists_for_issues_and_groups() {
+    let s = init("one-where");
+    std::fs::write(s.path().join(".moai/config.toml"), "prefix = \"argos\"\narchive_days = 1\n").unwrap();
+    let stone = field(&ok(s.path(), &["milestone", "add", "release", "--json"]), "id");
+    let epic = field(&ok(s.path(), &["epic", "add", "bundle", "--milestone", &stone, "--json"]), "id");
+    let member = add(s.path(), &["live member", "-e", &epic]);
+    let old_epic = field(&ok(s.path(), &["epic", "add", "old bundle", "--json"]), "id");
+    let old = add(s.path(), &["old member", "-e", &old_epic]);
+    ok_at(s.path(), "2026-01-01T00:00:00Z", &["mv", &old, "done"]);
+    // The epic's stored column is todo; its members make it archived.
+    let fields = "id,derived_milestone,archived";
+    let list: Vec<serde_json::Value> =
+        serde_json::from_str(&ok(s.path(), &["show", "--archived", "--json", "--fields", fields])).unwrap();
+    for id in [&member, &old, &old_epic, &stone] {
+        let row = list.iter().find(|r| r["id"] == id.as_str()).unwrap();
+        for args in [vec!["show", id, "--json"], vec!["show", id, "--json", "--fields", fields]] {
+            let one: serde_json::Value = serde_json::from_str(&ok(s.path(), &args)).unwrap();
+            for key in ["derived_milestone", "archived"] {
+                assert_eq!(one.get(key), row.get(key), "{id}: {key}");
+            }
+        }
+    }
+    assert_eq!(list.iter().find(|r| r["id"] == old_epic).unwrap()["archived"], true);
+}
