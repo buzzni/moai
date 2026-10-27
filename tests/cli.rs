@@ -14320,6 +14320,104 @@ fn an_add_whose_journal_fails_succeeds_and_says_so() {
     assert!(err.contains("moai note") && err.contains(&id), "잃은 말을 안 댔다 — {err}");
 }
 
+/// 정규화만 한 쓰기는 `-m` 을 잃었으면 실패하고 다시 적을 길을 댄다(moai-jdwk.xf0).
+#[cfg(unix)]
+#[test]
+fn a_message_lost_to_the_journal_on_a_tidied_snapshot_fails() {
+    use std::os::unix::fs::PermissionsExt;
+    let s = init("tidied-message");
+    let id = add(s.path(), &["row"]);
+    let deferred = add(s.path(), &["deferred"]);
+    ok(s.path(), &["defer", &deferred, "-m", "later"]);
+    let snap = s.path().join(".moai/issues.jsonl");
+    let skew = |id: &str| {
+        let text = issues(s.path());
+        let skewed = text.replace(&format!(r#""id":"{id}","#), &format!(r#""id":"{id}","priority":2,"#));
+        assert_ne!(skewed, text);
+        std::fs::write(&snap, skewed).unwrap();
+    };
+    let journal = s.path().join(".moai/journal");
+    for e in std::fs::read_dir(&journal).unwrap() {
+        std::fs::set_permissions(e.unwrap().path(), std::fs::Permissions::from_mode(0o444)).unwrap();
+    }
+    struct RestoreDir(PathBuf, std::fs::Permissions);
+    impl Drop for RestoreDir {
+        fn drop(&mut self) {
+            let _ = std::fs::set_permissions(&self.0, self.1.clone());
+        }
+    }
+    let _restore = RestoreDir(journal.clone(), std::fs::metadata(&journal).unwrap().permissions());
+    std::fs::set_permissions(&journal, std::fs::Permissions::from_mode(0o555)).unwrap();
+    if std::fs::File::create(journal.join("probe")).is_ok() {
+        std::fs::set_permissions(&journal, std::fs::Permissions::from_mode(0o755)).unwrap();
+        return;
+    }
+    for (row, args) in [
+        (&id, vec!["mv", id.as_str(), "todo", "-m", "reason"]),
+        (&deferred, vec!["defer", deferred.as_str(), "-m", "reason"]),
+    ] {
+        skew(row);
+        let out = moai(s.path(), &args);
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert!(!out.status.success(), "잃은 말을 삼켰다: {err}");
+        assert!(err.contains("moai note") && err.contains(row), "{err}");
+        assert!(!err.contains("다시 부르지") && !err.contains("do not call it again"), "{err}");
+        assert!(!issues(s.path()).contains(r#""priority":2"#), "정규화 갈래를 안 지났다");
+    }
+    skew(&id);
+    let out = moai(s.path(), &["mv", &id, "in_progress", "-m", "reason"]);
+    std::fs::set_permissions(&journal, std::fs::Permissions::from_mode(0o755)).unwrap();
+    assert!(out.status.success(), "{}", text(&out));
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("moai note") && err.contains(&id), "{err}");
+}
+
+/// 메모는 실패해도 실제 정리 쓰기·못 읽는 줄·집기는 잃지 않는다(moai-jdwk.87u).
+#[cfg(unix)]
+#[test]
+fn a_failed_message_keeps_the_committed_write_diagnostics_and_pick() {
+    use std::os::unix::fs::PermissionsExt;
+    let s = Scratch::new("failed-message-pick");
+    let main = s.path().join("main");
+    std::fs::create_dir_all(&main).unwrap();
+    git(&main, &["init", "-q"]);
+    ok(&main, &["init", "argos"]);
+    let id = add(&main, &["row", "-s", "in_progress"]);
+    git(&main, &["add", "-A"]);
+    git(&main, &["commit", "-qm", "setup"]);
+    git(&main, &["worktree", "add", "-q", ".worktrees/worker", "-b", "worker"]);
+    let snap = main.join(".moai/issues.jsonl");
+    let text = issues(&main).replace(&format!(r#""id":"{id}","#), &format!(r#""id":"{id}","priority":2,"#));
+    std::fs::write(&snap, format!("{text}broken\n")).unwrap();
+    let journal = main.join(".moai/journal");
+    struct RestoreDir(PathBuf, std::fs::Permissions);
+    impl Drop for RestoreDir {
+        fn drop(&mut self) {
+            let _ = std::fs::set_permissions(&self.0, self.1.clone());
+        }
+    }
+    let _restore = RestoreDir(journal.clone(), std::fs::metadata(&journal).unwrap().permissions());
+    for e in std::fs::read_dir(&journal).unwrap() {
+        std::fs::set_permissions(e.unwrap().path(), std::fs::Permissions::from_mode(0o444)).unwrap();
+    }
+    std::fs::set_permissions(&journal, std::fs::Permissions::from_mode(0o555)).unwrap();
+    if std::fs::File::create(journal.join("probe")).is_ok() {
+        return;
+    }
+    let config = s.path().join("hookcfg/config.toml");
+    let out = staged(&["mv", &id, "in_progress", "--from", "in_progress", "-m", "reason"])
+        .current_dir(main.join(".worktrees/worker"))
+        .env("MOAI_CONFIG", &config)
+        .env("CLAUDE_CODE_SESSION_ID", "a")
+        .output()
+        .unwrap();
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success() && err.contains("moai note"), "{err}");
+    assert!(err.contains("그대로 두고 썼다") && err.contains("트래커"), "실제 쓰기를 알리지 않았다: {err}");
+    let recorded: String = pick_dirs(&s).iter().filter_map(|d| std::fs::read_to_string(d.join("a")).ok()).collect();
+    assert!(recorded.contains(&id), "메모 실패로 이미 집은 기록을 잃었다: {recorded}");
+}
+
 /// **못 읽는 줄이 산 줄의 id 를 들고 있으면 `status` 가 중복이라 말한다.**
 /// 줄 번호만 보던 때는 `읽을 수 없는 줄` 만 서고 중복은 안 서서, 그 줄이
 /// 읽히게 되는 날에야 모든 쓰기가 막혔다(moai-4dk4). 쓰기는 여전히 안 막는다.
@@ -17429,6 +17527,23 @@ fn another_running_session_frees_rows_nobody_recorded() {
     assert!(!why.contains(&loose) && !why.contains(&other), "일꾼에게 남의 줄 밑 리뷰를 시킨다 — {why}");
 }
 
+/// 좁힌 초점이 규칙 1 대신 규칙 2 를 내도, 빠진 줄의 까닭을 거절 자리에서 댄다(moai-jdwk.mvy).
+#[test]
+fn a_refusal_says_why_an_unrecorded_row_of_yours_is_not_counted() {
+    let s = init("unrecorded-refusal");
+    let loose = add(s.path(), &["unrecorded"]);
+    let other = add(s.path(), &["other session"]);
+    let pick = format!("moai mv {other} in_progress --from todo");
+    let out = call(&s, "Bash", &format!("{{\"command\":{}}}", json_str(&pick)), "b");
+    assert!(out.trim().is_empty(), "{out}");
+    ok(s.path(), &["mv", &other, "in_progress", "--from", "todo"]);
+    ok(s.path(), &["mv", &loose, "in_progress", "--from", "todo"]);
+    let why = refusal(&call(&s, "Bash", "{\"command\":\"moai add x && echo y >> src/a.rs\"}", "a"));
+    assert!(why.contains("Rule 2") && why.contains(&loose), "{why}");
+    assert!(why.contains("Not counted as this session's work:") && why.contains("in the last 12 hours"), "{why}");
+    assert!(!why.contains("Why this session holds them:"), "{why}");
+}
+
 /// **제 이름 워크트리가 옆 에픽 워크트리를 이긴다**(moai-m62u·moai-cle9, 사용자 결정). 에픽
 /// 워크트리가 살아 있거나 머지하고 안 치운 채 그 에픽에 새 멤버를 집으면, 그 멤버를 제 이름
 /// 워크트리에서 하는 세션이 에픽 이름에 초점을 뺏겨 규칙 2 에 막혔다. 워크트리 목록을 읽는 배선
@@ -17643,6 +17758,51 @@ fn moai_mv_records_its_own_pick_for_the_session() {
     assert!(!recorded("a").contains(&moved), "옮긴 남의 줄을 --take 없이 제 집기로 적었다\n{}", recorded("a"));
 }
 
+/// 시작 칸에 바로 세운 제 일도 `mv` 처럼 제 집기로 적는다(moai-jdwk.323).
+#[test]
+fn moai_add_into_a_started_column_records_its_own_pick() {
+    let s = init("addpicks");
+    let theirs = add(s.path(), &["other session"]);
+    let pick = format!("moai mv {theirs} in_progress --from todo");
+    assert!(call(&s, "Bash", &format!("{{\"command\":{}}}", json_str(&pick)), "b").trim().is_empty());
+    ok(s.path(), &["mv", &theirs, "in_progress", "--from", "todo"]);
+    let cfg = s.path().join("hookcfg/config.toml");
+    let cfg = cfg.to_str().unwrap();
+    let env = [("MOAI_CONFIG", cfg), ("CLAUDE_CODE_SESSION_ID", "a")];
+    let mine = field(&ok_env(s.path(), NOW, &env, &["add", "mine", "-s", "in_progress", "--json"]), "id");
+    let held = hook_out(&s, "stop", &event(&s, "a"));
+    assert!(held.contains(&format!("moai mv {mine}")), "{held}");
+    assert!(!held.contains(&theirs), "{held}");
+    let recorded = |session: &str| -> String {
+        pick_dirs(&s).iter().filter_map(|d| std::fs::read_to_string(d.join(session)).ok()).collect()
+    };
+    // `-q` 도 일찍 돌아가기 전에 적는다.
+    let quiet = ok_env(s.path(), NOW, &env, &["add", "quiet", "-s", "review", "-q"]);
+    assert!(recorded("a").contains(quiet.trim()));
+    for args in [
+        vec!["add", "theirs", "-s", "in_progress", "-a", "Other (other@example.com)", "--json"],
+        vec!["add", "unowned", "-s", "in_progress", "-a", "none", "--json"],
+        vec!["epic", "add", "group", "-s", "in_progress", "--json"],
+        vec!["milestone", "add", "release", "-s", "in_progress", "--json"],
+        vec!["backlog", "add", "later", "-s", "in_progress", "--json"],
+        vec!["add", "todo", "--json"],
+        vec!["add", "done", "-s", "done", "--json"],
+    ] {
+        let id = field(&ok_env(s.path(), NOW, &env, &args), "id");
+        assert!(!recorded("a").contains(&id), "non-pick recorded: {args:?}");
+        if matches!(args[0], "epic" | "milestone" | "backlog") {
+            ok_env(s.path(), NOW, &env, &["mv", &id, "review"]);
+            ok_env(s.path(), NOW, &env, &["mv", &id, "review"]);
+            assert!(!recorded("a").contains(&id), "mv recorded non-work: {args:?}");
+        }
+    }
+    for (session, agent) in [("c", "CODEX_THREAD_ID"), ("g", "ANTIGRAVITY_CONVERSATION_ID")] {
+        let env = [("MOAI_CONFIG", cfg), ("CLAUDE_CODE_SESSION_ID", session), (agent, "other-agent")];
+        ok_env(s.path(), NOW, &env, &["add", "other agent", "-s", "in_progress", "--json"]);
+        assert!(recorded(session).is_empty(), "inherited session recorded: {agent}");
+    }
+}
+
 /// **다른 세션이 부모를 집어도 이 세션이 집은 자식은 제 것이다**(리뷰 moai-3k2d.1df). 모르는 줄은 그 밑의
 /// 자식까지 빼는데, 남이 부모를 집고 이 세션이 `--parent` 로 세운 리뷰 줄을 집으면 그 리뷰까지 빠져
 /// `Stop` 이 안 붙들고, 좁혀 다시 본 판정이 `-m` 없는 리뷰 닫기를 넘겼다.
@@ -17750,6 +17910,44 @@ fn a_row_this_session_picked_stays_its_own_beside_its_epics_worktree() {
     );
     let held = at("c", "stop", None);
     assert!(held.trim().is_empty(), "옆 워크트리의 일로 남을 붙든다\n{held}");
+}
+
+/// 옛 바이너리·셸 변수로 집어 기록이 빠진 리뷰를 거절 자리에서 되살린다(moai-jdwk.1a5).
+#[test]
+fn a_review_picked_outside_the_hook_passes_rule_3_beside_its_epics_worktree() {
+    let s = Scratch::new("review-outside-hook");
+    let main = s.path().join("main");
+    std::fs::create_dir_all(&main).unwrap();
+    git(&main, &["init", "-q"]);
+    ok(&main, &["init", "argos"]);
+    let epic = field(&ok(&main, &["epic", "add", "epic", "--json"]), "id");
+    let review = field(
+        &ok(&main, &["add", "review", "-t", "review", "--parent", &epic, "-b", "write path and hooks", "--json"]),
+        "id",
+    );
+    git(&main, &["add", "-A"]);
+    git(&main, &["commit", "-q", "-m", "setup"]);
+    git(&main, &["worktree", "add", "-q", &format!(".worktrees/{epic}"), "-b", &format!("worktree-{epic}")]);
+    ok(&main, &["mv", &review, "in_progress", "--from", "todo"]);
+    let skill = |session: &str| {
+        let input = format!(
+            "{{\"session_id\":{},\"cwd\":{},\"tool_name\":\"Skill\",\"tool_input\":{{\"skill\":\"code-review\",\"args\":\"max\"}}}}",
+            json_str(session),
+            json_str(&main.display().to_string())
+        );
+        String::from_utf8(hook_in(&s, &main, "pre-tool-use", &input).stdout).unwrap()
+    };
+    let why = refusal(&skill("a"));
+    let command = format!("moai mv {review} in_progress --from in_progress");
+    assert!(why.contains(&command) && why.contains("sibling worktree"), "{why}");
+    let cfg = s.path().join("hookcfg/config.toml");
+    let env = [("MOAI_CONFIG", cfg.to_str().unwrap()), ("CLAUDE_CODE_SESSION_ID", "a")];
+    ok_env(&main, NOW, &env, &["mv", &review, "in_progress", "--from", "in_progress"]);
+    let allowed = skill("a");
+    assert!(allowed.trim().is_empty(), "{allowed}");
+    let why = refusal(&skill("c"));
+    assert!(why.contains("another session picked it up last"), "{why}");
+    assert!(!why.contains(&command), "남의 집기를 뺏으라고 했다: {why}");
 }
 
 /// **루트에 선 세션이 워크트리가 선 일을 쥐면 루트 체크아웃의 쓰기를 그 워크트리로 돌린다**(moai-9js2.3xn, 리뷰

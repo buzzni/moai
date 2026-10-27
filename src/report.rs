@@ -936,6 +936,12 @@ pub fn is_work(i: &Issue) -> bool {
     i.kind == Kind::Issue
 }
 
+/// 쓰기가 이 세션의 집기로 적을 줄 — 내 담당의 일이며 시작 칸에 섰다.
+/// `add` 와 `mv` 의 두 갈래가 같은 뜻을 읽는다(moai-jdwk.87u).
+pub fn picks_up(i: &Issue, cfg: &Config, me: &crate::query::Me) -> bool {
+    is_work(i) && cfg.is_started(i.status.as_str()) && owner(me, i).is_none()
+}
+
 /// 지금 집고 있는 것. **첫 칸도 아니고 끝나지도 않은 일**이다.
 ///
 /// 칸 이름을 박아 두지 않는다 — 칸은 config 가 정하므로 `in_progress` 를
@@ -1155,6 +1161,11 @@ pub(crate) fn claims<'a>(ties: &Ties<'a>, names: &BTreeSet<String>, i: &'a Issue
 /// 있어(`hook::theirs`), 앞줄이 옆 워크트리의 이름 밑에 있다는 이유로 쓰기가 거절당하는 동안
 /// `status`·`show` 는 딴 말을 했다. 조상은 줄이 없으니 지도가 답이고, 그 답은 조상 줄의 것이다.
 pub(crate) fn nearness<'a>(ties: &Ties<'a>, names: &BTreeSet<String>, i: &'a Issue) -> Option<usize> {
+    nearest(ties, names, i).map(|(_, distance)| distance)
+}
+
+/// 거리와 그 거리를 준 이름 — 훅은 조상에서 물려받은 제외의 까닭도 같은 탐색으로 읽는다.
+pub(crate) fn nearest<'a, 'n>(ties: &Ties<'a>, names: &'n BTreeSet<String>, i: &'a Issue) -> Option<(&'n str, usize)> {
     // 조상은 깊어 봐야 몇 칸이다 — 에픽·마일스톤은 그 뒤에 선다.
     const EPIC: usize = 1 << 16;
     const STONE: usize = 1 << 17;
@@ -1174,8 +1185,8 @@ pub(crate) fn nearness<'a>(ties: &Ties<'a>, names: &BTreeSet<String>, i: &'a Iss
         })
         .enumerate()
         .filter_map(|(depth, id)| {
-            if names.contains(id) {
-                return Some(depth);
+            if let Some(name) = names.get(id) {
+                return Some((name.as_str(), depth));
             }
             if lost && depth > 0 && ties.lines.twinned(id) {
                 return None;
@@ -1183,18 +1194,19 @@ pub(crate) fn nearness<'a>(ties: &Ties<'a>, names: &BTreeSet<String>, i: &'a Iss
             // **손에 든 줄은 첫 걸음뿐이다.** 축마다 이 갈림을 적으면 한 축만 옮긴 판이 다시
             // 선다 — 리뷰 moai-jk2u.m60 1번이 잡은 것이 그 꼴이라 갈림을 한 번만 적는다.
             let line = (depth == 0).then_some(i);
-            if line.map_or_else(|| ties.epic_at(id), |i| ties.epic_of(i)).is_some_and(|e| names.contains(e)) {
-                return Some(EPIC);
+            if let Some(name) = line.map_or_else(|| ties.epic_at(id), |i| ties.epic_of(i)).and_then(|e| names.get(e)) {
+                return Some((name.as_str(), EPIC));
             }
             // **마일스톤은 에픽이 빗나간 뒤에 잰다.** 첫 걸음의 값은 줄에서 다시 세는 것이라
             // (`stood_at_line`), 미리 재면 에픽에서 끝나는 흔한 갈래가 그 걸음을 치르고 버린다 —
             // 리뷰 moai-jk2u.m60 6번이 `Filter::matches` 에서 잡은 그 꼴이다.
-            if line.map_or_else(|| ties.stone_at(id), |i| ties.stone_of(i)).is_some_and(|m| names.contains(m)) {
-                return Some(STONE);
+            if let Some(name) = line.map_or_else(|| ties.stone_at(id), |i| ties.stone_of(i)).and_then(|m| names.get(m))
+            {
+                return Some((name.as_str(), STONE));
             }
             None
         })
-        .min()
+        .min_by_key(|(_, distance)| *distance)
 }
 
 /// 옆 이름(`away`)이 이 줄을 **제 이름(`own`)보다 가까이** 가리키는가 — 그러면 옆의 일이다.

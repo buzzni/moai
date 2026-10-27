@@ -91,16 +91,26 @@ at is that worktree's, unless this worktree's name points at it as closely or th
 session picked it up for certain. A row another session picked up last is not
 counted, and nor — once another session has recorded a pick in the same tracker
 within the last 12 hours — is a started row no session's hook recorded picking up:
-moved in a terminal, by a session that runs without the moai hook, or through a
-shell variable such as `moai mv "$id" …`. Such an unrecorded row still counts when
-this worktree's name points at it, or when it sits under a row this session
-picked up or in that row's epic. Leaving rows out only ever lets a call through
+moved in a terminal, by a session without the moai hook, or by a moai older than
+0.29. `moai mv` and `moai add -s <started column>` record their own pick-ups for
+the Claude Code session, including when the shell expands a variable. Such an
+unrecorded row still counts when this worktree's name points at it — and so does
+a row under it that this worktree's name points at more closely — or when it
+sits under a row this session picked up or in that row's epic. Leaving rows out
+only ever lets a call through
 or holds the turn end less — it never adds a refusal. The session before a
 `/clear` counts as another session; with no other session's pick recorded in that
 window, an unrecorded row is still yours. A rule 1 or rule 3 refusal and the
 turn-end question end with one line per held row on why this session holds it —
 it picked the row up, this worktree's name points at it, or nobody recorded the
-pick — when the lines fit.
+pick — when the lines fit. A rule 3 refusal with nothing held also names up to
+three started review rows of yours it did not count, and why. When a rule 1, 2
+or 3 refusal names a started row of yours that it did not count, it says why.
+A row another session picked up last is left to that session; for an unrecorded
+review the refusal gives a line that records the pick-up without moving it.
+The reason follows the decision, including a cause inherited from an ancestor;
+a pick marked “may not have run” is described that way. A recovery command is
+offered only for a known column and a row in the tracker the command will write.
 
 ## Group
 
@@ -313,4 +323,4 @@ not pile commits onto one branch. The tracker stays in the main checkout; the
 wiki pages ride the branch. More in
 [the workflow](workflow.md#work-in-a-worktree).
 
-Decided in: moai-tllo moai-snyk moai-u5wr moai-dhxm moai-kxkw moai-jtvp moai-bth3 moai-obxm moai-9tqo moai-uzhx moai-pyi4
+Decided in: moai-tllo moai-snyk moai-u5wr moai-dhxm moai-kxkw moai-jtvp moai-bth3 moai-obxm moai-9tqo moai-uzhx moai-pyi4 moai-jdwk

@@ -38,6 +38,24 @@ does not tag — see `CONTRIBUTING.md`.
 - **Web tabs preserve each other's saved settings.** Each tab patches only the
   settings it changes, including per-project filter, sort, columns and view.
   (moai-ijjd.46f)
+- A message given to `mv -m` or `defer -m` on a row that does not move is no
+  longer lost in silence. When history cannot be written after only tidying the
+  file, the call fails and names `moai note` to write the message again. A failed
+  archive cleanup after such tidying also fails, and committed-write notices and
+  session pick-ups survive a lost message. (moai-jdwk.xf0, moai-jdwk.87u)
+- `moai add -s <started column>` records the pick-up for the Claude Code session,
+  as `moai mv` does. Both count only work owned by the actor; group and backlog
+  rows do not become session pick-ups. (moai-jdwk.323, moai-jdwk.87u)
+- Rule 3 says why a started review is not counted as yours. With nothing held,
+  the refusal names reviews it set aside and gives a quoted command to record a
+  missing pick-up when that is safe. A row excluded through an ancestor keeps
+  that ancestor's reason and is not offered as work to claim from another
+  session. (moai-jdwk.1a5, moai-jdwk.87u)
+- A refusal says why a started row of yours is not counted as this session's,
+  and a row this worktree's name points at is no longer set aside because its
+  ancestor was. Rule 2 uses the same cause for its guidance and explanation,
+  including the focus after a preceding pick-up in the command.
+  (moai-jdwk.mvy, moai-jdwk.87u)
 
 ## [0.29.1] - 2026-10-26
 
