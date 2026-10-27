@@ -158,6 +158,7 @@ fn turn_away(stream: TcpStream, lang: Lang, draining: &Arc<AtomicUsize>) {
     let _ = stream.shutdown(std::net::Shutdown::Write);
     if draining.fetch_add(1, Ordering::SeqCst) >= BUSY_DRAIN_MAX {
         draining.fetch_sub(1, Ordering::SeqCst);
+        close(&stream);
         return;
     }
     let leave = Leave(draining.clone());
