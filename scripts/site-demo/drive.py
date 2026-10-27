@@ -34,12 +34,6 @@ def scenes(repo):
             (2.0, SPC), (0.7, 'g'), (0.6, 's'),
             (2.0, '?'), (3.0, None),
         ],
-        # 한국어 달 단위: 해 아래에 숫자 달이 한 칸씩 떨어져 선다. 계획을 맞춘 Week 에서
-        # - 로 Month 로 간다. 화면 120x40, make.sh 에서 8.0초를 찍는다.
-        'release-gantt-month': [
-            (2.0, SPC), (0.7, 'g'), (0.6, 'g'),
-            (2.0, 't'), (0.8, '-'), (3.0, None),
-        ],
         # 목록 → 칸반 → 위키
         'tour': [
             (2.2, TAB), (1.4, 'j'), *key('j', 'j', 'j', 'j', 'j', 'j', gap=0.85),
@@ -87,7 +81,9 @@ def scenes(repo):
             (3.5, None),
         ],
         # v0.27.0 의 소식(moai-0fai): 간트 머리의 달 이름이 화면의 말을 따른다. make.sh 가 DEMO_LANG=ko 로 찍는다.
-        # 계획한 날은 gantt 처럼 plan.sh 가 단다. 주 걸음(-)으로 밀면 머리에 달 이름이 선다
+        # 계획한 날은 gantt 처럼 plan.sh 가 단다. 주 걸음(-)으로 밀면 머리에 달 이름이 선다.
+        # v0.30.0 의 소식(moai-87vm)도 이 장면이다: 계획을 맞춘 Week 에서 7.8초의 - 로 Month 로 가, 해 아래에 숫자 달이
+        # 한 칸씩 떨어져 선다. 그쪽 make.sh 는 9.7초를 찍는다 — 걸음을 바꾸면 두 make.sh 의 시각을 같이 본다
         'gantt-months': [
             (2.0, SPC), (0.7, 'g'), (0.6, 'g'),
             (2.5, 't'), (2.0, '-'),
@@ -159,8 +155,9 @@ def main():
     for k in ('MOAI_NOW', 'MOAI_ACTOR', 'MOAI_KEYS', 'NO_COLOR'):
         env.pop(k, None)
     if os.environ.get('DEMO_NOW'):
-        env['MOAI_NOW'] = os.environ['DEMO_NOW']
-    env['TZ'] = 'UTC'
+        # seed.sh 가 날을 맞춘 자(GNU date)와 꼴(RFC3339 UTC)로 — moai 는 MOAI_NOW 를 글자 그대로 저장된 시각과 견준다
+        env['MOAI_NOW'] = subprocess.run(['date', '-u', '-d', os.environ['DEMO_NOW'], '+%Y-%m-%dT%H:%M:%SZ'],
+                                         check=True, capture_output=True, text=True).stdout.strip()
     pid, fd = pty.fork()
     if pid == 0:
         # 크기는 자식이 exec 하기 전에 제 터미널에 건다 — 부모가 나중에 걸면 TUI 가 0×0 을 먼저 읽을 수 있다

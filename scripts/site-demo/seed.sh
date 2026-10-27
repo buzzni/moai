@@ -28,7 +28,9 @@ AIKO='Aiko Tanaka (aiko@example.com)'
 SAM='Sam Rivera (sam@example.com)'
 
 # DEMO_NOW 를 주면 소식 그림을 나중에 다시 지어도 같은 날에 선다. 기본은 녹화하는 오늘이다.
-demo_now=${DEMO_NOW:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}
+# 꼴은 여기서 RFC3339 UTC 로 맞춘다 — moai 는 MOAI_NOW 를 글자 그대로 저장된 시각과 견주니, drive.py·plan.sh 도
+# 같은 자(GNU date)로 같은 꼴에 맞춘다. 못 읽는 값은 여기서 멈춘다(아래 "$(day …)" 처럼 인자 안의 치환은 set -e 가 못 잡는다)
+demo_now=$(date -u -d "${DEMO_NOW:-now}" +%Y-%m-%dT%H:%M:%SZ)
 ago() { date -u -d "$demo_now -$1 days -${2:-0} hours" +%Y-%m-%dT%H:%M:%SZ; }
 day() { date -u -d "$demo_now $1 days" +%F; }
 

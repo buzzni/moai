@@ -22,6 +22,9 @@ mkdirSync(outDir, { recursive: true })
 // 이 저장소의 빌드가 기본이다. 상대 경로는 절대 경로로 굳힌다 — 서버는 데모 저장소에서 뜬다
 const moai = path.resolve(process.env.MOAI || path.join(path.dirname(new URL(import.meta.url).pathname), '../../target/release/moai'))
 const SIZE = { width: 1440, height: 900 }
+// DEMO_NOW 는 seed.sh·plan.sh 의 날을 옮기지만 이 녹화는 그날로 못 간다 — 서버는 MOAI_NOW 를 지우고, 페이지는 브라우저의
+// 시계로 오늘을 그린다. 그대로 찍으면 막대와 나이가 말없이 몇 날씩 어긋나니 멈춘다
+if (process.env.DEMO_NOW) throw new Error('record-web.mjs: DEMO_NOW is for the TUI scenes only; unset it and seed again')
 
 // 녹화하는 사람의 환경이 화면에 새지 않게: 정체·키·색·말·시간대는 데모의 것으로
 function demoEnv() {

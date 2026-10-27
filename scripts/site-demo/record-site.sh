@@ -35,8 +35,9 @@ encoders=$("$FFMPEG" -hide_banner -encoders 2>/dev/null || true)
 MOAI=${MOAI:-$root/target/release/moai}
 case $MOAI in */*) MOAI=$(realpath -- "$MOAI") ;; *) MOAI=$(command -v -- "$MOAI" || true) ;; esac
 [ -f "$MOAI" ] && [ -x "$MOAI" ] || { echo "record-site.sh: no moai binary at ${MOAI:-PATH}" >&2; exit 1; }
-# 사이트의 미디어는 화면의 말이 영어다 — 릴리스 소식을 찍던 DEMO_LANG 이 남아 있어도 따르지 않는다
-unset DEMO_LANG
+# 사이트의 미디어는 화면의 말이 영어이고 날은 찍는 오늘이다 — 릴리스 소식을 찍던 DEMO_LANG·DEMO_NOW 가 남아 있어도
+# 따르지 않는다. DEMO_NOW 는 seed.sh 의 날을 옮기는데 record-web.mjs 의 브라우저 시계는 못 따라간다
+unset DEMO_LANG DEMO_NOW
 export MOAI TZ=UTC
 out=$(mkdir -p "$out" && cd "$out" && pwd)
 tmp=$(mktemp -d)
