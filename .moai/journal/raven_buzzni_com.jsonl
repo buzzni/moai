@@ -8612,3 +8612,129 @@
 {"ts":"2026-10-26T17:54:55Z","id":"moai-k4vr","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"v0.29.1 released; tag pushed by hand"}
 {"ts":"2026-10-27T02:18:31Z","id":"moai-p0wz","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Resolved 2026-10-27: the person added RavenBuzzni as a required reviewer on environment release (protection_rules now required_reviewers). The next merge into main gets tagged after one approval."}
 {"ts":"2026-10-27T02:18:31Z","id":"moai-p0wz","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"environment release 에 승인자 설정됨"}
+{"ts":"2026-10-27T02:39:40Z","id":"moai-e47m","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"v0.29.2"}
+{"ts":"2026-10-27T02:39:48Z","id":"moai-ijjd","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"간트 후속 — 웹 간트 그리기·쓰기·시간대, TUI 간트 옆 워크트리"}
+{"ts":"2026-10-27T02:39:48Z","id":"moai-jdwk","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"쓰기 경로·훅 — 저널 실패 글 손실, add -s 집기, 규칙 2·3 거절"}
+{"ts":"2026-10-27T02:39:49Z","id":"moai-n8po","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"시험 안정 — 부하 connect, python3·BASH_ENV, 가짜 posted 줄"}
+{"ts":"2026-10-27T02:39:49Z","id":"moai-lj8g","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"문구·도움말 잔손질 — tui 도움말, wip 줄, 키 목록, 기한"}
+{"ts":"2026-10-27T02:39:50Z","id":"moai-1m21","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"감독·복구 스킬 글 — <root> 싸기, tmux 칸 줄 한 벌, /resume 기록"}
+{"ts":"2026-10-27T02:39:50Z","id":"moai-b4dc","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"내부 정리·성능 — 워크트리 두 번 찾기, 스킬 복사, PATH, 위키 순위"}
+{"ts":"2026-10-27T02:39:51Z","id":"moai-2g1f","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"site — 데모 TZ 고정·미디어 스크립트, 할 일 목록 렌더"}
+{"ts":"2026-10-27T02:40:09Z","id":"moai-ijjd.e8o","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"web 간트 창을 확대·맞춤에서 두 번, 가장자리마다 통째로 짓는다"}
+{"ts":"2026-10-27T02:40:09Z","id":"moai-ijjd.e8o","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Unfolded from moai-cast — web 간트 창 그리기의 군더더기 — 확대·맞춤에서 두 번 짓기, 가장자리마다 통째로 다시 짓기"}
+{"ts":"2026-10-27T02:40:09Z","id":"moai-cast","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"Unfolded into moai-ijjd as moai-ijjd.e8o"}
+{"ts":"2026-10-27T02:40:09Z","id":"moai-ijjd.qe4","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"web 간트: 쓰기를 기다리는 동안 창을 다시 지으면 놓은 막대가 옛 날로 돌아간다"}
+{"ts":"2026-10-27T02:40:09Z","id":"moai-ijjd.qe4","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Unfolded from moai-tmam — web 간트: 쓰기를 기다리는 동안 창을 다시 지으면 놓은 막대가 옛 날로 돌아간다"}
+{"ts":"2026-10-27T02:40:09Z","id":"moai-tmam","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"Unfolded into moai-ijjd as moai-ijjd.qe4"}
+{"ts":"2026-10-27T02:40:09Z","id":"moai-ijjd.h55","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"web 간트의 되돌리는 줄이 페이지가 읽은 날로 지어진다"}
+{"ts":"2026-10-27T02:40:09Z","id":"moai-ijjd.h55","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Unfolded from moai-jtnk — web 간트의 되돌리는 줄이 페이지가 읽은 날로 지어진다"}
+{"ts":"2026-10-27T02:40:09Z","id":"moai-jtnk","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"Unfolded into moai-ijjd as moai-ijjd.h55"}
+{"ts":"2026-10-27T02:40:09Z","id":"moai-ijjd.i7v","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"/api/tree 가 간트 탭이 안 보일 때도 간트를 센다"}
+{"ts":"2026-10-27T02:40:09Z","id":"moai-ijjd.i7v","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Unfolded from moai-h1u1 — web: /api/tree 가 간트 탭이 안 보일 때도 report::gantt 를 센다"}
+{"ts":"2026-10-27T02:40:09Z","id":"moai-h1u1","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"Unfolded into moai-ijjd as moai-ijjd.i7v"}
+{"ts":"2026-10-27T02:40:09Z","id":"moai-ijjd.7af","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"web 거르개는 서버 시간대, 간트 늦음은 페이지 시간대로 잰다"}
+{"ts":"2026-10-27T02:40:09Z","id":"moai-ijjd.7af","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Unfolded from moai-uwy4 — web 거르개는 서버 시간대, 간트 늦음은 페이지 시간대로 잰다"}
+{"ts":"2026-10-27T02:40:09Z","id":"moai-uwy4","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"Unfolded into moai-ijjd as moai-ijjd.7af"}
+{"ts":"2026-10-27T02:40:10Z","id":"moai-ijjd.46f","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"web 탭 둘이 저장한 보기 설정을 서로 덮는다"}
+{"ts":"2026-10-27T02:40:10Z","id":"moai-ijjd.46f","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Unfolded from moai-u4ja — web: 탭 둘이 열리면 저장한 보기 설정을 서로 덮는다"}
+{"ts":"2026-10-27T02:40:10Z","id":"moai-u4ja","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"Unfolded into moai-ijjd as moai-ijjd.46f"}
+{"ts":"2026-10-27T02:40:10Z","id":"moai-ijjd.5u9","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"간트 달 확대에서 한국어 달 이름 머리가 붙는다"}
+{"ts":"2026-10-27T02:40:10Z","id":"moai-ijjd.5u9","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Unfolded from moai-y7km — 간트 달 확대에서 한국어 달 이름 머리가 붙는다"}
+{"ts":"2026-10-27T02:40:10Z","id":"moai-y7km","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"Unfolded into moai-ijjd as moai-ijjd.5u9"}
+{"ts":"2026-10-27T02:40:10Z","id":"moai-ijjd.r7u","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"TUI 간트도 옆 워크트리에만 있는 줄을 옮기게 둔다"}
+{"ts":"2026-10-27T02:40:10Z","id":"moai-ijjd.r7u","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Unfolded from moai-khku — TUI 간트도 옆 워크트리에만 있는 줄을 옮기게 둔다"}
+{"ts":"2026-10-27T02:40:10Z","id":"moai-khku","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"Unfolded into moai-ijjd as moai-ijjd.r7u"}
+{"ts":"2026-10-27T02:40:10Z","id":"moai-jdwk.xf0","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"mv -m·defer -m 의 글이 저널 실패에 말없이 사라진다"}
+{"ts":"2026-10-27T02:40:10Z","id":"moai-jdwk.xf0","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Unfolded from moai-iovx — mv -m·defer -m 의 글이 저널 실패에 말없이 사라진다 — write_locked 가 정규화만 한 쓰기를 wrote 로 센다"}
+{"ts":"2026-10-27T02:40:10Z","id":"moai-iovx","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"Unfolded into moai-jdwk as moai-jdwk.xf0"}
+{"ts":"2026-10-27T02:40:10Z","id":"moai-jdwk.323","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"add -s <시작 칸> 이 세션 집기를 안 적는다"}
+{"ts":"2026-10-27T02:40:10Z","id":"moai-jdwk.323","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Unfolded from moai-zyvk — moai add -s <started column> records no session pick-up"}
+{"ts":"2026-10-27T02:40:10Z","id":"moai-zyvk","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"Unfolded into moai-jdwk as moai-jdwk.323"}
+{"ts":"2026-10-27T02:40:10Z","id":"moai-jdwk.1a5","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"훅 규칙 3 이 서브에이전트 일꾼이 띄운 리뷰를 거절한다"}
+{"ts":"2026-10-27T02:40:10Z","id":"moai-jdwk.1a5","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Unfolded from moai-m6zg — hook rule 3 refuses a review subagent raised by a subagent worker"}
+{"ts":"2026-10-27T02:40:10Z","id":"moai-m6zg","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"Unfolded into moai-jdwk as moai-jdwk.1a5"}
+{"ts":"2026-10-27T02:40:11Z","id":"moai-jdwk.mvy","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"붐비는 판의 좁힘이 바꾼 거절에 까닭이 안 선다"}
+{"ts":"2026-10-27T02:40:11Z","id":"moai-jdwk.mvy","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Unfolded from moai-6l4l — 붐비는 판의 좁힘이 바꾼 거절에 까닭이 안 선다"}
+{"ts":"2026-10-27T02:40:11Z","id":"moai-6l4l","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"Unfolded into moai-jdwk as moai-jdwk.mvy"}
+{"ts":"2026-10-27T02:40:11Z","id":"moai-jdwk.rat","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"딸린 워크트리 안에서 띄운 세션에 moai 훅이 안 선다"}
+{"ts":"2026-10-27T02:40:11Z","id":"moai-jdwk.rat","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Unfolded from moai-pkvd — 딸린 워크트리 안에서 띄운 세션에는 moai 훅이 안 선다"}
+{"ts":"2026-10-27T02:40:11Z","id":"moai-pkvd","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"Unfolded into moai-jdwk as moai-jdwk.rat"}
+{"ts":"2026-10-27T02:40:11Z","id":"moai-n8po.7e1","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"web 바쁨 시험이 전체 시험 중 connect 에서 깨진다"}
+{"ts":"2026-10-27T02:40:11Z","id":"moai-n8po.7e1","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Unfolded from moai-mhbh — web_answers_busy_past_the_cap_and_frees_the_slots 가 전체 시험 중 connect 에서 깨진다"}
+{"ts":"2026-10-27T02:40:11Z","id":"moai-mhbh","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"Unfolded into moai-n8po as moai-n8po.7e1"}
+{"ts":"2026-10-27T02:40:11Z","id":"moai-n8po.v1r","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"python3 있음 검사가 실행만 보고 성공은 안 본다"}
+{"ts":"2026-10-27T02:40:11Z","id":"moai-n8po.v1r","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Unfolded from moai-dmaa — python3 있음 검사가 실행만 보고 성공은 안 본다 — guide.rs 시험 두 곳"}
+{"ts":"2026-10-27T02:40:11Z","id":"moai-dmaa","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"Unfolded into moai-n8po as moai-n8po.v1r"}
+{"ts":"2026-10-27T02:40:11Z","id":"moai-n8po.oj4","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"단위 시험의 자식 bash 가 BASH_ENV 를 읽는다"}
+{"ts":"2026-10-27T02:40:11Z","id":"moai-n8po.oj4","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Unfolded from moai-b2pp — src 단위 시험의 자식 bash 가 BASH_ENV 를 읽는다 — 공용 깨끗한 셸 도우미"}
+{"ts":"2026-10-27T02:40:11Z","id":"moai-b2pp","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"Unfolded into moai-n8po as moai-n8po.oj4"}
+{"ts":"2026-10-27T02:40:11Z","id":"moai-n8po.hax","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"release-post 시험이 CI 로그에 가짜 posted 줄을 찍는다"}
+{"ts":"2026-10-27T02:40:11Z","id":"moai-n8po.hax","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Unfolded from moai-7srz — release-post 시험이 CI 로그에 가짜 posted 줄을 찍는다"}
+{"ts":"2026-10-27T02:40:11Z","id":"moai-7srz","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"Unfolded into moai-n8po as moai-n8po.hax"}
+{"ts":"2026-10-27T02:40:11Z","id":"moai-lj8g.w3a","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"tui 한 줄 도움말이 아직 the one write to an issue is SPC n 이다"}
+{"ts":"2026-10-27T02:40:11Z","id":"moai-lj8g.w3a","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Unfolded from moai-ya5o — tui 한 줄 도움말이 아직 \"the one write to an issue is SPC n\" 이다"}
+{"ts":"2026-10-27T02:40:11Z","id":"moai-ya5o","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"Unfolded into moai-lj8g as moai-lj8g.w3a"}
+{"ts":"2026-10-27T02:40:11Z","id":"moai-lj8g.vnc","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"wip_overload 줄의 묶음 수와 id 목록이 안 맞아 보인다"}
+{"ts":"2026-10-27T02:40:11Z","id":"moai-lj8g.vnc","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Unfolded from moai-dirm — 보드의 wip_overload 줄이 묶음 수와 줄 id 목록을 함께 내 수가 안 맞아 보인다"}
+{"ts":"2026-10-27T02:40:11Z","id":"moai-dirm","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"Unfolded into moai-lj8g as moai-lj8g.vnc"}
+{"ts":"2026-10-27T02:40:12Z","id":"moai-lj8g.oln","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"키 목록 창 후속 — SPC q·하드코딩 범위·F1·붙여넣기·stats/wiki 의 ?"}
+{"ts":"2026-10-27T02:40:12Z","id":"moai-lj8g.oln","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Unfolded from moai-6b2b — 키 목록 창(PR #50) 리뷰 후속 — SPC q·하드코딩 범위·F1·붙여넣기·stats/wiki 의 ?"}
+{"ts":"2026-10-27T02:40:12Z","id":"moai-6b2b","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"Unfolded into moai-lj8g as moai-lj8g.oln"}
+{"ts":"2026-10-27T02:40:12Z","id":"moai-lj8g.eea","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"Codex 보고 머리 Unfolded: 와 promote 노트가 낱말이 겹친다"}
+{"ts":"2026-10-27T02:40:12Z","id":"moai-lj8g.eea","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Unfolded from moai-a9sz — Codex 보고 머리 Unfolded: 와 promote 노트 Unfolded from/into 가 낱말이 겹친다"}
+{"ts":"2026-10-27T02:40:12Z","id":"moai-a9sz","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"Unfolded into moai-lj8g as moai-lj8g.eea"}
+{"ts":"2026-10-27T02:40:12Z","id":"moai-lj8g.wxt","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"TUI 헤더의 현재 프로젝트를 빛줄기만이 아니라 글리프로도 보인다"}
+{"ts":"2026-10-27T02:40:12Z","id":"moai-lj8g.wxt","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Unfolded from moai-93un — TUI 헤더가 현재 프로젝트를 빛줄기(shimmer)만으로 표시한다 — 글리프를 더해 웹(▸ 이름)과 맞춘다"}
+{"ts":"2026-10-27T02:40:12Z","id":"moai-93un","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"Unfolded into moai-lj8g as moai-lj8g.wxt"}
+{"ts":"2026-10-27T02:40:12Z","id":"moai-lj8g.qrb","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"기한 잔손질 — +3d 거절문·미리보기 날짜·미룬 마일스톤·전각 숫자"}
+{"ts":"2026-10-27T02:40:12Z","id":"moai-lj8g.qrb","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Unfolded from moai-agsg — 기한 잔손질 — +3d 거절문, 경고 미리보기의 날짜, 미룬 마일스톤의 기한, 전각 숫자 @"}
+{"ts":"2026-10-27T02:40:12Z","id":"moai-agsg","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"Unfolded into moai-lj8g as moai-lj8g.qrb"}
+{"ts":"2026-10-27T02:40:12Z","id":"moai-1m21.cqb","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"스킬의 나머지 줄도 <root> 를 싼다"}
+{"ts":"2026-10-27T02:40:12Z","id":"moai-1m21.cqb","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Unfolded from moai-og0h — 스킬의 나머지 줄도 <root> 를 싼다 — bash <script> <root>, moai -C <root>, 따옴표·$ 든 경로"}
+{"ts":"2026-10-27T02:40:12Z","id":"moai-og0h","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"Unfolded into moai-1m21 as moai-1m21.cqb"}
+{"ts":"2026-10-27T02:40:12Z","id":"moai-1m21.125","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"tmux 칸 여는 줄 세 벌을 한 조각으로"}
+{"ts":"2026-10-27T02:40:12Z","id":"moai-1m21.125","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Unfolded from moai-yhs1 — tmux 칸 여는 줄이 세 벌 — 한 조각으로 묶을지"}
+{"ts":"2026-10-27T02:40:12Z","id":"moai-yhs1","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"Unfolded into moai-1m21 as moai-1m21.125"}
+{"ts":"2026-10-27T02:40:12Z","id":"moai-1m21.hxm","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"moai-recover: 다른 대화로 /resume 한 기록이 후보로 남는다"}
+{"ts":"2026-10-27T02:40:12Z","id":"moai-1m21.hxm","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Unfolded from moai-zouz — moai-recover: a record left by /resume to another conversation stays a candidate"}
+{"ts":"2026-10-27T02:40:12Z","id":"moai-zouz","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"Unfolded into moai-1m21 as moai-1m21.hxm"}
+{"ts":"2026-10-27T02:40:12Z","id":"moai-b4dc.gqd","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"read --worktree 가 워크트리를 두 번 찾는다"}
+{"ts":"2026-10-27T02:40:12Z","id":"moai-b4dc.gqd","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Unfolded from moai-33ez — read --worktree 가 워크트리를 두 번 찾는다 — gather 와 gather_unmarked"}
+{"ts":"2026-10-27T02:40:12Z","id":"moai-33ez","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"Unfolded into moai-b4dc as moai-b4dc.gqd"}
+{"ts":"2026-10-27T02:40:12Z","id":"moai-b4dc.6qe","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"skill::picked 가 스킬 글을 트리마다 복사한다"}
+{"ts":"2026-10-27T02:40:12Z","id":"moai-b4dc.6qe","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Unfolded from moai-sfrg — skill::picked 가 스킬 글을 트리마다 복사한다"}
+{"ts":"2026-10-27T02:40:12Z","id":"moai-sfrg","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"Unfolded into moai-b4dc as moai-b4dc.6qe"}
+{"ts":"2026-10-27T02:40:13Z","id":"moai-b4dc.5u5","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"hook.rs·tui.rs 가 PATH 를 따로 훑는다 — cmd::find_on_path 로"}
+{"ts":"2026-10-27T02:40:13Z","id":"moai-b4dc.5u5","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Unfolded from moai-a6mb — hook.rs·tui.rs 가 PATH 를 따로 훑는다 — cmd::find_on_path 로"}
+{"ts":"2026-10-27T02:40:13Z","id":"moai-a6mb","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"Unfolded into moai-b4dc as moai-b4dc.5u5"}
+{"ts":"2026-10-27T02:40:13Z","id":"moai-b4dc.j8c","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"config 의 naming 낱말을 Naming 메서드 하나로"}
+{"ts":"2026-10-27T02:40:13Z","id":"moai-b4dc.j8c","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Unfolded from moai-zmzu — moai config 의 naming 낱말을 Naming 메서드 하나로"}
+{"ts":"2026-10-27T02:40:13Z","id":"moai-zmzu","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"Unfolded into moai-b4dc as moai-b4dc.j8c"}
+{"ts":"2026-10-27T02:40:13Z","id":"moai-b4dc.0ia","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"show --fields 가 중첩 객체의 키 차례를 바꾼다"}
+{"ts":"2026-10-27T02:40:13Z","id":"moai-b4dc.0ia","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Unfolded from moai-69pl — show --fields 가 중첩 객체의 키 차례를 바꾼다"}
+{"ts":"2026-10-27T02:40:13Z","id":"moai-69pl","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"Unfolded into moai-b4dc as moai-b4dc.0ia"}
+{"ts":"2026-10-27T02:40:13Z","id":"moai-b4dc.9ub","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"show <id> --json 이 저장소 전체 Where 를 짓는다"}
+{"ts":"2026-10-27T02:40:13Z","id":"moai-b4dc.9ub","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Unfolded from moai-t342 — show <id> --json 이 저장소 전체 Where 를 짓는 값"}
+{"ts":"2026-10-27T02:40:13Z","id":"moai-t342","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"Unfolded into moai-b4dc as moai-b4dc.9ub"}
+{"ts":"2026-10-27T02:40:13Z","id":"moai-b4dc.0ss","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"위키 순위를 체크아웃마다 한 벌로"}
+{"ts":"2026-10-27T02:40:13Z","id":"moai-b4dc.0ss","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Unfolded from moai-9dwl — 위키 순위를 체크아웃마다 한 벌로 — 탐색기 상세·/·/api/wiki-search 가 매번 위키 전부를 다시 매긴다"}
+{"ts":"2026-10-27T02:40:13Z","id":"moai-9dwl","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"Unfolded into moai-b4dc as moai-b4dc.0ss"}
+{"ts":"2026-10-27T02:40:13Z","id":"moai-2g1f.xjd","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"site-demo: 데모 환경의 TZ 고정과 안내 미디어를 다시 짓는 스크립트 하나"}
+{"ts":"2026-10-27T02:40:13Z","id":"moai-2g1f.xjd","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Unfolded from moai-fex4 — site-demo: pin TZ in the demo env and one script that rebuilds the guide media"}
+{"ts":"2026-10-27T02:40:13Z","id":"moai-fex4","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"Unfolded into moai-2g1f as moai-2g1f.xjd"}
+{"ts":"2026-10-27T02:40:14Z","id":"moai-2g1f.epr","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"site 의 마크다운 렌더러가 할 일 목록 - [ ] 을 안 그린다"}
+{"ts":"2026-10-27T02:40:14Z","id":"moai-2g1f.epr","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Unfolded from moai-9iov — site 의 마크다운 렌더러(mdhtml)가 할 일 목록 - [ ] 을 그리지 않는다"}
+{"ts":"2026-10-27T02:40:14Z","id":"moai-9iov","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"Unfolded into moai-2g1f as moai-2g1f.epr"}
+{"ts":"2026-10-27T02:58:17Z","id":"moai-muv6","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"tests/cli.rs 의 PATH 를 unwrap_or_default 로 읽는 다섯 곳"}
+{"ts":"2026-10-27T03:00:50Z","id":"moai-1lsn","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"TUI 간트의 되돌리는 줄이 절대 날짜라 옆 세션이 그사이 바꾼 날을 덮는다"}
+{"ts":"2026-10-27T03:00:50Z","id":"moai-k9dd","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"TUI 간트가 아카이브에만 있는 줄도 끌게 둔다 — 쓰기는 not_found"}
+{"ts":"2026-10-27T04:55:04Z","id":"moai-qr5u","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"성능 — show Where 를 줄 하나로, 위키 순위를 체크아웃마다 한 벌로"}
+{"ts":"2026-10-27T04:55:04Z","id":"moai-724f","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"TUI 간트 잔손질 — 한국어 달 머리, 옆 워크트리 줄 끌기"}
+{"ts":"2026-10-27T04:55:16Z","id":"moai-ijjd.i7v","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"2026-10-27 person decision: do it — option A, a public flag (moai tui --json --deep --no-gantt). CHANGELOG Added; the milestone is now v0.30.0. In lane W after 46f, before e8o (links)."}
+{"ts":"2026-10-27T04:55:16Z","id":"moai-b4dc.9ub","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"2026-10-27 person decision: do it — option B from the body, despite the 20ms measurement. Moved to epic moai-qr5u (performance) so it runs beside moai-b4dc in its own worktree. Keep one reader: do not open the second read path the comment at show.rs:701 forbids."}
+{"ts":"2026-10-27T04:55:16Z","id":"moai-b4dc.0ss","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"2026-10-27 person decision: do it — option B from the body (per-checkout ranking). Moved to epic moai-qr5u. The web part may be Added/Changed; the release is minor (v0.30.0) anyway, so put it in the right CHANGELOG section. The 31 existing ranking tests stay byte-identical."}
+{"ts":"2026-10-27T04:55:16Z","id":"moai-lj8g.qrb","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"2026-10-27 person decision: fix all four sub-items, (c) and (d) included. (c) changes the write path and (d) is behaviour — CHANGELOG Changed (release is v0.30.0). The person set the epic-end review of moai-lj8g to xhigh even with (c) in it — do not raise it to max."}
+{"ts":"2026-10-27T04:55:16Z","id":"moai-lj8g","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"2026-10-27 person decision: epic-end review grade is xhigh (person's call), although qrb (c) touches the deadline ceiling on the write path."}
+{"ts":"2026-10-27T04:55:16Z","id":"moai-jdwk.rat","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"2026-10-27 person decision: option C — a wiki entry only (docs/agents.md). No CHANGELOG line."}
+{"ts":"2026-10-27T04:55:16Z","id":"moai-ijjd","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"2026-10-27: 5u9 and r7u moved to epic moai-724f (TUI gantt) so they run in their own worktree beside lane W; i7v is in (person's decision), chain qe4 -> h55 -> 7af -> 46f -> i7v -> e8o (all rebuild src/web/dist). e8o: step 1 only today; park step 2 as backlog."}
+{"ts":"2026-10-27T04:55:16Z","id":"moai-b4dc","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"2026-10-27: 9ub and 0ss moved to epic moai-qr5u (person decided to do both). This epic keeps 6qe, gqd, 5u5, j8c, 0ia."}
