@@ -256,9 +256,21 @@ impl App {
         }
     }
 
+    /// 화면에 보인 줄이 옆 워크트리에서 왔으면 그 가지 이름. 그 날짜를 주 체크아웃에 쓰지 않는다.
+    fn elsewhere(&self, at: usize) -> Option<&str> {
+        self.site.origin.branch(&self.site.issues[at].id)
+    }
+
     /// 그 줄의 계획을 옮겨 쓴다. 못 옮기면(날이 없다·멤버에서 센 막대다) 까닭을 알림으로 댄다 — 조용히 먹으면 키가
     /// 고장 난 것으로 보인다.
     pub(super) fn shift_plan(&mut self, at: usize, edge: Edge, days: i64) {
+        if let Some(branch) = self.elsewhere(at) {
+            self.notice = Some(fill(
+                say(self.site.lang, "tui.gantt.elsewhere"),
+                &[("id", &self.site.issues[at].id), ("branch", branch)],
+            ));
+            return;
+        }
         let i = &self.site.issues[at];
         match i.shifted(edge, days) {
             Ok(_) => self.write_plan(PlanMove { id: i.id.clone(), plan: Plan::Shift(edge, days) }),
@@ -335,7 +347,7 @@ impl App {
             moai_gantt::Hit::Label { row } => self.move_to(row),
             moai_gantt::Hit::Bar { row, part } => {
                 self.move_to(row);
-                if let Some(i) = self.here_at(&rows, row) {
+                if let Some(i) = self.here_at(&rows, row).filter(|&i| self.elsewhere(i).is_none()) {
                     let id = self.site.issues[i].id.clone();
                     let c = col(at.x);
                     self.chart_drag = Some(ChartDrag::Bar { id, part, from: c, now: c });
@@ -356,7 +368,7 @@ impl App {
     /// 칸을 누른 것이다) 멤버에서 센 묶음이면 커서만 옮긴 것이다.
     fn plan_day(&mut self, at: usize, day: i64) {
         let i = &self.site.issues[at];
-        if i.has_days() || crate::report::is_group(i) {
+        if self.elsewhere(at).is_some() || i.has_days() || crate::report::is_group(i) {
             return;
         }
         self.write_plan(PlanMove { id: i.id.clone(), plan: Plan::Day(day) });
@@ -611,6 +623,130 @@ mod tests {
 
     fn put_cursor(a: &mut App, id: &str) {
         a.cursor = ids(a).iter().position(|i| i == id).unwrap();
+    }
+
+    /// 주 체크아웃의 줄을 덮은 판과 옆에만 있는 줄을 함께 겹친다.
+    fn overlaid_on_disk(name: &str) -> (crate::scratch::Scratch, App) {
+        let dir = crate::scratch::Scratch::new(&format!("tui-gantt-overlay-{name}"));
+        let main = dir.join("main");
+        std::fs::create_dir_all(main.join(".moai/journal")).unwrap();
+        std::fs::write(main.join(".moai/config.toml"), "prefix = \"argos\"\n").unwrap();
+        let mut issues = app().site.issues;
+        let mut local = make("argos-0005", Kind::Issue);
+        local.starts_on = Some("2026-10-22".into());
+        local.due_on = Some("2026-10-24".into());
+        issues.push(local);
+        let write = |path: &std::path::Path, issues: &[Issue]| {
+            let text: String = issues.iter().map(|i| serde_json::to_string(i).unwrap() + "\n").collect();
+            std::fs::write(path.join(".moai/issues.jsonl"), text).unwrap();
+        };
+        write(&main, &issues);
+        let git = |args: &[&str]| crate::git::tests::run_git(&main, None, args);
+        git(&["init", "-q"]);
+        git(&["add", ".moai"]);
+        git(&["commit", "-q", "-m", "base"]);
+        git(&["worktree", "add", "-q", "../side", "-b", "gantt-side"]);
+        for i in &mut issues {
+            if i.id == "argos-0003" || i.id == "argos-0004" {
+                i.updated_at = "2026-10-22T03:00:00Z".into();
+                i.title = "옆에서 고친 줄".into();
+            }
+            if i.id == "argos-0003" {
+                i.starts_on = Some("2026-10-21".into());
+                i.due_on = Some("2026-10-25".into());
+            }
+        }
+        let mut added = make("argos-0010", Kind::Issue);
+        added.starts_on = Some("2026-10-23".into());
+        added.due_on = Some("2026-10-26".into());
+        issues.extend([added, make("argos-0011", Kind::Issue)]);
+        write(&dir.join("side"), &issues);
+        let repo = crate::store::Repo::at(main, cfg());
+        let g = crate::worktree::gather(&repo, true).unwrap();
+        for id in ["argos-0003", "argos-0004", "argos-0010", "argos-0011"] {
+            assert_eq!(g.origin.branch(id), Some("gantt-side"), "전제: {id} 가 옆에서 안 왔다");
+        }
+        assert_eq!(g.origin.branch("argos-0005"), None);
+        let stamp = super::super::stamp_of(&repo);
+        let (index, ground) = super::super::measure(&g.load.issues, &repo.config);
+        let mut a = App::open(repo, g.load, index, ground, Path::new(), stamp).overlaid(
+            g.origin,
+            Vec::new(),
+            g.watched,
+            g.swept,
+        );
+        a.identify = |_, _| Ok(crate::model::someone("raven"));
+        a.site.now = "2026-10-22T03:00:00Z".into();
+        a.hit("SPC g g");
+        (dir, a)
+    }
+
+    #[test]
+    fn overlay_rows_refuse_date_keys_but_local_rows_still_move() {
+        let (dir, mut a) = overlaid_on_disk("keys");
+        let main = dir.join("main");
+        let before = std::fs::read(main.join(".moai/issues.jsonl")).unwrap();
+        let side_before = std::fs::read(dir.join("side/.moai/issues.jsonl")).unwrap();
+        for id in ["argos-0003", "argos-0010"] {
+            put_cursor(&mut a, id);
+            for (lang, unchanged) in
+                [(crate::i18n::Lang::En, "nothing was written"), (crate::i18n::Lang::Ko, "안 썼다")]
+            {
+                a.site.lang = lang;
+                for key in ["<", ">", "{", "}"] {
+                    a.hit(key);
+                    let told = a.notice.as_deref().unwrap_or_default();
+                    assert!(told.contains(id) && told.contains("gantt-side") && told.contains(unchanged), "{told}");
+                    assert!(a.trouble.is_none(), "{:?}", a.trouble);
+                    assert_eq!(std::fs::read(main.join(".moai/issues.jsonl")).unwrap(), before);
+                    assert_eq!(std::fs::read(dir.join("side/.moai/issues.jsonl")).unwrap(), side_before);
+                }
+            }
+        }
+        put_cursor(&mut a, "argos-0005");
+        a.hit(">");
+        assert_eq!(dates_on_disk(&main, "argos-0005"), (Some("2026-10-23".into()), Some("2026-10-25".into())));
+        assert_eq!(std::fs::read(dir.join("side/.moai/issues.jsonl")).unwrap(), side_before);
+    }
+
+    #[test]
+    fn overlay_bars_never_start_a_drag_and_empty_days_only_select() {
+        use ratatui::crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind as K};
+        let (dir, mut a) = overlaid_on_disk("mouse");
+        let before = std::fs::read(dir.join("main/.moai/issues.jsonl")).unwrap();
+        let side_before = std::fs::read(dir.join("side/.moai/issues.jsonl")).unwrap();
+        let _ = draw::tests::render(&mut a, 160, 30);
+        let area = a.drawn.chart.unwrap();
+        let laid = moai_gantt::Layout::of(area, &a.chart);
+        let ev = |kind, column, row| MouseEvent { kind, column, row, modifiers: KeyModifiers::NONE };
+        for id in ["argos-0003", "argos-0010"] {
+            let rows = a.rows();
+            let n = ids(&a).iter().position(|s| s == id).unwrap();
+            let chart = a.chart_of(&rows, 0..0, &|_, _| ratatui::text::Line::default());
+            let (start, end) = moai_gantt::bar_cells(&a.chart, chart.rows[n].planned.unwrap());
+            let y = laid.dates_body.y + (n - a.chart.first_row) as u16;
+            // 몸통과 양 끝 모두 커서는 옮기되 끌기는 세우지 않는다.
+            for cell in [start, (start + end) / 2, end - 1] {
+                let x = laid.dates_body.x + cell as u16;
+                a.mouse(ev(K::Down(MouseButton::Left), x, y));
+                assert_eq!(on(&a), id);
+                assert!(a.chart_drag.is_none(), "{id} 의 막대 끌기가 섰다");
+                a.mouse(ev(K::Drag(MouseButton::Left), x + 4, y));
+                a.mouse(ev(K::Up(MouseButton::Left), x + 4, y));
+            }
+        }
+        for id in ["argos-0004", "argos-0011"] {
+            let n = ids(&a).iter().position(|s| s == id).unwrap();
+            let y = laid.dates_body.y + (n - a.chart.first_row) as u16;
+            let x = laid.dates_body.x + 2;
+            a.mouse(ev(K::Down(MouseButton::Left), x, y));
+            a.mouse(ev(K::Up(MouseButton::Left), x, y));
+            assert_eq!(on(&a), id);
+            assert!(a.chart_drag.is_none());
+        }
+        assert!(a.notice.is_none() && a.trouble.is_none(), "{:?} {:?}", a.notice, a.trouble);
+        assert_eq!(std::fs::read(dir.join("main/.moai/issues.jsonl")).unwrap(), before);
+        assert_eq!(std::fs::read(dir.join("side/.moai/issues.jsonl")).unwrap(), side_before);
     }
 
     /// **`<`·`>` 는 막대를, `{`·`}` 는 시작만 하루 옮겨 쓴다**(moai-i4hf.9xi). 알림이 되돌리는 명령을 대고, 시작이 기한을
