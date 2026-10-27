@@ -17688,6 +17688,46 @@ fn moai_mv_records_its_own_pick_for_the_session() {
     assert!(!recorded("a").contains(&moved), "옮긴 남의 줄을 --take 없이 제 집기로 적었다\n{}", recorded("a"));
 }
 
+/// 시작 칸에 바로 세운 제 일도 `mv` 처럼 제 집기로 적는다(moai-jdwk.323).
+#[test]
+fn moai_add_into_a_started_column_records_its_own_pick() {
+    let s = init("addpicks");
+    let theirs = add(s.path(), &["other session"]);
+    let pick = format!("moai mv {theirs} in_progress --from todo");
+    assert!(call(&s, "Bash", &format!("{{\"command\":{}}}", json_str(&pick)), "b").trim().is_empty());
+    ok(s.path(), &["mv", &theirs, "in_progress", "--from", "todo"]);
+    let cfg = s.path().join("hookcfg/config.toml");
+    let cfg = cfg.to_str().unwrap();
+    let env = [("MOAI_CONFIG", cfg), ("CLAUDE_CODE_SESSION_ID", "a")];
+    let mine = field(&ok_env(s.path(), NOW, &env, &["add", "mine", "-s", "in_progress", "--json"]), "id");
+    let held = hook_out(&s, "stop", &event(&s, "a"));
+    assert!(held.contains(&format!("moai mv {mine}")), "{held}");
+    assert!(!held.contains(&theirs), "{held}");
+    let recorded = |session: &str| -> String {
+        pick_dirs(&s).iter().filter_map(|d| std::fs::read_to_string(d.join(session)).ok()).collect()
+    };
+    // `-q` 도 일찍 돌아가기 전에 적는다.
+    let quiet = ok_env(s.path(), NOW, &env, &["add", "quiet", "-s", "review", "-q"]);
+    assert!(recorded("a").contains(quiet.trim()));
+    for args in [
+        vec!["add", "theirs", "-s", "in_progress", "-a", "Other (other@example.com)", "--json"],
+        vec!["add", "unowned", "-s", "in_progress", "-a", "none", "--json"],
+        vec!["epic", "add", "group", "-s", "in_progress", "--json"],
+        vec!["milestone", "add", "release", "-s", "in_progress", "--json"],
+        vec!["backlog", "add", "later", "-s", "in_progress", "--json"],
+        vec!["add", "todo", "--json"],
+        vec!["add", "done", "-s", "done", "--json"],
+    ] {
+        let id = field(&ok_env(s.path(), NOW, &env, &args), "id");
+        assert!(!recorded("a").contains(&id), "non-pick recorded: {args:?}");
+    }
+    for (session, agent) in [("c", "CODEX_THREAD_ID"), ("g", "ANTIGRAVITY_CONVERSATION_ID")] {
+        let env = [("MOAI_CONFIG", cfg), ("CLAUDE_CODE_SESSION_ID", session), (agent, "other-agent")];
+        ok_env(s.path(), NOW, &env, &["add", "other agent", "-s", "in_progress", "--json"]);
+        assert!(recorded(session).is_empty(), "inherited session recorded: {agent}");
+    }
+}
+
 /// **다른 세션이 부모를 집어도 이 세션이 집은 자식은 제 것이다**(리뷰 moai-3k2d.1df). 모르는 줄은 그 밑의
 /// 자식까지 빼는데, 남이 부모를 집고 이 세션이 `--parent` 로 세운 리뷰 줄을 집으면 그 리뷰까지 빠져
 /// `Stop` 이 안 붙들고, 좁혀 다시 본 판정이 `-m` 없는 리뷰 닫기를 넘겼다.

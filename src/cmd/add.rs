@@ -548,6 +548,14 @@ pub fn run(ctx: &Ctx, args: AddArgs, kind_override: Option<Kind>) -> R<Vec<Strin
         |_| Ok(()),
     )?;
 
+    // `mv` 와 같은 자로, 시작 칸에 세운 제 일만 이 세션의 집기로 적는다(moai-jdwk.323).
+    if repo.config.is_started(made.status.as_str())
+        && crate::report::is_work(&made)
+        && crate::report::owner(&crate::query::Me::of(&by), &made).is_none()
+    {
+        super::hook::record_own_picks(&repo, std::slice::from_ref(&made.id));
+    }
+
     // 쓰기가 선 **뒤에** 말한다 — `bulk` 와 같은 자리고, 거절된 쓰기가 줄 알림이 아니다. `--json` 도
     // 가리지 않는다(stderr 라 stdout 의 JSON 은 그대로다). 필드가 에픽·조상에게 져서 `kept` 줄이 함께
     // 나는 경우에도 말한다 — 안 읽히는 필드의 헛 id 도 `status` 는 `dangling_milestone` 으로 센다
