@@ -50,9 +50,6 @@ const OVERSCAN_ROWS = 10
 /** The height assumed while the pane has none (hidden, or not laid out yet) — the window's and the keys' page size. */
 const FALLBACK_HEIGHT = 720
 
-/** A field the row may carry as text: the text, or null. */
-const text = (value: unknown): string | null => (typeof value === 'string' ? value : null)
-
 /**
  * A row the write cannot reach — `moai edit` finds a row in the main checkout's live snapshot only. With the worktree
  * overlay on, a sibling worktree's row (`branch`, which `show --worktree` puts only on those) may not be there at all
@@ -836,10 +833,10 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
         // The arrows into and out of the dropped bar are drawn from those days.
         paintArrows()
         // Invert the move rather than restoring the page's stale dates; the other edge stays as moai found it.
-        const planned = g.planned?.from === 'own' ? g.planned : null
+        // The tree plan is the same picture shiftPlan used; the separately read list may disagree about absent edges.
         write(movePlan, row.id, { edge, days }, undoOf(row.id, { edge, days }, {
-          start: text(row.starts_on) ?? planned?.start ?? null,
-          due: text(row.due_on) ?? planned?.end ?? null,
+          start: g.planned?.start ?? null,
+          due: g.planned?.end ?? null,
         }))
       }
       resume()

@@ -1102,3 +1102,22 @@ test('zoom, fit with a new step and Ctrl+wheel each build one window at their fi
     bubbles: true, cancelable: true, ctrlKey: true, deltaY: -100, clientX: 800,
   })))
 })
+
+test('edge undo uses the tree plan even when the list read disagrees about absent edges', async () => {
+  for (const [planned, fields, grip, expected] of [
+    [own('2026-10-26', null), { due_on: '2026-10-30' }, 'end', '--due none'],
+    [own('2026-10-26', '2026-10-27'), { starts_on: '' }, 'start', '--shift-start 1'],
+    [own('2026-10-26', '2026-10-27'), {}, 'end', '--shift-due -1'],
+  ]) {
+    const rows = ROWS.map((r) => r.id === 'e1.c' ? { ...r, ...fields } : r)
+    const gantt = { ...GANTT, 'e1.c': g('e1.c', { planned }) }
+    const { root, dom, moves } = writing(rows, gantt)
+    const l = lane(root, 'e1.c')
+    const bar = laidOut(l.querySelector('.b-plan'))
+    const from = grip === 'start' ? px(bar, 'left') + 1 : px(bar, 'left') + px(bar, 'width') - 1
+    press(dom, l, 'pointerdown', from)
+    press(dom, l, 'pointerup', from + (grip === 'start' ? -40 : 40))
+    assert.equal(moves.at(-1)?.undo, `moai edit e1.c ${expected}`)
+    await tick()
+  }
+})
