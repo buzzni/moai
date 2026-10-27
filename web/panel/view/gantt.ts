@@ -17,7 +17,7 @@
  */
 import { assigneeOf } from '../data/people.ts'
 import { MEMORY_KEY, settingsStorage } from '../data/memory.ts'
-import { undoLine, type PlanChange } from '../data/plan.ts'
+import { undoOf, type PlanChange } from '../data/plan.ts'
 import { zoneNow } from '../data/zone.ts'
 import type { GanttRow, IssueIndex, Row } from '../data/index.ts'
 import { fill } from '../i18n/index.ts'
@@ -819,11 +819,12 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
         moved.set(row.id, { start: change.start ?? g.planned!.start, end: change.due ?? g.planned!.end, from: 'own' })
         const n = model?.lines.findIndex((line) => line.key === row.id) ?? -1
         if (built && n >= 0) built.placed[n] = placeRow(ganttOf(row), row, built.now, clock.zone())
-        // The undo line puts back the days the page read: as the list printed them, or a row it did not print (one
-        // written between its read and the tree's) as the bar was drawn. moai measured the move itself from the row as
-        // it stood when written (moai-vj8w.02c), so a day another session moved after this read comes back with the undo.
+        // Invert the move rather than restoring the page's stale dates; the other edge stays as moai found it.
         const planned = g.planned?.from === 'own' ? g.planned : null
-        write(movePlan, row.id, { edge, days }, undoLine(row.id, text(row.starts_on) ?? planned?.start, text(row.due_on) ?? planned?.end))
+        write(movePlan, row.id, { edge, days }, undoOf(row.id, { edge, days }, {
+          start: text(row.starts_on) ?? planned?.start ?? null,
+          due: text(row.due_on) ?? planned?.end ?? null,
+        }))
       }
       resume()
     })
@@ -843,7 +844,7 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
       // `--if-unplanned` writes nothing over it.
       if (writing.has(row.id)) return
       const day = dayText(floorDay(wallAt(a, event.clientX - lane.getBoundingClientRect().left)))
-      write(movePlan, row.id, { day }, undoLine(row.id, null, null))
+      write(movePlan, row.id, { day }, undoOf(row.id, { day }, { start: null, due: null }))
     })
   }
 

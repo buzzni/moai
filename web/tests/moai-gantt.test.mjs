@@ -641,7 +641,7 @@ test('dragging a bar\'s middle moves the plan by whole days, once, on release; t
   assert.deepEqual(moves, [], 'nothing is written while it moves')
   press(dom, l, 'pointerup', mid + 70)
   l.click()
-  assert.deepEqual(moves, [{ id: 'e1.c', change: { edge: 'body', days: 2 }, undo: 'moai edit e1.c --start 2026-10-26 --due 2026-10-27' }])
+  assert.deepEqual(moves, [{ id: 'e1.c', change: { edge: 'body', days: 2 }, undo: 'moai edit e1.c --shift -2' }])
   assert.deepEqual(calls, [], 'the click a drag ends with chose the row')
   l.click()
   assert.deepEqual(calls, ['choose:e1.c'], 'the next click chooses as before')
@@ -724,7 +724,7 @@ test('a drag that ends without a click does not take the next press\'s click', (
   assert.deepEqual(calls, ['choose:e1.a'])
 })
 
-test('a milestone\'s own diamond moves with its bar\'s end; the undo names the days the bar was drawn from', () => {
+test('a milestone\'s own diamond moves with its bar\'s end; the undo inverts the move', () => {
   const rows = ROWS.map((row) => (row.id === 'm1' ? { ...row, starts_on: '2026-10-26' } : row))
   const gantt = { ...GANTT, m1: { ...GANTT.m1, planned: own('2026-10-26', '2026-10-28') } }
   const { root, dom, moves } = writing(rows, gantt)
@@ -737,12 +737,12 @@ test('a milestone\'s own diamond moves with its bar\'s end; the undo names the d
   assert.deepEqual([px(bar, 'left'), px(due, 'left')], [x0 + 40, d0 + 40])
   press(dom, l, 'pointercancel', x0 + 80)
   assert.deepEqual([px(bar, 'left'), px(due, 'left')], [x0, d0], 'a cancel puts both back')
-  // e1.c: the list printed no days for it, the tree drew 10-26 ~ 10-27 — the undo puts back what was drawn.
+  // e1.c: the list printed no days, but the tree drew its plan: the undo still inverts the move.
   const c = lane(root, 'e1.c')
   const cb = laidOut(c.querySelector('.b-plan'))
   press(dom, c, 'pointerdown', px(cb, 'left') + 40)
   press(dom, c, 'pointerup', px(cb, 'left') + 80)
-  assert.equal(moves.at(-1).undo, 'moai edit e1.c --start 2026-10-26 --due 2026-10-27')
+  assert.equal(moves.at(-1).undo, 'moai edit e1.c --shift -1')
 })
 
 test('a deadline-only row drags its diamond; a group counted from its members says why and moves nothing', () => {
@@ -1045,4 +1045,15 @@ test('a cursor sent to a row beyond the window brings that row in (moai-vj8w.2fh
   assert.ok(top > 100 * 28, 'the pane scrolled to it')
   assert.equal(lane(root, 'r150').getAttribute('aria-selected'), 'true')
   assert.equal(dom.window.document.querySelectorAll('.lane[aria-selected="true"]').length, 1)
+})
+
+test('undo inverts each move, clearing an edge only when it was absent at read time', async () => {
+  const { undoOf } = await panelModule('data/plan.ts')
+  const read = { start: '2026-10-26', due: '2026-10-27' }
+  assert.equal(undoOf('x', { edge: 'body', days: 2 }, read), 'moai edit x --shift -2')
+  assert.equal(undoOf('x', { edge: 'start', days: -3 }, read), 'moai edit x --shift-start 3')
+  assert.equal(undoOf('x', { edge: 'end', days: 1 }, read), 'moai edit x --shift-due -1')
+  assert.equal(undoOf('x', { edge: 'start', days: 1 }, { ...read, start: null }), 'moai edit x --start none')
+  assert.equal(undoOf('x', { edge: 'end', days: 1 }, { ...read, due: null }), 'moai edit x --due none')
+  assert.equal(undoOf('x', { day: '2026-10-27' }, { start: null, due: null }), 'moai edit x --start none --due none')
 })
