@@ -135,11 +135,16 @@ start and a deadline, `@2026-10-25~` a start alone — and `--start <day>` cover
 that have no `@` of their own, as `--due` does. A start is never made up either.
 
 A row made alone takes the same `--due` and `--start` on `moai add` or `moai backlog add`; an `@` is
-read on a plan line only.
+read on a plan line only. A trailing `@` word beginning with an ASCII or fullwidth
+digit is a date position: malformed dates are refused with a line number. Escape
+it as `\@２０２６-10-30` when it is meant as title text.
 
 A member's deadline cannot pass its epic's, nor an epic's its milestone's — the write
 is refused and names the day to give instead. A start is held to the same ceiling: it cannot
-fall after the deadline above it, though it may begin before the parent does. As deadlines near, `moai due apply`
+fall after the deadline above it, though it may begin before the parent does.
+Deferred ancestors, including those under a deferred group, set no ceiling until
+you restore them. Restoring a deferral keeps the plans you wrote and warns about
+any that now exceed an ancestor. As deadlines near, `moai due apply`
 raises the priority of each open, not deferred issue and backlog item by the deadline
 it follows — the earliest of its own and those of its milestone, epic and open parent (one day
 left or less — today and past included — is `p0`, two or less `p1`, seven or less `p2`)
@@ -323,4 +328,4 @@ where its contributors read them rather than repeated here:
   broken data, the same as a broken line in `issues.jsonl` — see [An archive file
   cannot be read](recovery.md#an-archive-file-cannot-be-read)
 
-Decided in: moai-0zjo moai-40ht moai-bx6t moai-9793 moai-ug3j moai-gelm moai-tllo moai-snyk moai-zynt moai-j9nf moai-jtvp moai-fx9t moai-bth3 moai-r0x8 moai-9tqo moai-g8pt
+Decided in: moai-0zjo moai-40ht moai-bx6t moai-9793 moai-ug3j moai-gelm moai-tllo moai-snyk moai-zynt moai-j9nf moai-jtvp moai-fx9t moai-bth3 moai-r0x8 moai-9tqo moai-g8pt moai-lj8g

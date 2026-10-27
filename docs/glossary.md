@@ -54,7 +54,9 @@ The day a row is due — its own `due_on` field, set with `--due YYYY-MM-DD`, `-
 carry one, and it is asked about but never required. It cannot pass the deadline of
 the [milestone](#milestone), [epic](#epic) or parent above it: such a write is refused,
 and a row the one above overtook by being pulled in is a [warning](#warning),
-`due_beyond_parent`. It is not inherited — a member is bounded by its epic's deadline
+`due_beyond_parent`. A deferred ancestor, or an ancestor under a deferred group,
+sets no ceiling while deferred; undoing the deferral restores it and warns about
+plans now beyond it. It is not inherited — a member is bounded by its epic's deadline
 without carrying it. A row's planned start (`--start`, `starts_on`) is held to the same ceiling: a start later than the deadline above it is refused, and one overtaken by pulling that deadline in is the same `due_beyond_parent` warning. A start earlier than the parent's start is never refused. `moai due apply` raises an open, not deferred issue's or backlog
 item's priority as the deadline it follows nears — the earliest of its own and those of
 the rows above it, a parent already closed lending none (one day left or less, today and
@@ -323,4 +325,4 @@ not pile commits onto one branch. The tracker stays in the main checkout; the
 wiki pages ride the branch. More in
 [the workflow](workflow.md#work-in-a-worktree).
 
-Decided in: moai-tllo moai-snyk moai-u5wr moai-dhxm moai-kxkw moai-jtvp moai-bth3 moai-obxm moai-9tqo moai-uzhx moai-pyi4 moai-jdwk
+Decided in: moai-tllo moai-snyk moai-u5wr moai-dhxm moai-kxkw moai-jtvp moai-bth3 moai-obxm moai-9tqo moai-uzhx moai-pyi4 moai-jdwk moai-lj8g

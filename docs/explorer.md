@@ -400,7 +400,8 @@ the shell when you quit — open it, save it as UTF-8, and park it again.
 
 Register a project once with `moai project add <dir>`, or from inside the explorer
 with `SPC p a`, which opens a window to walk to the directory. The header numbers
-every registered project; press that number to jump there, and `0` for one list
+every registered project and marks the one you are in with `▸`; press its number
+to jump there, and `0` for one list
 of them all, a header row per project. `Enter` on a header goes into that project.
 `SPC p d` on a header drops the project from the list and leaves its files alone.
 
@@ -443,4 +444,4 @@ write there either.
   an email on every write and `git config` had none. The answer holds for this
   run; set `user.name` and `user.email` to stop it asking
 
-Decided in: moai-z46r moai-9nfw moai-47mz moai-irrj moai-ucx8 moai-1hka moai-h2rh moai-gelm moai-m6ni moai-p3r9 moai-o3cb moai-fyul moai-ogaw moai-tllo moai-fc97 moai-jtvp moai-bth3 moai-9tqo moai-wk7i moai-pxiy moai-i4hf
+Decided in: moai-z46r moai-9nfw moai-47mz moai-irrj moai-ucx8 moai-1hka moai-h2rh moai-gelm moai-m6ni moai-p3r9 moai-o3cb moai-fyul moai-ogaw moai-tllo moai-fc97 moai-jtvp moai-bth3 moai-9tqo moai-wk7i moai-pxiy moai-i4hf moai-lj8g
