@@ -5572,8 +5572,8 @@ pub struct Away {
     /// 이 자리 워크트리의 이름 후보. 옆 이름과 **거리를 겨룬다** — 옆 이름이 더 가까이 가리킬 때만
     /// 옆의 것이다([`report::claims_over`]). 같으면 제 것이다.
     pub own: BTreeSet<String>,
-    /// 누구의 것인지 모르는 줄([`unsure`]) — 거리와 상관없이 그 밑의 자식까지 뺀다. **풀기만 하는
-    /// 판정**에만 싣는다(`cmd/hook.rs` 의 `settle`·`Stop`·접힌 뒤 싣는 것) — 막지도 붙들지도 않기로 한 줄이다.
+    /// 누구의 것인지 모르는 줄([`unsure`]) — 제 이름보다 같거나 더 가까이 가리키는 줄과 자식을 뺀다.
+    /// 제 이름이 더 가까운 자식은 남긴다(moai-jdwk.mvy). **풀기만 하는 판정**에만 싣는다(`cmd/hook.rs` 의 `settle`·`Stop`·접힌 뒤 싣는 것) — 막지도 붙들지도 않기로 한 줄이다.
     pub unsure: BTreeSet<String>,
     /// 이 세션이 마지막으로 집은 줄([`Picks::mine`]) — `unsure` 가 그 조상을 가리켜도 빼지 않는다(리뷰
     /// moai-3k2d.1df). 남이 부모를 집고 이 세션이 그 자식(`--parent` 로 세운 리뷰 줄 따위)을 집으면, 자식까지
@@ -5801,6 +5801,7 @@ pub fn held<'a>(issues: &'a [Issue], cfg: &Config, away: &Away) -> Vec<&'a Issue
 
 /// 이 줄이 **옆의 일**인가 — 옆 이름이 제 이름보다 가까이 가리키거나, 누구의 것인지 모른다. 다만 이 세션이
 /// 확실히 집은 줄([`Away::sure`])은 옆 이름을, 이 세션이 집은 줄([`Away::picked`])은 모름을 이긴다(moai-pxui).
+/// 모름은 제 이름보다 같거나 더 가까울 때만 이긴다 — 조상이 모른다고 제 이름인 자식까지 빼지 않는다(moai-jdwk.mvy).
 /// [`held`] 와 그 초점을 쓰는 규칙이 같은 자로 재야 한다 — 초점에서는
 /// 뺀 옆의 리뷰 줄을 규칙 3 이 "집으라" 고 대면, 이미 옆에서 집은 줄이라 시킨 대로 해도
 /// 안 풀린다.
@@ -5816,7 +5817,9 @@ fn theirs<'a>(issues: &'a [Issue], away: &'a Away) -> impl Fn(&'a Issue) -> bool
     let ties = if away.nameless() { report::Ties::default() } else { report::Ties::of(issues) };
     move |i: &'a Issue| {
         (report::claims_over(&ties, &away.names, &away.own, i) && !away.sure.contains(issues, &i.id))
-            || (report::claims(&ties, &away.unsure, i) && !away.picked.contains(&i.id))
+            || (report::nearness(&ties, &away.unsure, i)
+                .is_some_and(|u| report::nearness(&ties, &away.own, i).is_none_or(|o| u <= o))
+                && !away.picked.contains(&i.id))
     }
 }
 
@@ -9280,7 +9283,7 @@ fn refuse(rule: usize, why: String) -> Decision {
 /// 저마다 남의 줄로 막히고도 어느 세션·어느 기록 때문인지 못 찾아 손으로 돌았다. 진단 명령을 따로 두지 않은 것은
 /// 에이전트가 제 세션 id 를 몰라 그 명령을 못 부르기 때문이다 — 근거는 막힌 그 자리에서 읽힌다.
 ///
-/// **초점을 대는 답만 본다** — 규칙 1·3 의 거절과 `Stop` 의 붙듦이다. **그 답을 낸 판정의 초점**([`held`] — 그
+/// **쥔 까닭은 초점을 대는 답에만 붙인다** — 규칙 1·3 의 거절과 `Stop` 의 붙듦이다. **그 답을 낸 판정의 초점**([`held`] — 그
 /// 판정이 읽은 줄과 `away`) 가운데 글에 id 가 통째로 선 줄([`crate::git::words`])마다 근거를 단다. 글에 id 가 선 집힌
 /// 줄을 다 대던 판은 초점 밖의 줄 — 집은 줄의 제목에 선 id, 규칙 3 이 대는 이어지지 않은 리뷰, `Stop` 이 닫으라는
 /// 남의 담당 리뷰 — 에도 "이 세션이 쥔 까닭" 을 달아, 그 머리 밑에 "다른 세션이 마지막으로 집었다" 가 섰다(리뷰
@@ -9294,8 +9297,9 @@ fn refuse(rule: usize, why: String) -> Decision {
 ///
 /// 글은 `lang` 으로 낸다 — `Stop` 의 붙듦은 말묶음에서 오고, 규칙의 거절문은 아직 영어 하나다(`i18n/README.md` 의
 /// "훅은 반만 옮겼다"). 붙이면 `room` 을 넘는 글이면 붙이지 않는다 — 근거는 덤이고, 붙듦 글을 자르면 안 된다.
-/// 무엇을 막는지는 안 바꾼다. 규칙 3 의 초점이 비면, 내 담당의 시작한 리뷰 중 안 센 줄도 셋까지
-/// 까닭을 댄다(moai-jdwk.1a5). 남이 집은 줄에는 집기를 적으라는 명령을 내지 않는다.
+/// 무엇을 막는지는 안 바꾼다. 규칙 1·2·3 이 대는 내 담당의 시작한 줄 중 초점에서 뺀 줄은 별도 머리 밑에
+/// 까닭을 댄다(moai-jdwk.mvy). 규칙 3 의 초점이 비면 글에 없던 리뷰도 셋까지 댄다(moai-jdwk.1a5).
+/// 집기를 적으라는 명령은 글에 없던 리뷰에만 붙이고, 남이 집은 줄에는 내지 않는다.
 pub fn vouch(
     decision: Decision,
     issues: &[Issue],
@@ -9307,20 +9311,27 @@ pub fn vouch(
 ) -> Decision {
     let focus_rule = |text: &str| [1, 3].iter().any(|&n| text.starts_with(&crate::guide::rule_head(n)));
     let text = match &decision {
-        Decision::Deny(text) if focus_rule(text) => text,
+        Decision::Deny(text) if [1, 2, 3].iter().any(|&n| text.starts_with(&crate::guide::rule_head(n))) => text,
         Decision::Block(text) => text,
         _ => return decision,
     };
     let named: BTreeSet<&str> = crate::git::words(text).collect();
     let focus = held(issues, cfg, away);
-    let shown: Vec<&Issue> = focus.iter().copied().filter(|i| named.contains(i.id.as_str())).collect();
-    let aside = if text.starts_with(&crate::guide::rule_head(3)) && focus.is_empty() {
-        let out_of_plan = report::put_off(issues);
+    let shown: Vec<&Issue> = if focus_rule(text) || matches!(decision, Decision::Block(_)) {
+        focus.iter().copied().filter(|i| named.contains(i.id.as_str())).collect()
+    } else {
+        Vec::new()
+    };
+    let aside = if matches!(decision, Decision::Deny(_)) {
+        let reviews = text.starts_with(&crate::guide::rule_head(3)) && focus.is_empty();
+        let out_of_plan = reviews.then(|| report::put_off(issues));
+        let held_ids: BTreeSet<&str> = focus.iter().map(|i| i.id.as_str()).collect();
         let rows = report::wip(issues, cfg)
             .into_iter()
-            .filter(|i| is_review(i, &out_of_plan) && !not_mine(away, i))
+            .filter(|i| !held_ids.contains(i.id.as_str()) && !not_mine(away, i))
+            .filter(|i| named.contains(i.id.as_str()) || out_of_plan.as_ref().is_some_and(|out| is_review(i, out)))
             .take(3)
-            .map(|i| (i, true))
+            .map(|i| (i, reviews && !named.contains(i.id.as_str())))
             .collect();
         aside_lines(issues, away, picks, rows, lang)
     } else {
@@ -9329,21 +9340,25 @@ pub fn vouch(
     if shown.is_empty() && aside.is_empty() {
         return decision;
     }
-    let named_mine = report::claimed(issues, &away.own);
-    let hours = (Picks::LIVE_NANOS / 3_600_000_000_000).to_string();
-    let lines: Vec<String> = shown
-        .into_iter()
-        .map(|i| {
-            let why = if picks.mine.contains(&i.id) {
-                say(lang, "hook.vouch_picked").to_string()
-            } else if named_mine(i) {
-                say(lang, "hook.vouch_named").to_string()
-            } else {
-                fill(say(lang, "hook.vouch_unrecorded"), &[("hours", &hours)])
-            };
-            format!("  {}  {why}", i.id)
-        })
-        .collect();
+    let lines: Vec<String> = if shown.is_empty() {
+        Vec::new()
+    } else {
+        let named_mine = report::claimed(issues, &away.own);
+        let hours = (Picks::LIVE_NANOS / 3_600_000_000_000).to_string();
+        shown
+            .into_iter()
+            .map(|i| {
+                let why = if picks.mine.contains(&i.id) {
+                    say(lang, "hook.vouch_picked").to_string()
+                } else if named_mine(i) {
+                    say(lang, "hook.vouch_named").to_string()
+                } else {
+                    fill(say(lang, "hook.vouch_unrecorded"), &[("hours", &hours)])
+                };
+                format!("  {}  {why}", i.id)
+            })
+            .collect()
+    };
     let mut told = text.clone();
     if !lines.is_empty() {
         told.push_str(&format!("\n\n{}\n{}", say(lang, "hook.vouch_head"), lines.join("\n")));
@@ -9375,8 +9390,10 @@ fn aside_lines(issues: &[Issue], away: &Away, picks: &Picks, rows: Vec<(&Issue, 
                 say(lang, "hook.aside_theirs").to_string()
             } else if report::claims_over(&ties, &away.names, &away.own, i) {
                 say(lang, "hook.aside_named").to_string()
-            } else {
+            } else if picks.crowded {
                 fill(say(lang, "hook.aside_unrecorded"), &[("hours", &hours)])
+            } else {
+                say(lang, "hook.aside_elsewhere").to_string()
             };
             let mut line = format!("  {}  {why}", i.id);
             if record && !other {
@@ -10776,10 +10793,12 @@ mod tests {
                 && t.contains("  t-12  this session picked it up")),
             "{named:?}"
         );
-        // **초점 밖의 줄은 글에 서도 안 댄다** — 모르는 줄로 빠진 t-1 은 이 세션이 쥔 줄이 아니다.
+        // 초점 밖의 줄은 따로 댄다 — 쥔 까닭 머리 밑에 섞지 않는다.
         let narrowed = vouched(Decision::Deny(rule1.clone()), &Away { unsure: set(&["t-1"]), ..here() }, None);
         assert!(
-            matches!(&narrowed, Decision::Deny(t) if t.contains("  t-12  ") && !t.contains("  t-1  ")),
+            matches!(&narrowed, Decision::Deny(t) if t.contains("  t-12  ")
+                && t.split(say(Lang::En, "hook.aside_head")).nth(1).is_some_and(|aside| aside.contains("  t-1  "))
+                && !t.split(say(Lang::En, "hook.aside_head")).next().unwrap().contains("  t-1  ")),
             "초점 밖의 줄에 이 세션이 쥔 까닭을 달았다 — {narrowed:?}"
         );
         // 규칙 2 의 거절과 비추는 줄은 그대로다.
@@ -10826,6 +10845,44 @@ mod tests {
         let tight = Room { size: 1, unit: Unit::Utf8 };
         let d = guard_review(&all, &cfg(), &away);
         assert_eq!(vouch(d.clone(), &all, &cfg(), &away, &Picks::default(), Some(tight), Lang::En), d);
+    }
+
+    #[test]
+    fn an_unsure_parent_does_not_take_the_row_this_worktree_is_named_after() {
+        let all = vec![issue("t-1", "in_progress"), issue("t-1.f", "in_progress")];
+        let away = Away { unsure: set(&["t-1"]), own: set(&["t-1.f"]), ..here() };
+        let ids: Vec<&str> = held(&all, &cfg(), &away).iter().map(|i| i.id.as_str()).collect();
+        assert_eq!(ids, ["t-1.f"]);
+        assert!(held(&all, &cfg(), &Away { own: set(&[]), ..away.clone() }).is_empty());
+        assert!(held(&all, &cfg(), &Away { unsure: set(&["t-1.f"]), ..away }).iter().all(|i| i.id != "t-1.f"));
+    }
+
+    #[test]
+    fn a_set_aside_row_named_in_a_refusal_says_why() {
+        let all = vec![issue("t-1", "in_progress")];
+        let away = Away { unsure: set(&["t-1"]), ..here() };
+        let d = guard_edit(&all, &cfg(), &away, &abs("/repo"), "/repo/src/x.rs");
+        let picks = Picks { crowded: true, ..Picks::default() };
+        let told = vouch(d.clone(), &all, &cfg(), &away, &picks, None, Lang::En);
+        let why = denied(&told);
+        assert!(why.starts_with(denied(&d)), "판정을 바꿨다: {why}");
+        assert!(why.contains("  t-1  ") && why.contains("in the last 12 hours"), "{why}");
+        assert!(!why.contains(say(Lang::En, "hook.vouch_head")), "규칙 2 에 쥔 까닭을 달았다: {why}");
+        assert_eq!(why.matches("moai mv t-1").count(), denied(&d).matches("moai mv t-1").count());
+        let picks = Picks { theirs: set(&["t-1"]), ..picks };
+        let told = vouch(d.clone(), &all, &cfg(), &away, &picks, None, Lang::En);
+        assert!(denied(&told).contains("another session picked it up last"));
+        let alone = vouch(d.clone(), &all, &cfg(), &away, &Picks::default(), None, Lang::En);
+        assert!(denied(&alone).contains("a sibling worktree recorded holding it"));
+        for unchanged in [Decision::Context("t-1".into()), Decision::Block("t-1".into())] {
+            assert_eq!(vouch(unchanged.clone(), &all, &cfg(), &away, &picks, None, Lang::En), unchanged);
+        }
+        for rule in [1, 3] {
+            let d = Decision::Deny(format!("{}\nt-1", crate::guide::rule_head(rule)));
+            let told = vouch(d, &all, &cfg(), &away, &picks, None, Lang::En);
+            assert!(denied(&told).contains("another session picked it up last"));
+            assert!(!denied(&told).contains("--from in_progress"), "글에 있는 줄에 집기 명령을 더했다");
+        }
     }
 
     /// **껍데기가 풀 낱말은 id 로 안 적는다**(moai-pyi4) — `moai mv $R review` 의 `$R` 를 id 로 적던 판은 아무 줄도 안

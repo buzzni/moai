@@ -17474,6 +17474,23 @@ fn another_running_session_frees_rows_nobody_recorded() {
     assert!(!why.contains(&loose) && !why.contains(&other), "일꾼에게 남의 줄 밑 리뷰를 시킨다 — {why}");
 }
 
+/// 좁힌 초점이 규칙 1 대신 규칙 2 를 내도, 빠진 줄의 까닭을 거절 자리에서 댄다(moai-jdwk.mvy).
+#[test]
+fn a_refusal_says_why_an_unrecorded_row_of_yours_is_not_counted() {
+    let s = init("unrecorded-refusal");
+    let loose = add(s.path(), &["unrecorded"]);
+    let other = add(s.path(), &["other session"]);
+    let pick = format!("moai mv {other} in_progress --from todo");
+    let out = call(&s, "Bash", &format!("{{\"command\":{}}}", json_str(&pick)), "b");
+    assert!(out.trim().is_empty(), "{out}");
+    ok(s.path(), &["mv", &other, "in_progress", "--from", "todo"]);
+    ok(s.path(), &["mv", &loose, "in_progress", "--from", "todo"]);
+    let why = refusal(&call(&s, "Bash", "{\"command\":\"moai add x && echo y >> src/a.rs\"}", "a"));
+    assert!(why.contains("Rule 2") && why.contains(&loose), "{why}");
+    assert!(why.contains("Not counted as this session's work:") && why.contains("in the last 12 hours"), "{why}");
+    assert!(!why.contains("Why this session holds them:"), "{why}");
+}
+
 /// **제 이름 워크트리가 옆 에픽 워크트리를 이긴다**(moai-m62u·moai-cle9, 사용자 결정). 에픽
 /// 워크트리가 살아 있거나 머지하고 안 치운 채 그 에픽에 새 멤버를 집으면, 그 멤버를 제 이름
 /// 워크트리에서 하는 세션이 에픽 이름에 초점을 뺏겨 규칙 2 에 막혔다. 워크트리 목록을 읽는 배선
