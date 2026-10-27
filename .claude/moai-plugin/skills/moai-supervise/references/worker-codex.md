@@ -30,7 +30,7 @@ One call's `cd` may not persist into the next: always supply the absolute comman
 A backlog has no epic for the supervisor to watch until you unfold it. Right after the
 promote in 1, before 2, name the epic on the backlog `<id>` you were handed:
 
-    moai -C <root> note <id> 'Unfolded: <epic>'
+    moai -C "<root>" note <id> 'Unfolded: <epic>'
 
 Until it is written, a note the steps below put on the epic goes on that backlog instead.
 
@@ -47,21 +47,21 @@ check that screen rather than assuming a wrapper or another installation enabled
 ## Step 7: hand the review to the supervisor
 
 When the members are finished, pull the base branch as in 6, test and commit in the worktree.
-Create the review issue using the shared command, called with `moai -C <root>` (4-1):
+Create the review issue using the shared command, called with `moai -C "<root>"` (4-1):
 
     moai add 'review — <what you are looking at>' -t review --parent <epic> -b '<what you are looking for and why>'
 
 Fill the angle with the grade, why, and "review by the supervisor's review subagent".
 Do not run the review yourself. Move each finished member to review, one id per call:
 
-    moai -C <root> mv <member> review --from in_progress
+    moai -C "<root>" mv <member> review --from in_progress
 
 Keep worker.md's handling of missing review columns and members left in todo.
 Record the worktree absolute path, branch, `git merge-base <base branch> HEAD` hash and
 review issue id in a note whose first line is `Review-ready: <epic>`:
 
 ```sh
-moai -C <root> note <epic> -b - <<'CODEX_REVIEW'
+moai -C "<root>" note <epic> -b - <<'CODEX_REVIEW'
 Review-ready: <epic>
 - Worktree: <absolute path>; branch: <branch>; merge-base: <hash>
 - Review issue: <review id>; tested: <checks and results>
@@ -86,7 +86,7 @@ Do not write the review issue's model line: the supervisor's reviewer writes its
 ## Step 12: report by epic note
 
 Put worker.md's final report details in `moai note <epic> -b -`, called with
-`moai -C <root>` from the worktree. Its first line is `report: <epic>`.
+`moai -C "<root>"` from the worktree. Its first line is `report: <epic>`.
 It stands in the root's file, where the supervisor reads it — it needs no commit.
 For a decision needed during work, use the same note, starting with
 `Decision needed:` or `진행 중 결정이 필요합니다`, and ask this window's person too.

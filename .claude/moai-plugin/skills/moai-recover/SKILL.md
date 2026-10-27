@@ -171,29 +171,31 @@ PY
   cannot tell live from dead (a sandbox that hides other processes, say). Bring nothing back;
   tell the person what it said
 - A **candidate** is a `dead` row with a `sessionId` whose `cwd` is the root or one of the
-  worktrees `git worktree list` names
+  worktrees `git worktree list` names. Two dead records with the same `sessionId` are one
+  candidate
 - **Drop it when it is back already** — a live row carries the same `sessionId` (`--resume`
   keeps the id), **your own row included**: a session the person resumed first and then asked
   for this is back already, and resuming it again puts one conversation in two windows. In a
   worktree, also drop it when a live row other than your own stands in that same `cwd`. The
   root is not such a place — several live sessions stand there at once, and one of them being
   alive says nothing about the dead one
-- **Drop it when its conversation was cleared after it died.** Another process resumed it and
-  ran `/clear` there: that process went on under a new `sessionId` and its own record carries
-  the new one, so no live row carries the old id any more — and resuming it brings back a
-  conversation already left behind. Its transcript does not say so (the `/clear` lines open the
-  new id's transcript, not the end of the old one); `~/.claude/history.jsonl` does — it logs
-  every `/clear` (and its aliases `/new` and `/reset`) under the id it cleared. Give the lines
-  below the candidates' `sessionId`s; they print the ones cleared after their transcript last
-  moved, and you drop those. The lines a `/clear` writes as it interrupts a running turn land
-  within seconds of it and do not count as moving. A conversation that moved again after its
-  `/clear` (it was resumed back) is not printed. Two dead records with the same `sessionId`
-  are one candidate
+- **Drop it when its conversation was left after it died.** Another process resumed it and
+  ran `/clear` (or `/new` or `/reset`), or moved to another conversation with `/resume`
+  (or `/continue`): that process's record carries the conversation it went to, so no live
+  row carries the old id any more. Resuming it brings back a conversation already left
+  behind. Its transcript does not say so; `~/.claude/history.jsonl` logs the command under
+  the id it left. Give the lines below the candidates' `sessionId`s; they print each id left
+  after its transcript last moved, with the command and its UTC time, tab-separated. Do not
+  resume those, but name them under the table in 2. The lines written while interrupting a
+  running turn within ten seconds of the command do not count as moving; a conversation
+  that moved again later is not printed. A `/resume` picker can be cancelled, and a
+  conversation deliberately resumed after `/clear` can die before writing a line — both
+  can look left here, so bring one back when the person names it
 
 ```sh
 python3 - <sessionId> … <<'PY'
 import glob, json, os, sys
-from datetime import datetime
+from datetime import datetime, timezone
 wanted = set(sys.argv[1:])
 cleared = {}
 try:
@@ -201,8 +203,11 @@ try:
         for line in f:
             try:
                 h = json.loads(line)
-                if str(h.get("display", "")).split()[:1] in (["/clear"], ["/new"], ["/reset"]) and h.get("sessionId") in wanted:
-                    cleared[h["sessionId"]] = max(cleared.get(h["sessionId"], 0), int(h["timestamp"]))
+                words = str(h.get("display", "")).split()
+                if words and words[0] in ("/clear", "/new", "/reset", "/resume", "/continue") and h.get("sessionId") in wanted:
+                    sid, stamp = h["sessionId"], int(h["timestamp"])
+                    if sid not in cleared or stamp > cleared[sid][0]:
+                        cleared[sid] = (stamp, words[0])
             except (ValueError, KeyError, TypeError, AttributeError):
                 continue
 except OSError:
@@ -227,16 +232,33 @@ def moved(sid):
         return 0
     return datetime.fromisoformat(last.replace("Z", "+00:00")).timestamp() * 1000
 for sid in sorted(cleared):
-    if cleared[sid] + 10000 > moved(sid):
-        print(sid)
+    stamp, command = cleared[sid]
+    if stamp + 10000 > moved(sid):
+        try:
+            when = datetime.fromtimestamp(stamp / 1000, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        except (OverflowError, OSError, ValueError):
+            when = str(stamp)
+        print(f"{sid}\t{command}\t{when}")
 PY
 ```
 
 - **Drop old crashes.** Records of earlier deaths stay too. Keep the candidates whose
-  transcript (below) last moved around the same time; name an older one to the person apart,
-  and bring it back only if they say so
+  transcript (below) last moved around the same time; name older ones under the table in 2,
+  and bring one back only if the person says so
 - When several candidates stand in the same `cwd`, ask the person **once** — one question
   for all of them — which to bring back
+
+`<root>` and `<cwd>` stand in double quotes on every shell line here, so a path with a
+space stays one word. Double quotes still read `"`, `$`, a backtick and `\`: a path holding
+any of them is not one these lines can carry — build none, and tell the person which path
+it is. A Windows path (`C:\Users\…`) is the one exception for `\`: double quotes keep a
+single `\` between two names as it is. Inside cmux's `--command '…'` the path sits inside
+single quotes as well: write each `'` in it as `'\''` there.
+
+If a candidate still standing after the drops above has a `cwd` holding any of those
+characters, build no shell line on that `cwd` — no `git -C`, `readlink` or `test -e` in 2
+and 3, no pane or tab, no line of 7. Tell the person its path and `sessionId`, so they can
+quote it by hand and bring it back themselves.
 
 **A Saycode session** comes back through Saycode (8), never in a pane — resumed in a pane, its
 conversation would run outside Saycode while the Saycode session stays ended. Its transcript
@@ -284,13 +306,17 @@ line — and look at where it stood:
 - **Work.** The issue or epic id it held, and what it was doing or waiting for — a report,
   a review, a person's decision, a build
 - **Died at** — the `timestamp` of its last line
-- `git -C <cwd> status --short` — what it left uncommitted. In the root, leave `.moai/` out:
+- `git -C "<cwd>" status --short` — what it left uncommitted. In the root, leave `.moai/` out:
   the supervisor's steps commit the tracker once an epic closes or a round stops, so rows wait
   there by design, and they are every session's, not this one's
 - `moai show <id>` — a `Next:` note on that id says where the session meant to go on
 
 Show the person **one table**, a row per session: role, name, `cwd`, work id, what it was
-waiting for, died at, uncommitted files — and the Saycode id of a Saycode session. Then go on — they asked for recovery already.
+waiting for, died at, uncommitted files — and the Saycode id of a Saycode session.
+Under the table, name in one line what 1 dropped as left or as an older crash — not what is
+back already: each `sessionId` and `cwd`, with the command and UTC time for a conversation
+left, or that it is an older crash. Bring one back when the person names it. Then go on —
+they asked for recovery already.
 
 ## 3. Point out what died with it
 
@@ -306,8 +332,8 @@ waiting for, died at, uncommitted files — and the Saycode id of a Saycode sess
 - **A broken target link.** In the root and each worktree, `target` may be a link to
   `/tmp/cargo-target/<name>`, and a restart can empty `/tmp`:
 
-      readlink <cwd>/target
-      test -e <cwd>/target || echo dangling
+      readlink "<cwd>/target"
+      test -e "<cwd>/target" || echo dangling
 
   Make the directory again, `mkdir -p /tmp/cargo-target/<name>`, so builds land there. The
   build output is gone: `./target/release/moai` needs `cargo build --release` before anything
@@ -345,12 +371,17 @@ pane, not yours — so say which window they are in:
     tmux select-layout -t "$TMUX_PANE" tiled
 
 **No other flag**, and keep the double quotes around `<cwd>` — a path with a space stays one
-argument. The first line prints the new pane's `%N`, the `<pane>` below. The `set-option` after
-`\;` runs in the same tmux call, on the new pane, before `claude` can exit — a `--resume` that
-fails at once (no such conversation) keeps its pane and its error.
-`remain-on-exit` keeps the pane when `claude` exits: its last screen stays, `#{pane_dead}`
-reads `1`, and tmux refuses pastes aimed at it and drops keys, so nothing lands in a shell. A
-dead pane stays until the person closes it; never kill it. Then, as a separate call, look once: when its `❯` box shows and is empty
+argument. A `--resume` that fails at once (no such conversation) keeps its pane and its error.
+
+The first line prints the new pane's id (`%N`), the `<pane>` below. The `set-option` after
+`\;` runs in the same tmux call, on the new pane, before the program can exit — set in a call
+of its own, a program that ended at once would have taken its pane, and what it said, with it.
+`remain-on-exit` keeps the pane when the program exits: its last screen stays readable,
+`#{pane_dead}` reads `1`, and tmux refuses pastes aimed at it and drops keys — nothing you send
+lands in a shell under a dead session, though `send-keys` still exits `0`. A dead pane stays
+until the person closes it; never kill it.
+
+Then, as a separate call, look once: when its `❯` box shows and is empty
 ("Is the input box empty" above), paste the block:
 
     tmux load-buffer -b moai-recover <file>
@@ -375,7 +406,8 @@ session (8), in that order:
 
     cmux --id-format both new-split right --surface "$CMUX_SURFACE_ID" --command 'cd "<cwd>" && claude --resume <sessionId>'
 
-**No other flag**, and keep the double quotes around `<cwd>` inside the single ones. It prints `OK surface:<n> (<UUID>) workspace:<n> (<UUID>)` — the first UUID
+**No other flag**, and keep the double quotes around `<cwd>` inside the single ones;
+write each `'` in the path as `'\''` there. It prints `OK surface:<n> (<UUID>) workspace:<n> (<UUID>)` — the first UUID
 is the new tab, the second your workspace. The command is typed into the tab's shell, so the
 shell stays when `claude` exits, and the split does not take focus. **If cmux refuses a split**
 — no space for a new pane, as every split lands in your row, or it cannot find your tab in the

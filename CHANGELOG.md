@@ -38,6 +38,18 @@ does not tag — see `CONTRIBUTING.md`.
   its request. Silent or slow clients are waited for at most 200ms.
   (moai-n8po.7e1)
 
+- **Skill shell commands keep repository paths together.** Supervisor, worker
+  and recovery commands quote paths with spaces. A path holding `"`, `$`, a
+  backtick or `\` (a Windows path's separators aside) is handed to the person
+  instead of building a shell command;
+  cmux commands explain how to escape an apostrophe inside their outer single
+  quotes. (moai-1m21.cqb)
+- **`moai-recover` leaves conversations moved off with `/resume` or `/continue`
+  out of automatic recovery.** Under its table it names skipped conversations
+  with their command and UTC time, and older crashes, so the person can ask
+  one back even after a cancelled picker or a resume that died before writing
+  a line. (moai-1m21.hxm)
+
 - The explorer header marks the current project with `▸`, so its position stays
   visible without colour or shimmer. (moai-lj8g.wxt)
 
