@@ -15,9 +15,9 @@ dir=${1:?usage: seed.sh <empty dir>}
 moai=${MOAI:-$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)/target/release/moai}
 case $moai in */*) moai=$(realpath -- "$moai") ;; *) moai=$(command -v -- "$moai") ;; esac
 [ -x "$moai" ] || { echo "seed.sh: no moai binary at $moai" >&2; exit 1; }
-# 녹화하는 사람의 환경이 화면에 새지 않게: 정체(MOAI_ACTOR)·키·색·말은 데모의 것으로
+# 녹화하는 사람의 환경이 화면에 새지 않게: 정체(MOAI_ACTOR)·키·색·말·시간대는 데모의 것으로
 unset MOAI_ACTOR MOAI_KEYS NO_COLOR
-export MOAI_LANG=en
+export TZ=UTC MOAI_LANG=en
 mkdir -p "$dir"
 cd "$dir"
 [ -z "$(ls -A .)" ] || { echo "seed.sh: $dir is not empty" >&2; exit 1; }

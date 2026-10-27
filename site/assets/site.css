@@ -143,7 +143,6 @@ nav .lang a[aria-current="page"] { color: var(--ink); font-weight: 600; text-dec
 .window .cast { background: #121212; }
 .window .cast .ap-wrapper, .window .cast .ap-player { border-radius: 0; }
 .window video { display: block; width: 100%; height: auto; aspect-ratio: 1440 / 900; background: #13161a; }
-.window.term video { aspect-ratio: 1100 / 818; background: #121212; }
 
 /* logo marquee */
 .logos { padding: 72px 0 8px; }

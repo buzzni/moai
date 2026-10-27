@@ -3,11 +3,10 @@
 //     MOAI=<moai 바이너리> node scripts/site-demo/record-web.mjs <seed 저장소> <내보낼 디렉터리>
 //
 // playwright 는 이 저장소의 의존이 아니다 — 부르는 쪽이 NODE_PATH 로 건넨다. 장면마다 브라우저
-// 문맥을 하나씩 열어 webm 하나와, 장면이 끝난 화면의 png(포스터) 하나를 낸다. 녹화에는 마우스가 안 찍혀서
+// 문맥을 하나씩 열어 날 webm 과 png 포스터를 낸다. 녹화에는 마우스가 안 찍혀서
 // 가짜 커서를 페이지에 얹는다 — 보는 사람이 무엇을 눌렀는지 따라올 수 있게.
-// site/assets/media 의 클립은 이것이 낸 그대로가 아니다(moai-vlq7): VP9 crf 40 으로 다시 굽고 앞의 빈 화면을
-// 잘랐으며, web-wiki.png 는 끝 화면(이슈로 건너간 목록)이 아니라 위키 페이지가 선 한 장면을 클립에서 떠 왔다.
-// 다시 찍으면 그 손질도 다시 한다 — 그대로 덮으면 위키의 포스터가 목록 화면이 된다.
+// recorded <장면> lead <초> 는 첫 목록이 선 시각이다. 사이트용 자르기와 VP9 굽기는 record-site.sh 가 맡는다.
+// 릴리스 소식은 예전처럼 날 영상을 받는다. 위키 포스터는 장면 안에서 페이지가 선 때 찍는다.
 import { execFileSync, spawn } from 'node:child_process'
 import { createInterface } from 'node:readline'
 import { mkdirSync, readFileSync, renameSync } from 'node:fs'
@@ -24,9 +23,9 @@ mkdirSync(outDir, { recursive: true })
 const moai = path.resolve(process.env.MOAI || path.join(path.dirname(new URL(import.meta.url).pathname), '../../target/release/moai'))
 const SIZE = { width: 1440, height: 900 }
 
-// 녹화하는 사람의 환경이 화면에 새지 않게: 정체·키·색·말은 데모의 것으로
+// 녹화하는 사람의 환경이 화면에 새지 않게: 정체·키·색·말·시간대는 데모의 것으로
 function demoEnv() {
-  const env = { ...process.env, MOAI_NO_UPDATE_CHECK: '1', MOAI_LANG: 'en', MOAI_CONFIG: path.join(repo, '.demo-home', 'config.toml') }
+  const env = { ...process.env, TZ: 'UTC', MOAI_NO_UPDATE_CHECK: '1', MOAI_LANG: 'en', MOAI_CONFIG: path.join(repo, '.demo-home', 'config.toml') }
   for (const k of ['MOAI_ACTOR', 'MOAI_KEYS', 'NO_COLOR', 'MOAI_NOW']) delete env[k]
   return env
 }
@@ -118,12 +117,29 @@ async function still(page, file, ...targets) {
   await page.emulateMedia({ reducedMotion: 'no-preference' })
 }
 
+let t0 = 0, lead = 0, posterTaken = false, sceneName = ''
+async function open(page) {
+  await page.goto(url)
+  await page.waitForSelector('[role="row"]')
+  lead = (Date.now() - t0) / 1000
+}
+
+async function poster(page) {
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  await page.evaluate(() => document.getElementById('demo-cursor')?.style.setProperty('visibility', 'hidden'))
+  await page.waitForTimeout(300)
+  await page.screenshot({ path: path.join(outDir, `web-${sceneName}.png`) })
+  await page.evaluate(() => document.getElementById('demo-cursor')?.style.removeProperty('visibility'))
+  await page.emulateMedia({ reducedMotion: 'no-preference' })
+  posterTaken = true
+}
+
 const scenes = {
   // 간트 (v0.25.0 의 소식, moai-vj8w.fuh). 계획한 날과 막는 줄은 plan.sh 가 단다 — 이 장면만 그것이 든 저장소를 받는다.
   // 마우스는 'Sync attachments larger than 10 MB' 를 겨눈다: 앞으로 잡힌 막대라 끌어 옮길 수 있고, 두 줄에 막혀 화살표가 선다
   async gantt(page) {
     const TARGET = 'Sync attachments larger than 10 MB'
-    await page.goto(url)
+    await open(page)
     await page.waitForTimeout(1200)
     await keys(page, 'Space', 'g', 'g')
     await page.waitForSelector('.m-gantt .lane .bar')
@@ -185,7 +201,7 @@ const scenes = {
   // v0.25.0 의 끌기와 같고, 다른 것은 뒤에서 옮겨진 줄도 거기서부터 옮겨 간다는 것이다. 계획한 날은 plan.sh 가 단다
   async drag(page) {
     const TARGET = 'Sync attachments larger than 10 MB'
-    await page.goto(url)
+    await open(page)
     await page.waitForTimeout(1000)
     await keys(page, 'Space', 'g', 'g')
     await page.waitForSelector('.m-gantt .lane .bar')
@@ -218,7 +234,7 @@ const scenes = {
   },
   // 이슈 패널의 Wiki 토막 (v0.27.0 의 소식, moai-0fai): 커밋 뒤에 그 이슈를 이름 댄 페이지와 관련 절이 선다
   async wikipanel(page) {
-    await page.goto(url)
+    await open(page)
     await page.waitForTimeout(1200)
     await glide(page, row(page, 'v1.4 — Sync'))
     await keys(page, 'Tab', 'Space', 'o', 'd', 'Escape')
@@ -232,7 +248,7 @@ const scenes = {
   },
   // 이슈 상세 읽기: 트리를 펼쳐 에픽과 이슈를 차례로 고르고, 본문·커밋·이력까지 내려 읽는다
   async detail(page) {
-    await page.goto(url)
+    await open(page)
     await page.waitForTimeout(1200)
     await glide(page, row(page, 'v1.4 — Sync'))
     await keys(page, 'Tab', 'Space', 'o', 'd', 'Escape')
@@ -250,7 +266,7 @@ const scenes = {
   },
   // 사용 방법의 칸반 절(moai-vlq7): 마일스톤마다 한 줄의 보드에서 칸을 건너고 카드를 골라 상세를 읽는다
   async board(page) {
-    await page.goto(url)
+    await open(page)
     await page.waitForTimeout(1200)
     await keys(page, 'Space', 'g', 'b')
     await page.waitForTimeout(2000)
@@ -263,7 +279,7 @@ const scenes = {
   },
   // 위키: 첫 페이지에서 링크를 따라가고, 본문의 이슈 id 를 눌러 그 이슈로 건너간다
   async wiki(page) {
-    await page.goto(url)
+    await open(page)
     await page.waitForTimeout(1200)
     await glide(page, page.getByText('Wiki', { exact: true }).first())
     await page.waitForTimeout(1200)
@@ -271,6 +287,7 @@ const scenes = {
     await page.waitForTimeout(2400)
     await glide(page, page.locator('.m-wiki-scroll').getByText('Sync protocol', { exact: true }).first())
     await page.waitForTimeout(2800)
+    await poster(page)
     await glide(page, page.locator('.m-wiki-scroll').getByText('Architecture', { exact: true }).first())
     await page.waitForTimeout(2600)
     await glide(page, page.locator('.m-wiki-scroll').getByText(ids.conflict, { exact: true }).first())
@@ -282,19 +299,16 @@ const browser = await chromium.launch()
 try {
   for (const [name, play] of Object.entries(scenes)) {
     if (process.env.SCENE && process.env.SCENE !== name) continue
-    const context = await browser.newContext({ viewport: SIZE, recordVideo: { dir: outDir, size: SIZE }, colorScheme: 'dark', deviceScaleFactor: 1 })
+    const context = await browser.newContext({ viewport: SIZE, recordVideo: { dir: outDir, size: SIZE }, colorScheme: 'dark', deviceScaleFactor: 1, timezoneId: 'UTC' })
     await context.addInitScript(CURSOR)
     const page = await context.newPage()
+    t0 = Date.now(); lead = 0; posterTaken = false; sceneName = name
     await play(page)
-    // 포스터도 빛줄기를 멈춰 찍는다 — 굳은 한 걸음은 검색이 친 자리로 읽힌다(moai-vj8w.fuh)
-    await page.emulateMedia({ reducedMotion: 'reduce' })
-    await page.evaluate(() => document.getElementById('demo-cursor')?.style.setProperty('visibility', 'hidden'))
-    await page.waitForTimeout(300)
-    await page.screenshot({ path: path.join(outDir, `web-${name}.png`) })
+    if (!posterTaken) await poster(page)
     const video = page.video()
     await context.close()
     renameSync(await video.path(), path.join(outDir, `web-${name}.webm`))
-    console.log('recorded', name)
+    console.log('recorded', name, 'lead', lead.toFixed(2))
   }
 } finally {
   await browser.close()

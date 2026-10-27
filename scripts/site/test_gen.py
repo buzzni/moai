@@ -210,6 +210,26 @@ How versions are picked — a note to contributors.
 
 
 class Site(unittest.TestCase):
+    def media_names(self):
+        return {
+            name for template in gen.HERE.glob("*.html")
+            for name in re.findall(r"assets/media/([\w.-]+)", template.read_text(encoding="utf-8"))
+        }
+
+    def test_every_media_file_the_pages_name_is_committed(self):
+        committed = {p.name for p in (gen.SITE / "assets/media").iterdir() if p.is_file()}
+        self.assertEqual(self.media_names() - committed, set())
+
+    def test_no_committed_media_file_is_left_unnamed(self):
+        committed = {p.name for p in (gen.SITE / "assets/media").iterdir() if p.is_file()}
+        self.assertEqual(committed - self.media_names(), set())
+
+    def test_record_site_builds_every_media_but_the_team_scene(self):
+        script = (gen.REPO / "scripts/site-demo/record-site.sh").read_text(encoding="utf-8")
+        media = re.search(r"\bMEDIA=\((.*?)\)", script, re.S)
+        self.assertIsNotNone(media)
+        self.assertEqual(set(media.group(1).split()), self.media_names() - {"tui-team.cast"})
+
     def test_the_committed_pages_are_what_the_generator_builds(self):
         # CI runs `gen.py --check` too; here it fails with the page named.
         for rel_path, text in gen.build_pages().items():
