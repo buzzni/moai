@@ -31520,6 +31520,9 @@ struct Served {
 
 impl Drop for Served {
     fn drop(&mut self) {
+        if let Ok(Some(status)) = self.child.try_wait() {
+            eprintln!("moai web 이 시험보다 먼저 끝났다 — {status:?}");
+        }
         let _ = self.child.kill();
         let _ = self.child.wait();
     }
@@ -31564,10 +31567,30 @@ fn serve_with(dir: &Path, tweak: impl FnOnce(&mut Command)) -> Served {
     Served { child, port, first }
 }
 
+/// 부하 때문에 한 번의 connect 가 지더라도 10초 안에서 다시 붙고, 끝내 못 붙으면 errno 를 남긴다.
+/// **connect 한 번도 남은 시한 안에서 끊는다** — 맨 `connect` 는 버려진 SYN 을 다시 보내며 2분 넘게 선다.
+fn dial(port: u16) -> std::net::TcpStream {
+    let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
+    let until = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    let mut attempts = 0;
+    loop {
+        attempts += 1;
+        // 0 은 `connect_timeout` 이 거절한다 — 시한을 넘긴 판도 한 번 더 재고 아래 단언으로 넘어진다.
+        let left = until.saturating_duration_since(std::time::Instant::now()).max(std::time::Duration::from_millis(1));
+        match std::net::TcpStream::connect_timeout(&addr, left) {
+            Ok(stream) => return stream,
+            Err(error) => {
+                assert!(std::time::Instant::now() < until, "127.0.0.1:{port} 에 {attempts}번 붙지 못했다 — {error:?}");
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+        }
+    }
+}
+
 /// 날 요청 하나 — `(상태, 머리, 본문)`. dev-dependency 없이 std `TcpStream` 으로.
 fn http(port: u16, method: &str, path: &str, host: Option<&str>) -> (u16, String, String) {
     use std::io::{Read as _, Write as _};
-    let mut s = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+    let mut s = dial(port);
     s.set_read_timeout(Some(std::time::Duration::from_secs(60))).unwrap();
     let host = host.map(|h| format!("Host: {h}\r\n")).unwrap_or_default();
     write!(s, "{method} {path} HTTP/1.1\r\n{host}\r\n").unwrap();
@@ -31586,7 +31609,7 @@ fn get(port: u16, path: &str) -> (u16, String, String) {
 /// 본문 없는 POST 하나 — `Origin` 을 줄 때만 싣는다. 브라우저가 보내는 꼴이다(읽음 표시, moai-ly88).
 fn post(port: u16, path: &str, origin: Option<&str>) -> (u16, String, String) {
     use std::io::{Read as _, Write as _};
-    let mut s = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+    let mut s = dial(port);
     s.set_read_timeout(Some(std::time::Duration::from_secs(60))).unwrap();
     let origin = origin.map(|o| format!("Origin: {o}\r\n")).unwrap_or_default();
     write!(s, "POST {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n{origin}Content-Length: 0\r\n\r\n").unwrap();
@@ -32458,8 +32481,7 @@ fn web_speaks_the_language_the_user_config_says_now() {
 fn web_answers_busy_past_the_cap_and_frees_the_slots() {
     let s = init("web-busy");
     let web = serve(s.path());
-    let idle: Vec<std::net::TcpStream> =
-        (0..32).map(|_| std::net::TcpStream::connect(("127.0.0.1", web.port)).unwrap()).collect();
+    let idle: Vec<_> = (0..32).map(|_| dial(web.port)).collect();
     let (status, _, body) = get(web.port, "/api/stamp");
     assert_eq!(status, 503, "{body}");
     assert_eq!(json_of(&body)["code"], "busy", "{body}");
@@ -32474,6 +32496,54 @@ fn web_answers_busy_past_the_cap_and_frees_the_slots() {
         assert!(std::time::Instant::now() < until, "자리가 안 돌아왔다 — {status} {body}");
         std::thread::sleep(std::time::Duration::from_millis(50));
     }
+}
+
+/// 503 뒤에 도착하는 요청도 끝까지 쓸 수 있다 — 받는 쪽이 이미 온 바이트만 비우고 닫으면 BrokenPipe 다.
+#[test]
+fn web_busy_waits_briefly_for_a_request_that_arrives_after_its_answer() {
+    use std::io::{Read as _, Write as _};
+    let s = init("web-busy-delayed");
+    let web = serve(s.path());
+    let _idle: Vec<_> = (0..32).map(|_| dial(web.port)).collect();
+    let mut client = dial(web.port);
+    client.set_read_timeout(Some(std::time::Duration::from_secs(10))).unwrap();
+    // 503 을 먼저 받았는지 확인한다 — connect 뒤 잠만 자면 서버가 아직 accept 전일 수도 있다.
+    let mut got = Vec::new();
+    while !got.ends_with(b"\r\n\r\n") {
+        let mut byte = [0];
+        client.read_exact(&mut byte).unwrap();
+        got.push(byte[0]);
+    }
+    assert!(got.starts_with(b"HTTP/1.1 503 "), "{}", String::from_utf8_lossy(&got));
+    // 503 을 읽었으니 요청은 이미 답 뒤에 간다. 쉬는 것은 짧게 둔다 — 서버가 기다리는 200ms 를 이 시험이 먼저
+    // 먹으면, CPU 할당이 막히는 부하에서 남은 몫 안에 못 닿아 고친 서버도 BrokenPipe 로 진다.
+    std::thread::sleep(std::time::Duration::from_millis(10));
+    // write! 도 여러 번 쓸 수 있다 — 첫 조각이 RST 를 부르면 다음 조각이 BrokenPipe 다.
+    for part in [b"GET ".as_slice(), b"/api/stamp", b" HTTP/1.1\r\n", b"Host: 127.0.0.1\r\n\r\n"] {
+        client.write_all(part).expect("503 뒤에 도착한 요청을 못 썼다");
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+    client.read_to_end(&mut got).expect("503 이 RST 로 덮였다");
+    let text = String::from_utf8(got).unwrap();
+    assert_eq!(json_of(text.split_once("\r\n\r\n").unwrap().1)["code"], "busy", "{text}");
+}
+
+/// 조용한 초과 연결이 쌓여도 다음 연결은 바로 503 을 받는다 — 받기 고리에서 200ms 씩 비우면 줄을 세운다.
+#[test]
+fn web_silent_overflow_clients_do_not_delay_the_next_accept() {
+    use std::io::Read as _;
+    let s = init("web-busy-accept");
+    let web = serve(s.path());
+    let _idle: Vec<_> = (0..32).map(|_| dial(web.port)).collect();
+    // 한 연결의 짧은 시한과 스케줄링 오차를 견주지 않는다. 직렬로 기다리면 총 6.4초인 줄을 만든다.
+    let _overflow: Vec<_> = (0..32).map(|_| dial(web.port)).collect();
+    let mut next = dial(web.port);
+    next.set_read_timeout(Some(std::time::Duration::from_secs(2))).unwrap();
+    let mut got = Vec::new();
+    next.read_to_end(&mut got).expect("조용한 초과 연결이 다음 accept 를 세웠다");
+    let text = String::from_utf8(got).unwrap();
+    assert!(text.starts_with("HTTP/1.1 503 "), "{text}");
+    assert_eq!(json_of(text.split_once("\r\n\r\n").unwrap().1)["code"], "busy", "{text}");
 }
 
 /// **위키의 낱말은 `wiki ls` 가 낸 그대로 연다** — 디렉터리 밑의 쪽(`guide/start`)과 한글 이름을 id 의 모양으로
