@@ -1217,14 +1217,14 @@ fn editor() -> Option<String> {
 }
 
 /// PATH 에 그 이름의 실행 파일이 있는가. **실행할 수 있는가는 [`super::runnable`] 이 답한다** —
-/// `skill` 과 같은 자다(moai-p3kb).
+/// `skill` 과 같은 자다(moai-p3kb). 훑는 걸음은 [`super::hits_in`] 이고, 빈 자리는 껍데기처럼 지금 자리로 센다.
 ///
 /// 여기서 `PATH` 를 제 손으로 훑는 것은 껍데기를 띄우지 않으려는 것이다. 편집기 후보가 여럿이고
 /// 띄울 때 한 번 고르는 자리라, 이름마다 `sh -c 'command -v'` 를 띄우면 그 값이 얻는 값보다 크다.
 #[cfg(unix)]
 fn on_path(name: &str) -> bool {
     let Some(dirs) = std::env::var_os("PATH") else { return false };
-    std::env::split_paths(&dirs).any(|d| super::runnable(&d.join(name)))
+    super::hits_in(std::env::split_paths(&dirs), name, &[], super::runnable).next().is_some()
 }
 
 /// 유닉스가 아닌 판의 [`on_path`] — **편집기를 띄울 길([`editor_command`])의 찾기를 그대로 탄다**(리뷰
