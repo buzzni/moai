@@ -17837,6 +17837,44 @@ fn a_row_this_session_picked_stays_its_own_beside_its_epics_worktree() {
     assert!(held.trim().is_empty(), "옆 워크트리의 일로 남을 붙든다\n{held}");
 }
 
+/// 옛 바이너리·셸 변수로 집어 기록이 빠진 리뷰를 거절 자리에서 되살린다(moai-jdwk.1a5).
+#[test]
+fn a_review_picked_outside_the_hook_passes_rule_3_beside_its_epics_worktree() {
+    let s = Scratch::new("review-outside-hook");
+    let main = s.path().join("main");
+    std::fs::create_dir_all(&main).unwrap();
+    git(&main, &["init", "-q"]);
+    ok(&main, &["init", "argos"]);
+    let epic = field(&ok(&main, &["epic", "add", "epic", "--json"]), "id");
+    let review = field(
+        &ok(&main, &["add", "review", "-t", "review", "--parent", &epic, "-b", "write path and hooks", "--json"]),
+        "id",
+    );
+    git(&main, &["add", "-A"]);
+    git(&main, &["commit", "-q", "-m", "setup"]);
+    git(&main, &["worktree", "add", "-q", &format!(".worktrees/{epic}"), "-b", &format!("worktree-{epic}")]);
+    ok(&main, &["mv", &review, "in_progress", "--from", "todo"]);
+    let skill = |session: &str| {
+        let input = format!(
+            "{{\"session_id\":{},\"cwd\":{},\"tool_name\":\"Skill\",\"tool_input\":{{\"skill\":\"code-review\",\"args\":\"max\"}}}}",
+            json_str(session),
+            json_str(&main.display().to_string())
+        );
+        String::from_utf8(hook_in(&s, &main, "pre-tool-use", &input).stdout).unwrap()
+    };
+    let why = refusal(&skill("a"));
+    let command = format!("moai mv {review} in_progress --from in_progress");
+    assert!(why.contains(&command) && why.contains("sibling worktree"), "{why}");
+    let cfg = s.path().join("hookcfg/config.toml");
+    let env = [("MOAI_CONFIG", cfg.to_str().unwrap()), ("CLAUDE_CODE_SESSION_ID", "a")];
+    ok_env(&main, NOW, &env, &["mv", &review, "in_progress", "--from", "in_progress"]);
+    let allowed = skill("a");
+    assert!(allowed.trim().is_empty(), "{allowed}");
+    let why = refusal(&skill("c"));
+    assert!(why.contains("another session picked it up last"), "{why}");
+    assert!(!why.contains(&command), "남의 집기를 뺏으라고 했다: {why}");
+}
+
 /// **루트에 선 세션이 워크트리가 선 일을 쥐면 루트 체크아웃의 쓰기를 그 워크트리로 돌린다**(moai-9js2.3xn, 리뷰
 /// moai-9js2.s4s). 막는 판은 `settle` 이 겹친 스냅샷으로 한 번 더 재는데, 그 판의 `Away` 는 `worktree::fresh` 가
 /// 새로 짓는다 — 자리(`homes`)를 옮겨 싣지 않으면 겹친 판이 풀어 거절이 아무에게도 안 닿는다. 단위 시험은 그
