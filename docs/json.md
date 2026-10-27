@@ -173,12 +173,12 @@ A whole tracker with bodies runs to megabytes — this repository's
 `moai show --archived --json` is over 2 MB. Two things cut it down:
 
 - `--fields id,title,status` keeps only those keys of each row, in that order
-  and each once. The costly keys it leaves out are not worked out: without
-  `work` a list skips the journals, and `moai show <id>` reads the wiki only
-  for `wiki` and asks git only for
-  `commits`. `moai show -g <word> --all --fields id --json` is a small list of
-  the ids a search found, notes included — `-g` still reads the notes it
-  searches
+  and each once. Values inside a kept key come out byte for byte as in the full
+  row, including the order of nested keys. The costly keys it leaves out are
+  not worked out: without `work` a list skips the journals, and `moai show <id>`
+  reads the wiki only for `wiki` and asks git only for `commits`.
+  `moai show -g <word> --all --fields id --json` is a small list of the ids a
+  search found, notes included — `-g` still reads the notes it searches
 - Paging: `--sort id -n <count> --after <last id>` reads the list a page at a
   time. Archived rows and live rows share one order, and an edit between pages
   does not move a row in id order, so the pages join into the whole list
@@ -193,4 +193,4 @@ A whole tracker with bodies runs to megabytes — this repository's
 - **Pages repeat or skip a row** — the order moved under you. Page in `id` or
   `created` order; priority and title move when someone edits a row
 
-Decided in: moai-ijjd, moai-wk7i, moai-g8pt
+Decided in: moai-b4dc, moai-ijjd, moai-wk7i, moai-g8pt
