@@ -8,7 +8,7 @@
  */
 import { createClient, PANEL_CLIENT_OPTIONS, PRIORITY, projectOf, requestKey, withProject, type Fetch, type Outcome } from './data/client.js'
 import { IssueIndex, type Row } from './data/index.js'
-import { createMemory, queryKeyOf, remember, settingsStorage, sortDefault } from './data/memory.js'
+import { createMemory, follow, queryKeyOf, remember, settingsStorage, sortDefault } from './data/memory.js'
 import { useNaming } from './data/people.js'
 import { headerProjects, projectHref, type ProjectEntry } from './data/projects.js'
 import { writePlan, type PlanChange } from './data/plan.js'
@@ -51,6 +51,7 @@ async function start(): Promise<void> {
   // page use it, else this session only (data/memory.ts); reading `window.localStorage` itself can throw, hence the getter.
   // The filter, the order, the cells and the hidden columns are this project's own (data/memory.ts queryKeyOf).
   remember(store, createMemory(() => window.localStorage), sortDefault, settingsStorage, queryKeyOf(project))
+  follow(store, window)
   // Every date is drawn in the zone picked here (`SPC o t`), else the TUI's, else the browser's (data/zone.ts). Set
   // before any view draws, and before the shell (subscribed after this) draws again on a change.
   let zoneDrawn = ''
