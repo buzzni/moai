@@ -151,6 +151,8 @@ impl Drop for Leave {
 fn turn_away(stream: &TcpStream, lang: Lang) {
     let _ = stream.set_write_timeout(Some(Duration::from_secs(1)));
     let _ = http::write(&mut &*stream, &refuse(503, say(lang, "web.busy"), code::BUSY), true);
+    // 요청을 비우는 동안에도 상대는 답 끝을 바로 본다. 읽기 쪽은 늦은 요청을 받을 수 있게 열어 둔다.
+    let _ = stream.shutdown(std::net::Shutdown::Write);
     // 이미 온 것만 비우고 닫으면 connect 뒤 밀린 상대가 요청을 쓰다가 BrokenPipe 를 받는다.
     // 답은 이미 정했다. 머리를 제한된 크기·시간 안에서 읽고 버리며, 해석 결과로 다시 답하지 않는다.
     let _ = read_head(stream, BUSY_READ_LIMIT);
@@ -221,7 +223,8 @@ impl std::io::Write for Within<'_> {
 
 /// 답을 쓴 뒤 닫는다. **안 읽은 바이트를 둔 채 닫으면 커널이 FIN 대신 RST 를 보낸다** — 머리를 안 읽은 503 과
 /// 머리를 다 안 읽은 400 이 그 꼴이라, 상대는 방금 쓴 답 대신 "연결이 끊겼다" 를 받았다(503 을 스무 번 불러 열여덟
-/// 번이 `ECONNRESET` 이었다). 쓰기를 먼저 닫아 FIN 을 답 바로 뒤에 붙이고, 이미 와 있는 것만 기다리지 않고 비운다.
+/// 번이 `ECONNRESET` 이었다). 쓰기를 닫아 FIN 을 보낸 뒤 이미 와 있는 것만 기다리지 않고 비운다.
+/// 503 은 [`turn_away`] 에서 답 직후에 쓰기를 닫고 늦은 요청을 짧게 기다린다 — 여기서는 그 닫기를 거듭해도 같다.
 fn close(stream: &TcpStream) {
     let _ = stream.shutdown(std::net::Shutdown::Write);
     if stream.set_nonblocking(true).is_err() {
