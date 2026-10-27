@@ -12,8 +12,32 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+### Added
+
+- **`moai tui --json --deep --no-gantt` reads the tree without chart values.**
+  The web page now asks `/api/tree?gantt=1` only while Gantt is active, and
+  fetches the values when that tab opens after a tree-only read. Other tabs
+  skip the chart calculation and its response data. (moai-ijjd.i7v)
+
+### Changed
+
+- **Open web tabs follow theme and time zone choices made in another tab.**
+  Each keeps its current tab, layout and query. (moai-ijjd.46f)
+
 ### Fixed
 
+- **Web Gantt bars keep the dropped plan while a write is pending.** Scrolling,
+  resizing or receiving an older read no longer snaps a moved bar back before
+  its write and refresh finish. (moai-ijjd.qe4)
+- **Web Gantt undo reverses the move.** The notice gives an inverse shift for
+  the moved edge, preserving changes to the other edge made since the page read
+  it. An edge absent at read time is cleared instead. (moai-ijjd.h55)
+- **Web timestamp filters use the page's time zone.** Days in `created`, `since`
+  and the other timestamp filters now agree with the dates drawn on the page
+  and the Gantt's lateness count. (moai-ijjd.7af)
+- **Web tabs preserve each other's saved settings.** Each tab patches only the
+  settings it changes, including per-project filter, sort, columns and view.
+  (moai-ijjd.46f)
 - A message given to `mv -m` or `defer -m` on a row that does not move is no
   longer lost in silence. When history cannot be written after only tidying the
   file, the call fails and names `moai note` to write the message again. A failed

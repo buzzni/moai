@@ -46,8 +46,14 @@ inside a basket), always counted from the root even when `--path` starts the
 walk lower. `--deep` needs `--json` and a
 `.moai`, and one-level listings carry no `home`.
 
-Under `--deep` every row with an id also carries `gantt`, what the Gantt charts
-draw, decided by moai so that a program drawing it judges no dates itself. Basket
+Add `--no-gantt` to `moai tui --deep --json` when only the tree is needed. It skips
+calculating the chart values and omits the `gantt` key, leaving the tree, its order
+and every other field intact. Both `--json` and `--deep` are required with
+`--no-gantt`; omitting either is refused.
+
+Under `--deep` without `--no-gantt`, every row with an id also carries `gantt`,
+what the Gantt charts draw, decided by moai so that a program drawing it judges no
+dates itself. Basket
 rows have none, and every key inside it always stands (`null` when there is no value):
 
 - `planned` — `{start, end, from}`: calendar days, either end may be `null`; `from`
@@ -187,4 +193,4 @@ A whole tracker with bodies runs to megabytes — this repository's
 - **Pages repeat or skip a row** — the order moved under you. Page in `id` or
   `created` order; priority and title move when someone edits a row
 
-Decided in: moai-wk7i, moai-g8pt
+Decided in: moai-ijjd, moai-wk7i, moai-g8pt

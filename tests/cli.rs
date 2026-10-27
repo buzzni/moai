@@ -31794,7 +31794,7 @@ fn web_rows_are_moais_show() {
     assert_eq!(json_of(&body)["exit"], 0, "{body}");
 }
 
-/// **`/api/tree` 는 `moai tui --deep --json` 이다**(moai-0aa7.a0l) — 정렬도 같은 낱말로 옮긴다.
+/// **`/api/tree?gantt=1` 는 `moai tui --deep --json` 이다**(moai-0aa7.a0l) — 정렬도 같은 낱말로 옮긴다.
 #[test]
 fn web_tree_is_tui_deep() {
     let s = init("web-tree");
@@ -31802,14 +31802,14 @@ fn web_tree_is_tui_deep() {
     ok(s.path(), &["add", "a 일"]);
     let web = serve(s.path());
     let direct = ok(s.path(), &["tui", "--deep", "--json"]);
-    let (status, _, body) = get(web.port, "/api/tree");
+    let (status, _, body) = get(web.port, "/api/tree?gantt=1");
     assert_eq!(status, 200, "{body}");
     assert_eq!(envelope_out(&body, &direct), direct.trim());
     let direct = ok(s.path(), &["tui", "--deep", "--sort", "title", "--json"]);
-    let (_, _, body) = get(web.port, "/api/tree?sort=title");
+    let (_, _, body) = get(web.port, "/api/tree?sort=title&gantt=1");
     assert_eq!(envelope_out(&body, &direct), direct.trim());
     let direct = ok(s.path(), &["tui", "--deep", "--sort", "title", "--reverse", "--json"]);
-    let (_, _, body) = get(web.port, "/api/tree?sort=title&reverse=1");
+    let (_, _, body) = get(web.port, "/api/tree?sort=title&reverse=1&gantt=1");
     assert_eq!(envelope_out(&body, &direct), direct.trim());
 }
 
@@ -31859,7 +31859,7 @@ fn web_tree_judges_overdue_in_the_zone_the_page_draws() {
         })
     };
     let overdue = |port: u16, query: &str| {
-        let (status, _, body) = get(port, &format!("/api/tree{query}"));
+        let (status, _, body) = get(port, &format!("/api/tree?gantt=1{}", query.replace('?', "&")));
         assert_eq!(status, 200, "{body}");
         let env = json_of(&body);
         assert_eq!(env["exit"], 0, "{body}");
@@ -31885,6 +31885,34 @@ fn web_tree_judges_overdue_in_the_zone_the_page_draws() {
         assert_eq!(overdue(seoul.port, "?tz=Nowhere%2FAtAll"), serde_json::json!(1), "못 여는 이름이 UTC 로 떨어졌다");
         assert_eq!(overdue(seoul.port, "?tz=%2B09%3A00"), serde_json::json!(1));
         assert_eq!(overdue(seoul.port, "?tz=UTC"), serde_json::Value::Null, "여는 이름은 그대로 페이지의 시간대다");
+    }
+}
+
+/// Timestamp filters and the drawn dates use the same page zone; calendar plan days stay zone independent.
+#[test]
+fn web_rows_filter_judges_days_in_the_zone_the_page_draws() {
+    let s = init("web-filter-zone");
+    let row = json_of(&ok_at(s.path(), "2026-10-10T20:00:00Z", &["add", "Zone row", "--json"]));
+    let id = row["id"].as_str().unwrap();
+    let thought = json_of(&ok_at(s.path(), "2026-10-10T20:00:00Z", &["backlog", "add", "Zone thought", "--json"]));
+    let backlog_id = thought["id"].as_str().unwrap();
+    let web = serve_with(s.path(), |cmd| {
+        cmd.env("TZ", "UTC");
+    });
+    let found = |path: &str, zone: &str, id: &str| {
+        let (status, _, body) = get(web.port, &format!("{path}?filter=created%3D2026-10-11&fields=id{zone}"));
+        assert_eq!(status, 200, "{body}");
+        let env = json_of(&body);
+        assert_eq!(env["exit"], 0, "{body}");
+        env["out"].as_array().unwrap().iter().any(|r| r["id"] == id)
+    };
+    for (path, id) in [("/api/rows", id), ("/api/backlog", backlog_id)] {
+        assert!(!found(path, "", id));
+        assert!(!found(path, "&tz=UTC", id));
+        let tzdb = std::env::var_os("TZDIR").map_or_else(|| PathBuf::from("/usr/share/zoneinfo"), PathBuf::from);
+        if tzdb.join("Asia/Seoul").exists() {
+            assert!(found(path, "&tz=Asia%2FSeoul", id));
+        }
     }
 }
 
@@ -32395,4 +32423,60 @@ fn web_children_do_not_repeat_the_climb_notice() {
     let env = json_of(&get(web.port, "/api/status").2);
     assert_eq!(env["exit"], 0, "{env}");
     assert!(env.get("said").is_none(), "{env}");
+}
+
+/// Gantt values are optional for JSON consumers; the web only asks when its chart tab is active.
+#[test]
+fn tui_no_gantt_omits_values_and_web_tree_opts_in() {
+    let s = init("tui-no-gantt");
+    let id = add(s.path(), &["Planned row", "--start", "2026-10-26", "--due", "2026-10-28"]);
+    let full = json_of(&ok(s.path(), &["tui", "--json", "--deep"]));
+    let lean = json_of(&ok(s.path(), &["tui", "--json", "--deep", "--no-gantt"]));
+    let row = |values: &serde_json::Value| values.as_array().unwrap().iter().find(|r| r["id"] == id).unwrap().clone();
+    assert!(row(&full).get("gantt").is_some());
+    assert!(row(&lean).get("gantt").is_none());
+    assert!(row(&lean).get("home").is_some());
+    let mut without = full.clone();
+    for row in without.as_array_mut().unwrap() {
+        row.as_object_mut().unwrap().remove("gantt");
+    }
+    assert_eq!(lean, without, "no-gantt must leave the tree and every other field intact");
+    let refused = moai(s.path(), &["tui", "--no-gantt"]);
+    assert!(!refused.status.success());
+    assert!(text(&refused).contains("--no-gantt"));
+
+    let web = serve(s.path());
+    for (query, wanted) in [("", false), ("?gantt=1", true)] {
+        let (status, _, body) = get(web.port, &format!("/api/tree{query}"));
+        assert_eq!(status, 200, "{body}");
+        let env = json_of(&body);
+        assert_eq!(env["exit"], 0, "{body}");
+        assert_eq!(row(&env["out"]).get("gantt").is_some(), wanted, "{body}");
+    }
+    let (status, _, body) = get(web.port, "/api/tree?gantt=0");
+    assert_eq!((status, json_of(&body)["code"].as_str()), (400, Some("bad_input")));
+}
+
+/// A shape flag that would be a no-op is refused with the same coded contract as the TUI's other JSON shapes.
+#[test]
+fn tui_no_gantt_requires_deep_and_json() {
+    let s = init("tui-no-gantt-shape");
+    for args in [&["tui", "--no-gantt"][..], &["tui", "--deep", "--no-gantt"][..]] {
+        let out = moai(s.path(), args);
+        assert!(!out.status.success(), "{out:?}");
+        assert!(text(&out).contains("--json"), "{out:?}");
+    }
+    let out = moai(s.path(), &["tui", "--json", "--no-gantt"]);
+    assert!(!out.status.success(), "{out:?}");
+    assert!(out.stdout.is_empty(), "a refusal must not print a successful listing");
+    let failure = json_of(&String::from_utf8_lossy(&out.stderr));
+    assert_eq!(failure["code"], "bad_filter", "{failure}");
+    let message = failure["error"].as_str().unwrap();
+    assert!(message.contains("--no-gantt") && message.contains("--deep"), "{message}");
+    let valid = ok(s.path(), &["tui", "--json", "--deep", "--no-gantt"]);
+    assert!(json_of(&valid).is_array());
+    let outside = Scratch::new("tui-no-gantt-outside");
+    let out = moai(outside.path(), &["tui", "--json", "--no-gantt"]);
+    assert!(!out.status.success());
+    assert!(text(&out).contains("--no-gantt"));
 }

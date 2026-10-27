@@ -2427,6 +2427,10 @@ pub struct TuiArgs {
     #[arg(long)]
     pub no_archive: bool,
 
+    /// Leave out gantt values - requires --json --deep
+    #[arg(long)]
+    pub no_gantt: bool,
+
     // **`--json` 의 목록만 거르고 늘어놓는다**(moai-wk7i.5wx) — 화면은 `SPC f`·`SPC s` 가 한다. 말은 `show` 의 것이다.
     #[command(flatten)]
     pub filter: FilterArgs,

@@ -17,7 +17,7 @@
  */
 import { assigneeOf } from '../data/people.ts'
 import { MEMORY_KEY, settingsStorage } from '../data/memory.ts'
-import { undoLine, type PlanChange } from '../data/plan.ts'
+import { undoOf, type PlanChange } from '../data/plan.ts'
 import { zoneNow } from '../data/zone.ts'
 import type { GanttRow, IssueIndex, Row } from '../data/index.ts'
 import { fill } from '../i18n/index.ts'
@@ -30,7 +30,7 @@ import {
   PX_PER_DAY, rangeOf, MIN_GRID, ROW_H, shiftPlan, wallAt, wallOf, weekends, widthOf, xOf, ZOOMS, zoomToFit, type Axis, type Edge, type GanttLine,
   type Placed, type Tick, type Zoom,
 } from './gantt-model.ts'
-import { narrow, revealOffset, statusGlyph, statusOf, twigParts, TWIG_TEXT } from './list-model.ts'
+import { narrow, revealOffset, statusGlyph, statusOf, twigParts, TWIG_TEXT, windowRange } from './list-model.ts'
 import type { MountPane, PaneView } from './types.ts'
 
 /** What the view reads from outside: the clock and the zone dates are drawn in. Tests replace them. */
@@ -49,9 +49,6 @@ const CLIP_INSET = 2
 const OVERSCAN_ROWS = 10
 /** The height assumed while the pane has none (hidden, or not laid out yet) — the window's and the keys' page size. */
 const FALLBACK_HEIGHT = 720
-
-/** A field the row may carry as text: the text, or null. */
-const text = (value: unknown): string | null => (typeof value === 'string' ? value : null)
 
 /**
  * A row the write cannot reach — `moai edit` finds a row in the main checkout's live snapshot only. With the worktree
@@ -140,12 +137,27 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
   let waiting: [State, IssueIndex | null] | null = null
   let drawLater = false
   /**
-   * A scroll left the window while a bar was held: the window is owed, not a draw. A draw() would place every bar again
-   * from the read before the write, the dropped one back at its old days; the window only rebuilds what the view left.
+   * A scroll left the window while a bar was held: the window is owed, not a draw. A draw() would place every bar and
+   * the axis again; the window only rebuilds what the view left.
    */
   let paintLater = false
   /** Rows whose planned days are being written: a bar drawn from the read before that write does not move again. */
   const writing = new Set<string>()
+  /** Dropped plans stay visible through window rebuilds until the write and its refresh finish. */
+  const moved = new Map<string, NonNullable<GanttRow['planned']>>()
+  const ganttOf = (row: Row): GanttRow | undefined => {
+    const planned = moved.get(row.id)
+    return planned && row.gantt ? { ...row.gantt, planned } : row.gantt
+  }
+  /**
+   * Where a row's bars stand, a pending move included. placeRow reads a milestone's `◆` off the row's own `due_on`, not
+   * off its plan, so the dropped deadline goes onto the row too: else the `◆` went back to its old day on the next
+   * window while the bar stayed where it was dropped.
+   */
+  const placeOf = (row: Row, now: number, zone: string | undefined): Placed => {
+    const planned = moved.get(row.id)
+    return placeRow(ganttOf(row), planned ? { ...row, due_on: planned.end ?? undefined } : row, now, zone)
+  }
 
   // ── frame ──
   const zoomButtons = new Map<Zoom, HTMLButtonElement>()
@@ -250,14 +262,14 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
     return node
   }
 
-  function draw(): void {
+  function draw(scrollTo?: (a: Axis) => number): void {
     if (!model || !state) return
     if (holding) return void (drawLater = true)
     drawLater = false
     const m = model
     const now = nowWall()
     const zone = clock.zone()
-    const placed = m.lines.map((line) => (line.kind === 'row' ? placeRow(m.index.rows[line.at]!.gantt, m.index.rows[line.at], now, zone) : null))
+    const placed = m.lines.map((line) => (line.kind === 'row' ? placeOf(m.index.rows[line.at]!, now, zone) : null))
     const was = axis
     if (!axis || axis.zoom !== zoom || !fresh(placed, now)) {
       const [from, to] = rangeOf(placed.map((p) => p?.span ?? null), now)
@@ -272,7 +284,8 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
     rowsBox.style.height = `${m.lines.length * ROW_H}px`
     // An axis that grew at its start (a new row reaches earlier) moves every date right: the same dates stay in view.
     // A new step is setZoom's and fit's to place.
-    if (was && was.zoom === a.zoom && was.from !== a.from) scroll.scrollLeft = Math.max(0, scroll.scrollLeft + xOf(a, was.from))
+    if (scrollTo) scroll.scrollLeft = scrollTo(a)
+    else if (was && was.zoom === a.zoom && was.from !== a.from) scroll.scrollLeft = Math.max(0, scroll.scrollLeft + xOf(a, was.from))
 
     const svg = doc.createElementNS(SVG, 'svg')
     svg.setAttribute('class', 'links')
@@ -293,16 +306,20 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
   /** What is in view now: the lines `[r0, r1)` and the dates' pixels `[x0, x1]`, with no margin. */
   function inView(): NonNullable<typeof drawn> {
     const total = model ? model.lines.length : 0
-    const top = scroll.scrollTop - HEAD_H
-    const height = scroll.clientHeight || FALLBACK_HEIGHT
+    const { start, end } = rowRange(total, 0)
     const x0 = scroll.scrollLeft
     return {
-      r0: Math.max(0, Math.min(total, Math.floor(top / ROW_H))),
-      r1: Math.max(0, Math.min(total, Math.ceil((top + height) / ROW_H))),
+      r0: start,
+      r1: end,
       x0,
       x1: x0 + viewWidth(),
     }
   }
+
+  const rowRange = (count: number, overscan: number) => windowRange({
+    scrollTop: scroll.scrollTop, viewport: scroll.clientHeight || FALLBACK_HEIGHT,
+    offset: HEAD_H, rowHeight: ROW_H, count, overscan,
+  })
 
   /** Whether everything in view stands among the nodes built. */
   function covered(): boolean {
@@ -329,9 +346,10 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
     const cursor = state.cursor
     const v = inView()
     const view = Math.max(v.x1 - v.x0, 120)
+    const rowsInWindow = rowRange(m.lines.length, OVERSCAN_ROWS)
     const win = {
-      r0: Math.max(0, v.r0 - OVERSCAN_ROWS),
-      r1: Math.min(m.lines.length, v.r1 + OVERSCAN_ROWS),
+      r0: rowsInWindow.start,
+      r1: rowsInWindow.end,
       x0: Math.max(0, v.x0 - view),
       x1: Math.min(widthOf(a), v.x1 + view),
     }
@@ -358,7 +376,7 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
     const lanes: HTMLElement[] = []
     for (let n = win.r0; n < win.r1; n++) {
       const line = m.lines[n]!
-      const g = line.kind === 'row' ? m.index.rows[line.at]!.gantt : undefined
+      const g = line.kind === 'row' ? ganttOf(m.index.rows[line.at]!) : undefined
       const p = b.placed[n] ?? null
       const grid = gridRow(m, line, g, cursor)
       grid.style.top = `${n * ROW_H}px`
@@ -578,9 +596,7 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
     const centre = wallAt(axis, scroll.scrollLeft + held)
     zoom = next
     axis = { ...axis, zoom }
-    draw()
-    scroll.scrollLeft = Math.max(0, xOf(axis, centre) - held)
-    paintView()
+    draw((a) => Math.max(0, xOf(a, centre) - held))
   }
 
   function goToday(): void {
@@ -597,10 +613,11 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
     if (next !== zoom) {
       zoom = next
       axis = { ...axis, zoom }
-      draw()
+      draw((a) => Math.max(0, xOf(a, span[0]) - 8))
+    } else {
+      scroll.scrollLeft = Math.max(0, xOf(axis, span[0]) - 8)
+      paintView()
     }
-    scroll.scrollLeft = Math.max(0, xOf(axis, span[0]) - 8)
-    paintView()
   }
 
   /** The first time the tab shows, the dates start at today; a hidden pane has no width to place them by. */
@@ -746,11 +763,11 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
    */
   function write(movePlan: NonNullable<typeof ctx.movePlan>, id: string, change: PlanChange, undo: string): void {
     writing.add(id)
-    // The bar stays where it was dropped until the rows are read again; a refusal draws it back.
-    const read = model
     void movePlan(id, change, undo).finally(() => {
       writing.delete(id)
-      if (model === read) draw()
+      moved.delete(id)
+      // Even a refresh drew the overlay: remove it to show the days moai measured inside its lock.
+      draw()
     })
   }
 
@@ -810,11 +827,17 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
         }
       } else {
         dragged = true
-        // The undo line puts back the days the page read: as the list printed them, or a row it did not print (one
-        // written between its read and the tree's) as the bar was drawn. moai measured the move itself from the row as
-        // it stood when written (moai-vj8w.02c), so a day another session moved after this read comes back with the undo.
-        const planned = g.planned?.from === 'own' ? g.planned : null
-        write(movePlan, row.id, { edge, days }, undoLine(row.id, text(row.starts_on) ?? planned?.start, text(row.due_on) ?? planned?.end))
+        moved.set(row.id, { start: change.start ?? g.planned!.start, end: change.due ?? g.planned!.end, from: 'own' })
+        const n = model?.lines.findIndex((line) => line.key === row.id) ?? -1
+        if (built && n >= 0) built.placed[n] = placeOf(row, built.now, clock.zone())
+        // The arrows into and out of the dropped bar are drawn from those days.
+        paintArrows()
+        // Invert the move rather than restoring the page's stale dates; the other edge stays as moai found it.
+        // The tree plan is the same picture shiftPlan used; the separately read list may disagree about absent edges.
+        write(movePlan, row.id, { edge, days }, undoOf(row.id, { edge, days }, {
+          start: g.planned?.start ?? null,
+          due: g.planned?.end ?? null,
+        }))
       }
       resume()
     })
@@ -834,7 +857,7 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
       // `--if-unplanned` writes nothing over it.
       if (writing.has(row.id)) return
       const day = dayText(floorDay(wallAt(a, event.clientX - lane.getBoundingClientRect().left)))
-      write(movePlan, row.id, { day }, undoLine(row.id, null, null))
+      write(movePlan, row.id, { day }, undoOf(row.id, { day }, { start: null, due: null }))
     })
   }
 
