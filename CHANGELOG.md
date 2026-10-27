@@ -45,7 +45,8 @@ does not tag — see `CONTRIBUTING.md`.
   so a client can receive the 503 response without a broken pipe while sending
   its request. The response ends immediately; at most four background drainers
   wait up to 200ms each, keeping silent clients off the accept loop. When all
-  drainers are busy, further overflow connections close immediately.
+  drainers are busy, further overflow connections close immediately, and a
+  request sent after that may still see a broken pipe.
   (moai-n8po.7e1)
 
 - **Skill shell commands keep repository paths together.** Supervisor, worker
