@@ -1238,15 +1238,17 @@ fn preview(w: &Warning, by_id: &BTreeMap<&str, &Issue>, now: &str, screen: Scree
     if w.kind == "due_beyond_parent" {
         for id in w.ids.iter().take(SHOW) {
             let Some(i) = by_id.get(id.as_str()) else { continue };
-            let Some((above, due)) = w.ceilings.get(id) else { continue };
-            let dates = crate::draft::at_form(i.starts_on.as_deref(), i.due_on.as_deref()).unwrap_or_default();
+            // 날도 천장도 **판정한 줄의 것**을 읽는다([`crate::report::Warning::ceilings`]) — `by_id` 의 날을 내면 쌍둥이에서
+            // 두 줄의 값이 한 줄에 섞인다.
+            let Some(over) = w.ceilings.get(id) else { continue };
+            let dates = crate::draft::at_form(over.starts_on.as_deref(), over.due_on.as_deref()).unwrap_or_default();
             out.push(format!(
                 "    {}  {}   {}  > {} {}",
                 paint(style::ID, id),
                 marked(screen.branch(id), &i.title, TITLE_CAP, style::PLAIN).0,
                 paint(style::DIM, &dates),
-                paint(style::ID, above),
-                paint(style::DIM, due),
+                paint(style::ID, &over.above),
+                paint(style::DIM, &over.above_due),
             ));
         }
         let rest = w.ids.len().saturating_sub(SHOW);

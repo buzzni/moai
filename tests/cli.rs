@@ -13284,13 +13284,18 @@ fn what_came_from_what_lives_in_the_journal() {
     assert!(shown.contains(&epic), "이력이 무엇이 나왔는지 안 말한다 — {shown}");
     assert!(!line_of(s.path(), &id).contains("spawned"), "파생값을 줄에 적었다");
     // guide::REPORT_WATCH reserves this colon for the Codex worker, not tool-generated history.
+    // The watch reads `kind == "note"` entries and their `text`; count what it would read so the
+    // loop cannot pass by finding nothing (the epic's `Unfolded from` note must be among them).
+    let mut unfolded = 0;
     for row_id in [&id, &epic] {
         let row: serde_json::Value = serde_json::from_str(&ok(s.path(), &["show", row_id, "--json"])).unwrap();
         for note in row["journal"].as_array().unwrap().iter().filter(|n| n["kind"] == "note") {
             let head = note["text"].as_str().unwrap_or_default().lines().next().unwrap_or_default();
             assert!(!head.starts_with("Unfolded:"), "tool history looks like a worker report: {note}");
+            unfolded += usize::from(head.starts_with("Unfolded"));
         }
     }
+    assert!(unfolded > 0, "no tool-written `Unfolded` note was read — the guard above checked nothing");
 }
 
 /// `--dry-run` 은 아무것도 만들지 않는다. AI 가 펼친 안을 사람이 한 번 보고

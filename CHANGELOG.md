@@ -22,7 +22,9 @@ does not tag — see `CONTRIBUTING.md`.
 ### Changed
 
 - Deferred ancestors, including ancestors under a deferred group, no longer cap
-  a descendant's planned dates. Restoring them restores their deadline ceilings.
+  a descendant's planned dates, and `moai due apply` no longer raises a row by
+  their deadlines. Restoring them restores their deadline ceilings; rows that now
+  pass one stand as `due_beyond_parent` on `moai status`.
   Plan words beginning with `@` and a fullwidth digit are treated as dates and
   rejected with a line number unless escaped as title text. (moai-lj8g.qrb)
 

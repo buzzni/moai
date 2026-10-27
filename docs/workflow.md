@@ -143,10 +143,12 @@ A member's deadline cannot pass its epic's, nor an epic's its milestone's — th
 is refused and names the day to give instead. A start is held to the same ceiling: it cannot
 fall after the deadline above it, though it may begin before the parent does.
 Deferred ancestors, including those under a deferred group, set no ceiling until
-you restore them. Restoring a deferral keeps the plans you wrote and warns about
-any that now exceed an ancestor. As deadlines near, `moai due apply`
+you restore them. Restoring a deferral keeps the plans you wrote; `moai status`
+names any that now exceed an ancestor (`due_beyond_parent`) — the undo itself does
+not. As deadlines near, `moai due apply`
 raises the priority of each open, not deferred issue and backlog item by the deadline
-it follows — the earliest of its own and those of its milestone, epic and open parent (one day
+it follows — the earliest of its own and those of its milestone, epic and open parent
+that are not deferred (one day
 left or less — today and past included — is `p0`, two or less `p1`, seven or less `p2`)
 and notes why on the row; it never lowers one. So the day `--due` puts on an epic bounds
 the work and raises its members as it nears. Nothing runs it for you — run it when `moai status` says rows lag their

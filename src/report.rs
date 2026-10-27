@@ -5005,6 +5005,15 @@ fn far_ahead(i: &Issue, now: &str) -> bool {
     .any(|t| t - now > FUTURE_SLACK_SECS)
 }
 
+/// `due_beyond_parent` 의 한 줄 — 판정한 줄의 날(시작·기한)과 그 줄이 넘긴 조상의 id·기한([`Warning::ceilings`]).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Overrun {
+    pub starts_on: Option<String>,
+    pub due_on: Option<String>,
+    pub above: String,
+    pub above_due: String,
+}
+
 /// 드러난 것 하나. `kind` 가 **타입 붙은 열거값**이라 받는 쪽이 산문을
 /// 파싱하지 않고 분기한다.
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -5048,9 +5057,11 @@ pub struct Warning {
     /// 한다 — `ages` 와 같은 자다.
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     pub deadlines: BTreeMap<String, String>,
-    /// id → 넘긴 조상의 id 와 기한. 보드 미리보기만 쓰며 JSON 계약은 그대로다.
+    /// id → 판정한 줄의 날과 넘긴 조상(`due_beyond_parent`). 보드 미리보기만 쓰며 JSON 계약은 그대로다.
+    /// **줄의 날도 판정한 자리가 싣는다** — `ages`·`deadlines` 와 같은 자다. 보이는 쪽이 `by_id`(뒷줄)에서 날을 다시
+    /// 읽으면, 같은 종류의 쌍둥이 가운데 앞줄만 넘쳤을 때 넘지 않은 뒷줄의 날 곁에 앞줄의 천장이 선다.
     #[serde(skip)]
-    pub ceilings: BTreeMap<String, (String, String)>,
+    pub ceilings: BTreeMap<String, Overrun>,
     /// 고칠 것이 아니라 알려 주는 것. **`fatal` 옆에 데이터로 둔다** —
     /// 이 판단이 `view` 에만 있으면 `view` 를 건너뛴 표면(TUI·`--json`)이
     /// 알림을 경고로 세고, 담을수록 화면이 시끄러워진다.
@@ -6274,8 +6285,7 @@ fn status_in_scope<'a, 'c>(
     // 훅의 도구 호출마다 한 벌 더 지었고, 아카이브의 조상까지 세어 쓰기가 받은 줄을 꾸짖었다). 닫힌 줄과 계획 밖의
     // 줄은 안 센다 — 고칠 까닭이 없는 기한이다. 계획 밖인가는 줄에 묻고(`off`, moai-u3ta), 가려진 줄은
     // `duplicate_id` 가 따로 댄다.
-    let mut ceilings = BTreeMap::new();
-    let beyond: Vec<&Issue> = match ladder {
+    let beyond: Vec<(&Issue, Ceiling<'_>)> = match ladder {
         None => Vec::new(),
         Some(ladder) => issues
             .iter()
@@ -6283,16 +6293,25 @@ fn status_in_scope<'a, 'c>(
             .filter(|(k, i)| i.plan_days().next().is_some() && visible(i) && off[*k].is_none() && !eclipsed(i))
             .map(|(_, i)| i)
             .filter(|i| column(i, &states) != crate::config::DONE)
-            .filter(|i| {
-                let Some(c) = ladder.beyond_row(i) else { return false };
-                ceilings.insert(i.id.clone(), (c.above.id.clone(), c.due.to_string()));
-                true
-            })
+            .filter_map(|i| ladder.beyond_row(i).map(|c| (i, c)))
             .collect(),
     };
     if !beyond.is_empty() {
-        let mut warning = Warning::new("due_beyond_parent", ids_of(&beyond));
-        warning.ceilings = ceilings;
+        let rows: Vec<&Issue> = beyond.iter().map(|(i, _)| *i).collect();
+        let mut warning = Warning::new("due_beyond_parent", ids_of(&rows));
+        // 같은 id 의 줄이 둘 다 넘쳤으면 파일의 뒷줄이 이긴다 — 날과 천장은 늘 **한 줄**의 것이다.
+        warning.ceilings = beyond
+            .iter()
+            .map(|(i, c)| {
+                let over = Overrun {
+                    starts_on: i.starts_on.clone(),
+                    due_on: i.due_on.clone(),
+                    above: c.above.id.clone(),
+                    above_due: c.due.to_string(),
+                };
+                (i.id.clone(), over)
+            })
+            .collect();
         warnings.push(warning);
     }
     let dangling_blockers: Vec<&Issue> =
@@ -6635,6 +6654,26 @@ mod tests {
             assert_eq!(ladder.open_ceiling(&all[3]).map(|c| c.above.id.as_str()), expected, "priority ceiling");
             assert_eq!(first_beyond(&all, &[all[3].id.as_str()]).map(|(_, c)| c.above.id.as_str()), expected);
         }
+    }
+
+    /// **`due_beyond_parent` 의 날은 판정한 줄의 것이다**(에픽 끝 리뷰) — 같은 종류의 쌍둥이 가운데 앞줄만 넘쳤으면,
+    /// 보드가 읽는 날은 넘지 않은 뒷줄(`by_id`)의 것이 아니라 넘친 앞줄의 것이다. 날과 천장이 한 줄에서 온다.
+    #[test]
+    fn a_beyond_preview_carries_the_dates_of_the_line_it_judged() {
+        let mut e = make("argos-eeee", Kind::Epic, "todo");
+        e.due_on = Some("2026-10-20".into());
+        let mut over = make("argos-eeee.aaaa", Kind::Issue, "todo");
+        over.due_on = Some("2026-10-30".into());
+        let mut within = over.clone();
+        within.due_on = Some("2026-10-10".into());
+        let all = vec![e, over, within];
+        let st = status(&all, &[], &cfg(), "2026-10-01T00:00:00Z", utc());
+        let w = st.warnings.iter().find(|w| w.kind == "due_beyond_parent").expect("넘친 줄의 경고가 없다");
+        let got = w.ceilings.get("argos-eeee.aaaa").expect("천장을 안 실었다");
+        assert_eq!(
+            (got.due_on.as_deref(), got.above.as_str(), got.above_due.as_str()),
+            (Some("2026-10-30"), "argos-eeee", "2026-10-20")
+        );
     }
 
     /// 기한이 부르는 우선순위(moai-dr8a.7rs) — 문턱은 "이하" 고, 올리기만 한다.

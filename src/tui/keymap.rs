@@ -146,9 +146,14 @@ pub fn notice(problems: &[Problem], file: Option<&Path>, lang: Lang) -> Option<S
 pub fn fill_names(text: &str, keys: &Keymap) -> Result<String, String> {
     let mut out = String::with_capacity(text.len());
     let mut rest = text;
-    while let Some((at, open)) =
-        ["{key:", "{spc:"].into_iter().filter_map(|open| rest.find(open).map(|at| (at, open))).min_by_key(|(at, _)| *at)
-    {
+    // 틀을 **한 번 앞으로** 찾는다 — 틀마다 두 갈래를 따로 찾으면 마지막 `{spc:` 뒤로는 그 찾기가 남은 글 끝까지를
+    // `{key:` 마다 다시 훑는다(도움말 천 줄에 틀 수백 개).
+    let next = |rest: &str| {
+        rest.match_indices('{').find_map(|(at, _)| {
+            ["{key:", "{spc:"].into_iter().find(|open| rest[at..].starts_with(open)).map(|o| (at, o))
+        })
+    };
+    while let Some((at, open)) = next(rest) {
         out.push_str(&rest[..at]);
         let after = &rest[at + open.len()..];
         let end = after.find('}').ok_or_else(|| format!("unclosed key template: {}", &rest[at..]))?;
