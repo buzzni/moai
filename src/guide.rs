@@ -388,8 +388,9 @@ const TRACKER_IN_GIT: &str = "git -C \"<root>\" ls-files --error-unmatch -- .moa
 const PATH_QUOTES: &str = r##"`<root>` and `<cwd>` stand in double quotes on every shell line here, so a path with a
 space stays one word. Double quotes still read `"`, `$`, a backtick and `\`: a path holding
 any of them is not one these lines can carry — build none, and tell the person which path
-it is. Inside cmux's `--command '…'` the path sits inside single quotes as well: write each
-`'` in it as `'\''` there."##;
+it is. A Windows path (`C:\Users\…`) is the one exception for `\`: double quotes keep a
+single `\` between two names as it is. Inside cmux's `--command '…'` the path sits inside
+single quotes as well: write each `'` in it as `'\''` there."##;
 
 /// 그 답을 일꾼이 어떻게 읽는가 — "Before the steps" 에 한 번 선다. **한 걸음의 커밋에 매지 않는다**(리뷰 moai-nzmp.nfj) —
 /// 그때는 2 가 집기를 커밋해 `from "Carrying on stalled work"` 로 든 일꾼은 2 를 안 지나 묻지 않은 채 8·10 의 커밋에서
@@ -2502,7 +2503,8 @@ root = os.path.realpath(os.path.join(sys.argv[1], os.path.relpath(here, top)))
 print("root dir", root)
 if os.path.relpath(here, top) != ".":
     print("subdir", os.path.relpath(here, top))
-if any(c in root for c in ('"', '$', chr(96), chr(92))):
+unsafe = ['"', '$', chr(96)] + ([] if os.sep == chr(92) else [chr(92)])
+if any(c in root for c in unsafe) or chr(92) * 2 in root or root.endswith(chr(92)):
     print("unquotable root", root)
 PY
 ```
@@ -3109,7 +3111,10 @@ def moved(sid):
 for sid in sorted(cleared):
     stamp, command = cleared[sid]
     if stamp + 10000 > moved(sid):
-        when = datetime.fromtimestamp(stamp / 1000, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        try:
+            when = datetime.fromtimestamp(stamp / 1000, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        except (OverflowError, OSError, ValueError):
+            when = str(stamp)
         print(f"{sid}\t{command}\t{when}")
 PY"##;
 
@@ -4412,13 +4417,6 @@ leaves its record behind. The lines below print one row per record, tab-separate
 - A **candidate** is a `dead` row with a `sessionId` whose `cwd` is the root or one of the
   worktrees `git worktree list` names. Two dead records with the same `sessionId` are one
   candidate
-
-{PATH_QUOTES}
-
-If a candidate's `cwd` holds any of those four characters, open no pane or tab for it and
-print no command for it in 7 or 8. Tell the person its path and `sessionId`, so they can
-quote it by hand and bring it back themselves.
-
 - **Drop it when it is back already** — a live row carries the same `sessionId` (`--resume`
   keeps the id), **your own row included**: a session the person resumed first and then asked
   for this is back already, and resuming it again puts one conversation in two windows. In a
@@ -4447,6 +4445,13 @@ quote it by hand and bring it back themselves.
   and bring one back only if the person says so
 - When several candidates stand in the same `cwd`, ask the person **once** — one question
   for all of them — which to bring back
+
+{PATH_QUOTES}
+
+If a candidate still standing after the drops above has a `cwd` holding any of those
+characters, build no shell line on that `cwd` — no `git -C`, `readlink` or `test -e` in 2
+and 3, no pane or tab, no line of 7. Tell the person its path and `sessionId`, so they can
+quote it by hand and bring it back themselves.
 
 **A Saycode session** comes back through Saycode (8), never in a pane — resumed in a pane, its
 conversation would run outside Saycode while the Saycode session stays ended. Its transcript
@@ -4501,9 +4506,10 @@ line — and look at where it stood:
 
 Show the person **one table**, a row per session: role, name, `cwd`, work id, what it was
 waiting for, died at, uncommitted files — and the Saycode id of a Saycode session.
-Under the table, name what 1 left out in one line: each `sessionId` and `cwd`, the command
-and UTC time for a conversation left, or that it is an older crash. Bring one back when the
-person names it. Then go on — they asked for recovery already.
+Under the table, name in one line what 1 dropped as left or as an older crash — not what is
+back already: each `sessionId` and `cwd`, with the command and UTC time for a conversation
+left, or that it is an older crash. Bring one back when the person names it. Then go on —
+they asked for recovery already.
 
 ## 3. Point out what died with it
 
@@ -8373,7 +8379,8 @@ stop sending outside work while a release runs",
 
     /// **죽은 뒤 `/clear` 된 대화는 되살리지 않는다**(moai-jn8d.vyh). 고리는 `history.jsonl` 의 `/clear` 줄이 든 옛 id 다 —
     /// 대화 기록의 끝을 읽던 첫 규칙은 틀려 걷었다. 비운 뒤 다시 움직인 대화는 남고, 대화 기록이 없는 id 는 비운 것이다.
-    /// `/new` 도 비운 것이고, 끊긴 턴이 비운 직후에 적는 줄은 움직인 것이 아니다.
+    /// `/new` 도 비운 것이고, 끊긴 턴이 비운 직후에 적는 줄은 움직인 것이 아니다. `/resume`·`/continue` 로 떠난 대화도
+    /// 같이 빠지고(moai-1m21.hxm), 뺀 것은 명령·UTC 때와 함께 나와 표 밑에서 이름이 불린다.
     #[test]
     #[cfg(unix)]
     fn the_recover_skill_drops_a_conversation_left_after_it_died() {
@@ -8387,9 +8394,15 @@ stop sending outside work while a release runs",
             assert!(dead.contains(command));
         }
         let table = section(&text, "## 2. Draw the state each was in");
-        for part in
-            ["Under the table", "each `sessionId` and `cwd`", "command", "UTC time", "older crash", "person names it"]
-        {
+        for part in [
+            "Under the table",
+            "not what is\nback already",
+            "each `sessionId` and `cwd`",
+            "the command",
+            "UTC time",
+            "older crash",
+            "person names it",
+        ] {
             assert!(table.contains(part), "제외한 대화의 사유가 안 보인다 — {part}");
         }
         // 고리는 `history.jsonl` 이다 — 첫 규칙은 대화 기록의 끝을 읽어 틀렸다(리뷰 moai-jn8d.d79 1번).
@@ -9487,6 +9500,7 @@ stop sending outside work while a release runs",
                     "cd <root>",
                     "cd <cwd>",
                     "<script> <root>",
+                    "bash <script>",
                     "readlink <cwd>",
                     "test -e <cwd>",
                     "-c <root>",
@@ -9499,7 +9513,14 @@ stop sending outside work while a release runs",
         assert!(supervise().contains(PATH_QUOTES));
         assert!(recover().contains(PATH_QUOTES));
         assert!(supervise().contains("stop this round"));
-        assert!(recover().contains("print no command for it in 7 or 8"));
+        // 못 싸는 `cwd` 는 빠질 것을 다 뺀 뒤의 후보에만 선다 — 앞에 서면 이미 돌아온 대화까지 사람에게
+        // 손으로 되살리라고 넘긴다. 셸 줄은 2·3 의 읽기까지 안 짓고, `cwd` 가 안 드는 8 은 그대로 둔다.
+        let text = recover();
+        let dead = section(&text, "## 1. Find the dead");
+        let unquotable = dead.find("If a candidate still standing after the drops above").unwrap();
+        assert!(unquotable > dead.find("**Drop old crashes.**").unwrap(), "못 싸는 경로가 빼기보다 앞에 선다");
+        assert!(dead[unquotable..].contains("no `git -C`, `readlink` or `test -e` in 2\nand 3"));
+        assert!(!dead.contains("in 7 or 8"), "cwd 가 안 드는 Saycode 의 줄까지 거둔다");
         let cmux = cmux();
         for heading in ["## No idle worker left", "### Open a Codex worker"] {
             assert!(section(&cmux, heading).contains(r"'\''"));
@@ -9514,7 +9535,8 @@ stop sending outside work while a release runs",
         let text = supervise();
         let at = text.find("python3 - \"$(git worktree list --porcelain | sed").unwrap();
         let python = text[at..].split_once("<<'PY'\n").unwrap().1.split("\nPY").next().unwrap();
-        let scratch = crate::scratch::Scratch::new("root-quotes");
+        // 파이썬은 `realpath` 로 낸다 — macOS 의 임시 자리는 `/private` 로 가는 링크라 푼 자리로 견준다.
+        let scratch = crate::scratch::Scratch::real("root-quotes");
         for (name, unsafe_path) in [
             ("space and ' quote", false),
             ("double\"quote", true),

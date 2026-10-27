@@ -174,8 +174,8 @@ and wait on each other to merge.
 - **Claude Code does not enter it.** Every `EnterWorktree` into `.worktrees/`
   asks the person to approve it, and no allow rule turns that off, so a Claude
   session — a worker or a person's own — stays in the root and reaches the
-  worktree by absolute path (`git -C <root>/.worktrees/<epic> …`, absolute paths
-  for every file edit, and `(cd <root>/.worktrees/<epic> && …)` for a tool that
+  worktree by absolute path (`git -C "<root>/.worktrees/<epic>" …`, absolute paths
+  for every file edit, and `(cd "<root>/.worktrees/<epic>" && …)` for a tool that
   needs the directory) (moai-9js2). The parentheses matter in a session: its
   shell keeps a `cd` into the next call, while a subagent's starts in the root
   again every time. The hook's rule 2 takes over part of the isolation guard it

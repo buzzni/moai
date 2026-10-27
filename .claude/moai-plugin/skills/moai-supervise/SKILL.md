@@ -379,7 +379,8 @@ root = os.path.realpath(os.path.join(sys.argv[1], os.path.relpath(here, top)))
 print("root dir", root)
 if os.path.relpath(here, top) != ".":
     print("subdir", os.path.relpath(here, top))
-if any(c in root for c in ('"', '$', chr(96), chr(92))):
+unsafe = ['"', '$', chr(96)] + ([] if os.sep == chr(92) else [chr(92)])
+if any(c in root for c in unsafe) or chr(92) * 2 in root or root.endswith(chr(92)):
     print("unquotable root", root)
 PY
 ```
@@ -387,8 +388,9 @@ PY
 `<root>` and `<cwd>` stand in double quotes on every shell line here, so a path with a
 space stays one word. Double quotes still read `"`, `$`, a backtick and `\`: a path holding
 any of them is not one these lines can carry — build none, and tell the person which path
-it is. Inside cmux's `--command '…'` the path sits inside single quotes as well: write each
-`'` in it as `'\''` there.
+it is. A Windows path (`C:\Users\…`) is the one exception for `\`: double quotes keep a
+single `\` between two names as it is. Inside cmux's `--command '…'` the path sits inside
+single quotes as well: write each `'` in it as `'\''` there.
 
 If `unquotable root` is printed, stop this round and tell the person that path. Send no
 assignment with that `Root:`; the person handles its quoting.

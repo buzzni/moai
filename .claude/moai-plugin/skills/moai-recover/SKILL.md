@@ -173,17 +173,6 @@ PY
 - A **candidate** is a `dead` row with a `sessionId` whose `cwd` is the root or one of the
   worktrees `git worktree list` names. Two dead records with the same `sessionId` are one
   candidate
-
-`<root>` and `<cwd>` stand in double quotes on every shell line here, so a path with a
-space stays one word. Double quotes still read `"`, `$`, a backtick and `\`: a path holding
-any of them is not one these lines can carry — build none, and tell the person which path
-it is. Inside cmux's `--command '…'` the path sits inside single quotes as well: write each
-`'` in it as `'\''` there.
-
-If a candidate's `cwd` holds any of those four characters, open no pane or tab for it and
-print no command for it in 7 or 8. Tell the person its path and `sessionId`, so they can
-quote it by hand and bring it back themselves.
-
 - **Drop it when it is back already** — a live row carries the same `sessionId` (`--resume`
   keeps the id), **your own row included**: a session the person resumed first and then asked
   for this is back already, and resuming it again puts one conversation in two windows. In a
@@ -245,7 +234,10 @@ def moved(sid):
 for sid in sorted(cleared):
     stamp, command = cleared[sid]
     if stamp + 10000 > moved(sid):
-        when = datetime.fromtimestamp(stamp / 1000, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        try:
+            when = datetime.fromtimestamp(stamp / 1000, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        except (OverflowError, OSError, ValueError):
+            when = str(stamp)
         print(f"{sid}\t{command}\t{when}")
 PY
 ```
@@ -255,6 +247,18 @@ PY
   and bring one back only if the person says so
 - When several candidates stand in the same `cwd`, ask the person **once** — one question
   for all of them — which to bring back
+
+`<root>` and `<cwd>` stand in double quotes on every shell line here, so a path with a
+space stays one word. Double quotes still read `"`, `$`, a backtick and `\`: a path holding
+any of them is not one these lines can carry — build none, and tell the person which path
+it is. A Windows path (`C:\Users\…`) is the one exception for `\`: double quotes keep a
+single `\` between two names as it is. Inside cmux's `--command '…'` the path sits inside
+single quotes as well: write each `'` in it as `'\''` there.
+
+If a candidate still standing after the drops above has a `cwd` holding any of those
+characters, build no shell line on that `cwd` — no `git -C`, `readlink` or `test -e` in 2
+and 3, no pane or tab, no line of 7. Tell the person its path and `sessionId`, so they can
+quote it by hand and bring it back themselves.
 
 **A Saycode session** comes back through Saycode (8), never in a pane — resumed in a pane, its
 conversation would run outside Saycode while the Saycode session stays ended. Its transcript
@@ -309,9 +313,10 @@ line — and look at where it stood:
 
 Show the person **one table**, a row per session: role, name, `cwd`, work id, what it was
 waiting for, died at, uncommitted files — and the Saycode id of a Saycode session.
-Under the table, name what 1 left out in one line: each `sessionId` and `cwd`, the command
-and UTC time for a conversation left, or that it is an older crash. Bring one back when the
-person names it. Then go on — they asked for recovery already.
+Under the table, name in one line what 1 dropped as left or as an older crash — not what is
+back already: each `sessionId` and `cwd`, with the command and UTC time for a conversation
+left, or that it is an older crash. Bring one back when the person names it. Then go on —
+they asked for recovery already.
 
 ## 3. Point out what died with it
 

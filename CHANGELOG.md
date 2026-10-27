@@ -28,7 +28,8 @@ does not tag — see `CONTRIBUTING.md`.
 
 - **Skill shell commands keep repository paths together.** Supervisor, worker
   and recovery commands quote paths with spaces. A path holding `"`, `$`, a
-  backtick or `\` is handed to the person instead of building a shell command;
+  backtick or `\` (a Windows path's separators aside) is handed to the person
+  instead of building a shell command;
   cmux commands explain how to escape an apostrophe inside their outer single
   quotes. (moai-1m21.cqb)
 - **`moai-recover` leaves conversations moved off with `/resume` or `/continue`

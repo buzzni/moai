@@ -490,9 +490,15 @@ parks it as a backlog item under its own epic and reports `member refused:`; the
 supervisor unfolds it into that epic.
 
 **A repository can keep `.moai` out of git** (`.gitignore`, `.git/info/exclude`).
-The supervisor and the worker ask `git -C <root> ls-files --error-unmatch --
+The supervisor and the worker ask `git -C "<root>" ls-files --error-unmatch --
 .moai/issues.jsonl` once; on a non-zero code they skip every tracker commit and
 the tracker lives in the root's file alone.
+
+**A root path the shell lines cannot carry stops the round.** Every shell line the
+supervisor and the workers build puts the root in double quotes, so a space in it
+is fine. A root holding `"`, `$`, a backtick or `\` (a Windows path's separators
+aside) is not: the supervisor stops the round, names the path and sends nothing,
+and the quoting is yours.
 
 **The hook reads a subagent worker as the supervisor.** A subagent's tool calls
 carry the supervisor's session, so the rows it picks up are the supervisor's
