@@ -57,11 +57,11 @@ pub struct Profile {
     pub route: &'static str,
     pub head: &'static [&'static str],
     pub params: &'static [Param],
-    /// 아카이브를 **달라고 한 때만** 싣는 끝점이다(`/api/tree`, moai-m4ez.4zq) — 다른 끝점은 `archived=1` 을 줘야 싣고
-    /// 이쪽도 같은 말이지만, 자식의 기본이 반대라(`tui --json` 은 다 낸다) 안 줬을 때 `--no-archive` 를 얹는다.
-    pub without_archive: bool,
-    /// `/api/tree` only calculates gantt values when the page asks for them (`gantt=1`).
-    pub without_gantt: bool,
+    /// 자식이 기본으로 싣는 것을 **달라고 한 때만** 싣는 이름과, 안 줬을 때 얹는 끄는 플래그 — 줬으면 아무것도 안
+    /// 얹는다(`--<이름>` 꼴의 플래그는 자식에게 없다). `/api/tree` 의 아카이브(moai-m4ez.4zq)는 다른 끝점처럼 `archived=1`
+    /// 을 줘야 싣지만 자식의 기본이 반대라(`tui --json` 은 다 낸다) 이렇게 뒤집고, 간트 값(moai-ijjd.i7v)은 간트 탭이
+    /// 볼 때만 셈한다. 여기 선 이름은 `params` 에도 서야 받는다.
+    pub opt_in: &'static [(Param, &'static str)],
 }
 
 const LIST: &[Param] = &[Param::Archived, Param::Filter, Param::Q, Param::Fields, Param::Tz];
@@ -72,35 +72,16 @@ const ROWS: &[Param] = &[Param::Archived, Param::Filter, Param::Q, Param::Fields
 /// 쿼리가 거절된다(`/api/wiki?worktree=1` 을 말없이 맨 목록으로 답하던 판이 있었다). 경로에 값이 드는
 /// `/api/issue/<id>`·`/api/wiki/<slug>` 만 [`argv_of`] 가 따로 짓는다.
 pub const PROFILES: &[Profile] = &[
-    Profile {
-        route: "/api/status",
-        head: &["status"],
-        params: &[Param::Worktree],
-        without_archive: false,
-        without_gantt: false,
-    },
-    Profile {
-        route: "/api/rows",
-        head: &["show", "--all"],
-        params: ROWS,
-        without_archive: false,
-        without_gantt: false,
-    },
-    Profile {
-        route: "/api/backlog",
-        head: &["backlog", "show", "--all"],
-        params: LIST,
-        without_archive: false,
-        without_gantt: false,
-    },
+    Profile { route: "/api/status", head: &["status"], params: &[Param::Worktree], opt_in: &[] },
+    Profile { route: "/api/rows", head: &["show", "--all"], params: ROWS, opt_in: &[] },
+    Profile { route: "/api/backlog", head: &["backlog", "show", "--all"], params: LIST, opt_in: &[] },
     Profile {
         route: "/api/tree",
         head: &["tui", "--deep"],
         params: &[Param::Sort, Param::Reverse, Param::Worktree, Param::Archived, Param::Tz, Param::Gantt],
-        without_archive: true,
-        without_gantt: true,
+        opt_in: &[(Param::Archived, "--no-archive"), (Param::Gantt, "--no-gantt")],
     },
-    Profile { route: "/api/wiki", head: &["wiki", "ls"], params: &[], without_archive: false, without_gantt: false },
+    Profile { route: "/api/wiki", head: &["wiki", "ls"], params: &[], opt_in: &[] },
     // 위키 탭의 찾기가 순위를 받는 자리(moai-xp7l.nyi) — CLI·TUI 와 같은 자로 매긴다. 상한은 페이지의 목록이 다 서도록
     // 넉넉히 둔다(순위는 절마다라 한 페이지가 여러 번 선다). `/api/wiki/<slug>` 밑에 두지 않는다 — `search` 라는 페이지와
     // 겹친다.
@@ -108,18 +89,11 @@ pub const PROFILES: &[Profile] = &[
         route: "/api/wiki-search",
         head: &["wiki", "search", "-n", "2000"],
         params: &[Param::Words],
-        without_archive: false,
-        without_gantt: false,
+        opt_in: &[],
     },
     // 걸어 둔 프로젝트들 — 사용자 설정을 읽으니 어느 자리에서 돌아도 같은 답이다. 페이지는 그 `path` 를
     // `project=` 로 되돌려 보내 그 프로젝트를 읽는다([`super::project_of`]).
-    Profile {
-        route: "/api/projects",
-        head: &["project", "ls"],
-        params: &[],
-        without_archive: false,
-        without_gantt: false,
-    },
+    Profile { route: "/api/projects", head: &["project", "ls"], params: &[], opt_in: &[] },
 ];
 
 /// 거르개 줄 하나의 상한(바이트) — 줄을 나눠 여러 `--filter` 가 된다.
@@ -408,8 +382,8 @@ pub fn argv(profile: &Profile, query: &[(String, String)]) -> Result<Vec<String>
                 if value != "1" {
                     return Err(Bad::Shape(name.clone()));
                 }
-                // 아카이브를 기본으로 싣는 자식에게는 달라는 말이 따로 없다 — 안 줄 때만 뺀다(아래).
-                if !(p == Param::Archived && profile.without_archive || p == Param::Gantt && profile.without_gantt) {
+                // 기본으로 싣는 자식에게는 달라는 말이 따로 없다 — 안 줄 때만 뺀다(아래, `Profile::opt_in`).
+                if !profile.opt_in.iter().any(|&(o, _)| o == p) {
                     out.push(format!("--{}", p.name()));
                 }
             }
@@ -448,11 +422,10 @@ pub fn argv(profile: &Profile, query: &[(String, String)]) -> Result<Vec<String>
             }
         }
     }
-    if profile.without_archive && !query.iter().any(|(n, _)| n == Param::Archived.name()) {
-        out.push("--no-archive".to_string());
-    }
-    if profile.without_gantt && !query.iter().any(|(n, _)| n == Param::Gantt.name()) {
-        out.push("--no-gantt".to_string());
+    for &(p, off) in profile.opt_in {
+        if !query.iter().any(|(n, _)| n == p.name()) {
+            out.push(off.to_string());
+        }
     }
     if profile.params.contains(&Param::Fields) {
         out.push(format!("--fields={}", fields.unwrap_or(ROW_FIELDS)));
@@ -575,6 +548,20 @@ mod tests {
         assert_eq!(argv_of("/api/tree", &[]).unwrap().unwrap(), strs(&["tui", "--deep", "--no-archive", "--no-gantt"]));
         assert_eq!(argv_of("/api/status", &[]).unwrap().unwrap(), strs(&["status"]));
         assert_eq!(argv_of("/api/wiki", &[]).unwrap().unwrap(), strs(&["wiki", "ls"]));
+    }
+
+    /// `opt_in` 의 이름은 그 끝점이 받는 이름이고, `gantt` 는 늘 그 목록에 선다 — 안 서면 [`argv`] 가 자식에게 없는
+    /// `--gantt` 를 지어 clap 이 `code` 없는 글로 거절한다.
+    #[test]
+    fn opt_in_names_are_taken_and_gantt_is_never_a_flag() {
+        for p in PROFILES {
+            assert!(p.opt_in.iter().all(|(o, _)| p.params.contains(o)), "{}", p.route);
+            assert!(
+                !p.params.contains(&Param::Gantt) || p.opt_in.iter().any(|&(o, _)| o == Param::Gantt),
+                "{}",
+                p.route
+            );
+        }
     }
 
     #[test]

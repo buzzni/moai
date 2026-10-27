@@ -645,7 +645,8 @@ struct Row<'g> {
     #[serde(skip_serializing_if = "Option::is_none")]
     home: Option<Vec<String>>,
     /// `--deep` 일 때 id 가 있는 줄마다 서는 계획·실제 구간 — [`crate::report::gantt::Row`] 의 꼴 그대로다(moai-d86e.b2m).
-    /// 바구니에는 없다. 그 안의 키는 늘 선다 — 값이 없으면 `null` 이다(`planned`·`overdue`).
+    /// 바구니에는 없고, `--no-gantt` 면 어느 줄에도 없다(moai-ijjd.i7v). 그 안의 키는 늘 선다 — 값이 없으면 `null` 이다
+    /// (`planned`·`overdue`).
     #[serde(skip_serializing_if = "Option::is_none")]
     gantt: Option<&'g crate::report::gantt::Row<'g>>,
 }

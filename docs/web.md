@@ -63,10 +63,6 @@ it. `SPC v r` switches the body between rendered markdown and the raw text.
 
 ## Gantt
 
-Chart values are requested only while this tab is active. Opening Gantt after a
-tree-only read requests them once; rows may appear briefly before their bars.
-Other tabs read the same tree without calculating the chart values.
-
 The Gantt tab draws the same chart as the explorer's `SPC g g`, with the same
 meaning. The tree stays on the left with every folder open, the filter, search and
 view toggles of the list applied; the dates scroll on the right.
@@ -87,10 +83,14 @@ view toggles of the list applied; the dates scroll on the right.
 The page only places these: which span a group covers and whether a row is late is
 decided by moai (`moai tui --deep --json` carries it as `gantt`). Lateness is counted
 in the time zone the page draws in ([Time zone](#time-zone)): the page asks for the
-tree in it. A zone the machine `moai web` runs on cannot read is counted in the zone
+chart values in it. A zone the machine `moai web` runs on cannot read is counted in the zone
 moai runs in instead — an offset such as `+09:00`, a name its time zone data leaves
 out (browsers spell `Asia/Kolkata` as the older `Asia/Calcutta`, which newer data
 packages no longer carry), or any name on a machine with no time zone data.
+
+Chart values are requested only while this tab is active. Opening Gantt after a
+tree-only read requests them once; rows may appear briefly before their bars.
+Other tabs read the same tree without calculating the chart values.
 
 | Key / mouse | Does |
 |---|---|
