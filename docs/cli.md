@@ -2892,9 +2892,11 @@ Order:
   the start and its right end to move the deadline; it snaps to whole days and
   is written once, when you let go. Clicking an empty day on a row with no
   planned days plans that one day. Groups whose bar spans their members are
-  not moved — move the members. When a move is refused (a start after the
-  deadline, a day past the deadline above) the refusal is on the banner; a
-  move that went through names the `moai edit` line that puts it back.
+  not moved — move the members. Neither is a row whose copy the worktree
+  overlay took from another worktree; the notice names that worktree. When a
+  move is refused (a start after the deadline, a day past the deadline above)
+  the refusal is on the banner; a move that went through names the
+  `moai edit` line that puts it back.
   Clicking a row puts the cursor on it and the wheel scrolls the rows; a
   sideways wheel, or Shift and the wheel, slides the dates, and so does
   dragging the date header. Dragging the line between the rows and the dates
