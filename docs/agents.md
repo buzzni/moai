@@ -94,7 +94,10 @@ out), `codex`, `antigravity` or `auto` — and can be repeated.
     version no longer depends on the name. After a clone, `moai skill install`
     writes it again. A repository that committed it with an older moai gets
     one line from `skill install` with the command that stops tracking it:
-    `git rm --cached -- .claude/moai-plugin/.claude-plugin/marketplace.json`
+    `git rm --cached -- .claude/moai-plugin/.claude-plugin/marketplace.json`.
+    Once that is committed, every other clone loses the file on its next pull
+    (git deletes a file another commit stopped tracking); run `moai skill install`
+    there once to write it back
 - **Codex and Antigravity read the same `.agents/skills/`** in the repository, so
   naming either writes it for both. There is nothing to register — commit the
   directory and the team has the skills. `--scope` does not apply to them, and

@@ -143,8 +143,10 @@ fn main() -> ExitCode {
     // 쓰기를 대는 줄에 대한 것이 아니다.
     let quiet = matches!(cli.cmd, Some(cli::Cmd::Hook { .. }));
     // **Antigravity 의 훅은 패닉해도 아무것도 안 내고 0 으로 끝난다**(moai-r2nn.kep). 그 줄(`skill::portable_line`)은 sh 도 cmd 도
-    // 읽는 `<exe> hook … || exit 0` 이라 출력을 붙잡아 거를 셸이 없다 — 패닉의 101 은 그대로 에이전트에게 닿고, 판정을 못 낸
-    // 호출이 "훅이 고장 났다" 로 읽힌다. 판정을 못 내면 통과다(옛 POSIX 줄의 "그 밖의 종료 값 = 판정 안 흘림" 과 같은 뜻).
+    // 읽는 `<exe> hook … || exit 0` 이라 출력을 붙잡아 거를 셸이 없다. 종료 값은 그 `|| exit 0` 이 이미 0 으로 바꾸고 stdout 은
+    // [`print`] 가 맨 뒤에 쓰니, 여기서 더는 것은 **셸 줄에 기대지 않는 것**(옛 moai 가 심은 줄·손으로 고친 줄도 0 을 받는다)과
+    // Rust 의 여러 줄 패닉 글 대신 stderr 한 줄이다(리뷰 moai-r2nn.38g). 판정을 못 내면 통과다(옛 POSIX 줄의 "그 밖의 종료 값 =
+    // 판정 안 흘림" 과 같은 뜻).
     // **Claude·Codex 는 건드리지 않는다** — 그쪽 sh 줄은 101 을 보고 `systemMessage` 알림을 내니, 0 으로 삼키면 그 알림이 사라진다.
     let survives = matches!(cli.cmd, Some(cli::Cmd::Hook { dialect: cli::Dialect::Antigravity, .. }));
     let ran = if survives {

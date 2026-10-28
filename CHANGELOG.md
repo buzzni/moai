@@ -36,10 +36,11 @@ does not tag — see `CONTRIBUTING.md`.
   Windows too.** The whole-answer time limit was only checked between writes,
   and Windows takes a huge buffer in one call; the answer is now written in
   64 KiB pieces. (moai-r2nn.2z0)
-- **A crash inside an Antigravity hook no longer reaches `agy` as a failure.**
+- **A crash inside an Antigravity hook leaves one line on stderr and exit 0.**
   The hook line has no shell around it to filter the output, so `moai hook
-  --dialect antigravity` now catches a panic itself: one line on stderr,
-  nothing on stdout, exit 0 (no verdict means pass). Claude and Codex are
+  --dialect antigravity` now catches a panic itself: one line on stderr instead
+  of Rust's panic text, nothing on stdout, exit 0 (no verdict means pass) — even
+  without the planted line's `|| exit 0`. Claude and Codex are
   unchanged — their lines read the exit code and show the "hook did not run"
   notice. The limits that remain are written in the Windows page.
   (moai-r2nn.kep)
@@ -50,7 +51,9 @@ does not tag — see `CONTRIBUTING.md`.
   committed tree. `marketplace.json` is now kept out of git by a `.gitignore`
   in the plugin directory, and `version` no longer depends on it. A repository
   that committed it with an older moai gets one line naming
-  `git rm --cached -- <path>`; `--json` carries it as `market_tracked`. The
+  `git rm --cached -- <path>`; `--json` carries it as `market_tracked`. Once
+  that removal is committed, every other clone loses the file on its next pull —
+  run `moai skill install` there once to write it back. The
   plugin's `version` changes once. (moai-r2nn.bb6)
 - **Codex hooks run on Windows.** Codex starts a hook there with
   `powershell.exe -NoProfile -Command`, which could not read the POSIX line moai
