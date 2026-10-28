@@ -120,7 +120,14 @@ Windows (below).
   holds no quotes at all — `agy` passes it to cmd with every `"` turned into
   `\"`, which cmd cannot read — so a `moai.exe` path with a space or a
   character cmd or sh reads (`C:/Program Files/…`, `%`, `&`, `(`) is written
-  as plain `moai`, and that `moai` has to be on `PATH`. After
+  as plain `moai`, and that `moai` has to be on `PATH`.
+  What this line cannot do: it has no shell around it to hold or filter the
+  output, so moai does that itself — for Antigravity a panic inside `moai hook` prints one
+  line on stderr, writes nothing to stdout and exits 0 (no verdict means pass).
+  A missing `moai` leaves the shell's own line on stderr (`not found`, `is not
+  recognized`); a `moai` too old to know `--dialect` is refused by its argument
+  parser and the `|| exit 0` turns that into a pass; and Antigravity has never
+  shown the "the hook did not run" notice that Claude shows. After
   `moai skill install` Codex asks you to trust the hooks again in `/hooks`; a
   hook file planted by an older moai reads as `stale` in `moai skill status`
   until you run `moai skill install --agent codex` (or `antigravity`) again

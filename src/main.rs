@@ -142,7 +142,21 @@ fn main() -> ExitCode {
     // 훅에서도 그대로 나간다. 잦다는 까닭은 *찾기*마다 서는 줄에 대한 것이지, 정말 일어난
     // 쓰기를 대는 줄에 대한 것이 아니다.
     let quiet = matches!(cli.cmd, Some(cli::Cmd::Hook { .. }));
-    match cmd::run(cli) {
+    // **Antigravity 의 훅은 패닉해도 아무것도 안 내고 0 으로 끝난다**(moai-r2nn.kep). 그 줄(`skill::portable_line`)은 sh 도 cmd 도
+    // 읽는 `<exe> hook … || exit 0` 이라 출력을 붙잡아 거를 셸이 없다 — 패닉의 101 은 그대로 에이전트에게 닿고, 판정을 못 낸
+    // 호출이 "훅이 고장 났다" 로 읽힌다. 판정을 못 내면 통과다(옛 POSIX 줄의 "그 밖의 종료 값 = 판정 안 흘림" 과 같은 뜻).
+    // **Claude·Codex 는 건드리지 않는다** — 그쪽 sh 줄은 101 을 보고 `systemMessage` 알림을 내니, 0 으로 삼키면 그 알림이 사라진다.
+    let survives = matches!(cli.cmd, Some(cli::Cmd::Hook { dialect: cli::Dialect::Antigravity, .. }));
+    let ran = if survives {
+        std::panic::set_hook(Box::new(|info| {
+            let _ = writeln!(anstream::stderr().lock(), "moai: hook panicked, no verdict given ({info})");
+        }));
+        survived(|| cmd::run(cli))
+    } else {
+        Some(cmd::run(cli))
+    };
+    let Some(ran) = ran else { return ExitCode::SUCCESS };
+    match ran {
         Ok(lines) => {
             // **stdout 은 맨 뒤다**(moai-mnhq, 2026-09-23 사용자 결정). 넷은 stderr 에만 쓰므로
             // 자리를 바꿔도 stdout 의 차례는 안 바뀌고, 바뀌는 것은 **종료 값의 뜻**이다 —
@@ -431,10 +445,18 @@ fn unread_lines(lang: i18n::Lang, unread: &[store::Unread]) -> Vec<String> {
     cmd::journal_errors(lang, unread, None).into_iter().map(|e| e.said).collect()
 }
 
+/// 패닉을 잡아 `None` 으로 바꾼다 — 잡힌 호출은 아무것도 안 썼다. `cmd::run` 은 stdout 에 쓰지 않고 줄을 돌려주며
+/// ([`print`] 가 맨 뒤에 한 번 쓴다), 그래서 패닉이 반쯤 쓴 출력을 남길 길이 없다.
+fn survived<T>(f: impl FnOnce() -> T) -> Option<T> {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)).ok()
+}
+
 fn print(lines: &[String]) {
-    for l in lines {
-        outln!("{l}");
+    // 한 번에 쓴다 — 줄마다 쓰면 중간에 끊긴 출력이 반쪽 JSON 으로 흐를 수 있다.
+    if lines.is_empty() {
+        return;
     }
+    outln!("{}", lines.join("\n"));
 }
 
 fn fail(json: bool, e: &cmd::Fail) -> ExitCode {
@@ -490,6 +512,18 @@ mod tests {
         let printed = src.find(concat!("print", "(&lines);")).expect("`print(&lines);` 가 없다");
         let last = src.find(concat!("redirected", "(!quiet);")).expect("`redirected(!quiet);` 가 없다");
         assert!(last < printed, "`print(&lines)` 가 경고 넷보다 앞에 섰다 — 훅의 판정 앞에 남의 줄이 선다");
+    }
+
+    /// **훅이 패닉하면 잡아서 `None` 이다**(moai-r2nn.kep) — 잡힌 호출은 값을 못 내고, 안 패닉한 호출은 값을 그대로 낸다.
+    /// 어느 말씨에 거는지는 `fn main` 이 정한다(Antigravity 만) — 여기는 잡는 몸통만 잰다.
+    #[test]
+    fn a_panic_in_a_hook_is_caught_and_yields_nothing() {
+        assert_eq!(survived(|| 7), Some(7));
+        let prev = std::panic::take_hook();
+        std::panic::set_hook(Box::new(|_| {}));
+        let caught = survived(|| -> Vec<String> { panic!("판정 도중에 죽었다") });
+        std::panic::set_hook(prev);
+        assert_eq!(caught, None);
     }
 
     /// **못 읽은 자리와 까닭을 둘 다 댄다**(moai-6924). 고치는 법이 곧 그 자리에 대는 `chmod`

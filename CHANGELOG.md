@@ -32,6 +32,13 @@ does not tag — see `CONTRIBUTING.md`.
   and Windows takes a huge buffer in one call; the answer is now written in
   64 KiB pieces. (moai-r2nn.2z0)
 
+- **A crash inside an Antigravity hook no longer reaches `agy` as a failure.**
+  The hook line has no shell around it to filter the output, so `moai hook
+  --dialect antigravity` now catches a panic itself: one line on stderr,
+  nothing on stdout, exit 0 (no verdict means pass). Claude and Codex are
+  unchanged — their lines read the exit code and show the "hook did not run"
+  notice. The limits that remain are written in the Windows page.
+  (moai-r2nn.kep)
 - **Codex hooks run on Windows.** Codex starts a hook there with `cmd /C`, which
   could not read the POSIX line moai plants — the hook exited 0 with no output
   and the rules were silently off, while `moai skill status` said `current`.
