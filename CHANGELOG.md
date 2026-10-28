@@ -22,8 +22,10 @@ does not tag — see `CONTRIBUTING.md`.
   and an older `.codex/hooks.json` reads as `stale` until
   `moai skill install --agent codex` plants it again. (moai-cj4a.bcv, moai-cj4a.x4u)
 - **Antigravity hooks run on Windows.** `agy` starts hooks with `cmd /c`, so the
-  `.agents/hooks.json` line is now a single `"<moai>" hook <event> --dialect
-  antigravity || exit 0` that sh and cmd both read, on every OS. On Unix it no
+  `.agents/hooks.json` line is now a single `<moai> hook <event> --dialect
+  antigravity || exit 0` with no quotes, that sh and cmd both read, on every
+  OS; a `moai` path with a space or a shell character is written as plain
+  `moai`, found on `PATH`. On Unix it no
   longer carries the hand-off note, the broken-pipe trap or `set +e`; nothing a
   person sees changes. An older file reads as `stale` until
   `moai skill install --agent antigravity` plants it again. (moai-cj4a.t76, moai-cj4a.x4u)

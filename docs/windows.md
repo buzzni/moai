@@ -112,11 +112,14 @@ Windows (below).
   POSIX line moai plants for Unix (`>/dev/null` becomes a cmd redirect and the
   hook ends with exit 0 and no output — the rules are off without a sign). So
   Codex's `.codex/hooks.json` carries a second key per hook,
-  `commandWindows`, with `"<moai>" hook <event> --dialect codex || exit 0`
+  `commandWindows`, with `<moai> hook <event> --dialect codex || exit 0`
   (the Unix `command` is unchanged), and Antigravity's `.agents/hooks.json`
   has that one line for every OS, because the file is committed and has no
-  Windows-only key. If `moai` is missing the line exits 0 quietly. A path with
-  `%` is written as plain `moai` — cmd expands `%VAR%` even inside quotes. After
+  Windows-only key. If `moai` is missing the line exits 0 quietly. The line
+  holds no quotes at all — `agy` passes it to cmd with every `"` turned into
+  `\"`, which cmd cannot read — so a `moai.exe` path with a space or a
+  character cmd or sh reads (`C:/Program Files/…`, `%`, `&`, `(`) is written
+  as plain `moai`, and that `moai` has to be on `PATH`. After
   `moai skill install` Codex asks you to trust the hooks again in `/hooks`; a
   hook file planted by an older moai reads as `stale` in `moai skill status`
   until you run `moai skill install --agent codex` (or `antigravity`) again
