@@ -973,13 +973,18 @@ where
     let mut files: Vec<(PathBuf, String)> =
         skill_files(skills).map(|(p, b)| (PathBuf::from(format!("skills/{p}")), b)).collect();
     let market = (PathBuf::from(".claude-plugin/marketplace.json"), marketplace_json(market));
-    // 판은 **매니페스트를 뺀 트리 전부와 판 자리를 비운 매니페스트**에서 나온다.
+    // **marketplace.json 은 기계마다의 파일이라 커밋하지 않는다**(moai-r2nn.bb6) - 이름에 체크아웃 경로의 해시가 섞여([`market`])
+    // 리눅스와 Windows 가 번갈아 덮고, 커밋된 트리에 헛 diff 가 선다. 같은 디렉터리의 `.gitignore` 가 그것을 걸러 낸다.
+    files.push((PathBuf::from(".claude-plugin/.gitignore"), format!("{MARKET_FILE}\n")));
+    // 판은 **매니페스트와 마켓플레이스 파일을 뺀 트리 전부와 판 자리를 비운 매니페스트**에서 나온다. 마켓플레이스 파일은
+    // 이름에 체크아웃 경로가 섞여 있어, 셈에 넣으면 판이 기계마다 달라진다(moai-r2nn.bb6).
     // 매니페스트 자신은 그 판을 담고 있으므로 그대로는 셈에 넣을 수 없다 —
     // 넣으면 해시가 제 꼬리를 문다. 그렇다고 매니페스트를 통째로 빼면 그 틀
     // (`timeout`·`description`)만 바꾼 판이 옛 판과 같아 `claude` 가 옛 복사를
-    // 계속 쓴다. 훅 명령·실행 파일·이름표는 그 틀과 `marketplace.json` 에 이미
-    // 들어 있어 따로 셈하지 않는다 — 따로 적은 목록은 틀이 자랄 때마다 어긋난다.
-    let version = version_of(&[files.as_slice(), std::slice::from_ref(&market)].concat(), &plugin_json(exe, ""));
+    // 계속 쓴다. 훅 명령·실행 파일·이름표는 그 틀과 플러그인 매니페스트의 틀에 이미
+    // 들어 있어 따로 셈하지 않는다 - 따로 적은 목록은 틀이 자랄 때마다 어긋난다. 마켓플레이스 파일은 소스(`./`)와 플러그인
+    // 이름만 담아 판에 영향이 없고, 바뀌는 것은 마켓플레이스 이름뿐이다.
+    let version = version_of(&files, &plugin_json(exe, ""));
     files.push((PathBuf::from(".claude-plugin/plugin.json"), plugin_json(exe, &version)));
     files.push(market);
     files
@@ -1038,6 +1043,9 @@ fn plugin_json(exe: &str, version: &str) -> String {
     });
     pretty(&manifest)
 }
+
+/// 마켓플레이스 파일의 이름 - 같은 디렉터리의 `.gitignore` 가 가리킨다.
+const MARKET_FILE: &str = "marketplace.json";
 
 fn marketplace_json(name: &str) -> String {
     pretty(&serde_json::json!({
@@ -1702,6 +1710,7 @@ mod tests {
             "skills/moai-recover/SKILL.md",
             ".claude-plugin/plugin.json",
             ".claude-plugin/marketplace.json",
+            ".claude-plugin/.gitignore",
         ] {
             assert!(files.contains_key(want), "{want} 가 없다");
         }
@@ -1874,9 +1883,9 @@ mod tests {
             "감독 스킬은 SKILL.md 와 일꾼 글 셋, tmux·cmux·Saycode·되살리기 스킬은 SKILL.md 하나씩이다"
         );
         assert_eq!(
-            shared.len() + 2 + only_claude,
+            shared.len() + 3 + only_claude,
             claude.len(),
-            "매니페스트 둘과 Claude 만의 스킬 말고 다른 것이 갈렸다"
+            "매니페스트 둘과 그 곁의 .gitignore 와 Claude 만의 스킬 말고 다른 것이 갈렸다"
         );
         assert!(!shared.keys().any(|p| p.contains(".claude-plugin")), "매니페스트가 .agents 에 섰다");
     }
@@ -1982,6 +1991,28 @@ mod tests {
         let here = tree_at("api", Path::new("/work/api"), "/bin/moai", "# 스킬");
         let there = tree_at("api", Path::new("/old/api"), "/bin/moai", "# 스킬");
         assert_ne!(name(&here), name(&there), "접두어가 같다고 이름까지 같다");
+    }
+
+    /// **판은 마켓플레이스 이름에 안 기댄다**(moai-r2nn.bb6) — 이름은 체크아웃 경로에서 나오는 기계마다의 값이라, 판이 거기
+    /// 기대면 리눅스와 Windows 가 커밋된 `plugin.json` 을 번갈아 덮는다. 그 파일은 같은 디렉터리의 `.gitignore` 가 걸러 낸다.
+    #[test]
+    fn the_version_does_not_lean_on_the_marketplace_name() {
+        let ver = |f: &BTreeMap<String, String>| {
+            let v: serde_json::Value = serde_json::from_str(&f[".claude-plugin/plugin.json"]).unwrap();
+            v["version"].as_str().unwrap().to_string()
+        };
+        let here = tree_at("api", Path::new("/work/api"), "/bin/moai", "# 스킬");
+        let there = tree_at("other", Path::new("C:/Users/me/api"), "/bin/moai", "# 스킬");
+        assert_ne!(
+            here[".claude-plugin/marketplace.json"], there[".claude-plugin/marketplace.json"],
+            "시험이 이름을 못 갈랐다"
+        );
+        assert_eq!(ver(&here), ver(&there), "마켓플레이스 이름이 판에 들었다");
+        assert_eq!(here[".claude-plugin/plugin.json"], there[".claude-plugin/plugin.json"]);
+        // 걸러 내는 줄이 파일 이름과 같다.
+        assert_eq!(here[".claude-plugin/.gitignore"], "marketplace.json\n");
+        // 내용이 바뀌면 판은 여전히 바뀐다.
+        assert_ne!(ver(&here), ver(&tree_at("api", Path::new("/work/api"), "/bin/moai", "# 다른 스킬")));
     }
 
     /// **이름으로 적을 때도 PATH 를 본다.** `[ -x "moai" ]` 는 PATH 가 아니라
@@ -3442,12 +3473,9 @@ mod tests {
         let exe = hook_exe(&manifest)
             .or_else(|| loose(&manifest, "command -v -- \\\"").filter(|_| bless))
             .expect("커밋된 plugin.json 에서 훅의 실행 파일을 못 읽는다 — 깨졌으면 MOAI_BLESS=1 로 다시 쓴다");
-        let market = read(".claude-plugin/marketplace.json");
-        let name = serde_json::from_str::<serde_json::Value>(&market)
-            .ok()
-            .and_then(|v| Some(v.get("name")?.as_str()?.to_string()))
-            .or_else(|| loose(&market, TOP_NAME).filter(|_| bless))
-            .expect("marketplace.json 에서 name 을 못 읽는다 — 깨졌으면 MOAI_BLESS=1 로 다시 쓴다");
+        // **marketplace.json 은 커밋하지 않는다**(moai-r2nn.bb6) — 이름이 체크아웃 경로에서 나오는 기계마다의 파일이다. 판도
+        // 그 이름에 기대지 않으니(`tree_named`) 어떤 이름으로 지어도 같은 글이다. 견주는 것은 그 파일을 뺀 나머지다.
+        let name = "unused";
 
         let all = skills();
         // **세 에이전트의 훅도 같은 실행 파일로 본다**(moai-u5wr.kov) — 이 저장소는 그 파일들도 커밋한다. 자리는 저장소
@@ -3456,7 +3484,7 @@ mod tests {
             (PathBuf::from(CODEX_HOOKS), codex_hooks(&exe)),
             (PathBuf::from(AGENTS_HOOKS), antigravity_hooks(&exe)),
         ];
-        for (at, want) in [(DIR, tree_named(&name, &exe, &all)), (AGENTS_DIR, agents_tree(&all)), ("", hooks)] {
+        for (at, want) in [(DIR, without_market(tree_named(name, &exe, &all))), (AGENTS_DIR, agents_tree(&all)), ("", hooks)] {
             let stale = checked_in(&root.join(at), &want, bless);
             assert!(
                 stale.is_empty(),
@@ -3464,6 +3492,11 @@ mod tests {
                  MOAI_BLESS=1 cargo test checked_in 으로 다시 쓴다"
             );
         }
+    }
+
+    /// 커밋하지 않는 마켓플레이스 파일을 뺀다.
+    fn without_market(files: Vec<(PathBuf, String)>) -> Vec<(PathBuf, String)> {
+        files.into_iter().filter(|(p, _)| p.file_name().is_none_or(|n| n != MARKET_FILE)).collect()
     }
 
     /// 커밋된 트리 하나를 `want` 와 견주어 다른 파일을 낸다 — `bless` 면 먼저 그대로 다시 쓴다. 없는 파일도 다른 것이다.

@@ -422,6 +422,9 @@ fn plant_trees(
         }
     };
     let (stranded_with, stranded_without) = (stranded(&pick.with), stranded(&pick.without));
+    // 옛 판이 커밋해 둔 marketplace.json 이 있으면 한 줄로 이른다(moai-r2nn.bb6) - 이 판은 그것을 커밋하지 않는 기계마다의
+    // 파일로 다루니, 심으면 이 체크아웃의 이름으로 덮여 diff 가 선다. 막지 않는다.
+    let market_tracked = (chosen.claude && !refresh).then(|| tracked_market(&root, &place.dir)).flatten();
     // **이 판이 안 심는 moai 의 스킬 디렉터리는 걷는다**(moai-six5.1xz) — 쓰기가 다 된 뒤에 걷는다([`write_then_sweep`]).
     // Claude 의 트리는 [`claude_install`] 이 제 트리를 쓴 뒤 등록 앞에서 걷는다 — 까닭은 거기 있다.
     let mut shared_left: Vec<Leftover> = shared
@@ -446,6 +449,8 @@ fn plant_trees(
             let listed: Vec<String> =
                 shared.iter().flat_map(|(_, f)| f.iter().map(|(p, _)| p.display().to_string())).collect();
             o.insert("agents_files".into(), serde_json::json!(listed));
+            // 커밋돼 있는 옛 marketplace.json 의 자리(저장소 뿌리부터) - 없으면 `null`.
+            o.insert("market_tracked".into(), serde_json::json!(market_tracked));
             let left: Vec<serde_json::Value> = shared_left.iter().map(Leftover::json).collect();
             o.insert("agents_leftovers".into(), serde_json::json!(left));
             // `.agents` 의 선택 스킬 — Claude 의 트리의 것은 머리의 `optional` 이다([`optional_json`]).
@@ -499,8 +504,19 @@ fn plant_trees(
             out.push(String::new());
         }
     }
+    if let Some(at) = &market_tracked {
+        out.push(fill(say(lang, "skill.market_tracked"), &[("path", at)]));
+    }
     out.extend(claude);
     Ok(out)
+}
+
+/// 커밋돼 있는 `marketplace.json` 의 자리(저장소 뿌리부터, `/` 철자) - git 이 추적하지 않거나 git 이 아니면 `None`.
+fn tracked_market(root: &Path, dir: &Path) -> Option<String> {
+    let at = dir.join(".claude-plugin/marketplace.json");
+    let rel = crate::path::slashed(&at.strip_prefix(root).ok()?.display().to_string(), cfg!(windows));
+    let out = crate::git::command().args(["ls-files", "--error-unmatch", "--", &rel]).current_dir(root).output().ok()?;
+    out.status.success().then_some(rel)
 }
 
 /// `install` 의 쓰는 걸음 — `.agents` 의 트리, 훅 파일, 그다음 Claude 의 걸음(`claude`)을 차례로 하고, **그것이 다 `Ok`

@@ -44,6 +44,15 @@ does not tag — see `CONTRIBUTING.md`.
   unchanged — their lines read the exit code and show the "hook did not run"
   notice. The limits that remain are written in the Windows page.
   (moai-r2nn.kep)
+- **`moai skill install` stops writing a machine-specific name into committed
+  files.** The Claude marketplace name carries a hash of the checkout path, so
+  a Linux and a Windows clone overwrote `marketplace.json` (and the plugin's
+  `version`, which counted that file) back and forth, leaving a diff in the
+  committed tree. `marketplace.json` is now kept out of git by a `.gitignore`
+  in the plugin directory, and `version` no longer depends on it. A repository
+  that committed it with an older moai gets one line naming
+  `git rm --cached -- <path>`; `--json` carries it as `market_tracked`. The
+  plugin's `version` changes once. (moai-r2nn.bb6)
 - **Codex hooks run on Windows.** Codex starts a hook there with `cmd /C`, which
   could not read the POSIX line moai plants — the hook exited 0 with no output
   and the rules were silently off, while `moai skill status` said `current`.
