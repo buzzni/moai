@@ -14,6 +14,9 @@ does not tag — see `CONTRIBUTING.md`.
 
 ### Added
 
+- **Web Gantt groups fold independently of the list.** Chevron buttons, `h`/`l`
+  and `Tab` fold and open groups; each visit starts unfolded. Started work and
+  busy groups use the list’s spinner and title light. (moai-e9hi.lpd, moai-e9hi.fmp)
 - **The TUI detail shows history and a work log.** Creation, column moves and
   notes follow the wiki, with wrapped notes and journal refresh. AI work records
   follow history when present, including the model, grade, reason, author and
@@ -22,6 +25,12 @@ does not tag — see `CONTRIBUTING.md`.
 
 ### Changed
 
+- **Gantt plans include rows with only a deadline.** A missing start uses the
+  creation day in the viewing time zone, capped at the deadline; a missing end
+  uses the start day. Filled edges remain derived through moves and undo. JSON
+  planned spans always carry both dates and `start_filled`/`end_filled` flags.
+  Web dependency arrows follow the cursor in both directions; `◆` marks a
+  milestone’s own deadline. (moai-e9hi.ksl, moai-e9hi.4wi, moai-e9hi.wty)
 - **TUI board titles wrap within each column.** Cards keep up to 50 Unicode
   characters before an ellipsis and grow to fit; optional fields remain below
   the title. (moai-ccow.7p9)
