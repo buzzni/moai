@@ -161,7 +161,8 @@ function rowSvg(row) {
       if (ch === ' ' && start < 0) continue
       if (start < 0) start = q
       t += ch
-      if (/[^\x20-\x7e]/.test(ch) && !/[─│┌┐└┘├┤┬┴┼▌▐▄▀█░▒▓·•]/.test(ch)) { flush(q + 1) }
+      // 두 칸 글자는 다음 칸(빈 자리표)까지 제 몫이다 — 빼면 textLength 가 한 칸 모자라 줄이 밀린다
+      if (/[^\x20-\x7e]/.test(ch) && !/[─│┌┐└┘├┤┬┴┼▌▐▄▀█░▒▓·•]/.test(ch)) { flush(q + (row[q + 1]?.ch === '' ? 2 : 1)) }
     }
     flush(e)
     k = e
