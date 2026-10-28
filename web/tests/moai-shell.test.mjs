@@ -303,8 +303,8 @@ test('split: dragging the resizer sets the ratio and reports once at the end', (
   split.el.remove()
 })
 
-test('position toggle: one icon button flips left/bottom and is disabled with a reason when narrow', () => {
-  const labels = { toTop: '상세를 위로', toLeft: '상세를 왼쪽으로', toBottom: '상세를 아래로', forcedBottom: '폭이 좁아 아래로 고정' }
+test('position toggle: one icon button cycles the sides and is disabled with a reason when narrow', () => {
+  const labels = { toRight: '상세를 오른쪽으로', toTop: '상세를 위로', toLeft: '상세를 왼쪽으로', toBottom: '상세를 아래로', forcedBottom: '폭이 좁아 아래로 고정' }
   const toggled = []
   const toggle = splitModule.createPositionToggle(doc, { position: 'bottom', width: 900, labels, onToggle: (next) => toggled.push(next) })
   const button = toggle.el

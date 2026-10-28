@@ -83,7 +83,8 @@ export const mountDetail: MountPane = (root: HTMLElement, ctx: ViewContext): Pan
   // The pane scrolls in the split's detail container (marked data-keep-scroll), which holds `root`; a view
   // mounted on a scroller of its own is its own.
   const scroller = (): HTMLElement => root.closest<HTMLElement>('[data-keep-scroll]') ?? root
-  /** Folded sections the user opened, kept per id so a refresh does not close them. */
+  /** Folded sections that stand open, by section name: history and work log start open, and what the user opens or
+   *  closes stays so while the pane lives — a refresh or another row does not undo it. */
   const open = new Set<string>(['journal', 'work'])
   let shownId: string | null = null
   /** What the pane was drawn from: it is drawn again only when one of them changed (a redraw loses a text

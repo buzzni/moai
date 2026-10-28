@@ -1,6 +1,7 @@
 // Moai panel detail view (se-c10x.mh9): the pure wording of the head, fields, blockers, roll-up and journal,
 // and the pane itself in a jsdom document.
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import { test } from 'node:test'
 import { JSDOM } from 'jsdom'
 
@@ -408,6 +409,9 @@ test('history and work start expanded, preserve lines and remember a collapsed s
   for (const key of ['journal', 'work']) assert.equal(root.querySelector(`[data-fold=${key}]`).open, true)
   assert.equal(root.querySelector('[data-fold=journal] .moai-detail-text').textContent, 'first\n  second')
   assert.equal(root.querySelector('[data-fold=work] .moai-detail-text').textContent, 'work\nnext')
+  // textContent keeps the break whatever the sheet says; what shows it is pre-wrap on that class, so the sheet is read.
+  const detailCss = readFileSync(new URL('../panel/style/detail.css', import.meta.url), 'utf8')
+  assert.match(detailCss, /\.moai-detail-text \{ white-space: pre-wrap; overflow-wrap: anywhere;/)
   const journal = root.querySelector('[data-fold=journal]')
   journal.open = false
   journal.dispatchEvent(new doc.defaultView.Event('toggle'))

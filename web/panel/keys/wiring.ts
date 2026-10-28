@@ -22,7 +22,7 @@ import { statusKeys } from "../view/board-groups.ts"
 import { createHelp, focusHint, type HelpView } from "../view/help.ts"
 import { SHOW_ALL, UP_KEY } from "../view/list-model.ts"
 import { createMenu, type MenuView } from "../view/menu.ts"
-import { effectivePosition } from "../view/responsive.ts"
+import { effectivePosition, nextPosition } from "../view/responsive.ts"
 import type { Shell } from "../view/shell.ts"
 import type { ToolbarAction } from "../view/toolbar.ts"
 import type { PaneView } from "../view/types.ts"
@@ -476,8 +476,7 @@ export function wireKeys(options: KeyWiringOptions): KeyWiring {
       store.dispatch({ type: "column", column, on: !store.getState().columns[column] })
     },
     "option.detailAt": () => {
-      const position = ({ right: "bottom", bottom: "left", left: "top", top: "right" } as const)[store.getState().detail.position]
-      store.dispatch({ type: "detail-position", position })
+      store.dispatch({ type: "detail-position", position: nextPosition(store.getState().detail.position) })
     },
     "prompt.apply": () => {
       if (inWiki()) return wikiKey()

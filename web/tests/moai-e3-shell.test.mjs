@@ -83,7 +83,7 @@ test('memory: whatever storage gives back becomes usable settings', () => {
     normalizeMemory({ version: 1, tab: 'board', detail: { visible: false, position: 'left', ratio: { right: 0.45, top: 0.3, left: 0.6, bottom: 0.2 } } }),
     { tab: 'board', detail: { visible: false, position: 'left', ratio: { right: 0.45, top: 0.3, left: 0.6, bottom: 0.2 } } },
   )
-  // Out of range ratios are clamped, unknown tabs and positions (the TUI's right/top) fall back.
+  // Out of range ratios are clamped, unknown tabs fall back, and the TUI's right is a position of its own now.
   assert.deepEqual(
     normalizeMemory({ tab: 'stats', detail: { visible: 'yes', position: 'right', ratio: { right: 0.45, top: 0.3, left: 2, bottom: -1 } } }),
     { tab: 'list', detail: { visible: true, position: 'right', ratio: { right: 0.45, top: 0.3, left: 0.85, bottom: 0.15 } } },

@@ -47,8 +47,8 @@ The page has four tabs.
 |---|---|---|
 | **Board** | A kanban: one column per status, with backlog and deferred columns and one lane per [milestone](glossary.md#milestone) | `SPC g b` |
 | **List** | The tree of milestones, [epics](glossary.md#epic) and issues, which you step into and fold | `SPC g l` |
-| **Wiki** | The pages of this wiki: the page list on one side, the page on the other | `SPC g w` |
 | **Gantt** | The tree beside a date axis: when each row was planned and when it actually ran | `SPC g g` |
+| **Wiki** | The pages of this wiki: the page list on one side, the page on the other | `SPC g w` |
 
 Click a tab, or use the keys. Switching tabs keeps the list's cursor, filter and
 sort.
@@ -56,8 +56,12 @@ sort.
 Choosing an issue shows its detail: column, priority, assignee, tags, what blocks
 it, the body, its children, its commits, the wiki about it (the lessons its notes
 point at, the pages that name it, the related sections — as `moai show <id>`
-lists them) and its history. History and work log start expanded and preserve plain-text line breaks. In the list, in-progress rows have a pale gold background and review rows a pale purple background. The detail starts on the right; it cycles right → bottom → left → top when the window is wide enough. Below 640px it stays below the list; `SPC o d` moves it and `SPC v d` hides
-it. `SPC v r` switches the body between rendered markdown and the raw text.
+lists them) and its history. History and work log start expanded and keep the
+line breaks of the text as written. In the list, in-progress rows have a pale gold
+background and review rows a pale purple one. The detail starts on the right;
+`SPC o d`, or the position button, moves it right → bottom → left → top. Below
+640px it stays below the list. `SPC v d` hides it, and `SPC v r` switches the body
+between rendered markdown and the raw text.
 `Enter` on an issue moves the focus to the detail, and `SPC w w` moves it back.
 
 ## Gantt
@@ -301,7 +305,7 @@ once and the keys reach it.
 |---|---|
 | `SPC w w` / `SPC w W` | Next / previous pane |
 | `SPC w h` `j` `k` `l` | Pane to the left / below / above / right |
-| `SPC g l` `b` `w` `g` | List / board / wiki / Gantt tab |
+| `SPC g l` `b` `g` `w` | List / board / Gantt / wiki tab |
 | `SPC o d` | Detail position: right → bottom → left → top |
 | `SPC o t` | Pick the time zone dates are drawn in |
 

@@ -13,7 +13,7 @@
  */
 import { SORT_KEYS, sameSort, type Dir, type Sort, type SortField } from './query.js'
 import { COLUMN_DEFAULTS, type ColumnName, type DetailPosition, type Remembered, type State, type Store, type ViewSettings } from '../store.js'
-import { DEFAULT_RATIO, normalizeRatio } from '../view/split.js'
+import { normalizeRatios } from '../view/split.js'
 import { DEFAULT_TAB, normalizeTab } from '../view/tabs.js'
 import { MEMORY_KEY } from './memory-key.js'
 import { normalizeTheme } from './theme.js'
@@ -38,12 +38,7 @@ export function normalizeMemory(value: unknown): Remembered {
     detail: {
       visible: typeof detail.visible === 'boolean' ? detail.visible : true,
       position: normalizePosition(detail.position),
-      ratio: {
-        right: normalizeRatio(ratio.right, 'right'),
-        top: normalizeRatio(ratio.top, 'top'),
-        left: ratio.left === undefined ? DEFAULT_RATIO.left : normalizeRatio(ratio.left, 'left'),
-        bottom: ratio.bottom === undefined ? DEFAULT_RATIO.bottom : normalizeRatio(ratio.bottom, 'bottom'),
-      },
+      ratio: normalizeRatios(ratio),
     },
     // A zone this browser does not know (dropped since, or edited by hand) is no choice: the page falls back silently.
     // No choice is no key, as the page before the picker wrote it.

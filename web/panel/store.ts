@@ -19,7 +19,7 @@ import { toolbarReduce, type ToolbarAction, type ToolbarState } from './view/too
 import type { WikiState } from './view/wiki.js'
 // The split owns the layout rules (the 640px rule, the ratio bounds and defaults); the store keeps the choices.
 import { effectivePosition, type DetailPosition } from './view/responsive.js'
-import { DEFAULT_RATIO, normalizeRatio } from './view/split.js'
+import { DEFAULT_RATIO, normalizeRatio, normalizeRatios } from './view/split.js'
 
 export type { DetailPosition, Sort, WikiState }
 export { DEFAULT_SORT }
@@ -428,7 +428,7 @@ export function reduce(state: State, action: Action): State {
     case 'restore': {
       const { tab, detail, zone, theme } = action.settings
       if (tab === undefined && detail === undefined && zone === undefined && theme === undefined) return state
-      const ratio = detail ? { right: normalizeRatio(detail.ratio.right, 'right'), top: normalizeRatio(detail.ratio.top, 'top'), left: normalizeRatio(detail.ratio.left, 'left'), bottom: normalizeRatio(detail.ratio.bottom, 'bottom') } : state.detail.ratio
+      const ratio = detail ? normalizeRatios(detail.ratio) : state.detail.ratio
       return {
         ...state,
         tab: tab ?? state.tab,

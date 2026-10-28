@@ -1,5 +1,5 @@
 // List/detail split: the detail sits on any of the four sides, one 28px icon
-// button flips it, a resizer drags or arrow-keys the ratio, and a narrow panel is forced to the bottom.
+// button cycles it right → bottom → left → top, a resizer drags or arrow-keys the ratio, and a narrow panel is forced to the bottom.
 // Standalone: positions and ratios come in through props/setters and go out through callbacks, so the
 // caller (store) owns persistence. Ratios are the detail's share of the container, per position.
 
@@ -22,6 +22,16 @@ export type Ratios = Record<DetailPosition, number>
 /** A stored or received ratio to a usable one: finite and within 15-85%, else the position's default. */
 export function normalizeRatio(value: unknown, position: DetailPosition): number {
   return typeof value === "number" && Number.isFinite(value) ? Math.min(MAX_RATIO, Math.max(MIN_RATIO, value)) : DEFAULT_RATIO[position]
+}
+
+/** Every position's ratio from a stored or received set (any of them missing or unusable): {@link normalizeRatio} each. */
+export function normalizeRatios(value: Partial<Record<DetailPosition, unknown>> | null | undefined): Ratios {
+  return {
+    right: normalizeRatio(value?.right, "right"),
+    bottom: normalizeRatio(value?.bottom, "bottom"),
+    left: normalizeRatio(value?.left, "left"),
+    top: normalizeRatio(value?.top, "top"),
+  }
 }
 
 /**
@@ -79,7 +89,7 @@ export interface Split {
 }
 
 export function createSplit(doc: Document, props: SplitProps): Split {
-  const ratios: Ratios = { right: normalizeRatio(props.ratios?.right, "right"), top: normalizeRatio(props.ratios?.top, "top"), left: normalizeRatio(props.ratios?.left, "left"), bottom: normalizeRatio(props.ratios?.bottom, "bottom") }
+  const ratios: Ratios = normalizeRatios(props.ratios)
   let preferred = props.position
   let width = Infinity
   let shown: DetailPosition = effectivePosition(width, preferred)
@@ -199,7 +209,7 @@ export interface PositionToggleProps {
   position: DetailPosition
   width: number
   onToggle: (next: DetailPosition) => void
-  labels: { toRight?: string; toTop?: string; toLeft: string; toBottom: string; forcedBottom: string }
+  labels: { toRight: string; toTop: string; toLeft: string; toBottom: string; forcedBottom: string }
 }
 
 export interface PositionToggle {
@@ -214,10 +224,13 @@ export interface PositionToggle {
  */
 export function createPositionToggle(doc: Document, props: PositionToggleProps): PositionToggle {
   let position = props.position
-  const button = iconButton(doc, { icon: "panel-bottom", label: props.labels.toLeft })
+  const { toRight, toBottom, toLeft, toTop, forcedBottom } = props.labels
+  /** What pressing says, by the side it moves the detail to. */
+  const toward: Record<DetailPosition, string> = { right: toRight, bottom: toBottom, left: toLeft, top: toTop }
+  const button = iconButton(doc, { icon: `panel-${position}`, label: toward[nextPosition(position)] })
   const apply = (width: number): void => {
     const free = canChoosePosition(width)
-    const label = !free ? props.labels.forcedBottom : ({ right: props.labels.toRight ?? "Move details to the right", bottom: props.labels.toBottom, left: props.labels.toLeft, top: props.labels.toTop ?? "Move details to the top" })[nextPosition(position)]
+    const label = free ? toward[nextPosition(position)] : forcedBottom
     // aria-disabled, not disabled: a disabled button shows no title tooltip, and the tooltip is the explanation.
     if (free) button.removeAttribute("aria-disabled")
     else button.setAttribute("aria-disabled", "true")

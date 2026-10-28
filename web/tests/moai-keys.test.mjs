@@ -487,6 +487,8 @@ test('menuLayer: root items and layers with titles; state labels; availability h
   assert.equal(menuLayer('SPC c', ctx).items.find((i) => i.key === 't').state.id, 'hidden')
   assert.equal(menuLayer('SPC o', ctx).items[0].state.label, '[왼쪽]')
   assert.equal(menuLayer('SPC o', browse()).items[0].state.label, '[아래]')
+  assert.equal(menuLayer('SPC o', browse({ detailAt: 'right' })).items[0].state.label, '[오른쪽]')
+  assert.equal(menuLayer('SPC o', browse({ detailAt: 'top' })).items[0].state.label, '[위]')
 
   // Focus moves follow the split axis; the detail position is gone when the panel is narrow.
   assert.deepEqual(menuLayer('SPC w', ctx).items.map((i) => i.key), ['w', 'W', 'h', 'l'])
