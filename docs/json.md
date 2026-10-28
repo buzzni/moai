@@ -59,11 +59,12 @@ rows have none, and every key inside it always stands (`null` when there is no v
 - `planned` — `{start, end, start_filled, end_filled, from}`: calendar days, both ends always present; `from`
   is `own`, or `members` for an epic or milestone that wrote no day and is counted
   from its members. A missing start uses the creation day in the viewer’s time zone,
-  capped at the deadline; a missing end uses the start day. For a members span,
-  a missing start is the earlier of the group’s creation day and its earliest
-  member date; a missing end is its latest member date. The boolean fill flags
-  always stand and identify derived edges, which are never saved by a move or undo.
-  `null` when no day can be read
+  capped at the deadline; a missing end uses the start day. A members span covers
+  every member's planned span, filled starts included; when no member wrote a start,
+  the group's creation day counts too if it is earlier. The boolean fill flags
+  always stand and say whether that edge was written: a start written after its
+  deadline is still written (`start` after `end`, drawn as the start's day). Filled
+  edges are never saved by a move or undo. `null` when no day can be read
 - `actual` — `{"kind": "span", start, end}` in UTC (`end` `null` while it runs),
   `{"kind": "not_started"}`, or `{"kind": "unknown"}` for a start nobody recorded —
   not zero, not never

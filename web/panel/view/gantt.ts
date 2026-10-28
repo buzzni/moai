@@ -563,7 +563,8 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
       const add = (name: string, value: string) => dl.append(el(doc, 'dt', {}, name), el(doc, 'dd', {}, value))
       const zone = clock.zone()
       const t = words.tip
-      if (g.planned) add(g.planned.from === 'members' ? t.plannedMembers : t.planned, `${g.planned.start ?? '—'} ~ ${g.planned.end ?? '—'}`)
+      // A filled edge is drawn but nobody planned it: the bubble says so with `—`, as before moai filled it.
+      if (g.planned) add(g.planned.from === 'members' ? t.plannedMembers : t.planned, `${g.planned.start_filled ? '—' : g.planned.start} ~ ${g.planned.end_filled ? '—' : g.planned.end}`)
       add(t.actual, g.actual.kind === 'span' ? `${formatDate(g.actual.start, zone)} ~ ${g.actual.end ? formatDate(g.actual.end, zone) : t.now}` : g.actual.kind === 'unknown' ? t.unknown : t.notStarted)
       if (g.overdue !== null) add(t.overdue, fill(g.overdue === 1 ? t.overdueDay : t.overdueDays, { n: g.overdue }))
       if (g.progress.kind === 'rollup' && g.progress.total > 0) add(t.progress, `${g.progress.done}/${g.progress.total}`)
@@ -870,7 +871,7 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
       was = drawnAt.map((node) => ({ left: node.style.left, width: node.style.width }))
     }, (event, down) => {
       const change = shiftPlan(g.planned, edge, dragDays(a.zoom, event.clientX - down.clientX))
-      const span = 'why' in change ? null : movedPlan(g.planned, change, edge)
+      const span = 'why' in change ? null : movedPlan(g.planned, change)
       if (!span) return putBack()
       // The bar spans its days; a `◆` stands at the end of its day.
       if (planBar) {
@@ -891,7 +892,7 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
         }
       } else {
         dragged = true
-        const preview = movedPlan(g.planned, change, edge)
+        const preview = movedPlan(g.planned, change)
         if (preview) moved.set(row.id, {
           ...g.planned!, start: dayText(preview[0]), end: dayText(preview[1] - DAY),
           start_filled: change.start === undefined && g.planned!.start_filled,

@@ -104,7 +104,8 @@ export function placeRow(g: GanttRow | undefined, row: Row | undefined, now: num
   const start = planned ? dayStart(planned.start) : null
   const end = planned ? dayStart(planned.end) : null
   if (planned && start !== null && end !== null) {
-    const to = end + DAY
+    // A start written after its deadline (an old row moai reads but would not write) draws the start's day.
+    const to = Math.max(end, start) + DAY
     out.plan = { from: start, to, origin: planned.from }
     add(start, to)
   }
@@ -170,17 +171,25 @@ export function shiftPlan(planned: GanttRow['planned'], edge: Edge, days: number
 /** Whole days a drag of `dx` px moves at `zoom` — the nearest day, so a bar snaps to days at every step. */
 export const dragDays = (zoom: Zoom, dx: number): number => Math.round(dx / PX_PER_DAY[zoom]) || 0
 
-/** The planned bar a move would draw, `[from, to)` in wall ms, or null when the move would not stand. */
-export function movedPlan(planned: GanttRow['planned'], change: { start?: string; due?: string }, edge: Edge = 'body'): [number, number] | null {
-  let start = change.start !== undefined ? dayStart(change.start) : planned ? dayStart(planned.start) : null
-  // A body drag carries the filled edge visually; only the written edge is sent to moai.
-  const oldEnd = planned ? dayStart(planned.end) : null
-  const newEnd = dayStart(change.due)
-  if (edge === 'body' && planned?.start_filled && change.start === undefined && start !== null && oldEnd !== null && newEnd !== null) start += newEnd - oldEnd
-  const due = change.due !== undefined ? dayStart(change.due) : planned?.end_filled ? start : planned ? dayStart(planned.end) : null
+/**
+ * The planned bar a move would draw, `[from, to)` in wall ms, or null when the move would not stand — the bar moai draws
+ * once the written days have moved, as the TUI's drag draws it (`tui::gantt::preview`, moai-i4hf.exq). Only written days
+ * move and only they can make a move stand or not. A filled end is the start's day again. A filled start is moai's
+ * creation day capped at the deadline: one drawn before the old deadline is that creation day, so it stays and is capped
+ * at the new deadline; one drawn on the deadline only says the creation day was no earlier, so it follows the deadline.
+ */
+export function movedPlan(planned: GanttRow['planned'], change: { start?: string; due?: string }): [number, number] | null {
+  const written = (day: string | undefined, filled: boolean | undefined, now: string | undefined) =>
+    day !== undefined ? dayStart(day) : planned && !filled ? dayStart(now) : null
+  const start = written(change.start, planned?.start_filled, planned?.start)
+  const due = written(change.due, planned?.end_filled, planned?.end)
   if (start !== null && due !== null) return start > due ? null : [start, due + DAY]
   if (start !== null) return [start, start + DAY]
-  return due === null ? null : [due, due + DAY]
+  if (due === null) return null
+  const filled = planned ? dayStart(planned.start) : null
+  const oldDue = planned ? dayStart(planned.end) : null
+  const from = filled !== null && oldDue !== null && filled < oldDue ? Math.min(filled, due) : due
+  return [from, due + DAY]
 }
 
 // ── the axis ───────────────────────────────────────────────────────────

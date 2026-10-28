@@ -154,8 +154,11 @@ test('a deadline-only row has a filled plan, and lateness starts after its end',
   const sliver = model.placeRow(today, { id: 'y', status: 'todo', due_on: '2026-10-25' }, NOW, 'UTC')
   assert.deepEqual(sliver.over, { from: Date.UTC(2026, 9, 26), to: Date.UTC(2026, 9, 26) })
   // A row with a plan ending before its start is late from the deadline, not from the start's day.
-  const backwards = g('z', { planned: { ...own('2026-10-18', '2026-10-18'), start_filled: true }, overdue: 7 })
-  assert.equal(model.placeRow(backwards, { id: 'z', status: 'todo' }, NOW, 'UTC').over.from, Date.UTC(2026, 9, 19))
+  // moai hands such a start over as written (start_filled false), so a move and its undo keep it; the bar is the start's day.
+  const backwards = g('z', { planned: own('2026-10-20', '2026-10-18'), overdue: 7 })
+  const placed = model.placeRow(backwards, { id: 'z', status: 'todo' }, NOW, 'UTC')
+  assert.equal(placed.over.from, Date.UTC(2026, 9, 19))
+  assert.deepEqual([placed.plan.from, placed.plan.to], [Date.UTC(2026, 9, 20), Date.UTC(2026, 9, 21)])
 })
 
 test('a milestone that wrote no deadline has no diamond; an archived one reads its own from the plan', () => {
@@ -588,6 +591,14 @@ test('shiftPlan is Issue::shifted: the changing side only, own days only', () =>
   assert.deepEqual(movedPlan(own('2026-10-26', '2026-10-27'), { start: '2026-10-27' }), [Date.UTC(2026, 9, 27), Date.UTC(2026, 9, 27) + D])
   assert.equal(movedPlan(own('2026-10-26', '2026-10-27'), { start: '2026-10-28' }), null)
   assert.deepEqual(movedPlan(own(null, '2026-10-27'), { due: '2026-10-28' }), [Date.UTC(2026, 9, 28), Date.UTC(2026, 9, 28) + D])
+  // A filled start drawn before the deadline is the creation day: it stays, and a deadline pulled before it is not a
+  // refusal — moai writes it and fills the start with the deadline's day (the drag must not snap back meanwhile).
+  const filled = { ...own('2026-10-20', '2026-10-27'), start_filled: true }
+  assert.deepEqual(movedPlan(filled, { due: '2026-10-29' }), [Date.UTC(2026, 9, 20), Date.UTC(2026, 9, 29) + D])
+  assert.deepEqual(movedPlan(filled, { due: '2026-10-15' }), [Date.UTC(2026, 9, 15), Date.UTC(2026, 9, 15) + D])
+  // A start written after its deadline still counts as written: the move stands or not on that day.
+  assert.equal(movedPlan(own('2026-10-20', '2026-10-18'), { due: '2026-10-19' }), null)
+  assert.deepEqual(movedPlan(own('2026-10-20', '2026-10-18'), { due: '2026-10-21' }), [Date.UTC(2026, 9, 20), Date.UTC(2026, 9, 21) + D])
 })
 
 /** The index the gantt draws `rows` from, each tree line carrying its `gantt`. */
@@ -1140,9 +1151,12 @@ test('filled edges stay derived through a whole-bar move and undo; resizing crea
     const x = px(bar, 'left') + (grip === 'start' ? 1 : px(bar, 'width') / 2)
     press(dom, l, 'pointerdown', x)
     if (grip === 'body') {
-      const before = px(bar, 'left')
+      // The bar is drawn as moai will draw it after the write (as the TUI's drag): a filled start is the creation day
+      // and stays; a filled end is the start's day and travels with it.
+      const [left, width] = [px(bar, 'left'), px(bar, 'width')]
       press(dom, l, 'pointermove', x + 40)
-      assert.equal(px(bar, 'left'), before + 40, 'both displayed edges travel with a body drag')
+      if (planned.start_filled) assert.deepEqual([px(bar, 'left'), px(bar, 'width')], [left, width + 40], 'a filled start stays')
+      else assert.deepEqual([px(bar, 'left'), px(bar, 'width')], [left + 40, width], 'a filled end travels with its start')
     }
     press(dom, l, 'pointerup', x + 40)
     assert.deepEqual(moves, [{ id: 'e1.c', change: { edge, days: 1 }, undo: `moai edit e1.c ${undo}` }])
