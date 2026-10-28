@@ -12,6 +12,68 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+### Added
+
+- **`moai skill status` says when a hook line calls `moai` from `PATH` and there is
+  none, or a different one.** The `codex hooks` or `agy hooks` row whose file
+  calls plain `moai` shows a `!` for it, and `--json` gains `path_moai` on that
+  hook. Before, the row read `current` while the shell printed `not found` or
+  `is not recognized` and the rules stayed off. (moai-r2nn.yxz)
+- **`moai skill status` names the Git Bash Claude Code runs hooks in on
+  Windows.** Without Git Bash, Claude Code uses PowerShell, which cannot run the
+  hook lines; the new `git bash` row (and `git_bash` in `--json`) says where it
+  was found, or that it was not. (moai-cj4a.tux)
+
+### Fixed
+
+- **`moai wiki ls --json` gives `dir_abs` with `/` on Windows too.** It used to
+  end in `\docs` there, so the key a skill reads was a different shape per
+  platform. (moai-r2nn.2z0)
+- **A Codex `workdir` joined to the session's folder no longer mixes `\` into a
+  `/` path on Windows**, so the hook sees the same folder it was given.
+  (moai-r2nn.2z0)
+- **`moai web` stops writing a large answer to a reader that does not read, on
+  Windows too.** The whole-answer time limit was only checked between writes,
+  and Windows takes a huge buffer in one call; the answer is now written in
+  64 KiB pieces. (moai-r2nn.2z0)
+- **A crash inside an Antigravity hook leaves one line on stderr and exit 0.**
+  The hook line has no shell around it to filter the output, so `moai hook
+  --dialect antigravity` now catches a panic itself: one line on stderr instead
+  of Rust's panic text, nothing on stdout, exit 0 (no verdict means pass) — even
+  without the planted line's `|| exit 0`. Claude and Codex are
+  unchanged — their lines read the exit code and show the "hook did not run"
+  notice. The limits that remain are written in the Windows page.
+  (moai-r2nn.kep)
+- **`moai skill install` stops writing a machine-specific name into committed
+  files.** The Claude marketplace name carries a hash of the checkout path, so
+  a Linux and a Windows clone overwrote `marketplace.json` (and the plugin's
+  `version`, which counted that file) back and forth, leaving a diff in the
+  committed tree. `marketplace.json` is now kept out of git by a `.gitignore`
+  in the plugin directory, and `version` no longer depends on it. A repository
+  that committed it with an older moai gets one line naming
+  `git rm --cached -- <path>`; `--json` carries it as `market_tracked`. Once
+  that removal is committed, every other clone loses the file on its next pull —
+  run `moai skill install` there once to write it back. The
+  plugin's `version` changes once. (moai-r2nn.bb6)
+- **Codex hooks run on Windows.** Codex starts a hook there with
+  `powershell.exe -NoProfile -Command`, which could not read the POSIX line moai
+  plants, and the rules were silently off while `moai skill status` said `current`.
+  Each Codex hook now also carries `commandWindows`, a line Windows PowerShell 5.1
+  and PowerShell 7 both read: it puts the `moai.exe` path in single quotes (so
+  `C:/Program Files/...` works) and, when `moai` cannot run, prints the same
+  "the hook could not run" notice the Unix line does; the Unix
+  `command` is unchanged. Codex asks you to trust the hooks again in `/hooks`,
+  and an older `.codex/hooks.json` reads as `stale` until
+  `moai skill install --agent codex` plants it again. (moai-cj4a.bcv, moai-cj4a.x4u, moai-r2nn.k5a)
+- **Antigravity hooks run on Windows.** `agy` starts hooks with `cmd /c`, so the
+  `.agents/hooks.json` line is now a single `<moai> hook <event> --dialect
+  antigravity || exit 0` with no quotes, that sh and cmd both read, on every
+  OS; a `moai` path with a space or a shell character is written as plain
+  `moai`, found on `PATH`. On Unix it no
+  longer carries the hand-off note, the broken-pipe trap or `set +e`; nothing a
+  person sees changes. An older file reads as `stale` until
+  `moai skill install --agent antigravity` plants it again. (moai-cj4a.t76, moai-cj4a.x4u)
+
 ## [0.30.0] - 2026-10-27
 
 ### Added

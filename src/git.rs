@@ -735,7 +735,9 @@ pub(crate) mod tests {
     /// MSYS2 의 git 은 `git.exe` 옆에 `msys-2.0.dll` 이 있고, 처음 닿는 `git.exe` 만 본다(moai-vjdq.ch3).
     #[test]
     fn msys_is_told_by_the_dll_beside_the_first_git() {
-        let files = |set: &'static [&'static str]| move |p: &Path| set.contains(&p.to_str().unwrap());
+        let files = |set: &'static [&'static str]| {
+            move |p: &Path| set.contains(&p.to_str().unwrap().replace('\\', "/").as_str())
+        };
         // 가르는 글자는 기계마다 다르다(`:`·`;`) — 시험이 Windows 에서도 서게 `join_paths` 로 잇는다.
         let path = std::env::join_paths(["/a", "/b", "/c"]).unwrap();
         assert_eq!(msys_runtime(&path, files(&["/b/git.exe", "/b/msys-2.0.dll"])), Some(PathBuf::from("/b")));

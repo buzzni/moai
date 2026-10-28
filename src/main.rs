@@ -142,7 +142,23 @@ fn main() -> ExitCode {
     // 훅에서도 그대로 나간다. 잦다는 까닭은 *찾기*마다 서는 줄에 대한 것이지, 정말 일어난
     // 쓰기를 대는 줄에 대한 것이 아니다.
     let quiet = matches!(cli.cmd, Some(cli::Cmd::Hook { .. }));
-    match cmd::run(cli) {
+    // **Antigravity 의 훅은 패닉해도 아무것도 안 내고 0 으로 끝난다**(moai-r2nn.kep). 그 줄(`skill::portable_line`)은 sh 도 cmd 도
+    // 읽는 `<exe> hook … || exit 0` 이라 출력을 붙잡아 거를 셸이 없다. 종료 값은 그 `|| exit 0` 이 이미 0 으로 바꾸고 stdout 은
+    // [`print`] 가 맨 뒤에 쓰니, 여기서 더는 것은 **셸 줄에 기대지 않는 것**(옛 moai 가 심은 줄·손으로 고친 줄도 0 을 받는다)과
+    // Rust 의 여러 줄 패닉 글 대신 stderr 한 줄이다(리뷰 moai-r2nn.38g). 판정을 못 내면 통과다(옛 POSIX 줄의 "그 밖의 종료 값 =
+    // 판정 안 흘림" 과 같은 뜻).
+    // **Claude·Codex 는 건드리지 않는다** — 그쪽 sh 줄은 101 을 보고 `systemMessage` 알림을 내니, 0 으로 삼키면 그 알림이 사라진다.
+    let survives = matches!(cli.cmd, Some(cli::Cmd::Hook { dialect: cli::Dialect::Antigravity, .. }));
+    let ran = if survives {
+        std::panic::set_hook(Box::new(|info| {
+            let _ = writeln!(anstream::stderr().lock(), "moai: hook panicked, no verdict given ({info})");
+        }));
+        survived(|| cmd::run(cli))
+    } else {
+        Some(cmd::run(cli))
+    };
+    let Some(ran) = ran else { return ExitCode::SUCCESS };
+    match ran {
         Ok(lines) => {
             // **stdout 은 맨 뒤다**(moai-mnhq, 2026-09-23 사용자 결정). 넷은 stderr 에만 쓰므로
             // 자리를 바꿔도 stdout 의 차례는 안 바뀌고, 바뀌는 것은 **종료 값의 뜻**이다 —
@@ -174,11 +190,22 @@ fn main() -> ExitCode {
             // **`print` 가 맨 뒤라는 것과 넷이 stderr 에만 쓴다는 것을 시험이 못박는다** —
             // [`tests::the_notices_never_reach_stdout_and_print_stands_last`]. 둘 중 하나라도
             // 무너지면 훅의 판정 앞에 남의 줄이 서고, 그러면 `claude` 가 판정째 버린다.
-            carried();
-            unjournaled();
-            noted();
-            unread_journals();
-            redirected(!quiet);
+            let notices = || {
+                carried();
+                unjournaled();
+                noted();
+                unread_journals();
+                redirected(!quiet);
+            };
+            // **Antigravity 의 훅은 넷이 패닉해도 0 이다**(moai-r2nn.kep) — `cmd::run` 만 싸던 판은 여기서 난 패닉이 101 로
+            // agy 에 닿았다. 아직 stdout 에 아무것도 안 썼으니 판정 없이 지나간다.
+            if survives {
+                if survived(notices).is_none() {
+                    return ExitCode::SUCCESS;
+                }
+            } else {
+                notices();
+            }
             print(&lines);
             match cmd::chosen_exit() {
                 0 if cmd::had_partial() => ExitCode::FAILURE,
@@ -431,10 +458,18 @@ fn unread_lines(lang: i18n::Lang, unread: &[store::Unread]) -> Vec<String> {
     cmd::journal_errors(lang, unread, None).into_iter().map(|e| e.said).collect()
 }
 
+/// 패닉을 잡아 `None` 으로 바꾼다 — 잡힌 호출은 아무것도 안 썼다. `cmd::run` 은 stdout 에 쓰지 않고 줄을 돌려주며
+/// ([`print`] 가 맨 뒤에 한 번 쓴다), 그래서 패닉이 반쯤 쓴 출력을 남길 길이 없다.
+fn survived<T>(f: impl FnOnce() -> T) -> Option<T> {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)).ok()
+}
+
 fn print(lines: &[String]) {
-    for l in lines {
-        outln!("{l}");
+    // 한 번에 쓴다 — 줄마다 쓰면 중간에 끊긴 출력이 반쪽 JSON 으로 흐를 수 있다.
+    if lines.is_empty() {
+        return;
     }
+    outln!("{}", lines.join("\n"));
 }
 
 fn fail(json: bool, e: &cmd::Fail) -> ExitCode {
@@ -490,6 +525,18 @@ mod tests {
         let printed = src.find(concat!("print", "(&lines);")).expect("`print(&lines);` 가 없다");
         let last = src.find(concat!("redirected", "(!quiet);")).expect("`redirected(!quiet);` 가 없다");
         assert!(last < printed, "`print(&lines)` 가 경고 넷보다 앞에 섰다 — 훅의 판정 앞에 남의 줄이 선다");
+    }
+
+    /// **훅이 패닉하면 잡아서 `None` 이다**(moai-r2nn.kep) — 잡힌 호출은 값을 못 내고, 안 패닉한 호출은 값을 그대로 낸다.
+    /// 어느 말씨에 거는지는 `fn main` 이 정한다(Antigravity 만) — 여기는 잡는 몸통만 잰다.
+    #[test]
+    fn a_panic_in_a_hook_is_caught_and_yields_nothing() {
+        assert_eq!(survived(|| 7), Some(7));
+        let prev = std::panic::take_hook();
+        std::panic::set_hook(Box::new(|_| {}));
+        let caught = survived(|| -> Vec<String> { panic!("판정 도중에 죽었다") });
+        std::panic::set_hook(prev);
+        assert_eq!(caught, None);
     }
 
     /// **못 읽은 자리와 까닭을 둘 다 댄다**(moai-6924). 고치는 법이 곧 그 자리에 대는 `chmod`
