@@ -48,8 +48,8 @@ record v32-gantt; record v32-detail; record v32-board
 shot v32-gantt --at 15 --title 'moai tui — SPC g g' --line 'Search inside' --cells 22,46,59,1 -o "$here/media/01-gantt.png"
 # 상세: 이력과 작업 기록
 shot v32-detail --at 16 --title 'moai tui' -o "$here/media/02-detail.png"
-# 보드: 제목이 칸 안에서 줄을 바꾼다
-shot v32-board --at 5 --title 'moai tui — SPC g b' --line 'Resolve conflicts' -o "$here/media/03-board.png"
+# 보드: 제목이 칸 안에서 줄을 바꾼다 — 상자는 줄을 바꾼 카드 하나(Retry with backoff…)의 칸 좌표
+shot v32-board --at 5 --title 'moai tui — SPC g b' --cells 15,3,20,5 -o "$here/media/03-board.png"
 
 # moai web: 상세 네 방향과 목록 배경 (아래 web.mjs)
 web="$tmp/web"
