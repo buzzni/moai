@@ -35,6 +35,8 @@ const BUSY_READ_LIMIT: Duration = Duration::from_millis(200);
 const BUSY_DRAIN_MAX: usize = 4;
 /// 쓰기 한 번이 나아가지 못하고 기다리는 시한.
 const WRITE_LIMIT: Duration = Duration::from_secs(10);
+/// [`Within`] 이 한 번에 쓰는 몫의 상한.
+const WRITE_CHUNK: usize = 64 * 1024;
 /// 답 **전체**를 쓰는 시한 — 쓰기마다 조금씩 나아가는 느린 상대가 큰 답 하나로 한 자리를 몇 시간 쥐지 않게
 /// ([`Within`]). 루프백과 SSH 터널로 보는 페이지에는 넉넉하다.
 const ANSWER_LIMIT: Duration = Duration::from_secs(60);
@@ -229,7 +231,9 @@ impl std::io::Write for Within<'_> {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
         self.stream.set_write_timeout(Some(self.left()?.min(WRITE_LIMIT)))?;
         let mut s = self.stream;
-        s.write(buf)
+        // **한 번에 쓰는 몫을 끊는다** — Windows 의 `send` 는 큰 버퍼를 한 부름에 받아 두고 돌아와, 안 읽는 상대에게도
+        // 32 MiB 가 시한 확인 없이 "다 쓰였다". 몫마다 남은 시한을 다시 재야 답 전체의 시한이 어느 OS 에서나 선다.
+        s.write(&buf[..buf.len().min(WRITE_CHUNK)])
     }
 
     fn flush(&mut self) -> std::io::Result<()> {

@@ -368,6 +368,7 @@ pub fn codex_hooks(exe: &str) -> String {
         let mut entry = serde_json::json!({
             "type": "command",
             "command": command_for(exe, name.get_name(), Dialect::Codex),
+            "commandWindows": codex_cmd_line(exe, name.get_name()),
             "timeout": timeout,
             "statusMessage": message,
         });
@@ -494,8 +495,13 @@ pub fn planted_exe(text: &str) -> Option<String> {
         Some(inner) => inner.replace(r"'\''", "'"),
         None => cmd.to_string(),
     };
-    let rest = line.strip_prefix("command -v -- \"")?;
-    Some(rest[..rest.find('"')?].to_string())
+    // 두 꼴이다 — Claude·Codex 의 `command -v -- "<exe>" …` 와, Antigravity 의
+    // 따옴표 없는 `<exe> hook …`([`portable_line`]).
+    if let Some(rest) = line.strip_prefix("command -v -- \"") {
+        return Some(rest[..rest.find('"')?].to_string());
+    }
+    let (exe, rest) = line.split_once(' ')?;
+    (rest.starts_with("hook ") && portable_exe(exe) == exe).then(|| exe.to_string())
 }
 
 /// 훅이 부를 명령.
@@ -751,18 +757,96 @@ fn command(exe: &str, event: &str) -> String {
 ///   실측). Codex 는 세션을 대는 변수가 없고 훅을 띄운 데몬의 환경을 물려줘, 거기 선 `CLAUDE_CODE_SESSION_ID` 는
 ///   **남의 세션 것**이다(moai-sile) — 그래서 Codex 의 표식은 `$PPID` 하나로 가른다. 그 값은 Codex 세션들이 함께
 ///   쓰는 데몬이라 알림이 데몬마다 한 번이 되는데, 남의 세션 id 로 가르는 것보다 낫다
-/// - **Antigravity 에는 알림(`systemMessage`)을 안 낸다** — 그 꼴은 맨 윗단 `decision` 이라 모르는 키를 어떻게
-///   읽는지 재지 않았다. 못 도는 판은 빈 출력이다(빈 출력은 지나간다고 쟀다)
+/// - **Antigravity 의 줄은 셸 글이 아니라 [`portable_line`] 이다**(moai-cj4a) — Windows 의 agy 는 cmd 로 띄운다.
+///   알림(`systemMessage`)은 원래 없었다 — 그 꼴은 맨 윗단 `decision` 이라 모르는 키를 어떻게 읽는지 재지 않았다.
+///   못 도는 판은 빈 출력이다(빈 출력은 지나간다고 쟀다)
 ///
 /// **Codex 의 줄은 `sh -c` 로 싼다.** Codex 가 훅 명령을 어느 셸로 푸는지는 문서에 없고, 기록한 훅의 부모가 곧
 /// 데몬이라(사이에 셸이 안 보였다) 사람의 로그인 셸(`fish` 일 수도 있다)로 풀릴 수 있다. 이 줄은 POSIX 셸의
 /// 글이라 감싸면 어느 쪽이든 선다 — 셸로 풀면 바깥 셸이 따옴표를 벗기고, 낱말로 쪼개도 작은따옴표 안은 한 낱말이다.
 fn command_for(exe: &str, event: &str, dialect: Dialect) -> String {
-    let line = shell_line(exe, event, dialect);
     match dialect {
-        Dialect::Codex => format!("sh -c {}", crate::text::single_quoted(&line)),
-        Dialect::Claude | Dialect::Antigravity => line,
+        Dialect::Codex => format!("sh -c {}", crate::text::single_quoted(&shell_line(exe, event, dialect))),
+        Dialect::Claude => shell_line(exe, event, dialect),
+        Dialect::Antigravity => portable_line(exe, event, "antigravity"),
     }
+}
+
+/// Codex 의 `commandWindows` - **PowerShell 이 읽는 줄**이다(moai-r2nn.k5a, 리뷰 moai-r2nn.38g 1번).
+///
+/// **Codex 0.165 는 Windows 에서 훅을 cmd 가 아니라 `powershell.exe -NoProfile -Command "<줄>"` 로 띄운다** — 2026-10-28
+/// 실측 probe 의 프로세스 사슬이 `node.exe ← powershell.exe ← codex.exe` 였고 cmd 는 없었다(`%COMSPEC%` 가 안 풀린 까닭이
+/// 그것이다). 소스로도 그렇다(2026-10-28, openai/codex): 훅의 셸은 세션 환경의 셸이고(`core/src/session/mod.rs` 의
+/// `build_hooks_config` → `shell.derive_exec_args`), Windows 의 그 셸은 `pwsh` 다음 `powershell.exe`, **둘 다 없을 때만**
+/// `cmd.exe` 다(`shell-command/src/shell_detect.rs` 의 `default_user_shell_from_path`). 세션 환경이 없는 판에도
+/// `hooks/src/engine/command_runner.rs` 의 `build_command` 가 `cmd /C` 로 물러선다. 이 줄은 그 cmd 판에서는 안 돈다 — 두 셸이
+/// 함께 읽는 꼴은 따옴표·알림을 버린 맨 이름 줄뿐이라, 거의 늘 서는 PowerShell 판을 고른다(남는 판은 moai-7vgy).
+/// Windows PowerShell 5.1 은 `||` 를 문법 오류로 읽고(`The token '||' is not a valid statement separator`),
+/// `"<exe>" hook …` 은 명령이 아니라 문자열 식이라 `Unexpected token 'hook'` 이다 — cmd 꼴의 줄은 어떤 경로에서도 안 돌았다.
+/// 그래서 5.1 과 7 이 같이 읽는 꼴로 적는다.
+/// - `& '<exe>'` — 호출 연산자와 홑따옴표. 홑따옴표 안에서는 `$`·`` ` ``·`"`·`%`·빈칸·괄호가 다 글자라, 홑따옴표 넷
+///   (`'`·`‘`·`’`·`‚`·`‛`, PowerShell 은 다 같은 따옴표로 읽는다)만 겹쳐 적으면 된다. 제어문자가 들면 `moai` 로 물러선다
+/// - 못 돈 판(없는 바이너리 — `$LASTEXITCODE` 가 안 서 `$null`, clap 2, 패닉 101)에는 POSIX 줄([`shell_line`])과 같은 뜻의
+///   알림을 홑따옴표 글로 낸다. 0·1 은 POSIX 줄처럼 moai 의 출력만 둔다 — 1 은 넘어진 명령이 stderr 에만 쓴 판이다
+/// - 끝의 `exit 0` 은 POSIX 줄의 끝과 같다. moai 의 stdout·stdin 은 PowerShell 이 다시 감싸지 않고 그대로 건넨다(실측: CP949
+///   콘솔 인코딩에서도 한글·`✓` 가 바이트째 지났다)
+fn codex_cmd_line(exe: &str, event: &str) -> String {
+    let exe = if exe.is_empty() || exe.contains(char::is_control) {
+        "moai".to_string()
+    } else {
+        exe.chars()
+            .flat_map(|c| {
+                let q = matches!(c, '\'' | '\u{2018}' | '\u{2019}' | '\u{201A}' | '\u{201B}');
+                std::iter::once(c).chain(q.then_some(c))
+            })
+            .collect()
+    };
+    format!(
+        "& '{exe}' hook {event} --dialect codex; if ($LASTEXITCODE -notin 0,1) {{ '{{\"systemMessage\":\"moai: the {event} \
+         hook could not run. The five moai rules are not standing - run moai skill status to see why.\"}}' }}; exit 0"
+    )
+}
+
+/// sh 도 cmd 도 같은 뜻으로 읽는 한 줄 — `<exe> hook <event> --dialect <말씨> || exit 0`(moai-cj4a).
+///
+/// **왜 이 줄이 따로 있는가.** Windows 의 Antigravity(1.4.8)는 훅을 `cmd /c "<command>"` 로 띄운다
+/// (2026-10-28 실측 — `command_hook_executor.go`). Codex 는 이 줄을 안 쓴다 — 그쪽은 PowerShell 로 띄워 제 줄이 따로다
+/// ([`codex_cmd_line`], 리뷰 moai-r2nn.38g 1번).
+/// [`shell_line`] 의 POSIX 글은 cmd 가 `>/dev/null` 을 제 리다이렉트로 읽다 "The system cannot find the path
+/// specified." 로 끝나고 **종료 0·빈 출력**이라, 규칙 다섯이 꺼진 것이 통과와 구별되지 않았다. Codex 에는 Windows 전용
+/// 키 `commandWindows` 가 있어 이 줄을 거기 심고(`command` 는 글자 하나 안 바꾼다), agy 에는 그런 키가 없고
+/// `.agents/hooks.json` 은 커밋돼 OS 마다 다른 줄이 서로 덮어쓰므로 **모든 OS 에 이 한 줄**을 심는다.
+///
+/// - `|| exit 0` — moai 가 없거나 못 돌면(sh 의 127·126, cmd 의 9009) 0 이다. [`shell_line`] 의
+///   `command -v … || exit 0` 과 같은 몫이지만 **조용하지는 않다** — 셸이 stderr 에 한 줄을 남기고(sh·cmd 가 함께 읽는
+///   리다이렉트가 없다) 에이전트가 그것을 제 로그에 적는다. 못 돈 판의 알림(`systemMessage`)도 이 줄에는 없다
+/// - **따옴표를 하나도 안 쓴다**(리뷰 moai-cj4a.zpz) — agy 1.4.8 은 Go 의 인자 이스케이프로 `cmd /c` 를 띄워 줄 안의
+///   `"` 를 `\"` 로 바꾼다. 2026-10-28 실측: `"<exe>" hook …` 꼴은 cmd 가 `'\"<exe>\"' is not recognized` 로 끝나고
+///   `|| exit 0` 이 그것을 삼켜, 고치려던 "말없이 꺼진 규칙" 이 그대로였다. 따옴표 없는 줄은 Go 가 바깥을 `"…"` 로만
+///   싸고(안에 `"` 가 없으니 `\` 도 안 붙는다) cmd 가 그 한 겹을 벗겨 agy 로 실제로 돌았다 — 두 셸 모두에서
+///   같은 뜻인 꼴이 이것 하나다
+/// - exe 철자는 [`portable_exe`] 를 지난다 — 따옴표 없이 적으니 두 셸 어디서도 뜻이 없는 글자만 받는다
+///
+/// **셸이 못 하는 것은 moai 가 한다**(moai-r2nn.kep) — 이 줄에는 출력을 붙잡아 거를 셸이 없으니, `moai hook --dialect antigravity` 가
+/// 제 안에서 패닉하면 잡아 stdout 에 아무것도 안 내고 0 으로 끝난다(`main` 의 `survived`). 판정을 못 내면 통과다. Claude·Codex 의
+/// POSIX 줄은 101 을 보고 알림을 내므로 그쪽 갈래는 안 잡는다. **남는 한계**: 없는 `moai` 는 셸이 stderr 에 한 줄(sh `not found`·cmd
+/// `is not recognized`)을 남기고, `--dialect` 를 모르는 옛 `moai` 는 clap 이 2 로 끝내 `|| exit 0` 이 통과로 바꾼다.
+///
+/// **Unix 의 Antigravity 가 잃는 것** — 옛 POSIX 줄이 하던 셋이다. (1) `MOAI_HOOK_HANDOFF` 쪽지: 표식을 `moai` 가
+/// 제 안에서 세우는 옛 갈래로 물러선다(`cmd::hook` 의 `once_per_session`). (2) `trap … PIPE`: `main` 의 `outln!` 이
+/// BrokenPipe 를 삼켜 같은 몫을 한다. (3) `set +e`: 치환이 없어져 필요가 없다. 그리고 agy 에는 원래 알림(`systemMessage`)
+/// 이 없었다 — 못 도는 판은 빈 출력이었고 지금도 그렇다. 잃는 것이 사람에게 보이는 동작을 바꾸지 않아 받아들인다.
+fn portable_line(exe: &str, event: &str, dialect_word: &str) -> String {
+    format!("{} hook {event} --dialect {dialect_word} || exit 0", portable_exe(exe))
+}
+
+/// [`portable_line`] 이 부를 철자 — 따옴표 없이 적으므로 **글자(유니코드 포함)·숫자와 `/ . _ : -` 만** 받는다. 빈칸
+/// (`C:/Program Files/…`)은 낱말을 가르고, `% ! ^ & | < > ( ) , ; =` 는 cmd 가, `$ \` ' * ? ~ #` 는 sh 가 읽는다.
+/// 맨 앞 `-` 도 안 받는다. 못 지나면 PATH 의 `moai` 이름으로 물러선다 — [`exe_name`] 이 PATH 의 moai 가 이 파일이면
+/// 어차피 `moai` 로 적으니, 물러서는 것은 PATH 에 없는 낯선 자리뿐이다.
+fn portable_exe(exe: &str) -> &str {
+    let plain = |c: char| c.is_alphanumeric() || matches!(c, '/' | '.' | '_' | ':' | '-');
+    if !exe.is_empty() && !exe.starts_with('-') && exe.chars().all(plain) { exe } else { "moai" }
 }
 
 /// [`command_for`] 의 몸통 — 셸에 넘길 한 줄이다.
@@ -868,19 +952,16 @@ fn shell_line(exe: &str, event: &str, dialect: Dialect) -> String {
     let (sid, flag) = match dialect {
         Dialect::Claude => ("${CLAUDE_CODE_SESSION_ID:-$PPID}", String::new()),
         Dialect::Codex => ("$PPID", " --dialect codex".to_string()),
-        Dialect::Antigravity => ("${ANTIGRAVITY_CONVERSATION_ID:-$PPID}", " --dialect antigravity".to_string()),
+        Dialect::Antigravity => unreachable!("Antigravity 의 줄은 portable_line 이다 — command_for 가 가른다"),
     };
-    // 판정의 꼴이 아닌 출력 뒤에 서는 알림 — Antigravity 는 아무것도 안 낸다.
-    let notice = match dialect {
-        Dialect::Antigravity => String::new(),
-        Dialect::Claude | Dialect::Codex => format!(
-            "s=\"${{TMPDIR:-/tmp}}/moai-hook-{whose:04x}-{sid}.{event}.$c.said\"; \
-             {{ ! [ -e \"$s\" ] && ! [ -h \"$s\" ] && true 2>>/dev/null > \"$s\" \
-             || ! [ -f \"$s\" ] || ! [ -O \"$s\" ] || [ -h \"$s\" ]; }} && \
-             printf '{{\"systemMessage\":\"moai: the %s hook could not run (exit %s){spot}. \
-             The five moai rules are not standing - run moai skill status to see why.\"}}' {said} \"$c\"{where_} || :"
-        ),
-    };
+    // 판정의 꼴이 아닌 출력 뒤에 서는 알림.
+    let notice = format!(
+        "s=\"${{TMPDIR:-/tmp}}/moai-hook-{whose:04x}-{sid}.{event}.$c.said\"; \
+         {{ ! [ -e \"$s\" ] && ! [ -h \"$s\" ] && true 2>>/dev/null > \"$s\" \
+         || ! [ -f \"$s\" ] || ! [ -O \"$s\" ] || [ -h \"$s\" ]; }} && \
+         printf '{{\"systemMessage\":\"moai: the %s hook could not run (exit %s){spot}. \
+         The five moai rules are not standing - run moai skill status to see why.\"}}' {said} \"$c\"{where_} || :"
+    );
     format!(
         "command -v -- \"{exe}\" >/dev/null 2>&1{there} || exit 0; trap 'exit 0' PIPE; \
          h=\"${{TMPDIR:-/tmp}}/moai-hook-{sid}-$$.handoff\"; \
@@ -923,14 +1004,19 @@ where
 {
     let mut files: Vec<(PathBuf, String)> =
         skill_files(skills).map(|(p, b)| (PathBuf::from(format!("skills/{p}")), b)).collect();
-    let market = (PathBuf::from(".claude-plugin/marketplace.json"), marketplace_json(market));
-    // 판은 **매니페스트를 뺀 트리 전부와 판 자리를 비운 매니페스트**에서 나온다.
+    let market = (PathBuf::from(format!(".claude-plugin/{MARKET_FILE}")), marketplace_json(market));
+    // **marketplace.json 은 기계마다의 파일이라 커밋하지 않는다**(moai-r2nn.bb6) - 이름에 체크아웃 경로의 해시가 섞여([`market`])
+    // 리눅스와 Windows 가 번갈아 덮고, 커밋된 트리에 헛 diff 가 선다. 같은 디렉터리의 `.gitignore` 가 그것을 걸러 낸다.
+    files.push((PathBuf::from(".claude-plugin/.gitignore"), format!("{MARKET_FILE}\n")));
+    // 판은 **매니페스트와 마켓플레이스 파일을 뺀 트리 전부와 판 자리를 비운 매니페스트**에서 나온다. 마켓플레이스 파일은
+    // 이름에 체크아웃 경로가 섞여 있어, 셈에 넣으면 판이 기계마다 달라진다(moai-r2nn.bb6).
     // 매니페스트 자신은 그 판을 담고 있으므로 그대로는 셈에 넣을 수 없다 —
     // 넣으면 해시가 제 꼬리를 문다. 그렇다고 매니페스트를 통째로 빼면 그 틀
     // (`timeout`·`description`)만 바꾼 판이 옛 판과 같아 `claude` 가 옛 복사를
-    // 계속 쓴다. 훅 명령·실행 파일·이름표는 그 틀과 `marketplace.json` 에 이미
-    // 들어 있어 따로 셈하지 않는다 — 따로 적은 목록은 틀이 자랄 때마다 어긋난다.
-    let version = version_of(&[files.as_slice(), std::slice::from_ref(&market)].concat(), &plugin_json(exe, ""));
+    // 계속 쓴다. 훅 명령·실행 파일·이름표는 그 틀과 플러그인 매니페스트의 틀에 이미
+    // 들어 있어 따로 셈하지 않는다 - 따로 적은 목록은 틀이 자랄 때마다 어긋난다. 마켓플레이스 파일은 소스(`./`)와 플러그인
+    // 이름만 담아 판에 영향이 없고, 바뀌는 것은 마켓플레이스 이름뿐이다.
+    let version = version_of(&files, &plugin_json(exe, ""));
     files.push((PathBuf::from(".claude-plugin/plugin.json"), plugin_json(exe, &version)));
     files.push(market);
     files
@@ -989,6 +1075,9 @@ fn plugin_json(exe: &str, version: &str) -> String {
     });
     pretty(&manifest)
 }
+
+/// 마켓플레이스 파일의 이름 - 같은 디렉터리의 `.gitignore` 가 가리키고, `skill install` 이 커밋돼 있는지 묻는다.
+pub(crate) const MARKET_FILE: &str = "marketplace.json";
 
 fn marketplace_json(name: &str) -> String {
     pretty(&serde_json::json!({
@@ -1653,6 +1742,7 @@ mod tests {
             "skills/moai-recover/SKILL.md",
             ".claude-plugin/plugin.json",
             ".claude-plugin/marketplace.json",
+            ".claude-plugin/.gitignore",
         ] {
             assert!(files.contains_key(want), "{want} 가 없다");
         }
@@ -1825,9 +1915,9 @@ mod tests {
             "감독 스킬은 SKILL.md 와 일꾼 글 셋, tmux·cmux·Saycode·되살리기 스킬은 SKILL.md 하나씩이다"
         );
         assert_eq!(
-            shared.len() + 2 + only_claude,
+            shared.len() + 3 + only_claude,
             claude.len(),
-            "매니페스트 둘과 Claude 만의 스킬 말고 다른 것이 갈렸다"
+            "매니페스트 둘과 그 곁의 .gitignore 와 Claude 만의 스킬 말고 다른 것이 갈렸다"
         );
         assert!(!shared.keys().any(|p| p.contains(".claude-plugin")), "매니페스트가 .agents 에 섰다");
     }
@@ -1933,6 +2023,28 @@ mod tests {
         let here = tree_at("api", Path::new("/work/api"), "/bin/moai", "# 스킬");
         let there = tree_at("api", Path::new("/old/api"), "/bin/moai", "# 스킬");
         assert_ne!(name(&here), name(&there), "접두어가 같다고 이름까지 같다");
+    }
+
+    /// **판은 마켓플레이스 이름에 안 기댄다**(moai-r2nn.bb6) — 이름은 체크아웃 경로에서 나오는 기계마다의 값이라, 판이 거기
+    /// 기대면 리눅스와 Windows 가 커밋된 `plugin.json` 을 번갈아 덮는다. 그 파일은 같은 디렉터리의 `.gitignore` 가 걸러 낸다.
+    #[test]
+    fn the_version_does_not_lean_on_the_marketplace_name() {
+        let ver = |f: &BTreeMap<String, String>| {
+            let v: serde_json::Value = serde_json::from_str(&f[".claude-plugin/plugin.json"]).unwrap();
+            v["version"].as_str().unwrap().to_string()
+        };
+        let here = tree_at("api", Path::new("/work/api"), "/bin/moai", "# 스킬");
+        let there = tree_at("other", Path::new("C:/Users/me/api"), "/bin/moai", "# 스킬");
+        assert_ne!(
+            here[".claude-plugin/marketplace.json"], there[".claude-plugin/marketplace.json"],
+            "시험이 이름을 못 갈랐다"
+        );
+        assert_eq!(ver(&here), ver(&there), "마켓플레이스 이름이 판에 들었다");
+        assert_eq!(here[".claude-plugin/plugin.json"], there[".claude-plugin/plugin.json"]);
+        // 걸러 내는 줄이 파일 이름과 같다.
+        assert_eq!(here[".claude-plugin/.gitignore"], "marketplace.json\n");
+        // 내용이 바뀌면 판은 여전히 바뀐다.
+        assert_ne!(ver(&here), ver(&tree_at("api", Path::new("/work/api"), "/bin/moai", "# 다른 스킬")));
     }
 
     /// **이름으로 적을 때도 PATH 를 본다.** `[ -x "moai" ]` 는 PATH 가 아니라
@@ -2619,12 +2731,14 @@ mod tests {
     fn the_codex_and_antigravity_lines_call_moai_in_their_dialect() {
         let scratch = crate::scratch::Scratch::new("skill-dialect-line");
         let at = scratch.path();
+        // 가짜 moai 는 agy 줄이 이름으로 물러서지 않는 자리에 둔다([`Plain`]).
+        let bin = Plain::new("skill-dialect-bin");
         // 받은 인자를 판정의 꼴로 낸다 — 줄이 그것을 그대로 흘려보내는지 본다.
-        let echo = planted(at, "echo", "#!/bin/sh\nprintf '{\"args\":\"%s\"}\\n' \"$*\"\n", 0o755);
+        let echo = planted(&bin.0, "echo", "#!/bin/sh\nprintf '{\"args\":\"%s\"}\\n' \"$*\"\n", 0o755);
         if !crate::cmd::runnable(&echo) {
             return;
         }
-        let dead = planted(at, "dead", "#!/bin/sh\nexit 0\n", 0o644);
+        let dead = planted(&bin.0, "dead", "#!/bin/sh\nexit 0\n", 0o644);
         let (echo, dead) = (echo.display().to_string(), dead.display().to_string());
         assert!(!command(&echo, "stop").contains("--dialect"), "Claude 의 줄에 말씨가 붙었다");
         for (k, sh) in shells().into_iter().enumerate() {
@@ -2649,6 +2763,147 @@ mod tests {
         // 든 실행 파일이 그 판이다 — POSIX 셸만 재는 위의 고리는 이것을 못 본다.
         let quoted = shell_line("/home/me/Bob's tools/moai", "stop", Dialect::Codex);
         assert!(!quoted.contains("\\'"), "Codex 의 속 줄에 \\' 가 섰다 — {quoted}");
+    }
+
+    /// **Codex 의 처리기마다 `commandWindows` 가 서고 POSIX `command` 는 옛 글 그대로다**(moai-cj4a.bcv) — Windows 의 Codex 는
+    /// 훅을 `powershell.exe -NoProfile -Command` 로 띄워 `sh -c '…'` 를 못 읽는다(리뷰 moai-r2nn.38g 1번). exe 는 홑따옴표로 싸고
+    /// 못 돈 판에는 알림이 선다.
+    #[test]
+    fn codex_gets_a_cmd_line_beside_the_posix_one() {
+        let exe = "C:/repo/target/debug/moai.exe";
+        let v: serde_json::Value = serde_json::from_str(&codex_hooks(exe)).unwrap();
+        for (at, group) in v["hooks"].as_object().unwrap() {
+            let entry = &group[0]["hooks"][0];
+            let event = Event::value_variants()
+                .iter()
+                .find(|e| e.wire() == at.as_str())
+                .map(|e| e.to_possible_value().unwrap().get_name().to_string())
+                .unwrap();
+            assert_eq!(entry["command"], command_for(exe, &event, Dialect::Codex), "{at}: POSIX 줄이 바뀌었다");
+            assert_eq!(entry["commandWindows"], codex_cmd_line(exe, &event), "{at}");
+            let line = entry["commandWindows"].as_str().unwrap();
+            let head = format!("& '{exe}' hook {event} --dialect codex; if ($LASTEXITCODE -notin 0,1) {{ '");
+            assert!(line.starts_with(&head), "{at}: {line}");
+            // PowerShell 5.1 이 문법 오류로 읽는 `||`·`&&` 가 없다.
+            assert!(!line.contains("||") && !line.contains("&&"), "{at}: {line}");
+            let said = line[head.len()..].strip_suffix("' }; exit 0").expect("줄 끝이 `' }; exit 0` 이 아니다");
+            assert!(!said.contains('\''), "{at}: 알림 글에 홑따옴표 - {said}");
+            let json: serde_json::Value = serde_json::from_str(said).expect("알림 글이 JSON 이 아니다");
+            assert!(json["systemMessage"].as_str().unwrap().contains("moai skill status"), "{at}");
+        }
+        let stop = |exe: &str| -> String {
+            let v: serde_json::Value = serde_json::from_str(&codex_hooks(exe)).unwrap();
+            v["hooks"]["Stop"][0]["hooks"][0]["commandWindows"].as_str().unwrap().to_string()
+        };
+        // 홑따옴표 안에서는 다 글자라 빈칸·괄호·`%`·`&`·`$`·`"`·`\` 가 든 경로도 이름으로 물러서지 않는다.
+        for kept in [
+            "C:/100%/moai.exe",
+            "C:/Program Files/m/moai.exe",
+            "C:/Program Files (x86)/m/moai.exe",
+            "C:/a&b/moai.exe",
+            "C:/a$b/moai.exe",
+            "C:/a\"b/moai.exe",
+            r"C:\x\moai.exe",
+            "-moai",
+        ] {
+            assert!(stop(kept).starts_with(&format!("& '{kept}' hook stop --dialect codex; ")), "{kept}");
+        }
+        // 홑따옴표는 겹쳐 적는다 — PowerShell 이 따옴표로 읽는 것 다.
+        assert!(stop("C:/Bob's/moai.exe").starts_with("& 'C:/Bob''s/moai.exe' hook stop "));
+        assert!(stop("C:/a\u{2019}b/moai.exe").starts_with("& 'C:/a\u{2019}\u{2019}b/moai.exe' hook stop "));
+        // 빈 철자와 제어문자만 이름으로 물러선다.
+        for bad in ["", "C:/a\nb/moai.exe"] {
+            assert!(stop(bad).starts_with("& 'moai' hook stop --dialect codex; "), "{bad:?}");
+        }
+        // POSIX 줄은 글자 하나 안 바뀐다(Codex 는 글의 해시로 믿음을 기억한다).
+        let v: serde_json::Value = serde_json::from_str(&codex_hooks("/repo/moai")).unwrap();
+        assert_eq!(v["hooks"]["Stop"][0]["hooks"][0]["command"], command_for("/repo/moai", "stop", Dialect::Codex));
+    }
+
+    /// **Codex 의 줄을 Codex 처럼 띄워 본다**(리뷰 moai-r2nn.38g 1번) — `powershell.exe -NoProfile -Command <줄>`. 빈칸·괄호 든
+    /// 자리의 대역(`moai.bat`)을 부르면 그 출력만, 없는 자리면 알림 JSON 하나만 stdout 에 서고 종료는 늘 0 이다. 대역이
+    /// 101 로 끝나면(패닉) 알림이 선다. Windows 에서만 돈다 — 다른 OS 에는 그 셸이 없다.
+    #[cfg(windows)]
+    #[test]
+    fn the_codex_line_runs_under_windows_powershell() {
+        use std::process::{Command, Stdio};
+        let dir = std::env::temp_dir().join(format!("moai ps (x86) {}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let fake = dir.join("moai.bat");
+        std::fs::write(&fake, "@echo {\"verdict\":\"%1 %2\"}\r\n@exit /b %MOAI_FAKE_CODE%\r\n").unwrap();
+        let run = |exe: &str, code: &str| {
+            let out = Command::new("powershell.exe")
+                .args(["-NoProfile", "-Command", &codex_cmd_line(exe, "stop")])
+                .env("MOAI_FAKE_CODE", code)
+                .stdin(Stdio::null())
+                .output()
+                .unwrap();
+            (out.status.code(), String::from_utf8_lossy(&out.stdout).trim().to_string())
+        };
+        let shown = crate::path::slashed(&fake.display().to_string(), true);
+        assert_eq!(run(&shown, "0"), (Some(0), r#"{"verdict":"hook stop"}"#.to_string()));
+        assert_eq!(run(&shown, "1"), (Some(0), r#"{"verdict":"hook stop"}"#.to_string()));
+        let notice = |out: &str| {
+            let last: serde_json::Value =
+                serde_json::from_str(out.lines().last().unwrap()).expect("알림이 JSON 이 아니다");
+            last["systemMessage"].as_str().unwrap().contains("stop hook could not run")
+        };
+        let (code, out) = run(&shown, "101");
+        assert!(code == Some(0) && notice(&out), "{code:?} {out}");
+        let missing = crate::path::slashed(&dir.join("none").join("moai.exe").display().to_string(), true);
+        let (code, out) = run(&missing, "0");
+        assert!(code == Some(0) && out.lines().count() == 1 && notice(&out), "{code:?} {out}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **Antigravity 의 줄은 sh 도 cmd 도 읽는 한 줄이다**(moai-cj4a.t76) — 모든 OS 에 같은 글이 선다. 없는 바이너리는 0 과
+    /// 빈 출력이고, 있는 바이너리의 출력은 그대로 흘러간다. `planted_exe` 는 새 머리와 옛 머리를 모두 읽는다.
+    #[test]
+    fn the_antigravity_line_is_one_line_both_shells_read() {
+        let exe = "/repo/target/debug/moai";
+        assert_eq!(
+            command_for(exe, "pre-tool-use", Dialect::Antigravity),
+            "/repo/target/debug/moai hook pre-tool-use --dialect antigravity || exit 0"
+        );
+        assert_eq!(
+            command_for("C:/100%/moai.exe", "stop", Dialect::Antigravity),
+            "moai hook stop --dialect antigravity || exit 0"
+        );
+        // 유니코드 이름의 사용자 디렉터리는 그대로 선다 — cmd 도 sh 도 그 글자에 뜻이 없다.
+        assert_eq!(
+            command_for("C:/Users/홍길동/moai.exe", "stop", Dialect::Antigravity),
+            "C:/Users/홍길동/moai.exe hook stop --dialect antigravity || exit 0"
+        );
+        let line = command_for("moai", "stop", Dialect::Antigravity);
+        assert!(!line.contains(['\'', '"']) && !line.contains("/dev/null"), "cmd·agy 가 못 읽는 글이 들었다 — {line}");
+        // 새 머리와 Codex 의 `commandWindows`(껍질 안 쓴 `command` 가 앞선다)·옛 머리.
+        for exe in ["/repo/target/release/moai", "C:/Users/me/AppData/Local/Programs/moai/moai.exe", "moai"] {
+            assert_eq!(planted_exe(&antigravity_hooks(exe)).as_deref(), Some(exe));
+        }
+        assert_eq!(planted_exe(&antigravity_hooks("C:/Program Files/m/moai.exe")).as_deref(), Some("moai"));
+        assert_eq!(planted_exe(r#"{"a":{"command":"echo hi"}}"#), None, "남의 줄에서 exe 를 꺼냈다");
+        let old = r#"{"moai":{"enabled":true,"Stop":[{"type":"command","command":"command -v -- \"/old/moai\" >/dev/null 2>&1 || exit 0; x"}]}}"#;
+        assert_eq!(planted_exe(old).as_deref(), Some("/old/moai"));
+        assert!(hooks_are_ours(Dialect::Antigravity, &old.replace("x\"", "\\\" hook stop --dialect antigravity\"")));
+        assert_eq!(planted_exe(r#"{"a":{"command":"\"echo\" hi"}}"#), None, "남의 줄에서 exe 를 꺼냈다");
+    }
+
+    /// 새 줄을 sh 로 실제로 돌린다 — 없는 바이너리는 0·빈 출력, 있는 바이너리는 말씨를 붙여 불리고 출력이 그대로 흐른다.
+    #[cfg(unix)]
+    #[test]
+    fn the_antigravity_line_runs_under_sh() {
+        let bin = Plain::new("skill-agy-portable");
+        let echo = planted(&bin.0, "echo", "#!/bin/sh\nprintf '{\"args\":\"%s\"}\n' \"$*\"\n", 0o755);
+        if !crate::cmd::runnable(&echo) {
+            return;
+        }
+        let run = |line: &str| {
+            let out = crate::test_shell::shell("sh").args(["-c", line]).output().unwrap();
+            (out.status.code(), String::from_utf8_lossy(&out.stdout).to_string())
+        };
+        let want = "{\"args\":\"hook stop --dialect antigravity\"}\n".to_string();
+        assert_eq!(run(&command_for(&echo.display().to_string(), "stop", Dialect::Antigravity)), (Some(0), want));
+        assert_eq!(run(&command_for("/no/such/moai", "stop", Dialect::Antigravity)), (Some(0), String::new()));
     }
 
     /// **심는 훅 파일 둘의 꼴**(moai-u5wr.kov) — Codex 는 Claude 와 같은 틀에 `apply_patch` 를 보고 싣는 글의 상한을
@@ -2703,7 +2958,14 @@ mod tests {
         // **심긴 파일이 부르는 moai 를 읽는다** — `status` 가 그것으로 견준다. Codex 의 `sh -c '…'` 껍질과 자리에 든 `'` 도.
         for exe in ["/repo/target/release/moai", "/home/me/Bob's tools/moai", "moai"] {
             assert_eq!(planted_exe(&codex_hooks(exe)).as_deref(), Some(exe), "codex {exe}");
-            assert_eq!(planted_exe(&antigravity_hooks(exe)).as_deref(), Some(exe), "antigravity {exe}");
+        }
+        // Antigravity 의 줄은 따옴표가 없어 빈칸·`'` 든 자리를 `moai` 로 적는다([`portable_exe`]).
+        for (exe, want) in [
+            ("/repo/target/release/moai", "/repo/target/release/moai"),
+            ("/home/me/Bob's tools/moai", "moai"),
+            ("moai", "moai"),
+        ] {
+            assert_eq!(planted_exe(&antigravity_hooks(exe)).as_deref(), Some(want), "antigravity {exe}");
         }
     }
 
@@ -2976,6 +3238,38 @@ mod tests {
         assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
         std::fs::set_permissions(&p, std::fs::Permissions::from_mode(mode)).unwrap();
         p
+    }
+
+    /// [`portable_exe`] 가 **그대로 적는 자리** — agy 줄을 셸로 돌려 재는 시험의 가짜 moai 를 여기 둔다. 시험의
+    /// [`crate::scratch::Scratch`] 이름에는 `ThreadId(…)` 의 괄호가 들어 그 밑의 파일은 이름 `moai` 로 물러서고, CI 의
+    /// PATH 에는 moai 가 없어 줄이 빈 출력으로 끝났다(v0.31.0 의 PR CI, moai-xbnh). 물러서는 갈래는 따로 잰다
+    /// (`the_antigravity_line_is_one_line_both_shells_read`). 걷기는 `Drop` 이 한다.
+    #[cfg(unix)]
+    struct Plain(PathBuf);
+
+    #[cfg(unix)]
+    impl Plain {
+        fn new(name: &str) -> Plain {
+            use std::sync::atomic::{AtomicU32, Ordering};
+            static NTH: AtomicU32 = AtomicU32::new(0);
+            let dir = std::env::temp_dir().join(format!(
+                "moai-{name}-{}-{}",
+                std::process::id(),
+                NTH.fetch_add(1, Ordering::Relaxed)
+            ));
+            let _ = std::fs::remove_dir_all(&dir);
+            std::fs::create_dir_all(&dir).unwrap();
+            let shown = dir.display().to_string();
+            assert_eq!(portable_exe(&shown), shown, "임시 디렉터리가 agy 줄에 그대로 못 서는 자리다");
+            Plain(dir)
+        }
+    }
+
+    #[cfg(unix)]
+    impl Drop for Plain {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
     }
 
     /// **보드·`Stop` 의 표식은 판정이 건너간 뒤에 선다**(moai-45hf.wqg). `moai` 가 쪽지에 표식 이름을
@@ -3272,9 +3566,10 @@ mod tests {
     /// SKILL.md 가 "읽기 전용" 이라 가르쳤다(`moai-ka9p`). 그 복사를 읽은 세션은
     /// 바이너리가 아니라 옛 글을 배운다.
     ///
-    /// **훅의 실행 파일과 마켓플레이스 이름은 커밋된 파일에서 읽는다.** 둘은
-    /// 심은 체크아웃의 자리에서 나오는 값이라, 이 시험을 부른 자리(워크트리)로
-    /// 다시 셈하면 글이 같아도 늘 어긋난다. 여기서 보는 것은 글과 판뿐이다.
+    /// **훅의 실행 파일은 커밋된 파일에서 읽는다.** 심은 체크아웃의 자리에서
+    /// 나오는 값이라, 이 시험을 부른 자리(워크트리)로 다시 셈하면 글이 같아도 늘
+    /// 어긋난다. 마켓플레이스 이름은 커밋하지 않는다(moai-r2nn.bb6) — 여기서 보는
+    /// 것은 글과 판뿐이다.
     ///
     /// 다시 쓰는 길: `MOAI_BLESS=1 cargo test checked_in` — 같은
     /// `tree_named` 로 트리 전부를 적힌 자리 그대로 다시 쓴다. `skill install` 은
@@ -3289,22 +3584,18 @@ mod tests {
         let dir = root.join(DIR);
         let read = |p: &str| std::fs::read_to_string(dir.join(p)).unwrap_or_else(|e| panic!("{p}: {e}"));
         let bless = blessing(std::env::var("MOAI_BLESS").ok().as_deref());
-        // **깨진 파일도 bless 로 되살린다.** 두 값은 JSON 을 읽어야 나오는데, 병합
+        // **깨진 파일도 bless 로 되살린다.** 실행 파일은 JSON 을 읽어야 나오는데, 병합
         // 충돌 표시 한 줄로 그 읽기가 실패하면 다시 쓰기에 닿기 전에 멈춰 도구
         // 밖(`git checkout`)만 남는다. 그래서 bless 일 때만 글자로 찾는다. **아래
         // 비교는 틀린 값을 못 잡는다** — bless 는 찾은 값으로 먼저 쓰고 견주므로
-        // 제 자신과 같다. 그래서 이름은 맨 윗단 들여쓰기(두 칸)에 매어 찾는다 —
-        // 안 매면 맨 윗단 `name` 이 빠진 글에서 `owner.name` 의 `moai` 를 집는다.
+        // 제 자신과 같다.
         let manifest = read(".claude-plugin/plugin.json");
         let exe = hook_exe(&manifest)
             .or_else(|| loose(&manifest, "command -v -- \\\"").filter(|_| bless))
             .expect("커밋된 plugin.json 에서 훅의 실행 파일을 못 읽는다 — 깨졌으면 MOAI_BLESS=1 로 다시 쓴다");
-        let market = read(".claude-plugin/marketplace.json");
-        let name = serde_json::from_str::<serde_json::Value>(&market)
-            .ok()
-            .and_then(|v| Some(v.get("name")?.as_str()?.to_string()))
-            .or_else(|| loose(&market, TOP_NAME).filter(|_| bless))
-            .expect("marketplace.json 에서 name 을 못 읽는다 — 깨졌으면 MOAI_BLESS=1 로 다시 쓴다");
+        // **marketplace.json 은 커밋하지 않는다**(moai-r2nn.bb6) — 이름이 체크아웃 경로에서 나오는 기계마다의 파일이다. 판도
+        // 그 이름에 기대지 않으니(`tree_named`) 어떤 이름으로 지어도 같은 글이다. 견주는 것은 그 파일을 뺀 나머지다.
+        let name = "unused";
 
         let all = skills();
         // **세 에이전트의 훅도 같은 실행 파일로 본다**(moai-u5wr.kov) — 이 저장소는 그 파일들도 커밋한다. 자리는 저장소
@@ -3313,7 +3604,9 @@ mod tests {
             (PathBuf::from(CODEX_HOOKS), codex_hooks(&exe)),
             (PathBuf::from(AGENTS_HOOKS), antigravity_hooks(&exe)),
         ];
-        for (at, want) in [(DIR, tree_named(&name, &exe, &all)), (AGENTS_DIR, agents_tree(&all)), ("", hooks)] {
+        for (at, want) in
+            [(DIR, without_market(tree_named(name, &exe, &all))), (AGENTS_DIR, agents_tree(&all)), ("", hooks)]
+        {
             let stale = checked_in(&root.join(at), &want, bless);
             assert!(
                 stale.is_empty(),
@@ -3321,6 +3614,11 @@ mod tests {
                  MOAI_BLESS=1 cargo test checked_in 으로 다시 쓴다"
             );
         }
+    }
+
+    /// 커밋하지 않는 마켓플레이스 파일을 뺀다.
+    fn without_market(files: Vec<(PathBuf, String)>) -> Vec<(PathBuf, String)> {
+        files.into_iter().filter(|(p, _)| p.file_name().is_none_or(|n| n != MARKET_FILE)).collect()
     }
 
     /// 커밋된 트리 하나를 `want` 와 견주어 다른 파일을 낸다 — `bless` 면 먼저 그대로 다시 쓴다. 없는 파일도 다른 것이다.
@@ -3346,10 +3644,6 @@ mod tests {
         matches!(value.map(|v| v.trim().to_ascii_lowercase()).as_deref(), Some("1" | "true" | "yes"))
     }
 
-    /// `marketplace.json` 맨 윗단의 `name`. `pretty` 가 두 칸으로 들여 쓰고
-    /// `owner`·`plugins` 의 `name` 은 더 깊다.
-    const TOP_NAME: &str = "\n  \"name\": \"";
-
     /// JSON 으로 못 읽는 글에서 `before` 바로 뒤의 값을 찾는다. 값은 따옴표나
     /// 역슬래시에서 끝난다 — 훅의 실행 파일은 `quotable` 이라 둘 다 못 품는다.
     fn loose(text: &str, before: &str) -> Option<String> {
@@ -3368,9 +3662,10 @@ mod tests {
         assert!(!blessing(None));
     }
 
-    /// 병합 충돌 표시가 끼어 JSON 이 깨져도 bless 가 쓸 두 값은 글자로 나온다.
+    /// 병합 충돌 표시가 끼어 JSON 이 깨져도 bless 가 쓸 실행 파일은 글자로 나온다. 마켓플레이스 이름은 이제 커밋하지
+    /// 않아(moai-r2nn.bb6) 읽어 올 일이 없다.
     #[test]
-    fn a_conflicted_tree_still_yields_its_exe_and_name() {
+    fn a_conflicted_tree_still_yields_its_exe() {
         let exe = "/repo/target/release/moai";
         let files = tree("t", Path::new("/repo"), exe, &fake("# 스킬", "감독", "위키"));
         let body = |end: &str| {
@@ -3379,13 +3674,7 @@ mod tests {
         };
         let manifest = body("plugin.json");
         assert_eq!(hook_exe(&manifest), None, "시험이 깨진 매니페스트를 만들지 못했다");
-        assert_eq!(loose(&manifest, "command -v -- \\\"").as_deref(), Some(exe));
-        let name = market("t", Path::new("/repo"));
-        assert_eq!(loose(&body("marketplace.json"), TOP_NAME).as_deref(), Some(name.as_str()));
-        assert_eq!(loose("{}", TOP_NAME), None);
-        // 맨 윗단 name 이 빠지면 owner·plugins 의 `moai` 를 집지 않는다.
-        let headless = body("marketplace.json").replace(&format!("\n  \"name\": \"{name}\","), "");
-        assert_ne!(headless, body("marketplace.json"), "시험이 name 을 못 뺐다");
-        assert_eq!(loose(&headless, TOP_NAME), None);
+        assert_eq!(loose(&manifest, "command -v -- \\\""), Some(exe.to_string()));
+        assert_eq!(loose("{}", "command -v -- \\\""), None);
     }
 }
