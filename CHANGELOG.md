@@ -12,6 +12,26 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Codex hooks run on Windows.** Codex starts a hook there with `cmd /C`, which
+  could not read the POSIX line moai plants — the hook exited 0 with no output
+  and the rules were silently off, while `moai skill status` said `current`.
+  Each Codex hook now also carries `commandWindows`, which cmd reads; the Unix
+  `command` is unchanged. Codex asks you to trust the hooks again in `/hooks`,
+  and an older `.codex/hooks.json` reads as `stale` until
+  `moai skill install --agent codex` plants it again. (moai-cj4a.bcv, moai-cj4a.x4u)
+- **Antigravity hooks run on Windows.** `agy` starts hooks with `cmd /c`, so the
+  `.agents/hooks.json` line is now a single `"<moai>" hook <event> --dialect
+  antigravity || exit 0` that sh and cmd both read, on every OS. On Unix it no
+  longer carries the hand-off note, the broken-pipe trap or `set +e`; nothing a
+  person sees changes. An older file reads as `stale` until
+  `moai skill install --agent antigravity` plants it again. (moai-cj4a.t76, moai-cj4a.x4u)
+- **`moai skill status` names the Git Bash Claude Code runs hooks in on
+  Windows.** Without Git Bash, Claude Code uses PowerShell, which cannot run the
+  hook lines; the new `git bash` row (and `git_bash` in `--json`) says where it
+  was found, or that it was not. (moai-cj4a.tux)
+
 ## [0.30.0] - 2026-10-27
 
 ### Added
