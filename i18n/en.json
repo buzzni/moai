@@ -878,6 +878,8 @@
   "skill.install_stale": "  — the version to plant is {want}. Plant it again{advice}",
   "skill.hook_unrunnable": "— missing or not runnable. The five rules do not stand",
   "skill.hook_is_another_moai": "    the moai called here ({exe}) is not the one the hooks call — planting here makes the hooks call this one",
+  "skill.hooks_path_missing": "the hook line calls moai from PATH, and there is none - the rules are off (planting would write {exe})",
+  "skill.hooks_path_other": "the hook line calls moai from PATH, which is {found} - not {exe}",
   "skill.claude_on_path": "on PATH",
   "skill.claude_off_path": "not on PATH — nothing can be planted or removed",
   "skill.stale_copies": "    {n} old copies are left in the claude cache (clearing them is claude's job)",

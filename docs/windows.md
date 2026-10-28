@@ -131,6 +131,11 @@ Windows (below).
   `moai skill install` Codex asks you to trust the hooks again in `/hooks`; a
   hook file planted by an older moai reads as `stale` in `moai skill status`
   until you run `moai skill install --agent codex` (or `antigravity`) again
+  - **`moai skill status` says when that fallback bites.** When the hook line was
+    written as plain `moai` but this install would have written the full path,
+    the `agy hooks` row (and `codex hooks` on Windows) turns into a `!` if there
+    is no `moai` on `PATH` (the rules are off) or if the one there is a
+    different file; `--json` carries it as `path_moai`. It blocks nothing
 - **`moai skill status` names the Git Bash Claude Code will use**
   (`· git bash  C:\Program Files\Git\bin\bash.exe`), looked up as Claude Code
   does: `CLAUDE_CODE_GIT_BASH_PATH` when it is set (and only that — a path

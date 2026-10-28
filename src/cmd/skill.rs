@@ -811,6 +811,16 @@ pub fn status(ctx: &Ctx) -> R<Vec<String>> {
         ON_PATH.iter().filter(|(a, _)| *a != Agent::Claude).map(|(_, bin)| (*bin, which(bin).is_some())).collect();
     // 두 에이전트의 훅 파일(moai-u5wr.kov) — Claude 의 훅은 위의 플러그인 줄들이 댄다.
     let hook_files = HookFile::all(&root, &exe);
+    // 이름으로 부르는 줄이 PATH 의 어떤 moai 를 부르는가(moai-r2nn.yxz) — 현재인 파일만 본다. 없거나 남의 파일이면 그 줄이 먼저 말한다.
+    let by_name: Vec<ByName> = hook_files
+        .iter()
+        .map(|h| match h.seen(&root) {
+            HookState::Current => ByName::of(&exe, h.reads_by_name(cfg!(windows)), on_path.as_deref(), |a, b| {
+                crate::path::real(a) == crate::path::real(b)
+            }),
+            _ => ByName::Unused,
+        })
+        .collect();
 
     if ctx.json {
         let rows: Vec<_> = installs
@@ -850,11 +860,19 @@ pub fn status(ctx: &Ctx) -> R<Vec<String>> {
             "agents": shared.json(&others),
             "hooks": hook_files
                 .iter()
-                .map(|h| serde_json::json!({
-                    "agent": h.agent.as_str(),
-                    "path": h.path.display().to_string(),
-                    "state": h.seen(&root).as_str(),
-                }))
+                .zip(&by_name)
+                .map(|(h, named)| {
+                    let mut v = serde_json::json!({
+                        "agent": h.agent.as_str(),
+                        "path": h.path.display().to_string(),
+                        "state": h.seen(&root).as_str(),
+                    });
+                    // 줄이 이름으로 PATH 의 moai 를 부를 때만 선다 — 그 밖에서는 키가 없다.
+                    if let Some(found) = named.json() {
+                        v["path_moai"] = found;
+                    }
+                    v
+                })
                 .collect::<Vec<_>>(),
         }));
     }
@@ -958,8 +976,16 @@ pub fn status(ctx: &Ctx) -> R<Vec<String>> {
     // **남은 디렉터리는 이름과 까닭을 댄다**(moai-9s9s.v0y) — `install` 이 사람의 것이 든 디렉터리를 남기면(`Foreign`) 그
     // 안의 `SKILL.md` 가 걷힌 명령을 계속 가르치는데, 위 줄은 "지금 판" 이라 아무 화면도 그것을 안 댔다.
     out.extend(shared.left.iter().map(|l| l.status_line(lang)));
-    for h in &hook_files {
+    for (h, named) in hook_files.iter().zip(&by_name) {
         let (ok, said) = h.row(&root, lang);
+        let (ok, said) = match named {
+            ByName::Missing => (false, fill(say(lang, "skill.hooks_path_missing"), &[("exe", &exe)])),
+            ByName::Other(found) => (
+                false,
+                fill(say(lang, "skill.hooks_path_other"), &[("found", &found.display().to_string()), ("exe", &exe)]),
+            ),
+            _ => (ok, said),
+        };
         out.push(row(ok, h.label(), &said));
     }
     for (bin, on) in &others {
@@ -1047,6 +1073,48 @@ struct HookFile {
     dialect: crate::cli::Dialect,
     path: PathBuf,
     want: String,
+}
+
+/// 훅 줄이 PATH 의 `moai` 를 이름으로 부르는데 그 이름이 가리키는 것이 어떤가(moai-r2nn.yxz).
+#[derive(Debug, PartialEq)]
+enum ByName {
+    /// 이름으로 안 부른다 — 이 줄은 `exe` 를 그대로 적었다(또는 이 OS 에서 안 읽는 줄이다).
+    Unused,
+    /// PATH 의 `moai` 가 `install` 이 적을 그 파일이다.
+    Same,
+    /// PATH 에 `moai` 가 없다 — cmd 가 `is not recognized` 를 내고 `|| exit 0` 이 삼켜 규칙이 말없이 꺼진다.
+    Missing,
+    /// PATH 의 `moai` 가 다른 파일이다.
+    Other(PathBuf),
+}
+
+impl ByName {
+    /// `--json` 의 `path_moai` — 이름으로 안 부르면 `None`(키가 없다).
+    fn json(&self) -> Option<serde_json::Value> {
+        match self {
+            ByName::Unused => None,
+            ByName::Same => Some(serde_json::json!({ "found": true, "path": null, "same": true })),
+            ByName::Missing => Some(serde_json::json!({ "found": false, "path": null, "same": false })),
+            ByName::Other(p) => {
+                Some(serde_json::json!({ "found": true, "path": p.display().to_string(), "same": false }))
+            }
+        }
+    }
+
+    /// `exe` 는 `install` 이 적을 철자([`skill::exe_name`])다. `skill::portable_exe` 가 이름으로 물러서는 철자
+    /// (빈칸·`%`·`&` …)인데 `exe` 자신은 `moai` 가 아니면, 따옴표 없는 줄(agy 의 줄, Windows 의 Codex `commandWindows`)은
+    /// PATH 의 `moai` 를 부른다. **같은 파일인지는 [`status`] 가 `exe` 와 `runs` 를 견주는 자**(`crate::path::real`)다.
+    /// `reads_by_name` 은 이 에이전트의 줄이 이 OS 에서 그 줄을 읽는가 — agy 는 어디서나, Codex 는 Windows 에서만이다.
+    fn of(exe: &str, reads_by_name: bool, on_path: Option<&Path>, same_file: impl Fn(&Path, &Path) -> bool) -> ByName {
+        if !reads_by_name || exe == "moai" || skill::portable_exe(exe) != "moai" {
+            return ByName::Unused;
+        }
+        match on_path {
+            None => ByName::Missing,
+            Some(p) if same_file(p, Path::new(exe)) => ByName::Same,
+            Some(p) => ByName::Other(p.to_path_buf()),
+        }
+    }
 }
 
 /// 훅 파일이 지금 어떤가.
@@ -1180,6 +1248,15 @@ impl HookFile {
             HookState::Stale => (false, fill(say(lang, "skill.hooks_row_stale"), &args)),
             HookState::Missing => (false, fill(say(lang, "skill.hooks_row_missing"), &args)),
             HookState::Foreign => (false, fill(say(lang, "skill.hooks_row_foreign"), &args)),
+        }
+    }
+
+    /// 이 에이전트의 훅 줄이 이 OS 에서 실행 파일을 **이름으로** 읽는 줄인가([`ByName`]) — agy 는 모든 OS 에서 따옴표 없는
+    /// 한 줄이고, Codex 는 Windows 의 `commandWindows` 만 그렇다(Unix 의 `command` 는 따옴표로 절대 경로를 적는다).
+    fn reads_by_name(&self, windows: bool) -> bool {
+        match self.agent {
+            Agent::Codex => windows,
+            _ => true,
         }
     }
 
@@ -1491,12 +1568,7 @@ fn claude_home_from(env: impl Fn(&str) -> Option<std::ffi::OsString>, windows: b
 /// 못 찾으면 `Some(None)` 이다. Git Bash 가 없으면 Claude Code 는 훅을 PowerShell 로 띄우고, 심긴 POSIX 줄은 거기서
 /// 못 돈다 — 규칙 다섯이 조용히 꺼지니 `status` 가 댄다. 막지는 않는다.
 fn git_bash_here() -> Option<Option<PathBuf>> {
-    git_bash_from(
-        cfg!(windows),
-        |k| std::env::var_os(k),
-        || which("git"),
-        |p| p.is_file(),
-    )
+    git_bash_from(cfg!(windows), |k| std::env::var_os(k), || which("git"), |p| p.is_file())
 }
 
 /// [`git_bash_here`] 의 몸통 — `windows` 와 환경·`git` 찾기·파일 확인을 받아 리눅스에서도 잰다. **Claude Code 가 찾는
@@ -2791,7 +2863,11 @@ mod tests {
         // 옛 Codex — 처리기마다 `commandWindows` 를 뺀다.
         let mut v: serde_json::Value = serde_json::from_str(&codex.want).unwrap();
         for group in v["hooks"].as_object_mut().unwrap().values_mut() {
-            group[0]["hooks"][0].as_object_mut().unwrap().remove("commandWindows").expect("새 파일에 commandWindows 가 없다");
+            group[0]["hooks"][0]
+                .as_object_mut()
+                .unwrap()
+                .remove("commandWindows")
+                .expect("새 파일에 commandWindows 가 없다");
         }
         let old = serde_json::to_string_pretty(&v).unwrap() + "\n";
         std::fs::create_dir_all(codex.path.parent().unwrap()).unwrap();
@@ -2826,6 +2902,32 @@ mod tests {
         assert_eq!((codex.seen(&root), agy.seen(&root)), (HookState::Current, HookState::Current));
     }
 
+    /// **이름으로 부르는 훅 줄이 PATH 의 moai 로 물러섰을 때 `status` 가 세 판을 가른다**(moai-r2nn.yxz) — 없다·다른 파일이다·
+    /// 같은 파일이다. 따옴표 없는 줄이라 빈칸이 든 exe 는 `moai` 로 적힌다([`skill::portable_exe`]). 시험은 `windows` 와
+    /// PATH 를 받는 몸통으로 리눅스에서도 재고, `which` 대신 닫힘을 건넨다.
+    #[test]
+    fn a_hook_line_that_fell_back_to_path_moai_is_told() {
+        let spaced = "C:/Program Files/moai/moai.exe";
+        let same = |a: &Path, b: &Path| a == b;
+        let there = Path::new("/bin/moai");
+        // 빈칸이 든 exe: PATH 에 없다 / 다른 파일 / 같은 파일.
+        assert_eq!(ByName::of(spaced, true, None, same), ByName::Missing);
+        assert_eq!(ByName::of(spaced, true, Some(there), same), ByName::Other(there.to_path_buf()));
+        assert_eq!(ByName::of(spaced, true, Some(Path::new(spaced)), same), ByName::Same);
+        // 이름으로 안 부르는 때: 줄을 이름으로 안 읽는 OS 의 Codex, 잘 적히는 exe, 이미 `moai` 인 exe.
+        assert_eq!(ByName::of(spaced, false, None, same), ByName::Unused);
+        assert_eq!(ByName::of("/usr/local/bin/moai", true, None, same), ByName::Unused);
+        assert_eq!(ByName::of("moai", true, None, same), ByName::Unused);
+        // Codex 는 Windows 의 `commandWindows` 만 이름으로 읽고, agy 는 어디서나 읽는다.
+        let [codex, agy] = <[HookFile; 2]>::try_from(HookFile::all(Path::new("/r"), spaced)).ok().unwrap();
+        assert!(!codex.reads_by_name(false) && codex.reads_by_name(true));
+        assert!(agy.reads_by_name(false) && agy.reads_by_name(true));
+        // `--json` 의 꼴: 안 부르면 키가 없다.
+        assert_eq!(ByName::Unused.json(), None);
+        assert_eq!(ByName::Missing.json().unwrap()["found"], false);
+        assert_eq!(ByName::Other(there.to_path_buf()).json().unwrap()["path"], "/bin/moai");
+    }
+
     /// **Claude Code 가 Windows 에서 훅을 돌릴 Git Bash 를 찾는 차례**(moai-cj4a.tux) — Windows 가 아니면 줄이 안 선다.
     #[test]
     fn the_git_bash_row_follows_claude_codes_lookup() {
@@ -2845,7 +2947,12 @@ mod tests {
         assert_eq!(git_bash_from(true, env(pairs), git, files(&["/G/Git/bin/bash.exe"])), Some(None));
         // git.exe 곁.
         assert_eq!(
-            git_bash_from(true, env(&[]), || Some(PathBuf::from("/G/Git/bin/git.exe")), files(&["/G/Git/bin/bash.exe"])),
+            git_bash_from(
+                true,
+                env(&[]),
+                || Some(PathBuf::from("/G/Git/bin/git.exe")),
+                files(&["/G/Git/bin/bash.exe"])
+            ),
             Some(Some(PathBuf::from("/G/Git/bin/bash.exe")))
         );
         // git 이 PATH 에 없으면 %ProgramFiles%.

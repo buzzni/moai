@@ -808,7 +808,7 @@ fn portable_line(exe: &str, event: &str, dialect_word: &str) -> String {
 /// (`C:/Program Files/…`)은 낱말을 가르고, `% ! ^ & | < > ( ) , ; =` 는 cmd 가, `$ \` ' * ? ~ #` 는 sh 가 읽는다.
 /// 맨 앞 `-` 도 안 받는다. 못 지나면 PATH 의 `moai` 이름으로 물러선다 — [`exe_name`] 이 PATH 의 moai 가 이 파일이면
 /// 어차피 `moai` 로 적으니, 물러서는 것은 PATH 에 없는 낯선 자리뿐이다.
-fn portable_exe(exe: &str) -> &str {
+pub(crate) fn portable_exe(exe: &str) -> &str {
     let plain = |c: char| c.is_alphanumeric() || matches!(c, '/' | '.' | '_' | ':' | '-');
     if !exe.is_empty() && !exe.starts_with('-') && exe.chars().all(plain) {
         exe

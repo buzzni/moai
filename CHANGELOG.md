@@ -14,6 +14,11 @@ does not tag — see `CONTRIBUTING.md`.
 
 ### Added
 
+- **`moai skill status` says when a hook line calls `moai` from `PATH` and there is
+  none, or a different one.** The `agy hooks` row (and `codex hooks` on Windows)
+  shows a `!` for it, and `--json` gains `path_moai` on that hook. Before, the
+  row read `current` while cmd printed `is not recognized` and the rules stayed
+  off. (moai-r2nn.yxz)
 - **`moai skill status` names the Git Bash Claude Code runs hooks in on
   Windows.** Without Git Bash, Claude Code uses PowerShell, which cannot run the
   hook lines; the new `git bash` row (and `git_bash` in `--json`) says where it
