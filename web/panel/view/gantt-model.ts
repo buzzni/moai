@@ -171,8 +171,12 @@ export function shiftPlan(planned: GanttRow['planned'], edge: Edge, days: number
 export const dragDays = (zoom: Zoom, dx: number): number => Math.round(dx / PX_PER_DAY[zoom]) || 0
 
 /** The planned bar a move would draw, `[from, to)` in wall ms, or null when the move would not stand. */
-export function movedPlan(planned: GanttRow['planned'], change: { start?: string; due?: string }): [number, number] | null {
-  const start = change.start !== undefined ? dayStart(change.start) : planned ? dayStart(planned.start) : null
+export function movedPlan(planned: GanttRow['planned'], change: { start?: string; due?: string }, edge: Edge = 'body'): [number, number] | null {
+  let start = change.start !== undefined ? dayStart(change.start) : planned ? dayStart(planned.start) : null
+  // A body drag carries the filled edge visually; only the written edge is sent to moai.
+  const oldEnd = planned ? dayStart(planned.end) : null
+  const newEnd = dayStart(change.due)
+  if (edge === 'body' && planned?.start_filled && change.start === undefined && start !== null && oldEnd !== null && newEnd !== null) start += newEnd - oldEnd
   const due = change.due !== undefined ? dayStart(change.due) : planned?.end_filled ? start : planned ? dayStart(planned.end) : null
   if (start !== null && due !== null) return start > due ? null : [start, due + DAY]
   if (start !== null) return [start, start + DAY]

@@ -26,10 +26,11 @@ import { el, emptyState, icon } from './components.ts'
 import { segLabel } from './crumbs.ts'
 import { formatDate } from './detail-format.ts'
 import {
-  arrowOf, DEFAULT_GRID, DEFAULT_ZOOM, dayStart, dayText, dragDays, fitSpan, floorDay, ganttLines, HEAD_H, headerOf, movedPlan, normalizeGrid, placeRow,
+  arrowOf, DAY, DEFAULT_GRID, DEFAULT_ZOOM, dayStart, dayText, dragDays, fitSpan, floorDay, ganttLines, HEAD_H, headerOf, movedPlan, normalizeGrid, placeRow,
   PX_PER_DAY, rangeOf, MIN_GRID, ROW_H, shiftPlan, wallAt, wallOf, weekends, widthOf, xOf, ZOOMS, zoomToFit, type Axis, type Edge, type GanttLine,
   type Placed, type Tick, type Zoom,
 } from './gantt-model.ts'
+import { firstStatus, glint, spins } from './spin.ts'
 import { narrow, revealOffset, statusGlyph, statusOf, twigParts, TWIG_TEXT, windowRange } from './list-model.ts'
 import type { MountPane, PaneView } from './types.ts'
 
@@ -261,10 +262,11 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
     if (row) {
       const { glyph, tone } = statusGlyph(statusOf(row), m.boot)
       const name = String(row.title ?? row.id)
-      title.append(row.kind === 'milestone' ? '◆ ' : '', name)
+      const moving = line.kind === 'row' && spins(m.index, line.at, firstStatus(m.boot), m.boot?.statuses)
+      title.append(row.kind === 'milestone' ? '◆ ' : '', moving ? glint(doc, name) : name)
       title.title = name
       const progress = g?.progress.kind === 'rollup' && g.progress.total > 0 ? `${g.progress.done}/${g.progress.total}` : ''
-      const st = el(doc, 'span', { class: `c-st m-st-${tone}`, title: (copy.stats as Record<string, string>)[statusOf(row)] ?? statusOf(row) }, glyph)
+      const st = el(doc, 'span', { class: `c-st m-st-${tone}${moving ? ' m-spin' : ''}`, title: (copy.stats as Record<string, string>)[statusOf(row)] ?? statusOf(row) }, glyph)
       node.append(el(doc, 'span', { class: 'c-id' }, row.id), st, title, el(doc, 'span', { class: 'c-n' }, progress), el(doc, 'span', { class: 'c-who' }, assigneeOf(row)))
     } else {
       title.append(line.kind === 'bucket' ? segLabel(line.seg, m.index, copy) : '')
@@ -868,7 +870,7 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
       was = drawnAt.map((node) => ({ left: node.style.left, width: node.style.width }))
     }, (event, down) => {
       const change = shiftPlan(g.planned, edge, dragDays(a.zoom, event.clientX - down.clientX))
-      const span = 'why' in change ? null : movedPlan(g.planned, change)
+      const span = 'why' in change ? null : movedPlan(g.planned, change, edge)
       if (!span) return putBack()
       // The bar spans its days; a `◆` stands at the end of its day.
       if (planBar) {
@@ -889,7 +891,12 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
         }
       } else {
         dragged = true
-        moved.set(row.id, { ...g.planned!, start: change.start ?? g.planned!.start, end: change.due ?? (g.planned!.end_filled ? change.start : undefined) ?? g.planned!.end, start_filled: change.start === undefined && g.planned!.start_filled, end_filled: change.due === undefined && g.planned!.end_filled, from: 'own' })
+        const preview = movedPlan(g.planned, change, edge)
+        if (preview) moved.set(row.id, {
+          ...g.planned!, start: dayText(preview[0]), end: dayText(preview[1] - DAY),
+          start_filled: change.start === undefined && g.planned!.start_filled,
+          end_filled: change.due === undefined && g.planned!.end_filled, from: 'own',
+        })
         const n = model?.lines.findIndex((line) => line.key === row.id) ?? -1
         if (built && n >= 0) built.placed[n] = placeOf(row, built.now, clock.zone())
         // The arrows into and out of the dropped bar are drawn from those days.

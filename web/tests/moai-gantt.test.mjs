@@ -587,7 +587,7 @@ test('shiftPlan is Issue::shifted: the changing side only, own days only', () =>
   const D = 864e5
   assert.deepEqual(movedPlan(own('2026-10-26', '2026-10-27'), { start: '2026-10-27' }), [Date.UTC(2026, 9, 27), Date.UTC(2026, 9, 27) + D])
   assert.equal(movedPlan(own('2026-10-26', '2026-10-27'), { start: '2026-10-28' }), null)
-  assert.deepEqual(movedPlan(own(null, '2026-10-27'), { due: '2026-10-28' }), [Date.UTC(2026, 9, 27), Date.UTC(2026, 9, 28) + D])
+  assert.deepEqual(movedPlan(own(null, '2026-10-27'), { due: '2026-10-28' }), [Date.UTC(2026, 9, 28), Date.UTC(2026, 9, 28) + D])
 })
 
 /** The index the gantt draws `rows` from, each tree line carrying its `gantt`. */
@@ -1139,6 +1139,11 @@ test('filled edges stay derived through a whole-bar move and undo; resizing crea
     const bar = laidOut(l.querySelector('.b-plan'))
     const x = px(bar, 'left') + (grip === 'start' ? 1 : px(bar, 'width') / 2)
     press(dom, l, 'pointerdown', x)
+    if (grip === 'body') {
+      const before = px(bar, 'left')
+      press(dom, l, 'pointermove', x + 40)
+      assert.equal(px(bar, 'left'), before + 40, 'both displayed edges travel with a body drag')
+    }
     press(dom, l, 'pointerup', x + 40)
     assert.deepEqual(moves, [{ id: 'e1.c', change: { edge, days: 1 }, undo: `moai edit e1.c ${undo}` }])
     const { planEndpoint } = await panelModule('data/plan.ts')
@@ -1198,4 +1203,25 @@ test('a hidden dependency is omitted rather than retargeted to its closed group'
   assert.equal(root.querySelector('svg.links').querySelectorAll('path').length, 0)
   view.render({ ...initialState(), tab: 'gantt', cursor: 'z' }, index)
   assert.equal(root.querySelector('svg.links').querySelectorAll('path').length, 0)
+})
+
+
+test('started work and busy groups spin and glint in Gantt, with the list rules and no bar animation', () => {
+  const rows = [...ROWS,
+    { id: 'review', title: 'In review', kind: 'issue', status: 'review' },
+    { id: 'deferred', title: 'Later', kind: 'issue', status: 'in_progress', deferred_at: '2026-10-20T00:00:00Z', shelved_by: 'deferred' },
+  ]
+  const { root, view } = mount(null, indexOf(rows))
+  view.render({ ...initialState(), tab: 'gantt', view: { ...initialState().view, hideDeferred: false } }, indexOf(rows))
+  const node = (id) => root.querySelector(`.g-row[data-id="${id}"]`)
+  for (const id of ['e1.b', 'review', 'e1', 'm1']) {
+    assert.ok(node(id).querySelector('.c-st.m-spin'), id)
+    assert.ok(node(id).querySelector('.c-title .m-glint'), id)
+  }
+  for (const id of ['e1.a', 'e1.c', 'deferred']) {
+    assert.equal(node(id).querySelector('.m-spin, .m-glint'), null, id)
+  }
+  assert.match(node('m1').querySelector('.c-title').textContent, /^◆ /)
+  assert.equal(node('m1').querySelector('.m-glint').textContent, 'v1', 'milestone diamond stays outside the band')
+  assert.equal(root.querySelector('.g-lanes .m-spin, .g-lanes .m-glint'), null)
 })
