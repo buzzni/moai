@@ -1500,7 +1500,7 @@ fn git_bash_here() -> Option<Option<PathBuf>> {
 }
 
 /// [`git_bash_here`] 의 몸통 — `windows` 와 환경·`git` 찾기·파일 확인을 받아 리눅스에서도 잰다. **Claude Code 가 찾는
-/// 차례를 따른다**: `CLAUDE_CODE_GIT_BASH_PATH` 가 있는 파일이면 그것 → PATH 의 `git.exe` 가 선 디렉터리의
+/// 차례를 따른다**: `CLAUDE_CODE_GIT_BASH_PATH` 가 서 있으면 그것 하나(없는 파일이면 못 찾은 것) → PATH 의 `git.exe` 가 선 디렉터리의
 /// 윗 디렉터리 `bin\bash.exe`(`Git\cmd\git.exe` → `Git\bin\bash.exe`), 같은 디렉터리의 `bash.exe` →
 /// `%ProgramFiles%\Git\bin\bash.exe`.
 fn git_bash_from(
@@ -1513,7 +1513,12 @@ fn git_bash_from(
         return None;
     }
     let set = |k: &str| env(k).filter(|v| !v.is_empty()).map(PathBuf::from);
-    let mut candidates: Vec<PathBuf> = set("CLAUDE_CODE_GIT_BASH_PATH").into_iter().collect();
+    // **준 값이 틀리면 다음으로 안 넘어간다**(리뷰 moai-cj4a.zpz) — Claude Code 는 그 변수가 없는 파일을 가리키면 거기서
+    // 멈춘다고 읽었다. 다음 후보로 넘어가 `·` 를 대면 사람은 고칠 것을 못 본다. 틀린 경고가 틀린 안심보다 싸다.
+    if let Some(given) = set("CLAUDE_CODE_GIT_BASH_PATH") {
+        return Some(is_file(&given).then_some(given));
+    }
+    let mut candidates: Vec<PathBuf> = Vec::new();
     if let Some(dir) = git().as_deref().and_then(Path::parent) {
         candidates.extend(dir.parent().map(|up| up.join("bin").join("bash.exe")));
         candidates.push(dir.join("bash.exe"));
@@ -2836,11 +2841,8 @@ mod tests {
         let pairs: &[(&str, &str)] = &[("CLAUDE_CODE_GIT_BASH_PATH", "/mine/bash.exe"), ("ProgramFiles", "/PF")];
         let all = files(&["/mine/bash.exe", "/G/Git/bin/bash.exe", "/PF/Git/bin/bash.exe"]);
         assert_eq!(git_bash_from(true, env(pairs), git, all), Some(Some(PathBuf::from("/mine/bash.exe"))));
-        // 환경 변수가 없는 파일을 가리키면 다음으로 넘어간다.
-        assert_eq!(
-            git_bash_from(true, env(pairs), git, files(&["/G/Git/bin/bash.exe"])),
-            Some(Some(PathBuf::from("/G/Git/bin/bash.exe")))
-        );
+        // 환경 변수가 없는 파일을 가리키면 다음으로 안 넘어가고 못 찾은 것이다 — Claude Code 가 거기서 멈춘다.
+        assert_eq!(git_bash_from(true, env(pairs), git, files(&["/G/Git/bin/bash.exe"])), Some(None));
         // git.exe 곁.
         assert_eq!(
             git_bash_from(true, env(&[]), || Some(PathBuf::from("/G/Git/bin/git.exe")), files(&["/G/Git/bin/bash.exe"])),

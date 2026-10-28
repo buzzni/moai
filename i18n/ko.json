@@ -916,7 +916,7 @@
   "skill.hooks_row_stale": "{path} 가 지금 판과 다르다 — `moai skill install --agent {agent}` 로 다시 심는다",
   "skill.hooks_row_missing": "안 심겼다 — `moai skill install --agent {agent}` 가 {path} 에 심는다",
   "skill.hooks_row_foreign": "{path} 는 moai 의 것이 아니다 — 그대로 둔다",
-  "skill.git_bash_missing": "못 찾았다 — Claude Code 가 훅을 PowerShell 로 띄우는데 거기서는 못 돈다. Git for Windows 를 깔거나 CLAUDE_CODE_GIT_BASH_PATH 를 준다",
+  "skill.git_bash_missing": "못 찾았다 — Claude Code 가 훅을 PowerShell 로 띄우는데 거기서는 못 돈다. Git for Windows 를 깔거나 CLAUDE_CODE_GIT_BASH_PATH 가 그 bash.exe 를 가리키게 한다",
   "skill.hooks_by_hand": "moai 는 파일을 안 지운다 — 쥔 세션이 없을 때 {agent} 의 훅을 손으로 지운다:",
   "skill.remove_elsewhere": "! `{market}` 은 다른 자리({at}) 의 등록이다 — 건드리지 않는다",
   "skill.remove_elsewhere_there": "  그 저장소에서 `moai skill uninstall` 을 부른다",
