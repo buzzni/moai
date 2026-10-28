@@ -1,14 +1,65 @@
-# moai
+<a href="https://moai.buzzni.com/">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="site/assets/logo.svg">
+    <img src=".github/readme/logo-light.svg" alt="moai" width="208" height="78">
+  </picture>
+</a>
 
-An issue tracker that lives in your repository, for people and coding agents
-working in the same tree.
+[![release](https://img.shields.io/github/v/release/buzzni/moai?color=f08a4b)](https://github.com/buzzni/moai/releases/latest)
+[![build](https://img.shields.io/github/actions/workflow/status/buzzni/moai/ci.yml?branch=develop&label=build)](https://github.com/buzzni/moai/actions/workflows/ci.yml)
+[![license](https://img.shields.io/github/license/buzzni/moai)](LICENSE)
+[![Discord](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fdiscord.com%2Fapi%2Fv10%2Finvites%2FhCfQ76uX3t%3Fwith_counts%3Dtrue&query=%24.approximate_presence_count&suffix=%20online&label=chat&logo=discord&logoColor=white&color=5865F2)](https://discord.gg/hCfQ76uX3t)
+[![website](https://img.shields.io/badge/website-moai.buzzni.com-1b1e1b)](https://moai.buzzni.com/)
+
+**Agile, for your coding agents.** An issue tracker that lives in your repository,
+for people and coding agents working in the same tree.
 
 No approval gate. Anything can be created and anything can be moved. Discipline
 is something `moai status` reflects back at you, never something it enforces.
 
-See it on the [website](https://moai.buzzni.com/) — in English, 한국어 and
-日本語: the terminal explorer, the browser view, and a Claude Code supervisor
-handing work to Codex and Antigravity workers in one tmux window.
+<p align="center">
+  <a href="https://moai.buzzni.com/#see">
+    <img src=".github/readme/tui-tour.svg" alt="moai tui moving from the list to the kanban board and the wiki" width="100%">
+  </a>
+</p>
+
+### [Visit the website →](https://moai.buzzni.com/)
+
+The website plays it all — in English, [한국어](https://moai.buzzni.com/ko/) and
+[日本語](https://moai.buzzni.com/ja/): the terminal explorer, the browser view, and a
+Claude Code supervisor handing work to Codex and Antigravity workers in one tmux
+window. Start with the [guide](https://moai.buzzni.com/guide/), and come say hi on
+[Discord](https://discord.gg/hCfQ76uX3t).
+
+<table>
+  <tr>
+    <td width="50%" valign="top">
+      <a href="https://moai.buzzni.com/#see"><img src=".github/readme/tui-lifecycle.svg" alt="A card created in the backlog moving across the board to done"></a>
+      <p align="center"><sub><b>A card's life</b> — from the backlog across the board to done</sub></p>
+    </td>
+    <td width="50%" valign="top">
+      <a href="https://moai.buzzni.com/#see"><img src="site/assets/media/web-board.png" alt="moai web: the kanban board in the browser"></a>
+      <p align="center"><sub><b><code>moai web</code></b> — the same board in the browser · <a href="https://moai.buzzni.com/#see">▶ watch the clip</a></sub></p>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <a href="https://moai.buzzni.com/#see"><img src="site/assets/media/web-detail.png" alt="moai web showing an issue with its description, commits and history"></a>
+      <p align="center"><sub><b>Every issue keeps its why</b> — description, commits and history · <a href="https://moai.buzzni.com/#see">▶ watch</a></sub></p>
+    </td>
+    <td width="50%" valign="top">
+      <a href="https://moai.buzzni.com/#see"><img src="site/assets/media/web-gantt.png" alt="moai web gantt chart of milestones and epics"></a>
+      <p align="center"><sub><b>Gantt</b> — milestones, epics and deadlines on one timeline · <a href="https://moai.buzzni.com/#see">▶ watch</a></sub></p>
+    </td>
+  </tr>
+</table>
+
+<p align="center">
+  <a href="https://moai.buzzni.com/#team"><b>Different vendors. One team.</b></a> — see a Claude Code supervisor run
+  Codex and Antigravity workers side by side on the website.
+</p>
+
+## A quick look
 
 ```
 $ moai
