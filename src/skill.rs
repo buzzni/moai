@@ -831,7 +831,7 @@ fn codex_cmd_line(exe: &str, event: &str) -> String {
 /// 제 안에서 패닉하면 잡아 stdout 에 아무것도 안 내고 0 으로 끝난다(`main` 의 `survived`). 판정을 못 내면 통과다. Claude·Codex 의
 /// POSIX 줄은 101 을 보고 알림을 내므로 그쪽 갈래는 안 잡는다. **남는 한계**: 없는 `moai` 는 셸이 stderr 에 한 줄(sh `not found`·cmd
 /// `is not recognized`)을 남기고, `--dialect` 를 모르는 옛 `moai` 는 clap 이 2 로 끝내 `|| exit 0` 이 통과로 바꾼다.
-
+///
 /// **Unix 의 Antigravity 가 잃는 것** — 옛 POSIX 줄이 하던 셋이다. (1) `MOAI_HOOK_HANDOFF` 쪽지: 표식을 `moai` 가
 /// 제 안에서 세우는 옛 갈래로 물러선다(`cmd::hook` 의 `once_per_session`). (2) `trap … PIPE`: `main` 의 `outln!` 이
 /// BrokenPipe 를 삼켜 같은 몫을 한다. (3) `set +e`: 치환이 없어져 필요가 없다. 그리고 agy 에는 원래 알림(`systemMessage`)
@@ -846,11 +846,7 @@ fn portable_line(exe: &str, event: &str, dialect_word: &str) -> String {
 /// 어차피 `moai` 로 적으니, 물러서는 것은 PATH 에 없는 낯선 자리뿐이다.
 fn portable_exe(exe: &str) -> &str {
     let plain = |c: char| c.is_alphanumeric() || matches!(c, '/' | '.' | '_' | ':' | '-');
-    if !exe.is_empty() && !exe.starts_with('-') && exe.chars().all(plain) {
-        exe
-    } else {
-        "moai"
-    }
+    if !exe.is_empty() && !exe.starts_with('-') && exe.chars().all(plain) { exe } else { "moai" }
 }
 
 /// [`command_for`] 의 몸통 — 셸에 넘길 한 줄이다.
@@ -2867,7 +2863,10 @@ mod tests {
             command_for(exe, "pre-tool-use", Dialect::Antigravity),
             "/repo/target/debug/moai hook pre-tool-use --dialect antigravity || exit 0"
         );
-        assert_eq!(command_for("C:/100%/moai.exe", "stop", Dialect::Antigravity), "moai hook stop --dialect antigravity || exit 0");
+        assert_eq!(
+            command_for("C:/100%/moai.exe", "stop", Dialect::Antigravity),
+            "moai hook stop --dialect antigravity || exit 0"
+        );
         // 유니코드 이름의 사용자 디렉터리는 그대로 선다 — cmd 도 sh 도 그 글자에 뜻이 없다.
         assert_eq!(
             command_for("C:/Users/홍길동/moai.exe", "stop", Dialect::Antigravity),
