@@ -598,6 +598,9 @@ test('shiftPlan is Issue::shifted: the changing side only, own days only', () =>
   const filled = { ...own('2026-10-20', '2026-10-27'), start_filled: true }
   assert.deepEqual(movedPlan(filled, { due: '2026-10-29' }), [Date.UTC(2026, 9, 20), Date.UTC(2026, 9, 29) + D])
   assert.deepEqual(movedPlan(filled, { due: '2026-10-15' }), [Date.UTC(2026, 9, 15), Date.UTC(2026, 9, 15) + D])
+  const capped = own(null, '2026-10-20')
+  assert.deepEqual(movedPlan(capped, { due: '2026-10-22' }, Date.UTC(2026, 9, 20)), [Date.UTC(2026, 9, 20), Date.UTC(2026, 9, 23)])
+  assert.deepEqual(movedPlan(capped, { due: '2026-10-25' }, Date.UTC(2026, 9, 22)), [Date.UTC(2026, 9, 22), Date.UTC(2026, 9, 26)])
   // A start written after its deadline still counts as written: the move stands or not on that day.
   assert.equal(movedPlan(own('2026-10-20', '2026-10-18'), { due: '2026-10-19' }), null)
   assert.deepEqual(movedPlan(own('2026-10-20', '2026-10-18'), { due: '2026-10-21' }), [Date.UTC(2026, 9, 20), Date.UTC(2026, 9, 21) + D])
@@ -1243,4 +1246,32 @@ test('started work and busy groups spin and glint in Gantt, with the list rules 
   assert.match(node('m1').querySelector('.c-title').textContent, /^◆ /)
   assert.equal(node('m1').querySelector('.m-glint').textContent, 'v1', 'milestone diamond stays outside the band')
   assert.equal(root.querySelector('.g-lanes .m-spin, .g-lanes .m-glint'), null)
+})
+
+
+test('a capped filled start previews from the creation day in the page zone when the deadline moves later', async () => {
+  const oldZone = clock.zone
+  clock.zone = () => 'Asia/Seoul'
+  try {
+    const rows = ROWS.map(row => row.id === 'e1.c' ? { ...row, created_at: '2026-10-19T15:30:00Z', due_on: '2026-10-20' } : row)
+    const gantt = { ...GANTT, 'e1.c': g('e1.c', { planned: own(null, '2026-10-20') }) }
+    let finish
+    const answer = new Promise(resolve => { finish = resolve })
+    const { root, dom, moves } = writing(rows, gantt, () => answer)
+    const l = lane(root, 'e1.c')
+    const bar = laidOut(l.querySelector('.b-plan'))
+    const left = px(bar, 'left')
+    const width = px(bar, 'width')
+    const x = left + width / 2
+    press(dom, l, 'pointerdown', x)
+    press(dom, l, 'pointermove', x + 80)
+    assert.deepEqual([px(bar, 'left'), px(bar, 'width')], [left, width + 80])
+    press(dom, l, 'pointerup', x + 80)
+    assert.deepEqual(moves[0].change, { edge: 'end', days: 2 })
+    assert.deepEqual([px(bar, 'left'), px(bar, 'width')], [left, width + 80])
+    finish()
+    await tick()
+  } finally {
+    clock.zone = oldZone
+  }
 })

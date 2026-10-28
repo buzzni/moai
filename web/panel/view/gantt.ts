@@ -846,6 +846,8 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
     const days = g.planned && (dayStart(g.planned.start) !== null || dayStart(g.planned.end) !== null)
     if (!days) return
     const a = axis
+    const created = typeof row.created_at === 'string' ? wallOf(row.created_at, clock.zone()) : null
+    const made = created === null ? null : floorDay(created)
     // A group's bar counted from its members does not move: the press is still taken, and the release says why.
     const own = g.planned?.from !== 'members'
     if (own) grab.classList.add('movable')
@@ -871,7 +873,7 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
       was = drawnAt.map((node) => ({ left: node.style.left, width: node.style.width }))
     }, (event, down) => {
       const change = shiftPlan(g.planned, edge, dragDays(a.zoom, event.clientX - down.clientX))
-      const span = 'why' in change ? null : movedPlan(g.planned, change)
+      const span = 'why' in change ? null : movedPlan(g.planned, change, made)
       if (!span) return putBack()
       // The bar spans its days; a `◆` stands at the end of its day.
       if (planBar) {
@@ -892,7 +894,7 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
         }
       } else {
         dragged = true
-        const preview = movedPlan(g.planned, change)
+        const preview = movedPlan(g.planned, change, made)
         if (preview) moved.set(row.id, {
           ...g.planned!, start: dayText(preview[0]), end: dayText(preview[1] - DAY),
           start_filled: change.start === undefined && g.planned!.start_filled,

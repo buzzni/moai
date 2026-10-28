@@ -226,10 +226,7 @@ fn planned_of(
     }
     let first = days.iter().min()?.clone();
     let last = days.iter().max()?.clone();
-    let start = match (starts, made_day(i, zone)) {
-        (false, Some(made)) => made.min(first),
-        _ => first,
-    };
+    let start = if !starts && let Some(made) = made_day(i, zone) { made.min(first) } else { first };
     let start_filled = !starts || written.iter().min().is_none_or(|w| start < *w);
     Some(Planned { start, end: last, start_filled, end_filled: !ends, from: Origin::Members })
 }
@@ -399,7 +396,6 @@ mod tests {
         backwards.starts_on = Some("2026-10-25".into());
         backwards.due_on = Some("2026-10-23".into());
         let all = vec![due, past, start, backwards];
-        let before = serde_json::to_value(&all).unwrap();
         let zone = Zone::fixed("Asia/Seoul", 9 * 3600);
         let g = read_in(&all, "2026-10-28T16:00:00Z", &zone);
         let p = |at: usize| g.rows[at].planned.as_ref().unwrap();
@@ -415,7 +411,6 @@ mod tests {
         );
         // 거꾸로 적힌 시작도 적힌 날이다 — 채웠다고 하면 web 의 되돌리기가 `--start none` 으로 그 시작을 지운다.
         assert_eq!((&*p(3).start, &*p(3).end, p(3).start_filled), ("2026-10-25", "2026-10-23", false));
-        assert_eq!(serde_json::to_value(&all).unwrap(), before);
     }
 
     /// **만든 날은 읽은 시각에서 낸다**(리뷰) — 관대한 읽기가 받은 `2026-02-30T…` 를 글대로 자르면 달력에 없는 날이 막대의

@@ -175,10 +175,10 @@ export const dragDays = (zoom: Zoom, dx: number): number => Math.round(dx / PX_P
  * The planned bar a move would draw, `[from, to)` in wall ms, or null when the move would not stand — the bar moai draws
  * once the written days have moved, as the TUI's drag draws it (`tui::gantt::preview`, moai-i4hf.exq). Only written days
  * move and only they can make a move stand or not. A filled end is the start's day again. A filled start is moai's
- * creation day capped at the deadline: one drawn before the old deadline is that creation day, so it stays and is capped
- * at the new deadline; one drawn on the deadline only says the creation day was no earlier, so it follows the deadline.
+ * creation day capped at the deadline. `made` is that day placed in the page zone. Without it (tree-only/archive rows),
+ * a start before the old deadline is the known creation day; a start on the deadline supplies no earlier bound.
  */
-export function movedPlan(planned: GanttRow['planned'], change: { start?: string; due?: string }): [number, number] | null {
+export function movedPlan(planned: GanttRow['planned'], change: { start?: string; due?: string }, made: number | null = null): [number, number] | null {
   const written = (day: string | undefined, filled: boolean | undefined, now: string | undefined) =>
     day !== undefined ? dayStart(day) : planned && !filled ? dayStart(now) : null
   const start = written(change.start, planned?.start_filled, planned?.start)
@@ -188,7 +188,8 @@ export function movedPlan(planned: GanttRow['planned'], change: { start?: string
   if (due === null) return null
   const filled = planned ? dayStart(planned.start) : null
   const oldDue = planned ? dayStart(planned.end) : null
-  const from = filled !== null && oldDue !== null && filled < oldDue ? Math.min(filled, due) : due
+  const origin = made ?? (filled !== null && oldDue !== null && filled < oldDue ? filled : due)
+  const from = Math.min(origin, due)
   return [from, due + DAY]
 }
 

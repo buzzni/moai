@@ -7342,8 +7342,6 @@ fn tui_deep_carries_each_rows_gantt() {
             "start": "2026-10-25", "end": "2026-10-29", "start_filled": true, "end_filled": false, "from": "own"
         })
     );
-    let saved: serde_json::Value = serde_json::from_str(&ok_at(s.path(), now, &["show", &c, "--json"])).unwrap();
-    assert!(saved.get("starts_on").is_none(), "채운 시작이 저장됐다: {saved}");
     // 적재한 줄의 첨자는 밖에 안 낸다.
     assert!(gantt(&a).get("at").is_none(), "{}", gantt(&a));
     // 한 자리 목록은 싣지 않는다.

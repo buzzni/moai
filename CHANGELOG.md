@@ -25,6 +25,8 @@ does not tag — see `CONTRIBUTING.md`.
 
 ### Changed
 
+- Gantt group bars cover their members’ filled starts too, so they can reach
+  back to a member’s creation day before any written planned date. (moai-e9hi.442)
 - Choosing a filled Gantt start with the TUI start keys or a TUI/web left-edge
   drag writes the selected date as an absolute start. It replaces a start
   written meanwhile; ordinary moves keep their relative behavior. (moai-e9hi.442)
