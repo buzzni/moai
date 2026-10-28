@@ -12,6 +12,8 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+## [0.32.0] - 2026-10-28
+
 ### Added
 
 - **Web Gantt groups fold independently of the list.** Chevron buttons, `h`/`l`
