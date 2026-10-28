@@ -14,10 +14,17 @@ does not tag — see `CONTRIBUTING.md`.
 
 ### Added
 
+- **The TUI detail shows history and a work log.** Creation, column moves and
+  notes follow the wiki, with wrapped notes and journal refresh. AI work records
+  follow history when present, including the model, grade, reason, author and
+  recorded date. (moai-ccow.y3o, moai-ccow.an0)
 - Web details can sit on the right or top as well as the left or bottom. List rows use pale gold for in-progress and pale purple for review.
 
 ### Changed
 
+- **TUI board titles wrap within each column.** Cards keep up to 50 Unicode
+  characters before an ellipsis and grow to fit; optional fields remain below
+  the title. (moai-ccow.7p9)
 - Web details start on the right for new settings; the position button cycles right → bottom → left → top. History and work log start expanded. Tabs place Gantt before Wiki.
 
 ### Fixed
