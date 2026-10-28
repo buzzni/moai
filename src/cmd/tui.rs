@@ -96,7 +96,22 @@ pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
         // `--no-gantt` 는 그 값과 거르개 문맥 셈을 함께 뺀다 — 간트를 안 보이는 웹 탭은 트리만 읽는다.
         let wh = (deep && !no_gantt).then(|| ground.here(&load.issues));
         let gantt = wh.as_ref().map(|wh| {
-            crate::report::gantt::gantt(&load.issues, &index, wh, &repo.config, &crate::model::now(), ctx.zone())
+            let blocks = load
+                .issues
+                .iter()
+                .any(|i| !i.blocked_by.is_empty())
+                .then(|| crate::report::BlockMaps::over(&load.issues, &repo.config));
+            let shelved = crate::report::deferred_sources(&load.issues);
+            crate::report::gantt::gantt(
+                &load.issues,
+                &index,
+                wh,
+                &repo.config,
+                blocks.as_ref(),
+                &shelved,
+                &crate::model::now(),
+                ctx.zone(),
+            )
         });
         let rows: Vec<Row> = entries
             .into_iter()

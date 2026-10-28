@@ -162,7 +162,22 @@ impl Site {
         let mut cache = self.ground.chart.borrow_mut();
         if cache.as_ref().is_none_or(|c| c.now != now || c.site_now != self.now || c.zone != *zone) {
             let wh = self.ground.here(&self.issues);
-            let read = crate::report::gantt::gantt(&self.issues, &self.index, &wh, &self.cfg, now, zone);
+            let blocks = self
+                .issues
+                .iter()
+                .any(|i| !i.blocked_by.is_empty())
+                .then(|| crate::report::BlockMaps::over(&self.issues, &self.cfg));
+            let shelved = crate::report::deferred_sources(&self.issues);
+            let read = crate::report::gantt::gantt(
+                &self.issues,
+                &self.index,
+                &wh,
+                &self.cfg,
+                blocks.as_ref(),
+                &shelved,
+                now,
+                zone,
+            );
             let rows = read
                 .rows
                 .iter()
