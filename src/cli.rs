@@ -2617,6 +2617,9 @@ pub enum SkillCmd {
     hook          whether the executable the install calls is still there
     claude        whether it is on PATH (without it nothing can be installed
                   or removed)
+    git bash      on Windows only: the Git Bash Claude Code runs hooks in
+                  (without it Claude Code uses PowerShell, which cannot run
+                  them)
     .agents       whether .agents/skills/ holds this version's skills
                   (codex and antigravity read it)
     codex hooks   whether .codex/hooks.json is this version's, and moai's

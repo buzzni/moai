@@ -29646,8 +29646,10 @@ fn antigravity_holds_the_turn_with_continue() {
     let s = init("agy-stop");
     let id = add(s.path(), &["락을 잡는다"]);
     ok(s.path(), &["mv", &id, "in_progress"]);
-    // **표식은 셸이 세운다** — 쪽지 자리를 넘겨 `moai` 가 닫기 물음의 표식을 안 세우게 한다(심은 줄과 같다). 그래야 둘째
-    // `Stop` 을 보내는 것이 세션에 한 번이라는 표가 아니라 `executionNum` 이다(리뷰 moai-u5wr.e74).
+    // **쪽지 자리를 넘겨 `moai` 가 닫기 물음의 표식을 안 세우게 한다** — 그래야 둘째 `Stop` 을 보내는 것이 세션에 한 번이라는
+    // 표가 아니라 `executionNum` 이다(리뷰 moai-u5wr.e74). **심은 줄은 이제 쪽지를 안 넘긴다**(moai-cj4a — agy 의 줄은 sh·cmd 가
+    // 함께 읽는 한 줄이라 `$( … )` 가 없다) — 그 줄에서는 `moai` 가 표식을 제 안에서 세워 둘째 `Stop` 이 표로도 지나간다.
+    // 여기서 쪽지를 넘기는 것은 `executionNum` 갈래만 따로 재려는 시험의 손이다.
     let slip = s.path().join("hooktmp/agy-stop.handoff").display().to_string();
     let stop = |input: &str| {
         let argv = ["hook", "stop", "--dialect", "antigravity"];

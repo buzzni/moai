@@ -368,6 +368,7 @@ pub fn codex_hooks(exe: &str) -> String {
         let mut entry = serde_json::json!({
             "type": "command",
             "command": command_for(exe, name.get_name(), Dialect::Codex),
+            "commandWindows": portable_line(exe, name.get_name(), "codex"),
             "timeout": timeout,
             "statusMessage": message,
         });
@@ -494,8 +495,13 @@ pub fn planted_exe(text: &str) -> Option<String> {
         Some(inner) => inner.replace(r"'\''", "'"),
         None => cmd.to_string(),
     };
-    let rest = line.strip_prefix("command -v -- \"")?;
-    Some(rest[..rest.find('"')?].to_string())
+    // 두 꼴이다 — Claude·Codex 의 `command -v -- "<exe>" …` 와, Antigravity(와 Codex 의 `commandWindows`)의
+    // 따옴표 없는 `<exe> hook …`([`portable_line`]).
+    if let Some(rest) = line.strip_prefix("command -v -- \"") {
+        return Some(rest[..rest.find('"')?].to_string());
+    }
+    let (exe, rest) = line.split_once(' ')?;
+    (rest.starts_with("hook ") && portable_exe(exe) == exe).then(|| exe.to_string())
 }
 
 /// 훅이 부를 명령.
@@ -751,17 +757,58 @@ fn command(exe: &str, event: &str) -> String {
 ///   실측). Codex 는 세션을 대는 변수가 없고 훅을 띄운 데몬의 환경을 물려줘, 거기 선 `CLAUDE_CODE_SESSION_ID` 는
 ///   **남의 세션 것**이다(moai-sile) — 그래서 Codex 의 표식은 `$PPID` 하나로 가른다. 그 값은 Codex 세션들이 함께
 ///   쓰는 데몬이라 알림이 데몬마다 한 번이 되는데, 남의 세션 id 로 가르는 것보다 낫다
-/// - **Antigravity 에는 알림(`systemMessage`)을 안 낸다** — 그 꼴은 맨 윗단 `decision` 이라 모르는 키를 어떻게
-///   읽는지 재지 않았다. 못 도는 판은 빈 출력이다(빈 출력은 지나간다고 쟀다)
+/// - **Antigravity 의 줄은 셸 글이 아니라 [`portable_line`] 이다**(moai-cj4a) — Windows 의 agy 는 cmd 로 띄운다.
+///   알림(`systemMessage`)은 원래 없었다 — 그 꼴은 맨 윗단 `decision` 이라 모르는 키를 어떻게 읽는지 재지 않았다.
+///   못 도는 판은 빈 출력이다(빈 출력은 지나간다고 쟀다)
 ///
 /// **Codex 의 줄은 `sh -c` 로 싼다.** Codex 가 훅 명령을 어느 셸로 푸는지는 문서에 없고, 기록한 훅의 부모가 곧
 /// 데몬이라(사이에 셸이 안 보였다) 사람의 로그인 셸(`fish` 일 수도 있다)로 풀릴 수 있다. 이 줄은 POSIX 셸의
 /// 글이라 감싸면 어느 쪽이든 선다 — 셸로 풀면 바깥 셸이 따옴표를 벗기고, 낱말로 쪼개도 작은따옴표 안은 한 낱말이다.
 fn command_for(exe: &str, event: &str, dialect: Dialect) -> String {
-    let line = shell_line(exe, event, dialect);
     match dialect {
-        Dialect::Codex => format!("sh -c {}", crate::text::single_quoted(&line)),
-        Dialect::Claude | Dialect::Antigravity => line,
+        Dialect::Codex => format!("sh -c {}", crate::text::single_quoted(&shell_line(exe, event, dialect))),
+        Dialect::Claude => shell_line(exe, event, dialect),
+        Dialect::Antigravity => portable_line(exe, event, "antigravity"),
+    }
+}
+
+/// sh 도 cmd 도 같은 뜻으로 읽는 한 줄 — `<exe> hook <event> --dialect <말씨> || exit 0`(moai-cj4a).
+///
+/// **왜 이 줄이 따로 있는가.** Windows 의 Codex(0.165)와 Antigravity(1.4.8)는 훅을 `cmd /c "<command>"` 로 띄운다
+/// (2026-10-28 실측 — Codex 는 `command_runner.rs` 의 `default_shell_program`, agy 는 `command_hook_executor.go`).
+/// [`shell_line`] 의 POSIX 글은 cmd 가 `>/dev/null` 을 제 리다이렉트로 읽다 "The system cannot find the path
+/// specified." 로 끝나고 **종료 0·빈 출력**이라, 규칙 다섯이 꺼진 것이 통과와 구별되지 않았다. Codex 에는 Windows 전용
+/// 키 `commandWindows` 가 있어 이 줄을 거기 심고(`command` 는 글자 하나 안 바꾼다), agy 에는 그런 키가 없고
+/// `.agents/hooks.json` 은 커밋돼 OS 마다 다른 줄이 서로 덮어쓰므로 **모든 OS 에 이 한 줄**을 심는다.
+///
+/// - `|| exit 0` — moai 가 없거나 못 돌면(sh 의 127·126, cmd 의 9009) 0 이다. [`shell_line`] 의
+///   `command -v … || exit 0` 과 같은 몫이지만 **조용하지는 않다** — 셸이 stderr 에 한 줄을 남기고(sh·cmd 가 함께 읽는
+///   리다이렉트가 없다) 에이전트가 그것을 제 로그에 적는다. 못 돈 판의 알림(`systemMessage`)도 이 줄에는 없다
+/// - **따옴표를 하나도 안 쓴다**(리뷰 moai-cj4a.zpz) — agy 1.4.8 은 Go 의 인자 이스케이프로 `cmd /c` 를 띄워 줄 안의
+///   `"` 를 `\"` 로 바꾼다. 2026-10-28 실측: `"<exe>" hook …` 꼴은 cmd 가 `'\"<exe>\"' is not recognized` 로 끝나고
+///   `|| exit 0` 이 그것을 삼켜, 고치려던 "말없이 꺼진 규칙" 이 그대로였다. 따옴표 없는 줄은 Go 가 바깥을 `"…"` 로만
+///   싸고(안에 `"` 가 없으니 `\` 도 안 붙는다) cmd 가 그 한 겹을 벗겨 agy 로 실제로 돌았다. Codex 는 `raw_arg` 로
+///   한 겹 싸니 어느 쪽이든 선다 — 두 셸·두 띄우는 법 모두에서 같은 뜻인 꼴이 이것 하나다
+/// - exe 철자는 [`portable_exe`] 를 지난다 — 따옴표 없이 적으니 두 셸 어디서도 뜻이 없는 글자만 받는다
+///
+/// **Unix 의 Antigravity 가 잃는 것** — 옛 POSIX 줄이 하던 셋이다. (1) `MOAI_HOOK_HANDOFF` 쪽지: 표식을 `moai` 가
+/// 제 안에서 세우는 옛 갈래로 물러선다(`cmd::hook` 의 `once_per_session`). (2) `trap … PIPE`: `main` 의 `outln!` 이
+/// BrokenPipe 를 삼켜 같은 몫을 한다. (3) `set +e`: 치환이 없어져 필요가 없다. 그리고 agy 에는 원래 알림(`systemMessage`)
+/// 이 없었다 — 못 도는 판은 빈 출력이었고 지금도 그렇다. 잃는 것이 사람에게 보이는 동작을 바꾸지 않아 받아들인다.
+fn portable_line(exe: &str, event: &str, dialect_word: &str) -> String {
+    format!("{} hook {event} --dialect {dialect_word} || exit 0", portable_exe(exe))
+}
+
+/// [`portable_line`] 이 부를 철자 — 따옴표 없이 적으므로 **글자(유니코드 포함)·숫자와 `/ . _ : -` 만** 받는다. 빈칸
+/// (`C:/Program Files/…`)은 낱말을 가르고, `% ! ^ & | < > ( ) , ; =` 는 cmd 가, `$ \` ' * ? ~ #` 는 sh 가 읽는다.
+/// 맨 앞 `-` 도 안 받는다. 못 지나면 PATH 의 `moai` 이름으로 물러선다 — [`exe_name`] 이 PATH 의 moai 가 이 파일이면
+/// 어차피 `moai` 로 적으니, 물러서는 것은 PATH 에 없는 낯선 자리뿐이다.
+fn portable_exe(exe: &str) -> &str {
+    let plain = |c: char| c.is_alphanumeric() || matches!(c, '/' | '.' | '_' | ':' | '-');
+    if !exe.is_empty() && !exe.starts_with('-') && exe.chars().all(plain) {
+        exe
+    } else {
+        "moai"
     }
 }
 
@@ -868,19 +915,16 @@ fn shell_line(exe: &str, event: &str, dialect: Dialect) -> String {
     let (sid, flag) = match dialect {
         Dialect::Claude => ("${CLAUDE_CODE_SESSION_ID:-$PPID}", String::new()),
         Dialect::Codex => ("$PPID", " --dialect codex".to_string()),
-        Dialect::Antigravity => ("${ANTIGRAVITY_CONVERSATION_ID:-$PPID}", " --dialect antigravity".to_string()),
+        Dialect::Antigravity => unreachable!("Antigravity 의 줄은 portable_line 이다 — command_for 가 가른다"),
     };
-    // 판정의 꼴이 아닌 출력 뒤에 서는 알림 — Antigravity 는 아무것도 안 낸다.
-    let notice = match dialect {
-        Dialect::Antigravity => String::new(),
-        Dialect::Claude | Dialect::Codex => format!(
-            "s=\"${{TMPDIR:-/tmp}}/moai-hook-{whose:04x}-{sid}.{event}.$c.said\"; \
-             {{ ! [ -e \"$s\" ] && ! [ -h \"$s\" ] && true 2>>/dev/null > \"$s\" \
-             || ! [ -f \"$s\" ] || ! [ -O \"$s\" ] || [ -h \"$s\" ]; }} && \
-             printf '{{\"systemMessage\":\"moai: the %s hook could not run (exit %s){spot}. \
-             The five moai rules are not standing - run moai skill status to see why.\"}}' {said} \"$c\"{where_} || :"
-        ),
-    };
+    // 판정의 꼴이 아닌 출력 뒤에 서는 알림.
+    let notice = format!(
+        "s=\"${{TMPDIR:-/tmp}}/moai-hook-{whose:04x}-{sid}.{event}.$c.said\"; \
+         {{ ! [ -e \"$s\" ] && ! [ -h \"$s\" ] && true 2>>/dev/null > \"$s\" \
+         || ! [ -f \"$s\" ] || ! [ -O \"$s\" ] || [ -h \"$s\" ]; }} && \
+         printf '{{\"systemMessage\":\"moai: the %s hook could not run (exit %s){spot}. \
+         The five moai rules are not standing - run moai skill status to see why.\"}}' {said} \"$c\"{where_} || :"
+    );
     format!(
         "command -v -- \"{exe}\" >/dev/null 2>&1{there} || exit 0; trap 'exit 0' PIPE; \
          h=\"${{TMPDIR:-/tmp}}/moai-hook-{sid}-$$.handoff\"; \
@@ -2651,6 +2695,93 @@ mod tests {
         assert!(!quoted.contains("\\'"), "Codex 의 속 줄에 \\' 가 섰다 — {quoted}");
     }
 
+    /// **Codex 의 처리기마다 `commandWindows` 가 서고 POSIX `command` 는 옛 글 그대로다**(moai-cj4a.bcv) — Windows 의 Codex 는
+    /// `cmd /C` 로 띄워 `sh -c '…'` 를 못 읽는다. `%` 든 철자는 cmd 가 큰따옴표 안에서도 풀므로 이름으로 물러선다.
+    #[test]
+    fn codex_gets_a_cmd_line_beside_the_posix_one() {
+        let exe = "C:/repo/target/debug/moai.exe";
+        let v: serde_json::Value = serde_json::from_str(&codex_hooks(exe)).unwrap();
+        for (at, group) in v["hooks"].as_object().unwrap() {
+            let entry = &group[0]["hooks"][0];
+            let event = Event::value_variants()
+                .iter()
+                .find(|e| e.wire() == at.as_str())
+                .map(|e| e.to_possible_value().unwrap().get_name().to_string())
+                .unwrap();
+            assert_eq!(entry["command"], command_for(exe, &event, Dialect::Codex), "{at}: POSIX 줄이 바뀌었다");
+            assert_eq!(
+                entry["commandWindows"],
+                format!("{exe} hook {event} --dialect codex || exit 0"),
+                "{at}"
+            );
+        }
+        for bad in [
+            "C:/100%/moai.exe",
+            "C:/a\"b/moai.exe",
+            r"C:\x\moai.exe",
+            "/a$b/moai",
+            "C:/Program Files/m/moai.exe",
+            "C:/Program Files (x86)/m/moai.exe",
+            "C:/a&b/moai.exe",
+            "C:/a!b/moai.exe",
+            "C:/a^b/moai.exe",
+            "/home/me/Bob's/moai",
+            "-moai",
+            "",
+        ] {
+            let v: serde_json::Value = serde_json::from_str(&codex_hooks(bad)).unwrap();
+            let line = v["hooks"]["Stop"][0]["hooks"][0]["commandWindows"].as_str().unwrap().to_string();
+            assert_eq!(line, "moai hook stop --dialect codex || exit 0", "{bad}");
+        }
+    }
+
+    /// **Antigravity 의 줄은 sh 도 cmd 도 읽는 한 줄이다**(moai-cj4a.t76) — 모든 OS 에 같은 글이 선다. 없는 바이너리는 0 과
+    /// 빈 출력이고, 있는 바이너리의 출력은 그대로 흘러간다. `planted_exe` 는 새 머리와 옛 머리를 모두 읽는다.
+    #[test]
+    fn the_antigravity_line_is_one_line_both_shells_read() {
+        let exe = "/repo/target/debug/moai";
+        assert_eq!(
+            command_for(exe, "pre-tool-use", Dialect::Antigravity),
+            "/repo/target/debug/moai hook pre-tool-use --dialect antigravity || exit 0"
+        );
+        assert_eq!(command_for("C:/100%/moai.exe", "stop", Dialect::Antigravity), "moai hook stop --dialect antigravity || exit 0");
+        // 유니코드 이름의 사용자 디렉터리는 그대로 선다 — cmd 도 sh 도 그 글자에 뜻이 없다.
+        assert_eq!(
+            command_for("C:/Users/홍길동/moai.exe", "stop", Dialect::Antigravity),
+            "C:/Users/홍길동/moai.exe hook stop --dialect antigravity || exit 0"
+        );
+        let line = command_for("moai", "stop", Dialect::Antigravity);
+        assert!(!line.contains(['\'', '"']) && !line.contains("/dev/null"), "cmd·agy 가 못 읽는 글이 들었다 — {line}");
+        // 새 머리와 Codex 의 `commandWindows`(껍질 안 쓴 `command` 가 앞선다)·옛 머리.
+        for exe in ["/repo/target/release/moai", "C:/Users/me/AppData/Local/Programs/moai/moai.exe", "moai"] {
+            assert_eq!(planted_exe(&antigravity_hooks(exe)).as_deref(), Some(exe));
+        }
+        assert_eq!(planted_exe(&antigravity_hooks("C:/Program Files/m/moai.exe")).as_deref(), Some("moai"));
+        assert_eq!(planted_exe(r#"{"a":{"command":"echo hi"}}"#), None, "남의 줄에서 exe 를 꺼냈다");
+        let old = r#"{"moai":{"enabled":true,"Stop":[{"type":"command","command":"command -v -- \"/old/moai\" >/dev/null 2>&1 || exit 0; x"}]}}"#;
+        assert_eq!(planted_exe(old).as_deref(), Some("/old/moai"));
+        assert!(hooks_are_ours(Dialect::Antigravity, &old.replace("x\"", "\\\" hook stop --dialect antigravity\"")));
+        assert_eq!(planted_exe(r#"{"a":{"command":"\"echo\" hi"}}"#), None, "남의 줄에서 exe 를 꺼냈다");
+    }
+
+    /// 새 줄을 sh 로 실제로 돌린다 — 없는 바이너리는 0·빈 출력, 있는 바이너리는 말씨를 붙여 불리고 출력이 그대로 흐른다.
+    #[cfg(unix)]
+    #[test]
+    fn the_antigravity_line_runs_under_sh() {
+        let scratch = crate::scratch::Scratch::new("skill-agy-portable");
+        let echo = planted(scratch.path(), "echo", "#!/bin/sh\nprintf '{\"args\":\"%s\"}\n' \"$*\"\n", 0o755);
+        if !crate::cmd::runnable(&echo) {
+            return;
+        }
+        let run = |line: &str| {
+            let out = crate::test_shell::shell("sh").args(["-c", line]).output().unwrap();
+            (out.status.code(), String::from_utf8_lossy(&out.stdout).to_string())
+        };
+        let want = "{\"args\":\"hook stop --dialect antigravity\"}\n".to_string();
+        assert_eq!(run(&command_for(&echo.display().to_string(), "stop", Dialect::Antigravity)), (Some(0), want));
+        assert_eq!(run(&command_for("/no/such/moai", "stop", Dialect::Antigravity)), (Some(0), String::new()));
+    }
+
     /// **심는 훅 파일 둘의 꼴**(moai-u5wr.kov) — Codex 는 Claude 와 같은 틀에 `apply_patch` 를 보고 싣는 글의 상한을
     /// 넉넉히 준다. Antigravity 는 이름 붙은 무리 하나에 `PreInvocation` 이 `user-prompt-submit` 을 부른다. 다시 쓸지는
     /// 그 파일을 moai 가 통째로 썼는지가 가른다 — 남의 훅이 든 파일과 못 읽는 파일은 moai 의 것이 아니다.
@@ -2703,7 +2834,14 @@ mod tests {
         // **심긴 파일이 부르는 moai 를 읽는다** — `status` 가 그것으로 견준다. Codex 의 `sh -c '…'` 껍질과 자리에 든 `'` 도.
         for exe in ["/repo/target/release/moai", "/home/me/Bob's tools/moai", "moai"] {
             assert_eq!(planted_exe(&codex_hooks(exe)).as_deref(), Some(exe), "codex {exe}");
-            assert_eq!(planted_exe(&antigravity_hooks(exe)).as_deref(), Some(exe), "antigravity {exe}");
+        }
+        // Antigravity 의 줄은 따옴표가 없어 빈칸·`'` 든 자리를 `moai` 로 적는다([`portable_exe`]).
+        for (exe, want) in [
+            ("/repo/target/release/moai", "/repo/target/release/moai"),
+            ("/home/me/Bob's tools/moai", "moai"),
+            ("moai", "moai"),
+        ] {
+            assert_eq!(planted_exe(&antigravity_hooks(exe)).as_deref(), Some(want), "antigravity {exe}");
         }
     }
 

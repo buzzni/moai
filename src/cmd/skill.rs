@@ -777,6 +777,7 @@ pub fn status(ctx: &Ctx) -> R<Vec<String>> {
     let clash = listed.clone().filter(|other| !crate::user_config::same_dir(other, &dir));
     let installs = installs_here(&format!("moai@{market}"), &root);
     let claude = which("claude").is_some();
+    let git_bash = git_bash_here();
     // 실제로 불리는 것은 `claude` 가 복사해 간 매니페스트다. **복사본이 사라진
     // 설치**(캐시를 치운 뒤)는 훅이 아예 안 실리므로, 판이 맞아도 따로 짚는다.
     let copies: Vec<Option<String>> = installs
@@ -840,6 +841,9 @@ pub fn status(ctx: &Ctx) -> R<Vec<String>> {
             "hook_exe_path": hook_path.as_ref().map(|p| p.display().to_string()),
             "stale_copies": stale,
             "claude": claude,
+            // Windows 에서만 선다 — Claude Code 가 훅을 돌릴 Git Bash(moai-cj4a). 그 밖에서는 `null`, 못 찾으면
+            // `{"found":false,"path":null}`.
+            "git_bash": git_bash.as_ref().map(|p| serde_json::json!({ "found": p.is_some(), "path": p.as_ref().map(|p| p.display().to_string()) })),
             // Claude 의 트리에 남은 디렉터리 — `install --json` 의 머리 `leftovers` 와 같은 자리·같은 꼴이다(머리의 `dir` 이
             // Claude 의 트리다). **늘 서는 배열이다.**
             "leftovers": claude_left.iter().map(Leftover::json).collect::<Vec<_>>(),
@@ -925,6 +929,12 @@ pub fn status(ctx: &Ctx) -> R<Vec<String>> {
         false => say(lang, "skill.claude_off_path"),
     };
     out.push(row(claude, "claude", claude_said));
+    if let Some(found) = &git_bash {
+        out.push(match found {
+            Some(p) => row(true, "git bash", &p.display().to_string()),
+            None => row(false, "git bash", say(lang, "skill.git_bash_missing")),
+        });
+    }
     if stale > 0 {
         // **치우지 않는다.** 캐시는 `claude` 의 것이고, 돌고 있는 세션이 그중
         // 하나를 물고 있을 수 있다. 수만 비춘다.
@@ -1475,6 +1485,46 @@ fn claude_home_here(env: impl Fn(&str) -> Option<std::ffi::OsString>) -> Option<
 fn claude_home_from(env: impl Fn(&str) -> Option<std::ffi::OsString>, windows: bool) -> Option<PathBuf> {
     let set = |k: &str| env(k).filter(|v| !v.is_empty()).map(PathBuf::from);
     windows.then(|| set("USERPROFILE")).flatten().or_else(|| crate::user_config::home_from(&env, windows))
+}
+
+/// Claude Code 가 Windows 에서 훅을 돌릴 Git Bash(moai-cj4a) — Windows 가 아니면 `None`(줄이 안 선다), Windows 에서
+/// 못 찾으면 `Some(None)` 이다. Git Bash 가 없으면 Claude Code 는 훅을 PowerShell 로 띄우고, 심긴 POSIX 줄은 거기서
+/// 못 돈다 — 규칙 다섯이 조용히 꺼지니 `status` 가 댄다. 막지는 않는다.
+fn git_bash_here() -> Option<Option<PathBuf>> {
+    git_bash_from(
+        cfg!(windows),
+        |k| std::env::var_os(k),
+        || which("git"),
+        |p| p.is_file(),
+    )
+}
+
+/// [`git_bash_here`] 의 몸통 — `windows` 와 환경·`git` 찾기·파일 확인을 받아 리눅스에서도 잰다. **Claude Code 가 찾는
+/// 차례를 따른다**: `CLAUDE_CODE_GIT_BASH_PATH` 가 서 있으면 그것 하나(없는 파일이면 못 찾은 것) → PATH 의 `git.exe` 가 선 디렉터리의
+/// 윗 디렉터리 `bin\bash.exe`(`Git\cmd\git.exe` → `Git\bin\bash.exe`), 같은 디렉터리의 `bash.exe` →
+/// `%ProgramFiles%\Git\bin\bash.exe`.
+fn git_bash_from(
+    windows: bool,
+    env: impl Fn(&str) -> Option<std::ffi::OsString>,
+    git: impl Fn() -> Option<PathBuf>,
+    is_file: impl Fn(&Path) -> bool,
+) -> Option<Option<PathBuf>> {
+    if !windows {
+        return None;
+    }
+    let set = |k: &str| env(k).filter(|v| !v.is_empty()).map(PathBuf::from);
+    // **준 값이 틀리면 다음으로 안 넘어간다**(리뷰 moai-cj4a.zpz) — Claude Code 는 그 변수가 없는 파일을 가리키면 거기서
+    // 멈춘다고 읽었다. 다음 후보로 넘어가 `·` 를 대면 사람은 고칠 것을 못 본다. 틀린 경고가 틀린 안심보다 싸다.
+    if let Some(given) = set("CLAUDE_CODE_GIT_BASH_PATH") {
+        return Some(is_file(&given).then_some(given));
+    }
+    let mut candidates: Vec<PathBuf> = Vec::new();
+    if let Some(dir) = git().as_deref().and_then(Path::parent) {
+        candidates.extend(dir.parent().map(|up| up.join("bin").join("bash.exe")));
+        candidates.push(dir.join("bash.exe"));
+    }
+    candidates.extend(set("ProgramFiles").map(|pf| pf.join("Git").join("bin").join("bash.exe")));
+    Some(candidates.into_iter().find(|p| is_file(p)))
 }
 
 /// `claude` 의 장부 하나. **읽기만** 한다. 쓰는 것은 `claude` 의 몫이다.
@@ -2727,6 +2777,85 @@ mod tests {
             assert!(real_dir.join("moai-supervise/SKILL.md").is_file(), "감독 스킬을 걷었다");
             assert!(!real_dir.join("moai-work").exists(), "걷은 스킬을 남겼다");
         }
+    }
+
+    /// **옛 훅 파일은 `current` 라 하지 않는다**(moai-cj4a.x4u) — `commandWindows` 가 없는 Codex 파일과 POSIX 줄뿐인 Antigravity
+    /// 파일은 Windows 의 cmd 에서 못 돌면서도 내용이 최신인지만 보는 판에서는 `current` 였다. 지금은 생성기의 글과 뜻으로
+    /// 다르니 `Stale` 이고, 줄은 다시 심으라고 명령을 댄다.
+    #[test]
+    fn old_hook_files_without_the_cmd_line_read_as_stale() {
+        let s = crate::scratch::Scratch::new("skill-old-hooks");
+        let root = s.path().to_path_buf();
+        let [codex, agy] = <[HookFile; 2]>::try_from(HookFile::all(&root, "moai")).ok().unwrap();
+
+        // 옛 Codex — 처리기마다 `commandWindows` 를 뺀다.
+        let mut v: serde_json::Value = serde_json::from_str(&codex.want).unwrap();
+        for group in v["hooks"].as_object_mut().unwrap().values_mut() {
+            group[0]["hooks"][0].as_object_mut().unwrap().remove("commandWindows").expect("새 파일에 commandWindows 가 없다");
+        }
+        let old = serde_json::to_string_pretty(&v).unwrap() + "\n";
+        std::fs::create_dir_all(codex.path.parent().unwrap()).unwrap();
+        std::fs::write(&codex.path, &old).unwrap();
+        assert_eq!(codex.seen(&root), HookState::Stale, "옛 Codex 파일을 current 로 읽었다");
+
+        // 옛 Antigravity — POSIX 줄이다.
+        let mut v: serde_json::Value = serde_json::from_str(&agy.want).unwrap();
+        for (key, group) in v["moai"].as_object_mut().unwrap() {
+            if key == "enabled" {
+                continue;
+            }
+            let entry = &mut group[0];
+            let entry = if entry.get("hooks").is_some() { &mut entry["hooks"][0] } else { entry };
+            let event = entry["command"].as_str().unwrap().split(' ').nth(2).unwrap().to_string();
+            entry["command"] = serde_json::json!(format!(
+                "command -v -- \"moai\" >/dev/null 2>&1 || exit 0; o=$(\"moai\" hook {event} --dialect antigravity); exit 0"
+            ));
+        }
+        std::fs::create_dir_all(agy.path.parent().unwrap()).unwrap();
+        std::fs::write(&agy.path, serde_json::to_string_pretty(&v).unwrap() + "\n").unwrap();
+        assert_eq!(agy.seen(&root), HookState::Stale, "옛 POSIX agy 파일을 current 로 읽었다");
+
+        // 낡았다는 줄은 다시 심는 명령을 댄다.
+        for h in [&codex, &agy] {
+            let (ok, said) = h.row(&root, crate::i18n::Lang::En);
+            assert!(!ok && said.contains("moai skill install --agent"), "{}: {said}", h.label());
+        }
+        // 새 글은 current.
+        std::fs::write(&codex.path, &codex.want).unwrap();
+        std::fs::write(&agy.path, &agy.want).unwrap();
+        assert_eq!((codex.seen(&root), agy.seen(&root)), (HookState::Current, HookState::Current));
+    }
+
+    /// **Claude Code 가 Windows 에서 훅을 돌릴 Git Bash 를 찾는 차례**(moai-cj4a.tux) — Windows 가 아니면 줄이 안 선다.
+    #[test]
+    fn the_git_bash_row_follows_claude_codes_lookup() {
+        let env = |pairs: &'static [(&'static str, &'static str)]| {
+            move |k: &str| pairs.iter().find(|(n, _)| *n == k).map(|(_, v)| std::ffi::OsString::from(*v))
+        };
+        let files = |list: &'static [&'static str]| move |p: &Path| list.iter().any(|f| Path::new(f) == p);
+        let git = || Some(PathBuf::from("/G/Git/cmd/git.exe"));
+        let no_git = || None;
+
+        assert_eq!(git_bash_from(false, env(&[]), git, files(&["/G/Git/bin/bash.exe"])), None, "유닉스에 줄이 섰다");
+        // 환경 변수가 먼저다.
+        let pairs: &[(&str, &str)] = &[("CLAUDE_CODE_GIT_BASH_PATH", "/mine/bash.exe"), ("ProgramFiles", "/PF")];
+        let all = files(&["/mine/bash.exe", "/G/Git/bin/bash.exe", "/PF/Git/bin/bash.exe"]);
+        assert_eq!(git_bash_from(true, env(pairs), git, all), Some(Some(PathBuf::from("/mine/bash.exe"))));
+        // 환경 변수가 없는 파일을 가리키면 다음으로 안 넘어가고 못 찾은 것이다 — Claude Code 가 거기서 멈춘다.
+        assert_eq!(git_bash_from(true, env(pairs), git, files(&["/G/Git/bin/bash.exe"])), Some(None));
+        // git.exe 곁.
+        assert_eq!(
+            git_bash_from(true, env(&[]), || Some(PathBuf::from("/G/Git/bin/git.exe")), files(&["/G/Git/bin/bash.exe"])),
+            Some(Some(PathBuf::from("/G/Git/bin/bash.exe")))
+        );
+        // git 이 PATH 에 없으면 %ProgramFiles%.
+        let pf: &[(&str, &str)] = &[("ProgramFiles", "/PF")];
+        assert_eq!(
+            git_bash_from(true, env(pf), no_git, files(&["/PF/Git/bin/bash.exe"])),
+            Some(Some(PathBuf::from("/PF/Git/bin/bash.exe")))
+        );
+        // 어디에도 없다.
+        assert_eq!(git_bash_from(true, env(pf), git, files(&[])), Some(None));
     }
 
     /// **남의 훅 파일도 그 에이전트를 쓴다는 표식이다**(리뷰 moai-iu73.zci) — `.agents/skills` 만 낡았고

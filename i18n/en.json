@@ -916,6 +916,7 @@
   "skill.hooks_row_stale": "{path} differs from this version — `moai skill install --agent {agent}` plants it again",
   "skill.hooks_row_missing": "not planted — `moai skill install --agent {agent}` plants {path}",
   "skill.hooks_row_foreign": "{path} is not moai's — left alone",
+  "skill.git_bash_missing": "not found — Claude Code runs the hooks in PowerShell, which cannot run them. Install Git for Windows, or point CLAUDE_CODE_GIT_BASH_PATH at its bash.exe",
   "skill.hooks_by_hand": "moai deletes no file — once no session holds them, delete {agent}'s hooks by hand:",
   "skill.remove_elsewhere": "! `{market}` is another place's registration ({at}) — leaving it alone",
   "skill.remove_elsewhere_there": "  call `moai skill uninstall` in that repository",
