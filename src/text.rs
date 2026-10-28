@@ -48,6 +48,16 @@ pub fn clip(s: &str, max: usize) -> String {
     out
 }
 
+/// Keep at most `max` Unicode characters, appending an ellipsis only when truncated.
+pub fn clip_chars(s: &str, max: usize) -> String {
+    let mut chars = s.chars();
+    let mut out: String = chars.by_ref().take(max).collect();
+    if chars.next().is_some() {
+        out.push('…');
+    }
+    out
+}
+
 /// 진행 막대에서 채울 칸 수. **CLI 와 TUI 가 같은 자를 쓴다** — 갈라지면
 /// 같은 에픽이 두 표면에서 다른 진척으로 보인다.
 ///

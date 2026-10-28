@@ -2890,10 +2890,11 @@ struct Boarded {
 /// 칸은 테두리 안쪽 폭을 고르게 나눈다. 칸마다 [`super::board::CARD_MIN`] 을 못 받으면 덜 세우고, 못 세운 칸은
 /// 제목 줄에 이름과 수로 댄다 — **커서가 선 칸은 늘 선다**. **보이는 카드만 짓는다**(moai-wt4n 과 같은 까닭).
 fn board(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) -> Boarded {
-    let laid = app.laid(rows);
     let lang = app.site.lang;
     let block = frame(app, Pane::Explorer);
     let inner = block.inner(at);
+    app.board_width = Some(inner.width as usize);
+    let laid = app.laid(rows);
     let here = laid.plan.cards.get(app.cursor).copied();
     // 커서가 선 카드의 칸을 적어 둔다 — 누르기·휠로 카드에 섰어도 머리줄의 `j` 가 그 칸으로 돌아간다(`App::board_column`).
     app.note_board_column(&laid);
@@ -2965,7 +2966,7 @@ fn board(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) -> Boarded {
             continue;
         }
         let k = column - win.first;
-        let lines = card(app, r, n == app.cursor, widths[k], p.height);
+        let lines = card(app, r, n == app.cursor, inner.width as usize / win.count.max(1));
         let (from, to) = (p.top.max(seen.start), (p.top + p.height).min(seen.end));
         for (dy, line) in lines.iter().enumerate() {
             if (from..to).contains(&(p.top + dy)) {
@@ -3108,7 +3109,7 @@ fn lane_line<'a>(app: &App, laid: &super::Laid, lane: usize, w: usize) -> Line<'
 /// `>` 와 반전이다: 색 없는 터미널에서도 선다. id·우선순위·셈은 목록처럼 켠 것만 선다(`App::fields`).
 ///
 /// 줄마다 커서 자리(`> `)만큼 들이고 오른쪽에 한 칸을 비운다 — 옆 칸의 카드와 붙어 읽히지 않게.
-fn card<'a>(app: &App, r: &Row, chosen: bool, w: usize, h: usize) -> Vec<Line<'a>> {
+fn card<'a>(app: &App, r: &Row, chosen: bool, w: usize) -> Vec<Line<'a>> {
     use super::view::Field;
     let Row::Item(seat, e, _) = r else { return Vec::new() };
     let Some(site) = app.site_of_seat(*seat) else { return Vec::new() };
@@ -3118,7 +3119,6 @@ fn card<'a>(app: &App, r: &Row, chosen: bool, w: usize, h: usize) -> Vec<Line<'a
     let fields = app.fields;
     let grep = app.grep_query();
     let in_id = grep.filter(|(g, _)| g.sees_id()).map(|(_, q)| q);
-    let in_title = grep.filter(|(g, _)| g.sees_title()).map(|(_, q)| q);
 
     let mut head: Vec<Span<'static>> = Vec::new();
     if fields.shows(Field::Id) {
@@ -3142,34 +3142,9 @@ fn card<'a>(app: &App, r: &Row, chosen: bool, w: usize, h: usize) -> Vec<Line<'a
     }
 
     let unveiled = app.unveiled(e);
-    let tail = if unveiled { unveiled_mark(site.lang) } else { "" };
-    let mut body: Vec<Span<'static>> = Vec::new();
-    if site.unread.contains(&i.id) {
-        body.push(Span::styled(NEW_MARK, Style::new().fg(Color::Red).bg(Color::LightYellow)));
-        body.push(Span::raw(" "));
-    }
-    if let Some(m) = branch_mark(site, at, fields) {
-        body.push(Span::styled(m, branch()));
-        body.push(Span::raw(" "));
-    }
-    // **들어갈 수 있는 카드는 제목 끝에 `/`**(moai-4la6.qf1, 사용자 결정) — 목록 줄과 같은 꼴이다. 셈을 끄거나
-    // 자식이 모두 backlog 면 카드에 들어갈 수 있다고 말하는 것이 달리 없다. 제목을 먼저 잘라 `/` 가 남는다 — 다만
-    // `[NEW]`·가지 표시만으로 몸이 차면 제목 몫이 없어 `fit` 이 끝의 `/` 까지 자른다(리뷰 moai-4la6.ihu 5번).
-    let title = dir_title(
-        &i.title,
-        room.saturating_sub(spans_width(&body) + crate::text::width(tail)),
-        matches!(e, Entry::Dir { .. }),
-    );
-    if site.spins(at) {
-        body.extend(mark(shimmer(title, app.spin), in_title));
-    } else {
-        body.extend(mark(vec![Span::raw(title)], in_title));
-    }
-    if unveiled {
-        body.push(Span::raw(tail));
-    }
-    let mut lines = vec![head, fit(Line::from(body), room)];
-    if h > 2 {
+    let mut lines = vec![head];
+    lines.extend(card_body(app, r, w));
+    if card_height(fields, || site.whose(at).is_some()) > 2 {
         lines.push(fit(Line::from(card_foot(site, at, fields, room)), room));
     }
     if unveiled {
@@ -3185,6 +3160,54 @@ fn card<'a>(app: &App, r: &Row, chosen: bool, w: usize, h: usize) -> Vec<Line<'a
         .map(|(n, l)| {
             let lead = if chosen && n == 0 { Span::styled(CURSOR, bold()) } else { Span::raw("  ") };
             Line::from(std::iter::once(lead).chain(l.spans).collect::<Vec<_>>())
+        })
+        .collect()
+}
+
+const CARD_TITLE_CHARS: usize = 50;
+
+/// Shared by placement and painting; extra column remainder never changes wrapping.
+pub(super) fn card_body(app: &App, r: &Row, w: usize) -> Vec<Line<'static>> {
+    let Row::Item(seat, e, _) = r else { return Vec::new() };
+    let Some(site) = app.site_of_seat(*seat) else { return Vec::new() };
+    let Some(at) = e.at() else { return Vec::new() };
+    let i = &site.issues[at];
+    let mut parts = Vec::new();
+    let mut push = |text: String, role| {
+        parts.push(crate::markdown::Span { text, role: crate::markdown::Role::Plain, link: Some(role) })
+    };
+    if site.unread.contains(&i.id) {
+        push(NEW_MARK.into(), 0);
+        push(" ".into(), 3);
+    }
+    if let Some(m) = branch_mark(site, at, app.fields) {
+        push(format!("{m} "), 1);
+    }
+    push(crate::text::clip_chars(&crate::text::one_line(&i.title), CARD_TITLE_CHARS), 2);
+    if matches!(e, Entry::Dir { .. }) {
+        push("/".into(), 3);
+    }
+    if app.unveiled(e) {
+        push(unveiled_mark(site.lang).into(), 3);
+    }
+    let query = app.grep_query().filter(|(g, _)| g.sees_title()).map(|(_, q)| q);
+    crate::markdown::wrap_spans(&parts, w.saturating_sub(left_gutter() + 1).max(2), crate::markdown::Overflow::Break)
+        .into_iter()
+        .map(|line| {
+            Line::from(
+                line.into_iter()
+                    .flat_map(|part| match part.link {
+                        Some(0) => vec![Span::styled(part.text, Style::new().fg(Color::Red).bg(Color::LightYellow))],
+                        Some(1) => vec![Span::styled(part.text, branch())],
+                        Some(2) => {
+                            let spans =
+                                if site.spins(at) { shimmer(part.text, app.spin) } else { vec![Span::raw(part.text)] };
+                            mark(spans, query)
+                        }
+                        _ => vec![Span::raw(part.text)],
+                    })
+                    .collect::<Vec<_>>(),
+            )
         })
         .collect()
 }
@@ -5966,6 +5989,58 @@ pub(super) mod tests {
         a
     }
 
+    #[test]
+    fn wrapped_card_titles_share_their_height_with_placement() {
+        let mut a = board_app(2);
+        a.site.issues[2].title = "가".repeat(51);
+        a.board_width = Some(81);
+        let rows = a.rows();
+        let n = rows.iter().position(|r| matches!(r, Row::Item(_, e, _) if e.at() == Some(2))).unwrap();
+        let laid = a.laid(&rows);
+        let count = super::super::board::window(laid.columns.len(), 81, None, 0).count;
+        let w = 81 / count;
+        let body = card_body(&a, &rows[n], w);
+        let text: String = body.iter().flat_map(|l| &l.spans).map(|s| s.content.as_ref()).collect();
+        assert_eq!(text, format!("{}…", "가".repeat(50)));
+        assert!(body.len() > 1);
+        assert_eq!(laid.plan.cards[n].height, 1 + body.len());
+        let next = laid
+            .plan
+            .cards
+            .iter()
+            .skip(n + 1)
+            .find(|p| p.column == laid.plan.cards[n].column && p.lane == laid.plan.cards[n].lane)
+            .unwrap();
+        assert_eq!(next.top, laid.plan.cards[n].top + laid.plan.cards[n].height);
+        a.cursor = rows.len() - 1;
+        assert_eq!(a.laid(&rows).plan.cards[n].height, laid.plan.cards[n].height);
+        a.site.issues[2].title = "가".repeat(50);
+        let text: String =
+            card_body(&a, &rows[n], 120).iter().flat_map(|l| &l.spans).map(|s| s.content.as_ref()).collect();
+        assert_eq!(text, "가".repeat(50));
+        assert_eq!(crate::text::width(&text), 100);
+    }
+
+    #[test]
+    fn wrapped_titles_keep_animation_and_search_on_later_lines() {
+        let mut a = board_app(1);
+        let at = a.site.issues.iter().position(|i| i.id == "argos-0080").unwrap();
+        a.site.issues[at].title = "가".repeat(40);
+        let rows = a.rows();
+        let r = rows.iter().find(|r| matches!(r, Row::Item(_, e, _) if e.at() == Some(at))).unwrap();
+        a.spin = 4;
+        let body = card_body(&a, r, 16);
+        assert!(body.len() > 1);
+        assert!(body[1].spans.iter().any(|s| s.style.fg.is_some()), "second title line has no animation");
+        a.hung = Some(super::super::Hung::Grep { text: "가가".into(), scope: crate::query::GrepIn::default() });
+        let body = card_body(&a, r, 16);
+        assert!(
+            body[1].spans.iter().any(|s| s.style.add_modifier.contains(Modifier::BOLD)
+                || s.style.add_modifier.contains(Modifier::UNDERLINED)),
+            "second title line has no search highlight"
+        );
+    }
+
     /// **보드는 칸 머리줄·레인 머리줄·카드를 세우고, 고른 카드는 `>` 와 반전이다**(moai-9nfw, 사용자 결정) — 반전은
     /// 색 없는 터미널에서도 선다. 에픽과 마일스톤은 카드가 아니다.
     #[test]
@@ -6232,7 +6307,7 @@ pub(super) mod tests {
     }
 
     /// **들어갈 수 있는 카드는 제목 끝에 `/` 를 단다**(moai-4la6.qf1, 사용자 결정) — 목록 줄과 같은 꼴이고, 제목을
-    /// 먼저 잘라 좁아도 `/` 가 남는다. 카드 높이는 그대로다.
+    /// 50글자로 자른 뒤 폭에 맞춰 감싼다. `/` 는 마지막 줄에 남는다.
     #[test]
     fn a_card_that_can_be_entered_ends_its_title_with_a_slash() {
         let mut a = board_app(2);
@@ -6253,9 +6328,14 @@ pub(super) mod tests {
                 .iter()
                 .find(|r| matches!(r, Row::Item(_, e, _) if e.at().is_some_and(|at| a.site.issues[at].id == id)))
                 .unwrap_or_else(|| panic!("{id} 카드가 없다"));
-            let lines = card(a, r, false, w, 2);
-            assert_eq!(lines.len(), 2, "`/` 가 카드 높이를 바꿨다");
-            lines[1].spans.iter().map(|s| s.content.as_ref()).collect::<String>().trim_end().to_string()
+            let lines = card(a, r, false, w);
+            lines[1..]
+                .iter()
+                .flat_map(|l| &l.spans)
+                .map(|s| s.content.as_ref().trim_start())
+                .collect::<String>()
+                .trim_end()
+                .to_string()
         };
         let line = body(&a, "argos-0100", 80);
         assert!(line.ends_with("아주 긴 제목/"), "들어갈 수 있는 카드에 `/` 가 없다 — {line:?}");
@@ -6263,8 +6343,7 @@ pub(super) mod tests {
         assert!(!line.contains('/'), "잎 카드에 `/` 가 섰다 — {line:?}");
 
         let line = body(&a, "argos-0100", 20);
-        assert!(line.ends_with("…/"), "좁은 카드에서 `/` 가 잘려 나갔다 — {line:?}");
-        assert!(crate::text::width(&line) < 20, "줄이 카드 폭을 넘었다 — 오른쪽 한 칸은 비운다 — {line:?}");
+        assert!(line.ends_with("제목/") && !line.contains('…'), "좁은 카드에서 제목이 잘렸다 — {line:?}");
     }
 
     /// **탐색기의 줄머리는 줄마다 두 칸이다**(moai-nb6w, 사용자 결정 2026-09-21). 한때 그 곁에

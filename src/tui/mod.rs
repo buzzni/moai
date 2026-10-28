@@ -1382,6 +1382,7 @@ pub struct App {
     /// 상세의 Wiki 토막을 지어 둔 한 벌(moai-xp7l.vyw, [`draw::WikiAbout`]) — [`App::body`] 와 같은 까닭으로
     /// `draw::fill_wiki` 가 그리기 전에 채운다. 커서가 선 줄의 것 하나다.
     wiki_about: Option<draw::WikiAbout>,
+    board_width: Option<usize>,
     /// 상세의 Wiki 토막이 읽은 위키 — 체크아웃(`Repo::here`)마다 한 번, 처음 그 토막을 그릴 때 읽는다. 커서를 옮길
     /// 때마다 위키 전부를 다시 읽지 않는다. 연 뒤에 쓴 페이지는 위키 창(`SPC g w`)을 열면 — 창이 위키를 새로 읽으며 이것을
     /// 비운다 — 아니면 탐색기를 다시 열면 선다. 못 읽은 위키는 안 담는다(리뷰 moai-xp7l.mug).
@@ -2140,6 +2141,7 @@ impl App {
             body: None,
             note_hits: None,
             wiki_about: None,
+            board_width: None,
             wiki_pages: Default::default(),
             user: None,
             identify: crate::model::actor,
@@ -5094,7 +5096,7 @@ impl App {
         }
         let mut lanes: Vec<LaneOf> = Vec::new();
         let mut slots: Vec<board::Slot> = Vec::with_capacity(spots.len());
-        for spot in &spots {
+        for (n, spot) in spots.iter().enumerate() {
             let slot = match spot {
                 Some(Spot::Head(n)) => {
                     lanes.push(LaneOf::Project(*n));
@@ -5103,7 +5105,16 @@ impl App {
                 Some(Spot::Card(seat, lane, column, height)) => {
                     let lane = lane_of(&mut lanes, *seat, *lane);
                     let column = columns.iter().position(|c| c == column).unwrap_or(0);
-                    board::Slot { lane, column: Some(column), height: *height, group: group(*seat) }
+                    board::Slot {
+                        lane,
+                        column: Some(column),
+                        height: self.board_width.map_or(*height, |width| {
+                            let count = board::window(columns.len(), width, None, 0).count;
+                            let width = width / count.max(1);
+                            *height + draw::card_body(self, &rows[n], width).len().saturating_sub(1)
+                        }),
+                        group: group(*seat),
+                    }
                 }
                 // 빠진 프로젝트의 줄 — 다음 프레임에 사라진다([`App::site_of_seat`]). 그때까지 자리만 지킨다.
                 None => {
