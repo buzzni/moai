@@ -103,3 +103,5 @@ body {
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
+
+:root { --progress-soft: color-mix(in srgb, #F2B01E 7%, var(--bg)); --review-soft: color-mix(in srgb, #a855f7 8%, var(--bg)); }

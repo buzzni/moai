@@ -479,3 +479,14 @@ test('list view: rows are 24 high, as list.css --moai-row-h, so the branches mee
   const listCss = readFileSync(new URL('../panel/style/list.css', import.meta.url), 'utf8')
   assert.match(listCss, /--moai-row-h: 24px/)
 })
+
+test('list rows expose their status for progress and review backgrounds', () => {
+  const panel = mount([
+    { id: 'a', title: 'Progress', status: 'in_progress' },
+    { id: 'b', title: 'Review', status: 'review' },
+    { id: 'c', title: 'Todo', status: 'todo' },
+  ])
+  for (const [id, status] of [['a','in_progress'], ['b','review'], ['c','todo']]) {
+    assert.equal(panel.root.querySelector(`[data-id="${id}"]`).dataset.status, status)
+  }
+})
