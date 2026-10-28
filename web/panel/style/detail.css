@@ -58,4 +58,8 @@
 .moai-detail-timeline > li[data-kind="status"]::before { border-color: var(--accent); }
 .moai-detail-timeline > li[data-kind="note"]::before { border-color: var(--warn); }
 .moai-detail-timeline .moai-detail-meta { display: block; font-size: 11px; }
+/* Who and when, on its own line under a text that may run several lines. */
+.moai-detail-timeline > li > .moai-detail-meta { margin-top: 4px; }
 .moai-detail-timeline > li.moai-detail-meta::before { display: none; }
+/* A note or a work record as moai keeps it: its line breaks stand, as `moai show` prints them, and a long word wraps. */
+.moai-detail-text { white-space: pre-wrap; overflow-wrap: anywhere; min-width: 0; }

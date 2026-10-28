@@ -42,6 +42,8 @@ export interface ShellCopy {
   tabsLabel: string
   tabs: { board: string; list: string; wiki: string; gantt: string }
   /** The position toggle's name says what pressing does; under 640px it says why it is off. */
+  detailToRight: string
+  detailToTop: string
   detailToLeft: string
   detailToBottom: string
   detailForcedBottom: string
