@@ -44,6 +44,11 @@ use crate::tz::Zone;
 use serde::Serialize;
 use std::collections::BTreeMap;
 
+#[cfg(test)]
+thread_local! {
+    pub(crate) static CALLS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 /// 계획 구간이 어디서 왔나.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -138,6 +143,8 @@ pub fn gantt<'a>(
     now: &str,
     zone: &Zone,
 ) -> Gantt<'a> {
+    #[cfg(test)]
+    CALLS.set(CALLS.get() + 1);
     // 막음 지도는 막힌 줄이 있을 때만 짓는다 — 저장소 전부를 훑는 셈이다.
     let blocks = all.iter().any(|i| !i.blocked_by.is_empty()).then(|| BlockMaps::over(all, cfg));
     // 줄마다 그 줄을 계획에서 뺀 미룸들 — 미룬 줄이 없으면 빈 지도다. 묶음의 계획에서 멤버를 빼는 자([`planned_of`])가 쓴다.
