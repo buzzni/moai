@@ -12,6 +12,19 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+### Added
+
+- **The TUI detail shows history and a work log.** Creation, column moves and
+  notes follow the wiki, with wrapped notes and journal refresh. AI work records
+  follow history when present, including the model, grade, reason, author and
+  recorded date. (moai-ccow.y3o, moai-ccow.an0)
+
+### Changed
+
+- **TUI board titles wrap within each column.** Cards keep up to 50 Unicode
+  characters before an ellipsis and grow to fit; optional fields remain below
+  the title. (moai-ccow.7p9)
+
 ## [0.31.0] - 2026-10-28
 
 ### Added
