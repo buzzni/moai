@@ -2966,6 +2966,7 @@ fn board(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) -> Boarded {
             continue;
         }
         let k = column - win.first;
+        // 칸의 내림 폭이다 — `App::laid` 가 같은 폭으로 높이를 쟀다. 남는 칸(`widths` 의 +1)은 비어 남는다.
         let lines = card(app, r, n == app.cursor, inner.width as usize / win.count.max(1));
         let (from, to) = (p.top.max(seen.start), (p.top + p.height).min(seen.end));
         for (dy, line) in lines.iter().enumerate() {
@@ -3166,42 +3167,78 @@ fn card<'a>(app: &App, r: &Row, chosen: bool, w: usize) -> Vec<Line<'a>> {
 
 const CARD_TITLE_CHARS: usize = 50;
 
-/// Shared by placement and painting; extra column remainder never changes wrapping.
-pub(super) fn card_body(app: &App, r: &Row, w: usize) -> Vec<Line<'static>> {
-    let Row::Item(seat, e, _) = r else { return Vec::new() };
-    let Some(site) = app.site_of_seat(*seat) else { return Vec::new() };
-    let Some(at) = e.at() else { return Vec::new() };
-    let i = &site.issues[at];
+/// Which part of a card's title lines a glyph belongs to. The tag rides through [`crate::markdown::wrap_spans`] on
+/// `Span::link` — the wrap keeps it per glyph, and nothing on the board reads it as a link.
+const CARD_NEW: usize = 0;
+const CARD_BRANCH: usize = 1;
+const CARD_TITLE: usize = 2;
+const CARD_PLAIN: usize = 3;
+
+/// The width a card's title lines wrap at — [`card`] keeps the cursor gutter on the left and one free column on the right.
+fn card_room(w: usize) -> usize {
+    w.saturating_sub(left_gutter() + 1).max(2)
+}
+
+/// The card's title lines before wrapping — `[NEW]`, the branch mark, the title cut at [`CARD_TITLE_CHARS`], and the
+/// `/` and hidden mark at its end. `None` for a row that is not a card.
+fn card_parts<'s>(app: &'s App, r: &Row) -> Option<(&'s Site, usize, Vec<crate::markdown::Span>)> {
+    let Row::Item(seat, e, _) = r else { return None };
+    let site = app.site_of_seat(*seat)?;
+    let at = e.at()?;
+    let i = site.issues.get(at)?;
     let mut parts = Vec::new();
-    let mut push = |text: String, role| {
-        parts.push(crate::markdown::Span { text, role: crate::markdown::Role::Plain, link: Some(role) })
+    let mut push = |text: String, part| {
+        parts.push(crate::markdown::Span { text, role: crate::markdown::Role::Plain, link: Some(part) })
     };
     if site.unread.contains(&i.id) {
-        push(NEW_MARK.into(), 0);
-        push(" ".into(), 3);
+        push(NEW_MARK.into(), CARD_NEW);
+        push(" ".into(), CARD_PLAIN);
     }
     if let Some(m) = branch_mark(site, at, app.fields) {
-        push(format!("{m} "), 1);
+        push(format!("{m} "), CARD_BRANCH);
     }
-    push(crate::text::clip_chars(&crate::text::one_line(&i.title), CARD_TITLE_CHARS), 2);
+    push(crate::text::clip_chars(&crate::text::one_line(&i.title), CARD_TITLE_CHARS), CARD_TITLE);
     if matches!(e, Entry::Dir { .. }) {
-        push("/".into(), 3);
+        push("/".into(), CARD_PLAIN);
     }
     if app.unveiled(e) {
-        push(unveiled_mark(site.lang).into(), 3);
+        push(unveiled_mark(site.lang).into(), CARD_PLAIN);
     }
+    Some((site, at, parts))
+}
+
+/// How many title lines [`card_body`] draws at `w` — what placement (`App::laid`) adds to a card's height. It counts
+/// without styling: placement runs for every card on every frame and key, painting only for the cards on screen.
+/// Parts that fit the room are one line — [`crate::markdown::wrap_spans`] breaks only past it, by the same glyph widths.
+pub(super) fn card_title_lines(app: &App, r: &Row, w: usize) -> usize {
+    let Some((_, _, parts)) = card_parts(app, r) else { return 0 };
+    let room = card_room(w);
+    let cols: usize =
+        parts.iter().flat_map(|p| p.text.chars()).map(|c| crate::text::width(c.encode_utf8(&mut [0; 4]))).sum();
+    if cols <= room {
+        return 1;
+    }
+    crate::markdown::wrap_spans(&parts, room, crate::markdown::Overflow::Break).len()
+}
+
+/// The card's title lines, wrapped at the floor width of a column so the remainder `board::widths` hands the left
+/// columns never changes wrapping — [`card_title_lines`] counts the same lines for placement.
+pub(super) fn card_body(app: &App, r: &Row, w: usize) -> Vec<Line<'static>> {
+    let Some((site, at, parts)) = card_parts(app, r) else { return Vec::new() };
     let query = app.grep_query().filter(|(g, _)| g.sees_title()).map(|(_, q)| q);
-    crate::markdown::wrap_spans(&parts, w.saturating_sub(left_gutter() + 1).max(2), crate::markdown::Overflow::Break)
+    let spins = site.spins(at);
+    crate::markdown::wrap_spans(&parts, card_room(w), crate::markdown::Overflow::Break)
         .into_iter()
         .map(|line| {
             Line::from(
                 line.into_iter()
                     .flat_map(|part| match part.link {
-                        Some(0) => vec![Span::styled(part.text, Style::new().fg(Color::Red).bg(Color::LightYellow))],
-                        Some(1) => vec![Span::styled(part.text, branch())],
-                        Some(2) => {
-                            let spans =
-                                if site.spins(at) { shimmer(part.text, app.spin) } else { vec![Span::raw(part.text)] };
+                        Some(CARD_NEW) => {
+                            vec![Span::styled(part.text, Style::new().fg(Color::Red).bg(Color::LightYellow))]
+                        }
+                        Some(CARD_BRANCH) => vec![Span::styled(part.text, branch())],
+                        Some(CARD_TITLE) => {
+                            let spans = if spins { shimmer(part.text, app.spin) } else { vec![Span::raw(part.text)] };
                             mark(spans, query)
                         }
                         _ => vec![Span::raw(part.text)],
@@ -3212,7 +3249,8 @@ pub(super) fn card_body(app: &App, r: &Row, w: usize) -> Vec<Line<'static>> {
         .collect()
 }
 
-/// 제목을 `room` 에 맞춰 자르고, 들어갈 수 있는 줄이면 끝에 `/` 를 단다 — 목록 줄과 카드가 같은 자로 낸다.
+/// 제목을 `room` 에 맞춰 자르고, 들어갈 수 있는 줄이면 끝에 `/` 를 단다 — 목록 줄이 쓴다. 카드는 제목을 감싸므로
+/// 자르지 않고 [`card_parts`] 가 `/` 를 끝에 붙인다.
 /// **디렉터리 표시는 자른 뒤에 붙인다.** 먼저 붙이면 긴 제목에서 `/` 가 제일 먼저 잘려 나가고, 디렉터리라고
 /// 말하는 것이 달리 없다.
 fn dir_title(label: &str, room: usize, is_dir: bool) -> String {
@@ -3853,7 +3891,8 @@ fn detail(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) {
     fill_note_hits(app, rows, inner.width as usize);
     // **Wiki 토막도 그리기 전에 짓는다**(moai-xp7l.vyw) — 위키를 읽고 순위를 매기는 값이라 프레임마다 못 한다.
     fill_wiki(app, rows);
-    fill_history(app, rows);
+    // **이력·작업 기록도 그리기 전에 편다** — 저널은 옆 스레드가 읽고, 편 줄은 본문과 같은 까닭으로 든다.
+    fill_history(app, rows, inner.width as usize);
 
     let lines = match app.current_of(rows) {
         // **빈 층은 할 일을 댄다**(moai-r8kl). 등록이 0 인 채 `.moai` 밖에서 띄운 자리다 — "없다"
@@ -4401,103 +4440,75 @@ fn about<'a>(app: &App, site: &Site, idx: usize, e: &Entry, w: usize) -> Vec<Lin
         out.extend(about_wiki_lines(site.lang, wiki));
     }
     if let Some(repo) = site.repo.as_ref() {
-        let root = crate::cmd::show::home(repo, &site.origin, &i.id);
-        if let Some(journal) = app.history.entries.get(&(root.to_path_buf(), i.id.clone())) {
-            if !journal.is_empty() {
-                out.push(Line::from(""));
-                out.push(Line::from(Span::styled(say(site.lang, "tui.about.history"), bold())));
-                for entry in journal {
-                    let stamp = crate::view::short_stamp(&entry.ts, &app.zone);
-                    let text = crate::style::plain(&crate::view::history_entry(entry, &site.cfg, site.lang));
-                    let pad = " ".repeat(crate::text::width(&stamp) + 3);
-                    for (n, line) in text.split('\n').enumerate() {
-                        let lead = if n == 0 { format!("{stamp}   ") } else { pad.clone() };
-                        out.extend(wrapped(&format!("{lead}{line}"), w, Style::default()));
-                    }
-                }
-            }
-            let work = crate::model::work_of(journal);
-            if !work.is_empty() {
-                out.push(Line::from(""));
-                out.push(Line::from(Span::styled(say(site.lang, "tui.about.work"), bold())));
-                for work in work {
-                    let model =
-                        work.provider.as_ref().map_or_else(|| work.model.clone(), |p| format!("{p}/{}", work.model));
-                    let mut main = model.clone();
-                    if let Some(tokens) = work.tokens {
-                        main.push_str(&format!(" tokens={tokens}"));
-                    }
-                    let verdict = [work.grade.as_deref(), work.why.as_deref()]
-                        .into_iter()
-                        .flatten()
-                        .collect::<Vec<_>>()
-                        .join(" — ");
-                    if !verdict.is_empty() {
-                        main.push_str(&format!(" ({verdict})"));
-                    }
-                    let by = crate::text::one_line(&crate::model::label(
-                        &work.by,
-                        work.by_email.as_deref(),
-                        site.cfg.naming,
-                    ));
-                    let stamp = crate::view::stamp(&work.at, &app.zone);
-                    let text = crate::text::sanitize(&format!("{main}  {by} · {stamp}"));
-                    // Bold model text on every wrapped fragment, without relying on color.
-                    let model_len = crate::text::sanitize(&model).len();
-                    let parts = [
-                        crate::markdown::Span {
-                            text: crate::text::sanitize(&model),
-                            role: crate::markdown::Role::Strong,
-                            link: None,
-                        },
-                        crate::markdown::Span {
-                            text: text[model_len..].to_string(),
-                            role: crate::markdown::Role::Plain,
-                            link: None,
-                        },
-                    ];
-                    out.extend(
-                        crate::markdown::wrap_spans(&parts, w.max(2), crate::markdown::Overflow::Break)
-                            .into_iter()
-                            .map(|parts| {
-                                Line::from(
-                                    parts
-                                        .into_iter()
-                                        .map(|s| {
-                                            Span::styled(
-                                                s.text,
-                                                if s.role == crate::markdown::Role::Strong {
-                                                    bold()
-                                                } else {
-                                                    Style::default()
-                                                },
-                                            )
-                                        })
-                                        .collect::<Vec<_>>(),
-                                )
-                            }),
-                    );
-                }
+        let key = (crate::cmd::show::home(repo, &site.origin, &i.id).to_path_buf(), i.id.clone());
+        if let Some((read, journal)) = app.history.entries.get(&key) {
+            // 편 줄은 [`fill_history`] 가 그리기 전에 들여 둔 것이다 — 안 맞으면 여기서 편다. 캐시는 **값일 뿐이라**
+            // 없어도 그림이 같다(본문의 [`Body`] 와 같다).
+            match app.history.drawn.as_ref().filter(|d| d.fits(&key, read, w, site, &app.zone)) {
+                Some(held) => out.extend(held.lines.iter().cloned()),
+                None => out.extend(history_lines(journal, site, &app.zone, w)),
             }
         }
     }
     out
 }
 
-/// Journals are display data only. Cache each (home checkout, id), and invalidate
-/// that checkout's entries when journal files or their directory change.
+/// The journal marks of one home checkout (`Repo::journal_marks`).
+type JournalMarks = Vec<(std::path::PathBuf, crate::store::Stamp)>;
+
+/// Journals are display data only. Cache each (home checkout, id) with the marks it was read under. A journal write
+/// makes the held journal **stale, not absent**: the row in the detail keeps its history until the fresh read lands.
+/// Dropping it blanked the section for the length of a read on every write any session made, and `Scroll::fit` pulled
+/// the offset of a reader scrolled into the history back up meanwhile.
 #[derive(Default)]
 pub(super) struct HistoryCache {
-    marks: std::collections::HashMap<std::path::PathBuf, Vec<(std::path::PathBuf, crate::store::Stamp)>>,
-    entries: std::collections::HashMap<(std::path::PathBuf, String), Vec<crate::model::JournalEntry>>,
+    /// The marks last measured per home checkout — a held journal read under other marks is due for a fresh read.
+    marks: std::collections::HashMap<std::path::PathBuf, JournalMarks>,
+    /// Each row's journal by (home checkout, id), with the marks taken before it was read — never newer than the lines.
+    entries: std::collections::HashMap<(std::path::PathBuf, String), (JournalMarks, Vec<crate::model::JournalEntry>)>,
+    /// The one read in flight — another row waits until it lands ([`fill_history`]).
     pending: Option<HistoryPending>,
+    /// The history and work-log lines of the row in the detail ([`HistoryLines`]).
+    drawn: Option<HistoryLines>,
 }
 
 struct HistoryPending {
     key: (std::path::PathBuf, String),
-    marks: Vec<(std::path::PathBuf, crate::store::Stamp)>,
+    marks: JournalMarks,
     rx: std::sync::mpsc::Receiver<Vec<crate::model::JournalEntry>>,
     handle: std::thread::JoinHandle<()>,
+}
+
+/// The history and work log laid out once per read and width — [`Body`] and [`NoteHits`] for the same reason: a
+/// review row's journal carries its reviewer's text in full (385KB on one issue here), and wrapping every note on every
+/// frame is what those two stopped doing for the body and the matching notes.
+pub(super) struct HistoryLines {
+    key: (std::path::PathBuf, String),
+    read: JournalMarks,
+    w: usize,
+    lang: crate::i18n::Lang,
+    naming: crate::config::Naming,
+    zone: String,
+    lines: Vec<Line<'static>>,
+}
+
+impl HistoryLines {
+    /// Whether these lines are that read of that row at that width, in the words, names and clock the detail shows.
+    fn fits(
+        &self,
+        key: &(std::path::PathBuf, String),
+        read: &JournalMarks,
+        w: usize,
+        site: &Site,
+        zone: &crate::tz::Zone,
+    ) -> bool {
+        self.w == w
+            && self.lang == site.lang
+            && self.naming == site.cfg.naming
+            && self.zone == zone.name()
+            && &self.key == key
+            && &self.read == read
+    }
 }
 
 impl HistoryCache {
@@ -4518,32 +4529,140 @@ impl HistoryCache {
                 return;
             }
         };
+        // A read that a write overtook is still newer than what is held — it goes in under the marks it was read with,
+        // so the next frame reads again instead of the row standing without history meanwhile.
         let pending = self.pending.take().unwrap();
-        // Never let an older read replace a cache invalidated while it ran.
-        if self.marks.get(&pending.key.0) == Some(&pending.marks) {
-            self.entries.insert(pending.key, entries);
-        }
+        self.entries.insert(pending.key, (pending.marks, entries));
     }
 }
 
-fn fill_history(app: &mut App, rows: &[Row]) {
+/// The history section, then the work log — the CLI's order (`moai show`: history last) with the work log the web
+/// detail adds after it. Notes wrap under their text column ([`hung`]).
+fn history_lines(
+    journal: &[crate::model::JournalEntry],
+    site: &Site,
+    zone: &crate::tz::Zone,
+    w: usize,
+) -> Vec<Line<'static>> {
+    let mut out = Vec::new();
+    if !journal.is_empty() {
+        out.push(Line::from(""));
+        out.push(Line::from(Span::styled(say(site.lang, "tui.about.history"), bold())));
+        for entry in journal {
+            let stamp = crate::view::short_stamp(&entry.ts, zone);
+            let text = crate::style::plain(&crate::view::history_entry(entry, &site.cfg, site.lang));
+            let lead = crate::text::width(&stamp) + 3;
+            for (n, line) in text.split('\n').enumerate() {
+                out.extend(hung(if n == 0 { &stamp } else { "" }, lead, line, w));
+            }
+        }
+    }
+    let work = crate::model::work_of(journal);
+    if !work.is_empty() {
+        out.push(Line::from(""));
+        out.push(Line::from(Span::styled(say(site.lang, "tui.about.work"), bold())));
+    }
+    for work in work {
+        let model = work.provider.as_ref().map_or_else(|| work.model.clone(), |p| format!("{p}/{}", work.model));
+        let mut rest = String::new();
+        if let Some(tokens) = work.tokens {
+            rest.push_str(&format!(" tokens={tokens}"));
+        }
+        let verdict =
+            [work.grade.as_deref(), work.why.as_deref()].into_iter().flatten().collect::<Vec<_>>().join(" — ");
+        if !verdict.is_empty() {
+            rest.push_str(&format!(" ({verdict})"));
+        }
+        let by = crate::text::one_line(&crate::model::label(&work.by, work.by_email.as_deref(), site.cfg.naming));
+        rest.push_str(&format!("  {by} · {}", crate::view::stamp(&work.at, zone)));
+        // The model is bold on every wrapped fragment — weight, not colour, carries it.
+        let parts = [
+            crate::markdown::Span {
+                text: crate::text::sanitize(&model),
+                role: crate::markdown::Role::Strong,
+                link: None,
+            },
+            crate::markdown::Span {
+                text: crate::text::sanitize(&rest),
+                role: crate::markdown::Role::Plain,
+                link: None,
+            },
+        ];
+        out.extend(crate::markdown::wrap_spans(&parts, w.max(2), crate::markdown::Overflow::Break).into_iter().map(
+            |parts| Line::from(parts.into_iter().map(|s| Span::styled(s.text, role_style(s.role))).collect::<Vec<_>>()),
+        ));
+    }
+    out
+}
+
+/// The narrowest text column a history line hangs at; a narrower pane wraps the whole line at its full width.
+const HUNG_MIN: usize = 12;
+
+/// One line of a history entry — `stamp` (or nothing, on a note's later lines) in a column `lead` wide, then the text
+/// wrapped under it. Wrapping the column together with the text sent every wrapped fragment back to the left edge,
+/// and a later note line whose first word outran the room broke at the column's last space into a blank line.
+fn hung(stamp: &str, lead: usize, text: &str, w: usize) -> Vec<Line<'static>> {
+    let head = format!("{stamp}{}", " ".repeat(lead.saturating_sub(crate::text::width(stamp))));
+    let room = w.saturating_sub(lead);
+    if room < HUNG_MIN {
+        return wrapped(&format!("{head}{text}"), w, Style::default());
+    }
+    let pad = " ".repeat(lead);
+    wrapped(text, room, Style::default())
+        .into_iter()
+        .enumerate()
+        .map(|(n, l)| {
+            let lead = Span::raw(if n == 0 { head.clone() } else { pad.clone() });
+            Line::from(std::iter::once(lead).chain(l.spans).collect::<Vec<_>>())
+        })
+        .collect()
+}
+
+/// 상세의 이력·작업 기록을 **그리기 전에** 채운다 — 커서가 선 줄의 저널을 옆 스레드에서 읽어 들고([`HistoryCache`]),
+/// 든 저널을 폭에 맞춰 펴 둔다([`HistoryLines`]). 읽기는 한 번에 하나다: 커서를 빨리 옮기면 도는 읽기가 끝난 뒤 그때
+/// 선 줄을 읽는다.
+///
+/// **다시 읽을 때는 지난 표식의 자리를 잰다** — 디렉터리의 표식이 새 저널 파일을 알아챈다. `App::follow` 가 노트의
+/// 저널을 재는 것과 같은 자다. 저널 디렉터리를 다시 훑는 것(`Repo::journal_marks`)은 무언가 움직였을 때뿐이다 —
+/// 프레임마다 훑으면 물레가 도는 동안 120ms 마다 디렉터리를 읽고 이름마다 자리를 푼다.
+fn fill_history(app: &mut App, rows: &[Row], w: usize) {
     app.history.poll();
     let Some(Row::Item(seat, e, _)) = app.current_of(rows) else { return };
     let Some(site) = app.site_of_seat(seat) else { return };
     let Some(i) = e.at().and_then(|at| site.issues.get(at)) else { return };
     let Some(repo) = site.repo.as_ref() else { return };
-    let root = crate::cmd::show::home(repo, &site.origin, &i.id).to_path_buf();
-    let repo = crate::cmd::show::at_home(repo, &root);
-    let id = i.id.clone();
-    let marks = repo.journal_marks();
-    if app.history.marks.get(&root) != Some(&marks) {
-        app.history.entries.retain(|(home, _), _| home != &root);
-        app.history.marks.insert(root.clone(), marks.clone());
+    let key = (crate::cmd::show::home(repo, &site.origin, &i.id).to_path_buf(), i.id.clone());
+    let cache = &app.history;
+    let held = cache.entries.get(&key);
+    let laid = held
+        .filter(|(read, _)| !cache.drawn.as_ref().is_some_and(|d| d.fits(&key, read, w, site, &app.zone)))
+        .map(|(read, journal)| HistoryLines {
+            key: key.clone(),
+            read: read.clone(),
+            w,
+            lang: site.lang,
+            naming: site.cfg.naming,
+            zone: app.zone.name().to_string(),
+            lines: history_lines(journal, site, &app.zone, w),
+        });
+    let moved = cache.marks.get(&key.0).is_none_or(|was| was.iter().any(|(p, s)| crate::store::stamp(p) != *s));
+    let fresh = held.is_some_and(|(read, _)| cache.marks.get(&key.0) == Some(read));
+    let repo = (moved || (!fresh && !cache.loading())).then(|| crate::cmd::show::at_home(repo, &key.0));
+    if let Some(laid) = laid {
+        app.history.drawn = Some(laid);
     }
-    let key = (root, id.clone());
-    if app.history.entries.contains_key(&key) || app.history.loading() {
+    let Some(repo) = repo else { return };
+    if moved {
+        let marks = repo.journal_marks();
+        // 그 체크아웃의 다른 줄은 버린다 — 다시 서면 다시 읽는다. 지금 줄의 것은 새 읽기가 닿을 때까지 그대로 선다.
+        app.history.entries.retain(|k, _| k.0 != key.0 || k.1 == key.1);
+        app.history.marks.insert(key.0.clone(), marks);
+    }
+    let marks = app.history.marks.get(&key.0).cloned().unwrap_or_default();
+    if app.history.loading() || app.history.entries.get(&key).is_some_and(|(read, _)| *read == marks) {
         return;
     }
+    let id = key.1.clone();
     let (tx, rx) = std::sync::mpsc::channel();
     match std::thread::Builder::new().name("tui-history".into()).spawn(move || {
         let _ = tx.send(repo.journal_of(&id));
@@ -4555,7 +4674,8 @@ fn fill_history(app: &mut App, rows: &[Row]) {
 
 /// 상세의 Wiki 토막(moai-xp7l.vyw) — 커서가 선 줄의 것 하나를 지어 든다([`Body`] 와 같은 까닭). 줄이 아니라 글을
 /// 든다: 폭이 바뀌어도 다시 지을 것이 없고, 자르기는 그리는 쪽이 한 번에 한다. 교훈(`lessons`)은 안 든다 — 그 줄의
-/// 위키 관련 절은 노트를 재료로 쓰지 않는다. CLI 상세와 `show --json` 의 `wiki.lessons` 가 낸다.
+/// 노트가 재료인데, 이 토막은 저널 없이 짓는다. 이력이 읽는 저널([`HistoryCache`])은 옆 스레드에서 늦게 오고, 이
+/// 토막의 정체([`WikiAbout::fits`])는 저널을 안 본다. CLI 상세와 `show --json` 의 `wiki.lessons` 가 낸다.
 pub(super) struct WikiAbout {
     /// 지은 재료 — 체크아웃, id, 제목(관련 절의 질의), 에픽(댄 페이지의 둘째 id). [`WikiAbout::fits`] 가 견준다.
     root: std::path::PathBuf,
@@ -6172,19 +6292,74 @@ pub(super) mod tests {
         assert_eq!(crate::text::width(&text), 100);
     }
 
+    /// **앞지른 읽기는 들되 낡은 것으로 든다**(리뷰 moai-ccow.9d4) — 버리면 쓰기가 잦은 저장소에서 그 줄이 이력 없이
+    /// 서고, 들인 표식을 지금 표식으로 적으면 다시 읽지 않는다.
     #[test]
-    fn an_outdated_history_read_never_replaces_newer_journal_marks() {
+    fn an_outdated_history_read_stands_until_a_fresh_one_replaces_it() {
         let mut cache = HistoryCache::default();
         let root = std::path::PathBuf::from("home");
         let key = (root.clone(), "argos-0001".to_string());
         let (tx, rx) = std::sync::mpsc::channel();
         cache.marks.insert(root.clone(), vec![]);
         cache.pending = Some(HistoryPending { key: key.clone(), marks: vec![], rx, handle: std::thread::spawn(|| {}) });
-        cache.marks.insert(root.clone(), vec![(root, None)]);
+        cache.marks.insert(root.clone(), vec![(root.clone(), None)]);
         tx.send(vec![]).unwrap();
         cache.poll();
         assert!(!cache.loading());
-        assert!(!cache.entries.contains_key(&key));
+        let (read, _) = &cache.entries[&key];
+        assert!(read.is_empty(), "the read went in under marks it was not read with");
+        assert_ne!(Some(read), cache.marks.get(&root), "an overtaken read passes for a fresh one");
+    }
+
+    /// **저널이 바뀌어도 상세의 이력은 안 비고, 굴린 자리도 안 잃는다**(리뷰 moai-ccow.9d4) — 비우던 판은 다른 세션이
+    /// 쓸 때마다 읽기 한 번 동안 이력과 작업 기록이 사라졌고, 그동안 `Scroll::fit` 이 이력까지 굴린 자리를 끌어올렸다.
+    #[test]
+    fn a_journal_write_keeps_the_history_on_screen_until_it_is_read_again() {
+        use crate::model::{JournalEntry, someone};
+        let mut a = every(issues());
+        let scratch = crate::scratch::Scratch::new("tui-history-stale");
+        let repo = crate::store::Repo::at(scratch.path().to_path_buf(), a.site.cfg.clone());
+        std::fs::create_dir_all(repo.journal_dir()).unwrap();
+        let path = repo.journal_dir().join("test.jsonl");
+        a.site.repo = Some(repo);
+        let rows = a.rows();
+        let Row::Item(_, e, _) = a.current_of(&rows).unwrap() else { panic!() };
+        let idx = e.at().unwrap();
+        let id = a.site.issues[idx].id.clone();
+        let by = someone("tester");
+        let line = |text: &str, ts: &str| {
+            format!("{}\n", serde_json::to_string(&JournalEntry::note(&id, text, ts, &by)).unwrap())
+        };
+        let mut bytes = line("첫 노트", "2026-10-28T10:00:00Z");
+        std::fs::write(&path, &bytes).unwrap();
+        wait_history(&mut a, &rows);
+        bytes.push_str(&line("둘째 노트", "2026-10-28T10:01:00Z"));
+        std::fs::write(&path, &bytes).unwrap();
+        // 다시 읽기를 띄우는 그 프레임 — 든 이력이 그대로 선다.
+        fill_history(&mut a, &rows, 120);
+        assert!(a.history.loading(), "the write did not start a fresh read");
+        let text: String =
+            about(&a, &a.site, idx, &e, 120).iter().flat_map(|l| &l.spans).map(|s| s.content.as_ref()).collect();
+        assert!(text.contains("첫 노트"), "the history blanked while it was read again — {text}");
+        wait_history(&mut a, &rows);
+        let text: String =
+            about(&a, &a.site, idx, &e, 120).iter().flat_map(|l| &l.spans).map(|s| s.content.as_ref()).collect();
+        assert!(text.contains("둘째 노트"), "{text}");
+    }
+
+    /// **노트의 둘째 줄과 감긴 조각은 글 칸에 선다** — 도장 칸까지 함께 감던 판은 감긴 조각이 왼쪽 끝으로 돌아갔고,
+    /// 첫 낱말이 칸보다 긴 둘째 줄은 들인 칸의 빈칸에서 끊겨 빈 줄이 섰다.
+    #[test]
+    fn history_notes_wrap_under_their_text_column() {
+        let lines = hung("", 14, &"x".repeat(30), 30);
+        let text: Vec<String> = lines.iter().map(|l| l.spans.iter().map(|s| s.content.as_ref()).collect()).collect();
+        assert_eq!(
+            text,
+            [format!("{}{}", " ".repeat(14), "x".repeat(16)), format!("{}{}", " ".repeat(14), "x".repeat(14))]
+        );
+        let lines = hung("10-28 10:38", 14, "note: 가나다 라마바 사아자", 30);
+        let text: Vec<String> = lines.iter().map(|l| l.spans.iter().map(|s| s.content.as_ref()).collect()).collect();
+        assert_eq!(text, ["10-28 10:38   note: 가나다".to_string(), format!("{}라마바 사아자", " ".repeat(14))]);
     }
 
     #[test]
@@ -6210,7 +6385,7 @@ pub(super) mod tests {
     fn wait_history(a: &mut App, rows: &[Row]) {
         let until = std::time::Instant::now() + std::time::Duration::from_secs(5);
         loop {
-            fill_history(a, rows);
+            fill_history(a, rows, 120);
             if !a.history.loading() {
                 return;
             }
@@ -6249,9 +6424,9 @@ pub(super) mod tests {
         std::fs::write(&path, &bytes).unwrap();
         wait_history(&mut a, &rows);
         let key = (scratch.path().to_path_buf(), id.clone());
-        let ptr = a.history.entries[&key].as_ptr();
+        let ptr = a.history.entries[&key].1.as_ptr();
         wait_history(&mut a, &rows);
-        assert_eq!(ptr, a.history.entries[&key].as_ptr());
+        assert_eq!(ptr, a.history.entries[&key].1.as_ptr());
         let text: String =
             about(&a, &a.site, idx, &e, 120).iter().flat_map(|l| &l.spans).map(|s| s.content.as_ref()).collect();
         assert!(
@@ -6285,7 +6460,7 @@ pub(super) mod tests {
         ));
         std::fs::write(&path, &bytes).unwrap();
         wait_history(&mut a, &rows);
-        assert_eq!(a.history.entries[&key].len(), 5);
+        assert_eq!(a.history.entries[&key].1.len(), 5);
         let lines = about(&a, &a.site, idx, &e, 120);
         let work_at = lines.iter().position(|l| l.spans.iter().any(|s| s.content == "작업 기록")).unwrap();
         let work: String = lines[work_at..].iter().flat_map(|l| &l.spans).map(|s| s.content.as_ref()).collect();
@@ -6604,6 +6779,32 @@ pub(super) mod tests {
 
         let line = body(&a, "argos-0100", 20);
         assert!(line.ends_with("제목/") && !line.contains('…'), "좁은 카드에서 제목이 잘렸다 — {line:?}");
+        // 감싼 줄도 오른쪽 한 칸은 비운다 — 옆 칸의 카드와 붙어 읽히지 않게.
+        let rows = a.rows();
+        let r = rows
+            .iter()
+            .find(|r| matches!(r, Row::Item(_, e, _) if e.at().is_some_and(|at| a.site.issues[at].id == "argos-0100")))
+            .unwrap();
+        for l in card(&a, r, true, 20) {
+            assert!(spans_width(&l.spans) < 20, "줄이 카드 폭을 넘었다 — 오른쪽 한 칸은 비운다 — {l:?}");
+        }
+    }
+
+    /// **자리가 세는 제목 줄 수는 그리는 줄 수와 같다** — [`card_title_lines`] 는 칠하지 않고 세고, 폭에 드는 제목은
+    /// 감지 않고 한 줄로 센다. 둘이 갈리면 카드가 겹치거나 빈 줄을 안는다.
+    #[test]
+    fn placement_counts_the_title_lines_the_card_draws() {
+        let mut a = board_app(2);
+        for title in
+            ["짧은 제목", "a b c d e f g h i j k l m n o p q r s t u v w x y z", &"가".repeat(60), &"x".repeat(60)]
+        {
+            a.site.issues[2].title = title.to_string();
+            let rows = a.rows();
+            let r = rows.iter().find(|r| matches!(r, Row::Item(_, e, _) if e.at() == Some(2))).unwrap();
+            for w in 0..=80 {
+                assert_eq!(card_title_lines(&a, r, w), card_body(&a, r, w).len(), "{title:?} at {w}");
+            }
+        }
     }
 
     /// **탐색기의 줄머리는 줄마다 두 칸이다**(moai-nb6w, 사용자 결정 2026-09-21). 한때 그 곁에
