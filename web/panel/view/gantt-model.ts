@@ -77,7 +77,7 @@ export function isoWeek(wall: number): number {
 export interface Placed {
   /** The planned bar, ends in wall ms (the end is the end of the last day). */
   plan: { from: number; to: number; origin: 'own' | 'members' } | null
-  /** The `◆`: the end of a milestone's deadline day, or of a row that wrote a deadline and no start. */
+  /** The `◆`: the end of a milestone's own deadline day. */
   due: number | null
   /** The actual band; `open` runs to now. No band when the start is unknown or nothing started. */
   actual: { from: number; to: number; open: boolean } | null
@@ -103,17 +103,14 @@ export function placeRow(g: GanttRow | undefined, row: Row | undefined, now: num
   const planned = g.planned
   const start = planned ? dayStart(planned.start) : null
   const end = planned ? dayStart(planned.end) : null
-  if (planned && start !== null) {
-    // Start only: one day. Both: through the end of the last day. An end before the start still draws the start's day.
-    const to = end !== null ? Math.max(end + DAY, start + DAY) : start + DAY
+  if (planned && start !== null && end !== null) {
+    const to = end + DAY
     out.plan = { from: start, to, origin: planned.from }
     add(start, to)
   }
-  // A deadline and no start is a mark alone; a milestone's own deadline is a mark whatever its plan is. A milestone
-  // that wrote no deadline has none: the end its members' days reach is the hatched bar's end, not a `◆` (an archived
-  // row carries no `due_on`, and its own plan's end is that deadline).
+  // Only a milestone's own deadline has a diamond; filled ends are never deadlines.
   const own = row && typeof (row.due_on ?? row.due) === 'string' ? dayStart(row.due_on ?? row.due) : null
-  const dueDay = g.kind === 'milestone' ? own ?? (planned?.from === 'own' ? end : null) : start === null ? end : null
+  const dueDay = g.kind === 'milestone' ? own ?? (planned?.from === 'own' && !planned.end_filled ? end : null) : null
   if (dueDay !== null) {
     out.due = dueDay + DAY
     add(dueDay, dueDay + DAY)
@@ -128,10 +125,7 @@ export function placeRow(g: GanttRow | undefined, row: Row | undefined, now: num
       add(from, stop)
     }
   }
-  // Late: from the end of the deadline day to now. report::gantt said whether (and by how many days), so this neither
-  // asks the clock again nor needs a planned bar: a row that wrote a deadline and no start (the usual one) is late
-  // from its `◆`. The zone the page draws in may still be on the deadline day; the hatch is then a sliver, as the TUI's
-  // one cell.
+  // Core judges lateness; the hatch starts after the inclusive deadline day.
   const lateFrom = planned?.from === 'own' && end !== null ? end + DAY : out.due
   if (g.overdue !== null && lateFrom !== null) {
     out.over = { from: lateFrom, to: Math.max(now, lateFrom) }
@@ -165,8 +159,8 @@ export type Shifted = { start?: string; due?: string } | { why: 'members' | 'non
 export function shiftPlan(planned: GanttRow['planned'], edge: Edge, days: number): Shifted {
   if (days === 0) return { why: 'still' }
   if (planned?.from === 'members') return { why: 'members' }
-  const start = planned ? dayStart(planned.start) : null
-  const due = planned ? dayStart(planned.end) : null
+  const start = planned && !planned.start_filled ? dayStart(planned.start) : null
+  const due = planned && !planned.end_filled ? dayStart(planned.end) : null
   if (start === null && due === null) return { why: 'none' }
   const day = (d: number | null) => (d === null ? undefined : dayText(d + days * DAY))
   const out = edge === 'body' ? { start: day(start), due: day(due) } : edge === 'start' ? { start: day(start ?? due) } : { due: day(due ?? start) }
@@ -179,7 +173,7 @@ export const dragDays = (zoom: Zoom, dx: number): number => Math.round(dx / PX_P
 /** The planned bar a move would draw, `[from, to)` in wall ms, or null when the move would not stand. */
 export function movedPlan(planned: GanttRow['planned'], change: { start?: string; due?: string }): [number, number] | null {
   const start = change.start !== undefined ? dayStart(change.start) : planned ? dayStart(planned.start) : null
-  const due = change.due !== undefined ? dayStart(change.due) : planned ? dayStart(planned.end) : null
+  const due = change.due !== undefined ? dayStart(change.due) : planned?.end_filled ? start : planned ? dayStart(planned.end) : null
   if (start !== null && due !== null) return start > due ? null : [start, due + DAY]
   if (start !== null) return [start, start + DAY]
   return due === null ? null : [due, due + DAY]

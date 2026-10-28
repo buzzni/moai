@@ -156,7 +156,7 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
    */
   const placeOf = (row: Row, now: number, zone: string | undefined): Placed => {
     const planned = moved.get(row.id)
-    return placeRow(ganttOf(row), planned ? { ...row, due_on: planned.end ?? undefined } : row, now, zone)
+    return placeRow(ganttOf(row), planned ? { ...row, due_on: planned.end_filled ? undefined : planned.end } : row, now, zone)
   }
 
   // ── frame ──
@@ -827,16 +827,17 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
         }
       } else {
         dragged = true
-        moved.set(row.id, { ...g.planned!, start: change.start ?? g.planned!.start, end: change.due ?? g.planned!.end, from: 'own' })
+        moved.set(row.id, { ...g.planned!, start: change.start ?? g.planned!.start, end: change.due ?? (g.planned!.end_filled ? change.start : undefined) ?? g.planned!.end, start_filled: change.start === undefined && g.planned!.start_filled, end_filled: change.due === undefined && g.planned!.end_filled, from: 'own' })
         const n = model?.lines.findIndex((line) => line.key === row.id) ?? -1
         if (built && n >= 0) built.placed[n] = placeOf(row, built.now, clock.zone())
         // The arrows into and out of the dropped bar are drawn from those days.
         paintArrows()
         // Invert the move rather than restoring the page's stale dates; the other edge stays as moai found it.
         // The tree plan is the same picture shiftPlan used; the separately read list may disagree about absent edges.
-        write(movePlan, row.id, { edge, days }, undoOf(row.id, { edge, days }, {
-          start: g.planned?.start ?? null,
-          due: g.planned?.end ?? null,
+        const writtenEdge = edge === 'body' ? (g.planned!.start_filled ? 'end' : g.planned!.end_filled ? 'start' : edge) : edge
+        write(movePlan, row.id, { edge: writtenEdge, days }, undoOf(row.id, { edge: writtenEdge, days }, {
+          start: g.planned?.start_filled ? null : g.planned?.start ?? null,
+          due: g.planned?.end_filled ? null : g.planned?.end ?? null,
         }))
       }
       resume()

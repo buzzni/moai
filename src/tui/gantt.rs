@@ -85,28 +85,24 @@ fn edge_of(part: moai_gantt::Part) -> Edge {
     }
 }
 
-/// 계획 날 둘(날 번호) → 막대의 `[시작, 끝)`(초). 시작만 적은 줄은 그 하루다 — 끝을 모르는 막대를 길게 그리면 없는
-/// 기한을 지어낸다. 읽은 줄([`fill_row`])과 끄는 막대([`preview`])가 이 하나로 잰다.
-fn plan_span(start: Option<i64>, end: Option<i64>) -> Option<(i64, i64)> {
-    match (start, end) {
-        (Some(s), Some(e)) => Some((s * DAY, (e + 1) * DAY)),
-        (Some(s), None) => Some((s * DAY, (s + 1) * DAY)),
-        _ => None,
-    }
+/// core 가 채운 계획 양끝을 위젯의 `[시작, 끝)`(초)로 놓는다.
+fn plan_span(p: &crate::report::gantt::Planned) -> Option<(i64, i64)> {
+    Some((parse_date(&p.start)? * DAY, (parse_date(&p.end)? + 1) * DAY))
 }
 
 /// 끄는 막대를 **놓으면 쓸 날로** 그린다(moai-i4hf.exq) — 셈은 쓰기와 같은 [`crate::model::Issue::shifted`] 다. 위젯의 끌기
 /// 셈(`drag_apply`)으로 그리던 판은 0 길이 막대(시작이 기한을 하루 넘는다)·시작만 든 줄·멤버에서 센 묶음에서 그린 날과 쓴
 /// 날이 갈렸다. 쓰기의 검사가 거절할 모양(시작이 기한 뒤)이면 옮기지 않은 채 둔다.
-fn preview(g: &mut GanttRow, i: &crate::model::Issue, (start, due): crate::model::DateChange) {
-    let start = start.unwrap_or_else(|| i.starts_on.clone());
-    let due = due.unwrap_or_else(|| i.due_on.clone());
-    let (s, e) = (start.as_deref().and_then(parse_date), due.as_deref().and_then(parse_date));
-    if s.zip(e).is_some_and(|(s, e)| s > e) {
+fn preview(g: &mut GanttRow, i: &crate::model::Issue, change: crate::model::DateChange, zone: &crate::tz::Zone) {
+    let mut next = i.clone();
+    next.set_dates(change.0, change.1);
+    if next.planned_start().zip(next.deadline()).is_some_and(|(s, e)| s > e) {
         return;
     }
-    g.planned = plan_span(s, e);
-    g.due = e.map(|e| (e + 1) * DAY);
+    if let Some(p) = crate::report::gantt::own_plan(&next, zone) {
+        g.planned = plan_span(&p);
+        g.due = (!p.end_filled).then(|| parse_date(&p.end).map(|d| (d + 1) * DAY)).flatten();
+    }
 }
 
 impl Site {
@@ -455,7 +451,7 @@ impl App {
             && let Some(i) = self.site.issues.get(at)
             && let Ok(change) = i.shifted(edge_of(*part), moai_gantt::drag_days(self.chart.axis.zoom, *from, *to))
         {
-            preview(&mut out[n], i, change);
+            preview(&mut out[n], i, change, &self.zone);
         }
         let mut links = Vec::new();
         for (n, r) in rows.iter().enumerate() {
@@ -552,13 +548,11 @@ fn fill_row(g: &mut GanttRow, row: &crate::report::gantt::Row, column: &str, zon
         _ => RowKind::Item,
     };
     g.tone = tone(column);
-    let day = |d: Option<&str>| d.and_then(parse_date);
     if let Some(p) = &row.planned {
-        let (start, end) = (day(Some(&p.start)), day(Some(&p.end)));
-        g.planned = plan_span(start, end);
+        g.planned = plan_span(p);
         // 기한 표식은 **제 기한**만 — 멤버에서 센 끝은 그 줄의 기한이 아니다.
-        if p.from == Origin::Own {
-            g.due = end.map(|e| (e + 1) * DAY);
+        if p.from == Origin::Own && !p.end_filled {
+            g.due = parse_date(&p.end).map(|e| (e + 1) * DAY);
         }
     }
     let local = |t: &str| parse_rfc3339(t).map(|s| zone.local(s));
@@ -1175,6 +1169,23 @@ mod tests {
         assert!(pane("argos-0003").contains('░'), "계획 막대가 안 섰다\n{screen}");
         assert!(pane("argos-0001").contains('▒'), "멤버에서 센 묶음 막대가 안 섰다\n{screen}");
         assert!(!pane("argos-0009").contains('░'), "날 없는 줄에 막대가 섰다\n{screen}");
+    }
+
+    #[test]
+    fn a_deadline_only_plan_draws_a_bar_and_keeps_its_start_absent_when_moved() {
+        let (dir, mut a) = on_disk("filled-plan");
+        edit_on_disk(&dir, "argos-0003", |i| i.starts_on = None);
+        a.reload();
+        a.hit("SPC g g");
+        let _ = draw::tests::render(&mut a, 140, 20);
+        let rows = a.rows();
+        let n = ids(&a).iter().position(|i| i == "argos-0003").unwrap();
+        let chart = a.chart_of(&rows, 0..0, &|_, _| ratatui::text::Line::default());
+        assert!(chart.rows[n].planned.is_some(), "기한만 있는 줄이 막대를 잃었다");
+        put_cursor(&mut a, "argos-0003");
+        a.hit(">");
+        assert_eq!(dates_on_disk(&dir, "argos-0003"), (None, Some("2026-10-25".into())));
+        assert!(a.notice.as_deref().unwrap().contains("--start none --due 2026-10-24"));
     }
 
     /// **`keys.toml` 의 `[browse] expand = "L"` 은 목록에서 살고, 간트에서는 `L` 이 간트의 키다**(moai-l80o, 사람 결정
