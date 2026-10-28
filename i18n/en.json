@@ -595,6 +595,7 @@
   "tui.about.spent": "spent",
   "tui.about.started": "started",
   "tui.about.ended": "ended",
+  "tui.about.history": "history",
   "tui.about.commits": "commits",
   "tui.about.notes": "matching notes",
   "tui.block.missing": "dangling",

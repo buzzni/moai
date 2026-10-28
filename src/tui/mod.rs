@@ -1383,6 +1383,7 @@ pub struct App {
     /// `draw::fill_wiki` 가 그리기 전에 채운다. 커서가 선 줄의 것 하나다.
     wiki_about: Option<draw::WikiAbout>,
     board_width: Option<usize>,
+    history: draw::HistoryCache,
     /// 상세의 Wiki 토막이 읽은 위키 — 체크아웃(`Repo::here`)마다 한 번, 처음 그 토막을 그릴 때 읽는다. 커서를 옮길
     /// 때마다 위키 전부를 다시 읽지 않는다. 연 뒤에 쓴 페이지는 위키 창(`SPC g w`)을 열면 — 창이 위키를 새로 읽으며 이것을
     /// 비운다 — 아니면 탐색기를 다시 열면 선다. 못 읽은 위키는 안 담는다(리뷰 moai-xp7l.mug).
@@ -2142,6 +2143,7 @@ impl App {
             note_hits: None,
             wiki_about: None,
             board_width: None,
+            history: draw::HistoryCache::default(),
             wiki_pages: Default::default(),
             user: None,
             identify: crate::model::actor,
@@ -2568,7 +2570,7 @@ impl App {
 
     /// 스레드에서 짓고 있는 다시 읽기가 있는가. 루프가 이 동안은 더 자주 깨어 받는다.
     pub fn loading(&self) -> bool {
-        self.pending.is_some() || self.layer_loading()
+        self.pending.is_some() || self.layer_loading() || self.history.loading()
     }
 
     /// 버린 다시 읽기 스레드가 아직 남았는가. 루프는 이 동안에도 빠른 걸음으로 깬다 —
@@ -2946,6 +2948,7 @@ impl App {
         self.follow_site();
         self.follow_commits();
         self.follow_latest();
+        self.history.poll();
         self.reopen_journals();
         if let Some((rx, _)) = &self.pending {
             match rx.try_recv() {

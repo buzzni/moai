@@ -3853,6 +3853,7 @@ fn detail(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) {
     fill_note_hits(app, rows, inner.width as usize);
     // **Wiki 토막도 그리기 전에 짓는다**(moai-xp7l.vyw) — 위키를 읽고 순위를 매기는 값이라 프레임마다 못 한다.
     fill_wiki(app, rows);
+    fill_history(app, rows);
 
     let lines = match app.current_of(rows) {
         // **빈 층은 할 일을 댄다**(moai-r8kl). 등록이 0 인 채 `.moai` 밖에서 띄운 자리다 — "없다"
@@ -4337,7 +4338,7 @@ fn about<'a>(app: &App, site: &Site, idx: usize, e: &Entry, w: usize) -> Vec<Lin
 
     // **노트에서 걸린 줄을 그린다**(moai-wcy8.3v9, 2026-09-30 사용자 결정) — 노트는 목록에도 이 패널의 다른
     // 칸에도 없어, 노트로 걸린 줄은 이것 없이는 왜 걸렸는지가 안 보인다. **검색이 노트를 볼 때만, 걸린 줄만**
-    // 그린다 — 이력 절을 통째로 두는 것은 따로다(moai-9pcu). `f` 의 `grep=` 으로 건 줄도 여기서는 같다
+    // 그린다 — 이력 절을 통째로 두는 것은 뒤에 둔다(moai-ccow.y3o). `f` 의 `grep=` 으로 건 줄도 여기서는 같다
     // (moai-lpzj.4ks) — 글로 찾는 거르개면 그린다([`App::grep_query`]). 보기를 걷는 검색([`App::searching`])은 `/` 뿐이다.
     //
     // **노트로만 걸린 줄이면 본문 앞에, 다른 칸으로도 걸린 줄이면 본문 뒤에 선다**(리뷰 moai-wcy8.rbj 7번). 이 절은
@@ -4399,12 +4400,100 @@ fn about<'a>(app: &App, site: &Site, idx: usize, e: &Entry, w: usize) -> Vec<Lin
     {
         out.extend(about_wiki_lines(site.lang, wiki));
     }
+    if let Some(repo) = site.repo.as_ref() {
+        let root = crate::cmd::show::home(repo, &site.origin, &i.id);
+        if let Some(journal) = app.history.entries.get(&(root.to_path_buf(), i.id.clone())) {
+            if !journal.is_empty() {
+                out.push(Line::from(""));
+                out.push(Line::from(Span::styled(say(site.lang, "tui.about.history"), bold())));
+                for entry in journal {
+                    let stamp = crate::view::short_stamp(&entry.ts, &app.zone);
+                    let text = crate::style::plain(&crate::view::history_entry(entry, &site.cfg, site.lang));
+                    let pad = " ".repeat(crate::text::width(&stamp) + 3);
+                    for (n, line) in text.split('\n').enumerate() {
+                        let lead = if n == 0 { format!("{stamp}   ") } else { pad.clone() };
+                        out.extend(wrapped(&format!("{lead}{line}"), w, Style::default()));
+                    }
+                }
+            }
+
+        }
+    }
     out
+}
+
+/// Journals are display data only. Cache each (home checkout, id), and invalidate
+/// that checkout's entries when journal files or their directory change.
+#[derive(Default)]
+pub(super) struct HistoryCache {
+    marks: std::collections::HashMap<std::path::PathBuf, Vec<(std::path::PathBuf, crate::store::Stamp)>>,
+    entries: std::collections::HashMap<(std::path::PathBuf, String), Vec<crate::model::JournalEntry>>,
+    pending: Option<HistoryPending>,
+}
+
+struct HistoryPending {
+    key: (std::path::PathBuf, String),
+    marks: Vec<(std::path::PathBuf, crate::store::Stamp)>,
+    rx: std::sync::mpsc::Receiver<Vec<crate::model::JournalEntry>>,
+    handle: std::thread::JoinHandle<()>,
+}
+
+impl HistoryCache {
+    pub(super) fn loading(&self) -> bool {
+        self.pending.is_some()
+    }
+
+    pub(super) fn poll(&mut self) {
+        let Some(pending) = &self.pending else { return };
+        let entries = match pending.rx.try_recv() {
+            Ok(entries) => entries,
+            Err(std::sync::mpsc::TryRecvError::Empty) => return,
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                let pending = self.pending.take().unwrap();
+                if let Err(payload) = pending.handle.join() {
+                    std::panic::resume_unwind(payload);
+                }
+                return;
+            }
+        };
+        let pending = self.pending.take().unwrap();
+        // Never let an older read replace a cache invalidated while it ran.
+        if self.marks.get(&pending.key.0) == Some(&pending.marks) {
+            self.entries.insert(pending.key, entries);
+        }
+    }
+}
+
+fn fill_history(app: &mut App, rows: &[Row]) {
+    app.history.poll();
+    let Some(Row::Item(seat, e, _)) = app.current_of(rows) else { return };
+    let Some(site) = app.site_of_seat(seat) else { return };
+    let Some(i) = e.at().and_then(|at| site.issues.get(at)) else { return };
+    let Some(repo) = site.repo.as_ref() else { return };
+    let root = crate::cmd::show::home(repo, &site.origin, &i.id).to_path_buf();
+    let repo = crate::cmd::show::at_home(repo, &root);
+    let id = i.id.clone();
+    let marks = repo.journal_marks();
+    if app.history.marks.get(&root) != Some(&marks) {
+        app.history.entries.retain(|(home, _), _| home != &root);
+        app.history.marks.insert(root.clone(), marks.clone());
+    }
+    let key = (root, id.clone());
+    if app.history.entries.contains_key(&key) || app.history.loading() {
+        return;
+    }
+    let (tx, rx) = std::sync::mpsc::channel();
+    match std::thread::Builder::new().name("tui-history".into()).spawn(move || {
+        let _ = tx.send(repo.journal_of(&id));
+    }) {
+        Ok(handle) => app.history.pending = Some(HistoryPending { key, marks, rx, handle }),
+        Err(error) => app.trouble = Some(error.to_string()),
+    }
 }
 
 /// 상세의 Wiki 토막(moai-xp7l.vyw) — 커서가 선 줄의 것 하나를 지어 든다([`Body`] 와 같은 까닭). 줄이 아니라 글을
 /// 든다: 폭이 바뀌어도 다시 지을 것이 없고, 자르기는 그리는 쪽이 한 번에 한다. 교훈(`lessons`)은 안 든다 — 그 줄의
-/// 저널을 읽어야 하는데 탐색기는 노트를 찾을 때만 읽는다. CLI 상세와 `show --json` 의 `wiki.lessons` 가 낸다.
+/// 위키 관련 절은 노트를 재료로 쓰지 않는다. CLI 상세와 `show --json` 의 `wiki.lessons` 가 낸다.
 pub(super) struct WikiAbout {
     /// 지은 재료 — 체크아웃, id, 제목(관련 절의 질의), 에픽(댄 페이지의 둘째 id). [`WikiAbout::fits`] 가 견준다.
     root: std::path::PathBuf,
@@ -6022,6 +6111,21 @@ pub(super) mod tests {
     }
 
     #[test]
+    fn an_outdated_history_read_never_replaces_newer_journal_marks() {
+        let mut cache = HistoryCache::default();
+        let root = std::path::PathBuf::from("home");
+        let key = (root.clone(), "argos-0001".to_string());
+        let (tx, rx) = std::sync::mpsc::channel();
+        cache.marks.insert(root.clone(), vec![]);
+        cache.pending = Some(HistoryPending { key: key.clone(), marks: vec![], rx, handle: std::thread::spawn(|| {}) });
+        cache.marks.insert(root.clone(), vec![(root, None)]);
+        tx.send(vec![]).unwrap();
+        cache.poll();
+        assert!(!cache.loading());
+        assert!(!cache.entries.contains_key(&key));
+    }
+
+    #[test]
     fn wrapped_titles_keep_animation_and_search_on_later_lines() {
         let mut a = board_app(1);
         let at = a.site.issues.iter().position(|i| i.id == "argos-0080").unwrap();
@@ -6039,6 +6143,64 @@ pub(super) mod tests {
                 || s.style.add_modifier.contains(Modifier::UNDERLINED)),
             "second title line has no search highlight"
         );
+    }
+
+    fn wait_history(a: &mut App, rows: &[Row]) {
+        let until = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            fill_history(a, rows);
+            if !a.history.loading() {
+                return;
+            }
+            assert!(std::time::Instant::now() < until, "journal read timed out");
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+    }
+
+    #[test]
+    fn detail_history_refreshes_notes_and_reuses_unchanged_entries() {
+        use crate::model::{JournalEntry, someone};
+        let mut a = every(issues());
+        let scratch = crate::scratch::Scratch::new("tui-history");
+        let repo = crate::store::Repo::at(scratch.path().to_path_buf(), a.site.cfg.clone());
+        std::fs::create_dir_all(repo.journal_dir()).unwrap();
+        let path = repo.journal_dir().join("test.jsonl");
+        a.site.repo = Some(repo);
+        let rows = a.rows();
+        let Row::Item(_, e, _) = a.current_of(&rows).unwrap() else { panic!() };
+        let idx = e.at().unwrap();
+        let id = a.site.issues[idx].id.clone();
+        let by = someone("tester");
+        let entries = [
+            JournalEntry::create(&id, "title", "2026-10-28T10:00:00Z", &by),
+            JournalEntry::status(
+                &id,
+                &Status::new("todo"),
+                &Status::new("in_progress"),
+                Some("메모".into()),
+                "2026-10-28T10:01:00Z",
+                &by,
+            ),
+            JournalEntry::note(&id, "첫 줄\n둘째 줄 마지막", "2026-10-28T10:02:00Z", &by),
+        ];
+        let bytes: String = entries.iter().map(|e| format!("{}\n", serde_json::to_string(e).unwrap())).collect();
+        std::fs::write(&path, &bytes).unwrap();
+        wait_history(&mut a, &rows);
+        let key = (scratch.path().to_path_buf(), id.clone());
+        let ptr = a.history.entries[&key].as_ptr();
+        wait_history(&mut a, &rows);
+        assert_eq!(ptr, a.history.entries[&key].as_ptr());
+        let text: String =
+            about(&a, &a.site, idx, &e, 120).iter().flat_map(|l| &l.spans).map(|s| s.content.as_ref()).collect();
+        assert!(
+            text.contains("이력")
+                && text.contains("todo → in_progress")
+                && text.contains("메모")
+                && text.contains("둘째 줄 마지막"),
+            "{text}"
+        );
+        assert!(!text.contains("작업 기록"));
+
     }
 
     /// **보드는 칸 머리줄·레인 머리줄·카드를 세우고, 고른 카드는 `>` 와 반전이다**(moai-9nfw, 사용자 결정) — 반전은
