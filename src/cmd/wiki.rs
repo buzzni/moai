@@ -372,9 +372,8 @@ fn dir_abs(here: &std::path::Path, dir: &str, trouble: Option<&DirTrouble>) -> O
     }
     // **구분자는 `/` 로 통일한다** — Windows 의 `C:\...\docs` 를 그대로 내면 `--json` 의 계약(`.../docs` 로 끝난다)이
     // 플랫폼마다 달라지고, 스킬이 그 글을 다시 이어 붙일 때도 섞인다. Windows 도 `C:/...` 를 받아 준다.
-    crate::path::lexical(&here.join(dir))
-        .to_str()
-        .map(|s| if cfg!(windows) { s.replace('\\', "/") } else { s.to_string() })
+    // 바꾸는 자는 [`crate::path::slashed`] 하나다 — `\\?\` 접두어도 함께 걷는다(`//?/C:/…` 는 아무 데도 없는 자리다).
+    crate::path::lexical(&here.join(dir)).to_str().map(|s| crate::path::slashed(s, cfg!(windows)))
 }
 
 /// `moai wiki show <slug> --json` 의 한 줄 — 목록의 페이지에 원문 `body` 와, 역링크를 덜 셌을 때 `linked_from_partial`

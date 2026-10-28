@@ -879,7 +879,7 @@
   "skill.hook_unrunnable": "— 없거나 실행할 수 없다. 규칙 다섯이 안 선다",
   "skill.hook_is_another_moai": "    지금 부른 moai({exe}) 는 훅이 부르는 것과 다르다 — 여기서 심으면 훅이 그것을 부르게 바뀐다",
   "skill.market_tracked": "{path} 가 커밋돼 있다. 이제는 기계마다의 파일이다(이름에 이 체크아웃의 경로가 든다) - 심으면 덮여 diff 가 선다. 한 번만 추적을 푼다: git rm --cached -- {path}",
-  "skill.hooks_path_missing": "훅 줄이 PATH 의 moai 를 부르는데 PATH 에 없다 - 규칙이 꺼져 있다 (심으면 {exe} 를 적는다)",
+  "skill.hooks_path_missing": "훅 줄이 PATH 의 moai 를 부르는데 PATH 에 없다 - 규칙이 꺼져 있다 (지금 부른 moai 는 {exe})",
   "skill.hooks_path_other": "훅 줄이 PATH 의 moai 를 부르는데 그것은 {found} 다 - {exe} 가 아니다",
   "skill.claude_on_path": "PATH 에 있다",
   "skill.claude_off_path": "PATH 에 없다 — 심을 수도 걷을 수도 없다",

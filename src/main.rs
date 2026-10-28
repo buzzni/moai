@@ -188,11 +188,22 @@ fn main() -> ExitCode {
             // **`print` 가 맨 뒤라는 것과 넷이 stderr 에만 쓴다는 것을 시험이 못박는다** —
             // [`tests::the_notices_never_reach_stdout_and_print_stands_last`]. 둘 중 하나라도
             // 무너지면 훅의 판정 앞에 남의 줄이 서고, 그러면 `claude` 가 판정째 버린다.
-            carried();
-            unjournaled();
-            noted();
-            unread_journals();
-            redirected(!quiet);
+            let notices = || {
+                carried();
+                unjournaled();
+                noted();
+                unread_journals();
+                redirected(!quiet);
+            };
+            // **Antigravity 의 훅은 넷이 패닉해도 0 이다**(moai-r2nn.kep) — `cmd::run` 만 싸던 판은 여기서 난 패닉이 101 로
+            // agy 에 닿았다. 아직 stdout 에 아무것도 안 썼으니 판정 없이 지나간다.
+            if survives {
+                if survived(notices).is_none() {
+                    return ExitCode::SUCCESS;
+                }
+            } else {
+                notices();
+            }
             print(&lines);
             match cmd::chosen_exit() {
                 0 if cmd::had_partial() => ExitCode::FAILURE,

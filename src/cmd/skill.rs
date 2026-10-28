@@ -513,9 +513,10 @@ fn plant_trees(
 
 /// 커밋돼 있는 `marketplace.json` 의 자리(저장소 뿌리부터, `/` 철자) - git 이 추적하지 않거나 git 이 아니면 `None`.
 fn tracked_market(root: &Path, dir: &Path) -> Option<String> {
-    let at = dir.join(".claude-plugin/marketplace.json");
+    let at = dir.join(".claude-plugin").join(skill::MARKET_FILE);
     let rel = crate::path::slashed(&at.strip_prefix(root).ok()?.display().to_string(), cfg!(windows));
-    let out = crate::git::command().args(["ls-files", "--error-unmatch", "--", &rel]).current_dir(root).output().ok()?;
+    let out =
+        crate::git::command().args(["ls-files", "--error-unmatch", "--", &rel]).current_dir(root).output().ok()?;
     out.status.success().then_some(rel)
 }
 
@@ -827,13 +828,17 @@ pub fn status(ctx: &Ctx) -> R<Vec<String>> {
         ON_PATH.iter().filter(|(a, _)| *a != Agent::Claude).map(|(_, bin)| (*bin, which(bin).is_some())).collect();
     // 두 에이전트의 훅 파일(moai-u5wr.kov) — Claude 의 훅은 위의 플러그인 줄들이 댄다.
     let hook_files = HookFile::all(&root, &exe);
+    // 파일마다 한 번 읽는다 — 상태와, 그 파일의 줄이 부르는 실행 파일([`HookFile::seen_calling`]).
+    let hook_seen: Vec<(HookState, Option<String>)> = hook_files.iter().map(|h| h.seen_calling(&root)).collect();
     // 이름으로 부르는 줄이 PATH 의 어떤 moai 를 부르는가(moai-r2nn.yxz) — 현재인 파일만 본다. 없거나 남의 파일이면 그 줄이 먼저 말한다.
-    let by_name: Vec<ByName> = hook_files
+    // **디스크의 줄이 부르는 것으로 가른다** — `seen` 은 다른 moai 로 심은 파일도 `Current` 로 읽으니, 지금 부른 `exe` 로
+    // 가르면 커밋된 `moai` 줄을 워크트리의 빌드로 볼 때 PATH 에 moai 가 없어도 말이 없었다.
+    let by_name: Vec<ByName> = hook_seen
         .iter()
-        .map(|h| match h.seen(&root) {
-            HookState::Current => ByName::of(&exe, h.reads_by_name(), on_path.as_deref(), |a, b| {
-                crate::path::real(a) == crate::path::real(b)
-            }),
+        .map(|seen| match seen {
+            (HookState::Current, Some(line)) => {
+                ByName::of(line, &exe, on_path.as_deref(), |a, b| crate::path::real(a) == crate::path::real(b))
+            }
             _ => ByName::Unused,
         })
         .collect();
@@ -876,12 +881,12 @@ pub fn status(ctx: &Ctx) -> R<Vec<String>> {
             "agents": shared.json(&others),
             "hooks": hook_files
                 .iter()
-                .zip(&by_name)
-                .map(|(h, named)| {
+                .zip(hook_seen.iter().zip(&by_name))
+                .map(|(h, ((state, _), named))| {
                     let mut v = serde_json::json!({
                         "agent": h.agent.as_str(),
                         "path": h.path.display().to_string(),
-                        "state": h.seen(&root).as_str(),
+                        "state": state.as_str(),
                     });
                     // 줄이 이름으로 PATH 의 moai 를 부를 때만 선다 — 그 밖에서는 키가 없다.
                     if let Some(found) = named.json() {
@@ -992,8 +997,8 @@ pub fn status(ctx: &Ctx) -> R<Vec<String>> {
     // **남은 디렉터리는 이름과 까닭을 댄다**(moai-9s9s.v0y) — `install` 이 사람의 것이 든 디렉터리를 남기면(`Foreign`) 그
     // 안의 `SKILL.md` 가 걷힌 명령을 계속 가르치는데, 위 줄은 "지금 판" 이라 아무 화면도 그것을 안 댔다.
     out.extend(shared.left.iter().map(|l| l.status_line(lang)));
-    for (h, named) in hook_files.iter().zip(&by_name) {
-        let (ok, said) = h.row(&root, lang);
+    for (h, ((state, _), named)) in hook_files.iter().zip(hook_seen.iter().zip(&by_name)) {
+        let (ok, said) = h.row(*state, &root, lang);
         let (ok, said) = match named {
             ByName::Missing => (false, fill(say(lang, "skill.hooks_path_missing"), &[("exe", &exe)])),
             ByName::Other(found) => (
@@ -1094,11 +1099,11 @@ struct HookFile {
 /// 훅 줄이 PATH 의 `moai` 를 이름으로 부르는데 그 이름이 가리키는 것이 어떤가(moai-r2nn.yxz).
 #[derive(Debug, PartialEq)]
 enum ByName {
-    /// 이름으로 안 부른다 — 이 줄은 `exe` 를 그대로 적었다(또는 이 OS 에서 안 읽는 줄이다).
+    /// 이름으로 안 부른다 — 이 줄은 실행 파일의 자리를 적었다.
     Unused,
-    /// PATH 의 `moai` 가 `install` 이 적을 그 파일이다.
+    /// PATH 의 `moai` 가 지금 부른 그 파일이다.
     Same,
-    /// PATH 에 `moai` 가 없다 — cmd 가 `is not recognized` 를 내고 `|| exit 0` 이 삼켜 규칙이 말없이 꺼진다.
+    /// PATH 에 `moai` 가 없다 — 셸이 `not found`·`is not recognized` 를 내고 `|| exit 0` 이 삼켜 규칙이 말없이 꺼진다.
     Missing,
     /// PATH 의 `moai` 가 다른 파일이다.
     Other(PathBuf),
@@ -1117,16 +1122,19 @@ impl ByName {
         }
     }
 
-    /// `exe` 는 `install` 이 적을 철자([`skill::exe_name`])다. `skill::portable_exe` 가 이름으로 물러서는 철자
-    /// (빈칸·`%`·`&` …)인데 `exe` 자신은 `moai` 가 아니면, 따옴표 없는 줄(agy 의 줄)은
-    /// PATH 의 `moai` 를 부른다. **같은 파일인지는 [`status`] 가 `exe` 와 `runs` 를 견주는 자**(`crate::path::real`)다.
-    /// `reads_by_name` 은 이 에이전트의 줄이 exe 를 이름으로 읽는가 — agy 만이다.
-    fn of(exe: &str, reads_by_name: bool, on_path: Option<&Path>, same_file: impl Fn(&Path, &Path) -> bool) -> ByName {
-        if !reads_by_name || exe == "moai" || skill::portable_exe(exe) != "moai" {
+    /// `line` 은 **디스크의 훅 파일이 부르는 실행 파일**([`skill::planted_exe`])이다 — 그것이 `moai` 면 그 줄은 PATH 의
+    /// `moai` 를 부른다. 두 길로 그렇게 된다: agy 의 따옴표 없는 줄이 빈칸·`%`·`&` … 든 자리를 이름으로 물린 것
+    /// (`skill::portable_exe`)과, PATH 의 moai 가 제 바이너리인 기계에서 심어 커밋한 줄(이 저장소의 것이 그렇다).
+    /// **지금 부른 moai(`exe`)로 가르지 않는다** — [`HookFile::seen`] 은 다른 moai 로 심은 파일도 `Current` 로 읽어, 그
+    /// 판에 `exe` 로 가르면 디스크에 없는 줄을 잰다. `exe` 는 PATH 의 것과 견줄 쪽일 뿐이다 — 그것이 이름(`moai`)이면
+    /// [`skill::exe_name`] 이 PATH 의 것을 이 파일로 읽은 판이라 같다고 본다. 같은 파일인지는 `same_file` 이 가른다.
+    fn of(line: &str, exe: &str, on_path: Option<&Path>, same_file: impl Fn(&Path, &Path) -> bool) -> ByName {
+        if line != "moai" {
             return ByName::Unused;
         }
         match on_path {
             None => ByName::Missing,
+            Some(_) if exe == "moai" => ByName::Same,
             Some(p) if same_file(p, Path::new(exe)) => ByName::Same,
             Some(p) => ByName::Other(p.to_path_buf()),
         }
@@ -1211,14 +1219,21 @@ impl HookFile {
     /// 바뀌었다 — 워크트리를 걷는 날 그 줄이 `|| exit 0` 으로 말없이 꺼지고, Codex 는 `/hooks` 에서 다시 믿어 달라고 한다.
     /// `install` 은 이것을 안 쓴다 — 심는 것은 늘 지금 부른 moai 다(Claude 의 `install` 과 같다).
     fn seen(&self, root: &Path) -> HookState {
-        match self.judged(root) {
-            (HookState::Stale, Some(text))
-                if skill::planted_exe(&text).is_some_and(|exe| skill::same_hooks(&text, &self.written_for(&exe))) =>
-            {
+        self.seen_calling(root).0
+    }
+
+    /// [`HookFile::seen`] 와, 디스크의 그 파일이 부르는 실행 파일([`skill::planted_exe`]) — moai 의 파일일 때만 선다.
+    /// `status` 가 파일을 한 번만 읽고 [`ByName`] 을 그 줄로 가르는 데 쓴다.
+    fn seen_calling(&self, root: &Path) -> (HookState, Option<String>) {
+        let (state, text) = self.judged(root);
+        let calls = text.as_deref().and_then(skill::planted_exe);
+        let state = match (state, text.as_deref(), calls.as_deref()) {
+            (HookState::Stale, Some(text), Some(exe)) if skill::same_hooks(text, &self.written_for(exe)) => {
                 HookState::Current
             }
-            (state, _) => state,
-        }
+            (state, ..) => state,
+        };
+        (state, calls)
     }
 
     /// 이 에이전트의 훅 파일을 `exe` 로 지은 글.
@@ -1255,22 +1270,16 @@ impl HookFile {
         std::iter::once(head).chain(trust).collect()
     }
 
-    /// `status` 의 한 줄 — 상태는 [`HookFile::seen`] 이 댄다.
-    fn row(&self, root: &Path, lang: crate::i18n::Lang) -> (bool, String) {
+    /// `status` 의 한 줄 — `state` 는 [`HookFile::seen`] 이 댄 것이다(부르는 쪽이 파일을 한 번만 읽게 받는다).
+    fn row(&self, state: HookState, root: &Path, lang: crate::i18n::Lang) -> (bool, String) {
         let (agent, path) = (self.agent.as_str(), self.shown(root));
         let args = [("agent", agent), ("path", path.as_str())];
-        match self.seen(root) {
+        match state {
             HookState::Current => (true, fill(say(lang, "skill.hooks_row_current"), &args)),
             HookState::Stale => (false, fill(say(lang, "skill.hooks_row_stale"), &args)),
             HookState::Missing => (false, fill(say(lang, "skill.hooks_row_missing"), &args)),
             HookState::Foreign => (false, fill(say(lang, "skill.hooks_row_foreign"), &args)),
         }
-    }
-
-    /// 이 에이전트의 훅 줄이 실행 파일을 **이름으로** 읽는 줄인가([`ByName`]) - agy 만 그렇다(따옴표 없는 한 줄). Codex 의
-    /// `commandWindows` 는 exe 를 따옴표로 싸 물러서지 않는다(moai-r2nn.k5a).
-    fn reads_by_name(&self) -> bool {
-        matches!(self.agent, Agent::Antigravity)
     }
 
     /// `status` 의 이름 칸 — 실행 파일 이름으로 댄다(그 아래 PATH 줄과 같은 낱말).
@@ -2906,7 +2915,7 @@ mod tests {
 
         // 낡았다는 줄은 다시 심는 명령을 댄다.
         for h in [&codex, &agy] {
-            let (ok, said) = h.row(&root, crate::i18n::Lang::En);
+            let (ok, said) = h.row(h.seen(&root), &root, crate::i18n::Lang::En);
             assert!(!ok && said.contains("moai skill install --agent"), "{}: {said}", h.label());
         }
         // 새 글은 current.
@@ -2916,24 +2925,40 @@ mod tests {
     }
 
     /// **이름으로 부르는 훅 줄이 PATH 의 moai 로 물러섰을 때 `status` 가 세 판을 가른다**(moai-r2nn.yxz) — 없다·다른 파일이다·
-    /// 같은 파일이다. 따옴표 없는 줄이라 빈칸이 든 exe 는 `moai` 로 적힌다([`skill::portable_exe`]). 시험은 `windows` 와
-    /// PATH 를 받는 몸통으로 리눅스에서도 재고, `which` 대신 닫힘을 건넨다.
+    /// 같은 파일이다. 가르는 것은 **디스크의 줄이 부르는 실행 파일**이다 — 지금 부른 moai 가 아니다. 시험은 `which` 대신
+    /// 닫힘을 건넨다.
     #[test]
     fn a_hook_line_that_fell_back_to_path_moai_is_told() {
-        let spaced = "C:/Program Files/moai/moai.exe";
+        let built = "/work/target/release/moai";
         let same = |a: &Path, b: &Path| a == b;
         let there = Path::new("/bin/moai");
-        // 빈칸이 든 exe: PATH 에 없다 / 다른 파일 / 같은 파일.
-        assert_eq!(ByName::of(spaced, true, None, same), ByName::Missing);
-        assert_eq!(ByName::of(spaced, true, Some(there), same), ByName::Other(there.to_path_buf()));
-        assert_eq!(ByName::of(spaced, true, Some(Path::new(spaced)), same), ByName::Same);
-        // 이름으로 안 부르는 때: 줄을 이름으로 안 읽는 에이전트(Codex), 잘 적히는 exe, 이미 `moai` 인 exe.
-        assert_eq!(ByName::of(spaced, false, None, same), ByName::Unused);
-        assert_eq!(ByName::of("/usr/local/bin/moai", true, None, same), ByName::Unused);
-        assert_eq!(ByName::of("moai", true, None, same), ByName::Unused);
-        // agy 만 이름으로 읽는다 - Codex 의 `commandWindows` 는 exe 를 따옴표로 싼다(moai-r2nn.k5a).
-        let [codex, agy] = <[HookFile; 2]>::try_from(HookFile::all(Path::new("/r"), spaced)).ok().unwrap();
-        assert!(!codex.reads_by_name() && agy.reads_by_name());
+        // 줄이 `moai` 를 부른다: PATH 에 없다 / 다른 파일 / 지금 부른 그 파일.
+        assert_eq!(ByName::of("moai", built, None, same), ByName::Missing);
+        assert_eq!(ByName::of("moai", built, Some(there), same), ByName::Other(there.to_path_buf()));
+        assert_eq!(ByName::of("moai", built, Some(Path::new(built)), same), ByName::Same);
+        // 지금 부른 것이 이름이면 `exe_name` 이 PATH 의 것을 이 파일로 읽은 판이다.
+        assert_eq!(ByName::of("moai", "moai", Some(there), same), ByName::Same);
+        // 줄이 자리를 적었으면 PATH 를 안 탄다.
+        assert_eq!(ByName::of(built, built, None, same), ByName::Unused);
+
+        // **다른 moai 로 심은 파일도 그 줄로 가른다** — `moai` 로 심어 커밋한 파일을 워크트리의 빌드(`built`)로 보면 `seen` 은
+        // `Current` 다. 지금 부른 철자로 가르던 판은 그 줄이 PATH 의 moai 를 부르는데도 말이 없었다.
+        let s = crate::scratch::Scratch::new("skill-by-name");
+        let root = s.path().to_path_buf();
+        for h in HookFile::all(&root, "moai") {
+            std::fs::create_dir_all(h.path.parent().unwrap()).unwrap();
+            std::fs::write(&h.path, &h.want).unwrap();
+        }
+        for h in HookFile::all(&root, built) {
+            assert_eq!(h.seen_calling(&root), (HookState::Current, Some("moai".to_string())), "{}", h.label());
+        }
+        // agy 의 따옴표 없는 줄은 빈칸 든 자리를 `moai` 로 적는다(`skill::portable_exe`) — 그 줄도 이름으로 부른다.
+        let spaced = "C:/Program Files/moai/moai.exe";
+        let [codex, agy] = <[HookFile; 2]>::try_from(HookFile::all(&root, spaced)).ok().unwrap();
+        std::fs::write(&agy.path, &agy.want).unwrap();
+        assert_eq!(agy.seen_calling(&root).1.as_deref(), Some("moai"));
+        std::fs::write(&codex.path, &codex.want).unwrap();
+        assert_eq!(codex.seen_calling(&root).1.as_deref(), Some(spaced), "Codex 의 줄은 자리를 싸서 적는다");
         // `--json` 의 꼴: 안 부르면 키가 없다.
         assert_eq!(ByName::Unused.json(), None);
         assert_eq!(ByName::Missing.json().unwrap()["found"], false);

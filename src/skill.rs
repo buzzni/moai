@@ -839,7 +839,7 @@ fn portable_line(exe: &str, event: &str, dialect_word: &str) -> String {
 /// (`C:/Program Files/…`)은 낱말을 가르고, `% ! ^ & | < > ( ) , ; =` 는 cmd 가, `$ \` ' * ? ~ #` 는 sh 가 읽는다.
 /// 맨 앞 `-` 도 안 받는다. 못 지나면 PATH 의 `moai` 이름으로 물러선다 — [`exe_name`] 이 PATH 의 moai 가 이 파일이면
 /// 어차피 `moai` 로 적으니, 물러서는 것은 PATH 에 없는 낯선 자리뿐이다.
-pub(crate) fn portable_exe(exe: &str) -> &str {
+fn portable_exe(exe: &str) -> &str {
     let plain = |c: char| c.is_alphanumeric() || matches!(c, '/' | '.' | '_' | ':' | '-');
     if !exe.is_empty() && !exe.starts_with('-') && exe.chars().all(plain) {
         exe
@@ -1003,7 +1003,7 @@ where
 {
     let mut files: Vec<(PathBuf, String)> =
         skill_files(skills).map(|(p, b)| (PathBuf::from(format!("skills/{p}")), b)).collect();
-    let market = (PathBuf::from(".claude-plugin/marketplace.json"), marketplace_json(market));
+    let market = (PathBuf::from(format!(".claude-plugin/{MARKET_FILE}")), marketplace_json(market));
     // **marketplace.json 은 기계마다의 파일이라 커밋하지 않는다**(moai-r2nn.bb6) - 이름에 체크아웃 경로의 해시가 섞여([`market`])
     // 리눅스와 Windows 가 번갈아 덮고, 커밋된 트리에 헛 diff 가 선다. 같은 디렉터리의 `.gitignore` 가 그것을 걸러 낸다.
     files.push((PathBuf::from(".claude-plugin/.gitignore"), format!("{MARKET_FILE}\n")));
@@ -1075,8 +1075,8 @@ fn plugin_json(exe: &str, version: &str) -> String {
     pretty(&manifest)
 }
 
-/// 마켓플레이스 파일의 이름 - 같은 디렉터리의 `.gitignore` 가 가리킨다.
-const MARKET_FILE: &str = "marketplace.json";
+/// 마켓플레이스 파일의 이름 - 같은 디렉터리의 `.gitignore` 가 가리키고, `skill install` 이 커밋돼 있는지 묻는다.
+pub(crate) const MARKET_FILE: &str = "marketplace.json";
 
 fn marketplace_json(name: &str) -> String {
     pretty(&serde_json::json!({
@@ -2841,7 +2841,8 @@ mod tests {
         assert_eq!(run(&shown, "0"), (Some(0), r#"{"verdict":"hook stop"}"#.to_string()));
         assert_eq!(run(&shown, "1"), (Some(0), r#"{"verdict":"hook stop"}"#.to_string()));
         let notice = |out: &str| {
-            let last: serde_json::Value = serde_json::from_str(out.lines().last().unwrap()).expect("알림이 JSON 이 아니다");
+            let last: serde_json::Value =
+                serde_json::from_str(out.lines().last().unwrap()).expect("알림이 JSON 이 아니다");
             last["systemMessage"].as_str().unwrap().contains("stop hook could not run")
         };
         let (code, out) = run(&shown, "101");
@@ -3527,9 +3528,10 @@ mod tests {
     /// SKILL.md 가 "읽기 전용" 이라 가르쳤다(`moai-ka9p`). 그 복사를 읽은 세션은
     /// 바이너리가 아니라 옛 글을 배운다.
     ///
-    /// **훅의 실행 파일과 마켓플레이스 이름은 커밋된 파일에서 읽는다.** 둘은
-    /// 심은 체크아웃의 자리에서 나오는 값이라, 이 시험을 부른 자리(워크트리)로
-    /// 다시 셈하면 글이 같아도 늘 어긋난다. 여기서 보는 것은 글과 판뿐이다.
+    /// **훅의 실행 파일은 커밋된 파일에서 읽는다.** 심은 체크아웃의 자리에서
+    /// 나오는 값이라, 이 시험을 부른 자리(워크트리)로 다시 셈하면 글이 같아도 늘
+    /// 어긋난다. 마켓플레이스 이름은 커밋하지 않는다(moai-r2nn.bb6) — 여기서 보는
+    /// 것은 글과 판뿐이다.
     ///
     /// 다시 쓰는 길: `MOAI_BLESS=1 cargo test checked_in` — 같은
     /// `tree_named` 로 트리 전부를 적힌 자리 그대로 다시 쓴다. `skill install` 은
@@ -3544,12 +3546,11 @@ mod tests {
         let dir = root.join(DIR);
         let read = |p: &str| std::fs::read_to_string(dir.join(p)).unwrap_or_else(|e| panic!("{p}: {e}"));
         let bless = blessing(std::env::var("MOAI_BLESS").ok().as_deref());
-        // **깨진 파일도 bless 로 되살린다.** 두 값은 JSON 을 읽어야 나오는데, 병합
+        // **깨진 파일도 bless 로 되살린다.** 실행 파일은 JSON 을 읽어야 나오는데, 병합
         // 충돌 표시 한 줄로 그 읽기가 실패하면 다시 쓰기에 닿기 전에 멈춰 도구
         // 밖(`git checkout`)만 남는다. 그래서 bless 일 때만 글자로 찾는다. **아래
         // 비교는 틀린 값을 못 잡는다** — bless 는 찾은 값으로 먼저 쓰고 견주므로
-        // 제 자신과 같다. 그래서 이름은 맨 윗단 들여쓰기(두 칸)에 매어 찾는다 —
-        // 안 매면 맨 윗단 `name` 이 빠진 글에서 `owner.name` 의 `moai` 를 집는다.
+        // 제 자신과 같다.
         let manifest = read(".claude-plugin/plugin.json");
         let exe = hook_exe(&manifest)
             .or_else(|| loose(&manifest, "command -v -- \\\"").filter(|_| bless))
@@ -3565,7 +3566,9 @@ mod tests {
             (PathBuf::from(CODEX_HOOKS), codex_hooks(&exe)),
             (PathBuf::from(AGENTS_HOOKS), antigravity_hooks(&exe)),
         ];
-        for (at, want) in [(DIR, without_market(tree_named(name, &exe, &all))), (AGENTS_DIR, agents_tree(&all)), ("", hooks)] {
+        for (at, want) in
+            [(DIR, without_market(tree_named(name, &exe, &all))), (AGENTS_DIR, agents_tree(&all)), ("", hooks)]
+        {
             let stale = checked_in(&root.join(at), &want, bless);
             assert!(
                 stale.is_empty(),
@@ -3603,10 +3606,6 @@ mod tests {
         matches!(value.map(|v| v.trim().to_ascii_lowercase()).as_deref(), Some("1" | "true" | "yes"))
     }
 
-    /// `marketplace.json` 맨 윗단의 `name`. `pretty` 가 두 칸으로 들여 쓰고
-    /// `owner`·`plugins` 의 `name` 은 더 깊다.
-    const TOP_NAME: &str = "\n  \"name\": \"";
-
     /// JSON 으로 못 읽는 글에서 `before` 바로 뒤의 값을 찾는다. 값은 따옴표나
     /// 역슬래시에서 끝난다 — 훅의 실행 파일은 `quotable` 이라 둘 다 못 품는다.
     fn loose(text: &str, before: &str) -> Option<String> {
@@ -3625,9 +3624,10 @@ mod tests {
         assert!(!blessing(None));
     }
 
-    /// 병합 충돌 표시가 끼어 JSON 이 깨져도 bless 가 쓸 두 값은 글자로 나온다.
+    /// 병합 충돌 표시가 끼어 JSON 이 깨져도 bless 가 쓸 실행 파일은 글자로 나온다. 마켓플레이스 이름은 이제 커밋하지
+    /// 않아(moai-r2nn.bb6) 읽어 올 일이 없다.
     #[test]
-    fn a_conflicted_tree_still_yields_its_exe_and_name() {
+    fn a_conflicted_tree_still_yields_its_exe() {
         let exe = "/repo/target/release/moai";
         let files = tree("t", Path::new("/repo"), exe, &fake("# 스킬", "감독", "위키"));
         let body = |end: &str| {
@@ -3636,13 +3636,7 @@ mod tests {
         };
         let manifest = body("plugin.json");
         assert_eq!(hook_exe(&manifest), None, "시험이 깨진 매니페스트를 만들지 못했다");
-        assert_eq!(loose(&manifest, "command -v -- \\\"").as_deref(), Some(exe));
-        let name = market("t", Path::new("/repo"));
-        assert_eq!(loose(&body("marketplace.json"), TOP_NAME).as_deref(), Some(name.as_str()));
-        assert_eq!(loose("{}", TOP_NAME), None);
-        // 맨 윗단 name 이 빠지면 owner·plugins 의 `moai` 를 집지 않는다.
-        let headless = body("marketplace.json").replace(&format!("\n  \"name\": \"{name}\","), "");
-        assert_ne!(headless, body("marketplace.json"), "시험이 name 을 못 뺐다");
-        assert_eq!(loose(&headless, TOP_NAME), None);
+        assert_eq!(loose(&manifest, "command -v -- \\\""), Some(exe.to_string()));
+        assert_eq!(loose("{}", "command -v -- \\\""), None);
     }
 }

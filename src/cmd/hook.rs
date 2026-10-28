@@ -559,8 +559,9 @@ fn worked_in(mut input: Input) -> Input {
     input.cwd = match input.cwd.as_deref() {
         Some(cwd) => {
             let joined = Path::new(cwd).join(dir).display().to_string();
-            // `join` 은 Windows 에서 `\` 로 잇는다 — 세션의 자리가 `/` 꼴이면(`/c/…`) 섞인 구분자를 내지 않는다.
-            Some(if cwd.contains('\\') { joined } else { joined.replace('\\', "/") })
+            // `join` 은 Windows 에서 `\` 로 잇는다 — 세션의 자리가 `/` 꼴이면(`/c/…`) 섞인 구분자를 내지 않는다. **Windows 에서만**
+            // 바꾼다([`crate::path::slashed`]) — 유닉스에서 `\` 는 디렉터리 이름의 글자라, 바꾸면 없는 자리를 댄다.
+            Some(crate::path::slashed(&joined, cfg!(windows) && !cwd.contains('\\')))
         }
         None if dir.is_absolute() => Some(dir.display().to_string()),
         None => None,

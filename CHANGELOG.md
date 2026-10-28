@@ -15,10 +15,10 @@ does not tag — see `CONTRIBUTING.md`.
 ### Added
 
 - **`moai skill status` says when a hook line calls `moai` from `PATH` and there is
-  none, or a different one.** The `agy hooks` row
-  shows a `!` for it, and `--json` gains `path_moai` on that hook. Before, the
-  row read `current` while cmd printed `is not recognized` and the rules stayed
-  off. (moai-r2nn.yxz)
+  none, or a different one.** The `codex hooks` or `agy hooks` row whose file
+  calls plain `moai` shows a `!` for it, and `--json` gains `path_moai` on that
+  hook. Before, the row read `current` while the shell printed `not found` or
+  `is not recognized` and the rules stayed off. (moai-r2nn.yxz)
 - **`moai skill status` names the Git Bash Claude Code runs hooks in on
   Windows.** Without Git Bash, Claude Code uses PowerShell, which cannot run the
   hook lines; the new `git bash` row (and `git_bash` in `--json`) says where it
@@ -36,7 +36,6 @@ does not tag — see `CONTRIBUTING.md`.
   Windows too.** The whole-answer time limit was only checked between writes,
   and Windows takes a huge buffer in one call; the answer is now written in
   64 KiB pieces. (moai-r2nn.2z0)
-
 - **A crash inside an Antigravity hook no longer reaches `agy` as a failure.**
   The hook line has no shell around it to filter the output, so `moai hook
   --dialect antigravity` now catches a panic itself: one line on stderr,
