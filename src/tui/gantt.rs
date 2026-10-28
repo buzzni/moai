@@ -139,6 +139,59 @@ fn preview(g: &mut GanttRow, i: &crate::model::Issue, change: crate::model::Date
     }
 }
 
+/// Owned drawing data indexed by the loaded issue position. Ground owns the load generation;
+/// the other inputs (including the complete zone rules) are checked on every use.
+/// No references into issues or Where survive a read.
+#[derive(Debug)]
+pub(super) struct Cached {
+    now: String,
+    site_now: String,
+    zone: crate::tz::Zone,
+    rows: Vec<CachedRow>,
+}
+
+#[derive(Debug)]
+struct CachedRow {
+    bar: GanttRow,
+    blocked_by: Vec<String>,
+    range: Option<crate::report::gantt::Range>,
+}
+
+#[cfg(test)]
+thread_local! {
+    // How many times a site rebuilt its chart cache — the cache test counts report runs by it,
+    // so `report::gantt` itself stays free of test hooks.
+    static BUILT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+impl Site {
+    fn chart_read(&self, now: &str, zone: &crate::tz::Zone) -> std::cell::Ref<'_, Cached> {
+        let mut cache = self.ground.chart.borrow_mut();
+        if cache.as_ref().is_none_or(|c| c.now != now || c.site_now != self.now || c.zone != *zone) {
+            #[cfg(test)]
+            BUILT.set(BUILT.get() + 1);
+            let wh = self.ground.here(&self.issues);
+            let read = crate::report::gantt::gantt(&self.issues, &self.index, &wh, &self.cfg, now, zone);
+            let rows = read
+                .rows
+                .iter()
+                .map(|r| {
+                    let mut bar = GanttRow::default();
+                    fill_row(&mut bar, r, self.column(r.at), zone);
+                    CachedRow {
+                        bar,
+                        blocked_by: r.blocked_by.iter().map(|b| b.id.to_string()).collect(),
+                        range: crate::report::gantt::range_of([r], now, zone),
+                    }
+                })
+                .collect();
+            *cache = Some(Cached { now: now.into(), site_now: self.now.clone(), zone: zone.clone(), rows });
+        }
+        drop(cache);
+        std::cell::Ref::map(self.ground.chart.borrow(), |c| c.as_ref().unwrap())
+    }
+}
+
 impl Site {
     /// 묶음 하나를 펴거나 접는다 — 목록이면 펼친 자리(`expanded`)에, 간트면 접은 자리(`gantt_shut`)에 적는다.
     /// 두 집합의 뜻이 거꾸로라 적는 쪽을 여기 하나에 모은다: 키마다 가르면 새 키 하나가 그것을 잊는다.
@@ -441,8 +494,8 @@ impl App {
     /// 목록의 줄을 위젯의 줄로 옮긴다. 고정 칸의 글(`label`)은 그리는 쪽이 짓는다 — 목록의 줄과 같은 자로 재야
     /// 해서다(`draw::row_line`). `window` 밖의 줄은 글을 안 짓는다: 위젯은 보이는 창만 그린다.
     ///
-    /// **프로젝트마다 한 번 읽는다**(`report::gantt`) — 한눈 보기의 줄은 여러 프로젝트에서 온다. 지금은 프레임마다가
-    /// 아니라 **적재 때 잡은 시각**(`Site::now`)이다 — 통계 창과 같은 시계라 오늘 선이 초마다 흔들리지 않는다.
+    /// Each project reuses its loaded chart data, also for Fit and mouse hit testing.
+    /// Filtering and folding only select cached rows; drag previews are applied afterwards.
     pub(super) fn chart_of(
         &self,
         rows: &[Row],
@@ -461,32 +514,28 @@ impl App {
         }
         let sites: Vec<(Seat, &Site)> =
             seats.iter().filter_map(|&s| self.site_of_seat(s).map(|site| (s, site))).collect();
-        let wheres: Vec<crate::query::Where> = sites.iter().map(|(_, s)| s.ground.here(&s.issues)).collect();
-        let reads: Vec<crate::report::gantt::Gantt> = sites
-            .iter()
-            .zip(&wheres)
-            .map(|((_, s), wh)| crate::report::gantt::gantt(&s.issues, &s.index, wh, &s.cfg, &utc_now, &self.zone))
-            .collect();
+        let reads: Vec<_> = sites.iter().map(|(_, s)| s.chart_read(&utc_now, &self.zone)).collect();
         let read_of = |seat: Seat| sites.iter().position(|(s, _)| *s == seat);
 
         let mut out = Vec::with_capacity(rows.len());
-        let mut kept = Vec::new();
+        let mut kept: Vec<&crate::report::gantt::Range> = Vec::new();
         // 막음을 그릴 때 막는 줄의 자리를 id 로 찾는다 — 같은 프로젝트 안에서만 잇는다.
         let mut place: std::collections::HashMap<(usize, &str), usize> = std::collections::HashMap::new();
         for (n, r) in rows.iter().enumerate() {
             let mut g = GanttRow::default();
-            if window.contains(&n) {
-                g.label = label(n, r);
-            }
             if let Row::Item(seat, e, _) = r
                 && let Some(at) = e.at()
                 && let Some(k) = read_of(*seat)
                 && let Some(row) = reads[k].rows.get(at)
             {
-                let site = sites[k].1;
-                fill_row(&mut g, row, site.column(at), &self.zone);
-                place.insert((k, row.id), n);
-                kept.push(row);
+                g = row.bar.clone();
+                place.insert((k, sites[k].1.issues[at].id.as_str()), n);
+                if let Some(range) = &row.range {
+                    kept.push(range);
+                }
+            }
+            if window.contains(&n) {
+                g.label = label(n, r);
             }
             out.push(g);
         }
@@ -511,17 +560,18 @@ impl App {
                 && let Some(row) = reads[k].rows.get(at)
             {
                 for b in &row.blocked_by {
-                    if let Some(&from) = place.get(&(k, b.id)) {
+                    if let Some(&from) = place.get(&(k, b.as_str())) {
                         links.push(Link { from_row: from, to_row: n });
                     }
                 }
             }
         }
-        let range = crate::report::gantt::range_of(kept, &utc_now, &self.zone).and_then(|r| {
-            let from = parse_date(&r.from)?;
-            let to = parse_date(&r.to)?;
-            Some((from * DAY, (to + 1) * DAY))
-        });
+        let range = kept
+            .iter()
+            .map(|r| &r.from)
+            .min()
+            .zip(kept.iter().map(|r| &r.to).max())
+            .and_then(|(from, to)| Some((parse_date(from)? * DAY, (parse_date(to)? + 1) * DAY)));
         Chart { rows: out, links, range, now }
     }
 }
@@ -625,6 +675,40 @@ mod tests {
     use crate::config::Config;
     use crate::model::{Issue, Kind, Status};
     use crate::nav::Path;
+
+    #[test]
+    fn chart_reads_once_per_load_clock_and_zone() {
+        use super::BUILT as CALLS;
+        let mut i = make("argos-0001", Kind::Issue);
+        i.created_at = "2026-10-27T20:00:00Z".into();
+        i.due_on = Some("2026-10-30".into());
+        let mut a = App::new(vec![i.clone()], cfg(), Path::new());
+        a.zone = crate::tz::Zone::utc();
+        a.site.now = "2026-10-28T12:00:00Z".into();
+        a.open_gantt();
+        a.layout = Layout::Gantt;
+        let before = CALLS.get();
+        draw::tests::render(&mut a, 200, 50);
+        draw::tests::render(&mut a, 200, 50);
+        let chart = |a: &App| a.chart_of(&a.rows(), 0..0, &|_, _| ratatui::text::Line::default());
+        let bar = chart(&a).rows[0].planned;
+        assert_eq!(CALLS.get() - before, 1, "draw and hit testing must share the report calculation");
+        // Equal names with different rules must invalidate too.
+        a.zone = crate::tz::Zone::fixed("UTC", 9 * 3600);
+        let seoul = chart(&a).rows[0].planned;
+        assert_ne!(seoul, bar);
+        assert_eq!(CALLS.get() - before, 2);
+        a.site.now = "2026-11-01T12:00:00Z".into();
+        assert!(chart(&a).rows[0].overdue);
+        assert_eq!(CALLS.get() - before, 3);
+        // The real reload ingestion path replaces the generation even with an unchanged clock.
+        i.due_on = Some("2026-11-05".into());
+        let now = a.site.now.clone();
+        a.adopt(vec![i]);
+        a.site.now = now;
+        assert_ne!(chart(&a).rows[0].planned, seoul);
+        assert_eq!(CALLS.get() - before, 4);
+    }
 
     fn cfg() -> Config {
         Config::parse("prefix = \"argos\"\n").unwrap()

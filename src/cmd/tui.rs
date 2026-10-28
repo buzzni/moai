@@ -1538,7 +1538,11 @@ fn keep_unsaved(app: &App) {
 /// - 붙여넣기는 글로 넘긴다([`App::paste`]) — 키로 풀지 않는다
 /// - 마우스는 그대로 넘긴다([`App::mouse`]) — 어느 칸을 눌렀는지는 탐색기가 지난 그림으로 맞힌다
 /// - 창 크기 따위는 받을 것이 없다. 다음 그림이 새 크기로 그린다
-fn take(app: &mut App, ev: Event) {
+///
+/// 참이면 화면이 바뀌었을 수 있다 — 루프가 다시 그린다([`take_burst`]). 거짓은 끌지 않는 포인터의 움직임 하나뿐이다.
+fn take(app: &mut App, ev: Event) -> bool {
+    // Moved still releases a drag if the terminal lost its button-up event.
+    let changed = !matches!(&ev, Event::Mouse(m) if m.kind == MouseEventKind::Moved) || app.pointer_dragging();
     // 휠·끌기를 받은 때를 적는다 — 끝낼 때 답 뒤를 더 비울지 가르는 자다([`rolled_lately`], moai-pvpb.m2f).
     if rolls(&ev) {
         app.rolled_at = Some(std::time::Instant::now());
@@ -1549,14 +1553,53 @@ fn take(app: &mut App, ev: Event) {
         Event::Mouse(m) => app.mouse(m),
         _ => {}
     }
+    changed
 }
 
-/// 몰아 받는 사건인가 — 휠과 누른 채 끌기(moai-irrj, 리뷰). 둘 다 한 손짓에 칸마다 하나씩 오는데, 사건마다 한 프레임을
-/// 그리면 큰 저장소(이슈 1만 개에 한 프레임 22ms)에서 손을 멈춘 뒤에도 목록이 한참 따라 구른다.
+/// Consume queued input in order, retaining paste/IME events as whole events.
 ///
-/// **누르기·뗌·키는 안 몬다** — 하나 받고 그린다. 키는 편집기를 부르거나(`App::edit`) 끝낼 수 있고, 누르기는 다음
-/// 누르기가 맞힐 화면을 바꾼다(커서·포커스·알림 줄). 몰아 받는 동안 맞히는 바탕은 지난 프레임이고, 그동안 안 그렸으니
-/// 그것이 곧 사람이 보는 화면이다.
+/// - Pointer events are hit against the last drawn frame (`mouse::Drawn`). While only wheel or
+///   drag came before them in this burst, that frame is still what the person sees, so a click
+///   right after the wheel is taken here against it (moai-fyul). Once a key or paste has changed
+///   the screen, the next pointer event is held for the frame that change draws — as it was when
+///   every key drew.
+/// - A layout switch ends the burst: keys that measure the drawn frame (`App::pan` reads
+///   `Drawn::chart`) need the new layout's first frame.
+/// - So does a focus switch: a detail folded for lack of room hands focus back to the list only
+///   when it is drawn (`draw::screen`), so `Ctrl-w w` then `j` would scroll a pane nobody sees.
+/// - Editors and quit are boundaries too: later input belongs to that editor or shell.
+fn take_burst(
+    app: &mut App,
+    first: Event,
+    mut next: impl FnMut() -> std::io::Result<Option<Event>>,
+) -> std::io::Result<(bool, Option<Event>)> {
+    let until = std::time::Instant::now() + BURST;
+    let mut ev = first;
+    let mut changed = false;
+    // Something other than the pointer changed the screen since the last frame.
+    let mut keyed = false;
+    loop {
+        let pointer = matches!(&ev, Event::Mouse(_));
+        let boundary = matches!(&ev, Event::Resize(..))
+            || matches!(&ev, Event::Mouse(m) if matches!(m.kind, MouseEventKind::Down(_) | MouseEventKind::Up(_)));
+        let (layout, focus) = (app.layout, app.focus);
+        let moved = take(app, ev);
+        changed |= moved;
+        keyed |= moved && !pointer;
+        let reframed = app.layout != layout || app.focus != focus;
+        if app.quit || app.edit.is_some() || boundary || reframed || std::time::Instant::now() >= until {
+            return Ok((changed, None));
+        }
+        let Some(e) = next()? else { return Ok((changed, None)) };
+        if keyed && matches!(&e, Event::Mouse(_)) {
+            return Ok((changed, Some(e)));
+        }
+        ev = e;
+    }
+}
+
+/// Wheel/drag activity also controls the terminal reply drain on exit. Keyboard bursts
+/// share the event drain but do not count as pointer activity.
 fn rolls(ev: &Event) -> bool {
     use MouseEventKind as K;
     matches!(
@@ -1615,10 +1658,16 @@ fn loop_until_quit(term: &mut DefaultTerminal, app: &mut App, left: &mut Vec<Str
     let mut caught = app.wants_mouse();
     // 앞 프레임을 들고 그린다 — 넓은 글자의 반쪽이 남긴 칸을 다시 내려고(moai-c6go, `draw::Painter`).
     let mut painter = crate::tui::draw::Painter::default();
+    let mut dirty = true;
+    let mut pending = None;
+    let mut step = SPIN_TICK;
     while !app.quit {
-        let began = std::time::Instant::now();
-        painter.draw(term, app)?;
-        let step = spin_step(began.elapsed());
+        if dirty {
+            let began = std::time::Instant::now();
+            painter.draw(term, app)?;
+            step = spin_step(began.elapsed());
+            dirty = false;
+        }
         // **화면에 도는 것이 없으면 빠른 걸음으로 깨지 않는다.** 다 끝난 판을 열어 둔
         // 채로 둔 사람의 CPU 를 초당 여덟 번 깨울 까닭이 없고, 집은 일이 다른 에픽 안이나
         // 스크롤 밖에 있어 안 보일 때도 같다(moai-5jh6). 판단은 방금 그린 버퍼가 한다
@@ -1631,16 +1680,17 @@ fn loop_until_quit(term: &mut DefaultTerminal, app: &mut App, left: &mut Vec<Str
         // 하필 그때가 쓰는 사람이 화면을 보고 있는 때다.
         let wake = if spinning { stale_due.min(spin_due) } else { stale_due };
         let wait = wake.saturating_duration_since(std::time::Instant::now());
-        if event::poll(wait)? {
-            // **휠·끌기는 몰아 받는다**(`rolls`) — 이어 와 있는 동안은 그리지 않고 받고, 그 밖의 사건 하나에서 멈춰
-            // 그것까지 받은 뒤 그린다. 받는 때는 [`BURST`] 로 묶는다.
-            let until = std::time::Instant::now() + BURST;
-            let mut ev = event::read()?;
-            while rolls(&ev) && std::time::Instant::now() < until && event::poll(std::time::Duration::ZERO)? {
-                take(app, ev);
-                ev = event::read()?;
-            }
-            take(app, ev);
+        let first = match pending.take() {
+            Some(e) => Some(e),
+            None if event::poll(wait)? => Some(event::read()?),
+            None => None,
+        };
+        if let Some(first) = first {
+            let (changed, held) = take_burst(app, first, || {
+                if event::poll(std::time::Duration::ZERO)? { event::read().map(Some) } else { Ok(None) }
+            })?;
+            dirty |= changed;
+            pending = held;
         }
         if app.wants_mouse() != caught {
             caught = app.wants_mouse();
@@ -1663,6 +1713,7 @@ fn loop_until_quit(term: &mut DefaultTerminal, app: &mut App, left: &mut Vec<Str
             caught = app.wants_mouse();
             let up = resume(term, caught);
             painter.forget();
+            dirty = true;
             EDITING.release();
             up?;
         }
@@ -1673,6 +1724,7 @@ fn loop_until_quit(term: &mut DefaultTerminal, app: &mut App, left: &mut Vec<Str
         }
         if now >= stale_due {
             app.follow();
+            dirty = true;
             stale_due = now + if app.loading() || app.reaping() || app.gathering_commits() { LOAD_POLL } else { TICK };
         }
         // **걸음은 시계가 올린다, 그린 횟수가 올리지 않는다.** 그릴 때마다
@@ -1682,6 +1734,7 @@ fn loop_until_quit(term: &mut DefaultTerminal, app: &mut App, left: &mut Vec<Str
         if now >= spin_due {
             if spinning {
                 app.spin = app.spin.wrapping_add(1);
+                dirty = true;
             }
             spin_due = now + step;
         }
@@ -1691,6 +1744,126 @@ fn loop_until_quit(term: &mut DefaultTerminal, app: &mut App, left: &mut Vec<Str
 
 #[cfg(test)]
 mod tests {
+    fn burst_app() -> App {
+        let cfg = crate::config::Config::parse("prefix = \"argos\"\n").unwrap();
+        let issues = (0..80)
+            .map(|n| {
+                crate::model::Issue::new(
+                    format!("argos-{n:04}"),
+                    format!("row {n}"),
+                    crate::model::Kind::Issue,
+                    crate::model::Status::new("todo"),
+                    "2026-10-28T00:00:00Z",
+                )
+            })
+            .collect();
+        App::new(issues, cfg, crate::nav::Path::new())
+    }
+
+    fn pressed(c: char) -> Event {
+        use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+        Event::Key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE))
+    }
+
+    #[test]
+    fn queued_keys_move_before_the_next_frame() {
+        let mut app = burst_app();
+        let mut queue = std::iter::repeat_n(pressed('j'), 40);
+        let first = queue.next().unwrap();
+        let (dirty, pending) = take_burst(&mut app, first, || Ok(queue.next())).unwrap();
+        assert!(dirty && pending.is_none());
+        assert_eq!(app.cursor, 40);
+        // The loop draws once per `take_burst` call, so one call taking all forty is one frame.
+        assert!(queue.next().is_none(), "the queued moves did not share one draw");
+    }
+
+    #[test]
+    fn a_burst_keeps_leader_keys_and_pasted_unicode_in_order() {
+        let mut app = burst_app();
+        let mut events = vec![pressed('g'), pressed('g'), pressed('/'), Event::Paste("한글日本語".into())].into_iter();
+        let (dirty, pending) = take_burst(&mut app, pressed(' '), || Ok(events.next())).unwrap();
+        assert!(dirty && pending.is_none());
+        assert!(app.gantt());
+        // The layout switch ends the burst — keys after it measure the gantt's first frame.
+        let rest = events.next().expect("input after the layout switch stays queued");
+        let (dirty, pending) = take_burst(&mut app, rest, || Ok(events.next())).unwrap();
+        assert!(dirty && pending.is_none() && events.next().is_none());
+        assert_eq!(
+            app.mode,
+            crate::tui::Mode::Grep(crate::tui::input::Input::new("한글日本語"), crate::query::GrepIn::All)
+        );
+    }
+
+    #[test]
+    fn a_burst_leaves_input_after_quit_and_defers_clicks_until_drawn() {
+        use ratatui::crossterm::event::{KeyModifiers, MouseButton, MouseEvent};
+        let mut app = burst_app();
+        let mut queue = vec![pressed('q'), pressed('j')].into_iter();
+        take_burst(&mut app, pressed(' '), || Ok(queue.next())).unwrap();
+        assert!(app.quit);
+        assert!(queue.next().is_some(), "quit must not swallow shell input");
+        let mut app = burst_app();
+        let click = Event::Mouse(MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: 4,
+            row: 5,
+            modifiers: KeyModifiers::NONE,
+        });
+        let mut queue = vec![click.clone(), pressed('k')].into_iter();
+        let (dirty, pending) = take_burst(&mut app, pressed('j'), || Ok(queue.next())).unwrap();
+        assert!(dirty);
+        assert_eq!(pending, Some(click));
+        assert_eq!(app.cursor, 1);
+        assert!(queue.next().is_some());
+    }
+
+    /// **A focus switch ends the burst** — only the draw hands focus back from a detail folded for
+    /// lack of room (`draw::screen`), so `j` after `Ctrl-w w` must wait for that frame.
+    #[test]
+    fn a_focus_switch_ends_the_burst() {
+        use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+        let mut app = burst_app();
+        assert_eq!(app.focus, crate::tui::Pane::Explorer);
+        let chord = Event::Key(KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL));
+        let mut queue = vec![pressed('w'), pressed('j')].into_iter();
+        let (dirty, pending) = take_burst(&mut app, chord, || Ok(queue.next())).unwrap();
+        assert!(dirty && pending.is_none());
+        assert_eq!(app.focus, crate::tui::Pane::Detail);
+        assert_eq!(queue.next(), Some(pressed('j')), "the key after the focus switch was taken before a frame");
+    }
+
+    /// **A click right after the wheel is hit against the frame on screen**(moai-fyul) — the wheel
+    /// moves the list at once but nothing was drawn, so drawing first would pick the row the wheel
+    /// rolled under the pointer instead of the one the person clicked. Only a key holds the click.
+    #[test]
+    fn a_click_after_the_wheel_is_not_held_but_one_after_a_key_is() {
+        use ratatui::crossterm::event::{KeyModifiers, MouseButton, MouseEvent};
+        let mouse = |kind| Event::Mouse(MouseEvent { kind, column: 4, row: 5, modifiers: KeyModifiers::NONE });
+        let mut app = burst_app();
+        let mut queue =
+            vec![mouse(MouseEventKind::ScrollDown), mouse(MouseEventKind::Down(MouseButton::Left))].into_iter();
+        let (dirty, pending) = take_burst(&mut app, mouse(MouseEventKind::ScrollDown), || Ok(queue.next())).unwrap();
+        assert!(dirty && pending.is_none(), "the click after the wheel waited for a frame the person never saw");
+        assert!(queue.next().is_none());
+        let mut app = burst_app();
+        let wheel = mouse(MouseEventKind::ScrollDown);
+        let mut queue = vec![wheel.clone()].into_iter();
+        let (dirty, pending) = take_burst(&mut app, pressed('j'), || Ok(queue.next())).unwrap();
+        assert!(dirty);
+        assert_eq!(pending, Some(wheel), "the wheel after a key must hit the frame the key draws");
+    }
+
+    #[test]
+    fn ordinary_pointer_motion_does_not_request_a_frame() {
+        use ratatui::crossterm::event::{KeyModifiers, MouseEvent};
+        let mut app = burst_app();
+        let motion =
+            Event::Mouse(MouseEvent { kind: MouseEventKind::Moved, column: 4, row: 5, modifiers: KeyModifiers::NONE });
+        let mut queue = std::iter::repeat_n(motion.clone(), 20);
+        let (dirty, pending) = take_burst(&mut app, motion, || Ok(queue.next())).unwrap();
+        assert!(!dirty && pending.is_none() && queue.next().is_none());
+    }
+
     /// **문이 반대로 서면 `--json` 이 매번 바깥을 두드린다**(moai-3gia, 리뷰). `latest::gate` 는
     /// 제자리에서 잘 재지만, 그 답을 **쓰는** 자리가 안 재이던 자리였다.
     #[test]
@@ -1979,10 +2152,9 @@ mod tests {
         assert_eq!(rest_of(read), b"", "기다리는 동안 온 보고를 남겼다");
     }
 
-    /// **휠·끌기만 몰아 받는다**(리뷰) — 누르기·뗌·키·붙여넣기는 하나씩 받고 그린다. 키는 편집기를 부르거나 끝낼 수 있고,
-    /// 누르기는 다음 누르기가 맞힐 화면을 바꾼다.
+    /// Only pointer activity enables the exit-time trailing reply drain.
     #[test]
-    fn only_wheel_and_drag_events_roll_together() {
+    fn only_pointer_activity_opens_the_exit_drain() {
         use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent};
         let mouse = |kind| Event::Mouse(MouseEvent { kind, column: 3, row: 4, modifiers: KeyModifiers::NONE });
         assert!(rolls(&mouse(MouseEventKind::ScrollDown)));

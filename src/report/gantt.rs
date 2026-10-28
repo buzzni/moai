@@ -121,8 +121,9 @@ pub struct Range {
 pub struct Gantt<'a> {
     /// `all` 와 같은 차례, 같은 길이다 — `rows[at].at == at`. 화면이 목록을 거르고 정하는 것은 제 일이다.
     pub rows: Vec<Row<'a>>,
-    /// **적재한 줄 전부**의 폭이다. 날이 하나도 없으면 없다. 거른 목록에 맞추는 화면은 남긴 줄로 [`range_of`] 를 다시
-    /// 부른다(리뷰) — 숨긴 줄(아카이브·미룬 것)의 날이 이 폭을 넓히므로, 그 폭에 맞추면 보이는 막대가 한쪽에 몰린다.
+    /// **적재한 줄 전부**의 폭이다. 날이 하나도 없으면 없다. 거른 목록에 맞추는 화면은 이것을 안 쓰고 남긴 줄의 폭으로
+    /// 잰다(리뷰) — 적재 때 줄마다 [`range_of`] 를 불러 두고(`tui::gantt::Cached`) 남긴 줄의 것만 접는다. 숨긴 줄
+    /// (아카이브·미룬 것)의 날이 이 폭을 넓히므로, 그 폭에 맞추면 보이는 막대가 한쪽에 몰린다.
     pub range: Option<Range>,
 }
 
@@ -130,6 +131,9 @@ pub struct Gantt<'a> {
 /// 문맥이다 — 탐색기는 적재 때 둘 다 이미 들고 있어 여기서 다시 짓지 않는다. `now` 는 RFC3339(UTC)고, `zone` 은 읽는
 /// 사람의 시간대다 — 늦었는가와 오늘을 그 달로 잰다(보드의 `Dues::judge` 가 받는 그 둘이다). 거르개를 `'a` 로 빌리는 것은
 /// 서 있는 칸·닫힌 때가 거기서 빌려 온 글이라서다 — 값(`Gantt`)이 사는 동안 거르개도 산다.
+///
+/// 아래의 두 지도는 저장소 전부를 훑는다. 탐색기는 이 값을 적재마다 한 번 들고 있으므로(`tui::gantt::Cached`)
+/// 지도를 여기서 지어도 프레임마다가 아니다 — 부르는 쪽마다 짓게 하면 같은 적재로 지었는지를 부르는 쪽이 맞춰야 한다.
 pub fn gantt<'a>(
     all: &'a [Issue],
     index: &Index,
@@ -142,6 +146,17 @@ pub fn gantt<'a>(
     let blocks = all.iter().any(|i| !i.blocked_by.is_empty()).then(|| BlockMaps::over(all, cfg));
     // 줄마다 그 줄을 계획에서 뺀 미룸들 — 미룬 줄이 없으면 빈 지도다. 묶음의 계획에서 멤버를 빼는 자([`planned_of`])가 쓴다.
     let shelved = super::deferred_sources(all);
+    // Resolve each row's known start once, including the future-stamp check. Groups
+    // reuse those facts instead of parsing every member again for each ancestor.
+    let starts: Vec<Option<(&str, i64)>> = all
+        .iter()
+        .map(|i| {
+            let text = i.started_at.as_deref()?;
+            let at = parse_rfc3339(text)?;
+            (!super::far_ahead(i, now)).then_some((text, at))
+        })
+        .collect();
+    let now_at = parse_rfc3339(now);
     // **날 경계는 읽는 사람의 달에서 긋는다**(moai-h2th) — 한 번만 옮긴다.
     let today = zone.shift(now);
     let rows: Vec<Row<'a>> = all
@@ -159,7 +174,7 @@ pub fn gantt<'a>(
                 id: i.id.as_str(),
                 kind: i.kind,
                 planned: planned_of(i, &members, all, wh, &shelved, zone),
-                actual: actual_of(i, column, &members, all, wh, cfg, now),
+                actual: actual_of(at, column, &members, all, wh, cfg, &starts, now_at),
                 progress: match is_group(i) {
                     true => {
                         let (done, total) = dir.as_ref().map(|p| index.tally(p)).unwrap_or_default();
@@ -262,35 +277,34 @@ pub fn own_plan(i: &Issue, zone: &Zone) -> Option<Planned> {
 }
 
 /// 실제 구간. 일은 제 `started_at` 으로, 묶음은 멤버(일)의 가장 이른 `started_at` 으로 잰다. `column` 은 그 줄이 서 있는
-/// 칸이고(묶음이면 멤버에서 읽은 칸), `now` 는 RFC3339(UTC)다 — 앞날로 멀리 적힌 도장을 가르는 데만 쓴다.
+/// 칸이고(묶음이면 멤버에서 읽은 칸), `now` 는 한 번 파싱한 UTC 초다 — 앞날로 멀리 적힌 도장을 가르는 데만 쓴다.
 fn actual_of<'a>(
-    i: &'a Issue,
+    at: usize,
     column: &str,
     members: &[usize],
     all: &'a [Issue],
     wh: &'a Where<'a>,
     cfg: &Config,
-    now: &str,
+    starts: &[Option<(&'a str, i64)>],
+    now: Option<i64>,
 ) -> Actual<'a> {
+    let i = &all[at];
     // 묶음이면 멤버의 일, 아니면 그 줄 하나 — 시작을 아는 것/모르는 것을 같은 걸음으로 센다.
-    let work: Vec<&'a Issue> = match is_group(i) {
-        true => members.iter().map(|&m| &all[m]).filter(|m| is_work(m)).collect(),
-        false => vec![i],
+    let work: Vec<usize> = match is_group(i) {
+        true => members.iter().copied().filter(|&m| is_work(&all[m])).collect(),
+        false => vec![at],
     };
     // **시작은 읽히는 것만 센다** — 못 읽는 글(손으로 푼 줄)과 앞날로 멀리 적힌 줄(`future_timestamp`, `stats::spans` 가
     // 재는 금과 같다)의 시작은 모르는 것이다. 시계 오타 하나가 2099년에 시작한 막대와 70년짜리 폭을 세우지 않게.
-    let known = |w: &&'a Issue| -> Option<&'a str> {
-        (!super::far_ahead(w, now)).then_some(w.started_at.as_deref()).flatten().filter(|s| parse_rfc3339(s).is_some())
-    };
     // **떠난 일 가운데 하나라도 시작을 모르면 구간도 모른다**(리뷰) — 그 일이 더 일찍 시작했을 수 있어, 아는 시작 가운데
     // 가장 이른 것은 상한일 뿐이다. 그것을 시작으로 내면 모르는 것을 "그보다 늦지 않다" 로 채운 셈이다(필드 전에 닫힌
     // 멤버가 대부분인 에픽이 나중에 집은 멤버 하나 때문에 0 분짜리 구간으로 섰다). 줄 하나면 늘 그랬던 답이다.
-    if work.iter().any(|w| known(w).is_none() && wh.column(w) != cfg.first_status()) {
+    if work.iter().any(|&w| starts[w].is_none() && wh.column(&all[w]) != cfg.first_status()) {
         return Actual::Unknown;
     }
     // 시작을 아는 일이 없는데 떠난 일도 없으면 시작 전이다. 시각은 **읽은 값으로** 견준다 — 관대한 읽기가 받은 꼴
     // (`2026-02-30T…` 은 3월 2일이다)에서는 글의 차례가 때의 차례가 아니다.
-    let Some(start) = work.iter().filter_map(known).min_by_key(|s| parse_rfc3339(s)) else {
+    let Some((start, start_at)) = work.iter().filter_map(|&w| starts[w]).min_by_key(|(_, at)| *at) else {
         return Actual::NotStarted;
     };
     // 닫혔는가는 **서 있는 칸**으로 묻는다 — 묶음은 멤버에서 읽은 칸이고, 되돌린 줄의 `done_at` 은 안 센다.
@@ -299,9 +313,9 @@ fn actual_of<'a>(
     }
     // 닫혔는데 끝이 시작보다 앞서거나, 못 읽거나, 앞날로 멀리 적혔으면 구간을 못 낸다 — 열린 구간으로 그리면 끝난 일이
     // 아직 도는 것처럼 선다.
-    let ahead = |t: i64| parse_rfc3339(now).is_some_and(|n| t - n > FUTURE_SLACK_SECS);
-    let closed = super::stats::closed_at(i, wh)
-        .filter(|e| parse_rfc3339(e).zip(parse_rfc3339(start)).is_some_and(|(e, s)| e >= s && !ahead(e)));
+    let ahead = |t: i64| now.is_some_and(|n| t - n > FUTURE_SLACK_SECS);
+    let closed =
+        super::stats::closed_at(i, wh).filter(|e| parse_rfc3339(e).is_some_and(|e| e >= start_at && !ahead(e)));
     match closed {
         Some(end) => Actual::Span { start, end: Some(end) },
         None => Actual::Unknown,

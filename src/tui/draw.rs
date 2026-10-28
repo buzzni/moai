@@ -12660,6 +12660,53 @@ mod eyeball {
 /// 1만 건 더미를 dev 로 짓고 잰 값이 화면 사이에 섞인다(moai-xemz 리뷰).
 #[cfg(test)]
 mod bench {
+    /// Run against a fixed copy of a tracker, including archive, before and after a change.
+    /// MOAI_GANTT_BENCH=/tmp/tracker CARGO_PROFILE_TEST_OPT_LEVEL=3 cargo test
+    /// --bin moai gantt_frame_costs -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn gantt_frame_costs() {
+        let root = std::path::PathBuf::from(std::env::var("MOAI_GANTT_BENCH").expect("tracker fixture"));
+        let mut paths = vec![root.join(".moai/issues.jsonl")];
+        paths.extend(std::fs::read_dir(root.join(".moai/archive")).unwrap().map(|e| e.unwrap().path()));
+        paths.sort();
+        let issues: Vec<crate::model::Issue> = paths
+            .iter()
+            .flat_map(|p| {
+                std::fs::read_to_string(p)
+                    .unwrap()
+                    .lines()
+                    .map(|s| serde_json::from_str(s).unwrap())
+                    .collect::<Vec<_>>()
+            })
+            .collect();
+        let cfg =
+            crate::config::Config::parse(&std::fs::read_to_string(root.join(".moai/config.toml")).unwrap()).unwrap();
+        let mut app = super::App::aging(issues, cfg, "2026-10-28T14:00:00Z");
+        app.zone = crate::tz::Zone::utc();
+        let mut term = ratatui::Terminal::new(ratatui::backend::TestBackend::new(200, 50)).unwrap();
+        let mut painter = super::Painter::default();
+        for layout in [super::super::view::Layout::List, super::super::view::Layout::Gantt] {
+            if layout == super::super::view::Layout::Gantt {
+                app.open_gantt();
+            }
+            app.layout = layout;
+            let t = std::time::Instant::now();
+            painter.draw(&mut term, &mut app).unwrap();
+            println!(
+                "{layout:?}: first {:?}; {} loaded, {} shown",
+                t.elapsed(),
+                app.site.issues.len(),
+                app.rows().len()
+            );
+            let t = std::time::Instant::now();
+            for _ in 0..30 {
+                painter.draw(&mut term, &mut app).unwrap();
+            }
+            println!("{layout:?}: warm frame {:?}", t.elapsed() / 30);
+        }
+    }
+
     /// **한 프레임에 드는 값을 잰다**(moai-wt4n·moai-m7iy). 에픽 `BENCH_EPICS`(기본 500)개에 멤버를
     /// 열아홉씩, 느슨한 일을 에픽 수만큼 세워 뿌리 목록을 그린다 — 뿌리는 에픽 줄마다 진척 셈을 낸다.
     /// `CARGO_PROFILE_TEST_OPT_LEVEL=3 cargo test --bin moai -- --ignored --nocapture a_frame_costs` 로

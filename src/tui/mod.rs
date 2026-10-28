@@ -450,6 +450,8 @@ pub struct Ground {
     /// 그 프로젝트의 아카이브 날수(`Config::archive_days`, moai-47mz) — 적재가 설정에서 옮겨 둔다. 거름망의
     /// 자([`Ground::here`])와 보기의 자([`Site::archived`])가 이 하나를 읽는다.
     archive_days: i64,
+    /// Replaced with this load's maps on every read, including background/project reads.
+    chart: std::cell::RefCell<Option<gantt::Cached>>,
 }
 
 /// 읽은 노트 한 벌(리뷰 moai-wcy8.rbj) — 글과, 거름망의 자로 접은 것과, 그것을 읽은 저널의 표식. **셋을 한
@@ -537,6 +539,7 @@ impl Ground {
             // 줄만으로는 모른다 — 노트를 보는 거름망이 처음 걸릴 때 읽는다([`Ground::read_notes`]).
             notes: None,
             archive_days: cfg.archive_days,
+            chart: Default::default(),
         }
     }
 
@@ -5975,7 +5978,7 @@ impl App {
     /// 보드는 밀려난 커서를 그 칸에서 보이는 가장 가까운 카드로 끌어왔고, 그 칸에 보이는 카드가 없으면 굴리기를 멈췄다 —
     /// 멈춤은 끌어오기 때문에 생긴 규칙이라 함께 걷었다.
     ///
-    /// 목록은 굴렀을 때만 센다(리뷰) — 끝에 닿은 뒤에도 몰아 받은 휠(`cmd::tui::rolls`)이 사건마다 목록을 다시 세지 않게.
+    /// 목록은 굴렀을 때만 센다(리뷰) — 끝에 닿은 뒤에도 몰아 받은 휠(`cmd::tui::take_burst`)이 사건마다 목록을 다시 세지 않게.
     fn roll(&mut self, roll: impl FnOnce(&mut scroll::Scroll)) {
         let was = self.list.offset();
         roll(&mut self.list);
