@@ -557,7 +557,11 @@ fn worked_in(mut input: Input) -> Input {
     };
     let dir = Path::new(dir);
     input.cwd = match input.cwd.as_deref() {
-        Some(cwd) => Some(Path::new(cwd).join(dir).display().to_string()),
+        Some(cwd) => {
+            let joined = Path::new(cwd).join(dir).display().to_string();
+            // `join` 은 Windows 에서 `\` 로 잇는다 — 세션의 자리가 `/` 꼴이면(`/c/…`) 섞인 구분자를 내지 않는다.
+            Some(if cwd.contains('\\') { joined } else { joined.replace('\\', "/") })
+        }
         None if dir.is_absolute() => Some(dir.display().to_string()),
         None => None,
     };

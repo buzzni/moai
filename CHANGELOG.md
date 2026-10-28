@@ -21,6 +21,17 @@ does not tag — see `CONTRIBUTING.md`.
 
 ### Fixed
 
+- **`moai wiki ls --json` gives `dir_abs` with `/` on Windows too.** It used to
+  end in `\docs` there, so the key a skill reads was a different shape per
+  platform. (moai-r2nn.2z0)
+- **A Codex `workdir` joined to the session's folder no longer mixes `\` into a
+  `/` path on Windows**, so the hook sees the same folder it was given.
+  (moai-r2nn.2z0)
+- **`moai web` stops writing a large answer to a reader that does not read, on
+  Windows too.** The whole-answer time limit was only checked between writes,
+  and Windows takes a huge buffer in one call; the answer is now written in
+  64 KiB pieces. (moai-r2nn.2z0)
+
 - **Codex hooks run on Windows.** Codex starts a hook there with `cmd /C`, which
   could not read the POSIX line moai plants — the hook exited 0 with no output
   and the rules were silently off, while `moai skill status` said `current`.
