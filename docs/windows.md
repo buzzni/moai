@@ -107,23 +107,41 @@ Windows (below).
   `merge-driver --install --as` is kept as you typed it. **The hooks need Git
   for Windows** — without Git Bash, Claude Code runs hooks in PowerShell, which
   cannot run them
-- **Codex and Antigravity run hooks through `cmd.exe`, not Git Bash.** On
-  Windows both start a hook as `cmd /c "<command>"`, which cannot read the
-  POSIX line moai plants for Unix (`>/dev/null` becomes a cmd redirect and the
-  hook ends with exit 0 and no output — the rules are off without a sign). So
-  Codex's `.codex/hooks.json` carries a second key per hook,
-  `commandWindows`, with `<moai> hook <event> --dialect codex || exit 0`
-  (the Unix `command` is unchanged), and Antigravity's `.agents/hooks.json`
-  has that one line for every OS, because the file is committed and has no
-  Windows-only key. If `moai` is missing the line still exits 0, and the
-  shell leaves one line on stderr that the agent keeps in its log. The line
-  holds no quotes at all — `agy` passes it to cmd with every `"` turned into
+- **Codex and Antigravity do not run hooks through Git Bash.** On Windows,
+  Codex 0.165 starts a hook in the session's shell — `pwsh`, else
+  `powershell.exe` (`-NoProfile -Command "<command>"`), and `cmd /C` only when
+  neither PowerShell is found — and Antigravity as `cmd /c "<command>"`; neither can read the POSIX line moai
+  plants for Unix (the rules would be off without a sign). So Codex's
+  `.codex/hooks.json` carries a second key per hook, `commandWindows`, with
+  `& '<moai>' hook <event> --dialect codex; if ($LASTEXITCODE -notin 0,1) { '{...}' }; exit 0`
+  — a line Windows PowerShell 5.1 and PowerShell 7 both read. The path is in
+  single quotes, so `C:/Program Files (x86)/…` works as written; when `moai`
+  cannot run (missing, too old, crashed) it prints the same "hook could not
+  run" notice the Unix line gives, and it always exits 0. The Unix `command` is
+  unchanged. Antigravity's
+  `.agents/hooks.json` has one quote-free line for every OS, because the file is committed and has no
+  Windows-only key. If `moai` is missing that line still exits 0, and the
+  shell leaves one line on stderr that the agent keeps in its log. Antigravity's
+  line holds no quotes at all — `agy` passes it to cmd with every `"` turned into
   `\"`, which cmd cannot read — so a `moai.exe` path with a space or a
   character cmd or sh reads (`C:/Program Files/…`, `%`, `&`, `(`) is written
-  as plain `moai`, and that `moai` has to be on `PATH`. After
+  as plain `moai`, and that `moai` has to be on `PATH`.
+  What this line cannot do: it has no shell around it to hold or filter the
+  output, so moai does that itself — for Antigravity a panic inside `moai hook` prints one
+  line on stderr, writes nothing to stdout and exits 0 (no verdict means pass).
+  A missing `moai` leaves the shell's own line on stderr (`not found`, `is not
+  recognized`); a `moai` too old to know `--dialect` is refused by its argument
+  parser and the `|| exit 0` turns that into a pass; and Antigravity has never
+  shown the "the hook did not run" notice that Claude shows. After
   `moai skill install` Codex asks you to trust the hooks again in `/hooks`; a
   hook file planted by an older moai reads as `stale` in `moai skill status`
   until you run `moai skill install --agent codex` (or `antigravity`) again
+  - **`moai skill status` says when that fallback bites.** When a hook file calls
+    plain `moai` — this fallback, or a file planted on a machine where `moai` on
+    `PATH` was moai's own binary — its `codex hooks` or `agy hooks` row turns into
+    a `!` if there is no `moai` on `PATH` (the rules are off) or if the one there
+    is a different file from the moai you ran; `--json` carries it as
+    `path_moai`. It blocks nothing
 - **`moai skill status` names the Git Bash Claude Code will use**
   (`· git bash  C:\Program Files\Git\bin\bash.exe`), looked up as Claude Code
   does: `CLAUDE_CODE_GIT_BASH_PATH` when it is set (and only that — a path

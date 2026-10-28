@@ -11686,6 +11686,21 @@ fn the_screen_follows_the_timezone_but_the_file_and_json_stay_utc() {
     let said = String::from_utf8(out.stderr).unwrap();
     // **한 줄이라는 것이 이 줄의 뜻이다** — 자료가 없는 기계에서는 까닭이 "tzdb 가 없다" 로 바뀌고,
     // 이름을 안 댄다. 막지 않는 것과 줄 수는 어느 기계에서나 같다.
+    // **Windows 에서는 못 푼 `TZ` 가 기계의 시간대로 내려간다**(src/tz.rs `resolved`, moai-vjdq.tg6) — 알림도 UTC 도 안 서고,
+    // 기계가 시간대를 못 대는 기계에서만 `TZ` 의 까닭 한 줄이 선다. 막지 않는 것은 어느 쪽이나 같다.
+    // 그래서 Windows 에서는 내려간 자리를 잰다 — `TZ` 없이 부른 화면(기계의 시간대)과 글자째 같아야 하고, 기계가 시간대를
+    // 대는 판이면 알림도 같다(리뷰 moai-r2nn.38g).
+    if cfg!(windows) {
+        let machine = staged(&["show", &id]).current_dir(s.path()).env_remove("TZ").output().unwrap();
+        assert_eq!(
+            String::from_utf8(out.stdout).unwrap(),
+            String::from_utf8(machine.stdout).unwrap(),
+            "기계의 시간대로 안 내려갔다"
+        );
+        assert_eq!(said, String::from_utf8(machine.stderr).unwrap(), "{said:?}");
+        assert!(said.lines().count() <= 1, "{said:?}");
+        return;
+    }
     assert_eq!(said.lines().count(), 1, "{said:?}");
     if tzdb {
         assert!(said.contains("Mars/Olympus"), "{said:?}");
@@ -11712,10 +11727,19 @@ fn a_posix_rule_in_tz_needs_no_tzdb() {
         assert!(shown.contains("2026-09-11 13:12"), "{tz} 를 규칙으로 안 읽었다\n{shown}");
         assert_eq!(said, "", "{tz} 가 tzdb 없음을 알렸다");
     }
-    // 이름도 규칙도 아니면 예전처럼 UTC 로 떨어지고 한 줄로 알린다.
+    // 이름도 규칙도 아니면 예전처럼 UTC 로 떨어지고 한 줄로 알린다. **Windows 는 빼고** — 거기서는 못 연 `TZ` 가 기계의
+    // 시간대로 내려가 UTC 도 알림도 안 선다(src/tz.rs `resolved`).
     let (shown, said) = at(&nowhere, "Asia/Seoul");
-    assert!(shown.contains("2026-09-11 04:12"), "{shown}");
-    assert_eq!(said.lines().count(), 1, "{said:?}");
+    if cfg!(windows) {
+        // Windows 에서는 내려간 자리를 잰다 — `TZ` 없이 부른 화면(기계의 시간대)과 글자째 같다(리뷰 moai-r2nn.38g).
+        let machine =
+            staged(&["show", &id]).current_dir(s.path()).env("TZDIR", &nowhere).env_remove("TZ").output().unwrap();
+        assert_eq!(shown, String::from_utf8(machine.stdout).unwrap(), "기계의 시간대로 안 내려갔다");
+        assert_eq!(said, String::from_utf8(machine.stderr).unwrap(), "{said:?}");
+    } else {
+        assert!(shown.contains("2026-09-11 04:12"), "{shown}");
+        assert_eq!(said.lines().count(), 1, "{said:?}");
+    }
 
     // tzdb 에 같은 이름의 파일이 있는데 TZif 가 아니면 규칙으로 읽는다.
     let junk = s.path().join("junk-zoneinfo");
@@ -23400,7 +23424,11 @@ fn project_ls_draws_no_time_and_never_reaches_for_the_timezone() {
     let st = run(repo.path(), &["status"]);
     assert!(st.status.success(), "{}", text(&st));
     let said = String::from_utf8_lossy(&st.stderr);
-    assert!(said.contains("시간대 자료가 없다"), "대조가 안 섰다 — 이 환경은 tzdb 를 안 깨뜨린다\n{said}");
+    // Windows 는 대조를 못 세운다 — 못 연 `TZ` 가 기계의 시간대로 내려가 tzdb 없음을 안 알린다(src/tz.rs `resolved`).
+    assert!(
+        cfg!(windows) || said.contains("시간대 자료가 없다"),
+        "대조가 안 섰다 — 이 환경은 tzdb 를 안 깨뜨린다\n{said}"
+    );
 }
 
 /// **화면을 지어도 시각을 안 그리면 tzdb 를 안 만진다**(moai-s3i7). `ready`·`prime`·
@@ -23456,7 +23484,11 @@ fn screens_that_draw_no_time_never_reach_for_the_timezone() {
     let one = run(repo.path(), &["show", id]);
     assert!(one.status.success(), "{}", text(&one));
     let said = String::from_utf8_lossy(&one.stderr);
-    assert!(said.contains("시간대 자료가 없다"), "대조가 안 섰다 — 이 환경은 tzdb 를 안 깨뜨린다\n{said}");
+    // Windows 는 대조를 못 세운다 — 위와 같은 까닭(src/tz.rs `resolved`).
+    assert!(
+        cfg!(windows) || said.contains("시간대 자료가 없다"),
+        "대조가 안 섰다 — 이 환경은 tzdb 를 안 깨뜨린다\n{said}"
+    );
 }
 
 /// 두 번 더해도 한 줄이고 파일은 한 글자도 안 바뀐다. 이미 있는 것은 실패가 아니다.
@@ -27560,7 +27592,7 @@ fn the_wiki_json_is_the_contract_the_skill_reads() {
     // 목록은 페이지마다 `seen_count` 를 늘 낸다(moai-4s5n.c0n), `show` 는 `seen` 을 늘 낸다.
     // `dir_abs` 는 이 체크아웃의 위키 자리다(moai-xp7l.ml4) — 시험 자리의 절대 경로라 읽어서 견준다.
     let abs = serde_json::from_str::<serde_json::Value>(ls.trim()).unwrap()["dir_abs"].as_str().unwrap().to_string();
-    assert!(abs.starts_with('/') && abs.ends_with("/docs"), "{abs}");
+    assert!(Path::new(&abs).is_absolute() && abs.ends_with("/docs"), "{abs}");
     assert_eq!(
         ls.trim_end(),
         format!(
@@ -27658,16 +27690,14 @@ fn the_wiki_rides_the_branch_while_the_tracker_goes_to_the_root() {
 
     // `dir_abs` 는 이 체크아웃의 위키 자리다(moai-xp7l.ml4) — 워크트리에서 부르면 워크트리의 것이다.
     let abs = |out: &str| serde_json::from_str::<serde_json::Value>(out.trim()).unwrap()["dir_abs"].clone();
-    assert_eq!(abs(&here), wt.join("docs").to_string_lossy().as_ref(), "{here}");
-    assert_eq!(abs(&root), main.join("docs").to_string_lossy().as_ref(), "{root}");
+    // `dir_abs` 는 어느 OS 에서나 `/` 로 잇는다(src/cmd/wiki.rs) — 시험 쪽 경로도 같은 자로 접어 견준다.
+    let slashed = |p: std::path::PathBuf| p.to_string_lossy().replace('\\', "/");
+    assert_eq!(abs(&here), slashed(wt.join("docs")).as_str(), "{here}");
+    assert_eq!(abs(&root), slashed(main.join("docs")).as_str(), "{root}");
     let cfg = std::fs::read_to_string(main.join(".moai/config.toml")).unwrap();
     std::fs::write(main.join(".moai/config.toml"), format!("wiki_dir = \"./wiki\"\n{cfg}")).unwrap();
     let none = String::from_utf8_lossy(&moai(&main, &["wiki", "ls", "--json"]).stdout).into_owned();
-    assert_eq!(
-        abs(&none),
-        main.join("wiki").to_string_lossy().as_ref(),
-        "아직 없는 위키에도 지을 자리가 선다 — {none}"
-    );
+    assert_eq!(abs(&none), slashed(main.join("wiki")).as_str(), "아직 없는 위키에도 지을 자리가 선다 — {none}");
     std::fs::write(main.join(".moai/config.toml"), format!("wiki_dir = \"../away\"\n{cfg}")).unwrap();
     let away = String::from_utf8_lossy(&moai(&main, &["wiki", "ls", "--json"]).stdout).into_owned();
     assert!(!away.contains("dir_abs"), "체크아웃 밖을 쓸 자리로 내밀었다 — {away}");
