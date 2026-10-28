@@ -104,6 +104,8 @@ body {
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
 
+:root { --progress-soft: color-mix(in srgb, #F2B01E 7%, var(--bg)); --review-soft: color-mix(in srgb, #a855f7 8%, var(--bg)); }
+
 /*
  * Moai panel components. Specs: docs/moai-panel/look-and-feel.md section 5. Flat design: shadows only on
  * menus, popovers and the kanban's cards. Class names are m-* and built by view/components.ts, view/tabs.ts, view/split.ts.
@@ -293,12 +295,14 @@ button.m-refreshed:hover { background: var(--hover); color: var(--text); }
    Without motion both stand still: ▸, and the title in its own colour. */
 @media (prefers-reduced-motion: no-preference) {
   .m-spin { position: relative; color: transparent; }
-  /* One spinner for every started column: review's, its magenta at the regular weight (field test). In-progress's own
-     amber, and the bold its glyph carries, left the braille dots faint in Desktop, deepened or not. */
+  /* Status colours match TUI (user decision 2026-10-28). Regular weight keeps braille dots clear. */
   .m-spin::before {
-    content: "\280B"; position: absolute; inset: 0; color: var(--review); font-weight: 400; text-align: center;
+    content: "\280B"; position: absolute; inset: 0; color: var(--accent); font-weight: 400; text-align: center;
     animation: m-spin 1.2s step-start infinite;
   }
+  .m-st-in_progress.m-spin::before { color: var(--warn); }
+  .m-st-review.m-spin::before { color: var(--review); }
+  .m-st-other.m-spin::before { color: var(--accent); }
   .m-glint {
     --glint-band: 3ch;
     color: transparent;
@@ -423,6 +427,39 @@ body.m-resizing[data-resize="bottom"] { cursor: row-resize; }
 
 /* The label of a menu row: it takes what the glyph and the key hint leave. */
 .m-menu-label { flex: 1; }
+
+
+.m-split[data-position="top"] { flex-direction: column; }
+
+.m-split[data-position="right"] { flex-direction: row; }
+
+.m-split[data-position="right"] .m-split-detail { order: 2; flex-basis: var(--m-detail-size); }
+
+.m-split[data-position="right"] .m-split-resizer { order: 1; }
+
+.m-split[data-position="right"] .m-split-list { order: 0; }
+
+.m-split[data-position="top"] .m-split-list { order: 2; }
+
+.m-split[data-position="top"] .m-split-resizer { order: 1; }
+
+.m-split[data-position="top"] .m-split-detail { order: 0; flex-basis: var(--m-detail-size); }
+
+.m-split[data-position="right"] .m-split-resizer { width: 9px; margin: 0 -4px; cursor: col-resize; }
+
+.m-split[data-position="top"] .m-split-resizer { height: 9px; margin: -4px 0; cursor: row-resize; }
+
+.m-split[data-position="right"] .m-split-resizer::before { top: 0; bottom: 0; left: 4px; width: 1px; }
+
+.m-split[data-position="top"] .m-split-resizer::before { left: 0; right: 0; top: 4px; height: 1px; }
+
+.m-split[data-position="right"] .m-split-resizer:is(:hover, :focus-visible, [data-dragging])::before { left: 3px; width: 3px; background: var(--accent); }
+
+.m-split[data-position="top"] .m-split-resizer:is(:hover, :focus-visible, [data-dragging])::before { top: 3px; height: 3px; background: var(--accent); }
+
+body.m-resizing[data-resize="right"] { cursor: col-resize; }
+
+body.m-resizing[data-resize="top"] { cursor: row-resize; }
 
 /*
  * What a card of the kanban holds (view/board.ts): id, priority and count on one line, the title, and the chips
@@ -618,6 +655,9 @@ svg.links polygon { fill: var(--link); }
 .moai-head-sort { padding: 0; border: 0; background: transparent; color: inherit; font: inherit; cursor: pointer; }
 .moai-head-sort:hover { color: var(--text); }
 .moai-list-head [aria-sort] { color: var(--text); }
+
+.moai-list-body > .m-row[data-status="in_progress"]:not([aria-selected="true"]):not(:hover) { background: var(--progress-soft); }
+.moai-list-body > .m-row[data-status="review"]:not([aria-selected="true"]):not(:hover) { background: var(--review-soft); }
 
 /*
  * Rendered markdown (view/markdown.ts). Flat: borders only, tokens only. Needs tokens.css.
@@ -968,5 +1008,8 @@ svg.links polygon { fill: var(--link); }
 .moai-detail-timeline > li[data-kind="note"]::before { border-color: var(--warn); }
 .moai-detail-timeline .moai-detail-meta { display: block; font-size: 11px; }
 .moai-detail-timeline > li.moai-detail-meta::before { display: none; }
+
+.moai-detail-text { white-space: pre-wrap; overflow-wrap: anywhere; min-width: 0; }
+.moai-detail-timeline .moai-detail-meta { display: block; margin-top: 4px; }
 
 [hidden]{display:none!important}

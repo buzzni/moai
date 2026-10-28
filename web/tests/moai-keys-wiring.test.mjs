@@ -176,7 +176,7 @@ test('keys: SPC opens the menu; a toggle from it runs, keeps the menu open and r
   panel.seq(' ', 'c', 'i', 'Escape')
   assert.equal(panel.state().columns.id, false)
   panel.seq(' ', 'o', 'd', 'Escape')
-  assert.equal(panel.state().detail.position, 'left')
+  assert.equal(panel.state().detail.position, 'bottom')
   panel.seq(' ', 'v', 'd', 'Escape')
   assert.equal(panel.state().detail.visible, false)
   assert.equal(menu.hidden, true)

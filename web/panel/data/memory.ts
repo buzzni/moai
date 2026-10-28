@@ -1,6 +1,6 @@
 /**
  * What the panel remembers between openings (design §5): the last tab, whether the detail shows, where it
- * stands and its share of the split for each position (`ratio.left`, `ratio.bottom`), the time zone picked with
+ * stands and its share of the split for each position (`right`, `bottom`, `left`, `top`), the time zone picked with
  * `SPC o t` (`zone`, data/zone.ts) and the theme picked with the theme button (`theme`, data/theme.ts; left out for
  * `system`) — how this person reads the page, so it is kept beside the layout, not per project.
  *
@@ -26,7 +26,7 @@ export const MEMORY_VERSION = 1
 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null
 
-const normalizePosition = (value: unknown): DetailPosition => (value === 'left' ? 'left' : 'bottom')
+const normalizePosition = (value: unknown): DetailPosition => (value === 'left' || value === 'bottom' || value === 'top' || value === 'right' ? value : 'right')
 
 /** Stored settings (parsed JSON, or anything else) to usable ones; what is missing or wrong takes its default. */
 export function normalizeMemory(value: unknown): Remembered {
@@ -39,6 +39,8 @@ export function normalizeMemory(value: unknown): Remembered {
       visible: typeof detail.visible === 'boolean' ? detail.visible : true,
       position: normalizePosition(detail.position),
       ratio: {
+        right: normalizeRatio(ratio.right, 'right'),
+        top: normalizeRatio(ratio.top, 'top'),
         left: ratio.left === undefined ? DEFAULT_RATIO.left : normalizeRatio(ratio.left, 'left'),
         bottom: ratio.bottom === undefined ? DEFAULT_RATIO.bottom : normalizeRatio(ratio.bottom, 'bottom'),
       },
@@ -54,7 +56,7 @@ export function normalizeMemory(value: unknown): Remembered {
 /** The part of the state that is remembered. */
 export function rememberedOf(state: State): Remembered {
   const { visible, position, ratio } = state.detail
-  return { tab: state.tab, detail: { visible, position, ratio: { left: ratio.left, bottom: ratio.bottom } }, ...(state.zone ? { zone: state.zone } : {}), ...(state.theme !== 'system' ? { theme: state.theme } : {}) }
+  return { tab: state.tab, detail: { visible, position, ratio: { ...ratio } }, ...(state.zone ? { zone: state.zone } : {}), ...(state.theme !== 'system' ? { theme: state.theme } : {}) }
 }
 
 export function sameMemory(a: Remembered, b: Remembered): boolean {
@@ -62,6 +64,8 @@ export function sameMemory(a: Remembered, b: Remembered): boolean {
     a.tab === b.tab &&
     a.detail.visible === b.detail.visible &&
     a.detail.position === b.detail.position &&
+    a.detail.ratio.right === b.detail.ratio.right &&
+    a.detail.ratio.top === b.detail.ratio.top &&
     a.detail.ratio.left === b.detail.ratio.left &&
     a.detail.ratio.bottom === b.detail.ratio.bottom &&
     (a.zone ?? null) === (b.zone ?? null) &&

@@ -225,7 +225,7 @@ export function initialState(): State {
     cursor: null,
     focus: 'list',
     expanded: [],
-    detail: { visible: true, position: 'bottom', ratio: { ...DEFAULT_RATIO } },
+    detail: { visible: true, position: 'right', ratio: { ...DEFAULT_RATIO } },
     view: { hiddenStatuses: [], hideDeferred: true, hideBacklog: false, showArchived: false, worktree: true },
     columns: { ...COLUMN_DEFAULTS },
     columnsKnown: Object.keys(COLUMN_DEFAULTS) as ColumnName[],
@@ -428,7 +428,7 @@ export function reduce(state: State, action: Action): State {
     case 'restore': {
       const { tab, detail, zone, theme } = action.settings
       if (tab === undefined && detail === undefined && zone === undefined && theme === undefined) return state
-      const ratio = detail ? { left: normalizeRatio(detail.ratio.left, 'left'), bottom: normalizeRatio(detail.ratio.bottom, 'bottom') } : state.detail.ratio
+      const ratio = detail ? { right: normalizeRatio(detail.ratio.right, 'right'), top: normalizeRatio(detail.ratio.top, 'top'), left: normalizeRatio(detail.ratio.left, 'left'), bottom: normalizeRatio(detail.ratio.bottom, 'bottom') } : state.detail.ratio
       return {
         ...state,
         tab: tab ?? state.tab,

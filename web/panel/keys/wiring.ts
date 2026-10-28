@@ -262,8 +262,8 @@ export function wireKeys(options: KeyWiringOptions): KeyWiring {
       next: state.focus === "list" ? "detail" : "list",
       prev: state.focus === "list" ? "detail" : "list",
       left: at === "left" ? "detail" : "list",
-      right: "list",
-      up: "list",
+      right: at === "right" ? "detail" : "list",
+      up: at === "top" ? "detail" : "list",
       down: at === "bottom" ? "detail" : "list",
     }
     shell.focusPane(toward[side])
@@ -476,7 +476,7 @@ export function wireKeys(options: KeyWiringOptions): KeyWiring {
       store.dispatch({ type: "column", column, on: !store.getState().columns[column] })
     },
     "option.detailAt": () => {
-      const position = store.getState().detail.position === "left" ? "bottom" : "left"
+      const position = ({ right: "bottom", bottom: "left", left: "top", top: "right" } as const)[store.getState().detail.position]
       store.dispatch({ type: "detail-position", position })
     },
     "prompt.apply": () => {

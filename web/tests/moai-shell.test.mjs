@@ -116,7 +116,7 @@ test('tabs: roving tabindex, arrows wrap, Home/End, onSelect fires once per chan
   const tabs = tabsModule.createTabs(doc, { selected: 'board', onSelect: (id) => chosen.push(id) })
   doc.body.append(tabs.el)
   const buttons = [...tabs.el.querySelectorAll('[role=tab]')]
-  assert.deepEqual(buttons.map((b) => b.textContent), ['칸반', '목록', '위키', '간트'])
+  assert.deepEqual(buttons.map((b) => b.textContent), ['칸반', '목록', '간트', '위키'])
   const state = () => buttons.map((b) => `${b.getAttribute('aria-selected')}/${b.tabIndex}`)
   assert.deepEqual(state(), ['true/0', 'false/-1', 'false/-1', 'false/-1'])
   assert.equal(tabs.el.getAttribute('role'), 'tablist')
@@ -129,14 +129,14 @@ test('tabs: roving tabindex, arrows wrap, Home/End, onSelect fires once per chan
   press(buttons[3], 'ArrowRight')
   assert.equal(tabs.selected(), 'board', 'wraps to the first')
   press(buttons[0], 'ArrowLeft')
-  assert.equal(tabs.selected(), 'gantt', 'wraps to the last')
+  assert.equal(tabs.selected(), 'wiki', 'wraps to the last')
   press(buttons[3], 'Home')
   assert.equal(tabs.selected(), 'board')
   press(buttons[0], 'End')
-  assert.equal(tabs.selected(), 'gantt')
+  assert.equal(tabs.selected(), 'wiki')
   assert.equal(press(buttons[3], 'a').defaultPrevented, false)
   buttons[2].click()
-  assert.deepEqual(chosen, ['list', 'wiki', 'gantt', 'board', 'gantt', 'board', 'gantt', 'wiki'])
+  assert.deepEqual(chosen, ['list', 'gantt', 'wiki', 'board', 'wiki', 'board', 'wiki', 'gantt'])
 
   tabs.setSelected('list')
   assert.deepEqual(state(), ['false/-1', 'true/0', 'false/-1', 'false/-1'])
@@ -219,7 +219,7 @@ test('responsive: the css container queries carry the same numbers as responsive
 
 test('split: ratios are clamped to 15-85% and keep minimum sizes', () => {
   const { clampRatio, normalizeRatio, ratioFromPointer, DEFAULT_RATIO } = splitModule
-  assert.deepEqual(DEFAULT_RATIO, { left: 0.45, bottom: 0.3 })
+  assert.deepEqual(DEFAULT_RATIO, { right: 0.45, top: 0.3, left: 0.45, bottom: 0.3 })
   assert.equal(normalizeRatio('x', 'left'), 0.45)
   assert.equal(normalizeRatio(NaN, 'bottom'), 0.3)
   assert.equal(normalizeRatio(0.01, 'left'), 0.15)
@@ -304,7 +304,7 @@ test('split: dragging the resizer sets the ratio and reports once at the end', (
 })
 
 test('position toggle: one icon button flips left/bottom and is disabled with a reason when narrow', () => {
-  const labels = { toLeft: '상세를 왼쪽으로', toBottom: '상세를 아래로', forcedBottom: '폭이 좁아 아래로 고정' }
+  const labels = { toTop: '상세를 위로', toLeft: '상세를 왼쪽으로', toBottom: '상세를 아래로', forcedBottom: '폭이 좁아 아래로 고정' }
   const toggled = []
   const toggle = splitModule.createPositionToggle(doc, { position: 'bottom', width: 900, labels, onToggle: (next) => toggled.push(next) })
   const button = toggle.el
@@ -315,10 +315,10 @@ test('position toggle: one icon button flips left/bottom and is disabled with a 
   assert.deepEqual(toggled, ['left'])
 
   toggle.update('left', 900)
-  assert.equal(button.getAttribute('aria-label'), '상세를 아래로')
+  assert.equal(button.getAttribute('aria-label'), '상세를 위로')
   assert.equal(button.querySelectorAll('svg').length, 1)
   button.click()
-  assert.deepEqual(toggled, ['left', 'bottom'])
+  assert.deepEqual(toggled, ['left', 'top'])
 
   toggle.update('bottom', 500)
   assert.equal(button.getAttribute('aria-disabled'), 'true')
@@ -327,4 +327,30 @@ test('position toggle: one icon button flips left/bottom and is disabled with a 
   assert.equal(toggled.length, 2, 'does nothing while forced')
   toggle.update('bottom', 640)
   assert.equal(button.hasAttribute('aria-disabled'), false)
+})
+
+
+test('four sides: cycle, icons, forced bottom and mirrored resize keys and drag ratios', () => {
+  const labels = { toRight: 'right', toBottom: 'bottom', toLeft: 'left', toTop: 'top', forcedBottom: 'forced' }
+  let at = 'right'
+  const toggle = splitModule.createPositionToggle(doc, { position: at, width: 900, labels, onToggle: next => { at = next; toggle.update(at, 900) } })
+  for (const [current, next] of [['right','bottom'], ['bottom','left'], ['left','top'], ['top','right']]) {
+    assert.equal(at, current)
+    assert.equal(toggle.el.title, next)
+    assert.equal(toggle.el.querySelector('svg').innerHTML, components.icon(doc, `panel-${current}`).innerHTML)
+    toggle.el.click()
+  }
+  for (const position of ['right','bottom','left','top']) {
+    const split = splitModule.createSplit(doc, { position })
+    split.setWidth(639)
+    assert.equal(split.position(), 'bottom')
+    split.setWidth(900)
+    assert.equal(split.position(), position)
+    const before = split.ratio(position)
+    press(split.resizer, {right:'ArrowLeft',bottom:'ArrowUp',left:'ArrowRight',top:'ArrowDown'}[position])
+    assert.ok(split.ratio(position) > before)
+  }
+  assert.equal(splitModule.ratioFromPointer(300, 1000, 'right'), 0.7)
+  assert.equal(splitModule.ratioFromPointer(600, 1000, 'top'), 0.6)
+  assert.match(componentsCss, /\.m-st-in_progress\.m-spin::before\s*\{ color: var\(--warn\)/)
 })

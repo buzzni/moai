@@ -1,20 +1,20 @@
-// List/detail split: the detail sits on the left or at the bottom (never right or top), one 28px icon
+// List/detail split: the detail sits on any of the four sides, one 28px icon
 // button flips it, a resizer drags or arrow-keys the ratio, and a narrow panel is forced to the bottom.
 // Standalone: positions and ratios come in through props/setters and go out through callbacks, so the
 // caller (store) owns persistence. Ratios are the detail's share of the container, per position.
 
-import { canChoosePosition, effectivePosition, type DetailPosition } from "./responsive.ts"
+import { canChoosePosition, effectivePosition, horizontal, first, nextPosition, type DetailPosition } from "./responsive.ts"
 import { el, icon, iconButton } from "./components.ts"
 
 export type { DetailPosition } from "./responsive.ts"
 
-export const DEFAULT_RATIO: Readonly<Record<DetailPosition, number>> = { left: 0.45, bottom: 0.3 }
+export const DEFAULT_RATIO: Readonly<Record<DetailPosition, number>> = { right: 0.45, bottom: 0.3, left: 0.45, top: 0.3 }
 export const MIN_RATIO = 0.15
 export const MAX_RATIO = 0.85
 
 /** Smallest list (3 rows of 28px) and detail the split will leave, in px. */
 const MIN_LIST_PX = 84
-const MIN_DETAIL_PX: Record<DetailPosition, number> = { left: 240, bottom: 120 }
+const MIN_DETAIL_PX: Record<DetailPosition, number> = { right: 240, bottom: 120, left: 240, top: 120 }
 const MIN_LIST_WIDTH_PX = 160
 
 export type Ratios = Record<DetailPosition, number>
@@ -33,7 +33,7 @@ export function clampRatio(ratio: number, total: number, position: DetailPositio
   let hi = MAX_RATIO
   if (total > 0) {
     const detailMin = MIN_DETAIL_PX[position] / total
-    const listMin = (position === "left" ? MIN_LIST_WIDTH_PX : MIN_LIST_PX) / total
+    const listMin = (horizontal(position) ? MIN_LIST_WIDTH_PX : MIN_LIST_PX) / total
     if (detailMin + listMin <= 1) {
       lo = Math.max(lo, detailMin)
       hi = Math.min(hi, 1 - listMin)
@@ -46,7 +46,7 @@ export function clampRatio(ratio: number, total: number, position: DetailPositio
 /** The detail's ratio for a pointer at `offset` px inside a container of `total` px. */
 export function ratioFromPointer(offset: number, total: number, position: DetailPosition): number {
   if (total <= 0) return DEFAULT_RATIO[position]
-  const detailShare = position === "left" ? offset / total : 1 - offset / total
+  const detailShare = first(position) ? offset / total : 1 - offset / total
   return clampRatio(detailShare, total, position)
 }
 
@@ -79,7 +79,7 @@ export interface Split {
 }
 
 export function createSplit(doc: Document, props: SplitProps): Split {
-  const ratios: Ratios = { left: normalizeRatio(props.ratios?.left, "left"), bottom: normalizeRatio(props.ratios?.bottom, "bottom") }
+  const ratios: Ratios = { right: normalizeRatio(props.ratios?.right, "right"), top: normalizeRatio(props.ratios?.top, "top"), left: normalizeRatio(props.ratios?.left, "left"), bottom: normalizeRatio(props.ratios?.bottom, "bottom") }
   let preferred = props.position
   let width = Infinity
   let shown: DetailPosition = effectivePosition(width, preferred)
@@ -98,12 +98,12 @@ export function createSplit(doc: Document, props: SplitProps): Split {
 
   function axisTotal(): number {
     const rect = root.getBoundingClientRect()
-    return shown === "left" ? rect.width : rect.height
+    return horizontal(shown) ? rect.width : rect.height
   }
 
   function paint(): void {
     root.dataset.position = shown
-    resizer.setAttribute("aria-orientation", shown === "left" ? "vertical" : "horizontal")
+    resizer.setAttribute("aria-orientation", horizontal(shown) ? "vertical" : "horizontal")
     resizer.setAttribute("aria-valuenow", String(Math.round(ratios[shown] * 100)))
     root.style.setProperty("--m-detail-size", `${(ratios[shown] * 100).toFixed(2)}%`)
   }
@@ -125,8 +125,8 @@ export function createSplit(doc: Document, props: SplitProps): Split {
     doc.body.dataset.resize = position
     const move = (ev: PointerEvent): void => {
       const rect = root.getBoundingClientRect()
-      const total = position === "left" ? rect.width : rect.height
-      const offset = position === "left" ? ev.clientX - rect.left : ev.clientY - rect.top
+      const total = horizontal(position) ? rect.width : rect.height
+      const offset = horizontal(position) ? ev.clientX - rect.left : ev.clientY - rect.top
       ratios[position] = ratioFromPointer(offset, total, position)
       paint()
     }
@@ -145,9 +145,9 @@ export function createSplit(doc: Document, props: SplitProps): Split {
   }
 
   function onKeyDown(event: KeyboardEvent): void {
-    const grow = shown === "left" ? "ArrowRight" : "ArrowUp"
-    const shrink = shown === "left" ? "ArrowLeft" : "ArrowDown"
-    // The arrows move the divider: right for a left detail and up for a bottom one both make the detail larger.
+    const grow = horizontal(shown) ? (first(shown) ? "ArrowRight" : "ArrowLeft") : (first(shown) ? "ArrowDown" : "ArrowUp")
+    const shrink = horizontal(shown) ? (first(shown) ? "ArrowLeft" : "ArrowRight") : (first(shown) ? "ArrowUp" : "ArrowDown")
+    // Arrow keys move the divider toward or away from the detail on each side.
     const step = event.shiftKey ? 0.1 : 0.02
     let next: number | null = null
     if (event.key === shrink) next = ratios[shown] - step
@@ -199,7 +199,7 @@ export interface PositionToggleProps {
   position: DetailPosition
   width: number
   onToggle: (next: DetailPosition) => void
-  labels: { toLeft: string; toBottom: string; forcedBottom: string }
+  labels: { toRight?: string; toTop?: string; toLeft: string; toBottom: string; forcedBottom: string }
 }
 
 export interface PositionToggle {
@@ -209,7 +209,7 @@ export interface PositionToggle {
 }
 
 /**
- * The one 28px icon button that flips the detail between left and bottom. Its icon shows where the detail
+ * The one 28px icon button that cycles the detail right, bottom, left and top. Its icon shows where the detail
  * is now; its name says what pressing does. Under the forced-bottom width it is disabled with the reason.
  */
 export function createPositionToggle(doc: Document, props: PositionToggleProps): PositionToggle {
@@ -217,17 +217,17 @@ export function createPositionToggle(doc: Document, props: PositionToggleProps):
   const button = iconButton(doc, { icon: "panel-bottom", label: props.labels.toLeft })
   const apply = (width: number): void => {
     const free = canChoosePosition(width)
-    const label = !free ? props.labels.forcedBottom : position === "bottom" ? props.labels.toLeft : props.labels.toBottom
+    const label = !free ? props.labels.forcedBottom : ({ right: props.labels.toRight ?? "Move details to the right", bottom: props.labels.toBottom, left: props.labels.toLeft, top: props.labels.toTop ?? "Move details to the top" })[nextPosition(position)]
     // aria-disabled, not disabled: a disabled button shows no title tooltip, and the tooltip is the explanation.
     if (free) button.removeAttribute("aria-disabled")
     else button.setAttribute("aria-disabled", "true")
     button.setAttribute("aria-label", label)
     button.title = label
-    button.querySelector("svg")?.replaceWith(icon(doc, position === "bottom" ? "panel-bottom" : "panel-left"))
+    button.querySelector("svg")?.replaceWith(icon(doc, `panel-${position}`))
   }
   button.addEventListener("click", () => {
     if (button.getAttribute("aria-disabled") === "true") return
-    props.onToggle(position === "bottom" ? "left" : "bottom")
+    props.onToggle(nextPosition(position))
   })
   apply(props.width)
   return {
