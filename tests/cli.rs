@@ -11688,7 +11688,16 @@ fn the_screen_follows_the_timezone_but_the_file_and_json_stay_utc() {
     // 이름을 안 댄다. 막지 않는 것과 줄 수는 어느 기계에서나 같다.
     // **Windows 에서는 못 푼 `TZ` 가 기계의 시간대로 내려간다**(src/tz.rs `resolved`, moai-vjdq.tg6) — 알림도 UTC 도 안 서고,
     // 기계가 시간대를 못 대는 기계에서만 `TZ` 의 까닭 한 줄이 선다. 막지 않는 것은 어느 쪽이나 같다.
+    // 그래서 Windows 에서는 내려간 자리를 잰다 — `TZ` 없이 부른 화면(기계의 시간대)과 글자째 같아야 하고, 기계가 시간대를
+    // 대는 판이면 알림도 같다(리뷰 moai-r2nn.38g).
     if cfg!(windows) {
+        let machine = staged(&["show", &id]).current_dir(s.path()).env_remove("TZ").output().unwrap();
+        assert_eq!(
+            String::from_utf8(out.stdout).unwrap(),
+            String::from_utf8(machine.stdout).unwrap(),
+            "기계의 시간대로 안 내려갔다"
+        );
+        assert_eq!(said, String::from_utf8(machine.stderr).unwrap(), "{said:?}");
         assert!(said.lines().count() <= 1, "{said:?}");
         return;
     }
@@ -11720,8 +11729,14 @@ fn a_posix_rule_in_tz_needs_no_tzdb() {
     }
     // 이름도 규칙도 아니면 예전처럼 UTC 로 떨어지고 한 줄로 알린다. **Windows 는 빼고** — 거기서는 못 연 `TZ` 가 기계의
     // 시간대로 내려가 UTC 도 알림도 안 선다(src/tz.rs `resolved`).
-    if !cfg!(windows) {
-        let (shown, said) = at(&nowhere, "Asia/Seoul");
+    let (shown, said) = at(&nowhere, "Asia/Seoul");
+    if cfg!(windows) {
+        // Windows 에서는 내려간 자리를 잰다 — `TZ` 없이 부른 화면(기계의 시간대)과 글자째 같다(리뷰 moai-r2nn.38g).
+        let machine =
+            staged(&["show", &id]).current_dir(s.path()).env("TZDIR", &nowhere).env_remove("TZ").output().unwrap();
+        assert_eq!(shown, String::from_utf8(machine.stdout).unwrap(), "기계의 시간대로 안 내려갔다");
+        assert_eq!(said, String::from_utf8(machine.stderr).unwrap(), "{said:?}");
+    } else {
         assert!(shown.contains("2026-09-11 04:12"), "{shown}");
         assert_eq!(said.lines().count(), 1, "{said:?}");
     }
