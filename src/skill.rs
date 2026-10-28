@@ -776,7 +776,12 @@ fn command_for(exe: &str, event: &str, dialect: Dialect) -> String {
 ///
 /// **Codex 0.165 는 Windows 에서 훅을 cmd 가 아니라 `powershell.exe -NoProfile -Command "<줄>"` 로 띄운다** — 2026-10-28
 /// 실측 probe 의 프로세스 사슬이 `node.exe ← powershell.exe ← codex.exe` 였고 cmd 는 없었다(`%COMSPEC%` 가 안 풀린 까닭이
-/// 그것이다). Windows PowerShell 5.1 은 `||` 를 문법 오류로 읽고(`The token '||' is not a valid statement separator`),
+/// 그것이다). 소스로도 그렇다(2026-10-28, openai/codex): 훅의 셸은 세션 환경의 셸이고(`core/src/session/mod.rs` 의
+/// `build_hooks_config` → `shell.derive_exec_args`), Windows 의 그 셸은 `pwsh` 다음 `powershell.exe`, **둘 다 없을 때만**
+/// `cmd.exe` 다(`shell-command/src/shell_detect.rs` 의 `default_user_shell_from_path`). 세션 환경이 없는 판에도
+/// `hooks/src/engine/command_runner.rs` 의 `build_command` 가 `cmd /C` 로 물러선다. 이 줄은 그 cmd 판에서는 안 돈다 — 두 셸이
+/// 함께 읽는 꼴은 따옴표·알림을 버린 맨 이름 줄뿐이라, 거의 늘 서는 PowerShell 판을 고른다(남는 판은 moai-7vgy).
+/// Windows PowerShell 5.1 은 `||` 를 문법 오류로 읽고(`The token '||' is not a valid statement separator`),
 /// `"<exe>" hook …` 은 명령이 아니라 문자열 식이라 `Unexpected token 'hook'` 이다 — cmd 꼴의 줄은 어떤 경로에서도 안 돌았다.
 /// 그래서 5.1 과 7 이 같이 읽는 꼴로 적는다.
 /// - `& '<exe>'` — 호출 연산자와 홑따옴표. 홑따옴표 안에서는 `$`·`` ` ``·`"`·`%`·빈칸·괄호가 다 글자라, 홑따옴표 넷

@@ -108,8 +108,9 @@ Windows (below).
   for Windows** — without Git Bash, Claude Code runs hooks in PowerShell, which
   cannot run them
 - **Codex and Antigravity do not run hooks through Git Bash.** On Windows,
-  Codex 0.165 starts a hook as `powershell.exe -NoProfile -Command "<command>"`
-  and Antigravity as `cmd /c "<command>"`; neither can read the POSIX line moai
+  Codex 0.165 starts a hook in the session's shell — `pwsh`, else
+  `powershell.exe` (`-NoProfile -Command "<command>"`), and `cmd /C` only when
+  neither PowerShell is found — and Antigravity as `cmd /c "<command>"`; neither can read the POSIX line moai
   plants for Unix (the rules would be off without a sign). So Codex's
   `.codex/hooks.json` carries a second key per hook, `commandWindows`, with
   `& '<moai>' hook <event> --dialect codex; if ($LASTEXITCODE -notin 0,1) { '{...}' }; exit 0`
