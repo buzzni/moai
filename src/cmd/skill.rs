@@ -1118,7 +1118,7 @@ impl ByName {
     }
 
     /// `exe` 는 `install` 이 적을 철자([`skill::exe_name`])다. `skill::portable_exe` 가 이름으로 물러서는 철자
-    /// (빈칸·`%`·`&` …)인데 `exe` 자신은 `moai` 가 아니면, 따옴표 없는 줄(agy 의 줄, Windows 의 Codex `commandWindows`)은
+    /// (빈칸·`%`·`&` …)인데 `exe` 자신은 `moai` 가 아니면, 따옴표 없는 줄(agy 의 줄)은
     /// PATH 의 `moai` 를 부른다. **같은 파일인지는 [`status`] 가 `exe` 와 `runs` 를 견주는 자**(`crate::path::real`)다.
     /// `reads_by_name` 은 이 에이전트의 줄이 exe 를 이름으로 읽는가 — agy 만이다.
     fn of(exe: &str, reads_by_name: bool, on_path: Option<&Path>, same_file: impl Fn(&Path, &Path) -> bool) -> ByName {

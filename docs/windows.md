@@ -107,14 +107,17 @@ Windows (below).
   `merge-driver --install --as` is kept as you typed it. **The hooks need Git
   for Windows** — without Git Bash, Claude Code runs hooks in PowerShell, which
   cannot run them
-- **Codex and Antigravity run hooks through `cmd.exe`, not Git Bash.** On
-  Windows both start a hook as `cmd /c "<command>"`, which cannot read the
-  POSIX line moai plants for Unix (`>/dev/null` becomes a cmd redirect and the
-  hook ends with exit 0 and no output — the rules are off without a sign). So
-  Codex's `.codex/hooks.json` carries a second key per hook,
-  `commandWindows`, with `"<moai>" hook <event> --dialect codex || echo {...}`
-  (the path is quoted, and the echoed JSON is the same "hook could not run"
-  notice the Unix line gives; the Unix `command` is unchanged), and Antigravity's
+- **Codex and Antigravity do not run hooks through Git Bash.** On Windows,
+  Codex 0.165 starts a hook as `powershell.exe -NoProfile -Command "<command>"`
+  and Antigravity as `cmd /c "<command>"`; neither can read the POSIX line moai
+  plants for Unix (the rules would be off without a sign). So Codex's
+  `.codex/hooks.json` carries a second key per hook, `commandWindows`, with
+  `& '<moai>' hook <event> --dialect codex; if ($LASTEXITCODE -notin 0,1) { '{...}' }; exit 0`
+  — a line Windows PowerShell 5.1 and PowerShell 7 both read. The path is in
+  single quotes, so `C:/Program Files (x86)/…` works as written; when `moai`
+  cannot run (missing, too old, crashed) it prints the same "hook could not
+  run" notice the Unix line gives, and it always exits 0. The Unix `command` is
+  unchanged. Antigravity's
   `.agents/hooks.json` has one quote-free line for every OS, because the file is committed and has no
   Windows-only key. If `moai` is missing that line still exits 0, and the
   shell leaves one line on stderr that the agent keeps in its log. Antigravity's

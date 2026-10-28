@@ -495,7 +495,7 @@ pub fn planted_exe(text: &str) -> Option<String> {
         Some(inner) => inner.replace(r"'\''", "'"),
         None => cmd.to_string(),
     };
-    // 두 꼴이다 — Claude·Codex 의 `command -v -- "<exe>" …` 와, Antigravity(와 Codex 의 `commandWindows`)의
+    // 두 꼴이다 — Claude·Codex 의 `command -v -- "<exe>" …` 와, Antigravity 의
     // 따옴표 없는 `<exe> hook …`([`portable_line`]).
     if let Some(rest) = line.strip_prefix("command -v -- \"") {
         return Some(rest[..rest.find('"')?].to_string());
@@ -772,24 +772,41 @@ fn command_for(exe: &str, event: &str, dialect: Dialect) -> String {
     }
 }
 
-/// Codex 의 `commandWindows` - **cmd 만 읽는 줄**이다(moai-r2nn.k5a). Codex 는 훅을 `cmd /C` 로 띄우되 `raw_arg` 로 한 겹 싸서
-/// 큰따옴표가 선다(2026-10-28 실측, Codex 0.165: 공백·괄호가 든 따옴표 경로가 돌고 `%` 는 풀리지 않는다). 그래서 agy 의 줄
-/// ([`portable_line`])과 달리 exe 를 따옴표로 싸 공백·괄호 경로가 이름으로 물러서지 않는다 - 따옴표를 깨는 철자([`quotable`])만 `moai` 로
-/// 물러선다. 못 돈 판(없는 바이너리 9009, clap 2, 패닉)에는 POSIX 줄([`shell_line`])과 같은 뜻의 알림을 `echo` 로 낸다: cmd 의
-/// `||` 는 앞이 0 이 아닐 때만 뒤를 돌려, moai 가 0 이면 그 stdout 만, 아니면 echo 의 JSON 만 나간다. **echo 뒤의 글에는 cmd 가 푸는
-/// 글자(`&|<>^`)와 `%` 가 없다** - 시험이 못박는다. agy 의 줄은 그대로다(agy 는 `"` 를 `\"` 로 바꾼다, moai-cj4a.zpz).
+/// Codex 의 `commandWindows` - **PowerShell 이 읽는 줄**이다(moai-r2nn.k5a, 리뷰 moai-r2nn.38g 1번).
+///
+/// **Codex 0.165 는 Windows 에서 훅을 cmd 가 아니라 `powershell.exe -NoProfile -Command "<줄>"` 로 띄운다** — 2026-10-28
+/// 실측 probe 의 프로세스 사슬이 `node.exe ← powershell.exe ← codex.exe` 였고 cmd 는 없었다(`%COMSPEC%` 가 안 풀린 까닭이
+/// 그것이다). Windows PowerShell 5.1 은 `||` 를 문법 오류로 읽고(`The token '||' is not a valid statement separator`),
+/// `"<exe>" hook …` 은 명령이 아니라 문자열 식이라 `Unexpected token 'hook'` 이다 — cmd 꼴의 줄은 어떤 경로에서도 안 돌았다.
+/// 그래서 5.1 과 7 이 같이 읽는 꼴로 적는다.
+/// - `& '<exe>'` — 호출 연산자와 홑따옴표. 홑따옴표 안에서는 `$`·`` ` ``·`"`·`%`·빈칸·괄호가 다 글자라, 홑따옴표 넷
+///   (`'`·`‘`·`’`·`‚`·`‛`, PowerShell 은 다 같은 따옴표로 읽는다)만 겹쳐 적으면 된다. 제어문자가 들면 `moai` 로 물러선다
+/// - 못 돈 판(없는 바이너리 — `$LASTEXITCODE` 가 안 서 `$null`, clap 2, 패닉 101)에는 POSIX 줄([`shell_line`])과 같은 뜻의
+///   알림을 홑따옴표 글로 낸다. 0·1 은 POSIX 줄처럼 moai 의 출력만 둔다 — 1 은 넘어진 명령이 stderr 에만 쓴 판이다
+/// - 끝의 `exit 0` 은 POSIX 줄의 끝과 같다. moai 의 stdout·stdin 은 PowerShell 이 다시 감싸지 않고 그대로 건넨다(실측: CP949
+///   콘솔 인코딩에서도 한글·`✓` 가 바이트째 지났다)
 fn codex_cmd_line(exe: &str, event: &str) -> String {
-    let exe = if quotable(exe) { exe } else { "moai" };
+    let exe = if exe.is_empty() || exe.contains(char::is_control) {
+        "moai".to_string()
+    } else {
+        exe.chars()
+            .flat_map(|c| {
+                let q = matches!(c, '\'' | '\u{2018}' | '\u{2019}' | '\u{201A}' | '\u{201B}');
+                std::iter::once(c).chain(q.then_some(c))
+            })
+            .collect()
+    };
     format!(
-        "\"{exe}\" hook {event} --dialect codex || echo {{\"systemMessage\":\"moai: the {event} hook could not run. \
-         The five moai rules are not standing - run moai skill status to see why.\"}}"
+        "& '{exe}' hook {event} --dialect codex; if ($LASTEXITCODE -notin 0,1) {{ '{{\"systemMessage\":\"moai: the {event} \
+         hook could not run. The five moai rules are not standing - run moai skill status to see why.\"}}' }}; exit 0"
     )
 }
 
 /// sh 도 cmd 도 같은 뜻으로 읽는 한 줄 — `<exe> hook <event> --dialect <말씨> || exit 0`(moai-cj4a).
 ///
-/// **왜 이 줄이 따로 있는가.** Windows 의 Codex(0.165)와 Antigravity(1.4.8)는 훅을 `cmd /c "<command>"` 로 띄운다
-/// (2026-10-28 실측 — Codex 는 `command_runner.rs` 의 `default_shell_program`, agy 는 `command_hook_executor.go`).
+/// **왜 이 줄이 따로 있는가.** Windows 의 Antigravity(1.4.8)는 훅을 `cmd /c "<command>"` 로 띄운다
+/// (2026-10-28 실측 — `command_hook_executor.go`). Codex 는 이 줄을 안 쓴다 — 그쪽은 PowerShell 로 띄워 제 줄이 따로다
+/// ([`codex_cmd_line`], 리뷰 moai-r2nn.38g 1번).
 /// [`shell_line`] 의 POSIX 글은 cmd 가 `>/dev/null` 을 제 리다이렉트로 읽다 "The system cannot find the path
 /// specified." 로 끝나고 **종료 0·빈 출력**이라, 규칙 다섯이 꺼진 것이 통과와 구별되지 않았다. Codex 에는 Windows 전용
 /// 키 `commandWindows` 가 있어 이 줄을 거기 심고(`command` 는 글자 하나 안 바꾼다), agy 에는 그런 키가 없고
@@ -801,8 +818,8 @@ fn codex_cmd_line(exe: &str, event: &str) -> String {
 /// - **따옴표를 하나도 안 쓴다**(리뷰 moai-cj4a.zpz) — agy 1.4.8 은 Go 의 인자 이스케이프로 `cmd /c` 를 띄워 줄 안의
 ///   `"` 를 `\"` 로 바꾼다. 2026-10-28 실측: `"<exe>" hook …` 꼴은 cmd 가 `'\"<exe>\"' is not recognized` 로 끝나고
 ///   `|| exit 0` 이 그것을 삼켜, 고치려던 "말없이 꺼진 규칙" 이 그대로였다. 따옴표 없는 줄은 Go 가 바깥을 `"…"` 로만
-///   싸고(안에 `"` 가 없으니 `\` 도 안 붙는다) cmd 가 그 한 겹을 벗겨 agy 로 실제로 돌았다. Codex 는 `raw_arg` 로
-///   한 겹 싸니 어느 쪽이든 선다 — 두 셸·두 띄우는 법 모두에서 같은 뜻인 꼴이 이것 하나다
+///   싸고(안에 `"` 가 없으니 `\` 도 안 붙는다) cmd 가 그 한 겹을 벗겨 agy 로 실제로 돌았다 — 두 셸 모두에서
+///   같은 뜻인 꼴이 이것 하나다
 /// - exe 철자는 [`portable_exe`] 를 지난다 — 따옴표 없이 적으니 두 셸 어디서도 뜻이 없는 글자만 받는다
 ///
 /// **셸이 못 하는 것은 moai 가 한다**(moai-r2nn.kep) — 이 줄에는 출력을 붙잡아 거를 셸이 없으니, `moai hook --dialect antigravity` 가
@@ -2746,7 +2763,8 @@ mod tests {
     }
 
     /// **Codex 의 처리기마다 `commandWindows` 가 서고 POSIX `command` 는 옛 글 그대로다**(moai-cj4a.bcv) — Windows 의 Codex 는
-    /// `cmd /C` 로 띄워 `sh -c '…'` 를 못 읽는다. exe 는 따옴표로 싸고(moai-r2nn.k5a) 못 돈 판에는 echo 의 알림이 선다.
+    /// 훅을 `powershell.exe -NoProfile -Command` 로 띄워 `sh -c '…'` 를 못 읽는다(리뷰 moai-r2nn.38g 1번). exe 는 홑따옴표로 싸고
+    /// 못 돈 판에는 알림이 선다.
     #[test]
     fn codex_gets_a_cmd_line_beside_the_posix_one() {
         let exe = "C:/repo/target/debug/moai.exe";
@@ -2761,38 +2779,77 @@ mod tests {
             assert_eq!(entry["command"], command_for(exe, &event, Dialect::Codex), "{at}: POSIX 줄이 바뀌었다");
             assert_eq!(entry["commandWindows"], codex_cmd_line(exe, &event), "{at}");
             let line = entry["commandWindows"].as_str().unwrap();
-            let head = format!("\"{exe}\" hook {event} --dialect codex || echo ");
+            let head = format!("& '{exe}' hook {event} --dialect codex; if ($LASTEXITCODE -notin 0,1) {{ '");
             assert!(line.starts_with(&head), "{at}: {line}");
-            // echo 뒤의 글에는 cmd 가 푸는 글자가 없다 - 있으면 알림이 다른 명령이 된다.
-            let said = &line[head.len()..];
-            assert!(!said.contains(['&', '|', '<', '>', '^', '%', '!']), "{at}: cmd 가 푸는 글자 - {said}");
-            let json: serde_json::Value = serde_json::from_str(said).expect("echo 의 글이 JSON 이 아니다");
+            // PowerShell 5.1 이 문법 오류로 읽는 `||`·`&&` 가 없다.
+            assert!(!line.contains("||") && !line.contains("&&"), "{at}: {line}");
+            let said = line[head.len()..].strip_suffix("' }; exit 0").expect("줄 끝이 `' }; exit 0` 이 아니다");
+            assert!(!said.contains('\''), "{at}: 알림 글에 홑따옴표 - {said}");
+            let json: serde_json::Value = serde_json::from_str(said).expect("알림 글이 JSON 이 아니다");
             assert!(json["systemMessage"].as_str().unwrap().contains("moai skill status"), "{at}");
         }
         let stop = |exe: &str| -> String {
             let v: serde_json::Value = serde_json::from_str(&codex_hooks(exe)).unwrap();
             v["hooks"]["Stop"][0]["hooks"][0]["commandWindows"].as_str().unwrap().to_string()
         };
-        // 따옴표로 싸므로 공백·괄호·`%`·`&`·`!`·`^`·`'` 가 든 경로도 이름으로 물러서지 않는다(Codex 0.165 실측: 공백·괄호 경로가 돌고 `%` 는 안 풀린다).
+        // 홑따옴표 안에서는 다 글자라 빈칸·괄호·`%`·`&`·`$`·`"`·`\` 가 든 경로도 이름으로 물러서지 않는다.
         for kept in [
             "C:/100%/moai.exe",
             "C:/Program Files/m/moai.exe",
             "C:/Program Files (x86)/m/moai.exe",
             "C:/a&b/moai.exe",
-            "C:/a!b/moai.exe",
-            "C:/a^b/moai.exe",
-            "/home/me/Bob's/moai",
+            "C:/a$b/moai.exe",
+            "C:/a\"b/moai.exe",
+            r"C:\x\moai.exe",
             "-moai",
         ] {
-            assert!(stop(kept).starts_with(&format!("\"{kept}\" hook stop --dialect codex || echo ")), "{kept}");
+            assert!(stop(kept).starts_with(&format!("& '{kept}' hook stop --dialect codex; ")), "{kept}");
         }
-        // 따옴표를 깨는 철자만 이름으로 물러선다.
-        for bad in ["C:/a\"b/moai.exe", r"C:\x\moai.exe", "/a$b/moai", "/a`b/moai"] {
-            assert!(stop(bad).starts_with("\"moai\" hook stop --dialect codex || echo "), "{bad}");
+        // 홑따옴표는 겹쳐 적는다 — PowerShell 이 따옴표로 읽는 것 다.
+        assert!(stop("C:/Bob's/moai.exe").starts_with("& 'C:/Bob''s/moai.exe' hook stop "));
+        assert!(stop("C:/a\u{2019}b/moai.exe").starts_with("& 'C:/a\u{2019}\u{2019}b/moai.exe' hook stop "));
+        // 빈 철자와 제어문자만 이름으로 물러선다.
+        for bad in ["", "C:/a\nb/moai.exe"] {
+            assert!(stop(bad).starts_with("& 'moai' hook stop --dialect codex; "), "{bad:?}");
         }
         // POSIX 줄은 글자 하나 안 바뀐다(Codex 는 글의 해시로 믿음을 기억한다).
         let v: serde_json::Value = serde_json::from_str(&codex_hooks("/repo/moai")).unwrap();
         assert_eq!(v["hooks"]["Stop"][0]["hooks"][0]["command"], command_for("/repo/moai", "stop", Dialect::Codex));
+    }
+
+    /// **Codex 의 줄을 Codex 처럼 띄워 본다**(리뷰 moai-r2nn.38g 1번) — `powershell.exe -NoProfile -Command <줄>`. 빈칸·괄호 든
+    /// 자리의 대역(`moai.bat`)을 부르면 그 출력만, 없는 자리면 알림 JSON 하나만 stdout 에 서고 종료는 늘 0 이다. 대역이
+    /// 101 로 끝나면(패닉) 알림이 선다. Windows 에서만 돈다 — 다른 OS 에는 그 셸이 없다.
+    #[cfg(windows)]
+    #[test]
+    fn the_codex_line_runs_under_windows_powershell() {
+        use std::process::{Command, Stdio};
+        let dir = std::env::temp_dir().join(format!("moai ps (x86) {}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let fake = dir.join("moai.bat");
+        std::fs::write(&fake, "@echo {\"verdict\":\"%1 %2\"}\r\n@exit /b %MOAI_FAKE_CODE%\r\n").unwrap();
+        let run = |exe: &str, code: &str| {
+            let out = Command::new("powershell.exe")
+                .args(["-NoProfile", "-Command", &codex_cmd_line(exe, "stop")])
+                .env("MOAI_FAKE_CODE", code)
+                .stdin(Stdio::null())
+                .output()
+                .unwrap();
+            (out.status.code(), String::from_utf8_lossy(&out.stdout).trim().to_string())
+        };
+        let shown = crate::path::slashed(&fake.display().to_string(), true);
+        assert_eq!(run(&shown, "0"), (Some(0), r#"{"verdict":"hook stop"}"#.to_string()));
+        assert_eq!(run(&shown, "1"), (Some(0), r#"{"verdict":"hook stop"}"#.to_string()));
+        let notice = |out: &str| {
+            let last: serde_json::Value = serde_json::from_str(out.lines().last().unwrap()).expect("알림이 JSON 이 아니다");
+            last["systemMessage"].as_str().unwrap().contains("stop hook could not run")
+        };
+        let (code, out) = run(&shown, "101");
+        assert!(code == Some(0) && notice(&out), "{code:?} {out}");
+        let missing = crate::path::slashed(&dir.join("none").join("moai.exe").display().to_string(), true);
+        let (code, out) = run(&missing, "0");
+        assert!(code == Some(0) && out.lines().count() == 1 && notice(&out), "{code:?} {out}");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// **Antigravity 의 줄은 sh 도 cmd 도 읽는 한 줄이다**(moai-cj4a.t76) — 모든 OS 에 같은 글이 선다. 없는 바이너리는 0 과

@@ -53,12 +53,13 @@ does not tag — see `CONTRIBUTING.md`.
   that committed it with an older moai gets one line naming
   `git rm --cached -- <path>`; `--json` carries it as `market_tracked`. The
   plugin's `version` changes once. (moai-r2nn.bb6)
-- **Codex hooks run on Windows.** Codex starts a hook there with `cmd /C`, which
-  could not read the POSIX line moai plants — the hook exited 0 with no output
-  and the rules were silently off, while `moai skill status` said `current`.
-  Each Codex hook now also carries `commandWindows`, which cmd reads: it quotes the
-  `moai.exe` path (so `C:/Program Files/...` works) and, when `moai` cannot run,
-  prints the same "the hook could not run" notice the Unix line does; the Unix
+- **Codex hooks run on Windows.** Codex starts a hook there with
+  `powershell.exe -NoProfile -Command`, which could not read the POSIX line moai
+  plants, and the rules were silently off while `moai skill status` said `current`.
+  Each Codex hook now also carries `commandWindows`, a line Windows PowerShell 5.1
+  and PowerShell 7 both read: it puts the `moai.exe` path in single quotes (so
+  `C:/Program Files/...` works) and, when `moai` cannot run, prints the same
+  "the hook could not run" notice the Unix line does; the Unix
   `command` is unchanged. Codex asks you to trust the hooks again in `/hooks`,
   and an older `.codex/hooks.json` reads as `stale` until
   `moai skill install --agent codex` plants it again. (moai-cj4a.bcv, moai-cj4a.x4u, moai-r2nn.k5a)
