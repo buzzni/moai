@@ -20,7 +20,7 @@ const NOW = Date.UTC(2026, 9, 25, 14, 0)
 clock.now = () => NOW
 clock.zone = () => 'UTC'
 
-const own = (start, end) => ({ start, end, from: 'own' })
+const own = (start, end) => ({ start: start ?? end, end: end ?? start, start_filled: start === null, end_filled: end === null, from: 'own' })
 const span = (start, end = null) => ({ kind: 'span', start, end })
 const g = (id, over) => ({
   id, kind: 'issue', planned: null, actual: { kind: 'not_started' }, progress: { kind: 'column', name: 'todo' },
@@ -37,12 +37,12 @@ const ROWS = [
   { id: 'e1.e', kind: 'issue', title: 'Put off', derived_epic: 'e1', status: 'todo' },
 ]
 const GANTT = {
-  m1: g('m1', { kind: 'milestone', planned: { start: '2026-10-20', end: '2026-10-26', from: 'members' }, actual: span('2026-10-20T09:10:00Z'), progress: { kind: 'rollup', done: 1, total: 5 } }),
-  e1: g('e1', { kind: 'epic', planned: { start: '2026-10-10', end: '2026-10-27', from: 'members' }, actual: span('2026-10-19T09:00:00Z'), progress: { kind: 'rollup', done: 1, total: 5 } }),
+  m1: g('m1', { kind: 'milestone', planned: { start: '2026-10-20', end: '2026-10-26', start_filled: false, end_filled: false, from: 'members' }, actual: span('2026-10-20T09:10:00Z'), progress: { kind: 'rollup', done: 1, total: 5 } }),
+  e1: g('e1', { kind: 'epic', planned: { start: '2026-10-10', end: '2026-10-27', start_filled: false, end_filled: false, from: 'members' }, actual: span('2026-10-19T09:00:00Z'), progress: { kind: 'rollup', done: 1, total: 5 } }),
   'e1.a': g('e1.a', { planned: own('2026-10-21', '2026-10-22'), actual: span('2026-10-21T09:20:00Z', '2026-10-22T15:05:00Z'), progress: { kind: 'column', name: 'done' } }),
   'e1.b': g('e1.b', { planned: own('2026-10-19', '2026-10-22'), actual: span('2026-10-19T09:00:00Z'), overdue: 3, progress: { kind: 'column', name: 'in_progress' } }),
-  'e1.c': g('e1.c', { planned: own('2026-10-26', '2026-10-27'), blocked_by: [{ id: 'e1.a', state: 'done' }, { id: 'e1.b', state: 'open' }] }),
-  'e1.d': g('e1.d', { planned: { start: null, end: '2026-10-27', from: 'own' }, actual: { kind: 'unknown' }, progress: { kind: 'column', name: 'in_progress' } }),
+  'e1.c': g('e1.c', { planned: own('2026-10-26', '2026-10-27'), blocked_by: [{ id: 'e1.b', state: 'open' }] }),
+  'e1.d': g('e1.d', { planned: own(null, '2026-10-27'), blocked_by: [{ id: 'e1.b', state: 'open' }], actual: { kind: 'unknown' }, progress: { kind: 'column', name: 'in_progress' } }),
   'e1.e': g('e1.e', { planned: own('2026-10-10', '2026-10-12'), deferred: true }),
 }
 const build = () => {
@@ -134,36 +134,39 @@ test('the model puts planned days, actual instants and the late band on the axis
   const old = model.placeRow(GANTT['e1.d'], ROWS[5], NOW, 'UTC')
   assert.equal(old.actual, null)
   assert.equal(old.unknown, true)
-  assert.equal(old.plan, null)
-  assert.equal(old.due, Date.UTC(2026, 9, 28))
+  assert.equal(old.plan.from, Date.UTC(2026, 9, 27))
+  assert.equal(old.due, null)
   // A milestone's own deadline marks the end of that day whatever its plan says.
   assert.equal(model.placeRow(GANTT.m1, ROWS[0], NOW, 'UTC').due, Date.UTC(2026, 9, 29))
   assert.equal(model.placeRow(undefined, ROWS[0], NOW).span, null)
 })
 
-test('late without a planned bar: a deadline-only row is late from its diamond, and moai\'s verdict is not asked again', () => {
-  // The usual row writes a deadline and no start: no planned bar, a `◆` at the end of 10-22, late by 3 days.
-  const due = g('x', { planned: { start: null, end: '2026-10-22', from: 'own' }, overdue: 3 })
+test('a deadline-only row has a filled plan, and lateness starts after its end', () => {
+  // Core fills the missing start, keeping the deadline inside the bar.
+  const due = g('x', { planned: own(null, '2026-10-22'), overdue: 3 })
   const late = model.placeRow(due, { id: 'x', status: 'todo', due_on: '2026-10-22' }, NOW, 'UTC')
-  assert.equal(late.plan, null)
-  assert.equal(late.due, Date.UTC(2026, 9, 23))
+  assert.equal(late.plan.to, Date.UTC(2026, 9, 23))
+  assert.equal(late.due, null)
   assert.deepEqual(late.over, { from: Date.UTC(2026, 9, 23), to: NOW })
   // moai counts late days in its own zone; where the page's zone is still on the deadline day the hatch is a sliver,
   // never dropped.
-  const today = g('y', { planned: { start: null, end: '2026-10-25', from: 'own' }, overdue: 1 })
+  const today = g('y', { planned: own(null, '2026-10-25'), overdue: 1 })
   const sliver = model.placeRow(today, { id: 'y', status: 'todo', due_on: '2026-10-25' }, NOW, 'UTC')
   assert.deepEqual(sliver.over, { from: Date.UTC(2026, 9, 26), to: Date.UTC(2026, 9, 26) })
   // A row with a plan ending before its start is late from the deadline, not from the start's day.
+  // moai hands such a start over as written (start_filled false), so a move and its undo keep it; the bar is the start's day.
   const backwards = g('z', { planned: own('2026-10-20', '2026-10-18'), overdue: 7 })
-  assert.equal(model.placeRow(backwards, { id: 'z', status: 'todo' }, NOW, 'UTC').over.from, Date.UTC(2026, 9, 19))
+  const placed = model.placeRow(backwards, { id: 'z', status: 'todo' }, NOW, 'UTC')
+  assert.equal(placed.over.from, Date.UTC(2026, 9, 19))
+  assert.deepEqual([placed.plan.from, placed.plan.to], [Date.UTC(2026, 9, 20), Date.UTC(2026, 9, 21)])
 })
 
 test('a milestone that wrote no deadline has no diamond; an archived one reads its own from the plan', () => {
   // Members' days give the hatched bar; their latest deadline is not the milestone's.
-  const members = g('m', { kind: 'milestone', planned: { start: '2026-10-20', end: '2026-10-26', from: 'members' } })
+  const members = g('m', { kind: 'milestone', planned: { start: '2026-10-20', end: '2026-10-26', start_filled: false, end_filled: false, from: 'members' } })
   assert.equal(model.placeRow(members, { id: 'm', kind: 'milestone', status: 'todo' }, NOW, 'UTC').due, null)
   // An archived row (a tree line no list printed) carries no due_on: its own plan's end is that deadline.
-  const archived = g('n', { kind: 'milestone', planned: { start: null, end: '2026-10-28', from: 'own' } })
+  const archived = g('n', { kind: 'milestone', planned: own(null, '2026-10-28') })
   assert.equal(model.placeRow(archived, { id: 'n', kind: 'milestone', archived: true }, NOW, 'UTC').due, Date.UTC(2026, 9, 29))
 })
 
@@ -253,12 +256,12 @@ test('late: a hatch from the planned end to now, and a !; the milestone deadline
   assert.equal(px(due, 'left'), days('2026-10-29'))
 })
 
-test('an unknown start draws no actual band, a deadline-only row draws a mark', () => {
+test('an unknown actual start draws no actual band, a deadline-only plan draws a bar', () => {
   const { root } = mount()
   const old = lane(root, 'e1.d')
   assert.equal(old.querySelector('.b-act'), null)
-  assert.equal(old.querySelector('.b-plan'), null)
-  assert.equal(old.querySelector('.mk.due').textContent, '◆')
+  assert.ok(old.querySelector('.b-plan'))
+  assert.equal(old.querySelector('.mk.due'), null)
   assert.equal(lane(root, 'e1.c').querySelector('.b-act'), null, 'not started: no band either')
 })
 
@@ -272,11 +275,11 @@ test('today: a dashed line at now, a cap in the header and the day in red', () =
   assert.ok(root.querySelectorAll('.col-we').length > 0, 'weekend shading')
 })
 
-test('arrows: only the cursor row\'s blockers, in one SVG behind the bars', () => {
+test('arrows: incoming and outgoing links of the cursor only, in one SVG behind the bars', () => {
   const { root, at } = mount('e1.c')
   const svg = root.querySelector('svg.links')
-  assert.equal(svg.querySelectorAll('path').length, 2)
-  assert.equal(svg.querySelectorAll('polygon').length, 2)
+  assert.equal(svg.querySelectorAll('path').length, 1)
+  assert.equal(svg.querySelectorAll('polygon').length, 1)
   assert.ok(svg.querySelector('path').getAttribute('d').startsWith('M'))
   assert.equal(lane(root, 'e1.c').getAttribute('aria-selected'), 'true')
   // A row nothing blocks shows no arrows; the cursor moves in place.
@@ -289,7 +292,11 @@ test('arrows: only the cursor row\'s blockers, in one SVG behind the bars', () =
   assert.deepEqual([...root.querySelectorAll('.lane')], lanes, 'no redraw for a cursor move')
   // An unknown start blocks nothing visible: arrows come from the blocker's planned end.
   at('e1.c')
-  assert.equal(root.querySelector('svg.links').querySelectorAll('path').length, 2)
+  assert.equal(root.querySelector('svg.links').querySelectorAll('path').length, 1)
+  at('e1.b')
+  assert.equal(root.querySelector('svg.links').querySelectorAll('path').length, 2, 'both rows blocked by the cursor get outgoing arrows')
+  at('e1.d')
+  assert.equal(root.querySelector('svg.links').querySelectorAll('path').length, 1, 'a filled plan anchors an incoming arrow')
 })
 
 test('the bubble is the panel\'s own element, with the title, planned, actual, late days, blockers and assignee', () => {
@@ -307,10 +314,10 @@ test('the bubble is the panel\'s own element, with the title, planned, actual, l
   assert.equal(bubble.hidden, true)
   lane(root, 'e1.a').querySelector('.b-act').dispatchEvent(new dom.window.MouseEvent('mouseenter'))
   assert.match(bubble.textContent, /Assigneekim/)
-  lane(root, 'e1.d').querySelector('.mk.due').dispatchEvent(new dom.window.MouseEvent('mouseenter'))
+  lane(root, 'e1.d').querySelector('.b-plan').dispatchEvent(new dom.window.MouseEvent('mouseenter'))
   assert.match(bubble.textContent, /start unknown/)
   lane(root, 'e1.c').querySelector('.b-plan').dispatchEvent(new dom.window.MouseEvent('mouseenter'))
-  assert.match(bubble.textContent, /Blocked bye1\.a \(done\), e1\.b \(open\)/)
+  assert.match(bubble.textContent, /Blocked bye1\.b \(open\)/)
   assert.match(bubble.textContent, /not started/)
 })
 
@@ -324,7 +331,7 @@ test('keys: j/k move the cursor, Enter opens the detail, - and = change the step
   assert.deepEqual(calls, ['point:e1.b', 'point:e1', 'point:m1', 'point:e1.e'])
   assert.equal(view.command('enter'), true)
   assert.equal(calls.at(-1), 'choose:e1.a')
-  assert.equal(view.command('expand'), false, 'not a gantt action')
+  assert.equal(view.command('unrelated'), false, 'not a gantt action')
   // = goes finer: the day step (40px) becomes the hour step (480px a day); - goes back.
   const planWidth = () => planWidthAt(root, box, dom)
   assert.equal(planWidth(), 80)
@@ -555,6 +562,7 @@ test('the plan write carries the move, not the days: moai measures them inside i
   assert.deepEqual(planEndpoint('e1.c', { edge: 'body', days: -2 }), { path: '/api/plan/e1.c', method: 'POST', query: { edge: 'body', days: '-2' } })
   assert.deepEqual(planEndpoint('e1.c', { edge: 'end', days: 3 }).query, { edge: 'end', days: '3' })
   assert.deepEqual(planEndpoint('z', { day: '2026-10-30' }).query, { day: '2026-10-30' })
+  assert.deepEqual(planEndpoint('z', { start: '2026-10-21' }).query, { start: '2026-10-21' })
 })
 
 test('shiftPlan is Issue::shifted: the changing side only, own days only', () => {
@@ -565,10 +573,11 @@ test('shiftPlan is Issue::shifted: the changing side only, own days only', () =>
   // A deadline alone: the body moves it, the start sets out from it; a start alone: the end sets out from it.
   assert.deepEqual(shiftPlan(own(null, '2026-10-27'), 'body', 1), { due: '2026-10-28' })
   assert.deepEqual(shiftPlan(own(null, '2026-10-27'), 'start', -2), { start: '2026-10-25' })
+  assert.deepEqual(shiftPlan({ ...own('2026-10-20', '2026-10-27'), start_filled: true }, 'start', 1), { start: '2026-10-21' })
   assert.deepEqual(shiftPlan(own('2026-10-26', null), 'end', 1), { due: '2026-10-27' })
   // Across a month end and a year end, in calendar days.
   assert.deepEqual(shiftPlan(own('2026-12-31', null), 'body', 1), { start: '2027-01-01' })
-  assert.deepEqual(shiftPlan({ start: '2026-10-20', end: '2026-10-26', from: 'members' }, 'body', 1), { why: 'members' })
+  assert.deepEqual(shiftPlan({ start: '2026-10-20', end: '2026-10-26', start_filled: false, end_filled: false, from: 'members' }, 'body', 1), { why: 'members' })
   assert.deepEqual(shiftPlan(null, 'body', 1), { why: 'none' })
   assert.deepEqual(shiftPlan(own('2026-10-26', '2026-10-27'), 'body', 0), { why: 'still' })
   // Whole days at every step: half a day and more rounds to the next.
@@ -584,6 +593,17 @@ test('shiftPlan is Issue::shifted: the changing side only, own days only', () =>
   assert.deepEqual(movedPlan(own('2026-10-26', '2026-10-27'), { start: '2026-10-27' }), [Date.UTC(2026, 9, 27), Date.UTC(2026, 9, 27) + D])
   assert.equal(movedPlan(own('2026-10-26', '2026-10-27'), { start: '2026-10-28' }), null)
   assert.deepEqual(movedPlan(own(null, '2026-10-27'), { due: '2026-10-28' }), [Date.UTC(2026, 9, 28), Date.UTC(2026, 9, 28) + D])
+  // A filled start drawn before the deadline is the creation day: it stays, and a deadline pulled before it is not a
+  // refusal — moai writes it and fills the start with the deadline's day (the drag must not snap back meanwhile).
+  const filled = { ...own('2026-10-20', '2026-10-27'), start_filled: true }
+  assert.deepEqual(movedPlan(filled, { due: '2026-10-29' }), [Date.UTC(2026, 9, 20), Date.UTC(2026, 9, 29) + D])
+  assert.deepEqual(movedPlan(filled, { due: '2026-10-15' }), [Date.UTC(2026, 9, 15), Date.UTC(2026, 9, 15) + D])
+  const capped = own(null, '2026-10-20')
+  assert.deepEqual(movedPlan(capped, { due: '2026-10-22' }, Date.UTC(2026, 9, 20)), [Date.UTC(2026, 9, 20), Date.UTC(2026, 9, 23)])
+  assert.deepEqual(movedPlan(capped, { due: '2026-10-25' }, Date.UTC(2026, 9, 22)), [Date.UTC(2026, 9, 22), Date.UTC(2026, 9, 26)])
+  // A start written after its deadline still counts as written: the move stands or not on that day.
+  assert.equal(movedPlan(own('2026-10-20', '2026-10-18'), { due: '2026-10-19' }), null)
+  assert.deepEqual(movedPlan(own('2026-10-20', '2026-10-18'), { due: '2026-10-21' }), [Date.UTC(2026, 9, 20), Date.UTC(2026, 9, 21) + D])
 })
 
 /** The index the gantt draws `rows` from, each tree line carrying its `gantt`. */
@@ -745,14 +765,14 @@ test('a milestone\'s own diamond moves with its bar\'s end; the undo inverts the
   assert.equal(moves.at(-1).undo, 'moai edit e1.c --shift -1')
 })
 
-test('a deadline-only row drags its diamond; a group counted from its members says why and moves nothing', () => {
+test('a deadline-only row drags its filled bar; a group counted from its members says why and moves nothing', () => {
   const { root, dom, moves, said } = writing()
   const l = lane(root, 'e1.d')
-  const due = laidOut(l.querySelector('.mk.due'))
-  const x = px(due, 'left')
-  press(dom, l, 'pointerdown', x + 2)
-  press(dom, l, 'pointerup', x + 42)
-  assert.deepEqual(moves.map((m) => m.change), [{ edge: 'body', days: 1 }], 'a diamond drags as the whole plan: its deadline')
+  const due = laidOut(l.querySelector('.b-plan'))
+  const x = px(due, 'left') + px(due, 'width') / 2
+  press(dom, l, 'pointerdown', x)
+  press(dom, l, 'pointerup', x + 40)
+  assert.deepEqual(moves.map((m) => m.change), [{ edge: 'end', days: 1 }], 'only the written deadline moves')
   const e = lane(root, 'e1')
   const hatched = laidOut(e.querySelector('.b-plan'))
   assert.equal(hatched.classList.contains('movable'), false)
@@ -799,7 +819,7 @@ test('a row only a sibling worktree shows is not drawn movable, and a double cli
 
 test('a diamond the plan has no day for is not grabbed: there is nothing to move (moai-vj8w.93u)', () => {
   const rows = ROWS.map((row) => (row.id === 'm1' ? { ...row, due_on: '2026-10-28' } : row))
-  const gantt = { ...GANTT, m1: { ...GANTT.m1, planned: { start: null, end: null, from: 'own' } } }
+  const gantt = { ...GANTT, m1: { ...GANTT.m1, planned: null } }
   const { root, dom, moves, said } = writing(rows, gantt)
   const l = lane(root, 'm1')
   const due = laidOut(l.querySelector('.mk.due'))
@@ -1077,6 +1097,7 @@ test('undo inverts each move, clearing an edge only when it was absent at read t
   assert.equal(undoOf('x', { edge: 'start', days: 1 }, { ...read, start: null }), 'moai edit x --start none')
   assert.equal(undoOf('x', { edge: 'end', days: 1 }, { ...read, due: null }), 'moai edit x --due none')
   assert.equal(undoOf('x', { day: '2026-10-27' }, { start: null, due: null }), 'moai edit x --start none --due none')
+  assert.equal(undoOf('x', { start: '2026-10-21' }, { start: null, due: '2026-10-27' }), 'moai edit x --start none')
 })
 
 test('zoom, fit with a new step and Ctrl+wheel each build one window at their final scroll position', () => {
@@ -1119,5 +1140,138 @@ test('edge undo uses the tree plan even when the list read disagrees about absen
     press(dom, l, 'pointerup', from + (grip === 'start' ? -40 : 40))
     assert.equal(moves.at(-1)?.undo, `moai edit e1.c ${expected}`)
     await tick()
+  }
+})
+
+
+test('filled edges stay derived through a whole-bar move and undo; resizing creates only the chosen edge', async () => {
+  for (const [planned, grip, edge, undo] of [
+    [{ ...own('2026-10-20', '2026-10-27'), start_filled: true }, 'body', 'end', '--shift-due -1'],
+    [own('2026-10-26', null), 'body', 'start', '--shift-start -1'],
+    [{ ...own('2026-10-20', '2026-10-27'), start_filled: true }, 'start', 'start', '--start none'],
+  ]) {
+    const gantt = { ...GANTT, 'e1.c': g('e1.c', { planned }) }
+    const { root, dom, moves } = writing(ROWS, gantt)
+    const l = lane(root, 'e1.c')
+    const bar = laidOut(l.querySelector('.b-plan'))
+    const x = px(bar, 'left') + (grip === 'start' ? 1 : px(bar, 'width') / 2)
+    press(dom, l, 'pointerdown', x)
+    if (grip === 'body') {
+      // The bar is drawn as moai will draw it after the write (as the TUI's drag): a filled start is the creation day
+      // and stays; a filled end is the start's day and travels with it.
+      const [left, width] = [px(bar, 'left'), px(bar, 'width')]
+      press(dom, l, 'pointermove', x + 40)
+      if (planned.start_filled) assert.deepEqual([px(bar, 'left'), px(bar, 'width')], [left, width + 40], 'a filled start stays')
+      else assert.deepEqual([px(bar, 'left'), px(bar, 'width')], [left + 40, width], 'a filled end travels with its start')
+    }
+    press(dom, l, 'pointerup', x + 40)
+    const absolute = grip === 'start' && planned.start_filled
+    const change = absolute ? { start: '2026-10-21' } : { edge, days: 1 }
+    assert.deepEqual(moves, [{ id: 'e1.c', change, undo: `moai edit e1.c ${undo}` }])
+    const { planEndpoint } = await panelModule('data/plan.ts')
+    assert.deepEqual(planEndpoint('e1.c', moves[0].change).query, absolute ? { start: '2026-10-21' } : { edge, days: '1' })
+    await tick()
+  }
+})
+
+
+test('gantt group buttons fold milestones and epics without changing the list folds', () => {
+  const { root, view, calls, index } = mount('e1.c')
+  const toggle = (id) => root.querySelector(`.g-row[data-id="${id}"] .moai-toggle`)
+  const start = initialState()
+  view.render({ ...start, tab: 'gantt', cursor: 'e1.c', expanded: ['list-only'] }, index)
+  toggle('e1').click()
+  assert.equal(toggle('e1').getAttribute('aria-expanded'), 'false')
+  assert.equal(lane(root, 'e1.c'), null)
+  assert.ok(lane(root, 'e1').querySelector('.b-plan'), 'the closed group keeps its rollup bar')
+  assert.deepEqual(calls, ['point:e1'], 'folding moves a hidden cursor to its group without choosing detail')
+  toggle('e1').click()
+  assert.equal(toggle('e1').getAttribute('aria-expanded'), 'true')
+  assert.ok(lane(root, 'e1.c'))
+  toggle('m1').click()
+  assert.equal(root.querySelectorAll('.g-row').length, 1)
+  assert.equal(toggle('m1').getAttribute('aria-expanded'), 'false')
+  view.leave()
+  view.render({ ...start, tab: 'gantt', expanded: ['list-only'] }, index)
+  assert.equal(root.querySelectorAll('.g-row').length, 7, 'each visit starts fully open')
+  assert.deepEqual(start.expanded, [], 'no list expansion was mutated')
+})
+
+test('h folds a parent and points at it; l opens it; Tab folds and opens the whole subtree', () => {
+  const { root, view, calls, index } = mount('e1.c')
+  assert.equal(view.command('collapse'), true)
+  assert.equal(lane(root, 'e1.c'), null)
+  assert.equal(root.querySelector('.g-row[data-id="e1"]').getAttribute('aria-selected'), 'true')
+  assert.deepEqual(calls, ['point:e1'])
+  assert.equal(view.command('expand'), true)
+  assert.ok(lane(root, 'e1.c'))
+  view.render({ ...initialState(), tab: 'gantt', cursor: 'm1' }, index)
+  view.command('expandAll')
+  assert.equal(root.querySelectorAll('.g-row').length, 1)
+  view.command('expandAll')
+  assert.equal(root.querySelectorAll('.g-row').length, 7)
+  assert.ok([...root.querySelectorAll('.moai-toggle')].every((el) => el.getAttribute('aria-expanded') === 'true'))
+  const binding = KEY_TABLE.browse.find((one) => one.action === 'expandAll')
+  assert.equal(binding.when({ tab: 'gantt', focus: 'list', mode: 'browse' }), true)
+})
+
+test('a hidden dependency is omitted rather than retargeted to its closed group', () => {
+  const rows = [...ROWS, { id: 'z', title: 'Outside', kind: 'issue', status: 'todo' }]
+  const gantt = { ...GANTT, z: g('z', { planned: own('2026-10-26', '2026-10-27'), blocked_by: [{ id: 'e1.b', state: 'open' }] }) }
+  const index = indexOf(rows, gantt)
+  const { root, view } = mount('z', index)
+  assert.equal(root.querySelector('svg.links').querySelectorAll('path').length, 1)
+  root.querySelector('.g-row[data-id="e1"] .moai-toggle').click()
+  assert.equal(root.querySelector('svg.links').querySelectorAll('path').length, 0)
+  view.render({ ...initialState(), tab: 'gantt', cursor: 'z' }, index)
+  assert.equal(root.querySelector('svg.links').querySelectorAll('path').length, 0)
+})
+
+
+test('started work and busy groups spin and glint in Gantt, with the list rules and no bar animation', () => {
+  const rows = [...ROWS,
+    { id: 'review', title: 'In review', kind: 'issue', status: 'review' },
+    { id: 'deferred', title: 'Later', kind: 'issue', status: 'in_progress', deferred_at: '2026-10-20T00:00:00Z', shelved_by: 'deferred' },
+  ]
+  const { root, view } = mount(null, indexOf(rows))
+  view.render({ ...initialState(), tab: 'gantt', view: { ...initialState().view, hideDeferred: false } }, indexOf(rows))
+  const node = (id) => root.querySelector(`.g-row[data-id="${id}"]`)
+  for (const id of ['e1.b', 'review', 'e1', 'm1']) {
+    assert.ok(node(id).querySelector('.c-st.m-spin'), id)
+    assert.ok(node(id).querySelector('.c-title .m-glint'), id)
+  }
+  for (const id of ['e1.a', 'e1.c', 'deferred']) {
+    assert.equal(node(id).querySelector('.m-spin, .m-glint'), null, id)
+  }
+  assert.match(node('m1').querySelector('.c-title').textContent, /^◆ /)
+  assert.equal(node('m1').querySelector('.m-glint').textContent, 'v1', 'milestone diamond stays outside the band')
+  assert.equal(root.querySelector('.g-lanes .m-spin, .g-lanes .m-glint'), null)
+})
+
+
+test('a capped filled start previews from the creation day in the page zone when the deadline moves later', async () => {
+  const oldZone = clock.zone
+  clock.zone = () => 'Asia/Seoul'
+  try {
+    const rows = ROWS.map(row => row.id === 'e1.c' ? { ...row, created_at: '2026-10-19T15:30:00Z', due_on: '2026-10-20' } : row)
+    const gantt = { ...GANTT, 'e1.c': g('e1.c', { planned: own(null, '2026-10-20') }) }
+    let finish
+    const answer = new Promise(resolve => { finish = resolve })
+    const { root, dom, moves } = writing(rows, gantt, () => answer)
+    const l = lane(root, 'e1.c')
+    const bar = laidOut(l.querySelector('.b-plan'))
+    const left = px(bar, 'left')
+    const width = px(bar, 'width')
+    const x = left + width / 2
+    press(dom, l, 'pointerdown', x)
+    press(dom, l, 'pointermove', x + 80)
+    assert.deepEqual([px(bar, 'left'), px(bar, 'width')], [left, width + 80])
+    press(dom, l, 'pointerup', x + 80)
+    assert.deepEqual(moves[0].change, { edge: 'end', days: 2 })
+    assert.deepEqual([px(bar, 'left'), px(bar, 'width')], [left, width + 80])
+    finish()
+    await tick()
+  } finally {
+    clock.zone = oldZone
   }
 })

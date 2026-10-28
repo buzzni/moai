@@ -33,9 +33,8 @@ const LOW_BODY: u16 = 4;
 
 /// 쓰려는 계획 옮기기 하나(moai-i4hf.9xi). 누군지 물으러 갔다 오면 이것을 다시 쓴다.
 ///
-/// **날이 아니라 옮기는 뜻을 든다**([`Plan`]) — 고칠 날은 쓰기 안에서 **그때의 줄로** 다시 잰다(`Issue::shifted`). 화면의
-/// 줄로 미리 센 날을 들고 가면, 그새 옆 세션이 고친 날 위에 화면의 옛 날에서 센 값을 덮어 그 고침이 말없이 사라진다 —
-/// 다시 읽기를 기다리는 틈과 누군지 묻는 틈이 그 자리다.
+/// 보통은 옮기는 뜻을 들고 락 안에서 다시 잰다(`Issue::shifted`). **채운 시작을 조작하면 절대 날짜**를 든다 —
+/// 사람이 화면에서 고른 날을 `--start` 로 쓰며, 그새 적힌 시작이 있으면 이 쓰기가 이긴다(옵션 D, moai-e9hi.442).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct PlanMove {
     pub id: String,
@@ -47,9 +46,44 @@ pub(super) struct PlanMove {
 pub(super) enum Plan {
     /// 제 계획을 날 수만큼 옮긴다 — 어느 날이 옮는지는 [`crate::model::Issue::shifted`] 가 정한다.
     Shift(Edge, i64),
+    /// 채운 시작을 사람이 고른 날로 쓴다. 기존 시작이 그새 생겼어도 덮는다.
+    Start(i64),
     /// 날이 하나도 안 적힌 줄에 그 하루(1970-01-01 부터의 날 수)를 시작·기한으로 세운다. 쓰는 순간 날이 이미 적혀
     /// 있으면 안 쓴다 — 쓰면 그 날을 덮는다.
     Day(i64),
+}
+
+impl Plan {
+    /// 쓸 날짜 변경. 절대 시작은 그대로, 상대 옮기기는 지금 줄의 제 날짜에서 잰다.
+    fn change(self, i: &crate::model::Issue) -> Result<crate::model::DateChange, Unshifted> {
+        match self {
+            Self::Shift(edge, days) => i.shifted(edge, days),
+            Self::Start(day) => Ok((Some(Some(crate::model::format_date(day))), None)),
+            Self::Day(day) => {
+                let d = Some(Some(crate::model::format_date(day)));
+                Ok((d.clone(), d))
+            }
+        }
+    }
+}
+
+/// 채운 시작만 화면의 절대 날짜에서 출발한다. 나머지는 기존 상대 옮기기다.
+fn shift_intent(i: &crate::model::Issue, edge: Edge, days: i64, filled_start: Option<i64>) -> Result<Plan, Unshifted> {
+    if days == 0 {
+        return Err(Unshifted::Still);
+    }
+    if let Some(start) = filled_start {
+        return Ok(Plan::Start(start + days));
+    }
+    i.shifted(edge, days).map(|_| Plan::Shift(edge, days))
+}
+
+fn filled_start(i: &crate::model::Issue, edge: Edge, zone: &crate::tz::Zone) -> Option<i64> {
+    if edge != Edge::Start {
+        return None;
+    }
+    let p = crate::report::gantt::own_plan(i, zone)?;
+    p.start_filled.then(|| parse_date(&p.start)).flatten()
 }
 
 /// 간트 머리의 달 이름과 그것을 엮는 차례를 화면 말로 채운다. 위젯의 기본은 영어 약어다.
@@ -85,28 +119,24 @@ fn edge_of(part: moai_gantt::Part) -> Edge {
     }
 }
 
-/// 계획 날 둘(날 번호) → 막대의 `[시작, 끝)`(초). 시작만 적은 줄은 그 하루다 — 끝을 모르는 막대를 길게 그리면 없는
-/// 기한을 지어낸다. 읽은 줄([`fill_row`])과 끄는 막대([`preview`])가 이 하나로 잰다.
-fn plan_span(start: Option<i64>, end: Option<i64>) -> Option<(i64, i64)> {
-    match (start, end) {
-        (Some(s), Some(e)) => Some((s * DAY, (e + 1) * DAY)),
-        (Some(s), None) => Some((s * DAY, (s + 1) * DAY)),
-        _ => None,
-    }
+/// core 가 채운 계획 양끝을 위젯의 `[시작, 끝)`(초)로 놓는다.
+fn plan_span(p: &crate::report::gantt::Planned) -> Option<(i64, i64)> {
+    Some((parse_date(&p.start)? * DAY, (parse_date(&p.end)? + 1) * DAY))
 }
 
-/// 끄는 막대를 **놓으면 쓸 날로** 그린다(moai-i4hf.exq) — 셈은 쓰기와 같은 [`crate::model::Issue::shifted`] 다. 위젯의 끌기
+/// 끄는 막대를 **놓으면 쓸 날로** 그린다(moai-i4hf.exq) — 셈은 쓰기와 같은 [`Plan::change`] 다. 위젯의 끌기
 /// 셈(`drag_apply`)으로 그리던 판은 0 길이 막대(시작이 기한을 하루 넘는다)·시작만 든 줄·멤버에서 센 묶음에서 그린 날과 쓴
 /// 날이 갈렸다. 쓰기의 검사가 거절할 모양(시작이 기한 뒤)이면 옮기지 않은 채 둔다.
-fn preview(g: &mut GanttRow, i: &crate::model::Issue, (start, due): crate::model::DateChange) {
-    let start = start.unwrap_or_else(|| i.starts_on.clone());
-    let due = due.unwrap_or_else(|| i.due_on.clone());
-    let (s, e) = (start.as_deref().and_then(parse_date), due.as_deref().and_then(parse_date));
-    if s.zip(e).is_some_and(|(s, e)| s > e) {
+fn preview(g: &mut GanttRow, i: &crate::model::Issue, change: crate::model::DateChange, zone: &crate::tz::Zone) {
+    let mut next = i.clone();
+    next.set_dates(change.0, change.1);
+    if next.planned_start().zip(next.deadline()).is_some_and(|(s, e)| s > e) {
         return;
     }
-    g.planned = plan_span(s, e);
-    g.due = e.map(|e| (e + 1) * DAY);
+    if let Some(p) = crate::report::gantt::own_plan(&next, zone) {
+        g.planned = plan_span(&p);
+        g.due = (!p.end_filled).then(|| parse_date(&p.end).map(|d| (d + 1) * DAY)).flatten();
+    }
 }
 
 impl Site {
@@ -140,7 +170,14 @@ pub(super) enum ChartDrag {
     /// 막대 — 그 줄의 id, 잡은 부분, 누른 날짜 칸, 지금 날짜 칸. **끄는 동안은 그리기만 하고**
     /// (`App::chart_of`), 놓을 때 한 번 쓴다([`App::drop_chart`]). 줄은 **id 로** 든다 — 끄는 동안 다시 읽어 줄의 차례가
     /// 바뀌어도 그리는 쪽과 쓰는 쪽이 같은 줄을 찾는다.
-    Bar { id: String, part: moai_gantt::Part, from: i64, now: i64 },
+    Bar {
+        id: String,
+        part: moai_gantt::Part,
+        from: i64,
+        now: i64,
+        /// 잡을 때 채워져 있던 시작. 끄는 동안 다시 읽어도 처음 잡은 날에서 절대 날짜를 고른다.
+        filled_start: Option<i64>,
+    },
 }
 
 /// 위젯에 넘길 한 판 — 줄([`App::rows`] 와 같은 차례, 같은 길이), 막음, 맞출 폭, 지금.
@@ -235,7 +272,7 @@ impl App {
         }
     }
 
-    /// 커서 줄의 계획을 하루 옮긴다(moai-i4hf.9xi) — `<`·`>`·`{`·`}`. 어느 날이 옮는지는 `Issue::shifted` 가 정한다.
+    /// 커서 줄의 계획을 하루 옮긴다(moai-i4hf.9xi) — `<`·`>`·`{`·`}`. 채운 시작은 절대 날짜를 고르고 나머지는 `Issue::shifted` 다.
     pub(super) fn nudge(&mut self, n: keys::Nudge, rows: &[Row]) {
         let (edge, days) = match n {
             keys::Nudge::Earlier => (Edge::Body, -1),
@@ -264,6 +301,12 @@ impl App {
     /// 그 줄의 계획을 옮겨 쓴다. 못 옮기면(날이 없다·멤버에서 센 막대다) 까닭을 알림으로 댄다 — 조용히 먹으면 키가
     /// 고장 난 것으로 보인다.
     pub(super) fn shift_plan(&mut self, at: usize, edge: Edge, days: i64) {
+        let i = &self.site.issues[at];
+        let filled = filled_start(i, edge, &self.zone);
+        self.shift_from(at, edge, days, filled);
+    }
+
+    fn shift_from(&mut self, at: usize, edge: Edge, days: i64, filled: Option<i64>) {
         if let Some(branch) = self.elsewhere(at) {
             self.notice = Some(fill(
                 say(self.site.lang, "tui.gantt.elsewhere"),
@@ -272,8 +315,8 @@ impl App {
             return;
         }
         let i = &self.site.issues[at];
-        match i.shifted(edge, days) {
-            Ok(_) => self.write_plan(PlanMove { id: i.id.clone(), plan: Plan::Shift(edge, days) }),
+        match shift_intent(i, edge, days, filled) {
+            Ok(plan) => self.write_plan(PlanMove { id: i.id.clone(), plan }),
             Err(Unshifted::Still) => {}
             Err(why) => self.notice = Some(crate::view::unshifted(self.site.lang, why, &i.id)),
         }
@@ -316,9 +359,9 @@ impl App {
                     self.chart.set_label_width(w);
                     self.gantt_label = Some(w);
                 }
-                ChartDrag::Bar { id, part, from, .. } => {
+                ChartDrag::Bar { id, part, from, filled_start, .. } => {
                     let now = i64::from(at.x) - i64::from(laid.dates_body.x);
-                    self.chart_drag = Some(ChartDrag::Bar { id, part, from, now });
+                    self.chart_drag = Some(ChartDrag::Bar { id, part, from, now, filled_start });
                 }
             }
             return true;
@@ -350,7 +393,8 @@ impl App {
                 if let Some(i) = self.here_at(&rows, row).filter(|&i| self.elsewhere(i).is_none()) {
                     let id = self.site.issues[i].id.clone();
                     let c = col(at.x);
-                    self.chart_drag = Some(ChartDrag::Bar { id, part, from: c, now: c });
+                    let filled_start = filled_start(&self.site.issues[i], edge_of(part), &self.zone);
+                    self.chart_drag = Some(ChartDrag::Bar { id, part, from: c, now: c, filled_start });
                 }
             }
             moai_gantt::Hit::Empty { row, day } => {
@@ -378,14 +422,14 @@ impl App {
     /// 사용자 설정에 적는다(목록·상세 사이 선과 같은 결, `App::drop_line`). 축 끌기는 화면의 것이라 적을 것이 없다.
     /// [`App::drop_line`] 이 부른다 — 뗌을 놓친 터미널에서도 다음 사건·키가 놓는다.
     pub(super) fn drop_chart(&mut self) {
-        let (id, part, from, now) = match self.chart_drag.take() {
-            Some(ChartDrag::Bar { id, part, from, now, .. }) => (id, part, from, now),
+        let (id, part, from, now, filled_start) = match self.chart_drag.take() {
+            Some(ChartDrag::Bar { id, part, from, now, filled_start }) => (id, part, from, now, filled_start),
             Some(ChartDrag::Split { .. }) => return self.save_look(),
             Some(ChartDrag::Axis { .. }) | None => return,
         };
         let days = moai_gantt::drag_days(self.chart.axis.zoom, from, now);
         let Some(at) = self.site.index.find(&id) else { return };
-        self.shift_plan(at, edge_of(part), days);
+        self.shift_from(at, edge_of(part), days, filled_start);
     }
 
     /// 계획 옮기기를 쓴다 — [`commit_plan`] 이 쓰기 길(`App::write` → `store::with_write`)을 탄다.
@@ -449,13 +493,15 @@ impl App {
         // **끄는 막대는 화면에만 옮긴다**(moai-i4hf.exq) — 쓰기는 놓을 때 한 번이다([`App::drop_chart`]). 날 수는 위젯의
         // 셈(`drag_days`)이고 옮긴 날은 쓰기의 셈(`Issue::shifted`, [`preview`])이라, 놓을 때 쓰는 날과 끄는 동안 그린
         // 날이 한 자다. 못 옮기는 줄(멤버에서 센 묶음)은 그대로 둔다 — 놓으면 까닭이 선다.
-        if let Some(ChartDrag::Bar { id, part, from, now: to }) = &self.chart_drag
+        if let Some(ChartDrag::Bar { id, part, from, now: to, filled_start }) = &self.chart_drag
             && let Some(at) = self.site.index.find(id)
             && let Some(n) = rows.iter().position(|r| matches!(r, Row::Item(Seat::Here, e, _) if e.at() == Some(at)))
             && let Some(i) = self.site.issues.get(at)
-            && let Ok(change) = i.shifted(edge_of(*part), moai_gantt::drag_days(self.chart.axis.zoom, *from, *to))
+            && let Ok(plan) =
+                shift_intent(i, edge_of(*part), moai_gantt::drag_days(self.chart.axis.zoom, *from, *to), *filled_start)
+            && let Ok(change) = plan.change(i)
         {
-            preview(&mut out[n], i, change);
+            preview(&mut out[n], i, change, &self.zone);
         }
         let mut links = Vec::new();
         for (n, r) in rows.iter().enumerate() {
@@ -483,8 +529,8 @@ impl App {
 /// 들고 있는 계획 옮기기를 쓴다(moai-i4hf.9xi). **[`super::Retry`] 로도 넘긴다** — 누군지 묻고 받으면 `App::answer` 가
 /// 이것을 다시 부르고, 이것은 들고 있던 [`App::plan_move`] 를 다시 쓴다.
 ///
-/// **고칠 날은 여기서, 락 안에서 다시 읽은 줄로 잰다**([`PlanMove`]) — 화면이 그새 낡았어도 옆 세션이 고친 날 위에서
-/// 옮긴다. 그 줄이 그새 날을 잃었거나(옮기기) 얻었으면(하루 세우기) 아무것도 안 쓰고 까닭이 배너에 선다.
+/// **상대 옮기기는 여기서, 락 안에서 다시 읽은 줄로 잰다**([`PlanMove`]) — 화면이 그새 낡았어도 옆 세션이 고친 날 위에서
+/// 옮긴다. 채운 시작을 고른 절대 날짜(`Plan::Start`)는 그새 생긴 시작도 덮는다. 그 줄이 그새 날을 잃었거나(옮기기) 얻었으면(하루 세우기) 아무것도 안 쓰고 까닭이 배너에 선다.
 ///
 /// **고치는 차례는 `moai edit` 과 하나다** — `Issue::set_dates` 로 날을 적고 `Issue::settle` 이 정규화·검사·`updated_at` 을
 /// 한다. 시작이 기한을 넘거나 위의 기한을 넘는 날(`store::write_locked`, moai-xf0p.cbu)은 거절되고 그 거절문이 배너에
@@ -504,18 +550,11 @@ pub(super) fn commit_plan(app: &mut App) {
             return Err(crate::fail::Fail::not_found(&id, lang));
         };
         let before = i.clone();
-        let (start, due) = match plan {
-            Plan::Shift(edge, days) => {
-                i.shifted(edge, days).map_err(|why| crate::fail::Fail::new(crate::view::unshifted(lang, why, &id)))?
-            }
-            Plan::Day(_) if i.has_days() => {
-                return Err(crate::fail::Fail::new(fill(say(lang, "tui.gantt.planned"), &[("id", &id)])));
-            }
-            Plan::Day(day) => {
-                let d = Some(Some(crate::model::format_date(day)));
-                (d.clone(), d)
-            }
-        };
+        if matches!(plan, Plan::Day(_)) && i.has_days() {
+            return Err(crate::fail::Fail::new(fill(say(lang, "tui.gantt.planned"), &[("id", &id)])));
+        }
+        let (start, due) =
+            plan.change(i).map_err(|why| crate::fail::Fail::new(crate::view::unshifted(lang, why, &id)))?;
         i.set_dates(start, due);
         i.settle(&before, cfg, &at).map_err(|why| {
             crate::fail::Fail::new(crate::view::invalid(lang, &crate::store::At::Id(id.clone()), &why))
@@ -552,13 +591,11 @@ fn fill_row(g: &mut GanttRow, row: &crate::report::gantt::Row, column: &str, zon
         _ => RowKind::Item,
     };
     g.tone = tone(column);
-    let day = |d: Option<&str>| d.and_then(parse_date);
     if let Some(p) = &row.planned {
-        let (start, end) = (day(p.start), day(p.end));
-        g.planned = plan_span(start, end);
+        g.planned = plan_span(p);
         // 기한 표식은 **제 기한**만 — 멤버에서 센 끝은 그 줄의 기한이 아니다.
-        if p.from == Origin::Own {
-            g.due = end.map(|e| (e + 1) * DAY);
+        if p.from == Origin::Own && !p.end_filled {
+            g.due = parse_date(&p.end).map(|e| (e + 1) * DAY);
         }
     }
     let local = |t: &str| parse_rfc3339(t).map(|s| zone.local(s));
@@ -1175,6 +1212,86 @@ mod tests {
         assert!(pane("argos-0003").contains('░'), "계획 막대가 안 섰다\n{screen}");
         assert!(pane("argos-0001").contains('▒'), "멤버에서 센 묶음 막대가 안 섰다\n{screen}");
         assert!(!pane("argos-0009").contains('░'), "날 없는 줄에 막대가 섰다\n{screen}");
+    }
+
+    #[test]
+    fn a_deadline_only_plan_draws_a_bar_and_keeps_its_start_absent_when_moved() {
+        let (dir, mut a) = on_disk("filled-plan");
+        edit_on_disk(&dir, "argos-0003", |i| i.starts_on = None);
+        a.reload();
+        a.hit("SPC g g");
+        let _ = draw::tests::render(&mut a, 140, 20);
+        let rows = a.rows();
+        let n = ids(&a).iter().position(|i| i == "argos-0003").unwrap();
+        let chart = a.chart_of(&rows, 0..0, &|_, _| ratatui::text::Line::default());
+        assert!(chart.rows[n].planned.is_some(), "기한만 있는 줄이 막대를 잃었다");
+        put_cursor(&mut a, "argos-0003");
+        a.hit(">");
+        assert_eq!(dates_on_disk(&dir, "argos-0003"), (None, Some("2026-10-25".into())));
+        assert!(a.notice.as_deref().unwrap().contains("--start none --due 2026-10-24"));
+    }
+
+    #[test]
+    fn start_keys_choose_the_filled_day_instead_of_shifting_from_the_deadline() {
+        let (dir, mut a) = on_disk("filled-start-keys");
+        edit_on_disk(&dir, "argos-0003", |i| {
+            i.starts_on = None;
+            i.created_at = "2026-10-20T00:00:00Z".into();
+        });
+        a.reload();
+        a.zone = crate::tz::Zone::utc();
+        a.hit("SPC g g");
+        put_cursor(&mut a, "argos-0003");
+        a.hit("}");
+        assert_eq!(dates_on_disk(&dir, "argos-0003"), (Some("2026-10-21".into()), Some("2026-10-24".into())));
+        assert!(a.notice.as_deref().unwrap().contains("--start none --due 2026-10-24"));
+        a.hit("{");
+        assert_eq!(
+            dates_on_disk(&dir, "argos-0003").0.as_deref(),
+            Some("2026-10-20"),
+            "적힌 시작은 기존 상대 옮기기다"
+        );
+    }
+
+    #[test]
+    fn dragging_a_filled_start_writes_the_chosen_day_over_a_concurrent_start() {
+        use ratatui::crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind as K};
+        let (dir, mut a) = on_disk("filled-start-drag");
+        edit_on_disk(&dir, "argos-0003", |i| {
+            i.starts_on = None;
+            i.created_at = "2026-10-20T00:00:00Z".into();
+        });
+        a.reload();
+        a.zone = crate::tz::Zone::utc();
+        a.hit("SPC g g");
+        a.chart.fitting = false;
+        a.chart.axis.zoom = moai_gantt::Zoom::Day;
+        a.chart.axis.origin = crate::model::parse_date("2026-10-18").unwrap() * super::DAY;
+        let _ = draw::tests::render(&mut a, 140, 20);
+        let area = a.drawn.chart.unwrap();
+        let laid = moai_gantt::Layout::of(area, &a.chart_view(area));
+        let n = ids(&a).iter().position(|i| i == "argos-0003").unwrap();
+        let chart = a.chart_of(&a.rows(), 0..0, &|_, _| ratatui::text::Line::default());
+        let (c0, _) = moai_gantt::bar_cells(&a.chart, chart.rows[n].planned.unwrap());
+        let step = a.chart.axis.zoom.cells_per_day().round().max(1.0) as u16;
+        assert!(step >= 2);
+        let (x, y) = (laid.dates_body.x + c0 as u16, laid.dates_body.y + (n - a.chart.first_row) as u16);
+        let ev = |kind, column| MouseEvent { kind, column, row: y, modifiers: KeyModifiers::NONE };
+        a.mouse(ev(K::Down(MouseButton::Left), x));
+        assert!(matches!(
+            a.chart_drag,
+            Some(super::ChartDrag::Bar { part: moai_gantt::Part::Start, filled_start: Some(_), .. })
+        ));
+        edit_on_disk(&dir, "argos-0003", |i| i.starts_on = Some("2026-10-22".into()));
+        a.mouse(ev(K::Drag(MouseButton::Left), x + step));
+        let shown = a.chart_of(&a.rows(), 0..0, &|_, _| ratatui::text::Line::default());
+        assert_eq!(shown.rows[n].planned.unwrap().0, crate::model::parse_date("2026-10-21").unwrap() * super::DAY);
+        a.mouse(ev(K::Up(MouseButton::Left), x + step));
+        assert_eq!(dates_on_disk(&dir, "argos-0003"), (Some("2026-10-21".into()), Some("2026-10-24".into())));
+        assert!(
+            a.notice.as_deref().unwrap().contains("--start 2026-10-22 --due 2026-10-24"),
+            "되돌리기는 락 안에서 읽은 시작을 보존한다"
+        );
     }
 
     /// **`keys.toml` 의 `[browse] expand = "L"` 은 목록에서 살고, 간트에서는 `L` 이 간트의 키다**(moai-l80o, 사람 결정

@@ -19,17 +19,18 @@ import { assigneeOf } from '../data/people.ts'
 import { MEMORY_KEY, settingsStorage } from '../data/memory.ts'
 import { undoOf, type PlanChange } from '../data/plan.ts'
 import { zoneNow } from '../data/zone.ts'
-import type { GanttRow, IssueIndex, Row } from '../data/index.ts'
+import { pathKey, type GanttRow, type IssueIndex, type Row } from '../data/index.ts'
 import { fill } from '../i18n/index.ts'
 import type { State } from '../store.ts'
-import { el, emptyState } from './components.ts'
+import { el, emptyState, icon } from './components.ts'
 import { segLabel } from './crumbs.ts'
 import { formatDate } from './detail-format.ts'
 import {
-  arrowOf, DEFAULT_GRID, DEFAULT_ZOOM, dayStart, dayText, dragDays, fitSpan, floorDay, ganttLines, HEAD_H, headerOf, movedPlan, normalizeGrid, placeRow,
+  arrowOf, DAY, DEFAULT_GRID, DEFAULT_ZOOM, dayStart, dayText, dragDays, fitSpan, floorDay, ganttLines, HEAD_H, headerOf, movedPlan, normalizeGrid, placeRow,
   PX_PER_DAY, rangeOf, MIN_GRID, ROW_H, shiftPlan, wallAt, wallOf, weekends, widthOf, xOf, ZOOMS, zoomToFit, type Axis, type Edge, type GanttLine,
   type Placed, type Tick, type Zoom,
 } from './gantt-model.ts'
+import { firstStatus, glint, spins } from './spin.ts'
 import { narrow, revealOffset, statusGlyph, statusOf, twigParts, TWIG_TEXT, windowRange } from './list-model.ts'
 import type { MountPane, PaneView } from './types.ts'
 
@@ -112,6 +113,8 @@ let mounted = 0
 export const mountGantt: MountPane = (root, ctx): PaneView => {
   const { document: doc, copy, intents } = ctx
   const words = copy.gantt
+  const shut = new Set<string>()
+  let foldVersion = 0
   const win = doc.defaultView
   const SVG = 'http://www.w3.org/2000/svg'
   const uid = `moai-gantt-${++mounted}`
@@ -156,7 +159,7 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
    */
   const placeOf = (row: Row, now: number, zone: string | undefined): Placed => {
     const planned = moved.get(row.id)
-    return placeRow(ganttOf(row), planned ? { ...row, due_on: planned.end ?? undefined } : row, now, zone)
+    return placeRow(ganttOf(row), planned ? { ...row, due_on: planned.end_filled ? undefined : planned.end } : row, now, zone)
   }
 
   // ── frame ──
@@ -246,13 +249,24 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
     const title = el(doc, 'span', { class: `c-title${line.dir ? ' grp' : ''}${row?.kind === 'milestone' ? ' ms' : ''}` })
     const twig = twigOf(line)
     if (twig) title.append(twig)
+    if (line.dir) {
+      const label = line.open ? copy.list.collapse : copy.list.expand
+      const toggle = el(doc, 'button', { type: 'button', class: 'moai-toggle', tabindex: -1, 'aria-label': label, title: label, 'aria-expanded': String(line.open) }, icon(doc, 'chevron-right', 12))
+      toggle.addEventListener('click', (event) => {
+        event.stopPropagation()
+        keepFocus(() => fold(line, !line.open))
+      })
+      toggle.addEventListener('dblclick', (event) => event.stopPropagation())
+      title.append(toggle)
+    }
     if (row) {
       const { glyph, tone } = statusGlyph(statusOf(row), m.boot)
       const name = String(row.title ?? row.id)
-      title.append(row.kind === 'milestone' ? '◆ ' : '', name)
+      const moving = line.kind === 'row' && spins(m.index, line.at, firstStatus(m.boot), m.boot?.statuses)
+      title.append(row.kind === 'milestone' ? '◆ ' : '', moving ? glint(doc, name) : name)
       title.title = name
       const progress = g?.progress.kind === 'rollup' && g.progress.total > 0 ? `${g.progress.done}/${g.progress.total}` : ''
-      const st = el(doc, 'span', { class: `c-st m-st-${tone}`, title: (copy.stats as Record<string, string>)[statusOf(row)] ?? statusOf(row) }, glyph)
+      const st = el(doc, 'span', { class: `c-st m-st-${tone}${moving ? ' m-spin' : ''}`, title: (copy.stats as Record<string, string>)[statusOf(row)] ?? statusOf(row) }, glyph)
       node.append(el(doc, 'span', { class: 'c-id' }, row.id), st, title, el(doc, 'span', { class: 'c-n' }, progress), el(doc, 'span', { class: 'c-who' }, assigneeOf(row)))
     } else {
       title.append(line.kind === 'bucket' ? segLabel(line.seg, m.index, copy) : '')
@@ -461,29 +475,37 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
     return from >= axis.from && to <= axis.to
   }
 
-  /** The arrows into the cursor row, from what blocks it: one SVG behind the bars, the cursor row's only. */
+  /** Only links touching the cursor, in blocker → blocked direction, with the same style both ways. */
   function paintArrows(): void {
     if (!built || !model || !axis || !state) return
     const svg = built.svg
     svg.replaceChildren()
-    const to = model.lines.findIndex((line) => line.key === state!.cursor)
-    const line = model.lines[to]
-    const target = to < 0 ? null : built.placed[to]
-    if (!line || line.kind !== 'row' || !target) return
-    const g = model.index.rows[line.at]!.gantt
-    const x1 = target.plan?.from ?? target.span?.[0]
-    if (!g || x1 === undefined) return
-    for (const block of g.blocked_by) {
-      const from = model.lines.findIndex((one) => one.key === block.id)
-      const source = from < 0 ? null : built.placed[from]
-      const x0 = source ? source.plan?.to ?? source.span?.[1] : undefined
-      if (!source || x0 === undefined) continue
-      const { d, head } = arrowOf(xOf(axis, x0), from, xOf(axis, x1), to)
-      const path = doc.createElementNS(SVG, 'path')
-      path.setAttribute('d', d)
-      const tipHead = doc.createElementNS(SVG, 'polygon')
-      tipHead.setAttribute('points', head)
-      svg.append(path, tipHead)
+    const focus = model.lines.findIndex((line) => line.key === state!.cursor)
+    if (focus < 0) return
+    const visible = new Map<string, number>()
+    model.lines.forEach((line, n) => { if (!visible.has(line.key)) visible.set(line.key, n) })
+    const edges = new Set<string>()
+    for (let to = 0; to < model.lines.length; to++) {
+      const line = model.lines[to]!
+      if (line.kind !== 'row') continue
+      for (const block of model.index.rows[line.at]!.gantt?.blocked_by ?? []) {
+        const from = visible.get(block.id) ?? -1
+        if (from < 0 || from === to || (from !== focus && to !== focus)) continue
+        const key = `${from}:${to}`
+        if (edges.has(key)) continue
+        edges.add(key)
+        const source = built.placed[from]
+        const target = built.placed[to]
+        const x0 = source?.plan?.to ?? source?.span?.[1]
+        const x1 = target?.plan?.from ?? target?.span?.[0]
+        if (x0 === undefined || x1 === undefined) continue
+        const { d, head } = arrowOf(xOf(axis, x0), from, xOf(axis, x1), to)
+        const path = doc.createElementNS(SVG, 'path')
+        path.setAttribute('d', d)
+        const tipHead = doc.createElementNS(SVG, 'polygon')
+        tipHead.setAttribute('points', head)
+        svg.append(path, tipHead)
+      }
     }
   }
 
@@ -541,7 +563,8 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
       const add = (name: string, value: string) => dl.append(el(doc, 'dt', {}, name), el(doc, 'dd', {}, value))
       const zone = clock.zone()
       const t = words.tip
-      if (g.planned) add(g.planned.from === 'members' ? t.plannedMembers : t.planned, `${g.planned.start ?? '—'} ~ ${g.planned.end ?? '—'}`)
+      // A filled edge is drawn but nobody planned it: the bubble says so with `—`, as before moai filled it.
+      if (g.planned) add(g.planned.from === 'members' ? t.plannedMembers : t.planned, `${g.planned.start_filled ? '—' : g.planned.start} ~ ${g.planned.end_filled ? '—' : g.planned.end}`)
       add(t.actual, g.actual.kind === 'span' ? `${formatDate(g.actual.start, zone)} ~ ${g.actual.end ? formatDate(g.actual.end, zone) : t.now}` : g.actual.kind === 'unknown' ? t.unknown : t.notStarted)
       if (g.overdue !== null) add(t.overdue, fill(g.overdue === 1 ? t.overdueDay : t.overdueDays, { n: g.overdue }))
       if (g.progress.kind === 'rollup' && g.progress.total > 0) add(t.progress, `${g.progress.done}/${g.progress.total}`)
@@ -638,10 +661,52 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
     intents.point(lines[to]!.key)
   }
 
+  /** Fold state belongs to this visit, never to the list's expanded folders. */
+  function fold(line: GanttLine, open: boolean, all = false): void {
+    if (!model || !state || !line.dir) return
+    const index = model.index
+    const paths = [line.path, ...(all ? index.tree(line.path, () => true).filter((one) => one.entry.dir).map((one) => one.path) : [])]
+    for (const path of paths) {
+      const key = pathKey(path)
+      if (open) shut.delete(key)
+      else shut.add(key)
+    }
+    if (!open) {
+      const cursor = model.lines.find((one) => one.key === state!.cursor)
+      if (cursor && cursor.path.length > line.path.length && line.path.every((seg, n) => cursor.path[n] === seg)) {
+        state = { ...state, cursor: line.key }
+        intents.point(line.key)
+      }
+    }
+    foldVersion++
+    render(state, index)
+  }
+
   function command(action: string): boolean {
     if (!model || !state) return false
     const page = Math.max(1, Math.floor((scroll.clientHeight || FALLBACK_HEIGHT) / ROW_H) - 2)
+    const at = model.lines.findIndex((one) => one.key === state!.cursor)
+    const line = model.lines[at]
     switch (action) {
+      case 'expand':
+        if (line?.dir && !line.open) fold(line, true)
+        return true
+      case 'collapse': {
+        if (!line) return true
+        if (line.dir && line.open) fold(line, false)
+        else {
+          const parent = model.lines.slice(0, at).reverse().find((one) => one.dir && one.depth < line.depth)
+          if (parent) {
+            state = { ...state, cursor: parent.key }
+            intents.point(parent.key)
+            fold(parent, false)
+          }
+        }
+        return true
+      }
+      case 'expandAll':
+        if (line?.dir) fold(line, !line.open, true)
+        return true
       case 'move.down':
       case 'move.up':
       case 'move.pageDown':
@@ -781,6 +846,8 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
     const days = g.planned && (dayStart(g.planned.start) !== null || dayStart(g.planned.end) !== null)
     if (!days) return
     const a = axis
+    const created = typeof row.created_at === 'string' ? wallOf(row.created_at, clock.zone()) : null
+    const made = created === null ? null : floorDay(created)
     // A group's bar counted from its members does not move: the press is still taken, and the release says why.
     const own = g.planned?.from !== 'members'
     if (own) grab.classList.add('movable')
@@ -806,7 +873,7 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
       was = drawnAt.map((node) => ({ left: node.style.left, width: node.style.width }))
     }, (event, down) => {
       const change = shiftPlan(g.planned, edge, dragDays(a.zoom, event.clientX - down.clientX))
-      const span = 'why' in change ? null : movedPlan(g.planned, change)
+      const span = 'why' in change ? null : movedPlan(g.planned, change, made)
       if (!span) return putBack()
       // The bar spans its days; a `◆` stands at the end of its day.
       if (planBar) {
@@ -827,16 +894,24 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
         }
       } else {
         dragged = true
-        moved.set(row.id, { start: change.start ?? g.planned!.start, end: change.due ?? g.planned!.end, from: 'own' })
+        const preview = movedPlan(g.planned, change, made)
+        if (preview) moved.set(row.id, {
+          ...g.planned!, start: dayText(preview[0]), end: dayText(preview[1] - DAY),
+          start_filled: change.start === undefined && g.planned!.start_filled,
+          end_filled: change.due === undefined && g.planned!.end_filled, from: 'own',
+        })
         const n = model?.lines.findIndex((line) => line.key === row.id) ?? -1
         if (built && n >= 0) built.placed[n] = placeOf(row, built.now, clock.zone())
         // The arrows into and out of the dropped bar are drawn from those days.
         paintArrows()
         // Invert the move rather than restoring the page's stale dates; the other edge stays as moai found it.
         // The tree plan is the same picture shiftPlan used; the separately read list may disagree about absent edges.
-        write(movePlan, row.id, { edge, days }, undoOf(row.id, { edge, days }, {
-          start: g.planned?.start ?? null,
-          due: g.planned?.end ?? null,
+        const writtenEdge = edge === 'body' ? (g.planned!.start_filled ? 'end' : g.planned!.end_filled ? 'start' : edge) : edge
+        const intent: PlanChange = edge === 'start' && g.planned!.start_filled
+          ? { start: change.start! } : { edge: writtenEdge, days }
+        write(movePlan, row.id, intent, undoOf(row.id, intent, {
+          start: g.planned?.start_filled ? null : g.planned?.start ?? null,
+          due: g.planned?.end_filled ? null : g.planned?.end ?? null,
         }))
       }
       resume()
@@ -931,11 +1006,11 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
       lanesBox.replaceChildren()
       return
     }
-    const key = JSON.stringify([current.path, current.view, current.search.text, current.filter.applied])
+    const key = JSON.stringify([current.path, current.view, current.search.text, current.filter.applied, foldVersion])
     const zone = clock.zone()
     if (!model || model.index !== index || model.key !== key || model.matched !== current.matched || model.boot !== current.boot || model.zone !== zone) {
       const found = narrow(current, index)
-      model = { index, key, matched: current.matched, boot: current.boot, zone, lines: ganttLines(index, current.path, found.keep) }
+      model = { index, key, matched: current.matched, boot: current.boot, zone, lines: ganttLines(index, current.path, found.keep, shut) }
       draw()
       position()
       shownCursor = current.cursor
@@ -949,6 +1024,11 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
   return {
     render,
     command,
+    leave() {
+      shut.clear()
+      foldVersion++
+      model = null
+    },
     focus() {
       pane.focus({ preventScroll: true })
     },

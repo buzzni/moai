@@ -172,10 +172,14 @@ brings you back to the same row.
 
 **Reading it.** Every group opens out when you enter, and the left column is the
 list's row. On the right, `░` is the planned start to deadline (`▒` on an epic or a
-milestone), `◆` the row's own deadline, `█` over it when the work actually ran,
+milestone), `◆` a milestone's own deadline, `█` over it when the work actually ran,
 `▓` the time past a deadline, `┄` a deferred row's plan, and `▼` over a dotted line
-today. An epic that wrote no days of its own spans its members' days. Planned days
-are calendar days; actual times are shown in your time zone. With no planned days
+today. An epic that wrote no days of its own covers its members’ planned spans,
+including their filled starts. A row with a deadline but no start gets a bar from
+its creation day in your time zone, capped at the deadline day. A start without a
+deadline gets a one-day bar. With neither date, the row has no planned bar. These
+filled edges stay derived through ordinary moves and undo. Planned days are
+calendar days; actual times are shown in your time zone. With no planned days
 anywhere, the date side says how to add them: `moai edit <id> --start <day> --due
 <day>`, or `@start~due` at the end of a plan line.
 
@@ -187,7 +191,11 @@ keeps the folds it had, and the next time you enter, everything is open again.
 every row on one screen. It opens fitted and stays fitted until you move it.
 
 **Moving a plan.** `<` and `>` move the cursor row's whole plan a day, `{` and `}`
-only its start. With the mouse, drag a bar's middle, its left end (the start) or its
+only its start. If that start was filled, the start keys choose the drawn start
+plus or minus one day and write that absolute date as `--start`. A left-end drag
+on a filled start likewise writes the date you dragged to. This explicit choice
+wins over a start written meanwhile. Other moves shift the written dates.
+With the mouse, drag a bar's middle, its left end (the start) or its
 right end (the deadline); it snaps to whole days and is written once, when you let
 go. Click an empty day on a row with no plan to plan that one day. The write is the
 same as `moai edit --start --due`: a start after the deadline, or a day past the
@@ -460,4 +468,4 @@ write there either.
   an email on every write and `git config` had none. The answer holds for this
   run; set `user.name` and `user.email` to stop it asking
 
-Decided in: moai-724f moai-z46r moai-9nfw moai-47mz moai-irrj moai-ucx8 moai-1hka moai-h2rh moai-gelm moai-m6ni moai-p3r9 moai-o3cb moai-fyul moai-ogaw moai-tllo moai-fc97 moai-jtvp moai-bth3 moai-9tqo moai-wk7i moai-pxiy moai-i4hf moai-lj8g moai-ccow
+Decided in: moai-e9hi moai-724f moai-z46r moai-9nfw moai-47mz moai-irrj moai-ucx8 moai-1hka moai-h2rh moai-gelm moai-m6ni moai-p3r9 moai-o3cb moai-fyul moai-ogaw moai-tllo moai-fc97 moai-jtvp moai-bth3 moai-9tqo moai-wk7i moai-pxiy moai-i4hf moai-lj8g moai-ccow

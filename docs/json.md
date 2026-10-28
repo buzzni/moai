@@ -56,9 +56,15 @@ what the Gantt charts draw, decided by moai so that a program drawing it judges 
 dates itself. Basket
 rows have none, and every key inside it always stands (`null` when there is no value):
 
-- `planned` — `{start, end, from}`: calendar days, either end may be `null`; `from`
+- `planned` — `{start, end, start_filled, end_filled, from}`: calendar days, both ends always present; `from`
   is `own`, or `members` for an epic or milestone that wrote no day and is counted
-  from its members. `null` when no day can be read
+  from its members. A missing start uses the creation day in the viewer’s time zone,
+  capped at the deadline; a missing end uses the start day. A members span covers
+  every member's planned span, filled starts included; when no member wrote a start,
+  the group's creation day counts too if it is earlier. The boolean fill flags
+  always stand and say whether that edge was written: a start written after its
+  deadline is still written (`start` after `end`, drawn as the start's day). Filled
+  edges are never saved by a move or undo. `null` when no day can be read
 - `actual` — `{"kind": "span", start, end}` in UTC (`end` `null` while it runs),
   `{"kind": "not_started"}`, or `{"kind": "unknown"}` for a start nobody recorded —
   not zero, not never
@@ -193,4 +199,4 @@ A whole tracker with bodies runs to megabytes — this repository's
 - **Pages repeat or skip a row** — the order moved under you. Page in `id` or
   `created` order; priority and title move when someone edits a row
 
-Decided in: moai-b4dc, moai-ijjd, moai-wk7i, moai-g8pt
+Decided in: moai-e9hi, moai-b4dc, moai-ijjd, moai-wk7i, moai-g8pt

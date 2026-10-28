@@ -727,3 +727,19 @@ test('four-side memory preserves legacy positions and defaults unknown values to
   assert.equal(mainWidth(1000, 'right', true, 0.4), 600)
   assert.equal(mainWidth(1000, 'top', true, 0.3), 1000)
 })
+
+
+test('shell: leaving Gantt clears its folds while list expansion survives', () => {
+  const panel = boot(fakeStorage())
+  panel.tab('list').click()
+  panel.store.dispatch({ type: 'expanded', expanded: ['m:se-m1'] })
+  panel.tab('gantt').click()
+  panel.$('.g-row[data-id="se-e1"] .moai-toggle').click()
+  assert.equal(panel.$('.g-row[data-id="se-e1.a"]'), null)
+  assert.deepEqual(panel.store.getState().expanded, ['m:se-m1'])
+  panel.tab('list').click()
+  assert.deepEqual(panel.store.getState().expanded, ['m:se-m1'])
+  panel.tab('gantt').click()
+  assert.ok(panel.$('.g-row[data-id="se-e1.a"]'), 'returning opens every gantt folder')
+  panel.shell.destroy()
+})
