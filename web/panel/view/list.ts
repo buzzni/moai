@@ -161,6 +161,7 @@ export const mountList: MountPane = (root, ctx): PaneView => {
     const dim = line.kind === "row" && (!m.keep(line.at) || revealed)
     const node = el(doc, "div", {
       class: `m-row moai-line${dim ? " m-row-dim" : ""}`,
+      "data-status": row ? statusOf(row) : null,
       "data-revealed": revealed ? "" : null,
       role: "row",
       id: `${uid}-${n}`,

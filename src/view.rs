@@ -2773,7 +2773,7 @@ pub fn history(journal: &[JournalEntry], cfg: &Config, screen: Screen) -> Vec<St
             // 줄이 열을 잃는다.
             let ts = short_stamp(&e.ts, z);
             let pad = " ".repeat(width(&ts) + 5);
-            for (n, l) in entry(e, cfg, lang).split('\n').enumerate() {
+            for (n, l) in history_entry(e, cfg, lang).split('\n').enumerate() {
                 out.push(match n {
                     0 => format!("  {}   {l}", paint(style::DIM, &ts)),
                     _ => format!("{pad}{l}"),
@@ -2795,7 +2795,7 @@ pub fn history(journal: &[JournalEntry], cfg: &Config, screen: Screen) -> Vec<St
 /// 가른다. 칸 이름·갈래·사람은 한 줄짜리 값이라 한 줄로 접는다(`text::one_line`, moai-fmoa 리뷰) — 거기 든
 /// 줄바꿈은 뒤를 이어지는 줄처럼 그려, 손으로 고친 줄 하나가 없던 이력 줄을 지어냈다. [`removed`] 가 같은
 /// 저널 줄의 사람을 이미 이렇게 그린다.
-fn entry(e: &JournalEntry, cfg: &Config, lang: Lang) -> String {
+pub(crate) fn history_entry(e: &JournalEntry, cfg: &Config, lang: Lang) -> String {
     let clean = crate::text::sanitize;
     let what = match e.kind.as_str() {
         "create" => say(lang, "journal.create").to_string(),

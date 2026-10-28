@@ -1,6 +1,6 @@
 /**
  * The detail pane (design §4.3): the row under the cursor from `show <id>` — head line, labeled fields,
- * blockers, a group's roll-up, the body, commits, the wiki pages about it, and the history (journal) and work log as folded sections.
+ * blockers, a group's roll-up, the body, commits, the wiki pages about it, and the history (journal) and work log initially expanded, collapsible sections.
  * It only draws `state.shown` and the index; closing is the one thing it reports (`intents.closeDetail`).
  * The pure wording lives in view/detail-format.ts.
  */
@@ -83,8 +83,9 @@ export const mountDetail: MountPane = (root: HTMLElement, ctx: ViewContext): Pan
   // The pane scrolls in the split's detail container (marked data-keep-scroll), which holds `root`; a view
   // mounted on a scroller of its own is its own.
   const scroller = (): HTMLElement => root.closest<HTMLElement>('[data-keep-scroll]') ?? root
-  /** Folded sections the user opened, kept per id so a refresh does not close them. */
-  const open = new Set<string>()
+  /** Folded sections that stand open, by section name: history and work log start open, and what the user opens or
+   *  closes stays so while the pane lives — a refresh or another row does not undo it. */
+  const open = new Set<string>(['journal', 'work'])
   let shownId: string | null = null
   /** What the pane was drawn from: it is drawn again only when one of them changed (a redraw loses a text
    *  selection and the focus on a folded section's summary, and the shell renders it on every store change). */
@@ -203,13 +204,13 @@ export const mountDetail: MountPane = (root: HTMLElement, ctx: ViewContext): Pan
     const journal = journalOf(row, copy)
     const history = el(doc, 'ol', { class: 'moai-detail-list moai-detail-timeline' })
     if (journal.length) {
-      for (const line of journal) history.append(el(doc, 'li', { 'data-kind': line.kind }, el(doc, 'span', {}, line.text), line.meta ? el(doc, 'span', { class: 'moai-detail-meta' }, line.meta) : null))
+      for (const line of journal) history.append(el(doc, 'li', { 'data-kind': line.kind }, el(doc, 'span', { class: 'moai-detail-text' }, line.text), line.meta ? el(doc, 'span', { class: 'moai-detail-meta' }, line.meta) : null))
     } else history.append(el(doc, 'li', { class: 'moai-detail-meta' }, d.noJournal))
     out.push(folded(doc, 'journal', d.journal, open, history))
     const work = workOf(row)
     if (work.length) {
       const list = el(doc, 'ul', { class: 'moai-detail-list' })
-      for (const line of work) list.append(el(doc, 'li', {}, line))
+      for (const line of work) list.append(el(doc, 'li', {}, el(doc, 'span', { class: 'moai-detail-text' }, line)))
       out.push(folded(doc, 'work', d.work, open, list))
     }
     return out

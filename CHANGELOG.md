@@ -12,6 +12,46 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+## [0.32.0] - 2026-10-28
+
+### Added
+
+- **Web Gantt groups fold independently of the list.** Chevron buttons, `h`/`l`
+  and `Tab` fold and open groups; each visit starts unfolded. Started work and
+  busy groups use the list’s spinner and title light. (moai-e9hi.lpd, moai-e9hi.fmp)
+- **The TUI detail shows history and a work log.** Creation, column moves and
+  notes follow the wiki, with wrapped notes and journal refresh. AI work records
+  follow history when present, including the model, grade, reason, author and
+  recorded date. (moai-ccow.y3o, moai-ccow.an0)
+- Web details can sit on the right or top as well as the left or bottom. List rows use pale gold for in-progress and pale purple for review.
+
+### Changed
+
+- Gantt group bars cover their members’ filled starts too, so they can reach
+  back to a member’s creation day before any written planned date. (moai-e9hi.442)
+- Choosing a filled Gantt start with the TUI start keys or a TUI/web left-edge
+  drag writes the selected date as an absolute start. It replaces a start
+  written meanwhile; ordinary moves keep their relative behavior. (moai-e9hi.442)
+- **Gantt plans include rows with only a deadline.** A missing start uses the
+  creation day in the viewing time zone, capped at the deadline; a missing end
+  uses the start day. Filled edges remain derived through moves and undo. JSON
+  planned spans always carry both dates and `start_filled`/`end_filled` flags.
+  Web dependency arrows follow the cursor in both directions; `◆` marks a
+  milestone’s own deadline. (moai-e9hi.ksl, moai-e9hi.4wi, moai-e9hi.wty)
+- **TUI board titles wrap within each column.** Cards keep up to 50 Unicode
+  characters before an ellipsis and grow to fit; optional fields remain below
+  the title. (moai-ccow.7p9)
+- Web details start on the right for new settings; the position button cycles right → bottom → left → top. History and work log start expanded. Tabs place Gantt before Wiki.
+
+### Fixed
+
+- **TUI Gantt movement stays responsive on large trackers.** Chart calculations
+  are reused until loaded data, the clock or time zone changes. Queued keys share
+  a draw while layout, focus and mouse interactions keep their frame boundaries.
+  (moai-rycs)
+
+- Web history and work log preserve line breaks and wrap long text. In-progress spinners use their gold status colour.
+
 ## [0.31.0] - 2026-10-28
 
 ### Added

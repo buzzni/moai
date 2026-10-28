@@ -319,6 +319,14 @@ patterns to copy. Playwright is not a dependency of this repository; pass it in 
 `NODE_PATH`, as `scripts/site-demo/record-web.mjs` does.
 Rebuild the site media with `scripts/site-demo/record-site.sh <dir>`; it leaves out
 `tui-team.cast`, the partly manual scene from `record-team.sh`.
+The README cannot play a cast, so after a rebuild bake the two it shows into animated
+SVGs with `scripts/readme/cast-svg.mjs` (no dependencies):
+
+```sh
+for c in tui-tour tui-lifecycle; do
+  node scripts/readme/cast-svg.mjs site/assets/media/$c.cast .github/readme/$c.svg --title 'moai tui'
+done
+```
 
 The release workflow posts it once the GitHub release is out (`discord.yml`, skipped
 for a pre-release such as `-rc.1`). With no `post.md` committed it posts the text alone,

@@ -47,8 +47,8 @@ The page has four tabs.
 |---|---|---|
 | **Board** | A kanban: one column per status, with backlog and deferred columns and one lane per [milestone](glossary.md#milestone) | `SPC g b` |
 | **List** | The tree of milestones, [epics](glossary.md#epic) and issues, which you step into and fold | `SPC g l` |
-| **Wiki** | The pages of this wiki: the page list on one side, the page on the other | `SPC g w` |
 | **Gantt** | The tree beside a date axis: when each row was planned and when it actually ran | `SPC g g` |
+| **Wiki** | The pages of this wiki: the page list on one side, the page on the other | `SPC g w` |
 
 Click a tab, or use the keys. Switching tabs keeps the list's cursor, filter and
 sort.
@@ -56,15 +56,18 @@ sort.
 Choosing an issue shows its detail: column, priority, assignee, tags, what blocks
 it, the body, its children, its commits, the wiki about it (the lessons its notes
 point at, the pages that name it, the related sections — as `moai show <id>`
-lists them) and its history. The detail sits below the list, or on
-its left when the window is wide enough; `SPC o d` moves it and `SPC v d` hides
-it. `SPC v r` switches the body between rendered markdown and the raw text.
+lists them) and its history. History and work log start expanded and keep the
+line breaks of the text as written. In the list, in-progress rows have a pale gold
+background and review rows a pale purple one. The detail starts on the right;
+`SPC o d`, or the position button, moves it right → bottom → left → top. Below
+640px it stays below the list. `SPC v d` hides it, and `SPC v r` switches the body
+between rendered markdown and the raw text.
 `Enter` on an issue moves the focus to the detail, and `SPC w w` moves it back.
 
 ## Gantt
 
 The Gantt tab draws the same chart as the explorer's `SPC g g`, with the same
-meaning. The tree stays on the left with every folder open, the filter, search and
+meaning. The tree stays on the left, initially with every folder open, with the filter, search and
 view toggles of the list applied; the dates scroll on the right.
 
 | Mark | Means |
@@ -74,11 +77,22 @@ view toggles of the list applied; the dates scroll on the right.
 | dashed outline | A deferred row |
 | solid band over the bar | When the work actually ran, in its column's colour; a row whose start nobody recorded has none |
 | red hatch and `!` | Past the row's own deadline, up to today |
-| `◆` | A row with a deadline and no start |
+| `◆` | A milestone’s own deadline |
 | red dashed line | Now |
 | `‹` `›` | The row goes on off screen |
 | `n/m` and the fill | Finished work under an epic or milestone |
-| arrows | The rows that block the one under the cursor |
+| arrows | The rows that block the cursor row and those it blocks, pointing from blocker to blocked |
+
+A row with a deadline and no planned start gets a bar from its creation day in
+the viewing time zone, or from the deadline day if that is earlier. A start
+without a deadline gets a one-day bar. These filled edges stay derived through ordinary moves and undo. Choosing a
+filled start explicitly makes the selected day a written start. With neither day written, there is no planned bar.
+Completed blockers do not get arrows; a dependency outside the current place,
+filter or open folders is omitted.
+
+Started work and busy groups use the list’s spinner and moving light over the
+title. Deferred work stays still. Bars do not animate; reduced-motion settings
+also stop the spinner and title motion.
 
 The page only places these: which span a group covers and whether a row is late is
 decided by moai (`moai tui --deep --json` carries it as `gantt`). Lateness is counted
@@ -95,19 +109,28 @@ Other tabs read the same tree without calculating the chart values.
 | Key / mouse | Does |
 |---|---|
 | `j` `k`, click | Move the cursor; a click on a row or bar opens its detail |
+| `h` `l` / `←` `→`, group chevron | Fold / open a group; `h` on a member folds its parent and moves there |
+| `Tab` | Fold / open the whole subtree under the cursor |
 | `H` `L`, Shift+wheel, drag the date header | Move the dates |
 | `-` `=`, the zoom buttons, Ctrl+wheel over the dates | Hour / day / week / month |
 | `t` / `z` | Jump to today / fit every drawn row |
 | drag the line between grid and dates | Grid width, kept in this browser |
-| drag a bar's middle | Move its start and deadline by the same number of days |
-| drag a bar's left or right end, or a `◆` | Move the start alone, or the deadline alone |
+| drag a bar's middle | Move its written dates by the same number of days |
+| drag a bar's left end | Move a written start; a filled start writes the chosen day as an absolute start |
+| drag a bar's right end, or a milestone `◆` | Move only the deadline |
 | double-click a day on a row with no days | Plan that one day as its start and deadline |
+
+Gantt folds belong to that visit: leaving and returning opens every group again.
+The list keeps its own expansion state. A closed group keeps its rollup bar.
 
 A bar moves by whole days and is written once, when you let go — the same write as
 `moai edit <id> --shift <N>` (`--shift-start` or `--shift-due` for an end). What is
-sent is the move, not the days: moai counts them inside its write from the row as it
+sent is the move, not the days (only the written edge when the other was filled): moai counts them inside its write from the row as it
 stands then, so a row someone moved in the two seconds before the page read it again
-moves on from where they put it. A double-click plans its day as `moai edit <id>
+moves on from where they put it. A filled start is the exception: dragging its left
+end sends the chosen date as `moai edit <id> --start <day>`. This explicit choice
+wins over a start written meanwhile; the deadline stays as moai reads it. Undo
+clears that newly chosen start when the read plan had none. A double-click plans its day as `moai edit <id>
 --start <day> --due <day> --if-unplanned`, refused if the row gained days meanwhile.
 A move moai refuses (a start after the deadline, a day past the deadline of the
 epic, milestone or parent above) is told in moai's own words under the banners and
@@ -183,7 +206,8 @@ moving, editing and noting, and the explorer's `SPC n` for a thought you want to
 park and its Gantt for planned days.
 
 The one write to the tracker is a Gantt bar's days ([above](#gantt)): the server
-runs `moai edit --shift` for it (`--start --due --if-unplanned` for a double-click),
+runs `moai edit --shift` for ordinary moves, `--start <day>` for a filled-start
+resize, or `--start --due --if-unplanned` for a double-click,
 so it goes through the same lock, checks and refusals as the CLI. The server takes
 it only from the page itself: a request another site sends is refused.
 
@@ -302,8 +326,8 @@ once and the keys reach it.
 |---|---|
 | `SPC w w` / `SPC w W` | Next / previous pane |
 | `SPC w h` `j` `k` `l` | Pane to the left / below / above / right |
-| `SPC g l` `b` `w` `g` | List / board / wiki / Gantt tab |
-| `SPC o d` | Detail position: left or below |
+| `SPC g l` `b` `g` `w` | List / board / Gantt / wiki tab |
+| `SPC o d` | Detail position: right → bottom → left → top |
 | `SPC o t` | Pick the time zone dates are drawn in |
 
 **Projects and read marks**
@@ -361,4 +385,4 @@ once and the keys reach it.
 The page does not show the stats screen, and what it writes is a Gantt bar's days
 and your read marks.
 
-Decided in: moai-0aa7, moai-jshy, moai-d86e.3ud, moai-ijjd, moai-lj8g
+Decided in: moai-e9hi, moai-8r2l, moai-0aa7, moai-jshy, moai-d86e.3ud, moai-ijjd, moai-lj8g

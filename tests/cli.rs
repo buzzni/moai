@@ -7321,13 +7321,14 @@ fn tui_deep_carries_each_rows_gantt() {
     ok_at(s.path(), now, &["link", &a, "--blocks", &b]);
     ok_at(s.path(), "2026-10-21T01:00:00Z", &["mv", &a, "in_progress"]);
 
+    let c = field(&ok_at(s.path(), now, &["add", "기한만", "--due", "2026-10-29", "--json"]), "id");
     let rows: Vec<serde_json::Value> =
         serde_json::from_str(&ok_at(s.path(), now, &["tui", "--json", "--deep"])).unwrap();
     let gantt =
         |id: &str| rows.iter().find(|r| r["id"] == id).unwrap_or_else(|| panic!("{id} 가 없다"))["gantt"].clone();
     assert_eq!(
         gantt(&ep)["planned"],
-        serde_json::json!({"start": "2026-10-20", "end": "2026-10-28", "from": "members"})
+        serde_json::json!({"start": "2026-10-20", "end": "2026-10-28", "start_filled": false, "end_filled": false, "from": "members"})
     );
     assert_eq!(gantt(&ep)["progress"], serde_json::json!({"kind": "rollup", "done": 0, "total": 2}));
     assert_eq!(gantt(&a)["actual"], serde_json::json!({"kind": "span", "start": "2026-10-21T01:00:00Z", "end": null}));
@@ -7335,6 +7336,12 @@ fn tui_deep_carries_each_rows_gantt() {
     assert_eq!(gantt(&b)["actual"], serde_json::json!({"kind": "not_started"}));
     assert_eq!(gantt(&b)["overdue"], serde_json::Value::Null, "늘 서는 키다 — 값이 없으면 null");
     assert_eq!(gantt(&b)["blocked_by"], serde_json::json!([{"id": a, "state": "open"}]));
+    assert_eq!(
+        gantt(&c)["planned"],
+        serde_json::json!({
+            "start": "2026-10-25", "end": "2026-10-29", "start_filled": true, "end_filled": false, "from": "own"
+        })
+    );
     // 적재한 줄의 첨자는 밖에 안 낸다.
     assert!(gantt(&a).get("at").is_none(), "{}", gantt(&a));
     // 한 자리 목록은 싣지 않는다.
@@ -32387,6 +32394,25 @@ fn web_moves_a_plan_only_from_its_own_page() {
     let (_, _, body) = post(web.port, &format!("/api/plan/{id}?edge=body&days=1"), Some(&mine));
     assert_eq!(json_of(&body)["exit"], 0, "{body}");
     assert_eq!(days(), at("2026-10-21", "2026-11-03"), "옆 세션이 옮긴 시작을 페이지의 옛 날에서 덮었다");
+
+    // 채운 시작을 조작한 옵션 D는 절대 날짜다. 기한에서 세지 않고, 그새 생긴 시작도 의도대로 덮는다.
+    let filled =
+        field(&ok_with(s.path(), &cfg, &["add", "채운 시작", "-e", &epic, "--due", "2026-10-27", "--json"]), "id");
+    let (_, _, body) = post(web.port, &format!("/api/plan/{filled}?start=2026-10-21"), Some(&mine));
+    assert_eq!(json_of(&body)["exit"], 0, "{body}");
+    let row = json_of(&ok_with(s.path(), &cfg, &["show", &filled, "--json"]));
+    assert_eq!(row["starts_on"], "2026-10-21");
+    assert_eq!(row["due_on"], "2026-10-27");
+    ok_with(s.path(), &cfg, &["edit", &filled, "--start", "2026-10-22"]);
+    let (_, _, body) = post(web.port, &format!("/api/plan/{filled}?start=2026-10-21"), Some(&mine));
+    assert_eq!(json_of(&body)["exit"], 0, "{body}");
+    let row = json_of(&ok_with(s.path(), &cfg, &["show", &filled, "--json"]));
+    assert_eq!(row["starts_on"], "2026-10-21", "절대 시작은 마지막 쓰기가 이긴다");
+    assert_eq!(row["due_on"], "2026-10-27");
+    ok_with(s.path(), &cfg, &["edit", &filled, "--start", "none"]);
+    let row = json_of(&ok_with(s.path(), &cfg, &["show", &filled, "--json"]));
+    assert!(row.get("starts_on").is_none(), "실제 시작 쓰기를 되돌리지 못했다");
+    assert_eq!(row["due_on"], "2026-10-27");
 }
 
 /// **`project=` 는 걸어 둔 프로젝트만 읽는다**(moai-o14f) — 그 자리의 트래커로 답하고, 걸지 않은 자리·상대 경로는

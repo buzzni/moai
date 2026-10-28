@@ -10,7 +10,7 @@
 // `getUTCDay()`, whatever the zone's daylight saving does.
 
 import { partsIn } from '../data/zone.ts'
-import type { GanttRow, IssueIndex, Keep, Path, Row, Seg, Twig } from '../data/index.ts'
+import { pathKey, type GanttRow, type IssueIndex, type Keep, type Path, type Row, type Seg, type Twig } from '../data/index.ts'
 import { fill, type Copy } from '../i18n/index.ts'
 import { statusOf } from './list-model.ts'
 
@@ -77,7 +77,7 @@ export function isoWeek(wall: number): number {
 export interface Placed {
   /** The planned bar, ends in wall ms (the end is the end of the last day). */
   plan: { from: number; to: number; origin: 'own' | 'members' } | null
-  /** The `◆`: the end of a milestone's deadline day, or of a row that wrote a deadline and no start. */
+  /** The `◆`: the end of a milestone's own deadline day. */
   due: number | null
   /** The actual band; `open` runs to now. No band when the start is unknown or nothing started. */
   actual: { from: number; to: number; open: boolean } | null
@@ -103,17 +103,15 @@ export function placeRow(g: GanttRow | undefined, row: Row | undefined, now: num
   const planned = g.planned
   const start = planned ? dayStart(planned.start) : null
   const end = planned ? dayStart(planned.end) : null
-  if (planned && start !== null) {
-    // Start only: one day. Both: through the end of the last day. An end before the start still draws the start's day.
-    const to = end !== null ? Math.max(end + DAY, start + DAY) : start + DAY
+  if (planned && start !== null && end !== null) {
+    // A start written after its deadline (an old row moai reads but would not write) draws the start's day.
+    const to = Math.max(end, start) + DAY
     out.plan = { from: start, to, origin: planned.from }
     add(start, to)
   }
-  // A deadline and no start is a mark alone; a milestone's own deadline is a mark whatever its plan is. A milestone
-  // that wrote no deadline has none: the end its members' days reach is the hatched bar's end, not a `◆` (an archived
-  // row carries no `due_on`, and its own plan's end is that deadline).
+  // Only a milestone's own deadline has a diamond; filled ends are never deadlines.
   const own = row && typeof (row.due_on ?? row.due) === 'string' ? dayStart(row.due_on ?? row.due) : null
-  const dueDay = g.kind === 'milestone' ? own ?? (planned?.from === 'own' ? end : null) : start === null ? end : null
+  const dueDay = g.kind === 'milestone' ? own ?? (planned?.from === 'own' && !planned.end_filled ? end : null) : null
   if (dueDay !== null) {
     out.due = dueDay + DAY
     add(dueDay, dueDay + DAY)
@@ -128,10 +126,7 @@ export function placeRow(g: GanttRow | undefined, row: Row | undefined, now: num
       add(from, stop)
     }
   }
-  // Late: from the end of the deadline day to now. report::gantt said whether (and by how many days), so this neither
-  // asks the clock again nor needs a planned bar: a row that wrote a deadline and no start (the usual one) is late
-  // from its `◆`. The zone the page draws in may still be on the deadline day; the hatch is then a sliver, as the TUI's
-  // one cell.
+  // Core judges lateness; the hatch starts after the inclusive deadline day.
   const lateFrom = planned?.from === 'own' && end !== null ? end + DAY : out.due
   if (g.overdue !== null && lateFrom !== null) {
     out.over = { from: lateFrom, to: Math.max(now, lateFrom) }
@@ -151,13 +146,13 @@ export type Shifted = { start?: string; due?: string } | { why: 'members' | 'non
 
 /**
  * A plan moved `days` days: the days it lands on, **the changing side only** — the page's copy of `Issue::shifted`
- * (src/model.rs), which the TUI's drag and keys write through. It draws the bar while it is dragged and says why a press
- * moves nothing; the page never writes these days — moai measures them inside its write (data/plan.ts, moai-vj8w.02c).
+ * (src/model.rs), except a filled start: dragging it chooses an absolute start from the drawn day (option D).
+ * Ordinary moves send only edge+days for moai to measure inside its write; that explicit start sends the chosen day.
  * Only a row's own days move: a plan a group counts from its members is not that row's days (`members`), and a row with
  * no day has no bar (`none`).
  *
  * - `body` moves every day written — a row with a deadline alone moves its deadline
- * - `start` moves the start; with none, it sets out from the deadline (the `◆`'s left end was dragged)
+ * - `start` moves a written start relatively; a filled start chooses drawn start + days as an absolute date
  * - `end` moves the deadline; with none, it sets out from the start
  *
  * A start past the deadline is not stopped here: the write refuses it in moai's words, and the page shows them.
@@ -165,24 +160,37 @@ export type Shifted = { start?: string; due?: string } | { why: 'members' | 'non
 export function shiftPlan(planned: GanttRow['planned'], edge: Edge, days: number): Shifted {
   if (days === 0) return { why: 'still' }
   if (planned?.from === 'members') return { why: 'members' }
-  const start = planned ? dayStart(planned.start) : null
-  const due = planned ? dayStart(planned.end) : null
+  const start = planned && !planned.start_filled ? dayStart(planned.start) : null
+  const due = planned && !planned.end_filled ? dayStart(planned.end) : null
   if (start === null && due === null) return { why: 'none' }
   const day = (d: number | null) => (d === null ? undefined : dayText(d + days * DAY))
-  const out = edge === 'body' ? { start: day(start), due: day(due) } : edge === 'start' ? { start: day(start ?? due) } : { due: day(due ?? start) }
+  const out = edge === 'body' ? { start: day(start), due: day(due) } : edge === 'start' ? { start: day(planned?.start_filled ? dayStart(planned.start) : start ?? due) } : { due: day(due ?? start) }
   return Object.fromEntries(Object.entries(out).filter(([, v]) => v !== undefined))
 }
 
 /** Whole days a drag of `dx` px moves at `zoom` — the nearest day, so a bar snaps to days at every step. */
 export const dragDays = (zoom: Zoom, dx: number): number => Math.round(dx / PX_PER_DAY[zoom]) || 0
 
-/** The planned bar a move would draw, `[from, to)` in wall ms, or null when the move would not stand. */
-export function movedPlan(planned: GanttRow['planned'], change: { start?: string; due?: string }): [number, number] | null {
-  const start = change.start !== undefined ? dayStart(change.start) : planned ? dayStart(planned.start) : null
-  const due = change.due !== undefined ? dayStart(change.due) : planned ? dayStart(planned.end) : null
+/**
+ * The planned bar a move would draw, `[from, to)` in wall ms, or null when the move would not stand — the bar moai draws
+ * once the written days have moved, as the TUI's drag draws it (`tui::gantt::preview`, moai-i4hf.exq). Only written days
+ * move and only they can make a move stand or not. A filled end is the start's day again. A filled start is moai's
+ * creation day capped at the deadline. `made` is that day placed in the page zone. Without it (tree-only/archive rows),
+ * a start before the old deadline is the known creation day; a start on the deadline supplies no earlier bound.
+ */
+export function movedPlan(planned: GanttRow['planned'], change: { start?: string; due?: string }, made: number | null = null): [number, number] | null {
+  const written = (day: string | undefined, filled: boolean | undefined, now: string | undefined) =>
+    day !== undefined ? dayStart(day) : planned && !filled ? dayStart(now) : null
+  const start = written(change.start, planned?.start_filled, planned?.start)
+  const due = written(change.due, planned?.end_filled, planned?.end)
   if (start !== null && due !== null) return start > due ? null : [start, due + DAY]
   if (start !== null) return [start, start + DAY]
-  return due === null ? null : [due, due + DAY]
+  if (due === null) return null
+  const filled = planned ? dayStart(planned.start) : null
+  const oldDue = planned ? dayStart(planned.end) : null
+  const origin = made ?? (filled !== null && oldDue !== null && filled < oldDue ? filled : due)
+  const from = Math.min(origin, due)
+  return [from, due + DAY]
 }
 
 // ── the axis ───────────────────────────────────────────────────────────
@@ -316,15 +324,16 @@ export function weekends(axis: Axis, win?: [number, number]): Array<[number, num
 
 /** One line of the gantt: a row, or a bucket (`(no milestone)`, `(lost)`) that holds rows and has no dates. */
 export type GanttLine =
-  | { kind: 'row'; key: string; at: number; depth: number; twig: Twig; dir: boolean }
-  | { kind: 'bucket'; key: string; seg: Seg; depth: number; twig: Twig; dir: true }
+  | { kind: 'row'; key: string; at: number; depth: number; twig: Twig; path: Path; open: boolean; dir: boolean }
+  | { kind: 'bucket'; key: string; seg: Seg; depth: number; twig: Twig; path: Path; open: boolean; dir: true }
 
-/** The listing at `path` with every folder open — the whole tree, as the TUI's gantt draws it — in moai's order. */
-export function ganttLines(index: IssueIndex, path: Path, keep: Keep): GanttLine[] {
-  return index.tree(path, () => true, keep).map(({ entry, twig }): GanttLine => {
-    if (entry.dir && entry.at === undefined) return { kind: 'bucket', key: entry.seg, seg: entry.seg, depth: twig.length, twig, dir: true }
+/** The listing with the gantt’s own folds, in moai’s order; all folders start open. */
+export function ganttLines(index: IssueIndex, path: Path, keep: Keep, shut: ReadonlySet<string> = new Set()): GanttLine[] {
+  const opened = (p: Path) => !shut.has(pathKey(p))
+  return index.tree(path, opened, keep).map(({ entry, twig, path: here }): GanttLine => {
+    if (entry.dir && entry.at === undefined) return { kind: 'bucket', key: entry.seg, seg: entry.seg, depth: twig.length, twig, path: here, open: opened(here), dir: true }
     const at = entry.at!
-    return { kind: 'row', key: index.rows[at]!.id, at, depth: twig.length, twig, dir: entry.dir }
+    return { kind: 'row', key: index.rows[at]!.id, at, depth: twig.length, twig, path: here, open: entry.dir && opened(here), dir: entry.dir }
   })
 }
 
