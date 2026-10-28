@@ -595,6 +595,7 @@
   "tui.about.spent": "소요",
   "tui.about.started": "시작",
   "tui.about.ended": "끝",
+  "tui.about.work": "작업 기록",
   "tui.about.history": "이력",
   "tui.about.commits": "커밋",
   "tui.about.notes": "걸린 노트",

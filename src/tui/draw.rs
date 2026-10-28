@@ -4416,7 +4416,69 @@ fn about<'a>(app: &App, site: &Site, idx: usize, e: &Entry, w: usize) -> Vec<Lin
                     }
                 }
             }
-
+            let work = crate::model::work_of(journal);
+            if !work.is_empty() {
+                out.push(Line::from(""));
+                out.push(Line::from(Span::styled(say(site.lang, "tui.about.work"), bold())));
+                for work in work {
+                    let model =
+                        work.provider.as_ref().map_or_else(|| work.model.clone(), |p| format!("{p}/{}", work.model));
+                    let mut main = model.clone();
+                    if let Some(tokens) = work.tokens {
+                        main.push_str(&format!(" tokens={tokens}"));
+                    }
+                    let verdict = [work.grade.as_deref(), work.why.as_deref()]
+                        .into_iter()
+                        .flatten()
+                        .collect::<Vec<_>>()
+                        .join(" — ");
+                    if !verdict.is_empty() {
+                        main.push_str(&format!(" ({verdict})"));
+                    }
+                    let by = crate::text::one_line(&crate::model::label(
+                        &work.by,
+                        work.by_email.as_deref(),
+                        site.cfg.naming,
+                    ));
+                    let stamp = crate::view::stamp(&work.at, &app.zone);
+                    let text = crate::text::sanitize(&format!("{main}  {by} · {stamp}"));
+                    // Bold model text on every wrapped fragment, without relying on color.
+                    let model_len = crate::text::sanitize(&model).len();
+                    let parts = [
+                        crate::markdown::Span {
+                            text: crate::text::sanitize(&model),
+                            role: crate::markdown::Role::Strong,
+                            link: None,
+                        },
+                        crate::markdown::Span {
+                            text: text[model_len..].to_string(),
+                            role: crate::markdown::Role::Plain,
+                            link: None,
+                        },
+                    ];
+                    out.extend(
+                        crate::markdown::wrap_spans(&parts, w.max(2), crate::markdown::Overflow::Break)
+                            .into_iter()
+                            .map(|parts| {
+                                Line::from(
+                                    parts
+                                        .into_iter()
+                                        .map(|s| {
+                                            Span::styled(
+                                                s.text,
+                                                if s.role == crate::markdown::Role::Strong {
+                                                    bold()
+                                                } else {
+                                                    Style::default()
+                                                },
+                                            )
+                                        })
+                                        .collect::<Vec<_>>(),
+                                )
+                            }),
+                    );
+                }
+            }
         }
     }
     out
@@ -6183,7 +6245,7 @@ pub(super) mod tests {
             ),
             JournalEntry::note(&id, "첫 줄\n둘째 줄 마지막", "2026-10-28T10:02:00Z", &by),
         ];
-        let bytes: String = entries.iter().map(|e| format!("{}\n", serde_json::to_string(e).unwrap())).collect();
+        let mut bytes: String = entries.iter().map(|e| format!("{}\n", serde_json::to_string(e).unwrap())).collect();
         std::fs::write(&path, &bytes).unwrap();
         wait_history(&mut a, &rows);
         let key = (scratch.path().to_path_buf(), id.clone());
@@ -6200,7 +6262,43 @@ pub(super) mod tests {
             "{text}"
         );
         assert!(!text.contains("작업 기록"));
-
+        bytes.push_str(&format!(
+            "{}\n",
+            serde_json::to_string(&JournalEntry::note(
+                &id,
+                "model: anthropic/opus-5.5 (high — 쓰기 경로)",
+                "2026-10-28T10:03:00Z",
+                &by
+            ))
+            .unwrap()
+        ));
+        // Indented and fenced examples remain in history, but are not work records.
+        bytes.push_str(&format!(
+            "{}\n",
+            serde_json::to_string(&JournalEntry::note(
+                &id,
+                " model: openai/example (low — example)\n```\nmodel: google/example (low — example)\n```",
+                "2026-10-28T10:04:00Z",
+                &by
+            ))
+            .unwrap()
+        ));
+        std::fs::write(&path, &bytes).unwrap();
+        wait_history(&mut a, &rows);
+        assert_eq!(a.history.entries[&key].len(), 5);
+        let lines = about(&a, &a.site, idx, &e, 120);
+        let work_at = lines.iter().position(|l| l.spans.iter().any(|s| s.content == "작업 기록")).unwrap();
+        let work: String = lines[work_at..].iter().flat_map(|l| &l.spans).map(|s| s.content.as_ref()).collect();
+        for want in ["anthropic/opus-5.5", "high", "쓰기 경로", "tester", "2026-10-28"] {
+            assert!(work.contains(want), "{work}");
+        }
+        assert!(!work.contains("openai/example") && !work.contains("google/example"), "{work}");
+        assert!(
+            lines[work_at + 1]
+                .spans
+                .iter()
+                .any(|s| s.content.contains("opus") && s.style.add_modifier.contains(Modifier::BOLD))
+        );
     }
 
     /// **보드는 칸 머리줄·레인 머리줄·카드를 세우고, 고른 카드는 `>` 와 반전이다**(moai-9nfw, 사용자 결정) — 반전은
