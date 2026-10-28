@@ -115,7 +115,8 @@ Windows (below).
   `commandWindows`, with `<moai> hook <event> --dialect codex || exit 0`
   (the Unix `command` is unchanged), and Antigravity's `.agents/hooks.json`
   has that one line for every OS, because the file is committed and has no
-  Windows-only key. If `moai` is missing the line exits 0 quietly. The line
+  Windows-only key. If `moai` is missing the line still exits 0, and the
+  shell leaves one line on stderr that the agent keeps in its log. The line
   holds no quotes at all — `agy` passes it to cmd with every `"` turned into
   `\"`, which cmd cannot read — so a `moai.exe` path with a space or a
   character cmd or sh reads (`C:/Program Files/…`, `%`, `&`, `(`) is written
@@ -125,7 +126,8 @@ Windows (below).
   until you run `moai skill install --agent codex` (or `antigravity`) again
 - **`moai skill status` names the Git Bash Claude Code will use**
   (`· git bash  C:\Program Files\Git\bin\bash.exe`), looked up as Claude Code
-  does: `CLAUDE_CODE_GIT_BASH_PATH`, then the `bin\bash.exe` beside the `git`
+  does: `CLAUDE_CODE_GIT_BASH_PATH` when it is set (and only that — a path
+  that is not there is a `!`), then the `bin\bash.exe` beside the `git`
   on `PATH`, then `%ProgramFiles%\Git\bin\bash.exe`. When none is found the row
   is a `!` and says so — Claude Code then runs hooks in PowerShell and the rules
   do not stand. Nothing is blocked and the exit code stays 0

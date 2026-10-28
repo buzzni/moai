@@ -12,6 +12,13 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+### Added
+
+- **`moai skill status` names the Git Bash Claude Code runs hooks in on
+  Windows.** Without Git Bash, Claude Code uses PowerShell, which cannot run the
+  hook lines; the new `git bash` row (and `git_bash` in `--json`) says where it
+  was found, or that it was not. (moai-cj4a.tux)
+
 ### Fixed
 
 - **Codex hooks run on Windows.** Codex starts a hook there with `cmd /C`, which
@@ -29,10 +36,6 @@ does not tag — see `CONTRIBUTING.md`.
   longer carries the hand-off note, the broken-pipe trap or `set +e`; nothing a
   person sees changes. An older file reads as `stale` until
   `moai skill install --agent antigravity` plants it again. (moai-cj4a.t76, moai-cj4a.x4u)
-- **`moai skill status` names the Git Bash Claude Code runs hooks in on
-  Windows.** Without Git Bash, Claude Code uses PowerShell, which cannot run the
-  hook lines; the new `git bash` row (and `git_bash` in `--json`) says where it
-  was found, or that it was not. (moai-cj4a.tux)
 
 ## [0.30.0] - 2026-10-27
 

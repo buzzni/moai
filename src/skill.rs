@@ -781,8 +781,9 @@ fn command_for(exe: &str, event: &str, dialect: Dialect) -> String {
 /// 키 `commandWindows` 가 있어 이 줄을 거기 심고(`command` 는 글자 하나 안 바꾼다), agy 에는 그런 키가 없고
 /// `.agents/hooks.json` 은 커밋돼 OS 마다 다른 줄이 서로 덮어쓰므로 **모든 OS 에 이 한 줄**을 심는다.
 ///
-/// - `|| exit 0` — moai 가 없거나 못 돌면(sh 의 127·126, cmd 의 9009) 조용히 0 이다. [`shell_line`] 의
-///   `command -v … || exit 0` 과 같은 몫이다
+/// - `|| exit 0` — moai 가 없거나 못 돌면(sh 의 127·126, cmd 의 9009) 0 이다. [`shell_line`] 의
+///   `command -v … || exit 0` 과 같은 몫이지만 **조용하지는 않다** — 셸이 stderr 에 한 줄을 남기고(sh·cmd 가 함께 읽는
+///   리다이렉트가 없다) 에이전트가 그것을 제 로그에 적는다. 못 돈 판의 알림(`systemMessage`)도 이 줄에는 없다
 /// - **따옴표를 하나도 안 쓴다**(리뷰 moai-cj4a.zpz) — agy 1.4.8 은 Go 의 인자 이스케이프로 `cmd /c` 를 띄워 줄 안의
 ///   `"` 를 `\"` 로 바꾼다. 2026-10-28 실측: `"<exe>" hook …` 꼴은 cmd 가 `'\"<exe>\"' is not recognized` 로 끝나고
 ///   `|| exit 0` 이 그것을 삼켜, 고치려던 "말없이 꺼진 규칙" 이 그대로였다. 따옴표 없는 줄은 Go 가 바깥을 `"…"` 로만
