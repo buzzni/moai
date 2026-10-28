@@ -1382,6 +1382,12 @@ pub struct App {
     /// 상세의 Wiki 토막을 지어 둔 한 벌(moai-xp7l.vyw, [`draw::WikiAbout`]) — [`App::body`] 와 같은 까닭으로
     /// `draw::fill_wiki` 가 그리기 전에 채운다. 커서가 선 줄의 것 하나다.
     wiki_about: Option<draw::WikiAbout>,
+    /// 지난 프레임에 그린 보드의 안쪽 폭 — [`App::laid`] 가 감긴 제목의 줄 수를 이 폭으로 센다(moai-ccow.7p9). 보드를 그리는
+    /// 쪽(`draw::board`)만 적는다. 아직 안 그렸으면 `None` 이고, 그때 카드 제목은 한 줄로 친다.
+    board_width: Option<usize>,
+    /// 상세의 이력·작업 기록이 읽은 저널(moai-ccow.y3o, [`draw::HistoryCache`]) — 옆 스레드가 읽고 `draw::fill_history` 가
+    /// 받아 든다. 값일 뿐이라 비어 있으면 이력 절이 안 설 뿐이다.
+    history: draw::HistoryCache,
     /// 상세의 Wiki 토막이 읽은 위키 — 체크아웃(`Repo::here`)마다 한 번, 처음 그 토막을 그릴 때 읽는다. 커서를 옮길
     /// 때마다 위키 전부를 다시 읽지 않는다. 연 뒤에 쓴 페이지는 위키 창(`SPC g w`)을 열면 — 창이 위키를 새로 읽으며 이것을
     /// 비운다 — 아니면 탐색기를 다시 열면 선다. 못 읽은 위키는 안 담는다(리뷰 moai-xp7l.mug).
@@ -2140,6 +2146,8 @@ impl App {
             body: None,
             note_hits: None,
             wiki_about: None,
+            board_width: None,
+            history: draw::HistoryCache::default(),
             wiki_pages: Default::default(),
             user: None,
             identify: crate::model::actor,
@@ -2566,7 +2574,7 @@ impl App {
 
     /// 스레드에서 짓고 있는 다시 읽기가 있는가. 루프가 이 동안은 더 자주 깨어 받는다.
     pub fn loading(&self) -> bool {
-        self.pending.is_some() || self.layer_loading()
+        self.pending.is_some() || self.layer_loading() || self.history.loading()
     }
 
     /// 버린 다시 읽기 스레드가 아직 남았는가. 루프는 이 동안에도 빠른 걸음으로 깬다 —
@@ -2944,6 +2952,7 @@ impl App {
         self.follow_site();
         self.follow_commits();
         self.follow_latest();
+        self.history.poll();
         self.reopen_journals();
         if let Some((rx, _)) = &self.pending {
             match rx.try_recv() {
@@ -5094,7 +5103,10 @@ impl App {
         }
         let mut lanes: Vec<LaneOf> = Vec::new();
         let mut slots: Vec<board::Slot> = Vec::with_capacity(spots.len());
-        for spot in &spots {
+        // 제목은 칸의 내림 폭에서 감싼다 — `draw::board` 가 같은 폭으로 그려, 커서가 옮겨도 카드 높이가 안 흔들린다.
+        // 보드를 아직 안 그렸으면 제목 한 줄이다.
+        let wrap = self.board_width.map(|width| width / board::window(columns.len(), width, None, 0).count.max(1));
+        for (row, spot) in spots.iter().enumerate() {
             let slot = match spot {
                 Some(Spot::Head(n)) => {
                     lanes.push(LaneOf::Project(*n));
@@ -5103,7 +5115,13 @@ impl App {
                 Some(Spot::Card(seat, lane, column, height)) => {
                     let lane = lane_of(&mut lanes, *seat, *lane);
                     let column = columns.iter().position(|c| c == column).unwrap_or(0);
-                    board::Slot { lane, column: Some(column), height: *height, group: group(*seat) }
+                    let title = wrap.map_or(1, |w| draw::card_title_lines(self, &rows[row], w));
+                    board::Slot {
+                        lane,
+                        column: Some(column),
+                        height: *height + title.saturating_sub(1),
+                        group: group(*seat),
+                    }
                 }
                 // 빠진 프로젝트의 줄 — 다음 프레임에 사라진다([`App::site_of_seat`]). 그때까지 자리만 지킨다.
                 None => {
