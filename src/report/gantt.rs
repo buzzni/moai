@@ -7,8 +7,8 @@
 //! # 읽는 법
 //!
 //! - **계획 구간**([`Planned`]) — 제 `starts_on`·`due_on`. 묶음(에픽·마일스톤)이 제 날을 안 적었으면 **멤버가 적은
-//!   날을 다 덮는 폭**이다 — 가장 이른 날 ~ 가장 늦은 날이고, 시작을 적은 멤버가 없으면 시작이, 기한을 적은 멤버가 없으면
-//!   끝이 없다. 시작만 적은 멤버와 기한만 적은 멤버가 섞여도 막대는 거꾸로 서지 않는다(리뷰 — "가장 이른 시작 ~ 가장
+//!   날을 다 덮는 폭**이다 — 가장 이른 날 ~ 가장 늦은 날이다. 빈 시작은 만든 날(기한보다 늦으면 기한 날),
+//!   빈 끝은 시작 날로 채운다. 멤버에서 센 폭의 빈 시작도 묶음을 만든 날과 가장 이른 멤버 날 중 이른 날로 채운다. 시작만 적은 멤버와 기한만 적은 멤버가 섞여도 막대는 거꾸로 서지 않는다(리뷰 — "가장 이른 시작 ~ 가장
 //!   늦은 기한" 을 따로 재던 판은 `@10-27~` 과 `@10-22` 두 멤버로 끝이 시작보다 앞선 막대를 냈다). 어느 쪽에서 왔는지
 //!   [`Origin`] 이 말한다 — 화면이 "멤버에서 센 값" 을 다르게 그린다. 제 날은 **한 덩이다**: 시작이든 기한이든 하나라도
 //!   적었으면 그 줄의 구간은 그 줄의 것이고, 빈 쪽을 멤버로 채우지 않는다(채우면 사람이 적은 구간과 센 구간이 한 막대에
@@ -53,11 +53,13 @@ pub enum Origin {
     Members,
 }
 
-/// 계획한 구간. 달력 날짜(`YYYY-MM-DD`)고, **한쪽만 있을 수 있다** — 기한만 적은 줄이 보통이다.
+/// 계획한 구간. 양끝은 달력 날짜(`YYYY-MM-DD`)다. 채운 쪽은 파생값이며 저장하지 않는다.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct Planned<'a> {
-    pub start: Option<&'a str>,
-    pub end: Option<&'a str>,
+pub struct Planned {
+    pub start: String,
+    pub end: String,
+    pub start_filled: bool,
+    pub end_filled: bool,
     pub from: Origin,
 }
 
@@ -92,7 +94,7 @@ pub struct Row<'a> {
     pub id: &'a str,
     pub kind: Kind,
     /// 계획한 구간. 날을 하나도 못 읽으면 없다.
-    pub planned: Option<Planned<'a>>,
+    pub planned: Option<Planned>,
     pub actual: Actual<'a>,
     pub progress: Standing<'a>,
     /// 열린 줄의 **제** 기한이 지난 날수(양수). 안 지났거나 열린 줄이 아니거나 기한이 없으면 없다. **미룬 줄은 안 센다** —
@@ -155,7 +157,7 @@ pub fn gantt<'a>(
                 at,
                 id: i.id.as_str(),
                 kind: i.kind,
-                planned: planned_of(i, &members, all, wh, &shelved),
+                planned: planned_of(i, &members, all, wh, &shelved, zone),
                 actual: actual_of(i, column, &members, all, wh, cfg, now),
                 progress: match is_group(i) {
                     true => {
@@ -188,17 +190,17 @@ pub fn gantt<'a>(
 ///
 /// 멤버 날은 그 멤버가 **제 줄에** 적은 것만 본다 — 에픽 멤버의 에픽이 센 값을 다시 세면 같은 날이 두 번 든다(마일스톤의
 /// 멤버에는 에픽도 이슈도 이미 들어 있다). **폭은 멤버가 적은 날을 다 덮는다** — 시작만 적은 멤버와 기한만 적은 멤버가
-/// 섞여도 시작이 끝보다 늦지 않다. 시작을 적은 멤버가 없으면 시작이, 기한을 적은 멤버가 없으면 끝이 없다.
-fn planned_of<'a>(
-    i: &'a Issue,
+/// 섞여도 시작이 끝보다 늦지 않다. 빈 시작은 묶음을 만든 날과 가장 이른 멤버 날 중 이른 날로, 빈 끝은 가장 늦은 날로 채운다.
+fn planned_of(
+    i: &Issue,
     members: &[usize],
-    all: &'a [Issue],
+    all: &[Issue],
     wh: &Where<'_>,
     shelved: &BTreeMap<&str, Vec<&str>>,
-) -> Option<Planned<'a>> {
-    let (start, end) = (i.planned_start(), i.deadline());
-    if start.is_some() || end.is_some() {
-        return Some(Planned { start, end, from: Origin::Own });
+    zone: &Zone,
+) -> Option<Planned> {
+    if let Some(own) = own_plan(i, zone) {
+        return Some(own);
     }
     // 이 묶음을 계획에서 뺀 미룸들 — 멤버가 그것만으로 빠졌으면 이 묶음의 계획에 그대로 든다.
     let mine: &[&str] = shelved.get(i.id.as_str()).map(Vec::as_slice).unwrap_or_default();
@@ -220,11 +222,37 @@ fn planned_of<'a>(
             days.push(d);
         }
     }
-    let (first, last) = (days.iter().min().copied(), days.iter().max().copied());
-    (starts || ends).then_some(Planned {
-        start: first.filter(|_| starts),
-        end: last.filter(|_| ends),
+    let (first, last) = (days.iter().min().copied()?, days.iter().max().copied()?);
+    let made = zone.shift(&i.created_at);
+    let start = if starts { first } else { made.get(..10).unwrap_or(first).min(first) };
+    Some(Planned {
+        start: start.into(),
+        end: last.into(),
+        start_filled: !starts,
+        end_filled: !ends,
         from: Origin::Members,
+    })
+}
+
+/// 제 계획의 빈 쪽을 채운다. 끌기 미리보기도 이 자로 재되, 쓰기는 제 날짜만 옮긴다.
+pub fn own_plan(i: &Issue, zone: &Zone) -> Option<Planned> {
+    let (start, end) = (i.planned_start(), i.deadline());
+    if start.is_none() && end.is_none() {
+        return None;
+    }
+    let made = zone.shift(&i.created_at);
+    let filled = || made.get(..10).unwrap_or_else(|| end.unwrap_or_default()).min(end.unwrap_or_default());
+    let (start, start_filled) = match (start, end) {
+        (Some(s), Some(e)) if s > e => (e, true),
+        (Some(s), _) => (s, false),
+        (None, _) => (filled(), true),
+    };
+    Some(Planned {
+        start: start.into(),
+        end: end.unwrap_or(start).into(),
+        start_filled,
+        end_filled: end.is_none(),
+        from: Origin::Own,
     })
 }
 
@@ -296,7 +324,7 @@ pub fn range_of<'r, 'a: 'r>(rows: impl IntoIterator<Item = &'r Row<'a>>, now: &s
     let mut days: Vec<String> = Vec::new();
     for r in rows {
         if let Some(p) = &r.planned {
-            days.extend([p.start, p.end].into_iter().flatten().map(str::to_string));
+            days.extend([p.start.clone(), p.end.clone()]);
         }
         if let Actual::Span { start, end } = &r.actual {
             days.extend(day(start));
@@ -349,6 +377,55 @@ mod tests {
         g.rows.iter().find(|r| r.id == id).unwrap_or_else(|| panic!("{id} 줄이 없다"))
     }
 
+    #[test]
+    fn missing_plan_edges_are_filled_without_changing_written_dates() {
+        let mut due = row("argos-0001", Kind::Issue, "todo");
+        due.created_at = "2026-10-27T15:30:00Z".into();
+        due.due_on = Some("2026-10-30".into());
+        let mut past = due.clone();
+        past.id = "argos-0002".into();
+        past.due_on = Some("2026-10-20".into());
+        let mut start = row("argos-0003", Kind::Issue, "todo");
+        start.starts_on = Some("2026-10-22".into());
+        let mut backwards = row("argos-0004", Kind::Issue, "todo");
+        backwards.starts_on = Some("2026-10-25".into());
+        backwards.due_on = Some("2026-10-23".into());
+        let all = vec![due, past, start, backwards];
+        let before = serde_json::to_value(&all).unwrap();
+        let zone = Zone::fixed("Asia/Seoul", 9 * 3600);
+        let g = read_in(&all, "2026-10-28T16:00:00Z", &zone);
+        let p = |at: usize| g.rows[at].planned.as_ref().unwrap();
+        assert_eq!(
+            (&*p(0).start, &*p(0).end, p(0).start_filled, p(0).end_filled),
+            ("2026-10-28", "2026-10-30", true, false)
+        );
+        assert_eq!(read(&all).rows[0].planned.as_ref().unwrap().start, "2026-10-27");
+        assert_eq!((&*p(1).start, &*p(1).end), ("2026-10-20", "2026-10-20"));
+        assert_eq!(
+            (&*p(2).start, &*p(2).end, p(2).start_filled, p(2).end_filled),
+            ("2026-10-22", "2026-10-22", false, true)
+        );
+        assert_eq!((&*p(3).start, &*p(3).end, p(3).start_filled), ("2026-10-23", "2026-10-23", true));
+        assert_eq!(serde_json::to_value(&all).unwrap(), before);
+    }
+
+    #[test]
+    fn a_group_fills_only_edges_no_member_wrote() {
+        let mut epic = row("argos-0001", Kind::Epic, "todo");
+        epic.created_at = "2026-10-29T00:00:00Z".into();
+        let mut m = member("argos-0001.aaa", "argos-0001", "todo");
+        m.due_on = Some("2026-10-23".into());
+        let mut all = vec![epic, m];
+        let g = read(&all);
+        let p = g.rows[0].planned.as_ref().unwrap();
+        assert_eq!((&*p.start, &*p.end, p.start_filled, p.end_filled), ("2026-10-23", "2026-10-23", true, false));
+        all[1].due_on = None;
+        all[1].starts_on = Some("2026-10-22".into());
+        let g = read(&all);
+        let p = g.rows[0].planned.as_ref().unwrap();
+        assert_eq!((&*p.start, &*p.end, p.start_filled, p.end_filled), ("2026-10-22", "2026-10-22", false, true));
+    }
+
     /// 계획만 · 실제만 · 둘 다 · 아무것도 없는 일 하나씩.
     #[test]
     fn a_row_reads_its_plan_and_its_run_apart() {
@@ -366,7 +443,16 @@ mod tests {
         let g = read(&all);
 
         let a = by(&g, "argos-0001");
-        assert_eq!(a.planned, Some(Planned { start: Some("2026-10-22"), end: Some("2026-10-30"), from: Origin::Own }));
+        assert_eq!(
+            a.planned,
+            Some(Planned {
+                start: "2026-10-22".into(),
+                end: "2026-10-30".into(),
+                start_filled: false,
+                end_filled: false,
+                from: Origin::Own
+            })
+        );
         assert_eq!(a.actual, Actual::NotStarted);
         assert_eq!(a.progress, Standing::Column { name: "todo" });
 
@@ -376,7 +462,16 @@ mod tests {
         assert_eq!(b.actual, Actual::Span { start: "2026-10-10T01:00:00Z", end: None });
 
         let c = by(&g, "argos-0003");
-        assert_eq!(c.planned, Some(Planned { start: None, end: Some("2026-10-18"), from: Origin::Own }));
+        assert_eq!(
+            c.planned,
+            Some(Planned {
+                start: "2026-10-01".into(),
+                end: "2026-10-18".into(),
+                start_filled: true,
+                end_filled: false,
+                from: Origin::Own
+            })
+        );
         assert_eq!(c.actual, Actual::Span { start: "2026-10-12T01:00:00Z", end: Some("2026-10-16T05:00:00Z") });
         assert_eq!(c.overdue, None, "닫힌 줄은 기한을 넘기지 않는다");
 
@@ -387,7 +482,7 @@ mod tests {
         );
         assert!(d.blocked_by.is_empty());
         // 폭은 모든 줄의 가장 이른 날에서 가장 늦은 날까지 — 열린 줄(b)은 오늘까지다.
-        assert_eq!(g.range, Some(Range { from: "2026-10-10".into(), to: "2026-10-30".into() }));
+        assert_eq!(g.range, Some(Range { from: "2026-10-01".into(), to: "2026-10-30".into() }));
     }
 
     /// 시작을 모르는 줄은 구간이 없고 "시작 모름" 이 따로 선다 — 만든 때도 0 분도 아니다.
@@ -450,11 +545,23 @@ mod tests {
         // 제 값은 한 덩이다 — 기한만 적었으면 시작을 멤버(2026-10-25)에서 채우지 않는다.
         assert_eq!(
             by(&g, "argos-0001").planned,
-            Some(Planned { start: None, end: Some("2026-11-30"), from: Origin::Own })
+            Some(Planned {
+                start: "2026-10-01".into(),
+                end: "2026-11-30".into(),
+                start_filled: true,
+                end_filled: false,
+                from: Origin::Own
+            })
         );
         assert_eq!(
             by(&g, "argos-0002").planned,
-            Some(Planned { start: Some("2026-10-22"), end: Some("2026-11-10"), from: Origin::Members })
+            Some(Planned {
+                start: "2026-10-22".into(),
+                end: "2026-11-10".into(),
+                start_filled: false,
+                end_filled: false,
+                from: Origin::Members
+            })
         );
         assert_eq!(by(&g, "argos-0003").planned, None);
         // 묶음의 진척은 목록 줄이 세는 그 수다.
@@ -476,7 +583,13 @@ mod tests {
         let g = read(&all);
         assert_eq!(
             by(&g, "argos-m001").planned,
-            Some(Planned { start: Some("2026-10-27"), end: Some("2026-12-01"), from: Origin::Members })
+            Some(Planned {
+                start: "2026-10-27".into(),
+                end: "2026-12-01".into(),
+                start_filled: false,
+                end_filled: false,
+                from: Origin::Members
+            })
         );
     }
 
@@ -536,7 +649,13 @@ mod tests {
         let g = read(&all);
         assert_eq!(
             by(&g, "argos-0001").planned,
-            Some(Planned { start: None, end: Some("2026-10-30"), from: Origin::Members }),
+            Some(Planned {
+                start: "2026-10-01".into(),
+                end: "2026-10-30".into(),
+                start_filled: true,
+                end_filled: false,
+                from: Origin::Members
+            }),
             "미룬 멤버의 날이 묶음의 계획을 늘렸다"
         );
         let p = by(&g, "argos-0001.bbb");
@@ -551,7 +670,13 @@ mod tests {
         // 미룬 멤버는 여전히 빠진다(`report::counted` 와 같은 자).
         assert_eq!(
             by(&g, "argos-0001").planned,
-            Some(Planned { start: None, end: Some("2026-10-30"), from: Origin::Members }),
+            Some(Planned {
+                start: "2026-10-01".into(),
+                end: "2026-10-30".into(),
+                start_filled: true,
+                end_filled: false,
+                from: Origin::Members
+            }),
             "미룬 에픽이 제 막대를 잃었거나 따로 미룬 멤버를 셌다"
         );
     }
@@ -572,11 +697,23 @@ mod tests {
         let g = read(&all);
         assert_eq!(
             by(&g, "argos-0001").planned,
-            Some(Planned { start: Some("2026-10-22"), end: Some("2026-10-28"), from: Origin::Members })
+            Some(Planned {
+                start: "2026-10-22".into(),
+                end: "2026-10-28".into(),
+                start_filled: false,
+                end_filled: false,
+                from: Origin::Members
+            })
         );
         assert_eq!(
             by(&g, "argos-0001.aaa.bbb").planned,
-            Some(Planned { start: Some("2027-05-01"), end: Some("2027-06-01"), from: Origin::Own })
+            Some(Planned {
+                start: "2027-05-01".into(),
+                end: "2027-06-01".into(),
+                start_filled: false,
+                end_filled: false,
+                from: Origin::Own
+            })
         );
     }
 
@@ -598,11 +735,23 @@ mod tests {
         let g = read(&all);
         assert_eq!(
             by(&g, "argos-0001").planned,
-            Some(Planned { start: Some("2026-10-22"), end: Some("2026-10-27"), from: Origin::Members })
+            Some(Planned {
+                start: "2026-10-22".into(),
+                end: "2026-10-27".into(),
+                start_filled: false,
+                end_filled: false,
+                from: Origin::Members
+            })
         );
         assert_eq!(
             by(&g, "argos-0002").planned,
-            Some(Planned { start: Some("2026-10-20"), end: Some("2026-11-01"), from: Origin::Members }),
+            Some(Planned {
+                start: "2026-10-20".into(),
+                end: "2026-11-01".into(),
+                start_filled: false,
+                end_filled: false,
+                from: Origin::Members
+            }),
             "멤버의 시작이 묶음의 막대 밖에 섰다"
         );
     }
@@ -664,7 +813,16 @@ mod tests {
         let g = read(&all);
         assert_eq!((&g.rows[0].progress, &g.rows[0].planned), (&Standing::Rollup { done: 0, total: 0 }, &None));
         assert_eq!(g.rows[1].progress, Standing::Rollup { done: 0, total: 1 });
-        assert_eq!(g.rows[1].planned, Some(Planned { start: None, end: Some("2026-10-30"), from: Origin::Members }));
+        assert_eq!(
+            g.rows[1].planned,
+            Some(Planned {
+                start: "2026-10-01".into(),
+                end: "2026-10-30".into(),
+                start_filled: true,
+                end_filled: false,
+                from: Origin::Members
+            })
+        );
     }
 
     /// **맞춤의 폭은 부르는 쪽이 고른 줄로도 잰다**(리뷰) — 숨긴 줄의 날이 폭을 넓히지 않게, 거른 화면은 남긴 줄만 넘긴다.
@@ -729,10 +887,13 @@ mod tests {
         let v = serde_json::to_value(read(&all)).unwrap();
         let first = &v["rows"][0];
         assert_eq!(first["actual"], serde_json::json!({"kind": "span", "start": "2026-10-10T01:00:00Z", "end": null}));
-        assert_eq!(first["planned"], serde_json::json!({"start": null, "end": "2026-10-30", "from": "own"}));
+        assert_eq!(
+            first["planned"],
+            serde_json::json!({"start": "2026-10-01", "end": "2026-10-30", "start_filled": true, "end_filled": false, "from": "own"})
+        );
         assert_eq!(first["progress"], serde_json::json!({"kind": "column", "name": "in_progress"}));
         assert_eq!(v["rows"][1]["progress"], serde_json::json!({"kind": "rollup", "done": 0, "total": 0}));
-        assert_eq!(v["range"], serde_json::json!({"from": "2026-10-10", "to": "2026-10-30"}));
+        assert_eq!(v["range"], serde_json::json!({"from": "2026-10-01", "to": "2026-10-30"}));
     }
 
     /// 행은 `all` 과 같은 차례·같은 길이고, 같은 id 를 든 줄도 첨자로 가려진다.

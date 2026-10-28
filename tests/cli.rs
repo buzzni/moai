@@ -7327,7 +7327,7 @@ fn tui_deep_carries_each_rows_gantt() {
         |id: &str| rows.iter().find(|r| r["id"] == id).unwrap_or_else(|| panic!("{id} 가 없다"))["gantt"].clone();
     assert_eq!(
         gantt(&ep)["planned"],
-        serde_json::json!({"start": "2026-10-20", "end": "2026-10-28", "from": "members"})
+        serde_json::json!({"start": "2026-10-20", "end": "2026-10-28", "start_filled": false, "end_filled": false, "from": "members"})
     );
     assert_eq!(gantt(&ep)["progress"], serde_json::json!({"kind": "rollup", "done": 0, "total": 2}));
     assert_eq!(gantt(&a)["actual"], serde_json::json!({"kind": "span", "start": "2026-10-21T01:00:00Z", "end": null}));

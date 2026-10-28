@@ -56,9 +56,12 @@ what the Gantt charts draw, decided by moai so that a program drawing it judges 
 dates itself. Basket
 rows have none, and every key inside it always stands (`null` when there is no value):
 
-- `planned` — `{start, end, from}`: calendar days, either end may be `null`; `from`
+- `planned` — `{start, end, start_filled, end_filled, from}`: calendar days, both ends always present; `from`
   is `own`, or `members` for an epic or milestone that wrote no day and is counted
-  from its members. `null` when no day can be read
+  from its members. A missing start uses the creation day in the viewer’s time zone,
+  capped at the deadline; a missing end uses the start day. The boolean fill flags
+  always stand and identify derived edges, which are never saved by a move or undo.
+  `null` when no day can be read
 - `actual` — `{"kind": "span", start, end}` in UTC (`end` `null` while it runs),
   `{"kind": "not_started"}`, or `{"kind": "unknown"}` for a start nobody recorded —
   not zero, not never

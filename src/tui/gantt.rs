@@ -554,7 +554,7 @@ fn fill_row(g: &mut GanttRow, row: &crate::report::gantt::Row, column: &str, zon
     g.tone = tone(column);
     let day = |d: Option<&str>| d.and_then(parse_date);
     if let Some(p) = &row.planned {
-        let (start, end) = (day(p.start), day(p.end));
+        let (start, end) = (day(Some(&p.start)), day(Some(&p.end)));
         g.planned = plan_span(start, end);
         // 기한 표식은 **제 기한**만 — 멤버에서 센 끝은 그 줄의 기한이 아니다.
         if p.from == Origin::Own {

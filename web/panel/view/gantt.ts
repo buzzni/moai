@@ -827,7 +827,7 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
         }
       } else {
         dragged = true
-        moved.set(row.id, { start: change.start ?? g.planned!.start, end: change.due ?? g.planned!.end, from: 'own' })
+        moved.set(row.id, { ...g.planned!, start: change.start ?? g.planned!.start, end: change.due ?? g.planned!.end, from: 'own' })
         const n = model?.lines.findIndex((line) => line.key === row.id) ?? -1
         if (built && n >= 0) built.placed[n] = placeOf(row, built.now, clock.zone())
         // The arrows into and out of the dropped bar are drawn from those days.
