@@ -59,3 +59,6 @@
 .moai-detail-timeline > li[data-kind="note"]::before { border-color: var(--warn); }
 .moai-detail-timeline .moai-detail-meta { display: block; font-size: 11px; }
 .moai-detail-timeline > li.moai-detail-meta::before { display: none; }
+
+.moai-detail-text { white-space: pre-wrap; overflow-wrap: anywhere; min-width: 0; }
+.moai-detail-timeline .moai-detail-meta { display: block; margin-top: 4px; }

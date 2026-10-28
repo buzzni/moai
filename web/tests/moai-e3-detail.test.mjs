@@ -398,3 +398,19 @@ test('pane: NEW first among the chips for an unread row; not for a read or archi
   view.render(stateWith({ value: { id: row.id, row } }), archived)
   assert.equal(chips().querySelector('.m-chip-new'), null)
 })
+
+
+test('history and work start expanded, preserve lines and remember a collapsed section', () => {
+  const { doc, root, view } = mount()
+  const row = { ...ROWS[3], journal: [{ kind: 'note', text: 'first\n  second' }], work: ['work\nnext'] }
+  const state = stateWith({ value: { id: row.id, row } })
+  view.render(state, index)
+  for (const key of ['journal', 'work']) assert.equal(root.querySelector(`[data-fold=${key}]`).open, true)
+  assert.equal(root.querySelector('[data-fold=journal] .moai-detail-text').textContent, 'first\n  second')
+  assert.equal(root.querySelector('[data-fold=work] .moai-detail-text').textContent, 'work\nnext')
+  const journal = root.querySelector('[data-fold=journal]')
+  journal.open = false
+  journal.dispatchEvent(new doc.defaultView.Event('toggle'))
+  view.render(stateWith({ value: { id: row.id, row: { ...row, title: 'changed' } } }), index)
+  assert.equal(root.querySelector('[data-fold=journal]').open, false)
+})
