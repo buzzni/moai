@@ -67,7 +67,7 @@ between rendered markdown and the raw text.
 ## Gantt
 
 The Gantt tab draws the same chart as the explorer's `SPC g g`, with the same
-meaning. The tree stays on the left with every folder open, the filter, search and
+meaning. The tree stays on the left, initially with every folder open, with the filter, search and
 view toggles of the list applied; the dates scroll on the right.
 
 | Mark | Means |
@@ -77,11 +77,22 @@ view toggles of the list applied; the dates scroll on the right.
 | dashed outline | A deferred row |
 | solid band over the bar | When the work actually ran, in its column's colour; a row whose start nobody recorded has none |
 | red hatch and `!` | Past the row's own deadline, up to today |
-| `◆` | A row with a deadline and no start |
+| `◆` | A milestone’s own deadline |
 | red dashed line | Now |
 | `‹` `›` | The row goes on off screen |
 | `n/m` and the fill | Finished work under an epic or milestone |
-| arrows | The rows that block the one under the cursor |
+| arrows | The rows that block the cursor row and those it blocks, pointing from blocker to blocked |
+
+A row with a deadline and no planned start gets a bar from its creation day in
+the viewing time zone, or from the deadline day if that is earlier. A start
+without a deadline gets a one-day bar. These filled edges stay derived: a move or
+undo never saves them. With neither day written, there is no planned bar.
+Completed blockers do not get arrows; a dependency outside the current place,
+filter or open folders is omitted.
+
+Started work and busy groups use the list’s spinner and moving light over the
+title. Deferred work stays still. Bars do not animate; reduced-motion settings
+also stop the spinner and title motion.
 
 The page only places these: which span a group covers and whether a row is late is
 decided by moai (`moai tui --deep --json` carries it as `gantt`). Lateness is counted
@@ -98,17 +109,22 @@ Other tabs read the same tree without calculating the chart values.
 | Key / mouse | Does |
 |---|---|
 | `j` `k`, click | Move the cursor; a click on a row or bar opens its detail |
+| `h` `l` / `←` `→`, group chevron | Fold / open a group; `h` on a member folds its parent and moves there |
+| `Tab` | Fold / open the whole subtree under the cursor |
 | `H` `L`, Shift+wheel, drag the date header | Move the dates |
 | `-` `=`, the zoom buttons, Ctrl+wheel over the dates | Hour / day / week / month |
 | `t` / `z` | Jump to today / fit every drawn row |
 | drag the line between grid and dates | Grid width, kept in this browser |
-| drag a bar's middle | Move its start and deadline by the same number of days |
+| drag a bar's middle | Move its written dates by the same number of days |
 | drag a bar's left or right end, or a `◆` | Move the start alone, or the deadline alone |
 | double-click a day on a row with no days | Plan that one day as its start and deadline |
 
+Gantt folds belong to that visit: leaving and returning opens every group again.
+The list keeps its own expansion state. A closed group keeps its rollup bar.
+
 A bar moves by whole days and is written once, when you let go — the same write as
 `moai edit <id> --shift <N>` (`--shift-start` or `--shift-due` for an end). What is
-sent is the move, not the days: moai counts them inside its write from the row as it
+sent is the move, not the days (only the written edge when the other was filled): moai counts them inside its write from the row as it
 stands then, so a row someone moved in the two seconds before the page read it again
 moves on from where they put it. A double-click plans its day as `moai edit <id>
 --start <day> --due <day> --if-unplanned`, refused if the row gained days meanwhile.
@@ -364,4 +380,4 @@ once and the keys reach it.
 The page does not show the stats screen, and what it writes is a Gantt bar's days
 and your read marks.
 
-Decided in: moai-8r2l, moai-0aa7, moai-jshy, moai-d86e.3ud, moai-ijjd, moai-lj8g
+Decided in: moai-e9hi, moai-8r2l, moai-0aa7, moai-jshy, moai-d86e.3ud, moai-ijjd, moai-lj8g
