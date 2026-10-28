@@ -1330,6 +1330,8 @@ impl App {
         // 읽은 것인데(`Ground::read_notes`), 레이어에서는 `/` 가 안 서고 도로 들어가면 새로 읽는다. 두고 가면
         // 그 줄이 다시 읽힐 때까지 글과 접은 글 두 벌(이 저장소에서 9MB)이 쓸 데 없이 남는다.
         parked.ground.notes = None;
+        // 간트의 값도 두고 가지 않는다 — 층의 시계(`App::site` 의 `now`)로 다시 읽어 어차피 새로 짓는다(`Site::chart_read`).
+        parked.ground.chart = Default::default();
         if let (Some(at), Some(layer)) = (park_at, self.layer.as_mut())
             && let Some(place) = layer.places.iter_mut().find(|p| p.path == at)
         {

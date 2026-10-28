@@ -487,6 +487,8 @@ test('menuLayer: root items and layers with titles; state labels; availability h
   assert.equal(menuLayer('SPC c', ctx).items.find((i) => i.key === 't').state.id, 'hidden')
   assert.equal(menuLayer('SPC o', ctx).items[0].state.label, '[왼쪽]')
   assert.equal(menuLayer('SPC o', browse()).items[0].state.label, '[아래]')
+  assert.equal(menuLayer('SPC o', browse({ detailAt: 'right' })).items[0].state.label, '[오른쪽]')
+  assert.equal(menuLayer('SPC o', browse({ detailAt: 'top' })).items[0].state.label, '[위]')
 
   // Focus moves follow the split axis; the detail position is gone when the panel is narrow.
   assert.deepEqual(menuLayer('SPC w', ctx).items.map((i) => i.key), ['w', 'W', 'h', 'l'])
@@ -499,7 +501,7 @@ test('menuLayer: root items and layers with titles; state labels; availability h
   // The wiki menu: tabs, raw, the zone picker, windows, help — and the projects when there are some.
   assert.deepEqual(menuLayer('SPC', { mode: 'wiki' }).items.map((i) => i.key), ['g', 'v', 'o', 'w', '?'])
   assert.deepEqual(menuLayer('SPC', { mode: 'wiki', projects: ['a'] }).items.map((i) => i.key), ['p', 'g', 'v', 'o', 'w', '?'])
-  assert.deepEqual(menuLayer('SPC g', { mode: 'wiki' }).items.map((i) => [i.key, i.action]), [['l', 'tab.list'], ['b', 'tab.board'], ['w', 'tab.wiki'], ['g', 'tab.gantt']])
+  assert.deepEqual(menuLayer('SPC g', { mode: 'wiki' }).items.map((i) => [i.key, i.action]), [['l', 'tab.list'], ['b', 'tab.board'], ['g', 'tab.gantt'], ['w', 'tab.wiki']])
 })
 
 test('helpSections: grouped rows, platform keys, availability', () => {
@@ -906,7 +908,7 @@ test('menu: no label in any layer outgrows its cell in any language, and the hel
   }
   const rows = helpSections('browse', ctx, 'other', TABLE.en).flatMap((s) => s.rows)
   const longer = (action) => rows.find((r) => r.action === action).label
-  assert.equal(longer('option.detailAt'), 'Details position (left ↔ bottom)')
+  assert.equal(longer('option.detailAt'), 'Details position (right → bottom → left → top)')
   assert.equal(longer('view.raw'), 'Raw or rendered')
   assert.equal(rows.find((r) => r.action === 'sort.add' && r.args?.field === 'priority').label, 'Priority (add at the end)')
 })

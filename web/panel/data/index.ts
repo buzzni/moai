@@ -68,8 +68,8 @@ export interface TreeRow {
 export interface GanttRow {
   id: string
   kind: string
-  /** Calendar days, either end may be missing; `from` is `own` or, on a group that wrote no day, `members`. */
-  planned: { start: string | null; end: string | null; from: 'own' | 'members' } | null
+  /** Calendar days, filled ends are derived and never written; `from` is `own` or, on a group that wrote no day, `members`. */
+  planned: { start: string; end: string; start_filled: boolean; end_filled: boolean; from: 'own' | 'members' } | null
   /** UTC instants. `unknown` is a start nobody recorded — not zero, not never. An open span has `end: null`. */
   actual: { kind: 'not_started' } | { kind: 'unknown' } | { kind: 'span'; start: string; end: string | null }
   progress: { kind: 'rollup'; done: number; total: number } | { kind: 'column'; name: string }
@@ -106,6 +106,7 @@ export type Twig = readonly boolean[]
 
 export interface TreeLine {
   entry: Entry
+  path: Path
   twig: Twig
 }
 
@@ -348,7 +349,7 @@ export class IssueIndex {
       const entries = this.entries(here, keep)
       entries.forEach((entry, n) => {
         kin.push(n < entries.length - 1)
-        out.push({ entry, twig: [...kin] })
+        out.push({ entry, path: entry.dir ? [...here, entry.seg] : this.dirPath(entry.at), twig: [...kin] })
         if (entry.dir) {
           const under = [...here, entry.seg]
           if (open(under)) walk(under)

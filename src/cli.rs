@@ -720,12 +720,17 @@ BACKLOG
   and the list keeps the folds it had. Coming back to the list opens the
   folder that holds the row you stood on. The detail stands below the gantt at
   first; {key:browse.detail_at} there moves the gantt's detail only, for this session.
-  The planned bar (░, ▒ on a group)
-  runs from the start to the deadline and ◆ marks the row's own deadline; █
-  over it is when the work actually ran, ▓ is the time past a deadline, ┄ is
-  a deferred row's plan, and ▼ over a dotted line marks today.
+  The planned bar (░, ▒ on a group) runs from start to deadline.
+  Milestone deadlines carry ◆. The █ band is when the work actually ran,
+  ▓ is the time past a deadline, ┄ is a deferred row's plan, and ▼ over
+  a dotted line marks today.
   Groups that wrote no days of their own span their members' days. Planned days
   are calendar days; actual times are shown in your time zone.
+  Missing planned starts use the creation day in your time zone (the deadline
+  day if earlier). Missing ends use the start day. These filled edges are
+  derived through ordinary moves and undo. Choosing a filled start writes
+  its selected day as --start, replacing any start written meanwhile.
+  With neither day written, there is no planned bar.
   Keys that stand only in the gantt move the date axis:
     {key:gantt.zoom_in} {key:gantt.zoom_out}  zoom in and out — hour, day, week, month
     {key:gantt.left} {key:gantt.right}  one cell earlier and later   {key:gantt.page_left} {key:gantt.page_right}  a page earlier and later

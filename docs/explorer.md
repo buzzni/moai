@@ -42,11 +42,16 @@ directories. Forgot a key? `?` (or `SPC h`) opens [the key list](#the-key-list).
   so the same keys scroll it, and back again. After the commits it lists the
   wiki about the row, as `moai show <id>` does: the pages that name the row or
   its epic, then the related sections its title finds, `path:line` first. It
-  leaves out the lessons the row's own notes point at (it does not read the
-  notes), so such a lesson can stand among the related sections here while
+  leaves out the lessons the row's own notes point at (wiki matching does not
+  use those notes), so such a lesson can stand among the related sections here while
   `moai show <id>` lists it as a lesson. The
   wiki is read once per checkout, so a page written after the explorer opened
-  shows once `SPC g w` has read the wiki again, or the next time it opens
+  shows once `SPC g w` has read the wiki again, or the next time it opens.
+  After the wiki, history lists creation, column moves and notes in time order;
+  long notes wrap and the detail scrolls through the full history. New journal
+  entries appear without reopening the explorer. A work log follows when notes
+  name the AI that did the work, with its provider, model, grade, reason, author
+  and recorded date. Indented or fenced examples are not work records
 
 **What the list shows is the view.** To begin with every column is shown,
 done included, and [deferred](glossary.md#deferred) work is hidden; the path
@@ -110,7 +115,10 @@ remain readable; if both keys exist, `hide_backlog` wins.
   not yours says whose it is. `h` and `l` go across the columns, `j` and `k` along
   one, and the wheel and `Ctrl-d`/`Ctrl-u` scroll the board without moving the
   cursor. The cursor, filter, view and detail are the list's, so switching keeps
-  your place. The board does not move cards — `moai mv` does
+  your place. Titles wrap to the column width, keeping up to 50 Unicode
+  characters, then `…` if more remain. Korean characters count as one each,
+  despite occupying two terminal cells. Taller cards push the next card down;
+  optional fields stay below the title. The board does not move cards — `moai mv` does
 - **`SPC g g` — the gantt.** The same rows opened out on the left and a date axis
   with bars on the right — see [the gantt](#the-gantt) below
 - **`SPC g s` — statistics.** The numbers `moai stats` gives, drawn: the flow per
@@ -164,10 +172,14 @@ brings you back to the same row.
 
 **Reading it.** Every group opens out when you enter, and the left column is the
 list's row. On the right, `░` is the planned start to deadline (`▒` on an epic or a
-milestone), `◆` the row's own deadline, `█` over it when the work actually ran,
+milestone), `◆` a milestone's own deadline, `█` over it when the work actually ran,
 `▓` the time past a deadline, `┄` a deferred row's plan, and `▼` over a dotted line
-today. An epic that wrote no days of its own spans its members' days. Planned days
-are calendar days; actual times are shown in your time zone. With no planned days
+today. An epic that wrote no days of its own covers its members’ planned spans,
+including their filled starts. A row with a deadline but no start gets a bar from
+its creation day in your time zone, capped at the deadline day. A start without a
+deadline gets a one-day bar. With neither date, the row has no planned bar. These
+filled edges stay derived through ordinary moves and undo. Planned days are
+calendar days; actual times are shown in your time zone. With no planned days
 anywhere, the date side says how to add them: `moai edit <id> --start <day> --due
 <day>`, or `@start~due` at the end of a plan line.
 
@@ -179,7 +191,11 @@ keeps the folds it had, and the next time you enter, everything is open again.
 every row on one screen. It opens fitted and stays fitted until you move it.
 
 **Moving a plan.** `<` and `>` move the cursor row's whole plan a day, `{` and `}`
-only its start. With the mouse, drag a bar's middle, its left end (the start) or its
+only its start. If that start was filled, the start keys choose the drawn start
+plus or minus one day and write that absolute date as `--start`. A left-end drag
+on a filled start likewise writes the date you dragged to. This explicit choice
+wins over a start written meanwhile. Other moves shift the written dates.
+With the mouse, drag a bar's middle, its left end (the start) or its
 right end (the deadline); it snaps to whole days and is written once, when you let
 go. Click an empty day on a row with no plan to plan that one day. The write is the
 same as `moai edit --start --due`: a start after the deadline, or a day past the
@@ -452,4 +468,4 @@ write there either.
   an email on every write and `git config` had none. The answer holds for this
   run; set `user.name` and `user.email` to stop it asking
 
-Decided in: moai-724f moai-z46r moai-9nfw moai-47mz moai-irrj moai-ucx8 moai-1hka moai-h2rh moai-gelm moai-m6ni moai-p3r9 moai-o3cb moai-fyul moai-ogaw moai-tllo moai-fc97 moai-jtvp moai-bth3 moai-9tqo moai-wk7i moai-pxiy moai-i4hf moai-lj8g
+Decided in: moai-e9hi moai-724f moai-z46r moai-9nfw moai-47mz moai-irrj moai-ucx8 moai-1hka moai-h2rh moai-gelm moai-m6ni moai-p3r9 moai-o3cb moai-fyul moai-ogaw moai-tllo moai-fc97 moai-jtvp moai-bth3 moai-9tqo moai-wk7i moai-pxiy moai-i4hf moai-lj8g moai-ccow

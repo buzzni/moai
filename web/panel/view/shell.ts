@@ -1,4 +1,4 @@
-// The panel's frame (design §1): the tab bar (board, list, wiki, gantt; the refresh time, the theme button, the detail toggles), the
+// The panel's frame (design §1): the tab bar (board, list, gantt, wiki; the refresh time, the theme button, the detail toggles), the
 // search / filter / sort toolbar (view/toolbar.ts, its state in the store), the path line, the banners, the result line, the run's activity, and under them the
 // split holding the list or board beside the detail. The panes are filled by the views named in
 // view/panes.ts through the contract in view/types.ts; the shell renders the panes that show on every store
@@ -113,9 +113,9 @@ export function describe(outcome: Outcome, copy: Copy): { parts: (string | Node)
   }
 }
 
-/** The main pane's width: all of it, less the detail's share when the detail stands on the left. */
-export function mainWidth(width: number, position: PaneLayout["position"], detailVisible: boolean, leftRatio: number): number {
-  return position === "left" && detailVisible ? width * (1 - leftRatio) : width
+/** The main pane's width: all of it, less the detail's share when the detail stands on either horizontal side. */
+export function mainWidth(width: number, position: PaneLayout["position"], detailVisible: boolean, detailRatio: number): number {
+  return (position === "left" || position === "right") && detailVisible ? width * (1 - detailRatio) : width
 }
 
 /** The theme button's icon: the state it is in, by shape (data/theme.ts). */
@@ -177,7 +177,7 @@ export function mountShell(root: HTMLElement, options: ShellOptions): Shell {
     position: effectivePosition(width, state.detail.position),
     width,
     onToggle: (next) => store.dispatch({ type: "detail-position", position: next }),
-    labels: { toLeft: copy.shell.detailToLeft, toBottom: copy.shell.detailToBottom, forcedBottom: copy.shell.detailForcedBottom },
+    labels: { toRight: copy.shell.detailToRight, toTop: copy.shell.detailToTop, toLeft: copy.shell.detailToLeft, toBottom: copy.shell.detailToBottom, forcedBottom: copy.shell.detailForcedBottom },
   })
   position.el.classList.add("moai-position-toggle")
   const actions = el(doc, "div", { class: "m-tabbar-slot" })
@@ -270,7 +270,7 @@ export function mountShell(root: HTMLElement, options: ShellOptions): Shell {
   const layout = (): PaneLayout => {
     const current = store.getState().detail
     const shown = effectivePosition(width, current.position)
-    return { width, position: shown, detailVisible: current.visible, mainWidth: mainWidth(width, shown, current.visible, split.ratio("left")) }
+    return { width, position: shown, detailVisible: current.visible, mainWidth: mainWidth(width, shown, current.visible, split.ratio(shown)) }
   }
   const viewIntents: ViewIntents = {
     enter: (path, cursor) => store.dispatch(cursor === undefined ? { type: "enter", path } : { type: "enter", path, cursor }),
@@ -371,7 +371,7 @@ export function mountShell(root: HTMLElement, options: ShellOptions): Shell {
   function paintLayout(current: State) {
     const detail = current.detail
     if (split.preferred() !== detail.position) split.setPosition(detail.position)
-    for (const at of ["left", "bottom"] as const) if (split.ratio(at) !== detail.ratio[at]) split.setRatio(at, detail.ratio[at])
+    for (const at of ["right", "bottom", "left", "top"] as const) if (split.ratio(at) !== detail.ratio[at]) split.setRatio(at, detail.ratio[at])
     split.setDetailVisible(detail.visible)
     position.update(split.position(), width)
     shell.dataset.position = split.position()
@@ -434,6 +434,7 @@ export function mountShell(root: HTMLElement, options: ShellOptions): Shell {
       if (state.detail.visible) detailView.render(state, index)
     }
     putBack()
+    if (left === "gantt" && state.tab !== "gantt") mainViews.gantt.leave?.()
     // Last, as it dispatches (and so renders again): the wiki saves its page and trail into the store.
     if (left === "wiki" && state.tab !== "wiki") wikiView?.leave?.()
   }

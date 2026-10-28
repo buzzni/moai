@@ -37,7 +37,7 @@ export type CellField = "id" | "priority" | "assignee" | "created" | "updated" |
 
 /**
  * What the table needs to know about the panel right now. The caller (store) fills it; every field is optional and a
- * missing field reads as the panel's default (detail shown at the bottom, list focus, nothing hidden).
+ * missing field reads as the panel's default (detail shown at the right, list focus, nothing hidden).
  */
 export interface KeyContext {
   mode: Mode
@@ -47,7 +47,7 @@ export interface KeyContext {
   focus?: "list" | "detail" | "page"
   /** Detail pane shown (SPC v d). Default true. */
   detail?: boolean
-  detailAt?: "left" | "bottom"
+  detailAt?: "right" | "top" | "left" | "bottom"
   /** The panel is narrower than 640px and the detail is forced to the bottom: SPC o d does nothing. */
   detailAtLocked?: boolean
   /** Body shown as raw markdown (SPC v r). */
@@ -74,7 +74,7 @@ export interface KeyContext {
 }
 
 export type StateId =
-  | "shown" | "hidden" | "asc" | "desc" | "left" | "bottom" | "raw" | "rendered" | "list" | "board" | "wiki" | "gantt"
+  | "shown" | "hidden" | "asc" | "desc" | "right" | "top" | "left" | "bottom" | "raw" | "rendered" | "list" | "board" | "wiki" | "gantt"
 
 /** The words when a caller passes none. */
 const DEFAULT_WORDS: KeyTableCopy = TABLE.ko
@@ -156,7 +156,7 @@ export type KeyTable = Readonly<Record<TableName, ReadonlyArray<Binding>>>
 // ---------------------------------------------------------------- context readers
 
 const detailShown = (c: KeyContext): boolean => c.detail !== false
-const detailAt = (c: KeyContext): "left" | "bottom" => c.detailAt ?? "bottom"
+const detailAt = (c: KeyContext): "right" | "top" | "left" | "bottom" => c.detailAt ?? "right"
 const listFocus = (c: KeyContext): boolean => (c.focus ?? "list") === "list"
 const ganttFocus = (c: KeyContext): boolean => c.tab === "gantt" && listFocus(c)
 const shown = (hidden: boolean | undefined): StateId => (hidden ? "hidden" : "shown")
@@ -166,8 +166,8 @@ function focusWhen(side: "next" | "prev" | "left" | "right" | "up" | "down"): (c
   return (c) => {
     if (c.mode === "wiki") return side === "next" || side === "prev" || side === "left" || side === "right"
     if (!detailShown(c)) return false
-    if (side === "left" || side === "right") return detailAt(c) === "left"
-    if (side === "up" || side === "down") return detailAt(c) === "bottom"
+    if (side === "left" || side === "right") return detailAt(c) === "left" || detailAt(c) === "right"
+    if (side === "up" || side === "down") return detailAt(c) === "bottom" || detailAt(c) === "top"
     return true
   }
 }
@@ -211,7 +211,7 @@ const BROWSE: ReadonlyArray<Binding> = [
   { action: "leave", keys: ["Backspace"], label: "leave", group: "enter", when: listFocus },
   { action: "expand", keys: ["l", "Right"], label: "expand", group: "enter", motion: true, when: listFocus },
   { action: "collapse", keys: ["h", "Left"], label: "collapse", group: "enter", motion: true, when: listFocus },
-  { action: "expandAll", keys: ["Tab"], label: "expandAll", group: "enter", when: (c) => listFocus(c) && c.tab !== "board" && c.tab !== "gantt" },
+  { action: "expandAll", keys: ["Tab"], label: "expandAll", group: "enter", when: (c) => listFocus(c) && c.tab !== "board" },
   // The gantt's own keys, as the TUI's (H/L the dates, -/= the step, t today, z fit); j/k and Enter are the list's.
   { action: "gantt.left", keys: ["H"], label: "gantt.left", group: "gantt", when: ganttFocus },
   { action: "gantt.right", keys: ["L"], label: "gantt.right", group: "gantt", when: ganttFocus },
@@ -331,8 +331,8 @@ const MENU: ReadonlyArray<Binding> = [
   ...digitBindings("SPC p ", BOTH),
   { action: "tab.list", keys: ["SPC g l"], label: "tab.list", group: "tab", modes: BOTH },
   { action: "tab.board", keys: ["SPC g b"], label: "tab.board", group: "tab", modes: BOTH },
-  { action: "tab.wiki", keys: ["SPC g w"], label: "tab.wiki", group: "tab", modes: BOTH },
   { action: "tab.gantt", keys: ["SPC g g"], label: "tab.gantt", group: "tab", modes: BOTH },
+  { action: "tab.wiki", keys: ["SPC g w"], label: "tab.wiki", group: "tab", modes: BOTH },
   { action: "view.deferred", keys: ["SPC v l"], label: "view.deferred", group: "view", kind: "toggle", modes: BROWSE_ONLY, state: (c) => shown(c.hidden?.deferred) },
   { action: "view.backlog", keys: ["SPC v b"], label: "view.backlog", group: "view", kind: "toggle", modes: BROWSE_ONLY, state: (c) => shown(c.hidden?.backlog) },
   { action: "view.archived", keys: ["SPC v o"], label: "view.archived", group: "view", kind: "toggle", modes: BROWSE_ONLY, state: (c) => shown(c.hidden?.archived) },

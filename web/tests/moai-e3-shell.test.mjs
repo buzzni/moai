@@ -77,18 +77,18 @@ test('crumbs: a search or filter that is on is a badge of its own; the filter wi
 })
 
 test('memory: whatever storage gives back becomes usable settings', () => {
-  const defaults = { tab: 'list', detail: { visible: true, position: 'bottom', ratio: { left: 0.45, bottom: 0.3 } } }
+  const defaults = { tab: 'list', detail: { visible: true, position: 'right', ratio: { right: 0.45, top: 0.3, left: 0.45, bottom: 0.3 } } }
   for (const junk of [null, undefined, 3, 'list', [], { tab: 7, detail: 'left' }]) assert.deepEqual(normalizeMemory(junk), defaults)
   assert.deepEqual(
-    normalizeMemory({ version: 1, tab: 'board', detail: { visible: false, position: 'left', ratio: { left: 0.6, bottom: 0.2 } } }),
-    { tab: 'board', detail: { visible: false, position: 'left', ratio: { left: 0.6, bottom: 0.2 } } },
+    normalizeMemory({ version: 1, tab: 'board', detail: { visible: false, position: 'left', ratio: { right: 0.45, top: 0.3, left: 0.6, bottom: 0.2 } } }),
+    { tab: 'board', detail: { visible: false, position: 'left', ratio: { right: 0.45, top: 0.3, left: 0.6, bottom: 0.2 } } },
   )
-  // Out of range ratios are clamped, unknown tabs and positions (the TUI's right/top) fall back.
+  // Out of range ratios are clamped, unknown tabs fall back, and the TUI's right is a position of its own now.
   assert.deepEqual(
-    normalizeMemory({ tab: 'stats', detail: { visible: 'yes', position: 'right', ratio: { left: 2, bottom: -1 } } }),
-    { tab: 'list', detail: { visible: true, position: 'bottom', ratio: { left: 0.85, bottom: 0.15 } } },
+    normalizeMemory({ tab: 'stats', detail: { visible: 'yes', position: 'right', ratio: { right: 0.45, top: 0.3, left: 2, bottom: -1 } } }),
+    { tab: 'list', detail: { visible: true, position: 'right', ratio: { right: 0.45, top: 0.3, left: 0.85, bottom: 0.15 } } },
   )
-  assert.deepEqual(normalizeMemory({ detail: { ratio: { left: Number.NaN } } }).detail.ratio, { left: 0.45, bottom: 0.3 })
+  assert.deepEqual(normalizeMemory({ detail: { ratio: { left: Number.NaN } } }).detail.ratio, { right: 0.45, top: 0.3, left: 0.45, bottom: 0.3 })
 })
 
 const fakeStorage = () => {
@@ -100,7 +100,7 @@ test('memory: kept in storage when it works, for the session when it throws', ()
   const storage = fakeStorage()
   const memory = createMemory(() => storage)
   assert.equal(memory.persistent, true)
-  const settings = { tab: 'wiki', detail: { visible: true, position: 'left', ratio: { left: 0.5, bottom: 0.3 } } }
+  const settings = { tab: 'wiki', detail: { visible: true, position: 'left', ratio: { right: 0.45, top: 0.3, left: 0.5, bottom: 0.3 } } }
   memory.save(settings)
   assert.equal(JSON.parse(storage.items.get(MEMORY_KEY)).version, 1)
   assert.deepEqual(createMemory(() => storage).load(), settings)
@@ -125,27 +125,27 @@ test('memory: kept in storage when it works, for the session when it throws', ()
 
 test('memory: restored into the store at boot, saved only when a remembered setting changes', () => {
   const storage = fakeStorage()
-  storage.items.set(MEMORY_KEY, JSON.stringify({ tab: 'board', detail: { visible: false, position: 'left', ratio: { left: 0.6, bottom: 0.25 } } }))
+  storage.items.set(MEMORY_KEY, JSON.stringify({ tab: 'board', detail: { visible: false, position: 'left', ratio: { right: 0.45, top: 0.3, left: 0.6, bottom: 0.25 } } }))
   let writes = 0
   const counting = { getItem: storage.getItem, setItem: (key, value) => { writes++; storage.setItem(key, value) } }
   const store = createStore()
   remember(store, createMemory(() => counting), createSortDefault(), createSessionStorage())
   const state = store.getState()
   assert.equal(state.tab, 'board')
-  assert.deepEqual(state.detail, { visible: false, position: 'left', ratio: { left: 0.6, bottom: 0.25 } })
+  assert.deepEqual(state.detail, { visible: false, position: 'left', ratio: { right: 0.45, top: 0.3, left: 0.6, bottom: 0.25 } })
   assert.equal(writes, 0)
   store.dispatch({ type: 'search', text: 'x' })
   store.dispatch({ type: 'cursor', id: 'se-e1.a' })
   assert.equal(writes, 0, 'state the panel does not remember writes nothing')
-  store.dispatch({ type: 'detail-ratio', position: 'bottom', ratio: 0.4 })
+  store.dispatch({ type: 'detail-ratio', position: 'right', ratio: 0.4 })
   assert.equal(writes, 1)
-  assert.equal(JSON.parse(storage.items.get(MEMORY_KEY)).detail.ratio.bottom, 0.4)
+  assert.equal(JSON.parse(storage.items.get(MEMORY_KEY)).detail.ratio.right, 0.4)
 })
 
 test('store: restore applies what was kept and leaves the rest', () => {
   const state = initialState()
   assert.equal(reduce(state, { type: 'restore', settings: {} }), state)
-  const restored = reduce({ ...state, focus: 'detail' }, { type: 'restore', settings: { detail: { visible: false, position: 'left', ratio: { left: 0.9, bottom: 0.3 } } } })
+  const restored = reduce({ ...state, focus: 'detail' }, { type: 'restore', settings: { detail: { visible: false, position: 'left', ratio: { right: 0.45, top: 0.3, left: 0.9, bottom: 0.3 } } } })
   assert.equal(restored.tab, 'list')
   assert.equal(restored.detail.ratio.left, 0.85)
   assert.equal(restored.focus, 'list', 'a hidden detail cannot hold the focus')
@@ -187,7 +187,7 @@ function boot(storage, { rows = ROWS, indexOf = null } = {}) {
 test('shell: tabs switch the pane shown and the choice is remembered', () => {
   const storage = fakeStorage()
   const panel = boot(storage)
-  assert.deepEqual([...panel.doc.querySelectorAll('[role="tab"]')].map((tab) => tab.textContent), ['Board', 'List', 'Wiki', 'Gantt'])
+  assert.deepEqual([...panel.doc.querySelectorAll('[role="tab"]')].map((tab) => tab.textContent), ['Board', 'List', 'Gantt', 'Wiki'])
   assert.equal(panel.tab('list').getAttribute('aria-selected'), 'true')
   assert.equal(panel.$('.m-pane-main[data-pane="list"]').hidden, false)
   assert.equal(panel.$('.m-pane-main[data-pane="board"]').hidden, true)
@@ -230,12 +230,13 @@ test('shell: the position and visibility toggles are remembered and come back on
   const storage = fakeStorage()
   const panel = boot(storage)
   const toggle = panel.$('.moai-position-toggle')
-  assert.equal(toggle.getAttribute('aria-label'), 'Move details to the left')
-  assert.equal(panel.$('.m-split').dataset.position, 'bottom')
+  assert.equal(toggle.getAttribute('aria-label'), 'Move details to the bottom')
+  assert.equal(panel.$('.m-split').dataset.position, 'right')
+  toggle.click()
   toggle.click()
   assert.equal(panel.store.getState().detail.position, 'left')
   assert.equal(panel.$('.m-split').dataset.position, 'left')
-  assert.equal(toggle.getAttribute('aria-label'), 'Move details to the bottom')
+  assert.equal(toggle.getAttribute('aria-label'), 'Move details to the top')
   assert.equal(panel.shell.layout().mainWidth, panel.shell.layout().width * (1 - 0.45))
 
   // The resizer's keys change the ratio of the position shown, and that is remembered too.
@@ -250,7 +251,7 @@ test('shell: the position and visibility toggles are remembered and come back on
   assert.equal(visibility.getAttribute('aria-label'), 'Show details')
   panel.tab('board').click()
 
-  assert.deepEqual(normalizeMemory(JSON.parse(storage.items.get(MEMORY_KEY))), { tab: 'board', detail: { visible: false, position: 'left', ratio: { left, bottom: 0.3 } } })
+  assert.deepEqual(normalizeMemory(JSON.parse(storage.items.get(MEMORY_KEY))), { tab: 'board', detail: { visible: false, position: 'left', ratio: { right: 0.45, top: 0.3, left, bottom: 0.3 } } })
 
   const again = boot(storage)
   assert.equal(again.tab('board').getAttribute('aria-selected'), 'true')
@@ -713,4 +714,32 @@ test('memory: a settings storage that throws only forgets; the store and its oth
 test('memory: query settings that are not usable are left out', () => {
   assert.deepEqual(normalizeQuery(null), {})
   assert.deepEqual(normalizeQuery({ filter: 3, sort: { fields: [] }, columns: { tags: 'x', id: false }, view: { hideDeferred: 1 } }), { columns: { id: false }, view: {} })
+})
+
+
+test('four-side memory preserves legacy positions and defaults unknown values to right', () => {
+  for (const position of ['left', 'bottom', 'right', 'top']) {
+    assert.equal(normalizeMemory({ detail: { position } }).detail.position, position)
+  }
+  for (const position of [undefined, null, 'unknown']) {
+    assert.equal(normalizeMemory({ detail: { position } }).detail.position, 'right')
+  }
+  assert.equal(mainWidth(1000, 'right', true, 0.4), 600)
+  assert.equal(mainWidth(1000, 'top', true, 0.3), 1000)
+})
+
+
+test('shell: leaving Gantt clears its folds while list expansion survives', () => {
+  const panel = boot(fakeStorage())
+  panel.tab('list').click()
+  panel.store.dispatch({ type: 'expanded', expanded: ['m:se-m1'] })
+  panel.tab('gantt').click()
+  panel.$('.g-row[data-id="se-e1"] .moai-toggle').click()
+  assert.equal(panel.$('.g-row[data-id="se-e1.a"]'), null)
+  assert.deepEqual(panel.store.getState().expanded, ['m:se-m1'])
+  panel.tab('list').click()
+  assert.deepEqual(panel.store.getState().expanded, ['m:se-m1'])
+  panel.tab('gantt').click()
+  assert.ok(panel.$('.g-row[data-id="se-e1.a"]'), 'returning opens every gantt folder')
+  panel.shell.destroy()
 })
