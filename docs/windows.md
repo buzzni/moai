@@ -107,6 +107,25 @@ Windows (below).
   `merge-driver --install --as` is kept as you typed it. **The hooks need Git
   for Windows** — without Git Bash, Claude Code runs hooks in PowerShell, which
   cannot run them
+- **Codex and Antigravity run hooks through `cmd.exe`, not Git Bash.** On
+  Windows both start a hook as `cmd /c "<command>"`, which cannot read the
+  POSIX line moai plants for Unix (`>/dev/null` becomes a cmd redirect and the
+  hook ends with exit 0 and no output — the rules are off without a sign). So
+  Codex's `.codex/hooks.json` carries a second key per hook,
+  `commandWindows`, with `"<moai>" hook <event> --dialect codex || exit 0`
+  (the Unix `command` is unchanged), and Antigravity's `.agents/hooks.json`
+  has that one line for every OS, because the file is committed and has no
+  Windows-only key. If `moai` is missing the line exits 0 quietly. A path with
+  `%` is written as plain `moai` — cmd expands `%VAR%` even inside quotes. After
+  `moai skill install` Codex asks you to trust the hooks again in `/hooks`; a
+  hook file planted by an older moai reads as `stale` in `moai skill status`
+  until you run `moai skill install --agent codex` (or `antigravity`) again
+- **`moai skill status` names the Git Bash Claude Code will use**
+  (`· git bash  C:\Program Files\Git\bin\bash.exe`), looked up as Claude Code
+  does: `CLAUDE_CODE_GIT_BASH_PATH`, then the `bin\bash.exe` beside the `git`
+  on `PATH`, then `%ProgramFiles%\Git\bin\bash.exe`. When none is found the row
+  is a `!` and says so — Claude Code then runs hooks in PowerShell and the rules
+  do not stand. Nothing is blocked and the exit code stays 0
 - **MSYS2's git works too.** It hands back paths in its own spelling
   (`/c/Users/you/proj`), on the command line and in the `.git` files it writes
   for a linked worktree, and moai reads them as Windows paths: `/c/…` and
