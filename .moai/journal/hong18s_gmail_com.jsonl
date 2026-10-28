@@ -115,3 +115,8 @@
 {"ts":"2026-10-28T05:24:32Z","id":"moai-r2nn.bb6","kind":"status","by":"Raven","by_email":"hong18s@gmail.com","from":"review","to":"done"}
 {"ts":"2026-10-28T05:24:33Z","id":"moai-r2nn.kep","kind":"status","by":"Raven","by_email":"hong18s@gmail.com","from":"review","to":"done"}
 {"ts":"2026-10-28T05:24:33Z","id":"moai-r2nn.yxz","kind":"status","by":"Raven","by_email":"hong18s@gmail.com","from":"review","to":"done"}
+{"ts":"2026-10-28T05:30:30Z","id":"moai-xbnh","kind":"create","by":"Raven","by_email":"hong18s@gmail.com","title":"v0.31.0 PR 의 CI fmt·clippy 에 걸린 두 자리를 맞춘다"}
+{"ts":"2026-10-28T05:30:36Z","id":"moai-xbnh","kind":"status","by":"Raven","by_email":"hong18s@gmail.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-28T05:31:51Z","id":"moai-xbnh","kind":"note","by":"Raven","by_email":"hong18s@gmail.com","text":"Next: PR #56 의 CI 가 녹색인지 본다(gh pr checks 56). 지면 고치고 다시 푸시, 녹색이면 model 줄 적고 done."}
+{"ts":"2026-10-28T05:43:22Z","id":"moai-xbnh","kind":"note","by":"Raven","by_email":"hong18s@gmail.com","text":"model: anthropic/opus-5.5 (low — fmt·clippy 두 자리와 리눅스 전용 시험 픽스처, 감독 세션이 직접)"}
+{"ts":"2026-10-28T05:43:22Z","id":"moai-xbnh","kind":"status","by":"Raven","by_email":"hong18s@gmail.com","from":"in_progress","to":"done","note":"PR #56 CI 녹색(run 40639107152), main 에 bf5457cc 로 머지"}
