@@ -2731,12 +2731,14 @@ mod tests {
     fn the_codex_and_antigravity_lines_call_moai_in_their_dialect() {
         let scratch = crate::scratch::Scratch::new("skill-dialect-line");
         let at = scratch.path();
+        // 가짜 moai 는 agy 줄이 이름으로 물러서지 않는 자리에 둔다([`Plain`]).
+        let bin = Plain::new("skill-dialect-bin");
         // 받은 인자를 판정의 꼴로 낸다 — 줄이 그것을 그대로 흘려보내는지 본다.
-        let echo = planted(at, "echo", "#!/bin/sh\nprintf '{\"args\":\"%s\"}\\n' \"$*\"\n", 0o755);
+        let echo = planted(&bin.0, "echo", "#!/bin/sh\nprintf '{\"args\":\"%s\"}\\n' \"$*\"\n", 0o755);
         if !crate::cmd::runnable(&echo) {
             return;
         }
-        let dead = planted(at, "dead", "#!/bin/sh\nexit 0\n", 0o644);
+        let dead = planted(&bin.0, "dead", "#!/bin/sh\nexit 0\n", 0o644);
         let (echo, dead) = (echo.display().to_string(), dead.display().to_string());
         assert!(!command(&echo, "stop").contains("--dialect"), "Claude 의 줄에 말씨가 붙었다");
         for (k, sh) in shells().into_iter().enumerate() {
@@ -2890,8 +2892,8 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn the_antigravity_line_runs_under_sh() {
-        let scratch = crate::scratch::Scratch::new("skill-agy-portable");
-        let echo = planted(scratch.path(), "echo", "#!/bin/sh\nprintf '{\"args\":\"%s\"}\n' \"$*\"\n", 0o755);
+        let bin = Plain::new("skill-agy-portable");
+        let echo = planted(&bin.0, "echo", "#!/bin/sh\nprintf '{\"args\":\"%s\"}\n' \"$*\"\n", 0o755);
         if !crate::cmd::runnable(&echo) {
             return;
         }
@@ -3236,6 +3238,38 @@ mod tests {
         assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
         std::fs::set_permissions(&p, std::fs::Permissions::from_mode(mode)).unwrap();
         p
+    }
+
+    /// [`portable_exe`] 가 **그대로 적는 자리** — agy 줄을 셸로 돌려 재는 시험의 가짜 moai 를 여기 둔다. 시험의
+    /// [`crate::scratch::Scratch`] 이름에는 `ThreadId(…)` 의 괄호가 들어 그 밑의 파일은 이름 `moai` 로 물러서고, CI 의
+    /// PATH 에는 moai 가 없어 줄이 빈 출력으로 끝났다(v0.31.0 의 PR CI, moai-xbnh). 물러서는 갈래는 따로 잰다
+    /// (`the_antigravity_line_is_one_line_both_shells_read`). 걷기는 `Drop` 이 한다.
+    #[cfg(unix)]
+    struct Plain(PathBuf);
+
+    #[cfg(unix)]
+    impl Plain {
+        fn new(name: &str) -> Plain {
+            use std::sync::atomic::{AtomicU32, Ordering};
+            static NTH: AtomicU32 = AtomicU32::new(0);
+            let dir = std::env::temp_dir().join(format!(
+                "moai-{name}-{}-{}",
+                std::process::id(),
+                NTH.fetch_add(1, Ordering::Relaxed)
+            ));
+            let _ = std::fs::remove_dir_all(&dir);
+            std::fs::create_dir_all(&dir).unwrap();
+            let shown = dir.display().to_string();
+            assert_eq!(portable_exe(&shown), shown, "임시 디렉터리가 agy 줄에 그대로 못 서는 자리다");
+            Plain(dir)
+        }
+    }
+
+    #[cfg(unix)]
+    impl Drop for Plain {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
     }
 
     /// **보드·`Stop` 의 표식은 판정이 건너간 뒤에 선다**(moai-45hf.wqg). `moai` 가 쪽지에 표식 이름을
