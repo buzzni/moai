@@ -841,7 +841,8 @@ pub fn status(ctx: &Ctx) -> R<Vec<String>> {
             "hook_exe_path": hook_path.as_ref().map(|p| p.display().to_string()),
             "stale_copies": stale,
             "claude": claude,
-            // Windows 에서만 선다 — Claude Code 가 훅을 돌릴 Git Bash(moai-cj4a). 그 밖에서는 `null`, 못 찾으면 `{"found":false}`.
+            // Windows 에서만 선다 — Claude Code 가 훅을 돌릴 Git Bash(moai-cj4a). 그 밖에서는 `null`, 못 찾으면
+            // `{"found":false,"path":null}`.
             "git_bash": git_bash.as_ref().map(|p| serde_json::json!({ "found": p.is_some(), "path": p.as_ref().map(|p| p.display().to_string()) })),
             // Claude 의 트리에 남은 디렉터리 — `install --json` 의 머리 `leftovers` 와 같은 자리·같은 꼴이다(머리의 `dir` 이
             // Claude 의 트리다). **늘 서는 배열이다.**
