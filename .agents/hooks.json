@@ -2,7 +2,7 @@
   "moai": {
     "PreInvocation": [
       {
-        "command": "\"moai\" hook user-prompt-submit --dialect antigravity || exit 0",
+        "command": "moai hook user-prompt-submit --dialect antigravity || exit 0",
         "timeout": 15,
         "type": "command"
       }
@@ -11,7 +11,7 @@
       {
         "hooks": [
           {
-            "command": "\"moai\" hook pre-tool-use --dialect antigravity || exit 0",
+            "command": "moai hook pre-tool-use --dialect antigravity || exit 0",
             "timeout": 15,
             "type": "command"
           }
@@ -21,7 +21,7 @@
     ],
     "Stop": [
       {
-        "command": "\"moai\" hook stop --dialect antigravity || exit 0",
+        "command": "moai hook stop --dialect antigravity || exit 0",
         "timeout": 15,
         "type": "command"
       }
