@@ -49,7 +49,7 @@ export interface PaneLayout {
   /** The panel's width in px (the frame's). */
   width: number
   /**
-   * The main pane's width in px: the whole width, less the detail's share when the detail stands on the left.
+   * The main pane's width in px: the whole width, less the detail's share when the detail stands on the left or right.
    * Pass it to `visibleColumns(mainWidth, enabled)` (view/responsive.ts) to drop columns that no longer fit.
    */
   mainWidth: number

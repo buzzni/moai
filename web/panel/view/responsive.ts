@@ -17,7 +17,7 @@ export const COLUMN_DROPS: ReadonlyArray<{ column: "created" | "updated" | "epic
   { column: "tags", below: 340 },
 ]
 
-export type DetailPosition = "left" | "bottom"
+export type DetailPosition = "right" | "bottom" | "left" | "top"
 
 /** The position actually used: the saved preference, except that a narrow panel always gets bottom. */
 export function effectivePosition(width: number, preferred: DetailPosition): DetailPosition {
@@ -38,3 +38,7 @@ export function visibleColumns<T extends string>(width: number, enabled: Readonl
 export function toolbarCompact(width: number): boolean {
   return width < TOOLBAR_COMPACT_BELOW
 }
+
+export const horizontal = (p: DetailPosition): boolean => p === "left" || p === "right"
+export const first = (p: DetailPosition): boolean => p === "left" || p === "top"
+export const nextPosition = (p: DetailPosition): DetailPosition => ({ right: "bottom", bottom: "left", left: "top", top: "right" } as const)[p]

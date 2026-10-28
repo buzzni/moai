@@ -12,7 +12,7 @@ test('the panel starts on the list with the TUI defaults', () => {
   assert.equal(state.tab, 'list')
   assert.deepEqual(state.path, [])
   assert.equal(state.cursor, null)
-  assert.deepEqual(state.detail, { visible: true, position: 'bottom', ratio: { left: 0.45, bottom: 0.3 } })
+  assert.deepEqual(state.detail, { visible: true, position: 'right', ratio: { right: 0.45, top: 0.3, left: 0.45, bottom: 0.3 } })
   assert.equal(state.view.hideDeferred, true)
   assert.deepEqual(state.sort, { fields: [{ key: 'priority', dir: 'asc' }], reversed: false })
   // The cells are named as the key table's CellField: the name line is `names`.
@@ -32,19 +32,19 @@ test('an action that changes nothing keeps the same state, so nothing re-renders
 
 test('the detail ratio is kept per position and clamped to 15–85%', () => {
   let state = reduce(initialState(), { type: 'detail-ratio', ratio: 0.95 })
-  assert.equal(state.detail.ratio.bottom, MAX_RATIO)
+  assert.equal(state.detail.ratio.right, MAX_RATIO)
   state = reduce(state, { type: 'detail-position', position: 'left' })
   state = reduce(state, { type: 'detail-ratio', ratio: 0.01 })
-  assert.deepEqual(state.detail.ratio, { left: MIN_RATIO, bottom: MAX_RATIO })
+  assert.deepEqual(state.detail.ratio, { right: MAX_RATIO, top: 0.3, left: MIN_RATIO, bottom: 0.3 })
   // An unusable ratio falls back to that position's own default.
   assert.equal(reduce(state, { type: 'detail-ratio', ratio: Number.NaN }).detail.ratio.left, 0.45)
   // A narrow panel shows the bottom whatever was chosen; the split says so, and that ratio is the one that moves.
   state = reduce(state, { type: 'detail-ratio', ratio: 0.5, position: 'bottom' })
-  assert.deepEqual(state.detail.ratio, { left: MIN_RATIO, bottom: 0.5 })
+  assert.deepEqual(state.detail.ratio, { right: MAX_RATIO, top: 0.3, left: MIN_RATIO, bottom: 0.5 })
 })
 
 test('below 640px the detail stands at the bottom whatever was chosen', () => {
-  const detail = { visible: true, position: 'left', ratio: { left: 0.45, bottom: 0.3 } }
+  const detail = { visible: true, position: 'left', ratio: { right: 0.45, top: 0.3, left: 0.45, bottom: 0.3 } }
   assert.equal(detailPosition(detail, FORCE_BOTTOM_BELOW - 1), 'bottom')
   assert.equal(detailPosition(detail, FORCE_BOTTOM_BELOW), 'left')
 })

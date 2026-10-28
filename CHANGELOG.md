@@ -12,6 +12,18 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+### Added
+
+- Web details can sit on the right or top as well as the left or bottom. List rows use pale gold for in-progress and pale purple for review.
+
+### Changed
+
+- Web details start on the right for new settings; the position button cycles right → bottom → left → top. History and work log start expanded. Tabs place Gantt before Wiki.
+
+### Fixed
+
+- Web history and work log preserve line breaks and wrap long text. In-progress spinners use their gold status colour.
+
 ## [0.31.0] - 2026-10-28
 
 ### Added

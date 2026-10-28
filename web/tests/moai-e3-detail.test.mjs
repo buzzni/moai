@@ -1,6 +1,7 @@
 // Moai panel detail view (se-c10x.mh9): the pure wording of the head, fields, blockers, roll-up and journal,
 // and the pane itself in a jsdom document.
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import { test } from 'node:test'
 import { JSDOM } from 'jsdom'
 
@@ -397,4 +398,23 @@ test('pane: NEW first among the chips for an unread row; not for a read or archi
   const archived = build(ROWS.map((one) => (one.id === 'se-e1.b' ? { ...one, unread: true, archived: true } : one)))
   view.render(stateWith({ value: { id: row.id, row } }), archived)
   assert.equal(chips().querySelector('.m-chip-new'), null)
+})
+
+
+test('history and work start expanded, preserve lines and remember a collapsed section', () => {
+  const { doc, root, view } = mount()
+  const row = { ...ROWS[3], journal: [{ kind: 'note', text: 'first\n  second' }], work: ['work\nnext'] }
+  const state = stateWith({ value: { id: row.id, row } })
+  view.render(state, index)
+  for (const key of ['journal', 'work']) assert.equal(root.querySelector(`[data-fold=${key}]`).open, true)
+  assert.equal(root.querySelector('[data-fold=journal] .moai-detail-text').textContent, 'first\n  second')
+  assert.equal(root.querySelector('[data-fold=work] .moai-detail-text').textContent, 'work\nnext')
+  // textContent keeps the break whatever the sheet says; what shows it is pre-wrap on that class, so the sheet is read.
+  const detailCss = readFileSync(new URL('../panel/style/detail.css', import.meta.url), 'utf8')
+  assert.match(detailCss, /\.moai-detail-text \{ white-space: pre-wrap; overflow-wrap: anywhere;/)
+  const journal = root.querySelector('[data-fold=journal]')
+  journal.open = false
+  journal.dispatchEvent(new doc.defaultView.Event('toggle'))
+  view.render(stateWith({ value: { id: row.id, row: { ...row, title: 'changed' } } }), index)
+  assert.equal(root.querySelector('[data-fold=journal]').open, false)
 })
