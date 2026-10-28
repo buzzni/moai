@@ -12,6 +12,8 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+## [0.31.0] - 2026-10-28
+
 ### Added
 
 - **`moai skill status` says when a hook line calls `moai` from `PATH` and there is
