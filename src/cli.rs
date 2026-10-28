@@ -720,10 +720,10 @@ BACKLOG
   and the list keeps the folds it had. Coming back to the list opens the
   folder that holds the row you stood on. The detail stands below the gantt at
   first; {key:browse.detail_at} there moves the gantt's detail only, for this session.
-  The planned bar (░, ▒ on a group)
-  runs from the start to the deadline and ◆ marks a milestone's own deadline; █
-  over it is when the work actually ran, ▓ is the time past a deadline, ┄ is
-  a deferred row's plan, and ▼ over a dotted line marks today.
+  The planned bar (░, ▒ on a group) runs from start to deadline.
+  Milestone deadlines carry ◆. The █ band is when the work actually ran,
+  ▓ is the time past a deadline, ┄ is a deferred row's plan, and ▼ over
+  a dotted line marks today.
   Groups that wrote no days of their own span their members' days. Planned days
   are calendar days; actual times are shown in your time zone.
   Missing planned starts use the creation day in your time zone (the deadline
