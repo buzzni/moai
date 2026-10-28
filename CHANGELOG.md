@@ -43,6 +43,11 @@ does not tag — see `CONTRIBUTING.md`.
 
 ### Fixed
 
+- **TUI Gantt movement stays responsive on large trackers.** Chart calculations
+  are reused until loaded data, the clock or time zone changes. Queued keys share
+  a draw while layout, focus and mouse interactions keep their frame boundaries.
+  (moai-rycs)
+
 - Web history and work log preserve line breaks and wrap long text. In-progress spinners use their gold status colour.
 
 ## [0.31.0] - 2026-10-28
