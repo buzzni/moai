@@ -2876,7 +2876,7 @@ Order:
   a deferred row's plan, and ▼ over a dotted line marks today.
   Groups that wrote no days of their own span their members' days. Planned days
   are calendar days; actual times are shown in your time zone.
-  A missing planned start uses the creation day in your time zone (the deadline
+  Missing planned starts use the creation day in your time zone (the deadline
   day if earlier); a missing end uses the start day. These filled edges are
   derived, never saved by moving or undoing a plan. With neither day written,
   there is no planned bar.

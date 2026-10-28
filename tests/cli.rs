@@ -7321,6 +7321,7 @@ fn tui_deep_carries_each_rows_gantt() {
     ok_at(s.path(), now, &["link", &a, "--blocks", &b]);
     ok_at(s.path(), "2026-10-21T01:00:00Z", &["mv", &a, "in_progress"]);
 
+    let c = field(&ok_at(s.path(), now, &["add", "기한만", "--due", "2026-10-29", "--json"]), "id");
     let rows: Vec<serde_json::Value> =
         serde_json::from_str(&ok_at(s.path(), now, &["tui", "--json", "--deep"])).unwrap();
     let gantt =
@@ -7335,6 +7336,14 @@ fn tui_deep_carries_each_rows_gantt() {
     assert_eq!(gantt(&b)["actual"], serde_json::json!({"kind": "not_started"}));
     assert_eq!(gantt(&b)["overdue"], serde_json::Value::Null, "늘 서는 키다 — 값이 없으면 null");
     assert_eq!(gantt(&b)["blocked_by"], serde_json::json!([{"id": a, "state": "open"}]));
+    assert_eq!(
+        gantt(&c)["planned"],
+        serde_json::json!({
+            "start": "2026-10-25", "end": "2026-10-29", "start_filled": true, "end_filled": false, "from": "own"
+        })
+    );
+    let saved: serde_json::Value = serde_json::from_str(&ok_at(s.path(), now, &["show", &c, "--json"])).unwrap();
+    assert!(saved.get("starts_on").is_none(), "채운 시작이 저장됐다: {saved}");
     // 적재한 줄의 첨자는 밖에 안 낸다.
     assert!(gantt(&a).get("at").is_none(), "{}", gantt(&a));
     // 한 자리 목록은 싣지 않는다.
