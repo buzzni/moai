@@ -19,10 +19,10 @@ import { assigneeOf } from '../data/people.ts'
 import { MEMORY_KEY, settingsStorage } from '../data/memory.ts'
 import { undoOf, type PlanChange } from '../data/plan.ts'
 import { zoneNow } from '../data/zone.ts'
-import type { GanttRow, IssueIndex, Row } from '../data/index.ts'
+import { pathKey, type GanttRow, type IssueIndex, type Row } from '../data/index.ts'
 import { fill } from '../i18n/index.ts'
 import type { State } from '../store.ts'
-import { el, emptyState } from './components.ts'
+import { el, emptyState, icon } from './components.ts'
 import { segLabel } from './crumbs.ts'
 import { formatDate } from './detail-format.ts'
 import {
@@ -112,6 +112,8 @@ let mounted = 0
 export const mountGantt: MountPane = (root, ctx): PaneView => {
   const { document: doc, copy, intents } = ctx
   const words = copy.gantt
+  const shut = new Set<string>()
+  let foldVersion = 0
   const win = doc.defaultView
   const SVG = 'http://www.w3.org/2000/svg'
   const uid = `moai-gantt-${++mounted}`
@@ -246,6 +248,16 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
     const title = el(doc, 'span', { class: `c-title${line.dir ? ' grp' : ''}${row?.kind === 'milestone' ? ' ms' : ''}` })
     const twig = twigOf(line)
     if (twig) title.append(twig)
+    if (line.dir) {
+      const label = line.open ? copy.list.collapse : copy.list.expand
+      const toggle = el(doc, 'button', { type: 'button', class: 'moai-toggle', tabindex: -1, 'aria-label': label, title: label, 'aria-expanded': String(line.open) }, icon(doc, 'chevron-right', 12))
+      toggle.addEventListener('click', (event) => {
+        event.stopPropagation()
+        keepFocus(() => fold(line, !line.open))
+      })
+      toggle.addEventListener('dblclick', (event) => event.stopPropagation())
+      title.append(toggle)
+    }
     if (row) {
       const { glyph, tone } = statusGlyph(statusOf(row), m.boot)
       const name = String(row.title ?? row.id)
@@ -646,10 +658,52 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
     intents.point(lines[to]!.key)
   }
 
+  /** Fold state belongs to this visit, never to the list's expanded folders. */
+  function fold(line: GanttLine, open: boolean, all = false): void {
+    if (!model || !state || !line.dir) return
+    const index = model.index
+    const paths = [line.path, ...(all ? index.tree(line.path, () => true).filter((one) => one.entry.dir).map((one) => one.path) : [])]
+    for (const path of paths) {
+      const key = pathKey(path)
+      if (open) shut.delete(key)
+      else shut.add(key)
+    }
+    if (!open) {
+      const cursor = model.lines.find((one) => one.key === state!.cursor)
+      if (cursor && cursor.path.length > line.path.length && line.path.every((seg, n) => cursor.path[n] === seg)) {
+        state = { ...state, cursor: line.key }
+        intents.point(line.key)
+      }
+    }
+    foldVersion++
+    render(state, index)
+  }
+
   function command(action: string): boolean {
     if (!model || !state) return false
     const page = Math.max(1, Math.floor((scroll.clientHeight || FALLBACK_HEIGHT) / ROW_H) - 2)
+    const at = model.lines.findIndex((one) => one.key === state!.cursor)
+    const line = model.lines[at]
     switch (action) {
+      case 'expand':
+        if (line?.dir && !line.open) fold(line, true)
+        return true
+      case 'collapse': {
+        if (!line) return true
+        if (line.dir && line.open) fold(line, false)
+        else {
+          const parent = model.lines.slice(0, at).reverse().find((one) => one.dir && one.depth < line.depth)
+          if (parent) {
+            state = { ...state, cursor: parent.key }
+            intents.point(parent.key)
+            fold(parent, false)
+          }
+        }
+        return true
+      }
+      case 'expandAll':
+        if (line?.dir) fold(line, !line.open, true)
+        return true
       case 'move.down':
       case 'move.up':
       case 'move.pageDown':
@@ -940,11 +994,11 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
       lanesBox.replaceChildren()
       return
     }
-    const key = JSON.stringify([current.path, current.view, current.search.text, current.filter.applied])
+    const key = JSON.stringify([current.path, current.view, current.search.text, current.filter.applied, foldVersion])
     const zone = clock.zone()
     if (!model || model.index !== index || model.key !== key || model.matched !== current.matched || model.boot !== current.boot || model.zone !== zone) {
       const found = narrow(current, index)
-      model = { index, key, matched: current.matched, boot: current.boot, zone, lines: ganttLines(index, current.path, found.keep) }
+      model = { index, key, matched: current.matched, boot: current.boot, zone, lines: ganttLines(index, current.path, found.keep, shut) }
       draw()
       position()
       shownCursor = current.cursor
@@ -958,6 +1012,11 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
   return {
     render,
     command,
+    leave() {
+      shut.clear()
+      foldVersion++
+      model = null
+    },
     focus() {
       pane.focus({ preventScroll: true })
     },

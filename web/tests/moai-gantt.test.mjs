@@ -328,7 +328,7 @@ test('keys: j/k move the cursor, Enter opens the detail, - and = change the step
   assert.deepEqual(calls, ['point:e1.b', 'point:e1', 'point:m1', 'point:e1.e'])
   assert.equal(view.command('enter'), true)
   assert.equal(calls.at(-1), 'choose:e1.a')
-  assert.equal(view.command('expand'), false, 'not a gantt action')
+  assert.equal(view.command('unrelated'), false, 'not a gantt action')
   // = goes finer: the day step (40px) becomes the hour step (480px a day); - goes back.
   const planWidth = () => planWidthAt(root, box, dom)
   assert.equal(planWidth(), 80)
@@ -1145,4 +1145,57 @@ test('filled edges stay derived through a whole-bar move and undo; resizing crea
     assert.deepEqual(planEndpoint('e1.c', moves[0].change).query, { edge, days: '1' })
     await tick()
   }
+})
+
+
+test('gantt group buttons fold milestones and epics without changing the list folds', () => {
+  const { root, view, calls, index } = mount('e1.c')
+  const toggle = (id) => root.querySelector(`.g-row[data-id="${id}"] .moai-toggle`)
+  const start = initialState()
+  view.render({ ...start, tab: 'gantt', cursor: 'e1.c', expanded: ['list-only'] }, index)
+  toggle('e1').click()
+  assert.equal(toggle('e1').getAttribute('aria-expanded'), 'false')
+  assert.equal(lane(root, 'e1.c'), null)
+  assert.ok(lane(root, 'e1').querySelector('.b-plan'), 'the closed group keeps its rollup bar')
+  assert.deepEqual(calls, ['point:e1'], 'folding moves a hidden cursor to its group without choosing detail')
+  toggle('e1').click()
+  assert.equal(toggle('e1').getAttribute('aria-expanded'), 'true')
+  assert.ok(lane(root, 'e1.c'))
+  toggle('m1').click()
+  assert.equal(root.querySelectorAll('.g-row').length, 1)
+  assert.equal(toggle('m1').getAttribute('aria-expanded'), 'false')
+  view.leave()
+  view.render({ ...start, tab: 'gantt', expanded: ['list-only'] }, index)
+  assert.equal(root.querySelectorAll('.g-row').length, 7, 'each visit starts fully open')
+  assert.deepEqual(start.expanded, [], 'no list expansion was mutated')
+})
+
+test('h folds a parent and points at it; l opens it; Tab folds and opens the whole subtree', () => {
+  const { root, view, calls, index } = mount('e1.c')
+  assert.equal(view.command('collapse'), true)
+  assert.equal(lane(root, 'e1.c'), null)
+  assert.equal(root.querySelector('.g-row[data-id="e1"]').getAttribute('aria-selected'), 'true')
+  assert.deepEqual(calls, ['point:e1'])
+  assert.equal(view.command('expand'), true)
+  assert.ok(lane(root, 'e1.c'))
+  view.render({ ...initialState(), tab: 'gantt', cursor: 'm1' }, index)
+  view.command('expandAll')
+  assert.equal(root.querySelectorAll('.g-row').length, 1)
+  view.command('expandAll')
+  assert.equal(root.querySelectorAll('.g-row').length, 7)
+  assert.ok([...root.querySelectorAll('.moai-toggle')].every((el) => el.getAttribute('aria-expanded') === 'true'))
+  const binding = KEY_TABLE.browse.find((one) => one.action === 'expandAll')
+  assert.equal(binding.when({ tab: 'gantt', focus: 'list', mode: 'browse' }), true)
+})
+
+test('a hidden dependency is omitted rather than retargeted to its closed group', () => {
+  const rows = [...ROWS, { id: 'z', title: 'Outside', kind: 'issue', status: 'todo' }]
+  const gantt = { ...GANTT, z: g('z', { planned: own('2026-10-26', '2026-10-27'), blocked_by: [{ id: 'e1.b', state: 'open' }] }) }
+  const index = indexOf(rows, gantt)
+  const { root, view } = mount('z', index)
+  assert.equal(root.querySelector('svg.links').querySelectorAll('path').length, 1)
+  root.querySelector('.g-row[data-id="e1"] .moai-toggle').click()
+  assert.equal(root.querySelector('svg.links').querySelectorAll('path').length, 0)
+  view.render({ ...initialState(), tab: 'gantt', cursor: 'z' }, index)
+  assert.equal(root.querySelector('svg.links').querySelectorAll('path').length, 0)
 })

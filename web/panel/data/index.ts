@@ -106,6 +106,7 @@ export type Twig = readonly boolean[]
 
 export interface TreeLine {
   entry: Entry
+  path: Path
   twig: Twig
 }
 
@@ -348,7 +349,7 @@ export class IssueIndex {
       const entries = this.entries(here, keep)
       entries.forEach((entry, n) => {
         kin.push(n < entries.length - 1)
-        out.push({ entry, twig: [...kin] })
+        out.push({ entry, path: entry.dir ? [...here, entry.seg] : this.dirPath(entry.at), twig: [...kin] })
         if (entry.dir) {
           const under = [...here, entry.seg]
           if (open(under)) walk(under)

@@ -10,7 +10,7 @@
 // `getUTCDay()`, whatever the zone's daylight saving does.
 
 import { partsIn } from '../data/zone.ts'
-import type { GanttRow, IssueIndex, Keep, Path, Row, Seg, Twig } from '../data/index.ts'
+import { pathKey, type GanttRow, type IssueIndex, type Keep, type Path, type Row, type Seg, type Twig } from '../data/index.ts'
 import { fill, type Copy } from '../i18n/index.ts'
 import { statusOf } from './list-model.ts'
 
@@ -310,15 +310,16 @@ export function weekends(axis: Axis, win?: [number, number]): Array<[number, num
 
 /** One line of the gantt: a row, or a bucket (`(no milestone)`, `(lost)`) that holds rows and has no dates. */
 export type GanttLine =
-  | { kind: 'row'; key: string; at: number; depth: number; twig: Twig; dir: boolean }
-  | { kind: 'bucket'; key: string; seg: Seg; depth: number; twig: Twig; dir: true }
+  | { kind: 'row'; key: string; at: number; depth: number; twig: Twig; path: Path; open: boolean; dir: boolean }
+  | { kind: 'bucket'; key: string; seg: Seg; depth: number; twig: Twig; path: Path; open: boolean; dir: true }
 
-/** The listing at `path` with every folder open — the whole tree, as the TUI's gantt draws it — in moai's order. */
-export function ganttLines(index: IssueIndex, path: Path, keep: Keep): GanttLine[] {
-  return index.tree(path, () => true, keep).map(({ entry, twig }): GanttLine => {
-    if (entry.dir && entry.at === undefined) return { kind: 'bucket', key: entry.seg, seg: entry.seg, depth: twig.length, twig, dir: true }
+/** The listing with the gantt’s own folds, in moai’s order; all folders start open. */
+export function ganttLines(index: IssueIndex, path: Path, keep: Keep, shut: ReadonlySet<string> = new Set()): GanttLine[] {
+  const opened = (p: Path) => !shut.has(pathKey(p))
+  return index.tree(path, opened, keep).map(({ entry, twig, path: here }): GanttLine => {
+    if (entry.dir && entry.at === undefined) return { kind: 'bucket', key: entry.seg, seg: entry.seg, depth: twig.length, twig, path: here, open: opened(here), dir: true }
     const at = entry.at!
-    return { kind: 'row', key: index.rows[at]!.id, at, depth: twig.length, twig, dir: entry.dir }
+    return { kind: 'row', key: index.rows[at]!.id, at, depth: twig.length, twig, path: here, open: entry.dir && opened(here), dir: entry.dir }
   })
 }
 

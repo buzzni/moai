@@ -434,6 +434,7 @@ export function mountShell(root: HTMLElement, options: ShellOptions): Shell {
       if (state.detail.visible) detailView.render(state, index)
     }
     putBack()
+    if (left === "gantt" && state.tab !== "gantt") mainViews.gantt.leave?.()
     // Last, as it dispatches (and so renders again): the wiki saves its page and trail into the store.
     if (left === "wiki" && state.tab !== "wiki") wikiView?.leave?.()
   }

@@ -211,7 +211,7 @@ const BROWSE: ReadonlyArray<Binding> = [
   { action: "leave", keys: ["Backspace"], label: "leave", group: "enter", when: listFocus },
   { action: "expand", keys: ["l", "Right"], label: "expand", group: "enter", motion: true, when: listFocus },
   { action: "collapse", keys: ["h", "Left"], label: "collapse", group: "enter", motion: true, when: listFocus },
-  { action: "expandAll", keys: ["Tab"], label: "expandAll", group: "enter", when: (c) => listFocus(c) && c.tab !== "board" && c.tab !== "gantt" },
+  { action: "expandAll", keys: ["Tab"], label: "expandAll", group: "enter", when: (c) => listFocus(c) && c.tab !== "board" },
   // The gantt's own keys, as the TUI's (H/L the dates, -/= the step, t today, z fit); j/k and Enter are the list's.
   { action: "gantt.left", keys: ["H"], label: "gantt.left", group: "gantt", when: ganttFocus },
   { action: "gantt.right", keys: ["L"], label: "gantt.right", group: "gantt", when: ganttFocus },
