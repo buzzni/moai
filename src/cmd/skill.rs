@@ -831,7 +831,7 @@ pub fn status(ctx: &Ctx) -> R<Vec<String>> {
     let by_name: Vec<ByName> = hook_files
         .iter()
         .map(|h| match h.seen(&root) {
-            HookState::Current => ByName::of(&exe, h.reads_by_name(cfg!(windows)), on_path.as_deref(), |a, b| {
+            HookState::Current => ByName::of(&exe, h.reads_by_name(), on_path.as_deref(), |a, b| {
                 crate::path::real(a) == crate::path::real(b)
             }),
             _ => ByName::Unused,
@@ -1120,7 +1120,7 @@ impl ByName {
     /// `exe` 는 `install` 이 적을 철자([`skill::exe_name`])다. `skill::portable_exe` 가 이름으로 물러서는 철자
     /// (빈칸·`%`·`&` …)인데 `exe` 자신은 `moai` 가 아니면, 따옴표 없는 줄(agy 의 줄, Windows 의 Codex `commandWindows`)은
     /// PATH 의 `moai` 를 부른다. **같은 파일인지는 [`status`] 가 `exe` 와 `runs` 를 견주는 자**(`crate::path::real`)다.
-    /// `reads_by_name` 은 이 에이전트의 줄이 이 OS 에서 그 줄을 읽는가 — agy 는 어디서나, Codex 는 Windows 에서만이다.
+    /// `reads_by_name` 은 이 에이전트의 줄이 exe 를 이름으로 읽는가 — agy 만이다.
     fn of(exe: &str, reads_by_name: bool, on_path: Option<&Path>, same_file: impl Fn(&Path, &Path) -> bool) -> ByName {
         if !reads_by_name || exe == "moai" || skill::portable_exe(exe) != "moai" {
             return ByName::Unused;
@@ -1267,13 +1267,10 @@ impl HookFile {
         }
     }
 
-    /// 이 에이전트의 훅 줄이 이 OS 에서 실행 파일을 **이름으로** 읽는 줄인가([`ByName`]) — agy 는 모든 OS 에서 따옴표 없는
-    /// 한 줄이고, Codex 는 Windows 의 `commandWindows` 만 그렇다(Unix 의 `command` 는 따옴표로 절대 경로를 적는다).
-    fn reads_by_name(&self, windows: bool) -> bool {
-        match self.agent {
-            Agent::Codex => windows,
-            _ => true,
-        }
+    /// 이 에이전트의 훅 줄이 실행 파일을 **이름으로** 읽는 줄인가([`ByName`]) - agy 만 그렇다(따옴표 없는 한 줄). Codex 의
+    /// `commandWindows` 는 exe 를 따옴표로 싸 물러서지 않는다(moai-r2nn.k5a).
+    fn reads_by_name(&self) -> bool {
+        matches!(self.agent, Agent::Antigravity)
     }
 
     /// `status` 의 이름 칸 — 실행 파일 이름으로 댄다(그 아래 PATH 줄과 같은 낱말).
@@ -2930,14 +2927,13 @@ mod tests {
         assert_eq!(ByName::of(spaced, true, None, same), ByName::Missing);
         assert_eq!(ByName::of(spaced, true, Some(there), same), ByName::Other(there.to_path_buf()));
         assert_eq!(ByName::of(spaced, true, Some(Path::new(spaced)), same), ByName::Same);
-        // 이름으로 안 부르는 때: 줄을 이름으로 안 읽는 OS 의 Codex, 잘 적히는 exe, 이미 `moai` 인 exe.
+        // 이름으로 안 부르는 때: 줄을 이름으로 안 읽는 에이전트(Codex), 잘 적히는 exe, 이미 `moai` 인 exe.
         assert_eq!(ByName::of(spaced, false, None, same), ByName::Unused);
         assert_eq!(ByName::of("/usr/local/bin/moai", true, None, same), ByName::Unused);
         assert_eq!(ByName::of("moai", true, None, same), ByName::Unused);
-        // Codex 는 Windows 의 `commandWindows` 만 이름으로 읽고, agy 는 어디서나 읽는다.
+        // agy 만 이름으로 읽는다 - Codex 의 `commandWindows` 는 exe 를 따옴표로 싼다(moai-r2nn.k5a).
         let [codex, agy] = <[HookFile; 2]>::try_from(HookFile::all(Path::new("/r"), spaced)).ok().unwrap();
-        assert!(!codex.reads_by_name(false) && codex.reads_by_name(true));
-        assert!(agy.reads_by_name(false) && agy.reads_by_name(true));
+        assert!(!codex.reads_by_name() && agy.reads_by_name());
         // `--json` 의 꼴: 안 부르면 키가 없다.
         assert_eq!(ByName::Unused.json(), None);
         assert_eq!(ByName::Missing.json().unwrap()["found"], false);

@@ -15,7 +15,7 @@ does not tag — see `CONTRIBUTING.md`.
 ### Added
 
 - **`moai skill status` says when a hook line calls `moai` from `PATH` and there is
-  none, or a different one.** The `agy hooks` row (and `codex hooks` on Windows)
+  none, or a different one.** The `agy hooks` row
   shows a `!` for it, and `--json` gains `path_moai` on that hook. Before, the
   row read `current` while cmd printed `is not recognized` and the rules stayed
   off. (moai-r2nn.yxz)
@@ -56,10 +56,12 @@ does not tag — see `CONTRIBUTING.md`.
 - **Codex hooks run on Windows.** Codex starts a hook there with `cmd /C`, which
   could not read the POSIX line moai plants — the hook exited 0 with no output
   and the rules were silently off, while `moai skill status` said `current`.
-  Each Codex hook now also carries `commandWindows`, which cmd reads; the Unix
+  Each Codex hook now also carries `commandWindows`, which cmd reads: it quotes the
+  `moai.exe` path (so `C:/Program Files/...` works) and, when `moai` cannot run,
+  prints the same "the hook could not run" notice the Unix line does; the Unix
   `command` is unchanged. Codex asks you to trust the hooks again in `/hooks`,
   and an older `.codex/hooks.json` reads as `stale` until
-  `moai skill install --agent codex` plants it again. (moai-cj4a.bcv, moai-cj4a.x4u)
+  `moai skill install --agent codex` plants it again. (moai-cj4a.bcv, moai-cj4a.x4u, moai-r2nn.k5a)
 - **Antigravity hooks run on Windows.** `agy` starts hooks with `cmd /c`, so the
   `.agents/hooks.json` line is now a single `<moai> hook <event> --dialect
   antigravity || exit 0` with no quotes, that sh and cmd both read, on every

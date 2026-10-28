@@ -368,7 +368,7 @@ pub fn codex_hooks(exe: &str) -> String {
         let mut entry = serde_json::json!({
             "type": "command",
             "command": command_for(exe, name.get_name(), Dialect::Codex),
-            "commandWindows": portable_line(exe, name.get_name(), "codex"),
+            "commandWindows": codex_cmd_line(exe, name.get_name()),
             "timeout": timeout,
             "statusMessage": message,
         });
@@ -770,6 +770,20 @@ fn command_for(exe: &str, event: &str, dialect: Dialect) -> String {
         Dialect::Claude => shell_line(exe, event, dialect),
         Dialect::Antigravity => portable_line(exe, event, "antigravity"),
     }
+}
+
+/// Codex 의 `commandWindows` - **cmd 만 읽는 줄**이다(moai-r2nn.k5a). Codex 는 훅을 `cmd /C` 로 띄우되 `raw_arg` 로 한 겹 싸서
+/// 큰따옴표가 선다(2026-10-28 실측, Codex 0.165: 공백·괄호가 든 따옴표 경로가 돌고 `%` 는 풀리지 않는다). 그래서 agy 의 줄
+/// ([`portable_line`])과 달리 exe 를 따옴표로 싸 공백·괄호 경로가 이름으로 물러서지 않는다 - 따옴표를 깨는 철자([`quotable`])만 `moai` 로
+/// 물러선다. 못 돈 판(없는 바이너리 9009, clap 2, 패닉)에는 POSIX 줄([`shell_line`])과 같은 뜻의 알림을 `echo` 로 낸다: cmd 의
+/// `||` 는 앞이 0 이 아닐 때만 뒤를 돌려, moai 가 0 이면 그 stdout 만, 아니면 echo 의 JSON 만 나간다. **echo 뒤의 글에는 cmd 가 푸는
+/// 글자(`&|<>^`)와 `%` 가 없다** - 시험이 못박는다. agy 의 줄은 그대로다(agy 는 `"` 를 `\"` 로 바꾼다, moai-cj4a.zpz).
+fn codex_cmd_line(exe: &str, event: &str) -> String {
+    let exe = if quotable(exe) { exe } else { "moai" };
+    format!(
+        "\"{exe}\" hook {event} --dialect codex || echo {{\"systemMessage\":\"moai: the {event} hook could not run. \
+         The five moai rules are not standing - run moai skill status to see why.\"}}"
+    )
 }
 
 /// sh 도 cmd 도 같은 뜻으로 읽는 한 줄 — `<exe> hook <event> --dialect <말씨> || exit 0`(moai-cj4a).
@@ -2732,7 +2746,7 @@ mod tests {
     }
 
     /// **Codex 의 처리기마다 `commandWindows` 가 서고 POSIX `command` 는 옛 글 그대로다**(moai-cj4a.bcv) — Windows 의 Codex 는
-    /// `cmd /C` 로 띄워 `sh -c '…'` 를 못 읽는다. `%` 든 철자는 cmd 가 큰따옴표 안에서도 풀므로 이름으로 물러선다.
+    /// `cmd /C` 로 띄워 `sh -c '…'` 를 못 읽는다. exe 는 따옴표로 싸고(moai-r2nn.k5a) 못 돈 판에는 echo 의 알림이 선다.
     #[test]
     fn codex_gets_a_cmd_line_beside_the_posix_one() {
         let exe = "C:/repo/target/debug/moai.exe";
@@ -2745,17 +2759,23 @@ mod tests {
                 .map(|e| e.to_possible_value().unwrap().get_name().to_string())
                 .unwrap();
             assert_eq!(entry["command"], command_for(exe, &event, Dialect::Codex), "{at}: POSIX 줄이 바뀌었다");
-            assert_eq!(
-                entry["commandWindows"],
-                format!("{exe} hook {event} --dialect codex || exit 0"),
-                "{at}"
-            );
+            assert_eq!(entry["commandWindows"], codex_cmd_line(exe, &event), "{at}");
+            let line = entry["commandWindows"].as_str().unwrap();
+            let head = format!("\"{exe}\" hook {event} --dialect codex || echo ");
+            assert!(line.starts_with(&head), "{at}: {line}");
+            // echo 뒤의 글에는 cmd 가 푸는 글자가 없다 - 있으면 알림이 다른 명령이 된다.
+            let said = &line[head.len()..];
+            assert!(!said.contains(['&', '|', '<', '>', '^', '%', '!']), "{at}: cmd 가 푸는 글자 - {said}");
+            let json: serde_json::Value = serde_json::from_str(said).expect("echo 의 글이 JSON 이 아니다");
+            assert!(json["systemMessage"].as_str().unwrap().contains("moai skill status"), "{at}");
         }
-        for bad in [
+        let stop = |exe: &str| -> String {
+            let v: serde_json::Value = serde_json::from_str(&codex_hooks(exe)).unwrap();
+            v["hooks"]["Stop"][0]["hooks"][0]["commandWindows"].as_str().unwrap().to_string()
+        };
+        // 따옴표로 싸므로 공백·괄호·`%`·`&`·`!`·`^`·`'` 가 든 경로도 이름으로 물러서지 않는다(Codex 0.165 실측: 공백·괄호 경로가 돌고 `%` 는 안 풀린다).
+        for kept in [
             "C:/100%/moai.exe",
-            "C:/a\"b/moai.exe",
-            r"C:\x\moai.exe",
-            "/a$b/moai",
             "C:/Program Files/m/moai.exe",
             "C:/Program Files (x86)/m/moai.exe",
             "C:/a&b/moai.exe",
@@ -2763,12 +2783,16 @@ mod tests {
             "C:/a^b/moai.exe",
             "/home/me/Bob's/moai",
             "-moai",
-            "",
         ] {
-            let v: serde_json::Value = serde_json::from_str(&codex_hooks(bad)).unwrap();
-            let line = v["hooks"]["Stop"][0]["hooks"][0]["commandWindows"].as_str().unwrap().to_string();
-            assert_eq!(line, "moai hook stop --dialect codex || exit 0", "{bad}");
+            assert!(stop(kept).starts_with(&format!("\"{kept}\" hook stop --dialect codex || echo ")), "{kept}");
         }
+        // 따옴표를 깨는 철자만 이름으로 물러선다.
+        for bad in ["C:/a\"b/moai.exe", r"C:\x\moai.exe", "/a$b/moai", "/a`b/moai"] {
+            assert!(stop(bad).starts_with("\"moai\" hook stop --dialect codex || echo "), "{bad}");
+        }
+        // POSIX 줄은 글자 하나 안 바뀐다(Codex 는 글의 해시로 믿음을 기억한다).
+        let v: serde_json::Value = serde_json::from_str(&codex_hooks("/repo/moai")).unwrap();
+        assert_eq!(v["hooks"]["Stop"][0]["hooks"][0]["command"], command_for("/repo/moai", "stop", Dialect::Codex));
     }
 
     /// **Antigravity 의 줄은 sh 도 cmd 도 읽는 한 줄이다**(moai-cj4a.t76) — 모든 OS 에 같은 글이 선다. 없는 바이너리는 0 과

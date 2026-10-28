@@ -112,12 +112,13 @@ Windows (below).
   POSIX line moai plants for Unix (`>/dev/null` becomes a cmd redirect and the
   hook ends with exit 0 and no output — the rules are off without a sign). So
   Codex's `.codex/hooks.json` carries a second key per hook,
-  `commandWindows`, with `<moai> hook <event> --dialect codex || exit 0`
-  (the Unix `command` is unchanged), and Antigravity's `.agents/hooks.json`
-  has that one line for every OS, because the file is committed and has no
-  Windows-only key. If `moai` is missing the line still exits 0, and the
-  shell leaves one line on stderr that the agent keeps in its log. The line
-  holds no quotes at all — `agy` passes it to cmd with every `"` turned into
+  `commandWindows`, with `"<moai>" hook <event> --dialect codex || echo {...}`
+  (the path is quoted, and the echoed JSON is the same "hook could not run"
+  notice the Unix line gives; the Unix `command` is unchanged), and Antigravity's
+  `.agents/hooks.json` has one quote-free line for every OS, because the file is committed and has no
+  Windows-only key. If `moai` is missing that line still exits 0, and the
+  shell leaves one line on stderr that the agent keeps in its log. Antigravity's
+  line holds no quotes at all — `agy` passes it to cmd with every `"` turned into
   `\"`, which cmd cannot read — so a `moai.exe` path with a space or a
   character cmd or sh reads (`C:/Program Files/…`, `%`, `&`, `(`) is written
   as plain `moai`, and that `moai` has to be on `PATH`.
@@ -133,7 +134,7 @@ Windows (below).
   until you run `moai skill install --agent codex` (or `antigravity`) again
   - **`moai skill status` says when that fallback bites.** When the hook line was
     written as plain `moai` but this install would have written the full path,
-    the `agy hooks` row (and `codex hooks` on Windows) turns into a `!` if there
+    the `agy hooks` row turns into a `!` if there
     is no `moai` on `PATH` (the rules are off) or if the one there is a
     different file; `--json` carries it as `path_moai`. It blocks nothing
 - **`moai skill status` names the Git Bash Claude Code will use**
