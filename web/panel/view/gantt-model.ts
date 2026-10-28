@@ -146,13 +146,13 @@ export type Shifted = { start?: string; due?: string } | { why: 'members' | 'non
 
 /**
  * A plan moved `days` days: the days it lands on, **the changing side only** — the page's copy of `Issue::shifted`
- * (src/model.rs), which the TUI's drag and keys write through. It draws the bar while it is dragged and says why a press
- * moves nothing; the page never writes these days — moai measures them inside its write (data/plan.ts, moai-vj8w.02c).
+ * (src/model.rs), except a filled start: dragging it chooses an absolute start from the drawn day (option D).
+ * Ordinary moves send only edge+days for moai to measure inside its write; that explicit start sends the chosen day.
  * Only a row's own days move: a plan a group counts from its members is not that row's days (`members`), and a row with
  * no day has no bar (`none`).
  *
  * - `body` moves every day written — a row with a deadline alone moves its deadline
- * - `start` moves the start; with none, it sets out from the deadline (the `◆`'s left end was dragged)
+ * - `start` moves a written start relatively; a filled start chooses drawn start + days as an absolute date
  * - `end` moves the deadline; with none, it sets out from the start
  *
  * A start past the deadline is not stopped here: the write refuses it in moai's words, and the page shows them.
@@ -164,7 +164,7 @@ export function shiftPlan(planned: GanttRow['planned'], edge: Edge, days: number
   const due = planned && !planned.end_filled ? dayStart(planned.end) : null
   if (start === null && due === null) return { why: 'none' }
   const day = (d: number | null) => (d === null ? undefined : dayText(d + days * DAY))
-  const out = edge === 'body' ? { start: day(start), due: day(due) } : edge === 'start' ? { start: day(start ?? due) } : { due: day(due ?? start) }
+  const out = edge === 'body' ? { start: day(start), due: day(due) } : edge === 'start' ? { start: day(planned?.start_filled ? dayStart(planned.start) : start ?? due) } : { due: day(due ?? start) }
   return Object.fromEntries(Object.entries(out).filter(([, v]) => v !== undefined))
 }
 

@@ -32396,6 +32396,25 @@ fn web_moves_a_plan_only_from_its_own_page() {
     let (_, _, body) = post(web.port, &format!("/api/plan/{id}?edge=body&days=1"), Some(&mine));
     assert_eq!(json_of(&body)["exit"], 0, "{body}");
     assert_eq!(days(), at("2026-10-21", "2026-11-03"), "옆 세션이 옮긴 시작을 페이지의 옛 날에서 덮었다");
+
+    // 채운 시작을 조작한 옵션 D는 절대 날짜다. 기한에서 세지 않고, 그새 생긴 시작도 의도대로 덮는다.
+    let filled =
+        field(&ok_with(s.path(), &cfg, &["add", "채운 시작", "-e", &epic, "--due", "2026-10-27", "--json"]), "id");
+    let (_, _, body) = post(web.port, &format!("/api/plan/{filled}?start=2026-10-21"), Some(&mine));
+    assert_eq!(json_of(&body)["exit"], 0, "{body}");
+    let row = json_of(&ok_with(s.path(), &cfg, &["show", &filled, "--json"]));
+    assert_eq!(row["starts_on"], "2026-10-21");
+    assert_eq!(row["due_on"], "2026-10-27");
+    ok_with(s.path(), &cfg, &["edit", &filled, "--start", "2026-10-22"]);
+    let (_, _, body) = post(web.port, &format!("/api/plan/{filled}?start=2026-10-21"), Some(&mine));
+    assert_eq!(json_of(&body)["exit"], 0, "{body}");
+    let row = json_of(&ok_with(s.path(), &cfg, &["show", &filled, "--json"]));
+    assert_eq!(row["starts_on"], "2026-10-21", "절대 시작은 마지막 쓰기가 이긴다");
+    assert_eq!(row["due_on"], "2026-10-27");
+    ok_with(s.path(), &cfg, &["edit", &filled, "--start", "none"]);
+    let row = json_of(&ok_with(s.path(), &cfg, &["show", &filled, "--json"]));
+    assert!(row.get("starts_on").is_none(), "실제 시작 쓰기를 되돌리지 못했다");
+    assert_eq!(row["due_on"], "2026-10-27");
 }
 
 /// **`project=` 는 걸어 둔 프로젝트만 읽는다**(moai-o14f) — 그 자리의 트래커로 답하고, 걸지 않은 자리·상대 경로는

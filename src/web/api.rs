@@ -118,7 +118,7 @@ pub enum Bad {
     Control(String),
     /// 값이 그 이름이 받는 모양이 아니다 — 불린은 `1`, `fields` 는 `id`, id 는 이슈 id 의 꼴.
     Shape(String),
-    /// 둘 다 이 길이 받는 이름인데 같이는 못 준다 — `/api/plan` 의 옮기기(`edge`·`days`)와 하루 세우기(`day`).
+    /// 이 길이 받는 이름이지만 같이는 못 준다 — `/api/plan` 의 옮기기(`edge`·`days`), 하루 세우기(`day`), 절대 시작(`start`).
     /// 모르는 이름(`Unknown`)으로 대면 "이 길은 그 이름을 안 받는다" 는 거짓말이 된다(moai-vj8w 리뷰).
     Mixed(String, String),
 }
@@ -218,23 +218,27 @@ pub fn write_argv_of(path: &str, query: &[(String, String)]) -> Option<Result<Ve
     }))
 }
 
-/// `/api/plan/<id>` 의 argv — **날이 아니라 옮기는 뜻을 받는다**(moai-vj8w.02c). 날은 `edit` 이 락 안에서 그때의 줄로
+/// `/api/plan/<id>` 의 argv — 보통은 **옮기는 뜻을 받는다**(moai-vj8w.02c). 날은 `edit` 이 락 안에서 그때의 줄로
 /// 잰다(`Issue::shifted`) — 페이지가 읽은 날에서 센 날을 들고 오면, 그 읽기와 이 쓰기 사이에 옆 세션이 옮긴 날을
-/// 화면의 옛 날에서 센 값이 말없이 덮는다. TUI 의 끌기(`tui::gantt::Plan`)와 한 자다.
+/// 화면의 옛 날에서 센 값이 말없이 덮는다. **채운 시작의 명시적 조작은 예외**로 절대 날짜를 쓴다(옵션 D).
+/// TUI 의 끌기(`tui::gantt::Plan`)와 한 자다.
 ///
 /// - `edge=start|body|end&days=N` — 막대를 옮긴다: `edit --shift-start=N`·`--shift=N`·`--shift-due=N`. `N` 은 0 아닌
 ///   정수(여섯 자리까지, 앞에 `-` 하나)다
 /// - `day=YYYY-MM-DD` — 날이 없는 줄에 그 하루를 세운다: `edit --start=<날> --due=<날> --if-unplanned`. 그새 날이 섰으면
 ///   `edit` 이 안 쓰고 거절한다
 ///
-/// 둘을 섞으면 거절이다([`Bad::Mixed`]). 겹쳐 보기(`worktree`)는 안 받는다: 쓰기는 늘 주 체크아웃의 트래커에 간다.
+/// - `start=YYYY-MM-DD` — 채운 시작을 사람이 고른 날로 쓴다: `edit --start=<날>`. 그새 시작이 생겼어도 덮는다(옵션 D)
+///
+/// 서로 섞으면 거절이다([`Bad::Mixed`]). 겹쳐 보기(`worktree`)는 안 받는다: 쓰기는 늘 주 체크아웃의 트래커에 간다.
 fn plan_argv(id: &str, query: &[(String, String)]) -> Result<Vec<String>, Bad> {
-    let (mut edge, mut days, mut day) = (None, None, None);
+    let (mut edge, mut days, mut day, mut start) = (None, None, None, None);
     for (name, value) in query {
         let (slot, fits) = match name.as_str() {
             "edge" => (&mut edge, shift_flag(value).is_some()),
             "days" => (&mut days, is_days(value)),
             "day" => (&mut day, crate::model::parse_date(value).is_some()),
+            "start" => (&mut start, crate::model::parse_date(value).is_some()),
             _ => return Err(Bad::Unknown(name.clone())),
         };
         if !fits {
@@ -243,6 +247,17 @@ fn plan_argv(id: &str, query: &[(String, String)]) -> Result<Vec<String>, Bad> {
         if slot.replace(value.clone()).is_some() {
             return Err(Bad::Twice(name.clone()));
         }
+    }
+    if let Some(start) = start {
+        if let Some(name) = edge
+            .as_ref()
+            .map(|_| "edge")
+            .or_else(|| days.as_ref().map(|_| "days"))
+            .or_else(|| day.as_ref().map(|_| "day"))
+        {
+            return Err(Bad::Mixed(name.into(), "start".into()));
+        }
+        return Ok(vec!["edit".into(), format!("--start={start}"), "--".into(), id.into()]);
     }
     let mixed = |name: &str| Bad::Mixed(name.to_string(), "day".to_string());
     let flags = match (edge, days, day) {
@@ -741,6 +756,12 @@ mod tests {
             plan(&[("day", "2026-10-26")]),
             Ok(strs(&["edit", "--start=2026-10-26", "--due=2026-10-26", "--if-unplanned", "--", "moai-1abc"]))
         );
+        assert_eq!(plan(&[("start", "2026-10-21")]), Ok(strs(&["edit", "--start=2026-10-21", "--", "moai-1abc"])));
+        for (key, value) in [("edge", "start"), ("days", "1"), ("day", "2026-10-21")] {
+            assert_eq!(plan(&[("start", "2026-10-21"), (key, value)]), Err(Bad::Mixed(key.into(), "start".into())));
+        }
+        assert_eq!(plan(&[("start", "none")]), Err(Bad::Shape("start".into())));
+        assert_eq!(plan(&[("start", "2026-10-21"), ("start", "2026-10-22")]), Err(Bad::Twice("start".into())));
         assert_eq!(plan(&[]), Err(Bad::Empty("edge".into())));
         assert_eq!(plan(&[("days", "3")]), Err(Bad::Empty("edge".into())));
         assert_eq!(plan(&[("edge", "body")]), Err(Bad::Empty("days".into())));

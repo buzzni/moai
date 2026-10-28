@@ -905,7 +905,9 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
         // Invert the move rather than restoring the page's stale dates; the other edge stays as moai found it.
         // The tree plan is the same picture shiftPlan used; the separately read list may disagree about absent edges.
         const writtenEdge = edge === 'body' ? (g.planned!.start_filled ? 'end' : g.planned!.end_filled ? 'start' : edge) : edge
-        write(movePlan, row.id, { edge: writtenEdge, days }, undoOf(row.id, { edge: writtenEdge, days }, {
+        const intent: PlanChange = edge === 'start' && g.planned!.start_filled
+          ? { start: change.start! } : { edge: writtenEdge, days }
+        write(movePlan, row.id, intent, undoOf(row.id, intent, {
           start: g.planned?.start_filled ? null : g.planned?.start ?? null,
           due: g.planned?.end_filled ? null : g.planned?.end ?? null,
         }))

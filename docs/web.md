@@ -85,8 +85,8 @@ view toggles of the list applied; the dates scroll on the right.
 
 A row with a deadline and no planned start gets a bar from its creation day in
 the viewing time zone, or from the deadline day if that is earlier. A start
-without a deadline gets a one-day bar. These filled edges stay derived: a move or
-undo never saves them. With neither day written, there is no planned bar.
+without a deadline gets a one-day bar. These filled edges stay derived through ordinary moves and undo. Choosing a
+filled start explicitly makes the selected day a written start. With neither day written, there is no planned bar.
 Completed blockers do not get arrows; a dependency outside the current place,
 filter or open folders is omitted.
 
@@ -116,7 +116,8 @@ Other tabs read the same tree without calculating the chart values.
 | `t` / `z` | Jump to today / fit every drawn row |
 | drag the line between grid and dates | Grid width, kept in this browser |
 | drag a bar's middle | Move its written dates by the same number of days |
-| drag a bar's left or right end, or a `◆` | Move the start alone, or the deadline alone |
+| drag a bar's left end | Move a written start; a filled start writes the chosen day as an absolute start |
+| drag a bar's right end, or a milestone `◆` | Move only the deadline |
 | double-click a day on a row with no days | Plan that one day as its start and deadline |
 
 Gantt folds belong to that visit: leaving and returning opens every group again.
@@ -126,7 +127,10 @@ A bar moves by whole days and is written once, when you let go — the same writ
 `moai edit <id> --shift <N>` (`--shift-start` or `--shift-due` for an end). What is
 sent is the move, not the days (only the written edge when the other was filled): moai counts them inside its write from the row as it
 stands then, so a row someone moved in the two seconds before the page read it again
-moves on from where they put it. A double-click plans its day as `moai edit <id>
+moves on from where they put it. A filled start is the exception: dragging its left
+end sends the chosen date as `moai edit <id> --start <day>`. This explicit choice
+wins over a start written meanwhile; the deadline stays as moai reads it. Undo
+clears that newly chosen start when the read plan had none. A double-click plans its day as `moai edit <id>
 --start <day> --due <day> --if-unplanned`, refused if the row gained days meanwhile.
 A move moai refuses (a start after the deadline, a day past the deadline of the
 epic, milestone or parent above) is told in moai's own words under the banners and
@@ -202,7 +206,8 @@ moving, editing and noting, and the explorer's `SPC n` for a thought you want to
 park and its Gantt for planned days.
 
 The one write to the tracker is a Gantt bar's days ([above](#gantt)): the server
-runs `moai edit --shift` for it (`--start --due --if-unplanned` for a double-click),
+runs `moai edit --shift` for ordinary moves, `--start <day>` for a filled-start
+resize, or `--start --due --if-unplanned` for a double-click,
 so it goes through the same lock, checks and refusals as the CLI. The server takes
 it only from the page itself: a request another site sends is refused.
 

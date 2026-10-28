@@ -25,6 +25,9 @@ does not tag — see `CONTRIBUTING.md`.
 
 ### Changed
 
+- Choosing a filled Gantt start with the TUI start keys or a TUI/web left-edge
+  drag writes the selected date as an absolute start. It replaces a start
+  written meanwhile; ordinary moves keep their relative behavior. (moai-e9hi.442)
 - **Gantt plans include rows with only a deadline.** A missing start uses the
   creation day in the viewing time zone, capped at the deadline; a missing end
   uses the start day. Filled edges remain derived through moves and undo. JSON

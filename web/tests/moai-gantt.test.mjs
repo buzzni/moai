@@ -562,6 +562,7 @@ test('the plan write carries the move, not the days: moai measures them inside i
   assert.deepEqual(planEndpoint('e1.c', { edge: 'body', days: -2 }), { path: '/api/plan/e1.c', method: 'POST', query: { edge: 'body', days: '-2' } })
   assert.deepEqual(planEndpoint('e1.c', { edge: 'end', days: 3 }).query, { edge: 'end', days: '3' })
   assert.deepEqual(planEndpoint('z', { day: '2026-10-30' }).query, { day: '2026-10-30' })
+  assert.deepEqual(planEndpoint('z', { start: '2026-10-21' }).query, { start: '2026-10-21' })
 })
 
 test('shiftPlan is Issue::shifted: the changing side only, own days only', () => {
@@ -572,6 +573,7 @@ test('shiftPlan is Issue::shifted: the changing side only, own days only', () =>
   // A deadline alone: the body moves it, the start sets out from it; a start alone: the end sets out from it.
   assert.deepEqual(shiftPlan(own(null, '2026-10-27'), 'body', 1), { due: '2026-10-28' })
   assert.deepEqual(shiftPlan(own(null, '2026-10-27'), 'start', -2), { start: '2026-10-25' })
+  assert.deepEqual(shiftPlan({ ...own('2026-10-20', '2026-10-27'), start_filled: true }, 'start', 1), { start: '2026-10-21' })
   assert.deepEqual(shiftPlan(own('2026-10-26', null), 'end', 1), { due: '2026-10-27' })
   // Across a month end and a year end, in calendar days.
   assert.deepEqual(shiftPlan(own('2026-12-31', null), 'body', 1), { start: '2027-01-01' })
@@ -1092,6 +1094,7 @@ test('undo inverts each move, clearing an edge only when it was absent at read t
   assert.equal(undoOf('x', { edge: 'start', days: 1 }, { ...read, start: null }), 'moai edit x --start none')
   assert.equal(undoOf('x', { edge: 'end', days: 1 }, { ...read, due: null }), 'moai edit x --due none')
   assert.equal(undoOf('x', { day: '2026-10-27' }, { start: null, due: null }), 'moai edit x --start none --due none')
+  assert.equal(undoOf('x', { start: '2026-10-21' }, { start: null, due: '2026-10-27' }), 'moai edit x --start none')
 })
 
 test('zoom, fit with a new step and Ctrl+wheel each build one window at their final scroll position', () => {
@@ -1159,9 +1162,11 @@ test('filled edges stay derived through a whole-bar move and undo; resizing crea
       else assert.deepEqual([px(bar, 'left'), px(bar, 'width')], [left + 40, width], 'a filled end travels with its start')
     }
     press(dom, l, 'pointerup', x + 40)
-    assert.deepEqual(moves, [{ id: 'e1.c', change: { edge, days: 1 }, undo: `moai edit e1.c ${undo}` }])
+    const absolute = grip === 'start' && planned.start_filled
+    const change = absolute ? { start: '2026-10-21' } : { edge, days: 1 }
+    assert.deepEqual(moves, [{ id: 'e1.c', change, undo: `moai edit e1.c ${undo}` }])
     const { planEndpoint } = await panelModule('data/plan.ts')
-    assert.deepEqual(planEndpoint('e1.c', moves[0].change).query, { edge, days: '1' })
+    assert.deepEqual(planEndpoint('e1.c', moves[0].change).query, absolute ? { start: '2026-10-21' } : { edge, days: '1' })
     await tick()
   }
 })
