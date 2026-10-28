@@ -44,11 +44,6 @@ use crate::tz::Zone;
 use serde::Serialize;
 use std::collections::BTreeMap;
 
-#[cfg(test)]
-thread_local! {
-    pub(crate) static CALLS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
-}
-
 /// 계획 구간이 어디서 왔나.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -126,8 +121,9 @@ pub struct Range {
 pub struct Gantt<'a> {
     /// `all` 와 같은 차례, 같은 길이다 — `rows[at].at == at`. 화면이 목록을 거르고 정하는 것은 제 일이다.
     pub rows: Vec<Row<'a>>,
-    /// **적재한 줄 전부**의 폭이다. 날이 하나도 없으면 없다. 거른 목록에 맞추는 화면은 남긴 줄로 [`range_of`] 를 다시
-    /// 부른다(리뷰) — 숨긴 줄(아카이브·미룬 것)의 날이 이 폭을 넓히므로, 그 폭에 맞추면 보이는 막대가 한쪽에 몰린다.
+    /// **적재한 줄 전부**의 폭이다. 날이 하나도 없으면 없다. 거른 목록에 맞추는 화면은 이것을 안 쓰고 남긴 줄의 폭으로
+    /// 잰다(리뷰) — 적재 때 줄마다 [`range_of`] 를 불러 두고(`tui::gantt::Cached`) 남긴 줄의 것만 접는다. 숨긴 줄
+    /// (아카이브·미룬 것)의 날이 이 폭을 넓히므로, 그 폭에 맞추면 보이는 막대가 한쪽에 몰린다.
     pub range: Option<Range>,
 }
 
@@ -135,21 +131,21 @@ pub struct Gantt<'a> {
 /// 문맥이다 — 탐색기는 적재 때 둘 다 이미 들고 있어 여기서 다시 짓지 않는다. `now` 는 RFC3339(UTC)고, `zone` 은 읽는
 /// 사람의 시간대다 — 늦었는가와 오늘을 그 달로 잰다(보드의 `Dues::judge` 가 받는 그 둘이다). 거르개를 `'a` 로 빌리는 것은
 /// 서 있는 칸·닫힌 때가 거기서 빌려 온 글이라서다 — 값(`Gantt`)이 사는 동안 거르개도 산다.
-/// `blocks` and `shelved` must describe the same complete load (archives included):
-/// archived rows can still be blockers or deferred ancestors. The caller builds them once.
+///
+/// 아래의 두 지도는 저장소 전부를 훑는다. 탐색기는 이 값을 적재마다 한 번 들고 있으므로(`tui::gantt::Cached`)
+/// 지도를 여기서 지어도 프레임마다가 아니다 — 부르는 쪽마다 짓게 하면 같은 적재로 지었는지를 부르는 쪽이 맞춰야 한다.
 pub fn gantt<'a>(
     all: &'a [Issue],
     index: &Index,
     wh: &'a Where<'a>,
     cfg: &Config,
-    blocks: Option<&BlockMaps<'a, '_>>,
-    shelved: &BTreeMap<&str, Vec<&str>>,
     now: &str,
     zone: &Zone,
 ) -> Gantt<'a> {
-    #[cfg(test)]
-    CALLS.set(CALLS.get() + 1);
-    // These global maps belong to the caller's load, not to each report invocation.
+    // 막음 지도는 막힌 줄이 있을 때만 짓는다 — 저장소 전부를 훑는 셈이다.
+    let blocks = all.iter().any(|i| !i.blocked_by.is_empty()).then(|| BlockMaps::over(all, cfg));
+    // 줄마다 그 줄을 계획에서 뺀 미룸들 — 미룬 줄이 없으면 빈 지도다. 묶음의 계획에서 멤버를 빼는 자([`planned_of`])가 쓴다.
+    let shelved = super::deferred_sources(all);
     // Resolve each row's known start once, including the future-stamp check. Groups
     // reuse those facts instead of parsing every member again for each ancestor.
     let starts: Vec<Option<(&str, i64)>> = all
@@ -177,7 +173,7 @@ pub fn gantt<'a>(
                 at,
                 id: i.id.as_str(),
                 kind: i.kind,
-                planned: planned_of(i, &members, all, wh, shelved, zone),
+                planned: planned_of(i, &members, all, wh, &shelved, zone),
                 actual: actual_of(at, column, &members, all, wh, cfg, &starts, now_at),
                 progress: match is_group(i) {
                     true => {
@@ -189,6 +185,7 @@ pub fn gantt<'a>(
                 overdue: overdue_of(i, column, deferred, &today),
                 deferred,
                 blocked_by: blocks
+                    .as_ref()
                     .map(|b| b.of(i).into_iter().filter(|b| b.blocker.blocks()).collect())
                     .unwrap_or_default(),
             }
@@ -392,9 +389,7 @@ mod tests {
     fn read_in<'a>(all: &'a [Issue], now: &str, zone: &Zone) -> Gantt<'a> {
         let cfg: &'static Config = Box::leak(Box::new(cfg()));
         let wh: &'a Where<'a> = Box::leak(Box::new(Where::of(all, cfg)));
-        let blocks = all.iter().any(|i| !i.blocked_by.is_empty()).then(|| BlockMaps::over(all, cfg));
-        let shelved = super::super::deferred_sources(all);
-        gantt(all, &Index::of(all), wh, cfg, blocks.as_ref(), &shelved, now, zone)
+        gantt(all, &Index::of(all), wh, cfg, now, zone)
     }
 
     fn by<'g, 'a>(g: &'g Gantt<'a>, id: &str) -> &'g Row<'a> {

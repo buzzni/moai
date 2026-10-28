@@ -157,27 +157,21 @@ struct CachedRow {
     range: Option<crate::report::gantt::Range>,
 }
 
+#[cfg(test)]
+thread_local! {
+    // How many times a site rebuilt its chart cache — the cache test counts report runs by it,
+    // so `report::gantt` itself stays free of test hooks.
+    static BUILT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 impl Site {
     fn chart_read(&self, now: &str, zone: &crate::tz::Zone) -> std::cell::Ref<'_, Cached> {
         let mut cache = self.ground.chart.borrow_mut();
         if cache.as_ref().is_none_or(|c| c.now != now || c.site_now != self.now || c.zone != *zone) {
+            #[cfg(test)]
+            BUILT.set(BUILT.get() + 1);
             let wh = self.ground.here(&self.issues);
-            let blocks = self
-                .issues
-                .iter()
-                .any(|i| !i.blocked_by.is_empty())
-                .then(|| crate::report::BlockMaps::over(&self.issues, &self.cfg));
-            let shelved = crate::report::deferred_sources(&self.issues);
-            let read = crate::report::gantt::gantt(
-                &self.issues,
-                &self.index,
-                &wh,
-                &self.cfg,
-                blocks.as_ref(),
-                &shelved,
-                now,
-                zone,
-            );
+            let read = crate::report::gantt::gantt(&self.issues, &self.index, &wh, &self.cfg, now, zone);
             let rows = read
                 .rows
                 .iter()
@@ -684,7 +678,7 @@ mod tests {
 
     #[test]
     fn chart_reads_once_per_load_clock_and_zone() {
-        use crate::report::gantt::CALLS;
+        use super::BUILT as CALLS;
         let mut i = make("argos-0001", Kind::Issue);
         i.created_at = "2026-10-27T20:00:00Z".into();
         i.due_on = Some("2026-10-30".into());

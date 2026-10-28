@@ -96,22 +96,7 @@ pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
         // `--no-gantt` 는 그 값과 거르개 문맥 셈을 함께 뺀다 — 간트를 안 보이는 웹 탭은 트리만 읽는다.
         let wh = (deep && !no_gantt).then(|| ground.here(&load.issues));
         let gantt = wh.as_ref().map(|wh| {
-            let blocks = load
-                .issues
-                .iter()
-                .any(|i| !i.blocked_by.is_empty())
-                .then(|| crate::report::BlockMaps::over(&load.issues, &repo.config));
-            let shelved = crate::report::deferred_sources(&load.issues);
-            crate::report::gantt::gantt(
-                &load.issues,
-                &index,
-                wh,
-                &repo.config,
-                blocks.as_ref(),
-                &shelved,
-                &crate::model::now(),
-                ctx.zone(),
-            )
+            crate::report::gantt::gantt(&load.issues, &index, wh, &repo.config, &crate::model::now(), ctx.zone())
         });
         let rows: Vec<Row> = entries
             .into_iter()
@@ -1553,6 +1538,8 @@ fn keep_unsaved(app: &App) {
 /// - 붙여넣기는 글로 넘긴다([`App::paste`]) — 키로 풀지 않는다
 /// - 마우스는 그대로 넘긴다([`App::mouse`]) — 어느 칸을 눌렀는지는 탐색기가 지난 그림으로 맞힌다
 /// - 창 크기 따위는 받을 것이 없다. 다음 그림이 새 크기로 그린다
+///
+/// 참이면 화면이 바뀌었을 수 있다 — 루프가 다시 그린다([`take_burst`]). 거짓은 끌지 않는 포인터의 움직임 하나뿐이다.
 fn take(app: &mut App, ev: Event) -> bool {
     // Moved still releases a drag if the terminal lost its button-up event.
     let changed = !matches!(&ev, Event::Mouse(m) if m.kind == MouseEventKind::Moved) || app.pointer_dragging();
@@ -1569,9 +1556,18 @@ fn take(app: &mut App, ev: Event) -> bool {
     changed
 }
 
-/// Consume queued input in order, retaining paste/IME events as whole events. A pending
-/// click must hit the screen drawn after earlier keys, so keep it for the next frame.
-/// Editors and quit are boundaries too: later input belongs to that editor or shell.
+/// Consume queued input in order, retaining paste/IME events as whole events.
+///
+/// - Pointer events are hit against the last drawn frame (`mouse::Drawn`). While only wheel or
+///   drag came before them in this burst, that frame is still what the person sees, so a click
+///   right after the wheel is taken here against it (moai-fyul). Once a key or paste has changed
+///   the screen, the next pointer event is held for the frame that change draws — as it was when
+///   every key drew.
+/// - A layout switch ends the burst: keys that measure the drawn frame (`App::pan` reads
+///   `Drawn::chart`) need the new layout's first frame.
+/// - So does a focus switch: a detail folded for lack of room hands focus back to the list only
+///   when it is drawn (`draw::screen`), so `Ctrl-w w` then `j` would scroll a pane nobody sees.
+/// - Editors and quit are boundaries too: later input belongs to that editor or shell.
 fn take_burst(
     app: &mut App,
     first: Event,
@@ -1580,15 +1576,22 @@ fn take_burst(
     let until = std::time::Instant::now() + BURST;
     let mut ev = first;
     let mut changed = false;
+    // Something other than the pointer changed the screen since the last frame.
+    let mut keyed = false;
     loop {
+        let pointer = matches!(&ev, Event::Mouse(_));
         let boundary = matches!(&ev, Event::Resize(..))
             || matches!(&ev, Event::Mouse(m) if matches!(m.kind, MouseEventKind::Down(_) | MouseEventKind::Up(_)));
-        changed |= take(app, ev);
-        if app.quit || app.edit.is_some() || boundary || std::time::Instant::now() >= until {
+        let (layout, focus) = (app.layout, app.focus);
+        let moved = take(app, ev);
+        changed |= moved;
+        keyed |= moved && !pointer;
+        let reframed = app.layout != layout || app.focus != focus;
+        if app.quit || app.edit.is_some() || boundary || reframed || std::time::Instant::now() >= until {
             return Ok((changed, None));
         }
         let Some(e) = next()? else { return Ok((changed, None)) };
-        if changed && matches!(&e, Event::Mouse(m) if matches!(m.kind, MouseEventKind::Down(_))) {
+        if keyed && matches!(&e, Event::Mouse(_)) {
             return Ok((changed, Some(e)));
         }
         ev = e;
@@ -1770,10 +1773,8 @@ mod tests {
         let (dirty, pending) = take_burst(&mut app, first, || Ok(queue.next())).unwrap();
         assert!(dirty && pending.is_none());
         assert_eq!(app.cursor, 40);
-        assert!(queue.next().is_none());
-        let mut term = ratatui::Terminal::new(ratatui::backend::TestBackend::new(200, 50)).unwrap();
-        crate::tui::draw::Painter::default().draw(&mut term, &mut app).unwrap();
-        assert_eq!(term.get_frame().count(), 1, "the queued moves share one draw");
+        // The loop draws once per `take_burst` call, so one call taking all forty is one frame.
+        assert!(queue.next().is_none(), "the queued moves did not share one draw");
     }
 
     #[test]
@@ -1781,8 +1782,12 @@ mod tests {
         let mut app = burst_app();
         let mut events = vec![pressed('g'), pressed('g'), pressed('/'), Event::Paste("한글日本語".into())].into_iter();
         let (dirty, pending) = take_burst(&mut app, pressed(' '), || Ok(events.next())).unwrap();
-        assert!(dirty && pending.is_none() && events.next().is_none());
+        assert!(dirty && pending.is_none());
         assert!(app.gantt());
+        // The layout switch ends the burst — keys after it measure the gantt's first frame.
+        let rest = events.next().expect("input after the layout switch stays queued");
+        let (dirty, pending) = take_burst(&mut app, rest, || Ok(events.next())).unwrap();
+        assert!(dirty && pending.is_none() && events.next().is_none());
         assert_eq!(
             app.mode,
             crate::tui::Mode::Grep(crate::tui::input::Input::new("한글日本語"), crate::query::GrepIn::All)
@@ -1810,6 +1815,42 @@ mod tests {
         assert_eq!(pending, Some(click));
         assert_eq!(app.cursor, 1);
         assert!(queue.next().is_some());
+    }
+
+    /// **A focus switch ends the burst** — only the draw hands focus back from a detail folded for
+    /// lack of room (`draw::screen`), so `j` after `Ctrl-w w` must wait for that frame.
+    #[test]
+    fn a_focus_switch_ends_the_burst() {
+        use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+        let mut app = burst_app();
+        assert_eq!(app.focus, crate::tui::Pane::Explorer);
+        let chord = Event::Key(KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL));
+        let mut queue = vec![pressed('w'), pressed('j')].into_iter();
+        let (dirty, pending) = take_burst(&mut app, chord, || Ok(queue.next())).unwrap();
+        assert!(dirty && pending.is_none());
+        assert_eq!(app.focus, crate::tui::Pane::Detail);
+        assert_eq!(queue.next(), Some(pressed('j')), "the key after the focus switch was taken before a frame");
+    }
+
+    /// **A click right after the wheel is hit against the frame on screen**(moai-fyul) — the wheel
+    /// moves the list at once but nothing was drawn, so drawing first would pick the row the wheel
+    /// rolled under the pointer instead of the one the person clicked. Only a key holds the click.
+    #[test]
+    fn a_click_after_the_wheel_is_not_held_but_one_after_a_key_is() {
+        use ratatui::crossterm::event::{KeyModifiers, MouseButton, MouseEvent};
+        let mouse = |kind| Event::Mouse(MouseEvent { kind, column: 4, row: 5, modifiers: KeyModifiers::NONE });
+        let mut app = burst_app();
+        let mut queue =
+            vec![mouse(MouseEventKind::ScrollDown), mouse(MouseEventKind::Down(MouseButton::Left))].into_iter();
+        let (dirty, pending) = take_burst(&mut app, mouse(MouseEventKind::ScrollDown), || Ok(queue.next())).unwrap();
+        assert!(dirty && pending.is_none(), "the click after the wheel waited for a frame the person never saw");
+        assert!(queue.next().is_none());
+        let mut app = burst_app();
+        let wheel = mouse(MouseEventKind::ScrollDown);
+        let mut queue = vec![wheel.clone()].into_iter();
+        let (dirty, pending) = take_burst(&mut app, pressed('j'), || Ok(queue.next())).unwrap();
+        assert!(dirty);
+        assert_eq!(pending, Some(wheel), "the wheel after a key must hit the frame the key draws");
     }
 
     #[test]

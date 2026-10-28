@@ -5978,7 +5978,7 @@ impl App {
     /// 보드는 밀려난 커서를 그 칸에서 보이는 가장 가까운 카드로 끌어왔고, 그 칸에 보이는 카드가 없으면 굴리기를 멈췄다 —
     /// 멈춤은 끌어오기 때문에 생긴 규칙이라 함께 걷었다.
     ///
-    /// 목록은 굴렀을 때만 센다(리뷰) — 끝에 닿은 뒤에도 몰아 받은 휠(`cmd::tui::rolls`)이 사건마다 목록을 다시 세지 않게.
+    /// 목록은 굴렀을 때만 센다(리뷰) — 끝에 닿은 뒤에도 몰아 받은 휠(`cmd::tui::take_burst`)이 사건마다 목록을 다시 세지 않게.
     fn roll(&mut self, roll: impl FnOnce(&mut scroll::Scroll)) {
         let was = self.list.offset();
         roll(&mut self.list);
