@@ -56,8 +56,7 @@ sort.
 Choosing an issue shows its detail: column, priority, assignee, tags, what blocks
 it, the body, its children, its commits, the wiki about it (the lessons its notes
 point at, the pages that name it, the related sections — as `moai show <id>`
-lists them) and its history. The detail sits below the list, or on
-its left when the window is wide enough; `SPC o d` moves it and `SPC v d` hides
+lists them) and its history. History and work log start expanded and preserve plain-text line breaks. In the list, in-progress rows have a pale gold background and review rows a pale purple background. The detail starts on the right; it cycles right → bottom → left → top when the window is wide enough. Below 640px it stays below the list; `SPC o d` moves it and `SPC v d` hides
 it. `SPC v r` switches the body between rendered markdown and the raw text.
 `Enter` on an issue moves the focus to the detail, and `SPC w w` moves it back.
 
@@ -303,7 +302,7 @@ once and the keys reach it.
 | `SPC w w` / `SPC w W` | Next / previous pane |
 | `SPC w h` `j` `k` `l` | Pane to the left / below / above / right |
 | `SPC g l` `b` `w` `g` | List / board / wiki / Gantt tab |
-| `SPC o d` | Detail position: left or below |
+| `SPC o d` | Detail position: right → bottom → left → top |
 | `SPC o t` | Pick the time zone dates are drawn in |
 
 **Projects and read marks**
@@ -361,4 +360,4 @@ once and the keys reach it.
 The page does not show the stats screen, and what it writes is a Gantt bar's days
 and your read marks.
 
-Decided in: moai-0aa7, moai-jshy, moai-d86e.3ud, moai-ijjd, moai-lj8g
+Decided in: moai-8r2l, moai-0aa7, moai-jshy, moai-d86e.3ud, moai-ijjd, moai-lj8g
