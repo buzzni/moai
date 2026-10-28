@@ -41,8 +41,8 @@ const GANTT = {
   e1: g('e1', { kind: 'epic', planned: { start: '2026-10-10', end: '2026-10-27', start_filled: false, end_filled: false, from: 'members' }, actual: span('2026-10-19T09:00:00Z'), progress: { kind: 'rollup', done: 1, total: 5 } }),
   'e1.a': g('e1.a', { planned: own('2026-10-21', '2026-10-22'), actual: span('2026-10-21T09:20:00Z', '2026-10-22T15:05:00Z'), progress: { kind: 'column', name: 'done' } }),
   'e1.b': g('e1.b', { planned: own('2026-10-19', '2026-10-22'), actual: span('2026-10-19T09:00:00Z'), overdue: 3, progress: { kind: 'column', name: 'in_progress' } }),
-  'e1.c': g('e1.c', { planned: own('2026-10-26', '2026-10-27'), blocked_by: [{ id: 'e1.a', state: 'done' }, { id: 'e1.b', state: 'open' }] }),
-  'e1.d': g('e1.d', { planned: own(null, '2026-10-27'), actual: { kind: 'unknown' }, progress: { kind: 'column', name: 'in_progress' } }),
+  'e1.c': g('e1.c', { planned: own('2026-10-26', '2026-10-27'), blocked_by: [{ id: 'e1.b', state: 'open' }] }),
+  'e1.d': g('e1.d', { planned: own(null, '2026-10-27'), blocked_by: [{ id: 'e1.b', state: 'open' }], actual: { kind: 'unknown' }, progress: { kind: 'column', name: 'in_progress' } }),
   'e1.e': g('e1.e', { planned: own('2026-10-10', '2026-10-12'), deferred: true }),
 }
 const build = () => {
@@ -272,11 +272,11 @@ test('today: a dashed line at now, a cap in the header and the day in red', () =
   assert.ok(root.querySelectorAll('.col-we').length > 0, 'weekend shading')
 })
 
-test('arrows: only the cursor row\'s blockers, in one SVG behind the bars', () => {
+test('arrows: incoming and outgoing links of the cursor only, in one SVG behind the bars', () => {
   const { root, at } = mount('e1.c')
   const svg = root.querySelector('svg.links')
-  assert.equal(svg.querySelectorAll('path').length, 2)
-  assert.equal(svg.querySelectorAll('polygon').length, 2)
+  assert.equal(svg.querySelectorAll('path').length, 1)
+  assert.equal(svg.querySelectorAll('polygon').length, 1)
   assert.ok(svg.querySelector('path').getAttribute('d').startsWith('M'))
   assert.equal(lane(root, 'e1.c').getAttribute('aria-selected'), 'true')
   // A row nothing blocks shows no arrows; the cursor moves in place.
@@ -289,7 +289,11 @@ test('arrows: only the cursor row\'s blockers, in one SVG behind the bars', () =
   assert.deepEqual([...root.querySelectorAll('.lane')], lanes, 'no redraw for a cursor move')
   // An unknown start blocks nothing visible: arrows come from the blocker's planned end.
   at('e1.c')
-  assert.equal(root.querySelector('svg.links').querySelectorAll('path').length, 2)
+  assert.equal(root.querySelector('svg.links').querySelectorAll('path').length, 1)
+  at('e1.b')
+  assert.equal(root.querySelector('svg.links').querySelectorAll('path').length, 2, 'both rows blocked by the cursor get outgoing arrows')
+  at('e1.d')
+  assert.equal(root.querySelector('svg.links').querySelectorAll('path').length, 1, 'a filled plan anchors an incoming arrow')
 })
 
 test('the bubble is the panel\'s own element, with the title, planned, actual, late days, blockers and assignee', () => {
@@ -310,7 +314,7 @@ test('the bubble is the panel\'s own element, with the title, planned, actual, l
   lane(root, 'e1.d').querySelector('.b-plan').dispatchEvent(new dom.window.MouseEvent('mouseenter'))
   assert.match(bubble.textContent, /start unknown/)
   lane(root, 'e1.c').querySelector('.b-plan').dispatchEvent(new dom.window.MouseEvent('mouseenter'))
-  assert.match(bubble.textContent, /Blocked bye1\.a \(done\), e1\.b \(open\)/)
+  assert.match(bubble.textContent, /Blocked bye1\.b \(open\)/)
   assert.match(bubble.textContent, /not started/)
 })
 

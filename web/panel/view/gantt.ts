@@ -461,29 +461,37 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
     return from >= axis.from && to <= axis.to
   }
 
-  /** The arrows into the cursor row, from what blocks it: one SVG behind the bars, the cursor row's only. */
+  /** Only links touching the cursor, in blocker → blocked direction, with the same style both ways. */
   function paintArrows(): void {
     if (!built || !model || !axis || !state) return
     const svg = built.svg
     svg.replaceChildren()
-    const to = model.lines.findIndex((line) => line.key === state!.cursor)
-    const line = model.lines[to]
-    const target = to < 0 ? null : built.placed[to]
-    if (!line || line.kind !== 'row' || !target) return
-    const g = model.index.rows[line.at]!.gantt
-    const x1 = target.plan?.from ?? target.span?.[0]
-    if (!g || x1 === undefined) return
-    for (const block of g.blocked_by) {
-      const from = model.lines.findIndex((one) => one.key === block.id)
-      const source = from < 0 ? null : built.placed[from]
-      const x0 = source ? source.plan?.to ?? source.span?.[1] : undefined
-      if (!source || x0 === undefined) continue
-      const { d, head } = arrowOf(xOf(axis, x0), from, xOf(axis, x1), to)
-      const path = doc.createElementNS(SVG, 'path')
-      path.setAttribute('d', d)
-      const tipHead = doc.createElementNS(SVG, 'polygon')
-      tipHead.setAttribute('points', head)
-      svg.append(path, tipHead)
+    const focus = model.lines.findIndex((line) => line.key === state!.cursor)
+    if (focus < 0) return
+    const visible = new Map<string, number>()
+    model.lines.forEach((line, n) => { if (!visible.has(line.key)) visible.set(line.key, n) })
+    const edges = new Set<string>()
+    for (let to = 0; to < model.lines.length; to++) {
+      const line = model.lines[to]!
+      if (line.kind !== 'row') continue
+      for (const block of model.index.rows[line.at]!.gantt?.blocked_by ?? []) {
+        const from = visible.get(block.id) ?? -1
+        if (from < 0 || from === to || (from !== focus && to !== focus)) continue
+        const key = `${from}:${to}`
+        if (edges.has(key)) continue
+        edges.add(key)
+        const source = built.placed[from]
+        const target = built.placed[to]
+        const x0 = source?.plan?.to ?? source?.span?.[1]
+        const x1 = target?.plan?.from ?? target?.span?.[0]
+        if (x0 === undefined || x1 === undefined) continue
+        const { d, head } = arrowOf(xOf(axis, x0), from, xOf(axis, x1), to)
+        const path = doc.createElementNS(SVG, 'path')
+        path.setAttribute('d', d)
+        const tipHead = doc.createElementNS(SVG, 'polygon')
+        tipHead.setAttribute('points', head)
+        svg.append(path, tipHead)
+      }
     }
   }
 
