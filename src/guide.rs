@@ -307,6 +307,7 @@ const WORKER_SLOT: &str = "Worker: <worker kind>";
 /// 일꾼은 다시 안 읽는다. 사다리는 `bulk`·`develop`·`complex` 셋이다: `plan`·`docs`·`codex` 는 일꾼 안의 조각이 아니고,
 /// `review` 는 7 의 몫이다.
 const SUBAGENTS_SLOT: &str = "Subagents: <subagent ladder>";
+const WRITING_SLOT: &str = "Writing: <writing>";
 
 /// 그 줄을 일꾼이 어떻게 읽는가 — 일꾼 글([`worker`])의 "The assignment" 에 선다(moai-obxm). 메시지의 머리에는
 /// 자리만 싣고 읽는 법은 그 아래 일꾼 글에 둔다.
@@ -623,6 +624,31 @@ the title inside the body.
 The one thing that matters is that the next session reads this with
 `moai show <id>`. These three are advice for that reason, not rules anything checks."#;
 
+const DETAILED_BODY: &str = "goal · context (files and lines, the precedent) · what is decided · steps · acceptance (which tests) · out of scope · order and the files it shares · role";
+
+/// Advice only: the person's setting is read at runtime and never baked into generated files.
+const DETAIL: &str = r#"**How much to write is the person's — `detailed` unless they say otherwise.**
+`[writing] detail` in the user config wins over a repository recommendation. The board names
+the setting; `moai writing --json` gives its `detail`. If the board was not injected, run that
+command before writing. Pass the value in prompts to subagents.
+
+- `detailed`: give issue and member bodies headings and lists for goal, context (files and
+  lines and precedent), decisions, steps, acceptance tests, out of scope, order and shared files,
+  and role. In a plan body explain the bundle, agreements and order. Notes say what was done,
+  where, what remains and the next commands; decisions include options and reasons. Review
+  closes name findings taken in and handed on by number and issue ID. Backlog bodies record
+  the thought, where it arose and when to start.
+- `brief`: use a few lines for what, where and next; notes and closing lines can be one line,
+  and backlog entries can use the title alone.
+
+Both keep short titles, lists, no emoji and required IDs, commits and test names. Keep the
+machine-readable lines `model:`, `Report-checked:`, `Review-ready:`, `Regression-of:`,
+`Summary:`, `Sent:`, `Next:`, `report:`, `Decided alone:` and `Plan stopped:` in their original
+format; put details on that line. Do not shorten a reviewer's own words. This applies to
+tracker bodies, notes, review closes and reports; commits, wiki, CHANGELOG and conversation
+follow their own conventions. Nothing checks this — it is how much to write, not a rule
+anything enforces."#;
+
 /// 글 스타일의 예시(moai-1xf2). **참고 문서에만 둔다** — AGENTS 블록과 SKILL.md 는 언제나
 /// 읽히는 자리라 예시 한 벌이 모든 세션의 값이 된다. 규칙은 짧게 늘 보이고, 예시는 부를 때 온다.
 ///
@@ -640,6 +666,29 @@ moai add 'an empty tag slips past the filter' -t bug -e <epic> -b - <<'BODY'
 - What I saw: a list filtered by that tag filters nothing and returns everything
 - Where: where tags are normalized (<file>:<line>). Dropping the empty word ends it
 BODY
+```
+
+That is `brief`. A `detailed` body gives the next session enough to start:
+
+```sh
+moai add 'an empty tag slips past the filter' -t bug -e <epic> -b - <<'DETAILED'
+## Goal
+- Ignore empty tags when filtering.
+## Context
+- Normalization at <file>:<line> leaves an empty word; the existing filter is the precedent.
+## What is decided
+- Drop the empty word before filtering.
+## Steps
+- Update normalization at <file>:<line>.
+## Acceptance
+- Run the empty-tag filter test.
+## Out of scope
+- Changing tag display.
+## Order and shared files
+- Do this before the filter integration work; both touch <file>:<line>.
+## Role
+- Development, low difficulty.
+DETAILED
 ```
 
 Three common ways it goes wrong.
@@ -1367,6 +1416,8 @@ Start a session by running `moai status`. The board and the warnings come up on 
 
 {WRITING}
 
+{DETAIL}
+
 ### Park what is out of scope
 
 {backlog}
@@ -1493,6 +1544,8 @@ Whoever creates an issue is its assignee, for free.
 ## What to write in an issue
 
 {WRITING}
+
+{DETAIL}
 
 ## The five things the hook actually watches
 
@@ -2158,6 +2211,9 @@ Read it at the start of every round; a value changed mid-round counts from the n
                             written — the keys the person set — and repo — the keys the
                             repository recommended, read from repo_path; the rest are defaults
 
+How much agents write is the person's too. Read `moai writing --json` (`detail`) with the
+models at the start of each round; a change mid-round takes effect in the next one.
+
 When a value has to change, the person changes it — in their user config for a key in `written`
 or a default, and over a `repo` key by writing the same key there. The repository's file is
 committed and shared: changing it changes the recommendation for everyone, so name it as that.
@@ -2623,7 +2679,7 @@ and if the message does not arrive, deliver it into the tab —
 `moai-cmux`, "Label the tab" and "When a message does not arrive".
 Inside Saycode, a worker Saycode lists gets the message as a prompt instead of `SendMessage` —
 `moai-saycode`, "Send work".
-Fill in `<id>`, `<title>`, `<steps file>`, `<root branch>`, `<base branch>`, `<milestone>`, `<due>`, `<model>`, `<difficulty>`, `<why>`, `<effort>`, `<worker kind>`, `<subagent ladder>`, `<other work>`, `<root>`, `<person>` and — only for a subdirectory project — `<subdir>`.
+Fill in `<id>`, `<title>`, `<steps file>`, `<root branch>`, `<base branch>`, `<milestone>`, `<due>`, `<model>`, `<difficulty>`, `<why>`, `<effort>`, `<worker kind>`, `<subagent ladder>`, `<writing>`, `<other work>`, `<root>`, `<person>` and — only for a subdirectory project — `<subdir>`. Copy `<writing>` from this round's `moai writing --json` `detail`, without choosing it yourself.
 `<root>` is the `root dir` from 2. **Leave it unfilled** and a worker that stands in a
 worktree reads its own place as the root. With no `subdir` line in 2, leave the `Subdir:` line out
 of the message.
@@ -4724,6 +4780,7 @@ fn message() -> String {
     {EFFORT_SLOT}
     {WORKER_SLOT}
     {SUBAGENTS_SLOT}
+    {WRITING_SLOT}
     {BESIDE}
     Root branch: <root branch>
     Base branch: <base branch>
@@ -4763,6 +4820,7 @@ Root: <root>
 Milestone: <milestone>
 Due: <due>
 Person: <person>
+Writing: <writing>
 
 1. Read it — moai -C "<root>" show <id> — and as much of the code as the split needs. If it
    already stands done, hand back `already unfolded: <id>` and stop: unfolding again puts up
@@ -4780,8 +4838,8 @@ Person: <person>
    {MILESTONE_CLEAR}
    moai -C "<root>" edit <epic> --due <due>
    A refusal because the day is later than the milestone's leaves the epic as it stands.
-4. Give every member a body the worker can start from without searching again — what is
-   wrong, where (file and function), what to change, how to test it. A design question the
+4. Give every member a body as `Writing:` says — `detailed`: the headings {DETAILED_BODY},
+   each a list; `brief`: what · where · how to test it. A design question the
    backlog and its notes do not settle goes in it, open, for the worker to ask — do not
    settle it here. Write it to a file in your scratchpad and run
    moai -C "<root>" edit <member> -b - < <that file>
@@ -4900,6 +4958,7 @@ pub const BRANCHES_FILE: &str = "worker-branches.md";
 /// `branch -d` 를 루트에서 치면 루트의 가지가 아직 그 병합을 안 들어 "not fully merged" 로 거절한다(재 봤다).
 pub fn worker() -> String {
     let rule = indent(&model_rule(), "  ");
+    let detail = indent(DETAIL, "  ");
     let review = make_review("--parent <epic>");
     let close = indent(&close_steps("<review id>", "moai"), "      ");
     let over = indent(REVIEW_OVER_LIMIT, "    ");
@@ -4956,6 +5015,10 @@ said yes to taking over a row that is not yours, say — belongs to the assignme
   has no `EnterWorktree` — give it absolute paths under the worktree and the words of 4-1, 4-2
   and 4-3, and have it name its real model in what it hands back, for 9-1. The epic-end review
   stays as 7 says. `none` — do the work yourself
+- `Writing:` — use the person's value for tracker writing throughout the work.
+
+{detail}
+
 - `Work running alongside:` — the worktrees and work beside you, and the files they hold (4-3)
 - `Root branch:` — `<root branch>`, the branch the root checkout stands on. The supervisor read
   it in the root; do not read it again — read inside a worktree, it gives that worktree's own branch
@@ -5759,7 +5822,7 @@ mod tests {
     #[test]
     fn both_surfaces_carry_the_same_pieces() {
         let (agents, skill, reference) = (agents(), skill(), reference());
-        for piece in [CHEATSHEET, FORKS, NO_GATE, WRITING, CLOSING] {
+        for piece in [CHEATSHEET, FORKS, NO_GATE, WRITING, DETAIL, CLOSING] {
             let head = piece.lines().next().unwrap();
             assert!(agents.contains(piece), "AGENTS 블록에 없다 — {head}");
             assert!(skill.contains(piece), "스킬에 없다 — {head}");
@@ -5772,6 +5835,34 @@ mod tests {
             let head = piece.lines().next().unwrap();
             assert!(agents.contains(piece), "AGENTS 블록에 없다 — {head}");
             assert!(reference.contains(piece), "참고 문서에 없다 — {head}");
+        }
+    }
+
+    #[test]
+    fn the_supervisor_reads_the_writing_detail_each_round() {
+        let s = supervise();
+        assert!(s.contains("moai writing --json"));
+        assert!(s.contains("`<writing>`"));
+        assert!(message().contains(WRITING_SLOT));
+        assert!(plan_brief().contains(DETAILED_BODY));
+        assert!(worker().contains("`Writing:`"));
+        for key in [
+            "model:",
+            "Report-checked:",
+            "Review-ready:",
+            "Regression-of:",
+            "Summary:",
+            "Sent:",
+            "Next:",
+            "report:",
+            "Decided alone:",
+            "Plan stopped:",
+        ] {
+            assert!(DETAIL.contains(key), "{key}");
+        }
+        assert!(DETAIL.contains("moai writing --json"));
+        for value in crate::user_config::DETAILS {
+            assert!(DETAIL.contains(value));
         }
     }
 
@@ -6648,7 +6739,7 @@ stop sending outside work while a release runs",
         }
         // **감독이 채우는 자리만 3 의 이름을 쓴다** — 펼치기가 쓸 자리가 3 의 이름이면 감독이 그것까지 채운다.
         let list = slot_list(&s);
-        let inputs = ["id", "title", "root", "milestone", "due", "person"];
+        let inputs = ["id", "title", "root", "milestone", "due", "person", "writing"];
         for slot in brief.split('<').skip(1).filter_map(|x| x.split_once('>')).map(|(x, _)| x) {
             if list.contains(&format!("`<{slot}>`")) {
                 assert!(inputs.contains(&slot), "펼치기가 쓸 자리 <{slot}> 가 감독이 채우는 3 의 자리다");
