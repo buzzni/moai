@@ -420,9 +420,10 @@ NOTE
   writing them on the issue row would make even reading collide with others.
   Next to the config, <config dir>/read/ holds **one file per project** with
   the issue id and the updated_at of the row you saw - change that row after
-  that and it becomes unread again. What you change yourself is marked read
-  as it is written: `moai edit`, and a plan moved on the explorer's or
-  `moai web`'s gantt. The file name is a hash of the repository root, and
+  that and it becomes unread again. When you edit a row or move its plan on
+  the explorer's or web gantt, its new version is marked read only if its
+  previous version was already read. Unseen changes stay unread. The file
+  name is a hash of the repository root, and
   the path inside it says which root. The old [read] table in the config
   file is still read but never written again.
 
@@ -751,7 +752,8 @@ BACKLOG
   planned days plans that one day. Groups whose bar spans their members are
   not moved — move the members. Neither is a row whose copy the worktree
   overlay took from another worktree; the notice names that worktree. Rows held
-  only in the archive and archive copies of live rows cannot be moved or planned.
+  only in the archive, and archive copies of live rows, cannot be moved or
+  planned.
   When a move is refused (a start after the deadline, a day past the deadline
   above) the refusal is on the banner; a move that went through names the
   `moai edit` line that puts it back. Relative moves undo only the dates moved;
