@@ -1218,6 +1218,11 @@ fn init_plants_the_merge_driver_too() {
         git(root, &["config", "--local", "merge.moai.driver", &command]);
         ok(root, &["init"]);
         assert_eq!(git(root, &["config", "--get", "merge.moai.driver"]), command);
+
+        std::fs::write(&unknown, "#!/bin/sh\necho probe >> probe-count\nexec sleep 30\n").unwrap();
+        ok(root, &["init"]);
+        assert_eq!(git(root, &["config", "--get", "merge.moai.driver"]), command);
+        assert_eq!(std::fs::read_to_string(root.join("probe-count")).unwrap().lines().count(), 2);
     }
 
     // **`--no-driver` 는 `.git/config` 를 안 건드린다.**
