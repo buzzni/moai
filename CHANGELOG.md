@@ -12,11 +12,17 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
-## [0.34.0] - 2026-10-29
-
 ### Added
 
 - Claude Code gains `moai-plan` for interviews and detailed plans, and `effort_plan` configures planning effort (default `xhigh`). (moai-ns7a)
+
+### Changed
+
+- The supervisor passes `effort_plan` to its planning agent and carries planned review focus into the epic review. (moai-ns7a)
+
+## [0.34.0] - 2026-10-29
+
+### Added
 
 - Web list rows tint completed work pale green; Gantt labels use matching tints for in-progress, review, and completed work. (moai-skjr)
 - Plans accept the fullwidth `＠` as a date marker, with the same escaping rules as `@`. A plan
@@ -24,8 +30,6 @@ does not tag — see `CONTRIBUTING.md`.
   not one; write `\＠` to keep it as text. (moai-uwi9.kr5)
 
 ### Changed
-
-- The supervisor passes `effort_plan` to its planning agent and carries planned review focus into the epic review. (moai-ns7a)
 
 - `moai ready` orders equal-priority work by the earliest deadline it follows, including open ancestors. (moai-uwi9.rff)
 - Your own `moai edit`, and a plan you move on the explorer's or `moai web`'s gantt, marks the row you
