@@ -10011,3 +10011,6 @@
 {"ts":"2026-10-29T16:18:07Z","id":"moai-9bxw.stu","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"v0.34.0 이 나갔다: PR #59 머지(e9c164e3), 태그 v0.34.0, release·smoke 성공, GitHub 릴리스 자산 7, Discord 소식 잡 성공. milestone/moai-u86x 워크트리·가지·빌드 출력을 걷었다."}
 {"ts":"2026-10-29T16:18:07Z","id":"moai-9bxw.stu","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"v0.34.0 릴리스 완료"}
 {"ts":"2026-10-29T16:18:16Z","id":"moai-ns7a","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Report-checked: 5a56081e1eb61ba4dcaf0d7f695d3e50425fa904"}
+{"ts":"2026-10-29T16:21:43Z","id":"moai-5cru","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"v0.35.0 릴리스"}
+{"ts":"2026-10-29T16:21:43Z","id":"moai-5cru.kyi","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"v0.35.0 을 develop 에 들이고 판을 올려 낸다"}
+{"ts":"2026-10-29T16:21:44Z","id":"moai-5cru.kyi","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
