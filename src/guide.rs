@@ -4925,7 +4925,7 @@ Writing: <writing>
    {MILESTONE_CLEAR}
    moai -C "<root>" edit <epic> --due <due>
    A refusal because the day is later than the milestone's leaves the epic as it stands.
-4. Give the epic a detailed body with the bundle, decisions, promises, order, shared files and review focus from the shared instructions; retain the backlog context already carried onto it. Give every member a body the worker can start from, as `Writing:` says. `detailed`: these
+4. Give the epic a detailed body with the bundle, decisions, promises, order, shared files and review focus from the shared instructions; combine it with the backlog context already carried onto it in a scratch file and write that combined body with `moai -C "<root>" edit <epic> -b - < <epic body file>`. Give every member a body the worker can start from, as `Writing:` says. `detailed`: these
    headings, each a list —
    {DETAILED_BODY}.
    `brief`: what to change · where (file and function) · how to test it. A design question the
