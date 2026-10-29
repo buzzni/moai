@@ -351,6 +351,14 @@ impl App {
         self.site.origin.branch(&self.site.issues[at].id)
     }
 
+    /// Only rows present in the live snapshot can be dragged. Age-based archive
+    /// visibility is separate: an old completed row can still be live.
+    fn live_for_drag(&self, at: usize) -> bool {
+        self.site.repo.as_ref().is_none_or(|repo| {
+            repo.read().is_ok_and(|load| load.issues.iter().any(|i| i.id == self.site.issues[at].id))
+        })
+    }
+
     /// 그 줄의 계획을 옮겨 쓴다. 못 옮기면(날이 없다·멤버에서 센 막대다) 까닭을 알림으로 댄다 — 조용히 먹으면 키가
     /// 고장 난 것으로 보인다.
     pub(super) fn shift_plan(&mut self, at: usize, edge: Edge, days: i64) {
@@ -443,7 +451,7 @@ impl App {
             moai_gantt::Hit::Label { row } => self.move_to(row),
             moai_gantt::Hit::Bar { row, part } => {
                 self.move_to(row);
-                if let Some(i) = self.here_at(&rows, row).filter(|&i| self.elsewhere(i).is_none()) {
+                if let Some(i) = self.here_at(&rows, row).filter(|&i| self.elsewhere(i).is_none() && self.live_for_drag(i)) {
                     let id = self.site.issues[i].id.clone();
                     let c = col(at.x);
                     let filled_start = filled_start(&self.site.issues[i], edge_of(part), &self.zone);
@@ -884,8 +892,38 @@ mod tests {
         assert_eq!(std::fs::read(dir.join("side/.moai/issues.jsonl")).unwrap(), side_before);
     }
 
-    /// **`<`·`>` 는 막대를, `{`·`}` 는 시작만 하루 옮겨 쓴다**(moai-i4hf.9xi). 알림이 되돌리는 명령을 대고, 시작이 기한을
-    /// 넘는 쓰기는 거절되어 디스크가 그대로다. 날 없는 줄과 멤버에서 센 묶음은 까닭을 대고 안 쓴다.
+    #[test]
+    fn archive_only_bar_cannot_start_a_drag() {
+        use ratatui::crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind as K};
+        let (dir, mut a) = on_disk("archive-drag");
+        let mut archived = make("argos-0099", Kind::Issue);
+        archived.status = Status::new("done");
+        archived.status_since = "2026-09-01T00:00:00Z".into();
+        archived.done_at = Some("2026-09-01T00:00:00Z".into());
+        archived.starts_on = Some("2026-10-20".into());
+        archived.due_on = Some("2026-10-24".into());
+        crate::archive::append(&dir, &[archived], &cfg()).unwrap();
+        a.reload();
+        a.view.show_archived = true;
+        a.view.hidden.clear();
+        a.see();
+        a.hit("SPC g g");
+        let _ = draw::tests::render(&mut a, 160, 30);
+        let area = a.drawn.chart.unwrap();
+        let laid = moai_gantt::Layout::of(area, &a.chart);
+        let rows = a.rows();
+        let n = ids(&a).iter().position(|s| s == "argos-0099").unwrap();
+        let chart = a.chart_of(&rows, 0..0, &|_, _| ratatui::text::Line::default());
+        let (start, end) = moai_gantt::bar_cells(&a.chart, chart.rows[n].planned.unwrap());
+        let y = laid.dates_body.y + (n - a.chart.first_row) as u16;
+        for cell in [start, (start + end) / 2, end - 1] {
+            let x = laid.dates_body.x + cell as u16;
+            a.mouse(MouseEvent { kind: K::Down(MouseButton::Left), column: x, row: y, modifiers: KeyModifiers::NONE });
+            assert_eq!(on(&a), "argos-0099");
+            assert!(a.chart_drag.is_none());
+        }
+    }
+
     #[test]
     fn nudging_writes_the_plan_and_names_the_undo() {
         let (dir, mut a) = on_disk("nudge");
