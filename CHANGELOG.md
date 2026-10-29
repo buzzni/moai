@@ -14,6 +14,7 @@ does not tag — see `CONTRIBUTING.md`.
 
 ### Added
 
+- Web list rows tint completed work pale green; Gantt labels use matching tints for in-progress, review, and completed work. (moai-skjr)
 - Plans accept the fullwidth `＠` as a date marker, with the same escaping rules as `@`. A plan
   title ending in `＠` and a digit, such as `＠3F`, is now read as a date and refused when it is
   not one; write `\＠` to keep it as text. (moai-uwi9.kr5)

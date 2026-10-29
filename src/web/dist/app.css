@@ -79,11 +79,18 @@
   --warn-soft: color-mix(in srgb, var(--warn) 12%, var(--bg));
   --border-soft: color-mix(in srgb, var(--border) 65%, transparent);
   --review: color-mix(in srgb, #a855f7 70%, var(--text));
-  /* A list row in progress or in review (list.css): paler than --warn-soft, so a search mark still shows on it. */
+  /* A list or Gantt row in progress, review or done: paler than --warn-soft, so a list search mark still shows on it. */
   --progress-soft: color-mix(in srgb, #F2B01E 7%, var(--bg));
   --review-soft: color-mix(in srgb, #a855f7 8%, var(--bg));
+  --done-soft: color-mix(in srgb, #10B981 7%, var(--bg));
   --epic: color-mix(in srgb, var(--accent) 70%, var(--muted));
 }
+
+/* Keep a selected done row distinct in the dark theme. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) { --done-soft: color-mix(in srgb, #10B981 3%, var(--bg)); }
+}
+:root[data-theme="dark"] { --done-soft: color-mix(in srgb, #10B981 3%, var(--bg)); }
 
 /* Base. */
 * { box-sizing: border-box; }
@@ -489,6 +496,9 @@ body.m-resizing:is([data-resize="bottom"], [data-resize="top"]) { cursor: row-re
 .g-rows { position: relative; }
 /* Rows and lanes stand at their line number (top, set by the view): only the ones near the window are nodes. */
 .g-row { position: absolute; left: 0; right: 0; display: flex; align-items: center; gap: 8px; height: 28px; padding: 0 8px; white-space: nowrap; cursor: default; }
+.g-row[data-status="in_progress"]:not([aria-selected="true"]):not(:hover) { background: var(--progress-soft); }
+.g-row[data-status="review"]:not([aria-selected="true"]):not(:hover) { background: var(--review-soft); }
+.g-row[data-status="done"]:not([aria-selected="true"]):not(:hover) { background: var(--done-soft); }
 .g-row:hover { background: var(--hover); }
 .g-row[aria-selected="true"] { background: var(--selected); }
 .g-row[aria-selected="true"]::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 2px; background: var(--accent); }
@@ -627,6 +637,7 @@ svg.links polygon { fill: var(--link); }
 
 .moai-list-body > .m-row[data-status="in_progress"]:not([aria-selected="true"]):not(:hover) { background: var(--progress-soft); }
 .moai-list-body > .m-row[data-status="review"]:not([aria-selected="true"]):not(:hover) { background: var(--review-soft); }
+.moai-list-body > .m-row[data-status="done"]:not([aria-selected="true"]):not(:hover) { background: var(--done-soft); }
 
 /*
  * Rendered markdown (view/markdown.ts). Flat: borders only, tokens only. Needs tokens.css.
