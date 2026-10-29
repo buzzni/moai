@@ -235,6 +235,7 @@ fn isolated(program: impl AsRef<std::ffi::OsStr>) -> Command {
 }
 
 /// Prepend a test directory while preserving the inherited OS-native PATH.
+#[cfg(unix)]
 fn path_with(dir: &Path) -> std::ffi::OsString {
     let inherited = std::env::var_os("PATH").unwrap_or_default();
     std::env::join_paths(std::iter::once(dir.to_path_buf()).chain(std::env::split_paths(&inherited)))
