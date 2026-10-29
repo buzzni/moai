@@ -1346,12 +1346,17 @@ enum Probe {
     Unknown,
 }
 
-/// 재는 부름을 기다리는 한도. 넘기면 죽이고 [`Probe::Unknown`] 이다.
+/// 재는 부름을 기다리는 한도. 넘기면 죽이고 [`Probe::Unknown`] 이다 — 심는 결정만 한 번 더 잰다([`probe_settled`]).
 ///
 /// **알림 하나 때문에 `moai status` 가 멈추지 않는다.** 여기 도는 것은 이 도구가 안 쓴 명령이고,
 /// `moai status` 는 세션이 여는 화면이자 훅의 `UserPromptSubmit` 보드다(`cmd/hook.rs`) — 그 명령
 /// 하나가 잠들면 사람의 다음 프롬프트가 글자 한 줄 없이 함께 잠든다. `--help` 는 이 기계에서
 /// 9ms 였으니 2초는 느린 기계와 찬 캐시에도 넉넉하고, 넘긴 판은 **어차피 말할 것이 없다.**
+///
+/// **알림은 한 번만 잰다**(리뷰 moai-uwi9.j8c). 다시 재기(moai-uwi9.b75)를 [`probe`] 에 두던 판은 잠드는 드라이버를 심은
+/// 저장소에서 `moai status`·훅의 보드·한눈 보기의 프로젝트마다·`init --check` 를 4초씩 붙들고도 같은 침묵을 냈다(이 기계에서
+/// 4,062ms 대 2,039ms) — 알림의 `Unknown` 은 입을 다무는 자리라 둘째 잼이 바꿀 말이 없다. [`told`] 가 git 에게 두 번 안 묻는
+/// 까닭(한도를 두 번 쓴다)과 같다.
 ///
 /// **알림에서는 그 앞의 git 물음 셋도 이 한도를 쓴다**(moai-59k3.u09) — `check-attr`([`declared`])와
 /// 심은 줄을 읽는 `config` 둘이다. 한도가 `probe` 하나에만 있던 때는 git 이 답하지 않는 프로젝트
@@ -1435,6 +1440,8 @@ pub(crate) const PROBE_BUDGET: std::time::Duration = std::time::Duration::from_s
 /// | 그 밖의 비영 | `Alien` |
 /// | 그 밖의 못 띄움·시간 넘김·신호에 맞아 죽음 | `Unknown`(입을 다문다) |
 ///
+/// 시간 넘김만은 심는 결정([`probe_settled`])이 한 번 더 잰다 — 나머지 `Unknown` 은 다시 재지 않는다.
+///
 /// **`ENOEXEC` 가 `Unknown` 인 것은 일부러다.** git 은 심은 줄을 `sh -c` 로 돌리고, 껍데기는
 /// 샤뱅 없는 파일을 제 스크립트로 읽어 **멀쩡히 돌린다** — 여기서 곧바로 exec 하는 이쪽만 막힌다.
 /// 그것을 `Dead` 로 읽으면 git 이 잘 돌리는 래퍼를 "안 돈다" 고 부르게 되고, 걷을 길이 없다.
@@ -1447,13 +1454,38 @@ pub(crate) const PROBE_BUDGET: std::time::Duration = std::time::Duration::from_s
 /// 쓸 것과 꼭 같지는 않지만, 이름으로 심은 것은 그만큼만 믿는 것이 맞다.
 #[cfg(unix)]
 fn probe(root: &Path, cmd: &str) -> Probe {
+    probe_once(root, cmd).unwrap_or(Probe::Unknown)
+}
+
+/// [`probe`] 를 **심는 결정에서** — 시간을 넘긴 판은 한 번 더 잰다(moai-uwi9.b75, 2026-10-29 사용자 결정).
+///
+/// macOS 는 막 복사한 실행 파일의 첫 실행을 검사하느라 늦어(release 0.3~0.5초, debug 1~1.5초, 부하 아래서 더) 한도를 넘길
+/// 수 있다. 그 `Unknown` 이 [`chosen_command`] 에서는 지금 바이너리(워크트리의 `target/`)를 심게 하고 [`plant_for_init`] 에서는
+/// 멀쩡한 `--as` 줄을 다시 쓰게 했다. 둘째도 `Unknown` 이면 [`plant_for_init`] 은 선 줄을 그대로 둔다.
+///
+/// **다시 재는 것은 시간 넘김뿐이다** — 못 띄운 것·신호에 맞아 죽은 것은 한 번 더 불러도 같은 말을 할 판이 많다. 알림([`told`])은
+/// 이것을 안 쓴다([`PROBE_BUDGET`]). 첫 판의 아이와 받을 자리는 둘째 판을 띄우기 전에 거두고 치운다([`probe_once`]).
+#[cfg(unix)]
+fn probe_settled(root: &Path, cmd: &str) -> Probe {
+    probe_once(root, cmd).or_else(|| probe_once(root, cmd)).unwrap_or(Probe::Unknown)
+}
+
+/// 유닉스가 아닌 판의 [`probe_settled`] — [`probe`] 가 재지 않으니 다시 잴 것도 없다.
+#[cfg(not(unix))]
+fn probe_settled(root: &Path, cmd: &str) -> Probe {
+    probe(root, cmd)
+}
+
+/// 한 번 잰다 — **`None` 은 [`PROBE_BUDGET`] 을 넘긴 판 하나다**(아이는 죽이고 거뒀다). 나머지 갈래는 다 답을 낸다.
+#[cfg(unix)]
+fn probe_once(root: &Path, cmd: &str) -> Option<Probe> {
     use std::io::ErrorKind;
     use std::process::{Command, Stdio};
     let has_dir = cmd.contains('/') || cmd.contains(std::path::MAIN_SEPARATOR);
     let program = if has_dir { root.join(cmd) } else { std::path::PathBuf::from(cmd) };
     // **못 열면 안 잰다** — 도움말을 못 받아 놓고 "제 이름을 안 댔다" 로 읽으면 멀쩡한
     // 드라이버가 `Alien` 이 된다. 못 잰 것은 말하지 않는 자리다.
-    let Some((said, sink)) = Said::new() else { return Probe::Unknown };
+    let Some((said, sink)) = Said::new() else { return Some(Probe::Unknown) };
     let spawned = Command::new(program)
         .args([SUB, "--help"])
         .current_dir(root)
@@ -1464,12 +1496,12 @@ fn probe(root: &Path, cmd: &str) -> Probe {
     let mut child = match spawned {
         Ok(c) => c,
         // 이 둘만 그 **자리**에 대한 말이다.
-        Err(e) if matches!(e.kind(), ErrorKind::NotFound | ErrorKind::PermissionDenied) => return Probe::Dead,
+        Err(e) if matches!(e.kind(), ErrorKind::NotFound | ErrorKind::PermissionDenied) => return Some(Probe::Dead),
         // 나머지는 기계가 막은 것이다 — 멀쩡한 자리를 "썩었다" 고 부르지 않는다.
-        Err(_) => return Probe::Unknown,
+        Err(_) => return Some(Probe::Unknown),
     };
-    let Some(st) = reaped(&mut child) else { return Probe::Unknown };
-    match st.code() {
+    let st = reaped(&mut child)?;
+    Some(match st.code() {
         // **0 으로 끝난 것만으로는 모자라다**(moai-wwbi, 2026-09-21 사용자 결정). 모르는 인자를
         // 흘려 듣고 0 을 내는 래퍼(`#!/bin/sh` 두 줄짜리)는 `merge-driver` 를 모른 채 그대로
         // 지나갔고, 그 저장소의 매 병합이 말없이 내려앉는다. 도움말에 제 이름이 서는지까지 본다.
@@ -1481,7 +1513,7 @@ fn probe(root: &Path, cmd: &str) -> Probe {
         Some(_) => Probe::Alien,
         // 신호에 맞아 죽었다(유닉스에서만 선다) — OOM 킬러가 가장 흔하다.
         None => Probe::Unknown,
-    }
+    })
 }
 
 /// 유닉스가 아닌 판의 [`probe`].
@@ -1580,7 +1612,7 @@ fn reaped(child: &mut std::process::Child) -> Option<std::process::ExitStatus> {
 /// 바이너리가 심긴다 — 틀리는 값은 **덜 이르는 쪽**이라야 하고, 그쪽은 이 워크트리를 지울 때만
 /// 썩지만 앞쪽은 조용히 옛 알고리즘으로 합친다.
 ///
-/// 바이트가 같아도 [`probe`] 가 `Runs` 라야 한다 — 그 자리가 실제로 돌아야 심는 뜻이 있다.
+/// 바이트가 같아도 [`probe_settled`] 가 `Runs` 라야 한다 — 그 자리가 실제로 돌아야 심는 뜻이 있다.
 fn chosen_command(here: &Path) -> Result<String, String> {
     // **까닭은 자료로 낸다** — 부르는 두 자리(`install` 과 `plant_for_init`)가 저마다 제 말로
     // 편다(moai-uzgp). 여기서 글을 지으면 이 함수가 화면 말을 알아야 한다.
@@ -1604,7 +1636,11 @@ fn chosen_command(here: &Path) -> Result<String, String> {
         return Ok(spelt(&mine));
     }
     let word = spelt(&found);
-    if same_bytes(&found, &mine) && matches!(probe(here, &word), Probe::Runs) { Ok(word) } else { Ok(spelt(&mine)) }
+    if same_bytes(&found, &mine) && matches!(probe_settled(here, &word), Probe::Runs) {
+        Ok(word)
+    } else {
+        Ok(spelt(&mine))
+    }
 }
 
 /// 두 파일이 **바이트째 같은가** — 못 읽으면 거짓이다(모르면 덜 이르는 쪽).
@@ -1701,7 +1737,9 @@ fn git_said(e: crate::git::Error) -> String {
 pub(crate) enum Planting {
     /// 이 저장소는 드라이버를 안 쓴다 — 선언이 없거나(`.gitattributes`), git 저장소가 아니다.
     Off,
-    /// 이미 지금 판의 줄이 서 있다. 아무것도 안 썼다.
+    /// 이미 지금 판의 줄이 서 있다 — **또는 선 줄의 명령을 재고도 몰랐다**(`Probe::Unknown`, 시간 넘김은 두 번 잰다 —
+    /// moai-uwi9.b75). 어느 쪽이든 아무것도 안 썼다. 뒤의 판은 줄의 모양을 안 고친다 — `--json` 은 `current` 라고 말하지만
+    /// 그 줄이 옛 모양일 수 있다.
     Already,
     /// 심었다 — 적은 명령.
     Planted(String),
@@ -1741,21 +1779,22 @@ pub(crate) fn plant_for_init(root: &Path) -> Planting {
     if !declared(root, None) {
         return Planting::Off;
     }
-    // **먼저 선 줄을 본다.** 여기서 물러나면 [`chosen_command`] 의 두 부름(`--version`·[`probe`])
-    // 도 안 띄운다 — 이미 도는 저장소에서 `init` 이 가장 흔하게 지나는 길이다.
+    // **먼저 선 줄을 본다.** 여기서 물러나면 [`chosen_command`] 의 부름([`probe_settled`])도 안 띄운다 —
+    // 이미 도는 저장소에서 `init` 이 가장 흔하게 지나는 길이다.
     let planted = crate::git::run(root, &["config", "--local", "--get", &driver_key()]).unwrap_or_default();
     let planted = planted.trim();
-    if let Some(word) = planted_word(planted)
-        && matches!(probe(root, &word), Probe::Runs)
-    {
-        if planted == driver_command(&word) {
-            // 이미 지금 판의 줄이다 — `init` 은 한 일을 한 대로 말한다.
-            return Planting::Already;
+    if let Some(word) = planted_word(planted) {
+        match probe_settled(root, &word) {
+            Probe::Unknown => return Planting::Already,
+            Probe::Runs if planted == driver_command(&word) => return Planting::Already,
+            Probe::Runs => {
+                return match plant_config(root, &word) {
+                    Ok(_) => Planting::Planted(word),
+                    Err(why) => Planting::Failed(why),
+                };
+            }
+            Probe::Alien | Probe::Dead => {}
         }
-        return match plant_config(root, &word) {
-            Ok(_) => Planting::Planted(word),
-            Err(why) => Planting::Failed(why),
-        };
     }
     let cmd = match chosen_command(root) {
         Ok(c) => c,
@@ -3006,9 +3045,23 @@ mod tests {
         let clock = std::time::Instant::now();
         // `exec` 로 갈아 끼운다 — 껍데기가 `sleep` 을 따로 띄우면 죽이는 것은 껍데기뿐이라
         // 시험이 끝난 뒤에도 30초짜리가 남는다(죽이기가 바로 아래 자식까지인 까닭, 위의 글).
-        let slow = write("느리다", "#!/bin/sh\nexec sleep 30\n");
+        let tally = dir.join("느린-부름");
+        let slow = write(
+            "느리다",
+            &format!("#!/bin/sh\necho x >> {}\nexec sleep 30\n", crate::text::shell_word(&tally.display().to_string())),
+        );
         assert!(matches!(at(&slow), Probe::Unknown), "늦은 것을 재고 말았다");
         assert!(clock.elapsed() < PROBE_BUDGET * 3, "한도를 안 지켰다 — {:?}", clock.elapsed());
+        // **알림의 잼은 한 번이다**(리뷰 moai-uwi9.j8c) — 다시 재면 `moai status` 를 한도의 두 배로 붙든다.
+        assert_eq!(std::fs::read_to_string(&tally).unwrap().lines().count(), 1, "알림이 늦은 것을 두 번 쟀다");
+
+        // A cold executable times out once, then answers on its second invocation — the planting decisions ask again.
+        let marker = crate::text::shell_word(&dir.join("probe-retried").display().to_string());
+        let cold = write(
+            "cold",
+            &format!("#!/bin/sh\nif [ ! -e {marker} ]; then touch {marker}; exec sleep 30; fi\necho merge-driver\n"),
+        );
+        assert!(matches!(probe_settled(dir, &cold.display().to_string()), Probe::Runs));
 
         // **손자가 살아 있어도 제 시간에 돌아온다**(리뷰). 도움말을 파이프로 받던 판은 아이를
         // 거둔 **뒤에** 그 파이프를 읽어, 아이가 물려준 쓰기 끝을 손자가 쥐고 있으면 거기서

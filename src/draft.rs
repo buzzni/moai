@@ -18,8 +18,9 @@
 //! `@2026-10-30` 은 기한, `@2026-10-25~2026-10-30` 은 시작~기한, `@2026-10-25~` 은 시작만. `@` 뒤가
 //! 숫자(또는 `~` 와 숫자)일 때만 날짜로 읽는다: `@raven` 같은 끝 낱말은 제목이다. 꼴이 틀리거나 시작이 기한보다 뒤면
 //! 줄 번호와 거절한다 — 시작 자리를 비운 `@~2026-10-30` 도 받지 않고 거절한다(제목에 말없이 남기지 않는다).
+//! 전각 `＠`(U+FF20)도 같은 표식이다(moai-uwi9.kr5) — `＠2026-10-30` 은 기한이고, 제목의 글자면 `\＠…` 로 적는다.
 //!
-//! **이스케이프는 네 자리뿐이다** — 앞머리 `\[` 와 끝쪽에 이어진 `\#낱말`(moai-a5pz)·`\@숫자…`(moai-ghkp.u1w),
+//! **이스케이프는 네 자리뿐이다** — 앞머리 `\[` 와 끝쪽에 이어진 `\#낱말`(moai-a5pz)·`\@숫자…`(moai-ghkp.u1w, `\＠숫자…` 도),
 //! 그리고 템플릿 변수로 안 읽힐 글자 `\{{`(moai-xqxu). `{{` 바로 앞의 역슬래시는 쌍으로 센다 — `\\{{이름}}` 은 글자
 //! 역슬래시 하나와 변수다(moai-nqk5). 오타(`[P1]`·`[x]`)는 조용히 제목이 되지 않고 전처럼 줄
 //! 번호와 거절한다.
@@ -56,7 +57,7 @@ pub fn at_form(start: Option<&str>, due: Option<&str>) -> Option<String> {
     }
 }
 
-/// 끝 낱말이 날짜 자리인가 — `@` 뒤가 숫자다. 읽는 자와 되뽑는 자가 이 하나로 가른다.
+/// 끝 낱말이 날짜 자리인가 — 표식(`@`·`＠`) 뒤가 숫자다([`due_part`]). 읽는 자와 되뽑는 자가 이 하나로 가른다.
 ///
 /// 전각 숫자로 시작하는 낱말도 날짜 자리로 본다 — 날짜로 풀지 못하면 제목에 남기지 않고 거절한다.
 ///
@@ -64,9 +65,16 @@ pub fn at_form(start: Option<&str>, due: Option<&str>) -> Option<String> {
 /// 낱말이 말없이 제목에 남아 기한만 적으려던 줄이 기한 없이 만들어진다(종료 0). 날짜 자리로 보면 [`split_parts`] 가
 /// 빈 시작을 꼴 틀림으로 줄 번호와 거절하고, 그 글자를 제목으로 쓰려면 다른 날짜 낱말처럼 `\@~…` 로 적는다.
 fn is_due_word(w: &str) -> bool {
-    w.strip_prefix('@')
-        .map(|d| d.strip_prefix('~').unwrap_or(d))
-        .is_some_and(|d| d.starts_with(|c: char| c.is_ascii_digit() || ('０'..='９').contains(&c)))
+    due_part(w).is_some()
+}
+
+/// 날짜 자리인 끝 낱말의 **표식 뒤 글**(`2026-10-25~2026-10-30` 따위) — 날짜 자리가 아니면 `None`. 표식은 `@` 와 전각 `＠`
+/// (U+FF20, moai-uwi9.kr5)다. **표식 목록은 여기 하나다**(리뷰 moai-uwi9.j8c) — 읽는 자([`split_parts`])가 제 목록으로 표식을
+/// 다시 떼고 `unwrap` 하던 판은 [`is_due_word`] 에만 더한 표식 하나가 거절이 아니라 패닉이 되는 자리였다.
+fn due_part(w: &str) -> Option<&str> {
+    let date = w.strip_prefix(['@', '＠'])?;
+    let first = date.strip_prefix('~').unwrap_or(date);
+    first.starts_with(|c: char| c.is_ascii_digit() || ('０'..='９').contains(&c)).then_some(date)
 }
 
 /// 떼어 낸 한 줄 — 제목·우선순위·태그·기한·시작.
@@ -112,12 +120,12 @@ fn split_parts(raw: &str, n: usize, lang: Lang) -> Result<Parts, String> {
     let mut start: Option<String> = None;
     let mut dated = false;
     while let Some((head, last)) = rest.rsplit_once(char::is_whitespace) {
-        if is_due_word(last) {
+        if let Some(date) = due_part(last) {
             // `@시작~기한`·`@시작~`·`@기한` — `~` 앞이 시작이고 뒤가 기한이다. 비어 있는 쪽은 그쪽이 없다는 뜻이다.
-            let (first, second) = match last[1..].split_once('~') {
+            let (first, second) = match date.split_once('~') {
                 Some((a, "")) => (Some(a), None),
                 Some((a, b)) => (Some(a), Some(b)),
-                None => (None, Some(&last[1..])),
+                None => (None, Some(date)),
             };
             if [first, second].into_iter().flatten().any(|d| crate::model::parse_date(d).is_none()) {
                 return Err(say_fill(say(lang, "draft.not_a_due"), &[("line", &at()), ("due", last)]));
@@ -551,6 +559,25 @@ mod tests {
             let task = issue(&format!("task {word}"), Kind::Issue, None, &[]);
             assert_eq!(one(&render(&epic, &[&task]))[1].title, task.title);
         }
+    }
+
+    #[test]
+    fn fullwidth_at_dates_and_escaped_titles_round_trip() {
+        let parsed = one("# epic ＠2026-10-31\n- task ＠2026-10-25~2026-10-30\n");
+        assert_eq!(parsed[0].due.as_deref(), Some("2026-10-31"));
+        assert_eq!((parsed[1].start.as_deref(), parsed[1].due.as_deref()), (Some("2026-10-25"), Some("2026-10-30")));
+        for word in ["＠２０２６-10-30", "＠~2026-10-30", "＠2026-02-30"] {
+            assert!(parse(&format!("# epic\n- task {word}\n")).is_err());
+            let task = issue(&format!("task {word}"), Kind::Issue, None, &[]);
+            let epic = issue("epic", Kind::Epic, None, &[]);
+            assert_eq!(one(&render(&epic, &[&task]))[1].title, task.title);
+        }
+        assert!(parse("# epic\n- task @2026-10-30 ＠2026-10-31\n").is_err());
+        // A valid date kept as title text comes back as text, and `\＠` keeps the fullwidth sign (review moai-uwi9.j8c).
+        let task = issue("task ＠2026-10-30", Kind::Issue, None, &[]);
+        let back = one(&render(&issue("epic", Kind::Epic, None, &[]), &[&task]));
+        assert_eq!((back[1].title.as_str(), back[1].due.as_deref()), ("task ＠2026-10-30", None));
+        assert_eq!(one("# epic\n- 회의 \\＠3층\n")[1].title, "회의 ＠3층");
     }
 
     /// **`@` 는 시작~기한 꼴도 받는다**(moai-xf0p.due) — `@시작~기한`, `@시작~`(시작만), `@기한`(전처럼). 에픽 줄과

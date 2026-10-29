@@ -3244,11 +3244,27 @@ pub struct DueLadder<'m, 'a> {
 
 impl<'m, 'a> DueLadder<'m, 'a> {
     pub fn over(lines: &'m Lines<'a>, epic_of: &'m Handing<'a>) -> DueLadder<'m, 'a> {
+        Self::over_with_stones(lines, epic_of, None)
+    }
+
+    fn over_with_stones(
+        lines: &'m Lines<'a>,
+        epic_of: &'m Handing<'a>,
+        stones: Option<&BTreeMap<&'a str, &'a str>>,
+    ) -> DueLadder<'m, 'a> {
         // 미룬 줄이 없으면 걷지 않는다. 있을 때도 지도를 한 번만 짓고, 천장이 될 기한 든 줄만 잰다.
         // `Shelf` 를 써야 미룬 마일스톤 밑의 에픽·부모 기한도 함께 빠진다(제 `deferred_at` 만 보면 남는다).
         let off = if lines.by_id.values().any(|i| is_put_off(i)) {
-            let stones = lines.by_id.iter().filter_map(|(id, i)| epic_of.stood(i, lines).map(|m| (*id, m))).collect();
-            let shelf = Shelf::new(lines, epic_of, &stones);
+            let built;
+            let stones = match stones {
+                Some(stones) => stones,
+                None => {
+                    built =
+                        lines.by_id.iter().filter_map(|(id, i)| epic_of.stood(i, lines).map(|m| (*id, m))).collect();
+                    &built
+                }
+            };
+            let shelf = Shelf::new(lines, epic_of, stones);
             lines
                 .by_id
                 .values()
@@ -4545,18 +4561,27 @@ impl<'a> Picking<'a> {
         // **같은 `p`·같은 자리(마일스톤 안팎) 안에서는 기한이 이른 것이 먼저다**(moai-ghkp.7uy) — 기한 없는 줄은
         // 뒤다. 읽을 때만 재고 저장하지 않는다: `moai due apply` 가 우선순위를 올리기 전의 틈을 이 차례가 메운다.
         // **마일스톤 안인가 뒤에 선다**(리뷰) — AGENTS 블록의 약속("`p0` 이 먼저고 마일스톤이 둘째다")이 차례에도
-        // 서야 한다. 그 앞에 두던 판은 1년 뒤 날을 든 밖의 `p0` 이 도는 마일스톤 안의 `p0` 을 앞질렀다. 자는
-        // `--sort due` 와 한 벌이다([`crate::query::due_order`]).
+        // 서야 한다. 그 앞에 두던 판은 1년 뒤 날을 든 밖의 `p0` 이 도는 마일스톤 안의 `p0` 을 앞질렀다. 기한은
+        // **따르는 기한**이다(moai-uwi9.rff) — `due apply` 와 같은 자([`followed`]·[`DueLadder::open_ceiling`])로 잰다.
         let pct = |i: &Issue| group.at(i).and_then(|e| self.progress.get(e)).copied().unwrap_or(0);
-        out.sort_by(|a, b| {
-            let (pa, pb) = (pct(a), pct(b));
-            a.priority()
-                .cmp(&b.priority())
-                .then_with(|| inside(b).cmp(&inside(a)))
-                .then_with(|| crate::query::due_order(a, b))
-                .then_with(|| pb.cmp(&pa))
-                .then_with(|| a.created_at.cmp(&b.created_at))
-                .then_with(|| a.id.cmp(&b.id))
+        // 마일스톤 지도는 **지은 판에만 빌린다**([`Ties::epics_only`] 는 `None`) — 그때는 사다리가 저 지도를 안 읽는다(미룬 줄이
+        // 없다). 빈 지도를 "지었다" 로 건네면 두 문이 갈리는 날 미룬 마일스톤의 기한이 말없이 차례에 든다.
+        let ladder = self
+            .issues
+            .iter()
+            .any(|i| i.deadline().is_some())
+            .then(|| DueLadder::over_with_stones(self.ties.lines(), group, self.ties.stones.as_ref()));
+        out.sort_by_cached_key(|&i| {
+            let due = followed(i.deadline(), ladder.as_ref().and_then(|l| l.open_ceiling(i))).map(|(d, _)| d);
+            (
+                i.priority(),
+                !inside(i),
+                due.is_none(),
+                due,
+                std::cmp::Reverse(pct(i)),
+                i.created_at.as_str(),
+                i.id.as_str(),
+            )
         });
         outside.sort_by(|a, b| a.priority().cmp(&b.priority()).then_with(|| a.id.cmp(&b.id)));
         (out, Focus { running: running.to_vec(), outside })
@@ -5852,7 +5877,10 @@ pub fn status_in<'a>(
     // 산 줄만 든 문맥이라 [`Soil`] 의 지도가 곧 쓰기가 재는 지도다 — 기한의 위계를 재려고 다시 안 짓는다.
     // **기한 든 줄이 없으면 안 빌린다**(리뷰) — [`status_of_context`] 와 같은 문이다. 빌리면 뒤처진 우선순위를 재는
     // 자리가 열린 줄마다 조상을 걷고 늘 `None` 을 받는다 — 훅이 도구 호출마다 이 자리를 지난다.
-    let ladder = issues.iter().any(|i| i.due_on.is_some()).then(|| DueLadder::over(&soil.lines, &soil.epic));
+    let ladder = issues
+        .iter()
+        .any(|i| i.due_on.is_some())
+        .then(|| DueLadder::over_with_stones(&soil.lines, &soil.epic, Some(&soil.milestone)));
     status_in_scope(issues, unreadable, cfg, now, soil, soil.stands(issues, cfg), &|_| true, ladder.as_ref())
 }
 
@@ -8077,6 +8105,46 @@ mod tests {
         let got: Vec<&str> = ready(&issues, &cfg()).iter().map(|i| i.id.as_str()).collect();
         // p0 → 50% 에픽 멤버 → 0% 에픽 멤버
         assert_eq!(got, ["argos-000d", "argos-000b", "argos-000c"], "{got:?}");
+    }
+
+    #[test]
+    fn ready_orders_by_followed_deadline() {
+        let mut epic = make("argos-0001", Kind::Epic, "todo");
+        epic.due_on = Some("2026-10-30".into());
+        let inherited = member("argos-000a", "argos-0001", "todo");
+        let mut later = make("argos-000b", Kind::Issue, "todo");
+        later.due_on = Some("2027-01-01".into());
+        let rows = vec![epic, later, inherited];
+        let ids: Vec<_> = ready(&rows, &cfg()).iter().map(|i| i.id.as_str()).collect();
+        assert_eq!(ids, ["argos-000a", "argos-000b"]);
+    }
+
+    #[test]
+    fn ready_follows_open_parents_and_milestones_but_not_closed_parents() {
+        let mut stone = make("argos-m001", Kind::Milestone, "todo");
+        stone.due_on = Some("2026-10-31".into());
+        let mut epic = make("argos-0001", Kind::Epic, "todo");
+        epic.milestone = Some(stone.id.clone());
+        let mut parent = member("argos-000a", "argos-0001", "todo");
+        parent.due_on = Some("2026-10-29".into());
+        let mut child = make("argos-000a.abc", Kind::Issue, "todo");
+        child.priority = Some(0);
+        let mut outside = make("argos-000b", Kind::Issue, "todo");
+        outside.priority = Some(0);
+        outside.due_on = Some("2026-10-30".into());
+        let mut rows = vec![stone, epic, parent, child, outside];
+        let ids = |rows: &[Issue]| ready(rows, &cfg()).iter().map(|i| i.id.clone()).collect::<Vec<_>>();
+        assert_eq!(ids(&rows), ["argos-000a.abc", "argos-000b"]);
+        rows[2].status = Status::new("done");
+        // Both are p0, but a running milestone still sorts before outside work.
+        // Test the closed-parent deadline directly without the milestone focus.
+        let unfocused =
+            |rows: &[Issue]| Picking::of(rows, &cfg()).picks(false).0.iter().map(|i| i.id.clone()).collect::<Vec<_>>();
+        assert_eq!(unfocused(&rows), ["argos-000b", "argos-000a.abc"]);
+        // The milestone's 2026-10-31 decides once the outside row is due later (review moai-uwi9.j8c) — without it
+        // the child would follow no deadline at all and sort last.
+        rows[4].due_on = Some("2026-11-01".into());
+        assert_eq!(unfocused(&rows), ["argos-000a.abc", "argos-000b"]);
     }
 
     /// 마일스톤 하나와 그 안의 에픽·멤버, 그리고 밖에 선 일 둘(`p2`·`p0`).
