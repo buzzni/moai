@@ -427,7 +427,7 @@ session (8), in that order:
 
     cmux --id-format both new-split right --surface "$CMUX_SURFACE_ID" --command 'cd "<cwd>" && claude --resume <sessionId>'
 
-**No other flag**, and keep the double quotes around `<cwd>` inside the single ones;
+If `<cwd>` contains `!`, do not build this command: tell the person the path and sessionId, because the destination interactive shell can expand it. **No other flag**, and keep the double quotes around `<cwd>` inside the single ones;
 write each `'` in the path as `'\''` there. It prints `OK surface:<n> (<UUID>) workspace:<n> (<UUID>)` — the first UUID
 is the new tab, the second your workspace. The command is typed into the tab's shell, so the
 shell stays when `claude` exits, and the split does not take focus. **If cmux refuses a split**
@@ -456,6 +456,8 @@ Neither way above stands: open nothing. Print, per session in the same order, th
 person types in a terminal of their own, and under it the block to paste once its box shows:
 
     cd "<cwd>" && claude --resume <sessionId>
+
+If `<cwd>` contains `!`, do not print this command: tell the person the path and sessionId so they can quote it themselves. The destination is an interactive shell, which can expand `!` even inside double quotes.
 
 A Saycode session gets the line of 8 instead.
 

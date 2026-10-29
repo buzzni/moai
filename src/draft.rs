@@ -65,6 +65,7 @@ pub fn at_form(start: Option<&str>, due: Option<&str>) -> Option<String> {
 /// 빈 시작을 꼴 틀림으로 줄 번호와 거절하고, 그 글자를 제목으로 쓰려면 다른 날짜 낱말처럼 `\@~…` 로 적는다.
 fn is_due_word(w: &str) -> bool {
     w.strip_prefix('@')
+        .or_else(|| w.strip_prefix('＠'))
         .map(|d| d.strip_prefix('~').unwrap_or(d))
         .is_some_and(|d| d.starts_with(|c: char| c.is_ascii_digit() || ('０'..='９').contains(&c)))
 }
@@ -114,10 +115,11 @@ fn split_parts(raw: &str, n: usize, lang: Lang) -> Result<Parts, String> {
     while let Some((head, last)) = rest.rsplit_once(char::is_whitespace) {
         if is_due_word(last) {
             // `@시작~기한`·`@시작~`·`@기한` — `~` 앞이 시작이고 뒤가 기한이다. 비어 있는 쪽은 그쪽이 없다는 뜻이다.
-            let (first, second) = match last[1..].split_once('~') {
+            let date = last.strip_prefix('@').or_else(|| last.strip_prefix('＠')).unwrap();
+            let (first, second) = match date.split_once('~') {
                 Some((a, "")) => (Some(a), None),
                 Some((a, b)) => (Some(a), Some(b)),
-                None => (None, Some(&last[1..])),
+                None => (None, Some(date)),
             };
             if [first, second].into_iter().flatten().any(|d| crate::model::parse_date(d).is_none()) {
                 return Err(say_fill(say(lang, "draft.not_a_due"), &[("line", &at()), ("due", last)]));
@@ -551,6 +553,20 @@ mod tests {
             let task = issue(&format!("task {word}"), Kind::Issue, None, &[]);
             assert_eq!(one(&render(&epic, &[&task]))[1].title, task.title);
         }
+    }
+
+    #[test]
+    fn fullwidth_at_dates_and_escaped_titles_round_trip() {
+        let parsed = one("# epic ＠2026-10-31\n- task ＠2026-10-25~2026-10-30\n");
+        assert_eq!(parsed[0].due.as_deref(), Some("2026-10-31"));
+        assert_eq!((parsed[1].start.as_deref(), parsed[1].due.as_deref()), (Some("2026-10-25"), Some("2026-10-30")));
+        for word in ["＠２０２６-10-30", "＠~2026-10-30", "＠2026-02-30"] {
+            assert!(parse(&format!("# epic\n- task {word}\n")).is_err());
+            let task = issue(&format!("task {word}"), Kind::Issue, None, &[]);
+            let epic = issue("epic", Kind::Epic, None, &[]);
+            assert_eq!(one(&render(&epic, &[&task]))[1].title, task.title);
+        }
+        assert!(parse("# epic\n- task @2026-10-30 ＠2026-10-31\n").is_err());
     }
 
     /// **`@` 는 시작~기한 꼴도 받는다**(moai-xf0p.due) — `@시작~기한`, `@시작~`(시작만), `@기한`(전처럼). 에픽 줄과

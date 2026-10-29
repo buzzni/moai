@@ -933,8 +933,8 @@ column, it is running. There is no command that opens it and no new field.
   for you, not a refusal. What is already picked up is simply finished — the same ground as never taking work back late
 - If two milestones are running, both are inside, and the ordering within them is as it always was (`p` · age)
 - **Within one `p` the nearer deadline comes first**, whether a milestone runs or not, and a
-  row with none comes last. It is the row's own deadline — an epic's or a milestone's moves
-  none of its members. Where a milestone runs, its work still comes before outside work of the same `p`
+  row with none comes last. It follows the earliest deadline of the row, its milestone, epic,
+  and open parents, as `due apply` does. Where a milestone runs, its work still comes before outside work of the same `p`
 - **A setup with only two columns has no running milestone** — there is no column
   that says "started but not finished", so the rule itself does not stand. In that
   setup `ready` and the board are as they were"#;
@@ -4248,7 +4248,7 @@ asked you for it. On a yes, for each:
     cmux --id-format both new-split right --surface "$CMUX_SURFACE_ID" --command 'cd "<root>" && claude --model <model>'
 
 `<root>` is the `root dir` of the supervisor's 2 and `<model>` the model picked in 2-1. **No
-other flag** on `claude`. Keep the double quotes around `<root>` inside the single ones;
+other flag** on `claude`. If `<root>` contains `!`, do not build this command: tell the person the path, because the destination interactive shell can expand it. Keep the double quotes around `<root>` inside the single ones;
 write each `'` in the path as `'\''` there. It prints `OK surface:<n> (<UUID>) workspace:<n> (<UUID>)` — the first
 UUID is the new surface, the second your workspace. `--command` is typed into the new tab's
 shell, so the shell stays when `claude` exits and what it said stays readable, and the split
@@ -4351,7 +4351,7 @@ Ask once before opening new tabs, as above. On a yes, open an ordinary interacti
 
     cmux --id-format both new-split right --surface "$CMUX_SURFACE_ID" --command 'cd "<root>" && codex --model <codex>'
 
-Keep the double quotes around `<root>` inside the single ones; write each `'` in the path
+If `<root>` contains `!`, do not build this command: tell the person the path, because the destination interactive shell can expand it. Keep the double quotes around `<root>` inside the single ones; write each `'` in the path
 as `'\''` there. Keep the returned surface UUID. The same split refusal rule applies: stop opening and tell
 the person. Read its startup screen in a separate call; folder trust, hooks trust and any
 permission prompt belong to the person. The first assignment can use a verified fresh box.
@@ -4682,7 +4682,7 @@ session (8), in that order:
 
     cmux --id-format both new-split right --surface "$CMUX_SURFACE_ID" --command 'cd "<cwd>" && claude --resume <sessionId>'
 
-**No other flag**, and keep the double quotes around `<cwd>` inside the single ones;
+If `<cwd>` contains `!`, do not build this command: tell the person the path and sessionId, because the destination interactive shell can expand it. **No other flag**, and keep the double quotes around `<cwd>` inside the single ones;
 write each `'` in the path as `'\''` there. It prints `OK surface:<n> (<UUID>) workspace:<n> (<UUID>)` — the first UUID
 is the new tab, the second your workspace. The command is typed into the tab's shell, so the
 shell stays when `claude` exits, and the split does not take focus. **If cmux refuses a split**
@@ -4711,6 +4711,8 @@ Neither way above stands: open nothing. Print, per session in the same order, th
 person types in a terminal of their own, and under it the block to paste once its box shows:
 
     cd "<cwd>" && claude --resume <sessionId>
+
+If `<cwd>` contains `!`, do not print this command: tell the person the path and sessionId so they can quote it themselves. The destination is an interactive shell, which can expand `!` even inside double quotes.
 
 A Saycode session gets the line of 8 instead.
 
@@ -9800,9 +9802,12 @@ stop sending outside work while a release runs",
         assert!(!dead.contains("in 7 or 8"), "cwd 가 안 드는 Saycode 의 줄까지 거둔다");
         let cmux = cmux();
         for heading in ["## No idle worker left", "### Open a Codex worker"] {
+            assert!(section(&cmux, heading).contains("contains `!`"));
             assert!(section(&cmux, heading).contains(r"'\''"));
         }
         assert!(section(&recover(), "## 6. Inside cmux — open a tab each").contains(r"'\''"));
+        assert!(section(&recover(), "## 6. Inside cmux — open a tab each").contains("contains `!`"));
+        assert!(section(&recover(), "## 7. Outside tmux and cmux — say what to type").contains("contains `!`"));
     }
 
     #[test]
