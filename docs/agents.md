@@ -97,7 +97,8 @@ out), `codex`, `antigravity` or `auto` — and can be repeated.
     `git rm --cached -- .claude/moai-plugin/.claude-plugin/marketplace.json`.
     Once that is committed, every other clone loses the file on its next pull
     (git deletes a file another commit stopped tracking); run `moai skill install`
-    there once to write it back
+    there once to write it back. `moai skill status` warns when the planted plugin
+    is missing that file; its JSON output carries `market_missing`
 - **Codex and Antigravity read the same `.agents/skills/`** in the repository, so
   naming either writes it for both. There is nothing to register — commit the
   directory and the team has the skills. `--scope` does not apply to them, and
@@ -700,7 +701,10 @@ every session in it, so when to update is yours.
   cmux the map asks `cmux top` which surface each live session runs in — a
   worker `cmux claude-teams` started gets its tab too: the tmux its record names
   is the stand-in's answer, not a tmux pane. Every cmux call names that surface
-  by its UUID, `--surface <UUID>`
+  by its UUID, `--surface <UUID>`. A Claude session under screen, tmux or
+  zellij inside the tab gets no surface: typing to the tab could reach a different
+  window. The current ancestry check can also suppress a normal tab if cmux
+  itself was launched under tmux or screen; moai-5a28 tracks that limitation
 - **A label on the tab.** Once a round it asks whether worker tabs should carry
   labels; on a yes it names the tab `<worker> <id>` (`cmux rpc tab.action`,
   action `rename`), and takes the name off once the report is checked (action
@@ -922,7 +926,7 @@ worker's line is written by the supervisor.
   where an incoming message waits for its person's approval — look at that
   window
 
-Decided in: moai-2w0s moai-hxma moai-0zjo moai-nqdc moai-bl3x moai-gelm moai-tllo moai-mdzx moai-xs2h moai-h8tn moai-snyk moai-u5wr moai-b6cw moai-ew4o moai-dhxm moai-ml0d moai-nas5 moai-kxkw moai-dj4j moai-54yc moai-bkn4 moai-084j moai-keka moai-zynt moai-j9nf moai-jtvp moai-obxm moai-six5 moai-iu73 moai-r0x8 moai-u99i moai-uqf7 moai-p5sz moai-xpa8 moai-9tqo moai-pxui moai-uzhx moai-wk7i moai-jdwk moai-1m21 moai-d1zn
+Decided in: moai-2w0s moai-hxma moai-0zjo moai-nqdc moai-bl3x moai-gelm moai-tllo moai-mdzx moai-xs2h moai-h8tn moai-snyk moai-u5wr moai-b6cw moai-ew4o moai-dhxm moai-ml0d moai-nas5 moai-kxkw moai-dj4j moai-54yc moai-bkn4 moai-084j moai-keka moai-zynt moai-j9nf moai-jtvp moai-obxm moai-six5 moai-iu73 moai-r0x8 moai-u99i moai-uqf7 moai-p5sz moai-xpa8 moai-9tqo moai-pxui moai-uzhx moai-wk7i moai-jdwk moai-1m21 moai-d1zn moai-xvvr
 
 ## Archive storage
 
