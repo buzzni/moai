@@ -424,6 +424,21 @@ mod tests {
     }
 
     #[test]
+    fn rows_only_has_identical_json_to_the_complete_chart_rows() {
+        let mut issue = row("argos-0001", Kind::Issue, "in_progress");
+        issue.started_at = Some("2026-10-18T23:30:00Z".into());
+        issue.due_on = Some("2026-10-30".into());
+        let all = [issue];
+        let cfg = cfg();
+        let index = Index::of(&all);
+        let wh = Where::of(&all, &cfg);
+        let zone = Zone::utc();
+        let full = gantt(&all, &index, &wh, &cfg, NOW, &zone);
+        let only = rows(&all, &index, &wh, &cfg, NOW, &zone);
+        assert_eq!(serde_json::to_vec(&full.rows).unwrap(), serde_json::to_vec(&only).unwrap());
+    }
+
+    #[test]
     fn shared_range_context_matches_filtered_ranges() {
         let mut open = row("argos-0001", Kind::Issue, "in_progress");
         open.started_at = Some("2026-10-18T23:30:00Z".into());
