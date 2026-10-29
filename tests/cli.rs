@@ -1208,6 +1208,18 @@ fn init_plants_the_merge_driver_too() {
     assert!(!said.contains("머지 드라이버를 심었다"), "일부러 고른 줄을 덮었다\n{said}");
     assert_eq!(git(root, &["config", "--get", "merge.moai.driver"]), pinned, "일부러 고른 줄이 바뀌었다");
 
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let unknown = root.join("unknown-driver");
+        std::fs::write(&unknown, "#!/bin/sh\nkill -9 $$\n").unwrap();
+        std::fs::set_permissions(&unknown, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let command = format!("{} merge-driver %O %A %B %L %P", unknown.display());
+        git(root, &["config", "--local", "merge.moai.driver", &command]);
+        ok(root, &["init"]);
+        assert_eq!(git(root, &["config", "--get", "merge.moai.driver"]), command);
+    }
+
     // **`--no-driver` 는 `.git/config` 를 안 건드린다.**
     let other = s.path().join("옆");
     std::fs::create_dir_all(&other).unwrap();

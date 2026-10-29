@@ -1447,6 +1447,11 @@ pub(crate) const PROBE_BUDGET: std::time::Duration = std::time::Duration::from_s
 /// 쓸 것과 꼭 같지는 않지만, 이름으로 심은 것은 그만큼만 믿는 것이 맞다.
 #[cfg(unix)]
 fn probe(root: &Path, cmd: &str) -> Probe {
+    probe_attempt(root, cmd, true)
+}
+
+#[cfg(unix)]
+fn probe_attempt(root: &Path, cmd: &str, retry: bool) -> Probe {
     use std::io::ErrorKind;
     use std::process::{Command, Stdio};
     let has_dir = cmd.contains('/') || cmd.contains(std::path::MAIN_SEPARATOR);
@@ -1468,7 +1473,9 @@ fn probe(root: &Path, cmd: &str) -> Probe {
         // 나머지는 기계가 막은 것이다 — 멀쩡한 자리를 "썩었다" 고 부르지 않는다.
         Err(_) => return Probe::Unknown,
     };
-    let Some(st) = reaped(&mut child) else { return Probe::Unknown };
+    let Some(st) = reaped(&mut child) else {
+        return if retry { probe_attempt(root, cmd, false) } else { Probe::Unknown };
+    };
     match st.code() {
         // **0 으로 끝난 것만으로는 모자라다**(moai-wwbi, 2026-09-21 사용자 결정). 모르는 인자를
         // 흘려 듣고 0 을 내는 래퍼(`#!/bin/sh` 두 줄짜리)는 `merge-driver` 를 모른 채 그대로
@@ -1745,17 +1752,18 @@ pub(crate) fn plant_for_init(root: &Path) -> Planting {
     // 도 안 띄운다 — 이미 도는 저장소에서 `init` 이 가장 흔하게 지나는 길이다.
     let planted = crate::git::run(root, &["config", "--local", "--get", &driver_key()]).unwrap_or_default();
     let planted = planted.trim();
-    if let Some(word) = planted_word(planted)
-        && matches!(probe(root, &word), Probe::Runs)
-    {
-        if planted == driver_command(&word) {
-            // 이미 지금 판의 줄이다 — `init` 은 한 일을 한 대로 말한다.
-            return Planting::Already;
+    if let Some(word) = planted_word(planted) {
+        match probe(root, &word) {
+            Probe::Unknown => return Planting::Already,
+            Probe::Runs if planted == driver_command(&word) => return Planting::Already,
+            Probe::Runs => {
+                return match plant_config(root, &word) {
+                    Ok(_) => Planting::Planted(word),
+                    Err(why) => Planting::Failed(why),
+                };
+            }
+            Probe::Alien | Probe::Dead => {}
         }
-        return match plant_config(root, &word) {
-            Ok(_) => Planting::Planted(word),
-            Err(why) => Planting::Failed(why),
-        };
     }
     let cmd = match chosen_command(root) {
         Ok(c) => c,
@@ -3009,6 +3017,14 @@ mod tests {
         let slow = write("느리다", "#!/bin/sh\nexec sleep 30\n");
         assert!(matches!(at(&slow), Probe::Unknown), "늦은 것을 재고 말았다");
         assert!(clock.elapsed() < PROBE_BUDGET * 3, "한도를 안 지켰다 — {:?}", clock.elapsed());
+
+        // A cold executable times out once, then answers on its second invocation.
+        let marker = crate::text::shell_word(&dir.join("probe-retried").display().to_string());
+        let cold = write(
+            "cold",
+            &format!("#!/bin/sh\nif [ ! -e {marker} ]; then touch {marker}; exec sleep 30; fi\necho merge-driver\n"),
+        );
+        assert!(matches!(at(&cold), Probe::Runs));
 
         // **손자가 살아 있어도 제 시간에 돌아온다**(리뷰). 도움말을 파이프로 받던 판은 아이를
         // 거둔 **뒤에** 그 파이프를 읽어, 아이가 물려준 쓰기 끝을 손자가 쥐고 있으면 거기서
