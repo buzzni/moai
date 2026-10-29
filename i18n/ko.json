@@ -871,7 +871,7 @@
   "skill.row_install": "설치",
   "skill.row_hook": "훅",
   "skill.market_listed": "`{market}` 등록됨",
-  "skill.market_missing": "  ! {path} 파일이 없다. moai skill install 로 다시 만든다",
+  "skill.market_missing": "  ! {path} 파일이 없다 — `moai skill install` 이 다시 쓴다",
   "skill.market_unlisted": "`{market}` 등록 안 됨",
   "skill.market_elsewhere": "`{market}` 이 다른 자리({at}) 를 가리킨다",
   "skill.market_escape_here": "    그 자리를 이제 안 쓰면 `claude plugin marketplace remove {market}` 뒤에 `moai skill install`",

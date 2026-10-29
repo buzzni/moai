@@ -22471,14 +22471,50 @@ fn skill_status_reports_a_missing_marketplace_without_failing() {
     assert!(text(&status(true)).contains("\"market_missing\":false"));
     std::fs::remove_file(&market).unwrap();
     let out = status(false);
+    // 그 한 줄로 잰다 — `moai skill install` 은 `.agents` 줄 같은 다른 줄도 대니, 낱말만 찾으면 줄이 없어도 지나간다.
     assert!(
-        out.status.success() && text(&out).contains("marketplace.json") && text(&out).contains("moai skill install"),
+        out.status.success()
+            && text(&out)
+                .lines()
+                .any(|l| l.contains("marketplace.json 파일이 없다") && l.contains("`moai skill install`")),
         "{}",
         text(&out)
     );
     assert!(text(&status(true)).contains("\"market_missing\":true"));
     assert!(c.run(s.path(), &["skill", "install"], true).status.success());
     assert!(text(&status(true)).contains("\"market_missing\":false"));
+}
+
+/// **추적을 푸는 명령은 트래커 뿌리를 `-C` 로 겨눈다**(moai-xvvr.qt8, 리뷰 moai-r2nn.38g 10번) — `.moai` 가 모노레포 하위에
+/// 서면 그 줄의 자리는 하위에서 센 것이라, 맨 `git rm --cached -- <자리>` 를 git 뿌리에서 치면 없는 파일을 가리킨다.
+/// 낸 명령을 git 뿌리에서 그대로 쳐서 추적이 풀리는지 잰다.
+#[cfg(unix)]
+#[test]
+fn the_untrack_command_for_a_committed_marketplace_works_from_the_git_root() {
+    let s = Scratch::new("market-tracked-monorepo");
+    git(s.path(), &["init", "-q", "."]);
+    let sub = s.path().join("sub");
+    std::fs::create_dir(&sub).unwrap();
+    ok(&sub, &["init", "argos", "--no-driver"]);
+    let c = Claude::new("market-tracked-monorepo-home");
+    // 가짜 `claude` 의 PATH 에는 git 이 없다 — 추적을 재는 `git ls-files` 가 돌게 git 의 자리를 더한다.
+    let git_dir = std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())
+        .find(|d| d.join("git").is_file())
+        .expect("PATH 에 git 이 없다");
+    let path = std::env::join_paths([c.bin.clone(), c.home.path().join("sysbin"), git_dir]).unwrap();
+    let install = || c.command(Path::new(BIN), &sub, &["skill", "install"], true).env("PATH", &path).output().unwrap();
+    let first = install();
+    assert!(first.status.success(), "{}", text(&first));
+    let rel = "sub/.claude/moai-plugin/.claude-plugin/marketplace.json";
+    git(s.path(), &["add", "-f", "--", rel]);
+    let said = text(&install());
+    let command = said
+        .lines()
+        .find_map(|l| l.split_once("추적을 푼다: ").map(|(_, c)| c.to_string()))
+        .unwrap_or_else(|| panic!("추적을 푸는 명령을 안 냈다\n{said}"));
+    let ran = isolated("sh").arg("-c").arg(&command).current_dir(s.path()).output().unwrap();
+    assert!(ran.status.success(), "{command}\n{}", text(&ran));
+    assert_eq!(git(s.path(), &["ls-files", "--", rel]), "", "{command} 가 추적을 못 풀었다");
 }
 
 /// **`status` 는 훅 파일을 그 파일이 부르는 moai 로 견준다**(리뷰 moai-u5wr.e74) — Claude 의 줄이 설치본의 훅이 부르는
@@ -29548,7 +29584,7 @@ fn init_slow_git_does_not_hide_linked_dotfile_notices() {
     )
     .unwrap();
     std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
-    let path = format!("{}:{}", bin.display(), std::env::var("PATH").unwrap());
+    let path = path_with(&bin);
     let clock = std::time::Instant::now();
     let out = staged(&["status", "--json"]).env("PATH", &path).current_dir(s.path()).output().unwrap();
     let js = String::from_utf8_lossy(&out.stdout);

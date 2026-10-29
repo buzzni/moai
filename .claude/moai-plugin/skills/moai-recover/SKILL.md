@@ -170,7 +170,9 @@ for path in sorted(glob.glob(os.path.expanduser("~/.claude/sessions/*.json"))):
         if not here or here != device(out("tmux", "display", "-p", "-t", pane, "#{pane_tty}")):
             pane = ""
     elif alive and cmux:
-        pane = "" if (told and not told.startswith("cmux:")) or nested_multiplexer(pid) else surfaces.get(pid)
+        pane = surfaces.get(pid)
+        if (told and not told.startswith("cmux:")) or (pane and nested_multiplexer(pid)):
+            pane = ""
     rows.append((alive, pane, r))
 if rows and not any(alive for alive, _, _ in rows):
     sys.exit("no record reads alive, not even this session's own: this shell cannot read process start times (a sandbox, or no ps), so act on no row")

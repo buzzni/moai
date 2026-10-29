@@ -34,6 +34,8 @@ struct Place {
     /// 심을 수 있는 스킬의 글 전부 — 두 트리가 이 한 벌에서 저마다 고른다([`skill::picked`]). 부르는 자리마다
     /// [`skill::skills`] 를 다시 지으면 `guide` 의 글 넷을 명령 한 번에 몇 벌씩 짓는다.
     all: Vec<skill::Skill>,
+    /// `files` 를 지은 스킬의 `all` 속 자리 — `status` 가 훅이 부르는 다른 실행 파일로 같은 트리를 다시 지을 때 고른 것을
+    /// 다시 고르지 않는다. 자리로 드는 것은 `all` 을 빌린 참조를 같은 구조체에 둘 수 없어서다.
     selected: Vec<usize>,
     /// Claude 의 트리에 심는 선택 스킬 이름 — `all` 에서 고른 스킬로(moai-3r7l), `files` 가 그것으로
     /// 지어진다. 심을 선택 스킬은 지금 그 트리에 심긴 것에 고른 것을 더하고 뺀 것이다([`Pick::kept`]).
@@ -792,7 +794,8 @@ fn claude_install(ctx: &Ctx, place: Place, reg: Reg, dry_run: bool) -> R<(serde_
 pub fn status(ctx: &Ctx) -> R<Vec<String>> {
     let Place { root, dir, market, prefix, exe, on_path, files, all, selected, optional, written, .. } =
         place(ctx, &Pick::default())?;
-    let market_missing = written && !dir.join(".claude-plugin").join(skill::MARKET_FILE).is_file();
+    let market_file = dir.join(".claude-plugin").join(skill::MARKET_FILE);
+    let market_missing = written && !market_file.is_file();
     let want = skill::version_in(&files).unwrap_or_default();
     let listed = known_at(&market);
     let clash = listed.clone().filter(|other| !crate::user_config::same_dir(other, &dir));
@@ -925,10 +928,7 @@ pub fn status(ctx: &Ctx) -> R<Vec<String>> {
         out.push(fill(say(lang, "skill.market_escape_here"), &[("market", &market)]));
     }
     if market_missing {
-        out.push(fill(
-            say(lang, "skill.market_missing"),
-            &[("path", &dir.join(".claude-plugin").join(skill::MARKET_FILE).display().to_string())],
-        ));
+        out.push(fill(say(lang, "skill.market_missing"), &[("path", &market_file.display().to_string())]));
     }
     let install_row = say(lang, "skill.row_install");
     if installs.is_empty() {

@@ -871,7 +871,7 @@
   "skill.row_install": "install",
   "skill.row_hook": "hook",
   "skill.market_listed": "`{market}` registered",
-  "skill.market_missing": "  ! {path} is missing; run moai skill install to restore it",
+  "skill.market_missing": "  ! {path} is missing — `moai skill install` writes it again",
   "skill.market_unlisted": "`{market}` not registered",
   "skill.market_elsewhere": "`{market}` points somewhere else ({at})",
   "skill.market_escape_here": "    once you are done with that place, `claude plugin marketplace remove {market}` and then `moai skill install`",

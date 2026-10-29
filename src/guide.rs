@@ -2987,9 +2987,14 @@ subject — that has actually happened. So in the root, supervisor and worker al
 ///   (옛 판, 닿지 않는 소켓, 샌드박스) stderr 에 한 줄을 남긴다 — 모든 칸의 `-` 가 "cmux 탭 밖" 이 아니라 "cmux 가 답하지
 ///   않았다" 임을 읽는 쪽이 가르게(리뷰 moai-p5sz.tkn). 짝이 부르는 프로세스(`ps`·`tmux`·`cmux`)는 모두 10초에 끊는다 —
 ///   응답 없는 소켓 하나가 짝 전체를, 그것을 부른 감독의 차례까지 세운다
-/// - **한 칸을 둘이 대면 둘 다 `-` 다**(리뷰 moai-p5sz.tkn) — cmux 의 다리는 물려받은 환경뿐이라, cmux 탭 안에서 돈
-///   zellij·screen 처럼 기록에 `tmux` 가 안 서는 멀티플렉서의 세션은 모두 그 탭으로 읽히고, 그 탭에 친 것은 앞에 선 세션
-///   하나에만 간다. 확인한 tmux 칸도 같은 잣대다. `interactive` 가 아닌 기록(`ListAgents` 의 `bg`)은 띄운 세션의 탭과
+/// - **조상에 멀티플렉서가 선 세션은 surface 가 없다 — `-` 다**(moai-xvvr.gkr) — cmux 의 다리는 물려받은 환경뿐이라,
+///   cmux 탭 안에서 돈 screen·tmux·zellij 의 세션은 기록에 `tmux` 가 안 서도 그 탭으로 읽히는데, 그 탭에 친 것은 그
+///   멀티플렉서의 앞 창으로 간다. 그래서 surface 를 받은 줄만 `ps` 로 조상의 이름(`comm`)을 거슬러 읽고, 그 이름이
+///   멀티플렉서면 `-` 로 낸다. 이름만 읽고 환경은 안 읽는다(moai-p5sz.7q3). surface 가 없는 줄은 거스르지 않는다 —
+///   조상마다 `ps` 를 하나씩 띄우니, 칸을 안 낼 줄에 쓰면 감독의 차례만 늦는다
+/// - **한 칸을 둘이 대면 둘 다 `-` 다**(리뷰 moai-p5sz.tkn) — 위의 이름 표에 없는 감싸개가 같은 탭을 둘에게 대게 해도, 그
+///   탭에 친 것은 앞에 선 세션 하나에만 간다. 일꾼이 하나뿐이면 이 규칙은 못 막는다 — 위의 조상 규칙이 그 몫이다. 확인한
+///   tmux 칸도 같은 잣대다. `interactive` 가 아닌 기록(`ListAgents` 의 `bg`)은 띄운 세션의 탭과
 ///   tty 를 물려받을 뿐 그 입력을 받지 않아, 확인하는 판(tmux·cmux 안)에서는 칸 없이 `-` 다
 ///
 /// **두 산 줄이 대는 칸은 어느 쪽 것도 아니다 — 둘 다 `-` 다**(moai-l244). Saycode 가 띄운 세션의 기록은 `tmux` 에
@@ -3100,7 +3105,9 @@ for path in sorted(glob.glob(os.path.expanduser("~/.claude/sessions/*.json"))):
         if not here or here != device(out("tmux", "display", "-p", "-t", pane, "#{pane_tty}")):
             pane = ""
     elif alive and cmux:
-        pane = "" if (told and not told.startswith("cmux:")) or nested_multiplexer(pid) else surfaces.get(pid)
+        pane = surfaces.get(pid)
+        if (told and not told.startswith("cmux:")) or (pane and nested_multiplexer(pid)):
+            pane = ""
     rows.append((alive, pane, r))
 if rows and not any(alive for alive, _, _ in rows):
     sys.exit("no record reads alive, not even this session's own: this shell cannot read process start times (a sandbox, or no ps), so act on no row")
@@ -8824,7 +8831,7 @@ stop sending outside work while a release runs",
         std::fs::write(nested.join("1.json"), record(me, &start, "nested", None)).unwrap();
         for name in ["screen", "tmux", "zellij"] {
             let override_ps = format!(
-                "real_out = out\ndef out(*cmd, **env):\n    if cmd[0] == 'ps' and cmd[2] == '{me}': return '999998 claude'\n    if cmd[0] == 'ps' and cmd[2] == '999998': return '999999 {name}'\n    if cmd[0] == 'ps' and cmd[2] == '999999': return '1 shell'\n    return real_out(*cmd, **env)\n"
+                "real_out = out\ndef out(*cmd, **env):\n    walk = cmd[0] == 'ps' and 'ppid=' in cmd\n    if walk and cmd[2] == '{me}': return '999998 claude'\n    if walk and cmd[2] == '999998': return '999999 {name}'\n    if walk and cmd[2] == '999999': return '1 shell'\n    return real_out(*cmd, **env)\n"
             );
             let shell = SESSIONS
                 .replace("~/.claude/sessions", &nested.display().to_string())

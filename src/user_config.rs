@@ -4025,6 +4025,21 @@ mod tests {
         );
     }
 
+    /// **받는 낱말마다 제 `Detail` 이 선다**(리뷰 moai-xvvr.6vh) — [`Writing::detail`] 은 모르는 값에서 `unreachable!` 로
+    /// 멈추고, 그것을 부르는 것은 훅(`SessionStart` 의 보드)이다. [`DETAILS`] 에 낱말을 더하고 갈래를 안 더하면 컴파일은
+    /// 지나고 그 값을 고른 사람의 훅이 죽는다 — 그 어긋남을 여기서 잡는다.
+    #[test]
+    fn every_detail_word_reads_as_its_own_detail() {
+        let mut seen = Vec::new();
+        for &word in DETAILS {
+            let mut writing = Writing::default();
+            assert_eq!(writing.put("detail", Some(word), String::new), Ok("detail"), "{word}");
+            let detail = writing.detail();
+            assert!(!seen.contains(&detail), "{word} 가 다른 낱말과 같은 Detail 로 읽힌다");
+            seen.push(detail);
+        }
+    }
+
     #[test]
     fn models_are_read_once_and_warn_in_the_explorer() {
         let dir = scratch("models");

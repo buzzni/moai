@@ -402,16 +402,19 @@ impl Unshown {
     }
 }
 
+/// [`gather_with`] 가 어느 판으로 겹치는가 — 부르는 셋([`gather`]·[`gather_unmarked`]·[`gather_reading`])과 하나씩 짝이다.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum GatherMode {
+    /// 화면 판: [`marks_of`] 를 읽고 부른 자리의 워크트리는 옆으로 안 겹친다.
     Screen,
+    /// [`marks_of`] 를 안 부르고, 부른 자리의 워크트리([`callers`])도 옆으로 그대로 겹친다.
     Unmarked,
+    /// 화면 판에 더해, 겹치지 않은 제 워크트리의 사본을 둘째 값으로 낸다.
     Reading,
 }
 
-/// [`gather`]·[`gather_unmarked`]·[`gather_reading`] 의 몸 — `screen` 이 거짓이면 [`marks_of`] 를 안 부르고, 부른
-/// 자리의 워크트리([`callers`])도 옆으로 그대로 겹친다. `keep_own` 이면 겹치지 않은 그 워크트리의 사본을 둘째 값으로
-/// 낸다(`screen` 일 때만 뜻이 있다 — 아니면 제 워크트리도 옆으로 겹친다).
+/// [`gather`]·[`gather_unmarked`]·[`gather_reading`] 의 몸 — 무엇을 읽고 무엇을 겹치는지는 `mode` 가 고른다
+/// ([`GatherMode`]). 둘째 값은 [`GatherMode::Reading`] 일 때만 차고, 나머지 판에서는 비어 있다.
 fn gather_with(repo: &Repo, worktree: bool, mode: GatherMode) -> crate::fail::R<(Gathered, Vec<Side>)> {
     let screen = mode != GatherMode::Unmarked;
     let keep_own = mode == GatherMode::Reading;
