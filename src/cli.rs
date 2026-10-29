@@ -1091,12 +1091,13 @@ Examples:
   nothing set it. A broken .moai/config.toml leaves the table as your user
   config gives it.
 
-  Model names are strings. review_grade, effort and effort_complex accept
-  low, medium, high, xhigh or max. Invalid values fall back per key and warn;
-  unknown keys warn. written lists the valid, known keys from your user config,
-  repo the ones the repository table set that your config did not, and
-  repo_path that file (null when it set none). The level lines name the roles
-  they pair with. This command only reads; edit the files by hand.")]
+  Model names are strings. review_grade, effort, effort_complex and
+  effort_plan accept low, medium, high, xhigh or max. Invalid values fall back
+  per key and warn; unknown keys warn. written lists the valid, known keys from
+  your user config, repo the ones the repository table set that your config
+  did not, and repo_path that file (null when it set none). The level lines
+  name the roles they pair with. This command only reads; edit the files by
+  hand.")]
     Models,
 
     /// Read how much agents should write
@@ -2522,9 +2523,9 @@ pub enum SkillCmd {
   text is the one Claude gets; the steps that differ per agent are in the
   `moai` skill's \"Words per agent\" table. The supervisor (moai-supervise),
   its hands on tmux panes, cmux tabs and Saycode sessions (moai-tmux,
-  moai-cmux, moai-saycode) and the recovery of sessions that died
-  (moai-recover) are planted for Claude Code only — Codex and Antigravity get
-  no supervisor.
+  moai-cmux, moai-saycode), the recovery of sessions that died
+  (moai-recover) and the planning interview (moai-plan) are planted for
+  Claude Code only — Codex and Antigravity get no supervisor.
 
   Optional skills are planted only where you choose them: today moai-tmux,
   moai-cmux and moai-saycode, the supervisor's hands on tmux panes, on cmux

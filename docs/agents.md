@@ -142,11 +142,12 @@ does not have reads `—`: tell the person and go on. The supervisor skill, its
 tmux, cmux and Saycode companions and the recovery skill, planted for Claude Code only,
 name Claude Code's tools directly.
 
-Four skills are always planted, and three more are yours to choose:
+Five skills are always planted, and three more are yours to choose:
 
     moai              the tracker itself — what to pick up, issues, plans, backlog items
     moai-wiki         keeps this wiki in step with the work
     moai-supervise    Claude Code only: hands piled-up backlog items to workers, one at a time
+    moai-plan         Claude Code only: interviews and drafts plans on the plan model
     moai-recover      Claude Code only: brings back the sessions of the repository that died
     moai-tmux         optional, Claude Code only: the supervisor's hands on the workers' tmux panes
     moai-cmux         optional, Claude Code only: the same on the workers' cmux tabs (cmux 0.65.0 or later)
@@ -154,6 +155,7 @@ Four skills are always planted, and three more are yours to choose:
 
 - **`moai`** is the tracker skill — what an agent reaches for instead of a
   to-do list of its own
+- **`moai-plan`** interviews you, sends a draft to the configured planning model and registers the approved plan. It is planted only for Claude Code.
 - **`moai-wiki`** is followed by the window that did an epic, to fix the page
   that teaches what the epic changed; a person can also call it to sweep
   everything merged since the last release
@@ -412,6 +414,7 @@ codex   = "gpt-6.1-sol"   # a Codex worker
 review_grade   = "xhigh"  # low|medium|high|xhigh|max
 effort         = "medium" # develop, docs, bulk
 effort_complex = "high"   # complex
+effort_plan    = "xhigh"  # plan
 ```
 
 `moai models` shows the table with the defaults marked; `moai models --json` is
@@ -430,7 +433,7 @@ there is named and skipped, and no other command stops on it.
 
 `moai models` marks each line for its own value only. The level lines name the
 roles they pair with — `effort` goes with `develop`, `docs` and `bulk`,
-`effort_complex` with `complex`, `review_grade` with `review`.
+`effort_complex` with `complex`, `effort_plan` with `plan`, `review_grade` with `review`. The supervisor passes `effort_plan` to its planning agent.
 
 ### How much the agents write
 
@@ -929,7 +932,7 @@ worker's line is written by the supervisor.
   where an incoming message waits for its person's approval — look at that
   window
 
-Decided in: moai-2w0s moai-hxma moai-0zjo moai-nqdc moai-bl3x moai-gelm moai-tllo moai-mdzx moai-xs2h moai-h8tn moai-snyk moai-u5wr moai-b6cw moai-ew4o moai-dhxm moai-ml0d moai-nas5 moai-kxkw moai-dj4j moai-54yc moai-bkn4 moai-084j moai-keka moai-zynt moai-j9nf moai-jtvp moai-obxm moai-six5 moai-iu73 moai-r0x8 moai-u99i moai-uqf7 moai-p5sz moai-xpa8 moai-9tqo moai-pxui moai-uzhx moai-wk7i moai-jdwk moai-1m21 moai-d1zn moai-xvvr
+Decided in: moai-2w0s moai-hxma moai-0zjo moai-nqdc moai-bl3x moai-gelm moai-tllo moai-mdzx moai-xs2h moai-h8tn moai-snyk moai-u5wr moai-b6cw moai-ew4o moai-dhxm moai-ml0d moai-nas5 moai-kxkw moai-dj4j moai-54yc moai-bkn4 moai-084j moai-keka moai-zynt moai-j9nf moai-jtvp moai-obxm moai-six5 moai-iu73 moai-r0x8 moai-u99i moai-uqf7 moai-p5sz moai-xpa8 moai-9tqo moai-pxui moai-uzhx moai-wk7i moai-jdwk moai-1m21 moai-d1zn moai-xvvr moai-ns7a
 
 ## Archive storage
 
