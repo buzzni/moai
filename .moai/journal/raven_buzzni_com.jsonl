@@ -9427,3 +9427,7 @@
 {"ts":"2026-10-29T02:14:37Z","id":"moai-0lx6","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"로컬 전용 CLAUDE.local.md 를 세웠다(.git/info/exclude, 커밋 안 함). 사람 요청: 사람에게 읽힐 글은 이 저장소에 선 agy 창의 Gemini low 로 윤문, 창이 없으면 넘어감. 저장소의 \"한국어 글\" 절은 그대로 둔다 — 이 기계에서만 앞선다."}
 {"ts":"2026-10-29T02:14:37Z","id":"moai-0lx6","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 (low — 로컬 글 한 장)"}
 {"ts":"2026-10-29T02:14:37Z","id":"moai-0lx6","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
+{"ts":"2026-10-29T02:16:26Z","id":"moai-0lx6","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"done","to":"todo"}
+{"ts":"2026-10-29T02:16:26Z","id":"moai-0lx6","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-29T02:16:37Z","id":"moai-0lx6","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"사람 요청으로 이슈 본문도 윤문 대상에 넣었다(목록 꼴·줄 머리 꼴은 그대로)."}
+{"ts":"2026-10-29T02:16:37Z","id":"moai-0lx6","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
