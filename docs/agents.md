@@ -307,7 +307,7 @@ The hooks catch the same few places in each agent's session. Each calls
 | When | What happens |
 |---|---|
 | The session starts | A baseline of the warnings is written. After a compaction, what the session was holding is loaded back into it |
-| A person sends a prompt | The `moai status` board is loaded, once per session |
+| A person sends a prompt | The `moai status` board is loaded once per session, under a line saying how much to write |
 | Before a tool call | The five rules below are checked |
 | The turn ends | If the session still holds work, the turn is held once and asks for a [`Next:` note](glossary.md#next-note) for whoever comes after; it is also held when the [warnings](glossary.md#warning) grew. That question has a fixed room: open reviews tied to the held work, and held rows that would close their epic if deferred, get it first; the other held rows fill what is left from the top, those that do not fit are left out whole, and one more line counts them and names `moai prime`, which lists everything held |
 
@@ -430,6 +430,24 @@ there is named and skipped, and no other command stops on it.
 `moai models` marks each line for its own value only. The level lines name the
 roles they pair with — `effort` goes with `develop`, `docs` and `bulk`,
 `effort_complex` with `complex`, `review_grade` with `review`.
+
+### How much the agents write
+
+Set the detail in your user config, or inspect the effective value with `moai writing`
+or `moai writing --json`:
+
+```toml
+[writing]
+detail = "brief" # or "detailed" (the default)
+```
+
+`detailed` asks for context, decisions, steps and acceptance; `brief` asks for the
+essential what, where and next. A repository can recommend a value in its own
+`.moai/config.toml`; your user setting wins. The hook's first board and compacted
+carry name it, the supervisor passes it to workers and planning agents, and the
+installed guidance explains it. Nothing checks text length or changes existing text.
+Machine-readable lines keep their format in either mode. JSON includes `detail`,
+`written`, `repo`, `path` and `repo_path` to identify the effective source.
 
 ### One round
 
@@ -903,7 +921,7 @@ worker's line is written by the supervisor.
   where an incoming message waits for its person's approval — look at that
   window
 
-Decided in: moai-2w0s moai-hxma moai-0zjo moai-nqdc moai-bl3x moai-gelm moai-tllo moai-mdzx moai-xs2h moai-h8tn moai-snyk moai-u5wr moai-b6cw moai-ew4o moai-dhxm moai-ml0d moai-nas5 moai-kxkw moai-dj4j moai-54yc moai-bkn4 moai-084j moai-keka moai-zynt moai-j9nf moai-jtvp moai-obxm moai-six5 moai-iu73 moai-r0x8 moai-u99i moai-uqf7 moai-p5sz moai-xpa8 moai-9tqo moai-pxui moai-uzhx moai-wk7i moai-jdwk moai-1m21
+Decided in: moai-2w0s moai-hxma moai-0zjo moai-nqdc moai-bl3x moai-gelm moai-tllo moai-mdzx moai-xs2h moai-h8tn moai-snyk moai-u5wr moai-b6cw moai-ew4o moai-dhxm moai-ml0d moai-nas5 moai-kxkw moai-dj4j moai-54yc moai-bkn4 moai-084j moai-keka moai-zynt moai-j9nf moai-jtvp moai-obxm moai-six5 moai-iu73 moai-r0x8 moai-u99i moai-uqf7 moai-p5sz moai-xpa8 moai-9tqo moai-pxui moai-uzhx moai-wk7i moai-jdwk moai-1m21 moai-d1zn
 
 ## Archive storage
 
