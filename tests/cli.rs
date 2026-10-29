@@ -1217,11 +1217,11 @@ fn init_plants_the_merge_driver_too() {
         let command = format!("{} merge-driver %O %A %B %L %P", unknown.display());
         git(root, &["config", "--local", "merge.moai.driver", &command]);
         ok(root, &["init"]);
-        assert_eq!(git(root, &["config", "--get", "merge.moai.driver"]), command);
+        assert_eq!(git(root, &["config", "--get", "merge.moai.driver"]).trim_end(), command);
 
         std::fs::write(&unknown, "#!/bin/sh\necho probe >> probe-count\nexec sleep 30\n").unwrap();
         ok(root, &["init"]);
-        assert_eq!(git(root, &["config", "--get", "merge.moai.driver"]), command);
+        assert_eq!(git(root, &["config", "--get", "merge.moai.driver"]).trim_end(), command);
         assert_eq!(std::fs::read_to_string(root.join("probe-count")).unwrap().lines().count(), 2);
     }
 
