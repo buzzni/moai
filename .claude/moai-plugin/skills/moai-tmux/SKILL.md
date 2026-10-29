@@ -77,6 +77,25 @@ def tty(pid):
             return 0
     t = out("ps", "-p", str(pid), "-o", "tty=")
     return device("/dev/" + t) if t.strip("?") else 0
+def nested_multiplexer(pid):
+    # Inspect process names and parents only, never another process's environment.
+    seen = set()
+    while pid > 1 and pid not in seen:
+        seen.add(pid)
+        line = out("ps", "-p", str(pid), "-o", "ppid=", "-o", "comm=")
+        fields = line.split(None, 1)
+        if len(fields) != 2:
+            return True
+        try:
+            pid = int(fields[0])
+        except ValueError:
+            return True
+        name = os.path.basename(fields[1].strip()).lower()
+        if name in ("cmux", "cmux dev"):
+            break
+        if name in ("screen", "tmux", "zellij") or name.startswith("screen-") or name.startswith("tmux:"):
+            return True
+    return False
 mine = os.environ.get("TMUX")
 if mine and mine.startswith("/tmp/cmux-"):
     mine = None
@@ -116,7 +135,9 @@ for path in sorted(glob.glob(os.path.expanduser("~/.claude/sessions/*.json"))):
         if not here or here != device(out("tmux", "display", "-p", "-t", pane, "#{pane_tty}")):
             pane = ""
     elif alive and cmux:
-        pane = "" if told and not told.startswith("cmux:") else surfaces.get(pid)
+        pane = surfaces.get(pid)
+        if (told and not told.startswith("cmux:")) or (pane and nested_multiplexer(pid)):
+            pane = ""
     rows.append((alive, pane, r))
 if rows and not any(alive for alive, _, _ in rows):
     sys.exit("no record reads alive, not even this session's own: this shell cannot read process start times (a sandbox, or no ps), so act on no row")
@@ -409,21 +430,20 @@ no hook stands.
 
 Clear only after its report passed the supervisor's checks and `Report-checked:` is
 written, its work has stopped, and its live Codex process and empty input box are confirmed.
-Use `/new`, with text and Enter in separate calls:
+Use `/clear`, with text and Enter in separate calls:
 
-    tmux send-keys -t <pane> /new
+    tmux send-keys -t <pane> /clear
     tmux capture-pane -p -e -t <pane>
     tmux send-keys -t <pane> Enter
     tmux capture-pane -p -e -t <pane>
 
-Each look is a separate call. The survey found that `/new` and Enter sent together left
-`/new` in the composer. Do not send a fixed number of Enters blindly. If the screen asks
-`Where should the new conversation run?`, read the selection and tell the person which
-pane asks. Even when `Use current Git worktree` is selected, the person handles that menu.
-Read the pane after they choose; confirm the old conversation is gone, the cwd is the same,
-and the fresh composer is empty before sending work. Never choose a new worktree yourself.
-An unexpected menu, question or permission prompt belongs to the person. If `/new` remains
-typed or the result is unclear, stop and tell them — a later Enter could erase the next work.
+Each look is a separate call. Before the Enter, the composer holds `/clear` and nothing
+else — if it does not, stop and tell the person. Do not send a fixed number of Enters blindly.
+Confirm the old conversation is gone, the cwd is the same, and the fresh composer is empty
+before sending work.
+An unexpected menu, question or permission prompt belongs to the person: tell them which
+pane shows it, and read the pane again after they answer. If `/clear` remains typed or the
+result is unclear, stop and tell them — a later Enter could erase the next work.
 
 ### Paste the assignment
 

@@ -2,6 +2,7 @@
 // "Now" is 2026-10-25 14:00 UTC and the zone is UTC, so every position below is a day count at 40px a day.
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
+import { readFileSync } from 'node:fs'
 import { JSDOM } from 'jsdom'
 
 import { panelModule } from './moai-panel-modules.mjs'
@@ -1051,9 +1052,20 @@ test('only the window is drawn: a long list and a multi-year axis at the hour st
   assert.ok(count('.tick') > 0 && count('.tick') < 150, `ticks: ${count('.tick')}`)
   assert.ok(count('.col-we') <= 4, `weekend blocks: ${count('.col-we')}`)
 
+  const header = root.querySelector('.hd2 .tick')
+  const today = root.querySelector('.todayline')
+  const retained = lane(root, 'r010')
+  const retainedRow = root.querySelector('.g-row[data-id="r010"]')
+  top = 12 * 28
+  scrolled()
+  assert.equal(lane(root, 'r010'), retained, 'overlapping lanes are reused')
+  assert.equal(root.querySelector('.g-row[data-id="r010"]'), retainedRow, 'overlapping rows are reused')
+  assert.equal(retainedRow.dataset.status, 'todo')
   // Scrolling down brings the rows in and lets the first go.
   top = 300 * 28 + 44
   scrolled()
+  assert.equal(root.querySelector('.hd2 .tick'), header)
+  assert.equal(root.querySelector('.todayline'), today)
   assert.ok(lane(root, 'r300') && !lane(root, 'r000'))
   assert.equal(lane(root, 'r300').style.top, `${300 * 28}px`)
   assert.equal(root.querySelector(`.g-row[data-id="r300"]`).style.top, `${300 * 28}px`)
@@ -1068,8 +1080,10 @@ test('only the window is drawn: a long list and a multi-year axis at the hour st
   assert.ok(count('.tick') < 150, `ticks: ${count('.tick')}`)
   const lefts = [...root.querySelectorAll('.hd2 .tick')].map((node) => px(node, 'left'))
   assert.ok(lefts.every((x) => x > box.scrollLeft - 3000 && x < box.scrollLeft + 4000), 'no tick far from the view')
+  const grid = root.querySelector('.g-row[data-id="r399"]')
   box.scrollLeft = 0
   scrolled()
+  assert.equal(root.querySelector('.g-row[data-id="r399"]'), grid)
   assert.equal(lane(root, 'r399').querySelector('.b-plan'), null, 'a bar far from the view is not a node')
   assert.ok(lane(root, 'r399').querySelector('.mk.clip:not([hidden])'), 'its mark says it lies off to the side')
 })
@@ -1273,5 +1287,28 @@ test('a capped filled start previews from the creation day in the page zone when
     await tick()
   } finally {
     clock.zone = oldZone
+  }
+})
+
+test('gantt row status tints follow refreshed data and preserve selection and hover', () => {
+  const rows = [...ROWS, { id: 'review', title: 'Review', status: 'review' }]
+  const index = indexOf(rows)
+  const { root, view } = mount(null, index)
+  const node = id => root.querySelector(`.g-row[data-id="${id}"]`)
+  for (const [id, status] of [['m1', 'in_progress'], ['e1.a', 'done'], ['review', 'review'], ['e1.b', 'in_progress'], ['e1.c', 'todo']]) {
+    assert.equal(node(id).dataset.status, status)
+  }
+  const changed = indexOf(rows.map(row => row.id === 'e1.b' ? { ...row, status: 'done' } : row))
+  const state = { ...initialState(), tab: 'gantt' }
+  view.render(state, changed)
+  assert.equal(node('e1.b').dataset.status, 'done', 'a refreshed index replaces the old status')
+  // The cursor alone moving (paintCursor, no redraw) marks the row selected, which the sheet's :not() lets win.
+  const tinted = node('e1.b')
+  view.render({ ...state, cursor: 'e1.b' }, changed)
+  assert.equal(node('e1.b'), tinted)
+  assert.equal(tinted.getAttribute('aria-selected'), 'true')
+  const css = readFileSync(new URL('../panel/style/gantt.css', import.meta.url), 'utf8')
+  for (const [status, token] of [['in_progress', '--progress-soft'], ['review', '--review-soft'], ['done', '--done-soft']]) {
+    assert.ok(css.includes(`.g-row[data-status="${status}"]:not([aria-selected="true"]):not(:hover) { background: var(${token}); }`))
   }
 })

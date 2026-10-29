@@ -181,6 +181,26 @@ test('a read that did not take leaves its stamp unseen: the next look reads agai
   assert.deepEqual(loads, [false, true, true], 'it took: nothing more to read')
 })
 
+test('a failed manual refresh retries even when the stamp was already seen', async () => {
+  for (const failure of [false, 'failed']) {
+    const clock = fakeClock()
+    const server = fakeServer('a')
+    const outcomes = [true, failure, true]
+    let reads = 0
+    const refresher = createRefresher({
+      load: async () => outcomes[reads++], stamp: server.stamp, visibility: fakeVisibility(), clock,
+    })
+    await refresher.refresh()
+    await refresher.refresh()
+    assert.equal(reads, 2)
+    await clock.advance(failure === 'failed' ? BACKOFF_MS : POLL_MS)
+    assert.equal(reads, 3, 'the unchanged stamp is retried')
+    await clock.advance(POLL_MS)
+    assert.equal(reads, 3, 'a successful retry marks it seen')
+    refresher.stop()
+  }
+})
+
 test('reads that fail against a server that answers back off to 10 s and say so once; a cancel does not', async () => {
   const clock = fakeClock()
   const server = fakeServer()

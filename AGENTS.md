@@ -1,4 +1,4 @@
-<!-- moai:begin v:0.32.0 hash:65df9ed1 -->
+<!-- moai:begin v:0.33.0 hash:06fb7ec4 -->
 ## Issue tracker — moai
 
 This repository's work lives in `.moai/issues.jsonl`.
@@ -359,10 +359,10 @@ column, it is running. There is no command that opens it and no new field.
 - **Nothing is blocked.** A `moai mv` that picks up work from outside goes straight
   through, and so does a `--milestone` that carries a row in — the rule above is a rule
   for you, not a refusal. What is already picked up is simply finished — the same ground as never taking work back late
-- If two milestones are running, both are inside, and the ordering within them is as it always was (`p` · age)
+- If two milestones are running, both are inside, and the ordering within them is the one below (`p` · deadline · age)
 - **Within one `p` the nearer deadline comes first**, whether a milestone runs or not, and a
-  row with none comes last. It is the row's own deadline — an epic's or a milestone's moves
-  none of its members. Where a milestone runs, its work still comes before outside work of the same `p`
+  row with none comes last. It follows the earliest deadline of the row, its milestone, epic,
+  and open parents, as `due apply` does. Where a milestone runs, its work still comes before outside work of the same `p`
 - **A setup with only two columns has no running milestone** — there is no column
   that says "started but not finished", so the rule itself does not stand. In that
   setup `ready` and the board are as they were
@@ -547,9 +547,11 @@ What counts is work inside the repository — `.moai/`, `.claude/`, `.agents/`, 
 `.worktrees/`, `target/` and anything outside the repository (scratchpad, temporary
 files) do not. Shell writes (`>`, `>>`, `sed -i`, `tee`, the destination of `cp`·`mv`·`install`)
 count as much as `Edit` and `Write`. If it was not in the plan, create it with `moai add 'a title'`
-and pick that up. A session that holds only work whose worktree stands is refused a write that
-lands in the main checkout — wherever its shell stands — and a write into another epic's worktree;
-the refusal names the same file in its own worktree.
+and pick that up. A session holding work is refused a write into another epic's worktree, even
+while a row it holds has no worktree yet; one whose held work all has its worktree standing is
+also refused a write that lands in the main checkout — wherever its shell stands. The refusal
+names the same file where the work it belongs to lives. A worktree carrying the
+pickup mark of a row this session surely picked up is also that row's worktree.
 
 **3. A review is an issue too.** Before you call a review, create a review issue tied to
 what you are reviewing. The review is `/code-review` in Claude Code; in Codex and

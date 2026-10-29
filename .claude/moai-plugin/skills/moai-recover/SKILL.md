@@ -114,6 +114,25 @@ def tty(pid):
             return 0
     t = out("ps", "-p", str(pid), "-o", "tty=")
     return device("/dev/" + t) if t.strip("?") else 0
+def nested_multiplexer(pid):
+    # Inspect process names and parents only, never another process's environment.
+    seen = set()
+    while pid > 1 and pid not in seen:
+        seen.add(pid)
+        line = out("ps", "-p", str(pid), "-o", "ppid=", "-o", "comm=")
+        fields = line.split(None, 1)
+        if len(fields) != 2:
+            return True
+        try:
+            pid = int(fields[0])
+        except ValueError:
+            return True
+        name = os.path.basename(fields[1].strip()).lower()
+        if name in ("cmux", "cmux dev"):
+            break
+        if name in ("screen", "tmux", "zellij") or name.startswith("screen-") or name.startswith("tmux:"):
+            return True
+    return False
 mine = os.environ.get("TMUX")
 if mine and mine.startswith("/tmp/cmux-"):
     mine = None
@@ -153,7 +172,9 @@ for path in sorted(glob.glob(os.path.expanduser("~/.claude/sessions/*.json"))):
         if not here or here != device(out("tmux", "display", "-p", "-t", pane, "#{pane_tty}")):
             pane = ""
     elif alive and cmux:
-        pane = "" if told and not told.startswith("cmux:") else surfaces.get(pid)
+        pane = surfaces.get(pid)
+        if (told and not told.startswith("cmux:")) or (pane and nested_multiplexer(pid)):
+            pane = ""
     rows.append((alive, pane, r))
 if rows and not any(alive for alive, _, _ in rows):
     sys.exit("no record reads alive, not even this session's own: this shell cannot read process start times (a sandbox, or no ps), so act on no row")
@@ -406,7 +427,7 @@ session (8), in that order:
 
     cmux --id-format both new-split right --surface "$CMUX_SURFACE_ID" --command 'cd "<cwd>" && claude --resume <sessionId>'
 
-**No other flag**, and keep the double quotes around `<cwd>` inside the single ones;
+If `<cwd>` contains `!`, do not build this command: tell the person the path and sessionId, because the destination interactive shell can expand it. **No other flag**, and keep the double quotes around `<cwd>` inside the single ones;
 write each `'` in the path as `'\''` there. It prints `OK surface:<n> (<UUID>) workspace:<n> (<UUID>)` — the first UUID
 is the new tab, the second your workspace. The command is typed into the tab's shell, so the
 shell stays when `claude` exits, and the split does not take focus. **If cmux refuses a split**
@@ -435,6 +456,8 @@ Neither way above stands: open nothing. Print, per session in the same order, th
 person types in a terminal of their own, and under it the block to paste once its box shows:
 
     cd "<cwd>" && claude --resume <sessionId>
+
+If `<cwd>` contains `!`, do not print this command: tell the person the path and sessionId so they can quote it themselves. The destination is an interactive shell, which can expand `!` even inside double quotes.
 
 A Saycode session gets the line of 8 instead.
 

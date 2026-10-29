@@ -70,9 +70,10 @@ test('a read asked after a change is not handed a run of it that already started
   assert.equal(await after, await alsoAfter)
 })
 
-test('a read that must not be shared is fetched on its own', async () => {
+test('a read that must not be shared is fetched on its own', async (t) => {
   const net = fakeFetch()
   const client = createClient(net.fetcher, { concurrency: 2 })
+  t.after(() => client.cancelAll())
   void client.request({ path: '/api/issue/a' })
   void client.request({ path: '/api/issue/a' }, { share: false })
   await flush()
@@ -95,9 +96,10 @@ test('a subscriber that throws does not stop the queue', async () => {
   }
 })
 
-test('with one read at a time, the detail goes before a waiting list refresh', async () => {
+test('with one read at a time, the detail goes before a waiting list refresh', async (t) => {
   const net = fakeFetch()
   const client = createClient(net.fetcher, { concurrency: 1 })
+  t.after(() => client.cancelAll())
   void client.request({ path: '/api/wiki' }, { priority: PRIORITY.wiki })
   void client.request({ path: '/api/rows' }, { priority: PRIORITY.list })
   void client.request({ path: '/api/issue/a' }, { priority: PRIORITY.detail })
@@ -109,9 +111,10 @@ test('with one read at a time, the detail goes before a waiting list refresh', a
   assert.deepEqual(net.urls(), ['/api/wiki', '/api/issue/a', '/api/rows'])
 })
 
-test('a queued shared read asked sooner moves up', async () => {
+test('a queued shared read asked sooner moves up', async (t) => {
   const net = fakeFetch()
   const client = createClient(net.fetcher, { concurrency: 1 })
+  t.after(() => client.cancelAll())
   void client.request({ path: '/api/status' })
   void client.request({ path: '/api/rows' }, { priority: PRIORITY.background })
   void client.request({ path: '/api/backlog' }, { priority: PRIORITY.list })
@@ -122,16 +125,18 @@ test('a queued shared read asked sooner moves up', async () => {
   assert.deepEqual(net.urls(), ['/api/status', '/api/rows'])
 })
 
-test('the page runs three reads at once; the bare client one', async () => {
+test('the page runs three reads at once; the bare client one', async (t) => {
   assert.deepEqual(PANEL_CLIENT_OPTIONS, { concurrency: 3 })
   const net = fakeFetch()
   const client = createClient(net.fetcher, PANEL_CLIENT_OPTIONS)
+  t.after(() => client.cancelAll())
   for (const path of ['/api/rows', '/api/backlog', '/api/status', '/api/wiki']) void client.request({ path })
   await flush()
   assert.equal(net.calls.length, 3)
   assert.deepEqual(client.requests().map((request) => request.phase), ['running', 'running', 'running', 'queued'])
   const bare = fakeFetch()
   const one = createClient(bare.fetcher)
+  t.after(() => one.cancelAll())
   void one.request({ path: '/api/rows' })
   void one.request({ path: '/api/backlog' })
   await flush()

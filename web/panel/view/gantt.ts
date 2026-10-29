@@ -106,6 +106,10 @@ interface Built {
   /** The header's top ticks, to keep their label in view while the dates scroll. */
   top: Array<{ el: HTMLElement; from: number; to: number }>
   svg: SVGSVGElement
+  /** The today line, at `now` on this axis — neither moves for the life of this Built, so every window shows the one node. */
+  today: HTMLElement
+  /** The weekend blocks of the dates' window: built again only when that window moves, kept while only the rows' does. */
+  shade: HTMLElement[]
 }
 
 let mounted = 0
@@ -243,8 +247,9 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
 
   function gridRow(m: Model, line: GanttLine, g: GanttRow | undefined, cursor: string | null): HTMLElement {
     const row = line.kind === 'row' ? m.index.rows[line.at]! : null
+    const status = row ? statusOf(row) : null
     const node = el(doc, 'div', {
-      class: `g-row${g?.deferred ? ' dim' : ''}`, role: 'option', 'aria-selected': String(line.key === cursor), 'data-id': row ? row.id : null, 'data-key': line.key,
+      class: `g-row${g?.deferred ? ' dim' : ''}`, role: 'option', 'aria-selected': String(line.key === cursor), 'data-id': row ? row.id : null, 'data-status': status, 'data-key': line.key,
     })
     const title = el(doc, 'span', { class: `c-title${line.dir ? ' grp' : ''}${row?.kind === 'milestone' ? ' ms' : ''}` })
     const twig = twigOf(line)
@@ -259,14 +264,14 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
       toggle.addEventListener('dblclick', (event) => event.stopPropagation())
       title.append(toggle)
     }
-    if (row) {
-      const { glyph, tone } = statusGlyph(statusOf(row), m.boot)
+    if (row && status !== null) {
+      const { glyph, tone } = statusGlyph(status, m.boot)
       const name = String(row.title ?? row.id)
       const moving = line.kind === 'row' && spins(m.index, line.at, firstStatus(m.boot), m.boot?.statuses)
       title.append(row.kind === 'milestone' ? '◆ ' : '', moving ? glint(doc, name) : name)
       title.title = name
       const progress = g?.progress.kind === 'rollup' && g.progress.total > 0 ? `${g.progress.done}/${g.progress.total}` : ''
-      const st = el(doc, 'span', { class: `c-st m-st-${tone}${moving ? ' m-spin' : ''}`, title: (copy.stats as Record<string, string>)[statusOf(row)] ?? statusOf(row) }, glyph)
+      const st = el(doc, 'span', { class: `c-st m-st-${tone}${moving ? ' m-spin' : ''}`, title: (copy.stats as Record<string, string>)[status] ?? status }, glyph)
       node.append(el(doc, 'span', { class: 'c-id' }, row.id), st, title, el(doc, 'span', { class: 'c-n' }, progress), el(doc, 'span', { class: 'c-who' }, assigneeOf(row)))
     } else {
       title.append(line.kind === 'bucket' ? segLabel(line.seg, m.index, copy) : '')
@@ -306,7 +311,9 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
     svg.setAttribute('width', String(wide))
     svg.setAttribute('height', String(m.lines.length * ROW_H))
     svg.setAttribute('aria-hidden', 'true')
-    built = { rows: new Map(), lanes: new Map(), clips: new Map(), placed, now, top: [], svg }
+    const today = el(doc, 'div', { class: 'todayline' })
+    today.style.left = `${xOf(a, now)}px`
+    built = { rows: new Map(), lanes: new Map(), clips: new Map(), placed, now, top: [], svg, today, shade: [] }
     drawn = null
     paintWindow()
 
@@ -361,38 +368,45 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
     const v = inView()
     const view = Math.max(v.x1 - v.x0, 120)
     const rowsInWindow = rowRange(m.lines.length, OVERSCAN_ROWS)
+    const previous = drawn
+    // The dates' window stays while the view is inside it: a scroll up or down builds only the rows it brings in.
+    const dates = previous && v.x0 >= previous.x0 && v.x1 <= previous.x1 ? previous : { x0: v.x0 - view, x1: v.x1 + view }
+    const datesChanged = dates !== previous
+    const oldRows = b.rows, oldLanes = b.lanes, oldClips = b.clips
     const win = {
       r0: rowsInWindow.start,
       r1: rowsInWindow.end,
-      x0: Math.max(0, v.x0 - view),
-      x1: Math.min(widthOf(a), v.x1 + view),
+      x0: Math.max(0, dates.x0),
+      x1: Math.min(widthOf(a), dates.x1),
     }
     // The dates' margin is kept unclamped: a view at the axis' edge is covered by a window that ends there.
-    drawn = { ...win, x0: v.x0 - view, x1: v.x1 + view }
+    drawn = { ...win, x0: dates.x0, x1: dates.x1 }
     // A bubble over a bar about to go has no mouseleave to take it down.
     bubble.hidden = true
     const wall: [number, number] = [wallAt(a, win.x0), wallAt(a, win.x1)]
 
     // Weekends, behind everything. Not at the month step, where a day is 4px.
-    const shade: HTMLElement[] = []
-    if (a.zoom !== 'month') {
-      for (const [from, to] of weekends(a, wall)) {
-        const col = el(doc, 'div', { class: 'col-we' })
-        col.style.left = `${xOf(a, from)}px`
-        col.style.width = `${xOf(a, to) - xOf(a, from)}px`
-        shade.push(col)
+    if (datesChanged) {
+      b.shade = []
+      if (a.zoom !== 'month') {
+        for (const [from, to] of weekends(a, wall)) {
+          const col = el(doc, 'div', { class: 'col-we' })
+          col.style.left = `${xOf(a, from)}px`
+          col.style.width = `${xOf(a, to) - xOf(a, from)}px`
+          b.shade.push(col)
+        }
       }
     }
-    b.rows.clear()
-    b.lanes.clear()
-    b.clips.clear()
+    b.rows = new Map()
+    b.lanes = new Map()
+    b.clips = new Map()
     const rows: HTMLElement[] = []
     const lanes: HTMLElement[] = []
     for (let n = win.r0; n < win.r1; n++) {
       const line = m.lines[n]!
       const g = line.kind === 'row' ? ganttOf(m.index.rows[line.at]!) : undefined
       const p = b.placed[n] ?? null
-      const grid = gridRow(m, line, g, cursor)
+      const grid = oldRows.get(n) ?? gridRow(m, line, g, cursor)
       grid.style.top = `${n * ROW_H}px`
       // Only the window's options are in the listbox: each says where it stands in the whole set, as the list's rows do
       // with aria-rowindex — or a screen reader counts "3 of 41" in a tree of 400.
@@ -400,6 +414,17 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
       grid.setAttribute('aria-posinset', String(n + 1))
       rows.push(grid)
       b.rows.set(n, grid)
+      // A lane is kept while its dates are — but not one whose plan was just dropped (`moved`): its bubble and drag were
+      // wired to the plan before the drop, and a window built anew builds it from the dropped one, as it always did.
+      const dropped = line.kind === 'row' && moved.has(m.index.rows[line.at]!.id)
+      const retained = !datesChanged && !dropped ? oldLanes.get(n) : undefined
+      if (retained) {
+        lanes.push(retained)
+        b.lanes.set(n, retained)
+        const clips = oldClips.get(n)
+        if (clips) b.clips.set(n, clips)
+        continue
+      }
       const lane = el(doc, 'div', { class: `lane${g?.deferred ? ' dim' : ''}`, 'data-id': line.kind === 'row' ? m.index.rows[line.at]!.id : null, 'data-key': line.key, 'aria-selected': String(line.key === cursor) })
       lane.style.top = `${n * ROW_H}px`
       lane.addEventListener('click', () => {
@@ -420,11 +445,11 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
       lanes.push(lane)
       b.lanes.set(n, lane)
     }
-    const today = el(doc, 'div', { class: 'todayline' })
-    today.style.left = `${xOf(a, now)}px`
-    lanesBox.replaceChildren(...shade, ...lanes, b.svg, today)
+    lanesBox.replaceChildren(...b.shade, ...lanes, b.svg, b.today)
     rowsBox.replaceChildren(...rows)
 
+    // The date decorations remain when only the vertical window changes.
+    if (!datesChanged) return
     // The header; its today cap stands over the day's line.
     b.top = []
     const header = headerOf(a, now, words, wall)

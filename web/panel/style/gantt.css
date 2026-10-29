@@ -44,6 +44,9 @@
 .g-rows { position: relative; }
 /* Rows and lanes stand at their line number (top, set by the view): only the ones near the window are nodes. */
 .g-row { position: absolute; left: 0; right: 0; display: flex; align-items: center; gap: 8px; height: 28px; padding: 0 8px; white-space: nowrap; cursor: default; }
+.g-row[data-status="in_progress"]:not([aria-selected="true"]):not(:hover) { background: var(--progress-soft); }
+.g-row[data-status="review"]:not([aria-selected="true"]):not(:hover) { background: var(--review-soft); }
+.g-row[data-status="done"]:not([aria-selected="true"]):not(:hover) { background: var(--done-soft); }
 .g-row:hover { background: var(--hover); }
 .g-row[aria-selected="true"] { background: var(--selected); }
 .g-row[aria-selected="true"]::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 2px; background: var(--accent); }

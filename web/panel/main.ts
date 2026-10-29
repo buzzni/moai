@@ -13,7 +13,7 @@ import { useNaming } from './data/people.js'
 import { headerProjects, projectHref, type ProjectEntry } from './data/projects.js'
 import { writePlan, type PlanChange } from './data/plan.js'
 import { isUnread, readMarks } from './data/read.js'
-import { createRefresher } from './data/refresh.js'
+import { BACKOFF_MS, createRefresher, POLL_MS } from './data/refresh.js'
 import { sortQuery, useVocabulary } from './data/query.js'
 import {
   archiveDue, loadAllRows, loadArchived, loadBoot, loadDetail, loadGroups, loadMatches, loadProjects, loadTree, loadWikiListing, loadWikiPage, loadWikiSearch, matchEndpoints, sameGroups, withArchive,
@@ -130,6 +130,55 @@ async function start(): Promise<void> {
   let treeHasGantt = false
   /** The load the clock started on its own, or 0: its reads run without the activity line. */
   let quietLoad = 0
+  /** A chart read is independent of the board read and is coalesced while it is in flight. */
+  let chartReading = false
+  let chartProblem: Outcome | null = null
+  let chartRetry: ReturnType<typeof setTimeout> | undefined
+  /**
+   * Chart reads that failed in a row. The first is asked again at the usual pace; one that fails again waits as the
+   * refresher does (data/refresh.ts BACKOFF_MS): each try is a `tui --deep` child, and each failure is told again.
+   */
+  let chartFailures = 0
+  async function ensureChart(): Promise<void> {
+    const state = store.getState()
+    const board = state.board.value
+    if (chartReading || treeHasGantt || state.tab !== 'gantt' || !board || state.board.loading || document.visibilityState === 'hidden') return
+    // The board's own read failed: it is read whole again, as opening the chart did before (moai-w7ms review). The chart
+    // values ride on that read, and what it retries afterwards keeps the refresher's pace.
+    if (state.board.problem && state.board.problem !== chartProblem) return void refresher.refresh()
+    clearTimeout(chartRetry)
+    chartReading = true
+    // The person's tab asked for this read, not the clock: it shows on the activity line and can be cancelled (activity()).
+    quietLoad = 0
+    const { sort, view } = state
+    const zone = zoneNow()
+    const generation = loads
+    const result = await loadTree(client, { query: sortQuery(sort), priority: PRIORITY.list, epoch: generation,
+      worktree: view.worktree, archived: view.showArchived, zone, gantt: true })
+    chartReading = false
+    const after = store.getState()
+    const current = generation === loads && !after.board.loading && after.board.value?.rows === board.rows &&
+      after.sort === sort && after.view.worktree === view.worktree && after.view.showArchived === view.showArchived && zoneNow() === zone
+    if (current && result.ok) {
+      treeHasGantt = true
+      chartFailures = 0
+      store.dispatch({ type: 'chart-tree', rows: board.rows, tree: result.value, clearProblem: chartProblem })
+      chartProblem = null
+    } else if (after.tab === 'gantt' && !treeHasGantt) {
+      // A superseded read asks for the current view as soon as the board is ready.
+      let wait = 0
+      if (current && !result.ok) {
+        chartProblem = result.outcome
+        store.dispatch({ type: 'board-failed', problem: result.outcome })
+        // A cancel is the person's and asks again at the usual pace, as the refresher's does.
+        chartFailures = failure(result.outcome) === 'failed' ? chartFailures + 1 : 0
+        wait = chartFailures > 1 ? BACKOFF_MS : POLL_MS
+      }
+      chartRetry = setTimeout(() => void ensureChart(), wait)
+    }
+  }
+
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState !== 'hidden') void ensureChart() })
 
   /**
    * Reads the board. False when the read did not take (a refusal, a cancel, the boot still missing): data/refresh.ts
@@ -160,7 +209,7 @@ async function start(): Promise<void> {
     const zone = zoneNow()
     // `SPC v w` (on by default): the other worktrees' rows over the list, as the TUI's explorer opens.
     const listing = loadAllRows(client, PRIORITY.list, load, view.worktree)
-    const placing = loadTree(client, sortQuery(sort), PRIORITY.list, load, view.worktree, view.showArchived, zone, gantt)
+    const placing = loadTree(client, { query: sortQuery(sort), priority: PRIORITY.list, epoch: load, worktree: view.worktree, archived: view.showArchived, zone, gantt })
     const counting = loadGroups(client, PRIORITY.list, load, view.worktree)
     let counted: Awaited<typeof counting> | undefined
     void counting.then((groups) => (counted = groups))
@@ -184,6 +233,8 @@ async function start(): Promise<void> {
     // never held (an issue a wiki page links to that only the archive holds) stays.
     const wasListed = shownBefore !== null && indexOf(before)?.find(shownBefore.id) !== undefined
     treeHasGantt = gantt
+    // Chart values that came with the board are a chart read that took.
+    if (gantt) chartFailures = 0
     store.dispatch({ type: 'board-loaded', data, order: drawnOrder() })
     const state = store.getState()
     const shown = state.shown.value
@@ -207,7 +258,8 @@ async function start(): Promise<void> {
     // So does the worktree overlay, or the archive shown, turned while it ran (the tree is asked for both).
     // The zone picked while it ran is the same: the tree's `overdue` was judged in the zone before.
     const after = store.getState()
-    if (zoneNow() !== zone || after.sort !== sort || after.view.worktree !== view.worktree || after.view.showArchived !== view.showArchived || (after.tab === 'gantt' && !gantt)) setTimeout(() => void refresher.refresh(), 0)
+    if ((gantt && zoneNow() !== zone) || after.sort !== sort || after.view.worktree !== view.worktree || after.view.showArchived !== view.showArchived) setTimeout(() => void refresher.refresh(), 0)
+    else if (after.tab === 'gantt' && !gantt) void ensureChart()
     return true
   }
 
@@ -252,7 +304,7 @@ async function start(): Promise<void> {
       else void ask()
     }
     // Opening the chart after a tree-only read asks for its values. A transition during a read is caught at loadBoard's end.
-    if (state.tab === 'gantt' && previous.tab !== 'gantt' && !treeHasGantt && state.board.value) void refresher.refresh()
+    if (state.tab === 'gantt' && previous.tab !== 'gantt' && !treeHasGantt && state.board.value) void ensureChart()
     // A new order is moai's to make: the tree is read again in it.
     if (state.sort !== previous.sort && state.board.value) void refresher.refresh()
     // The worktree overlay turned on or off: the rows are read again with it or without it.
@@ -262,7 +314,9 @@ async function start(): Promise<void> {
     const zone = zoneNow()
     if (zone !== zoneSeen) {
       zoneSeen = zone
-      if (state.board.value) void refresher.refresh()
+      treeHasGantt = false
+      if (state.tab === 'gantt') void ensureChart()
+      void ask(true)
     }
   })
 

@@ -139,6 +139,17 @@ export async function loadGroups(client: Client, priority: number = PRIORITY.lis
   return output === undefined ? { ok: false, outcome } : { ok: true, value: groupsFrom(output) }
 }
 
+/** What a tree read asks for, each as {@link loadTree} says; what is left out is the plain tree. */
+export interface TreeOptions {
+  query?: Record<string, string>
+  priority?: number
+  epoch?: number
+  worktree?: boolean
+  archived?: boolean
+  zone?: string
+  gantt?: boolean
+}
+
 /**
  * `/api/tree` with the order the page asks for (query.ts sortQuery): every row, where it stands, in moai's order.
  * `worktree` (the view's `SPC v w`) places the rows only another git worktree holds the way the list reads them
@@ -151,7 +162,7 @@ export async function loadGroups(client: Client, priority: number = PRIORITY.lis
  * told, not the server machine's, so the count agrees with the today line drawn beside it (moai-vj8w.7sh). A zone that
  * machine cannot read (an offset, an Intl name its tzdb lacks) is judged in the server's own zone instead.
  */
-export async function loadTree(client: Client, query: Record<string, string> = {}, priority: number = PRIORITY.list, epoch?: number, worktree = false, archived = false, zone?: string, gantt = false): Promise<Loaded<TreeRow[]>> {
+export async function loadTree(client: Client, { query = {}, priority = PRIORITY.list, epoch, worktree = false, archived = false, zone, gantt = false }: TreeOptions = {}): Promise<Loaded<TreeRow[]>> {
   const asked = { ...query, ...(worktree ? { worktree: '1' } : {}), ...(archived ? { archived: '1' } : {}), ...(gantt ? { gantt: '1', ...(zone ? { tz: zone } : {}) } : {}) }
   const outcome = await client.request({ path: ENDPOINT.tree, query: asked }, { priority, epoch })
   const output = answerOf(outcome)

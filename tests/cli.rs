@@ -234,6 +234,13 @@ fn isolated(program: impl AsRef<std::ffi::OsStr>) -> Command {
     cmd
 }
 
+/// Prepend a test directory while preserving the inherited OS-native PATH.
+fn path_with(dir: &Path) -> std::ffi::OsString {
+    let inherited = std::env::var_os("PATH").unwrap_or_default();
+    std::env::join_paths(std::iter::once(dir.to_path_buf()).chain(std::env::split_paths(&inherited)))
+        .expect("test directory must be valid in PATH")
+}
+
 /// `moai` 가 든 디렉터리를 뺀 `PATH` — git 도 든 자리는 남긴다. [`isolated`] 가 쓴다.
 fn path_without_moai() -> std::ffi::OsString {
     let path = std::env::var_os("PATH").unwrap_or_default();
@@ -1200,6 +1207,32 @@ fn init_plants_the_merge_driver_too() {
     let said = ok(root, &["init"]);
     assert!(!said.contains("머지 드라이버를 심었다"), "일부러 고른 줄을 덮었다\n{said}");
     assert_eq!(git(root, &["config", "--get", "merge.moai.driver"]), pinned, "일부러 고른 줄이 바뀌었다");
+
+    // **모르는 드라이버는 그대로 둔다**(moai-uwi9.b75) — 신호에 맞아 죽은 것도, 두 번 재고도 시간을 넘긴 것도. 실행 파일은
+    // `write_exe` 로 내놓는다 — 이 프로세스가 쓴 inode 를 띄우면 옆 시험의 fork 와 겹쳐 ETXTBSY 고, 그때의 `Unknown` 은
+    // 다시 재지 않아 `probe-count` 가 안 선다(리뷰 moai-uwi9.j8c).
+    #[cfg(unix)]
+    {
+        let unknown = root.join("unknown-driver");
+        write_exe(&unknown, "#!/bin/sh\nkill -9 $$\n");
+        let command = format!("{} merge-driver %O %A %B %L %P", unknown.display());
+        git(root, &["config", "--local", "merge.moai.driver", &command]);
+        let said = ok(root, &["init"]);
+        // 못 잰 것도 한 일이다 — 그 줄 밑에 "다 맞아 있다" 가 서면 두 말이 서로를 지운다(리뷰).
+        assert!(said.contains("못 재어 그대로 둔다") && !said.contains("이미 다 맞아 있다"), "{said}");
+        let json = ok(root, &["init", "--json"]);
+        assert_eq!(field(&json, "driver"), "unmeasured");
+        let check = ok(root, &["init", "--check", "--json"]);
+        assert_eq!(field(&check, "driver"), "unmeasured");
+        assert!(ok(root, &["init", "--check"]).contains("못 재어 그대로 둔다"));
+        assert_eq!(git(root, &["config", "--get", "merge.moai.driver"]).trim_end(), command);
+
+        write_exe(&unknown, "#!/bin/sh\necho probe >> probe-count\nexec sleep 30\n");
+        let said = ok(root, &["init"]);
+        assert!(said.contains("못 재어 그대로 둔다"), "{said}");
+        assert_eq!(git(root, &["config", "--get", "merge.moai.driver"]).trim_end(), command);
+        assert_eq!(std::fs::read_to_string(root.join("probe-count")).unwrap().lines().count(), 2);
+    }
 
     // **`--no-driver` 는 `.git/config` 를 안 건드린다.**
     let other = s.path().join("옆");
@@ -8977,6 +9010,84 @@ fn read_marks_the_line_in_my_config_and_leaves_the_tracker_alone() {
     assert!(out.contains(r#""held":[]"#), "막힌 것이 없는 판에 `held` 가 안 섰다 — {out}");
 }
 
+#[test]
+fn edit_marks_the_written_version_for_only_its_user() {
+    let s = init("edit-own-read");
+    let writer = s.path().join("writer/config.toml");
+    let other = s.path().join("other/config.toml");
+    let id = field(&ok_with(s.path(), &writer, &["add", "test", "--json"]), "id");
+    // **고침은 더 늦은 시각에 든다**(리뷰) — 시계를 하나로 박으면 만든 판과 고친 판의 도장이 같아, 쓰기 앞의 판을 적어도 이 시험이
+    // 못 가른다.
+    let writer_env = [("MOAI_CONFIG", writer.to_str().unwrap())];
+    ok_with(s.path(), &writer, &["read", &id]);
+    ok_env(s.path(), LATER, &writer_env, &["edit", &id, "--title", "changed"]);
+    let row = json_of(&ok_with(s.path(), &writer, &["show", &id, "--json"]));
+    assert_eq!(row["updated_at"], LATER, "{row}");
+    let sheet = read_sheet(&writer, s.path());
+    assert!(sheet.contains(&id) && sheet.contains(LATER), "{sheet}");
+    // 쓴 사람에게는 [NEW] 가 안 서고, 그 줄을 안 본 남에게는 그대로 선다.
+    assert!(row.get("unread").is_none(), "제 고침이 제게 [NEW] 로 섰다 — {row}");
+    let theirs = json_of(&ok_with(s.path(), &other, &["show", &id, "--json"]));
+    assert_eq!(theirs["unread"], true, "남의 읽음까지 적었다 — {theirs}");
+    ok_env(
+        s.path(),
+        "2026-09-13T00:00:00Z",
+        &[("MOAI_CONFIG", other.to_str().unwrap())],
+        &["edit", &id, "--body", "unseen"],
+    );
+    ok_env(s.path(), "2026-09-14T00:00:00Z", &writer_env, &["edit", &id, "--tag", "mine"]);
+    let row = json_of(&ok_with(s.path(), &writer, &["show", &id, "--json"]));
+    assert_eq!(row["unread"], true, "an unseen change was marked read: {row}");
+}
+
+/// **쓴 사람의 읽음은 트래커 락을 놓은 뒤에 적는다**(moai-uwi9.0xu 리뷰). 그 읽음 파일은 이 사람의 설정 곁에 살고 락도 제 것이라,
+/// 쓰기 안에서 적던 판은 그 락을 기다리는 동안 `.moai/lock` 을 쥐어 옆 세션의 쓰기를 다 세웠다 — 그 락 자리에 FIFO 가 서면 `edit`
+/// 이 영영 멎은 채로 옆의 `add` 가 5초 뒤 `locked` 로 졌다. 고친 판은 `edit` 만 그 자리에서 기다리고, 그 줄은 이미 담겼다.
+///
+/// 못 적으면 **무엇을 못 했는지를 앞에 대고** 한 줄로 말한다 — 락 기다림의 말("…Nothing was changed")을 그대로 내던 판은 담긴
+/// 쓰기를 실패로 읽게 했다. 종료 코드는 0 이다.
+#[cfg(unix)]
+#[test]
+fn a_stuck_read_mark_does_not_hold_the_tracker() {
+    let s = init("edit-mark-outside-lock");
+    let cfg = s.path().join("person/config.toml");
+    let id = field(&ok_with(s.path(), &cfg, &["add", "first", "--json"]), "id");
+    // 읽음 파일을 먼저 세운다 — 자리(뿌리의 해시)는 도구가 고른다.
+    ok_with(s.path(), &cfg, &["read", &id]);
+    let (sheet, _) = read_sheets(&cfg, s.path()).into_iter().next().expect("읽음 파일이 안 섰다");
+    let lock = sheet.with_file_name(format!("{}.lock", sheet.file_name().unwrap().to_string_lossy()));
+    let _ = std::fs::remove_file(&lock);
+    assert!(Command::new("mkfifo").arg(&lock).status().unwrap().success(), "FIFO 를 못 지었다");
+    let mut edit = staged(&["edit", &id, "--title", "edited while stuck"])
+        .current_dir(s.path())
+        .env("MOAI_CONFIG", &cfg)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    // 그 `edit` 이 줄을 담을 때까지 기다린다 — 담은 뒤에야 읽음 적기에 닿는다.
+    let landed = (0..200).any(|_| {
+        std::thread::sleep(std::time::Duration::from_millis(25));
+        issues(s.path()).contains("edited while stuck")
+    });
+    // 옆 세션의 쓰기 — 트래커 락이 놓였으면 곧바로 든다.
+    let beside = moai_with(s.path(), &s.path().join("beside/config.toml"), &["add", "second"]);
+    let _ = edit.kill();
+    let _ = edit.wait();
+    assert!(landed, "edit 이 줄을 안 담았다");
+    assert!(beside.status.success(), "읽음 하나가 옆의 쓰기를 막았다\n{}", String::from_utf8_lossy(&beside.stderr));
+
+    // 못 적은 판 — 읽음 파일 자리에 디렉터리가 섰다. 쓰기는 담기고 그 까닭이 무엇을 못 했는지와 함께 선다.
+    std::fs::remove_file(&lock).unwrap();
+    std::fs::remove_file(&sheet).unwrap();
+    std::fs::create_dir(&sheet).unwrap();
+    let out = moai_with(s.path(), &cfg, &["edit", &id, "--tag", "after"]);
+    let said = String::from_utf8_lossy(&out.stderr);
+    assert!(out.status.success() && issues(s.path()).contains("\"after\""), "{said}");
+    // The prior read mark cannot be read, so no automatic mark is attempted.
+    assert!(!said.contains("Nothing was changed"), "{said}");
+}
+
 /// **사람이 적은 값에 막힌 id 는 이름으로 나온다**(moai-l5ue, 리뷰 moai-kuib.g9c 9번).
 ///
 /// `Sheet::mark` 이 그 id 만 건너뛰게 되면서(막힌 줄 하나가 쓰기 전체를 세우지 않는다) 시킨 id 가
@@ -9121,7 +9232,14 @@ fn reading_writes_the_stamp_of_the_line_i_saw() {
     );
 
     // 가지에서 01:30 에 찍힌 고침이 머지로 들어온다 — 읽은 때(02:00)보다 이르지만 본 줄과 다르다.
-    at("2026-09-18T01:30:00Z", &["edit", &id, "--tag", "merged"]);
+    // 고친 이는 다른 사람이다 — 제 `edit` 은 제 읽음을 함께 적는다(moai-uwi9.0xu).
+    let other = s.path().join("other/config.toml");
+    ok_env(
+        s.path(),
+        "2026-09-18T01:30:00Z",
+        &[("MOAI_CONFIG", other.to_str().unwrap())],
+        &["edit", &id, "--tag", "merged"],
+    );
     let out = at("2026-09-18T03:00:00Z", &["read", "--all", "--json"]);
     assert!(out.contains(&id), "머지로 들어온 고침에 [NEW] 가 안 섰다 — {out}");
 
@@ -22451,6 +22569,65 @@ fn skill_status_wants_the_version_of_what_is_planted_here() {
     assert!(json.contains("\"current\":true"), "{json}");
 }
 
+#[test]
+fn skill_status_reports_a_missing_marketplace_without_failing() {
+    let s = init("missing-marketplace");
+    let c = Claude::new("missing-marketplace-home");
+    let status = |json: bool| {
+        let args: &[&str] = if json { &["skill", "status", "--json"] } else { &["skill", "status"] };
+        c.run(s.path(), args, true)
+    };
+    assert!(c.run(s.path(), &["skill", "install"], true).status.success());
+    let market = s.path().join(".claude/moai-plugin/.claude-plugin/marketplace.json");
+    assert!(text(&status(true)).contains("\"market_missing\":false"));
+    std::fs::remove_file(&market).unwrap();
+    let out = status(false);
+    // 그 한 줄로 잰다 — `moai skill install` 은 `.agents` 줄 같은 다른 줄도 대니, 낱말만 찾으면 줄이 없어도 지나간다.
+    assert!(
+        out.status.success()
+            && text(&out)
+                .lines()
+                .any(|l| l.contains("marketplace.json 파일이 없다") && l.contains("`moai skill install`")),
+        "{}",
+        text(&out)
+    );
+    assert!(text(&status(true)).contains("\"market_missing\":true"));
+    assert!(c.run(s.path(), &["skill", "install"], true).status.success());
+    assert!(text(&status(true)).contains("\"market_missing\":false"));
+}
+
+/// **추적을 푸는 명령은 트래커 뿌리를 `-C` 로 겨눈다**(moai-xvvr.qt8, 리뷰 moai-r2nn.38g 10번) — `.moai` 가 모노레포 하위에
+/// 서면 그 줄의 자리는 하위에서 센 것이라, 맨 `git rm --cached -- <자리>` 를 git 뿌리에서 치면 없는 파일을 가리킨다.
+/// 낸 명령을 git 뿌리에서 그대로 쳐서 추적이 풀리는지 잰다.
+#[cfg(unix)]
+#[test]
+fn the_untrack_command_for_a_committed_marketplace_works_from_the_git_root() {
+    let s = Scratch::new("market-tracked-monorepo");
+    git(s.path(), &["init", "-q", "."]);
+    let sub = s.path().join("sub");
+    std::fs::create_dir(&sub).unwrap();
+    ok(&sub, &["init", "argos", "--no-driver"]);
+    let c = Claude::new("market-tracked-monorepo-home");
+    // 가짜 `claude` 의 PATH 에는 git 이 없다 — 추적을 재는 `git ls-files` 가 돌게 git 의 자리를 더한다.
+    let git_dir = std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())
+        .find(|d| d.join("git").is_file())
+        .expect("PATH 에 git 이 없다");
+    let path = std::env::join_paths([c.bin.clone(), c.home.path().join("sysbin"), git_dir]).unwrap();
+    let install = || c.command(Path::new(BIN), &sub, &["skill", "install"], true).env("PATH", &path).output().unwrap();
+    let first = install();
+    assert!(first.status.success(), "{}", text(&first));
+    let rel = "sub/.claude/moai-plugin/.claude-plugin/marketplace.json";
+    git(s.path(), &["add", "-f", "--", rel]);
+    let said = text(&install());
+    let command = said
+        .lines()
+        .find_map(|l| l.split_once("추적을 푼다: ").map(|(_, c)| c.to_string()))
+        .unwrap_or_else(|| panic!("추적을 푸는 명령을 안 냈다\n{said}"));
+    let ran = isolated("sh").arg("-c").arg(&command).current_dir(s.path()).output().unwrap();
+    assert!(ran.status.success(), "{command}\n{}", text(&ran));
+    assert_eq!(git(s.path(), &["ls-files", "--", rel]), "", "{command} 가 추적을 못 풀었다");
+}
+
 /// **`status` 는 훅 파일을 그 파일이 부르는 moai 로 견준다**(리뷰 moai-u5wr.e74) — Claude 의 줄이 설치본의 훅이 부르는
 /// 파일로 견주는 것과 같다. 다른 철자(워크트리의 빌드, `cargo run`)로 부른 `status` 가 멀쩡한 파일을 "다시 심는다" 고
 /// 하면, 시킨 대로 심는 순간 커밋된 훅이 그 moai 를 부른다. **Antigravity 의 파일은 무리 안까지 본다** — agy 가 다시
@@ -24763,8 +24940,8 @@ fn install_prefers_a_moai_on_path_when_it_is_the_same_build() {
     // 도구는 덜 이르는 쪽(지금 바이너리)을 골라 이 시험이 셋에 둘꼴로 붉었다. 사람의 `PATH` 에 선 `moai` 는 이미 돈 파일이다.
     let warmed = warm_exe(&shim, &["--version"]);
     assert!(warmed.status.success(), "{}", String::from_utf8_lossy(&warmed.stderr));
-    let path = format!("{}:{}", bin.display(), std::env::var("PATH").unwrap_or_default());
-    let planted = |path: &str| {
+    let path = path_with(&bin);
+    let planted = |path: &std::ffi::OsStr| {
         let mut cmd = isolated(BIN);
         cmd.args(["merge-driver", "--install"]).current_dir(root).env("MOAI_ACTOR", ACTOR).env("PATH", path);
         let o = cmd.output().expect("moai 를 실행하지 못했다");
@@ -24780,7 +24957,7 @@ fn install_prefers_a_moai_on_path_when_it_is_the_same_build() {
 
     // **PATH 에 없으면 지금 바이너리다** — 앞 판이 늘 하던 일이다. git 은 남은 자리다.
     let bare = path_without_moai();
-    assert!(planted(&bare.to_string_lossy()).contains(recorded_bin()), "PATH 에 없는데 딴것을 심었다");
+    assert!(planted(bare.as_os_str()).contains(recorded_bin()), "PATH 에 없는데 딴것을 심었다");
 }
 
 /// **모르는 인자를 흘려 듣고 0 을 내는 래퍼는 그대로 못 지나간다**(moai-wwbi, 2026-09-21 사용자 결정).
@@ -26756,7 +26933,7 @@ fn the_same_version_still_names_an_older_moai_first_on_path() {
     placed_moai(&shadow, "0.1.2", true);
     let dir = s.path().join("bin");
     placed_moai(&dir, "9.9.9", true);
-    let path = format!("{}:{}", shadow.display(), std::env::var("PATH").unwrap_or_default());
+    let path = path_with(&shadow);
 
     let out = install_cmd(Path::new(NOWHERE), &dir, &[]).env("PATH", path).output().unwrap();
     assert!(out.status.success(), "{}", text(&out));
@@ -26769,7 +26946,7 @@ fn the_same_version_still_names_an_older_moai_first_on_path() {
 
     // **같은 파일은 철자가 달라도 같은 moai 다**(`-ef`, 리뷰). PATH 에 선 자리 끝에 `/` 가
     // 붙었다고(dash 의 `command -v` 는 `…//moai` 로 댄다) 딴 moai 가 먼저 선다고 말하지 않는다.
-    let slashed = format!("{}/:{}", dir.display(), std::env::var("PATH").unwrap_or_default());
+    let slashed = path_with(&dir.join(""));
     let same = install_cmd(Path::new(NOWHERE), &dir, &[]).env("PATH", slashed).output().unwrap();
     assert!(same.status.success(), "{}", text(&same));
     assert!(
@@ -26836,7 +27013,7 @@ fn an_old_busybox_timeout_does_not_make_this_moai_foreign() {
     );
     let dir = s.path().join("bin");
     placed_moai(&dir, "0.1.2", true);
-    let path = format!("{}:{}", shim.display(), std::env::var("PATH").unwrap_or_default());
+    let path = path_with(&shim);
 
     let out = install_cmd(&base, &dir, &[]).env("PATH", path).output().unwrap();
     assert!(out.status.success(), "이 moai 를 남의 것으로 읽었다\n{}", text(&out));
@@ -29518,7 +29695,7 @@ fn init_slow_git_does_not_hide_linked_dotfile_notices() {
     )
     .unwrap();
     std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
-    let path = format!("{}:{}", bin.display(), std::env::var("PATH").unwrap());
+    let path = path_with(&bin);
     let clock = std::time::Instant::now();
     let out = staged(&["status", "--json"]).env("PATH", &path).current_dir(s.path()).output().unwrap();
     let js = String::from_utf8_lossy(&out.stdout);
@@ -32361,6 +32538,7 @@ fn web_moves_a_plan_only_from_its_own_page() {
         ),
         "id",
     );
+    ok_with(s.path(), &cfg, &["read", &id]);
     let web = serve_with(s.path(), |cmd| {
         cmd.env("MOAI_CONFIG", &cfg);
     });
@@ -32382,6 +32560,10 @@ fn web_moves_a_plan_only_from_its_own_page() {
     assert_eq!((status, json_of(&body)["exit"].as_i64()), (200, Some(0)), "{body}");
     assert!(json_of(&body).get("out").is_some(), "성공한 판에 답이 없으면 페이지는 못 읽은 답으로 본다 — {body}");
     assert_eq!(days(), at("2026-10-28", "2026-10-29"));
+    let updated =
+        json_of(&ok_with(s.path(), &cfg, &["show", &id, "--json"]))["updated_at"].as_str().unwrap().to_string();
+    let sheet = read_sheet(&cfg, s.path());
+    assert!(sheet.contains(&id) && sheet.contains(&updated), "{sheet}");
     // 끝 하나를 옮긴 판은 다른 쪽을 그대로 둔다.
     let (_, _, body) = post(web.port, &format!("/api/plan/{id}?edge=end&days=2"), Some(&mine));
     assert_eq!(json_of(&body)["exit"], 0, "{body}");

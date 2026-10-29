@@ -13,7 +13,7 @@ The supervisor skill remains Claude Code only; reading this file does not instal
 | `/code-review` (7) | Send the review readiness note below and wait for the supervisor's review. |
 | `TaskStop` | No equivalent step here; the supervisor manages its review subagent. |
 | `SendMessage(to: <supervisor>, …)` | Write an epic note in the root's tracker, as below. |
-| `/clear` | The person or supervisor sends `/new`, then handles the work directory menu. |
+| `/clear` | The person or supervisor sends `/clear`. |
 
 `/model` exists in Codex too. The person changes the model; use the assignment's `Model:`
 as the suggestion, and record the model that actually ran. Do not change it yourself.
@@ -91,5 +91,5 @@ It stands in the root's file, where the supervisor reads it — it needs no comm
 For a decision needed during work, use the same note, starting with
 `Decision needed:` or `진행 중 결정이 필요합니다`, and ask this window's person too.
 The supervisor watches these notes; a note does not grant permission for a decision.
-When the report is complete, tell the person here they may clear this window with `/new`.
-Do not clear it yourself; directory menus and permission prompts belong to the person.
+When the report is complete, tell the person here they may clear this window with `/clear`.
+Do not clear it yourself; unexpected menus and permission prompts belong to the person.

@@ -55,6 +55,8 @@ export interface Loadable<T> {
 
 export interface BoardData {
   rows: Row[]
+  /** Board whose late counts still belong after a chart-only tree replacement. */
+  chartSource?: BoardData
   /** `/api/tree` (`tui --json --deep`): where every row stands and in which order (data/index.ts). */
   tree?: TreeRow[]
   /** What moai said on stderr beside the lists (source.ts Rows): a line it could not read, a notice. */
@@ -277,6 +279,7 @@ export type Action =
   /** `order` is the ids in the order they were drawn before this read, to place the cursor after it. */
   | { type: 'board-loaded'; data: BoardData; order?: string[] }
   | { type: 'board-failed'; problem: Outcome }
+  | { type: 'chart-tree'; rows: BoardData['rows']; tree: NonNullable<BoardData['tree']>; clearProblem?: Outcome | null }
   /**
    * The status counts that came after the rows of `data` (the board-loaded they belong to); null when they could not
    * be read. A later read's board has its own counts, so counts for any board but the one shown are dropped.
@@ -388,10 +391,13 @@ export function reduce(state: State, action: Action): State {
     case 'board-failed':
       // The rows read before stay on screen; the problem is shown beside them.
       return { ...state, board: { ...state.board, loading: false, problem: action.problem } }
+    case 'chart-tree':
+      if (!state.board.value || state.board.value.rows !== action.rows || state.board.loading) return state
+      return { ...state, board: { ...state.board, problem: action.clearProblem && state.board.problem === action.clearProblem ? null : state.board.problem, value: { ...state.board.value, tree: action.tree, chartSource: state.board.value.chartSource ?? state.board.value } } }
     case 'groups': {
       // Only the counts change: the rows, and so the cursor and the drawn order, stay.
-      if (state.board.value !== action.data) return state
-      const { groups: _drawn, ...uncounted } = action.data
+      if (state.board.value !== action.data && state.board.value?.chartSource !== action.data) return state
+      const { groups: _drawn, chartSource: _source, ...uncounted } = state.board.value!
       return { ...state, board: { ...state.board, value: action.groups ? { ...uncounted, groups: action.groups } : uncounted } }
     }
     case 'boot':
