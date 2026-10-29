@@ -184,9 +184,10 @@ What counts is work inside the repository — `.moai/`, `.claude/`, `.agents/`, 
 `.worktrees/`, `target/` and anything outside the repository (scratchpad, temporary
 files) do not. Shell writes (`>`, `>>`, `sed -i`, `tee`, the destination of `cp`·`mv`·`install`)
 count as much as `Edit` and `Write`. If it was not in the plan, create it with `moai add 'a title'`
-and pick that up. A session that holds only work whose worktree stands is refused a write that
-lands in the main checkout — wherever its shell stands — and a write into another epic's worktree;
-the refusal names the same file in its own worktree.
+and pick that up. A session holding work is refused a write into another epic's worktree, even
+while a row it holds has no worktree yet; one whose held work all has its worktree standing is
+also refused a write that lands in the main checkout — wherever its shell stands. The refusal
+names the same file where the work it belongs to lives.
 
 **3. A review is an issue too.** Before you call a review, create a review issue tied to
 what you are reviewing. The review is `/code-review` in Claude Code; in Codex and

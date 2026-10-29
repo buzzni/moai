@@ -96,7 +96,7 @@ column, it is running. There is no command that opens it and no new field.
 - **Nothing is blocked.** A `moai mv` that picks up work from outside goes straight
   through, and so does a `--milestone` that carries a row in — the rule above is a rule
   for you, not a refusal. What is already picked up is simply finished — the same ground as never taking work back late
-- If two milestones are running, both are inside, and the ordering within them is as it always was (`p` · age)
+- If two milestones are running, both are inside, and the ordering within them is the one below (`p` · deadline · age)
 - **Within one `p` the nearer deadline comes first**, whether a milestone runs or not, and a
   row with none comes last. It follows the earliest deadline of the row, its milestone, epic,
   and open parents, as `due apply` does. Where a milestone runs, its work still comes before outside work of the same `p`

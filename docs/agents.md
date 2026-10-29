@@ -350,14 +350,14 @@ gets through — run it as given. None of them waits on a person except rule 5.
    held issue — `moai mv <id> in_progress`, or `moai add` first if it was not in
    the plan. Not counted: `.moai/`, `.claude/`, `.agents/`, `.codex/`,
    `.worktrees/`, `.git/`, `target/`, `node_modules/`, and anything outside the
-   repository. A session whose held work all has a worktree standing
-   (`.worktrees/<epic>`) is refused a write that lands in the main checkout —
-   wherever its shell stands, and also when the write comes after a pick-up on the
-   same line — and a write into another epic's worktree; the refusal names the same
-   file inside its own worktree. Workers stay in the root and reach their worktree
-   by absolute path, so this is what keeps a relative path from landing in the
-   checkout every session shares. `git apply`, `patch` and what a script writes are
-   not seen (moai-qrja)
+   repository. A session holding work is refused a write into another epic's
+   worktree, even while a held row has no worktree yet. A session whose held work all
+   has a worktree standing (`.worktrees/<epic>`) is also refused a write that lands in
+   the main checkout — wherever its shell stands, and also when the write comes after a
+   pick-up on the same line. The refusal names the same file where its work lives.
+   Workers stay in the root and reach their worktree by absolute path, so this is
+   what keeps a relative path from landing in the checkout every session shares.
+   `git apply`, `patch` and what a script writes are not seen (moai-qrja)
 3. **A review is an issue too.** `/code-review` needs an open review issue tied to
    the held work, and that issue needs an angle in its body (`-b`) — what is being
    looked for and why. Moving it to `done` needs a closing line (`-m`) saying what
@@ -727,7 +727,8 @@ every session in it, so when to update is yours.
   what stands there
 - **No idle worker.** On your yes it opens a split beside its own tab running
   `cd "<root>" && claude --model <model>`, without taking focus, and evens the
-  splits out. When cmux has no room for another pane it stops and tells you
+  splits out. A root holding `!` gets no split — the tab's shell would expand it — so
+  it tells you the path. When cmux has no room for another pane it stops and tells you
 
 It never closes a tab, a workspace or a window, never moves focus, and never
 passes `--force`.
@@ -817,7 +818,8 @@ to bring them back ("recover the sessions", "되살려"). It loads `moai-recover
   workers' names may have changed. Inside cmux (0.65.0 or later) it does the
   same with a split tab per session, and when cmux has no room for another pane
   the sessions left get the lines to type. Outside both it prints, per session,
-  `cd "<dir>" && claude --resume <id>` and the note to paste
+  `cd "<dir>" && claude --resume <id>` and the note to paste. A `<dir>` holding `!`
+  gets neither a tab nor that line: it names the path and the id for you to quote
 
 A session Saycode ran is not resumed in a pane — that would run its
 conversation outside Saycode. It tells such a session from its transcript,

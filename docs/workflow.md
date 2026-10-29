@@ -194,7 +194,8 @@ and wait on each other to merge.
   `tee` or a `cp`/`mv`/`install` destination, wherever the shell stands — is
   refused. A row without a worktree permits a root write while its worktree is being
   created, but does not permit a write into another epic's worktree. The refusal names
-  the same file in the held worktree when one exists
+  the same file in the held worktree; for a held row that has none yet, it says to make
+  one or names the same file in the root checkout
 - **Work a supervisor hands out inside a milestone branches from that
   milestone's branch**, `milestone/<milestone id>`, instead of the root branch,
   and merges back into it; the branch lives in its own worktree,
