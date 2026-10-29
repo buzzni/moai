@@ -12,11 +12,10 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
-### Changed
-
-- Supervisors clear Codex worker windows with `/clear`, preserving the current directory. (moai-2t9u)
-
 ### Fixed
+
+- Supervisors clear Codex worker windows with `/clear` instead of `/new`, which asked
+  where the new conversation should run and left the clear to you. (moai-2t9u)
 
 - `moai skill status` warns when a planted Claude plugin is missing its local
   `marketplace.json`, and `--json` reports `market_missing`. `moai skill install`

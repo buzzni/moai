@@ -1188,8 +1188,10 @@ const REVIEW_IN_SESSION: &str = "the review this session has, else read the diff
 /// 스킬 본문은 하는 일로 말하고 칸을 이 표에서 읽게 한다. 에이전트마다 SKILL.md 를 따로 내면 같은 글이 세 벌이 되어
 /// 반드시 갈라진다(이 모듈 머리의 "왜 한 출처인가") — 그래서 세 트리가 같은 글을 받고, 다른 것은 이 표의 열 하나다.
 ///
-/// **칸의 글은 기획 노트(마일스톤 moai-5m2h)의 조사와 사용자 결정에서 왔다** — Codex 의 `request_user_input`·`/clear`,
-/// Antigravity 의 `/clear`(2026-10-04 사용자 결정, 이 컨테이너에서는 못 쟀다 — 에이전트를 띄우지 않는다). 못 확인한
+/// **칸의 글은 기획 노트(마일스톤 moai-5m2h)의 조사와 사용자 결정에서 왔다** — Codex 의 `request_user_input`,
+/// Antigravity 의 `/clear`(2026-10-04 사용자 결정, 이 컨테이너에서는 못 쟀다 — 에이전트를 띄우지 않는다). Codex 의
+/// `/clear` 는 그 조사가 고른 `/new` 를 갈아 낀 것이다(2026-10-27 사용자 지시, moai-2t9u) — `/new` 는 새 대화를 어디서
+/// 돌릴지 묻는 작업 디렉터리 메뉴를 띄워, 감독이 사람 없이 창을 못 비웠다. 못 확인한
 /// 것은 지어 적지 않고 [`NO_VERB`] 로 둔다: 지어낸 명령은 치면 실패하고, 빈 칸은 표 아래 한 줄(사람에게 알리고
 /// 건너뛴다)이 받는다.
 ///
@@ -3563,11 +3565,13 @@ Use `/clear`, with text and Enter in separate calls:
     tmux send-keys -t <pane> Enter
     tmux capture-pane -p -e -t <pane>
 
-Each look is a separate call. Do not send a fixed number of Enters blindly. Confirm the
-old conversation is gone, the cwd is the same, and the fresh composer is empty before
-sending work. An unexpected menu, question or permission prompt belongs to the person.
-If `/clear` remains typed or the result is unclear, stop and tell them — a later Enter
-could erase the next work.
+Each look is a separate call. Before the Enter, the composer holds `/clear` and nothing
+else — if it does not, stop and tell the person. Do not send a fixed number of Enters blindly.
+Confirm the old conversation is gone, the cwd is the same, and the fresh composer is empty
+before sending work.
+An unexpected menu, question or permission prompt belongs to the person: tell them which
+pane shows it, and read the pane again after they answer. If `/clear` remains typed or the
+result is unclear, stop and tell them — a later Enter could erase the next work.
 
 ### Paste the assignment
 
@@ -4368,10 +4372,13 @@ Read the screen once, then send an explicit Enter in a separate call:
     cmux send-key --surface <surface> enter
     cmux read-screen --surface <surface> --lines 40
 
-Require a fresh screen in the same cwd and an empty composer before assigning work.
-An unexpected menu, question or permission prompt belongs to the person. If a command
-remains typed, a screen is cropped, or cmux refuses any input, stop and tell the person.
-Do not resend the command or paste the work over it.
+Before the Enter, the composer holds `/clear` and nothing else — if it does not, stop and
+tell the person. Never guess an Enter count. Require a fresh screen in the same cwd and an
+empty composer before assigning work.
+An unexpected menu, question or permission prompt belongs to the person: tell them which
+tab shows it, and read the screen again after they answer. If a command remains typed, a
+screen is cropped, or cmux refuses any input, stop and tell the person. Do not resend the
+command or paste the work over it.
 
 ### Paste the assignment
 
@@ -8124,13 +8131,20 @@ stop sending outside work while a release runs",
             let row =
                 VERBS.iter().find(|v| v.words[0].contains(word)).unwrap_or_else(|| panic!("{word} 의 줄이 표에 없다"));
             for (vendor, cell) in VENDORS.iter().zip(row.words).skip(1) {
-                // `/model` 은 Codex 도, `/clear` 는 Codex 와 Antigravity 도 같은 낱말이다.
+                // `/model` 은 Codex 도, `/clear` 는 Antigravity(2026-10-04 사용자 결정)도 Codex(2026-10-27 사용자 지시,
+                // moai-2t9u)도 같은 낱말이다.
                 let shared = matches!((word, *vendor), ("/model", "Codex") | ("/clear", "Codex" | "Antigravity"));
                 if !shared {
                     assert!(!cell.contains(word), "{vendor} 열에 Claude 의 {word} 가 섰다 — {}", row.step);
                 }
             }
         }
+        // 위 고리는 세 열이 다 같은 낱말인 `/clear` 줄을 아무것도 안 잰다 — `/new` 로 되돌린 칸을 여기서 잡는다.
+        let clear = VERBS.iter().find(|v| v.step.starts_with("Clear the window")).expect("창 비우기 줄이 표에 없다");
+        assert_eq!(
+            clear.words, ["`/clear`"; 3],
+            "Codex 는 `/new` 가 아니라 `/clear` 로 비운다 — `/new` 는 작업 디렉터리 메뉴를 띄운다"
+        );
         for v in &VERBS {
             for (vendor, cell) in VENDORS.iter().zip(v.words) {
                 assert!(!cell.trim().is_empty(), "{vendor} 의 `{}` 칸이 비었다 — 없으면 {NO_VERB} 로 적는다", v.step);
@@ -8142,9 +8156,7 @@ stop sending outside work while a release runs",
     fn codex_worker_changes_the_claude_steps_without_repeating_them() {
         let text = worker_codex();
         assert!((60..=100).contains(&text.lines().count()), "차이 글이 짧은 참고 파일의 길이를 벗어났다");
-        for word in
-            ["EnterWorktree", "ExitWorktree", "AskUserQuestion", "/code-review", "TaskStop", "SendMessage("]
-        {
+        for word in ["EnterWorktree", "ExitWorktree", "AskUserQuestion", "/code-review", "TaskStop", "SendMessage("] {
             let lines: Vec<_> = text.lines().filter(|l| l.contains(word)).collect();
             assert_eq!(lines.len(), 1, "Claude 낱말이 표 밖에도 섰다 — {word}");
             let columns: Vec<_> = lines[0].split('|').collect();
@@ -9246,7 +9258,9 @@ stop sending outside work while a release runs",
             "cmux paste --surface <surface> --submit - < <file>",
             "cmux send --surface <surface> -- '/clear'",
             "cmux send-key --surface <surface> enter",
-            "An unexpected menu, question or permission prompt belongs to the person",
+            "An unexpected menu, question or permission prompt belongs to the person: tell them which\ntab shows it",
+            "the composer holds `/clear` and nothing else",
+            "Never guess an Enter count",
             "The review brief",
             "Report-checked:",
         ] {
@@ -9436,7 +9450,8 @@ stop sending outside work while a release runs",
             "`Report-checked:`",
             "tmux send-keys -t <pane> /clear\n",
             "text and Enter in separate calls",
-            "An unexpected menu, question or permission prompt belongs to the person",
+            "An unexpected menu, question or permission prompt belongs to the person: tell them which\npane shows it",
+            "the composer holds `/clear` and nothing\nelse",
             "Do not send a fixed number of Enters blindly",
             "tmux load-buffer -b moai-send <file>",
             "tmux paste-buffer -p -d -b moai-send -t <pane>",
@@ -9453,6 +9468,7 @@ stop sending outside work while a release runs",
             assert_eq!(line, "the person under `[models] codex`. Default example: `gpt-6.1-sol`.");
         }
         assert!(!codex.contains("/clear Enter"), "Codex /clear 와 Enter 를 한 호출에 친다");
+        assert!(!codex.contains("/new"), "Codex 를 작업 디렉터리 메뉴를 띄우는 /new 로 비운다");
         assert!(tmux_calls(codex) >= 12, "새 Codex 절의 tmux 줄을 안 잰다");
         let launches: Vec<_> = codex.lines().filter(|line| line.contains("'codex ")).collect();
         assert_eq!(launches.len(), 1, "Codex 띄우는 줄이 하나가 아니다");

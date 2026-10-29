@@ -500,10 +500,13 @@ Read the screen once, then send an explicit Enter in a separate call:
     cmux send-key --surface <surface> enter
     cmux read-screen --surface <surface> --lines 40
 
-Require a fresh screen in the same cwd and an empty composer before assigning work.
-An unexpected menu, question or permission prompt belongs to the person. If a command
-remains typed, a screen is cropped, or cmux refuses any input, stop and tell the person.
-Do not resend the command or paste the work over it.
+Before the Enter, the composer holds `/clear` and nothing else — if it does not, stop and
+tell the person. Never guess an Enter count. Require a fresh screen in the same cwd and an
+empty composer before assigning work.
+An unexpected menu, question or permission prompt belongs to the person: tell them which
+tab shows it, and read the screen again after they answer. If a command remains typed, a
+screen is cropped, or cmux refuses any input, stop and tell the person. Do not resend the
+command or paste the work over it.
 
 ### Paste the assignment
 

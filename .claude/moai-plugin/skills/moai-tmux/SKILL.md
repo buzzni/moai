@@ -435,11 +435,13 @@ Use `/clear`, with text and Enter in separate calls:
     tmux send-keys -t <pane> Enter
     tmux capture-pane -p -e -t <pane>
 
-Each look is a separate call. Do not send a fixed number of Enters blindly. Confirm the
-old conversation is gone, the cwd is the same, and the fresh composer is empty before
-sending work. An unexpected menu, question or permission prompt belongs to the person.
-If `/clear` remains typed or the result is unclear, stop and tell them — a later Enter
-could erase the next work.
+Each look is a separate call. Before the Enter, the composer holds `/clear` and nothing
+else — if it does not, stop and tell the person. Do not send a fixed number of Enters blindly.
+Confirm the old conversation is gone, the cwd is the same, and the fresh composer is empty
+before sending work.
+An unexpected menu, question or permission prompt belongs to the person: tell them which
+pane shows it, and read the pane again after they answer. If `/clear` remains typed or the
+result is unclear, stop and tell them — a later Enter could erase the next work.
 
 ### Paste the assignment
 
