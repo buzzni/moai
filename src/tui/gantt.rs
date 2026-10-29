@@ -53,6 +53,16 @@ pub(super) enum Plan {
     Day(i64),
 }
 
+/// 그 줄의 계획을 여기서 못 쓰는 까닭([`App::unwritable`], moai-ekg6.ej7).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Unwritable {
+    /// 산 스냅샷에 읽히는 줄이 없는 아카이브의 줄이다 — 쓰기가 `not_found` 로만 돌아온다.
+    Archived,
+    /// 같은 id 의 다른 줄이 있고, 쓰기·놓기·그리기가 id 로 찾는 줄([`crate::nav::Index::find`])은 그쪽이다 — 산 줄의 아카이브
+    /// 사본(`archive_duplicate_id`)이 그렇다. 이 줄을 옮기면 다른 줄이 옮는다.
+    Copy,
+}
+
 impl Plan {
     /// 쓸 날짜 변경. 절대 시작은 그대로, 상대 옮기기는 지금 줄의 제 날짜에서 잰다.
     fn change(self, i: &crate::model::Issue) -> Result<crate::model::DateChange, Unshifted> {
@@ -351,12 +361,19 @@ impl App {
         self.site.origin.branch(&self.site.issues[at].id)
     }
 
-    /// Only rows present in the live snapshot can be dragged. Age-based archive
-    /// visibility is separate: an old completed row can still be live.
-    fn live_for_drag(&self, at: usize) -> bool {
-        self.site.repo.as_ref().is_none_or(|repo| {
-            repo.read().is_ok_and(|load| load.issues.iter().any(|i| i.id == self.site.issues[at].id))
-        })
+    /// 이 줄의 계획을 **여기서 못 쓰는 까닭** — 산 스냅샷에 선 바로 그 줄이어야 쓴다(moai-ekg6.ej7). web 의 `unwritable` 이
+    /// 아카이브 줄을 막는 것과 같은 까닭이다(web 은 나이로 아카이브인 산 줄까지 막고, 여기는 안 막는다 — 오래 닫힌 줄도 산
+    /// 스냅샷에 있으면 쓴다). 막대 잡기·빈 날 누르기는 말없이 안 세우고([`App::chart_pointer`]·[`App::plan_day`]), 키와 놓기는
+    /// 까닭을 댄다([`App::shift_from`]). 적재가 섞기 전에 잰 값을 읽는다 — 누를 때마다 스냅샷을 다시 읽지 않는다.
+    fn unwritable(&self, at: usize) -> Option<Unwritable> {
+        let id = &self.site.issues[at].id;
+        if self.site.ground.archive_only.contains(id) {
+            Some(Unwritable::Archived)
+        } else if self.site.index.find(id) != Some(at) {
+            Some(Unwritable::Copy)
+        } else {
+            None
+        }
     }
 
     /// 그 줄의 계획을 옮겨 쓴다. 못 옮기면(날이 없다·멤버에서 센 막대다) 까닭을 알림으로 댄다 — 조용히 먹으면 키가
@@ -376,7 +393,19 @@ impl App {
             return;
         }
         let i = &self.site.issues[at];
+        let refused = self.unwritable(at);
         match shift_intent(i, edge, days, filled) {
+            // 키(`<`·`>`·`{`·`}`)와 놓기가 함께 지나는 문 — 여기서 못 쓰는 줄은 까닭을 대고 안 쓴다(moai-ekg6.ej7). 아카이브에만
+            // 있는 줄은 쓰면 `not_found` 로만 돌아오고, 산 줄의 아카이브 사본은 쓰면 산 줄이 옮는다(채운 시작은 사본에서 센다).
+            // 날 없는 줄도 그렇다: "`moai edit` 으로 적는다" 는 그 줄에서 못 듣는 말이다. 멤버에서 센 묶음은 제 말(멤버를
+            // 옮긴다)을 그대로 대고, 제자리에서 뗀 놓기는 여전히 말이 없다.
+            Ok(_) | Err(Unshifted::NoPlan) if refused.is_some() => {
+                let said = match refused {
+                    Some(Unwritable::Copy) => say(self.site.lang, "tui.gantt.copy"),
+                    _ => say(self.site.lang, "tui.gantt.archived"),
+                };
+                self.notice = Some(fill(said, &[("id", &i.id)]));
+            }
             Ok(plan) => self.write_plan(PlanMove { id: i.id.clone(), plan }),
             Err(Unshifted::Still) => {}
             Err(why) => self.notice = Some(crate::view::unshifted(self.site.lang, why, &i.id)),
@@ -452,7 +481,7 @@ impl App {
             moai_gantt::Hit::Bar { row, part } => {
                 self.move_to(row);
                 if let Some(i) =
-                    self.here_at(&rows, row).filter(|&i| self.elsewhere(i).is_none() && self.live_for_drag(i))
+                    self.here_at(&rows, row).filter(|&i| self.elsewhere(i).is_none() && self.unwritable(i).is_none())
                 {
                     let id = self.site.issues[i].id.clone();
                     let c = col(at.x);
@@ -472,10 +501,10 @@ impl App {
     }
 
     /// 계획 날짜가 없는 줄의 빈 날을 눌렀다 — 그 날 하루를 계획으로 세운다(moai-i4hf.9xi). 날이 이미 있거나(막대 밖의 빈
-    /// 칸을 누른 것이다) 멤버에서 센 묶음이면 커서만 옮긴 것이다.
+    /// 칸을 누른 것이다) 멤버에서 센 묶음이거나 여기서 못 쓰는 줄이면([`App::unwritable`]) 커서만 옮긴 것이다.
     fn plan_day(&mut self, at: usize, day: i64) {
         let i = &self.site.issues[at];
-        if self.elsewhere(at).is_some() || i.has_days() || crate::report::is_group(i) {
+        if self.elsewhere(at).is_some() || i.has_days() || crate::report::is_group(i) || self.unwritable(at).is_some() {
             return;
         }
         self.write_plan(PlanMove { id: i.id.clone(), plan: Plan::Day(day) });
@@ -596,8 +625,11 @@ impl App {
 /// 한다. 시작이 기한을 넘거나 위의 기한을 넘는 날(`store::write_locked`, moai-xf0p.cbu)은 거절되고 그 거절문이 배너에
 /// 선다. **저널은 안 적는다** — 필드 고치기다(CLAUDE.md "저널은 상태 계산에 읽히지 않는다").
 ///
-/// 되면 알림 끝에 **되돌리는 명령**을 붙인다 (상대 이동은 역이동) — 손이 미끄러진 끌기를 도구 안에서 되돌릴
-/// 길이 보여야 한다. 위 기한을 당겨 아래 줄이 넘쳤으면 그 줄도 댄다 — `moai edit` 이 stderr 로 대는 그것이다.
+/// 되면 알림 끝에 **되돌리는 명령**을 붙인다 — 손이 미끄러진 끌기를 도구 안에서 되돌릴 길이 보여야 한다. **이 쓰기가 옮긴
+/// 날만 거꾸로 옮긴다**(moai-ekg6.sml, web 의 `undoOf` 와 같은 자) — 쓰기 앞의 날을 통째로 되쓰면 그새 옆 세션이 적은 날을
+/// 덮는다. 어느 날이 있었는지는 락 안에서 읽은 줄로 가른다. **남는 틈이 하나 있다**: 이 쓰기가 세운 날을 비우는 것과 고른
+/// 시작을 되쓰는 것은 절대 값이라, 옮긴 뒤 되돌리기 전에 옆 세션이 그 칸에 적은 날을 덮는다 — `moai edit` 에 견주고 쓰는
+/// 길이 없어서다. 위 기한을 당겨 아래 줄이 넘쳤으면 그 줄도 댄다 — `moai edit` 이 stderr 로 대는 그것이다.
 pub(super) fn commit_plan(app: &mut App) {
     let Some(PlanMove { id, plan }) = app.plan_move.clone() else { return };
     let lang = app.site.lang;
@@ -621,7 +653,10 @@ pub(super) fn commit_plan(app: &mut App) {
         })?;
         let after = i.clone();
         overflow = crate::report::overflow_by(issues, &before, &after, cfg);
-        was = Some((before.starts_on, before.due_on));
+        // **읽히는 날만 든다** — `Issue::shifted` 가 옮길 날을 고른 자(`planned_start`·`deadline`)와 같다. 못 읽는 글
+        // (손으로 푼 `2026-10-24T00:00:00Z`)은 옮기기가 다른 쪽 날에서 센 날로 덮었으니 되돌릴 것은 "날 없음" 이고,
+        // 그 글을 `--start` 에 되쓰는 명령은 `moai edit` 이 거절한다.
+        was = Some((before.planned_start().map(str::to_string), before.deadline().map(str::to_string)));
         Ok((Vec::new(), Touched { id: id.clone(), done }))
     });
     // 누군지 물으러 갔으면 들고 있는다 — 답이 오면 이것을 다시 쓴다. 됐든 거절됐든 끝난 쓰기는 비운다.
@@ -632,16 +667,21 @@ pub(super) fn commit_plan(app: &mut App) {
         return;
     }
     let Some((start, due)) = was else { return };
-    let none = || "none".to_string();
-    let cmd = format!("moai edit {id}");
+    // 옮긴 날이 있던 쪽은 같은 날 수를 거꾸로 — **몸통도 옮긴 쪽만이다**: 한쪽 날만 있던 줄에 `--shift` 를 대면 그새 옆
+    // 세션이 다른 쪽에 적은 날까지 민다. 이 쓰기가 새로 세운 쪽(없던 끝을 다른 쪽에서 센 것, 하루 세우기)은 비우고, 고른
+    // 시작(`Plan::Start`)은 그 칸만 쓰기 앞의 값으로 되돌린다.
     let undo = match plan {
-        Plan::Shift(Edge::Body, days) => format!("{cmd} --shift {}", -days),
-        Plan::Shift(Edge::Start, days) if start.is_some() => format!("{cmd} --shift-start {}", -days),
-        Plan::Shift(Edge::End, days) if due.is_some() => format!("{cmd} --shift-due {}", -days),
-        Plan::Shift(Edge::Start, _) | Plan::Start(_) => format!("{cmd} --start {}", start.unwrap_or_else(none)),
-        Plan::Shift(Edge::End, _) => format!("{cmd} --due {}", due.unwrap_or_else(none)),
-        Plan::Day(_) => format!("{cmd} --start none --due none"),
+        Plan::Shift(Edge::Body, days) if start.is_none() => format!("--shift-due {}", -days),
+        Plan::Shift(Edge::Body, days) if due.is_none() => format!("--shift-start {}", -days),
+        Plan::Shift(Edge::Body, days) => format!("--shift {}", -days),
+        Plan::Shift(Edge::Start, days) if start.is_some() => format!("--shift-start {}", -days),
+        Plan::Shift(Edge::End, days) if due.is_some() => format!("--shift-due {}", -days),
+        Plan::Shift(Edge::Start, _) => "--start none".to_string(),
+        Plan::Shift(Edge::End, _) => "--due none".to_string(),
+        Plan::Start(_) => format!("--start {}", start.as_deref().unwrap_or("none")),
+        Plan::Day(_) => "--start none --due none".to_string(),
     };
+    let undo = format!("moai edit {id} {undo}");
     let mut told = app.notice.take().unwrap_or_default();
     told.push_str(&fill(say(lang, "tui.gantt.undo"), &[("cmd", &undo)]));
     if !overflow.is_empty() {
@@ -902,38 +942,123 @@ mod tests {
         assert_eq!(std::fs::read(dir.join("side/.moai/issues.jsonl")).unwrap(), side_before);
     }
 
+    /// **아카이브에만 있는 줄은 간트에서 못 옮긴다**(moai-ekg6.ej7) — 쓰기는 산 스냅샷의 읽힌 줄에서 id 로 줄을 찾아
+    /// `not_found` 로만 돌아오니, 막대의 몸통·양 끝을 눌러도 끌기가 안 서고, 날 없는 줄의 빈 날을 눌러도 하루를 안 세우고,
+    /// 키는 까닭을 대고 안 쓴다(web 의 `unwritable`). 산 줄을 못 읽는 id 의 아카이브 사본도 그렇다. 산 줄과 같은 id 의
+    /// 아카이브 사본은 잡지도 키로 옮기지도 않는다 — 쓰면 그 산 줄이 사본에서 센 날로 옮는다.
+    ///
+    /// 같은 셈이 산 줄의 막대는 잡는다 — 막대를 빗맞힌 시험이 막은 것으로 읽히지 않게(옆 워크트리 줄의 시험과 같은 전제).
+    /// 그 산 줄 하나는 나이로 아카이브인 줄(오래 닫힌 줄)이다: 막는 자는 아카이브 **파일**이지 시계가 아니다.
     #[test]
     fn archive_only_bar_cannot_start_a_drag() {
         use ratatui::crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind as K};
         let (dir, mut a) = on_disk("archive-drag");
-        let mut archived = make("argos-0099", Kind::Issue);
-        archived.status = Status::new("done");
-        archived.status_since = "2026-09-01T00:00:00Z".into();
-        archived.done_at = Some("2026-09-01T00:00:00Z".into());
-        archived.starts_on = Some("2026-10-20".into());
-        archived.due_on = Some("2026-10-24".into());
-        crate::archive::append(&dir, &[archived], &cfg()).unwrap();
+        let close = |i: &mut Issue, days: Option<(&str, &str)>| {
+            i.status = Status::new("done");
+            i.status_since = "2026-09-01T00:00:00Z".into();
+            i.done_at = Some("2026-09-01T00:00:00Z".into());
+            if let Some((start, due)) = days {
+                i.starts_on = Some(start.into());
+                i.due_on = Some(due.into());
+            }
+        };
+        let closed = |id: &str, days: Option<(&str, &str)>| {
+            let mut i = make(id, Kind::Issue);
+            close(&mut i, days);
+            serde_json::to_string(&i).unwrap() + "\n"
+        };
+        // 산 스냅샷의 오래 닫힌 줄 — 나이로는 아카이브지만 쓰기가 닿는다.
+        edit_on_disk(&dir, "argos-0009", |i| close(i, Some(("2026-10-20", "2026-10-24"))));
+        // 못 읽는 산 줄 — id 는 읽힌다(`LoadError::id`). 쓰기의 닫는 함수는 이 줄을 못 본다.
+        let mut live_file = std::fs::OpenOptions::new().append(true).open(dir.join(".moai/issues.jsonl")).unwrap();
+        std::io::Write::write_all(&mut live_file, b"{\"id\":\"argos-0097\",\"title\":\n").unwrap();
+        drop(live_file);
+        // 아카이브에만 있는 줄 둘(날 있는 것·없는 것), 못 읽는 산 줄의 사본, 산 argos-0003 의 사본(`archive_duplicate_id`).
+        std::fs::create_dir_all(crate::archive::dir(&dir)).unwrap();
+        let archive = crate::archive::path(&dir, "2026");
+        let lines = closed("argos-0003", Some(("2026-10-21", "2026-10-23")))
+            + &closed("argos-0097", Some(("2026-10-20", "2026-10-24")))
+            + &closed("argos-0098", None)
+            + &closed("argos-0099", Some(("2026-10-20", "2026-10-24")));
+        std::fs::write(&archive, lines).unwrap();
+        let live_before = std::fs::read(dir.join(".moai/issues.jsonl")).unwrap();
+        let archive_before = std::fs::read(&archive).unwrap();
         a.reload();
         a.view.show_archived = true;
         a.view.hidden.clear();
         a.see();
         a.hit("SPC g g");
-        let _ = draw::tests::render(&mut a, 160, 30);
+        let _ = draw::tests::render(&mut a, 160, 40);
         let area = a.drawn.chart.unwrap();
-        let laid = moai_gantt::Layout::of(area, &a.chart);
+        let laid = moai_gantt::Layout::of(area, &a.chart_view(area));
         let rows = a.rows();
-        let n = ids(&a).iter().position(|s| s == "argos-0099").unwrap();
         let chart = a.chart_of(&rows, 0..0, &|_, _| ratatui::text::Line::default());
-        let (start, end) = moai_gantt::bar_cells(&a.chart, chart.rows[n].planned.unwrap());
-        let y = laid.dates_body.y + (n - a.chart.first_row) as u16;
-        for cell in [start, (start + end) / 2, end - 1] {
-            let x = laid.dates_body.x + cell as u16;
-            a.mouse(MouseEvent { kind: K::Down(MouseButton::Left), column: x, row: y, modifiers: KeyModifiers::NONE });
-            assert_eq!(on(&a), "argos-0099");
+        let ev = |kind, column, row| MouseEvent { kind, column, row, modifiers: KeyModifiers::NONE };
+        let row_at = |at: usize| {
+            rows.iter()
+                .position(|r| matches!(r, Row::Item(Seat::Here, e, _) if e.at() == Some(at)))
+                .expect("전제: 그 줄이 목록에 안 섰다")
+        };
+        let found = |id: &str| a.site.index.find(id).unwrap();
+        let copy3 = (0..a.site.issues.len())
+            .find(|&at| a.site.issues[at].id == "argos-0003" && at != found("argos-0003"))
+            .expect("전제: argos-0003 의 아카이브 사본이 안 섰다");
+        let (n_live3, n_copy3) = (row_at(found("argos-0003")), row_at(copy3));
+        let [n09, n97, n98, n99] = ["argos-0009", "argos-0097", "argos-0098", "argos-0099"].map(|id| row_at(found(id)));
+        let top = a.chart.first_row;
+        let y_of = |n: usize| laid.dates_body.y + (n - top) as u16;
+        let bar = |n: usize| (n, moai_gantt::bar_cells(&a.chart, chart.rows[n].planned.expect("전제: 막대가 없다")));
+        let [bar_live3, bar_live09, bar_only97, bar_only99, bar_copy3] = [n_live3, n09, n97, n99, n_copy3].map(bar);
+
+        // 같은 셈이 산 줄의 막대는 잡는다 — 제자리에서 떼니 날은 안 옮는다.
+        for (n, (c0, c1)) in [bar_live3, bar_live09] {
+            let x = laid.dates_body.x + ((c0 + c1) / 2) as u16;
+            a.mouse(ev(K::Down(MouseButton::Left), x, y_of(n)));
+            assert!(a.chart_drag.is_some(), "전제: 산 줄 {} 의 막대를 못 잡았다", on(&a));
+            a.mouse(ev(K::Up(MouseButton::Left), x, y_of(n)));
             assert!(a.chart_drag.is_none());
         }
+        // 아카이브에만 있는 줄들과 산 줄의 아카이브 사본 — 몸통과 양 끝 모두 커서는 옮기되 끌기는 안 세운다.
+        for (n, (c0, c1)) in [bar_only97, bar_only99, bar_copy3] {
+            for cell in [c0, (c0 + c1) / 2, c1 - 1] {
+                let x = laid.dates_body.x + cell as u16;
+                a.mouse(ev(K::Down(MouseButton::Left), x, y_of(n)));
+                assert_eq!(a.cursor, n, "막대를 눌러도 커서가 안 갔다");
+                assert!(a.chart_drag.is_none(), "{} 의 막대 끌기가 섰다", on(&a));
+                a.mouse(ev(K::Drag(MouseButton::Left), x + 4, y_of(n)));
+                a.mouse(ev(K::Up(MouseButton::Left), x + 4, y_of(n)));
+            }
+        }
+        // 날 없는 아카이브 줄의 빈 날 — 커서만 옮기고 하루를 안 세운다.
+        a.mouse(ev(K::Down(MouseButton::Left), laid.dates_body.x + 2, y_of(n98)));
+        a.mouse(ev(K::Up(MouseButton::Left), laid.dates_body.x + 2, y_of(n98)));
+        assert_eq!(on(&a), "argos-0098");
+        assert!(a.notice.is_none() && a.trouble.is_none(), "{:?} {:?}", a.notice, a.trouble);
+        // 키는 까닭을 대고 안 쓴다 — `not_found` 거절이 배너에 서지 않고, 날 없는 줄에 "`moai edit` 으로 적는다" 도 안 댄다.
+        // 사본에 선 커서의 키는 산 줄을 안 옮긴다 — 막대를 눌러 끌기가 안 선 뒤에도 커서는 그 사본에 남는다.
+        let (archived, copy) =
+            (super::say(a.site.lang, "tui.gantt.archived"), super::say(a.site.lang, "tui.gantt.copy"));
+        let pressed = [
+            ("argos-0097", n97, archived),
+            ("argos-0098", n98, archived),
+            ("argos-0099", n99, archived),
+            ("argos-0003", n_copy3, copy),
+        ];
+        for (id, n, said) in pressed {
+            for key in ["<", ">", "{", "}"] {
+                a.cursor = n;
+                a.hit(key);
+                let told = a.notice.clone().unwrap_or_default();
+                assert_eq!(told, super::fill(said, &[("id", id)]), "{id} {key}: {:?}", a.trouble);
+                assert!(a.trouble.is_none(), "{id} {key}: {:?}", a.trouble);
+            }
+        }
+        assert_eq!(std::fs::read(dir.join(".moai/issues.jsonl")).unwrap(), live_before);
+        assert_eq!(std::fs::read(&archive).unwrap(), archive_before);
     }
 
+    /// **`<`·`>` 는 막대를, `{`·`}` 는 시작만 하루 옮겨 쓴다**(moai-i4hf.9xi). 알림이 되돌리는 명령을 대고, 시작이 기한을
+    /// 넘는 쓰기는 거절되어 디스크가 그대로다. 날 없는 줄과 멤버에서 센 묶음은 까닭을 대고 안 쓴다.
     #[test]
     fn nudging_writes_the_plan_and_names_the_undo() {
         let (dir, mut a) = on_disk("nudge");
@@ -947,7 +1072,7 @@ mod tests {
             a.trouble
         );
         let told = a.notice.clone().unwrap_or_default();
-        assert!(told.contains("moai edit argos-0003 --shift -1"), "되돌리는 명령이 없다: {told}");
+        assert!(told.contains("`moai edit argos-0003 --shift -1`"), "되돌리는 명령이 없다: {told}");
         assert_eq!(on(&a), "argos-0003", "쓰고 나서 커서가 그 줄을 놓쳤다");
 
         a.hit("{");
@@ -982,29 +1107,66 @@ mod tests {
         assert!(a.notice.as_deref().is_some_and(|n| n.contains("argos-0001")), "묶음이 까닭을 안 댔다");
     }
 
+    /// **되돌리는 명령은 이 쓰기가 옮긴 날만 거꾸로 옮긴다**(moai-ekg6.sml) — web 의 `undoOf` 와 같은 자다. 있던 날은 같은
+    /// 날 수를 거꾸로(`--shift*`), 이 쓰기가 세운 날(없던 끝, 하루 세우기)과 고른 시작은 그 칸만 쓰기 앞의 값으로 되돌린다.
+    /// 몸통을 옮겨도 한쪽 날만 있었으면 그쪽만이다 — `--shift` 는 그새 다른 쪽에 선 날까지 민다. 못 읽는 날은 없는 날이다.
+    /// 명령은 백틱째 견준다: 앞머리만 보면 다른 칸까지 되쓰는 옛 꼴(`--start … --due …`)도 지나간다.
     #[test]
     fn undo_commands_follow_each_move_and_only_restore_created_edges() {
         use super::{Plan, PlanMove};
-        use crate::model::Edge;
+        use crate::model::{Edge, parse_date};
         let (dir, mut a) = on_disk("undo-edges");
         let id = "argos-0003";
-        for (edge, days, expected) in
+        let set = |a: &mut App, start: Option<&str>, due: Option<&str>| {
+            edit_on_disk(&dir, id, |i| {
+                i.starts_on = start.map(str::to_string);
+                i.due_on = due.map(str::to_string);
+            });
+            a.reload();
+        };
+        // 쓰고 나서 알림이 대는 되돌리기가 이 명령 하나인가.
+        let undoes = |a: &mut App, row: &str, plan: Plan, cmd: &str| {
+            a.write_plan(PlanMove { id: row.into(), plan });
+            let told = a.notice.clone().unwrap_or_else(|| panic!("안 썼다: {:?}", a.trouble));
+            assert!(
+                told.contains(&format!("`moai edit {row} {cmd}`")),
+                "{plan:?} 의 되돌리기가 `{cmd}` 가 아니다: {told}"
+            );
+        };
+
+        // 두 날이 다 있으면 옮긴 쪽을 같은 날 수만큼 거꾸로.
+        for (edge, days, cmd) in
             [(Edge::Start, 1, "--shift-start -1"), (Edge::End, 2, "--shift-due -2"), (Edge::Body, -1, "--shift 1")]
         {
-            a.write_plan(PlanMove { id: id.into(), plan: Plan::Shift(edge, days) });
-            assert!(a.notice.as_deref().unwrap().contains(expected), "{:?}", a.notice);
+            undoes(&mut a, id, Plan::Shift(edge, days), cmd);
         }
-        edit_on_disk(&dir, id, |i| i.due_on = None);
-        a.reload();
-        a.write_plan(PlanMove { id: id.into(), plan: Plan::Shift(Edge::End, 2) });
-        assert!(a.notice.as_deref().unwrap().contains("--due none"));
-        a.write_plan(PlanMove {
-            id: "argos-0004".into(),
-            plan: Plan::Day(crate::model::parse_date("2026-10-22").unwrap()),
-        });
-        assert!(a.notice.as_deref().unwrap().contains("--start none --due none"));
+        // 한쪽 날만 있던 줄의 몸통은 그쪽만.
+        set(&mut a, None, Some("2026-10-24"));
+        undoes(&mut a, id, Plan::Shift(Edge::Body, 1), "--shift-due -1");
+        set(&mut a, Some("2026-10-20"), None);
+        undoes(&mut a, id, Plan::Shift(Edge::Body, 1), "--shift-start -1");
+        // 없던 끝을 다른 쪽에서 세웠으면 그 끝을 비운다. 못 읽는 글(손으로 푼 꼴)도 없는 날이다 — 옮기기가 그 글을 다른
+        // 쪽에서 센 날로 덮었으니 `--shift-due` 로 되돌리면 아무도 안 적은 기한이 선다.
+        set(&mut a, Some("2026-10-20"), None);
+        undoes(&mut a, id, Plan::Shift(Edge::End, 2), "--due none");
+        set(&mut a, Some("2026-10-20"), Some("2026-10-24T00:00:00Z"));
+        undoes(&mut a, id, Plan::Shift(Edge::End, 2), "--due none");
+        set(&mut a, None, Some("2026-10-24"));
+        undoes(&mut a, id, Plan::Shift(Edge::Start, -2), "--start none");
+        // 고른 시작은 시작만 쓰기 앞의 값으로 — 못 읽는 시작은 `none` 이다(그 글을 되쓰는 명령은 `moai edit` 이 거절한다).
+        set(&mut a, Some("2026-10-20"), Some("2026-10-24"));
+        undoes(&mut a, id, Plan::Start(parse_date("2026-10-18").unwrap()), "--start 2026-10-20");
+        for unreadable in ["2026-10-20T00:00:00Z", ""] {
+            set(&mut a, Some(unreadable), Some("2026-10-24"));
+            undoes(&mut a, id, Plan::Start(parse_date("2026-10-18").unwrap()), "--start none");
+        }
+        // 하루 세우기는 두 날을 다 비운다.
+        undoes(&mut a, "argos-0004", Plan::Day(parse_date("2026-10-22").unwrap()), "--start none --due none");
     }
 
+    /// **간트 위의 마우스**(moai-i4hf.exq) — 고정 칸을 누르면 커서가 그 줄로, 막대를 끌면 놓을 때 계획이 옮아 쓰이고,
+    /// 날 없는 줄의 빈 날을 누르면 그 하루가 계획이 된다. 가로 휠·Shift+휠·날짜 머리 끌기는 축을, 나눔 선 끌기는 고정
+    /// 칸 폭을 바꾼다.
     #[test]
     fn the_mouse_picks_rows_drags_bars_and_slides_the_axis() {
         use ratatui::crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind as K};
@@ -1191,7 +1353,15 @@ mod tests {
             a.trouble
         );
         let told = a.notice.clone().unwrap_or_default();
-        assert!(told.contains("--shift -1"), "되돌리는 역이동이 없다: {told}");
+        assert!(told.contains("`moai edit argos-0003 --shift -1`"), "되돌리는 역이동이 없다: {told}");
+
+        // 되돌리기도 쓰는 순간의 줄로 고른다 — 화면에는 시작이 있는데 그새 지워졌으면 `{` 는 기한에서 센 시작을 세우고,
+        // 되돌리기는 그 시작을 비운다. 화면의 줄로 고르면 `--shift-start 1` 이 되어 아무도 안 적은 시작이 남는다.
+        edit_on_disk(&dir, "argos-0003", |i| i.starts_on = None);
+        a.hit("{");
+        assert_eq!(dates_on_disk(&dir, "argos-0003"), (Some("2026-10-30".into()), Some("2026-10-31".into())));
+        let told = a.notice.clone().unwrap_or_default();
+        assert!(told.contains("`moai edit argos-0003 --start none`"), "세운 시작을 안 비운다: {told}");
 
         // 화면에는 날이 없는데 그새 날이 섰다 — 하루 세우기가 그 날을 덮지 않는다.
         let _ = draw::tests::render(&mut a, 140, 20);
@@ -1377,7 +1547,9 @@ mod tests {
         put_cursor(&mut a, "argos-0003");
         a.hit(">");
         assert_eq!(dates_on_disk(&dir, "argos-0003"), (None, Some("2026-10-25".into())));
-        assert!(a.notice.as_deref().unwrap().contains("--shift -1"));
+        // 옮은 것은 기한 하나다 — `--shift` 로 되돌리면 그새 적힌 시작까지 민다(moai-ekg6.sml).
+        let told = a.notice.clone().unwrap_or_default();
+        assert!(told.contains("`moai edit argos-0003 --shift-due -1`"), "{told}");
     }
 
     #[test]
@@ -1393,7 +1565,9 @@ mod tests {
         put_cursor(&mut a, "argos-0003");
         a.hit("}");
         assert_eq!(dates_on_disk(&dir, "argos-0003"), (Some("2026-10-21".into()), Some("2026-10-24".into())));
-        assert!(a.notice.as_deref().unwrap().contains("--start none"));
+        // 고른 시작만 되돌린다 — 기한은 안 댄다.
+        let told = a.notice.clone().unwrap_or_default();
+        assert!(told.contains("`moai edit argos-0003 --start none`"), "{told}");
         a.hit("{");
         assert_eq!(
             dates_on_disk(&dir, "argos-0003").0.as_deref(),
@@ -1437,9 +1611,10 @@ mod tests {
         assert_eq!(shown.rows[n].planned.unwrap().0, crate::model::parse_date("2026-10-21").unwrap() * super::DAY);
         a.mouse(ev(K::Up(MouseButton::Left), x + step));
         assert_eq!(dates_on_disk(&dir, "argos-0003"), (Some("2026-10-21".into()), Some("2026-10-24".into())));
+        let told = a.notice.clone().unwrap_or_default();
         assert!(
-            a.notice.as_deref().unwrap().contains("--start 2026-10-22"),
-            "되돌리기는 락 안에서 읽은 시작을 보존한다"
+            told.contains("`moai edit argos-0003 --start 2026-10-22`"),
+            "되돌리기는 락 안에서 읽은 시작만 되돌린다: {told}"
         );
     }
 
