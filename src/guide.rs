@@ -1188,8 +1188,10 @@ const REVIEW_IN_SESSION: &str = "the review this session has, else read the diff
 /// 스킬 본문은 하는 일로 말하고 칸을 이 표에서 읽게 한다. 에이전트마다 SKILL.md 를 따로 내면 같은 글이 세 벌이 되어
 /// 반드시 갈라진다(이 모듈 머리의 "왜 한 출처인가") — 그래서 세 트리가 같은 글을 받고, 다른 것은 이 표의 열 하나다.
 ///
-/// **칸의 글은 기획 노트(마일스톤 moai-5m2h)의 조사와 사용자 결정에서 왔다** — Codex 의 `request_user_input`·`/new`,
-/// Antigravity 의 `/clear`(2026-10-04 사용자 결정, 이 컨테이너에서는 못 쟀다 — 에이전트를 띄우지 않는다). 못 확인한
+/// **칸의 글은 기획 노트(마일스톤 moai-5m2h)의 조사와 사용자 결정에서 왔다** — Codex 의 `request_user_input`,
+/// Antigravity 의 `/clear`(2026-10-04 사용자 결정, 이 컨테이너에서는 못 쟀다 — 에이전트를 띄우지 않는다). Codex 의
+/// `/clear` 는 그 조사가 고른 `/new` 를 갈아 낀 것이다(2026-10-27 사용자 지시, moai-2t9u) — `/new` 는 새 대화를 어디서
+/// 돌릴지 묻는 작업 디렉터리 메뉴를 띄워, 감독이 사람 없이 창을 못 비웠다. 못 확인한
 /// 것은 지어 적지 않고 [`NO_VERB`] 로 둔다: 지어낸 명령은 치면 실패하고, 빈 칸은 표 아래 한 줄(사람에게 알리고
 /// 건너뛴다)이 받는다.
 ///
@@ -1223,7 +1225,7 @@ pub const VERBS: [Verb; 8] = [
     },
     REVIEW_VERB,
     Verb { step: "Change the model (the person does it)", words: ["`/model`", "`/model`", NO_VERB] },
-    Verb { step: "Clear the window (the person does it)", words: ["`/clear`", "`/new`", "`/clear`"] },
+    Verb { step: "Clear the window (the person does it)", words: ["`/clear`", "`/clear`", "`/clear`"] },
     Verb {
         step: "Call a skill (the person does it)",
         words: ["`/<skill>`", "`$<skill>`", "ask for the skill by name"],
@@ -2987,9 +2989,15 @@ subject — that has actually happened. So in the root, supervisor and worker al
 ///   (옛 판, 닿지 않는 소켓, 샌드박스) stderr 에 한 줄을 남긴다 — 모든 칸의 `-` 가 "cmux 탭 밖" 이 아니라 "cmux 가 답하지
 ///   않았다" 임을 읽는 쪽이 가르게(리뷰 moai-p5sz.tkn). 짝이 부르는 프로세스(`ps`·`tmux`·`cmux`)는 모두 10초에 끊는다 —
 ///   응답 없는 소켓 하나가 짝 전체를, 그것을 부른 감독의 차례까지 세운다
-/// - **한 칸을 둘이 대면 둘 다 `-` 다**(리뷰 moai-p5sz.tkn) — cmux 의 다리는 물려받은 환경뿐이라, cmux 탭 안에서 돈
-///   zellij·screen 처럼 기록에 `tmux` 가 안 서는 멀티플렉서의 세션은 모두 그 탭으로 읽히고, 그 탭에 친 것은 앞에 선 세션
-///   하나에만 간다. 확인한 tmux 칸도 같은 잣대다. `interactive` 가 아닌 기록(`ListAgents` 의 `bg`)은 띄운 세션의 탭과
+/// - **조상에 멀티플렉서가 선 세션은 surface 가 없다 — `-` 다**(moai-xvvr.gkr) — cmux 의 다리는 물려받은 환경뿐이라,
+///   cmux 탭 안에서 돈 screen·tmux·zellij 의 세션은 기록에 `tmux` 가 안 서도 그 탭으로 읽히는데, 그 탭에 친 것은 그
+///   멀티플렉서의 앞 창으로 간다. 그래서 surface 를 받은 줄만 `ps` 로 조상의 이름(`comm`)을 거슬러 읽고, 그 이름이
+///   멀티플렉서면 `-` 로 낸다. cmux 앱에 닿으면 멈춰 앱 바깥 조상은 세지 않는다(moai-5a28). 조상 하나라도 `ps` 가
+///   못 읽으면 멀티플렉서가 없다고 가를 수 없으니 그 줄도 `-` 다. 이름만 읽고 환경은 안 읽는다(moai-p5sz.7q3).
+///   surface 가 없는 줄은 거스르지 않는다 — 조상마다 `ps` 를 하나씩 띄우니, 칸을 안 낼 줄에 쓰면 감독의 차례만 늦는다
+/// - **한 칸을 둘이 대면 둘 다 `-` 다**(리뷰 moai-p5sz.tkn) — 위의 이름 표에 없는 감싸개가 같은 탭을 둘에게 대게 해도, 그
+///   탭에 친 것은 앞에 선 세션 하나에만 간다. 일꾼이 하나뿐이면 이 규칙은 못 막는다 — 위의 조상 규칙이 그 몫이다. 확인한
+///   tmux 칸도 같은 잣대다. `interactive` 가 아닌 기록(`ListAgents` 의 `bg`)은 띄운 세션의 탭과
 ///   tty 를 물려받을 뿐 그 입력을 받지 않아, 확인하는 판(tmux·cmux 안)에서는 칸 없이 `-` 다
 ///
 /// **두 산 줄이 대는 칸은 어느 쪽 것도 아니다 — 둘 다 `-` 다**(moai-l244). Saycode 가 띄운 세션의 기록은 `tmux` 에
@@ -3044,6 +3052,25 @@ def tty(pid):
             return 0
     t = out("ps", "-p", str(pid), "-o", "tty=")
     return device("/dev/" + t) if t.strip("?") else 0
+def nested_multiplexer(pid):
+    # Inspect process names and parents only, never another process's environment.
+    seen = set()
+    while pid > 1 and pid not in seen:
+        seen.add(pid)
+        line = out("ps", "-p", str(pid), "-o", "ppid=", "-o", "comm=")
+        fields = line.split(None, 1)
+        if len(fields) != 2:
+            return True
+        try:
+            pid = int(fields[0])
+        except ValueError:
+            return True
+        name = os.path.basename(fields[1].strip()).lower()
+        if name in ("cmux", "cmux dev"):
+            break
+        if name in ("screen", "tmux", "zellij") or name.startswith("screen-") or name.startswith("tmux:"):
+            return True
+    return False
 mine = os.environ.get("TMUX")
 if mine and mine.startswith("/tmp/cmux-"):
     mine = None
@@ -3083,7 +3110,9 @@ for path in sorted(glob.glob(os.path.expanduser("~/.claude/sessions/*.json"))):
         if not here or here != device(out("tmux", "display", "-p", "-t", pane, "#{pane_tty}")):
             pane = ""
     elif alive and cmux:
-        pane = "" if told and not told.startswith("cmux:") else surfaces.get(pid)
+        pane = surfaces.get(pid)
+        if (told and not told.startswith("cmux:")) or (pane and nested_multiplexer(pid)):
+            pane = ""
     rows.append((alive, pane, r))
 if rows and not any(alive for alive, _, _ in rows):
     sys.exit("no record reads alive, not even this session's own: this shell cannot read process start times (a sandbox, or no ps), so act on no row")
@@ -3532,21 +3561,20 @@ no hook stands.
 
 Clear only after its report passed the supervisor's checks and `Report-checked:` is
 written, its work has stopped, and its live Codex process and empty input box are confirmed.
-Use `/new`, with text and Enter in separate calls:
+Use `/clear`, with text and Enter in separate calls:
 
-    tmux send-keys -t <pane> /new
+    tmux send-keys -t <pane> /clear
     tmux capture-pane -p -e -t <pane>
     tmux send-keys -t <pane> Enter
     tmux capture-pane -p -e -t <pane>
 
-Each look is a separate call. The survey found that `/new` and Enter sent together left
-`/new` in the composer. Do not send a fixed number of Enters blindly. If the screen asks
-`Where should the new conversation run?`, read the selection and tell the person which
-pane asks. Even when `Use current Git worktree` is selected, the person handles that menu.
-Read the pane after they choose; confirm the old conversation is gone, the cwd is the same,
-and the fresh composer is empty before sending work. Never choose a new worktree yourself.
-An unexpected menu, question or permission prompt belongs to the person. If `/new` remains
-typed or the result is unclear, stop and tell them — a later Enter could erase the next work.
+Each look is a separate call. Before the Enter, the composer holds `/clear` and nothing
+else — if it does not, stop and tell the person. Do not send a fixed number of Enters blindly.
+Confirm the old conversation is gone, the cwd is the same, and the fresh composer is empty
+before sending work.
+An unexpected menu, question or permission prompt belongs to the person: tell them which
+pane shows it, and read the pane again after they answer. If `/clear` remains typed or the
+result is unclear, stop and tell them — a later Enter could erase the next work.
 
 ### Paste the assignment
 
@@ -4339,7 +4367,7 @@ permission prompt belong to the person. The first assignment can use a verified 
 Only after `Report-checked:` and a verified live Codex with an empty idle box, type the
 command text, without assuming a newline is Enter:
 
-    cmux send --surface <surface> -- '/new'
+    cmux send --surface <surface> -- '/clear'
 
 Read the screen once, then send an explicit Enter in a separate call:
 
@@ -4347,12 +4375,13 @@ Read the screen once, then send an explicit Enter in a separate call:
     cmux send-key --surface <surface> enter
     cmux read-screen --surface <surface> --lines 40
 
-Codex can ask `Where should the new conversation run?`. Whatever it selects —
-`Use current Git worktree` included — the person handles that menu; tell them which tab and why.
-Read again after they choose: require a fresh startup screen in the same cwd and an empty
-composer before assigning work. Never guess an Enter count or choose a new worktree.
-If a command remains typed, a screen is cropped, or cmux refuses any input, stop and tell
-the person. Do not resend the command or paste the work over it.
+Before the Enter, the composer holds `/clear` and nothing else — if it does not, stop and
+tell the person. Never guess an Enter count. Require a fresh screen in the same cwd and an
+empty composer before assigning work.
+An unexpected menu, question or permission prompt belongs to the person: tell them which
+tab shows it, and read the screen again after they answer. If a command remains typed, a
+screen is cropped, or cmux refuses any input, stop and tell the person. Do not resend the
+command or paste the work over it.
 
 ### Paste the assignment
 
@@ -5658,7 +5687,7 @@ The supervisor skill remains Claude Code only; reading this file does not instal
 | `/code-review` (7) | Send the review readiness note below and wait for the supervisor's review. |
 | `TaskStop` | No equivalent step here; the supervisor manages its review subagent. |
 | `SendMessage(to: <supervisor>, …)` | Write an epic note in the root's tracker, as below. |
-| `/clear` | The person or supervisor sends `/new`, then handles the work directory menu. |
+| `/clear` | The person or supervisor sends `/clear`. |
 
 `/model` exists in Codex too. The person changes the model; use the assignment's `Model:`
 as the suggestion, and record the model that actually ran. Do not change it yourself.
@@ -5736,8 +5765,8 @@ It stands in the root's file, where the supervisor reads it — it needs no comm
 For a decision needed during work, use the same note, starting with
 `Decision needed:` or `진행 중 결정이 필요합니다`, and ask this window's person too.
 The supervisor watches these notes; a note does not grant permission for a decision.
-When the report is complete, tell the person here they may clear this window with `/new`.
-Do not clear it yourself; directory menus and permission prompts belong to the person.
+When the report is complete, tell the person here they may clear this window with `/clear`.
+Do not clear it yourself; unexpected menus and permission prompts belong to the person.
 "#
     )
 }
@@ -8105,14 +8134,20 @@ stop sending outside work while a release runs",
             let row =
                 VERBS.iter().find(|v| v.words[0].contains(word)).unwrap_or_else(|| panic!("{word} 의 줄이 표에 없다"));
             for (vendor, cell) in VENDORS.iter().zip(row.words).skip(1) {
-                // `/model` 은 Codex 도, `/clear` 는 Antigravity 도 같은 낱말이다(2026-10-04 사용자 결정) — 그 둘만
-                // 같은 글을 받는다.
-                let shared = matches!((word, *vendor), ("/model", "Codex") | ("/clear", "Antigravity"));
+                // `/model` 은 Codex 도, `/clear` 는 Antigravity(2026-10-04 사용자 결정)도 Codex(2026-10-27 사용자 지시,
+                // moai-2t9u)도 같은 낱말이다.
+                let shared = matches!((word, *vendor), ("/model", "Codex") | ("/clear", "Codex" | "Antigravity"));
                 if !shared {
                     assert!(!cell.contains(word), "{vendor} 열에 Claude 의 {word} 가 섰다 — {}", row.step);
                 }
             }
         }
+        // 위 고리는 세 열이 다 같은 낱말인 `/clear` 줄을 아무것도 안 잰다 — `/new` 로 되돌린 칸을 여기서 잡는다.
+        let clear = VERBS.iter().find(|v| v.step.starts_with("Clear the window")).expect("창 비우기 줄이 표에 없다");
+        assert_eq!(
+            clear.words, ["`/clear`"; 3],
+            "Codex 는 `/new` 가 아니라 `/clear` 로 비운다 — `/new` 는 작업 디렉터리 메뉴를 띄운다"
+        );
         for v in &VERBS {
             for (vendor, cell) in VENDORS.iter().zip(v.words) {
                 assert!(!cell.trim().is_empty(), "{vendor} 의 `{}` 칸이 비었다 — 없으면 {NO_VERB} 로 적는다", v.step);
@@ -8124,9 +8159,7 @@ stop sending outside work while a release runs",
     fn codex_worker_changes_the_claude_steps_without_repeating_them() {
         let text = worker_codex();
         assert!((60..=100).contains(&text.lines().count()), "차이 글이 짧은 참고 파일의 길이를 벗어났다");
-        for word in
-            ["EnterWorktree", "ExitWorktree", "AskUserQuestion", "/code-review", "TaskStop", "SendMessage(", "/clear"]
-        {
+        for word in ["EnterWorktree", "ExitWorktree", "AskUserQuestion", "/code-review", "TaskStop", "SendMessage("] {
             let lines: Vec<_> = text.lines().filter(|l| l.contains(word)).collect();
             assert_eq!(lines.len(), 1, "Claude 낱말이 표 밖에도 섰다 — {word}");
             let columns: Vec<_> = lines[0].split('|').collect();
@@ -8137,7 +8170,8 @@ stop sending outside work while a release runs",
             "Review-ready:",
             "report:",
             "moai note <epic> -b -",
-            "/new",
+            "| `/clear` | The person or supervisor sends `/clear`. |",
+            "clear this window with `/clear`",
             "Root:",
             "request_user_input_async",
             "keep the five yourself",
@@ -8754,7 +8788,10 @@ stop sending outside work while a release runs",
         // 시험은 사람의 cmux 안에서 돌 수 있다 — 물려받은 `CMUX_SURFACE_ID` 는 늘 걷고, cmux 를 재는 판만 세운다.
         let map = |records: &std::path::Path, tmux: Option<&str>, cmux: bool| {
             let mut cmd = std::process::Command::new("sh");
-            let shell = SESSIONS.replace("~/.claude/sessions", &records.display().to_string());
+            let shell = SESSIONS.replace("~/.claude/sessions", &records.display().to_string()).replace(
+                "mine = os.environ.get(\"TMUX\")",
+                "real_out = out\ndef out(*cmd, **env):\n    if cmd[0] == 'ps' and '-o' in cmd and 'ppid=' in cmd: return '1 shell'\n    return real_out(*cmd, **env)\nmine = os.environ.get(\"TMUX\")",
+            );
             cmd.arg("-c").arg(shell).env_remove("CMUX_SURFACE_ID");
             match tmux {
                 Some(t) => cmd.env("TMUX", t),
@@ -8797,6 +8834,67 @@ stop sending outside work while a release runs",
              alive\tplain\tCMUX-SURFACE-A\tidle\t/repo\ts-plain\t-\n\
              alive\tlone\t-\tidle\t/repo\ts-lone\tsaycode\n",
             "cmux 안에서 세션의 surface 를 못 찾았다"
+        );
+        // A single nested session must not claim the surface, even when no other row claims it.
+        let nested = s.path().join("nested");
+        std::fs::create_dir_all(&nested).unwrap();
+        std::fs::write(nested.join("1.json"), record(me, &start, "nested", None)).unwrap();
+        // The map with `ps` answering from a made-up ancestry: each link is the pid asked and `<ppid> <comm>`.
+        let me_pid = me.to_string();
+        let walked = |links: &[(&str, &str)]| {
+            let answers: String = links
+                .iter()
+                .map(|(pid, said)| format!("    if walk and cmd[2] == '{pid}': return '{said}'\n"))
+                .collect();
+            let override_ps = format!(
+                "real_out = out\ndef out(*cmd, **env):\n    walk = cmd[0] == 'ps' and 'ppid=' in cmd\n{answers}    return real_out(*cmd, **env)\n"
+            );
+            let shell = SESSIONS
+                .replace("~/.claude/sessions", &nested.display().to_string())
+                .replace("mine = os.environ.get(\"TMUX\")", &(override_ps + "mine = os.environ.get(\"TMUX\")"));
+            let out = std::process::Command::new("sh")
+                .arg("-c")
+                .arg(shell)
+                .env_remove("TMUX")
+                .env("CMUX_SURFACE_ID", "CMUX-SURFACE-SUPERVISOR")
+                .env("PATH", &path)
+                .output()
+                .unwrap();
+            assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+            String::from_utf8(out.stdout).unwrap()
+        };
+        for name in ["screen", "tmux", "zellij"] {
+            assert_eq!(
+                walked(&[(&me_pid, "999998 claude"), ("999998", &format!("999999 {name}")), ("999999", "1 shell")]),
+                "alive\tnested\t-\tidle\t/repo\ts-nested\t-\n",
+                "{name}"
+            );
+        }
+        // cmux app is the boundary: an outer multiplexer must not hide a normal tab.
+        // A multiplexer below the same boundary must still suppress its surface.
+        for (outer, app) in [("screen", "cmux"), ("tmux", "cmux DEV")] {
+            for inner in [None, Some("screen"), Some("tmux"), Some("zellij")] {
+                let below = format!("999997 {}", inner.unwrap_or("zsh"));
+                let bundle = format!("999998 /Applications/{app}.app/Contents/MacOS/{app}");
+                let surface = if inner.is_some() { "-" } else { "CMUX-SURFACE-A" };
+                assert_eq!(
+                    walked(&[
+                        (&me_pid, "999996 claude"),
+                        ("999996", &below),
+                        ("999997", &bundle),
+                        ("999998", &format!("999999 {outer}")),
+                        ("999999", "1 shell"),
+                    ]),
+                    format!("alive\tnested\t{surface}\tidle\t/repo\ts-nested\t-\n"),
+                    "outer={outer}, inner={inner:?}"
+                );
+            }
+        }
+        // An ancestor `ps` cannot read leaves the walk unproven, so the surface is withheld.
+        assert_eq!(
+            walked(&[(&me_pid, "999998 claude"), ("999998", "")]),
+            "alive\tnested\t-\tidle\t/repo\ts-nested\t-\n",
+            "an unreadable ancestor still gave the surface"
         );
         // tmux 를 cmux 안에서 돌리면 둘 다 선다 — 그 셸에서 친 것은 tmux 로 가니 tmux 의 짝이 이긴다.
         assert_eq!(
@@ -9196,10 +9294,11 @@ stop sending outside work while a release runs",
             "references/worker-codex.md",
             "from: <supervisor name>",
             "cmux paste --surface <surface> --submit - < <file>",
-            "cmux send --surface <surface> -- '/new'",
+            "cmux send --surface <surface> -- '/clear'",
             "cmux send-key --surface <surface> enter",
-            "Use current Git worktree",
-            "the person handles that menu",
+            "An unexpected menu, question or permission prompt belongs to the person: tell them which\ntab shows it",
+            "the composer holds `/clear` and nothing else",
+            "Never guess an Enter count",
             "The review brief",
             "Report-checked:",
         ] {
@@ -9208,7 +9307,7 @@ stop sending outside work while a release runs",
         for line in codex.lines().filter(|l| l.contains("gpt-")) {
             assert_eq!(line, "the person under `[models] codex`. Default example: `gpt-6.1-sol`.");
         }
-        assert!(!codex.contains("/clear"));
+        assert!(!codex.contains("/new"));
         assert!(!codex.contains(SESSIONS), "Codex 를 Claude 세션 짝에 넣었다");
         assert!(cmux_calls(codex) >= 8, "Codex 절의 cmux 명령을 못 셌다");
         let script = codex.split("```sh\n").nth(1).unwrap().split("```").next().unwrap();
@@ -9387,11 +9486,10 @@ stop sending outside work while a release runs",
             "only on their yes",
             "-c \"<root>\" 'codex --model <codex>' \\; set-option -p remain-on-exit on\n",
             "`Report-checked:`",
-            "tmux send-keys -t <pane> /new\n",
+            "tmux send-keys -t <pane> /clear\n",
             "text and Enter in separate calls",
-            "`Where should the new conversation run?`",
-            "`Use current Git worktree` is selected",
-            "the person handles that menu",
+            "An unexpected menu, question or permission prompt belongs to the person: tell them which\npane shows it",
+            "the composer holds `/clear` and nothing\nelse",
             "Do not send a fixed number of Enters blindly",
             "tmux load-buffer -b moai-send <file>",
             "tmux paste-buffer -p -d -b moai-send -t <pane>",
@@ -9407,7 +9505,8 @@ stop sending outside work while a release runs",
         for line in text.lines().filter(|line| line.contains("gpt-")) {
             assert_eq!(line, "the person under `[models] codex`. Default example: `gpt-6.1-sol`.");
         }
-        assert!(!codex.contains("/new Enter"), "Codex /new 와 Enter 를 한 호출에 친다");
+        assert!(!codex.contains("/clear Enter"), "Codex /clear 와 Enter 를 한 호출에 친다");
+        assert!(!codex.contains("/new"), "Codex 를 작업 디렉터리 메뉴를 띄우는 /new 로 비운다");
         assert!(tmux_calls(codex) >= 12, "새 Codex 절의 tmux 줄을 안 잰다");
         let launches: Vec<_> = codex.lines().filter(|line| line.contains("'codex ")).collect();
         assert_eq!(launches.len(), 1, "Codex 띄우는 줄이 하나가 아니다");
