@@ -31577,8 +31577,8 @@ fn models_human_output_marks_defaults_and_shows_efforts_and_path() {
     let cfg = s.path().join("config.toml");
     std::fs::write(&cfg, "[models]\ndevelop = \"sonnet\"\neffort = \"high\"\n").unwrap();
     let out = ok_with(s.path(), &cfg, &["models"]);
-    assert_eq!(out.lines().count(), 11, "{out}");
-    assert_eq!(out.matches("default").count(), 8, "{out}");
+    assert_eq!(out.lines().count(), 12, "{out}");
+    assert_eq!(out.matches("default").count(), 9, "{out}");
     let line = |key: &str| out.lines().find(|line| line.starts_with(&format!("{key} "))).unwrap().to_string();
     assert!(
         line("develop").contains("sonnet") && !line("develop").contains("default"),
@@ -31595,13 +31595,14 @@ fn models_human_output_marks_defaults_and_shows_efforts_and_path() {
     };
     assert!(marked("complex", "opus", "") && !line("complex").contains("high"), "{out}");
     assert!(marked("effort_complex", "high", "  complex"), "{out}");
+    assert!(marked("effort_plan", "xhigh", "  plan"), "{out}");
     assert!(marked("review_grade", "xhigh", "  review"), "{out}");
     assert!(out.lines().last().unwrap().contains(cfg.to_str().unwrap()));
 
     // 허용한 모델 이름의 줄바꿈도 표에서는 한 줄로 그린다.
     std::fs::write(&cfg, "[models]\nplan = \"a\\nb\"\n").unwrap();
     let out = ok_with(s.path(), &cfg, &["models"]);
-    assert_eq!(out.lines().count(), 11, "{out}");
+    assert_eq!(out.lines().count(), 12, "{out}");
 }
 
 /// **저장소는 권하고 사람이 고른다**(moai-w25x.jud, 2026-10-26 사용자 결정) — `.moai/config.toml` 의 `[models]` 가
