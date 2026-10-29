@@ -31626,6 +31626,17 @@ fn a_repository_models_table_sits_under_the_person() {
     assert_eq!(got["effort"], "medium", "틀린 저장소 값이 섰다\n{got}");
     assert_eq!(got["written"], serde_json::json!(["develop"]));
     assert_eq!(got["repo"], serde_json::json!(["complex"]), "사람이 덮은 키를 저장소의 것으로 댄다\n{got}");
+    // The planning effort follows the same repository and user layers.
+    std::fs::write(&repo_cfg, format!("{src}effort_plan = \"max\"\n")).unwrap();
+    let layered: serde_json::Value = serde_json::from_str(&ok_with(s.path(), &cfg, &["models", "--json"])).unwrap();
+    assert_eq!(layered["effort_plan"], "max");
+    assert!(layered["repo"].as_array().unwrap().contains(&serde_json::json!("effort_plan")));
+    std::fs::write(&cfg, "[models]\ndevelop = \"sonnet\"\neffort_plan = \"high\"\n").unwrap();
+    let layered: serde_json::Value = serde_json::from_str(&ok_with(s.path(), &cfg, &["models", "--json"])).unwrap();
+    assert_eq!(layered["effort_plan"], "high");
+    assert!(layered["written"].as_array().unwrap().contains(&serde_json::json!("effort_plan")));
+    std::fs::write(&cfg, "[models]\ndevelop = \"sonnet\"\n").unwrap();
+    std::fs::write(&repo_cfg, &src).unwrap();
     let canon_cfg = canon(&repo_cfg).unwrap();
     let repo_path = std::path::PathBuf::from(got["repo_path"].as_str().unwrap());
     assert_eq!(canon(&repo_path).unwrap(), canon_cfg);
