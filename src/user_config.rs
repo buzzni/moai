@@ -119,28 +119,13 @@ impl Models {
     /// `put` 에 넘기던 판은 `effort = high` 에 "low|…|max 중 하나여야 한다 — 지금은 \"high\"" 라는 제 말과 어긋난 탈을
     /// 대고, 적힌 날 글(받은 저장소의 제어문자까지)을 탈의 `found` 에 실었다.
     pub fn with_repo(&self, repo: &[crate::config::ModelEntry]) -> (Models, Vec<ModelsTrouble>) {
-        let mut out = Models::default();
-        let mut problems = Vec::new();
-        for e in repo {
-            let word = e.word();
-            if word.is_none() && MODELS_DEFAULT.iter().any(|&(known, _)| known == e.key) {
-                problems.push(ModelsTrouble::NotQuoted { key: e.key.clone(), raw: e.raw.clone(), line: e.line });
-                continue;
-            }
-            match out.put(&e.key, word, || e.raw.clone()) {
-                Ok(key) if !out.repo.iter().any(|k| k == key) => out.repo.push(key.to_string()),
-                Ok(_) => {}
-                Err(why) => problems.push(why),
-            }
-        }
-        for key in &self.written {
-            if let Some((&k, v)) = self.values.get_key_value(key.as_str()) {
-                out.values.insert(k, v.clone());
-            }
-        }
-        out.repo.retain(|k| !self.written.contains(k));
-        out.written = self.written.clone();
-        (out, problems)
+        layered(
+            self,
+            repo,
+            MODELS_DEFAULT,
+            |out, e| out.put(&e.key, e.word(), || e.raw.clone()),
+            |e| ModelsTrouble::NotQuoted { key: e.key.clone(), raw: e.raw.clone(), line: e.line },
+        )
     }
 }
 
@@ -193,7 +178,11 @@ pub enum WritingTrouble {
 }
 impl Writing {
     pub fn detail(&self) -> Detail {
-        if self.values["detail"] == "brief" { Detail::Brief } else { Detail::Detailed }
+        match self.values["detail"].as_str() {
+            "brief" => Detail::Brief,
+            "detailed" => Detail::Detailed,
+            other => unreachable!("invalid writing detail: {other}"),
+        }
     }
     fn put(
         &mut self,
@@ -214,29 +203,70 @@ impl Writing {
         Ok("detail")
     }
     pub fn with_repo(&self, repo: &[crate::config::ModelEntry]) -> (Self, Vec<WritingTrouble>) {
-        let mut out = Self::default();
-        let mut problems = Vec::new();
-        for e in repo {
-            let word = e.word();
-            if word.is_none() && e.key == "detail" {
-                problems.push(WritingTrouble::NotQuoted { key: e.key.clone(), raw: e.raw.clone(), line: e.line });
-                continue;
-            }
-            match out.put(&e.key, word, || e.raw.clone()) {
-                Ok(key) if !out.repo.iter().any(|k| k == key) => out.repo.push(key.into()),
-                Ok(_) => (),
-                Err(why) => problems.push(why),
-            }
-        }
-        for key in &self.written {
-            if let Some((&k, v)) = self.values.get_key_value(key.as_str()) {
-                out.values.insert(k, v.clone());
-            }
-        }
-        out.repo.retain(|k| !self.written.contains(k));
-        out.written = self.written.clone();
-        (out, problems)
+        layered(
+            self,
+            repo,
+            WRITING_DEFAULT,
+            |out, e| out.put(&e.key, e.word(), || e.raw.clone()),
+            |e| WritingTrouble::NotQuoted { key: e.key.clone(), raw: e.raw.clone(), line: e.line },
+        )
     }
+}
+
+trait LayeredTable: Default {
+    fn parts(&self) -> (&BTreeMap<&'static str, String>, &Vec<String>);
+    fn parts_mut(&mut self) -> (&mut BTreeMap<&'static str, String>, &mut Vec<String>, &mut Vec<String>);
+}
+impl LayeredTable for Models {
+    fn parts(&self) -> (&BTreeMap<&'static str, String>, &Vec<String>) {
+        (&self.values, &self.written)
+    }
+    fn parts_mut(&mut self) -> (&mut BTreeMap<&'static str, String>, &mut Vec<String>, &mut Vec<String>) {
+        (&mut self.values, &mut self.written, &mut self.repo)
+    }
+}
+impl LayeredTable for Writing {
+    fn parts(&self) -> (&BTreeMap<&'static str, String>, &Vec<String>) {
+        (&self.values, &self.written)
+    }
+    fn parts_mut(&mut self) -> (&mut BTreeMap<&'static str, String>, &mut Vec<String>, &mut Vec<String>) {
+        (&mut self.values, &mut self.written, &mut self.repo)
+    }
+}
+fn layered<T: LayeredTable, E>(
+    user: &T,
+    entries: &[crate::config::ModelEntry],
+    known: &[(&str, &str)],
+    mut put: impl FnMut(&mut T, &crate::config::ModelEntry) -> Result<&'static str, E>,
+    not_quoted: impl Fn(&crate::config::ModelEntry) -> E,
+) -> (T, Vec<E>) {
+    let mut out = T::default();
+    let mut problems = Vec::new();
+    for entry in entries {
+        if entry.word().is_none() && known.iter().any(|(key, _)| *key == entry.key) {
+            problems.push(not_quoted(entry));
+            continue;
+        }
+        match put(&mut out, entry) {
+            Ok(key) => {
+                let (_, _, repo) = out.parts_mut();
+                if !repo.iter().any(|k| k == key) {
+                    repo.push(key.into());
+                }
+            }
+            Err(why) => problems.push(why),
+        }
+    }
+    let (source, written) = user.parts();
+    let (values, target_written, repo) = out.parts_mut();
+    for key in written {
+        if let Some((&k, v)) = source.get_key_value(key.as_str()) {
+            values.insert(k, v.clone());
+        }
+    }
+    repo.retain(|k| !written.contains(k));
+    *target_written = written.clone();
+    (out, problems)
 }
 
 /// 값이 등급 낱말([`MODEL_LEVELS`])인 키인가 — `review_grade`·`effort`·`effort_complex`. 키를 재는 [`Models::put`] 과
