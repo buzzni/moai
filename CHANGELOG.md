@@ -12,6 +12,8 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+## [0.34.0] - 2026-10-29
+
 ### Added
 
 - Web list rows tint completed work pale green; Gantt labels use matching tints for in-progress, review, and completed work. (moai-skjr)
