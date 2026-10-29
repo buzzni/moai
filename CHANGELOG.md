@@ -12,8 +12,22 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+### Added
+
+- Plans accept the fullwidth `＠` as a date marker, with the same escaping rules as `@`. A plan
+  title ending in `＠` and a digit, such as `＠3F`, is now read as a date and refused when it is
+  not one; write `\＠` to keep it as text. (moai-uwi9.kr5)
+
+### Changed
+
+- `moai ready` orders equal-priority work by the earliest deadline it follows, including open ancestors. (moai-uwi9.rff)
+
 ### Fixed
 
+- Hook rule 2 protects another epic's worktree even when a held row has no worktree. (moai-uwi9.q08)
+- Interactive cmux and recovery command guidance rejects paths containing `!`. (moai-uwi9.ctp)
+- `moai init` and `moai merge-driver --install` measure a driver that timed out once more, and
+  `init` keeps an existing driver command whose result stays unknown. (moai-uwi9.b75)
 - Gantt charts load and scroll with less repeated work in the terminal and web; the web retries chart reads, and slow history reads poll less often while background updates remain visible. (moai-w7ms)
 - Supervisors clear Codex worker windows with `/clear` instead of `/new`, which asked
   where the new conversation should run and left the clear to you. (moai-2t9u)

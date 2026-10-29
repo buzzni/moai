@@ -323,7 +323,7 @@ asked you for it. On a yes, for each:
     cmux --id-format both new-split right --surface "$CMUX_SURFACE_ID" --command 'cd "<root>" && claude --model <model>'
 
 `<root>` is the `root dir` of the supervisor's 2 and `<model>` the model picked in 2-1. **No
-other flag** on `claude`. Keep the double quotes around `<root>` inside the single ones;
+other flag** on `claude`. If `<root>` contains `!`, do not build this command: tell the person the path, because the destination interactive shell can expand it. Keep the double quotes around `<root>` inside the single ones;
 write each `'` in the path as `'\''` there. It prints `OK surface:<n> (<UUID>) workspace:<n> (<UUID>)` — the first
 UUID is the new surface, the second your workspace. `--command` is typed into the new tab's
 shell, so the shell stays when `claude` exits and what it said stays readable, and the split
@@ -455,7 +455,7 @@ Ask once before opening new tabs, as above. On a yes, open an ordinary interacti
 
     cmux --id-format both new-split right --surface "$CMUX_SURFACE_ID" --command 'cd "<root>" && codex --model <codex>'
 
-Keep the double quotes around `<root>` inside the single ones; write each `'` in the path
+If `<root>` contains `!`, do not build this command: tell the person the path, because the destination interactive shell can expand it. Keep the double quotes around `<root>` inside the single ones; write each `'` in the path
 as `'\''` there. Keep the returned surface UUID. The same split refusal rule applies: stop opening and tell
 the person. Read its startup screen in a separate call; folder trust, hooks trust and any
 permission prompt belong to the person. The first assignment can use a verified fresh box.

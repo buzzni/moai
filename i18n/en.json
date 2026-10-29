@@ -1117,7 +1117,7 @@
   "git.not_utf8": "what git gave could not be read — {said}",
   "draft.unclosed_bracket": "line {line}: `[` was never closed — {raw}",
   "draft.not_a_priority": "line {line}: `[{tag}]` is not a priority. `[p0]`–`[p{max}]`",
-  "draft.not_a_due": "line {line}: `{due}` is not a date. It is `@YYYY-MM-DD` (deadline), `@YYYY-MM-DD~YYYY-MM-DD` (start to deadline) or `@YYYY-MM-DD~` (start only); a title that ends in `@` and a digit writes `\\@`",
+  "draft.not_a_due": "line {line}: `{due}` is not a date. It is `@YYYY-MM-DD` (deadline), `@YYYY-MM-DD~YYYY-MM-DD` (start to deadline) or `@YYYY-MM-DD~` (start only); a title that ends in `@` or `＠` and a digit writes `\\@` or `\\＠`",
   "draft.start_after_due": "line {line}: `{due}` starts after its deadline — write the earlier day first",
   "draft.two_dues": "line {line}: two dates on one line — {raw}",
   "draft.no_title": "line {line}: no title — {raw}",

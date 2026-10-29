@@ -1117,7 +1117,7 @@
   "git.not_utf8": "git 이 낸 글을 못 읽었다 — {said}",
   "draft.unclosed_bracket": "{line}줄: `[` 를 닫지 않았다 — {raw}",
   "draft.not_a_priority": "{line}줄: `[{tag}]` 는 우선순위가 아니다. `[p0]`~`[p{max}]`",
-  "draft.not_a_due": "{line}줄: `{due}` 는 날짜가 아니다. `@YYYY-MM-DD`(기한)·`@YYYY-MM-DD~YYYY-MM-DD`(시작~기한)·`@YYYY-MM-DD~`(시작만)이다 — `@` 와 숫자로 끝나는 제목이면 `\\@` 로 적는다",
+  "draft.not_a_due": "{line}줄: `{due}` 는 날짜가 아니다. `@YYYY-MM-DD`(기한)·`@YYYY-MM-DD~YYYY-MM-DD`(시작~기한)·`@YYYY-MM-DD~`(시작만)이다 — `@`·`＠` 와 숫자로 끝나는 제목이면 `\\@`·`\\＠` 로 적는다",
   "draft.start_after_due": "{line}줄: `{due}` 는 시작이 기한보다 뒤다 — 이른 날을 앞에 적는다",
   "draft.two_dues": "{line}줄: 한 줄에 날짜가 둘이다 — {raw}",
   "draft.no_title": "{line}줄: 제목이 없다 — {raw}",

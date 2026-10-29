@@ -1440,8 +1440,9 @@ pub fn display_order(a: &Issue, b: &Issue) -> std::cmp::Ordering {
 }
 
 /// 기한의 차례 — **이른 기한이 먼저고 기한 없는 줄이 뒤다**(moai-ghkp.7uy). 꼴이 틀린 값은 없는 것이다
-/// ([`Issue::deadline`]). `--sort due`·탐색기의 `SPC s w`·`ready` 가 이 하나로 잰다(리뷰) — 저마다 적던 때는
-/// 셋이 같은 줄을 다른 차례로 세울 길이 열려 있었다. 날짜는 고정폭이라 글로 견준다.
+/// ([`Issue::deadline`]). `--sort due`·탐색기의 `SPC s w` 가 이 하나로 잰다(리뷰) — 저마다 적던 때는
+/// 같은 줄을 다른 차례로 세울 길이 열려 있었다. `ready` 는 같은 규칙(이른 것 먼저, 없는 줄 뒤)을 **제 기한이 아니라 따르는
+/// 기한**에 쓴다(moai-uwi9.rff, `report::Picking::picks`) — 그래서 이 함수를 안 부른다. 날짜는 고정폭이라 글로 견준다.
 pub fn due_order(a: &Issue, b: &Issue) -> std::cmp::Ordering {
     use std::cmp::Ordering;
     match (a.deadline(), b.deadline()) {
