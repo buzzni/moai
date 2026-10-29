@@ -1643,6 +1643,7 @@ mod tests {
                     .replace("<review id>", "t-r")
                     .replace("<review text>", "/tmp/review.txt")
                     .replace("<that file>", "/tmp/review.txt")
+                    .replace("<epic body file>", "/tmp/epic-body.txt")
                     .replace("<keyword>", "parser")
                     .replace("<milestone>", "t-m")
                     // 감독이 싣는 기한(`Due:`, moai-7bqy.fvo) — 일꾼 1 이 에픽에 단다.
