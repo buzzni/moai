@@ -260,7 +260,7 @@ its own way — read your own column.
 | Ask the person watching | `AskUserQuestion` | `request_user_input` | ask in the conversation and wait |
 | Review the work | `/code-review` | the review this session has, else read the diff yourself | the review this session has, else read the diff yourself |
 | Change the model (the person does it) | `/model` | `/model` | — |
-| Clear the window (the person does it) | `/clear` | `/new` | `/clear` |
+| Clear the window (the person does it) | `/clear` | `/clear` | `/clear` |
 | Call a skill (the person does it) | `/<skill>` | `$<skill>` | ask for the skill by name |
 | Stop what a review left running | `TaskStop` | — | — |
 
