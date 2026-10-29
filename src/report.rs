@@ -8126,14 +8126,21 @@ mod tests {
         epic.milestone = Some(stone.id.clone());
         let mut parent = member("argos-000a", "argos-0001", "todo");
         parent.due_on = Some("2026-10-29".into());
-        let child = make("argos-000a.abc", Kind::Issue, "todo");
+        let mut child = make("argos-000a.abc", Kind::Issue, "todo");
+        child.priority = Some(0);
         let mut outside = make("argos-000b", Kind::Issue, "todo");
+        outside.priority = Some(0);
         outside.due_on = Some("2026-10-30".into());
         let mut rows = vec![stone, epic, parent, child, outside];
         let ids = |rows: &[Issue]| ready(rows, &cfg()).iter().map(|i| i.id.clone()).collect::<Vec<_>>();
         assert_eq!(ids(&rows), ["argos-000a.abc", "argos-000b"]);
         rows[2].status = Status::new("done");
-        assert_eq!(ids(&rows), ["argos-000b", "argos-000a.abc"]);
+        // Both are p0, but a running milestone still sorts before outside work.
+        // Test the closed-parent deadline directly without the milestone focus.
+        assert_eq!(
+            Picking::of(&rows, &cfg()).picks(false).0.iter().map(|i| i.id.as_str()).collect::<Vec<_>>(),
+            ["argos-000b", "argos-000a.abc"]
+        );
     }
 
     /// 마일스톤 하나와 그 안의 에픽·멤버, 그리고 밖에 선 일 둘(`p2`·`p0`).
