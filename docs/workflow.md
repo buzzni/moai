@@ -106,6 +106,8 @@ whoever comes next when you stop halfway — a [`Next:` note](glossary.md#next-n
 
 ## Plan something bigger
 
+In Claude Code, call `/moai-plan` to interview you and draft a detailed plan on the configured `plan` model. The skill checks the model first: a name containing `fable` qualifies; an `opus` name needs `effort_plan` at `xhigh` or `max`. Other names stop with configuration guidance. The host resolves questions, presents the draft for approval, and only then writes the tracker. The planning agent reads the interview and reports gaps without asking you directly. Codex and Antigravity follow the steps below in the current session.
+
 When a request will not end inside one file, split it into one
 [epic](glossary.md#epic) and three to seven issues, show the
 [plan](glossary.md#plan) to the person once, and on a yes create it in one go:
@@ -336,4 +338,4 @@ where its contributors read them rather than repeated here:
   broken data, the same as a broken line in `issues.jsonl` — see [An archive file
   cannot be read](recovery.md#an-archive-file-cannot-be-read)
 
-Decided in: moai-0zjo moai-40ht moai-bx6t moai-9793 moai-ug3j moai-gelm moai-tllo moai-snyk moai-zynt moai-j9nf moai-jtvp moai-fx9t moai-bth3 moai-r0x8 moai-9tqo moai-g8pt moai-lj8g moai-1m21 moai-uwi9
+Decided in: moai-0zjo moai-40ht moai-bx6t moai-9793 moai-ug3j moai-gelm moai-tllo moai-snyk moai-zynt moai-j9nf moai-jtvp moai-fx9t moai-bth3 moai-r0x8 moai-9tqo moai-g8pt moai-lj8g moai-1m21 moai-uwi9 moai-ns7a

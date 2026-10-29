@@ -31589,7 +31589,7 @@ fn models_json_reads_user_config_outside_a_tracker_and_only_reads() {
         serde_json::json!({
             "plan": "fable", "develop": "opus-6", "complex": "opus", "review": "opus",
             "docs": "sonnet", "bulk": "haiku", "codex": "future-model",
-            "review_grade": "xhigh", "effort": "max", "effort_complex": "high",
+            "review_grade": "xhigh", "effort": "max", "effort_complex": "high", "effort_plan": "xhigh",
             "written": ["develop", "codex", "effort"], "repo": [], "path": cfg, "repo_path": null,
         })
     );
@@ -31617,7 +31617,7 @@ fn models_missing_file_uses_all_defaults_and_keeps_the_path() {
         serde_json::json!({
             "plan": "fable", "develop": "sonnet", "complex": "opus", "review": "opus",
             "docs": "sonnet", "bulk": "haiku", "codex": "gpt-6.1-sol",
-            "review_grade": "xhigh", "effort": "medium", "effort_complex": "high",
+            "review_grade": "xhigh", "effort": "medium", "effort_complex": "high", "effort_plan": "xhigh",
             "written": [], "repo": [], "path": cfg, "repo_path": null,
         })
     );
@@ -31632,6 +31632,7 @@ fn models_bad_values_warn_once_and_preserve_the_other_keys() {
         ("review_grade = \"ultra\"", "review_grade", "xhigh"),
         ("effort = 3", "effort", "medium"),
         ("effort_complex = \"ultra\"", "effort_complex", "high"),
+        ("effort_plan = \"ultra\"", "effort_plan", "xhigh"),
         ("develop = false", "develop", "sonnet"),
         ("future = \"x\"", "future", ""),
     ] {
@@ -31670,8 +31671,8 @@ fn models_human_output_marks_defaults_and_shows_efforts_and_path() {
     let cfg = s.path().join("config.toml");
     std::fs::write(&cfg, "[models]\ndevelop = \"sonnet\"\neffort = \"high\"\n").unwrap();
     let out = ok_with(s.path(), &cfg, &["models"]);
-    assert_eq!(out.lines().count(), 11, "{out}");
-    assert_eq!(out.matches("default").count(), 8, "{out}");
+    assert_eq!(out.lines().count(), 12, "{out}");
+    assert_eq!(out.matches("default").count(), 9, "{out}");
     let line = |key: &str| out.lines().find(|line| line.starts_with(&format!("{key} "))).unwrap().to_string();
     assert!(
         line("develop").contains("sonnet") && !line("develop").contains("default"),
@@ -31688,13 +31689,14 @@ fn models_human_output_marks_defaults_and_shows_efforts_and_path() {
     };
     assert!(marked("complex", "opus", "") && !line("complex").contains("high"), "{out}");
     assert!(marked("effort_complex", "high", "  complex"), "{out}");
+    assert!(marked("effort_plan", "xhigh", "  plan"), "{out}");
     assert!(marked("review_grade", "xhigh", "  review"), "{out}");
     assert!(out.lines().last().unwrap().contains(cfg.to_str().unwrap()));
 
     // 허용한 모델 이름의 줄바꿈도 표에서는 한 줄로 그린다.
     std::fs::write(&cfg, "[models]\nplan = \"a\\nb\"\n").unwrap();
     let out = ok_with(s.path(), &cfg, &["models"]);
-    assert_eq!(out.lines().count(), 11, "{out}");
+    assert_eq!(out.lines().count(), 12, "{out}");
 }
 
 /// **저장소는 권하고 사람이 고른다**(moai-w25x.jud, 2026-10-26 사용자 결정) — `.moai/config.toml` 의 `[models]` 가
@@ -31719,6 +31721,17 @@ fn a_repository_models_table_sits_under_the_person() {
     assert_eq!(got["effort"], "medium", "틀린 저장소 값이 섰다\n{got}");
     assert_eq!(got["written"], serde_json::json!(["develop"]));
     assert_eq!(got["repo"], serde_json::json!(["complex"]), "사람이 덮은 키를 저장소의 것으로 댄다\n{got}");
+    // The planning effort follows the same repository and user layers.
+    std::fs::write(&repo_cfg, format!("{src}effort_plan = \"max\"\n")).unwrap();
+    let layered: serde_json::Value = serde_json::from_str(&ok_with(s.path(), &cfg, &["models", "--json"])).unwrap();
+    assert_eq!(layered["effort_plan"], "max");
+    assert!(layered["repo"].as_array().unwrap().contains(&serde_json::json!("effort_plan")));
+    std::fs::write(&cfg, "[models]\ndevelop = \"sonnet\"\neffort_plan = \"high\"\n").unwrap();
+    let layered: serde_json::Value = serde_json::from_str(&ok_with(s.path(), &cfg, &["models", "--json"])).unwrap();
+    assert_eq!(layered["effort_plan"], "high");
+    assert!(layered["written"].as_array().unwrap().contains(&serde_json::json!("effort_plan")));
+    std::fs::write(&cfg, "[models]\ndevelop = \"sonnet\"\n").unwrap();
+    std::fs::write(&repo_cfg, &src).unwrap();
     let canon_cfg = canon(&repo_cfg).unwrap();
     let repo_path = std::path::PathBuf::from(got["repo_path"].as_str().unwrap());
     assert_eq!(canon(&repo_path).unwrap(), canon_cfg);
