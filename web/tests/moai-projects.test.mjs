@@ -51,7 +51,7 @@ test('the page reads ?project=, and every call it makes names it — reads, writ
   const { calls, fetcher } = recorder((url) => (url.startsWith('/api/boot') ? '{}' : envelope({ read: [] })))
   const named = withProject(fetcher, '/w/a b&c')
   const client = createClient(named, { concurrency: 3 })
-  await loadTree(client, { sort: 'priority' })
+  await loadTree(client, { query: { sort: 'priority' } })
   await loadDetail(client, 'moai-1abc')
   await loadProjects(client)
   await readMarks(client, async () => {}).all()

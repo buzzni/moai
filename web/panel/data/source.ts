@@ -151,7 +151,17 @@ export async function loadGroups(client: Client, priority: number = PRIORITY.lis
  * told, not the server machine's, so the count agrees with the today line drawn beside it (moai-vj8w.7sh). A zone that
  * machine cannot read (an offset, an Intl name its tzdb lacks) is judged in the server's own zone instead.
  */
-export async function loadTree(client: Client, query: Record<string, string> = {}, priority: number = PRIORITY.list, epoch?: number, worktree = false, archived = false, zone?: string, gantt = false): Promise<Loaded<TreeRow[]>> {
+export interface TreeOptions {
+  query?: Record<string, string>
+  priority?: number
+  epoch?: number
+  worktree?: boolean
+  archived?: boolean
+  zone?: string
+  gantt?: boolean
+}
+
+export async function loadTree(client: Client, { query = {}, priority = PRIORITY.list, epoch, worktree = false, archived = false, zone, gantt = false }: TreeOptions = {}): Promise<Loaded<TreeRow[]>> {
   const asked = { ...query, ...(worktree ? { worktree: '1' } : {}), ...(archived ? { archived: '1' } : {}), ...(gantt ? { gantt: '1', ...(zone ? { tz: zone } : {}) } : {}) }
   const outcome = await client.request({ path: ENDPOINT.tree, query: asked }, { priority, epoch })
   const output = answerOf(outcome)

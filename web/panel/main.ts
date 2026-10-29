@@ -160,7 +160,7 @@ async function start(): Promise<void> {
     const zone = zoneNow()
     // `SPC v w` (on by default): the other worktrees' rows over the list, as the TUI's explorer opens.
     const listing = loadAllRows(client, PRIORITY.list, load, view.worktree)
-    const placing = loadTree(client, sortQuery(sort), PRIORITY.list, load, view.worktree, view.showArchived, zone, gantt)
+    const placing = loadTree(client, { query: sortQuery(sort), priority: PRIORITY.list, epoch: load, worktree: view.worktree, archived: view.showArchived, zone, gantt })
     const counting = loadGroups(client, PRIORITY.list, load, view.worktree)
     let counted: Awaited<typeof counting> | undefined
     void counting.then((groups) => (counted = groups))
