@@ -179,6 +179,8 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
         .transpose()
         .map_err(|e| Fail::no_actor(&e, lang))?;
 
+    let read_config = crate::user_config::path();
+    let mark_problem = std::cell::RefCell::new(Vec::new());
     let done: Edited = repo.with_write_after(
         || ctx.lang(),
         |issues, unread, cfg, _| {
@@ -381,8 +383,23 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
                 },
             ))
         },
-        |_| Ok(()),
+        |done| {
+            if done.changed
+                && let Some(config) = &read_config
+            {
+                match crate::read_marks::mark_written(config, &repo.root, lang, &done.issue) {
+                    Ok(wrote) => mark_problem
+                        .borrow_mut()
+                        .extend(wrote.problems.iter().map(|p| crate::view::sheet_trouble(lang, p))),
+                    Err(e) => mark_problem.borrow_mut().push(e.message),
+                }
+            }
+            Ok(())
+        },
     )?;
+    for why in mark_problem.into_inner() {
+        super::tell(&format!("moai: {}", crate::text::one_line(&why)));
+    }
 
     let Edited {
         issue: edited,

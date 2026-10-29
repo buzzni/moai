@@ -719,6 +719,24 @@ pub fn update<T>(
     })
 }
 
+/// Record the exact version just committed, without moving a later read mark backwards.
+pub fn mark_written(
+    config: &Path,
+    root: &Path,
+    lang: crate::i18n::Lang,
+    issue: &crate::model::Issue,
+) -> R<Wrote<Vec<String>>> {
+    update(
+        config,
+        root,
+        || lang,
+        |sheet| {
+            let marks = crate::query::read_marks_of(std::iter::once(issue), &sheet.marks().0);
+            sheet.mark(&marks)
+        },
+    )
+}
+
 /// [`write_sheet`] 가 멈춘 까닭 — 락을 쥔 자리는 말을 모르므로 거절은 자료로 들고 나온다.
 enum Stop {
     /// io·락이 낸 것 — 이미 글이다.

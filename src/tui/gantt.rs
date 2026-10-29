@@ -637,7 +637,7 @@ pub(super) fn commit_plan(app: &mut App) {
     let done = say(lang, "tui.gantt.moved");
     let mut was: Option<(Option<String>, Option<String>)> = None;
     let mut overflow: Vec<String> = Vec::new();
-    let wrote = app.write(commit_plan, |issues, cfg, _, _| {
+    let wrote = app.write_marked(commit_plan, |issues, cfg, _, _| {
         let Some(i) = issues.iter_mut().find(|i| i.id == id) else {
             return Err(crate::fail::Fail::not_found(&id, lang));
         };
@@ -1105,6 +1105,20 @@ mod tests {
         a.hit(">");
         assert_eq!(dates_on_disk(&dir, "argos-0001"), (None, None), "멤버에서 센 막대를 그 줄의 날로 적었다");
         assert!(a.notice.as_deref().is_some_and(|n| n.contains("argos-0001")), "묶음이 까닭을 안 댔다");
+    }
+
+    #[test]
+    fn moving_a_plan_marks_the_written_row_read() {
+        let (dir, mut app) = on_disk("plan-read");
+        let config = dir.join("user/config.toml");
+        app.user_config = Some(config.clone());
+        app.hit("SPC g g");
+        put_cursor(&mut app, "argos-0003");
+        app.hit(">");
+        let row = app.site.issues.iter().find(|i| i.id == "argos-0003").unwrap();
+        let marks = crate::read_marks::read(&config, &dir, &Default::default());
+        assert_eq!(marks.seen.get(&row.id), Some(&row.updated_at));
+        assert_eq!(app.site.seen.get(&row.id), Some(&row.updated_at));
     }
 
     /// **되돌리는 명령은 이 쓰기가 옮긴 날만 거꾸로 옮긴다**(moai-ekg6.sml) — web 의 `undoOf` 와 같은 자다. 있던 날은 같은

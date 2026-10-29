@@ -1217,11 +1217,15 @@ fn init_plants_the_merge_driver_too() {
         write_exe(&unknown, "#!/bin/sh\nkill -9 $$\n");
         let command = format!("{} merge-driver %O %A %B %L %P", unknown.display());
         git(root, &["config", "--local", "merge.moai.driver", &command]);
-        ok(root, &["init"]);
+        let said = ok(root, &["init"]);
+        assert!(said.contains("못 재어 그대로 둔다"), "{said}");
+        let json = ok(root, &["init", "--json"]);
+        assert_eq!(field(&json, "driver"), "unmeasured");
         assert_eq!(git(root, &["config", "--get", "merge.moai.driver"]).trim_end(), command);
 
         write_exe(&unknown, "#!/bin/sh\necho probe >> probe-count\nexec sleep 30\n");
-        ok(root, &["init"]);
+        let said = ok(root, &["init"]);
+        assert!(said.contains("못 재어 그대로 둔다"), "{said}");
         assert_eq!(git(root, &["config", "--get", "merge.moai.driver"]).trim_end(), command);
         assert_eq!(std::fs::read_to_string(root.join("probe-count")).unwrap().lines().count(), 2);
     }
@@ -9002,6 +9006,20 @@ fn read_marks_the_line_in_my_config_and_leaves_the_tracker_alone() {
     assert!(out.contains(r#""held":[]"#), "막힌 것이 없는 판에 `held` 가 안 섰다 — {out}");
 }
 
+#[test]
+fn edit_marks_the_written_version_for_only_its_user() {
+    let s = init("edit-own-read");
+    let writer = s.path().join("writer/config.toml");
+    let other = s.path().join("other/config.toml");
+    let id = field(&ok_with(s.path(), &writer, &["add", "test", "--json"]), "id");
+    ok_with(s.path(), &writer, &["edit", &id, "--title", "changed"]);
+    let updated =
+        json_of(&ok_with(s.path(), &writer, &["show", &id, "--json"]))["updated_at"].as_str().unwrap().to_string();
+    let sheet = read_sheet(&writer, s.path());
+    assert!(sheet.contains(&id) && sheet.contains(&updated), "{sheet}");
+    assert!(!read_sheet(&other, s.path()).contains(&id));
+}
+
 /// **사람이 적은 값에 막힌 id 는 이름으로 나온다**(moai-l5ue, 리뷰 moai-kuib.g9c 9번).
 ///
 /// `Sheet::mark` 이 그 id 만 건너뛰게 되면서(막힌 줄 하나가 쓰기 전체를 세우지 않는다) 시킨 id 가
@@ -9146,7 +9164,14 @@ fn reading_writes_the_stamp_of_the_line_i_saw() {
     );
 
     // 가지에서 01:30 에 찍힌 고침이 머지로 들어온다 — 읽은 때(02:00)보다 이르지만 본 줄과 다르다.
-    at("2026-09-18T01:30:00Z", &["edit", &id, "--tag", "merged"]);
+    let other = s.path().join("other/config.toml");
+    let edited = staged(&["edit", &id, "--tag", "merged"])
+        .current_dir(s.path())
+        .env("MOAI_CONFIG", &other)
+        .env("MOAI_NOW", "2026-09-18T01:30:00Z")
+        .output()
+        .unwrap();
+    assert!(edited.status.success(), "{}", String::from_utf8_lossy(&edited.stderr));
     let out = at("2026-09-18T03:00:00Z", &["read", "--all", "--json"]);
     assert!(out.contains(&id), "머지로 들어온 고침에 [NEW] 가 안 섰다 — {out}");
 
@@ -32466,6 +32491,10 @@ fn web_moves_a_plan_only_from_its_own_page() {
     assert_eq!((status, json_of(&body)["exit"].as_i64()), (200, Some(0)), "{body}");
     assert!(json_of(&body).get("out").is_some(), "성공한 판에 답이 없으면 페이지는 못 읽은 답으로 본다 — {body}");
     assert_eq!(days(), at("2026-10-28", "2026-10-29"));
+    let updated =
+        json_of(&ok_with(s.path(), &cfg, &["show", &id, "--json"]))["updated_at"].as_str().unwrap().to_string();
+    let sheet = read_sheet(&cfg, s.path());
+    assert!(sheet.contains(&id) && sheet.contains(&updated), "{sheet}");
     // 끝 하나를 옮긴 판은 다른 쪽을 그대로 둔다.
     let (_, _, body) = post(web.port, &format!("/api/plan/{id}?edge=end&days=2"), Some(&mine));
     assert_eq!(json_of(&body)["exit"], 0, "{body}");

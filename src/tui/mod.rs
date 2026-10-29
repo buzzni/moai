@@ -2397,6 +2397,33 @@ impl App {
             &crate::model::Actor,
         ) -> crate::fail::R<(Vec<crate::model::JournalEntry>, Touched)>,
     ) -> Option<String> {
+        self.write_inner(retry, false, f)
+    }
+
+    pub(super) fn write_marked(
+        &mut self,
+        retry: Retry,
+        f: impl FnOnce(
+            &mut Vec<Issue>,
+            &Config,
+            &std::collections::BTreeSet<String>,
+            &crate::model::Actor,
+        ) -> crate::fail::R<(Vec<crate::model::JournalEntry>, Touched)>,
+    ) -> Option<String> {
+        self.write_inner(retry, true, f)
+    }
+
+    fn write_inner(
+        &mut self,
+        retry: Retry,
+        mark: bool,
+        f: impl FnOnce(
+            &mut Vec<Issue>,
+            &Config,
+            &std::collections::BTreeSet<String>,
+            &crate::model::Actor,
+        ) -> crate::fail::R<(Vec<crate::model::JournalEntry>, Touched)>,
+    ) -> Option<String> {
         // 앞 쓰기의 알림은 이 쓰기가 무엇이 되든 낡았다 — 실패한 뒤에 옛 `✓` 가 남으면
         // 이번 것이 담긴 것으로 읽힌다.
         self.notice = None;
@@ -2421,9 +2448,32 @@ impl App {
         // 저널 실패는 프로세스 전체에 쌓인다 — 이 쓰기 뒤에 이 저장소에 새로 선 것만 이 쓰기의 것이다.
         let missed_before = crate::store::journal_misses().len();
         let root = repo.root.clone();
-        let written = by.and_then(|by| repo.with_write(|| lang, |issues, cfg, reserved| f(issues, cfg, reserved, &by)));
+        let read_config = self.user_config.clone();
+        let mark_problem = std::cell::RefCell::new(Vec::new());
+        let written = by.and_then(|by| {
+            repo.with_write_after(
+                || lang,
+                |issues, _, cfg, reserved| {
+                    let (journal, touched) = f(issues, cfg, reserved, &by)?;
+                    let row = if mark { issues.iter().find(|i| i.id == touched.id).cloned() } else { None };
+                    Ok((journal, (touched, row)))
+                },
+                |(_, row)| {
+                    if let (Some(config), Some(row)) = (&read_config, row) {
+                        match crate::read_marks::mark_written(config, &root, lang, row) {
+                            Ok(wrote) => {
+                                mark_problem.borrow_mut().extend(wrote.problems.iter().map(|p| said_read(lang, p)))
+                            }
+                            Err(e) => mark_problem.borrow_mut().push(crate::text::one_line(&e.message)),
+                        }
+                    }
+                    Ok(())
+                },
+            )
+        });
         match written {
-            Ok(touched) => {
+            Ok((touched, _)) => {
+                let mark_problem = mark_problem.into_inner().into_iter().next();
                 // 담긴 것은 참이라 성공으로 닫는다 — 실패로 내면 폼이 열린 채 남아 다시 누르면
                 // 같은 것이 둘 선다(moai-52z9). 이력을 못 남긴 것은 알림 끝에 붙인다.
                 let unjournaled = crate::store::journal_misses()
@@ -2436,6 +2486,12 @@ impl App {
                     .unwrap_or_default();
                 self.write_failed = false;
                 self.reload();
+                if mark {
+                    self.load_read();
+                }
+                if let Some(why) = mark_problem {
+                    self.trouble = Some(why);
+                }
                 let Touched { id, done } = touched;
                 // 층이 있으면 **어느 프로젝트에** 담겼는지도 댄다 — 같은 id 가 두 프로젝트에 있을 수
                 // 있어 id 만으로는 어디인지 모른다(moai-fccv). 층이 없으면 프로젝트는 하나뿐이다.

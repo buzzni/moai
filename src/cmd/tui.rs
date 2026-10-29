@@ -1293,7 +1293,7 @@ fn resume(term: &mut DefaultTerminal, mouse: bool) -> std::io::Result<()> {
 /// `text` 를 임시 파일에 적고 `editor` 로 연 뒤 **고친 글**을 돌려준다. `Err` 는 담지 않을
 /// 까닭이다 — 편집기가 0 이 아닌 코드로 끝났다(vim 의 `:cq`), 못 띄웠다, 못 읽었다.
 ///
-/// 파일은 **한 길만 빼고 지운다 — 편집기가 0 으로 끝났는데 못 읽은 때다**(moai-wk3r). 비 UTF-8
+/// 파일은 **못 읽었거나 편집기가 신호로 끝나면 남긴다**(moai-wk3r, moai-uwi9.9tn). 비 UTF-8
 /// 로 저장한 편집기(메모장 ANSI, vim `fenc=latin1`)에서는 그 파일이 적은 글의 **유일한 사본**이라,
 /// 남겨 두고 오류에 경로를 댄다. 경로는 **글의 앞에 선다** — 배너는 한 줄이라 80칸에서 꼬리가
 /// 잘린다. 같은 말을 `left` 에도 담아 루프가 끝난 뒤 셸에 한 번 더 낸다([`screen`]) — 배너의 알림은
@@ -1339,7 +1339,17 @@ fn write_in_editor(
                 }
             }),
             Some(code) => Err(fill(say(lang, "tui.editor_exit"), &[("editor", editor), ("code", &code.to_string())])),
-            None => Err(fill(say(lang, "tui.editor_signal"), &[("editor", editor)])),
+            None => {
+                keep = path.exists();
+                if keep {
+                    Err(fill(
+                        say(lang, "tui.editor_signal_kept"),
+                        &[("path", &path.display().to_string()), ("editor", editor)],
+                    ))
+                } else {
+                    Err(fill(say(lang, "tui.editor_signal"), &[("editor", editor)]))
+                }
+            }
         });
     if !keep {
         let _ = std::fs::remove_file(&path);
@@ -2313,6 +2323,21 @@ mod tests {
         assert!(why.contains("127"), "{why}");
         assert_eq!(d.leftovers(), Vec::<String>::new());
         assert_eq!(said, Vec::<String>::new(), "지운 파일을 나갈 때 댄다");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_signalled_editor_keeps_saved_text_and_reports_its_path() {
+        let d = Dir::new("signal");
+        let editor = format!("exec {}", d.editor("printf saved > \"$2\"; kill -9 $$"));
+        let mut said = Vec::new();
+        let why = write_in_editor(&editor, "", &d.0, crate::i18n::Lang::En, &mut said).unwrap_err();
+        let files = d.leftovers();
+        assert_eq!(files.len(), 1);
+        let path = d.0.join(&files[0]);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "saved");
+        assert!(why.contains(&path.display().to_string()));
+        assert_eq!(said, vec![why]);
     }
 
     /// **편집기가 0 으로 끝났는데 파일을 못 읽으면(비 UTF-8) 파일을 지우지 않고 오류에 경로를 댄다.**

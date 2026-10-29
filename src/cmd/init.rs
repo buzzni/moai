@@ -2202,6 +2202,7 @@ pub fn run(ctx: &Ctx, flags: &Choice, yes: bool) -> R<Vec<String>> {
                 None => "skipped",
                 Some(Planting::Off) => "off",
                 Some(Planting::Already) => "current",
+                Some(Planting::Unmeasured) => "unmeasured",
                 Some(Planting::Planted(_)) => "planted",
                 Some(Planting::Failed(_)) => "failed",
             },
@@ -2316,6 +2317,7 @@ pub fn run(ctx: &Ctx, flags: &Choice, yes: bool) -> R<Vec<String>> {
     // (읽기 전용 AGENTS.md 를 `?` 로 끊지 않는 moai-780n 과 같은 자다).
     match &planting {
         Some(Planting::Planted(cmd)) => out.push(fill(say(lang, "init.planted_driver"), &[("cmd", cmd)])),
+        Some(Planting::Unmeasured) => out.push(say(lang, "init.driver_unmeasured").to_string()),
         Some(Planting::Failed(why)) => out.push(fill(say(lang, "init.driver_trouble"), &[("why", why)])),
         _ => {}
     }
@@ -2422,7 +2424,7 @@ pub fn run(ctx: &Ctx, flags: &Choice, yes: bool) -> R<Vec<String>> {
         && listed.is_none()
         && untouched.is_empty()
         && skills_stale.is_none()
-        && !matches!(planting, Some(Planting::Planted(_) | Planting::Failed(_)));
+        && !matches!(planting, Some(Planting::Planted(_) | Planting::Failed(_) | Planting::Unmeasured));
     if again && did_nothing {
         out.push(say(lang, "init.all_current").to_string());
     }
