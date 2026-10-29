@@ -1,6 +1,8 @@
 // moai web 을 띄워 Playwright 의 화면 녹화로 장면을 찍는다.
 //
-//     MOAI=<moai 바이너리> node scripts/site-demo/record-web.mjs <seed 저장소> <내보낼 디렉터리>
+//     MOAI=<moai 바이너리> [FFMPEG=<ffmpeg>] node scripts/site-demo/record-web.mjs <seed 저장소> <내보낼 디렉터리>
+//
+// FFMPEG 는 위키 장면의 포스터를 영상에서 꺼낼 때만 쓴다(없으면 PATH 의 ffmpeg). record-site.sh 는 고른 것을 넘긴다.
 //
 // playwright 는 이 저장소의 의존이 아니다 — 부르는 쪽이 NODE_PATH 로 건넨다. 장면마다 브라우저
 // 문맥을 하나씩 열어 날 webm 과 png 포스터를 낸다. 녹화에는 마우스가 안 찍혀서
@@ -25,6 +27,15 @@ const SIZE = { width: 1440, height: 900 }
 // DEMO_NOW 는 seed.sh·plan.sh 의 날을 옮기지만 이 녹화는 그날로 못 간다 — 서버는 MOAI_NOW 를 지우고, 페이지는 브라우저의
 // 시계로 오늘을 그린다. 그대로 찍으면 막대와 나이가 말없이 몇 날씩 어긋나니 멈춘다
 if (process.env.DEMO_NOW) throw new Error('record-web.mjs: DEMO_NOW is for the TUI scenes only; unset it and seed again')
+// 위키 포스터는 장면을 다 찍은 뒤 ffmpeg 로 꺼낸다 — 없으면 녹화를 끝까지 하고 나서야 멈추니, 서버를 띄우기 전에 본다
+const ffmpeg = process.env.FFMPEG || 'ffmpeg'
+if (!process.env.SCENE || process.env.SCENE === 'wiki') {
+  try {
+    execFileSync(ffmpeg, ['-version'], { stdio: 'ignore' })
+  } catch {
+    throw new Error(`record-web.mjs: the wiki poster is taken from the video with ffmpeg, and ${ffmpeg} did not run; set FFMPEG`)
+  }
+}
 
 // 녹화하는 사람의 환경이 화면에 새지 않게: 정체·키·색·말·시간대는 데모의 것으로
 function demoEnv() {
@@ -120,7 +131,7 @@ async function still(page, file, ...targets) {
   await page.emulateMedia({ reducedMotion: 'no-preference' })
 }
 
-let t0 = 0, videoStart = 0, lead = 0, posterTaken = false, posterTime = null, sceneName = ''
+let t0 = 0, videoStart = 0, lead = 0, posterTime = null, sceneName = ''
 async function open(page) {
   await page.goto(url)
   await page.waitForSelector('[role="row"]')
@@ -132,7 +143,6 @@ async function open(page) {
 // 포스터는 상자 없는 정지 그림이다 — 빛줄기 멈춤·커서 숨김·되돌림을 still() 과 함께 쓴다
 async function poster(page) {
   await still(page, `web-${sceneName}.png`)
-  posterTaken = true
 }
 
 const scenes = {
@@ -304,17 +314,18 @@ try {
     const context = await browser.newContext({ viewport: SIZE, recordVideo: { dir: outDir, size: SIZE }, colorScheme: 'dark', deviceScaleFactor: 1, timezoneId: 'UTC' })
     await context.addInitScript(CURSOR)
     // newPage 를 기다리는 동안에도 영상이 시작된다 — 그 앞에서 재야 처음의 빈 화면을 다 자른다.
-    t0 = Date.now(); lead = 0; posterTaken = false; posterTime = null; sceneName = name
+    t0 = Date.now(); lead = 0; posterTime = null; sceneName = name
     const page = await context.newPage()
     videoStart = Date.now()
     await play(page)
-    if (!posterTaken && posterTime === null) await poster(page)
+    // 위키처럼 장면이 포스터의 때를 골랐으면 녹화가 끝난 뒤 그 프레임을 꺼내고, 아니면 끝 화면을 찍는다
+    if (posterTime === null) await poster(page)
     const video = page.video()
     await context.close()
     const videoPath = path.join(outDir, `web-${name}.webm`)
     renameSync(await video.path(), videoPath)
     if (posterTime !== null) {
-      execFileSync(process.env.FFMPEG || 'ffmpeg', ['-v', 'error', '-y', '-ss', String(posterTime), '-i', videoPath, '-frames:v', '1', path.join(outDir, `web-${name}.png`)])
+      execFileSync(ffmpeg, ['-v', 'error', '-y', '-ss', String(posterTime), '-i', videoPath, '-frames:v', '1', path.join(outDir, `web-${name}.png`)])
     }
     console.log('recorded', name, 'lead', lead.toFixed(2))
   }
