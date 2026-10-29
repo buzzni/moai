@@ -1821,6 +1821,12 @@ pub(crate) fn state_at(here: &Path, tracker: &Path, chdir: bool) -> &'static str
     }
     // **[`told`] 로 든다** — [`notice_at`] 으로 들면 선언을 한 번 더 묻는다(같은 답이 나올
     // 물음에 `git check-attr` 를 한 번 더 띄운다).
+    if let Ok(planted) = crate::git::run(here, &["config", "--local", "--get", &driver_key()])
+        && let Some(word) = planted_word(planted.trim())
+        && matches!(probe_settled(here, &word), Probe::Unknown)
+    {
+        return "unmeasured";
+    }
     match told(here, chdir, None) {
         Some(w) => w.kind.trim_start_matches("merge_driver_"),
         None => "current",

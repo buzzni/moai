@@ -1141,7 +1141,9 @@ pub fn check(ctx: &Ctx) -> R<Vec<String>> {
     }
     // **드라이버도 한 줄로 댄다**(moai-08bo). 안 쓰기로 한 저장소(`off`)와 이미 선 줄(`current`)은
     // 조용하다 — `--check` 가 대는 것은 **남은 일**이고, 그 둘은 남은 일이 아니다.
-    if !matches!(driver, "off" | "current") {
+    if driver == "unmeasured" {
+        out.push(say(lang, "init.driver_unmeasured").to_string());
+    } else if !matches!(driver, "off" | "current") {
         out.push(fill(say(lang, "init.check_driver"), &[("state", driver)]));
     }
     // **어디서 쳐야 하는지를 끝에 댄다**(moai-nppo). 위의 줄들이 저마다 대는 `moai init` 은
