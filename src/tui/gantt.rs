@@ -451,7 +451,9 @@ impl App {
             moai_gantt::Hit::Label { row } => self.move_to(row),
             moai_gantt::Hit::Bar { row, part } => {
                 self.move_to(row);
-                if let Some(i) = self.here_at(&rows, row).filter(|&i| self.elsewhere(i).is_none() && self.live_for_drag(i)) {
+                if let Some(i) =
+                    self.here_at(&rows, row).filter(|&i| self.elsewhere(i).is_none() && self.live_for_drag(i))
+                {
                     let id = self.site.issues[i].id.clone();
                     let c = col(at.x);
                     let filled_start = filled_start(&self.site.issues[i], edge_of(part), &self.zone);
@@ -594,7 +596,7 @@ impl App {
 /// 한다. 시작이 기한을 넘거나 위의 기한을 넘는 날(`store::write_locked`, moai-xf0p.cbu)은 거절되고 그 거절문이 배너에
 /// 선다. **저널은 안 적는다** — 필드 고치기다(CLAUDE.md "저널은 상태 계산에 읽히지 않는다").
 ///
-/// 되면 알림 끝에 **되돌리는 명령**을 붙인다(`moai edit <id> --start … --due …`) — 손이 미끄러진 끌기를 도구 안에서 되돌릴
+/// 되면 알림 끝에 **되돌리는 명령**을 붙인다 (상대 이동은 역이동) — 손이 미끄러진 끌기를 도구 안에서 되돌릴
 /// 길이 보여야 한다. 위 기한을 당겨 아래 줄이 넘쳤으면 그 줄도 댄다 — `moai edit` 이 stderr 로 대는 그것이다.
 pub(super) fn commit_plan(app: &mut App) {
     let Some(PlanMove { id, plan }) = app.plan_move.clone() else { return };
@@ -631,7 +633,15 @@ pub(super) fn commit_plan(app: &mut App) {
     }
     let Some((start, due)) = was else { return };
     let none = || "none".to_string();
-    let undo = format!("moai edit {id} --start {} --due {}", start.unwrap_or_else(none), due.unwrap_or_else(none));
+    let cmd = format!("moai edit {id}");
+    let undo = match plan {
+        Plan::Shift(Edge::Body, days) => format!("{cmd} --shift {}", -days),
+        Plan::Shift(Edge::Start, days) if start.is_some() => format!("{cmd} --shift-start {}", -days),
+        Plan::Shift(Edge::End, days) if due.is_some() => format!("{cmd} --shift-due {}", -days),
+        Plan::Shift(Edge::Start, _) | Plan::Start(_) => format!("{cmd} --start {}", start.unwrap_or_else(none)),
+        Plan::Shift(Edge::End, _) => format!("{cmd} --due {}", due.unwrap_or_else(none)),
+        Plan::Day(_) => format!("{cmd} --start none --due none"),
+    };
     let mut told = app.notice.take().unwrap_or_default();
     told.push_str(&fill(say(lang, "tui.gantt.undo"), &[("cmd", &undo)]));
     if !overflow.is_empty() {
@@ -937,10 +947,7 @@ mod tests {
             a.trouble
         );
         let told = a.notice.clone().unwrap_or_default();
-        assert!(
-            told.contains("moai edit argos-0003 --start 2026-10-20 --due 2026-10-24"),
-            "되돌리는 명령이 없다: {told}"
-        );
+        assert!(told.contains("moai edit argos-0003 --shift -1"), "되돌리는 명령이 없다: {told}");
         assert_eq!(on(&a), "argos-0003", "쓰고 나서 커서가 그 줄을 놓쳤다");
 
         a.hit("{");
@@ -975,9 +982,29 @@ mod tests {
         assert!(a.notice.as_deref().is_some_and(|n| n.contains("argos-0001")), "묶음이 까닭을 안 댔다");
     }
 
-    /// **간트 위의 마우스**(moai-i4hf.exq) — 고정 칸을 누르면 커서가 그 줄로, 막대를 끌면 놓을 때 계획이 옮아 쓰이고,
-    /// 날 없는 줄의 빈 날을 누르면 그 하루가 계획이 된다. 가로 휠·Shift+휠·날짜 머리 끌기는 축을, 나눔 선 끌기는 고정
-    /// 칸 폭을 바꾼다.
+    #[test]
+    fn undo_commands_follow_each_move_and_only_restore_created_edges() {
+        use super::{Plan, PlanMove};
+        use crate::model::Edge;
+        let (dir, mut a) = on_disk("undo-edges");
+        let id = "argos-0003";
+        for (edge, days, expected) in
+            [(Edge::Start, 1, "--shift-start -1"), (Edge::End, 2, "--shift-due -2"), (Edge::Body, -1, "--shift 1")]
+        {
+            a.write_plan(PlanMove { id: id.into(), plan: Plan::Shift(edge, days) });
+            assert!(a.notice.as_deref().unwrap().contains(expected), "{:?}", a.notice);
+        }
+        edit_on_disk(&dir, id, |i| i.due_on = None);
+        a.reload();
+        a.write_plan(PlanMove { id: id.into(), plan: Plan::Shift(Edge::End, 2) });
+        assert!(a.notice.as_deref().unwrap().contains("--due none"));
+        a.write_plan(PlanMove {
+            id: "argos-0004".into(),
+            plan: Plan::Day(crate::model::parse_date("2026-10-22").unwrap()),
+        });
+        assert!(a.notice.as_deref().unwrap().contains("--start none --due none"));
+    }
+
     #[test]
     fn the_mouse_picks_rows_drags_bars_and_slides_the_axis() {
         use ratatui::crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind as K};
@@ -1164,7 +1191,7 @@ mod tests {
             a.trouble
         );
         let told = a.notice.clone().unwrap_or_default();
-        assert!(told.contains("--due 2026-10-30"), "되돌리는 명령이 쓰기 앞의 기한을 안 댔다: {told}");
+        assert!(told.contains("--shift -1"), "되돌리는 역이동이 없다: {told}");
 
         // 화면에는 날이 없는데 그새 날이 섰다 — 하루 세우기가 그 날을 덮지 않는다.
         let _ = draw::tests::render(&mut a, 140, 20);
@@ -1350,7 +1377,7 @@ mod tests {
         put_cursor(&mut a, "argos-0003");
         a.hit(">");
         assert_eq!(dates_on_disk(&dir, "argos-0003"), (None, Some("2026-10-25".into())));
-        assert!(a.notice.as_deref().unwrap().contains("--start none --due 2026-10-24"));
+        assert!(a.notice.as_deref().unwrap().contains("--shift -1"));
     }
 
     #[test]
@@ -1366,7 +1393,7 @@ mod tests {
         put_cursor(&mut a, "argos-0003");
         a.hit("}");
         assert_eq!(dates_on_disk(&dir, "argos-0003"), (Some("2026-10-21".into()), Some("2026-10-24".into())));
-        assert!(a.notice.as_deref().unwrap().contains("--start none --due 2026-10-24"));
+        assert!(a.notice.as_deref().unwrap().contains("--start none"));
         a.hit("{");
         assert_eq!(
             dates_on_disk(&dir, "argos-0003").0.as_deref(),
@@ -1411,7 +1438,7 @@ mod tests {
         a.mouse(ev(K::Up(MouseButton::Left), x + step));
         assert_eq!(dates_on_disk(&dir, "argos-0003"), (Some("2026-10-21".into()), Some("2026-10-24".into())));
         assert!(
-            a.notice.as_deref().unwrap().contains("--start 2026-10-22 --due 2026-10-24"),
+            a.notice.as_deref().unwrap().contains("--start 2026-10-22"),
             "되돌리기는 락 안에서 읽은 시작을 보존한다"
         );
     }
