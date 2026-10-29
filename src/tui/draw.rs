@@ -12660,6 +12660,39 @@ mod eyeball {
 /// 1만 건 더미를 dev 로 짓고 잰 값이 화면 사이에 섞인다(moai-xemz 리뷰).
 #[cfg(test)]
 mod bench {
+    fn fixture_paths(root: &std::path::Path) -> std::io::Result<Vec<std::path::PathBuf>> {
+        let mut paths = vec![root.join(".moai/issues.jsonl")];
+        let archive = root.join(".moai/archive");
+        match std::fs::read_dir(&archive) {
+            Ok(entries) => {
+                for entry in entries {
+                    let entry = entry?;
+                    let path = entry.path();
+                    if entry.file_type()?.is_file() && path.extension().is_some_and(|ext| ext == "jsonl") {
+                        paths.push(path);
+                    }
+                }
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(std::io::Error::new(e.kind(), format!("{}: {e}", archive.display()))),
+        }
+        paths.sort();
+        Ok(paths)
+    }
+
+    #[test]
+    fn fixture_paths_accepts_missing_archive_and_skips_unrelated_entries() {
+        let root = std::env::temp_dir().join(format!("moai-gantt-fixture-{}", std::process::id()));
+        let archive = root.join(".moai/archive");
+        std::fs::create_dir_all(root.join(".moai")).unwrap();
+        assert_eq!(fixture_paths(&root).unwrap(), vec![root.join(".moai/issues.jsonl")]);
+        std::fs::create_dir_all(archive.join("folder.jsonl")).unwrap();
+        std::fs::write(archive.join("notes.txt"), "unrelated").unwrap();
+        std::fs::write(archive.join("2026.jsonl"), "").unwrap();
+        assert_eq!(fixture_paths(&root).unwrap(), vec![archive.join("2026.jsonl"), root.join(".moai/issues.jsonl")]);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
     /// Run against a fixed copy of a tracker, including archive, before and after a change.
     /// MOAI_GANTT_BENCH=/tmp/tracker CARGO_PROFILE_TEST_OPT_LEVEL=3 cargo test
     /// --bin moai gantt_frame_costs -- --ignored --nocapture
@@ -12667,16 +12700,17 @@ mod bench {
     #[ignore]
     fn gantt_frame_costs() {
         let root = std::path::PathBuf::from(std::env::var("MOAI_GANTT_BENCH").expect("tracker fixture"));
-        let mut paths = vec![root.join(".moai/issues.jsonl")];
-        paths.extend(std::fs::read_dir(root.join(".moai/archive")).unwrap().map(|e| e.unwrap().path()));
-        paths.sort();
+        let paths = fixture_paths(&root).unwrap_or_else(|e| panic!("fixture {}: {e}", root.display()));
         let issues: Vec<crate::model::Issue> = paths
             .iter()
             .flat_map(|p| {
                 std::fs::read_to_string(p)
-                    .unwrap()
+                    .unwrap_or_else(|e| panic!("fixture {}: {e}", p.display()))
                     .lines()
-                    .map(|s| serde_json::from_str(s).unwrap())
+                    .enumerate()
+                    .map(|(n, s)| {
+                        serde_json::from_str(s).unwrap_or_else(|e| panic!("fixture {}:{}: {e}", p.display(), n + 1))
+                    })
                     .collect::<Vec<_>>()
             })
             .collect();
