@@ -483,8 +483,10 @@ The word is `plan`, not `subagent` — no worker holds this backlog, so it is no
        moai -C "<root>" edit <epic> --milestone none
        moai -C "<root>" edit <epic> --due <due>
        A refusal because the day is later than the milestone's leaves the epic as it stands.
-    4. Give every member a body as `Writing:` says — `detailed`: the headings goal · context (files and lines, the precedent) · what is decided · steps · acceptance (which tests) · out of scope · order and the files it shares · role,
-       each a list; `brief`: what · where · how to test it. A design question the
+    4. Give every member a body the worker can start from, as `Writing:` says. `detailed`: these
+       headings, each a list —
+       goal · context (files and lines, the precedent) · what is decided · steps · acceptance (which tests) · out of scope · order and the files it shares · role.
+       `brief`: what to change · where (file and function) · how to test it. A design question the
        backlog and its notes do not settle goes in it, open, for the worker to ask — do not
        settle it here. Write it to a file in your scratchpad and run
        moai -C "<root>" edit <member> -b - < <that file>

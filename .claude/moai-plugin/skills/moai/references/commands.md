@@ -422,7 +422,7 @@ moai add 'an empty tag slips past the filter' -t bug -e <epic> -b - <<'DETAILED'
 - Run the empty-tag filter test.
 ## Out of scope
 - Changing tag display.
-## Order and shared files
+## Order and the files it shares
 - Do this before the filter integration work; both touch <file>:<line>.
 ## Role
 - Development, low difficulty.

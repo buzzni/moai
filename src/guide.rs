@@ -633,21 +633,23 @@ the setting; `moai writing --json` gives its `detail`. If the board was not inje
 command before writing. Pass the value in prompts to subagents.
 
 - `detailed`: give issue and member bodies headings and lists for goal, context (files and
-  lines and precedent), decisions, steps, acceptance tests, out of scope, order and shared files,
-  and role. In a plan body explain the bundle, agreements and order. Notes say what was done,
-  where, what remains and the next commands; decisions include options and reasons. Review
-  closes name findings taken in and handed on by number and issue ID. Backlog bodies record
-  the thought, where it arose and when to start.
+  lines and precedent), decisions, steps, acceptance tests, out of scope, order and the files
+  it shares, and role. In a plan body explain the bundle, agreements and order. Notes say what
+  was done, where, what remains and the next commands; decisions include options and reasons.
+  Review closes name findings taken in and handed on by number and issue ID. Backlog bodies
+  record the thought, where it arose and when to start.
 - `brief`: use a few lines for what, where and next; notes and closing lines can be one line,
   and backlog entries can use the title alone.
 
 Both keep short titles, lists, no emoji and required IDs, commits and test names. Keep the
-machine-readable lines `model:`, `Report-checked:`, `Review-ready:`, `Regression-of:`,
-`Summary:`, `Sent:`, `Next:`, `report:`, `Decided alone:` and `Plan stopped:` in their original
-format; put details on that line. Do not shorten a reviewer's own words. This applies to
-tracker bodies, notes, review closes and reports; commits, wiki, CHANGELOG and conversation
-follow their own conventions. Nothing checks this — it is how much to write, not a rule
-anything enforces."#;
+machine-readable lines `model:`, `Lesson:`, `Report-checked:`, `Review-ready:`, `Regression-of:`,
+`Summary:`, `Sent:`, `Next:`, `report:`, `Model ran:`, `Subagent ran:`, `Unfolded:`,
+`Decided alone:` and `Plan stopped:` in their original format: detail goes only where that
+format leaves room (the reason inside `model:`'s parentheses, the text after `Next:`) or on the
+lines below it, never ahead of a value read off the line. Do not shorten a reviewer's own words.
+This applies to tracker bodies, notes, review closes and reports; commits, wiki, CHANGELOG and
+conversation follow their own conventions. Nothing checks this — it is how much to write, not a
+rule anything enforces."#;
 
 /// 글 스타일의 예시(moai-1xf2). **참고 문서에만 둔다** — AGENTS 블록과 SKILL.md 는 언제나
 /// 읽히는 자리라 예시 한 벌이 모든 세션의 값이 된다. 규칙은 짧게 늘 보이고, 예시는 부를 때 온다.
@@ -684,7 +686,7 @@ moai add 'an empty tag slips past the filter' -t bug -e <epic> -b - <<'DETAILED'
 - Run the empty-tag filter test.
 ## Out of scope
 - Changing tag display.
-## Order and shared files
+## Order and the files it shares
 - Do this before the filter integration work; both touch <file>:<line>.
 ## Role
 - Development, low difficulty.
@@ -4839,8 +4841,10 @@ Writing: <writing>
    {MILESTONE_CLEAR}
    moai -C "<root>" edit <epic> --due <due>
    A refusal because the day is later than the milestone's leaves the epic as it stands.
-4. Give every member a body as `Writing:` says — `detailed`: the headings {DETAILED_BODY},
-   each a list; `brief`: what · where · how to test it. A design question the
+4. Give every member a body the worker can start from, as `Writing:` says. `detailed`: these
+   headings, each a list —
+   {DETAILED_BODY}.
+   `brief`: what to change · where (file and function) · how to test it. A design question the
    backlog and its notes do not settle goes in it, open, for the worker to ask — do not
    settle it here. Write it to a file in your scratchpad and run
    moai -C "<root>" edit <member> -b - < <that file>
@@ -5016,7 +5020,9 @@ said yes to taking over a row that is not yours, say — belongs to the assignme
   has no `EnterWorktree` — give it absolute paths under the worktree and the words of 4-1, 4-2
   and 4-3, and have it name its real model in what it hands back, for 9-1. The epic-end review
   stays as 7 says. `none` — do the work yourself
-- `Writing:` — use the person's value for tracker writing throughout the work.
+- `Writing:` — `detailed` or `brief`, the person's value the supervisor read this round. It
+  stands for the board and for `moai writing --json` below: keep to it for tracker writing
+  throughout the work, and pass it on to subagents of yours.
 
 {detail}
 
@@ -5847,8 +5853,11 @@ mod tests {
         assert!(message().contains(WRITING_SLOT));
         assert!(plan_brief().contains(DETAILED_BODY));
         assert!(worker().contains("`Writing:`"));
+        // **기계가 읽는 줄은 다 댄다** — `Lesson:` 은 `model::parse_lesson` 이 슬러그를 첫 낱말로 읽고, `Model ran:`·
+        // `Subagent ran:`·`Unfolded:` 는 감독과 Codex 지켜보기가 줄 머리로 읽는다. 빠진 줄은 `detailed` 에서 글이 끼어 깨진다.
         for key in [
             "model:",
+            "Lesson:",
             "Report-checked:",
             "Review-ready:",
             "Regression-of:",
@@ -5856,30 +5865,49 @@ mod tests {
             "Sent:",
             "Next:",
             "report:",
+            "Model ran:",
+            "Subagent ran:",
+            "Unfolded:",
             "Decided alone:",
             "Plan stopped:",
         ] {
-            assert!(DETAIL.contains(key), "{key}");
+            assert!(DETAIL.contains(&format!("`{key}`")), "{key}");
         }
         assert!(DETAIL.contains("moai writing --json"));
         for value in crate::user_config::DETAILS {
             assert!(DETAIL.contains(value));
+            // **심는 글에 값을 굽지 않는다**(moai-d1zn.vg2) — 감독이 회차마다 읽어 채우는 자리라, 채운 줄이 커밋된 글에
+            // 서면 사람의 설정이 아니라 그 글이 일꾼의 자세함을 정한다.
+            let filled = format!("Writing: {value}");
+            for (name, text) in [
+                ("supervise", supervise()),
+                ("message", message()),
+                ("plan_brief", plan_brief()),
+                ("worker", worker()),
+                ("worker_codex", worker_codex()),
+                ("agents", agents()),
+                ("skill", skill()),
+                ("reference", reference()),
+            ] {
+                assert!(!text.contains(&filled), "{name} 에 `{filled}` 가 구워졌다");
+            }
         }
     }
 
+    /// **예시의 머리는 펼치기 브리프의 머리와 한 목록이다** — 손으로 따로 적으면 브리프가 시키는 머리와 예시가 보이는
+    /// 머리가 갈린다(`order and the files it shares` 와 `Order and shared files` 가 그랬다).
     #[test]
     fn the_detailed_example_carries_every_heading() {
         let body = WRITING_EXAMPLE.split_once("<<'DETAILED'\n").unwrap().1.split_once("\nDETAILED").unwrap().0;
-        let headings = [
-            "Goal",
-            "Context",
-            "What is decided",
-            "Steps",
-            "Acceptance",
-            "Out of scope",
-            "Order and shared files",
-            "Role",
-        ];
+        let headings: Vec<String> = DETAILED_BODY
+            .split(" · ")
+            .map(|h| h.split_once(" (").map_or(h, |(head, _)| head))
+            .map(|h| {
+                let mut c = h.chars();
+                c.next().map(|f| f.to_uppercase().chain(c).collect()).unwrap_or_default()
+            })
+            .collect();
+        assert_eq!(headings.len(), 8, "{headings:?}");
         let mut seen = Vec::new();
         for line in body.lines() {
             if let Some(heading) = line.strip_prefix("## ") {

@@ -443,9 +443,10 @@ detail = "brief" # or "detailed" (the default)
 
 `detailed` asks for context, decisions, steps and acceptance; `brief` asks for the
 essential what, where and next. A repository can recommend a value in its own
-`.moai/config.toml`; your user setting wins. The hook's first board and compacted
-carry name it, the supervisor passes it to workers and planning agents, and the
-installed guidance explains it. Nothing checks text length or changes existing text.
+`.moai/config.toml`; your user setting wins. The hook's first board names it, and
+so does the first board after a compaction (as does the line that carries held work
+back, when there is any). The supervisor passes it to workers and planning agents, and
+the installed guidance explains it. Nothing checks text length or changes existing text.
 Machine-readable lines keep their format in either mode. JSON includes `detail`,
 `written`, `repo`, `path` and `repo_path` to identify the effective source.
 

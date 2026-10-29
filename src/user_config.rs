@@ -3950,6 +3950,51 @@ mod tests {
         assert_eq!(problems, [ModelsTrouble::NotAnEffort { key: "effort_complex".into(), raw: "ultra".into() }]);
     }
 
+    /// **`[writing]` 은 `[models]` 와 같은 자로 읽는다**(moai-d1zn) — 틀린 값·모르는 키·표가 아닌 것은 탈로 내고 기본값에
+    /// 선다. 저장소의 표는 권하는 값이라 기본값을 덮고 사람의 값에 진다. 따옴표 없는 저장소 값은 제 말(`NotQuoted`)로 댄다.
+    #[test]
+    fn writing_reads_one_detail_and_layers_the_repo_under_the_person() {
+        let parse = |src: &str| Doc::parse(src).unwrap().writing();
+        assert_eq!(parse(""), (Writing::default(), vec![]));
+        assert_eq!(Writing::default().detail(), Detail::Detailed);
+        let (brief, problems) = parse("[writing]\ndetail = \"brief\"\n");
+        assert!(problems.is_empty());
+        assert_eq!((brief.detail(), brief.written.as_slice()), (Detail::Brief, ["detail".to_string()].as_slice()));
+        let (writing, problems) = parse("[writing]\ndetail = \"Brief\"\nfuture = \"x\"\n");
+        assert_eq!(writing, Writing::default());
+        assert_eq!(
+            problems,
+            [
+                WritingTrouble::NotADetail { key: "detail".into(), raw: "Brief".into() },
+                WritingTrouble::UnknownKey { key: "future".into() },
+            ]
+        );
+        assert_eq!(
+            parse("[writing]\ndetail = 3\n").1,
+            [WritingTrouble::NotAWord { key: "detail".into(), found: "integer".into() }]
+        );
+        assert_eq!(parse("writing = 3\n").1, [WritingTrouble::NotATable { found: "integer".into() }]);
+        assert_eq!(parse("writing.detail = \"brief\"\n").0.detail(), Detail::Brief);
+
+        let repo = |src: &str| crate::config::Config::parse(&format!("prefix = \"a\"\n{src}")).unwrap().writing;
+        let (layered, problems) = Writing::default().with_repo(&repo("[writing]\ndetail = \"brief\"\n"));
+        assert!(problems.is_empty());
+        assert_eq!((layered.detail(), layered.repo.as_slice()), (Detail::Brief, ["detail".to_string()].as_slice()));
+        // 사람이 적은 값이 이긴다 — 같은 키는 `repo` 에서 빠진다.
+        let (mine, _) = parse("[writing]\ndetail = \"detailed\"\n");
+        let (layered, _) = mine.with_repo(&repo("[writing]\ndetail = \"brief\"\n"));
+        assert_eq!((layered.detail(), layered.repo.len(), layered.written.len()), (Detail::Detailed, 0, 1));
+        let (layered, problems) = Writing::default().with_repo(&repo("[writing]\ndetail = brief\nfuture = \"x\"\n"));
+        assert_eq!(layered.detail(), Detail::Detailed);
+        assert_eq!(
+            problems,
+            [
+                WritingTrouble::NotQuoted { key: "detail".into(), raw: "brief".into(), line: 3 },
+                WritingTrouble::UnknownKey { key: "future".into() },
+            ]
+        );
+    }
+
     #[test]
     fn models_are_read_once_and_warn_in_the_explorer() {
         let dir = scratch("models");

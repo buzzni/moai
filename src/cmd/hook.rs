@@ -159,6 +159,13 @@ fn judge(ctx: &Ctx, event: Event, dialect: Dialect, input: &Input) -> Decision {
     decide(ctx, event, dialect, input, call, &line).unwrap_or(Decision::Pass)
 }
 
+/// 이 세션이 얼마나 자세히 쓸지 — 사람의 `[writing] detail`, 저장소가 권한 값을 밑에 깐다(moai-d1zn). **글을 싣는 두
+/// 갈래만 부른다** — 사람의 설정을 읽으므로 `PreToolUse` 에서 부르지 않는다([`decide`] 의 `Ctx` 까닭과 같다). 틀린 값의
+/// 탈은 안 댄다 — 훅의 stderr 는 아무도 안 읽고, 그 말은 `moai writing` 이 댄다.
+fn writing_detail(ctx: &Ctx, repo: &Repo) -> crate::user_config::Detail {
+    ctx.registry().writing.with_repo(&repo.config.writing).0.detail()
+}
+
 /// 답을 내되, 못 내면 아무 말도 하지 않는다(`None`).
 ///
 /// **`Ctx` 를 통째로 받는다** — 화면 언어([`Ctx::lang`])가 드는 것은 **글을 싣는 갈래**뿐이다
@@ -220,7 +227,7 @@ fn decide(
                 &repo.config,
                 &away,
                 ctx.lang(),
-                ctx.registry().writing.with_repo(&repo.config.writing).0.detail(),
+                writing_detail(ctx, &repo),
             )
         }
         // 기준선만 적고 아무것도 싣지 않는다. 까닭은 `hook::Event` 에 있다.
@@ -264,12 +271,7 @@ fn decide(
                 // AGENTS.md 에 moai 블록이 없으면(git 밖에 둔 트래커의 `--guide hook`) 사용법이 어디 있는지 한 줄을 더한다.
                 // 못 읽으면 더하지 않는다 — 무엇이 들었는지 모른다.
                 let unguided = matches!(agents, Ok((crate::cmd::init::BlockState::Missing, _)));
-                crate::hook::guided_board(
-                    &lines,
-                    ctx.lang(),
-                    unguided,
-                    ctx.registry().writing.with_repo(&repo.config.writing).0.detail(),
-                )
+                crate::hook::guided_board(&lines, ctx.lang(), unguided, writing_detail(ctx, &repo))
             })
         }
         Event::PreToolUse => {

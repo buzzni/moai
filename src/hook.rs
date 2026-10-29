@@ -154,6 +154,14 @@ impl Decision {
     }
 }
 
+/// 사람의 `[writing] detail` 을 이르는 한 줄(moai-d1zn) — 보드의 머리와 접힌 뒤 싣는 글이 같은 줄을 쓴다.
+fn writing_line(lang: Lang, detail: crate::user_config::Detail) -> &'static str {
+    match detail {
+        crate::user_config::Detail::Detailed => say(lang, "hook.writing_detailed"),
+        crate::user_config::Detail::Brief => say(lang, "hook.writing_brief"),
+    }
+}
+
 /// 보드를 실을 글로 만든다.
 ///
 /// 보드 줄은 `view::status` 가 이미 만든 것을 그대로 받는다 — 훅이 제 손으로
@@ -166,13 +174,8 @@ impl Decision {
 /// 없다는 뜻이다(moai-6pld). 트래커를 git 밖에 두고 AGENTS.md 를 안 건드린 저장소에서는 이 훅이 에이전트가
 /// moai 를 아는 유일한 길이라, 사용법을 든 스킬을 댄다. 블록이 있는 저장소에는 안 싣는다 — 같은 말을 두 번
 /// 하는 것은 첫 프롬프트마다 치르는 값이다.
-fn writing_line(lang: Lang, detail: crate::user_config::Detail) -> &'static str {
-    match detail {
-        crate::user_config::Detail::Detailed => say(lang, "hook.writing_detailed"),
-        crate::user_config::Detail::Brief => say(lang, "hook.writing_brief"),
-    }
-}
-
+///
+/// 머리말 밑에 **얼마나 자세히 쓸지** 한 줄([`writing_line`])이 선다(moai-d1zn) — 사람의 `[writing] detail` 이다.
 pub fn guided_board(lines: &[String], lang: Lang, unguided: bool, detail: crate::user_config::Detail) -> Decision {
     // 싣기 전에 색을 걷는다. 까닭은 `style::plain` 에 있다.
     let body = crate::style::plain(&lines.join("\n"));

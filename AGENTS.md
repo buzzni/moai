@@ -1,4 +1,4 @@
-<!-- moai:begin v:0.32.0 hash:da6377e6 -->
+<!-- moai:begin v:0.32.0 hash:65df9ed1 -->
 ## Issue tracker — moai
 
 This repository's work lives in `.moai/issues.jsonl`.
@@ -167,21 +167,23 @@ the setting; `moai writing --json` gives its `detail`. If the board was not inje
 command before writing. Pass the value in prompts to subagents.
 
 - `detailed`: give issue and member bodies headings and lists for goal, context (files and
-  lines and precedent), decisions, steps, acceptance tests, out of scope, order and shared files,
-  and role. In a plan body explain the bundle, agreements and order. Notes say what was done,
-  where, what remains and the next commands; decisions include options and reasons. Review
-  closes name findings taken in and handed on by number and issue ID. Backlog bodies record
-  the thought, where it arose and when to start.
+  lines and precedent), decisions, steps, acceptance tests, out of scope, order and the files
+  it shares, and role. In a plan body explain the bundle, agreements and order. Notes say what
+  was done, where, what remains and the next commands; decisions include options and reasons.
+  Review closes name findings taken in and handed on by number and issue ID. Backlog bodies
+  record the thought, where it arose and when to start.
 - `brief`: use a few lines for what, where and next; notes and closing lines can be one line,
   and backlog entries can use the title alone.
 
 Both keep short titles, lists, no emoji and required IDs, commits and test names. Keep the
-machine-readable lines `model:`, `Report-checked:`, `Review-ready:`, `Regression-of:`,
-`Summary:`, `Sent:`, `Next:`, `report:`, `Decided alone:` and `Plan stopped:` in their original
-format; put details on that line. Do not shorten a reviewer's own words. This applies to
-tracker bodies, notes, review closes and reports; commits, wiki, CHANGELOG and conversation
-follow their own conventions. Nothing checks this — it is how much to write, not a rule
-anything enforces.
+machine-readable lines `model:`, `Lesson:`, `Report-checked:`, `Review-ready:`, `Regression-of:`,
+`Summary:`, `Sent:`, `Next:`, `report:`, `Model ran:`, `Subagent ran:`, `Unfolded:`,
+`Decided alone:` and `Plan stopped:` in their original format: detail goes only where that
+format leaves room (the reason inside `model:`'s parentheses, the text after `Next:`) or on the
+lines below it, never ahead of a value read off the line. Do not shorten a reviewer's own words.
+This applies to tracker bodies, notes, review closes and reports; commits, wiki, CHANGELOG and
+conversation follow their own conventions. Nothing checks this — it is how much to write, not a
+rule anything enforces.
 
 ### Park what is out of scope
 
