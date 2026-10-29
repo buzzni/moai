@@ -567,7 +567,8 @@ that promise up.
 `--undo` brings the same row back as it was. A backlog item is "not work yet"; a defer
 is "work, but not now".
 
-**3. Is it worth splitting into an epic** — if the request does not end inside one
+**3. Is it worth splitting into an epic** — in Claude Code, use `/moai-plan` for this step with the plan model.
+For Codex and Antigravity, do it in this session. If the request does not end inside one
 file, show the person **once**, before writing code, a plan split into one epic
 plus three to seven issues, and ask. On a "yes", create it in one go with
 `moai add --from -` (`--dry-run` shows it first).
@@ -1214,7 +1215,7 @@ const REVIEW_IN_SESSION: &str = "the review this session has, else read the diff
 ///
 /// 표를 싣는 것은 `moai` 스킬 하나다([`verbs_section`]) — 세 벤더에 다 심기는 스킬이다. 감독 스킬과 그 일꾼 글은
 /// Claude Code 에만 가니(moai-obxm) 도구를 바로 적는다.
-pub const VERBS: [Verb; 8] = [
+pub const VERBS: [Verb; 9] = [
     // **Claude 는 들지 않는다**(moai-9js2, 2026-10-25 사용자 결정) — `.worktrees/` 로 드는 `EnterWorktree` 는 부를
     // 때마다 사람에게 승인을 묻고, allow 규칙으로 안 꺼진다. 그래서 칸이 도구가 아니라 "들지 말고 겨눈다" 다.
     Verb {
@@ -1237,6 +1238,7 @@ pub const VERBS: [Verb; 8] = [
         step: "Ask the person watching",
         words: ["`AskUserQuestion`", "`request_user_input`", "ask in the conversation and wait"],
     },
+    Verb { step: "Plan a request", words: ["`/moai-plan`", "follow fork 3 in this session", "follow fork 3 in this session"] },
     REVIEW_VERB,
     Verb { step: "Change the model (the person does it)", words: ["`/model`", "`/model`", NO_VERB] },
     Verb { step: "Clear the window (the person does it)", words: ["`/clear`", "`/clear`", "`/clear`"] },
@@ -1545,7 +1547,7 @@ pub fn skill() -> String {
     format!(
         r#"---
 name: moai
-description: Use for this repository's work, issues and plans. "what should I do first", "sort out the to-dos", "create an issue", "how is it going", "let us do this later", "뭐부터 할까", "할 일 정리", "이슈 만들어", "진행 상황", "이거 나중에 하자", when a feature request has to be split into several parts, or when something out of scope comes to mind mid-task. Use this instead of TodoWrite or a markdown TODO list.
+description: Use for this repository's work and issue tracking. "what should I do first", "sort out the to-dos", "create an issue", "how is it going", "let us do this later", "뭐부터 할까", "할 일 정리", "이슈 만들어", "진행 상황", "이거 나중에 하자", when something out of scope comes to mind mid-task. Use this instead of TodoWrite or a markdown TODO list.
 ---
 
 # moai — this repository's issue tracker
