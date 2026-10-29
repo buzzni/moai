@@ -12,6 +12,10 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+### Changed
+
+- Supervisors clear Codex worker windows with `/clear`, preserving the current directory. (moai-2t9u)
+
 ### Fixed
 
 - `moai skill status` warns when a planted Claude plugin is missing its local
