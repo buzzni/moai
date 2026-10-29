@@ -703,8 +703,9 @@ every session in it, so when to update is yours.
   is the stand-in's answer, not a tmux pane. Every cmux call names that surface
   by its UUID, `--surface <UUID>`. A Claude session under screen, tmux or
   zellij inside the tab gets no surface: typing to the tab could reach a different
-  window. The current ancestry check can also suppress a normal tab if cmux
-  itself was launched under tmux or screen; moai-5a28 tracks that limitation
+  window. The check stops at the cmux app, so a multiplexer outside the app
+  does not hide a normal tab (moai-5a28); a session whose ancestors cannot be
+  read gets no surface either
 - **A label on the tab.** Once a round it asks whether worker tabs should carry
   labels; on a yes it names the tab `<worker> <id>` (`cmux rpc tab.action`,
   action `rename`), and takes the name off once the report is checked (action

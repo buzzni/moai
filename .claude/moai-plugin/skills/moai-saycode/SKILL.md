@@ -115,12 +115,14 @@ def nested_multiplexer(pid):
         line = out("ps", "-p", str(pid), "-o", "ppid=", "-o", "comm=")
         fields = line.split(None, 1)
         if len(fields) != 2:
-            break
+            return True
         try:
             pid = int(fields[0])
         except ValueError:
-            break
+            return True
         name = os.path.basename(fields[1].strip()).lower()
+        if name in ("cmux", "cmux dev"):
+            break
         if name in ("screen", "tmux", "zellij") or name.startswith("screen-") or name.startswith("tmux:"):
             return True
     return False

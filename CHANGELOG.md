@@ -16,12 +16,13 @@ does not tag — see `CONTRIBUTING.md`.
 
 - Supervisors clear Codex worker windows with `/clear` instead of `/new`, which asked
   where the new conversation should run and left the clear to you. (moai-2t9u)
-
 - `moai skill status` warns when a planted Claude plugin is missing its local
   `marketplace.json`, and `--json` reports `market_missing`. `moai skill install`
   restores the file. (moai-xvvr.qt8)
 - The cmux session map does not assign a tab to a Claude session running under
   screen, tmux or zellij inside that tab. (moai-xvvr.gkr)
+- Normal cmux tabs remain matched when the cmux app was launched under a
+  multiplexer; unreadable ancestry leaves the surface unassigned. (moai-5a28)
 
 ## [0.33.0] - 2026-10-29
 

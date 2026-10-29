@@ -2992,8 +2992,9 @@ subject — that has actually happened. So in the root, supervisor and worker al
 /// - **조상에 멀티플렉서가 선 세션은 surface 가 없다 — `-` 다**(moai-xvvr.gkr) — cmux 의 다리는 물려받은 환경뿐이라,
 ///   cmux 탭 안에서 돈 screen·tmux·zellij 의 세션은 기록에 `tmux` 가 안 서도 그 탭으로 읽히는데, 그 탭에 친 것은 그
 ///   멀티플렉서의 앞 창으로 간다. 그래서 surface 를 받은 줄만 `ps` 로 조상의 이름(`comm`)을 거슬러 읽고, 그 이름이
-///   멀티플렉서면 `-` 로 낸다. 이름만 읽고 환경은 안 읽는다(moai-p5sz.7q3). surface 가 없는 줄은 거스르지 않는다 —
-///   조상마다 `ps` 를 하나씩 띄우니, 칸을 안 낼 줄에 쓰면 감독의 차례만 늦는다
+///   멀티플렉서면 `-` 로 낸다. cmux 앱에 닿으면 멈춰 앱 바깥 조상은 세지 않는다(moai-5a28). 조상 하나라도 `ps` 가
+///   못 읽으면 멀티플렉서가 없다고 가를 수 없으니 그 줄도 `-` 다. 이름만 읽고 환경은 안 읽는다(moai-p5sz.7q3).
+///   surface 가 없는 줄은 거스르지 않는다 — 조상마다 `ps` 를 하나씩 띄우니, 칸을 안 낼 줄에 쓰면 감독의 차례만 늦는다
 /// - **한 칸을 둘이 대면 둘 다 `-` 다**(리뷰 moai-p5sz.tkn) — 위의 이름 표에 없는 감싸개가 같은 탭을 둘에게 대게 해도, 그
 ///   탭에 친 것은 앞에 선 세션 하나에만 간다. 일꾼이 하나뿐이면 이 규칙은 못 막는다 — 위의 조상 규칙이 그 몫이다. 확인한
 ///   tmux 칸도 같은 잣대다. `interactive` 가 아닌 기록(`ListAgents` 의 `bg`)은 띄운 세션의 탭과
@@ -3059,12 +3060,14 @@ def nested_multiplexer(pid):
         line = out("ps", "-p", str(pid), "-o", "ppid=", "-o", "comm=")
         fields = line.split(None, 1)
         if len(fields) != 2:
-            break
+            return True
         try:
             pid = int(fields[0])
         except ValueError:
-            break
+            return True
         name = os.path.basename(fields[1].strip()).lower()
+        if name in ("cmux", "cmux dev"):
+            break
         if name in ("screen", "tmux", "zellij") or name.startswith("screen-") or name.startswith("tmux:"):
             return True
     return False
@@ -8836,9 +8839,15 @@ stop sending outside work while a release runs",
         let nested = s.path().join("nested");
         std::fs::create_dir_all(&nested).unwrap();
         std::fs::write(nested.join("1.json"), record(me, &start, "nested", None)).unwrap();
-        for name in ["screen", "tmux", "zellij"] {
+        // The map with `ps` answering from a made-up ancestry: each link is the pid asked and `<ppid> <comm>`.
+        let me_pid = me.to_string();
+        let walked = |links: &[(&str, &str)]| {
+            let answers: String = links
+                .iter()
+                .map(|(pid, said)| format!("    if walk and cmd[2] == '{pid}': return '{said}'\n"))
+                .collect();
             let override_ps = format!(
-                "real_out = out\ndef out(*cmd, **env):\n    walk = cmd[0] == 'ps' and 'ppid=' in cmd\n    if walk and cmd[2] == '{me}': return '999998 claude'\n    if walk and cmd[2] == '999998': return '999999 {name}'\n    if walk and cmd[2] == '999999': return '1 shell'\n    return real_out(*cmd, **env)\n"
+                "real_out = out\ndef out(*cmd, **env):\n    walk = cmd[0] == 'ps' and 'ppid=' in cmd\n{answers}    return real_out(*cmd, **env)\n"
             );
             let shell = SESSIONS
                 .replace("~/.claude/sessions", &nested.display().to_string())
@@ -8852,12 +8861,41 @@ stop sending outside work while a release runs",
                 .output()
                 .unwrap();
             assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+            String::from_utf8(out.stdout).unwrap()
+        };
+        for name in ["screen", "tmux", "zellij"] {
             assert_eq!(
-                String::from_utf8(out.stdout).unwrap(),
+                walked(&[(&me_pid, "999998 claude"), ("999998", &format!("999999 {name}")), ("999999", "1 shell")]),
                 "alive\tnested\t-\tidle\t/repo\ts-nested\t-\n",
                 "{name}"
             );
         }
+        // cmux app is the boundary: an outer multiplexer must not hide a normal tab.
+        // A multiplexer below the same boundary must still suppress its surface.
+        for (outer, app) in [("screen", "cmux"), ("tmux", "cmux DEV")] {
+            for inner in [None, Some("screen"), Some("tmux"), Some("zellij")] {
+                let below = format!("999997 {}", inner.unwrap_or("zsh"));
+                let bundle = format!("999998 /Applications/{app}.app/Contents/MacOS/{app}");
+                let surface = if inner.is_some() { "-" } else { "CMUX-SURFACE-A" };
+                assert_eq!(
+                    walked(&[
+                        (&me_pid, "999996 claude"),
+                        ("999996", &below),
+                        ("999997", &bundle),
+                        ("999998", &format!("999999 {outer}")),
+                        ("999999", "1 shell"),
+                    ]),
+                    format!("alive\tnested\t{surface}\tidle\t/repo\ts-nested\t-\n"),
+                    "outer={outer}, inner={inner:?}"
+                );
+            }
+        }
+        // An ancestor `ps` cannot read leaves the walk unproven, so the surface is withheld.
+        assert_eq!(
+            walked(&[(&me_pid, "999998 claude"), ("999998", "")]),
+            "alive\tnested\t-\tidle\t/repo\ts-nested\t-\n",
+            "an unreadable ancestor still gave the surface"
+        );
         // tmux 를 cmux 안에서 돌리면 둘 다 선다 — 그 셸에서 친 것은 tmux 로 가니 tmux 의 짝이 이긴다.
         assert_eq!(
             run_in(Some("/nonexistent/moai-other-server,1,0"), true),
