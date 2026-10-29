@@ -1343,6 +1343,8 @@ pub struct Site {
 }
 
 pub struct App {
+    /// Whether the current background poll changed something the screen can show.
+    follow_changed: bool,
     /// 지금 선 프로젝트에 딸린 것 — 줄·색인·설정과 그 안에서 선 자리([`Site`]).
     pub site: Site,
     pub cursor: usize,
@@ -2132,6 +2134,7 @@ impl App {
         counted: Option<Counted>,
     ) -> App {
         let mut app = App {
+            follow_changed: false,
             site: Site::of(issues, index, ground, cfg, path, unreadable_ids),
             cursor: 0,
             mode: Mode::Browse,
@@ -2519,8 +2522,11 @@ impl App {
             return;
         }
         self.reopened_at = Some(std::time::Instant::now());
-        if (self.reopen)(&self.site.cfg) > 0 && self.site.repo.is_some() {
-            self.reread = true;
+        if (self.reopen)(&self.site.cfg) > 0 {
+            self.follow_changed = true;
+            if self.site.repo.is_some() {
+                self.reread = true;
+            }
         }
     }
 
@@ -2578,6 +2584,14 @@ impl App {
     /// 스레드에서 짓고 있는 다시 읽기가 있는가. 루프가 이 동안은 더 자주 깨어 받는다.
     pub fn loading(&self) -> bool {
         self.pending.is_some() || self.layer_loading() || self.history.loading()
+    }
+
+    /// How long the history read has run, when it is the only background job left — a slow one can be polled less often
+    /// (`cmd::tui`'s `history_poll`). `None` while anything else runs: the others keep the fast poll. The clock is the
+    /// read's own, so a read that follows another gets its grace too.
+    pub fn history_alone(&self) -> Option<std::time::Duration> {
+        let others = self.pending.is_some() || self.layer_loading() || self.reaping() || self.gathering_commits();
+        if others { None } else { self.history.waited() }
     }
 
     /// 버린 다시 읽기 스레드가 아직 남았는가. 루프는 이 동안에도 빠른 걸음으로 깬다 —
@@ -2945,7 +2959,18 @@ impl App {
     /// **읽기는 스레드에서 한다**([`Fresh`]). 짓는 동안은 표식을 다시 재지 않는다 —
     /// 하나가 끝나기 전에 또 띄우면 몰아 쓰는 동안 스레드가 쌓인다. 끝난 것을 들인
     /// 뒤에도 파일이 또 바뀌었으면(표식은 읽기 전에 쟀다) 다음 걸음이 다시 띄운다.
-    pub fn follow(&mut self) {
+    ///
+    /// **바뀐 것이 있을 때만 참이다**(moai-w7ms.ujp) — 루프는 이 답으로만 그린다. 걸음들이 바뀐 것을 `follow_changed` 에
+    /// 적고, 읽기가 뜨거나 끝난 것은 `loading` 의 앞뒤로 잰다.
+    pub fn follow(&mut self) -> bool {
+        self.follow_changed = false;
+        let was_loading = self.loading();
+        self.follow_steps();
+        self.follow_changed || was_loading != self.loading()
+    }
+
+    /// [`App::follow`] 의 걸음들 — 화면에 닿는 것을 바꾸면 `follow_changed` 를 세운다.
+    fn follow_steps(&mut self) {
         self.reap();
         self.follow_config();
         self.follow_read();
@@ -2955,12 +2980,16 @@ impl App {
         self.follow_site();
         self.follow_commits();
         self.follow_latest();
-        self.history.poll();
+        self.follow_changed |= self.history.poll();
+        // **상세가 그린 이력의 저널도 본다**(moai-w7ms 리뷰) — 다시 읽을지는 그리는 자(`draw::fill_history`)가 가르는데,
+        // 쉬는 루프는 이 걸음이 바뀌었다고 할 때만 그린다. `moai note` 는 스냅샷을 안 바꾼다.
+        self.follow_changed |= self.history.moved();
         self.reopen_journals();
         if let Some((rx, _)) = &self.pending {
             match rx.try_recv() {
                 Err(std::sync::mpsc::TryRecvError::Empty) => {}
                 Ok(fresh) => {
+                    self.follow_changed = true;
                     self.pending = None;
                     self.receive(fresh);
                 }
@@ -2974,6 +3003,7 @@ impl App {
                     {
                         std::panic::resume_unwind(payload);
                     }
+                    self.follow_changed = true;
                     self.trouble = Some(say(self.site.lang, "tui.reload.stopped").into());
                 }
             }
@@ -3067,6 +3097,7 @@ impl App {
         match rx.try_recv() {
             Err(std::sync::mpsc::TryRecvError::Empty) => {}
             Ok(seen) => {
+                self.follow_changed = true;
                 self.latest = seen;
                 self.latest_job = None;
             }
@@ -3124,6 +3155,7 @@ impl App {
             match rx.try_recv() {
                 Err(std::sync::mpsc::TryRecvError::Empty) => return,
                 Ok(table) => {
+                    self.follow_changed = true;
                     self.commits_job = None;
                     // **뿌리마다 덮는다.** `commit_tables` 는 이번에 git 이 답을 안 준 뿌리를
                     // 통째로 빼고 오므로(`.ok()`), 받은 것을 그대로 넣으면 한 번 어긋난 걸음에
@@ -4134,6 +4166,7 @@ impl App {
         if !stale {
             return;
         }
+        self.follow_changed = true;
         self.load_read_in(seat);
     }
 
@@ -4162,6 +4195,7 @@ impl App {
         if was == now && !owed {
             return;
         }
+        self.follow_changed = true;
         // **한 번만 읽는다**(moai-7yil) — 적어 둔 읽음과 등록 목록이 한 파일에 살아, 둘이 저마다 읽던
         // 판은 이 걸음마다 같은 글을 두 번 파싱했다. 이 길은 자주 돈다: 보기 토글과 읽음이 그 파일을
         // **스스로 써서**, `r` 을 누르고 있으면 누를 때마다 두 번 파싱이 붙었다.
@@ -4650,6 +4684,7 @@ impl App {
             Err(std::sync::mpsc::TryRecvError::Empty) => return,
             Err(std::sync::mpsc::TryRecvError::Disconnected) => (path.clone(), None),
         };
+        self.follow_changed = true;
         let (_, _, handle, round) = layer.reading.take().expect("바로 위에서 보았다");
         // **이 읽기가 도는 사이에 그 프로젝트에 쓰기가 들어왔는가**(moai-x1hb) — 쓸기가 표식이
         // 움직인 것을 보고 적어 둔다([`layer::Layer::reading_behind`]). 답은 그대로 들이고 그 줄을
@@ -6688,6 +6723,32 @@ mod tests {
 
     fn cfg() -> Config {
         Config::parse("prefix = \"argos\"\n").unwrap()
+    }
+
+    #[test]
+    fn idle_follow_and_empty_background_poll_do_not_request_a_frame() {
+        let mut a = App::new(Vec::new(), cfg(), Path::new());
+        assert!(!a.follow());
+        let (tx, rx) = std::sync::mpsc::channel();
+        let (stop, wait) = std::sync::mpsc::channel::<()>();
+        let handle = std::thread::spawn(move || {
+            let _ = wait.recv();
+        });
+        a.pending = Some((rx, handle));
+        assert!(!a.follow(), "an empty poll changed no visible state");
+        drop(tx);
+        stop.send(()).unwrap();
+        assert!(a.follow(), "a disconnected read must show its error");
+    }
+
+    #[test]
+    fn a_completed_version_read_requests_a_frame() {
+        let mut a = App::new(Vec::new(), cfg(), Path::new());
+        let (tx, rx) = std::sync::mpsc::channel();
+        tx.send(crate::latest::Seen::Unasked(crate::latest::Why::not_asked())).unwrap();
+        a.latest_job = Some((rx, std::thread::spawn(|| {})));
+        assert!(a.follow());
+        assert!(!a.follow());
     }
 
     /// 걸린 거름망의 뱃지 글 — 화면이 그리는 그 글([`draw::badge`])이다.

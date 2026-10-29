@@ -234,6 +234,31 @@ test('counts that come after the rows go on the board they belong to, and a late
   assert.equal(reduce(state, { type: 'groups', data: first, groups: new Map() }), state)
 })
 
+test('a chart-only read clears its own error but preserves a board error', () => {
+  const rows = [{ id: 'a' }]
+  const boardError = { kind: 'unreadable' }
+  const chartError = { kind: 'not-started' }
+  const state = { ...initialState(), board: { value: { rows, loadedAt: 1 }, loading: false, problem: boardError } }
+  const action = { type: 'chart-tree', rows, tree: [], clearProblem: chartError }
+  assert.equal(reduce(state, action).board.problem, boardError)
+  assert.equal(reduce({ ...state, board: { ...state.board, problem: chartError } }, action).board.problem, null)
+})
+
+test('late counts survive a chart-only tree replacement but not a later board', () => {
+  const rows = [{ id: 'a' }]
+  const first = { rows, loadedAt: 1 }
+  const tree = [{ id: 'a', home: [] }]
+  let state = reduce(initialState(), { type: 'board-loaded', data: first })
+  state = reduce(state, { type: 'chart-tree', rows, tree })
+  const groups = new Map([['m', { todo: 1 }]])
+  state = reduce(state, { type: 'groups', data: first, groups })
+  assert.equal(state.board.value.tree, tree)
+  assert.equal(state.board.value.groups, groups)
+  const second = { rows, loadedAt: 2 }
+  state = reduce(state, { type: 'board-loaded', data: second })
+  assert.equal(reduce(state, { type: 'groups', data: first, groups }), state)
+})
+
 test('an archive read that failed is its own problem, gone with the next archive read or when archived rows go', () => {
   const problem = { kind: 'refused', code: 'declined' }
   const state = reduce({ ...initialState(), board: { value: { rows: [], more: 0, loadedAt: 1 }, loading: false, problem: null } }, { type: 'archive-failed', problem })
