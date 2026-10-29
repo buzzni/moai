@@ -132,11 +132,13 @@ async function start(): Promise<void> {
   let quietLoad = 0
   /** A chart read is independent of the board read and is coalesced while it is in flight. */
   let chartReading = false
+  let chartProblem: Outcome | null = null
   let chartRetry: ReturnType<typeof setTimeout> | undefined
   async function ensureChart(): Promise<void> {
     const state = store.getState()
     const board = state.board.value
-    if (chartReading || treeHasGantt || state.tab !== 'gantt' || !board || state.board.loading || document.visibilityState === 'hidden') return
+    if (chartReading || treeHasGantt || state.tab !== 'gantt' || !board || state.board.loading ||
+      (state.board.problem && state.board.problem !== chartProblem) || document.visibilityState === 'hidden') return
     clearTimeout(chartRetry)
     chartRetry = undefined
     chartReading = true
@@ -151,9 +153,13 @@ async function start(): Promise<void> {
       after.sort === sort && after.view.worktree === view.worktree && after.view.showArchived === view.showArchived && zoneNow() === zone
     if (current && result.ok) {
       treeHasGantt = true
-      store.dispatch({ type: 'chart-tree', rows: board.rows, tree: result.value })
+      store.dispatch({ type: 'chart-tree', rows: board.rows, tree: result.value, clearProblem: chartProblem })
+      chartProblem = null
     } else if (after.tab === 'gantt' && !treeHasGantt) {
-      if (current && !result.ok) store.dispatch({ type: 'board-failed', problem: result.outcome })
+      if (current && !result.ok) {
+        chartProblem = result.outcome
+        store.dispatch({ type: 'board-failed', problem: result.outcome })
+      }
       // A failed read retries; a superseded one asks for the current view as soon as the board is ready.
       chartRetry = setTimeout(() => void ensureChart(), current ? (result.ok ? 0 : 2000) : 0)
     }

@@ -234,6 +234,16 @@ test('counts that come after the rows go on the board they belong to, and a late
   assert.equal(reduce(state, { type: 'groups', data: first, groups: new Map() }), state)
 })
 
+test('a chart-only read clears its own error but preserves a board error', () => {
+  const rows = [{ id: 'a' }]
+  const boardError = { kind: 'unreadable' }
+  const chartError = { kind: 'not-started' }
+  const state = { ...initialState(), board: { value: { rows, loadedAt: 1 }, loading: false, problem: boardError } }
+  const action = { type: 'chart-tree', rows, tree: [], clearProblem: chartError }
+  assert.equal(reduce(state, action).board.problem, boardError)
+  assert.equal(reduce({ ...state, board: { ...state.board, problem: chartError } }, action).board.problem, null)
+})
+
 test('late counts survive a chart-only tree replacement but not a later board', () => {
   const rows = [{ id: 'a' }]
   const first = { rows, loadedAt: 1 }
