@@ -367,7 +367,8 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
                     true => before,
                     false => crate::report::with_archive(&before, &archived.issues, &opaque),
                 };
-                let opened = crate::report::freed(&before, &context, cfg, &closed, Some(&me));
+                // 따르는 기한만은 **산 줄로** 잰다(`issues`, moai-eev6) — `ready` 가 그렇게 고르므로 "이 에픽의 다음" 도 같은 사다리다.
+                let opened = crate::report::freed(&before, &context, issues, cfg, &closed, Some(&me));
                 m.unblocked = opened.unblocked.into_iter().cloned().collect();
                 m.closable = opened.closable.into_iter().cloned().collect();
                 m.next = opened.next.into_iter().cloned().collect();

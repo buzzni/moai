@@ -1036,9 +1036,12 @@ Options:
   writing them on the issue row would make even reading collide with others.
   Next to the config, <config dir>/read/ holds **one file per project** with
   the issue id and the updated_at of the row you saw - change that row after
-  that and it becomes unread again. The file name is a hash of the repository
-  root, and the path inside it says which root. The old [read] table in the
-  config file is still read but never written again.
+  that and it becomes unread again. When you edit a row or move its plan on
+  the explorer's or web gantt, its new version is marked read only if its
+  previous version was already read. Unseen changes stay unread. The file
+  name is a hash of the repository root, and
+  the path inside it says which root. The old [read] table in the config
+  file is still read but never written again.
 
   Unread rows carry a [NEW] mark in front of the title in the explorer list -
   only what is assigned to me and what is under it (children, reviews, epic
@@ -2900,7 +2903,8 @@ Order:
   planned days plans that one day. Groups whose bar spans their members are
   not moved — move the members. Neither is a row whose copy the worktree
   overlay took from another worktree; the notice names that worktree. Rows held
-  only in the archive and archive copies of live rows cannot be moved or planned.
+  only in the archive, and archive copies of live rows, cannot be moved or
+  planned.
   When a move is refused (a start after the deadline, a day past the deadline
   above) the refusal is on the banner; a move that went through names the
   `moai edit` line that puts it back. Relative moves undo only the dates moved;
@@ -3900,10 +3904,11 @@ Options:
 
   --json reports gitignore=true only when .gitignore was written; exclude=true
   means the ignore lines were written to .git/info/exclude. Its driver is
-  planted, current (already the same line), off (the repository declares no
-  driver, or is not a git repository), failed (driver_trouble says why),
-  skipped (--no-driver, this run only) or untracked (a tracker kept out of
-  git - git never merges it, so there is nothing to drive).
+  planted, current (already the same line), unmeasured (the planted command
+  could not be measured, so it was left as it was), off (the repository
+  declares no driver, or is not a git repository), failed (driver_trouble
+  says why), skipped (--no-driver, this run only) or untracked (a tracker
+  kept out of git - git never merges it, so there is nothing to drive).
 
   --check writes nothing and only answers whether the AGENTS.md block is
   current, stale or missing, and where the merge driver stands. It is
