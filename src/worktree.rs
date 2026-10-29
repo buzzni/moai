@@ -727,11 +727,25 @@ pub fn away(root: &Path) -> crate::hook::Away {
             names: names(d.others()),
             own: names(d.mine()),
             homes: d.homes(),
+            marked: {
+                let root = root.to_path_buf();
+                crate::hook::Marked::asked(move || marked_homes(&root))
+            },
             main: d.main_root(),
             linked: d.linked(),
             ..Default::default()
         })
         .unwrap_or_default()
+}
+
+/// Pickup marks associated with each linked worktree, used only when a write needs them.
+fn marked_homes(root: &Path) -> std::collections::BTreeMap<PathBuf, BTreeSet<String>> {
+    let Some(disk) = on_disk(root) else { return Default::default() };
+    disk.all
+        .iter()
+        .filter(|(tree, linked, _)| *linked && !is_milestone(tree))
+        .filter_map(|(tree, ..)| disk.admin.get(&tree.path).map(|admin| (root_in(&disk, tree), held_here(admin))))
+        .collect()
 }
 
 /// git 이 적어 둔 파일에서 읽은 워크트리 목록([`on_disk`]).
@@ -2454,6 +2468,8 @@ mod tests {
         }
         std::fs::write(main.join(".git/worktrees/agent-x").join(HELD), "t-0003\n").unwrap();
 
+        let homes = marked_homes(&main);
+        assert_eq!(homes.get(&crate::path::real(&base.join("agent-x"))), Some(&BTreeSet::from(["t-0003".to_string()])));
         let elsewhere = held_elsewhere(&main);
         assert_eq!(
             elsewhere,

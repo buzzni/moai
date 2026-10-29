@@ -5635,6 +5635,9 @@ pub struct Away {
     /// 세션에만 짓던 판은 껍데기가 워크트리로 `cd` 한 세션(Claude 세션은 `EnterWorktree` 로 안 들고, 셸의 `cd` 가 다음
     /// 부름까지 남는다)에서 비어, 그 세션이 절대 경로로 친 루트 쓰기를 안 막았다.
     pub homes: Vec<(PathBuf, BTreeSet<String>)>,
+    /// Worktree pickup marks, read only when a write lands in a linked worktree.
+    pub marked: Marked,
+
     /// 이 세션이 **딸린 워크트리에 섰을 때** main 체크아웃의 moai 뿌리(moai-qrja.kb4) — 그 세션의 쓰기가 루트에 떨어지는지를
     /// 잰다([`homed`]). main 에 선 세션은 없다: 그 뿌리가 곧 훅이 세는 자리다. 맨 저장소처럼 main 이 없어도 없다([`Away::linked`]).
     pub main: Option<PathBuf>,
@@ -5642,6 +5645,34 @@ pub struct Away {
     /// 어디로 잴지 가른다([`main_of`]): main 에 선 세션은 제 뿌리고, 딸린 워크트리에 선 세션은 [`Away::main`] 이며, 그것이 없으면
     /// 잴 main 이 없다. `main` 의 있고 없음으로 가르던 판은 맨 저장소의 딸린 체크아웃을 main 에 선 세션처럼 읽었다.
     pub linked: bool,
+}
+
+/// Deferred lookup of pickup marks by worktree root.
+#[derive(Clone, Default)]
+pub struct Marked(Option<std::sync::Arc<MarkedAsked>>);
+struct MarkedAsked {
+    seen: std::sync::OnceLock<std::collections::BTreeMap<PathBuf, BTreeSet<String>>>,
+    find: Box<dyn Fn() -> std::collections::BTreeMap<PathBuf, BTreeSet<String>> + Send + Sync>,
+}
+impl Marked {
+    pub fn asked(
+        find: impl Fn() -> std::collections::BTreeMap<PathBuf, BTreeSet<String>> + Send + Sync + 'static,
+    ) -> Self {
+        Self(Some(std::sync::Arc::new(MarkedAsked { seen: std::sync::OnceLock::new(), find: Box::new(find) })))
+    }
+    fn contains(&self, home: &Path, id: &str) -> bool {
+        self.0.as_ref().is_some_and(|a| a.seen.get_or_init(|| (a.find)()).get(home).is_some_and(|ids| ids.contains(id)))
+    }
+}
+impl std::fmt::Debug for Marked {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("Marked").field(&self.0.is_some()).finish()
+    }
+}
+impl PartialEq for Marked {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.is_some() == other.0.is_some()
+    }
 }
 
 /// 모름을 고른 그 자리의 까닭. 글을 붙이는 쪽이 집기 기록으로 다시 추측하지 않는다.
@@ -6722,13 +6753,15 @@ fn main_of<'a>(away: &'a Away, root: &'a Path) -> Option<&'a Path> {
 /// 줄의 담당이 그 뒤에 남으로 바뀌었으면([`not_mine`]) 초점에서 빠지는데, 여기서는 지난다 — 지나는 쪽으로 기운다.
 fn sure_home(issues: &[Issue], cfg: &Config, away: &Away, at: &Path) -> bool {
     let real = real_path(at);
-    let Some((_, names)) = landing(away, &real) else { return false };
+    let Some((home, names)) = landing(away, &real) else { return false };
     let wip = report::wip(issues, cfg);
     if wip.is_empty() {
         return false;
     }
     let ties = report::Ties::of(issues);
-    wip.into_iter().any(|i| report::claims(&ties, names, i) && away.sure.contains(issues, &i.id))
+    wip.into_iter().any(|i| {
+        away.sure.contains(issues, &i.id) && (report::claims(&ties, names, i) || away.marked.contains(home, &i.id))
+    })
 }
 
 /// [`guard_edit_at`] 의 몸통 — **초점과 그 자리는 부르는 쪽이 한 번 지어 건넨다**([`held`]·[`homes_of`]). 껍데기의
@@ -10348,6 +10381,28 @@ mod tests {
         let mut both = all.clone();
         both.push(issue("t-2", "in_progress"));
         assert_eq!(guard_edit(&both, &cfg(), &homed, &root, "src/store.rs"), Decision::Pass);
+    }
+
+    #[test]
+    fn pickup_mark_allows_its_worktree_but_not_another_epic() {
+        let all = vec![epic("t-e"), under("t-e.aa", "in_progress", "t-e"), epic("t-f"), epic("t-g")];
+        let root = abs("/repo");
+        let shared = abs("/repo/.worktrees/t-f");
+        let marked_path = shared.clone();
+        let away = Away {
+            names: set(&["t-f", "t-g"]),
+            sure: set(&["t-e.aa"]).into(),
+            homes: vec![(shared, set(&["t-f"])), (abs("/repo/.worktrees/t-g"), set(&["t-g"]))],
+            marked: Marked::asked(move || std::collections::BTreeMap::from([(marked_path.clone(), set(&["t-e.aa"]))])),
+            ..Away::default()
+        };
+        assert_eq!(guard_edit(&all, &cfg(), &away, &root, "/repo/.worktrees/t-f/src/a.rs"), Decision::Pass);
+        assert!(matches!(guard_edit(&all, &cfg(), &away, &root, "/repo/.worktrees/t-g/src/a.rs"), Decision::Deny(_)));
+        let other_session = Away { sure: Sure::default(), ..away };
+        assert!(matches!(
+            guard_edit(&all, &cfg(), &other_session, &root, "/repo/.worktrees/t-f/src/a.rs"),
+            Decision::Deny(_)
+        ));
     }
 
     /// **규칙 2 의 둘째 물음은 쓰기가 떨어지는 자리로 잰다 — 세션이 선 자리가 아니다**(moai-qrja.kb4, 2026-10-26 사용자
