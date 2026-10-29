@@ -563,7 +563,8 @@ and if the message does not arrive, deliver it into the tab —
 `moai-cmux`, "Label the tab" and "When a message does not arrive".
 Inside Saycode, a worker Saycode lists gets the message as a prompt instead of `SendMessage` —
 `moai-saycode`, "Send work".
-Fill in `<id>`, `<title>`, `<steps file>`, `<root branch>`, `<base branch>`, `<milestone>`, `<due>`, `<model>`, `<difficulty>`, `<why>`, `<effort>`, `<worker kind>`, `<subagent ladder>`, `<writing>`, `<other work>`, `<root>`, `<person>` and — only for a subdirectory project — `<subdir>`. Copy `<writing>` from this round's `moai writing --json` `detail`, without choosing it yourself.
+Fill in `<id>`, `<title>`, `<steps file>`, `<root branch>`, `<base branch>`, `<milestone>`, `<due>`, `<model>`, `<difficulty>`, `<why>`, `<effort>`, `<worker kind>`, `<subagent ladder>`, `<writing>`, `<other work>`, `<root>`, `<person>` and — only for a subdirectory project — `<subdir>`.
+Copy `<writing>` from this round's `moai writing --json` `detail`, without choosing it yourself.
 `<root>` is the `root dir` from 2. **Leave it unfilled** and a worker that stands in a
 worktree reads its own place as the root. With no `subdir` line in 2, leave the `Subdir:` line out
 of the message.
