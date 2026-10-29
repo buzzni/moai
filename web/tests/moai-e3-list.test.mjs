@@ -480,19 +480,20 @@ test('list view: rows are 24 high, as list.css --moai-row-h, so the branches mee
   assert.match(listCss, /--moai-row-h: 24px/)
 })
 
-test('list rows expose their status for progress and review backgrounds', () => {
+test('list rows expose their status for progress, review and done backgrounds', () => {
   const panel = mount([
     { id: 'a', title: 'Progress', status: 'in_progress' },
     { id: 'b', title: 'Review', status: 'review' },
     { id: 'c', title: 'Todo', status: 'todo' },
+    { id: 'd', title: 'Done', status: 'done' },
   ])
-  for (const [id, status] of [['a','in_progress'], ['b','review'], ['c','todo']]) {
+  for (const [id, status] of [['a','in_progress'], ['b','review'], ['c','todo'], ['d','done']]) {
     assert.equal(panel.root.querySelector(`[data-id="${id}"]`).dataset.status, status)
   }
-  // jsdom computes no colour, so the sheets are read: the two tints stand, and the cursor and hover still win over them.
+  // jsdom computes no colour, so the sheets are read: the tints stand, and the cursor and hover still win over them.
   const listCss = readFileSync(new URL('../panel/style/list.css', import.meta.url), 'utf8')
   const tokensCss = readFileSync(new URL('../panel/style/tokens.css', import.meta.url), 'utf8')
-  for (const [status, token] of [['in_progress', '--progress-soft'], ['review', '--review-soft']]) {
+  for (const [status, token] of [['in_progress', '--progress-soft'], ['review', '--review-soft'], ['done', '--done-soft']]) {
     assert.match(listCss, new RegExp(`\\.m-row\\[data-status="${status}"\\]:not\\(\\[aria-selected="true"\\]\\):not\\(:hover\\) \\{ background: var\\(${token}\\); \\}`))
     assert.match(tokensCss, new RegExp(`${token}: color-mix\\(`))
   }

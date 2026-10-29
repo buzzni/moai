@@ -2,6 +2,7 @@
 // "Now" is 2026-10-25 14:00 UTC and the zone is UTC, so every position below is a day count at 40px a day.
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
+import { readFileSync } from 'node:fs'
 import { JSDOM } from 'jsdom'
 
 import { panelModule } from './moai-panel-modules.mjs'
@@ -1054,9 +1055,12 @@ test('only the window is drawn: a long list and a multi-year axis at the hour st
   const header = root.querySelector('.hd2 .tick')
   const today = root.querySelector('.todayline')
   const retained = lane(root, 'r010')
+  const retainedRow = root.querySelector('.g-row[data-id="r010"]')
   top = 12 * 28
   scrolled()
   assert.equal(lane(root, 'r010'), retained, 'overlapping lanes are reused')
+  assert.equal(root.querySelector('.g-row[data-id="r010"]'), retainedRow, 'overlapping rows are reused')
+  assert.equal(retainedRow.dataset.status, 'todo')
   // Scrolling down brings the rows in and lets the first go.
   top = 300 * 28 + 44
   scrolled()
@@ -1283,5 +1287,23 @@ test('a capped filled start previews from the creation day in the page zone when
     await tick()
   } finally {
     clock.zone = oldZone
+  }
+})
+
+
+test('gantt row status tints follow refreshed data and preserve selection and hover', () => {
+  const rows = [...ROWS, { id: 'review', title: 'Review', status: 'review' }]
+  const index = indexOf(rows)
+  const { root, view } = mount(null, index)
+  const node = id => root.querySelector(`.g-row[data-id="${id}"]`)
+  for (const [id, status] of [['m1', 'in_progress'], ['e1.a', 'done'], ['review', 'review'], ['e1.c', 'todo']]) {
+    assert.equal(node(id).dataset.status, status)
+  }
+  const changed = rows.map(row => row.id === 'e1.b' ? { ...row, status: 'done' } : row)
+  view.render({ ...initialState(), tab: 'gantt' }, indexOf(changed))
+  assert.equal(node('e1.b').dataset.status, 'done', 'a refreshed index replaces the old status')
+  const css = readFileSync(new URL('../panel/style/gantt.css', import.meta.url), 'utf8')
+  for (const [status, token] of [['in_progress', '--progress-soft'], ['review', '--review-soft'], ['done', '--done-soft']]) {
+    assert.ok(css.includes(`.g-row[data-status="${status}"]:not([aria-selected="true"]):not(:hover) { background: var(${token}); }`))
   }
 })

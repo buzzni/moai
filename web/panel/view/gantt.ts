@@ -248,7 +248,7 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
   function gridRow(m: Model, line: GanttLine, g: GanttRow | undefined, cursor: string | null): HTMLElement {
     const row = line.kind === 'row' ? m.index.rows[line.at]! : null
     const node = el(doc, 'div', {
-      class: `g-row${g?.deferred ? ' dim' : ''}`, role: 'option', 'aria-selected': String(line.key === cursor), 'data-id': row ? row.id : null, 'data-key': line.key,
+      class: `g-row${g?.deferred ? ' dim' : ''}`, role: 'option', 'aria-selected': String(line.key === cursor), 'data-id': row ? row.id : null, 'data-status': row ? statusOf(row) : null, 'data-key': line.key,
     })
     const title = el(doc, 'span', { class: `c-title${line.dir ? ' grp' : ''}${row?.kind === 'milestone' ? ' ms' : ''}` })
     const twig = twigOf(line)
