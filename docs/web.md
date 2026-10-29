@@ -139,8 +139,11 @@ through scrolling and redraws. A move that went through says the `moai edit` lin
 that shifts the same edge back by the same number of days. Changes to the other
 edge stay in place. If that edge had no day when the page read it, undo clears it;
 a day another session added to that edge before the write would be cleared too.
-A newly planned day is undone by clearing both days. The TUI's notice instead
-names the dates it read inside the write. A bar an epic or milestone counts from its members
+A newly planned day is undone by clearing both days. The TUI also names an inverse
+move, choosing the written edges from the dates read inside the write. Undo that
+clears a newly created date or restores an explicitly chosen start still writes an
+absolute value; another session's later change to that field can be overwritten.
+A bar an epic or milestone counts from its members
 (hatched) does not move — move the members. Nor does a row the write cannot reach:
 one the worktree overlay shows from another worktree, and an archived row.
 
@@ -385,4 +388,4 @@ once and the keys reach it.
 The page does not show the stats screen, and what it writes is a Gantt bar's days
 and your read marks.
 
-Decided in: moai-e9hi, moai-8r2l, moai-0aa7, moai-jshy, moai-d86e.3ud, moai-ijjd, moai-lj8g
+Decided in: moai-e9hi, moai-8r2l, moai-0aa7, moai-jshy, moai-d86e.3ud, moai-ijjd, moai-lj8g, moai-ekg6
