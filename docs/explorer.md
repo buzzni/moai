@@ -409,7 +409,9 @@ something that is — and changed
 since you last looked carry a `[NEW]` mark. `r` marks the row under the cursor
 read, `SPC m g` every member of the group it is in, and `SPC m a` everything.
 Read marks live in your own config, not in the tracker, so marking changes
-nothing anyone else sees; the CLI side is `moai read`. Outside the explorer,
+nothing anyone else sees; the CLI side is `moai read`. Editing a row or moving
+its plan marks the new version read only if the previous version was already
+read. An unseen change remains `[NEW]` (moai-uwi9). Outside the explorer,
 `moai show --json` (and `moai show <id> --json`) puts `"unread": true` on the same
 rows the explorer marks `[NEW]`; a row that is not unread has no key at all, and
 when moai cannot tell who you are or cannot read your read marks, no row carries it.
@@ -424,7 +426,9 @@ like a git commit message: the first line is the title. Without one, a built-in
 form opens and `Ctrl-S` keeps it. Leave the title empty and nothing is kept.
 The editor has to save UTF-8. If it saves in another encoding, moai cannot read
 the file, so it keeps it where it is, names its path, and says that path again on
-the shell when you quit — open it, save it as UTF-8, and park it again.
+the shell when you quit — open it, save it as UTF-8, and park it again. If the
+editor crashes or ends on a signal, moai also keeps the file and reports its path
+without saving the thought (moai-uwi9).
 
 ## Several projects
 
@@ -474,4 +478,4 @@ write there either.
   an email on every write and `git config` had none. The answer holds for this
   run; set `user.name` and `user.email` to stop it asking
 
-Decided in: moai-e9hi moai-724f moai-z46r moai-9nfw moai-47mz moai-irrj moai-ucx8 moai-1hka moai-h2rh moai-gelm moai-m6ni moai-p3r9 moai-o3cb moai-fyul moai-ogaw moai-tllo moai-fc97 moai-jtvp moai-bth3 moai-9tqo moai-wk7i moai-pxiy moai-i4hf moai-lj8g moai-ccow moai-d1zn moai-ekg6
+Decided in: moai-e9hi moai-724f moai-z46r moai-9nfw moai-47mz moai-irrj moai-ucx8 moai-1hka moai-h2rh moai-gelm moai-m6ni moai-p3r9 moai-o3cb moai-fyul moai-ogaw moai-tllo moai-fc97 moai-jtvp moai-bth3 moai-9tqo moai-wk7i moai-pxiy moai-i4hf moai-lj8g moai-ccow moai-d1zn moai-ekg6 moai-uwi9

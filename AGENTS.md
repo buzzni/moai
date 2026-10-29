@@ -1,4 +1,4 @@
-<!-- moai:begin v:0.33.0 hash:240f1eab -->
+<!-- moai:begin v:0.33.0 hash:06fb7ec4 -->
 ## Issue tracker — moai
 
 This repository's work lives in `.moai/issues.jsonl`.
@@ -550,7 +550,8 @@ count as much as `Edit` and `Write`. If it was not in the plan, create it with `
 and pick that up. A session holding work is refused a write into another epic's worktree, even
 while a row it holds has no worktree yet; one whose held work all has its worktree standing is
 also refused a write that lands in the main checkout — wherever its shell stands. The refusal
-names the same file where the work it belongs to lives.
+names the same file where the work it belongs to lives. A worktree carrying the
+pickup mark of a row this session surely picked up is also that row's worktree.
 
 **3. A review is an issue too.** Before you call a review, create a review issue tied to
 what you are reviewing. The review is `/code-review` in Claude Code; in Codex and

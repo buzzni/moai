@@ -19,20 +19,21 @@ pub fn run(ctx: &Ctx, worktree: bool, limit: Option<usize>) -> R<Vec<String>> {
         return overview(ctx, worktree, limit);
     };
     let crate::worktree::Gathered { load, origin, .. } = super::gather(ctx, &repo, worktree)?;
+    let live = load.issues.clone();
     let load = crate::archive::context(&repo.root, load)?;
     super::report_load_errors(ctx.lang(), &repo.issues_path(), &load.errors);
 
     // **겹친 줄로 고른다.** 옆 워크트리에서 집은 일은 거기서 `in_progress` 로 서
     // 있으므로, 같은 자(`report::ready`)가 그것을 저절로 뺀다 — 여기에 "남이 집은
     // 것" 을 가르는 `if` 를 따로 두지 않는다.
-    let (picks, focus) = report::ready_in(&load.issues, &repo.config);
+    let (picks, focus) = report::ready_in_live(&load.issues, &live, &repo.config);
     // **내 것과 남의 것을 가른다**(moai-0zjo, 2026-10-02 사용자 결정). 사람은 여기서 풀어 자료로
     // 건넨다 — `report` 는 git 설정을 안 연다. **가를 줄이 있을 때만, 한 번 푼다**: `git` 을 두 번 띄운다.
     let asked = std::cell::OnceCell::new();
     let me = || asked.get_or_init(|| super::me_at(ctx, &repo.root)).as_ref();
     let judge = if picks.is_empty() { None } else { me() };
     let (mut picks, mut others) = report::by_owner(picks, judge);
-    // `ready` 의 차례는 `report::ready_in` 이 이미 세웠다 — 여기서는 끊기만 한다. 내 것이 아닌 줄도
+    // `ready` 의 차례는 `report::ready_in_live` 가 이미 세웠다 — 여기서는 끊기만 한다. 내 것이 아닌 줄도
     // 같은 `-n` 으로 자른다(사용자 결정) — 여러 사람이 쓰는 저장소에서 화면이 남의 일로 길어지지 않는다.
     let more = crate::query::cut(&mut picks, limit);
     let others_more = crate::query::cut(&mut others, limit);
@@ -144,7 +145,7 @@ fn overview(ctx: &Ctx, worktree: bool, limit: Option<usize>) -> R<Vec<String>> {
                 let opaque: std::collections::BTreeSet<&str> =
                     load.errors.iter().filter_map(|e| e.id.as_deref()).collect();
                 let context = report::with_archive(&load.issues, &archived, &opaque);
-                let (picks, focus) = report::ready_in(&context, &repo.config);
+                let (picks, focus) = report::ready_in_live(&context, &load.issues, &repo.config);
                 let live: std::collections::BTreeMap<&str, &crate::model::Issue> =
                     load.issues.iter().map(|i| (i.id.as_str(), i)).collect();
                 let picks = live_rows(picks, &live);

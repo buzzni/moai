@@ -775,11 +775,14 @@ fn settle<'a>(
             // `a_root_session_holding_worktree_work_is_sent_to_the_worktree` 가 훅을 통째로 돌려 잰다). 제 스냅샷에 집힌
             // 줄이 없어 `base` 가 자리를 안 읽은 판(`away_of`)은 여기도 비어
             // 그 물음이 안 선다 — 그 판은 제 스냅샷으로는 아무것도 안 쥐었다.
+            // 집기 표식(`marked`, moai-8kzn)도 같다 — 자리처럼 git 이 적어 둔 파일에서 오고 겹쳐 보기는 안 짓는다. 빠지면 다시 잰 판이
+            // 표식으로 지나야 할 쓰기를 옆 에픽의 자리로 막고, 한 줄에 그 쓰기와 진짜 막을 쓰기가 섞이면 거절문이 앞의 것을 댔다(리뷰).
             let mut away = crate::hook::Away {
                 me: base.me.clone(),
                 recordable: Some(issues.iter().map(|i| i.id.clone()).collect()),
                 archive: base.archive.clone(),
                 homes: base.homes.clone(),
+                marked: base.marked.clone(),
                 main: base.main.clone(),
                 linked: base.linked,
                 ..beside
