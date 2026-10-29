@@ -493,6 +493,9 @@ test('list rows expose their status for progress, review and done backgrounds', 
   // jsdom computes no colour, so the sheets are read: the tints stand, and the cursor and hover still win over them.
   const listCss = readFileSync(new URL('../panel/style/list.css', import.meta.url), 'utf8')
   const tokensCss = readFileSync(new URL('../panel/style/tokens.css', import.meta.url), 'utf8')
+  assert.match(tokensCss, /--done-soft: color-mix\(in srgb, #10B981 7%, var\(--bg\)\)/)
+  assert.match(tokensCss, /:root\[data-theme="dark"\] \{ --done-soft: color-mix\(in srgb, #10B981 3%, var\(--bg\)\)/)
+  assert.match(tokensCss, /:root:not\(\[data-theme="light"\]\) \{ --done-soft: color-mix\(in srgb, #10B981 3%, var\(--bg\)\)/)
   for (const [status, token] of [['in_progress', '--progress-soft'], ['review', '--review-soft'], ['done', '--done-soft']]) {
     assert.match(listCss, new RegExp(`\\.m-row\\[data-status="${status}"\\]:not\\(\\[aria-selected="true"\\]\\):not\\(:hover\\) \\{ background: var\\(${token}\\); \\}`))
     assert.match(tokensCss, new RegExp(`${token}: color-mix\\(`))

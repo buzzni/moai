@@ -86,6 +86,12 @@
   --epic: color-mix(in srgb, var(--accent) 70%, var(--muted));
 }
 
+/* Keep a selected done row distinct in the dark theme. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) { --done-soft: color-mix(in srgb, #10B981 3%, var(--bg)); }
+}
+:root[data-theme="dark"] { --done-soft: color-mix(in srgb, #10B981 3%, var(--bg)); }
+
 /* Base. */
 * { box-sizing: border-box; }
 html, body { height: 100%; }
