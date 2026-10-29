@@ -6833,8 +6833,9 @@ fn refuse_edit(away: &Away, focus: &[&Issue], text: String) -> Decision {
 /// 한 줄이 모두가 나눠 쓰는 루트의 소스에 떨어지고, 아무도 막지 않는다. 그래서 이 자리가 그 가드의 몫을 진다.
 ///
 /// - **초점의 줄마다 그 줄을 가장 가까이 가리키는 옆 워크트리**([`report::nearness`])를 찾는다. 하나라도 제
-///   워크트리가 없는 줄이 있으면 지난다 — 워크트리를 띄우기 전(집고 `worktree add` 하는 사이)과, 워크트리 없이
-///   루트에서 하기로 한 일을 막지 않는다
+///   워크트리가 없는 줄이 있으면 **루트 쓰기는** 지난다 — 워크트리를 띄우기 전(집고 `worktree add` 하는 사이)과, 워크트리
+///   없이 루트에서 하기로 한 일을 막지 않는다. **옆 에픽의 워크트리 쓰기는 그래도 막는다**(moai-uwi9.q08, 2026-10-29 사용자
+///   결정) — 그런 줄을 하나 쥐었다고 옆 에픽의 가지에 쓸 수 있게 되지 않는다
 /// - **거절문이 같은 파일의 워크트리 경로를 낸다** — 리뷰 이슈의 규칙 3 처럼 시킨 대로 치면 지난다. **자리가 여럿이면
 ///   다 댄다**(리뷰 moai-9js2.s4s) — 서브에이전트 일꾼은 감독과 세션 id 를 나눠 써 둘의 집기가 한 초점에 서는데, 첫
 ///   줄의 자리 하나만 대던 판은 다른 일꾼의 쓰기를 남의 가지로 보냈다
@@ -6850,8 +6851,9 @@ fn refuse_edit(away: &Away, focus: &[&Issue], text: String) -> Decision {
 ///   워크트리에 선 세션이 main 에 떨어뜨린 쓰기는 루트의 쓰기다([`main_of`])
 /// - 사람은 훅을 안 지나니 터미널에서 고치는 것은 안 막힌다
 ///
-/// **초점이 모두 제 워크트리를 가졌는가는 부르는 쪽이 한 번 잰다**([`homes_of`]) — 그 답은 경로에 안 달리지만, 이
-/// 물음은 경로마다 다르다(딸린 워크트리 안이면 지난다). 껍데기의 쓰기가 여럿이면 경로마다 여기를 부른다.
+/// **초점의 자리는 부르는 쪽이 한 번 짓는다**([`homes_of`]) — 그 답은 경로에 안 달리지만, 이 물음은 경로마다 다르다(딸린
+/// 워크트리 안이면 지난다). 껍데기의 쓰기가 여럿이면 경로마다 여기를 부른다. 초점이 모두 제 워크트리를 가졌는가는 여기서
+/// 그 자리의 수로 잰다 — [`homes_of`] 는 자리를 가진 줄마다 하나씩 낸다.
 fn homed<'a>(
     issues: &'a [Issue],
     away: &Away,
@@ -6861,7 +6863,9 @@ fn homed<'a>(
     at: &Path,
     typed: &str,
 ) -> Decision {
-    if focus.is_empty() {
+    // **딸린 워크트리가 없으면 막을 자리가 없다**(리뷰 moai-uwi9.j8c) — 쥔 일이 있는 세션의 쓰기는 모두 여기를 지나므로, 경로를
+    // 풀기([`real_path`]) 전에 돌아선다. `found` 가 비면 돌아서던 앞 판의 지름길이 그 자리였다.
+    if focus.is_empty() || away.homes.is_empty() {
         return Decision::Pass;
     }
     let real = real_path(at);
@@ -6874,7 +6878,7 @@ fn homed<'a>(
         if !counted_real(&real, beside) || !claims_other(issues, focus, names) {
             return Decision::Pass;
         }
-        return refuse_edit(away, focus, beside_text(found, beside, &real, typed));
+        return refuse_edit(away, focus, beside_text(focus, found, main_of(away, root), beside, &real, typed));
     }
     if found.len() != focus.len() {
         return Decision::Pass;
@@ -6891,13 +6895,7 @@ fn homed<'a>(
     let spell = |p: &Path| crate::path::slashed(&p.to_string_lossy(), cfg!(windows));
     let there = |home: &Path| rel.map_or_else(|| spell(home), |rel| spell(&home.join(rel)));
     let what = shown(at, root, typed);
-    let mut unique = Vec::new();
-    for &(row, home) in found {
-        if !unique.iter().any(|(_, p)| *p == home) {
-            unique.push((row, home));
-        }
-    }
-    let text = match unique.as_slice() {
+    let text = match distinct_homes(found).as_slice() {
         &[(row, home)] => format!(
             "Changing {what} in the root checkout while holding {}, whose worktree stands at {}.\n\
          The root is shared by every session. Write the same file in the worktree instead:\n\
@@ -6931,29 +6929,68 @@ fn claims_other<'a>(issues: &'a [Issue], focus: &[&'a Issue], names: &BTreeSet<S
 
 /// [`homed`] 의 셋째 거절 — **쥔 일의 워크트리가 아닌 옆 워크트리에 쓴다**(moai-qrja.kb4, 2026-10-26 사용자 결정). 옆
 /// 에픽의 가지에 떨어진 쓰기는 머지까지 아무도 모르고, 그 가지의 일꾼이 제 것이 아닌 고침을 리뷰에 싣는다. 같은 파일의
-/// 제 워크트리 자리를 낸다 — 옆 워크트리의 뿌리에서 뗀 조각을 잇는다.
-fn beside_text(found: &[(&Issue, &Path)], beside: &Path, real: &Path, typed: &str) -> String {
+/// 제 워크트리 자리를 낸다 — 옆 워크트리의 뿌리에서 뗀 조각을 잇는다. 자리는 워크트리마다 한 번이다([`distinct_homes`]).
+///
+/// **워크트리 없는 줄에도 지나는 길을 댄다**(리뷰 moai-uwi9.j8c) — 그 줄의 워크트리를 먼저 세우거나, 루트 체크아웃(`main`)의
+/// 같은 파일이다([`homed`] 의 루트 쓰기 문이 그 줄 때문에 지난다). 워크트리를 먼저 댄다 — 일은 워크트리에서 하는 것이 이
+/// 도구의 걸음이다. 안 대던 판은 그 줄의 고침을 쥔 다른 줄의 가지로 보내거나, 줄이 모두 그러면 지나는 길을 하나도 안 냈다.
+/// main 이 없는 맨 저장소에서는 루트 자리를 안 댄다.
+fn beside_text(
+    focus: &[&Issue],
+    found: &[(&Issue, &Path)],
+    main: Option<&Path>,
+    beside: &Path,
+    real: &Path,
+    typed: &str,
+) -> String {
     let spell = |p: &Path| crate::path::slashed(&p.to_string_lossy(), cfg!(windows));
     let rel = real.strip_prefix(beside).ok();
     let there = |home: &Path| rel.map_or_else(|| spell(home), |rel| spell(&home.join(rel)));
-    let places = if found.is_empty() {
-        "  No worktree exists for the work you hold yet.".to_string()
-    } else {
-        found.iter().map(|&(row, home)| format!("\x20 {}   ({})", there(home), row.id)).collect::<Vec<_>>().join("\n")
-    };
-    format!(
+    let mut text = format!(
         "Changing {typed} in the worktree at {}, which none of the work you hold lives in.\n\
-     That branch is another epic's. Write the same file in the worktree of the work it belongs to:\n\
-     {places}\n\
-     If the change belongs to that other epic, it is that epic's worker's to make.",
+     That branch is another epic's.",
         spell(beside)
-    )
+    );
+    let places: Vec<String> =
+        distinct_homes(found).into_iter().map(|(row, home)| format!("\x20 {}   ({})", there(home), row.id)).collect();
+    if !places.is_empty() {
+        text.push_str(" Write the same file in the worktree of the work it belongs to:\n");
+        text.push_str(&places.join("\n"));
+    }
+    let homeless: Vec<&str> = focus
+        .iter()
+        .copied()
+        .filter(|i| !found.iter().any(|&(row, _)| std::ptr::eq(row, *i)))
+        .map(|i| i.id.as_str())
+        .collect();
+    if !homeless.is_empty() {
+        let root = main.map(|main| format!(", or write {} in the root checkout", there(main))).unwrap_or_default();
+        text.push_str(&format!(
+            "\nNo worktree yet for {}: make one and write the file there{root}.",
+            homeless.join(", ")
+        ));
+    }
+    text.push_str("\nIf the change belongs to that other epic, it is that epic's worker's to make.");
+    text
 }
 
-/// [`homed`] 가 댈 자리 — 초점의 줄마다 그 줄을 가장 가까이 가리키는 옆 워크트리(초점 차례).
-/// 워크트리가 없는 줄은 빼고, 같은 자리를 쓰는 줄도 각각 남긴다. 루트 쓰기는 모든 줄이 자리를 가질 때만 막는다.
-/// 옆 워크트리의 자리가 없거나
-/// 초점이 비면 소속 재료를 안 짓는다.
+/// 자리마다 한 번 — 같은 워크트리를 가리키는 초점의 줄은 첫 줄만 남긴다(초점 차례). 거절문 둘([`homed`] 의 루트 쓰기와
+/// [`beside_text`])이 함께 쓴다. **[`homes_of`] 는 겹친 채 둔다** — [`homed`] 가 그 수로 "모든 줄이 자리를 가졌나" 를
+/// 잰다. 한 에픽의 멤버 둘, 멤버와 그 리뷰 줄이 한 워크트리를 가리키는 흔한 판에서 같은 경로가 두 줄로 섰다(리뷰 moai-uwi9.j8c).
+fn distinct_homes<'i, 'h>(found: &[(&'i Issue, &'h Path)]) -> Vec<(&'i Issue, &'h Path)> {
+    let mut unique: Vec<(&'i Issue, &'h Path)> = Vec::new();
+    for &(row, home) in found {
+        if !unique.iter().any(|&(_, p)| p == home) {
+            unique.push((row, home));
+        }
+    }
+    unique
+}
+
+/// [`homed`] 가 댈 자리 — 초점의 줄마다 그 줄을 가장 가까이 가리키는 옆 워크트리(초점 차례). 워크트리가 없는 줄은 빠진다.
+/// **같은 자리를 쓰는 줄도 저마다 남긴다** — [`homed`] 가 그 수를 초점의 수와 견주어 모든 줄이 자리를 가졌는지 재고(루트
+/// 쓰기는 그때만 막는다), 겹친 자리는 거절문이 걷는다([`distinct_homes`]). 옆 워크트리의 자리가 없거나 초점이 비면 소속
+/// 재료를 안 짓는다.
 fn homes_of<'a, 'h>(issues: &'a [Issue], away: &'h Away, focus: &[&'a Issue]) -> Vec<(&'a Issue, &'h Path)> {
     if away.homes.is_empty() || focus.is_empty() {
         return Vec::new();
@@ -7050,7 +7087,8 @@ fn guard_writes_in(
         }
     }
     // 집기 뒤의 초점은 **그 쓰기 앞의 집기가 집을 줄을 더한 것**이다([`picked_before`]) — 방금 집는 줄에 워크트리가 없으면
-    // [`homes_of`] 가 비어 지난다. 못 푸는 과녁이 섞이면 그 쓰기는 안 묻는다.
+    // 루트 쓰기는 지나고, 옆 에픽의 워크트리 쓰기는 그래도 막힌다([`homed`], moai-uwi9.q08). 못 푸는 과녁이 섞이면 그 쓰기는
+    // 안 묻는다.
     for (at, path, n) in &later {
         let Some(picking) = picked_before(scan, only, *n, issues) else { continue };
         let mut ahead = focus.clone();
@@ -10418,10 +10456,22 @@ mod tests {
         mixed.push(issue("t-2", "in_progress"));
         let mixed_away = Away { sure: set(&["t-e.aa", "t-2"]).into(), ..homed.clone() };
         assert_eq!(guard_edit(&mixed, &cfg(), &mixed_away, &root, "/repo/src/a.rs"), Decision::Pass);
-        assert!(
-            denied(&guard_edit(&mixed, &cfg(), &mixed_away, &root, "/repo/.worktrees/t-f/src/a.rs"))
-                .contains("another epic's")
-        );
+        let why = denied(&guard_edit(&mixed, &cfg(), &mixed_away, &root, "/repo/.worktrees/t-f/src/a.rs")).to_string();
+        assert!(why.contains("another epic's"), "{why}");
+        // The refusal gives each held row a way that passes: t-e.aa's worktree, and for t-2 its own worktree or the root.
+        let homeless =
+            format!("No worktree yet for t-2: make one and write the file there, or write {}", spelt("/repo/src/a.rs"));
+        assert!(why.contains(&format!("{}/src/a.rs   (t-e.aa)", spelt("/repo/.worktrees/t-e"))), "{why}");
+        assert!(why.contains(&homeless), "{why}");
+        let alone = Away { sure: set(&["t-2"]).into(), ..homed.clone() };
+        let why = denied(&guard_edit(&mixed, &cfg(), &alone, &root, "/repo/.worktrees/t-f/src/a.rs")).to_string();
+        assert!(why.contains(&homeless) && !why.contains("worktree of the work"), "{why}");
+        // Two held rows homed in one worktree are named once (review moai-uwi9.j8c).
+        let mut pair = all.clone();
+        pair.push(under("t-e.bb", "in_progress", "t-e"));
+        let both = Away { sure: set(&["t-e.aa", "t-e.bb"]).into(), ..homed.clone() };
+        let why = denied(&guard_edit(&pair, &cfg(), &both, &root, "/repo/.worktrees/t-f/src/a.rs")).to_string();
+        assert_eq!(why.matches(&format!("{}/src/a.rs", spelt("/repo/.worktrees/t-e"))).count(), 1, "{why}");
 
         // 껍데기가 옆 에픽의 워크트리로 `cd` 한 세션 — 떨어지는 자리가 그 워크트리라 막는다. 제 `target/` 는 일이 아니다.
         let wf = abs("/repo/.worktrees/t-f");
