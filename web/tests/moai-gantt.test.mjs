@@ -1290,18 +1290,23 @@ test('a capped filled start previews from the creation day in the page zone when
   }
 })
 
-
 test('gantt row status tints follow refreshed data and preserve selection and hover', () => {
   const rows = [...ROWS, { id: 'review', title: 'Review', status: 'review' }]
   const index = indexOf(rows)
   const { root, view } = mount(null, index)
   const node = id => root.querySelector(`.g-row[data-id="${id}"]`)
-  for (const [id, status] of [['m1', 'in_progress'], ['e1.a', 'done'], ['review', 'review'], ['e1.c', 'todo']]) {
+  for (const [id, status] of [['m1', 'in_progress'], ['e1.a', 'done'], ['review', 'review'], ['e1.b', 'in_progress'], ['e1.c', 'todo']]) {
     assert.equal(node(id).dataset.status, status)
   }
-  const changed = rows.map(row => row.id === 'e1.b' ? { ...row, status: 'done' } : row)
-  view.render({ ...initialState(), tab: 'gantt' }, indexOf(changed))
+  const changed = indexOf(rows.map(row => row.id === 'e1.b' ? { ...row, status: 'done' } : row))
+  const state = { ...initialState(), tab: 'gantt' }
+  view.render(state, changed)
   assert.equal(node('e1.b').dataset.status, 'done', 'a refreshed index replaces the old status')
+  // The cursor alone moving (paintCursor, no redraw) marks the row selected, which the sheet's :not() lets win.
+  const tinted = node('e1.b')
+  view.render({ ...state, cursor: 'e1.b' }, changed)
+  assert.equal(node('e1.b'), tinted)
+  assert.equal(tinted.getAttribute('aria-selected'), 'true')
   const css = readFileSync(new URL('../panel/style/gantt.css', import.meta.url), 'utf8')
   for (const [status, token] of [['in_progress', '--progress-soft'], ['review', '--review-soft'], ['done', '--done-soft']]) {
     assert.ok(css.includes(`.g-row[data-status="${status}"]:not([aria-selected="true"]):not(:hover) { background: var(${token}); }`))

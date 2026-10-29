@@ -247,8 +247,9 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
 
   function gridRow(m: Model, line: GanttLine, g: GanttRow | undefined, cursor: string | null): HTMLElement {
     const row = line.kind === 'row' ? m.index.rows[line.at]! : null
+    const status = row ? statusOf(row) : null
     const node = el(doc, 'div', {
-      class: `g-row${g?.deferred ? ' dim' : ''}`, role: 'option', 'aria-selected': String(line.key === cursor), 'data-id': row ? row.id : null, 'data-status': row ? statusOf(row) : null, 'data-key': line.key,
+      class: `g-row${g?.deferred ? ' dim' : ''}`, role: 'option', 'aria-selected': String(line.key === cursor), 'data-id': row ? row.id : null, 'data-status': status, 'data-key': line.key,
     })
     const title = el(doc, 'span', { class: `c-title${line.dir ? ' grp' : ''}${row?.kind === 'milestone' ? ' ms' : ''}` })
     const twig = twigOf(line)
@@ -263,14 +264,14 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
       toggle.addEventListener('dblclick', (event) => event.stopPropagation())
       title.append(toggle)
     }
-    if (row) {
-      const { glyph, tone } = statusGlyph(statusOf(row), m.boot)
+    if (row && status !== null) {
+      const { glyph, tone } = statusGlyph(status, m.boot)
       const name = String(row.title ?? row.id)
       const moving = line.kind === 'row' && spins(m.index, line.at, firstStatus(m.boot), m.boot?.statuses)
       title.append(row.kind === 'milestone' ? '◆ ' : '', moving ? glint(doc, name) : name)
       title.title = name
       const progress = g?.progress.kind === 'rollup' && g.progress.total > 0 ? `${g.progress.done}/${g.progress.total}` : ''
-      const st = el(doc, 'span', { class: `c-st m-st-${tone}${moving ? ' m-spin' : ''}`, title: (copy.stats as Record<string, string>)[statusOf(row)] ?? statusOf(row) }, glyph)
+      const st = el(doc, 'span', { class: `c-st m-st-${tone}${moving ? ' m-spin' : ''}`, title: (copy.stats as Record<string, string>)[status] ?? status }, glyph)
       node.append(el(doc, 'span', { class: 'c-id' }, row.id), st, title, el(doc, 'span', { class: 'c-n' }, progress), el(doc, 'span', { class: 'c-who' }, assigneeOf(row)))
     } else {
       title.append(line.kind === 'bucket' ? segLabel(line.seg, m.index, copy) : '')

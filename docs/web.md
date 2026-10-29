@@ -58,7 +58,8 @@ it, the body, its children, its commits, the wiki about it (the lessons its note
 point at, the pages that name it, the related sections — as `moai show <id>`
 lists them) and its history. History and work log start expanded and keep the
 line breaks of the text as written. In the list, in-progress rows have a pale gold
-background and review rows a pale purple one. The detail starts on the right;
+background, review rows a pale purple one and done rows a pale green one. The
+detail starts on the right;
 `SPC o d`, or the position button, moves it right → bottom → left → top. Below
 640px it stays below the list. `SPC v d` hides it, and `SPC v r` switches the body
 between rendered markdown and the raw text.
@@ -68,7 +69,8 @@ between rendered markdown and the raw text.
 
 The Gantt tab draws the same chart as the explorer's `SPC g g`, with the same
 meaning. The tree stays on the left, initially with every folder open, with the filter, search and
-view toggles of the list applied; the dates scroll on the right.
+view toggles of the list applied; the dates scroll on the right. The tree's rows take
+the list's column backgrounds; the dates behind the bars stay plain.
 
 | Mark | Means |
 |---|---|
