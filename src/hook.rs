@@ -6891,7 +6891,13 @@ fn homed<'a>(
     let spell = |p: &Path| crate::path::slashed(&p.to_string_lossy(), cfg!(windows));
     let there = |home: &Path| rel.map_or_else(|| spell(home), |rel| spell(&home.join(rel)));
     let what = shown(at, root, typed);
-    let text = match found {
+    let mut unique = Vec::new();
+    for &(row, home) in found {
+        if !unique.iter().any(|(_, p)| *p == home) {
+            unique.push((row, home));
+        }
+    }
+    let text = match unique.as_slice() {
         &[(row, home)] => format!(
             "Changing {what} in the root checkout while holding {}, whose worktree stands at {}.\n\
          The root is shared by every session. Write the same file in the worktree instead:\n\
