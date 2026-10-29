@@ -25,9 +25,23 @@ does not tag — see `CONTRIBUTING.md`.
 - The supervisor passes `effort_plan` to its planning agent and carries planned review focus into the epic review. (moai-ns7a)
 
 - `moai ready` orders equal-priority work by the earliest deadline it follows, including open ancestors. (moai-uwi9.rff)
+- Your own `moai edit`, and a plan you move on the explorer's or `moai web`'s gantt, marks the row you
+  wrote read if its previous version was already read; unseen changes stay `[NEW]`. (moai-uwi9.0xu)
+- When the editor for a parked thought ends on a signal (killed or crashed), the explorer keeps its
+  file and names the path instead of deleting what you saved. (moai-uwi9.9tn)
 
 ### Fixed
 
+- `moai init` says when it could not measure the planted merge driver and left it as it was, and
+  `init --json` and `init --check --json` report `"driver":"unmeasured"` instead of `current`. (moai-fzeo)
+- `moai ready`, `moai prime` and the next row `moai mv … done` names follow only live rows' deadlines,
+  as `moai due apply` does, so an archived epic's deadline no longer reorders its revived members. (moai-eev6)
+- Hook rule 2 lets a session write into a worktree that carries the pick-up mark of a row it picked up
+  there, even when that worktree is named for another epic; other epics' worktrees are still refused.
+  (moai-8kzn)
+- `moai edit` and explorer gantt moves take their `updated_at` once they hold the tracker lock, so a
+  write that waited behind another session no longer stamps an older time that hides it from readers.
+  (moai-uwi9.w5o)
 - Nested task lists in `moai web` retain their indentation. (moai-sqwn.y71)
 - TUI gantt undo reverses only the dates moved, and archive-only rows and archive copies cannot be dragged or planned. (moai-ekg6)
 - Hook rule 2 protects another epic's worktree even when a held row has no worktree. (moai-uwi9.q08)

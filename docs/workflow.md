@@ -197,7 +197,9 @@ and wait on each other to merge.
   refused. A row without a worktree permits a root write while its worktree is being
   created, but does not permit a write into another epic's worktree. The refusal names
   the same file in the held worktree; for a held row that has none yet, it says to make
-  one or names the same file in the root checkout
+  one or names the same file in the root checkout. A worktree carrying the pickup
+  mark of a row this session surely picked up is also a place for that row's work
+  (moai-uwi9).
 - **Work a supervisor hands out inside a milestone branches from that
   milestone's branch**, `milestone/<milestone id>`, instead of the root branch,
   and merges back into it; the branch lives in its own worktree,

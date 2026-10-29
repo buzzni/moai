@@ -2490,6 +2490,35 @@ impl App {
         }
     }
 
+    /// **방금 쓴 줄을 쓴 사람의 읽음으로 적는다**(moai-uwi9.0xu) — 제 끌기가 제게 [NEW] 로 돌아오지 않게. 쓰기가 담긴 **뒤에**,
+    /// [`App::write`] 가 트래커 락을 놓은 다음에 부른다(리뷰). 그 쓰기의 뒷걸음에서 적던 판은 이 사람의 읽음 파일 락을 기다리는
+    /// 동안(5초까지)과 그 파일을 읽고 고쳐 쓰는 동안 `.moai/lock` 을 쥐어 옆 세션의 쓰기를 다 세웠다 — `cmd::edit` 과 같은 까닭이다.
+    /// 적는 값은 받은 줄의 도장이고, 더 늦은 읽음은 거꾸로 안 옮긴다([`crate::read_marks::mark_written`]).
+    ///
+    /// **못 적은 까닭은 돌려준다** — 부르는 쪽이 알림 끝에 붙인다. 실패 배너(`trouble`)로 세우던 판은 담긴 쓰기를 빨간 글 뒤로
+    /// 밀어 80칸에서 되돌리는 명령을 잘랐고, 방금 선 다시 읽기의 실패를 덮었다. 붙이는 글은 `r` 과 같은 자다([`App::mark_read`]).
+    /// 설정 자리가 없으면(`user_config` 가 없다) `r` 처럼 화면에서만 걷는다.
+    pub(super) fn mark_written(&mut self, row: &Issue) -> Option<String> {
+        let lang = self.site.lang;
+        let root = self.site.repo.as_ref().map(|r| r.root.clone());
+        let (Some(config), Some(root)) = (self.user_config.clone(), root) else {
+            let marks = crate::query::read_marks_of(std::iter::once(row), &self.site.seen);
+            self.site.seen.extend(marks);
+            self.recount_unread();
+            return None;
+        };
+        let why = match crate::read_marks::mark_written(&config, &root, lang, row) {
+            Ok(wrote) => wrote.problems.first().map(|p| said_read(lang, p)),
+            Err(e) => Some(fill(say(lang, "tui.read.unwritten"), &[("why", &crate::text::one_line(&e.message))])),
+        };
+        // 다시 든 읽음으로 [NEW] 를 다시 센다 — 그 파일의 표식이 바뀌어 다음 걸음이 어차피 다시 읽는다. **쓰기의 알림은 지킨다** —
+        // 다시 들기가 못 읽은 까닭을 알림에 세우면 방금 담긴 쓰기의 `✓` 를 덮는다. 그 까닭은 적다 만난 까닭이 없을 때 대신 돌려준다.
+        let landed = self.notice.take();
+        self.load_read();
+        let reread = std::mem::replace(&mut self.notice, landed);
+        why.or(reread)
+    }
+
     /// 헤더가 적을 사람. 처음 한 번만 풀고 [`Self::user`] 나 그 프로젝트의 `naming` 이
     /// 바뀌면 다시 푼다 — 까닭은 `header_user` 에 적었다.
     ///

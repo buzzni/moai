@@ -439,7 +439,8 @@ fn screen(mut app: App) -> R<Vec<String>> {
     // 오류·패닉으로 끝난 길에서는 어긋날 수 있는데, 그때 드는 것은 헛 왕복 한 번이지 새는 글이 아니다.
     modes_off_draining(app.wants_mouse(), app.rolled_at);
     ratatui::restore();
-    // 편집기가 남겼는데 못 읽어 **지우지 않은 파일은 나갈 때 셸에 한 번 더 댄다**(moai-f6ao) — 어느 길로
+    // 편집기가 남겼는데 못 읽었거나 편집기가 신호로 끝나 **지우지 않은 파일은 나갈 때 셸에 한 번 더 댄다**(moai-f6ao,
+    // moai-uwi9.9tn) — 어느 길로
     // 끝났든. 배너의 알림은 80칸에서 잘리고 다음 키에 걷힌다 — 새 판 줄을 나갈 때 내는 것과 같은 까닭이다
     // (moai-8rmw.665). 거기 든 것이 적은 글의 유일한 사본이다.
     for said in &left {
@@ -1291,9 +1292,10 @@ fn resume(term: &mut DefaultTerminal, mouse: bool) -> std::io::Result<()> {
 }
 
 /// `text` 를 임시 파일에 적고 `editor` 로 연 뒤 **고친 글**을 돌려준다. `Err` 는 담지 않을
-/// 까닭이다 — 편집기가 0 이 아닌 코드로 끝났다(vim 의 `:cq`), 못 띄웠다, 못 읽었다.
+/// 까닭이다 — 편집기가 0 이 아닌 코드로 끝났다(vim 의 `:cq`), 신호로 끝났다, 못 띄웠다, 못 읽었다.
 ///
-/// 파일은 **한 길만 빼고 지운다 — 편집기가 0 으로 끝났는데 못 읽은 때다**(moai-wk3r). 비 UTF-8
+/// 파일은 **못 읽었거나 편집기가 신호로 끝나면 남긴다**(moai-wk3r, moai-uwi9.9tn) — 껍데기가 128+N 으로 갚은 신호도
+/// 신호다([`signalled`]). 비 UTF-8
 /// 로 저장한 편집기(메모장 ANSI, vim `fenc=latin1`)에서는 그 파일이 적은 글의 **유일한 사본**이라,
 /// 남겨 두고 오류에 경로를 댄다. 경로는 **글의 앞에 선다** — 배너는 한 줄이라 80칸에서 꼬리가
 /// 잘린다. 같은 말을 `left` 에도 담아 루프가 끝난 뒤 셸에 한 번 더 낸다([`screen`]) — 배너의 알림은
@@ -1338,8 +1340,21 @@ fn write_in_editor(
                     fill(say(lang, "tui.editor_no_read"), &[("why", &why)])
                 }
             }),
-            Some(code) => Err(fill(say(lang, "tui.editor_exit"), &[("editor", editor), ("code", &code.to_string())])),
-            None => Err(fill(say(lang, "tui.editor_signal"), &[("editor", editor)])),
+            Some(code) if !signalled(code) => {
+                Err(fill(say(lang, "tui.editor_exit"), &[("editor", editor), ("code", &code.to_string())]))
+            }
+            // 신호로 끝났거나 터졌다 — 이 프로세스가 본 신호거나(`code()` 가 없다), `sh -c` 가 128+N 으로 갚은 신호, Windows 의 NTSTATUS 다([`signalled`]).
+            _ => {
+                keep = path.exists();
+                if keep {
+                    Err(fill(
+                        say(lang, "tui.editor_signal_kept"),
+                        &[("path", &path.display().to_string()), ("editor", editor)],
+                    ))
+                } else {
+                    Err(fill(say(lang, "tui.editor_signal"), &[("editor", editor)]))
+                }
+            }
         });
     if !keep {
         let _ = std::fs::remove_file(&path);
@@ -1355,6 +1370,21 @@ fn write_in_editor(
         left.push(said.clone());
     }
     got
+}
+
+/// 편집기가 **스스로 끝나지 않았다**고 읽는 코드인가(moai-uwi9.9tn 리뷰) — 신호에 맞았거나 터졌다. 그 판의 파일은 남긴다.
+///
+/// - **껍데기가 갚은 신호** — 128+N(N 은 신호 번호, 1~64). 편집기는 `sh -c '<편집기> "$@"'` 의 자식이다([`editor_command`]).
+///   마지막 명령을 exec 하는 `sh`(bash)에서는 편집기가 곧 이 프로세스의 자식이라 신호가 그대로 보이지만(`code()` 가 없다), exec
+///   하지 않는 `sh`(Debian·Ubuntu 의 dash)는 신호에 맞아 죽은 편집기를 그 코드로 갚는다. 앞의 꼴만 세던 판은 `:w` 뒤에 OOM
+///   킬러에 맞은 편집기의 글을 "편집기가 137 로 끝났다" 와 함께 지웠다 — 그 파일을 남기기로 한 결정이 막으려던 바로 그 손실이다
+/// - **Windows 에서 터진 편집기** — 신호가 없어 `code()` 가 늘 서고, 터지면 NTSTATUS 의 실패 값(`0xC0000005` 따위)이 i32 로
+///   음수다. 유닉스의 코드는 음수가 될 수 없다
+///
+/// 편집기가 그 코드를 스스로 낸 것과는 못 가르지만, 가르지 못할 때 남기는 쪽이 싸다: 남은 파일은 지우면 되지만 지운 글은
+/// 돌아오지 않는다.
+fn signalled(code: i32) -> bool {
+    code < 0 || (129..=192).contains(&code)
 }
 
 /// 편집기를 띄우는 명령 — 유닉스에서는 `sh` 가 편집기 글을 껍데기 규칙으로 쪼갠다([`crate::tui::jotfile::argv`]).
@@ -1669,7 +1699,7 @@ fn spin_step(drew: std::time::Duration) -> std::time::Duration {
     (drew * SPIN_BUDGET).clamp(SPIN_TICK, SPIN_SLOWEST)
 }
 
-/// `q` 가 올 때까지 그리고 받는다. `left` 에는 편집기가 남겼는데 못 읽어 지우지 않은 파일의 말이
+/// `q` 가 올 때까지 그리고 받는다. `left` 에는 편집기가 남겼는데 못 읽었거나 신호로 끝나 지우지 않은 파일의 말이
 /// 쌓인다 — [`screen`] 이 터미널을 걷은 뒤 셸에 낸다([`write_in_editor`]).
 fn loop_until_quit(term: &mut DefaultTerminal, app: &mut App, left: &mut Vec<String>) -> std::io::Result<()> {
     // 층에서 시작하면 읽기가 이미 돌 수 있다 — 첫 걸음부터 빠르게 받는다.
@@ -2313,6 +2343,28 @@ mod tests {
         assert!(why.contains("127"), "{why}");
         assert_eq!(d.leftovers(), Vec::<String>::new());
         assert_eq!(said, Vec::<String>::new(), "지운 파일을 나갈 때 댄다");
+    }
+
+    /// **신호로 끝난 편집기의 파일은 남기고 그 자리를 댄다**(moai-uwi9.9tn). 두 꼴을 다 잰다 — `exec` 로 띄운 편집기는 신호가
+    /// 그대로 보이고(`code()` 가 없다), 보통의 `$EDITOR` 는 `sh -c` 의 자식이라 마지막 명령을 exec 하지 않는 `sh`(Debian·Ubuntu 의
+    /// dash)가 그 신호를 128+N 으로 갚는다(리뷰). 앞의 꼴만 재던 시험은 이 기계의 `sh` 에서 진짜 편집기의 글이 지워지는 동안 푸르렀다.
+    #[cfg(unix)]
+    #[test]
+    fn a_signalled_editor_keeps_saved_text_and_reports_its_path() {
+        for (name, exec) in [("signal-exec", "exec "), ("signal-plain", "")] {
+            let d = Dir::new(name);
+            let editor = format!("{exec}{}", d.editor("printf saved > \"$2\"; kill -9 $$"));
+            let mut said = Vec::new();
+            let why = write_in_editor(&editor, "", &d.0, crate::i18n::Lang::En, &mut said).unwrap_err();
+            let files = d.leftovers();
+            assert_eq!(files.len(), 1, "{name}: {why}");
+            let path = d.0.join(&files[0]);
+            assert_eq!(std::fs::read_to_string(&path).unwrap(), "saved", "{name}");
+            assert!(why.contains(&path.display().to_string()), "{name}: {why}");
+            assert_eq!(said, vec![why], "{name}");
+        }
+        // 신호로 읽는 것은 128+N 과 Windows 의 NTSTATUS(음수)뿐이다 — 스스로 낸 0 아닌 코드(`:cq`)는 그대로 지운다(`a_failing_editor_…`).
+        assert!(!signalled(1) && !signalled(128) && signalled(137) && !signalled(193) && signalled(-1_073_741_819));
     }
 
     /// **편집기가 0 으로 끝났는데 파일을 못 읽으면(비 UTF-8) 파일을 지우지 않고 오류에 경로를 댄다.**

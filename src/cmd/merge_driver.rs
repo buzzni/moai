@@ -1737,10 +1737,10 @@ fn git_said(e: crate::git::Error) -> String {
 pub(crate) enum Planting {
     /// 이 저장소는 드라이버를 안 쓴다 — 선언이 없거나(`.gitattributes`), git 저장소가 아니다.
     Off,
-    /// 이미 지금 판의 줄이 서 있다 — **또는 선 줄의 명령을 재고도 몰랐다**(`Probe::Unknown`, 시간 넘김은 두 번 잰다 —
-    /// moai-uwi9.b75). 어느 쪽이든 아무것도 안 썼다. 뒤의 판은 줄의 모양을 안 고친다 — `--json` 은 `current` 라고 말하지만
-    /// 그 줄이 옛 모양일 수 있다.
+    /// 이미 지금 판의 줄이 서 있다.
     Already,
+    /// 선 명령을 재지 못해 그대로 두었다.
+    Unmeasured,
     /// 심었다 — 적은 명령.
     Planted(String),
     /// 못 심었다 — git 이 댄 까닭.
@@ -1785,7 +1785,7 @@ pub(crate) fn plant_for_init(root: &Path) -> Planting {
     let planted = planted.trim();
     if let Some(word) = planted_word(planted) {
         match probe_settled(root, &word) {
-            Probe::Unknown => return Planting::Already,
+            Probe::Unknown => return Planting::Unmeasured,
             Probe::Runs if planted == driver_command(&word) => return Planting::Already,
             Probe::Runs => {
                 return match plant_config(root, &word) {
@@ -1821,6 +1821,12 @@ pub(crate) fn state_at(here: &Path, tracker: &Path, chdir: bool) -> &'static str
     }
     // **[`told`] 로 든다** — [`notice_at`] 으로 들면 선언을 한 번 더 묻는다(같은 답이 나올
     // 물음에 `git check-attr` 를 한 번 더 띄운다).
+    if let Ok(planted) = crate::git::run(here, &["config", "--local", "--get", &driver_key()])
+        && let Some(word) = planted_word(planted.trim())
+        && matches!(probe_settled(here, &word), Probe::Unknown)
+    {
+        return "unmeasured";
+    }
     match told(here, chdir, None) {
         Some(w) => w.kind.trim_start_matches("merge_driver_"),
         None => "current",
