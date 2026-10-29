@@ -142,6 +142,20 @@ pub fn gantt<'a>(
     now: &str,
     zone: &Zone,
 ) -> Gantt<'a> {
+    let rows = rows(all, index, wh, cfg, now, zone);
+    let range = range_of(&rows, now, zone);
+    Gantt { rows, range }
+}
+
+/// Build chart rows without the aggregate range, for consumers that filter rows first.
+pub fn rows<'a>(
+    all: &'a [Issue],
+    index: &Index,
+    wh: &'a Where<'a>,
+    cfg: &Config,
+    now: &str,
+    zone: &Zone,
+) -> Vec<Row<'a>> {
     // 막음 지도는 막힌 줄이 있을 때만 짓는다 — 저장소 전부를 훑는 셈이다.
     let blocks = all.iter().any(|i| !i.blocked_by.is_empty()).then(|| BlockMaps::over(all, cfg));
     // 줄마다 그 줄을 계획에서 뺀 미룸들 — 미룬 줄이 없으면 빈 지도다. 묶음의 계획에서 멤버를 빼는 자([`planned_of`])가 쓴다.
@@ -191,8 +205,7 @@ pub fn gantt<'a>(
             }
         })
         .collect();
-    let range = range_of(&rows, now, zone);
-    Gantt { rows, range }
+    rows
 }
 
 /// 계획 구간 — 제 날이 있으면 그것, 없는 묶음은 멤버가 적은 날을 다 덮는 폭(가장 이른 날 ~ 가장 늦은 날).
@@ -338,24 +351,38 @@ fn overdue_of(i: &Issue, column: &str, deferred: bool, today: &str) -> Option<i6
 /// 화면에 선다. 실제의 날은 **읽은 시각에서** 낸다 — 관대한 읽기가 받은 `2026-02-30T…` 를 글대로 자르면 달력에 없는 날이
 /// 폭의 끝에 선다.
 pub fn range_of<'r, 'a: 'r>(rows: impl IntoIterator<Item = &'r Row<'a>>, now: &str, zone: &Zone) -> Option<Range> {
-    let day = |t: &str| parse_rfc3339(t).map(|s| format_rfc3339(s)[..10].to_string());
-    let today = zone.shift(now).get(..10).filter(|d| parse_date(d).is_some()).map(str::to_string);
-    let mut days: Vec<String> = Vec::new();
-    for r in rows {
-        if let Some(p) = &r.planned {
-            days.extend([p.start.clone(), p.end.clone()]);
-        }
-        if let Actual::Span { start, end } = &r.actual {
-            days.extend(day(start));
-            match end {
-                Some(e) => days.extend(day(e)),
-                None => days.extend(today.clone()),
+    RangeContext::new(now, zone).range_of(rows)
+}
+
+/// Shared date context for measuring several independently filtered row ranges.
+pub struct RangeContext {
+    today: Option<String>,
+}
+
+impl RangeContext {
+    pub fn new(now: &str, zone: &Zone) -> Self {
+        Self { today: zone.shift(now).get(..10).filter(|d| parse_date(d).is_some()).map(str::to_string) }
+    }
+
+    pub fn range_of<'r, 'a: 'r>(&self, rows: impl IntoIterator<Item = &'r Row<'a>>) -> Option<Range> {
+        let day = |t: &str| parse_rfc3339(t).map(|s| format_rfc3339(s)[..10].to_string());
+        let mut days: Vec<String> = Vec::new();
+        for r in rows {
+            if let Some(p) = &r.planned {
+                days.extend([p.start.clone(), p.end.clone()]);
+            }
+            if let Actual::Span { start, end } = &r.actual {
+                days.extend(day(start));
+                match end {
+                    Some(e) => days.extend(day(e)),
+                    None => days.extend(self.today.clone()),
+                }
             }
         }
+        let from = days.iter().min()?.clone();
+        let to = days.iter().max()?.clone();
+        Some(Range { from, to })
     }
-    let from = days.iter().min()?.clone();
-    let to = days.iter().max()?.clone();
-    Some(Range { from, to })
 }
 
 #[cfg(test)]
@@ -394,6 +421,30 @@ mod tests {
 
     fn by<'g, 'a>(g: &'g Gantt<'a>, id: &str) -> &'g Row<'a> {
         g.rows.iter().find(|r| r.id == id).unwrap_or_else(|| panic!("{id} 줄이 없다"))
+    }
+
+    #[test]
+    fn shared_range_context_matches_filtered_ranges() {
+        let mut open = row("argos-0001", Kind::Issue, "in_progress");
+        open.started_at = Some("2026-10-18T23:30:00Z".into());
+        let mut planned = row("argos-0002", Kind::Issue, "todo");
+        planned.due_on = Some("2026-10-30".into());
+        let all = [open, planned];
+        let zone = Zone::utc();
+        let chart = read_in(&all, NOW, &zone);
+        let context = RangeContext::new(NOW, &zone);
+        for row in &chart.rows {
+            assert_eq!(context.range_of([row]), range_of([row], NOW, &zone));
+        }
+        assert_eq!(context.range_of(&chart.rows), chart.range);
+        assert_eq!(
+            context.range_of([&chart.rows[0]]),
+            Some(Range { from: "2026-10-18".into(), to: "2026-10-20".into() })
+        );
+        assert_eq!(
+            context.range_of([&chart.rows[1]]),
+            Some(Range { from: "2026-10-01".into(), to: "2026-10-30".into() })
+        );
     }
 
     #[test]
