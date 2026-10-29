@@ -54,6 +54,7 @@
 
 .m-md del { color: var(--muted); text-decoration: line-through; }
 .m-md li.m-md-task-item { list-style: none; margin-left: -18px; }
+.m-md li.m-md-task-item > :is(ul, ol) { padding-left: 40px; }
 .m-md-task {
   display: inline-block; width: 12px; height: 12px; margin-right: 2px; vertical-align: -2px;
   border: 1px solid var(--border); border-radius: var(--radius-xs); background: var(--muted-bg);

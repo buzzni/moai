@@ -6,7 +6,7 @@
 // 문맥을 하나씩 열어 날 webm 과 png 포스터를 낸다. 녹화에는 마우스가 안 찍혀서
 // 가짜 커서를 페이지에 얹는다 — 보는 사람이 무엇을 눌렀는지 따라올 수 있게.
 // recorded <장면> lead <초> 는 첫 목록이 선 시각이다. 사이트용 자르기와 VP9 굽기는 record-site.sh 가 맡는다.
-// 릴리스 소식은 예전처럼 날 영상을 받는다. 위키 포스터는 장면 안에서 페이지가 선 때 찍는다.
+// 릴리스 소식은 예전처럼 날 영상을 받는다. 위키 포스터는 녹화가 끝난 뒤 영상에서 해당 프레임을 꺼낸다.
 import { execFileSync, spawn } from 'node:child_process'
 import { createInterface } from 'node:readline'
 import { mkdirSync, readFileSync, renameSync } from 'node:fs'
@@ -120,7 +120,7 @@ async function still(page, file, ...targets) {
   await page.emulateMedia({ reducedMotion: 'no-preference' })
 }
 
-let t0 = 0, lead = 0, posterTaken = false, sceneName = ''
+let t0 = 0, videoStart = 0, lead = 0, posterTaken = false, posterTime = null, sceneName = ''
 async function open(page) {
   await page.goto(url)
   await page.waitForSelector('[role="row"]')
@@ -288,7 +288,8 @@ const scenes = {
     await page.waitForTimeout(2400)
     await glide(page, page.locator('.m-wiki-scroll').getByText('Sync protocol', { exact: true }).first())
     await page.waitForTimeout(2800)
-    await poster(page)
+    // 동영상이 페이지 생성 중 시작될 수 있어, 다음 클릭에서 떨어진 안정된 중간 프레임을 고른다.
+    posterTime = Math.max(0, (Date.now() - videoStart) / 1000 - 1)
     await glide(page, page.locator('.m-wiki-scroll').getByText('Architecture', { exact: true }).first())
     await page.waitForTimeout(2600)
     await glide(page, page.locator('.m-wiki-scroll').getByText(ids.conflict, { exact: true }).first())
@@ -303,13 +304,18 @@ try {
     const context = await browser.newContext({ viewport: SIZE, recordVideo: { dir: outDir, size: SIZE }, colorScheme: 'dark', deviceScaleFactor: 1, timezoneId: 'UTC' })
     await context.addInitScript(CURSOR)
     // newPage 를 기다리는 동안에도 영상이 시작된다 — 그 앞에서 재야 처음의 빈 화면을 다 자른다.
-    t0 = Date.now(); lead = 0; posterTaken = false; sceneName = name
+    t0 = Date.now(); lead = 0; posterTaken = false; posterTime = null; sceneName = name
     const page = await context.newPage()
+    videoStart = Date.now()
     await play(page)
-    if (!posterTaken) await poster(page)
+    if (!posterTaken && posterTime === null) await poster(page)
     const video = page.video()
     await context.close()
-    renameSync(await video.path(), path.join(outDir, `web-${name}.webm`))
+    const videoPath = path.join(outDir, `web-${name}.webm`)
+    renameSync(await video.path(), videoPath)
+    if (posterTime !== null) {
+      execFileSync(process.env.FFMPEG || 'ffmpeg', ['-v', 'error', '-y', '-ss', String(posterTime), '-i', videoPath, '-frames:v', '1', path.join(outDir, `web-${name}.png`)])
+    }
     console.log('recorded', name, 'lead', lead.toFixed(2))
   }
 } finally {

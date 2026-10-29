@@ -38,7 +38,7 @@ case $MOAI in */*) MOAI=$(realpath -- "$MOAI") ;; *) MOAI=$(command -v -- "$MOAI
 # 사이트의 미디어는 화면의 말이 영어이고 날은 찍는 오늘이다 — 릴리스 소식을 찍던 DEMO_LANG·DEMO_NOW 가 남아 있어도
 # 따르지 않는다. DEMO_NOW 는 seed.sh 의 날을 옮기는데 record-web.mjs 의 브라우저 시계는 못 따라간다
 unset DEMO_LANG DEMO_NOW
-export MOAI TZ=UTC
+export MOAI FFMPEG TZ=UTC
 out=$(mkdir -p "$out" && cd "$out" && pwd)
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
