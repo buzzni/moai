@@ -1222,6 +1222,9 @@ fn init_plants_the_merge_driver_too() {
         assert!(said.contains("못 재어 그대로 둔다") && !said.contains("이미 다 맞아 있다"), "{said}");
         let json = ok(root, &["init", "--json"]);
         assert_eq!(field(&json, "driver"), "unmeasured");
+        let check = ok(root, &["init", "--check", "--json"]);
+        assert_eq!(field(&check, "driver"), "unmeasured");
+        assert!(ok(root, &["init", "--check"]).contains("못 재어 그대로 둔다"));
         assert_eq!(git(root, &["config", "--get", "merge.moai.driver"]).trim_end(), command);
 
         write_exe(&unknown, "#!/bin/sh\necho probe >> probe-count\nexec sleep 30\n");
@@ -9016,6 +9019,7 @@ fn edit_marks_the_written_version_for_only_its_user() {
     // **고침은 더 늦은 시각에 든다**(리뷰) — 시계를 하나로 박으면 만든 판과 고친 판의 도장이 같아, 쓰기 앞의 판을 적어도 이 시험이
     // 못 가른다.
     let writer_env = [("MOAI_CONFIG", writer.to_str().unwrap())];
+    ok_with(s.path(), &writer, &["read", &id]);
     ok_env(s.path(), LATER, &writer_env, &["edit", &id, "--title", "changed"]);
     let row = json_of(&ok_with(s.path(), &writer, &["show", &id, "--json"]));
     assert_eq!(row["updated_at"], LATER, "{row}");
@@ -9025,6 +9029,15 @@ fn edit_marks_the_written_version_for_only_its_user() {
     assert!(row.get("unread").is_none(), "제 고침이 제게 [NEW] 로 섰다 — {row}");
     let theirs = json_of(&ok_with(s.path(), &other, &["show", &id, "--json"]));
     assert_eq!(theirs["unread"], true, "남의 읽음까지 적었다 — {theirs}");
+    ok_env(
+        s.path(),
+        "2026-09-13T00:00:00Z",
+        &[("MOAI_CONFIG", other.to_str().unwrap())],
+        &["edit", &id, "--body", "unseen"],
+    );
+    ok_env(s.path(), "2026-09-14T00:00:00Z", &writer_env, &["edit", &id, "--tag", "mine"]);
+    let row = json_of(&ok_with(s.path(), &writer, &["show", &id, "--json"]));
+    assert_eq!(row["unread"], true, "an unseen change was marked read: {row}");
 }
 
 /// **쓴 사람의 읽음은 트래커 락을 놓은 뒤에 적는다**(moai-uwi9.0xu 리뷰). 그 읽음 파일은 이 사람의 설정 곁에 살고 락도 제 것이라,
@@ -9071,7 +9084,8 @@ fn a_stuck_read_mark_does_not_hold_the_tracker() {
     let out = moai_with(s.path(), &cfg, &["edit", &id, "--tag", "after"]);
     let said = String::from_utf8_lossy(&out.stderr);
     assert!(out.status.success() && issues(s.path()).contains("\"after\""), "{said}");
-    assert!(said.contains(&format!("{id} 는 고쳤지만 그 읽음은 못 적었다")), "{said}");
+    // The prior read mark cannot be read, so no automatic mark is attempted.
+    assert!(!said.contains("Nothing was changed"), "{said}");
 }
 
 /// **사람이 적은 값에 막힌 id 는 이름으로 나온다**(moai-l5ue, 리뷰 moai-kuib.g9c 9번).
@@ -32524,6 +32538,7 @@ fn web_moves_a_plan_only_from_its_own_page() {
         ),
         "id",
     );
+    ok_with(s.path(), &cfg, &["read", &id]);
     let web = serve_with(s.path(), |cmd| {
         cmd.env("MOAI_CONFIG", &cfg);
     });

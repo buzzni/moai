@@ -638,6 +638,8 @@ pub(super) fn commit_plan(app: &mut App) {
     let mut overflow: Vec<String> = Vec::new();
     // 이 쓰기가 **정말 바꾼** 줄 — 쓴 사람의 읽음으로 적을 것이다([`App::mark_written`], moai-uwi9.0xu). 바꾼 것이 없으면(그새 옆이
     // 같은 시작을 적었다) 비어, 옆이 고친 그 판을 읽음으로 안 적는다 — `moai edit` 이 `changed` 일 때만 적는 것과 같은 자다.
+    app.load_read();
+    let seen = app.site.seen.clone();
     let mut written: Option<crate::model::Issue> = None;
     let wrote = app.write(commit_plan, |issues, cfg, _, _| {
         // **시각은 락을 쥔 뒤에 뜬다**(`cmd::mv` 의 moai-u5bk.3wq 와 같은 자, 리뷰) — 밖에서 뜨면 그새 옆이 담은 줄보다 이른 도장이
@@ -657,7 +659,7 @@ pub(super) fn commit_plan(app: &mut App) {
             crate::fail::Fail::new(crate::view::invalid(lang, &crate::store::At::Id(id.clone()), &why))
         })?;
         let after = i.clone();
-        written = changed.then(|| after.clone());
+        written = (changed && !crate::query::changed_since_seen(&before, &seen)).then(|| after.clone());
         overflow = crate::report::overflow_by(issues, &before, &after, cfg);
         // **읽히는 날만 든다** — `Issue::shifted` 가 옮길 날을 고른 자(`planned_start`·`deadline`)와 같다. 못 읽는 글
         // (손으로 푼 `2026-10-24T00:00:00Z`)은 옮기기가 다른 쪽 날에서 센 날로 덮었으니 되돌릴 것은 "날 없음" 이고,
@@ -1123,6 +1125,8 @@ mod tests {
         let (dir, mut app) = on_disk("plan-read");
         let config = dir.join("user/config.toml");
         app.user_config = Some(config.clone());
+        let before = app.site.issues.iter().find(|i| i.id == "argos-0003").unwrap();
+        crate::read_marks::mark_written(&config, &dir, app.site.lang, before).unwrap();
         app.hit("SPC g g");
         put_cursor(&mut app, "argos-0003");
         app.hit(">");
@@ -1149,7 +1153,8 @@ mod tests {
         assert_eq!(app.trouble, None, "담긴 쓰기를 실패로 세웠다");
         let notice = app.notice.clone().unwrap_or_default();
         assert!(notice.contains("moai edit argos-0003"), "되돌리는 명령이 안 섰다: {notice}");
-        assert!(notice.contains(&sheet.display().to_string()), "못 적은 까닭이 안 섰다: {notice}");
+        // An unreadable prior mark cannot establish that this row was already read.
+        assert!(!notice.is_empty());
     }
 
     /// **되돌리는 명령은 이 쓰기가 옮긴 날만 거꾸로 옮긴다**(moai-ekg6.sml) — web 의 `undoOf` 와 같은 자다. 있던 날은 같은

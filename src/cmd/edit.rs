@@ -13,6 +13,7 @@ use crate::view;
 /// 늘어놓으면 자리를 바꿔 적어도 컴파일러가 안 잡는다.
 struct Edited {
     issue: Issue,
+    was_read: bool,
     epic: Option<Issue>,
     children: Vec<Issue>,
     /// 계획에서 빠진 줄 → 뺀 줄. 고친 줄과 그 자식만.
@@ -179,6 +180,12 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
         .transpose()
         .map_err(|e| Fail::no_actor(&e, lang))?;
 
+    // Read outside the tracker lock; compare this snapshot to the row actually read under it.
+    let read_config = crate::user_config::path();
+    let seen = read_config.as_ref().and_then(|config| {
+        let marks = crate::read_marks::read(config, &repo.root, &ctx.registry().read);
+        marks.trouble.is_none().then_some(marks.seen)
+    });
     let done: Edited = repo.with_write_after(
         || ctx.lang(),
         |issues, unread, cfg, _| {
@@ -191,6 +198,7 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
                 return Err(Fail::not_found(&args.id, lang));
             };
             let before = i.clone();
+            let was_read = seen.as_ref().is_some_and(|m| !crate::query::changed_since_seen(&before, m));
 
             if let Some(t) = &args.title {
                 i.title = t.trim().to_string();
@@ -326,6 +334,7 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
                     vec![],
                     Edited {
                         issue: before,
+                        was_read,
                         epic: None,
                         children: Vec::new(),
                         shelved: Vec::new(),
@@ -372,6 +381,7 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
                 vec![],
                 Edited {
                     issue: out,
+                    was_read,
                     epic,
                     children,
                     shelved,
@@ -396,7 +406,8 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
     // 못 했는지를 앞에 대고 한 줄로 말한다. 그 말 없이 까닭만 내던 판은 락 기다림의 말("…Nothing was changed")을 그대로 내어, 담긴
     // 쓰기를 실패로 읽게 했다.
     if done.changed
-        && let Some(config) = crate::user_config::path()
+        && done.was_read
+        && let Some(config) = read_config
     {
         let said: Vec<String> = match crate::read_marks::mark_written(&config, &repo.root, lang, &done.issue) {
             Ok(wrote) => wrote.problems.iter().map(|p| crate::view::sheet_trouble(lang, p)).collect(),
@@ -412,6 +423,7 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
 
     let Edited {
         issue: edited,
+        was_read: _,
         epic,
         children,
         shelved,
