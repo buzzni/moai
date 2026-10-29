@@ -6861,7 +6861,7 @@ fn homed<'a>(
     at: &Path,
     typed: &str,
 ) -> Decision {
-    if found.is_empty() {
+    if focus.is_empty() {
         return Decision::Pass;
     }
     let real = real_path(at);
@@ -6875,6 +6875,9 @@ fn homed<'a>(
             return Decision::Pass;
         }
         return refuse_edit(away, focus, beside_text(found, beside, &real, typed));
+    }
+    if found.len() != focus.len() {
+        return Decision::Pass;
     }
     // 딸린 워크트리에 선 세션의 루트 쓰기는 **main 의 뿌리**에서 뗀다 — 이 세션의 뿌리(`root`)는 그 워크트리다.
     let Some(root) = main_of(away, root).filter(|main| counted_real(&real, main)) else {
@@ -6927,8 +6930,11 @@ fn beside_text(found: &[(&Issue, &Path)], beside: &Path, real: &Path, typed: &st
     let spell = |p: &Path| crate::path::slashed(&p.to_string_lossy(), cfg!(windows));
     let rel = real.strip_prefix(beside).ok();
     let there = |home: &Path| rel.map_or_else(|| spell(home), |rel| spell(&home.join(rel)));
-    let places =
-        found.iter().map(|&(row, home)| format!("\x20 {}   ({})", there(home), row.id)).collect::<Vec<_>>().join("\n");
+    let places = if found.is_empty() {
+        "  No worktree exists for the work you hold yet.".to_string()
+    } else {
+        found.iter().map(|&(row, home)| format!("\x20 {}   ({})", there(home), row.id)).collect::<Vec<_>>().join("\n")
+    };
     format!(
         "Changing {typed} in the worktree at {}, which none of the work you hold lives in.\n\
      That branch is another epic's. Write the same file in the worktree of the work it belongs to:\n\
@@ -6938,8 +6944,9 @@ fn beside_text(found: &[(&Issue, &Path)], beside: &Path, real: &Path, typed: &st
     )
 }
 
-/// [`homed`] 가 댈 자리 — 초점의 줄마다 그 줄을 가장 가까이 가리키는 옆 워크트리, 겹치는 자리는 한 번씩(초점 차례).
-/// **하나라도 제 워크트리가 없는 줄이 있으면 비어 있다** — 그러면 [`homed`] 가 지난다. 옆 워크트리의 자리가 없거나
+/// [`homed`] 가 댈 자리 — 초점의 줄마다 그 줄을 가장 가까이 가리키는 옆 워크트리(초점 차례).
+/// 워크트리가 없는 줄은 빼고, 같은 자리를 쓰는 줄도 각각 남긴다. 루트 쓰기는 모든 줄이 자리를 가질 때만 막는다.
+/// 옆 워크트리의 자리가 없거나
 /// 초점이 비면 소속 재료를 안 짓는다.
 fn homes_of<'a, 'h>(issues: &'a [Issue], away: &'h Away, focus: &[&'a Issue]) -> Vec<(&'a Issue, &'h Path)> {
     if away.homes.is_empty() || focus.is_empty() {
@@ -6953,8 +6960,7 @@ fn homes_of<'a, 'h>(issues: &'a [Issue], away: &'h Away, focus: &[&'a Issue]) ->
             .iter()
             .filter_map(|(path, names)| report::nearness(&ties, names, i).map(|d| (d, path)))
             .min_by_key(|(d, _)| *d);
-        let Some((_, path)) = home else { return Vec::new() };
-        if !found.iter().any(|(_, p)| *p == path.as_path()) {
+        if let Some((_, path)) = home {
             found.push((i, path.as_path()));
         }
     }
@@ -10400,6 +10406,16 @@ mod tests {
             ..unsure.clone()
         };
         assert_eq!(guard_edit(&all, &cfg(), &twice, &root, "/repo/.worktrees/t-e/src/x.rs"), Decision::Pass);
+
+        // A homeless focus permits root writes, but never a sibling epic's writes.
+        let mut mixed = all.clone();
+        mixed.push(issue("t-2", "in_progress"));
+        let mixed_away = Away { sure: set(&["t-e.aa", "t-2"]).into(), ..homed.clone() };
+        assert_eq!(guard_edit(&mixed, &cfg(), &mixed_away, &root, "/repo/src/a.rs"), Decision::Pass);
+        assert!(
+            denied(&guard_edit(&mixed, &cfg(), &mixed_away, &root, "/repo/.worktrees/t-f/src/a.rs"))
+                .contains("another epic's")
+        );
 
         // 껍데기가 옆 에픽의 워크트리로 `cd` 한 세션 — 떨어지는 자리가 그 워크트리라 막는다. 제 `target/` 는 일이 아니다.
         let wf = abs("/repo/.worktrees/t-f");
