@@ -144,7 +144,7 @@ fn model_default(key: &str) -> &'static str {
 /// 읽고(`moai models --json`), 기본값은 [`models_defaults`] 한 줄에만 선다. 역할 이름은 설정의 키와 글자째
 /// 같아야 한다 — `the_roles_are_the_models_table` 이 견준다.
 const ROLES: [(&str, &str, &str); 7] = [
-    ("plan", "planning — splitting a request into an epic and its issues", "—"),
+    ("plan", "planning — splitting a request into an epic and its issues", "`effort_plan`"),
     ("develop", "development — most work", "`effort`"),
     (
         "complex",
@@ -2212,7 +2212,7 @@ values in a `[models]` table of its `.moai/config.toml`; the person's own keys w
 Read it at the start of every round; a value changed mid-round counts from the next one.
 
     moai models --json      one object: a model per role (plan, develop, complex, review,
-                            docs, bulk, codex), review_grade, effort, effort_complex,
+                            docs, bulk, codex), review_grade, effort, effort_complex, effort_plan,
                             written — the keys the person set — and repo — the keys the
                             repository recommended, read from repo_path; the rest are defaults
 
@@ -2611,10 +2611,10 @@ subagent's model is fixed when you raise it: a worker that finds the work heavie
 **2-2. Unfold with the `plan` role.** A backlog item goes to its worker already unfolded.
 Splitting work into an epic and its issues is the `plan` role's (2-1) — a worker on `develop`
 or `complex` would otherwise plan on its own model. So before you send a backlog item, raise one
-subagent on the `plan` role's model — the role has no effort key, so pass none — on the brief
+subagent on the `plan` role's model and `effort_plan` on the brief
 below, every slot filled as in 3:
 
-    Agent(subagent_type: "general-purpose", model: <plan model>, description: "plan <id>", prompt: <the plan brief>)
+    Agent(subagent_type: "general-purpose", model: <plan model>, effort: <effort_plan>, description: "plan <id>", prompt: <the plan brief>)
 
 **Mark the backlog the moment you raise it** — `moai note <id> 'Sent: plan <agentId>'`, as 1 says
 for a send: until the plan hands back, that backlog still stands in `moai backlog ls`, and a
