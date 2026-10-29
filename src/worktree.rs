@@ -366,7 +366,7 @@ pub struct Gathered {
 /// 제 스냅샷은 그대로 낸다 — 그런 것은 `trouble` 로 말만 한다. 스냅샷 파일이
 /// 없는 워크트리는 moai 를 들이기 전에 갈라진 브랜치라 **말하지도 않는다.**
 pub fn gather(repo: &Repo, worktree: bool) -> crate::fail::R<Gathered> {
-    gather_with(repo, worktree, true, false).map(|(seen, _)| seen)
+    gather_with(repo, worktree, GatherMode::Screen).map(|(seen, _)| seen)
 }
 
 /// 옆을 겹치되 **집은 표식은 안 읽고 제 워크트리도 빼지 않는** [`gather`] — 겹친 줄의 id 와
@@ -378,14 +378,14 @@ pub fn gather(repo: &Repo, worktree: bool) -> crate::fail::R<Gathered> {
 /// 찍을 수 있는 줄 전부다. 루트에서 연 탐색기는 이 워크트리를 옆으로 겹쳐 거기에만 있는 줄에 도장을 찍는데,
 /// 여기서 그 사본을 빼면 이 워크트리에서 친 `moai read` 한 번이 그 도장을 조용히 걷는다.
 pub fn gather_unmarked(repo: &Repo) -> crate::fail::R<Gathered> {
-    gather_with(repo, true, false, false).map(|(seen, _)| seen)
+    gather_with(repo, true, GatherMode::Unmarked).map(|(seen, _)| seen)
 }
 
 /// 읽을 화면 판([`gather`] 와 같다)과, 그 걸음이 화면에 안 겹친 제 워크트리 사본을 한 걸음에서 함께 낸다
 /// (`moai read --worktree`, moai-b4dc.gqd). 제 사본은 화면 판도 이미 풀어 읽으니 다시 훑지 않는다 — 걷기가
 /// 지킬 id 는 [`Unshown::keep`] 이 **걷기가 쓸 때만** 센다.
 pub fn gather_reading(repo: &Repo) -> crate::fail::R<(Gathered, Unshown)> {
-    let (seen, own) = gather_with(repo, true, true, true)?;
+    let (seen, own) = gather_with(repo, true, GatherMode::Reading)?;
     Ok((seen, Unshown(own)))
 }
 
@@ -402,10 +402,22 @@ impl Unshown {
     }
 }
 
-/// [`gather`]·[`gather_unmarked`]·[`gather_reading`] 의 몸 — `screen` 이 거짓이면 [`marks_of`] 를 안 부르고, 부른
-/// 자리의 워크트리([`callers`])도 옆으로 그대로 겹친다. `keep_own` 이면 겹치지 않은 그 워크트리의 사본을 둘째 값으로
-/// 낸다(`screen` 일 때만 뜻이 있다 — 아니면 제 워크트리도 옆으로 겹친다).
-fn gather_with(repo: &Repo, worktree: bool, screen: bool, keep_own: bool) -> crate::fail::R<(Gathered, Vec<Side>)> {
+/// [`gather_with`] 가 어느 판으로 겹치는가 — 부르는 셋([`gather`]·[`gather_unmarked`]·[`gather_reading`])과 하나씩 짝이다.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum GatherMode {
+    /// 화면 판: [`marks_of`] 를 읽고 부른 자리의 워크트리는 옆으로 안 겹친다.
+    Screen,
+    /// [`marks_of`] 를 안 부르고, 부른 자리의 워크트리([`callers`])도 옆으로 그대로 겹친다.
+    Unmarked,
+    /// 화면 판에 더해, 겹치지 않은 제 워크트리의 사본을 둘째 값으로 낸다.
+    Reading,
+}
+
+/// [`gather`]·[`gather_unmarked`]·[`gather_reading`] 의 몸 — 무엇을 읽고 무엇을 겹치는지는 `mode` 가 고른다
+/// ([`GatherMode`]). 둘째 값은 [`GatherMode::Reading`] 일 때만 차고, 나머지 판에서는 비어 있다.
+fn gather_with(repo: &Repo, worktree: bool, mode: GatherMode) -> crate::fail::R<(Gathered, Vec<Side>)> {
+    let screen = mode != GatherMode::Unmarked;
+    let keep_own = mode == GatherMode::Reading;
     let load = repo.read()?;
     if !worktree {
         return Ok((

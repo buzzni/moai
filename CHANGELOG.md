@@ -12,6 +12,14 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+### Fixed
+
+- `moai skill status` warns when a planted Claude plugin is missing its local
+  `marketplace.json`, and `--json` reports `market_missing`. `moai skill install`
+  restores the file. (moai-xvvr.qt8)
+- The cmux session map does not assign a tab to a Claude session running under
+  screen, tmux or zellij inside that tab. (moai-xvvr.gkr)
+
 ## [0.33.0] - 2026-10-29
 
 ### Added

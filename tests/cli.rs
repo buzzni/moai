@@ -234,6 +234,13 @@ fn isolated(program: impl AsRef<std::ffi::OsStr>) -> Command {
     cmd
 }
 
+/// Prepend a test directory while preserving the inherited OS-native PATH.
+fn path_with(dir: &Path) -> std::ffi::OsString {
+    let inherited = std::env::var_os("PATH").unwrap_or_default();
+    std::env::join_paths(std::iter::once(dir.to_path_buf()).chain(std::env::split_paths(&inherited)))
+        .expect("test directory must be valid in PATH")
+}
+
 /// `moai` 가 든 디렉터리를 뺀 `PATH` — git 도 든 자리는 남긴다. [`isolated`] 가 쓴다.
 fn path_without_moai() -> std::ffi::OsString {
     let path = std::env::var_os("PATH").unwrap_or_default();
@@ -22451,6 +22458,65 @@ fn skill_status_wants_the_version_of_what_is_planted_here() {
     assert!(json.contains("\"current\":true"), "{json}");
 }
 
+#[test]
+fn skill_status_reports_a_missing_marketplace_without_failing() {
+    let s = init("missing-marketplace");
+    let c = Claude::new("missing-marketplace-home");
+    let status = |json: bool| {
+        let args: &[&str] = if json { &["skill", "status", "--json"] } else { &["skill", "status"] };
+        c.run(s.path(), args, true)
+    };
+    assert!(c.run(s.path(), &["skill", "install"], true).status.success());
+    let market = s.path().join(".claude/moai-plugin/.claude-plugin/marketplace.json");
+    assert!(text(&status(true)).contains("\"market_missing\":false"));
+    std::fs::remove_file(&market).unwrap();
+    let out = status(false);
+    // 그 한 줄로 잰다 — `moai skill install` 은 `.agents` 줄 같은 다른 줄도 대니, 낱말만 찾으면 줄이 없어도 지나간다.
+    assert!(
+        out.status.success()
+            && text(&out)
+                .lines()
+                .any(|l| l.contains("marketplace.json 파일이 없다") && l.contains("`moai skill install`")),
+        "{}",
+        text(&out)
+    );
+    assert!(text(&status(true)).contains("\"market_missing\":true"));
+    assert!(c.run(s.path(), &["skill", "install"], true).status.success());
+    assert!(text(&status(true)).contains("\"market_missing\":false"));
+}
+
+/// **추적을 푸는 명령은 트래커 뿌리를 `-C` 로 겨눈다**(moai-xvvr.qt8, 리뷰 moai-r2nn.38g 10번) — `.moai` 가 모노레포 하위에
+/// 서면 그 줄의 자리는 하위에서 센 것이라, 맨 `git rm --cached -- <자리>` 를 git 뿌리에서 치면 없는 파일을 가리킨다.
+/// 낸 명령을 git 뿌리에서 그대로 쳐서 추적이 풀리는지 잰다.
+#[cfg(unix)]
+#[test]
+fn the_untrack_command_for_a_committed_marketplace_works_from_the_git_root() {
+    let s = Scratch::new("market-tracked-monorepo");
+    git(s.path(), &["init", "-q", "."]);
+    let sub = s.path().join("sub");
+    std::fs::create_dir(&sub).unwrap();
+    ok(&sub, &["init", "argos", "--no-driver"]);
+    let c = Claude::new("market-tracked-monorepo-home");
+    // 가짜 `claude` 의 PATH 에는 git 이 없다 — 추적을 재는 `git ls-files` 가 돌게 git 의 자리를 더한다.
+    let git_dir = std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())
+        .find(|d| d.join("git").is_file())
+        .expect("PATH 에 git 이 없다");
+    let path = std::env::join_paths([c.bin.clone(), c.home.path().join("sysbin"), git_dir]).unwrap();
+    let install = || c.command(Path::new(BIN), &sub, &["skill", "install"], true).env("PATH", &path).output().unwrap();
+    let first = install();
+    assert!(first.status.success(), "{}", text(&first));
+    let rel = "sub/.claude/moai-plugin/.claude-plugin/marketplace.json";
+    git(s.path(), &["add", "-f", "--", rel]);
+    let said = text(&install());
+    let command = said
+        .lines()
+        .find_map(|l| l.split_once("추적을 푼다: ").map(|(_, c)| c.to_string()))
+        .unwrap_or_else(|| panic!("추적을 푸는 명령을 안 냈다\n{said}"));
+    let ran = isolated("sh").arg("-c").arg(&command).current_dir(s.path()).output().unwrap();
+    assert!(ran.status.success(), "{command}\n{}", text(&ran));
+    assert_eq!(git(s.path(), &["ls-files", "--", rel]), "", "{command} 가 추적을 못 풀었다");
+}
+
 /// **`status` 는 훅 파일을 그 파일이 부르는 moai 로 견준다**(리뷰 moai-u5wr.e74) — Claude 의 줄이 설치본의 훅이 부르는
 /// 파일로 견주는 것과 같다. 다른 철자(워크트리의 빌드, `cargo run`)로 부른 `status` 가 멀쩡한 파일을 "다시 심는다" 고
 /// 하면, 시킨 대로 심는 순간 커밋된 훅이 그 moai 를 부른다. **Antigravity 의 파일은 무리 안까지 본다** — agy 가 다시
@@ -24763,8 +24829,8 @@ fn install_prefers_a_moai_on_path_when_it_is_the_same_build() {
     // 도구는 덜 이르는 쪽(지금 바이너리)을 골라 이 시험이 셋에 둘꼴로 붉었다. 사람의 `PATH` 에 선 `moai` 는 이미 돈 파일이다.
     let warmed = warm_exe(&shim, &["--version"]);
     assert!(warmed.status.success(), "{}", String::from_utf8_lossy(&warmed.stderr));
-    let path = format!("{}:{}", bin.display(), std::env::var("PATH").unwrap_or_default());
-    let planted = |path: &str| {
+    let path = path_with(&bin);
+    let planted = |path: &std::ffi::OsStr| {
         let mut cmd = isolated(BIN);
         cmd.args(["merge-driver", "--install"]).current_dir(root).env("MOAI_ACTOR", ACTOR).env("PATH", path);
         let o = cmd.output().expect("moai 를 실행하지 못했다");
@@ -24780,7 +24846,7 @@ fn install_prefers_a_moai_on_path_when_it_is_the_same_build() {
 
     // **PATH 에 없으면 지금 바이너리다** — 앞 판이 늘 하던 일이다. git 은 남은 자리다.
     let bare = path_without_moai();
-    assert!(planted(&bare.to_string_lossy()).contains(recorded_bin()), "PATH 에 없는데 딴것을 심었다");
+    assert!(planted(bare.as_os_str()).contains(recorded_bin()), "PATH 에 없는데 딴것을 심었다");
 }
 
 /// **모르는 인자를 흘려 듣고 0 을 내는 래퍼는 그대로 못 지나간다**(moai-wwbi, 2026-09-21 사용자 결정).
@@ -26756,7 +26822,7 @@ fn the_same_version_still_names_an_older_moai_first_on_path() {
     placed_moai(&shadow, "0.1.2", true);
     let dir = s.path().join("bin");
     placed_moai(&dir, "9.9.9", true);
-    let path = format!("{}:{}", shadow.display(), std::env::var("PATH").unwrap_or_default());
+    let path = path_with(&shadow);
 
     let out = install_cmd(Path::new(NOWHERE), &dir, &[]).env("PATH", path).output().unwrap();
     assert!(out.status.success(), "{}", text(&out));
@@ -26769,7 +26835,7 @@ fn the_same_version_still_names_an_older_moai_first_on_path() {
 
     // **같은 파일은 철자가 달라도 같은 moai 다**(`-ef`, 리뷰). PATH 에 선 자리 끝에 `/` 가
     // 붙었다고(dash 의 `command -v` 는 `…//moai` 로 댄다) 딴 moai 가 먼저 선다고 말하지 않는다.
-    let slashed = format!("{}/:{}", dir.display(), std::env::var("PATH").unwrap_or_default());
+    let slashed = path_with(&dir.join(""));
     let same = install_cmd(Path::new(NOWHERE), &dir, &[]).env("PATH", slashed).output().unwrap();
     assert!(same.status.success(), "{}", text(&same));
     assert!(
@@ -26836,7 +26902,7 @@ fn an_old_busybox_timeout_does_not_make_this_moai_foreign() {
     );
     let dir = s.path().join("bin");
     placed_moai(&dir, "0.1.2", true);
-    let path = format!("{}:{}", shim.display(), std::env::var("PATH").unwrap_or_default());
+    let path = path_with(&shim);
 
     let out = install_cmd(&base, &dir, &[]).env("PATH", path).output().unwrap();
     assert!(out.status.success(), "이 moai 를 남의 것으로 읽었다\n{}", text(&out));
@@ -29518,7 +29584,7 @@ fn init_slow_git_does_not_hide_linked_dotfile_notices() {
     )
     .unwrap();
     std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
-    let path = format!("{}:{}", bin.display(), std::env::var("PATH").unwrap());
+    let path = path_with(&bin);
     let clock = std::time::Instant::now();
     let out = staged(&["status", "--json"]).env("PATH", &path).current_dir(s.path()).output().unwrap();
     let js = String::from_utf8_lossy(&out.stdout);

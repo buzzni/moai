@@ -102,6 +102,23 @@ def tty(pid):
             return 0
     t = out("ps", "-p", str(pid), "-o", "tty=")
     return device("/dev/" + t) if t.strip("?") else 0
+def nested_multiplexer(pid):
+    # Inspect process names and parents only, never another process's environment.
+    seen = set()
+    while pid > 1 and pid not in seen:
+        seen.add(pid)
+        line = out("ps", "-p", str(pid), "-o", "ppid=", "-o", "comm=")
+        fields = line.split(None, 1)
+        if len(fields) != 2:
+            break
+        try:
+            pid = int(fields[0])
+        except ValueError:
+            break
+        name = os.path.basename(fields[1].strip()).lower()
+        if name in ("screen", "tmux", "zellij") or name.startswith("screen-") or name.startswith("tmux:"):
+            return True
+    return False
 mine = os.environ.get("TMUX")
 if mine and mine.startswith("/tmp/cmux-"):
     mine = None
@@ -141,7 +158,9 @@ for path in sorted(glob.glob(os.path.expanduser("~/.claude/sessions/*.json"))):
         if not here or here != device(out("tmux", "display", "-p", "-t", pane, "#{pane_tty}")):
             pane = ""
     elif alive and cmux:
-        pane = "" if told and not told.startswith("cmux:") else surfaces.get(pid)
+        pane = surfaces.get(pid)
+        if (told and not told.startswith("cmux:")) or (pane and nested_multiplexer(pid)):
+            pane = ""
     rows.append((alive, pane, r))
 if rows and not any(alive for alive, _, _ in rows):
     sys.exit("no record reads alive, not even this session's own: this shell cannot read process start times (a sandbox, or no ps), so act on no row")
