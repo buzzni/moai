@@ -136,8 +136,9 @@ that have no `@` of their own, as `--due` does. A start is never made up either.
 
 A row made alone takes the same `--due` and `--start` on `moai add` or `moai backlog add`; an `@` is
 read on a plan line only. A trailing `@` word beginning with an ASCII or fullwidth
-digit is a date position: malformed dates are refused with a line number. Escape
-it as `\@２０２６-10-30` when it is meant as title text.
+digit is a date position: malformed dates are refused with a line number. The fullwidth
+`＠` is also a date marker; escape either marker, for example `\＠2026-10-30`, when
+it is meant as title text.
 
 A member's deadline cannot pass its epic's, nor an epic's its milestone's — the write
 is refused and names the day to give instead. A start is held to the same ceiling: it cannot
@@ -152,7 +153,9 @@ that are not deferred (one day
 left or less — today and past included — is `p0`, two or less `p1`, seven or less `p2`)
 and notes why on the row; it never lowers one. So the day `--due` puts on an epic bounds
 the work and raises its members as it nears. Nothing runs it for you — run it when `moai status` says rows lag their
-deadline. The thresholds and `due_priority = "off"` live in `.moai/config.toml`.
+deadline. Within the same priority and milestone position, `moai ready` orders by that
+same followed deadline, with no deadline last. The thresholds and `due_priority = "off"`
+live in `.moai/config.toml`.
 
 - **Do not move an epic or a [milestone](glossary.md#milestone).** A
   [group](glossary.md#group)'s column is read from its members: pick one member
@@ -189,9 +192,9 @@ and wait on each other to merge.
   gives up: while everything the session holds has its worktree standing, a
   write that lands in the root checkout — an edit, or a shell redirect, `sed -i`,
   `tee` or a `cp`/`mv`/`install` destination, wherever the shell stands — is
-  refused, and so is a write into another epic's worktree; the refusal names the
-  same file in the worktree (in each worktree, when the work held stands in
-  several)
+  refused. A row without a worktree permits a root write while its worktree is being
+  created, but does not permit a write into another epic's worktree. The refusal names
+  the same file in the held worktree when one exists
 - **Work a supervisor hands out inside a milestone branches from that
   milestone's branch**, `milestone/<milestone id>`, instead of the root branch,
   and merges back into it; the branch lives in its own worktree,
@@ -330,4 +333,4 @@ where its contributors read them rather than repeated here:
   broken data, the same as a broken line in `issues.jsonl` — see [An archive file
   cannot be read](recovery.md#an-archive-file-cannot-be-read)
 
-Decided in: moai-0zjo moai-40ht moai-bx6t moai-9793 moai-ug3j moai-gelm moai-tllo moai-snyk moai-zynt moai-j9nf moai-jtvp moai-fx9t moai-bth3 moai-r0x8 moai-9tqo moai-g8pt moai-lj8g moai-1m21
+Decided in: moai-0zjo moai-40ht moai-bx6t moai-9793 moai-ug3j moai-gelm moai-tllo moai-snyk moai-zynt moai-j9nf moai-jtvp moai-fx9t moai-bth3 moai-r0x8 moai-9tqo moai-g8pt moai-lj8g moai-1m21 moai-uwi9
