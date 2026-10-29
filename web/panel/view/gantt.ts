@@ -106,6 +106,10 @@ interface Built {
   /** The header's top ticks, to keep their label in view while the dates scroll. */
   top: Array<{ el: HTMLElement; from: number; to: number }>
   svg: SVGSVGElement
+  /** The today line, at `now` on this axis — neither moves for the life of this Built, so every window shows the one node. */
+  today: HTMLElement
+  /** The weekend blocks of the dates' window: built again only when that window moves, kept while only the rows' does. */
+  shade: HTMLElement[]
 }
 
 let mounted = 0
@@ -306,7 +310,9 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
     svg.setAttribute('width', String(wide))
     svg.setAttribute('height', String(m.lines.length * ROW_H))
     svg.setAttribute('aria-hidden', 'true')
-    built = { rows: new Map(), lanes: new Map(), clips: new Map(), placed, now, top: [], svg }
+    const today = el(doc, 'div', { class: 'todayline' })
+    today.style.left = `${xOf(a, now)}px`
+    built = { rows: new Map(), lanes: new Map(), clips: new Map(), placed, now, top: [], svg, today, shade: [] }
     drawn = null
     paintWindow()
 
@@ -362,28 +368,32 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
     const view = Math.max(v.x1 - v.x0, 120)
     const rowsInWindow = rowRange(m.lines.length, OVERSCAN_ROWS)
     const previous = drawn
-    const datesChanged = !previous || v.x0 < previous.x0 || v.x1 > previous.x1
+    // The dates' window stays while the view is inside it: a scroll up or down builds only the rows it brings in.
+    const dates = previous && v.x0 >= previous.x0 && v.x1 <= previous.x1 ? previous : { x0: v.x0 - view, x1: v.x1 + view }
+    const datesChanged = dates !== previous
     const oldRows = b.rows, oldLanes = b.lanes, oldClips = b.clips
     const win = {
       r0: rowsInWindow.start,
       r1: rowsInWindow.end,
-      x0: Math.max(0, datesChanged ? v.x0 - view : previous!.x0),
-      x1: Math.min(widthOf(a), datesChanged ? v.x1 + view : previous!.x1),
+      x0: Math.max(0, dates.x0),
+      x1: Math.min(widthOf(a), dates.x1),
     }
     // The dates' margin is kept unclamped: a view at the axis' edge is covered by a window that ends there.
-    drawn = { ...win, x0: datesChanged ? v.x0 - view : previous!.x0, x1: datesChanged ? v.x1 + view : previous!.x1 }
+    drawn = { ...win, x0: dates.x0, x1: dates.x1 }
     // A bubble over a bar about to go has no mouseleave to take it down.
     bubble.hidden = true
     const wall: [number, number] = [wallAt(a, win.x0), wallAt(a, win.x1)]
 
     // Weekends, behind everything. Not at the month step, where a day is 4px.
-    const shade: HTMLElement[] = datesChanged ? [] : Array.from(lanesBox.querySelectorAll<HTMLElement>(':scope > .col-we'))
-    if (datesChanged && a.zoom !== 'month') {
-      for (const [from, to] of weekends(a, wall)) {
-        const col = el(doc, 'div', { class: 'col-we' })
-        col.style.left = `${xOf(a, from)}px`
-        col.style.width = `${xOf(a, to) - xOf(a, from)}px`
-        shade.push(col)
+    if (datesChanged) {
+      b.shade = []
+      if (a.zoom !== 'month') {
+        for (const [from, to] of weekends(a, wall)) {
+          const col = el(doc, 'div', { class: 'col-we' })
+          col.style.left = `${xOf(a, from)}px`
+          col.style.width = `${xOf(a, to) - xOf(a, from)}px`
+          b.shade.push(col)
+        }
       }
     }
     b.rows = new Map()
@@ -403,7 +413,10 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
       grid.setAttribute('aria-posinset', String(n + 1))
       rows.push(grid)
       b.rows.set(n, grid)
-      const retained = !datesChanged ? oldLanes.get(n) : undefined
+      // A lane is kept while its dates are — but not one whose plan was just dropped (`moved`): its bubble and drag were
+      // wired to the plan before the drop, and a window built anew builds it from the dropped one, as it always did.
+      const dropped = line.kind === 'row' && moved.has(m.index.rows[line.at]!.id)
+      const retained = !datesChanged && !dropped ? oldLanes.get(n) : undefined
       if (retained) {
         lanes.push(retained)
         b.lanes.set(n, retained)
@@ -431,9 +444,7 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
       lanes.push(lane)
       b.lanes.set(n, lane)
     }
-    const today = (!datesChanged && lanesBox.querySelector<HTMLElement>(':scope > .todayline')) || el(doc, 'div', { class: 'todayline' })
-    today.style.left = `${xOf(a, now)}px`
-    lanesBox.replaceChildren(...shade, ...lanes, b.svg, today)
+    lanesBox.replaceChildren(...b.shade, ...lanes, b.svg, b.today)
     rowsBox.replaceChildren(...rows)
 
     // The date decorations remain when only the vertical window changes.
