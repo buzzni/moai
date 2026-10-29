@@ -28,7 +28,7 @@ values in a `[models]` table of its `.moai/config.toml`; the person's own keys w
 Read it at the start of every round; a value changed mid-round counts from the next one.
 
     moai models --json      one object: a model per role (plan, develop, complex, review,
-                            docs, bulk, codex), review_grade, effort, effort_complex,
+                            docs, bulk, codex), review_grade, effort, effort_complex, effort_plan,
                             written — the keys the person set — and repo — the keys the
                             repository recommended, read from repo_path; the rest are defaults
 
@@ -403,7 +403,7 @@ model and effort come from the `moai models --json` you read at the start of the
 
 | Role | What it is for | Effort key |
 |---|---|---|
-| `plan` | planning — splitting a request into an epic and its issues | — |
+| `plan` | planning — splitting a request into an epic and its issues | `effort_plan` |
 | `develop` | development — most work | `effort` |
 | `complex` | the write path, concurrency, the storage format, hooks, or a contract across several files | `effort_complex` |
 | `review` | the epic-end review, once per epic | `review_grade` (the grade) |
@@ -411,7 +411,7 @@ model and effort come from the `moai models --json` you read at the start of the
 | `bulk` | sorting and summing up, a review text past 64KB, the same mechanical fix many times | `effort` |
 | `codex` | a Codex worker — never a subagent ("Codex workers") | — |
 
-With nothing written and no repository table, the defaults are `plan` `fable` · `develop` `sonnet` · `complex` `opus` · `review` `opus` · `docs` `sonnet` · `bulk` `haiku` · `codex` `gpt-6.1-sol` · `review_grade` `xhigh` · `effort` `medium` · `effort_complex` `high`.
+With nothing written and no repository table, the defaults are `plan` `fable` · `develop` `sonnet` · `complex` `opus` · `review` `opus` · `docs` `sonnet` · `bulk` `haiku` · `codex` `gpt-6.1-sol` · `review_grade` `xhigh` · `effort` `medium` · `effort_complex` `high` · `effort_plan` `xhigh`.
 
 Development is split by one word of difficulty — `develop` or `complex`. The same rubric
 decides, member by member, whether the epic-end review goes to `max` (the worker's 7). Keep
@@ -448,10 +448,10 @@ subagent's model is fixed when you raise it: a worker that finds the work heavie
 **2-2. Unfold with the `plan` role.** A backlog item goes to its worker already unfolded.
 Splitting work into an epic and its issues is the `plan` role's (2-1) — a worker on `develop`
 or `complex` would otherwise plan on its own model. So before you send a backlog item, raise one
-subagent on the `plan` role's model — the role has no effort key, so pass none — on the brief
+subagent on the `plan` role's model and `effort_plan` on the brief
 below, every slot filled as in 3:
 
-    Agent(subagent_type: "general-purpose", model: <plan model>, description: "plan <id>", prompt: <the plan brief>)
+    Agent(subagent_type: "general-purpose", model: <plan model>, effort: <effort_plan>, description: "plan <id>", prompt: <the plan brief>)
 
 **Mark the backlog the moment you raise it** — `moai note <id> 'Sent: plan <agentId>'`, as 1 says
 for a send: until the plan hands back, that backlog still stands in `moai backlog ls`, and a
@@ -466,6 +466,8 @@ The word is `plan`, not `subagent` — no worker holds this backlog, so it is no
     Due: <due>
     Person: <person>
     Writing: <writing>
+
+    Read the request, its evidence and enough code and tracker context to ground the split. Write short titles and concrete, actionable bodies with file and function locations, constraints, acceptance tests and review focus. For detailed writing use: Epic: why this bundle · the person's decisions · promises · order and shared files · review focus. Development member: goal · context (files and lines, precedent) · decisions · where and how (files, functions, structures) · important contracts and pitfalls · steps · acceptance tests · out of scope · order and shared files · role. Name the epic review section `Review focus / 리뷰에서 볼 것` (choose the English or Korean heading). For brief writing give what, where and tests. Classify each member using the difficulty rubric and explain why. Do not ask the person questions; report missing decisions as gaps.
 
     1. Read it — moai -C "<root>" show <id> — and as much of the code as the split needs. If it
        already stands done, hand back `already unfolded: <id>` and stop: unfolding again puts up

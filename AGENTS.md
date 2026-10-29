@@ -1,4 +1,4 @@
-<!-- moai:begin v:0.33.0 hash:240f1eab -->
+<!-- moai:begin v:0.33.0 hash:e98225b7 -->
 ## Issue tracker — moai
 
 This repository's work lives in `.moai/issues.jsonl`.
@@ -105,7 +105,8 @@ that promise up.
 `--undo` brings the same row back as it was. A backlog item is "not work yet"; a defer
 is "work, but not now".
 
-**3. Is it worth splitting into an epic** — if the request does not end inside one
+**3. Is it worth splitting into an epic** — in Claude Code, use `/moai-plan` for this step with the plan model.
+For Codex and Antigravity, do it in this session. If the request does not end inside one
 file, show the person **once**, before writing code, a plan split into one epic
 plus three to seven issues, and ask. On a "yes", create it in one go with
 `moai add --from -` (`--dry-run` shows it first).

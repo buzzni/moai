@@ -1,6 +1,6 @@
 ---
 name: moai
-description: Use for this repository's work, issues and plans. "what should I do first", "sort out the to-dos", "create an issue", "how is it going", "let us do this later", "뭐부터 할까", "할 일 정리", "이슈 만들어", "진행 상황", "이거 나중에 하자", when a feature request has to be split into several parts, or when something out of scope comes to mind mid-task. Use this instead of TodoWrite or a markdown TODO list.
+description: Use for this repository's work and issue tracking. "what should I do first", "sort out the to-dos", "create an issue", "how is it going", "let us do this later", "뭐부터 할까", "할 일 정리", "이슈 만들어", "진행 상황", "이거 나중에 하자", when something out of scope comes to mind mid-task. Use this instead of TodoWrite or a markdown TODO list.
 ---
 
 # moai — this repository's issue tracker
@@ -89,7 +89,8 @@ that promise up.
 `--undo` brings the same row back as it was. A backlog item is "not work yet"; a defer
 is "work, but not now".
 
-**3. Is it worth splitting into an epic** — if the request does not end inside one
+**3. Is it worth splitting into an epic** — in Claude Code, use `/moai-plan` for this step with the plan model.
+For Codex and Antigravity, do it in this session. If the request does not end inside one
 file, show the person **once**, before writing code, a plan split into one epic
 plus three to seven issues, and ask. On a "yes", create it in one go with
 `moai add --from -` (`--dry-run` shows it first).
@@ -259,6 +260,7 @@ its own way — read your own column.
 | Work in the worktree | stay in the root and aim every call at its absolute path — not `EnterWorktree`, which asks the person to approve each call into `.worktrees/` | `cd` into it and run every command there | `cd` into it and run every command there |
 | Come back to the root | nothing if the shell never left; `cd` to the root if a `cd` moved it — the shell keeps it — and `ExitWorktree(keep)` only after an `EnterWorktree` | `cd` to the root and run every command there | `cd` to the root and run every command there |
 | Ask the person watching | `AskUserQuestion` | `request_user_input` | ask in the conversation and wait |
+| Plan a request | `/moai-plan` | follow fork 3 in this session | follow fork 3 in this session |
 | Review the work | `/code-review` | the review this session has, else read the diff yourself | the review this session has, else read the diff yourself |
 | Change the model (the person does it) | `/model` | `/model` | — |
 | Clear the window (the person does it) | `/clear` | `/clear` | `/clear` |
