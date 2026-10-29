@@ -406,6 +406,29 @@ moai add 'an empty tag slips past the filter' -t bug -e <epic> -b - <<'BODY'
 BODY
 ```
 
+That is `brief`. A `detailed` body gives the next session enough to start:
+
+```sh
+moai add 'an empty tag slips past the filter' -t bug -e <epic> -b - <<'DETAILED'
+## Goal
+- Ignore empty tags when filtering.
+## Context
+- Normalization at <file>:<line> leaves an empty word; the existing filter is the precedent.
+## What is decided
+- Drop the empty word before filtering.
+## Steps
+- Update normalization at <file>:<line>.
+## Acceptance
+- Run the empty-tag filter test.
+## Out of scope
+- Changing tag display.
+## Order and shared files
+- Do this before the filter integration work; both touch <file>:<line>.
+## Role
+- Development, low difficulty.
+DETAILED
+```
+
 Three common ways it goes wrong.
 
 - **The title carries the whole story** — "yesterday while I was … it … so I think … needs checking".

@@ -52,6 +52,30 @@ said yes to taking over a row that is not yours, say — belongs to the assignme
   has no `EnterWorktree` — give it absolute paths under the worktree and the words of 4-1, 4-2
   and 4-3, and have it name its real model in what it hands back, for 9-1. The epic-end review
   stays as 7 says. `none` — do the work yourself
+- `Writing:` — use the person's value for tracker writing throughout the work.
+
+  **How much to write is the person's — `detailed` unless they say otherwise.**
+  `[writing] detail` in the user config wins over a repository recommendation. The board names
+  the setting; `moai writing --json` gives its `detail`. If the board was not injected, run that
+  command before writing. Pass the value in prompts to subagents.
+
+  - `detailed`: give issue and member bodies headings and lists for goal, context (files and
+    lines and precedent), decisions, steps, acceptance tests, out of scope, order and shared files,
+    and role. In a plan body explain the bundle, agreements and order. Notes say what was done,
+    where, what remains and the next commands; decisions include options and reasons. Review
+    closes name findings taken in and handed on by number and issue ID. Backlog bodies record
+    the thought, where it arose and when to start.
+  - `brief`: use a few lines for what, where and next; notes and closing lines can be one line,
+    and backlog entries can use the title alone.
+
+  Both keep short titles, lists, no emoji and required IDs, commits and test names. Keep the
+  machine-readable lines `model:`, `Report-checked:`, `Review-ready:`, `Regression-of:`,
+  `Summary:`, `Sent:`, `Next:`, `report:`, `Decided alone:` and `Plan stopped:` in their original
+  format; put details on that line. Do not shorten a reviewer's own words. This applies to
+  tracker bodies, notes, review closes and reports; commits, wiki, CHANGELOG and conversation
+  follow their own conventions. Nothing checks this — it is how much to write, not a rule
+  anything enforces.
+
 - `Work running alongside:` — the worktrees and work beside you, and the files they hold (4-3)
 - `Root branch:` — `<root branch>`, the branch the root checkout stands on. The supervisor read
   it in the root; do not read it again — read inside a worktree, it gives that worktree's own branch
