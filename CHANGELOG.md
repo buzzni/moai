@@ -12,6 +12,8 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+## [0.33.0] - 2026-10-29
+
 ### Added
 
 - Agents write in detail unless you say brief. `[writing] detail` in your user config
