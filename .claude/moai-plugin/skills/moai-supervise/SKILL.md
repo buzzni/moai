@@ -32,6 +32,9 @@ Read it at the start of every round; a value changed mid-round counts from the n
                             written — the keys the person set — and repo — the keys the
                             repository recommended, read from repo_path; the rest are defaults
 
+How much agents write is the person's too. Read `moai writing --json` (`detail`) with the
+models at the start of each round; a change mid-round takes effect in the next one.
+
 When a value has to change, the person changes it — in their user config for a key in `written`
 or a default, and over a `repo` key by writing the same key there. The repository's file is
 committed and shared: changing it changes the recommendation for everyone, so name it as that.
@@ -462,6 +465,7 @@ The word is `plan`, not `subagent` — no worker holds this backlog, so it is no
     Milestone: <milestone>
     Due: <due>
     Person: <person>
+    Writing: <writing>
 
     1. Read it — moai -C "<root>" show <id> — and as much of the code as the split needs. If it
        already stands done, hand back `already unfolded: <id>` and stop: unfolding again puts up
@@ -479,8 +483,10 @@ The word is `plan`, not `subagent` — no worker holds this backlog, so it is no
        moai -C "<root>" edit <epic> --milestone none
        moai -C "<root>" edit <epic> --due <due>
        A refusal because the day is later than the milestone's leaves the epic as it stands.
-    4. Give every member a body the worker can start from without searching again — what is
-       wrong, where (file and function), what to change, how to test it. A design question the
+    4. Give every member a body the worker can start from, as `Writing:` says. `detailed`: these
+       headings, each a list —
+       goal · context (files and lines, the precedent) · what is decided · steps · acceptance (which tests) · out of scope · order and the files it shares · role.
+       `brief`: what to change · where (file and function) · how to test it. A design question the
        backlog and its notes do not settle goes in it, open, for the worker to ask — do not
        settle it here. Write it to a file in your scratchpad and run
        moai -C "<root>" edit <member> -b - < <that file>
@@ -559,7 +565,8 @@ and if the message does not arrive, deliver it into the tab —
 `moai-cmux`, "Label the tab" and "When a message does not arrive".
 Inside Saycode, a worker Saycode lists gets the message as a prompt instead of `SendMessage` —
 `moai-saycode`, "Send work".
-Fill in `<id>`, `<title>`, `<steps file>`, `<root branch>`, `<base branch>`, `<milestone>`, `<due>`, `<model>`, `<difficulty>`, `<why>`, `<effort>`, `<worker kind>`, `<subagent ladder>`, `<other work>`, `<root>`, `<person>` and — only for a subdirectory project — `<subdir>`.
+Fill in `<id>`, `<title>`, `<steps file>`, `<root branch>`, `<base branch>`, `<milestone>`, `<due>`, `<model>`, `<difficulty>`, `<why>`, `<effort>`, `<worker kind>`, `<subagent ladder>`, `<writing>`, `<other work>`, `<root>`, `<person>` and — only for a subdirectory project — `<subdir>`.
+Copy `<writing>` from this round's `moai writing --json` `detail`, without choosing it yourself.
 `<root>` is the `root dir` from 2. **Leave it unfilled** and a worker that stands in a
 worktree reads its own place as the root. With no `subdir` line in 2, leave the `Subdir:` line out
 of the message.
@@ -618,6 +625,7 @@ a session worker's 9-1).
     Effort: <effort>
     Worker: <worker kind>
     Subagents: <subagent ladder>
+    Writing: <writing>
     Work running alongside: <other work> — do not touch those files (4-3)
     Root branch: <root branch>
     Base branch: <base branch>

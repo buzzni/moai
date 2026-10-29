@@ -50,6 +50,7 @@ Commands:
   due           Raise priorities a deadline has caught up with
   config        Read this repository's settings, defaults filled in
   models        Read the model per role from your config and the repository's
+  writing       Read how much agents should write
   keys          Show the explorer's keys and what your keys.toml changed
   update        Upgrade the moai you are running with install.sh
   init          Put a .moai/ into this repository (safe to run again)
@@ -3637,7 +3638,7 @@ Options:
   are the values this binary acts on, so a surface drawing the board reads
   them here instead of parsing the file again. --json adds path, the file it
   read. A [models] table is left to `moai models`, which lays it under your
-  user config.
+  user config. A [writing] table is left to `moai writing`.
 
   It only reads; edit the file by hand to change a setting.
 ```
@@ -3676,6 +3677,30 @@ Options:
   repo the ones the repository table set that your config did not, and
   repo_path that file (null when it set none). The level lines name the roles
   they pair with. This command only reads; edit the files by hand.
+```
+
+## `moai writing`
+
+```
+Read how much agents should write
+
+Usage: moai writing [OPTIONS]
+
+Options:
+      --json                 Machine-readable output. Every human line goes away
+      --no-color             Turn colour off (same as `--color never`)
+      --color <how>          auto|always|never (auto by default, off when piped)
+  -C, --dir <path>           Run in this directory (same as `git -C`)
+      --user <name (email)>  Who is doing this (from `git config` when absent)
+  -h, --help                 Print help
+
+  moai writing           writing detail and its source
+  moai writing --json    value, sources and config paths
+
+  Reads [writing] detail in your user config: detailed (default) or brief.
+  A repository may recommend a value in .moai/config.toml; your user config
+  takes precedence. Invalid values warn and fall back. This command only reads;
+  edit the files by hand.
 ```
 
 ## `moai keys`
