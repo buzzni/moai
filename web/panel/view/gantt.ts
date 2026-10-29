@@ -361,21 +361,24 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
     const v = inView()
     const view = Math.max(v.x1 - v.x0, 120)
     const rowsInWindow = rowRange(m.lines.length, OVERSCAN_ROWS)
+    const previous = drawn
+    const datesChanged = !previous || v.x0 < previous.x0 || v.x1 > previous.x1
+    const oldRows = b.rows, oldLanes = b.lanes, oldClips = b.clips
     const win = {
       r0: rowsInWindow.start,
       r1: rowsInWindow.end,
-      x0: Math.max(0, v.x0 - view),
-      x1: Math.min(widthOf(a), v.x1 + view),
+      x0: Math.max(0, datesChanged ? v.x0 - view : previous!.x0),
+      x1: Math.min(widthOf(a), datesChanged ? v.x1 + view : previous!.x1),
     }
     // The dates' margin is kept unclamped: a view at the axis' edge is covered by a window that ends there.
-    drawn = { ...win, x0: v.x0 - view, x1: v.x1 + view }
+    drawn = { ...win, x0: datesChanged ? v.x0 - view : previous!.x0, x1: datesChanged ? v.x1 + view : previous!.x1 }
     // A bubble over a bar about to go has no mouseleave to take it down.
     bubble.hidden = true
     const wall: [number, number] = [wallAt(a, win.x0), wallAt(a, win.x1)]
 
     // Weekends, behind everything. Not at the month step, where a day is 4px.
-    const shade: HTMLElement[] = []
-    if (a.zoom !== 'month') {
+    const shade: HTMLElement[] = datesChanged ? [] : Array.from(lanesBox.querySelectorAll<HTMLElement>(':scope > .col-we'))
+    if (datesChanged && a.zoom !== 'month') {
       for (const [from, to] of weekends(a, wall)) {
         const col = el(doc, 'div', { class: 'col-we' })
         col.style.left = `${xOf(a, from)}px`
@@ -383,16 +386,16 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
         shade.push(col)
       }
     }
-    b.rows.clear()
-    b.lanes.clear()
-    b.clips.clear()
+    b.rows = new Map()
+    b.lanes = new Map()
+    b.clips = new Map()
     const rows: HTMLElement[] = []
     const lanes: HTMLElement[] = []
     for (let n = win.r0; n < win.r1; n++) {
       const line = m.lines[n]!
       const g = line.kind === 'row' ? ganttOf(m.index.rows[line.at]!) : undefined
       const p = b.placed[n] ?? null
-      const grid = gridRow(m, line, g, cursor)
+      const grid = oldRows.get(n) ?? gridRow(m, line, g, cursor)
       grid.style.top = `${n * ROW_H}px`
       // Only the window's options are in the listbox: each says where it stands in the whole set, as the list's rows do
       // with aria-rowindex — or a screen reader counts "3 of 41" in a tree of 400.
@@ -400,6 +403,14 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
       grid.setAttribute('aria-posinset', String(n + 1))
       rows.push(grid)
       b.rows.set(n, grid)
+      const retained = !datesChanged ? oldLanes.get(n) : undefined
+      if (retained) {
+        lanes.push(retained)
+        b.lanes.set(n, retained)
+        const clips = oldClips.get(n)
+        if (clips) b.clips.set(n, clips)
+        continue
+      }
       const lane = el(doc, 'div', { class: `lane${g?.deferred ? ' dim' : ''}`, 'data-id': line.kind === 'row' ? m.index.rows[line.at]!.id : null, 'data-key': line.key, 'aria-selected': String(line.key === cursor) })
       lane.style.top = `${n * ROW_H}px`
       lane.addEventListener('click', () => {
@@ -420,11 +431,13 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
       lanes.push(lane)
       b.lanes.set(n, lane)
     }
-    const today = el(doc, 'div', { class: 'todayline' })
+    const today = (!datesChanged && lanesBox.querySelector<HTMLElement>(':scope > .todayline')) || el(doc, 'div', { class: 'todayline' })
     today.style.left = `${xOf(a, now)}px`
     lanesBox.replaceChildren(...shade, ...lanes, b.svg, today)
     rowsBox.replaceChildren(...rows)
 
+    // The date decorations remain when only the vertical window changes.
+    if (!datesChanged) return
     // The header; its today cap stands over the day's line.
     b.top = []
     const header = headerOf(a, now, words, wall)
