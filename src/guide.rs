@@ -2992,7 +2992,8 @@ subject — that has actually happened. So in the root, supervisor and worker al
 /// - **조상에 멀티플렉서가 선 세션은 surface 가 없다 — `-` 다**(moai-xvvr.gkr) — cmux 의 다리는 물려받은 환경뿐이라,
 ///   cmux 탭 안에서 돈 screen·tmux·zellij 의 세션은 기록에 `tmux` 가 안 서도 그 탭으로 읽히는데, 그 탭에 친 것은 그
 ///   멀티플렉서의 앞 창으로 간다. 그래서 surface 를 받은 줄만 `ps` 로 조상의 이름(`comm`)을 거슬러 읽고, 그 이름이
-///   멀티플렉서면 `-` 로 낸다. 이름만 읽고 환경은 안 읽는다(moai-p5sz.7q3). surface 가 없는 줄은 거스르지 않는다 —
+///   멀티플렉서면 `-` 로 낸다. cmux 앱에 닿으면 멈춰 앱 바깥 조상은 세지 않는다(moai-5a28). 이름만 읽고 환경은 안 읽는다.
+///   surface 가 없는 줄은 거스르지 않는다 —
 ///   조상마다 `ps` 를 하나씩 띄우니, 칸을 안 낼 줄에 쓰면 감독의 차례만 늦는다
 /// - **한 칸을 둘이 대면 둘 다 `-` 다**(리뷰 moai-p5sz.tkn) — 위의 이름 표에 없는 감싸개가 같은 탭을 둘에게 대게 해도, 그
 ///   탭에 친 것은 앞에 선 세션 하나에만 간다. 일꾼이 하나뿐이면 이 규칙은 못 막는다 — 위의 조상 규칙이 그 몫이다. 확인한
@@ -3065,6 +3066,8 @@ def nested_multiplexer(pid):
         except ValueError:
             break
         name = os.path.basename(fields[1].strip()).lower()
+        if name in ("cmux", "cmux dev"):
+            break
         if name in ("screen", "tmux", "zellij") or name.startswith("screen-") or name.startswith("tmux:"):
             return True
     return False
@@ -8857,6 +8860,34 @@ stop sending outside work while a release runs",
                 "alive\tnested\t-\tidle\t/repo\ts-nested\t-\n",
                 "{name}"
             );
+        }
+        // cmux app is the boundary: an outer multiplexer must not hide a normal tab.
+        // A multiplexer below the same boundary must still suppress its surface.
+        for (outer, app) in [("screen", "cmux"), ("tmux", "cmux DEV")] {
+            for inner in [None, Some("screen"), Some("tmux"), Some("zellij")] {
+                let below = inner.unwrap_or("zsh");
+                let override_ps = format!(
+                    "real_out = out\ndef out(*cmd, **env):\n    walk = cmd[0] == 'ps' and 'ppid=' in cmd\n    if walk and cmd[2] == '{me}': return '999996 claude'\n    if walk and cmd[2] == '999996': return '999997 {below}'\n    if walk and cmd[2] == '999997': return '999998 /Applications/cmux.app/Contents/MacOS/{app}'\n    if walk and cmd[2] == '999998': return '999999 {outer}'\n    if walk and cmd[2] == '999999': return '1 shell'\n    return real_out(*cmd, **env)\n"
+                );
+                let shell = SESSIONS
+                    .replace("~/.claude/sessions", &nested.display().to_string())
+                    .replace("mine = os.environ.get(\"TMUX\")", &(override_ps + "mine = os.environ.get(\"TMUX\")"));
+                let out = std::process::Command::new("sh")
+                    .arg("-c")
+                    .arg(shell)
+                    .env_remove("TMUX")
+                    .env("CMUX_SURFACE_ID", "CMUX-SURFACE-SUPERVISOR")
+                    .env("PATH", &path)
+                    .output()
+                    .unwrap();
+                assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+                let surface = if inner.is_some() { "-" } else { "CMUX-SURFACE-A" };
+                assert_eq!(
+                    String::from_utf8(out.stdout).unwrap(),
+                    format!("alive\tnested\t{surface}\tidle\t/repo\ts-nested\t-\n"),
+                    "outer={outer}, inner={inner:?}"
+                );
+            }
         }
         // tmux 를 cmux 안에서 돌리면 둘 다 선다 — 그 셸에서 친 것은 tmux 로 가니 tmux 의 짝이 이긴다.
         assert_eq!(

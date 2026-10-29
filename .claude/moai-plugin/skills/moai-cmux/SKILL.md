@@ -116,6 +116,8 @@ def nested_multiplexer(pid):
         except ValueError:
             break
         name = os.path.basename(fields[1].strip()).lower()
+        if name in ("cmux", "cmux dev"):
+            break
         if name in ("screen", "tmux", "zellij") or name.startswith("screen-") or name.startswith("tmux:"):
             return True
     return False
