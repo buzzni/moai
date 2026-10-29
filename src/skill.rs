@@ -41,7 +41,7 @@ pub const DIR: &str = ".claude/moai-plugin";
 ///
 /// **넷째 `moai-recover` 는 죽은 세션을 되살린다**(2026-10-10 사용자 결정, moai-uqf7) — Claude Code 의 세션 기록을
 /// 읽는 글이라 Claude Code 에만 선다. tmux 밖에서도 칠 줄을 내니 모두에게 심는다(사용자 결정, moai-3r7l 노트).
-pub const NAMES: [&str; 4] = ["moai", "moai-supervise", "moai-wiki", "moai-recover"];
+pub const NAMES: [&str; 5] = ["moai", "moai-supervise", "moai-wiki", "moai-recover", "moai-plan"];
 
 /// **고른 사람에게만 심는** 스킬과, 그것을 쓰는 사람인지 알아보는 표식(2026-10-10 사용자 결정, moai-3r7l) — [`NAMES`]
 /// 곁의 둘째 목록이다. tmux 를 안 쓰는 사람에게 칸을 만지는 스킬을 심으면 그 발동어가 그 사람의 모든 세션에 실린다.
@@ -150,7 +150,7 @@ pub fn picked<'a>(all: &'a [Skill], optional: &[&str]) -> Vec<&'a Skill> {
 ///
 /// **이름은 지우지 않는다.** 스킬을 걷어도 줄은 남긴다 — 빼면 그 판이 심은 디렉터리를 다음 판이 못 알아본다. 지금 심는
 /// 스킬과 그 파일이 모두 여기 들었는지는 시험이 잰다(`cmd::skill::tests::every_planted_skill_is_on_the_list`).
-pub const EVER_PLANTED: [(&str, &[&str]); 8] = [
+pub const EVER_PLANTED: [(&str, &[&str]); 9] = [
     ("moai", &["SKILL.md", "references/commands.md"]),
     (
         "moai-supervise",
@@ -162,6 +162,7 @@ pub const EVER_PLANTED: [(&str, &[&str]); 8] = [
     ("moai-saycode", &["SKILL.md"]),
     ("moai-recover", &["SKILL.md"]),
     ("moai-work", &["SKILL.md"]),
+    ("moai-plan", &["SKILL.md"]),
 ];
 
 /// `name` 이 moai 가 심었던 스킬의 이름인가([`EVER_PLANTED`]).
@@ -193,7 +194,7 @@ pub struct Skill {
 pub fn skills() -> Vec<Skill> {
     // 디렉터리 이름은 [`NAMES`]·[`OPTIONAL`] 에서 온다 — 위키가 스킬 이름을 id 에서 거르는 [`EVER_PLANTED`] 가 그 목록을
     // 다 들니(moai-mdzx.3pm, moai-six5.1xz), 여기 글자를 따로 적으면 이름을 바꿀 때 두 자리가 갈린다.
-    let [main, supervisor, wiki, recover] = NAMES;
+    let [main, supervisor, wiki, recover, plan] = NAMES;
     let [Optional { name: tmux, .. }, Optional { name: cmux, .. }, Optional { name: saycode, .. }] = OPTIONAL;
     vec![
         Skill {
@@ -222,6 +223,8 @@ pub fn skills() -> Vec<Skill> {
         Skill { name: wiki, files: vec![("SKILL.md", crate::guide::wiki())], claude_only: false },
         // 되살리기 스킬은 사람이 죽은 세션을 되살려 달라고 할 때만 읽는다(2026-10-10 사용자 결정, moai-uqf7) — 기록을
         // 읽는 곳이 Claude Code 의 `~/.claude/` 라 Claude Code 에만 선다. 새 moai 명령은 없다.
+        // The person chose an always-installed Claude-only planning skill (moai-ns7a, 2026-10-29).
+        Skill { name: plan, files: vec![("SKILL.md", crate::guide::plan())], claude_only: true },
         Skill { name: recover, files: vec![("SKILL.md", crate::guide::recover())], claude_only: true },
         // tmux 스킬은 감독이 `$TMUX` 안에서 돌 때만 읽는다(2026-10-10 사용자 결정, moai-u99i) — 감독 스킬에 섞으면 tmux 를
         // 안 쓰는 감독도 칸을 만지는 걸음을 매번 읽는다. 감독 스킬과 같은 까닭으로 Claude Code 에만 선다. 고른 사람에게만

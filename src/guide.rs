@@ -6390,7 +6390,7 @@ mod tests {
         let head: String = skill.chars().take(40).collect();
         // 이름은 `skill::NAMES`·`skill::OPTIONAL` 의 것이다 — 위키가 스킬 이름을 id 에서 거르는 `skill::EVER_PLANTED` 는 그
         // 목록을 다 든다(moai-mdzx.3pm, moai-six5.1xz). 머리의 이름이 그 목록과 갈리면 고친 이름이 다시 없는 id 로 선다.
-        let [moai, supervisor, wiki_skill, recover_skill] = crate::skill::NAMES;
+        let [moai, supervisor, wiki_skill, recover_skill, plan_skill] = crate::skill::NAMES;
         let [
             crate::skill::Optional { name: tmux_skill, .. },
             crate::skill::Optional { name: cmux_skill, .. },
@@ -6398,6 +6398,7 @@ mod tests {
         ] = crate::skill::OPTIONAL;
         assert!(skill.starts_with(&format!("---\nname: {moai}\ndescription: ")), "{head}");
         assert!(supervise().starts_with(&format!("---\nname: {supervisor}\ndescription: ")), "감독 스킬의 머리가 없다");
+        assert!(plan().starts_with(&format!("---\nname: {plan_skill}\ndescription: ")), "planning skill frontmatter");
         assert!(wiki().starts_with(&format!("---\nname: {wiki_skill}\ndescription: ")), "위키 스킬의 머리가 없다");
         assert!(tmux().starts_with(&format!("---\nname: {tmux_skill}\ndescription: ")), "tmux 스킬의 머리가 없다");
         assert!(cmux().starts_with(&format!("---\nname: {cmux_skill}\ndescription: ")), "cmux 스킬의 머리가 없다");
