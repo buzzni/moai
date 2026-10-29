@@ -627,10 +627,10 @@ The one thing that matters is that the next session reads this with
 const DETAILED_BODY: &str = "goal · context (files and lines, the precedent) · what is decided · steps · acceptance (which tests) · out of scope · order and the files it shares · role";
 
 const REVIEW_FOCUS: &str = "Review focus / 리뷰에서 볼 것";
-const PLAN_BODY: &str = "Epic: why this bundle · the person's decisions · promises · order and shared files · Review focus / 리뷰에서 볼 것. Development member: goal · context (files and lines, precedent) · decisions · where and how (files, functions, structures) · important contracts and pitfalls · steps · acceptance tests · out of scope · order and shared files · role";
+const PLAN_BODY: &str = "Epic: why this bundle · the person's decisions · promises · order and shared files · review focus. Development member: goal · context (files and lines, precedent) · decisions · where and how (files, functions, structures) · important contracts and pitfalls · steps · acceptance tests · out of scope · order and shared files · role";
 
 fn plan_core() -> String {
-    format!("Read the request, its evidence and enough code and tracker context to ground the split. Write short titles and concrete, actionable bodies with file and function locations, constraints, acceptance tests and review focus. For detailed writing use: {PLAN_BODY}. For brief writing give what, where and tests. Classify each member using the difficulty rubric and explain why. Do not ask the person questions; report missing decisions as gaps.")
+    format!("Read the request, its evidence and enough code and tracker context to ground the split. Write short titles and concrete, actionable bodies with file and function locations, constraints, acceptance tests and review focus. For detailed writing use: {PLAN_BODY}. Name the epic review section `{REVIEW_FOCUS}` (choose the English or Korean heading). For brief writing give what, where and tests. Classify each member using the difficulty rubric and explain why. Do not ask the person questions; report missing decisions as gaps.")
 }
 
 fn plan_brief_draft() -> String {
@@ -5358,7 +5358,10 @@ root"), never in the root
    Write the grade you picked and why in one line in the angle (`-b`). The diff runs from
    where the branch left <base branch> — `git -C "<root>/.worktrees/<epic>" merge-base <base branch> HEAD`;
    asked in the root, `HEAD` is the root's own tip and the range comes out empty. You pulled it
-   in 6, so the conflict resolution is inside it too. Create the review issue (rule 3)
+   in 6, so the conflict resolution is inside it too. Read the epic body and put the contents
+   of its `{REVIEW_FOCUS}` section (either heading) first in the review issue angle,
+   followed by any focus discovered during development. If neither heading exists, write the
+   angle as before. Create the review issue (rule 3)
 
        {review}
    Run this line as `moai -C "<root>"`, per 4-1, wherever the shell stands.
