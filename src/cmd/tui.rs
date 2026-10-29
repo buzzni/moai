@@ -1621,6 +1621,11 @@ const TICK: std::time::Duration = std::time::Duration::from_millis(700);
 /// 한 번 들여다보는 일이라 싸다.
 const LOAD_POLL: std::time::Duration = std::time::Duration::from_millis(30);
 
+/// History usually finishes quickly; after a short grace period a slow filesystem needs fewer polls.
+fn history_poll(elapsed: std::time::Duration) -> std::time::Duration {
+    if elapsed < std::time::Duration::from_millis(300) { LOAD_POLL } else { SPIN_TICK }
+}
+
 /// 도는 글리프가 한 칸 가는 **가장 빠른** 걸음. ora 가 80ms 로 돌린다. 그보다
 /// 느긋해도 회전으로 읽히는데, **파일을 보는 걸음(700ms)에 얹으면 한 바퀴가
 /// 7초라 도는 것이 아니라 글자가 이따금 바뀌는 것으로 보인다** — 그래서 걸음을
@@ -1661,6 +1666,7 @@ fn loop_until_quit(term: &mut DefaultTerminal, app: &mut App, left: &mut Vec<Str
     let mut dirty = true;
     let mut pending = None;
     let mut step = SPIN_TICK;
+    let mut history_since = None;
     while !app.quit {
         if dirty {
             let began = std::time::Instant::now();
@@ -1719,13 +1725,25 @@ fn loop_until_quit(term: &mut DefaultTerminal, app: &mut App, left: &mut Vec<Str
         }
         let now = std::time::Instant::now();
         // 키가 읽기를 띄웠으면(층으로 올라가기 따위) 느린 걸음까지 기다리지 않고 받으러 깬다.
+        let history_delay = if app.history_only_loading() {
+            history_poll(now.duration_since(*history_since.get_or_insert(now)))
+        } else {
+            history_since = None;
+            LOAD_POLL
+        };
         if app.loading() {
-            stale_due = stale_due.min(now + LOAD_POLL);
+            stale_due = stale_due.min(now + history_delay);
         }
         if now >= stale_due {
-            app.follow();
-            dirty = true;
-            stale_due = now + if app.loading() || app.reaping() || app.gathering_commits() { LOAD_POLL } else { TICK };
+            dirty |= app.follow();
+            stale_due = now
+                + if app.history_only_loading() {
+                    history_delay
+                } else if app.loading() || app.reaping() || app.gathering_commits() {
+                    LOAD_POLL
+                } else {
+                    TICK
+                };
         }
         // **걸음은 시계가 올린다, 그린 횟수가 올리지 않는다.** 그릴 때마다
         // 올리면 키를 누르는 내내 타이핑 속도로 돌고, 가만히 두면 파일을 보는
@@ -1744,6 +1762,13 @@ fn loop_until_quit(term: &mut DefaultTerminal, app: &mut App, left: &mut Vec<Str
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn slow_history_poll_backs_off_without_delaying_short_reads() {
+        use std::time::Duration;
+        assert_eq!(super::history_poll(Duration::from_millis(299)), super::LOAD_POLL);
+        assert_eq!(super::history_poll(Duration::from_millis(300)), super::SPIN_TICK);
+    }
+
     fn burst_app() -> App {
         let cfg = crate::config::Config::parse("prefix = \"argos\"\n").unwrap();
         let issues = (0..80)

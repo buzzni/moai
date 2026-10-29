@@ -4516,23 +4516,24 @@ impl HistoryCache {
         self.pending.is_some()
     }
 
-    pub(super) fn poll(&mut self) {
-        let Some(pending) = &self.pending else { return };
+    pub(super) fn poll(&mut self) -> bool {
+        let Some(pending) = &self.pending else { return false };
         let entries = match pending.rx.try_recv() {
             Ok(entries) => entries,
-            Err(std::sync::mpsc::TryRecvError::Empty) => return,
+            Err(std::sync::mpsc::TryRecvError::Empty) => return false,
             Err(std::sync::mpsc::TryRecvError::Disconnected) => {
                 let pending = self.pending.take().unwrap();
                 if let Err(payload) = pending.handle.join() {
                     std::panic::resume_unwind(payload);
                 }
-                return;
+                return true;
             }
         };
         // A read that a write overtook is still newer than what is held — it goes in under the marks it was read with,
         // so the next frame reads again instead of the row standing without history meanwhile.
         let pending = self.pending.take().unwrap();
         self.entries.insert(pending.key, (pending.marks, entries));
+        true
     }
 }
 
