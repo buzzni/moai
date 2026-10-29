@@ -1566,6 +1566,7 @@ impl App {
             let round = *round;
             match rx.try_recv() {
                 Ok(looked) => {
+                    self.follow_changed = true;
                     // **들인 것이 있을 때만 시계를 올린다**(moai-ctcb) — 머리의 `↻` 가 그 값으로
                     // "방금 갱신했다" 를 말하는데, 세대가 버린 답은 화면에 아무것도 안 남긴다.
                     // 올리면 한 시간 틈·날로 재는 경고만 새 시각으로 다시 서고 그것이 매기는 셈은

@@ -1141,7 +1141,9 @@ pub fn check(ctx: &Ctx) -> R<Vec<String>> {
     }
     // **드라이버도 한 줄로 댄다**(moai-08bo). 안 쓰기로 한 저장소(`off`)와 이미 선 줄(`current`)은
     // 조용하다 — `--check` 가 대는 것은 **남은 일**이고, 그 둘은 남은 일이 아니다.
-    if !matches!(driver, "off" | "current") {
+    if driver == "unmeasured" {
+        out.push(say(lang, "init.driver_unmeasured").to_string());
+    } else if !matches!(driver, "off" | "current") {
         out.push(fill(say(lang, "init.check_driver"), &[("state", driver)]));
     }
     // **어디서 쳐야 하는지를 끝에 댄다**(moai-nppo). 위의 줄들이 저마다 대는 `moai init` 은
@@ -2202,6 +2204,7 @@ pub fn run(ctx: &Ctx, flags: &Choice, yes: bool) -> R<Vec<String>> {
                 None => "skipped",
                 Some(Planting::Off) => "off",
                 Some(Planting::Already) => "current",
+                Some(Planting::Unmeasured) => "unmeasured",
                 Some(Planting::Planted(_)) => "planted",
                 Some(Planting::Failed(_)) => "failed",
             },
@@ -2311,14 +2314,21 @@ pub fn run(ctx: &Ctx, flags: &Choice, yes: bool) -> R<Vec<String>> {
         }
         _ => {}
     }
-    // **한 일만 말한다** — 이미 서 있던 줄과 안 쓰기로 한 저장소는 조용하다. 못 심은 것은
+    // **한 일만 말한다** — 재어 맞은 줄과 안 쓰기로 한 저장소는 조용하다. 재지 못한 줄은 그대로 두되 그렇다고 한 줄로
+    // 말한다(moai-fzeo) — 말 없이 지나가면 "지금 판이다" 로 읽힌다. 못 심은 것은
     // 끊지 않고 말한다: `.git/config` 하나 때문에 트래커를 세운 말까지 삼키면 안 된다
     // (읽기 전용 AGENTS.md 를 `?` 로 끊지 않는 moai-780n 과 같은 자다).
-    match &planting {
-        Some(Planting::Planted(cmd)) => out.push(fill(say(lang, "init.planted_driver"), &[("cmd", cmd)])),
-        Some(Planting::Failed(why)) => out.push(fill(say(lang, "init.driver_trouble"), &[("why", why)])),
-        _ => {}
-    }
+    //
+    // **그 한 줄을 냈는가가 곧 아래 `did_nothing` 의 드라이버 몫이다**(리뷰) — 갈래를 두 자리에 따로 적던 판은 새 갈래를 한쪽에만
+    // 더하면 그 줄 밑에 "다 맞아 있다" 가 서거나 아무 말도 안 났다. 갈래를 다 적어 두어 새 갈래는 컴파일러가 여기서 묻는다.
+    let driver_line = match &planting {
+        Some(Planting::Planted(cmd)) => Some(fill(say(lang, "init.planted_driver"), &[("cmd", cmd)])),
+        Some(Planting::Unmeasured) => Some(say(lang, "init.driver_unmeasured").to_string()),
+        Some(Planting::Failed(why)) => Some(fill(say(lang, "init.driver_trouble"), &[("why", why)])),
+        None | Some(Planting::Off | Planting::Already) => None,
+    };
+    let driver_said = driver_line.is_some();
+    out.extend(driver_line);
     for (name, done, block) in &untouched {
         // 못 읽은 것과 못 쓴 것은 **사람이 할 일이 다르다** — 인코딩을 고칠 일과 권한을 열 일이다.
         // 갈래를 빠짐없이 적는다: `_` 로 받던 때는 갈래가 하나 느는 날 그것이 말없이 "못 읽어"
@@ -2422,7 +2432,7 @@ pub fn run(ctx: &Ctx, flags: &Choice, yes: bool) -> R<Vec<String>> {
         && listed.is_none()
         && untouched.is_empty()
         && skills_stale.is_none()
-        && !matches!(planting, Some(Planting::Planted(_) | Planting::Failed(_)));
+        && !driver_said;
     if again && did_nothing {
         out.push(say(lang, "init.all_current").to_string());
     }

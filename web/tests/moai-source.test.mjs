@@ -127,23 +127,23 @@ test('status epics[] and milestones[] give their counts per column; malformed en
 
 test('the tree is /api/tree with the order asked for; an answer that is not a list is unreadable', async () => {
   const client = fakeClient({ '/api/tree?reverse=1&sort=updated%3Adesc': passed(TREE), '/api/tree': passed({}) })
-  assert.deepEqual((await loadTree(client, { sort: 'updated:desc', reverse: '1' })).value, TREE)
+  assert.deepEqual((await loadTree(client, { query: { sort: 'updated:desc', reverse: '1' } })).value, TREE)
   assert.deepEqual(await loadTree(client), { ok: false, outcome: { kind: 'unreadable' } })
 })
 
 test('the tree asks for the archive only while archived rows are shown (moai-m4ez.4zq)', async () => {
   const client = fakeClient({ '/api/tree': passed(TREE), '/api/tree?archived=1': passed(TREE), '/api/tree?archived=1&worktree=1': passed(TREE) })
   assert.deepEqual((await loadTree(client)).value, TREE)
-  assert.deepEqual((await loadTree(client, {}, undefined, undefined, false, true)).value, TREE)
-  assert.deepEqual((await loadTree(client, {}, undefined, undefined, true, true)).value, TREE)
+  assert.deepEqual((await loadTree(client, { archived: true })).value, TREE)
+  assert.deepEqual((await loadTree(client, { worktree: true, archived: true })).value, TREE)
   assert.deepEqual(client.calls.map((call) => call.url), ['/api/tree', '/api/tree?archived=1', '/api/tree?archived=1&worktree=1'])
 })
 
 test('the tree is asked in the zone the page draws in, so moai judges overdue there (moai-vj8w.7sh)', async () => {
   const client = fakeClient({ '/api/tree': passed(TREE), '/api/tree?gantt=1&tz=Asia%2FSeoul': passed(TREE), '/api/tree?archived=1&gantt=1&tz=UTC&worktree=1': passed(TREE) })
   assert.deepEqual((await loadTree(client)).value, TREE)
-  assert.deepEqual((await loadTree(client, {}, undefined, undefined, false, false, 'Asia/Seoul', true)).value, TREE)
-  assert.deepEqual((await loadTree(client, {}, undefined, undefined, true, true, 'UTC', true)).value, TREE)
+  assert.deepEqual((await loadTree(client, { zone: 'Asia/Seoul', gantt: true })).value, TREE)
+  assert.deepEqual((await loadTree(client, { worktree: true, archived: true, zone: 'UTC', gantt: true })).value, TREE)
   assert.deepEqual(client.calls.map((call) => call.url), ['/api/tree', '/api/tree?gantt=1&tz=Asia%2FSeoul', '/api/tree?archived=1&gantt=1&tz=UTC&worktree=1'])
 })
 
@@ -157,8 +157,8 @@ test('the detail of a row only another worktree holds is asked with worktree=1 w
 
 test('with the overlay on the tree is asked with worktree=1, so a row only another worktree holds is placed (moai-m4ez.gcp)', async () => {
   const client = fakeClient({ '/api/tree?reverse=1&sort=updated%3Adesc&worktree=1': passed(TREE), '/api/tree?worktree=1': passed(TREE) })
-  assert.deepEqual((await loadTree(client, { sort: 'updated:desc', reverse: '1' }, undefined, undefined, true)).value, TREE)
-  assert.deepEqual((await loadTree(client, {}, undefined, undefined, true)).value, TREE)
+  assert.deepEqual((await loadTree(client, { query: { sort: 'updated:desc', reverse: '1' }, worktree: true })).value, TREE)
+  assert.deepEqual((await loadTree(client, { worktree: true })).value, TREE)
 })
 
 test('what a filter and a search find is both lists with fields=id; moai\'s refusal is the outcome', async () => {
@@ -275,7 +275,7 @@ test('filter days use the page zone for both rows and backlog, without changing 
 
 test('a tree-only read omits both chart values and timezone; a chart read explicitly asks for them', async () => {
   const client = fakeClient({ '/api/tree': passed(TREE), '/api/tree?gantt=1': passed(TREE) })
-  await loadTree(client, {}, undefined, undefined, false, false, 'Asia/Seoul')
-  await loadTree(client, {}, undefined, undefined, false, false, undefined, true)
+  await loadTree(client, { zone: 'Asia/Seoul' })
+  await loadTree(client, { gantt: true })
   assert.deepEqual(client.calls.map((c) => c.url), ['/api/tree', '/api/tree?gantt=1'])
 })

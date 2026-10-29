@@ -184,9 +184,11 @@ What counts is work inside the repository — `.moai/`, `.claude/`, `.agents/`, 
 `.worktrees/`, `target/` and anything outside the repository (scratchpad, temporary
 files) do not. Shell writes (`>`, `>>`, `sed -i`, `tee`, the destination of `cp`·`mv`·`install`)
 count as much as `Edit` and `Write`. If it was not in the plan, create it with `moai add 'a title'`
-and pick that up. A session that holds only work whose worktree stands is refused a write that
-lands in the main checkout — wherever its shell stands — and a write into another epic's worktree;
-the refusal names the same file in its own worktree.
+and pick that up. A session holding work is refused a write into another epic's worktree, even
+while a row it holds has no worktree yet; one whose held work all has its worktree standing is
+also refused a write that lands in the main checkout — wherever its shell stands. The refusal
+names the same file where the work it belongs to lives. A worktree carrying the
+pickup mark of a row this session surely picked up is also that row's worktree.
 
 **3. A review is an issue too.** Before you call a review, create a review issue tied to
 what you are reviewing. The review is `/code-review` in Claude Code; in Codex and
@@ -260,7 +262,7 @@ its own way — read your own column.
 | Ask the person watching | `AskUserQuestion` | `request_user_input` | ask in the conversation and wait |
 | Review the work | `/code-review` | the review this session has, else read the diff yourself | the review this session has, else read the diff yourself |
 | Change the model (the person does it) | `/model` | `/model` | — |
-| Clear the window (the person does it) | `/clear` | `/new` | `/clear` |
+| Clear the window (the person does it) | `/clear` | `/clear` | `/clear` |
 | Call a skill (the person does it) | `/<skill>` | `$<skill>` | ask for the skill by name |
 | Stop what a review left running | `TaskStop` | — | — |
 

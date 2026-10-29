@@ -97,7 +97,8 @@ out), `codex`, `antigravity` or `auto` — and can be repeated.
     `git rm --cached -- .claude/moai-plugin/.claude-plugin/marketplace.json`.
     Once that is committed, every other clone loses the file on its next pull
     (git deletes a file another commit stopped tracking); run `moai skill install`
-    there once to write it back
+    there once to write it back. `moai skill status` warns when the planted plugin
+    is missing that file; its JSON output carries `market_missing`
 - **Codex and Antigravity read the same `.agents/skills/`** in the repository, so
   naming either writes it for both. There is nothing to register — commit the
   directory and the team has the skills. `--scope` does not apply to them, and
@@ -349,14 +350,14 @@ gets through — run it as given. None of them waits on a person except rule 5.
    held issue — `moai mv <id> in_progress`, or `moai add` first if it was not in
    the plan. Not counted: `.moai/`, `.claude/`, `.agents/`, `.codex/`,
    `.worktrees/`, `.git/`, `target/`, `node_modules/`, and anything outside the
-   repository. A session whose held work all has a worktree standing
-   (`.worktrees/<epic>`) is refused a write that lands in the main checkout —
-   wherever its shell stands, and also when the write comes after a pick-up on the
-   same line — and a write into another epic's worktree; the refusal names the same
-   file inside its own worktree. Workers stay in the root and reach their worktree
-   by absolute path, so this is what keeps a relative path from landing in the
-   checkout every session shares. `git apply`, `patch` and what a script writes are
-   not seen (moai-qrja)
+   repository. A session holding work is refused a write into another epic's
+   worktree, even while a held row has no worktree yet. A session whose held work all
+   has a worktree standing (`.worktrees/<epic>`) is also refused a write that lands in
+   the main checkout — wherever its shell stands, and also when the write comes after a
+   pick-up on the same line. The refusal names the same file where its work lives.
+   Workers stay in the root and reach their worktree by absolute path, so this is
+   what keeps a relative path from landing in the checkout every session shares.
+   `git apply`, `patch` and what a script writes are not seen (moai-qrja)
 3. **A review is an issue too.** `/code-review` needs an open review issue tied to
    the held work, and that issue needs an angle in its body (`-b`) — what is being
    looked for and why. Moving it to `done` needs a closing line (`-m`) saying what
@@ -673,8 +674,8 @@ terminal (`#{pane_tty}`), never by reading another process's environment
 **Codex workers.** The skill finds Codex from the running server's pane
 command, path and live process, including a shell launcher's child; it does not
 add Codex to the Claude session map. It checks the screen, live PID and completed
-report together, leaving copy mode, drafts and dialogs to you. `/new` text and
-Enter are separate calls; you handle any work directory menu. Assignments use
+report together, leaving copy mode, drafts and dialogs to you. `/clear` text and
+Enter are separate calls; you handle any unexpected menu or prompt. Assignments use
 `load-buffer`, `paste-buffer -p` and a separate Enter. New panes require your
 yes and use `[models] codex`, read from `moai models --json`; once a round the
 supervisor checks official models with `WebSearch` and tells you if that value
@@ -700,7 +701,11 @@ every session in it, so when to update is yours.
   cmux the map asks `cmux top` which surface each live session runs in — a
   worker `cmux claude-teams` started gets its tab too: the tmux its record names
   is the stand-in's answer, not a tmux pane. Every cmux call names that surface
-  by its UUID, `--surface <UUID>`
+  by its UUID, `--surface <UUID>`. A Claude session under screen, tmux or
+  zellij inside the tab gets no surface: typing to the tab could reach a different
+  window. The check stops at the cmux app, so a multiplexer outside the app
+  does not hide a normal tab (moai-5a28); a session whose ancestors cannot be
+  read gets no surface either
 - **A label on the tab.** Once a round it asks whether worker tabs should carry
   labels; on a yes it names the tab `<worker> <id>` (`cmux rpc tab.action`,
   action `rename`), and takes the name off once the report is checked (action
@@ -722,7 +727,8 @@ every session in it, so when to update is yours.
   what stands there
 - **No idle worker.** On your yes it opens a split beside its own tab running
   `cd "<root>" && claude --model <model>`, without taking focus, and evens the
-  splits out. When cmux has no room for another pane it stops and tells you
+  splits out. A root holding `!` gets no split — the tab's shell would expand it — so
+  it tells you the path. When cmux has no room for another pane it stops and tells you
 
 It never closes a tab, a workspace or a window, never moves focus, and never
 passes `--force`.
@@ -730,8 +736,8 @@ passes `--force`.
 **Codex workers.** The skill uses `cmux top` and live Codex PIDs whose cwd is
 the root or a named worktree, rather than the Claude session map. Before input,
 it checks the screen, live PID and completed report together; cmux's input state
-alone does not establish an idle, empty Codex composer. It sends `/new` text,
-reads the screen and sends Enter separately; you handle the work directory menu.
+alone does not establish an idle, empty Codex composer. It sends `/clear` text,
+reads the screen and sends Enter separately; you handle any unexpected menu or prompt.
 It pastes a multiline assignment with `cmux paste --surface <UUID> --submit -`
 from a file. New tabs require your yes and use `[models] codex`; the supervisor
 reads `moai models --json` and checks official models with `WebSearch` once a
@@ -812,7 +818,8 @@ to bring them back ("recover the sessions", "되살려"). It loads `moai-recover
   workers' names may have changed. Inside cmux (0.65.0 or later) it does the
   same with a split tab per session, and when cmux has no room for another pane
   the sessions left get the lines to type. Outside both it prints, per session,
-  `cd "<dir>" && claude --resume <id>` and the note to paste
+  `cd "<dir>" && claude --resume <id>` and the note to paste. A `<dir>` holding `!`
+  gets neither a tab nor that line: it names the path and the id for you to quote
 
 A session Saycode ran is not resumed in a pane — that would run its
 conversation outside Saycode. It tells such a session from its transcript,
@@ -922,7 +929,7 @@ worker's line is written by the supervisor.
   where an incoming message waits for its person's approval — look at that
   window
 
-Decided in: moai-2w0s moai-hxma moai-0zjo moai-nqdc moai-bl3x moai-gelm moai-tllo moai-mdzx moai-xs2h moai-h8tn moai-snyk moai-u5wr moai-b6cw moai-ew4o moai-dhxm moai-ml0d moai-nas5 moai-kxkw moai-dj4j moai-54yc moai-bkn4 moai-084j moai-keka moai-zynt moai-j9nf moai-jtvp moai-obxm moai-six5 moai-iu73 moai-r0x8 moai-u99i moai-uqf7 moai-p5sz moai-xpa8 moai-9tqo moai-pxui moai-uzhx moai-wk7i moai-jdwk moai-1m21 moai-d1zn
+Decided in: moai-2w0s moai-hxma moai-0zjo moai-nqdc moai-bl3x moai-gelm moai-tllo moai-mdzx moai-xs2h moai-h8tn moai-snyk moai-u5wr moai-b6cw moai-ew4o moai-dhxm moai-ml0d moai-nas5 moai-kxkw moai-dj4j moai-54yc moai-bkn4 moai-084j moai-keka moai-zynt moai-j9nf moai-jtvp moai-obxm moai-six5 moai-iu73 moai-r0x8 moai-u99i moai-uqf7 moai-p5sz moai-xpa8 moai-9tqo moai-pxui moai-uzhx moai-wk7i moai-jdwk moai-1m21 moai-d1zn moai-xvvr
 
 ## Archive storage
 

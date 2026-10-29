@@ -450,6 +450,15 @@ pub struct Ground {
     /// 그 프로젝트의 아카이브 날수(`Config::archive_days`, moai-47mz) — 적재가 설정에서 옮겨 둔다. 거름망의
     /// 자([`Ground::here`])와 보기의 자([`Site::archived`])가 이 하나를 읽는다.
     archive_days: i64,
+    /// **쓰기가 못 찾는 아카이브의 id** — 이 적재가 읽은 산 스냅샷(겹쳐 보면 루트의 것)에 **읽히는** 줄이 없는 아카이브의
+    /// id 다(moai-ekg6.ej7). 섞은 줄([`beside`])은 어느 파일에서 왔는지를 안 들어, [`counted_beside`] 가 섞기 전에 잰다.
+    /// 쓰기(`Repo::with_write`)는 산 스냅샷의 읽힌 줄에서 id 로 찾으니 간트는 이 id 의 계획을 안 쓴다(`App::unwritable`) —
+    /// 누를 때마다 스냅샷을 다시 읽던 판은 UI 실에서 산 파일 전체를 풀었다.
+    ///
+    /// `moai show` 의 `Where::stored` 와는 **못 읽는 산 줄**에서 갈린다 — 그쪽은 보일 줄을 가르므로 그 줄의 id 를 산 것으로
+    /// 치지만, 여기는 쓸 줄을 가르므로 안 친다: 쓰기의 닫는 함수는 못 읽는 줄을 못 본다. 나이로 숨는 아카이브
+    /// ([`Site::archived`])와도 다른 자다. 저장소 없이 지은 화면(시험의 [`measure`])은 비어 있어 다 산 줄로 본다.
+    archive_only: std::collections::BTreeSet<String>,
     /// Replaced with this load's maps on every read, including background/project reads.
     chart: std::cell::RefCell<Option<gantt::Cached>>,
 }
@@ -539,6 +548,8 @@ impl Ground {
             // 줄만으로는 모른다 — 노트를 보는 거름망이 처음 걸릴 때 읽는다([`Ground::read_notes`]).
             notes: None,
             archive_days: cfg.archive_days,
+            // 줄만으로는 모른다 — 섞기 전의 두 벌을 든 [`counted_beside`] 가 채운다.
+            archive_only: std::collections::BTreeSet::new(),
             chart: Default::default(),
         }
     }
@@ -953,10 +964,14 @@ pub(crate) fn counted_beside(
     let archived = crate::archive::read(&repo.root)?;
     let cfg = &repo.config;
     let unreadable = live_unreadable(&live, origin);
+    // **섞기 전에 잰다** — 섞은 줄은 어느 파일에서 왔는지를 안 든다([`Ground::archive_only`], moai-ekg6.ej7). 견줄 산 줄은
+    // [`board`] 가 고르는 루트의 스냅샷이다 — 쓰기가 줄을 찾는 그 파일이다.
+    let archive_only = unwritten_in(&archived, root.unwrap_or(&live));
     if !count || root.is_some() || !crate::archive::shareable(&live.issues, &unreadable, &archived) {
         let counted = if count { board(repo, &live, &unreadable, root, &archived, now) } else { Counted::default() };
         let load = beside(archived, live);
-        let (index, ground) = measure(&load.issues, cfg);
+        let (index, mut ground) = measure(&load.issues, cfg);
+        ground.archive_only = archive_only;
         return Ok(Beside { load, counted, index, ground });
     }
     // 여기부터는 루트가 곧 산 줄이다(`root` 가 없다) — [`board`] 가 `root.unwrap_or(live)` 로 고르는 그것.
@@ -969,9 +984,17 @@ pub(crate) fn counted_beside(
     let (st, movable) = crate::archive::board_in(&load.issues, &soil, &live.issues, &unreadable, &excluded, cfg, now);
     let st = side.warn(st, movable);
     let counted = tally(st, unreadable.len(), archive_unreadable);
-    let (index, ground) = measure_in(&load.issues, cfg, &soil);
+    let (index, mut ground) = measure_in(&load.issues, cfg, &soil);
+    ground.archive_only = archive_only;
     drop(soil);
     Ok(Beside { load, counted, index, ground })
+}
+
+/// 산 줄(`live`)의 **읽힌** 줄에 없는 아카이브의 id([`Ground::archive_only`]). 못 읽는 산 줄의 id 는 안 센다 — 쓰기의 닫는
+/// 함수는 그 줄을 못 보니, 그 id 의 계획도 `not_found` 로만 돌아온다.
+fn unwritten_in(archived: &Load, live: &Load) -> std::collections::BTreeSet<String> {
+    let live: std::collections::BTreeSet<&str> = live.issues.iter().map(|i| i.id.as_str()).collect();
+    archived.issues.iter().map(|i| i.id.as_str()).filter(|id| !live.contains(id)).map(str::to_string).collect()
 }
 
 /// 아카이브의 줄을 산 줄 곁에 놓는다 — `archive::read_all` 과 같은 섞기를 **이미 읽은 아카이브로** 한다
@@ -1343,6 +1366,8 @@ pub struct Site {
 }
 
 pub struct App {
+    /// Whether the current background poll changed something the screen can show.
+    follow_changed: bool,
     /// 지금 선 프로젝트에 딸린 것 — 줄·색인·설정과 그 안에서 선 자리([`Site`]).
     pub site: Site,
     pub cursor: usize,
@@ -2132,6 +2157,7 @@ impl App {
         counted: Option<Counted>,
     ) -> App {
         let mut app = App {
+            follow_changed: false,
             site: Site::of(issues, index, ground, cfg, path, unreadable_ids),
             cursor: 0,
             mode: Mode::Browse,
@@ -2464,6 +2490,35 @@ impl App {
         }
     }
 
+    /// **방금 쓴 줄을 쓴 사람의 읽음으로 적는다**(moai-uwi9.0xu) — 제 끌기가 제게 [NEW] 로 돌아오지 않게. 쓰기가 담긴 **뒤에**,
+    /// [`App::write`] 가 트래커 락을 놓은 다음에 부른다(리뷰). 그 쓰기의 뒷걸음에서 적던 판은 이 사람의 읽음 파일 락을 기다리는
+    /// 동안(5초까지)과 그 파일을 읽고 고쳐 쓰는 동안 `.moai/lock` 을 쥐어 옆 세션의 쓰기를 다 세웠다 — `cmd::edit` 과 같은 까닭이다.
+    /// 적는 값은 받은 줄의 도장이고, 더 늦은 읽음은 거꾸로 안 옮긴다([`crate::read_marks::mark_written`]).
+    ///
+    /// **못 적은 까닭은 돌려준다** — 부르는 쪽이 알림 끝에 붙인다. 실패 배너(`trouble`)로 세우던 판은 담긴 쓰기를 빨간 글 뒤로
+    /// 밀어 80칸에서 되돌리는 명령을 잘랐고, 방금 선 다시 읽기의 실패를 덮었다. 붙이는 글은 `r` 과 같은 자다([`App::mark_read`]).
+    /// 설정 자리가 없으면(`user_config` 가 없다) `r` 처럼 화면에서만 걷는다.
+    pub(super) fn mark_written(&mut self, row: &Issue) -> Option<String> {
+        let lang = self.site.lang;
+        let root = self.site.repo.as_ref().map(|r| r.root.clone());
+        let (Some(config), Some(root)) = (self.user_config.clone(), root) else {
+            let marks = crate::query::read_marks_of(std::iter::once(row), &self.site.seen);
+            self.site.seen.extend(marks);
+            self.recount_unread();
+            return None;
+        };
+        let why = match crate::read_marks::mark_written(&config, &root, lang, row) {
+            Ok(wrote) => wrote.problems.first().map(|p| said_read(lang, p)),
+            Err(e) => Some(fill(say(lang, "tui.read.unwritten"), &[("why", &crate::text::one_line(&e.message))])),
+        };
+        // 다시 든 읽음으로 [NEW] 를 다시 센다 — 그 파일의 표식이 바뀌어 다음 걸음이 어차피 다시 읽는다. **쓰기의 알림은 지킨다** —
+        // 다시 들기가 못 읽은 까닭을 알림에 세우면 방금 담긴 쓰기의 `✓` 를 덮는다. 그 까닭은 적다 만난 까닭이 없을 때 대신 돌려준다.
+        let landed = self.notice.take();
+        self.load_read();
+        let reread = std::mem::replace(&mut self.notice, landed);
+        why.or(reread)
+    }
+
     /// 헤더가 적을 사람. 처음 한 번만 풀고 [`Self::user`] 나 그 프로젝트의 `naming` 이
     /// 바뀌면 다시 푼다 — 까닭은 `header_user` 에 적었다.
     ///
@@ -2519,8 +2574,11 @@ impl App {
             return;
         }
         self.reopened_at = Some(std::time::Instant::now());
-        if (self.reopen)(&self.site.cfg) > 0 && self.site.repo.is_some() {
-            self.reread = true;
+        if (self.reopen)(&self.site.cfg) > 0 {
+            self.follow_changed = true;
+            if self.site.repo.is_some() {
+                self.reread = true;
+            }
         }
     }
 
@@ -2578,6 +2636,14 @@ impl App {
     /// 스레드에서 짓고 있는 다시 읽기가 있는가. 루프가 이 동안은 더 자주 깨어 받는다.
     pub fn loading(&self) -> bool {
         self.pending.is_some() || self.layer_loading() || self.history.loading()
+    }
+
+    /// How long the history read has run, when it is the only background job left — a slow one can be polled less often
+    /// (`cmd::tui`'s `history_poll`). `None` while anything else runs: the others keep the fast poll. The clock is the
+    /// read's own, so a read that follows another gets its grace too.
+    pub fn history_alone(&self) -> Option<std::time::Duration> {
+        let others = self.pending.is_some() || self.layer_loading() || self.reaping() || self.gathering_commits();
+        if others { None } else { self.history.waited() }
     }
 
     /// 버린 다시 읽기 스레드가 아직 남았는가. 루프는 이 동안에도 빠른 걸음으로 깬다 —
@@ -2945,7 +3011,18 @@ impl App {
     /// **읽기는 스레드에서 한다**([`Fresh`]). 짓는 동안은 표식을 다시 재지 않는다 —
     /// 하나가 끝나기 전에 또 띄우면 몰아 쓰는 동안 스레드가 쌓인다. 끝난 것을 들인
     /// 뒤에도 파일이 또 바뀌었으면(표식은 읽기 전에 쟀다) 다음 걸음이 다시 띄운다.
-    pub fn follow(&mut self) {
+    ///
+    /// **바뀐 것이 있을 때만 참이다**(moai-w7ms.ujp) — 루프는 이 답으로만 그린다. 걸음들이 바뀐 것을 `follow_changed` 에
+    /// 적고, 읽기가 뜨거나 끝난 것은 `loading` 의 앞뒤로 잰다.
+    pub fn follow(&mut self) -> bool {
+        self.follow_changed = false;
+        let was_loading = self.loading();
+        self.follow_steps();
+        self.follow_changed || was_loading != self.loading()
+    }
+
+    /// [`App::follow`] 의 걸음들 — 화면에 닿는 것을 바꾸면 `follow_changed` 를 세운다.
+    fn follow_steps(&mut self) {
         self.reap();
         self.follow_config();
         self.follow_read();
@@ -2955,12 +3032,16 @@ impl App {
         self.follow_site();
         self.follow_commits();
         self.follow_latest();
-        self.history.poll();
+        self.follow_changed |= self.history.poll();
+        // **상세가 그린 이력의 저널도 본다**(moai-w7ms 리뷰) — 다시 읽을지는 그리는 자(`draw::fill_history`)가 가르는데,
+        // 쉬는 루프는 이 걸음이 바뀌었다고 할 때만 그린다. `moai note` 는 스냅샷을 안 바꾼다.
+        self.follow_changed |= self.history.moved();
         self.reopen_journals();
         if let Some((rx, _)) = &self.pending {
             match rx.try_recv() {
                 Err(std::sync::mpsc::TryRecvError::Empty) => {}
                 Ok(fresh) => {
+                    self.follow_changed = true;
                     self.pending = None;
                     self.receive(fresh);
                 }
@@ -2974,6 +3055,7 @@ impl App {
                     {
                         std::panic::resume_unwind(payload);
                     }
+                    self.follow_changed = true;
                     self.trouble = Some(say(self.site.lang, "tui.reload.stopped").into());
                 }
             }
@@ -3067,6 +3149,7 @@ impl App {
         match rx.try_recv() {
             Err(std::sync::mpsc::TryRecvError::Empty) => {}
             Ok(seen) => {
+                self.follow_changed = true;
                 self.latest = seen;
                 self.latest_job = None;
             }
@@ -3124,6 +3207,7 @@ impl App {
             match rx.try_recv() {
                 Err(std::sync::mpsc::TryRecvError::Empty) => return,
                 Ok(table) => {
+                    self.follow_changed = true;
                     self.commits_job = None;
                     // **뿌리마다 덮는다.** `commit_tables` 는 이번에 git 이 답을 안 준 뿌리를
                     // 통째로 빼고 오므로(`.ok()`), 받은 것을 그대로 넣으면 한 번 어긋난 걸음에
@@ -4134,6 +4218,7 @@ impl App {
         if !stale {
             return;
         }
+        self.follow_changed = true;
         self.load_read_in(seat);
     }
 
@@ -4162,6 +4247,7 @@ impl App {
         if was == now && !owed {
             return;
         }
+        self.follow_changed = true;
         // **한 번만 읽는다**(moai-7yil) — 적어 둔 읽음과 등록 목록이 한 파일에 살아, 둘이 저마다 읽던
         // 판은 이 걸음마다 같은 글을 두 번 파싱했다. 이 길은 자주 돈다: 보기 토글과 읽음이 그 파일을
         // **스스로 써서**, `r` 을 누르고 있으면 누를 때마다 두 번 파싱이 붙었다.
@@ -4650,6 +4736,7 @@ impl App {
             Err(std::sync::mpsc::TryRecvError::Empty) => return,
             Err(std::sync::mpsc::TryRecvError::Disconnected) => (path.clone(), None),
         };
+        self.follow_changed = true;
         let (_, _, handle, round) = layer.reading.take().expect("바로 위에서 보았다");
         // **이 읽기가 도는 사이에 그 프로젝트에 쓰기가 들어왔는가**(moai-x1hb) — 쓸기가 표식이
         // 움직인 것을 보고 적어 둔다([`layer::Layer::reading_behind`]). 답은 그대로 들이고 그 줄을
@@ -6688,6 +6775,32 @@ mod tests {
 
     fn cfg() -> Config {
         Config::parse("prefix = \"argos\"\n").unwrap()
+    }
+
+    #[test]
+    fn idle_follow_and_empty_background_poll_do_not_request_a_frame() {
+        let mut a = App::new(Vec::new(), cfg(), Path::new());
+        assert!(!a.follow());
+        let (tx, rx) = std::sync::mpsc::channel();
+        let (stop, wait) = std::sync::mpsc::channel::<()>();
+        let handle = std::thread::spawn(move || {
+            let _ = wait.recv();
+        });
+        a.pending = Some((rx, handle));
+        assert!(!a.follow(), "an empty poll changed no visible state");
+        drop(tx);
+        stop.send(()).unwrap();
+        assert!(a.follow(), "a disconnected read must show its error");
+    }
+
+    #[test]
+    fn a_completed_version_read_requests_a_frame() {
+        let mut a = App::new(Vec::new(), cfg(), Path::new());
+        let (tx, rx) = std::sync::mpsc::channel();
+        tx.send(crate::latest::Seen::Unasked(crate::latest::Why::not_asked())).unwrap();
+        a.latest_job = Some((rx, std::thread::spawn(|| {})));
+        assert!(a.follow());
+        assert!(!a.follow());
     }
 
     /// 걸린 거름망의 뱃지 글 — 화면이 그리는 그 글([`draw::badge`])이다.

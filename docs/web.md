@@ -58,7 +58,8 @@ it, the body, its children, its commits, the wiki about it (the lessons its note
 point at, the pages that name it, the related sections — as `moai show <id>`
 lists them) and its history. History and work log start expanded and keep the
 line breaks of the text as written. In the list, in-progress rows have a pale gold
-background and review rows a pale purple one. The detail starts on the right;
+background, review rows a pale purple one and done rows a pale green one. The
+detail starts on the right;
 `SPC o d`, or the position button, moves it right → bottom → left → top. Below
 640px it stays below the list. `SPC v d` hides it, and `SPC v r` switches the body
 between rendered markdown and the raw text.
@@ -68,7 +69,8 @@ between rendered markdown and the raw text.
 
 The Gantt tab draws the same chart as the explorer's `SPC g g`, with the same
 meaning. The tree stays on the left, initially with every folder open, with the filter, search and
-view toggles of the list applied; the dates scroll on the right.
+view toggles of the list applied; the dates scroll on the right. The tree's rows take
+the list's column backgrounds; the dates behind the bars stay plain.
 
 | Mark | Means |
 |---|---|
@@ -139,8 +141,11 @@ through scrolling and redraws. A move that went through says the `moai edit` lin
 that shifts the same edge back by the same number of days. Changes to the other
 edge stay in place. If that edge had no day when the page read it, undo clears it;
 a day another session added to that edge before the write would be cleared too.
-A newly planned day is undone by clearing both days. The TUI's notice instead
-names the dates it read inside the write. A bar an epic or milestone counts from its members
+A newly planned day is undone by clearing both days. The TUI also names an inverse
+move, choosing the written edges from the dates read inside the write. Undo that
+clears a newly created date or restores an explicitly chosen start still writes an
+absolute value; another session's later change to that field can be overwritten.
+A bar an epic or milestone counts from its members
 (hatched) does not move — move the members. Nor does a row the write cannot reach:
 one the worktree overlay shows from another worktree, and an archived row.
 
@@ -385,4 +390,4 @@ once and the keys reach it.
 The page does not show the stats screen, and what it writes is a Gantt bar's days
 and your read marks.
 
-Decided in: moai-e9hi, moai-8r2l, moai-0aa7, moai-jshy, moai-d86e.3ud, moai-ijjd, moai-lj8g
+Decided in: moai-skjr, moai-e9hi, moai-8r2l, moai-0aa7, moai-jshy, moai-d86e.3ud, moai-ijjd, moai-lj8g, moai-ekg6

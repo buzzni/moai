@@ -102,6 +102,25 @@ def tty(pid):
             return 0
     t = out("ps", "-p", str(pid), "-o", "tty=")
     return device("/dev/" + t) if t.strip("?") else 0
+def nested_multiplexer(pid):
+    # Inspect process names and parents only, never another process's environment.
+    seen = set()
+    while pid > 1 and pid not in seen:
+        seen.add(pid)
+        line = out("ps", "-p", str(pid), "-o", "ppid=", "-o", "comm=")
+        fields = line.split(None, 1)
+        if len(fields) != 2:
+            return True
+        try:
+            pid = int(fields[0])
+        except ValueError:
+            return True
+        name = os.path.basename(fields[1].strip()).lower()
+        if name in ("cmux", "cmux dev"):
+            break
+        if name in ("screen", "tmux", "zellij") or name.startswith("screen-") or name.startswith("tmux:"):
+            return True
+    return False
 mine = os.environ.get("TMUX")
 if mine and mine.startswith("/tmp/cmux-"):
     mine = None
@@ -141,7 +160,9 @@ for path in sorted(glob.glob(os.path.expanduser("~/.claude/sessions/*.json"))):
         if not here or here != device(out("tmux", "display", "-p", "-t", pane, "#{pane_tty}")):
             pane = ""
     elif alive and cmux:
-        pane = "" if told and not told.startswith("cmux:") else surfaces.get(pid)
+        pane = surfaces.get(pid)
+        if (told and not told.startswith("cmux:")) or (pane and nested_multiplexer(pid)):
+            pane = ""
     rows.append((alive, pane, r))
 if rows and not any(alive for alive, _, _ in rows):
     sys.exit("no record reads alive, not even this session's own: this shell cannot read process start times (a sandbox, or no ps), so act on no row")
@@ -302,7 +323,7 @@ asked you for it. On a yes, for each:
     cmux --id-format both new-split right --surface "$CMUX_SURFACE_ID" --command 'cd "<root>" && claude --model <model>'
 
 `<root>` is the `root dir` of the supervisor's 2 and `<model>` the model picked in 2-1. **No
-other flag** on `claude`. Keep the double quotes around `<root>` inside the single ones;
+other flag** on `claude`. If `<root>` contains `!`, do not build this command: tell the person the path, because the destination interactive shell can expand it. Keep the double quotes around `<root>` inside the single ones;
 write each `'` in the path as `'\''` there. It prints `OK surface:<n> (<UUID>) workspace:<n> (<UUID>)` — the first
 UUID is the new surface, the second your workspace. `--command` is typed into the new tab's
 shell, so the shell stays when `claude` exits and what it said stays readable, and the split
@@ -434,7 +455,7 @@ Ask once before opening new tabs, as above. On a yes, open an ordinary interacti
 
     cmux --id-format both new-split right --surface "$CMUX_SURFACE_ID" --command 'cd "<root>" && codex --model <codex>'
 
-Keep the double quotes around `<root>` inside the single ones; write each `'` in the path
+If `<root>` contains `!`, do not build this command: tell the person the path, because the destination interactive shell can expand it. Keep the double quotes around `<root>` inside the single ones; write each `'` in the path
 as `'\''` there. Keep the returned surface UUID. The same split refusal rule applies: stop opening and tell
 the person. Read its startup screen in a separate call; folder trust, hooks trust and any
 permission prompt belong to the person. The first assignment can use a verified fresh box.
@@ -473,7 +494,7 @@ If any check is unclear or any input is refused, do not type again; ask the pers
 Only after `Report-checked:` and a verified live Codex with an empty idle box, type the
 command text, without assuming a newline is Enter:
 
-    cmux send --surface <surface> -- '/new'
+    cmux send --surface <surface> -- '/clear'
 
 Read the screen once, then send an explicit Enter in a separate call:
 
@@ -481,12 +502,13 @@ Read the screen once, then send an explicit Enter in a separate call:
     cmux send-key --surface <surface> enter
     cmux read-screen --surface <surface> --lines 40
 
-Codex can ask `Where should the new conversation run?`. Whatever it selects —
-`Use current Git worktree` included — the person handles that menu; tell them which tab and why.
-Read again after they choose: require a fresh startup screen in the same cwd and an empty
-composer before assigning work. Never guess an Enter count or choose a new worktree.
-If a command remains typed, a screen is cropped, or cmux refuses any input, stop and tell
-the person. Do not resend the command or paste the work over it.
+Before the Enter, the composer holds `/clear` and nothing else — if it does not, stop and
+tell the person. Never guess an Enter count. Require a fresh screen in the same cwd and an
+empty composer before assigning work.
+An unexpected menu, question or permission prompt belongs to the person: tell them which
+tab shows it, and read the screen again after they answer. If a command remains typed, a
+screen is cropped, or cmux refuses any input, stop and tell the person. Do not resend the
+command or paste the work over it.
 
 ### Paste the assignment
 

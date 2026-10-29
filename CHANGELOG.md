@@ -12,6 +12,52 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+## [0.34.0] - 2026-10-29
+
+### Added
+
+- Web list rows tint completed work pale green; Gantt labels use matching tints for in-progress, review, and completed work. (moai-skjr)
+- Plans accept the fullwidth `＠` as a date marker, with the same escaping rules as `@`. A plan
+  title ending in `＠` and a digit, such as `＠3F`, is now read as a date and refused when it is
+  not one; write `\＠` to keep it as text. (moai-uwi9.kr5)
+
+### Changed
+
+- `moai ready` orders equal-priority work by the earliest deadline it follows, including open ancestors. (moai-uwi9.rff)
+- Your own `moai edit`, and a plan you move on the explorer's or `moai web`'s gantt, marks the row you
+  wrote read if its previous version was already read; unseen changes stay `[NEW]`. (moai-uwi9.0xu)
+- When the editor for a parked thought ends on a signal (killed or crashed), the explorer keeps its
+  file and names the path instead of deleting what you saved. (moai-uwi9.9tn)
+
+### Fixed
+
+- `moai init` says when it could not measure the planted merge driver and left it as it was, and
+  `init --json` and `init --check --json` report `"driver":"unmeasured"` instead of `current`. (moai-fzeo)
+- `moai ready`, `moai prime` and the next row `moai mv … done` names follow only live rows' deadlines,
+  as `moai due apply` does, so an archived epic's deadline no longer reorders its revived members. (moai-eev6)
+- Hook rule 2 lets a session write into a worktree that carries the pick-up mark of a row it picked up
+  there, even when that worktree is named for another epic; other epics' worktrees are still refused.
+  (moai-8kzn)
+- `moai edit` and explorer gantt moves take their `updated_at` once they hold the tracker lock, so a
+  write that waited behind another session no longer stamps an older time that hides it from readers.
+  (moai-uwi9.w5o)
+- Nested task lists in `moai web` retain their indentation. (moai-sqwn.y71)
+- TUI gantt undo reverses only the dates moved, and archive-only rows and archive copies cannot be dragged or planned. (moai-ekg6)
+- Hook rule 2 protects another epic's worktree even when a held row has no worktree. (moai-uwi9.q08)
+- Interactive cmux and recovery command guidance rejects paths containing `!`. (moai-uwi9.ctp)
+- `moai init` and `moai merge-driver --install` measure a driver that timed out once more, and
+  `init` keeps an existing driver command whose result stays unknown. (moai-uwi9.b75)
+- Gantt charts load and scroll with less repeated work in the terminal and web; the web retries chart reads, and slow history reads poll less often while background updates remain visible. (moai-w7ms)
+- Supervisors clear Codex worker windows with `/clear` instead of `/new`, which asked
+  where the new conversation should run and left the clear to you. (moai-2t9u)
+- `moai skill status` warns when a planted Claude plugin is missing its local
+  `marketplace.json`, and `--json` reports `market_missing`. `moai skill install`
+  restores the file. (moai-xvvr.qt8)
+- The cmux session map does not assign a tab to a Claude session running under
+  screen, tmux or zellij inside that tab. (moai-xvvr.gkr)
+- Normal cmux tabs remain matched when the cmux app was launched under a
+  multiplexer; unreadable ancestry leaves the surface unassigned. (moai-5a28)
+
 ## [0.33.0] - 2026-10-29
 
 ### Added
