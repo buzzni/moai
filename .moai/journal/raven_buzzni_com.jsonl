@@ -9829,3 +9829,7 @@
 {"ts":"2026-10-29T12:52:25Z","id":"moai-ekg6.sml","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
 {"ts":"2026-10-29T12:52:31Z","id":"moai-ekg6.yo8","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"발견 1–10은 리뷰 수정으로 반영했고 11은 도움말·위키·CHANGELOG, 15는 수정 커밋 본문에 이유를 기록했다. 12와 엣지 매핑은 moai-svrp, 13은 moai-rpap, 14는 moai-7ggk에 넘겼다. 기존 절대 복구와 프로젝트 경로·목록 표시 설계는 요청대로 후속으로 둔다."}
 {"ts":"2026-10-29T12:52:41Z","id":"moai-ekg6","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 마일스톤 moai-u86x에서 병합된 결과를 릴리스에 포함한다. 절대 복구 조건부 쓰기 moai-svrp, 프로젝트 경로 moai-rpap, 탐색기 보관 표시 moai-7ggk는 백로그다."}
+{"ts":"2026-10-29T12:53:01Z","id":"moai-7ggk","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Due-priority: p2 → p0 (0 days left, due 2026-10-29 from moai-u86x)"}
+{"ts":"2026-10-29T12:53:01Z","id":"moai-rpap","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Due-priority: p2 → p0 (0 days left, due 2026-10-29 from moai-u86x)"}
+{"ts":"2026-10-29T12:53:01Z","id":"moai-sqwn.gdk","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Due-priority: p2 → p0 (0 days left, due 2026-10-29 from moai-u86x)"}
+{"ts":"2026-10-29T12:53:01Z","id":"moai-svrp","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Due-priority: p2 → p0 (0 days left, due 2026-10-29 from moai-u86x)"}
