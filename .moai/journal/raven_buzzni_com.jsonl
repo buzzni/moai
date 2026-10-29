@@ -9431,3 +9431,7 @@
 {"ts":"2026-10-29T02:16:26Z","id":"moai-0lx6","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-10-29T02:16:37Z","id":"moai-0lx6","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"사람 요청으로 이슈 본문도 윤문 대상에 넣었다(목록 꼴·줄 머리 꼴은 그대로)."}
 {"ts":"2026-10-29T02:16:37Z","id":"moai-0lx6","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
+{"ts":"2026-10-29T02:17:18Z","id":"moai-0lx6","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"done","to":"todo"}
+{"ts":"2026-10-29T02:17:18Z","id":"moai-0lx6","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-29T02:17:30Z","id":"moai-0lx6","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"사람 요청으로 트래커 노트도 윤문 대상에 넣었다. 기계·다음 세션이 읽는 줄 머리 꼴(model:·Report-checked: 등)은 글자째 둔다."}
+{"ts":"2026-10-29T02:17:30Z","id":"moai-0lx6","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
