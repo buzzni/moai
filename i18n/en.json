@@ -452,6 +452,8 @@
   "tui.gantt.no_plan": "{id} has no planned days to move — `moai edit {id} --start <day> --due <day>` sets them",
   "tui.gantt.planned": "{id} has planned days by now — nothing was written; move its bar instead",
   "tui.gantt.elsewhere": "{id}'s plan is from {branch}'s own snapshot — nothing was written; replay the change in the main checkout and drop the worktree's copy (docs/recovery.md)",
+  "tui.gantt.archived": "{id} stands only in the archive — nothing was written",
+  "tui.gantt.copy": "{id} also stands on another row — this copy is not the one a write changes; nothing was written",
   "tui.gantt.members": "{id} wrote no days of its own — its bar spans its members, move them instead",
   "tui.gantt.layer": "a plan is moved inside its project — Enter goes in",
   "tui.gantt.month_1": "Jan",
