@@ -8124,9 +8124,8 @@ stop sending outside work while a release runs",
             let row =
                 VERBS.iter().find(|v| v.words[0].contains(word)).unwrap_or_else(|| panic!("{word} 의 줄이 표에 없다"));
             for (vendor, cell) in VENDORS.iter().zip(row.words).skip(1) {
-                // `/model` 은 Codex 도, `/clear` 는 Antigravity 도 같은 낱말이다(2026-10-04 사용자 결정) — 그 둘만
-                // 같은 글을 받는다.
-                let shared = matches!((word, *vendor), ("/model", "Codex") | ("/clear", "Antigravity"));
+                // `/model` 은 Codex 도, `/clear` 는 Codex 와 Antigravity 도 같은 낱말이다.
+                let shared = matches!((word, *vendor), ("/model", "Codex") | ("/clear", "Codex" | "Antigravity"));
                 if !shared {
                     assert!(!cell.contains(word), "{vendor} 열에 Claude 의 {word} 가 섰다 — {}", row.step);
                 }
@@ -9256,7 +9255,7 @@ stop sending outside work while a release runs",
         for line in codex.lines().filter(|l| l.contains("gpt-")) {
             assert_eq!(line, "the person under `[models] codex`. Default example: `gpt-6.1-sol`.");
         }
-        assert!(!codex.contains("/clear"));
+        assert!(!codex.contains("/new"));
         assert!(!codex.contains(SESSIONS), "Codex 를 Claude 세션 짝에 넣었다");
         assert!(cmux_calls(codex) >= 8, "Codex 절의 cmux 명령을 못 셌다");
         let script = codex.split("```sh\n").nth(1).unwrap().split("```").next().unwrap();
