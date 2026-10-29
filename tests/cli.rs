@@ -8790,6 +8790,7 @@ fn idea_and_issue_share_one_list_of_verbs() {
 /// `--json` 훑기가 실제로 부르는 명령들. **위 시험이 이 목록을 도움말과 견준다** —
 /// 목록을 여기 한 자리에 두어야 그 견줌이 뜻을 갖는다.
 const JSON_SWEEP: &[&str] = &[
+    "writing",
     "init",
     // 저장소의 설정을 기본값을 채워 읽는다(moai-wk7i.qtq).
     "config",
@@ -9366,6 +9367,7 @@ fn every_command_still_speaks_json() {
     let epic = field(&ok(s.path(), &["add", "에픽", "--type", "epic", "--json"]), "id");
 
     let cases = [
+        vec!["writing", "--json"],
         vec!["status", "--json"],
         vec!["ready", "--json"],
         vec!["prime", "--json"],
@@ -16521,8 +16523,18 @@ fn carried_text(out: &str) -> String {
     let key = "\"additionalContext\":\"";
     let at = out.find(key).unwrap_or_else(|| panic!("실은 글이 없다 — {out}"));
     let rest = &out[at + key.len()..];
-    // 싣는 글에 큰따옴표를 넣지 않는 시험만 이 헬퍼를 쓴다.
-    rest[..rest.find('"').unwrap_or(rest.len())].to_string()
+    let mut escaped = false;
+    for (at, ch) in rest.char_indices() {
+        if ch == '"' && !escaped {
+            return rest[..at].to_string();
+        }
+        if ch == '\\' {
+            escaped = !escaped;
+        } else {
+            escaped = false;
+        }
+    }
+    rest.to_string()
 }
 
 fn event(s: &Scratch, session: &str) -> String {
@@ -16572,6 +16584,36 @@ fn the_board_rides_the_first_prompt_only() {
     // 다른 세션은 다시 받는다 — 표는 세션마다 따로다.
     let other = hook_out(&s, "user-prompt-submit", &event(&s, "s2"));
     assert!(!other.trim().is_empty(), "새 세션이 보드를 못 받았다");
+}
+
+#[test]
+fn the_board_names_the_writing_detail() {
+    let s = init("hook-writing");
+    ok(s.path(), &["add", "work"]);
+    let config = s.path().join("writing.toml");
+    std::fs::write(&config, "[writing]\ndetail = \"brief\"\n").unwrap();
+    let run = |session: &str| {
+        hook_at_home(
+            &s,
+            s.path(),
+            None,
+            &[("MOAI_CONFIG", config.to_str().unwrap()), ("MOAI_LANG", "en")],
+            "user-prompt-submit",
+            &event(&s, session),
+        )
+    };
+    let first = String::from_utf8(run("brief").stdout).unwrap();
+    assert!(first.contains("Write issues, plans and notes briefly"), "{first}");
+    assert!(run("brief").stdout.is_empty());
+    std::fs::write(&config, "").unwrap();
+    let first = String::from_utf8(run("default").stdout).unwrap();
+    assert!(first.contains("Write issues, plans and notes in detail"), "{first}");
+    let repo = s.path().join(".moai/config.toml");
+    let mut src = std::fs::read_to_string(&repo).unwrap();
+    src.push_str("\n[writing]\ndetail = \"brief\"\n");
+    std::fs::write(repo, src).unwrap();
+    let first = String::from_utf8(run("repo").stdout).unwrap();
+    assert!(first.contains("Write issues, plans and notes briefly"), "{first}");
 }
 
 /// **셸이 쪽지 자리를 주면 표식은 셸이 세운다**(moai-45hf.wqg). `moai` 는 표식 이름을 쪽지에 적기만
@@ -32725,4 +32767,42 @@ fn show_one_where_agrees_with_lists_for_issues_and_groups() {
         }
     }
     assert_eq!(list.iter().find(|r| r["id"] == old_epic).unwrap()["archived"], true);
+}
+
+#[test]
+fn writing_reads_precedence_and_warns_without_writing() {
+    let s = Scratch::new("writing-config");
+    let cfg = s.path().join("user.toml");
+    let missing = moai_with(s.path(), &cfg, &["writing", "--json"]);
+    assert!(missing.status.success());
+    let got: serde_json::Value = serde_json::from_slice(&missing.stdout).unwrap();
+    assert_eq!(got["detail"], "detailed");
+    for src in
+        ["[writing]\ndetail = \"short\"\n", "[writing]\ndetail = 3\n", "[writing]\nfuture = \"x\"\n", "writing = 3\n"]
+    {
+        std::fs::write(&cfg, src).unwrap();
+        let out = moai_with(s.path(), &cfg, &["writing", "--json"]);
+        assert!(out.status.success());
+        assert_eq!(serde_json::from_slice::<serde_json::Value>(&out.stdout).unwrap()["detail"], "detailed");
+        assert_eq!(String::from_utf8_lossy(&out.stderr).lines().count(), 1);
+        assert_eq!(std::fs::read_to_string(&cfg).unwrap(), src);
+    }
+    git(s.path(), &["init", "-q"]);
+    ok(s.path(), &["init", "argos"]);
+    let repo = s.path().join(".moai/config.toml");
+    let mut text = std::fs::read_to_string(&repo).unwrap();
+    text.push_str("\n[writing]\ndetail = \"brief\"\n");
+    std::fs::write(&repo, text).unwrap();
+    std::fs::write(&cfg, "").unwrap();
+    let out = moai_with(s.path(), &cfg, &["writing", "--json"]);
+    let got: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(got["detail"], "brief");
+    assert_eq!(got["repo"], serde_json::json!(["detail"]));
+    std::fs::write(&cfg, "[writing]\ndetail = \"detailed\"\n").unwrap();
+    let out = moai_with(s.path(), &cfg, &["writing", "--json"]);
+    let got: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(got["detail"], "detailed");
+    assert_eq!(got["written"], serde_json::json!(["detail"]));
+    assert_eq!(got["repo"], serde_json::json!([]));
+    ok(s.path(), &["status"]);
 }

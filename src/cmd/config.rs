@@ -80,6 +80,7 @@ pub fn run(ctx: &Ctx) -> R<Vec<String>> {
     }
     // 사람의 화면은 파일의 꼴 그대로다 — 그대로 옮겨 적으면 같은 설정이 된다. 차례도 위 `Out` 의 것이다. `[models]` 표는
     // 여기 안 선다 — 사람의 설정 밑에 깔아 읽는 값이라 `moai models` 가 낸다(moai-w25x.jud).
+    // `[writing]` 도 같은 이유로 `moai writing` 이 낸다.
     let t = |v: &dyn std::fmt::Display| v.to_string();
     let q = |v: &str| format!("{v:?}");
     let pairs: [(&str, String); 18] = [
