@@ -38,6 +38,7 @@ does not tag — see `CONTRIBUTING.md`.
 - `moai edit` and explorer gantt moves take their `updated_at` once they hold the tracker lock, so a
   write that waited behind another session no longer stamps an older time that hides it from readers.
   (moai-uwi9.w5o)
+- Nested task lists in `moai web` retain their indentation. (moai-sqwn.y71)
 - TUI gantt undo reverses only the dates moved, and archive-only rows and archive copies cannot be dragged or planned. (moai-ekg6)
 - Hook rule 2 protects another epic's worktree even when a held row has no worktree. (moai-uwi9.q08)
 - Interactive cmux and recovery command guidance rejects paths containing `!`. (moai-uwi9.ctp)
