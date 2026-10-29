@@ -9966,3 +9966,8 @@
 {"ts":"2026-10-29T15:43:58Z","id":"moai-ns7a.cwm","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-10-29T15:52:53Z","id":"moai-9bxw.stu","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 (medium — 감독이 릴리스 절차를 직접 진행, 소식 그림은 서브에이전트)"}
 {"ts":"2026-10-29T15:52:53Z","id":"moai-9bxw.stu","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Subagent ran: anthropic/opus-5.5 on moai-9bxw.stu (release-posts/v0.34.0 글과 그림)"}
+{"ts":"2026-10-29T15:53:29Z","id":"moai-9bxw.stu","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: PR #59 (develop → main, v0.34.0) 가 열렸다. 관리자가 squash 없이 머지하고 Actions 의 \"tag on merge\"(environment release)를 승인하면 v0.34.0 태그·릴리스·Discord 소식이 따른다. 릴리스가 나간 뒤: git worktree remove .worktrees/milestone-moai-u86x; git branch -d milestone/moai-u86x; rm -rf /tmp/cargo-target/milestone-moai-u86x; 그리고 이 줄을 done 으로. milestone/moai-vxaf(v0.35.0)는 u86x 에서 떴으니 그 가지는 남긴다."}
+{"ts":"2026-10-29T16:00:19Z","id":"moai-9bxw.stu.hd0","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"Windows clippy: path_with 이 쓰이지 않는 함수로 잡힌다"}
+{"ts":"2026-10-29T16:00:20Z","id":"moai-9bxw.stu.hd0","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-29T16:03:19Z","id":"moai-9bxw.stu.hd0","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 (low — 시험 도우미에 cfg(unix) 한 줄, Windows CI 실패 고침)"}
+{"ts":"2026-10-29T16:03:19Z","id":"moai-9bxw.stu.hd0","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"path_with 에 #[cfg(unix)] (b3747c71). 리눅스 clippy·fmt 통과. Windows 교차 빌드는 이 기계에 mingw 가 없어 CI 로 확인한다"}
