@@ -3936,6 +3936,14 @@ mod tests {
         let parse = |src: &str| Doc::parse(src).unwrap().models();
         assert_eq!(parse(""), (Models::default(), vec![]));
         assert_eq!(parse("[models]\n"), (Models::default(), vec![]));
+        assert_eq!(Models::default().values["effort_plan"], "xhigh");
+        let (plan, problems) = parse("[models]\neffort_plan = \"max\"\n");
+        assert!(problems.is_empty());
+        assert_eq!(plan.values["effort_plan"], "max");
+        assert_eq!(plan.written, ["effort_plan"]);
+        let (plan, problems) = parse("[models]\neffort_plan = \"ultra\"\n");
+        assert_eq!(plan.values["effort_plan"], "xhigh");
+        assert_eq!(problems, [ModelsTrouble::NotAnEffort { key: "effort_plan".into(), raw: "ultra".into() }]);
         let (models, problems) = parse("[models]\ndevelop = \"opus-6\"\n");
         assert!(problems.is_empty());
         let mut want = Models::default();

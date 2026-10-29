@@ -631,14 +631,20 @@ const REVIEW_FOCUS: &str = "Review focus / 리뷰에서 볼 것";
 const PLAN_BODY: &str = "Epic: why this bundle · the person's decisions · promises · order and shared files · review focus. Development member: goal · context (files and lines, precedent) · decisions · where and how (files, functions, structures) · important contracts and pitfalls · steps · acceptance tests · out of scope · order and shared files · role";
 
 fn plan_core() -> String {
-    format!("Read the request, its evidence and enough code and tracker context to ground the split. Write short titles and concrete, actionable bodies with file and function locations, constraints, acceptance tests and review focus. For detailed writing use: {PLAN_BODY}. Name the epic review section `{REVIEW_FOCUS}` (choose the English or Korean heading). For brief writing give what, where and tests. Classify each member using the difficulty rubric and explain why. Do not ask the person questions; report missing decisions as gaps.")
+    format!(
+        "Read the request, its evidence and enough code and tracker context to ground the split. Write short titles and concrete, actionable bodies with file and function locations, constraints, acceptance tests and review focus. For detailed writing use: {PLAN_BODY}. Name the epic review section `{REVIEW_FOCUS}` (choose the English or Korean heading). For brief writing give what, where and tests. Classify each member using the difficulty rubric and explain why. Do not ask the person questions; report missing decisions as gaps."
+    )
 }
 
 fn plan_brief_draft() -> String {
-    format!(r#"Draft a plan from the interview record at <interview path> and the repository at <root>. Writing: <writing>. Work only in the scratchpad; do not write to the tracker or change repository files.
+    format!(
+        r#"Draft a plan from the interview record at <interview path> and the repository at <root>. Writing: <writing>. Work only in the scratchpad; do not write to the tracker or change repository files.
 {core}
 Write a plan file, an epic body file and one body file per member in the scratchpad. Preserve the mapping from each plan title to its body file. Return first `Model ran: anthropic/<your real model name>`, then `plan: <absolute file>`, `epic body: <absolute file>`, and for each member `<title> <low|medium|high> — <reason>; body: <absolute file>`. Return each unresolved decision as `gap: <what>`; do not ask the user.
-{rubric}"#, core = plan_core(), rubric = difficulty_rubric())
+{rubric}"#,
+        core = plan_core(),
+        rubric = difficulty_rubric()
+    )
 }
 
 /// Advice only: the person's setting is read at runtime and never baked into generated files.
@@ -1238,7 +1244,10 @@ pub const VERBS: [Verb; 9] = [
         step: "Ask the person watching",
         words: ["`AskUserQuestion`", "`request_user_input`", "ask in the conversation and wait"],
     },
-    Verb { step: "Plan a request", words: ["`/moai-plan`", "follow fork 3 in this session", "follow fork 3 in this session"] },
+    Verb {
+        step: "Plan a request",
+        words: ["`/moai-plan`", "follow fork 3 in this session", "follow fork 3 in this session"],
+    },
     REVIEW_VERB,
     Verb { step: "Change the model (the person does it)", words: ["`/model`", "`/model`", NO_VERB] },
     Verb { step: "Clear the window (the person does it)", words: ["`/clear`", "`/clear`", "`/clear`"] },
@@ -1863,6 +1872,31 @@ write that repository's name.
     )
 }
 
+/// Claude Code planning skill (moai-ns7a).
+pub fn plan() -> String {
+    format!(
+        r#"---
+name: moai-plan
+description: Plan a request, split an epic, or unfold a backlog with the planning model. Use for "plan this", "계획 세워", and "에픽으로 나눠".
+---
+
+# moai-plan
+
+The host interviews the person, then a planning subagent drafts a grounded plan. The moai CLI never launches an agent.
+
+1. Read `moai models --json` and `moai writing --json`. Compare the `plan` identifier case-insensitively: a name containing `fable` qualifies; a name containing `opus` qualifies only when `effort_plan` is `xhigh` or `max`. All other names fail. On failure stop before interviewing or creating anything; print one line naming the keys to change (`plan` and, when needed, `effort_plan`), recommending `fable` or `opus` with `effort_plan = "xhigh"`. Identify the source from `written`, then `repo`, else default; the user config overrides repository recommendations. Never substitute a model automatically.
+2. Inspect the repository, tracker and wiki for what can be learned without asking. Use `AskUserQuestion` to complete the interview: goal and done state, scope and exclusions, acceptance, protected areas and settled design, milestone (including explicit consent to join a running release or a new version), deadline and start, priority, review focus and risks. Ask follow-ups until decisions are settled. Never invent a start or deadline. No answer means no deadline.
+3. Save the interview, including the person's answers verbatim, in a scratchpad file. Pass its absolute path, root and `Writing:` detail to the subagent. Call `Agent(subagent_type: "general-purpose", model: <plan>, effort: <effort_plan>, prompt: <draft brief>)` with this brief:
+
+{brief}
+
+4. Present the epic and member titles, difficulty and any `gap:` lines once. If gaps remain, ask only about those and resume the same `agentId` with the answers; the subagent never asks the person. Present the revised plan and obtain approval before writing the tracker. The person decides whether to attach a running milestone; omit `--milestone` without explicit consent. Encode dates in the plan or use `--due` and `--start` only as answered.
+5. After approval, the host registers new work with `moai add --from <plan file> --body -` (stream the epic body), adding `--milestone <id>` only when approved. For a backlog use `moai backlog promote <id> --from <plan file>`; preserve its inherited milestone and body and add the approved epic details to it. Map returned member IDs to titles and apply each body with `moai edit <member> -b - < <body file>`. Record `model: anthropic/<Model ran> (<highest difficulty> — plan: interview and detailed plan)` on the epic, using the actual model name without repeating the vendor. Do not pick up the work.
+"#,
+        brief = indent(&plan_brief_draft(), "    ")
+    )
+}
+
 /// 셋째 스킬 `moai-wiki` 의 SKILL.md — 저장소의 매뉴얼(위키)을 개발 진척에 맞춰 고치는 걸음이다
 /// (moai-bl3x, 사용자 결정 2026-10-04).
 ///
@@ -1880,27 +1914,6 @@ write that repository's name.
 /// 명령이 키를 바꾸거나 더하면 거기서 붉어진다.
 ///
 /// 발동어는 [`skill`] 과 같은 까닭으로 두 말을 함께 싣는다.
-pub fn plan() -> String {
-    format!(r#"---
-name: moai-plan
-description: Plan a request, split an epic, or unfold a backlog with the planning model. Use for "plan this", "계획 세워", and "에픽으로 나눠".
----
-
-# moai-plan
-
-The host interviews the person, then a planning subagent drafts a grounded plan. The moai CLI never launches an agent.
-
-1. Read `moai models --json` and `moai writing --json`. Compare the `plan` identifier case-insensitively: a name containing `fable` qualifies; a name containing `opus` qualifies only when `effort_plan` is `xhigh` or `max`. All other names fail. On failure stop before interviewing or creating anything; print one line naming the keys to change (`plan` and, when needed, `effort_plan`), recommending `fable` or `opus` with `effort_plan = "xhigh"`. Identify the source from `written`, then `repo`, else default; the user config overrides repository recommendations. Never substitute a model automatically.
-2. Inspect the repository, tracker and wiki for what can be learned without asking. Use `AskUserQuestion` to complete the interview: goal and done state, scope and exclusions, acceptance, protected areas and settled design, milestone (including explicit consent to join a running release or a new version), deadline and start, priority, review focus and risks. Ask follow-ups until decisions are settled. Never invent a start or deadline. No answer means no deadline.
-3. Save the interview, including the person's answers verbatim, in a scratchpad file. Pass its absolute path, root and `Writing:` detail to the subagent. Call `Agent(subagent_type: "general-purpose", model: <plan>, effort: <effort_plan>, prompt: <draft brief>)` with this brief:
-
-{brief}
-
-4. Present the epic and member titles, difficulty and any `gap:` lines once. If gaps remain, ask only about those and resume the same `agentId` with the answers; the subagent never asks the person. Present the revised plan and obtain approval before writing the tracker. The person decides whether to attach a running milestone; omit `--milestone` without explicit consent. Encode dates in the plan or use `--due` and `--start` only as answered.
-5. After approval, the host registers new work with `moai add --from <plan file> --body -` (stream the epic body), adding `--milestone <id>` only when approved. For a backlog use `moai backlog promote <id> --from <plan file>`; preserve its inherited milestone and body and add the approved epic details to it. Map returned member IDs to titles and apply each body with `moai edit <member> -b - < <body file>`. Record `model: anthropic/<Model ran> (<highest difficulty> — plan: interview and detailed plan)` on the epic, using the actual model name without repeating the vendor. Do not pick up the work.
-"#, brief = indent(&plan_brief_draft(), "    "))
-}
-
 pub fn wiki() -> String {
     let [one, two, ..] = RULES;
     let commit = indent(WIKI_COMMIT, "       ");
@@ -6828,6 +6841,22 @@ stop sending outside work while a release runs",
             assert!(supervise.contains(head), "감독이 {head} 를 안 읽는다");
         }
         assert!(worker().contains(RAISE_HEAD), "일꾼이 {RAISE_HEAD} 를 안 낸다");
+    }
+
+    #[test]
+    fn planning_briefs_share_the_core_and_draft_only_writes_scratch() {
+        let core = plan_core();
+        assert!(plan_brief().contains(&core));
+        let draft = plan_brief_draft();
+        assert!(draft.contains(&core));
+        for command in ["backlog promote", "moai edit", "moai note"] {
+            assert!(!draft.contains(command));
+        }
+        for term in ["moai models --json", "effort_plan", "AskUserQuestion", "Agent(", "--milestone", "--due"] {
+            assert!(plan().contains(term), "missing {term}");
+        }
+        assert!(worker().contains(REVIEW_FOCUS));
+        assert!(supervise().contains("effort: <effort_plan>"));
     }
 
     /// **`plan` 역할이 감독의 펼치기를 맡는다**(moai-w25x.jby, 2026-10-26 사용자 결정) — 표에 적어도 아무 데서 안 듣던

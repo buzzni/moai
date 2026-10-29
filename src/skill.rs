@@ -1743,6 +1743,7 @@ mod tests {
             "skills/moai-cmux/SKILL.md",
             "skills/moai-saycode/SKILL.md",
             "skills/moai-recover/SKILL.md",
+            "skills/moai-plan/SKILL.md",
             ".claude-plugin/plugin.json",
             ".claude-plugin/marketplace.json",
             ".claude-plugin/.gitignore",
@@ -1895,6 +1896,7 @@ mod tests {
         assert!(!shared.keys().any(|p| p.starts_with("moai-tmux/")), "tmux 스킬이 .agents 에 섰다");
         assert!(!shared.keys().any(|p| p.starts_with("moai-cmux/")), "cmux 스킬이 .agents 에 섰다");
         assert!(!shared.keys().any(|p| p.starts_with("moai-saycode/")), "Saycode 스킬이 .agents 에 섰다");
+        assert!(!shared.keys().any(|p| p.starts_with("moai-plan/")));
         assert!(!shared.keys().any(|p| p.starts_with("moai-recover/")), "되살리기 스킬이 .agents 에 섰다");
         for (path, body) in &shared {
             assert_eq!(claude.get(&format!("skills/{path}")), Some(body), "{path} 가 Claude 의 트리와 다르다");
@@ -1908,13 +1910,14 @@ mod tests {
                     "skills/moai-cmux/",
                     "skills/moai-saycode/",
                     "skills/moai-recover/",
+                    "skills/moai-plan/",
                 ]
                 .iter()
                 .any(|d| p.starts_with(d))
             })
             .count();
         assert_eq!(
-            only_claude, 8,
+            only_claude, 9,
             "감독 스킬은 SKILL.md 와 일꾼 글 셋, tmux·cmux·Saycode·되살리기 스킬은 SKILL.md 하나씩이다"
         );
         assert_eq!(
