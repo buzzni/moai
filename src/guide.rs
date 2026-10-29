@@ -3044,6 +3044,23 @@ def tty(pid):
             return 0
     t = out("ps", "-p", str(pid), "-o", "tty=")
     return device("/dev/" + t) if t.strip("?") else 0
+def nested_multiplexer(pid):
+    # Inspect process names and parents only, never another process's environment.
+    seen = set()
+    while pid > 1 and pid not in seen:
+        seen.add(pid)
+        line = out("ps", "-p", str(pid), "-o", "ppid=", "-o", "comm=")
+        fields = line.split(None, 1)
+        if len(fields) != 2:
+            break
+        try:
+            pid = int(fields[0])
+        except ValueError:
+            break
+        name = os.path.basename(fields[1].strip()).lower()
+        if name in ("screen", "tmux", "zellij") or name.startswith("screen-") or name.startswith("tmux:"):
+            return True
+    return False
 mine = os.environ.get("TMUX")
 if mine and mine.startswith("/tmp/cmux-"):
     mine = None
@@ -3083,7 +3100,7 @@ for path in sorted(glob.glob(os.path.expanduser("~/.claude/sessions/*.json"))):
         if not here or here != device(out("tmux", "display", "-p", "-t", pane, "#{pane_tty}")):
             pane = ""
     elif alive and cmux:
-        pane = "" if told and not told.startswith("cmux:") else surfaces.get(pid)
+        pane = "" if (told and not told.startswith("cmux:")) or nested_multiplexer(pid) else surfaces.get(pid)
     rows.append((alive, pane, r))
 if rows and not any(alive for alive, _, _ in rows):
     sys.exit("no record reads alive, not even this session's own: this shell cannot read process start times (a sandbox, or no ps), so act on no row")
@@ -8754,7 +8771,10 @@ stop sending outside work while a release runs",
         // 시험은 사람의 cmux 안에서 돌 수 있다 — 물려받은 `CMUX_SURFACE_ID` 는 늘 걷고, cmux 를 재는 판만 세운다.
         let map = |records: &std::path::Path, tmux: Option<&str>, cmux: bool| {
             let mut cmd = std::process::Command::new("sh");
-            let shell = SESSIONS.replace("~/.claude/sessions", &records.display().to_string());
+            let shell = SESSIONS.replace("~/.claude/sessions", &records.display().to_string()).replace(
+                "mine = os.environ.get(\"TMUX\")",
+                "real_out = out\ndef out(*cmd, **env):\n    if cmd[0] == 'ps' and '-o' in cmd and 'ppid=' in cmd: return '1 shell'\n    return real_out(*cmd, **env)\nmine = os.environ.get(\"TMUX\")",
+            );
             cmd.arg("-c").arg(shell).env_remove("CMUX_SURFACE_ID");
             match tmux {
                 Some(t) => cmd.env("TMUX", t),
@@ -8798,6 +8818,32 @@ stop sending outside work while a release runs",
              alive\tlone\t-\tidle\t/repo\ts-lone\tsaycode\n",
             "cmux 안에서 세션의 surface 를 못 찾았다"
         );
+        // A single nested session must not claim the surface, even when no other row claims it.
+        let nested = s.path().join("nested");
+        std::fs::create_dir_all(&nested).unwrap();
+        std::fs::write(nested.join("1.json"), record(me, &start, "nested", None)).unwrap();
+        for name in ["screen", "tmux", "zellij"] {
+            let override_ps = format!(
+                "real_out = out\ndef out(*cmd, **env):\n    if cmd[0] == 'ps' and cmd[2] == '{me}': return '999998 claude'\n    if cmd[0] == 'ps' and cmd[2] == '999998': return '999999 {name}'\n    if cmd[0] == 'ps' and cmd[2] == '999999': return '1 shell'\n    return real_out(*cmd, **env)\n"
+            );
+            let shell = SESSIONS
+                .replace("~/.claude/sessions", &nested.display().to_string())
+                .replace("mine = os.environ.get(\"TMUX\")", &(override_ps + "mine = os.environ.get(\"TMUX\")"));
+            let out = std::process::Command::new("sh")
+                .arg("-c")
+                .arg(shell)
+                .env_remove("TMUX")
+                .env("CMUX_SURFACE_ID", "CMUX-SURFACE-SUPERVISOR")
+                .env("PATH", &path)
+                .output()
+                .unwrap();
+            assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+            assert_eq!(
+                String::from_utf8(out.stdout).unwrap(),
+                "alive\tnested\t-\tidle\t/repo\ts-nested\t-\n",
+                "{name}"
+            );
+        }
         // tmux 를 cmux 안에서 돌리면 둘 다 선다 — 그 셸에서 친 것은 tmux 로 가니 tmux 의 짝이 이긴다.
         assert_eq!(
             run_in(Some("/nonexistent/moai-other-server,1,0"), true),
