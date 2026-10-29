@@ -4561,25 +4561,26 @@ impl<'a> Picking<'a> {
         // **같은 `p`·같은 자리(마일스톤 안팎) 안에서는 기한이 이른 것이 먼저다**(moai-ghkp.7uy) — 기한 없는 줄은
         // 뒤다. 읽을 때만 재고 저장하지 않는다: `moai due apply` 가 우선순위를 올리기 전의 틈을 이 차례가 메운다.
         // **마일스톤 안인가 뒤에 선다**(리뷰) — AGENTS 블록의 약속("`p0` 이 먼저고 마일스톤이 둘째다")이 차례에도
-        // 서야 한다. 그 앞에 두던 판은 1년 뒤 날을 든 밖의 `p0` 이 도는 마일스톤 안의 `p0` 을 앞질렀다. 자는
-        // 따르는 기한은 `due apply` 와 같은 자로 잰다.
+        // 서야 한다. 그 앞에 두던 판은 1년 뒤 날을 든 밖의 `p0` 이 도는 마일스톤 안의 `p0` 을 앞질렀다. 기한은
+        // **따르는 기한**이다(moai-uwi9.rff) — `due apply` 와 같은 자([`followed`]·[`DueLadder::open_ceiling`])로 잰다.
         let pct = |i: &Issue| group.at(i).and_then(|e| self.progress.get(e)).copied().unwrap_or(0);
+        // 마일스톤 지도는 **지은 판에만 빌린다**([`Ties::epics_only`] 는 `None`) — 그때는 사다리가 저 지도를 안 읽는다(미룬 줄이
+        // 없다). 빈 지도를 "지었다" 로 건네면 두 문이 갈리는 날 미룬 마일스톤의 기한이 말없이 차례에 든다.
         let ladder = self
             .issues
             .iter()
             .any(|i| i.deadline().is_some())
-            .then(|| DueLadder::over_with_stones(self.ties.lines(), group, Some(self.ties.stones())));
-        out.sort_by_cached_key(|i| {
-            let due =
-                followed(i.deadline(), ladder.as_ref().and_then(|l| l.open_ceiling(i))).map(|(d, _)| d.to_owned());
+            .then(|| DueLadder::over_with_stones(self.ties.lines(), group, self.ties.stones.as_ref()));
+        out.sort_by_cached_key(|&i| {
+            let due = followed(i.deadline(), ladder.as_ref().and_then(|l| l.open_ceiling(i))).map(|(d, _)| d);
             (
                 i.priority(),
                 !inside(i),
                 due.is_none(),
                 due,
                 std::cmp::Reverse(pct(i)),
-                i.created_at.clone(),
-                i.id.clone(),
+                i.created_at.as_str(),
+                i.id.as_str(),
             )
         });
         outside.sort_by(|a, b| a.priority().cmp(&b.priority()).then_with(|| a.id.cmp(&b.id)));
@@ -8137,10 +8138,13 @@ mod tests {
         rows[2].status = Status::new("done");
         // Both are p0, but a running milestone still sorts before outside work.
         // Test the closed-parent deadline directly without the milestone focus.
-        assert_eq!(
-            Picking::of(&rows, &cfg()).picks(false).0.iter().map(|i| i.id.as_str()).collect::<Vec<_>>(),
-            ["argos-000b", "argos-000a.abc"]
-        );
+        let unfocused =
+            |rows: &[Issue]| Picking::of(rows, &cfg()).picks(false).0.iter().map(|i| i.id.clone()).collect::<Vec<_>>();
+        assert_eq!(unfocused(&rows), ["argos-000b", "argos-000a.abc"]);
+        // The milestone's 2026-10-31 decides once the outside row is due later (review moai-uwi9.j8c) — without it
+        // the child would follow no deadline at all and sort last.
+        rows[4].due_on = Some("2026-11-01".into());
+        assert_eq!(unfocused(&rows), ["argos-000a.abc", "argos-000b"]);
     }
 
     /// 마일스톤 하나와 그 안의 에픽·멤버, 그리고 밖에 선 일 둘(`p2`·`p0`).
