@@ -626,6 +626,20 @@ The one thing that matters is that the next session reads this with
 
 const DETAILED_BODY: &str = "goal · context (files and lines, the precedent) · what is decided · steps · acceptance (which tests) · out of scope · order and the files it shares · role";
 
+const REVIEW_FOCUS: &str = "Review focus / 리뷰에서 볼 것";
+const PLAN_BODY: &str = "Epic: why this bundle · the person's decisions · promises · order and shared files · Review focus / 리뷰에서 볼 것. Development member: goal · context (files and lines, precedent) · decisions · where and how (files, functions, structures) · important contracts and pitfalls · steps · acceptance tests · out of scope · order and shared files · role";
+
+fn plan_core() -> String {
+    format!("Read the request, its evidence and enough code and tracker context to ground the split. Write short titles and concrete, actionable bodies with file and function locations, constraints, acceptance tests and review focus. For detailed writing use: {PLAN_BODY}. For brief writing give what, where and tests. Classify each member using the difficulty rubric and explain why. Do not ask the person questions; report missing decisions as gaps.")
+}
+
+fn plan_brief_draft() -> String {
+    format!(r#"Draft a plan from the interview record at <interview path> and the repository at <root>. Writing: <writing>. Work only in the scratchpad; do not write to the tracker or change repository files.
+{core}
+Write a plan file, an epic body file and one body file per member in the scratchpad. Preserve the mapping from each plan title to its body file. Return first `Model ran: anthropic/<your real model name>`, then `plan: <absolute file>`, `epic body: <absolute file>`, and for each member `<title> <low|medium|high> — <reason>; body: <absolute file>`. Return each unresolved decision as `gap: <what>`; do not ask the user.
+{rubric}"#, core = plan_core(), rubric = difficulty_rubric())
+}
+
 /// Advice only: the person's setting is read at runtime and never baked into generated files.
 const DETAIL: &str = r#"**How much to write is the person's — `detailed` unless they say otherwise.**
 `[writing] detail` in the user config wins over a repository recommendation. The board names
@@ -4857,6 +4871,8 @@ Due: <due>
 Person: <person>
 Writing: <writing>
 
+{core}
+
 1. Read it — moai -C "<root>" show <id> — and as much of the code as the split needs. If it
    already stands done, hand back `already unfolded: <id>` and stop: unfolding again puts up
    two epics.
@@ -4891,6 +4907,7 @@ Writing: <writing>
    with `bulk` for sorting, summing up or the same mechanical fix many times. Then a line
    `not hung: <what and why>` for each release or deadline 3 left as it was or cleared.
    If you could not unfold, the first line after Model ran: is `not unfolded: <reason>`."#,
+        core = plan_core(),
         levels = DIFFICULTY.iter().map(|(level, _, _)| *level).collect::<Vec<_>>().join("|"),
         rubric = indent(&difficulty_rubric(), "   - "),
     )
