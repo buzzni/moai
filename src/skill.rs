@@ -223,9 +223,9 @@ pub fn skills() -> Vec<Skill> {
         Skill { name: wiki, files: vec![("SKILL.md", crate::guide::wiki())], claude_only: false },
         // 되살리기 스킬은 사람이 죽은 세션을 되살려 달라고 할 때만 읽는다(2026-10-10 사용자 결정, moai-uqf7) — 기록을
         // 읽는 곳이 Claude Code 의 `~/.claude/` 라 Claude Code 에만 선다. 새 moai 명령은 없다.
+        Skill { name: recover, files: vec![("SKILL.md", crate::guide::recover())], claude_only: true },
         // The person chose an always-installed Claude-only planning skill (moai-ns7a, 2026-10-29).
         Skill { name: plan, files: vec![("SKILL.md", crate::guide::plan())], claude_only: true },
-        Skill { name: recover, files: vec![("SKILL.md", crate::guide::recover())], claude_only: true },
         // tmux 스킬은 감독이 `$TMUX` 안에서 돌 때만 읽는다(2026-10-10 사용자 결정, moai-u99i) — 감독 스킬에 섞으면 tmux 를
         // 안 쓰는 감독도 칸을 만지는 걸음을 매번 읽는다. 감독 스킬과 같은 까닭으로 Claude Code 에만 선다. 고른 사람에게만
         // 심는다([`OPTIONAL`], moai-3r7l).
