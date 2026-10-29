@@ -34,6 +34,7 @@ struct Place {
     /// 심을 수 있는 스킬의 글 전부 — 두 트리가 이 한 벌에서 저마다 고른다([`skill::picked`]). 부르는 자리마다
     /// [`skill::skills`] 를 다시 지으면 `guide` 의 글 넷을 명령 한 번에 몇 벌씩 짓는다.
     all: Vec<skill::Skill>,
+    selected: Vec<usize>,
     /// Claude 의 트리에 심는 선택 스킬 이름 — `all` 에서 고른 스킬로(moai-3r7l), `files` 가 그것으로
     /// 지어진다. 심을 선택 스킬은 지금 그 트리에 심긴 것에 고른 것을 더하고 뺀 것이다([`Pick::kept`]).
     optional: Vec<&'static str>,
@@ -113,8 +114,13 @@ fn place(ctx: &Ctx, pick: &Pick) -> R<Place> {
     let all = skill::skills();
     let (kept, held) = pick.kept(&dir.join("skills"), &root);
     let skills = skill::picked(&all, &kept);
-    let files = plant(&prefix, &root, &exe, skills.iter().copied());
+    let files = skill::tree(&prefix, &root, &exe, skills.iter().copied());
     let optional = optional_of(&skills);
+    let selected = all
+        .iter()
+        .enumerate()
+        .filter_map(|(i, skill)| skills.iter().any(|s| std::ptr::eq(*s, skill)).then_some(i))
+        .collect();
     Ok(Place {
         dir,
         market: skill::market(&prefix, &root),
@@ -125,6 +131,7 @@ fn place(ctx: &Ctx, pick: &Pick) -> R<Place> {
         on_path,
         files,
         all,
+        selected,
         optional,
         held,
     })
@@ -167,15 +174,6 @@ fn invoked(current: PathBuf, resolved: &Path) -> PathBuf {
         Some(spelled) if crate::path::real(&spelled) == resolved => spelled,
         _ => current,
     }
-}
-
-/// 훅에 이 실행 파일을 적었을 때 심을 트리.
-fn plant<'a, I>(prefix: &str, root: &Path, exe: &str, skills: I) -> Vec<(PathBuf, String)>
-where
-    I: IntoIterator<Item = &'a skill::Skill>,
-    I::IntoIter: 'a,
-{
-    skill::tree(prefix, root, exe, skills)
 }
 
 /// 고른 에이전트를 심을 자리로 푼 것(moai-xs2h.ylx).
@@ -505,7 +503,12 @@ fn plant_trees(
         }
     }
     if let Some(at) = &market_tracked {
-        out.push(fill(say(lang, "skill.market_tracked"), &[("path", at)]));
+        let command = format!(
+            "git -C {} rm --cached -- {}",
+            crate::text::shell_word(&root.display().to_string()),
+            crate::text::shell_word(at)
+        );
+        out.push(fill(say(lang, "skill.market_tracked"), &[("path", at), ("command", &command)]));
     }
     out.extend(claude);
     Ok(out)
@@ -787,8 +790,9 @@ fn claude_install(ctx: &Ctx, place: Place, reg: Reg, dry_run: bool) -> R<(serde_
 /// 어긋남을 비영 종료로 알리면 에이전트가 이것을 "실패" 로 읽는다 —
 /// `moai status` 가 아무것도 막지 않는 것과 같은 까닭이다.
 pub fn status(ctx: &Ctx) -> R<Vec<String>> {
-    let Place { root, dir, market, prefix, exe, on_path, files, all, optional, written, .. } =
+    let Place { root, dir, market, prefix, exe, on_path, files, all, selected, optional, written, .. } =
         place(ctx, &Pick::default())?;
+    let market_missing = written && !dir.join(".claude-plugin").join(skill::MARKET_FILE).is_file();
     let want = skill::version_in(&files).unwrap_or_default();
     let listed = known_at(&market);
     let clash = listed.clone().filter(|other| !crate::user_config::same_dir(other, &dir));
@@ -806,12 +810,12 @@ pub fn status(ctx: &Ctx) -> R<Vec<String>> {
     // 지금 부른 moai 의 자리로 견주면 내용이 같아도 판이 달라 보인다 — 복사본이나
     // `cargo run` 으로 부른 것만으로 "다시 심는다" 가 떴고, 시킨 대로 하면 훅이 그
     // 복사본을 부르게 바뀌었다.
-    let skills = skill::picked(&all, &optional);
     let wants: Vec<String> = hooks
         .iter()
         .map(|h| match h.as_deref() {
             Some(h) if h != exe => {
-                skill::version_in(&plant(&prefix, &root, h, skills.iter().copied())).unwrap_or_default()
+                skill::version_in(&skill::tree(&prefix, &root, h, selected.iter().map(|&i| &all[i])))
+                    .unwrap_or_default()
             }
             _ => want.clone(),
         })
@@ -861,6 +865,7 @@ pub fn status(ctx: &Ctx) -> R<Vec<String>> {
         return super::json_line(&serde_json::json!({
             "dir": dir.display().to_string(),
             "written": written,
+            "market_missing": market_missing,
             "market": market,
             "listed": listed.as_ref().map(|p| p.display().to_string()),
             "blocked_by": clash.as_ref().map(|p| p.display().to_string()),
@@ -918,6 +923,12 @@ pub fn status(ctx: &Ctx) -> R<Vec<String>> {
     // 같은 덫이다. 빠져나갈 길은 이 한 줄에만 댄다.
     if clash.is_some() {
         out.push(fill(say(lang, "skill.market_escape_here"), &[("market", &market)]));
+    }
+    if market_missing {
+        out.push(fill(
+            say(lang, "skill.market_missing"),
+            &[("path", &dir.join(".claude-plugin").join(skill::MARKET_FILE).display().to_string())],
+        ));
     }
     let install_row = say(lang, "skill.row_install");
     if installs.is_empty() {
@@ -2475,7 +2486,7 @@ pub(crate) fn stale_trees(root: &Path, prefix: &str) -> Vec<(&'static str, Agent
         // **트리는 한 벌만 짓는다** — 스킬의 글은 실행 파일을 안 들어 어느 철자로 지어도 같다. 훅이 부르는 실행
         // 파일을 못 읽으면 훅은 안 견주고 스킬만 견준다.
         let exe = skill::hook_exe(&text);
-        let want = plant(prefix, root, exe.as_deref().unwrap_or("moai"), skills.iter().copied());
+        let want = skill::tree(prefix, root, exe.as_deref().unwrap_or("moai"), skills.iter().copied());
         let hooks_differ = exe.is_some()
             && want.iter().find(|(p, _)| p.ends_with("plugin.json")).is_some_and(|(_, w)| hooks(w) != hooks(&text));
         let skills_differ =
@@ -2545,7 +2556,7 @@ mod tests {
     /// 서서, 모든 저장소에서 그 스킬이 조용히 안 뜬다.
     #[test]
     fn each_text_is_planted_at_its_own_path() {
-        let files: BTreeMap<String, String> = plant("t", Path::new("/repo"), "/bin/moai", &skill::skills())
+        let files: BTreeMap<String, String> = skill::tree("t", Path::new("/repo"), "/bin/moai", &skill::skills())
             .into_iter()
             .map(|(p, b)| (p.display().to_string(), b))
             .collect();
@@ -2566,7 +2577,7 @@ mod tests {
     #[test]
     fn every_planted_skill_is_on_the_list() {
         let skills = skill::skills();
-        let claude = plant("t", Path::new("/repo"), "/bin/moai", &skills);
+        let claude = skill::tree("t", Path::new("/repo"), "/bin/moai", &skills);
         let shared = skill::agents_tree(&skills);
         let trees = [(claude.as_slice(), "skills"), (shared.as_slice(), "")];
         for (files, under) in trees {
@@ -2643,7 +2654,7 @@ mod tests {
             v
         };
         let trees = [
-            (skill::DIR, named(plant("t", root, "/bin/moai", &skills))),
+            (skill::DIR, named(skill::tree("t", root, "/bin/moai", &skills))),
             (skill::AGENTS_DIR, named(skill::agents_tree(&skills))),
         ];
         for (at, want) in trees {
@@ -2838,7 +2849,7 @@ mod tests {
         let skills = skill::skills();
         let shared = skill::agents_tree(&skills);
         let shared_names = planted_names(&shared, "");
-        let claude_tree = plant("t", Path::new("/repo"), "/bin/moai", &skills);
+        let claude_tree = skill::tree("t", Path::new("/repo"), "/bin/moai", &skills);
         let claude_names = planted_names(&claude_tree, "skills");
         for (real, link) in
             [(".claude/moai-plugin/skills", ".agents/skills"), (".agents/skills", ".claude/moai-plugin/skills")]
@@ -3024,7 +3035,7 @@ mod tests {
         let s = crate::scratch::Scratch::new("skill-stale-optional");
         let root = s.path().to_path_buf();
         let plugin = root.join(skill::DIR);
-        for (path, body) in plant("t", &root, "moai", skill::picked(&skill::skills(), &[])) {
+        for (path, body) in skill::tree("t", &root, "moai", skill::picked(&skill::skills(), &[])) {
             std::fs::create_dir_all(plugin.join(&path).parent().unwrap()).unwrap();
             std::fs::write(plugin.join(&path), body).unwrap();
         }
