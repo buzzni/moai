@@ -4347,6 +4347,11 @@ pub fn ready_in<'a>(issues: &'a [Issue], cfg: &Config) -> (Vec<&'a Issue>, Focus
     Picking::of(issues, cfg).picks(true)
 }
 
+/// Use archive rows for context, but only live rows for the followed deadline.
+pub fn ready_in_live<'a>(issues: &'a [Issue], live: &'a [Issue], cfg: &Config) -> (Vec<&'a Issue>, Focus<'a>) {
+    Picking::with_live(issues, live, cfg).picks(true)
+}
+
 /// 내 것이 아닌 줄이 **왜** 내 것이 아닌가(moai-0zjo). `--json` 의 `owner` 키가 이 낱말이다.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -4428,8 +4433,18 @@ pub struct Prime<'a> {
 pub const PRIME_PICKS: usize = 3;
 
 /// [`Prime`] 을 읽어 낸다. `me` 는 [`by_owner`] 와 같은 약속이다 — 모르면 가르지 않는다.
+#[cfg(test)]
 pub fn prime<'a>(issues: &'a [Issue], cfg: &Config, me: Option<&crate::query::Me>) -> Prime<'a> {
-    let (all, focus) = ready_in(issues, cfg);
+    prime_live(issues, issues, cfg, me)
+}
+
+pub fn prime_live<'a>(
+    issues: &'a [Issue],
+    live: &'a [Issue],
+    cfg: &Config,
+    me: Option<&crate::query::Me>,
+) -> Prime<'a> {
+    let (all, focus) = ready_in_live(issues, live, cfg);
     let (mut mine, mut others) = by_owner(all, me);
     let rest = crate::query::cut(&mut mine, Some(PRIME_PICKS));
     let others_rest = crate::query::cut(&mut others, Some(PRIME_PICKS));
@@ -4465,6 +4480,7 @@ pub fn held_by<'a>(issues: &'a [Issue], cfg: &Config, me: Option<&crate::query::
 struct Picking<'a> {
     issues: &'a [Issue],
     ties: Ties<'a>,
+    due_ties: Option<Ties<'a>>,
     /// 줄마다 — 계획에서 뺀 줄([`shelved_over`]). `issues` 와 자리가 같다.
     off: Vec<Option<&'a str>>,
     progress: BTreeMap<&'a str, u8>,
@@ -4482,6 +4498,14 @@ thread_local! {
 
 impl<'a> Picking<'a> {
     fn of(issues: &'a [Issue], cfg: &Config) -> Picking<'a> {
+        Self::build(issues, None, cfg)
+    }
+
+    fn with_live(issues: &'a [Issue], live: &'a [Issue], cfg: &Config) -> Picking<'a> {
+        Self::build(issues, Some(live), cfg)
+    }
+
+    fn build(issues: &'a [Issue], live: Option<&'a [Issue]>, cfg: &Config) -> Picking<'a> {
         #[cfg(test)]
         PICKINGS.with(|n| n.set(n.get() + 1));
         // **소속 지도는 한 벌이다**([`Ties`]) — 에픽 지도와 마일스톤 지도를 따로 부르면 뒤의 것이
@@ -4522,7 +4546,11 @@ impl<'a> Picking<'a> {
             })
             .map(|(_, i)| i)
             .collect();
-        Picking { issues, ties, off, progress, running, open }
+        let due_ties = live.map(|rows| match rows.iter().any(is_put_off) {
+            true => Ties::of(rows),
+            false => Ties::epics_only(rows),
+        });
+        Picking { issues, ties, due_ties, off, progress, running, open }
     }
 
     /// 후보에 차례를 매긴다. `focused` 면 도는 마일스톤 밖의 일을 [`Focus::outside`] 로 뺀다.
@@ -4566,13 +4594,14 @@ impl<'a> Picking<'a> {
         let pct = |i: &Issue| group.at(i).and_then(|e| self.progress.get(e)).copied().unwrap_or(0);
         // 마일스톤 지도는 **지은 판에만 빌린다**([`Ties::epics_only`] 는 `None`) — 그때는 사다리가 저 지도를 안 읽는다(미룬 줄이
         // 없다). 빈 지도를 "지었다" 로 건네면 두 문이 갈리는 날 미룬 마일스톤의 기한이 말없이 차례에 든다.
+        let due_ties = self.due_ties.as_ref().unwrap_or(&self.ties);
         let ladder = self
             .issues
             .iter()
             .any(|i| i.deadline().is_some())
-            .then(|| DueLadder::over_with_stones(self.ties.lines(), group, self.ties.stones.as_ref()));
+            .then(|| DueLadder::over_with_stones(due_ties.lines(), due_ties.epics(), due_ties.stones.as_ref()));
         out.sort_by_cached_key(|&i| {
-            let due = followed(i.deadline(), ladder.as_ref().and_then(|l| l.open_ceiling(i))).map(|(d, _)| d);
+            let due = followed(i.deadline(), ladder.as_ref().and_then(|l| l.open_ceiling_row(i))).map(|(d, _)| d);
             (
                 i.priority(),
                 !inside(i),
@@ -8117,6 +8146,21 @@ mod tests {
         let rows = vec![epic, later, inherited];
         let ids: Vec<_> = ready(&rows, &cfg()).iter().map(|i| i.id.as_str()).collect();
         assert_eq!(ids, ["argos-000a", "argos-000b"]);
+    }
+
+    #[test]
+    fn ready_deadline_uses_live_rows_even_with_archived_epic_context() {
+        let mut archived = make("argos-0001", Kind::Epic, "done");
+        archived.due_on = Some("2026-10-01".into());
+        let revived = member("argos-000a", "argos-0001", "todo");
+        let mut dated = make("argos-000b", Kind::Issue, "todo");
+        dated.due_on = Some("2026-10-30".into());
+        let live = vec![revived, dated];
+        let context = with_archive(&live, &[archived], &BTreeSet::new());
+        let ids: Vec<_> = ready_in_live(&context, &live, &cfg()).0.iter().map(|i| i.id.as_str()).collect();
+        assert_eq!(ids, ["argos-000b", "argos-000a"]);
+        let raises = due_raises(&live, &context, "2026-10-29T00:00:00Z", utc(), &crate::config::DueRule::DEFAULT);
+        assert_eq!(raises.iter().map(|r| r.issue.id.as_str()).collect::<Vec<_>>(), ["argos-000b"]);
     }
 
     #[test]

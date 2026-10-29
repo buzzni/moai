@@ -271,6 +271,7 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
         Err(e) => return bare(ctx, lang, Some(&e)),
     };
     let crate::worktree::Gathered { load, origin, .. } = gathered;
+    let live = load.issues.clone();
     let load = crate::archive::context(&repo.root, load)?;
     // **못 읽는 줄은 말만 한다.** [`super::name_load_errors`] 는 `report_load_errors` 와 같은
     // 글을 내면서 부분 실패 깃발을 안 세운다 — `ready` 는 "답을 덜 냈다" 를 종료 코드로 말하는
@@ -282,7 +283,7 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
     // 띄울 까닭이 없다. 모르면 가르지 않는다(`report::by_owner`).
     let open = load.issues.iter().any(|i| !i.status.is_done());
     let me = if open { super::me_at(ctx, &repo.root) } else { None };
-    let p = report::prime(&load.issues, &repo.config, me.as_ref());
+    let p = report::prime_live(&load.issues, &live, &repo.config, me.as_ref());
     if ctx.json {
         // 소속은 **물려받은 것까지 푼다** — 자식의 에픽은 부모에게서 오므로, 줄에 적힌
         // `epic` 만 실으면 자식 줄이 에픽 없는 것으로 나간다. 사람 쪽이 제목을 내는 자와
