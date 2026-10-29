@@ -12,6 +12,8 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+## [0.35.0] - 2026-10-29
+
 ### Added
 
 - Claude Code gains `moai-plan` for interviews and detailed plans, and `effort_plan` configures planning effort (default `xhigh`). (moai-ns7a)
