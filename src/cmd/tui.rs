@@ -1621,9 +1621,27 @@ const TICK: std::time::Duration = std::time::Duration::from_millis(700);
 /// 한 번 들여다보는 일이라 싸다.
 const LOAD_POLL: std::time::Duration = std::time::Duration::from_millis(30);
 
-/// History usually finishes quickly; after a short grace period a slow filesystem needs fewer polls.
-fn history_poll(elapsed: std::time::Duration) -> std::time::Duration {
-    if elapsed < std::time::Duration::from_millis(300) { LOAD_POLL } else { SPIN_TICK }
+/// How long a history read keeps the fast poll (moai-w7ms.bc8) — most land inside it.
+const HISTORY_GRACE: std::time::Duration = std::time::Duration::from_millis(300);
+
+/// The poll for a history read past [`HISTORY_GRACE`] while nothing else runs: a slow filesystem needs fewer looks.
+/// Its own value, not the spinner's step — retuning one must not retune the other.
+const HISTORY_SLOW_POLL: std::time::Duration = std::time::Duration::from_millis(120);
+
+/// History usually finishes quickly; after a short grace period a slow filesystem needs fewer polls. `waited` is how
+/// long the read has run, on its own clock (`App::history_alone`).
+fn history_poll(waited: std::time::Duration) -> std::time::Duration {
+    if waited < HISTORY_GRACE { LOAD_POLL } else { HISTORY_SLOW_POLL }
+}
+
+/// How soon the loop looks again: a lone history read's own cadence, the fast poll while any other background job runs,
+/// the file watch's step when none does. One answer for before and after `App::follow`.
+fn poll_after(app: &App) -> std::time::Duration {
+    match app.history_alone() {
+        Some(waited) => history_poll(waited),
+        None if app.loading() || app.reaping() || app.gathering_commits() => LOAD_POLL,
+        None => TICK,
+    }
 }
 
 /// 도는 글리프가 한 칸 가는 **가장 빠른** 걸음. ora 가 80ms 로 돌린다. 그보다
@@ -1666,13 +1684,21 @@ fn loop_until_quit(term: &mut DefaultTerminal, app: &mut App, left: &mut Vec<Str
     let mut dirty = true;
     let mut pending = None;
     let mut step = SPIN_TICK;
-    let mut history_since = None;
     while !app.quit {
         if dirty {
             let began = std::time::Instant::now();
+            // **그리다 선 탈은 다음 그림이 낸다**(moai-w7ms 리뷰) — 배너를 앉힌 뒤에 그리는 자가 세운 탈(`draw::fill_history`
+            // 가 실을 못 얻었을 때)은 이 그림에 안 선다. 쉬는 루프는 이제 저절로 다시 안 그리므로 여기서 한 번 더 청한다.
+            let told = app.trouble.clone();
             painter.draw(term, app)?;
             step = spin_step(began.elapsed());
-            dirty = false;
+            dirty = app.trouble != told;
+            // **그리다 띄운 읽기도 곧 받으러 깬다**(moai-w7ms 리뷰) — 상세의 이력은 그리는 자가 띄운다
+            // (`draw::fill_history`). 그리기 전에 정한 때(쉬던 화면이면 700ms 뒤)를 그대로 기다리면 짧은 읽기도 그만큼
+            // 늦게 선다 — 아래의 당김은 기다린 **뒤에야** 돈다.
+            if app.loading() {
+                stale_due = stale_due.min(std::time::Instant::now() + poll_after(app));
+            }
         }
         // **화면에 도는 것이 없으면 빠른 걸음으로 깨지 않는다.** 다 끝난 판을 열어 둔
         // 채로 둔 사람의 CPU 를 초당 여덟 번 깨울 까닭이 없고, 집은 일이 다른 에픽 안이나
@@ -1725,25 +1751,12 @@ fn loop_until_quit(term: &mut DefaultTerminal, app: &mut App, left: &mut Vec<Str
         }
         let now = std::time::Instant::now();
         // 키가 읽기를 띄웠으면(층으로 올라가기 따위) 느린 걸음까지 기다리지 않고 받으러 깬다.
-        let history_delay = if app.history_only_loading() {
-            history_poll(now.duration_since(*history_since.get_or_insert(now)))
-        } else {
-            history_since = None;
-            LOAD_POLL
-        };
         if app.loading() {
-            stale_due = stale_due.min(now + history_delay);
+            stale_due = stale_due.min(now + poll_after(app));
         }
         if now >= stale_due {
             dirty |= app.follow();
-            stale_due = now
-                + if app.history_only_loading() {
-                    history_delay
-                } else if app.loading() || app.reaping() || app.gathering_commits() {
-                    LOAD_POLL
-                } else {
-                    TICK
-                };
+            stale_due = now + poll_after(app);
         }
         // **걸음은 시계가 올린다, 그린 횟수가 올리지 않는다.** 그릴 때마다
         // 올리면 키를 누르는 내내 타이핑 속도로 돌고, 가만히 두면 파일을 보는
@@ -1766,7 +1779,7 @@ mod tests {
     fn slow_history_poll_backs_off_without_delaying_short_reads() {
         use std::time::Duration;
         assert_eq!(super::history_poll(Duration::from_millis(299)), super::LOAD_POLL);
-        assert_eq!(super::history_poll(Duration::from_millis(300)), super::SPIN_TICK);
+        assert_eq!(super::history_poll(super::HISTORY_GRACE), super::HISTORY_SLOW_POLL);
     }
 
     fn burst_app() -> App {

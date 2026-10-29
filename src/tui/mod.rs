@@ -2586,13 +2586,12 @@ impl App {
         self.pending.is_some() || self.layer_loading() || self.history.loading()
     }
 
-    /// A slow history read can be polled less often once every other background job has finished.
-    pub fn history_only_loading(&self) -> bool {
-        self.history.loading()
-            && self.pending.is_none()
-            && !self.layer_loading()
-            && !self.reaping()
-            && !self.gathering_commits()
+    /// How long the history read has run, when it is the only background job left — a slow one can be polled less often
+    /// (`cmd::tui`'s `history_poll`). `None` while anything else runs: the others keep the fast poll. The clock is the
+    /// read's own, so a read that follows another gets its grace too.
+    pub fn history_alone(&self) -> Option<std::time::Duration> {
+        let others = self.pending.is_some() || self.layer_loading() || self.reaping() || self.gathering_commits();
+        if others { None } else { self.history.waited() }
     }
 
     /// 버린 다시 읽기 스레드가 아직 남았는가. 루프는 이 동안에도 빠른 걸음으로 깬다 —
@@ -2960,10 +2959,18 @@ impl App {
     /// **읽기는 스레드에서 한다**([`Fresh`]). 짓는 동안은 표식을 다시 재지 않는다 —
     /// 하나가 끝나기 전에 또 띄우면 몰아 쓰는 동안 스레드가 쌓인다. 끝난 것을 들인
     /// 뒤에도 파일이 또 바뀌었으면(표식은 읽기 전에 쟀다) 다음 걸음이 다시 띄운다.
+    ///
+    /// **바뀐 것이 있을 때만 참이다**(moai-w7ms.ujp) — 루프는 이 답으로만 그린다. 걸음들이 바뀐 것을 `follow_changed` 에
+    /// 적고, 읽기가 뜨거나 끝난 것은 `loading` 의 앞뒤로 잰다.
     pub fn follow(&mut self) -> bool {
         self.follow_changed = false;
         let was_loading = self.loading();
-        let was_committing = self.gathering_commits();
+        self.follow_steps();
+        self.follow_changed || was_loading != self.loading()
+    }
+
+    /// [`App::follow`] 의 걸음들 — 화면에 닿는 것을 바꾸면 `follow_changed` 를 세운다.
+    fn follow_steps(&mut self) {
         self.reap();
         self.follow_config();
         self.follow_read();
@@ -2974,6 +2981,9 @@ impl App {
         self.follow_commits();
         self.follow_latest();
         self.follow_changed |= self.history.poll();
+        // **상세가 그린 이력의 저널도 본다**(moai-w7ms 리뷰) — 다시 읽을지는 그리는 자(`draw::fill_history`)가 가르는데,
+        // 쉬는 루프는 이 걸음이 바뀌었다고 할 때만 그린다. `moai note` 는 스냅샷을 안 바꾼다.
+        self.follow_changed |= self.history.moved();
         self.reopen_journals();
         if let Some((rx, _)) = &self.pending {
             match rx.try_recv() {
@@ -2997,11 +3007,9 @@ impl App {
                     self.trouble = Some(say(self.site.lang, "tui.reload.stopped").into());
                 }
             }
-            return self.follow_changed || was_loading != self.loading() || was_committing != self.gathering_commits();
+            return;
         }
-        let Some(repo) = &self.site.repo else {
-            return self.follow_changed || was_loading != self.loading() || was_committing != self.gathering_commits();
-        };
+        let Some(repo) = &self.site.repo else { return };
         // **시계도 다시 읽을 까닭이다**(moai-z4r4) — 배너의 수에는 한 시간 틈과 날로 재는 경고가 들어
         // 파일이 그대로여도 답이 바뀐다. 층과 **같은 자**(`layer::due`)로 재므로, 안 읽으면 틈을 넘긴
         // 순간 층의 `!` 와 이 배너가 갈린다. 저장소가 서 있으면 읽은 때도 늘 서 있다 — 띄울 때의 첫
@@ -3049,7 +3057,6 @@ impl App {
             });
             self.pending = Some((rx, handle));
         }
-        self.follow_changed || was_loading != self.loading() || was_committing != self.gathering_commits()
     }
 
     /// 걸린 거름망이 노트를 보는가([`crate::query::Filter::sees_notes`]) — 다시 읽는 스레드가 노트까지 읽어

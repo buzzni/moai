@@ -249,6 +249,9 @@ pub fn screen(f: &mut Frame, app: &mut App) {
         wiki: None,
         chart,
     };
+    // The detail names the checkout whose journals the follow step watches ([`HistoryCache::moved`]) — none unless it
+    // draws a row's history in this frame, so a hidden detail leaves nothing to stat.
+    app.history.watched = None;
     if let Some(right) = right {
         detail(f, app, right, &rows);
     }
@@ -4470,6 +4473,10 @@ pub(super) struct HistoryCache {
     pending: Option<HistoryPending>,
     /// The history and work-log lines of the row in the detail ([`HistoryLines`]).
     drawn: Option<HistoryLines>,
+    /// The home checkout whose journals the last frame's detail drew a history from — what [`HistoryCache::moved`] watches.
+    /// Only a frame measures the marks again ([`fill_history`]), and an idle loop draws only for what `App::follow` reports
+    /// (moai-w7ms.ujp), so without this a note another session wrote stood unread until a key was pressed.
+    watched: Option<std::path::PathBuf>,
 }
 
 struct HistoryPending {
@@ -4477,6 +4484,8 @@ struct HistoryPending {
     marks: JournalMarks,
     rx: std::sync::mpsc::Receiver<Vec<crate::model::JournalEntry>>,
     handle: std::thread::JoinHandle<()>,
+    /// When the read began — the loop polls one that has run past its grace less often ([`HistoryCache::waited`]).
+    at: std::time::Instant,
 }
 
 /// The history and work log laid out once per read and width — [`Body`] and [`NoteHits`] for the same reason: a
@@ -4514,6 +4523,20 @@ impl HistoryLines {
 impl HistoryCache {
     pub(super) fn loading(&self) -> bool {
         self.pending.is_some()
+    }
+
+    /// How long the read in flight has run — its own clock, so a read that follows another gets its grace too.
+    pub(super) fn waited(&self) -> Option<std::time::Duration> {
+        self.pending.as_ref().map(|p| p.at.elapsed())
+    }
+
+    /// Whether a journal under the history the detail drew moved since that frame measured it — the same stat
+    /// [`fill_history`] makes, asked once a follow step so the frame that reads it again comes without a key.
+    pub(super) fn moved(&self) -> bool {
+        self.watched
+            .as_ref()
+            .and_then(|home| self.marks.get(home))
+            .is_some_and(|was| was.iter().any(|(path, stamp)| crate::store::stamp(path) != *stamp))
     }
 
     pub(super) fn poll(&mut self) -> bool {
@@ -4649,6 +4672,8 @@ fn fill_history(app: &mut App, rows: &[Row], w: usize) {
     let moved = cache.marks.get(&key.0).is_none_or(|was| was.iter().any(|(p, s)| crate::store::stamp(p) != *s));
     let fresh = held.is_some_and(|(read, _)| cache.marks.get(&key.0) == Some(read));
     let repo = (moved || (!fresh && !cache.loading())).then(|| crate::cmd::show::at_home(repo, &key.0));
+    // Between frames the follow step watches these marks for the loop ([`HistoryCache::moved`]).
+    app.history.watched = Some(key.0.clone());
     if let Some(laid) = laid {
         app.history.drawn = Some(laid);
     }
@@ -4668,7 +4693,9 @@ fn fill_history(app: &mut App, rows: &[Row], w: usize) {
     match std::thread::Builder::new().name("tui-history".into()).spawn(move || {
         let _ = tx.send(repo.journal_of(&id));
     }) {
-        Ok(handle) => app.history.pending = Some(HistoryPending { key, marks, rx, handle }),
+        Ok(handle) => {
+            app.history.pending = Some(HistoryPending { key, marks, rx, handle, at: std::time::Instant::now() })
+        }
         Err(error) => app.trouble = Some(error.to_string()),
     }
 }
@@ -6302,7 +6329,13 @@ pub(super) mod tests {
         let key = (root.clone(), "argos-0001".to_string());
         let (tx, rx) = std::sync::mpsc::channel();
         cache.marks.insert(root.clone(), vec![]);
-        cache.pending = Some(HistoryPending { key: key.clone(), marks: vec![], rx, handle: std::thread::spawn(|| {}) });
+        cache.pending = Some(HistoryPending {
+            key: key.clone(),
+            marks: vec![],
+            rx,
+            handle: std::thread::spawn(|| {}),
+            at: std::time::Instant::now(),
+        });
         cache.marks.insert(root.clone(), vec![(root.clone(), None)]);
         tx.send(vec![]).unwrap();
         cache.poll();
@@ -6310,6 +6343,78 @@ pub(super) mod tests {
         let (read, _) = &cache.entries[&key];
         assert!(read.is_empty(), "the read went in under marks it was not read with");
         assert_ne!(Some(read), cache.marks.get(&root), "an overtaken read passes for a fresh one");
+    }
+
+    /// **A read's grace runs on its own clock** (moai-w7ms review) — the loop's one timestamp for "history alone" was
+    /// never reset between reads that follow each other (the frame that takes one in starts the next), so every read after
+    /// the first 300 ms of a run lost the fast poll.
+    #[test]
+    fn a_history_read_reports_how_long_it_has_run() {
+        let mut cache = HistoryCache::default();
+        assert_eq!(cache.waited(), None);
+        let (_tx, rx) = std::sync::mpsc::channel();
+        let at =
+            std::time::Instant::now().checked_sub(std::time::Duration::from_secs(1)).expect("the clock ran a second");
+        let key = (std::path::PathBuf::from("home"), "argos-0001".to_string());
+        cache.pending = Some(HistoryPending { key, marks: vec![], rx, handle: std::thread::spawn(|| {}), at });
+        assert!(cache.waited().is_some_and(|w| w >= std::time::Duration::from_secs(1)));
+    }
+
+    /// **An idle follow step hears the journal under the detail** (moai-w7ms review) — whether the history is read again
+    /// is the frame's call ([`fill_history`]), and the loop now draws only for what `App::follow` reports. `moai note`
+    /// leaves the snapshot alone, so without this a note another session wrote stood unread until a key was pressed.
+    #[test]
+    fn an_idle_follow_hears_a_note_under_the_detail() {
+        use crate::model::{JournalEntry, someone};
+        let mut a = every(issues());
+        let scratch = crate::scratch::Scratch::new("tui-history-idle");
+        let repo = crate::store::Repo::at(scratch.path().to_path_buf(), a.site.cfg.clone());
+        std::fs::create_dir_all(repo.journal_dir()).unwrap();
+        let path = repo.journal_dir().join("test.jsonl");
+        a.site.repo = Some(repo);
+        let rows = a.rows();
+        let Row::Item(_, e, _) = a.current_of(&rows).unwrap() else { panic!() };
+        let id = a.site.issues[e.at().unwrap()].id.clone();
+        let by = someone("tester");
+        let line = |text: &str, ts: &str| {
+            format!("{}\n", serde_json::to_string(&JournalEntry::note(&id, text, ts, &by)).unwrap())
+        };
+        let mut bytes = line("첫 노트", "2026-10-28T10:00:00Z");
+        std::fs::write(&path, &bytes).unwrap();
+        wait_history(&mut a, &rows);
+        // What the first steps start (the commit table) lands first; after that a step has nothing to draw.
+        let until = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while a.follow() || a.loading() || a.gathering_commits() {
+            assert!(std::time::Instant::now() < until, "the background work did not settle");
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+        assert!(!a.follow(), "an idle step with nothing moved asked for a frame");
+        bytes.push_str(&line("둘째 노트", "2026-10-28T10:01:00Z"));
+        std::fs::write(&path, &bytes).unwrap();
+        assert!(a.follow(), "a note under the detail did not ask for the frame that reads it");
+    }
+
+    /// **A read that ends while another runs still asks for a frame** (moai-w7ms review) — `App::follow` reports what its
+    /// steps flag, not only `loading` flipping: with a history read still out, `loading` stays true across the reread's
+    /// end, and the line that says the reread stopped must still be drawn.
+    #[test]
+    fn a_reread_that_ends_beside_a_history_read_asks_for_a_frame() {
+        let mut a = every(issues());
+        let (_history_tx, history_rx) = std::sync::mpsc::channel();
+        let key = (std::path::PathBuf::from("home"), "argos-0001".to_string());
+        a.history.pending = Some(HistoryPending {
+            key,
+            marks: vec![],
+            rx: history_rx,
+            handle: std::thread::spawn(|| {}),
+            at: std::time::Instant::now(),
+        });
+        let (tx, rx) = std::sync::mpsc::channel();
+        a.pending = Some((rx, std::thread::spawn(|| {})));
+        drop(tx);
+        assert!(a.loading());
+        assert!(a.follow(), "a reread that stopped beside a history read asked for no frame");
+        assert!(a.loading() && a.trouble.is_some(), "the history read is still out, and the stop is told");
     }
 
     /// **저널이 바뀌어도 상세의 이력은 안 비고, 굴린 자리도 안 잃는다**(리뷰 moai-ccow.9d4) — 비우던 판은 다른 세션이
@@ -12661,60 +12766,24 @@ mod eyeball {
 /// 1만 건 더미를 dev 로 짓고 잰 값이 화면 사이에 섞인다(moai-xemz 리뷰).
 #[cfg(test)]
 mod bench {
-    fn fixture_paths(root: &std::path::Path) -> std::io::Result<Vec<std::path::PathBuf>> {
-        let mut paths = vec![root.join(".moai/issues.jsonl")];
-        let archive = root.join(".moai/archive");
-        match std::fs::read_dir(&archive) {
-            Ok(entries) => {
-                for entry in entries {
-                    let entry = entry?;
-                    let path = entry.path();
-                    if entry.file_type()?.is_file() && path.extension().is_some_and(|ext| ext == "jsonl") {
-                        paths.push(path);
-                    }
-                }
-            }
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-            Err(e) => return Err(std::io::Error::new(e.kind(), format!("{}: {e}", archive.display()))),
-        }
-        paths.sort();
-        Ok(paths)
-    }
-
-    #[test]
-    fn fixture_paths_accepts_missing_archive_and_skips_unrelated_entries() {
-        let root = std::env::temp_dir().join(format!("moai-gantt-fixture-{}", std::process::id()));
-        let archive = root.join(".moai/archive");
-        std::fs::create_dir_all(root.join(".moai")).unwrap();
-        assert_eq!(fixture_paths(&root).unwrap(), vec![root.join(".moai/issues.jsonl")]);
-        std::fs::create_dir_all(archive.join("folder.jsonl")).unwrap();
-        std::fs::write(archive.join("notes.txt"), "unrelated").unwrap();
-        std::fs::write(archive.join("2026.jsonl"), "").unwrap();
-        assert_eq!(fixture_paths(&root).unwrap(), vec![archive.join("2026.jsonl"), root.join(".moai/issues.jsonl")]);
-        std::fs::remove_dir_all(root).unwrap();
-    }
-
     /// Run against a fixed copy of a tracker, including archive, before and after a change.
     /// MOAI_GANTT_BENCH=/tmp/tracker CARGO_PROFILE_TEST_OPT_LEVEL=3 cargo test
     /// --bin moai gantt_frame_costs -- --ignored --nocapture
+    ///
+    /// The rows are read the way moai reads them (`store::read_snapshot`, `archive::read_all`, the explorer's order —
+    /// moai-w7ms review): a fixture with no archive directory, with other files beside the archive's `.jsonl`, with a
+    /// byte-order mark or a blank line reads as the explorer reads it, and a line moai cannot read stops the run with its
+    /// file and line.
     #[test]
     #[ignore]
     fn gantt_frame_costs() {
         let root = std::path::PathBuf::from(std::env::var("MOAI_GANTT_BENCH").expect("tracker fixture"));
-        let paths = fixture_paths(&root).unwrap_or_else(|e| panic!("fixture {}: {e}", root.display()));
-        let issues: Vec<crate::model::Issue> = paths
-            .iter()
-            .flat_map(|p| {
-                std::fs::read_to_string(p)
-                    .unwrap_or_else(|e| panic!("fixture {}: {e}", p.display()))
-                    .lines()
-                    .enumerate()
-                    .map(|(n, s)| {
-                        serde_json::from_str(s).unwrap_or_else(|e| panic!("fixture {}:{}: {e}", p.display(), n + 1))
-                    })
-                    .collect::<Vec<_>>()
-            })
-            .collect();
+        let live = crate::store::read_snapshot(&root)
+            .unwrap_or_else(|e| panic!("fixture {}: {e:?}", root.display()))
+            .unwrap_or_else(|| panic!("fixture {}: no .moai/issues.jsonl", root.display()));
+        let load = crate::archive::read_all(&root, live).unwrap_or_else(|e| panic!("fixture {}: {e}", root.display()));
+        assert!(load.errors.is_empty(), "fixture {}: {:?}", root.display(), load.errors);
+        let issues = load.issues;
         let cfg =
             crate::config::Config::parse(&std::fs::read_to_string(root.join(".moai/config.toml")).unwrap()).unwrap();
         let mut app = super::App::aging(issues, cfg, "2026-10-28T14:00:00Z");

@@ -110,30 +110,29 @@ pub struct Row<'a> {
 
 /// 화면에 놓을 날의 폭 — 줄들의 계획·실제 가운데 가장 이른 날부터 가장 늦은 날까지(`YYYY-MM-DD`). 화면의 "맞춤" 이 쓴다.
 /// 실제는 UTC 의 날이다 — 시간대로 옮기면 하루 어긋날 수 있어 화면이 여백을 둔다. 열린 구간은 읽는 사람의 오늘까지다.
-/// 짓는 자는 [`range_of`] 하나다.
+/// 짓는 자는 [`RangeContext::range_of`] 하나다.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Range {
     pub from: String,
     pub to: String,
 }
 
+/// The rows and the span of all of them, as one value. Only the tests read it now: the explorer and `tui --json` take
+/// [`rows`] and measure the rows they keep with [`RangeContext`] (moai-w7ms.lrt). Ungated, the bin target's dead_code
+/// lint fails CI's `clippy --all-targets -- -D warnings`.
+#[cfg(test)]
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Gantt<'a> {
     /// `all` 와 같은 차례, 같은 길이다 — `rows[at].at == at`. 화면이 목록을 거르고 정하는 것은 제 일이다.
     pub rows: Vec<Row<'a>>,
     /// **적재한 줄 전부**의 폭이다. 날이 하나도 없으면 없다. 거른 목록에 맞추는 화면은 이것을 안 쓰고 남긴 줄의 폭으로
-    /// 잰다(리뷰) — 적재 때 줄마다 [`range_of`] 를 불러 두고(`tui::gantt::Cached`) 남긴 줄의 것만 접는다. 숨긴 줄
-    /// (아카이브·미룬 것)의 날이 이 폭을 넓히므로, 그 폭에 맞추면 보이는 막대가 한쪽에 몰린다.
+    /// 잰다(리뷰) — 적재 때 줄마다 [`RangeContext::range_of`] 로 재어 두고(`tui::gantt::Cached`) 남긴 줄의 것만 접는다.
+    /// 숨긴 줄(아카이브·미룬 것)의 날이 이 폭을 넓히므로, 그 폭에 맞추면 보이는 막대가 한쪽에 몰린다.
     pub range: Option<Range>,
 }
 
-/// 줄마다 계획·실제 구간을 읽는다. `index` 는 `all` 로 지은 색인(`nav::Index::of`)이고 `wh` 는 같은 줄로 지은 거르개
-/// 문맥이다 — 탐색기는 적재 때 둘 다 이미 들고 있어 여기서 다시 짓지 않는다. `now` 는 RFC3339(UTC)고, `zone` 은 읽는
-/// 사람의 시간대다 — 늦었는가와 오늘을 그 달로 잰다(보드의 `Dues::judge` 가 받는 그 둘이다). 거르개를 `'a` 로 빌리는 것은
-/// 서 있는 칸·닫힌 때가 거기서 빌려 온 글이라서다 — 값(`Gantt`)이 사는 동안 거르개도 산다.
-///
-/// 아래의 두 지도는 저장소 전부를 훑는다. 탐색기는 이 값을 적재마다 한 번 들고 있으므로(`tui::gantt::Cached`)
-/// 지도를 여기서 지어도 프레임마다가 아니다 — 부르는 쪽마다 짓게 하면 같은 적재로 지었는지를 부르는 쪽이 맞춰야 한다.
+/// [`rows`] with the span of all of them — the tests' one call.
+#[cfg(test)]
 pub fn gantt<'a>(
     all: &'a [Issue],
     index: &Index,
@@ -147,7 +146,14 @@ pub fn gantt<'a>(
     Gantt { rows, range }
 }
 
-/// Build chart rows without the aggregate range, for consumers that filter rows first.
+/// 줄마다 계획·실제 구간을 읽는다 — `all` 과 같은 차례, 같은 길이다(`rows[at].at == at`). 폭은 안 잰다: 부르는 쪽이 거른
+/// 줄로 [`RangeContext`] 가 잰다. `index` 는 `all` 로 지은 색인(`nav::Index::of`)이고 `wh` 는 같은 줄로 지은 거르개
+/// 문맥이다 — 탐색기는 적재 때 둘 다 이미 들고 있어 여기서 다시 짓지 않는다. `now` 는 RFC3339(UTC)고, `zone` 은 읽는
+/// 사람의 시간대다 — 늦었는가와 오늘을 그 달로 잰다(보드의 `Dues::judge` 가 받는 그 둘이다). 거르개를 `'a` 로 빌리는 것은
+/// 서 있는 칸·닫힌 때가 거기서 빌려 온 글이라서다 — 줄이 사는 동안 거르개도 산다.
+///
+/// 아래의 두 지도는 저장소 전부를 훑는다. 탐색기는 이 값을 적재마다 한 번 들고 있으므로(`tui::gantt::Cached`)
+/// 지도를 여기서 지어도 프레임마다가 아니다 — 부르는 쪽마다 짓게 하면 같은 적재로 지었는지를 부르는 쪽이 맞춰야 한다.
 pub fn rows<'a>(
     all: &'a [Issue],
     index: &Index,
@@ -173,8 +179,7 @@ pub fn rows<'a>(
     let now_at = parse_rfc3339(now);
     // **날 경계는 읽는 사람의 달에서 긋는다**(moai-h2th) — 한 번만 옮긴다.
     let today = zone.shift(now);
-    let rows: Vec<Row<'a>> = all
-        .iter()
+    all.iter()
         .enumerate()
         .map(|(at, i)| {
             // **목록이 폴더로 여는 묶음만 멤버를 거느린다**(`Index::is_dir`, 리뷰) — 같은 id 의 앞줄(`duplicate_id`)은
@@ -204,8 +209,7 @@ pub fn rows<'a>(
                     .unwrap_or_default(),
             }
         })
-        .collect();
-    rows
+        .collect()
 }
 
 /// 계획 구간 — 제 날이 있으면 그것, 없는 묶음은 멤버가 적은 날을 다 덮는 폭(가장 이른 날 ~ 가장 늦은 날).
@@ -260,7 +264,7 @@ fn planned_of(
 }
 
 /// 줄을 만든 날 — 읽는 사람의 달로 옮긴 `created_at` 의 날짜다. 못 읽는 시각은 없다고 한다: 관대한 읽기가 받은 글을 그대로
-/// 자르면 달력에 없는 날(`2026-02-30`)이 막대의 끝에 선다([`range_of`] 의 오늘과 같은 금).
+/// 자르면 달력에 없는 날(`2026-02-30`)이 막대의 끝에 선다([`RangeContext`] 의 오늘과 같은 금).
 fn made_day(i: &Issue, zone: &Zone) -> Option<String> {
     let at = format_rfc3339(zone.local(parse_rfc3339(&i.created_at)?));
     at.get(..10).filter(|d| parse_date(d).is_some()).map(str::to_string)
@@ -344,12 +348,8 @@ fn overdue_of(i: &Issue, column: &str, deferred: bool, today: &str) -> Option<i6
     days_until(i.deadline()?, today).filter(|d| *d < 0).map(|d| -d)
 }
 
-/// 줄들의 계획·실제 가운데 가장 이른 날 ~ 가장 늦은 날 — 화면의 "맞춤" 이 쓴다. 열린 구간은 읽는 사람의 오늘까지다.
-///
-/// **어느 줄로 잴지는 부르는 쪽이 고른다**(리뷰) — [`Gantt::range`] 는 적재한 줄 전부로 잰 것이고, 목록을 거른 화면은
-/// 남긴 줄만 넘겨 다시 잰다. 화면이 그 셈(열린 구간은 오늘까지, 시각은 UTC 의 날)을 따로 적으면 날짜를 판단하는 `if` 가
-/// 화면에 선다. 실제의 날은 **읽은 시각에서** 낸다 — 관대한 읽기가 받은 `2026-02-30T…` 를 글대로 자르면 달력에 없는 날이
-/// 폭의 끝에 선다.
+/// [`RangeContext::range_of`] at one clock — the tests' shorthand.
+#[cfg(test)]
 pub fn range_of<'r, 'a: 'r>(rows: impl IntoIterator<Item = &'r Row<'a>>, now: &str, zone: &Zone) -> Option<Range> {
     RangeContext::new(now, zone).range_of(rows)
 }
@@ -364,6 +364,12 @@ impl RangeContext {
         Self { today: zone.shift(now).get(..10).filter(|d| parse_date(d).is_some()).map(str::to_string) }
     }
 
+    /// 줄들의 계획·실제 가운데 가장 이른 날 ~ 가장 늦은 날 — 화면의 "맞춤" 이 쓴다. 열린 구간은 읽는 사람의 오늘까지다.
+    ///
+    /// **어느 줄로 잴지는 부르는 쪽이 고른다**(리뷰) — 적재한 줄 전부의 폭은 화면이 안 쓰고, 목록을 거른 화면은 남긴 줄만
+    /// 넘겨 잰다. 화면이 그 셈(열린 구간은 오늘까지, 시각은 UTC 의 날)을 따로 적으면 날짜를 판단하는 `if` 가 화면에 선다.
+    /// 실제의 날은 **읽은 시각에서** 낸다 — 관대한 읽기가 받은 `2026-02-30T…` 를 글대로 자르면 달력에 없는 날이 폭의 끝에
+    /// 선다.
     pub fn range_of<'r, 'a: 'r>(&self, rows: impl IntoIterator<Item = &'r Row<'a>>) -> Option<Range> {
         let day = |t: &str| parse_rfc3339(t).map(|s| format_rfc3339(s)[..10].to_string());
         let mut days: Vec<String> = Vec::new();
@@ -424,22 +430,7 @@ mod tests {
     }
 
     #[test]
-    fn rows_only_has_identical_json_to_the_complete_chart_rows() {
-        let mut issue = row("argos-0001", Kind::Issue, "in_progress");
-        issue.started_at = Some("2026-10-18T23:30:00Z".into());
-        issue.due_on = Some("2026-10-30".into());
-        let all = [issue];
-        let cfg = cfg();
-        let index = Index::of(&all);
-        let wh = Where::of(&all, &cfg);
-        let zone = Zone::utc();
-        let full = gantt(&all, &index, &wh, &cfg, NOW, &zone);
-        let only = rows(&all, &index, &wh, &cfg, NOW, &zone);
-        assert_eq!(serde_json::to_vec(&full.rows).unwrap(), serde_json::to_vec(&only).unwrap());
-    }
-
-    #[test]
-    fn shared_range_context_matches_filtered_ranges() {
+    fn shared_range_context_measures_filtered_rows() {
         let mut open = row("argos-0001", Kind::Issue, "in_progress");
         open.started_at = Some("2026-10-18T23:30:00Z".into());
         let mut planned = row("argos-0002", Kind::Issue, "todo");
@@ -448,10 +439,8 @@ mod tests {
         let zone = Zone::utc();
         let chart = read_in(&all, NOW, &zone);
         let context = RangeContext::new(NOW, &zone);
-        for row in &chart.rows {
-            assert_eq!(context.range_of([row]), range_of([row], NOW, &zone));
-        }
-        assert_eq!(context.range_of(&chart.rows), chart.range);
+        assert_eq!(context.range_of(std::iter::empty()), None);
+        assert_eq!(context.range_of(&chart.rows), Some(Range { from: "2026-10-01".into(), to: "2026-10-30".into() }));
         assert_eq!(
             context.range_of([&chart.rows[0]]),
             Some(Range { from: "2026-10-18".into(), to: "2026-10-20".into() })
