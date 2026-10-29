@@ -492,7 +492,7 @@ If any check is unclear or any input is refused, do not type again; ask the pers
 Only after `Report-checked:` and a verified live Codex with an empty idle box, type the
 command text, without assuming a newline is Enter:
 
-    cmux send --surface <surface> -- '/new'
+    cmux send --surface <surface> -- '/clear'
 
 Read the screen once, then send an explicit Enter in a separate call:
 
@@ -500,12 +500,10 @@ Read the screen once, then send an explicit Enter in a separate call:
     cmux send-key --surface <surface> enter
     cmux read-screen --surface <surface> --lines 40
 
-Codex can ask `Where should the new conversation run?`. Whatever it selects —
-`Use current Git worktree` included — the person handles that menu; tell them which tab and why.
-Read again after they choose: require a fresh startup screen in the same cwd and an empty
-composer before assigning work. Never guess an Enter count or choose a new worktree.
-If a command remains typed, a screen is cropped, or cmux refuses any input, stop and tell
-the person. Do not resend the command or paste the work over it.
+Require a fresh screen in the same cwd and an empty composer before assigning work.
+An unexpected menu, question or permission prompt belongs to the person. If a command
+remains typed, a screen is cropped, or cmux refuses any input, stop and tell the person.
+Do not resend the command or paste the work over it.
 
 ### Paste the assignment
 

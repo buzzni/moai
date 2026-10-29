@@ -674,8 +674,8 @@ terminal (`#{pane_tty}`), never by reading another process's environment
 **Codex workers.** The skill finds Codex from the running server's pane
 command, path and live process, including a shell launcher's child; it does not
 add Codex to the Claude session map. It checks the screen, live PID and completed
-report together, leaving copy mode, drafts and dialogs to you. `/new` text and
-Enter are separate calls; you handle any work directory menu. Assignments use
+report together, leaving copy mode, drafts and dialogs to you. `/clear` text and
+Enter are separate calls; you handle any unexpected menu or prompt. Assignments use
 `load-buffer`, `paste-buffer -p` and a separate Enter. New panes require your
 yes and use `[models] codex`, read from `moai models --json`; once a round the
 supervisor checks official models with `WebSearch` and tells you if that value
@@ -734,8 +734,8 @@ passes `--force`.
 **Codex workers.** The skill uses `cmux top` and live Codex PIDs whose cwd is
 the root or a named worktree, rather than the Claude session map. Before input,
 it checks the screen, live PID and completed report together; cmux's input state
-alone does not establish an idle, empty Codex composer. It sends `/new` text,
-reads the screen and sends Enter separately; you handle the work directory menu.
+alone does not establish an idle, empty Codex composer. It sends `/clear` text,
+reads the screen and sends Enter separately; you handle any unexpected menu or prompt.
 It pastes a multiline assignment with `cmux paste --surface <UUID> --submit -`
 from a file. New tabs require your yes and use `[models] codex`; the supervisor
 reads `moai models --json` and checks official models with `WebSearch` once a
