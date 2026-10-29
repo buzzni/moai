@@ -220,6 +220,7 @@ fn decide(
                 &repo.config,
                 &away,
                 ctx.lang(),
+                ctx.registry().writing.with_repo(&repo.config.writing).0.detail(),
             )
         }
         // 기준선만 적고 아무것도 싣지 않는다. 까닭은 `hook::Event` 에 있다.
@@ -263,7 +264,12 @@ fn decide(
                 // AGENTS.md 에 moai 블록이 없으면(git 밖에 둔 트래커의 `--guide hook`) 사용법이 어디 있는지 한 줄을 더한다.
                 // 못 읽으면 더하지 않는다 — 무엇이 들었는지 모른다.
                 let unguided = matches!(agents, Ok((crate::cmd::init::BlockState::Missing, _)));
-                crate::hook::guided_board(&lines, ctx.lang(), unguided)
+                crate::hook::guided_board(
+                    &lines,
+                    ctx.lang(),
+                    unguided,
+                    ctx.registry().writing.with_repo(&repo.config.writing).0.detail(),
+                )
             })
         }
         Event::PreToolUse => {

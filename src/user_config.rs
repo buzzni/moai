@@ -156,6 +156,89 @@ pub enum ModelsTrouble {
     NotQuoted { key: String, raw: String, line: usize },
 }
 
+pub const WRITING: &str = "writing";
+pub const WRITING_DEFAULT: &[(&str, &str)] = &[("detail", "detailed")];
+pub const DETAILS: &[&str] = &["detailed", "brief"];
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Detail {
+    #[default]
+    Detailed,
+    Brief,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct Writing {
+    #[serde(flatten)]
+    pub values: BTreeMap<&'static str, String>,
+    pub written: Vec<String>,
+    pub repo: Vec<String>,
+}
+impl Default for Writing {
+    fn default() -> Self {
+        Self {
+            values: WRITING_DEFAULT.iter().map(|&(k, v)| (k, v.to_string())).collect(),
+            written: Vec::new(),
+            repo: Vec::new(),
+        }
+    }
+}
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WritingTrouble {
+    NotATable { found: String },
+    NotAWord { key: String, found: String },
+    NotADetail { key: String, raw: String },
+    UnknownKey { key: String },
+    NotQuoted { key: String, raw: String, line: usize },
+}
+impl Writing {
+    pub fn detail(&self) -> Detail {
+        if self.values["detail"] == "brief" { Detail::Brief } else { Detail::Detailed }
+    }
+    fn put(
+        &mut self,
+        key: &str,
+        word: Option<&str>,
+        found: impl FnOnce() -> String,
+    ) -> Result<&'static str, WritingTrouble> {
+        if key != "detail" {
+            return Err(WritingTrouble::UnknownKey { key: key.into() });
+        }
+        let Some(word) = word else {
+            return Err(WritingTrouble::NotAWord { key: key.into(), found: found() });
+        };
+        if !DETAILS.contains(&word) {
+            return Err(WritingTrouble::NotADetail { key: key.into(), raw: word.into() });
+        }
+        self.values.insert("detail", word.into());
+        Ok("detail")
+    }
+    pub fn with_repo(&self, repo: &[crate::config::ModelEntry]) -> (Self, Vec<WritingTrouble>) {
+        let mut out = Self::default();
+        let mut problems = Vec::new();
+        for e in repo {
+            let word = e.word();
+            if word.is_none() && e.key == "detail" {
+                problems.push(WritingTrouble::NotQuoted { key: e.key.clone(), raw: e.raw.clone(), line: e.line });
+                continue;
+            }
+            match out.put(&e.key, word, || e.raw.clone()) {
+                Ok(key) if !out.repo.iter().any(|k| k == key) => out.repo.push(key.into()),
+                Ok(_) => (),
+                Err(why) => problems.push(why),
+            }
+        }
+        for key in &self.written {
+            if let Some((&k, v)) = self.values.get_key_value(key.as_str()) {
+                out.values.insert(k, v.clone());
+            }
+        }
+        out.repo.retain(|k| !self.written.contains(k));
+        out.written = self.written.clone();
+        (out, problems)
+    }
+}
+
 /// 값이 등급 낱말([`MODEL_LEVELS`])인 키인가 — `review_grade`·`effort`·`effort_complex`. 키를 재는 [`Models::put`] 과
 /// 탈의 글을 고르는 사용자 설정의 읽기가 이 하나로 가른다.
 pub fn is_level_key(key: &str) -> bool {
@@ -290,6 +373,8 @@ pub struct Registry {
     /// 한 파싱에서 읽은 역할별 모델과 까닭. 쓰는 길은 없다(moai-9tqo.3la).
     pub models: Models,
     pub models_problems: Vec<ModelsTrouble>,
+    pub writing: Writing,
+    pub writing_problems: Vec<WritingTrouble>,
     /// 읽다 만난 탈. 멀쩡하면 `None` 이다. 까닭 글은 `problems` 에 있고 여기는 **그 탈의 갈래**뿐이다
     /// — 글로 가르면 말이 바뀔 때마다 가르는 쪽이 따라 깨진다.
     ///
@@ -627,6 +712,9 @@ pub fn read(path: Option<&Path>) -> Registry {
             let (models, problems) = doc.models();
             reg.models = models;
             reg.models_problems = problems;
+            let (writing, problems) = doc.writing();
+            reg.writing = writing;
+            reg.writing_problems = problems;
         }
         // 못 읽었거나 깨진 까닭은 **층만 댄다**(moai-5jsn). 보기에도 실으면 탐색기가 같은 파싱 오류를 층 없음
         // 배너와 보기 알림으로 두 번 댔다. 층은 늘 댄다 — 밖에서는 층 화면이, 안에서는 층을 못 세운 배너
@@ -1217,6 +1305,23 @@ impl Doc {
             }
         }
         (models, problems)
+    }
+
+    pub fn writing(&self) -> (Writing, Vec<WritingTrouble>) {
+        let mut writing = Writing::default();
+        let mut problems = Vec::new();
+        let Some(item) = self.doc.get(WRITING) else { return (writing, problems) };
+        let Some(table) = item.as_table_like() else {
+            problems.push(WritingTrouble::NotATable { found: item.type_name().to_string() });
+            return (writing, problems);
+        };
+        for (key, item) in table.iter() {
+            match writing.put(key, item.as_str(), || item.type_name().to_string()) {
+                Ok(key) => writing.written.push(key.into()),
+                Err(why) => problems.push(why),
+            }
+        }
+        (writing, problems)
     }
 
     /// 적어 둔 탐색기 보기와, 못 읽은 키의 까닭(moai-2bzp). **관대하게 읽는다** — 틀린 키 하나가

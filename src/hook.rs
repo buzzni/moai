@@ -166,7 +166,14 @@ impl Decision {
 /// 없다는 뜻이다(moai-6pld). 트래커를 git 밖에 두고 AGENTS.md 를 안 건드린 저장소에서는 이 훅이 에이전트가
 /// moai 를 아는 유일한 길이라, 사용법을 든 스킬을 댄다. 블록이 있는 저장소에는 안 싣는다 — 같은 말을 두 번
 /// 하는 것은 첫 프롬프트마다 치르는 값이다.
-pub fn guided_board(lines: &[String], lang: Lang, unguided: bool) -> Decision {
+fn writing_line(lang: Lang, detail: crate::user_config::Detail) -> &'static str {
+    match detail {
+        crate::user_config::Detail::Detailed => say(lang, "hook.writing_detailed"),
+        crate::user_config::Detail::Brief => say(lang, "hook.writing_brief"),
+    }
+}
+
+pub fn guided_board(lines: &[String], lang: Lang, unguided: bool, detail: crate::user_config::Detail) -> Decision {
     // 싣기 전에 색을 걷는다. 까닭은 `style::plain` 에 있다.
     let body = crate::style::plain(&lines.join("\n"));
     if body.trim().is_empty() {
@@ -176,13 +183,13 @@ pub fn guided_board(lines: &[String], lang: Lang, unguided: bool) -> Decision {
         true => format!("{}\n{}", say(lang, "hook.lead"), say(lang, "hook.unguided")),
         false => say(lang, "hook.lead").to_string(),
     };
-    Decision::Context(format!("{lead}\n\n{body}"))
+    Decision::Context(format!("{lead}\n{}\n\n{body}", writing_line(lang, detail)))
 }
 
 /// 블록이 선 체크아웃의 보드 — 시험이 이 모양으로 부른다.
 #[cfg(test)]
 pub fn board(lines: &[String], lang: Lang) -> Decision {
-    guided_board(lines, lang, false)
+    guided_board(lines, lang, false, crate::user_config::Detail::default())
 }
 
 /// Claude Code 가 훅의 글 한 칸(`additionalContext`, 평문 stdout)에 싣는 상한 — 1만 자다(리뷰 moai-h8tn.x4l,
@@ -313,7 +320,14 @@ impl Carry {
 /// **`closing` 과 같은 자로 잰다**([`holding`]) — 겹친 줄(`latest`)에서 더는 안 집힌 줄은 안 싣는다.
 /// 따로 재던 판은 main 이 이미 닫거나 놓은 줄을 딸린 워크트리의 낡은 스냅샷대로 "압축 전부터 집고
 /// 있다" 로 실었고, 같은 세션의 `Stop` 은 그 줄을 안 붙들어 두 말이 갈렸다(리뷰 moai-3k2d.1df).
-pub fn carried(issues: &[Issue], latest: &[Issue], cfg: &Config, away: &Away, lang: Lang) -> Decision {
+pub fn carried(
+    issues: &[Issue],
+    latest: &[Issue],
+    cfg: &Config,
+    away: &Away,
+    lang: Lang,
+    detail: crate::user_config::Detail,
+) -> Decision {
     let wip = holding(issues, latest, cfg, away);
     if wip.is_empty() {
         return Decision::Pass;
@@ -322,6 +336,7 @@ pub fn carried(issues: &[Issue], latest: &[Issue], cfg: &Config, away: &Away, la
     for i in wip {
         out.push_str(&format!("\n  {}  {}", i.id, i.title));
     }
+    out.push_str(&format!("\n{}", writing_line(lang, detail)));
     Decision::Context(out)
 }
 
@@ -10023,7 +10038,7 @@ mod tests {
     }
 
     fn carried(issues: &[Issue], latest: &[Issue], cfg: &Config, away: &Away) -> Decision {
-        super::carried(issues, latest, cfg, away, Lang::Ko)
+        super::carried(issues, latest, cfg, away, Lang::Ko, crate::user_config::Detail::default())
     }
 
     fn board(lines: &[String]) -> Decision {
@@ -11633,7 +11648,9 @@ mod tests {
                 panic!("보드를 안 실었다");
             };
             assert!(said.starts_with(head), "{lang:?} 의 머리말이 아니다 — {said}");
-            let Decision::Context(said) = super::carried(&all, &all, &cfg(), &here(), lang) else {
+            let Decision::Context(said) =
+                super::carried(&all, &all, &cfg(), &here(), lang, crate::user_config::Detail::default())
+            else {
                 panic!("집은 줄을 안 실었다");
             };
             assert!(said.contains("t-1"), "{lang:?}: 집은 줄을 잃었다 — {said}");
@@ -15417,6 +15434,33 @@ mod tests {
         assert!(c.contains("이슈 3"), "{c}");
     }
 
+    #[test]
+    fn the_board_says_how_much_to_write() {
+        use crate::user_config::Detail;
+        for lang in [Lang::En, Lang::Ko] {
+            for (detail, key) in [(Detail::Detailed, "hook.writing_detailed"), (Detail::Brief, "hook.writing_brief")] {
+                let Decision::Context(text) = guided_board(&["board".into()], lang, false, detail) else {
+                    panic!("no board")
+                };
+                assert_eq!(text.lines().nth(1), Some(say(lang, key)));
+                assert_eq!(guided_board(&[], lang, false, detail), Decision::Pass);
+            }
+        }
+    }
+
+    #[test]
+    fn what_is_carried_says_how_much_to_write() {
+        use crate::user_config::Detail;
+        let all = vec![epic("t-e"), under("t-1", "in_progress", "t-e")];
+        for detail in [Detail::Detailed, Detail::Brief] {
+            let Decision::Context(text) = super::carried(&all, &all, &cfg(), &here(), Lang::En, detail) else {
+                panic!("no carry")
+            };
+            assert!(text.ends_with(writing_line(Lang::En, detail)));
+            assert_eq!(super::carried(&[], &[], &cfg(), &here(), Lang::En, detail), Decision::Pass);
+        }
+    }
+
     /// 싣는 글에 색이 섞이면 안 된다. 계약 JSON 안의 이스케이프는 아무도
     /// 안 걷어내고, 받는 쪽 화면에 그 글자가 그대로 뜬다.
     #[test]
@@ -15436,9 +15480,15 @@ mod tests {
         assert_eq!(board(&[]), Decision::Pass);
         // AGENTS.md 에 블록이 없는 체크아웃에는 사용법이 어디 있는지 한 줄을 더 싣는다(moai-6pld).
         let lang = crate::i18n::Lang::En;
-        let Decision::Context(bare) = guided_board(&["todo 3".into()], lang, true) else { panic!("실어야 한다") };
+        let Decision::Context(bare) =
+            guided_board(&["todo 3".into()], lang, true, crate::user_config::Detail::default())
+        else {
+            panic!("실어야 한다")
+        };
         assert!(bare.contains(say(lang, "hook.unguided")), "{bare}");
-        let Decision::Context(plain) = guided_board(&["todo 3".into()], lang, false) else {
+        let Decision::Context(plain) =
+            guided_board(&["todo 3".into()], lang, false, crate::user_config::Detail::default())
+        else {
             panic!("실어야 한다")
         };
         assert!(!plain.contains(say(lang, "hook.unguided")), "{plain}");
