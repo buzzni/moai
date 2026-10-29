@@ -1878,6 +1878,27 @@ write that repository's name.
 /// 명령이 키를 바꾸거나 더하면 거기서 붉어진다.
 ///
 /// 발동어는 [`skill`] 과 같은 까닭으로 두 말을 함께 싣는다.
+pub fn plan() -> String {
+    format!(r#"---
+name: moai-plan
+description: Plan a request, split an epic, or unfold a backlog with the planning model. Use for "plan this", "계획 세워", and "에픽으로 나눠".
+---
+
+# moai-plan
+
+The host interviews the person, then a planning subagent drafts a grounded plan. The moai CLI never launches an agent.
+
+1. Read `moai models --json` and `moai writing --json`. Compare the `plan` identifier case-insensitively: a name containing `fable` qualifies; a name containing `opus` qualifies only when `effort_plan` is `xhigh` or `max`. All other names fail. On failure stop before interviewing or creating anything; print one line naming the keys to change (`plan` and, when needed, `effort_plan`), recommending `fable` or `opus` with `effort_plan = "xhigh"`. Identify the source from `written`, then `repo`, else default; the user config overrides repository recommendations. Never substitute a model automatically.
+2. Inspect the repository, tracker and wiki for what can be learned without asking. Use `AskUserQuestion` to complete the interview: goal and done state, scope and exclusions, acceptance, protected areas and settled design, milestone (including explicit consent to join a running release or a new version), deadline and start, priority, review focus and risks. Ask follow-ups until decisions are settled. Never invent a start or deadline. No answer means no deadline.
+3. Save the interview, including the person's answers verbatim, in a scratchpad file. Pass its absolute path, root and `Writing:` detail to the subagent. Call `Agent(subagent_type: "general-purpose", model: <plan>, effort: <effort_plan>, prompt: <draft brief>)` with this brief:
+
+{brief}
+
+4. Present the epic and member titles, difficulty and any `gap:` lines once. If gaps remain, ask only about those and resume the same `agentId` with the answers; the subagent never asks the person. Present the revised plan and obtain approval before writing the tracker. The person decides whether to attach a running milestone; omit `--milestone` without explicit consent. Encode dates in the plan or use `--due` and `--start` only as answered.
+5. After approval, the host registers new work with `moai add --from <plan file> --body -` (stream the epic body), adding `--milestone <id>` only when approved. For a backlog use `moai backlog promote <id> --from <plan file>`; preserve its inherited milestone and body and add the approved epic details to it. Map returned member IDs to titles and apply each body with `moai edit <member> -b - < <body file>`. Record `model: anthropic/<Model ran> (<highest difficulty> — plan: interview and detailed plan)` on the epic, using the actual model name without repeating the vendor. Do not pick up the work.
+"#, brief = indent(&plan_brief_draft(), "    "))
+}
+
 pub fn wiki() -> String {
     let [one, two, ..] = RULES;
     let commit = indent(WIKI_COMMIT, "       ");
