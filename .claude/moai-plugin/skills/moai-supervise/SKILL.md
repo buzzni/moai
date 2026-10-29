@@ -428,7 +428,8 @@ A backlog that only touches the wiki or the CHANGELOG is `docs`; sorting, summin
 same mechanical fix many times is `bulk`. **If the planner wrote `Model:` and `Effort:` lines
 in the issue body, read the model there as the role whose default it is** — the person's table
 still decides which model that role runs on. `<effort>` is `effort_complex` for `complex` and
-`effort` for the rest. The Codex worker's role is `codex`, and its sections say how it is sent.
+`effort` for the other worker roles; `effort_plan` goes only to the `plan` subagent (2-2).
+The Codex worker's role is `codex`, and its sections say how it is sent.
 
 The epic-end review is that epic's only review, because the members are not reviewed
 separately (the worker's 5 and 7).
@@ -467,7 +468,7 @@ The word is `plan`, not `subagent` — no worker holds this backlog, so it is no
     Person: <person>
     Writing: <writing>
 
-    Read the request, its evidence and enough code and tracker context to ground the split. Write short titles and concrete, actionable bodies with file and function locations, constraints, acceptance tests and review focus. For detailed writing use: Epic: why this bundle · the person's decisions · promises · order and shared files · review focus. Development member: goal · context (files and lines, precedent) · decisions · where and how (files, functions, structures) · important contracts and pitfalls · steps · acceptance tests · out of scope · order and shared files · role. Name the epic review section `Review focus / 리뷰에서 볼 것` (choose the English or Korean heading). For brief writing give what, where and tests. Classify each member using the difficulty rubric and explain why. Do not ask the person questions; report missing decisions as gaps.
+    Read the request, its evidence and enough code and tracker context to ground the split. Write short titles and concrete, actionable bodies with file and function locations, constraints, acceptance tests and review focus. For detailed writing use, for the epic: why this bundle · the person's decisions · promises · order and the files it shares · review focus; for a development member: goal · context (files and lines, the precedent) · what is decided · steps · acceptance (which tests) · out of scope · order and the files it shares · role, adding where and how (files, functions, structures) · important contracts and pitfalls after `what is decided`. Name the epic review section `Review focus / 리뷰에서 볼 것` (choose the English or Korean heading). For brief writing give what, where and tests. Classify each member using the difficulty rubric and explain why. Do not ask the person questions.
 
     1. Read it — moai -C "<root>" show <id> — and as much of the code as the split needs. If it
        already stands done, hand back `already unfolded: <id>` and stop: unfolding again puts up
@@ -485,8 +486,8 @@ The word is `plan`, not `subagent` — no worker holds this backlog, so it is no
        moai -C "<root>" edit <epic> --milestone none
        moai -C "<root>" edit <epic> --due <due>
        A refusal because the day is later than the milestone's leaves the epic as it stands.
-    4. Give the epic a detailed body with the bundle, decisions, promises, order, shared files and review focus from the shared instructions; combine it with the backlog context already carried onto it in a scratch file and write that combined body with `moai -C "<root>" edit <epic> -b - < <epic body file>`. Give every member a body the worker can start from, as `Writing:` says. `detailed`: these
-       headings, each a list —
+    4. Give the epic a body, as `Writing:` says — `detailed`: the epic headings of the shared instructions above; combine it with the backlog context already carried onto it in a scratch file and write that combined body with `moai -C "<root>" edit <epic> -b - < <epic body file>`. Give every member a body the worker can start from, as `Writing:` says. `detailed`: these
+       headings, each a list, with the two the shared instructions add after `what is decided` —
        goal · context (files and lines, the precedent) · what is decided · steps · acceptance (which tests) · out of scope · order and the files it shares · role.
        `brief`: what to change · where (file and function) · how to test it. A design question the
        backlog and its notes do not settle goes in it, open, for the worker to ask — do not

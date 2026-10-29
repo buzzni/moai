@@ -270,8 +270,8 @@ fn layered<T: LayeredTable, E>(
     (out, problems)
 }
 
-/// 값이 등급 낱말([`MODEL_LEVELS`])인 키인가 — `review_grade`·`effort`·`effort_complex`. 키를 재는 [`Models::put`] 과
-/// 탈의 글을 고르는 사용자 설정의 읽기가 이 하나로 가른다.
+/// 값이 등급 낱말([`MODEL_LEVELS`])인 키인가 — `review_grade`·`effort`·`effort_complex`·`effort_plan`.
+/// 키를 재는 [`Models::put`] 과 탈의 글을 고르는 사용자 설정의 읽기가 이 하나로 가른다.
 pub fn is_level_key(key: &str) -> bool {
     matches!(key, "review_grade" | "effort" | "effort_complex" | "effort_plan")
 }

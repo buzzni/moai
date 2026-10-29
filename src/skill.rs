@@ -1607,6 +1607,7 @@ mod tests {
             crate::guide::tmux(),
             crate::guide::saycode(),
             crate::guide::recover(),
+            crate::guide::plan(),
             crate::guide::worker(),
             crate::guide::worker_branches(),
         ];
@@ -1644,6 +1645,10 @@ mod tests {
                     .replace("<review text>", "/tmp/review.txt")
                     .replace("<that file>", "/tmp/review.txt")
                     .replace("<epic body file>", "/tmp/epic-body.txt")
+                    // `moai-plan` 이 초안에서 받은 파일들(moai-ns7a) — 계획·합친 에픽 본문·멤버 본문.
+                    .replace("<plan file>", "/tmp/plan.md")
+                    .replace("<combined file>", "/tmp/epic-body.txt")
+                    .replace("<body file>", "/tmp/member-body.txt")
                     .replace("<keyword>", "parser")
                     .replace("<milestone>", "t-m")
                     // 감독이 싣는 기한(`Due:`, moai-7bqy.fvo) — 일꾼 1 이 에픽에 단다.

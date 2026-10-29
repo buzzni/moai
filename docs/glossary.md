@@ -262,7 +262,7 @@ The person's `[writing] detail` selects `detailed` or `brief` for tracker writin
 
 `[models]` in your user config: which model each role runs on — `plan`,
 `develop`, `complex`, `review`, `docs`, `bulk`, `codex` — with `review_grade`,
-`effort` and `effort_complex` beside them. A key left out keeps its default.
+`effort`, `effort_complex` and `effort_plan` beside them. A key left out keeps its default.
 `moai models` shows it and the [supervisor](#supervisor) reads
 `moai models --json` once a round. A repository can recommend values in a
 `[models]` table of its `.moai/config.toml`: they override the defaults, and your
