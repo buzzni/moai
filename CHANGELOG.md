@@ -14,6 +14,7 @@ does not tag — see `CONTRIBUTING.md`.
 
 ### Fixed
 
+- Gantt charts load and scroll with less repeated work in the terminal and web; the web retries chart reads, and slow history reads poll less often while background updates remain visible. (moai-w7ms)
 - Supervisors clear Codex worker windows with `/clear` instead of `/new`, which asked
   where the new conversation should run and left the clear to you. (moai-2t9u)
 - `moai skill status` warns when a planted Claude plugin is missing its local

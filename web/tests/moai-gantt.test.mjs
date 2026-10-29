@@ -1051,9 +1051,17 @@ test('only the window is drawn: a long list and a multi-year axis at the hour st
   assert.ok(count('.tick') > 0 && count('.tick') < 150, `ticks: ${count('.tick')}`)
   assert.ok(count('.col-we') <= 4, `weekend blocks: ${count('.col-we')}`)
 
+  const header = root.querySelector('.hd2 .tick')
+  const today = root.querySelector('.todayline')
+  const retained = lane(root, 'r010')
+  top = 12 * 28
+  scrolled()
+  assert.equal(lane(root, 'r010'), retained, 'overlapping lanes are reused')
   // Scrolling down brings the rows in and lets the first go.
   top = 300 * 28 + 44
   scrolled()
+  assert.equal(root.querySelector('.hd2 .tick'), header)
+  assert.equal(root.querySelector('.todayline'), today)
   assert.ok(lane(root, 'r300') && !lane(root, 'r000'))
   assert.equal(lane(root, 'r300').style.top, `${300 * 28}px`)
   assert.equal(root.querySelector(`.g-row[data-id="r300"]`).style.top, `${300 * 28}px`)
@@ -1068,8 +1076,10 @@ test('only the window is drawn: a long list and a multi-year axis at the hour st
   assert.ok(count('.tick') < 150, `ticks: ${count('.tick')}`)
   const lefts = [...root.querySelectorAll('.hd2 .tick')].map((node) => px(node, 'left'))
   assert.ok(lefts.every((x) => x > box.scrollLeft - 3000 && x < box.scrollLeft + 4000), 'no tick far from the view')
+  const grid = root.querySelector('.g-row[data-id="r399"]')
   box.scrollLeft = 0
   scrolled()
+  assert.equal(root.querySelector('.g-row[data-id="r399"]'), grid)
   assert.equal(lane(root, 'r399').querySelector('.b-plan'), null, 'a bar far from the view is not a node')
   assert.ok(lane(root, 'r399').querySelector('.mk.clip:not([hidden])'), 'its mark says it lies off to the side')
 })

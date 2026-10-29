@@ -171,9 +171,9 @@ impl Site {
             #[cfg(test)]
             BUILT.set(BUILT.get() + 1);
             let wh = self.ground.here(&self.issues);
-            let read = crate::report::gantt::gantt(&self.issues, &self.index, &wh, &self.cfg, now, zone);
+            let read = crate::report::gantt::rows(&self.issues, &self.index, &wh, &self.cfg, now, zone);
+            let ranges = crate::report::gantt::RangeContext::new(now, zone);
             let rows = read
-                .rows
                 .iter()
                 .map(|r| {
                     let mut bar = GanttRow::default();
@@ -181,7 +181,7 @@ impl Site {
                     CachedRow {
                         bar,
                         blocked_by: r.blocked_by.iter().map(|b| b.id.to_string()).collect(),
-                        range: crate::report::gantt::range_of([r], now, zone),
+                        range: ranges.range_of([r]),
                     }
                 })
                 .collect();

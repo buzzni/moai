@@ -28,16 +28,18 @@ const until = async (check) => {
   assert.fail('the page did not reach the expected state')
 }
 
-async function page(t, { holdFirst = false, initialTab } = {}) {
+async function page(t, { holdFirst = false, initialTab, chartFailures = 0 } = {}) {
   const dom = new JSDOM('<!doctype html><html><body><div id="moai-app"></div></body></html>', {
     url: 'http://localhost:6624/', runScripts: 'outside-only', pretendToBeVisual: true,
   })
   t.after(() => dom.window.close())
   if (initialTab) dom.window.localStorage.setItem('moai.web', JSON.stringify({ tab: initialTab }))
   const trees = []
+  const requests = []
   let release
   dom.window.fetch = async (path) => {
     const url = new URL(path, dom.window.location.href)
+    requests.push(url.pathname)
     let body
     if (url.pathname === '/api/boot') body = boot
     else if (url.pathname === '/api/stamp') body = { stamp: 'unchanged' }
@@ -46,7 +48,8 @@ async function page(t, { holdFirst = false, initialTab } = {}) {
       if (url.pathname === '/api/tree') {
         trees.push(url)
         if (holdFirst && trees.length === 1) await new Promise((resolve) => { release = resolve })
-        out = [{ ...row, home: [], ...(url.searchParams.has('gantt') ? { gantt } : {}) }]
+        if (url.searchParams.has('gantt') && chartFailures > 0) { chartFailures--; out = null }
+        else out = [{ ...row, home: [], ...(url.searchParams.has('gantt') ? { gantt } : {}) }]
       } else if (url.pathname === '/api/rows') out = [row]
       else if (url.pathname === '/api/status') out = { issues: {}, milestones: [], epics: [] }
       else out = []
@@ -58,7 +61,7 @@ async function page(t, { holdFirst = false, initialTab } = {}) {
   await until(() => trees.length > 0)
   const tab = (id) => dom.window.document.querySelector(`[role=tab][data-tab="${id}"]`)
   const bars = () => dom.window.document.querySelectorAll('.g-lanes .b-plan').length
-  return { dom, trees, tab, bars, release: () => release?.() }
+  return { dom, trees, requests, tab, bars, release: () => release?.() }
 }
 
 test('opening Gantt fetches values once and subsequent visits reuse them', async (t) => {
@@ -66,8 +69,12 @@ test('opening Gantt fetches values once and subsequent visits reuse them', async
   await until(() => p.dom.window.document.querySelector('.moai-line[data-key="test-1234"]'))
   assert.equal(p.trees[0].searchParams.has('gantt'), false)
   assert.equal(p.trees[0].searchParams.has('tz'), false)
+  const rowReads = p.requests.filter((path) => path === '/api/rows').length
+  const statusReads = p.requests.filter((path) => path === '/api/status').length
   p.tab('gantt').click()
   await until(() => p.bars() === 1)
+  assert.equal(p.requests.filter((path) => path === '/api/rows').length, rowReads)
+  assert.equal(p.requests.filter((path) => path === '/api/status').length, statusReads)
   assert.equal(p.trees.length, 2)
   assert.equal(p.trees[1].searchParams.get('gantt'), '1')
   assert.equal(p.trees[1].searchParams.get('tz'), 'UTC')
@@ -83,6 +90,14 @@ test('opening Gantt during the first tree-only read schedules a chart read after
   p.release()
   await until(() => p.bars() === 1)
   assert.deepEqual(p.trees.map((url) => url.searchParams.has('gantt')), [false, true])
+})
+
+test('a failed chart-only read retries while the tracker stamp stays unchanged', async (t) => {
+  const p = await page(t, { chartFailures: 1 })
+  await until(() => p.dom.window.document.querySelector('.moai-line[data-key="test-1234"]'))
+  p.tab('gantt').click()
+  await until(() => p.bars() === 1)
+  assert.deepEqual(p.trees.map((url) => url.searchParams.has('gantt')), [false, true, true])
 })
 
 test('a page restored on Gantt asks for values in its first read', async (t) => {
