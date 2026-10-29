@@ -14,11 +14,15 @@ does not tag — see `CONTRIBUTING.md`.
 
 ### Added
 
+- Claude Code gains `moai-plan` for interviews and detailed plans, and `effort_plan` configures planning effort (default `xhigh`). (moai-ns7a)
+
 - Plans accept the fullwidth `＠` as a date marker, with the same escaping rules as `@`. A plan
   title ending in `＠` and a digit, such as `＠3F`, is now read as a date and refused when it is
   not one; write `\＠` to keep it as text. (moai-uwi9.kr5)
 
 ### Changed
+
+- The supervisor passes `effort_plan` to its planning agent and carries planned review focus into the epic review. (moai-ns7a)
 
 - `moai ready` orders equal-priority work by the earliest deadline it follows, including open ancestors. (moai-uwi9.rff)
 
