@@ -12,8 +12,19 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+### Added
+
+- Plans accept the fullwidth `＠` as a date marker, with the same escaping rules as `@`. (moai-uwi9.kr5)
+
+### Changed
+
+- `moai ready` orders equal-priority work by the earliest deadline it follows, including open ancestors. (moai-uwi9.rff)
+
 ### Fixed
 
+- Hook rule 2 protects another epic's worktree even when a held row has no worktree. (moai-uwi9.q08)
+- Interactive cmux and recovery command guidance rejects paths containing `!`. (moai-uwi9.ctp)
+- Merge-driver probes retry a timeout and preserve an existing command when its result remains unknown. (moai-uwi9.b75)
 - Supervisors clear Codex worker windows with `/clear` instead of `/new`, which asked
   where the new conversation should run and left the clear to you. (moai-2t9u)
 - `moai skill status` warns when a planted Claude plugin is missing its local
