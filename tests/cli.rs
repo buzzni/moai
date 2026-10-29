@@ -1208,18 +1208,19 @@ fn init_plants_the_merge_driver_too() {
     assert!(!said.contains("머지 드라이버를 심었다"), "일부러 고른 줄을 덮었다\n{said}");
     assert_eq!(git(root, &["config", "--get", "merge.moai.driver"]), pinned, "일부러 고른 줄이 바뀌었다");
 
+    // **모르는 드라이버는 그대로 둔다**(moai-uwi9.b75) — 신호에 맞아 죽은 것도, 두 번 재고도 시간을 넘긴 것도. 실행 파일은
+    // `write_exe` 로 내놓는다 — 이 프로세스가 쓴 inode 를 띄우면 옆 시험의 fork 와 겹쳐 ETXTBSY 고, 그때의 `Unknown` 은
+    // 다시 재지 않아 `probe-count` 가 안 선다(리뷰 moai-uwi9.j8c).
     #[cfg(unix)]
     {
-        use std::os::unix::fs::PermissionsExt;
         let unknown = root.join("unknown-driver");
-        std::fs::write(&unknown, "#!/bin/sh\nkill -9 $$\n").unwrap();
-        std::fs::set_permissions(&unknown, std::fs::Permissions::from_mode(0o755)).unwrap();
+        write_exe(&unknown, "#!/bin/sh\nkill -9 $$\n");
         let command = format!("{} merge-driver %O %A %B %L %P", unknown.display());
         git(root, &["config", "--local", "merge.moai.driver", &command]);
         ok(root, &["init"]);
         assert_eq!(git(root, &["config", "--get", "merge.moai.driver"]).trim_end(), command);
 
-        std::fs::write(&unknown, "#!/bin/sh\necho probe >> probe-count\nexec sleep 30\n").unwrap();
+        write_exe(&unknown, "#!/bin/sh\necho probe >> probe-count\nexec sleep 30\n");
         ok(root, &["init"]);
         assert_eq!(git(root, &["config", "--get", "merge.moai.driver"]).trim_end(), command);
         assert_eq!(std::fs::read_to_string(root.join("probe-count")).unwrap().lines().count(), 2);
