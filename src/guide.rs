@@ -5867,6 +5867,30 @@ mod tests {
         }
     }
 
+    #[test]
+    fn the_detailed_example_carries_every_heading() {
+        let body = WRITING_EXAMPLE.split_once("<<'DETAILED'\n").unwrap().1.split_once("\nDETAILED").unwrap().0;
+        let headings = [
+            "Goal",
+            "Context",
+            "What is decided",
+            "Steps",
+            "Acceptance",
+            "Out of scope",
+            "Order and shared files",
+            "Role",
+        ];
+        let mut seen = Vec::new();
+        for line in body.lines() {
+            if let Some(heading) = line.strip_prefix("## ") {
+                seen.push(heading);
+            } else {
+                assert!(line.starts_with("- "), "{line}");
+            }
+        }
+        assert_eq!(seen, headings);
+    }
+
     /// **심는 글은 한국어 글 다듬기를 시키지 않는다**(사용자 결정 moai-vtfu, 2026-10-03). 그 절(moai-5wk4)과
     /// 용어 규칙(moai-iloh)을 걷었다 — 글은 기본으로 쓴다. 한 표면에만 남으면 그 표면을 읽은 세션이 깔리지도
     /// 않은 플러그인을 부르려 든다. 심는 다섯 글과 브리프를 다 훑는다.
