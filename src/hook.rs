@@ -5619,7 +5619,8 @@ pub struct Away {
     /// (moai-9js2.3xn, 2026-10-25 사용자 결정) — 쥔 줄이 모두 제 워크트리를 가지면 규칙 2 가 루트 쓰기를 빈손이
     /// 아니라 그 워크트리의 자리를 대며 막는다([`homed`], [`Away::homes`]).
     ///
-    /// **처음 묻는 자리에서 한 번 읽는다**([`Sure`], moai-qrja.12h) — 옆 이름이 그 줄을 가리킬 때만 묻는다.
+    /// **처음 묻는 자리에서 한 번 읽는다**([`Sure`], moai-qrja.12h) — 옆 이름이 그 줄을 가리킬 때와, 쓰기가 떨어지는 워크트리에
+    /// 그 줄의 집기 표식이 설 때만 묻는다([`sure_home`]·[`marked_in`], moai-8kzn).
     pub sure: Sure,
     /// 이 세션의 사람(moai-0zjo, 2026-10-02 사용자 결정) — **담당이 내가 아닌 줄**은 초점([`held`])에서 뺀다.
     /// 남이 집은 줄도, 담당 없이 시작 칸에 선 줄도 내 일이 아니다. 담당은 줄마다 보고 묶음에서 물려받지
@@ -5663,15 +5664,25 @@ impl Marked {
     fn contains(&self, home: &Path, id: &str) -> bool {
         self.0.as_ref().is_some_and(|a| a.seen.get_or_init(|| (a.find)()).get(home).is_some_and(|ids| ids.contains(id)))
     }
+
+    /// 이미 읽은 답 — 읽지 않는다. 비교와 찍기가 쓴다([`Sure`] 와 같은 자).
+    fn settled(&self) -> Option<&std::collections::BTreeMap<PathBuf, BTreeSet<String>>> {
+        self.0.as_ref().and_then(|a| a.seen.get())
+    }
 }
 impl std::fmt::Debug for Marked {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_tuple("Marked").field(&self.0.is_some()).finish()
+        match (self.0.is_some(), self.settled()) {
+            (false, _) => f.write_str("Marked(none)"),
+            (true, None) => f.write_str("Marked(not read yet)"),
+            (true, Some(marks)) => write!(f, "Marked({marks:?})"),
+        }
     }
 }
+/// **비교는 표식을 안 읽는다** — [`Sure`] 와 같은 까닭이다. 읽을 길의 있고 없음과 이미 읽은 답을 견준다.
 impl PartialEq for Marked {
     fn eq(&self, other: &Self) -> bool {
-        self.0.is_some() == other.0.is_some()
+        self.0.is_some() == other.0.is_some() && self.settled() == other.settled()
     }
 }
 
@@ -5798,7 +5809,8 @@ impl Away {
 /// 이 세션이 **확실히** 집은 줄([`Away::sure`]) — **처음 묻는 자리에서 한 번 읽는다**(moai-qrja.12h, 리뷰 moai-9tqo.jdi 11번).
 ///
 /// 값으로 들던 판은 옆 이름이 서고 집힌 줄이 있으면 `PreToolUse` 마다 집기 기록 디렉터리(세션 파일 전부)를 미리
-/// 읽었다 — 늘 지나가는 `ls`·`cargo test` 도. 묻는 자리는 [`theirs`] 하나고, 옆 이름이 그 줄을 가리킬 때만 묻는다:
+/// 읽었다 — 늘 지나가는 `ls`·`cargo test` 도. 묻는 자리는 [`theirs`] 와 규칙 2 의 워크트리 물음([`sure_home`]·[`marked_in`])이고,
+/// 옆 이름이 그 줄을 가리키거나 그 줄의 집기 표식이 쓰기의 워크트리에 설 때만 묻는다:
 /// 그 밖의 줄에서는 이 값이 답을 못 바꾼다. [`Person`] 과 같은 꼴이다.
 ///
 /// 읽는 손은 `cmd/hook.rs` 가 건넨다 — 이 모듈은 저장소의 파일을 안 연다(모듈 머리). 손은 **묻는 판정의 줄**을 받는다: 기록이
@@ -6751,6 +6763,12 @@ fn main_of<'a>(away: &'a Away, root: &'a Path) -> Option<&'a Path> {
 ///
 /// **지금 벌인 줄만 센다**([`report::wip`]) — 미룬 줄은 확실한 집기로 남아도 초점이 아니다. 갈리는 판은 하나다: 확실히 집은
 /// 줄의 담당이 그 뒤에 남으로 바뀌었으면([`not_mine`]) 초점에서 빠지는데, 여기서는 지난다 — 지나는 쪽으로 기운다.
+///
+/// **그 줄의 집기 표식이 그 워크트리에 서 있어도 지난다**(moai-8kzn, 2026-10-29 사용자 결정) — 두 에픽을 한 워크트리에 실은
+/// 판에서는 이름이 그 줄을 안 가리킨다. [`homed`] 도 같은 물음을 묻는다([`marked_in`]). **이름을 먼저 본다** — 값싼 이름과 기록의
+/// 차례는 옛 판 그대로 두고, 표식(git 이 적어 둔 파일과 표식 파일을 읽는다)은 그 길이 못 풀었을 때만 연다. 한 고리에서 둘을 함께
+/// 묻던 판은 옆 에픽의 줄(서브에이전트 일꾼은 감독과 세션 id 를 나눠 써 그 줄도 다 확실히 집은 줄이다)에서 먼저 표식을 열어, 제
+/// 워크트리에 쓰는 거의 모든 부름이 그 파일들을 헛되이 읽었다(리뷰).
 fn sure_home(issues: &[Issue], cfg: &Config, away: &Away, at: &Path) -> bool {
     let real = real_path(at);
     let Some((home, names)) = landing(away, &real) else { return false };
@@ -6759,9 +6777,42 @@ fn sure_home(issues: &[Issue], cfg: &Config, away: &Away, at: &Path) -> bool {
         return false;
     }
     let ties = report::Ties::of(issues);
-    wip.into_iter().any(|i| {
-        away.sure.contains(issues, &i.id) && (report::claims(&ties, names, i) || away.marked.contains(home, &i.id))
-    })
+    wip.iter().any(|i| report::claims(&ties, names, i) && away.sure.contains(issues, &i.id))
+        || wip.iter().any(|i| away.marked.contains(home, &i.id) && away.sure.contains(issues, &i.id))
+}
+
+/// 초점의 줄 가운데 **이 세션이 확실히 집은 줄의 집기 표식**이 그 워크트리(`home`)에 서 있는가(moai-8kzn) — [`homed`] 가 옆 에픽의
+/// 자리로 막기 전에 묻는다. [`sure_home`] 은 세는 자리 밖의 쓰기에서만 그것을 물어, 셸이 그 워크트리에 선 세션(그 안의 쓰기가 그
+/// 자리에서 세는 자리다)은 표식이 선 제 자리에 쓰다 막혔다(리뷰) — 표식은 그 워크트리 안에서 친 집기가 적으므로 그 세션의 셸은 대개
+/// 거기 서 있다. 셸이 선 자리로 가르지 않는다는 규칙 2 의 자(moai-qrja.kb4)가 여기에도 선다.
+///
+/// **확실히 집은 줄만 센다**([`Away::sure`]) — 초점은 사람 하나의 벌인 줄이라 옆 세션의 줄도 든다. 그것으로 열면 그 줄을 집지도 않은
+/// 세션이 표식만 보고 옆 에픽의 워크트리에 쓴다.
+fn marked_in(issues: &[Issue], away: &Away, focus: &[&Issue], home: &Path) -> bool {
+    focus.iter().any(|i| away.marked.contains(home, &i.id) && away.sure.contains(issues, &i.id))
+}
+
+/// [`beside_text`] 가 댈 자리 — [`homes_of`] 가 이름으로 찾은 자리에, 이름으로는 못 찾았지만 **이 세션이 확실히 집은 줄의 집기
+/// 표식**이 선 워크트리를 더한다(moai-8kzn, 리뷰). 그 자리의 쓰기는 지나므로([`marked_in`]) 거절문은 그리로 보내야 한다 — 안 더하던
+/// 판은 그 줄을 워크트리 없는 줄로 대어 새 워크트리를 짓거나 모두가 나눠 쓰는 루트 체크아웃에 쓰라고 했다. 루트 쓰기의 문
+/// ([`homed`] 의 `found.len()`)은 이것을 안 쓴다 — 그 문은 지금처럼 이름으로 잰다.
+fn with_marked<'a, 'h>(
+    issues: &[Issue],
+    away: &'h Away,
+    focus: &[&'a Issue],
+    found: &[(&'a Issue, &'h Path)],
+) -> Vec<(&'a Issue, &'h Path)> {
+    let mut out = found.to_vec();
+    for &i in focus {
+        if out.iter().any(|&(row, _)| std::ptr::eq(row, i)) {
+            continue;
+        }
+        let marked = away.homes.iter().find(|(home, _)| away.marked.contains(home, &i.id));
+        if let Some((home, _)) = marked.filter(|_| away.sure.contains(issues, &i.id)) {
+            out.push((i, home.as_path()));
+        }
+    }
+    out
 }
 
 /// [`guard_edit_at`] 의 몸통 — **초점과 그 자리는 부르는 쪽이 한 번 지어 건넨다**([`held`]·[`homes_of`]). 껍데기의
@@ -6908,10 +6959,12 @@ fn homed<'a>(
         return Decision::Pass;
     }
     if let Some((beside, names)) = landing(away, &real) {
-        if !counted_real(&real, beside) || !claims_other(issues, focus, names) {
+        if !counted_real(&real, beside) || !claims_other(issues, focus, names) || marked_in(issues, away, focus, beside)
+        {
             return Decision::Pass;
         }
-        return refuse_edit(away, focus, beside_text(focus, found, main_of(away, root), beside, &real, typed));
+        let places = with_marked(issues, away, focus, found);
+        return refuse_edit(away, focus, beside_text(focus, &places, main_of(away, root), beside, &real, typed));
     }
     if found.len() != focus.len() {
         return Decision::Pass;
@@ -10397,12 +10450,28 @@ mod tests {
             ..Away::default()
         };
         assert_eq!(guard_edit(&all, &cfg(), &away, &root, "/repo/.worktrees/t-f/src/a.rs"), Decision::Pass);
-        assert!(matches!(guard_edit(&all, &cfg(), &away, &root, "/repo/.worktrees/t-g/src/a.rs"), Decision::Deny(_)));
+        // 옆 에픽의 워크트리는 그래도 막고, 거절문은 표식이 선 자리를 댄다 — 워크트리 없는 줄로 대어 루트로 보내지 않는다(리뷰).
+        let Decision::Deny(why) = guard_edit(&all, &cfg(), &away, &root, "/repo/.worktrees/t-g/src/a.rs") else {
+            panic!("옆 에픽의 워크트리 쓰기를 안 막았다");
+        };
+        assert!(why.contains(&spelt("/repo/.worktrees/t-f/src/a.rs")) && !why.contains("No worktree yet"), "{why}");
+        // **셸이 그 워크트리에 선 세션도 같다**(리뷰) — 그 안의 쓰기는 그 자리에서 세는 자리라 [`homed`] 로 가고, 표식은 그 워크트리
+        // 안에서 친 집기가 적으므로 그 세션의 셸은 대개 거기 서 있다.
+        let here = abs("/repo/.worktrees/t-f");
+        let standing = Away { main: Some(root.clone()), linked: true, ..away.clone() };
+        assert_eq!(guard_edit(&all, &cfg(), &standing, &here, "src/a.rs"), Decision::Pass);
+        assert!(matches!(
+            guard_edit(&all, &cfg(), &standing, &here, "/repo/.worktrees/t-g/src/a.rs"),
+            Decision::Deny(_)
+        ));
         let other_session = Away { sure: Sure::default(), ..away };
         assert!(matches!(
             guard_edit(&all, &cfg(), &other_session, &root, "/repo/.worktrees/t-f/src/a.rs"),
             Decision::Deny(_)
         ));
+        // 그 줄을 안 집은 세션은 그 워크트리에 서 있어도 표식으로 못 연다.
+        let other_standing = Away { sure: Sure::default(), ..standing };
+        assert!(matches!(guard_edit(&all, &cfg(), &other_standing, &here, "src/a.rs"), Decision::Deny(_)));
     }
 
     /// **규칙 2 의 둘째 물음은 쓰기가 떨어지는 자리로 잰다 — 세션이 선 자리가 아니다**(moai-qrja.kb4, 2026-10-26 사용자

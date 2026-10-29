@@ -633,11 +633,16 @@ impl App {
 pub(super) fn commit_plan(app: &mut App) {
     let Some(PlanMove { id, plan }) = app.plan_move.clone() else { return };
     let lang = app.site.lang;
-    let at = crate::model::now();
     let done = say(lang, "tui.gantt.moved");
     let mut was: Option<(Option<String>, Option<String>)> = None;
     let mut overflow: Vec<String> = Vec::new();
-    let wrote = app.write_marked(commit_plan, |issues, cfg, _, _| {
+    // 이 쓰기가 **정말 바꾼** 줄 — 쓴 사람의 읽음으로 적을 것이다([`App::mark_written`], moai-uwi9.0xu). 바꾼 것이 없으면(그새 옆이
+    // 같은 시작을 적었다) 비어, 옆이 고친 그 판을 읽음으로 안 적는다 — `moai edit` 이 `changed` 일 때만 적는 것과 같은 자다.
+    let mut written: Option<crate::model::Issue> = None;
+    let wrote = app.write(commit_plan, |issues, cfg, _, _| {
+        // **시각은 락을 쥔 뒤에 뜬다**(`cmd::mv` 의 moai-u5bk.3wq 와 같은 자, 리뷰) — 밖에서 뜨면 그새 옆이 담은 줄보다 이른 도장이
+        // 서서 줄의 도장이 거꾸로 간다.
+        let at = crate::model::now();
         let Some(i) = issues.iter_mut().find(|i| i.id == id) else {
             return Err(crate::fail::Fail::not_found(&id, lang));
         };
@@ -648,10 +653,11 @@ pub(super) fn commit_plan(app: &mut App) {
         let (start, due) =
             plan.change(i).map_err(|why| crate::fail::Fail::new(crate::view::unshifted(lang, why, &id)))?;
         i.set_dates(start, due);
-        i.settle(&before, cfg, &at).map_err(|why| {
+        let changed = i.settle(&before, cfg, &at).map_err(|why| {
             crate::fail::Fail::new(crate::view::invalid(lang, &crate::store::At::Id(id.clone()), &why))
         })?;
         let after = i.clone();
+        written = changed.then(|| after.clone());
         overflow = crate::report::overflow_by(issues, &before, &after, cfg);
         // **읽히는 날만 든다** — `Issue::shifted` 가 옮길 날을 고른 자(`planned_start`·`deadline`)와 같다. 못 읽는 글
         // (손으로 푼 `2026-10-24T00:00:00Z`)은 옮기기가 다른 쪽 날에서 센 날로 덮었으니 되돌릴 것은 "날 없음" 이고,
@@ -666,6 +672,8 @@ pub(super) fn commit_plan(app: &mut App) {
     if wrote.is_none() {
         return;
     }
+    // 쓴 사람의 읽음은 **쓰기가 락을 놓은 뒤에** 적는다. 못 적은 까닭은 알림 끝에 붙는다 — 옮긴 것은 담겼다.
+    let unmarked = written.and_then(|row| app.mark_written(&row));
     let Some((start, due)) = was else { return };
     // 옮긴 날이 있던 쪽은 같은 날 수를 거꾸로 — **몸통도 옮긴 쪽만이다**: 한쪽 날만 있던 줄에 `--shift` 를 대면 그새 옆
     // 세션이 다른 쪽에 적은 날까지 민다. 이 쓰기가 새로 세운 쪽(없던 끝을 다른 쪽에서 센 것, 하루 세우기)은 비우고, 고른
@@ -686,6 +694,9 @@ pub(super) fn commit_plan(app: &mut App) {
     told.push_str(&fill(say(lang, "tui.gantt.undo"), &[("cmd", &undo)]));
     if !overflow.is_empty() {
         told.push_str(&fill(say(lang, "tui.gantt.overflow"), &[("ids", &overflow.join(", "))]));
+    }
+    if let Some(why) = unmarked {
+        told.push_str(&format!(" — {why}"));
     }
     app.notice = Some(told);
 }
@@ -1119,6 +1130,26 @@ mod tests {
         let marks = crate::read_marks::read(&config, &dir, &Default::default());
         assert_eq!(marks.seen.get(&row.id), Some(&row.updated_at));
         assert_eq!(app.site.seen.get(&row.id), Some(&row.updated_at));
+    }
+
+    /// **읽음을 못 적어도 옮긴 것은 담겼다고 말한다**(moai-uwi9.0xu 리뷰) — 그 까닭은 알림 끝에 붙고 실패 배너(`trouble`)로 안
+    /// 선다. 배너로 세우던 판은 담긴 쓰기를 빨간 글로 앞세워 80칸에서 되돌리는 명령을 밀어냈고, 다시 든 읽음의 까닭이 `✓` 를 덮을
+    /// 수도 있었다.
+    #[test]
+    fn a_read_mark_that_cannot_be_written_does_not_fail_the_move() {
+        let (dir, mut app) = on_disk("plan-read-fail");
+        let config = dir.join("user/config.toml");
+        app.user_config = Some(config.clone());
+        // 읽음 파일 자리에 디렉터리가 서 있다 — 읽지도 쓰지도 못한다.
+        let sheet = crate::read_marks::place_of(&config, &dir).at;
+        std::fs::create_dir_all(&sheet).unwrap();
+        app.hit("SPC g g");
+        put_cursor(&mut app, "argos-0003");
+        app.hit(">");
+        assert_eq!(app.trouble, None, "담긴 쓰기를 실패로 세웠다");
+        let notice = app.notice.clone().unwrap_or_default();
+        assert!(notice.contains("moai edit argos-0003"), "되돌리는 명령이 안 섰다: {notice}");
+        assert!(notice.contains(&sheet.display().to_string()), "못 적은 까닭이 안 섰다: {notice}");
     }
 
     /// **되돌리는 명령은 이 쓰기가 옮긴 날만 거꾸로 옮긴다**(moai-ekg6.sml) — web 의 `undoOf` 와 같은 자다. 있던 날은 같은

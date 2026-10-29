@@ -2397,33 +2397,6 @@ impl App {
             &crate::model::Actor,
         ) -> crate::fail::R<(Vec<crate::model::JournalEntry>, Touched)>,
     ) -> Option<String> {
-        self.write_inner(retry, false, f)
-    }
-
-    pub(super) fn write_marked(
-        &mut self,
-        retry: Retry,
-        f: impl FnOnce(
-            &mut Vec<Issue>,
-            &Config,
-            &std::collections::BTreeSet<String>,
-            &crate::model::Actor,
-        ) -> crate::fail::R<(Vec<crate::model::JournalEntry>, Touched)>,
-    ) -> Option<String> {
-        self.write_inner(retry, true, f)
-    }
-
-    fn write_inner(
-        &mut self,
-        retry: Retry,
-        mark: bool,
-        f: impl FnOnce(
-            &mut Vec<Issue>,
-            &Config,
-            &std::collections::BTreeSet<String>,
-            &crate::model::Actor,
-        ) -> crate::fail::R<(Vec<crate::model::JournalEntry>, Touched)>,
-    ) -> Option<String> {
         // 앞 쓰기의 알림은 이 쓰기가 무엇이 되든 낡았다 — 실패한 뒤에 옛 `✓` 가 남으면
         // 이번 것이 담긴 것으로 읽힌다.
         self.notice = None;
@@ -2448,32 +2421,9 @@ impl App {
         // 저널 실패는 프로세스 전체에 쌓인다 — 이 쓰기 뒤에 이 저장소에 새로 선 것만 이 쓰기의 것이다.
         let missed_before = crate::store::journal_misses().len();
         let root = repo.root.clone();
-        let read_config = self.user_config.clone();
-        let mark_problem = std::cell::RefCell::new(Vec::new());
-        let written = by.and_then(|by| {
-            repo.with_write_after(
-                || lang,
-                |issues, _, cfg, reserved| {
-                    let (journal, touched) = f(issues, cfg, reserved, &by)?;
-                    let row = if mark { issues.iter().find(|i| i.id == touched.id).cloned() } else { None };
-                    Ok((journal, (touched, row)))
-                },
-                |(_, row)| {
-                    if let (Some(config), Some(row)) = (&read_config, row) {
-                        match crate::read_marks::mark_written(config, &root, lang, row) {
-                            Ok(wrote) => {
-                                mark_problem.borrow_mut().extend(wrote.problems.iter().map(|p| said_read(lang, p)))
-                            }
-                            Err(e) => mark_problem.borrow_mut().push(crate::text::one_line(&e.message)),
-                        }
-                    }
-                    Ok(())
-                },
-            )
-        });
+        let written = by.and_then(|by| repo.with_write(|| lang, |issues, cfg, reserved| f(issues, cfg, reserved, &by)));
         match written {
-            Ok((touched, _)) => {
-                let mark_problem = mark_problem.into_inner().into_iter().next();
+            Ok(touched) => {
                 // 담긴 것은 참이라 성공으로 닫는다 — 실패로 내면 폼이 열린 채 남아 다시 누르면
                 // 같은 것이 둘 선다(moai-52z9). 이력을 못 남긴 것은 알림 끝에 붙인다.
                 let unjournaled = crate::store::journal_misses()
@@ -2486,12 +2436,6 @@ impl App {
                     .unwrap_or_default();
                 self.write_failed = false;
                 self.reload();
-                if mark {
-                    self.load_read();
-                }
-                if let Some(why) = mark_problem {
-                    self.trouble = Some(why);
-                }
                 let Touched { id, done } = touched;
                 // 층이 있으면 **어느 프로젝트에** 담겼는지도 댄다 — 같은 id 가 두 프로젝트에 있을 수
                 // 있어 id 만으로는 어디인지 모른다(moai-fccv). 층이 없으면 프로젝트는 하나뿐이다.
@@ -2544,6 +2488,35 @@ impl App {
                 None
             }
         }
+    }
+
+    /// **방금 쓴 줄을 쓴 사람의 읽음으로 적는다**(moai-uwi9.0xu) — 제 끌기가 제게 [NEW] 로 돌아오지 않게. 쓰기가 담긴 **뒤에**,
+    /// [`App::write`] 가 트래커 락을 놓은 다음에 부른다(리뷰). 그 쓰기의 뒷걸음에서 적던 판은 이 사람의 읽음 파일 락을 기다리는
+    /// 동안(5초까지)과 그 파일을 읽고 고쳐 쓰는 동안 `.moai/lock` 을 쥐어 옆 세션의 쓰기를 다 세웠다 — `cmd::edit` 과 같은 까닭이다.
+    /// 적는 값은 받은 줄의 도장이고, 더 늦은 읽음은 거꾸로 안 옮긴다([`crate::read_marks::mark_written`]).
+    ///
+    /// **못 적은 까닭은 돌려준다** — 부르는 쪽이 알림 끝에 붙인다. 실패 배너(`trouble`)로 세우던 판은 담긴 쓰기를 빨간 글 뒤로
+    /// 밀어 80칸에서 되돌리는 명령을 잘랐고, 방금 선 다시 읽기의 실패를 덮었다. 붙이는 글은 `r` 과 같은 자다([`App::mark_read`]).
+    /// 설정 자리가 없으면(`user_config` 가 없다) `r` 처럼 화면에서만 걷는다.
+    pub(super) fn mark_written(&mut self, row: &Issue) -> Option<String> {
+        let lang = self.site.lang;
+        let root = self.site.repo.as_ref().map(|r| r.root.clone());
+        let (Some(config), Some(root)) = (self.user_config.clone(), root) else {
+            let marks = crate::query::read_marks_of(std::iter::once(row), &self.site.seen);
+            self.site.seen.extend(marks);
+            self.recount_unread();
+            return None;
+        };
+        let why = match crate::read_marks::mark_written(&config, &root, lang, row) {
+            Ok(wrote) => wrote.problems.first().map(|p| said_read(lang, p)),
+            Err(e) => Some(fill(say(lang, "tui.read.unwritten"), &[("why", &crate::text::one_line(&e.message))])),
+        };
+        // 다시 든 읽음으로 [NEW] 를 다시 센다 — 그 파일의 표식이 바뀌어 다음 걸음이 어차피 다시 읽는다. **쓰기의 알림은 지킨다** —
+        // 다시 들기가 못 읽은 까닭을 알림에 세우면 방금 담긴 쓰기의 `✓` 를 덮는다. 그 까닭은 적다 만난 까닭이 없을 때 대신 돌려준다.
+        let landed = self.notice.take();
+        self.load_read();
+        let reread = std::mem::replace(&mut self.notice, landed);
+        why.or(reread)
     }
 
     /// 헤더가 적을 사람. 처음 한 번만 풀고 [`Self::user`] 나 그 프로젝트의 `naming` 이

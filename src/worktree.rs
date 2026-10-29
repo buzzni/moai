@@ -723,29 +723,27 @@ fn head_of(me: Option<&Tree>) -> Option<&str> {
 /// 전처럼 스냅샷의 집은 줄이 다 제 초점이다. 훅은 무엇이 어긋나도 조용해야 한다.
 pub fn away(root: &Path) -> crate::hook::Away {
     on_disk(root)
-        .map(|d| crate::hook::Away {
-            names: names(d.others()),
-            own: names(d.mine()),
-            homes: d.homes(),
-            marked: {
-                let root = root.to_path_buf();
-                crate::hook::Marked::asked(move || marked_homes(&root))
-            },
-            main: d.main_root(),
-            linked: d.linked(),
-            ..Default::default()
+        .map(|d| {
+            // **집기 표식(moai-8kzn)은 쓰기가 그 자리를 물을 때만 읽는다** — 그때 읽는 것은 표식 파일뿐이다. 자리는 위의 `homes` 와 같은
+            // 목록에서 같은 자로 이미 골랐다([`Disk::marked_places`]): 그 목록을 물을 때 다시 걷던 판은 git 이 적어 둔 파일을 한 판에
+            // 두 벌 읽었고, 열쇠를 따로 지어 `landing` 이 고른 자리와 갈리는 날 표식이 말없이 안 먹을 틈을 두었다(리뷰).
+            let places = d.marked_places();
+            crate::hook::Away {
+                names: names(d.others()),
+                own: names(d.mine()),
+                homes: d.homes(),
+                marked: crate::hook::Marked::asked(move || marked_homes(&places)),
+                main: d.main_root(),
+                linked: d.linked(),
+                ..Default::default()
+            }
         })
         .unwrap_or_default()
 }
 
-/// Pickup marks associated with each linked worktree, used only when a write needs them.
-fn marked_homes(root: &Path) -> std::collections::BTreeMap<PathBuf, BTreeSet<String>> {
-    let Some(disk) = on_disk(root) else { return Default::default() };
-    disk.all
-        .iter()
-        .filter(|(tree, linked, _)| *linked && !is_milestone(tree))
-        .filter_map(|(tree, ..)| disk.admin.get(&tree.path).map(|admin| (root_in(&disk, tree), held_here(admin))))
-        .collect()
+/// 일하는 딸린 워크트리마다 그 집기 표식([`held_here`]) — 열쇠는 [`crate::hook::Away::homes`] 의 자리다([`Disk::marked_places`]).
+fn marked_homes(places: &[(PathBuf, PathBuf)]) -> BTreeMap<PathBuf, BTreeSet<String>> {
+    places.iter().map(|(home, admin)| (home.clone(), held_here(admin))).collect()
 }
 
 /// git 이 적어 둔 파일에서 읽은 워크트리 목록([`on_disk`]).
@@ -784,11 +782,19 @@ impl Disk {
     /// **뿌리는 [`root_in`] 으로 짓는다**(리뷰 moai-9js2.s4s) — 트래커가 꼭대기에 선 흔한 판은 `rel` 이 비어,
     /// `join("")` 이 끝에 가름선을 더해 거절문이 `…/<에픽>/.` 과 `…/<에픽>//src/x.rs` 를 냈다.
     fn homes(&self) -> Vec<(PathBuf, BTreeSet<String>)> {
-        self.all
-            .iter()
-            .filter(|(t, linked, _)| *linked && !is_milestone(t))
-            .map(|(t, ..)| (root_in(self, t), names([t])))
-            .collect()
+        self.working().map(|t| (root_in(self, t), names([t]))).collect()
+    }
+
+    /// 집기 표식을 읽을 자리 — 일하는 딸린 워크트리마다 (그 moai 뿌리, git 이 그 워크트리 몫으로 든 디렉터리)다. 자리는
+    /// [`Disk::homes`] 와 **같은 자**([`Disk::working`]·[`root_in`])로 고른다 — 훅이 쓰기의 자리(`landing`)로 표식을 찾는다.
+    fn marked_places(&self) -> Vec<(PathBuf, PathBuf)> {
+        self.working().filter_map(|t| self.admin.get(&t.path).map(|admin| (root_in(self, t), admin.clone()))).collect()
+    }
+
+    /// 일하는 딸린 워크트리 — 마일스톤 워크트리는 모으는 자리라 뺀다([`is_milestone`]). [`Disk::homes`] 와
+    /// [`Disk::marked_places`] 가 함께 쓴다.
+    fn working(&self) -> impl Iterator<Item = &Tree> {
+        self.all.iter().filter(|(t, linked, _)| *linked && !is_milestone(t)).map(|(t, ..)| t)
     }
 
     /// 이 자리가 딸린 워크트리일 때 main 체크아웃의 moai 뿌리([`crate::hook::Away::main`], moai-qrja.kb4). main 에 선
@@ -2468,8 +2474,12 @@ mod tests {
         }
         std::fs::write(main.join(".git/worktrees/agent-x").join(HELD), "t-0003\n").unwrap();
 
-        let homes = marked_homes(&main);
-        assert_eq!(homes.get(&crate::path::real(&base.join("agent-x"))), Some(&BTreeSet::from(["t-0003".to_string()])));
+        // 훅이 표식을 찾는 열쇠는 `homes` 의 자리다 — 둘이 한 목록에서 같은 자로 선다(리뷰).
+        let disk = on_disk(&main).unwrap();
+        let homes = marked_homes(&disk.marked_places());
+        let agent = crate::path::real(&base.join("agent-x"));
+        assert_eq!(homes.get(&agent), Some(&BTreeSet::from(["t-0003".to_string()])));
+        assert!(disk.homes().iter().any(|(home, _)| *home == agent));
         let elsewhere = held_elsewhere(&main);
         assert_eq!(
             elsewhere,

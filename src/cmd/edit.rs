@@ -179,11 +179,14 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
         .transpose()
         .map_err(|e| Fail::no_actor(&e, lang))?;
 
-    let read_config = crate::user_config::path();
-    let mark_problem = std::cell::RefCell::new(Vec::new());
     let done: Edited = repo.with_write_after(
         || ctx.lang(),
         |issues, unread, cfg, _| {
+            // **`updated_at` 의 시각은 락을 쥔 뒤에 뜬다**(`cmd::mv` 의 moai-u5bk.3wq 와 같은 자, 리뷰) — 밖에서 뜬 시각으로
+            // 적으면 락을 늦게 잡은 이 쓰기가 그새 옆이 담은 줄보다 이른 도장을 찍어 줄의 도장이 거꾸로 간다. 그러면 그 늦은 판을
+            // 이미 읽은 사람에게 이 고침이 [NEW] 로 안 서고(`query::changed_since_seen` 은 `>` 다), 아래에서 적는 쓴 사람의
+            // 읽음도 거꾸로 간 도장이 된다. `--due +N` 의 날은 위에서 락 밖의 시각으로 잰 그대로다.
+            let at = model::now();
             let Some(i) = issues.iter_mut().find(|i| i.id == args.id) else {
                 return Err(Fail::not_found(&args.id, lang));
             };
@@ -383,22 +386,28 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
                 },
             ))
         },
-        |done| {
-            if done.changed
-                && let Some(config) = &read_config
-            {
-                match crate::read_marks::mark_written(config, &repo.root, lang, &done.issue) {
-                    Ok(wrote) => mark_problem
-                        .borrow_mut()
-                        .extend(wrote.problems.iter().map(|p| crate::view::sheet_trouble(lang, p))),
-                    Err(e) => mark_problem.borrow_mut().push(e.message),
-                }
-            }
-            Ok(())
-        },
+        |_| Ok(()),
     )?;
-    for why in mark_problem.into_inner() {
-        super::tell(&format!("moai: {}", crate::text::one_line(&why)));
+    // **쓴 사람의 읽음은 트래커 락을 놓은 뒤에 적는다**(moai-uwi9.0xu, 리뷰) — 그 파일은 사용자 설정 곁에 살고 락도 제 것이라,
+    // 쓰기의 뒷걸음(`with_write_after` 의 `after`)에서 적던 판은 그 락을 기다리는 동안(5초까지)과 그 파일을 읽고 고쳐 쓰는 동안
+    // `.moai/lock` 을 쥐어 옆 세션의 쓰기를 다 세웠고, 그 자리가 FIFO 거나 멎은 홈이면 영영 세웠다 — 위에서 말을 락 밖에서 묻는
+    // 것과 같은 까닭이다. 밖에서 적어도 잃는 것이 없다: 적는 것은 이 쓰기가 담은 줄의 도장이고, 그새 옆이 더 늦게 고쳤거나 더 늦은
+    // 읽음을 적었으면 [`crate::read_marks::mark_written`] 이 거꾸로 안 옮긴다. **못 적어도 막지 않는다** — 줄은 이미 담겼으니 무엇을
+    // 못 했는지를 앞에 대고 한 줄로 말한다. 그 말 없이 까닭만 내던 판은 락 기다림의 말("…Nothing was changed")을 그대로 내어, 담긴
+    // 쓰기를 실패로 읽게 했다.
+    if done.changed
+        && let Some(config) = crate::user_config::path()
+    {
+        let said: Vec<String> = match crate::read_marks::mark_written(&config, &repo.root, lang, &done.issue) {
+            Ok(wrote) => wrote.problems.iter().map(|p| crate::view::sheet_trouble(lang, p)).collect(),
+            Err(e) => vec![crate::i18n::fill(
+                crate::i18n::say(lang, "edit.read_unmarked"),
+                &[("id", &done.issue.id), ("why", &crate::text::one_line(&e.message))],
+            )],
+        };
+        for why in said {
+            super::tell(&format!("moai: {}", crate::text::one_line(&why)));
+        }
     }
 
     let Edited {

@@ -33,7 +33,7 @@ pub fn run(ctx: &Ctx, worktree: bool, limit: Option<usize>) -> R<Vec<String>> {
     let me = || asked.get_or_init(|| super::me_at(ctx, &repo.root)).as_ref();
     let judge = if picks.is_empty() { None } else { me() };
     let (mut picks, mut others) = report::by_owner(picks, judge);
-    // `ready` 의 차례는 `report::ready_in` 이 이미 세웠다 — 여기서는 끊기만 한다. 내 것이 아닌 줄도
+    // `ready` 의 차례는 `report::ready_in_live` 가 이미 세웠다 — 여기서는 끊기만 한다. 내 것이 아닌 줄도
     // 같은 `-n` 으로 자른다(사용자 결정) — 여러 사람이 쓰는 저장소에서 화면이 남의 일로 길어지지 않는다.
     let more = crate::query::cut(&mut picks, limit);
     let others_more = crate::query::cut(&mut others, limit);
