@@ -31,6 +31,7 @@ pub mod tui;
 pub mod update;
 pub mod web;
 pub mod wiki;
+pub mod writing;
 
 use crate::cli::{BacklogCmd, Cli, Cmd, ProjectCmd, SkillCmd, Typed, WikiCmd};
 use crate::model::Kind;
@@ -652,6 +653,7 @@ fn dispatch(ctx: &Ctx, cli: Cli) -> R<Vec<String>> {
         Cmd::Project(ProjectCmd::Add { path }) => project::add(ctx, &path),
         Cmd::Project(ProjectCmd::Ls) => project::ls(ctx),
         Cmd::Models => models::run(ctx),
+        Cmd::Writing => writing::run(ctx),
         // 사람의 키 파일을 읽기만 한다(moai-so7w) — 트래커를 안 찾는다.
         Cmd::Keys(a) => keys::run(ctx, a),
         Cmd::Config => config::run(ctx),

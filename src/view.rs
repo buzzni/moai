@@ -3291,7 +3291,7 @@ pub fn look_problems(reg: &crate::user_config::Registry, lang: Lang) -> Vec<Stri
     let reads = reg.read_problems.iter().map(|why| told(skipped(lang, why)));
     // 새 판 묻기의 틀린 값도 여기 선다(moai-d74q) — 그 설정이 서는 표면이 탐색기 하나다.
     let updates = reg.update_problems.iter().map(|why| told(update_trouble(lang, why)));
-    looks.chain(reads).chain(updates).chain(models_problems(reg, lang)).collect()
+    looks.chain(reads).chain(updates).chain(models_problems(reg, lang)).chain(writing_problems(reg, lang)).collect()
 }
 
 /// 계획을 못 옮기는 까닭의 글([`crate::model::Unshifted`]) — **한 자리다**(moai-vj8w 리뷰). 탐색기의 키·끌기 알림과
@@ -3520,6 +3520,73 @@ pub fn models_problems(reg: &crate::user_config::Registry, lang: Lang) -> Vec<St
             }
         })
         .collect()
+}
+
+pub fn writing_trouble(lang: Lang, why: &crate::user_config::WritingTrouble) -> String {
+    use crate::user_config::{DETAILS, WRITING, WritingTrouble};
+    let want = |key: &str, wanted: &str, found: &str| {
+        fill(say(lang, "look.want"), &[("key", &format!("{WRITING}.{key}")), ("want", wanted), ("found", found)])
+    };
+    match why {
+        WritingTrouble::NotATable { found } => {
+            fill(say(lang, "look.not_a_table"), &[("key", WRITING), ("found", found)])
+        }
+        WritingTrouble::NotAWord { key, found } => {
+            want(key, say(lang, "look.want_word"), &crate::text::one_line(found))
+        }
+        WritingTrouble::NotADetail { key, raw } => want(
+            key,
+            &fill(say(lang, "models.want_level"), &[("known", &DETAILS.join("|"))]),
+            &crate::text::one_line(&format!("{raw:?}")),
+        ),
+        WritingTrouble::UnknownKey { key } => {
+            fill(say(lang, "writing.unknown_key"), &[("key", &crate::text::one_line(&format!("{WRITING}.{key}")))])
+        }
+        WritingTrouble::NotQuoted { key, raw, line } => fill(
+            say(lang, "config.not_quoted"),
+            &[
+                ("line", &line.to_string()),
+                ("key", &crate::text::one_line(&format!("{WRITING}.{key}"))),
+                ("raw", &crate::text::one_line(&format!("{raw:?}"))),
+            ],
+        ),
+    }
+}
+pub fn writing_problems(reg: &crate::user_config::Registry, lang: Lang) -> Vec<String> {
+    reg.writing_problems
+        .iter()
+        .map(|why| {
+            let said = writing_trouble(lang, why);
+            match reg.path.as_deref() {
+                Some(at) => format!("{}: {said}", crate::text::one_line(&at.display().to_string())),
+                None => said,
+            }
+        })
+        .collect()
+}
+pub fn writing(
+    writing: &crate::user_config::Writing,
+    path: Option<&std::path::Path>,
+    repo_path: Option<&std::path::Path>,
+    lang: Lang,
+) -> Vec<String> {
+    let mark = if !writing.written.is_empty() {
+        ""
+    } else if !writing.repo.is_empty() {
+        say(lang, "models.repo")
+    } else {
+        say(lang, "models.default")
+    };
+    let suffix = if mark.is_empty() { String::new() } else { format!("  {mark}") };
+    let mut out = vec![format!("detail  {}{suffix}", writing.values["detail"])];
+    let path = path
+        .map(|p| crate::text::one_line(&p.display().to_string()))
+        .unwrap_or_else(|| say(lang, "models.no_path").to_string());
+    out.push(fill(say(lang, "models.path"), &[("path", &path)]));
+    if let Some(repo) = repo_path {
+        out.push(fill(say(lang, "models.repo_path"), &[("path", &crate::text::one_line(&repo.display().to_string()))]));
+    }
+    out
 }
 
 /// `moai keys` 의 사람 화면(moai-so7w) — 파일의 자리 한 줄, 그리고 절마다 동작과 키. **바꾼 줄은 `*` 와 옛 키를 단다**

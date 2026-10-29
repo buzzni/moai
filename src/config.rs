@@ -456,6 +456,9 @@ pub struct Config {
     pub due: DueRule,
     /// `[models]` 표 — **이 저장소가 권하는** 역할별 모델(moai-w25x.jud, 2026-10-26 사용자 결정). 적힌 그대로다.
     pub models: Vec<ModelEntry>,
+    /// `[writing]` 표 — **이 저장소가 권하는** 글의 자세함(moai-d1zn). `[models]` 와 같은 꼴의 줄이라 같은 [`ModelEntry`] 로
+    /// 적힌 그대로 들고, 값은 `moai writing` 과 훅이 [`crate::user_config::Writing::with_repo`] 로 잰다 — 여기서 거절하지 않는다.
+    pub writing: Vec<ModelEntry>,
 }
 
 /// `.moai/config.toml` 의 `[models]` 한 줄 — **값은 여기서 재지 않는다.** 아는 키인가·등급 낱말인가·큰따옴표 글인가는
@@ -559,7 +562,12 @@ impl Config {
             .map(|e| ModelEntry { key: e.key.to_string(), raw: e.value.to_string(), line: e.line })
             .collect();
 
-        Ok(Config { prefix, statuses, naming, status, archive_days, wiki_dir, due, models })
+        let writing = es
+            .iter()
+            .filter(|e| e.table == Some(crate::user_config::WRITING))
+            .map(|e| ModelEntry { key: e.key.to_string(), raw: e.value.to_string(), line: e.line })
+            .collect();
+        Ok(Config { prefix, statuses, naming, status, archive_days, wiki_dir, due, models, writing })
     }
 
     /// 새 이슈가 놓이는 칸. 목록의 첫 칸이다.
