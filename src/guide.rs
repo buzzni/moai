@@ -1891,7 +1891,7 @@ The host interviews the person, then a planning subagent drafts a grounded plan.
 {brief}
 
 4. Present the epic and member titles, difficulty and any `gap:` lines once. If gaps remain, ask only about those and resume the same `agentId` with the answers; the subagent never asks the person. Present the revised plan and obtain approval before writing the tracker. The person decides whether to attach a running milestone; omit `--milestone` without explicit consent. Encode dates in the plan or use `--due` and `--start` only as answered.
-5. After approval, the host registers new work with `moai add --from <plan file> --body -` (stream the epic body), adding `--milestone <id>` only when approved. For a backlog use `moai backlog promote <id> --from <plan file>`; preserve its inherited milestone and body and add the approved epic details to it. Map returned member IDs to titles and apply each body with `moai edit <member> -b - < <body file>`. Record `model: anthropic/<Model ran> (<highest difficulty> — plan: interview and detailed plan)` on the epic, using the actual model name without repeating the vendor. Do not pick up the work.
+5. After approval, the host registers new work with `moai add --from <plan file> --body -` (stream the epic body), adding `--milestone <id>` only when approved. If the person approved a new milestone, create it after approval with `moai milestone add`, using only the agreed version and dates, then attach it. For a backlog use `moai backlog promote <id> --from <plan file>`; preserve its inherited milestone and body: combine the carried body and approved epic details into a scratch file, then replace the body with `moai edit <epic> -b - < <combined file>`. Apply an explicitly approved milestone and dates to the epic; do not override an inherited milestone without that approval. Map returned member IDs to titles and apply each body with `moai edit <member> -b - < <body file>`. Record `model: anthropic/<Model ran> (<highest difficulty> — plan: interview and detailed plan)` on the epic, using the actual model name without repeating the vendor. Do not pick up the work.
 "#,
         brief = indent(&plan_brief_draft(), "    ")
     )
@@ -4925,7 +4925,7 @@ Writing: <writing>
    {MILESTONE_CLEAR}
    moai -C "<root>" edit <epic> --due <due>
    A refusal because the day is later than the milestone's leaves the epic as it stands.
-4. Give every member a body the worker can start from, as `Writing:` says. `detailed`: these
+4. Give the epic a detailed body with the bundle, decisions, promises, order, shared files and review focus from the shared instructions; retain the backlog context already carried onto it. Give every member a body the worker can start from, as `Writing:` says. `detailed`: these
    headings, each a list —
    {DETAILED_BODY}.
    `brief`: what to change · where (file and function) · how to test it. A design question the
