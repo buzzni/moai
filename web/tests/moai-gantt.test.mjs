@@ -208,8 +208,9 @@ test('a short date range fills a wide view at every zoom without moving its firs
 })
 
 test('a short Gantt fills the dates through zoom, fit and resize; its range ends at the drawn axis', () => {
+  // Four planned days: fit picks the day step and places them a week in, past the first screen's stretch.
   const rows = [{ id: 'short', kind: 'issue', title: 'Short', status: 'todo' }]
-  const index = new IssueIndex(rows, treeOf(rows).map((line) => line.id ? { ...line, gantt: g(line.id) } : line))
+  const index = new IssueIndex(rows, treeOf(rows).map((line) => line.id ? { ...line, gantt: g(line.id, { planned: own('2026-10-25', '2026-10-28') }) } : line))
   let resize
   const { root, view, dom } = mount(null, index, [2000, 560], (win) => {
     win.ResizeObserver = class {
@@ -219,25 +220,40 @@ test('a short Gantt fills the dates through zoom, fit and resize; its range ends
     }
   })
   const box = root.querySelector('.g-scroll')
+  const step = () => root.querySelector('.g-seg [aria-pressed="true"]').dataset.zoom
   const visible = () => box.clientWidth - Number.parseFloat(root.querySelector('.g-inner').style.getPropertyValue('--grid-w'))
   const right = () => px(root.querySelector('.g-right'), 'width')
   const lastTick = () => Math.max(...[...root.querySelectorAll('.hd2 .tick')].map((tick) => px(tick, 'left') + px(tick, 'width')))
-  const fills = (step) => {
-    assert.ok(right() > visible(), `${step}: axis stops before the visible right edge`)
-    assert.ok(lastTick() >= visible(), `${step}: date header stops before the visible right edge`)
+  // The view's right edge is the scroll offset plus its width: a view scrolled right must have dates under all of it.
+  const fills = (name) => {
+    assert.ok(right() > box.scrollLeft + visible(), `${name}: axis stops before the visible right edge`)
+    assert.ok(lastTick() >= box.scrollLeft + visible(), `${name}: date header stops before the visible right edge`)
   }
+  // The stretch reaches the view and a day or two past it, never what a coarser step once needed.
+  const snug = (name) => assert.ok(right() - box.scrollLeft - visible() <= 2 * model.PX_PER_DAY[step()], `${name}: the axis kept a stretch the view does not need`)
   fills('day')
   view.command('gantt.zoomOut')
   fills('week')
   view.command('gantt.zoomOut')
   fills('month')
+  // The month view's middle is the empty stretch: a step in comes back to the work, not months past it.
+  view.command('gantt.zoomIn')
+  assert.equal(step(), 'week')
+  assert.equal(box.scrollLeft, 0, 'a step in from the stretch landed past every bar')
+  fills('week again')
+  snug('week again')
+  view.command('gantt.zoomOut')
   view.command('gantt.fit')
+  assert.equal(step(), 'day')
+  assert.equal(box.scrollLeft, 7 * 40 - 8, 'fit places the work 8px in')
   fills('fit')
+  snug('fit')
 
-  // A wider pane must remeasure the axis, while keeping the date under the old scroll position.
+  // A wider pane must remeasure the axis from the current offset (more than the day of margin), keeping that offset.
   box.scrollLeft = Math.max(0, right() - visible() - 1)
   Object.defineProperty(box, 'clientWidth', { get: () => 2600, configurable: true })
   const before = box.scrollLeft
+  assert.ok(before > model.PX_PER_DAY.day, 'the premise — the offset is more than the margin absorbs')
   resize()
   fills('resize')
   assert.equal(box.scrollLeft, before)

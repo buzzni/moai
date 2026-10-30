@@ -80,7 +80,8 @@
   --border-soft: color-mix(in srgb, var(--border) 65%, transparent);
   --todo: color-mix(in srgb, #3b82f6 70%, var(--text));
   --review: color-mix(in srgb, #a855f7 70%, var(--text));
-  /* List and Gantt column tints stay pale enough for a search mark to show on top. */
+  /* List and Gantt column tints stay pale enough for a search mark to show on top. Todo is fainter still: the
+     selected row's --selected is the same blue hue, and it must stay distinct from a todo row. */
   --todo-soft: color-mix(in srgb, #3b82f6 2%, var(--bg));
   --progress-soft: color-mix(in srgb, #F2B01E 7%, var(--bg));
   --review-soft: color-mix(in srgb, #a855f7 8%, var(--bg));

@@ -129,6 +129,12 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
   let state: State | null = null
   let model: Model | null = null
   let axis: Axis | null = null
+  /**
+   * The dates the lines call for (`rangeOf`), before draw() stretches the axis' end to fill the view. `fresh` measures
+   * against it and every draw stretches from it again: kept on the axis, a month step's stretch stood at the day step
+   * as months of empty dates.
+   */
+  let base: [number, number] | null = null
   let built: Built | null = null
   /** The window the nodes were built for: lines `[r0, r1)` and the dates' pixels `[x0, x1]`. */
   let drawn: { r0: number; r1: number; x0: number; x1: number } | null = null
@@ -291,16 +297,15 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
     const zone = clock.zone()
     const placed = m.lines.map((line) => (line.kind === 'row' ? placeOf(m.index.rows[line.at]!, now, zone) : null))
     const was = axis
-    if (!axis || axis.zoom !== zoom || !fresh(placed, now)) {
-      const [from, to] = rangeOf(placed.map((p) => p?.span ?? null), now)
-      axis = { zoom, from, to }
-    }
-    // Zoom, fit and a resize may retain the date range while changing how much of it fits on screen.
-    // Include the view's left offset: a resize near the right edge must fill that view, not just the first screen.
-    const targetScroll = scrollTo ? scrollTo(axis) : was && was.zoom === axis.zoom && was.from !== axis.from
-      ? Math.max(0, scroll.scrollLeft + xOf(axis, was.from)) : scroll.scrollLeft
-    const [from, to] = fillRange([axis.from, axis.to], zoom, targetScroll + viewWidth())
-    axis = { ...axis, from, to }
+    if (!axis || !base || axis.zoom !== zoom || !fresh(placed, now)) base = rangeOf(placed.map((p) => p?.span ?? null), now)
+    const unstretched: Axis = { zoom, from: base[0], to: base[1] }
+    // Zoom, fit and a resize may keep the dates while changing how much of them fits on screen. The stretch counts the
+    // view's left offset: a step fit places past the first screen, or a view scrolled into the stretched end, must have
+    // dates under its whole width.
+    const targetScroll = scrollTo ? scrollTo(unstretched) : was && was.zoom === zoom && was.from !== base[0]
+      ? Math.max(0, scroll.scrollLeft + xOf(unstretched, was.from)) : scroll.scrollLeft
+    const [from, to] = fillRange(base, zoom, targetScroll + viewWidth())
+    axis = { zoom, from, to }
     const a = axis
     // The bars this hovered bubble spoke of are about to be replaced, and a removed node sends no mouseleave.
     bubble.hidden = true
@@ -499,11 +504,11 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
     if (line.kind === 'row') movable(lane, m.index.rows[line.at]!, g, planBar, dueMark)
   }
 
-  /** The axis stands while the lines' dates still fit in it; a draw because the index was read again does not shift it. */
+  /** The lines' range stands while their dates still fit in it; a draw because the index was read again does not shift it. */
   function fresh(placed: Array<Placed | null>, now: number): boolean {
-    if (!axis) return false
+    if (!base) return false
     const [from, to] = rangeOf(placed.map((p) => p?.span ?? null), now)
-    return from >= axis.from && to <= axis.to
+    return from >= base[0] && to <= base[1]
   }
 
   /** Only links touching the cursor, in blocker → blocked direction, with the same style both ways. */
@@ -647,7 +652,9 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
     if (!axis || next === zoom || holding) return
     const view = viewWidth()
     const held = anchor ?? view / 2
-    const centre = wallAt(axis, scroll.scrollLeft + held)
+    // A date in the stretch past the lines' range is no date to keep still: kept, a step in from a short month view
+    // landed months past every bar. The lines' last day takes its place.
+    const centre = Math.min(wallAt(axis, scroll.scrollLeft + held), base?.[1] ?? axis.to)
     zoom = next
     axis = { ...axis, zoom }
     draw((a) => Math.max(0, xOf(a, centre) - held))

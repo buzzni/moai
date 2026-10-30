@@ -1227,15 +1227,17 @@ impl App {
                 // milestones one level; the cursor stays on the first row, which no fold below it moves.
                 self.site.seed_list_folds();
                 // The same blank-site entry bypasses the board/Gantt first-visit seed. Seed only this project: the
-                // other overview projects keep their hand-made folds. The selected row's ancestors stay open.
-                let selected_home = self.rows().get(self.cursor).and_then(|row| match row {
-                    Row::Item(super::Seat::Here, entry, _) => entry.at().map(|at| self.site.index.home_of(at).clone()),
-                    _ => None,
-                });
-                match self.layout {
-                    super::view::Layout::Board => self.site.seed_layout_folds(selected_home.as_ref(), false),
-                    super::view::Layout::Gantt => self.site.seed_layout_folds(selected_home.as_ref(), true),
-                    super::view::Layout::List => {}
+                // other overview projects keep their hand-made folds. The selected row's ancestors stay open. The rows
+                // are built for those two layouts only: a list entry builds none here (moai-go4o).
+                if self.board() || self.gantt() {
+                    let selected_home = self.rows().get(self.cursor).and_then(|row| match row {
+                        Row::Item(super::Seat::Here, entry, _) => {
+                            entry.at().map(|at| self.site.index.home_of(at).clone())
+                        }
+                        _ => None,
+                    });
+                    let gantt = self.gantt();
+                    self.site.seed_layout_folds(selected_home.as_ref(), gantt);
                 }
                 // **층이 물어 둔 것도 옮겨 든다**(리뷰) — 위의 `held` 가 그 값을 읽어 이 읽기에
                 // 썼으므로 `prepare` 는 안 물었고([`super::Fresh::asked_install`] 가 `None`),
@@ -1342,10 +1344,8 @@ impl App {
         parked.board_shut.clear();
         // Climbing back starts the overview's active layout at its default too. The overview cursor is the project
         // header, so no child milestone is exempt; a later reread preserves these seeded folds as hand-made ones.
-        match self.layout {
-            super::view::Layout::Board => parked.seed_layout_folds(None, false),
-            super::view::Layout::Gantt => parked.seed_layout_folds(None, true),
-            super::view::Layout::List => {}
+        if self.board() || self.gantt() {
+            parked.seed_layout_folds(None, self.gantt());
         }
         // **거름망 마스크도 푼다**(리뷰). 아래에서 `hung` 을 비우므로 걸린 글은 사라지는데,
         // 마스크를 두고 가면 그 프로젝트의 줄은 한눈 보기에서 걸러진 채 서고 — 경로 줄에 뱃지도
