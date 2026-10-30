@@ -56,6 +56,11 @@ export interface Refresher {
   refresh(how?: { fresh?: boolean }): Promise<void>
   /** Asks the stamp now and reads when it moved. */
   check(): Promise<void>
+  /** A stamp pushed by the server; the same comparison and read path as polling. */
+  saw(stamp: string): Promise<void>
+  /** Suspend or resume the polling timer while a server event stream is up. */
+  pause(): void
+  resume(): void
   stop(): void
   /** When the last read finished, or null before the first. */
   readonly lastLoaded: number | null
@@ -85,6 +90,7 @@ export function createRefresher(options: RefresherOptions): Refresher {
   let reached = true
   let failing = false
   let stopped = false
+  let paused = false
 
   const clear = () => {
     if (timer !== null) clock.clearTimeout(timer)
@@ -92,7 +98,7 @@ export function createRefresher(options: RefresherOptions): Refresher {
   }
   const schedule = (ms: number) => {
     clear()
-    if (stopped || !shown()) return
+    if (stopped || paused || !shown()) return
     timer = clock.setTimeout(() => {
       timer = null
       void check()
@@ -131,8 +137,12 @@ export function createRefresher(options: RefresherOptions): Refresher {
   function check(): Promise<void> {
     if (checking) return checking
     checking = (async () => {
+      // Let the promise be assigned before a hidden or paused check can finish.
+      // Otherwise its synchronous finally clears null and this resolved promise
+      // is assigned back to `checking`, suppressing every later visible check.
+      await Promise.resolve()
       try {
-        if (stopped || !shown()) return
+        if (stopped || paused || !shown()) return
         const at = await options.stamp()
         if (at === null) {
           reach(false)
@@ -167,6 +177,24 @@ export function createRefresher(options: RefresherOptions): Refresher {
   return {
     refresh,
     check,
+    async saw(at: string) {
+      if (stopped || !shown()) return
+      reach(true)
+      // A pushed stamp during a read must be checked after that read settles;
+      // the stream may not repeat the stamp.
+      if (inFlight) await inFlight
+      if (at !== seen) await read(true, at)
+      schedule(failing ? backoffMs : pollMs)
+    },
+    pause() {
+      paused = true
+      clear()
+    },
+    resume() {
+      if (stopped) return
+      paused = false
+      void check()
+    },
     stop() {
       stopped = true
       clear()

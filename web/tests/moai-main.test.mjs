@@ -28,7 +28,7 @@ const until = async (check) => {
   assert.fail('the page did not reach the expected state')
 }
 
-async function page(t, { holdFirst = false, initialTab, chartFailures = 0 } = {}) {
+async function page(t, { holdFirst = false, initialTab, chartFailures = 0, fakeStream = false } = {}) {
   const dom = new JSDOM('<!doctype html><html><body><div id="moai-app"></div></body></html>', {
     url: 'http://localhost:6624/', runScripts: 'outside-only', pretendToBeVisual: true,
   })
@@ -36,6 +36,13 @@ async function page(t, { holdFirst = false, initialTab, chartFailures = 0 } = {}
   if (initialTab) dom.window.localStorage.setItem('moai.web', JSON.stringify({ tab: initialTab }))
   const trees = []
   const requests = []
+  const streams = []
+  if (fakeStream) dom.window.EventSource = class {
+    constructor(url) { this.url = url; this.listeners = {}; this.closed = false; streams.push(this) }
+    addEventListener(name, listener) { this.listeners[name] = listener }
+    close() { this.closed = true }
+    stamp(value) { this.listeners.stamp({ data: JSON.stringify({ stamp: value }) }) }
+  }
   let release
   dom.window.fetch = async (path) => {
     const url = new URL(path, dom.window.location.href)
@@ -61,8 +68,20 @@ async function page(t, { holdFirst = false, initialTab, chartFailures = 0 } = {}
   await until(() => trees.length > 0)
   const tab = (id) => dom.window.document.querySelector(`[role=tab][data-tab="${id}"]`)
   const bars = () => dom.window.document.querySelectorAll('.g-lanes .b-plan').length
-  return { dom, trees, requests, tab, bars, release: () => release?.() }
+  return { dom, trees, requests, streams, tab, bars, release: () => release?.() }
 }
+
+test('the page reads changed stamps from its event stream and ignores repeats', async (t) => {
+  const p = await page(t, { fakeStream: true })
+  await until(() => p.streams.length === 1 && p.trees.length === 1)
+  p.streams[0].onopen()
+  p.streams[0].stamp('changed')
+  await until(() => p.trees.length === 2)
+  p.streams[0].stamp('changed')
+  await new Promise((resolve) => setTimeout(resolve, 20))
+  assert.equal(p.trees.length, 2)
+  assert.equal(p.streams[0].url, '/api/events?worktree=1')
+})
 
 test('opening Gantt fetches values once and subsequent visits reuse them', async (t) => {
   const p = await page(t)

@@ -13,6 +13,7 @@ import { useNaming } from './data/people.js'
 import { headerProjects, projectHref, type ProjectEntry } from './data/projects.js'
 import { writePlan, type PlanChange } from './data/plan.js'
 import { isUnread, readMarks } from './data/read.js'
+import { openEvents, type Events } from './data/events.js'
 import { BACKOFF_MS, createRefresher, POLL_MS } from './data/refresh.js'
 import { sortQuery, useVocabulary } from './data/query.js'
 import {
@@ -296,6 +297,7 @@ async function start(): Promise<void> {
   }
   /** The zone the page drew in at the last change — followZone (subscribed before the listener below) moves it first. */
   let zoneSeen = zoneNow()
+  let events: Events | null = null
   store.subscribe((state, previous) => {
     if (matchKey(state) !== matchKey(previous)) {
       clearTimeout(asking)
@@ -308,7 +310,10 @@ async function start(): Promise<void> {
     // A new order is moai's to make: the tree is read again in it.
     if (state.sort !== previous.sort && state.board.value) void refresher.refresh()
     // The worktree overlay turned on or off: the rows are read again with it or without it.
-    if (state.view.worktree !== previous.view.worktree && state.board.value) void refresher.refresh()
+    if (state.view.worktree !== previous.view.worktree && state.board.value) {
+      events?.reconnect()
+      void refresher.refresh()
+    }
     // The zone the page draws in turned (`SPC o t`, or the boot's arrived): the tree's `overdue` is judged in it. What
     // followZone set is compared, not worked out again — that asks Intl for a zone on every dispatch, every j and k.
     const zone = zoneNow()
@@ -375,6 +380,14 @@ async function start(): Promise<void> {
     }
   }
   const refresher = createRefresher({ load: ({ automatic }) => loadBoard(automatic), stamp, onReach: (reached) => shell.offline(!reached), onBackoff: (on) => shell.backoff(on) })
+  const eventUrl = (): string => {
+    const query = new URLSearchParams()
+    if (project) query.set('project', project)
+    if (store.getState().view.worktree) query.set('worktree', '1')
+    return `/api/events${query.size ? `?${query}` : ''}`
+  }
+  events = openEvents({ url: eventUrl, onStamp: (at) => refresher.saw(at), onUp: () => refresher.pause(),
+    onDown: () => refresher.resume(), onVisible: () => void refresher.check() })
 
   let choice = 0
   async function choose(id: string) {

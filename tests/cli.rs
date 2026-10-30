@@ -32158,6 +32158,103 @@ fn get(port: u16, path: &str) -> (u16, String, String) {
     http(port, "GET", path, Some(&format!("127.0.0.1:{port}")))
 }
 
+fn events(port: u16) -> std::io::BufReader<std::net::TcpStream> {
+    use std::io::{BufRead as _, Write as _};
+    let mut stream = dial(port);
+    stream.set_read_timeout(Some(std::time::Duration::from_secs(5))).unwrap();
+    write!(stream, "GET /api/events HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n\r\n").unwrap();
+    let mut reader = std::io::BufReader::new(stream);
+    let mut head = String::new();
+    loop {
+        let mut line = String::new();
+        reader.read_line(&mut line).unwrap();
+        if line == "\r\n" {
+            break;
+        }
+        assert!(!line.is_empty(), "events connection closed before its header: {head}");
+        head.push_str(&line);
+    }
+    assert!(head.starts_with("HTTP/1.1 200 OK") && head.contains("text/event-stream"), "{head}");
+    assert!(!head.contains("Content-Length"), "{head}");
+    reader
+}
+
+fn next_event_stamp(reader: &mut std::io::BufReader<std::net::TcpStream>) -> String {
+    use std::io::BufRead as _;
+    loop {
+        let mut line = String::new();
+        reader.read_line(&mut line).unwrap();
+        assert!(!line.is_empty(), "events connection closed before a stamp");
+        if let Some(data) = line.strip_prefix("data: ") {
+            return json_of(data)["stamp"].as_str().unwrap().to_string();
+        }
+    }
+}
+
+#[test]
+fn web_events_push_a_stamp_when_the_tracker_moves() {
+    let s = init("web-events-move");
+    let web = serve(s.path());
+    let mut stream = events(web.port);
+    let first = next_event_stamp(&mut stream);
+    assert_eq!(first.len(), 16);
+    ok(s.path(), &["add", "second row"]);
+    let second = next_event_stamp(&mut stream);
+    assert_ne!(first, second);
+}
+
+#[test]
+fn web_events_beyond_the_cap_are_busy_and_reads_still_answer() {
+    let s = init("web-events-cap");
+    let web = serve(s.path());
+    let mut streams = Vec::new();
+    for _ in 0..8 {
+        let mut stream = events(web.port);
+        next_event_stamp(&mut stream);
+        streams.push(stream);
+    }
+    let (status, _, body) = get(web.port, "/api/events");
+    assert_eq!(status, 503, "{body}");
+    assert_eq!(json_of(&body)["code"], "busy");
+    assert_eq!(get(web.port, "/api/stamp").0, 200);
+}
+
+#[test]
+fn web_events_refuse_a_foreign_host() {
+    let s = init("web-events-host");
+    let web = serve(s.path());
+    let (status, _, body) = http(web.port, "GET", "/api/events", Some("evil.example"));
+    assert_eq!(status, 403, "{body}");
+    assert_eq!(json_of(&body)["code"], "forbidden_host");
+}
+
+#[test]
+fn web_events_give_their_slot_back_when_the_tab_goes() {
+    let s = init("web-events-release");
+    let web = serve(s.path());
+    let mut streams = Vec::new();
+    for _ in 0..8 {
+        let mut stream = events(web.port);
+        next_event_stamp(&mut stream);
+        streams.push(stream);
+    }
+    drop(streams);
+    let until = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        let mut stream = dial(web.port);
+        use std::io::{Read as _, Write as _};
+        write!(stream, "GET /api/events HTTP/1.1\r\nHost: 127.0.0.1:{}\r\n\r\n", web.port).unwrap();
+        stream.set_read_timeout(Some(std::time::Duration::from_secs(2))).unwrap();
+        let mut start = [0; 12];
+        stream.read_exact(&mut start).unwrap();
+        if &start == b"HTTP/1.1 200" {
+            break;
+        }
+        assert!(std::time::Instant::now() < until, "closed streams did not return their slots");
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+}
+
 /// 본문 없는 POST 하나 — `Origin` 을 줄 때만 싣는다. 브라우저가 보내는 꼴이다(읽음 표시, moai-ly88).
 fn post(port: u16, path: &str, origin: Option<&str>) -> (u16, String, String) {
     use std::io::{Read as _, Write as _};

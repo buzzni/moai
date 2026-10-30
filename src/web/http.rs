@@ -262,6 +262,15 @@ pub fn write(w: &mut impl Write, r: &Response, body: bool) -> std::io::Result<()
     w.flush()
 }
 
+/// Start a server-sent event response without a Content-Length. The connection closes at the stream's bounded end.
+pub fn write_stream_head(w: &mut impl Write) -> std::io::Result<()> {
+    write!(
+        w,
+        "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream; charset=utf-8\r\nConnection: close\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\nContent-Security-Policy: {CSP}\r\n\r\n"
+    )?;
+    w.flush()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

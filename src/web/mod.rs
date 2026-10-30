@@ -1,8 +1,8 @@
 //! `moai web` — 127.0.0.1 에서 트래커를 페이지로 낸다. 받기 고리와 길.
 //!
-//! **연결마다 스레드 하나, 나누는 상태가 없다.** 요청마다 자식 `moai --json …` 하나를 띄워 그 답을 옮기므로
-//! ([`run`]) 스레드끼리 함께 쥐는 것은 띄우는 법([`Site`])과 도는 연결의 수뿐이다. 비동기 런타임을 안 쓰는
-//! 까닭이 이것이다 — 동시에 도는 것이 많아야 [`BUSY_MAX`] 이고, 한 판의 값은 자식 프로세스가 치른다.
+//! **연결마다 스레드 하나.** 보통 요청은 자식 `moai --json …` 하나를 띄워 그 답을 옮긴다([`run`]).
+//! 사건 흐름은 제 스레드에서 1초마다 표식을 재며, 보통 요청의 [`BUSY_MAX`] 와 따로 [`STREAMS_MAX`] 를 센다.
+//! 비동기 런타임은 쓰지 않는다.
 //!
 //! **트래커에 쓰는 길은 계획 날 하나다.** 길은 GET 이고, POST 는 둘이다([`api::write_argv_of`]) — 읽음 표시(2026-10-22
 //! 사람 결정, moai-ly88)는 사용자 설정 곁의 제 파일에만 적히고, 간트의 막대 끌기(`/api/plan/<id>`, moai-d86e.3ud)는 자식
@@ -26,6 +26,8 @@ use std::time::{Duration, Instant};
 
 /// 동시에 도는 연결의 상한 — 넘치면 503 을 쓰고 닫는다. 페이지 하나가 한 번에 여는 부름은 몇 개다.
 pub const BUSY_MAX: usize = 32;
+/// Long-lived event streams have their own slots and never occupy ordinary request capacity.
+pub const STREAMS_MAX: usize = 8;
 /// 요청 머리 **전체**를 읽는 시한 — `read` 한 번의 시한이 아니다([`read_head`]).
 const READ_LIMIT: Duration = Duration::from_secs(5);
 /// 503 뒤에 늦게 오는 요청 머리를 별도 스레드에서 비우는 전체 시한. 조용하거나 한 바이트씩 보내는
@@ -49,6 +51,7 @@ pub struct Site {
     pub started_in: Lang,
     /// 사용자 설정의 표식과 그것에서 읽은 것([`Site::config`]).
     picked: Mutex<Picked>,
+    streams: AtomicUsize,
 }
 
 /// 사용자 설정을 한 번 풀어 든 값 — **표식이 같은 동안 다시 안 푼다.** 말과 걸어 둔 프로젝트가 한 번의 풀기를 나눠 쓴다.
@@ -63,7 +66,12 @@ struct Picked {
 
 impl Site {
     pub fn new(spawner: run::Spawner, started_in: Lang) -> Site {
-        Site { spawner, started_in, picked: Mutex::new(Picked { stamp: None, lang: started_in, projects: Vec::new() }) }
+        Site {
+            spawner,
+            started_in,
+            picked: Mutex::new(Picked { stamp: None, lang: started_in, projects: Vec::new() }),
+            streams: AtomicUsize::new(0),
+        }
     }
 
     /// 이 요청의 말 — **설정이 바뀌면 다시 고른다**([`crate::cmd::lang_of`] 의 자, `MOAI_LANG` 이 이긴다). 자식은
@@ -131,8 +139,7 @@ pub fn serve(listener: TcpListener, site: Site) -> ! {
         let leave = Leave(busy.clone());
         let site_of = site.clone();
         let spawned = std::thread::Builder::new().spawn(move || {
-            let _leave = leave;
-            handle(stream, &site_of);
+            handle(stream, &site_of, leave);
         });
         if spawned.is_err()
             && let Some(spare) = spare
@@ -178,16 +185,105 @@ fn turn_away_within(stream: TcpStream, lang: Lang, draining: &Arc<AtomicUsize>, 
     });
 }
 
-fn handle(stream: TcpStream, site: &Site) {
+fn handle(stream: TcpStream, site: &Site, busy: Leave) {
     let (answer, body) = match read_head(&stream, READ_LIMIT) {
         // 시한·끊김은 답할 상대가 없다.
         Err(Bad::Io) => return,
         Err(bad) => (refuse(400, &bad_said(&bad, site.lang()), code::BAD_INPUT), true),
+        Ok(req) if req.path == "/api/events" => {
+            let target = event_target(&req, site);
+            match target {
+                Ok((cwd, lang, overlay, first)) => {
+                    if site.streams.fetch_add(1, Ordering::SeqCst) >= STREAMS_MAX {
+                        site.streams.fetch_sub(1, Ordering::SeqCst);
+                        (refuse(503, say(lang, "web.busy"), code::BUSY), true)
+                    } else {
+                        struct StreamLeave<'a>(&'a AtomicUsize);
+                        impl Drop for StreamLeave<'_> {
+                            fn drop(&mut self) {
+                                self.0.fetch_sub(1, Ordering::SeqCst);
+                            }
+                        }
+                        let _stream = StreamLeave(&site.streams);
+                        drop(busy);
+                        let _ = stream_events(&stream, &cwd, lang, overlay, first);
+                        close(&stream);
+                        return;
+                    }
+                }
+                Err(refused) => (refused, true),
+            }
+        }
         // HEAD 의 답은 머리만 쓴다([`http::write`]).
         Ok(req) => (answer(&req, site), req.method != "HEAD"),
     };
+    let _busy = busy;
     let _ = http::write(&mut Within::of(&stream, ANSWER_LIMIT), &answer, body);
     close(&stream);
+}
+
+fn event_target(req: &Request, site: &Site) -> Result<(std::path::PathBuf, Lang, bool, String), Response> {
+    let lang = site.lang();
+    if !http::host_ok(req.host.as_deref()) {
+        return Err(refuse(403, say(lang, "web.foreign_host"), code::FORBIDDEN_HOST));
+    }
+    if req.method != "GET" {
+        let said = fill(say(lang, "web.only_get"), &[("method", &req.method), ("path", &req.path)]);
+        return Err(Response { allow: "GET", ..refuse(405, &said, code::METHOD_NOT_ALLOWED) });
+    }
+    let (project, query) =
+        api::split_project(&req.query).map_err(|bad| refuse(400, &bad.said(lang), code::BAD_INPUT))?;
+    let cwd = match project {
+        Some(project) => project_of(site, &project, lang)?,
+        None => site.spawner.cwd.clone(),
+    };
+    let overlay = api::overlay_of(&query).map_err(|bad| refuse(400, &bad.said(lang), code::BAD_INPUT))?;
+    let first = api::stamp(&cwd, lang, overlay).map_err(|e| refuse(500, &e.message, e.code))?;
+    Ok((cwd, lang, overlay, first))
+}
+
+fn stream_events(
+    stream: &TcpStream,
+    cwd: &std::path::Path,
+    lang: Lang,
+    overlay: bool,
+    first: String,
+) -> std::io::Result<()> {
+    use std::io::Write as _;
+    let mut writer = Within::of(stream, WRITE_LIMIT);
+    http::write_stream_head(&mut writer)?;
+    writer.write_all(b"retry: 3000\n\n")?;
+    writer.write_all(format!("event: stamp\ndata: {{\"stamp\":\"{first}\"}}\n\n").as_bytes())?;
+    writer.flush()?;
+    let (until, mut ping, mut seen) = (Instant::now() + Duration::from_secs(30 * 60), Instant::now(), first);
+    while Instant::now() < until {
+        std::thread::sleep(Duration::from_secs(1));
+        // A closed tab need not wait for the next changed stamp or fifteen-second ping to return its slot.
+        stream.set_read_timeout(Some(Duration::from_millis(1)))?;
+        match stream.peek(&mut [0u8; 1]) {
+            Ok(0) => break,
+            Err(e) if matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) => {}
+            Err(_) => break,
+            Ok(_) => {}
+        }
+        let stamp = match api::stamp(cwd, lang, overlay) {
+            Ok(s) => s,
+            Err(_) => break,
+        };
+        if stamp != seen {
+            let mut writer = Within::of(stream, WRITE_LIMIT);
+            writer.write_all(format!("event: stamp\ndata: {{\"stamp\":\"{stamp}\"}}\n\n").as_bytes())?;
+            writer.flush()?;
+            seen = stamp;
+        }
+        if ping.elapsed() >= Duration::from_secs(15) {
+            let mut writer = Within::of(stream, WRITE_LIMIT);
+            writer.write_all(b": ping\n\n")?;
+            writer.flush()?;
+            ping = Instant::now();
+        }
+    }
+    Ok(())
 }
 
 /// 요청 머리를 `limit` 안에 **다** 읽는다([`Within`]).
