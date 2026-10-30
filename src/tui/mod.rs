@@ -1809,7 +1809,7 @@ impl Site {
         path: Path,
         unreadable: Vec<Option<String>>,
     ) -> Site {
-        Site {
+        let mut site = Site {
             // 기본값은 도구의 것이다(moai-9it4). 한때 여기가 `Lang::Ko` 였고 그 한 줄이 "탐색기는
             // 아직 한국어로 선다" 는 뜻이었다 — 말이 안 닿은 자리에서 영어를 집으면 한국어 화면
             // 한가운데 몇 줄만 영어로 섰기 때문이다. 이제 탐색기의 글이 다 말묶음에서 오므로 그
@@ -1852,7 +1852,24 @@ impl Site {
             origin: crate::worktree::Origin::default(),
             elsewhere: Vec::new(),
             unfound: None,
-        }
+        };
+        site.seed_list_folds();
+        site
+    }
+
+    /// List folders start closed except milestones with unfinished work (moai-zxd0), opened one level — their epics
+    /// keep their own fold. Measured where a project's list starts over: when it is built ([`Site::of`]), entered
+    /// from the overview (`App::enter_project`, whose rows arrive after a blank `Site`) and parked back in the
+    /// overview (`App::leave_project`). A reread keeps the person's folds instead (`App::take`, [`App::follow_site`]).
+    pub(super) fn seed_list_folds(&mut self) {
+        self.expanded = (0..self.issues.len())
+            .filter(|&at| {
+                self.issues[at].kind == Kind::Milestone
+                    && self.index.is_dir(&self.issues, at)
+                    && !self.starts_folded(at)
+            })
+            .map(|at| self.index.dir_path(&self.issues, at))
+            .collect();
     }
 
     /// 이 줄이 목록에 서는가 — 거름망이 안 가렸고, 보기가 안 가렸거나 검색이 보기를 걷었다([`Site::veil`]).
@@ -1943,6 +1960,13 @@ impl Site {
             .into_iter()
             .filter(|path| !selected_home.is_some_and(|home| home.starts_with(path)))
             .collect()
+    }
+
+    /// Start a board or Gantt visit with the shared closed-milestone rule. An overview-to-project entry loads rows
+    /// into a blank site, so it calls this after the load; a reread must instead preserve the person's folds.
+    pub(super) fn seed_layout_folds(&mut self, selected_home: Option<&Path>, gantt: bool) {
+        let shut = self.default_folds(selected_home);
+        if gantt { self.gantt_shut = shut } else { self.board_shut = shut }
     }
 
     /// 그 줄이 아카이브인가(moai-47mz) — **거름망과 같은 자로 잰다**([`crate::query::Where::archived`]): 칸은
@@ -4930,9 +4954,16 @@ impl App {
                     .as_mut()
                     .and_then(|l| l.places.iter_mut().find(|p| p.path == path))
                     .and_then(|p| p.site.as_mut())
-                    .map(|held| (std::mem::take(&mut held.gantt_shut), std::mem::take(&mut held.board_shut)));
+                    .map(|held| {
+                        (
+                            std::mem::take(&mut held.expanded),
+                            std::mem::take(&mut held.gantt_shut),
+                            std::mem::take(&mut held.board_shut),
+                        )
+                    });
                 match held {
-                    Some((gantt_shut, board_shut)) => {
+                    Some((expanded, gantt_shut, board_shut)) => {
+                        site.expanded = expanded;
                         site.gantt_shut = gantt_shut;
                         site.board_shut = board_shut;
                     }
@@ -5483,10 +5514,7 @@ impl App {
             _ => None,
         };
         let keep = |seat: Seat| selected.as_ref().and_then(|(s, path)| (*s == seat).then_some(path));
-        let seed = |site: &mut Site, keep: Option<&Path>| {
-            let shut = site.default_folds(keep);
-            if gantt { site.gantt_shut = shut } else { site.board_shut = shut }
-        };
+        let seed = |site: &mut Site, keep: Option<&Path>| site.seed_layout_folds(keep, gantt);
         seed(&mut self.site, keep(Seat::Here));
         if let Some(layer) = self.layer.as_mut() {
             for (at, place) in layer.places.iter_mut().enumerate() {
@@ -7202,10 +7230,43 @@ mod tests {
     }
 
     #[test]
+    fn the_list_opens_running_milestones_and_keeps_closed_ones_folded() {
+        let a = grouped_for_folding();
+        let milestone = a.site.index.dir_path(&a.site.issues, 0);
+        let epic = a.site.index.dir_path(&a.site.issues, 1);
+        assert!(a.site.expanded.contains(&milestone));
+        assert!(!a.site.expanded.contains(&epic), "opening a milestone must not also open its epics");
+        assert_eq!(row_ids(&a), ["argos-0000", "argos-0001", "argos-0002"]);
+
+        let mut finished = member("argos-0012", "argos-0011");
+        finished.status = Status::new(crate::config::DONE);
+        finished.done_at = Some(crate::model::now());
+        let mut finished_epic = make("argos-0011", Kind::Epic);
+        finished_epic.milestone = Some("argos-0010".into());
+        let closed = App::new(vec![make("argos-0010", Kind::Milestone), finished_epic, finished], cfg(), Path::new());
+        assert!(closed.site.starts_folded(0));
+        assert!(closed.site.expanded.is_empty());
+        assert_eq!(row_ids(&closed), ["argos-0010"]);
+    }
+
+    #[test]
+    fn a_milestone_folded_by_hand_stays_folded_after_a_reread() {
+        let mut a = grouped_for_folding();
+        let milestone = a.site.index.dir_path(&a.site.issues, 0);
+        assert!(a.site.expanded.contains(&milestone));
+        a.hit("h");
+        assert!(!a.site.expanded.contains(&milestone));
+        a.adopt(a.site.issues.clone());
+        assert!(!a.site.expanded.contains(&milestone));
+        assert_eq!(row_ids(&a), ["argos-0000"]);
+    }
+
+    #[test]
     fn tab_opens_closed_epics_with_other_descendants() {
         let mut a = grouped_for_folding();
         assert!(a.site.closed(1));
         assert!(!a.site.closed(2));
+        a.hit("h");
         a.hit("Tab");
         let closed = a.site.index.dir_path(&a.site.issues, 1);
         let running = a.site.index.dir_path(&a.site.issues, 2);
@@ -7254,6 +7315,7 @@ mod tests {
         assert!(a.site.closed(0), "the premise — every member is done, so the milestone is closed");
         let milestone = a.site.index.dir_path(&a.site.issues, 0);
         a.cursor = a.rows().iter().position(|r| matches!(r, Row::Item(_, e, _) if e.at() == Some(0))).unwrap();
+        a.hit("h");
         a.hit("Tab");
         a.cursor = a.rows().iter().position(|r| matches!(r, Row::Item(_, e, _) if e.at() == Some(3))).unwrap();
         a.hit("SPC g g");
@@ -9501,7 +9563,9 @@ mod tests {
             member("argos-0003", "argos-0002"),
         ];
         let mut a = App::new(issues, cfg(), Path::new());
-        assert_eq!(row_ids(&a), ["argos-0001"], "시험의 전제 — 마일스톤 하나만 선다");
+        assert_eq!(row_ids(&a), ["argos-0001", "argos-0002"], "시험의 전제 — 열린 마일스톤은 한 단 펼친다");
+        a.hit("h");
+        assert_eq!(row_ids(&a), ["argos-0001"]);
         a.hit("Tab");
         assert_eq!(row_ids(&a), ["argos-0001", "argos-0002", "argos-0003"], "재귀로 안 펼쳤다");
         let depths: Vec<usize> = a
@@ -9534,7 +9598,7 @@ mod tests {
     #[test]
     fn h_on_a_member_folds_its_parent_and_stands_there() {
         let mut a = App::new(nested(), cfg(), Path::new());
-        a.hit("Tab");
+        a.hit("h Tab");
         assert_eq!(row_ids(&a), ["argos-0001", "argos-0002", "argos-0003"], "시험의 전제");
         a.hit("G");
         assert_eq!(row_ids(&a)[a.cursor], "argos-0003");
@@ -9552,7 +9616,7 @@ mod tests {
     #[test]
     fn entering_an_inlined_group_goes_to_its_own_place() {
         let mut a = App::new(nested(), cfg(), Path::new());
-        a.hit("Tab");
+        a.hit("h Tab");
         assert_eq!(row_ids(&a), ["argos-0001", "argos-0002", "argos-0003"], "시험의 전제");
         a.cursor = 1;
         a.key(key(KeyCode::Enter));
@@ -9574,7 +9638,7 @@ mod tests {
     #[test]
     fn tab_expands_right_after_a_one_level_fold() {
         let mut a = App::new(nested(), cfg(), Path::new());
-        a.hit("Tab");
+        a.hit("h Tab");
         assert_eq!(row_ids(&a).len(), 3, "시험의 전제");
         a.key(key(KeyCode::Char('h')));
         assert_eq!(row_ids(&a), ["argos-0001"], "`h` 가 한 단계 안 접었다");
@@ -9607,6 +9671,7 @@ mod tests {
         is.push(make("argos-0008", Kind::Milestone));
         is.push(make("argos-0009", Kind::Milestone));
         let mut a = App::new(is, cfg(), Path::new());
+        a.hit("h");
         assert_eq!(row_ids(&a), ["argos-0001", "argos-0008", "argos-0009"], "시험의 전제");
         search(&mut a, "argos-0003");
         // 칸을 Enter 로 닫는다 — 칸 안의 Esc 는 치기 전 자리로 되돌리는 다른 길이다(`grep_was`).

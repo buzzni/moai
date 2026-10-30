@@ -190,6 +190,38 @@ function mount(rows, { state: over = {}, width = 800, height = 280, detailVisibl
   return { dom, doc, root, store, pane, calls, lines, key, render, size }
 }
 
+test('the list opens running milestones one level and keeps closed ones folded', () => {
+  const rows = [
+    { id: 'm-open', kind: 'milestone', title: 'Open', derived_status: 'in_progress' },
+    { id: 'e-open', kind: 'epic', title: 'Epic', milestone: 'm-open', derived_status: 'todo' },
+    { id: 'e-open.a', kind: 'issue', title: 'Work', derived_epic: 'e-open', status: 'todo' },
+    { id: 'm-closed', kind: 'milestone', title: 'Closed', derived_status: 'done' },
+    { id: 'e-closed', kind: 'epic', title: 'Finished', milestone: 'm-closed', derived_status: 'done' },
+    { id: 'e-closed.a', kind: 'issue', title: 'Done', derived_epic: 'e-closed', status: 'done' },
+  ]
+  const { lines, store } = mount(rows)
+  assert.deepEqual(lines().map((line) => line.dataset.key), ['m-open', 'e-open', 'm-closed'])
+  assert.equal(lines()[0].getAttribute('aria-expanded'), 'true')
+  assert.equal(lines()[1].getAttribute('aria-expanded'), 'false')
+  assert.equal(lines()[2].getAttribute('aria-expanded'), 'false')
+  assert.deepEqual(store.getState().expanded, [pathKey(['m:m-open'])])
+})
+
+test('a milestone folded by hand stays folded after a reread', () => {
+  const rows = [
+    { id: 'm-open', kind: 'milestone', title: 'Open', derived_status: 'in_progress' },
+    { id: 'e-open', kind: 'epic', title: 'Epic', milestone: 'm-open', derived_status: 'todo' },
+    { id: 'e-open.a', kind: 'issue', title: 'Work', derived_epic: 'e-open', status: 'todo' },
+  ]
+  const { lines, key, store, pane } = mount(rows, { state: { cursor: 'm-open' } })
+  assert.deepEqual(lines().map((line) => line.dataset.key), ['m-open', 'e-open'])
+  key('ArrowLeft')
+  assert.deepEqual(store.getState().expanded, [])
+  pane.render(store.getState(), build(rows.map((row) => ({ ...row }))))
+  assert.deepEqual(lines().map((line) => line.dataset.key), ['m-open'])
+  assert.equal(lines()[0].getAttribute('aria-expanded'), 'false')
+})
+
 test('Tab on a closed milestone opens its closed epic too', () => {
   const rows = [
     { id: 'm1', kind: 'milestone', title: 'Release', derived_status: 'done' },
@@ -256,6 +288,9 @@ test('list view: rows, columns, the name line, and going in and out', () => {
   assert.deepEqual(lines().map((line) => line.dataset.key), ['..', 'se-e1.a', 'se-e1.b'])
   const selected = root.querySelector('[aria-selected="true"]')
   assert.equal(selected.dataset.key, 'se-e1.a')
+  assert.ok(selected.matches('.moai-list-body > .m-row[aria-selected="true"]'), 'the selected row owns the list mark')
+  const listCss = readFileSync(new URL('../panel/style/list.css', import.meta.url), 'utf8')
+  assert.match(listCss, /\.moai-list-body > \.m-row\[aria-selected="true"\]::before \{[^}]*content: "";[^}]*left: 0;[^}]*top: 0; bottom: 0; width: 4px;[^}]*background: var\(--accent\);/)
   assert.equal(root.querySelector('.moai-list').getAttribute('aria-activedescendant'), selected.id)
   assert.equal(selected.querySelector('.moai-c-p').textContent, 'p1')
   assert.ok(selected.querySelector('.moai-c-p').classList.contains('m-p1'))
@@ -269,7 +304,7 @@ test('list view: rows, columns, the name line, and going in and out', () => {
   assert.equal(store.getState().cursor, 'se-e1.a.x')
   key('ArrowLeft')
   assert.equal(store.getState().cursor, 'se-e1.a', '← on a child folds its folder and lands on it')
-  assert.deepEqual(store.getState().expanded, [])
+  assert.deepEqual(store.getState().expanded, [pathKey(['m:se-m1'])])
   // Nothing to fold on a top-level line: ← leaves the place, landing on the folder it came out of (the TUI's `h`).
   key('ArrowLeft')
   assert.deepEqual(store.getState().path, ['m:se-m1'])
@@ -345,7 +380,7 @@ test('list view: no index yet shows loading, then the rows', () => {
   assert.match(dom.root.querySelector('.moai-list-empty').textContent, /Loading/)
   dom.render()
   assert.equal(dom.root.querySelector('.moai-list-empty').hidden, true)
-  assert.equal(dom.lines().length, 2)
+  assert.equal(dom.lines().length, 3)
 })
 
 test('virtual scroll: 5000 rows draw only a window, follow the scroll, and keep the cursor in view', () => {
@@ -512,7 +547,7 @@ test('list view: rows are 24 high, as list.css --moai-row-h, so the branches mee
   assert.match(listCss, /--moai-row-h: 24px/)
 })
 
-test('list rows expose their status for progress, review and done backgrounds', () => {
+test('list rows expose their status for todo, progress, review and done backgrounds', () => {
   const panel = mount([
     { id: 'a', title: 'Progress', status: 'in_progress' },
     { id: 'b', title: 'Review', status: 'review' },
@@ -525,10 +560,18 @@ test('list rows expose their status for progress, review and done backgrounds', 
   // jsdom computes no colour, so the sheets are read: the tints stand, and the cursor and hover still win over them.
   const listCss = readFileSync(new URL('../panel/style/list.css', import.meta.url), 'utf8')
   const tokensCss = readFileSync(new URL('../panel/style/tokens.css', import.meta.url), 'utf8')
+  const componentsCss = readFileSync(new URL('../panel/style/components.css', import.meta.url), 'utf8')
+  assert.match(tokensCss, /--todo: color-mix\(in srgb, #3b82f6 70%, var\(--text\)\)/)
+  assert.match(tokensCss, /--todo-soft: color-mix\(in srgb, #3b82f6 2%, var\(--bg\)\)/, 'light todo tint leaves the selected 10% accent visibly distinct')
+  assert.match(tokensCss, /--selected: color-mix\(in srgb, var\(--accent\) 10%, var\(--bg\)\)/)
+  assert.match(tokensCss, /:root\[data-theme="dark"\] \{ --todo-soft: color-mix\(in srgb, #3b82f6 3%, var\(--bg\)\)/)
+  assert.match(tokensCss, /:root:not\(\[data-theme="light"\]\) \{ --todo-soft: color-mix\(in srgb, #3b82f6 3%, var\(--bg\)\)/)
+  assert.match(componentsCss, /\.m-st-todo \{ color: var\(--todo\); \}/)
+  assert.match(componentsCss, /\.m-st-todo\.m-spin::before \{ color: var\(--todo\); \}/)
   assert.match(tokensCss, /--done-soft: color-mix\(in srgb, #10B981 7%, var\(--bg\)\)/)
-  assert.match(tokensCss, /:root\[data-theme="dark"\] \{ --done-soft: color-mix\(in srgb, #10B981 3%, var\(--bg\)\)/)
-  assert.match(tokensCss, /:root:not\(\[data-theme="light"\]\) \{ --done-soft: color-mix\(in srgb, #10B981 3%, var\(--bg\)\)/)
-  for (const [status, token] of [['in_progress', '--progress-soft'], ['review', '--review-soft'], ['done', '--done-soft']]) {
+  assert.match(tokensCss, /:root\[data-theme="dark"\] \{[^}]*--done-soft: color-mix\(in srgb, #10B981 3%, var\(--bg\)\)/)
+  assert.match(tokensCss, /:root:not\(\[data-theme="light"\]\) \{[^}]*--done-soft: color-mix\(in srgb, #10B981 3%, var\(--bg\)\)/)
+  for (const [status, token] of [['todo', '--todo-soft'], ['in_progress', '--progress-soft'], ['review', '--review-soft'], ['done', '--done-soft']]) {
     assert.match(listCss, new RegExp(`\\.m-row\\[data-status="${status}"\\]:not\\(\\[aria-selected="true"\\]\\):not\\(:hover\\) \\{ background: var\\(${token}\\); \\}`))
     assert.match(tokensCss, new RegExp(`${token}: color-mix\\(`))
   }

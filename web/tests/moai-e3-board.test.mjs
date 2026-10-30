@@ -269,7 +269,7 @@ test('board bands follow rendered lanes and the card head, including a selected 
   const bandSelector = '.m-card > .m-card-line:first-child'
   assert.match(css, /\.m-card > \.m-card-line:first-child\s*\{[^}]*background: var\(--band, transparent\);[^}]*border-bottom: 1px solid var\(--edge, transparent\)/s)
   assert.match(css, /\.m-card\[aria-selected="true"\] > \.m-card-line:first-child\s*\{[^}]*border-top: 1px solid var\(--accent\);[^}]*border-left: 1px solid var\(--accent\);[^}]*border-right: 1px solid var\(--accent\)/s)
-  for (const [status, token] of [['in_progress', 'progress'], ['review', 'review'], ['done', 'done']]) {
+  for (const [status, token] of [['todo', 'todo'], ['in_progress', 'progress'], ['review', 'review'], ['done', 'done']]) {
     const card = root.querySelector(`.m-lane[data-status="${status}"] .m-card[data-id="${token}"]`)
     assert.ok(card, `${status} card is in its rendered lane`)
     assert.ok(card.querySelector(bandSelector), `${status} card has a first-line band`)
@@ -281,9 +281,10 @@ test('board bands follow rendered lanes and the card head, including a selected 
   }
   // The dark done band stays pale in both dark blocks (OS dark and data-theme="dark"), as --done-soft does.
   assert.equal(tokens.match(/--done-band: color-mix\(in srgb, #10B981 5%, var\(--card-bg\)\)/g)?.length, 2)
+  assert.equal(tokens.match(/--todo-band: color-mix\(in srgb, #3b82f6 5%, var\(--card-bg\)\)/g)?.length, 2)
   assert.equal(root.querySelector('[data-id="progress"]').getAttribute('aria-selected'), 'true')
   assert.ok(root.querySelector('.m-lane[data-status="deferred"] [data-id="shelved"]'))
-  for (const status of ['todo', 'backlog', 'deferred']) {
+  for (const status of ['backlog', 'deferred']) {
     assert.doesNotMatch(css, new RegExp(`\\.m-lane\\[data-status="${status}"\\] \\{ --band:`))
   }
 })

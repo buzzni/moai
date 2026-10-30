@@ -17,6 +17,7 @@
   border-top: 1px solid var(--accent); border-left: 1px solid var(--accent); border-right: 1px solid var(--accent);
   padding: 4px 9px 3px;
 }
+.m-lane[data-status="todo"] { --band: var(--todo-band); --edge: var(--todo-edge); }
 .m-lane[data-status="in_progress"] { --band: var(--progress-band); --edge: var(--progress-edge); }
 .m-lane[data-status="review"] { --band: var(--review-band); --edge: var(--review-edge); }
 .m-lane[data-status="done"] { --band: var(--done-band); --edge: var(--done-edge); }
