@@ -559,6 +559,8 @@ test('list rows expose their status for todo, progress, review and done backgrou
   const tokensCss = readFileSync(new URL('../panel/style/tokens.css', import.meta.url), 'utf8')
   const componentsCss = readFileSync(new URL('../panel/style/components.css', import.meta.url), 'utf8')
   assert.match(tokensCss, /--todo: color-mix\(in srgb, #3b82f6 70%, var\(--text\)\)/)
+  assert.match(tokensCss, /--todo-soft: color-mix\(in srgb, #3b82f6 2%, var\(--bg\)\)/, 'light todo tint leaves the selected 10% accent visibly distinct')
+  assert.match(tokensCss, /--selected: color-mix\(in srgb, var\(--accent\) 10%, var\(--bg\)\)/)
   assert.match(tokensCss, /:root\[data-theme="dark"\] \{ --todo-soft: color-mix\(in srgb, #3b82f6 3%, var\(--bg\)\)/)
   assert.match(tokensCss, /:root:not\(\[data-theme="light"\]\) \{ --todo-soft: color-mix\(in srgb, #3b82f6 3%, var\(--bg\)\)/)
   assert.match(componentsCss, /\.m-st-todo \{ color: var\(--todo\); \}/)

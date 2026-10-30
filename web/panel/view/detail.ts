@@ -147,8 +147,8 @@ export const mountDetail: MountPane = (root: HTMLElement, ctx: ViewContext): Pan
     const rollup = rollupOf(row, index, last?.state.board.value?.groups, last?.state.boot?.statuses)
     if (rollup) {
       const bar = el(doc, 'div', { class: 'moai-detail-bar', role: 'progressbar', 'aria-valuemin': 0, 'aria-valuemax': 100, 'aria-valuenow': rollup.percent ?? 0, 'aria-label': d.rollup })
-      // The bar in the colours of the columns: done, review, held, then todo. Any other status
-      // stays in the bar's ground. The legend under it names each, in the same colours.
+      // The bar paints done, review and held work. Todo is the empty ground, so an all-todo
+      // group has an empty bar as its zero aria-valuenow says. The legend still names todo.
       const counted = rollup.byStatus.reduce((sum, [, n]) => sum + n, 0)
       // The share is set through CSSOM (`style.width`), which the CSP lets through; a `style` attribute it would not.
       const share = (status: string, percent: number) => {
@@ -156,7 +156,7 @@ export const mountDetail: MountPane = (root: HTMLElement, ctx: ViewContext): Pan
         span.style.width = `${percent}%`
         bar.append(span)
       }
-      for (const status of ['done', 'review', 'in_progress', 'todo']) {
+      for (const status of ['done', 'review', 'in_progress']) {
         const n = rollup.byStatus.find(([one]) => one === status)?.[1] ?? 0
         if (n && counted) share(status, (n * 100) / counted)
       }
