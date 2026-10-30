@@ -1222,6 +1222,10 @@ impl App {
                 // (`leave_project`), 뿌리에는 `..` 이 없어(moai-i784) 첫 줄이 곧 첫 이슈다. 디렉터리에
                 // 들어갈 때와 같은 자리다(`App::first_row`, moai-cm13). 여기서 목록을 또 세지 않는다(moai-go4o).
                 self.apply_fresh(fresh);
+                // **The list starts as a first read does** (moai-zxd0) — `leave_project` put a blank `Site` here and
+                // `apply_fresh` only swaps the rows in, keeping folds as a reread must. Seeding after it opens the running
+                // milestones one level; the cursor stays on the first row, which no fold below it moves.
+                self.site.seed_list_folds();
                 // **층이 물어 둔 것도 옮겨 든다**(리뷰) — 위의 `held` 가 그 값을 읽어 이 읽기에
                 // 썼으므로 `prepare` 는 안 물었고([`super::Fresh::asked_install`] 가 `None`),
                 // [`App::apply_fresh`] 는 물은 때만 찍는다. 그런데 [`App::leave_project`] 가 `Site` 를
@@ -1320,7 +1324,9 @@ impl App {
         let mut parked = std::mem::replace(&mut self.site, blank);
         parked.path.clear();
         parked.remembered.clear();
-        parked.expanded.clear();
+        // "From the beginning" is the seeded list (moai-zxd0): running milestones open one level. A bare `clear()`
+        // folded them here while a project first read in the overview stood with them open.
+        parked.seed_list_folds();
         parked.gantt_shut.clear();
         parked.board_shut.clear();
         // **거름망 마스크도 푼다**(리뷰). 아래에서 `hung` 을 비우므로 걸린 글은 사라지는데,
@@ -3632,6 +3638,96 @@ mod tests {
         assert!(site.expanded.contains(&path("argos-0400")), "Tab left the open milestone folded");
         assert!(site.expanded.contains(&path("argos-0300")), "Tab left the closed epic folded");
         assert!(!site.expanded.contains(&path("argos-0200")), "Tab opened the closed milestone");
+    }
+
+    /// A project with one running milestone (`argos-0400`, a todo member) beside a loose row.
+    fn running_milestone_project(s: &Scratch) -> PathBuf {
+        let dir = s.project("deep", &[("argos-0001", "묶음 밖의 줄", "todo")]);
+        let now = crate::model::now();
+        let open = Issue::new("argos-0400".into(), "열린 마일스톤".into(), Kind::Milestone, Status::new("todo"), &now);
+        let mut member =
+            Issue::new("argos-0401".into(), "마일스톤의 일".into(), Kind::Issue, Status::new("todo"), &now);
+        member.milestone = Some(open.id.clone());
+        let file = dir.join(".moai/issues.jsonl");
+        let mut body = std::fs::read_to_string(&file).unwrap();
+        for i in [open, member] {
+            body.push_str(&format!("{}\n", serde_json::to_string(&i).unwrap()));
+        }
+        std::fs::write(&file, body).unwrap();
+        dir
+    }
+
+    fn milestone_dir(site: &crate::tui::Site) -> crate::nav::Path {
+        site.index.dir_path(&site.issues, site.index.find("argos-0400").unwrap())
+    }
+
+    /// **Entering a project from the overview opens its running milestones as a first read does** (moai-zxd0 review).
+    /// `enter_project` swaps a blank `Site` in and loads the rows through `apply_fresh`, which keeps folds as a reread
+    /// must — the seed in `Site::of` never ran, so every milestone of a project entered with `Enter` or a digit stood
+    /// folded. Climbing back parks the project with the same seed: a bare `clear()` folded the running milestone there
+    /// while a project read fresh in the overview showed it open.
+    #[test]
+    fn entering_and_leaving_from_the_overview_open_running_milestones() {
+        let s = Scratch::fenced("layer-seed-enter");
+        let dir = running_milestone_project(&s);
+        let cfg = s.register(&[&dir]);
+        let mut a = layered(&cfg);
+        a.hit("l");
+        settle(&mut a);
+        let site = a.layer.as_ref().unwrap().places[0].site.as_ref().expect("l read the project");
+        assert!(site.expanded.contains(&milestone_dir(site)), "the premise — a first read in the overview opens it");
+
+        a.cursor = a.rows().iter().position(|r| matches!(r, Row::Project(0))).unwrap();
+        a.key(key(KeyCode::Enter));
+        assert!(!a.on_layer(), "the premise — Enter went in");
+        assert!(a.site.expanded.contains(&milestone_dir(&a.site)), "entering left the running milestone folded");
+        assert!(titles(&a).contains(&"마일스톤의 일".to_string()), "the member is not listed: {:?}", titles(&a));
+
+        a.hit("h");
+        assert!(!a.site.expanded.contains(&milestone_dir(&a.site)), "the premise — h folded it by hand");
+        a.hit("0");
+        settle(&mut a);
+        let site = a.layer.as_ref().unwrap().places[0].site.as_ref().expect("climbing parked the project");
+        assert!(site.expanded.contains(&milestone_dir(site)), "climbing parked the running milestone folded");
+    }
+
+    /// **A milestone folded by hand in the overview stays folded when that project is read again** (moai-zxd0).
+    /// `follow_site` builds a new `Site` on every read — it seeds — and only a first read may keep that seed; a reread
+    /// takes the held folds. Without carrying `expanded` the overview reopened the milestone (and dropped every fold the
+    /// person made) each time another session wrote to that project.
+    #[test]
+    fn an_overview_reread_keeps_a_milestone_folded_by_hand() {
+        let s = Scratch::fenced("layer-seed-reread");
+        let dir = running_milestone_project(&s);
+        let cfg = s.register(&[&dir]);
+        let mut a = layered(&cfg);
+        a.hit("l");
+        settle(&mut a);
+        let at = {
+            let site = a.layer.as_ref().unwrap().places[0].site.as_ref().unwrap();
+            site.index.find("argos-0400").unwrap()
+        };
+        a.cursor = a
+            .rows()
+            .iter()
+            .position(|r| matches!(r, Row::Item(crate::tui::Seat::Place(0), e, _) if e.at() == Some(at)))
+            .expect("the milestone row stands under its header");
+        a.hit("h");
+        let site = a.layer.as_ref().unwrap().places[0].site.as_ref().unwrap();
+        assert!(!site.expanded.contains(&milestone_dir(site)), "the premise — h folded it by hand");
+        // A folder the person opened by hand must survive too — dropping every fold would also leave the milestone shut.
+        let basket = vec![crate::nav::Seg::Milestone(None)];
+        a.layer.as_mut().unwrap().places[0].site.as_mut().unwrap().expanded.insert(basket.clone());
+
+        let read = a.layer.as_ref().unwrap().places[0].read_at;
+        a.layer.as_mut().unwrap().queue(dir.clone());
+        a.read_wanted();
+        settle(&mut a);
+        let place = &a.layer.as_ref().unwrap().places[0];
+        assert!(place.read_at > read, "the premise — the project was read again");
+        let site = place.site.as_ref().unwrap();
+        assert!(!site.expanded.contains(&milestone_dir(site)), "a reread reopened the milestone folded by hand");
+        assert!(site.expanded.contains(&basket), "a reread dropped a folder opened by hand");
     }
 
     /// **건너뛰면 포커스가 목록으로 돌아온다**(리뷰 moai-i784.pzh) — 층의 상세에는 듣는 키가

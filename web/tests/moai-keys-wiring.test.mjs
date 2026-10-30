@@ -143,7 +143,8 @@ test('keys: Enter goes into a folder and Backspace leaves it, landing on the fol
   panel.press('Backspace')
   assert.equal(panel.state().cursor, 'e1')
   panel.press('Tab')
-  assert.ok(panel.state().expanded.length > 0)
+  // The running milestone m1 stands open from the first render (moai-zxd0), so Tab is read off the epic's own key.
+  assert.ok(panel.state().expanded.includes(['m:m1', 'e:e1'].join('\u001f')))
   assert.ok(panel.lines().includes('e1.a'))
   panel.press('Tab')
   assert.deepEqual(panel.state().expanded, ['m:m1'])

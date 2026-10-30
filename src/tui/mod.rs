@@ -1853,17 +1853,23 @@ impl Site {
             elsewhere: Vec::new(),
             unfound: None,
         };
-        // List folders start closed except for milestones with unfinished work. Seed only when a
-        // project is first loaded; a reread keeps the person's folds in `follow_site`.
-        site.expanded = (0..site.issues.len())
-            .filter(|&at| {
-                site.issues[at].kind == Kind::Milestone
-                    && site.index.is_dir(&site.issues, at)
-                    && !site.starts_folded(at)
-            })
-            .map(|at| site.index.dir_path(&site.issues, at))
-            .collect();
+        site.seed_list_folds();
         site
+    }
+
+    /// List folders start closed except milestones with unfinished work (moai-zxd0), opened one level — their epics
+    /// keep their own fold. Measured where a project's list starts over: when it is built ([`Site::of`]), entered
+    /// from the overview (`App::enter_project`, whose rows arrive after a blank `Site`) and parked back in the
+    /// overview (`App::leave_project`). A reread keeps the person's folds instead (`App::take`, [`App::follow_site`]).
+    pub(super) fn seed_list_folds(&mut self) {
+        self.expanded = (0..self.issues.len())
+            .filter(|&at| {
+                self.issues[at].kind == Kind::Milestone
+                    && self.index.is_dir(&self.issues, at)
+                    && !self.starts_folded(at)
+            })
+            .map(|at| self.index.dir_path(&self.issues, at))
+            .collect();
     }
 
     /// 이 줄이 목록에 서는가 — 거름망이 안 가렸고, 보기가 안 가렸거나 검색이 보기를 걷었다([`Site::veil`]).
