@@ -8861,9 +8861,9 @@ const JSON_SWEEP: &[&str] = &[
     "epic",
     "milestone",
     "backlog",
-    // 사용자 설정을 고친다. `add`·`rm` 은 제 설정 파일로 따로 부른다 — 공용 집에 쓰면 안 된다.
+    // 사용자 설정을 고친다. `add`·`rm` 은 쓴 자리를 알 수 있도록 제 설정 파일로 따로 부른다.
     "project",
-    // 읽음도 사용자 설정에 적는다. 시험의 `MOAI_CONFIG` 는 그 시험만의 임시 자리다.
+    // 읽음도 사용자 설정 곁에 적는다. `isolated` 가 시험마다 울타리를 준다.
     "read",
     // git 이 주는 임시 파일 셋을 받는다. 훑기는 깨끗이 합쳐지는 판으로만 부른다 —
     // 충돌은 종료 코드가 0 이 아닌 것이 계약이라 `ok` 로는 못 부른다.
@@ -9577,7 +9577,7 @@ fn every_command_still_speaks_json() {
         // 장부를 읽기만 한다. `uninstall` 은 `claude` 를 부르므로 훑지 않는다 —
         // 가짜 `claude` 로 따로 본다 (`skill_*` 시험).
         vec!["skill", "status", "--json"],
-        // 공용 설정(없는 파일)을 읽기만 한다.
+        // `isolated` 의 시험별 설정(없는 파일)을 읽기만 한다.
         vec!["project", "ls", "--json"],
         // 위키를 읽기만 한다 — 이 판에는 `docs/` 가 없어 `no_dir` 객체 하나와 0 이다.
         vec!["wiki", "ls", "--json"],
@@ -9597,8 +9597,8 @@ fn every_command_still_speaks_json() {
     // 위 시험은 초록인데 그 명령의 `--json` 은 아무도 안 본 것이 된다 —
     // 없는 안전망을 있다고 믿는 것이 제일 나쁘다.
     // `init` 과 `add` 는 위에서 바탕을 세우며 이미 `--json` 으로 부른다.
-    // `read` 는 **제 설정 파일로** 여기서 따로 부른다 — 공용 집의 없는 파일에 쓰면 그 격리가 깨진다
-    // (`project add`·`rm` 과 같은 까닭). 무엇을 적는지는 위의 `read_marks_…` 시험이 본다.
+    // `read` 는 **알려진 설정 자리로** 여기서 따로 부른다 — 곁에 적는 파일을 필요할 때 찾기 쉽다.
+    // 기본 울타리도 시험별로 갈라져 있다. 무엇을 적는지는 위의 `read_marks_…` 시험이 본다.
     let own = s.path().join("sweep-read.toml");
     one_json_value(&ok_with(s.path(), &own, &["read", &id, "--json"]));
     // 머지 드라이버는 git 이 주는 임시 파일 셋을 받는다 — 여기서는 셋을 손으로 놓는다.
@@ -9632,7 +9632,7 @@ fn every_command_still_speaks_json() {
         }
         one_json_value(&ok(s.path(), args));
     }
-    // 쓰는 `project` 동사는 제 설정 파일로 — 공용 집을 비워 둔다.
+    // 쓰는 `project` 동사는 정해 둔 설정 파일로 — 필요할 때 등록 결과를 그 자리에서 본다.
     let config = s.path().join("user-config.toml");
     for args in [
         &["project", "add", ".", "--json"][..],
@@ -16665,8 +16665,8 @@ fn hook_argv(
     if let Some(home) = home {
         cmd.env("HOME", home);
     }
-    // **집기 기록은 사용자 설정 곁에 놓인다**(moai-59k3.yo6) — 시험마다 제 자리를 준다. 모든 시험이 함께
-    // 쓰는 `isolated` 의 자리로 두면 남의 시험이 적은 기록이 한 디렉터리에 쌓인다. 시험이 준 값이 이긴다.
+    // **집기 기록은 사용자 설정 곁에 놓인다**(moai-59k3.yo6) — 이 시험이 `picks/` 를 살펴볼
+    // 자리를 고정한다. `isolated` 의 기본 울타리도 시험마다 따로 서고, 여기서 준 값이 이긴다.
     cmd.env("MOAI_CONFIG", s.path().join("hookcfg").join("config.toml"));
     for (k, v) in env {
         cmd.env(k, v);
@@ -17198,7 +17198,7 @@ fn a_stale_planted_tree_names_the_install_line() {
     assert!(!work.exists());
 
     // Claude 의 트리만 낡았으면 맨 `install` 이다 — 기본이 Claude 다. **진짜 `claude` 에 닿지 않는다**(`Claude` 위의
-    // 머리 주석) — 맨 `moai` 는 PATH 를 물려받아, `claude` 가 깔린 기계에서 시험이 함께 쓰는 빈 집에 등록을 적었다.
+    // 머리 주석) — 예전 맨 `moai` 는 PATH 를 물려받아, `claude` 가 깔린 기계에서 당시의 공유 시험 집에 등록을 적었다.
     // 트리는 `claude` 가 없어도 심긴다.
     let planted = staged(&["skill", "install"]).current_dir(root).env("PATH", "/nonexistent").output().unwrap();
     assert!(
@@ -23597,9 +23597,9 @@ fn outside_a_repo_the_overview_overlays_each_projects_worktrees() {
 
 // ── moai project ────────────────────────────────────────────────────────────
 
-/// **등록 시험은 저마다 제 설정 파일을 쓴다.** [`isolated`] 의 `MOAI_CONFIG` 는
-/// 모든 시험이 함께 쓰는 빈 집 밑이라, 거기에 등록하면 병렬로 도는 시험끼리
-/// 목록이 섞이고 공용 집이 더는 비어 있지 않다(moai-88l8.5ik). 사람도 안 준다 —
+/// **등록 시험은 결과를 살펴볼 수 있도록 제 설정 파일을 지정한다.** [`isolated`] 의
+/// 기본 `MOAI_CONFIG` 도 시험마다 갈라진 울타리다. 이 자리에서는 등록 목록 자체를
+/// 읽어야 하므로 알려진 경로를 쓴다(moai-88l8.5ik). 사람도 안 준다 —
 /// 이력이 남는 파일이 아니라 누군지 묻지 않아야 한다.
 fn project(dir: &Path, config: &Path, args: &[&str]) -> Output {
     isolated(BIN)

@@ -63,6 +63,12 @@ real binary through `CARGO_BIN_EXE_moai`. A test harness that drags in
 dependencies blurs the premise that this is a tool installed into someone else's
 repository.
 
+Every process started through `tests/cli.rs::isolated()` receives a user config
+fence private to its test thread. The fence and files written beside its default
+config are removed when that thread ends, including after a panic unwinds. Set
+`MOAI_CONFIG` explicitly only when a test needs a known path to inspect those
+files; the later value takes precedence over the default fence.
+
 Clippy runs with `-D warnings`. Lints this project deliberately carries are
 listed under `[workspace.lints.clippy]` in `Cargo.toml`, each with the reason it is there.
 Add the reason when you add a line — an `allow` without one cannot be judged
