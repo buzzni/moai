@@ -6,7 +6,7 @@ members = ["crates/moai-gantt"]
 
 [package]
 name = "moai"
-version = "0.37.0"
+version = "0.38.0"
 edition = "2024"
 description = "이슈 트래커. 승인 게이트 없음. 규율은 `moai status` 가 비춘다."
 license = "MIT"
