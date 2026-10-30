@@ -4,14 +4,16 @@
 //! 사건 흐름은 제 스레드에서 1초마다 표식을 재며, 보통 요청의 [`BUSY_MAX`] 와 따로 [`STREAMS_MAX`] 를 센다.
 //! 비동기 런타임은 쓰지 않는다.
 //!
-//! **트래커에 쓰는 길은 계획 날 하나다.** 길은 GET 이고, POST 는 둘이다([`api::write_argv_of`]) — 읽음 표시(2026-10-22
+//! **트래커에 쓰는 길은 계획 날 하나다.** 보통 API 길은 GET 이고, 쓰기 POST 는 둘이다([`api::write_argv_of`]) — 읽음 표시(2026-10-22
 //! 사람 결정, moai-ly88)는 사용자 설정 곁의 제 파일에만 적히고, 간트의 막대 끌기(`/api/plan/<id>`, moai-d86e.3ud)는 자식
 //! `moai edit --shift*`(하루 세우기는 `--start --due --if-unplanned`, moai-vj8w.02c)로 트래커에 쓴다 — 쓰기는 CLI 의 그
 //! 길(`store::with_write`)을 그대로 지난다. 그 밖에 트래커를
-//! 바꾸는 길은 여전히 CLI 와 탐색기다. 두 POST 모두 이 페이지에서 보낸 것만 받는다([`http::origin_ok`]).
+//! 바꾸는 길은 여전히 CLI 와 탐색기다. 제어 탭의 답과 마지막 입력도 별도 POST 로 받는다.
+//! POST 는 모두 이 페이지에서 보낸 것만 받는다([`http::origin_ok`]).
 
 pub mod api;
 pub mod boot;
+pub mod ctl;
 pub mod http;
 pub mod run;
 
@@ -52,6 +54,7 @@ pub struct Site {
     /// 사용자 설정의 표식과 그것에서 읽은 것([`Site::config`]).
     picked: Mutex<Picked>,
     streams: AtomicUsize,
+    pub tabs: Arc<ctl::Tabs>,
 }
 
 /// 사용자 설정을 한 번 풀어 든 값 — **표식이 같은 동안 다시 안 푼다.** 말과 걸어 둔 프로젝트가 한 번의 풀기를 나눠 쓴다.
@@ -71,6 +74,7 @@ impl Site {
             started_in,
             picked: Mutex::new(Picked { stamp: None, lang: started_in, projects: Vec::new() }),
             streams: AtomicUsize::new(0),
+            tabs: Arc::new(ctl::Tabs::new()),
         }
     }
 
@@ -190,6 +194,8 @@ fn handle(stream: TcpStream, site: &Site, busy: Leave) {
         // 시한·끊김은 답할 상대가 없다.
         Err(Bad::Io) => return,
         Err(bad) => (refuse(400, &bad_said(&bad, site.lang()), code::BAD_INPUT), true),
+        Ok(req) if req.path.starts_with("/api/ctl/") => (ctl_post(&stream, &req, site), true),
+        Ok(req) if req.content_length != 0 => (refuse(400, say(site.lang(), "web.body"), code::BAD_INPUT), true),
         Ok(req) if req.path == "/api/events" => {
             let target = event_target(&req, site);
             match target {
@@ -206,7 +212,7 @@ fn handle(stream: TcpStream, site: &Site, busy: Leave) {
                         }
                         let _stream = StreamLeave(&site.streams);
                         drop(busy);
-                        let _ = stream_events(&stream, &cwd, lang, overlay, first);
+                        let _ = stream_events(&stream, &cwd, lang, overlay, first, &site.tabs);
                         close(&stream);
                         return;
                     }
@@ -220,6 +226,69 @@ fn handle(stream: TcpStream, site: &Site, busy: Leave) {
     let _busy = busy;
     let _ = http::write(&mut Within::of(&stream, ANSWER_LIMIT), &answer, body);
     close(&stream);
+}
+
+fn ctl_post(stream: &TcpStream, req: &Request, site: &Site) -> Response {
+    let lang = site.lang();
+    if !http::host_ok(req.host.as_deref()) {
+        return refuse(403, say(lang, "web.foreign_host"), code::FORBIDDEN_HOST);
+    }
+    if req.method != "POST" {
+        return Response { allow: "POST", ..refuse(405, "control replies require POST", code::METHOD_NOT_ALLOWED) };
+    }
+    if !http::origin_ok(req.origin.as_deref(), req.host.as_deref()) {
+        return refuse(403, say(lang, "web.foreign_origin"), code::FORBIDDEN_ORIGIN);
+    }
+    let Some(path) = req.path.strip_prefix("/api/ctl/") else {
+        return refuse(404, "unknown control path", code::NOT_FOUND);
+    };
+    let (id, seen) = match path.strip_suffix("/seen") {
+        Some(id) => (id, true),
+        None => (path, false),
+    };
+    if id.is_empty() || id.contains('/') {
+        return refuse(404, "unknown control tab", code::NOT_FOUND);
+    }
+    let mut token = None;
+    let mut seq = None;
+    let mut screen = None;
+    for (key, value) in &req.query {
+        match key.as_str() {
+            "token" if token.replace(value.as_str()).is_none() => {}
+            "seq" if !seen && seq.replace(value.parse::<u64>().ok()).is_none() => {}
+            "screen" if seen && screen.replace(value.as_str()).is_none() => {}
+            _ => return refuse(400, "invalid control query", code::BAD_INPUT),
+        }
+    }
+    let Some(token) = token else { return refuse(400, "control token is required", code::BAD_INPUT) };
+    let result = if seen {
+        if req.content_length != 0 {
+            return refuse(400, say(lang, "web.body"), code::BAD_INPUT);
+        }
+        let Some(screen) = screen else { return refuse(400, "screen is required", code::BAD_INPUT) };
+        site.tabs.seen(id, token, screen)
+    } else {
+        let Some(Some(seq)) = seq else { return refuse(400, "sequence is required", code::BAD_INPUT) };
+        if req.content_type.as_deref() != Some("application/json") {
+            return refuse(400, "control reply must be application/json", code::BAD_INPUT);
+        }
+        let bytes = match http::read_body(&mut Within::of(stream, READ_LIMIT), req, crate::ctl::wire::LINE_MAX) {
+            Ok(bytes) => bytes,
+            Err(Bad::TooBig) => return refuse(413, "control reply exceeds 1 MiB", code::TOO_LARGE),
+            Err(bad) => return refuse(400, &bad_said(&bad, lang), code::BAD_INPUT),
+        };
+        let reply = match serde_json::from_slice::<crate::ctl::wire::Reply>(&bytes) {
+            Ok(reply) => reply,
+            Err(_) => return refuse(400, "invalid control reply", code::BAD_INPUT),
+        };
+        site.tabs.reply(id, token, seq, reply)
+    };
+    match result {
+        Ok(()) => Response::new(200, http::JSON, b"{}".to_vec()),
+        Err("gone") => refuse(410, "tab or request is gone", code::GONE),
+        Err("forbidden") => refuse(403, "control token does not match", code::FORBIDDEN_ORIGIN),
+        Err(_) => refuse(400, "invalid control request", code::BAD_INPUT),
+    }
 }
 
 fn event_target(req: &Request, site: &Site) -> Result<(std::path::PathBuf, Lang, bool, String), Response> {
@@ -248,16 +317,38 @@ fn stream_events(
     lang: Lang,
     overlay: bool,
     first: String,
+    tabs: &ctl::Tabs,
 ) -> std::io::Result<()> {
     use std::io::Write as _;
+    // Local ctl sockets are Unix-only; the tracker stream remains available on Windows.
+    let joined = if cfg!(unix) { Some(tabs.join(cwd, overlay)?) } else { None };
+    struct TabLeave<'a>(&'a ctl::Tabs, String);
+    impl Drop for TabLeave<'_> {
+        fn drop(&mut self) {
+            self.0.leave(&self.1);
+        }
+    }
+    let _tab = joined.as_ref().map(|joined| TabLeave(tabs, joined.id.clone()));
     let mut writer = Within::of(stream, WRITE_LIMIT);
     http::write_stream_head(&mut writer)?;
     writer.write_all(b"retry: 3000\n\n")?;
+    if let Some(joined) = &joined {
+        writer.write_all(
+            format!("event: hello\ndata: {}\n\n", serde_json::json!({"tab": joined.id, "token": joined.token}))
+                .as_bytes(),
+        )?;
+    }
     writer.write_all(format!("event: stamp\ndata: {{\"stamp\":\"{first}\"}}\n\n").as_bytes())?;
     writer.flush()?;
     let (until, mut ping, mut seen) = (Instant::now() + Duration::from_secs(30 * 60), Instant::now(), first);
     while Instant::now() < until {
-        std::thread::sleep(Duration::from_secs(1));
+        let pushed = match &joined {
+            Some(joined) => joined.incoming.recv_timeout(Duration::from_secs(1)).ok(),
+            None => {
+                std::thread::sleep(Duration::from_secs(1));
+                None
+            }
+        };
         // A closed tab need not wait for the next changed stamp or fifteen-second ping to return its slot.
         stream.set_read_timeout(Some(Duration::from_millis(1)))?;
         match stream.peek(&mut [0u8; 1]) {
@@ -265,6 +356,14 @@ fn stream_events(
             Err(e) if matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) => {}
             Err(_) => break,
             Ok(_) => {}
+        }
+        if let Some(push) = pushed {
+            let mut writer = Within::of(stream, WRITE_LIMIT);
+            writer.write_all(
+                format!("event: ctl\ndata: {}\n\n", serde_json::json!({"seq": push.seq, "request": push.request}))
+                    .as_bytes(),
+            )?;
+            writer.flush()?;
         }
         let stamp = match api::stamp(cwd, lang, overlay) {
             Ok(s) => s,
@@ -288,7 +387,7 @@ fn stream_events(
 
 /// 요청 머리를 `limit` 안에 **다** 읽는다([`Within`]).
 fn read_head(stream: &TcpStream, limit: Duration) -> Result<Request, Bad> {
-    http::read(&mut Within::of(stream, limit))
+    http::read_allow_body(&mut Within::of(stream, limit))
 }
 
 /// 연결 하나를 **한 시한 안에서** 읽고 쓰는 손잡이. `set_read_timeout`·`set_write_timeout` 은 부름 한 번의 시한이라,
@@ -416,8 +515,21 @@ pub fn answer(req: &Request, site: &Site) -> Response {
         Some(Err(refused)) => return refused,
     };
     if write {
-        return match api::write_argv_of(&req.path, &query) {
-            Some(Ok(args)) => child(site, &overlay_in_git(args, &cwd), &cwd, None, lang),
+        let (ordinary, ctl) = match ctl_write_query(&query) {
+            Ok(parts) => parts,
+            Err(error) => return error,
+        };
+        let actor = match ctl {
+            Some((seq, token)) => match site.tabs.actor(&token, seq, &cwd) {
+                Ok(actor) => Some(actor),
+                Err("no_actor") => return refuse(400, "control caller has no actor", code::NO_ACTOR),
+                Err("forbidden") => return refuse(403, "control token does not match", code::FORBIDDEN_ORIGIN),
+                Err(_) => return refuse(410, "control request is gone", code::GONE),
+            },
+            None => None,
+        };
+        return match api::write_argv_of(&req.path, &ordinary) {
+            Some(Ok(args)) => child_as(site, &overlay_in_git(args, &cwd), &cwd, None, lang, actor.as_deref()),
             Some(Err(bad)) => refuse(400, &bad.said(lang), code::BAD_INPUT),
             None => not_allowed(),
         };
@@ -449,6 +561,26 @@ pub fn answer(req: &Request, site: &Site) -> Response {
             }
         },
     }
+}
+
+/// Peel off the live ctl request's identity, leaving the write endpoint's own query untouched.
+fn ctl_write_query(query: &[(String, String)]) -> Result<(Vec<(String, String)>, Option<(u64, String)>), Response> {
+    let mut ordinary = Vec::new();
+    let (mut seq, mut token) = (None, None);
+    for (key, value) in query {
+        match key.as_str() {
+            "ctl" if seq.replace(value.parse::<u64>().ok()).is_none() => {}
+            "token" if token.replace(value.clone()).is_none() => {}
+            "ctl" | "token" => return Err(refuse(400, "duplicate control query", code::BAD_INPUT)),
+            _ => ordinary.push((key.clone(), value.clone())),
+        }
+    }
+    let ctl = match (seq, token) {
+        (None, None) => None,
+        (Some(Some(seq)), Some(token)) if !token.is_empty() => Some((seq, token)),
+        _ => return Err(refuse(400, "control sequence and token must be given together", code::BAD_INPUT)),
+    };
+    Ok((ordinary, ctl))
 }
 
 /// `project=` 의 자리 — **걸어 둔 프로젝트만 읽는다**(moai-o14f). 페이지는 `/api/projects` 가 낸 `path` 를 그대로
@@ -522,7 +654,28 @@ fn page(kind: &'static str, body: &'static str) -> Response {
 /// 자식을 돌려 봉투로 낸다. **자식이 돌았으면 200 이다** — 자식의 실패는 봉투의 `exit`·`err` 가 말한다.
 /// 4xx·5xx 는 서버가 답을 못 낸 판이다.
 pub fn child(site: &Site, args: &[String], cwd: &std::path::Path, zone: Option<&str>, lang: Lang) -> Response {
-    match site.spawner.run_in(args, cwd, zone) {
+    child_as(site, args, cwd, zone, lang, None)
+}
+
+fn child_as(
+    site: &Site,
+    args: &[String],
+    cwd: &std::path::Path,
+    zone: Option<&str>,
+    lang: Lang,
+    actor: Option<&str>,
+) -> Response {
+    let run = if let Some(actor) = actor {
+        let spawner = run::Spawner {
+            exe: site.spawner.exe.clone(),
+            cwd: site.spawner.cwd.clone(),
+            user: Some(actor.to_string()),
+        };
+        spawner.run_in(args, cwd, zone)
+    } else {
+        site.spawner.run_in(args, cwd, zone)
+    };
+    match run {
         Ok(done) => Response::new(200, http::JSON, run::envelope(&done).into_bytes()),
         Err(run::Fault::Timeout) => {
             let secs = run::TIME_LIMIT.as_secs().to_string();
@@ -592,6 +745,9 @@ mod tests {
                 query: Vec::new(),
                 host: Some("127.0.0.1:1".into()),
                 origin: None,
+                content_length: 0,
+                content_type: None,
+                body_prefix: Vec::new(),
             };
             answer(&req, &site)
         };

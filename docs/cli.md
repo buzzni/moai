@@ -509,6 +509,8 @@ Options:
 
       --gantt-label <GANTT_LABEL>
 
+      --gantt-grid <GANTT_GRID>
+          Web Gantt name grid width in pixels (not the TUI's character cells)
   -t, --target <TARGET>
           Window id from moai ctl ls
       --json

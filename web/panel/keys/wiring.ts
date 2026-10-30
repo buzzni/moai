@@ -118,6 +118,8 @@ export interface KeyWiring {
   context(): KeyContext
   /** Every action id this wiring dispatches (the key table's ids; tests hold them to the table). */
   actions: string[]
+  /** Run a named action through the same handler as a key binding. */
+  run(id: string): boolean
   destroy(): void
 }
 
@@ -645,6 +647,13 @@ export function wireKeys(options: KeyWiringOptions): KeyWiring {
     hint,
     context,
     actions: Object.keys(handlers),
+    run(id) {
+      const handler = handlers[id]
+      if (!handler) return false
+      const used = handler({ id, keys: [], mode: context().mode, fromMenu: false })
+      redraw()
+      return used !== false
+    },
     destroy() {
       detach()
       unsubscribe()

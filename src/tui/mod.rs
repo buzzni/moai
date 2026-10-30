@@ -2011,7 +2011,10 @@ impl App {
                 Verb::Wiki { slug, search } => {
                     extra = self.ctl_wiki(slug.as_deref(), search.as_deref())?;
                 }
-                Verb::Pane { list_width, list_height, wiki_width, gantt_label } => {
+                Verb::Pane { list_width, list_height, wiki_width, gantt_label, gantt_grid } => {
+                    if gantt_grid.is_some() {
+                        return Err(Reply::error("unsupported", "--gantt-grid is a web pixel width"));
+                    }
                     if [list_width, list_height, wiki_width, gantt_label].iter().all(|v| v.is_none()) {
                         return Err(bad("give at least one pane value".into()));
                     }
@@ -13306,11 +13309,28 @@ mod tests {
         assert!(read.ok, "{read:?}");
         assert_eq!(a.cursor, cursor);
         let pane = a.ctl(&ctl_req(
-            Verb::Pane { list_width: Some("5".into()), list_height: None, wiki_width: None, gantt_label: None },
+            Verb::Pane {
+                list_width: Some("5".into()),
+                list_height: None,
+                wiki_width: None,
+                gantt_label: None,
+                gantt_grid: None,
+            },
             None,
         ));
         assert!(pane.ok, "{pane:?}");
         assert_eq!(a.list_width, Some(15));
+        let pixels = a.ctl(&ctl_req(
+            Verb::Pane {
+                list_width: None,
+                list_height: None,
+                wiki_width: None,
+                gantt_label: None,
+                gantt_grid: Some("300".into()),
+            },
+            None,
+        ));
+        assert_eq!(pixels.code.as_deref(), Some("unsupported"));
         let at = a.ctl(&ctl_req(Verb::Goto { id: Some("argos-0001".into()), enter: false, project: None }, None));
         assert_eq!(at.data.as_ref().unwrap()["landed"], true, "{at:?}");
         let theme = a.ctl(&ctl_req(Verb::Theme { name: "dark".into() }, None));

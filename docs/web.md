@@ -268,6 +268,22 @@ goes once the server answers. A read that
 comes back refused or cut short (`busy`, `timeout`, a Cancel) is asked again on
 the next look, so the list never stays on the rows from before a change.
 
+## Driven from another terminal
+
+`moai ctl ls` lists each visible tab as a separate `web` window. Use its id with
+`moai ctl state -t <id> --json` or the [control commands](ctl.md) to select a row,
+change the tab, press its keys, resize the detail, or change its theme. The server
+sends a control request down that tab's event stream and waits for its reply.
+Hiding a tab closes the stream, so hidden tabs are absent from `ls` and cannot
+be changed. Showing it again gives it a new id. Control never opens or closes a
+browser window.
+
+The page replies only through a same-origin POST carrying the tab's stream
+token; the server limits its JSON body to 1 MiB. A human-focused input or menu
+returns `person_busy`. Tracker writes requested by ctl carry the caller's identity;
+read marks remain the web server owner's. Column moves
+and notes remain CLI commands (`moai mv`, `moai note`).
+
 ## See it from another machine
 
 Leave the server on `127.0.0.1` and bring the port to you:
@@ -278,6 +294,8 @@ Then open `http://localhost:6624/` on your own machine. This is the way to go
 rather than `--host 0.0.0.0`, which serves the tracker to anyone on the network —
 and lets them move its planned days, since a Gantt bar dragged on their page
 writes the tracker as yours does.
+The remote browser tab is also visible to `moai ctl` running on the machine
+that hosts the server; the ctl socket is local to that machine.
 
 Whatever it binds, the server answers only requests whose `Host` header is
 `localhost` or an IP address. A request with another name — what a page on some
@@ -300,6 +318,8 @@ comes from the start. The rest come from the server while it runs:
 | `bad_input` | A request the server could not read, one carrying a body, or a query this path does not take or whose value is the wrong shape (a `sort` moai does not know, a flag other than `1`, a Gantt move that is not an edge and a whole number of days, a Gantt day that is not `YYYY-MM-DD`, a time zone that is not a zone name or an offset) |
 | `not_found` | No such path |
 | `busy` | Too many requests at once (32 ordinary requests or eight event streams); the page falls back to stamp polling when its stream is refused |
+| `gone` | The target web tab closed, or its ctl request expired before the reply arrived |
+| `no_actor` | A ctl-requested write had no caller identity; set `--user 'Name (email)'` or `MOAI_ACTOR` on the ctl command |
 | `timeout` | The child `moai` did not answer in time |
 | `too_large` | The child's answer was larger than the server will pass on |
 | `error` | The child `moai` could not be run, or died before it answered |

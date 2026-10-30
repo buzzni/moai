@@ -1,8 +1,8 @@
 //! HTTP/1.1 의 요청 한 개를 읽고 응답 한 개를 쓴다 — `moai web` 이 쓰는 만큼만.
 //!
 //! **연결 하나에 요청 하나다**(`Connection: close`). keep-alive 를 안 하므로 요청 머리 끝(`\r\n\r\n`)
-//! 까지만 읽고, 본문은 받지 않는다 — 이 서버는 읽기 전용이라 본문을 실은 요청은 뜻이 없다(400).
-//! 그래서 `Transfer-Encoding` 을 풀 일도, 다음 요청과의 경계를 잴 일도 없다.
+//! 까지만 읽는다. 제어 응답 한 길만 길이와 꼴을 잰 JSON 본문을 받는다.
+//! `Transfer-Encoding` 은 받지 않는다.
 
 use std::io::{Read, Write};
 
@@ -21,6 +21,10 @@ pub struct Request {
     pub host: Option<String>,
     /// `Origin` 머리 — 없으면 `None`. 쓰는 길 하나(`POST /api/read…`)만 잰다([`origin_ok`]).
     pub origin: Option<String>,
+    pub content_length: usize,
+    pub content_type: Option<String>,
+    /// Bytes already read after the header terminator; only the ctl reply path consumes these.
+    pub body_prefix: Vec<u8>,
 }
 
 /// 읽다 만난 탈. [`Bad::Io`] 는 답할 상대가 없는 것이라(시한·끊김) 그냥 닫는다 — 나머지는 400 이다.
@@ -36,7 +40,16 @@ pub enum Bad {
 }
 
 /// 머리 끝까지 읽는다. 끝에 닿기 전에 [`HEAD_MAX`] 를 넘으면 [`Bad::TooBig`].
+#[cfg(test)]
 pub fn read(r: &mut impl Read) -> Result<Request, Bad> {
+    read_inner(r, false)
+}
+
+pub fn read_allow_body(r: &mut impl Read) -> Result<Request, Bad> {
+    read_inner(r, true)
+}
+
+fn read_inner(r: &mut impl Read, allow_body: bool) -> Result<Request, Bad> {
     let mut buf: Vec<u8> = Vec::with_capacity(1024);
     let mut chunk = [0u8; 4096];
     let end = loop {
@@ -64,10 +77,10 @@ pub fn read(r: &mut impl Read) -> Result<Request, Bad> {
     if end > HEAD_MAX {
         return Err(Bad::TooBig);
     }
-    parse(&buf[..end])
+    parse(&buf[..end], &buf[end + 4..], allow_body)
 }
 
-fn parse(head: &[u8]) -> Result<Request, Bad> {
+fn parse(head: &[u8], body_prefix: &[u8], allow_body: bool) -> Result<Request, Bad> {
     let head = std::str::from_utf8(head).map_err(|_| Bad::Malformed)?;
     let mut lines = head.split("\r\n");
     let first = lines.next().ok_or(Bad::Malformed)?;
@@ -79,7 +92,7 @@ fn parse(head: &[u8]) -> Result<Request, Bad> {
     if method.is_empty() || !version.starts_with("HTTP/1.") {
         return Err(Bad::Malformed);
     }
-    let (mut host, mut origin) = (None, None);
+    let (mut host, mut origin, mut content_type, mut content_length) = (None, None, None, None);
     for line in lines {
         let (name, value) = line.split_once(':').ok_or(Bad::Malformed)?;
         let value = value.trim();
@@ -93,11 +106,24 @@ fn parse(head: &[u8]) -> Result<Request, Bad> {
             if origin.replace(value.to_string()).is_some() {
                 return Err(Bad::Malformed);
             }
-        } else if name.eq_ignore_ascii_case("transfer-encoding")
-            || (name.eq_ignore_ascii_case("content-length") && value != "0")
-        {
+        } else if name.eq_ignore_ascii_case("content-type") {
+            if content_type.replace(value.to_string()).is_some() {
+                return Err(Bad::Malformed);
+            }
+        } else if name.eq_ignore_ascii_case("content-length") {
+            if content_length.replace(value.parse::<usize>().map_err(|_| Bad::Malformed)?).is_some() {
+                return Err(Bad::Malformed);
+            }
+        } else if name.eq_ignore_ascii_case("transfer-encoding") {
             return Err(Bad::Body);
         }
+    }
+    let content_length = content_length.unwrap_or(0);
+    if !allow_body && content_length != 0 {
+        return Err(Bad::Body);
+    }
+    if body_prefix.len() > content_length {
+        return Err(Bad::Malformed);
     }
     // 절대 꼴(`http://…/`)과 `*` 는 프록시에 보내는 꼴이다 — 이 서버는 프록시가 아니다.
     if !target.starts_with('/') {
@@ -113,7 +139,30 @@ fn parse(head: &[u8]) -> Result<Request, Bad> {
             Ok((unescape(k, true)?, unescape(v, true)?))
         })
         .collect::<Result<_, Bad>>()?;
-    Ok(Request { method: method.to_string(), path, query, host, origin })
+    Ok(Request {
+        method: method.to_string(),
+        path,
+        query,
+        host,
+        origin,
+        content_length,
+        content_type,
+        body_prefix: body_prefix.to_vec(),
+    })
+}
+
+/// Read exactly the declared body; the caller checks the path, Origin and content type first.
+pub fn read_body(r: &mut impl Read, request: &Request, cap: usize) -> Result<Vec<u8>, Bad> {
+    if request.content_length > cap {
+        return Err(Bad::TooBig);
+    }
+    let mut body = request.body_prefix.clone();
+    if body.len() > request.content_length {
+        return Err(Bad::Malformed);
+    }
+    body.resize(request.content_length, 0);
+    r.read_exact(&mut body[request.body_prefix.len()..]).map_err(|_| Bad::Io)?;
+    Ok(body)
 }
 
 /// 쓰는 요청이 **이 페이지에서 왔는가** — `Origin` 이 `http://<Host>` 와 글자째 같아야 한다.

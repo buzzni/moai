@@ -1,10 +1,12 @@
 # Control an open window
 
-`moai ctl` connects to an explorer or web tab you already opened. It never opens a window or controls a terminal multiplexer. Start `moai tui` in one terminal, then run `moai ctl ls` in another to see its window id. `moai ctl state --json` reads the most recently used window in the current repository; `moai ctl state -t <id> --rows --json` reads a specific window and includes visible row ids.
+`moai ctl` connects to an explorer or visible web tab you already opened. It never opens a window or controls a terminal multiplexer. Start `moai tui` or `moai web`, then run `moai ctl ls` in another terminal to see its window id. A web server lists each visible tab separately. `moai ctl state --json` reads the most recently used window in the current repository; `moai ctl state -t <id> --rows --json` reads a specific window and includes visible row ids.
 
 `moai ctl ls --all` includes other repositories. Without `--all`, `ls` lists only windows in the current repository. A missing window gives `no_window` for `state`; it never silently chooses a window in another repository. From outside a repository, the most recently used window across repositories is the default.
 
 The transport is a Unix socket in `MOAI_CTL_DIR`, otherwise `$XDG_RUNTIME_DIR/moai`, otherwise the system temporary directory's `moai-<uid>` folder. The folder must belong to your user and have no group or other access. The socket is `<pid>.sock`; no metadata file is written. The listener removes its socket on exit, and discovery cleans up stale sockets only after verifying their type and owner. Requests and replies are one JSON object per line, limited to 1 MiB. Requests carry `proto: 1`; unknown versions are refused.
+
+A web tab holds one event stream while it is visible. Hiding or closing the tab ends that stream, removes its id from `ctl ls`, and promptly returns `gone` to waiting ctl calls. A tab that shows again gets a new id and token. The server sends ctl requests through that stream and accepts a JSON reply only from the same-origin page with the tab token; it limits the reply body to 1 MiB. If the local ctl socket cannot open, the web page still serves normally and the server says why on stderr.
 
 On Windows, `ctl ls` returns an empty list and commands that need a window report `unsupported`. Named pipes remain to be designed.
 
@@ -13,6 +15,8 @@ On Windows, `ctl ls` returns an empty list and commands that need a window repor
 `moai ctl keys 'SPC g b'` presses the explorer's current key bindings. Quote each sequence; the spelling is the same as `keys.toml` and `moai keys`. Several sequences run in order. `--text 'parser'` pastes literal text into a field opened by an earlier control request, for example `moai ctl keys /` followed by `moai ctl keys --text 'parser'` and `moai ctl keys Enter`.
 
 `moai ctl do browse.go_list` runs a named action even if the person changed its key binding. `moai ctl actions --json` lists the current `browse`, `gantt`, and `moves` actions with their bindings and whether each is enabled. Plain `actions` output marks disabled actions with `·` and `(off: …)`. The name `browse.read_all` and its default keys `SPC m a` both mark all visible NEW rows read. Column moves and notes use `moai mv` and `moai note`.
+
+Web tabs use the names from their own key table, such as `tab.gantt` and `read.all`. `keys 'SPC g b'` presses the web page's key router. `moai ctl theme dark` changes that tab's theme and remembers it in the browser; the browser's other open tabs follow the stored theme. A human-focused input or menu gives `person_busy`. A search or filter opened by ctl accepts a later `keys --text`.
 
 Control requests wait until their keys have run and return the resulting screen, mode, menu, cursor, notice, and whether they changed anything. They never count as human input when selecting the most recently used window. A request cannot take over a field or unfinished key sequence the person started, open an editor, or close the person's window. A field opened by a control request remains available to later control requests until the person types in it.
 
@@ -34,8 +38,10 @@ These commands act on the selected open window. Use `-t <id>` to choose one expl
 | `goto` | `moai ctl goto moai-1234 --enter` | Select a row without clearing a filter; `--project <number or path>` selects a project. |
 | `read` | `moai ctl read --all` | Mark the window owner's NEW rows read; also accepts ids or `--group <id>`. Use when the person asks. |
 | `wiki` | `moai ctl wiki 'guide#start'` | Open a page and heading; `--search 'words'` opens the top ranked hit and returns all hits. |
-| `pane` | `moai ctl pane --list-width 60` | Set `--list-width`, `--list-height`, `--wiki-width` percentages or `--gantt-label` columns; `none` restores a default. |
+| `pane` | `moai ctl pane --list-width 60` | Set `--list-width`, `--list-height`, `--wiki-width` percentages or `--gantt-label` character columns in the explorer. On the web, `--list-width` is converted from list share to detail share; `--list-height` applies with detail above or below, and `--gantt-grid <px>` sets the Gantt name grid in pixels. The other surface's Gantt unit returns `unsupported`; `none` restores a default. |
 | `zone` | `moai ctl zone Europe/Paris` | Set the explorer timezone; `none` restores UTC. |
 | `theme` | `moai ctl theme dark` | Supported by web tabs; the explorer returns `unsupported` because terminal colours belong to the terminal. |
 
 `pane` changes proportions inside the explorer. It does not resize the terminal or browser; use the terminal's window manager or `tmux resize-pane` for that. View, cell, detail, pane, sort, and zone choices are saved in the person's config and may appear again when they reopen the explorer; `raw` is a session-only view toggle. Every change leaves a `⇄ ctl` notice in the window.
+
+On the web, view choices are saved in that browser's local storage, not in the user's moai config. The web has no `stats` screen, no `--wiki-width`, and no `--gantt-label`; those return `unsupported`. Web search covers all fields, so `find --in title` and other restricted scopes return `unsupported`. `zone none` follows the browser or TUI default.

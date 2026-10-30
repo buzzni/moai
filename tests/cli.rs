@@ -32185,10 +32185,206 @@ fn next_event_stamp(reader: &mut std::io::BufReader<std::net::TcpStream>) -> Str
         let mut line = String::new();
         reader.read_line(&mut line).unwrap();
         assert!(!line.is_empty(), "events connection closed before a stamp");
-        if let Some(data) = line.strip_prefix("data: ") {
-            return json_of(data)["stamp"].as_str().unwrap().to_string();
+        if let Some(data) = line.strip_prefix("data: ")
+            && let Some(stamp) = json_of(data)["stamp"].as_str()
+        {
+            return stamp.to_string();
         }
     }
+}
+
+#[cfg(unix)]
+fn event_named(reader: &mut std::io::BufReader<std::net::TcpStream>, want: &str) -> serde_json::Value {
+    use std::io::BufRead as _;
+    let mut event = String::new();
+    loop {
+        let mut line = String::new();
+        reader.read_line(&mut line).unwrap();
+        assert!(!line.is_empty(), "event stream closed before {want}");
+        if let Some(name) = line.strip_prefix("event: ") {
+            event = name.trim().to_string();
+        } else if let Some(data) = line.strip_prefix("data: ")
+            && event == want
+        {
+            return json_of(data);
+        }
+    }
+}
+
+#[cfg(unix)]
+fn ctl_post(port: u16, path: &str, body: &str, content_type: &str, token: bool) -> (u16, String) {
+    use std::io::{Read as _, Write as _};
+    let mut stream = dial(port);
+    stream.set_read_timeout(Some(std::time::Duration::from_secs(5))).unwrap();
+    let origin = if token { format!("Origin: http://127.0.0.1:{port}\r\n") } else { String::new() };
+    write!(stream, "POST {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n{origin}Content-Type: {content_type}\r\nContent-Length: {}\r\n\r\n{body}", body.len()).unwrap();
+    let mut answer = String::new();
+    stream.read_to_string(&mut answer).unwrap();
+    (answer.split(' ').nth(1).unwrap().parse().unwrap(), answer)
+}
+
+#[test]
+#[cfg(unix)]
+fn web_ctl_lists_a_visible_tab_and_reads_its_state() {
+    let s = init("web-ctl-tab");
+    let web = serve(s.path());
+    let mut stream = events(web.port);
+    let hello = event_named(&mut stream, "hello");
+    let id = hello["tab"].as_str().unwrap().to_string();
+    let token = hello["token"].as_str().unwrap().to_string();
+    assert_eq!(token.len(), 32);
+    let seen = format!("/api/ctl/{id}/seen?token={token}&screen=gantt");
+    assert_eq!(ctl_post(web.port, &seen, "", "application/json", true).0, 200);
+    let until = std::time::Instant::now() + std::time::Duration::from_secs(3);
+    loop {
+        let listed = moai(s.path(), &["ctl", "ls", "--json"]);
+        if listed.status.success() {
+            let windows = json_of(&String::from_utf8_lossy(&listed.stdout));
+            if windows["windows"].as_array().unwrap().iter().any(|w| w["id"] == id && w["screen"] == "gantt") {
+                break;
+            }
+        }
+        assert!(std::time::Instant::now() < until, "web tab was not listed");
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    let mut cmd = staged(&["ctl", "state", "-t", &id, "--json"]);
+    cmd.current_dir(s.path());
+    let waiting = std::thread::spawn(move || cmd.output().unwrap());
+    let pushed = event_named(&mut stream, "ctl");
+    assert_eq!(pushed["request"]["verb"], "state");
+    let seq = pushed["seq"].as_u64().unwrap();
+    let path = format!("/api/ctl/{id}?seq={seq}&token={token}");
+    let answer = ctl_post(web.port, &path, r#"{"ok":true,"data":{"screen":"gantt"}}"#, "application/json", true);
+    assert_eq!(answer.0, 200, "{}", answer.1);
+    let finished = waiting.join().unwrap();
+    assert!(finished.status.success(), "{}", String::from_utf8_lossy(&finished.stderr));
+    assert_eq!(json_of(&String::from_utf8_lossy(&finished.stdout))["screen"], "gantt");
+}
+
+#[test]
+#[cfg(unix)]
+fn web_ctl_reply_needs_origin_token_and_json() {
+    let s = init("web-ctl-reply-guard");
+    let web = serve(s.path());
+    let mut stream = events(web.port);
+    let hello = event_named(&mut stream, "hello");
+    let id = hello["tab"].as_str().unwrap();
+    let token = hello["token"].as_str().unwrap();
+    let path = format!("/api/ctl/{id}?seq=1&token={token}");
+    let reply = r#"{"ok":true,"data":{}}"#;
+    assert_eq!(ctl_post(web.port, &path, reply, "application/json", false).0, 403);
+    assert_eq!(ctl_post(web.port, &path.replace(token, "wrong"), reply, "application/json", true).0, 403);
+    assert_eq!(ctl_post(web.port, &path, reply, "text/plain", true).0, 400);
+    assert_eq!(ctl_post(web.port, &path, "not json", "application/json", true).0, 400);
+    assert_eq!(ctl_post(web.port, &path, reply, "application/json", true).0, 410);
+}
+
+#[test]
+#[cfg(unix)]
+fn web_ctl_reply_body_is_capped() {
+    use std::io::{Read as _, Write as _};
+    let s = init("web-ctl-cap");
+    let web = serve(s.path());
+    let mut stream = dial(web.port);
+    stream.set_read_timeout(Some(std::time::Duration::from_secs(5))).unwrap();
+    write!(stream, "POST /api/ctl/1.1?seq=1&token=x HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nOrigin: http://127.0.0.1:{}\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n", web.port, web.port, 1024 * 1024 + 1).unwrap();
+    let mut answer = String::new();
+    stream.read_to_string(&mut answer).unwrap();
+    assert!(answer.starts_with("HTTP/1.1 413"), "{answer}");
+    assert!(answer.contains("too_large"), "{answer}");
+}
+
+#[test]
+#[cfg(unix)]
+fn a_body_on_any_other_path_is_still_refused() {
+    let s = init("web-ctl-body-only");
+    let web = serve(s.path());
+    let answer = ctl_post(web.port, "/api/read-all", "{}", "application/json", true);
+    assert_eq!(answer.0, 400, "{}", answer.1);
+    let answer = ctl_post(web.port, "/api/rows", "{}", "application/json", true);
+    assert_eq!(answer.0, 400, "{}", answer.1);
+}
+
+#[test]
+#[cfg(unix)]
+fn web_ctl_gone_when_the_stream_ends() {
+    let s = init("web-ctl-gone");
+    let web = serve(s.path());
+    let mut stream = events(web.port);
+    let hello = event_named(&mut stream, "hello");
+    let id = hello["tab"].as_str().unwrap().to_string();
+    let mut cmd = staged(&["ctl", "state", "-t", &id, "--json"]);
+    cmd.current_dir(s.path());
+    let waiting = std::thread::spawn(move || cmd.output().unwrap());
+    let _ = event_named(&mut stream, "ctl");
+    drop(stream);
+    let finished = waiting.join().unwrap();
+    assert!(!finished.status.success());
+    assert_eq!(json_of(&String::from_utf8_lossy(&finished.stderr))["code"], "gone");
+}
+
+#[test]
+#[cfg(unix)]
+fn web_ctl_write_carries_the_callers_name() {
+    let s = init("web-ctl-caller");
+    let issue = field(&ok(s.path(), &["add", "planned row", "--json"]), "id");
+    let web = serve(s.path());
+    let mut stream = events(web.port);
+    let hello = event_named(&mut stream, "hello");
+    let tab = hello["tab"].as_str().unwrap().to_string();
+    let token = hello["token"].as_str().unwrap().to_string();
+    let mut cmd = staged(&["--user", "Caller (caller@example.test)", "ctl", "screen", "list", "-t", &tab, "--json"]);
+    cmd.current_dir(s.path());
+    let waiting = std::thread::spawn(move || cmd.output().unwrap());
+    let pushed = event_named(&mut stream, "ctl");
+    let seq = pushed["seq"].as_u64().unwrap();
+    let path = format!("/api/plan/{issue}?day=2026-10-30&ctl={seq}&token={token}");
+    let written = ctl_post(web.port, &path, "", "application/json", true);
+    assert_eq!(written.0, 200, "{}", written.1);
+    assert_eq!(json_of(written.1.split_once("\r\n\r\n").unwrap().1)["exit"], 0);
+    let answer = ctl_post(
+        web.port,
+        &format!("/api/ctl/{tab}?seq={seq}&token={token}"),
+        r#"{"ok":true,"data":{}}"#,
+        "application/json",
+        true,
+    );
+    assert_eq!(answer.0, 200);
+    assert!(waiting.join().unwrap().status.success());
+    let shown = json_of(&ok(s.path(), &["show", &issue, "--json"]));
+    assert_eq!(shown["due_on"], "2026-10-30", "{shown}");
+}
+
+#[test]
+#[cfg(unix)]
+fn web_ctl_write_refuses_a_request_without_an_actor() {
+    let s = init("web-ctl-no-actor");
+    let issue = field(&ok(s.path(), &["add", "planned row", "--json"]), "id");
+    let web = serve(s.path());
+    let mut stream = events(web.port);
+    let hello = event_named(&mut stream, "hello");
+    let tab = hello["tab"].as_str().unwrap().to_string();
+    let token = hello["token"].as_str().unwrap().to_string();
+    let mut cmd = staged(&["ctl", "state", "-t", &tab, "--json"]);
+    cmd.current_dir(s.path());
+    let waiting = std::thread::spawn(move || cmd.output().unwrap());
+    let pushed = event_named(&mut stream, "ctl");
+    let seq = pushed["seq"].as_u64().unwrap();
+    let path = format!("/api/plan/{issue}?day=2026-10-30&ctl={seq}&token={token}");
+    let refused = ctl_post(web.port, &path, "", "application/json", true);
+    assert_eq!(refused.0, 400);
+    assert!(refused.1.contains("no_actor"), "{}", refused.1);
+    let answer = ctl_post(
+        web.port,
+        &format!("/api/ctl/{tab}?seq={seq}&token={token}"),
+        r#"{"ok":true,"data":{}}"#,
+        "application/json",
+        true,
+    );
+    assert_eq!(answer.0, 200);
+    assert!(waiting.join().unwrap().status.success());
+    let shown = json_of(&ok(s.path(), &["show", &issue, "--json"]));
+    assert!(shown.get("due_on").is_none(), "{shown}");
 }
 
 #[test]

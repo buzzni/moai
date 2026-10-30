@@ -14,6 +14,7 @@ import { headerProjects, projectHref, type ProjectEntry } from './data/projects.
 import { writePlan, type PlanChange } from './data/plan.js'
 import { isUnread, readMarks } from './data/read.js'
 import { openEvents, type Events } from './data/events.js'
+import { createCtl, type Reply as CtlReply } from './ctl.js'
 import { BACKOFF_MS, createRefresher, POLL_MS } from './data/refresh.js'
 import { sortQuery, useVocabulary } from './data/query.js'
 import {
@@ -386,9 +387,6 @@ async function start(): Promise<void> {
     if (store.getState().view.worktree) query.set('worktree', '1')
     return `/api/events${query.size ? `?${query}` : ''}`
   }
-  events = openEvents({ url: eventUrl, onStamp: (at) => refresher.saw(at), onUp: () => refresher.pause(),
-    onDown: () => refresher.resume(), onVisible: () => void refresher.check() })
-
   let choice = 0
   async function choose(id: string) {
     const mine = ++choice
@@ -427,6 +425,7 @@ async function start(): Promise<void> {
    * marks come back with them — and the detail on screen when it marked that row: nothing else reads the detail
    * again, and its NEW would outlive the mark.
    */
+  let ctlIdentity: { seq: number; token: string } | null = null
   const read = readMarks(client, (written) => {
     const shown = store.getState().shown.value
     // A list read already running began before the write and cannot hold its marks: `fresh` reads again after it.
@@ -435,7 +434,7 @@ async function start(): Promise<void> {
       refresher.refresh({ fresh: true }),
       shown && isUnread(shown.row) && written.has(shown.id) ? rereadDetail(shown.id, loads + 1) : undefined,
     ])
-  }, () => store.getState().view.worktree)
+  }, () => store.getState().view.worktree, () => ctlIdentity ? { ctl: String(ctlIdentity.seq), token: ctlIdentity.token } : undefined)
 
   /**
    * The gantt's move of a row's planned days (data/plan.ts, moai-d86e.3ud). One that went through reads the rows again —
@@ -505,7 +504,51 @@ async function start(): Promise<void> {
   client.subscribe(() => shell.activity(activity()))
   // The one keydown listener: keys → the key table's actions → the store and the panes (keys/wiring.ts), with the
   // SPC menu, the shortcut help and the "click to use the keyboard" hint.
-  wireKeys({ document, store, shell, copy, read, openProject, index: indexOf })
+  const keys = wireKeys({ document, store, shell, copy, read, openProject, index: indexOf })
+  const ctl = createCtl({ store, keys, shell, read, drawnOrder,
+    openProject: (path) => {
+      const found = store.getState().projects.find((entry) => entry.path === path)
+      if (!found) return false
+      openProject(found)
+      return true
+    },
+    wikiSearch: async (query) => {
+      const found = await loadWikiSearch(client, query)
+      if (!found.ok || !found.value || typeof found.value !== 'object') return null
+      const hits = (found.value as { hits?: { slug?: string; anchor?: string }[] }).hits
+      return hits?.[0]?.slug ? { slug: `${hits[0].slug}${hits[0].anchor ? `#${hits[0].anchor}` : ''}`, hits } : null
+    },
+    withIdentity: (seq, token, work) => {
+      const before = ctlIdentity
+      ctlIdentity = { seq, token }
+      try { return work() } finally { ctlIdentity = before }
+    },
+  })
+  let tab: { id: string; token: string } | null = null
+  let lastSeen = 0
+  const seen = () => {
+    if (!tab || document.visibilityState === 'hidden') return
+    lastSeen = Date.now()
+    const query = new URLSearchParams({ token: tab.token, screen: store.getState().tab })
+    void window.fetch(`/api/ctl/${encodeURIComponent(tab.id)}/seen?${query}`, { method: 'POST' }).catch(() => {})
+  }
+  window.addEventListener('focus', seen)
+  document.addEventListener('keydown', () => { if (Date.now() - lastSeen >= 5_000) seen() })
+  document.addEventListener('click', () => { if (Date.now() - lastSeen >= 5_000) seen() })
+  events = openEvents({ url: eventUrl, onStamp: (at) => refresher.saw(at), onUp: () => refresher.pause(),
+    onDown: () => { tab = null; refresher.resume() }, onVisible: () => { void refresher.check(); seen() },
+    onHello: (hello) => { tab = { id: hello.tab, token: hello.token }; seen() },
+    onCtl: ({ seq, request }) => {
+      const here = tab
+      if (!here) return
+      void ctl.run(request as { verb: string }, seq, here.token).then((reply: CtlReply) => {
+        const query = new URLSearchParams({ seq: String(seq), token: here.token })
+        return window.fetch(`/api/ctl/${encodeURIComponent(here.id)}?${query}`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(reply),
+        })
+      }).catch(() => {})
+    },
+  })
 
   document.body.tabIndex = -1
   document.body.focus({ preventScroll: true })

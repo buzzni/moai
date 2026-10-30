@@ -107,8 +107,8 @@ pub fn verb(ctx: &Ctx, target: Option<&str>, verb: wire::Verb) -> R<Vec<String>>
         Verb::Wiki { slug, search } if slug.is_some() == search.is_some() => {
             return Err(bad("give a wiki slug or --search"));
         }
-        Verb::Pane { list_width, list_height, wiki_width, gantt_label }
-            if [list_width, list_height, wiki_width, gantt_label].iter().all(|v| v.is_none()) =>
+        Verb::Pane { list_width, list_height, wiki_width, gantt_label, gantt_grid }
+            if [list_width, list_height, wiki_width, gantt_label, gantt_grid].iter().all(|v| v.is_none()) =>
         {
             return Err(bad("give at least one pane width or height"));
         }
@@ -117,8 +117,8 @@ pub fn verb(ctx: &Ctx, target: Option<&str>, verb: wire::Verb) -> R<Vec<String>>
         }
         _ => {}
     }
-    if let Verb::Pane { list_width, list_height, wiki_width, gantt_label } = &verb {
-        for value in [list_width, list_height, wiki_width, gantt_label].into_iter().flatten() {
+    if let Verb::Pane { list_width, list_height, wiki_width, gantt_label, gantt_grid } = &verb {
+        for value in [list_width, list_height, wiki_width, gantt_label, gantt_grid].into_iter().flatten() {
             if value != "none" && value.parse::<i64>().is_err() {
                 return Err(bad("pane values must be numbers or none"));
             }

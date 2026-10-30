@@ -40,11 +40,18 @@ pub fn windows() -> R<Vec<Window>> {
         let req = wire::request(Verb::Hello, Duration::from_millis(1200));
         match send_at(&path, &req) {
             Ok(reply) if reply.ok => {
-                if let Some(data) = reply.data
-                    && let Ok(mut window) = serde_json::from_value::<Window>(data)
-                {
-                    window.socket = path;
-                    windows.push(window);
+                if let Some(data) = reply.data {
+                    let entries = data
+                        .get("windows")
+                        .and_then(serde_json::Value::as_array)
+                        .cloned()
+                        .unwrap_or_else(|| vec![data]);
+                    for entry in entries {
+                        if let Ok(mut window) = serde_json::from_value::<Window>(entry) {
+                            window.socket = path.clone();
+                            windows.push(window);
+                        }
+                    }
                 }
             }
             Err(e) if matches!(e.kind(), std::io::ErrorKind::ConnectionRefused | std::io::ErrorKind::NotFound) => {
@@ -107,7 +114,10 @@ pub fn send_at(_: &Path, _: &Request) -> std::io::Result<Reply> {
 }
 
 pub fn send(window: &Window, request: &Request) -> R<Reply> {
-    send_at(&window.socket, request).map_err(|e| Fail::coded(format!("window {} is gone: {e}", window.id), code::GONE))
+    let mut directed = request.clone();
+    directed.target = Some(window.id.clone());
+    send_at(&window.socket, &directed)
+        .map_err(|e| Fail::coded(format!("window {} is gone: {e}", window.id), code::GONE))
 }
 
 #[cfg(test)]

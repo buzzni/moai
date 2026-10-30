@@ -12,6 +12,8 @@ pub struct Request {
     pub actor: Option<String>,
     pub deadline_ms: u64,
     pub lang: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -73,6 +75,7 @@ pub enum Verb {
         list_height: Option<String>,
         wiki_width: Option<String>,
         gantt_label: Option<String>,
+        gantt_grid: Option<String>,
     },
     Zone {
         name: String,
@@ -114,6 +117,7 @@ pub fn request(verb: Verb, timeout: std::time::Duration) -> Request {
         actor: None,
         deadline_ms: now_ms().saturating_add(timeout.as_millis() as u64),
         lang: "en".into(),
+        target: None,
     }
 }
 
@@ -136,8 +140,8 @@ mod tests {
         assert_eq!(
             names,
             [
-                "hello", "state", "keys", "do", "actions", "sort", "filter", "find", "screen", "view", "cell",
-                "detail", "goto", "read", "wiki", "pane", "zone", "theme"
+                "hello", "state", "keys", "do", "do", "actions", "sort", "filter", "find", "screen", "view", "cell",
+                "detail", "goto", "read", "wiki", "pane", "pane", "zone", "theme"
             ]
         );
     }

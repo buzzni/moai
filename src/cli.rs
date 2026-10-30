@@ -1476,6 +1476,9 @@ pub enum CtlCmd {
         wiki_width: Option<String>,
         #[arg(long)]
         gantt_label: Option<String>,
+        /// Web Gantt name grid width in pixels (not the TUI's character cells)
+        #[arg(long)]
+        gantt_grid: Option<String>,
         #[arg(short = 't', long, help = "Window id from moai ctl ls")]
         target: Option<String>,
     },

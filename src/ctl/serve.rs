@@ -20,9 +20,20 @@ pub struct Listener {
     stop: Arc<AtomicBool>,
 }
 
+pub type Handler = Arc<dyn Fn(Request) -> Reply + Send + Sync>;
+
 #[cfg(unix)]
 impl Listener {
     pub fn bind() -> std::io::Result<Self> {
+        Self::bind_with(None)
+    }
+
+    /// The web server answers from its tab registry; the TUI keeps its owner-loop channel.
+    pub fn bind_web(handler: Handler) -> std::io::Result<Self> {
+        Self::bind_with(Some(handler))
+    }
+
+    fn bind_with(handler: Option<Handler>) -> std::io::Result<Self> {
         use std::os::unix::fs::{FileTypeExt, MetadataExt};
         use std::os::unix::net::UnixListener;
         let path = super::place::socket(&super::place::dir()?)?;
@@ -53,6 +64,7 @@ impl Listener {
                             continue;
                         }
                         let tx = tx.clone();
+                        let handler = handler.clone();
                         let client_active = Arc::clone(&active);
                         let spawned = std::thread::Builder::new().name("moai-ctl-client".into()).spawn(move || {
                             struct Leave(Arc<AtomicUsize>);
@@ -62,7 +74,7 @@ impl Listener {
                                 }
                             }
                             let _leave = Leave(client_active);
-                            handle(&mut stream, &tx);
+                            handle(&mut stream, &tx, handler.as_ref());
                         });
                         if spawned.is_err() {
                             active.fetch_sub(1, Ordering::AcqRel);
@@ -84,6 +96,10 @@ impl Listener {
     pub fn bind() -> std::io::Result<Self> {
         Err(std::io::Error::new(std::io::ErrorKind::Unsupported, "control sockets are unavailable on this OS"))
     }
+
+    pub fn bind_web(_: Handler) -> std::io::Result<Self> {
+        Self::bind()
+    }
 }
 
 impl Drop for Listener {
@@ -94,7 +110,7 @@ impl Drop for Listener {
 }
 
 #[cfg(unix)]
-fn handle(stream: &mut std::os::unix::net::UnixStream, tx: &mpsc::Sender<Incoming>) {
+fn handle(stream: &mut std::os::unix::net::UnixStream, tx: &mpsc::Sender<Incoming>, handler: Option<&Handler>) {
     let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
     let mut line = Vec::new();
     let read = BufReader::new(&mut *stream).take(wire::LINE_MAX as u64 + 1).read_until(b'\n', &mut line);
@@ -104,6 +120,7 @@ fn handle(stream: &mut std::os::unix::net::UnixStream, tx: &mpsc::Sender<Incomin
         Ok(_) => match serde_json::from_slice::<Request>(&line) {
             Ok(req) if req.proto != wire::PROTO => Reply::error("unsupported", "unknown control protocol"),
             Ok(req) if req.deadline_ms <= wire::now_ms() => Reply::error("timeout", "control request expired"),
+            Ok(req) if handler.is_some() => handler.unwrap()(req),
             Ok(req) => {
                 let wait = Duration::from_millis(req.deadline_ms.saturating_sub(wire::now_ms()).min(30_000));
                 let (answer, rx) = mpsc::channel();

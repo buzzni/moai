@@ -36,17 +36,21 @@ async function page(t, { holdFirst = false, initialTab, chartFailures = 0, fakeS
   if (initialTab) dom.window.localStorage.setItem('moai.web', JSON.stringify({ tab: initialTab }))
   const trees = []
   const requests = []
+  const posts = []
   const streams = []
   if (fakeStream) dom.window.EventSource = class {
     constructor(url) { this.url = url; this.listeners = {}; this.closed = false; streams.push(this) }
     addEventListener(name, listener) { this.listeners[name] = listener }
     close() { this.closed = true }
     stamp(value) { this.listeners.stamp({ data: JSON.stringify({ stamp: value }) }) }
+    hello(tab, token) { this.listeners.hello({ data: JSON.stringify({ tab, token }) }) }
+    ctl(seq, request) { this.listeners.ctl({ data: JSON.stringify({ seq, request }) }) }
   }
   let release
-  dom.window.fetch = async (path) => {
+  dom.window.fetch = async (path, init = {}) => {
     const url = new URL(path, dom.window.location.href)
     requests.push(url.pathname)
+    if (init.method === 'POST') posts.push({ url, init })
     let body
     if (url.pathname === '/api/boot') body = boot
     else if (url.pathname === '/api/stamp') body = { stamp: 'unchanged' }
@@ -68,8 +72,23 @@ async function page(t, { holdFirst = false, initialTab, chartFailures = 0, fakeS
   await until(() => trees.length > 0)
   const tab = (id) => dom.window.document.querySelector(`[role=tab][data-tab="${id}"]`)
   const bars = () => dom.window.document.querySelectorAll('.g-lanes .b-plan').length
-  return { dom, trees, requests, streams, tab, bars, release: () => release?.() }
+  return { dom, trees, requests, posts, streams, tab, bars, release: () => release?.() }
 }
+
+test('a ctl event changes the visible theme and replies with the tab token', async (t) => {
+  const p = await page(t, { fakeStream: true })
+  const source = p.streams[0]
+  source.onopen()
+  source.hello('123.1', 'token')
+  source.ctl(7, { verb: 'theme', name: 'dark' })
+  await until(() => p.posts.some(({ url }) => url.pathname === '/api/ctl/123.1'))
+  const posted = p.posts.find(({ url }) => url.pathname === '/api/ctl/123.1')
+  assert.equal(posted.url.searchParams.get('seq'), '7')
+  assert.equal(posted.url.searchParams.get('token'), 'token')
+  assert.equal(JSON.parse(posted.init.body).ok, true)
+  assert.equal(p.dom.window.document.documentElement.dataset.theme, 'dark')
+  assert.equal(JSON.parse(p.dom.window.localStorage.getItem('moai.web')).theme, 'dark')
+})
 
 test('the page reads changed stamps from its event stream and ignores repeats', async (t) => {
   const p = await page(t, { fakeStream: true })

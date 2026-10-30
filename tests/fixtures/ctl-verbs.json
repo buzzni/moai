@@ -1,12 +1,13 @@
 [
   {"verb":"hello","args":{},"surfaces":["tui","web"],"say":"identify an open window"},
   {"verb":"state","args":{"rows":false},"surfaces":["tui","web"],"say":"read its state"},
-  {"verb":"keys","args":{"seqs":["SPC g b"],"text":null},"surfaces":["tui"],"say":"press the window's bindings"},
-  {"verb":"do","args":{"name":"browse.go_list"},"surfaces":["tui"],"say":"run a named action"},
-  {"verb":"actions","args":{},"surfaces":["tui"],"say":"list enabled actions"},
+  {"verb":"keys","args":{"seqs":["SPC g b"],"text":null},"surfaces":["tui","web"],"say":"press the window's bindings"},
+  {"verb":"do","args":{"name":"browse.go_list"},"surfaces":["tui"],"say":"run a TUI action"},
+  {"verb":"do","args":{"name":"tab.board"},"surfaces":["web"],"say":"run a web action"},
+  {"verb":"actions","args":{},"surfaces":["tui","web"],"say":"list enabled actions"},
   {"verb":"sort","args":{"words":["title:desc","priority:desc"],"default":false},"surfaces":["tui","web"],"say":"set the issue order"},
   {"verb":"filter","args":{"query":"status=todo"},"surfaces":["tui","web"],"say":"apply a filter"},
-  {"verb":"find","args":{"query":"parser","scope":"title"},"surfaces":["tui","web"],"say":"search a field"},
+  {"verb":"find","args":{"query":"parser","scope":"all"},"surfaces":["tui","web"],"say":"search a field"},
   {"verb":"screen","args":{"name":"board"},"surfaces":["tui","web"],"say":"change the screen"},
   {"verb":"view","args":{"name":"deferred","on":true},"surfaces":["tui","web"],"say":"set a view axis"},
   {"verb":"cell","args":{"name":"priority","on":true},"surfaces":["tui","web"],"say":"set a list cell"},
@@ -15,6 +16,7 @@
   {"verb":"read","args":{"ids":[],"all":true,"group":null},"surfaces":["tui","web"],"say":"mark the owner's rows read"},
   {"verb":"wiki","args":{"slug":"guide#start","search":null},"surfaces":["tui","web"],"say":"open a wiki page"},
   {"verb":"pane","args":{"list_width":"55","list_height":null,"wiki_width":null,"gantt_label":null},"surfaces":["tui","web"],"say":"set a pane share"},
+  {"verb":"pane","args":{"list_width":null,"list_height":null,"wiki_width":null,"gantt_label":null,"gantt_grid":"300"},"surfaces":["web"],"say":"set the web Gantt grid in pixels"},
   {"verb":"zone","args":{"name":"UTC"},"surfaces":["tui","web"],"say":"set the timezone"},
   {"verb":"theme","args":{"name":"dark"},"surfaces":["web"],"say":"set web colours"}
 ]

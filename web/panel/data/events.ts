@@ -7,6 +7,8 @@ export interface EventsOptions {
   onUp: () => void
   onDown: () => void
   onVisible?: () => void
+  onHello?: (hello: { tab: string; token: string }) => void
+  onCtl?: (message: { seq: number; request: Record<string, unknown> }) => void
   factory?: (url: string) => EventSource
   visibility?: VisibilitySignal | null
   clock?: Clock
@@ -76,6 +78,22 @@ export function openEvents(options: EventsOptions): Events {
           const stamp = (JSON.parse((event as MessageEvent).data) as { stamp?: unknown }).stamp
           if (typeof stamp === 'string') void Promise.resolve(options.onStamp(stamp)).catch(() => options.onDown())
         } catch { /* a broken event cannot replace the visible rows */ }
+      })
+      opened.addEventListener('hello', (event) => {
+        if (source !== opened) return
+        try {
+          const hello = JSON.parse((event as MessageEvent).data) as { tab?: unknown; token?: unknown }
+          if (typeof hello.tab === 'string' && typeof hello.token === 'string') options.onHello?.({ tab: hello.tab, token: hello.token })
+        } catch { /* ignore a malformed server event */ }
+      })
+      opened.addEventListener('ctl', (event) => {
+        if (source !== opened) return
+        try {
+          const message = JSON.parse((event as MessageEvent).data) as { seq?: unknown; request?: unknown }
+          if (typeof message.seq === 'number' && message.request && typeof message.request === 'object') {
+            options.onCtl?.({ seq: message.seq, request: message.request as Record<string, unknown> })
+          }
+        } catch { /* ignore a malformed server event */ }
       })
       opened.onerror = () => {
         if (source !== opened) return

@@ -627,10 +627,10 @@ fn dispatch(ctx: &Ctx, cli: Cli) -> R<Vec<String>> {
         Cmd::Ctl(CtlCmd::Wiki { slug, search, target }) => {
             ctl::verb(ctx, target.as_deref(), crate::ctl::wire::Verb::Wiki { slug, search })
         }
-        Cmd::Ctl(CtlCmd::Pane { list_width, list_height, wiki_width, gantt_label, target }) => ctl::verb(
+        Cmd::Ctl(CtlCmd::Pane { list_width, list_height, wiki_width, gantt_label, gantt_grid, target }) => ctl::verb(
             ctx,
             target.as_deref(),
-            crate::ctl::wire::Verb::Pane { list_width, list_height, wiki_width, gantt_label },
+            crate::ctl::wire::Verb::Pane { list_width, list_height, wiki_width, gantt_label, gantt_grid },
         ),
         Cmd::Ctl(CtlCmd::Zone { name, target }) => {
             ctl::verb(ctx, target.as_deref(), crate::ctl::wire::Verb::Zone { name })

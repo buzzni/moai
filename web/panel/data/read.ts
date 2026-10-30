@@ -72,9 +72,9 @@ export function parseRead(output: unknown): ReadResult | undefined {
   }
 }
 
-async function write(client: Client, endpoint: Endpoint): Promise<Marked> {
+async function write(client: Client, endpoint: Endpoint, ctl?: Readonly<Record<string, string>>): Promise<Marked> {
   // Never shared: a mark is a write of its own (client.ts shares no POST either).
-  const outcome = await client.request(endpoint, { priority: PRIORITY.detail, share: false })
+  const outcome = await client.request(ctl ? { ...endpoint, query: { ...endpoint.query, ...ctl } } : endpoint, { priority: PRIORITY.detail, share: false })
   // A missing id ends the run non-zero with the whole answer still printed (see the header).
   const result = parseRead(answerOf(outcome))
   if (result) return { ok: true, result, ...('notes' in outcome && outcome.notes ? { said: outcome.notes } : {}) }
@@ -82,13 +82,13 @@ async function write(client: Client, endpoint: Endpoint): Promise<Marked> {
 }
 
 /** `r`: the drawn row. Only its id travels; see the note on stale draws above. */
-export const markRead = (client: Client, row: Pick<Row, 'id'>, worktree = false): Promise<Marked> => write(client, READ_ENDPOINT.one(row.id, worktree))
+export const markRead = (client: Client, row: Pick<Row, 'id'>, worktree = false, ctl?: Readonly<Record<string, string>>): Promise<Marked> => write(client, READ_ENDPOINT.one(row.id, worktree), ctl)
 
 /** `SPC m a`: everything unread that came to me. */
-export const markAllRead = (client: Client, worktree = false): Promise<Marked> => write(client, READ_ENDPOINT.all(worktree))
+export const markAllRead = (client: Client, worktree = false, ctl?: Readonly<Record<string, string>>): Promise<Marked> => write(client, READ_ENDPOINT.all(worktree), ctl)
 
 /** `SPC m g`: a group's members and what is drawn under it. */
-export const markGroupRead = (client: Client, groupId: string, worktree = false): Promise<Marked> => write(client, READ_ENDPOINT.group(groupId, worktree))
+export const markGroupRead = (client: Client, groupId: string, worktree = false, ctl?: Readonly<Record<string, string>>): Promise<Marked> => write(client, READ_ENDPOINT.group(groupId, worktree), ctl)
 
 /**
  * The three writes as the keys call them (keys/wiring.ts `r`, `SPC m a`, `SPC m g`), each answering null when it went
@@ -104,7 +104,7 @@ export interface ReadMarks {
   group(id: string): Promise<Outcome | null>
 }
 
-export function readMarks(client: Client, after: (written: ReadonlySet<string>) => Promise<unknown>, overlay: () => boolean = () => false): ReadMarks {
+export function readMarks(client: Client, after: (written: ReadonlySet<string>) => Promise<unknown>, overlay: () => boolean = () => false, identity: () => Readonly<Record<string, string>> | undefined = () => undefined): ReadMarks {
   const marked = async (writing: Promise<Marked>): Promise<Outcome | null> => {
     const done = await writing
     if (!done.ok) return done.outcome
@@ -120,8 +120,8 @@ export function readMarks(client: Client, after: (written: ReadonlySet<string>) 
     return null
   }
   return {
-    one: (id) => marked(markRead(client, { id }, overlay())),
-    all: () => marked(markAllRead(client, overlay())),
-    group: (id) => marked(markGroupRead(client, id, overlay())),
+    one: (id) => marked(markRead(client, { id }, overlay(), identity())),
+    all: () => marked(markAllRead(client, overlay(), identity())),
+    group: (id) => marked(markGroupRead(client, id, overlay(), identity())),
   }
 }
