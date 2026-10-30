@@ -3,6 +3,7 @@
 //! 상태([`App`])와 그림([`draw`])을 나눈다. 상태 전이는 터미널 없이 시험되고,
 //! 그림은 `TestBackend` 로 시험된다 — 둘 다 TTY 를 켜지 않는다.
 
+mod archive_days;
 pub mod board;
 pub mod draw;
 pub mod edit;
@@ -197,6 +198,8 @@ pub enum Mode {
     /// `SPC o t` 가 연 시간대 고르는 창(moai-3oz2). **돌리지 않고 창이다** — 이 기계의 tzdb 는
     /// 이름을 천 개 넘게 들어, 눌러 돌리는 길로는 고를 수가 없다.
     Zone(zones::Zones),
+    /// `SPC o o` repository archive retention picker.
+    ArchiveDays(archive_days::Picker),
     /// `SPC s e` 가 연 차례 편집 창(moai-r170.x22). 필드를 넣고 빼고 앞뒤를 바꾸고 방향을 뒤집는다 — 키 하나로는
     /// 차례를 갈아 끼우거나(`SPC s <소문자>`) 끝에 더하는 것(`SPC s <대문자>`)만 된다.
     Sort(sorter::Editor),
@@ -421,7 +424,15 @@ struct Stood {
 #[derive(Default)]
 pub struct Ground {
     stands: States,
+    /// Archive answers per row and the clock they were measured at ([`Site::archived`]). Measured lazily, once per
+    /// clock: a reread installs a fresh `Ground` and the layer moves [`Site::now`], and answering a row on its own
+    /// rebuilds the whole filter ([`Ground::here`]) — per row, that made every list pass quadratic.
+    archived: std::cell::RefCell<Option<(String, Vec<bool>)>>,
+    from_archive: Vec<bool>,
+    stored_ids: std::collections::BTreeSet<String>,
+    archive_copies: std::collections::BTreeSet<String>,
     epic: std::collections::BTreeMap<String, String>,
+    milestone: std::collections::BTreeMap<String, String>,
     /// 쌍둥이 부모 밑에서 소속을 못 정한 줄(`report::Handing::twin`) — `epic` 과 함께 옮긴다.
     twin: std::collections::BTreeSet<String>,
     /// 계획에서 빠진 줄 → 그것을 뺀 줄, **id 로 접은 것**(`report::deferred_roots`).
@@ -451,7 +462,7 @@ pub struct Ground {
     /// 자([`Ground::here`])와 보기의 자([`Site::archived`])가 이 하나를 읽는다.
     archive_days: i64,
     /// **쓰기가 못 찾는 아카이브의 id** — 이 적재가 읽은 산 스냅샷(겹쳐 보면 루트의 것)에 **읽히는** 줄이 없는 아카이브의
-    /// id 다(moai-ekg6.ej7). 섞은 줄([`beside`])은 어느 파일에서 왔는지를 안 들어, [`counted_beside`] 가 섞기 전에 잰다.
+    /// id 다(moai-ekg6.ej7). [`from_archive`] 와 달리 쓰기 가능성만 가른다; [`counted_beside`] 가 섞기 전에 잰다.
     /// 쓰기(`Repo::with_write`)는 산 스냅샷의 읽힌 줄에서 id 로 찾으니 간트는 이 id 의 계획을 안 쓴다(`App::unwritable`) —
     /// 누를 때마다 스냅샷을 다시 읽던 판은 UI 실에서 산 파일 전체를 풀었다.
     ///
@@ -498,6 +509,35 @@ fn measure_in(issues: &[Issue], cfg: &Config, soil: &crate::report::Soil<'_>) ->
 }
 
 impl Ground {
+    pub(crate) fn archive_copy(&self, issues: &[Issue], at: usize) -> bool {
+        self.from_archive.get(at).copied().unwrap_or(false)
+            && issues.get(at).is_some_and(|row| self.archive_copies.contains(&row.id))
+    }
+
+    fn record_archive_source(
+        &mut self,
+        issues: &[Issue],
+        source: Vec<bool>,
+        unreadable_live: &std::collections::BTreeSet<String>,
+    ) {
+        let live: std::collections::BTreeSet<&str> =
+            issues.iter().zip(&source).filter_map(|(row, archived)| (!archived).then_some(row.id.as_str())).collect();
+        self.archive_copies = issues
+            .iter()
+            .zip(&source)
+            .filter_map(|(row, archived)| (*archived && live.contains(row.id.as_str())).then_some(row.id.clone()))
+            .collect();
+        self.stored_ids = issues
+            .iter()
+            .zip(&source)
+            .filter_map(|(row, archived)| {
+                (*archived && !live.contains(row.id.as_str()) && !unreadable_live.contains(&row.id))
+                    .then_some(row.id.clone())
+            })
+            .collect();
+        self.from_archive = source;
+    }
+
     fn in_soil(issues: &[Issue], cfg: &Config, soil: &crate::report::Soil<'_>) -> Ground {
         let stands = soil
             .stands(issues, cfg)
@@ -538,7 +578,12 @@ impl Ground {
         };
         Ground {
             stands,
+            archived: Default::default(),
+            from_archive: Vec::new(),
+            stored_ids: Default::default(),
+            archive_copies: Default::default(),
             epic: soil.epic.handed().iter().map(|(k, v)| (k.to_string(), v.to_string())).collect(),
+            milestone: soil.milestone.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect(),
             twin: soil.epic.twin().iter().map(|k| k.to_string()).collect(),
             put_off: soil.roots.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect(),
             split,
@@ -624,6 +669,7 @@ impl Ground {
         }
         crate::query::Where {
             epic: crate::report::Handing::of_handed(borrow(&self.epic), self.twin.iter().map(String::as_str).collect()),
+            milestone: borrow(&self.milestone),
             // **이것만 줄을 든다** — 마일스톤을 줄마다 묻는 재료라 빌릴 String 지도가 없다
             // (moai-jk2u.wvn). 그래서 짓지 않고 줄만 건넨다 — `--milestone` 을 묻는 거르개만
             // 그 판에 한 번 짓는다(`query::Lined`, moai-6mnm).
@@ -648,7 +694,7 @@ impl Ground {
             // 시간대는 적재가 아니라 보는 사람의 것이다(`App::zone`) — 거름망을 거는 자리가 얹는다.
             zone: None,
             archive_days: self.archive_days,
-            stored: Default::default(),
+            stored: self.stored_ids.iter().map(String::as_str).collect(),
         }
     }
 }
@@ -964,14 +1010,17 @@ pub(crate) fn counted_beside(
     let archived = crate::archive::read(&repo.root)?;
     let cfg = &repo.config;
     let unreadable = live_unreadable(&live, origin);
+    let unreadable_ids: std::collections::BTreeSet<String> =
+        unreadable.iter().filter_map(|u| u.id).map(str::to_string).collect();
     // **섞기 전에 잰다** — 섞은 줄은 어느 파일에서 왔는지를 안 든다([`Ground::archive_only`], moai-ekg6.ej7). 견줄 산 줄은
     // [`board`] 가 고르는 루트의 스냅샷이다 — 쓰기가 줄을 찾는 그 파일이다.
     let archive_only = unwritten_in(&archived, root.unwrap_or(&live));
     if !count || root.is_some() || !crate::archive::shareable(&live.issues, &unreadable, &archived) {
         let counted = if count { board(repo, &live, &unreadable, root, &archived, now) } else { Counted::default() };
-        let load = beside(archived, live);
+        let (load, source) = beside_with_source(archived, live);
         let (index, mut ground) = measure(&load.issues, cfg);
         ground.archive_only = archive_only;
+        ground.record_archive_source(&load.issues, source, &unreadable_ids);
         return Ok(Beside { load, counted, index, ground });
     }
     // 여기부터는 루트가 곧 산 줄이다(`root` 가 없다) — [`board`] 가 `root.unwrap_or(live)` 로 고르는 그것.
@@ -979,13 +1028,15 @@ pub(crate) fn counted_beside(
     let side = crate::cmd::status::ArchiveSide::of((&live.issues, &roots), &archived);
     let excluded = crate::archive::conflicts(&live.issues, &archived);
     let archive_unreadable = archived.errors.len();
-    let load = beside(archived, Load { issues: live.issues.clone(), errors: live.errors.clone() });
+    let (load, source) =
+        beside_with_source(archived, Load { issues: live.issues.clone(), errors: live.errors.clone() });
     let soil = crate::report::Soil::of(&load.issues);
     let (st, movable) = crate::archive::board_in(&load.issues, &soil, &live.issues, &unreadable, &excluded, cfg, now);
     let st = side.warn(st, movable);
     let counted = tally(st, unreadable.len(), archive_unreadable);
     let (index, mut ground) = measure_in(&load.issues, cfg, &soil);
     ground.archive_only = archive_only;
+    ground.record_archive_source(&load.issues, source, &unreadable_ids);
     drop(soil);
     Ok(Beside { load, counted, index, ground })
 }
@@ -1001,12 +1052,22 @@ fn unwritten_in(archived: &Load, live: &Load) -> std::collections::BTreeSet<Stri
 /// (moai-nkwg). 셈([`board`])은 섞기 전의 두 벌을 따로 받으므로, `read_all` 로 섞으면 셈을 위해 아카이브를 한 벌
 /// 더 읽어야 한다. 겹친 id 는 둘 다 남고(진단과 `SPC v o` 가 본다), 안정 정렬이라 산 줄이 뒤에 서서
 /// `Load::get` 에서 이긴다.
+#[cfg(test)]
 pub(crate) fn beside(archived: Load, live: Load) -> Load {
+    beside_with_source(archived, live).0
+}
+
+fn beside_with_source(archived: Load, live: Load) -> (Load, Vec<bool>) {
+    let mut source = vec![true; archived.issues.len()];
+    source.extend(std::iter::repeat_n(false, live.issues.len()));
     let mut out = archived;
     out.issues.extend(live.issues);
-    out.issues.sort_by(|a, b| a.id.cmp(&b.id));
+    let mut paired: Vec<_> = std::mem::take(&mut out.issues).into_iter().zip(source).collect();
+    paired.sort_by(|a, b| a.0.id.cmp(&b.0.id));
+    let (issues, source) = paired.into_iter().unzip();
+    out.issues = issues;
     out.errors.extend(live.errors);
-    out
+    (out, source)
 }
 
 /// 지켜볼 것에 더한다 — **이미 든 자리는 안 더한다.** `worktree::heads`·`gather`·`worktree::place_marks`
@@ -1351,9 +1412,12 @@ pub struct Site {
     /// 접어도 **밑의 펼침은 기억한다** — 접었다 다시 펼치면 안이 그대로 선다. `Tab`
     /// (다 펼침)의 두 번째 누름만 밑까지 걷는다([`App::expand_all`]).
     expanded: std::collections::HashSet<Path>,
-    /// 간트에서 **접어 둔** 묶음의 자리(moai-i4hf). 목록의 `expanded` 와 따로 들고 뜻이 거꾸로다 — 간트는 모두
-    /// 펼친 채로 서니(비면 "모두"), 사람이 접은 자리만 적는다. 들어갈 때마다 비운다([`App::open_gantt`]).
+    /// 간트에서 **접어 둔** 묶음의 자리(moai-i4hf). 목록의 `expanded` 와 따로 들고 뜻이 거꾸로다 — 비면 "모두
+    /// 펼침"이고, 접은 자리만 적는다. 들어갈 때마다 닫힌 묶음으로 다시 심는다([`App::seed_folds`]).
     gantt_shut: std::collections::HashSet<Path>,
+    /// Board lane and closed-epic folds. Seeded on board entry, then changed
+    /// only by the person; reloads retain the chosen shape.
+    board_shut: std::collections::HashSet<Path>,
     /// 겹쳐 본 줄의 출처. 꺼져 있으면 비었다.
     pub origin: crate::worktree::Origin,
     /// 옆 워크트리에서 만난 문제. **배너로 말만 한다** — CLI 가 stderr 로 흘리는
@@ -1784,6 +1848,7 @@ impl Site {
             unread: Default::default(),
             expanded: Default::default(),
             gantt_shut: Default::default(),
+            board_shut: Default::default(),
             origin: crate::worktree::Origin::default(),
             elsewhere: Vec::new(),
             unfound: None,
@@ -1847,13 +1912,62 @@ impl Site {
         self.read_of(i).unwrap_or(i.status.as_str())
     }
 
+    /// A closed epic or milestone uses its members' read column, and only a
+    /// standing group may inherit that column. Duplicate hidden twins do not.
+    pub fn closed(&self, at: usize) -> bool {
+        let Some(i) = self.issues.get(at) else { return false };
+        crate::report::is_group(i) && self.stand_of(i).is_some() && self.column(at) == crate::config::DONE
+    }
+
+    /// Directory paths of closed groups below a place. The index supplies the
+    /// same paths that list and Gantt rows use.
+    pub(super) fn closed_dirs(&self, under: &Path) -> Vec<Path> {
+        self.index
+            .descendants(under)
+            .into_iter()
+            .filter(|&at| self.index.is_dir(&self.issues, at) && self.closed(at))
+            .map(|at| self.index.dir_path(&self.issues, at))
+            .collect()
+    }
+
+    /// The folds the board and Gantt seed on entry — every closed epic and milestone, except those holding the
+    /// selected row so switching layouts does not hide the cursor. One answer for both layouts.
+    pub(super) fn closed_folds(&self, selected_home: Option<&Path>) -> std::collections::HashSet<Path> {
+        self.closed_dirs(&Path::new())
+            .into_iter()
+            .filter(|path| !selected_home.is_some_and(|home| home.starts_with(path)))
+            .collect()
+    }
+
     /// 그 줄이 아카이브인가(moai-47mz) — **거름망과 같은 자로 잰다**([`crate::query::Where::archived`]): 칸은
     /// [`Site::column`], 그 칸에 든 때는 묶음이면 읽은 칸에 든 때(`report::Stand::entered`)고 아니면 제 칸
     /// 시각이다. 시계는 적재마다 고정한 [`Site::now`] 다 — 프레임마다 다시 잡으면 자정 언저리에 줄이 깜빡인다.
     pub fn archived(&self, at: usize) -> bool {
-        let i = &self.issues[at];
-        let since = self.stand_of(i).map_or(i.status_since.as_str(), |s| s.entered.as_str());
-        crate::report::archived(self.column(at), since, &self.now, self.ground.archive_days)
+        // **Every row is answered in one pass per clock.** A reread (`App::take`) and the layer's clock both move
+        // `now`; a per-row fallback rebuilt `Ground::here` and `report::Lines` for each row.
+        let fresh = self
+            .ground
+            .archived
+            .borrow()
+            .as_ref()
+            .is_some_and(|(when, rows)| *when == self.now && rows.len() == self.issues.len());
+        if !fresh {
+            let rows = {
+                let where_ = self.ground.here(&self.issues);
+                (0..self.issues.len())
+                    .map(|n| self.ground.archive_copy(&self.issues, n) || where_.archived(&self.issues[n], &self.now))
+                    .collect()
+            };
+            *self.ground.archived.borrow_mut() = Some((self.now.clone(), rows));
+        }
+        self.ground.archived.borrow().as_ref().and_then(|(_, rows)| rows.get(at).copied()).unwrap_or(false)
+    }
+
+    /// `Some(true)` is an archive copy shadowed by a live row; `Some(false)`
+    /// came only from the archive. Neither is inferred from the id alone.
+    pub fn archive_file(&self, at: usize) -> Option<bool> {
+        let row = self.issues.get(at)?;
+        self.ground.from_archive.get(at).copied().unwrap_or(false).then(|| self.ground.archive_copies.contains(&row.id))
     }
 
     /// 그 줄이 서는 **보드의 레인**(moai-9nfw) — 뿌리에서는 그 줄이 사는 마일스톤이나 바구니(`(마일스톤 없음)`·
@@ -3335,6 +3449,7 @@ impl App {
             | Mode::Pick(_)
             | Mode::Unregister(_)
             | Mode::Zone(_)
+            | Mode::ArchiveDays(_)
             | Mode::Sort(_)
             | Mode::Stats(_)
             | Mode::Wiki(_) => String::new(),
@@ -3403,6 +3518,7 @@ impl App {
             | Mode::Pick(_)
             | Mode::Unregister(_)
             | Mode::Zone(_)
+            | Mode::ArchiveDays(_)
             | Mode::Sort(_)
             | Mode::Stats(_)
             | Mode::Wiki(_) => Raw::default(),
@@ -3870,7 +3986,15 @@ impl App {
             self.detail_at = at;
         }
         // 모르는 낱말은 목록 그대로다 — 상세의 자리와 같은 결이다.
-        if let Some(l) = look.layout.as_deref().and_then(view::Layout::named) {
+        if let Some(l) = look.layout.as_deref().and_then(view::Layout::named)
+            && l != self.layout
+        {
+            // **A saved board or Gantt is an entry too** — closed groups start folded there as they do on
+            // `SPC g b`/`SPC g g` ([`App::set_layout`]). Seed from the rows the cursor stands on now.
+            if matches!(l, view::Layout::Gantt | view::Layout::Board) {
+                let rows = self.rows();
+                self.seed_folds(&rows, l == view::Layout::Gantt);
+            }
             self.layout = l;
         }
         if let Some(on) = look.mouse {
@@ -4791,6 +4915,25 @@ impl App {
                 // 바구니를 다른 말로 부른다.
                 site.lang = self.site.lang;
                 site.repo = repo;
+                // **A reread keeps the folds the person chose** — only a first read seeds them. Seeding on every read
+                // closed what the person had opened, and folded the lane under the cursor, each time that project
+                // was written to.
+                let (gantt, board) = (self.gantt(), self.board());
+                let held = self
+                    .layer
+                    .as_mut()
+                    .and_then(|l| l.places.iter_mut().find(|p| p.path == path))
+                    .and_then(|p| p.site.as_mut())
+                    .map(|held| (std::mem::take(&mut held.gantt_shut), std::mem::take(&mut held.board_shut)));
+                match held {
+                    Some((gantt_shut, board_shut)) => {
+                        site.gantt_shut = gantt_shut;
+                        site.board_shut = board_shut;
+                    }
+                    None if gantt => site.gantt_shut = site.closed_folds(None),
+                    None if board => site.board_shut = site.closed_folds(None),
+                    None => {}
+                }
                 // **누군지는 읽는 스레드가 풀어 온다**(moai-ropk, 옮긴 것은 moai-uitb) — 그 프로젝트의
                 // 뿌리에서, 읽을 때 한 번. [`super::layer::App::enter_project`] 가 들어가며 하는 것과
                 // 같은 자다(프로젝트마다 git 설정이 다를 수 있어 뿌리마다 푼다). 그 한 번이 하위
@@ -5110,26 +5253,71 @@ impl App {
     /// 걸렸을 때만 선다 — 자식이 있는 일이 자식 덕에 카드로 서면 거름망이 숨긴 것이 보드에 선다.
     fn cards_in(&self, seat: Seat, site: &Site, keep: &dyn Fn(usize) -> bool) -> Vec<Row> {
         let mut lanes: Vec<Option<&Seg>> = Vec::new();
-        let mut cards: Vec<(usize, Entry, Twig)> = Vec::new();
+        let mut cards: Vec<(usize, usize, usize, bool, Entry, Twig)> = Vec::new();
         let tree =
             site.index.entries_tree(&site.issues, &site.path, keep, &|a, b| self.order_in(site, a, b), &|_| true);
         for (e, twig) in tree {
-            let card = |i: &Issue| {
-                !crate::report::is_group(i) && (crate::report::is_open_backlog(i) || !crate::report::is_backlog(i))
-            };
-            let Some(at) = e.at().filter(|&at| keep(at) && card(&site.issues[at])) else {
+            let Some(at) = e.at().filter(|&at| keep(at)) else {
                 continue;
             };
+            let issue = &site.issues[at];
+            let closed_epic = issue.kind == Kind::Epic && site.closed(at);
+            if !closed_epic
+                && (crate::report::is_group(issue)
+                    || (crate::report::is_backlog(issue) && !crate::report::is_open_backlog(issue)))
+            {
+                continue;
+            }
             let lane = site.lane(at);
             let rank = lanes.iter().position(|l| *l == lane).unwrap_or_else(|| {
                 lanes.push(lane);
                 lanes.len() - 1
             });
-            cards.push((rank, e, twig));
+            let mut lane_path = Path::new();
+            if let Some(seg) = lane {
+                lane_path.push(seg.clone());
+            }
+            if !self.searching() && !lane_path.is_empty() && site.board_shut.contains(&lane_path) {
+                continue;
+            }
+            let epic = site.index.home_of(at).iter().rev().find_map(|seg| match seg {
+                Seg::Epic(id) => site.index.find(id).filter(|&e| site.closed(e)),
+                _ => None,
+            });
+            let done_card = site.column(at) == crate::config::DONE && site.index.shelved_at(at).is_none();
+            // **Inside the epic its fold does not apply** — there the epic is the folder, not a card, so nothing on
+            // the board could open it again and its done members would simply vanish.
+            if !self.searching()
+                && done_card
+                && epic.is_some_and(|e| {
+                    let folded = site.index.dir_path(&site.issues, e);
+                    !site.path.starts_with(&folded) && site.board_shut.contains(&folded)
+                })
+            {
+                continue;
+            }
+            let owner = if done_card { epic.unwrap_or(at) } else { at };
+            cards.push((rank, owner, at, closed_epic, e, twig));
         }
-        let at = |e: &Entry| e.at().expect("카드는 제 줄이 있다");
-        cards.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| self.order_in(site, at(&a.1), at(&b.1))));
-        cards.into_iter().map(|(_, e, twig)| Row::Item(seat, e, twig)).collect()
+        cards.sort_by(|a, b| {
+            a.0.cmp(&b.0)
+                .then_with(|| self.order_in(site, a.1, b.1))
+                .then_with(|| b.3.cmp(&a.3))
+                .then_with(|| self.order_in(site, a.2, b.2))
+        });
+        let mut rows = Vec::new();
+        let headed = site.path.is_empty() && lanes.iter().any(Option::is_some);
+        for (rank, lane) in lanes.iter().enumerate() {
+            if headed && let Some(seg) = lane {
+                let at = match seg {
+                    Seg::Milestone(Some(id)) => site.index.find(id),
+                    _ => None,
+                };
+                rows.push(Row::Item(seat, Entry::Dir { seg: (*seg).clone(), at }, Twig::default()));
+            }
+            rows.extend(cards.iter().filter(|c| c.0 == rank).map(|c| Row::Item(seat, c.4.clone(), c.5.clone())));
+        }
+        rows
     }
 
     /// 보드 한 장 — 칸·레인·자리(moai-9nfw). **키·그림·마우스가 이 하나를 읽는다**([`board::Plan`]): 저마다 재면
@@ -5142,6 +5330,7 @@ impl App {
         /// 줄 하나가 보드에 서는 꼴 — 프로젝트 머리줄이거나 카드다.
         enum Spot<'a> {
             Head(usize),
+            Lane(Seat, &'a Seg),
             Card(Seat, Option<&'a Seg>, board::Column, usize),
         }
         // 줄마다 레인·칸·카드의 줄 수. **남의 카드는 켠 열이 없어도 발줄을 단다**(moai-oagj.y88, 사용자 결정).
@@ -5152,6 +5341,12 @@ impl App {
                     Row::Project(n) => Some(Spot::Head(*n)),
                     Row::Item(seat, e, _) => {
                         let site = self.site_of_seat(*seat)?;
+                        if let Entry::Dir { seg, .. } = e
+                            && site.path.is_empty()
+                            && matches!(seg, Seg::Milestone(_) | Seg::Lost)
+                        {
+                            return Some(Spot::Lane(*seat, seg));
+                        }
                         let at = e.at().filter(|&at| at < site.issues.len())?;
                         let backlog = crate::report::is_backlog(&site.issues[at]);
                         let column = board::column_of(backlog, site.index.shelved_at(at).is_some(), site.column(at));
@@ -5202,6 +5397,10 @@ impl App {
                     lanes.push(LaneOf::Project(*n));
                     board::Slot { lane: lanes.len() - 1, column: None, height: 1, group: *n }
                 }
+                Some(Spot::Lane(seat, seg)) => {
+                    let lane = lane_of(&mut lanes, *seat, Some(seg));
+                    board::Slot { lane, column: None, height: 1, group: group(*seat) }
+                }
                 Some(Spot::Card(seat, lane, column, height)) => {
                     let lane = lane_of(&mut lanes, *seat, *lane);
                     let column = columns.iter().position(|c| c == column).unwrap_or(0);
@@ -5227,9 +5426,13 @@ impl App {
         // 이것을 프로젝트마다 따로 잰다 — 마일스톤을 쓰는 옆 프로젝트 때문에 안 쓰는 프로젝트에 빈 줄이 서지 않는다.
         let heads: Vec<bool> = lanes
             .iter()
-            .map(|l| match l {
+            .enumerate()
+            .map(|(n, l)| match l {
                 LaneOf::Project(_) => false,
-                LaneOf::Seg(seat, _) => lanes.iter().any(|o| o.seg().is_some_and(|(s, _)| s == *seat)),
+                LaneOf::Seg(seat, _) => {
+                    !slots.iter().any(|s| s.lane == n && s.column.is_none())
+                        && lanes.iter().any(|o| o.seg().is_some_and(|(s, _)| s == *seat))
+                }
             })
             .collect();
         let plan = board::Plan::of(&slots, columns.len(), &heads);
@@ -5242,7 +5445,9 @@ impl App {
         let site = self.site_of_seat(seat)?;
         rows.iter().position(|r| {
             matches!(r, Row::Item(s, e, _)
-                if *s == seat && e.at().is_some_and(|at| at < site.issues.len() && site.index.home_of(at).starts_with(under)))
+                if *s == seat && e.at().is_some_and(|at| at < site.issues.len()
+                    && (!crate::report::is_group(&site.issues[at]) || site.closed(at) && site.issues[at].kind == Kind::Epic)
+                    && site.index.home_of(at).starts_with(under)))
         })
     }
 
@@ -5280,13 +5485,44 @@ impl App {
         }
     }
 
+    /// Enter the board with closed milestone lanes and closed epic cards folded ([`Site::closed_folds`]).
+    fn open_board(&mut self, rows: &[Row]) {
+        self.seed_folds(rows, false);
+    }
+
+    /// Seed the board's (`gantt` false) or Gantt's folds once, on entry, in this project and every project the
+    /// overview has read. `rows` are the rows the cursor stood on before the switch: the groups holding that row stay
+    /// open in its own project.
+    pub(super) fn seed_folds(&mut self, rows: &[Row], gantt: bool) {
+        let selected = match rows.get(self.cursor) {
+            Some(Row::Item(seat, entry, _)) => {
+                entry.at().and_then(|at| self.site_of_seat(*seat).map(|site| (*seat, site.index.home_of(at).clone())))
+            }
+            _ => None,
+        };
+        let keep = |seat: Seat| selected.as_ref().and_then(|(s, path)| (*s == seat).then_some(path));
+        let seed = |site: &mut Site, keep: Option<&Path>| {
+            let shut = site.closed_folds(keep);
+            if gantt { site.gantt_shut = shut } else { site.board_shut = shut }
+        };
+        seed(&mut self.site, keep(Seat::Here));
+        if let Some(layer) = self.layer.as_mut() {
+            for (at, place) in layer.places.iter_mut().enumerate() {
+                if let Some(site) = place.site.as_mut() {
+                    seed(site, keep(Seat::Place(at)));
+                }
+            }
+        }
+    }
+
     /// 배치를 바꾼다 — [`App::go`] 가 다른 배치를 고를 때(moai-9nfw·moai-i4hf). **고른 줄을 그대로 든다.**
     ///
     /// - 목록 → 보드: 그 줄이 카드면 그 카드에, 폴더(에픽·마일스톤·바구니)면 그 밑의 첫 카드에 선다
     /// - 보드·간트 → 목록: **같은 디렉터리에 남고** 그 줄을 품은 폴더를 연다. 그 줄의 집으로 들어가면(`land`)
     ///   한 번 오간 것만으로 뿌리의 보드가 에픽 하나의 보드로 줄어 돌아온다. 간트는 제 펼침을 따로 들어
     ///   목록이 접어 둔 폴더 안의 줄에도 커서가 설 수 있다 — 그 폴더만 연다
-    /// - → 간트: **모두 펼친 채로 선다**([`App::open_gantt`]). 목록의 접기는 건드리지 않는다
+    /// - → 보드·간트: 닫힌 묶음을 접은 채 선다([`App::seed_folds`]). 고른 줄을 품은 묶음은 열어 둔다. 목록의 접기는
+    ///   건드리지 않는다
     ///
     /// 굴린 자리는 첫 줄로 돌린다 — 목록의 줄 수와 보드 캔버스의 줄 수는 다른 자다. 화면을 떼어 둔 줄
     /// ([`App::adrift`])도 함께 걷는다: 남기면 첫 줄로 돌아간 보드나 목록에서 그 줄이 안 보여도 그림이 안 드러낸다.
@@ -5301,7 +5537,9 @@ impl App {
             _ => None,
         };
         if to == view::Layout::Gantt {
-            self.open_gantt();
+            self.seed_folds(rows, true);
+        } else if to == view::Layout::Board {
+            self.open_board(rows);
         }
         self.layout = to;
         self.list.rewind();
@@ -5398,6 +5636,34 @@ impl App {
                 Some((seat, path))
             }
             _ => None,
+        }
+    }
+
+    fn board_fold_at(&self, rows: &[Row]) -> Option<(Seat, Path, bool)> {
+        if !self.board() {
+            return None;
+        }
+        let row = rows.get(self.cursor)?;
+        let Row::Item(seat, Entry::Dir { seg, at }, _) = row else { return None };
+        let site = self.site_of_seat(*seat)?;
+        let lane = site.path.is_empty() && matches!(seg, Seg::Milestone(_) | Seg::Lost);
+        let epic = at.is_some_and(|n| site.issues.get(n).is_some_and(|i| i.kind == Kind::Epic && site.closed(n)));
+        if !lane && !epic {
+            return None;
+        }
+        let (_, path) = self.dir_of(Some(row.clone()))?;
+        Some((*seat, path, lane))
+    }
+
+    fn board_fold(&mut self, rows: &[Row], open: Option<bool>) {
+        let Some((seat, path, _lane)) = self.board_fold_at(rows) else { return };
+        let Some(site) = self.site_mut(seat) else { return };
+        let is_open = !site.board_shut.contains(&path);
+        let want = open.unwrap_or(!is_open);
+        if want {
+            site.board_shut.remove(&path);
+        } else {
+            site.board_shut.insert(path);
         }
     }
 
@@ -5505,10 +5771,13 @@ impl App {
         let Some(site) = self.site_mut(seat) else { return };
         if gantt {
             site.gantt_shut.clear();
+            for path in site.closed_dirs(&Path::new()) {
+                site.set_open(true, path, false);
+            }
             return;
         }
         let dirs: Vec<Path> = (0..site.issues.len())
-            .filter(|&n| site.index.is_dir(&site.issues, n))
+            .filter(|&n| site.index.is_dir(&site.issues, n) && !site.closed(n))
             .map(|n| site.index.dir_path(&site.issues, n))
             .collect();
         site.expanded.extend(dirs);
@@ -5578,16 +5847,22 @@ impl App {
         if gantt {
             // 간트는 접은 자리를 적는다 — 다 접기는 그 자리와 밑의 묶음 전부를 넣고, 다 펼치기는 그것을 걷는다.
             let Some(site) = self.site_mut(seat) else { return };
-            let mut under: Vec<Path> = site
+            let mut under: Vec<(Path, bool)> = site
                 .index
                 .descendants(&path)
                 .into_iter()
                 .filter(|&at| site.index.is_dir(&site.issues, at))
-                .map(|at| site.index.dir_path(&site.issues, at))
+                .map(|at| (site.index.dir_path(&site.issues, at), site.closed(at)))
                 .collect();
-            under.push(path);
-            for p in under {
-                site.set_open(true, p, !open);
+            under.push((path, false));
+            for (p, closed) in under {
+                if open {
+                    site.set_open(true, p, false);
+                } else if !closed {
+                    // A closed descendant the person already opened keeps that choice.
+                    // Its seeded fold also stays put; only this row and open descendants unfold.
+                    site.set_open(true, p, true);
+                }
             }
             return;
         }
@@ -5610,7 +5885,7 @@ impl App {
             .index
             .descendants(&path)
             .into_iter()
-            .filter(|&at| site.index.is_dir(&site.issues, at))
+            .filter(|&at| site.index.is_dir(&site.issues, at) && !site.closed(at))
             .map(|at| site.index.dir_path(&site.issues, at))
             .collect();
         site.expanded.extend(under);
@@ -5796,6 +6071,12 @@ impl App {
             // 접는다. 그래서 머리줄의 갈래가 보드의 옆 칸보다 먼저다.
             B::Expand if self.head_at(&rows).is_some() => self.unfold(&rows, false),
             B::Collapse if self.head_at(&rows).is_some() => self.fold(&rows),
+            B::Expand if self.board_fold_at(&rows).is_some_and(|(_, _, lane)| lane) => {
+                self.board_fold(&rows, Some(true))
+            }
+            B::Collapse if self.board_fold_at(&rows).is_some_and(|(_, _, lane)| lane) => {
+                self.board_fold(&rows, Some(false))
+            }
             B::Expand if self.board() => self.board_step(board::Go::Side(keys::Side::Right), &rows),
             B::Collapse if self.board() => self.board_step(board::Go::Side(keys::Side::Left), &rows),
             B::Expand => self.expand(&rows),
@@ -5811,6 +6092,7 @@ impl App {
             }
             // 머리줄의 `Tab` 은 그 프로젝트를 묶음까지 다 펼친다 — 펼쳐져 있으면 통째로 접는다.
             B::ExpandAll if self.head_at(&rows).is_some() => self.unfold(&rows, true),
+            B::ExpandAll if self.board() => self.board_fold(&rows, None),
             B::ExpandAll => self.expand_all(&rows),
             // **헤더의 번호로 바로 간다**(moai-o133). `0` 은 전체 — 층이다. 이미 그 자리면
             // 아무 일도 안 한다: 같은 프로젝트를 다시 열면 커서와 굴린 자리가 첫 줄로 튄다.
@@ -5935,6 +6217,12 @@ impl App {
                 let (all, why) = crate::tz::names();
                 self.mode = Mode::Zone(zones::Zones::open(all, why, self.zone.name()));
             }
+            B::ArchiveDays => {
+                self.mode = Mode::ArchiveDays(archive_days::Picker::open(
+                    self.site.cfg.archive_days,
+                    crate::config::ARCHIVE_DAYS,
+                ))
+            }
             B::Raw => {
                 self.raw = !self.raw;
                 // 그린 것과 원문은 줄 수가 다르다. 굴린 자리를 들고 가면
@@ -5989,12 +6277,14 @@ impl App {
             deferred_hidden: self.view.hide_deferred,
             backlog_hidden: self.view.hide_backlog,
             archived_hidden: !self.view.show_archived,
+            archive_days: self.site.cfg.archive_days,
             detail_at: self.detail_side(),
             board: self.board(),
             gantt: self.gantt(),
             stats: matches!(self.mode, Mode::Stats(_)),
             wiki: matches!(self.mode, Mode::Wiki(_)),
             head: self.head_at(rows).is_some(),
+            board_foldable: self.board_fold_at(rows).is_some(),
             mouse: self.mouse_on,
             sorting: self.order,
             fields: self.fields,
@@ -6136,6 +6426,7 @@ impl App {
             Mode::Pick(_) => return self.pick(k),
             Mode::Unregister(_) => return self.settle_unregister(k),
             Mode::Zone(_) => return self.pick_zone(k),
+            Mode::ArchiveDays(_) => return self.pick_archive_days(k),
             Mode::Sort(_) => return self.edit_sort(k),
             _ => {}
         }
@@ -6153,6 +6444,7 @@ impl App {
             | Mode::Pick(_)
             | Mode::Unregister(_)
             | Mode::Zone(_)
+            | Mode::ArchiveDays(_)
             | Mode::Sort(_)
             | Mode::Stats(_)
             | Mode::Wiki(_) => {
@@ -6252,7 +6544,18 @@ impl App {
             && let Some(was) = &self.grep_was
         {
             let rows = self.rows();
-            let at = self.regain(&rows, was.grip.0.as_ref(), was.grip.1.as_ref()).unwrap_or(self.cursor);
+            let mut at = self.regain(&rows, was.grip.0.as_ref(), was.grip.1.as_ref()).unwrap_or(self.cursor);
+            // A lane banner survives a member search as context. When the
+            // search finds a card, move to that card instead of leaving the
+            // cursor on the unchanged banner above it.
+            if let Mode::Grep(q, _) = &mode
+                && !q.text().is_empty()
+            {
+                let plan = self.laid(&rows).plan;
+                if plan.cards.get(at).is_some_and(|p| p.column.is_none()) {
+                    at = plan.cards.iter().position(|p| p.column.is_some()).unwrap_or(at);
+                }
+            }
             // 상세를 되감을지는 **이 글자 전에** 커서 밑에 섰던 줄로 가른다 — 상세가 보이던 것은 그 줄이다.
             self.stand(&rows, at, held.as_ref());
             return;
@@ -6423,6 +6726,7 @@ impl App {
             Mode::Pick(picker) => picker.paste(s),
             // 거르는 글에 붙여 넣는다 — 목록이 그만큼 좁아지고 커서가 도로 안으로 든다.
             Mode::Zone(z) => z.paste(s),
+            Mode::ArchiveDays(p) => p.paste(s),
             // 글칸이 없다 — 붙여 넣을 자리가 없으니 아무 일도 안 한다.
             Mode::Sort(_) => {}
             Mode::Unregister(_) => self.mode = Mode::Browse,
@@ -6596,16 +6900,24 @@ impl App {
                 matches!(rows.get(n), Some(Row::Item(Seat::Here, e, _))
                     if e.at().is_some_and(|at| self.site.index.home_of(at).starts_with(&came)))
             };
-            self.cursor = rows
-                .iter()
-                .position(|r| matches!(r, Row::Item(_, Entry::Dir { seg, .. }, _) if *seg == from))
-                .or_else(|| {
-                    if !self.board() {
-                        return None;
+            self.cursor = if self.board() {
+                let laid = self.laid(&rows);
+                let folder_card = rows.iter().zip(&laid.plan.cards).position(|(r, slot)| {
+                    slot.column.is_some() && matches!(r, Row::Item(_, Entry::Dir { seg, .. }, _) if *seg == from)
+                });
+                let opened_head =
+                    matches!(rows.get(fallback), Some(Row::Item(_, Entry::Dir { seg, .. }, _)) if *seg == from);
+                folder_card.or_else(|| {
+                    if opened_head || under(fallback) {
+                        Some(fallback)
+                    } else {
+                        self.first_under(&rows, Seat::Here, &came)
                     }
-                    if under(fallback) { Some(fallback) } else { self.first_under(&rows, Seat::Here, &came) }
                 })
-                .unwrap_or(fallback.min(rows.len().saturating_sub(1)));
+            } else {
+                rows.iter().position(|r| matches!(r, Row::Item(_, Entry::Dir { seg, .. }, _) if *seg == from))
+            }
+            .unwrap_or(fallback.min(rows.len().saturating_sub(1)));
         }
     }
 
@@ -6753,6 +7065,76 @@ pub fn stamp_of(repo: &Repo) -> Stamp {
     crate::store::stamp(&repo.issues_path())
 }
 
+// Repository archive retention picker: the component holds only state; this host writes.
+use ratatui::crossterm::event::{KeyCode, KeyModifiers};
+
+impl App {
+    pub(super) fn pick_archive_days(&mut self, k: KeyEvent) {
+        let Mode::ArchiveDays(p) = &mut self.mode else { return };
+        let plain = !k.modifiers.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT);
+        if !plain {
+            return;
+        }
+        match k.code {
+            KeyCode::Esc => self.mode = Mode::Browse,
+            KeyCode::Down | KeyCode::Char('j') => {
+                p.cursor = (p.cursor + 1).min(p.choices.len() - 1);
+                p.typed.clear();
+                p.error = None;
+            }
+            KeyCode::Up | KeyCode::Char('k') => {
+                p.cursor = p.cursor.saturating_sub(1);
+                p.typed.clear();
+                p.error = None;
+            }
+            KeyCode::Char(c) if c.is_ascii_digit() => {
+                p.typed.push(c);
+                p.error = None;
+            }
+            KeyCode::Backspace => {
+                p.typed.pop();
+                p.error = None;
+            }
+            KeyCode::Enter => {
+                let days = match p.selected() {
+                    Ok(days) => days,
+                    Err(range) => {
+                        p.error = Some(crate::i18n::fill(
+                            crate::i18n::say(self.site.lang, "tui.archive_days.range"),
+                            &[("range", range)],
+                        ));
+                        return;
+                    }
+                };
+                if days == p.now {
+                    self.mode = Mode::Browse;
+                    return;
+                }
+                let Some(repo) = self.site.repo.as_ref() else { return };
+                match repo.set_archive_days(days, || self.site.lang) {
+                    Ok((config, old)) => {
+                        self.site.cfg = config.clone();
+                        if let Some(repo) = self.site.repo.as_mut() {
+                            repo.config = config;
+                        }
+                        self.mode = Mode::Browse;
+                        self.reload();
+                        self.notice = Some(crate::i18n::fill(
+                            crate::i18n::say(self.site.lang, "tui.archive_days.saved"),
+                            &[("old", &old.to_string()), ("days", &days.to_string())],
+                        ));
+                    }
+                    Err(why) => {
+                        self.trouble = Some(why.to_string());
+                        p.error = Some(why.to_string());
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
 /// 스레드에서 짓는 읽기(다시 읽기·층)를 **끝날 때까지** 받는다. 루프가 하는 것을 흉내 낸다 —
 /// 시험 셋(여기·층·등록)이 같은 것을 저마다 적던 자리다(리뷰 moai-3lul.kt0).
 #[cfg(test)]
@@ -6827,6 +7209,221 @@ mod tests {
             make("argos-0009", Kind::Issue),
         ];
         App::new(issues, cfg(), Path::new())
+    }
+
+    fn grouped_for_folding() -> App {
+        let mut closed = member("argos-0003", "argos-0001");
+        closed.status = Status::new(crate::config::DONE);
+        closed.done_at = Some(crate::model::now());
+        let mut running = member("argos-0004", "argos-0002");
+        running.status = Status::new("in_progress");
+        let mut first = make("argos-0001", Kind::Epic);
+        let mut second = make("argos-0002", Kind::Epic);
+        first.milestone = Some("argos-0000".into());
+        second.milestone = Some("argos-0000".into());
+        App::new(vec![make("argos-0000", Kind::Milestone), first, second, closed, running], cfg(), Path::new())
+    }
+
+    #[test]
+    fn tab_leaves_closed_epics_folded_but_opens_the_selected_group() {
+        let mut a = grouped_for_folding();
+        assert!(a.site.closed(1));
+        assert!(!a.site.closed(2));
+        a.hit("Tab");
+        let closed = a.site.index.dir_path(&a.site.issues, 1);
+        let running = a.site.index.dir_path(&a.site.issues, 2);
+        assert!(!a.site.expanded.contains(&closed));
+        assert!(a.site.expanded.contains(&running));
+        let rows = a.rows();
+        a.cursor = rows.iter().position(|r| matches!(r, Row::Item(_, e, _) if e.at() == Some(1))).unwrap();
+        a.hit("Tab");
+        assert!(a.site.expanded.contains(&closed), "Tab on the closed epic must open that epic");
+    }
+
+    #[test]
+    fn gantt_enters_with_closed_epics_folded_and_keeps_manual_opening() {
+        let mut a = grouped_for_folding();
+        a.hit("SPC g g");
+        let closed = a.site.index.dir_path(&a.site.issues, 1);
+        assert!(a.site.gantt_shut.contains(&closed));
+        let rows = a.rows();
+        a.cursor = rows.iter().position(|r| matches!(r, Row::Item(_, e, _) if e.at() == Some(1))).unwrap();
+        a.hit("l");
+        assert!(!a.site.gantt_shut.contains(&closed));
+        let issues = a.site.issues.clone();
+        a.adopt(issues);
+        assert!(!a.site.gantt_shut.contains(&closed), "reload folded a group opened by the person");
+        let mut issues = a.site.issues.clone();
+        issues[4].status = Status::new(crate::config::DONE);
+        issues[4].done_at = Some(crate::model::now());
+        a.adopt(issues);
+        let newly_closed = a.site.index.dir_path(&a.site.issues, 2);
+        assert!(a.site.closed(2));
+        assert!(!a.site.gantt_shut.contains(&newly_closed), "a group closed while watched folded itself");
+    }
+
+    #[test]
+    fn gantt_keeps_the_selected_members_closed_group_open() {
+        let mut a = grouped_for_folding();
+        a.hit("Tab");
+        let rows = a.rows();
+        a.cursor = rows.iter().position(|r| matches!(r, Row::Item(_, e, _) if e.at() == Some(1))).unwrap();
+        a.hit("l");
+        let rows = a.rows();
+        a.cursor = rows.iter().position(|r| matches!(r, Row::Item(_, e, _) if e.at() == Some(3))).unwrap();
+        a.hit("SPC g g");
+        let closed = a.site.index.dir_path(&a.site.issues, 1);
+        assert!(!a.site.gantt_shut.contains(&closed));
+        assert!(a.rows().iter().any(|r| matches!(r, Row::Item(_, e, _) if e.at() == Some(3))));
+    }
+
+    #[test]
+    fn gantt_tab_reopens_an_ancestor_without_refolding_a_manually_opened_epic() {
+        let mut a = grouped_for_folding();
+        a.hit("SPC g g");
+        let epic = a.site.index.dir_path(&a.site.issues, 1);
+        let milestone = a.site.index.dir_path(&a.site.issues, 0);
+        a.cursor = a.rows().iter().position(|r| matches!(r, Row::Item(_, e, _) if e.at() == Some(1))).unwrap();
+        a.hit("l");
+        assert!(!a.site.gantt_shut.contains(&epic));
+        a.cursor = a.rows().iter().position(|r| matches!(r, Row::Item(_, e, _) if e.at() == Some(0))).unwrap();
+        a.hit("h");
+        assert!(a.site.gantt_shut.contains(&milestone));
+        a.hit("Tab");
+        assert!(!a.site.gantt_shut.contains(&milestone));
+        assert!(!a.site.gantt_shut.contains(&epic));
+        assert!(a.rows().iter().any(|r| matches!(r, Row::Item(_, e, _) if e.at() == Some(3))));
+    }
+
+    #[test]
+    fn board_closed_milestone_and_epic_open_in_two_steps() {
+        let mut done = member("argos-0002", "argos-0001");
+        done.status = Status::new(crate::config::DONE);
+        done.done_at = Some(crate::model::now());
+        let mut epic = make("argos-0001", Kind::Epic);
+        epic.milestone = Some("argos-0000".into());
+        let mut a = App::new(vec![make("argos-0000", Kind::Milestone), epic, done], cfg(), Path::new());
+        a.hit("SPC g b");
+        let lane = a.site.index.dir_path(&a.site.issues, 0);
+        let epic = a.site.index.dir_path(&a.site.issues, 1);
+        assert!(a.site.board_shut.contains(&lane) && a.site.board_shut.contains(&epic));
+        assert_eq!(row_ids(&a), ["argos-0000"]);
+        assert_eq!(a.laid(&a.rows()).plan.cards[0].column, None);
+        a.hit("Tab");
+        assert_eq!(row_ids(&a), ["argos-0000", "argos-0001"]);
+        a.hit("j Tab");
+        assert_eq!(row_ids(&a), ["argos-0000", "argos-0001", "argos-0002"]);
+        assert!(!a.site.board_shut.contains(&epic));
+        assert!(a.site.expanded.is_empty(), "board folding changed list expansion");
+        a.hit("SPC g l");
+    }
+
+    #[test]
+    fn board_lane_head_has_detail_and_folds_by_hand() {
+        let mut a = grouped_for_folding();
+        a.hit("SPC g b");
+        assert_eq!(on_id(&a), "argos-0000");
+        assert_eq!(a.laid(&a.rows()).plan.cards[a.cursor].column, None);
+        let lane = a.site.index.dir_path(&a.site.issues, 0);
+        a.hit("h");
+        assert!(a.site.board_shut.contains(&lane));
+        a.hit("l");
+        assert!(!a.site.board_shut.contains(&lane));
+        a.hit("Enter");
+        assert_eq!(a.site.path, lane);
+    }
+
+    #[test]
+    fn search_reveals_a_card_in_a_folded_board_lane() {
+        let mut done = member("argos-0002", "argos-0001");
+        done.status = Status::new(crate::config::DONE);
+        done.done_at = Some(crate::model::now());
+        let mut epic = make("argos-0001", Kind::Epic);
+        epic.milestone = Some("argos-0000".into());
+        let mut a = App::new(vec![make("argos-0000", Kind::Milestone), epic, done], cfg(), Path::new());
+        a.hit("SPC g b");
+        assert_eq!(board_card_ids(&a), Vec::<String>::new());
+        search(&mut a, "argos-0002");
+        assert!(board_card_ids(&a).contains(&"argos-0002".into()));
+        a.key(key(KeyCode::Enter));
+        assert_eq!(on_id(&a), "argos-0002");
+    }
+
+    #[test]
+    fn a_deferred_member_of_a_folded_epic_keeps_its_board_card() {
+        let mut done = member("argos-0002", "argos-0001");
+        done.status = Status::new(crate::config::DONE);
+        done.done_at = Some(crate::model::now());
+        let mut deferred = member("argos-0003", "argos-0001");
+        deferred.deferred_at = Some(crate::model::now());
+        let mut epic = make("argos-0001", Kind::Epic);
+        epic.milestone = Some("argos-0000".into());
+        let mut a = App::new(vec![make("argos-0000", Kind::Milestone), epic, done, deferred], cfg(), Path::new());
+        a.view.hide_deferred = false;
+        a.see();
+        a.hit("SPC g b Tab");
+        assert!(a.site.closed(1));
+        assert_eq!(board_card_ids(&a), ["argos-0001", "argos-0003"]);
+        assert!(!board_card_ids(&a).contains(&"argos-0002".into()));
+    }
+
+    /// Inside a folded closed epic the epic is the folder, not a card — nothing could open it again, so its fold must
+    /// not hide its done members there (review moai-mkzo.8wa).
+    #[test]
+    fn entering_a_folded_closed_epic_on_the_board_shows_its_done_cards() {
+        let mut done = member("argos-0002", "argos-0001");
+        done.status = Status::new(crate::config::DONE);
+        done.done_at = Some(crate::model::now());
+        let mut epic = make("argos-0001", Kind::Epic);
+        epic.milestone = Some("argos-0000".into());
+        let mut a = App::new(vec![make("argos-0000", Kind::Milestone), epic, done], cfg(), Path::new());
+        a.hit("SPC g b Tab j");
+        assert_eq!(on_id(&a), "argos-0001");
+        let epic = a.site.index.dir_path(&a.site.issues, 1);
+        assert!(a.site.board_shut.contains(&epic), "the premise — the closed epic is folded");
+        a.hit("Enter");
+        assert_eq!(a.site.path, epic);
+        assert_eq!(board_card_ids(&a), ["argos-0002"], "the folded epic's own board hid its done member");
+    }
+
+    /// A saved `layout = "board"` is an entry like `SPC g b` — closed groups start folded (review moai-mkzo.8wa).
+    #[test]
+    fn a_saved_board_layout_seeds_the_closed_folds() {
+        let mut a = grouped_for_folding();
+        let look = crate::user_config::Look { layout: Some("board".into()), ..Default::default() };
+        a.adopt_look(&look, Vec::new());
+        assert!(a.board());
+        assert!(a.site.board_shut.contains(&a.site.index.dir_path(&a.site.issues, 1)), "the closed epic started open");
+        assert!(!a.site.board_shut.contains(&a.site.index.dir_path(&a.site.issues, 2)), "an open epic was folded");
+    }
+
+    /// The archive answers are measured once per clock for every row — a reread hands in a fresh `Ground`, and
+    /// answering row by row rebuilt the whole filter per row (review moai-mkzo.8wa).
+    #[test]
+    fn archive_answers_are_measured_once_per_clock() {
+        let mut a = grouped_for_folding();
+        a.adopt(a.site.issues.clone());
+        assert!(!a.site.archived(0));
+        let measured =
+            |a: &App| a.site.ground.archived.borrow().as_ref().map(|(when, rows)| (when.clone(), rows.len()));
+        assert_eq!(measured(&a), Some((a.site.now.clone(), a.site.issues.len())));
+        a.site.now = "2030-01-01T00:00:00Z".into();
+        assert!(!a.site.archived(3), "a running milestone holds the closed epic's member however old it is");
+        assert_eq!(measured(&a), Some(("2030-01-01T00:00:00Z".to_string(), a.site.issues.len())));
+    }
+
+    #[test]
+    fn board_fold_chosen_by_the_person_survives_a_reread() {
+        let mut a = grouped_for_folding();
+        a.hit("SPC g b h");
+        let lane = a.site.index.dir_path(&a.site.issues, 0);
+        assert!(a.site.board_shut.contains(&lane));
+        a.adopt(a.site.issues.clone());
+        assert!(a.site.board_shut.contains(&lane));
+        a.hit("l");
+        assert!(!a.site.board_shut.contains(&lane));
+        a.adopt(a.site.issues.clone());
+        assert!(!a.site.board_shut.contains(&lane));
     }
 
     impl App {
@@ -7011,7 +7608,7 @@ mod tests {
         rest.deferred_at = Some("2026-09-28T00:00:00Z".into());
         let a = App::aging(vec![make("argos-0001", Kind::Epic), finished, rest], cfg(), "2026-09-30T00:00:00Z");
         assert_eq!(a.site.column(0), "done", "시험의 전제 — 남은 멤버를 미뤄 에픽이 닫혔다");
-        assert!(a.site.archived(1), "시험의 전제 — 29일 전에 끝난 멤버는 아카이브다");
+        assert!(!a.site.archived(1), "recently closed epic keeps its older member visible");
         assert!(!a.site.archived(0), "미뤄 닫은 그날 에픽이 아카이브로 숨었다");
         let wh = a.site.ground.here(&a.site.issues);
         assert_eq!(wh.since(&a.site.issues[0]), "2026-09-28T00:00:00Z", "거름망이 끝난 멤버의 때로 쟀다");
@@ -7060,21 +7657,42 @@ mod tests {
         }
     }
 
+    fn board_row(a: &App, id: &str) -> usize {
+        a.rows()
+            .iter()
+            .position(|r| matches!(r, Row::Item(_, e, _) if e.at().is_some_and(|at| a.site.issues[at].id == id)))
+            .unwrap()
+    }
+
+    fn board_card_ids(a: &App) -> Vec<String> {
+        let rows = a.rows();
+        let laid = a.laid(&rows);
+        rows.iter()
+            .zip(&laid.plan.cards)
+            .filter(|(_, slot)| slot.column.is_some())
+            .filter_map(|(r, _)| match r {
+                Row::Item(_, e, _) => e.at().map(|at| a.site.issues[at].id.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
     /// **`SPC g b` 는 같은 줄을 카드로 세운다**(moai-9nfw) — 묶음은 카드가 아니고, 레인(마일스톤 → 바구니) 안에서는
     /// 목록의 차례다. 고른 줄을 그대로 들고 오가며, 보드에서 목록으로 와도 디렉터리는 그대로다.
     #[test]
     fn spc_g_b_lays_the_same_rows_out_as_cards_and_keeps_the_row() {
         let mut a = boarded();
         assert_eq!(a.layout, view::Layout::List);
-        // 뿌리의 목록 — 마일스톤과 바구니 폴더뿐이다. 마일스톤에 서서 보드로 가면 그 밑의 첫 카드다.
+        // 마일스톤 줄은 보드에서 커서가 서는 레인 머리로 이어진다.
         a.hit("SPC g b");
         assert_eq!(a.layout, view::Layout::Board);
         assert_eq!(
-            row_ids(&a),
+            board_card_ids(&a),
             ["argos-0003", "argos-0004", "argos-0007", "argos-0006", "argos-0005"],
             "묶음이 카드로 섰거나 레인·차례가 어긋났다"
         );
-        assert_eq!(on_id(&a), "argos-0003", "마일스톤에서 온 커서가 그 밑의 첫 카드에 안 섰다");
+        assert_eq!(on_id(&a), "argos-0001", "마일스톤에서 온 커서가 레인 머리를 놓쳤다");
+        a.cursor = board_row(&a, "argos-0003");
         assert!(a.rows().iter().all(|r| !matches!(r, Row::Up)), "보드에 `..` 이 섰다");
 
         // 보드 → 목록: 같은 디렉터리에 남고 그 카드를 품은 폴더가 열린다.
@@ -7117,7 +7735,11 @@ mod tests {
         let backlog = a.site.index.find("argos-0006").unwrap();
         assert!(row_ids(&a).contains(&"argos-0006".to_string()), "시험의 전제 — backlog 카드가 섰다");
         a.hit("SPC v b Esc");
-        assert_eq!(row_ids(&a), ["argos-0003", "argos-0004", "argos-0007", "argos-0005"], "backlog 카드가 안 숨었다");
+        assert_eq!(
+            board_card_ids(&a),
+            ["argos-0003", "argos-0004", "argos-0007", "argos-0005"],
+            "backlog 카드가 안 숨었다"
+        );
         let rows = a.rows();
         assert!(!a.laid(&rows).columns.contains(&board::Column::Backlog), "빈 backlog 칸이 보드에 남았다");
         assert!(!a.visible(backlog), "목록에서도 backlog 가 숨어야 한다");
@@ -7125,7 +7747,7 @@ mod tests {
         assert!(text.contains("hide_backlog = true"), "{text}");
 
         search(&mut a, "0006");
-        assert_eq!(row_ids(&a), ["argos-0006"], "검색이 숨긴 backlog 를 못 찾았다");
+        assert_eq!(board_card_ids(&a), ["argos-0006"], "검색이 숨긴 backlog 를 못 찾았다");
         a.hit("Esc");
 
         let mut b = boarded();
@@ -7143,10 +7765,17 @@ mod tests {
         let mut a = boarded();
         a.layout = view::Layout::Board;
         // 칸은 backlog · 미룸 · todo · in_progress · review 다(done 은 바닥이 숨긴다). 0003·0005 가 todo 다.
-        let at = |a: &App, id: &str| row_ids(a).iter().position(|r| r == id).unwrap();
+        let at = board_row;
         a.cursor = at(&a, "argos-0003");
         a.hit("j");
+        assert!(
+            matches!(a.current(), Some(Row::Item(_, Entry::Dir { at: None, .. }, _))),
+            "j must visit the next lane head"
+        );
+        a.hit("j");
         assert_eq!(on_id(&a), "argos-0005", "todo 칸을 레인 건너 내려가지 않았다");
+        a.hit("k");
+        assert!(matches!(a.current(), Some(Row::Item(_, Entry::Dir { at: None, .. }, _))));
         a.hit("k");
         assert_eq!(on_id(&a), "argos-0003");
         a.hit("h");
@@ -7202,7 +7831,7 @@ mod tests {
     fn a_vanished_card_hands_the_cursor_to_its_own_column() {
         // 칸은 backlog · 미룸 · todo · in_progress · review 다. 줄은 0003(todo)·0004(in_progress)·0007(미룸)·0006(backlog)·0005(todo).
         let without = |a: &App, id: &str| a.site.issues.iter().filter(|i| i.id != id).cloned().collect::<Vec<_>>();
-        let at = |a: &App, id: &str| row_ids(a).iter().position(|r| r == id).unwrap();
+        let at = board_row;
         let on_board = |id: &str| {
             let mut a = boarded();
             a.layout = view::Layout::Board;
@@ -7258,7 +7887,7 @@ mod tests {
         ];
         let mut a = App::new(issues, cfg(), Path::new());
         a.layout = view::Layout::Board;
-        a.cursor = row_ids(&a).iter().position(|r| r == "argos-0007").unwrap();
+        a.cursor = board_row(&a, "argos-0007");
         a.hit("SPC v 3 Esc");
         assert!(!row_ids(&a).contains(&"argos-0007".to_string()), "시험의 전제 — review 가 숨었다");
         assert_eq!(on_id(&a), "argos-0008", "숨은 칸이 위 레인을 줄였더니 다른 레인의 카드로 건너갔다");
@@ -7294,7 +7923,7 @@ mod tests {
         let on_board = |id: &str| {
             let mut a = boarded();
             a.layout = view::Layout::Board;
-            a.cursor = row_ids(&a).iter().position(|r| r == id).unwrap();
+            a.cursor = board_row(&a, id);
             a
         };
         let filter = |a: &mut App| {
@@ -7320,7 +7949,7 @@ mod tests {
     fn clearing_a_filter_on_the_board_keeps_to_the_card() {
         let mut a = boarded();
         a.layout = view::Layout::Board;
-        a.cursor = row_ids(&a).iter().position(|r| r == "argos-0006").unwrap();
+        a.cursor = board_row(&a, "argos-0006");
         a.hit("SPC f");
         typed(&mut a, "status=todo");
         assert_eq!(on_id(&a), "argos-0006", "시험의 전제");
@@ -7389,7 +8018,7 @@ mod tests {
     fn cancelling_a_search_after_a_reread_goes_back_to_the_same_card() {
         let mut a = boarded();
         a.layout = view::Layout::Board;
-        a.cursor = row_ids(&a).iter().position(|r| r == "argos-0005").unwrap();
+        a.cursor = board_row(&a, "argos-0005");
         search(&mut a, "제목");
         // 칸이 열린 사이에 옆 세션이 p0 하나를 바구니 레인 맨 앞에 더했다.
         let mut issues = a.site.issues.clone();
@@ -7541,7 +8170,7 @@ mod tests {
             let card = a.laid(&a.rows()).plan.cards[a.cursor];
             a.list.shows(card.top, card.height)
         };
-        a.cursor = row_ids(&a).iter().position(|r| r == "argos-0100").unwrap();
+        a.cursor = board_row(&a, "argos-0100");
         a.hit("Enter");
         a.hit("SPC g b");
         draw(&mut a);
@@ -7795,7 +8424,7 @@ mod tests {
         assert_eq!(row_ids(&a), ["argos-0003", "argos-0004"], "마일스톤 안의 보드가 그 밑의 카드만 안 냈다");
         a.hit("Bksp");
         assert!(a.site.path.is_empty());
-        assert_eq!(on_id(&a), "argos-0003", "나온 마일스톤 밑의 카드에 안 섰다");
+        assert_eq!(on_id(&a), "argos-0001", "마일스톤에서 나오며 레인 머리를 놓쳤다");
     }
 
     /// **보드에서 들어갔다 뿌리로 돌아오면 들어가기 전의 카드에 선다**(moai-9nfw 리뷰) — 보드의 Enter 는 펼친 트리의
@@ -7808,7 +8437,7 @@ mod tests {
         issues.push(make("argos-0004.c1a", Kind::Issue));
         a.adopt(issues);
         a.layout = view::Layout::Board;
-        a.cursor = row_ids(&a).iter().position(|r| r == "argos-0004").unwrap();
+        a.cursor = board_row(&a, "argos-0004");
         a.hit("Enter");
         assert_eq!(a.site.path.len(), 3, "0004 안으로 안 들어갔다 — {:?}", a.site.path);
         a.hit("Bksp");
@@ -8378,7 +9007,7 @@ mod tests {
         let ctx = a.key_ctx(&a.rows());
         assert_eq!(
             keys::Browse::Sort(keys::Order::Created).state(&ctx),
-            Some("[● 거꾸로]"),
+            Some("[● 거꾸로]".into()),
             "메뉴가 고른 차례·방향을 모른다"
         );
         assert_eq!(keys::Browse::Sort(keys::Order::Priority).state(&ctx), None, "고르지 않은 차례에 표시가 붙었다");
@@ -12065,6 +12694,78 @@ mod tests {
         assert_eq!(a.zone.name(), before, "Esc 가 시간대를 바꿨다");
     }
 
+    #[test]
+    fn spc_o_o_writes_archive_days_and_rereads_the_repository() {
+        let s = scratch("archive-days-pick");
+        let mut a = opened(Repo::at(s.path().to_path_buf(), cfg()));
+        a.hit("SPC o o");
+        let Mode::ArchiveDays(p) = &a.mode else { panic!("archive picker did not open") };
+        assert_eq!(p.selected(), Ok(14));
+        a.key(key(KeyCode::Char('3')));
+        a.key(key(KeyCode::Char('0')));
+        a.key(key(KeyCode::Enter));
+        assert!(matches!(a.mode, Mode::Browse));
+        assert_eq!(a.site.cfg.archive_days, 30);
+        assert_eq!(a.site.repo.as_ref().unwrap().config.archive_days, 30);
+        assert_eq!(a.site.ground.archive_days, 30);
+        assert!(std::fs::read_to_string(s.join(".moai/config.toml")).unwrap().contains("archive_days = 30"));
+    }
+
+    #[test]
+    fn archive_days_picker_cancel_same_value_and_failed_write() {
+        let s = scratch("archive-days-cancel");
+        let path = s.join(".moai/config.toml");
+        let original = std::fs::read(&path).unwrap();
+        let mut a = opened(Repo::at(s.path().to_path_buf(), cfg()));
+        a.hit("SPC o o Esc");
+        assert_eq!(std::fs::read(&path).unwrap(), original);
+        a.hit("SPC o o Enter");
+        assert_eq!(std::fs::read(&path).unwrap(), original);
+        std::fs::write(&path, "[broken\n").unwrap();
+        a.hit("SPC o o");
+        a.key(key(KeyCode::Char('3')));
+        a.key(key(KeyCode::Char('0')));
+        a.key(key(KeyCode::Enter));
+        let Mode::ArchiveDays(p) = &a.mode else { panic!("failed write closed the picker") };
+        assert_eq!(p.typed, "30");
+        assert!(p.error.is_some() && a.trouble.is_some());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "[broken\n");
+    }
+
+    #[test]
+    fn archive_days_picker_rejects_out_of_range_and_is_quiet_on_layer() {
+        let s = scratch("archive-days-range");
+        let path = s.join(".moai/config.toml");
+        let original = std::fs::read(&path).unwrap();
+        let mut a = opened(Repo::at(s.path().to_path_buf(), cfg()));
+        a.hit("SPC o o");
+        for c in "3651".chars() {
+            a.key(key(KeyCode::Char(c)));
+        }
+        a.key(key(KeyCode::Enter));
+        assert!(matches!(a.mode, Mode::ArchiveDays(_)));
+        assert_eq!(std::fs::read(&path).unwrap(), original);
+        let mut c = a.key_ctx(&a.rows());
+        c.layer = true;
+        assert_eq!(keys::Browse::ArchiveDays.enabled(&c), Err(keys::Off::Quiet));
+    }
+
+    #[test]
+    fn options_menu_names_archive_days_in_both_languages() {
+        let mut c = app().key_ctx(&[]);
+        c.lang = crate::i18n::Lang::En;
+        c.archive_days = 14;
+        let option = |c: &keys::Ctx| {
+            let seq = keys::parse_seq("SPC o").unwrap();
+            menu::entries(&seq, c, &[]).into_iter().find(|e| e.key == "o").unwrap().text()
+        };
+        assert!(option(&c).contains("[14 days]"));
+        c.lang = crate::i18n::Lang::Ko;
+        assert!(option(&c).contains("[14일]"));
+        c.archive_days = 0;
+        assert!(option(&c).contains("[꺼짐]"));
+    }
+
     /// **규칙 글 시간대에서 글자 없는 Enter 는 아무것도 안 고른다**(moai-pvpb.1yh) — `TZ=JST-9` 는 목록의
     /// 이름이 아니라 커서가 아무 줄도 안 가리킨다. 맨 위에 세워 두던 판은 그 Enter 가 첫 tzdb 이름
     /// (`Africa/Abidjan`)으로 바꾸고 설정에 적었다. 창 밑에는 그렇다고 한 줄 선다.
@@ -12132,10 +12833,10 @@ mod tests {
         a.user_config = Some(user.clone());
         assert!(a.mouse_on, "처음부터 잡고 있어야 한다");
         let state = |a: &App| keys::Browse::Mouse.state(&a.key_ctx(&a.rows()));
-        assert_eq!(state(&a), Some(crate::i18n::say(a.site.lang, "tui.state.on")));
+        assert_eq!(state(&a), Some(crate::i18n::say(a.site.lang, "tui.state.on").into()));
         a.hit("SPC o m");
         assert!(!a.mouse_on, "SPC o m 이 마우스를 안 놓았다");
-        assert_eq!(state(&a), Some(crate::i18n::say(a.site.lang, "tui.state.off")));
+        assert_eq!(state(&a), Some(crate::i18n::say(a.site.lang, "tui.state.off").into()));
         assert!(menu::open(&a.chord), "상태를 대는 항목인데 메뉴가 닫혔다");
         a.hit("Esc");
         let text = std::fs::read_to_string(&user).expect("마우스가 설정에 안 적혔다");
@@ -12284,7 +12985,7 @@ mod tests {
         a.hit("SPC s S Esc");
         assert_eq!(a.order, Sorting::of(&[up(Order::Column).flipped(), up(Order::Title).flipped()]).unwrap());
         let ctx = a.key_ctx(&a.rows());
-        assert_eq!(keys::Browse::SortAdd(Order::Title).state(&ctx), Some("[● ↓ 내림]"));
+        assert_eq!(keys::Browse::SortAdd(Order::Title).state(&ctx), Some("[● ↓ 내림]".into()));
         assert_eq!(keys::Browse::SortAdd(Order::Created).state(&ctx), None, "차례에 없는 필드에 표시가 붙었다");
         assert_eq!(
             keys::Browse::Sort(Order::Column).state(&ctx),
@@ -13468,6 +14169,63 @@ mod tests {
         );
         assert_eq!(load.issues.len(), 4);
         assert_eq!(load.errors.len(), 1, "섞은 줄이 아카이브의 못 읽는 줄을 잃었다");
+    }
+
+    #[test]
+    fn a_stored_row_stays_hidden_when_archive_days_grows() {
+        let s = scratch("stored-source");
+        let root = s.path();
+        let mut old = make("argos-a001", Kind::Issue);
+        old.status = Status::new("done");
+        old.status_since = "2020-01-01T00:00:00Z".into();
+        crate::archive::append(root, std::slice::from_ref(&old), &cfg()).unwrap();
+        let mut live = make("argos-a002", Kind::Issue);
+        live.status = Status::new("done");
+        live.status_since = old.status_since.clone();
+        std::fs::write(root.join(".moai/issues.jsonl"), format!("{}\n", serde_json::to_string(&live).unwrap()))
+            .unwrap();
+        let mut c = cfg();
+        c.archive_days = 100_000;
+        let repo = Repo::at(root.to_path_buf(), c);
+        let stamp = stamp_of(&repo);
+        let now = crate::model::now();
+        let Beside { load, counted, index, ground } =
+            counted_beside(&repo, repo.read().unwrap(), None, &Default::default(), true, &now).unwrap();
+        let mut a = App::open_counted(repo, load, index, ground, Path::new(), stamp, counted);
+        let archived = a.site.issues.iter().position(|i| i.id == old.id).unwrap();
+        let active = a.site.issues.iter().position(|i| i.id == live.id).unwrap();
+        assert!(a.site.archived(archived));
+        assert!(!a.site.archived(active));
+        assert_eq!(a.site.archive_file(archived), Some(false));
+        assert_eq!(a.site.archive_file(active), None);
+        let wh = a.site.ground.here(&a.site.issues);
+        assert!(wh.archived(&a.site.issues[archived], &a.site.now));
+        a.site.ground.archive_days = 0;
+        a.site.now = "2030-01-01T00:00:00Z".into();
+        assert!(a.site.archived(archived), "archive_days off must keep a stored row hidden");
+        assert!(!a.site.archived(active));
+    }
+
+    #[test]
+    fn an_archive_copy_of_a_live_id_stays_hidden() {
+        let s = scratch("archive-copy-source");
+        let root = s.path();
+        let mut old = make("argos-a001", Kind::Issue);
+        old.status = Status::new("done");
+        crate::archive::append(root, std::slice::from_ref(&old), &cfg()).unwrap();
+        let live = make("argos-a001", Kind::Issue);
+        std::fs::write(root.join(".moai/issues.jsonl"), format!("{}\n", serde_json::to_string(&live).unwrap()))
+            .unwrap();
+        let repo = Repo::at(root.to_path_buf(), cfg());
+        let stamp = stamp_of(&repo);
+        let now = crate::model::now();
+        let Beside { load, counted, index, ground } =
+            counted_beside(&repo, repo.read().unwrap(), None, &Default::default(), true, &now).unwrap();
+        let a = App::open_counted(repo, load, index, ground, Path::new(), stamp, counted);
+        assert_eq!(a.site.issues.len(), 2);
+        assert_eq!(a.site.archive_file(0), Some(true));
+        assert!(a.site.archived(0));
+        assert!(!a.site.archived(1));
     }
 
     /// **아카이브로 옮긴 미룬 에픽도 산 멤버를 미룬 것으로 세운다**(moai-ug6x.cpq) — 보드의 셈(`report` 의

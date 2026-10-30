@@ -358,6 +358,10 @@ mark.m-mark { background: var(--warn-soft); color: inherit; border-radius: 2px; 
    numbers, so a change here goes there too. */
 .m-board-wrap { --board-gap: 6px; --board-lane-gap: 4px; padding: var(--board-gap); }
 .m-swim-head { display: flex; align-items: center; gap: 6px; padding: 8px 2px 6px; font: 600 12px var(--font); }
+.m-swim-head[aria-selected="true"] { outline: 1px solid var(--accent); border-radius: 4px; }
+.m-swim-head[aria-selected="true"]::before { content: '›'; font-weight: 800; }
+.m-swim-title { border: 0; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.m-swim-title:hover { text-decoration: underline; }
 .m-swim-head .m-count { color: var(--muted); font: 11px var(--mono); }
 .m-swim-head:first-child { padding-top: 2px; }
 .m-board { display: flex; gap: var(--board-lane-gap); min-height: 0; }

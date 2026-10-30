@@ -12,6 +12,23 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+## [0.37.0] - 2026-10-30
+
+### Added
+
+- Explorer `SPC o o` chooses the archive retention and writes `archive_days` to the shared repository configuration. (moai-mkzo.mgn)
+- Explorer board lane headers can be selected and folded; closed milestone lanes and epic cards start folded. (moai-mkzo.65c)
+- Web list and Gantt fold closed groups by default, and web board milestone lanes and closed epic cards can be folded; lane titles select the milestone detail. (moai-mkzo.8db)
+
+### Changed
+
+- Explorer list `Tab` and Gantt entry leave closed epics and milestones folded; opening one keeps it visible while reading. (moai-mkzo.fck)
+- Archive hiding and `moai archive` now wait for a row's parent, epic and milestone to reach archive age before removing the row from the active view or snapshot. (moai-mkzo.pji)
+
+### Fixed
+
+- Explorer rows already moved to archive storage stay hidden when `archive_days` changes; archive view detail identifies file rows and copies. (moai-mkzo.6mw, moai-7ggk)
+
 ## [0.36.0] - 2026-10-30
 
 ### Changed

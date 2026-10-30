@@ -45,7 +45,7 @@ The page has four tabs.
 
 | Tab | Shows | Switch |
 |---|---|---|
-| **Board** | A kanban: one column per status, with backlog and deferred columns and one lane per [milestone](glossary.md#milestone) | `SPC g b` |
+| **Board** | A kanban: one column per status, with backlog and deferred columns and one lane per [milestone](glossary.md#milestone). Closed milestone lanes and epic cards start folded. Select a lane title to see its milestone detail; use its chevron to fold or open it. | `SPC g b` |
 | **List** | The tree of milestones, [epics](glossary.md#epic) and issues, which you step into and fold | `SPC g l` |
 | **Gantt** | The tree beside a date axis: when each row was planned and when it actually ran | `SPC g g` |
 | **Wiki** | The pages of this wiki: the page list on one side, the page on the other | `SPC g w` |
@@ -114,7 +114,7 @@ Other tabs read the same tree without calculating the chart values.
 |---|---|
 | `j` `k`, click | Move the cursor; a click on a row or bar opens its detail |
 | `h` `l` / `←` `→`, group chevron | Fold / open a group; `h` on a member folds its parent and moves there |
-| `Tab` | Fold / open the whole subtree under the cursor |
+| `Tab` | Fold / open the subtree under the cursor, preserving closed descendants you opened by hand |
 | `H` `L`, Shift+wheel, drag the date header | Move the dates |
 | `-` `=`, the zoom buttons, Ctrl+wheel over the dates | Hour / day / week / month |
 | `t` / `z` | Jump to today / fit every drawn row |
@@ -124,7 +124,8 @@ Other tabs read the same tree without calculating the chart values.
 | drag a bar's right end, or a milestone `◆` | Move only the deadline |
 | double-click a day on a row with no days | Plan that one day as its start and deadline |
 
-Gantt folds belong to that visit: leaving and returning opens every group again.
+Gantt folds belong to that visit: closed groups start folded, and leaving and
+returning restores those folds. A group you open stays open through a reread.
 The list keeps its own expansion state. A closed group keeps its rollup bar.
 
 A bar moves by whole days and is written once, when you let go — the same write as
@@ -324,8 +325,12 @@ once and the keys reach it.
 |---|---|
 | `Enter` | Step into a group; on an issue, focus the detail |
 | `Backspace` | Step out one level |
-| `l` `Right` / `h` `Left` | Unfold / fold (board: column to the right / left) |
+| `l` `Right` / `h` `Left` | Unfold / fold (board: on a lane title, open / fold the lane; on a card, column to the right / left) |
 | `Tab` | Unfold / fold everything under the group (list) |
+
+In the list, `Tab` leaves closed descendant epics and milestones folded;
+`Tab` on one of those groups opens that group. The board leaves `Tab` to the
+browser's focus order; its chevrons fold lanes and closed epic cards.
 
 **Panes and tabs**
 
@@ -392,4 +397,4 @@ once and the keys reach it.
 The page does not show the stats screen, and what it writes is a Gantt bar's days
 and your read marks.
 
-Decided in: moai-skjr, moai-e9hi, moai-8r2l, moai-0aa7, moai-jshy, moai-d86e.3ud, moai-ijjd, moai-lj8g, moai-ekg6
+Decided in: moai-skjr, moai-e9hi, moai-8r2l, moai-0aa7, moai-jshy, moai-d86e.3ud, moai-ijjd, moai-lj8g, moai-ekg6 moai-mkzo

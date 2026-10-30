@@ -1,8 +1,8 @@
-//! 간트 배치 — `SPC g g`(moai-i4hf). 목록을 **모두 펼친 채** 왼쪽에 고정하고, 오른쪽에 날짜 축과 막대를 둔다.
+//! 간트 배치 — `SPC g g`(moai-i4hf). 닫힌 묶음을 접은 목록을 왼쪽에 고정하고, 오른쪽에 날짜 축과 막대를 둔다.
 //!
 //! **새 창이 아니라 목록의 배치다**([`super::view::Layout::Gantt`]). 줄은 목록과 같은 몸(`App::rows_in`)이 세우고,
 //! 커서·거름망·보기·검색·상세가 한 벌이라 `SPC g l` ↔ `SPC g g` 를 오가도 자리를 잃지 않는다. 다른 것은 펼침
-//! 하나다 — 간트는 접은 자리(`Site::gantt_shut`)를 따로 들어, 들어갈 때 모두 펼치고 목록의 접기는 그대로 둔다.
+//! 하나다 — 간트는 접은 자리(`Site::gantt_shut`)를 따로 들어, 들어갈 때 닫힌 묶음을 접고 목록의 접기는 그대로 둔다.
 //!
 //! **날짜를 판단하지 않는다.** 계획이 어디서 왔는지, 시작을 아는지, 늦었는지는 [`crate::report::gantt`] 가 정하고,
 //! 여기는 그 값을 위젯의 줄([`moai_gantt::GanttRow`])로 옮기기만 한다 — 날짜를 지역 기준 초로, 칸을 색 칸으로.
@@ -255,18 +255,22 @@ pub(super) struct Chart {
 impl App {
     /// 그 묶음이 지금 배치에서 펼쳐져 있는가 — 검색이 저절로 연 것은 따로 센다(`App::searched_open`).
     pub(super) fn opened(&self, site: &Site, path: &Path) -> bool {
-        if self.gantt() { !site.gantt_shut.contains(path) } else { site.expanded.contains(path) }
+        if self.gantt() {
+            !site.gantt_shut.contains(path)
+        } else if self.board() {
+            !site.board_shut.contains(path)
+        } else {
+            site.expanded.contains(path)
+        }
     }
 
-    /// 간트로 들어간다 — **모두 펼친다**. 지금 프로젝트와 한눈 보기에 이미 읽은 프로젝트 모두의 접은 자리를
-    /// 걷는다. 목록의 펼침(`expanded`)은 안 건드린다 — 목록으로 돌아오면 접어 둔 그대로 선다.
+    /// Enter Gantt with closed epics and milestones folded. A selected row's
+    /// ancestors stay open. List expansion remains independent. The layout switch seeds with the rows it already
+    /// holds ([`App::seed_folds`]); tests enter through this.
+    #[cfg(test)]
     pub(super) fn open_gantt(&mut self) {
-        self.site.gantt_shut.clear();
-        if let Some(layer) = self.layer.as_mut() {
-            for site in layer.places.iter_mut().filter_map(|p| p.site.as_mut()) {
-                site.gantt_shut.clear();
-            }
-        }
+        let rows = self.rows();
+        self.seed_folds(&rows, true);
     }
 
     /// 이 자리에 그릴 보기 상태(moai-i4hf.25n) — 사람이 고른 것(`App::chart`)을 창에 맞춘다. **그리기·키·마우스가 이
@@ -1519,7 +1523,8 @@ mod tests {
         ids(a).get(a.cursor).cloned().unwrap_or_default()
     }
 
-    /// **`SPC g g` 는 모두 펼친 채로 서고, 목록의 접기는 건드리지 않는다**(moai-i4hf.sas). 간트 안의 `h`·`l`·`Tab` 은
+    /// **`SPC g g` 는 열린 묶음을 모두 펼친 채로 서고, 목록의 접기는 건드리지 않는다**(moai-i4hf.sas). 닫힌 묶음이
+    /// 접혀 서는 것은 `gantt_enters_with_closed_epics_folded_and_keeps_manual_opening` 이 본다. 간트 안의 `h`·`l`·`Tab` 은
     /// 간트의 펼침만 바꾼다 — 목록으로 돌아오면 접어 둔 그대로다.
     #[test]
     fn spc_g_g_opens_everything_and_leaves_the_list_folds_alone() {

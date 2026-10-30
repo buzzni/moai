@@ -143,13 +143,13 @@ pub struct Entry {
     /// 동작의 낱말, 하위 접두어면 `+이름`(doom which-key 의 모양 — moai-apsa).
     pub what: String,
     /// 켜고 끄는 것의 지금 상태(`[켜짐]`·`[원문]`).
-    pub state: Option<&'static str>,
+    pub state: Option<String>,
 }
 
 impl Entry {
     /// 칸의 설명 — 낱말 뒤에 상태. **상태는 글자로 선다** — 색이 혼자 뜻을 지지 않는다.
     pub fn text(&self) -> String {
-        match self.state {
+        match &self.state {
             Some(st) => format!("{} {st}", self.what),
             None => self.what.clone(),
         }
@@ -192,7 +192,12 @@ pub fn entries(held: &[KeyEvent], c: &Ctx, columns: &[String]) -> Vec<Entry> {
             }
             Lookup::Pending if live(&seq, c) => {
                 let what = format!("+{}", group(&seq, c.lang));
-                out.push(Entry { key: name_of_key(next.event()), event: next.event(), what, state: here(&seq, c) });
+                out.push(Entry {
+                    key: name_of_key(next.event()),
+                    event: next.event(),
+                    what,
+                    state: here(&seq, c).map(str::to_string),
+                });
             }
             _ => {}
         }
@@ -879,21 +884,18 @@ mod tests {
     #[test]
     fn toggles_show_their_state_in_words() {
         // 화면의 꼴 셋(상세 칸·워크트리·원문)만 본다 — 줄 보기(done·미룸)는 위 시험이 본다.
-        let states = |c: Ctx| -> Vec<Option<&'static str>> {
+        let states = |c: Ctx| -> Vec<String> {
             entries(&[k(' '), k('v')], &c, &[])
-                .iter()
+                .into_iter()
                 .filter(|e| ["d", "w", "r"].contains(&e.key.as_str()))
-                .map(|e| e.state)
+                .map(|e| e.state.unwrap_or_default())
                 .collect()
         };
-        assert_eq!(states(inside()), [Some("[보임]"), Some("[꺼짐]"), Some("[그리기]")]);
-        assert_eq!(
-            states(Ctx { worktree: true, raw: true, ..inside() }),
-            [Some("[보임]"), Some("[켜짐]"), Some("[원문]")]
-        );
+        assert_eq!(states(inside()), ["[보임]", "[꺼짐]", "[그리기]"]);
+        assert_eq!(states(Ctx { worktree: true, raw: true, ..inside() }), ["[보임]", "[켜짐]", "[원문]"]);
         // **상세를 숨기면 원문↔그리기가 빠진다** — 그 키는 상세의 글에만 걸려, 서 있어 봐야
         // 눌러도 화면이 그대로다(moai-ymnu 리뷰).
-        assert_eq!(states(Ctx { detail: false, ..inside() }), [Some("[숨김]"), Some("[꺼짐]")]);
+        assert_eq!(states(Ctx { detail: false, ..inside() }), ["[숨김]", "[꺼짐]"]);
         assert_eq!(
             keys_of(&entries(&[k(' '), k('v')], &Ctx { detail: false, ..inside() }, &[])),
             ["l", "b", "o", "a", "d", "w"]

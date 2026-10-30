@@ -97,6 +97,8 @@ pub struct Lane {
     /// 맨 위에 레인 머리줄(마일스톤의 이름) 한 줄이 서는가. **레인마다 다르다**(moai-oagj.vcj) — 한눈 보기에서는
     /// 마일스톤을 쓰는 프로젝트의 레인에만 서고, 프로젝트 머리줄의 레인에는 안 선다.
     pub head: bool,
+    /// Cursor-addressable banner rows in this lane, before its card columns.
+    pub banner: usize,
 }
 
 /// 보드 한 장의 배치 — 줄마다 선 자리와 레인의 자리. **키와 그림이 이 하나를 읽는다**: 둘이 저마다 재면
@@ -135,8 +137,10 @@ impl Plan {
         let mut top = 0;
         for (n, counts) in stack.iter().enumerate() {
             let head = heads.get(n).copied().unwrap_or(false);
-            let height = usize::from(head) + counts.iter().map(|&(_, lines)| lines).max().unwrap_or(0);
-            lanes.push(Lane { top, height, head });
+            let banner = counts[columns].1;
+            let cards = counts[..columns].iter().map(|&(_, lines)| lines).max().unwrap_or(0);
+            let height = usize::from(head) + banner + cards;
+            lanes.push(Lane { top, height, head, banner });
             top += height;
         }
         let cards = slots
@@ -148,7 +152,7 @@ impl Plan {
                     lane: s.lane,
                     column: s.column,
                     nth,
-                    top: lane.top + usize::from(lane.head) + lines,
+                    top: lane.top + usize::from(lane.head) + if s.column.is_some() { lane.banner } else { 0 } + lines,
                     height: s.height,
                     group: s.group,
                 }
@@ -188,7 +192,11 @@ impl Plan {
     /// 머리줄만 가린 카드로 `k` 를 눌러도 화면이 한 줄 되돌아간다.
     pub fn span(&self, n: usize) -> Option<(usize, usize)> {
         let p = self.cards.get(n)?;
-        let lead = usize::from(self.lanes.get(p.lane).is_some_and(|l| l.head) && p.nth == 0);
+        let lead = if p.column.is_some() && p.nth == 0 {
+            self.lanes.get(p.lane).map_or(0, |l| usize::from(l.head) + l.banner)
+        } else {
+            0
+        };
         Some((p.top - lead, p.height + lead))
     }
 
@@ -420,13 +428,27 @@ mod tests {
         let p = Plan::of(&slots, 3, &[true, true]);
         assert_eq!(
             p.lanes,
-            [Lane { top: 0, height: 1 + 2 * 2, head: true }, Lane { top: 5, height: 1 + 2, head: true }]
+            [
+                Lane { top: 0, height: 1 + 2 * 2, head: true, banner: 0 },
+                Lane { top: 5, height: 1 + 2, head: true, banner: 0 }
+            ]
         );
         assert_eq!(p.cards.iter().map(|c| (c.nth, c.top)).collect::<Vec<_>>(), [(0, 1), (1, 3), (0, 1), (0, 6)]);
         assert_eq!(p.height, 8);
         assert_eq!((p.count(0), p.count(1), p.count(2)), (1, 2, 1));
         // 머리줄이 없으면 그 한 줄이 안 든다.
         assert_eq!(Plan::of(&slots[..3], 3, &[]).cards[1].top, 2);
+    }
+
+    #[test]
+    fn a_lane_head_row_is_a_banner_slot_without_a_second_decoration() {
+        let slots = [Slot { lane: 0, column: None, height: 1, group: 0 }, slot(0, 0), slot(0, 1)];
+        let p = Plan::of(&slots, 2, &[false]);
+        assert_eq!(p.lanes, [Lane { top: 0, height: 3, head: false, banner: 1 }]);
+        assert_eq!(p.cards.iter().map(|c| c.top).collect::<Vec<_>>(), [0, 1, 1]);
+        assert_eq!(p.span(1), Some((0, 3)), "first card must reveal its lane banner");
+        assert_eq!(p.count(0), 1);
+        assert_eq!(p.count(1), 1);
     }
 
     /// **카드의 높이는 저마다다**(moai-oagj.y88) — 발줄을 단 카드 밑의 카드는 그만큼 내려서고, 레인은 장 수가 아니라
@@ -443,7 +465,10 @@ mod tests {
         );
         assert_eq!(
             p.lanes,
-            [Lane { top: 0, height: 1 + 3 + 2, head: true }, Lane { top: 6, height: 1 + 2, head: true }]
+            [
+                Lane { top: 0, height: 1 + 3 + 2, head: true, banner: 0 },
+                Lane { top: 6, height: 1 + 2, head: true, banner: 0 }
+            ]
         );
         // 옆 칸으로 옮기는 자는 줄로 잰 높이다 — 칸 1 의 둘째 카드(윗줄 3)에서 왼쪽은 윗줄 4 의 카드다.
         assert_eq!(step(&p, 3, Go::Side(Side::Left)), 1);
