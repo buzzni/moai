@@ -264,7 +264,7 @@ impl App {
         }
     }
 
-    /// Enter Gantt with closed epics and milestones folded. A selected row's
+    /// Enter Gantt with closed milestones folded. A selected row's
     /// ancestors stay open. List expansion remains independent. The layout switch seeds with the rows it already
     /// holds ([`App::seed_folds`]); tests enter through this.
     #[cfg(test)]
@@ -1523,8 +1523,9 @@ mod tests {
         ids(a).get(a.cursor).cloned().unwrap_or_default()
     }
 
-    /// **`SPC g g` 는 열린 묶음을 모두 펼친 채로 서고, 목록의 접기는 건드리지 않는다**(moai-i4hf.sas). 닫힌 묶음이
-    /// 접혀 서는 것은 `gantt_enters_with_closed_epics_folded_and_keeps_manual_opening` 이 본다. 간트 안의 `h`·`l`·`Tab` 은
+    /// **`SPC g g` 는 열린 묶음을 모두 펼친 채로 서고, 목록의 접기는 건드리지 않는다**(moai-i4hf.sas). 닫힌 에픽도
+    /// 열린 채 서는 것은 `gantt_enters_with_closed_epics_open_and_keeps_manual_folding` 이, 닫힌 마일스톤만 접혀 서는
+    /// 것은 `gantt_keeps_a_closed_milestone_holding_the_selected_row_open` 이 본다(moai-i07x). 간트 안의 `h`·`l`·`Tab` 은
     /// 간트의 펼침만 바꾼다 — 목록으로 돌아오면 접어 둔 그대로다.
     #[test]
     fn spc_g_g_opens_everything_and_leaves_the_list_folds_alone() {

@@ -78,26 +78,31 @@
   --ok-soft: color-mix(in srgb, #10B981 12%, var(--bg));
   --warn-soft: color-mix(in srgb, var(--warn) 12%, var(--bg));
   --border-soft: color-mix(in srgb, var(--border) 65%, transparent);
+  --todo: color-mix(in srgb, #3b82f6 70%, var(--text));
   --review: color-mix(in srgb, #a855f7 70%, var(--text));
-  /* A list or Gantt row in progress, review or done: paler than --warn-soft, so a list search mark still shows on it. */
+  /* List and Gantt column tints stay pale enough for a search mark to show on top. Todo is fainter still: the
+     selected row's --selected is the same blue hue, and it must stay distinct from a todo row. */
+  --todo-soft: color-mix(in srgb, #3b82f6 2%, var(--bg));
   --progress-soft: color-mix(in srgb, #F2B01E 7%, var(--bg));
   --review-soft: color-mix(in srgb, #a855f7 8%, var(--bg));
   --done-soft: color-mix(in srgb, #10B981 7%, var(--bg));
   /* A narrow card band mixes into the card, which is --surface in the dark theme. */
+  --todo-band: color-mix(in srgb, #3b82f6 10%, var(--card-bg));
   --progress-band: color-mix(in srgb, #F2B01E 10%, var(--card-bg));
   --review-band: color-mix(in srgb, #a855f7 12%, var(--card-bg));
   --done-band: color-mix(in srgb, #10B981 10%, var(--card-bg));
+  --todo-edge: color-mix(in srgb, #3b82f6 42%, var(--card-bg));
   --progress-edge: color-mix(in srgb, #F2B01E 42%, var(--card-bg));
   --review-edge: color-mix(in srgb, #a855f7 48%, var(--card-bg));
   --done-edge: color-mix(in srgb, #10B981 42%, var(--card-bg));
   --epic: color-mix(in srgb, var(--accent) 70%, var(--muted));
 }
 
-/* Keep a selected done row distinct, and the done band on a dark card pale. */
+/* Keep selected rows distinct, and the todo and done bands on dark cards pale. */
 @media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) { --done-soft: color-mix(in srgb, #10B981 3%, var(--bg)); --done-band: color-mix(in srgb, #10B981 5%, var(--card-bg)); }
+  :root:not([data-theme="light"]) { --todo-soft: color-mix(in srgb, #3b82f6 3%, var(--bg)); --todo-band: color-mix(in srgb, #3b82f6 5%, var(--card-bg)); --done-soft: color-mix(in srgb, #10B981 3%, var(--bg)); --done-band: color-mix(in srgb, #10B981 5%, var(--card-bg)); }
 }
-:root[data-theme="dark"] { --done-soft: color-mix(in srgb, #10B981 3%, var(--bg)); --done-band: color-mix(in srgb, #10B981 5%, var(--card-bg)); }
+:root[data-theme="dark"] { --todo-soft: color-mix(in srgb, #3b82f6 3%, var(--bg)); --todo-band: color-mix(in srgb, #3b82f6 5%, var(--card-bg)); --done-soft: color-mix(in srgb, #10B981 3%, var(--bg)); --done-band: color-mix(in srgb, #10B981 5%, var(--card-bg)); }
 
 /* Base. */
 * { box-sizing: border-box; }

@@ -146,7 +146,7 @@ const mount = (state, rows = ROWS) => {
   return { root, view, chosen, dom, index }
 }
 
-test('closed milestone lanes and epic cards fold; the running lane and deferred member remain', () => {
+test('closed milestone lanes fold while epic members remain ordinary cards', () => {
   const rows = [
     { id: 'm1', kind: 'milestone', title: 'Closed release', status: 'todo', derived_status: 'done' },
     { id: 'e1', kind: 'epic', title: 'Closed epic', milestone: 'm1', status: 'todo', derived_status: 'done' },
@@ -167,16 +167,15 @@ test('closed milestone lanes and epic cards fold; the running lane and deferred 
   assert.ok(root.querySelector('[data-id="w1"]'))
   head('m1').querySelector('.moai-toggle').click()
   assert.equal(head('m1').querySelector('.moai-toggle').getAttribute('aria-expanded'), 'true')
-  assert.ok(root.querySelector('.m-lane[data-status="done"] [data-id="e1"]'))
-  assert.equal(root.querySelector('[data-id="e1.a"]'), null)
-  assert.ok(root.querySelector('.m-lane[data-status="deferred"] [data-id="e1.b"]'))
-  root.querySelector('[data-id="e1"] .moai-toggle').click()
+  assert.equal(root.querySelector('[data-id="e1"]'), null)
   assert.ok(root.querySelector('.m-lane[data-status="done"] [data-id="e1.a"]'))
+  assert.ok(root.querySelector('.m-lane[data-status="deferred"] [data-id="e1.b"]'))
+  assert.equal(root.querySelector('.m-card .moai-toggle'), null, 'card toggles must not return')
   view.render(state, index)
   assert.ok(root.querySelector('[data-id="e1.a"]'), 'a reread of the view keeps the chosen fold')
   view.leave()
   view.render(state, index)
-  assert.equal(head('m1').querySelector('.moai-toggle').getAttribute('aria-expanded'), 'false', 'a new visit seeds closed groups again')
+  assert.equal(head('m1').querySelector('.moai-toggle').getAttribute('aria-expanded'), 'false', 'a new visit seeds closed milestone lanes again')
   const selectedHead = mount({ ...state, cursor: 'm1' }, rows)
   assert.equal(selectedHead.root.querySelector('.m-swim-head[data-lane="m:m1"] .moai-toggle').getAttribute('aria-expanded'), 'false', 'selecting the head does not open its lane')
 })
@@ -226,7 +225,7 @@ test('folding another lane leaves a selected lane head where it is (review moai-
   assert.deepEqual(chosen, [], 'folding m2 moved a cursor that stood outside it')
 })
 
-test('inside a folded closed epic its done members stay cards (review moai-mkzo.8wa)', () => {
+test('inside a closed epic its done members remain cards', () => {
   const rows = [
     { id: 'm1', kind: 'milestone', derived_status: 'done' },
     { id: 'e1', kind: 'epic', milestone: 'm1', derived_status: 'done' },
@@ -239,7 +238,7 @@ test('inside a folded closed epic its done members stay cards (review moai-mkzo.
   assert.deepEqual(inside.lanes[0].columns.find((column) => column.key === 'done').cards.map((at) => idx.rows[at].id), ['e1.a'])
 })
 
-test('search reveals a done member inside folded lane and epic without changing the fold', () => {
+test('search reveals a done member inside a folded lane without changing the fold', () => {
   const rows = [
     { id: 'm1', kind: 'milestone', derived_status: 'done' },
     { id: 'e1', kind: 'epic', milestone: 'm1', derived_status: 'done' },
@@ -270,7 +269,7 @@ test('board bands follow rendered lanes and the card head, including a selected 
   const bandSelector = '.m-card > .m-card-line:first-child'
   assert.match(css, /\.m-card > \.m-card-line:first-child\s*\{[^}]*background: var\(--band, transparent\);[^}]*border-bottom: 1px solid var\(--edge, transparent\)/s)
   assert.match(css, /\.m-card\[aria-selected="true"\] > \.m-card-line:first-child\s*\{[^}]*border-top: 1px solid var\(--accent\);[^}]*border-left: 1px solid var\(--accent\);[^}]*border-right: 1px solid var\(--accent\)/s)
-  for (const [status, token] of [['in_progress', 'progress'], ['review', 'review'], ['done', 'done']]) {
+  for (const [status, token] of [['todo', 'todo'], ['in_progress', 'progress'], ['review', 'review'], ['done', 'done']]) {
     const card = root.querySelector(`.m-lane[data-status="${status}"] .m-card[data-id="${token}"]`)
     assert.ok(card, `${status} card is in its rendered lane`)
     assert.ok(card.querySelector(bandSelector), `${status} card has a first-line band`)
@@ -282,9 +281,10 @@ test('board bands follow rendered lanes and the card head, including a selected 
   }
   // The dark done band stays pale in both dark blocks (OS dark and data-theme="dark"), as --done-soft does.
   assert.equal(tokens.match(/--done-band: color-mix\(in srgb, #10B981 5%, var\(--card-bg\)\)/g)?.length, 2)
+  assert.equal(tokens.match(/--todo-band: color-mix\(in srgb, #3b82f6 5%, var\(--card-bg\)\)/g)?.length, 2)
   assert.equal(root.querySelector('[data-id="progress"]').getAttribute('aria-selected'), 'true')
   assert.ok(root.querySelector('.m-lane[data-status="deferred"] [data-id="shelved"]'))
-  for (const status of ['todo', 'backlog', 'deferred']) {
+  for (const status of ['backlog', 'deferred']) {
     assert.doesNotMatch(css, new RegExp(`\\.m-lane\\[data-status="${status}"\\] \\{ --band:`))
   }
 })

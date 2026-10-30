@@ -2676,8 +2676,8 @@ Order:
   and lands on the parent; with nothing to fold it leaves one level. On a
   project header row, l and the right arrow unfold and h and the left arrow
   fold. Tab unfolds everything under it recursively and folds it again on a
-  second press. Closed epics and milestones below that row stay folded; press
-  l or Tab on one to open it. Unfolded members
+  second press. Closed milestones below that row stay folded; epics open with
+  other descendants. Press l or Tab on a milestone to open it. Unfolded members
   stand with branch marks in the title column,
   and that unfolding is not kept in the config. gg and Home go to the top,
   G and End to the bottom. Ctrl-d and Ctrl-u scroll half a page, Ctrl-f and
@@ -2853,14 +2853,14 @@ Order:
   At the project root every milestone is a lane, with (no milestone) last;
   inside a milestone or an epic there is one lane. The lane header takes the
   cursor, shows its detail, and Enter opens that milestone. Closed milestone
-  lanes and closed epic cards start folded. On a lane header, h
+  lanes start folded. On a lane header, h
   folds, l opens, and Tab flips it; click
-  its arrow to flip it. The closed epic is one card in done; Tab
-  or its arrow shows done members below. Other members keep their columns.
+  its arrow to flip it. Epics are not cards; their members stand in
+  their own columns.
   Each ordinary card is two lines, its id, column and priority over its title,
   and the cursor's card is marked and drawn reversed. Cards Enter can go
   into end their title with /, as in the list. The foot, a third line,
-  stands while SPC c has tag, epic, assignee or a date on; open epics appear in
+  stands while SPC c has tag, epic, assignee or a date on; epics appear in
   the board only as the name in that foot (SPC c e). Cards that are not yours
   grow that foot anyway and say whose they are, dimmed — → name, or unowned —
   in the assignee's place; your own cards stay two lines. Whose is decided the
@@ -2868,8 +2868,8 @@ Order:
   apart. On a narrow card the tags and the epic name shrink, longest first, so
   whose it is and the dates still show. j and k move within the
   column, h and l go to the next column at the nearest height, gg and G go to
-  the column's ends, Enter and Bksp go in and out as in the list, and Tab
-  flips a closed epic card. The board scrolls as one; column names stay on top.
+  the column's ends, Enter and Bksp go in and out as in the list. On a card,
+  Tab does nothing. The board scrolls as one; column names stay on top.
   When the columns do not fit, the column the cursor stands in always stands
   and the frame title names the rest with their counts. Clicking a card puts
   the cursor on it. The wheel, Ctrl-d and Ctrl-u, Ctrl-f and Ctrl-b, and
@@ -2886,8 +2886,8 @@ Order:
   SPC g g lays the same rows out as a gantt chart: the list, with open groups
   out, stays fixed on the left and a date axis with bars stands on the right.
   It is the list's layout too — the cursor, the filter, the view, search and
-  the detail are the list's — but it holds its own folds: closed epics and
-  milestones start folded, except those holding the selected row.
+  the detail are the list's — but it holds its own folds: closed milestones
+  start folded, except those holding the selected row. Epics start open.
   h, l and Tab fold and unfold only inside it,
   and the list keeps the folds it had. Coming back to the list opens the
   folder that holds the row you stood on. The detail stands below the gantt at

@@ -222,6 +222,12 @@ export function rangeOf(spans: ReadonlyArray<[number, number] | null>, now: numb
   return [floorDay(lo) - 7 * DAY, floorDay(hi) + 8 * DAY]
 }
 
+/** Extend only the right edge so a short span still fills the visible dates, plus one day of scrollable margin. */
+export function fillRange(range: [number, number], zoom: Zoom, viewPx: number): [number, number] {
+  const days = Math.ceil(Math.max(0, viewPx) / PX_PER_DAY[zoom]) + 1
+  return [range[0], Math.max(range[1], range[0] + days * DAY)]
+}
+
 /** The range the lines' own dates cover, for the fit: null when no line has a date. */
 export function fitSpan(spans: ReadonlyArray<[number, number] | null>): [number, number] | null {
   let lo = Infinity

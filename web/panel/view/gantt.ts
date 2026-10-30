@@ -19,14 +19,14 @@ import { assigneeOf } from '../data/people.ts'
 import { MEMORY_KEY, settingsStorage } from '../data/memory.ts'
 import { undoOf, type PlanChange } from '../data/plan.ts'
 import { zoneNow } from '../data/zone.ts'
-import { closedGroup, pathKey, type GanttRow, type IssueIndex, type Row } from '../data/index.ts'
+import { startsFolded, pathKey, type GanttRow, type IssueIndex, type Row } from '../data/index.ts'
 import { fill } from '../i18n/index.ts'
 import type { State } from '../store.ts'
 import { el, emptyState, icon } from './components.ts'
 import { segLabel } from './crumbs.ts'
 import { formatDate } from './detail-format.ts'
 import {
-  arrowOf, DAY, DEFAULT_GRID, DEFAULT_ZOOM, dayStart, dayText, dragDays, fitSpan, floorDay, ganttLines, HEAD_H, headerOf, movedPlan, normalizeGrid, placeRow,
+  arrowOf, DAY, DEFAULT_GRID, DEFAULT_ZOOM, dayStart, dayText, dragDays, fillRange, fitSpan, floorDay, ganttLines, HEAD_H, headerOf, movedPlan, normalizeGrid, placeRow,
   PX_PER_DAY, rangeOf, MIN_GRID, ROW_H, shiftPlan, wallAt, wallOf, weekends, widthOf, xOf, ZOOMS, zoomToFit, type Axis, type Edge, type GanttLine,
   type Placed, type Tick, type Zoom,
 } from './gantt-model.ts'
@@ -129,6 +129,12 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
   let state: State | null = null
   let model: Model | null = null
   let axis: Axis | null = null
+  /**
+   * The dates the lines call for (`rangeOf`), before draw() stretches the axis' end to fill the view. `fresh` measures
+   * against it and every draw stretches from it again: kept on the axis, a month step's stretch stood at the day step
+   * as months of empty dates.
+   */
+  let base: [number, number] | null = null
   let built: Built | null = null
   /** The window the nodes were built for: lines `[r0, r1)` and the dates' pixels `[x0, x1]`. */
   let drawn: { r0: number; r1: number; x0: number; x1: number } | null = null
@@ -291,10 +297,15 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
     const zone = clock.zone()
     const placed = m.lines.map((line) => (line.kind === 'row' ? placeOf(m.index.rows[line.at]!, now, zone) : null))
     const was = axis
-    if (!axis || axis.zoom !== zoom || !fresh(placed, now)) {
-      const [from, to] = rangeOf(placed.map((p) => p?.span ?? null), now)
-      axis = { zoom, from, to }
-    }
+    if (!axis || !base || axis.zoom !== zoom || !fresh(placed, now)) base = rangeOf(placed.map((p) => p?.span ?? null), now)
+    const unstretched: Axis = { zoom, from: base[0], to: base[1] }
+    // Zoom, fit and a resize may keep the dates while changing how much of them fits on screen. The stretch counts the
+    // view's left offset: a step fit places past the first screen, or a view scrolled into the stretched end, must have
+    // dates under its whole width.
+    const targetScroll = scrollTo ? scrollTo(unstretched) : was && was.zoom === zoom && was.from !== base[0]
+      ? Math.max(0, scroll.scrollLeft + xOf(unstretched, was.from)) : scroll.scrollLeft
+    const [from, to] = fillRange(base, zoom, targetScroll + viewWidth())
+    axis = { zoom, from, to }
     const a = axis
     // The bars this hovered bubble spoke of are about to be replaced, and a removed node sends no mouseleave.
     bubble.hidden = true
@@ -304,8 +315,7 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
     rowsBox.style.height = `${m.lines.length * ROW_H}px`
     // An axis that grew at its start (a new row reaches earlier) moves every date right: the same dates stay in view.
     // A new step is setZoom's and fit's to place.
-    if (scrollTo) scroll.scrollLeft = scrollTo(a)
-    else if (was && was.zoom === a.zoom && was.from !== a.from) scroll.scrollLeft = Math.max(0, scroll.scrollLeft + xOf(a, was.from))
+    if (targetScroll !== scroll.scrollLeft) scroll.scrollLeft = targetScroll
 
     const svg = doc.createElementNS(SVG, 'svg')
     svg.setAttribute('class', 'links')
@@ -494,11 +504,11 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
     if (line.kind === 'row') movable(lane, m.index.rows[line.at]!, g, planBar, dueMark)
   }
 
-  /** The axis stands while the lines' dates still fit in it; a draw because the index was read again does not shift it. */
+  /** The lines' range stands while their dates still fit in it; a draw because the index was read again does not shift it. */
   function fresh(placed: Array<Placed | null>, now: number): boolean {
-    if (!axis) return false
+    if (!base) return false
     const [from, to] = rangeOf(placed.map((p) => p?.span ?? null), now)
-    return from >= axis.from && to <= axis.to
+    return from >= base[0] && to <= base[1]
   }
 
   /** Only links touching the cursor, in blocker → blocked direction, with the same style both ways. */
@@ -553,7 +563,7 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
       if (!hideRight) pair.right.style.left = `${v1 - 12}px`
     })
     for (const tick of built.top) tick.el.style.paddingLeft = tick.from < v0 && tick.to > v0 ? `${v0 - tick.from + 4}px` : ''
-    rangeText.textContent = `${dayText(wallAt(axis, v0))} ~ ${dayText(wallAt(axis, v1))}`
+    rangeText.textContent = `${dayText(wallAt(axis, v0))} ~ ${dayText(wallAt(axis, Math.min(v1, widthOf(axis))))}`
   }
 
   /** Only the cursor moved: the selection mark, the arrows, the row in view. */
@@ -642,7 +652,9 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
     if (!axis || next === zoom || holding) return
     const view = viewWidth()
     const held = anchor ?? view / 2
-    const centre = wallAt(axis, scroll.scrollLeft + held)
+    // A date in the stretch past the lines' range is no date to keep still: kept, a step in from a short month view
+    // landed months past every bar. The lines' last day takes its place.
+    const centre = Math.min(wallAt(axis, scroll.scrollLeft + held), base?.[1] ?? axis.to)
     zoom = next
     axis = { ...axis, zoom }
     draw((a) => Math.max(0, xOf(a, centre) - held))
@@ -695,7 +707,7 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
     for (const { path, at } of paths) {
       const key = pathKey(path)
       if (!open) shut.add(key)
-      else if (key === pathKey(line.path) || at === undefined || !closedGroup(index.rows[at]!)) shut.delete(key)
+      else if (key === pathKey(line.path) || at === undefined || !startsFolded(index.rows[at]!)) shut.delete(key)
     }
     if (!open) {
       const cursor = model.lines.find((one) => one.key === state!.cursor)
@@ -1017,7 +1029,12 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
     frame = win.requestAnimationFrame(paintView)
   }
   scroll.addEventListener('scroll', onScroll, { passive: true })
-  const observer = win && 'ResizeObserver' in win ? new win.ResizeObserver(() => (paintGrid(), position(), paintView())) : null
+  const observer = win && 'ResizeObserver' in win ? new win.ResizeObserver(() => {
+    paintGrid()
+    position()
+    if (axis && viewWidth() > widthOf(axis) - scroll.scrollLeft) draw()
+    else paintView()
+  }) : null
   observer?.observe(scroll)
 
   function render(current: State, index: IssueIndex | null): void {
@@ -1036,7 +1053,7 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
       const at = current.cursor === null ? undefined : index.find(current.cursor)
       const selected = at === undefined ? [] : index.homeOf(at)
       for (let n = 0; n < index.rows.length; n++) {
-        if (!index.isDir(n) || !closedGroup(index.rows[n]!)) continue
+        if (!index.isDir(n) || !startsFolded(index.rows[n]!)) continue
         const path = index.dirPath(n)
         if (path.every((seg, k) => selected[k] === seg)) continue
         shut.add(pathKey(path))

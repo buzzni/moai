@@ -1222,6 +1222,23 @@ impl App {
                 // (`leave_project`), 뿌리에는 `..` 이 없어(moai-i784) 첫 줄이 곧 첫 이슈다. 디렉터리에
                 // 들어갈 때와 같은 자리다(`App::first_row`, moai-cm13). 여기서 목록을 또 세지 않는다(moai-go4o).
                 self.apply_fresh(fresh);
+                // **The list starts as a first read does** (moai-zxd0) — `leave_project` put a blank `Site` here and
+                // `apply_fresh` only swaps the rows in, keeping folds as a reread must. Seeding after it opens the running
+                // milestones one level; the cursor stays on the first row, which no fold below it moves.
+                self.site.seed_list_folds();
+                // The same blank-site entry bypasses the board/Gantt first-visit seed. Seed only this project: the
+                // other overview projects keep their hand-made folds. The selected row's ancestors stay open. The rows
+                // are built for those two layouts only: a list entry builds none here (moai-go4o).
+                if self.board() || self.gantt() {
+                    let selected_home = self.rows().get(self.cursor).and_then(|row| match row {
+                        Row::Item(super::Seat::Here, entry, _) => {
+                            entry.at().map(|at| self.site.index.home_of(at).clone())
+                        }
+                        _ => None,
+                    });
+                    let gantt = self.gantt();
+                    self.site.seed_layout_folds(selected_home.as_ref(), gantt);
+                }
                 // **층이 물어 둔 것도 옮겨 든다**(리뷰) — 위의 `held` 가 그 값을 읽어 이 읽기에
                 // 썼으므로 `prepare` 는 안 물었고([`super::Fresh::asked_install`] 가 `None`),
                 // [`App::apply_fresh`] 는 물은 때만 찍는다. 그런데 [`App::leave_project`] 가 `Site` 를
@@ -1320,9 +1337,16 @@ impl App {
         let mut parked = std::mem::replace(&mut self.site, blank);
         parked.path.clear();
         parked.remembered.clear();
-        parked.expanded.clear();
+        // "From the beginning" is the seeded list (moai-zxd0): running milestones open one level. A bare `clear()`
+        // folded them here while a project first read in the overview stood with them open.
+        parked.seed_list_folds();
         parked.gantt_shut.clear();
         parked.board_shut.clear();
+        // Climbing back starts the overview's active layout at its default too. The overview cursor is the project
+        // header, so no child milestone is exempt; a later reread preserves these seeded folds as hand-made ones.
+        if self.board() || self.gantt() {
+            parked.seed_layout_folds(None, self.gantt());
+        }
         // **거름망 마스크도 푼다**(리뷰). 아래에서 `hung` 을 비우므로 걸린 글은 사라지는데,
         // 마스크를 두고 가면 그 프로젝트의 줄은 한눈 보기에서 걸러진 채 서고 — 경로 줄에 뱃지도
         // 없고 Esc 로 풀 것도 없어 — 왜 줄이 적은지 말할 자리가 도구 안에 안 남는다.
@@ -3587,6 +3611,205 @@ mod tests {
             body.push_str(&format!("{}\n", serde_json::to_string(&i).unwrap()));
         }
         std::fs::write(&file, body).unwrap();
+    }
+
+    /// **머리줄의 `Tab` 도 닫힌 에픽을 편다**(moai-i07x) — 묶음 줄의 `Tab` 과 같은 자([`Site::starts_folded`])라
+    /// 닫힌 마일스톤만 접힌 채 남는다. [`App::open_all`] 의 목록 갈래를 옛 `closed` 로 되돌리면 닫힌 에픽이 접힌 채
+    /// 남고, 거르개를 걷으면 닫힌 마일스톤이 열린다 — 이 시험 전에는 둘 다 붉은 것이 없었다.
+    #[test]
+    fn tab_on_a_header_opens_closed_epics_and_leaves_closed_milestones_folded() {
+        let s = Scratch::fenced("layer-tab-closed");
+        let dir = s.project("deep", &[("argos-0001", "묶음 밖의 줄", "todo")]);
+        let now = crate::model::now();
+        let row = |id: &str, kind: Kind, status: &str| {
+            let mut i = Issue::new(id.into(), format!("{id} 제목"), kind, Status::new(status), &now);
+            if status == "done" {
+                i.done_at = Some(now.clone());
+            }
+            i
+        };
+        let shut = row("argos-0200", Kind::Milestone, "todo");
+        let mut shut_member = row("argos-0201", Kind::Issue, "done");
+        shut_member.milestone = Some(shut.id.clone());
+        let open = row("argos-0400", Kind::Milestone, "todo");
+        let mut open_member = row("argos-0401", Kind::Issue, "todo");
+        open_member.milestone = Some(open.id.clone());
+        let mut epic = row("argos-0300", Kind::Epic, "todo");
+        epic.milestone = Some(open.id.clone());
+        let mut epic_member = row("argos-0301", Kind::Issue, "done");
+        epic_member.epic = Some(epic.id.clone());
+        let file = dir.join(".moai/issues.jsonl");
+        let mut body = std::fs::read_to_string(&file).unwrap();
+        for i in [shut, shut_member, open, open_member, epic, epic_member] {
+            body.push_str(&format!("{}\n", serde_json::to_string(&i).unwrap()));
+        }
+        std::fs::write(&file, body).unwrap();
+        let cfg = s.register(&[&dir]);
+        let mut a = layered(&cfg);
+
+        a.hit("Tab");
+        settle(&mut a);
+        let site = a.layer.as_ref().unwrap().places[0].site.as_ref().expect("Tab read the project");
+        let path = |id: &str| site.index.dir_path(&site.issues, site.index.find(id).unwrap());
+        assert!(site.closed(site.index.find("argos-0300").unwrap()), "the premise — the epic is closed");
+        assert!(site.closed(site.index.find("argos-0200").unwrap()), "the premise — the milestone is closed");
+        assert!(site.expanded.contains(&path("argos-0400")), "Tab left the open milestone folded");
+        assert!(site.expanded.contains(&path("argos-0300")), "Tab left the closed epic folded");
+        assert!(!site.expanded.contains(&path("argos-0200")), "Tab opened the closed milestone");
+    }
+
+    /// A project with one running milestone (`argos-0400`, a todo member) beside a loose row.
+    fn running_milestone_project(s: &Scratch) -> PathBuf {
+        let dir = s.project("deep", &[("argos-0001", "묶음 밖의 줄", "todo")]);
+        let now = crate::model::now();
+        let open = Issue::new("argos-0400".into(), "열린 마일스톤".into(), Kind::Milestone, Status::new("todo"), &now);
+        let mut member =
+            Issue::new("argos-0401".into(), "마일스톤의 일".into(), Kind::Issue, Status::new("todo"), &now);
+        member.milestone = Some(open.id.clone());
+        let file = dir.join(".moai/issues.jsonl");
+        let mut body = std::fs::read_to_string(&file).unwrap();
+        for i in [open, member] {
+            body.push_str(&format!("{}\n", serde_json::to_string(&i).unwrap()));
+        }
+        std::fs::write(&file, body).unwrap();
+        dir
+    }
+
+    fn milestone_dir(site: &crate::tui::Site) -> crate::nav::Path {
+        site.index.dir_path(&site.issues, site.index.find("argos-0400").unwrap())
+    }
+
+    /// A closed milestone beside one with unfinished work, with a loose first row so neither milestone holds the cursor.
+    fn mixed_milestone_project(s: &Scratch) -> PathBuf {
+        let dir = s.project("mixed", &[("argos-0001", "묶음 밖의 줄", "todo")]);
+        let now = crate::model::now();
+        let closed =
+            Issue::new("argos-0200".into(), "닫힌 마일스톤".into(), Kind::Milestone, Status::new("todo"), &now);
+        let mut finished = Issue::new("argos-0201".into(), "끝난 일".into(), Kind::Issue, Status::new("done"), &now);
+        finished.done_at = Some(now.clone());
+        finished.milestone = Some(closed.id.clone());
+        let running =
+            Issue::new("argos-0400".into(), "도는 마일스톤".into(), Kind::Milestone, Status::new("todo"), &now);
+        let mut unfinished = Issue::new("argos-0401".into(), "남은 일".into(), Kind::Issue, Status::new("todo"), &now);
+        unfinished.milestone = Some(running.id.clone());
+        let file = dir.join(".moai/issues.jsonl");
+        let mut body = std::fs::read_to_string(&file).unwrap();
+        for issue in [closed, finished, running, unfinished] {
+            body.push_str(&format!("{}\n", serde_json::to_string(&issue).unwrap()));
+        }
+        std::fs::write(&file, body).unwrap();
+        dir
+    }
+
+    /// The overview-to-project path bypasses `Site::of`, and climbing back parks that site. Both board and Gantt must
+    /// seed the closed-milestone rule at those two boundaries, while the running milestone stays open (moai-8q2t).
+    #[test]
+    fn board_and_gantt_project_entry_and_return_seed_closed_milestones() {
+        for (name, layout_key, gantt) in [("layer-board-seed", "SPC g b", false), ("layer-gantt-seed", "SPC g g", true)]
+        {
+            let s = Scratch::fenced(name);
+            let dir = mixed_milestone_project(&s);
+            let cfg = s.register(&[&dir]);
+            let mut a = layered(&cfg);
+            a.hit(layout_key);
+            let check = |site: &crate::tui::Site, phase: &str| {
+                let closed = site.index.find("argos-0200").unwrap();
+                let running = site.index.find("argos-0400").unwrap();
+                assert!(site.closed(closed), "{phase}: the closed milestone is a test premise");
+                assert!(!site.closed(running), "{phase}: the running milestone is a test premise");
+                let folds = if gantt { &site.gantt_shut } else { &site.board_shut };
+                assert!(
+                    folds.contains(&site.index.dir_path(&site.issues, closed)),
+                    "{phase}: closed milestone stood open"
+                );
+                assert!(
+                    !folds.contains(&site.index.dir_path(&site.issues, running)),
+                    "{phase}: running milestone was folded"
+                );
+            };
+            a.cursor = a.rows().iter().position(|r| matches!(r, Row::Project(0))).unwrap();
+            a.key(key(KeyCode::Enter));
+            assert!(!a.on_layer(), "{name}: Enter did not open the project");
+            check(&a.site, "enter");
+
+            a.hit("0");
+            settle(&mut a);
+            let site = a.layer.as_ref().unwrap().places[0].site.as_ref().expect("climbing parked the project");
+            check(site, "return");
+
+            a.cursor = a.rows().iter().position(|r| matches!(r, Row::Project(0))).unwrap();
+            a.key(key(KeyCode::Enter));
+            check(&a.site, "reenter");
+        }
+    }
+
+    /// **Entering a project from the overview opens its running milestones as a first read does** (moai-zxd0 review).
+    /// `enter_project` swaps a blank `Site` in and loads the rows through `apply_fresh`, which keeps folds as a reread
+    /// must — the seed in `Site::of` never ran, so every milestone of a project entered with `Enter` or a digit stood
+    /// folded. Climbing back parks the project with the same seed: a bare `clear()` folded the running milestone there
+    /// while a project read fresh in the overview showed it open.
+    #[test]
+    fn entering_and_leaving_from_the_overview_open_running_milestones() {
+        let s = Scratch::fenced("layer-seed-enter");
+        let dir = running_milestone_project(&s);
+        let cfg = s.register(&[&dir]);
+        let mut a = layered(&cfg);
+        a.hit("l");
+        settle(&mut a);
+        let site = a.layer.as_ref().unwrap().places[0].site.as_ref().expect("l read the project");
+        assert!(site.expanded.contains(&milestone_dir(site)), "the premise — a first read in the overview opens it");
+
+        a.cursor = a.rows().iter().position(|r| matches!(r, Row::Project(0))).unwrap();
+        a.key(key(KeyCode::Enter));
+        assert!(!a.on_layer(), "the premise — Enter went in");
+        assert!(a.site.expanded.contains(&milestone_dir(&a.site)), "entering left the running milestone folded");
+        assert!(titles(&a).contains(&"마일스톤의 일".to_string()), "the member is not listed: {:?}", titles(&a));
+
+        a.hit("h");
+        assert!(!a.site.expanded.contains(&milestone_dir(&a.site)), "the premise — h folded it by hand");
+        a.hit("0");
+        settle(&mut a);
+        let site = a.layer.as_ref().unwrap().places[0].site.as_ref().expect("climbing parked the project");
+        assert!(site.expanded.contains(&milestone_dir(site)), "climbing parked the running milestone folded");
+    }
+
+    /// **A milestone folded by hand in the overview stays folded when that project is read again** (moai-zxd0).
+    /// `follow_site` builds a new `Site` on every read — it seeds — and only a first read may keep that seed; a reread
+    /// takes the held folds. Without carrying `expanded` the overview reopened the milestone (and dropped every fold the
+    /// person made) each time another session wrote to that project.
+    #[test]
+    fn an_overview_reread_keeps_a_milestone_folded_by_hand() {
+        let s = Scratch::fenced("layer-seed-reread");
+        let dir = running_milestone_project(&s);
+        let cfg = s.register(&[&dir]);
+        let mut a = layered(&cfg);
+        a.hit("l");
+        settle(&mut a);
+        let at = {
+            let site = a.layer.as_ref().unwrap().places[0].site.as_ref().unwrap();
+            site.index.find("argos-0400").unwrap()
+        };
+        a.cursor = a
+            .rows()
+            .iter()
+            .position(|r| matches!(r, Row::Item(crate::tui::Seat::Place(0), e, _) if e.at() == Some(at)))
+            .expect("the milestone row stands under its header");
+        a.hit("h");
+        let site = a.layer.as_ref().unwrap().places[0].site.as_ref().unwrap();
+        assert!(!site.expanded.contains(&milestone_dir(site)), "the premise — h folded it by hand");
+        // A folder the person opened by hand must survive too — dropping every fold would also leave the milestone shut.
+        let basket = vec![crate::nav::Seg::Milestone(None)];
+        a.layer.as_mut().unwrap().places[0].site.as_mut().unwrap().expanded.insert(basket.clone());
+
+        let read = a.layer.as_ref().unwrap().places[0].read_at;
+        a.layer.as_mut().unwrap().queue(dir.clone());
+        a.read_wanted();
+        settle(&mut a);
+        let place = &a.layer.as_ref().unwrap().places[0];
+        assert!(place.read_at > read, "the premise — the project was read again");
+        let site = place.site.as_ref().unwrap();
+        assert!(!site.expanded.contains(&milestone_dir(site)), "a reread reopened the milestone folded by hand");
+        assert!(site.expanded.contains(&basket), "a reread dropped a folder opened by hand");
     }
 
     /// **건너뛰면 포커스가 목록으로 돌아온다**(리뷰 moai-i784.pzh) — 층의 상세에는 듣는 키가

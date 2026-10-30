@@ -45,8 +45,8 @@ The page has four tabs.
 
 | Tab | Shows | Switch |
 |---|---|---|
-| **Board** | A kanban: one column per status, with backlog and deferred columns and one lane per [milestone](glossary.md#milestone). Closed milestone lanes and epic cards start folded. Select a lane title to see its milestone detail; use its chevron to fold or open it. | `SPC g b` |
-| **List** | The tree of milestones, [epics](glossary.md#epic) and issues, which you step into and fold | `SPC g l` |
+| **Board** | A kanban: one column per status, with backlog and deferred columns and one lane per [milestone](glossary.md#milestone). Closed milestone lanes start folded. Epics are not cards; their members stand in their own columns. Select a lane title to see its milestone detail; use its chevron to fold or open it. | `SPC g b` |
+| **List** | The tree of milestones, [epics](glossary.md#epic) and issues, which you step into and fold. Milestones with unfinished work start open one level; closed milestones start folded. Manual folds survive a reread. | `SPC g l` |
 | **Gantt** | The tree beside a date axis: when each row was planned and when it actually ran | `SPC g g` |
 | **Wiki** | The pages of this wiki: the page list on one side, the page on the other | `SPC g w` |
 
@@ -57,9 +57,14 @@ Choosing an issue shows its detail: column, priority, assignee, tags, what block
 it, the body, its children, its commits, the wiki about it (the lessons its notes
 point at, the pages that name it, the related sections — as `moai show <id>`
 lists them) and its history. History and work log start expanded and keep the
-line breaks of the text as written. In the list, in-progress rows have a pale gold
-background, review rows a pale purple one and done rows a pale green one. The
-board carries those colours on the first line of cards in those three columns
+line breaks of the text as written. In the list, todo rows have a pale blue
+background, in-progress rows pale gold, review rows pale purple and done rows pale
+green. Gantt rows use the same tints; the light blue todo tint is faint enough
+to keep a selected row distinct in either theme, and the selected list row has a
+left accent bar as a shape cue. Todo status glyphs and detail
+counts are blue. In a detail progress bar, todo is the empty portion, while its
+legend still names the todo count.
+The board carries those colours on the first line of cards in those four columns
 (id, status glyph and priority), with a thin line under the band. Cards in other
 columns stay plain. The detail starts on the right;
 `SPC o d`, or the position button, moves it right → bottom → left → top. Below
@@ -70,8 +75,10 @@ between rendered markdown and the raw text.
 ## Gantt
 
 The Gantt tab draws the same chart as the explorer's `SPC g g`, with the same
-meaning. The tree stays on the left, initially with every folder open, with the filter, search and
-view toggles of the list applied; the dates scroll on the right. The tree's rows take
+meaning. The tree stays on the left, initially with every folder open but closed milestones, with the filter, search and
+view toggles of the list applied; the dates scroll on the right. The date axis
+reaches across the visible pane even when the work spans only a few days, and grows
+with the pane when it is resized. The tree's rows take
 the list's column backgrounds; the dates behind the bars stay plain.
 
 | Mark | Means |
@@ -124,7 +131,7 @@ Other tabs read the same tree without calculating the chart values.
 | drag a bar's right end, or a milestone `◆` | Move only the deadline |
 | double-click a day on a row with no days | Plan that one day as its start and deadline |
 
-Gantt folds belong to that visit: closed groups start folded, and leaving and
+Gantt folds belong to that visit: closed milestones start folded and epics start open; leaving and
 returning restores those folds. A group you open stays open through a reread.
 The list keeps its own expansion state. A closed group keeps its rollup bar.
 
@@ -328,9 +335,9 @@ once and the keys reach it.
 | `l` `Right` / `h` `Left` | Unfold / fold (board: on a lane title, open / fold the lane; on a card, column to the right / left) |
 | `Tab` | Unfold / fold everything under the group (list) |
 
-In the list, `Tab` leaves closed descendant epics and milestones folded;
-`Tab` on one of those groups opens that group. The board leaves `Tab` to the
-browser's focus order; its chevrons fold lanes and closed epic cards.
+In the list, `Tab` opens everything under the group, closed epics included. The
+board leaves `Tab` to the browser's focus order; its chevrons fold milestone
+lanes.
 
 **Panes and tabs**
 
@@ -397,4 +404,4 @@ browser's focus order; its chevrons fold lanes and closed epic cards.
 The page does not show the stats screen, and what it writes is a Gantt bar's days
 and your read marks.
 
-Decided in: moai-skjr, moai-e9hi, moai-8r2l, moai-0aa7, moai-jshy, moai-d86e.3ud, moai-ijjd, moai-lj8g, moai-ekg6 moai-mkzo
+Decided in: moai-skjr, moai-e9hi, moai-8r2l, moai-0aa7, moai-jshy, moai-d86e.3ud, moai-ijjd, moai-lj8g, moai-ekg6 moai-mkzo moai-i07x

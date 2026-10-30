@@ -9,7 +9,7 @@
 // redrawing the window never drops it. The key router (panel/keys/) owns every key; it calls command() with
 // the action a key stands for (moves in drawn order, going in and out, unfolding), so no key runs twice.
 
-import { closedGroup, pathKey, priorityOf, type IssueIndex, type Keep, type Path } from "../data/index.ts"
+import { startsFolded, pathKey, priorityOf, type IssueIndex, type Keep, type Path } from "../data/index.ts"
 import { sortEdit, type SortKey } from "../data/query.ts"
 import { assigneeOf } from "../data/people.ts"
 import { isUnread } from "../data/read.ts"
@@ -83,6 +83,7 @@ export const mountList: MountPane = (root, ctx): PaneView => {
   let drawn = { start: -1, end: -1 }
   let shownCursor: string | null | undefined
   let shownPath = ""
+  let seeded = false
 
   // ── model ──
 
@@ -317,6 +318,22 @@ export const mountList: MountPane = (root, ctx): PaneView => {
       empty.replaceChildren(...(current.board.loading ? [emptyState(doc, { title: copy.loading })] : []))
       return
     }
+    if (!seeded) {
+      seeded = true
+      // Seed only on the first loaded list. Later renders and rereads keep a milestone the
+      // person folded by hand closed; epics beneath open milestones keep their own default.
+      const expanded = [...current.expanded]
+      for (const at of index.descendants([])) {
+        const row = index.rows[at]!
+        if (row.kind !== "milestone" || !index.isDir(at) || startsFolded(row)) continue
+        const key = pathKey(index.dirPath(at))
+        if (!expanded.includes(key)) expanded.push(key)
+      }
+      if (expanded.length !== current.expanded.length) {
+        intents.dispatch({ type: "expanded", expanded })
+        return
+      }
+    }
     model = compute(current, index)
     columns = columnSet(current.columns, ctx.layout().mainWidth)
     list.style.setProperty("--moai-id-w", `${model.idWidth}ch`)
@@ -424,7 +441,7 @@ export const mountList: MountPane = (root, ctx): PaneView => {
         const under = foldersUnder(model.index, folder.path)
         const inside = new Set(under)
         const closed = new Set(model.index.descendants(folder.path)
-          .filter((at) => model!.index.isDir(at) && closedGroup(model!.index.rows[at]!))
+          .filter((at) => model!.index.isDir(at) && startsFolded(model!.index.rows[at]!))
           .map((at) => pathKey(model!.index.dirPath(at))))
         const expanded = folder.open
           ? state.expanded.filter((key) => !inside.has(key))

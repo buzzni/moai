@@ -175,7 +175,7 @@ button.m-refreshed:hover { background: var(--hover); color: var(--text); }
 @container m-list (max-width: 339px) { .m-col-tags { display: none; } }
 
 /* Status glyphs (look-and-feel section 6). Colour never carries the status alone: the glyph differs. */
-.m-st-todo { color: var(--muted); }
+.m-st-todo { color: var(--todo); }
 .m-st-in_progress { color: var(--warn); font-weight: 600; }
 .m-st-review { color: var(--review); }
 .m-st-done { color: var(--ok); }
@@ -192,6 +192,7 @@ button.m-refreshed:hover { background: var(--hover); color: var(--text); }
     content: "\280B"; position: absolute; inset: 0; color: var(--accent); font-weight: 400; text-align: center;
     animation: m-spin 1.2s step-start infinite;
   }
+  .m-st-todo.m-spin::before { color: var(--todo); }
   .m-st-in_progress.m-spin::before { color: var(--warn); }
   .m-st-review.m-spin::before { color: var(--review); }
   .m-glint {

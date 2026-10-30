@@ -78,26 +78,31 @@
   --ok-soft: color-mix(in srgb, #10B981 12%, var(--bg));
   --warn-soft: color-mix(in srgb, var(--warn) 12%, var(--bg));
   --border-soft: color-mix(in srgb, var(--border) 65%, transparent);
+  --todo: color-mix(in srgb, #3b82f6 70%, var(--text));
   --review: color-mix(in srgb, #a855f7 70%, var(--text));
-  /* A list or Gantt row in progress, review or done: paler than --warn-soft, so a list search mark still shows on it. */
+  /* List and Gantt column tints stay pale enough for a search mark to show on top. Todo is fainter still: the
+     selected row's --selected is the same blue hue, and it must stay distinct from a todo row. */
+  --todo-soft: color-mix(in srgb, #3b82f6 2%, var(--bg));
   --progress-soft: color-mix(in srgb, #F2B01E 7%, var(--bg));
   --review-soft: color-mix(in srgb, #a855f7 8%, var(--bg));
   --done-soft: color-mix(in srgb, #10B981 7%, var(--bg));
   /* A narrow card band mixes into the card, which is --surface in the dark theme. */
+  --todo-band: color-mix(in srgb, #3b82f6 10%, var(--card-bg));
   --progress-band: color-mix(in srgb, #F2B01E 10%, var(--card-bg));
   --review-band: color-mix(in srgb, #a855f7 12%, var(--card-bg));
   --done-band: color-mix(in srgb, #10B981 10%, var(--card-bg));
+  --todo-edge: color-mix(in srgb, #3b82f6 42%, var(--card-bg));
   --progress-edge: color-mix(in srgb, #F2B01E 42%, var(--card-bg));
   --review-edge: color-mix(in srgb, #a855f7 48%, var(--card-bg));
   --done-edge: color-mix(in srgb, #10B981 42%, var(--card-bg));
   --epic: color-mix(in srgb, var(--accent) 70%, var(--muted));
 }
 
-/* Keep a selected done row distinct, and the done band on a dark card pale. */
+/* Keep selected rows distinct, and the todo and done bands on dark cards pale. */
 @media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) { --done-soft: color-mix(in srgb, #10B981 3%, var(--bg)); --done-band: color-mix(in srgb, #10B981 5%, var(--card-bg)); }
+  :root:not([data-theme="light"]) { --todo-soft: color-mix(in srgb, #3b82f6 3%, var(--bg)); --todo-band: color-mix(in srgb, #3b82f6 5%, var(--card-bg)); --done-soft: color-mix(in srgb, #10B981 3%, var(--bg)); --done-band: color-mix(in srgb, #10B981 5%, var(--card-bg)); }
 }
-:root[data-theme="dark"] { --done-soft: color-mix(in srgb, #10B981 3%, var(--bg)); --done-band: color-mix(in srgb, #10B981 5%, var(--card-bg)); }
+:root[data-theme="dark"] { --todo-soft: color-mix(in srgb, #3b82f6 3%, var(--bg)); --todo-band: color-mix(in srgb, #3b82f6 5%, var(--card-bg)); --done-soft: color-mix(in srgb, #10B981 3%, var(--bg)); --done-band: color-mix(in srgb, #10B981 5%, var(--card-bg)); }
 
 /* Base. */
 * { box-sizing: border-box; }
@@ -298,7 +303,7 @@ button.m-refreshed:hover { background: var(--hover); color: var(--text); }
 @container m-list (max-width: 339px) { .m-col-tags { display: none; } }
 
 /* Status glyphs (look-and-feel section 6). Colour never carries the status alone: the glyph differs. */
-.m-st-todo { color: var(--muted); }
+.m-st-todo { color: var(--todo); }
 .m-st-in_progress { color: var(--warn); font-weight: 600; }
 .m-st-review { color: var(--review); }
 .m-st-done { color: var(--ok); }
@@ -315,6 +320,7 @@ button.m-refreshed:hover { background: var(--hover); color: var(--text); }
     content: "\280B"; position: absolute; inset: 0; color: var(--accent); font-weight: 400; text-align: center;
     animation: m-spin 1.2s step-start infinite;
   }
+  .m-st-todo.m-spin::before { color: var(--todo); }
   .m-st-in_progress.m-spin::before { color: var(--warn); }
   .m-st-review.m-spin::before { color: var(--review); }
   .m-glint {
@@ -467,6 +473,7 @@ body.m-resizing:is([data-resize="bottom"], [data-resize="top"]) { cursor: row-re
   border-top: 1px solid var(--accent); border-left: 1px solid var(--accent); border-right: 1px solid var(--accent);
   padding: 4px 9px 3px;
 }
+.m-lane[data-status="todo"] { --band: var(--todo-band); --edge: var(--todo-edge); }
 .m-lane[data-status="in_progress"] { --band: var(--progress-band); --edge: var(--progress-edge); }
 .m-lane[data-status="review"] { --band: var(--review-band); --edge: var(--review-edge); }
 .m-lane[data-status="done"] { --band: var(--done-band); --edge: var(--done-edge); }
@@ -523,6 +530,7 @@ body.m-resizing:is([data-resize="bottom"], [data-resize="top"]) { cursor: row-re
 .g-rows { position: relative; }
 /* Rows and lanes stand at their line number (top, set by the view): only the ones near the window are nodes. */
 .g-row { position: absolute; left: 0; right: 0; display: flex; align-items: center; gap: 8px; height: 28px; padding: 0 8px; white-space: nowrap; cursor: default; }
+.g-row[data-status="todo"]:not([aria-selected="true"]):not(:hover) { background: var(--todo-soft); }
 .g-row[data-status="in_progress"]:not([aria-selected="true"]):not(:hover) { background: var(--progress-soft); }
 .g-row[data-status="review"]:not([aria-selected="true"]):not(:hover) { background: var(--review-soft); }
 .g-row[data-status="done"]:not([aria-selected="true"]):not(:hover) { background: var(--done-soft); }
@@ -564,6 +572,7 @@ body.m-resizing:is([data-resize="bottom"], [data-resize="top"]) { cursor: row-re
 .b-plan.deferred { background: transparent; border: 1px dashed color-mix(in srgb, var(--muted) 60%, transparent); }
 .b-fill { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 3px 0 0 3px; background: color-mix(in srgb, var(--branch) 30%, transparent); }
 .b-act { top: 10px; height: 8px; border-radius: 3px; z-index: 1; background: var(--muted); }
+.b-act.a-todo { background: var(--todo); }
 .b-act.a-in_progress { background: var(--warn); }
 .b-act.a-review { background: var(--review); }
 .b-act.a-done { background: var(--ok); }
@@ -625,6 +634,8 @@ svg.links polygon { fill: var(--link); }
 .moai-list-head[hidden], .moai-list-note[hidden], .moai-list-empty[hidden] { display: none; }
 .moai-list-body { position: relative; }
 .moai-list-body > .m-row { position: absolute; left: 0; right: 0; height: var(--moai-row-h); }
+/* The shared row has a 2px selection mark; make this list's mark wider so a faint todo tint never has to carry focus. */
+.moai-list-body > .m-row[aria-selected="true"]::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; background: var(--accent); border-radius: 0 2px 2px 0; }
 .moai-list-body > .m-row > .m-row-title { align-self: stretch; line-height: var(--moai-row-h); }
 .moai-list-body .moai-new { vertical-align: middle; }
 
@@ -662,6 +673,7 @@ svg.links polygon { fill: var(--link); }
 .moai-head-sort:hover { color: var(--text); }
 .moai-list-head [aria-sort] { color: var(--text); }
 
+.moai-list-body > .m-row[data-status="todo"]:not([aria-selected="true"]):not(:hover) { background: var(--todo-soft); }
 .moai-list-body > .m-row[data-status="in_progress"]:not([aria-selected="true"]):not(:hover) { background: var(--progress-soft); }
 .moai-list-body > .m-row[data-status="review"]:not([aria-selected="true"]):not(:hover) { background: var(--review-soft); }
 .moai-list-body > .m-row[data-status="done"]:not([aria-selected="true"]):not(:hover) { background: var(--done-soft); }
@@ -978,6 +990,7 @@ svg.links polygon { fill: var(--link); }
 .moai-detail-bar > span { flex: none; height: 100%; }
 .moai-detail :is(.moai-detail-bar > span, .moai-detail-legend > span)[data-status] { --dot: var(--border); }
 .moai-detail :is(.moai-detail-bar > span, .moai-detail-legend > span)[data-status="done"] { --dot: var(--ok); }
+.moai-detail :is(.moai-detail-bar > span, .moai-detail-legend > span)[data-status="todo"] { --dot: var(--todo); }
 .moai-detail :is(.moai-detail-bar > span, .moai-detail-legend > span)[data-status="review"] { --dot: var(--review); }
 .moai-detail :is(.moai-detail-bar > span, .moai-detail-legend > span)[data-status="in_progress"] { --dot: var(--warn); }
 .moai-detail-bar > span { background: var(--dot); }
