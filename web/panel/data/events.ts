@@ -9,6 +9,8 @@ export interface EventsOptions {
   onVisible?: () => void
   onHello?: (hello: { tab: string; token: string }) => void
   onCtl?: (message: { seq: number; request: Record<string, unknown> }) => void
+  onProposal?: (entry: { id: string; text: string; then?: { verb: string; [key: string]: unknown } | null; remaining_ms?: number }) => void
+  onProposalClosed?: (id: string) => void
   factory?: (url: string) => EventSource
   visibility?: VisibilitySignal | null
   clock?: Clock
@@ -93,6 +95,20 @@ export function openEvents(options: EventsOptions): Events {
           if (typeof message.seq === 'number' && message.request && typeof message.request === 'object') {
             options.onCtl?.({ seq: message.seq, request: message.request as Record<string, unknown> })
           }
+        } catch { /* ignore a malformed server event */ }
+      })
+      opened.addEventListener('proposal', (event) => {
+        if (source !== opened) return
+        try {
+          const entry = JSON.parse((event as MessageEvent).data) as { id?: unknown; text?: unknown; then?: unknown; remaining_ms?: unknown }
+          if (typeof entry.id === 'string' && typeof entry.text === 'string') options.onProposal?.(entry as Parameters<NonNullable<EventsOptions['onProposal']>>[0])
+        } catch { /* ignore a malformed server event */ }
+      })
+      opened.addEventListener('proposal_closed', (event) => {
+        if (source !== opened) return
+        try {
+          const entry = JSON.parse((event as MessageEvent).data) as { id?: unknown }
+          if (typeof entry.id === 'string') options.onProposalClosed?.(entry.id)
         } catch { /* ignore a malformed server event */ }
       })
       opened.onerror = () => {

@@ -2,5 +2,6 @@
 
 pub mod call;
 pub mod place;
+pub mod proposal;
 pub mod serve;
 pub mod wire;

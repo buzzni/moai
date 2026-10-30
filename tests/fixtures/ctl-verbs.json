@@ -1,5 +1,8 @@
 [
   {"verb":"hello","args":{},"surfaces":["tui","web"],"say":"identify an open window"},
+  {"verb":"propose","args":{"text":"Suggestion","then":null,"ttl":900,"wait":0},"surfaces":["server"],"say":"show a suggestion to the person"},
+  {"verb":"answer","args":{"proposal":"window/1","wait":0},"surfaces":["server"],"say":"read the person's answer"},
+  {"verb":"withdraw","args":{"proposal":"window/1"},"surfaces":["server"],"say":"take down a suggestion"},
   {"verb":"state","args":{"rows":false},"surfaces":["tui","web"],"say":"read its state"},
   {"verb":"keys","args":{"seqs":["SPC g b"],"text":null},"surfaces":["tui","web"],"say":"press the window's bindings"},
   {"verb":"do","args":{"name":"browse.go_list"},"surfaces":["tui"],"say":"run a TUI action"},
@@ -12,7 +15,7 @@
   {"verb":"view","args":{"name":"deferred","on":true},"surfaces":["tui","web"],"say":"set a view axis"},
   {"verb":"cell","args":{"name":"priority","on":true},"surfaces":["tui","web"],"say":"set a list cell"},
   {"verb":"detail","args":{"name":"right"},"surfaces":["tui","web"],"say":"place the detail"},
-  {"verb":"goto","args":{"id":"moai-example","enter":false,"project":null},"surfaces":["tui","web"],"say":"select a row"},
+  {"verb":"goto","args":{"issue":"moai-example","enter":false,"project":null},"surfaces":["tui","web"],"say":"select a row"},
   {"verb":"read","args":{"ids":[],"all":true,"group":null},"surfaces":["tui","web"],"say":"mark the owner's rows read"},
   {"verb":"wiki","args":{"slug":"guide#start","search":null},"surfaces":["tui","web"],"say":"open a wiki page"},
   {"verb":"pane","args":{"list_width":"55","list_height":null,"wiki_width":null,"gantt_label":null},"surfaces":["tui","web"],"say":"set a pane share"},

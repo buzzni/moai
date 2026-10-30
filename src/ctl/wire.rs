@@ -20,6 +20,21 @@ pub struct Request {
 #[serde(tag = "verb", rename_all = "snake_case")]
 pub enum Verb {
     Hello,
+    Propose {
+        text: String,
+        then: Option<Box<Verb>>,
+        ttl: u64,
+        wait: u64,
+    },
+    Answer {
+        #[serde(rename = "proposal")]
+        id: String,
+        wait: u64,
+    },
+    Withdraw {
+        #[serde(rename = "proposal")]
+        id: String,
+    },
     State {
         rows: bool,
     },
@@ -57,6 +72,7 @@ pub enum Verb {
         name: String,
     },
     Goto {
+        #[serde(rename = "issue")]
         id: Option<String>,
         enter: bool,
         project: Option<String>,
@@ -83,6 +99,77 @@ pub enum Verb {
     Theme {
         name: String,
     },
+}
+
+impl Verb {
+    pub fn proposable(&self) -> bool {
+        matches!(
+            self,
+            Self::Do { .. }
+                | Self::Sort { .. }
+                | Self::Filter { .. }
+                | Self::Find { .. }
+                | Self::Screen { .. }
+                | Self::View { .. }
+                | Self::Cell { .. }
+                | Self::Detail { .. }
+                | Self::Goto { .. }
+                | Self::Read { .. }
+                | Self::Wiki { .. }
+                | Self::Pane { .. }
+                | Self::Zone { .. }
+                | Self::Theme { .. }
+        )
+    }
+
+    pub fn describe(&self, lang: crate::i18n::Lang) -> String {
+        use crate::i18n::say;
+        match self {
+            Self::Do { name } => format!("{} {name}", say(lang, "tui.propose.verb.do")),
+            Self::Sort { words, .. } => format!("{} {}", say(lang, "tui.act.sort"), words.join(",")),
+            Self::Filter { query: Some(query) } => format!("{} {query}", say(lang, "tui.propose.verb.filter")),
+            Self::Filter { query: None } => say(lang, "tui.propose.verb.clear").into(),
+            Self::Find { query, .. } => format!("{} {query}", say(lang, "tui.act.grep")),
+            Self::Screen { name } => {
+                use crate::tui::keys::Screen;
+                let screen = match name.as_str() {
+                    "list" => Some(Screen::List),
+                    "board" => Some(Screen::Board),
+                    "gantt" => Some(Screen::Gantt),
+                    "stats" => Some(Screen::Stats),
+                    "wiki" => Some(Screen::Wiki),
+                    _ => None,
+                };
+                screen.map_or_else(|| name.clone(), |screen| screen.word(lang).into())
+            }
+            Self::View { name, on } => {
+                format!("{} {name} {}", say(lang, "tui.group.view"), if *on { "on" } else { "off" })
+            }
+            Self::Cell { name, on } => {
+                format!("{} {name} {}", say(lang, "tui.group.cell"), if *on { "on" } else { "off" })
+            }
+            Self::Detail { name } => format!("{} {name}", say(lang, "tui.act.detail")),
+            Self::Goto { id, project, .. } => {
+                format!(
+                    "{} {}",
+                    say(lang, "tui.propose.verb.goto"),
+                    id.as_ref().or(project.as_ref()).map(String::as_str).unwrap_or("")
+                )
+            }
+            Self::Read { .. } => say(lang, "tui.act.read").into(),
+            Self::Wiki { slug, search } => {
+                format!(
+                    "{} {}",
+                    say(lang, "tui.act.wiki"),
+                    slug.as_ref().or(search.as_ref()).map(String::as_str).unwrap_or("")
+                )
+            }
+            Self::Pane { .. } => say(lang, "tui.propose.verb.pane").into(),
+            Self::Zone { name } => format!("{} {name}", say(lang, "tui.propose.verb.zone")),
+            Self::Theme { name } => format!("{} {name}", say(lang, "tui.propose.verb.theme")),
+            _ => "".into(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -124,6 +211,22 @@ pub fn request(verb: Verb, timeout: std::time::Duration) -> Request {
 #[cfg(test)]
 mod tests {
     #[test]
+    fn request_id_does_not_collide_with_a_proposal_or_issue_id() {
+        for (verb, field) in [
+            (super::Verb::Answer { id: "window/1".into(), wait: 0 }, "proposal"),
+            (super::Verb::Withdraw { id: "window/1".into() }, "proposal"),
+            (super::Verb::Goto { id: Some("moai-example".into()), enter: false, project: None }, "issue"),
+        ] {
+            let mut request = super::request(verb, std::time::Duration::from_secs(5));
+            request.id = 42;
+            let encoded = serde_json::to_value(&request).unwrap();
+            assert_eq!(encoded["id"], 42);
+            assert!(encoded[field].is_string(), "{encoded}");
+            assert_eq!(serde_json::from_value::<super::Request>(encoded).unwrap().id, 42);
+        }
+    }
+
+    #[test]
     fn every_ctl_verb_is_in_the_fixture_and_parses() {
         let fixture: Vec<serde_json::Value> =
             serde_json::from_str(include_str!("../../tests/fixtures/ctl-verbs.json")).unwrap();
@@ -140,8 +243,8 @@ mod tests {
         assert_eq!(
             names,
             [
-                "hello", "state", "keys", "do", "do", "actions", "sort", "filter", "find", "screen", "view", "cell",
-                "detail", "goto", "read", "wiki", "pane", "pane", "zone", "theme"
+                "hello", "propose", "answer", "withdraw", "state", "keys", "do", "do", "actions", "sort", "filter",
+                "find", "screen", "view", "cell", "detail", "goto", "read", "wiki", "pane", "pane", "zone", "theme"
             ]
         );
     }

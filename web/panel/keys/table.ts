@@ -64,6 +64,7 @@ export interface KeyContext {
    * when it is given no read-mark writes, so the menu leaves the items out and the help dims them.
    */
   readable?: boolean
+  proposals?: boolean
   /**
    * The numbered projects' names by digit (`1`-`9` and `SPC p 1`-`9`, data/projects.ts numberedNames); a digit past
    * them does nothing, as the TUI's (keys.rs `Project(n)` past `Ctx::projects`).
@@ -97,7 +98,7 @@ export type KeyLabel =
   | "filter" | "tab.list" | "tab.board" | "tab.wiki" | "tab.gantt"
   | "gantt.left" | "gantt.right" | "gantt.zoomIn" | "gantt.zoomOut" | "gantt.today" | "gantt.fit"
   | "view.deferred" | "view.backlog" | "view.archived" | "view.worktree" | "view.all" | "view.allHelp" | "view.detail" | "view.raw" | "view.rawHelp"
-  | "sort.edit" | "read.all" | "read.group" | "read.groupHelp" | "option.detailAt" | "option.detailAtHelp"
+  | "sort.edit" | "read.all" | "read.group" | "read.groupHelp" | "proposal.accept" | "proposal.decline" | "proposal.list" | "option.detailAt" | "option.detailAtHelp"
   | "option.timezone" | "option.timezoneHelp" | "project.jumpHelp" | "menu.close" | "menu.up"
   | "prompt.apply" | "prompt.cancel" | "prompt.next" | "prompt.prev" | "prompt.up" | "prompt.down" | "prompt.clear" | "prompt.deleteWord"
   | "sorter.down" | "sorter.up" | "sorter.lower" | "sorter.raise" | "sorter.toggle" | "sorter.flip" | "sorter.apply" | "sorter.default" | "sorter.cancel"
@@ -107,7 +108,7 @@ export type KeyLabel =
 export type Label = KeyLabel | ((words: KeyTableCopy, ctx: KeyContext) => string)
 
 /** The SPC layers by their key after SPC. */
-export type LayerId = "g" | "p" | "v" | "s" | "c" | "m" | "o" | "w"
+export type LayerId = "a" | "g" | "p" | "v" | "s" | "c" | "m" | "o" | "w"
 
 export interface Binding {
   /** Action id the router dispatches (with `args`). The store performs it. */
@@ -358,6 +359,9 @@ const MENU: ReadonlyArray<Binding> = [
   ...cellBindings,
   { action: "read.all", keys: ["SPC m a"], label: "read.all", group: "read", modes: BROWSE_ONLY, when: (c) => c.readable !== false },
   { action: "read.group", keys: ["SPC m g"], label: "read.group", helpLabel: "read.groupHelp", group: "read", modes: BROWSE_ONLY, when: (c) => c.readable !== false },
+  { action: "proposal.accept", keys: ["SPC a y"], label: "proposal.accept", group: "other", modes: BOTH, when: (c) => c.proposals === true },
+  { action: "proposal.decline", keys: ["SPC a n"], label: "proposal.decline", group: "other", modes: BOTH, when: (c) => c.proposals === true },
+  { action: "proposal.list", keys: ["SPC a l"], label: "proposal.list", group: "other", modes: BOTH, when: (c) => c.proposals === true },
   {
     action: "option.detailAt",
     keys: ["SPC o d"],
@@ -390,6 +394,7 @@ const MENU: ReadonlyArray<Binding> = [
 ]
 
 export const LAYERS: ReadonlyArray<Layer> = [
+  { prefix: "SPC a", id: "a" },
   { prefix: "SPC p", id: "p" },
   { prefix: "SPC g", id: "g", state: (c) => (c.mode === "wiki" ? "wiki" : c.tab === "board" ? "board" : c.tab ?? "list") },
   { prefix: "SPC v", id: "v" },

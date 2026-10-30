@@ -145,6 +145,7 @@ pub fn screen(f: &mut Frame, app: &mut App) {
     }
     // 할 말이 있을 때만 배너 줄이 선다. 늘 세워 두면 한 줄이 영영 논다.
     let banner_h = u16::from(banner(app).is_some());
+    let proposal_h = u16::from(!app.proposals.rows().is_empty());
     // 누군지 묻는 동안과 거름망을 적는 동안만 아랫줄이 둘이다. 묻는 칸은 왜 묻는지와 다시 안 묻게
     // 하는 법이, 거름망은 거절문의 둘째 줄(고칠 글·있는 항목)이 윗줄에 선다 — 글칸 뒤에 붙이면 적는
     // 글에 밀려 사라진다.
@@ -164,7 +165,7 @@ pub fn screen(f: &mut Frame, app: &mut App) {
             .then(|| {
             let ctx = app.key_ctx(&rows);
             let items = menu::entries(app.chord.held(), &ctx, &app.screen_statuses());
-            let left = area.height.saturating_sub(header_h + 1 + banner_h + keys_h) as usize;
+            let left = area.height.saturating_sub(header_h + 1 + banner_h + proposal_h + keys_h) as usize;
             let grid = menu::grid(&items, (area.width as usize).saturating_sub(2), menu::rows_for(left));
             // 이 층이 ESC 를 기다리는가는 켜진 항목에서 읽는다 — 접두어 줄이 그것으로 안내를 세운다.
             (items, grid, menu::waits(app.chord.held(), &ctx))
@@ -175,7 +176,7 @@ pub fn screen(f: &mut Frame, app: &mut App) {
     // **받은 줄 수는 적어 둔다**(`App::hint_room`) — 0 이면 값 목록이 안 서는 것으로 쳐서 Enter 가 거름망을 건다. 창이
     // 낮아 안 그린 목록이 Enter 를 먹으면 보이지 않던 값이 칸에 들어간다.
     let hint = if matches!(app.mode, Mode::Filter(_)) {
-        let left = area.height.saturating_sub(header_h + 1 + banner_h + keys_h) as usize;
+        let left = area.height.saturating_sub(header_h + 1 + banner_h + proposal_h + keys_h) as usize;
         let room = menu::rows_for(left).min(super::hint::ROWS);
         app.hint_room = Some(room);
         Some(hint_lines(app, (area.width as usize).saturating_sub(2), room)).filter(|(lines, _)| !lines.is_empty())
@@ -188,10 +189,11 @@ pub fn screen(f: &mut Frame, app: &mut App) {
         Some((lines, _)) => lines.len() as u16 + 1,
         None => open_menu.as_ref().map_or(0, |(_, g, _)| if g.rows == 0 { 0 } else { g.rows as u16 + 1 }),
     };
-    let [head, top, note, body, panel, keys] = Layout::vertical([
+    let [head, top, note, suggestion, body, panel, keys] = Layout::vertical([
         Constraint::Length(header_h),
         Constraint::Length(1),
         Constraint::Length(banner_h),
+        Constraint::Length(proposal_h),
         Constraint::Min(1),
         Constraint::Length(panel_h),
         Constraint::Length(keys_h),
@@ -219,6 +221,11 @@ pub fn screen(f: &mut Frame, app: &mut App) {
         };
         f.render_widget(Paragraph::new(banner_line(&text, note.width as usize, style, dimmed)), note);
     }
+    if suggestion.height > 0
+        && let Some(text) = proposal_line(app, suggestion.width as usize)
+    {
+        f.render_widget(Paragraph::new(text).style(Style::new().fg(Color::Black).bg(Color::LightCyan)), suggestion);
+    }
     // **보드는 목록 자리에 선다**(moai-9nfw) — 새 창이 아니라 목록의 배치라 상세·포커스·마우스의 칸은 그대로다.
     let mut chart = None;
     let (rows_at, cards, columns) = if app.board() {
@@ -236,6 +243,7 @@ pub fn screen(f: &mut Frame, app: &mut App) {
     // 합친 자리다(moai-m6ni) — 격자가 접혀 창이 0 줄이면 접두어 줄 하나다. 메뉴의 누를 칸은 메뉴를 칠한 뒤 맨 끝에서 채운다.
     let menu = open_menu.is_some().then(|| panel.union(keys));
     app.drawn = super::mouse::Drawn {
+        proposal: (suggestion.height > 0).then_some(suggestion),
         body,
         list: left,
         rows: rows_at,
@@ -287,6 +295,7 @@ pub fn screen(f: &mut Frame, app: &mut App) {
         Mode::Zone(z) => zone_pick(f, z, body, lang),
         Mode::ArchiveDays(p) => archive_days_pick(f, p, body, lang),
         Mode::Sort(e) => sort_edit(f, e, body, lang),
+        Mode::Proposals(at) => proposals_window(f, app.proposals.rows(), *at, body, lang),
         Mode::Stats(w) => stats_window(f, w, body, lang),
         Mode::Wiki(w) => wiki_at = Some(wiki_window(f, w, body, raw, share, lang)),
         Mode::Ask(ask) => {
@@ -330,6 +339,7 @@ pub fn screen(f: &mut Frame, app: &mut App) {
     // 맨 아랫줄은 하나다 — 글을 받는 중이면 프롬프트가, 아니면 키 바가 선다.
     match &app.mode {
         _ if app.help.is_some() => help_keys(f, app.keys.browse, keys, app.site.lang),
+        Mode::Proposals(_) => f.render_widget(Paragraph::new("j/k choose · y accept · n decline · Esc close"), keys),
         Mode::Browse => match &open_menu {
             Some((items, grid, waits)) => menu_keys.extend(menu_line(f, app, items, grid, *waits, keys)),
             None => fkeys(f, app, &rows, keys, !header_numbered),
@@ -1929,6 +1939,51 @@ fn ask_why(why: &str, lang: Lang) -> String {
 /// 는 지나가는 것이라, 붙박이가 이기면 지나가는 알림은 영영 안 보인다.
 /// 지금 할 일이 있는 것부터 앞에 놓고 이어 붙인다.
 /// 시험이 배너 글을 본다 — 그리지 않고 [`banner`] 가 낼 글만.
+fn proposal_line(app: &App, width: usize) -> Option<String> {
+    use unicode_width::UnicodeWidthStr;
+    let rows = app.proposals.rows();
+    let row = rows.first()?;
+    let word = say(app.site.lang, "tui.propose.word");
+    let mut tail = say(app.site.lang, "tui.propose.hint");
+    let then = row.then.as_ref().map(|verb| format!(" → {}", verb.describe(app.site.lang))).unwrap_or_default();
+    let mut head = format!("» {word} 1/{} · ", rows.len());
+    if width < head.width() + tail.width() + 6 {
+        tail = say(app.site.lang, "tui.propose.hint_short");
+    }
+    if width < head.width() + tail.width() {
+        head = format!("» {word} ");
+    }
+    if width < head.width() + tail.width() {
+        tail = say(app.site.lang, "tui.propose.hint_tiny");
+    }
+    let tail = clip(tail, width.saturating_sub(head.width()));
+    let before = width.saturating_sub(head.width() + tail.width());
+    let then = clip(&then, before / 2);
+    let shown = clip(&row.text.replace('\n', " "), before.saturating_sub(then.width()));
+    Some(format!("{head}{shown}{then}{tail}"))
+}
+
+fn proposals_window(f: &mut Frame, rows: Vec<crate::ctl::proposal::Entry>, at: usize, area: Rect, lang: Lang) {
+    let width = area.width.min(72);
+    let height = area.height.min(rows.len().saturating_add(4).max(5) as u16);
+    let box_at = Rect::new(area.x + (area.width - width) / 2, area.y + (area.height - height) / 2, width, height);
+    f.render_widget(Clear, box_at);
+    let title = say(lang, "tui.propose.title");
+    let block = Block::default().title(title).borders(Borders::ALL);
+    let inner = block.inner(box_at);
+    f.render_widget(block, box_at);
+    let lines: Vec<_> = rows
+        .iter()
+        .enumerate()
+        .map(|(n, row)| {
+            let name = row.text.replace('\n', " ");
+            let text = clip(&format!("{} {}", if n == at { ">" } else { " " }, name), inner.width as usize);
+            ListItem::new(text)
+        })
+        .collect();
+    f.render_widget(List::new(lines), inner);
+}
+
 #[cfg(test)]
 pub(crate) fn tests_banner(app: &mut App) -> String {
     banner(app).map(|(t, _)| t).unwrap_or_default()
@@ -6374,6 +6429,27 @@ pub(super) mod tests {
     /// 법을 본다 — 처음 보기(done 보임·미룸 숨김, moai-muit)는 제 시험이 따로 본다.
     fn app() -> App {
         every(issues())
+    }
+
+    #[test]
+    fn the_proposal_line_carries_a_glyph_and_a_word_even_without_colour() {
+        let mut app = app();
+        app.site.lang = Lang::Ko;
+        let added = app.proposals.add(
+            "window",
+            "parser 태그의 남은 일만 볼까요?",
+            Some(crate::ctl::wire::Verb::Filter { query: Some("tag=parser".into()) }),
+            900,
+            None,
+        );
+        assert!(added.ok);
+        let lines = render(&mut app, 100, 30).join("\n");
+        assert!(
+            lines.contains("» 제안") && lines.contains("→ 거르개 tag=parser") && lines.contains("SPC a y"),
+            "{lines}"
+        );
+        let narrow = render(&mut app, 40, 20).join("\n");
+        assert!(narrow.contains("» 제안") && narrow.contains("SPC a y/n/l"), "{narrow}");
     }
 
     /// 보드 그림의 바닥(moai-9nfw) — 마일스톤 0001 밑 에픽 0002 에 todo `n` 개(p1)와 in_progress 하나, 마일스톤

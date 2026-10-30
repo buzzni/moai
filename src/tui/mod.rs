@@ -181,6 +181,7 @@ struct Adrift {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Mode {
     Browse,
+    Proposals(usize),
     /// `/` 로 연 빠른 검색. 곁의 것은 찾을 자리 — 칸의 Tab·Shift-Tab 이 돌린다(moai-kojj).
     Grep(Input, GrepIn),
     /// `f` 로 연 거름망. **CLI 와 같은 `항목=값` 문법이다.**
@@ -1436,7 +1437,10 @@ struct CtlTurn {
 
 pub struct App {
     ctl_turn: Option<CtlTurn>,
+    ctl_owner: bool,
+    proposal_back: Option<Box<Mode>>,
     ctl_opened: bool,
+    pub proposals: std::sync::Arc<crate::ctl::proposal::Book>,
     /// Repository from which this window was opened, even while the overview shows another project.
     pub ctl_root: String,
     /// Only terminal input changes target recency; ctl requests never do.
@@ -1796,6 +1800,57 @@ pub struct App {
 }
 
 impl App {
+    fn answer_proposal(&mut self, accepted: bool) {
+        let at = match self.mode {
+            Mode::Proposals(at) => at,
+            _ => 0,
+        };
+        let Some(row) = self.proposals.rows().into_iter().nth(at) else { return };
+        if let Some(back) = self.proposal_back.take() {
+            self.mode = *back;
+        }
+        let ran = if accepted {
+            row.then.map(|verb| {
+                let request = crate::ctl::wire::request(verb, std::time::Duration::from_secs(5));
+                // This path is reached only from a person's key. App::write resolves the window owner's identity.
+                self.ctl_owner = true;
+                let result = self.ctl(&request);
+                self.ctl_owner = false;
+                result
+            })
+        } else {
+            None
+        };
+        self.proposals.finish(&row.id, if accepted { "accepted" } else { "declined" }, ran);
+        self.notice = Some(
+            if accepted {
+                crate::i18n::say(self.site.lang, "tui.propose.accepted")
+            } else {
+                crate::i18n::say(self.site.lang, "tui.propose.declined")
+            }
+            .into(),
+        );
+    }
+
+    fn proposal_key(&mut self, key: ratatui::crossterm::event::KeyEvent) {
+        use keys::Key;
+        use ratatui::crossterm::event::KeyCode;
+        let count = self.proposals.rows().len();
+        if Key::plain('y').matches(key) {
+            self.answer_proposal(true);
+        } else if Key::plain('n').matches(key) {
+            self.answer_proposal(false);
+        } else if Key::any(KeyCode::Esc).matches(key) {
+            self.mode = self.proposal_back.take().map_or(Mode::Browse, |back| *back);
+        } else if let Mode::Proposals(at) = &mut self.mode {
+            if Key::plain('j').matches(key) || Key::any(KeyCode::Down).matches(key) {
+                *at = (*at + 1).min(count.saturating_sub(1));
+            } else if Key::plain('k').matches(key) || Key::any(KeyCode::Up).matches(key) {
+                *at = at.saturating_sub(1);
+            }
+        }
+    }
+
     pub fn human_input(&mut self) {
         self.last_human = std::time::Instant::now();
         self.ctl_opened = false;
@@ -1834,6 +1889,49 @@ impl App {
             }),
             Verb::Do { name } => self.ctl_do(req, name),
             Verb::Actions => self.ctl_actions(),
+            Verb::Propose { text, then, ttl, .. } => {
+                if then
+                    .as_deref()
+                    .is_some_and(|verb| matches!(verb, Verb::Theme { .. } | Verb::Pane { gantt_grid: Some(_), .. }))
+                {
+                    return Reply::error("unsupported", "that action is unavailable in the explorer");
+                }
+                if let Some(Verb::Do { name }) = then.as_deref()
+                    && keymap::named(name).is_none_or(|action| {
+                        matches!(
+                            action,
+                            keys::Browse::Quit
+                                | keys::Browse::ProposalAccept
+                                | keys::Browse::ProposalDecline
+                                | keys::Browse::Proposals
+                        )
+                    })
+                {
+                    return Reply::error("unsupported", "unknown or unsafe explorer action");
+                }
+                if let Some(Verb::View { name, .. }) = then.as_deref()
+                    && !matches!(name.as_str(), "deferred" | "backlog" | "archived" | "worktree" | "raw")
+                    && !name
+                        .strip_prefix("column:")
+                        .is_some_and(|column| self.screen_statuses().iter().any(|s| s == column))
+                {
+                    return Reply::error("unsupported", "unknown explorer view");
+                }
+                if let Some(Verb::Cell { name, .. }) = then.as_deref()
+                    && view::Field::named(name).is_none()
+                {
+                    return Reply::error("unsupported", "unknown explorer cell");
+                }
+                self.proposals.add(
+                    &format!("tui-{}", std::process::id()),
+                    text,
+                    then.as_deref().cloned(),
+                    *ttl,
+                    req.actor.clone(),
+                )
+            }
+            Verb::Answer { id, .. } => self.proposals.get(id),
+            Verb::Withdraw { id } => self.proposals.finish(id, "withdrawn", None),
             verb => self.ctl_verb(req, verb),
         }
     }
@@ -2270,10 +2368,14 @@ impl App {
             .map(|a| {
                 let full = format!("{}.{}", a.section, a.action);
                 let enabled = keymap::named(&full).map(|act| act.enabled(&ctx));
-                let (on, why) = match enabled {
-                    Some(Ok(())) => (true, None),
-                    Some(Err(keys::Off::Why(s))) => (false, Some(s)),
-                    _ => (false, None),
+                let (on, why) = if a.action.starts_with("proposal_") {
+                    (false, Some("only the person can answer a proposal".into()))
+                } else {
+                    match enabled {
+                        Some(Ok(())) => (true, None),
+                        Some(Err(keys::Off::Why(s))) => (false, Some(s)),
+                        _ => (false, None),
+                    }
                 };
                 serde_json::json!({"name": full, "keys": a.keys, "enabled": on, "why": why})
             })
@@ -2348,6 +2450,7 @@ impl App {
         };
         let mode = match self.mode {
             Mode::Browse => "browse",
+            Mode::Proposals(_) => "proposals",
             Mode::Grep(..) => "grep",
             Mode::Filter(..) => "filter",
             Mode::Ask(..) => "ask",
@@ -2392,7 +2495,7 @@ impl App {
             "mouse": self.mouse_on, "timezone": self.saved_zone,
             "wiki": if let Mode::Wiki(w) = &self.mode { w.ctl_state() } else { serde_json::Value::Null }, "unread": self.site.unread.len(),
             "notice": self.notice, "trouble": self.trouble,
-            "proposals": [],
+            "proposals": self.proposals.rows().iter().map(crate::ctl::proposal::Entry::value).collect::<Vec<_>>(),
         });
         if include_rows {
             let visible: Vec<_> = rows
@@ -2939,6 +3042,9 @@ impl App {
         let mut app = App {
             ctl_turn: None,
             ctl_opened: false,
+            ctl_owner: false,
+            proposal_back: None,
+            proposals: std::sync::Arc::new(crate::ctl::proposal::Book::new()),
             ctl_root: String::new(),
             last_human: std::time::Instant::now(),
             follow_changed: false,
@@ -3197,6 +3303,9 @@ impl App {
         // **코드는 `Fail` 이 이미 든다** — `Fail::no_actor` 가 `NoActor::code()` 로 채운다.
         // 곁들여 들고 다니면 늘 같아야 할 둘을 타입이 안 묶는다(리뷰).
         let by = match &self.ctl_turn {
+            Some(_) if self.ctl_owner => {
+                (self.identify)(self.user.as_deref(), &repo.root).map_err(|e| crate::fail::Fail::no_actor(&e, lang))
+            }
             Some(turn) => turn
                 .actor
                 .clone()
@@ -3205,7 +3314,8 @@ impl App {
                 (self.identify)(self.user.as_deref(), &repo.root).map_err(|e| crate::fail::Fail::no_actor(&e, lang))
             }
         };
-        if let Some(turn) = self.ctl_turn.as_mut()
+        if !self.ctl_owner
+            && let Some(turn) = self.ctl_turn.as_mut()
             && let Err(e) = &by
         {
             turn.error = Some(crate::ctl::wire::Reply::error(e.code, e.message.clone()));
@@ -4135,6 +4245,7 @@ impl App {
         let text = match mode {
             Mode::Grep(q, _) | Mode::Filter(q) => q.text().to_string(),
             Mode::Browse
+            | Mode::Proposals(_)
             | Mode::Ask(_)
             | Mode::Backlog(_)
             | Mode::Pick(_)
@@ -4217,6 +4328,7 @@ impl App {
                 ..Raw::default()
             },
             Mode::Browse
+            | Mode::Proposals(_)
             | Mode::Ask(_)
             | Mode::Backlog(_)
             | Mode::Pick(_)
@@ -6748,11 +6860,21 @@ impl App {
             self.adrift = None;
         }
         match act {
+            B::ProposalAccept | B::ProposalDecline | B::Proposals if self.ctl_turn.is_some() => {
+                self.ctl_turn.as_mut().unwrap().error =
+                    Some(crate::ctl::wire::Reply::error("refused", "only the person can answer a proposal"));
+            }
             B::Quit if self.ctl_turn.is_some() => {
                 self.ctl_turn.as_mut().unwrap().error =
                     Some(crate::ctl::wire::Reply::error("refused", say(self.site.lang, "tui.ctl.quit")));
             }
             B::Quit => self.quit = true,
+            B::ProposalAccept => self.answer_proposal(true),
+            B::ProposalDecline => self.answer_proposal(false),
+            B::Proposals => {
+                self.proposal_back = Some(Box::new(self.mode.clone()));
+                self.mode = Mode::Proposals(0);
+            }
             B::Help => self.open_help(rows),
             B::FocusPrev => self.focus = self.focus.prev(),
             B::FocusNext => self.focus = self.focus.next(),
@@ -6944,6 +7066,7 @@ impl App {
         // 칸의 이름은 고른 배치로 댄다 — 한눈 보기에도 보드가 선다(moai-oagj.vcj).
         let layout = self.layout;
         keys::Ctx {
+            proposals: !self.proposals.rows().is_empty(),
             lang: self.site.lang,
             layer: self.on_layer(),
             on_row: matches!(self.current_of(rows), Some(Row::Item(..))),
@@ -7122,6 +7245,7 @@ impl App {
             self.completion = None;
         }
         match self.mode {
+            Mode::Proposals(_) => return self.proposal_key(k),
             Mode::Backlog(_) => return self.jot(k),
             Mode::Pick(_) => return self.pick(k),
             Mode::Unregister(_) => return self.settle_unregister(k),
@@ -7140,6 +7264,7 @@ impl App {
                 eaten
             }
             Mode::Browse
+            | Mode::Proposals(_)
             | Mode::Backlog(_)
             | Mode::Pick(_)
             | Mode::Unregister(_)
@@ -7413,7 +7538,7 @@ impl App {
             Mode::ArchiveDays(p) => p.paste(s),
             // 글칸이 없다 — 붙여 넣을 자리가 없으니 아무 일도 안 한다.
             Mode::Sort(_) => {}
-            Mode::Unregister(_) => self.mode = Mode::Browse,
+            Mode::Unregister(_) | Mode::Proposals(_) => self.mode = Mode::Browse,
             // 글칸이 없다 — 붙여 넣을 자리가 없으니 아무 일도 안 한다. 창을 닫으면 보던 것을 잃는다.
             Mode::Stats(_) => {}
             // 찾는 칸이 열렸으면 거기 넣는다 — 목록이 그만큼 좁아진다.
@@ -13162,6 +13287,96 @@ mod tests {
         let mut req = crate::ctl::wire::request(verb, std::time::Duration::from_secs(5));
         req.actor = actor.map(str::to_string);
         req
+    }
+
+    #[test]
+    fn a_proposal_never_takes_the_keys_and_the_person_can_accept_it() {
+        use crate::ctl::wire::Verb;
+        let (_scratch, mut a) = writable("proposal-human");
+        a.hit("/");
+        let proposed = a.ctl(&ctl_req(
+            Verb::Propose {
+                text: "Show the board?".into(),
+                then: Some(Box::new(Verb::Screen { name: "board".into() })),
+                ttl: 900,
+                wait: 0,
+            },
+            None,
+        ));
+        assert!(proposed.ok, "{proposed:?}");
+        assert!(matches!(a.mode, Mode::Grep(..)), "the arriving suggestion took the input");
+        a.hit("Esc");
+        let before = a.ctl(&ctl_req(Verb::Screen { name: "board".into() }, None));
+        assert!(before.ok);
+        a.ctl(&ctl_req(Verb::Screen { name: "list".into() }, None));
+        a.hit("SPC a y");
+        assert_eq!(a.ctl_screen(), "board");
+        // The id includes this process's real pid, so read it from the proposal answer.
+        let id = proposed.data.unwrap()["id"].as_str().unwrap().to_string();
+        let accepted = a.proposals.get(&id);
+        assert_eq!(accepted.data.unwrap()["ran"]["data"]["screen"], before.data.unwrap()["screen"]);
+    }
+
+    #[test]
+    fn an_accepted_write_is_written_by_the_window_owner() {
+        use crate::ctl::wire::Verb;
+        let (_scratch, mut a) = writable("proposal-write-owner");
+        let proposed = a.ctl(&ctl_req(
+            Verb::Propose {
+                text: "Write down a thought?".into(),
+                then: Some(Box::new(Verb::Do { name: "browse.jot".into() })),
+                ttl: 900,
+                wait: 0,
+            },
+            Some("Caller (caller@example.com)"),
+        ));
+        assert!(proposed.ok, "{proposed:?}");
+        assert_eq!(proposed.data.as_ref().unwrap()["from"], "Caller (caller@example.com)");
+        let id = proposed.data.unwrap()["id"].as_str().unwrap().to_string();
+        a.hit("SPC a y");
+        let answer = a.proposals.get(&id).data.unwrap();
+        assert_eq!(answer["state"], "accepted");
+        assert_eq!(answer["ran"]["ok"], true, "{answer}");
+        assert!(matches!(a.mode, Mode::Backlog(_)), "{:?}", a.mode);
+        a.paste("person's thought");
+        a.hit("Ctrl-s");
+        let made = backlog_in(a.site.repo.as_ref().unwrap());
+        assert_eq!(made.len(), 1, "{made:?}");
+        let journal = a.site.repo.as_ref().unwrap().journal_of(&made[0].id);
+        assert!(journal.iter().any(|entry| entry.by == "레이븐"), "{journal:?}");
+        assert!(!journal.iter().any(|entry| entry.by == "Caller"), "{journal:?}");
+    }
+
+    #[test]
+    fn an_unknown_followup_is_refused_before_it_shows_and_ctl_cannot_accept_for_the_person() {
+        use crate::ctl::wire::Verb;
+        let (_scratch, mut a) = writable("proposal-unknown");
+        let unsupported = a.ctl(&ctl_req(
+            Verb::Propose {
+                text: "dark?".into(),
+                then: Some(Box::new(Verb::Theme { name: "dark".into() })),
+                ttl: 900,
+                wait: 0,
+            },
+            None,
+        ));
+        assert_eq!(unsupported.code.as_deref(), Some("unsupported"));
+        assert!(a.proposals.rows().is_empty());
+        let unsupported = a.ctl(&ctl_req(
+            Verb::Propose {
+                text: "show?".into(),
+                then: Some(Box::new(Verb::View { name: "unknown".into(), on: true })),
+                ttl: 900,
+                wait: 0,
+            },
+            None,
+        ));
+        assert_eq!(unsupported.code.as_deref(), Some("unsupported"));
+        assert!(a.proposals.rows().is_empty());
+        a.ctl(&ctl_req(Verb::Propose { text: "hello".into(), then: None, ttl: 900, wait: 0 }, None));
+        let forbidden = a.ctl(&ctl_req(Verb::Do { name: "browse.proposal_accept".into() }, None));
+        assert_eq!(forbidden.code.as_deref(), Some("refused"));
+        assert_eq!(a.proposals.rows().len(), 1);
     }
 
     #[test]

@@ -22,6 +22,7 @@ export interface CtlOptions {
   shell: Shell
   read: ReadMarks
   drawnOrder(): string[]
+  proposals?(): unknown[]
   openProject?(path: string): boolean
   wikiSearch?(query: string): Promise<{ slug: string; hits: unknown[] } | null>
   /** Captures the identity synchronously when a read-mark write starts. */
@@ -68,7 +69,7 @@ export function createCtl(options: CtlOptions) {
         gantt_grid: shell.panes().gantt.gridWidth?.() ?? null },
       theme: s.theme, timezone: s.zone, wiki: s.tab === 'wiki' ? s.wiki : null,
       unread: (s.board.value?.rows ?? []).filter(isUnread).length,
-      proposals: [],
+      proposals: options.proposals?.() ?? [],
       ...(rows ? { rows: shown.map((id) => { const row = index.get(id); return { id, status: row?.status, title: row?.title } }) } : {}),
     })
   }
@@ -78,7 +79,9 @@ export function createCtl(options: CtlOptions) {
     const platform = detectPlatform(doc.defaultView?.navigator)
     return yes({ actions: keys.actions.map((name) => {
       const bindings = catalog.filter((binding) => binding.action === name)
-      return { name, keys: bindings.flatMap((binding) => bindingKeys(binding, platform)), enabled: bindings.some((binding) => isAvailable(binding, context)) }
+      return { name, keys: bindings.flatMap((binding) => bindingKeys(binding, platform)),
+        enabled: !name.startsWith('proposal.') && bindings.some((binding) => isAvailable(binding, context)),
+        ...(name.startsWith('proposal.') ? { why: 'only the person can answer a proposal' } : {}) }
     }) })
   }
   const press = (seqs: unknown, text: unknown): Reply => {
@@ -137,6 +140,8 @@ export function createCtl(options: CtlOptions) {
   async function run(request: Request, seq: number, token: string): Promise<Reply> {
     if (request.verb === 'state') return state(request.rows === true)
     if (request.verb === 'actions') return actions()
+    if (request.verb === 'do' && typeof request.name === 'string' && request.name.startsWith('proposal.')) return no('refused', 'only the person can answer a proposal')
+    if (request.verb === 'keys' && Array.isArray(request.seqs) && request.seqs.some((value) => typeof value === 'string' && /(?:^|\s)SPC\s+a\s+[ynl](?:\s|$)/.test(value))) return no('refused', 'only the person can answer a proposal')
     if (busy()) return no('person_busy', 'the person is using an input or menu')
     try {
       return await options.withIdentity(seq, token, () => execute(request, seq, token))
@@ -209,8 +214,8 @@ export function createCtl(options: CtlOptions) {
           const project = s.projects.find((entry) => entry.path === request.project || String(entry.number) === request.project)
           return project && options.openProject?.(project.path) ? after() : no('not_found', 'project is not open')
         }
-        if (typeof request.id !== 'string' || !s.board.value?.rows.some((row) => row.id === request.id)) return no('not_found', 'row is not on screen')
-        store.dispatch({ type: 'cursor', id: request.id });
+        if (typeof request.issue !== 'string' || !s.board.value?.rows.some((row) => row.id === request.issue)) return no('not_found', 'row is not on screen')
+        store.dispatch({ type: 'cursor', id: request.issue });
         if (request.enter === true) keys.run('enter')
         return after()
       case 'read': return mark(request, seq, token)

@@ -45,6 +45,8 @@ async function page(t, { holdFirst = false, initialTab, chartFailures = 0, fakeS
     stamp(value) { this.listeners.stamp({ data: JSON.stringify({ stamp: value }) }) }
     hello(tab, token) { this.listeners.hello({ data: JSON.stringify({ tab, token }) }) }
     ctl(seq, request) { this.listeners.ctl({ data: JSON.stringify({ seq, request }) }) }
+    proposal(entry) { this.listeners.proposal({ data: JSON.stringify(entry) }) }
+    proposalClosed(id) { this.listeners.proposal_closed({ data: JSON.stringify({ id }) }) }
   }
   let release
   dom.window.fetch = async (path, init = {}) => {
@@ -66,7 +68,7 @@ async function page(t, { holdFirst = false, initialTab, chartFailures = 0, fakeS
       else out = []
       body = { exit: 0, out }
     }
-    return { status: 200, text: async () => JSON.stringify(body) }
+    return { status: 200, ok: true, text: async () => JSON.stringify(body) }
   }
   dom.window.eval(code)
   await until(() => trees.length > 0)
@@ -88,6 +90,26 @@ test('a ctl event changes the visible theme and replies with the tab token', asy
   assert.equal(JSON.parse(posted.init.body).ok, true)
   assert.equal(p.dom.window.document.documentElement.dataset.theme, 'dark')
   assert.equal(JSON.parse(p.dom.window.localStorage.getItem('moai.web')).theme, 'dark')
+})
+
+test('a suggestion card waits for the person, then runs its action and posts the answer', async (t) => {
+  const p = await page(t, { fakeStream: true })
+  const source = p.streams[0]
+  source.onopen()
+  source.hello('123.1', 'token')
+  source.proposal({ id: '123.1/1', text: 'Use dark theme?', then: { verb: 'theme', name: 'dark' }, remaining_ms: 900000 })
+  const card = p.dom.window.document.querySelector('.m-proposal')
+  assert.match(card.textContent, /» Suggestion/)
+  assert.equal(card.hidden, false)
+  card.querySelectorAll('button')[2].click()
+  await until(() => p.posts.some(({ url }) => url.pathname === '/api/ctl/123.1/proposal'))
+  const answer = p.posts.find(({ url }) => url.pathname === '/api/ctl/123.1/proposal')
+  assert.equal(answer.url.searchParams.get('token'), 'token')
+  assert.equal(answer.url.searchParams.get('id'), '123.1/1')
+  assert.equal(JSON.parse(answer.init.body).state, 'accepted')
+  assert.equal(JSON.parse(answer.init.body).ran.ok, true)
+  assert.equal(p.dom.window.document.documentElement.dataset.theme, 'dark')
+  await until(() => card.hidden)
 })
 
 test('the page reads changed stamps from its event stream and ignores repeats', async (t) => {

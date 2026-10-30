@@ -2698,7 +2698,8 @@ mod tests {
             | Mode::ArchiveDays(_)
             | Mode::Sort(_)
             | Mode::Stats(_)
-            | Mode::Wiki(_) => None,
+            | Mode::Wiki(_)
+            | Mode::Proposals(_) => None,
         }
     }
 

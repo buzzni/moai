@@ -28,6 +28,7 @@ import { createStore, matchKey, type BoardData, type State } from './store.js'
 import { listLines, narrow } from './view/list-model.js'
 import { PANES } from './view/panes.js'
 import { describe, mountShell, type Activity } from './view/shell.js'
+import { createProposalView } from './view/propose.js'
 import type { WikiSource } from './view/types.js'
 
 /** The browser's fetch, naming no project: the home's boot is read through it. */
@@ -504,8 +505,29 @@ async function start(): Promise<void> {
   client.subscribe(() => shell.activity(activity()))
   // The one keydown listener: keys → the key table's actions → the store and the panes (keys/wiring.ts), with the
   // SPC menu, the shortcut help and the "click to use the keyboard" hint.
-  const keys = wireKeys({ document, store, shell, copy, read, openProject, index: indexOf })
-  const ctl = createCtl({ store, keys, shell, read, drawnOrder,
+  let tab: { id: string; token: string } | null = null
+  let ctlExecuting = 0
+  const answering = new Set<string>()
+  let ctl: ReturnType<typeof createCtl>
+  const proposals = createProposalView(document, copy.propose, (entry, accepted) => {
+    if (ctlExecuting > 0 || !tab || answering.has(entry.id)) return
+    answering.add(entry.id)
+    const here = tab
+    void (async () => {
+      const ran = accepted && entry.then ? await ctl.run(entry.then, 0, '') : null
+      const query = new URLSearchParams({ token: here.token, id: entry.id })
+      const response = await window.fetch(`/api/ctl/${encodeURIComponent(here.id)}/proposal?${query}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ state: accepted ? 'accepted' : 'declined', ran }),
+      })
+      if (response.ok) proposals.remove(entry.id)
+    })().catch(() => {}).finally(() => answering.delete(entry.id))
+  })
+  const keys = wireKeys({ document, store, shell, copy, read, openProject, index: indexOf,
+    proposal: { pending: () => proposals.count() > 0, accept: () => { if (ctlExecuting === 0) proposals.accept() },
+      decline: () => { if (ctlExecuting === 0) proposals.decline() }, list: () => { if (ctlExecuting === 0) proposals.list() } },
+  })
+  ctl = createCtl({ store, keys, shell, read, drawnOrder, proposals: () => proposals.rows(),
     openProject: (path) => {
       const found = store.getState().projects.find((entry) => entry.path === path)
       if (!found) return false
@@ -519,12 +541,12 @@ async function start(): Promise<void> {
       return hits?.[0]?.slug ? { slug: `${hits[0].slug}${hits[0].anchor ? `#${hits[0].anchor}` : ''}`, hits } : null
     },
     withIdentity: (seq, token, work) => {
+      if (seq === 0) return work()
       const before = ctlIdentity
       ctlIdentity = { seq, token }
       try { return work() } finally { ctlIdentity = before }
     },
   })
-  let tab: { id: string; token: string } | null = null
   let lastSeen = 0
   const seen = () => {
     if (!tab || document.visibilityState === 'hidden') return
@@ -536,18 +558,21 @@ async function start(): Promise<void> {
   document.addEventListener('keydown', () => { if (Date.now() - lastSeen >= 5_000) seen() })
   document.addEventListener('click', () => { if (Date.now() - lastSeen >= 5_000) seen() })
   events = openEvents({ url: eventUrl, onStamp: (at) => refresher.saw(at), onUp: () => refresher.pause(),
-    onDown: () => { tab = null; refresher.resume() }, onVisible: () => { void refresher.check(); seen() },
+    onDown: () => { tab = null; proposals.clear(); refresher.resume() }, onVisible: () => { void refresher.check(); seen() },
     onHello: (hello) => { tab = { id: hello.tab, token: hello.token }; seen() },
     onCtl: ({ seq, request }) => {
       const here = tab
       if (!here) return
+      ctlExecuting += 1
       void ctl.run(request as { verb: string }, seq, here.token).then((reply: CtlReply) => {
         const query = new URLSearchParams({ seq: String(seq), token: here.token })
         return window.fetch(`/api/ctl/${encodeURIComponent(here.id)}?${query}`, {
           method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(reply),
         })
-      }).catch(() => {})
+      }).catch(() => {}).finally(() => { ctlExecuting -= 1 })
     },
+    onProposal: (entry) => proposals.show(entry),
+    onProposalClosed: (id) => proposals.remove(id),
   })
 
   document.body.tabIndex = -1

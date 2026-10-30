@@ -32,6 +32,7 @@ pub const WHEEL: isize = 3;
 /// 지난 프레임이 그린 자리. **쓰는 곳은 `draw::screen` 하나다** — 여기는 읽기만 한다.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Drawn {
+    pub proposal: Option<Rect>,
     /// 목록과 상세가 나눠 쓰는 몸통. 통계 창·폼은 이 자리를 통째로 덮는다.
     pub body: Rect,
     /// 목록 칸 — 테두리까지.
@@ -151,6 +152,13 @@ impl App {
             return;
         }
         let at = Position::new(m.column, m.row);
+        if matches!(m.kind, MouseEventKind::Down(MouseButton::Left))
+            && self.drawn.proposal.is_some_and(|rect| rect.contains(at))
+            && !self.proposals.rows().is_empty()
+        {
+            self.run(super::keys::Browse::Proposals, &[]);
+            return;
+        }
         // **가로 휠은 간트의 날짜 축만 받는다**(moai-i4hf.exq) — 가로 휠이 없는 마우스를 위해 Shift+휠도 가로다. 다른
         // 자리에서는 가로로 구를 것이 없어 버린다. 한 번에 한 칸 — 축의 한 칸은 확대에 따라 한 시간~한 주다.
         // **Shift+휠이 가로인 것은 간트 위에서만이다** — 목록·상세·통계 창·위키 창에서는 이 에픽 전처럼 세로로 구른다. 어디서나

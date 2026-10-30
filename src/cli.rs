@@ -569,6 +569,8 @@ BACKLOG
   close hint.
     {spc:browse.grep}    search              {key:browse.filter}    filter             {key:browse.jot}    jot
     {spc:browse.help}    keys                {key:browse.quit}    quit
+    {key:browse.proposal_accept}  accept a suggestion; {key:browse.proposal_decline} declines
+    {key:browse.proposals}  open the suggestion list
     {key:browse.pick}  register            {key:browse.unregister}  drop from the list
   Screen — which one stands; the root menu names it, as in [board]:
     {key:browse.go_list}  list                {key:browse.go_board}  board — described below
@@ -1322,6 +1324,35 @@ Examples:
 
 #[derive(Subcommand, Debug)]
 pub enum CtlCmd {
+    /// Suggest an action in an open window
+    Propose {
+        text: String,
+        /// A named ctl verb to run if the person accepts
+        #[arg(long = "then")]
+        then_cmd: Option<String>,
+        /// Wait for an answer in seconds
+        #[arg(long, default_value_t = 0)]
+        wait: u64,
+        /// Expiry in seconds (1–3600)
+        #[arg(long, default_value_t = 900)]
+        ttl: u64,
+        #[arg(short = 't', long = "target", help = "Window id from moai ctl ls")]
+        target: Option<String>,
+    },
+    /// Read a suggestion's answer, optionally waiting for it
+    Answer {
+        id: String,
+        #[arg(long, default_value_t = 0)]
+        wait: u64,
+        #[arg(short = 't', long = "target", help = "Window id from moai ctl ls")]
+        target: Option<String>,
+    },
+    /// Take down a suggestion that is still pending
+    Withdraw {
+        id: String,
+        #[arg(short = 't', long = "target", help = "Window id from moai ctl ls")]
+        target: Option<String>,
+    },
     /// List the windows this user already opened
     #[command(
         after_help = "  Without --all, list only windows in this repository.\n  No window is an empty list and a successful exit."

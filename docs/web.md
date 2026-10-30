@@ -43,6 +43,14 @@ registered itself. Only registered projects can be read this way.
 
 The page has four tabs.
 
+A visible tab can receive `moai ctl propose` suggestions from another terminal.
+The nonmodal card at the lower right starts with `» Suggestion` (or `» 제안`),
+shows the proposed action, and offers Accept and Decline. The same choices are
+available at `SPC a y` and `SPC a n`; `SPC a l` steps through several pending
+suggestions. The card leaves the current tab and input alone. A suggestion
+expires and disappears if nobody answers it. See [Control an open
+window](ctl.md#suggest-something-to-the-person) for waits and follow-up actions.
+
 | Tab | Shows | Switch |
 |---|---|---|
 | **Board** | A kanban: one column per status, with backlog and deferred columns and one lane per [milestone](glossary.md#milestone). Closed milestone lanes start folded. Epics are not cards; their members stand in their own columns. Select a lane title to see its milestone detail; use its chevron to fold or open it. | `SPC g b` |

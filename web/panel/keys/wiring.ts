@@ -82,6 +82,7 @@ export interface KeyWiringOptions {
   document: Document
   store: Store
   shell: Shell
+  proposal?: { pending(): boolean; accept(): void; decline(): void; list(): void }
   copy: Copy
   /** Defaults to the navigator's (detectPlatform). */
   platform?: Platform
@@ -158,14 +159,14 @@ export function wireKeys(options: KeyWiringOptions): KeyWiring {
     const state = store.getState()
     const mode = modeOf(state)
     const onWiki = state.tab === "wiki"
-    return keyContext(state, {
+    return { ...keyContext(state, {
       mode,
       width: shell.layout().width,
       wikiPane: wikiPaneEl()?.dataset.pane === "body" ? "body" : "list",
       raw: (onWiki ? panes().wiki?.raw?.() : panes().detail.raw?.()) ?? false,
       statusName: (status) => (copy.stats as Record<string, string>)[status] ?? status,
       readable: options.read !== undefined,
-    })
+    }), proposals: options.proposal?.pending() ?? false }
   }
 
   const toolbar = (action: ToolbarAction) => store.dispatch({ type: "toolbar", action })
@@ -404,6 +405,9 @@ export function wireKeys(options: KeyWiringOptions): KeyWiring {
   }
 
   const handlers: Record<string, Handler> = {
+    "proposal.accept": () => options.proposal?.accept(),
+    "proposal.decline": () => options.proposal?.decline(),
+    "proposal.list": () => options.proposal?.list(),
     "move.down": move,
     "move.up": move,
     "move.top": move,

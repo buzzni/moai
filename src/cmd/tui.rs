@@ -416,7 +416,7 @@ fn screen(mut app: App) -> R<Vec<String>> {
     // 역추적 문구를 받는다. 여기서 받아 `Fail` 로 바꾼다.
     let lang = app.site.lang;
     app.ctl_root = app.site.repo.as_ref().map(|r| r.root.display().to_string()).unwrap_or_default();
-    let control = match crate::ctl::serve::Listener::bind() {
+    let control = match crate::ctl::serve::Listener::bind_proposals(app.proposals.clone()) {
         Ok(listener) => Some(listener),
         Err(e) => {
             app.trouble = Some(format!("Control socket unavailable: {e}"));
@@ -1752,7 +1752,13 @@ fn loop_until_quit(
     let mut pending = None;
     let mut step = SPIN_TICK;
     let mut ctl_until = std::time::Instant::now();
+    let mut last_proposals = Vec::<String>::new();
     while !app.quit {
+        let now_proposals: Vec<_> = app.proposals.rows().iter().map(|row| row.id.clone()).collect();
+        if now_proposals != last_proposals {
+            dirty = true;
+            last_proposals = now_proposals;
+        }
         if dirty {
             let began = std::time::Instant::now();
             // **그리다 선 탈은 다음 그림이 낸다**(moai-w7ms 리뷰) — 배너를 앉힌 뒤에 그리는 자가 세운 탈(`draw::fill_history`
@@ -1780,6 +1786,9 @@ fn loop_until_quit(
         // 하필 그때가 쓰는 사람이 화면을 보고 있는 때다.
         let wake = if spinning { stale_due.min(spin_due) } else { stale_due };
         let mut wait = wake.saturating_duration_since(std::time::Instant::now());
+        if let Some(expiry) = app.proposals.next_expiry_in() {
+            wait = wait.min(expiry);
+        }
         if control.is_some() && std::time::Instant::now() < ctl_until {
             wait = wait.min(std::time::Duration::from_millis(100));
         }

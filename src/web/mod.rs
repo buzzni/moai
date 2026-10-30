@@ -242,9 +242,12 @@ fn ctl_post(stream: &TcpStream, req: &Request, site: &Site) -> Response {
     let Some(path) = req.path.strip_prefix("/api/ctl/") else {
         return refuse(404, "unknown control path", code::NOT_FOUND);
     };
-    let (id, seen) = match path.strip_suffix("/seen") {
-        Some(id) => (id, true),
-        None => (path, false),
+    let (id, seen, proposal) = if let Some(id) = path.strip_suffix("/seen") {
+        (id, true, false)
+    } else if let Some(id) = path.strip_suffix("/proposal") {
+        (id, false, true)
+    } else {
+        (path, false, false)
     };
     if id.is_empty() || id.contains('/') {
         return refuse(404, "unknown control tab", code::NOT_FOUND);
@@ -252,16 +255,52 @@ fn ctl_post(stream: &TcpStream, req: &Request, site: &Site) -> Response {
     let mut token = None;
     let mut seq = None;
     let mut screen = None;
+    let mut proposal_id = None;
     for (key, value) in &req.query {
         match key.as_str() {
             "token" if token.replace(value.as_str()).is_none() => {}
             "seq" if !seen && seq.replace(value.parse::<u64>().ok()).is_none() => {}
             "screen" if seen && screen.replace(value.as_str()).is_none() => {}
+            "id" if proposal && proposal_id.replace(value.as_str()).is_none() => {}
             _ => return refuse(400, "invalid control query", code::BAD_INPUT),
         }
     }
     let Some(token) = token else { return refuse(400, "control token is required", code::BAD_INPUT) };
-    let result = if seen {
+    let result = if proposal {
+        let Some(proposal_id) = proposal_id else { return refuse(400, "proposal id is required", code::BAD_INPUT) };
+        if req.content_type.as_deref() != Some("application/json") {
+            return refuse(400, "proposal answer must be application/json", code::BAD_INPUT);
+        }
+        let bytes = match http::read_body(&mut Within::of(stream, READ_LIMIT), req, crate::ctl::wire::LINE_MAX) {
+            Ok(bytes) => bytes,
+            Err(Bad::TooBig) => return refuse(413, "proposal answer exceeds 1 MiB", code::TOO_LARGE),
+            Err(bad) => return refuse(400, &bad_said(&bad, lang), code::BAD_INPUT),
+        };
+        let body: serde_json::Value = match serde_json::from_slice(&bytes) {
+            Ok(value) => value,
+            Err(_) => return refuse(400, "invalid proposal answer", code::BAD_INPUT),
+        };
+        let accepted = match body["state"].as_str() {
+            Some("accepted") => true,
+            Some("declined") => false,
+            _ => return refuse(400, "proposal answer needs accepted or declined", code::BAD_INPUT),
+        };
+        let ran = match body.get("ran") {
+            Some(value) if !value.is_null() => match serde_json::from_value::<crate::ctl::wire::Reply>(value.clone()) {
+                Ok(reply) => Some(reply),
+                Err(_) => return refuse(400, "invalid proposal action result", code::BAD_INPUT),
+            },
+            _ => None,
+        };
+        return match site.tabs.proposal_reply(id, token, proposal_id, accepted, ran) {
+            Ok(reply) if reply.ok => {
+                Response::new(200, http::JSON, serde_json::to_vec(&reply.data).unwrap_or_default())
+            }
+            Ok(reply) => refuse(409, reply.message.as_deref().unwrap_or("proposal already answered"), code::REFUSED),
+            Err("gone") => refuse(410, "tab is gone", code::GONE),
+            Err(_) => refuse(403, "control token does not match", code::FORBIDDEN_ORIGIN),
+        };
+    } else if seen {
         if req.content_length != 0 {
             return refuse(400, say(lang, "web.body"), code::BAD_INPUT);
         }
@@ -359,10 +398,12 @@ fn stream_events(
         }
         if let Some(push) = pushed {
             let mut writer = Within::of(stream, WRITE_LIMIT);
-            writer.write_all(
-                format!("event: ctl\ndata: {}\n\n", serde_json::json!({"seq": push.seq, "request": push.request}))
-                    .as_bytes(),
-            )?;
+            let (name, data) = match push {
+                ctl::Push::Ctl { seq, request } => ("ctl", serde_json::json!({"seq": seq, "request": request})),
+                ctl::Push::Proposal { entry } => ("proposal", entry),
+                ctl::Push::ProposalClosed { id } => ("proposal_closed", serde_json::json!({"id": id})),
+            };
+            writer.write_all(format!("event: {name}\ndata: {data}\n\n").as_bytes())?;
             writer.flush()?;
         }
         let stamp = match api::stamp(cwd, lang, overlay) {

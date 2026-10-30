@@ -264,6 +264,127 @@ fn ctl_lists_and_reads_an_open_explorer() {
     assert!(!socket.exists());
 }
 
+#[cfg(unix)]
+struct ProposalPtyChild(std::process::Child);
+
+#[cfg(unix)]
+impl Drop for ProposalPtyChild {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+
+#[cfg(unix)]
+fn proposal_pty(name: &str) -> (Scratch, std::fs::File, ProposalPtyChild) {
+    use std::io::{Read, Write};
+    use std::os::fd::{AsRawFd, FromRawFd};
+    use std::os::unix::process::CommandExt;
+    use std::time::{Duration, Instant};
+
+    let scratch = init(name);
+    let (mut master_fd, mut slave_fd) = (-1, -1);
+    let size = libc::winsize { ws_row: 30, ws_col: 120, ws_xpixel: 0, ws_ypixel: 0 };
+    assert_eq!(
+        unsafe {
+            libc::openpty(
+                &mut master_fd,
+                &mut slave_fd,
+                std::ptr::null_mut(),
+                std::ptr::null_mut::<libc::termios>(),
+                &size as *const _ as *mut _,
+            )
+        },
+        0
+    );
+    let (mut master, slave) = unsafe { (std::fs::File::from_raw_fd(master_fd), std::fs::File::from_raw_fd(slave_fd)) };
+    for fd in [master.as_raw_fd(), slave.as_raw_fd()] {
+        assert_ne!(unsafe { libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC) }, -1);
+    }
+    assert_ne!(unsafe { libc::fcntl(master.as_raw_fd(), libc::F_SETFL, libc::O_NONBLOCK) }, -1);
+    let mut command = staged(&["tui"]);
+    command
+        .current_dir(scratch.path())
+        .env("TERM", "xterm")
+        .stdin(slave.try_clone().unwrap())
+        .stdout(slave.try_clone().unwrap())
+        .stderr(slave);
+    unsafe {
+        command.pre_exec(|| {
+            if libc::setsid() == -1 || libc::ioctl(0, libc::TIOCSCTTY as _, 0) == -1 {
+                return Err(std::io::Error::last_os_error());
+            }
+            Ok(())
+        });
+    }
+    let child = ProposalPtyChild(command.spawn().unwrap());
+    let deadline = Instant::now() + Duration::from_secs(15);
+    let mut shown = String::new();
+    while Instant::now() < deadline {
+        let mut buf = [0; 8192];
+        match master.read(&mut buf) {
+            Ok(n) => {
+                let chunk = String::from_utf8_lossy(&buf[..n]);
+                for _ in 0..chunk.matches("\x1b[6n").count() {
+                    master.write_all(b"\x1b[1;1R").unwrap();
+                }
+                shown.push_str(&chunk);
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock || e.raw_os_error() == Some(libc::EIO) => {}
+            Err(e) => panic!("PTY: {e}"),
+        }
+        let windows = json_of(&ok(scratch.path(), &["ctl", "ls", "--json"]));
+        if windows["windows"].as_array().is_some_and(|rows| !rows.is_empty()) {
+            return (scratch, master, child);
+        }
+        std::thread::sleep(Duration::from_millis(30));
+    }
+    panic!("explorer did not register: {shown}");
+}
+
+#[test]
+#[cfg(unix)]
+fn ctl_propose_waits_for_the_person() {
+    use std::io::Write;
+    use std::time::{Duration, Instant};
+
+    let (s, mut master, _child) = proposal_pty("ctl-propose-pty");
+    let mut command =
+        staged(&["ctl", "propose", "Show the board?", "--then", "screen board", "--wait", "10", "--json"]);
+    command.current_dir(s.path());
+    let waiting = std::thread::spawn(move || command.output().unwrap());
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while Instant::now() < deadline {
+        let state = json_of(&ok(s.path(), &["ctl", "state", "--json"]));
+        if state["proposals"].as_array().is_some_and(|rows| !rows.is_empty()) {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(30));
+    }
+    master.write_all(b" ay").unwrap();
+    let finished = waiting.join().unwrap();
+    assert!(finished.status.success(), "{}", String::from_utf8_lossy(&finished.stderr));
+    let answer = json_of(&String::from_utf8_lossy(&finished.stdout));
+    assert_eq!(answer["state"], "accepted", "{answer}");
+    assert_eq!(answer["ran"]["ok"], true, "{answer}");
+    assert_eq!(json_of(&ok(s.path(), &["ctl", "state", "--json"]))["screen"], "board");
+}
+
+#[test]
+#[cfg(unix)]
+fn ctl_withdraw_takes_it_down() {
+    let (s, _master, _child) = proposal_pty("ctl-withdraw-pty");
+    let made = json_of(&ok(s.path(), &["ctl", "propose", "Later?", "--json"]));
+    let id = made["id"].as_str().unwrap();
+    let state = json_of(&ok(s.path(), &["ctl", "state", "--json"]));
+    assert_eq!(state["proposals"].as_array().unwrap().len(), 1);
+    let gone = json_of(&ok(s.path(), &["ctl", "withdraw", id, "--json"]));
+    assert_eq!(gone["state"], "withdrawn");
+    let state = json_of(&ok(s.path(), &["ctl", "state", "--json"]));
+    assert!(state["proposals"].as_array().unwrap().is_empty());
+    assert_eq!(json_of(&ok(s.path(), &["ctl", "answer", id, "--json"]))["state"], "withdrawn");
+}
+
 // 링크를 푼 자리 — Windows 의 `\\?\` 까지 걷은, 도구가 내는 철자다(moai-lag7.rrm). 시험이 도구의 철자와 견줄 때 쓴다.
 // 시험 크레이트라 `path::canonical` 을 못 들여, `#[path]` 로 함께 든 `scratch` 의 같은 자를 쓴다 — 여기 베껴 두던
 // 두 벌째를 걷었다(moai-lag7.482). 유닉스에서는 `std::fs::canonicalize` 그대로다.
@@ -32321,6 +32442,49 @@ fn web_ctl_gone_when_the_stream_ends() {
     let finished = waiting.join().unwrap();
     assert!(!finished.status.success());
     assert_eq!(json_of(&String::from_utf8_lossy(&finished.stderr))["code"], "gone");
+}
+
+#[test]
+#[cfg(unix)]
+fn web_ctl_propose_reaches_a_tab_and_returns_its_answer() {
+    let s = init("web-ctl-propose");
+    let web = serve(s.path());
+    let mut stream = events(web.port);
+    let hello = event_named(&mut stream, "hello");
+    let tab = hello["tab"].as_str().unwrap().to_string();
+    let token = hello["token"].as_str().unwrap().to_string();
+    let mut cmd =
+        staged(&["ctl", "propose", "Show board?", "--then", "screen board", "--wait", "10", "-t", &tab, "--json"]);
+    cmd.current_dir(s.path());
+    let waiting = std::thread::spawn(move || cmd.output().unwrap());
+    let card = event_named(&mut stream, "proposal");
+    assert_eq!(card["text"], "Show board?");
+    assert_eq!(card["then"]["verb"], "screen");
+    let id = card["id"].as_str().unwrap();
+    let path = format!("/api/ctl/{tab}/proposal?token={token}&id={id}");
+    let wrong_token = ctl_post(
+        web.port,
+        &format!("/api/ctl/{tab}/proposal?token=wrong&id={id}"),
+        r#"{"state":"declined"}"#,
+        "application/json",
+        true,
+    );
+    assert_eq!(wrong_token.0, 403, "{}", wrong_token.1);
+    let wrong_origin = ctl_post(web.port, &path, r#"{"state":"declined"}"#, "application/json", false);
+    assert_eq!(wrong_origin.0, 403, "{}", wrong_origin.1);
+    let posted = ctl_post(
+        web.port,
+        &path,
+        r#"{"state":"accepted","ran":{"ok":true,"data":{"screen":"board"}}}"#,
+        "application/json",
+        true,
+    );
+    assert_eq!(posted.0, 200, "{}", posted.1);
+    let finished = waiting.join().unwrap();
+    assert!(finished.status.success(), "{}", String::from_utf8_lossy(&finished.stderr));
+    let answer = json_of(&String::from_utf8_lossy(&finished.stdout));
+    assert_eq!(answer["state"], "accepted");
+    assert_eq!(answer["ran"]["data"]["screen"], "board");
 }
 
 #[test]

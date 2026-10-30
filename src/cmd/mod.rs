@@ -596,6 +596,11 @@ fn dispatch(ctx: &Ctx, cli: Cli) -> R<Vec<String>> {
         return opening(ctx);
     };
     match cmd {
+        Cmd::Ctl(CtlCmd::Propose { text, then_cmd, wait, ttl, target }) => {
+            ctl::propose(ctx, target.as_deref(), text, then_cmd, wait, ttl)
+        }
+        Cmd::Ctl(CtlCmd::Answer { id, wait, target }) => ctl::answer(ctx, target.as_deref(), id, wait),
+        Cmd::Ctl(CtlCmd::Withdraw { id, target }) => ctl::withdraw(ctx, target.as_deref(), id),
         Cmd::Ctl(CtlCmd::Ls { all }) => ctl::ls(ctx, all),
         Cmd::Ctl(CtlCmd::State { target, rows }) => ctl::state(ctx, target.as_deref(), rows),
         Cmd::Ctl(CtlCmd::Keys { seqs, text, target }) => ctl::keys(ctx, target.as_deref(), seqs, text),

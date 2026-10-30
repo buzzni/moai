@@ -32,6 +32,14 @@ its view and show a `⇄ ctl` notice. See [Control an open window](ctl.md) for
 window selection, all commands, and the rules for writing under the caller's
 name.
 
+An agent can also suggest an action with `moai ctl propose`. A line below the
+banner begins with `» Suggestion` (or `» 제안`) and names the proposed action.
+It leaves the current mode and keys alone. `SPC a y` accepts the oldest pending
+suggestion, `SPC a n` declines it, and `SPC a l` opens the list, where `j` and
+`k` choose one, `y` and `n` answer, and `Esc` closes without answering. The
+suggestion expires on its own if nobody answers it. See [Control an open
+window](ctl.md#suggest-something-to-the-person) for waits and follow-up actions.
+
 ## Find your way around
 
 [Milestones](glossary.md#milestone) and [epics](glossary.md#epic) behave like

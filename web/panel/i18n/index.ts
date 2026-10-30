@@ -344,6 +344,7 @@ export interface WikiCopy {
 }
 
 export interface Copy {
+  propose: { title: string; accept: string; decline: string; previous: string; next: string }
   hint: string
   refreshedAt: string
   empty: string

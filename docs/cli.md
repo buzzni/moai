@@ -129,27 +129,94 @@ Control an already open explorer or web tab
 Usage: moai ctl [OPTIONS] <COMMAND>
 
 Commands:
-  ls       List the windows this user already opened
-  state    Read the current state of one open window
-  keys     Press keys in an open window using its own key bindings
-  do       Run an action by its stable name, independent of keys.toml
-  actions  List this window's named actions and whether each is enabled
-  sort     Set the explorer order, such as title:desc,priority:desc
-  filter   Apply a filter, or remove the current filter
-  find     Search issues in a chosen field
-  screen   Show list, board, gantt, stats, or wiki
-  view     Show or hide a view axis, including column:<name>
-  cell     Show or hide a list field
-  detail   Show, hide, or place the detail pane
-  goto     Select an issue or a project
-  read     Mark selected issues, a group, or all NEW issues read
-  wiki     Open a wiki page or search wiki pages
-  pane     Set pane shares
-  zone     Select the explorer's timezone
-  theme    Select a web tab's theme; terminal colours follow the terminal
-  help     Print this message or the help of the given subcommand(s)
+  propose   Suggest an action in an open window
+  answer    Read a suggestion's answer, optionally waiting for it
+  withdraw  Take down a suggestion that is still pending
+  ls        List the windows this user already opened
+  state     Read the current state of one open window
+  keys      Press keys in an open window using its own key bindings
+  do        Run an action by its stable name, independent of keys.toml
+  actions   List this window's named actions and whether each is enabled
+  sort      Set the explorer order, such as title:desc,priority:desc
+  filter    Apply a filter, or remove the current filter
+  find      Search issues in a chosen field
+  screen    Show list, board, gantt, stats, or wiki
+  view      Show or hide a view axis, including column:<name>
+  cell      Show or hide a list field
+  detail    Show, hide, or place the detail pane
+  goto      Select an issue or a project
+  read      Mark selected issues, a group, or all NEW issues read
+  wiki      Open a wiki page or search wiki pages
+  pane      Set pane shares
+  zone      Select the explorer's timezone
+  theme     Select a web tab's theme; terminal colours follow the terminal
+  help      Print this message or the help of the given subcommand(s)
 
 Options:
+      --json                 Machine-readable output. Every human line goes away
+      --no-color             Turn colour off (same as `--color never`)
+      --color <how>          auto|always|never (auto by default, off when piped)
+  -C, --dir <path>           Run in this directory (same as `git -C`)
+      --user <name (email)>  Who is doing this (from `git config` when absent)
+  -h, --help                 Print help
+```
+
+## `moai ctl propose`
+
+```
+Suggest an action in an open window
+
+Usage: moai ctl propose [OPTIONS] <TEXT>
+
+Arguments:
+  <TEXT>
+
+Options:
+      --then <THEN_CMD>      A named ctl verb to run if the person accepts
+      --wait <WAIT>          Wait for an answer in seconds [default: 0]
+      --ttl <TTL>            Expiry in seconds (1–3600) [default: 900]
+  -t, --target <TARGET>      Window id from moai ctl ls
+      --json                 Machine-readable output. Every human line goes away
+      --no-color             Turn colour off (same as `--color never`)
+      --color <how>          auto|always|never (auto by default, off when piped)
+  -C, --dir <path>           Run in this directory (same as `git -C`)
+      --user <name (email)>  Who is doing this (from `git config` when absent)
+  -h, --help                 Print help
+```
+
+## `moai ctl answer`
+
+```
+Read a suggestion's answer, optionally waiting for it
+
+Usage: moai ctl answer [OPTIONS] <ID>
+
+Arguments:
+  <ID>
+
+Options:
+      --wait <WAIT>          [default: 0]
+  -t, --target <TARGET>      Window id from moai ctl ls
+      --json                 Machine-readable output. Every human line goes away
+      --no-color             Turn colour off (same as `--color never`)
+      --color <how>          auto|always|never (auto by default, off when piped)
+  -C, --dir <path>           Run in this directory (same as `git -C`)
+      --user <name (email)>  Who is doing this (from `git config` when absent)
+  -h, --help                 Print help
+```
+
+## `moai ctl withdraw`
+
+```
+Take down a suggestion that is still pending
+
+Usage: moai ctl withdraw [OPTIONS] <ID>
+
+Arguments:
+  <ID>
+
+Options:
+  -t, --target <TARGET>      Window id from moai ctl ls
       --json                 Machine-readable output. Every human line goes away
       --no-color             Turn colour off (same as `--color never`)
       --color <how>          auto|always|never (auto by default, off when piped)
@@ -3176,6 +3243,8 @@ Order:
   close hint.
     SPC /    search              SPC f    filter             SPC n    jot
     SPC h    keys                SPC q    quit
+    SPC a y  accept a suggestion; SPC a n declines
+    SPC a l  open the suggestion list
     SPC p a  register            SPC p d  drop from the list
   Screen — which one stands; the root menu names it, as in [board]:
     SPC g l  list                SPC g b  board — described below
