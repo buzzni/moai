@@ -2,7 +2,7 @@
  * The board's grouping, pure (no DOM): which rows become cards, in which lane and which column.
  * Where a row stands is moai's (data/index.ts: `descendants` for what is at the path, `homeOf` for the lane,
  * `shelvedAt` for deferral, the order of the tree for the order of the cards). This file only sorts those answers
- * into a grid. Closed epics stand as done cards; milestones head lanes.
+ * into a grid. Epics are not cards; milestones head lanes.
  */
 import { closedGroup, isBacklog, isDone, isWork, LOST, pathKey, type IssueIndex, type Keep, type Path, type Row, type Seg } from '../data/index.js'
 import type { ViewSettings } from '../store.js'
@@ -108,7 +108,7 @@ export function groupBoard(index: IssueIndex, look: BoardLook, known: readonly s
   // Work, and a thought that is still open: the TUI board counts only open backlog (a closed one is `unopenable`).
   const cards = index.descendants(path).filter((at) => {
     const row = index.rows[at]!
-    return index.find(row.id) === at && (isWork(row) || (isBacklog(row) && !isDone(row)) || (row.kind === 'epic' && closedGroup(row)))
+    return index.find(row.id) === at && (isWork(row) || (isBacklog(row) && !isDone(row)))
   })
   const cursorAt = cursor === null ? undefined : index.find(cursor)
   const cursorColumn = cursorAt === undefined ? undefined : columnOf(index, cursorAt)
@@ -123,16 +123,7 @@ export function groupBoard(index: IssueIndex, look: BoardLook, known: readonly s
     return view.showArchived === true || index.rows[at]!.archived !== true
   }
   const shown = (at: number) => at === cursorAt || passes(at)
-  const kept = cards.filter(shown).filter((at) => {
-    if (look.reveal || at === cursorAt || columnOf(index, at) !== 'done') return true
-    const epic = index.epicOf(at)
-    const home = epic === undefined ? undefined : index.find(epic)
-    if (home === undefined || !closedGroup(index.rows[home]!)) return true
-    const folded = index.dirPath(home)
-    // Inside the epic its fold does not apply: there it is the path, not a card, so nothing could open it again.
-    if (folded.every((seg, n) => path[n] === seg)) return true
-    return !look.shut?.has(pathKey(folded))
-  })
+  const kept = cards.filter(shown)
   const found = look.reveal ? new Set(kept.map((at) => columnOf(index, at))) : null
   const keys = all.filter((key) => !hides(key) || key === cursorColumn || found?.has(key))
   // What only the cursor keeps: its card, or (the cursor on a group, say) the hidden column it stands in.

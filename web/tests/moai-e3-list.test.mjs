@@ -190,7 +190,7 @@ function mount(rows, { state: over = {}, width = 800, height = 280, detailVisibl
   return { dom, doc, root, store, pane, calls, lines, key, render, size }
 }
 
-test('Tab opens the chosen closed group while leaving closed descendants folded', () => {
+test('Tab opens closed epic descendants while closed milestones keep their folds', () => {
   const rows = [
     { id: 'm1', kind: 'milestone', title: 'Release', derived_status: 'done' },
     { id: 'e1', kind: 'epic', title: 'Epic', milestone: 'm1', derived_status: 'done' },
@@ -198,11 +198,11 @@ test('Tab opens the chosen closed group while leaving closed descendants folded'
   ]
   const { lines, key, store } = mount(rows, { state: { cursor: 'm1' } })
   key('Tab')
-  assert.deepEqual(lines().map((line) => line.dataset.key), ['m1', 'e1'])
-  assert.equal(lines()[1].getAttribute('aria-expanded'), 'false')
+  assert.deepEqual(lines().map((line) => line.dataset.key), ['m1', 'e1', 'e1.a'])
+  assert.equal(lines()[1].getAttribute('aria-expanded'), 'true')
   store.dispatch({ type: 'cursor', id: 'e1' })
   key('Tab')
-  assert.ok(lines().some((line) => line.dataset.key === 'e1.a'))
+  assert.ok(!lines().some((line) => line.dataset.key === 'e1.a'), 'Tab on an open epic folds it by hand')
 })
 
 test('Tab on a parent keeps a closed group the person opened (review moai-mkzo.8wa)', () => {
@@ -213,8 +213,6 @@ test('Tab on a parent keeps a closed group the person opened (review moai-mkzo.8
   ]
   const { lines, key, store } = mount(rows, { state: { cursor: 'e1' } })
   store.dispatch({ type: 'cursor', id: 'm1' })
-  key('Tab')
-  store.dispatch({ type: 'cursor', id: 'e1' })
   key('Tab')
   assert.ok(lines().some((line) => line.dataset.key === 'e1.a'), 'the premise — e1 is open')
   store.dispatch({ type: 'cursor', id: 'm1' })

@@ -146,7 +146,7 @@ const mount = (state, rows = ROWS) => {
   return { root, view, chosen, dom, index }
 }
 
-test('closed milestone lanes and epic cards fold; the running lane and deferred member remain', () => {
+test('closed milestone lanes fold while epic members remain ordinary cards', () => {
   const rows = [
     { id: 'm1', kind: 'milestone', title: 'Closed release', status: 'todo', derived_status: 'done' },
     { id: 'e1', kind: 'epic', title: 'Closed epic', milestone: 'm1', status: 'todo', derived_status: 'done' },
@@ -167,16 +167,15 @@ test('closed milestone lanes and epic cards fold; the running lane and deferred 
   assert.ok(root.querySelector('[data-id="w1"]'))
   head('m1').querySelector('.moai-toggle').click()
   assert.equal(head('m1').querySelector('.moai-toggle').getAttribute('aria-expanded'), 'true')
-  assert.ok(root.querySelector('.m-lane[data-status="done"] [data-id="e1"]'))
-  assert.equal(root.querySelector('[data-id="e1.a"]'), null)
-  assert.ok(root.querySelector('.m-lane[data-status="deferred"] [data-id="e1.b"]'))
-  root.querySelector('[data-id="e1"] .moai-toggle').click()
+  assert.equal(root.querySelector('[data-id="e1"]'), null)
   assert.ok(root.querySelector('.m-lane[data-status="done"] [data-id="e1.a"]'))
+  assert.ok(root.querySelector('.m-lane[data-status="deferred"] [data-id="e1.b"]'))
+  assert.equal(root.querySelector('.m-card .moai-toggle'), null, 'card toggles must not return')
   view.render(state, index)
   assert.ok(root.querySelector('[data-id="e1.a"]'), 'a reread of the view keeps the chosen fold')
   view.leave()
   view.render(state, index)
-  assert.equal(head('m1').querySelector('.moai-toggle').getAttribute('aria-expanded'), 'false', 'a new visit seeds closed groups again')
+  assert.equal(head('m1').querySelector('.moai-toggle').getAttribute('aria-expanded'), 'false', 'a new visit seeds closed milestone lanes again')
   const selectedHead = mount({ ...state, cursor: 'm1' }, rows)
   assert.equal(selectedHead.root.querySelector('.m-swim-head[data-lane="m:m1"] .moai-toggle').getAttribute('aria-expanded'), 'false', 'selecting the head does not open its lane')
 })
@@ -226,7 +225,7 @@ test('folding another lane leaves a selected lane head where it is (review moai-
   assert.deepEqual(chosen, [], 'folding m2 moved a cursor that stood outside it')
 })
 
-test('inside a folded closed epic its done members stay cards (review moai-mkzo.8wa)', () => {
+test('inside a closed epic its done members remain cards', () => {
   const rows = [
     { id: 'm1', kind: 'milestone', derived_status: 'done' },
     { id: 'e1', kind: 'epic', milestone: 'm1', derived_status: 'done' },
@@ -239,7 +238,7 @@ test('inside a folded closed epic its done members stay cards (review moai-mkzo.
   assert.deepEqual(inside.lanes[0].columns.find((column) => column.key === 'done').cards.map((at) => idx.rows[at].id), ['e1.a'])
 })
 
-test('search reveals a done member inside folded lane and epic without changing the fold', () => {
+test('search reveals a done member inside a folded lane without changing the fold', () => {
   const rows = [
     { id: 'm1', kind: 'milestone', derived_status: 'done' },
     { id: 'e1', kind: 'epic', milestone: 'm1', derived_status: 'done' },

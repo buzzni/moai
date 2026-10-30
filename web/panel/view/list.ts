@@ -9,7 +9,7 @@
 // redrawing the window never drops it. The key router (panel/keys/) owns every key; it calls command() with
 // the action a key stands for (moves in drawn order, going in and out, unfolding), so no key runs twice.
 
-import { closedGroup, pathKey, priorityOf, type IssueIndex, type Keep, type Path } from "../data/index.ts"
+import { startsFolded, pathKey, priorityOf, type IssueIndex, type Keep, type Path } from "../data/index.ts"
 import { sortEdit, type SortKey } from "../data/query.ts"
 import { assigneeOf } from "../data/people.ts"
 import { isUnread } from "../data/read.ts"
@@ -424,7 +424,7 @@ export const mountList: MountPane = (root, ctx): PaneView => {
         const under = foldersUnder(model.index, folder.path)
         const inside = new Set(under)
         const closed = new Set(model.index.descendants(folder.path)
-          .filter((at) => model!.index.isDir(at) && closedGroup(model!.index.rows[at]!))
+          .filter((at) => model!.index.isDir(at) && startsFolded(model!.index.rows[at]!))
           .map((at) => pathKey(model!.index.dirPath(at))))
         const expanded = folder.open
           ? state.expanded.filter((key) => !inside.has(key))

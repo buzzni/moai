@@ -19,7 +19,7 @@ import { assigneeOf } from '../data/people.ts'
 import { MEMORY_KEY, settingsStorage } from '../data/memory.ts'
 import { undoOf, type PlanChange } from '../data/plan.ts'
 import { zoneNow } from '../data/zone.ts'
-import { closedGroup, pathKey, type GanttRow, type IssueIndex, type Row } from '../data/index.ts'
+import { startsFolded, pathKey, type GanttRow, type IssueIndex, type Row } from '../data/index.ts'
 import { fill } from '../i18n/index.ts'
 import type { State } from '../store.ts'
 import { el, emptyState, icon } from './components.ts'
@@ -695,7 +695,7 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
     for (const { path, at } of paths) {
       const key = pathKey(path)
       if (!open) shut.add(key)
-      else if (key === pathKey(line.path) || at === undefined || !closedGroup(index.rows[at]!)) shut.delete(key)
+      else if (key === pathKey(line.path) || at === undefined || !startsFolded(index.rows[at]!)) shut.delete(key)
     }
     if (!open) {
       const cursor = model.lines.find((one) => one.key === state!.cursor)
@@ -1036,7 +1036,7 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
       const at = current.cursor === null ? undefined : index.find(current.cursor)
       const selected = at === undefined ? [] : index.homeOf(at)
       for (let n = 0; n < index.rows.length; n++) {
-        if (!index.isDir(n) || !closedGroup(index.rows[n]!)) continue
+        if (!index.isDir(n) || !startsFolded(index.rows[n]!)) continue
         const path = index.dirPath(n)
         if (path.every((seg, k) => selected[k] === seg)) continue
         shut.add(pathKey(path))
