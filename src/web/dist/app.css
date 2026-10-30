@@ -83,14 +83,21 @@
   --progress-soft: color-mix(in srgb, #F2B01E 7%, var(--bg));
   --review-soft: color-mix(in srgb, #a855f7 8%, var(--bg));
   --done-soft: color-mix(in srgb, #10B981 7%, var(--bg));
+  /* A narrow card band mixes into the card, which is --surface in the dark theme. */
+  --progress-band: color-mix(in srgb, #F2B01E 10%, var(--card-bg));
+  --review-band: color-mix(in srgb, #a855f7 12%, var(--card-bg));
+  --done-band: color-mix(in srgb, #10B981 10%, var(--card-bg));
+  --progress-edge: color-mix(in srgb, #F2B01E 42%, var(--card-bg));
+  --review-edge: color-mix(in srgb, #a855f7 48%, var(--card-bg));
+  --done-edge: color-mix(in srgb, #10B981 42%, var(--card-bg));
   --epic: color-mix(in srgb, var(--accent) 70%, var(--muted));
 }
 
-/* Keep a selected done row distinct in the dark theme. */
+/* Keep a selected done row distinct, and the done band on a dark card pale. */
 @media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) { --done-soft: color-mix(in srgb, #10B981 3%, var(--bg)); }
+  :root:not([data-theme="light"]) { --done-soft: color-mix(in srgb, #10B981 3%, var(--bg)); --done-band: color-mix(in srgb, #10B981 5%, var(--card-bg)); }
 }
-:root[data-theme="dark"] { --done-soft: color-mix(in srgb, #10B981 3%, var(--bg)); }
+:root[data-theme="dark"] { --done-soft: color-mix(in srgb, #10B981 3%, var(--bg)); --done-band: color-mix(in srgb, #10B981 5%, var(--card-bg)); }
 
 /* Base. */
 * { box-sizing: border-box; }
@@ -439,16 +446,32 @@ body.m-resizing:is([data-resize="bottom"], [data-resize="top"]) { cursor: row-re
 
 /*
  * What a card of the kanban holds (view/board.ts): id, priority and count on one line, the title, and the chips
- * of the columns that are on. The lanes, the column heads and the card box are components.css (look-and-feel 5.7).
+ * of the columns that are on, plus the first-line band and which columns carry it. The lanes, the column heads
+ * and the card box are components.css (look-and-feel 5.7).
  * Needs tokens.css and components.css.
  */
 .m-card-line { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; min-width: 0; }
+/* Every card keeps this geometry, including plain columns. Only the lane supplies colour. */
+.m-card > .m-card-line:first-child {
+  margin: -8px -10px 0; padding: 5px 10px 3px;
+  border-radius: var(--radius-card) var(--radius-card) 0 0;
+  background: var(--band, transparent);
+  border-bottom: 1px solid var(--edge, transparent);
+}
+/* The band covers the selected card's inset ring, so draw its top and sides on the band. */
+.m-card[aria-selected="true"] > .m-card-line:first-child {
+  border-top: 1px solid var(--accent); border-left: 1px solid var(--accent); border-right: 1px solid var(--accent);
+  padding: 4px 9px 3px;
+}
+.m-lane[data-status="in_progress"] { --band: var(--progress-band); --edge: var(--progress-edge); }
+.m-lane[data-status="review"] { --band: var(--review-band); --edge: var(--review-edge); }
+.m-lane[data-status="done"] { --band: var(--done-band); --edge: var(--done-edge); }
 /* A chip on a card (an epic's name, an assignee, a tag) stays inside the card: one line, cut with an ellipsis, the
    whole name in its title (moai-rqec). Upstream's inline-flex chip cannot ellipsize its text, so it ran past the
    card's edge with a long epic name. */
 .m-card-line > .m-chip { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; line-height: 20px; }
 .m-card-line .m-id, .m-card-line .m-count { font: 12px var(--mono); color: var(--muted); }
-.m-card-title { margin-top: 2px; overflow-wrap: anywhere; }
+.m-card-title { margin-top: 5px; overflow-wrap: anywhere; }
 
 /*
  * The gantt tab (view/gantt.ts): a toolbar, one scroll box holding two columns — the grid (left, sticky, so it never
