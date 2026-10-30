@@ -18,6 +18,7 @@ does not tag — see `CONTRIBUTING.md`.
 
 ### Changed
 
+- Explorer list `Tab` and Gantt entry leave closed epics and milestones folded; opening one keeps it visible while reading. (moai-mkzo.fck)
 - Archive hiding and `moai archive` now wait for a row's parent, epic and milestone to reach archive age before removing the row from the active view or snapshot. (moai-mkzo.pji)
 
 ### Fixed

@@ -2676,7 +2676,9 @@ Order:
   and lands on the parent; with nothing to fold it leaves one level. On a
   project header row, l and the right arrow unfold and h and the left arrow
   fold. Tab unfolds everything under it recursively and folds it again on a
-  second press. Unfolded members stand with branch marks in the title column,
+  second press. Closed epics and milestones below that row stay folded; press
+  l or Tab on one to open it. Unfolded members
+  stand with branch marks in the title column,
   and that unfolding is not kept in the config. gg and Home go to the top,
   G and End to the bottom. Ctrl-d and Ctrl-u scroll half a page, Ctrl-f and
   Ctrl-b (PageDown and PageUp) a whole page and the wheel three rows — the
@@ -2876,11 +2878,12 @@ Order:
   top card in a column goes up to it — and there l unfolds, h folds, Tab
   unfolds everything and Enter goes in, as in the list.
 
-  SPC g g lays the same rows out as a gantt chart: the list, every group opened
+  SPC g g lays the same rows out as a gantt chart: the list, with open groups
   out, stays fixed on the left and a date axis with bars stands on the right.
   It is the list's layout too — the cursor, the filter, the view, search and
-  the detail are the list's — but it holds its own folds: it opens with
-  everything unfolded, h, l and Tab fold and unfold only inside it,
+  the detail are the list's — but it holds its own folds: closed epics and
+  milestones start folded, except those holding the selected row.
+  h, l and Tab fold and unfold only inside it,
   and the list keeps the folds it had. Coming back to the list opens the
   folder that holds the row you stood on. The detail stands below the gantt at
   first; SPC o d there moves the gantt's detail only, for this session.

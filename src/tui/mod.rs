@@ -1918,6 +1918,24 @@ impl Site {
         self.read_of(i).unwrap_or(i.status.as_str())
     }
 
+    /// A closed epic or milestone uses its members' read column, and only a
+    /// standing group may inherit that column. Duplicate hidden twins do not.
+    pub fn closed(&self, at: usize) -> bool {
+        let Some(i) = self.issues.get(at) else { return false };
+        crate::report::is_group(i) && self.stand_of(i).is_some() && self.column(at) == crate::config::DONE
+    }
+
+    /// Directory paths of closed groups below a place. The index supplies the
+    /// same paths that list and Gantt rows use.
+    pub(super) fn closed_dirs(&self, under: &Path) -> Vec<Path> {
+        self.index
+            .descendants(under)
+            .into_iter()
+            .filter(|&at| self.index.is_dir(&self.issues, at) && self.closed(at))
+            .map(|at| self.index.dir_path(&self.issues, at))
+            .collect()
+    }
+
     /// 그 줄이 아카이브인가(moai-47mz) — **거름망과 같은 자로 잰다**([`crate::query::Where::archived`]): 칸은
     /// [`Site::column`], 그 칸에 든 때는 묶음이면 읽은 칸에 든 때(`report::Stand::entered`)고 아니면 제 칸
     /// 시각이다. 시계는 적재마다 고정한 [`Site::now`] 다 — 프레임마다 다시 잡으면 자정 언저리에 줄이 깜빡인다.
@@ -4876,6 +4894,9 @@ impl App {
                 // 바구니를 다른 말로 부른다.
                 site.lang = self.site.lang;
                 site.repo = repo;
+                if self.gantt() {
+                    site.fold_closed_for_gantt(None);
+                }
                 // **누군지는 읽는 스레드가 풀어 온다**(moai-ropk, 옮긴 것은 moai-uitb) — 그 프로젝트의
                 // 뿌리에서, 읽을 때 한 번. [`super::layer::App::enter_project`] 가 들어가며 하는 것과
                 // 같은 자다(프로젝트마다 git 설정이 다를 수 있어 뿌리마다 푼다). 그 한 번이 하위
@@ -5590,10 +5611,13 @@ impl App {
         let Some(site) = self.site_mut(seat) else { return };
         if gantt {
             site.gantt_shut.clear();
+            for path in site.closed_dirs(&Path::new()) {
+                site.set_open(true, path, false);
+            }
             return;
         }
         let dirs: Vec<Path> = (0..site.issues.len())
-            .filter(|&n| site.index.is_dir(&site.issues, n))
+            .filter(|&n| site.index.is_dir(&site.issues, n) && !site.closed(n))
             .map(|n| site.index.dir_path(&site.issues, n))
             .collect();
         site.expanded.extend(dirs);
@@ -5663,16 +5687,16 @@ impl App {
         if gantt {
             // 간트는 접은 자리를 적는다 — 다 접기는 그 자리와 밑의 묶음 전부를 넣고, 다 펼치기는 그것을 걷는다.
             let Some(site) = self.site_mut(seat) else { return };
-            let mut under: Vec<Path> = site
+            let mut under: Vec<(Path, bool)> = site
                 .index
                 .descendants(&path)
                 .into_iter()
                 .filter(|&at| site.index.is_dir(&site.issues, at))
-                .map(|at| site.index.dir_path(&site.issues, at))
+                .map(|at| (site.index.dir_path(&site.issues, at), site.closed(at)))
                 .collect();
-            under.push(path);
-            for p in under {
-                site.set_open(true, p, !open);
+            under.push((path, false));
+            for (p, closed) in under {
+                site.set_open(true, p, !open && !closed);
             }
             return;
         }
@@ -5695,7 +5719,7 @@ impl App {
             .index
             .descendants(&path)
             .into_iter()
-            .filter(|&at| site.index.is_dir(&site.issues, at))
+            .filter(|&at| site.index.is_dir(&site.issues, at) && !site.closed(at))
             .map(|at| site.index.dir_path(&site.issues, at))
             .collect();
         site.expanded.extend(under);
@@ -6917,6 +6941,72 @@ mod tests {
             make("argos-0009", Kind::Issue),
         ];
         App::new(issues, cfg(), Path::new())
+    }
+
+    fn grouped_for_folding() -> App {
+        let mut closed = member("argos-0003", "argos-0001");
+        closed.status = Status::new(crate::config::DONE);
+        closed.done_at = Some(crate::model::now());
+        let mut running = member("argos-0004", "argos-0002");
+        running.status = Status::new("in_progress");
+        let mut first = make("argos-0001", Kind::Epic);
+        let mut second = make("argos-0002", Kind::Epic);
+        first.milestone = Some("argos-0000".into());
+        second.milestone = Some("argos-0000".into());
+        App::new(vec![make("argos-0000", Kind::Milestone), first, second, closed, running], cfg(), Path::new())
+    }
+
+    #[test]
+    fn tab_leaves_closed_epics_folded_but_opens_the_selected_group() {
+        let mut a = grouped_for_folding();
+        assert!(a.site.closed(1));
+        assert!(!a.site.closed(2));
+        a.hit("Tab");
+        let closed = a.site.index.dir_path(&a.site.issues, 1);
+        let running = a.site.index.dir_path(&a.site.issues, 2);
+        assert!(!a.site.expanded.contains(&closed));
+        assert!(a.site.expanded.contains(&running));
+        let rows = a.rows();
+        a.cursor = rows.iter().position(|r| matches!(r, Row::Item(_, e, _) if e.at() == Some(1))).unwrap();
+        a.hit("Tab");
+        assert!(a.site.expanded.contains(&closed), "Tab on the closed epic must open that epic");
+    }
+
+    #[test]
+    fn gantt_enters_with_closed_epics_folded_and_keeps_manual_opening() {
+        let mut a = grouped_for_folding();
+        a.hit("SPC g g");
+        let closed = a.site.index.dir_path(&a.site.issues, 1);
+        assert!(a.site.gantt_shut.contains(&closed));
+        let rows = a.rows();
+        a.cursor = rows.iter().position(|r| matches!(r, Row::Item(_, e, _) if e.at() == Some(1))).unwrap();
+        a.hit("l");
+        assert!(!a.site.gantt_shut.contains(&closed));
+        let issues = a.site.issues.clone();
+        a.adopt(issues);
+        assert!(!a.site.gantt_shut.contains(&closed), "reload folded a group opened by the person");
+        let mut issues = a.site.issues.clone();
+        issues[4].status = Status::new(crate::config::DONE);
+        issues[4].done_at = Some(crate::model::now());
+        a.adopt(issues);
+        let newly_closed = a.site.index.dir_path(&a.site.issues, 2);
+        assert!(a.site.closed(2));
+        assert!(!a.site.gantt_shut.contains(&newly_closed), "a group closed while watched folded itself");
+    }
+
+    #[test]
+    fn gantt_keeps_the_selected_members_closed_group_open() {
+        let mut a = grouped_for_folding();
+        a.hit("Tab");
+        let rows = a.rows();
+        a.cursor = rows.iter().position(|r| matches!(r, Row::Item(_, e, _) if e.at() == Some(1))).unwrap();
+        a.hit("l");
+        let rows = a.rows();
+        a.cursor = rows.iter().position(|r| matches!(r, Row::Item(_, e, _) if e.at() == Some(3))).unwrap();
+        a.hit("SPC g g");
+        let closed = a.site.index.dir_path(&a.site.issues, 1);
+        assert!(!a.site.gantt_shut.contains(&closed));
+        assert!(a.rows().iter().any(|r| matches!(r, Row::Item(_, e, _) if e.at() == Some(3))));
     }
 
     impl App {

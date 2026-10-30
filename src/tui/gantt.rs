@@ -1,8 +1,8 @@
-//! 간트 배치 — `SPC g g`(moai-i4hf). 목록을 **모두 펼친 채** 왼쪽에 고정하고, 오른쪽에 날짜 축과 막대를 둔다.
+//! 간트 배치 — `SPC g g`(moai-i4hf). 닫힌 묶음을 접은 목록을 왼쪽에 고정하고, 오른쪽에 날짜 축과 막대를 둔다.
 //!
 //! **새 창이 아니라 목록의 배치다**([`super::view::Layout::Gantt`]). 줄은 목록과 같은 몸(`App::rows_in`)이 세우고,
 //! 커서·거름망·보기·검색·상세가 한 벌이라 `SPC g l` ↔ `SPC g g` 를 오가도 자리를 잃지 않는다. 다른 것은 펼침
-//! 하나다 — 간트는 접은 자리(`Site::gantt_shut`)를 따로 들어, 들어갈 때 모두 펼치고 목록의 접기는 그대로 둔다.
+//! 하나다 — 간트는 접은 자리(`Site::gantt_shut`)를 따로 들어, 들어갈 때 닫힌 묶음을 접고 목록의 접기는 그대로 둔다.
 //!
 //! **날짜를 판단하지 않는다.** 계획이 어디서 왔는지, 시작을 아는지, 늦었는지는 [`crate::report::gantt`] 가 정하고,
 //! 여기는 그 값을 위젯의 줄([`moai_gantt::GanttRow`])로 옮기기만 한다 — 날짜를 지역 기준 초로, 칸을 색 칸으로.
@@ -221,6 +221,18 @@ impl Site {
             }
         }
     }
+
+    /// Seed Gantt's folded set once on entry. A group containing the selected
+    /// row remains open so switching layouts does not hide the cursor.
+    pub(super) fn fold_closed_for_gantt(&mut self, selected_home: Option<&Path>) {
+        self.gantt_shut.clear();
+        for path in self.closed_dirs(&Path::new()) {
+            if selected_home.is_some_and(|home| home.starts_with(&path)) {
+                continue;
+            }
+            self.set_open(true, path, false);
+        }
+    }
 }
 
 /// 간트 위의 끌기(moai-i4hf.exq). 끄는 동안 [`App::chart_drag`] 가 든다.
@@ -258,13 +270,22 @@ impl App {
         if self.gantt() { !site.gantt_shut.contains(path) } else { site.expanded.contains(path) }
     }
 
-    /// 간트로 들어간다 — **모두 펼친다**. 지금 프로젝트와 한눈 보기에 이미 읽은 프로젝트 모두의 접은 자리를
-    /// 걷는다. 목록의 펼침(`expanded`)은 안 건드린다 — 목록으로 돌아오면 접어 둔 그대로 선다.
+    /// Enter Gantt with closed epics and milestones folded. A selected row's
+    /// ancestors stay open. List expansion remains independent.
     pub(super) fn open_gantt(&mut self) {
-        self.site.gantt_shut.clear();
+        let selected = match self.current() {
+            Some(super::Row::Item(seat, entry, _)) => {
+                entry.at().and_then(|at| self.site_of_seat(seat).map(|site| (seat, site.index.home_of(at).clone())))
+            }
+            _ => None,
+        };
+        let here = selected.as_ref().and_then(|(seat, path)| (*seat == super::Seat::Here).then_some(path));
+        self.site.fold_closed_for_gantt(here);
         if let Some(layer) = self.layer.as_mut() {
-            for site in layer.places.iter_mut().filter_map(|p| p.site.as_mut()) {
-                site.gantt_shut.clear();
+            for (at, site) in layer.places.iter_mut().enumerate().filter_map(|(at, p)| p.site.as_mut().map(|s| (at, s)))
+            {
+                let keep = selected.as_ref().and_then(|(seat, path)| (*seat == super::Seat::Place(at)).then_some(path));
+                site.fold_closed_for_gantt(keep);
             }
         }
     }

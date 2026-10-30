@@ -520,7 +520,9 @@ BACKLOG
   and lands on the parent; with nothing to fold it leaves one level. On a
   project header row, {key:browse.expand} and the right arrow unfold and {key:browse.collapse} and the left arrow
   fold. {key:browse.expand_all} unfolds everything under it recursively and folds it again on a
-  second press. Unfolded members stand with branch marks in the title column,
+  second press. Closed epics and milestones below that row stay folded; press
+  {key:browse.expand} or {key:browse.expand_all} on one to open it. Unfolded members
+  stand with branch marks in the title column,
   and that unfolding is not kept in the config. {key:moves.top} and Home go to the top,
   {key:moves.bottom} and End to the bottom. {key:moves.half_down} and {key:moves.half_up} scroll half a page, {key:moves.page_down} and
   {key:moves.page_up} (PageDown and PageUp) a whole page and the wheel three rows — the
@@ -720,11 +722,12 @@ BACKLOG
   top card in a column goes up to it — and there {key:browse.expand} unfolds, {key:browse.collapse} folds, {key:browse.expand_all}
   unfolds everything and {key:browse.enter} goes in, as in the list.
 
-  {key:browse.go_gantt} lays the same rows out as a gantt chart: the list, every group opened
+  {key:browse.go_gantt} lays the same rows out as a gantt chart: the list, with open groups
   out, stays fixed on the left and a date axis with bars stands on the right.
   It is the list's layout too — the cursor, the filter, the view, search and
-  the detail are the list's — but it holds its own folds: it opens with
-  everything unfolded, {key:browse.collapse}, {key:browse.expand} and {key:browse.expand_all} fold and unfold only inside it,
+  the detail are the list's — but it holds its own folds: closed epics and
+  milestones start folded, except those holding the selected row.
+  {key:browse.collapse}, {key:browse.expand} and {key:browse.expand_all} fold and unfold only inside it,
   and the list keeps the folds it had. Coming back to the list opens the
   folder that holds the row you stood on. The detail stands below the gantt at
   first; {key:browse.detail_at} there moves the gantt's detail only, for this session.

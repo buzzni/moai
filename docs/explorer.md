@@ -33,7 +33,8 @@ directories. Forgot a key? `?` (or `SPC h`) opens [the key list](#the-key-list).
 - `j`/`k` move, `Enter` goes into a milestone or an epic, `Backspace` comes back
   out. Rows you can go into end their title with `/`
 - `l` unfolds a group one step where it stands and `h` folds it; `Tab` unfolds
-  everything under it
+  everything under it while leaving closed epics and milestones folded. Press
+  `l` or `Tab` on a closed group to open that group
 - `gg` and `G` go to the top and the bottom. `Ctrl-d`/`Ctrl-u` scroll half a
   page and `Ctrl-f`/`Ctrl-b` a whole one without moving the cursor: the row you
   chose and its detail stay put even off screen, and the next `j` or `k` brings
@@ -174,7 +175,8 @@ what runs late, and what is moving right now. It is the list's layout, not a win
 of its own, so the cursor, filter, view, search and detail carry over and `SPC g l`
 brings you back to the same row.
 
-**Reading it.** Every group opens out when you enter, and the left column is the
+**Reading it.** Closed epics and milestones start folded; the group holding
+the selected row stays open. The left column is the
 list's row. On the right, `░` is the planned start to deadline (`▒` on an epic or a
 milestone), `◆` a milestone's own deadline, `█` over it when the work actually ran,
 `▓` the time past a deadline, `┄` a deferred row's plan, and `▼` over a dotted line
@@ -188,7 +190,8 @@ anywhere, the date side says how to add them: `moai edit <id> --start <day> --du
 <day>`, or `@start~due` at the end of a plan line.
 
 **Folding.** `h`, `l` and `Tab` fold and unfold inside the gantt only — the list
-keeps the folds it had, and the next time you enter, everything is open again.
+keeps the folds it had. A group you open stays open through a reread; entering
+the gantt again folds closed groups afresh.
 
 **Moving the dates.** `=` and `-` zoom in and out (hour, day, week, month), `H` and
 `L` slide one cell, `[` and `]` a page, `t` puts today in the middle and `z` fits
