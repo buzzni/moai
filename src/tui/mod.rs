@@ -1430,6 +1430,10 @@ pub struct Site {
 }
 
 pub struct App {
+    /// Repository from which this window was opened, even while the overview shows another project.
+    pub ctl_root: String,
+    /// Only terminal input changes target recency; ctl requests never do.
+    pub last_human: std::time::Instant,
     /// Whether the current background poll changed something the screen can show.
     follow_changed: bool,
     /// 지금 선 프로젝트에 딸린 것 — 줄·색인·설정과 그 안에서 선 자리([`Site`]).
@@ -1782,6 +1786,127 @@ pub struct App {
     /// 루프에 맡긴 "편집기로 열어 달라". **App 은 터미널을 모른다** — 터미널을 내리고 편집기를
     /// 기다리고 다시 올리는 것은 루프가 하고, 받은 글은 [`App::edited`] 로 돌려준다.
     pub edit: Option<Edit>,
+}
+
+impl App {
+    /// Snapshot for the local control socket. This stays on the event-loop thread.
+    pub fn ctl(&mut self, req: &crate::ctl::wire::Request) -> crate::ctl::wire::Reply {
+        use crate::ctl::wire::{PROTO, Reply, Verb};
+        if req.proto != PROTO {
+            return Reply::error("unsupported", "unknown control protocol");
+        }
+        if req.deadline_ms <= crate::ctl::wire::now_ms() {
+            return Reply::error("timeout", "control request expired");
+        }
+        match req.verb {
+            Verb::Hello => {
+                let root = &self.ctl_root;
+                let here = self.site.repo.as_ref().map(|r| r.here().display().to_string()).unwrap_or_default();
+                let screen = self.ctl_screen();
+                Reply::success(serde_json::json!({
+                    "id": format!("tui-{}", std::process::id()), "kind": "tui",
+                    "pid": std::process::id(), "version": env!("CARGO_PKG_VERSION"),
+                    "proto": PROTO, "root": root, "here": here,
+                    "layer": self.on_layer(), "screen": screen,
+                    "last_input_ago_ms": self.last_human.elapsed().as_millis() as u64,
+                }))
+            }
+            Verb::State { rows } => Reply::success(self.ctl_state(rows)),
+        }
+    }
+
+    fn ctl_screen(&self) -> &'static str {
+        use keys::Screen;
+        match self.key_ctx(&self.rows()).screen() {
+            Screen::List => "list",
+            Screen::Board => "board",
+            Screen::Gantt => "gantt",
+            Screen::Stats => "stats",
+            Screen::Wiki => "wiki",
+        }
+    }
+
+    pub fn ctl_state(&self, include_rows: bool) -> serde_json::Value {
+        use crate::nav::Seg;
+        let rows = self.rows();
+        let id_of = |row: &Row| -> Option<String> {
+            match row {
+                Row::Item(seat, entry, _) => entry.at().and_then(|at| self.issue_at(*seat, at)).map(|i| i.id.clone()),
+                _ => None,
+            }
+        };
+        let mode = match self.mode {
+            Mode::Browse => "browse",
+            Mode::Grep(..) => "grep",
+            Mode::Filter(..) => "filter",
+            Mode::Ask(..) => "ask",
+            Mode::Backlog(..) => "form",
+            Mode::Pick(..) | Mode::Unregister(..) => "pick",
+            Mode::Zone(..) => "zone",
+            Mode::ArchiveDays(..) => "archive_days",
+            Mode::Sort(..) => "sort",
+            Mode::Stats(..) => "stats",
+            Mode::Wiki(..) => "wiki",
+        };
+        let filter = match &self.hung {
+            Some(Hung::Grep { text, scope }) => {
+                serde_json::json!({"text": text, "kind": "grep", "scope": format!("{scope:?}").to_lowercase()})
+            }
+            Some(Hung::Filter { text, .. }) => serde_json::json!({"text": text, "kind": "filter", "scope": "all"}),
+            None => serde_json::Value::Null,
+        };
+        let path: Vec<_> = self
+            .site
+            .path
+            .iter()
+            .map(|s| match s {
+                Seg::Milestone(id) => id.clone().unwrap_or_else(|| "(none)".into()),
+                Seg::Epic(id) | Seg::Issue(id) => id.clone(),
+                Seg::Lost => "(lost)".into(),
+            })
+            .collect();
+        let mut state = serde_json::json!({
+            "screen": self.ctl_screen(), "path": path,
+            "cursor": rows.get(self.cursor).and_then(id_of),
+            "focus": if self.focus == Pane::Explorer { "list" } else { "detail" },
+            "mode": mode,
+            "menu": if self.chord.held().is_empty() { serde_json::Value::Null } else { serde_json::json!(format!("{:?}", self.chord.held())) },
+            "filter": filter, "sort": Self::order_words(&self.order),
+            "view": {"hidden": self.view.hidden, "deferred": !self.view.hide_deferred,
+                "backlog": !self.view.hide_backlog, "archived": self.view.show_archived, "worktree": self.worktree},
+            "cells": view::Field::ALL.into_iter().filter(|f| self.fields.shows(*f)).map(|f| f.name()).collect::<Vec<_>>(),
+            "detail": {"shown": self.detail_open, "at": self.detail_at.name()},
+            "panes": {"list_width": self.list_width, "list_height": self.list_height,
+                "wiki_width": self.wiki_width, "gantt_label": self.gantt_label},
+            "mouse": self.mouse_on, "timezone": self.saved_zone,
+            "wiki": serde_json::Value::Null, "unread": self.site.unread.len(),
+            "notice": self.notice, "trouble": self.trouble,
+            "proposals": [],
+        });
+        if include_rows {
+            let visible: Vec<_> = rows
+                .iter()
+                .take(2000)
+                .filter_map(|row| {
+                    let id = id_of(row)?;
+                    let depth = match row {
+                        Row::Item(_, _, twig) => twig.depth(),
+                        _ => 0,
+                    };
+                    let open = self.dir_of(Some(row.clone())).is_some_and(|(seat, path)| {
+                        self.site_of_seat(seat).is_some_and(|site| self.opened(site, &path))
+                            || self.searched_into(seat, &path)
+                    });
+                    Some(serde_json::json!({"id": id, "depth": depth, "open": open}))
+                })
+                .collect();
+            state["rows"] = serde_json::json!(visible);
+            if rows.len() > 2000 {
+                state["rows_total"] = serde_json::json!(rows.len());
+            }
+        }
+        state
+    }
 }
 
 /// 편집기로 적어 달라는 요청. 담을 곳은 **여는 순간 박힌 것**이다(moai-fccv) — 편집기가
@@ -2301,6 +2426,8 @@ impl App {
         counted: Option<Counted>,
     ) -> App {
         let mut app = App {
+            ctl_root: String::new(),
+            last_human: std::time::Instant::now(),
             follow_changed: false,
             site: Site::of(issues, index, ground, cfg, path, unreadable_ids),
             cursor: 0,

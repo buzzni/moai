@@ -84,6 +84,151 @@ thread_local! {
         static NTH: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
         Scratch::new(&format!("config-fence-{}", NTH.fetch_add(1, std::sync::atomic::Ordering::Relaxed)))
     };
+    // A socket path has a short OS limit. Keep this separate from the often long
+    // cargo test directory, and fence every CLI child before any ctl test runs.
+    static CTL_FENCE: Scratch = {
+        static NTH: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let base = if cfg!(unix) { Path::new("/tmp") } else { Path::new(env!("CARGO_TARGET_TMPDIR")) };
+        let path = base.join(format!("moai-ctl-{}-{}", std::process::id(), NTH.fetch_add(1, std::sync::atomic::Ordering::Relaxed)));
+        std::fs::create_dir(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700)).unwrap();
+        }
+        Scratch(path)
+    };
+}
+
+#[test]
+#[cfg(unix)]
+fn ctl_never_reaches_the_runners_sockets() {
+    use std::os::unix::net::UnixListener;
+    let s = Scratch::new("ctl-xdg");
+    let xdg = s.path().join("moai");
+    std::fs::create_dir(&xdg).unwrap();
+    let socket = xdg.join("9999.sock");
+    let listener = UnixListener::bind(&socket).unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let output = staged(&["ctl", "ls", "--all", "--json"])
+        .env("XDG_RUNTIME_DIR", s.path())
+        .current_dir(s.path())
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(json["windows"], serde_json::json!([]));
+    assert!(listener.accept().is_err(), "the test reached a socket outside MOAI_CTL_DIR");
+}
+
+#[test]
+fn ctl_state_without_a_window_says_no_window() {
+    let s = Scratch::new("ctl-empty");
+    let output = moai(s.path(), &["ctl", "state", "--json"]);
+    assert!(!output.status.success());
+    let json: serde_json::Value = serde_json::from_slice(&output.stderr).unwrap();
+    assert_eq!(json["code"], if cfg!(unix) { "no_window" } else { "unsupported" });
+}
+
+#[test]
+#[cfg(unix)]
+fn ctl_lists_and_reads_an_open_explorer() {
+    use std::io::{Read, Write};
+    use std::os::fd::{AsRawFd, FromRawFd};
+    use std::os::unix::process::CommandExt;
+    use std::time::{Duration, Instant};
+
+    let s = init("ctl-pty");
+    let (mut master_fd, mut slave_fd) = (-1, -1);
+    let size = libc::winsize { ws_row: 30, ws_col: 120, ws_xpixel: 0, ws_ypixel: 0 };
+    assert_eq!(
+        unsafe {
+            libc::openpty(
+                &mut master_fd,
+                &mut slave_fd,
+                std::ptr::null_mut(),
+                std::ptr::null_mut::<libc::termios>(),
+                &size as *const _ as *mut _,
+            )
+        },
+        0
+    );
+    let (mut master, slave) = unsafe { (std::fs::File::from_raw_fd(master_fd), std::fs::File::from_raw_fd(slave_fd)) };
+    for fd in [master.as_raw_fd(), slave.as_raw_fd()] {
+        assert_ne!(unsafe { libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC) }, -1);
+    }
+    assert_ne!(unsafe { libc::fcntl(master.as_raw_fd(), libc::F_SETFL, libc::O_NONBLOCK) }, -1);
+    let mut command = staged(&["tui"]);
+    command
+        .current_dir(s.path())
+        .env("TERM", "xterm")
+        .stdin(slave.try_clone().unwrap())
+        .stdout(slave.try_clone().unwrap())
+        .stderr(slave);
+    unsafe {
+        command.pre_exec(|| {
+            if libc::setsid() == -1 || libc::ioctl(0, libc::TIOCSCTTY as _, 0) == -1 {
+                return Err(std::io::Error::last_os_error());
+            }
+            Ok(())
+        });
+    }
+    struct Child(std::process::Child);
+    impl Drop for Child {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+    let mut child = Child(command.spawn().unwrap());
+    drop(command);
+    let deadline = Instant::now() + Duration::from_secs(15);
+    let mut shown = String::new();
+    let mut window_id = None;
+    while Instant::now() < deadline {
+        let mut buf = [0; 8192];
+        match master.read(&mut buf) {
+            Ok(n) => {
+                let chunk = String::from_utf8_lossy(&buf[..n]);
+                for _ in 0..chunk.matches("\x1b[6n").count() {
+                    master.write_all(b"\x1b[1;1R").unwrap();
+                }
+                shown.push_str(&chunk);
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock || e.raw_os_error() == Some(libc::EIO) => {}
+            Err(e) => panic!("PTY: {e}"),
+        }
+        let out = ok(s.path(), &["ctl", "ls", "--json"]);
+        let json: serde_json::Value = serde_json::from_str(&out).unwrap();
+        if let Some(id) = json["windows"].as_array().unwrap().first().and_then(|w| w["id"].as_str()) {
+            window_id = Some(id.to_string());
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(30));
+    }
+    let id = window_id.unwrap_or_else(|| panic!("explorer did not register: {shown}"));
+    assert_eq!(id, format!("tui-{}", child.0.id()));
+    let out = ok(s.path(), &["ctl", "state", "--json"]);
+    let json: serde_json::Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(json["screen"], "list");
+    assert_eq!(json["sort"], serde_json::json!(["priority"]));
+    let socket = CTL_FENCE.with(|f| f.path().join(format!("{}.sock", child.0.id())));
+    for (proto, deadline, code) in [(2, 9_999_999_999_999u64, "unsupported"), (1, 1, "timeout")] {
+        let mut peer = std::os::unix::net::UnixStream::connect(&socket).unwrap();
+        peer.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+        writeln!(peer, "{{\"proto\":{proto},\"id\":1,\"verb\":\"hello\",\"actor\":null,\"deadline_ms\":{deadline},\"lang\":\"en\"}}").unwrap();
+        let mut answer = String::new();
+        peer.read_to_string(&mut answer).unwrap();
+        let reply: serde_json::Value = serde_json::from_str(&answer).unwrap();
+        assert_eq!(reply["code"], code, "{answer}");
+    }
+    master.write_all(b"\x03").unwrap();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while child.0.try_wait().unwrap().is_none() && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert!(child.0.try_wait().unwrap().is_some(), "explorer did not exit after human Ctrl-C");
+    assert!(!socket.exists());
 }
 
 // 링크를 푼 자리 — Windows 의 `\\?\` 까지 걷은, 도구가 내는 철자다(moai-lag7.rrm). 시험이 도구의 철자와 견줄 때 쓴다.
@@ -171,6 +316,7 @@ fn isolated(program: impl AsRef<std::ffi::OsStr>) -> Command {
     let home = Path::new(env!("CARGO_TARGET_TMPDIR")).join("moai-cli-home");
     std::fs::create_dir_all(&home).unwrap();
     let config = CONFIG_FENCE.with(|fence| fence.path().join("config.toml"));
+    let ctl_dir = CTL_FENCE.with(|fence| fence.path().to_path_buf());
     let mut cmd = Command::new(program);
     // **걷기가 먼저다.** `Command` 의 환경은 이름마다 마지막에 부른 것이 이긴다 —
     // 아래 `.env` 보다 뒤에 두면, 목록에 `GIT_CONFIG_GLOBAL` 같은 이름이 느는 날
@@ -197,6 +343,8 @@ fn isolated(program: impl AsRef<std::ffi::OsStr>) -> Command {
         // `MOAI_CONFIG` 를 주면 그 값이 이긴다. `XDG_CONFIG_HOME` 도 걷어야 설정을
         // 덮어쓴 시험이 그것을 지웠을 때 사람의 설정으로 되돌아가지 않는다.
         .env("MOAI_CONFIG", config)
+        .env("MOAI_CTL_DIR", ctl_dir)
+        .env_remove("XDG_RUNTIME_DIR")
         .env_remove("XDG_CONFIG_HOME")
         // 키 파일(moai-aqmg)도 사람의 것이 새면 안 된다 — `--help` 가 그 키로 그려져 도움말을 재는 시험이 돌리는
         // 사람마다 달라진다. 걷으면 위의 없는 설정 곁(`keys.toml`)을 보니 기본 키다.
@@ -8842,6 +8990,7 @@ fn idea_and_issue_share_one_list_of_verbs() {
 /// `--json` 훑기가 실제로 부르는 명령들. **위 시험이 이 목록을 도움말과 견준다** —
 /// 목록을 여기 한 자리에 두어야 그 견줌이 뜻을 갖는다.
 const JSON_SWEEP: &[&str] = &[
+    "ctl",
     "writing",
     "init",
     // 저장소의 설정을 기본값을 채워 읽는다(moai-wk7i.qtq).
@@ -9582,6 +9731,7 @@ fn every_command_still_speaks_json() {
     let epic = field(&ok(s.path(), &["add", "에픽", "--type", "epic", "--json"]), "id");
 
     let cases = [
+        vec!["ctl", "ls", "--json"],
         vec!["writing", "--json"],
         vec!["status", "--json"],
         vec!["ready", "--json"],

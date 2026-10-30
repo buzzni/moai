@@ -22,6 +22,7 @@ Issue tracker. No approval gate. `moai status` shows the discipline.
 Usage: moai [OPTIONS] [COMMAND]
 
 Commands:
+  ctl           Control an already open explorer or web tab
   status        Board, warnings, flow. A session starts here
   ready         What you can pick up now
   prime         A short markdown page - what you hold and what comes next
@@ -118,6 +119,68 @@ much you have opened at once.
 
 `moai <command> --help` tells you all of that command. If the repository has
 an AGENTS.md, how to work in that repository is written there.
+```
+
+## `moai ctl`
+
+```
+Control an already open explorer or web tab
+
+Usage: moai ctl [OPTIONS] <COMMAND>
+
+Commands:
+  ls     List the windows this user already opened
+  state  Read the current state of one open window
+  help   Print this message or the help of the given subcommand(s)
+
+Options:
+      --json                 Machine-readable output. Every human line goes away
+      --no-color             Turn colour off (same as `--color never`)
+      --color <how>          auto|always|never (auto by default, off when piped)
+  -C, --dir <path>           Run in this directory (same as `git -C`)
+      --user <name (email)>  Who is doing this (from `git config` when absent)
+  -h, --help                 Print help
+```
+
+## `moai ctl ls`
+
+```
+List the windows this user already opened
+
+Usage: moai ctl ls [OPTIONS]
+
+Options:
+      --all                  Include windows from other repositories
+      --json                 Machine-readable output. Every human line goes away
+      --no-color             Turn colour off (same as `--color never`)
+      --color <how>          auto|always|never (auto by default, off when piped)
+  -C, --dir <path>           Run in this directory (same as `git -C`)
+      --user <name (email)>  Who is doing this (from `git config` when absent)
+  -h, --help                 Print help
+
+  Without --all, list only windows in this repository.
+  No window is an empty list and a successful exit.
+```
+
+## `moai ctl state`
+
+```
+Read the current state of one open window
+
+Usage: moai ctl state [OPTIONS]
+
+Options:
+  -t, --target <TARGET>      Window id from moai ctl ls
+      --rows                 Include visible row ids and depths (up to 2000)
+      --json                 Machine-readable output. Every human line goes away
+      --no-color             Turn colour off (same as `--color never`)
+      --color <how>          auto|always|never (auto by default, off when piped)
+  -C, --dir <path>           Run in this directory (same as `git -C`)
+      --user <name (email)>  Who is doing this (from `git config` when absent)
+  -h, --help                 Print help
+
+  Without -t, choose the most recently used window in this repository.
+  Use moai ctl ls --all to find an id; -t never starts a window.
 ```
 
 ## `moai status`

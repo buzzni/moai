@@ -169,6 +169,9 @@ pub enum ColorArg {
 // (`every_help_heredoc_is_copyable`, moai-foc3).
 #[derive(Subcommand, Debug)]
 pub enum Cmd {
+    /// Control an already open explorer or web tab
+    #[command(subcommand)]
+    Ctl(CtlCmd),
     /// Board, warnings, flow. A session starts here
     #[command(after_help = "  It blocks nothing. No approval, no gate.
   Instead it surfaces issues with no epic, reviews stalled for days, and how
@@ -1314,6 +1317,31 @@ Examples:
         /// Write nothing; print that block (to paste it)
         #[arg(long, conflicts_with_all = ["prefix", "no_agents", "driver", "no_driver", "tracking", "guide", "skill", "no_skill", "with", "register", "no_register", "yes", "check"])]
         print: bool,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum CtlCmd {
+    /// List the windows this user already opened
+    #[command(
+        after_help = "  Without --all, list only windows in this repository.\n  No window is an empty list and a successful exit."
+    )]
+    Ls {
+        /// Include windows from other repositories
+        #[arg(long)]
+        all: bool,
+    },
+    /// Read the current state of one open window
+    #[command(
+        after_help = "  Without -t, choose the most recently used window in this repository.\n  Use moai ctl ls --all to find an id; -t never starts a window."
+    )]
+    State {
+        /// Window id from moai ctl ls
+        #[arg(short = 't', long = "target")]
+        target: Option<String>,
+        /// Include visible row ids and depths (up to 2000)
+        #[arg(long)]
+        rows: bool,
     },
 }
 
