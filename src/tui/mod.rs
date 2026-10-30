@@ -1962,6 +1962,13 @@ impl Site {
             .collect()
     }
 
+    /// Start a board or Gantt visit with the shared closed-milestone rule. An overview-to-project entry loads rows
+    /// into a blank site, so it calls this after the load; a reread must instead preserve the person's folds.
+    pub(super) fn seed_layout_folds(&mut self, selected_home: Option<&Path>, gantt: bool) {
+        let shut = self.default_folds(selected_home);
+        if gantt { self.gantt_shut = shut } else { self.board_shut = shut }
+    }
+
     /// 그 줄이 아카이브인가(moai-47mz) — **거름망과 같은 자로 잰다**([`crate::query::Where::archived`]): 칸은
     /// [`Site::column`], 그 칸에 든 때는 묶음이면 읽은 칸에 든 때(`report::Stand::entered`)고 아니면 제 칸
     /// 시각이다. 시계는 적재마다 고정한 [`Site::now`] 다 — 프레임마다 다시 잡으면 자정 언저리에 줄이 깜빡인다.
@@ -5507,10 +5514,7 @@ impl App {
             _ => None,
         };
         let keep = |seat: Seat| selected.as_ref().and_then(|(s, path)| (*s == seat).then_some(path));
-        let seed = |site: &mut Site, keep: Option<&Path>| {
-            let shut = site.default_folds(keep);
-            if gantt { site.gantt_shut = shut } else { site.board_shut = shut }
-        };
+        let seed = |site: &mut Site, keep: Option<&Path>| site.seed_layout_folds(keep, gantt);
         seed(&mut self.site, keep(Seat::Here));
         if let Some(layer) = self.layer.as_mut() {
             for (at, place) in layer.places.iter_mut().enumerate() {

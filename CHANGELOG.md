@@ -21,6 +21,7 @@ does not tag — see `CONTRIBUTING.md`.
 ### Fixed
 
 - Web Gantt date headers, weekend shading and lanes now extend across a wide or resized pane even when work spans only a few days; zoom and fit retain enough date axis to fill the view. (moai-hwa8)
+- Explorer overview entry and return now seed closed milestone folds for board and Gantt layouts, while leaving running milestones open. (moai-8q2t)
 
 ## [0.37.0] - 2026-10-30
 

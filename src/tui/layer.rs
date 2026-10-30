@@ -1226,6 +1226,17 @@ impl App {
                 // `apply_fresh` only swaps the rows in, keeping folds as a reread must. Seeding after it opens the running
                 // milestones one level; the cursor stays on the first row, which no fold below it moves.
                 self.site.seed_list_folds();
+                // The same blank-site entry bypasses the board/Gantt first-visit seed. Seed only this project: the
+                // other overview projects keep their hand-made folds. The selected row's ancestors stay open.
+                let selected_home = self.rows().get(self.cursor).and_then(|row| match row {
+                    Row::Item(super::Seat::Here, entry, _) => entry.at().map(|at| self.site.index.home_of(at).clone()),
+                    _ => None,
+                });
+                match self.layout {
+                    super::view::Layout::Board => self.site.seed_layout_folds(selected_home.as_ref(), false),
+                    super::view::Layout::Gantt => self.site.seed_layout_folds(selected_home.as_ref(), true),
+                    super::view::Layout::List => {}
+                }
                 // **층이 물어 둔 것도 옮겨 든다**(리뷰) — 위의 `held` 가 그 값을 읽어 이 읽기에
                 // 썼으므로 `prepare` 는 안 물었고([`super::Fresh::asked_install`] 가 `None`),
                 // [`App::apply_fresh`] 는 물은 때만 찍는다. 그런데 [`App::leave_project`] 가 `Site` 를
@@ -1329,6 +1340,13 @@ impl App {
         parked.seed_list_folds();
         parked.gantt_shut.clear();
         parked.board_shut.clear();
+        // Climbing back starts the overview's active layout at its default too. The overview cursor is the project
+        // header, so no child milestone is exempt; a later reread preserves these seeded folds as hand-made ones.
+        match self.layout {
+            super::view::Layout::Board => parked.seed_layout_folds(None, false),
+            super::view::Layout::Gantt => parked.seed_layout_folds(None, true),
+            super::view::Layout::List => {}
+        }
         // **거름망 마스크도 푼다**(리뷰). 아래에서 `hung` 을 비우므로 걸린 글은 사라지는데,
         // 마스크를 두고 가면 그 프로젝트의 줄은 한눈 보기에서 걸러진 채 서고 — 경로 줄에 뱃지도
         // 없고 Esc 로 풀 것도 없어 — 왜 줄이 적은지 말할 자리가 도구 안에 안 남는다.
@@ -3659,6 +3677,70 @@ mod tests {
 
     fn milestone_dir(site: &crate::tui::Site) -> crate::nav::Path {
         site.index.dir_path(&site.issues, site.index.find("argos-0400").unwrap())
+    }
+
+    /// A closed milestone beside one with unfinished work, with a loose first row so neither milestone holds the cursor.
+    fn mixed_milestone_project(s: &Scratch) -> PathBuf {
+        let dir = s.project("mixed", &[("argos-0001", "묶음 밖의 줄", "todo")]);
+        let now = crate::model::now();
+        let closed =
+            Issue::new("argos-0200".into(), "닫힌 마일스톤".into(), Kind::Milestone, Status::new("todo"), &now);
+        let mut finished = Issue::new("argos-0201".into(), "끝난 일".into(), Kind::Issue, Status::new("done"), &now);
+        finished.done_at = Some(now.clone());
+        finished.milestone = Some(closed.id.clone());
+        let running =
+            Issue::new("argos-0400".into(), "도는 마일스톤".into(), Kind::Milestone, Status::new("todo"), &now);
+        let mut unfinished = Issue::new("argos-0401".into(), "남은 일".into(), Kind::Issue, Status::new("todo"), &now);
+        unfinished.milestone = Some(running.id.clone());
+        let file = dir.join(".moai/issues.jsonl");
+        let mut body = std::fs::read_to_string(&file).unwrap();
+        for issue in [closed, finished, running, unfinished] {
+            body.push_str(&format!("{}\n", serde_json::to_string(&issue).unwrap()));
+        }
+        std::fs::write(&file, body).unwrap();
+        dir
+    }
+
+    /// The overview-to-project path bypasses `Site::of`, and climbing back parks that site. Both board and Gantt must
+    /// seed the closed-milestone rule at those two boundaries, while the running milestone stays open (moai-8q2t).
+    #[test]
+    fn board_and_gantt_project_entry_and_return_seed_closed_milestones() {
+        for (name, layout_key, gantt) in [("layer-board-seed", "SPC g b", false), ("layer-gantt-seed", "SPC g g", true)]
+        {
+            let s = Scratch::fenced(name);
+            let dir = mixed_milestone_project(&s);
+            let cfg = s.register(&[&dir]);
+            let mut a = layered(&cfg);
+            a.hit(layout_key);
+            let check = |site: &crate::tui::Site, phase: &str| {
+                let closed = site.index.find("argos-0200").unwrap();
+                let running = site.index.find("argos-0400").unwrap();
+                assert!(site.closed(closed), "{phase}: the closed milestone is a test premise");
+                assert!(!site.closed(running), "{phase}: the running milestone is a test premise");
+                let folds = if gantt { &site.gantt_shut } else { &site.board_shut };
+                assert!(
+                    folds.contains(&site.index.dir_path(&site.issues, closed)),
+                    "{phase}: closed milestone stood open"
+                );
+                assert!(
+                    !folds.contains(&site.index.dir_path(&site.issues, running)),
+                    "{phase}: running milestone was folded"
+                );
+            };
+            a.cursor = a.rows().iter().position(|r| matches!(r, Row::Project(0))).unwrap();
+            a.key(key(KeyCode::Enter));
+            assert!(!a.on_layer(), "{name}: Enter did not open the project");
+            check(&a.site, "enter");
+
+            a.hit("0");
+            settle(&mut a);
+            let site = a.layer.as_ref().unwrap().places[0].site.as_ref().expect("climbing parked the project");
+            check(site, "return");
+
+            a.cursor = a.rows().iter().position(|r| matches!(r, Row::Project(0))).unwrap();
+            a.key(key(KeyCode::Enter));
+            check(&a.site, "reenter");
+        }
     }
 
     /// **Entering a project from the overview opens its running milestones as a first read does** (moai-zxd0 review).
