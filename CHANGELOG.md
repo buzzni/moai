@@ -12,6 +12,8 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+## [0.36.0] - 2026-10-30
+
 ### Changed
 
 - Board cards carry their column's colour on the first line — the id, status glyph and priority — as a band: on the web a pale tint with a hairline under it, in the explorer a bright background with black text; for in-progress, review and done, and plain in every other column. (moai-bg2i)
