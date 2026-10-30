@@ -4210,11 +4210,8 @@ fn about<'a>(app: &App, site: &Site, idx: usize, e: &Entry, w: usize) -> Vec<Lin
         first.push(Span::styled(clip(&format!("{} {b}", style::BRANCH_GLYPH), room), branch()));
     }
     if let Some(copy) = site.archive_file(idx) {
-        let label = if copy {
-            say(site.lang, "tui.detail.archive_copy")
-        } else {
-            say(site.lang, "tui.detail.archive_file")
-        };
+        let label =
+            if copy { say(site.lang, "tui.detail.archive_copy") } else { say(site.lang, "tui.detail.archive_file") };
         first.push(Span::raw("  ·  "));
         first.push(Span::styled(label, dim()));
     }
@@ -6577,14 +6574,16 @@ pub(super) mod tests {
         let idx = e.at().unwrap();
         a.site.ground.from_archive = vec![false; a.site.issues.len()];
         a.site.ground.from_archive[idx] = true;
-        for (lang, file, copy) in [
-            (crate::i18n::Lang::En, "archive file", "archive copy"),
-            (crate::i18n::Lang::Ko, "보관 파일", "보관 사본"),
-        ] {
+        for (lang, file, copy) in
+            [(crate::i18n::Lang::En, "archive file", "archive copy"), (crate::i18n::Lang::Ko, "보관 파일", "보관 사본")]
+        {
             a.site.lang = lang;
             let text = |a: &App| -> String {
-                about(a, &a.site, idx, &e, 120).iter().flat_map(|line| &line.spans)
-                    .map(|span| span.content.as_ref()).collect()
+                about(a, &a.site, idx, &e, 120)
+                    .iter()
+                    .flat_map(|line| &line.spans)
+                    .map(|span| span.content.as_ref())
+                    .collect()
             };
             assert!(text(&a).contains(file));
             a.site.ground.archive_copies.insert(a.site.issues[idx].id.clone());

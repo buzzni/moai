@@ -316,7 +316,10 @@ impl<'a> Where<'a> {
         let shelf = crate::report::Shelf::new(self.lines.get(), &self.epic, &self.milestone);
         crate::report::put_away_in(i, &shelf, stored, |row| {
             crate::report::is_put_away(
-                self.column(row), self.since(row), now, self.archive_days,
+                self.column(row),
+                self.since(row),
+                now,
+                self.archive_days,
                 self.stored.contains(row.id.as_str()),
             )
         })

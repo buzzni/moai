@@ -509,14 +509,26 @@ impl Ground {
             && issues.get(at).is_some_and(|row| self.archive_copies.contains(&row.id))
     }
 
-    fn record_archive_source(&mut self, issues: &[Issue], source: Vec<bool>, unreadable_live: &std::collections::BTreeSet<String>) {
-        let live: std::collections::BTreeSet<&str> = issues.iter().zip(&source)
-            .filter_map(|(row, archived)| (!archived).then_some(row.id.as_str())).collect();
-        self.archive_copies = issues.iter().zip(&source)
+    fn record_archive_source(
+        &mut self,
+        issues: &[Issue],
+        source: Vec<bool>,
+        unreadable_live: &std::collections::BTreeSet<String>,
+    ) {
+        let live: std::collections::BTreeSet<&str> =
+            issues.iter().zip(&source).filter_map(|(row, archived)| (!archived).then_some(row.id.as_str())).collect();
+        self.archive_copies = issues
+            .iter()
+            .zip(&source)
             .filter_map(|(row, archived)| (*archived && live.contains(row.id.as_str())).then_some(row.id.clone()))
             .collect();
-        self.stored_ids = issues.iter().zip(&source)
-            .filter_map(|(row, archived)| (*archived && !live.contains(row.id.as_str()) && !unreadable_live.contains(&row.id)).then_some(row.id.clone()))
+        self.stored_ids = issues
+            .iter()
+            .zip(&source)
+            .filter_map(|(row, archived)| {
+                (*archived && !live.contains(row.id.as_str()) && !unreadable_live.contains(&row.id))
+                    .then_some(row.id.clone())
+            })
             .collect();
         self.from_archive = source;
     }
@@ -994,7 +1006,8 @@ pub(crate) fn counted_beside(
     let archived = crate::archive::read(&repo.root)?;
     let cfg = &repo.config;
     let unreadable = live_unreadable(&live, origin);
-    let unreadable_ids: std::collections::BTreeSet<String> = unreadable.iter().filter_map(|u| u.id).map(str::to_string).collect();
+    let unreadable_ids: std::collections::BTreeSet<String> =
+        unreadable.iter().filter_map(|u| u.id).map(str::to_string).collect();
     // **섞기 전에 잰다** — 섞은 줄은 어느 파일에서 왔는지를 안 든다([`Ground::archive_only`], moai-ekg6.ej7). 견줄 산 줄은
     // [`board`] 가 고르는 루트의 스냅샷이다 — 쓰기가 줄을 찾는 그 파일이다.
     let archive_only = unwritten_in(&archived, root.unwrap_or(&live));
@@ -1011,7 +1024,8 @@ pub(crate) fn counted_beside(
     let side = crate::cmd::status::ArchiveSide::of((&live.issues, &roots), &archived);
     let excluded = crate::archive::conflicts(&live.issues, &archived);
     let archive_unreadable = archived.errors.len();
-    let (load, source) = beside_with_source(archived, Load { issues: live.issues.clone(), errors: live.errors.clone() });
+    let (load, source) =
+        beside_with_source(archived, Load { issues: live.issues.clone(), errors: live.errors.clone() });
     let soil = crate::report::Soil::of(&load.issues);
     let (st, movable) = crate::archive::board_in(&load.issues, &soil, &live.issues, &unreadable, &excluded, cfg, now);
     let st = side.warn(st, movable);
@@ -1792,9 +1806,11 @@ impl Site {
         let mut ground = ground;
         ground.archived_rows = {
             let where_ = ground.here(&issues);
-            issues.iter().enumerate().map(|(at, row)| {
-                ground.archive_copy(&issues, at) || where_.archived(row, &now)
-            }).collect()
+            issues
+                .iter()
+                .enumerate()
+                .map(|(at, row)| ground.archive_copy(&issues, at) || where_.archived(row, &now))
+                .collect()
         };
         ground.archived_at = now.clone();
         Site {
@@ -1909,8 +1925,7 @@ impl Site {
             // A fixed test clock or a read that crosses a second needs the new
             // instant. Normal frames use the load's precomputed answers.
             let row = &self.issues[at];
-            self.archive_file(at) == Some(true)
-                || self.ground.here(&self.issues).archived(row, &self.now)
+            self.archive_file(at) == Some(true) || self.ground.here(&self.issues).archived(row, &self.now)
         }
     }
 
@@ -1918,8 +1933,7 @@ impl Site {
     /// came only from the archive. Neither is inferred from the id alone.
     pub fn archive_file(&self, at: usize) -> Option<bool> {
         let row = self.issues.get(at)?;
-        self.ground.from_archive.get(at).copied().unwrap_or(false)
-            .then(|| self.ground.archive_copies.contains(&row.id))
+        self.ground.from_archive.get(at).copied().unwrap_or(false).then(|| self.ground.archive_copies.contains(&row.id))
     }
 
     /// 그 줄이 서는 **보드의 레인**(moai-9nfw) — 뿌리에서는 그 줄이 사는 마일스톤이나 바구니(`(마일스톤 없음)`·
@@ -13547,7 +13561,8 @@ mod tests {
         let mut live = make("argos-a002", Kind::Issue);
         live.status = Status::new("done");
         live.status_since = old.status_since.clone();
-        std::fs::write(root.join(".moai/issues.jsonl"), format!("{}\n", serde_json::to_string(&live).unwrap())).unwrap();
+        std::fs::write(root.join(".moai/issues.jsonl"), format!("{}\n", serde_json::to_string(&live).unwrap()))
+            .unwrap();
         let mut c = cfg();
         c.archive_days = 100_000;
         let repo = Repo::at(root.to_path_buf(), c);
@@ -13578,7 +13593,8 @@ mod tests {
         old.status = Status::new("done");
         crate::archive::append(root, std::slice::from_ref(&old), &cfg()).unwrap();
         let live = make("argos-a001", Kind::Issue);
-        std::fs::write(root.join(".moai/issues.jsonl"), format!("{}\n", serde_json::to_string(&live).unwrap())).unwrap();
+        std::fs::write(root.join(".moai/issues.jsonl"), format!("{}\n", serde_json::to_string(&live).unwrap()))
+            .unwrap();
         let repo = Repo::at(root.to_path_buf(), cfg());
         let stamp = stamp_of(&repo);
         let now = crate::model::now();

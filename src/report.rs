@@ -662,7 +662,11 @@ pub(crate) struct Shelf<'a, 'm> {
 impl<'a, 'm> Shelf<'a, 'm> {
     /// **[`Lines`] 는 받는다** — 여기서 지으면 `status` 한 번에 [`groups`]·[`milestones_over`]
     /// 와 나란히 세 벌이 선다(moai-jk2u.pl6, `지도는 한 벌이다` moai-g0zx).
-    pub(crate) fn new(lines: &'m Lines<'a>, epic_of: &'m Handing<'a>, mile_of: &'m BTreeMap<&'a str, &'a str>) -> Shelf<'a, 'm> {
+    pub(crate) fn new(
+        lines: &'m Lines<'a>,
+        epic_of: &'m Handing<'a>,
+        mile_of: &'m BTreeMap<&'a str, &'a str>,
+    ) -> Shelf<'a, 'm> {
         Shelf { lines, epic_of, mile_of }
     }
 
@@ -782,7 +786,9 @@ impl<'a, 'm> Shelf<'a, 'm> {
                 first = false;
                 return false;
             }
-            if let Some(line) = self.lines.at(id) && !eligible(line) {
+            if let Some(line) = self.lines.at(id)
+                && !eligible(line)
+            {
                 all = false;
                 return true;
             }
@@ -6677,9 +6683,7 @@ fn status_in_scope<'a, 'c>(
     // **아카이브 파일로 옮긴 묶음은 시계를 안 본다**(moai-bth3 리뷰) — 산 줄이 아니면(`visible`) 이미 옮겨 둔 것이라,
     // `archive_days` 를 0 으로 끄거나 늘려도 보드로 돌아오지 않는다. 같은 자를 목록(`query::Where::archived`)이 쓴다.
     let aged = |r: &Roll| {
-        r.id.as_deref().is_some_and(|id| {
-            by_id.get(id).is_some_and(|i| put_away_in(i, &shelf, !visible(i), aged_row))
-        })
+        r.id.as_deref().is_some_and(|id| by_id.get(id).is_some_and(|i| put_away_in(i, &shelf, !visible(i), aged_row)))
     };
     let before = (stones.len(), epics.len());
     stones.retain(|r| !aged(r));

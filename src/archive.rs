@@ -689,11 +689,12 @@ fn eligible_except(
         *counts.entry(i.id.as_str()).or_insert(0usize) += 1;
     }
     for (at, i) in issues.iter().enumerate() {
-        let eligible = i.kind != Kind::Milestone && report::put_away_in(i, &shelf, false, |row| {
-            let (column, since) = report::stands_on(row, |key| stands.get(&key))
-                .map_or((row.status.as_str(), row.status_since.as_str()), |s| (s.column, s.entered));
-            report::archived(column, since, now, cfg.archive_days)
-        });
+        let eligible = i.kind != Kind::Milestone
+            && report::put_away_in(i, &shelf, false, |row| {
+                let (column, since) = report::stands_on(row, |key| stands.get(&key))
+                    .map_or((row.status.as_str(), row.status_since.as_str()), |s| (s.column, s.entered));
+                report::archived(column, since, now, cfg.archive_days)
+            });
         if !eligible || counts[i.id.as_str()] > 1 || excluded.contains(&i.id) {
             blocked.insert(root(&mut parents, at));
         }
@@ -896,8 +897,10 @@ mod tests {
         let mut rows = vec![milestone, closed_epic, closed_member, open_epic, open_member];
         assert!(eligible(&rows, &cfg(), NOW).is_empty(), "an open milestone holds its old epic bundle");
         rows[4].status = Status::new("done");
-        assert_eq!(eligible(&rows, &cfg(), NOW).iter().map(|i| i.id.as_str()).collect::<Vec<_>>(),
-            ["argos-e001", "argos-e001.aaa", "argos-e002", "argos-e002.aaa"]);
+        assert_eq!(
+            eligible(&rows, &cfg(), NOW).iter().map(|i| i.id.as_str()).collect::<Vec<_>>(),
+            ["argos-e001", "argos-e001.aaa", "argos-e002", "argos-e002.aaa"]
+        );
     }
 
     #[test]
