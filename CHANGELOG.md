@@ -12,6 +12,11 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+### Changed
+
+- Explorer and web list and Gantt now open closed epics by default; board epic cards and their folds are gone, so members stand in their own columns. Closed milestone folds remain. (moai-i07x.3k3, moai-i07x.wxi)
+- Explorer board cards in the in-progress, review and done columns now carry a black head band with text in the column's colour; the selected card reverses the band. (moai-i07x.z3s)
+
 ## [0.37.0] - 2026-10-30
 
 ### Added
