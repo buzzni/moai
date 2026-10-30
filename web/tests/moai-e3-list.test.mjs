@@ -190,7 +190,7 @@ function mount(rows, { state: over = {}, width = 800, height = 280, detailVisibl
   return { dom, doc, root, store, pane, calls, lines, key, render, size }
 }
 
-test('Tab opens closed epic descendants while closed milestones keep their folds', () => {
+test('Tab on a closed milestone opens its closed epic too', () => {
   const rows = [
     { id: 'm1', kind: 'milestone', title: 'Release', derived_status: 'done' },
     { id: 'e1', kind: 'epic', title: 'Epic', milestone: 'm1', derived_status: 'done' },
@@ -205,7 +205,7 @@ test('Tab opens closed epic descendants while closed milestones keep their folds
   assert.ok(!lines().some((line) => line.dataset.key === 'e1.a'), 'Tab on an open epic folds it by hand')
 })
 
-test('Tab on a parent keeps a closed group the person opened (review moai-mkzo.8wa)', () => {
+test('Tab on a parent folded with h opens its closed epic again (review moai-mkzo.8wa)', () => {
   const rows = [
     { id: 'm1', kind: 'milestone', title: 'Release', derived_status: 'done' },
     { id: 'e1', kind: 'epic', title: 'Epic', milestone: 'm1', derived_status: 'done' },
@@ -219,7 +219,7 @@ test('Tab on a parent keeps a closed group the person opened (review moai-mkzo.8
   key('ArrowLeft')
   assert.deepEqual(lines().map((line) => line.dataset.key), ['m1'], 'the premise — h folds m1 alone')
   key('Tab')
-  assert.ok(lines().some((line) => line.dataset.key === 'e1.a'), 'Tab on m1 folded the epic the person opened')
+  assert.ok(lines().some((line) => line.dataset.key === 'e1.a'), 'Tab on m1 left the closed epic folded')
 })
 
 test('list view: rows, columns, the name line, and going in and out', () => {

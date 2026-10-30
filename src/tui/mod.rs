@@ -1930,7 +1930,7 @@ impl Site {
             .collect()
     }
 
-    /// 2026-10-30 user decision (v0.37.1): epics do not start folded and are not board cards.
+    /// 2026-10-30 user decision (moai-i07x): epics do not start folded and are not board cards.
     /// Only closed milestones start folded; `closed` still describes both group kinds.
     pub(super) fn starts_folded(&self, at: usize) -> bool {
         self.issues.get(at).is_some_and(|i| i.kind == Kind::Milestone) && self.closed(at)
@@ -5835,12 +5835,13 @@ impl App {
                 .map(|at| (site.index.dir_path(&site.issues, at), site.starts_folded(at)))
                 .collect();
             under.push((path, false));
-            for (p, closed) in under {
+            for (p, folds) in under {
                 if open {
                     site.set_open(true, p, false);
-                } else if !closed {
-                    // A closed descendant the person already opened keeps that choice.
-                    // Its seeded fold also stays put; only this row and open descendants unfold.
+                } else if !folds {
+                    // A descendant that starts folded (`Site::starts_folded`, a closed milestone) keeps its seeded
+                    // fold, or the opening the person gave it. Every other descendant unfolds, closed epics included
+                    // (moai-i07x) — a closed epic the person folded by hand opens again with its ancestor.
                     site.set_open(true, p, true);
                 }
             }
@@ -7240,36 +7241,48 @@ mod tests {
         assert!(!a.site.gantt_shut.contains(&newly_closed), "a group closed while watched folded itself");
     }
 
+    /// Only a closed milestone starts folded, and not the one holding the selected row (moai-i07x). The epics here are
+    /// closed too and never fold, so the closed milestone is what pins the keep filter of [`Site::default_folds`] —
+    /// with a closed epic in its place this test passed with that filter deleted.
     #[test]
-    fn gantt_keeps_the_selected_members_closed_group_open() {
+    fn gantt_keeps_a_closed_milestone_holding_the_selected_row_open() {
         let mut a = grouped_for_folding();
+        let mut issues = a.site.issues.clone();
+        issues[4].status = Status::new(crate::config::DONE);
+        issues[4].done_at = Some(crate::model::now());
+        a.adopt(issues);
+        assert!(a.site.closed(0), "the premise — every member is done, so the milestone is closed");
+        let milestone = a.site.index.dir_path(&a.site.issues, 0);
+        a.cursor = a.rows().iter().position(|r| matches!(r, Row::Item(_, e, _) if e.at() == Some(0))).unwrap();
         a.hit("Tab");
-        let rows = a.rows();
-        a.cursor = rows.iter().position(|r| matches!(r, Row::Item(_, e, _) if e.at() == Some(1))).unwrap();
-        a.hit("l");
-        let rows = a.rows();
-        a.cursor = rows.iter().position(|r| matches!(r, Row::Item(_, e, _) if e.at() == Some(3))).unwrap();
+        a.cursor = a.rows().iter().position(|r| matches!(r, Row::Item(_, e, _) if e.at() == Some(3))).unwrap();
         a.hit("SPC g g");
-        let closed = a.site.index.dir_path(&a.site.issues, 1);
-        assert!(!a.site.gantt_shut.contains(&closed));
+        assert!(!a.site.gantt_shut.contains(&milestone), "the closed milestone holding the cursor started folded");
         assert!(a.rows().iter().any(|r| matches!(r, Row::Item(_, e, _) if e.at() == Some(3))));
+        a.hit("SPC g l");
+        a.cursor = a.rows().iter().position(|r| matches!(r, Row::Item(_, e, _) if e.at() == Some(0))).unwrap();
+        a.hit("SPC g g");
+        assert!(a.site.gantt_shut.contains(&milestone), "a closed milestone not holding the cursor started open");
     }
 
+    /// Reopening a folded ancestor with `Tab` opens a closed epic the way it opens an open one (moai-i07x) — even one
+    /// the person folded by hand. Reading the old `closed` in the Gantt branch of [`App::expand_all`] left it folded.
     #[test]
-    fn gantt_tab_reopens_an_ancestor_without_refolding_a_manually_opened_epic() {
+    fn gantt_tab_on_an_ancestor_opens_a_closed_epic_like_an_open_one() {
         let mut a = grouped_for_folding();
         a.hit("SPC g g");
         let epic = a.site.index.dir_path(&a.site.issues, 1);
         let milestone = a.site.index.dir_path(&a.site.issues, 0);
+        assert!(a.site.closed(1), "the premise — the first epic is closed");
         a.cursor = a.rows().iter().position(|r| matches!(r, Row::Item(_, e, _) if e.at() == Some(1))).unwrap();
-        a.hit("l");
-        assert!(!a.site.gantt_shut.contains(&epic));
+        a.hit("h");
+        assert!(a.site.gantt_shut.contains(&epic), "the premise — the closed epic is folded by hand");
         a.cursor = a.rows().iter().position(|r| matches!(r, Row::Item(_, e, _) if e.at() == Some(0))).unwrap();
         a.hit("h");
         assert!(a.site.gantt_shut.contains(&milestone));
         a.hit("Tab");
         assert!(!a.site.gantt_shut.contains(&milestone));
-        assert!(!a.site.gantt_shut.contains(&epic));
+        assert!(!a.site.gantt_shut.contains(&epic), "Tab on the milestone left the closed epic folded");
         assert!(a.rows().iter().any(|r| matches!(r, Row::Item(_, e, _) if e.at() == Some(3))));
     }
 

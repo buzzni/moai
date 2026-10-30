@@ -28,7 +28,7 @@ pub const DONE_BAND: Style = fg(AnsiColor::BrightGreen).bg_color(Some(Color::Ans
 /// The band behind a board card's head line in the explorer, by the board column the card stands
 /// in (moai-bg2i) — `None` leaves the head plain. The only place that says which columns carry one.
 ///
-/// 2026-10-30: v0.36.0 used bright backgrounds and black text. For v0.37.1 the user chose
+/// 2026-10-30: v0.36.0 used bright backgrounds and black text. In moai-i07x the user chose
 /// the old selected-card colours for every card: black background and bright column-coloured
 /// text; selection reverses both. Solarized maps the bright text to grey. On dark themes the
 /// black background can blend into the terminal background; the status glyph and column name

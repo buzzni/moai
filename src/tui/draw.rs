@@ -451,9 +451,10 @@ pub fn screen(f: &mut Frame, app: &mut App) {
 /// `todo` 는 `PLAIN`) 그 스피너는 맨 글자와 같은 `Reset` 이라 그 설정에서는 글에 적은 스피너 글자로도
 /// 깬다 — 칸 색만으로는 둘을 못 가른다. 그 손해는 이 좁히기 전과 같다(`SPIN_BUDGET` 로 묶인다).
 ///
-/// **칸 색은 바탕에 서도 센다**(moai-bg2i) — 보드 카드의 머리 띠는 칸 색 바탕에 검정 글자라([`card`]), 띠 위의
-/// 스피너는 글자색으로는 안 걸린다. 지금은 같은 칸의 머리줄 스피너가 늘 함께 서서 루프를 깨우지만, 그 머리줄에
-/// 기대면 카드의 스피너가 제 힘으로 보이는 것이 아니게 된다.
+/// **칸 색은 바탕에 서도 센다**(moai-bg2i) — v0.36.0 의 보드 카드 머리 띠는 칸 색 바탕에 검정 글자라 띠 위의
+/// 스피너가 글자색으로는 안 걸렸다. moai-i07x 부터 띠는 검정 바탕에 칸 색 글자라([`card`]) 글자색으로 걸리고,
+/// 고른 카드의 반전도 칸의 `fg` 를 그대로 둔다. 바탕 갈래는 밝은 바탕 띠가 돌아와도 카드의 스피너가 같은 칸
+/// 머리줄 스피너에 기대지 않고 제 힘으로 깨우게 남긴 그물이다 — `a_spinner_on_a_board_band_still_counts` 가 두 꼴을 본다.
 fn spinner_on(buf: &ratatui::buffer::Buffer, colours: &[Color]) -> bool {
     buf.content
         .iter()
@@ -3195,7 +3196,7 @@ fn lane_line<'a>(app: &App, laid: &super::Laid, lane: usize, w: usize) -> Line<'
 }
 
 /// 카드 한 장 — 머리(`id · 칸 글리프 · pN`), 몸(`[NEW] ⎇ 가지 제목`), 그리고 `SPC c` 로 켠 열이 있으면 발줄.
-/// 2026-10-30 결정: v0.36.0(moai-bg2i)의 밝은 바탕·검정 글자를 v0.37.1 에서 모든 카드에
+/// 2026-10-30 결정: v0.36.0(moai-bg2i)의 밝은 바탕·검정 글자를 moai-i07x 에서 모든 카드에
 /// 검정 바탕·칸 색 글자로 뒤집었다. 집은·리뷰·끝낸 칸의 머리만 띠(`band`)이고 나머지는 바탕색이 없다.
 /// **바탕은 보드의 칸이 고른다** — [`board`] 가 `laid.columns` 에서 읽어 넘긴다. 미룬 `in_progress` 줄은 미룸 칸에
 /// 서므로 바탕이 없다. "bug" 는 종류가 아니라 태그이고, 우선순위가 아닌 칸이 바탕을 고른다. 고른 카드는
@@ -9403,6 +9404,10 @@ pub(super) mod tests {
         let mut buf = ratatui::buffer::Buffer::empty(Rect::new(0, 0, 4, 1));
         buf[(1, 0)].set_symbol(spinner).set_style(from_anstyle(style::IN_PROGRESS_BAND));
         assert!(spinner_on(&buf, &colours), "띠 위의 스피너를 못 알아본다");
+        // 바탕 갈래가 그물이라는 말이 서려면 그 꼴을 직접 잰다 — 칸 색 바탕에 검정 글자(v0.36.0 의 띠).
+        let mut bright = ratatui::buffer::Buffer::empty(Rect::new(0, 0, 4, 1));
+        bright[(1, 0)].set_symbol(spinner).set_style(Style::new().fg(Color::Black).bg(Color::LightYellow));
+        assert!(spinner_on(&bright, &colours), "칸 색 바탕 띠 위의 스피너를 못 알아본다");
         let mut plain = ratatui::buffer::Buffer::empty(Rect::new(0, 0, 4, 1));
         plain[(1, 0)].set_symbol(spinner).set_style(Style::new().fg(Color::Black));
         assert!(!spinner_on(&plain, &colours), "칸 색 없는 스피너 글자로 깬다");

@@ -328,9 +328,9 @@ once and the keys reach it.
 | `l` `Right` / `h` `Left` | Unfold / fold (board: on a lane title, open / fold the lane; on a card, column to the right / left) |
 | `Tab` | Unfold / fold everything under the group (list) |
 
-In the list, `Tab` leaves closed descendant milestones folded and opens epics;
-`Tab` on a milestone opens it. The board leaves `Tab` to the
-browser's focus order; its chevrons fold milestone lanes.
+In the list, `Tab` opens everything under the group, closed epics included. The
+board leaves `Tab` to the browser's focus order; its chevrons fold milestone
+lanes.
 
 **Panes and tabs**
 
