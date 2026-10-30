@@ -5471,16 +5471,9 @@ impl App {
     /// ([`App::adrift`])도 함께 걷는다: 남기면 첫 줄로 돌아간 보드나 목록에서 그 줄이 안 보여도 그림이 안 드러낸다.
     fn open_board(&mut self, rows: &[Row]) {
         let selected = match rows.get(self.cursor) {
-            Some(Row::Item(seat, entry, _)) => entry.at().and_then(|at| {
-                self.site_of_seat(*seat).map(|site| {
-                    let home = if site.index.is_dir(&site.issues, at) {
-                        site.index.dir_path(&site.issues, at)
-                    } else {
-                        site.index.home_of(at).clone()
-                    };
-                    (*seat, home)
-                })
-            }),
+            Some(Row::Item(seat, entry, _)) => {
+                entry.at().and_then(|at| self.site_of_seat(*seat).map(|site| (*seat, site.index.home_of(at).clone())))
+            }
             _ => None,
         };
         let here = selected.as_ref().and_then(|(seat, path)| (*seat == Seat::Here).then_some(path));
@@ -7185,24 +7178,6 @@ mod tests {
         assert!(!a.site.board_shut.contains(&epic));
         assert!(a.site.expanded.is_empty(), "board folding changed list expansion");
         a.hit("SPC g l");
-    }
-
-    #[test]
-    fn board_keeps_the_selected_closed_lane_open_on_entering() {
-        let mut done = member("argos-0002", "argos-0001");
-        done.status = Status::new(crate::config::DONE);
-        done.done_at = Some(crate::model::now());
-        let mut epic = make("argos-0001", Kind::Epic);
-        epic.milestone = Some("argos-0000".into());
-        let mut a = App::new(vec![make("argos-0000", Kind::Milestone), epic, done], cfg(), Path::new());
-        a.cursor = a.rows().iter().position(|r| matches!(r, Row::Item(_, e, _) if e.at() == Some(0))).unwrap();
-        a.hit("SPC g b");
-        let lane = a.site.index.dir_path(&a.site.issues, 0);
-        let epic = a.site.index.dir_path(&a.site.issues, 1);
-        assert!(!a.site.board_shut.contains(&lane));
-        assert!(a.site.board_shut.contains(&epic));
-        assert_eq!(on_id(&a), "argos-0000");
-        assert_eq!(board_card_ids(&a), ["argos-0001"]);
     }
 
     #[test]
