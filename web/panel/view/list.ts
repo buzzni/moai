@@ -83,6 +83,7 @@ export const mountList: MountPane = (root, ctx): PaneView => {
   let drawn = { start: -1, end: -1 }
   let shownCursor: string | null | undefined
   let shownPath = ""
+  let seeded = false
 
   // ── model ──
 
@@ -316,6 +317,22 @@ export const mountList: MountPane = (root, ctx): PaneView => {
       empty.hidden = !current.board.loading
       empty.replaceChildren(...(current.board.loading ? [emptyState(doc, { title: copy.loading })] : []))
       return
+    }
+    if (!seeded) {
+      seeded = true
+      // Seed only on the first loaded list. Later renders and rereads keep a milestone the
+      // person folded by hand closed; epics beneath open milestones keep their own default.
+      const expanded = [...current.expanded]
+      for (const at of index.descendants([])) {
+        const row = index.rows[at]!
+        if (row.kind !== "milestone" || !index.isDir(at) || startsFolded(row)) continue
+        const key = pathKey(index.dirPath(at))
+        if (!expanded.includes(key)) expanded.push(key)
+      }
+      if (expanded.length !== current.expanded.length) {
+        intents.dispatch({ type: "expanded", expanded })
+        return
+      }
     }
     model = compute(current, index)
     columns = columnSet(current.columns, ctx.layout().mainWidth)

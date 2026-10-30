@@ -46,7 +46,7 @@ The page has four tabs.
 | Tab | Shows | Switch |
 |---|---|---|
 | **Board** | A kanban: one column per status, with backlog and deferred columns and one lane per [milestone](glossary.md#milestone). Closed milestone lanes start folded. Epics are not cards; their members stand in their own columns. Select a lane title to see its milestone detail; use its chevron to fold or open it. | `SPC g b` |
-| **List** | The tree of milestones, [epics](glossary.md#epic) and issues, which you step into and fold | `SPC g l` |
+| **List** | The tree of milestones, [epics](glossary.md#epic) and issues, which you step into and fold. Milestones with unfinished work start open one level; closed milestones start folded. Manual folds survive a reread. | `SPC g l` |
 | **Gantt** | The tree beside a date axis: when each row was planned and when it actually ran | `SPC g g` |
 | **Wiki** | The pages of this wiki: the page list on one side, the page on the other | `SPC g w` |
 

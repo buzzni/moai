@@ -29,6 +29,9 @@ To read the same tracker in a browser tab instead, run `moai web` — see
 
 [Milestones](glossary.md#milestone) and [epics](glossary.md#epic) behave like
 directories. Forgot a key? `?` (or `SPC h`) opens [the key list](#the-key-list).
+In the list, milestones with unfinished work start open one level, showing their
+epics; closed milestones start folded. The same applies when a project is first
+opened in the overview. A milestone you fold yourself stays folded on reread.
 
 - `j`/`k` move, `Enter` goes into a milestone or an epic, `Backspace` comes back
   out. Rows you can go into end their title with `/`

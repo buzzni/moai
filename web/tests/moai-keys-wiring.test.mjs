@@ -146,7 +146,7 @@ test('keys: Enter goes into a folder and Backspace leaves it, landing on the fol
   assert.ok(panel.state().expanded.length > 0)
   assert.ok(panel.lines().includes('e1.a'))
   panel.press('Tab')
-  assert.deepEqual(panel.state().expanded, [])
+  assert.deepEqual(panel.state().expanded, ['m:m1'])
 })
 
 test('keys: SPC opens the menu; a toggle from it runs, keeps the menu open and redraws its state', () => {

@@ -14,7 +14,7 @@ does not tag — see `CONTRIBUTING.md`.
 
 ### Changed
 
-- Closed epics no longer start folded in the explorer or the web: list `Tab` opens them with everything else and the Gantt enters with them open; board epic cards and their folds are gone, so members stand in their own columns. Closed milestones still start folded. (moai-i07x.3k3, moai-i07x.wxi)
+- Closed epics no longer start folded in the explorer or the web: list `Tab` opens them with everything else and the Gantt enters with them open; board epic cards and their folds are gone, so members stand in their own columns. In both lists, milestones with unfinished work start open one level and closed milestones stay folded; manual folds survive a reread. (moai-i07x.3k3, moai-i07x.wxi, moai-zxd0)
 - Explorer board cards in the in-progress, review and done columns now carry a black head band with text in the column's colour; the selected card reverses the band. (moai-i07x.z3s)
 
 ## [0.37.0] - 2026-10-30

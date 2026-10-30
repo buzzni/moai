@@ -7363,7 +7363,7 @@ pub(super) mod tests {
         is.push(stone);
         let mut a = every(is);
         // 에픽 안으로 들어가서 본 셈을 먼저 잰다 — 펼쳐 본 줄이 그것과 같아야 한다.
-        a.hit("Tab");
+        a.hit("h Tab");
         let epic = render(&mut a, 120, 14)
             .into_iter()
             .filter(|l| l.contains("argos-0001"))
@@ -7488,7 +7488,7 @@ pub(super) mod tests {
         kid.epic = Some("argos-0101".into());
         is.extend([stone, second, kid]);
         let mut a = every(is);
-        a.hit("Tab");
+        a.hit("h Tab");
         let rows: Vec<String> = render(&mut a, 100, 14)
             .into_iter()
             .filter(|l| l.contains("argos-"))
@@ -9431,7 +9431,7 @@ pub(super) mod tests {
 
         let still = render(&mut a, 120, 16).join("\n");
         assert!(!a.spun, "안 도는 화면으로 깬다\n{still}");
-        a.hit("j");
+        a.hit("G");
         let basket = render(&mut a, 120, 16).join("\n");
         assert!(basket.contains("마일스톤 없음"), "바구니에 안 섰다\n{basket}");
         assert!(a.spun, "상세의 도는 건수를 안 깨운다\n{basket}");

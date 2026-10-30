@@ -190,6 +190,38 @@ function mount(rows, { state: over = {}, width = 800, height = 280, detailVisibl
   return { dom, doc, root, store, pane, calls, lines, key, render, size }
 }
 
+test('the list opens running milestones one level and keeps closed ones folded', () => {
+  const rows = [
+    { id: 'm-open', kind: 'milestone', title: 'Open', derived_status: 'in_progress' },
+    { id: 'e-open', kind: 'epic', title: 'Epic', milestone: 'm-open', derived_status: 'todo' },
+    { id: 'e-open.a', kind: 'issue', title: 'Work', derived_epic: 'e-open', status: 'todo' },
+    { id: 'm-closed', kind: 'milestone', title: 'Closed', derived_status: 'done' },
+    { id: 'e-closed', kind: 'epic', title: 'Finished', milestone: 'm-closed', derived_status: 'done' },
+    { id: 'e-closed.a', kind: 'issue', title: 'Done', derived_epic: 'e-closed', status: 'done' },
+  ]
+  const { lines, store } = mount(rows)
+  assert.deepEqual(lines().map((line) => line.dataset.key), ['m-open', 'e-open', 'm-closed'])
+  assert.equal(lines()[0].getAttribute('aria-expanded'), 'true')
+  assert.equal(lines()[1].getAttribute('aria-expanded'), 'false')
+  assert.equal(lines()[2].getAttribute('aria-expanded'), 'false')
+  assert.deepEqual(store.getState().expanded, [pathKey(['m:m-open'])])
+})
+
+test('a milestone folded by hand stays folded after a reread', () => {
+  const rows = [
+    { id: 'm-open', kind: 'milestone', title: 'Open', derived_status: 'in_progress' },
+    { id: 'e-open', kind: 'epic', title: 'Epic', milestone: 'm-open', derived_status: 'todo' },
+    { id: 'e-open.a', kind: 'issue', title: 'Work', derived_epic: 'e-open', status: 'todo' },
+  ]
+  const { lines, key, store, pane } = mount(rows, { state: { cursor: 'm-open' } })
+  assert.deepEqual(lines().map((line) => line.dataset.key), ['m-open', 'e-open'])
+  key('ArrowLeft')
+  assert.deepEqual(store.getState().expanded, [])
+  pane.render(store.getState(), build(rows.map((row) => ({ ...row }))))
+  assert.deepEqual(lines().map((line) => line.dataset.key), ['m-open'])
+  assert.equal(lines()[0].getAttribute('aria-expanded'), 'false')
+})
+
 test('Tab on a closed milestone opens its closed epic too', () => {
   const rows = [
     { id: 'm1', kind: 'milestone', title: 'Release', derived_status: 'done' },
@@ -269,7 +301,7 @@ test('list view: rows, columns, the name line, and going in and out', () => {
   assert.equal(store.getState().cursor, 'se-e1.a.x')
   key('ArrowLeft')
   assert.equal(store.getState().cursor, 'se-e1.a', '← on a child folds its folder and lands on it')
-  assert.deepEqual(store.getState().expanded, [])
+  assert.deepEqual(store.getState().expanded, [pathKey(['m:se-m1'])])
   // Nothing to fold on a top-level line: ← leaves the place, landing on the folder it came out of (the TUI's `h`).
   key('ArrowLeft')
   assert.deepEqual(store.getState().path, ['m:se-m1'])
@@ -345,7 +377,7 @@ test('list view: no index yet shows loading, then the rows', () => {
   assert.match(dom.root.querySelector('.moai-list-empty').textContent, /Loading/)
   dom.render()
   assert.equal(dom.root.querySelector('.moai-list-empty').hidden, true)
-  assert.equal(dom.lines().length, 2)
+  assert.equal(dom.lines().length, 3)
 })
 
 test('virtual scroll: 5000 rows draw only a window, follow the scroll, and keep the cursor in view', () => {
