@@ -520,7 +520,9 @@ BACKLOG
   and lands on the parent; with nothing to fold it leaves one level. On a
   project header row, {key:browse.expand} and the right arrow unfold and {key:browse.collapse} and the left arrow
   fold. {key:browse.expand_all} unfolds everything under it recursively and folds it again on a
-  second press. Unfolded members stand with branch marks in the title column,
+  second press. Closed epics and milestones below that row stay folded; press
+  {key:browse.expand} or {key:browse.expand_all} on one to open it. Unfolded members
+  stand with branch marks in the title column,
   and that unfolding is not kept in the config. {key:moves.top} and Home go to the top,
   {key:moves.bottom} and End to the bottom. {key:moves.half_down} and {key:moves.half_up} scroll half a page, {key:moves.page_down} and
   {key:moves.page_up} (PageDown and PageUp) a whole page and the wheel three rows — the
@@ -621,6 +623,8 @@ BACKLOG
              middle-button paste work there as they always did. Over the list
              and the detail, the terminal's own selection and paste need Shift
              held in most terminals, Option in iTerm2
+    {key:browse.archive_days}  archive days [14 days/off] — opens a picker and writes
+             archive_days in .moai/config.toml for everyone in the repository.
   The one key that quits outright is Ctrl-C — anywhere, even mid-typing.
   The screen rereads itself — issues written next door, and `moai read` or
   `moai project add` in another terminal, land without a keypress.
@@ -642,8 +646,11 @@ BACKLOG
   [deferred·archive 312 hidden]. The view is separate from the filter, so
   Esc does not clear it and the two apply together.
   Done that has sat in done for a while is the archive (archive_days in
-  .moai/config.toml, 14 unless written; 0 turns it off). It stays hidden on
-  the list and the board even with done shown, and the path line counts it
+  .moai/config.toml, 14 unless written; 0 turns it off). Rows also wait for
+  its parent, epic and milestone to reach archive age. It stays hidden on
+  the list and board. {key:browse.archive_days} opens a picker for that number
+  and writes the repository setting in .moai/config.toml, shared by everyone.
+  Even with done shown, the path line counts hidden archive rows
   — [archive 312 hidden]. {key:browse.archived} shows it and is kept under [tui] as
   show_archived; {key:browse.show_all} (all) leaves it hidden. {key:browse.grep} search finds it anyway.
   Sorting puts urgent, new, earlier column and alphabetical on top. The order
@@ -688,11 +695,16 @@ BACKLOG
   {key:browse.backlog} hides backlog items in both the board and the list, and is kept
   under [tui] as hide_backlog.
   At the project root every milestone is a lane, with (no milestone) last;
-  inside a milestone or an epic there is one lane. Epics and milestones are
-  not cards. Each card is two lines, its id, column and priority over its title,
+  inside a milestone or an epic there is one lane. The lane header takes the
+  cursor, shows its detail, and Enter opens that milestone. Closed milestone
+  lanes and closed epic cards start folded. On a lane header, {key:browse.collapse}
+  folds, {key:browse.expand} opens, and {key:browse.expand_all} flips it; click
+  its arrow to flip it. The closed epic is one card in done; {key:browse.expand_all}
+  or its arrow shows done members below. Other members keep their columns.
+  Each ordinary card is two lines, its id, column and priority over its title,
   and the cursor's card is marked and drawn reversed. Cards Enter can go
   into end their title with /, as in the list. The foot, a third line,
-  stands while SPC c has tag, epic, assignee or a date on — an epic shows up on
+  stands while SPC c has tag, epic, assignee or a date on; open epics appear in
   the board only as the name in that foot ({key:browse.cell_epic}). Cards that are not yours
   grow that foot anyway and say whose they are, dimmed — → name, or unowned —
   in the assignee's place; your own cards stay two lines. Whose is decided the
@@ -701,7 +713,7 @@ BACKLOG
   whose it is and the dates still show. {key:moves.line_down} and {key:moves.line_up} move within the
   column, {key:browse.collapse} and {key:browse.expand} go to the next column at the nearest height, {key:moves.top} and {key:moves.bottom} go to
   the column's ends, {key:browse.enter} and {key:browse.leave} go in and out as in the list, and {key:browse.expand_all}
-  does nothing. The whole board scrolls as one; the column names stay on top.
+  flips a closed epic card. The board scrolls as one; column names stay on top.
   When the columns do not fit, the column the cursor stands in always stands
   and the frame title names the rest with their counts. Clicking a card puts
   the cursor on it. The wheel, {key:moves.half_down} and {key:moves.half_up}, {key:moves.page_down} and {key:moves.page_up}, and
@@ -715,11 +727,12 @@ BACKLOG
   top card in a column goes up to it — and there {key:browse.expand} unfolds, {key:browse.collapse} folds, {key:browse.expand_all}
   unfolds everything and {key:browse.enter} goes in, as in the list.
 
-  {key:browse.go_gantt} lays the same rows out as a gantt chart: the list, every group opened
+  {key:browse.go_gantt} lays the same rows out as a gantt chart: the list, with open groups
   out, stays fixed on the left and a date axis with bars stands on the right.
   It is the list's layout too — the cursor, the filter, the view, search and
-  the detail are the list's — but it holds its own folds: it opens with
-  everything unfolded, {key:browse.collapse}, {key:browse.expand} and {key:browse.expand_all} fold and unfold only inside it,
+  the detail are the list's — but it holds its own folds: closed epics and
+  milestones start folded, except those holding the selected row.
+  {key:browse.collapse}, {key:browse.expand} and {key:browse.expand_all} fold and unfold only inside it,
   and the list keeps the folds it had. Coming back to the list opens the
   folder that holds the row you stood on. The detail stands below the gantt at
   first; {key:browse.detail_at} there moves the gantt's detail only, for this session.
@@ -1775,11 +1788,12 @@ const SHOW_LIST: &str = "  Order: --sort takes fields separated by commas, like 
   Archive: a row that has stood in done for archive_days (14 unless
   .moai/config.toml says otherwise, 0 turns it off) is the archive - an
   epic or milestone counted from when it got to done, the clock --done
-  reads. --all and -s done leave it out and the tail says how many;
+  reads. Rows under a parent, epic or milestone wait for that group to
+  reach archive age too. --all and -s done leave it out; the tail says how many.
   --archived brings it back, done and deferred with it. Asking by time
   (--since, --created, --done, --stale) finds it anyway, and so does -g
-  once done is let in (-g --all). Nothing is stored: it is read from the
-  column and the clock each time.
+  once done is let in (-g --all). Rows already moved to .moai/archive stay
+  archived even if archive_days is increased or turned off.
 
     moai show --archived -g parser
 

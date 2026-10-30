@@ -490,6 +490,67 @@ pub const ARCHIVE_DAYS: i64 = 14;
 /// [`Config::archive_days`] 를 적는 키.
 pub const ARCHIVE_KEY: &str = "archive_days";
 
+/// Change one flat numeric setting without reserializing the rest of the file.
+/// The caller parses the existing file and the edited result under the write lock.
+/// This preserves comments, unknown keys, tables and line endings.
+pub fn set_flat(src: &str, key: &str, value: i64) -> Result<String, Trouble> {
+    debug_assert_eq!(key, ARCHIVE_KEY);
+    let es = entries(src)?;
+    if let Some(entry) = es.iter().find(|entry| entry.key == key && entry.table.is_some()) {
+        return Err(Trouble::ThresholdInTable { line: entry.line, named: key.into() });
+    }
+    let found = es.iter().find(|entry| entry.table.is_none() && entry.key == key);
+    let line_number = found.map_or_else(
+        || es.iter().filter(|entry| entry.table.is_none()).map(|e| e.line).max().unwrap_or(0) + 1,
+        |e| e.line,
+    );
+    if value < 0 {
+        return Err(Trouble::NotANumber {
+            line: line_number,
+            key: key.into(),
+            want: Want::Whole,
+            raw: value.to_string(),
+        });
+    }
+    let line_ending = if src.contains("\r\n") { "\r\n" } else { "\n" };
+    let lines: Vec<&str> = src.split_inclusive('\n').collect();
+    if let Some(entry) = found {
+        let start: usize = lines.iter().take(entry.line - 1).map(|line| line.len()).sum();
+        let line = lines[entry.line - 1];
+        let equal = line.find('=').expect("entries found an equals sign");
+        let token = line[equal + 1..].find(entry.value).expect("entries found this value") + equal + 1;
+        let a = start + token;
+        let b = a + entry.value.len();
+        let mut out = String::with_capacity(src.len() + 20);
+        out.push_str(&src[..a]);
+        out.push_str(&value.to_string());
+        out.push_str(&src[b..]);
+        return Ok(out);
+    }
+    let written = format!("{key} = {value}");
+    let last_flat = es.iter().filter(|entry| entry.table.is_none()).map(|entry| entry.line).max();
+    let (at, before, after) = match last_flat {
+        Some(n) => {
+            let at: usize = lines.iter().take(n).map(|line| line.len()).sum();
+            let before = if lines[n - 1].ends_with('\n') { "" } else { line_ending };
+            let after = if at == src.len() && !src.ends_with('\n') { "" } else { line_ending };
+            (at, before, after)
+        }
+        None => {
+            // Keep a UTF-8 BOM at byte zero if one was present.
+            let at = if src.starts_with('\u{feff}') { '\u{feff}'.len_utf8() } else { 0 };
+            (at, "", line_ending)
+        }
+    };
+    let mut out = String::with_capacity(src.len() + written.len() + before.len() + after.len());
+    out.push_str(&src[..at]);
+    out.push_str(before);
+    out.push_str(&written);
+    out.push_str(after);
+    out.push_str(&src[at..]);
+    Ok(out)
+}
+
 /// [`Config::wiki_dir`] 를 안 적은 저장소가 받는 자리 — 이 저장소의 `docs/cli.md`·`docs/recovery.md` 가 이미
 /// 매뉴얼의 시작이다(2026-10-04 사용자 결정).
 pub const WIKI_DIR: &str = "docs";
@@ -952,6 +1013,35 @@ status_due_days      = 17
             Config::parse("prefix = \"a\"\narchive_days = -1\n").unwrap_err(),
             Trouble::NotANumber { line: 2, .. }
         ));
+    }
+
+    #[test]
+    fn setting_archive_days_replaces_only_its_value() {
+        let src = "# keep\nprefix = \"a\"\n  archive_days  =  14   # old\nunknown = \"x\"\n[models]\ncodex = \"old\"\n";
+        let got = set_flat(src, ARCHIVE_KEY, 30).unwrap();
+        assert_eq!(got, src.replace("14   # old", "30   # old"));
+        assert_eq!(set_flat(&got, ARCHIVE_KEY, 30).unwrap(), got);
+        assert_eq!(Config::parse(&got).unwrap().archive_days, 30);
+    }
+
+    #[test]
+    fn setting_archive_days_inserts_above_tables_and_keeps_line_endings() {
+        let crlf = "prefix = \"a\"\r\n# note\r\n[models]\r\ncodex = \"old\"\r\n";
+        assert_eq!(
+            set_flat(crlf, ARCHIVE_KEY, 7).unwrap(),
+            "prefix = \"a\"\r\narchive_days = 7\r\n# note\r\n[models]\r\ncodex = \"old\"\r\n"
+        );
+        let bare = "# note\n[models]\ncodex = \"old\"";
+        assert_eq!(set_flat(bare, ARCHIVE_KEY, 7).unwrap(), "archive_days = 7\n# note\n[models]\ncodex = \"old\"");
+        let no_final_newline = "prefix = \"a\"";
+        assert_eq!(set_flat(no_final_newline, ARCHIVE_KEY, 7).unwrap(), "prefix = \"a\"\narchive_days = 7");
+    }
+
+    #[test]
+    fn setting_archive_days_refuses_broken_and_negative_inputs() {
+        let broken = "prefix = \"a\"\n[models]\narchive_days = 3\n";
+        assert!(matches!(set_flat(broken, ARCHIVE_KEY, 7), Err(Trouble::ThresholdInTable { .. })));
+        assert!(matches!(set_flat("prefix = \"a\"\n", ARCHIVE_KEY, -1), Err(Trouble::NotANumber { .. })));
     }
 
     /// **0.9.0 이 걷은 `mail_read_days` 를 든 옛 설정도 말없이 읽힌다**(moai-5uwh.st1) — 우편함이 걷혀 그 키를 읽는

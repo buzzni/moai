@@ -347,12 +347,18 @@ impl App {
     /// 줄이 없는 자리(마지막 줄 밑의 빈 곳·테두리·열 이름 줄)는 포커스만 옮긴다.
     ///
     /// **보드에서는 카드를 누른다**(moai-9nfw) — 그린 카드의 자리([`Drawn::cards`])에서 맞힌다. 카드 사이의 빈 곳·칸
-    /// 머리줄·레인 머리줄은 포커스만 옮긴다.
+    /// 머리줄은 포커스만 옮긴다. 레인 머리줄은 고를 수 있고, 접힘 표시는 누르면 뒤집힌다.
     fn press(&mut self, at: Position) {
         let Some(pane) = self.pane_at(at) else { return };
         self.focus = pane;
-        if let Some(&(_, n)) = self.drawn.cards.iter().find(|(r, _)| pane == Pane::Explorer && r.contains(at)) {
+        if let Some(&(rect, n)) = self.drawn.cards.iter().find(|(r, _)| pane == Pane::Explorer && r.contains(at)) {
             self.move_to(n);
+            if self.board() && at.y == rect.y && (rect.x.saturating_add(2)..rect.x.saturating_add(4)).contains(&at.x) {
+                let rows = self.rows();
+                if self.board_fold_at(&rows).is_some() {
+                    self.board_fold(&rows, None);
+                }
+            }
             return;
         }
         let rows = self.drawn.rows;
@@ -875,6 +881,27 @@ mod tests {
         let todo = column_at(&a, "todo");
         click(&mut a, todo.x + 3, todo.y);
         assert_eq!((a.focus, on_card(&a)), (Pane::Explorer, "argos-0018".to_string()), "칸 머리줄이 카드를 골랐다");
+    }
+
+    #[test]
+    fn a_click_on_a_lane_head_selects_it_and_its_arrow_folds_it() {
+        let at = "2026-09-01T00:00:00Z";
+        let milestone = Issue::new("argos-0000".into(), "Milestone".into(), Kind::Milestone, Status::new("todo"), at);
+        let mut issue = Issue::new("argos-0001".into(), "Work".into(), Kind::Issue, Status::new("todo"), at);
+        issue.milestone = Some("argos-0000".into());
+        let mut a =
+            App::new(vec![milestone, issue], Config::parse("prefix = \"argos\"\n").unwrap(), crate::nav::Path::new());
+        a.hit("SPC g b");
+        super::super::draw::tests::render(&mut a, 140, 20);
+        let lane = card_at(&a, "argos-0000");
+        a.focus = Pane::Detail;
+        click(&mut a, lane.x + 8, lane.y);
+        assert_eq!((a.focus, on_card(&a)), (Pane::Explorer, "argos-0000".into()));
+        let path = a.site.index.dir_path(&a.site.issues, 0);
+        assert!(!a.site.board_shut.contains(&path));
+        click(&mut a, lane.x + 2, lane.y);
+        assert!(a.site.board_shut.contains(&path));
+        assert_eq!(on_card(&a), "argos-0000");
     }
 
     /// **보드의 휠은 화면만 굴린다**(moai-acfk·moai-j0jf, 사용자 결정 2026-10-02·2026-10-03) — 마우스가 선 칸과
