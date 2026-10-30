@@ -451,9 +451,10 @@ pub fn screen(f: &mut Frame, app: &mut App) {
 /// `todo` 는 `PLAIN`) 그 스피너는 맨 글자와 같은 `Reset` 이라 그 설정에서는 글에 적은 스피너 글자로도
 /// 깬다 — 칸 색만으로는 둘을 못 가른다. 그 손해는 이 좁히기 전과 같다(`SPIN_BUDGET` 로 묶인다).
 ///
-/// **칸 색은 바탕에 서도 센다**(moai-bg2i) — 보드 카드의 머리 띠는 칸 색 바탕에 검정 글자라([`card`]), 띠 위의
-/// 스피너는 글자색으로는 안 걸린다. 지금은 같은 칸의 머리줄 스피너가 늘 함께 서서 루프를 깨우지만, 그 머리줄에
-/// 기대면 카드의 스피너가 제 힘으로 보이는 것이 아니게 된다.
+/// **칸 색은 바탕에 서도 센다**(moai-bg2i) — v0.36.0 의 보드 카드 머리 띠는 칸 색 바탕에 검정 글자라 띠 위의
+/// 스피너가 글자색으로는 안 걸렸다. moai-i07x 부터 띠는 검정 바탕에 칸 색 글자라([`card`]) 글자색으로 걸리고,
+/// 고른 카드의 반전도 칸의 `fg` 를 그대로 둔다. 바탕 갈래는 밝은 바탕 띠가 돌아와도 카드의 스피너가 같은 칸
+/// 머리줄 스피너에 기대지 않고 제 힘으로 깨우게 남긴 그물이다 — `a_spinner_on_a_board_band_still_counts` 가 두 꼴을 본다.
 fn spinner_on(buf: &ratatui::buffer::Buffer, colours: &[Color]) -> bool {
     buf.content
         .iter()
@@ -3195,12 +3196,14 @@ fn lane_line<'a>(app: &App, laid: &super::Laid, lane: usize, w: usize) -> Line<'
 }
 
 /// 카드 한 장 — 머리(`id · 칸 글리프 · pN`), 몸(`[NEW] ⎇ 가지 제목`), 그리고 `SPC c` 로 켠 열이 있으면 발줄.
-/// 2026-10-30 결정(moai-bg2i): 집은·리뷰·끝낸 칸의 머리만 밝은 16색 바탕(`band`)이다. 나머지는 바탕색이 없다.
+/// 2026-10-30 결정: v0.36.0(moai-bg2i)의 밝은 바탕·검정 글자를 moai-i07x 에서 모든 카드에
+/// 검정 바탕·칸 색 글자로 뒤집었다. 집은·리뷰·끝낸 칸의 머리만 띠(`band`)이고 나머지는 바탕색이 없다.
 /// **바탕은 보드의 칸이 고른다** — [`board`] 가 `laid.columns` 에서 읽어 넘긴다. 미룬 `in_progress` 줄은 미룸 칸에
 /// 서므로 바탕이 없다. "bug" 는 종류가 아니라 태그이고, 우선순위가 아닌 칸이 바탕을 고른다. 고른 카드는
-/// `>` 와 반전이다: 색 없는 터미널에서도 선다. id·우선순위·셈은 목록처럼 켠 것만 선다(`App::fields`).
+/// `>` 와 반전이다: 고른 띠는 칸 색 바탕·검정 글자로 서며, 색 없는 터미널에서도 선다.
+/// id·우선순위·셈은 목록처럼 켠 것만 선다(`App::fields`).
 ///
-/// 띠 위의 글자는 검정이고, 띠 밖에서 흐린 id·셈은 띠 위에서도 흐리다(`DIM`). **띠를 먼저 입히고 찾은 글자를 그 위에
+/// 띠 위의 글자는 칸 색이고, 띠 밖에서 흐린 id·셈은 띠 위에서도 흐리다(`DIM`). **띠를 먼저 입히고 찾은 글자를 그 위에
 /// 덧칠한다**([`mark`]) — 찾은 글자는 띠 위에서도 밝은 파랑 굵게 남는다. 칠한 뒤에 색으로 찾은 글자를 되짚지 않는다.
 ///
 /// 줄마다 커서 자리(`> `)만큼 들이고 오른쪽에 한 칸을 비운다 — 옆 칸의 카드와 붙어 읽히지 않게.
@@ -3214,16 +3217,11 @@ fn card<'a>(app: &App, r: &Row, chosen: bool, w: usize, band: Option<Style>) -> 
     let fields = app.fields;
     let grep = app.grep_query();
     let in_id = grep.filter(|(g, _)| g.sees_id()).map(|(_, q)| q);
-    // 띠 위의 잉크 — 띠가 없으면 제 모양 그대로다. 흐린 조각(id·셈)은 회색 글자 대신 흐린 검정이 된다.
+    // 띠 위의 잉크 — 띠가 없으면 제 모양 그대로다. 흐린 조각(id·셈)은 칸 색을 흐리게 한다.
     let ink = |s: Style| band.map_or(s, |b| s.patch(b));
     let quiet = || band.map_or(dim(), |b| b.add_modifier(Modifier::DIM));
 
     let mut head: Vec<Span<'static>> = Vec::new();
-    if i.kind == crate::model::Kind::Epic && site.closed(at) {
-        let path = site.index.dir_path(&site.issues, at);
-        let mark = if !app.searching() && site.board_shut.contains(&path) { "▸ " } else { "▾ " };
-        head.push(Span::styled(mark, ink(Style::new())));
-    }
     if fields.shows(Field::Id) {
         head.extend(mark(vec![Span::styled(i.id.clone(), quiet())], in_id));
         head.push(Span::styled(" ", ink(Style::new())));
@@ -6452,17 +6450,35 @@ pub(super) mod tests {
                 (x, y)
             };
             let (x, y) = id_at("argos-0080");
-            assert_eq!(buf[(x, y)].bg, colour, "{status}: id background");
-            assert_eq!(buf[(x, y)].fg, Color::Black, "{status}: id foreground");
-            assert!(buf[(x, y)].modifier.contains(Modifier::DIM), "{status}: the id is dim black on the band");
+            assert_eq!(buf[(x, y)].bg, Color::Black, "{status}: id background");
+            assert_eq!(buf[(x, y)].fg, colour, "{status}: id foreground");
+            assert!(buf[(x, y)].modifier.contains(Modifier::DIM), "{status}: the id is dim on the band");
             assert!(buf[(x, y)].modifier.contains(Modifier::REVERSED), "{status}: selected head");
             // 띠는 카드 폭에서 커서 자리(왼쪽 둘)와 오른쪽 한 칸을 뺀 자리를 꽉 채운다 — 글이 끝난 자리에서 멈추면 안 된다.
             let card = a.drawn.cards.iter().find(|(_, n)| *n == row).expect("the card was drawn").0;
-            let end = (x..w).find(|&x| buf[(x, y)].bg != colour).expect("band end");
+            let end = (x..w).find(|&x| buf[(x, y)].bg != Color::Black).expect("band end");
             assert_eq!(buf[(end - 1, y)].symbol(), " ", "{status}: the band stopped where the head's text did");
             assert!(matches!(card.right() - end, 1 | 2), "{status}: band ends at {end}, card {card:?}");
             assert!(buf[(end - 1, y)].modifier.contains(Modifier::REVERSED), "{status}: filler lost reverse");
-            assert_ne!(buf[(end, y)].bg, colour, "{status}: right gutter was filled");
+            assert_ne!(buf[(end, y)].bg, Color::Black, "{status}: right gutter was filled");
+            // Put the cursor on a plain card: every banded card keeps the same ink without reverse.
+            let plain_row = a.rows().iter().position(|r| matches!(r, Row::Item(_, e, _) if e.at().is_some_and(|at| a.site.issues[at].id == "argos-0100"))).unwrap();
+            a.cursor = plain_row;
+            let unselected = render_buf(&mut a, w, h);
+            let uy = lines_of(&unselected).iter().position(|line| line.contains("argos-0080")).unwrap() as u16;
+            let ux = (0..w - 10)
+                .find(|&x| (0..10).map(|n| unselected[(x + n, uy)].symbol()).collect::<String>() == "argos-0080")
+                .unwrap();
+            assert_eq!(unselected[(ux, uy)].bg, Color::Black, "{status}: unselected card lost its band");
+            assert_eq!(unselected[(ux, uy)].fg, colour, "{status}: unselected card lost its column ink");
+            assert!(
+                !unselected[(ux, uy)].modifier.contains(Modifier::REVERSED),
+                "{status}: unselected card is reversed"
+            );
+            let uend = (ux..w).find(|&x| unselected[(x, uy)].bg != Color::Black).expect("unselected band end");
+            assert_eq!(unselected[(uend - 1, uy)].symbol(), " ", "{status}: unselected band stopped early");
+            assert!(!unselected[(uend - 1, uy)].modifier.contains(Modifier::REVERSED));
+            assert_ne!(unselected[(uend, uy)].bg, Color::Black, "{status}: unselected band filled the gutter");
             for plain in ["argos-0100", "argos-0090"] {
                 let (px, py) = id_at(plain);
                 assert_eq!(buf[(px, py)].bg, Color::Reset, "{status}: {plain} gained a band");
@@ -6484,8 +6500,8 @@ pub(super) mod tests {
             let hit = &found_buf[(x + 6, y)];
             assert_eq!(hit.fg, Color::LightBlue, "{status}: the search hit lost its colour on the band");
             assert!(hit.modifier.contains(Modifier::BOLD), "{status}: the search hit is not bold on the band");
-            assert_eq!(hit.bg, colour, "{status}: the search hit dropped the band");
-            assert_eq!(found_buf[(x, y)].fg, Color::Black, "{status}: the unmatched id lost its ink");
+            assert_eq!(hit.bg, Color::Black, "{status}: the search hit dropped the band");
+            assert_eq!(found_buf[(x, y)].fg, colour, "{status}: the unmatched id lost its ink");
         }
     }
 
@@ -9378,8 +9394,9 @@ pub(super) mod tests {
         assert!(a.spun, "머리의 도는 건수로 안 깬다\n{lines}");
     }
 
-    /// **보드 카드의 띠 위 스피너도 제 힘으로 깨운다**(moai-bg2i) — 띠는 칸 색 바탕에 검정 글자라 글자색만 보면
-    /// 그 스피너를 못 알아본다. 띠 없는 자리의 같은 글자(맨 바탕의 검정 글자)는 여전히 안 센다.
+    /// **보드 카드의 띠 위 스피너도 제 힘으로 깨운다**(moai-bg2i, moai-i07x) — 이제 검정 바탕에
+    /// 칸 색 글자여서 글자색으로 잡힌다. 바탕색 갈래는 옛 밝은 바탕 띠가 돌아와도 잡는 그물로 남긴다.
+    /// 띠 없는 자리의 검정 글자 스피너는 여전히 안 센다.
     #[test]
     fn a_spinner_on_a_board_band_still_counts() {
         let colours = [Color::LightYellow, Color::LightMagenta];
@@ -9387,6 +9404,10 @@ pub(super) mod tests {
         let mut buf = ratatui::buffer::Buffer::empty(Rect::new(0, 0, 4, 1));
         buf[(1, 0)].set_symbol(spinner).set_style(from_anstyle(style::IN_PROGRESS_BAND));
         assert!(spinner_on(&buf, &colours), "띠 위의 스피너를 못 알아본다");
+        // 바탕 갈래가 그물이라는 말이 서려면 그 꼴을 직접 잰다 — 칸 색 바탕에 검정 글자(v0.36.0 의 띠).
+        let mut bright = ratatui::buffer::Buffer::empty(Rect::new(0, 0, 4, 1));
+        bright[(1, 0)].set_symbol(spinner).set_style(Style::new().fg(Color::Black).bg(Color::LightYellow));
+        assert!(spinner_on(&bright, &colours), "칸 색 바탕 띠 위의 스피너를 못 알아본다");
         let mut plain = ratatui::buffer::Buffer::empty(Rect::new(0, 0, 4, 1));
         plain[(1, 0)].set_symbol(spinner).set_style(Style::new().fg(Color::Black));
         assert!(!spinner_on(&plain, &colours), "칸 색 없는 스피너 글자로 깬다");

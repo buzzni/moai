@@ -3589,6 +3589,51 @@ mod tests {
         std::fs::write(&file, body).unwrap();
     }
 
+    /// **머리줄의 `Tab` 도 닫힌 에픽을 편다**(moai-i07x) — 묶음 줄의 `Tab` 과 같은 자([`Site::starts_folded`])라
+    /// 닫힌 마일스톤만 접힌 채 남는다. [`App::open_all`] 의 목록 갈래를 옛 `closed` 로 되돌리면 닫힌 에픽이 접힌 채
+    /// 남고, 거르개를 걷으면 닫힌 마일스톤이 열린다 — 이 시험 전에는 둘 다 붉은 것이 없었다.
+    #[test]
+    fn tab_on_a_header_opens_closed_epics_and_leaves_closed_milestones_folded() {
+        let s = Scratch::fenced("layer-tab-closed");
+        let dir = s.project("deep", &[("argos-0001", "묶음 밖의 줄", "todo")]);
+        let now = crate::model::now();
+        let row = |id: &str, kind: Kind, status: &str| {
+            let mut i = Issue::new(id.into(), format!("{id} 제목"), kind, Status::new(status), &now);
+            if status == "done" {
+                i.done_at = Some(now.clone());
+            }
+            i
+        };
+        let shut = row("argos-0200", Kind::Milestone, "todo");
+        let mut shut_member = row("argos-0201", Kind::Issue, "done");
+        shut_member.milestone = Some(shut.id.clone());
+        let open = row("argos-0400", Kind::Milestone, "todo");
+        let mut open_member = row("argos-0401", Kind::Issue, "todo");
+        open_member.milestone = Some(open.id.clone());
+        let mut epic = row("argos-0300", Kind::Epic, "todo");
+        epic.milestone = Some(open.id.clone());
+        let mut epic_member = row("argos-0301", Kind::Issue, "done");
+        epic_member.epic = Some(epic.id.clone());
+        let file = dir.join(".moai/issues.jsonl");
+        let mut body = std::fs::read_to_string(&file).unwrap();
+        for i in [shut, shut_member, open, open_member, epic, epic_member] {
+            body.push_str(&format!("{}\n", serde_json::to_string(&i).unwrap()));
+        }
+        std::fs::write(&file, body).unwrap();
+        let cfg = s.register(&[&dir]);
+        let mut a = layered(&cfg);
+
+        a.hit("Tab");
+        settle(&mut a);
+        let site = a.layer.as_ref().unwrap().places[0].site.as_ref().expect("Tab read the project");
+        let path = |id: &str| site.index.dir_path(&site.issues, site.index.find(id).unwrap());
+        assert!(site.closed(site.index.find("argos-0300").unwrap()), "the premise — the epic is closed");
+        assert!(site.closed(site.index.find("argos-0200").unwrap()), "the premise — the milestone is closed");
+        assert!(site.expanded.contains(&path("argos-0400")), "Tab left the open milestone folded");
+        assert!(site.expanded.contains(&path("argos-0300")), "Tab left the closed epic folded");
+        assert!(!site.expanded.contains(&path("argos-0200")), "Tab opened the closed milestone");
+    }
+
     /// **건너뛰면 포커스가 목록으로 돌아온다**(리뷰 moai-i784.pzh) — 층의 상세에는 듣는 키가
     /// 없어, 상세에 포커스를 둔 채 `0` 을 누르면 무엇을 눌러야 할지 없는 화면이 선다.
     #[test]

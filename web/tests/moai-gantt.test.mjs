@@ -1211,7 +1211,7 @@ test('gantt group buttons fold milestones and epics without changing the list fo
   assert.deepEqual(start.expanded, [], 'no list expansion was mutated')
 })
 
-test('closed gantt groups seed once per visit and Tab keeps their closed descendants folded', () => {
+test('closed milestone Gantt folds seed once while epics start open', () => {
   const rows = [
     { id: 'm1', kind: 'milestone', title: 'Release', derived_status: 'done' },
     { id: 'e1', kind: 'epic', title: 'Epic', milestone: 'm1', derived_status: 'done' },
@@ -1225,14 +1225,14 @@ test('closed gantt groups seed once per visit and Tab keeps their closed descend
   const selectedHead = mount('m1', index)
   assert.equal(selectedHead.root.querySelector('.g-row[data-id="m1"] .moai-toggle').getAttribute('aria-expanded'), 'false')
   toggle('m1').click()
-  assert.equal(toggle('e1').getAttribute('aria-expanded'), 'false')
+  assert.equal(toggle('e1').getAttribute('aria-expanded'), 'true')
   view.render({ ...initialState(), tab: 'gantt', cursor: 'm1' }, index)
   view.command('expandAll')
   view.command('expandAll')
-  assert.equal(toggle('e1').getAttribute('aria-expanded'), 'false')
+  assert.equal(toggle('e1').getAttribute('aria-expanded'), 'true')
   toggle('e1').click()
   view.render({ ...initialState(), tab: 'gantt' }, index)
-  assert.equal(toggle('e1').getAttribute('aria-expanded'), 'true')
+  assert.equal(toggle('e1').getAttribute('aria-expanded'), 'false', 'a manual epic fold survives reread')
   view.render({ ...initialState(), tab: 'gantt', cursor: 'm1' }, index)
   view.command('collapse')
   assert.equal(toggle('m1').getAttribute('aria-expanded'), 'false')

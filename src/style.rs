@@ -21,17 +21,19 @@ pub const IN_PROGRESS: Style = fg(AnsiColor::BrightYellow).bold();
 /// **가장 눈에 띄어야 한다** — 게이트를 없앤 대신 여기가 썩는다.
 pub const REVIEW: Style = fg(AnsiColor::BrightMagenta);
 pub const DONE: Style = fg(AnsiColor::Green).dimmed();
-pub const IN_PROGRESS_BAND: Style = fg(AnsiColor::Black).bg_color(Some(Color::Ansi(AnsiColor::BrightYellow)));
-pub const REVIEW_BAND: Style = fg(AnsiColor::Black).bg_color(Some(Color::Ansi(AnsiColor::BrightMagenta)));
-pub const DONE_BAND: Style = fg(AnsiColor::Black).bg_color(Some(Color::Ansi(AnsiColor::BrightGreen)));
+pub const IN_PROGRESS_BAND: Style = fg(AnsiColor::BrightYellow).bg_color(Some(Color::Ansi(AnsiColor::Black)));
+pub const REVIEW_BAND: Style = fg(AnsiColor::BrightMagenta).bg_color(Some(Color::Ansi(AnsiColor::Black)));
+pub const DONE_BAND: Style = fg(AnsiColor::BrightGreen).bg_color(Some(Color::Ansi(AnsiColor::Black)));
 
 /// The band behind a board card's head line in the explorer, by the board column the card stands
 /// in (moai-bg2i) — `None` leaves the head plain. The only place that says which columns carry one.
 ///
-/// Only the bright half of the basic 16 colours. Solarized maps these to greys; the status glyph
-/// on the same line still carries the meaning. BrightGreen shares the Green family with a project
-/// hue deliberately: here it is a background with black text, beside the done glyph `✓`, and the
-/// column head above the cards names the column in words.
+/// 2026-10-30: v0.36.0 used bright backgrounds and black text. In moai-i07x the user chose
+/// the old selected-card colours for every card: black background and bright column-coloured
+/// text; selection reverses both. Solarized maps the bright text to grey. On dark themes the
+/// black background can blend into the terminal background; the status glyph and column name
+/// still carry meaning. BrightGreen shares a family with a project Green deliberately: the
+/// done glyph `✓` and the column head distinguish them.
 pub fn band_style(status: &str) -> Option<Style> {
     match status {
         "in_progress" => Some(IN_PROGRESS_BAND),
