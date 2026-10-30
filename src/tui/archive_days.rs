@@ -5,19 +5,24 @@ pub struct Picker {
     pub choices: Vec<i64>,
     pub cursor: usize,
     pub now: i64,
+    /// The value an unwritten `archive_days` stands at — the caller hands it in (`config::ARCHIVE_DAYS`), so the
+    /// picker knows neither the config nor the store.
+    pub default: i64,
     pub typed: String,
     pub error: Option<String>,
 }
 
 impl Picker {
-    pub fn open(now: i64) -> Self {
-        let mut choices = vec![0, 7, 14, 30, 60, 90, 180, 365];
-        if !choices.contains(&now) {
-            choices.push(now);
-            choices.sort_unstable();
+    pub fn open(now: i64, default: i64) -> Self {
+        let mut choices = vec![0, 7, 30, 60, 90, 180, 365];
+        for one in [default, now] {
+            if !choices.contains(&one) {
+                choices.push(one);
+            }
         }
+        choices.sort_unstable();
         let cursor = choices.iter().position(|n| *n == now).unwrap_or(0);
-        Self { choices, cursor, now, typed: String::new(), error: None }
+        Self { choices, cursor, now, default, typed: String::new(), error: None }
     }
 
     pub fn selected(&self) -> Result<i64, &'static str> {
@@ -42,7 +47,8 @@ mod tests {
 
     #[test]
     fn keeps_custom_current_value_and_validates_input() {
-        let mut p = Picker::open(21);
+        let mut p = Picker::open(21, 14);
+        assert_eq!(p.choices, [0, 7, 14, 21, 30, 60, 90, 180, 365]);
         assert_eq!(p.selected(), Ok(21));
         p.paste("3650");
         assert_eq!(p.selected(), Ok(3650));

@@ -179,28 +179,11 @@ impl<'a> Where<'a> {
     /// **지도를 통째로 받는다**(`&Soil` 이 아니다) — 거름망은 그 지도를 제 필드로 들고 사는데,
     /// 빌려 받으면 그 지도가 사는 동안 거름망도 거기 매인다. 받은 쪽이 옮겨 담는 것은 한 번이고,
     /// 부르는 쪽은 색인처럼 지도를 먼저 쓰는 것을 다 쓴 뒤에 이것을 짓는다.
+    ///
+    /// Single-row detail (`moai show <id>`) takes this path too: even an ordinary issue needs the group columns to
+    /// decide whether its parent, epic and milestone have aged ([`Where::archived`]).
     pub fn from_soil(all: &'a [Issue], cfg: &'a crate::config::Config, soil: crate::report::Soil<'a>) -> Where<'a> {
-        Self::build(all, cfg, soil, true)
-    }
-
-    /// Single-row detail uses the same group columns as lists. Even an ordinary
-    /// issue needs them to decide whether its parent, epic and milestone have aged.
-    pub fn for_one(
-        all: &'a [Issue],
-        cfg: &'a crate::config::Config,
-        soil: crate::report::Soil<'a>,
-        _issue: &Issue,
-    ) -> Where<'a> {
-        Self::build(all, cfg, soil, true)
-    }
-
-    fn build(
-        all: &'a [Issue],
-        cfg: &'a crate::config::Config,
-        soil: crate::report::Soil<'a>,
-        groups: bool,
-    ) -> Where<'a> {
-        let stands = if groups { soil.stands(all, cfg) } else { Default::default() };
+        let stands = soil.stands(all, cfg);
         let states = stands.iter().map(|(id, s)| (*id, s.column)).collect();
         let since = stands.into_iter().map(|(id, s)| (id, s.entered)).collect();
         let crate::report::Soil { epic, milestone, roots, shelved, kinds, folded, lines, .. } = soil;

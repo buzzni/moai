@@ -213,6 +213,32 @@ test('folding a lane moves its selected card to the milestone head', () => {
   assert.deepEqual(chosen, ['point:m1'])
 })
 
+test('folding another lane leaves a selected lane head where it is (review moai-mkzo.8wa)', () => {
+  const rows = [
+    { id: 'm1', kind: 'milestone', title: 'One', derived_status: 'in_progress' },
+    { id: 'm2', kind: 'milestone', title: 'Two', derived_status: 'in_progress' },
+    { id: 'w1', kind: 'issue', title: 'Work one', milestone: 'm1', status: 'in_progress' },
+    { id: 'w2', kind: 'issue', title: 'Work two', milestone: 'm2', status: 'in_progress' },
+  ]
+  const { root, chosen } = mount({ ...initialState(), tab: 'board', cursor: 'm1' }, rows)
+  root.querySelector('.m-swim-head[data-lane="m:m2"] .moai-toggle').click()
+  assert.equal(root.querySelector('.m-swim-head[data-lane="m:m2"] .moai-toggle').getAttribute('aria-expanded'), 'false')
+  assert.deepEqual(chosen, [], 'folding m2 moved a cursor that stood outside it')
+})
+
+test('inside a folded closed epic its done members stay cards (review moai-mkzo.8wa)', () => {
+  const rows = [
+    { id: 'm1', kind: 'milestone', derived_status: 'done' },
+    { id: 'e1', kind: 'epic', milestone: 'm1', derived_status: 'done' },
+    { id: 'e1.a', kind: 'issue', derived_epic: 'e1', status: 'done' },
+  ]
+  const idx = build(rows)
+  const epic = idx.dirPath(idx.find('e1'))
+  const shut = new Set([pathKey(epic)])
+  const inside = groupBoard(idx, look({ path: epic, shut }))
+  assert.deepEqual(inside.lanes[0].columns.find((column) => column.key === 'done').cards.map((at) => idx.rows[at].id), ['e1.a'])
+})
+
 test('search reveals a done member inside folded lane and epic without changing the fold', () => {
   const rows = [
     { id: 'm1', kind: 'milestone', derived_status: 'done' },

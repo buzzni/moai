@@ -183,7 +183,10 @@ export const mountBoard: MountPane = (root, ctx): PaneView => {
     else shut.delete(key)
     let state = drawn.state
     const at = state.cursor === null ? undefined : drawn.index.find(state.cursor)
-    if (closing && at !== undefined && drawn.index.homeOf(at).slice(0, path.length).every((seg, n) => seg === path[n]) && id !== state.cursor) {
+    // Only a fold that hides the cursor moves it: the folded path must be a prefix of the cursor's home. Walking the
+    // home instead let a shorter home (a lane head at the root, a closed epic card) pass for any group.
+    const home = at === undefined ? [] : drawn.index.homeOf(at)
+    if (closing && at !== undefined && path.every((seg, n) => home[n] === seg) && id !== state.cursor) {
       state = { ...state, cursor: id ?? null }
       ctx.intents.point(id ?? null)
     }

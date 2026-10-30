@@ -646,7 +646,9 @@ pub fn board_in<'a>(
 }
 
 /// Keep connected epic/member and parent/child bundles together. Milestones
-/// stay live. An old closed member never leaves a bundle that is still open.
+/// stay live. An old closed member never leaves a bundle that is still open,
+/// and every row also waits for its parent, epic and milestone to reach archive
+/// age ([`report::put_away_in`], walked on `soil`'s maps).
 /// `stands` holds the group columns read with archived rows beside `issues` ([`report::group_stands`]).
 fn eligible_except(
     issues: &[Issue],

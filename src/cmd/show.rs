@@ -1028,7 +1028,7 @@ fn one(
         // 미룸은 위 `shelved_by` 가 이미 같은 자(`Shelved::root`)로 냈다. 저장소 전부를 재는 걸음이라 두 키를 다
         // 안 고른 `--fields` 에서는 안 짓는다.
         if wants(&["derived_milestone", "archived"]) {
-            let mut wh = crate::query::Where::for_one(all, &repo.config, report::Soil::of(all), issue);
+            let mut wh = crate::query::Where::from_soil(all, &repo.config, report::Soil::of(all));
             wh.stored = all.iter().map(|i| i.id.as_str()).filter(|id| !live.contains(*id)).collect();
             let derived = Derived::of(&wh, issue, &model::now());
             if let Some(m) = derived.derived_milestone {

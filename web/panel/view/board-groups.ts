@@ -127,7 +127,11 @@ export function groupBoard(index: IssueIndex, look: BoardLook, known: readonly s
     if (look.reveal || at === cursorAt || columnOf(index, at) !== 'done') return true
     const epic = index.epicOf(at)
     const home = epic === undefined ? undefined : index.find(epic)
-    return home === undefined || !closedGroup(index.rows[home]!) || !look.shut?.has(pathKey(index.dirPath(home)))
+    if (home === undefined || !closedGroup(index.rows[home]!)) return true
+    const folded = index.dirPath(home)
+    // Inside the epic its fold does not apply: there it is the path, not a card, so nothing could open it again.
+    if (folded.every((seg, n) => path[n] === seg)) return true
+    return !look.shut?.has(pathKey(folded))
   })
   const found = look.reveal ? new Set(kept.map((at) => columnOf(index, at))) : null
   const keys = all.filter((key) => !hides(key) || key === cursorColumn || found?.has(key))

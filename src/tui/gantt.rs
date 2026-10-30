@@ -221,18 +221,6 @@ impl Site {
             }
         }
     }
-
-    /// Seed Gantt's folded set once on entry. A group containing the selected
-    /// row remains open so switching layouts does not hide the cursor.
-    pub(super) fn fold_closed_for_gantt(&mut self, selected_home: Option<&Path>) {
-        self.gantt_shut.clear();
-        for path in self.closed_dirs(&Path::new()) {
-            if selected_home.is_some_and(|home| home.starts_with(&path)) {
-                continue;
-            }
-            self.set_open(true, path, false);
-        }
-    }
 }
 
 /// 간트 위의 끌기(moai-i4hf.exq). 끄는 동안 [`App::chart_drag`] 가 든다.
@@ -277,23 +265,12 @@ impl App {
     }
 
     /// Enter Gantt with closed epics and milestones folded. A selected row's
-    /// ancestors stay open. List expansion remains independent.
+    /// ancestors stay open. List expansion remains independent. The layout switch seeds with the rows it already
+    /// holds ([`App::seed_folds`]); tests enter through this.
+    #[cfg(test)]
     pub(super) fn open_gantt(&mut self) {
-        let selected = match self.current() {
-            Some(super::Row::Item(seat, entry, _)) => {
-                entry.at().and_then(|at| self.site_of_seat(seat).map(|site| (seat, site.index.home_of(at).clone())))
-            }
-            _ => None,
-        };
-        let here = selected.as_ref().and_then(|(seat, path)| (*seat == super::Seat::Here).then_some(path));
-        self.site.fold_closed_for_gantt(here);
-        if let Some(layer) = self.layer.as_mut() {
-            for (at, site) in layer.places.iter_mut().enumerate().filter_map(|(at, p)| p.site.as_mut().map(|s| (at, s)))
-            {
-                let keep = selected.as_ref().and_then(|(seat, path)| (*seat == super::Seat::Place(at)).then_some(path));
-                site.fold_closed_for_gantt(keep);
-            }
-        }
+        let rows = self.rows();
+        self.seed_folds(&rows, true);
     }
 
     /// 이 자리에 그릴 보기 상태(moai-i4hf.25n) — 사람이 고른 것(`App::chart`)을 창에 맞춘다. **그리기·키·마우스가 이
@@ -1546,7 +1523,8 @@ mod tests {
         ids(a).get(a.cursor).cloned().unwrap_or_default()
     }
 
-    /// **`SPC g g` 는 모두 펼친 채로 서고, 목록의 접기는 건드리지 않는다**(moai-i4hf.sas). 간트 안의 `h`·`l`·`Tab` 은
+    /// **`SPC g g` 는 열린 묶음을 모두 펼친 채로 서고, 목록의 접기는 건드리지 않는다**(moai-i4hf.sas). 닫힌 묶음이
+    /// 접혀 서는 것은 `gantt_enters_with_closed_epics_folded_and_keeps_manual_opening` 이 본다. 간트 안의 `h`·`l`·`Tab` 은
     /// 간트의 펼침만 바꾼다 — 목록으로 돌아오면 접어 둔 그대로다.
     #[test]
     fn spc_g_g_opens_everything_and_leaves_the_list_folds_alone() {

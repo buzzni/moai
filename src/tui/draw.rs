@@ -772,7 +772,7 @@ fn archive_days_pick(f: &mut Frame, p: &mut super::archive_days::Picker, at: Rec
                 format!("{days} {}", say(lang, "tui.archive_days.days"))
             };
             let default =
-                if *days == 14 { format!("  {}", say(lang, "tui.archive_days.default")) } else { String::new() };
+                if *days == p.default { format!("  {}", say(lang, "tui.archive_days.default")) } else { String::new() };
             let now = if *days == p.now { format!("  {}", say(lang, "tui.tz.now")) } else { String::new() };
             ListItem::new(format!("{label}{default}{now}"))
         })
@@ -3065,10 +3065,12 @@ fn project_banner<'a>(app: &App, place: usize, chosen: bool, w: usize) -> Line<'
 }
 
 fn lane_banner<'a>(app: &App, laid: &super::Laid, row: &Row, lane: usize, chosen: bool, w: usize) -> Line<'a> {
-    let folded = app
-        .dir_of(Some(row.clone()))
-        .and_then(|(seat, path)| app.site_of_seat(seat).map(|site| site.board_shut.contains(&path)))
-        .unwrap_or(false);
+    // A search lays folded cards out (`App::cards_in`), so the arrow says open while it does — as the web does.
+    let folded = !app.searching()
+        && app
+            .dir_of(Some(row.clone()))
+            .and_then(|(seat, path)| app.site_of_seat(seat).map(|site| site.board_shut.contains(&path)))
+            .unwrap_or(false);
     let mark = if folded { "▸" } else { "▾" };
     let mut line = lane_line(app, laid, lane, w.saturating_sub(4));
     if chosen {
@@ -3219,7 +3221,7 @@ fn card<'a>(app: &App, r: &Row, chosen: bool, w: usize, band: Option<Style>) -> 
     let mut head: Vec<Span<'static>> = Vec::new();
     if i.kind == crate::model::Kind::Epic && site.closed(at) {
         let path = site.index.dir_path(&site.issues, at);
-        let mark = if site.board_shut.contains(&path) { "▸ " } else { "▾ " };
+        let mark = if !app.searching() && site.board_shut.contains(&path) { "▸ " } else { "▾ " };
         head.push(Span::styled(mark, ink(Style::new())));
     }
     if fields.shows(Field::Id) {

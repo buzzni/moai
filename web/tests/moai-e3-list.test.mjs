@@ -205,6 +205,25 @@ test('Tab opens the chosen closed group while leaving closed descendants folded'
   assert.ok(lines().some((line) => line.dataset.key === 'e1.a'))
 })
 
+test('Tab on a parent keeps a closed group the person opened (review moai-mkzo.8wa)', () => {
+  const rows = [
+    { id: 'm1', kind: 'milestone', title: 'Release', derived_status: 'done' },
+    { id: 'e1', kind: 'epic', title: 'Epic', milestone: 'm1', derived_status: 'done' },
+    { id: 'e1.a', kind: 'issue', title: 'Done', derived_epic: 'e1', status: 'done' },
+  ]
+  const { lines, key, store } = mount(rows, { state: { cursor: 'e1' } })
+  store.dispatch({ type: 'cursor', id: 'm1' })
+  key('Tab')
+  store.dispatch({ type: 'cursor', id: 'e1' })
+  key('Tab')
+  assert.ok(lines().some((line) => line.dataset.key === 'e1.a'), 'the premise — e1 is open')
+  store.dispatch({ type: 'cursor', id: 'm1' })
+  key('ArrowLeft')
+  assert.deepEqual(lines().map((line) => line.dataset.key), ['m1'], 'the premise — h folds m1 alone')
+  key('Tab')
+  assert.ok(lines().some((line) => line.dataset.key === 'e1.a'), 'Tab on m1 folded the epic the person opened')
+})
+
 test('list view: rows, columns, the name line, and going in and out', () => {
   const view = mount(ROWS, { state: { path: ['m:se-m1'] } })
   const { root, store, lines, key, calls } = view

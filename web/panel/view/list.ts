@@ -428,7 +428,7 @@ export const mountList: MountPane = (root, ctx): PaneView => {
           .map((at) => pathKey(model!.index.dirPath(at))))
         const expanded = folder.open
           ? state.expanded.filter((key) => !inside.has(key))
-          : [...state.expanded.filter((key) => !closed.has(key)), ...under.filter((key) => !closed.has(key) && !state!.expanded.includes(key))]
+          : [...state.expanded, ...under.filter((key) => !closed.has(key) && !state!.expanded.includes(key))]
         intents.dispatch({ type: "expanded", expanded })
         return true
       }
