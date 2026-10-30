@@ -621,6 +621,8 @@ BACKLOG
              middle-button paste work there as they always did. Over the list
              and the detail, the terminal's own selection and paste need Shift
              held in most terminals, Option in iTerm2
+    {key:browse.archive_days}  archive days [14 days/off] — opens a picker and writes
+             archive_days in .moai/config.toml for everyone in the repository.
   The one key that quits outright is Ctrl-C — anywhere, even mid-typing.
   The screen rereads itself — issues written next door, and `moai read` or
   `moai project add` in another terminal, land without a keypress.
@@ -644,7 +646,9 @@ BACKLOG
   Done that has sat in done for a while is the archive (archive_days in
   .moai/config.toml, 14 unless written; 0 turns it off). Rows also wait for
   its parent, epic and milestone to reach archive age. It stays hidden on
-  the list and the board even with done shown, and the path line counts it
+  the list and board. {key:browse.archive_days} opens a picker for that number
+  and writes the repository setting in .moai/config.toml, shared by everyone.
+  Even with done shown, the path line counts hidden archive rows
   — [archive 312 hidden]. {key:browse.archived} shows it and is kept under [tui] as
   show_archived; {key:browse.show_all} (all) leaves it hidden. {key:browse.grep} search finds it anyway.
   Sorting puts urgent, new, earlier column and alphabetical on top. The order

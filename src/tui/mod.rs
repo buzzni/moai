@@ -3,6 +3,7 @@
 //! 상태([`App`])와 그림([`draw`])을 나눈다. 상태 전이는 터미널 없이 시험되고,
 //! 그림은 `TestBackend` 로 시험된다 — 둘 다 TTY 를 켜지 않는다.
 
+mod archive_days;
 pub mod board;
 pub mod draw;
 pub mod edit;
@@ -197,6 +198,8 @@ pub enum Mode {
     /// `SPC o t` 가 연 시간대 고르는 창(moai-3oz2). **돌리지 않고 창이다** — 이 기계의 tzdb 는
     /// 이름을 천 개 넘게 들어, 눌러 돌리는 길로는 고를 수가 없다.
     Zone(zones::Zones),
+    /// `SPC o o` repository archive retention picker.
+    ArchiveDays(archive_days::Picker),
     /// `SPC s e` 가 연 차례 편집 창(moai-r170.x22). 필드를 넣고 빼고 앞뒤를 바꾸고 방향을 뒤집는다 — 키 하나로는
     /// 차례를 갈아 끼우거나(`SPC s <소문자>`) 끝에 더하는 것(`SPC s <대문자>`)만 된다.
     Sort(sorter::Editor),
@@ -3415,6 +3418,7 @@ impl App {
             | Mode::Pick(_)
             | Mode::Unregister(_)
             | Mode::Zone(_)
+            | Mode::ArchiveDays(_)
             | Mode::Sort(_)
             | Mode::Stats(_)
             | Mode::Wiki(_) => String::new(),
@@ -3483,6 +3487,7 @@ impl App {
             | Mode::Pick(_)
             | Mode::Unregister(_)
             | Mode::Zone(_)
+            | Mode::ArchiveDays(_)
             | Mode::Sort(_)
             | Mode::Stats(_)
             | Mode::Wiki(_) => Raw::default(),
@@ -6015,6 +6020,7 @@ impl App {
                 let (all, why) = crate::tz::names();
                 self.mode = Mode::Zone(zones::Zones::open(all, why, self.zone.name()));
             }
+            B::ArchiveDays => self.mode = Mode::ArchiveDays(archive_days::Picker::open(self.site.cfg.archive_days)),
             B::Raw => {
                 self.raw = !self.raw;
                 // 그린 것과 원문은 줄 수가 다르다. 굴린 자리를 들고 가면
@@ -6069,6 +6075,7 @@ impl App {
             deferred_hidden: self.view.hide_deferred,
             backlog_hidden: self.view.hide_backlog,
             archived_hidden: !self.view.show_archived,
+            archive_days: self.site.cfg.archive_days,
             detail_at: self.detail_side(),
             board: self.board(),
             gantt: self.gantt(),
@@ -6216,6 +6223,7 @@ impl App {
             Mode::Pick(_) => return self.pick(k),
             Mode::Unregister(_) => return self.settle_unregister(k),
             Mode::Zone(_) => return self.pick_zone(k),
+            Mode::ArchiveDays(_) => return self.pick_archive_days(k),
             Mode::Sort(_) => return self.edit_sort(k),
             _ => {}
         }
@@ -6233,6 +6241,7 @@ impl App {
             | Mode::Pick(_)
             | Mode::Unregister(_)
             | Mode::Zone(_)
+            | Mode::ArchiveDays(_)
             | Mode::Sort(_)
             | Mode::Stats(_)
             | Mode::Wiki(_) => {
@@ -6503,6 +6512,7 @@ impl App {
             Mode::Pick(picker) => picker.paste(s),
             // 거르는 글에 붙여 넣는다 — 목록이 그만큼 좁아지고 커서가 도로 안으로 든다.
             Mode::Zone(z) => z.paste(s),
+            Mode::ArchiveDays(p) => p.paste(s),
             // 글칸이 없다 — 붙여 넣을 자리가 없으니 아무 일도 안 한다.
             Mode::Sort(_) => {}
             Mode::Unregister(_) => self.mode = Mode::Browse,
@@ -8458,7 +8468,7 @@ mod tests {
         let ctx = a.key_ctx(&a.rows());
         assert_eq!(
             keys::Browse::Sort(keys::Order::Created).state(&ctx),
-            Some("[● 거꾸로]"),
+            Some("[● 거꾸로]".into()),
             "메뉴가 고른 차례·방향을 모른다"
         );
         assert_eq!(keys::Browse::Sort(keys::Order::Priority).state(&ctx), None, "고르지 않은 차례에 표시가 붙었다");
@@ -12145,6 +12155,78 @@ mod tests {
         assert_eq!(a.zone.name(), before, "Esc 가 시간대를 바꿨다");
     }
 
+    #[test]
+    fn spc_o_o_writes_archive_days_and_rereads_the_repository() {
+        let s = scratch("archive-days-pick");
+        let mut a = opened(Repo::at(s.path().to_path_buf(), cfg()));
+        a.hit("SPC o o");
+        let Mode::ArchiveDays(p) = &a.mode else { panic!("archive picker did not open") };
+        assert_eq!(p.selected(), Ok(14));
+        a.key(key(KeyCode::Char('3')));
+        a.key(key(KeyCode::Char('0')));
+        a.key(key(KeyCode::Enter));
+        assert!(matches!(a.mode, Mode::Browse));
+        assert_eq!(a.site.cfg.archive_days, 30);
+        assert_eq!(a.site.repo.as_ref().unwrap().config.archive_days, 30);
+        assert_eq!(a.site.ground.archive_days, 30);
+        assert!(std::fs::read_to_string(s.join(".moai/config.toml")).unwrap().contains("archive_days = 30"));
+    }
+
+    #[test]
+    fn archive_days_picker_cancel_same_value_and_failed_write() {
+        let s = scratch("archive-days-cancel");
+        let path = s.join(".moai/config.toml");
+        let original = std::fs::read(&path).unwrap();
+        let mut a = opened(Repo::at(s.path().to_path_buf(), cfg()));
+        a.hit("SPC o o Esc");
+        assert_eq!(std::fs::read(&path).unwrap(), original);
+        a.hit("SPC o o Enter");
+        assert_eq!(std::fs::read(&path).unwrap(), original);
+        std::fs::write(&path, "[broken\n").unwrap();
+        a.hit("SPC o o");
+        a.key(key(KeyCode::Char('3')));
+        a.key(key(KeyCode::Char('0')));
+        a.key(key(KeyCode::Enter));
+        let Mode::ArchiveDays(p) = &a.mode else { panic!("failed write closed the picker") };
+        assert_eq!(p.typed, "30");
+        assert!(p.error.is_some() && a.trouble.is_some());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "[broken\n");
+    }
+
+    #[test]
+    fn archive_days_picker_rejects_out_of_range_and_is_quiet_on_layer() {
+        let s = scratch("archive-days-range");
+        let path = s.join(".moai/config.toml");
+        let original = std::fs::read(&path).unwrap();
+        let mut a = opened(Repo::at(s.path().to_path_buf(), cfg()));
+        a.hit("SPC o o");
+        for c in "3651".chars() {
+            a.key(key(KeyCode::Char(c)));
+        }
+        a.key(key(KeyCode::Enter));
+        assert!(matches!(a.mode, Mode::ArchiveDays(_)));
+        assert_eq!(std::fs::read(&path).unwrap(), original);
+        let mut c = a.key_ctx(&a.rows());
+        c.layer = true;
+        assert_eq!(keys::Browse::ArchiveDays.enabled(&c), Err(keys::Off::Quiet));
+    }
+
+    #[test]
+    fn options_menu_names_archive_days_in_both_languages() {
+        let mut c = app().key_ctx(&[]);
+        c.lang = crate::i18n::Lang::En;
+        c.archive_days = 14;
+        let option = |c: &keys::Ctx| {
+            let seq = keys::parse_seq("SPC o").unwrap();
+            menu::entries(&seq, c, &[]).into_iter().find(|e| e.key == "o").unwrap().text()
+        };
+        assert!(option(&c).contains("[14 days]"));
+        c.lang = crate::i18n::Lang::Ko;
+        assert!(option(&c).contains("[14일]"));
+        c.archive_days = 0;
+        assert!(option(&c).contains("[꺼짐]"));
+    }
+
     /// **규칙 글 시간대에서 글자 없는 Enter 는 아무것도 안 고른다**(moai-pvpb.1yh) — `TZ=JST-9` 는 목록의
     /// 이름이 아니라 커서가 아무 줄도 안 가리킨다. 맨 위에 세워 두던 판은 그 Enter 가 첫 tzdb 이름
     /// (`Africa/Abidjan`)으로 바꾸고 설정에 적었다. 창 밑에는 그렇다고 한 줄 선다.
@@ -12212,10 +12294,10 @@ mod tests {
         a.user_config = Some(user.clone());
         assert!(a.mouse_on, "처음부터 잡고 있어야 한다");
         let state = |a: &App| keys::Browse::Mouse.state(&a.key_ctx(&a.rows()));
-        assert_eq!(state(&a), Some(crate::i18n::say(a.site.lang, "tui.state.on")));
+        assert_eq!(state(&a), Some(crate::i18n::say(a.site.lang, "tui.state.on").into()));
         a.hit("SPC o m");
         assert!(!a.mouse_on, "SPC o m 이 마우스를 안 놓았다");
-        assert_eq!(state(&a), Some(crate::i18n::say(a.site.lang, "tui.state.off")));
+        assert_eq!(state(&a), Some(crate::i18n::say(a.site.lang, "tui.state.off").into()));
         assert!(menu::open(&a.chord), "상태를 대는 항목인데 메뉴가 닫혔다");
         a.hit("Esc");
         let text = std::fs::read_to_string(&user).expect("마우스가 설정에 안 적혔다");
@@ -12364,7 +12446,7 @@ mod tests {
         a.hit("SPC s S Esc");
         assert_eq!(a.order, Sorting::of(&[up(Order::Column).flipped(), up(Order::Title).flipped()]).unwrap());
         let ctx = a.key_ctx(&a.rows());
-        assert_eq!(keys::Browse::SortAdd(Order::Title).state(&ctx), Some("[● ↓ 내림]"));
+        assert_eq!(keys::Browse::SortAdd(Order::Title).state(&ctx), Some("[● ↓ 내림]".into()));
         assert_eq!(keys::Browse::SortAdd(Order::Created).state(&ctx), None, "차례에 없는 필드에 표시가 붙었다");
         assert_eq!(
             keys::Browse::Sort(Order::Column).state(&ctx),
@@ -13693,5 +13775,75 @@ mod tests {
         a.reload();
         assert_eq!(a.site.unreadable.len(), 2, "{:?}", a.site.unreadable);
         assert_eq!(a.site.unreadable_live, 1);
+    }
+}
+
+// Repository archive retention picker: the component holds only state; this host writes.
+use ratatui::crossterm::event::{KeyCode, KeyModifiers};
+
+impl App {
+    pub(super) fn pick_archive_days(&mut self, k: KeyEvent) {
+        let Mode::ArchiveDays(p) = &mut self.mode else { return };
+        let plain = !k.modifiers.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT);
+        if !plain {
+            return;
+        }
+        match k.code {
+            KeyCode::Esc => self.mode = Mode::Browse,
+            KeyCode::Down | KeyCode::Char('j') => {
+                p.cursor = (p.cursor + 1).min(p.choices.len() - 1);
+                p.typed.clear();
+                p.error = None;
+            }
+            KeyCode::Up | KeyCode::Char('k') => {
+                p.cursor = p.cursor.saturating_sub(1);
+                p.typed.clear();
+                p.error = None;
+            }
+            KeyCode::Char(c) if c.is_ascii_digit() => {
+                p.typed.push(c);
+                p.error = None;
+            }
+            KeyCode::Backspace => {
+                p.typed.pop();
+                p.error = None;
+            }
+            KeyCode::Enter => {
+                let days = match p.selected() {
+                    Ok(days) => days,
+                    Err(range) => {
+                        p.error = Some(crate::i18n::fill(
+                            crate::i18n::say(self.site.lang, "tui.archive_days.range"),
+                            &[("range", range)],
+                        ));
+                        return;
+                    }
+                };
+                if days == p.now {
+                    self.mode = Mode::Browse;
+                    return;
+                }
+                let Some(repo) = self.site.repo.as_ref() else { return };
+                match repo.set_archive_days(days, || self.site.lang) {
+                    Ok((config, old)) => {
+                        self.site.cfg = config.clone();
+                        if let Some(repo) = self.site.repo.as_mut() {
+                            repo.config = config;
+                        }
+                        self.mode = Mode::Browse;
+                        self.reload();
+                        self.notice = Some(crate::i18n::fill(
+                            crate::i18n::say(self.site.lang, "tui.archive_days.saved"),
+                            &[("old", &old.to_string()), ("days", &days.to_string())],
+                        ));
+                    }
+                    Err(why) => {
+                        self.trouble = Some(why.to_string());
+                        p.error = Some(why.to_string());
+                    }
+                }
+            }
+            _ => {}
+        }
     }
 }

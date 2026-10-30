@@ -496,6 +496,7 @@ impl Named for Browse {
             Detail => own("detail"),
             DetailAt => own("detail_at"),
             Timezone => own("timezone"),
+            ArchiveDays => own("archive_days"),
             Mouse => own("mouse"),
             Read => own("read"),
             ReadAll => own("read_all"),
@@ -1037,7 +1038,7 @@ mod tests {
             each(LINKS),
             each(CONFIRM),
         ];
-        assert_eq!(counts, [62, 8, 12, 2, 9, 6, 2, 9, 2, 1]);
+        assert_eq!(counts, [63, 8, 12, 2, 9, 6, 2, 9, 2, 1]);
         // 이동은 다섯 표 모두에서 여덟이 다 선다 — `[moves]` 의 한 줄이 어느 표에서는 없는 동작이면 안 된다.
         fn moves<A: Named>(table: &[Bind<A>]) -> usize {
             names(table).iter().filter(|(n, _)| matches!(n, Name::Move(_))).count()
@@ -1625,7 +1626,7 @@ mod tests {
         let (map, problems) = build(&open);
         assert_eq!(problems, Vec::new());
         assert_eq!(listing(&map), listing(&Keymap::default()));
-        assert_eq!(open.matches(" = ").count(), 113, "틀이 동작을 빠뜨렸다");
+        assert_eq!(open.matches(" = ").count(), 114, "틀이 동작을 빠뜨렸다");
         // 주석 그대로면 아무것도 안 바뀐다.
         assert_eq!(build(&t), (Keymap::default(), Vec::new()));
     }

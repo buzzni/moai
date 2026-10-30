@@ -12,6 +12,10 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+### Added
+
+- Explorer `SPC o o` chooses the archive retention and writes `archive_days` to the shared repository configuration. (moai-mkzo.mgn)
+
 ### Changed
 
 - Archive hiding and `moai archive` now wait for a row's parent, epic and milestone to reach archive age before removing the row from the active view or snapshot. (moai-mkzo.pji)

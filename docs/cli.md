@@ -2777,6 +2777,8 @@ Order:
              middle-button paste work there as they always did. Over the list
              and the detail, the terminal's own selection and paste need Shift
              held in most terminals, Option in iTerm2
+    SPC o o  archive days [14 days/off] — opens a picker and writes
+             archive_days in .moai/config.toml for everyone in the repository.
   The one key that quits outright is Ctrl-C — anywhere, even mid-typing.
   The screen rereads itself — issues written next door, and `moai read` or
   `moai project add` in another terminal, land without a keypress.
@@ -2800,7 +2802,9 @@ Order:
   Done that has sat in done for a while is the archive (archive_days in
   .moai/config.toml, 14 unless written; 0 turns it off). Rows also wait for
   its parent, epic and milestone to reach archive age. It stays hidden on
-  the list and the board even with done shown, and the path line counts it
+  the list and board. SPC o o opens a picker for that number
+  and writes the repository setting in .moai/config.toml, shared by everyone.
+  Even with done shown, the path line counts hidden archive rows
   — [archive 312 hidden]. SPC v o shows it and is kept under [tui] as
   show_archived; SPC v a (all) leaves it hidden. / search finds it anyway.
   Sorting puts urgent, new, earlier column and alphabetical on top. The order

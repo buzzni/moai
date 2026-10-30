@@ -285,6 +285,7 @@ pub fn screen(f: &mut Frame, app: &mut App) {
         Mode::Backlog(form) => jot(f, form, body, true, tint, lang),
         Mode::Pick(p) => pick(f, p, body, lang),
         Mode::Zone(z) => zone_pick(f, z, body, lang),
+        Mode::ArchiveDays(p) => archive_days_pick(f, p, body, lang),
         Mode::Sort(e) => sort_edit(f, e, body, lang),
         Mode::Stats(w) => stats_window(f, w, body, lang),
         Mode::Wiki(w) => wiki_at = Some(wiki_window(f, w, body, raw, share, lang)),
@@ -400,6 +401,14 @@ pub fn screen(f: &mut Frame, app: &mut App) {
             let lang = app.site.lang;
             let help = prompt_help(say(lang, "tui.prompt.hang"), lang);
             prompt(f, keys, say(lang, "tui.tz.title"), &z.typing, None, &help)
+        }
+        Mode::ArchiveDays(p) => {
+            let message = if let Some(error) = &p.error {
+                error.clone()
+            } else {
+                fill(say(app.site.lang, "tui.archive_days.keys"), &[("typed", &p.typed)])
+            };
+            f.render_widget(Paragraph::new(clip(&message, keys.width as usize)), keys);
         }
         Mode::Sort(_) => sort_keys(f, app.keys.sorter, keys, app.site.lang),
         Mode::Stats(w) => match &open_menu {
@@ -749,6 +758,51 @@ fn zone_pick(f: &mut Frame, z: &mut super::zones::Zones, at: Rect, lang: Lang) {
         &mut state,
     );
     scroll_mark(f, &z.list, at, "", true, lang);
+}
+
+fn archive_days_pick(f: &mut Frame, p: &mut super::archive_days::Picker, at: Rect, lang: Lang) {
+    f.render_widget(Clear, at);
+    let mut items: Vec<ListItem> = p
+        .choices
+        .iter()
+        .map(|days| {
+            let label = if *days == 0 {
+                say(lang, "tui.archive_days.off").to_string()
+            } else {
+                format!("{days} {}", say(lang, "tui.archive_days.days"))
+            };
+            let default =
+                if *days == 14 { format!("  {}", say(lang, "tui.archive_days.default")) } else { String::new() };
+            let now = if *days == p.now { format!("  {}", say(lang, "tui.tz.now")) } else { String::new() };
+            ListItem::new(format!("{label}{default}{now}"))
+        })
+        .collect();
+    if !p.typed.is_empty() {
+        let custom = if p.selected().is_ok() {
+            fill(say(lang, "tui.archive_days.custom"), &[("days", &p.typed)])
+        } else {
+            fill(say(lang, "tui.archive_days.range"), &[("range", "0..3650")])
+        };
+        items.insert(0, ListItem::new(custom));
+    }
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Thick)
+        .border_style(from_anstyle(style::FOCUS))
+        .title(format!(" {} ", say(lang, "tui.archive_days.title")))
+        .title_bottom(Line::from(Span::styled(
+            clip(say(lang, "tui.archive_days.shared"), at.width.saturating_sub(2) as usize),
+            dim(),
+        )));
+    let mut state = ListState::default().with_selected(Some(if p.typed.is_empty() { p.cursor } else { 0 }));
+    f.render_stateful_widget(
+        List::new(items)
+            .block(block)
+            .highlight_style(Style::new().add_modifier(Modifier::REVERSED))
+            .highlight_symbol(CURSOR),
+        at,
+        &mut state,
+    );
 }
 
 /// 통계 창이 차트를 세우려면 이만큼은 넓어야 한다(테두리와 좌우 여백을 뺀 안쪽 칸 수). 좁으면 차트 대신 `moai stats` 의 글로 떨어진다

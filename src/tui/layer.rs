@@ -2669,6 +2669,7 @@ mod tests {
             | Mode::Pick(_)
             | Mode::Unregister(_)
             | Mode::Zone(_)
+            | Mode::ArchiveDays(_)
             | Mode::Sort(_)
             | Mode::Stats(_)
             | Mode::Wiki(_) => None,

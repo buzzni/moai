@@ -234,6 +234,9 @@ moment you press `SPC`. It stands up only what works where you are — screens,
 view, sort, columns, read marks, options and projects — and ignores keys it does
 not know.
 
+`SPC o o` opens the archive days picker in a project. Its value is a repository
+setting in `.moai/config.toml`, shared by everyone using that repository.
+
 - `Esc` or `SPC` closes it, and `Backspace` goes one level up
 - Toggles and sorts leave it open so you can try one and watch the screen change;
   that level says so with an `Esc` hint
@@ -386,6 +389,8 @@ read archived rows too, and `moai show <id>` can open one directly.
 eligibility off; `moai show` and `moai status` leave rows already moved to the
 archive out either way. Moving an archived row with `moai mv` restores that selected
 row; its former bundle remains archived (moai-fx9t).
+In the explorer, `SPC o o` chooses the number of days and writes it to
+`.moai/config.toml`. It offers common values or a number from 0 to 3650.
 The explorer also keeps rows already moved to an archive file hidden when
 `archive_days` grows or becomes `0`. With `SPC v o`, the detail names an
 `archive file` row and distinguishes an `archive copy` from its live row.
