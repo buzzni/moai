@@ -2970,7 +2970,11 @@ fn board(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) -> Boarded {
         }
         let k = column - win.first;
         // 칸의 내림 폭이다 — `App::laid` 가 같은 폭으로 높이를 쟀다. 남는 칸(`widths` 의 +1)은 비어 남는다.
-        let lines = card(app, r, n == app.cursor, inner.width as usize / win.count.max(1));
+        let band = match &laid.columns[column] {
+            super::board::Column::Status(status) => style::band_style(status).map(from_anstyle),
+            _ => None,
+        };
+        let lines = card(app, r, n == app.cursor, inner.width as usize / win.count.max(1), band);
         let (from, to) = (p.top.max(seen.start), (p.top + p.height).min(seen.end));
         for (dy, line) in lines.iter().enumerate() {
             if (from..to).contains(&(p.top + dy)) {
@@ -3109,11 +3113,12 @@ fn lane_line<'a>(app: &App, laid: &super::Laid, lane: usize, w: usize) -> Line<'
 }
 
 /// 카드 한 장 — 머리(`id · 칸 글리프 · pN`), 몸(`[NEW] ⎇ 가지 제목`), 그리고 `SPC c` 로 켠 열이 있으면 발줄.
-/// **바탕색은 없다**(사용자 결정) — "bug" 는 종류가 아니라 태그이고, 빨강은 이미 p0·p1 의 것이다. 고른 카드는
+/// 2026-10-30 결정: 집은·리뷰·끝낸 칸의 머리만 밝은 16색 바탕이다. 나머지는 바탕색이 없다.
+/// "bug" 는 종류가 아니라 태그이고, 우선순위가 아닌 칸이 바탕을 고른다. 고른 카드는
 /// `>` 와 반전이다: 색 없는 터미널에서도 선다. id·우선순위·셈은 목록처럼 켠 것만 선다(`App::fields`).
 ///
 /// 줄마다 커서 자리(`> `)만큼 들이고 오른쪽에 한 칸을 비운다 — 옆 칸의 카드와 붙어 읽히지 않게.
-fn card<'a>(app: &App, r: &Row, chosen: bool, w: usize) -> Vec<Line<'a>> {
+fn card<'a>(app: &App, r: &Row, chosen: bool, w: usize, band: Option<Style>) -> Vec<Line<'a>> {
     use super::view::Field;
     let Row::Item(seat, e, _) = r else { return Vec::new() };
     let Some(site) = app.site_of_seat(*seat) else { return Vec::new() };
@@ -3139,6 +3144,19 @@ fn card<'a>(app: &App, r: &Row, chosen: bool, w: usize) -> Vec<Line<'a>> {
         head.push(Span::styled(format!("  {tally}"), dim()));
     }
     let mut head = fit(Line::from(head), room);
+    if let Some(band) = band {
+        for s in &mut head.spans {
+            let is_found = s.style.fg == Some(Color::LightBlue) && s.style.add_modifier.contains(Modifier::BOLD);
+            s.style = s.style.patch(band);
+            if is_found {
+                s.style = s.style.patch(found());
+            }
+        }
+        let rest = room.saturating_sub(spans_width(&head.spans));
+        if rest > 0 {
+            head.spans.push(Span::styled(" ".repeat(rest), band));
+        }
+    }
     if chosen {
         for s in &mut head.spans {
             s.style = s.style.add_modifier(Modifier::REVERSED);
@@ -5946,6 +5964,9 @@ fn from_anstyle(s: anstyle::Style) -> Style {
     if let Some(anstyle::Color::Ansi(c)) = s.get_fg_color() {
         out = out.fg(ansi(c));
     }
+    if let Some(anstyle::Color::Ansi(c)) = s.get_bg_color() {
+        out = out.bg(ansi(c));
+    }
     let e = s.get_effects();
     if e.contains(anstyle::Effects::BOLD) {
         out = out.add_modifier(Modifier::BOLD);
@@ -6286,6 +6307,42 @@ pub(super) mod tests {
         a.layout = super::super::view::Layout::Board;
         a.detail_open = false;
         a
+    }
+
+    #[test]
+    fn board_card_head_bands_fill_the_column_and_keep_the_selected_reverse() {
+        assert!(style::band_style("todo").is_none());
+        assert!(style::band_style("blocked").is_none());
+        for (status, colour) in
+            [("in_progress", Color::LightYellow), ("review", Color::LightMagenta), ("done", Color::LightGreen)]
+        {
+            let mut a = board_app(1);
+            let at = a.site.issues.iter().position(|i| i.id == "argos-0080").unwrap();
+            a.site.issues[at].status = Status::new(status);
+            let row = a.rows().iter().position(|r| matches!(r, Row::Item(_, e, _) if e.at() == Some(at))).unwrap();
+            a.cursor = row;
+            let (w, h) = (100u16, 16u16);
+            let mut term = Terminal::new(TestBackend::new(w, h)).unwrap();
+            term.draw(|f| screen(f, &mut a)).unwrap();
+            let buf = term.backend().buffer();
+            let lines = render(&mut a, w, h);
+            let y = lines.iter().position(|line| line.contains("argos-0080")).expect("card head") as u16;
+            let x = (0..w - 10)
+                .find(|&x| (0..10).map(|n| buf[(x + n, y)].symbol()).collect::<String>() == "argos-0080")
+                .expect("id start");
+            assert_eq!(buf[(x, y)].bg, colour, "{status}: id background");
+            assert_eq!(buf[(x, y)].fg, Color::Black, "{status}: id foreground");
+            assert!(buf[(x, y)].modifier.contains(Modifier::REVERSED), "{status}: selected head");
+            let end = (x..w).find(|&x| buf[(x, y)].bg != colour).expect("band end");
+            assert!(end - x >= 10, "{status}: band did not fill the head");
+            assert!(buf[(end - 1, y)].modifier.contains(Modifier::REVERSED), "{status}: filler lost reverse");
+            assert_ne!(buf[(end, y)].bg, colour, "{status}: right gutter was filled");
+            let plain_y = lines.iter().position(|line| line.contains("argos-0100")).expect("todo card") as u16;
+            let plain_x = (0..w - 10)
+                .find(|&x| (0..10).map(|n| buf[(x + n, plain_y)].symbol()).collect::<String>() == "argos-0100")
+                .expect("todo id");
+            assert_eq!(buf[(plain_x, plain_y)].bg, Color::Reset, "todo card gained a band");
+        }
     }
 
     #[test]
@@ -6869,7 +6926,7 @@ pub(super) mod tests {
                 .iter()
                 .find(|r| matches!(r, Row::Item(_, e, _) if e.at().is_some_and(|at| a.site.issues[at].id == id)))
                 .unwrap_or_else(|| panic!("{id} 카드가 없다"));
-            let lines = card(a, r, false, w);
+            let lines = card(a, r, false, w, None);
             lines[1..]
                 .iter()
                 .flat_map(|l| &l.spans)
@@ -6891,7 +6948,7 @@ pub(super) mod tests {
             .iter()
             .find(|r| matches!(r, Row::Item(_, e, _) if e.at().is_some_and(|at| a.site.issues[at].id == "argos-0100")))
             .unwrap();
-        for l in card(&a, r, true, 20) {
+        for l in card(&a, r, true, 20, None) {
             assert!(spans_width(&l.spans) < 20, "줄이 카드 폭을 넘었다 — 오른쪽 한 칸은 비운다 — {l:?}");
         }
     }
