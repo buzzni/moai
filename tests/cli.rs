@@ -70,6 +70,13 @@ impl Drop for Scratch {
     }
 }
 
+thread_local! {
+    // libtest 는 시험마다 별도 스레드를 쓴다. 첫 isolated 호출에 울타리를 만들고 스레드가 끝날 때
+    // Scratch::drop 이 설정 곁의 파일까지 걷는다(패닉으로 풀릴 때도). 보조 스레드도 각자 제 울타리를 쓴다.
+    // 메인 스레드의 TLS 소멸자는 프로세스 종료 때 돌지 않지만, libtest 시험은 메인 스레드에서 돌지 않는다.
+    static CONFIG_FENCE: Scratch = Scratch::new("config-fence");
+}
+
 // 링크를 푼 자리 — Windows 의 `\\?\` 까지 걷은, 도구가 내는 철자다(moai-lag7.rrm). 시험이 도구의 철자와 견줄 때 쓴다.
 // 시험 크레이트라 `path::canonical` 을 못 들여, `#[path]` 로 함께 든 `scratch` 의 같은 자를 쓴다 — 여기 베껴 두던
 // 두 벌째를 걷었다(moai-lag7.482). 유닉스에서는 `std::fs::canonicalize` 그대로다.
@@ -149,10 +156,11 @@ fn temp_at(cmd: &mut Command, dir: impl AsRef<std::ffi::OsStr>) -> &mut Command 
 /// 시험이 제 값을 주려면 이 뒤에 `.env` 로 덮는다. `PATH` 는 두고 간다 — moai 가
 /// git 을 부르고, `claude` 가 없는 자리가 필요한 시험은 `Claude` 가 따로 만든다.
 fn isolated(program: impl AsRef<std::ffi::OsStr>) -> Command {
-    // 빈 집 하나를 모든 시험이 함께 쓴다. moai 도 git 도 `HOME` 에 쓰지 않으니
-    // 비어 있는 채로 남고, `target/` 밑이라 기계에 부스러기를 흘리지 않는다.
+    // HOME 은 시험용으로 고정한다. 사용자 설정은 CONFIG_FENCE 의 시험 스레드별 자리로
+    // 갈라 두므로, 설정 곁에 쓰는 read/·picks/ 도 시험이 끝나면 함께 걷힌다.
     let home = Path::new(env!("CARGO_TARGET_TMPDIR")).join("moai-cli-home");
     std::fs::create_dir_all(&home).unwrap();
+    let config = CONFIG_FENCE.with(|fence| fence.path().join("config.toml"));
     let mut cmd = Command::new(program);
     // **걷기가 먼저다.** `Command` 의 환경은 이름마다 마지막에 부른 것이 이긴다 —
     // 아래 `.env` 보다 뒤에 두면, 목록에 `GIT_CONFIG_GLOBAL` 같은 이름이 느는 날
@@ -175,10 +183,10 @@ fn isolated(program: impl AsRef<std::ffi::OsStr>) -> Command {
         // 일부러 갈라 놓는 시험만 이것을 켠다([`ok_here`]) — 새면 워크트리의 쓰기가 루트로 안 간다.
         .env_remove("MOAI_HERE")
         .env_remove("COLUMNS")
-        // 사용자 설정은 **없는 파일**을 가리킨다. 등록한 프로젝트가 새면 `.moai`
-        // 밖에서 부르는 시험이 돌리는 사람의 프로젝트를 본다. `XDG_CONFIG_HOME` 도
-        // 걷는다 — `MOAI_CONFIG` 를 덮어쓴 시험이 그것을 지우면 그다음 자리다.
-        .env("MOAI_CONFIG", home.join("moai-config-unset/config.toml"))
+        // 사용자 설정은 시험 스레드의 울타리 안 **없는 파일**을 가리킨다. 호출자가 뒤에
+        // `MOAI_CONFIG` 를 주면 그 값이 이긴다. `XDG_CONFIG_HOME` 도 걷어야 설정을
+        // 덮어쓴 시험이 그것을 지웠을 때 사람의 설정으로 되돌아가지 않는다.
+        .env("MOAI_CONFIG", config)
         .env_remove("XDG_CONFIG_HOME")
         // 키 파일(moai-aqmg)도 사람의 것이 새면 안 된다 — `--help` 가 그 키로 그려져 도움말을 재는 시험이 돌리는
         // 사람마다 달라진다. 걷으면 위의 없는 설정 곁(`keys.toml`)을 보니 기본 키다.
@@ -20363,13 +20371,14 @@ fn the_fake_claude_command_starts_from_the_isolated_one() {
     }
     assert_eq!(set("GIT_CONFIG_GLOBAL"), Some(std::ffi::OsStr::new("/dev/null")));
     assert_eq!(set("GIT_CONFIG_SYSTEM"), Some(std::ffi::OsStr::new("/dev/null")));
-    // 사용자 설정은 공용 빈 집 밑의 **없는** 파일이다. 집을 덮어도 이 자리는 따라가지 않는다.
+    // 사용자 설정은 시험 스레드의 울타리 안 **없는** 파일이다. 집을 덮어도 이 자리는 따라가지 않는다.
     let config = Path::new(set("MOAI_CONFIG").expect("MOAI_CONFIG 를 안 줬다"));
     assert!(
-        config.starts_with(env!("CARGO_TARGET_TMPDIR")) && !config.exists(),
+        config.starts_with(scratch::base()) && config.parent().is_some_and(Path::is_dir) && !config.exists(),
         "사용자 설정이 격리되지 않았다 — {}",
         config.display()
     );
+    assert!(!config.starts_with(c.home.path()), "가짜 claude 의 집 안에 설정이 섰다 — {}", config.display());
     assert_eq!(set("HOME"), Some(c.home.path().as_os_str()), "집은 가짜 claude 의 것이어야 한다");
     let path = set("PATH").expect("PATH 를 안 줬다").to_string_lossy().into_owned();
     assert!(path.starts_with(&c.bin.display().to_string()), "가짜 claude 가 PATH 앞에 없다 — {path}");
