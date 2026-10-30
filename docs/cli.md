@@ -129,9 +129,12 @@ Control an already open explorer or web tab
 Usage: moai ctl [OPTIONS] <COMMAND>
 
 Commands:
-  ls     List the windows this user already opened
-  state  Read the current state of one open window
-  help   Print this message or the help of the given subcommand(s)
+  ls       List the windows this user already opened
+  state    Read the current state of one open window
+  keys     Press keys in an open window using its own key bindings
+  do       Run an action by its stable name, independent of keys.toml
+  actions  List this window's named actions and whether each is enabled
+  help     Print this message or the help of the given subcommand(s)
 
 Options:
       --json                 Machine-readable output. Every human line goes away
@@ -181,6 +184,68 @@ Options:
 
   Without -t, choose the most recently used window in this repository.
   Use moai ctl ls --all to find an id; -t never starts a window.
+```
+
+## `moai ctl keys`
+
+```
+Press keys in an open window using its own key bindings
+
+Usage: moai ctl keys [OPTIONS] [keys]...
+
+Arguments:
+  [keys]...  Key sequences, such as 'SPC m a' or 'Ctrl-w w'
+
+Options:
+      --text <text>          Paste literal text into an open field
+  -t, --target <TARGET>      Window id from moai ctl ls
+      --json                 Machine-readable output. Every human line goes away
+      --no-color             Turn colour off (same as `--color never`)
+      --color <how>          auto|always|never (auto by default, off when piped)
+  -C, --dir <path>           Run in this directory (same as `git -C`)
+      --user <name (email)>  Who is doing this (from `git config` when absent)
+  -h, --help                 Print help
+
+  Quote each key sequence: moai ctl keys 'SPC m a'.
+  The spelling is the same as keys.toml; moai keys lists it.
+  --text pastes into a field already opened in this window.
+```
+
+## `moai ctl do`
+
+```
+Run an action by its stable name, independent of keys.toml
+
+Usage: moai ctl do [OPTIONS] <NAME>
+
+Arguments:
+  <NAME>  Such as browse.read_all or browse.go_board
+
+Options:
+  -t, --target <TARGET>      Window id from moai ctl ls
+      --json                 Machine-readable output. Every human line goes away
+      --no-color             Turn colour off (same as `--color never`)
+      --color <how>          auto|always|never (auto by default, off when piped)
+  -C, --dir <path>           Run in this directory (same as `git -C`)
+      --user <name (email)>  Who is doing this (from `git config` when absent)
+  -h, --help                 Print help
+```
+
+## `moai ctl actions`
+
+```
+List this window's named actions and whether each is enabled
+
+Usage: moai ctl actions [OPTIONS]
+
+Options:
+  -t, --target <TARGET>      Window id from moai ctl ls
+      --json                 Machine-readable output. Every human line goes away
+      --no-color             Turn colour off (same as `--color never`)
+      --color <how>          auto|always|never (auto by default, off when piped)
+  -C, --dir <path>           Run in this directory (same as `git -C`)
+      --user <name (email)>  Who is doing this (from `git config` when absent)
+  -h, --help                 Print help
 ```
 
 ## `moai status`

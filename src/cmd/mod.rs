@@ -598,6 +598,9 @@ fn dispatch(ctx: &Ctx, cli: Cli) -> R<Vec<String>> {
     match cmd {
         Cmd::Ctl(CtlCmd::Ls { all }) => ctl::ls(ctx, all),
         Cmd::Ctl(CtlCmd::State { target, rows }) => ctl::state(ctx, target.as_deref(), rows),
+        Cmd::Ctl(CtlCmd::Keys { seqs, text, target }) => ctl::keys(ctx, target.as_deref(), seqs, text),
+        Cmd::Ctl(CtlCmd::Do { name, target }) => ctl::named(ctx, target.as_deref(), name),
+        Cmd::Ctl(CtlCmd::Actions { target }) => ctl::actions(ctx, target.as_deref()),
         // 새 명령을 두지 않고 `init` 의 플래그로 둔다 — 고치는 길(`init`)과 보는 길이 한 이름에 있어야
         // `stale` 을 본 사람이 무엇을 칠지 안다(moai-mstm).
         Cmd::Init { check: true, .. } => init::check(ctx),

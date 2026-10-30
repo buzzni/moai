@@ -88,7 +88,7 @@ pub fn send_at(path: &Path, request: &Request) -> std::io::Result<Reply> {
     use std::io::{BufRead, BufReader, Read, Write};
     use std::os::unix::net::UnixStream;
     let mut stream = UnixStream::connect(path)?;
-    let ms = request.deadline_ms.saturating_sub(wire::now_ms()).min(30_000).max(1);
+    let ms = request.deadline_ms.saturating_sub(wire::now_ms()).clamp(1, 30_000);
     stream.set_read_timeout(Some(Duration::from_millis(ms)))?;
     stream.set_write_timeout(Some(Duration::from_millis(ms)))?;
     serde_json::to_writer(&mut stream, request)?;

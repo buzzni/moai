@@ -1343,6 +1343,35 @@ pub enum CtlCmd {
         #[arg(long)]
         rows: bool,
     },
+    /// Press keys in an open window using its own key bindings
+    #[command(
+        after_help = "  Quote each key sequence: moai ctl keys 'SPC m a'.\n  The spelling is the same as keys.toml; moai keys lists it.\n  --text pastes into a field already opened in this window."
+    )]
+    Keys {
+        /// Key sequences, such as 'SPC m a' or 'Ctrl-w w'
+        #[arg(value_name = "keys")]
+        seqs: Vec<String>,
+        /// Paste literal text into an open field
+        #[arg(long, value_name = "text")]
+        text: Option<String>,
+        /// Window id from moai ctl ls
+        #[arg(short = 't', long = "target")]
+        target: Option<String>,
+    },
+    /// Run an action by its stable name, independent of keys.toml
+    Do {
+        /// Such as browse.read_all or browse.go_board
+        name: String,
+        /// Window id from moai ctl ls
+        #[arg(short = 't', long = "target")]
+        target: Option<String>,
+    },
+    /// List this window's named actions and whether each is enabled
+    Actions {
+        /// Window id from moai ctl ls
+        #[arg(short = 't', long = "target")]
+        target: Option<String>,
+    },
 }
 
 /// 기한이 우선순위를 올린다(moai-dr8a.1q4). 동사는 하나지만 이름 밑에 두어, 읽는 동사가 생기면 같은 자리에 선다.

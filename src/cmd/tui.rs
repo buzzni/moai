@@ -1581,12 +1581,18 @@ fn keep_unsaved(app: &App) {
 /// - 창 크기 따위는 받을 것이 없다. 다음 그림이 새 크기로 그린다
 ///
 /// 참이면 화면이 바뀌었을 수 있다 — 루프가 다시 그린다([`take_burst`]). 거짓은 끌지 않는 포인터의 움직임 하나뿐이다.
+#[cfg(test)]
 fn take(app: &mut App, ev: Event) -> bool {
-    if matches!(&ev, Event::Key(k) if k.kind == KeyEventKind::Press)
-        || matches!(&ev, Event::Paste(_))
-        || matches!(&ev, Event::Mouse(m) if m.kind != MouseEventKind::Moved)
+    take_as(app, ev, true)
+}
+
+fn take_as(app: &mut App, ev: Event, human: bool) -> bool {
+    if human
+        && (matches!(&ev, Event::Key(k) if k.kind == KeyEventKind::Press)
+            || matches!(&ev, Event::Paste(_))
+            || matches!(&ev, Event::Mouse(m) if m.kind != MouseEventKind::Moved))
     {
-        app.last_human = std::time::Instant::now();
+        app.human_input();
     }
     // Moved still releases a drag if the terminal lost its button-up event.
     let changed = !matches!(&ev, Event::Mouse(m) if m.kind == MouseEventKind::Moved) || app.pointer_dragging();
@@ -1620,6 +1626,15 @@ fn take_burst(
     first: Event,
     mut next: impl FnMut() -> std::io::Result<Option<Event>>,
 ) -> std::io::Result<(bool, Option<Event>)> {
+    take_burst_as(app, first, &mut next, true)
+}
+
+fn take_burst_as(
+    app: &mut App,
+    first: Event,
+    mut next: impl FnMut() -> std::io::Result<Option<Event>>,
+    human: bool,
+) -> std::io::Result<(bool, Option<Event>)> {
     let until = std::time::Instant::now() + BURST;
     let mut ev = first;
     let mut changed = false;
@@ -1630,7 +1645,7 @@ fn take_burst(
         let boundary = matches!(&ev, Event::Resize(..))
             || matches!(&ev, Event::Mouse(m) if matches!(m.kind, MouseEventKind::Down(_) | MouseEventKind::Up(_)));
         let (layout, focus) = (app.layout, app.focus);
-        let moved = take(app, ev);
+        let moved = take_as(app, ev, human);
         changed |= moved;
         keyed |= moved && !pointer;
         let reframed = app.layout != layout || app.focus != focus;
@@ -1786,7 +1801,15 @@ fn loop_until_quit(
                 if incoming.request.deadline_ms <= crate::ctl::wire::now_ms() {
                     continue;
                 }
-                let answer = app.ctl(&incoming.request);
+                let answer = if matches!(&incoming.request.verb, crate::ctl::wire::Verb::Keys { .. }) {
+                    app.ctl_keys(&incoming.request, |app, event| {
+                        let _ = take_burst_as(app, event, || Ok(None), false)?;
+                        painter.draw(term, app)?;
+                        Ok(())
+                    })
+                } else {
+                    app.ctl(&incoming.request)
+                };
                 let _ = incoming.answer.send(answer);
                 dirty = true;
             }

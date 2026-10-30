@@ -212,6 +212,30 @@ fn ctl_lists_and_reads_an_open_explorer() {
     let json: serde_json::Value = serde_json::from_str(&out).unwrap();
     assert_eq!(json["screen"], "list");
     assert_eq!(json["sort"], serde_json::json!(["priority"]));
+    let pressed = ok(s.path(), &["ctl", "keys", "SPC g b", "--json"]);
+    assert_eq!(serde_json::from_str::<serde_json::Value>(&pressed).unwrap()["screen"], "board");
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&ok(s.path(), &["ctl", "state", "--json"])).unwrap()["screen"],
+        "board"
+    );
+    let done = ok(s.path(), &["ctl", "do", "browse.go_list", "--json"]);
+    assert_eq!(serde_json::from_str::<serde_json::Value>(&done).unwrap()["screen"], "list");
+    let actions = ok(s.path(), &["ctl", "actions", "--json"]);
+    assert!(actions.contains("browse.read_all"), "{actions}");
+    for command in [
+        vec!["ctl", "do", "browse.quit", "--json"],
+        vec!["ctl", "keys", "SPC q", "--json"],
+        vec!["ctl", "keys", "Ctrl-c", "--json"],
+    ] {
+        let out = moai(s.path(), &command);
+        assert!(!out.status.success(), "{command:?}");
+        let error: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+        assert_eq!(error["code"], "refused", "{command:?}: {error}");
+    }
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&ok(s.path(), &["ctl", "state", "--json"])).unwrap()["screen"],
+        "list"
+    );
     let socket = CTL_FENCE.with(|f| f.path().join(format!("{}.sock", child.0.id())));
     for (proto, deadline, code) in [(2, 9_999_999_999_999u64, "unsupported"), (1, 1, "timeout")] {
         let mut peer = std::os::unix::net::UnixStream::connect(&socket).unwrap();

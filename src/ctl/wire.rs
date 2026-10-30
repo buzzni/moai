@@ -19,6 +19,9 @@ pub struct Request {
 pub enum Verb {
     Hello,
     State { rows: bool },
+    Keys { seqs: Vec<String>, text: Option<String> },
+    Do { name: String },
+    Actions,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

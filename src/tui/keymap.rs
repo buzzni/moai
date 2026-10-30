@@ -289,6 +289,29 @@ pub fn listing(keys: &Keymap) -> Vec<Listed> {
     out
 }
 
+/// Resolve the stable action name independently of a person's key bindings.
+pub fn named(full: &str) -> Option<Browse> {
+    let (section, action) = full.split_once('.')?;
+    match section {
+        "browse" => BROWSE.iter().find(|b| b.act.name() == Name::Own(action.into())).map(|b| b.act),
+        "gantt" => GANTT.iter().find(|b| b.act.name() == Name::Own(action.into())).map(|b| b.act),
+        "moves" => MOVES.iter().find(|(name, _)| *name == action).map(|(_, m)| Browse::Step(*m)),
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod ctl_tests {
+    #[test]
+    fn every_listed_action_is_named_back() {
+        let keys = crate::tui::keys::Keymap::default();
+        for row in super::listing(&keys).into_iter().filter(|r| matches!(r.section, "browse" | "gantt" | "moves")) {
+            let full = format!("{}.{}", row.section, row.action);
+            assert!(super::named(&full).is_some(), "{full}");
+        }
+    }
+}
+
 /// 키 파일의 빈 틀(`moai keys --template`) — 절과 동작을 모두 기본 키와 함께 **주석으로** 적는다. 주석을 풀면 그 줄이
 /// 산다. 도구는 이 파일을 쓰지 않는다: 사람이 표준 출력을 받아 둔다.
 pub fn template() -> String {
