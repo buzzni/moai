@@ -59,7 +59,9 @@ point at, the pages that name it, the related sections — as `moai show <id>`
 lists them) and its history. History and work log start expanded and keep the
 line breaks of the text as written. In the list, in-progress rows have a pale gold
 background, review rows a pale purple one and done rows a pale green one. The
-detail starts on the right;
+board carries those colours on the first line of cards in those three columns
+(id, status glyph and priority), with a thin line under the band. Cards in other
+columns stay plain. The detail starts on the right;
 `SPC o d`, or the position button, moves it right → bottom → left → top. Below
 640px it stays below the list. `SPC v d` hides it, and `SPC v r` switches the body
 between rendered markdown and the raw text.
