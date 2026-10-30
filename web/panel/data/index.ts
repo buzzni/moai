@@ -134,6 +134,8 @@ export const isDone = (row: Row): boolean => row.status === 'done'
  * members. This only reads the key.
  */
 export const standsDone = (row: Row): boolean => (row.derived_status ?? row.status) === 'done'
+/** Closed epics and milestones have a derived done column; every view uses this same answer. */
+export const closedGroup = (row: Row): boolean => isGroup(row) && standsDone(row)
 /** Priority as moai prints it; 2 when a row was built without it (a test's). */
 export const priorityOf = (row: Row): number => (typeof row.priority === 'number' ? row.priority : 2)
 

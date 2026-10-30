@@ -1,4 +1,4 @@
-<!-- moai:begin v:0.33.0 hash:a961c030 -->
+<!-- moai:begin v:0.36.0 hash:660d250c -->
 ## Issue tracker — moai
 
 This repository's work lives in `.moai/issues.jsonl`.
@@ -497,7 +497,8 @@ path that will not disappear. What is merged and how is in
 
 Moving is explicit; ordinary writes never archive work. An epic and its members,
 and a parent and its children, move together only once the whole bundle has
-stood closed for `archive_days`. Milestones stay in the active snapshot.
+stood closed for `archive_days`. A row under a milestone moves only once that
+milestone has stood closed for `archive_days` too. Milestones stay in the active snapshot.
 `status`, `ready`, `prime` and hook boards count the active snapshot and read
 archived rows only as context: parents, blockers and milestones. `show <id>`,
 `show --archived`, search, statistics and the explorer can list archived rows.

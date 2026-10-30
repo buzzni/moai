@@ -5,7 +5,7 @@
  * between columns is not part of 2.0. Keys are the key router's (panel/keys/): it calls command() — j/k
  * within a column, h/l to the next column, Enter to show the card — and the cards listen for none.
  */
-import { isDone, type IssueIndex, type Row } from '../data/index.js'
+import { closedGroup, pathKey, type IssueIndex, type Row } from '../data/index.js'
 import { assigneeOf } from '../data/people.js'
 import { isUnread } from '../data/read.js'
 import type { Boot } from '../data/source.js'
@@ -13,7 +13,7 @@ import type { State } from '../store.js'
 import { BACKLOG, DEFERRED, groupBoard, type BoardLane, type BoardModel } from './board-groups.ts'
 import { segLabel } from './crumbs.ts'
 import { narrow, segKey, statusGlyph, statusOf } from './list-model.ts'
-import { chip, el, emptyState } from './components.ts'
+import { chip, el, emptyState, icon } from './components.ts'
 import { newChip } from './unread.ts'
 import { firstStatus, glint, spins } from './spin.ts'
 import { branchMark, branchOf } from './branch.ts'
@@ -34,7 +34,7 @@ const BOARD_PAD = 6
 
 const priorityClass = (priority: number) => `m-p${Math.min(3, Math.max(0, Math.round(priority)))}`
 
-function draw(ctx: ViewContext, state: State, index: IssueIndex, model: BoardModel): HTMLElement[] {
+function draw(ctx: ViewContext, state: State, index: IssueIndex, model: BoardModel, flip: (path: readonly string[], id?: string) => void, shut: ReadonlySet<string>, revealing: boolean): HTMLElement[] {
   const { document: doc, copy, intents } = ctx
   const firstColumn = firstStatus(state.boot)
   if (!model.total) return [emptyState(doc, { icon: 'kanban', title: copy.empty })]
@@ -54,9 +54,17 @@ function draw(ctx: ViewContext, state: State, index: IssueIndex, model: BoardMod
   const card = (at: number): HTMLElement => {
     const row: Row = index.rows[at]!
     const key = row.id
-    const done = isDone(row)
+    const done = statusOf(row) === 'done'
     const selected = state.cursor === key
     const first = el(doc, 'div', { class: 'm-card-line' })
+    if (closedGroup(row)) {
+      const path = index.dirPath(at)
+      const open = revealing || !shut.has(pathKey(path))
+      const label = open ? copy.board.fold : copy.board.unfold
+      const toggle = el(doc, 'button', { type: 'button', class: 'moai-toggle', tabindex: 0, 'aria-label': label, title: label, 'aria-expanded': String(open) }, icon(doc, 'chevron-right', 12))
+      toggle.addEventListener('click', (event) => { event.stopPropagation(); flip(path, row.id) })
+      first.append(toggle)
+    }
     first.append(el(doc, 'span', { class: 'm-id' }, row.id))
     // The status in the card itself, as the TUI draws it (`id glyph pN n/n`): a card in the Deferred or Backlog
     // column would otherwise not say where it stands. The glyph differs by status, never colour alone.
@@ -101,9 +109,18 @@ function draw(ctx: ViewContext, state: State, index: IssueIndex, model: BoardMod
   const laneHead = (lane: BoardLane): HTMLElement | null => {
     if (lane.seg === null) return null
     const title = lane.at !== undefined ? (index.rows[lane.at]!.title ?? index.rows[lane.at]!.id) : segLabel(lane.seg, index, copy)
-    const head = el(doc, 'div', { class: 'm-swim-head', 'data-lane': lane.seg })
-    const count = lane.columns.reduce((n, column) => n + column.cards.length, 0)
-    head.append(el(doc, 'span', {}, title), el(doc, 'span', { class: 'm-count' }, String(count)))
+    const selected = lane.at !== undefined && index.rows[lane.at]!.id === state.cursor
+    const head = el(doc, 'div', { class: 'm-swim-head', 'data-lane': lane.seg, 'aria-selected': String(selected), 'data-focus': lane.at === undefined ? null : `lane:${index.rows[lane.at]!.id}` })
+    const path = [lane.seg]
+    const label = lane.folded ? copy.board.unfold : copy.board.fold
+    const toggle = el(doc, 'button', { type: 'button', class: 'moai-toggle', tabindex: 0, 'aria-label': label, title: label, 'aria-expanded': String(!lane.folded) }, icon(doc, 'chevron-right', 12))
+    toggle.addEventListener('click', (event) => { event.stopPropagation(); flip(path, lane.at === undefined ? undefined : index.rows[lane.at]!.id) })
+    const name = el(doc, 'button', { type: 'button', class: 'm-swim-title', tabindex: 0 }, title)
+    name.addEventListener('click', () => {
+      if (lane.at === undefined) flip(path)
+      else { ctx.intents.choose(index.rows[lane.at]!.id); if (ctx.layout().detailVisible) ctx.focusPane('detail') }
+    })
+    head.append(toggle, name, el(doc, 'span', { class: 'm-count' }, String(lane.count)))
     return head
   }
 
@@ -112,6 +129,7 @@ function draw(ctx: ViewContext, state: State, index: IssueIndex, model: BoardMod
     const head = laneHead(lane)
     if (head) out.push(head)
     const board = el(doc, 'div', { class: 'm-board', 'data-lane': lane.seg ?? '' })
+    if (lane.folded) continue
     for (const column of lane.columns) {
       const label = nameOf(column.key)
       const lanes = el(doc, 'div', { class: 'm-lane', role: 'list', 'data-status': column.key, 'aria-label': fill(column.cards.length === 1 ? copy.board.columnLabelOne : copy.board.columnLabelMany, { name: label, count: column.cards.length }) })
@@ -153,6 +171,28 @@ export const mountBoard: MountPane = (root, ctx): PaneView => {
   root.replaceChildren(pane)
   let cursor: string | null = null
   let drawn: { state: State; index: IssueIndex; model: BoardModel; key: string } | null = null
+  const shut = new Set<string>()
+  let seeded = false
+  let foldVersion = 0
+
+  function flip(path: readonly string[], id?: string): void {
+    if (!drawn) return
+    const key = pathKey(path)
+    const closing = !shut.has(key)
+    if (closing) shut.add(key)
+    else shut.delete(key)
+    let state = drawn.state
+    const at = state.cursor === null ? undefined : drawn.index.find(state.cursor)
+    // Only a fold that hides the cursor moves it: the folded path must be a prefix of the cursor's home. Walking the
+    // home instead let a shorter home (a lane head at the root, a closed epic card) pass for any group.
+    const home = at === undefined ? [] : drawn.index.homeOf(at)
+    if (closing && at !== undefined && path.every((seg, n) => home[n] === seg) && id !== state.cursor) {
+      state = { ...state, cursor: id ?? null }
+      ctx.intents.point(id ?? null)
+    }
+    foldVersion++
+    renderBoard(state, drawn.index)
+  }
 
   /**
    * Nothing but the cursor moved (the cards, their order and the columns are what they were): move the selection mark
@@ -172,6 +212,7 @@ export const mountBoard: MountPane = (root, ctx): PaneView => {
     }
     if (drawn.model.pinned || !drawn.model.total) return false
     const cards = [...pane.querySelectorAll<HTMLElement>('.m-card')]
+    if (drawn.state.cursor !== null && !cards.some((node) => node.dataset.id === drawn!.state.cursor)) return false
     const target = state.cursor === null ? undefined : cards.find((node) => node.dataset.id === state.cursor)
     if (state.cursor !== null && !target) return false
     for (const node of cards) {
@@ -199,6 +240,7 @@ export const mountBoard: MountPane = (root, ctx): PaneView => {
     }
     const first = model.lanes.flatMap((lane) => lane.columns.flatMap((column) => column.cards))[0]
     const here = locate(model, index, state.cursor)
+    const header = model.lanes.find((lane) => lane.at !== undefined && index.rows[lane.at]!.id === state.cursor)
     const page = Math.max(1, Math.floor((root.clientHeight || 720) / 80))
     switch (action) {
       case 'move.down':
@@ -207,6 +249,11 @@ export const mountBoard: MountPane = (root, ctx): PaneView => {
       case 'move.pageUp':
       case 'move.top':
       case 'move.bottom': {
+        if (header) {
+          const firstInLane = header.columns.flatMap((column) => column.cards)[0]
+          point(firstInLane ?? first)
+          return true
+        }
         if (!here) {
           point(first)
           return true
@@ -227,6 +274,11 @@ export const mountBoard: MountPane = (root, ctx): PaneView => {
       }
       case 'expand':
       case 'collapse': {
+        if (header?.seg) {
+          const key = pathKey([header.seg])
+          if ((action === 'expand' && shut.has(key)) || (action === 'collapse' && !shut.has(key))) flip([header.seg], state.cursor ?? undefined)
+          return true
+        }
         if (!here) {
           point(first)
           return true
@@ -243,6 +295,11 @@ export const mountBoard: MountPane = (root, ctx): PaneView => {
         return true
       }
       case 'enter': {
+        if (header?.at !== undefined) {
+          ctx.intents.choose(index.rows[header.at]!.id)
+          if (ctx.layout().detailVisible) ctx.focusPane('detail')
+          return true
+        }
         // The cursor's card; with the cursor on no card (a group or `..` in the list), the card that has the focus —
         // the tab stop focus() moved to — as the card's own Enter chose it before the key router took the keys.
         const focused = doc.activeElement?.closest<HTMLElement>('.m-card')
@@ -261,19 +318,30 @@ export const mountBoard: MountPane = (root, ctx): PaneView => {
     return false
   }
 
-  return {
-    render(state, index) {
+  function renderBoard(state: State, index: IssueIndex | null): void {
       const active = doc.activeElement as HTMLElement | null
       const key = active && pane.contains(active) ? active.dataset?.focus : undefined
       if (index) {
+        if (!seeded) {
+          const at = state.cursor === null ? undefined : index.find(state.cursor)
+          const selected = at === undefined ? [] : index.homeOf(at)
+          for (let n = 0; n < index.rows.length; n++) {
+            if (!index.isDir(n) || !closedGroup(index.rows[n]!)) continue
+            const path = index.dirPath(n)
+            if (path.every((seg, k) => selected[k] === seg)) continue
+            shut.add(pathKey(path))
+          }
+          seeded = true
+          foldVersion++
+        }
         // What the cards are drawn from. The cursor is not in it: a cursor move changes two cards' marks, not the board.
-        const drawKey = JSON.stringify([state.path, state.view, state.search.text, state.filter.applied, state.columns])
+        const drawKey = JSON.stringify([state.path, state.view, state.search.text, state.filter.applied, state.columns, foldVersion])
         if (!inPlace(state, index, drawKey)) {
           // The board is a layout of the list: the same filter and search narrow it (list-model.ts narrow).
           const found = narrow(state, index)
-          const model = groupBoard(index, { path: state.path, view: state.view, cursor: state.cursor, match: found.match, reveal: found.searching }, state.boot?.statuses)
+          const model = groupBoard(index, { path: state.path, view: state.view, cursor: state.cursor, match: found.match, reveal: found.searching, shut }, state.boot?.statuses)
           drawn = { state, index, model, key: drawKey }
-          pane.replaceChildren(...draw(ctx, state, index, model))
+          pane.replaceChildren(...draw(ctx, state, index, model, flip, shut, found.searching))
         }
       } else {
         drawn = null
@@ -281,7 +349,7 @@ export const mountBoard: MountPane = (root, ctx): PaneView => {
       }
       if (key !== undefined) {
         // A focused card follows the cursor a key moved, so the focus ring and the selection stay one card.
-        const want = key.startsWith('card:') && state.cursor !== null ? [`card:${state.cursor}`, key] : [key]
+        const want = state.cursor !== null ? [`card:${state.cursor}`, `lane:${state.cursor}`, key] : [key]
         const nodes = [...pane.querySelectorAll<HTMLElement>('[data-focus]')]
         const node = want.map((one) => nodes.find((n) => n.dataset.focus === one)).find((n) => n !== undefined)
         node?.focus({ preventScroll: true })
@@ -289,14 +357,23 @@ export const mountBoard: MountPane = (root, ctx): PaneView => {
       // The card with the cursor stays in view when the cursor moves.
       if (state.cursor !== cursor) {
         cursor = state.cursor
-        const selected = pane.querySelector<HTMLElement>('.m-card[aria-selected="true"]')
+        const selected = pane.querySelector<HTMLElement>('.m-card[aria-selected="true"], .m-swim-head[aria-selected="true"]')
         if (selected && typeof selected.scrollIntoView === 'function') selected.scrollIntoView({ block: 'nearest', inline: 'nearest' })
       }
-    },
+  }
+
+  return {
+    render: renderBoard,
     command,
     focus() {
-      const target = pane.querySelector<HTMLElement>('.m-card[aria-selected="true"]') ?? pane.querySelector<HTMLElement>('.m-card')
+      const target = pane.querySelector<HTMLElement>('.m-swim-head[aria-selected="true"] .m-swim-title, .m-card[aria-selected="true"]') ?? pane.querySelector<HTMLElement>('.m-card')
       ;(target ?? (pane.closest('[tabindex]') as HTMLElement | null))?.focus({ preventScroll: false })
+    },
+    leave() {
+      shut.clear()
+      seeded = false
+      foldVersion++
+      drawn = null
     },
     destroy() {
       pane.remove()

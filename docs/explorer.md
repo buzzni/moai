@@ -33,7 +33,8 @@ directories. Forgot a key? `?` (or `SPC h`) opens [the key list](#the-key-list).
 - `j`/`k` move, `Enter` goes into a milestone or an epic, `Backspace` comes back
   out. Rows you can go into end their title with `/`
 - `l` unfolds a group one step where it stands and `h` folds it; `Tab` unfolds
-  everything under it
+  everything under it while leaving closed epics and milestones folded. Press
+  `l` or `Tab` on a closed group to open that group
 - `gg` and `G` go to the top and the bottom. `Ctrl-d`/`Ctrl-u` scroll half a
   page and `Ctrl-f`/`Ctrl-b` a whole one without moving the cursor: the row you
   chose and its detail stay put even off screen, and the next `j` or `k` brings
@@ -111,12 +112,20 @@ remain readable; if both keys exist, `hide_backlog` wins.
 
 - **`SPC g l` — the list**, described above
 - **`SPC g b` — the board.** The same rows as a kanban board: backlog, deferred, then
-  your columns, with one lane per milestone at the project root. The deferred column
+  your columns, with one lane per milestone at the project root. Each lane header
+  takes the cursor and shows that milestone's detail; `Enter` opens it. A closed
+  milestone lane starts folded, showing its `done/work` count. On its header,
+  `h` folds, `l` opens, and `Tab` flips the fold. Clicking its arrow flips it;
+  clicking elsewhere on the header selects it. Closed epics stand as folded
+  cards in done. `Tab` or a click on a card's arrow shows their done members
+  beneath them; members in other columns remain visible. A search reveals
+  matching cards inside folded groups. In the overview, each project's lanes
+  fold independently. The deferred column
   follows the view — hidden to begin with, back with `SPC v l`. A card that is
   not yours says whose it is. Cards in the in-progress, review and done columns
   carry bright yellow, magenta or green bands on their head lines, with black text;
   other columns, including deferred, stay plain. Solarized maps those bright
-  colours to greys, so the bands are grey there. `h` and `l` go across the columns, `j` and `k` along
+  colours to greys, so the bands are grey there. On cards, `h` and `l` go across the columns, `j` and `k` along
   one, and the wheel and `Ctrl-d`/`Ctrl-u` scroll the board without moving the
   cursor. The cursor, filter, view and detail are the list's, so switching keeps
   your place. Titles wrap to the column width, keeping up to 50 Unicode
@@ -174,7 +183,8 @@ what runs late, and what is moving right now. It is the list's layout, not a win
 of its own, so the cursor, filter, view, search and detail carry over and `SPC g l`
 brings you back to the same row.
 
-**Reading it.** Every group opens out when you enter, and the left column is the
+**Reading it.** Closed epics and milestones start folded; the group holding
+the selected row stays open. The left column is the
 list's row. On the right, `░` is the planned start to deadline (`▒` on an epic or a
 milestone), `◆` a milestone's own deadline, `█` over it when the work actually ran,
 `▓` the time past a deadline, `┄` a deferred row's plan, and `▼` over a dotted line
@@ -188,7 +198,8 @@ anywhere, the date side says how to add them: `moai edit <id> --start <day> --du
 <day>`, or `@start~due` at the end of a plan line.
 
 **Folding.** `h`, `l` and `Tab` fold and unfold inside the gantt only — the list
-keeps the folds it had, and the next time you enter, everything is open again.
+keeps the folds it had. A group you open stays open through a reread; entering
+the gantt again folds closed groups afresh.
 
 **Moving the dates.** `=` and `-` zoom in and out (hour, day, week, month), `H` and
 `L` slide one cell, `[` and `]` a page, `t` puts today in the middle and `z` fits
@@ -233,6 +244,9 @@ Everything that is not moving or searching lives in the menu that opens the
 moment you press `SPC`. It stands up only what works where you are — screens,
 view, sort, columns, read marks, options and projects — and ignores keys it does
 not know.
+
+`SPC o o` opens the archive days picker in a project. Its value is a repository
+setting in `.moai/config.toml`, shared by everyone using that repository.
 
 - `Esc` or `SPC` closes it, and `Backspace` goes one level up
 - Toggles and sorts leave it open so you can try one and watch the screen change;
@@ -373,7 +387,8 @@ with `Enter` first.
 
 Work that has sat in done for two weeks is eligible for the archive. The archive
 is moved explicitly with `moai archive`; use `moai archive --dry-run` first to
-see the rows. Closed epic bundles move together into
+see the rows. A row under a parent, epic or milestone stays visible until every
+one of those groups has stood closed for `archive_days`. Closed epic bundles move together into
 `.moai/archive/<year>.jsonl`, while milestone rows stay live. Normal board and
 ready counts use the active snapshot. Archived rows still supply parent, blocker
 and milestone context, so a shipped release stays closed and a restored member
@@ -385,6 +400,11 @@ read archived rows too, and `moai show <id>` can open one directly.
 eligibility off; `moai show` and `moai status` leave rows already moved to the
 archive out either way. Moving an archived row with `moai mv` restores that selected
 row; its former bundle remains archived (moai-fx9t).
+In the explorer, `SPC o o` chooses the number of days and writes it to
+`.moai/config.toml`. It offers common values or a number from 0 to 3650.
+The explorer also keeps rows already moved to an archive file hidden when
+`archive_days` grows or becomes `0`. With `SPC v o`, the detail names an
+`archive file` row and distinguishes an `archive copy` from its live row.
 
 When a live row also has an archive copy, `moai status` names the conflict as
 `archive_duplicate_id`. Keep the live row and run `moai archive --drop <id>` to
@@ -481,4 +501,4 @@ write there either.
   an email on every write and `git config` had none. The answer holds for this
   run; set `user.name` and `user.email` to stop it asking
 
-Decided in: moai-e9hi moai-724f moai-z46r moai-9nfw moai-47mz moai-irrj moai-ucx8 moai-1hka moai-h2rh moai-gelm moai-m6ni moai-p3r9 moai-o3cb moai-fyul moai-ogaw moai-tllo moai-fc97 moai-jtvp moai-bth3 moai-9tqo moai-wk7i moai-pxiy moai-i4hf moai-lj8g moai-ccow moai-d1zn moai-ekg6 moai-uwi9
+Decided in: moai-e9hi moai-724f moai-z46r moai-9nfw moai-47mz moai-irrj moai-ucx8 moai-1hka moai-h2rh moai-gelm moai-m6ni moai-p3r9 moai-o3cb moai-fyul moai-ogaw moai-tllo moai-fc97 moai-jtvp moai-bth3 moai-9tqo moai-wk7i moai-pxiy moai-i4hf moai-lj8g moai-ccow moai-d1zn moai-ekg6 moai-uwi9 moai-mkzo

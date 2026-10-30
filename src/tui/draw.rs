@@ -285,6 +285,7 @@ pub fn screen(f: &mut Frame, app: &mut App) {
         Mode::Backlog(form) => jot(f, form, body, true, tint, lang),
         Mode::Pick(p) => pick(f, p, body, lang),
         Mode::Zone(z) => zone_pick(f, z, body, lang),
+        Mode::ArchiveDays(p) => archive_days_pick(f, p, body, lang),
         Mode::Sort(e) => sort_edit(f, e, body, lang),
         Mode::Stats(w) => stats_window(f, w, body, lang),
         Mode::Wiki(w) => wiki_at = Some(wiki_window(f, w, body, raw, share, lang)),
@@ -400,6 +401,14 @@ pub fn screen(f: &mut Frame, app: &mut App) {
             let lang = app.site.lang;
             let help = prompt_help(say(lang, "tui.prompt.hang"), lang);
             prompt(f, keys, say(lang, "tui.tz.title"), &z.typing, None, &help)
+        }
+        Mode::ArchiveDays(p) => {
+            let message = if let Some(error) = &p.error {
+                error.clone()
+            } else {
+                fill(say(app.site.lang, "tui.archive_days.keys"), &[("typed", &p.typed)])
+            };
+            f.render_widget(Paragraph::new(clip(&message, keys.width as usize)), keys);
         }
         Mode::Sort(_) => sort_keys(f, app.keys.sorter, keys, app.site.lang),
         Mode::Stats(w) => match &open_menu {
@@ -749,6 +758,51 @@ fn zone_pick(f: &mut Frame, z: &mut super::zones::Zones, at: Rect, lang: Lang) {
         &mut state,
     );
     scroll_mark(f, &z.list, at, "", true, lang);
+}
+
+fn archive_days_pick(f: &mut Frame, p: &mut super::archive_days::Picker, at: Rect, lang: Lang) {
+    f.render_widget(Clear, at);
+    let mut items: Vec<ListItem> = p
+        .choices
+        .iter()
+        .map(|days| {
+            let label = if *days == 0 {
+                say(lang, "tui.archive_days.off").to_string()
+            } else {
+                format!("{days} {}", say(lang, "tui.archive_days.days"))
+            };
+            let default =
+                if *days == p.default { format!("  {}", say(lang, "tui.archive_days.default")) } else { String::new() };
+            let now = if *days == p.now { format!("  {}", say(lang, "tui.tz.now")) } else { String::new() };
+            ListItem::new(format!("{label}{default}{now}"))
+        })
+        .collect();
+    if !p.typed.is_empty() {
+        let custom = if p.selected().is_ok() {
+            fill(say(lang, "tui.archive_days.custom"), &[("days", &p.typed)])
+        } else {
+            fill(say(lang, "tui.archive_days.range"), &[("range", "0..3650")])
+        };
+        items.insert(0, ListItem::new(custom));
+    }
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Thick)
+        .border_style(from_anstyle(style::FOCUS))
+        .title(format!(" {} ", say(lang, "tui.archive_days.title")))
+        .title_bottom(Line::from(Span::styled(
+            clip(say(lang, "tui.archive_days.shared"), at.width.saturating_sub(2) as usize),
+            dim(),
+        )));
+    let mut state = ListState::default().with_selected(Some(if p.typed.is_empty() { p.cursor } else { 0 }));
+    f.render_stateful_widget(
+        List::new(items)
+            .block(block)
+            .highlight_style(Style::new().add_modifier(Modifier::REVERSED))
+            .highlight_symbol(CURSOR),
+        at,
+        &mut state,
+    );
 }
 
 /// 통계 창이 차트를 세우려면 이만큼은 넓어야 한다(테두리와 좌우 여백을 뺀 안쪽 칸 수). 좁으면 차트 대신 `moai stats` 의 글로 떨어진다
@@ -2962,10 +3016,14 @@ fn board(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) -> Boarded {
             continue;
         }
         let Some(r) = rows.get(n) else { continue };
-        // 칸을 가로지르는 머리줄 — 한눈 보기의 프로젝트 줄이다. 보드 폭을 다 쓴다.
+        // 칸을 가로지르는 머리줄 — 프로젝트 또는 마일스톤 레인.
         let Some(column) = p.column else {
             if let Row::Project(place) = r {
                 let line = project_banner(app, *place, n == app.cursor, canvas.width as usize);
+                f.buffer_mut().set_line(canvas.x, y_of(p.top), &line, canvas.width);
+                out.cards.push((Rect { x: canvas.x, y: y_of(p.top), width: canvas.width, height: 1 }, n));
+            } else if let Row::Item(_, Entry::Dir { .. }, _) = r {
+                let line = lane_banner(app, &laid, r, p.lane, n == app.cursor, canvas.width as usize);
                 f.buffer_mut().set_line(canvas.x, y_of(p.top), &line, canvas.width);
                 out.cards.push((Rect { x: canvas.x, y: y_of(p.top), width: canvas.width, height: 1 }, n));
             }
@@ -3004,6 +3062,24 @@ fn project_banner<'a>(app: &App, place: usize, chosen: bool, w: usize) -> Line<'
     }
     let lead = if chosen { Span::styled(CURSOR, bold()) } else { Span::raw("  ") };
     Line::from(std::iter::once(lead).chain(line.spans).collect::<Vec<_>>())
+}
+
+fn lane_banner<'a>(app: &App, laid: &super::Laid, row: &Row, lane: usize, chosen: bool, w: usize) -> Line<'a> {
+    // A search lays folded cards out (`App::cards_in`), so the arrow says open while it does — as the web does.
+    let folded = !app.searching()
+        && app
+            .dir_of(Some(row.clone()))
+            .and_then(|(seat, path)| app.site_of_seat(seat).map(|site| site.board_shut.contains(&path)))
+            .unwrap_or(false);
+    let mark = if folded { "▸" } else { "▾" };
+    let mut line = lane_line(app, laid, lane, w.saturating_sub(4));
+    if chosen {
+        for span in &mut line.spans {
+            span.style = span.style.add_modifier(Modifier::REVERSED);
+        }
+    }
+    let lead = if chosen { Span::styled(CURSOR, bold()) } else { Span::raw("  ") };
+    Line::from(std::iter::once(lead).chain([Span::raw(format!("{mark} "))]).chain(line.spans).collect::<Vec<_>>())
 }
 
 /// 보드의 제목 줄 — **못 세운 칸을 이름과 수로 댄다**(`+2 · ? review 0 · ✓ done 4`). 칸이 다 섰으면 제목이 없다:
@@ -3143,6 +3219,11 @@ fn card<'a>(app: &App, r: &Row, chosen: bool, w: usize, band: Option<Style>) -> 
     let quiet = || band.map_or(dim(), |b| b.add_modifier(Modifier::DIM));
 
     let mut head: Vec<Span<'static>> = Vec::new();
+    if i.kind == crate::model::Kind::Epic && site.closed(at) {
+        let path = site.index.dir_path(&site.issues, at);
+        let mark = if !app.searching() && site.board_shut.contains(&path) { "▸ " } else { "▾ " };
+        head.push(Span::styled(mark, ink(Style::new())));
+    }
     if fields.shows(Field::Id) {
         head.extend(mark(vec![Span::styled(i.id.clone(), quiet())], in_id));
         head.push(Span::styled(" ", ink(Style::new())));
@@ -4208,6 +4289,12 @@ fn about<'a>(app: &App, site: &Site, idx: usize, e: &Entry, w: usize) -> Vec<Lin
         let room = w.saturating_sub(crate::text::width(&i.id) + 2);
         first.push(Span::raw("  "));
         first.push(Span::styled(clip(&format!("{} {b}", style::BRANCH_GLYPH), room), branch()));
+    }
+    if let Some(copy) = site.archive_file(idx) {
+        let label =
+            if copy { say(site.lang, "tui.detail.archive_copy") } else { say(site.lang, "tui.detail.archive_file") };
+        first.push(Span::raw("  ·  "));
+        first.push(Span::styled(label, dim()));
     }
     let mut out = vec![Line::from(first)];
     // 칠은 **그린 줄마다** 찾는다 — 접힌 줄에 걸친 글은 안 칠해진다(본문과 같다).
@@ -6316,6 +6403,13 @@ pub(super) mod tests {
         let mut a = old_look(a);
         a.layout = super::super::view::Layout::Board;
         a.detail_open = false;
+        a.cursor = a
+            .rows()
+            .iter()
+            .position(
+                |r| matches!(r, Row::Item(_, e, _) if e.at().is_some_and(|at| a.site.issues[at].id == "argos-0100")),
+            )
+            .unwrap_or(0);
         a
     }
 
@@ -6560,6 +6654,32 @@ pub(super) mod tests {
         assert!(text.contains("둘째 노트"), "{text}");
     }
 
+    #[test]
+    fn the_archive_view_names_an_archive_file_row() {
+        let mut a = every(issues());
+        let rows = a.rows();
+        let Row::Item(_, e, _) = a.current_of(&rows).unwrap() else { panic!() };
+        let idx = e.at().unwrap();
+        a.site.ground.from_archive = vec![false; a.site.issues.len()];
+        a.site.ground.from_archive[idx] = true;
+        for (lang, file, copy) in
+            [(crate::i18n::Lang::En, "archive file", "archive copy"), (crate::i18n::Lang::Ko, "보관 파일", "보관 사본")]
+        {
+            a.site.lang = lang;
+            let text = |a: &App| -> String {
+                about(a, &a.site, idx, &e, 120)
+                    .iter()
+                    .flat_map(|line| &line.spans)
+                    .map(|span| span.content.as_ref())
+                    .collect()
+            };
+            assert!(text(&a).contains(file));
+            a.site.ground.archive_copies.insert(a.site.issues[idx].id.clone());
+            assert!(text(&a).contains(copy));
+            a.site.ground.archive_copies.clear();
+        }
+    }
+
     /// **노트의 둘째 줄과 감긴 조각은 글 칸에 선다** — 도장 칸까지 함께 감던 판은 감긴 조각이 왼쪽 끝으로 돌아갔고,
     /// 첫 낱말이 칸보다 긴 둘째 줄은 들인 칸의 빈칸에서 끊겨 빈 줄이 섰다.
     #[test]
@@ -6712,7 +6832,7 @@ pub(super) mod tests {
         assert!(buf[(x, y)].modifier.contains(Modifier::REVERSED), "고른 카드의 머리가 반전이 아니다");
         assert!(a.spun, "집은 카드가 보이는데 루프를 안 깨운다");
         // 카드 자리를 마우스가 맞힐 바탕으로 남긴다 — 보이는 카드 넷이다.
-        assert_eq!(a.drawn.cards.len(), 4, "{:?}", a.drawn.cards);
+        assert_eq!(a.drawn.cards.len(), 6, "{:?}", a.drawn.cards);
         assert_eq!(a.drawn.rows, Rect::default(), "보드인데 목록의 줄 자리를 남겼다");
     }
 
@@ -6774,6 +6894,8 @@ pub(super) mod tests {
         assert!(text.contains('↑'), "굴린 만큼을 안 댄다\n{text}");
         // 맨 위로 돌아가면 첫 레인의 머리줄부터 선다.
         a.hit("g g");
+        assert!(matches!(a.current(), Some(Row::Item(_, Entry::Dir { .. }, _))), "gg must reach the lane head");
+        a.hit("j");
         let lines = render(&mut a, 100, 14);
         let y = lines.iter().position(|l| l.contains("> argos-0100")).unwrap();
         assert!(lines[y - 1].contains("── argos-0001"), "{}", lines.join("\n"));
@@ -6839,6 +6961,7 @@ pub(super) mod tests {
         let at = lines.iter().position(|l| l.contains("argos-0002.x1y")).unwrap_or_else(|| panic!("{lines:#?}"));
         assert!(lines[at + 2].contains("보드 에픽"), "카드의 발줄이 에픽을 안 댄다\n{}", lines.join("\n"));
 
+        a.cursor = a.rows().iter().position(|r| matches!(r, Row::Item(_, e, _) if e.at().is_some_and(|at| a.site.issues[at].id == "argos-0002.x1y"))).unwrap();
         a.hit("SPC g l");
         let lines = render(&mut a, 120, 14);
         let row = lines.iter().find(|l| l.contains("계획의 멤버")).unwrap_or_else(|| panic!("{lines:#?}"));

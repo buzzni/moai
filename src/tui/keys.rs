@@ -389,6 +389,8 @@ pub enum Browse {
     /// 시간대 고르는 창을 연다 — `SPC o t`(moai-3oz2). **돌리지 않고 창을 연다**: 이 기계의
     /// tzdb 는 이름을 천 개 넘게 들어, 눌러 돌리는 길로는 고를 수가 없다.
     Timezone,
+    /// Repository archive retention picker (`SPC o o`).
+    ArchiveDays,
     /// 마우스를 잡고 놓는다 — `SPC o m`(moai-irrj.9xq). 잡으면 누르기·휠·칸 끌기가 듣고, 터미널의
     /// 끌어서 글 고르기는 Shift 를 눌러야 된다. 놓으면 거꾸로다 — 고르는 사람이 그 값을 정한다.
     Mouse,
@@ -944,12 +946,14 @@ pub const BROWSE: &[Bind<Browse>] = {
         // 그 자로 뒤에 올 것이 정해진다: 시간대(`t`), 그리고 화면 말·이름 꼴·색처럼 **이미 선 값을
         // 이 사람에게 어떻게 보일까** 하는 것들이다. 어느 줄을 볼까는 여기 안 온다.
         //
+        // `SPC o o` 하나는 예외다(2026-10-30 사용자 결정): 저장소 설정에 쓰며 창이 그 사실을 댄다.
         // **어느 것도 이슈를 안 건드린다** — 설정에만 적히고 화면만 바꾼다. 설정이 이미 쓴 줄을
         // 바꾸면 그건 설정이 아니라 마이그레이션이다.
         row!(DetailAt, Some("SPC o d"), LEADER, Key::plain('o'), Key::plain('d')),
         row!(Timezone, Some("SPC o t"), LEADER, Key::plain('o'), Key::plain('t')),
         // **마우스도 여기다** — 이슈도 줄도 안 건드리고 이 사람 화면을 어떻게 다루는가만 바꾼다(위의 자).
         row!(Mouse, Some("SPC o m"), LEADER, Key::plain('o'), Key::plain('m')),
+        row!(ArchiveDays, Some("SPC o o"), LEADER, Key::plain('o'), Key::plain('o')),
         // **키 목록은 두 키로 연다**(moai-ucyr, 2026-10-26 사용자 결정) — `?` 는 lazygit·k9s 의 버릇이고 `SPC h` 는
         // doom 의 help 접두어다. 이름은 바로 누르는 `?` 하나만 댄다 — `/` 와 `SPC /` 처럼. **뿌리 메뉴의 끝 칸이다** —
         // 가장 드물게 누르는 것이고, 낮은 창에서 메뉴가 한 줄로 접힐 때 앞 칸들을 밀어내지 않는다.
@@ -1003,6 +1007,8 @@ pub struct Ctx {
     pub backlog_hidden: bool,
     /// 아카이브를 숨겼는가(moai-47mz) — 처음에는 참이다.
     pub archived_hidden: bool,
+    /// Repository retention in days; 0 disables age-based archive eligibility.
+    pub archive_days: i64,
     /// 상세 칸이 지금 선 자리 — 메뉴 줄이 낱말로 댄다(moai-e7r3).
     pub detail_at: super::view::DetailAt,
     /// 목록을 보드로 세웠는가(moai-9nfw). `h`·`l` 이 옆 칸으로 가고 `Tab` 이 조용해진다 — 프로젝트 머리줄(`head`)만
@@ -1019,6 +1025,8 @@ pub struct Ctx {
     /// 커서가 한눈 보기의 프로젝트 머리줄에 섰는가(moai-oagj.vcj). 보드에서도 그 줄의 `h`·`l`·`Tab` 은 목록과 같이
     /// 접고 편다(사용자 결정) — 칸이 없는 줄이다.
     pub head: bool,
+    /// Cursor is on a board lane banner or closed-epic card, so Tab toggles it.
+    pub board_foldable: bool,
     /// 마우스를 잡고 있는가 — 메뉴 줄이 `[켜짐]`·`[꺼짐]` 으로 댄다(moai-irrj.9xq).
     pub mouse: bool,
     /// 고른 차례와 그 방향.
@@ -1142,7 +1150,7 @@ impl Browse {
             // **한눈 보기의 프로젝트 머리줄은 목록과 같다**(moai-oagj.vcj) — 칸이 없는 줄이라 그 자리의 `h`·`l`·`Tab` 은
             // 접고 편다. 아래 목록의 갈래를 그대로 탄다.
             Expand | Collapse if c.board && !c.head => Ok(()),
-            ExpandAll if c.board && !c.head => Err(Off::Quiet),
+            ExpandAll if c.board && !c.head && !c.board_foldable => Err(Off::Quiet),
             // 묶음 줄에만 펼칠 것이 있다 — `Enter` 가 잎에서 조용한 것과 같은 자리다. `leaf` 로
             // 가르지 않는다: `leaf` 는 `Enter` 의 물음이라 `..` 과 층의 프로젝트 줄에도 거짓이고,
             // 거기서는 펼침이 아무 일도 안 한다.
@@ -1177,6 +1185,7 @@ impl Browse {
                 Err(Off::Why(fill(say(c.lang, "tui.off.filter_inside"), &[("enter", &said(c.keys.browse, Enter))])))
             }
             Worktree if c.layer => Err(Off::Quiet),
+            ArchiveDays if c.layer => Err(Off::Quiet),
             // **층에는 읽을 줄이 없다**(moai-j038.vna) — 층의 줄은 프로젝트고 안 읽은 줄은 들어간 프로젝트의
             // 것이라(`App::climb` 이 비운다), 여기서 서면 `SPC m a` 는 늘 "적을 것이 없다" 로 답하면서 그
             // 프로젝트에 [NEW] 가 남는다. 눌러도 아무 일이 없는 키는 메뉴에 안 선다(아래 `Raw` 와 같은 까닭).
@@ -1262,35 +1271,41 @@ impl Browse {
 
     /// 켜고 끄는 것의 **지금 상태** 낱말. 색이 혼자 뜻을 지지 않는다 — 켜진 것을 색으로만
     /// 칠하면 색 없는 터미널에서 어느 쪽인지 모른다.
-    pub fn state(self, c: &Ctx) -> Option<&'static str> {
+    pub fn state(self, c: &Ctx) -> Option<String> {
         match self {
-            Browse::Worktree if c.worktree => Some(say(c.lang, "tui.state.on")),
-            Browse::Worktree => Some(say(c.lang, "tui.state.off")),
-            Browse::Raw if c.raw => Some(say(c.lang, "tui.state.raw")),
-            Browse::Raw => Some(say(c.lang, "tui.state.rendered")),
-            Browse::Column(n) => Some(shown(c.hidden & (1 << n) != 0, c.lang)),
-            Browse::Deferred => Some(shown(c.deferred_hidden, c.lang)),
-            Browse::Backlog => Some(shown(c.backlog_hidden, c.lang)),
-            Browse::Archived => Some(shown(c.archived_hidden, c.lang)),
+            Browse::Worktree if c.worktree => Some(say(c.lang, "tui.state.on").into()),
+            Browse::Worktree => Some(say(c.lang, "tui.state.off").into()),
+            Browse::Raw if c.raw => Some(say(c.lang, "tui.state.raw").into()),
+            Browse::Raw => Some(say(c.lang, "tui.state.rendered").into()),
+            Browse::Column(n) => Some(shown(c.hidden & (1 << n) != 0, c.lang).into()),
+            Browse::Deferred => Some(shown(c.deferred_hidden, c.lang).into()),
+            Browse::Backlog => Some(shown(c.backlog_hidden, c.lang).into()),
+            Browse::Archived => Some(shown(c.archived_hidden, c.lang).into()),
+            Browse::ArchiveDays if c.archive_days == 0 => {
+                Some(format!("[{}]", say(c.lang, "tui.archive_days.off_state")))
+            }
+            Browse::ArchiveDays => {
+                Some(fill(say(c.lang, "tui.archive_days.state"), &[("days", &c.archive_days.to_string())]))
+            }
             // 차례가 **그 필드 하나뿐일 때만** 붙는다 — 그때 이 키가 방향을 뒤집는다([`Sorting::press`]). 여러 필드의
             // 첫째에 붙이면 누른 뒤 나머지 필드가 사라지는 것을 표시가 숨긴다. 방향은 낱말로 댄다.
             Browse::Sort(o) => match c.sorting.fields() {
-                [only] if only.by == o && only.reversed() => Some(say(c.lang, "tui.state.reversed")),
-                [only] if only.by == o => Some(say(c.lang, "tui.state.sorted")),
+                [only] if only.by == o && only.reversed() => Some(say(c.lang, "tui.state.reversed").into()),
+                [only] if only.by == o => Some(say(c.lang, "tui.state.sorted").into()),
                 _ => None,
             },
             // 차례에 든 필드면 어느 자리에 있든 방향을 댄다 — 글리프와 낱말 둘 다(색이 혼자 뜻을 지지 않는다).
             Browse::SortAdd(o) => c
                 .sorting
                 .place(o)
-                .map(|(_, f)| if f.down { say(c.lang, "tui.state.desc") } else { say(c.lang, "tui.state.asc") }),
-            Browse::Cell(f) => Some(shown(!c.fields.shows(f), c.lang)),
-            Browse::Detail => Some(shown(!c.detail, c.lang)),
+                .map(|(_, f)| if f.down { say(c.lang, "tui.state.desc") } else { say(c.lang, "tui.state.asc") }.into()),
+            Browse::Cell(f) => Some(shown(!c.fields.shows(f), c.lang).into()),
+            Browse::Detail => Some(shown(!c.detail, c.lang).into()),
             // **지금 자리를 낱말로 댄다** — 색도 글리프도 안 쓴다. 돌리는 키라 다음이 무엇인지는
             // 눌러 보면 되고, 지금이 어디인지는 읽혀야 한다.
-            Browse::DetailAt => Some(c.detail_at.word(c.lang)),
-            Browse::Mouse if c.mouse => Some(say(c.lang, "tui.state.on")),
-            Browse::Mouse => Some(say(c.lang, "tui.state.off")),
+            Browse::DetailAt => Some(c.detail_at.word(c.lang).into()),
+            Browse::Mouse if c.mouse => Some(say(c.lang, "tui.state.on").into()),
+            Browse::Mouse => Some(say(c.lang, "tui.state.off").into()),
             _ => None,
         }
     }
@@ -1319,6 +1334,7 @@ impl Browse {
                 | Cell(_)
                 | Detail
                 | DetailAt
+                | ArchiveDays
                 | Mouse
         )
     }
@@ -1381,6 +1397,7 @@ impl Browse {
             Detail => say(c.lang, "tui.act.detail"),
             DetailAt => say(c.lang, "tui.act.detail_at"),
             Timezone => say(c.lang, "tui.act.timezone"),
+            ArchiveDays => say(c.lang, "tui.act.archive_days"),
             Mouse => say(c.lang, "tui.act.mouse"),
             Read | ReadAll | ReadGroup => say(c.lang, "tui.act.read"),
             Help => say(c.lang, "tui.act.help"),

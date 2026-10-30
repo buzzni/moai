@@ -559,7 +559,8 @@ fn listing(
     // 묻는 것은 숨긴 수를 세려는 것이고, 셀 것이 없는 여기서 그 둘을 이으면 `matches` 를 손으로 다시 적는 셈이다.
     // 아카이브를 빼는 자도 같은 거름망의 `archived` 다 — `show --all` 이 숨기는 줄과 한 자(`Where::archived`).
     let keep = |at: usize| {
-        (!given || filter.matches(&issues[at], &now, &wh)) && (!no_archive || !wh.archived(&issues[at], &now))
+        (!given || filter.matches(&issues[at], &now, &wh))
+            && (!no_archive || !(ground.archive_copy(issues, at) || wh.archived(&issues[at], &now)))
     };
     let fields = order.sort.map(|f| f.0);
     let cfg = &repo.config;

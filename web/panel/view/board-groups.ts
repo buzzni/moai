@@ -2,9 +2,9 @@
  * The board's grouping, pure (no DOM): which rows become cards, in which lane and which column.
  * Where a row stands is moai's (data/index.ts: `descendants` for what is at the path, `homeOf` for the lane,
  * `shelvedAt` for deferral, the order of the tree for the order of the cards). This file only sorts those answers
- * into a grid. Epics and milestones are not cards; they are lane heads.
+ * into a grid. Closed epics stand as done cards; milestones head lanes.
  */
-import { isBacklog, isDone, isWork, LOST, type IssueIndex, type Keep, type Path, type Row, type Seg } from '../data/index.js'
+import { closedGroup, isBacklog, isDone, isWork, LOST, pathKey, type IssueIndex, type Keep, type Path, type Row, type Seg } from '../data/index.js'
 import type { ViewSettings } from '../store.js'
 
 /** The columns moai has when `.moai/config.toml` names none, until `/api/boot` gives the project's own. */
@@ -26,6 +26,9 @@ export interface BoardLane {
   seg: Seg | null
   /** The milestone row of the lane, when it has one. */
   at?: number
+  /** Cards before this lane's fold hides them. */
+  count: number
+  folded: boolean
   columns: BoardColumn[]
 }
 
@@ -55,6 +58,8 @@ export interface BoardLook {
    */
   match?: Keep
   reveal?: boolean
+  /** Paths folded during this board visit. Search reveals matches without changing this set. */
+  shut?: ReadonlySet<string>
 }
 
 /**
@@ -66,7 +71,7 @@ export function columnOf(index: IssueIndex, at: number): string {
   const row = index.rows[at]!
   if (isBacklog(row)) return BACKLOG
   if (index.shelvedAt(at) !== undefined) return DEFERRED
-  return String(row.status ?? FALLBACK_STATUSES[0])
+  return String(closedGroup(row) ? row.derived_status ?? row.status : row.status ?? FALLBACK_STATUSES[0])
 }
 
 /**
@@ -103,7 +108,7 @@ export function groupBoard(index: IssueIndex, look: BoardLook, known: readonly s
   // Work, and a thought that is still open: the TUI board counts only open backlog (a closed one is `unopenable`).
   const cards = index.descendants(path).filter((at) => {
     const row = index.rows[at]!
-    return index.find(row.id) === at && (isWork(row) || (isBacklog(row) && !isDone(row)))
+    return index.find(row.id) === at && (isWork(row) || (isBacklog(row) && !isDone(row)) || (row.kind === 'epic' && closedGroup(row)))
   })
   const cursorAt = cursor === null ? undefined : index.find(cursor)
   const cursorColumn = cursorAt === undefined ? undefined : columnOf(index, cursorAt)
@@ -118,7 +123,16 @@ export function groupBoard(index: IssueIndex, look: BoardLook, known: readonly s
     return view.showArchived === true || index.rows[at]!.archived !== true
   }
   const shown = (at: number) => at === cursorAt || passes(at)
-  const kept = cards.filter(shown)
+  const kept = cards.filter(shown).filter((at) => {
+    if (look.reveal || at === cursorAt || columnOf(index, at) !== 'done') return true
+    const epic = index.epicOf(at)
+    const home = epic === undefined ? undefined : index.find(epic)
+    if (home === undefined || !closedGroup(index.rows[home]!)) return true
+    const folded = index.dirPath(home)
+    // Inside the epic its fold does not apply: there it is the path, not a card, so nothing could open it again.
+    if (folded.every((seg, n) => path[n] === seg)) return true
+    return !look.shut?.has(pathKey(folded))
+  })
   const found = look.reveal ? new Set(kept.map((at) => columnOf(index, at))) : null
   const keys = all.filter((key) => !hides(key) || key === cursorColumn || found?.has(key))
   // What only the cursor keeps: its card, or (the cursor on a group, say) the hidden column it stands in.
@@ -127,11 +141,11 @@ export function groupBoard(index: IssueIndex, look: BoardLook, known: readonly s
     (cursorColumn !== undefined && hides(cursorColumn) && !found?.has(cursorColumn))
 
   // `descendants` is in the tree's order, which is the order the list draws: a card stands where its row stands.
-  const make = (seg: Seg | null, members: number[], at?: number): BoardLane => ({
-    seg,
-    at,
-    columns: keys.map((key) => ({ key, cards: members.filter((m) => columnOf(index, m) === key) })),
-  })
+  const make = (seg: Seg | null, members: number[], at?: number): BoardLane => {
+    const folded = !look.reveal && seg !== null && !!look.shut?.has(pathKey([seg]))
+    return { seg, at, count: members.length, folded,
+      columns: keys.map((key) => ({ key, cards: folded ? [] : members.filter((m) => columnOf(index, m) === key) })) }
+  }
 
   if (path.length) return { keys, lanes: kept.length ? [make(null, kept)] : [], total: kept.length, pinned }
 
