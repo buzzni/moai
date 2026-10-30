@@ -1025,7 +1025,7 @@ pub struct Ctx {
     /// 커서가 한눈 보기의 프로젝트 머리줄에 섰는가(moai-oagj.vcj). 보드에서도 그 줄의 `h`·`l`·`Tab` 은 목록과 같이
     /// 접고 편다(사용자 결정) — 칸이 없는 줄이다.
     pub head: bool,
-    /// Cursor is on a board lane banner or closed-epic card, so Tab toggles it.
+    /// Cursor is on a board lane banner, so Tab toggles it.
     pub board_foldable: bool,
     /// 마우스를 잡고 있는가 — 메뉴 줄이 `[켜짐]`·`[꺼짐]` 으로 댄다(moai-irrj.9xq).
     pub mouse: bool,

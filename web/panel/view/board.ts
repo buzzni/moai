@@ -5,7 +5,7 @@
  * between columns is not part of 2.0. Keys are the key router's (panel/keys/): it calls command() — j/k
  * within a column, h/l to the next column, Enter to show the card — and the cards listen for none.
  */
-import { closedGroup, pathKey, type IssueIndex, type Row } from '../data/index.js'
+import { startsFolded, pathKey, type IssueIndex, type Row } from '../data/index.js'
 import { assigneeOf } from '../data/people.js'
 import { isUnread } from '../data/read.js'
 import type { Boot } from '../data/source.js'
@@ -34,7 +34,7 @@ const BOARD_PAD = 6
 
 const priorityClass = (priority: number) => `m-p${Math.min(3, Math.max(0, Math.round(priority)))}`
 
-function draw(ctx: ViewContext, state: State, index: IssueIndex, model: BoardModel, flip: (path: readonly string[], id?: string) => void, shut: ReadonlySet<string>, revealing: boolean): HTMLElement[] {
+function draw(ctx: ViewContext, state: State, index: IssueIndex, model: BoardModel, flip: (path: readonly string[], id?: string) => void): HTMLElement[] {
   const { document: doc, copy, intents } = ctx
   const firstColumn = firstStatus(state.boot)
   if (!model.total) return [emptyState(doc, { icon: 'kanban', title: copy.empty })]
@@ -57,14 +57,6 @@ function draw(ctx: ViewContext, state: State, index: IssueIndex, model: BoardMod
     const done = statusOf(row) === 'done'
     const selected = state.cursor === key
     const first = el(doc, 'div', { class: 'm-card-line' })
-    if (closedGroup(row)) {
-      const path = index.dirPath(at)
-      const open = revealing || !shut.has(pathKey(path))
-      const label = open ? copy.board.fold : copy.board.unfold
-      const toggle = el(doc, 'button', { type: 'button', class: 'moai-toggle', tabindex: 0, 'aria-label': label, title: label, 'aria-expanded': String(open) }, icon(doc, 'chevron-right', 12))
-      toggle.addEventListener('click', (event) => { event.stopPropagation(); flip(path, row.id) })
-      first.append(toggle)
-    }
     first.append(el(doc, 'span', { class: 'm-id' }, row.id))
     // The status in the card itself, as the TUI draws it (`id glyph pN n/n`): a card in the Deferred or Backlog
     // column would otherwise not say where it stands. The glyph differs by status, never colour alone.
@@ -184,7 +176,7 @@ export const mountBoard: MountPane = (root, ctx): PaneView => {
     let state = drawn.state
     const at = state.cursor === null ? undefined : drawn.index.find(state.cursor)
     // Only a fold that hides the cursor moves it: the folded path must be a prefix of the cursor's home. Walking the
-    // home instead let a shorter home (a lane head at the root, a closed epic card) pass for any group.
+    // home instead let a shorter home (a lane head at the root) pass for any group.
     const home = at === undefined ? [] : drawn.index.homeOf(at)
     if (closing && at !== undefined && path.every((seg, n) => home[n] === seg) && id !== state.cursor) {
       state = { ...state, cursor: id ?? null }
@@ -326,7 +318,7 @@ export const mountBoard: MountPane = (root, ctx): PaneView => {
           const at = state.cursor === null ? undefined : index.find(state.cursor)
           const selected = at === undefined ? [] : index.homeOf(at)
           for (let n = 0; n < index.rows.length; n++) {
-            if (!index.isDir(n) || !closedGroup(index.rows[n]!)) continue
+            if (!index.isDir(n) || !startsFolded(index.rows[n]!)) continue
             const path = index.dirPath(n)
             if (path.every((seg, k) => selected[k] === seg)) continue
             shut.add(pathKey(path))
@@ -341,7 +333,7 @@ export const mountBoard: MountPane = (root, ctx): PaneView => {
           const found = narrow(state, index)
           const model = groupBoard(index, { path: state.path, view: state.view, cursor: state.cursor, match: found.match, reveal: found.searching, shut }, state.boot?.statuses)
           drawn = { state, index, model, key: drawKey }
-          pane.replaceChildren(...draw(ctx, state, index, model, flip, shut, found.searching))
+          pane.replaceChildren(...draw(ctx, state, index, model, flip))
         }
       } else {
         drawn = null

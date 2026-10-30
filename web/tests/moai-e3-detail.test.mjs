@@ -359,6 +359,26 @@ test('pane: the per-column counts that come after the rows draw the roll-up agai
   view.render({ ...state, board: { value: counted, loading: false, problem: null } }, index)
   assert.notEqual(root.querySelector('.moai-detail-title'), before, 'drawn again for the counts')
   assert.match(root.textContent, /4/)
+  assert.equal(root.querySelector('.moai-detail-bar > span[data-status="todo"]'), null, 'todo is empty ground in the progress bar')
+  assert.match(root.querySelector('.moai-detail-legend').textContent, /To do 1/, 'the legend still names todo')
+  const css = readFileSync(new URL('../panel/style/detail.css', import.meta.url), 'utf8')
+  assert.match(css, /\[data-status="todo"\] \{ --dot: var\(--todo\); \}/)
+})
+
+test('pane: an all-todo group has an empty progress bar and a zero accessible value', () => {
+  const rows = [
+    { id: 'se-all', kind: 'epic', title: 'All todo', status: 'todo' },
+    { id: 'se-all.a', kind: 'issue', title: 'First', status: 'todo' },
+    { id: 'se-all.b', kind: 'issue', title: 'Second', status: 'todo' },
+  ]
+  const idx = build(rows)
+  const { root, view } = mount()
+  const state = stateWith({ value: { id: rows[0].id, row: rows[0] } })
+  view.render({ ...state, board: { value: { rows, groups: new Map([['se-all', { todo: 2 }]]) }, loading: false, problem: null } }, idx)
+  const bar = root.querySelector('.moai-detail-bar')
+  assert.equal(bar.getAttribute('aria-valuenow'), '0')
+  assert.equal(bar.querySelectorAll('span').length, 0)
+  assert.match(root.querySelector('.moai-detail-legend').textContent, /To do 2/)
 })
 
 test('pane: a search keystroke repaints the id and title only; the body and sections stay (se-mzlx)', () => {
