@@ -12,6 +12,8 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+## [0.37.0] - 2026-10-30
+
 ### Added
 
 - Explorer `SPC o o` chooses the archive retention and writes `archive_days` to the shared repository configuration. (moai-mkzo.mgn)
