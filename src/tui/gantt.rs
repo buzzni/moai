@@ -264,7 +264,7 @@ impl App {
         }
     }
 
-    /// Enter Gantt with closed epics and milestones folded. A selected row's
+    /// Enter Gantt with closed milestones folded. A selected row's
     /// ancestors stay open. List expansion remains independent. The layout switch seeds with the rows it already
     /// holds ([`App::seed_folds`]); tests enter through this.
     #[cfg(test)]

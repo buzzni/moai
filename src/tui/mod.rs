@@ -1413,9 +1413,9 @@ pub struct Site {
     /// (다 펼침)의 두 번째 누름만 밑까지 걷는다([`App::expand_all`]).
     expanded: std::collections::HashSet<Path>,
     /// 간트에서 **접어 둔** 묶음의 자리(moai-i4hf). 목록의 `expanded` 와 따로 들고 뜻이 거꾸로다 — 비면 "모두
-    /// 펼침"이고, 접은 자리만 적는다. 들어갈 때마다 닫힌 묶음으로 다시 심는다([`App::seed_folds`]).
+    /// 펼침"이고, 접은 자리만 적는다. 들어갈 때마다 닫힌 마일스톤으로 다시 심는다([`App::seed_folds`]).
     gantt_shut: std::collections::HashSet<Path>,
-    /// Board lane and closed-epic folds. Seeded on board entry, then changed
+    /// Board lane folds. Seeded on board entry, then changed
     /// only by the person; reloads retain the chosen shape.
     board_shut: std::collections::HashSet<Path>,
     /// 겹쳐 본 줄의 출처. 꺼져 있으면 비었다.
@@ -1919,21 +1919,27 @@ impl Site {
         crate::report::is_group(i) && self.stand_of(i).is_some() && self.column(at) == crate::config::DONE
     }
 
-    /// Directory paths of closed groups below a place. The index supplies the
+    /// Directory paths that start folded below a place. The index supplies the
     /// same paths that list and Gantt rows use.
-    pub(super) fn closed_dirs(&self, under: &Path) -> Vec<Path> {
+    pub(super) fn default_fold_dirs(&self, under: &Path) -> Vec<Path> {
         self.index
             .descendants(under)
             .into_iter()
-            .filter(|&at| self.index.is_dir(&self.issues, at) && self.closed(at))
+            .filter(|&at| self.index.is_dir(&self.issues, at) && self.starts_folded(at))
             .map(|at| self.index.dir_path(&self.issues, at))
             .collect()
     }
 
-    /// The folds the board and Gantt seed on entry — every closed epic and milestone, except those holding the
+    /// 2026-10-30 user decision (v0.37.1): epics do not start folded and are not board cards.
+    /// Only closed milestones start folded; `closed` still describes both group kinds.
+    pub(super) fn starts_folded(&self, at: usize) -> bool {
+        self.issues.get(at).is_some_and(|i| i.kind == Kind::Milestone) && self.closed(at)
+    }
+
+    /// The folds the board and Gantt seed on entry — closed milestones, except those holding the
     /// selected row so switching layouts does not hide the cursor. One answer for both layouts.
-    pub(super) fn closed_folds(&self, selected_home: Option<&Path>) -> std::collections::HashSet<Path> {
-        self.closed_dirs(&Path::new())
+    pub(super) fn default_folds(&self, selected_home: Option<&Path>) -> std::collections::HashSet<Path> {
+        self.default_fold_dirs(&Path::new())
             .into_iter()
             .filter(|path| !selected_home.is_some_and(|home| home.starts_with(path)))
             .collect()
@@ -3989,7 +3995,7 @@ impl App {
         if let Some(l) = look.layout.as_deref().and_then(view::Layout::named)
             && l != self.layout
         {
-            // **A saved board or Gantt is an entry too** — closed groups start folded there as they do on
+            // **A saved board or Gantt is an entry too** — closed milestones start folded there as they do on
             // `SPC g b`/`SPC g g` ([`App::set_layout`]). Seed from the rows the cursor stands on now.
             if matches!(l, view::Layout::Gantt | view::Layout::Board) {
                 let rows = self.rows();
@@ -4930,8 +4936,8 @@ impl App {
                         site.gantt_shut = gantt_shut;
                         site.board_shut = board_shut;
                     }
-                    None if gantt => site.gantt_shut = site.closed_folds(None),
-                    None if board => site.board_shut = site.closed_folds(None),
+                    None if gantt => site.gantt_shut = site.default_folds(None),
+                    None if board => site.board_shut = site.default_folds(None),
                     None => {}
                 }
                 // **누군지는 읽는 스레드가 풀어 온다**(moai-ropk, 옮긴 것은 moai-uitb) — 그 프로젝트의
@@ -5253,7 +5259,7 @@ impl App {
     /// 걸렸을 때만 선다 — 자식이 있는 일이 자식 덕에 카드로 서면 거름망이 숨긴 것이 보드에 선다.
     fn cards_in(&self, seat: Seat, site: &Site, keep: &dyn Fn(usize) -> bool) -> Vec<Row> {
         let mut lanes: Vec<Option<&Seg>> = Vec::new();
-        let mut cards: Vec<(usize, usize, usize, bool, Entry, Twig)> = Vec::new();
+        let mut cards: Vec<(usize, usize, Entry, Twig)> = Vec::new();
         let tree =
             site.index.entries_tree(&site.issues, &site.path, keep, &|a, b| self.order_in(site, a, b), &|_| true);
         for (e, twig) in tree {
@@ -5261,10 +5267,8 @@ impl App {
                 continue;
             };
             let issue = &site.issues[at];
-            let closed_epic = issue.kind == Kind::Epic && site.closed(at);
-            if !closed_epic
-                && (crate::report::is_group(issue)
-                    || (crate::report::is_backlog(issue) && !crate::report::is_open_backlog(issue)))
+            if crate::report::is_group(issue)
+                || (crate::report::is_backlog(issue) && !crate::report::is_open_backlog(issue))
             {
                 continue;
             }
@@ -5280,31 +5284,9 @@ impl App {
             if !self.searching() && !lane_path.is_empty() && site.board_shut.contains(&lane_path) {
                 continue;
             }
-            let epic = site.index.home_of(at).iter().rev().find_map(|seg| match seg {
-                Seg::Epic(id) => site.index.find(id).filter(|&e| site.closed(e)),
-                _ => None,
-            });
-            let done_card = site.column(at) == crate::config::DONE && site.index.shelved_at(at).is_none();
-            // **Inside the epic its fold does not apply** — there the epic is the folder, not a card, so nothing on
-            // the board could open it again and its done members would simply vanish.
-            if !self.searching()
-                && done_card
-                && epic.is_some_and(|e| {
-                    let folded = site.index.dir_path(&site.issues, e);
-                    !site.path.starts_with(&folded) && site.board_shut.contains(&folded)
-                })
-            {
-                continue;
-            }
-            let owner = if done_card { epic.unwrap_or(at) } else { at };
-            cards.push((rank, owner, at, closed_epic, e, twig));
+            cards.push((rank, at, e, twig));
         }
-        cards.sort_by(|a, b| {
-            a.0.cmp(&b.0)
-                .then_with(|| self.order_in(site, a.1, b.1))
-                .then_with(|| b.3.cmp(&a.3))
-                .then_with(|| self.order_in(site, a.2, b.2))
-        });
+        cards.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| self.order_in(site, a.1, b.1)));
         let mut rows = Vec::new();
         let headed = site.path.is_empty() && lanes.iter().any(Option::is_some);
         for (rank, lane) in lanes.iter().enumerate() {
@@ -5315,7 +5297,7 @@ impl App {
                 };
                 rows.push(Row::Item(seat, Entry::Dir { seg: (*seg).clone(), at }, Twig::default()));
             }
-            rows.extend(cards.iter().filter(|c| c.0 == rank).map(|c| Row::Item(seat, c.4.clone(), c.5.clone())));
+            rows.extend(cards.iter().filter(|c| c.0 == rank).map(|c| Row::Item(seat, c.2.clone(), c.3.clone())));
         }
         rows
     }
@@ -5446,7 +5428,7 @@ impl App {
         rows.iter().position(|r| {
             matches!(r, Row::Item(s, e, _)
                 if *s == seat && e.at().is_some_and(|at| at < site.issues.len()
-                    && (!crate::report::is_group(&site.issues[at]) || site.closed(at) && site.issues[at].kind == Kind::Epic)
+                    && !crate::report::is_group(&site.issues[at])
                     && site.index.home_of(at).starts_with(under)))
         })
     }
@@ -5485,7 +5467,7 @@ impl App {
         }
     }
 
-    /// Enter the board with closed milestone lanes and closed epic cards folded ([`Site::closed_folds`]).
+    /// Enter the board with closed milestone lanes folded ([`Site::default_folds`]).
     fn open_board(&mut self, rows: &[Row]) {
         self.seed_folds(rows, false);
     }
@@ -5502,7 +5484,7 @@ impl App {
         };
         let keep = |seat: Seat| selected.as_ref().and_then(|(s, path)| (*s == seat).then_some(path));
         let seed = |site: &mut Site, keep: Option<&Path>| {
-            let shut = site.closed_folds(keep);
+            let shut = site.default_folds(keep);
             if gantt { site.gantt_shut = shut } else { site.board_shut = shut }
         };
         seed(&mut self.site, keep(Seat::Here));
@@ -5521,7 +5503,7 @@ impl App {
     /// - 보드·간트 → 목록: **같은 디렉터리에 남고** 그 줄을 품은 폴더를 연다. 그 줄의 집으로 들어가면(`land`)
     ///   한 번 오간 것만으로 뿌리의 보드가 에픽 하나의 보드로 줄어 돌아온다. 간트는 제 펼침을 따로 들어
     ///   목록이 접어 둔 폴더 안의 줄에도 커서가 설 수 있다 — 그 폴더만 연다
-    /// - → 보드·간트: 닫힌 묶음을 접은 채 선다([`App::seed_folds`]). 고른 줄을 품은 묶음은 열어 둔다. 목록의 접기는
+    /// - → 보드·간트: 닫힌 마일스톤을 접은 채 선다([`App::seed_folds`]). 고른 줄을 품은 묶음은 열어 둔다. 목록의 접기는
     ///   건드리지 않는다
     ///
     /// 굴린 자리는 첫 줄로 돌린다 — 목록의 줄 수와 보드 캔버스의 줄 수는 다른 자다. 화면을 떼어 둔 줄
@@ -5639,24 +5621,22 @@ impl App {
         }
     }
 
-    fn board_fold_at(&self, rows: &[Row]) -> Option<(Seat, Path, bool)> {
+    fn board_fold_at(&self, rows: &[Row]) -> Option<(Seat, Path)> {
         if !self.board() {
             return None;
         }
         let row = rows.get(self.cursor)?;
-        let Row::Item(seat, Entry::Dir { seg, at }, _) = row else { return None };
+        let Row::Item(seat, Entry::Dir { seg, .. }, _) = row else { return None };
         let site = self.site_of_seat(*seat)?;
-        let lane = site.path.is_empty() && matches!(seg, Seg::Milestone(_) | Seg::Lost);
-        let epic = at.is_some_and(|n| site.issues.get(n).is_some_and(|i| i.kind == Kind::Epic && site.closed(n)));
-        if !lane && !epic {
+        if !site.path.is_empty() || !matches!(seg, Seg::Milestone(_) | Seg::Lost) {
             return None;
         }
         let (_, path) = self.dir_of(Some(row.clone()))?;
-        Some((*seat, path, lane))
+        Some((*seat, path))
     }
 
     fn board_fold(&mut self, rows: &[Row], open: Option<bool>) {
-        let Some((seat, path, _lane)) = self.board_fold_at(rows) else { return };
+        let Some((seat, path)) = self.board_fold_at(rows) else { return };
         let Some(site) = self.site_mut(seat) else { return };
         let is_open = !site.board_shut.contains(&path);
         let want = open.unwrap_or(!is_open);
@@ -5771,13 +5751,13 @@ impl App {
         let Some(site) = self.site_mut(seat) else { return };
         if gantt {
             site.gantt_shut.clear();
-            for path in site.closed_dirs(&Path::new()) {
+            for path in site.default_fold_dirs(&Path::new()) {
                 site.set_open(true, path, false);
             }
             return;
         }
         let dirs: Vec<Path> = (0..site.issues.len())
-            .filter(|&n| site.index.is_dir(&site.issues, n) && !site.closed(n))
+            .filter(|&n| site.index.is_dir(&site.issues, n) && !site.starts_folded(n))
             .map(|n| site.index.dir_path(&site.issues, n))
             .collect();
         site.expanded.extend(dirs);
@@ -5852,7 +5832,7 @@ impl App {
                 .descendants(&path)
                 .into_iter()
                 .filter(|&at| site.index.is_dir(&site.issues, at))
-                .map(|at| (site.index.dir_path(&site.issues, at), site.closed(at)))
+                .map(|at| (site.index.dir_path(&site.issues, at), site.starts_folded(at)))
                 .collect();
             under.push((path, false));
             for (p, closed) in under {
@@ -5885,7 +5865,7 @@ impl App {
             .index
             .descendants(&path)
             .into_iter()
-            .filter(|&at| site.index.is_dir(&site.issues, at) && !site.closed(at))
+            .filter(|&at| site.index.is_dir(&site.issues, at) && !site.starts_folded(at))
             .map(|at| site.index.dir_path(&site.issues, at))
             .collect();
         site.expanded.extend(under);
@@ -6071,12 +6051,8 @@ impl App {
             // 접는다. 그래서 머리줄의 갈래가 보드의 옆 칸보다 먼저다.
             B::Expand if self.head_at(&rows).is_some() => self.unfold(&rows, false),
             B::Collapse if self.head_at(&rows).is_some() => self.fold(&rows),
-            B::Expand if self.board_fold_at(&rows).is_some_and(|(_, _, lane)| lane) => {
-                self.board_fold(&rows, Some(true))
-            }
-            B::Collapse if self.board_fold_at(&rows).is_some_and(|(_, _, lane)| lane) => {
-                self.board_fold(&rows, Some(false))
-            }
+            B::Expand if self.board_fold_at(&rows).is_some() => self.board_fold(&rows, Some(true)),
+            B::Collapse if self.board_fold_at(&rows).is_some() => self.board_fold(&rows, Some(false)),
             B::Expand if self.board() => self.board_step(board::Go::Side(keys::Side::Right), &rows),
             B::Collapse if self.board() => self.board_step(board::Go::Side(keys::Side::Left), &rows),
             B::Expand => self.expand(&rows),
@@ -7225,34 +7201,36 @@ mod tests {
     }
 
     #[test]
-    fn tab_leaves_closed_epics_folded_but_opens_the_selected_group() {
+    fn tab_opens_closed_epics_with_other_descendants() {
         let mut a = grouped_for_folding();
         assert!(a.site.closed(1));
         assert!(!a.site.closed(2));
         a.hit("Tab");
         let closed = a.site.index.dir_path(&a.site.issues, 1);
         let running = a.site.index.dir_path(&a.site.issues, 2);
-        assert!(!a.site.expanded.contains(&closed));
+        assert!(a.site.expanded.contains(&closed));
         assert!(a.site.expanded.contains(&running));
         let rows = a.rows();
         a.cursor = rows.iter().position(|r| matches!(r, Row::Item(_, e, _) if e.at() == Some(1))).unwrap();
         a.hit("Tab");
-        assert!(a.site.expanded.contains(&closed), "Tab on the closed epic must open that epic");
+        assert!(!a.site.expanded.contains(&closed), "Tab on an open epic folds it by hand");
+        a.hit("Tab");
+        assert!(a.site.expanded.contains(&closed), "Tab on the closed epic must reopen it");
     }
 
     #[test]
-    fn gantt_enters_with_closed_epics_folded_and_keeps_manual_opening() {
+    fn gantt_enters_with_closed_epics_open_and_keeps_manual_folding() {
         let mut a = grouped_for_folding();
         a.hit("SPC g g");
         let closed = a.site.index.dir_path(&a.site.issues, 1);
-        assert!(a.site.gantt_shut.contains(&closed));
+        assert!(!a.site.gantt_shut.contains(&closed));
         let rows = a.rows();
         a.cursor = rows.iter().position(|r| matches!(r, Row::Item(_, e, _) if e.at() == Some(1))).unwrap();
-        a.hit("l");
-        assert!(!a.site.gantt_shut.contains(&closed));
+        a.hit("h");
+        assert!(a.site.gantt_shut.contains(&closed));
         let issues = a.site.issues.clone();
         a.adopt(issues);
-        assert!(!a.site.gantt_shut.contains(&closed), "reload folded a group opened by the person");
+        assert!(a.site.gantt_shut.contains(&closed), "reload reopened a group folded by the person");
         let mut issues = a.site.issues.clone();
         issues[4].status = Status::new(crate::config::DONE);
         issues[4].done_at = Some(crate::model::now());
@@ -7296,7 +7274,7 @@ mod tests {
     }
 
     #[test]
-    fn board_closed_milestone_and_epic_open_in_two_steps() {
+    fn board_closed_milestone_opens_to_member_cards() {
         let mut done = member("argos-0002", "argos-0001");
         done.status = Status::new(crate::config::DONE);
         done.done_at = Some(crate::model::now());
@@ -7306,13 +7284,14 @@ mod tests {
         a.hit("SPC g b");
         let lane = a.site.index.dir_path(&a.site.issues, 0);
         let epic = a.site.index.dir_path(&a.site.issues, 1);
-        assert!(a.site.board_shut.contains(&lane) && a.site.board_shut.contains(&epic));
+        assert!(a.site.board_shut.contains(&lane));
+        assert!(!a.site.board_shut.contains(&epic));
         assert_eq!(row_ids(&a), ["argos-0000"]);
         assert_eq!(a.laid(&a.rows()).plan.cards[0].column, None);
         a.hit("Tab");
-        assert_eq!(row_ids(&a), ["argos-0000", "argos-0001"]);
+        assert_eq!(row_ids(&a), ["argos-0000", "argos-0002"]);
         a.hit("j Tab");
-        assert_eq!(row_ids(&a), ["argos-0000", "argos-0001", "argos-0002"]);
+        assert_eq!(row_ids(&a), ["argos-0000", "argos-0002"], "Tab on a work card is quiet");
         assert!(!a.site.board_shut.contains(&epic));
         assert!(a.site.expanded.is_empty(), "board folding changed list expansion");
         a.hit("SPC g l");
@@ -7350,7 +7329,7 @@ mod tests {
     }
 
     #[test]
-    fn a_deferred_member_of_a_folded_epic_keeps_its_board_card() {
+    fn closed_epic_done_and_deferred_members_keep_their_board_cards() {
         let mut done = member("argos-0002", "argos-0001");
         done.status = Status::new(crate::config::DONE);
         done.done_at = Some(crate::model::now());
@@ -7363,38 +7342,44 @@ mod tests {
         a.see();
         a.hit("SPC g b Tab");
         assert!(a.site.closed(1));
-        assert_eq!(board_card_ids(&a), ["argos-0001", "argos-0003"]);
-        assert!(!board_card_ids(&a).contains(&"argos-0002".into()));
+        assert_eq!(board_card_ids(&a), ["argos-0002", "argos-0003"]);
+        assert!(!board_card_ids(&a).contains(&"argos-0001".into()));
     }
 
-    /// Inside a folded closed epic the epic is the folder, not a card — nothing could open it again, so its fold must
-    /// not hide its done members there (review moai-mkzo.8wa).
+    /// An epic is never a board card; its done member stands in the done column.
     #[test]
-    fn entering_a_folded_closed_epic_on_the_board_shows_its_done_cards() {
+    fn closed_epic_is_not_a_board_card() {
         let mut done = member("argos-0002", "argos-0001");
         done.status = Status::new(crate::config::DONE);
         done.done_at = Some(crate::model::now());
         let mut epic = make("argos-0001", Kind::Epic);
         epic.milestone = Some("argos-0000".into());
         let mut a = App::new(vec![make("argos-0000", Kind::Milestone), epic, done], cfg(), Path::new());
-        a.hit("SPC g b Tab j");
-        assert_eq!(on_id(&a), "argos-0001");
-        let epic = a.site.index.dir_path(&a.site.issues, 1);
-        assert!(a.site.board_shut.contains(&epic), "the premise — the closed epic is folded");
-        a.hit("Enter");
-        assert_eq!(a.site.path, epic);
-        assert_eq!(board_card_ids(&a), ["argos-0002"], "the folded epic's own board hid its done member");
+        a.hit("SPC g b Tab");
+        assert_eq!(board_card_ids(&a), ["argos-0002"]);
+        assert!(!a.site.board_shut.contains(&a.site.index.dir_path(&a.site.issues, 1)));
     }
 
-    /// A saved `layout = "board"` is an entry like `SPC g b` — closed groups start folded (review moai-mkzo.8wa).
+    /// A saved `layout = "board"` is an entry like `SPC g b` — closed milestones start folded.
     #[test]
-    fn a_saved_board_layout_seeds_the_closed_folds() {
+    fn a_saved_board_layout_seeds_only_closed_milestone_folds() {
         let mut a = grouped_for_folding();
+        let mut issues = a.site.issues.clone();
+        issues[4].status = Status::new(crate::config::DONE);
+        issues[4].done_at = Some(crate::model::now());
+        a.adopt(issues);
         let look = crate::user_config::Look { layout: Some("board".into()), ..Default::default() };
         a.adopt_look(&look, Vec::new());
         assert!(a.board());
-        assert!(a.site.board_shut.contains(&a.site.index.dir_path(&a.site.issues, 1)), "the closed epic started open");
-        assert!(!a.site.board_shut.contains(&a.site.index.dir_path(&a.site.issues, 2)), "an open epic was folded");
+        assert!(a.site.board_shut.contains(&a.site.index.dir_path(&a.site.issues, 0)), "closed milestone did not fold");
+        assert!(
+            !a.site.board_shut.contains(&a.site.index.dir_path(&a.site.issues, 1)),
+            "the closed epic started folded"
+        );
+        assert!(
+            !a.site.board_shut.contains(&a.site.index.dir_path(&a.site.issues, 2)),
+            "another closed epic was folded"
+        );
     }
 
     /// The archive answers are measured once per clock for every row — a reread hands in a fresh `Ground`, and
