@@ -98,6 +98,12 @@ enum Stop {
     Refused(Trouble),
 }
 
+enum ConfigWriteStop {
+    Lock(Stop),
+    Config(crate::config::Refused),
+    Failed(Fail),
+}
+
 impl Stop {
     /// 고른 말로 편 실패 — **코드는 갈래가 쥔다**([`Trouble::code`]). 여기서 하나로 뭉치면 태그 오타가
     /// "파일이 깨졌다" 로 나간다. 말은 이 자리에서야 묻는다.
@@ -129,6 +135,39 @@ pub struct Repo {
 }
 
 impl Repo {
+    /// The only repository-config write path: lock, reread, edit one flat key,
+    /// parse the result, then atomically replace the file. It writes no journal.
+    /// The caller replaces its held `Repo::config` with the returned value.
+    pub fn set_archive_days(&self, days: i64, lang: impl Fn() -> crate::i18n::Lang) -> R<(Config, i64)> {
+        let result = (|| -> Result<(Config, i64), ConfigWriteStop> {
+            let home = crate::held::Home::of(&self.root);
+            let _lock = Lock::inside(&lock_at(&self.root), &home).map_err(ConfigWriteStop::Lock)?;
+            let path = self.dir().join("config.toml");
+            let refused = |why| ConfigWriteStop::Config(crate::config::Refused { at: path.clone(), why });
+            let src = crate::held::read_inside(&path, &home).map_err(|fell| {
+                refused(match fell {
+                    crate::held::Fell::Unheld(why) => crate::config::Trouble::Held(why),
+                    crate::held::Fell::Io(e) => crate::config::Trouble::Unreadable { said: e.to_string() },
+                })
+            })?;
+            let old = Config::parse(&src).map_err(refused)?;
+            let edited = crate::config::set_flat(&src, crate::config::ARCHIVE_KEY, days).map_err(refused)?;
+            let new = Config::parse(&edited).map_err(refused)?;
+            if new.archive_days != days {
+                return Err(ConfigWriteStop::Failed(Fail::new("archive_days was not changed by the config editor")));
+            }
+            if edited != src {
+                write_atomic_inside(&path, edited.as_bytes(), &self.root).map_err(ConfigWriteStop::Failed)?;
+            }
+            Ok((new, old.archive_days))
+        })();
+        result.map_err(|stop| match stop {
+            ConfigWriteStop::Lock(stop) => stop.said(&lang),
+            ConfigWriteStop::Config(why) => Fail::coded(crate::view::config_refused(lang(), &why), why.why.code()),
+            ConfigWriteStop::Failed(fail) => fail,
+        })
+    }
+
     /// 시험과 딴 자리를 여는 쪽이 쓰는 생성자 — 옮겨 온 것이 아니다.
     pub fn at(root: PathBuf, config: Config) -> Repo {
         Repo { root, config, moved_from: None }
@@ -3682,6 +3721,101 @@ mod tests {
         let root = scratch(name);
         let config = Config::load(&root).unwrap();
         (Repo::at(root.to_path_buf(), config), root)
+    }
+
+    #[test]
+    fn set_config_writes_the_value_and_returns_the_new_config() {
+        let (r, d) = repo("set-config");
+        let path = d.join(".moai/config.toml");
+        std::fs::write(&path, "# keep\nprefix = \"argos\"\n[models]\ncodex = \"old\"\n").unwrap();
+        let (new, old) = r.set_archive_days(30, || crate::i18n::Lang::En).unwrap();
+        assert_eq!((old, new.archive_days), (14, 30));
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "# keep\nprefix = \"argos\"\narchive_days = 30\n[models]\ncodex = \"old\"\n"
+        );
+        assert!(r.journal_of("argos-4aex").is_empty());
+        assert!(!r.journal_dir().exists(), "a config edit wrote a journal directory");
+        let before = std::fs::read(&path).unwrap();
+        assert_eq!(r.set_archive_days(30, || crate::i18n::Lang::En).unwrap().1, 30);
+        assert_eq!(std::fs::read(&path).unwrap(), before);
+    }
+
+    #[test]
+    fn set_config_leaves_a_broken_file_alone() {
+        let (r, d) = repo("set-config-broken");
+        let path = d.join(".moai/config.toml");
+        let broken = b"prefix = \"argos\"\n[models]\narchive_days = 7\n";
+        std::fs::write(&path, broken).unwrap();
+        assert!(r.set_archive_days(30, || crate::i18n::Lang::En).is_err());
+        assert_eq!(std::fs::read(path).unwrap(), broken);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn set_config_refuses_a_link_out_of_the_checkout() {
+        use std::os::unix::fs::symlink;
+        let (r, d) = repo("set-config-link");
+        let path = d.join(".moai/config.toml");
+        let outside = Scratch::new("set-config-outside");
+        let target = outside.join("config.toml");
+        let bytes = b"prefix = \"argos\"\n";
+        std::fs::write(&target, bytes).unwrap();
+        std::fs::remove_file(&path).unwrap();
+        symlink(&target, &path).unwrap();
+        assert!(r.set_archive_days(30, || crate::i18n::Lang::En).is_err());
+        assert_eq!(std::fs::read(target).unwrap(), bytes);
+    }
+
+    #[test]
+    fn concurrent_config_and_snapshot_writes_lose_nothing() {
+        use std::sync::Arc;
+        let (r, d) = repo("set-config-concurrent");
+        let r = Arc::new(r);
+        let first = {
+            let r = Arc::clone(&r);
+            std::thread::spawn(move || r.set_archive_days(30, || crate::i18n::Lang::En).unwrap().1)
+        };
+        let second = {
+            let r = Arc::clone(&r);
+            std::thread::spawn(move || r.set_archive_days(40, || crate::i18n::Lang::En).unwrap().1)
+        };
+        let snapshot = {
+            let r = Arc::clone(&r);
+            std::thread::spawn(move || {
+                r.with_write(
+                    || crate::i18n::Lang::En,
+                    |rows, _, _| {
+                        rows.push(issue("argos-4aex"));
+                        Ok((Vec::new(), ()))
+                    },
+                )
+                .unwrap()
+            })
+        };
+        let old = [first.join().unwrap(), second.join().unwrap()];
+        snapshot.join().unwrap();
+        assert!(
+            old.contains(&14) && (old.contains(&30) || old.contains(&40)),
+            "both config writes must observe a serial order: {old:?}"
+        );
+        let final_config = Config::load(d.path()).unwrap();
+        assert_eq!(final_config.archive_days, if old[0] == 14 { 40 } else { 30 });
+        assert_eq!(r.read().unwrap().issues.iter().map(|i| i.id.as_str()).collect::<Vec<_>>(), ["argos-4aex"]);
+    }
+
+    #[test]
+    fn set_config_in_a_linked_worktree_writes_the_root_file() {
+        let (r, root) = repo("set-config-linked");
+        let sibling = Scratch::new("set-config-linked-sibling");
+        std::fs::create_dir_all(sibling.join(".moai")).unwrap();
+        let sibling_file = sibling.join(".moai/config.toml");
+        std::fs::write(&sibling_file, "prefix = \"argos\"\narchive_days = 5\n").unwrap();
+        let moved = Repo::moved(r.root.clone(), r.config.clone(), sibling.path().to_path_buf());
+        assert_eq!(moved.here(), sibling.path());
+        moved.set_archive_days(30, || crate::i18n::Lang::En).unwrap();
+        assert_eq!(Config::load(root.path()).unwrap().archive_days, 30);
+        assert_eq!(std::fs::read_to_string(sibling_file).unwrap(), "prefix = \"argos\"\narchive_days = 5\n");
     }
 
     #[test]
