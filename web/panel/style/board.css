@@ -1,12 +1,28 @@
 /*
  * What a card of the kanban holds (view/board.ts): id, priority and count on one line, the title, and the chips
- * of the columns that are on. The lanes, the column heads and the card box are components.css (look-and-feel 5.7).
+ * of the columns that are on, plus the first-line band and which columns carry it. The lanes, the column heads
+ * and the card box are components.css (look-and-feel 5.7).
  * Needs tokens.css and components.css.
  */
 .m-card-line { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; min-width: 0; }
+/* Every card keeps this geometry, including plain columns. Only the lane supplies colour. */
+.m-card > .m-card-line:first-child {
+  margin: -8px -10px 0; padding: 5px 10px 3px;
+  border-radius: var(--radius-card) var(--radius-card) 0 0;
+  background: var(--band, transparent);
+  border-bottom: 1px solid var(--edge, transparent);
+}
+/* The band covers the selected card's inset ring, so draw its top and sides on the band. */
+.m-card[aria-selected="true"] > .m-card-line:first-child {
+  border-top: 1px solid var(--accent); border-left: 1px solid var(--accent); border-right: 1px solid var(--accent);
+  padding: 4px 9px 3px;
+}
+.m-lane[data-status="in_progress"] { --band: var(--progress-band); --edge: var(--progress-edge); }
+.m-lane[data-status="review"] { --band: var(--review-band); --edge: var(--review-edge); }
+.m-lane[data-status="done"] { --band: var(--done-band); --edge: var(--done-edge); }
 /* A chip on a card (an epic's name, an assignee, a tag) stays inside the card: one line, cut with an ellipsis, the
    whole name in its title (moai-rqec). Upstream's inline-flex chip cannot ellipsize its text, so it ran past the
    card's edge with a long epic name. */
 .m-card-line > .m-chip { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; line-height: 20px; }
 .m-card-line .m-id, .m-card-line .m-count { font: 12px var(--mono); color: var(--muted); }
-.m-card-title { margin-top: 2px; overflow-wrap: anywhere; }
+.m-card-title { margin-top: 5px; overflow-wrap: anywhere; }

@@ -70,6 +70,22 @@ impl Drop for Scratch {
     }
 }
 
+thread_local! {
+    // libtest 는 시험마다 별도 스레드를 쓴다. 첫 isolated 호출에 울타리를 만들고 스레드가 끝날 때
+    // Scratch::drop 이 설정 곁의 파일까지 걷는다(패닉으로 풀릴 때도). 보조 스레드도 각자 제 울타리를 쓴다 —
+    // 보조 스레드끼리 설정 곁의 파일을 나눠 봐야 하는 시험은 `config_of` 로 읽은 자리를 `MOAI_CONFIG` 로 건넨다.
+    // 메인 스레드의 TLS 소멸자는 프로세스 종료 때 돌지 않는다. libtest 가 시험을 메인 스레드에서 돌리는 판
+    // (스레드를 못 띄워 `WouldBlock` 으로 떨어진 판, `-Zpanic-abort-tests` 의 자식 프로세스)에서는 울타리가 남는다.
+    //
+    // **이름에 셈을 넣는다.** `Scratch::new` 는 pid·시각·이름으로 자리를 짓고 겹치면 크게 실패하는데, 모든 시험
+    // 스레드가 같은 이름으로 울타리를 지으니 시계 한 칸(macOS 의 `SystemTime` 은 µs) 안에 둘이 지으면 `create_dir`
+    // 이 "File exists" 로 넘어진다. 시험마다 다른 이름을 주던 `init(name)` 과 달리 여기는 이름이 하나뿐이다.
+    static CONFIG_FENCE: Scratch = {
+        static NTH: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        Scratch::new(&format!("config-fence-{}", NTH.fetch_add(1, std::sync::atomic::Ordering::Relaxed)))
+    };
+}
+
 // 링크를 푼 자리 — Windows 의 `\\?\` 까지 걷은, 도구가 내는 철자다(moai-lag7.rrm). 시험이 도구의 철자와 견줄 때 쓴다.
 // 시험 크레이트라 `path::canonical` 을 못 들여, `#[path]` 로 함께 든 `scratch` 의 같은 자를 쓴다 — 여기 베껴 두던
 // 두 벌째를 걷었다(moai-lag7.482). 유닉스에서는 `std::fs::canonicalize` 그대로다.
@@ -149,10 +165,12 @@ fn temp_at(cmd: &mut Command, dir: impl AsRef<std::ffi::OsStr>) -> &mut Command 
 /// 시험이 제 값을 주려면 이 뒤에 `.env` 로 덮는다. `PATH` 는 두고 간다 — moai 가
 /// git 을 부르고, `claude` 가 없는 자리가 필요한 시험은 `Claude` 가 따로 만든다.
 fn isolated(program: impl AsRef<std::ffi::OsStr>) -> Command {
-    // 빈 집 하나를 모든 시험이 함께 쓴다. moai 도 git 도 `HOME` 에 쓰지 않으니
-    // 비어 있는 채로 남고, `target/` 밑이라 기계에 부스러기를 흘리지 않는다.
+    // HOME 은 시험용 한 자리로 고정하고 **모든 시험이 함께 쓴다** — 울타리는 사용자 설정에만 선다.
+    // 사용자 설정은 CONFIG_FENCE 의 시험 스레드별 자리로 갈라 두므로, 설정 곁에 쓰는 read/·picks/ 도
+    // 시험이 끝나면 함께 걷힌다. 시험이 뒤에 준 `MOAI_CONFIG` 는 울타리 밖이라 그 시험의 Scratch 안에 둔다.
     let home = Path::new(env!("CARGO_TARGET_TMPDIR")).join("moai-cli-home");
     std::fs::create_dir_all(&home).unwrap();
+    let config = CONFIG_FENCE.with(|fence| fence.path().join("config.toml"));
     let mut cmd = Command::new(program);
     // **걷기가 먼저다.** `Command` 의 환경은 이름마다 마지막에 부른 것이 이긴다 —
     // 아래 `.env` 보다 뒤에 두면, 목록에 `GIT_CONFIG_GLOBAL` 같은 이름이 느는 날
@@ -175,10 +193,10 @@ fn isolated(program: impl AsRef<std::ffi::OsStr>) -> Command {
         // 일부러 갈라 놓는 시험만 이것을 켠다([`ok_here`]) — 새면 워크트리의 쓰기가 루트로 안 간다.
         .env_remove("MOAI_HERE")
         .env_remove("COLUMNS")
-        // 사용자 설정은 **없는 파일**을 가리킨다. 등록한 프로젝트가 새면 `.moai`
-        // 밖에서 부르는 시험이 돌리는 사람의 프로젝트를 본다. `XDG_CONFIG_HOME` 도
-        // 걷는다 — `MOAI_CONFIG` 를 덮어쓴 시험이 그것을 지우면 그다음 자리다.
-        .env("MOAI_CONFIG", home.join("moai-config-unset/config.toml"))
+        // 사용자 설정은 시험 스레드의 울타리 안 **없는 파일**을 가리킨다. 호출자가 뒤에
+        // `MOAI_CONFIG` 를 주면 그 값이 이긴다. `XDG_CONFIG_HOME` 도 걷어야 설정을
+        // 덮어쓴 시험이 그것을 지웠을 때 사람의 설정으로 되돌아가지 않는다.
+        .env("MOAI_CONFIG", config)
         .env_remove("XDG_CONFIG_HOME")
         // 키 파일(moai-aqmg)도 사람의 것이 새면 안 된다 — `--help` 가 그 키로 그려져 도움말을 재는 시험이 돌리는
         // 사람마다 달라진다. 걷으면 위의 없는 설정 곁(`keys.toml`)을 보니 기본 키다.
@@ -8853,9 +8871,9 @@ const JSON_SWEEP: &[&str] = &[
     "epic",
     "milestone",
     "backlog",
-    // 사용자 설정을 고친다. `add`·`rm` 은 제 설정 파일로 따로 부른다 — 공용 집에 쓰면 안 된다.
+    // 사용자 설정을 고친다. `add`·`rm` 은 쓴 자리를 알 수 있도록 제 설정 파일로 따로 부른다.
     "project",
-    // 읽음도 사용자 설정에 적는다. 시험의 `MOAI_CONFIG` 는 그 시험만의 임시 자리다.
+    // 읽음도 사용자 설정 곁에 적는다. `isolated` 가 시험마다 울타리를 준다.
     "read",
     // git 이 주는 임시 파일 셋을 받는다. 훑기는 깨끗이 합쳐지는 판으로만 부른다 —
     // 충돌은 종료 코드가 0 이 아닌 것이 계약이라 `ok` 로는 못 부른다.
@@ -8923,22 +8941,100 @@ fn read_sheets(cfg: &std::path::Path, root: &std::path::Path) -> Vec<(PathBuf, S
     // `TMPDIR` 이 링크인 기계에서는 시험이 든 철자와 파일에 적힌 철자가 갈린다 — 여기서 풀지 않으면
     // 다섯 단언이 제품이 아니라 임시 자리의 철자 때문에 붉다. 어느 뿌리의 것인지를 보는 힘은 그대로다.
     let real = canon(root).unwrap_or_else(|e| panic!("{}: {e}", root.display()));
-    let mine = format!("path = {:?}", real.display().to_string());
-    // TOML 은 `\` 를 품은 글을 따옴표 하나(`'…'`)로 적기도 한다 — Windows 의 자리가 늘 그 꼴이다(moai-lag7.rrm).
-    // 유닉스의 시험 자리에는 `\` 가 없어 앞의 꼴만 선다.
-    let literal = format!("path = '{}'", real.display());
     files
         .into_iter()
         .map(|p| {
             let text = std::fs::read_to_string(&p).expect("방금 본 파일이다");
-            assert!(
-                text.contains(&mine) || text.contains(&literal),
-                "{} 의 읽음이 아닌 파일이 곁에 섰다 — {text}",
-                root.display()
-            );
+            assert!(sheet_of(&text, &real), "{} 의 읽음이 아닌 파일이 곁에 섰다 — {text}", root.display());
             (p, text)
         })
         .collect()
+}
+
+/// 읽음 파일 한 장이 링크를 푼 뿌리 `real` 의 것인가 — 파일마다 제 뿌리를 `path` 로 적는다.
+fn sheet_of(text: &str, real: &Path) -> bool {
+    let mine = format!("path = {:?}", real.display().to_string());
+    // TOML 은 `\` 를 품은 글을 따옴표 하나(`'…'`)로 적기도 한다 — Windows 의 자리가 늘 그 꼴이다(moai-lag7.rrm).
+    // 유닉스의 시험 자리에는 `\` 가 없어 앞의 꼴만 선다.
+    let literal = format!("path = '{}'", real.display());
+    text.contains(&mine) || text.contains(&literal)
+}
+
+/// 격리된 명령이 받은 설정 파일 자리. 실행 전에도 알 수 있으므로 쓰인 파일을 시험 울타리에서만 찾는다.
+fn config_of(cmd: &Command) -> PathBuf {
+    let (_, value) =
+        cmd.get_envs().find(|(key, _)| *key == std::ffi::OsStr::new("MOAI_CONFIG")).expect("MOAI_CONFIG 를 안 줬다");
+    PathBuf::from(value.expect("MOAI_CONFIG 를 걷었다"))
+}
+
+#[test]
+fn the_fence_holds_a_tests_read_marks_and_no_shared_path_does() {
+    let s = init("fenced-read");
+    let cfg = config_of(&staged(&[]));
+    let id = field(&ok(s.path(), &["add", "fenced", "--json"]), "id");
+    ok(s.path(), &["read", &id]);
+
+    let sheets = read_sheets(&cfg, s.path());
+    assert_eq!(sheets.len(), 1, "읽음 파일이 제 울타리 안에 하나여야 한다: {sheets:?}");
+    assert!(sheets[0].1.contains(&id), "읽음 파일에 적힌 id 가 다르다: {sheets:?}");
+    // 옛 공유 자리에서는 이 시험의 뿌리에 관한 읽음이 없어야 한다. 사람의 설정 자리는 보지 않는다.
+    // **남의 뿌리 것은 거르기만 한다** — `read_sheets` 는 곁의 남의 파일에 넘어지는데, 이 자리에는 울타리 전의
+    // 판(9c624dd1 전에는 판마다 510장)이 남긴 읽음이 `target/tmp` 와 함께 남는다. CI 는 `target` 을 통째로 캐시한다.
+    let old_read = Path::new(env!("CARGO_TARGET_TMPDIR")).join("moai-cli-home/moai-config-unset/read");
+    let real = canon(s.path()).unwrap();
+    let leaked: Vec<PathBuf> = std::fs::read_dir(&old_read)
+        .into_iter()
+        .flatten()
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| std::fs::read_to_string(p).is_ok_and(|text| sheet_of(&text, &real)))
+        .collect();
+    assert!(leaked.is_empty(), "옛 공유 설정 자리에 이 시험의 읽음이 남았다: {leaked:?}");
+}
+
+/// 끝까지 간 시험도, **패닉으로 넘어진 시험도** 울타리를 걷는다. 패닉한 스레드는 std 가 그 패닉을 받아
+/// 정상으로 끝나므로 TLS 소멸자가 돈다 — 그것을 실제로 넘어지는 스레드로 잰다.
+#[test]
+fn the_fence_is_gone_when_its_test_ends() {
+    for fails in [false, true] {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let joined = std::thread::spawn(move || {
+            let s = init("fence-thread-exit");
+            let cfg = config_of(&staged(&[]));
+            let id = field(&ok(s.path(), &["add", "fenced", "--json"]), "id");
+            ok(s.path(), &["read", &id]);
+            assert!(cfg.parent().unwrap().is_dir(), "읽음이 적힌 울타리가 없다");
+            assert_eq!(read_sheets(&cfg, s.path()).len(), 1, "읽음이 울타리 밖에 적혔다");
+            tx.send(cfg).unwrap();
+            if fails {
+                panic!("fence unwind probe");
+            }
+        })
+        .join();
+        // 보내기 전에 넘어졌으면 그 패닉을 그대로 올린다 — 아래 단언이 까닭을 가리지 않게.
+        let cfg = match rx.try_recv() {
+            Ok(cfg) => cfg,
+            Err(_) => std::panic::resume_unwind(joined.expect_err("울타리 자리를 안 보내고 끝났다")),
+        };
+        assert_eq!(joined.is_err(), fails, "시험 스레드가 뜻한 대로 끝나지 않았다");
+        assert!(
+            !cfg.parent().unwrap().exists(),
+            "시험 스레드가 끝났는데 울타리가 남았다(패닉 {fails}): {}",
+            cfg.display()
+        );
+    }
+}
+
+#[test]
+fn two_tests_do_not_share_a_fence() {
+    let first = std::thread::spawn(|| config_of(&staged(&[])));
+    let second = std::thread::spawn(|| config_of(&staged(&[])));
+    let first = first.join().unwrap();
+    let second = second.join().unwrap();
+    assert_ne!(first, second, "서로 다른 시험 스레드가 설정 울타리를 함께 쓴다");
+    assert!(
+        !first.parent().unwrap().exists() && !second.parent().unwrap().exists(),
+        "시험 스레드 뒤에 울타리가 남았다"
+    );
 }
 
 /// **읽음은 내 설정 곁에만 적힌다**(moai-u8oh 사용자 결정, 자리는 moai-omx7 이 프로젝트마다로 갈랐다) —
@@ -9516,7 +9612,7 @@ fn every_command_still_speaks_json() {
         // 장부를 읽기만 한다. `uninstall` 은 `claude` 를 부르므로 훑지 않는다 —
         // 가짜 `claude` 로 따로 본다 (`skill_*` 시험).
         vec!["skill", "status", "--json"],
-        // 공용 설정(없는 파일)을 읽기만 한다.
+        // `isolated` 의 시험별 설정(없는 파일)을 읽기만 한다.
         vec!["project", "ls", "--json"],
         // 위키를 읽기만 한다 — 이 판에는 `docs/` 가 없어 `no_dir` 객체 하나와 0 이다.
         vec!["wiki", "ls", "--json"],
@@ -9536,8 +9632,8 @@ fn every_command_still_speaks_json() {
     // 위 시험은 초록인데 그 명령의 `--json` 은 아무도 안 본 것이 된다 —
     // 없는 안전망을 있다고 믿는 것이 제일 나쁘다.
     // `init` 과 `add` 는 위에서 바탕을 세우며 이미 `--json` 으로 부른다.
-    // `read` 는 **제 설정 파일로** 여기서 따로 부른다 — 공용 집의 없는 파일에 쓰면 그 격리가 깨진다
-    // (`project add`·`rm` 과 같은 까닭). 무엇을 적는지는 위의 `read_marks_…` 시험이 본다.
+    // `read` 는 **알려진 설정 자리로** 여기서 따로 부른다 — 곁에 적는 파일을 필요할 때 찾기 쉽다.
+    // 기본 울타리도 시험별로 갈라져 있다. 무엇을 적는지는 위의 `read_marks_…` 시험이 본다.
     let own = s.path().join("sweep-read.toml");
     one_json_value(&ok_with(s.path(), &own, &["read", &id, "--json"]));
     // 머지 드라이버는 git 이 주는 임시 파일 셋을 받는다 — 여기서는 셋을 손으로 놓는다.
@@ -9571,7 +9667,7 @@ fn every_command_still_speaks_json() {
         }
         one_json_value(&ok(s.path(), args));
     }
-    // 쓰는 `project` 동사는 제 설정 파일로 — 공용 집을 비워 둔다.
+    // 쓰는 `project` 동사는 정해 둔 설정 파일로 — 필요할 때 등록 결과를 그 자리에서 본다.
     let config = s.path().join("user-config.toml");
     for args in [
         &["project", "add", ".", "--json"][..],
@@ -16604,8 +16700,8 @@ fn hook_argv(
     if let Some(home) = home {
         cmd.env("HOME", home);
     }
-    // **집기 기록은 사용자 설정 곁에 놓인다**(moai-59k3.yo6) — 시험마다 제 자리를 준다. 모든 시험이 함께
-    // 쓰는 `isolated` 의 자리로 두면 남의 시험이 적은 기록이 한 디렉터리에 쌓인다. 시험이 준 값이 이긴다.
+    // **집기 기록은 사용자 설정 곁에 놓인다**(moai-59k3.yo6) — 이 시험이 `picks/` 를 살펴볼
+    // 자리를 고정한다. `isolated` 의 기본 울타리도 시험마다 따로 서고, 여기서 준 값이 이긴다.
     cmd.env("MOAI_CONFIG", s.path().join("hookcfg").join("config.toml"));
     for (k, v) in env {
         cmd.env(k, v);
@@ -17137,7 +17233,7 @@ fn a_stale_planted_tree_names_the_install_line() {
     assert!(!work.exists());
 
     // Claude 의 트리만 낡았으면 맨 `install` 이다 — 기본이 Claude 다. **진짜 `claude` 에 닿지 않는다**(`Claude` 위의
-    // 머리 주석) — 맨 `moai` 는 PATH 를 물려받아, `claude` 가 깔린 기계에서 시험이 함께 쓰는 빈 집에 등록을 적었다.
+    // 머리 주석) — 예전 맨 `moai` 는 PATH 를 물려받아, `claude` 가 깔린 기계에서 당시의 공유 시험 집에 등록을 적었다.
     // 트리는 `claude` 가 없어도 심긴다.
     let planted = staged(&["skill", "install"]).current_dir(root).env("PATH", "/nonexistent").output().unwrap();
     assert!(
@@ -20363,13 +20459,14 @@ fn the_fake_claude_command_starts_from_the_isolated_one() {
     }
     assert_eq!(set("GIT_CONFIG_GLOBAL"), Some(std::ffi::OsStr::new("/dev/null")));
     assert_eq!(set("GIT_CONFIG_SYSTEM"), Some(std::ffi::OsStr::new("/dev/null")));
-    // 사용자 설정은 공용 빈 집 밑의 **없는** 파일이다. 집을 덮어도 이 자리는 따라가지 않는다.
-    let config = Path::new(set("MOAI_CONFIG").expect("MOAI_CONFIG 를 안 줬다"));
+    // 사용자 설정은 시험 스레드의 울타리 안 **없는** 파일이다. 집을 덮어도 이 자리는 따라가지 않는다.
+    let config = config_of(&cmd);
     assert!(
-        config.starts_with(env!("CARGO_TARGET_TMPDIR")) && !config.exists(),
+        config.starts_with(scratch::base()) && config.parent().is_some_and(Path::is_dir) && !config.exists(),
         "사용자 설정이 격리되지 않았다 — {}",
         config.display()
     );
+    assert!(!config.starts_with(c.home.path()), "가짜 claude 의 집 안에 설정이 섰다 — {}", config.display());
     assert_eq!(set("HOME"), Some(c.home.path().as_os_str()), "집은 가짜 claude 의 것이어야 한다");
     let path = set("PATH").expect("PATH 를 안 줬다").to_string_lossy().into_owned();
     assert!(path.starts_with(&c.bin.display().to_string()), "가짜 claude 가 PATH 앞에 없다 — {path}");
@@ -23535,9 +23632,9 @@ fn outside_a_repo_the_overview_overlays_each_projects_worktrees() {
 
 // ── moai project ────────────────────────────────────────────────────────────
 
-/// **등록 시험은 저마다 제 설정 파일을 쓴다.** [`isolated`] 의 `MOAI_CONFIG` 는
-/// 모든 시험이 함께 쓰는 빈 집 밑이라, 거기에 등록하면 병렬로 도는 시험끼리
-/// 목록이 섞이고 공용 집이 더는 비어 있지 않다(moai-88l8.5ik). 사람도 안 준다 —
+/// **등록 시험은 결과를 살펴볼 수 있도록 제 설정 파일을 지정한다.** [`isolated`] 의
+/// 기본 `MOAI_CONFIG` 도 시험마다 갈라진 울타리다. 이 자리에서는 등록 목록 자체를
+/// 읽어야 하므로 알려진 경로를 쓴다(moai-88l8.5ik). 사람도 안 준다 —
 /// 이력이 남는 파일이 아니라 누군지 묻지 않아야 한다.
 fn project(dir: &Path, config: &Path, args: &[&str]) -> Output {
     isolated(BIN)

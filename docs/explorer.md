@@ -113,7 +113,10 @@ remain readable; if both keys exist, `hide_backlog` wins.
 - **`SPC g b` — the board.** The same rows as a kanban board: backlog, deferred, then
   your columns, with one lane per milestone at the project root. The deferred column
   follows the view — hidden to begin with, back with `SPC v l`. A card that is
-  not yours says whose it is. `h` and `l` go across the columns, `j` and `k` along
+  not yours says whose it is. Cards in the in-progress, review and done columns
+  carry bright yellow, magenta or green bands on their head lines, with black text;
+  other columns, including deferred, stay plain. Solarized maps those bright
+  colours to greys, so the bands are grey there. `h` and `l` go across the columns, `j` and `k` along
   one, and the wheel and `Ctrl-d`/`Ctrl-u` scroll the board without moving the
   cursor. The cursor, filter, view and detail are the list's, so switching keeps
   your place. Titles wrap to the column width, keeping up to 50 Unicode

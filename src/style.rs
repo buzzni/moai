@@ -21,6 +21,25 @@ pub const IN_PROGRESS: Style = fg(AnsiColor::BrightYellow).bold();
 /// **가장 눈에 띄어야 한다** — 게이트를 없앤 대신 여기가 썩는다.
 pub const REVIEW: Style = fg(AnsiColor::BrightMagenta);
 pub const DONE: Style = fg(AnsiColor::Green).dimmed();
+pub const IN_PROGRESS_BAND: Style = fg(AnsiColor::Black).bg_color(Some(Color::Ansi(AnsiColor::BrightYellow)));
+pub const REVIEW_BAND: Style = fg(AnsiColor::Black).bg_color(Some(Color::Ansi(AnsiColor::BrightMagenta)));
+pub const DONE_BAND: Style = fg(AnsiColor::Black).bg_color(Some(Color::Ansi(AnsiColor::BrightGreen)));
+
+/// The band behind a board card's head line in the explorer, by the board column the card stands
+/// in (moai-bg2i) — `None` leaves the head plain. The only place that says which columns carry one.
+///
+/// Only the bright half of the basic 16 colours. Solarized maps these to greys; the status glyph
+/// on the same line still carries the meaning. BrightGreen shares the Green family with a project
+/// hue deliberately: here it is a background with black text, beside the done glyph `✓`, and the
+/// column head above the cards names the column in words.
+pub fn band_style(status: &str) -> Option<Style> {
+    match status {
+        "in_progress" => Some(IN_PROGRESS_BAND),
+        "review" => Some(REVIEW_BAND),
+        "done" => Some(DONE_BAND),
+        _ => None,
+    }
+}
 /// 진행 바의 찬 칸 — 16색 10번(사용자 결정, moai-a46g). `DONE` 과 가른다: 끝난 줄은 흐리게
 /// 물러나야 하고, 바는 눈에 서야 한다.
 pub const BAR: Style = fg(AnsiColor::BrightGreen);
