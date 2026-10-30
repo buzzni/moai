@@ -1,0 +1,1 @@
+The TUI board gives Todo its blue column colour. In-progress, Review and Done cards use black status bands with coloured text; the selected card reverses its band. Issues stand directly in their columns, without epic cards.
