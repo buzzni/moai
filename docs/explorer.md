@@ -33,8 +33,8 @@ directories. Forgot a key? `?` (or `SPC h`) opens [the key list](#the-key-list).
 - `j`/`k` move, `Enter` goes into a milestone or an epic, `Backspace` comes back
   out. Rows you can go into end their title with `/`
 - `l` unfolds a group one step where it stands and `h` folds it; `Tab` unfolds
-  everything under it while leaving closed epics and milestones folded. Press
-  `l` or `Tab` on a closed group to open that group
+  everything under it while leaving closed milestones folded. Closed epics open
+  with other descendants; press `l` or `Tab` on a milestone to open it
 - `gg` and `G` go to the top and the bottom. `Ctrl-d`/`Ctrl-u` scroll half a
   page and `Ctrl-f`/`Ctrl-b` a whole one without moving the cursor: the row you
   chose and its detail stay put even off screen, and the next `j` or `k` brings
@@ -116,16 +116,18 @@ remain readable; if both keys exist, `hide_backlog` wins.
   takes the cursor and shows that milestone's detail; `Enter` opens it. A closed
   milestone lane starts folded, showing its `done/work` count. On its header,
   `h` folds, `l` opens, and `Tab` flips the fold. Clicking its arrow flips it;
-  clicking elsewhere on the header selects it. Closed epics stand as folded
-  cards in done. `Tab` or a click on a card's arrow shows their done members
-  beneath them; members in other columns remain visible. A search reveals
-  matching cards inside folded groups. In the overview, each project's lanes
+  clicking elsewhere on the header selects it. Epics are not board cards; their
+  members stand in their own columns. A search reveals matching cards inside
+  folded milestone lanes. In the overview, each project's lanes
   fold independently. The deferred column
   follows the view — hidden to begin with, back with `SPC v l`. A card that is
   not yours says whose it is. Cards in the in-progress, review and done columns
-  carry bright yellow, magenta or green bands on their head lines, with black text;
-  other columns, including deferred, stay plain. Solarized maps those bright
-  colours to greys, so the bands are grey there. On cards, `h` and `l` go across the columns, `j` and `k` along
+  carry black bands on their head lines, with text in the column's bright yellow,
+  magenta or green colour. The selected card reverses that band, with a column
+  coloured background and black text. Other columns, including deferred, stay
+  plain. Solarized maps those bright colours to greys, so band text is grey
+  there; on a dark theme the black band sits close to the background, and the
+  coloured text and status glyph still name the column. On cards, `h` and `l` go across the columns, `j` and `k` along
   one, and the wheel and `Ctrl-d`/`Ctrl-u` scroll the board without moving the
   cursor. The cursor, filter, view and detail are the list's, so switching keeps
   your place. Titles wrap to the column width, keeping up to 50 Unicode
@@ -183,7 +185,7 @@ what runs late, and what is moving right now. It is the list's layout, not a win
 of its own, so the cursor, filter, view, search and detail carry over and `SPC g l`
 brings you back to the same row.
 
-**Reading it.** Closed epics and milestones start folded; the group holding
+**Reading it.** Closed milestones start folded; epics start open. The group holding
 the selected row stays open. The left column is the
 list's row. On the right, `░` is the planned start to deadline (`▒` on an epic or a
 milestone), `◆` a milestone's own deadline, `█` over it when the work actually ran,
@@ -199,7 +201,7 @@ anywhere, the date side says how to add them: `moai edit <id> --start <day> --du
 
 **Folding.** `h`, `l` and `Tab` fold and unfold inside the gantt only — the list
 keeps the folds it had. A group you open stays open through a reread; entering
-the gantt again folds closed groups afresh.
+the gantt again folds closed milestones afresh.
 
 **Moving the dates.** `=` and `-` zoom in and out (hour, day, week, month), `H` and
 `L` slide one cell, `[` and `]` a page, `t` puts today in the middle and `z` fits
@@ -501,4 +503,4 @@ write there either.
   an email on every write and `git config` had none. The answer holds for this
   run; set `user.name` and `user.email` to stop it asking
 
-Decided in: moai-e9hi moai-724f moai-z46r moai-9nfw moai-47mz moai-irrj moai-ucx8 moai-1hka moai-h2rh moai-gelm moai-m6ni moai-p3r9 moai-o3cb moai-fyul moai-ogaw moai-tllo moai-fc97 moai-jtvp moai-bth3 moai-9tqo moai-wk7i moai-pxiy moai-i4hf moai-lj8g moai-ccow moai-d1zn moai-ekg6 moai-uwi9 moai-mkzo
+Decided in: moai-e9hi moai-724f moai-z46r moai-9nfw moai-47mz moai-irrj moai-ucx8 moai-1hka moai-h2rh moai-gelm moai-m6ni moai-p3r9 moai-o3cb moai-fyul moai-ogaw moai-tllo moai-fc97 moai-jtvp moai-bth3 moai-9tqo moai-wk7i moai-pxiy moai-i4hf moai-lj8g moai-ccow moai-d1zn moai-ekg6 moai-uwi9 moai-mkzo moai-i07x
