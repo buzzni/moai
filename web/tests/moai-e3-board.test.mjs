@@ -167,7 +167,11 @@ test('board bands follow rendered lanes and the card head, including a selected 
     assert.equal(card.querySelectorAll(bandSelector).length, 1)
     assert.match(css, new RegExp(`\\.m-lane\\[data-status="${status}"\\] \\{ --band: var\\(--${token}-band\\); --edge: var\\(--${token}-edge\\); \\}`))
     assert.match(tokens, new RegExp(`--${token}-band: color-mix\\(in srgb, #[0-9A-Fa-f]+ [0-9]+%, var\\(--card-bg\\)\\)`))
+    // A missing edge token leaves the lane's `--edge` invalid, so the hairline falls back to transparent without a word.
+    assert.match(tokens, new RegExp(`--${token}-edge: color-mix\\(in srgb, #[0-9A-Fa-f]+ [0-9]+%, var\\(--card-bg\\)\\)`))
   }
+  // The dark done band stays pale in both dark blocks (OS dark and data-theme="dark"), as --done-soft does.
+  assert.equal(tokens.match(/--done-band: color-mix\(in srgb, #10B981 5%, var\(--card-bg\)\)/g)?.length, 2)
   assert.equal(root.querySelector('[data-id="progress"]').getAttribute('aria-selected'), 'true')
   assert.ok(root.querySelector('.m-lane[data-status="deferred"] [data-id="shelved"]'))
   for (const status of ['todo', 'backlog', 'deferred']) {
