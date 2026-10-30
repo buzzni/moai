@@ -436,10 +436,22 @@ impl App {
             let list = if side.first() { len - front } else { front };
             Some(super::draw::share_for(body, side, list))
         };
-        match (grab.wiki, vertical) {
-            (true, _) => self.wiki_width = share,
-            (false, true) => self.list_height = share,
-            (false, false) => self.list_width = share,
+        let which = match (grab.wiki, vertical) {
+            (true, _) => "wiki_width",
+            (false, true) => "list_height",
+            (false, false) => "list_width",
+        };
+        self.set_share(which, share.map(i64::from));
+    }
+
+    /// Mouse dragging and ctl pane values use one clamp before entering the saved look.
+    pub(super) fn set_share(&mut self, which: &str, value: Option<i64>) {
+        let share = value.map(super::draw::share);
+        match which {
+            "list_width" => self.list_width = share,
+            "list_height" => self.list_height = share,
+            "wiki_width" => self.wiki_width = share,
+            _ => {}
         }
     }
 

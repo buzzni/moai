@@ -25,6 +25,13 @@ which prints the listing and opens no screen — with counts, filters and order 
 To read the same tracker in a browser tab instead, run `moai web` — see
 [Open the tracker in a browser](web.md).
 
+From another terminal, `moai ctl ls` lists explorers you already opened and
+`moai ctl state --json` reads the current one. `moai ctl keys 'SPC g b'` sends
+its own keys, while named commands such as `moai ctl sort 'title:desc'` change
+its view and show a `⇄ ctl` notice. See [Control an open window](ctl.md) for
+window selection, all commands, and the rules for writing under the caller's
+name.
+
 ## Find your way around
 
 [Milestones](glossary.md#milestone) and [epics](glossary.md#epic) behave like

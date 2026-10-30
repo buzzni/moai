@@ -334,6 +334,21 @@ pub enum GrepIn {
 impl GrepIn {
     const ORDER: [GrepIn; 6] = [GrepIn::All, GrepIn::Id, GrepIn::Title, GrepIn::Tag, GrepIn::Body, GrepIn::Note];
 
+    pub fn name(self) -> &'static str {
+        match self {
+            GrepIn::All => "all",
+            GrepIn::Id => "id",
+            GrepIn::Title => "title",
+            GrepIn::Tag => "tag",
+            GrepIn::Body => "body",
+            GrepIn::Note => "note",
+        }
+    }
+
+    pub fn named(name: &str) -> Option<GrepIn> {
+        Self::ORDER.into_iter().find(|scope| scope.name() == name)
+    }
+
     /// Tab 의 다음 범위. 끝에서 처음으로 돈다.
     pub fn next(self) -> GrepIn {
         let at = Self::ORDER.iter().position(|g| *g == self).unwrap_or(0);

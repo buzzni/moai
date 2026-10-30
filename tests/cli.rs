@@ -222,6 +222,15 @@ fn ctl_lists_and_reads_an_open_explorer() {
     assert_eq!(serde_json::from_str::<serde_json::Value>(&done).unwrap()["screen"], "list");
     let actions = ok(s.path(), &["ctl", "actions", "--json"]);
     assert!(actions.contains("browse.read_all"), "{actions}");
+    let sorted = ok(s.path(), &["ctl", "sort", "title:desc,priority:desc", "--json"]);
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&sorted).unwrap()["sort"],
+        serde_json::json!(["title:desc", "priority:desc"])
+    );
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&ok(s.path(), &["ctl", "state", "--json"])).unwrap()["sort"],
+        serde_json::json!(["title:desc", "priority:desc"])
+    );
     for command in [
         vec!["ctl", "do", "browse.quit", "--json"],
         vec!["ctl", "keys", "SPC q", "--json"],

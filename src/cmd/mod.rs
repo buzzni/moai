@@ -601,6 +601,43 @@ fn dispatch(ctx: &Ctx, cli: Cli) -> R<Vec<String>> {
         Cmd::Ctl(CtlCmd::Keys { seqs, text, target }) => ctl::keys(ctx, target.as_deref(), seqs, text),
         Cmd::Ctl(CtlCmd::Do { name, target }) => ctl::named(ctx, target.as_deref(), name),
         Cmd::Ctl(CtlCmd::Actions { target }) => ctl::actions(ctx, target.as_deref()),
+        Cmd::Ctl(CtlCmd::Sort { words, default, target }) => ctl::verb(
+            ctx,
+            target.as_deref(),
+            crate::ctl::wire::Verb::Sort { words: words.split(',').map(str::to_string).collect(), default },
+        ),
+        Cmd::Ctl(CtlCmd::Filter { query, clear, target }) => ctl::filter(ctx, target.as_deref(), query, clear),
+        Cmd::Ctl(CtlCmd::Find { query, scope, target }) => {
+            ctl::verb(ctx, target.as_deref(), crate::ctl::wire::Verb::Find { query, scope })
+        }
+        Cmd::Ctl(CtlCmd::Screen { name, target }) => {
+            ctl::verb(ctx, target.as_deref(), crate::ctl::wire::Verb::Screen { name })
+        }
+        Cmd::Ctl(CtlCmd::View { name, value, target }) => ctl::toggle(ctx, target.as_deref(), "view", name, value),
+        Cmd::Ctl(CtlCmd::Cell { name, value, target }) => ctl::toggle(ctx, target.as_deref(), "cell", name, value),
+        Cmd::Ctl(CtlCmd::Detail { name, target }) => {
+            ctl::verb(ctx, target.as_deref(), crate::ctl::wire::Verb::Detail { name })
+        }
+        Cmd::Ctl(CtlCmd::Goto { id, enter, project, target }) => {
+            ctl::verb(ctx, target.as_deref(), crate::ctl::wire::Verb::Goto { id, enter, project })
+        }
+        Cmd::Ctl(CtlCmd::Read { ids, all, group, target }) => {
+            ctl::verb(ctx, target.as_deref(), crate::ctl::wire::Verb::Read { ids, all, group })
+        }
+        Cmd::Ctl(CtlCmd::Wiki { slug, search, target }) => {
+            ctl::verb(ctx, target.as_deref(), crate::ctl::wire::Verb::Wiki { slug, search })
+        }
+        Cmd::Ctl(CtlCmd::Pane { list_width, list_height, wiki_width, gantt_label, target }) => ctl::verb(
+            ctx,
+            target.as_deref(),
+            crate::ctl::wire::Verb::Pane { list_width, list_height, wiki_width, gantt_label },
+        ),
+        Cmd::Ctl(CtlCmd::Zone { name, target }) => {
+            ctl::verb(ctx, target.as_deref(), crate::ctl::wire::Verb::Zone { name })
+        }
+        Cmd::Ctl(CtlCmd::Theme { name, target }) => {
+            ctl::verb(ctx, target.as_deref(), crate::ctl::wire::Verb::Theme { name })
+        }
         // 새 명령을 두지 않고 `init` 의 플래그로 둔다 — 고치는 길(`init`)과 보는 길이 한 이름에 있어야
         // `stale` 을 본 사람이 무엇을 칠지 안다(moai-mstm).
         Cmd::Init { check: true, .. } => init::check(ctx),

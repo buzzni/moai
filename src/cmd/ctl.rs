@@ -62,6 +62,75 @@ pub fn actions(ctx: &Ctx, target: Option<&str>) -> R<Vec<String>> {
     invoke(ctx, target, wire::Verb::Actions, false)
 }
 
+pub fn filter(ctx: &Ctx, target: Option<&str>, query: Option<String>, clear: bool) -> R<Vec<String>> {
+    if clear == query.is_some() {
+        return Err(Fail::coded("give a filter query or --clear", code::BAD_INPUT));
+    }
+    verb(ctx, target, wire::Verb::Filter { query })
+}
+
+pub fn toggle(ctx: &Ctx, target: Option<&str>, kind: &str, name: String, value: String) -> R<Vec<String>> {
+    let on = match value.as_str() {
+        "on" => true,
+        "off" => false,
+        _ => return Err(Fail::coded("use on or off", code::BAD_INPUT)),
+    };
+    let verb = match kind {
+        "view" => wire::Verb::View { name, on },
+        _ => wire::Verb::Cell { name, on },
+    };
+    verb_request(ctx, target, verb)
+}
+
+pub fn verb(ctx: &Ctx, target: Option<&str>, verb: wire::Verb) -> R<Vec<String>> {
+    use wire::Verb;
+    let bad = |message: &str| Fail::coded(message, code::BAD_INPUT);
+    match &verb {
+        Verb::Sort { words, .. } if crate::tui::App::sorting_of(words).is_none() => {
+            return Err(bad("invalid explorer order; use title, priority, status, or another explorer field, not id"));
+        }
+        Verb::Find { scope, .. } if crate::query::GrepIn::named(scope).is_none() => {
+            return Err(bad("--in must be all, id, title, tag, body, or note"));
+        }
+        Verb::Screen { name } if !matches!(name.as_str(), "list" | "board" | "gantt" | "stats" | "wiki") => {
+            return Err(bad("screen must be list, board, gantt, stats, or wiki"));
+        }
+        Verb::Detail { name } if !matches!(name.as_str(), "on" | "off" | "right" | "bottom" | "left" | "top") => {
+            return Err(bad("detail must be on, off, right, bottom, left, or top"));
+        }
+        Verb::Goto { id, project, .. } if id.is_some() == project.is_some() => {
+            return Err(bad("give an issue id or --project, not both"));
+        }
+        Verb::Read { ids, all, group } if (*all as u8 + group.is_some() as u8 + !ids.is_empty() as u8) != 1 => {
+            return Err(bad("give issue ids, --all, or --group"));
+        }
+        Verb::Wiki { slug, search } if slug.is_some() == search.is_some() => {
+            return Err(bad("give a wiki slug or --search"));
+        }
+        Verb::Pane { list_width, list_height, wiki_width, gantt_label }
+            if [list_width, list_height, wiki_width, gantt_label].iter().all(|v| v.is_none()) =>
+        {
+            return Err(bad("give at least one pane width or height"));
+        }
+        Verb::Theme { name } if !matches!(name.as_str(), "system" | "light" | "dark") => {
+            return Err(bad("theme must be system, light, or dark"));
+        }
+        _ => {}
+    }
+    if let Verb::Pane { list_width, list_height, wiki_width, gantt_label } = &verb {
+        for value in [list_width, list_height, wiki_width, gantt_label].into_iter().flatten() {
+            if value != "none" && value.parse::<i64>().is_err() {
+                return Err(bad("pane values must be numbers or none"));
+            }
+        }
+    }
+    verb_request(ctx, target, verb)
+}
+
+fn verb_request(ctx: &Ctx, target: Option<&str>, verb: wire::Verb) -> R<Vec<String>> {
+    invoke(ctx, target, verb, true)
+}
+
 fn invoke(ctx: &Ctx, target: Option<&str>, verb: wire::Verb, needs_actor: bool) -> R<Vec<String>> {
     #[cfg(not(unix))]
     return Err(Fail::coded("control sockets are unavailable on this OS", code::UNSUPPORTED));
@@ -125,6 +194,7 @@ fn code_of(code_name: Option<&str>) -> &'static str {
         Some("timeout") => code::TIMEOUT,
         Some("busy") => code::BUSY,
         Some("no_actor") => code::NO_ACTOR,
+        Some("not_found") => code::NOT_FOUND,
         _ => code::REFUSED,
     }
 }

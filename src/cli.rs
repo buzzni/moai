@@ -1372,6 +1372,127 @@ pub enum CtlCmd {
         #[arg(short = 't', long = "target")]
         target: Option<String>,
     },
+    /// Set the explorer order, such as title:desc,priority:desc
+    #[command(
+        after_help = "  Example: moai ctl sort 'title:desc,priority:desc'.\n  --default also updates the default order."
+    )]
+    Sort {
+        words: String,
+        #[arg(long)]
+        default: bool,
+        #[arg(short = 't', long, help = "Window id from moai ctl ls")]
+        target: Option<String>,
+    },
+    /// Apply a filter, or remove the current filter
+    #[command(after_help = "  Example: moai ctl filter 'status=todo tag=parser'.")]
+    Filter {
+        query: Option<String>,
+        #[arg(long)]
+        clear: bool,
+        #[arg(short = 't', long, help = "Window id from moai ctl ls")]
+        target: Option<String>,
+    },
+    /// Search issues in a chosen field
+    #[command(after_help = "  Example: moai ctl find 'parser' --in title.")]
+    Find {
+        query: String,
+        #[arg(long = "in", default_value = "all")]
+        scope: String,
+        #[arg(short = 't', long, help = "Window id from moai ctl ls")]
+        target: Option<String>,
+    },
+    /// Show list, board, gantt, stats, or wiki
+    #[command(after_help = "  Example: moai ctl screen board.")]
+    Screen {
+        name: String,
+        #[arg(short = 't', long, help = "Window id from moai ctl ls")]
+        target: Option<String>,
+    },
+    /// Show or hide a view axis, including column:<name>
+    #[command(after_help = "  Example: moai ctl view deferred on.")]
+    View {
+        name: String,
+        value: String,
+        #[arg(short = 't', long, help = "Window id from moai ctl ls")]
+        target: Option<String>,
+    },
+    /// Show or hide a list field
+    #[command(after_help = "  Example: moai ctl cell assignee off.")]
+    Cell {
+        name: String,
+        value: String,
+        #[arg(short = 't', long, help = "Window id from moai ctl ls")]
+        target: Option<String>,
+    },
+    /// Show, hide, or place the detail pane
+    #[command(after_help = "  Example: moai ctl detail right.")]
+    Detail {
+        name: String,
+        #[arg(short = 't', long, help = "Window id from moai ctl ls")]
+        target: Option<String>,
+    },
+    /// Select an issue or a project
+    #[command(after_help = "  Example: moai ctl goto moai-1234 --enter.")]
+    Goto {
+        id: Option<String>,
+        #[arg(long)]
+        enter: bool,
+        #[arg(long)]
+        project: Option<String>,
+        #[arg(short = 't', long, help = "Window id from moai ctl ls")]
+        target: Option<String>,
+    },
+    /// Mark selected issues, a group, or all NEW issues read
+    #[command(after_help = "  Example: moai ctl read --all.\n  Mark the person's NEW rows only when asked.")]
+    Read {
+        ids: Vec<String>,
+        #[arg(long)]
+        all: bool,
+        #[arg(long)]
+        group: Option<String>,
+        #[arg(short = 't', long, help = "Window id from moai ctl ls")]
+        target: Option<String>,
+    },
+    /// Open a wiki page or search wiki pages
+    #[command(after_help = "  Example: moai ctl wiki 'guide#start'.")]
+    Wiki {
+        slug: Option<String>,
+        #[arg(long)]
+        search: Option<String>,
+        #[arg(short = 't', long, help = "Window id from moai ctl ls")]
+        target: Option<String>,
+    },
+    /// Set pane shares
+    #[command(
+        next_line_help = true,
+        after_help = "  Example: moai ctl pane --list-width 60.\n  Terminal size belongs to tmux resize-pane or the window manager."
+    )]
+    Pane {
+        #[arg(long)]
+        list_width: Option<String>,
+        #[arg(long)]
+        list_height: Option<String>,
+        #[arg(long)]
+        wiki_width: Option<String>,
+        #[arg(long)]
+        gantt_label: Option<String>,
+        #[arg(short = 't', long, help = "Window id from moai ctl ls")]
+        target: Option<String>,
+    },
+    /// Select the explorer's timezone
+    #[command(after_help = "  Example: moai ctl zone Europe/Paris.")]
+    Zone {
+        name: String,
+        #[arg(short = 't', long, help = "Window id from moai ctl ls")]
+        target: Option<String>,
+    },
+    /// Select a web tab's theme; terminal colours follow the terminal
+    #[command(after_help = "  Example: moai ctl theme dark -t web-1234.")]
+    Theme {
+        name: String,
+        #[arg(short = 't', long, help = "Window id from moai ctl ls")]
+        target: Option<String>,
+    },
 }
 
 /// 기한이 우선순위를 올린다(moai-dr8a.1q4). 동사는 하나지만 이름 밑에 두어, 읽는 동사가 생기면 같은 자리에 선다.

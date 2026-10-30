@@ -17,3 +17,25 @@ On Windows, `ctl ls` returns an empty list and commands that need a window repor
 Control requests wait until their keys have run and return the resulting screen, mode, menu, cursor, notice, and whether they changed anything. They never count as human input when selecting the most recently used window. A request cannot take over a field or unfinished key sequence the person started, open an editor, or close the person's window. A field opened by a control request remains available to later control requests until the person types in it.
 
 Tracker writes made through the explorer carry the calling agent's identity. Pass `--user 'Name (email)'` or set `MOAI_ACTOR` when Git identity is not configured; a write with no caller identity returns `no_actor` and never opens the explorer's identity prompt. The window owner's read marks remain theirs. A future action that moves columns must honor the same ownership rule as `moai mv`: work assigned to someone else requires an explicit takeover.
+
+## Change the view by name
+
+These commands act on the selected open window. Use `-t <id>` to choose one explicitly. They return the small state from `keys` and any verb-specific result. Values are checked by the CLI and by the window, since a window may receive a request from an older CLI.
+
+| Command | Example | Effect |
+|---|---|---|
+| `sort` | `moai ctl sort 'title:desc,priority:desc'` | Set the current project's order; `--default` also changes the default. |
+| `filter` | `moai ctl filter 'status=todo tag=parser'` | Apply a filter; `--clear` removes it. |
+| `find` | `moai ctl find 'parser' --in title` | Search `all`, `id`, `title`, `tag`, `body`, or `note`. |
+| `screen` | `moai ctl screen board` | Open `list`, `board`, `gantt`, `stats`, or `wiki`. |
+| `view` | `moai ctl view deferred on` | Set `deferred`, `backlog`, `archived`, `worktree`, `raw`, or `column:<name>` on or off. |
+| `cell` | `moai ctl cell assignee off` | Show or hide a list field, including `id`, `priority`, `tally`, `tags`, `epic`, `names`, and `branch`. |
+| `detail` | `moai ctl detail right` | Show or hide the detail, or place it `right`, `bottom`, `left`, or `top`. |
+| `goto` | `moai ctl goto moai-1234 --enter` | Select a row without clearing a filter; `--project <number or path>` selects a project. |
+| `read` | `moai ctl read --all` | Mark the window owner's NEW rows read; also accepts ids or `--group <id>`. Use when the person asks. |
+| `wiki` | `moai ctl wiki 'guide#start'` | Open a page and heading; `--search 'words'` opens the top ranked hit and returns all hits. |
+| `pane` | `moai ctl pane --list-width 60` | Set `--list-width`, `--list-height`, `--wiki-width` percentages or `--gantt-label` columns; `none` restores a default. |
+| `zone` | `moai ctl zone Europe/Paris` | Set the explorer timezone; `none` restores UTC. |
+| `theme` | `moai ctl theme dark` | Supported by web tabs; the explorer returns `unsupported` because terminal colours belong to the terminal. |
+
+`pane` changes proportions inside the explorer. It does not resize the terminal or browser; use the terminal's window manager or `tmux resize-pane` for that. View, cell, detail, pane, sort, and zone choices are saved in the person's config and may appear again when they reopen the explorer; `raw` is a session-only view toggle. Every change leaves a `⇄ ctl` notice in the window.

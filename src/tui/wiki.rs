@@ -589,6 +589,45 @@ impl Window {
         true
     }
 
+    /// Open a page from ctl through the same link-following path as a human selection.
+    pub(super) fn open_at(&mut self, slug: &str, anchor: Option<&str>) -> bool {
+        self.follow_to(slug, anchor)
+    }
+
+    pub(super) fn near(&self, slug: &str) -> Vec<String> {
+        self.pages
+            .iter()
+            .filter(|p| p.slug.contains(slug) || slug.contains(&p.slug))
+            .take(3)
+            .map(|p| p.slug.clone())
+            .collect()
+    }
+
+    pub(super) fn ctl_search(&mut self, query: &str) -> serde_json::Value {
+        let found = crate::wiki::search::search(&self.pages, query, 20);
+        let hits: Vec<_> = found
+            .hits
+            .iter()
+            .map(|h| {
+                serde_json::json!({
+                    "slug": h.page.slug, "heading": h.heading, "anchor": h.anchor,
+                    "line": h.line, "snippet": h.snippet.as_ref().map(|s| &s.text),
+                })
+            })
+            .collect();
+        let top = found.hits.first().map(|h| (h.page.slug.clone(), h.anchor.map(str::to_string)));
+        let total = found.total;
+        if let Some((slug, anchor)) = top {
+            self.open_at(&slug, anchor.as_deref());
+        }
+        serde_json::json!({"hits": hits, "total": total, "page": self.current().map(|p| &p.slug)})
+    }
+
+    pub(super) fn ctl_state(&self) -> serde_json::Value {
+        serde_json::json!({"page": self.current().map(|p| &p.slug), "cursor": self.cursor,
+            "focus": if self.focus == Side::List { "list" } else { "page" }, "search": self.search})
+    }
+
     /// 건너오기 전의 페이지로 한 걸음 — 읽던 줄로 돌아간다. 자취가 비었으면 거짓이다. 머리글 표시는 걷힌다 — 돌아간
     /// 자리는 읽던 줄이지 건너온 머리글이 아니다.
     pub fn back(&mut self) -> bool {
@@ -1027,6 +1066,25 @@ pub(super) mod tests {
         ("guide.md", "# Guide\n\nGo [deeper](notes/deep.md).\n\nLine\n\nLine\n"),
         ("notes/deep.md", "# Deep\n\nThe bottom.\n"),
     ];
+
+    #[test]
+    fn ctl_wiki_opens_a_page_and_searches_ranked_hits() {
+        use crate::ctl::wire::{self, Verb};
+        let (_scratch, mut app) = wiki_app("ctl", PAGES);
+        let open = app.ctl(&wire::request(
+            Verb::Wiki { slug: Some("guide".into()), search: None },
+            std::time::Duration::from_secs(5),
+        ));
+        assert!(open.ok, "{open:?}");
+        assert_eq!(app.ctl_state(false)["wiki"]["page"], "guide");
+        let found = app.ctl(&wire::request(
+            Verb::Wiki { slug: None, search: Some("deeper".into()) },
+            std::time::Duration::from_secs(5),
+        ));
+        assert!(found.ok, "{found:?}");
+        assert!(!found.data.as_ref().unwrap()["hits"].as_array().unwrap().is_empty());
+        assert_eq!(app.ctl_state(false)["wiki"]["page"], "guide");
+    }
 
     pub(in crate::tui) fn window(a: &App) -> &Window {
         match &a.mode {
