@@ -1025,6 +1025,8 @@ pub struct Ctx {
     /// 커서가 한눈 보기의 프로젝트 머리줄에 섰는가(moai-oagj.vcj). 보드에서도 그 줄의 `h`·`l`·`Tab` 은 목록과 같이
     /// 접고 편다(사용자 결정) — 칸이 없는 줄이다.
     pub head: bool,
+    /// Cursor is on a board lane banner or closed-epic card, so Tab toggles it.
+    pub board_foldable: bool,
     /// 마우스를 잡고 있는가 — 메뉴 줄이 `[켜짐]`·`[꺼짐]` 으로 댄다(moai-irrj.9xq).
     pub mouse: bool,
     /// 고른 차례와 그 방향.
@@ -1148,7 +1150,7 @@ impl Browse {
             // **한눈 보기의 프로젝트 머리줄은 목록과 같다**(moai-oagj.vcj) — 칸이 없는 줄이라 그 자리의 `h`·`l`·`Tab` 은
             // 접고 편다. 아래 목록의 갈래를 그대로 탄다.
             Expand | Collapse if c.board && !c.head => Ok(()),
-            ExpandAll if c.board && !c.head => Err(Off::Quiet),
+            ExpandAll if c.board && !c.head && !c.board_foldable => Err(Off::Quiet),
             // 묶음 줄에만 펼칠 것이 있다 — `Enter` 가 잎에서 조용한 것과 같은 자리다. `leaf` 로
             // 가르지 않는다: `leaf` 는 `Enter` 의 물음이라 `..` 과 층의 프로젝트 줄에도 거짓이고,
             // 거기서는 펼침이 아무 일도 안 한다.

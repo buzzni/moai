@@ -1322,6 +1322,7 @@ impl App {
         parked.remembered.clear();
         parked.expanded.clear();
         parked.gantt_shut.clear();
+        parked.board_shut.clear();
         // **거름망 마스크도 푼다**(리뷰). 아래에서 `hung` 을 비우므로 걸린 글은 사라지는데,
         // 마스크를 두고 가면 그 프로젝트의 줄은 한눈 보기에서 걸러진 채 서고 — 경로 줄에 뱃지도
         // 없고 Esc 로 풀 것도 없어 — 왜 줄이 적은지 말할 자리가 도구 안에 안 남는다.
@@ -1356,6 +1357,7 @@ impl App {
         // 그대로 샌다. 세션 내내 쌓이기도 한다.
         self.site.expanded.clear();
         self.site.gantt_shut.clear();
+        self.site.board_shut.clear();
         // 펴 둔 본문도 그 프로젝트에 매인 것이다(리뷰) — 글과 id 가 떠난 줄의 것이다. 상세를
         // 연 채면 다음 프레임의 `draw::fill_body` 가 곧 갈아 끼우지만, `SPC v d` 로 상세를
         // 닫아 둔 채 떠나면 그리는 쪽이 안 돌아 큰 본문 한 벌이 세션 내내 남는다.
@@ -3221,6 +3223,11 @@ mod tests {
         a.key(key(KeyCode::Home));
         assert_eq!(a.rows()[a.cursor], Row::Project(0));
         a.hit("j");
+        assert!(
+            matches!(a.rows().get(a.cursor), Some(Row::Item(Seat::Place(0), crate::nav::Entry::Dir { .. }, _))),
+            "project header must reach the lane head first"
+        );
+        a.hit("j");
         let title = match &a.rows()[a.cursor] {
             Row::Item(seat @ Seat::Place(0), e, _) => {
                 e.at().and_then(|at| a.issue_at(*seat, at)).map(|i| i.title.clone())
@@ -3228,6 +3235,11 @@ mod tests {
             _ => None,
         };
         assert_eq!(title.as_deref(), Some("릴리스의 일"), "머리줄의 j 가 one 의 맨 위 카드로 안 갔다");
+        a.hit("k");
+        assert!(
+            matches!(a.rows().get(a.cursor), Some(Row::Item(Seat::Place(0), crate::nav::Entry::Dir { .. }, _))),
+            "card must return to lane head"
+        );
         a.hit("k");
         assert_eq!(a.rows()[a.cursor], Row::Project(0), "레인 맨 위 카드의 k 가 머리줄로 안 갔다");
         // 머리줄의 `h` 는 목록처럼 접는다 — 보드의 옆 칸이 아니다.

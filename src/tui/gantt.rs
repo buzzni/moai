@@ -267,7 +267,13 @@ pub(super) struct Chart {
 impl App {
     /// 그 묶음이 지금 배치에서 펼쳐져 있는가 — 검색이 저절로 연 것은 따로 센다(`App::searched_open`).
     pub(super) fn opened(&self, site: &Site, path: &Path) -> bool {
-        if self.gantt() { !site.gantt_shut.contains(path) } else { site.expanded.contains(path) }
+        if self.gantt() {
+            !site.gantt_shut.contains(path)
+        } else if self.board() {
+            !site.board_shut.contains(path)
+        } else {
+            site.expanded.contains(path)
+        }
     }
 
     /// Enter Gantt with closed epics and milestones folded. A selected row's

@@ -15,6 +15,7 @@ does not tag — see `CONTRIBUTING.md`.
 ### Added
 
 - Explorer `SPC o o` chooses the archive retention and writes `archive_days` to the shared repository configuration. (moai-mkzo.mgn)
+- Explorer board lane headers can be selected and folded; closed milestone lanes and epic cards start folded. (moai-mkzo.65c)
 
 ### Changed
 

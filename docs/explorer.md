@@ -112,12 +112,20 @@ remain readable; if both keys exist, `hide_backlog` wins.
 
 - **`SPC g l` — the list**, described above
 - **`SPC g b` — the board.** The same rows as a kanban board: backlog, deferred, then
-  your columns, with one lane per milestone at the project root. The deferred column
+  your columns, with one lane per milestone at the project root. Each lane header
+  takes the cursor and shows that milestone's detail; `Enter` opens it. A closed
+  milestone lane starts folded, showing its `done/work` count. On its header,
+  `h` folds, `l` opens, and `Tab` flips the fold. Clicking its arrow flips it;
+  clicking elsewhere on the header selects it. Closed epics stand as folded
+  cards in done. `Tab` or a click on a card's arrow shows their done members
+  beneath them; members in other columns remain visible. A search reveals
+  matching cards inside folded groups. In the overview, each project's lanes
+  fold independently. The deferred column
   follows the view — hidden to begin with, back with `SPC v l`. A card that is
   not yours says whose it is. Cards in the in-progress, review and done columns
   carry bright yellow, magenta or green bands on their head lines, with black text;
   other columns, including deferred, stay plain. Solarized maps those bright
-  colours to greys, so the bands are grey there. `h` and `l` go across the columns, `j` and `k` along
+  colours to greys, so the bands are grey there. On cards, `h` and `l` go across the columns, `j` and `k` along
   one, and the wheel and `Ctrl-d`/`Ctrl-u` scroll the board without moving the
   cursor. The cursor, filter, view and detail are the list's, so switching keeps
   your place. Titles wrap to the column width, keeping up to 50 Unicode

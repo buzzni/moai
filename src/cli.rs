@@ -695,11 +695,16 @@ BACKLOG
   {key:browse.backlog} hides backlog items in both the board and the list, and is kept
   under [tui] as hide_backlog.
   At the project root every milestone is a lane, with (no milestone) last;
-  inside a milestone or an epic there is one lane. Epics and milestones are
-  not cards. Each card is two lines, its id, column and priority over its title,
+  inside a milestone or an epic there is one lane. The lane header takes the
+  cursor, shows its detail, and Enter opens that milestone. Closed milestone
+  lanes and closed epic cards start folded. On a lane header, {key:browse.collapse}
+  folds, {key:browse.expand} opens, and {key:browse.expand_all} flips it; click
+  its arrow to flip it. The closed epic is one card in done; {key:browse.expand_all}
+  or its arrow shows done members below. Other members keep their columns.
+  Each ordinary card is two lines, its id, column and priority over its title,
   and the cursor's card is marked and drawn reversed. Cards Enter can go
   into end their title with /, as in the list. The foot, a third line,
-  stands while SPC c has tag, epic, assignee or a date on — an epic shows up on
+  stands while SPC c has tag, epic, assignee or a date on; open epics appear in
   the board only as the name in that foot ({key:browse.cell_epic}). Cards that are not yours
   grow that foot anyway and say whose they are, dimmed — → name, or unowned —
   in the assignee's place; your own cards stay two lines. Whose is decided the
@@ -708,7 +713,7 @@ BACKLOG
   whose it is and the dates still show. {key:moves.line_down} and {key:moves.line_up} move within the
   column, {key:browse.collapse} and {key:browse.expand} go to the next column at the nearest height, {key:moves.top} and {key:moves.bottom} go to
   the column's ends, {key:browse.enter} and {key:browse.leave} go in and out as in the list, and {key:browse.expand_all}
-  does nothing. The whole board scrolls as one; the column names stay on top.
+  flips a closed epic card. The board scrolls as one; column names stay on top.
   When the columns do not fit, the column the cursor stands in always stands
   and the frame title names the rest with their counts. Clicking a card puts
   the cursor on it. The wheel, {key:moves.half_down} and {key:moves.half_up}, {key:moves.page_down} and {key:moves.page_up}, and
