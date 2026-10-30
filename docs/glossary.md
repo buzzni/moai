@@ -223,7 +223,7 @@ one `- [p1] issue title #tag` line per issue, any line ending in an optional
 `@YYYY-MM-DD` [deadline](#deadline), `@YYYY-MM-DD~YYYY-MM-DD` (start to deadline) or
 `@YYYY-MM-DD~` (start only) — fed to `moai add --from -`
 (`--dry-run` shows it first) or to `moai backlog promote`. Show it to the person
-once, before writing code. More in
+once, before writing code. Claude Code can use `moai-plan` to interview the person and draft it on the plan model. More in
 [the workflow](workflow.md#plan-something-bigger).
 
 ## Regression-of
@@ -262,7 +262,7 @@ The person's `[writing] detail` selects `detailed` or `brief` for tracker writin
 
 `[models]` in your user config: which model each role runs on — `plan`,
 `develop`, `complex`, `review`, `docs`, `bulk`, `codex` — with `review_grade`,
-`effort` and `effort_complex` beside them. A key left out keeps its default.
+`effort`, `effort_complex` and `effort_plan` beside them. A key left out keeps its default.
 `moai models` shows it and the [supervisor](#supervisor) reads
 `moai models --json` once a round. A repository can recommend values in a
 `[models]` table of its `.moai/config.toml`: they override the defaults, and your
@@ -330,4 +330,4 @@ not pile commits onto one branch. The tracker stays in the main checkout; the
 wiki pages ride the branch. More in
 [the workflow](workflow.md#work-in-a-worktree).
 
-Decided in: moai-tllo moai-snyk moai-u5wr moai-dhxm moai-kxkw moai-jtvp moai-bth3 moai-obxm moai-9tqo moai-uzhx moai-pyi4 moai-jdwk moai-lj8g moai-d1zn
+Decided in: moai-tllo moai-snyk moai-u5wr moai-dhxm moai-kxkw moai-jtvp moai-bth3 moai-obxm moai-9tqo moai-uzhx moai-pyi4 moai-jdwk moai-lj8g moai-d1zn moai-ns7a

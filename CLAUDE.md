@@ -453,7 +453,7 @@ Codex 일꾼에 남는다), 역할마다의 모델은 사람의 사용자 설정
 
 | 역할 | 무엇 | 기본 모델 | effort / 등급 |
 |---|---|---|---|
-| `plan` | 계획 — 요청을 에픽과 이슈로 가른다 | fable | — |
+| `plan` | 계획 — 요청을 에픽과 이슈로 가른다 | fable | `xhigh` (`effort_plan`) |
 | `develop` | 개발 — 대부분의 일 | sonnet | `medium` |
 | `complex` | 쓰기 경로·동시성·저장 형식·훅·여러 파일의 계약을 함께 바꾸는 것 | opus | `high` |
 | `review` | 에픽 끝 리뷰, 에픽마다 한 번 | opus | `xhigh` (위 `max` 줄이면 `max`) |

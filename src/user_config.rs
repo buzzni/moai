@@ -59,6 +59,7 @@ pub const MODELS_DEFAULT: &[(&str, &str)] = &[
     ("review_grade", "xhigh"),
     ("effort", "medium"),
     ("effort_complex", "high"),
+    ("effort_plan", "xhigh"),
 ];
 pub const MODELS: &str = "models";
 pub const MODEL_LEVELS: &[&str] = &["low", "medium", "high", "xhigh", "max"];
@@ -269,10 +270,10 @@ fn layered<T: LayeredTable, E>(
     (out, problems)
 }
 
-/// 값이 등급 낱말([`MODEL_LEVELS`])인 키인가 — `review_grade`·`effort`·`effort_complex`. 키를 재는 [`Models::put`] 과
-/// 탈의 글을 고르는 사용자 설정의 읽기가 이 하나로 가른다.
+/// 값이 등급 낱말([`MODEL_LEVELS`])인 키인가 — `review_grade`·`effort`·`effort_complex`·`effort_plan`.
+/// 키를 재는 [`Models::put`] 과 탈의 글을 고르는 사용자 설정의 읽기가 이 하나로 가른다.
 pub fn is_level_key(key: &str) -> bool {
-    matches!(key, "review_grade" | "effort" | "effort_complex")
+    matches!(key, "review_grade" | "effort" | "effort_complex" | "effort_plan")
 }
 
 /// 설정 파일의 자리. `MOAI_CONFIG` → `$XDG_CONFIG_HOME/moai/config.toml` →
@@ -3935,6 +3936,14 @@ mod tests {
         let parse = |src: &str| Doc::parse(src).unwrap().models();
         assert_eq!(parse(""), (Models::default(), vec![]));
         assert_eq!(parse("[models]\n"), (Models::default(), vec![]));
+        assert_eq!(Models::default().values["effort_plan"], "xhigh");
+        let (plan, problems) = parse("[models]\neffort_plan = \"max\"\n");
+        assert!(problems.is_empty());
+        assert_eq!(plan.values["effort_plan"], "max");
+        assert_eq!(plan.written, ["effort_plan"]);
+        let (plan, problems) = parse("[models]\neffort_plan = \"ultra\"\n");
+        assert_eq!(plan.values["effort_plan"], "xhigh");
+        assert_eq!(problems, [ModelsTrouble::NotAnEffort { key: "effort_plan".into(), raw: "ultra".into() }]);
         let (models, problems) = parse("[models]\ndevelop = \"opus-6\"\n");
         assert!(problems.is_empty());
         let mut want = Models::default();

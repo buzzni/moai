@@ -2567,6 +2567,7 @@ mod tests {
             ("skills/moai-wiki/SKILL.md", "---\nname: moai-wiki\n"),
             ("skills/moai-tmux/SKILL.md", "---\nname: moai-tmux\n"),
             ("skills/moai-recover/SKILL.md", "---\nname: moai-recover\n"),
+            ("skills/moai-plan/SKILL.md", "---\nname: moai-plan\n"),
         ] {
             assert!(files[path].starts_with(head), "{path} 에 엉뚱한 글이 섰다");
         }

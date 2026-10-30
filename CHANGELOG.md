@@ -12,6 +12,16 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+## [0.35.0] - 2026-10-29
+
+### Added
+
+- Claude Code gains `moai-plan` for interviews and detailed plans, and `effort_plan` configures planning effort (default `xhigh`). (moai-ns7a)
+
+### Changed
+
+- The supervisor passes `effort_plan` to its planning agent and carries planned review focus into the epic review. (moai-ns7a)
+
 ## [0.34.0] - 2026-10-29
 
 ### Added

@@ -144,7 +144,7 @@ fn model_default(key: &str) -> &'static str {
 /// 읽고(`moai models --json`), 기본값은 [`models_defaults`] 한 줄에만 선다. 역할 이름은 설정의 키와 글자째
 /// 같아야 한다 — `the_roles_are_the_models_table` 이 견준다.
 const ROLES: [(&str, &str, &str); 7] = [
-    ("plan", "planning — splitting a request into an epic and its issues", "—"),
+    ("plan", "planning — splitting a request into an epic and its issues", "`effort_plan`"),
     ("develop", "development — most work", "`effort`"),
     (
         "complex",
@@ -290,7 +290,8 @@ fn epic_review_rule() -> String {
 /// 목록에 같은 이름을 넣으면 읽기 전의 제안이 그 명령에 박힌다.
 const MODEL_SLOT: &str = "Model: <model> (<difficulty> — <why>)";
 
-/// 메시지 머리의 `Effort:` 줄(moai-9tqo.rsl) — 역할의 effort(`moai models --json` 의 `effort`·`effort_complex`).
+/// 메시지 머리의 `Effort:` 줄(moai-9tqo.rsl) — 일꾼 역할의 effort(`moai models --json` 의 `effort`·`effort_complex`). `plan`
+/// 의 `effort_plan` 은 이 줄이 아니라 2-2 의 `Agent` 부름에 바로 선다.
 /// 서브에이전트는 띄울 때 그 값으로 서고, 세션은 그 창의 사람이 정한다. [`MODEL_SLOT`] 과 같은 까닭으로 한 자리다.
 const EFFORT_SLOT: &str = "Effort: <effort>";
 
@@ -567,7 +568,8 @@ that promise up.
 `--undo` brings the same row back as it was. A backlog item is "not work yet"; a defer
 is "work, but not now".
 
-**3. Is it worth splitting into an epic** — if the request does not end inside one
+**3. Is it worth splitting into an epic** — in Claude Code, use `/moai-plan` for this step with the plan model.
+For Codex and Antigravity, do it in this session. If the request does not end inside one
 file, show the person **once**, before writing code, a plan split into one epic
 plus three to seven issues, and ask. On a "yes", create it in one go with
 `moai add --from -` (`--dry-run` shows it first).
@@ -625,6 +627,34 @@ The one thing that matters is that the next session reads this with
 `moai show <id>`. These three are advice for that reason, not rules anything checks."#;
 
 const DETAILED_BODY: &str = "goal · context (files and lines, the precedent) · what is decided · steps · acceptance (which tests) · out of scope · order and the files it shares · role";
+
+const REVIEW_FOCUS: &str = "Review focus / 리뷰에서 볼 것";
+/// 계획이 쓰는 에픽의 머리. 멤버의 머리는 [`DETAILED_BODY`] 그대로에 둘을 더한 것이다 — 따로 적으면 감독의 펼치기
+/// 브리프가 한 글 안에서 두 머리 목록(`what is decided` 와 `decisions`, `order and the files it shares` 와
+/// `order and shared files`)을 시킨다. `the_detailed_example_carries_every_heading` 이 막으려던 그 갈림이다.
+const PLAN_EPIC_BODY: &str =
+    "why this bundle · the person's decisions · promises · order and the files it shares · review focus";
+const PLAN_MEMBER_EXTRA: &str = "where and how (files, functions, structures) · important contracts and pitfalls";
+
+/// 두 계획 브리프의 공통 글. **물음을 어디로 보내는가는 여기 두지 않는다** — 감독의 펼치기는 정하지 못한 설계
+/// 물음을 멤버 본문에 열어 둔 채 일꾼에게 넘기고(그 보고에는 `gap:` 줄이 없다), `moai-plan` 의 초안은 `gap:` 줄로
+/// 돌려준다. 공통 글에 "gap 으로 돌려 달라" 를 두면 감독의 펼치기가 아무도 안 읽는 줄을 낸다.
+fn plan_core() -> String {
+    format!(
+        "Read the request, its evidence and enough code and tracker context to ground the split. Write short titles and concrete, actionable bodies with file and function locations, constraints, acceptance tests and review focus. For detailed writing use, for the epic: {PLAN_EPIC_BODY}; for a development member: {DETAILED_BODY}, adding {PLAN_MEMBER_EXTRA} after `what is decided`. Name the epic review section `{REVIEW_FOCUS}` (choose the English or Korean heading). For brief writing give what, where and tests. Classify each member using the difficulty rubric and explain why. Do not ask the person questions."
+    )
+}
+
+fn plan_brief_draft() -> String {
+    format!(
+        r#"Draft a plan from the interview record at <interview path> and the repository at <root>. Writing: <writing>. Work only in the scratchpad; do not write to the tracker or change repository files.
+{core}
+Write a plan file, an epic body file and one body file per member in the scratchpad. Preserve the mapping from each plan title to its body file. Return first `Model ran: anthropic/<your real model name>`, then `plan: <absolute file>`, `epic body: <absolute file>`, and for each member `<title> <low|medium|high> — <reason>; body: <absolute file>`. Return each unresolved decision as `gap: <what>`; do not ask the user.
+{rubric}"#,
+        core = plan_core(),
+        rubric = difficulty_rubric()
+    )
+}
 
 /// Advice only: the person's setting is read at runtime and never baked into generated files.
 const DETAIL: &str = r#"**How much to write is the person's — `detailed` unless they say otherwise.**
@@ -1200,7 +1230,7 @@ const REVIEW_IN_SESSION: &str = "the review this session has, else read the diff
 ///
 /// 표를 싣는 것은 `moai` 스킬 하나다([`verbs_section`]) — 세 벤더에 다 심기는 스킬이다. 감독 스킬과 그 일꾼 글은
 /// Claude Code 에만 가니(moai-obxm) 도구를 바로 적는다.
-pub const VERBS: [Verb; 8] = [
+pub const VERBS: [Verb; 9] = [
     // **Claude 는 들지 않는다**(moai-9js2, 2026-10-25 사용자 결정) — `.worktrees/` 로 드는 `EnterWorktree` 는 부를
     // 때마다 사람에게 승인을 묻고, allow 규칙으로 안 꺼진다. 그래서 칸이 도구가 아니라 "들지 말고 겨눈다" 다.
     Verb {
@@ -1222,6 +1252,10 @@ pub const VERBS: [Verb; 8] = [
     Verb {
         step: "Ask the person watching",
         words: ["`AskUserQuestion`", "`request_user_input`", "ask in the conversation and wait"],
+    },
+    Verb {
+        step: "Plan a request",
+        words: ["`/moai-plan`", "follow fork 3 in this session", "follow fork 3 in this session"],
     },
     REVIEW_VERB,
     Verb { step: "Change the model (the person does it)", words: ["`/model`", "`/model`", NO_VERB] },
@@ -1532,7 +1566,7 @@ pub fn skill() -> String {
     format!(
         r#"---
 name: moai
-description: Use for this repository's work, issues and plans. "what should I do first", "sort out the to-dos", "create an issue", "how is it going", "let us do this later", "뭐부터 할까", "할 일 정리", "이슈 만들어", "진행 상황", "이거 나중에 하자", when a feature request has to be split into several parts, or when something out of scope comes to mind mid-task. Use this instead of TodoWrite or a markdown TODO list.
+description: Use for this repository's work and issue tracking. "what should I do first", "sort out the to-dos", "create an issue", "how is it going", "let us do this later", "뭐부터 할까", "할 일 정리", "이슈 만들어", "진행 상황", "이거 나중에 하자", when a feature request has to be split into several parts, or when something out of scope comes to mind mid-task. Use this instead of TodoWrite or a markdown TODO list.
 ---
 
 # moai — this repository's issue tracker
@@ -1845,6 +1879,31 @@ commit column are read from that tracker's `.moai` root — even with another re
 nested inside the project (a submodule, `vendor`), a `moai` called in there does not
 write that repository's name.
 "#
+    )
+}
+
+/// Claude Code planning skill (moai-ns7a).
+pub fn plan() -> String {
+    format!(
+        r#"---
+name: moai-plan
+description: Plan a request, split an epic, or unfold a backlog with the planning model. Use for "plan this", "계획 세워", and "에픽으로 나눠".
+---
+
+# moai-plan
+
+The host interviews the person, then a planning subagent drafts a grounded plan. The moai CLI never launches an agent.
+
+1. Read `moai models --json` and `moai writing --json`. Compare the `plan` identifier case-insensitively: a name containing `fable` qualifies; a name containing `opus` qualifies only when `effort_plan` is `xhigh` or `max`. All other names fail. On failure stop before interviewing or creating anything; print one line naming the keys to change (`plan` and, when needed, `effort_plan`), recommending `fable` or `opus` with `effort_plan = "xhigh"`. Identify the source from `written`, then `repo`, else default; the user config overrides repository recommendations. Never substitute a model automatically.
+2. Inspect the repository, tracker and wiki for what can be learned without asking. Use `AskUserQuestion` to complete the interview: goal and done state, scope and exclusions, acceptance, protected areas and settled design, milestone (including explicit consent to join a running release or a new version), deadline and start, priority, review focus and risks. Ask follow-ups until decisions are settled. Never invent a start or deadline. No answer means no deadline.
+3. Save the interview, including the person's answers verbatim, in a scratchpad file. Pass its absolute path, root and `Writing:` detail to the subagent. Call `Agent(subagent_type: "general-purpose", model: <plan>, effort: <effort_plan>, description: "draft plan", prompt: <draft brief>)` with this brief. If `Agent` refuses the `plan` name (it takes only the names it can raise a subagent on), stop and tell the person which key to change, as in 1 — never substitute another model:
+
+{brief}
+
+4. Present the epic and member titles, difficulty and any `gap:` lines once. If gaps remain, ask only about those and resume the same `agentId` with the answers; the subagent never asks the person. Present the revised plan and obtain approval before writing the tracker. The person decides whether to attach a running milestone; omit `--milestone` without explicit consent. Encode dates in the plan or use `--due` and `--start` only as answered.
+5. After approval, the host registers new work with `moai add --from <plan file> --body -` (stream the epic body), adding `--milestone <id>` only when approved. If the person approved a new milestone, create it after approval with `moai milestone add`, using only the agreed version and dates, then attach it; hook rule 1 refuses a new milestone while this session holds a picked-up row, so then ask the person to create it. For a backlog use `moai backlog promote <id> --from <plan file>`; preserve its inherited milestone and body: combine the carried body and approved epic details into a scratch file, then replace the body with `moai edit <epic> -b - < <combined file>`. Apply an explicitly approved milestone and dates to the epic; do not override an inherited milestone without that approval. Map returned member IDs to titles and apply each body with `moai edit <member> -b - < <body file>`. Record `model: anthropic/<Model ran> (<highest difficulty> — plan: interview and detailed plan)` on the epic, using the actual model name without repeating the vendor. Do not pick up the work.
+"#,
+        brief = indent(&plan_brief_draft(), "    ")
     )
 }
 
@@ -2213,7 +2272,7 @@ values in a `[models]` table of its `.moai/config.toml`; the person's own keys w
 Read it at the start of every round; a value changed mid-round counts from the next one.
 
     moai models --json      one object: a model per role (plan, develop, complex, review,
-                            docs, bulk, codex), review_grade, effort, effort_complex,
+                            docs, bulk, codex), review_grade, effort, effort_complex, effort_plan,
                             written — the keys the person set — and repo — the keys the
                             repository recommended, read from repo_path; the rest are defaults
 
@@ -2596,7 +2655,8 @@ A backlog that only touches the wiki or the CHANGELOG is `docs`; sorting, summin
 same mechanical fix many times is `bulk`. **If the planner wrote `Model:` and `Effort:` lines
 in the issue body, read the model there as the role whose default it is** — the person's table
 still decides which model that role runs on. `<effort>` is `effort_complex` for `complex` and
-`effort` for the rest. The Codex worker's role is `codex`, and its sections say how it is sent.
+`effort` for the other worker roles; `effort_plan` goes only to the `plan` subagent (2-2).
+The Codex worker's role is `codex`, and its sections say how it is sent.
 
 The epic-end review is that epic's only review, because the members are not reviewed
 separately (the worker's 5 and 7).
@@ -2612,10 +2672,10 @@ subagent's model is fixed when you raise it: a worker that finds the work heavie
 **2-2. Unfold with the `plan` role.** A backlog item goes to its worker already unfolded.
 Splitting work into an epic and its issues is the `plan` role's (2-1) — a worker on `develop`
 or `complex` would otherwise plan on its own model. So before you send a backlog item, raise one
-subagent on the `plan` role's model — the role has no effort key, so pass none — on the brief
+subagent on the `plan` role's model and `effort_plan` on the brief
 below, every slot filled as in 3:
 
-    Agent(subagent_type: "general-purpose", model: <plan model>, description: "plan <id>", prompt: <the plan brief>)
+    Agent(subagent_type: "general-purpose", model: <plan model>, effort: <effort_plan>, description: "plan <id>", prompt: <the plan brief>)
 
 **Mark the backlog the moment you raise it** — `moai note <id> 'Sent: plan <agentId>'`, as 1 says
 for a send: until the plan hands back, that backlog still stands in `moai backlog ls`, and a
@@ -4858,6 +4918,8 @@ Due: <due>
 Person: <person>
 Writing: <writing>
 
+{core}
+
 1. Read it — moai -C "<root>" show <id> — and as much of the code as the split needs. If it
    already stands done, hand back `already unfolded: <id>` and stop: unfolding again puts up
    two epics.
@@ -4874,8 +4936,8 @@ Writing: <writing>
    {MILESTONE_CLEAR}
    moai -C "<root>" edit <epic> --due <due>
    A refusal because the day is later than the milestone's leaves the epic as it stands.
-4. Give every member a body the worker can start from, as `Writing:` says. `detailed`: these
-   headings, each a list —
+4. Give the epic a body, as `Writing:` says — `detailed`: the epic headings of the shared instructions above; combine it with the backlog context already carried onto it in a scratch file and write that combined body with `moai -C "<root>" edit <epic> -b - < <epic body file>`. Give every member a body the worker can start from, as `Writing:` says. `detailed`: these
+   headings, each a list, with the two the shared instructions add after `what is decided` —
    {DETAILED_BODY}.
    `brief`: what to change · where (file and function) · how to test it. A design question the
    backlog and its notes do not settle goes in it, open, for the worker to ask — do not
@@ -4892,6 +4954,7 @@ Writing: <writing>
    with `bulk` for sorting, summing up or the same mechanical fix many times. Then a line
    `not hung: <what and why>` for each release or deadline 3 left as it was or cleared.
    If you could not unfold, the first line after Model ran: is `not unfolded: <reason>`."#,
+        core = plan_core(),
         levels = DIFFICULTY.iter().map(|(level, _, _)| *level).collect::<Vec<_>>().join("|"),
         rubric = indent(&difficulty_rubric(), "   - "),
     )
@@ -5321,7 +5384,11 @@ root"), never in the root
    Write the grade you picked and why in one line in the angle (`-b`). The diff runs from
    where the branch left <base branch> — `git -C "<root>/.worktrees/<epic>" merge-base <base branch> HEAD`;
    asked in the root, `HEAD` is the root's own tip and the range comes out empty. You pulled it
-   in 6, so the conflict resolution is inside it too. Create the review issue (rule 3)
+   in 6, so the conflict resolution is inside it too. Read the epic body and put the contents
+   of its `{REVIEW_FOCUS}` section (either heading) first in the review issue angle,
+   followed by any focus discovered during development — a section of several lines or one
+   holding a single quote goes in through `-b -` from a scratch file, not inside `-b '…'`.
+   If neither heading exists, write the angle as before. Create the review issue (rule 3)
 
        {review}
    Run this line as `moai -C "<root>"`, per 4-1, wherever the shell stands.
@@ -5729,7 +5796,9 @@ Create the review issue using the shared command, called with `moai -C "<root>"`
 
     {review}
 
-Fill the angle with the grade, why, and "review by the supervisor's review subagent".
+Fill the angle with the grade, why, and "review by the supervisor's review subagent", then
+the epic body's `{REVIEW_FOCUS}` section (either heading) and the focus development
+added, as worker.md's 7 says.
 Do not run the review yourself. Move each finished member to review, one id per call:
 
     {TO_REVIEW}
@@ -6312,6 +6381,7 @@ mod tests {
     fn the_skill_description_keeps_its_korean_triggers() {
         let head =
             |text: &str| text.lines().find(|l| l.starts_with("description: ")).expect("발동어 줄이 없다").to_string();
+        assert!(head(&skill()).contains("when a feature request has to be split into several parts"));
         for (whose, said, triggers) in [
             (
                 "moai",
@@ -6353,7 +6423,7 @@ mod tests {
         let head: String = skill.chars().take(40).collect();
         // 이름은 `skill::NAMES`·`skill::OPTIONAL` 의 것이다 — 위키가 스킬 이름을 id 에서 거르는 `skill::EVER_PLANTED` 는 그
         // 목록을 다 든다(moai-mdzx.3pm, moai-six5.1xz). 머리의 이름이 그 목록과 갈리면 고친 이름이 다시 없는 id 로 선다.
-        let [moai, supervisor, wiki_skill, recover_skill] = crate::skill::NAMES;
+        let [moai, supervisor, wiki_skill, recover_skill, plan_skill] = crate::skill::NAMES;
         let [
             crate::skill::Optional { name: tmux_skill, .. },
             crate::skill::Optional { name: cmux_skill, .. },
@@ -6361,6 +6431,7 @@ mod tests {
         ] = crate::skill::OPTIONAL;
         assert!(skill.starts_with(&format!("---\nname: {moai}\ndescription: ")), "{head}");
         assert!(supervise().starts_with(&format!("---\nname: {supervisor}\ndescription: ")), "감독 스킬의 머리가 없다");
+        assert!(plan().starts_with(&format!("---\nname: {plan_skill}\ndescription: ")), "planning skill frontmatter");
         assert!(wiki().starts_with(&format!("---\nname: {wiki_skill}\ndescription: ")), "위키 스킬의 머리가 없다");
         assert!(tmux().starts_with(&format!("---\nname: {tmux_skill}\ndescription: ")), "tmux 스킬의 머리가 없다");
         assert!(cmux().starts_with(&format!("---\nname: {cmux_skill}\ndescription: ")), "cmux 스킬의 머리가 없다");
@@ -6785,6 +6856,29 @@ stop sending outside work while a release runs",
             assert!(supervise.contains(head), "감독이 {head} 를 안 읽는다");
         }
         assert!(worker().contains(RAISE_HEAD), "일꾼이 {RAISE_HEAD} 를 안 낸다");
+    }
+
+    #[test]
+    fn planning_briefs_share_the_core_and_draft_only_writes_scratch() {
+        let core = plan_core();
+        assert!(plan_brief().contains(&core));
+        let draft = plan_brief_draft();
+        assert!(draft.contains(&core));
+        // 초안은 moai 를 아예 안 부른다 — `moai -C "<root>" edit` 처럼 감독 쪽 철자로 든 쓰기도 여기서 붉어진다.
+        assert!(!draft.contains("moai "), "the draft brief runs a moai command:\n{draft}");
+        // 물음을 `gap:` 으로 돌려주는 것은 초안만이다 — 감독의 펼치기는 열린 물음을 멤버 본문에 남기고, 그 보고에는
+        // `gap:` 줄을 읽는 자리가 없다.
+        assert!(draft.contains("gap: <what>"));
+        assert!(!core.contains("gap"), "the shared core sends questions to gaps:\n{core}");
+        // 멤버의 머리는 펼치기의 4 와 한 목록이다 — 공통 글이 따로 적은 목록을 시키면 한 브리프 안에서 머리가 갈린다.
+        assert!(core.contains(DETAILED_BODY), "the shared core names other member headings:\n{core}");
+        for term in ["moai models --json", "effort_plan", "AskUserQuestion", "Agent(", "--milestone", "--due"] {
+            assert!(plan().contains(term), "missing {term}");
+        }
+        assert!(plan().contains("description: "), "the Agent call misses its required description");
+        assert!(worker().contains(REVIEW_FOCUS));
+        assert!(worker_codex().contains(REVIEW_FOCUS), "a Codex worker drops the planned review focus");
+        assert!(supervise().contains("effort: <effort_plan>"));
     }
 
     /// **`plan` 역할이 감독의 펼치기를 맡는다**(moai-w25x.jby, 2026-10-26 사용자 결정) — 표에 적어도 아무 데서 안 듣던

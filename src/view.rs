@@ -3646,6 +3646,7 @@ pub fn models(
         match key {
             "effort" => &["develop", "docs", "bulk"],
             "effort_complex" => &["complex"],
+            "effort_plan" => &["plan"],
             "review_grade" => &["review"],
             _ => &[],
         }
