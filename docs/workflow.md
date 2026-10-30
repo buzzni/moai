@@ -285,7 +285,8 @@ step you take on purpose — no ordinary write archives anything.
    than `archive_days` (two weeks unless `.moai/config.toml` says otherwise)
 2. `moai archive --dry-run` — see what would move. An epic moves together with its
    members, and a parent with its children, only once the whole bundle is old
-   enough. Milestones never move
+   enough. A member under a milestone waits until that milestone is old enough
+   too; the milestone row never moves
 3. `moai archive` — move them into `.moai/archive/<year>.jsonl`, then commit
    `.moai/` like any other tracker change
 

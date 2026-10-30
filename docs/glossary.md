@@ -10,7 +10,8 @@ in [the CLI reference](cli.md).
 Work that has stood in `done` for longer than `archive_days` (two weeks unless
 `.moai/config.toml` says otherwise; `0` turns eligibility off). `moai archive`
 moves eligible closed epic bundles and standalone rows into yearly JSONL files
-under `.moai/archive`; milestones stay live. Board and ready count active work
+under `.moai/archive`; milestones stay live. A row under a parent, epic or milestone
+waits until every one of those groups has also reached archive age. Board and ready count active work
 and use archived rows as reference context, while `moai show --archived`, `moai show <id>` and `SPC v o`
 read the archive. `moai mv` restores only the selected archived row, and so does
 `moai defer <id> --undo` on an archived deferred epic. A live row

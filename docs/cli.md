@@ -469,11 +469,12 @@ Order and paging:
   Archive: a row that has stood in done for archive_days (14 unless
   .moai/config.toml says otherwise, 0 turns it off) is the archive - an
   epic or milestone counted from when it got to done, the clock --done
-  reads. --all and -s done leave it out and the tail says how many;
+  reads. Rows under a parent, epic or milestone wait for that group to
+  reach archive age too. --all and -s done leave it out; the tail says how many.
   --archived brings it back, done and deferred with it. Asking by time
   (--since, --created, --done, --stale) finds it anyway, and so does -g
-  once done is let in (-g --all). Nothing is stored: it is read from the
-  column and the clock each time.
+  once done is let in (-g --all). Rows already moved to .moai/archive stay
+  archived even if archive_days is increased or turned off.
 
     moai show --archived -g parser
 
@@ -1276,11 +1277,12 @@ Order and paging:
   Archive: a row that has stood in done for archive_days (14 unless
   .moai/config.toml says otherwise, 0 turns it off) is the archive - an
   epic or milestone counted from when it got to done, the clock --done
-  reads. --all and -s done leave it out and the tail says how many;
+  reads. Rows under a parent, epic or milestone wait for that group to
+  reach archive age too. --all and -s done leave it out; the tail says how many.
   --archived brings it back, done and deferred with it. Asking by time
   (--since, --created, --done, --stale) finds it anyway, and so does -g
-  once done is let in (-g --all). Nothing is stored: it is read from the
-  column and the clock each time.
+  once done is let in (-g --all). Rows already moved to .moai/archive stay
+  archived even if archive_days is increased or turned off.
 
     moai show --archived -g parser
 
@@ -1581,11 +1583,12 @@ Order and paging:
   Archive: a row that has stood in done for archive_days (14 unless
   .moai/config.toml says otherwise, 0 turns it off) is the archive - an
   epic or milestone counted from when it got to done, the clock --done
-  reads. --all and -s done leave it out and the tail says how many;
+  reads. Rows under a parent, epic or milestone wait for that group to
+  reach archive age too. --all and -s done leave it out; the tail says how many.
   --archived brings it back, done and deferred with it. Asking by time
   (--since, --created, --done, --stale) finds it anyway, and so does -g
-  once done is let in (-g --all). Nothing is stored: it is read from the
-  column and the clock each time.
+  once done is let in (-g --all). Rows already moved to .moai/archive stay
+  archived even if archive_days is increased or turned off.
 
     moai show --archived -g parser
 
@@ -1886,11 +1889,12 @@ Order and paging:
   Archive: a row that has stood in done for archive_days (14 unless
   .moai/config.toml says otherwise, 0 turns it off) is the archive - an
   epic or milestone counted from when it got to done, the clock --done
-  reads. --all and -s done leave it out and the tail says how many;
+  reads. Rows under a parent, epic or milestone wait for that group to
+  reach archive age too. --all and -s done leave it out; the tail says how many.
   --archived brings it back, done and deferred with it. Asking by time
   (--since, --created, --done, --stale) finds it anyway, and so does -g
-  once done is let in (-g --all). Nothing is stored: it is read from the
-  column and the clock each time.
+  once done is let in (-g --all). Rows already moved to .moai/archive stay
+  archived even if archive_days is increased or turned off.
 
     moai show --archived -g parser
 
@@ -2212,11 +2216,12 @@ Order and paging:
   Archive: a row that has stood in done for archive_days (14 unless
   .moai/config.toml says otherwise, 0 turns it off) is the archive - an
   epic or milestone counted from when it got to done, the clock --done
-  reads. --all and -s done leave it out and the tail says how many;
+  reads. Rows under a parent, epic or milestone wait for that group to
+  reach archive age too. --all and -s done leave it out; the tail says how many.
   --archived brings it back, done and deferred with it. Asking by time
   (--since, --created, --done, --stale) finds it anyway, and so does -g
-  once done is let in (-g --all). Nothing is stored: it is read from the
-  column and the clock each time.
+  once done is let in (-g --all). Rows already moved to .moai/archive stay
+  archived even if archive_days is increased or turned off.
 
     moai show --archived -g parser
 
@@ -2793,7 +2798,8 @@ Order:
   [deferred·archive 312 hidden]. The view is separate from the filter, so
   Esc does not clear it and the two apply together.
   Done that has sat in done for a while is the archive (archive_days in
-  .moai/config.toml, 14 unless written; 0 turns it off). It stays hidden on
+  .moai/config.toml, 14 unless written; 0 turns it off). Rows also wait for
+  its parent, epic and milestone to reach archive age. It stays hidden on
   the list and the board even with done shown, and the path line counts it
   — [archive 312 hidden]. SPC v o shows it and is kept under [tui] as
   show_archived; SPC v a (all) leaves it hidden. / search finds it anyway.

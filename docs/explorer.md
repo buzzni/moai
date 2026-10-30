@@ -373,7 +373,8 @@ with `Enter` first.
 
 Work that has sat in done for two weeks is eligible for the archive. The archive
 is moved explicitly with `moai archive`; use `moai archive --dry-run` first to
-see the rows. Closed epic bundles move together into
+see the rows. A row under a parent, epic or milestone stays visible until every
+one of those groups has stood closed for `archive_days`. Closed epic bundles move together into
 `.moai/archive/<year>.jsonl`, while milestone rows stay live. Normal board and
 ready counts use the active snapshot. Archived rows still supply parent, blocker
 and milestone context, so a shipped release stays closed and a restored member

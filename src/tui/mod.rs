@@ -421,7 +421,10 @@ struct Stood {
 #[derive(Default)]
 pub struct Ground {
     stands: States,
+    archived_rows: Vec<bool>,
+    archived_at: String,
     epic: std::collections::BTreeMap<String, String>,
+    milestone: std::collections::BTreeMap<String, String>,
     /// 쌍둥이 부모 밑에서 소속을 못 정한 줄(`report::Handing::twin`) — `epic` 과 함께 옮긴다.
     twin: std::collections::BTreeSet<String>,
     /// 계획에서 빠진 줄 → 그것을 뺀 줄, **id 로 접은 것**(`report::deferred_roots`).
@@ -538,7 +541,10 @@ impl Ground {
         };
         Ground {
             stands,
+            archived_rows: Vec::new(),
+            archived_at: String::new(),
             epic: soil.epic.handed().iter().map(|(k, v)| (k.to_string(), v.to_string())).collect(),
+            milestone: soil.milestone.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect(),
             twin: soil.epic.twin().iter().map(|k| k.to_string()).collect(),
             put_off: soil.roots.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect(),
             split,
@@ -624,6 +630,7 @@ impl Ground {
         }
         crate::query::Where {
             epic: crate::report::Handing::of_handed(borrow(&self.epic), self.twin.iter().map(String::as_str).collect()),
+            milestone: borrow(&self.milestone),
             // **이것만 줄을 든다** — 마일스톤을 줄마다 묻는 재료라 빌릴 String 지도가 없다
             // (moai-jk2u.wvn). 그래서 짓지 않고 줄만 건넨다 — `--milestone` 을 묻는 거르개만
             // 그 판에 한 번 짓는다(`query::Lined`, moai-6mnm).
@@ -1745,6 +1752,13 @@ impl Site {
         path: Path,
         unreadable: Vec<Option<String>>,
     ) -> Site {
+        let now = crate::model::now();
+        let mut ground = ground;
+        ground.archived_rows = {
+            let where_ = ground.here(&issues);
+            issues.iter().map(|row| where_.archived(row, &now)).collect()
+        };
+        ground.archived_at = now.clone();
         Site {
             // 기본값은 도구의 것이다(moai-9it4). 한때 여기가 `Lang::Ko` 였고 그 한 줄이 "탐색기는
             // 아직 한국어로 선다" 는 뜻이었다 — 말이 안 닿은 자리에서 영어를 집으면 한국어 화면
@@ -1761,7 +1775,7 @@ impl Site {
             path,
             repo: None,
             me: None,
-            now: crate::model::now(),
+            now,
             unreadable_live: unreadable.len(),
             unreadable_archive: 0,
             unreadable,
@@ -1851,9 +1865,13 @@ impl Site {
     /// [`Site::column`], 그 칸에 든 때는 묶음이면 읽은 칸에 든 때(`report::Stand::entered`)고 아니면 제 칸
     /// 시각이다. 시계는 적재마다 고정한 [`Site::now`] 다 — 프레임마다 다시 잡으면 자정 언저리에 줄이 깜빡인다.
     pub fn archived(&self, at: usize) -> bool {
-        let i = &self.issues[at];
-        let since = self.stand_of(i).map_or(i.status_since.as_str(), |s| s.entered.as_str());
-        crate::report::archived(self.column(at), since, &self.now, self.ground.archive_days)
+        if self.now == self.ground.archived_at {
+            self.ground.archived_rows.get(at).copied().unwrap_or(false)
+        } else {
+            // A fixed test clock or a read that crosses a second needs the new
+            // instant. Normal frames use the load's precomputed answers.
+            self.ground.here(&self.issues).archived(&self.issues[at], &self.now)
+        }
     }
 
     /// 그 줄이 서는 **보드의 레인**(moai-9nfw) — 뿌리에서는 그 줄이 사는 마일스톤이나 바구니(`(마일스톤 없음)`·
@@ -7011,7 +7029,7 @@ mod tests {
         rest.deferred_at = Some("2026-09-28T00:00:00Z".into());
         let a = App::aging(vec![make("argos-0001", Kind::Epic), finished, rest], cfg(), "2026-09-30T00:00:00Z");
         assert_eq!(a.site.column(0), "done", "시험의 전제 — 남은 멤버를 미뤄 에픽이 닫혔다");
-        assert!(a.site.archived(1), "시험의 전제 — 29일 전에 끝난 멤버는 아카이브다");
+        assert!(!a.site.archived(1), "recently closed epic keeps its older member visible");
         assert!(!a.site.archived(0), "미뤄 닫은 그날 에픽이 아카이브로 숨었다");
         let wh = a.site.ground.here(&a.site.issues);
         assert_eq!(wh.since(&a.site.issues[0]), "2026-09-28T00:00:00Z", "거름망이 끝난 멤버의 때로 쟀다");

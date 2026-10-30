@@ -653,7 +653,7 @@ pub fn deferred_sources_in<'a>(
 /// 줄 하나를 계획에서 빼는 미룸을 **가까운 것부터** 짚는 길 — 제 줄, 제가 든
 /// 에픽·마일스톤, 그다음 부모. [`deferred_roots_in`] 은 첫째만 쓰고(그 줄을 뺀 곳),
 /// [`counted`] 는 전부 본다(묶음 제 미룸 말고도 그 멤버를 빼는 까닭이 있나).
-struct Shelf<'a, 'm> {
+pub(crate) struct Shelf<'a, 'm> {
     lines: &'m Lines<'a>,
     epic_of: &'m Handing<'a>,
     mile_of: &'m BTreeMap<&'a str, &'a str>,
@@ -662,14 +662,14 @@ struct Shelf<'a, 'm> {
 impl<'a, 'm> Shelf<'a, 'm> {
     /// **[`Lines`] 는 받는다** — 여기서 지으면 `status` 한 번에 [`groups`]·[`milestones_over`]
     /// 와 나란히 세 벌이 선다(moai-jk2u.pl6, `지도는 한 벌이다` moai-g0zx).
-    fn new(lines: &'m Lines<'a>, epic_of: &'m Handing<'a>, mile_of: &'m BTreeMap<&'a str, &'a str>) -> Shelf<'a, 'm> {
+    pub(crate) fn new(lines: &'m Lines<'a>, epic_of: &'m Handing<'a>, mile_of: &'m BTreeMap<&'a str, &'a str>) -> Shelf<'a, 'm> {
         Shelf { lines, epic_of, mile_of }
     }
 
     /// id 로 짚은 줄의 미룸 — **조상에게만 쓴다.** 조상의 답은 그 조상 줄의 것이고,
     /// 그 줄을 고르는 자는 `by_id`(뒷줄이 이긴다)라 [`groups`] 와 같은 자다.
-    fn own(&self, id: &'a str) -> Option<&'a str> {
-        self.lines.at(id).is_some_and(is_put_off).then_some(id)
+    fn own(&self, id: &'a str, eligible: &impl Fn(&Issue) -> bool) -> Option<&'a str> {
+        self.lines.at(id).is_some_and(eligible).then_some(id)
     }
 
     /// 그 줄이 **든 묶음**의 미룸. **소속이 실제로 서는 곳만** 본다 — 에픽은 에픽에
@@ -680,8 +680,8 @@ impl<'a, 'm> Shelf<'a, 'm> {
     /// **값으로 받는다** — 지도를 짚은 `Option<&&str>` 을 받던 때는 줄마다 잰 답과 지도를 짚은
     /// 답이 부르는 자리에서 똑같이 생겨서, 축 하나만 줄로 옮기고 다른 축을 지도에 둔 것을
     /// 컴파일러도 읽는 사람도 못 봤다(리뷰 moai-jk2u.m60 — 마일스톤 축이 그렇게 남았다).
-    fn joined(&self, to: Option<&'a str>, want: Kind) -> Option<&'a str> {
-        to.filter(|t| self.lines.at(t).map(|x| x.kind) == Some(want)).and_then(|t| self.own(t))
+    fn joined(&self, to: Option<&'a str>, want: Kind, eligible: &impl Fn(&Issue) -> bool) -> Option<&'a str> {
+        to.filter(|t| self.lines.at(t).map(|x| x.kind) == Some(want)).and_then(|t| self.own(t, eligible))
     }
 
     /// 제 줄부터 부모를 타고 올라가며, 그 줄이나 그 줄의 에픽·마일스톤의 미룸을
@@ -708,13 +708,13 @@ impl<'a, 'm> Shelf<'a, 'm> {
     /// 그 줄의 미룸을 입었다 — 두 줄의 차례를 바꾸면 `ready` 에 서다가 사라졌다. 넘지 않으면
     /// 그 위의 미룸도 안 받고 그 줄은 계획에 남는다. 자리를 모르는 줄이 파일 차례로 계획에서
     /// 빠지는 것보다 싸다.
-    fn walk(&self, from: &'a Issue, mut visit: impl FnMut(&'a str) -> bool) {
+    fn walk_if(&self, from: &'a Issue, eligible: &impl Fn(&Issue) -> bool, mut visit: impl FnMut(&'a str) -> bool) {
         let lost = self.epic_of.lost(from);
         let start = from.id.as_str();
         let mut cur = Some(start);
         while let Some(at) = cur {
             if at != start && self.lines.rooted.contains(at) {
-                if let Some(r) = self.own(at) {
+                if let Some(r) = self.own(at, eligible) {
                     visit(r);
                 }
                 return;
@@ -724,7 +724,7 @@ impl<'a, 'm> Shelf<'a, 'm> {
             let here = line.map(|x| x.kind);
             // **`line` 이 고른 그 줄에 묻는다** — 줄을 한 번 고르고 축마다 다시 고르면, 축
             // 하나가 딴 줄을 보게 되는 것이 컴파일에 안 걸린다(리뷰 moai-jk2u.m60).
-            let own = line.filter(|l| is_put_off(l)).map(|_| at);
+            let own = line.filter(|l| eligible(l)).map(|_| at);
             if let Some(r) = own
                 && visit(r)
             {
@@ -741,7 +741,7 @@ impl<'a, 'm> Shelf<'a, 'm> {
             // 를 한 번 더 짚던 값도 함께 빠진다.
             let epic = line.and_then(|i| self.epic_of.at(i));
             if matches!(here, Some(Kind::Issue | Kind::Backlog))
-                && let Some(r) = self.joined(epic, Kind::Epic)
+                && let Some(r) = self.joined(epic, Kind::Epic, eligible)
                 && visit(r)
             {
                 return;
@@ -758,13 +758,37 @@ impl<'a, 'm> Shelf<'a, 'm> {
                 _ => self.mile_of.get(at).copied(),
             };
             if matches!(here, Some(Kind::Issue | Kind::Backlog | Kind::Epic))
-                && let Some(r) = self.joined(stone, Kind::Milestone)
+                && let Some(r) = self.joined(stone, Kind::Milestone, eligible)
                 && visit(r)
             {
                 return;
             }
             cur = crate::id::parent_of(at).filter(|p| self.lines.at(p).is_some() && !(lost && self.lines.twinned(p)));
         }
+    }
+
+    fn walk(&self, from: &'a Issue, visit: impl FnMut(&'a str) -> bool) {
+        self.walk_if(from, &is_put_off, visit);
+    }
+
+    /// Ask the same parent, epic and milestone path used for inherited deferral.
+    /// The first callback is the row itself; callers may skip it when they have
+    /// already checked that row with its own stored/live provenance.
+    pub(crate) fn every_archive_ancestor(&self, from: &'a Issue, eligible: impl Fn(&Issue) -> bool) -> bool {
+        let mut first = true;
+        let mut all = true;
+        self.walk_if(from, &|_| true, |id| {
+            if first {
+                first = false;
+                return false;
+            }
+            if let Some(line) = self.lines.at(id) && !eligible(line) {
+                all = false;
+                return true;
+            }
+            false
+        });
+        all
     }
 
     /// 그 줄을 계획에서 뺀 가장 가까운 줄.
@@ -1975,6 +1999,18 @@ pub fn archived(column: &str, since: &str, now: &str, days: i64) -> bool {
 /// 되살린 멤버가 있어 닫히지 않았으면(읽은 칸이 done 이 아니면) 보인다: 그 멤버의 묶음이다.
 pub fn is_put_away(column: &str, since: &str, now: &str, days: i64, stored: bool) -> bool {
     (stored && column == crate::config::DONE) || archived(column, since, now, days)
+}
+
+/// A live row ages only after every parent, epic and milestone on its placement
+/// path has aged. A row already moved to archive storage stays put away while
+/// its read column is done, even when a group later reopens.
+pub(crate) fn put_away_in<'a>(
+    row: &'a Issue,
+    shelf: &Shelf<'a, '_>,
+    stored: bool,
+    aged: impl Fn(&Issue) -> bool,
+) -> bool {
+    aged(row) && (stored || shelf.every_archive_ancestor(row, aged))
 }
 
 /// 줄 하나가 입는 **읽은 칸** — `--json` 의 `derived_status` 가 내는 그 값이다. 묶음이
@@ -6440,10 +6476,12 @@ fn status_in_scope<'a, 'c>(
     //      산 줄만 세던 판은 하나를 댔고, 가리키는 `show --deferred` 는 둘을 냈다. 도로 섰는가는 목록이
     //      아카이브를 숨기는 자(`query::Where::archived`)와 같은 자로 잰다: 읽은 칸과 그 칸에 든 때를
     //      [`is_put_away`] 에 댄다. 밑에 산 줄이 없는 미룬 묶음은 칸이 done 이라 지난 일로 빠진다.
-    let back = |i: &Issue| {
-        let since = stands_on(i, |(_, id)| group_entered.get(id).copied()).unwrap_or(i.status_since.as_str());
-        !is_put_away(column(i, &states), since, now, cfg.archive_days, true)
+    let shelf = Shelf::new(&soil.lines, &soil.epic, &soil.milestone);
+    let aged_row = |row: &Issue| {
+        let since = stands_on(row, |(_, id)| group_entered.get(id).copied()).unwrap_or(row.status_since.as_str());
+        is_put_away(column(row, &states), since, now, cfg.archive_days, !visible(row))
     };
+    let back = |i: &Issue| !put_away_in(i, &shelf, !visible(i), aged_row);
     let shelved = |(k, i): &(usize, &Issue)| off[*k].is_some() && (visible(i) || back(i));
     let count = issues.iter().enumerate().filter(shelved).count();
     if count > 0 {
@@ -6640,9 +6678,7 @@ fn status_in_scope<'a, 'c>(
     // `archive_days` 를 0 으로 끄거나 늘려도 보드로 돌아오지 않는다. 같은 자를 목록(`query::Where::archived`)이 쓴다.
     let aged = |r: &Roll| {
         r.id.as_deref().is_some_and(|id| {
-            let since = group_entered.get(id).copied().unwrap_or_default();
-            let stored = by_id.get(id).is_some_and(|i| !visible(i));
-            is_put_away(r.column.as_deref().unwrap_or_default(), since, now, cfg.archive_days, stored)
+            by_id.get(id).is_some_and(|i| put_away_in(i, &shelf, !visible(i), aged_row))
         })
     };
     let before = (stones.len(), epics.len());

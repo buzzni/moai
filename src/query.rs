@@ -29,6 +29,7 @@ pub enum Sel {
 #[derive(Default)]
 pub struct Where<'a> {
     pub epic: crate::report::Handing<'a>,
+    pub(crate) milestone: BTreeMap<&'a str, &'a str>,
     /// 줄을 id 로 찾는 지도와 뿌리로 올라간 생각 (`report::Lines`). 마일스톤을 **줄마다**
     /// 묻는 재료다 — 위의 `milestone` 지도는 id 로 짠 것이라 같은 id 의 앞줄이 뒷줄의
     /// 릴리스를 입는다(moai-jk2u.wvn).
@@ -182,15 +183,15 @@ impl<'a> Where<'a> {
         Self::build(all, cfg, soil, true)
     }
 
-    /// Single-row detail uses the same reader as lists, but ordinary issues need no group columns.
-    /// Taking the row here keeps group details on the full path, including their archive age.
+    /// Single-row detail uses the same group columns as lists. Even an ordinary
+    /// issue needs them to decide whether its parent, epic and milestone have aged.
     pub fn for_one(
         all: &'a [Issue],
         cfg: &'a crate::config::Config,
         soil: crate::report::Soil<'a>,
-        issue: &Issue,
+        _issue: &Issue,
     ) -> Where<'a> {
-        Self::build(all, cfg, soil, crate::report::is_group(issue))
+        Self::build(all, cfg, soil, true)
     }
 
     fn build(
@@ -202,7 +203,7 @@ impl<'a> Where<'a> {
         let stands = if groups { soil.stands(all, cfg) } else { Default::default() };
         let states = stands.iter().map(|(id, s)| (*id, s.column)).collect();
         let since = stands.into_iter().map(|(id, s)| (id, s.entered)).collect();
-        let crate::report::Soil { epic, roots, shelved, kinds, folded, lines, .. } = soil;
+        let crate::report::Soil { epic, milestone, roots, shelved, kinds, folded, lines, .. } = soil;
         // **짓기 전에 빈지 본다**(리뷰 moai-jk2u.hr4). 줄마다 갈리는 id 는 같은 id 가 두 줄일
         // 때만 서는데, `kinds` 는 id 마다 한 칸이라 그 수가 줄 수와 같으면 id 가 다 다르다 —
         // 성한 저장소에서 거름망을 짓는 걸음마다 목록을 두 번 더 걷던 자리다.
@@ -217,6 +218,7 @@ impl<'a> Where<'a> {
         let kinds = crate::report::Kinds::Own(kinds);
         Where {
             epic,
+            milestone,
             lines: Lined::Ready(lines),
             shelved,
             states,
@@ -311,7 +313,13 @@ impl<'a> Where<'a> {
     /// 아카이브와 한 줄을 다르게 보지 않는다.
     pub fn archived(&self, i: &Issue, now: &str) -> bool {
         let stored = self.stored.contains(i.id.as_str());
-        crate::report::is_put_away(self.column(i), self.since(i), now, self.archive_days, stored)
+        let shelf = crate::report::Shelf::new(self.lines.get(), &self.epic, &self.milestone);
+        crate::report::put_away_in(i, &shelf, stored, |row| {
+            crate::report::is_put_away(
+                self.column(row), self.since(row), now, self.archive_days,
+                self.stored.contains(row.id.as_str()),
+            )
+        })
     }
 }
 
@@ -2254,13 +2262,48 @@ mod tests {
         let (both, c) = ([epic.clone(), old.clone(), late.clone()], cfg());
         let wh = Where::of(&both, &c);
         assert!(!wh.archived(&epic, NOW), "최근에 끝난 멤버가 있는데 묶음이 숨었다");
-        assert!(wh.archived(&old, NOW) && !wh.archived(&late, NOW));
+        assert!(!wh.archived(&old, NOW) && !wh.archived(&late, NOW), "an open epic keeps its old member visible");
         let aged = [epic.clone(), old.clone(), member("a-0012", "2026-08-02T00:00:00Z")];
         assert!(Where::of(&aged, &cfg()).archived(&epic, NOW), "멤버가 다 오래 끝난 묶음이 안 숨는다");
         // 멤버가 남은 묶음은 제 줄을 손으로 done 에 뒀어도 done 이 아니다.
         let mut open = late.clone();
         open.status = Status::new("todo");
         assert!(!Where::of(&[epic.clone(), old, open], &cfg()).archived(&epic, NOW));
+    }
+
+    #[test]
+    fn a_done_member_under_an_open_epic_is_not_archived() {
+        let mut epic = issue("a-0010", "todo", &[]);
+        epic.kind = Kind::Epic;
+        let mut old = closed_at("a-0011", "2026-08-01T00:00:00Z");
+        old.epic = Some(epic.id.clone());
+        let mut open = issue("a-0012", "todo", &[]);
+        open.epic = Some(epic.id.clone());
+        let rows = [epic, old, open];
+        let c = cfg();
+        let where_ = Where::of(&rows, &c);
+        assert!(!where_.archived(&rows[1], NOW));
+    }
+
+    #[test]
+    fn a_done_epic_under_a_running_milestone_is_not_archived() {
+        let mut milestone = issue("a-0010", "todo", &[]);
+        milestone.kind = Kind::Milestone;
+        let mut epic = issue("a-0011", "todo", &[]);
+        epic.kind = Kind::Epic;
+        epic.milestone = Some(milestone.id.clone());
+        let mut old = closed_at("a-0012", "2026-08-01T00:00:00Z");
+        old.epic = Some(epic.id.clone());
+        let mut other_epic = issue("a-0013", "todo", &[]);
+        other_epic.kind = Kind::Epic;
+        other_epic.milestone = Some(milestone.id.clone());
+        let mut open = issue("a-0014", "in_progress", &[]);
+        open.epic = Some(other_epic.id.clone());
+        let rows = [milestone, epic, old, other_epic, open];
+        let c = cfg();
+        let where_ = Where::of(&rows, &c);
+        assert!(!where_.archived(&rows[1], NOW));
+        assert!(!where_.archived(&rows[2], NOW));
     }
 
     /// **남은 멤버를 미뤄 닫은 묶음은 미룬 때 done 에 든다**(moai-23q4, 2026-10-03 사용자 결정). 끝난 멤버가

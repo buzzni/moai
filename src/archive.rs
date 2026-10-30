@@ -567,7 +567,8 @@ pub fn movable(issues: &[Issue], archived: &Load, cfg: &Config, now: &str) -> Ve
         return Vec::new();
     }
     let context = report::with_archive(issues, &archived.issues, &BTreeSet::new());
-    eligible_except(issues, &report::group_stands(&context, cfg), cfg, now, &conflicts(issues, archived))
+    let soil = report::Soil::of(&context);
+    eligible_except(issues, &soil, &soil.stands(&context, cfg), cfg, now, &conflicts(issues, archived))
 }
 
 /// The board over `rows` with the archive beside it, and how many rows [`movable`] picks from `root` — what
@@ -639,7 +640,7 @@ pub fn board_in<'a>(
     let stands = soil.stands(all, cfg);
     let moving = match cfg.archive_days <= 0 {
         true => 0,
-        false => eligible_except(rows, &stands, cfg, now, excluded).len(),
+        false => eligible_except(rows, soil, &stands, cfg, now, excluded).len(),
     };
     (report::status_of_context(all, rows, unreadable, cfg, now, soil, stands), moving)
 }
@@ -649,6 +650,7 @@ pub fn board_in<'a>(
 /// `stands` holds the group columns read with archived rows beside `issues` ([`report::group_stands`]).
 fn eligible_except(
     issues: &[Issue],
+    soil: &report::Soil<'_>,
     stands: &BTreeMap<report::GroupKey<'_>, report::Stand<'_, '_>>,
     cfg: &Config,
     now: &str,
@@ -658,6 +660,7 @@ fn eligible_except(
         return Vec::new();
     }
     let handing = report::Handing::of(issues);
+    let shelf = report::Shelf::new(&soil.lines, &soil.epic, &soil.milestone);
     let by_id: BTreeMap<&str, usize> = issues.iter().enumerate().map(|(at, i)| (i.id.as_str(), at)).collect();
     let mut parents: Vec<usize> = (0..issues.len()).collect();
     fn root(parents: &mut [usize], at: usize) -> usize {
@@ -686,13 +689,11 @@ fn eligible_except(
         *counts.entry(i.id.as_str()).or_insert(0usize) += 1;
     }
     for (at, i) in issues.iter().enumerate() {
-        let eligible = match i.kind {
-            Kind::Milestone => false,
-            Kind::Epic => stands
-                .get(&(Kind::Epic, i.id.as_str()))
-                .is_some_and(|s| report::archived(s.column, s.entered, now, cfg.archive_days)),
-            _ => report::archived(i.status.as_str(), &i.status_since, now, cfg.archive_days),
-        };
+        let eligible = i.kind != Kind::Milestone && report::put_away_in(i, &shelf, false, |row| {
+            let (column, since) = report::stands_on(row, |key| stands.get(&key))
+                .map_or((row.status.as_str(), row.status_since.as_str()), |s| (s.column, s.entered));
+            report::archived(column, since, now, cfg.archive_days)
+        });
         if !eligible || counts[i.id.as_str()] > 1 || excluded.contains(&i.id) {
             blocked.insert(root(&mut parents, at));
         }
@@ -881,6 +882,22 @@ mod tests {
         let mut no_archive = cfg();
         no_archive.archive_days = 0;
         assert!(eligible(&[row("argos-i001", Kind::Issue, "done")], &no_archive, NOW).is_empty());
+    }
+
+    #[test]
+    fn archive_waits_for_the_milestone_to_age() {
+        let milestone = row("argos-m001", Kind::Milestone, "todo");
+        let mut closed_epic = row("argos-e001", Kind::Epic, "todo");
+        closed_epic.milestone = Some(milestone.id.clone());
+        let closed_member = row("argos-e001.aaa", Kind::Issue, "done");
+        let mut open_epic = row("argos-e002", Kind::Epic, "todo");
+        open_epic.milestone = Some(milestone.id.clone());
+        let open_member = row("argos-e002.aaa", Kind::Issue, "in_progress");
+        let mut rows = vec![milestone, closed_epic, closed_member, open_epic, open_member];
+        assert!(eligible(&rows, &cfg(), NOW).is_empty(), "an open milestone holds its old epic bundle");
+        rows[4].status = Status::new("done");
+        assert_eq!(eligible(&rows, &cfg(), NOW).iter().map(|i| i.id.as_str()).collect::<Vec<_>>(),
+            ["argos-e001", "argos-e001.aaa", "argos-e002", "argos-e002.aaa"]);
     }
 
     #[test]
