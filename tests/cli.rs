@@ -14138,6 +14138,23 @@ fn the_agents_block_teaches_idea() {
     }
 }
 
+#[test]
+fn the_agents_block_teaches_ctl_without_mv() {
+    let s = init("agentsctl");
+    let block = std::fs::read_to_string(s.path().join("AGENTS.md")).unwrap();
+    for want in [
+        "moai ctl ls",
+        "moai ctl state",
+        "moai ctl propose '<why>' --then '<verb>'",
+        "moai ctl propose '<why>' --wait <seconds>",
+        "--take -m 'accepted proposal <proposal id> in the explorer'",
+        "moai ctl read` only on request",
+    ] {
+        assert!(block.contains(want), "{want} is missing from the managed block");
+    }
+    assert!(!block.contains("moai ctl mv") && !block.contains("moai ctl note"), "tracker writes became ctl verbs");
+}
+
 /// **마크다운은 `idea add` 로 들어오지 않는다.** `#` 이 에픽이고 `-` 가
 /// 이슈라는 뜻이 형식에 박혀 있어 종류 고정 장치가 거기까지 못 가고, 그래서
 /// 담은 줄 알았던 것이 그대로 보드에 선다 — 일로 세지 않으려고 담은 것이

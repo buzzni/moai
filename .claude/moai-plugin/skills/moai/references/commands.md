@@ -3,6 +3,25 @@
 `moai --help` and `moai <command> --help` are the truth. This file is a summary of
 them, so where they differ the help wins.
 
+### The person's open explorer
+
+`moai ctl` reaches only a person's already open `moai tui` or visible `moai web`
+tab from another terminal. It opens no window and drives no agent session. To show
+the person a view or a finding, run `moai ctl ls`, then `moai ctl state`. The verbs
+are in `docs/ctl.md` and `moai ctl --help`.
+
+The view belongs to the person. Sort, view, cell and pane choices persist in their
+settings; unless asked to change one, `moai ctl propose '<why>' --then '<verb>'`
+asks first. `[NEW]` is theirs too: use `moai ctl read` only on request, since an
+agent sharing their identity clears their read marks. On `person_busy`, wait once
+or propose; never retry in a loop. ctl refuses to close their window. Tests set
+`MOAI_CTL_DIR` to an isolated directory so they cannot reach it.
+
+Column moves and notes use `moai mv` and `moai note`, not ctl verbs. Ask with
+`moai ctl propose '<why>' --wait <seconds>` and no `--then`, then run the tracker
+command on acceptance. For someone else's row, acceptance is permission:
+`moai mv <id> <column> --from <seen column> --take -m 'accepted proposal <proposal id> in the explorer'`.
+
 ## There are two kinds of group
 
     moai epic add '<storage layer>'                an epic

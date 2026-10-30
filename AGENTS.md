@@ -1,4 +1,4 @@
-<!-- moai:begin v:0.36.0 hash:660d250c -->
+<!-- moai:begin v:0.38.0 hash:6aa40b4a -->
 ## Issue tracker — moai
 
 This repository's work lives in `.moai/issues.jsonl`.
@@ -18,6 +18,8 @@ Start a session by running `moai status`. The board and the warnings come up on 
     moai stats                             counts: columns, flow, lead and cycle time, AI work
     moai tui                               walk the explorer. SPC n parks a thought
                                            on a group row: l one step · Tab expand all · h fold
+    moai ctl ls · moai ctl state          open windows and their state
+    moai ctl sort|filter|find|wiki … · propose  change a view or ask first
     moai add '<title>' -p 1 -t bug -e <epic>   create
     moai mv <id> in_progress               pick up  →  review  →  done
     moai mv <id> in_progress --take        take over someone else's row (ask first)
@@ -64,6 +66,25 @@ tracker.** Editing the worktree's `.moai` makes that file conflict on the merge,
 and then the only way out is outside the tool — one line on stderr says where it
 wrote. So that worktree's `.moai/issues.jsonl` stays as it was when the worktree
 split off, and the current rows are in the main checkout's file.
+
+### The person's open explorer
+
+`moai ctl` reaches only a person's already open `moai tui` or visible `moai web`
+tab from another terminal. It opens no window and drives no agent session. To show
+the person a view or a finding, run `moai ctl ls`, then `moai ctl state`. The verbs
+are in `docs/ctl.md` and `moai ctl --help`.
+
+The view belongs to the person. Sort, view, cell and pane choices persist in their
+settings; unless asked to change one, `moai ctl propose '<why>' --then '<verb>'`
+asks first. `[NEW]` is theirs too: use `moai ctl read` only on request, since an
+agent sharing their identity clears their read marks. On `person_busy`, wait once
+or propose; never retry in a loop. ctl refuses to close their window. Tests set
+`MOAI_CTL_DIR` to an isolated directory so they cannot reach it.
+
+Column moves and notes use `moai mv` and `moai note`, not ctl verbs. Ask with
+`moai ctl propose '<why>' --wait <seconds>` and no `--then`, then run the tracker
+command on acceptance. For someone else's row, acceptance is permission:
+`moai mv <id> <column> --from <seen column> --take -m 'accepted proposal <proposal id> in the explorer'`.
 
 **The assignee comes for free** — whoever created it is the assignee. To hand it to
 someone else, `-a "Name (email)"`; to leave it unowned, `-a none`. The name and

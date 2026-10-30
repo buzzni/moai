@@ -584,6 +584,13 @@ the message's `Due:` is then the one the backlog item already carries, or `none`
 
 ### In a session
 
+When a person asks an agent to show something in their open explorer or web tab,
+the agent can use `moai ctl ls` and `moai ctl state` to find that window, then
+change its view or offer a `moai ctl propose` suggestion. The window stays under
+the person's control; [Control an open window](ctl.md) explains its verbs,
+suggestions, and read-mark rules. Tracker column moves and notes still use
+`moai mv` and `moai note`.
+
 When you ask to watch the workers' windows, and for a Codex worker, the workers
 are sessions. The supervisor talks to them with Claude Code's own tools —
 `ListAgents` to see who is here, `SendMessage` to hand over work and to report
