@@ -60,7 +60,8 @@ lists them) and its history. History and work log start expanded and keep the
 line breaks of the text as written. In the list, todo rows have a pale blue
 background, in-progress rows pale gold, review rows pale purple and done rows pale
 green. Gantt rows use the same tints; the light blue todo tint is faint enough
-to keep a selected row distinct in either theme. Todo status glyphs and detail
+to keep a selected row distinct in either theme, and the selected list row has a
+left accent bar as a shape cue. Todo status glyphs and detail
 counts are blue. In a detail progress bar, todo is the empty portion, while its
 legend still names the todo count.
 The board carries those colours on the first line of cards in those four columns

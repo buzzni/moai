@@ -11,6 +11,8 @@
 .moai-list-head[hidden], .moai-list-note[hidden], .moai-list-empty[hidden] { display: none; }
 .moai-list-body { position: relative; }
 .moai-list-body > .m-row { position: absolute; left: 0; right: 0; height: var(--moai-row-h); }
+/* The shared row has a 2px selection mark; make this list's mark wider so a faint todo tint never has to carry focus. */
+.moai-list-body > .m-row[aria-selected="true"]::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; background: var(--accent); border-radius: 0 2px 2px 0; }
 .moai-list-body > .m-row > .m-row-title { align-self: stretch; line-height: var(--moai-row-h); }
 .moai-list-body .moai-new { vertical-align: middle; }
 
