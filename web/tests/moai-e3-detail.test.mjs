@@ -359,6 +359,9 @@ test('pane: the per-column counts that come after the rows draw the roll-up agai
   view.render({ ...state, board: { value: counted, loading: false, problem: null } }, index)
   assert.notEqual(root.querySelector('.moai-detail-title'), before, 'drawn again for the counts')
   assert.match(root.textContent, /4/)
+  assert.ok(root.querySelector('.moai-detail-bar > span[data-status="todo"]'))
+  const css = readFileSync(new URL('../panel/style/detail.css', import.meta.url), 'utf8')
+  assert.match(css, /\[data-status="todo"\] \{ --dot: var\(--todo\); \}/)
 })
 
 test('pane: a search keystroke repaints the id and title only; the body and sections stay (se-mzlx)', () => {

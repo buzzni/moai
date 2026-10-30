@@ -1340,7 +1340,7 @@ test('gantt row status tints follow refreshed data and preserve selection and ho
   assert.equal(node('e1.b'), tinted)
   assert.equal(tinted.getAttribute('aria-selected'), 'true')
   const css = readFileSync(new URL('../panel/style/gantt.css', import.meta.url), 'utf8')
-  for (const [status, token] of [['in_progress', '--progress-soft'], ['review', '--review-soft'], ['done', '--done-soft']]) {
+  for (const [status, token] of [['todo', '--todo-soft'], ['in_progress', '--progress-soft'], ['review', '--review-soft'], ['done', '--done-soft']]) {
     assert.ok(css.includes(`.g-row[data-status="${status}"]:not([aria-selected="true"]):not(:hover) { background: var(${token}); }`))
   }
 })

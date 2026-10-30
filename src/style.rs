@@ -12,15 +12,16 @@ const fn fg(c: AnsiColor) -> Style {
     Style::new().fg_color(Some(Color::Ansi(c)))
 }
 
-/// 다수파는 칠하지 않는다 — 다수파를 칠하면 신호가 죽는다.
+/// 칸 뜻이 없는 보통 글은 칠하지 않는다 — 뜻 색이 배경 글까지 번지면 신호가 죽는다.
 pub const PLAIN: Style = Style::new();
 pub const DIM: Style = Style::new().dimmed();
 
-pub const TODO: Style = PLAIN;
+pub const TODO: Style = fg(AnsiColor::BrightBlue);
 pub const IN_PROGRESS: Style = fg(AnsiColor::BrightYellow).bold();
 /// **가장 눈에 띄어야 한다** — 게이트를 없앤 대신 여기가 썩는다.
 pub const REVIEW: Style = fg(AnsiColor::BrightMagenta);
 pub const DONE: Style = fg(AnsiColor::Green).dimmed();
+pub const TODO_BAND: Style = fg(AnsiColor::BrightBlue).bg_color(Some(Color::Ansi(AnsiColor::Black)));
 pub const IN_PROGRESS_BAND: Style = fg(AnsiColor::BrightYellow).bg_color(Some(Color::Ansi(AnsiColor::Black)));
 pub const REVIEW_BAND: Style = fg(AnsiColor::BrightMagenta).bg_color(Some(Color::Ansi(AnsiColor::Black)));
 pub const DONE_BAND: Style = fg(AnsiColor::BrightGreen).bg_color(Some(Color::Ansi(AnsiColor::Black)));
@@ -32,10 +33,11 @@ pub const DONE_BAND: Style = fg(AnsiColor::BrightGreen).bg_color(Some(Color::Ans
 /// the old selected-card colours for every card: black background and bright column-coloured
 /// text; selection reverses both. Solarized maps the bright text to grey. On dark themes the
 /// black background can blend into the terminal background; the status glyph and column name
-/// still carry meaning. BrightGreen shares a family with a project Green deliberately: the
-/// done glyph `✓` and the column head distinguish them.
+/// still carry meaning. BrightGreen and BrightBlue share families with project Green and Blue
+/// deliberately: the status glyph and column head distinguish them.
 pub fn band_style(status: &str) -> Option<Style> {
     match status {
+        "todo" => Some(TODO_BAND),
         "in_progress" => Some(IN_PROGRESS_BAND),
         "review" => Some(REVIEW_BAND),
         "done" => Some(DONE_BAND),
@@ -75,8 +77,9 @@ pub const HEAD: Style = Style::new().bold();
 /// - 빨강은 `ERROR`·`P1`, 노랑은 `IN_PROGRESS`·`WARN`, 자홍은 `REVIEW` 다. 한눈 보기
 ///   줄에는 우선순위 칸·집은 칸·review 줄이 id 곁에 실제로 서서, 그 색의 id 는 거짓
 ///   뜻으로 읽힌다
-/// - 남는 초록(`DONE`)·파랑(`EPIC`)은 한눈 보기 줄에 그 뜻이 서지 않는다 — done 줄도
-///   에픽 열도 없다. 청록의 `TAG` 도 태그 칸이 없어 안 선다
+/// - 초록(`DONE`)·파랑(`TODO`·`EPIC`)은 한눈 보기의 프로젝트 머리줄에서 그 뜻을
+///   지지 않는다. 일 줄에는 상태 글리프가, 프로젝트 머리줄에는 이름이 곁에 선다.
+///   청록의 `TAG` 도 태그 칸이 없어 안 선다
 /// - **청록 하나는 알고 받아들인다.** `statuses` 에 칸을 더한 저장소(`blocked` 따위)는
 ///   그 칸의 줄이 집은 것으로 서고, 글리프 `○` 가 `OTHER`(청록)로 칠해져 청록 id 곁에
 ///   붙는다. 빼지 않는 까닭: 빨강·노랑·자홍이 지는 뜻은 급함·진행·review 라 잘못 읽으면
@@ -336,6 +339,13 @@ mod tests {
         assert_eq!(paint(REVIEW, ""), "");
     }
 
+    #[test]
+    fn todo_uses_bright_blue_ink_and_a_black_board_band() {
+        assert_eq!(status_style("todo").get_fg_color(), Some(Color::Ansi(AnsiColor::BrightBlue)));
+        assert_eq!(band_style("todo").and_then(|style| style.get_fg_color()), Some(Color::Ansi(AnsiColor::BrightBlue)));
+        assert_eq!(band_style("todo").and_then(|style| style.get_bg_color()), Some(Color::Ansi(AnsiColor::Black)));
+    }
+
     /// 같은 경로는 늘 같은 색이고, 철자만 다른 같은 경로도 같은 색이다.
     #[test]
     fn project_colour_is_a_function_of_the_path_alone() {
@@ -389,6 +399,10 @@ mod tests {
                 assert_ne!(hue, family(used), "{hue:?} 가 칸·경고·우선순위의 색과 같은 계열이다");
             }
         }
+        // `TODO` BrightBlue 와 프로젝트 Blue 의 계열 겹침은 `DONE`/Green 과 같은 의도다.
+        // 프로젝트 이름과 todo 상태 글리프가 색 없이도 둘을 가른다.
+        let todo_clash: Vec<_> = PROJECT_HUES.iter().filter(|h| **h == family(TODO)).collect();
+        assert_eq!(todo_clash, [&A::Blue], "TODO 와 프로젝트 팔레트의 겹침이 문서와 다르다");
         // 알고 받아들인 겹침 하나 — 설정으로 더한 칸의 `OTHER`. 팔레트나 `OTHER` 를 바꾸면 여기서
         // 멈춰 `PROJECT_HUES` 문서의 근거를 다시 본다.
         let clash: Vec<_> = PROJECT_HUES.iter().filter(|h| **h == family(OTHER)).collect();

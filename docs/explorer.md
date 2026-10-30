@@ -124,10 +124,11 @@ remain readable; if both keys exist, `hide_backlog` wins.
   folded milestone lanes. In the overview, each project's lanes
   fold independently. The deferred column
   follows the view — hidden to begin with, back with `SPC v l`. A card that is
-  not yours says whose it is. Cards in the in-progress, review and done columns
-  carry black bands on their head lines, with text in the column's bright yellow,
-  magenta or green colour. The selected card reverses that band, with a column
-  coloured background and black text. Other columns, including deferred, stay
+  not yours says whose it is. Cards in the todo, in-progress, review and done columns
+  carry black bands on their head lines, with text in the column's bright blue,
+  yellow, magenta or green colour. The same blue colours todo status glyphs in the
+  list, gantt and detail. The selected card reverses its band, with a column
+  coloured background and black text. Backlog, deferred and other columns stay
   plain. Solarized maps those bright colours to greys, so band text is grey
   there; on a dark theme the black band sits close to the background, and the
   coloured text and status glyph still name the column. On cards, `h` and `l` go across the columns, `j` and `k` along

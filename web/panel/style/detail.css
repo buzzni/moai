@@ -21,6 +21,7 @@
 .moai-detail-bar > span { flex: none; height: 100%; }
 .moai-detail :is(.moai-detail-bar > span, .moai-detail-legend > span)[data-status] { --dot: var(--border); }
 .moai-detail :is(.moai-detail-bar > span, .moai-detail-legend > span)[data-status="done"] { --dot: var(--ok); }
+.moai-detail :is(.moai-detail-bar > span, .moai-detail-legend > span)[data-status="todo"] { --dot: var(--todo); }
 .moai-detail :is(.moai-detail-bar > span, .moai-detail-legend > span)[data-status="review"] { --dot: var(--review); }
 .moai-detail :is(.moai-detail-bar > span, .moai-detail-legend > span)[data-status="in_progress"] { --dot: var(--warn); }
 .moai-detail-bar > span { background: var(--dot); }

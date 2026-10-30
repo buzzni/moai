@@ -48,6 +48,7 @@
 .moai-head-sort:hover { color: var(--text); }
 .moai-list-head [aria-sort] { color: var(--text); }
 
+.moai-list-body > .m-row[data-status="todo"]:not([aria-selected="true"]):not(:hover) { background: var(--todo-soft); }
 .moai-list-body > .m-row[data-status="in_progress"]:not([aria-selected="true"]):not(:hover) { background: var(--progress-soft); }
 .moai-list-body > .m-row[data-status="review"]:not([aria-selected="true"]):not(:hover) { background: var(--review-soft); }
 .moai-list-body > .m-row[data-status="done"]:not([aria-selected="true"]):not(:hover) { background: var(--done-soft); }

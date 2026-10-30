@@ -544,7 +544,7 @@ test('list view: rows are 24 high, as list.css --moai-row-h, so the branches mee
   assert.match(listCss, /--moai-row-h: 24px/)
 })
 
-test('list rows expose their status for progress, review and done backgrounds', () => {
+test('list rows expose their status for todo, progress, review and done backgrounds', () => {
   const panel = mount([
     { id: 'a', title: 'Progress', status: 'in_progress' },
     { id: 'b', title: 'Review', status: 'review' },
@@ -557,10 +557,16 @@ test('list rows expose their status for progress, review and done backgrounds', 
   // jsdom computes no colour, so the sheets are read: the tints stand, and the cursor and hover still win over them.
   const listCss = readFileSync(new URL('../panel/style/list.css', import.meta.url), 'utf8')
   const tokensCss = readFileSync(new URL('../panel/style/tokens.css', import.meta.url), 'utf8')
+  const componentsCss = readFileSync(new URL('../panel/style/components.css', import.meta.url), 'utf8')
+  assert.match(tokensCss, /--todo: color-mix\(in srgb, #3b82f6 70%, var\(--text\)\)/)
+  assert.match(tokensCss, /:root\[data-theme="dark"\] \{ --todo-soft: color-mix\(in srgb, #3b82f6 3%, var\(--bg\)\)/)
+  assert.match(tokensCss, /:root:not\(\[data-theme="light"\]\) \{ --todo-soft: color-mix\(in srgb, #3b82f6 3%, var\(--bg\)\)/)
+  assert.match(componentsCss, /\.m-st-todo \{ color: var\(--todo\); \}/)
+  assert.match(componentsCss, /\.m-st-todo\.m-spin::before \{ color: var\(--todo\); \}/)
   assert.match(tokensCss, /--done-soft: color-mix\(in srgb, #10B981 7%, var\(--bg\)\)/)
-  assert.match(tokensCss, /:root\[data-theme="dark"\] \{ --done-soft: color-mix\(in srgb, #10B981 3%, var\(--bg\)\)/)
-  assert.match(tokensCss, /:root:not\(\[data-theme="light"\]\) \{ --done-soft: color-mix\(in srgb, #10B981 3%, var\(--bg\)\)/)
-  for (const [status, token] of [['in_progress', '--progress-soft'], ['review', '--review-soft'], ['done', '--done-soft']]) {
+  assert.match(tokensCss, /:root\[data-theme="dark"\] \{[^}]*--done-soft: color-mix\(in srgb, #10B981 3%, var\(--bg\)\)/)
+  assert.match(tokensCss, /:root:not\(\[data-theme="light"\]\) \{[^}]*--done-soft: color-mix\(in srgb, #10B981 3%, var\(--bg\)\)/)
+  for (const [status, token] of [['todo', '--todo-soft'], ['in_progress', '--progress-soft'], ['review', '--review-soft'], ['done', '--done-soft']]) {
     assert.match(listCss, new RegExp(`\\.m-row\\[data-status="${status}"\\]:not\\(\\[aria-selected="true"\\]\\):not\\(:hover\\) \\{ background: var\\(${token}\\); \\}`))
     assert.match(tokensCss, new RegExp(`${token}: color-mix\\(`))
   }

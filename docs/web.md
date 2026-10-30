@@ -57,9 +57,10 @@ Choosing an issue shows its detail: column, priority, assignee, tags, what block
 it, the body, its children, its commits, the wiki about it (the lessons its notes
 point at, the pages that name it, the related sections — as `moai show <id>`
 lists them) and its history. History and work log start expanded and keep the
-line breaks of the text as written. In the list, in-progress rows have a pale gold
-background, review rows a pale purple one and done rows a pale green one. The
-board carries those colours on the first line of cards in those three columns
+line breaks of the text as written. In the list, todo rows have a pale blue
+background, in-progress rows pale gold, review rows pale purple and done rows pale
+green. Gantt rows use the same tints; todo status glyphs and detail counts are blue.
+The board carries those colours on the first line of cards in those four columns
 (id, status glyph and priority), with a thin line under the band. Cards in other
 columns stay plain. The detail starts on the right;
 `SPC o d`, or the position button, moves it right → bottom → left → top. Below
