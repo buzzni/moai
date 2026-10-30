@@ -5856,7 +5856,13 @@ impl App {
                 .collect();
             under.push((path, false));
             for (p, closed) in under {
-                site.set_open(true, p, !open && !closed);
+                if open {
+                    site.set_open(true, p, false);
+                } else if !closed {
+                    // A closed descendant the person already opened keeps that choice.
+                    // Its seeded fold also stays put; only this row and open descendants unfold.
+                    site.set_open(true, p, true);
+                }
             }
             return;
         }
@@ -7268,6 +7274,24 @@ mod tests {
         a.hit("SPC g g");
         let closed = a.site.index.dir_path(&a.site.issues, 1);
         assert!(!a.site.gantt_shut.contains(&closed));
+        assert!(a.rows().iter().any(|r| matches!(r, Row::Item(_, e, _) if e.at() == Some(3))));
+    }
+
+    #[test]
+    fn gantt_tab_reopens_an_ancestor_without_refolding_a_manually_opened_epic() {
+        let mut a = grouped_for_folding();
+        a.hit("SPC g g");
+        let epic = a.site.index.dir_path(&a.site.issues, 1);
+        let milestone = a.site.index.dir_path(&a.site.issues, 0);
+        a.cursor = a.rows().iter().position(|r| matches!(r, Row::Item(_, e, _) if e.at() == Some(1))).unwrap();
+        a.hit("l");
+        assert!(!a.site.gantt_shut.contains(&epic));
+        a.cursor = a.rows().iter().position(|r| matches!(r, Row::Item(_, e, _) if e.at() == Some(0))).unwrap();
+        a.hit("h");
+        assert!(a.site.gantt_shut.contains(&milestone));
+        a.hit("Tab");
+        assert!(!a.site.gantt_shut.contains(&milestone));
+        assert!(!a.site.gantt_shut.contains(&epic));
         assert!(a.rows().iter().any(|r| matches!(r, Row::Item(_, e, _) if e.at() == Some(3))));
     }
 

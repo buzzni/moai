@@ -694,8 +694,8 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
     const paths = [{ path: line.path, at: line.kind === 'row' ? line.at : undefined }, ...(all ? index.tree(line.path, () => true).filter((one) => one.entry.dir).map((one) => ({ path: one.path, at: one.entry.at })) : [])]
     for (const { path, at } of paths) {
       const key = pathKey(path)
-      if (open && (key === pathKey(line.path) || at === undefined || !closedGroup(index.rows[at]!))) shut.delete(key)
-      else shut.add(key)
+      if (!open) shut.add(key)
+      else if (key === pathKey(line.path) || at === undefined || !closedGroup(index.rows[at]!)) shut.delete(key)
     }
     if (!open) {
       const cursor = model.lines.find((one) => one.key === state!.cursor)

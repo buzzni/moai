@@ -3805,6 +3805,27 @@ mod tests {
     }
 
     #[test]
+    fn config_write_waits_for_the_snapshot_lock() {
+        use std::sync::mpsc;
+        use std::time::Duration;
+        let (r, d) = repo("set-config-shared-lock");
+        let home = crate::held::Home::of(d.path());
+        let held = Lock::inside(&lock_at(d.path()), &home).unwrap_or_else(|_| panic!("could not hold snapshot lock"));
+        let (started_tx, started_rx) = mpsc::channel();
+        let (done_tx, done_rx) = mpsc::channel();
+        let writer = std::thread::spawn(move || {
+            started_tx.send(()).unwrap();
+            done_tx.send(r.set_archive_days(30, || crate::i18n::Lang::En)).unwrap();
+        });
+        started_rx.recv().unwrap();
+        assert!(done_rx.recv_timeout(Duration::from_millis(200)).is_err(), "config write bypassed the snapshot lock");
+        drop(held);
+        assert_eq!(done_rx.recv_timeout(Duration::from_secs(5)).unwrap().unwrap().1, 14);
+        writer.join().unwrap();
+        assert_eq!(Config::load(d.path()).unwrap().archive_days, 30);
+    }
+
+    #[test]
     fn set_config_in_a_linked_worktree_writes_the_root_file() {
         let (r, root) = repo("set-config-linked");
         let sibling = Scratch::new("set-config-linked-sibling");
