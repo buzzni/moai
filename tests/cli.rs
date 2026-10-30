@@ -8949,6 +8949,59 @@ fn read_sheets(cfg: &std::path::Path, root: &std::path::Path) -> Vec<(PathBuf, S
         .collect()
 }
 
+/// 격리된 명령이 받은 설정 파일 자리. 실행 전에도 알 수 있으므로 쓰인 파일을 시험 울타리에서만 찾는다.
+fn config_of(cmd: &Command) -> PathBuf {
+    let (_, value) =
+        cmd.get_envs().find(|(key, _)| *key == std::ffi::OsStr::new("MOAI_CONFIG")).expect("MOAI_CONFIG 를 안 줬다");
+    PathBuf::from(value.expect("MOAI_CONFIG 를 걷었다"))
+}
+
+#[test]
+fn the_fence_holds_a_tests_read_marks_and_no_shared_path_does() {
+    let s = init("fenced-read");
+    let cfg = config_of(&staged(&[]));
+    let id = field(&ok(s.path(), &["add", "fenced", "--json"]), "id");
+    ok(s.path(), &["read", &id]);
+
+    let sheets = read_sheets(&cfg, s.path());
+    assert_eq!(sheets.len(), 1, "읽음 파일이 제 울타리 안에 하나여야 한다: {sheets:?}");
+    assert!(sheets[0].1.contains(&id), "읽음 파일에 적힌 id 가 다르다: {sheets:?}");
+    // 옛 공유 자리에서는 이 시험의 뿌리에 관한 읽음이 없어야 한다. 사람의 설정 자리는 보지 않는다.
+    let old_shared_cfg = Path::new(env!("CARGO_TARGET_TMPDIR")).join("moai-cli-home/moai-config-unset/config.toml");
+    assert!(read_sheets(&old_shared_cfg, s.path()).is_empty(), "옛 공유 설정 자리에 이 시험의 읽음이 남았다");
+}
+
+#[test]
+fn the_fence_is_gone_when_its_test_ends() {
+    let cfg = std::thread::spawn(|| {
+        let s = init("fence-thread-exit");
+        let cfg = config_of(&staged(&[]));
+        let id = field(&ok(s.path(), &["add", "fenced", "--json"]), "id");
+        ok(s.path(), &["read", &id]);
+        assert!(cfg.parent().unwrap().is_dir(), "읽음이 적힌 울타리가 없다");
+        assert_eq!(read_sheets(&cfg, s.path()).len(), 1, "읽음이 울타리 밖에 적혔다");
+        // 패닉을 풀고도 같은 시험 스레드에서 울타리를 쓸 수 있다. 스레드가 끝나면 TLS Drop 이 걷는다.
+        assert!(std::panic::catch_unwind(|| panic!("fence unwind probe")).is_err());
+        cfg
+    })
+    .join()
+    .unwrap();
+    assert!(!cfg.parent().unwrap().exists(), "시험 스레드가 끝났는데 울타리가 남았다: {}", cfg.display());
+}
+
+#[test]
+fn two_tests_do_not_share_a_fence() {
+    let first = std::thread::spawn(|| config_of(&staged(&[])));
+    let second = std::thread::spawn(|| config_of(&staged(&[])));
+    let first = first.join().unwrap();
+    let second = second.join().unwrap();
+    assert_ne!(first, second, "서로 다른 시험 스레드가 설정 울타리를 함께 쓴다");
+    assert!(
+        !first.parent().unwrap().exists() && !second.parent().unwrap().exists(),
+        "시험 스레드 뒤에 울타리가 남았다"
+    );
+}
+
 /// **읽음은 내 설정 곁에만 적힌다**(moai-u8oh 사용자 결정, 자리는 moai-omx7 이 프로젝트마다로 갈랐다) —
 /// 트래커 파일은 한 바이트도 안 바뀌고, 설정 파일의 `[read]` 도 더는 안 적힌다(아래가 그것을 잰다).
 /// `--all` 은 내게 온 것 가운데 안 읽은 것을, `-e` 는 그 묶음(에픽·마일스톤)의 멤버와 **그 밑까지**
