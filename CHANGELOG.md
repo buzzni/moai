@@ -16,6 +16,10 @@ does not tag — see `CONTRIBUTING.md`.
 
 - Archive hiding and `moai archive` now wait for a row's parent, epic and milestone to reach archive age before removing the row from the active view or snapshot. (moai-mkzo.pji)
 
+### Fixed
+
+- Explorer rows already moved to archive storage stay hidden when `archive_days` changes; archive view detail identifies file rows and copies. (moai-mkzo.6mw, moai-7ggk)
+
 ## [0.36.0] - 2026-10-30
 
 ### Changed

@@ -386,6 +386,9 @@ read archived rows too, and `moai show <id>` can open one directly.
 eligibility off; `moai show` and `moai status` leave rows already moved to the
 archive out either way. Moving an archived row with `moai mv` restores that selected
 row; its former bundle remains archived (moai-fx9t).
+The explorer also keeps rows already moved to an archive file hidden when
+`archive_days` grows or becomes `0`. With `SPC v o`, the detail names an
+`archive file` row and distinguishes an `archive copy` from its live row.
 
 When a live row also has an archive copy, `moai status` names the conflict as
 `archive_duplicate_id`. Keep the live row and run `moai archive --drop <id>` to

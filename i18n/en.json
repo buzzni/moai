@@ -616,6 +616,8 @@
   "tui.layer.no_projects": "no project is registered",
   "tui.layer.how_to_register": "{key} picks a directory and registers it",
   "tui.detail.none": "none",
+  "tui.detail.archive_file": "archive file",
+  "tui.detail.archive_copy": "archive copy — the live row is separate",
   "tui.detail.up": "one level up",
   "tui.place.reading": "reading",
   "tui.place.empty": "empty",

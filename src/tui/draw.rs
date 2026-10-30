@@ -4209,6 +4209,15 @@ fn about<'a>(app: &App, site: &Site, idx: usize, e: &Entry, w: usize) -> Vec<Lin
         first.push(Span::raw("  "));
         first.push(Span::styled(clip(&format!("{} {b}", style::BRANCH_GLYPH), room), branch()));
     }
+    if let Some(copy) = site.archive_file(idx) {
+        let label = if copy {
+            say(site.lang, "tui.detail.archive_copy")
+        } else {
+            say(site.lang, "tui.detail.archive_file")
+        };
+        first.push(Span::raw("  ·  "));
+        first.push(Span::styled(label, dim()));
+    }
     let mut out = vec![Line::from(first)];
     // 칠은 **그린 줄마다** 찾는다 — 접힌 줄에 걸친 글은 안 칠해진다(본문과 같다).
     out.extend(wrapped(&i.title, w, bold()).into_iter().map(|l| mark_line(l, in_title)));
@@ -6558,6 +6567,30 @@ pub(super) mod tests {
         let text: String =
             about(&a, &a.site, idx, &e, 120).iter().flat_map(|l| &l.spans).map(|s| s.content.as_ref()).collect();
         assert!(text.contains("둘째 노트"), "{text}");
+    }
+
+    #[test]
+    fn the_archive_view_names_an_archive_file_row() {
+        let mut a = every(issues());
+        let rows = a.rows();
+        let Row::Item(_, e, _) = a.current_of(&rows).unwrap() else { panic!() };
+        let idx = e.at().unwrap();
+        a.site.ground.from_archive = vec![false; a.site.issues.len()];
+        a.site.ground.from_archive[idx] = true;
+        for (lang, file, copy) in [
+            (crate::i18n::Lang::En, "archive file", "archive copy"),
+            (crate::i18n::Lang::Ko, "보관 파일", "보관 사본"),
+        ] {
+            a.site.lang = lang;
+            let text = |a: &App| -> String {
+                about(a, &a.site, idx, &e, 120).iter().flat_map(|line| &line.spans)
+                    .map(|span| span.content.as_ref()).collect()
+            };
+            assert!(text(&a).contains(file));
+            a.site.ground.archive_copies.insert(a.site.issues[idx].id.clone());
+            assert!(text(&a).contains(copy));
+            a.site.ground.archive_copies.clear();
+        }
     }
 
     /// **노트의 둘째 줄과 감긴 조각은 글 칸에 선다** — 도장 칸까지 함께 감던 판은 감긴 조각이 왼쪽 끝으로 돌아갔고,

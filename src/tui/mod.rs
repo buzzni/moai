@@ -423,6 +423,9 @@ pub struct Ground {
     stands: States,
     archived_rows: Vec<bool>,
     archived_at: String,
+    from_archive: Vec<bool>,
+    stored_ids: std::collections::BTreeSet<String>,
+    archive_copies: std::collections::BTreeSet<String>,
     epic: std::collections::BTreeMap<String, String>,
     milestone: std::collections::BTreeMap<String, String>,
     /// 쌍둥이 부모 밑에서 소속을 못 정한 줄(`report::Handing::twin`) — `epic` 과 함께 옮긴다.
@@ -454,7 +457,7 @@ pub struct Ground {
     /// 자([`Ground::here`])와 보기의 자([`Site::archived`])가 이 하나를 읽는다.
     archive_days: i64,
     /// **쓰기가 못 찾는 아카이브의 id** — 이 적재가 읽은 산 스냅샷(겹쳐 보면 루트의 것)에 **읽히는** 줄이 없는 아카이브의
-    /// id 다(moai-ekg6.ej7). 섞은 줄([`beside`])은 어느 파일에서 왔는지를 안 들어, [`counted_beside`] 가 섞기 전에 잰다.
+    /// id 다(moai-ekg6.ej7). [`from_archive`] 와 달리 쓰기 가능성만 가른다; [`counted_beside`] 가 섞기 전에 잰다.
     /// 쓰기(`Repo::with_write`)는 산 스냅샷의 읽힌 줄에서 id 로 찾으니 간트는 이 id 의 계획을 안 쓴다(`App::unwritable`) —
     /// 누를 때마다 스냅샷을 다시 읽던 판은 UI 실에서 산 파일 전체를 풀었다.
     ///
@@ -501,6 +504,23 @@ fn measure_in(issues: &[Issue], cfg: &Config, soil: &crate::report::Soil<'_>) ->
 }
 
 impl Ground {
+    pub(crate) fn archive_copy(&self, issues: &[Issue], at: usize) -> bool {
+        self.from_archive.get(at).copied().unwrap_or(false)
+            && issues.get(at).is_some_and(|row| self.archive_copies.contains(&row.id))
+    }
+
+    fn record_archive_source(&mut self, issues: &[Issue], source: Vec<bool>, unreadable_live: &std::collections::BTreeSet<String>) {
+        let live: std::collections::BTreeSet<&str> = issues.iter().zip(&source)
+            .filter_map(|(row, archived)| (!archived).then_some(row.id.as_str())).collect();
+        self.archive_copies = issues.iter().zip(&source)
+            .filter_map(|(row, archived)| (*archived && live.contains(row.id.as_str())).then_some(row.id.clone()))
+            .collect();
+        self.stored_ids = issues.iter().zip(&source)
+            .filter_map(|(row, archived)| (*archived && !live.contains(row.id.as_str()) && !unreadable_live.contains(&row.id)).then_some(row.id.clone()))
+            .collect();
+        self.from_archive = source;
+    }
+
     fn in_soil(issues: &[Issue], cfg: &Config, soil: &crate::report::Soil<'_>) -> Ground {
         let stands = soil
             .stands(issues, cfg)
@@ -543,6 +563,9 @@ impl Ground {
             stands,
             archived_rows: Vec::new(),
             archived_at: String::new(),
+            from_archive: Vec::new(),
+            stored_ids: Default::default(),
+            archive_copies: Default::default(),
             epic: soil.epic.handed().iter().map(|(k, v)| (k.to_string(), v.to_string())).collect(),
             milestone: soil.milestone.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect(),
             twin: soil.epic.twin().iter().map(|k| k.to_string()).collect(),
@@ -655,7 +678,7 @@ impl Ground {
             // 시간대는 적재가 아니라 보는 사람의 것이다(`App::zone`) — 거름망을 거는 자리가 얹는다.
             zone: None,
             archive_days: self.archive_days,
-            stored: Default::default(),
+            stored: self.stored_ids.iter().map(String::as_str).collect(),
         }
     }
 }
@@ -971,14 +994,16 @@ pub(crate) fn counted_beside(
     let archived = crate::archive::read(&repo.root)?;
     let cfg = &repo.config;
     let unreadable = live_unreadable(&live, origin);
+    let unreadable_ids: std::collections::BTreeSet<String> = unreadable.iter().filter_map(|u| u.id).map(str::to_string).collect();
     // **섞기 전에 잰다** — 섞은 줄은 어느 파일에서 왔는지를 안 든다([`Ground::archive_only`], moai-ekg6.ej7). 견줄 산 줄은
     // [`board`] 가 고르는 루트의 스냅샷이다 — 쓰기가 줄을 찾는 그 파일이다.
     let archive_only = unwritten_in(&archived, root.unwrap_or(&live));
     if !count || root.is_some() || !crate::archive::shareable(&live.issues, &unreadable, &archived) {
         let counted = if count { board(repo, &live, &unreadable, root, &archived, now) } else { Counted::default() };
-        let load = beside(archived, live);
+        let (load, source) = beside_with_source(archived, live);
         let (index, mut ground) = measure(&load.issues, cfg);
         ground.archive_only = archive_only;
+        ground.record_archive_source(&load.issues, source, &unreadable_ids);
         return Ok(Beside { load, counted, index, ground });
     }
     // 여기부터는 루트가 곧 산 줄이다(`root` 가 없다) — [`board`] 가 `root.unwrap_or(live)` 로 고르는 그것.
@@ -986,13 +1011,14 @@ pub(crate) fn counted_beside(
     let side = crate::cmd::status::ArchiveSide::of((&live.issues, &roots), &archived);
     let excluded = crate::archive::conflicts(&live.issues, &archived);
     let archive_unreadable = archived.errors.len();
-    let load = beside(archived, Load { issues: live.issues.clone(), errors: live.errors.clone() });
+    let (load, source) = beside_with_source(archived, Load { issues: live.issues.clone(), errors: live.errors.clone() });
     let soil = crate::report::Soil::of(&load.issues);
     let (st, movable) = crate::archive::board_in(&load.issues, &soil, &live.issues, &unreadable, &excluded, cfg, now);
     let st = side.warn(st, movable);
     let counted = tally(st, unreadable.len(), archive_unreadable);
     let (index, mut ground) = measure_in(&load.issues, cfg, &soil);
     ground.archive_only = archive_only;
+    ground.record_archive_source(&load.issues, source, &unreadable_ids);
     drop(soil);
     Ok(Beside { load, counted, index, ground })
 }
@@ -1008,12 +1034,22 @@ fn unwritten_in(archived: &Load, live: &Load) -> std::collections::BTreeSet<Stri
 /// (moai-nkwg). 셈([`board`])은 섞기 전의 두 벌을 따로 받으므로, `read_all` 로 섞으면 셈을 위해 아카이브를 한 벌
 /// 더 읽어야 한다. 겹친 id 는 둘 다 남고(진단과 `SPC v o` 가 본다), 안정 정렬이라 산 줄이 뒤에 서서
 /// `Load::get` 에서 이긴다.
+#[cfg(test)]
 pub(crate) fn beside(archived: Load, live: Load) -> Load {
+    beside_with_source(archived, live).0
+}
+
+fn beside_with_source(archived: Load, live: Load) -> (Load, Vec<bool>) {
+    let mut source = vec![true; archived.issues.len()];
+    source.extend(std::iter::repeat_n(false, live.issues.len()));
     let mut out = archived;
     out.issues.extend(live.issues);
-    out.issues.sort_by(|a, b| a.id.cmp(&b.id));
+    let mut paired: Vec<_> = std::mem::take(&mut out.issues).into_iter().zip(source).collect();
+    paired.sort_by(|a, b| a.0.id.cmp(&b.0.id));
+    let (issues, source) = paired.into_iter().unzip();
+    out.issues = issues;
     out.errors.extend(live.errors);
-    out
+    (out, source)
 }
 
 /// 지켜볼 것에 더한다 — **이미 든 자리는 안 더한다.** `worktree::heads`·`gather`·`worktree::place_marks`
@@ -1756,7 +1792,9 @@ impl Site {
         let mut ground = ground;
         ground.archived_rows = {
             let where_ = ground.here(&issues);
-            issues.iter().map(|row| where_.archived(row, &now)).collect()
+            issues.iter().enumerate().map(|(at, row)| {
+                ground.archive_copy(&issues, at) || where_.archived(row, &now)
+            }).collect()
         };
         ground.archived_at = now.clone();
         Site {
@@ -1870,8 +1908,18 @@ impl Site {
         } else {
             // A fixed test clock or a read that crosses a second needs the new
             // instant. Normal frames use the load's precomputed answers.
-            self.ground.here(&self.issues).archived(&self.issues[at], &self.now)
+            let row = &self.issues[at];
+            self.archive_file(at) == Some(true)
+                || self.ground.here(&self.issues).archived(row, &self.now)
         }
+    }
+
+    /// `Some(true)` is an archive copy shadowed by a live row; `Some(false)`
+    /// came only from the archive. Neither is inferred from the id alone.
+    pub fn archive_file(&self, at: usize) -> Option<bool> {
+        let row = self.issues.get(at)?;
+        self.ground.from_archive.get(at).copied().unwrap_or(false)
+            .then(|| self.ground.archive_copies.contains(&row.id))
     }
 
     /// 그 줄이 서는 **보드의 레인**(moai-9nfw) — 뿌리에서는 그 줄이 사는 마일스톤이나 바구니(`(마일스톤 없음)`·
@@ -13486,6 +13534,61 @@ mod tests {
         );
         assert_eq!(load.issues.len(), 4);
         assert_eq!(load.errors.len(), 1, "섞은 줄이 아카이브의 못 읽는 줄을 잃었다");
+    }
+
+    #[test]
+    fn a_stored_row_stays_hidden_when_archive_days_grows() {
+        let s = scratch("stored-source");
+        let root = s.path();
+        let mut old = make("argos-a001", Kind::Issue);
+        old.status = Status::new("done");
+        old.status_since = "2020-01-01T00:00:00Z".into();
+        crate::archive::append(root, std::slice::from_ref(&old), &cfg()).unwrap();
+        let mut live = make("argos-a002", Kind::Issue);
+        live.status = Status::new("done");
+        live.status_since = old.status_since.clone();
+        std::fs::write(root.join(".moai/issues.jsonl"), format!("{}\n", serde_json::to_string(&live).unwrap())).unwrap();
+        let mut c = cfg();
+        c.archive_days = 100_000;
+        let repo = Repo::at(root.to_path_buf(), c);
+        let stamp = stamp_of(&repo);
+        let now = crate::model::now();
+        let Beside { load, counted, index, ground } =
+            counted_beside(&repo, repo.read().unwrap(), None, &Default::default(), true, &now).unwrap();
+        let mut a = App::open_counted(repo, load, index, ground, Path::new(), stamp, counted);
+        let archived = a.site.issues.iter().position(|i| i.id == old.id).unwrap();
+        let active = a.site.issues.iter().position(|i| i.id == live.id).unwrap();
+        assert!(a.site.archived(archived));
+        assert!(!a.site.archived(active));
+        assert_eq!(a.site.archive_file(archived), Some(false));
+        assert_eq!(a.site.archive_file(active), None);
+        let wh = a.site.ground.here(&a.site.issues);
+        assert!(wh.archived(&a.site.issues[archived], &a.site.now));
+        a.site.ground.archive_days = 0;
+        a.site.now = "2030-01-01T00:00:00Z".into();
+        assert!(a.site.archived(archived), "archive_days off must keep a stored row hidden");
+        assert!(!a.site.archived(active));
+    }
+
+    #[test]
+    fn an_archive_copy_of_a_live_id_stays_hidden() {
+        let s = scratch("archive-copy-source");
+        let root = s.path();
+        let mut old = make("argos-a001", Kind::Issue);
+        old.status = Status::new("done");
+        crate::archive::append(root, std::slice::from_ref(&old), &cfg()).unwrap();
+        let live = make("argos-a001", Kind::Issue);
+        std::fs::write(root.join(".moai/issues.jsonl"), format!("{}\n", serde_json::to_string(&live).unwrap())).unwrap();
+        let repo = Repo::at(root.to_path_buf(), cfg());
+        let stamp = stamp_of(&repo);
+        let now = crate::model::now();
+        let Beside { load, counted, index, ground } =
+            counted_beside(&repo, repo.read().unwrap(), None, &Default::default(), true, &now).unwrap();
+        let a = App::open_counted(repo, load, index, ground, Path::new(), stamp, counted);
+        assert_eq!(a.site.issues.len(), 2);
+        assert_eq!(a.site.archive_file(0), Some(true));
+        assert!(a.site.archived(0));
+        assert!(!a.site.archived(1));
     }
 
     /// **아카이브로 옮긴 미룬 에픽도 산 멤버를 미룬 것으로 세운다**(moai-ug6x.cpq) — 보드의 셈(`report` 의

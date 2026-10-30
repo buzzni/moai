@@ -616,6 +616,8 @@
   "tui.layer.no_projects": "등록한 프로젝트가 없다",
   "tui.layer.how_to_register": "{key} 로 디렉터리를 골라 등록한다",
   "tui.detail.none": "없다",
+  "tui.detail.archive_file": "보관 파일",
+  "tui.detail.archive_copy": "보관 사본 — 산 줄이 따로 있다",
   "tui.detail.up": "한 층 위로",
   "tui.place.reading": "읽는 중",
   "tui.place.empty": "비었다",
