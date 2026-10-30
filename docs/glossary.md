@@ -331,4 +331,4 @@ not pile commits onto one branch. The tracker stays in the main checkout; the
 wiki pages ride the branch. More in
 [the workflow](workflow.md#work-in-a-worktree).
 
-Decided in: moai-tllo moai-snyk moai-u5wr moai-dhxm moai-kxkw moai-jtvp moai-bth3 moai-obxm moai-9tqo moai-uzhx moai-pyi4 moai-jdwk moai-lj8g moai-d1zn moai-ns7a
+Decided in: moai-tllo moai-snyk moai-u5wr moai-dhxm moai-kxkw moai-jtvp moai-bth3 moai-obxm moai-9tqo moai-uzhx moai-pyi4 moai-jdwk moai-lj8g moai-d1zn moai-ns7a moai-mkzo

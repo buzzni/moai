@@ -114,7 +114,7 @@ Other tabs read the same tree without calculating the chart values.
 |---|---|
 | `j` `k`, click | Move the cursor; a click on a row or bar opens its detail |
 | `h` `l` / `←` `→`, group chevron | Fold / open a group; `h` on a member folds its parent and moves there |
-| `Tab` | Fold / open the subtree under the cursor, leaving closed descendants folded |
+| `Tab` | Fold / open the subtree under the cursor, preserving closed descendants you opened by hand |
 | `H` `L`, Shift+wheel, drag the date header | Move the dates |
 | `-` `=`, the zoom buttons, Ctrl+wheel over the dates | Hour / day / week / month |
 | `t` / `z` | Jump to today / fit every drawn row |
@@ -397,4 +397,4 @@ browser's focus order; its chevrons fold lanes and closed epic cards.
 The page does not show the stats screen, and what it writes is a Gantt bar's days
 and your read marks.
 
-Decided in: moai-skjr, moai-e9hi, moai-8r2l, moai-0aa7, moai-jshy, moai-d86e.3ud, moai-ijjd, moai-lj8g, moai-ekg6
+Decided in: moai-skjr, moai-e9hi, moai-8r2l, moai-0aa7, moai-jshy, moai-d86e.3ud, moai-ijjd, moai-lj8g, moai-ekg6 moai-mkzo
