@@ -1524,6 +1524,8 @@
   "page.board.columnLabelOne": "{name}, {count} card",
   "page.board.columnLabelMany": "{name}, {count} cards",
   "page.board.noCards": "No cards",
+  "page.board.fold": "Fold group",
+  "page.board.unfold": "Unfold group",
   "page.gantt.label": "Gantt",
   "page.gantt.empty": "Nothing to draw.",
   "page.gantt.heads.id": "ID",

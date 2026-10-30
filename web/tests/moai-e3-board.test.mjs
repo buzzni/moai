@@ -8,7 +8,7 @@ import { panelModule } from './moai-panel-modules.mjs'
 
 const { groupBoard, columnOf, statusKeys, BACKLOG, DEFERRED } = await panelModule('view/board-groups.ts')
 const { mountBoard, glyphOf } = await panelModule('view/board.ts')
-const { IssueIndex, NO_MILESTONE } = await panelModule('data/index.ts')
+const { IssueIndex, NO_MILESTONE, pathKey } = await panelModule('data/index.ts')
 const { treeOf } = await import('./moai-tree-helper.mjs')
 const { initialState } = await panelModule('store.ts')
 const { copyFor } = await panelModule('i18n/index.ts')
@@ -141,9 +141,93 @@ const mount = (state, rows = ROWS) => {
     intents: { choose: (id) => chosen.push(id), point: (id) => chosen.push(`point:${id}`) }, layout: () => ({}), focusPane: () => {},
   }
   const view = mountBoard(root, ctx)
-  view.render(state, build(rows))
-  return { root, view, chosen, dom }
+  const index = build(rows)
+  view.render(state, index)
+  return { root, view, chosen, dom, index }
 }
+
+test('closed milestone lanes and epic cards fold; the running lane and deferred member remain', () => {
+  const rows = [
+    { id: 'm1', kind: 'milestone', title: 'Closed release', status: 'todo', derived_status: 'done' },
+    { id: 'e1', kind: 'epic', title: 'Closed epic', milestone: 'm1', status: 'todo', derived_status: 'done' },
+    { id: 'e1.a', kind: 'issue', title: 'Done', derived_epic: 'e1', status: 'done' },
+    { id: 'e1.b', kind: 'issue', title: 'Deferred', derived_epic: 'e1', status: 'todo', deferred_at: '2026-10-01', shelved_by: 'e1.b' },
+    { id: 'm2', kind: 'milestone', title: 'Running release', status: 'todo', derived_status: 'in_progress' },
+    { id: 'w1', kind: 'issue', title: 'Running', milestone: 'm2', status: 'in_progress' },
+  ]
+  const state = { ...initialState(), tab: 'board', view: { ...initialState().view, hideDeferred: false } }
+  const { root, view, index } = mount(state, rows)
+  const head = (id) => root.querySelector(`.m-swim-head[data-lane="m:${id}"]`)
+  assert.equal(head('m1').querySelector('.moai-toggle').getAttribute('aria-expanded'), 'false')
+  assert.equal(head('m1').querySelector('.moai-toggle').tabIndex, 0, 'the browser Tab reaches the fold button')
+  assert.equal(head('m1').querySelector('.m-swim-title').tabIndex, 0, 'the browser Tab reaches the milestone title')
+  assert.equal(head('m1').querySelector('.m-count').textContent, '2')
+  assert.equal(root.querySelector('[data-id="e1"]'), null)
+  assert.equal(head('m2').querySelector('.moai-toggle').getAttribute('aria-expanded'), 'true')
+  assert.ok(root.querySelector('[data-id="w1"]'))
+  head('m1').querySelector('.moai-toggle').click()
+  assert.equal(head('m1').querySelector('.moai-toggle').getAttribute('aria-expanded'), 'true')
+  assert.ok(root.querySelector('.m-lane[data-status="done"] [data-id="e1"]'))
+  assert.equal(root.querySelector('[data-id="e1.a"]'), null)
+  assert.ok(root.querySelector('.m-lane[data-status="deferred"] [data-id="e1.b"]'))
+  root.querySelector('[data-id="e1"] .moai-toggle').click()
+  assert.ok(root.querySelector('.m-lane[data-status="done"] [data-id="e1.a"]'))
+  view.render(state, index)
+  assert.ok(root.querySelector('[data-id="e1.a"]'), 'a reread of the view keeps the chosen fold')
+  view.leave()
+  view.render(state, index)
+  assert.equal(head('m1').querySelector('.moai-toggle').getAttribute('aria-expanded'), 'false', 'a new visit seeds closed groups again')
+  const selectedHead = mount({ ...state, cursor: 'm1' }, rows)
+  assert.equal(selectedHead.root.querySelector('.m-swim-head[data-lane="m:m1"] .moai-toggle').getAttribute('aria-expanded'), 'false', 'selecting the head does not open its lane')
+})
+
+test('lane title chooses its milestone; h and l fold its cards, and j enters the lane', () => {
+  const rows = [
+    { id: 'm1', kind: 'milestone', title: 'Release', derived_status: 'in_progress' },
+    { id: 'w1', kind: 'issue', title: 'Work', milestone: 'm1', status: 'in_progress' },
+  ]
+  const state = { ...initialState(), tab: 'board', cursor: 'm1' }
+  const { root, view, chosen, index } = mount(state, rows)
+  const head = () => root.querySelector('.m-swim-head[data-lane="m:m1"]')
+  assert.equal(head().getAttribute('aria-selected'), 'true')
+  head().querySelector('.m-swim-title').click()
+  assert.deepEqual(chosen, ['m1'])
+  view.command('collapse')
+  assert.equal(head().querySelector('.moai-toggle').getAttribute('aria-expanded'), 'false')
+  view.command('expand')
+  assert.equal(head().querySelector('.moai-toggle').getAttribute('aria-expanded'), 'true')
+  view.render(state, index)
+  view.command('move.down')
+  assert.equal(chosen.at(-1), 'point:w1')
+})
+
+test('folding a lane moves its selected card to the milestone head', () => {
+  const rows = [
+    { id: 'm1', kind: 'milestone', title: 'Release', derived_status: 'in_progress' },
+    { id: 'w1', kind: 'issue', title: 'Work', milestone: 'm1', status: 'in_progress' },
+  ]
+  const { root, chosen } = mount({ ...initialState(), tab: 'board', cursor: 'w1' }, rows)
+  root.querySelector('.m-swim-head[data-lane="m:m1"] .moai-toggle').click()
+  assert.equal(root.querySelector('[data-id="w1"]'), null)
+  assert.equal(root.querySelector('.m-swim-head[data-lane="m:m1"]').getAttribute('aria-selected'), 'true')
+  assert.deepEqual(chosen, ['point:m1'])
+})
+
+test('search reveals a done member inside folded lane and epic without changing the fold', () => {
+  const rows = [
+    { id: 'm1', kind: 'milestone', derived_status: 'done' },
+    { id: 'e1', kind: 'epic', milestone: 'm1', derived_status: 'done' },
+    { id: 'e1.a', kind: 'issue', derived_epic: 'e1', status: 'done' },
+  ]
+  const idx = build(rows)
+  const shut = new Set(['m:m1', pathKey(idx.dirPath(idx.find('e1')))])
+  const normal = groupBoard(idx, look({ shut }))
+  assert.equal(normal.lanes[0].folded, true)
+  const found = groupBoard(idx, look({ shut, reveal: true, match: (at) => idx.rows[at].id === 'e1.a' }))
+  assert.equal(found.lanes[0].folded, false)
+  assert.deepEqual(found.lanes[0].columns.find((column) => column.key === 'done').cards.map((at) => idx.rows[at].id), ['e1.a'])
+  assert.equal(shut.size, 2)
+})
 
 test('board bands follow rendered lanes and the card head, including a selected and deferred card', () => {
   const rows = [

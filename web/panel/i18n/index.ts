@@ -111,6 +111,8 @@ export interface BoardCopy {
   columnLabelMany: string
   /** An empty column. */
   noCards: string
+  fold: string
+  unfold: string
 }
 
 export interface GanttCopy {

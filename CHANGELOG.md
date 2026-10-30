@@ -16,6 +16,7 @@ does not tag — see `CONTRIBUTING.md`.
 
 - Explorer `SPC o o` chooses the archive retention and writes `archive_days` to the shared repository configuration. (moai-mkzo.mgn)
 - Explorer board lane headers can be selected and folded; closed milestone lanes and epic cards start folded. (moai-mkzo.65c)
+- Web list and Gantt fold closed groups by default, and web board milestone lanes and closed epic cards can be folded; lane titles select the milestone detail. (moai-mkzo.8db)
 
 ### Changed
 

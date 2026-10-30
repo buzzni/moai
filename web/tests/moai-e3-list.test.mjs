@@ -190,6 +190,21 @@ function mount(rows, { state: over = {}, width = 800, height = 280, detailVisibl
   return { dom, doc, root, store, pane, calls, lines, key, render, size }
 }
 
+test('Tab opens the chosen closed group while leaving closed descendants folded', () => {
+  const rows = [
+    { id: 'm1', kind: 'milestone', title: 'Release', derived_status: 'done' },
+    { id: 'e1', kind: 'epic', title: 'Epic', milestone: 'm1', derived_status: 'done' },
+    { id: 'e1.a', kind: 'issue', title: 'Done', derived_epic: 'e1', status: 'done' },
+  ]
+  const { lines, key, store } = mount(rows, { state: { cursor: 'm1' } })
+  key('Tab')
+  assert.deepEqual(lines().map((line) => line.dataset.key), ['m1', 'e1'])
+  assert.equal(lines()[1].getAttribute('aria-expanded'), 'false')
+  store.dispatch({ type: 'cursor', id: 'e1' })
+  key('Tab')
+  assert.ok(lines().some((line) => line.dataset.key === 'e1.a'))
+})
+
 test('list view: rows, columns, the name line, and going in and out', () => {
   const view = mount(ROWS, { state: { path: ['m:se-m1'] } })
   const { root, store, lines, key, calls } = view

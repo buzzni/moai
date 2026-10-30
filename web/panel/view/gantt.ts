@@ -19,7 +19,7 @@ import { assigneeOf } from '../data/people.ts'
 import { MEMORY_KEY, settingsStorage } from '../data/memory.ts'
 import { undoOf, type PlanChange } from '../data/plan.ts'
 import { zoneNow } from '../data/zone.ts'
-import { pathKey, type GanttRow, type IssueIndex, type Row } from '../data/index.ts'
+import { closedGroup, pathKey, type GanttRow, type IssueIndex, type Row } from '../data/index.ts'
 import { fill } from '../i18n/index.ts'
 import type { State } from '../store.ts'
 import { el, emptyState, icon } from './components.ts'
@@ -119,6 +119,7 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
   const words = copy.gantt
   const shut = new Set<string>()
   let foldVersion = 0
+  let seeded = false
   const win = doc.defaultView
   const SVG = 'http://www.w3.org/2000/svg'
   const uid = `moai-gantt-${++mounted}`
@@ -690,10 +691,10 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
   function fold(line: GanttLine, open: boolean, all = false): void {
     if (!model || !state || !line.dir) return
     const index = model.index
-    const paths = [line.path, ...(all ? index.tree(line.path, () => true).filter((one) => one.entry.dir).map((one) => one.path) : [])]
-    for (const path of paths) {
+    const paths = [{ path: line.path, at: line.kind === 'row' ? line.at : undefined }, ...(all ? index.tree(line.path, () => true).filter((one) => one.entry.dir).map((one) => ({ path: one.path, at: one.entry.at })) : [])]
+    for (const { path, at } of paths) {
       const key = pathKey(path)
-      if (open) shut.delete(key)
+      if (open && (key === pathKey(line.path) || at === undefined || !closedGroup(index.rows[at]!))) shut.delete(key)
       else shut.add(key)
     }
     if (!open) {
@@ -1031,6 +1032,18 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
       lanesBox.replaceChildren()
       return
     }
+    if (!seeded) {
+      const at = current.cursor === null ? undefined : index.find(current.cursor)
+      const selected = at === undefined ? [] : index.homeOf(at)
+      for (let n = 0; n < index.rows.length; n++) {
+        if (!index.isDir(n) || !closedGroup(index.rows[n]!)) continue
+        const path = index.dirPath(n)
+        if (path.every((seg, k) => selected[k] === seg)) continue
+        shut.add(pathKey(path))
+      }
+      seeded = true
+      foldVersion++
+    }
     const key = JSON.stringify([current.path, current.view, current.search.text, current.filter.applied, foldVersion])
     const zone = clock.zone()
     if (!model || model.index !== index || model.key !== key || model.matched !== current.matched || model.boot !== current.boot || model.zone !== zone) {
@@ -1052,6 +1065,7 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
     leave() {
       shut.clear()
       foldVersion++
+      seeded = false
       model = null
     },
     focus() {

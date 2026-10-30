@@ -1524,6 +1524,8 @@
   "page.board.columnLabelOne": "{name}, 카드 {count}장",
   "page.board.columnLabelMany": "{name}, 카드 {count}장",
   "page.board.noCards": "카드 없음",
+  "page.board.fold": "묶음 접기",
+  "page.board.unfold": "묶음 펴기",
   "page.gantt.label": "간트",
   "page.gantt.empty": "그릴 줄이 없습니다.",
   "page.gantt.heads.id": "ID",

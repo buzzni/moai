@@ -1211,6 +1211,33 @@ test('gantt group buttons fold milestones and epics without changing the list fo
   assert.deepEqual(start.expanded, [], 'no list expansion was mutated')
 })
 
+test('closed gantt groups seed once per visit and Tab keeps their closed descendants folded', () => {
+  const rows = [
+    { id: 'm1', kind: 'milestone', title: 'Release', derived_status: 'done' },
+    { id: 'e1', kind: 'epic', title: 'Epic', milestone: 'm1', derived_status: 'done' },
+    { id: 'e1.a', kind: 'issue', title: 'Done', derived_epic: 'e1', status: 'done' },
+  ]
+  const index = new IssueIndex(rows, treeOf(rows))
+  const { root, view } = mount(null, index)
+  const toggle = (id) => root.querySelector(`.g-row[data-id="${id}"] .moai-toggle`)
+  assert.equal(toggle('m1').getAttribute('aria-expanded'), 'false')
+  assert.equal(lane(root, 'e1'), null)
+  const selectedHead = mount('m1', index)
+  assert.equal(selectedHead.root.querySelector('.g-row[data-id="m1"] .moai-toggle').getAttribute('aria-expanded'), 'false')
+  toggle('m1').click()
+  assert.equal(toggle('e1').getAttribute('aria-expanded'), 'false')
+  view.render({ ...initialState(), tab: 'gantt', cursor: 'm1' }, index)
+  view.command('expandAll')
+  view.command('expandAll')
+  assert.equal(toggle('e1').getAttribute('aria-expanded'), 'false')
+  toggle('e1').click()
+  view.render({ ...initialState(), tab: 'gantt' }, index)
+  assert.equal(toggle('e1').getAttribute('aria-expanded'), 'true')
+  view.leave()
+  view.render({ ...initialState(), tab: 'gantt' }, index)
+  assert.equal(toggle('m1').getAttribute('aria-expanded'), 'false')
+})
+
 test('h folds a parent and points at it; l opens it; Tab folds and opens the whole subtree', () => {
   const { root, view, calls, index } = mount('e1.c')
   assert.equal(view.command('collapse'), true)
