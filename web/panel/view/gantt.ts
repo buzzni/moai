@@ -26,7 +26,7 @@ import { el, emptyState, icon } from './components.ts'
 import { segLabel } from './crumbs.ts'
 import { formatDate } from './detail-format.ts'
 import {
-  arrowOf, DAY, DEFAULT_GRID, DEFAULT_ZOOM, dayStart, dayText, dragDays, fitSpan, floorDay, ganttLines, HEAD_H, headerOf, movedPlan, normalizeGrid, placeRow,
+  arrowOf, DAY, DEFAULT_GRID, DEFAULT_ZOOM, dayStart, dayText, dragDays, fillRange, fitSpan, floorDay, ganttLines, HEAD_H, headerOf, movedPlan, normalizeGrid, placeRow,
   PX_PER_DAY, rangeOf, MIN_GRID, ROW_H, shiftPlan, wallAt, wallOf, weekends, widthOf, xOf, ZOOMS, zoomToFit, type Axis, type Edge, type GanttLine,
   type Placed, type Tick, type Zoom,
 } from './gantt-model.ts'
@@ -295,6 +295,12 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
       const [from, to] = rangeOf(placed.map((p) => p?.span ?? null), now)
       axis = { zoom, from, to }
     }
+    // Zoom, fit and a resize may retain the date range while changing how much of it fits on screen.
+    // Include the view's left offset: a resize near the right edge must fill that view, not just the first screen.
+    const targetScroll = scrollTo ? scrollTo(axis) : was && was.zoom === axis.zoom && was.from !== axis.from
+      ? Math.max(0, scroll.scrollLeft + xOf(axis, was.from)) : scroll.scrollLeft
+    const [from, to] = fillRange([axis.from, axis.to], zoom, targetScroll + viewWidth())
+    axis = { ...axis, from, to }
     const a = axis
     // The bars this hovered bubble spoke of are about to be replaced, and a removed node sends no mouseleave.
     bubble.hidden = true
@@ -304,8 +310,7 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
     rowsBox.style.height = `${m.lines.length * ROW_H}px`
     // An axis that grew at its start (a new row reaches earlier) moves every date right: the same dates stay in view.
     // A new step is setZoom's and fit's to place.
-    if (scrollTo) scroll.scrollLeft = scrollTo(a)
-    else if (was && was.zoom === a.zoom && was.from !== a.from) scroll.scrollLeft = Math.max(0, scroll.scrollLeft + xOf(a, was.from))
+    if (targetScroll !== scroll.scrollLeft) scroll.scrollLeft = targetScroll
 
     const svg = doc.createElementNS(SVG, 'svg')
     svg.setAttribute('class', 'links')
@@ -553,7 +558,7 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
       if (!hideRight) pair.right.style.left = `${v1 - 12}px`
     })
     for (const tick of built.top) tick.el.style.paddingLeft = tick.from < v0 && tick.to > v0 ? `${v0 - tick.from + 4}px` : ''
-    rangeText.textContent = `${dayText(wallAt(axis, v0))} ~ ${dayText(wallAt(axis, v1))}`
+    rangeText.textContent = `${dayText(wallAt(axis, v0))} ~ ${dayText(wallAt(axis, Math.min(v1, widthOf(axis))))}`
   }
 
   /** Only the cursor moved: the selection mark, the arrows, the row in view. */
@@ -1017,7 +1022,12 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
     frame = win.requestAnimationFrame(paintView)
   }
   scroll.addEventListener('scroll', onScroll, { passive: true })
-  const observer = win && 'ResizeObserver' in win ? new win.ResizeObserver(() => (paintGrid(), position(), paintView())) : null
+  const observer = win && 'ResizeObserver' in win ? new win.ResizeObserver(() => {
+    paintGrid()
+    position()
+    if (axis && viewWidth() > widthOf(axis) - scroll.scrollLeft) draw()
+    else paintView()
+  }) : null
   observer?.observe(scroll)
 
   function render(current: State, index: IssueIndex | null): void {

@@ -62,8 +62,9 @@ const size = (root, width = 4000, height = 2000) => {
   return box
 }
 
-const mount = (cursor = null, index = build(), dims = []) => {
+const mount = (cursor = null, index = build(), dims = [], setup = () => {}) => {
   const dom = new JSDOM('<!doctype html><body><div id="r"></div></body>')
+  setup(dom.window)
   const calls = []
   const root = dom.window.document.getElementById('r')
   const ctx = {
@@ -194,6 +195,60 @@ test('the axis: steps, the two header lines, weekends, fit', () => {
   assert.equal(model.normalizeGrid('9000'), 760)
   assert.equal(model.normalizeGrid('nope'), 460)
   assert.equal(model.normalizeGrid(10), 220)
+})
+
+test('a short date range fills a wide view at every zoom without moving its first day', () => {
+  const short = model.rangeOf([null], NOW)
+  for (const zoom of model.ZOOMS) {
+    const filled = model.fillRange(short, zoom, 1540)
+    assert.equal(filled[0], short[0])
+    assert.ok(model.widthOf({ zoom, from: filled[0], to: filled[1] }) > 1540, `${zoom} leaves a day of scrollable margin`)
+  }
+  assert.deepEqual(model.fillRange(short, 'day', 100), short, 'an already wide enough range is kept')
+})
+
+test('a short Gantt fills the dates through zoom, fit and resize; its range ends at the drawn axis', () => {
+  const rows = [{ id: 'short', kind: 'issue', title: 'Short', status: 'todo' }]
+  const index = new IssueIndex(rows, treeOf(rows).map((line) => line.id ? { ...line, gantt: g(line.id) } : line))
+  let resize
+  const { root, view, dom } = mount(null, index, [2000, 560], (win) => {
+    win.ResizeObserver = class {
+      constructor(callback) { resize = callback }
+      observe() {}
+      disconnect() {}
+    }
+  })
+  const box = root.querySelector('.g-scroll')
+  const visible = () => box.clientWidth - Number.parseFloat(root.querySelector('.g-inner').style.getPropertyValue('--grid-w'))
+  const right = () => px(root.querySelector('.g-right'), 'width')
+  const lastTick = () => Math.max(...[...root.querySelectorAll('.hd2 .tick')].map((tick) => px(tick, 'left') + px(tick, 'width')))
+  const fills = (step) => {
+    assert.ok(right() > visible(), `${step}: axis stops before the visible right edge`)
+    assert.ok(lastTick() >= visible(), `${step}: date header stops before the visible right edge`)
+  }
+  fills('day')
+  view.command('gantt.zoomOut')
+  fills('week')
+  view.command('gantt.zoomOut')
+  fills('month')
+  view.command('gantt.fit')
+  fills('fit')
+
+  // A wider pane must remeasure the axis, while keeping the date under the old scroll position.
+  box.scrollLeft = Math.max(0, right() - visible() - 1)
+  Object.defineProperty(box, 'clientWidth', { get: () => 2600, configurable: true })
+  const before = box.scrollLeft
+  resize()
+  fills('resize')
+  assert.equal(box.scrollLeft, before)
+  assert.ok(right() > visible() + before, 'the resized view keeps a scrollable right margin after the current offset')
+
+  // In jsdom scrollLeft can be set past the browser's normal limit; the label must still stop at the drawn axis.
+  box.scrollLeft = right() - 40
+  box.dispatchEvent(new dom.window.Event('scroll'))
+  const from = model.rangeOf([null], NOW)[0]
+  const axisEnd = model.dayText(from + right() / model.PX_PER_DAY[root.querySelector('.g-seg [aria-pressed="true"]').dataset.zoom] * model.DAY)
+  assert.equal(root.querySelector('.g-range').textContent.split(' ~ ')[1], axisEnd)
 })
 
 test('the grid draws the whole tree: id, glyph, branch, title, progress, assignee', () => {

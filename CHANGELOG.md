@@ -18,6 +18,10 @@ does not tag — see `CONTRIBUTING.md`.
 - Explorer board cards in the in-progress, review and done columns now carry a black head band with text in the column's colour; the selected card reverses the band. (moai-i07x.z3s)
 - Todo now has a blue column colour, as the other columns do: explorer board card head bands, status glyphs and counts; web board bands, list and Gantt row tints, status glyphs and detail counts; and the todo glyph and column name in command output such as `moai status`, `moai show` and `moai mv`. (moai-ivqd)
 
+### Fixed
+
+- Web Gantt date headers, weekend shading and lanes now extend across a wide or resized pane even when work spans only a few days; zoom and fit retain enough date axis to fill the view. (moai-hwa8)
+
 ## [0.37.0] - 2026-10-30
 
 ### Added

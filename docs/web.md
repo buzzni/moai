@@ -75,7 +75,9 @@ between rendered markdown and the raw text.
 
 The Gantt tab draws the same chart as the explorer's `SPC g g`, with the same
 meaning. The tree stays on the left, initially with every folder open, with the filter, search and
-view toggles of the list applied; the dates scroll on the right. The tree's rows take
+view toggles of the list applied; the dates scroll on the right. The date axis
+reaches across the visible pane even when the work spans only a few days, and grows
+with the pane when it is resized. The tree's rows take
 the list's column backgrounds; the dates behind the bars stay plain.
 
 | Mark | Means |
