@@ -65,9 +65,14 @@ repository.
 
 Every process started through `tests/cli.rs::isolated()` receives a user config
 fence private to its test thread. The fence and files written beside its default
-config are removed when that thread ends, including after a panic unwinds. Set
-`MOAI_CONFIG` explicitly only when a test needs a known path to inspect those
-files; the later value takes precedence over the default fence.
+config are removed when that thread ends, including after a panic unwinds.
+`config_of(&cmd)` returns the fence path when a test needs to inspect those
+files. A helper thread that a test spawns gets a fence of its own, so helper
+threads that must share config files are given the test thread's
+`config_of(&cmd)` as `MOAI_CONFIG`; a value set after `isolated()` takes
+precedence over the default fence. Any other explicit `MOAI_CONFIG` lies outside
+the fence, so put it inside a scratch directory the test owns, or what is
+written beside it outlives the test. `HOME` is not fenced: every test shares it.
 
 Clippy runs with `-D warnings`. Lints this project deliberately carries are
 listed under `[workspace.lints.clippy]` in `Cargo.toml`, each with the reason it is there.

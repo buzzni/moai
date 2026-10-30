@@ -72,9 +72,18 @@ impl Drop for Scratch {
 
 thread_local! {
     // libtest 는 시험마다 별도 스레드를 쓴다. 첫 isolated 호출에 울타리를 만들고 스레드가 끝날 때
-    // Scratch::drop 이 설정 곁의 파일까지 걷는다(패닉으로 풀릴 때도). 보조 스레드도 각자 제 울타리를 쓴다.
-    // 메인 스레드의 TLS 소멸자는 프로세스 종료 때 돌지 않지만, libtest 시험은 메인 스레드에서 돌지 않는다.
-    static CONFIG_FENCE: Scratch = Scratch::new("config-fence");
+    // Scratch::drop 이 설정 곁의 파일까지 걷는다(패닉으로 풀릴 때도). 보조 스레드도 각자 제 울타리를 쓴다 —
+    // 보조 스레드끼리 설정 곁의 파일을 나눠 봐야 하는 시험은 `config_of` 로 읽은 자리를 `MOAI_CONFIG` 로 건넨다.
+    // 메인 스레드의 TLS 소멸자는 프로세스 종료 때 돌지 않는다. libtest 가 시험을 메인 스레드에서 돌리는 판
+    // (스레드를 못 띄워 `WouldBlock` 으로 떨어진 판, `-Zpanic-abort-tests` 의 자식 프로세스)에서는 울타리가 남는다.
+    //
+    // **이름에 셈을 넣는다.** `Scratch::new` 는 pid·시각·이름으로 자리를 짓고 겹치면 크게 실패하는데, 모든 시험
+    // 스레드가 같은 이름으로 울타리를 지으니 시계 한 칸(macOS 의 `SystemTime` 은 µs) 안에 둘이 지으면 `create_dir`
+    // 이 "File exists" 로 넘어진다. 시험마다 다른 이름을 주던 `init(name)` 과 달리 여기는 이름이 하나뿐이다.
+    static CONFIG_FENCE: Scratch = {
+        static NTH: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        Scratch::new(&format!("config-fence-{}", NTH.fetch_add(1, std::sync::atomic::Ordering::Relaxed)))
+    };
 }
 
 // 링크를 푼 자리 — Windows 의 `\\?\` 까지 걷은, 도구가 내는 철자다(moai-lag7.rrm). 시험이 도구의 철자와 견줄 때 쓴다.
@@ -156,8 +165,9 @@ fn temp_at(cmd: &mut Command, dir: impl AsRef<std::ffi::OsStr>) -> &mut Command 
 /// 시험이 제 값을 주려면 이 뒤에 `.env` 로 덮는다. `PATH` 는 두고 간다 — moai 가
 /// git 을 부르고, `claude` 가 없는 자리가 필요한 시험은 `Claude` 가 따로 만든다.
 fn isolated(program: impl AsRef<std::ffi::OsStr>) -> Command {
-    // HOME 은 시험용으로 고정한다. 사용자 설정은 CONFIG_FENCE 의 시험 스레드별 자리로
-    // 갈라 두므로, 설정 곁에 쓰는 read/·picks/ 도 시험이 끝나면 함께 걷힌다.
+    // HOME 은 시험용 한 자리로 고정하고 **모든 시험이 함께 쓴다** — 울타리는 사용자 설정에만 선다.
+    // 사용자 설정은 CONFIG_FENCE 의 시험 스레드별 자리로 갈라 두므로, 설정 곁에 쓰는 read/·picks/ 도
+    // 시험이 끝나면 함께 걷힌다. 시험이 뒤에 준 `MOAI_CONFIG` 는 울타리 밖이라 그 시험의 Scratch 안에 둔다.
     let home = Path::new(env!("CARGO_TARGET_TMPDIR")).join("moai-cli-home");
     std::fs::create_dir_all(&home).unwrap();
     let config = CONFIG_FENCE.with(|fence| fence.path().join("config.toml"));
@@ -8931,22 +8941,23 @@ fn read_sheets(cfg: &std::path::Path, root: &std::path::Path) -> Vec<(PathBuf, S
     // `TMPDIR` 이 링크인 기계에서는 시험이 든 철자와 파일에 적힌 철자가 갈린다 — 여기서 풀지 않으면
     // 다섯 단언이 제품이 아니라 임시 자리의 철자 때문에 붉다. 어느 뿌리의 것인지를 보는 힘은 그대로다.
     let real = canon(root).unwrap_or_else(|e| panic!("{}: {e}", root.display()));
-    let mine = format!("path = {:?}", real.display().to_string());
-    // TOML 은 `\` 를 품은 글을 따옴표 하나(`'…'`)로 적기도 한다 — Windows 의 자리가 늘 그 꼴이다(moai-lag7.rrm).
-    // 유닉스의 시험 자리에는 `\` 가 없어 앞의 꼴만 선다.
-    let literal = format!("path = '{}'", real.display());
     files
         .into_iter()
         .map(|p| {
             let text = std::fs::read_to_string(&p).expect("방금 본 파일이다");
-            assert!(
-                text.contains(&mine) || text.contains(&literal),
-                "{} 의 읽음이 아닌 파일이 곁에 섰다 — {text}",
-                root.display()
-            );
+            assert!(sheet_of(&text, &real), "{} 의 읽음이 아닌 파일이 곁에 섰다 — {text}", root.display());
             (p, text)
         })
         .collect()
+}
+
+/// 읽음 파일 한 장이 링크를 푼 뿌리 `real` 의 것인가 — 파일마다 제 뿌리를 `path` 로 적는다.
+fn sheet_of(text: &str, real: &Path) -> bool {
+    let mine = format!("path = {:?}", real.display().to_string());
+    // TOML 은 `\` 를 품은 글을 따옴표 하나(`'…'`)로 적기도 한다 — Windows 의 자리가 늘 그 꼴이다(moai-lag7.rrm).
+    // 유닉스의 시험 자리에는 `\` 가 없어 앞의 꼴만 선다.
+    let literal = format!("path = '{}'", real.display());
+    text.contains(&mine) || text.contains(&literal)
 }
 
 /// 격리된 명령이 받은 설정 파일 자리. 실행 전에도 알 수 있으므로 쓰인 파일을 시험 울타리에서만 찾는다.
@@ -8967,26 +8978,50 @@ fn the_fence_holds_a_tests_read_marks_and_no_shared_path_does() {
     assert_eq!(sheets.len(), 1, "읽음 파일이 제 울타리 안에 하나여야 한다: {sheets:?}");
     assert!(sheets[0].1.contains(&id), "읽음 파일에 적힌 id 가 다르다: {sheets:?}");
     // 옛 공유 자리에서는 이 시험의 뿌리에 관한 읽음이 없어야 한다. 사람의 설정 자리는 보지 않는다.
-    let old_shared_cfg = Path::new(env!("CARGO_TARGET_TMPDIR")).join("moai-cli-home/moai-config-unset/config.toml");
-    assert!(read_sheets(&old_shared_cfg, s.path()).is_empty(), "옛 공유 설정 자리에 이 시험의 읽음이 남았다");
+    // **남의 뿌리 것은 거르기만 한다** — `read_sheets` 는 곁의 남의 파일에 넘어지는데, 이 자리에는 울타리 전의
+    // 판(9c624dd1 전에는 판마다 510장)이 남긴 읽음이 `target/tmp` 와 함께 남는다. CI 는 `target` 을 통째로 캐시한다.
+    let old_read = Path::new(env!("CARGO_TARGET_TMPDIR")).join("moai-cli-home/moai-config-unset/read");
+    let real = canon(s.path()).unwrap();
+    let leaked: Vec<PathBuf> = std::fs::read_dir(&old_read)
+        .into_iter()
+        .flatten()
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| std::fs::read_to_string(p).is_ok_and(|text| sheet_of(&text, &real)))
+        .collect();
+    assert!(leaked.is_empty(), "옛 공유 설정 자리에 이 시험의 읽음이 남았다: {leaked:?}");
 }
 
+/// 끝까지 간 시험도, **패닉으로 넘어진 시험도** 울타리를 걷는다. 패닉한 스레드는 std 가 그 패닉을 받아
+/// 정상으로 끝나므로 TLS 소멸자가 돈다 — 그것을 실제로 넘어지는 스레드로 잰다.
 #[test]
 fn the_fence_is_gone_when_its_test_ends() {
-    let cfg = std::thread::spawn(|| {
-        let s = init("fence-thread-exit");
-        let cfg = config_of(&staged(&[]));
-        let id = field(&ok(s.path(), &["add", "fenced", "--json"]), "id");
-        ok(s.path(), &["read", &id]);
-        assert!(cfg.parent().unwrap().is_dir(), "읽음이 적힌 울타리가 없다");
-        assert_eq!(read_sheets(&cfg, s.path()).len(), 1, "읽음이 울타리 밖에 적혔다");
-        // 패닉을 풀고도 같은 시험 스레드에서 울타리를 쓸 수 있다. 스레드가 끝나면 TLS Drop 이 걷는다.
-        assert!(std::panic::catch_unwind(|| panic!("fence unwind probe")).is_err());
-        cfg
-    })
-    .join()
-    .unwrap();
-    assert!(!cfg.parent().unwrap().exists(), "시험 스레드가 끝났는데 울타리가 남았다: {}", cfg.display());
+    for fails in [false, true] {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let joined = std::thread::spawn(move || {
+            let s = init("fence-thread-exit");
+            let cfg = config_of(&staged(&[]));
+            let id = field(&ok(s.path(), &["add", "fenced", "--json"]), "id");
+            ok(s.path(), &["read", &id]);
+            assert!(cfg.parent().unwrap().is_dir(), "읽음이 적힌 울타리가 없다");
+            assert_eq!(read_sheets(&cfg, s.path()).len(), 1, "읽음이 울타리 밖에 적혔다");
+            tx.send(cfg).unwrap();
+            if fails {
+                panic!("fence unwind probe");
+            }
+        })
+        .join();
+        // 보내기 전에 넘어졌으면 그 패닉을 그대로 올린다 — 아래 단언이 까닭을 가리지 않게.
+        let cfg = match rx.try_recv() {
+            Ok(cfg) => cfg,
+            Err(_) => std::panic::resume_unwind(joined.expect_err("울타리 자리를 안 보내고 끝났다")),
+        };
+        assert_eq!(joined.is_err(), fails, "시험 스레드가 뜻한 대로 끝나지 않았다");
+        assert!(
+            !cfg.parent().unwrap().exists(),
+            "시험 스레드가 끝났는데 울타리가 남았다(패닉 {fails}): {}",
+            cfg.display()
+        );
+    }
 }
 
 #[test]
@@ -20425,7 +20460,7 @@ fn the_fake_claude_command_starts_from_the_isolated_one() {
     assert_eq!(set("GIT_CONFIG_GLOBAL"), Some(std::ffi::OsStr::new("/dev/null")));
     assert_eq!(set("GIT_CONFIG_SYSTEM"), Some(std::ffi::OsStr::new("/dev/null")));
     // 사용자 설정은 시험 스레드의 울타리 안 **없는** 파일이다. 집을 덮어도 이 자리는 따라가지 않는다.
-    let config = Path::new(set("MOAI_CONFIG").expect("MOAI_CONFIG 를 안 줬다"));
+    let config = config_of(&cmd);
     assert!(
         config.starts_with(scratch::base()) && config.parent().is_some_and(Path::is_dir) && !config.exists(),
         "사용자 설정이 격리되지 않았다 — {}",
