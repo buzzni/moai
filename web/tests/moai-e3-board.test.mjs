@@ -145,6 +145,36 @@ const mount = (state, rows = ROWS) => {
   return { root, view, chosen, dom }
 }
 
+test('board bands follow rendered lanes and the card head, including a selected and deferred card', () => {
+  const rows = [
+    { id: 'todo', kind: 'issue', title: 'Todo', status: 'todo' },
+    { id: 'progress', kind: 'issue', title: 'Progress', status: 'in_progress', priority: 0 },
+    { id: 'review', kind: 'issue', title: 'Review', status: 'review' },
+    { id: 'done', kind: 'issue', title: 'Done', status: 'done' },
+    { id: 'shelved', kind: 'issue', title: 'Shelved', status: 'in_progress', deferred_at: '2026-01-01', shelved_by: 'shelved' },
+    { id: 'idea', kind: 'backlog', title: 'Idea', status: 'todo' },
+  ]
+  const { root } = mount({ ...initialState(), tab: 'board', cursor: 'progress', view: { ...initialState().view, hideDeferred: false } }, rows)
+  const css = readFileSync(new URL('../panel/style/board.css', import.meta.url), 'utf8')
+  const tokens = readFileSync(new URL('../panel/style/tokens.css', import.meta.url), 'utf8')
+  const bandSelector = '.m-card > .m-card-line:first-child'
+  assert.match(css, /\.m-card > \.m-card-line:first-child\s*\{[^}]*background: var\(--band, transparent\);[^}]*border-bottom: 1px solid var\(--edge, transparent\)/s)
+  assert.match(css, /\.m-card\[aria-selected="true"\] > \.m-card-line:first-child\s*\{[^}]*border-top: 1px solid var\(--accent\);[^}]*border-left: 1px solid var\(--accent\);[^}]*border-right: 1px solid var\(--accent\)/s)
+  for (const [status, token] of [['in_progress', 'progress'], ['review', 'review'], ['done', 'done']]) {
+    const card = root.querySelector(`.m-lane[data-status="${status}"] .m-card[data-id="${token}"]`)
+    assert.ok(card, `${status} card is in its rendered lane`)
+    assert.ok(card.querySelector(bandSelector), `${status} card has a first-line band`)
+    assert.equal(card.querySelectorAll(bandSelector).length, 1)
+    assert.match(css, new RegExp(`\\.m-lane\\[data-status="${status}"\\] \\{ --band: var\\(--${token}-band\\); --edge: var\\(--${token}-edge\\); \\}`))
+    assert.match(tokens, new RegExp(`--${token}-band: color-mix\\(in srgb, #[0-9A-Fa-f]+ [0-9]+%, var\\(--card-bg\\)\\)`))
+  }
+  assert.equal(root.querySelector('[data-id="progress"]').getAttribute('aria-selected'), 'true')
+  assert.ok(root.querySelector('.m-lane[data-status="deferred"] [data-id="shelved"]'))
+  for (const status of ['todo', 'backlog', 'deferred']) {
+    assert.doesNotMatch(css, new RegExp(`\\.m-lane\\[data-status="${status}"\\] \\{ --band:`))
+  }
+})
+
 test('board view: moai\'s answer to the filter, coming after the filter, draws the board again', () => {
   const dom = new JSDOM('<!doctype html><body><div id="r"></div></body>')
   const root = dom.window.document.getElementById('r')
