@@ -835,7 +835,6 @@ impl<'a, 'm> Shelf<'a, 'm> {
 /// 줄을 다 보고 답이 갈리는지 잰다. 성한 저장소에서는 빈 지도다.
 #[derive(Default)]
 pub struct Lines<'a> {
-    all: &'a [Issue],
     by_id: BTreeMap<&'a str, &'a Issue>,
     rooted: BTreeSet<&'a str>,
     twins: Twins<'a>,
@@ -871,7 +870,7 @@ impl<'a> Lines<'a> {
             false => twins_of(all, &by_id),
         };
         let rooted = rooted_thoughts(&by_id, &twins);
-        Lines { all, by_id, rooted, twins }
+        Lines { by_id, rooted, twins }
     }
 
     /// 그 id 를 **마지막으로 든 줄** — 같은 id 가 둘이면 뒷줄이다. 조상을 짚는 자리가
@@ -2240,9 +2239,10 @@ pub fn group_stands_in<'a, 'c>(
         .collect()
 }
 
-/// Use the already reduced stands, including their last-row-wins handling of duplicate groups.
-fn closed_group_ids(stands: &BTreeMap<GroupKey<'_>, Stand<'_, '_>>) -> BTreeSet<String> {
-    stands.iter().filter(|(_, s)| s.column == crate::config::DONE).map(|((_, id), _)| id.to_string()).collect()
+/// 읽은 칸이 done 인 묶음의 id — 이미 접은 칸 지도([`group_stands_in`])를 그대로 읽는다. 같은 id 의 묶음 줄은 그 지도가
+/// 뒷줄로 접었고 가려진 줄은 안 들었으므로(moai-w30o.m70 의 교훈), 여기서 다시 가르지 않는다. id 는 지도가 빌린 줄의 것이다.
+fn closed_group_ids<'a>(stands: &BTreeMap<GroupKey<'a>, Stand<'a, '_>>) -> BTreeSet<&'a str> {
+    stands.iter().filter(|(_, s)| s.column == crate::config::DONE).map(|((_, id), _)| *id).collect()
 }
 
 /// 막음을 가르는 데 드는 묶음 쪽 재료 — 읽은 칸과, 제 칸대로가 아닌 묶음이 기다리는
@@ -3288,8 +3288,6 @@ pub struct DueLadder<'m, 'a> {
     epic_of: &'m Handing<'a>,
     /// 기한 든 조상 가운데 미룬 줄(물려받은 미룸 포함). 조상은 `Lines::at` 이 고르는 줄이므로 id 로 든다.
     off: BTreeSet<&'a str>,
-    /// 우선순위 천장을 물을 때만 짓는다. 쓰기의 천장은 닫힌 그룹도 센다.
-    closed_groups: std::cell::OnceCell<BTreeSet<String>>,
 }
 
 impl<'m, 'a> DueLadder<'m, 'a> {
@@ -3324,14 +3322,7 @@ impl<'m, 'a> DueLadder<'m, 'a> {
         } else {
             BTreeSet::new()
         };
-        DueLadder { lines, epic_of, off, closed_groups: std::cell::OnceCell::new() }
-    }
-
-    /// Reuse group closure from the caller's archive-aware context. Ancestors and write ceilings
-    /// still come from this ladder's live maps; only priority ceilings consult this set.
-    fn with_closed_groups(mut self, closed: BTreeSet<String>) -> Self {
-        self.closed_groups = std::cell::OnceCell::from(closed);
-        self
+        DueLadder { lines, epic_of, off }
     }
 
     /// 그 줄의 조상 가운데 가장 이른 기한. 기한 든 조상이 없으면 `None` 이다. 꼴이 틀린 기한은
@@ -3416,44 +3407,22 @@ impl<'m, 'a> DueLadder<'m, 'a> {
     /// 빠져나갈 길이 부모의 기한을 지우는 것뿐이었다. 보드의 `overdue` 가 닫힌 줄을 안 세는 것과 같은 자다.
     ///
     /// 묶음은 **멤버에서 읽은 칸**으로 가른다 — 저장된 `status` 는 뜻이 없다. 빈 묶음은 첫 칸이고,
-    /// 남은 멤버를 미뤄 닫은 묶음도 빠진다. Archive-aware callers supply their existing closure. 쓰기의 위계 검사는 이것이 아니라 [`DueLadder::ceiling`] 이다.
-    pub fn open_ceiling(&self, i: &'a Issue) -> Option<Ceiling<'a>> {
+    /// 남은 멤버를 미뤄 닫은 묶음도 빠진다. 그 칸은 **부르는 쪽이 이미 읽은 것**을 `closed` 로 받는다 — 보드·`ready` 는
+    /// 제 칸 지도를, `moai due apply` 는 아카이브를 곁들인 문맥의 칸([`due_raises`])을 넘긴다. 사다리는 산 줄의 것이라
+    /// 여기서 칸을 다시 재면 아카이브로 간 멤버를 못 보고 닫힌 묶음을 도로 연다(moai-nfct). 쓰기의 위계 검사는 이것이
+    /// 아니라 [`DueLadder::ceiling`] 이다.
+    fn open_ceiling(&self, i: &'a Issue, closed: &dyn Fn(&Issue) -> bool) -> Option<Ceiling<'a>> {
         let above: Vec<&'a str> = self
             .above(i)
             .into_iter()
             .filter(|id| {
                 self.lines.at(id).is_some_and(|a| match is_group(a) {
-                    true => !self.closed_groups().contains(a.id.as_str()),
+                    true => !closed(a),
                     false => !a.status.is_done(),
                 })
             })
             .collect();
         self.lowest(i, &above)
-    }
-
-    /// 묶음 칸의 `done` 판정([`reads_done`])에 쓰는 같은 멤버와 미룸의 자를 빌린다.
-    /// 우선순위 천장을 실제로 물을 때 한 번만 짓고, 쓰기의 천장에는 이 셈을 더하지 않는다.
-    fn closed_groups(&self) -> &BTreeSet<String> {
-        self.closed_groups.get_or_init(|| {
-            let all = self.lines.all;
-            let kind_of = kinds(all);
-            let members = members_in(all, self.epic_of, self.lines, &kind_of);
-            // 미룬 줄이 없으면 묶음도 멤버를 뺄 일이 없다.
-            let mile_of = all.iter().any(is_put_off).then(|| milestones_over(all, self.epic_of, self.lines));
-            let off = mile_of
-                .as_ref()
-                .map(|m| off_rows(all, &shelved_over(all, self.lines, self.epic_of, m)))
-                .unwrap_or_default();
-            let shelf = (!off.is_empty()).then(|| Shelf::new(self.lines, self.epic_of, mile_of.as_ref().unwrap()));
-            // **같은 id 의 묶음 줄 둘은 뒷줄이 답한다** — 보드의 칸 지도([`group_stands_in`])가 `(종류, id)` 로 접어 뒷줄을
-            // 남기고, `open_ceiling` 이 짚는 줄도 `Lines::at` 의 뒷줄이다. 어느 한 줄이 done 이면 빼던 판은 미룸이 갈린
-            // 쌍둥이에서 보드가 열렸다고 대는 묶음의 기한을 놓쳤다.
-            let mut done: BTreeMap<&str, bool> = BTreeMap::new();
-            for g in all.iter().filter(|g| is_group(g) && !is_eclipsed(&kind_of, g)) {
-                done.insert(g.id.as_str(), reads_done(&counted(g, &members, shelf.as_ref(), &off)));
-            }
-            done.into_iter().filter(|(_, d)| *d).map(|(id, _)| id.to_string()).collect()
-        })
     }
 
     /// 이 지도가 든 **같은 줄** — 아카이브를 곁들인 문맥의 줄(사본)로 물어도 산 줄의 지도에서 다시 찾는다
@@ -3468,8 +3437,8 @@ impl<'m, 'a> DueLadder<'m, 'a> {
 
     /// [`DueLadder::open_ceiling`] 을 **이 지도 밖에서 빌린 줄로** — `status` 는 아카이브를 겹친 줄(사본)을 걷지만 지도는
     /// 산 줄의 것이라([`status_of_context`]), 그 줄을 이 지도의 줄로 찾아 묻는다([`DueLadder::row_of`]).
-    pub fn open_ceiling_row(&self, i: &Issue) -> Option<Ceiling<'a>> {
-        self.row_of(i).and_then(|r| self.open_ceiling(r))
+    fn open_ceiling_row(&self, i: &Issue, closed: &dyn Fn(&Issue) -> bool) -> Option<Ceiling<'a>> {
+        self.row_of(i).and_then(|r| self.open_ceiling(r, closed))
     }
 
     /// 그 줄이 조상보다 늦으면 그 조상 — **이 지도가 든 같은 줄로** 잰다. 아카이브를 곁들인 문맥의 줄(사본)로 물어도
@@ -4565,8 +4534,9 @@ struct Picking<'a> {
     /// 줄마다 — 계획에서 뺀 줄([`shelved_over`]). `issues` 와 자리가 같다.
     off: Vec<Option<&'a str>>,
     progress: BTreeMap<&'a str, u8>,
-    /// Archive-aware closure from the same stands that supply progress and running milestones.
-    closed_groups: BTreeSet<String>,
+    /// 읽은 칸이 done 인 묶음 — `progress`·`running` 을 낸 그 칸 지도에서 읽는다([`closed_group_ids`]). `issues` 가
+    /// 아카이브를 곁들인 문맥이면 이 칸도 아카이브로 간 멤버까지 센다. 기한 든 줄이 없으면 비어 있다(사다리를 안 짓는다).
+    closed: BTreeSet<&'a str>,
     /// 도는 마일스톤 — 거르개를 걸 때만 쓴다.
     running: Vec<&'a Issue>,
     /// 막음·미룸·열린 자식을 거친 후보. 차례도 마일스톤 거르개도 아직 안 걸었다.
@@ -4616,7 +4586,7 @@ impl<'a> Picking<'a> {
         let out_of_plan: BTreeSet<&str> = roots.keys().copied().collect();
         // **줄 지도도 한 벌이다** — [`Lines`] 가 이미 든 그 지도다(리뷰 moai-jk2u.m60).
         let running = running_in(cfg, &lines.by_id, &stands, &out_of_plan);
-        let closed_groups = match issues.iter().any(|i| i.deadline().is_some()) {
+        let closed = match issues.iter().any(|i| i.deadline().is_some()) {
             true => closed_group_ids(&stands),
             false => BTreeSet::new(),
         };
@@ -4642,7 +4612,7 @@ impl<'a> Picking<'a> {
                 false => Ties::epics_only(rows),
             }
         });
-        Picking { issues, ties, due_ties, off, progress, closed_groups, running, open }
+        Picking { issues, ties, due_ties, off, progress, closed, running, open }
     }
 
     /// 후보에 차례를 매긴다. `focused` 면 도는 마일스톤 밖의 일을 [`Focus::outside`] 로 뺀다.
@@ -4687,12 +4657,15 @@ impl<'a> Picking<'a> {
         // 마일스톤 지도는 **지은 판에만 빌린다**([`Ties::epics_only`] 는 `None`) — 그때는 사다리가 저 지도를 안 읽는다(미룬 줄이
         // 없다). 빈 지도를 "지었다" 로 건네면 두 문이 갈리는 날 미룬 마일스톤의 기한이 말없이 차례에 든다.
         let due_ties = self.due_ties.as_ref().unwrap_or(&self.ties);
-        let ladder = self.issues.iter().any(|i| i.deadline().is_some()).then(|| {
-            DueLadder::over_with_stones(due_ties.lines(), due_ties.epics(), due_ties.stones.as_ref())
-                .with_closed_groups(self.closed_groups.clone())
-        });
+        let ladder = self
+            .issues
+            .iter()
+            .any(|i| i.deadline().is_some())
+            .then(|| DueLadder::over_with_stones(due_ties.lines(), due_ties.epics(), due_ties.stones.as_ref()));
+        let closed = |g: &Issue| self.closed.contains(g.id.as_str());
         out.sort_by_cached_key(|&i| {
-            let due = followed(i.deadline(), ladder.as_ref().and_then(|l| l.open_ceiling_row(i))).map(|(d, _)| d);
+            let due =
+                followed(i.deadline(), ladder.as_ref().and_then(|l| l.open_ceiling_row(i, &closed))).map(|(d, _)| d);
             (
                 i.priority(),
                 !inside(i),
@@ -5769,7 +5742,7 @@ impl Dues {
 
 /// 남은 날수가 부르는 우선순위 — **올릴 것이 있을 때만** 그 값이다(moai-dr8a.7rs, 2026-10-16 사용자 결정).
 ///
-/// `due` 는 그 줄이 따를 기한이고([`due_candidates`] 가 고른다 — 제 기한과 조상의 기한 가운데 가장 이른 것), `today` 는
+/// `due` 는 그 줄이 따를 기한이고([`due_raises`] 가 고른다 — 제 기한과 열린 조상의 기한 가운데 가장 이른 것), `today` 는
 /// **읽는 사람의 달로 옮긴 지금**이다(`zone.shift(now)`). 기한은 달력의 날이라, 날 경계는 [`Dues`] 와 같은 자
 /// ([`crate::model::days_until`])로 읽는 사람의 시간대에서 긋는다.
 ///
@@ -5833,7 +5806,8 @@ fn followed<'a>(own: Option<&'a str>, above: Option<Ceiling<'a>>) -> Option<(&'a
     }
 }
 
-/// 올릴 줄 하나 — [`due_candidates`] 가 내고 [`due_in_plan`] 이 거른 것을 `moai due apply` 가 적는다.
+/// 올릴 줄 하나 — [`due_raises`] 가 내는 것을 `moai due apply` 가 적는다. 탐침([`due_candidates`])도 같은 꼴을 내지만 그쪽은
+/// 닫힌 묶음의 기한도 따르므로 적을 답이 아니다.
 #[derive(Debug, Clone)]
 pub struct Raise<'a> {
     pub issue: &'a Issue,
@@ -5847,68 +5821,120 @@ pub struct Raise<'a> {
     pub from: Option<&'a Issue>,
 }
 
-/// Final priority raises: ancestors and deadlines come only from `live`, while group closure,
-/// inherited deferral and eclipsed rows use the archive-aware `context`.
-/// `cmd::due` first probes with [`due_candidates`] before deciding whether to read archives.
+/// `live` 가운데 **기한에 뒤처진 줄** 전부를, 급한 것부터(moai-dr8a) — `moai due apply` 가 적는 답이다.
+///
+/// **따르는 기한은 제 것과 조상의 것 가운데 가장 이른 것이다**(Decided alone, moai-dr8a.7rs). 사람의 기한은 계획을
+/// 따라 에픽에 선다(AGENTS 의 갈래 3, 감독의 `Due:` 줄, 일꾼 걸음 1) — 제 기한만 보면 계획의 기한이 멤버를 하나도 안
+/// 올린다. 조상은 쓰기가 위계를 재는 자([`DueLadder`])가 고르는 그대로다 — 선 마일스톤, 든 에픽, 접어 그리는 부모 —
+/// 다만 **닫힌 부모도 닫힌 묶음도 안 센다**([`DueLadder::open_ceiling`]). **읽을 때 재고 담지 않는다** — 멤버에 기한을
+/// 내려 적으면 부모를 당길 때마다 멤버를 다 고쳐 써야 한다.
+///
+/// 조상과 그 기한은 **산 줄의 지도로** 찾는다 — `status` 의 알림([`Dues`])과 쓰기의 위계 검사가 그 지도로 재므로, 여기만
+/// 아카이브의 조상을 세면 보드가 말없는 줄을 이 동사가 올린다. 묶음이 닫혔는가와 물려받은 미룸·가려짐은 `context` 로
+/// 읽는다 — 아카이브를 곁들인 문맥이면 아카이브로 간 멤버까지 센 칸이다(moai-nfct). 문맥의 지도는 **한 벌**이다: 보드
+/// ([`status_with_archive_unjudged`])처럼 [`Soil`] 하나에서 칸([`Soil::stands`])과 미룸·가려짐을 함께 읽는다 — 칸을 따로
+/// 재는 자를 두면 보드의 칸과 이 동사의 칸이 언젠가 갈린다(moai-w30o.m70 2번이 그렇게 갈렸다).
+///
+/// **`context` 는 `live` 를 품는다**(`cmd::in_context` 가 그렇게 잇는다) — 빈 문맥을 주면 아무 묶음도 안 닫히고 아무
+/// 미룸도 안 걸린다. `moai due apply` 는 먼저 [`due_candidates`] 로 아카이브를 펼지 정한다([`due_context_ids`]).
 pub fn due_raises<'a>(
     live: &'a [Issue],
     context: &[Issue],
     now: &str,
     zone: &crate::tz::Zone,
-    rule: &crate::config::DueRule,
+    cfg: &Config,
 ) -> Vec<Raise<'a>> {
+    let rule = &cfg.due;
     if !rule.auto || !live.iter().any(|i| i.deadline().is_some()) {
         return Vec::new();
     }
-    let closed = if live.iter().any(|i| is_group(i) && i.deadline().is_some()) {
-        let context_lines = Lines::of(context);
-        let context_epics = Handing::over(context, &context_lines);
-        DueLadder::over(&context_lines, &context_epics).closed_groups().clone()
-    } else {
-        BTreeSet::new()
+    // 문맥의 지도는 물을 때 한 번 짓는다 — 기한 든 묶음이 없고 올릴 줄도 없으면 안 짓는다.
+    let soil = std::cell::OnceCell::new();
+    let soil = || soil.get_or_init(|| Soil::of(context));
+    let closed = match live.iter().any(|i| is_group(i) && i.deadline().is_some()) {
+        true => closed_group_ids(&soil().stands(context, cfg)),
+        false => BTreeSet::new(),
     };
-    due_in_plan(due_candidates_with_closure(live, now, zone, rule, closed), context)
+    let raises = due_candidates_with_closure(live, now, zone, rule, &|g| closed.contains(g.id.as_str()));
+    if raises.is_empty() {
+        return raises;
+    }
+    due_in_plan(raises, context, soil())
 }
 
-/// Conservative candidates before archive loading. Closed ordinary parents are excluded, but
-/// group closure is deliberately unknown: archived members can close a live empty group, and
-/// archived parents can move live members to another group and reopen one that looked closed.
-/// [`due_raises`] recomputes the followed deadline with the final context rather than merely
-/// dropping candidates: removing a closed group's earlier date can expose another ancestor.
-/// Deferral and eclipsing are filtered only after loading, since archive context can undo them.
+/// `moai due apply` 의 **탐침** — 아카이브를 펼지 정하려고 `live` 만으로 고른 후보다([`due_context_ids`]). 판정은 줄마다
+/// [`due_priority`] 다.
+///
+/// **묶음이 닫혔는가는 모르는 것으로 친다** — 묶음을 다 열린 것으로 잰다. 아카이브로 간 멤버가 산 줄로는 빈 묶음을 닫고,
+/// 아카이브의 부모가 산 멤버를 다른 묶음으로 옮겨 닫힌 듯한 묶음을 열 수도 있어 산 줄만으로는 못 정한다. 닫힌 묶음을 빼면
+/// 따르는 기한이 늦어지기만 하므로 이 후보는 [`due_raises`] 의 답을 다 품는다. 그래서 **적을 답이 아니다** — 닫힌 묶음의
+/// 기한도 따른다. 쓰는 쪽은 문맥을 곁들여 [`due_raises`] 로 다시 잰다: 닫힌 묶음을 빼면 그 밑의 다른 조상의 기한이 드러날
+/// 수 있어 후보를 거르기만 해서는 안 된다.
+///
+/// **물려받은 미룸과 가려짐도 아직 안 걸렀다**(리뷰) — 펼지는 미룸을 거르기 **전**의 후보로 재야 한다: 아카이브의 부모가
+/// 그 줄이 선 마일스톤을 바꿔 미룸을 풀 수 있어, 산 줄만으로 계획 밖이던 줄이 문맥을 펴면 계획 안으로 돌아온다. 후보는
+/// 미룸과 무관하게 산 줄만으로 서므로, 후보가 다 산 줄 안에 머물면 그 미룸의 답도 아카이브와 무관하다.
 pub fn due_candidates<'a>(
     live: &'a [Issue],
     now: &str,
     zone: &crate::tz::Zone,
     rule: &crate::config::DueRule,
 ) -> Vec<Raise<'a>> {
-    due_candidates_with_closure(live, now, zone, rule, BTreeSet::new())
+    due_candidates_with_closure(live, now, zone, rule, &|_| false)
 }
 
-/// Candidate rows plus live deadline groups whose archived members can change the final answer.
-/// Non-group ancestors still use `archived_for`'s reference gate; undated groups do not need closure.
+/// 탐침([`due_candidates`])의 후보에 대해 **아카이브를 읽어야 답이 갈릴 수 있는 id** — `cmd::due` 가 이것으로 아카이브를
+/// 펼지 정한다(`cmd::archived_with_groups`). 둘이다.
+///
+/// - 후보 제 id — 참조가 산 줄 밖으로 닿으면 미룸을 잴 문맥이 든다(`cmd::archived_for`)
+/// - 탐침이 **묶음의 기한을 따른 생각** 위의 묶음 가운데 닫힘이 그 답을 바꿀 수 있는 것 — 멤버가 아카이브에 있을 수
+///   있어서다. 제 기한이나 열린 부모가 이긴 줄은 닫힌 묶음을 빼도 답이 같다(`followed` 는 같은 날이면 제 기한을,
+///   [`DueLadder::lowest`] 는 같은 날이면 앞선 조상 — 마일스톤, 에픽, 부모 — 을 남긴다). **이슈는 안 본다**: 열린 이슈는
+///   제가 따르는 묶음에 멤버로 세어져 그 묶음이 어느 문맥에서든 열려 있다 — 참조가 산 줄 안에 머무는 한이고, 밖으로 닿으면
+///   위의 첫째가 아카이브를 편다. 계획 밖이면 어차피 안 올린다. 멤버로 안 세는 생각만 남고, 산 줄의 미룸으로 계획 밖인
+///   생각도 뺀다(같은 까닭으로 문맥을 펴도 계획 밖이다). 그 위의 묶음 가운데서도 기한 없는 묶음, 미룬 묶음(빌려 줄 기한이
+///   없다), 그 줄의 제 기한보다 늦거나 같은 묶음(이길 수 없다)은 뺀다
+///
+/// 후보는 **탐침의 것**이어야 한다 — 닫힘을 아는 후보는 읽어야 할 묶음 밑의 줄을 이미 뺐다. 닫힌 묶음에 담아 둔 생각은
+/// 탐침에서 그 묶음의 기한을 늘 따르므로, 그런 줄이 있는 동안은 회차마다 아카이브를 읽는다 — 닫힘은 멤버에서 읽는
+/// 파생값이고 담아 두지 않는다(CLAUDE.md).
 pub fn due_context_ids<'a>(live: &'a [Issue], candidates: &[Raise<'a>]) -> Vec<&'a str> {
+    let mut ids: BTreeSet<&str> = candidates.iter().map(|r| r.issue.id.as_str()).collect();
+    let by_group: Vec<&Raise<'a>> =
+        candidates.iter().filter(|r| !is_work(r.issue) && r.from.is_some_and(is_group)).collect();
+    // 묶음의 기한을 따른 생각이 없으면 지도를 안 짓는다 — 산 줄 밖으로 닿는가는 `archived_for` 가 잰다.
+    if by_group.is_empty() {
+        return ids.into_iter().collect();
+    }
     let lines = Lines::of(live);
     let epics = Handing::over(live, &lines);
-    let ladder = DueLadder::over(&lines, &epics);
-    let mut ids: BTreeSet<&str> = candidates.iter().map(|r| r.issue.id.as_str()).collect();
-    for r in candidates {
-        ids.extend(
-            ladder
-                .above(r.issue)
-                .into_iter()
-                .filter(|id| lines.at(id).is_some_and(|g| is_group(g) && g.deadline().is_some())),
-        );
+    // 미룬 줄이 있을 때만 마일스톤 지도를 짓고, 사다리와 미룸이 그 한 벌을 나눠 쓴다.
+    let stones = live.iter().any(is_put_off).then(|| milestones_over(live, &epics, &lines));
+    let ladder = DueLadder::over_with_stones(&lines, &epics, stones.as_ref());
+    let shelf = stones.as_ref().map(|m| Shelf::new(&lines, &epics, m));
+    // 산 줄의 미룸으로 계획 밖인 생각은 문맥을 펴도 계획 밖이다 — 그 미룸이 걸린 줄이 다 산 줄이라서다(참조가 밖으로
+    // 닿으면 `archived_for` 가 따로 편다). 어차피 안 올리니 그 묶음의 멤버를 읽을 까닭이 없다.
+    for r in by_group.into_iter().filter(|r| shelf.as_ref().is_none_or(|s| s.nearest(r.issue).is_none())) {
+        let own = r.issue.deadline();
+        ids.extend(ladder.above(r.issue).into_iter().filter(|id| {
+            !ladder.off.contains(id)
+                && lines
+                    .at(id)
+                    .is_some_and(|g| is_group(g) && g.deadline().is_some_and(|due| own.is_none_or(|own| due < own)))
+        }));
     }
     ids.into_iter().collect()
 }
 
+/// 따르는 기한으로 올릴 후보 — 판정은 줄마다 [`due_priority`] 다. 묶음이 닫혔는가는 부르는 쪽이 `closed` 로 준다
+/// ([`due_raises`] 는 문맥의 칸, [`due_candidates`] 는 "모른다" 곧 다 열림). 계획 밖(물려받은 미룸)과 가려진 줄은 아직
+/// 안 걸렀다 — [`due_in_plan`] 이 문맥으로 거른다.
 fn due_candidates_with_closure<'a>(
     live: &'a [Issue],
     now: &str,
     zone: &crate::tz::Zone,
     rule: &crate::config::DueRule,
-    closed: BTreeSet<String>,
+    closed: &dyn Fn(&Issue) -> bool,
 ) -> Vec<Raise<'a>> {
     // 기한 든 줄이 없으면 지도를 안 짓는다 — 기한 없는 저장소가 보통이다.
     if !rule.auto || !live.iter().any(|i| i.deadline().is_some()) {
@@ -5917,11 +5943,11 @@ fn due_candidates_with_closure<'a>(
     let today = zone.shift(now);
     let lines = Lines::of(live);
     let epic_of = Handing::over(live, &lines);
-    let ladder = DueLadder::over(&lines, &epic_of).with_closed_groups(closed);
+    let ladder = DueLadder::over(&lines, &epic_of);
     live.iter()
         .filter(|i| due_open(i))
         .filter_map(|i| {
-            let (due, from) = followed(i.deadline(), ladder.open_ceiling(i))?;
+            let (due, from) = followed(i.deadline(), ladder.open_ceiling(i, closed))?;
             // 쓰기의 검사까지 든 자([`due_eligible`])는 여기서 판정이 묻는다 — 따를 기한이 선 줄만 치른다.
             let to = due_priority(i, due, &today, rule)?;
             let left = crate::model::days_until(due, &today)?;
@@ -5930,19 +5956,31 @@ fn due_candidates_with_closure<'a>(
         .collect()
 }
 
-/// Closure-aware candidates 가운데 **계획 안의 것**을, 급한 것부터. Probe candidates need [`due_raises`] first. `context` 는 계획 밖을 잴 문맥이다 — 아카이브를
-/// 겹쳐 읽은 쪽은 그 겹친 줄을 준다. **물려받은 미룸**과 **가려진 줄**(같은 id 의 다른 종류)을 여기서 거른다 —
-/// `status` 가 기한 경고에서 거르는 것과 같다. 미룬 일이 잔소리를 늘리면 미루기가 경고를 낳는 손잡이가 된다.
+/// 후보 가운데 **계획 안의 것**을, 급한 것부터. `soil` 은 `context` 위에서 잰 지도다 — 아카이브를 겹쳐 읽은 쪽은 그 겹친
+/// 줄을 준다. **물려받은 미룸**과 **가려진 줄**(같은 id 의 다른 종류)을 여기서 거른다 — `status` 가 기한 알림에서 거르는 것과
+/// 같은 자(`Soil::shelved`·[`Soil::eclipsed`])다. 미룬 일이 잔소리를 늘리면 미루기가 경고를 낳는 손잡이가 된다.
 ///
 /// **미룸은 줄마다 묻는다**([`Shelved::root`], moai-u3ta) — `status` 의 알림이 줄마다의 답(`Soil::shelved`)으로 재므로,
-/// id 로 접은 지도로 재면 같은 id 의 쌍둥이에서 알림과 이 동사가 서로 다른 줄을 댄다. 문맥의 줄은 사본이어도 된다 —
-/// `root` 는 내용으로 줄을 찾는다.
-fn due_in_plan<'a>(candidates: Vec<Raise<'a>>, context: &[Issue]) -> Vec<Raise<'a>> {
+/// id 로 접은 지도로 재면 같은 id 의 쌍둥이에서 알림과 이 동사가 서로 다른 줄을 댄다. 후보의 줄은 `context` 의 사본이 아니어도
+/// 된다 — `root` 는 내용으로 줄을 찾는다.
+fn due_in_plan<'a, 'c>(candidates: Vec<Raise<'a>>, context: &'c [Issue], soil: &Soil<'c>) -> Vec<Raise<'a>> {
     if candidates.is_empty() {
         return candidates;
     }
-    let off = Shelved::of(context);
-    let hidden = eclipsed(context);
+    // 줄마다 갈리는 id 는 같은 id 가 두 줄일 때만 선다 — id 수가 줄 수와 같으면 접은 지도가 곧 줄마다의 답이다
+    // (`query::Where::from_soil` 과 같은 문).
+    let split = match soil.kinds.len() == context.len() {
+        true => BTreeSet::new(),
+        false => split_roots(context, &soil.shelved),
+    };
+    let rows: Vec<(&Issue, Option<&str>)> = context
+        .iter()
+        .zip(&soil.shelved)
+        .filter(|(i, _)| split.contains(i.id.as_str()))
+        .map(|(i, r)| (i, *r))
+        .collect();
+    let off = Shelved::kept(soil.roots.clone(), split, rows);
+    let hidden = soil.eclipsed();
     let mut out: Vec<Raise<'a>> =
         candidates.into_iter().filter(|r| off.root(r.issue).is_none() && !hidden(r.issue)).collect();
     // 급한 것이 앞이다 — 남은 날, 그다음 id. 보드는 앞의 셋만 그린다.
@@ -6028,12 +6066,11 @@ pub fn status_in<'a>(
     // 산 줄만 든 문맥이라 [`Soil`] 의 지도가 곧 쓰기가 재는 지도다 — 기한의 위계를 재려고 다시 안 짓는다.
     // **기한 든 줄이 없으면 안 빌린다**(리뷰) — [`status_of_context`] 와 같은 문이다. 빌리면 뒤처진 우선순위를 재는
     // 자리가 열린 줄마다 조상을 걷고 늘 `None` 을 받는다 — 훅이 도구 호출마다 이 자리를 지난다.
-    let stands = soil.stands(issues, cfg);
-    let ladder = issues.iter().any(|i| i.due_on.is_some()).then(|| {
-        DueLadder::over_with_stones(&soil.lines, &soil.epic, Some(&soil.milestone))
-            .with_closed_groups(closed_group_ids(&stands))
-    });
-    status_in_scope(issues, unreadable, cfg, now, soil, stands, &|_| true, ladder.as_ref())
+    let ladder = issues
+        .iter()
+        .any(|i| i.due_on.is_some())
+        .then(|| DueLadder::over_with_stones(&soil.lines, &soil.epic, Some(&soil.milestone)));
+    status_in_scope(issues, unreadable, cfg, now, soil, soil.stands(issues, cfg), &|_| true, ladder.as_ref())
 }
 
 /// Combine reference context without letting a stale archive copy eclipse a live row. A live id is a readable row
@@ -6107,9 +6144,7 @@ pub fn status_of_context<'a, 'c>(
         let epic_of = Handing::over(active, &lines);
         (lines, epic_of)
     });
-    let ladder = maps
-        .as_ref()
-        .map(|(lines, epic_of)| DueLadder::over(lines, epic_of).with_closed_groups(closed_group_ids(&stands)));
+    let ladder = maps.as_ref().map(|(lines, epic_of)| DueLadder::over(lines, epic_of));
     status_in_scope(all, unreadable, cfg, now, soil, stands, &|i| visible.contains(i.id.as_str()), ladder.as_ref())
 }
 
@@ -6637,6 +6672,10 @@ fn status_in_scope<'a, 'c>(
         );
     }
 
+    // 묶음이 닫혔는가는 **이 보드가 읽은 칸**이다 — 문맥에 아카이브가 들었으면 그 멤버까지 센 칸이다(moai-nfct). 사다리는
+    // 산 줄의 것이라 칸을 거기서 다시 재면 아카이브로 간 멤버를 못 보고, `moai due apply` 와 갈린다([`due_raises`]).
+    let closed = |g: &Issue| states.get(&(g.kind, g.id.as_str())).is_some_and(|c| *c == crate::config::DONE);
+
     // 6-6. 마일스톤의 기한(moai-tfcp, 2026-09-22 사용자 결정). **판정은 여기서 안 한다** —
     //      기한을 든 줄과 문턱만 [`Dues`] 에 담고, 읽는 사람의 달로 재는 것은 그리는 쪽이 한다
     //      (moai-fgjj, 2026-09-23 사용자 결정). 까닭은 [`Dues`] 에 적었다.
@@ -6691,7 +6730,7 @@ fn status_in_scope<'a, 'c>(
                 .enumerate()
                 .filter(|(k, i)| due_open(i) && visible(i) && off[*k].is_none() && !eclipsed(i))
                 .filter_map(|(_, i)| {
-                    let (due, _) = followed(i.deadline(), ladder.and_then(|l| l.open_ceiling_row(i)))?;
+                    let (due, _) = followed(i.deadline(), ladder.and_then(|l| l.open_ceiling_row(i, &closed)))?;
                     // 쓰기의 검사는 따를 기한이 선 줄만 치른다([`due_open`]).
                     due_eligible(i).then(|| (i.id.clone(), due.to_string(), i.priority()))
                 })
@@ -6797,6 +6836,18 @@ mod tests {
         Config::parse("prefix = \"argos\"\n").unwrap()
     }
 
+    /// 기한 규칙만 바꾼 설정 — [`due_raises`] 는 설정째 받는다(묶음의 칸을 보드와 같은 자로 읽는다).
+    fn due_cfg(rule: crate::config::DueRule) -> Config {
+        let mut c = cfg();
+        c.due = rule;
+        c
+    }
+
+    /// 보드가 읽는 칸으로 닫힌 묶음 — 사다리의 우선순위 천장([`DueLadder::open_ceiling`])에 넘기는 그것이다.
+    fn closed_in(all: &[Issue]) -> BTreeSet<&str> {
+        closed_group_ids(&group_stands(all, &cfg()))
+    }
+
     /// 시험의 바탕 시간대 — 저장된 그대로다. 여기 쓰는 `now` 가 모두 UTC 로 적혀 있어, 옮기는
     /// 시간대를 들면 기한 말고도 이 파일의 모든 시각이 함께 움직인다. 옮겨서 갈리는 것은
     /// [`a_deadline_is_read_in_the_reader_s_day`] 가 따로 잰다.
@@ -6831,7 +6882,9 @@ mod tests {
             let ladder = DueLadder::over(&lines, &epic_of);
             let expected = want.map(|at: usize| all[at].id.as_str());
             assert_eq!(ladder.ceiling(&all[3]).map(|c| c.above.id.as_str()), expected, "deferred {defer}");
-            assert_eq!(ladder.open_ceiling(&all[3]).map(|c| c.above.id.as_str()), expected, "priority ceiling");
+            let closed = closed_in(&all);
+            let shut = |g: &Issue| closed.contains(g.id.as_str());
+            assert_eq!(ladder.open_ceiling(&all[3], &shut).map(|c| c.above.id.as_str()), expected, "priority ceiling");
             assert_eq!(first_beyond(&all, &[all[3].id.as_str()]).map(|(_, c)| c.above.id.as_str()), expected);
         }
     }
@@ -6911,9 +6964,9 @@ mod tests {
         let mut a = make("argos-aaaa", Kind::Issue, "todo");
         a.due_on = Some("2026-10-17".into());
         let all = [a];
-        let utc_says = due_raises(&all, &all, now, utc(), &rule);
+        let utc_says = due_raises(&all, &all, now, utc(), &due_cfg(rule));
         assert_eq!((utc_says[0].to, utc_says[0].left, utc_says[0].from), (1, 2, None), "UTC 로는 이틀");
-        let seoul_says = due_raises(&all, &all, now, &seoul, &rule);
+        let seoul_says = due_raises(&all, &all, now, &seoul, &due_cfg(rule));
         assert_eq!((seoul_says[0].to, seoul_says[0].left), (0, 1), "서울로는 하루");
     }
 
@@ -6934,7 +6987,7 @@ mod tests {
         let mut shelved = member("argos-dddd", "argos-kkkk", "todo");
         shelved.due_on = Some("2026-10-10".into());
         let all = vec![epic, plain, later, sooner, kept, shelved];
-        let got: Vec<(&str, u8, &str, Option<&str>)> = due_raises(&all, &all, now, utc(), &rule)
+        let got: Vec<(&str, u8, &str, Option<&str>)> = due_raises(&all, &all, now, utc(), &due_cfg(rule))
             .iter()
             .map(|r| (r.issue.id.as_str(), r.to, r.due, r.from.map(|f| f.id.as_str())))
             .collect();
@@ -6948,7 +7001,7 @@ mod tests {
             "급한 것이 앞이고, 에픽 줄과 미룬 에픽 밑은 빠진다"
         );
         let off = crate::config::DueRule { auto: false, ..rule };
-        assert!(due_raises(&all, &all, now, utc(), &off).is_empty());
+        assert!(due_raises(&all, &all, now, utc(), &due_cfg(off)).is_empty());
     }
 
     /// **따르지 않는 것과 올리지 않는 것**(리뷰) — 닫힌 부모의 지난 기한은 지난 일이라 그 밑에 뒤늦게 세운 후속 일을 안
@@ -6974,7 +7027,8 @@ mod tests {
         let shadowed = member("argos-ssss", "argos-eeee", "todo");
         let twin = make("argos-ssss", Kind::Epic, "todo");
         let all = vec![shipped, follow_up, epic, clean, hand_edited, tagged, shadowed, twin];
-        let got: Vec<&str> = due_raises(&all, &all, now, utc(), &rule).iter().map(|r| r.issue.id.as_str()).collect();
+        let got: Vec<&str> =
+            due_raises(&all, &all, now, utc(), &due_cfg(rule)).iter().map(|r| r.issue.id.as_str()).collect();
         assert_eq!(got, ["argos-mmmm"], "닫힌 부모·쓰기가 거절할 줄·가려진 줄을 올렸다");
         let st = status(&all, &[], &cfg(), now, utc());
         let behind = st.notices.iter().find(|w| w.kind == "due_priority_behind").expect("알림이 없다");
@@ -6985,7 +7039,7 @@ mod tests {
         let mut child = make("argos-pppp.ccc", Kind::Issue, "todo");
         child.priority = Some(3);
         let pair = vec![open_parent, child];
-        let raised = due_raises(&pair, &pair, now, utc(), &rule);
+        let raised = due_raises(&pair, &pair, now, utc(), &due_cfg(rule));
         let got: Vec<(&str, Option<&str>)> =
             raised.iter().map(|r| (r.issue.id.as_str(), r.from.map(|f| f.id.as_str()))).collect();
         assert_eq!(got, [("argos-pppp", None), ("argos-pppp.ccc", Some("argos-pppp"))]);
@@ -7009,7 +7063,7 @@ mod tests {
         let mut all = vec![milestone, epic, finished, parked];
 
         let raises = |rows: &[Issue]| {
-            due_raises(rows, rows, now, utc(), &rule)
+            due_raises(rows, rows, now, utc(), &due_cfg(rule))
                 .iter()
                 .map(|r| (r.issue.id.clone(), r.from.map(|f| f.id.clone())))
                 .collect::<Vec<_>>()
@@ -7018,7 +7072,8 @@ mod tests {
         let lines = Lines::of(&all);
         let epic_of = Handing::over(&all, &lines);
         let ladder = DueLadder::over(&lines, &epic_of);
-        assert!(ladder.open_ceiling(&all[3]).is_none());
+        let closed = closed_in(&all);
+        assert!(ladder.open_ceiling(&all[3], &|g| closed.contains(g.id.as_str())).is_none());
         assert_eq!(ladder.ceiling(&all[3]).map(|c| c.above.id.as_str()), Some("argos-eeee"));
 
         // A different open issue reopens the milestone, while this epic stays closed.
@@ -7050,9 +7105,12 @@ mod tests {
         own.due_on = Some("2026-10-17".into());
         let mut member = member("argos-bbbb", "argos-eeee", "todo");
         member.priority = Some(3);
+        let mut parked = make("argos-cccc", Kind::Backlog, "todo");
+        parked.epic = Some(undated.id.clone());
+        parked.priority = Some(3);
         let mut unrelated = make("argos-uuuu", Kind::Epic, "todo");
         unrelated.due_on = Some("2026-10-17".into());
-        let mut rows = vec![stone, undated, own, member, unrelated];
+        let mut rows = vec![stone, undated, own, member, parked, unrelated];
         let rule = crate::config::DueRule::DEFAULT;
         let now = "2026-10-16T00:00:00Z";
         let ids = |rows: &[Issue]| {
@@ -7061,13 +7119,40 @@ mod tests {
                 .map(str::to_string)
                 .collect::<Vec<_>>()
         };
-        assert_eq!(ids(&rows), ["argos-aaaa", "argos-bbbb", "argos-ssss"]);
+        // The parked thought follows the milestone's date, and only archived members can say whether it is still open.
+        assert_eq!(ids(&rows), ["argos-aaaa", "argos-bbbb", "argos-cccc", "argos-ssss"]);
+        // An open issue is itself counted in the groups it follows, so they read open whatever the archive holds.
+        rows[4].priority = Some(0);
+        assert_eq!(ids(&rows), ["argos-aaaa", "argos-bbbb"], "an open member needs no archived members");
+        rows[4].priority = Some(3);
+        // Only a group date that can still win needs the members read: an own date due no later than the group's
+        // keeps winning with the group closed (`followed` keeps the own date on a tie).
+        for own_due in ["2026-10-16", "2026-10-17"] {
+            rows[4].due_on = Some(own_due.into());
+            assert_eq!(ids(&rows), ["argos-aaaa", "argos-bbbb", "argos-cccc"], "own date {own_due}");
+        }
+        rows[4].due_on = Some("2026-10-20".into());
+        assert_eq!(ids(&rows), ["argos-aaaa", "argos-bbbb", "argos-cccc", "argos-ssss"], "an earlier group date wins");
+        rows[4].due_on = None;
+        // A thought kept out of the plan by a live deferral is never raised, so nothing above it is read either — and a
+        // deferred dated group would lend nothing anyway.
+        rows[1].due_on = Some("2026-10-16".into());
+        rows[1].deferred_at = Some("2026-10-01T00:00:00Z".into());
+        assert_eq!(
+            ids(&rows),
+            ["argos-aaaa", "argos-bbbb", "argos-cccc"],
+            "a deferred epic's thought read the archive"
+        );
+        rows[1].due_on = None;
+        rows[1].deferred_at = None;
         // Own-date work below undated groups and unrelated dated groups need no member archive.
         rows[0].due_on = None;
         rows[3].due_on = Some("2026-10-17".into());
-        assert_eq!(ids(&rows), ["argos-aaaa", "argos-bbbb"]);
-        rows[2].priority = Some(0);
-        rows[3].priority = Some(0);
+        rows[4].due_on = Some("2026-10-17".into());
+        assert_eq!(ids(&rows), ["argos-aaaa", "argos-bbbb", "argos-cccc"]);
+        for row in [2, 3, 4] {
+            rows[row].priority = Some(0);
+        }
         assert!(ids(&rows).is_empty(), "no candidates must never request archive context");
     }
 
@@ -7089,7 +7174,7 @@ mod tests {
         let archive = vec![finished, parent];
         let verify = |live: &[Issue], reopened: bool| {
             let all = with_archive(live, &archive, &BTreeSet::new());
-            let raised = due_raises(live, &all, now, utc(), &crate::config::DueRule::DEFAULT);
+            let raised = due_raises(live, &all, now, utc(), &cfg());
             let ids: Vec<_> = raised.iter().map(|r| r.issue.id.as_str()).collect();
             let expected = if reopened { vec!["argos-pppp.ccc", "argos-aaaa"] } else { vec!["argos-aaaa"] };
             assert_eq!(ids, expected);
@@ -7123,7 +7208,7 @@ mod tests {
         parked.milestone = Some(stone.id.clone());
         let child = make("argos-pppp.ccc", Kind::Issue, "todo");
         let live = vec![stone, done, parked, child];
-        assert!(due_raises(&live, &live, now, utc(), &rule).is_empty());
+        assert!(due_raises(&live, &live, now, utc(), &due_cfg(rule)).is_empty());
         // A live-only closure filter here would produce no candidates and never read the archive.
         let probe = due_candidates(&live, now, utc(), &rule);
         assert_eq!(probe.iter().map(|r| r.issue.id.as_str()).collect::<Vec<_>>(), ["argos-bbbb"]);
@@ -7132,12 +7217,106 @@ mod tests {
         archived_parent.milestone = Some("argos-ssss".into());
         let archive = vec![archived_parent];
         let context = with_archive(&live, &archive, &BTreeSet::new());
-        let raised = due_raises(&live, &context, now, utc(), &rule);
+        let raised = due_raises(&live, &context, now, utc(), &due_cfg(rule));
         assert_eq!(raised.iter().map(|r| r.issue.id.as_str()).collect::<Vec<_>>(), ["argos-bbbb"]);
         // Archived membership reopens the group, but its date is still not lent to the live child.
         let board = status_with_archive(&live, &archive, &[], &cfg(), now, utc());
         let notice = board.notices.iter().find(|w| w.kind == "due_priority_behind").unwrap();
         assert_eq!(notice.ids, ["argos-bbbb"]);
+    }
+
+    /// **`moai due apply` 와 보드가 같은 줄을 대고, 아카이브를 안 편 판은 펴도 답이 같다** — 무작위 저장소로 잰다(moai-nfct
+    /// 리뷰). 산 줄과 아카이브(끝난 줄의 일부)를 나눠, 보드의 `due_priority_behind` 와 [`due_raises`] 가 같은 줄을 대는지,
+    /// 탐침([`due_candidates`])이 답을 다 품는지, 그리고 `cmd::due` 의 문([`due_context_ids`]·`archive::reaches_out`)이
+    /// 아카이브를 안 펴기로 한 판에서 산 줄만으로 낸 답이 아카이브를 곁들인 답과 같은지 본다.
+    #[test]
+    fn due_apply_agrees_with_the_board_and_skips_only_an_archive_it_does_not_need_on_random_piles() {
+        let mut seed: u64 = 0x9e37_79b9_7f4a_7c15;
+        let mut roll = |n: usize| {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            (seed % n as u64) as usize
+        };
+        let cfg = cfg();
+        let rule = crate::config::DueRule::DEFAULT;
+        let now = "2026-10-16T00:00:00Z";
+        let dates = [None, Some("2026-10-10"), Some("2026-10-17"), Some("2026-10-20"), Some("2026-12-01")];
+        let (mut loaded, mut skipped) = (0usize, 0usize);
+        for _ in 0..3000 {
+            let mut all: Vec<Issue> = Vec::new();
+            let n = 2 + roll(12);
+            for k in 0..n {
+                let kind = [Kind::Milestone, Kind::Epic, Kind::Epic, Kind::Issue, Kind::Issue, Kind::Backlog][roll(6)];
+                let id = match roll(4) {
+                    0 if !all.is_empty() => {
+                        let p = roll(all.len());
+                        format!("{}.a{k:02}", all[p].id)
+                    }
+                    _ => format!("argos-{k:04}"),
+                };
+                if all.iter().any(|i| i.id == id) {
+                    continue;
+                }
+                let status = ["todo", "in_progress", "done"][roll(3)];
+                let mut i = make(&id, kind, status);
+                if roll(3) > 0 && !all.is_empty() {
+                    let p = roll(all.len());
+                    i.epic = Some(all[p].id.clone());
+                }
+                if roll(3) > 0 && !all.is_empty() {
+                    let p = roll(all.len());
+                    i.milestone = Some(all[p].id.clone());
+                }
+                if roll(6) == 0 {
+                    i.deferred_at = Some("2026-09-01T00:00:00Z".into());
+                }
+                i.due_on = dates[roll(dates.len())].map(str::to_string);
+                i.priority = Some(roll(4) as u8);
+                all.push(i);
+            }
+            let mut live = Vec::new();
+            let mut archive = Vec::new();
+            for i in all {
+                if i.status.is_done() && i.kind != Kind::Milestone && roll(2) == 0 {
+                    archive.push(i)
+                } else {
+                    live.push(i)
+                }
+            }
+            let ctx = with_archive(&live, &archive, &BTreeSet::new());
+            let key = |r: &Raise| (r.issue.id.clone(), r.to, r.due.to_string(), r.from.map(|f| f.id.clone()));
+            let full: Vec<_> = due_raises(&live, &ctx, now, utc(), &due_cfg(rule)).iter().map(key).collect();
+            let board = status_with_archive(&live, &archive, &[], &cfg, now, utc());
+            let said: Vec<String> = board
+                .notices
+                .iter()
+                .find(|w| w.kind == "due_priority_behind")
+                .map(|w| w.ids.clone())
+                .unwrap_or_default();
+            let raised: Vec<String> = full.iter().map(|k| k.0.clone()).collect();
+            assert_eq!(said, raised, "board vs apply\nlive {live:#?}\narchive {archive:#?}");
+            let probe = due_candidates(&live, now, utc(), &rule);
+            for k in &full {
+                assert!(
+                    probe.iter().any(|r| r.issue.id == k.0),
+                    "probe missed {}\nlive {live:#?}\narchive {archive:#?}",
+                    k.0
+                );
+            }
+            let ids = due_context_ids(&live, &probe);
+            let loads = live.iter().any(|i| ids.contains(&i.id.as_str()) && is_group(i))
+                || crate::archive::reaches_out(&live, &ids);
+            if loads {
+                loaded += 1;
+            } else {
+                skipped += 1;
+                let bare: Vec<_> = due_raises(&live, &live, now, utc(), &due_cfg(rule)).iter().map(key).collect();
+                assert_eq!(bare, full, "gate skipped a needed archive\nlive {live:#?}\narchive {archive:#?}");
+            }
+        }
+        // 두 갈래가 다 서야 이 시험이 무엇을 잰다 — 한쪽만 서면 문을 바꿔도 안 붉어진다.
+        assert!(loaded > 0 && skipped > 0, "loaded {loaded} skipped {skipped}");
     }
 
     /// **문맥은 미룸을 풀기도 한다**(리뷰) — 그래서 `moai due apply` 는 아카이브를 펼지를 미룸을 거르기 **전**의 후보로
@@ -7156,10 +7335,16 @@ mod tests {
         let live = vec![stone, child];
         let candidates = due_candidates(&live, now, utc(), &rule);
         assert_eq!(candidates.len(), 1, "후보는 미룸과 무관하게 선다");
-        assert!(due_in_plan(candidates.clone(), &live).is_empty(), "전제: 산 줄만으로는 미룬 마일스톤 밑이다");
+        assert!(
+            due_raises(&live, &live, now, utc(), &due_cfg(rule)).is_empty(),
+            "전제: 산 줄만으로는 미룬 마일스톤 밑이다"
+        );
+        // 펼지는 그 후보로 잰다 — 부모가 산 줄 밖이라 `cmd::archived_for` 가 아카이브를 편다.
+        assert!(crate::archive::reaches_out(&live, &due_context_ids(&live, &candidates)), "아카이브를 안 폈다");
         let archived_parent = make("argos-xxxx", Kind::Issue, "done");
         let context: Vec<Issue> = std::iter::once(archived_parent).chain(live.iter().cloned()).collect();
-        let raised: Vec<&str> = due_in_plan(candidates, &context).iter().map(|r| r.issue.id.as_str()).collect();
+        let raised: Vec<String> =
+            due_raises(&live, &context, now, utc(), &due_cfg(rule)).iter().map(|r| r.issue.id.clone()).collect();
         assert_eq!(raised, ["argos-xxxx.ccc"], "아카이브의 부모를 곁들였는데 계획 안으로 안 돌아왔다");
     }
 
@@ -8431,7 +8616,7 @@ mod tests {
         let context = with_archive(&live, &[archived], &BTreeSet::new());
         let ids: Vec<_> = ready_in_live(&context, &live, &cfg()).0.iter().map(|i| i.id.as_str()).collect();
         assert_eq!(ids, ["argos-000b", "argos-000a"]);
-        let raises = due_raises(&live, &context, "2026-10-29T00:00:00Z", utc(), &crate::config::DueRule::DEFAULT);
+        let raises = due_raises(&live, &context, "2026-10-29T00:00:00Z", utc(), &cfg());
         assert_eq!(raises.iter().map(|r| r.issue.id.as_str()).collect::<Vec<_>>(), ["argos-000b"]);
     }
 

@@ -7376,14 +7376,13 @@ fn due_apply_reads_archived_group_closure_and_reopened_groups() {
         field(&ok(p, &["epic", "add", "finished", "--milestone", &stone, "--due", "2026-09-04", "--json"]), "id");
     let finished = add(p, &["shipped work", "--parent", &epic]);
     ok(p, &["mv", &finished, "done"]);
-    let epic_line = line_of(p, &epic);
     let later = "2026-10-01T00:00:00Z";
     ok_at(p, later, &["archive"]);
     assert!(!issues(p).contains(&finished), "fixture did not archive finished work");
     assert!(!issues(p).contains(&format!(r#""id":"{epic}""#)), "fixture did not archive epic");
-    // Restore only the group; its completed work remains in the archive. Milestones stay live.
-    std::fs::write(p.join(".moai/issues.jsonl"), format!("{}{epic_line}\n", issues(p))).unwrap();
-    ok(p, &["archive", "--drop", &epic]);
+    // Restore only the group, the way a person does; its completed work stays in the archive. Milestones stay live.
+    ok_at(p, later, &["mv", &epic, "todo"]);
+    assert!(issues(p).contains(&format!(r#""id":"{epic}""#)), "the restore did not bring the epic back");
     let stored = std::fs::read_to_string(p.join(".moai/archive/2026.jsonl")).unwrap();
     assert!(stored.contains(&finished), "restoring the group restored its work too");
     let parked_epic = field(&ok(p, &["backlog", "add", "epic follow-up", "-e", &epic, "-p", "3", "--json"]), "id");
