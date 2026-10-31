@@ -27,6 +27,12 @@ pub struct Window {
 
 #[cfg(unix)]
 pub fn windows() -> R<Vec<Window>> {
+    windows_for_proposal(None)
+}
+
+/// Discover a reconnecting tab only when a proposal names its exact window.
+#[cfg(unix)]
+pub fn windows_for_proposal(target: Option<&str>) -> R<Vec<Window>> {
     use std::os::unix::fs::{FileTypeExt, MetadataExt};
     let dir = super::place::dir().map_err(|e| Fail::new(e.to_string()))?;
     let mut windows = Vec::new();
@@ -40,7 +46,8 @@ pub fn windows() -> R<Vec<Window>> {
         if !meta.file_type().is_socket() || meta.uid() != unsafe { libc::geteuid() } {
             continue;
         }
-        let req = wire::request(Verb::Hello, Duration::from_millis(1200));
+        let mut req = wire::request(Verb::Hello, Duration::from_millis(1200));
+        req.target = target.map(str::to_owned);
         match send_at(&path, &req) {
             Ok(reply) if reply.ok => {
                 if let Some(data) = reply.data {
@@ -76,6 +83,11 @@ pub fn windows() -> R<Vec<Window>> {
 
 #[cfg(not(unix))]
 pub fn windows() -> R<Vec<Window>> {
+    Ok(Vec::new())
+}
+
+#[cfg(not(unix))]
+pub fn windows_for_proposal(_: Option<&str>) -> R<Vec<Window>> {
     Ok(Vec::new())
 }
 

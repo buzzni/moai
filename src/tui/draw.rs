@@ -145,7 +145,8 @@ pub fn screen(f: &mut Frame, app: &mut App) {
     }
     // 할 말이 있을 때만 배너 줄이 선다. 늘 세워 두면 한 줄이 영영 논다.
     let banner_h = u16::from(banner(app).is_some());
-    let proposal_h = u16::from(!app.proposals.rows().is_empty());
+    app.proposal_banner_id = app.proposals.rows().first().map(|row| row.id.clone());
+    let proposal_h = u16::from(app.proposal_banner_id.is_some());
     // 누군지 묻는 동안과 거름망을 적는 동안만 아랫줄이 둘이다. 묻는 칸은 왜 묻는지와 다시 안 묻게
     // 하는 법이, 거름망은 거절문의 둘째 줄(고칠 글·있는 항목)이 윗줄에 선다 — 글칸 뒤에 붙이면 적는
     // 글에 밀려 사라진다.
@@ -295,7 +296,7 @@ pub fn screen(f: &mut Frame, app: &mut App) {
         Mode::Zone(z) => zone_pick(f, z, body, lang),
         Mode::ArchiveDays(p) => archive_days_pick(f, p, body, lang),
         Mode::Sort(e) => sort_edit(f, e, body, lang),
-        Mode::Proposals(at) => proposals_window(f, app.proposals.rows(), *at, body, lang),
+        Mode::Proposals(id) => proposals_window(f, app.proposals.rows(), id.as_deref(), body, lang),
         Mode::Stats(w) => stats_window(f, w, body, lang),
         Mode::Wiki(w) => wiki_at = Some(wiki_window(f, w, body, raw, share, lang)),
         Mode::Ask(ask) => {
@@ -1936,7 +1937,7 @@ fn ask_why(why: &str, lang: Lang) -> String {
 fn proposal_line(app: &App, width: usize) -> Option<String> {
     use unicode_width::UnicodeWidthStr;
     let rows = app.proposals.rows();
-    let row = rows.first()?;
+    let row = rows.iter().find(|row| Some(row.id.as_str()) == app.proposal_banner_id.as_deref())?;
     let word = say(app.site.lang, "tui.propose.word");
     let mut tail = say(app.site.lang, "tui.propose.hint");
     let then = row.then.as_ref().map(|verb| format!(" → {}", verb.describe(app.site.lang))).unwrap_or_default();
@@ -1958,7 +1959,13 @@ fn proposal_line(app: &App, width: usize) -> Option<String> {
 }
 
 /// The suggestion list (`SPC a l`): `j`·`k` choose, `y`·`n` answer, `Esc` closes. Each row names what accepting does.
-fn proposals_window(f: &mut Frame, rows: Vec<crate::ctl::proposal::Entry>, at: usize, area: Rect, lang: Lang) {
+fn proposals_window(
+    f: &mut Frame,
+    rows: Vec<crate::ctl::proposal::Entry>,
+    selected: Option<&str>,
+    area: Rect,
+    lang: Lang,
+) {
     let width = area.width.min(72);
     let height = area.height.min(rows.len().saturating_add(4).max(5) as u16);
     let box_at = Rect::new(area.x + (area.width - width) / 2, area.y + (area.height - height) / 2, width, height);
@@ -1969,12 +1976,14 @@ fn proposals_window(f: &mut Frame, rows: Vec<crate::ctl::proposal::Entry>, at: u
     f.render_widget(block, box_at);
     let lines: Vec<_> = rows
         .iter()
-        .enumerate()
-        .map(|(n, row)| {
+        .map(|row| {
             let name = row.text.replace('\n', " ");
             // The list is where a person picks one to accept, so each row names what accepting it does.
             let then = row.then.as_ref().map(|verb| format!(" → {}", verb.describe(lang))).unwrap_or_default();
-            let text = clip(&format!("{} {name}{then}", if n == at { ">" } else { " " }), inner.width as usize);
+            let text = clip(
+                &format!("{} {name}{then}", if Some(row.id.as_str()) == selected { ">" } else { " " }),
+                inner.width as usize,
+            );
             ListItem::new(text)
         })
         .collect();

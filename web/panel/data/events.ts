@@ -9,6 +9,7 @@ export interface EventsOptions {
   onVisible?: () => void
   onHello?: (hello: { tab: string; token: string }) => void
   onCtl?: (message: { seq: number; request: Record<string, unknown> }) => void
+  onValidateZone?: (message: { seq: number; name: string }) => void
   onProposal?: (entry: { id: string; text: string; then?: { verb: string; [key: string]: unknown } | null; remaining_ms?: number }) => void
   onProposalClosed?: (id: string) => void
   factory?: (url: string) => EventSource
@@ -23,6 +24,13 @@ export interface Events {
 }
 
 const RETRY_MS = 30_000
+/**
+ * A stream that was open and then ended — the server closes each after thirty minutes, or the connection dropped — is
+ * opened again after three seconds (the `retry:` the server sends), well inside the server's thirty-second resume grace
+ * (src/web/ctl.rs RESUME_GRACE), so the tab keeps its ctl id, token and pending suggestions. Waiting RETRY_MS there
+ * always arrived after the grace. A stream refused before it opened still waits RETRY_MS.
+ */
+const RESUME_MS = 3_000
 const clockDefault: Clock = {
   now: () => Date.now(),
   setTimeout: (callback, ms) => setTimeout(callback, ms),
@@ -55,13 +63,13 @@ export function openEvents(options: EventsOptions): Events {
     source = null
     down()
   }
-  const later = () => {
+  const later = (ms = options.retryMs ?? RETRY_MS) => {
     clear()
     if (stopped || !shown() || !factory) return
     retry = clock.setTimeout(() => {
       retry = null
       start()
-    }, options.retryMs ?? RETRY_MS)
+    }, ms)
   }
   const start = () => {
     if (stopped || !shown() || source || !factory) return
@@ -97,6 +105,13 @@ export function openEvents(options: EventsOptions): Events {
           }
         } catch { /* ignore a malformed server event */ }
       })
+      opened.addEventListener('validate_zone', (event) => {
+        if (source !== opened) return
+        try {
+          const message = JSON.parse((event as MessageEvent).data) as { seq?: unknown; name?: unknown }
+          if (typeof message.seq === 'number' && typeof message.name === 'string') options.onValidateZone?.({ seq: message.seq, name: message.name })
+        } catch { /* ignore a malformed server event */ }
+      })
       opened.addEventListener('proposal', (event) => {
         if (source !== opened) return
         try {
@@ -116,7 +131,7 @@ export function openEvents(options: EventsOptions): Events {
         const wasUp = up
         close()
         if (!wasUp) options.onDown()
-        later()
+        later(wasUp ? Math.min(RESUME_MS, options.retryMs ?? RETRY_MS) : undefined)
       }
     } catch {
       options.onDown()

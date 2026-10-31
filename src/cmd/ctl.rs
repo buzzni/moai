@@ -52,16 +52,18 @@ pub fn answer(ctx: &Ctx, target: Option<&str>, id: String, wait: u64) -> R<Vec<S
         return Err(Fail::coded("--wait must be at most 3600 seconds", code::BAD_INPUT));
     }
     unix_only()?;
-    let windows = call::windows()?;
-    let window = window_for(ctx, &windows, target.or_else(|| id.rsplit_once('/').map(|(w, _)| w)))?;
+    let target = target.or_else(|| id.rsplit_once('/').map(|(w, _)| w));
+    let windows = call::windows_for_proposal(target)?;
+    let window = window_for(ctx, &windows, target)?;
     let request = wire::request(wire::Verb::Answer { id, wait }, Duration::from_secs(wait + 10));
     proposal_reply(ctx, call::send(window, &request)?)
 }
 
 pub fn withdraw(ctx: &Ctx, target: Option<&str>, id: String) -> R<Vec<String>> {
     unix_only()?;
-    let windows = call::windows()?;
-    let window = window_for(ctx, &windows, target.or_else(|| id.rsplit_once('/').map(|(w, _)| w)))?;
+    let target = target.or_else(|| id.rsplit_once('/').map(|(w, _)| w));
+    let windows = call::windows_for_proposal(target)?;
+    let window = window_for(ctx, &windows, target)?;
     let request = wire::request(wire::Verb::Withdraw { id }, Duration::from_secs(5));
     proposal_reply(ctx, call::send(window, &request)?)
 }

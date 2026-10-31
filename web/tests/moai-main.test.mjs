@@ -47,6 +47,7 @@ async function page(t, { holdFirst = false, initialTab, chartFailures = 0, fakeS
     ctl(seq, request) { this.listeners.ctl({ data: JSON.stringify({ seq, request }) }) }
     proposal(entry) { this.listeners.proposal({ data: JSON.stringify(entry) }) }
     proposalClosed(id) { this.listeners.proposal_closed({ data: JSON.stringify({ id }) }) }
+    validateZone(seq, name) { this.listeners.validate_zone({ data: JSON.stringify({ seq, name }) }) }
   }
   let release
   dom.window.fetch = async (path, init = {}) => {
@@ -110,6 +111,22 @@ test('a suggestion card waits for the person, then runs its action and posts the
   assert.equal(JSON.parse(answer.init.body).ran.ok, true)
   assert.equal(p.dom.window.document.documentElement.dataset.theme, 'dark')
   await until(() => card.hidden)
+})
+
+// The server's half (src/web/ctl.rs validate_zone) is tested against a stand-in page; this is the page's half: the
+// `validate_zone` event it listens for, and the reply it posts back for a zone it can and cannot draw.
+test('the page answers a zone check before a zone suggestion is shown', async (t) => {
+  const p = await page(t, { fakeStream: true })
+  const source = p.streams[0]
+  source.onopen()
+  source.hello('123.1', 'token')
+  const replies = (seq) => p.posts.filter(({ url }) => url.pathname === '/api/ctl/123.1' && url.searchParams.get('seq') === String(seq))
+  source.validateZone(4, 'UTC')
+  source.validateZone(5, 'Mars/Olympus')
+  await until(() => replies(4).length === 1 && replies(5).length === 1)
+  assert.equal(replies(4)[0].url.searchParams.get('token'), 'token')
+  assert.equal(JSON.parse(replies(4)[0].init.body).ok, true)
+  assert.deepEqual(JSON.parse(replies(5)[0].init.body), { ok: false, code: 'bad_input', message: 'unknown time zone' })
 })
 
 test('the page reads changed stamps from its event stream and ignores repeats', async (t) => {
