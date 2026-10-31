@@ -2574,12 +2574,21 @@ impl App {
                 Seg::Lost => "(lost)".into(),
             })
             .collect();
+        let held = if !self.chord.held().is_empty() {
+            self.chord.held()
+        } else {
+            match &self.mode {
+                Mode::Stats(w) => w.chord.held(),
+                Mode::Wiki(w) => w.chord.held(),
+                _ => self.chord.held(),
+            }
+        };
         let mut state = serde_json::json!({
             "screen": self.ctl_screen(), "path": path,
             "cursor": rows.get(self.cursor).and_then(id_of),
             "focus": if self.focus == Pane::Explorer { "list" } else { "detail" },
             "mode": mode,
-            "menu": if self.chord.held().is_empty() { serde_json::Value::Null } else { serde_json::json!(format!("{:?}", self.chord.held())) },
+            "menu": if held.is_empty() { serde_json::Value::Null } else { serde_json::json!(held.iter().copied().map(keys::name_of_key).collect::<Vec<_>>().join(" ")) },
             "filter": filter, "sort": Self::order_words(&self.order),
             "view": {"hidden": self.view.hidden, "deferred": !self.view.hide_deferred,
                 "backlog": !self.view.hide_backlog, "archived": self.view.show_archived, "worktree": self.worktree},
@@ -13665,6 +13674,22 @@ mod tests {
         assert!(!a.quit);
         assert_eq!(a.mode, Mode::Browse);
         assert_eq!(a.proposals.rows().len(), 1);
+    }
+
+    #[test]
+    fn ctl_state_spells_held_prefixes_as_keys_on_the_visible_window() {
+        use crate::ctl::wire::Verb;
+        let (_scratch, mut a) = writable("ctl-held");
+        for prefix in ["SPC", "Ctrl-w", "g"] {
+            a.hit(prefix);
+            let reply = a.ctl(&ctl_req(Verb::State { rows: false }, None));
+            assert_eq!(reply.data.unwrap()["menu"], prefix);
+            a.chord.clear();
+        }
+        a.hit("SPC g s g");
+        assert_eq!(a.ctl_state(false)["menu"], "g");
+        a.hit("Esc");
+        assert_eq!(a.ctl_state(false)["menu"], serde_json::Value::Null);
     }
 
     #[test]
