@@ -2421,9 +2421,9 @@ impl App {
             self.ctl_turn = None;
             return Reply::error("unsupported", format!("unknown action: {name}"));
         };
-        if act == keys::Browse::Quit {
+        if let Some(why) = self.ctl_action_refusal(act) {
             self.ctl_turn = None;
-            return Reply::error("refused", say(self.site.lang, "tui.ctl.quit"));
+            return Reply::error("refused", why);
         }
         let rows = self.rows();
         match act.enabled(&self.key_ctx(&rows)) {
@@ -2442,6 +2442,17 @@ impl App {
         self.ctl_end(name, true)
     }
 
+    /// Control callers cannot close the person's window or operate their proposal chooser.
+    fn ctl_action_refusal(&self, act: keys::Browse) -> Option<String> {
+        use keys::Browse as B;
+        match act {
+            B::Quit => Some(say(self.site.lang, "tui.ctl.quit").into()),
+            B::ProposalAccept | B::ProposalDecline | B::Proposals =>
+                Some("only the person can answer a proposal".into()),
+            _ => None,
+        }
+    }
+
     fn ctl_actions(&self) -> crate::ctl::wire::Reply {
         use crate::ctl::wire::Reply;
         let rows = self.rows();
@@ -2451,15 +2462,15 @@ impl App {
             .filter(|a| matches!(a.section, "browse" | "gantt" | "moves"))
             .map(|a| {
                 let full = format!("{}.{}", a.section, a.action);
-                let enabled = keymap::named(&full).map(|act| act.enabled(&ctx));
-                let (on, why) = if a.action.starts_with("proposal_") {
-                    (false, Some("only the person can answer a proposal".into()))
-                } else {
-                    match enabled {
-                        Some(Ok(())) => (true, None),
-                        Some(Err(keys::Off::Why(s))) => (false, Some(s)),
-                        _ => (false, None),
-                    }
+                let act = keymap::named(&full);
+                let (on, why) = match act {
+                    Some(act) if self.ctl_action_refusal(act).is_some() => (false, self.ctl_action_refusal(act)),
+                    Some(act) => match act.enabled(&ctx) {
+                        Ok(()) => (true, None),
+                        Err(keys::Off::Why(s)) => (false, Some(s)),
+                        Err(keys::Off::Quiet) => (false, None),
+                    },
+                    None => (false, None),
                 };
                 serde_json::json!({"name": full, "keys": a.keys, "enabled": on, "why": why})
             })
@@ -13629,6 +13640,31 @@ mod tests {
             assert!(!a.quit);
             assert!(a.chord.held().is_empty());
         }
+    }
+
+    #[test]
+    fn ctl_actions_disable_every_person_only_action_and_do_refuses_it() {
+        use crate::ctl::wire::Verb;
+        let (_scratch, mut a) = writable("ctl-person-only");
+        assert!(a.ctl(&ctl_req(Verb::Propose {
+            text: "A suggestion".into(), then: None, ttl: 900, wait: 0,
+        }, None)).ok);
+        let listing = a.ctl(&ctl_req(Verb::Actions, None)).data.unwrap();
+        for name in ["browse.quit", "browse.proposal_accept", "browse.proposal_decline", "browse.proposals"] {
+            let row = listing["actions"].as_array().unwrap().iter().find(|row| row["name"] == name).unwrap();
+            assert_eq!(row["enabled"], false, "{row}");
+            assert!(!row["why"].as_str().unwrap().is_empty());
+            let reply = a.ctl(&ctl_req(Verb::Do { name: name.into() }, None));
+            assert_eq!(reply.code.as_deref(), Some("refused"), "{reply:?}");
+            assert_eq!(reply.message.as_deref(), row["why"].as_str());
+        }
+        for seq in ["SPC q", "SPC a y", "SPC a n", "SPC a l"] {
+            let reply = a.ctl(&ctl_req(Verb::Keys { seqs: vec![seq.into()], text: None }, None));
+            assert_eq!(reply.code.as_deref(), Some("refused"), "{seq}: {reply:?}");
+        }
+        assert!(!a.quit);
+        assert_eq!(a.mode, Mode::Browse);
+        assert_eq!(a.proposals.rows().len(), 1);
     }
 
     #[test]
