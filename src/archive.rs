@@ -451,6 +451,13 @@ pub fn reaches_out(active: &[Issue], wanted: &[&str]) -> bool {
     walks_out(active, wanted.iter().copied(), true, |_| false)
 }
 
+/// [`reaches_out`] without blockers — only a parent, epic or milestone above `wanted` that no live row holds counts.
+/// `moai due apply` gates its archive read on this: a blocker never places a row, lends it a deadline, closes its
+/// groups or defers it, so following blockers read (and refused on) an archive the answer never depends on.
+pub fn places_out(active: &[Issue], wanted: &[&str]) -> bool {
+    walks_out(active, wanted.iter().copied(), false, |_| false)
+}
+
 /// The walk [`needs_context`] and [`reaches_out`] share: from `wanted` up through every parent, epic and milestone
 /// (and every blocker, with `blockers`), true at the first id no live row holds or the first row `stop` picks.
 fn walks_out<'a>(
@@ -459,22 +466,33 @@ fn walks_out<'a>(
     blockers: bool,
     stop: impl Fn(&Issue) -> bool,
 ) -> bool {
-    let by_id: BTreeMap<&str, &Issue> = active.iter().map(|i| (i.id.as_str(), i)).collect();
+    let mut by_id = BTreeMap::new();
+    // Keep preceding twins only: healthy snapshots still allocate no per-row vectors.
+    // A gate must cover references from every row the derived readers can select.
+    let mut shadowed: BTreeMap<&str, Vec<&Issue>> = BTreeMap::new();
+    for i in active {
+        if let Some(previous) = by_id.insert(i.id.as_str(), i) {
+            shadowed.entry(i.id.as_str()).or_default().push(previous);
+        }
+    }
     let mut pending: Vec<&str> = wanted.into_iter().collect();
     let mut seen = BTreeSet::new();
     while let Some(id) = pending.pop() {
         if !seen.insert(id) {
             continue;
         }
-        let Some(i) = by_id.get(id) else {
+        let Some(&last) = by_id.get(id) else {
             return true;
         };
-        if stop(i) {
-            return true;
-        }
-        pending.extend([crate::id::parent_of(&i.id), i.epic.as_deref(), i.milestone.as_deref()].into_iter().flatten());
-        if blockers {
-            pending.extend(i.blocked_by.iter().map(String::as_str));
+        for i in std::iter::once(last).chain(shadowed.get(id).into_iter().flatten().copied()) {
+            if stop(i) {
+                return true;
+            }
+            pending
+                .extend([crate::id::parent_of(&i.id), i.epic.as_deref(), i.milestone.as_deref()].into_iter().flatten());
+            if blockers {
+                pending.extend(i.blocked_by.iter().map(String::as_str));
+            }
         }
     }
     false

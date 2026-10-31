@@ -7450,6 +7450,144 @@ fn due_apply_reads_archived_group_closure_and_reopened_groups() {
     assert_eq!(applied["raised"], dry["raised"], "{applied}");
 }
 
+/// A live child is folded under an archived parent in a different milestone.
+/// Keep the snapshot explicit so both the historical placement and write ceiling are visible.
+fn due_archived_placement(p: &Path, original_due: Option<&str>, placed_due: &str) {
+    let row = |id: &str, kind: &str, status: &str| {
+        serde_json::json!({
+            "id": id, "title": id, "kind": kind, "status": status,
+            "assignee": "Tester", "assignee_email": "tester@example.com",
+            "created_at": "2026-09-01T00:00:00Z", "updated_at": "2026-09-01T00:00:00Z",
+            "status_since": "2026-09-01T00:00:00Z"
+        })
+    };
+    let mut original = row("moai-m001", "milestone", "todo");
+    if let Some(due) = original_due {
+        original["due_on"] = due.into();
+    }
+    let mut placed = row("moai-m002", "milestone", "todo");
+    placed["due_on"] = placed_due.into();
+    let mut child = row("moai-pppp.ccc", "issue", "todo");
+    child["milestone"] = "moai-m001".into();
+    let mut parent = row("moai-pppp", "issue", "done");
+    parent["milestone"] = "moai-m002".into();
+    let mut finished = row("moai-dddd", "issue", "done");
+    finished["milestone"] = "moai-m001".into();
+    let encode = |rows: Vec<serde_json::Value>| rows.iter().map(|r| format!("{r}\n")).collect::<String>();
+    std::fs::write(p.join(".moai/issues.jsonl"), encode(vec![original, placed, child])).unwrap();
+    std::fs::create_dir_all(p.join(".moai/archive")).unwrap();
+    std::fs::write(p.join(".moai/archive/2026.jsonl"), encode(vec![parent, finished])).unwrap();
+}
+
+#[test]
+fn due_apply_status_ready_and_prime_follow_archived_parent_placement() {
+    for (original_due, placed_due) in
+        [(Some("2026-10-01"), "2026-10-17"), (Some("2026-10-17"), "2026-10-01"), (None, "2026-10-17")]
+    {
+        let s = init("due-archived-placement");
+        let p = s.path();
+        let now = "2026-10-16T00:00:00Z";
+        due_archived_placement(p, original_due, placed_due);
+        let own = add(p, &["own deadline", "--due", "2026-10-16"]);
+        // Both candidates must be inside the running placement for ready's deadline tie-breaker.
+        let snapshot = issues(p)
+            .lines()
+            .map(|line| {
+                let mut row: serde_json::Value = serde_json::from_str(line).unwrap();
+                if row["id"] == own {
+                    row["milestone"] = "moai-m002".into();
+                }
+                format!("{row}\n")
+            })
+            .collect::<String>();
+        std::fs::write(p.join(".moai/issues.jsonl"), snapshot).unwrap();
+        let dry: serde_json::Value =
+            serde_json::from_str(&ok_at(p, now, &["due", "apply", "--dry-run", "--json"])).unwrap();
+        let child = dry["raised"].as_array().unwrap().iter().find(|r| r["id"] == "moai-pppp.ccc").unwrap();
+        assert_eq!(child["due_from"], "moai-m002", "{dry}");
+        assert_eq!(child["due_on"], placed_due, "{dry}");
+        // The own-date row either wins by its own date or ties on the shared milestone.
+        let expected = vec![own.as_str(), "moai-pppp.ccc"];
+        let board: serde_json::Value = serde_json::from_str(&ok_at(p, now, &["status", "--json"])).unwrap();
+        let notice = board["notices"].as_array().unwrap().iter().find(|w| w["kind"] == "due_priority_behind").unwrap();
+        assert_eq!(notice["ids"], serde_json::json!(expected), "{board}");
+        // Ready breaks equal deadlines by creation time; status notices break them by ID.
+        let expected_ready = if placed_due < "2026-10-16" { vec!["moai-pppp.ccc", own.as_str()] } else { expected };
+        let ready: serde_json::Value = serde_json::from_str(&ok_at(p, now, &["ready", "--json"])).unwrap();
+        assert_eq!(
+            ready["ready"].as_array().unwrap().iter().map(|r| r["id"].as_str().unwrap()).collect::<Vec<_>>(),
+            expected_ready,
+            "{ready}"
+        );
+        let prime = ok_at(p, now, &["prime"]);
+        assert!(prime.find(expected_ready[0]).unwrap() < prime.find(expected_ready[1]).unwrap(), "{prime}");
+        let applied: serde_json::Value = serde_json::from_str(&ok_at(p, now, &["due", "apply", "--json"])).unwrap();
+        assert_eq!(applied["raised"], dry["raised"], "locked pass disagrees: {applied}");
+    }
+    // No live deadline at all: a live child reopens its archived epic, whose deadline becomes eligible.
+    let s = init("due-archived-provider-only");
+    let p = s.path();
+    let epic = field(&ok(p, &["epic", "add", "archived provider", "--due", "2026-09-11", "--json"]), "id");
+    let child = add(p, &["revived child", "--parent", &epic]);
+    ok(p, &["mv", &child, "done"]);
+    ok_at(p, "2026-10-01T00:00:00Z", &["archive"]);
+    ok_at(p, "2026-10-01T00:00:00Z", &["mv", &child, "todo"]);
+    let dry: serde_json::Value =
+        serde_json::from_str(&ok_at(p, "2026-10-01T00:00:00Z", &["due", "apply", "--dry-run", "--json"])).unwrap();
+    assert_eq!(dry["raised"][0]["id"], child, "{dry}");
+    assert_eq!(dry["raised"][0]["due_from"], epic, "{dry}");
+}
+
+#[test]
+fn due_apply_probe_reads_references_from_both_duplicate_rows() {
+    let s = init("due-archive-twin-probe");
+    let p = s.path();
+    due_archived_placement(p, None, "2026-10-17");
+    let mut joined: serde_json::Value =
+        serde_json::from_str(issues(p).lines().find(|l| l.contains("moai-pppp.ccc")).unwrap()).unwrap();
+    joined["id"] = "moai-cccc".into();
+    joined["epic"] = "moai-eeee".into();
+    joined.as_object_mut().unwrap().remove("milestone");
+    let mut loose = joined.clone();
+    loose.as_object_mut().unwrap().remove("epic");
+    let mut epic = joined.clone();
+    epic["id"] = "moai-eeee".into();
+    epic["kind"] = "epic".into();
+    epic["status"] = "done".into();
+    epic["due_on"] = "2026-10-17".into();
+    epic.as_object_mut().unwrap().remove("epic");
+    std::fs::write(p.join(".moai/issues.jsonl"), format!("{joined}\n{loose}\n")).unwrap();
+    std::fs::write(p.join(".moai/archive/2026.jsonl"), format!("{epic}\n")).unwrap();
+    let now = "2026-10-16T00:00:00Z";
+    let before = issues(p);
+    let dry: serde_json::Value =
+        serde_json::from_str(&ok_at(p, now, &["due", "apply", "--dry-run", "--json"])).unwrap();
+    assert_eq!(dry["raised"][0]["id"], "moai-cccc", "{dry}");
+    assert_eq!(dry["raised"][0]["due_from"], "moai-eeee", "{dry}");
+    let applied = at(p, now, &["due", "apply", "--json"]);
+    assert!(!applied.status.success(), "duplicate write was accepted: {}", text(&applied));
+    assert_eq!(issues(p), before, "failed duplicate write changed the snapshot");
+}
+
+#[test]
+fn rule_two_pickup_suggestions_match_ready_with_archived_placement() {
+    let s = init("hook-due-archive-placement");
+    let p = s.path();
+    due_archived_placement(p, Some("2026-10-01"), "2026-10-17");
+    let own = add(p, &["own deadline", "--milestone", "moai-m002", "--due", "2026-10-16"]);
+    let ready: serde_json::Value = serde_json::from_str(&ok(p, &["ready", "--json"])).unwrap();
+    assert_eq!(ready["ready"][0]["id"], own, "{ready}");
+    let why = refusal(&call(
+        &s,
+        "Edit",
+        r#"{"file_path":"src/lib.rs","old_string":"x","new_string":"y"}"#,
+        "archive-pick-order",
+    ));
+    assert!(why.find(&format!("moai mv {own}")).unwrap() < why.find("moai mv moai-pppp.ccc").unwrap(), "{why}");
+    let prime: serde_json::Value = serde_json::from_str(&ok(p, &["prime", "--json"])).unwrap();
+    assert_eq!(prime["ready"][0]["id"], own, "{prime}");
+}
+
 /// Incomplete required archive context must not turn a closed group's unknown state into an
 /// irreversible priority raise. Unrelated broken archives still stay outside the read gate.
 #[test]
@@ -7484,6 +7622,20 @@ fn due_apply_refuses_incomplete_required_archive_context_without_writing() {
 
     let unrelated = init("due-broken-unneeded-context");
     let own = add(unrelated.path(), &["own deadline", "--due", "2026-09-11"]);
+    // A blocker never places a row, lends it a deadline, closes its groups or defers it — an open row
+    // waiting on work that left the live snapshot must not pull the archive into due apply.
+    let waiting = add(unrelated.path(), &["waits on moved work"]);
+    let snapshot = issues(unrelated.path())
+        .lines()
+        .map(|line| {
+            let mut row: serde_json::Value = serde_json::from_str(line).unwrap();
+            if row["id"] == waiting {
+                row["blocked_by"] = serde_json::json!(["argos-gone"]);
+            }
+            format!("{row}\n")
+        })
+        .collect::<String>();
+    std::fs::write(unrelated.path().join(".moai/issues.jsonl"), snapshot).unwrap();
     let archive = unrelated.path().join(".moai/archive");
     std::fs::create_dir_all(&archive).unwrap();
     std::fs::write(archive.join("2026.jsonl"), [0xff]).unwrap();
@@ -11906,6 +12058,40 @@ fn the_overflow_notice_names_what_this_write_pushed_over() {
     let out = moai(s.path(), &["edit", &m, "--due", "2026-09-25"]);
     assert!(!String::from_utf8_lossy(&out.stderr).contains("due_beyond_parent"), "{}", text(&out));
     assert!(ok(s.path(), &["status", "--json"]).contains("due_beyond_parent"), "남은 넘침을 보드가 안 비춘다");
+}
+
+#[test]
+fn overflow_notices_match_status_for_archived_and_reopened_groups() {
+    for reopened in [false, true] {
+        let s = init("due-overflow-archived-closure");
+        let p = s.path();
+        let m = field(&ok(p, &["milestone", "add", "release", "--due", "2026-09-30", "--json"]), "id");
+        let e =
+            field(&ok(p, &["epic", "add", "restored epic", "--milestone", &m, "--due", "2026-09-29", "--json"]), "id");
+        let done = add(p, &["completed member", "--parent", &e]);
+        ok(p, &["mv", &done, "done"]);
+        let now = "2026-10-01T00:00:00Z";
+        ok_at(p, now, &["archive"]);
+        ok_at(p, now, &["mv", &e, "todo"]);
+        if reopened {
+            add(p, &["new work", "--parent", &e]);
+        }
+        let out = at(p, now, &["edit", &m, "--due", "2026-09-20"]);
+        assert!(out.status.success(), "{}", text(&out));
+        let said = String::from_utf8_lossy(&out.stderr);
+        assert_eq!(said.contains(&e), reopened, "{said}");
+        let board: serde_json::Value = serde_json::from_str(&ok_at(p, now, &["status", "--json"])).unwrap();
+        let ids = board["warnings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|w| w["kind"] == "due_beyond_parent")
+            .map(|w| w["ids"].clone())
+            .unwrap_or_else(|| serde_json::json!([]));
+        assert_eq!(ids, if reopened { serde_json::json!([e]) } else { serde_json::json!([]) }, "{board}");
+        // Accepting a later deadline on that restored epic still obeys the live write ceiling.
+        assert!(!at(p, now, &["edit", &e, "--due", "2026-09-28"]).status.success());
+    }
 }
 
 /// **도는 마일스톤 안이 기한보다 먼저다**(리뷰) — AGENTS 블록의 약속("`p0` 이 먼저고 마일스톤이 둘째다")이
