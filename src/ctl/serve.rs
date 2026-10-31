@@ -23,6 +23,8 @@ pub struct Incoming {
 /// The owner loop alone consumes requests and owns the application state.
 pub struct Listener {
     pub incoming: mpsc::Receiver<Incoming>,
+    #[cfg(unix)]
+    wake: std::os::unix::net::UnixStream,
     path: std::path::PathBuf,
     stop: Arc<AtomicBool>,
     book: Option<Arc<super::proposal::Book>>,
@@ -53,9 +55,66 @@ impl Editing {
     }
 }
 
-/// The owner loop calls this before it hands the terminal to the editor. While it is away, the listener can still
-/// list this window and answer a directed call with `person_busy`; it never reads or changes `App` off the loop.
+/// Owner-loop wakeups and editor suspension; application state stays on the owner thread.
 impl Listener {
+    /// Wait for terminal input or a newly queued owner-loop request. Crossterm still parses and consumes every
+    /// terminal event on the owner thread; this socket only interrupts its idle wait.
+    pub fn poll_input(&self, timeout: std::time::Duration) -> std::io::Result<bool> {
+        use ratatui::crossterm::event;
+        if event::poll(std::time::Duration::ZERO)? {
+            return Ok(true);
+        }
+        #[cfg(unix)]
+        {
+            use std::io::IsTerminal;
+            use std::os::fd::AsRawFd;
+            // Match crossterm's input source even when stdin is redirected.
+            let tty;
+            let terminal = if std::io::stdin().is_terminal() {
+                std::io::stdin().as_raw_fd()
+            } else {
+                tty = std::fs::File::open("/dev/tty")?;
+                tty.as_raw_fd()
+            };
+            self.wait_on(terminal, timeout)?;
+            event::poll(std::time::Duration::ZERO)
+        }
+        #[cfg(not(unix))]
+        event::poll(timeout)
+    }
+
+    #[cfg(unix)]
+    fn wait_on(&self, terminal: std::os::fd::RawFd, timeout: Duration) -> std::io::Result<()> {
+        use std::os::fd::AsRawFd;
+        let mut fds = [
+            libc::pollfd { fd: terminal, events: libc::POLLIN, revents: 0 },
+            libc::pollfd { fd: self.wake.as_raw_fd(), events: libc::POLLIN, revents: 0 },
+        ];
+        // Round up: a fractional millisecond must not turn an idle wait into a busy loop.
+        let ms = timeout.as_nanos().div_ceil(1_000_000);
+        let ready = unsafe { libc::poll(fds.as_mut_ptr(), fds.len() as libc::nfds_t, ms.min(i32::MAX as u128) as i32) };
+        if ready < 0 {
+            let error = std::io::Error::last_os_error();
+            // SIGWINCH interrupts poll; let crossterm read its resize notification.
+            if error.kind() != std::io::ErrorKind::Interrupted {
+                return Err(error);
+            }
+        }
+        let mut wake = &self.wake;
+        let mut bytes = [0; 256];
+        loop {
+            match wake.read(&mut bytes) {
+                Ok(0) => break,
+                Ok(_) => {}
+                Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => break,
+                Err(e) => return Err(e),
+            }
+        }
+        Ok(())
+    }
+
+    /// Cache Hello before handing the terminal to the editor. Directed actions then return person_busy.
     pub fn editor_begin(&self, hello: Reply) {
         *self.editing.hello.lock().unwrap_or_else(|e| e.into_inner()) = Some((hello, Instant::now()));
         self.editing.active.store(true, Ordering::Release);
@@ -107,6 +166,10 @@ impl Listener {
         // client's read timeout off and cut large replies short with EAGAIN. `Drop` wakes the accept by connecting once.
         let listener = UnixListener::bind(&path)?;
         let (tx, incoming) = mpsc::channel();
+        let (wake, notify) = std::os::unix::net::UnixStream::pair()?;
+        wake.set_nonblocking(true)?;
+        notify.set_nonblocking(true)?;
+        let notify = Arc::new(notify);
         let stop = Arc::new(AtomicBool::new(false));
         let stopped = Arc::clone(&stop);
         let active = Arc::new(AtomicUsize::new(0));
@@ -132,6 +195,7 @@ impl Listener {
                     continue;
                 }
                 let tx = tx.clone();
+                let notify = Arc::clone(&notify);
                 let handler = handler.clone();
                 let book = book.clone();
                 let client_active = Arc::clone(&active);
@@ -147,6 +211,7 @@ impl Listener {
                         &mut leave,
                         &client_waiting,
                         &client_editing,
+                        Some(&notify),
                     );
                 });
                 if spawned.is_err() {
@@ -154,7 +219,7 @@ impl Listener {
                 }
             }
         })?;
-        Ok(Self { incoming, path, stop, book: keep_book, editing })
+        Ok(Self { incoming, wake, path, stop, book: keep_book, editing })
     }
 }
 
@@ -191,6 +256,7 @@ fn handle(
     leave: &mut Option<Leave>,
     waiting: &Arc<AtomicUsize>,
     editing: &Editing,
+    notify: Option<&std::os::unix::net::UnixStream>,
 ) {
     let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
     let mut line = Vec::new();
@@ -231,6 +297,10 @@ fn handle(
                     let reply = if tx.send(Incoming { request: req, answer }).is_err() {
                         Reply::error("gone", "window closed")
                     } else {
+                        if let Some(mut notify) = notify {
+                            // Nonblocking: a full socket already carries a wakeup.
+                            let _ = notify.write_all(&[1]);
+                        }
                         let first = rx
                             .recv_timeout(limit)
                             .unwrap_or_else(|_| Reply::error("timeout", "window did not answer in time"));
@@ -299,6 +369,53 @@ mod tests {
     use crate::ctl::wire::Verb;
 
     #[test]
+    fn a_queued_request_wakes_once_and_leaves_no_fast_idle_tail() {
+        use std::os::fd::AsRawFd;
+        use std::os::unix::net::UnixStream;
+        let (wake, notify) = UnixStream::pair().unwrap();
+        wake.set_nonblocking(true).unwrap();
+        notify.set_nonblocking(true).unwrap();
+        let _keep_notify = notify.try_clone().unwrap();
+        let (tx, incoming) = mpsc::channel();
+        let listener = Listener {
+            incoming,
+            wake,
+            path: std::env::temp_dir().join(format!("moai-4km9-unused-{}", std::process::id())),
+            stop: Arc::new(AtomicBool::new(false)),
+            book: None,
+            editing: Arc::new(Editing::default()),
+        };
+        // An empty, open terminal descriptor stays quiet without using the person's terminal.
+        let (terminal, _keep_terminal) = UnixStream::pair().unwrap();
+        let (mut client, mut server) = UnixStream::pair().unwrap();
+        let worker = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(20));
+            let req = wire::request(Verb::Hello, Duration::from_secs(5));
+            serde_json::to_writer(&mut client, &req).unwrap();
+            client.write_all(b"\n").unwrap();
+            handle(
+                &mut server,
+                &tx,
+                None,
+                None,
+                &mut None,
+                &Arc::new(AtomicUsize::new(0)),
+                &Editing::default(),
+                Some(&notify),
+            );
+        });
+        let start = Instant::now();
+        listener.wait_on(terminal.as_raw_fd(), Duration::from_secs(3)).unwrap();
+        assert!(start.elapsed() < Duration::from_secs(1), "a queued Hello waited for the idle timer");
+        let turn = listener.incoming.try_recv().unwrap();
+        turn.answer.send(Reply::success(serde_json::json!({}))).unwrap();
+        worker.join().unwrap();
+        let idle = Instant::now();
+        listener.wait_on(terminal.as_raw_fd(), Duration::from_millis(50)).unwrap();
+        assert!(idle.elapsed() >= Duration::from_millis(40), "a serviced read left an idle wakeup behind");
+    }
+
+    #[test]
     fn an_editor_keeps_the_window_listed_and_refuses_actions_without_waiting_for_the_loop() {
         use std::os::unix::net::UnixStream;
         let editing = Editing::default();
@@ -317,7 +434,7 @@ mod tests {
             serde_json::to_writer(&mut client, &request).unwrap();
             client.write_all(b"\n").unwrap();
             let mut leave = None;
-            handle(&mut server, &tx, None, None, &mut leave, &waiting, &editing);
+            handle(&mut server, &tx, None, None, &mut leave, &waiting, &editing, None);
             let mut line = String::new();
             BufReader::new(client).read_line(&mut line).unwrap();
             serde_json::from_str::<Reply>(&line).unwrap()
@@ -366,7 +483,7 @@ mod tests {
             let editing = Arc::clone(&editing);
             handles.push(std::thread::spawn(move || {
                 let mut leave = None;
-                handle(&mut server, &tx, None, Some(&book), &mut leave, &waiting, &editing);
+                handle(&mut server, &tx, None, Some(&book), &mut leave, &waiting, &editing, None);
             }));
             drop(client);
         }
@@ -383,7 +500,7 @@ mod tests {
         let fifth_editing = Arc::clone(&editing);
         let fifth = std::thread::spawn(move || {
             let mut leave = None;
-            handle(&mut server, &fifth_tx, None, Some(&fifth_book), &mut leave, &fifth_waiting, &fifth_editing);
+            handle(&mut server, &fifth_tx, None, Some(&fifth_book), &mut leave, &fifth_waiting, &fifth_editing, None);
         });
         let until = Instant::now() + Duration::from_secs(2);
         while book.rows().len() < 5 && Instant::now() < until {
@@ -430,7 +547,7 @@ mod tests {
             let tx = tx.clone();
             handles.push(std::thread::spawn(move || {
                 let mut leave = None;
-                handle(&mut server, &tx, Some(&handler), None, &mut leave, &waiting, &editing);
+                handle(&mut server, &tx, Some(&handler), None, &mut leave, &waiting, &editing, None);
             }));
             drop(client);
         }
@@ -453,7 +570,16 @@ mod tests {
         let fifth_tx = tx.clone();
         let fifth = std::thread::spawn(move || {
             let mut leave = None;
-            handle(&mut server, &fifth_tx, Some(&fifth_handler), None, &mut leave, &fifth_waiting, &fifth_editing);
+            handle(
+                &mut server,
+                &fifth_tx,
+                Some(&fifth_handler),
+                None,
+                &mut leave,
+                &fifth_waiting,
+                &fifth_editing,
+                None,
+            );
         });
         let crate::web::ctl::Push::Proposal { entry } = joined.incoming.recv_timeout(Duration::from_secs(2)).unwrap()
         else {
@@ -501,7 +627,7 @@ mod tests {
             answering.finish("window/1", "accepted", None);
         });
         let mut leave = None;
-        handle(&mut server, &tx, None, Some(&book), &mut leave, &waiting, &editing);
+        handle(&mut server, &tx, None, Some(&book), &mut leave, &waiting, &editing, None);
         answer.join().unwrap();
         let mut line = String::new();
         BufReader::new(client).read_line(&mut line).unwrap();
