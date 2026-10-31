@@ -12,6 +12,8 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+## [0.40.0] - 2026-10-31
+
 ### Added
 
 - **`moai read --atomic`** writes none of the named marks when any of the IDs is missing (`not_found`) or held by a value written by hand (`refused`). A web tab's `moai ctl read <ids>` uses it. (moai-v5of.om1)
