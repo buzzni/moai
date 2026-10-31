@@ -563,8 +563,11 @@ async function start(): Promise<void> {
   window.addEventListener('focus', () => seen())
   document.addEventListener('keydown', () => { if (Date.now() - lastSeen >= 5_000) seen() })
   document.addEventListener('click', () => { if (Date.now() - lastSeen >= 5_000) seen() })
+  // Showing the tab again is the person's doing; a reconnect while it stayed visible is not (hello's seen is passive).
+  // The server takes `seen` and a proposal answer from a tab whose stream is still reconnecting (src/web/ctl.rs
+  // `resumable`), so neither is lost to the gap before the resumed stream's hello.
   events = openEvents({ url: eventUrl, onStamp: (at) => refresher.saw(at), onUp: () => refresher.pause(),
-    onDown: () => { refresher.resume() }, onVisible: () => { void refresher.check() },
+    onDown: () => { refresher.resume() }, onVisible: () => { void refresher.check(); seen() },
     onHello: (hello) => { proposals.clear(); tab = { id: hello.tab, token: hello.token }; seen(false) },
     onCtl: ({ seq, request }) => {
       const here = tab

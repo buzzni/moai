@@ -17,6 +17,8 @@ struct Entries {
     next: u32,
     rows: Vec<Entry>,
     closed: bool,
+    /// When a web tab whose stream ended stops counting as reconnecting ([`Book::close_at`]).
+    closes_at: Option<Instant>,
 }
 
 #[derive(Clone)]
@@ -134,7 +136,7 @@ impl Book {
         let end = Instant::now() + Duration::from_secs(seconds);
         let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         loop {
-            if inner.closed {
+            if inner.closed || inner.closes_at.is_some_and(|at| Instant::now() >= at) {
                 return Reply::error("gone", "window closed");
             }
             expire(&mut inner);
@@ -159,6 +161,20 @@ impl Book {
         let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         inner.closed = true;
         self.changed.notify_all();
+    }
+
+    /// A web tab whose stream ended may come back within its resume grace, so its waiters stay until `at` and then
+    /// get `gone`; `None` cancels that when the stream resumes. Waiters see it at their next wakeup in
+    /// [`Book::wait_while`], so nothing has to run when the grace ends — a tab nobody reopens still answers them.
+    pub fn close_at(&self, at: Option<Instant>) {
+        let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        inner.closes_at = at;
+        self.changed.notify_all();
+    }
+
+    #[cfg(test)]
+    pub fn closes_at(&self) -> Option<Instant> {
+        self.inner.lock().unwrap_or_else(|e| e.into_inner()).closes_at
     }
 }
 
@@ -227,6 +243,25 @@ mod tests {
         let waited = std::thread::spawn(move || other.wait("window/1", 5));
         book.close();
         assert_eq!(waited.join().unwrap().code.as_deref(), Some("gone"));
+    }
+
+    #[test]
+    fn a_book_closing_later_keeps_its_waiters_until_then_and_a_resume_cancels_it() {
+        let book = std::sync::Arc::new(Book::new());
+        book.add("window", "hello", None, 900, None);
+        // The tab's stream ended and came back: the closing it had scheduled no longer applies.
+        book.close_at(Some(Instant::now()));
+        book.close_at(None);
+        let other = book.clone();
+        let waited = std::thread::spawn(move || other.wait("window/1", 5));
+        book.finish("window/1", "accepted", None);
+        assert_eq!(waited.join().unwrap().data.unwrap()["state"], "accepted");
+        // No resume within the grace: a waiter is told the window is gone, not left until its own wait ends.
+        book.add("window", "again", None, 900, None);
+        book.close_at(Some(Instant::now() + Duration::from_millis(50)));
+        let started = Instant::now();
+        assert_eq!(book.wait("window/2", 30).code.as_deref(), Some("gone"));
+        assert!(started.elapsed() < Duration::from_secs(5));
     }
 
     #[test]

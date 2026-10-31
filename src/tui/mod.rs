@@ -1930,11 +1930,11 @@ impl App {
                 {
                     return Reply::error("unsupported", "unknown explorer cell");
                 }
+                // The same check the zone verb makes on acceptance, so a shown suggestion is one that can run.
                 if let Some(Verb::Zone { name }) = then.as_deref()
-                    && name != "none"
-                    && !crate::tz::names().0.iter().any(|zone| zone == name)
+                    && let Err(why) = Self::zone_known(name)
                 {
-                    return Reply::error("bad_input", format!("unknown timezone: {name}"));
+                    return Reply::error("bad_input", why);
                 }
                 self.proposals.add(
                     &format!("tui-{}", std::process::id()),
@@ -2167,9 +2167,7 @@ impl App {
                     )?;
                 }
                 Verb::Zone { name } => {
-                    if name != "none" && !crate::tz::names().0.iter().any(|z| z == name) {
-                        return Err(bad(format!("unknown timezone: {name}")));
-                    }
+                    Self::zone_known(name).map_err(bad)?;
                     let name = (name != "none").then_some(name.as_str());
                     changed = self.saved_zone.as_deref() != name;
                     if changed {
@@ -2238,6 +2236,16 @@ impl App {
             return Err(crate::ctl::wire::Reply::error("refused", say(self.site.lang, "tui.ctl.editor")));
         }
         Ok(())
+    }
+
+    /// A zone the explorer can apply: `none` (back to this machine's) or a tzdb name. One rule for the `zone` verb and
+    /// for a suggestion that would run it, so the two cannot drift apart.
+    fn zone_known(name: &str) -> Result<(), String> {
+        if name == "none" || crate::tz::names().0.iter().any(|zone| zone == name) {
+            Ok(())
+        } else {
+            Err(format!("unknown timezone: {name}"))
+        }
     }
 
     fn ctl_read_ids(&mut self, ids: &[String]) -> Result<(), crate::ctl::wire::Reply> {
@@ -13438,8 +13446,40 @@ mod tests {
         };
         assert_eq!(app.ctl(&ctl_req(propose("Mars/Olympus"), None)).code.as_deref(), Some("bad_input"));
         assert!(app.proposals.rows().is_empty());
-        assert!(app.ctl(&ctl_req(propose("UTC"), None)).ok);
+        // `none` needs no tzdb; a named zone is only as good as this machine's tzdb (a static build may have none),
+        // so the named case runs where the tzdb lists one.
+        assert!(app.ctl(&ctl_req(propose("none"), None)).ok);
         assert_eq!(app.proposals.rows().len(), 1);
+        if let Some(zone) = crate::tz::names().0.first() {
+            assert!(app.ctl(&ctl_req(propose(zone), None)).ok, "{zone}");
+            assert_eq!(app.proposals.rows().len(), 2);
+        }
+    }
+
+    /// **A follow-up that still fails on acceptance says so** — the zone is now refused before display, but a `goto`
+    /// whose row is gone (or was never there) is only found out when it runs.
+    #[test]
+    fn a_follow_up_that_cannot_run_is_not_reported_as_accepted() {
+        use crate::ctl::wire::Verb;
+        let (_scratch, mut a) = writable("proposal-follow-up-failed");
+        let shown = a.ctl(&ctl_req(
+            Verb::Propose {
+                text: "Open it?".into(),
+                then: Some(Box::new(Verb::Goto { id: Some("argos-9999".into()), enter: false, project: None })),
+                ttl: 900,
+                wait: 0,
+            },
+            None,
+        ));
+        let id = shown.data.unwrap()["id"].as_str().unwrap().to_string();
+        a.proposal_banner_id = Some(id.clone());
+        a.hit("SPC a y");
+        let answer = a.proposals.get(&id).data.unwrap();
+        assert_eq!(answer["state"], "accepted");
+        assert_eq!(answer["ran"]["ok"], false);
+        let failed = crate::i18n::say(a.site.lang, "tui.propose.failed");
+        let head = failed.split("{why}").next().unwrap_or_default();
+        assert!(a.notice.as_deref().is_some_and(|notice| notice.starts_with(head)), "{:?}", a.notice);
     }
 
     #[test]

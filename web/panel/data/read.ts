@@ -13,7 +13,8 @@
  *   "problems":[prose],"at":"<when the command ran>"}`. Ids that were already read at their current
  * `updated_at` are not rewritten and so appear in none of `read`, `missing`, `held`. A missing id or group
  * (a row removed, or one only the archive holds) still writes the rest and prints that answer, but ends the run
- * non-zero; the answer is handed out all the same, with `missing` naming it.
+ * non-zero; the answer is handed out all the same, with `missing` naming it. `read --atomic` (ctl's `read <ids>`)
+ * is the exception: a missing id (`not_found`) or a held one (`refused`) writes nothing and prints no answer.
  *
  * The worktree overlay (moai-m4ez.gcp). With `SPC v w` on the writes carry `?worktree=1` (`read --worktree`): the ids are
  * looked up in the rows the overlay shows, so a row only another worktree holds is marked, and a row another worktree
@@ -95,13 +96,15 @@ export const markAllRead = (client: Client, worktree = false, ctl?: Readonly<Rec
 export const markGroupRead = (client: Client, groupId: string, worktree = false, ctl?: Readonly<Record<string, string>>): Promise<Marked> => write(client, READ_ENDPOINT.group(groupId, worktree), ctl)
 
 /**
- * The three writes as the keys call them (keys/wiring.ts `r`, `SPC m a`, `SPC m g`), each answering null when it went
- * through or the {@link Outcome} that stopped it. `after` runs once a write went through, with the ids it wrote, and
- * is waited for: the page reads the rows again there (main.ts), so the marks come back with them.
+ * The writes as the keys call them (keys/wiring.ts `r`, `SPC m a`, `SPC m g`) and as ctl's `read <ids>` does (ctl.ts),
+ * each answering null when it went through or the {@link Outcome} that stopped it. `after` runs once a write went
+ * through, with the ids it wrote, and is waited for: the page reads the rows again there (main.ts), so the marks come
+ * back with them.
  */
 export interface ReadMarks {
   /** `r`: the row under the cursor. */
   one(id: string): Promise<Outcome | null>
+  /** ctl's `read <ids>`: all of them or none (`read --atomic`). */
   ids(ids: readonly string[]): Promise<Outcome | null>
   /** `SPC m a`: everything unread. */
   all(): Promise<Outcome | null>

@@ -12,6 +12,10 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+### Added
+
+- **`moai read --atomic`** writes none of the named marks when any of the IDs is missing (`not_found`) or held by a value written by hand (`refused`). A web tab's `moai ctl read <ids>` uses it. (moai-v5of.om1)
+
 ### Fixed
 
 - Control proposals now keep the selected ID stable, release disconnected waiter slots, validate time zones before display, preserve visible web tabs and pending suggestions across short stream reconnects, and mark multiple web read IDs atomically. (moai-v5of)

@@ -61,36 +61,36 @@ impl Tabs {
     }
 
     pub fn join(&self, here: &Path, overlay: bool, resume: Option<(&str, &str)>) -> std::io::Result<Joined> {
-        let mut registry = self.inner.lock().unwrap_or_else(|e| e.into_inner());
-        registry.prune();
-        if let Some((id, token)) = resume {
-            let (sender, incoming) = mpsc::channel();
-            registry.next_stream += 1;
-            let stream = registry.next_stream;
-            if let Some(tab) = registry.tabs.get_mut(id)
-                && tab.token == token
-                && crate::user_config::same_dir(Path::new(&tab.here), here)
-                && tab.overlay == overlay
-            {
-                tab.stream = stream;
-                tab.detached = None;
-                tab.sender = Some(sender.clone());
-                for (_, pending) in tab.pending.drain() {
-                    let _ = pending.answer.send(Reply::error("gone", "tab stream replaced"));
-                }
-                for row in tab.proposals.rows() {
-                    let _ = sender.send(Push::Proposal { entry: row.value() });
-                }
-                return Ok(Joined { id: id.into(), token: token.into(), incoming, stream });
-            }
-        }
+        // The token is read before the registry lock, as every ctl request, `seen` and `ls` waits on that lock.
         let mut bytes = [0u8; 16];
         std::fs::File::open("/dev/urandom")?.read_exact(&mut bytes)?;
-        let token = bytes.iter().map(|b| format!("{b:02x}")).collect::<String>();
-        let (sender, incoming) = mpsc::channel();
-        registry.next_tab += 1;
+        let mut registry = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        registry.prune();
         registry.next_stream += 1;
         let stream = registry.next_stream;
+        let (sender, incoming) = mpsc::channel();
+        if let Some((id, token)) = resume
+            && let Some(tab) = registry.tabs.get_mut(id)
+            && tab.token == token
+            && crate::user_config::same_dir(Path::new(&tab.here), here)
+        {
+            // **The overlay is the page's view, not its identity** — turning the worktree overlay on or off is the
+            // page's own reconnect (main.ts `events.reconnect()`), so requiring the old value refused every one of them.
+            tab.overlay = overlay;
+            tab.stream = stream;
+            tab.detached = None;
+            tab.proposals.close_at(None);
+            tab.sender = Some(sender.clone());
+            for (_, pending) in tab.pending.drain() {
+                let _ = pending.answer.send(Reply::error("gone", "tab stream replaced"));
+            }
+            for row in tab.proposals.rows() {
+                let _ = sender.send(Push::Proposal { entry: row.value() });
+            }
+            return Ok(Joined { id: id.into(), token: token.into(), incoming, stream });
+        }
+        let token = bytes.iter().map(|b| format!("{b:02x}")).collect::<String>();
+        registry.next_tab += 1;
         let id = format!("{}.{}", std::process::id(), registry.next_tab);
         registry.tabs.insert(
             id.clone(),
@@ -117,8 +117,12 @@ impl Tabs {
         if let Some(tab) = registry.tabs.get_mut(id)
             && tab.stream == stream
         {
+            let now = Instant::now();
             tab.sender = None;
-            tab.detached = Some(Instant::now());
+            tab.detached = Some(now);
+            // Proposal waiters ride out a reconnect, but a tab nobody reopens must still answer them `gone` — prune only
+            // runs on a later join, which may never come.
+            tab.proposals.close_at(Some(now + RESUME_GRACE));
             for (_, pending) in tab.pending.drain() {
                 let _ = pending.answer.send(Reply::error("gone", "tab closed"));
             }
@@ -131,7 +135,7 @@ impl Tabs {
 
     pub fn handle_while(&self, request: Request, connected: &dyn Fn() -> bool) -> Reply {
         if matches!(request.verb, Verb::Hello) {
-            return Reply::success(json!({"windows": self.windows()}));
+            return Reply::success(json!({"windows": self.windows(request.target.as_deref())}));
         }
         let Some(target) = request.target.clone() else { return Reply::error("bad_input", "target tab is required") };
         match &request.verb {
@@ -167,7 +171,10 @@ impl Tabs {
                         return Reply::error("unsupported", format!("unknown web action: {name}"));
                     }
                 }
-                if let Some(Verb::Zone { name }) = then.as_deref() {
+                // `none` returns to the default zone, which every browser draws; the explorer skips it the same way.
+                if let Some(Verb::Zone { name }) = then.as_deref()
+                    && name != "none"
+                {
                     let checked = self.validate_zone(&target, name);
                     if !checked.ok {
                         return checked;
@@ -206,7 +213,7 @@ impl Tabs {
             }
             Verb::Answer { id, wait } => {
                 let registry = self.inner.lock().unwrap_or_else(|e| e.into_inner());
-                let Some(tab) = registry.tabs.get(&target).filter(|tab| tab.sender.is_some()) else {
+                let Some(tab) = registry.tabs.get(&target).filter(|tab| tab.resumable()) else {
                     return Reply::error("gone", "tab closed");
                 };
                 let book = tab.proposals.clone();
@@ -215,12 +222,14 @@ impl Tabs {
             }
             Verb::Withdraw { id } => {
                 let mut registry = self.inner.lock().unwrap_or_else(|e| e.into_inner());
-                let Some(tab) = registry.tabs.get_mut(&target).filter(|tab| tab.sender.is_some()) else {
+                let Some(tab) = registry.tabs.get_mut(&target).filter(|tab| tab.resumable()) else {
                     return Reply::error("gone", "tab closed");
                 };
                 let reply = tab.proposals.finish(id, "withdrawn", None);
-                if reply.ok {
-                    let _ = tab.sender.as_ref().unwrap().send(Push::ProposalClosed { id: id.clone() });
+                if reply.ok
+                    && let Some(sender) = &tab.sender
+                {
+                    let _ = sender.send(Push::ProposalClosed { id: id.clone() });
                 }
                 return reply;
             }
@@ -252,12 +261,12 @@ impl Tabs {
         result
     }
 
-    fn windows(&self) -> Vec<serde_json::Value> {
+    fn windows(&self, target: Option<&str>) -> Vec<serde_json::Value> {
         let registry = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         registry
             .tabs
             .iter()
-            .filter(|(_, tab)| tab.sender.is_some())
+            .filter(|(id, tab)| tab.sender.is_some() || (target == Some(id.as_str()) && tab.resumable()))
             .map(|(id, tab)| {
                 json!({
                     "id": id, "kind": "web", "pid": std::process::id(), "version": env!("CARGO_PKG_VERSION"),
@@ -271,7 +280,9 @@ impl Tabs {
 
     pub fn seen(&self, id: &str, token: &str, screen: &str, human: bool) -> Result<(), &'static str> {
         let mut registry = self.inner.lock().unwrap_or_else(|e| e.into_inner());
-        let Some(tab) = registry.tabs.get_mut(id).filter(|tab| tab.sender.is_some()) else { return Err("gone") };
+        // The page's own call reaches a tab that is reconnecting: the focus that follows showing it again usually
+        // arrives before the resumed stream does, and dropping it lost the person's return as input.
+        let Some(tab) = registry.tabs.get_mut(id).filter(|tab| tab.resumable()) else { return Err("gone") };
         if tab.token != token {
             return Err("forbidden");
         }
@@ -316,15 +327,17 @@ impl Tabs {
         ran: Option<Reply>,
     ) -> Result<Reply, &'static str> {
         let mut registry = self.inner.lock().unwrap_or_else(|e| e.into_inner());
-        let Some(tab) = registry.tabs.get_mut(id).filter(|tab| tab.sender.is_some()) else { return Err("gone") };
+        // **An answer given while the stream reconnects is kept** — the page has already run the follow-up by then;
+        // refusing it left the card up, the proposal pending, and the resume showing it again to be accepted twice.
+        let Some(tab) = registry.tabs.get_mut(id).filter(|tab| tab.resumable()) else { return Err("gone") };
         if tab.token != token {
             return Err("forbidden");
         }
         let reply = tab.proposals.finish(proposal, if accepted { "accepted" } else { "declined" }, ran);
-        if reply.ok {
-            if let Some(sender) = &tab.sender {
-                let _ = sender.send(Push::ProposalClosed { id: proposal.into() });
-            }
+        if reply.ok
+            && let Some(sender) = &tab.sender
+        {
+            let _ = sender.send(Push::ProposalClosed { id: proposal.into() });
         }
         Ok(reply)
     }
@@ -352,6 +365,14 @@ impl Tabs {
             tab.pending.remove(&seq);
         }
         result
+    }
+}
+
+impl Tab {
+    /// Its stream is open, or it ended less than [`RESUME_GRACE`] ago and a resume will keep this tab. The page's own
+    /// token calls and agents' proposal answer/withdraw calls reach it; new actions need an open stream.
+    fn resumable(&self) -> bool {
+        self.detached.is_none_or(|at| at.elapsed() < RESUME_GRACE)
     }
 }
 
@@ -404,7 +425,112 @@ mod tests {
         assert!(listed["windows"][0]["last_input_ago_ms"].as_u64().unwrap() >= 10_000);
         assert_eq!(listed["windows"][0]["screen"], "board");
         tabs.leave(&first.id, first.stream);
-        assert_eq!(tabs.handle(proposal(&first.id, None)).ok, true, "an old stream detached the resumed one");
+        assert!(tabs.handle(proposal(&first.id, None)).ok, "an old stream detached the resumed one");
+    }
+
+    #[test]
+    fn a_withdrawn_proposal_does_not_return_after_a_detached_tab_resumes() {
+        let tabs = Tabs::new();
+        let first = tabs.join(Path::new("/tmp"), false, None).unwrap();
+        let id = tabs.handle(proposal(&first.id, None)).data.unwrap()["id"].as_str().unwrap().to_string();
+        tabs.leave(&first.id, first.stream);
+        assert!(tabs.windows(None).is_empty());
+        let mut hello = wire::request(Verb::Hello, Duration::from_secs(1));
+        hello.target = Some(first.id.clone());
+        assert_eq!(tabs.handle(hello).data.unwrap()["windows"][0]["id"], first.id);
+        let mut withdraw = wire::request(Verb::Withdraw { id: id.clone() }, Duration::from_secs(1));
+        withdraw.target = Some(first.id.clone());
+        assert_eq!(tabs.handle(withdraw).data.unwrap()["state"], "withdrawn");
+        let mut answer = wire::request(Verb::Answer { id, wait: 0 }, Duration::from_secs(1));
+        answer.target = Some(first.id.clone());
+        assert_eq!(tabs.handle(answer).data.unwrap()["state"], "withdrawn");
+        assert_eq!(tabs.handle(proposal(&first.id, None)).code.as_deref(), Some("gone"));
+        let resumed = tabs.join(Path::new("/tmp"), false, Some((&first.id, &first.token))).unwrap();
+        assert!(resumed.incoming.try_recv().is_err());
+        tabs.leave(&resumed.id, resumed.stream);
+        tabs.inner.lock().unwrap().tabs.get_mut(&resumed.id).unwrap().detached = Some(Instant::now() - RESUME_GRACE);
+        assert!(tabs.windows(Some(&resumed.id)).is_empty());
+    }
+
+    #[test]
+    fn an_overlay_reconnect_keeps_the_tab_and_reports_the_new_layer() {
+        let tabs = Tabs::new();
+        let first = tabs.join(Path::new("/tmp"), false, None).unwrap();
+        let id = tabs.handle(proposal(&first.id, None)).data.unwrap()["id"].as_str().unwrap().to_string();
+        assert!(matches!(first.incoming.try_recv(), Ok(Push::Proposal { .. })));
+        // The page turns the worktree overlay on: it opens a stream with `worktree=1` before the old one is seen closing.
+        let resumed = tabs.join(Path::new("/tmp"), true, Some((&first.id, &first.token))).unwrap();
+        assert_eq!(resumed.id, first.id);
+        assert!(matches!(resumed.incoming.try_recv(), Ok(Push::Proposal { entry }) if entry["id"] == id));
+        let listed = tabs.handle(wire::request(Verb::Hello, Duration::from_secs(1))).data.unwrap();
+        assert_eq!(listed["windows"][0]["layer"], true);
+        // The replaced stream's channel is closed, so its loop ends (web::stream_events) instead of idling on it.
+        assert!(matches!(first.incoming.try_recv(), Err(mpsc::TryRecvError::Disconnected)));
+        // Its late leave does not detach the resumed stream.
+        tabs.leave(&first.id, first.stream);
+        assert!(tabs.handle(proposal(&first.id, None)).ok);
+    }
+
+    #[test]
+    fn a_waiter_rides_out_a_resume_and_hears_gone_once_the_grace_ends() {
+        let tabs = Arc::new(Tabs::new());
+        let first = tabs.join(Path::new("/tmp"), false, None).unwrap();
+        let waiting = |target: &str| {
+            let mut request = proposal(target, None);
+            if let Verb::Propose { wait, .. } = &mut request.verb {
+                *wait = 30;
+            }
+            let of = Arc::clone(&tabs);
+            std::thread::spawn(move || of.handle(request))
+        };
+        let shown = |joined: &Joined, id: &str| loop {
+            match joined.incoming.recv_timeout(Duration::from_secs(2)) {
+                Ok(Push::Proposal { entry }) if entry["id"] == id => break,
+                Ok(_) => continue,
+                Err(e) => panic!("proposal {id} was not pushed: {e}"),
+            }
+        };
+        // The stream ends and resumes: the waiter is still there for the answer given through the resumed tab.
+        let answered = waiting(&first.id);
+        shown(&first, &format!("{}/1", first.id));
+        tabs.leave(&first.id, first.stream);
+        let book = tabs.inner.lock().unwrap().tabs[&first.id].proposals.clone();
+        assert!(book.closes_at().is_some(), "leave scheduled no end for the tab's waiters");
+        let resumed = tabs.join(Path::new("/tmp"), false, Some((&first.id, &first.token))).unwrap();
+        assert_eq!(book.closes_at(), None, "the resume kept the scheduled end");
+        tabs.proposal_reply(&resumed.id, &resumed.token, &format!("{}/1", first.id), true, None).unwrap();
+        assert_eq!(answered.join().unwrap().data.unwrap()["state"], "accepted");
+        // The stream ends for good: the waiter hears `gone` once the grace has run out, though no tab ever joins again.
+        let orphaned = waiting(&resumed.id);
+        shown(&resumed, &format!("{}/2", resumed.id));
+        tabs.leave(&resumed.id, resumed.stream);
+        std::thread::sleep(Duration::from_millis(300));
+        assert!(!orphaned.is_finished(), "the waiter left before the grace ran out");
+        book.close_at(Some(Instant::now())); // as when RESUME_GRACE has passed
+        assert_eq!(orphaned.join().unwrap().code.as_deref(), Some("gone"));
+    }
+
+    #[test]
+    fn the_page_answers_and_reports_input_while_its_stream_reconnects() {
+        let tabs = Tabs::new();
+        let first = tabs.join(Path::new("/tmp"), false, None).unwrap();
+        let id = tabs.handle(proposal(&first.id, None)).data.unwrap()["id"].as_str().unwrap().to_string();
+        tabs.inner.lock().unwrap().tabs.get_mut(&first.id).unwrap().last_input -= Duration::from_secs(10);
+        tabs.leave(&first.id, first.stream);
+        // Agents cannot reach the tab meanwhile …
+        assert_eq!(tabs.handle(proposal(&first.id, None)).code.as_deref(), Some("gone"));
+        // … but the page's own calls land: the person came back to the tab and answered its card.
+        tabs.seen(&first.id, &first.token, "board", true).unwrap();
+        let answer = tabs.proposal_reply(&first.id, &first.token, &id, true, None).unwrap();
+        assert_eq!(answer.data.unwrap()["state"], "accepted");
+        let resumed = tabs.join(Path::new("/tmp"), false, Some((&first.id, &first.token))).unwrap();
+        assert!(resumed.incoming.try_recv().is_err(), "an answered proposal came back on resume");
+        let listed = tabs.handle(wire::request(Verb::Hello, Duration::from_secs(1))).data.unwrap();
+        assert!(listed["windows"][0]["last_input_ago_ms"].as_u64().unwrap() < 10_000);
+        // Past the grace the tab is gone for the page as well.
+        tabs.leave(&resumed.id, resumed.stream);
+        tabs.inner.lock().unwrap().tabs.get_mut(&first.id).unwrap().detached = Some(Instant::now() - RESUME_GRACE);
+        assert_eq!(tabs.seen(&first.id, &first.token, "list", true), Err("gone"));
     }
 
     #[test]

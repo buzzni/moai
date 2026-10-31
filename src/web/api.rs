@@ -191,32 +191,16 @@ pub fn split_project(query: &[(String, String)]) -> Result<(Option<String>, Vec<
     Ok((project, rest))
 }
 
-/// 쓰는 길 — **읽음 표시 셋과 계획 날 하나다**. 읽음은 사용자 설정 곁의 제 파일에만 적히고 트래커에는 안
+/// 쓰는 길 — **읽음 표시 넷과 계획 날 하나다**. 읽음은 사용자 설정 곁의 제 파일에만 적히고 트래커에는 안
 /// 적힌다(`moai read --help`, 2026-10-22 사람 결정, moai-ly88). **계획 날(`/api/plan/<id>`)은 트래커에 쓰는 하나뿐인
 /// 길이다**(moai-d86e.3ud) — 간트의 막대 끌기가 `moai edit <id> --shift*=<N>`(하루 세우기는 `--start --due
 /// --if-unplanned`, moai-vj8w.02c)을 자식으로 부르니 `store::with_write` 를 지나고, 거절(시작이 기한 뒤·위 기한 넘김·그새
 /// 날이 선 줄)도 `edit` 의 말 그대로다. 끝점이 아니면 `None`.
+///
+/// `/api/read-ids/<id>,<id>…` 는 ctl 의 `read <ids>` 다(moai-v5of.om1) — `read --atomic` 하나로 다 적거나 하나도 안
+/// 적는다. **개수는 따로 안 막는다** — 탐색기의 ctl read 와 CLI 도 안 막고, 요청 머리의 상한(`http::HEAD_MAX`)이 이미 선다.
 pub fn write_argv_of(path: &str, query: &[(String, String)]) -> Option<Result<Vec<String>, Bad>> {
     let strs = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
-    if let Some(ids) = path.strip_prefix("/api/read-ids/") {
-        let ids: Vec<&str> = ids.split(',').collect();
-        let built = if ids.is_empty() || ids.len() > 100 {
-            Err(Bad::Shape("ids".into()))
-        } else {
-            ids.iter().try_for_each(|id| issue_id(id)).map(|()| {
-                let mut args = strs(&["read", "--atomic", "--"]);
-                args.extend(ids.iter().map(|id| (*id).to_string()));
-                args
-            })
-        };
-        return Some(overlay_of(query).and_then(|on| {
-            let mut args = built?;
-            if on {
-                args.insert(1, "--worktree".into());
-            }
-            Ok(args)
-        }));
-    }
     if let Some(id) = path.strip_prefix("/api/plan/") {
         return Some(issue_id(id).and_then(|()| plan_argv(id, query)));
     }
@@ -224,7 +208,14 @@ pub fn write_argv_of(path: &str, query: &[(String, String)]) -> Option<Result<Ve
         ("/api/read-all", _, _) => Ok(strs(&["read", "--all"])),
         (_, Some(id), _) => issue_id(id).map(|()| strs(&["read", "--", id])),
         (_, _, Some(id)) => issue_id(id).map(|()| vec!["read".to_string(), format!("--epic={id}")]),
-        _ => return None,
+        _ => {
+            let ids = path.strip_prefix("/api/read-ids/")?;
+            ids.split(',').try_for_each(issue_id).map(|()| {
+                let mut args = strs(&["read", "--atomic", "--"]);
+                args.extend(ids.split(',').map(str::to_string));
+                args
+            })
+        }
     };
     // **겹쳐 보기를 켠 페이지는 읽음도 그 판에서 적는다**(moai-m4ez.gcp) — 옆 워크트리에만 있는 줄도, 옆이 더 늦게 고친
     // 줄도 보이는 그 `updated_at` 으로 적혀야 [NEW] 가 내린다. `--` 앞에 놓는다(뒤는 값 하나만 선다).
@@ -752,6 +743,11 @@ mod tests {
             Some(strs(&["read", "--atomic", "--", "moai-1abc", "moai-2def"]))
         );
         assert!(matches!(write_argv_of("/api/read-ids/moai-1abc,bad", &[]), Some(Err(Bad::Shape(_)))));
+        assert!(matches!(write_argv_of("/api/read-ids/", &[]), Some(Err(Bad::Shape(_)))));
+        // No count of its own: a ctl read of 150 ids marks them as the explorer and the CLI would.
+        let many: Vec<String> = (0..150).map(|n| format!("moai-{n:04}")).collect();
+        let argv = w(&format!("/api/read-ids/{}", many.join(","))).unwrap();
+        assert_eq!(argv.len(), 3 + many.len());
         assert_eq!(w("/api/read-group/moai-1abc"), Some(strs(&["read", "--epic=moai-1abc"])));
         for bad in ["/api/read/issue", "/api/read/-e", "/api/read-group/--all", "/api/read/"] {
             assert!(matches!(write_argv_of(bad, &[]), Some(Err(Bad::Shape(_)))), "{bad}");
@@ -763,6 +759,10 @@ mod tests {
         assert_eq!(w("/api/read/moai-1abc", &on), Ok(strs(&["read", "--worktree", "--", "moai-1abc"])));
         assert_eq!(w("/api/read-all", &on), Ok(strs(&["read", "--worktree", "--all"])));
         assert_eq!(w("/api/read-group/moai-1abc", &on), Ok(strs(&["read", "--worktree", "--epic=moai-1abc"])));
+        assert_eq!(
+            w("/api/read-ids/moai-1abc,moai-2def", &on),
+            Ok(strs(&["read", "--worktree", "--atomic", "--", "moai-1abc", "moai-2def"]))
+        );
         assert_eq!(w("/api/read-all", &q(&[("worktree", "0")])), Err(Bad::Shape("worktree".into())));
         assert_eq!(w("/api/read-all", &q(&[("worktree", "1"), ("worktree", "1")])), Err(Bad::Twice("worktree".into())));
         assert_eq!(overlay_of(&[]), Ok(false));

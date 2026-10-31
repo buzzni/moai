@@ -421,7 +421,14 @@ fn stream_events(
     let (until, mut ping, mut seen) = (Instant::now() + Duration::from_secs(30 * 60), Instant::now(), first);
     while Instant::now() < until {
         let pushed = match &joined {
-            Some(joined) => joined.incoming.recv_timeout(Duration::from_secs(1)).ok(),
+            Some(joined) => match joined.incoming.recv_timeout(Duration::from_secs(1)) {
+                Ok(push) => Some(push),
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => None,
+                // **A resumed stream took this tab over** (`Tabs::join` swaps its sender) — this one can never carry
+                // ctl again. Waiting on the closed channel returns at once, so going on spun a core on `api::stamp`
+                // until this socket closed, which a dead `ssh -L` tunnel can put off for many minutes.
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+            },
             None => {
                 std::thread::sleep(Duration::from_secs(1));
                 None
@@ -819,6 +826,53 @@ mod tests {
         drop(reader);
         drop(client);
         worker.join().unwrap().unwrap();
+    }
+
+    /// **A stream whose tab a resume took over ends at once** — its socket can stay open (a dead `ssh -L` tunnel), and
+    /// waiting on the closed channel used to return at once, spinning on `api::stamp` until the socket closed.
+    #[cfg(unix)]
+    #[test]
+    fn a_stream_whose_tab_was_resumed_elsewhere_ends_while_its_socket_stays_open() {
+        let (client, server) = pair();
+        client.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
+        let tabs = Arc::new(ctl::Tabs::new());
+        let of = Arc::clone(&tabs);
+        let scratch = crate::scratch::Scratch::new("resumed-stream-ends");
+        std::fs::create_dir_all(scratch.path().join(".moai")).unwrap();
+        std::fs::write(scratch.path().join(".moai/config.toml"), "prefix = \"moai\"\n").unwrap();
+        std::fs::write(scratch.path().join(".moai/issues.jsonl"), "").unwrap();
+        let cwd = scratch.path().to_path_buf();
+        let here = cwd.clone();
+        let worker =
+            std::thread::spawn(move || stream_events(&server, &cwd, Lang::En, false, "stamp".into(), &of, true, None));
+        let mut reader = std::io::BufReader::new(&client);
+        let hello = loop {
+            let mut line = String::new();
+            std::io::BufRead::read_line(&mut reader, &mut line).unwrap();
+            assert!(!line.is_empty(), "stream ended before its hello");
+            if let Some(data) = line.strip_prefix("data: ")
+                && data.contains("\"tab\"")
+            {
+                break serde_json::from_str::<serde_json::Value>(data).unwrap();
+            }
+        };
+        // The stream is healthy on its own: its stamps read, so only the takeover below can end it.
+        std::thread::sleep(Duration::from_millis(1500));
+        assert!(!worker.is_finished(), "the stream ended before any resume");
+        let (id, token) = (hello["tab"].as_str().unwrap(), hello["token"].as_str().unwrap());
+        let resumed = tabs.join(&here, false, Some((id, token))).unwrap();
+        assert_eq!(resumed.id, id);
+        let until = Instant::now() + Duration::from_secs(5);
+        while !worker.is_finished() && Instant::now() < until {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(worker.is_finished(), "the replaced stream kept running while its socket stayed open");
+        worker.join().unwrap().unwrap();
+        // Its end did not detach the stream that took over.
+        let listed = tabs.handle(crate::ctl::wire::request(crate::ctl::wire::Verb::Hello, Duration::from_secs(1)));
+        assert_eq!(listed.data.unwrap()["windows"][0]["id"], id);
+        drop(reader);
+        drop(client);
     }
 
     /// 루프백에 짝 하나 — (부르는 쪽, 받은 쪽).

@@ -2559,7 +2559,7 @@ pub struct ReadArgs {
     #[arg(value_name = "id", required_unless_present_any = ["all", "epic"], verbatim_doc_comment)]
     pub ids: Vec<String>,
 
-    /// Write none of the named marks if any ID is missing or held
+    /// Write no mark if any ID is missing or held
     #[arg(long, requires = "ids")]
     pub atomic: bool,
 

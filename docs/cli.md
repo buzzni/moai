@@ -1524,7 +1524,7 @@ Arguments:
 
 Options:
       --atomic
-          Write none of the named marks if any ID is missing or held
+          Write no mark if any ID is missing or held
 
       --all
           Everything unread that came to me

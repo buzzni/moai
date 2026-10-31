@@ -260,15 +260,13 @@ fn handle(
 #[cfg(unix)]
 fn client_connected(stream: &std::os::unix::net::UnixStream) -> bool {
     use std::os::fd::AsRawFd;
-    // A nonblocking peek leaves the socket's blocking mode alone; zero is EOF. Rust's UnixStream::peek is unstable.
-    let mut byte = [0u8; 1];
-    let read =
-        unsafe { libc::recv(stream.as_raw_fd(), byte.as_mut_ptr().cast(), 1, libc::MSG_PEEK | libc::MSG_DONTWAIT) };
-    match read {
-        0 => false,
-        n if n > 0 => true,
-        _ => matches!(std::io::Error::last_os_error().kind(), std::io::ErrorKind::WouldBlock),
-    }
+    // **A hang-up, not end-of-input.** A caller of the line protocol (docs/ctl.md) may shut down its writing half once
+    // its request is sent (`nc -N -U`, `shutdown(SHUT_WR)`) and still read the reply; a peeked EOF told it `gone` at
+    // once, and a byte it left unread hid a real close. POLLHUP comes only when both halves are shut. POLLIN is asked
+    // for because macOS reports the hang-up only through a read filter. A zero timeout leaves blocking mode alone.
+    let mut fd = libc::pollfd { fd: stream.as_raw_fd(), events: libc::POLLIN, revents: 0 };
+    let ready = unsafe { libc::poll(&mut fd, 1, 0) };
+    !(ready > 0 && fd.revents & (libc::POLLHUP | libc::POLLERR | libc::POLLNVAL) != 0)
 }
 
 #[cfg(unix)]
@@ -359,6 +357,7 @@ mod tests {
             (client, server)
         };
         let mut handles = Vec::new();
+        let started = Instant::now();
         for n in 0..4 {
             let (client, mut server) = ask(&format!("disconnected {n}"));
             let tx = tx.clone();
@@ -374,6 +373,8 @@ mod tests {
         for handle in handles {
             handle.join().unwrap();
         }
+        // Without the disconnect check each would hold its slot to the end of its 30-second wait and still join.
+        assert!(started.elapsed() < Duration::from_secs(10), "disconnected waiters kept their slots");
         assert_eq!(waiting.load(Ordering::Acquire), 0);
         let (client, mut server) = ask("live fifth");
         let fifth_tx = tx.clone();
@@ -420,6 +421,7 @@ mod tests {
             (client, server)
         };
         let mut handles = Vec::new();
+        let started = Instant::now();
         for n in 0..4 {
             let (client, mut server) = ask(&format!("web disconnected {n}"));
             let handler = Arc::clone(&handler);
@@ -435,6 +437,7 @@ mod tests {
         for handle in handles {
             handle.join().unwrap();
         }
+        assert!(started.elapsed() < Duration::from_secs(10), "disconnected waiters kept their slots");
         assert_eq!(waiting.load(Ordering::Acquire), 0);
         for _ in 0..4 {
             assert!(matches!(
@@ -462,5 +465,48 @@ mod tests {
         assert_eq!(serde_json::from_str::<Reply>(&line).unwrap().data.unwrap()["state"], "accepted");
         fifth.join().unwrap();
         assert_eq!(waiting.load(Ordering::Acquire), 0);
+    }
+
+    /// A caller that shuts down its writing half after its request line is still reading: it is not a disconnect.
+    /// Linux only — macOS reports a read-side EOF as a hang-up, so there it is treated as before.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_half_closed_waiter_still_gets_its_answer() {
+        use std::os::unix::net::UnixStream;
+        let book = Arc::new(super::super::proposal::Book::new());
+        let waiting = Arc::new(AtomicUsize::new(0));
+        let editing = Editing::default();
+        let (tx, incoming) = mpsc::channel::<Incoming>();
+        let owner_book = Arc::clone(&book);
+        let owner = std::thread::spawn(move || {
+            for turn in incoming {
+                let Verb::Propose { text, ttl, .. } = turn.request.verb else { panic!("expected proposal") };
+                turn.answer.send(owner_book.add("window", &text, None, ttl, None)).unwrap();
+            }
+        });
+        let (mut client, mut server) = UnixStream::pair().unwrap();
+        let request =
+            wire::request(Verb::Propose { text: "half".into(), then: None, ttl: 60, wait: 30 }, Duration::from_secs(5));
+        serde_json::to_writer(&mut client, &request).unwrap();
+        client.write_all(b"\n").unwrap();
+        client.shutdown(std::net::Shutdown::Write).unwrap();
+        let answering = Arc::clone(&book);
+        let answer = std::thread::spawn(move || {
+            let until = Instant::now() + Duration::from_secs(2);
+            while answering.rows().is_empty() && Instant::now() < until {
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            // Past a few disconnect checks, so a half-close read as a hang-up has already answered `gone`.
+            std::thread::sleep(Duration::from_millis(500));
+            answering.finish("window/1", "accepted", None);
+        });
+        let mut leave = None;
+        handle(&mut server, &tx, None, Some(&book), &mut leave, &waiting, &editing);
+        answer.join().unwrap();
+        let mut line = String::new();
+        BufReader::new(client).read_line(&mut line).unwrap();
+        assert_eq!(serde_json::from_str::<Reply>(&line).unwrap().data.unwrap()["state"], "accepted");
+        drop(tx);
+        owner.join().unwrap();
     }
 }

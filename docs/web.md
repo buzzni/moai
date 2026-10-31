@@ -268,7 +268,9 @@ ageing into the archive — shows on the next reload, or when you click the
 refresh time.
 
 If the stream is refused or lost, the page asks for the stamp every two seconds
-and tries the stream again after thirty seconds. More than eight visible tabs
+and tries the stream again after thirty seconds. A stream that was open and then
+ended (the server ends each after thirty minutes) is tried again after three
+seconds. More than eight visible tabs
 on one server, or more than about six visible tabs connected to one host in a
 browser, may leave some tabs asking instead. When the server stops, one line
 says it cannot be reached, and the page asks again every ten seconds; the line

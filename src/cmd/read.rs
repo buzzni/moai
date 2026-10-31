@@ -96,11 +96,10 @@ pub fn run(ctx: &Ctx, args: ReadArgs) -> R<Vec<String>> {
         }
     }
     missing.extend(want.iter().filter(|id| !known.contains(id.as_str())).cloned());
+    // **`--atomic` writes nothing when one is missing**, and says so in the words and code every missing id gets
+    // (`Fail::not_found`, `refuse.not_found`) — the explorer's ctl read answers `not_found` for the same ids.
     if args.atomic && !missing.is_empty() {
-        return Err(Fail::coded(
-            format!("read marks unchanged: missing {}", missing.iter().cloned().collect::<Vec<_>>().join(", ")),
-            super::code::BAD_INPUT,
-        ));
+        return Err(Fail::not_found(&missing.iter().map(String::as_str).collect::<Vec<_>>().join(", "), ctx.lang()));
     }
     let targets: BTreeSet<&str> = want.iter().map(String::as_str).filter(|id| known.contains(id)).collect();
 

@@ -716,7 +716,13 @@ pub fn update<T>(
             if fallen {
                 said = crate::view::fallen_place(lang, &said);
             }
-            Fail::coded(said, crate::fail::code::BROKEN)
+            // **A held id is not a broken file** — `--atomic` refuses on a value a person wrote by hand, which the plain
+            // write skips and reports as `held`. `broken` would send a ctl caller to repair a file that reads fine.
+            let code = match why {
+                SheetRefusal::AtomicHeld { .. } => crate::fail::code::REFUSED,
+                _ => crate::fail::code::BROKEN,
+            };
+            Fail::coded(said, code)
         }
     })
 }
@@ -2724,6 +2730,23 @@ mod tests {
             crate::view::sheet_trouble(crate::i18n::Lang::En, held[0]).contains("argos-0002"),
             "글이 어느 id 인지를 안 댔다"
         );
+    }
+
+    /// **`--atomic` 이 막힌 id 에 멈추는 것은 깨진 파일이 아니다** — 같은 줄을 성한 쓰기는 건너뛰고 `held` 로 댄다.
+    /// `broken` 으로 내면 ctl 을 부른 쪽이 멀쩡한 파일을 고치러 간다. 아무 id 도 안 적힌다.
+    #[test]
+    fn an_atomic_write_held_by_a_hand_written_value_is_refused_not_broken() {
+        let s = Scratch::new("read-marks-atomic-held");
+        let cfg = s.join("config.toml");
+        let root = s.join("proj");
+        std::fs::create_dir_all(&root).unwrap();
+        let at = place_of(&cfg, &root).at;
+        std::fs::create_dir_all(at.parent().unwrap()).unwrap();
+        let src = format!("path = {:?}\n\n[read]\n\"argos-0002\".rv = \"A\"\n", root.display().to_string());
+        std::fs::write(&at, &src).unwrap();
+        let e = upd(&cfg, &root, |sh| sh.mark_atomic(&marks(&[("argos-0002", "B"), ("argos-0003", "C")]))).unwrap_err();
+        assert_eq!(e.code, crate::fail::code::REFUSED, "{e}");
+        assert_eq!(std::fs::read_to_string(&at).unwrap(), src, "an atomic refusal wrote some of the marks");
     }
 
     /// **막힌 id 를 안 시킨 판에서는 그 글이 안 선다**(moai-l5ue 리뷰 눈) — [`SheetTrouble::Held`] 는
