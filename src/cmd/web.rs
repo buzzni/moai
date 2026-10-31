@@ -81,7 +81,16 @@ pub fn run(ctx: &Ctx, a: WebArgs) -> R<Vec<String>> {
     // 저마다 다시 올라가 잡고, 서버가 위에서 한 번 댄 그 줄을 봉투마다 `said` 로 또 실었다. 딸린 워크트리는 그대로
     // 그 워크트리라 커밋 표(`HEAD`)도 같다.
     let spawner = crate::web::run::Spawner { exe, cwd: repo.here().to_path_buf(), user: ctx.user.clone() };
-    crate::web::serve(listener, crate::web::Site::new(spawner, lang))
+    let site = crate::web::Site::new(spawner, lang);
+    let tabs = site.tabs.clone();
+    let _ctl = match crate::ctl::serve::Listener::bind_web(std::sync::Arc::new(move |request| tabs.handle(request))) {
+        Ok(listener) => Some(listener),
+        Err(error) => {
+            super::tell(&format!("moai: ctl unavailable: {error}"));
+            None
+        }
+    };
+    crate::web::serve(listener, site)
 }
 
 /// 올라가 잡은 트래커와 루프백 밖의 자리를 stderr 에 댄다. **올라가 잡은 것은 여기서 꺼내 댄다**(`cmd::prime` 의

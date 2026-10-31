@@ -22,6 +22,7 @@ Issue tracker. No approval gate. `moai status` shows the discipline.
 Usage: moai [OPTIONS] [COMMAND]
 
 Commands:
+  ctl           Control an already open explorer or web tab
   status        Board, warnings, flow. A session starts here
   ready         What you can pick up now
   prime         A short markdown page - what you hold and what comes next
@@ -118,6 +119,526 @@ much you have opened at once.
 
 `moai <command> --help` tells you all of that command. If the repository has
 an AGENTS.md, how to work in that repository is written there.
+```
+
+## `moai ctl`
+
+```
+Control an already open explorer or web tab
+
+Usage: moai ctl [OPTIONS] <COMMAND>
+
+Commands:
+  propose   Suggest an action in an open window
+  answer    Read a suggestion's answer, optionally waiting for it
+  withdraw  Take down a suggestion that is still pending
+  ls        List the windows this user already opened
+  state     Read the current state of one open window
+  keys      Press keys in an open window using its own key bindings
+  do        Run an action by its stable name, independent of keys.toml
+  actions   List this window's named actions and whether each is enabled
+  sort      Set the explorer order, such as title:desc,priority:desc
+  filter    Apply a filter, or remove the current filter
+  find      Search issues in a chosen field
+  screen    Show list, board, gantt, stats, or wiki
+  view      Show or hide a view axis, including column:<name>
+  cell      Show or hide a list field
+  detail    Show, hide, or place the detail pane
+  goto      Select an issue or a project
+  read      Mark selected issues, a group, or all NEW issues read
+  wiki      Open a wiki page or search wiki pages
+  pane      Set pane shares
+  zone      Select the explorer's timezone
+  theme     Select a web tab's theme; terminal colours follow the terminal
+  help      Print this message or the help of the given subcommand(s)
+
+Options:
+      --json                 Machine-readable output. Every human line goes away
+      --no-color             Turn colour off (same as `--color never`)
+      --color <how>          auto|always|never (auto by default, off when piped)
+  -C, --dir <path>           Run in this directory (same as `git -C`)
+      --user <name (email)>  Who is doing this (from `git config` when absent)
+  -h, --help                 Print help
+```
+
+## `moai ctl propose`
+
+```
+Suggest an action in an open window
+
+Usage: moai ctl propose [OPTIONS] <TEXT>
+
+Arguments:
+  <TEXT>
+
+Options:
+      --then <THEN_CMD>      A named ctl verb to run if the person accepts
+      --wait <WAIT>          Wait for an answer in seconds [default: 0]
+      --ttl <TTL>            Expiry in seconds (1–3600) [default: 900]
+  -t, --target <TARGET>      Window id from moai ctl ls
+      --json                 Machine-readable output. Every human line goes away
+      --no-color             Turn colour off (same as `--color never`)
+      --color <how>          auto|always|never (auto by default, off when piped)
+  -C, --dir <path>           Run in this directory (same as `git -C`)
+      --user <name (email)>  Who is doing this (from `git config` when absent)
+  -h, --help                 Print help
+```
+
+## `moai ctl answer`
+
+```
+Read a suggestion's answer, optionally waiting for it
+
+Usage: moai ctl answer [OPTIONS] <ID>
+
+Arguments:
+  <ID>
+
+Options:
+      --wait <WAIT>          [default: 0]
+  -t, --target <TARGET>      Window id from moai ctl ls
+      --json                 Machine-readable output. Every human line goes away
+      --no-color             Turn colour off (same as `--color never`)
+      --color <how>          auto|always|never (auto by default, off when piped)
+  -C, --dir <path>           Run in this directory (same as `git -C`)
+      --user <name (email)>  Who is doing this (from `git config` when absent)
+  -h, --help                 Print help
+```
+
+## `moai ctl withdraw`
+
+```
+Take down a suggestion that is still pending
+
+Usage: moai ctl withdraw [OPTIONS] <ID>
+
+Arguments:
+  <ID>
+
+Options:
+  -t, --target <TARGET>      Window id from moai ctl ls
+      --json                 Machine-readable output. Every human line goes away
+      --no-color             Turn colour off (same as `--color never`)
+      --color <how>          auto|always|never (auto by default, off when piped)
+  -C, --dir <path>           Run in this directory (same as `git -C`)
+      --user <name (email)>  Who is doing this (from `git config` when absent)
+  -h, --help                 Print help
+```
+
+## `moai ctl ls`
+
+```
+List the windows this user already opened
+
+Usage: moai ctl ls [OPTIONS]
+
+Options:
+      --all                  Include windows from other repositories
+      --json                 Machine-readable output. Every human line goes away
+      --no-color             Turn colour off (same as `--color never`)
+      --color <how>          auto|always|never (auto by default, off when piped)
+  -C, --dir <path>           Run in this directory (same as `git -C`)
+      --user <name (email)>  Who is doing this (from `git config` when absent)
+  -h, --help                 Print help
+
+  Without --all, list only windows in this repository.
+  No window is an empty list and a successful exit.
+```
+
+## `moai ctl state`
+
+```
+Read the current state of one open window
+
+Usage: moai ctl state [OPTIONS]
+
+Options:
+  -t, --target <TARGET>      Window id from moai ctl ls
+      --rows                 Include visible row ids and depths (up to 2000)
+      --json                 Machine-readable output. Every human line goes away
+      --no-color             Turn colour off (same as `--color never`)
+      --color <how>          auto|always|never (auto by default, off when piped)
+  -C, --dir <path>           Run in this directory (same as `git -C`)
+      --user <name (email)>  Who is doing this (from `git config` when absent)
+  -h, --help                 Print help
+
+  Without -t, choose the most recently used window in this repository.
+  Use moai ctl ls --all to find an id; -t never starts a window.
+```
+
+## `moai ctl keys`
+
+```
+Press keys in an open window using its own key bindings
+
+Usage: moai ctl keys [OPTIONS] [keys]...
+
+Arguments:
+  [keys]...  Key sequences, such as 'SPC m a' or 'Ctrl-w w'
+
+Options:
+      --text <text>          Paste literal text into an open field
+  -t, --target <TARGET>      Window id from moai ctl ls
+      --json                 Machine-readable output. Every human line goes away
+      --no-color             Turn colour off (same as `--color never`)
+      --color <how>          auto|always|never (auto by default, off when piped)
+  -C, --dir <path>           Run in this directory (same as `git -C`)
+      --user <name (email)>  Who is doing this (from `git config` when absent)
+  -h, --help                 Print help
+
+  Quote each key sequence: moai ctl keys 'SPC m a'.
+  The spelling is the same as keys.toml; moai keys lists it.
+  --text pastes into a field already opened in this window.
+```
+
+## `moai ctl do`
+
+```
+Run an action by its stable name, independent of keys.toml
+
+Usage: moai ctl do [OPTIONS] <NAME>
+
+Arguments:
+  <NAME>  Such as browse.read_all or browse.go_board
+
+Options:
+  -t, --target <TARGET>      Window id from moai ctl ls
+      --json                 Machine-readable output. Every human line goes away
+      --no-color             Turn colour off (same as `--color never`)
+      --color <how>          auto|always|never (auto by default, off when piped)
+  -C, --dir <path>           Run in this directory (same as `git -C`)
+      --user <name (email)>  Who is doing this (from `git config` when absent)
+  -h, --help                 Print help
+```
+
+## `moai ctl actions`
+
+```
+List this window's named actions and whether each is enabled
+
+Usage: moai ctl actions [OPTIONS]
+
+Options:
+  -t, --target <TARGET>      Window id from moai ctl ls
+      --json                 Machine-readable output. Every human line goes away
+      --no-color             Turn colour off (same as `--color never`)
+      --color <how>          auto|always|never (auto by default, off when piped)
+  -C, --dir <path>           Run in this directory (same as `git -C`)
+      --user <name (email)>  Who is doing this (from `git config` when absent)
+  -h, --help                 Print help
+```
+
+## `moai ctl sort`
+
+```
+Set the explorer order, such as title:desc,priority:desc
+
+Usage: moai ctl sort [OPTIONS] <WORDS>
+
+Arguments:
+  <WORDS>
+
+Options:
+      --default
+  -t, --target <TARGET>      Window id from moai ctl ls
+      --json                 Machine-readable output. Every human line goes away
+      --no-color             Turn colour off (same as `--color never`)
+      --color <how>          auto|always|never (auto by default, off when piped)
+  -C, --dir <path>           Run in this directory (same as `git -C`)
+      --user <name (email)>  Who is doing this (from `git config` when absent)
+  -h, --help                 Print help
+
+  Example: moai ctl sort 'title:desc,priority:desc'.
+  --default also updates the default order.
+```
+
+## `moai ctl filter`
+
+```
+Apply a filter, or remove the current filter
+
+Usage: moai ctl filter [OPTIONS] [QUERY]
+
+Arguments:
+  [QUERY]
+
+Options:
+      --clear
+  -t, --target <TARGET>      Window id from moai ctl ls
+      --json                 Machine-readable output. Every human line goes away
+      --no-color             Turn colour off (same as `--color never`)
+      --color <how>          auto|always|never (auto by default, off when piped)
+  -C, --dir <path>           Run in this directory (same as `git -C`)
+      --user <name (email)>  Who is doing this (from `git config` when absent)
+  -h, --help                 Print help
+
+  Example: moai ctl filter 'status=todo tag=parser'.
+```
+
+## `moai ctl find`
+
+```
+Search issues in a chosen field
+
+Usage: moai ctl find [OPTIONS] <QUERY>
+
+Arguments:
+  <QUERY>
+
+Options:
+      --in <SCOPE>           [default: all]
+  -t, --target <TARGET>      Window id from moai ctl ls
+      --json                 Machine-readable output. Every human line goes away
+      --no-color             Turn colour off (same as `--color never`)
+      --color <how>          auto|always|never (auto by default, off when piped)
+  -C, --dir <path>           Run in this directory (same as `git -C`)
+      --user <name (email)>  Who is doing this (from `git config` when absent)
+  -h, --help                 Print help
+
+  Example: moai ctl find 'parser' --in title.
+```
+
+## `moai ctl screen`
+
+```
+Show list, board, gantt, stats, or wiki
+
+Usage: moai ctl screen [OPTIONS] <NAME>
+
+Arguments:
+  <NAME>
+
+Options:
+  -t, --target <TARGET>      Window id from moai ctl ls
+      --json                 Machine-readable output. Every human line goes away
+      --no-color             Turn colour off (same as `--color never`)
+      --color <how>          auto|always|never (auto by default, off when piped)
+  -C, --dir <path>           Run in this directory (same as `git -C`)
+      --user <name (email)>  Who is doing this (from `git config` when absent)
+  -h, --help                 Print help
+
+  Example: moai ctl screen board.
+```
+
+## `moai ctl view`
+
+```
+Show or hide a view axis, including column:<name>
+
+Usage: moai ctl view [OPTIONS] <NAME> <VALUE>
+
+Arguments:
+  <NAME>
+  <VALUE>
+
+Options:
+  -t, --target <TARGET>      Window id from moai ctl ls
+      --json                 Machine-readable output. Every human line goes away
+      --no-color             Turn colour off (same as `--color never`)
+      --color <how>          auto|always|never (auto by default, off when piped)
+  -C, --dir <path>           Run in this directory (same as `git -C`)
+      --user <name (email)>  Who is doing this (from `git config` when absent)
+  -h, --help                 Print help
+
+  Example: moai ctl view deferred on.
+```
+
+## `moai ctl cell`
+
+```
+Show or hide a list field
+
+Usage: moai ctl cell [OPTIONS] <NAME> <VALUE>
+
+Arguments:
+  <NAME>
+  <VALUE>
+
+Options:
+  -t, --target <TARGET>      Window id from moai ctl ls
+      --json                 Machine-readable output. Every human line goes away
+      --no-color             Turn colour off (same as `--color never`)
+      --color <how>          auto|always|never (auto by default, off when piped)
+  -C, --dir <path>           Run in this directory (same as `git -C`)
+      --user <name (email)>  Who is doing this (from `git config` when absent)
+  -h, --help                 Print help
+
+  Example: moai ctl cell assignee off.
+```
+
+## `moai ctl detail`
+
+```
+Show, hide, or place the detail pane
+
+Usage: moai ctl detail [OPTIONS] <NAME>
+
+Arguments:
+  <NAME>
+
+Options:
+  -t, --target <TARGET>      Window id from moai ctl ls
+      --json                 Machine-readable output. Every human line goes away
+      --no-color             Turn colour off (same as `--color never`)
+      --color <how>          auto|always|never (auto by default, off when piped)
+  -C, --dir <path>           Run in this directory (same as `git -C`)
+      --user <name (email)>  Who is doing this (from `git config` when absent)
+  -h, --help                 Print help
+
+  Example: moai ctl detail right.
+```
+
+## `moai ctl goto`
+
+```
+Select an issue or a project
+
+Usage: moai ctl goto [OPTIONS] [ID]
+
+Arguments:
+  [ID]
+
+Options:
+      --enter
+      --project <PROJECT>
+  -t, --target <TARGET>      Window id from moai ctl ls
+      --json                 Machine-readable output. Every human line goes away
+      --no-color             Turn colour off (same as `--color never`)
+      --color <how>          auto|always|never (auto by default, off when piped)
+  -C, --dir <path>           Run in this directory (same as `git -C`)
+      --user <name (email)>  Who is doing this (from `git config` when absent)
+  -h, --help                 Print help
+
+  Example: moai ctl goto moai-1234 --enter.
+```
+
+## `moai ctl read`
+
+```
+Mark selected issues, a group, or all NEW issues read
+
+Usage: moai ctl read [OPTIONS] [IDS]...
+
+Arguments:
+  [IDS]...
+
+Options:
+      --all
+      --group <GROUP>
+  -t, --target <TARGET>      Window id from moai ctl ls
+      --json                 Machine-readable output. Every human line goes away
+      --no-color             Turn colour off (same as `--color never`)
+      --color <how>          auto|always|never (auto by default, off when piped)
+  -C, --dir <path>           Run in this directory (same as `git -C`)
+      --user <name (email)>  Who is doing this (from `git config` when absent)
+  -h, --help                 Print help
+
+  Example: moai ctl read --all.
+  Mark the person's NEW rows only when asked.
+```
+
+## `moai ctl wiki`
+
+```
+Open a wiki page or search wiki pages
+
+Usage: moai ctl wiki [OPTIONS] [SLUG]
+
+Arguments:
+  [SLUG]
+
+Options:
+      --search <SEARCH>
+  -t, --target <TARGET>      Window id from moai ctl ls
+      --json                 Machine-readable output. Every human line goes away
+      --no-color             Turn colour off (same as `--color never`)
+      --color <how>          auto|always|never (auto by default, off when piped)
+  -C, --dir <path>           Run in this directory (same as `git -C`)
+      --user <name (email)>  Who is doing this (from `git config` when absent)
+  -h, --help                 Print help
+
+  Example: moai ctl wiki 'guide#start'.
+```
+
+## `moai ctl pane`
+
+```
+Set pane shares
+
+Usage: moai ctl pane [OPTIONS]
+
+Options:
+      --list-width <LIST_WIDTH>
+
+      --list-height <LIST_HEIGHT>
+
+      --wiki-width <WIKI_WIDTH>
+
+      --gantt-label <GANTT_LABEL>
+
+      --gantt-grid <GANTT_GRID>
+          Web Gantt name grid width in pixels (not the TUI's character cells)
+  -t, --target <TARGET>
+          Window id from moai ctl ls
+      --json
+          Machine-readable output. Every human line goes away
+      --no-color
+          Turn colour off (same as `--color never`)
+      --color <how>
+          auto|always|never (auto by default, off when piped)
+  -C, --dir <path>
+          Run in this directory (same as `git -C`)
+      --user <name (email)>
+          Who is doing this (from `git config` when absent)
+  -h, --help
+          Print help
+
+  Example: moai ctl pane --list-width 60.
+  Terminal size belongs to tmux resize-pane or the window manager.
+```
+
+## `moai ctl zone`
+
+```
+Select the explorer's timezone
+
+Usage: moai ctl zone [OPTIONS] <NAME>
+
+Arguments:
+  <NAME>
+
+Options:
+  -t, --target <TARGET>      Window id from moai ctl ls
+      --json                 Machine-readable output. Every human line goes away
+      --no-color             Turn colour off (same as `--color never`)
+      --color <how>          auto|always|never (auto by default, off when piped)
+  -C, --dir <path>           Run in this directory (same as `git -C`)
+      --user <name (email)>  Who is doing this (from `git config` when absent)
+  -h, --help                 Print help
+
+  Example: moai ctl zone Europe/Paris.
+```
+
+## `moai ctl theme`
+
+```
+Select a web tab's theme; terminal colours follow the terminal
+
+Usage: moai ctl theme [OPTIONS] <NAME>
+
+Arguments:
+  <NAME>
+
+Options:
+  -t, --target <TARGET>      Window id from moai ctl ls
+      --json                 Machine-readable output. Every human line goes away
+      --no-color             Turn colour off (same as `--color never`)
+      --color <how>          auto|always|never (auto by default, off when piped)
+  -C, --dir <path>           Run in this directory (same as `git -C`)
+      --user <name (email)>  Who is doing this (from `git config` when absent)
+  -h, --help                 Print help
+
+  Example: moai ctl theme dark -t 4242.1 (a web tab's id from moai ctl ls).
 ```
 
 ## `moai status`
@@ -281,7 +802,7 @@ Options:
 
   -b, --body <text>
           Text, not a path. `-` reads stdin (with `--from`, on the first epic)
-          
+
           **A file goes in as `--body - < <file>`.** `--body <path>` takes
           the path as the body, it does not open the file.
 
@@ -305,7 +826,7 @@ Options:
 
       --dry-run
           Create nothing; only say what would be created (with `--from`)
-          
+
           **It means nothing without `--from`.** It once took it alone, and
           then `moai add 'title' --dry-run` printed a line saying it was a
           rehearsal and then actually created it - a command called to hold
@@ -313,7 +834,7 @@ Options:
 
       --var <name=value>
           Fill `{{name}}` in a plan template (with `--from`, several times)
-          
+
           **Every variable is required** - an unfilled name, an empty value, a
           value with a line break, a name not in the plan, or the same name
           twice is refused and nothing is created. Names are letters, digits,
@@ -415,9 +936,9 @@ Filters  (comma = or,  repeated = and):
   -e, --epic <id|none>                       In that epic (`none` = no epic)
       --milestone <id|none>                  In that milestone (`none` = none)
       --parent <id|none>                     Child of this issue (`none` = top)
-  -p, --priority <0-3>                       
+  -p, --priority <0-3>
   -a, --assignee <who|none|me>               That assignee (repeated = or)
-      --type <issue|epic|milestone|backlog>  
+      --type <issue|epic|milestone|backlog>
   -g, --grep <text>                          In id, title, tag, body or notes
       --stale <days>                         Sitting in its column that long
       --since <when>                         Changed since that time (see below)
@@ -599,9 +1120,9 @@ Filters  (comma = or,  repeated = and):
   -e, --epic <id|none>                       In that epic (`none` = no epic)
       --milestone <id|none>                  In that milestone (`none` = none)
       --parent <id|none>                     Child of this issue (`none` = top)
-  -p, --priority <0-3>                       
+  -p, --priority <0-3>
   -a, --assignee <who|none|me>               That assignee (repeated = or)
-      --type <issue|epic|milestone|backlog>  
+      --type <issue|epic|milestone|backlog>
   -g, --grep <text>                          In id, title, tag, body or notes
       --stale <days>                         Sitting in its column that long
       --since <when>                         Changed since that time (see below)
@@ -714,14 +1235,14 @@ Arguments:
 Options:
   -m, --msg <text>
           A note on this move (journal only). `-` reads stdin
-          
+
           Text, not a path - a file goes in as `-m - < <file>`. A one-line
           text that names a file still goes in as those words, and one
           stderr line says so.
 
       --from <column>
           Only while still in this column (racing pickups)
-          
+
           Without it nothing is blocked, as before. With it, the column is
           looked at again inside the lock, and a row whose column changed in
           the meantime is left untouched and stands as a partial failure.
@@ -789,7 +1310,7 @@ Edit title, body, tags, epic or priority
 Usage: moai edit [OPTIONS] <id>
 
 Arguments:
-  <id>  
+  <id>
 
 Options:
       --title <text>         One line. A lone `-x` needs `--title=-x`
@@ -798,7 +1319,7 @@ Options:
       --untag <tag>          Remove tags
   -e, --epic <id|none>       Move the epic (`none` clears only its own field)
       --milestone <id|none>  Move the milestone (`none` clears its own field)
-  -p, --priority <0-3>       
+  -p, --priority <0-3>
   -a, --assignee <who|none>  Give `name (email)`. `none` clears it, `me` is you
       --start <date|none>    Start, a day or `+N` days. `none` clears it
       --due <date|none>      Deadline, a day or `+N` days. `none` clears it
@@ -834,7 +1355,7 @@ Remove
 Usage: moai rm [OPTIONS] [id]...
 
 Arguments:
-  [id]...  
+  [id]...
 
 Options:
       --line <n>             Remove the unreadable line at number <n>
@@ -874,7 +1395,7 @@ Usage: moai note [OPTIONS] <id> [text]
 
 Arguments:
   <id>
-          
+
 
   [text]
           What the next person (or agent) should read. A lone `-x` needs `--`
@@ -882,7 +1403,7 @@ Arguments:
 Options:
   -b, --body <text>
           Text, not a path. `-` reads stdin: `-b - < <file>`
-          
+
           **It pushes the positional out.** Given both, nobody can remember
           which one wins, and a rule nobody remembers erases someone's text
           sooner or later.
@@ -929,7 +1450,7 @@ Usage: moai defer [OPTIONS] <id>...
 
 Arguments:
   <id>...
-          
+
 
 Options:
       --undo
@@ -937,14 +1458,14 @@ Options:
 
   -m, --msg <text>
           Why it is deferred (journal only). `-` reads stdin
-          
+
           Text, not a path - a file goes in as `-m - < <file>`. A one-line
           text that names a file still goes in as those words, and one
           stderr line says so.
 
       --from <column>
           Only while it is in this column (racing pickups)
-          
+
           The same measure as `mv --from`. A row the other side picked up and
           started on is not taken out of the plan late. Without it nothing is
           blocked, as before.
@@ -996,7 +1517,7 @@ Usage: moai read [OPTIONS] [id]...
 Arguments:
   [id]...
           The issues to mark as read
-          
+
           What was read is always named - called with no argument it would
           mark nothing while exiting as a success, and a person would move on
           believing it was all marked. `--all` and `-e` fill that place.
@@ -1057,7 +1578,7 @@ One blocks another (or clear that block)
 Usage: moai link [OPTIONS] <id>
 
 Arguments:
-  <id>  
+  <id>
 
 Options:
       --blocks <id>          Block this issue (or issues)
@@ -1126,7 +1647,7 @@ Options:
 
   -b, --body <text>
           Text, not a path. `-` reads stdin (with `--from`, on the first epic)
-          
+
           **A file goes in as `--body - < <file>`.** `--body <path>` takes
           the path as the body, it does not open the file.
 
@@ -1150,7 +1671,7 @@ Options:
 
       --dry-run
           Create nothing; only say what would be created (with `--from`)
-          
+
           **It means nothing without `--from`.** It once took it alone, and
           then `moai add 'title' --dry-run` printed a line saying it was a
           rehearsal and then actually created it - a command called to hold
@@ -1158,7 +1679,7 @@ Options:
 
       --var <name=value>
           Fill `{{name}}` in a plan template (with `--from`, several times)
-          
+
           **Every variable is required** - an unfilled name, an empty value, a
           value with a line break, a name not in the plan, or the same name
           twice is refused and nothing is created. Names are letters, digits,
@@ -1223,9 +1744,9 @@ Filters  (comma = or,  repeated = and):
   -e, --epic <id|none>                       In that epic (`none` = no epic)
       --milestone <id|none>                  In that milestone (`none` = none)
       --parent <id|none>                     Child of this issue (`none` = top)
-  -p, --priority <0-3>                       
+  -p, --priority <0-3>
   -a, --assignee <who|none|me>               That assignee (repeated = or)
-      --type <issue|epic|milestone|backlog>  
+      --type <issue|epic|milestone|backlog>
   -g, --grep <text>                          In id, title, tag, body or notes
       --stale <days>                         Sitting in its column that long
       --since <when>                         Changed since that time (see below)
@@ -1432,7 +1953,7 @@ Options:
 
   -b, --body <text>
           Text, not a path. `-` reads stdin (with `--from`, on the first epic)
-          
+
           **A file goes in as `--body - < <file>`.** `--body <path>` takes
           the path as the body, it does not open the file.
 
@@ -1456,7 +1977,7 @@ Options:
 
       --dry-run
           Create nothing; only say what would be created (with `--from`)
-          
+
           **It means nothing without `--from`.** It once took it alone, and
           then `moai add 'title' --dry-run` printed a line saying it was a
           rehearsal and then actually created it - a command called to hold
@@ -1464,7 +1985,7 @@ Options:
 
       --var <name=value>
           Fill `{{name}}` in a plan template (with `--from`, several times)
-          
+
           **Every variable is required** - an unfilled name, an empty value, a
           value with a line break, a name not in the plan, or the same name
           twice is refused and nothing is created. Names are letters, digits,
@@ -1529,9 +2050,9 @@ Filters  (comma = or,  repeated = and):
   -e, --epic <id|none>                       In that epic (`none` = no epic)
       --milestone <id|none>                  In that milestone (`none` = none)
       --parent <id|none>                     Child of this issue (`none` = top)
-  -p, --priority <0-3>                       
+  -p, --priority <0-3>
   -a, --assignee <who|none|me>               That assignee (repeated = or)
-      --type <issue|epic|milestone|backlog>  
+      --type <issue|epic|milestone|backlog>
   -g, --grep <text>                          In id, title, tag, body or notes
       --stale <days>                         Sitting in its column that long
       --since <when>                         Changed since that time (see below)
@@ -1738,7 +2259,7 @@ Options:
 
   -b, --body <text>
           Text, not a path. `-` reads stdin (with `--from`, on the first epic)
-          
+
           **A file goes in as `--body - < <file>`.** `--body <path>` takes
           the path as the body, it does not open the file.
 
@@ -1762,7 +2283,7 @@ Options:
 
       --dry-run
           Create nothing; only say what would be created (with `--from`)
-          
+
           **It means nothing without `--from`.** It once took it alone, and
           then `moai add 'title' --dry-run` printed a line saying it was a
           rehearsal and then actually created it - a command called to hold
@@ -1770,7 +2291,7 @@ Options:
 
       --var <name=value>
           Fill `{{name}}` in a plan template (with `--from`, several times)
-          
+
           **Every variable is required** - an unfilled name, an empty value, a
           value with a line break, a name not in the plan, or the same name
           twice is refused and nothing is created. Names are letters, digits,
@@ -1835,9 +2356,9 @@ Filters  (comma = or,  repeated = and):
   -e, --epic <id|none>                       In that epic (`none` = no epic)
       --milestone <id|none>                  In that milestone (`none` = none)
       --parent <id|none>                     Child of this issue (`none` = top)
-  -p, --priority <0-3>                       
+  -p, --priority <0-3>
   -a, --assignee <who|none|me>               That assignee (repeated = or)
-      --type <issue|epic|milestone|backlog>  
+      --type <issue|epic|milestone|backlog>
   -g, --grep <text>                          In id, title, tag, body or notes
       --stale <days>                         Sitting in its column that long
       --since <when>                         Changed since that time (see below)
@@ -2065,7 +2586,7 @@ Options:
 
   -b, --body <text>
           Text, not a path. `-` reads stdin (with `--from`, on the first epic)
-          
+
           **A file goes in as `--body - < <file>`.** `--body <path>` takes
           the path as the body, it does not open the file.
 
@@ -2089,7 +2610,7 @@ Options:
 
       --dry-run
           Create nothing; only say what would be created (with `--from`)
-          
+
           **It means nothing without `--from`.** It once took it alone, and
           then `moai add 'title' --dry-run` printed a line saying it was a
           rehearsal and then actually created it - a command called to hold
@@ -2097,7 +2618,7 @@ Options:
 
       --var <name=value>
           Fill `{{name}}` in a plan template (with `--from`, several times)
-          
+
           **Every variable is required** - an unfilled name, an empty value, a
           value with a line break, a name not in the plan, or the same name
           twice is refused and nothing is created. Names are letters, digits,
@@ -2162,9 +2683,9 @@ Filters  (comma = or,  repeated = and):
   -e, --epic <id|none>                       In that epic (`none` = no epic)
       --milestone <id|none>                  In that milestone (`none` = none)
       --parent <id|none>                     Child of this issue (`none` = top)
-  -p, --priority <0-3>                       
+  -p, --priority <0-3>
   -a, --assignee <who|none|me>               That assignee (repeated = or)
-      --type <issue|epic|milestone|backlog>  
+      --type <issue|epic|milestone|backlog>
   -g, --grep <text>                          In id, title, tag, body or notes
       --stale <days>                         Sitting in its column that long
       --since <when>                         Changed since that time (see below)
@@ -2650,9 +3171,9 @@ Filters  (comma = or,  repeated = and):
   -e, --epic <id|none>                       In that epic (`none` = no epic)
       --milestone <id|none>                  In that milestone (`none` = none)
       --parent <id|none>                     Child of this issue (`none` = top)
-  -p, --priority <0-3>                       
+  -p, --priority <0-3>
   -a, --assignee <who|none|me>               That assignee (repeated = or)
-      --type <issue|epic|milestone|backlog>  
+      --type <issue|epic|milestone|backlog>
   -g, --grep <text>                          In id, title, tag, body or notes
       --stale <days>                         Sitting in its column that long
       --since <when>                         Changed since that time (see below)
@@ -2722,6 +3243,8 @@ Order:
   close hint.
     SPC /    search              SPC f    filter             SPC n    jot
     SPC h    keys                SPC q    quit
+    SPC a y  accept a suggestion; SPC a n declines
+    SPC a l  open the suggestion list
     SPC p a  register            SPC p d  drop from the list
   Screen — which one stands; the root menu names it, as in [board]:
     SPC g l  list                SPC g b  board — described below

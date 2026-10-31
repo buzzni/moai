@@ -28,7 +28,7 @@ import type { ToolbarAction } from "../view/toolbar.ts"
 import type { PaneView } from "../view/types.ts"
 import { createZonePicker, type ZonePicker } from "../view/zones.ts"
 import { attachKeyRouter, createKeyRouter, detectPlatform, type DispatchedAction, type KeyRouter } from "./router.ts"
-import type { CellField, KeyContext, Mode, Platform } from "./table.ts"
+import { bindingsFor, isAvailable, type CellField, type KeyContext, type Mode, type Platform } from "./table.ts"
 
 export type { ReadMarks }
 
@@ -82,6 +82,7 @@ export interface KeyWiringOptions {
   document: Document
   store: Store
   shell: Shell
+  proposal?: { pending(): boolean; accept(): void; decline(): void; list(): void }
   copy: Copy
   /** Defaults to the navigator's (detectPlatform). */
   platform?: Platform
@@ -118,6 +119,8 @@ export interface KeyWiring {
   context(): KeyContext
   /** Every action id this wiring dispatches (the key table's ids; tests hold them to the table). */
   actions: string[]
+  /** Run a named action through the same handler as a key binding. */
+  run(id: string): boolean
   destroy(): void
 }
 
@@ -156,14 +159,14 @@ export function wireKeys(options: KeyWiringOptions): KeyWiring {
     const state = store.getState()
     const mode = modeOf(state)
     const onWiki = state.tab === "wiki"
-    return keyContext(state, {
+    return { ...keyContext(state, {
       mode,
       width: shell.layout().width,
       wikiPane: wikiPaneEl()?.dataset.pane === "body" ? "body" : "list",
       raw: (onWiki ? panes().wiki?.raw?.() : panes().detail.raw?.()) ?? false,
       statusName: (status) => (copy.stats as Record<string, string>)[status] ?? status,
       readable: options.read !== undefined,
-    })
+    }), proposals: options.proposal?.pending() ?? false }
   }
 
   const toolbar = (action: ToolbarAction) => store.dispatch({ type: "toolbar", action })
@@ -402,6 +405,9 @@ export function wireKeys(options: KeyWiringOptions): KeyWiring {
   }
 
   const handlers: Record<string, Handler> = {
+    "proposal.accept": () => options.proposal?.accept(),
+    "proposal.decline": () => options.proposal?.decline(),
+    "proposal.list": () => options.proposal?.list(),
     "move.down": move,
     "move.up": move,
     "move.top": move,
@@ -645,6 +651,20 @@ export function wireKeys(options: KeyWiringOptions): KeyWiring {
     hint,
     context,
     actions: Object.keys(handlers),
+    run(id) {
+      // A named action runs where its key would and only when a name alone says what it does. The router checks
+      // `isAvailable` and passes the binding's `args`; an action whose keys carry args (`sort.set`, `cell.toggle`,
+      // `view.column`, `project.jump`) means nothing without them — `sort.set` ran with field "undefined" and broke
+      // the board read. Own names only: `handlers.constructor` is `Object`.
+      if (!Object.hasOwn(handlers, id)) return false
+      const ctx = context()
+      const bindings = bindingsFor(ctx.mode).filter((binding) => binding.action === id)
+      if (bindings.some((binding) => binding.args !== undefined)) return false
+      if (!bindings.some((binding) => isAvailable(binding, ctx))) return false
+      const used = handlers[id]!({ id, keys: [], mode: ctx.mode, fromMenu: false })
+      redraw()
+      return used !== false
+    },
     destroy() {
       detach()
       unsubscribe()

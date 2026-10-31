@@ -25,6 +25,21 @@ which prints the listing and opens no screen — with counts, filters and order 
 To read the same tracker in a browser tab instead, run `moai web` — see
 [Open the tracker in a browser](web.md).
 
+From another terminal, `moai ctl ls` lists explorers you already opened and
+`moai ctl state --json` reads the current one. `moai ctl keys 'SPC g b'` sends
+its own keys, while named commands such as `moai ctl sort 'title:desc'` change
+its view and show a `⇄ ctl` notice. See [Control an open window](ctl.md) for
+window selection, all commands, and the rules for writing under the caller's
+name.
+
+An agent can also suggest an action with `moai ctl propose`. A line below the
+banner begins with `» Suggestion` (or `» 제안`) and names the proposed action.
+It leaves the current mode and keys alone. `SPC a y` accepts the oldest pending
+suggestion, `SPC a n` declines it, and `SPC a l` opens the list, where `j` and
+`k` choose one, `y` and `n` answer, and `Esc` closes without answering. The
+suggestion expires on its own if nobody answers it. See [Control an open
+window](ctl.md#suggest-something-to-the-person) for waits and follow-up actions.
+
 ## Find your way around
 
 [Milestones](glossary.md#milestone) and [epics](glossary.md#epic) behave like
@@ -507,4 +522,4 @@ write there either.
   an email on every write and `git config` had none. The answer holds for this
   run; set `user.name` and `user.email` to stop it asking
 
-Decided in: moai-e9hi moai-724f moai-z46r moai-9nfw moai-47mz moai-irrj moai-ucx8 moai-1hka moai-h2rh moai-gelm moai-m6ni moai-p3r9 moai-o3cb moai-fyul moai-ogaw moai-tllo moai-fc97 moai-jtvp moai-bth3 moai-9tqo moai-wk7i moai-pxiy moai-i4hf moai-lj8g moai-ccow moai-d1zn moai-ekg6 moai-uwi9 moai-mkzo moai-i07x
+Decided in: moai-e9hi moai-724f moai-z46r moai-9nfw moai-47mz moai-irrj moai-ucx8 moai-1hka moai-h2rh moai-gelm moai-m6ni moai-p3r9 moai-o3cb moai-fyul moai-ogaw moai-tllo moai-fc97 moai-jtvp moai-bth3 moai-9tqo moai-wk7i moai-pxiy moai-i4hf moai-lj8g moai-ccow moai-d1zn moai-ekg6 moai-uwi9 moai-mkzo moai-i07x moai-zgc1

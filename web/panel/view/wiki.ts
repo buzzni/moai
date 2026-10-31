@@ -1267,6 +1267,7 @@ export const mountWiki: MountPane = (root, ctx): PaneView => {
     command: (action) => view.command(action),
     toggleRaw: () => view.toggleRaw(),
     raw: () => view.state().raw,
+    openWiki: (slug, anchor) => view.open(slug, { anchor, push: true }),
     leave: () => {
       retry = failed
       intents.dispatch({ type: "wiki", wiki: view.state() })
