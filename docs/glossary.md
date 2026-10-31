@@ -60,12 +60,16 @@ sets no ceiling while deferred; undoing the deferral restores it, and plans now
 beyond it stand as that same warning — the undo itself names none. It is not inherited — a member is bounded by its epic's deadline
 without carrying it. A row's planned start (`--start`, `starts_on`) is held to the same ceiling: a start later than the deadline above it is refused, and one overtaken by pulling that deadline in is the same `due_beyond_parent` warning. A start earlier than the parent's start is never refused. `moai due apply` raises an open, not deferred issue's or backlog
 item's priority as the deadline it follows nears — the earliest of its own and those of
-the open, not deferred rows above it. Closed epics and milestones lend no priority
+the open, not deferred rows above it.
+The rows above it are read from the archive-aware placement shown by the board. An archived parent
+can change where a live child stands, and an archived group reopened by live work can lend its
+priority deadline. The same placement and deadline choice orders `moai ready`, `moai prime`, and the
+next work suggested after `moai mv … done`.
+Closed epics and milestones lend no priority
 deadline; their columns come from their members, including archived members. An empty
 group stays in the first column. One day left or less, today and past included, calls
 for `p0`; two or less `p1`; seven or less `p2`. The command never lowers priority and
-leaves a `Due-priority:` note. Deadline ceilings enforced on writes still count closed
-ancestors. A group row is never raised itself; its members are. An open
+leaves a `Due-priority:` note. Deadline ceilings enforced on writes still use live rows and count closed ancestors. A group row is never raised itself; its members are. An open
 issue or epic whose own deadline has passed is a [warning](#warning), `overdue`, and a priority
 behind its deadline is a [notice](#notice) that names `moai due apply`.
 More in
