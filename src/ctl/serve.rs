@@ -111,7 +111,8 @@ impl Listener {
         Ok(false)
     }
 
-    /// Wait for the terminal (when given) or the wake socket, drain the wake bytes, and say whether the terminal stirred.
+    /// Wait for terminal input or control work and drain wake bytes. Only terminal readiness, without a control wake,
+    /// permits wait_input to sleep again for a parser that has no event.
     #[cfg(unix)]
     fn wait_on(&self, terminal: Option<std::os::fd::RawFd>, timeout: Duration) -> std::io::Result<bool> {
         use std::os::fd::AsRawFd;
@@ -142,7 +143,9 @@ impl Listener {
                 Err(e) => return Err(e),
             }
         }
-        Ok(ready > 0 && fds[0].revents != 0)
+        // A simultaneous notification must win: it has already been drained, so sleeping again could delay the
+        // queued request until the idle deadline even though that request woke this wait.
+        Ok(ready > 0 && fds[0].revents != 0 && fds[1].revents == 0)
     }
 
     /// Cache Hello before handing the terminal to the editor. Directed actions then return person_busy.
@@ -466,6 +469,15 @@ mod tests {
         let start = Instant::now();
         assert!(!listener.wait_input(terminal.as_raw_fd(), Duration::from_millis(60), || Ok(false)).unwrap());
         assert!(start.elapsed() >= Duration::from_millis(50), "a readable terminal with nothing parsed spun the loop");
+        // A notification already queued alongside persistent terminal readiness must not be consumed and followed
+        // by another idle wait. No new notification would be left to interrupt that second wait.
+        (&notify).write_all(&[1]).unwrap();
+        let queued = Instant::now();
+        assert!(!listener.wait_input(terminal.as_raw_fd(), Duration::from_secs(3), || Ok(false)).unwrap());
+        assert!(
+            queued.elapsed() < Duration::from_secs(1),
+            "a simultaneous control wake was lost behind terminal readiness"
+        );
         let poke = std::thread::spawn(move || {
             std::thread::sleep(Duration::from_millis(20));
             (&notify).write_all(&[1]).unwrap();
