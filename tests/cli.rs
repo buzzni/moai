@@ -7423,6 +7423,47 @@ fn due_apply_reads_archived_group_closure_and_reopened_groups() {
     assert_eq!(applied["raised"], dry["raised"], "{applied}");
 }
 
+/// Incomplete required archive context must not turn a closed group's unknown state into an
+/// irreversible priority raise. Unrelated broken archives still stay outside the read gate.
+#[test]
+fn due_apply_refuses_incomplete_required_archive_context_without_writing() {
+    let s = init("due-broken-required-context");
+    let p = s.path();
+    let stone = field(&ok(p, &["milestone", "add", "shipped", "--due", "2026-09-05", "--json"]), "id");
+    let finished = add(p, &["finished member", "--milestone", &stone]);
+    ok(p, &["mv", &finished, "done"]);
+    ok_at(p, "2026-10-01T00:00:00Z", &["archive"]);
+    let parked = field(&ok(p, &["backlog", "add", "parked follow-up", "--milestone", &stone, "--json"]), "id");
+    let archive = p.join(".moai/archive/2026.jsonl");
+    let intact = std::fs::read(&archive).unwrap();
+    let mut broken = intact.clone();
+    broken.push(0xff);
+    std::fs::write(&archive, &broken).unwrap();
+    let snapshot = issues(p);
+    let history = std::fs::read(p.join(".moai/journal/tester_example_com.jsonl")).unwrap();
+    for args in [vec!["due", "apply", "--dry-run", "--json"], vec!["due", "apply", "--json"]] {
+        let out = at(p, "2026-10-01T00:00:00Z", &args);
+        assert!(!out.status.success(), "partial archive context was accepted: {}", text(&out));
+        let error: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+        assert_eq!(error["code"], "broken", "{error}");
+        assert!(error.to_string().contains("2026.jsonl"), "{error}");
+        assert_eq!(issues(p), snapshot, "failed due apply changed the snapshot");
+        assert_eq!(std::fs::read(p.join(".moai/journal/tester_example_com.jsonl")).unwrap(), history);
+    }
+    std::fs::write(&archive, &intact).unwrap();
+    let repaired: serde_json::Value =
+        serde_json::from_str(&ok_at(p, "2026-10-01T00:00:00Z", &["due", "apply", "--json"])).unwrap();
+    assert_eq!(repaired["raised"], serde_json::json!([]), "repaired closed group raised {parked}: {repaired}");
+
+    let unrelated = init("due-broken-unneeded-context");
+    let own = add(unrelated.path(), &["own deadline", "--due", "2026-09-11"]);
+    let archive = unrelated.path().join(".moai/archive");
+    std::fs::create_dir_all(&archive).unwrap();
+    std::fs::write(archive.join("2026.jsonl"), [0xff]).unwrap();
+    let raised: serde_json::Value = serde_json::from_str(&ok(unrelated.path(), &["due", "apply", "--json"])).unwrap();
+    assert_eq!(raised["raised"][0]["id"], own, "unneeded archive prevented independent write: {raised}");
+}
+
 /// **`moai tui --json` 의 알림 수도 `moai status` 와 같다**(moai-dr8a.rl4, 리뷰) — 기한에 뒤처진 우선순위는 날 판정에
 /// 닿아 셈에 안 접히므로, 든 수만 내던 판은 그 알림을 빼고 층의 `+N`·보드보다 하나 적게 댔다.
 #[test]

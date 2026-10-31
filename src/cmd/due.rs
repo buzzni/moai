@@ -81,8 +81,19 @@ fn judged(
         return Ok(Vec::new());
     }
     let ids = crate::report::due_context_ids(issues, &candidates);
-    let archived = super::archived_with_groups(root, issues, &ids)?;
-    let context = super::in_context(issues, &archived, unread);
+    let archived = super::archived_group_context(root, issues, &ids)?;
+    if let Some(error) = archived.errors.first() {
+        let source = error.source.clone().unwrap_or_else(|| crate::archive::dir(root));
+        return Err(Fail::coded(
+            format!(
+                "Cannot apply due priorities with incomplete archive context: {}:{}. Repair the archive; `moai show --archived` lists its errors.",
+                crate::text::one_line(&source.display().to_string()),
+                error.line,
+            ),
+            crate::fail::code::BROKEN,
+        ));
+    }
+    let context = super::in_context(issues, &archived.issues, unread);
     Ok(crate::report::due_raises(issues, &context, now, zone, cfg).iter().map(Raised::of).collect())
 }
 

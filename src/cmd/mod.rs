@@ -1299,10 +1299,21 @@ pub fn archived_with_groups(
     issues: &[crate::model::Issue],
     rows: &[&str],
 ) -> R<Vec<crate::model::Issue>> {
-    // 싼 쪽을 먼저 묻는다 — 묶음 줄만 `rows` 를 훑는다.
-    match issues.iter().any(|i| crate::report::is_group(i) && rows.contains(&i.id.as_str())) {
-        true => Ok(crate::archive::read(root)?.issues),
-        false => archived_for(root, issues, rows),
+    Ok(archived_group_context(root, issues, rows)?.issues)
+}
+
+/// The same conditional group/reference read, retaining diagnostics for callers whose write
+/// decision requires complete context. Other context callers keep their existing lenient behavior.
+pub fn archived_group_context(
+    root: &std::path::Path,
+    issues: &[crate::model::Issue],
+    rows: &[&str],
+) -> R<crate::store::Load> {
+    // Check kind before searching the requested IDs; ordinary rows need only the reference gate.
+    let groups = issues.iter().any(|i| crate::report::is_group(i) && rows.contains(&i.id.as_str()));
+    match groups || crate::archive::reaches_out(issues, rows) {
+        true => crate::archive::read(root),
+        false => Ok(crate::store::Load::default()),
     }
 }
 
