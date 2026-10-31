@@ -10730,3 +10730,9 @@
 {"ts":"2026-10-31T09:43:33Z","id":"moai-s1le","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-10-31T09:44:06Z","id":"moai-s1le","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: PR #65 (develop → main, v0.40.0) is open. A person merges it without squash and an admin approves \"tag on merge\" in Actions. After the release is out: git worktree remove .worktrees/milestone-moai-tncb; git branch -d milestone/moai-tncb; rm -rf /tmp/cargo-target/milestone-moai-tncb; then close moai-s1le."}
 {"ts":"2026-10-31T09:44:06Z","id":"moai-s1le","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 (low — release steps as supervisor)"}
+{"ts":"2026-10-31T10:18:03Z","id":"moai-s1le.chq","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"Windows clippy: closes_at dead code"}
+{"ts":"2026-10-31T10:18:03Z","id":"moai-s1le.chq","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-31T10:25:44Z","id":"moai-s1le.chq","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 (low — one cfg gate; local x86_64-pc-windows-gnu clippy -D warnings passes)"}
+{"ts":"2026-10-31T10:25:45Z","id":"moai-s1le.chq","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"Merged d03dd11b into develop and pushed to PR #65."}
+{"ts":"2026-10-31T13:25:24Z","id":"moai-s1le","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 (high — 마일스톤 병합·판 올리기·릴리스 소식·Windows clippy 핫픽스)"}
+{"ts":"2026-10-31T13:25:24Z","id":"moai-s1le","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"v0.40.0 나감: PR #65 병합(e03f4d38), 태그·GitHub 릴리스 v0.40.0. 마일스톤 워크트리·가지·target 정리"}
