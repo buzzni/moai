@@ -113,6 +113,8 @@ pub enum SheetRefusal {
     /// ("깨진 파일에는 쓰지 않는다", [`update`]). 읽는 길은 같은 줄을 [`Skipped::NotATable`] 로
     /// 건너뛴다.
     NotATable { found: String },
+    /// An atomic read would skip these hand-written values, so it writes no marks.
+    AtomicHeld { ids: Vec<String> },
 }
 
 /// 같은 자리를 가리키는 철자를 **하나로 모은다** — 링크와 `..`·끝 `/` 를 걷는다(`canonicalize`).
@@ -714,7 +716,13 @@ pub fn update<T>(
             if fallen {
                 said = crate::view::fallen_place(lang, &said);
             }
-            Fail::coded(said, crate::fail::code::BROKEN)
+            // **A held id is not a broken file** — `--atomic` refuses on a value a person wrote by hand, which the plain
+            // write skips and reports as `held`. `broken` would send a ctl caller to repair a file that reads fine.
+            let code = match why {
+                SheetRefusal::AtomicHeld { .. } => crate::fail::code::REFUSED,
+                _ => crate::fail::code::BROKEN,
+            };
+            Fail::coded(said, code)
         }
     })
 }
@@ -1262,6 +1270,14 @@ impl Sheet {
     /// **값만 바꾼다**([`write_value`], 리뷰) — 키 위의 주석·값 뒤의 주석·키 모양은 그대로다.
     /// `Table::insert` 로 갈아 끼우면 키를 새로 지어 셋이 다 사라진다(`Doc::set_hue` 가 적어 둔 그대로다).
     pub fn mark(&mut self, marks: &BTreeMap<String, String>) -> Result<Vec<String>, SheetRefusal> {
+        self.mark_with(marks, false)
+    }
+
+    pub fn mark_atomic(&mut self, marks: &BTreeMap<String, String>) -> Result<Vec<String>, SheetRefusal> {
+        self.mark_with(marks, true)
+    }
+
+    fn mark_with(&mut self, marks: &BTreeMap<String, String>, atomic: bool) -> Result<Vec<String>, SheetRefusal> {
         if marks.is_empty() {
             return Ok(Vec::new());
         }
@@ -1277,6 +1293,9 @@ impl Sheet {
             // 움직여야 하고, 갈리는 쪽에 따라 사람이 적은 줄을 덮거나([`Unmerged::held`] 가 막힌 id 를
             // 앉은 것으로 세어) 대기 자리를 통째로 지운다 — `stamped` 의 글이 적어 둔 그 자리다.
             blocked = marks.keys().filter(|id| self.taken(id) && !self.stamped(id)).map(String::as_str).collect();
+            if atomic && !blocked.is_empty() {
+                return Err(SheetRefusal::AtomicHeld { ids: blocked.iter().map(|id| (*id).to_string()).collect() });
+            }
         } else {
             // 주석만 있던 파일이면 머리 주석을 머리에 둔다 — 안 두면 사람이 적어 둔 줄이 `[read]` 밑으로
             // 밀려 마지막 읽음에 붙은 말로 읽힌다(moai-gmdu 에픽 리뷰가 설정에서 고친 그 자리다, 리뷰).
@@ -1371,6 +1390,16 @@ mod tests {
         let mut sheet = Sheet::parse(src).unwrap();
         sheet.mark(&marks(&[("moai-1", "2026-09-02T00:00:00Z")])).unwrap();
         assert_eq!(sheet.render(), "[read]\nmoai-1 = '2026-09-02T00:00:00Z'  # 처음\n");
+    }
+
+    #[test]
+    fn atomic_marks_leave_every_id_untouched_when_one_is_hand_written() {
+        let src = "[read]\nmoai-1 = 3\n";
+        let mut sheet = Sheet::parse(src).unwrap();
+        let answer =
+            sheet.mark_atomic(&marks(&[("moai-2", "2026-09-02T00:00:00Z"), ("moai-1", "2026-09-02T00:00:00Z")]));
+        assert!(matches!(answer, Err(SheetRefusal::AtomicHeld { ids }) if ids == ["moai-1"]));
+        assert_eq!(sheet.render(), src);
     }
 
     #[test]
@@ -2701,6 +2730,23 @@ mod tests {
             crate::view::sheet_trouble(crate::i18n::Lang::En, held[0]).contains("argos-0002"),
             "글이 어느 id 인지를 안 댔다"
         );
+    }
+
+    /// **`--atomic` 이 막힌 id 에 멈추는 것은 깨진 파일이 아니다** — 같은 줄을 성한 쓰기는 건너뛰고 `held` 로 댄다.
+    /// `broken` 으로 내면 ctl 을 부른 쪽이 멀쩡한 파일을 고치러 간다. 아무 id 도 안 적힌다.
+    #[test]
+    fn an_atomic_write_held_by_a_hand_written_value_is_refused_not_broken() {
+        let s = Scratch::new("read-marks-atomic-held");
+        let cfg = s.join("config.toml");
+        let root = s.join("proj");
+        std::fs::create_dir_all(&root).unwrap();
+        let at = place_of(&cfg, &root).at;
+        std::fs::create_dir_all(at.parent().unwrap()).unwrap();
+        let src = format!("path = {:?}\n\n[read]\n\"argos-0002\".rv = \"A\"\n", root.display().to_string());
+        std::fs::write(&at, &src).unwrap();
+        let e = upd(&cfg, &root, |sh| sh.mark_atomic(&marks(&[("argos-0002", "B"), ("argos-0003", "C")]))).unwrap_err();
+        assert_eq!(e.code, crate::fail::code::REFUSED, "{e}");
+        assert_eq!(std::fs::read_to_string(&at).unwrap(), src, "an atomic refusal wrote some of the marks");
     }
 
     /// **막힌 id 를 안 시킨 판에서는 그 글이 안 선다**(moai-l5ue 리뷰 눈) — [`SheetTrouble::Held`] 는

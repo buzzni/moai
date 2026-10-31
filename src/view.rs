@@ -3897,6 +3897,7 @@ pub fn sheet_refusal(lang: Lang, at: &std::path::Path, why: &crate::read_marks::
         SheetRefusal::NotATable { found } => {
             fill(say(lang, "sheet.refuse_not_a_table"), &[("table", READ), ("is", found)])
         }
+        SheetRefusal::AtomicHeld { ids } => fill(say(lang, "sheet.refuse_atomic_held"), &[("ids", &ids.join(", "))]),
     };
     format!("{}: {said}", at.display())
 }

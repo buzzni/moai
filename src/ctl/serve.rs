@@ -67,7 +67,7 @@ impl Listener {
     }
 }
 
-pub type Handler = Arc<dyn Fn(Request) -> Reply + Send + Sync>;
+pub type Handler = Arc<dyn Fn(Request, &dyn Fn() -> bool) -> Reply + Send + Sync>;
 
 #[cfg(unix)]
 struct Leave(Arc<AtomicUsize>);
@@ -212,7 +212,7 @@ fn handle(
                     Reply::error("busy", "too many proposal waiters")
                 } else {
                     let wait = wait_seconds(&req) > 0;
-                    let reply = handler.unwrap()(req);
+                    let reply = handler.unwrap()(req, &|| client_connected(stream));
                     if wait {
                         waiting.fetch_sub(1, Ordering::AcqRel);
                     }
@@ -241,7 +241,7 @@ fn handle(
                             first
                         } else {
                             let id = first.data.as_ref().and_then(|d| d["id"].as_str()).unwrap_or_default().to_string();
-                            book.map_or(first, |book| book.wait(&id, wait))
+                            book.map_or(first, |book| book.wait_while(&id, wait, || client_connected(stream)))
                         }
                     };
                     if wait > 0 {
@@ -255,6 +255,18 @@ fn handle(
         Err(e) => Reply::error("bad_input", e.to_string()),
     };
     let _ = write_reply(stream, &reply);
+}
+
+#[cfg(unix)]
+fn client_connected(stream: &std::os::unix::net::UnixStream) -> bool {
+    use std::os::fd::AsRawFd;
+    // **A hang-up, not end-of-input.** A caller of the line protocol (docs/ctl.md) may shut down its writing half once
+    // its request is sent (`nc -N -U`, `shutdown(SHUT_WR)`) and still read the reply; a peeked EOF told it `gone` at
+    // once, and a byte it left unread hid a real close. POLLHUP comes only when both halves are shut. POLLIN is asked
+    // for because macOS reports the hang-up only through a read filter. A zero timeout leaves blocking mode alone.
+    let mut fd = libc::pollfd { fd: stream.as_raw_fd(), events: libc::POLLIN, revents: 0 };
+    let ready = unsafe { libc::poll(&mut fd, 1, 0) };
+    !(ready > 0 && fd.revents & (libc::POLLHUP | libc::POLLERR | libc::POLLNVAL) != 0)
 }
 
 #[cfg(unix)]
@@ -317,5 +329,184 @@ mod tests {
             matches!(incoming.try_recv(), Err(mpsc::TryRecvError::Empty)),
             "an action reached the paused owner loop"
         );
+    }
+
+    #[test]
+    fn four_disconnected_waiters_release_their_slots_for_a_fifth() {
+        use std::os::unix::net::UnixStream;
+        let book = Arc::new(super::super::proposal::Book::new());
+        let waiting = Arc::new(AtomicUsize::new(0));
+        let editing = Arc::new(Editing::default());
+        let (tx, incoming) = mpsc::channel::<Incoming>();
+        let owner_book = Arc::clone(&book);
+        let owner = std::thread::spawn(move || {
+            for turn in incoming {
+                let Verb::Propose { text, ttl, .. } = turn.request.verb else { panic!("expected proposal") };
+                let answer = owner_book.add("window", &text, None, ttl, None);
+                turn.answer.send(answer).unwrap();
+            }
+        });
+        let ask = |label: &str| {
+            let (mut client, server) = UnixStream::pair().unwrap();
+            let request = wire::request(
+                Verb::Propose { text: label.into(), then: None, ttl: 60, wait: 30 },
+                Duration::from_secs(5),
+            );
+            serde_json::to_writer(&mut client, &request).unwrap();
+            client.write_all(b"\n").unwrap();
+            (client, server)
+        };
+        let mut handles = Vec::new();
+        let started = Instant::now();
+        for n in 0..4 {
+            let (client, mut server) = ask(&format!("disconnected {n}"));
+            let tx = tx.clone();
+            let book = Arc::clone(&book);
+            let waiting = Arc::clone(&waiting);
+            let editing = Arc::clone(&editing);
+            handles.push(std::thread::spawn(move || {
+                let mut leave = None;
+                handle(&mut server, &tx, None, Some(&book), &mut leave, &waiting, &editing);
+            }));
+            drop(client);
+        }
+        for handle in handles {
+            handle.join().unwrap();
+        }
+        // Without the disconnect check each would hold its slot to the end of its 30-second wait and still join.
+        assert!(started.elapsed() < Duration::from_secs(10), "disconnected waiters kept their slots");
+        assert_eq!(waiting.load(Ordering::Acquire), 0);
+        let (client, mut server) = ask("live fifth");
+        let fifth_tx = tx.clone();
+        let fifth_book = Arc::clone(&book);
+        let fifth_waiting = Arc::clone(&waiting);
+        let fifth_editing = Arc::clone(&editing);
+        let fifth = std::thread::spawn(move || {
+            let mut leave = None;
+            handle(&mut server, &fifth_tx, None, Some(&fifth_book), &mut leave, &fifth_waiting, &fifth_editing);
+        });
+        let until = Instant::now() + Duration::from_secs(2);
+        while book.rows().len() < 5 && Instant::now() < until {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert_eq!(book.rows().len(), 5);
+        book.finish("window/5", "accepted", None);
+        let mut line = String::new();
+        BufReader::new(client).read_line(&mut line).unwrap();
+        assert_eq!(serde_json::from_str::<Reply>(&line).unwrap().data.unwrap()["state"], "accepted");
+        fifth.join().unwrap();
+        drop(tx);
+        owner.join().unwrap();
+    }
+
+    #[test]
+    fn web_waiters_also_release_slots_after_four_callers_disconnect() {
+        use std::os::unix::net::UnixStream;
+        let tabs = Arc::new(crate::web::ctl::Tabs::new());
+        let joined = tabs.join(std::path::Path::new("/tmp"), false, None).unwrap();
+        let of = Arc::clone(&tabs);
+        let handler: Handler = Arc::new(move |request, connected| of.handle_while(request, connected));
+        let waiting = Arc::new(AtomicUsize::new(0));
+        let editing = Arc::new(Editing::default());
+        let (tx, _) = mpsc::channel();
+        let ask = |label: &str| {
+            let (mut client, server) = UnixStream::pair().unwrap();
+            let mut request = wire::request(
+                Verb::Propose { text: label.into(), then: None, ttl: 60, wait: 30 },
+                Duration::from_secs(5),
+            );
+            request.target = Some(joined.id.clone());
+            serde_json::to_writer(&mut client, &request).unwrap();
+            client.write_all(b"\n").unwrap();
+            (client, server)
+        };
+        let mut handles = Vec::new();
+        let started = Instant::now();
+        for n in 0..4 {
+            let (client, mut server) = ask(&format!("web disconnected {n}"));
+            let handler = Arc::clone(&handler);
+            let waiting = Arc::clone(&waiting);
+            let editing = Arc::clone(&editing);
+            let tx = tx.clone();
+            handles.push(std::thread::spawn(move || {
+                let mut leave = None;
+                handle(&mut server, &tx, Some(&handler), None, &mut leave, &waiting, &editing);
+            }));
+            drop(client);
+        }
+        for handle in handles {
+            handle.join().unwrap();
+        }
+        assert!(started.elapsed() < Duration::from_secs(10), "disconnected waiters kept their slots");
+        assert_eq!(waiting.load(Ordering::Acquire), 0);
+        for _ in 0..4 {
+            assert!(matches!(
+                joined.incoming.recv_timeout(Duration::from_secs(2)),
+                Ok(crate::web::ctl::Push::Proposal { .. })
+            ));
+        }
+
+        let (client, mut server) = ask("web live fifth");
+        let fifth_handler = Arc::clone(&handler);
+        let fifth_waiting = Arc::clone(&waiting);
+        let fifth_editing = Arc::clone(&editing);
+        let fifth_tx = tx.clone();
+        let fifth = std::thread::spawn(move || {
+            let mut leave = None;
+            handle(&mut server, &fifth_tx, Some(&fifth_handler), None, &mut leave, &fifth_waiting, &fifth_editing);
+        });
+        let crate::web::ctl::Push::Proposal { entry } = joined.incoming.recv_timeout(Duration::from_secs(2)).unwrap()
+        else {
+            panic!("fifth proposal was not sent")
+        };
+        tabs.proposal_reply(&joined.id, &joined.token, entry["id"].as_str().unwrap(), true, None).unwrap();
+        let mut line = String::new();
+        BufReader::new(client).read_line(&mut line).unwrap();
+        assert_eq!(serde_json::from_str::<Reply>(&line).unwrap().data.unwrap()["state"], "accepted");
+        fifth.join().unwrap();
+        assert_eq!(waiting.load(Ordering::Acquire), 0);
+    }
+
+    /// A caller that shuts down its writing half after its request line is still reading: it is not a disconnect.
+    /// Linux only — macOS reports a read-side EOF as a hang-up, so there it is treated as before.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_half_closed_waiter_still_gets_its_answer() {
+        use std::os::unix::net::UnixStream;
+        let book = Arc::new(super::super::proposal::Book::new());
+        let waiting = Arc::new(AtomicUsize::new(0));
+        let editing = Editing::default();
+        let (tx, incoming) = mpsc::channel::<Incoming>();
+        let owner_book = Arc::clone(&book);
+        let owner = std::thread::spawn(move || {
+            for turn in incoming {
+                let Verb::Propose { text, ttl, .. } = turn.request.verb else { panic!("expected proposal") };
+                turn.answer.send(owner_book.add("window", &text, None, ttl, None)).unwrap();
+            }
+        });
+        let (mut client, mut server) = UnixStream::pair().unwrap();
+        let request =
+            wire::request(Verb::Propose { text: "half".into(), then: None, ttl: 60, wait: 30 }, Duration::from_secs(5));
+        serde_json::to_writer(&mut client, &request).unwrap();
+        client.write_all(b"\n").unwrap();
+        client.shutdown(std::net::Shutdown::Write).unwrap();
+        let answering = Arc::clone(&book);
+        let answer = std::thread::spawn(move || {
+            let until = Instant::now() + Duration::from_secs(2);
+            while answering.rows().is_empty() && Instant::now() < until {
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            // Past a few disconnect checks, so a half-close read as a hang-up has already answered `gone`.
+            std::thread::sleep(Duration::from_millis(500));
+            answering.finish("window/1", "accepted", None);
+        });
+        let mut leave = None;
+        handle(&mut server, &tx, None, Some(&book), &mut leave, &waiting, &editing);
+        answer.join().unwrap();
+        let mut line = String::new();
+        BufReader::new(client).read_line(&mut line).unwrap();
+        assert_eq!(serde_json::from_str::<Reply>(&line).unwrap().data.unwrap()["state"], "accepted");
+        drop(tx);
+        owner.join().unwrap();
     }
 }

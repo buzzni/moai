@@ -199,7 +199,7 @@ fn handle(stream: TcpStream, site: &Site, busy: Leave) {
         Ok(req) if req.path == "/api/events" => {
             let target = event_target(&req, site);
             match target {
-                Ok((cwd, lang, overlay, first)) => {
+                Ok((cwd, lang, overlay, first, resume)) => {
                     if site.streams.fetch_add(1, Ordering::SeqCst) >= STREAMS_MAX {
                         site.streams.fetch_sub(1, Ordering::SeqCst);
                         (refuse(503, say(lang, "web.busy"), code::BUSY), true)
@@ -213,7 +213,16 @@ fn handle(stream: TcpStream, site: &Site, busy: Leave) {
                         let _stream = StreamLeave(&site.streams);
                         drop(busy);
                         let ctl_peer = stream.peer_addr().is_ok_and(local_ctl_peer);
-                        let _ = stream_events(&stream, &cwd, lang, overlay, first, &site.tabs, ctl_peer);
+                        let _ = stream_events(
+                            &stream,
+                            &cwd,
+                            lang,
+                            overlay,
+                            first,
+                            &site.tabs,
+                            ctl_peer,
+                            resume.as_ref().map(|(id, token)| (id.as_str(), token.as_str())),
+                        );
                         close(&stream);
                         return;
                     }
@@ -256,12 +265,14 @@ fn ctl_post(stream: &TcpStream, req: &Request, site: &Site) -> Response {
     let mut token = None;
     let mut seq = None;
     let mut screen = None;
+    let mut passive = None;
     let mut proposal_id = None;
     for (key, value) in &req.query {
         match key.as_str() {
             "token" if token.replace(value.as_str()).is_none() => {}
             "seq" if !seen && seq.replace(value.parse::<u64>().ok()).is_none() => {}
             "screen" if seen && screen.replace(value.as_str()).is_none() => {}
+            "passive" if seen && value == "1" && passive.replace(true).is_none() => {}
             "id" if proposal && proposal_id.replace(value.as_str()).is_none() => {}
             _ => return refuse(400, "invalid control query", code::BAD_INPUT),
         }
@@ -306,7 +317,7 @@ fn ctl_post(stream: &TcpStream, req: &Request, site: &Site) -> Response {
             return refuse(400, say(lang, "web.body"), code::BAD_INPUT);
         }
         let Some(screen) = screen else { return refuse(400, "screen is required", code::BAD_INPUT) };
-        site.tabs.seen(id, token, screen)
+        site.tabs.seen(id, token, screen, passive.is_none())
     } else {
         let Some(Some(seq)) = seq else { return refuse(400, "sequence is required", code::BAD_INPUT) };
         if req.content_type.as_deref() != Some("application/json") {
@@ -331,7 +342,10 @@ fn ctl_post(stream: &TcpStream, req: &Request, site: &Site) -> Response {
     }
 }
 
-fn event_target(req: &Request, site: &Site) -> Result<(std::path::PathBuf, Lang, bool, String), Response> {
+fn event_target(
+    req: &Request,
+    site: &Site,
+) -> Result<(std::path::PathBuf, Lang, bool, String, Option<(String, String)>), Response> {
     let lang = site.lang();
     if !http::host_ok(req.host.as_deref()) {
         return Err(refuse(403, say(lang, "web.foreign_host"), code::FORBIDDEN_HOST));
@@ -346,9 +360,25 @@ fn event_target(req: &Request, site: &Site) -> Result<(std::path::PathBuf, Lang,
         Some(project) => project_of(site, &project, lang)?,
         None => site.spawner.cwd.clone(),
     };
-    let overlay = api::overlay_of(&query).map_err(|bad| refuse(400, &bad.said(lang), code::BAD_INPUT))?;
+    let mut resume = None;
+    let mut token = None;
+    let mut rest = Vec::new();
+    for (key, value) in query {
+        match key.as_str() {
+            "resume" if resume.is_none() && value.len() <= 80 => resume = Some(value),
+            "token" if token.is_none() && value.len() == 32 && value.bytes().all(|b| b.is_ascii_hexdigit()) => {
+                token = Some(value)
+            }
+            "resume" | "token" => return Err(refuse(400, "invalid event resume", code::BAD_INPUT)),
+            _ => rest.push((key, value)),
+        }
+    }
+    if resume.is_some() != token.is_some() {
+        return Err(refuse(400, "event resume needs id and token", code::BAD_INPUT));
+    }
+    let overlay = api::overlay_of(&rest).map_err(|bad| refuse(400, &bad.said(lang), code::BAD_INPUT))?;
     let first = api::stamp(&cwd, lang, overlay).map_err(|e| refuse(500, &e.message, e.code))?;
-    Ok((cwd, lang, overlay, first))
+    Ok((cwd, lang, overlay, first, resume.zip(token)))
 }
 
 fn local_ctl_peer(peer: std::net::SocketAddr) -> bool {
@@ -363,19 +393,20 @@ fn stream_events(
     first: String,
     tabs: &ctl::Tabs,
     ctl_peer: bool,
+    resume: Option<(&str, &str)>,
 ) -> std::io::Result<()> {
     use std::io::Write as _;
     // Local ctl sockets are Unix-only; the tracker stream remains available on Windows.
     // A remote page can read the web UI when the server binds externally, but it must never receive a ctl request,
     // the caller's actor, or a token that can answer or write as that caller. SSH port forwarding arrives on loopback.
-    let joined = if cfg!(unix) && ctl_peer { Some(tabs.join(cwd, overlay)?) } else { None };
-    struct TabLeave<'a>(&'a ctl::Tabs, String);
+    let joined = if cfg!(unix) && ctl_peer { Some(tabs.join(cwd, overlay, resume)?) } else { None };
+    struct TabLeave<'a>(&'a ctl::Tabs, String, u64);
     impl Drop for TabLeave<'_> {
         fn drop(&mut self) {
-            self.0.leave(&self.1);
+            self.0.leave(&self.1, self.2);
         }
     }
-    let _tab = joined.as_ref().map(|joined| TabLeave(tabs, joined.id.clone()));
+    let _tab = joined.as_ref().map(|joined| TabLeave(tabs, joined.id.clone(), joined.stream));
     let mut writer = Within::of(stream, WRITE_LIMIT);
     http::write_stream_head(&mut writer)?;
     writer.write_all(b"retry: 3000\n\n")?;
@@ -390,7 +421,14 @@ fn stream_events(
     let (until, mut ping, mut seen) = (Instant::now() + Duration::from_secs(30 * 60), Instant::now(), first);
     while Instant::now() < until {
         let pushed = match &joined {
-            Some(joined) => joined.incoming.recv_timeout(Duration::from_secs(1)).ok(),
+            Some(joined) => match joined.incoming.recv_timeout(Duration::from_secs(1)) {
+                Ok(push) => Some(push),
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => None,
+                // **A resumed stream took this tab over** (`Tabs::join` swaps its sender) — this one can never carry
+                // ctl again. Waiting on the closed channel returns at once, so going on spun a core on `api::stamp`
+                // until this socket closed, which a dead `ssh -L` tunnel can put off for many minutes.
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+            },
             None => {
                 std::thread::sleep(Duration::from_secs(1));
                 None
@@ -408,6 +446,9 @@ fn stream_events(
             let mut writer = Within::of(stream, WRITE_LIMIT);
             let (name, data) = match push {
                 ctl::Push::Ctl { seq, request } => ("ctl", serde_json::json!({"seq": seq, "request": request})),
+                ctl::Push::ValidateZone { seq, name } => {
+                    ("validate_zone", serde_json::json!({"seq": seq, "name": name}))
+                }
                 ctl::Push::Proposal { entry } => ("proposal", entry),
                 ctl::Push::ProposalClosed { id } => ("proposal_closed", serde_json::json!({"id": id})),
             };
@@ -767,7 +808,7 @@ mod tests {
         let scratch = crate::scratch::Scratch::new("remote-event-no-ctl");
         let cwd = scratch.path().to_path_buf();
         let worker =
-            std::thread::spawn(move || stream_events(&server, &cwd, Lang::En, false, "stamp".into(), &of, false));
+            std::thread::spawn(move || stream_events(&server, &cwd, Lang::En, false, "stamp".into(), &of, false, None));
         let mut reader = std::io::BufReader::new(&client);
         let mut lines = String::new();
         loop {
@@ -785,6 +826,53 @@ mod tests {
         drop(reader);
         drop(client);
         worker.join().unwrap().unwrap();
+    }
+
+    /// **A stream whose tab a resume took over ends at once** — its socket can stay open (a dead `ssh -L` tunnel), and
+    /// waiting on the closed channel used to return at once, spinning on `api::stamp` until the socket closed.
+    #[cfg(unix)]
+    #[test]
+    fn a_stream_whose_tab_was_resumed_elsewhere_ends_while_its_socket_stays_open() {
+        let (client, server) = pair();
+        client.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
+        let tabs = Arc::new(ctl::Tabs::new());
+        let of = Arc::clone(&tabs);
+        let scratch = crate::scratch::Scratch::new("resumed-stream-ends");
+        std::fs::create_dir_all(scratch.path().join(".moai")).unwrap();
+        std::fs::write(scratch.path().join(".moai/config.toml"), "prefix = \"moai\"\n").unwrap();
+        std::fs::write(scratch.path().join(".moai/issues.jsonl"), "").unwrap();
+        let cwd = scratch.path().to_path_buf();
+        let here = cwd.clone();
+        let worker =
+            std::thread::spawn(move || stream_events(&server, &cwd, Lang::En, false, "stamp".into(), &of, true, None));
+        let mut reader = std::io::BufReader::new(&client);
+        let hello = loop {
+            let mut line = String::new();
+            std::io::BufRead::read_line(&mut reader, &mut line).unwrap();
+            assert!(!line.is_empty(), "stream ended before its hello");
+            if let Some(data) = line.strip_prefix("data: ")
+                && data.contains("\"tab\"")
+            {
+                break serde_json::from_str::<serde_json::Value>(data).unwrap();
+            }
+        };
+        // The stream is healthy on its own: its stamps read, so only the takeover below can end it.
+        std::thread::sleep(Duration::from_millis(1500));
+        assert!(!worker.is_finished(), "the stream ended before any resume");
+        let (id, token) = (hello["tab"].as_str().unwrap(), hello["token"].as_str().unwrap());
+        let resumed = tabs.join(&here, false, Some((id, token))).unwrap();
+        assert_eq!(resumed.id, id);
+        let until = Instant::now() + Duration::from_secs(5);
+        while !worker.is_finished() && Instant::now() < until {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(worker.is_finished(), "the replaced stream kept running while its socket stayed open");
+        worker.join().unwrap().unwrap();
+        // Its end did not detach the stream that took over.
+        let listed = tabs.handle(crate::ctl::wire::request(crate::ctl::wire::Verb::Hello, Duration::from_secs(1)));
+        assert_eq!(listed.data.unwrap()["windows"][0]["id"], id);
+        drop(reader);
+        drop(client);
     }
 
     /// 루프백에 짝 하나 — (부르는 쪽, 받은 쪽).

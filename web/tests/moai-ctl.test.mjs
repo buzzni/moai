@@ -26,6 +26,7 @@ function setup() {
   const called = []
   const read = {
     one: async (id) => { called.push(id); return null },
+    ids: async (ids) => { called.push([...ids]); return ids.includes('moai-missing') ? { kind: 'moai-error', message: 'missing ID' } : null },
     all: async () => { called.push('all'); return null },
     group: async (id) => { called.push(`group:${id}`); return null },
   }
@@ -65,6 +66,16 @@ test('read through a key binding uses the current read mark path', async () => {
   assert.equal(reply.ok, true)
   await new Promise((resolve) => setImmediate(resolve))
   assert.deepEqual(p.called, ['all'])
+  p.dom.window.close()
+})
+
+test('ctl read sends all IDs in one atomic request', async () => {
+  const p = setup()
+  const reply = await p.ctl.run({ verb: 'read', ids: ['moai-example', 'moai-missing'] }, 1, 'token')
+  assert.equal(reply.ok, false)
+  assert.deepEqual(p.called, [['moai-example', 'moai-missing']])
+  p.keys.destroy()
+  p.shell.destroy()
   p.dom.window.close()
 })
 
