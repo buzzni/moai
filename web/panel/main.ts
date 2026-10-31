@@ -386,7 +386,8 @@ async function start(): Promise<void> {
     const query = new URLSearchParams()
     if (project) query.set('project', project)
     if (store.getState().view.worktree) query.set('worktree', '1')
-    return `/api/events${query.size ? `?${query}` : ''}`
+    const params = query.toString()
+    return `/api/events${params ? `?${params}` : ''}`
   }
   let choice = 0
   async function choose(id: string) {

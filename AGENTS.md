@@ -1,4 +1,4 @@
-<!-- moai:begin v:0.38.0 hash:6aa40b4a -->
+<!-- moai:begin v:0.38.0 hash:4c871ebe -->
 ## Issue tracker — moai
 
 This repository's work lives in `.moai/issues.jsonl`.
@@ -81,9 +81,10 @@ agent sharing their identity clears their read marks. On `person_busy`, wait onc
 or propose; never retry in a loop. ctl refuses to close their window. Tests set
 `MOAI_CTL_DIR` to an isolated directory so they cannot reach it.
 
-Column moves and notes use `moai mv` and `moai note`, not ctl verbs. Ask with
-`moai ctl propose '<why>' --wait <seconds>` and no `--then`, then run the tracker
-command on acceptance. For someone else's row, acceptance is permission:
+Column moves and notes use `moai mv` and `moai note`, not ctl verbs. To suggest one
+in the person's open window, use `moai ctl propose '<why>' --wait <seconds>` and no
+`--then`, then run the tracker command on acceptance. For someone else's row,
+acceptance is permission:
 `moai mv <id> <column> --from <seen column> --take -m 'accepted proposal <proposal id> in the explorer'`.
 
 **The assignee comes for free** — whoever created it is the assignee. To hand it to

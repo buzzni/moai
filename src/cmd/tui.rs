@@ -1836,6 +1836,16 @@ fn loop_until_quit(
         // 키가 편집기를 청했으면(`n`) 터미널을 넘긴다. 받은 글은 App 이 담는다 — 담을 곳은 연
         // 순간 박힌 그대로 요청에 실려 왔다.
         if let Some(edit) = app.edit.take() {
+            // The owner loop cannot answer while the editor holds this terminal. Cache only its hello reply; the
+            // listener keeps it visible to `ctl ls` and returns person_busy to every action until this loop resumes.
+            if let Some(control) = control {
+                control.editor_begin(
+                    app.ctl(&crate::ctl::wire::request(
+                        crate::ctl::wire::Verb::Hello,
+                        std::time::Duration::from_secs(5),
+                    )),
+                );
+            }
             suspend(caught, app.rolled_at);
             let got = write_in_editor(&edit.editor, &edit.text, &std::env::temp_dir(), app.site.lang, left);
             // **받은 글을 올리기보다 먼저 담는다.** 올리기가 실패하면 루프가 끝나는데, 먼저 담아
@@ -1851,6 +1861,9 @@ fn loop_until_quit(
             let up = resume(term, caught);
             painter.forget();
             dirty = true;
+            if let Some(control) = control {
+                control.editor_end();
+            }
             EDITING.release();
             up?;
         }

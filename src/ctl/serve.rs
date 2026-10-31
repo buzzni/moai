@@ -1,10 +1,10 @@
 use std::io::{BufRead, BufReader, Read, Write};
 use std::sync::{
-    Arc,
+    Arc, Mutex,
     atomic::{AtomicBool, AtomicUsize, Ordering},
     mpsc,
 };
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use super::wire::{self, Reply, Request};
 
@@ -19,6 +19,44 @@ pub struct Listener {
     path: std::path::PathBuf,
     stop: Arc<AtomicBool>,
     book: Option<Arc<super::proposal::Book>>,
+    editing: Arc<Editing>,
+}
+
+#[derive(Default)]
+struct Editing {
+    active: AtomicBool,
+    hello: Mutex<Option<(Reply, Instant)>>,
+}
+
+impl Editing {
+    fn answer(&self, request: &Request) -> Option<Reply> {
+        if !self.active.load(Ordering::Acquire) {
+            return None;
+        }
+        if !matches!(request.verb, super::wire::Verb::Hello) {
+            return Some(Reply::error("person_busy", "the person is in their editor"));
+        }
+        let mut snapshot = self.hello.lock().unwrap_or_else(|e| e.into_inner()).clone()?;
+        if let Some(data) = snapshot.0.data.as_mut() {
+            let ago = data["last_input_ago_ms"].as_u64().unwrap_or_default();
+            data["last_input_ago_ms"] = ago.saturating_add(snapshot.1.elapsed().as_millis() as u64).into();
+        }
+        Some(snapshot.0)
+    }
+}
+
+/// The owner loop calls this before it hands the terminal to the editor. While it is away, the listener can still
+/// list this window and answer a directed call with `person_busy`; it never reads or changes `App` off the loop.
+impl Listener {
+    pub fn editor_begin(&self, hello: Reply) {
+        *self.editing.hello.lock().unwrap_or_else(|e| e.into_inner()) = Some((hello, Instant::now()));
+        self.editing.active.store(true, Ordering::Release);
+    }
+
+    pub fn editor_end(&self) {
+        self.editing.active.store(false, Ordering::Release);
+        *self.editing.hello.lock().unwrap_or_else(|e| e.into_inner()) = None;
+    }
 }
 
 pub type Handler = Arc<dyn Fn(Request) -> Reply + Send + Sync>;
@@ -64,6 +102,8 @@ impl Listener {
         let active = Arc::new(AtomicUsize::new(0));
         let waiting = Arc::new(AtomicUsize::new(0));
         let keep_book = book.clone();
+        let editing = Arc::new(Editing::default());
+        let listen_editing = Arc::clone(&editing);
         std::thread::Builder::new().name("moai-ctl-listen".into()).spawn(move || {
             for accepted in listener.incoming() {
                 if stopped.load(Ordering::Acquire) {
@@ -86,16 +126,25 @@ impl Listener {
                 let book = book.clone();
                 let client_active = Arc::clone(&active);
                 let client_waiting = Arc::clone(&waiting);
+                let client_editing = Arc::clone(&listen_editing);
                 let spawned = std::thread::Builder::new().name("moai-ctl-client".into()).spawn(move || {
                     let mut leave = Some(Leave(client_active));
-                    handle(&mut stream, &tx, handler.as_ref(), book.as_deref(), &mut leave, &client_waiting);
+                    handle(
+                        &mut stream,
+                        &tx,
+                        handler.as_ref(),
+                        book.as_deref(),
+                        &mut leave,
+                        &client_waiting,
+                        &client_editing,
+                    );
                 });
                 if spawned.is_err() {
                     active.fetch_sub(1, Ordering::AcqRel);
                 }
             }
         })?;
-        Ok(Self { incoming, path, stop, book: keep_book })
+        Ok(Self { incoming, path, stop, book: keep_book, editing })
     }
 }
 
@@ -131,6 +180,7 @@ fn handle(
     book: Option<&super::proposal::Book>,
     leave: &mut Option<Leave>,
     waiting: &Arc<AtomicUsize>,
+    editing: &Editing,
 ) {
     let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
     let mut line = Vec::new();
@@ -143,6 +193,9 @@ fn handle(
             Ok(req) if req.deadline_ms <= wire::now_ms() => Reply::error("timeout", "control request expired"),
             Ok(req) if wait_seconds(&req) > 3600 => {
                 Reply::error("bad_input", "proposal wait must be at most 3600 seconds")
+            }
+            Ok(req) if editing.active.load(Ordering::Acquire) => {
+                editing.answer(&req).unwrap_or_else(|| Reply::error("person_busy", "the person is in their editor"))
             }
             Ok(req) if handler.is_some() => {
                 if wait_seconds(&req) > 0 && !wait_slot(waiting, leave) {
@@ -213,4 +266,43 @@ fn wait_slot(waiting: &Arc<AtomicUsize>, leave: &mut Option<Leave>) -> bool {
 fn write_reply(stream: &mut impl Write, reply: &Reply) -> std::io::Result<()> {
     serde_json::to_writer(&mut *stream, reply)?;
     stream.write_all(b"\n")
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+    use crate::ctl::wire::Verb;
+
+    #[test]
+    fn an_editor_keeps_the_window_listed_and_refuses_actions_without_waiting_for_the_loop() {
+        use std::os::unix::net::UnixStream;
+        let editing = Editing::default();
+        *editing.hello.lock().unwrap() = Some((
+            Reply::success(serde_json::json!({
+                "id": "tui-42", "root": "/repo", "screen": "list", "last_input_ago_ms": 7,
+            })),
+            Instant::now(),
+        ));
+        editing.active.store(true, Ordering::Release);
+        let (tx, incoming) = mpsc::channel();
+        let waiting = Arc::new(AtomicUsize::new(0));
+        let ask = |verb| {
+            let (mut client, mut server) = UnixStream::pair().unwrap();
+            let request = wire::request(verb, Duration::from_secs(2));
+            serde_json::to_writer(&mut client, &request).unwrap();
+            client.write_all(b"\n").unwrap();
+            let mut leave = None;
+            handle(&mut server, &tx, None, None, &mut leave, &waiting, &editing);
+            let mut line = String::new();
+            BufReader::new(client).read_line(&mut line).unwrap();
+            serde_json::from_str::<Reply>(&line).unwrap()
+        };
+        let listed = ask(Verb::Hello);
+        assert_eq!(listed.data.unwrap()["id"], "tui-42");
+        assert_eq!(ask(Verb::State { rows: false }).code.as_deref(), Some("person_busy"));
+        assert!(
+            matches!(incoming.try_recv(), Err(mpsc::TryRecvError::Empty)),
+            "an action reached the paused owner loop"
+        );
+    }
 }

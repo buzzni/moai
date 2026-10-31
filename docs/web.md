@@ -283,8 +283,10 @@ the next look, so the list never stays on the rows from before a change.
 change the tab, press its keys, resize the detail, or change its theme. The server
 sends a control request down that tab's event stream and waits for its reply.
 Hiding a tab closes the stream, so hidden tabs are absent from `ls` and cannot
-be changed. Showing it again gives it a new id. Control never opens or closes a
-browser window.
+be changed. Showing it again gives it a new id. Only a browser connected from
+loopback joins the ctl tab registry. A page opened from a remote address can
+read the tracker but receives no ctl token or requests and is absent from `ls`.
+Control never opens or closes a browser window.
 
 The page replies only through a same-origin POST carrying the tab's stream
 token; the server limits its JSON body to 1 MiB. The key help, a human-focused
@@ -304,8 +306,10 @@ Then open `http://localhost:6624/` on your own machine. This is the way to go
 rather than `--host 0.0.0.0`, which serves the tracker to anyone on the network —
 and lets them move its planned days, since a Gantt bar dragged on their page
 writes the tracker as yours does.
-The remote browser tab is also visible to `moai ctl` running on the machine
-that hosts the server; the ctl socket is local to that machine.
+The browser tab reached through this SSH forward appears to the server as a
+loopback peer and is visible to `moai ctl` running on the host machine; the ctl
+socket is local to that machine. A direct remote tab on `--host 0.0.0.0` is not
+a ctl target.
 
 Whatever it binds, the server answers only requests whose `Host` header is
 `localhost` or an IP address. A request with another name — what a page on some

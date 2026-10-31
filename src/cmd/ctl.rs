@@ -351,6 +351,8 @@ fn code_of(code_name: Option<&str>) -> &'static str {
         Some("busy") => code::BUSY,
         Some("no_actor") => code::NO_ACTOR,
         Some("not_found") => code::NOT_FOUND,
+        Some("broken") => code::BROKEN,
+        Some("error") => code::ERROR,
         _ => code::REFUSED,
     }
 }
@@ -358,6 +360,12 @@ fn code_of(code_name: Option<&str>) -> &'static str {
 #[cfg(test)]
 mod proposal_tests {
     use super::*;
+
+    #[test]
+    fn control_preserves_broken_and_error_codes() {
+        assert_eq!(code_of(Some("broken")), code::BROKEN);
+        assert_eq!(code_of(Some("error")), code::ERROR);
+    }
 
     #[test]
     fn then_uses_the_same_named_verb_shape_and_keeps_a_filter_phrase() {

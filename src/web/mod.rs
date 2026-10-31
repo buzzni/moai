@@ -212,7 +212,8 @@ fn handle(stream: TcpStream, site: &Site, busy: Leave) {
                         }
                         let _stream = StreamLeave(&site.streams);
                         drop(busy);
-                        let _ = stream_events(&stream, &cwd, lang, overlay, first, &site.tabs);
+                        let ctl_peer = stream.peer_addr().is_ok_and(local_ctl_peer);
+                        let _ = stream_events(&stream, &cwd, lang, overlay, first, &site.tabs, ctl_peer);
                         close(&stream);
                         return;
                     }
@@ -350,6 +351,10 @@ fn event_target(req: &Request, site: &Site) -> Result<(std::path::PathBuf, Lang,
     Ok((cwd, lang, overlay, first))
 }
 
+fn local_ctl_peer(peer: std::net::SocketAddr) -> bool {
+    peer.ip().is_loopback()
+}
+
 fn stream_events(
     stream: &TcpStream,
     cwd: &std::path::Path,
@@ -357,10 +362,13 @@ fn stream_events(
     overlay: bool,
     first: String,
     tabs: &ctl::Tabs,
+    ctl_peer: bool,
 ) -> std::io::Result<()> {
     use std::io::Write as _;
     // Local ctl sockets are Unix-only; the tracker stream remains available on Windows.
-    let joined = if cfg!(unix) { Some(tabs.join(cwd, overlay)?) } else { None };
+    // A remote page can read the web UI when the server binds externally, but it must never receive a ctl request,
+    // the caller's actor, or a token that can answer or write as that caller. SSH port forwarding arrives on loopback.
+    let joined = if cfg!(unix) && ctl_peer { Some(tabs.join(cwd, overlay)?) } else { None };
     struct TabLeave<'a>(&'a ctl::Tabs, String);
     impl Drop for TabLeave<'_> {
         fn drop(&mut self) {
@@ -743,6 +751,41 @@ pub fn refuse(status: u16, said: &str, code: &str) -> Response {
 mod tests {
     use super::*;
     use std::io::Write as _;
+
+    #[test]
+    fn only_loopback_event_peers_can_join_ctl() {
+        assert!(local_ctl_peer("127.0.0.1:6624".parse().unwrap()));
+        assert!(local_ctl_peer("[::1]:6624".parse().unwrap()));
+        assert!(!local_ctl_peer("192.0.2.3:6624".parse().unwrap()));
+        assert!(!local_ctl_peer("[2001:db8::3]:6624".parse().unwrap()));
+
+        // A stream admitted for reading from elsewhere receives no ctl hello and never enters the tab registry.
+        let (client, server) = pair();
+        client.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
+        let tabs = Arc::new(ctl::Tabs::new());
+        let of = Arc::clone(&tabs);
+        let scratch = crate::scratch::Scratch::new("remote-event-no-ctl");
+        let cwd = scratch.path().to_path_buf();
+        let worker =
+            std::thread::spawn(move || stream_events(&server, &cwd, Lang::En, false, "stamp".into(), &of, false));
+        let mut reader = std::io::BufReader::new(&client);
+        let mut lines = String::new();
+        loop {
+            let mut line = String::new();
+            std::io::BufRead::read_line(&mut reader, &mut line).unwrap();
+            assert!(!line.is_empty(), "stream ended before its stamp");
+            lines.push_str(&line);
+            if line.starts_with("event: stamp") {
+                break;
+            }
+        }
+        assert!(!lines.contains("event: hello"), "a remote page received a ctl token");
+        let listed = tabs.handle(crate::ctl::wire::request(crate::ctl::wire::Verb::Hello, Duration::from_secs(1)));
+        assert!(listed.data.unwrap()["windows"].as_array().unwrap().is_empty(), "a remote page became a ctl target");
+        drop(reader);
+        drop(client);
+        worker.join().unwrap().unwrap();
+    }
 
     /// 루프백에 짝 하나 — (부르는 쪽, 받은 쪽).
     fn pair() -> (TcpStream, TcpStream) {

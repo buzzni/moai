@@ -88,6 +88,17 @@ test('pane share is the inverse of the detail ratio', async () => {
   p.dom.window.close()
 })
 
+test('an expired ctl event cannot change the tab after its caller timed out', async () => {
+  const p = setup()
+  const before = p.store.getState().tab
+  const reply = await p.ctl.run({ verb: 'screen', name: 'gantt', deadline_ms: Date.now() - 1 }, 1, 'token')
+  assert.equal(reply.code, 'timeout')
+  assert.equal(p.store.getState().tab, before)
+  p.keys.destroy()
+  p.shell.destroy()
+  p.dom.window.close()
+})
+
 test('do runs only what a name alone says, where its key would, and owns the field it opens', async () => {
   const p = setup()
   const before = p.store.getState().sort

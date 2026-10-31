@@ -163,6 +163,9 @@ export function createCtl(options: CtlOptions) {
   }
 
   async function run(request: Request, seq: number, token: string): Promise<Reply> {
+    // The socket caller may have timed out while this event waited in the browser queue. The explorer drops that
+    // request before dispatch too; running it now would change the person's view after the caller saw a timeout.
+    if (typeof request.deadline_ms === 'number' && Date.now() >= request.deadline_ms) return no('timeout', 'control request expired')
     if (request.verb === 'state') return state(request.rows === true)
     if (request.verb === 'actions') return actions()
     if (request.verb === 'do' && typeof request.name === 'string' && request.name.startsWith('proposal.')) return no('refused', 'only the person can answer a proposal')
