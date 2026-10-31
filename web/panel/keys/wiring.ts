@@ -28,7 +28,7 @@ import type { ToolbarAction } from "../view/toolbar.ts"
 import type { PaneView } from "../view/types.ts"
 import { createZonePicker, type ZonePicker } from "../view/zones.ts"
 import { attachKeyRouter, createKeyRouter, detectPlatform, type DispatchedAction, type KeyRouter } from "./router.ts"
-import type { CellField, KeyContext, Mode, Platform } from "./table.ts"
+import { bindingsFor, isAvailable, type CellField, type KeyContext, type Mode, type Platform } from "./table.ts"
 
 export type { ReadMarks }
 
@@ -652,9 +652,16 @@ export function wireKeys(options: KeyWiringOptions): KeyWiring {
     context,
     actions: Object.keys(handlers),
     run(id) {
-      const handler = handlers[id]
-      if (!handler) return false
-      const used = handler({ id, keys: [], mode: context().mode, fromMenu: false })
+      // A named action runs where its key would and only when a name alone says what it does. The router checks
+      // `isAvailable` and passes the binding's `args`; an action whose keys carry args (`sort.set`, `cell.toggle`,
+      // `view.column`, `project.jump`) means nothing without them — `sort.set` ran with field "undefined" and broke
+      // the board read. Own names only: `handlers.constructor` is `Object`.
+      if (!Object.hasOwn(handlers, id)) return false
+      const ctx = context()
+      const bindings = bindingsFor(ctx.mode).filter((binding) => binding.action === id)
+      if (bindings.some((binding) => binding.args !== undefined)) return false
+      if (!bindings.some((binding) => isAvailable(binding, ctx))) return false
+      const used = handlers[id]!({ id, keys: [], mode: ctx.mode, fromMenu: false })
       redraw()
       return used !== false
     },

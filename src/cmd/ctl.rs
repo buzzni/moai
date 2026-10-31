@@ -8,7 +8,7 @@ use clap::Parser;
 use std::time::Duration;
 
 pub fn ls(ctx: &Ctx, all: bool) -> R<Vec<String>> {
-    let root = call::current_root();
+    let root = if all { None } else { call::current_root(ctx.lang())? };
     let windows: Vec<_> =
         call::windows()?.into_iter().filter(|w| all || root.as_deref().is_none_or(|r| w.root == r)).collect();
     if ctx.json {
@@ -36,9 +36,9 @@ pub fn propose(
         ));
     }
     let then = then_cmd.as_deref().map(then_verb).transpose()?.map(Box::new);
+    unix_only()?;
     let windows = call::windows()?;
-    let root = call::current_root();
-    let window = call::pick(&windows, root.as_deref(), target)?;
+    let window = window_for(ctx, &windows, target)?;
     let mut request = wire::request(wire::Verb::Propose { text, then, ttl, wait }, Duration::from_secs(wait + 10));
     request.lang = format!("{:?}", ctx.lang()).to_lowercase();
     request.actor = crate::model::actor(ctx.user.as_deref(), std::path::Path::new(&window.root))
@@ -51,19 +51,32 @@ pub fn answer(ctx: &Ctx, target: Option<&str>, id: String, wait: u64) -> R<Vec<S
     if wait > 3600 {
         return Err(Fail::coded("--wait must be at most 3600 seconds", code::BAD_INPUT));
     }
+    unix_only()?;
     let windows = call::windows()?;
-    let root = call::current_root();
-    let window = call::pick(&windows, root.as_deref(), target.or_else(|| id.rsplit_once('/').map(|(w, _)| w)))?;
+    let window = window_for(ctx, &windows, target.or_else(|| id.rsplit_once('/').map(|(w, _)| w)))?;
     let request = wire::request(wire::Verb::Answer { id, wait }, Duration::from_secs(wait + 10));
     proposal_reply(ctx, call::send(window, &request)?)
 }
 
 pub fn withdraw(ctx: &Ctx, target: Option<&str>, id: String) -> R<Vec<String>> {
+    unix_only()?;
     let windows = call::windows()?;
-    let root = call::current_root();
-    let window = call::pick(&windows, root.as_deref(), target.or_else(|| id.rsplit_once('/').map(|(w, _)| w)))?;
+    let window = window_for(ctx, &windows, target.or_else(|| id.rsplit_once('/').map(|(w, _)| w)))?;
     let request = wire::request(wire::Verb::Withdraw { id }, Duration::from_secs(5));
     proposal_reply(ctx, call::send(window, &request)?)
+}
+
+/// The window a request goes to: the one `-t` names, else the most recent of the caller's repository. The root is read
+/// only when no id names the window, so a broken tracker here never blocks an explicit `-t`.
+fn window_for<'a>(ctx: &Ctx, windows: &'a [call::Window], target: Option<&str>) -> R<&'a call::Window> {
+    let root = if target.is_some() { None } else { call::current_root(ctx.lang())? };
+    call::pick(windows, root.as_deref(), target)
+}
+
+/// A command that needs a window says `unsupported` where no window can listen, as `state` and the verbs do; `ls`
+/// alone answers an empty list there.
+fn unix_only() -> R<()> {
+    if cfg!(unix) { Ok(()) } else { Err(Fail::coded("control sockets are unavailable on this OS", code::UNSUPPORTED)) }
 }
 
 fn proposal_reply(ctx: &Ctx, reply: wire::Reply) -> R<Vec<String>> {
@@ -165,8 +178,7 @@ pub fn state(ctx: &Ctx, target: Option<&str>, rows: bool) -> R<Vec<String>> {
     #[cfg(unix)]
     {
         let windows = call::windows()?;
-        let root = call::current_root();
-        let window = call::pick(&windows, root.as_deref(), target)?;
+        let window = window_for(ctx, &windows, target)?;
         let reply = call::send(window, &wire::request(wire::Verb::State { rows }, Duration::from_secs(5)))?;
         if !reply.ok {
             return Err(Fail::coded(
@@ -282,8 +294,7 @@ fn invoke(ctx: &Ctx, target: Option<&str>, verb: wire::Verb, needs_actor: bool) 
     #[cfg(unix)]
     {
         let windows = call::windows()?;
-        let root = call::current_root();
-        let window = call::pick(&windows, root.as_deref(), target)?;
+        let window = window_for(ctx, &windows, target)?;
         let mut request = wire::request(verb, Duration::from_secs(5));
         request.lang = format!("{:?}", ctx.lang()).to_lowercase();
         if needs_actor {

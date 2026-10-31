@@ -100,7 +100,8 @@ impl Tabs {
                     matches!(verb, Verb::Screen { name } if !matches!(name.as_str(), "list" | "board" | "gantt" | "wiki"))
                         || matches!(verb, Verb::Find { scope, .. } if scope != "all")
                         || matches!(verb, Verb::View { name, .. } if !matches!(name.as_str(), "deferred" | "backlog" | "archived" | "worktree" | "raw") && !name.starts_with("column:"))
-                        || matches!(verb, Verb::Cell { name, .. } if crate::tui::view::Field::named(name).is_none())
+                        // No cell check here: the tab's columns (`counts`, …) are not the explorer's `Field` names, and
+                        // the tab refuses an unknown one itself.
                         || matches!(
                             verb,
                             Verb::Pane { wiki_width: Some(_), .. } | Verb::Pane { gantt_label: Some(_), .. }

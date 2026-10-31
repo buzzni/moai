@@ -39,16 +39,19 @@ pub enum Bad {
     Encoding,
 }
 
-/// 머리 끝까지 읽는다. 끝에 닿기 전에 [`HEAD_MAX`] 를 넘으면 [`Bad::TooBig`].
+/// The reader before ctl replies took bodies: any body is refused. The tests hold that path ([`read_inner`]).
 #[cfg(test)]
 pub fn read(r: &mut impl Read) -> Result<Request, Bad> {
     read_inner(r, false)
 }
 
+/// The server's reader: a declared body is kept for the one path that reads it (`POST /api/ctl/…`), which checks
+/// its path, Origin and content type before [`read_body`] reads the rest.
 pub fn read_allow_body(r: &mut impl Read) -> Result<Request, Bad> {
     read_inner(r, true)
 }
 
+/// 머리 끝까지 읽는다. 끝에 닿기 전에 [`HEAD_MAX`] 를 넘으면 [`Bad::TooBig`].
 fn read_inner(r: &mut impl Read, allow_body: bool) -> Result<Request, Bad> {
     let mut buf: Vec<u8> = Vec::with_capacity(1024);
     let mut chunk = [0u8; 4096];

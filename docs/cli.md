@@ -638,7 +638,7 @@ Options:
       --user <name (email)>  Who is doing this (from `git config` when absent)
   -h, --help                 Print help
 
-  Example: moai ctl theme dark -t web-1234.
+  Example: moai ctl theme dark -t 4242.1 (a web tab's id from moai ctl ls).
 ```
 
 ## `moai status`

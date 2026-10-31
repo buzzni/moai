@@ -952,6 +952,11 @@ impl App {
                     }
                     true
                 }
+                // The suggestion line is drawn over this window too, and its keys answer here as on the list.
+                Some(act @ (Browse::ProposalAccept | Browse::ProposalDecline | Browse::Proposals)) => {
+                    self.run(act, &rows);
+                    true
+                }
                 _ => false,
             };
         }
@@ -1084,6 +1089,35 @@ pub(super) mod tests {
         assert!(found.ok, "{found:?}");
         assert!(!found.data.as_ref().unwrap()["hits"].as_array().unwrap().is_empty());
         assert_eq!(app.ctl_state(false)["wiki"]["page"], "guide");
+    }
+
+    #[test]
+    fn ctl_waits_for_the_person_typing_in_the_wiki_and_its_filter_leaves_the_window() {
+        use crate::ctl::wire::{self, Verb};
+        let req = |verb| wire::request(verb, std::time::Duration::from_secs(5));
+        let (_scratch, mut app) = wiki_app("ctl-busy", PAGES);
+        assert!(app.ctl(&req(Verb::Wiki { slug: Some("guide".into()), search: None })).ok);
+        // The filter key is quiet over the wiki window, so the named verb is too — it used to close the window.
+        let filtered = app.ctl(&req(Verb::Filter { query: Some("status=todo".into()) }));
+        assert!(filtered.ok, "{filtered:?}");
+        assert_eq!(filtered.data.unwrap()["changed"], false);
+        assert!(matches!(app.mode, Mode::Wiki(_)), "{:?}", app.mode);
+        app.hit("/");
+        assert!(window(&app).typing.is_some());
+        let typed = app.ctl(&req(Verb::Keys { seqs: vec![], text: Some("x".into()) }));
+        assert_eq!(typed.code.as_deref(), Some("person_busy"), "{typed:?}");
+    }
+
+    #[test]
+    fn a_suggestion_is_answered_from_the_wiki_window() {
+        use crate::ctl::wire::{self, Verb};
+        let req = |verb| wire::request(verb, std::time::Duration::from_secs(5));
+        let (_scratch, mut app) = wiki_app("ctl-answer", PAGES);
+        assert!(app.ctl(&req(Verb::Wiki { slug: Some("guide".into()), search: None })).ok);
+        let proposed = app.ctl(&req(Verb::Propose { text: "Later?".into(), then: None, ttl: 900, wait: 0 }));
+        let id = proposed.data.unwrap()["id"].as_str().unwrap().to_string();
+        app.hit("SPC a n");
+        assert_eq!(app.proposals.get(&id).data.unwrap()["state"], "declined");
     }
 
     pub(in crate::tui) fn window(a: &App) -> &Window {

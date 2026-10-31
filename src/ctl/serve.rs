@@ -54,8 +54,10 @@ impl Listener {
             }
             std::fs::remove_file(&path)?;
         }
+        // **A blocking listener.** An idle window never wakes this thread, and the streams it accepts are blocking on
+        // every platform — BSD and macOS copy O_NONBLOCK from the listener to each accepted socket, which turned the
+        // client's read timeout off and cut large replies short with EAGAIN. `Drop` wakes the accept by connecting once.
         let listener = UnixListener::bind(&path)?;
-        listener.set_nonblocking(true)?;
         let (tx, incoming) = mpsc::channel();
         let stop = Arc::new(AtomicBool::new(false));
         let stopped = Arc::clone(&stop);
@@ -63,33 +65,33 @@ impl Listener {
         let waiting = Arc::new(AtomicUsize::new(0));
         let keep_book = book.clone();
         std::thread::Builder::new().name("moai-ctl-listen".into()).spawn(move || {
-            while !stopped.load(Ordering::Relaxed) {
-                match listener.accept() {
-                    Ok((mut stream, _)) => {
-                        if active.fetch_add(1, Ordering::AcqRel) >= 8 {
-                            active.fetch_sub(1, Ordering::AcqRel);
-                            // The accept loop never waits for a client to read its refusal.
-                            let _ = stream.set_nonblocking(true);
-                            let _ = write_reply(&mut stream, &Reply::error("busy", "too many control clients"));
-                            continue;
-                        }
-                        let tx = tx.clone();
-                        let handler = handler.clone();
-                        let book = book.clone();
-                        let client_active = Arc::clone(&active);
-                        let client_waiting = Arc::clone(&waiting);
-                        let spawned = std::thread::Builder::new().name("moai-ctl-client".into()).spawn(move || {
-                            let mut leave = Some(Leave(client_active));
-                            handle(&mut stream, &tx, handler.as_ref(), book.as_deref(), &mut leave, &client_waiting);
-                        });
-                        if spawned.is_err() {
-                            active.fetch_sub(1, Ordering::AcqRel);
-                        }
-                    }
-                    Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                        std::thread::sleep(Duration::from_millis(25))
-                    }
-                    Err(_) => break,
+            for accepted in listener.incoming() {
+                if stopped.load(Ordering::Acquire) {
+                    break;
+                }
+                // A refused accept (EMFILE and the like) passes; it must not end control for the window's lifetime.
+                let Ok(mut stream) = accepted else {
+                    std::thread::sleep(Duration::from_millis(100));
+                    continue;
+                };
+                if active.fetch_add(1, Ordering::AcqRel) >= 8 {
+                    active.fetch_sub(1, Ordering::AcqRel);
+                    // The accept loop never waits for a client to read its refusal.
+                    let _ = stream.set_nonblocking(true);
+                    let _ = write_reply(&mut stream, &Reply::error("busy", "too many control clients"));
+                    continue;
+                }
+                let tx = tx.clone();
+                let handler = handler.clone();
+                let book = book.clone();
+                let client_active = Arc::clone(&active);
+                let client_waiting = Arc::clone(&waiting);
+                let spawned = std::thread::Builder::new().name("moai-ctl-client".into()).spawn(move || {
+                    let mut leave = Some(Leave(client_active));
+                    handle(&mut stream, &tx, handler.as_ref(), book.as_deref(), &mut leave, &client_waiting);
+                });
+                if spawned.is_err() {
+                    active.fetch_sub(1, Ordering::AcqRel);
                 }
             }
         })?;
@@ -110,7 +112,10 @@ impl Listener {
 
 impl Drop for Listener {
     fn drop(&mut self) {
-        self.stop.store(true, Ordering::Relaxed);
+        self.stop.store(true, Ordering::Release);
+        // Wake the blocking accept so its thread sees `stop` and lets the listener go.
+        #[cfg(unix)]
+        let _ = std::os::unix::net::UnixStream::connect(&self.path);
         if let Some(book) = &self.book {
             book.close();
         }
@@ -153,27 +158,33 @@ fn handle(
             }
             Ok(req) => {
                 let limit = Duration::from_millis(req.deadline_ms.saturating_sub(wire::now_ms()));
-                let (answer, rx) = mpsc::channel();
                 let wait = wait_seconds(&req);
-                if tx.send(Incoming { request: req, answer }).is_err() {
-                    Reply::error("gone", "window closed")
+                // **The waiter slot comes before the window sees the request**, as on the web path: reserved after,
+                // a refused `--wait` left its suggestion on screen with no id for the caller to answer or withdraw.
+                if wait > 0 && !wait_slot(waiting, leave) {
+                    Reply::error("busy", "too many proposal waiters")
                 } else {
-                    let first = rx
-                        .recv_timeout(limit)
-                        .unwrap_or_else(|_| Reply::error("timeout", "window did not answer in time"));
-                    if wait == 0
-                        || !first.ok
-                        || first.data.as_ref().and_then(|d| d["state"].as_str()) != Some("pending")
-                    {
-                        first
-                    } else if !wait_slot(waiting, leave) {
-                        Reply::error("busy", "too many proposal waiters")
+                    let (answer, rx) = mpsc::channel();
+                    let reply = if tx.send(Incoming { request: req, answer }).is_err() {
+                        Reply::error("gone", "window closed")
                     } else {
-                        let id = first.data.as_ref().and_then(|d| d["id"].as_str()).unwrap_or_default().to_string();
-                        let reply = book.map_or(first, |book| book.wait(&id, wait));
+                        let first = rx
+                            .recv_timeout(limit)
+                            .unwrap_or_else(|_| Reply::error("timeout", "window did not answer in time"));
+                        if wait == 0
+                            || !first.ok
+                            || first.data.as_ref().and_then(|d| d["state"].as_str()) != Some("pending")
+                        {
+                            first
+                        } else {
+                            let id = first.data.as_ref().and_then(|d| d["id"].as_str()).unwrap_or_default().to_string();
+                            book.map_or(first, |book| book.wait(&id, wait))
+                        }
+                    };
+                    if wait > 0 {
                         waiting.fetch_sub(1, Ordering::AcqRel);
-                        reply
                     }
+                    reply
                 }
             }
             Err(e) => Reply::error("bad_input", e.to_string()),

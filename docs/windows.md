@@ -162,6 +162,13 @@ Windows (below).
   `CLAUDE_CODE_PLUGIN_CACHE_DIR` or `CLAUDE_CONFIG_DIR` names another place, as
   for `claude` itself
 
+## Open windows and `moai ctl`
+
+`moai ctl` reaches an open explorer or web tab over a Unix socket, which the
+Windows builds do not have yet. `moai ctl ls` answers an empty list, and the
+commands that need a window answer `unsupported`. The web page still follows
+the tracker over its event stream. See [Control an open window](ctl.md).
+
 ## Build from source
 
 `scripts/windows-dev.ps1` checks for Git for Windows, the Visual Studio C++

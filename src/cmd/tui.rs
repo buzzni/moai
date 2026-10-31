@@ -418,8 +418,11 @@ fn screen(mut app: App) -> R<Vec<String>> {
     app.ctl_root = app.site.repo.as_ref().map(|r| r.root.display().to_string()).unwrap_or_default();
     let control = match crate::ctl::serve::Listener::bind_proposals(app.proposals.clone()) {
         Ok(listener) => Some(listener),
+        // No control socket on this OS (Windows) is documented, not trouble to raise in red on every start.
+        Err(e) if e.kind() == std::io::ErrorKind::Unsupported => None,
         Err(e) => {
-            app.trouble = Some(format!("Control socket unavailable: {e}"));
+            app.trouble =
+                Some(crate::i18n::fill(crate::i18n::say(lang, "tui.ctl.unavailable"), &[("why", &e.to_string())]));
             None
         }
     };
@@ -1572,6 +1575,12 @@ fn keep_unsaved(app: &App) {
     }
 }
 
+/// A person's event, as the tests hand it over without a loop ([`take_as`]).
+#[cfg(test)]
+fn take(app: &mut App, ev: Event) -> bool {
+    take_as(app, ev, true)
+}
+
 /// 루프가 받은 사건 하나를 탐색기에 넘긴다. **터미널 없이 시험된다.**
 ///
 /// - 키는 **누를 때만** 받는다. crossterm 은 kitty 프로토콜 터미널에서 뗄 때도 보내므로,
@@ -1581,11 +1590,8 @@ fn keep_unsaved(app: &App) {
 /// - 창 크기 따위는 받을 것이 없다. 다음 그림이 새 크기로 그린다
 ///
 /// 참이면 화면이 바뀌었을 수 있다 — 루프가 다시 그린다([`take_burst`]). 거짓은 끌지 않는 포인터의 움직임 하나뿐이다.
-#[cfg(test)]
-fn take(app: &mut App, ev: Event) -> bool {
-    take_as(app, ev, true)
-}
-
+///
+/// `human` is false for an event a ctl request sent: it never counts as the person's last input ([`App::human_input`]).
 fn take_as(app: &mut App, ev: Event, human: bool) -> bool {
     if human
         && (matches!(&ev, Event::Key(k) if k.kind == KeyEventKind::Press)

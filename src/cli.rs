@@ -1521,7 +1521,7 @@ pub enum CtlCmd {
         target: Option<String>,
     },
     /// Select a web tab's theme; terminal colours follow the terminal
-    #[command(after_help = "  Example: moai ctl theme dark -t web-1234.")]
+    #[command(after_help = "  Example: moai ctl theme dark -t 4242.1 (a web tab's id from moai ctl ls).")]
     Theme {
         name: String,
         #[arg(short = 't', long, help = "Window id from moai ctl ls")]

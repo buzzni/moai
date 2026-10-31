@@ -287,9 +287,11 @@ be changed. Showing it again gives it a new id. Control never opens or closes a
 browser window.
 
 The page replies only through a same-origin POST carrying the tab's stream
-token; the server limits its JSON body to 1 MiB. A human-focused input or menu
-returns `person_busy`. Tracker writes requested by ctl carry the caller's identity;
-read marks remain the web server owner's. Column moves
+token; the server limits its JSON body to 1 MiB. The key help, a human-focused
+input or menu, a half-typed key sequence or an open sort editor returns
+`person_busy`. Tracker writes requested by ctl carry the caller's identity; read
+marks remain the web server owner's, so `moai ctl read --all` marks the owner's
+NEW rows. Column moves
 and notes remain CLI commands (`moai mv`, `moai note`).
 
 ## See it from another machine

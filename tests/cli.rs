@@ -385,6 +385,36 @@ fn ctl_withdraw_takes_it_down() {
     assert_eq!(json_of(&ok(s.path(), &["ctl", "answer", id, "--json"]))["state"], "withdrawn");
 }
 
+#[test]
+#[cfg(unix)]
+fn a_waiter_past_the_slots_is_refused_before_its_suggestion_shows() {
+    use std::time::{Duration, Instant};
+
+    let (s, _master, child) = proposal_pty("ctl-waiter-slots");
+    let waiting: Vec<_> = (0..4)
+        .map(|n| {
+            let mut command = staged(&["ctl", "propose", &format!("Wait {n}?"), "--wait", "30", "--json"]);
+            command.current_dir(s.path());
+            std::thread::spawn(move || command.output().unwrap())
+        })
+        .collect();
+    let shown = || json_of(&ok(s.path(), &["ctl", "state", "--json"]))["proposals"].as_array().map_or(0, Vec::len);
+    let until = Instant::now() + Duration::from_secs(10);
+    while shown() < 4 {
+        assert!(Instant::now() < until, "four waiting suggestions did not stand");
+        std::thread::sleep(Duration::from_millis(30));
+    }
+    let fifth = moai(s.path(), &["ctl", "propose", "Fifth?", "--wait", "30", "--json"]);
+    assert!(!fifth.status.success());
+    assert_eq!(json_of(&String::from_utf8_lossy(&fifth.stderr))["code"], "busy");
+    // The refused waiter never reached the window: no suggestion stands under an id its caller never got.
+    assert_eq!(shown(), 4);
+    drop(child);
+    for handle in waiting {
+        assert!(!handle.join().unwrap().status.success(), "a waiter outlived its window");
+    }
+}
+
 // 링크를 푼 자리 — Windows 의 `\\?\` 까지 걷은, 도구가 내는 철자다(moai-lag7.rrm). 시험이 도구의 철자와 견줄 때 쓴다.
 // 시험 크레이트라 `path::canonical` 을 못 들여, `#[path]` 로 함께 든 `scratch` 의 같은 자를 쓴다 — 여기 베껴 두던
 // 두 벌째를 걷었다(moai-lag7.482). 유닉스에서는 `std::fs::canonicalize` 그대로다.

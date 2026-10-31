@@ -25,7 +25,10 @@ export interface CtlOptions {
   proposals?(): unknown[]
   openProject?(path: string): boolean
   wikiSearch?(query: string): Promise<{ slug: string; hits: unknown[] } | null>
-  /** Captures the identity synchronously when a read-mark write starts. */
+  /**
+   * Holds the ctl caller's identity while a request's synchronous work runs, for a tracker write it starts. Read marks
+   * do not take it: they are the window owner's (main.ts).
+   */
   withIdentity<T>(seq: number, token: string, work: () => T): T
 }
 
@@ -34,17 +37,29 @@ export function createCtl(options: CtlOptions) {
   const doc = shell.el.ownerDocument
   let ownedInput: Element | null = null
   let ownedMenu = false
+  let ownedHeld = false
   doc.addEventListener('keydown', (event) => {
-    if (event.isTrusted) { ownedInput = null; ownedMenu = false }
+    if (event.isTrusted) { ownedInput = null; ownedMenu = false; ownedHeld = false }
   }, true)
   doc.addEventListener('pointerdown', (event) => {
-    if (event.isTrusted) { ownedInput = null; ownedMenu = false }
+    if (event.isTrusted) { ownedInput = null; ownedMenu = false; ownedHeld = false }
   }, true)
+  /** What a ctl request left open is ctl's until the person touches the page: a field, the SPC menu, a key prefix or the sort editor. */
+  const own = () => {
+    ownedMenu = keys.router.state().menu !== null
+    ownedHeld = keys.router.state().pending.length > 0 || keys.context().mode === 'sorter'
+    const active = doc.activeElement
+    if (active?.matches('input, textarea')) ownedInput = active
+  }
   const current = () => store.getState()
+  /** The explorer's person_busy, on this page: the key help, a field, the SPC menu, a key prefix or the sort editor the person holds. */
   const busy = (): boolean => {
+    if (keys.help.isOpen()) return true
     const active = doc.activeElement
     if (active && active !== doc.body && active.matches('input, textarea, select, [contenteditable="true"]') && active !== ownedInput) return true
-    return keys.router.state().menu !== null && !ownedMenu
+    const held = keys.router.state()
+    if ((held.pending.length > 0 || keys.context().mode === 'sorter') && !ownedHeld) return true
+    return held.menu !== null && !ownedMenu
   }
   const screen = (name: unknown): name is Tab => name === 'board' || name === 'list' || name === 'gantt' || name === 'wiki'
   const after = (): Reply => {
@@ -79,22 +94,32 @@ export function createCtl(options: CtlOptions) {
     const platform = detectPlatform(doc.defaultView?.navigator)
     return yes({ actions: keys.actions.map((name) => {
       const bindings = catalog.filter((binding) => binding.action === name)
+      // An action whose keys carry arguments has no single meaning by name; `do` refuses it (keys/wiring.ts run).
+      const keyed = bindings.some((binding) => binding.args !== undefined)
       return { name, keys: bindings.flatMap((binding) => bindingKeys(binding, platform)),
-        enabled: !name.startsWith('proposal.') && bindings.some((binding) => isAvailable(binding, context)),
-        ...(name.startsWith('proposal.') ? { why: 'only the person can answer a proposal' } : {}) }
+        enabled: !name.startsWith('proposal.') && !keyed && bindings.some((binding) => isAvailable(binding, context)),
+        ...(name.startsWith('proposal.') ? { why: 'only the person can answer a proposal' } : keyed ? { why: 'needs its key: use moai ctl keys' } : {}) }
     }) })
   }
+  /** The explorer's spelling, which `moai ctl keys` checks (`Ctrl-d`, `BackTab`, `Bksp`, `gg`), as this router's tokens. */
+  const routerTokens = (seq: string): string[] => seq.split(/\s+/).filter(Boolean).flatMap((token) => {
+    if (/^([a-z])\1$/i.test(token)) return [token[0]!, token[1]!]
+    const m = /^((?:(?:Ctrl|Alt|Shift)-)*)(.+)$/.exec(token)!
+    let mods = m[1]!.replace(/Ctrl-/g, 'C-').replace(/Alt-/g, 'A-').replace(/Shift-/g, 'S-')
+    let name = m[2]!
+    if (name === 'BackTab') { name = 'Tab'; if (!mods.includes('S-')) mods += 'S-' }
+    return [mods + (({ Bksp: 'Backspace', PgUp: 'PageUp', PgDn: 'PageDown' } as Record<string, string>)[name] ?? name)]
+  })
   const press = (seqs: unknown, text: unknown): Reply => {
     if (!Array.isArray(seqs) || seqs.some((seq) => typeof seq !== 'string')) return no('bad_input', 'key sequences must be strings')
     if (text !== null && text !== undefined && typeof text !== 'string') return no('bad_input', 'text must be a string')
     for (const seq of seqs as string[]) {
-      for (const token of seq.split(/\s+/).filter(Boolean)) {
+      for (const token of routerTokens(seq)) {
         if (!keys.router.press(token).handled) return no('bad_input', `unknown key: ${token}`)
       }
     }
-    ownedMenu = keys.router.state().menu !== null
+    own()
     const active = doc.activeElement
-    if (active?.matches('input, textarea')) ownedInput = active
     if (typeof text === 'string') {
       if (!ownedInput || active !== ownedInput || !(active instanceof (doc.defaultView?.HTMLInputElement ?? HTMLInputElement))) {
         return no('person_busy', 'text needs a search or filter opened by ctl')
@@ -154,8 +179,12 @@ export function createCtl(options: CtlOptions) {
     const s = current()
     switch (request.verb) {
       case 'keys': return press(request.seqs, request.text)
-      case 'do':
-        return typeof request.name === 'string' && keys.run(request.name) ? after() : no('unsupported', 'unknown web action')
+      case 'do': {
+        if (typeof request.name !== 'string' || !keys.actions.includes(request.name)) return no('unsupported', 'unknown web action')
+        if (!keys.run(request.name)) return no('refused', `${request.name} is not available here; an action that needs its key runs through moai ctl keys`)
+        own()
+        return after()
+      }
       case 'screen':
         if (!screen(request.name)) return no('unsupported', 'this screen is unavailable on the web')
         store.dispatch({ type: 'tab', tab: request.name }); return after()
@@ -202,7 +231,7 @@ export function createCtl(options: CtlOptions) {
         return after()
       }
       case 'cell':
-        if (typeof request.name !== 'string' || !(request.name in s.columns) || typeof request.on !== 'boolean') return no('bad_input', 'unknown cell')
+        if (typeof request.name !== 'string' || !Object.hasOwn(s.columns, request.name) || typeof request.on !== 'boolean') return no('bad_input', 'unknown cell')
         store.dispatch({ type: 'column', column: request.name as ColumnName, on: request.on }); return after()
       case 'detail':
         if (request.name === 'on' || request.name === 'off') store.dispatch({ type: 'detail-visible', visible: request.name === 'on' })

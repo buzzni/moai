@@ -14,6 +14,28 @@ export interface ProposalWords {
   next: string
 }
 
+/** Arguments the CLI takes in place; every other one is a `--flag`. */
+const PLACED = new Set(['name', 'query', 'issue', 'slug', 'words', 'ids'])
+
+/**
+ * The follow-up as the CLI spells it — `view deferred off`, `read --all`, `sort title:desc,priority:desc` — so the
+ * person sees what accepting does. Booleans, arrays and a cleared filter decide that and were dropped before.
+ */
+export function describeThen(then: NonNullable<Suggestion['then']>): string {
+  const parts = [then.verb]
+  for (const [key, value] of Object.entries(then)) {
+    if (key === 'verb' || value === null || value === undefined) continue
+    const flag = key === 'scope' ? '--in' : `--${key.replace(/_/g, '-')}`
+    if (key === 'on') parts.push(value ? 'on' : 'off')
+    else if (typeof value === 'boolean') { if (value) parts.push(flag) }
+    else if (Array.isArray(value)) { if (value.length) parts.push(value.join(key === 'words' ? ',' : ' ')) }
+    else if (PLACED.has(key)) parts.push(String(value))
+    else if (!(key === 'scope' && value === 'all')) parts.push(`${flag} ${String(value)}`)
+  }
+  if (then.verb === 'filter' && (then.query === null || then.query === undefined)) parts.push('--clear')
+  return parts.join(' ')
+}
+
 export function createProposalView(doc: Document, words: ProposalWords, answer: (entry: Suggestion, accepted: boolean) => void) {
   const rows: Suggestion[] = []
   const timers = new Map<string, ReturnType<typeof setTimeout>>()
@@ -50,7 +72,7 @@ export function createProposalView(doc: Document, words: ProposalWords, answer: 
     if (!row) return
     heading.textContent = `» ${words.title} ${at + 1}/${rows.length}`
     message.textContent = row.text
-    action.textContent = row.then ? `→ ${row.then.verb} ${Object.entries(row.then).filter(([key]) => key !== 'verb').map(([, value]) => typeof value === 'string' ? value : '').filter(Boolean).join(' ')}` : ''
+    action.textContent = row.then ? `→ ${describeThen(row.then)}` : ''
     previous.hidden = next.hidden = rows.length < 2
   }
   const remove = (id: string) => {

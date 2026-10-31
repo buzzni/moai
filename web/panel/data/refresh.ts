@@ -168,6 +168,31 @@ export function createRefresher(options: RefresherOptions): Refresher {
     schedule(at === null || failing ? backoffMs : pollMs)
   }
 
+  /**
+   * While the stream is up the timer is paused and the server pushes a stamp only when it changes, so a pushed read
+   * that failed or was cancelled (`seen` left behind `at`) would keep the rows from before the change on screen until
+   * the next write. That stamp is tried again on the poll or backoff step instead, as polling did.
+   */
+  const retryPushed = (at: string) => {
+    clear()
+    if (stopped || !shown()) return
+    timer = clock.setTimeout(() => {
+      timer = null
+      void saw(at)
+    }, failing ? backoffMs : pollMs)
+  }
+
+  async function saw(at: string): Promise<void> {
+    if (stopped || !shown()) return
+    reach(true)
+    // A pushed stamp during a read must be checked after that read settles;
+    // the stream may not repeat the stamp.
+    if (inFlight) await inFlight
+    if (at !== seen) await read(true, at)
+    if (paused && seen !== at) return retryPushed(at)
+    schedule(failing ? backoffMs : pollMs)
+  }
+
   const unwatch = signal?.watch(() => {
     if (stopped) return
     if (shown()) void check()
@@ -177,15 +202,7 @@ export function createRefresher(options: RefresherOptions): Refresher {
   return {
     refresh,
     check,
-    async saw(at: string) {
-      if (stopped || !shown()) return
-      reach(true)
-      // A pushed stamp during a read must be checked after that read settles;
-      // the stream may not repeat the stamp.
-      if (inFlight) await inFlight
-      if (at !== seen) await read(true, at)
-      schedule(failing ? backoffMs : pollMs)
-    },
+    saw,
     pause() {
       paused = true
       clear()

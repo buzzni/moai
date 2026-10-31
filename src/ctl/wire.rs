@@ -126,9 +126,16 @@ impl Verb {
         use crate::i18n::say;
         match self {
             Self::Do { name } => format!("{} {name}", say(lang, "tui.propose.verb.do")),
-            Self::Sort { words, .. } => format!("{} {}", say(lang, "tui.act.sort"), words.join(",")),
+            // The words name what accepting does — `--default`, `--in`, `--enter`, a read's scope and pane values
+            // decide it, so they are spelled out as the CLI takes them.
+            Self::Sort { words, default } => {
+                format!("{} {}{}", say(lang, "tui.act.sort"), words.join(","), if *default { " --default" } else { "" })
+            }
             Self::Filter { query: Some(query) } => format!("{} {query}", say(lang, "tui.propose.verb.filter")),
             Self::Filter { query: None } => say(lang, "tui.propose.verb.clear").into(),
+            Self::Find { query, scope } if scope != "all" => {
+                format!("{} {query} --in {scope}", say(lang, "tui.act.grep"))
+            }
             Self::Find { query, .. } => format!("{} {query}", say(lang, "tui.act.grep")),
             Self::Screen { name } => {
                 use crate::tui::keys::Screen;
@@ -149,14 +156,22 @@ impl Verb {
                 format!("{} {name} {}", say(lang, "tui.group.cell"), if *on { "on" } else { "off" })
             }
             Self::Detail { name } => format!("{} {name}", say(lang, "tui.act.detail")),
-            Self::Goto { id, project, .. } => {
+            Self::Goto { id, project, enter } => {
                 format!(
-                    "{} {}",
+                    "{} {}{}",
                     say(lang, "tui.propose.verb.goto"),
-                    id.as_ref().or(project.as_ref()).map(String::as_str).unwrap_or("")
+                    id.as_ref().or(project.as_ref()).map(String::as_str).unwrap_or(""),
+                    if *enter { " --enter" } else { "" }
                 )
             }
-            Self::Read { .. } => say(lang, "tui.act.read").into(),
+            Self::Read { ids, all, group } => {
+                let what = match (all, group) {
+                    (true, _) => "--all".to_string(),
+                    (false, Some(group)) => format!("--group {group}"),
+                    (false, None) => ids.join(" "),
+                };
+                format!("{} {what}", say(lang, "tui.act.read"))
+            }
             Self::Wiki { slug, search } => {
                 format!(
                     "{} {}",
@@ -164,7 +179,19 @@ impl Verb {
                     slug.as_ref().or(search.as_ref()).map(String::as_str).unwrap_or("")
                 )
             }
-            Self::Pane { .. } => say(lang, "tui.propose.verb.pane").into(),
+            Self::Pane { list_width, list_height, wiki_width, gantt_label, gantt_grid } => {
+                let set: Vec<String> = [
+                    ("--list-width", list_width),
+                    ("--list-height", list_height),
+                    ("--wiki-width", wiki_width),
+                    ("--gantt-label", gantt_label),
+                    ("--gantt-grid", gantt_grid),
+                ]
+                .into_iter()
+                .filter_map(|(flag, value)| value.as_ref().map(|value| format!("{flag} {value}")))
+                .collect();
+                format!("{} {}", say(lang, "tui.propose.verb.pane"), set.join(" "))
+            }
             Self::Zone { name } => format!("{} {name}", say(lang, "tui.propose.verb.zone")),
             Self::Theme { name } => format!("{} {name}", say(lang, "tui.propose.verb.theme")),
             _ => "".into(),

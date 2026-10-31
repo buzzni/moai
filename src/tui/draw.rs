@@ -339,7 +339,7 @@ pub fn screen(f: &mut Frame, app: &mut App) {
     // 맨 아랫줄은 하나다 — 글을 받는 중이면 프롬프트가, 아니면 키 바가 선다.
     match &app.mode {
         _ if app.help.is_some() => help_keys(f, app.keys.browse, keys, app.site.lang),
-        Mode::Proposals(_) => f.render_widget(Paragraph::new("j/k choose · y accept · n decline · Esc close"), keys),
+        Mode::Proposals(_) => f.render_widget(Paragraph::new(say(app.site.lang, "tui.propose.keys")), keys),
         Mode::Browse => match &open_menu {
             Some((items, grid, waits)) => menu_keys.extend(menu_line(f, app, items, grid, *waits, keys)),
             None => fkeys(f, app, &rows, keys, !header_numbered),
@@ -1931,14 +1931,8 @@ fn ask_why(why: &str, lang: Lang) -> String {
     fill(say(lang, "tui.ask.why"), &[("why", why)])
 }
 
-/// 화면 안에서 알려야 할 것. **대체 화면 안에서는 `eprintln!` 이 화면을
-/// 망가뜨린다** — 적재 오류를 stderr 로 흘리던 CLI 의 길을 여기서는 못 쓴다.
-///
-/// 한 줄만 쓴다 — 줄을 여럿 세우면 목록이 그만큼 짧아진다. 하지만 **하나만
-/// 고르지는 않는다**: 못 읽는 줄은 사람이 파일을 고칠 때까지 붙박이고 "바뀌었다"
-/// 는 지나가는 것이라, 붙박이가 이기면 지나가는 알림은 영영 안 보인다.
-/// 지금 할 일이 있는 것부터 앞에 놓고 이어 붙인다.
-/// 시험이 배너 글을 본다 — 그리지 않고 [`banner`] 가 낼 글만.
+/// The suggestion line: the oldest pending suggestion with the `»` glyph and the word, so colour never carries it
+/// alone. It narrows the hint before it cuts the text.
 fn proposal_line(app: &App, width: usize) -> Option<String> {
     use unicode_width::UnicodeWidthStr;
     let rows = app.proposals.rows();
@@ -1963,6 +1957,7 @@ fn proposal_line(app: &App, width: usize) -> Option<String> {
     Some(format!("{head}{shown}{then}{tail}"))
 }
 
+/// The suggestion list (`SPC a l`): `j`·`k` choose, `y`·`n` answer, `Esc` closes. Each row names what accepting does.
 fn proposals_window(f: &mut Frame, rows: Vec<crate::ctl::proposal::Entry>, at: usize, area: Rect, lang: Lang) {
     let width = area.width.min(72);
     let height = area.height.min(rows.len().saturating_add(4).max(5) as u16);
@@ -1977,13 +1972,23 @@ fn proposals_window(f: &mut Frame, rows: Vec<crate::ctl::proposal::Entry>, at: u
         .enumerate()
         .map(|(n, row)| {
             let name = row.text.replace('\n', " ");
-            let text = clip(&format!("{} {}", if n == at { ">" } else { " " }, name), inner.width as usize);
+            // The list is where a person picks one to accept, so each row names what accepting it does.
+            let then = row.then.as_ref().map(|verb| format!(" → {}", verb.describe(lang))).unwrap_or_default();
+            let text = clip(&format!("{} {name}{then}", if n == at { ">" } else { " " }), inner.width as usize);
             ListItem::new(text)
         })
         .collect();
     f.render_widget(List::new(lines), inner);
 }
 
+/// 화면 안에서 알려야 할 것. **대체 화면 안에서는 `eprintln!` 이 화면을
+/// 망가뜨린다** — 적재 오류를 stderr 로 흘리던 CLI 의 길을 여기서는 못 쓴다.
+///
+/// 한 줄만 쓴다 — 줄을 여럿 세우면 목록이 그만큼 짧아진다. 하지만 **하나만
+/// 고르지는 않는다**: 못 읽는 줄은 사람이 파일을 고칠 때까지 붙박이고 "바뀌었다"
+/// 는 지나가는 것이라, 붙박이가 이기면 지나가는 알림은 영영 안 보인다.
+/// 지금 할 일이 있는 것부터 앞에 놓고 이어 붙인다.
+/// 시험이 배너 글을 본다 — 그리지 않고 [`banner`] 가 낼 글만.
 #[cfg(test)]
 pub(crate) fn tests_banner(app: &mut App) -> String {
     banner(app).map(|(t, _)| t).unwrap_or_default()

@@ -3,7 +3,7 @@ import { test } from 'node:test'
 import { JSDOM } from 'jsdom'
 import { panelModule } from './moai-panel-modules.mjs'
 
-const { createProposalView } = await panelModule('view/propose.ts')
+const { createProposalView, describeThen } = await panelModule('view/propose.ts')
 
 test('a suggestion card announces its text without treating it as markup, and accept or decline names the chosen entry', () => {
   const dom = new JSDOM('<!doctype html><html><body></body></html>', { pretendToBeVisual: true })
@@ -26,4 +26,15 @@ test('a suggestion card announces its text without treating it as markup, and ac
   view.remove('window/2')
   assert.equal(view.el.hidden, true)
   dom.window.close()
+})
+
+test('a follow-up is shown the way the CLI spells it, so the person sees what accepting does', () => {
+  assert.equal(describeThen({ verb: 'view', name: 'deferred', on: false }), 'view deferred off')
+  assert.equal(describeThen({ verb: 'read', ids: [], all: true, group: null }), 'read --all')
+  assert.equal(describeThen({ verb: 'sort', words: ['title:desc', 'priority:desc'], default: false }), 'sort title:desc,priority:desc')
+  assert.equal(describeThen({ verb: 'filter', query: null }), 'filter --clear')
+  assert.equal(describeThen({ verb: 'find', query: 'parser', scope: 'title' }), 'find parser --in title')
+  assert.equal(describeThen({ verb: 'find', query: 'parser', scope: 'all' }), 'find parser')
+  assert.equal(describeThen({ verb: 'goto', issue: 'moai-1', enter: true, project: null }), 'goto moai-1 --enter')
+  assert.equal(describeThen({ verb: 'pane', list_width: '60', list_height: null, wiki_width: null, gantt_label: null }), 'pane --list-width 60')
 })

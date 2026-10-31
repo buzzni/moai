@@ -87,3 +87,40 @@ test('pane share is the inverse of the detail ratio', async () => {
   assert.ok(Math.abs(p.store.getState().detail.ratio.right - 0.45) < 0.01)
   p.dom.window.close()
 })
+
+test('do runs only what a name alone says, where its key would, and owns the field it opens', async () => {
+  const p = setup()
+  const before = p.store.getState().sort
+  const sorted = await p.ctl.run({ verb: 'do', name: 'sort.set' }, 1, 'token')
+  assert.equal(sorted.code, 'refused', 'an action whose keys carry arguments has no meaning by name')
+  assert.equal(p.store.getState().sort, before)
+  assert.equal((await p.ctl.run({ verb: 'do', name: 'constructor' }, 2, 'token')).code, 'unsupported')
+  assert.equal((await p.ctl.run({ verb: 'do', name: 'sorter.default' }, 3, 'token')).code, 'refused', 'the sort editor is not open')
+  const listed = (await p.ctl.run({ verb: 'actions' }, 4, 'token')).data.actions
+  assert.equal(listed.find((row) => row.name === 'sort.set').enabled, false)
+  assert.equal((await p.ctl.run({ verb: 'cell', name: 'toString', on: true }, 5, 'token')).code, 'bad_input')
+  assert.equal((await p.ctl.run({ verb: 'do', name: 'search.open' }, 6, 'token')).ok, true)
+  assert.equal((await p.ctl.run({ verb: 'keys', seqs: [], text: 'parser' }, 7, 'token')).ok, true, 'ctl types into the field it opened')
+  p.keys.destroy()
+  p.shell.destroy()
+  p.dom.window.close()
+})
+
+test('a key prefix the person holds is theirs', async () => {
+  const p = setup()
+  p.keys.router.press('g')
+  assert.equal((await p.ctl.run({ verb: 'screen', name: 'board' }, 1, 'token')).code, 'person_busy')
+  p.keys.router.reset()
+  p.keys.destroy()
+  p.shell.destroy()
+  p.dom.window.close()
+})
+
+test('keys take the explorer\'s spelling, which moai ctl keys checks', async () => {
+  for (const seq of ['Ctrl-d', 'C-d', 'gg', 'g g']) {
+    const p = setup()
+    const reply = await p.ctl.run({ verb: 'keys', seqs: [seq], text: null }, 1, 'token')
+    assert.equal(reply.ok, true, `${seq}: ${JSON.stringify(reply)}`)
+    p.dom.window.close()
+  }
+})

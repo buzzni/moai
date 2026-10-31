@@ -1816,20 +1816,21 @@ impl App {
                 self.ctl_owner = true;
                 let result = self.ctl(&request);
                 self.ctl_owner = false;
+                // **What the accepted action left open is the person's** — their key ran it. `ctl_end` marked it
+                // ctl-opened, which let the next ctl request type into the form or the "who are you" prompt.
+                self.ctl_opened = false;
                 result
             })
         } else {
             None
         };
+        let failed = ran.as_ref().filter(|r| !r.ok).map(|r| r.message.clone().unwrap_or_default());
         self.proposals.finish(&row.id, if accepted { "accepted" } else { "declined" }, ran);
-        self.notice = Some(
-            if accepted {
-                crate::i18n::say(self.site.lang, "tui.propose.accepted")
-            } else {
-                crate::i18n::say(self.site.lang, "tui.propose.declined")
-            }
-            .into(),
-        );
+        self.notice = Some(match failed {
+            Some(why) => fill(say(self.site.lang, "tui.propose.failed"), &[("why", &why)]),
+            None if accepted => say(self.site.lang, "tui.propose.accepted").into(),
+            None => say(self.site.lang, "tui.propose.declined").into(),
+        });
     }
 
     fn proposal_key(&mut self, key: ratatui::crossterm::event::KeyEvent) {
@@ -1946,6 +1947,26 @@ impl App {
         let mut changed = true;
         let mut extra = serde_json::json!({});
         let result: Result<(), Reply> = (|| {
+            // **A named verb passes its key's availability check** (`Browse::enabled`), as keys and `do` do: on the
+            // stats and wiki windows it is that key's quiet no-op (filter and find used to close the person's window),
+            // and on the projects layer a refused key is a refused verb (`filter_inside`).
+            let gate = match verb {
+                Verb::Sort { .. } => Some(B::SortEdit),
+                Verb::Filter { query: Some(_) } => Some(B::Filter),
+                Verb::Filter { query: None } => Some(B::ClearFilter),
+                Verb::Find { .. } => Some(B::Grep),
+                Verb::Cell { name, .. } => view::Field::named(name).map(B::Cell),
+                Verb::Detail { name } if name == "on" || name == "off" => Some(B::Detail),
+                Verb::Detail { .. } => Some(B::DetailAt),
+                Verb::Zone { .. } => Some(B::Timezone),
+                _ => None,
+            };
+            if let Some(act) = gate
+                && !self.ctl_allows(act)?
+            {
+                changed = false;
+                return Ok(());
+            }
             match verb {
                 Verb::Sort { words, default } => {
                     let order = Self::sorting_of(words)
@@ -2009,6 +2030,15 @@ impl App {
                         }
                         _ => return Err(bad(format!("unknown view: {name}"))),
                     };
+                    // The numbered keys stop at the ninth column; ctl reaches the rest under the same screen rules.
+                    let gate = match act {
+                        B::Column(at) if usize::from(at) >= keys::NUMBERED => B::Column(0),
+                        act => act,
+                    };
+                    if !self.ctl_allows(gate)? {
+                        changed = false;
+                        return Ok(());
+                    }
                     changed = was != *on;
                     if changed {
                         let rows = self.rows();
@@ -2172,6 +2202,17 @@ impl App {
         reply
     }
 
+    /// Whether `act`'s key would run here — the one availability check keys and `do` pass. `Ok(false)` is the key's
+    /// quiet no-op; an `Off::Why` is its refusal, said the same way.
+    fn ctl_allows(&self, act: keys::Browse) -> Result<bool, crate::ctl::wire::Reply> {
+        let rows = self.rows();
+        match act.enabled(&self.key_ctx(&rows)) {
+            Ok(()) => Ok(true),
+            Err(keys::Off::Quiet) => Ok(false),
+            Err(keys::Off::Why(said)) => Err(crate::ctl::wire::Reply::error("refused", said)),
+        }
+    }
+
     fn ctl_run(&mut self, act: keys::Browse) -> Result<(), crate::ctl::wire::Reply> {
         let rows = self.rows();
         match act.enabled(&self.key_ctx(&rows)) {
@@ -2179,7 +2220,8 @@ impl App {
             Err(keys::Off::Why(said)) => return Err(crate::ctl::wire::Reply::error("refused", said)),
             Err(keys::Off::Quiet) => return Ok(()),
         }
-        if self.edit.take().is_some() {
+        // A person-accepted proposal keeps the editor it asked for — the loop opens it, as for the person's own key.
+        if !self.ctl_owner && self.edit.take().is_some() {
             return Err(crate::ctl::wire::Reply::error("refused", say(self.site.lang, "tui.ctl.editor")));
         }
         Ok(())
@@ -2281,6 +2323,18 @@ impl App {
         Ok(changed)
     }
 
+    /// The window holds a field, a picker or a key sequence open — the person's, unless a ctl request opened it
+    /// (`ctl_opened`). The stats and wiki windows keep their own: the wiki's search field and link chooser, and both
+    /// windows' chords (`wants_mouse` reads the same two fields as typing).
+    fn ctl_holds_input(&self) -> bool {
+        match &self.mode {
+            Mode::Browse => false,
+            Mode::Stats(w) => !w.chord.held().is_empty(),
+            Mode::Wiki(w) => w.typing.is_some() || w.choose.is_some() || !w.chord.held().is_empty(),
+            _ => true,
+        }
+    }
+
     fn ctl_begin(&mut self, req: &crate::ctl::wire::Request) -> Result<(), crate::ctl::wire::Reply> {
         use crate::ctl::wire::Reply;
         if self.help.is_some() {
@@ -2289,7 +2343,15 @@ impl App {
         if !self.chord.held().is_empty() {
             return Err(Reply::error("person_busy", say(self.site.lang, "tui.ctl.person_chord")));
         }
-        if !self.ctl_opened && !matches!(self.mode, Mode::Browse | Mode::Stats(_) | Mode::Wiki(_)) {
+        // **The person's key asked for the editor** and the loop opens it after the ctl requests it drains in the same
+        // turn: an action that ran now would take that request (`self.edit.take()`) and drop it.
+        if self.edit.is_some() && !self.ctl_owner {
+            return Err(Reply::error(
+                "person_busy",
+                fill(say(self.site.lang, "tui.ctl.person_typing"), &[("mode", "editor")]),
+            ));
+        }
+        if !self.ctl_opened && self.ctl_holds_input() {
             let mode = self.ctl_state(false)["mode"].as_str().unwrap_or("input").to_string();
             return Err(Reply::error(
                 "person_busy",
@@ -2311,7 +2373,7 @@ impl App {
         use crate::ctl::wire::Reply;
         let error = self.ctl_turn.take().and_then(|turn| turn.error);
         self.chord.clear();
-        self.ctl_opened = !matches!(self.mode, Mode::Browse | Mode::Stats(_) | Mode::Wiki(_));
+        self.ctl_opened = self.ctl_holds_input();
         if let Some(error) = error {
             return error;
         }
@@ -2351,7 +2413,8 @@ impl App {
                 return Reply::error("refused", said);
             }
         }
-        if self.edit.take().is_some() {
+        // A person-accepted proposal keeps the editor it asked for — the loop opens it, as for the person's own key.
+        if !self.ctl_owner && self.edit.take().is_some() {
             self.ctl_turn.as_mut().unwrap().error =
                 Some(Reply::error("refused", say(self.site.lang, "tui.ctl.editor")));
         }
@@ -13380,6 +13443,75 @@ mod tests {
     }
 
     #[test]
+    fn an_accepted_proposal_leaves_what_it_opened_to_the_person() {
+        use crate::ctl::wire::Verb;
+        let (_scratch, mut a) = writable("proposal-opened");
+        let proposed = a.ctl(&ctl_req(
+            Verb::Propose {
+                text: "Filter?".into(),
+                then: Some(Box::new(Verb::Do { name: "browse.filter".into() })),
+                ttl: 900,
+                wait: 0,
+            },
+            None,
+        ));
+        assert!(proposed.ok, "{proposed:?}");
+        a.hit("SPC a y");
+        assert!(matches!(a.mode, Mode::Filter(_)), "{:?}", a.mode);
+        // The person's key opened this field: a ctl request may not type into it.
+        let typed = a.ctl(&ctl_req(Verb::Keys { seqs: vec![], text: Some("x".into()) }, None));
+        assert_eq!(typed.code.as_deref(), Some("person_busy"), "{typed:?}");
+    }
+
+    #[test]
+    fn ctl_leaves_the_persons_editor_request_and_an_accepted_jot_opens_the_editor() {
+        use crate::ctl::wire::Verb;
+        let (_scratch, mut a) = writable("ctl-editor-pending");
+        a.editor = Some("vi".into());
+        a.hit("SPC n");
+        assert!(a.edit.is_some(), "the person's key asked for the editor");
+        // The loop drains ctl requests before it opens the editor: one that ran now would take the request.
+        let busy = a.ctl(&ctl_req(Verb::Do { name: "browse.go_board".into() }, None));
+        assert_eq!(busy.code.as_deref(), Some("person_busy"), "{busy:?}");
+        assert!(a.edit.is_some(), "a ctl request took the person's editor request");
+        a.edit = None;
+        let proposed = a.ctl(&ctl_req(
+            Verb::Propose {
+                text: "Write it down?".into(),
+                then: Some(Box::new(Verb::Do { name: "browse.jot".into() })),
+                ttl: 900,
+                wait: 0,
+            },
+            None,
+        ));
+        let id = proposed.data.unwrap()["id"].as_str().unwrap().to_string();
+        a.hit("SPC a y");
+        assert!(a.edit.is_some(), "the accepted jot lost its editor");
+        assert_eq!(a.proposals.get(&id).data.unwrap()["ran"]["ok"], true);
+    }
+
+    #[test]
+    fn a_follow_up_that_cannot_run_is_not_reported_as_accepted() {
+        use crate::ctl::wire::Verb;
+        let (_scratch, mut a) = writable("proposal-failed");
+        a.ctl(&ctl_req(
+            Verb::Propose {
+                text: "Paris time?".into(),
+                then: Some(Box::new(Verb::Zone { name: "Europe/Pari".into() })),
+                ttl: 900,
+                wait: 0,
+            },
+            None,
+        ));
+        a.hit("SPC a y");
+        let failed = crate::i18n::fill(
+            crate::i18n::say(a.site.lang, "tui.propose.failed"),
+            &[("why", "unknown timezone: Europe/Pari")],
+        );
+        assert_eq!(a.notice.as_deref(), Some(failed.as_str()));
+    }
+
+    #[test]
     fn ctl_do_and_keys_share_the_browse_action_and_cannot_quit() {
         use crate::ctl::wire::Verb;
         let (_scratch, mut a) = writable("ctl-actions");
@@ -13485,6 +13617,19 @@ mod tests {
         assert_eq!(reply.code.as_deref(), Some("refused"), "{reply:?}");
         assert!(a.edit.is_none());
         assert!(a.ctl_turn.is_none());
+    }
+
+    #[test]
+    fn ctl_zone_none_returns_to_this_machines_zone() {
+        use crate::ctl::wire::Verb;
+        let (_scratch, mut a) = writable("ctl-zone-none");
+        a.system_zone = crate::tz::Zone::load("<-03>3").unwrap();
+        a.zone = crate::tz::Zone::load("JST-9").unwrap();
+        a.saved_zone = Some("JST-9".into());
+        let reply = a.ctl(&ctl_req(Verb::Zone { name: "none".into() }, None));
+        assert!(reply.ok, "{reply:?}");
+        assert_eq!(a.zone.name(), "<-03>3", "zone none is not the zone a restart would draw in");
+        assert_eq!(a.saved_zone, None);
     }
 
     #[test]

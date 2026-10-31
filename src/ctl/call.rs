@@ -76,9 +76,12 @@ pub fn windows() -> R<Vec<Window>> {
     Ok(Vec::new())
 }
 
-pub fn current_root() -> Option<String> {
-    let here = std::env::current_dir().ok()?;
-    crate::store::Repo::find_here(&here, || crate::i18n::Lang::En).ok().flatten().map(|r| r.root.display().to_string())
+/// The caller's repository root, spelled the way windows report theirs: `Repo::find`, the opener every command uses,
+/// so a linked worktree reads its main checkout as explorers (`site.repo.root`) and web tabs (`Repo::opened_root`) do.
+/// A repository that cannot be opened is an error — reading it as "outside any repository" would aim the request
+/// at another repository's window.
+pub fn current_root(lang: crate::i18n::Lang) -> R<Option<String>> {
+    Ok(crate::store::Repo::find(|| lang)?.map(|r| r.root.display().to_string()))
 }
 
 pub fn pick<'a>(windows: &'a [Window], root: Option<&str>, want: Option<&str>) -> R<&'a Window> {

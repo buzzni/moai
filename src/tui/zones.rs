@@ -215,8 +215,10 @@ impl App {
         self.set_zone_opt(Some(name));
     }
 
+    /// `None` clears the choice (`moai ctl zone none`): the explorer then stands in this machine's zone, as one opened
+    /// without `[tui] timezone` does (`tz::chosen`). Falling to UTC here would differ from the next start.
     pub(super) fn set_zone_opt(&mut self, name: Option<&str>) {
-        match crate::tz::Zone::load(name.unwrap_or("UTC")) {
+        match name.map(crate::tz::Zone::load).unwrap_or_else(|| Ok(self.system_zone.clone())) {
             // **성했다고 알림을 지우지 않는다**(리뷰). `App::notice` 는 한 자리를 나눠 쓰는데,
             // 여기서 비우면 못 읽은 옆 스냅샷처럼 이 일과 무관한 배너가 시간대를 한 번 고른 것만으로
             // 사라진다. 앞선 시간대 알림은 [`App::key`] 가 키마다 걷으므로 여기서 비울 까닭도 없다.

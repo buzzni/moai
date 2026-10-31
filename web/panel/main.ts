@@ -427,6 +427,9 @@ async function start(): Promise<void> {
    * again, and its NEW would outlive the mark.
    */
   let ctlIdentity: { seq: number; token: string } | null = null
+  // Read marks are the window owner's (docs/web.md), as in the explorer: no ctl caller identity rides on them. With it
+  // the child ran `read --all` as the caller, `no_actor` refused a caller without one, and a `do read.all` write still
+  // queued behind the ctl reply met its request already gone (410).
   const read = readMarks(client, (written) => {
     const shown = store.getState().shown.value
     // A list read already running began before the write and cannot hold its marks: `fresh` reads again after it.
@@ -435,7 +438,7 @@ async function start(): Promise<void> {
       refresher.refresh({ fresh: true }),
       shown && isUnread(shown.row) && written.has(shown.id) ? rereadDetail(shown.id, loads + 1) : undefined,
     ])
-  }, () => store.getState().view.worktree, () => ctlIdentity ? { ctl: String(ctlIdentity.seq), token: ctlIdentity.token } : undefined)
+  }, () => store.getState().view.worktree)
 
   /**
    * The gantt's move of a row's planned days (data/plan.ts, moai-d86e.3ud). One that went through reads the rows again —
