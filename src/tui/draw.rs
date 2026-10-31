@@ -6309,7 +6309,7 @@ pub(super) mod tests {
         a.site.now = now.into();
         a.adopt_look(&seoul, Vec::new());
         assert_eq!(a.zone.name(), "<+09>-9", "전제: 화면은 고른 시간대다");
-        let apply = crate::report::due_raises(&issues, &[], now, &Zone::utc(), &cfg.due).len();
+        let apply = crate::report::due_raises(&issues, &issues, now, &Zone::utc(), &cfg).len();
         assert_eq!(apply, 0, "전제: 시스템 UTC 의 due apply 는 안 올린다");
         assert_eq!(a.site.warnings.notices(0, now, &a.zone), 1, "전제: 고른 시간대의 날로는 뒤처졌다");
         assert_eq!(noticed(&a, &a.site.warnings, 0), usize::from(apply > 0), "알림이 due apply 와 다른 날로 셌다");
@@ -6319,7 +6319,7 @@ pub(super) mod tests {
         b.system = || (Zone::load("<+09>-9").unwrap(), None);
         b.site.now = now.into();
         b.adopt_look(&utc, Vec::new());
-        let apply = crate::report::due_raises(&issues, &[], now, &b.system_zone, &cfg.due).len();
+        let apply = crate::report::due_raises(&issues, &issues, now, &b.system_zone, &cfg).len();
         assert_eq!(apply, 1, "전제: 시스템 +9 의 due apply 는 올린다");
         assert_eq!(noticed(&b, &b.site.warnings, 0), 1);
     }

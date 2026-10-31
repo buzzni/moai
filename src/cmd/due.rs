@@ -61,26 +61,40 @@ pub fn run(ctx: &Ctx, cmd: DueCmd) -> R<Vec<String>> {
 
 /// 판정을 제 것으로 든다 — 판정은 빌린 줄을 내고, 쓰기는 그 줄을 고친다. 올리는 것은 **산 줄뿐이다**.
 ///
-/// **아카이브는 후보가 산 줄 밖으로 닿을 때만 편다**(리뷰, [`super::archived_for`]) — 그 줄들은 계획 밖을 잴 문맥(아카이브로
-/// 간 미룬 조상)일 뿐인데, 쓰기는 이것을 락을 쥔 채 부른다. 기한 든 줄이 하나라도 서면 늘 펴던 판은 감독의 회차마다 락
-/// 너머로 아카이브 전부를 풀었다(moai-bth3·moai-tzzt 가 쓰기 길에서 걷어 낸 그것이다). 닿는지는 **미룸을 거르기 전의
-/// 후보**로 잰다([`crate::report::due_candidates`]) — 까닭은 거기 적었다. 판단은 `report`·`archive` 의 것이고 여기는 잇기만 한다.
+/// **아카이브는 답이 거기 걸릴 때만 편다**(리뷰, [`super::archived_for`]) — 쓰기는 이것을 락을 쥔 채 부른다. 기한 든 줄이
+/// 하나라도 서면 늘 펴던 판은 감독의 회차마다 락 너머로 아카이브 전부를 풀었다(moai-bth3·moai-tzzt 가 쓰기 길에서 걷어 낸
+/// 그것이다). 그래서 먼저 산 줄만으로 **탐침**을 대고([`crate::report::due_candidates`] — 묶음은 다 열린 것으로 친다), 답이
+/// 아카이브에 걸릴 수 있는 id 를 고른다([`crate::report::due_context_ids`]): 참조가 산 줄 밖으로 닿는 후보, 그리고 후보가
+/// 기한을 빌린 묶음 가운데 닫힘이 그 답을 바꿀 수 있는 것(멤버가 아카이브에 있을 수 있다). 펴든 안 펴든 마지막 답은 그
+/// 문맥으로 다시 잰다([`crate::report::due_raises`]) — 조상과 기한은 산 줄의 지도에서, 묶음의 닫힘과 미룸은 문맥에서.
+/// 판단은 `report`·`archive` 의 것이고 여기는 잇기만 한다.
 fn judged(
     root: &std::path::Path,
     issues: &[model::Issue],
     unread: &[crate::store::LoadError],
     zone: &crate::tz::Zone,
-    rule: &crate::config::DueRule,
+    cfg: &crate::config::Config,
     now: &str,
 ) -> R<Vec<Raised>> {
-    let candidates = crate::report::due_candidates(issues, now, zone, rule);
+    let candidates = crate::report::due_candidates(issues, now, zone, &cfg.due);
     if candidates.is_empty() {
         return Ok(Vec::new());
     }
-    let ids: Vec<&str> = candidates.iter().map(|r| r.issue.id.as_str()).collect();
-    let archived = super::archived_for(root, issues, &ids)?;
-    let context = super::in_context(issues, &archived, unread);
-    Ok(crate::report::due_in_plan(candidates, &context).iter().map(Raised::of).collect())
+    let ids = crate::report::due_context_ids(issues, &candidates);
+    let archived = super::archived_group_context(root, issues, &ids)?;
+    if let Some(error) = archived.errors.first() {
+        let source = error.source.clone().unwrap_or_else(|| crate::archive::dir(root));
+        return Err(Fail::coded(
+            format!(
+                "Cannot apply due priorities with incomplete archive context: {}:{}. Repair the archive; `moai show --archived` lists its errors.",
+                crate::text::one_line(&source.display().to_string()),
+                error.line,
+            ),
+            crate::fail::code::BROKEN,
+        ));
+    }
+    let context = super::in_context(issues, &archived.issues, unread);
+    Ok(crate::report::due_raises(issues, &context, now, zone, cfg).iter().map(Raised::of).collect())
 }
 
 fn apply(ctx: &Ctx, dry_run: bool) -> R<Vec<String>> {
@@ -98,7 +112,7 @@ fn apply(ctx: &Ctx, dry_run: bool) -> R<Vec<String>> {
         // 것이 없는 판(감독이 회차마다 치는 판의 대부분)까지 그 길을 지나면, 손으로 푼 스냅샷을 정규화해 다시 쓰며 "올릴
         // 것이 없다" 고 말하고(아무도 모를 diff 가 남는다), 쌍둥이 id 하나에 멈추고, 옆 세션의 쓰기를 락 너머로 민다.
         let load = repo.read()?;
-        let seen = judged(&repo.root, &load.issues, &load.errors, zone, &rule, &model::now())?;
+        let seen = judged(&repo.root, &load.issues, &load.errors, zone, &repo.config, &model::now())?;
         if dry_run || seen.is_empty() {
             seen
         } else {
@@ -111,7 +125,7 @@ fn apply(ctx: &Ctx, dry_run: bool) -> R<Vec<String>> {
                     // **시각은 락을 쥔 뒤에 뜬다** — `mv` 와 같은 까닭이다. 남은 날도 이 시각으로 잰다. 락 밖의 판정은 쓸지를
                     // 가를 뿐이다 — 쓰는 줄은 락 안에서 다시 읽은 줄로 다시 잰다.
                     let at = model::now();
-                    let raised = judged(&repo.root, issues, unread, zone, &cfg.due, &at)?;
+                    let raised = judged(&repo.root, issues, unread, zone, cfg, &at)?;
                     if raised.is_empty() {
                         return Ok((Vec::new(), raised));
                     }
