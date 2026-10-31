@@ -12,6 +12,10 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+### Fixed
+
+- Control proposals now keep the selected ID stable, release disconnected waiter slots, validate time zones before display, preserve visible web tabs and pending suggestions across short stream reconnects, and mark multiple web read IDs atomically. (moai-v5of)
+
 ## [0.39.0] - 2026-10-31
 
 ### Added
