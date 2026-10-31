@@ -7512,6 +7512,37 @@ fn due_apply_status_ready_and_prime_follow_archived_parent_placement() {
 }
 
 #[test]
+fn due_apply_probe_reads_references_from_both_duplicate_rows() {
+    let s = init("due-archive-twin-probe");
+    let p = s.path();
+    due_archived_placement(p, None, "2026-10-17");
+    let mut joined: serde_json::Value =
+        serde_json::from_str(issues(p).lines().find(|l| l.contains("moai-pppp.ccc")).unwrap()).unwrap();
+    joined["id"] = "moai-cccc".into();
+    joined["epic"] = "moai-eeee".into();
+    joined.as_object_mut().unwrap().remove("milestone");
+    let mut loose = joined.clone();
+    loose.as_object_mut().unwrap().remove("epic");
+    let mut epic = joined.clone();
+    epic["id"] = "moai-eeee".into();
+    epic["kind"] = "epic".into();
+    epic["status"] = "done".into();
+    epic["due_on"] = "2026-10-17".into();
+    epic.as_object_mut().unwrap().remove("epic");
+    std::fs::write(p.join(".moai/issues.jsonl"), format!("{joined}\n{loose}\n")).unwrap();
+    std::fs::write(p.join(".moai/archive/2026.jsonl"), format!("{epic}\n")).unwrap();
+    let now = "2026-10-16T00:00:00Z";
+    let before = issues(p);
+    let dry: serde_json::Value =
+        serde_json::from_str(&ok_at(p, now, &["due", "apply", "--dry-run", "--json"])).unwrap();
+    assert_eq!(dry["raised"][0]["id"], "moai-cccc", "{dry}");
+    assert_eq!(dry["raised"][0]["due_from"], "moai-eeee", "{dry}");
+    let applied = at(p, now, &["due", "apply", "--json"]);
+    assert!(!applied.status.success(), "duplicate write was accepted: {}", text(&applied));
+    assert_eq!(issues(p), before, "failed duplicate write changed the snapshot");
+}
+
+#[test]
 fn rule_two_pickup_suggestions_match_ready_with_archived_placement() {
     let s = init("hook-due-archive-placement");
     let p = s.path();

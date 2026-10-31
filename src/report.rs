@@ -3278,7 +3278,7 @@ impl Ceiling<'_> {
 ///
 /// **판정만 한다.** 막는 자리는 쓰기 경로(`store::write_locked`, 지금 쓰는 줄)고, 부모를 당겨 넘친
 /// 자식을 비추는 자리는 `status` 다. 둘이 이 한 자를 든다. **산 줄로 잰다** — 쓰기는 아카이브를 안 펴므로
-/// `status` 도 산 줄의 지도로 잰다([`status_of_context`]).
+/// `status` 의 넘침 경고도 산 줄의 지도로 잰다([`status_of_context`]). 우선순위의 따를 기한은 보드의 문맥 지도로 잰다.
 ///
 /// **지도는 빌린다** — `status` 는 [`Soil`] 이 이미 지은 것을 쓴다(지도는 한 벌이다, moai-jk2u.pl6). 지도가 없는
 /// 쪽은 [`first_beyond`]·[`due_overflow_of`] 가 한 번 짓고 줄마다 묻는다 — 쓰기가 락을 쥔 채 부르므로 줄마다
@@ -3425,8 +3425,8 @@ impl<'m, 'a> DueLadder<'m, 'a> {
         self.lowest(i, &above)
     }
 
-    /// 이 지도가 든 **같은 줄** — 아카이브를 곁들인 문맥의 줄(사본)로 물어도 산 줄의 지도에서 다시 찾는다
-    /// ([`status_of_context`]). 지도에 없는 줄(아카이브의 것)은 `None` 이다. 쌍둥이는 줄마다 찾는다 — 까닭은
+    /// 이 지도가 든 **같은 줄** — 다른 곳에서 빌린 사본으로 물어도 이 지도의 줄로 다시 찾는다.
+    /// 지도에 없는 줄은 `None` 이다. 쌍둥이는 줄마다 찾는다 — 까닭은
     /// [`DueLadder::beyond_row`] 에 있다. 그 줄을 찾는 자가 둘이면 쌍둥이를 가르는 자가 한쪽에서만 바뀐다.
     fn row_of(&self, i: &Issue) -> Option<&'a Issue> {
         match self.lines.twinned(&i.id) {
@@ -3435,8 +3435,8 @@ impl<'m, 'a> DueLadder<'m, 'a> {
         }
     }
 
-    /// [`DueLadder::open_ceiling`] 을 **이 지도 밖에서 빌린 줄로** — `status` 는 아카이브를 겹친 줄(사본)을 걷지만 지도는
-    /// 산 줄의 것이라([`status_of_context`]), 그 줄을 이 지도의 줄로 찾아 묻는다([`DueLadder::row_of`]).
+    /// [`DueLadder::open_ceiling`] 을 **이 지도 밖에서 빌린 줄로** — 사본도 같은 줄을 찾아 묻는다([`DueLadder::row_of`]).
+    /// 우선순위를 재는 쪽은 보드가 그리는 문맥의 지도를 넘긴다.
     fn open_ceiling_row(&self, i: &Issue, closed: &dyn Fn(&Issue) -> bool) -> Option<Ceiling<'a>> {
         self.row_of(i).and_then(|r| self.open_ceiling(r, closed))
     }
@@ -4498,8 +4498,7 @@ pub struct Prime<'a> {
 pub const PRIME_PICKS: usize = 3;
 
 /// [`Prime`] 을 읽어 낸다. `me` 는 [`by_owner`] 와 같은 약속이다 — 모르면 가르지 않는다. 고르는 자는 `moai ready` 와 같은
-/// [`ready_in_live`] 다 — `issues` 는 아카이브를 곁들인 문맥, `live` 는 따르는 기한을 잴 산 줄이다(moai-eev6). 아카이브가 없으면
-/// 둘에 같은 줄을 준다.
+/// [`ready_in_live`] 다 — 소속과 따르는 기한 모두 아카이브를 곁들인 `issues` 문맥에서 잰다.
 pub fn prime<'a>(issues: &'a [Issue], live: &'a [Issue], cfg: &Config, me: Option<&crate::query::Me>) -> Prime<'a> {
     let (all, focus) = ready_in_live(issues, live, cfg);
     let (mut mine, mut others) = by_owner(all, me);
@@ -5855,8 +5854,8 @@ pub fn due_raises<'a>(
 /// [`due_priority`] 다.
 ///
 /// **묶음이 닫혔는가는 모르는 것으로 친다** — 묶음을 다 열린 것으로 잰다. 아카이브로 간 멤버가 산 줄로는 빈 묶음을 닫고,
-/// 아카이브의 부모가 산 멤버를 다른 묶음으로 옮겨 닫힌 듯한 묶음을 열 수도 있어 산 줄만으로는 못 정한다. 닫힌 묶음을 빼면
-/// 산 줄에서 따르는 기한만 찾는다. 아카이브의 부모가 자리를 바꾸면 새 기한도 드러나므로
+/// 아카이브의 부모가 산 멤버를 다른 묶음으로 옮겨 닫힌 듯한 묶음을 열 수도 있어 산 줄만으로는 못 정한다.
+/// 탐침은 산 줄에서 따르는 기한만 찾는다. 아카이브의 부모가 자리를 바꾸면 새 기한도 드러나므로
 /// 후보가 없어도 [`due_context_ids`] 가 참조를 살핀다. 그래서 **적을 답이 아니다** — 닫힌 묶음의
 /// 기한도 따른다. 쓰는 쪽은 문맥을 곁들여 [`due_raises`] 로 다시 잰다: 닫힌 묶음을 빼면 그 밑의 다른 조상의 기한이 드러날
 /// 수 있어 후보를 거르기만 해서는 안 된다.
@@ -7166,7 +7165,7 @@ mod tests {
         for row in [2, 3, 4] {
             rows[row].priority = Some(0);
         }
-        assert!(ids(&rows).is_empty(), "no candidates must never request archive context");
+        assert!(ids(&rows).is_empty(), "no raisable rows must never request archive context");
     }
 
     #[test]
@@ -7251,6 +7250,28 @@ mod tests {
         assert_eq!(raises.len(), 1);
         assert_eq!(raises[0].from.unwrap().id, "argos-eeee");
         assert_eq!(raises[0].due, "2026-10-17");
+    }
+
+    #[test]
+    fn due_archive_gate_covers_preceding_twins_when_the_probe_is_empty() {
+        let now = "2026-10-16T00:00:00Z";
+        let mut archived_epic = make("argos-eeee", Kind::Epic, "done");
+        archived_epic.due_on = Some("2026-10-17".into());
+        let joined = member("argos-cccc", "argos-eeee", "todo");
+        let loose = make("argos-cccc", Kind::Issue, "todo");
+        for live in [vec![joined.clone(), loose.clone()], vec![loose.clone(), joined.clone()]] {
+            let probe = due_candidates(&live, now, utc(), &cfg().due);
+            assert!(probe.is_empty());
+            let ids = due_context_ids(&live, &probe);
+            assert!(crate::archive::reaches_out(&live, &ids), "a preceding twin's archived epic was missed");
+            let archive = vec![archived_epic.clone()];
+            let all = with_archive(&live, &archive, &BTreeSet::new());
+            let raised = due_raises(&live, &all, now, utc(), &cfg());
+            assert_eq!(raised.len(), 1);
+            assert_eq!(raised[0].from.unwrap().id, "argos-eeee");
+            let board = status_with_archive(&live, &archive, &[], &cfg(), now, utc());
+            assert_eq!(board.notices.iter().find(|w| w.kind == "due_priority_behind").unwrap().ids, ["argos-cccc"]);
+        }
     }
 
     #[test]
