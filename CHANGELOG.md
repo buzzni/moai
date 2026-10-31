@@ -19,7 +19,7 @@ does not tag — see `CONTRIBUTING.md`.
 ### Fixed
 
 - Control proposals now keep the selected ID stable, release disconnected waiter slots, validate time zones before display, preserve visible web tabs and pending suggestions across short stream reconnects, and mark multiple web read IDs atomically. (moai-v5of)
-- `moai due apply` skips the deadlines of epics and milestones whose live members read closed, including groups closed by deferring remaining work, so parked backlog is not repeatedly raised by those deadlines. Archive-aware closure is tracked in moai-nfct. (moai-w30o.pkr)
+- `moai due apply` skips closed epic and milestone deadlines, including groups whose finished members have moved to archive storage and groups closed by deferring remaining work. Priority notices and ready ordering use the same group closure, and reopened groups lend their deadlines again. Archive reads are limited to cases that can affect the result; an incomplete required archive read refuses without changing priorities or adding notes. (moai-w30o.pkr, moai-nfct)
 
 ## [0.39.0] - 2026-10-31
 

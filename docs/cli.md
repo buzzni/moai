@@ -4123,9 +4123,14 @@ Options:
   moai due apply --dry-run   show what it would raise, write nothing
 
   A row follows the earliest deadline among its own and those of the rows it
-  is drawn under - its milestone, its epic, its parent (a parent already
-  closed lends none). By days left (today and a past deadline count as 0 or
-  less):
+  is drawn under - its milestone, its epic, its parents. Only open, not
+  deferred ancestors lend a priority deadline. A group's column is read from
+  its members, including archived members; a closed group lends none, and an
+  empty group stays in the first column. Deadline limits enforced on writes
+  still count closed ancestors. If needed archive context cannot be read,
+  apply refuses without writing; repair the archive using
+  `moai show --archived` and try again.
+  By days left (today and a past deadline count as 0 or less):
     due_p0_days  = 1      at most this many days left - p0
     due_p1_days  = 2      at most this many - p1
     due_p2_days  = 7      at most this many - p2; more days left, untouched

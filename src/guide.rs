@@ -924,7 +924,11 @@ as `due_beyond_parent`.
 
 **A near deadline raises priority, by one verb.** `moai due apply` (`--dry-run` shows it
 first) raises an open, not deferred issue or backlog item by the deadline it follows —
-the earliest of its own and those of the milestone, epic and open parent it stands under. One
+the earliest of its own and those of the open, not deferred milestone, epic and parents it
+stands under. A group's column comes from its members, including archived members: a closed
+group lends no priority deadline, and an empty group stays in the first column. Deadline limits
+enforced on writes still count closed ancestors. If needed archive context cannot be read, this command
+refuses without writing; repair the archive with `moai show --archived` and try again. One
 day left or less (today and past included) is `p0`, two or less `p1`, seven or less `p2`,
 and it leaves on the row a note `Due-priority: pX → pY (N days left, due D)` in the same
 write, ending in `from <id>` when the deadline was that row's. It only raises, never
@@ -988,8 +992,9 @@ column, it is running. There is no command that opens it and no new field.
   for you, not a refusal. What is already picked up is simply finished — the same ground as never taking work back late
 - If two milestones are running, both are inside, and the ordering within them is the one below (`p` · deadline · age)
 - **Within one `p` the nearer deadline comes first**, whether a milestone runs or not, and a
-  row with none comes last. It follows the earliest deadline of the row, its milestone, epic,
-  and open parents, as `due apply` does. Where a milestone runs, its work still comes before outside work of the same `p`
+  row with none comes last. It follows the earliest deadline of the row and its open,
+  not deferred milestone, epic and parents, as `due apply` does. Group closure includes
+  archived members. Where a milestone runs, its work still comes before outside work of the same `p`
 - **A setup with only two columns has no running milestone** — there is no column
   that says "started but not finished", so the rule itself does not stand. In that
   setup `ready` and the board are as they were"#;
