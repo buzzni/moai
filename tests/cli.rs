@@ -7365,6 +7365,65 @@ fn due_apply_does_not_follow_a_closed_parent() {
     assert_eq!(v["priority"], 3);
 }
 
+/// Shipped live groups keep reading done after their work moves to archive storage. A parked
+/// backlog is not group work; reopening the milestone or epic must restore only that group's date.
+#[test]
+fn due_apply_reads_archived_group_closure_and_reopened_groups() {
+    let s = init("due-archived-closure");
+    let p = s.path();
+    let stone = field(&ok(p, &["milestone", "add", "shipped", "--due", "2026-09-05", "--json"]), "id");
+    let epic =
+        field(&ok(p, &["epic", "add", "finished", "--milestone", &stone, "--due", "2026-09-04", "--json"]), "id");
+    let finished = add(p, &["shipped work", "--parent", &epic]);
+    ok(p, &["mv", &finished, "done"]);
+    let epic_line = line_of(p, &epic);
+    let later = "2026-10-01T00:00:00Z";
+    ok_at(p, later, &["archive"]);
+    assert!(!issues(p).contains(&finished), "fixture did not archive finished work");
+    assert!(!issues(p).contains(&format!(r#""id":"{epic}""#)), "fixture did not archive epic");
+    // Restore only the group; its completed work remains in the archive. Milestones stay live.
+    std::fs::write(p.join(".moai/issues.jsonl"), format!("{}{epic_line}\n", issues(p))).unwrap();
+    ok(p, &["archive", "--drop", &epic]);
+    let stored = std::fs::read_to_string(p.join(".moai/archive/2026.jsonl")).unwrap();
+    assert!(stored.contains(&finished), "restoring the group restored its work too");
+    let parked_epic = field(&ok(p, &["backlog", "add", "epic follow-up", "-e", &epic, "-p", "3", "--json"]), "id");
+    let parked_stone =
+        field(&ok(p, &["backlog", "add", "release follow-up", "--milestone", &stone, "-p", "3", "--json"]), "id");
+    let unrelated = add(p, &["own deadline forces the write pass", "--due", "2026-09-11", "-p", "3"]);
+    let snapshot = issues(p);
+    let dry: serde_json::Value =
+        serde_json::from_str(&ok_at(p, later, &["due", "apply", "--dry-run", "--json"])).unwrap();
+    assert_eq!(dry["raised"].as_array().unwrap().len(), 1, "closed groups raised backlog: {dry}");
+    assert_eq!(dry["raised"][0]["id"], unrelated, "{dry}");
+    assert_eq!(issues(p), snapshot, "preview wrote the snapshot");
+    let applied: serde_json::Value = serde_json::from_str(&ok_at(p, later, &["due", "apply", "--json"])).unwrap();
+    assert_eq!(applied["raised"], dry["raised"], "locked pass changed group closure");
+    let board = ok_at(p, later, &["status", "--json"]);
+    assert!(!board.contains("due_priority_behind"), "board disagrees with apply: {board}");
+    for id in [&parked_epic, &parked_stone] {
+        let shown: serde_json::Value = serde_json::from_str(&ok(p, &["show", id, "--json"])).unwrap();
+        assert_eq!(shown["priority"], 3, "{shown}");
+    }
+
+    // A new member reopens the milestone, but the restored epic still reads done.
+    add(p, &["new release work", "--milestone", &stone, "-p", "0"]);
+    let raises = |args: &[&str]| -> serde_json::Value { serde_json::from_str(&ok_at(p, later, args)).unwrap() };
+    let reopened = raises(&["due", "apply", "--dry-run", "--json"]);
+    assert_eq!(reopened["raised"].as_array().unwrap().len(), 2, "{reopened}");
+    for r in reopened["raised"].as_array().unwrap() {
+        assert_eq!(r["due_from"], stone, "closed epic date survived: {reopened}");
+        assert_eq!(r["due_on"], "2026-09-05", "{reopened}");
+    }
+    // Reopening the epic exposes its earlier date again.
+    add(p, &["new epic work", "--parent", &epic, "-p", "0"]);
+    let dry = raises(&["due", "apply", "--dry-run", "--json"]);
+    let row = dry["raised"].as_array().unwrap().iter().find(|r| r["id"] == parked_epic).unwrap();
+    assert_eq!(row["due_from"], epic, "{dry}");
+    assert_eq!(row["due_on"], "2026-09-04", "{dry}");
+    let applied = raises(&["due", "apply", "--json"]);
+    assert_eq!(applied["raised"], dry["raised"], "{applied}");
+}
+
 /// **`moai tui --json` 의 알림 수도 `moai status` 와 같다**(moai-dr8a.rl4, 리뷰) — 기한에 뒤처진 우선순위는 날 판정에
 /// 닿아 셈에 안 접히므로, 든 수만 내던 판은 그 알림을 빼고 층의 `+N`·보드보다 하나 적게 댔다.
 #[test]

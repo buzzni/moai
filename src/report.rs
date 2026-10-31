@@ -2240,6 +2240,11 @@ pub fn group_stands_in<'a, 'c>(
         .collect()
 }
 
+/// Use the already reduced stands, including their last-row-wins handling of duplicate groups.
+fn closed_group_ids(stands: &BTreeMap<GroupKey<'_>, Stand<'_, '_>>) -> BTreeSet<String> {
+    stands.iter().filter(|(_, s)| s.column == crate::config::DONE).map(|((_, id), _)| id.to_string()).collect()
+}
+
 /// 막음을 가르는 데 드는 묶음 쪽 재료 — 읽은 칸과, 제 칸대로가 아닌 묶음이 기다리는
 /// 것([`Waits`]). 한 번의 셈에서 둘로 가른다.
 ///
@@ -3284,7 +3289,7 @@ pub struct DueLadder<'m, 'a> {
     /// 기한 든 조상 가운데 미룬 줄(물려받은 미룸 포함). 조상은 `Lines::at` 이 고르는 줄이므로 id 로 든다.
     off: BTreeSet<&'a str>,
     /// 우선순위 천장을 물을 때만 짓는다. 쓰기의 천장은 닫힌 그룹도 센다.
-    closed_groups: std::cell::OnceCell<BTreeSet<&'a str>>,
+    closed_groups: std::cell::OnceCell<BTreeSet<String>>,
 }
 
 impl<'m, 'a> DueLadder<'m, 'a> {
@@ -3320,6 +3325,13 @@ impl<'m, 'a> DueLadder<'m, 'a> {
             BTreeSet::new()
         };
         DueLadder { lines, epic_of, off, closed_groups: std::cell::OnceCell::new() }
+    }
+
+    /// Reuse group closure from the caller's archive-aware context. Ancestors and write ceilings
+    /// still come from this ladder's live maps; only priority ceilings consult this set.
+    fn with_closed_groups(mut self, closed: BTreeSet<String>) -> Self {
+        self.closed_groups = std::cell::OnceCell::from(closed);
+        self
     }
 
     /// 그 줄의 조상 가운데 가장 이른 기한. 기한 든 조상이 없으면 `None` 이다. 꼴이 틀린 기한은
@@ -3404,7 +3416,7 @@ impl<'m, 'a> DueLadder<'m, 'a> {
     /// 빠져나갈 길이 부모의 기한을 지우는 것뿐이었다. 보드의 `overdue` 가 닫힌 줄을 안 세는 것과 같은 자다.
     ///
     /// 묶음은 **멤버에서 읽은 칸**으로 가른다 — 저장된 `status` 는 뜻이 없다. 빈 묶음은 첫 칸이고,
-    /// 남은 멤버를 미뤄 닫은 묶음도 빠진다. 쓰기의 위계 검사는 이것이 아니라 [`DueLadder::ceiling`] 이다.
+    /// 남은 멤버를 미뤄 닫은 묶음도 빠진다. Archive-aware callers supply their existing closure. 쓰기의 위계 검사는 이것이 아니라 [`DueLadder::ceiling`] 이다.
     pub fn open_ceiling(&self, i: &'a Issue) -> Option<Ceiling<'a>> {
         let above: Vec<&'a str> = self
             .above(i)
@@ -3421,7 +3433,7 @@ impl<'m, 'a> DueLadder<'m, 'a> {
 
     /// 묶음 칸의 `done` 판정([`reads_done`])에 쓰는 같은 멤버와 미룸의 자를 빌린다.
     /// 우선순위 천장을 실제로 물을 때 한 번만 짓고, 쓰기의 천장에는 이 셈을 더하지 않는다.
-    fn closed_groups(&self) -> &BTreeSet<&'a str> {
+    fn closed_groups(&self) -> &BTreeSet<String> {
         self.closed_groups.get_or_init(|| {
             let all = self.lines.all;
             let kind_of = kinds(all);
@@ -3440,7 +3452,7 @@ impl<'m, 'a> DueLadder<'m, 'a> {
             for g in all.iter().filter(|g| is_group(g) && !is_eclipsed(&kind_of, g)) {
                 done.insert(g.id.as_str(), reads_done(&counted(g, &members, shelf.as_ref(), &off)));
             }
-            done.into_iter().filter(|(_, d)| *d).map(|(id, _)| id).collect()
+            done.into_iter().filter(|(_, d)| *d).map(|(id, _)| id.to_string()).collect()
         })
     }
 
@@ -4553,6 +4565,8 @@ struct Picking<'a> {
     /// 줄마다 — 계획에서 뺀 줄([`shelved_over`]). `issues` 와 자리가 같다.
     off: Vec<Option<&'a str>>,
     progress: BTreeMap<&'a str, u8>,
+    /// Archive-aware closure from the same stands that supply progress and running milestones.
+    closed_groups: BTreeSet<String>,
     /// 도는 마일스톤 — 거르개를 걸 때만 쓴다.
     running: Vec<&'a Issue>,
     /// 막음·미룸·열린 자식을 거친 후보. 차례도 마일스톤 거르개도 아직 안 걸었다.
@@ -4602,6 +4616,10 @@ impl<'a> Picking<'a> {
         let out_of_plan: BTreeSet<&str> = roots.keys().copied().collect();
         // **줄 지도도 한 벌이다** — [`Lines`] 가 이미 든 그 지도다(리뷰 moai-jk2u.m60).
         let running = running_in(cfg, &lines.by_id, &stands, &out_of_plan);
+        let closed_groups = match issues.iter().any(|i| i.deadline().is_some()) {
+            true => closed_group_ids(&stands),
+            false => BTreeSet::new(),
+        };
         let (states, waits) = split_stands(stands);
         // **종류 지도는 한 벌이다**(리뷰) — `eclipsed(issues)` 는 제 안에서 [`kinds`] 를 또 짓는데
         // [`Ties`] 가 이미 하나 지었다. `rollups`·`group_members` 가 같은 자리에서 걷어낸 그것이다.
@@ -4624,7 +4642,7 @@ impl<'a> Picking<'a> {
                 false => Ties::epics_only(rows),
             }
         });
-        Picking { issues, ties, due_ties, off, progress, running, open }
+        Picking { issues, ties, due_ties, off, progress, closed_groups, running, open }
     }
 
     /// 후보에 차례를 매긴다. `focused` 면 도는 마일스톤 밖의 일을 [`Focus::outside`] 로 뺀다.
@@ -4669,11 +4687,10 @@ impl<'a> Picking<'a> {
         // 마일스톤 지도는 **지은 판에만 빌린다**([`Ties::epics_only`] 는 `None`) — 그때는 사다리가 저 지도를 안 읽는다(미룬 줄이
         // 없다). 빈 지도를 "지었다" 로 건네면 두 문이 갈리는 날 미룬 마일스톤의 기한이 말없이 차례에 든다.
         let due_ties = self.due_ties.as_ref().unwrap_or(&self.ties);
-        let ladder = self
-            .issues
-            .iter()
-            .any(|i| i.deadline().is_some())
-            .then(|| DueLadder::over_with_stones(due_ties.lines(), due_ties.epics(), due_ties.stones.as_ref()));
+        let ladder = self.issues.iter().any(|i| i.deadline().is_some()).then(|| {
+            DueLadder::over_with_stones(due_ties.lines(), due_ties.epics(), due_ties.stones.as_ref())
+                .with_closed_groups(self.closed_groups.clone())
+        });
         out.sort_by_cached_key(|&i| {
             let due = followed(i.deadline(), ladder.as_ref().and_then(|l| l.open_ceiling_row(i))).map(|(d, _)| d);
             (
@@ -5830,11 +5847,9 @@ pub struct Raise<'a> {
     pub from: Option<&'a Issue>,
 }
 
-/// `live` 가운데 **기한에 뒤처진 줄** 전부를, 급한 것부터(moai-dr8a) — [`due_candidates`] 를 [`due_in_plan`] 으로
-/// 거른 것이다. `moai due apply` 는 둘을 따로 부른다: 둘 사이에서 아카이브를 펼지 정한다(`cmd::due`).
-///
-/// **시험과 문서만 부른다** — 한 이름으로 둘을 잇는 길을 시험에 남긴다.
-#[cfg(any(test, doc))]
+/// Final priority raises: ancestors and deadlines come only from `live`, while group closure,
+/// inherited deferral and eclipsed rows use the archive-aware `context`.
+/// `cmd::due` first probes with [`due_candidates`] before deciding whether to read archives.
 pub fn due_raises<'a>(
     live: &'a [Issue],
     context: &[Issue],
@@ -5842,31 +5857,58 @@ pub fn due_raises<'a>(
     zone: &crate::tz::Zone,
     rule: &crate::config::DueRule,
 ) -> Vec<Raise<'a>> {
-    due_in_plan(due_candidates(live, now, zone, rule), context)
+    if !rule.auto || !live.iter().any(|i| i.deadline().is_some()) {
+        return Vec::new();
+    }
+    let closed = if live.iter().any(|i| is_group(i) && i.deadline().is_some()) {
+        let context_lines = Lines::of(context);
+        let context_epics = Handing::over(context, &context_lines);
+        DueLadder::over(&context_lines, &context_epics).closed_groups().clone()
+    } else {
+        BTreeSet::new()
+    };
+    due_in_plan(due_candidates_with_closure(live, now, zone, rule, closed), context)
 }
 
-/// `live` 가운데 기한이 올릴 **후보** — 판정은 줄마다 [`due_priority`] 다. **계획 밖(물려받은 미룸)과 가려진 줄은 아직
-/// 안 걸렀다** — 그것은 [`due_in_plan`] 이 문맥으로 거른다.
-///
-/// **따르는 기한은 제 것과 조상의 것 가운데 가장 이른 것이다**(Decided alone, moai-dr8a.7rs). 사람의 기한은 계획을
-/// 따라 에픽에 선다(AGENTS 의 갈래 3, 감독의 `Due:` 줄, 일꾼 걸음 1) — 제 기한만 보면 계획의 기한이 멤버를 하나도 안
-/// 올린다. 조상은 쓰기가 위계를 재는 자([`DueLadder`])가 고르는 그대로다 — 선 마일스톤, 든 에픽, 접어 그리는 부모 —
-/// 다만 **닫힌 부모는 안 센다**([`DueLadder::open_ceiling`]). **읽을 때 재고 담지 않는다** — 멤버에 기한을 내려 적으면
-/// 부모를 당길 때마다 멤버를 다 고쳐 써야 한다.
-///
-/// 조상은 **산 줄의 지도로** 찾는다 — `status` 의 알림([`Dues`])과 쓰기의 위계 검사가 그 지도로 재므로, 여기만
-/// 아카이브의 조상을 세면 보드가 말없는 줄을 이 동사가 올린다.
-///
-/// **둘로 가른 까닭**(리뷰) — 미룸을 잴 문맥에는 아카이브가 들 수 있는데(미룬 에픽이 아카이브로 갔어도 그 멤버는 계획
-/// 밖이다), 그것을 늘 펴면 쓰기가 락을 쥔 채 아카이브 전부를 푼다. 펼지는 **이 후보의 조상이 산 줄 밖으로 닿는가**로
-/// 정한다(`cmd::archived_for`) — 미룸을 거른 **뒤의** 줄로 재면 안 된다: 아카이브의 부모가 그 줄이 선 마일스톤을
-/// 바꿔 미룸을 풀 수도 있어, 산 줄만으로 계획 밖이던 줄이 문맥을 펴면 계획 안으로 돌아온다. 후보는 미룸과 무관하게
-/// 산 줄만으로 서므로, 후보가 다 산 줄 안에 머물면 그 미룸의 답도 아카이브와 무관하다.
+/// Conservative candidates before archive loading. Closed ordinary parents are excluded, but
+/// group closure is deliberately unknown: archived members can close a live empty group, and
+/// archived parents can move live members to another group and reopen one that looked closed.
+/// [`due_raises`] recomputes the followed deadline with the final context rather than merely
+/// dropping candidates: removing a closed group's earlier date can expose another ancestor.
+/// Deferral and eclipsing are filtered only after loading, since archive context can undo them.
 pub fn due_candidates<'a>(
     live: &'a [Issue],
     now: &str,
     zone: &crate::tz::Zone,
     rule: &crate::config::DueRule,
+) -> Vec<Raise<'a>> {
+    due_candidates_with_closure(live, now, zone, rule, BTreeSet::new())
+}
+
+/// Candidate rows plus live deadline groups whose archived members can change the final answer.
+/// Non-group ancestors still use `archived_for`'s reference gate; undated groups do not need closure.
+pub fn due_context_ids<'a>(live: &'a [Issue], candidates: &[Raise<'a>]) -> Vec<&'a str> {
+    let lines = Lines::of(live);
+    let epics = Handing::over(live, &lines);
+    let ladder = DueLadder::over(&lines, &epics);
+    let mut ids: BTreeSet<&str> = candidates.iter().map(|r| r.issue.id.as_str()).collect();
+    for r in candidates {
+        ids.extend(
+            ladder
+                .above(r.issue)
+                .into_iter()
+                .filter(|id| lines.at(id).is_some_and(|g| is_group(g) && g.deadline().is_some())),
+        );
+    }
+    ids.into_iter().collect()
+}
+
+fn due_candidates_with_closure<'a>(
+    live: &'a [Issue],
+    now: &str,
+    zone: &crate::tz::Zone,
+    rule: &crate::config::DueRule,
+    closed: BTreeSet<String>,
 ) -> Vec<Raise<'a>> {
     // 기한 든 줄이 없으면 지도를 안 짓는다 — 기한 없는 저장소가 보통이다.
     if !rule.auto || !live.iter().any(|i| i.deadline().is_some()) {
@@ -5875,7 +5917,7 @@ pub fn due_candidates<'a>(
     let today = zone.shift(now);
     let lines = Lines::of(live);
     let epic_of = Handing::over(live, &lines);
-    let ladder = DueLadder::over(&lines, &epic_of);
+    let ladder = DueLadder::over(&lines, &epic_of).with_closed_groups(closed);
     live.iter()
         .filter(|i| due_open(i))
         .filter_map(|i| {
@@ -5888,14 +5930,14 @@ pub fn due_candidates<'a>(
         .collect()
 }
 
-/// 후보([`due_candidates`]) 가운데 **계획 안의 것**을, 급한 것부터. `context` 는 계획 밖을 잴 문맥이다 — 아카이브를
+/// Closure-aware candidates 가운데 **계획 안의 것**을, 급한 것부터. Probe candidates need [`due_raises`] first. `context` 는 계획 밖을 잴 문맥이다 — 아카이브를
 /// 겹쳐 읽은 쪽은 그 겹친 줄을 준다. **물려받은 미룸**과 **가려진 줄**(같은 id 의 다른 종류)을 여기서 거른다 —
 /// `status` 가 기한 경고에서 거르는 것과 같다. 미룬 일이 잔소리를 늘리면 미루기가 경고를 낳는 손잡이가 된다.
 ///
 /// **미룸은 줄마다 묻는다**([`Shelved::root`], moai-u3ta) — `status` 의 알림이 줄마다의 답(`Soil::shelved`)으로 재므로,
 /// id 로 접은 지도로 재면 같은 id 의 쌍둥이에서 알림과 이 동사가 서로 다른 줄을 댄다. 문맥의 줄은 사본이어도 된다 —
 /// `root` 는 내용으로 줄을 찾는다.
-pub fn due_in_plan<'a>(candidates: Vec<Raise<'a>>, context: &[Issue]) -> Vec<Raise<'a>> {
+fn due_in_plan<'a>(candidates: Vec<Raise<'a>>, context: &[Issue]) -> Vec<Raise<'a>> {
     if candidates.is_empty() {
         return candidates;
     }
@@ -5986,11 +6028,12 @@ pub fn status_in<'a>(
     // 산 줄만 든 문맥이라 [`Soil`] 의 지도가 곧 쓰기가 재는 지도다 — 기한의 위계를 재려고 다시 안 짓는다.
     // **기한 든 줄이 없으면 안 빌린다**(리뷰) — [`status_of_context`] 와 같은 문이다. 빌리면 뒤처진 우선순위를 재는
     // 자리가 열린 줄마다 조상을 걷고 늘 `None` 을 받는다 — 훅이 도구 호출마다 이 자리를 지난다.
-    let ladder = issues
-        .iter()
-        .any(|i| i.due_on.is_some())
-        .then(|| DueLadder::over_with_stones(&soil.lines, &soil.epic, Some(&soil.milestone)));
-    status_in_scope(issues, unreadable, cfg, now, soil, soil.stands(issues, cfg), &|_| true, ladder.as_ref())
+    let stands = soil.stands(issues, cfg);
+    let ladder = issues.iter().any(|i| i.due_on.is_some()).then(|| {
+        DueLadder::over_with_stones(&soil.lines, &soil.epic, Some(&soil.milestone))
+            .with_closed_groups(closed_group_ids(&stands))
+    });
+    status_in_scope(issues, unreadable, cfg, now, soil, stands, &|_| true, ladder.as_ref())
 }
 
 /// Combine reference context without letting a stale archive copy eclipse a live row. A live id is a readable row
@@ -6064,7 +6107,9 @@ pub fn status_of_context<'a, 'c>(
         let epic_of = Handing::over(active, &lines);
         (lines, epic_of)
     });
-    let ladder = maps.as_ref().map(|(lines, epic_of)| DueLadder::over(lines, epic_of));
+    let ladder = maps
+        .as_ref()
+        .map(|(lines, epic_of)| DueLadder::over(lines, epic_of).with_closed_groups(closed_group_ids(&stands)));
     status_in_scope(all, unreadable, cfg, now, soil, stands, &|i| visible.contains(i.id.as_str()), ladder.as_ref())
 }
 
@@ -6993,6 +7038,106 @@ mod tests {
         all.push(kept);
         all[2].deferred_at = Some("2026-10-01T00:00:00Z".into());
         assert_eq!(raises(&all), [("argos-bbbb".into(), Some("argos-ssss".into()))]);
+    }
+
+    #[test]
+    fn due_archive_gate_reaches_only_candidates_and_their_dated_groups() {
+        let mut stone = make("argos-ssss", Kind::Milestone, "todo");
+        stone.due_on = Some("2026-10-17".into());
+        let mut undated = make("argos-eeee", Kind::Epic, "todo");
+        undated.milestone = Some(stone.id.clone());
+        let mut own = make("argos-aaaa", Kind::Issue, "todo");
+        own.due_on = Some("2026-10-17".into());
+        let mut member = member("argos-bbbb", "argos-eeee", "todo");
+        member.priority = Some(3);
+        let mut unrelated = make("argos-uuuu", Kind::Epic, "todo");
+        unrelated.due_on = Some("2026-10-17".into());
+        let mut rows = vec![stone, undated, own, member, unrelated];
+        let rule = crate::config::DueRule::DEFAULT;
+        let now = "2026-10-16T00:00:00Z";
+        let ids = |rows: &[Issue]| {
+            due_context_ids(rows, &due_candidates(rows, now, utc(), &rule))
+                .into_iter()
+                .map(str::to_string)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(ids(&rows), ["argos-aaaa", "argos-bbbb", "argos-ssss"]);
+        // Own-date work below undated groups and unrelated dated groups need no member archive.
+        rows[0].due_on = None;
+        rows[3].due_on = Some("2026-10-17".into());
+        assert_eq!(ids(&rows), ["argos-aaaa", "argos-bbbb"]);
+        rows[2].priority = Some(0);
+        rows[3].priority = Some(0);
+        assert!(ids(&rows).is_empty(), "no candidates must never request archive context");
+    }
+
+    #[test]
+    fn archived_closure_drives_due_status_and_sorting_with_live_deadline_ancestors() {
+        let now = "2026-10-16T00:00:00Z";
+        let mut stone = make("argos-ssss", Kind::Milestone, "todo");
+        stone.due_on = Some("2026-10-01".into());
+        let mut finished = make("argos-dddd", Kind::Issue, "done");
+        finished.milestone = Some(stone.id.clone());
+        // The archive parent moves this child out of the milestone in context. The deadline
+        // ladder still reads its live placement, but closure must use the board's context.
+        let parent = make("argos-pppp", Kind::Issue, "done");
+        let mut child = make("argos-pppp.ccc", Kind::Issue, "todo");
+        child.milestone = Some(stone.id.clone());
+        let mut own = make("argos-aaaa", Kind::Issue, "todo");
+        own.due_on = Some("2026-10-17".into());
+        let mut live = vec![stone, child, own];
+        let archive = vec![finished, parent];
+        let verify = |live: &[Issue], reopened: bool| {
+            let all = with_archive(live, &archive, &BTreeSet::new());
+            let raised = due_raises(live, &all, now, utc(), &crate::config::DueRule::DEFAULT);
+            let ids: Vec<_> = raised.iter().map(|r| r.issue.id.as_str()).collect();
+            let expected = if reopened { vec!["argos-pppp.ccc", "argos-aaaa"] } else { vec!["argos-aaaa"] };
+            assert_eq!(ids, expected);
+            let board = status_with_archive(live, &archive, &[], &cfg(), now, utc());
+            let notice = board.notices.iter().find(|w| w.kind == "due_priority_behind").unwrap();
+            assert_eq!(notice.ids, expected, "status disagrees with apply");
+            let ordered = Picking::with_live(&all, live, &cfg()).picks(false).0;
+            let relevant: Vec<_> = ordered.iter().filter(|r| r.priority() == 2).map(|r| r.id.as_str()).collect();
+            assert_eq!(
+                relevant,
+                if reopened { vec!["argos-pppp.ccc", "argos-aaaa"] } else { vec!["argos-aaaa", "argos-pppp.ccc"] }
+            );
+        };
+        verify(&live, false);
+        let mut reopened = make("argos-rrrr", Kind::Issue, "todo");
+        reopened.milestone = Some("argos-ssss".into());
+        reopened.priority = Some(0);
+        live.push(reopened);
+        verify(&live, true);
+    }
+
+    #[test]
+    fn archived_context_reopens_a_live_closed_group_before_due_filtering() {
+        let now = "2026-10-16T00:00:00Z";
+        let rule = crate::config::DueRule::DEFAULT;
+        let mut stone = make("argos-ssss", Kind::Milestone, "todo");
+        stone.due_on = Some("2026-10-17".into());
+        let mut done = make("argos-dddd", Kind::Issue, "done");
+        done.milestone = Some(stone.id.clone());
+        let mut parked = make("argos-bbbb", Kind::Backlog, "todo");
+        parked.milestone = Some(stone.id.clone());
+        let child = make("argos-pppp.ccc", Kind::Issue, "todo");
+        let live = vec![stone, done, parked, child];
+        assert!(due_raises(&live, &live, now, utc(), &rule).is_empty());
+        // A live-only closure filter here would produce no candidates and never read the archive.
+        let probe = due_candidates(&live, now, utc(), &rule);
+        assert_eq!(probe.iter().map(|r| r.issue.id.as_str()).collect::<Vec<_>>(), ["argos-bbbb"]);
+        assert!(due_context_ids(&live, &probe).contains(&"argos-ssss"));
+        let mut archived_parent = make("argos-pppp", Kind::Issue, "done");
+        archived_parent.milestone = Some("argos-ssss".into());
+        let archive = vec![archived_parent];
+        let context = with_archive(&live, &archive, &BTreeSet::new());
+        let raised = due_raises(&live, &context, now, utc(), &rule);
+        assert_eq!(raised.iter().map(|r| r.issue.id.as_str()).collect::<Vec<_>>(), ["argos-bbbb"]);
+        // Archived membership reopens the group, but its date is still not lent to the live child.
+        let board = status_with_archive(&live, &archive, &[], &cfg(), now, utc());
+        let notice = board.notices.iter().find(|w| w.kind == "due_priority_behind").unwrap();
+        assert_eq!(notice.ids, ["argos-bbbb"]);
     }
 
     /// **문맥은 미룸을 풀기도 한다**(리뷰) — 그래서 `moai due apply` 는 아카이브를 펼지를 미룸을 거르기 **전**의 후보로

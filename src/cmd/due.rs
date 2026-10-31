@@ -61,10 +61,11 @@ pub fn run(ctx: &Ctx, cmd: DueCmd) -> R<Vec<String>> {
 
 /// 판정을 제 것으로 든다 — 판정은 빌린 줄을 내고, 쓰기는 그 줄을 고친다. 올리는 것은 **산 줄뿐이다**.
 ///
-/// **아카이브는 후보가 산 줄 밖으로 닿을 때만 편다**(리뷰, [`super::archived_for`]) — 그 줄들은 계획 밖을 잴 문맥(아카이브로
-/// 간 미룬 조상)일 뿐인데, 쓰기는 이것을 락을 쥔 채 부른다. 기한 든 줄이 하나라도 서면 늘 펴던 판은 감독의 회차마다 락
-/// 너머로 아카이브 전부를 풀었다(moai-bth3·moai-tzzt 가 쓰기 길에서 걷어 낸 그것이다). 닿는지는 **미룸을 거르기 전의
-/// 후보**로 잰다([`crate::report::due_candidates`]) — 까닭은 거기 적었다. 판단은 `report`·`archive` 의 것이고 여기는 잇기만 한다.
+/// Probe before reading archives. A candidate that reaches outside live references needs deferral
+/// context; a live dated group above it needs archived members to determine closure. Only those
+/// groups are added by `due_context_ids`, so an unrelated group or an undated group does not
+/// make an own-deadline write load the archive under the lock. The final pass recomputes deadlines
+/// with archive-aware closure, keeping deadline ancestors and all writes in the live snapshot.
 fn judged(
     root: &std::path::Path,
     issues: &[model::Issue],
@@ -77,10 +78,10 @@ fn judged(
     if candidates.is_empty() {
         return Ok(Vec::new());
     }
-    let ids: Vec<&str> = candidates.iter().map(|r| r.issue.id.as_str()).collect();
-    let archived = super::archived_for(root, issues, &ids)?;
+    let ids = crate::report::due_context_ids(issues, &candidates);
+    let archived = super::archived_with_groups(root, issues, &ids)?;
     let context = super::in_context(issues, &archived, unread);
-    Ok(crate::report::due_in_plan(candidates, &context).iter().map(Raised::of).collect())
+    Ok(crate::report::due_raises(issues, &context, now, zone, rule).iter().map(Raised::of).collect())
 }
 
 fn apply(ctx: &Ctx, dry_run: bool) -> R<Vec<String>> {
