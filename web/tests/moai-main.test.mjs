@@ -28,7 +28,7 @@ const until = async (check) => {
   assert.fail('the page did not reach the expected state')
 }
 
-async function page(t, { holdFirst = false, initialTab, chartFailures = 0 } = {}) {
+async function page(t, { holdFirst = false, initialTab, chartFailures = 0, fakeStream = false } = {}) {
   const dom = new JSDOM('<!doctype html><html><body><div id="moai-app"></div></body></html>', {
     url: 'http://localhost:6624/', runScripts: 'outside-only', pretendToBeVisual: true,
   })
@@ -36,10 +36,23 @@ async function page(t, { holdFirst = false, initialTab, chartFailures = 0 } = {}
   if (initialTab) dom.window.localStorage.setItem('moai.web', JSON.stringify({ tab: initialTab }))
   const trees = []
   const requests = []
+  const posts = []
+  const streams = []
+  if (fakeStream) dom.window.EventSource = class {
+    constructor(url) { this.url = url; this.listeners = {}; this.closed = false; streams.push(this) }
+    addEventListener(name, listener) { this.listeners[name] = listener }
+    close() { this.closed = true }
+    stamp(value) { this.listeners.stamp({ data: JSON.stringify({ stamp: value }) }) }
+    hello(tab, token) { this.listeners.hello({ data: JSON.stringify({ tab, token }) }) }
+    ctl(seq, request) { this.listeners.ctl({ data: JSON.stringify({ seq, request }) }) }
+    proposal(entry) { this.listeners.proposal({ data: JSON.stringify(entry) }) }
+    proposalClosed(id) { this.listeners.proposal_closed({ data: JSON.stringify({ id }) }) }
+  }
   let release
-  dom.window.fetch = async (path) => {
+  dom.window.fetch = async (path, init = {}) => {
     const url = new URL(path, dom.window.location.href)
     requests.push(url.pathname)
+    if (init.method === 'POST') posts.push({ url, init })
     let body
     if (url.pathname === '/api/boot') body = boot
     else if (url.pathname === '/api/stamp') body = { stamp: 'unchanged' }
@@ -55,14 +68,61 @@ async function page(t, { holdFirst = false, initialTab, chartFailures = 0 } = {}
       else out = []
       body = { exit: 0, out }
     }
-    return { status: 200, text: async () => JSON.stringify(body) }
+    return { status: 200, ok: true, text: async () => JSON.stringify(body) }
   }
   dom.window.eval(code)
   await until(() => trees.length > 0)
   const tab = (id) => dom.window.document.querySelector(`[role=tab][data-tab="${id}"]`)
   const bars = () => dom.window.document.querySelectorAll('.g-lanes .b-plan').length
-  return { dom, trees, requests, tab, bars, release: () => release?.() }
+  return { dom, trees, requests, posts, streams, tab, bars, release: () => release?.() }
 }
+
+test('a ctl event changes the visible theme and replies with the tab token', async (t) => {
+  const p = await page(t, { fakeStream: true })
+  const source = p.streams[0]
+  source.onopen()
+  source.hello('123.1', 'token')
+  source.ctl(7, { verb: 'theme', name: 'dark' })
+  await until(() => p.posts.some(({ url }) => url.pathname === '/api/ctl/123.1'))
+  const posted = p.posts.find(({ url }) => url.pathname === '/api/ctl/123.1')
+  assert.equal(posted.url.searchParams.get('seq'), '7')
+  assert.equal(posted.url.searchParams.get('token'), 'token')
+  assert.equal(JSON.parse(posted.init.body).ok, true)
+  assert.equal(p.dom.window.document.documentElement.dataset.theme, 'dark')
+  assert.equal(JSON.parse(p.dom.window.localStorage.getItem('moai.web')).theme, 'dark')
+})
+
+test('a suggestion card waits for the person, then runs its action and posts the answer', async (t) => {
+  const p = await page(t, { fakeStream: true })
+  const source = p.streams[0]
+  source.onopen()
+  source.hello('123.1', 'token')
+  source.proposal({ id: '123.1/1', text: 'Use dark theme?', then: { verb: 'theme', name: 'dark' }, remaining_ms: 900000 })
+  const card = p.dom.window.document.querySelector('.m-proposal')
+  assert.match(card.textContent, /» Suggestion/)
+  assert.equal(card.hidden, false)
+  card.querySelectorAll('button')[2].click()
+  await until(() => p.posts.some(({ url }) => url.pathname === '/api/ctl/123.1/proposal'))
+  const answer = p.posts.find(({ url }) => url.pathname === '/api/ctl/123.1/proposal')
+  assert.equal(answer.url.searchParams.get('token'), 'token')
+  assert.equal(answer.url.searchParams.get('id'), '123.1/1')
+  assert.equal(JSON.parse(answer.init.body).state, 'accepted')
+  assert.equal(JSON.parse(answer.init.body).ran.ok, true)
+  assert.equal(p.dom.window.document.documentElement.dataset.theme, 'dark')
+  await until(() => card.hidden)
+})
+
+test('the page reads changed stamps from its event stream and ignores repeats', async (t) => {
+  const p = await page(t, { fakeStream: true })
+  await until(() => p.streams.length === 1 && p.trees.length === 1)
+  p.streams[0].onopen()
+  p.streams[0].stamp('changed')
+  await until(() => p.trees.length === 2)
+  p.streams[0].stamp('changed')
+  await new Promise((resolve) => setTimeout(resolve, 20))
+  assert.equal(p.trees.length, 2)
+  assert.equal(p.streams[0].url, '/api/events?worktree=1')
+})
 
 test('opening Gantt fetches values once and subsequent visits reuse them', async (t) => {
   const p = await page(t)

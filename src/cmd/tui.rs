@@ -415,6 +415,17 @@ fn screen(mut app: App) -> R<Vec<String>> {
     // 101 번 패닉이 나고, `--json` 으로 부른 쪽은 약속된 오류 객체 대신
     // 역추적 문구를 받는다. 여기서 받아 `Fail` 로 바꾼다.
     let lang = app.site.lang;
+    app.ctl_root = app.site.repo.as_ref().map(|r| r.root.display().to_string()).unwrap_or_default();
+    let control = match crate::ctl::serve::Listener::bind_proposals(app.proposals.clone()) {
+        Ok(listener) => Some(listener),
+        // No control socket on this OS (Windows) is documented, not trouble to raise in red on every start.
+        Err(e) if e.kind() == std::io::ErrorKind::Unsupported => None,
+        Err(e) => {
+            app.trouble =
+                Some(crate::i18n::fill(crate::i18n::say(lang, "tui.ctl.unavailable"), &[("why", &e.to_string())]));
+            None
+        }
+    };
     let mut term = ratatui::try_init().map_err(|e| {
         Fail::new(crate::i18n::fill(crate::i18n::say(lang, "tui.no_terminal"), &[("why", &e.to_string())]))
     })?;
@@ -433,8 +444,10 @@ fn screen(mut app: App) -> R<Vec<String>> {
     // 올렸다면 raw·대체 화면인 채로 셸에 남는다. 걷은 뒤 패닉 글을 **한 번 더** 낸다: 훅이 낸
     // 글은 그 뒤에도 루프가 그린 한 프레임에 덮였을 수 있다.
     let mut left = Vec::new();
-    let out =
-        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| loop_until_quit(&mut term, &mut app, &mut left)));
+    let out = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        loop_until_quit(&mut term, &mut app, &mut left, control.as_ref())
+    }));
+    drop(control);
     // 루프는 사건마다 터미널의 잡기를 `wants_mouse` 에 맞춰 두므로, 제대로 끝난 자리의 값이 곧 터미널의 것이다.
     // 오류·패닉으로 끝난 길에서는 어긋날 수 있는데, 그때 드는 것은 헛 왕복 한 번이지 새는 글이 아니다.
     modes_off_draining(app.wants_mouse(), app.rolled_at);
@@ -1562,6 +1575,12 @@ fn keep_unsaved(app: &App) {
     }
 }
 
+/// A person's event, as the tests hand it over without a loop ([`take_as`]).
+#[cfg(test)]
+fn take(app: &mut App, ev: Event) -> bool {
+    take_as(app, ev, true)
+}
+
 /// 루프가 받은 사건 하나를 탐색기에 넘긴다. **터미널 없이 시험된다.**
 ///
 /// - 키는 **누를 때만** 받는다. crossterm 은 kitty 프로토콜 터미널에서 뗄 때도 보내므로,
@@ -1571,7 +1590,16 @@ fn keep_unsaved(app: &App) {
 /// - 창 크기 따위는 받을 것이 없다. 다음 그림이 새 크기로 그린다
 ///
 /// 참이면 화면이 바뀌었을 수 있다 — 루프가 다시 그린다([`take_burst`]). 거짓은 끌지 않는 포인터의 움직임 하나뿐이다.
-fn take(app: &mut App, ev: Event) -> bool {
+///
+/// `human` is false for an event a ctl request sent: it never counts as the person's last input ([`App::human_input`]).
+fn take_as(app: &mut App, ev: Event, human: bool) -> bool {
+    if human
+        && (matches!(&ev, Event::Key(k) if k.kind == KeyEventKind::Press)
+            || matches!(&ev, Event::Paste(_))
+            || matches!(&ev, Event::Mouse(m) if m.kind != MouseEventKind::Moved))
+    {
+        app.human_input();
+    }
     // Moved still releases a drag if the terminal lost its button-up event.
     let changed = !matches!(&ev, Event::Mouse(m) if m.kind == MouseEventKind::Moved) || app.pointer_dragging();
     // 휠·끌기를 받은 때를 적는다 — 끝낼 때 답 뒤를 더 비울지 가르는 자다([`rolled_lately`], moai-pvpb.m2f).
@@ -1604,6 +1632,15 @@ fn take_burst(
     first: Event,
     mut next: impl FnMut() -> std::io::Result<Option<Event>>,
 ) -> std::io::Result<(bool, Option<Event>)> {
+    take_burst_as(app, first, &mut next, true)
+}
+
+fn take_burst_as(
+    app: &mut App,
+    first: Event,
+    mut next: impl FnMut() -> std::io::Result<Option<Event>>,
+    human: bool,
+) -> std::io::Result<(bool, Option<Event>)> {
     let until = std::time::Instant::now() + BURST;
     let mut ev = first;
     let mut changed = false;
@@ -1614,7 +1651,7 @@ fn take_burst(
         let boundary = matches!(&ev, Event::Resize(..))
             || matches!(&ev, Event::Mouse(m) if matches!(m.kind, MouseEventKind::Down(_) | MouseEventKind::Up(_)));
         let (layout, focus) = (app.layout, app.focus);
-        let moved = take(app, ev);
+        let moved = take_as(app, ev, human);
         changed |= moved;
         keyed |= moved && !pointer;
         let reframed = app.layout != layout || app.focus != focus;
@@ -1702,7 +1739,12 @@ fn spin_step(drew: std::time::Duration) -> std::time::Duration {
 
 /// `q` 가 올 때까지 그리고 받는다. `left` 에는 편집기가 남겼는데 못 읽었거나 신호로 끝나 지우지 않은 파일의 말이
 /// 쌓인다 — [`screen`] 이 터미널을 걷은 뒤 셸에 낸다([`write_in_editor`]).
-fn loop_until_quit(term: &mut DefaultTerminal, app: &mut App, left: &mut Vec<String>) -> std::io::Result<()> {
+fn loop_until_quit(
+    term: &mut DefaultTerminal,
+    app: &mut App,
+    left: &mut Vec<String>,
+    control: Option<&crate::ctl::serve::Listener>,
+) -> std::io::Result<()> {
     // 층에서 시작하면 읽기가 이미 돌 수 있다 — 첫 걸음부터 빠르게 받는다.
     let mut stale_due = std::time::Instant::now() + if app.loading() { LOAD_POLL } else { TICK };
     let mut spin_due = std::time::Instant::now() + SPIN_TICK;
@@ -1715,7 +1757,14 @@ fn loop_until_quit(term: &mut DefaultTerminal, app: &mut App, left: &mut Vec<Str
     let mut dirty = true;
     let mut pending = None;
     let mut step = SPIN_TICK;
+    let mut ctl_until = std::time::Instant::now();
+    let mut last_proposals = Vec::<String>::new();
     while !app.quit {
+        let now_proposals: Vec<_> = app.proposals.rows().iter().map(|row| row.id.clone()).collect();
+        if now_proposals != last_proposals {
+            dirty = true;
+            last_proposals = now_proposals;
+        }
         if dirty {
             let began = std::time::Instant::now();
             // **그리다 선 탈은 다음 그림이 낸다**(moai-w7ms 리뷰) — 배너를 앉힌 뒤에 그리는 자가 세운 탈(`draw::fill_history`
@@ -1742,7 +1791,13 @@ fn loop_until_quit(term: &mut DefaultTerminal, app: &mut App, left: &mut Vec<Str
         // 안 보면 — 키를 누르고 있거나 창을 끄는 내내 — 바뀐 것을 못 본다.
         // 하필 그때가 쓰는 사람이 화면을 보고 있는 때다.
         let wake = if spinning { stale_due.min(spin_due) } else { stale_due };
-        let wait = wake.saturating_duration_since(std::time::Instant::now());
+        let mut wait = wake.saturating_duration_since(std::time::Instant::now());
+        if let Some(expiry) = app.proposals.next_expiry_in() {
+            wait = wait.min(expiry);
+        }
+        if control.is_some() && std::time::Instant::now() < ctl_until {
+            wait = wait.min(std::time::Duration::from_millis(100));
+        }
         let first = match pending.take() {
             Some(e) => Some(e),
             None if event::poll(wait)? => Some(event::read()?),
@@ -1755,6 +1810,25 @@ fn loop_until_quit(term: &mut DefaultTerminal, app: &mut App, left: &mut Vec<Str
             dirty |= changed;
             pending = held;
         }
+        if let Some(control) = control {
+            while let Ok(incoming) = control.incoming.try_recv() {
+                ctl_until = std::time::Instant::now() + std::time::Duration::from_secs(10);
+                if incoming.request.deadline_ms <= crate::ctl::wire::now_ms() {
+                    continue;
+                }
+                let answer = if matches!(&incoming.request.verb, crate::ctl::wire::Verb::Keys { .. }) {
+                    app.ctl_keys(&incoming.request, |app, event| {
+                        let _ = take_burst_as(app, event, || Ok(None), false)?;
+                        painter.draw(term, app)?;
+                        Ok(())
+                    })
+                } else {
+                    app.ctl(&incoming.request)
+                };
+                let _ = incoming.answer.send(answer);
+                dirty = true;
+            }
+        }
         if app.wants_mouse() != caught {
             caught = app.wants_mouse();
             let _ = mouse_capture(&mut std::io::stdout(), caught);
@@ -1762,6 +1836,16 @@ fn loop_until_quit(term: &mut DefaultTerminal, app: &mut App, left: &mut Vec<Str
         // 키가 편집기를 청했으면(`n`) 터미널을 넘긴다. 받은 글은 App 이 담는다 — 담을 곳은 연
         // 순간 박힌 그대로 요청에 실려 왔다.
         if let Some(edit) = app.edit.take() {
+            // The owner loop cannot answer while the editor holds this terminal. Cache only its hello reply; the
+            // listener keeps it visible to `ctl ls` and returns person_busy to every action until this loop resumes.
+            if let Some(control) = control {
+                control.editor_begin(
+                    app.ctl(&crate::ctl::wire::request(
+                        crate::ctl::wire::Verb::Hello,
+                        std::time::Duration::from_secs(5),
+                    )),
+                );
+            }
             suspend(caught, app.rolled_at);
             let got = write_in_editor(&edit.editor, &edit.text, &std::env::temp_dir(), app.site.lang, left);
             // **받은 글을 올리기보다 먼저 담는다.** 올리기가 실패하면 루프가 끝나는데, 먼저 담아
@@ -1777,6 +1861,9 @@ fn loop_until_quit(term: &mut DefaultTerminal, app: &mut App, left: &mut Vec<Str
             let up = resume(term, caught);
             painter.forget();
             dirty = true;
+            if let Some(control) = control {
+                control.editor_end();
+            }
             EDITING.release();
             up?;
         }

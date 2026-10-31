@@ -19,6 +19,8 @@ The work lives in `.moai/issues.jsonl`. There is no approval gate — create any
     moai stats                             counts: columns, flow, lead and cycle time, AI work
     moai tui                               walk the explorer. SPC n parks a thought
                                            on a group row: l one step · Tab expand all · h fold
+    moai ctl ls · moai ctl state          open windows and their state
+    moai ctl sort|filter|find|wiki … · propose  change a view or ask first
     moai add '<title>' -p 1 -t bug -e <epic>   create
     moai mv <id> in_progress               pick up  →  review  →  done
     moai mv <id> in_progress --take        take over someone else's row (ask first)

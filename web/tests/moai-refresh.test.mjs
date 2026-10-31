@@ -201,6 +201,27 @@ test('a failed manual refresh retries even when the stamp was already seen', asy
   }
 })
 
+test('a pushed stamp whose read failed is read again while the stream keeps the timer paused', async () => {
+  for (const failure of [false, 'failed']) {
+    const clock = fakeClock()
+    const outcomes = [failure, true]
+    let reads = 0
+    const refresher = createRefresher({
+      load: async () => outcomes[reads++], stamp: async () => 'b', visibility: fakeVisibility(), clock,
+    })
+    refresher.pause()
+    await refresher.saw('b')
+    assert.equal(reads, 1)
+    // The server pushes a stamp only when it changes: nothing else would read this one again.
+    await clock.advance(failure === 'failed' ? BACKOFF_MS : POLL_MS)
+    assert.equal(reads, 2, 'the pushed stamp is retried while paused')
+    await clock.advance(BACKOFF_MS)
+    assert.equal(reads, 2, 'a read that took ends the retry')
+    assert.equal(clock.pending(), 0, 'and leaves no timer while the stream is up')
+    refresher.stop()
+  }
+})
+
 test('reads that fail against a server that answers back off to 10 s and say so once; a cancel does not', async () => {
   const clock = fakeClock()
   const server = fakeServer()

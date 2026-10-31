@@ -181,6 +181,7 @@ struct Adrift {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Mode {
     Browse,
+    Proposals(usize),
     /// `/` 로 연 빠른 검색. 곁의 것은 찾을 자리 — 칸의 Tab·Shift-Tab 이 돌린다(moai-kojj).
     Grep(Input, GrepIn),
     /// `f` 로 연 거름망. **CLI 와 같은 `항목=값` 문법이다.**
@@ -1429,7 +1430,21 @@ pub struct Site {
     pub unfound: Option<String>,
 }
 
+struct CtlTurn {
+    actor: Option<crate::model::Actor>,
+    error: Option<crate::ctl::wire::Reply>,
+}
+
 pub struct App {
+    ctl_turn: Option<CtlTurn>,
+    ctl_owner: bool,
+    proposal_back: Option<Box<Mode>>,
+    ctl_opened: bool,
+    pub proposals: std::sync::Arc<crate::ctl::proposal::Book>,
+    /// Repository from which this window was opened, even while the overview shows another project.
+    pub ctl_root: String,
+    /// Only terminal input changes target recency; ctl requests never do.
+    pub last_human: std::time::Instant,
     /// Whether the current background poll changed something the screen can show.
     follow_changed: bool,
     /// 지금 선 프로젝트에 딸린 것 — 줄·색인·설정과 그 안에서 선 자리([`Site`]).
@@ -1782,6 +1797,793 @@ pub struct App {
     /// 루프에 맡긴 "편집기로 열어 달라". **App 은 터미널을 모른다** — 터미널을 내리고 편집기를
     /// 기다리고 다시 올리는 것은 루프가 하고, 받은 글은 [`App::edited`] 로 돌려준다.
     pub edit: Option<Edit>,
+}
+
+impl App {
+    fn answer_proposal(&mut self, accepted: bool) {
+        let at = match self.mode {
+            Mode::Proposals(at) => at,
+            _ => 0,
+        };
+        let Some(row) = self.proposals.rows().into_iter().nth(at) else { return };
+        if let Some(back) = self.proposal_back.take() {
+            self.mode = *back;
+        }
+        let ran = if accepted {
+            row.then.map(|verb| {
+                let request = crate::ctl::wire::request(verb, std::time::Duration::from_secs(5));
+                // This path is reached only from a person's key. App::write resolves the window owner's identity.
+                self.ctl_owner = true;
+                let result = self.ctl(&request);
+                self.ctl_owner = false;
+                // **What the accepted action left open is the person's** — their key ran it. `ctl_end` marked it
+                // ctl-opened, which let the next ctl request type into the form or the "who are you" prompt.
+                self.ctl_opened = false;
+                result
+            })
+        } else {
+            None
+        };
+        let failed = ran.as_ref().filter(|r| !r.ok).map(|r| r.message.clone().unwrap_or_default());
+        self.proposals.finish(&row.id, if accepted { "accepted" } else { "declined" }, ran);
+        self.notice = Some(match failed {
+            Some(why) => fill(say(self.site.lang, "tui.propose.failed"), &[("why", &why)]),
+            None if accepted => say(self.site.lang, "tui.propose.accepted").into(),
+            None => say(self.site.lang, "tui.propose.declined").into(),
+        });
+    }
+
+    fn proposal_key(&mut self, key: ratatui::crossterm::event::KeyEvent) {
+        use keys::Key;
+        use ratatui::crossterm::event::KeyCode;
+        let count = self.proposals.rows().len();
+        if Key::plain('y').matches(key) {
+            self.answer_proposal(true);
+        } else if Key::plain('n').matches(key) {
+            self.answer_proposal(false);
+        } else if Key::any(KeyCode::Esc).matches(key) {
+            self.mode = self.proposal_back.take().map_or(Mode::Browse, |back| *back);
+        } else if let Mode::Proposals(at) = &mut self.mode {
+            if Key::plain('j').matches(key) || Key::any(KeyCode::Down).matches(key) {
+                *at = (*at + 1).min(count.saturating_sub(1));
+            } else if Key::plain('k').matches(key) || Key::any(KeyCode::Up).matches(key) {
+                *at = at.saturating_sub(1);
+            }
+        }
+    }
+
+    pub fn human_input(&mut self) {
+        self.last_human = std::time::Instant::now();
+        self.ctl_opened = false;
+    }
+
+    /// Snapshot for the local control socket. This stays on the event-loop thread.
+    pub fn ctl(&mut self, req: &crate::ctl::wire::Request) -> crate::ctl::wire::Reply {
+        use crate::ctl::wire::{PROTO, Reply, Verb};
+        if req.proto != PROTO {
+            return Reply::error("unsupported", "unknown control protocol");
+        }
+        if req.deadline_ms <= crate::ctl::wire::now_ms() {
+            return Reply::error("timeout", "control request expired");
+        }
+        match &req.verb {
+            Verb::Hello => {
+                let root = &self.ctl_root;
+                let here = self.site.repo.as_ref().map(|r| r.here().display().to_string()).unwrap_or_default();
+                let screen = self.ctl_screen();
+                Reply::success(serde_json::json!({
+                    "id": format!("tui-{}", std::process::id()), "kind": "tui",
+                    "pid": std::process::id(), "version": env!("CARGO_PKG_VERSION"),
+                    "proto": PROTO, "root": root, "here": here,
+                    "layer": self.on_layer(), "screen": screen,
+                    "last_input_ago_ms": self.last_human.elapsed().as_millis() as u64,
+                }))
+            }
+            Verb::State { rows } => Reply::success(self.ctl_state(*rows)),
+            Verb::Keys { .. } => self.ctl_keys(req, |app, ev| {
+                match ev {
+                    ratatui::crossterm::event::Event::Key(k) => app.key(k),
+                    ratatui::crossterm::event::Event::Paste(text) => app.paste(&text),
+                    _ => {}
+                }
+                Ok(())
+            }),
+            Verb::Do { name } => self.ctl_do(req, name),
+            Verb::Actions => self.ctl_actions(),
+            Verb::Propose { text, then, ttl, .. } => {
+                if then
+                    .as_deref()
+                    .is_some_and(|verb| matches!(verb, Verb::Theme { .. } | Verb::Pane { gantt_grid: Some(_), .. }))
+                {
+                    return Reply::error("unsupported", "that action is unavailable in the explorer");
+                }
+                if let Some(Verb::Do { name }) = then.as_deref()
+                    && keymap::named(name).is_none_or(|action| {
+                        matches!(
+                            action,
+                            keys::Browse::Quit
+                                | keys::Browse::ProposalAccept
+                                | keys::Browse::ProposalDecline
+                                | keys::Browse::Proposals
+                        )
+                    })
+                {
+                    return Reply::error("unsupported", "unknown or unsafe explorer action");
+                }
+                if let Some(Verb::View { name, .. }) = then.as_deref()
+                    && !matches!(name.as_str(), "deferred" | "backlog" | "archived" | "worktree" | "raw")
+                    && !name
+                        .strip_prefix("column:")
+                        .is_some_and(|column| self.screen_statuses().iter().any(|s| s == column))
+                {
+                    return Reply::error("unsupported", "unknown explorer view");
+                }
+                if let Some(Verb::Cell { name, .. }) = then.as_deref()
+                    && view::Field::named(name).is_none()
+                {
+                    return Reply::error("unsupported", "unknown explorer cell");
+                }
+                self.proposals.add(
+                    &format!("tui-{}", std::process::id()),
+                    text,
+                    then.as_deref().cloned(),
+                    *ttl,
+                    req.actor.clone(),
+                )
+            }
+            Verb::Answer { id, .. } => self.proposals.get(id),
+            Verb::Withdraw { id } => self.proposals.finish(id, "withdrawn", None),
+            verb => self.ctl_verb(req, verb),
+        }
+    }
+
+    fn ctl_verb(&mut self, req: &crate::ctl::wire::Request, verb: &crate::ctl::wire::Verb) -> crate::ctl::wire::Reply {
+        use crate::ctl::wire::{Reply, Verb};
+        use keys::Browse as B;
+        if let Err(reply) = self.ctl_begin(req) {
+            return reply;
+        }
+        let bad = |message: String| Reply::error("bad_input", message);
+        let mut changed = true;
+        let mut extra = serde_json::json!({});
+        let result: Result<(), Reply> = (|| {
+            // **A named verb passes its key's availability check** (`Browse::enabled`), as keys and `do` do: on the
+            // stats and wiki windows it is that key's quiet no-op (filter and find used to close the person's window),
+            // and on the projects layer a refused key is a refused verb (`filter_inside`).
+            let gate = match verb {
+                Verb::Sort { .. } => Some(B::SortEdit),
+                Verb::Filter { query: Some(_) } => Some(B::Filter),
+                Verb::Filter { query: None } => Some(B::ClearFilter),
+                Verb::Find { .. } => Some(B::Grep),
+                Verb::Cell { name, .. } => view::Field::named(name).map(B::Cell),
+                Verb::Detail { name } if name == "on" || name == "off" => Some(B::Detail),
+                Verb::Detail { .. } => Some(B::DetailAt),
+                Verb::Zone { .. } => Some(B::Timezone),
+                _ => None,
+            };
+            if let Some(act) = gate
+                && !self.ctl_allows(act)?
+            {
+                changed = false;
+                return Ok(());
+            }
+            match verb {
+                Verb::Sort { words, default } => {
+                    let order = Self::sorting_of(words)
+                        .ok_or_else(|| bad("invalid explorer order; id is not an explorer sort field".into()))?;
+                    changed = order != self.order || *default;
+                    if changed {
+                        self.set_order(order, *default);
+                    }
+                    extra["sort"] = serde_json::json!(Self::order_words(&self.order));
+                }
+                Verb::Filter { query } => match query {
+                    Some(q) => self.hang(Mode::Filter(Input::new(q))).map_err(bad)?,
+                    None => {
+                        changed = self.hung.is_some();
+                        if changed {
+                            let rows = self.rows();
+                            self.run(B::ClearFilter, &rows);
+                        }
+                    }
+                },
+                Verb::Find { query, scope } => {
+                    let scope = crate::query::GrepIn::named(scope).ok_or_else(|| bad("unknown search scope".into()))?;
+                    self.hang(Mode::Grep(Input::new(query), scope)).map_err(bad)?;
+                }
+                Verb::Screen { name } => {
+                    let screen = match name.as_str() {
+                        "list" => keys::Screen::List,
+                        "board" => keys::Screen::Board,
+                        "gantt" => keys::Screen::Gantt,
+                        "stats" => keys::Screen::Stats,
+                        "wiki" => keys::Screen::Wiki,
+                        _ => return Err(bad("unknown screen".into())),
+                    };
+                    changed = self.ctl_screen() != name;
+                    if changed {
+                        self.ctl_run(B::Go(screen))?;
+                    }
+                    if name == "wiki" && !matches!(self.mode, Mode::Wiki(_)) {
+                        return Err(Reply::error(
+                            "refused",
+                            self.notice.clone().unwrap_or_else(|| "wiki could not open".into()),
+                        ));
+                    }
+                }
+                Verb::View { name, on } => {
+                    let (was, act) = match name.as_str() {
+                        "deferred" => (!self.view.hide_deferred, B::Deferred),
+                        "backlog" => (!self.view.hide_backlog, B::Backlog),
+                        "archived" => (self.view.show_archived, B::Archived),
+                        "worktree" => (self.worktree, B::Worktree),
+                        "raw" => (self.raw, B::Raw),
+                        _ if name.starts_with("column:") => {
+                            let column = &name[7..];
+                            let at = self
+                                .screen_statuses()
+                                .iter()
+                                .position(|s| s == column)
+                                .ok_or_else(|| bad(format!("unknown column: {column}")))?;
+                            let at = u8::try_from(at).map_err(|_| bad("too many columns".into()))?;
+                            (!self.view.hides(column), B::Column(at))
+                        }
+                        _ => return Err(bad(format!("unknown view: {name}"))),
+                    };
+                    // The numbered keys stop at the ninth column; ctl reaches the rest under the same screen rules.
+                    let gate = match act {
+                        B::Column(at) if usize::from(at) >= keys::NUMBERED => B::Column(0),
+                        act => act,
+                    };
+                    if !self.ctl_allows(gate)? {
+                        changed = false;
+                        return Ok(());
+                    }
+                    changed = was != *on;
+                    if changed {
+                        let rows = self.rows();
+                        self.run(act, &rows);
+                    }
+                }
+                Verb::Cell { name, on } => {
+                    let field = view::Field::named(name).ok_or_else(|| bad(format!("unknown cell: {name}")))?;
+                    changed = self.fields.shows(field) != *on;
+                    if changed {
+                        let rows = self.rows();
+                        self.run(B::Cell(field), &rows);
+                    }
+                }
+                Verb::Detail { name } => match name.as_str() {
+                    "on" | "off" => {
+                        changed = self.detail_open != (name == "on");
+                        if changed {
+                            let rows = self.rows();
+                            self.run(B::Detail, &rows);
+                        }
+                    }
+                    place => {
+                        let at = view::DetailAt::named(place)
+                            .ok_or_else(|| bad(format!("unknown detail place: {place}")))?;
+                        if self.gantt() {
+                            changed = self.gantt_detail_at != at;
+                            self.gantt_detail_at = at;
+                        } else {
+                            changed = self.detail_at != at;
+                            if changed {
+                                self.detail_at = at;
+                                self.save_look();
+                            }
+                        }
+                    }
+                },
+                Verb::Goto { id, enter, project } => {
+                    if id.is_some() == project.is_some() {
+                        return Err(bad("give an issue id or --project".into()));
+                    }
+                    if let Some(project) = project {
+                        let at = if let Ok(n) = project.parse::<usize>() {
+                            n
+                        } else {
+                            self.layer
+                                .as_ref()
+                                .and_then(|l| {
+                                    l.places.iter().position(|p| p.path.to_string_lossy() == project.as_str())
+                                })
+                                .map(|n| n + 1)
+                                .ok_or_else(|| bad(format!("unknown project: {project}")))?
+                        };
+                        if self.layer.as_ref().is_none_or(|l| at > l.places.len()) {
+                            return Err(Reply::error("not_found", format!("project not found: {project}")));
+                        }
+                        let n = u8::try_from(at).map_err(|_| bad("project number is too large".into()))?;
+                        self.ctl_run(B::Project(n))?;
+                    } else if let Some(id) = id {
+                        match self.land(id) {
+                            Landing::Shown => {
+                                extra["landed"] = serde_json::json!(true);
+                                if *enter {
+                                    self.ctl_run(B::Enter)?;
+                                }
+                            }
+                            Landing::Hidden => {
+                                changed = false;
+                                extra["landed"] = serde_json::json!(false);
+                                if let Some(at) = self.site.index.find(id) {
+                                    let veil = self.site.veil(at);
+                                    extra["hidden_by"] =
+                                        serde_json::json!({"filter": veil.filtered, "view": veil.viewed});
+                                }
+                            }
+                            Landing::Missing => {
+                                return Err(Reply::error("not_found", format!("issue not found: {id}")));
+                            }
+                        }
+                    } else {
+                        return Err(bad("give an issue id or --project".into()));
+                    }
+                }
+                Verb::Read { ids, all, group } => {
+                    if (*all as u8 + group.is_some() as u8 + !ids.is_empty() as u8) != 1 {
+                        return Err(bad("give issue ids, --all, or --group".into()));
+                    }
+                    if *all {
+                        self.ctl_run(B::ReadAll)?;
+                    } else if let Some(id) = group {
+                        self.ctl_read_group(id)?;
+                    } else if !ids.is_empty() {
+                        self.ctl_read_ids(ids)?;
+                    } else {
+                        return Err(bad("give issue ids, --all, or --group".into()));
+                    }
+                }
+                Verb::Wiki { slug, search } => {
+                    extra = self.ctl_wiki(slug.as_deref(), search.as_deref())?;
+                }
+                Verb::Pane { list_width, list_height, wiki_width, gantt_label, gantt_grid } => {
+                    if gantt_grid.is_some() {
+                        return Err(Reply::error("unsupported", "--gantt-grid is a web pixel width"));
+                    }
+                    if [list_width, list_height, wiki_width, gantt_label].iter().all(|v| v.is_none()) {
+                        return Err(bad("give at least one pane value".into()));
+                    }
+                    changed = self.ctl_pane(
+                        list_width.as_deref(),
+                        list_height.as_deref(),
+                        wiki_width.as_deref(),
+                        gantt_label.as_deref(),
+                    )?;
+                }
+                Verb::Zone { name } => {
+                    if name != "none" && !crate::tz::names().0.iter().any(|z| z == name) {
+                        return Err(bad(format!("unknown timezone: {name}")));
+                    }
+                    let name = (name != "none").then_some(name.as_str());
+                    changed = self.saved_zone.as_deref() != name;
+                    if changed {
+                        self.set_zone_opt(name);
+                    }
+                }
+                Verb::Theme { .. } => {
+                    return Err(Reply::error(
+                        "unsupported",
+                        "terminal colours are set by the terminal; target a web tab",
+                    ));
+                }
+                _ => return Err(Reply::error("unsupported", "unknown control verb")),
+            }
+            Ok(())
+        })();
+        if let Err(reply) = result {
+            self.ctl_turn = None;
+            return reply;
+        }
+        let name = match verb {
+            Verb::Sort { .. } => "sort",
+            Verb::Filter { .. } => "filter",
+            Verb::Find { .. } => "find",
+            Verb::Screen { .. } => "screen",
+            Verb::View { .. } => "view",
+            Verb::Cell { .. } => "cell",
+            Verb::Detail { .. } => "detail",
+            Verb::Goto { .. } => "goto",
+            Verb::Read { .. } => "read",
+            Verb::Wiki { .. } => "wiki",
+            Verb::Pane { .. } => "pane",
+            Verb::Zone { .. } => "zone",
+            Verb::Theme { .. } => "theme",
+            _ => "ctl",
+        };
+        let mut reply = self.ctl_end(name, changed);
+        if let Some(data) = &mut reply.data
+            && let (Some(dst), Some(src)) = (data.as_object_mut(), extra.as_object())
+        {
+            dst.extend(src.clone());
+        }
+        reply
+    }
+
+    /// Whether `act`'s key would run here — the one availability check keys and `do` pass. `Ok(false)` is the key's
+    /// quiet no-op; an `Off::Why` is its refusal, said the same way.
+    fn ctl_allows(&self, act: keys::Browse) -> Result<bool, crate::ctl::wire::Reply> {
+        let rows = self.rows();
+        match act.enabled(&self.key_ctx(&rows)) {
+            Ok(()) => Ok(true),
+            Err(keys::Off::Quiet) => Ok(false),
+            Err(keys::Off::Why(said)) => Err(crate::ctl::wire::Reply::error("refused", said)),
+        }
+    }
+
+    fn ctl_run(&mut self, act: keys::Browse) -> Result<(), crate::ctl::wire::Reply> {
+        let rows = self.rows();
+        match act.enabled(&self.key_ctx(&rows)) {
+            Ok(()) => self.run(act, &rows),
+            Err(keys::Off::Why(said)) => return Err(crate::ctl::wire::Reply::error("refused", said)),
+            Err(keys::Off::Quiet) => return Ok(()),
+        }
+        // A person-accepted proposal keeps the editor it asked for — the loop opens it, as for the person's own key.
+        if !self.ctl_owner && self.edit.take().is_some() {
+            return Err(crate::ctl::wire::Reply::error("refused", say(self.site.lang, "tui.ctl.editor")));
+        }
+        Ok(())
+    }
+
+    fn ctl_read_ids(&mut self, ids: &[String]) -> Result<(), crate::ctl::wire::Reply> {
+        let targets = ids
+            .iter()
+            .map(|id| {
+                self.site
+                    .index
+                    .find(id)
+                    .ok_or_else(|| crate::ctl::wire::Reply::error("not_found", format!("issue not found: {id}")))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        self.mark_ids(Seat::Here, &targets);
+        Ok(())
+    }
+
+    fn ctl_read_group(&mut self, id: &str) -> Result<(), crate::ctl::wire::Reply> {
+        let Some(at) = self.site.index.find(id) else {
+            return Err(crate::ctl::wire::Reply::error("not_found", format!("group not found: {id}")));
+        };
+        if !crate::report::is_group(&self.site.issues[at]) {
+            return Err(crate::ctl::wire::Reply::error("bad_input", format!("not a group: {id}")));
+        }
+        let targets = self.site.index.under_group(&self.site.issues, id);
+        self.mark_ids(Seat::Here, &targets);
+        Ok(())
+    }
+
+    fn ctl_wiki(
+        &mut self,
+        slug: Option<&str>,
+        search: Option<&str>,
+    ) -> Result<serde_json::Value, crate::ctl::wire::Reply> {
+        use crate::ctl::wire::Reply;
+        if slug.is_some() == search.is_some() {
+            return Err(Reply::error("bad_input", "give a slug or --search"));
+        }
+        if !matches!(self.mode, Mode::Wiki(_)) {
+            self.open_wiki();
+        }
+        let Mode::Wiki(window) = &mut self.mode else {
+            return Err(Reply::error("refused", self.notice.clone().unwrap_or_else(|| "wiki could not open".into())));
+        };
+        if let Some(query) = search {
+            return Ok(window.ctl_search(query));
+        }
+        let raw = slug.unwrap();
+        let (slug, anchor) = raw.split_once('#').map_or((raw, None), |(slug, anchor)| (slug, Some(anchor)));
+        if !window.open_at(slug, anchor) {
+            let near = window.near(slug);
+            let mut reply =
+                Reply::error("not_found", format!("wiki page not found: {slug}; near: {}", near.join(", ")));
+            reply.data = Some(serde_json::json!({"near": near}));
+            return Err(reply);
+        }
+        Ok(serde_json::json!({"page": slug, "anchor": anchor}))
+    }
+
+    fn ctl_pane(
+        &mut self,
+        list_width: Option<&str>,
+        list_height: Option<&str>,
+        wiki_width: Option<&str>,
+        gantt_label: Option<&str>,
+    ) -> Result<bool, crate::ctl::wire::Reply> {
+        use crate::ctl::wire::Reply;
+        let parse = |name: &str, value: &str| -> Result<Option<i64>, Reply> {
+            if value == "none" {
+                return Ok(None);
+            }
+            value
+                .parse::<i64>()
+                .map(Some)
+                .map_err(|_| Reply::error("bad_input", format!("{name} must be a number or none")))
+        };
+        let values = [
+            list_width.map(|v| parse("list_width", v)).transpose()?,
+            list_height.map(|v| parse("list_height", v)).transpose()?,
+            wiki_width.map(|v| parse("wiki_width", v)).transpose()?,
+            gantt_label.map(|v| parse("gantt_label", v)).transpose()?,
+        ];
+        let before = (self.list_width, self.list_height, self.wiki_width, self.gantt_label);
+        for (name, value) in ["list_width", "list_height", "wiki_width"].into_iter().zip(values[..3].iter()) {
+            if let Some(value) = value {
+                self.set_share(name, *value);
+            }
+        }
+        if let Some(value) = values[3] {
+            self.gantt_label = value.map(|n| n.clamp(1, i64::from(u16::MAX)) as u16);
+            self.chart.set_label_width(self.gantt_label.unwrap_or(moai_gantt::DEFAULT_LABEL_WIDTH));
+        }
+        let changed = before != (self.list_width, self.list_height, self.wiki_width, self.gantt_label);
+        if changed {
+            self.save_look();
+        }
+        Ok(changed)
+    }
+
+    /// The window holds a field, a picker or a key sequence open — the person's, unless a ctl request opened it
+    /// (`ctl_opened`). The stats and wiki windows keep their own: the wiki's search field and link chooser, and both
+    /// windows' chords (`wants_mouse` reads the same two fields as typing).
+    fn ctl_holds_input(&self) -> bool {
+        match &self.mode {
+            Mode::Browse => false,
+            Mode::Stats(w) => !w.chord.held().is_empty(),
+            Mode::Wiki(w) => w.typing.is_some() || w.choose.is_some() || !w.chord.held().is_empty(),
+            _ => true,
+        }
+    }
+
+    fn ctl_begin(&mut self, req: &crate::ctl::wire::Request) -> Result<(), crate::ctl::wire::Reply> {
+        use crate::ctl::wire::Reply;
+        if self.help.is_some() {
+            return Err(Reply::error("person_busy", say(self.site.lang, "tui.ctl.person_key_list")));
+        }
+        if !self.chord.held().is_empty() {
+            return Err(Reply::error("person_busy", say(self.site.lang, "tui.ctl.person_chord")));
+        }
+        // **The person's key asked for the editor** and the loop opens it after the ctl requests it drains in the same
+        // turn: an action that ran now would take that request (`self.edit.take()`) and drop it.
+        if self.edit.is_some() && !self.ctl_owner {
+            return Err(Reply::error(
+                "person_busy",
+                fill(say(self.site.lang, "tui.ctl.person_typing"), &[("mode", "editor")]),
+            ));
+        }
+        if !self.ctl_opened && self.ctl_holds_input() {
+            let mode = self.ctl_state(false)["mode"].as_str().unwrap_or("input").to_string();
+            return Err(Reply::error(
+                "person_busy",
+                fill(say(self.site.lang, "tui.ctl.person_typing"), &[("mode", &mode)]),
+            ));
+        }
+        let actor = match req.actor.as_deref() {
+            Some(raw) => {
+                Some(crate::model::Actor::parse(raw).ok_or_else(|| Reply::error("bad_input", "invalid caller actor"))?)
+            }
+            None => None,
+        };
+        self.chord.clear();
+        self.ctl_turn = Some(CtlTurn { actor, error: None });
+        Ok(())
+    }
+
+    fn ctl_end(&mut self, what: &str, changed: bool) -> crate::ctl::wire::Reply {
+        use crate::ctl::wire::Reply;
+        let error = self.ctl_turn.take().and_then(|turn| turn.error);
+        self.chord.clear();
+        self.ctl_opened = self.ctl_holds_input();
+        if let Some(error) = error {
+            return error;
+        }
+        if changed {
+            let old = self.notice.take();
+            self.notice = Some(match old {
+                Some(s) => format!("{} · {s}", fill(say(self.site.lang, "tui.ctl.notice"), &[("what", what)])),
+                None => fill(say(self.site.lang, "tui.ctl.notice"), &[("what", what)]),
+            });
+        }
+        let state = self.ctl_state(false);
+        Reply::success(serde_json::json!({
+            "screen": state["screen"], "mode": state["mode"], "menu": state["menu"],
+            "cursor": state["cursor"], "notice": state["notice"], "changed": changed,
+        }))
+    }
+
+    fn ctl_do(&mut self, req: &crate::ctl::wire::Request, name: &str) -> crate::ctl::wire::Reply {
+        use crate::ctl::wire::Reply;
+        if let Err(reply) = self.ctl_begin(req) {
+            return reply;
+        }
+        let Some(act) = keymap::named(name) else {
+            self.ctl_turn = None;
+            return Reply::error("unsupported", format!("unknown action: {name}"));
+        };
+        if act == keys::Browse::Quit {
+            self.ctl_turn = None;
+            return Reply::error("refused", say(self.site.lang, "tui.ctl.quit"));
+        }
+        let rows = self.rows();
+        match act.enabled(&self.key_ctx(&rows)) {
+            Ok(()) => self.run(act, &rows),
+            Err(keys::Off::Quiet) => return self.ctl_end(name, false),
+            Err(keys::Off::Why(said)) => {
+                self.ctl_turn = None;
+                return Reply::error("refused", said);
+            }
+        }
+        // A person-accepted proposal keeps the editor it asked for — the loop opens it, as for the person's own key.
+        if !self.ctl_owner && self.edit.take().is_some() {
+            self.ctl_turn.as_mut().unwrap().error =
+                Some(Reply::error("refused", say(self.site.lang, "tui.ctl.editor")));
+        }
+        self.ctl_end(name, true)
+    }
+
+    fn ctl_actions(&self) -> crate::ctl::wire::Reply {
+        use crate::ctl::wire::Reply;
+        let rows = self.rows();
+        let ctx = self.key_ctx(&rows);
+        let actions: Vec<_> = keymap::listing(&self.keys)
+            .into_iter()
+            .filter(|a| matches!(a.section, "browse" | "gantt" | "moves"))
+            .map(|a| {
+                let full = format!("{}.{}", a.section, a.action);
+                let enabled = keymap::named(&full).map(|act| act.enabled(&ctx));
+                let (on, why) = if a.action.starts_with("proposal_") {
+                    (false, Some("only the person can answer a proposal".into()))
+                } else {
+                    match enabled {
+                        Some(Ok(())) => (true, None),
+                        Some(Err(keys::Off::Why(s))) => (false, Some(s)),
+                        _ => (false, None),
+                    }
+                };
+                serde_json::json!({"name": full, "keys": a.keys, "enabled": on, "why": why})
+            })
+            .collect();
+        Reply::success(serde_json::json!({"actions": actions}))
+    }
+
+    pub fn ctl_keys(
+        &mut self,
+        req: &crate::ctl::wire::Request,
+        mut deliver: impl FnMut(&mut App, ratatui::crossterm::event::Event) -> std::io::Result<()>,
+    ) -> crate::ctl::wire::Reply {
+        use crate::ctl::wire::{Reply, Verb};
+        use ratatui::crossterm::event::Event;
+        let Verb::Keys { seqs, text } = &req.verb else { return Reply::error("bad_input", "not a keys request") };
+        let mut events = Vec::new();
+        for seq in seqs {
+            let Some(parsed) = keys::parse_seq(seq) else {
+                return Reply::error("bad_input", format!("unknown key sequence: {seq}"));
+            };
+            events.extend(parsed.into_iter().map(Event::Key));
+        }
+        if let Some(text) = text {
+            events.push(Event::Paste(text.clone()));
+        }
+        if events.is_empty() {
+            return Reply::error("bad_input", "give a key sequence or --text");
+        }
+        if let Err(reply) = self.ctl_begin(req) {
+            return reply;
+        }
+        let mut ran = 0;
+        for event in events {
+            if let Err(e) = deliver(self, event) {
+                self.ctl_turn.as_mut().unwrap().error = Some(Reply::error("gone", e.to_string()));
+            }
+            if self.edit.take().is_some() {
+                self.ctl_turn.as_mut().unwrap().error =
+                    Some(Reply::error("refused", say(self.site.lang, "tui.ctl.editor")));
+            }
+            if self.ctl_turn.as_ref().is_some_and(|turn| turn.error.is_some()) {
+                break;
+            }
+            ran += 1;
+        }
+        let mut reply = self.ctl_end("keys", ran > 0);
+        if !reply.ok {
+            reply.data = Some(serde_json::json!({"ran": ran}));
+        }
+        reply
+    }
+
+    fn ctl_screen(&self) -> &'static str {
+        use keys::Screen;
+        match self.key_ctx(&self.rows()).screen() {
+            Screen::List => "list",
+            Screen::Board => "board",
+            Screen::Gantt => "gantt",
+            Screen::Stats => "stats",
+            Screen::Wiki => "wiki",
+        }
+    }
+
+    pub fn ctl_state(&self, include_rows: bool) -> serde_json::Value {
+        use crate::nav::Seg;
+        let rows = self.rows();
+        let id_of = |row: &Row| -> Option<String> {
+            match row {
+                Row::Item(seat, entry, _) => entry.at().and_then(|at| self.issue_at(*seat, at)).map(|i| i.id.clone()),
+                _ => None,
+            }
+        };
+        let mode = match self.mode {
+            Mode::Browse => "browse",
+            Mode::Proposals(_) => "proposals",
+            Mode::Grep(..) => "grep",
+            Mode::Filter(..) => "filter",
+            Mode::Ask(..) => "ask",
+            Mode::Backlog(..) => "form",
+            Mode::Pick(..) | Mode::Unregister(..) => "pick",
+            Mode::Zone(..) => "zone",
+            Mode::ArchiveDays(..) => "archive_days",
+            Mode::Sort(..) => "sort",
+            Mode::Stats(..) => "stats",
+            Mode::Wiki(..) => "wiki",
+        };
+        let filter = match &self.hung {
+            Some(Hung::Grep { text, scope }) => {
+                serde_json::json!({"text": text, "kind": "grep", "scope": format!("{scope:?}").to_lowercase()})
+            }
+            Some(Hung::Filter { text, .. }) => serde_json::json!({"text": text, "kind": "filter", "scope": "all"}),
+            None => serde_json::Value::Null,
+        };
+        let path: Vec<_> = self
+            .site
+            .path
+            .iter()
+            .map(|s| match s {
+                Seg::Milestone(id) => id.clone().unwrap_or_else(|| "(none)".into()),
+                Seg::Epic(id) | Seg::Issue(id) => id.clone(),
+                Seg::Lost => "(lost)".into(),
+            })
+            .collect();
+        let mut state = serde_json::json!({
+            "screen": self.ctl_screen(), "path": path,
+            "cursor": rows.get(self.cursor).and_then(id_of),
+            "focus": if self.focus == Pane::Explorer { "list" } else { "detail" },
+            "mode": mode,
+            "menu": if self.chord.held().is_empty() { serde_json::Value::Null } else { serde_json::json!(format!("{:?}", self.chord.held())) },
+            "filter": filter, "sort": Self::order_words(&self.order),
+            "view": {"hidden": self.view.hidden, "deferred": !self.view.hide_deferred,
+                "backlog": !self.view.hide_backlog, "archived": self.view.show_archived, "worktree": self.worktree},
+            "cells": view::Field::ALL.into_iter().filter(|f| self.fields.shows(*f)).map(|f| f.name()).collect::<Vec<_>>(),
+            "detail": {"shown": self.detail_open, "at": self.detail_at.name()},
+            "panes": {"list_width": self.list_width, "list_height": self.list_height,
+                "wiki_width": self.wiki_width, "gantt_label": self.gantt_label},
+            "mouse": self.mouse_on, "timezone": self.saved_zone,
+            "wiki": if let Mode::Wiki(w) = &self.mode { w.ctl_state() } else { serde_json::Value::Null }, "unread": self.site.unread.len(),
+            "notice": self.notice, "trouble": self.trouble,
+            "proposals": self.proposals.rows().iter().map(crate::ctl::proposal::Entry::value).collect::<Vec<_>>(),
+        });
+        if include_rows {
+            let visible: Vec<_> = rows
+                .iter()
+                .take(2000)
+                .filter_map(|row| {
+                    let id = id_of(row)?;
+                    let depth = match row {
+                        Row::Item(_, _, twig) => twig.depth(),
+                        _ => 0,
+                    };
+                    let open = self.dir_of(Some(row.clone())).is_some_and(|(seat, path)| {
+                        self.site_of_seat(seat).is_some_and(|site| self.opened(site, &path))
+                            || self.searched_into(seat, &path)
+                    });
+                    Some(serde_json::json!({"id": id, "depth": depth, "open": open}))
+                })
+                .collect();
+            state["rows"] = serde_json::json!(visible);
+            if rows.len() > 2000 {
+                state["rows_total"] = serde_json::json!(rows.len());
+            }
+        }
+        state
+    }
 }
 
 /// 편집기로 적어 달라는 요청. 담을 곳은 **여는 순간 박힌 것**이다(moai-fccv) — 편집기가
@@ -2301,6 +3103,13 @@ impl App {
         counted: Option<Counted>,
     ) -> App {
         let mut app = App {
+            ctl_turn: None,
+            ctl_opened: false,
+            ctl_owner: false,
+            proposal_back: None,
+            proposals: std::sync::Arc::new(crate::ctl::proposal::Book::new()),
+            ctl_root: String::new(),
+            last_human: std::time::Instant::now(),
             follow_changed: false,
             site: Site::of(issues, index, ground, cfg, path, unreadable_ids),
             cursor: 0,
@@ -2547,13 +3356,35 @@ impl App {
         let Some(repo) = &self.site.repo else {
             self.trouble = Some(say(self.site.lang, "tui.write.no_repo").into());
             self.write_failed = true;
+            if let Some(turn) = self.ctl_turn.as_mut() {
+                turn.error = Some(crate::ctl::wire::Reply::error("refused", "no repository is open"));
+            }
             return None;
         };
         // 탐색기는 화면 말을 이미 쥐고 있다 — 묻는 길이지만 여는 파일이 없다.
         let lang = self.site.lang;
         // **코드는 `Fail` 이 이미 든다** — `Fail::no_actor` 가 `NoActor::code()` 로 채운다.
         // 곁들여 들고 다니면 늘 같아야 할 둘을 타입이 안 묶는다(리뷰).
-        let by = (self.identify)(self.user.as_deref(), &repo.root).map_err(|e| crate::fail::Fail::no_actor(&e, lang));
+        let by = match &self.ctl_turn {
+            Some(_) if self.ctl_owner => {
+                (self.identify)(self.user.as_deref(), &repo.root).map_err(|e| crate::fail::Fail::no_actor(&e, lang))
+            }
+            Some(turn) => turn
+                .actor
+                .clone()
+                .ok_or_else(|| crate::fail::Fail::coded(say(lang, "tui.ctl.no_actor"), crate::fail::code::NO_ACTOR)),
+            None => {
+                (self.identify)(self.user.as_deref(), &repo.root).map_err(|e| crate::fail::Fail::no_actor(&e, lang))
+            }
+        };
+        if !self.ctl_owner
+            && let Some(turn) = self.ctl_turn.as_mut()
+            && let Err(e) = &by
+        {
+            turn.error = Some(crate::ctl::wire::Reply::error(e.code, e.message.clone()));
+            self.notice = Some(e.message.clone());
+            return None;
+        }
         if let Err(e) = &by
             && e.code == crate::fail::code::NO_ACTOR
         {
@@ -2626,6 +3457,9 @@ impl App {
             // 거절문은 여러 줄일 수 있다(누군지 모를 때는 고칠 명령까지 낸다). 배너는
             // 한 줄이라 줄바꿈이 그대로 가면 그림이 찢어진다 — 한 줄로 잇는다.
             Err(e) => {
+                if let Some(turn) = self.ctl_turn.as_mut() {
+                    turn.error = Some(crate::ctl::wire::Reply::error(e.code, e.message.clone()));
+                }
                 let why: Vec<&str> = e.message.lines().map(str::trim).filter(|l| !l.is_empty()).collect();
                 self.trouble = Some(fill(say(self.site.lang, "tui.write.failed"), &[("why", &why.join("  "))]));
                 self.write_failed = true;
@@ -3474,6 +4308,7 @@ impl App {
         let text = match mode {
             Mode::Grep(q, _) | Mode::Filter(q) => q.text().to_string(),
             Mode::Browse
+            | Mode::Proposals(_)
             | Mode::Ask(_)
             | Mode::Backlog(_)
             | Mode::Pick(_)
@@ -3528,6 +4363,19 @@ impl App {
         Ok(())
     }
 
+    /// Apply a completed search prompt through the same cursor and filter transition as Enter.
+    fn hang(&mut self, mode: Mode) -> Result<(), String> {
+        let grip = self.grip_of(&self.rows());
+        let was = self.searching() || self.grep_was.as_ref().is_some_and(|w| matches!(w.hung, Some(Hung::Grep { .. })));
+        self.apply(&mode)?;
+        self.mode = Mode::Browse;
+        self.grep_was = None;
+        if !self.after_search(was, grip.0.clone()) {
+            self.settle(grip, self.cursor);
+        }
+        Ok(())
+    }
+
     /// 적은 글을 거름망으로. **적는 곳과 물어보는 곳이 같은 것을 쓴다** —
     /// 갈라지면 프롬프트 밑의 오류가 Enter 가 판정할 글과 다른 글을 판정한다.
     fn build_filter(&self, mode: &Mode) -> Result<Filter, String> {
@@ -3543,6 +4391,7 @@ impl App {
                 ..Raw::default()
             },
             Mode::Browse
+            | Mode::Proposals(_)
             | Mode::Ask(_)
             | Mode::Backlog(_)
             | Mode::Pick(_)
@@ -4564,6 +5413,11 @@ impl App {
             }
             _ => return,
         };
+        self.mark_ids(seat, &targets);
+    }
+
+    /// Mark the supplied rows through the same read sheet as the human read keys.
+    fn mark_ids(&mut self, seat: Seat, targets: &[usize]) {
         let Some(site) = self.site_of_seat(seat) else { return };
         // 넘친 첨자는 건너뛴다 — 그 줄은 이미 없다.
         let ids: std::collections::BTreeSet<&str> =
@@ -5976,6 +6830,10 @@ impl App {
         // 받는 중에 글자로 먹으면 검색칸에 `c` 가 찍히고, 폼·창·물음에서 막히면 멈춘 화면에서
         // 나갈 길이 없다. 적던 것은 그 길로 날아간다.
         if let Lookup::Run(keys::Anywhere::Quit) = keys::lookup(keys::ANYWHERE, &[k]) {
+            if let Some(turn) = self.ctl_turn.as_mut() {
+                turn.error = Some(crate::ctl::wire::Reply::error("refused", say(self.site.lang, "tui.ctl.quit")));
+                return;
+            }
             self.quit = true;
             return;
         }
@@ -6045,10 +6903,18 @@ impl App {
             Ok(()) => {}
             Err(keys::Off::Quiet) => return,
             Err(keys::Off::Why(say)) => {
+                if let Some(turn) = self.ctl_turn.as_mut() {
+                    turn.error = Some(crate::ctl::wire::Reply::error("refused", say.clone()));
+                }
                 self.notice = Some(say);
                 return;
             }
         }
+        self.run(act, &rows);
+    }
+
+    /// Execute an enabled browse action on the event-loop thread.
+    pub(crate) fn run(&mut self, act: keys::Browse, rows: &[Row]) {
         use keys::Browse as B;
         // **펴고 접는 키는 커서가 선 줄의 키다**(moai-fyul) — 굴려 떼어 둔 화면([`App::adrift`])을 걷어 그 줄로 되돌린다.
         // 아무것도 안 펴고 안 접혀도 걷는다: 화면 밖의 줄에서 누른 `l` 이 아무 일도 안 하면 키가 죽은 것처럼 보인다
@@ -6057,13 +6923,27 @@ impl App {
             self.adrift = None;
         }
         match act {
+            B::ProposalAccept | B::ProposalDecline | B::Proposals if self.ctl_turn.is_some() => {
+                self.ctl_turn.as_mut().unwrap().error =
+                    Some(crate::ctl::wire::Reply::error("refused", "only the person can answer a proposal"));
+            }
+            B::Quit if self.ctl_turn.is_some() => {
+                self.ctl_turn.as_mut().unwrap().error =
+                    Some(crate::ctl::wire::Reply::error("refused", say(self.site.lang, "tui.ctl.quit")));
+            }
             B::Quit => self.quit = true,
-            B::Help => self.open_help(&rows),
+            B::ProposalAccept => self.answer_proposal(true),
+            B::ProposalDecline => self.answer_proposal(false),
+            B::Proposals => {
+                self.proposal_back = Some(Box::new(self.mode.clone()));
+                self.mode = Mode::Proposals(0);
+            }
+            B::Help => self.open_help(rows),
             B::FocusPrev => self.focus = self.focus.prev(),
             B::FocusNext => self.focus = self.focus.next(),
             // **끝에서는 제자리다** — 목록에서 `Ctrl-w h` 를 눌러도 상세로 돌지 않는다.
             B::Focus(side) => self.focus = self.focus.step(side, self.detail_side()),
-            B::Step(m) => self.step(m, &rows),
+            B::Step(m) => self.step(m, rows),
             // **드나드는 키도 포커스를 탄다**(`enabled`). 상세를 읽다가 누른 Enter·←가 목록을
             // 옮기면 보던 이슈가 바뀌고 굴린 자리도 첫 줄로 돌아간다 — ↑↓ 를 포커스에
             // 태운 까닭과 같다. 상세에서는 아직 뜻이 없어 아무 일도 안 한다.
@@ -6078,27 +6958,27 @@ impl App {
             // 좌우 키가 화면의 좌우로 간다.
             // **보드의 프로젝트 머리줄에서는 목록과 같다**(moai-oagj.vcj, 사용자 결정) — 칸이 없는 줄이라 `l` 이 펴고 `h` 가
             // 접는다. 그래서 머리줄의 갈래가 보드의 옆 칸보다 먼저다.
-            B::Expand if self.head_at(&rows).is_some() => self.unfold(&rows, false),
-            B::Collapse if self.head_at(&rows).is_some() => self.fold(&rows),
-            B::Expand if self.board_fold_at(&rows).is_some() => self.board_fold(&rows, Some(true)),
-            B::Collapse if self.board_fold_at(&rows).is_some() => self.board_fold(&rows, Some(false)),
-            B::Expand if self.board() => self.board_step(board::Go::Side(keys::Side::Right), &rows),
-            B::Collapse if self.board() => self.board_step(board::Go::Side(keys::Side::Left), &rows),
-            B::Expand => self.expand(&rows),
+            B::Expand if self.head_at(rows).is_some() => self.unfold(rows, false),
+            B::Collapse if self.head_at(rows).is_some() => self.fold(rows),
+            B::Expand if self.board_fold_at(rows).is_some() => self.board_fold(rows, Some(true)),
+            B::Collapse if self.board_fold_at(rows).is_some() => self.board_fold(rows, Some(false)),
+            B::Expand if self.board() => self.board_step(board::Go::Side(keys::Side::Right), rows),
+            B::Collapse if self.board() => self.board_step(board::Go::Side(keys::Side::Left), rows),
+            B::Expand => self.expand(rows),
             // **접을 것이 없으면 부모를 접고, 부모도 없으면 나간다** — 키 표도 그렇게 켠다
             // (`Browse::enabled`). 손에 익은 `h` 가 뿌리에서만 말하고 멤버 줄에서 입을 다물면
             // 어느 쪽이 고장인지 모른다.
             // 머리줄의 `h`·`←` 는 그 프로젝트를 접는다(위의 갈래) — 접힌 머리줄에서는 아무 일도 없다(층은
             // 맨 위라 나갈 데가 없다).
             B::Collapse => {
-                if !self.collapse(&rows) && !self.fold_parent(&rows) {
+                if !self.collapse(rows) && !self.fold_parent(rows) {
                     self.leave();
                 }
             }
             // 머리줄의 `Tab` 은 그 프로젝트를 묶음까지 다 펼친다 — 펼쳐져 있으면 통째로 접는다.
-            B::ExpandAll if self.head_at(&rows).is_some() => self.unfold(&rows, true),
-            B::ExpandAll if self.board() => self.board_fold(&rows, None),
-            B::ExpandAll => self.expand_all(&rows),
+            B::ExpandAll if self.head_at(rows).is_some() => self.unfold(rows, true),
+            B::ExpandAll if self.board() => self.board_fold(rows, None),
+            B::ExpandAll => self.expand_all(rows),
             // **헤더의 번호로 바로 간다**(moai-o133). `0` 은 전체 — 층이다. 이미 그 자리면
             // 아무 일도 안 한다: 같은 프로젝트를 다시 열면 커서와 굴린 자리가 첫 줄로 튄다.
             // **건너뛰면 포커스는 목록으로 돌아온다**(리뷰 moai-i784.pzh). 상세에 포커스를 둔 채
@@ -6126,7 +7006,7 @@ impl App {
             }
             B::Grep => {
                 self.grep_was =
-                    Some(GrepWas { hung: self.hung.clone(), grip: self.grip_of(&rows), cursor: self.cursor });
+                    Some(GrepWas { hung: self.hung.clone(), grip: self.grip_of(rows), cursor: self.cursor });
                 self.mode = Mode::Grep(Input::default(), GrepIn::All);
             }
             B::Filter => self.mode = Mode::Filter(Input::default()),
@@ -6139,16 +7019,16 @@ impl App {
             B::Unregister => self.ask_unregister(),
             // **화면 고르기는 포커스와 상관이 없다**(moai-z46r) — 배치는 목록 칸 하나의 것이 아니고, 통계가 세는 것은
             // 프로젝트라 어느 칸을 보고 있었는지와 상관이 없다(moai-1hka.bq9).
-            B::Go(s) => self.go(s, &rows),
-            B::Gantt(p) => self.pan(p, &rows),
-            B::Plan(n) => self.nudge(n, &rows),
+            B::Go(s) => self.go(s, rows),
+            B::Gantt(p) => self.pan(p, rows),
+            B::Plan(n) => self.nudge(n, rows),
             // 거름망이 걸려 있으면 Esc 가 그것을 푼다. 아니면 아무 일도 없다 —
             // Esc 로 화면이 꺼지면 실수 한 번에 하던 것이 날아간다.
             // **검색이 아니어도 커서를 다시 세운다**(리뷰 moai-r1ly.f2x) — `after_search` 는 검색을 풀 때만 세우므로,
             // 거름망(`f`)을 풀면 번호가 그대로 남아 보드에서는 도로 선 카드만큼 밀린 딴 카드에 섰다. Enter 로 거는
             // 길(`keys::Prompt::Apply`)과 같은 자다.
             B::ClearFilter => {
-                let (was, grip) = (self.searching(), self.grip_of(&rows));
+                let (was, grip) = (self.searching(), self.grip_of(rows));
                 self.clear_filter();
                 if !self.after_search(was, grip.0.clone()) {
                     self.settle(grip, self.cursor);
@@ -6181,7 +7061,7 @@ impl App {
                 }
             }
             B::Column(_) | B::Deferred | B::Backlog | B::Archived | B::ShowAll | B::Sort(_) | B::SortAdd(_) => {
-                self.look(act, &rows)
+                self.look(act, rows)
             }
             // 열은 줄을 더하거나 빼지 않는다 — 커서를 붙들 까닭이 없다.
             B::Cell(f) => {
@@ -6191,7 +7071,7 @@ impl App {
             // 상세를 숨기면 **포커스를 목록으로 되돌린다** — 안 보이는 칸에 포커스가 남으면
             // 이동키가 어디에도 안 닿아 화면이 굳은 것으로 보인다(moai-ymnu).
             // **읽음은 시킬 때만 선다**(사용자 결정) — 커서가 지나갔다고, 상세를 봤다고 서지 않는다.
-            B::Read | B::ReadAll | B::ReadGroup => self.mark_read(act, &rows),
+            B::Read | B::ReadAll | B::ReadGroup => self.mark_read(act, rows),
             B::Detail => {
                 self.detail_open = !self.detail_open;
                 if !self.detail_open {
@@ -6249,6 +7129,7 @@ impl App {
         // 칸의 이름은 고른 배치로 댄다 — 한눈 보기에도 보드가 선다(moai-oagj.vcj).
         let layout = self.layout;
         keys::Ctx {
+            proposals: !self.proposals.rows().is_empty(),
             lang: self.site.lang,
             layer: self.on_layer(),
             on_row: matches!(self.current_of(rows), Some(Row::Item(..))),
@@ -6427,6 +7308,7 @@ impl App {
             self.completion = None;
         }
         match self.mode {
+            Mode::Proposals(_) => return self.proposal_key(k),
             Mode::Backlog(_) => return self.jot(k),
             Mode::Pick(_) => return self.pick(k),
             Mode::Unregister(_) => return self.settle_unregister(k),
@@ -6445,6 +7327,7 @@ impl App {
                 eaten
             }
             Mode::Browse
+            | Mode::Proposals(_)
             | Mode::Backlog(_)
             | Mode::Pick(_)
             | Mode::Unregister(_)
@@ -6480,24 +7363,8 @@ impl App {
             keys::Prompt::Apply if self.put_offer() => {}
             keys::Prompt::Apply => {
                 let mode = self.mode.clone();
-                // 잘못 적은 것은 버리지 않고 그 자리에 둔다 — 지우고 다시 치게
-                // 하면 긴 거름망일수록 고치기가 벌이 된다.
-                // 붙든 줄은 **거르기 전**에 잰다 — 첨자가 옛 `keep` 을 가리킨다. 보드면 그 카드의 자리도 함께다.
-                let grip = self.grip_of(&self.rows());
-                // 검색이었는지는 **칸을 열기 전**의 것까지 본다 — 검색 칸은 치는 대로 걸어(`live`) 지금
-                // 걸린 거름망이 이미 검색이다. 빈 글로 Enter 를 치면 그 검색이 풀린다.
-                let was = self.searching()
-                    || self.grep_was.as_ref().is_some_and(|w| matches!(w.hung, Some(Hung::Grep { .. })));
-                if self.apply(&mode).is_ok() {
-                    self.mode = Mode::Browse;
-                    self.grep_was = None;
-                    // 자른 자리의 줄이 다른 것이면 상세도 첫 줄로(리뷰 moai-3lul.kt0) — 치는 대로 거르는
-                    // 길(`live`)이 이미 그렇게 서고, 여기만 커서를 자르고 굴린 자리를 남겼다. **검색이 풀렸으면
-                    // 커서는 `after_search` 가 세운다** — 번호로 먼저 자르면 붙든 줄이 그대로 서도 상세가 되감긴다.
-                    if !self.after_search(was, grip.0.clone()) {
-                        self.settle(grip, self.cursor);
-                    }
-                }
+                // Bad input stays in the prompt, as it did before this shared path was extracted.
+                let _ = self.hang(mode);
             }
             keys::Prompt::Cancel => {
                 // 치는 대로 걸었던 것을 **열기 전으로** 되돌린다 — Esc 는 "안 한 것으로" 다.
@@ -6734,7 +7601,7 @@ impl App {
             Mode::ArchiveDays(p) => p.paste(s),
             // 글칸이 없다 — 붙여 넣을 자리가 없으니 아무 일도 안 한다.
             Mode::Sort(_) => {}
-            Mode::Unregister(_) => self.mode = Mode::Browse,
+            Mode::Unregister(_) | Mode::Proposals(_) => self.mode = Mode::Browse,
             // 글칸이 없다 — 붙여 넣을 자리가 없으니 아무 일도 안 한다. 창을 닫으면 보던 것을 잃는다.
             Mode::Stats(_) => {}
             // 찾는 칸이 열렸으면 거기 넣는다 — 목록이 그만큼 좁아진다.
@@ -12477,6 +13344,376 @@ mod tests {
         let mut a = App::open(repo, load, index, ground, Path::new(), stamp);
         a.user = Some("레이븐 (raven@example.com)".into());
         (scratch, a)
+    }
+
+    fn ctl_req(verb: crate::ctl::wire::Verb, actor: Option<&str>) -> crate::ctl::wire::Request {
+        let mut req = crate::ctl::wire::request(verb, std::time::Duration::from_secs(5));
+        req.actor = actor.map(str::to_string);
+        req
+    }
+
+    #[test]
+    fn a_proposal_never_takes_the_keys_and_the_person_can_accept_it() {
+        use crate::ctl::wire::Verb;
+        let (_scratch, mut a) = writable("proposal-human");
+        a.hit("/");
+        let proposed = a.ctl(&ctl_req(
+            Verb::Propose {
+                text: "Show the board?".into(),
+                then: Some(Box::new(Verb::Screen { name: "board".into() })),
+                ttl: 900,
+                wait: 0,
+            },
+            None,
+        ));
+        assert!(proposed.ok, "{proposed:?}");
+        assert!(matches!(a.mode, Mode::Grep(..)), "the arriving suggestion took the input");
+        a.hit("Esc");
+        let before = a.ctl(&ctl_req(Verb::Screen { name: "board".into() }, None));
+        assert!(before.ok);
+        a.ctl(&ctl_req(Verb::Screen { name: "list".into() }, None));
+        a.hit("SPC a y");
+        assert_eq!(a.ctl_screen(), "board");
+        // The id includes this process's real pid, so read it from the proposal answer.
+        let id = proposed.data.unwrap()["id"].as_str().unwrap().to_string();
+        let accepted = a.proposals.get(&id);
+        assert_eq!(accepted.data.unwrap()["ran"]["data"]["screen"], before.data.unwrap()["screen"]);
+    }
+
+    #[test]
+    fn an_accepted_write_is_written_by_the_window_owner() {
+        use crate::ctl::wire::Verb;
+        let (_scratch, mut a) = writable("proposal-write-owner");
+        let proposed = a.ctl(&ctl_req(
+            Verb::Propose {
+                text: "Write down a thought?".into(),
+                then: Some(Box::new(Verb::Do { name: "browse.jot".into() })),
+                ttl: 900,
+                wait: 0,
+            },
+            Some("Caller (caller@example.com)"),
+        ));
+        assert!(proposed.ok, "{proposed:?}");
+        assert_eq!(proposed.data.as_ref().unwrap()["from"], "Caller (caller@example.com)");
+        let id = proposed.data.unwrap()["id"].as_str().unwrap().to_string();
+        a.hit("SPC a y");
+        let answer = a.proposals.get(&id).data.unwrap();
+        assert_eq!(answer["state"], "accepted");
+        assert_eq!(answer["ran"]["ok"], true, "{answer}");
+        assert!(matches!(a.mode, Mode::Backlog(_)), "{:?}", a.mode);
+        a.paste("person's thought");
+        a.hit("Ctrl-s");
+        let made = backlog_in(a.site.repo.as_ref().unwrap());
+        assert_eq!(made.len(), 1, "{made:?}");
+        let journal = a.site.repo.as_ref().unwrap().journal_of(&made[0].id);
+        assert!(journal.iter().any(|entry| entry.by == "레이븐"), "{journal:?}");
+        assert!(!journal.iter().any(|entry| entry.by == "Caller"), "{journal:?}");
+    }
+
+    #[test]
+    fn an_unknown_followup_is_refused_before_it_shows_and_ctl_cannot_accept_for_the_person() {
+        use crate::ctl::wire::Verb;
+        let (_scratch, mut a) = writable("proposal-unknown");
+        let unsupported = a.ctl(&ctl_req(
+            Verb::Propose {
+                text: "dark?".into(),
+                then: Some(Box::new(Verb::Theme { name: "dark".into() })),
+                ttl: 900,
+                wait: 0,
+            },
+            None,
+        ));
+        assert_eq!(unsupported.code.as_deref(), Some("unsupported"));
+        assert!(a.proposals.rows().is_empty());
+        let unsupported = a.ctl(&ctl_req(
+            Verb::Propose {
+                text: "show?".into(),
+                then: Some(Box::new(Verb::View { name: "unknown".into(), on: true })),
+                ttl: 900,
+                wait: 0,
+            },
+            None,
+        ));
+        assert_eq!(unsupported.code.as_deref(), Some("unsupported"));
+        assert!(a.proposals.rows().is_empty());
+        a.ctl(&ctl_req(Verb::Propose { text: "hello".into(), then: None, ttl: 900, wait: 0 }, None));
+        let forbidden = a.ctl(&ctl_req(Verb::Do { name: "browse.proposal_accept".into() }, None));
+        assert_eq!(forbidden.code.as_deref(), Some("refused"));
+        assert_eq!(a.proposals.rows().len(), 1);
+    }
+
+    #[test]
+    fn an_accepted_proposal_leaves_what_it_opened_to_the_person() {
+        use crate::ctl::wire::Verb;
+        let (_scratch, mut a) = writable("proposal-opened");
+        let proposed = a.ctl(&ctl_req(
+            Verb::Propose {
+                text: "Filter?".into(),
+                then: Some(Box::new(Verb::Do { name: "browse.filter".into() })),
+                ttl: 900,
+                wait: 0,
+            },
+            None,
+        ));
+        assert!(proposed.ok, "{proposed:?}");
+        a.hit("SPC a y");
+        assert!(matches!(a.mode, Mode::Filter(_)), "{:?}", a.mode);
+        // The person's key opened this field: a ctl request may not type into it.
+        let typed = a.ctl(&ctl_req(Verb::Keys { seqs: vec![], text: Some("x".into()) }, None));
+        assert_eq!(typed.code.as_deref(), Some("person_busy"), "{typed:?}");
+    }
+
+    #[test]
+    fn ctl_leaves_the_persons_editor_request_and_an_accepted_jot_opens_the_editor() {
+        use crate::ctl::wire::Verb;
+        let (_scratch, mut a) = writable("ctl-editor-pending");
+        a.editor = Some("vi".into());
+        a.hit("SPC n");
+        assert!(a.edit.is_some(), "the person's key asked for the editor");
+        // The loop drains ctl requests before it opens the editor: one that ran now would take the request.
+        let busy = a.ctl(&ctl_req(Verb::Do { name: "browse.go_board".into() }, None));
+        assert_eq!(busy.code.as_deref(), Some("person_busy"), "{busy:?}");
+        assert!(a.edit.is_some(), "a ctl request took the person's editor request");
+        a.edit = None;
+        let proposed = a.ctl(&ctl_req(
+            Verb::Propose {
+                text: "Write it down?".into(),
+                then: Some(Box::new(Verb::Do { name: "browse.jot".into() })),
+                ttl: 900,
+                wait: 0,
+            },
+            None,
+        ));
+        let id = proposed.data.unwrap()["id"].as_str().unwrap().to_string();
+        a.hit("SPC a y");
+        assert!(a.edit.is_some(), "the accepted jot lost its editor");
+        assert_eq!(a.proposals.get(&id).data.unwrap()["ran"]["ok"], true);
+    }
+
+    #[test]
+    fn a_follow_up_that_cannot_run_is_not_reported_as_accepted() {
+        use crate::ctl::wire::Verb;
+        let (_scratch, mut a) = writable("proposal-failed");
+        a.ctl(&ctl_req(
+            Verb::Propose {
+                text: "Paris time?".into(),
+                then: Some(Box::new(Verb::Zone { name: "Europe/Pari".into() })),
+                ttl: 900,
+                wait: 0,
+            },
+            None,
+        ));
+        a.hit("SPC a y");
+        let failed = crate::i18n::fill(
+            crate::i18n::say(a.site.lang, "tui.propose.failed"),
+            &[("why", "unknown timezone: Europe/Pari")],
+        );
+        assert_eq!(a.notice.as_deref(), Some(failed.as_str()));
+    }
+
+    #[test]
+    fn ctl_do_and_keys_share_the_browse_action_and_cannot_quit() {
+        use crate::ctl::wire::Verb;
+        let (_scratch, mut a) = writable("ctl-actions");
+        let keys = a.ctl(&ctl_req(Verb::Keys { seqs: vec!["SPC g b".into()], text: None }, None));
+        assert!(keys.ok, "{keys:?}");
+        assert_eq!(keys.data.as_ref().unwrap()["screen"], "board");
+        let named = a.ctl(&ctl_req(Verb::Do { name: "browse.go_list".into() }, None));
+        assert!(named.ok, "{named:?}");
+        assert_eq!(named.data.as_ref().unwrap()["screen"], "list");
+        for verb in [
+            Verb::Do { name: "browse.quit".into() },
+            Verb::Keys { seqs: vec!["SPC q".into()], text: None },
+            Verb::Keys { seqs: vec!["Ctrl-c".into()], text: None },
+        ] {
+            let reply = a.ctl(&ctl_req(verb, None));
+            assert_eq!(reply.code.as_deref(), Some("refused"), "{reply:?}");
+            assert!(!a.quit);
+            assert!(a.chord.held().is_empty());
+        }
+    }
+
+    #[test]
+    fn ctl_do_uses_the_action_name_after_a_key_is_rebound() {
+        use crate::ctl::wire::Verb;
+        let (_scratch, mut a) = writable("ctl-rebind");
+        let (keys, problems) = keymap::build("[browse]\ngo_board = 'SPC x'\n");
+        assert!(problems.is_empty(), "{problems:?}");
+        a.keys = keys;
+        let old = a.ctl(&ctl_req(Verb::Keys { seqs: vec!["SPC g b".into()], text: None }, None));
+        assert!(old.ok, "{old:?}");
+        assert_eq!(a.ctl_screen(), "list");
+        let named = a.ctl(&ctl_req(Verb::Do { name: "browse.go_board".into() }, None));
+        assert!(named.ok, "{named:?}");
+        assert_eq!(a.ctl_screen(), "board");
+        let actions = a.ctl(&ctl_req(Verb::Actions, None));
+        let rows = actions.data.unwrap()["actions"].as_array().unwrap().clone();
+        let go_board = rows.iter().find(|row| row["name"] == "browse.go_board").unwrap();
+        assert_eq!(go_board["keys"], serde_json::json!(["SPC x"]));
+    }
+
+    #[test]
+    fn ctl_types_only_in_a_field_it_opened() {
+        use crate::ctl::wire::Verb;
+        let (_scratch, mut a) = writable("ctl-field");
+        a.hit("/");
+        let busy = a.ctl(&ctl_req(Verb::Keys { seqs: vec![], text: Some("person".into()) }, None));
+        assert_eq!(busy.code.as_deref(), Some("person_busy"), "{busy:?}");
+        a.hit("Esc");
+        let open = a.ctl(&ctl_req(Verb::Keys { seqs: vec!["/".into()], text: None }, None));
+        assert!(open.ok, "{open:?}");
+        let typed = a.ctl(&ctl_req(Verb::Keys { seqs: vec![], text: Some("parser".into()) }, None));
+        assert!(typed.ok, "{typed:?}");
+        assert!(matches!(&a.mode, Mode::Grep(input, _) if input.text() == "parser"), "{:?}", a.mode);
+        a.human_input();
+        let busy_again = a.ctl(&ctl_req(Verb::Keys { seqs: vec![], text: Some("more".into()) }, None));
+        assert_eq!(busy_again.code.as_deref(), Some("person_busy"), "{busy_again:?}");
+    }
+
+    #[test]
+    fn ctl_writes_with_the_callers_name_and_does_not_leave_it_for_a_human() {
+        use crate::ctl::wire::Verb;
+        let (_scratch, mut a) = writable("ctl-actor");
+        let open =
+            a.ctl(&ctl_req(Verb::Keys { seqs: vec!["SPC n".into()], text: None }, Some("Caller (caller@example.com)")));
+        assert!(open.ok, "{open:?}");
+        let title = a.ctl(&ctl_req(
+            Verb::Keys { seqs: vec![], text: Some("ctl thought".into()) },
+            Some("Caller (caller@example.com)"),
+        ));
+        assert!(title.ok, "{title:?}");
+        let save = a
+            .ctl(&ctl_req(Verb::Keys { seqs: vec!["Ctrl-s".into()], text: None }, Some("Caller (caller@example.com)")));
+        assert!(save.ok, "{save:?}");
+        let repo = a.site.repo.clone().unwrap();
+        let made = backlog_in(&repo);
+        assert_eq!(made.len(), 1, "{made:?}");
+        assert_eq!(made[0].assignee_email.as_deref(), Some("caller@example.com"));
+        assert_eq!(repo.journal_of(&made[0].id)[0].by, "Caller");
+        a.human_input();
+        add_backlog(&mut a, "argos-0002");
+        assert_eq!(repo.journal_of("argos-0002")[0].by, "레이븐");
+    }
+
+    #[test]
+    fn ctl_write_without_an_actor_never_asks_or_writes() {
+        use crate::ctl::wire::Verb;
+        let (_scratch, mut a) = writable("ctl-no-actor");
+        assert!(a.ctl(&ctl_req(Verb::Keys { seqs: vec!["SPC n".into()], text: None }, None)).ok);
+        assert!(a.ctl(&ctl_req(Verb::Keys { seqs: vec![], text: Some("not saved".into()) }, None)).ok);
+        let reply = a.ctl(&ctl_req(Verb::Keys { seqs: vec!["Ctrl-s".into()], text: None }, None));
+        assert_eq!(reply.code.as_deref(), Some("no_actor"), "{reply:?}");
+        assert!(matches!(a.mode, Mode::Backlog(_)), "{:?}", a.mode);
+        assert!(backlog_in(a.site.repo.as_ref().unwrap()).is_empty());
+        assert!(a.trouble.is_none());
+    }
+
+    #[test]
+    fn ctl_refuses_an_editor_and_clears_the_request() {
+        use crate::ctl::wire::Verb;
+        let (_scratch, mut a) = writable("ctl-editor");
+        a.editor = Some("vi".into());
+        let reply = a.ctl(&ctl_req(Verb::Do { name: "browse.jot".into() }, None));
+        assert_eq!(reply.code.as_deref(), Some("refused"), "{reply:?}");
+        assert!(a.edit.is_none());
+        assert!(a.ctl_turn.is_none());
+    }
+
+    #[test]
+    fn ctl_zone_none_returns_to_this_machines_zone() {
+        use crate::ctl::wire::Verb;
+        let (_scratch, mut a) = writable("ctl-zone-none");
+        a.system_zone = crate::tz::Zone::load("<-03>3").unwrap();
+        a.zone = crate::tz::Zone::load("JST-9").unwrap();
+        a.saved_zone = Some("JST-9".into());
+        let reply = a.ctl(&ctl_req(Verb::Zone { name: "none".into() }, None));
+        assert!(reply.ok, "{reply:?}");
+        assert_eq!(a.zone.name(), "<-03>3", "zone none is not the zone a restart would draw in");
+        assert_eq!(a.saved_zone, None);
+    }
+
+    #[test]
+    fn ctl_sort_filter_find_and_view_use_the_explorers_state() {
+        use crate::ctl::wire::Verb;
+        let (_scratch, mut a) = writable("ctl-values");
+        let sorted = a.ctl(&ctl_req(
+            Verb::Sort { words: vec!["title:desc".into(), "priority:desc".into()], default: false },
+            None,
+        ));
+        assert!(sorted.ok, "{sorted:?}");
+        assert_eq!(sorted.data.as_ref().unwrap()["sort"], serde_json::json!(["title:desc", "priority:desc"]));
+        let filtered = a.ctl(&ctl_req(Verb::Filter { query: Some("status=todo".into()) }, None));
+        assert!(filtered.ok, "{filtered:?}");
+        assert_eq!(a.ctl_state(false)["filter"]["text"], "status=todo");
+        let cursor = a.cursor;
+        let invalid = a.ctl(&ctl_req(Verb::Filter { query: Some("status=no-such-column".into()) }, None));
+        assert_eq!(invalid.code.as_deref(), Some("bad_input"), "{invalid:?}");
+        assert_eq!(a.cursor, cursor);
+        let found = a.ctl(&ctl_req(Verb::Find { query: "argos".into(), scope: "id".into() }, None));
+        assert!(found.ok, "{found:?}");
+        assert_eq!(a.ctl_state(false)["filter"]["scope"], "id");
+        let cleared = a.ctl(&ctl_req(Verb::Filter { query: None }, None));
+        assert!(cleared.ok, "{cleared:?}");
+        let one = a.ctl(&ctl_req(Verb::View { name: "deferred".into(), on: true }, None));
+        assert!(one.ok, "{one:?}");
+        let again = a.ctl(&ctl_req(Verb::View { name: "deferred".into(), on: true }, None));
+        assert_eq!(again.data.as_ref().unwrap()["changed"], false);
+    }
+
+    #[test]
+    fn ctl_goto_read_pane_and_theme_have_bounded_effects() {
+        use crate::ctl::wire::Verb;
+        let (_scratch, mut a) = writable("ctl-goto-pane");
+        let cursor = a.cursor;
+        let read = a.ctl(&ctl_req(Verb::Read { ids: vec!["argos-0001".into()], all: false, group: None }, None));
+        assert!(read.ok, "{read:?}");
+        assert_eq!(a.cursor, cursor);
+        let pane = a.ctl(&ctl_req(
+            Verb::Pane {
+                list_width: Some("5".into()),
+                list_height: None,
+                wiki_width: None,
+                gantt_label: None,
+                gantt_grid: None,
+            },
+            None,
+        ));
+        assert!(pane.ok, "{pane:?}");
+        assert_eq!(a.list_width, Some(15));
+        let pixels = a.ctl(&ctl_req(
+            Verb::Pane {
+                list_width: None,
+                list_height: None,
+                wiki_width: None,
+                gantt_label: None,
+                gantt_grid: Some("300".into()),
+            },
+            None,
+        ));
+        assert_eq!(pixels.code.as_deref(), Some("unsupported"));
+        let at = a.ctl(&ctl_req(Verb::Goto { id: Some("argos-0001".into()), enter: false, project: None }, None));
+        assert_eq!(at.data.as_ref().unwrap()["landed"], true, "{at:?}");
+        let theme = a.ctl(&ctl_req(Verb::Theme { name: "dark".into() }, None));
+        assert_eq!(theme.code.as_deref(), Some("unsupported"));
+    }
+
+    #[test]
+    fn ctl_sort_default_and_a_tenth_column_use_the_saved_look() {
+        use crate::ctl::wire::Verb;
+        let (scratch, mut a) = writable("ctl-saved-look");
+        let user = scratch.join("user.toml");
+        a.user_config = Some(user.clone());
+        let sort = a.ctl(&ctl_req(Verb::Sort { words: vec!["title:desc".into()], default: true }, None));
+        assert!(sort.ok, "{sort:?}");
+        assert_eq!(App::order_words(&a.order_default), ["title:desc"]);
+        assert!(std::fs::read_to_string(&user).unwrap().contains("order = [\"title:desc\"]"));
+        while a.site.cfg.statuses.len() < 10 {
+            let next = a.site.cfg.statuses.len();
+            a.site.cfg.statuses.push(format!("extra_{next}"));
+        }
+        let view = a.ctl(&ctl_req(Verb::View { name: "column:extra_9".into(), on: false }, None));
+        assert!(view.ok, "{view:?}");
+        assert!(a.view.hides("extra_9"));
     }
 
     /// 생각 하나를 담는 쓰기 — 폼이 부를 모양 그대로다.

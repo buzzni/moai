@@ -485,6 +485,8 @@ const SUBDIR: &str = "cd \"<root>/.worktrees/<epic>/<subdir>\" && …";
 /// 을 가르치면 에이전트가 방금 바꾼 줄에서 **사람의 `[NEW]` 가 내려간다.** 읽음은 사람마다 다른
 /// 값이라는 것이 `cmd/read.rs` 의 전제인데, 신원이 하나면 그 전제가 선 채로 깨진다. 가르치려면
 /// 에이전트용 신원(`MOAI_CONFIG` 를 가르는 길)이 먼저다.
+/// `moai ctl read` 도 사람의 열린 창에서 같은 읽음 표를 바꾸므로, 아래의 `CTL` 은 사람이
+/// 시켰을 때만 쓰라고 가르친다.
 const CHEATSHEET: &str = r#"    moai status                            board · warnings · flow (start a session here)
     moai prime                             what you hold and what is next, nothing else
     moai ready                             what you can pick up right now
@@ -497,6 +499,8 @@ const CHEATSHEET: &str = r#"    moai status                            board · 
     moai stats                             counts: columns, flow, lead and cycle time, AI work
     moai tui                               walk the explorer. SPC n parks a thought
                                            on a group row: l one step · Tab expand all · h fold
+    moai ctl ls · moai ctl state          open windows and their state
+    moai ctl sort|filter|find|wiki … · propose  change a view or ask first
     moai add '<title>' -p 1 -t bug -e <epic>   create
     moai mv <id> in_progress               pick up  →  review  →  done
     moai mv <id> in_progress --take        take over someone else's row (ask first)
@@ -543,6 +547,26 @@ tracker.** Editing the worktree's `.moai` makes that file conflict on the merge,
 and then the only way out is outside the tool — one line on stderr says where it
 wrote. So that worktree's `.moai/issues.jsonl` stays as it was when the worktree
 split off, and the current rows are in the main checkout's file."#;
+
+const CTL: &str = r#"### The person's open explorer
+
+`moai ctl` reaches only a person's already open `moai tui` or visible `moai web`
+tab from another terminal. It opens no window and drives no agent session. To show
+the person a view or a finding, run `moai ctl ls`, then `moai ctl state`. The verbs
+are in `docs/ctl.md` and `moai ctl --help`.
+
+The view belongs to the person. Sort, view, cell and pane choices persist in their
+settings; unless asked to change one, `moai ctl propose '<why>' --then '<verb>'`
+asks first. `[NEW]` is theirs too: use `moai ctl read` only on request, since an
+agent sharing their identity clears their read marks. On `person_busy`, wait once
+or propose; never retry in a loop. ctl refuses to close their window. Tests set
+`MOAI_CTL_DIR` to an isolated directory so they cannot reach it.
+
+Column moves and notes use `moai mv` and `moai note`, not ctl verbs. To suggest one
+in the person's open window, use `moai ctl propose '<why>' --wait <seconds>` and no
+`--then`, then run the tracker command on acceptance. For someone else's row,
+acceptance is permission:
+`moai mv <id> <column> --from <seen column> --take -m 'accepted proposal <proposal id> in the explorer'`."#;
 
 /// 승인 게이트가 없다는 말 — **한 자리만 판다**(moai-0zjo, 2026-10-02 사용자 결정): 남의 줄이나 담당
 /// 없는 줄을 집기 전에는 사람에게 묻는다. 그 밖은 여전히 묻지 않는다.
@@ -1447,6 +1471,8 @@ Start a session by running `moai status`. The board and the warnings come up on 
 
 {CHEATSHEET}
 
+{CTL}
+
 {PEOPLE}
 
 ### The three forks
@@ -1613,6 +1639,8 @@ pub fn reference() -> String {
 
 `moai --help` and `moai <command> --help` are the truth. This file is a summary of
 them, so where they differ the help wins.
+
+{CTL}
 
 ## There are two kinds of group
 
@@ -5941,7 +5969,7 @@ mod tests {
         let rules = rules();
         assert!(agents.contains(&rules) && skill.contains(&rules), "규칙 셋이 갈라졌다");
         let backlog = backlog();
-        for piece in [GROUPS, backlog.as_str(), DEFERRING, PEOPLE, PROJECTS, LANGUAGE, UPDATES, COMMITS, WIKI] {
+        for piece in [GROUPS, backlog.as_str(), DEFERRING, PEOPLE, PROJECTS, LANGUAGE, UPDATES, COMMITS, WIKI, CTL] {
             let head = piece.lines().next().unwrap();
             assert!(agents.contains(piece), "AGENTS 블록에 없다 — {head}");
             assert!(reference.contains(piece), "참고 문서에 없다 — {head}");

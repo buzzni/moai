@@ -1079,6 +1079,15 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
   return {
     render,
     command,
+    setGrid(width) {
+      gridW = normalizeGrid(width, (scroll.clientWidth || FALLBACK_WIDTH) - 120)
+      saveGrid(gridW)
+      paintGrid()
+      position()
+      draw()
+      return gridW
+    },
+    gridWidth: () => gridW,
     leave() {
       shut.clear()
       foldVersion++

@@ -1657,6 +1657,10 @@ mod tests {
                     .replace("<title>", "title")
                     .replace("<what you found>", "what I found")
                     .replace("<why>", "why")
+                    .replace("<seconds>", "10")
+                    .replace("<column>", "review")
+                    .replace("<seen column>", "in_progress")
+                    .replace("<proposal id>", "tui-1/1")
                     // 감독이 일꾼에게 싣는 글은 멤버를 `<멤버>` 로 부른다. 자리표시자가 남으면 셸
                     // 읽기가 `<`·`>` 를 리다이렉션으로 읽어, 가르친 명령이 아니라 엉뚱한 쓰기를
                     // 잰다 — 9-1 의 노트 줄은 글의 `(` 가 그 쓰기를 못 읽을 것으로 돌려 우연히

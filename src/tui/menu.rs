@@ -340,6 +340,7 @@ pub(super) fn group(seq: &[KeyEvent], lang: Lang) -> &'static str {
         "SPC c" => say(lang, "tui.group.cell"),
         "SPC m" => say(lang, "tui.group.read"),
         "SPC o" => say(lang, "tui.group.options"),
+        "SPC a" => say(lang, "tui.group.proposal"),
         _ => "…",
     }
 }

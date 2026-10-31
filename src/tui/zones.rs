@@ -212,7 +212,13 @@ impl App {
     /// 이름은 설정에 적는다**: 지금 기계에 그 자료가 없다고 사람이 고른 것을 지우면, zoneinfo 가
     /// 있는 기계로 옮겼을 때 그 설정이 사라져 있다. 읽기가 관대한 것과 같은 자다.
     pub(super) fn set_zone(&mut self, name: &str) {
-        match crate::tz::Zone::load(name) {
+        self.set_zone_opt(Some(name));
+    }
+
+    /// `None` clears the choice (`moai ctl zone none`): the explorer then stands in this machine's zone, as one opened
+    /// without `[tui] timezone` does (`tz::chosen`). Falling to UTC here would differ from the next start.
+    pub(super) fn set_zone_opt(&mut self, name: Option<&str>) {
+        match name.map(crate::tz::Zone::load).unwrap_or_else(|| Ok(self.system_zone.clone())) {
             // **성했다고 알림을 지우지 않는다**(리뷰). `App::notice` 는 한 자리를 나눠 쓰는데,
             // 여기서 비우면 못 읽은 옆 스냅샷처럼 이 일과 무관한 배너가 시간대를 한 번 고른 것만으로
             // 사라진다. 앞선 시간대 알림은 [`App::key`] 가 키마다 걷으므로 여기서 비울 까닭도 없다.
@@ -235,7 +241,7 @@ impl App {
         // 돌렸고(그때 이름은 `recount`, 지금 [`super::App::count_all`])(리뷰), 그것으로도 프로젝트
         // 층의 줄과 도는 읽기는 못 고쳐 이 이슈가 섰다.
         // 적는 것은 **고른 이름**이지 떨어진 UTC 가 아니다.
-        self.saved_zone = Some(name.to_string());
+        self.saved_zone = name.map(str::to_string);
         self.save_look();
     }
 }
