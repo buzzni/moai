@@ -18,6 +18,7 @@ does not tag — see `CONTRIBUTING.md`.
 
 ### Fixed
 
+- Explorer control actions now reflect person-only restrictions, run against the visible stats or wiki window, and report held keys in normal spelling. Proposal hints follow remapped bindings and keep suggestion text readable in narrow windows; read-only calls no longer leave a fast idle-polling tail, and explicit targets skip unrelated sockets. (moai-4km9)
 - Control proposals now keep the selected ID stable, release disconnected waiter slots, validate time zones before display, preserve visible web tabs and pending suggestions across short stream reconnects, and mark multiple web read IDs atomically. (moai-v5of)
 - `moai due apply` skips closed epic and milestone deadlines, including groups whose finished members have moved to archive storage and groups closed by deferring remaining work. Priority notices and ready ordering use the same group closure, and reopened groups lend their deadlines again. Archive reads are limited to cases that can affect the result; an incomplete required archive read refuses without changing priorities or adding notes. (moai-w30o.pkr, moai-nfct)
 

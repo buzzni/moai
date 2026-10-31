@@ -16,6 +16,12 @@ On Windows, `ctl ls` returns an empty list and commands that need a window repor
 
 `moai ctl do browse.go_list` runs a named action even if the person changed its key binding. `moai ctl actions --json` lists the current `browse`, `gantt`, and `moves` actions with their bindings and whether each is enabled. Plain `actions` output marks disabled actions with `·` and `(off: …)`. The name `browse.read_all` and its default keys `SPC m a` both mark all visible NEW rows read. Column moves and notes use `moai mv` and `moai note`.
 
+`moai ctl do` runs on the visible explorer window: movement scrolls stats or moves the focused wiki pane, and the wiki raw toggle resets its page layout. `actions` marks quit and proposal accept, decline and list actions disabled, with the reason returned by `do`; the person operates those actions in the window.
+
+An explicit `-t <id>` checks only the socket for that window's process, so an unrelated slow window cannot delay it. Ordinary commands still require a visible web tab; proposal `answer` and `withdraw` retain the reconnect grace described below.
+
+The explorer's `state` reports held keys in their normal spelling, such as `SPC a` or `Ctrl-w`, rather than Rust debug syntax. Read-only ctl calls wake the explorer for the queued request and leave its normal idle wait in place.
+
 Web tabs use the names from their own key table, such as `tab.gantt` and `read.all`. `keys 'SPC g b'` presses the web page's key router. `moai ctl theme dark` changes that tab's theme and remembers it in the browser; the browser's other open tabs follow the stored theme. The key help, a human-focused input or menu, a half-typed key sequence such as the `g` of `g g`, or an open sort editor gives `person_busy`; what a ctl request leaves open stays ctl's until the person presses a key or clicks. A search or filter opened by ctl accepts a later `keys --text`. Keys use the explorer's spelling (`Ctrl-d`, `Shift-Tab`) on both surfaces. On a web tab, `do` refuses an action that `actions` marks off, including one whose key carries an argument; press its keys instead.
 
 Control requests wait until their keys have run and return the resulting screen, mode, menu, cursor, notice, and whether they changed anything. They never count as human input when selecting the most recently used window. A request cannot take over a field or unfinished key sequence the person started, open an editor, or close the person's window. While the person's editor holds the terminal, the explorer stays in `ctl ls` and actions answer `person_busy`. A web tab discards a request whose deadline passed before it arrived. A field opened by a control request remains available to later control requests until the person types in it.
@@ -58,4 +64,4 @@ If a waiting command closes its connection, its waiter slot is released promptly
 
 A window holds up to five pending suggestions. Text is limited to 500 characters and three lines, with control characters removed. `--ttl` defaults to 900 seconds and is limited to 3600; an unanswered suggestion expires and disappears. Answered suggestions remain readable for ten minutes. Waiting callers have four slots separate from ordinary ctl requests, so a set of unanswered suggestions does not stop `state` from answering.
 
-Decided in: moai-zgc1 moai-v5of
+Decided in: moai-zgc1 moai-v5of moai-4km9
