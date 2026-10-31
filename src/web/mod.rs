@@ -901,6 +901,52 @@ mod tests {
         assert_eq!(overlay_in_git(asked.clone(), &s.path().join("sub")), asked, "체크아웃 밑의 자리");
     }
 
+    #[test]
+    #[cfg(unix)]
+    fn a_ctl_write_spawns_the_child_with_the_callers_user_argument() {
+        use crate::ctl::wire::{self, Verb};
+        use std::os::unix::fs::PermissionsExt;
+        let scratch = crate::scratch::Scratch::new("web-ctl-spawn-actor");
+        let exe = scratch.path().join("planted-moai");
+        std::fs::write(&exe, "#!/bin/sh\nprintf '%s\\n' \"$@\" > argv.txt\nprintf '{}\\n'\n").unwrap();
+        std::fs::set_permissions(&exe, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let site = Site::new(
+            run::Spawner { exe, cwd: scratch.path().to_path_buf(), user: Some("Owner (owner@example.test)".into()) },
+            Lang::En,
+        );
+        let joined = site.tabs.join(scratch.path(), false, None).unwrap();
+        let mut req = wire::request(Verb::Screen { name: "list".into() }, Duration::from_secs(5));
+        req.target = Some(joined.id.clone());
+        req.actor = Some("Caller (caller@example.test)".into());
+        std::thread::scope(|scope| {
+            let waiting = scope.spawn(|| site.tabs.handle(req));
+            let ctl::Push::Ctl { seq, .. } = joined.incoming.recv_timeout(Duration::from_secs(2)).unwrap() else {
+                panic!("expected a live ctl request")
+            };
+            let request = Request {
+                method: "POST".into(),
+                path: "/api/plan/moai-1abc".into(),
+                query: vec![
+                    ("day".into(), "2026-10-30".into()),
+                    ("ctl".into(), seq.to_string()),
+                    ("token".into(), joined.token.clone()),
+                ],
+                host: Some("127.0.0.1:1".into()),
+                origin: Some("http://127.0.0.1:1".into()),
+                content_length: 0,
+                content_type: None,
+                body_prefix: Vec::new(),
+            };
+            let written = answer(&request, &site);
+            let argv = std::fs::read_to_string(scratch.path().join("argv.txt")).unwrap();
+            assert_eq!(written.status, 200);
+            assert!(argv.lines().any(|arg| arg == "--user=Caller (caller@example.test)"), "{argv}");
+            assert!(!argv.contains("Owner"), "{argv}");
+            site.tabs.reply(&joined.id, &joined.token, seq, wire::Reply::success(serde_json::json!({}))).unwrap();
+            assert!(waiting.join().unwrap().ok);
+        });
+    }
+
     /// **405 의 `Allow` 는 그 길이 받는 메서드다**(moai-m4ez.4zq) — 쓰는 길(읽음 표시·계획 날)은 `POST`, 나머지는 `GET`. 자식을 안 띄우는
     /// 답이라 없는 바이너리를 준다.
     #[test]
