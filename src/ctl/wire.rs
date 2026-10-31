@@ -263,6 +263,32 @@ mod tests {
             let mut wire = row["args"].as_object().unwrap().clone();
             wire.insert("verb".into(), serde_json::json!(name));
             let parsed: super::Verb = serde_json::from_value(serde_json::Value::Object(wire)).unwrap();
+            // Deliberately exhaustive: adding a protocol variant must revisit fixture coverage, even if no fixture
+            // row can yet deserialize into it. A wildcard would let that addition stay green.
+            let variant = match &parsed {
+                super::Verb::Hello => "hello",
+                super::Verb::Propose { .. } => "propose",
+                super::Verb::Answer { .. } => "answer",
+                super::Verb::Withdraw { .. } => "withdraw",
+                super::Verb::State { .. } => "state",
+                super::Verb::Keys { .. } => "keys",
+                super::Verb::Do { .. } => "do",
+                super::Verb::Actions => "actions",
+                super::Verb::Sort { .. } => "sort",
+                super::Verb::Filter { .. } => "filter",
+                super::Verb::Find { .. } => "find",
+                super::Verb::Screen { .. } => "screen",
+                super::Verb::View { .. } => "view",
+                super::Verb::Cell { .. } => "cell",
+                super::Verb::Detail { .. } => "detail",
+                super::Verb::Goto { .. } => "goto",
+                super::Verb::Read { .. } => "read",
+                super::Verb::Wiki { .. } => "wiki",
+                super::Verb::Pane { .. } => "pane",
+                super::Verb::Zone { .. } => "zone",
+                super::Verb::Theme { .. } => "theme",
+            };
+            assert_eq!(variant, name);
             assert_eq!(serde_json::to_value(parsed).unwrap()["verb"], name);
             assert!(!row["surfaces"].as_array().unwrap().is_empty());
             names.push(name);

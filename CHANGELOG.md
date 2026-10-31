@@ -12,6 +12,20 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+### Added
+
+- **`moai read --atomic`** writes none of the named marks when any of the IDs is missing (`not_found`) or held by a value written by hand (`refused`). A web tab's `moai ctl read <ids>` uses it. (moai-v5of.om1)
+
+### Changed
+
+- `moai ready`, `moai prime` and the next-work suggestion from `moai mv … done` now follow archive-aware placement and deadlines, reversing the live-only deadline rule shipped in 0.38.0 (moai-eev6). An archived parent can place a live child, and an archived group reopened by live work can lend its deadline. Due apply and status priority notices use that same placement; write deadline ceilings still use live rows. (moai-w30o, moai-mg2d)
+
+### Fixed
+
+- Explorer control actions now reflect person-only restrictions, run against the visible stats or wiki window, and report held keys in normal spelling. Proposal hints follow remapped bindings and keep suggestion text readable in narrow windows; read-only calls no longer leave a fast idle-polling tail, and explicit targets skip unrelated sockets. (moai-4km9)
+- Control proposals now keep the selected ID stable, release disconnected waiter slots, validate time zones before display, preserve visible web tabs and pending suggestions across short stream reconnects, and mark multiple web read IDs atomically. (moai-v5of)
+- `moai due apply` skips closed epic and milestone deadlines, including groups whose finished members have moved to archive storage and groups closed by deferring remaining work. Priority notices and ready ordering use the same group closure, and reopened groups lend their deadlines again. Archive reads are limited to placement and closure that can affect the result; blockers alone do not trigger a due archive read, and an incomplete required archive read refuses without changing priorities or adding notes. Rule-2 pickup suggestions use archive-aware context, and edit/Gantt overflow notices use archived group closure. (moai-w30o.pkr, moai-nfct, moai-2ayc, moai-4h9j, moai-w30o.j7j)
+
 ## [0.39.0] - 2026-10-31
 
 ### Added

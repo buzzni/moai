@@ -154,10 +154,8 @@ export function createCtl(options: CtlOptions) {
     if (request.all === true) result = await options.withIdentity(seq, token, () => read.all())
     else if (typeof request.group === 'string') result = await options.withIdentity(seq, token, () => read.group(String(request.group)))
     else if (Array.isArray(ids) && ids.every((id) => typeof id === 'string')) {
-      for (const id of ids as string[]) {
-        result = await options.withIdentity(seq, token, () => read.one(id))
-        if (result) break
-      }
+      if (ids.length === 0) return no('bad_input', 'give ids, all or group')
+      result = await options.withIdentity(seq, token, () => read.ids(ids as string[]))
     } else return no('bad_input', 'give ids, all or group')
     return result ? no(result.kind === 'moai-error' ? result.code ?? 'refused' : 'refused', 'message' in result ? String(result.message) : 'read was refused') : after()
   }

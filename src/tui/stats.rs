@@ -273,9 +273,7 @@ impl App {
                     false
                 }
                 Some(Browse::Step(m)) => {
-                    if let Mode::Stats(w) = &mut self.mode {
-                        w.scroll.go(m);
-                    }
+                    self.run(Browse::Step(m), &rows);
                     false
                 }
                 // The suggestion line is drawn over this window too, and its keys answer here as on the list.

@@ -644,6 +644,7 @@ pub(super) fn commit_plan(app: &mut App) {
     // 같은 시작을 적었다) 비어, 옆이 고친 그 판을 읽음으로 안 적는다 — `moai edit` 이 `changed` 일 때만 적는 것과 같은 자다.
     app.load_read();
     let seen = app.site.seen.clone();
+    let root = app.site.repo.as_ref().map(|repo| repo.root.clone());
     let mut written: Option<crate::model::Issue> = None;
     let wrote = app.write(commit_plan, |issues, cfg, _, _| {
         // **시각은 락을 쥔 뒤에 뜬다**(`cmd::mv` 의 moai-u5bk.3wq 와 같은 자, 리뷰) — 밖에서 뜨면 그새 옆이 담은 줄보다 이른 도장이
@@ -664,7 +665,24 @@ pub(super) fn commit_plan(app: &mut App) {
         })?;
         let after = i.clone();
         written = (changed && !crate::query::changed_since_seen(&before, &seen)).then(|| after.clone());
-        overflow = crate::report::overflow_by(issues, &before, &after, cfg);
+        let candidates = crate::report::overflow_by(issues, &before, &after);
+        if !candidates.is_empty()
+            && let Some(root) = &root
+        {
+            let ids: Vec<&str> = candidates.iter().map(String::as_str).collect();
+            // Re-read under the write lock: the screen's archive context can be stale.
+            let archived = crate::cmd::archived_with_groups(root, issues, &ids)?;
+            // App::write exposes reserved IDs including archived IDs, not unread live
+            // IDs alone. Read the live diagnostics under the same lock rather than
+            // suppressing every archived member or borrowing stale screen diagnostics.
+            let unread = if archived.is_empty() {
+                Vec::new()
+            } else {
+                crate::store::Repo::at(root.clone(), cfg.clone()).read()?.errors
+            };
+            let context = crate::cmd::in_context(issues, &archived, &unread);
+            overflow = crate::report::overflow_in_context(&context, candidates, cfg);
+        }
         // **읽히는 날만 든다** — `Issue::shifted` 가 옮길 날을 고른 자(`planned_start`·`deadline`)와 같다. 못 읽는 글
         // (손으로 푼 `2026-10-24T00:00:00Z`)은 옮기기가 다른 쪽 날에서 센 날로 덮었으니 되돌릴 것은 "날 없음" 이고,
         // 그 글을 `--start` 에 되쓰는 명령은 `moai edit` 이 거절한다.
@@ -808,6 +826,46 @@ mod tests {
         a.identify = |_, _| Ok(crate::model::someone("raven"));
         a.site.now = "2026-10-22T03:00:00Z".into();
         (dir, a)
+    }
+
+    #[test]
+    fn gantt_overflow_notices_match_archived_closure_and_reopened_groups() {
+        use super::{Plan, PlanMove};
+        for (reopened, opaque) in [(false, false), (true, false), (false, true)] {
+            let (dir, mut a) = on_disk("archived-overflow");
+            let mut milestone = make("argos-mmmm", Kind::Milestone);
+            milestone.due_on = Some("2026-10-31".into());
+            let mut epic = make("argos-eeee", Kind::Epic);
+            epic.milestone = Some(milestone.id.clone());
+            epic.due_on = Some("2026-10-29".into());
+            let mut finished = make("argos-dddd", Kind::Issue);
+            finished.epic = Some(epic.id.clone());
+            finished.status = Status::new("done");
+            let mut live = vec![milestone, epic];
+            let encode =
+                |rows: &[Issue]| rows.iter().map(|i| serde_json::to_string(i).unwrap() + "\n").collect::<String>();
+            std::fs::write(dir.join(".moai/issues.jsonl"), encode(&live)).unwrap();
+            std::fs::create_dir_all(dir.join(".moai/archive")).unwrap();
+            std::fs::write(dir.join(".moai/archive/2026.jsonl"), encode(&[finished])).unwrap();
+            a.reload();
+            // Change the tracker after the screen measured closure; the locked write
+            // must use new live rows and unread diagnostics rather than that screen.
+            if reopened {
+                let mut open = make("argos-rrrr", Kind::Issue);
+                open.epic = Some("argos-eeee".into());
+                live.push(open);
+            }
+            let mut snapshot = encode(&live);
+            if opaque {
+                snapshot.push_str("{\"id\":\"argos-dddd\",\"kind\":\"unreadable\"}\n");
+            }
+            std::fs::write(dir.join(".moai/issues.jsonl"), snapshot).unwrap();
+            a.write_plan(PlanMove { id: "argos-mmmm".into(), plan: Plan::Shift(crate::model::Edge::End, -5) });
+            assert!(!a.write_failed, "{:?}", a.trouble);
+            assert_eq!(dates_on_disk(&dir, "argos-mmmm").1.as_deref(), Some("2026-10-26"));
+            let notice = a.notice.as_deref().unwrap();
+            assert_eq!(notice.contains("argos-eeee"), reopened || opaque, "{notice}");
+        }
     }
 
     /// 디스크의 그 줄의 (시작, 기한).

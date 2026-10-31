@@ -83,7 +83,9 @@ pub fn run(ctx: &Ctx, a: WebArgs) -> R<Vec<String>> {
     let spawner = crate::web::run::Spawner { exe, cwd: repo.here().to_path_buf(), user: ctx.user.clone() };
     let site = crate::web::Site::new(spawner, lang);
     let tabs = site.tabs.clone();
-    let _ctl = match crate::ctl::serve::Listener::bind_web(std::sync::Arc::new(move |request| tabs.handle(request))) {
+    let _ctl = match crate::ctl::serve::Listener::bind_web(std::sync::Arc::new(move |request, connected| {
+        tabs.handle_while(request, connected)
+    })) {
         Ok(listener) => Some(listener),
         Err(error) => {
             super::tell(&format!("moai: ctl unavailable: {error}"));

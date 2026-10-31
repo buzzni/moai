@@ -37,7 +37,7 @@ pub fn propose(
     }
     let then = then_cmd.as_deref().map(then_verb).transpose()?.map(Box::new);
     unix_only()?;
-    let windows = call::windows()?;
+    let windows = call::windows_for_target(target)?;
     let window = window_for(ctx, &windows, target)?;
     let mut request = wire::request(wire::Verb::Propose { text, then, ttl, wait }, Duration::from_secs(wait + 10));
     request.lang = format!("{:?}", ctx.lang()).to_lowercase();
@@ -52,16 +52,18 @@ pub fn answer(ctx: &Ctx, target: Option<&str>, id: String, wait: u64) -> R<Vec<S
         return Err(Fail::coded("--wait must be at most 3600 seconds", code::BAD_INPUT));
     }
     unix_only()?;
-    let windows = call::windows()?;
-    let window = window_for(ctx, &windows, target.or_else(|| id.rsplit_once('/').map(|(w, _)| w)))?;
+    let target = target.or_else(|| id.rsplit_once('/').map(|(w, _)| w));
+    let windows = call::windows_for_proposal(target)?;
+    let window = window_for(ctx, &windows, target)?;
     let request = wire::request(wire::Verb::Answer { id, wait }, Duration::from_secs(wait + 10));
     proposal_reply(ctx, call::send(window, &request)?)
 }
 
 pub fn withdraw(ctx: &Ctx, target: Option<&str>, id: String) -> R<Vec<String>> {
     unix_only()?;
-    let windows = call::windows()?;
-    let window = window_for(ctx, &windows, target.or_else(|| id.rsplit_once('/').map(|(w, _)| w)))?;
+    let target = target.or_else(|| id.rsplit_once('/').map(|(w, _)| w));
+    let windows = call::windows_for_proposal(target)?;
+    let window = window_for(ctx, &windows, target)?;
     let request = wire::request(wire::Verb::Withdraw { id }, Duration::from_secs(5));
     proposal_reply(ctx, call::send(window, &request)?)
 }
@@ -180,7 +182,7 @@ pub fn state(ctx: &Ctx, target: Option<&str>, rows: bool) -> R<Vec<String>> {
     }
     #[cfg(unix)]
     {
-        let windows = call::windows()?;
+        let windows = call::windows_for_target(target)?;
         let window = window_for(ctx, &windows, target)?;
         let reply = call::send(window, &wire::request(wire::Verb::State { rows }, Duration::from_secs(5)))?;
         if !reply.ok {
@@ -299,7 +301,7 @@ fn invoke(ctx: &Ctx, target: Option<&str>, verb: wire::Verb, needs_actor: bool) 
     }
     #[cfg(unix)]
     {
-        let windows = call::windows()?;
+        let windows = call::windows_for_target(target)?;
         let window = window_for(ctx, &windows, target)?;
         let mut request = wire::request(verb, Duration::from_secs(5));
         request.lang = format!("{:?}", ctx.lang()).to_lowercase();
