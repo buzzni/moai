@@ -1904,16 +1904,9 @@ impl App {
                 {
                     return Reply::error("unsupported", "that action is unavailable in the explorer");
                 }
+                // The same person-only list `do` and `actions` refuse (`ctl_action_refusal`).
                 if let Some(Verb::Do { name }) = then.as_deref()
-                    && keymap::named(name).is_none_or(|action| {
-                        matches!(
-                            action,
-                            keys::Browse::Quit
-                                | keys::Browse::ProposalAccept
-                                | keys::Browse::ProposalDecline
-                                | keys::Browse::Proposals
-                        )
-                    })
+                    && keymap::named(name).is_none_or(|action| self.ctl_action_refusal(action).is_some())
                 {
                     return Reply::error("unsupported", "unknown or unsafe explorer action");
                 }
@@ -2421,9 +2414,9 @@ impl App {
             self.ctl_turn = None;
             return Reply::error("unsupported", format!("unknown action: {name}"));
         };
-        if act == keys::Browse::Quit {
+        if let Some(why) = self.ctl_action_refusal(act) {
             self.ctl_turn = None;
-            return Reply::error("refused", say(self.site.lang, "tui.ctl.quit"));
+            return Reply::error("refused", why);
         }
         let rows = self.rows();
         match act.enabled(&self.key_ctx(&rows)) {
@@ -2442,6 +2435,18 @@ impl App {
         self.ctl_end(name, true)
     }
 
+    /// Control callers cannot close the person's window or operate their proposal chooser.
+    fn ctl_action_refusal(&self, act: keys::Browse) -> Option<String> {
+        use keys::Browse as B;
+        match act {
+            B::Quit => Some(say(self.site.lang, "tui.ctl.quit").into()),
+            B::ProposalAccept | B::ProposalDecline | B::Proposals => {
+                Some("only the person can answer a proposal".into())
+            }
+            _ => None,
+        }
+    }
+
     fn ctl_actions(&self) -> crate::ctl::wire::Reply {
         use crate::ctl::wire::Reply;
         let rows = self.rows();
@@ -2451,15 +2456,16 @@ impl App {
             .filter(|a| matches!(a.section, "browse" | "gantt" | "moves"))
             .map(|a| {
                 let full = format!("{}.{}", a.section, a.action);
-                let enabled = keymap::named(&full).map(|act| act.enabled(&ctx));
-                let (on, why) = if a.action.starts_with("proposal_") {
-                    (false, Some("only the person can answer a proposal".into()))
-                } else {
-                    match enabled {
-                        Some(Ok(())) => (true, None),
-                        Some(Err(keys::Off::Why(s))) => (false, Some(s)),
-                        _ => (false, None),
-                    }
+                let (on, why) = match keymap::named(&full) {
+                    Some(act) => match self.ctl_action_refusal(act) {
+                        Some(why) => (false, Some(why)),
+                        None => match act.enabled(&ctx) {
+                            Ok(()) => (true, None),
+                            Err(keys::Off::Why(s)) => (false, Some(s)),
+                            Err(keys::Off::Quiet) => (false, None),
+                        },
+                    },
+                    None => (false, None),
                 };
                 serde_json::json!({"name": full, "keys": a.keys, "enabled": on, "why": why})
             })
@@ -2563,12 +2569,21 @@ impl App {
                 Seg::Lost => "(lost)".into(),
             })
             .collect();
+        let held = if !self.chord.held().is_empty() {
+            self.chord.held()
+        } else {
+            match &self.mode {
+                Mode::Stats(w) => w.chord.held(),
+                Mode::Wiki(w) => w.chord.held(),
+                _ => self.chord.held(),
+            }
+        };
         let mut state = serde_json::json!({
             "screen": self.ctl_screen(), "path": path,
             "cursor": rows.get(self.cursor).and_then(id_of),
             "focus": if self.focus == Pane::Explorer { "list" } else { "detail" },
             "mode": mode,
-            "menu": if self.chord.held().is_empty() { serde_json::Value::Null } else { serde_json::json!(format!("{:?}", self.chord.held())) },
+            "menu": if held.is_empty() { serde_json::Value::Null } else { serde_json::json!(held.iter().copied().map(keys::name_of_key).collect::<Vec<_>>().join(" ")) },
             "filter": filter, "sort": Self::order_words(&self.order),
             "view": {"hidden": self.view.hidden, "deferred": !self.view.hide_deferred,
                 "backlog": !self.view.hide_backlog, "archived": self.view.show_archived, "worktree": self.worktree},
@@ -6967,7 +6982,11 @@ impl App {
             B::FocusNext => self.focus = self.focus.next(),
             // **끝에서는 제자리다** — 목록에서 `Ctrl-w h` 를 눌러도 상세로 돌지 않는다.
             B::Focus(side) => self.focus = self.focus.step(side, self.detail_side()),
-            B::Step(m) => self.step(m, rows),
+            B::Step(m) => match &mut self.mode {
+                Mode::Stats(w) => w.scroll.go(m),
+                Mode::Wiki(w) => w.step(m),
+                _ => self.step(m, rows),
+            },
             // **드나드는 키도 포커스를 탄다**(`enabled`). 상세를 읽다가 누른 Enter·←가 목록을
             // 옮기면 보던 이슈가 바뀌고 굴린 자리도 첫 줄로 돌아간다 — ↑↓ 를 포커스에
             // 태운 까닭과 같다. 상세에서는 아직 뜻이 없어 아무 일도 안 한다.
@@ -7137,6 +7156,9 @@ impl App {
                 // 그린 것과 원문은 줄 수가 다르다. 굴린 자리를 들고 가면
                 // 엉뚱한 데가 나온다.
                 self.detail.rewind();
+                if let Mode::Wiki(w) = &mut self.mode {
+                    w.rewind_raw();
+                }
             }
         }
     }
@@ -13629,6 +13651,64 @@ mod tests {
             assert!(!a.quit);
             assert!(a.chord.held().is_empty());
         }
+    }
+
+    #[test]
+    fn ctl_actions_disable_every_person_only_action_and_do_refuses_it() {
+        use crate::ctl::wire::Verb;
+        let (_scratch, mut a) = writable("ctl-person-only");
+        assert!(a.ctl(&ctl_req(Verb::Propose { text: "A suggestion".into(), then: None, ttl: 900, wait: 0 }, None)).ok);
+        let listing = a.ctl(&ctl_req(Verb::Actions, None)).data.unwrap();
+        for name in ["browse.quit", "browse.proposal_accept", "browse.proposal_decline", "browse.proposals"] {
+            let row = listing["actions"].as_array().unwrap().iter().find(|row| row["name"] == name).unwrap();
+            assert_eq!(row["enabled"], false, "{row}");
+            assert!(!row["why"].as_str().unwrap().is_empty());
+            let reply = a.ctl(&ctl_req(Verb::Do { name: name.into() }, None));
+            assert_eq!(reply.code.as_deref(), Some("refused"), "{reply:?}");
+            assert_eq!(reply.message.as_deref(), row["why"].as_str());
+        }
+        for seq in ["SPC q", "SPC a y", "SPC a n", "SPC a l"] {
+            let reply = a.ctl(&ctl_req(Verb::Keys { seqs: vec![seq.into()], text: None }, None));
+            assert_eq!(reply.code.as_deref(), Some("refused"), "{seq}: {reply:?}");
+        }
+        assert!(!a.quit);
+        assert_eq!(a.mode, Mode::Browse);
+        assert_eq!(a.proposals.rows().len(), 1);
+    }
+
+    #[test]
+    fn ctl_state_spells_held_prefixes_as_keys_on_the_visible_window() {
+        use crate::ctl::wire::Verb;
+        let (_scratch, mut a) = writable("ctl-held");
+        for prefix in ["SPC", "Ctrl-w", "g"] {
+            a.hit(prefix);
+            let reply = a.ctl(&ctl_req(Verb::State { rows: false }, None));
+            assert_eq!(reply.data.unwrap()["menu"], prefix);
+            a.chord.clear();
+        }
+        a.hit("SPC g s g");
+        assert_eq!(a.ctl_state(false)["menu"], "g");
+        a.hit("Esc");
+        assert_eq!(a.ctl_state(false)["menu"], serde_json::Value::Null);
+    }
+
+    #[test]
+    fn ctl_named_moves_scroll_stats_without_moving_the_hidden_list() {
+        use crate::ctl::wire::Verb;
+        let (_scratch, mut a) = writable("ctl-visible-stats");
+        a.hit("SPC g s");
+        let Mode::Stats(w) = &mut a.mode else { panic!("stats did not open") };
+        w.scroll.fit(5, 100);
+        let cursor = a.cursor;
+        let reply = a.ctl(&ctl_req(Verb::Do { name: "moves.line_down".into() }, None));
+        assert!(reply.ok, "{reply:?}");
+        let Mode::Stats(w) = &a.mode else { panic!("stats closed") };
+        assert_eq!(w.scroll.offset(), 1);
+        assert_eq!(a.cursor, cursor);
+        let reply = a.ctl(&ctl_req(Verb::Do { name: "browse.filter".into() }, None));
+        assert!(reply.ok, "{reply:?}");
+        assert_eq!(reply.data.unwrap()["changed"], false);
+        assert!(matches!(a.mode, Mode::Stats(_)));
     }
 
     #[test]

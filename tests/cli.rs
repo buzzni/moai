@@ -342,6 +342,33 @@ fn proposal_pty(name: &str) -> (Scratch, std::fs::File, ProposalPtyChild) {
     panic!("explorer did not register: {shown}");
 }
 
+/// Exercise the actual cmd::tui owner loop, not only Listener's notification helper. Restoring the old 100ms
+/// post-request polling tail raises the per-process idle context-switch count above this ceiling.
+#[test]
+#[cfg(target_os = "linux")]
+fn ctl_read_only_requests_leave_the_explorer_idle() {
+    use std::time::Duration;
+    let (s, _master, child) = proposal_pty("ctl-idle-owner-loop");
+    let switches = || {
+        let status = std::fs::read_to_string(format!("/proc/{}/status", child.0.id())).unwrap();
+        status
+            .lines()
+            .find_map(|line| line.strip_prefix("voluntary_ctxt_switches:").map(|n| n.trim().parse::<u64>().unwrap()))
+            .expect("Linux process context-switch counter")
+    };
+    // Let initial asynchronous reads finish, then send a real read-only request that used to start the fast tail.
+    std::thread::sleep(Duration::from_millis(1500));
+    assert_eq!(json_of(&ok(s.path(), &["ctl", "state", "--json"]))["screen"], "list");
+    let before = switches();
+    std::thread::sleep(Duration::from_millis(1500));
+    let after = switches();
+    assert!(
+        after - before <= 9,
+        "a read-only ctl call kept the owner loop waking: {} switches in 1500ms",
+        after - before
+    );
+}
+
 #[test]
 #[cfg(unix)]
 fn ctl_propose_waits_for_the_person() {
@@ -32635,7 +32662,7 @@ fn web_ctl_propose_reaches_a_tab_and_returns_its_answer() {
 
 #[test]
 #[cfg(unix)]
-fn web_ctl_write_carries_the_callers_name() {
+fn web_ctl_plan_applies_the_requested_day() {
     let s = init("web-ctl-caller");
     let issue = field(&ok(s.path(), &["add", "planned row", "--json"]), "id");
     let web = serve(s.path());
@@ -32722,7 +32749,11 @@ fn web_events_beyond_the_cap_are_busy_and_reads_still_answer() {
     let (status, _, body) = get(web.port, "/api/events");
     assert_eq!(status, 503, "{body}");
     assert_eq!(json_of(&body)["code"], "busy");
-    assert_eq!(get(web.port, "/api/stamp").0, 200);
+    // STREAMS_MAX is eight and BUSY_MAX is 32. Twenty-four incomplete ordinary requests must still leave room
+    // for a read; if the eight event streams retain BUSY slots, this next request becomes the 33rd and gets 503.
+    let _ordinary: Vec<_> = (0..24).map(|_| dial(web.port)).collect();
+    let (status, _, body) = get(web.port, "/api/stamp");
+    assert_eq!(status, 200, "event streams retained ordinary request slots: {body}");
 }
 
 #[test]
