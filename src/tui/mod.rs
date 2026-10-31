@@ -1904,16 +1904,9 @@ impl App {
                 {
                     return Reply::error("unsupported", "that action is unavailable in the explorer");
                 }
+                // The same person-only list `do` and `actions` refuse (`ctl_action_refusal`).
                 if let Some(Verb::Do { name }) = then.as_deref()
-                    && keymap::named(name).is_none_or(|action| {
-                        matches!(
-                            action,
-                            keys::Browse::Quit
-                                | keys::Browse::ProposalAccept
-                                | keys::Browse::ProposalDecline
-                                | keys::Browse::Proposals
-                        )
-                    })
+                    && keymap::named(name).is_none_or(|action| self.ctl_action_refusal(action).is_some())
                 {
                     return Reply::error("unsupported", "unknown or unsafe explorer action");
                 }
@@ -2463,13 +2456,14 @@ impl App {
             .filter(|a| matches!(a.section, "browse" | "gantt" | "moves"))
             .map(|a| {
                 let full = format!("{}.{}", a.section, a.action);
-                let act = keymap::named(&full);
-                let (on, why) = match act {
-                    Some(act) if self.ctl_action_refusal(act).is_some() => (false, self.ctl_action_refusal(act)),
-                    Some(act) => match act.enabled(&ctx) {
-                        Ok(()) => (true, None),
-                        Err(keys::Off::Why(s)) => (false, Some(s)),
-                        Err(keys::Off::Quiet) => (false, None),
+                let (on, why) = match keymap::named(&full) {
+                    Some(act) => match self.ctl_action_refusal(act) {
+                        Some(why) => (false, Some(why)),
+                        None => match act.enabled(&ctx) {
+                            Ok(()) => (true, None),
+                            Err(keys::Off::Why(s)) => (false, Some(s)),
+                            Err(keys::Off::Quiet) => (false, None),
+                        },
                     },
                     None => (false, None),
                 };

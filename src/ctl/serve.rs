@@ -68,26 +68,56 @@ impl Listener {
         {
             use std::io::IsTerminal;
             use std::os::fd::AsRawFd;
-            // Match crossterm's input source even when stdin is redirected.
-            let tty;
+            // Match crossterm's input source even when stdin is redirected. Crossterm opens /dev/tty once; so does
+            // this wait, rather than once per turn of the owner loop.
+            static TTY: std::sync::OnceLock<std::fs::File> = std::sync::OnceLock::new();
             let terminal = if std::io::stdin().is_terminal() {
                 std::io::stdin().as_raw_fd()
-            } else {
-                tty = std::fs::File::open("/dev/tty")?;
+            } else if let Some(tty) = TTY.get() {
                 tty.as_raw_fd()
+            } else {
+                let tty = std::fs::File::open("/dev/tty")?;
+                TTY.get_or_init(|| tty).as_raw_fd()
             };
-            self.wait_on(terminal, timeout)?;
-            event::poll(std::time::Duration::ZERO)
+            self.wait_input(terminal, timeout, || event::poll(std::time::Duration::ZERO))
         }
         #[cfg(not(unix))]
         event::poll(timeout)
     }
 
+    /// One idle wait on the terminal and the wake socket; `parsed` then asks crossterm whether an event came of it.
+    ///
+    /// **A terminal that stays readable while crossterm reports nothing is not waited on again this turn.** Crossterm's
+    /// source is edge-triggered and returns as soon as its 1 KiB read yields an event, so input past that read stays in
+    /// the terminal and is reported only when more arrives. This level-triggered wait would return at once on every turn
+    /// and spin the owner loop until the next keypress; the rest of the turn waits on the wake socket alone instead, as
+    /// crossterm's own wait slept until new input.
     #[cfg(unix)]
-    fn wait_on(&self, terminal: std::os::fd::RawFd, timeout: Duration) -> std::io::Result<()> {
+    fn wait_input(
+        &self,
+        terminal: std::os::fd::RawFd,
+        timeout: Duration,
+        mut parsed: impl FnMut() -> std::io::Result<bool>,
+    ) -> std::io::Result<bool> {
+        let started = Instant::now();
+        let typed = self.wait_on(Some(terminal), timeout)?;
+        if parsed()? {
+            return Ok(true);
+        }
+        if typed && self.wait_on(Some(terminal), Duration::ZERO)? {
+            self.wait_on(None, timeout.saturating_sub(started.elapsed()))?;
+            return parsed();
+        }
+        Ok(false)
+    }
+
+    /// Wait for the terminal (when given) or the wake socket, drain the wake bytes, and say whether the terminal stirred.
+    #[cfg(unix)]
+    fn wait_on(&self, terminal: Option<std::os::fd::RawFd>, timeout: Duration) -> std::io::Result<bool> {
         use std::os::fd::AsRawFd;
+        // A negative descriptor is skipped by poll(2) and reports no events.
         let mut fds = [
-            libc::pollfd { fd: terminal, events: libc::POLLIN, revents: 0 },
+            libc::pollfd { fd: terminal.unwrap_or(-1), events: libc::POLLIN, revents: 0 },
             libc::pollfd { fd: self.wake.as_raw_fd(), events: libc::POLLIN, revents: 0 },
         ];
         // Round up: a fractional millisecond must not turn an idle wait into a busy loop.
@@ -95,7 +125,8 @@ impl Listener {
         let ready = unsafe { libc::poll(fds.as_mut_ptr(), fds.len() as libc::nfds_t, ms.min(i32::MAX as u128) as i32) };
         if ready < 0 {
             let error = std::io::Error::last_os_error();
-            // SIGWINCH interrupts poll; let crossterm read its resize notification.
+            // A SIGWINCH delivered to this thread interrupts poll; let crossterm read its resize notification. One that
+            // lands on another thread, or just before this poll, is seen at the end of the wait.
             if error.kind() != std::io::ErrorKind::Interrupted {
                 return Err(error);
             }
@@ -111,7 +142,7 @@ impl Listener {
                 Err(e) => return Err(e),
             }
         }
-        Ok(())
+        Ok(ready > 0 && fds[0].revents != 0)
     }
 
     /// Cache Hello before handing the terminal to the editor. Directed actions then return person_busy.
@@ -368,23 +399,30 @@ mod tests {
     use super::*;
     use crate::ctl::wire::Verb;
 
-    #[test]
-    fn a_queued_request_wakes_once_and_leaves_no_fast_idle_tail() {
-        use std::os::fd::AsRawFd;
-        use std::os::unix::net::UnixStream;
-        let (wake, notify) = UnixStream::pair().unwrap();
+    /// A listener with only its wake pair, no socket file or accept thread; the second value is its writer, kept alive by
+    /// the caller as the accept thread keeps it (`lessons/keep-notification-writers-alive-in-idle-tests`).
+    fn wake_listener(name: &str) -> (Listener, mpsc::Sender<Incoming>, std::os::unix::net::UnixStream) {
+        let (wake, notify) = std::os::unix::net::UnixStream::pair().unwrap();
         wake.set_nonblocking(true).unwrap();
         notify.set_nonblocking(true).unwrap();
-        let _keep_notify = notify.try_clone().unwrap();
         let (tx, incoming) = mpsc::channel();
         let listener = Listener {
             incoming,
             wake,
-            path: std::env::temp_dir().join(format!("moai-4km9-unused-{}", std::process::id())),
+            path: std::env::temp_dir().join(format!("moai-{name}-unused-{}", std::process::id())),
             stop: Arc::new(AtomicBool::new(false)),
             book: None,
             editing: Arc::new(Editing::default()),
         };
+        (listener, tx, notify)
+    }
+
+    #[test]
+    fn a_queued_request_wakes_once_and_leaves_no_fast_idle_tail() {
+        use std::os::fd::AsRawFd;
+        use std::os::unix::net::UnixStream;
+        let (listener, tx, notify) = wake_listener("4km9-wake");
+        let _keep_notify = notify.try_clone().unwrap();
         // An empty, open terminal descriptor stays quiet without using the person's terminal.
         let (terminal, _keep_terminal) = UnixStream::pair().unwrap();
         let (mut client, mut server) = UnixStream::pair().unwrap();
@@ -405,14 +443,42 @@ mod tests {
             );
         });
         let start = Instant::now();
-        listener.wait_on(terminal.as_raw_fd(), Duration::from_secs(3)).unwrap();
+        assert!(!listener.wait_on(Some(terminal.as_raw_fd()), Duration::from_secs(3)).unwrap());
         assert!(start.elapsed() < Duration::from_secs(1), "a queued Hello waited for the idle timer");
         let turn = listener.incoming.try_recv().unwrap();
         turn.answer.send(Reply::success(serde_json::json!({}))).unwrap();
         worker.join().unwrap();
         let idle = Instant::now();
-        listener.wait_on(terminal.as_raw_fd(), Duration::from_millis(50)).unwrap();
+        listener.wait_on(Some(terminal.as_raw_fd()), Duration::from_millis(50)).unwrap();
         assert!(idle.elapsed() >= Duration::from_millis(40), "a serviced read left an idle wakeup behind");
+    }
+
+    /// Input crossterm left unread (past its 1 KiB read, edge-triggered) keeps the terminal level-readable while crossterm
+    /// reports nothing. The wait must still sleep out its turn, and a queued request must still cut it short.
+    #[test]
+    fn a_terminal_crossterm_left_unread_does_not_spin_the_idle_wait() {
+        use std::os::fd::AsRawFd;
+        use std::os::unix::net::UnixStream;
+        let (listener, _tx, notify) = wake_listener("4km9-stalled");
+        let keep_notify = notify.try_clone().unwrap();
+        let (terminal, mut typed) = UnixStream::pair().unwrap();
+        typed.write_all(b"x").unwrap();
+        let start = Instant::now();
+        assert!(!listener.wait_input(terminal.as_raw_fd(), Duration::from_millis(60), || Ok(false)).unwrap());
+        assert!(start.elapsed() >= Duration::from_millis(50), "a readable terminal with nothing parsed spun the loop");
+        let poke = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(20));
+            (&notify).write_all(&[1]).unwrap();
+        });
+        let start = Instant::now();
+        assert!(!listener.wait_input(terminal.as_raw_fd(), Duration::from_secs(3), || Ok(false)).unwrap());
+        assert!(start.elapsed() < Duration::from_secs(1), "a queued request waited behind a stalled terminal");
+        poke.join().unwrap();
+        // An event crossterm does parse still ends the wait at once.
+        let start = Instant::now();
+        assert!(listener.wait_input(terminal.as_raw_fd(), Duration::from_secs(3), || Ok(true)).unwrap());
+        assert!(start.elapsed() < Duration::from_secs(1));
+        drop(keep_notify);
     }
 
     #[test]

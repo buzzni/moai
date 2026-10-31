@@ -227,6 +227,9 @@ impl Window {
     }
 
     /// A raw/rendered toggle invalidates the selected rendered link and its scroll layout.
+    ///
+    /// 건너온 머리글이 있으면 다시 편 그림이 그 줄로 굴린다(`Window::resettle`). 고른 링크는 걷는다 — 원문에는 링크 칸이
+    /// 없고, 돌아온 그린 글에서 첫 줄로 간 화면 밖의 링크가 다시 살면 안 보이는 고름이 선다.
     pub(super) fn rewind_raw(&mut self) {
         self.page.rewind();
         self.picked = None;
