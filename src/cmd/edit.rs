@@ -284,7 +284,7 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
             // 빼고 댄다: `status` 의 `due_beyond_parent` 가 안 세는 줄을 "센다" 고 하면 거짓말이다. 묶음의 칸은 멤버에서
             // 읽는다(`report::group_states_of` — 묶음이 섞였을 때만 센다).
             // 재는 자는 `report::overflow_by` 하나다 — 탐색기의 막대 끌기도 같은 줄을 댄다(moai-i4hf.9xi).
-            let overflow = crate::report::overflow_by(issues, &before, &out, cfg);
+            let overflow = crate::report::overflow_by(issues, &before, &out);
             // **아래의 판단은 아카이브로 옮긴 줄까지 겹쳐 읽는다**(moai-tzzt) — `-e` 로 적은 에픽이나 이 줄의 부모·
             // 막는 줄이 아카이브에 있으면 산 줄만으로는 "없는 에픽" 이 되는데, 보드는 같은 줄을 멀쩡하다고 센다.
             // 고친 줄은 산 파일의 것이 이긴다([`super::in_context`]).
@@ -292,9 +292,12 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
             // 자식이 부름마다 섰다 말았다 한다.
             let live = &issues[..];
             // 고친 줄이 되살린 묶음이면 그 칸도 아카이브에 남은 멤버에서 읽는다([`super::archived_with_groups`]).
-            let archived = super::archived_with_groups(&repo.root, live, &[out.id.as_str()])?;
+            let context_ids: Vec<&str> =
+                std::iter::once(out.id.as_str()).chain(overflow.iter().map(String::as_str)).collect();
+            let archived = super::archived_with_groups(&repo.root, live, &context_ids)?;
             let issues = super::in_context(live, &archived, unread);
             let issues = &issues[..];
+            let overflow = crate::report::overflow_in_context(issues, overflow, cfg);
             // **`-e none` 이 못 끊는 소속을 묻는다** (moai-w5gz). 이슈의 뜻은 `report` 가
             // 판단한다 — 여기서는 비우라고 적었는지만 본다. 바뀐 것이 없어도 묻는다: 필드가
             // 원래 비어 있던 에픽 밑 자식이 가장 흔한 자리다.

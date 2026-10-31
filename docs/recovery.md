@@ -397,7 +397,11 @@ warning and exits non-zero (moai-5y2a). Its count is the files that could not be
 opened at all — a FIFO, a link out of the checkout, a file that is not UTF-8 —
 plus the lines inside readable files that do not parse. Readable rows stay
 available meanwhile, and `moai stats` and `moai show --archived` still answer
-with exit code 0; writes are not blocked.
+with exit code 0. Ordinary writes remain available. `moai due apply` refuses without
+changing priorities or adding notes when it needs archive context and that read is
+incomplete: a missing finished member could make a closed group look open and raise
+parked backlog permanently. Repair the archive, then run it again. A due application
+whose answer needs no archive context does not read or refuse that unrelated archive.
 
 `moai status` and `moai show --archived` name each source on stderr, with the
 line number and the reason for a line. Repair the file itself:
@@ -429,4 +433,4 @@ The state is two text files under version control. `git log -p -- .moai/` shows
 every change anyone made to them, and any commit that had them whole is a
 recovery point.
 
-Decided in: moai-uzhx moai-bth3 moai-r0x8
+Decided in: moai-uzhx moai-bth3 moai-r0x8 moai-w30o

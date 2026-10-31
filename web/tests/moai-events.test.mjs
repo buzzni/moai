@@ -118,6 +118,27 @@ test('a stream refused before open leaves polling available', async () => {
   p.refresher.stop()
 })
 
+// The server keeps a tab for thirty seconds after its stream ends (src/web/ctl.rs RESUME_GRACE): a stream that was open
+// (the server's thirty-minute end, a dropped connection) must come back well inside that, or the tab loses its ctl id
+// and its suggestions. One refused before it opened still waits thirty seconds.
+test('an open stream that ends comes back inside the server resume grace', async () => {
+  const p = setup()
+  await p.refresher.refresh()
+  p.sources[0].onopen()
+  p.sources[0].onerror()
+  await p.time.advance(2_999)
+  assert.equal(p.sources.length, 1)
+  await p.time.advance(1)
+  assert.equal(p.sources.length, 2)
+  p.sources[1].onerror()
+  await p.time.advance(29_999)
+  assert.equal(p.sources.length, 2, 'a stream refused before it opened was retried early')
+  await p.time.advance(1)
+  assert.equal(p.sources.length, 3)
+  p.events.stop()
+  p.refresher.stop()
+})
+
 test('a pushed stamp during a read is checked after that read settles', async () => {
   const time = clock()
   let release

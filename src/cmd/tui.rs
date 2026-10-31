@@ -1757,7 +1757,6 @@ fn loop_until_quit(
     let mut dirty = true;
     let mut pending = None;
     let mut step = SPIN_TICK;
-    let mut ctl_until = std::time::Instant::now();
     let mut last_proposals = Vec::<String>::new();
     while !app.quit {
         let now_proposals: Vec<_> = app.proposals.rows().iter().map(|row| row.id.clone()).collect();
@@ -1795,12 +1794,15 @@ fn loop_until_quit(
         if let Some(expiry) = app.proposals.next_expiry_in() {
             wait = wait.min(expiry);
         }
-        if control.is_some() && std::time::Instant::now() < ctl_until {
-            wait = wait.min(std::time::Duration::from_millis(100));
-        }
         let first = match pending.take() {
             Some(e) => Some(e),
-            None if event::poll(wait)? => Some(event::read()?),
+            None if match control {
+                Some(control) => control.poll_input(wait)?,
+                None => event::poll(wait)?,
+            } =>
+            {
+                Some(event::read()?)
+            }
             None => None,
         };
         if let Some(first) = first {
@@ -1812,7 +1814,6 @@ fn loop_until_quit(
         }
         if let Some(control) = control {
             while let Ok(incoming) = control.incoming.try_recv() {
-                ctl_until = std::time::Instant::now() + std::time::Duration::from_secs(10);
                 if incoming.request.deadline_ms <= crate::ctl::wire::now_ms() {
                     continue;
                 }

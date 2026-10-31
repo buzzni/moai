@@ -21,7 +21,7 @@ import {
   archiveDue, loadAllRows, loadArchived, loadBoot, loadDetail, loadGroups, loadMatches, loadProjects, loadTree, loadWikiListing, loadWikiPage, loadWikiSearch, matchEndpoints, sameGroups, withArchive,
   type Boot, type Loaded,
 } from './data/source.js'
-import { effectiveZone, useZone, zoneNow } from './data/zone.js'
+import { effectiveZone, useZone, validZone, zoneNow } from './data/zone.js'
 import { copyFor, fill, speaks } from './i18n/index.js'
 import { wireKeys } from './keys/wiring.js'
 import { createStore, matchKey, type BoardData, type State } from './store.js'
@@ -382,10 +382,12 @@ async function start(): Promise<void> {
     }
   }
   const refresher = createRefresher({ load: ({ automatic }) => loadBoard(automatic), stamp, onReach: (reached) => shell.offline(!reached), onBackoff: (on) => shell.backoff(on) })
+  let tab: { id: string; token: string } | null = null
   const eventUrl = (): string => {
     const query = new URLSearchParams()
     if (project) query.set('project', project)
     if (store.getState().view.worktree) query.set('worktree', '1')
+    if (tab) { query.set('resume', tab.id); query.set('token', tab.token) }
     const params = query.toString()
     return `/api/events${params ? `?${params}` : ''}`
   }
@@ -509,7 +511,6 @@ async function start(): Promise<void> {
   client.subscribe(() => shell.activity(activity()))
   // The one keydown listener: keys → the key table's actions → the store and the panes (keys/wiring.ts), with the
   // SPC menu, the shortcut help and the "click to use the keyboard" hint.
-  let tab: { id: string; token: string } | null = null
   let ctlExecuting = 0
   const answering = new Set<string>()
   let ctl: ReturnType<typeof createCtl>
@@ -552,18 +553,22 @@ async function start(): Promise<void> {
     },
   })
   let lastSeen = 0
-  const seen = () => {
+  const seen = (human = true) => {
     if (!tab || document.visibilityState === 'hidden') return
-    lastSeen = Date.now()
+    if (human) lastSeen = Date.now()
     const query = new URLSearchParams({ token: tab.token, screen: store.getState().tab })
+    if (!human) query.set('passive', '1')
     void window.fetch(`/api/ctl/${encodeURIComponent(tab.id)}/seen?${query}`, { method: 'POST' }).catch(() => {})
   }
-  window.addEventListener('focus', seen)
+  window.addEventListener('focus', () => seen())
   document.addEventListener('keydown', () => { if (Date.now() - lastSeen >= 5_000) seen() })
   document.addEventListener('click', () => { if (Date.now() - lastSeen >= 5_000) seen() })
+  // Showing the tab again is the person's doing; a reconnect while it stayed visible is not (hello's seen is passive).
+  // The server takes `seen` and a proposal answer from a tab whose stream is still reconnecting (src/web/ctl.rs
+  // `resumable`), so neither is lost to the gap before the resumed stream's hello.
   events = openEvents({ url: eventUrl, onStamp: (at) => refresher.saw(at), onUp: () => refresher.pause(),
-    onDown: () => { tab = null; proposals.clear(); refresher.resume() }, onVisible: () => { void refresher.check(); seen() },
-    onHello: (hello) => { tab = { id: hello.tab, token: hello.token }; seen() },
+    onDown: () => { refresher.resume() }, onVisible: () => { void refresher.check(); seen() },
+    onHello: (hello) => { proposals.clear(); tab = { id: hello.tab, token: hello.token }; seen(false) },
     onCtl: ({ seq, request }) => {
       const here = tab
       if (!here) return
@@ -574,6 +579,16 @@ async function start(): Promise<void> {
           method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(reply),
         })
       }).catch(() => {}).finally(() => { ctlExecuting -= 1 })
+    },
+    onValidateZone: ({ seq, name }) => {
+      const here = tab
+      if (!here) return
+      const query = new URLSearchParams({ seq: String(seq), token: here.token })
+      const reply: CtlReply = name === 'none' || validZone(name)
+        ? { ok: true, data: {} } : { ok: false, code: 'bad_input', message: 'unknown time zone' }
+      void window.fetch(`/api/ctl/${encodeURIComponent(here.id)}?${query}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(reply),
+      }).catch(() => {})
     },
     onProposal: (entry) => proposals.show(entry),
     onProposalClosed: (id) => proposals.remove(id),

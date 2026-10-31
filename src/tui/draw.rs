@@ -145,7 +145,8 @@ pub fn screen(f: &mut Frame, app: &mut App) {
     }
     // 할 말이 있을 때만 배너 줄이 선다. 늘 세워 두면 한 줄이 영영 논다.
     let banner_h = u16::from(banner(app).is_some());
-    let proposal_h = u16::from(!app.proposals.rows().is_empty());
+    app.proposal_banner_id = app.proposals.rows().first().map(|row| row.id.clone());
+    let proposal_h = u16::from(app.proposal_banner_id.is_some());
     // 누군지 묻는 동안과 거름망을 적는 동안만 아랫줄이 둘이다. 묻는 칸은 왜 묻는지와 다시 안 묻게
     // 하는 법이, 거름망은 거절문의 둘째 줄(고칠 글·있는 항목)이 윗줄에 선다 — 글칸 뒤에 붙이면 적는
     // 글에 밀려 사라진다.
@@ -295,7 +296,7 @@ pub fn screen(f: &mut Frame, app: &mut App) {
         Mode::Zone(z) => zone_pick(f, z, body, lang),
         Mode::ArchiveDays(p) => archive_days_pick(f, p, body, lang),
         Mode::Sort(e) => sort_edit(f, e, body, lang),
-        Mode::Proposals(at) => proposals_window(f, app.proposals.rows(), *at, body, lang),
+        Mode::Proposals(id) => proposals_window(f, app.proposals.rows(), id.as_deref(), body, lang),
         Mode::Stats(w) => stats_window(f, w, body, lang),
         Mode::Wiki(w) => wiki_at = Some(wiki_window(f, w, body, raw, share, lang)),
         Mode::Ask(ask) => {
@@ -1931,26 +1932,48 @@ fn ask_why(why: &str, lang: Lang) -> String {
     fill(say(lang, "tui.ask.why"), &[("why", why)])
 }
 
+/// Both wide and compact hints use the loaded bindings. Compact only a shared prefix, never discard it:
+/// bare y/n/l are not the banner shortcuts. Missing bindings are spelled (none), as in other key hints.
+fn proposal_hint(app: &App, compact: bool) -> String {
+    let actions = [Browse::ProposalAccept, Browse::ProposalDecline, Browse::Proposals];
+    let names = actions.map(|act| said(app.keys.browse, act));
+    if !compact {
+        return fill(
+            say(app.site.lang, "tui.propose.hint"),
+            &[("accept", &names[0]), ("decline", &names[1]), ("list", &names[2])],
+        );
+    }
+    let parts = names.each_ref().map(|name| name.rsplit_once(' '));
+    let compact = match parts {
+        [Some((a, x)), Some((b, y)), Some((c, z))] if a == b && b == c => format!("{a} {x}/{y}/{z}"),
+        _ => names.join(" / "),
+    };
+    format!(" — {compact}")
+}
+
 /// The suggestion line: the oldest pending suggestion with the `»` glyph and the word, so colour never carries it
 /// alone. It narrows the hint before it cuts the text.
 fn proposal_line(app: &App, width: usize) -> Option<String> {
     use unicode_width::UnicodeWidthStr;
     let rows = app.proposals.rows();
-    let row = rows.first()?;
+    let row = rows.iter().find(|row| Some(row.id.as_str()) == app.proposal_banner_id.as_deref())?;
     let word = say(app.site.lang, "tui.propose.word");
-    let mut tail = say(app.site.lang, "tui.propose.hint");
+    let mut tail = proposal_hint(app, false);
     let then = row.then.as_ref().map(|verb| format!(" → {}", verb.describe(app.site.lang))).unwrap_or_default();
     let mut head = format!("» {word} 1/{} · ", rows.len());
     if width < head.width() + tail.width() + 6 {
-        tail = say(app.site.lang, "tui.propose.hint_short");
+        tail = proposal_hint(app, true);
     }
-    if width < head.width() + tail.width() {
+    if width < head.width() + tail.width() + 6 {
         head = format!("» {word} ");
     }
-    if width < head.width() + tail.width() {
-        tail = say(app.site.lang, "tui.propose.hint_tiny");
+    if width < head.width() + tail.width() + 6 {
+        tail.clear();
     }
-    let tail = clip(tail, width.saturating_sub(head.width()));
+    if width < head.width() + 6 {
+        head = "» ".into();
+    }
+    let head = clip(&head, width);
     let before = width.saturating_sub(head.width() + tail.width());
     let then = clip(&then, before / 2);
     let shown = clip(&row.text.replace('\n', " "), before.saturating_sub(then.width()));
@@ -1958,7 +1981,13 @@ fn proposal_line(app: &App, width: usize) -> Option<String> {
 }
 
 /// The suggestion list (`SPC a l`): `j`·`k` choose, `y`·`n` answer, `Esc` closes. Each row names what accepting does.
-fn proposals_window(f: &mut Frame, rows: Vec<crate::ctl::proposal::Entry>, at: usize, area: Rect, lang: Lang) {
+fn proposals_window(
+    f: &mut Frame,
+    rows: Vec<crate::ctl::proposal::Entry>,
+    selected: Option<&str>,
+    area: Rect,
+    lang: Lang,
+) {
     let width = area.width.min(72);
     let height = area.height.min(rows.len().saturating_add(4).max(5) as u16);
     let box_at = Rect::new(area.x + (area.width - width) / 2, area.y + (area.height - height) / 2, width, height);
@@ -1969,12 +1998,14 @@ fn proposals_window(f: &mut Frame, rows: Vec<crate::ctl::proposal::Entry>, at: u
     f.render_widget(block, box_at);
     let lines: Vec<_> = rows
         .iter()
-        .enumerate()
-        .map(|(n, row)| {
+        .map(|row| {
             let name = row.text.replace('\n', " ");
             // The list is where a person picks one to accept, so each row names what accepting it does.
             let then = row.then.as_ref().map(|verb| format!(" → {}", verb.describe(lang))).unwrap_or_default();
-            let text = clip(&format!("{} {name}{then}", if n == at { ">" } else { " " }), inner.width as usize);
+            let text = clip(
+                &format!("{} {name}{then}", if Some(row.id.as_str()) == selected { ">" } else { " " }),
+                inner.width as usize,
+            );
             ListItem::new(text)
         })
         .collect();
@@ -6284,7 +6315,7 @@ pub(super) mod tests {
         a.site.now = now.into();
         a.adopt_look(&seoul, Vec::new());
         assert_eq!(a.zone.name(), "<+09>-9", "전제: 화면은 고른 시간대다");
-        let apply = crate::report::due_raises(&issues, &[], now, &Zone::utc(), &cfg.due).len();
+        let apply = crate::report::due_raises(&issues, &issues, now, &Zone::utc(), &cfg).len();
         assert_eq!(apply, 0, "전제: 시스템 UTC 의 due apply 는 안 올린다");
         assert_eq!(a.site.warnings.notices(0, now, &a.zone), 1, "전제: 고른 시간대의 날로는 뒤처졌다");
         assert_eq!(noticed(&a, &a.site.warnings, 0), usize::from(apply > 0), "알림이 due apply 와 다른 날로 셌다");
@@ -6294,7 +6325,7 @@ pub(super) mod tests {
         b.system = || (Zone::load("<+09>-9").unwrap(), None);
         b.site.now = now.into();
         b.adopt_look(&utc, Vec::new());
-        let apply = crate::report::due_raises(&issues, &[], now, &b.system_zone, &cfg.due).len();
+        let apply = crate::report::due_raises(&issues, &issues, now, &b.system_zone, &cfg).len();
         assert_eq!(apply, 1, "전제: 시스템 +9 의 due apply 는 올린다");
         assert_eq!(noticed(&b, &b.site.warnings, 0), 1);
     }
@@ -6455,6 +6486,51 @@ pub(super) mod tests {
         );
         let narrow = render(&mut app, 40, 20).join("\n");
         assert!(narrow.contains("» 제안") && narrow.contains("SPC a y/n/l"), "{narrow}");
+    }
+
+    #[test]
+    fn proposal_hints_follow_remapped_and_removed_bindings_at_every_width() {
+        let mut app = app();
+        let (keys, problems) = super::super::keymap::build(
+            "[browse]\nproposal_accept = 'Ctrl-y'\nproposal_decline = 'Alt-n'\nproposals = 'none'\n",
+        );
+        assert!(problems.is_empty(), "{problems:?}");
+        app.keys = keys;
+        assert!(app.proposals.add("window", "A suggestion", None, 900, None).ok);
+        app.proposal_banner_id = app.proposals.rows().first().map(|row| row.id.clone());
+        for width in [120, 40, 25] {
+            let line = proposal_line(&app, width).unwrap();
+            assert!(!line.contains("SPC a"), "{line}");
+        }
+        for compact in [false, true] {
+            let hint = proposal_hint(&app, compact);
+            assert!(hint.contains("Ctrl-y") && hint.contains("Alt-n") && hint.contains("(none)"), "{hint}");
+        }
+        let (keys, problems) = super::super::keymap::build(
+            "[browse]\nproposal_accept = 'SPC x y'\nproposal_decline = 'SPC x n'\nproposals = 'SPC x l'\n",
+        );
+        assert!(problems.is_empty(), "{problems:?}");
+        app.keys = keys;
+        assert_eq!(proposal_hint(&app, true), " — SPC x y/n/l");
+    }
+
+    #[test]
+    fn a_narrow_proposal_banner_keeps_text_without_a_partial_shortcut() {
+        use unicode_width::UnicodeWidthStr;
+        let mut app = app();
+        app.site.lang = Lang::En;
+        assert!(app.proposals.add("window", "A suggestion", None, 900, None).ok);
+        app.proposal_banner_id = app.proposals.rows().first().map(|row| row.id.clone());
+        let line = proposal_line(&app, 25).unwrap();
+        assert!(line.contains("A suggest"), "{line}");
+        assert!(!line.contains("SPC"), "{line}");
+        for width in 0..=40 {
+            let line = proposal_line(&app, width).unwrap();
+            assert!(line.width() <= width, "width {width}: {line}");
+            if line.contains("SPC") {
+                assert!(line.contains("SPC a y/n/l"), "width {width}: {line}");
+            }
+        }
     }
 
     /// 보드 그림의 바닥(moai-9nfw) — 마일스톤 0001 밑 에픽 0002 에 todo `n` 개(p1)와 in_progress 하나, 마일스톤

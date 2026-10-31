@@ -1289,18 +1289,34 @@ pub fn archived_for(
     }
 }
 
-/// [`archived_for`] 에 더해 **고친 줄의 칸을 내는 쓰기**가 부른다 — 고친 줄 가운데 산 묶음이 있으면 늘 읽는다. 묶음의
+/// [`archived_for`] 에 더해 **묶음의 칸을 읽어야 하는 쪽**이 부른다 — 받은 id 가운데 산 묶음이 있으면 늘 읽는다. 묶음의
 /// 칸은 멤버에서 읽는데(`read_of`), 되살린 묶음의 멤버는 아카이브에 남아 있다 — 산 줄로만 읽으면 보드가 done 으로 세는
 /// 그 묶음을 `--json` 의 `derived_status` 가 첫 칸으로 낸다. `mv` 가 묶음이면 늘 읽는 것([`crate::archive::needs_context`])과
-/// 같은 까닭이고, 참조만 재는 `add -e` 는 이 길을 안 지난다(그 묶음의 멤버를 안 읽는다).
+/// 같은 까닭이고, 참조만 재는 `add -e` 는 이 길을 안 지난다(그 묶음의 멤버를 안 읽는다). 고친 줄의 칸을 내는 쓰기와,
+/// 닫힌 묶음의 기한을 안 따르는 `moai due apply`(`report::due_context_ids` 가 고른 묶음)가 이 길이다.
 pub fn archived_with_groups(
     root: &std::path::Path,
     issues: &[crate::model::Issue],
     rows: &[&str],
 ) -> R<Vec<crate::model::Issue>> {
-    match issues.iter().any(|i| rows.contains(&i.id.as_str()) && crate::report::is_group(i)) {
-        true => Ok(crate::archive::read(root)?.issues),
-        false => archived_for(root, issues, rows),
+    Ok(archived_group_context(root, issues, rows, crate::archive::reaches_out)?.issues)
+}
+
+/// The same conditional group/reference read, retaining diagnostics for callers whose write
+/// decision requires complete context. Other context callers keep their existing lenient behavior.
+/// `reaches` is the reference gate: [`crate::archive::reaches_out`] for writes that judge blockers,
+/// [`crate::archive::places_out`] for `moai due apply`, whose answer never follows a blocker.
+pub fn archived_group_context(
+    root: &std::path::Path,
+    issues: &[crate::model::Issue],
+    rows: &[&str],
+    reaches: fn(&[crate::model::Issue], &[&str]) -> bool,
+) -> R<crate::store::Load> {
+    // Check kind before searching the requested IDs; ordinary rows need only the reference gate.
+    let groups = issues.iter().any(|i| crate::report::is_group(i) && rows.contains(&i.id.as_str()));
+    match groups || reaches(issues, rows) {
+        true => crate::archive::read(root),
+        false => Ok(crate::store::Load::default()),
     }
 }
 

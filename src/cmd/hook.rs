@@ -873,7 +873,7 @@ fn person_at(repo: &Repo, ctx: &Ctx) -> crate::hook::Person {
 /// 것이 없으니 기록을 안 읽는다.
 fn away_of(input: &Input, repo: &Repo, issues: &[model::Issue], me: &crate::hook::Person) -> crate::hook::Away {
     // 규칙 5 가 아카이브의 줄을 찾는 손(moai-bth3) — 읽는 것은 여기(`cmd/`)고, `hook` 은 집는 id 가 산 스냅샷에 없을
-    // 때만 이 손을 부른다. 못 읽는 아카이브 파일은 건너뛴다(`archive::read` 가 너그럽다).
+    // 때나 규칙 2 의 빈손 거절에서 집을 일을 내밀 때만 이 손을 부른다. 못 읽는 아카이브 파일은 건너뛴다(`archive::read` 가 너그럽다).
     let archive = Some(crate::hook::Archive {
         root: repo.root.clone(),
         read: |root| crate::archive::read(root).map(|l| l.issues).unwrap_or_default(),
