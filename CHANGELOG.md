@@ -12,6 +12,8 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+## [0.39.0] - 2026-10-31
+
 ### Added
 
 - `moai ctl ls` and `moai ctl state` list the explorers open for you and read what one shows, over a socket only you can reach. (moai-zgc1.blf)
