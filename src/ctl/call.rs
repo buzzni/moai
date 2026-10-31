@@ -88,11 +88,11 @@ fn windows_in(dir: &Path, target: Option<&str>, proposal: bool) -> R<Vec<Window>
                         .cloned()
                         .unwrap_or_else(|| vec![data]);
                     for entry in entries {
-                        if let Ok(mut window) = serde_json::from_value::<Window>(entry) {
-                            if target.is_none_or(|id| window.id == id) {
-                                window.socket = path.clone();
-                                windows.push(window);
-                            }
+                        if let Ok(mut window) = serde_json::from_value::<Window>(entry)
+                            && target.is_none_or(|id| window.id == id)
+                        {
+                            window.socket = path.clone();
+                            windows.push(window);
                         }
                     }
                 }
