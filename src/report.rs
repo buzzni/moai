@@ -3433,11 +3433,14 @@ impl<'m, 'a> DueLadder<'m, 'a> {
                 .map(|m| off_rows(all, &shelved_over(all, self.lines, self.epic_of, m)))
                 .unwrap_or_default();
             let shelf = (!off.is_empty()).then(|| Shelf::new(self.lines, self.epic_of, mile_of.as_ref().unwrap()));
-            all.iter()
-                .filter(|g| is_group(g) && !is_eclipsed(&kind_of, g))
-                .filter(|g| reads_done(&counted(g, &members, shelf.as_ref(), &off)))
-                .map(|g| g.id.as_str())
-                .collect()
+            // **같은 id 의 묶음 줄 둘은 뒷줄이 답한다** — 보드의 칸 지도([`group_stands_in`])가 `(종류, id)` 로 접어 뒷줄을
+            // 남기고, `open_ceiling` 이 짚는 줄도 `Lines::at` 의 뒷줄이다. 어느 한 줄이 done 이면 빼던 판은 미룸이 갈린
+            // 쌍둥이에서 보드가 열렸다고 대는 묶음의 기한을 놓쳤다.
+            let mut done: BTreeMap<&str, bool> = BTreeMap::new();
+            for g in all.iter().filter(|g| is_group(g) && !is_eclipsed(&kind_of, g)) {
+                done.insert(g.id.as_str(), reads_done(&counted(g, &members, shelf.as_ref(), &off)));
+            }
+            done.into_iter().filter(|(_, d)| *d).map(|(id, _)| id).collect()
         })
     }
 
@@ -6983,6 +6986,13 @@ mod tests {
         // Reopening the epic restores its earlier ceiling.
         all[2].status = Status::new("todo");
         assert_eq!(raises(&all), [("argos-bbbb".into(), Some("argos-eeee".into()))]);
+
+        // Deferring the remaining open member closes the epic again, as the board's column reads it.
+        let mut kept = member("argos-eeee.ccc", "argos-eeee", "done");
+        kept.priority = Some(0);
+        all.push(kept);
+        all[2].deferred_at = Some("2026-10-01T00:00:00Z".into());
+        assert_eq!(raises(&all), [("argos-bbbb".into(), Some("argos-ssss".into()))]);
     }
 
     /// **문맥은 미룸을 풀기도 한다**(리뷰) — 그래서 `moai due apply` 는 아카이브를 펼지를 미룸을 거르기 **전**의 후보로
