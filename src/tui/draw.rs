@@ -1964,10 +1964,16 @@ fn proposal_line(app: &App, width: usize) -> Option<String> {
     if width < head.width() + tail.width() + 6 {
         tail = proposal_hint(app, true);
     }
-    if width < head.width() + tail.width() {
+    if width < head.width() + tail.width() + 6 {
         head = format!("» {word} ");
     }
-    let tail = clip(&tail, width.saturating_sub(head.width()));
+    if width < head.width() + tail.width() + 6 {
+        tail.clear();
+    }
+    if width < head.width() + 6 {
+        head = "» ".into();
+    }
+    let head = clip(&head, width);
     let before = width.saturating_sub(head.width() + tail.width());
     let then = clip(&then, before / 2);
     let shown = clip(&row.text.replace('\n', " "), before.saturating_sub(then.width()));
@@ -6506,6 +6512,25 @@ pub(super) mod tests {
         assert!(problems.is_empty(), "{problems:?}");
         app.keys = keys;
         assert_eq!(proposal_hint(&app, true), " — SPC x y/n/l");
+    }
+
+    #[test]
+    fn a_narrow_proposal_banner_keeps_text_without_a_partial_shortcut() {
+        use unicode_width::UnicodeWidthStr;
+        let mut app = app();
+        app.site.lang = Lang::En;
+        assert!(app.proposals.add("window", "A suggestion", None, 900, None).ok);
+        app.proposal_banner_id = app.proposals.rows().first().map(|row| row.id.clone());
+        let line = proposal_line(&app, 25).unwrap();
+        assert!(line.contains("A suggest"), "{line}");
+        assert!(!line.contains("SPC"), "{line}");
+        for width in 0..=40 {
+            let line = proposal_line(&app, width).unwrap();
+            assert!(line.width() <= width, "width {width}: {line}");
+            if line.contains("SPC") {
+                assert!(line.contains("SPC a y/n/l"), "width {width}: {line}");
+            }
+        }
     }
 
     /// 보드 그림의 바닥(moai-9nfw) — 마일스톤 0001 밑 에픽 0002 에 todo `n` 개(p1)와 in_progress 하나, 마일스톤
