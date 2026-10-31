@@ -27,18 +27,49 @@ pub struct Window {
 
 #[cfg(unix)]
 pub fn windows() -> R<Vec<Window>> {
-    windows_for_proposal(None)
+    windows_for_target(None)
+}
+
+/// Resolve an explicit window through its PID socket without contacting unrelated windows.
+#[cfg(unix)]
+pub fn windows_for_target(target: Option<&str>) -> R<Vec<Window>> {
+    let dir = super::place::dir().map_err(|e| Fail::new(e.to_string()))?;
+    windows_in(&dir, target, false)
 }
 
 /// Discover a reconnecting tab only when a proposal names its exact window.
 #[cfg(unix)]
 pub fn windows_for_proposal(target: Option<&str>) -> R<Vec<Window>> {
-    use std::os::unix::fs::{FileTypeExt, MetadataExt};
     let dir = super::place::dir().map_err(|e| Fail::new(e.to_string()))?;
+    windows_in(&dir, target, true)
+}
+
+#[cfg(unix)]
+fn target_pid(target: &str) -> Option<u32> {
+    let pid = if let Some(pid) = target.strip_prefix("tui-") {
+        pid
+    } else {
+        let (pid, tab) = target.split_once('.')?;
+        tab.parse::<u64>().ok()?;
+        pid
+    };
+    pid.parse::<u32>().ok().filter(|pid| *pid > 0)
+}
+
+#[cfg(unix)]
+fn windows_in(dir: &Path, target: Option<&str>, proposal: bool) -> R<Vec<Window>> {
+    use std::os::unix::fs::{FileTypeExt, MetadataExt};
+    let paths = if let Some(target) = target {
+        let Some(pid) = target_pid(target) else { return Ok(Vec::new()) };
+        vec![dir.join(format!("{pid}.sock"))]
+    } else {
+        std::fs::read_dir(dir)
+            .map_err(|e| Fail::new(e.to_string()))?
+            .map(|entry| entry.map(|entry| entry.path()).map_err(|e| Fail::new(e.to_string())))
+            .collect::<R<Vec<_>>>()?
+    };
     let mut windows = Vec::new();
-    for entry in std::fs::read_dir(dir).map_err(|e| Fail::new(e.to_string()))? {
-        let entry = entry.map_err(|e| Fail::new(e.to_string()))?;
-        let path = entry.path();
+    for path in paths {
         if path.extension().is_none_or(|e| e != "sock") {
             continue;
         }
@@ -47,7 +78,7 @@ pub fn windows_for_proposal(target: Option<&str>) -> R<Vec<Window>> {
             continue;
         }
         let mut req = wire::request(Verb::Hello, Duration::from_millis(1200));
-        req.target = target.map(str::to_owned);
+        req.target = target.filter(|_| proposal).map(str::to_owned);
         match send_at(&path, &req) {
             Ok(reply) if reply.ok => {
                 if let Some(data) = reply.data {
@@ -58,8 +89,10 @@ pub fn windows_for_proposal(target: Option<&str>) -> R<Vec<Window>> {
                         .unwrap_or_else(|| vec![data]);
                     for entry in entries {
                         if let Ok(mut window) = serde_json::from_value::<Window>(entry) {
-                            window.socket = path.clone();
-                            windows.push(window);
+                            if target.is_none_or(|id| window.id == id) {
+                                window.socket = path.clone();
+                                windows.push(window);
+                            }
                         }
                     }
                 }
@@ -88,6 +121,11 @@ pub fn windows() -> R<Vec<Window>> {
 
 #[cfg(not(unix))]
 pub fn windows_for_proposal(_: Option<&str>) -> R<Vec<Window>> {
+    Ok(Vec::new())
+}
+
+#[cfg(not(unix))]
+pub fn windows_for_target(_: Option<&str>) -> R<Vec<Window>> {
     Ok(Vec::new())
 }
 
@@ -170,5 +208,41 @@ mod tests {
     fn no_window_here_does_not_fall_through_to_another_repository() {
         let windows = vec![window("other", "/two", 1)];
         assert_eq!(pick(&windows, Some("/one"), None).unwrap_err().code, code::NO_WINDOW);
+    }
+    #[test]
+    #[cfg(unix)]
+    fn explicit_targets_skip_unrelated_sockets_and_preserve_proposal_hello() {
+        use std::io::{BufRead, BufReader, Write};
+        use std::os::unix::net::UnixListener;
+        let dir = std::env::temp_dir().join(format!("moai-4km9-target-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let slow = UnixListener::bind(dir.join("1.sock")).unwrap();
+        slow.set_nonblocking(true).unwrap();
+        let target = UnixListener::bind(dir.join("2.sock")).unwrap();
+        let owner = std::thread::spawn(move || {
+            for expected in [None, Some("2.7")] {
+                let (mut stream, _) = target.accept().unwrap();
+                stream.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
+                let mut line = String::new();
+                BufReader::new(&stream).read_line(&mut line).unwrap();
+                let req: Request = serde_json::from_str(&line).unwrap();
+                assert_eq!(req.target.as_deref(), expected);
+                let mut tab = window("2.7", "/one", 0);
+                tab.kind = "web".into();
+                tab.pid = 2;
+                let reply = Reply::success(serde_json::json!({"windows": [tab]}));
+                serde_json::to_writer(&mut stream, &reply).unwrap();
+                stream.write_all(b"\n").unwrap();
+            }
+        });
+        assert_eq!(windows_in(&dir, Some("2.7"), false).unwrap()[0].id, "2.7");
+        assert_eq!(windows_in(&dir, Some("2.7"), true).unwrap()[0].id, "2.7");
+        owner.join().unwrap();
+        assert_eq!(slow.accept().unwrap_err().kind(), std::io::ErrorKind::WouldBlock);
+        for invalid in ["../1", "tui-../../1", "1", "2.x", "tui-0"] {
+            assert!(windows_in(&dir, Some(invalid), false).unwrap().is_empty());
+        }
+        assert_eq!(target_pid("tui-42"), Some(42));
+        std::fs::remove_dir_all(dir).unwrap();
     }
 }
