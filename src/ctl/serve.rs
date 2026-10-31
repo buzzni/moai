@@ -1,12 +1,19 @@
+#[cfg(unix)]
 use std::io::{BufRead, BufReader, Read, Write};
+#[cfg(unix)]
+use std::sync::atomic::AtomicUsize;
 use std::sync::{
     Arc, Mutex,
-    atomic::{AtomicBool, AtomicUsize, Ordering},
+    atomic::{AtomicBool, Ordering},
     mpsc,
 };
-use std::time::{Duration, Instant};
+#[cfg(unix)]
+use std::time::Duration;
+use std::time::Instant;
 
-use super::wire::{self, Reply, Request};
+#[cfg(unix)]
+use super::wire;
+use super::wire::{Reply, Request};
 
 pub struct Incoming {
     pub request: Request,
@@ -29,6 +36,7 @@ struct Editing {
 }
 
 impl Editing {
+    #[cfg(unix)]
     fn answer(&self, request: &Request) -> Option<Reply> {
         if !self.active.load(Ordering::Acquire) {
             return None;
@@ -61,7 +69,9 @@ impl Listener {
 
 pub type Handler = Arc<dyn Fn(Request) -> Reply + Send + Sync>;
 
+#[cfg(unix)]
 struct Leave(Arc<AtomicUsize>);
+#[cfg(unix)]
 impl Drop for Leave {
     fn drop(&mut self) {
         self.0.fetch_sub(1, Ordering::AcqRel);
@@ -247,6 +257,7 @@ fn handle(
     let _ = write_reply(stream, &reply);
 }
 
+#[cfg(unix)]
 fn wait_seconds(req: &Request) -> u64 {
     match &req.verb {
         super::wire::Verb::Propose { wait, .. } | super::wire::Verb::Answer { wait, .. } => *wait,
@@ -254,6 +265,7 @@ fn wait_seconds(req: &Request) -> u64 {
     }
 }
 
+#[cfg(unix)]
 fn wait_slot(waiting: &Arc<AtomicUsize>, leave: &mut Option<Leave>) -> bool {
     if waiting.fetch_add(1, Ordering::AcqRel) >= 4 {
         waiting.fetch_sub(1, Ordering::AcqRel);
@@ -263,6 +275,7 @@ fn wait_slot(waiting: &Arc<AtomicUsize>, leave: &mut Option<Leave>) -> bool {
     true
 }
 
+#[cfg(unix)]
 fn write_reply(stream: &mut impl Write, reply: &Reply) -> std::io::Result<()> {
     serde_json::to_writer(&mut *stream, reply)?;
     stream.write_all(b"\n")
