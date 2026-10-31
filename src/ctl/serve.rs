@@ -397,4 +397,70 @@ mod tests {
         drop(tx);
         owner.join().unwrap();
     }
+
+    #[test]
+    fn web_waiters_also_release_slots_after_four_callers_disconnect() {
+        use std::os::unix::net::UnixStream;
+        let tabs = Arc::new(crate::web::ctl::Tabs::new());
+        let joined = tabs.join(std::path::Path::new("/tmp"), false, None).unwrap();
+        let of = Arc::clone(&tabs);
+        let handler: Handler = Arc::new(move |request, connected| of.handle_while(request, connected));
+        let waiting = Arc::new(AtomicUsize::new(0));
+        let editing = Arc::new(Editing::default());
+        let (tx, _) = mpsc::channel();
+        let ask = |label: &str| {
+            let (mut client, server) = UnixStream::pair().unwrap();
+            let mut request = wire::request(
+                Verb::Propose { text: label.into(), then: None, ttl: 60, wait: 30 },
+                Duration::from_secs(5),
+            );
+            request.target = Some(joined.id.clone());
+            serde_json::to_writer(&mut client, &request).unwrap();
+            client.write_all(b"\n").unwrap();
+            (client, server)
+        };
+        let mut handles = Vec::new();
+        for n in 0..4 {
+            let (client, mut server) = ask(&format!("web disconnected {n}"));
+            let handler = Arc::clone(&handler);
+            let waiting = Arc::clone(&waiting);
+            let editing = Arc::clone(&editing);
+            let tx = tx.clone();
+            handles.push(std::thread::spawn(move || {
+                let mut leave = None;
+                handle(&mut server, &tx, Some(&handler), None, &mut leave, &waiting, &editing);
+            }));
+            drop(client);
+        }
+        for handle in handles {
+            handle.join().unwrap();
+        }
+        assert_eq!(waiting.load(Ordering::Acquire), 0);
+        for _ in 0..4 {
+            assert!(matches!(
+                joined.incoming.recv_timeout(Duration::from_secs(2)),
+                Ok(crate::web::ctl::Push::Proposal { .. })
+            ));
+        }
+
+        let (client, mut server) = ask("web live fifth");
+        let fifth_handler = Arc::clone(&handler);
+        let fifth_waiting = Arc::clone(&waiting);
+        let fifth_editing = Arc::clone(&editing);
+        let fifth_tx = tx.clone();
+        let fifth = std::thread::spawn(move || {
+            let mut leave = None;
+            handle(&mut server, &fifth_tx, Some(&fifth_handler), None, &mut leave, &fifth_waiting, &fifth_editing);
+        });
+        let crate::web::ctl::Push::Proposal { entry } = joined.incoming.recv_timeout(Duration::from_secs(2)).unwrap()
+        else {
+            panic!("fifth proposal was not sent")
+        };
+        tabs.proposal_reply(&joined.id, &joined.token, entry["id"].as_str().unwrap(), true, None).unwrap();
+        let mut line = String::new();
+        BufReader::new(client).read_line(&mut line).unwrap();
+        assert_eq!(serde_json::from_str::<Reply>(&line).unwrap().data.unwrap()["state"], "accepted");
+        fifth.join().unwrap();
+        assert_eq!(waiting.load(Ordering::Acquire), 0);
+    }
 }
