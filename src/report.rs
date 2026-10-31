@@ -835,6 +835,7 @@ impl<'a, 'm> Shelf<'a, 'm> {
 /// 줄을 다 보고 답이 갈리는지 잰다. 성한 저장소에서는 빈 지도다.
 #[derive(Default)]
 pub struct Lines<'a> {
+    all: &'a [Issue],
     by_id: BTreeMap<&'a str, &'a Issue>,
     rooted: BTreeSet<&'a str>,
     twins: Twins<'a>,
@@ -870,7 +871,7 @@ impl<'a> Lines<'a> {
             false => twins_of(all, &by_id),
         };
         let rooted = rooted_thoughts(&by_id, &twins);
-        Lines { by_id, rooted, twins }
+        Lines { all, by_id, rooted, twins }
     }
 
     /// 그 id 를 **마지막으로 든 줄** — 같은 id 가 둘이면 뒷줄이다. 조상을 짚는 자리가
@@ -3282,6 +3283,8 @@ pub struct DueLadder<'m, 'a> {
     epic_of: &'m Handing<'a>,
     /// 기한 든 조상 가운데 미룬 줄(물려받은 미룸 포함). 조상은 `Lines::at` 이 고르는 줄이므로 id 로 든다.
     off: BTreeSet<&'a str>,
+    /// 우선순위 천장을 물을 때만 짓는다. 쓰기의 천장은 닫힌 그룹도 센다.
+    closed_groups: std::cell::OnceCell<BTreeSet<&'a str>>,
 }
 
 impl<'m, 'a> DueLadder<'m, 'a> {
@@ -3316,7 +3319,7 @@ impl<'m, 'a> DueLadder<'m, 'a> {
         } else {
             BTreeSet::new()
         };
-        DueLadder { lines, epic_of, off }
+        DueLadder { lines, epic_of, off, closed_groups: std::cell::OnceCell::new() }
     }
 
     /// 그 줄의 조상 가운데 가장 이른 기한. 기한 든 조상이 없으면 `None` 이다. 꼴이 틀린 기한은
@@ -3400,15 +3403,42 @@ impl<'m, 'a> DueLadder<'m, 'a> {
     /// 다음 `moai due apply` 가 도로 올린다. 그 줄에 더 늦은 제 기한도 못 준다(쓰기의 위계 검사는 닫힌 부모도 센다) —
     /// 빠져나갈 길이 부모의 기한을 지우는 것뿐이었다. 보드의 `overdue` 가 닫힌 줄을 안 세는 것과 같은 자다.
     ///
-    /// 묶음은 **칸으로 안 가른다** — 칸을 멤버에서 읽으므로 열린 일이 남으면 묶음도 열려 있고, 저장된 `status` 는 뜻이
-    /// 없다. 쓰기의 위계 검사는 이것이 아니라 [`DueLadder::ceiling`] 이다.
+    /// 묶음은 **멤버에서 읽은 칸**으로 가른다 — 저장된 `status` 는 뜻이 없다. 빈 묶음은 첫 칸이고,
+    /// 남은 멤버를 미뤄 닫은 묶음도 빠진다. 쓰기의 위계 검사는 이것이 아니라 [`DueLadder::ceiling`] 이다.
     pub fn open_ceiling(&self, i: &'a Issue) -> Option<Ceiling<'a>> {
         let above: Vec<&'a str> = self
             .above(i)
             .into_iter()
-            .filter(|id| self.lines.at(id).is_some_and(|a| is_group(a) || !a.status.is_done()))
+            .filter(|id| {
+                self.lines.at(id).is_some_and(|a| match is_group(a) {
+                    true => !self.closed_groups().contains(a.id.as_str()),
+                    false => !a.status.is_done(),
+                })
+            })
             .collect();
         self.lowest(i, &above)
+    }
+
+    /// 묶음 칸의 `done` 판정([`reads_done`])에 쓰는 같은 멤버와 미룸의 자를 빌린다.
+    /// 우선순위 천장을 실제로 물을 때 한 번만 짓고, 쓰기의 천장에는 이 셈을 더하지 않는다.
+    fn closed_groups(&self) -> &BTreeSet<&'a str> {
+        self.closed_groups.get_or_init(|| {
+            let all = self.lines.all;
+            let kind_of = kinds(all);
+            let members = members_in(all, self.epic_of, self.lines, &kind_of);
+            // 미룬 줄이 없으면 묶음도 멤버를 뺄 일이 없다.
+            let mile_of = all.iter().any(is_put_off).then(|| milestones_over(all, self.epic_of, self.lines));
+            let off = mile_of
+                .as_ref()
+                .map(|m| off_rows(all, &shelved_over(all, self.lines, self.epic_of, m)))
+                .unwrap_or_default();
+            let shelf = (!off.is_empty()).then(|| Shelf::new(self.lines, self.epic_of, mile_of.as_ref().unwrap()));
+            all.iter()
+                .filter(|g| is_group(g) && !is_eclipsed(&kind_of, g))
+                .filter(|g| reads_done(&counted(g, &members, shelf.as_ref(), &off)))
+                .map(|g| g.id.as_str())
+                .collect()
+        })
     }
 
     /// 이 지도가 든 **같은 줄** — 아카이브를 곁들인 문맥의 줄(사본)로 물어도 산 줄의 지도에서 다시 찾는다
@@ -6911,6 +6941,48 @@ mod tests {
         let got: Vec<(&str, Option<&str>)> =
             raised.iter().map(|r| (r.issue.id.as_str(), r.from.map(|f| f.id.as_str()))).collect();
         assert_eq!(got, [("argos-pppp", None), ("argos-pppp.ccc", Some("argos-pppp"))]);
+    }
+
+    #[test]
+    fn due_raises_skips_derived_closed_groups_but_follows_open_ones() {
+        let rule = crate::config::DueRule::DEFAULT;
+        let now = "2026-10-16T00:00:00Z";
+        let mut milestone = make("argos-ssss", Kind::Milestone, "todo");
+        milestone.due_on = Some("2026-10-17".into());
+        let mut epic = make("argos-eeee", Kind::Epic, "todo");
+        epic.milestone = Some(milestone.id.clone());
+        epic.due_on = Some("2026-10-10".into());
+        let mut finished = member("argos-eeee.aaa", "argos-eeee", "done");
+        finished.priority = Some(0);
+        // Backlog does not count as group work, even when parked inside the epic.
+        let mut parked = make("argos-bbbb", Kind::Backlog, "todo");
+        parked.epic = Some(epic.id.clone());
+        parked.priority = Some(3);
+        let mut all = vec![milestone, epic, finished, parked];
+
+        let raises = |rows: &[Issue]| {
+            due_raises(rows, rows, now, utc(), &rule)
+                .iter()
+                .map(|r| (r.issue.id.clone(), r.from.map(|f| f.id.clone())))
+                .collect::<Vec<_>>()
+        };
+        assert!(raises(&all).is_empty(), "closed milestone and epic must not raise parked backlog");
+        let lines = Lines::of(&all);
+        let epic_of = Handing::over(&all, &lines);
+        let ladder = DueLadder::over(&lines, &epic_of);
+        assert!(ladder.open_ceiling(&all[3]).is_none());
+        assert_eq!(ladder.ceiling(&all[3]).map(|c| c.above.id.as_str()), Some("argos-eeee"));
+
+        // A different open issue reopens the milestone, while this epic stays closed.
+        let mut other = make("argos-xxxx", Kind::Issue, "todo");
+        other.milestone = Some("argos-ssss".into());
+        other.priority = Some(0);
+        all.push(other);
+        assert_eq!(raises(&all), [("argos-bbbb".into(), Some("argos-ssss".into()))]);
+
+        // Reopening the epic restores its earlier ceiling.
+        all[2].status = Status::new("todo");
+        assert_eq!(raises(&all), [("argos-bbbb".into(), Some("argos-eeee".into()))]);
     }
 
     /// **문맥은 미룸을 풀기도 한다**(리뷰) — 그래서 `moai due apply` 는 아카이브를 펼지를 미룸을 거르기 **전**의 후보로
