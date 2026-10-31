@@ -226,6 +226,12 @@ impl Window {
         self.laid_here().map_or(&[], |l| l.cells.as_slice())
     }
 
+    /// A raw/rendered toggle invalidates the selected rendered link and its scroll layout.
+    pub(super) fn rewind_raw(&mut self) {
+        self.page.rewind();
+        self.picked = None;
+    }
+
     /// 골라진 링크 — 지금 페이지에서 고른 것이고 지금 편 한 벌에 그 칸이 있을 때만이다. 그림이 칠하고 바가 대상을 댄다.
     pub fn picked(&self) -> Option<usize> {
         let (slug, k) = self.picked.as_ref()?;
@@ -933,23 +939,14 @@ impl App {
                     false
                 }
                 Some(Browse::Step(m)) => {
-                    if let Mode::Wiki(w) = &mut self.mode {
-                        w.step(m);
-                    }
+                    self.run(Browse::Step(m), &rows);
                     false
                 }
                 // **원문·그린 글은 탐색과 한 값이다**(`App::raw`) — 설정에 안 남는 값이라 창이 따로 들 까닭이 없고, 닫고
                 // 돌아간 상세도 같은 꼴로 선다. 줄 수가 바뀌니 두 굴린 자리를 첫 줄로 돌린다(탐색의 `B::Raw` 와 같다).
                 // 메뉴는 열린 채로 남는다(`Browse::stateful`).
                 Some(Browse::Raw) => {
-                    self.raw = !self.raw;
-                    self.detail.rewind();
-                    // 건너온 머리글이 있으면 다시 편 그림이 그 줄로 굴린다(`Window::resettle`). 고른 링크는 걷는다 — 원문에는
-                    // 링크 칸이 없고, 돌아온 그린 글에서 첫 줄로 간 화면 밖의 링크가 다시 살면 안 보이는 고름이 선다.
-                    if let Mode::Wiki(w) = &mut self.mode {
-                        w.page.rewind();
-                        w.picked = None;
-                    }
+                    self.run(Browse::Raw, &rows);
                     true
                 }
                 // The suggestion line is drawn over this window too, and its keys answer here as on the list.
@@ -1106,6 +1103,32 @@ pub(super) mod tests {
         assert!(window(&app).typing.is_some());
         let typed = app.ctl(&req(Verb::Keys { seqs: vec![], text: Some("x".into()) }));
         assert_eq!(typed.code.as_deref(), Some("person_busy"), "{typed:?}");
+    }
+
+    #[test]
+    fn ctl_named_actions_change_the_visible_wiki_pane() {
+        use crate::ctl::wire::{self, Verb};
+        let (_scratch, mut app) = wiki_app("ctl-visible-wiki", PAGES);
+        app.hit("SPC g w");
+        let cursor = app.cursor;
+        let req = |name: &str| wire::request(Verb::Do { name: name.into() }, std::time::Duration::from_secs(5));
+        let reply = app.ctl(&req("moves.line_down"));
+        assert!(reply.ok, "{reply:?}");
+        assert_eq!(window(&app).cursor, 1);
+        assert_eq!(app.cursor, cursor);
+        app.hit("Enter");
+        if let Mode::Wiki(w) = &mut app.mode {
+            w.page.fit(5, 100);
+        }
+        let reply = app.ctl(&req("moves.line_down"));
+        assert!(reply.ok, "{reply:?}");
+        assert_eq!(window(&app).page.offset(), 1);
+        assert!(app.ctl(&req("browse.raw")).ok);
+        assert!(app.raw);
+        assert_eq!(window(&app).page.offset(), 0);
+        assert_eq!(window(&app).picked(), None);
+        assert_eq!(window(&app).cursor, 1);
+        assert_eq!(app.cursor, cursor);
     }
 
     #[test]

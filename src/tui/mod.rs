@@ -2447,8 +2447,9 @@ impl App {
         use keys::Browse as B;
         match act {
             B::Quit => Some(say(self.site.lang, "tui.ctl.quit").into()),
-            B::ProposalAccept | B::ProposalDecline | B::Proposals =>
-                Some("only the person can answer a proposal".into()),
+            B::ProposalAccept | B::ProposalDecline | B::Proposals => {
+                Some("only the person can answer a proposal".into())
+            }
             _ => None,
         }
     }
@@ -6987,7 +6988,11 @@ impl App {
             B::FocusNext => self.focus = self.focus.next(),
             // **끝에서는 제자리다** — 목록에서 `Ctrl-w h` 를 눌러도 상세로 돌지 않는다.
             B::Focus(side) => self.focus = self.focus.step(side, self.detail_side()),
-            B::Step(m) => self.step(m, rows),
+            B::Step(m) => match &mut self.mode {
+                Mode::Stats(w) => w.scroll.go(m),
+                Mode::Wiki(w) => w.step(m),
+                _ => self.step(m, rows),
+            },
             // **드나드는 키도 포커스를 탄다**(`enabled`). 상세를 읽다가 누른 Enter·←가 목록을
             // 옮기면 보던 이슈가 바뀌고 굴린 자리도 첫 줄로 돌아간다 — ↑↓ 를 포커스에
             // 태운 까닭과 같다. 상세에서는 아직 뜻이 없어 아무 일도 안 한다.
@@ -7157,6 +7162,9 @@ impl App {
                 // 그린 것과 원문은 줄 수가 다르다. 굴린 자리를 들고 가면
                 // 엉뚱한 데가 나온다.
                 self.detail.rewind();
+                if let Mode::Wiki(w) = &mut self.mode {
+                    w.rewind_raw();
+                }
             }
         }
     }
@@ -13655,9 +13663,7 @@ mod tests {
     fn ctl_actions_disable_every_person_only_action_and_do_refuses_it() {
         use crate::ctl::wire::Verb;
         let (_scratch, mut a) = writable("ctl-person-only");
-        assert!(a.ctl(&ctl_req(Verb::Propose {
-            text: "A suggestion".into(), then: None, ttl: 900, wait: 0,
-        }, None)).ok);
+        assert!(a.ctl(&ctl_req(Verb::Propose { text: "A suggestion".into(), then: None, ttl: 900, wait: 0 }, None)).ok);
         let listing = a.ctl(&ctl_req(Verb::Actions, None)).data.unwrap();
         for name in ["browse.quit", "browse.proposal_accept", "browse.proposal_decline", "browse.proposals"] {
             let row = listing["actions"].as_array().unwrap().iter().find(|row| row["name"] == name).unwrap();
@@ -13690,6 +13696,25 @@ mod tests {
         assert_eq!(a.ctl_state(false)["menu"], "g");
         a.hit("Esc");
         assert_eq!(a.ctl_state(false)["menu"], serde_json::Value::Null);
+    }
+
+    #[test]
+    fn ctl_named_moves_scroll_stats_without_moving_the_hidden_list() {
+        use crate::ctl::wire::Verb;
+        let (_scratch, mut a) = writable("ctl-visible-stats");
+        a.hit("SPC g s");
+        let Mode::Stats(w) = &mut a.mode else { panic!("stats did not open") };
+        w.scroll.fit(5, 100);
+        let cursor = a.cursor;
+        let reply = a.ctl(&ctl_req(Verb::Do { name: "moves.line_down".into() }, None));
+        assert!(reply.ok, "{reply:?}");
+        let Mode::Stats(w) = &a.mode else { panic!("stats closed") };
+        assert_eq!(w.scroll.offset(), 1);
+        assert_eq!(a.cursor, cursor);
+        let reply = a.ctl(&ctl_req(Verb::Do { name: "browse.filter".into() }, None));
+        assert!(reply.ok, "{reply:?}");
+        assert_eq!(reply.data.unwrap()["changed"], false);
+        assert!(matches!(a.mode, Mode::Stats(_)));
     }
 
     #[test]
