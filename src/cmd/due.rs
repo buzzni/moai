@@ -66,7 +66,8 @@ pub fn run(ctx: &Ctx, cmd: DueCmd) -> R<Vec<String>> {
 /// 그것이다). 그래서 먼저 산 줄만으로 **탐침**을 대고([`crate::report::due_candidates`] — 묶음은 다 열린 것으로 친다), 답이
 /// 아카이브에 걸릴 수 있는 id 를 고른다([`crate::report::due_context_ids`]): 참조가 산 줄 밖으로 닿는 후보, 그리고 후보가
 /// 기한을 빌린 묶음 가운데 닫힘이 그 답을 바꿀 수 있는 것(멤버가 아카이브에 있을 수 있다). 펴든 안 펴든 마지막 답은 그
-/// 문맥으로 다시 잰다([`crate::report::due_raises`]) — 조상과 기한은 산 줄의 지도에서, 묶음의 닫힘과 미룸은 문맥에서.
+/// 문맥으로 다시 잰다([`crate::report::due_raises`]) — 조상·기한·묶음의 닫힘·미룸 모두 보드의 문맥에서.
+/// 탐침이 비어도 올릴 수 있는 열린 줄의 참조를 살핀다 — 아카이브의 부모가 새 기한을 드러낼 수 있다.
 /// 판단은 `report`·`archive` 의 것이고 여기는 잇기만 한다.
 fn judged(
     root: &std::path::Path,
@@ -77,9 +78,6 @@ fn judged(
     now: &str,
 ) -> R<Vec<Raised>> {
     let candidates = crate::report::due_candidates(issues, now, zone, &cfg.due);
-    if candidates.is_empty() {
-        return Ok(Vec::new());
-    }
     let ids = crate::report::due_context_ids(issues, &candidates);
     let archived = super::archived_group_context(root, issues, &ids)?;
     if let Some(error) = archived.errors.first() {
