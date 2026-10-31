@@ -1523,6 +1523,9 @@ Arguments:
           believing it was all marked. `--all` and `-e` fill that place.
 
 Options:
+      --atomic
+          Write none of the named marks if any ID is missing or held
+
       --all
           Everything unread that came to me
 

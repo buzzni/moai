@@ -54,6 +54,8 @@ On the web, view choices are saved in that browser's local storage, not in the u
 
 By default, `propose` returns a pending id immediately. `--wait <seconds>` keeps the command open until the person answers or the wait ends. A wait ending first returns `pending` and leaves the suggestion visible. `moai ctl answer <id> [--wait <seconds>]` reads it later, and `moai ctl withdraw <id>` takes down a pending one. Accepted, declined, expired, withdrawn, and pending answers all exit successfully; a missing or closed window and a proposal refused before display do not. The id includes the window id, so `answer` and `withdraw` can find the same window. A closed window returns `gone` to its waiters.
 
+If a waiting command disconnects, its waiter slot is released promptly; the proposal itself stays pending until answered, withdrawn, or expired. A proposed time-zone change is checked by the target explorer or browser before the suggestion appears, so an unsupported zone is refused at once.
+
 A window holds up to five pending suggestions. Text is limited to 500 characters and three lines, with control characters removed. `--ttl` defaults to 900 seconds and is limited to 3600; an unanswered suggestion expires and disappears. Answered suggestions remain readable for ten minutes. Waiting callers have four slots separate from ordinary ctl requests, so a set of unanswered suggestions does not stop `state` from answering.
 
-Decided in: moai-zgc1
+Decided in: moai-zgc1 moai-v5of

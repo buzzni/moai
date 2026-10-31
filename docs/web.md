@@ -283,7 +283,7 @@ the next look, so the list never stays on the rows from before a change.
 change the tab, press its keys, resize the detail, or change its theme. The server
 sends a control request down that tab's event stream and waits for its reply.
 Hiding a tab closes the stream, so hidden tabs are absent from `ls` and cannot
-be changed. Showing it again gives it a new id. Only a browser connected from
+be changed. A visible tab reconnecting within 30 seconds keeps its id, token and pending suggestions; after that it gets a new id. Reconnecting does not count as human input. Only a browser connected from
 loopback joins the ctl tab registry. A page opened from a remote address can
 read the tracker but receives no ctl token or requests and is absent from `ls`.
 Control never opens or closes a browser window.
@@ -293,7 +293,7 @@ token; the server limits its JSON body to 1 MiB. The key help, a human-focused
 input or menu, a half-typed key sequence or an open sort editor returns
 `person_busy`. Tracker writes requested by ctl carry the caller's identity; read
 marks remain the web server owner's, so `moai ctl read --all` marks the owner's
-NEW rows. Column moves
+NEW rows. A `moai ctl read` with several IDs validates the whole set before it marks any, so a missing or blocked later ID leaves earlier marks untouched. Column moves
 and notes remain CLI commands (`moai mv`, `moai note`).
 
 ## See it from another machine
@@ -442,4 +442,4 @@ lanes.
 The page does not show the stats screen, and what it writes is a Gantt bar's days
 and your read marks.
 
-Decided in: moai-skjr, moai-e9hi, moai-8r2l, moai-0aa7, moai-jshy, moai-d86e.3ud, moai-ijjd, moai-lj8g, moai-ekg6 moai-mkzo moai-i07x moai-zgc1
+Decided in: moai-skjr, moai-e9hi, moai-8r2l, moai-0aa7, moai-jshy, moai-d86e.3ud, moai-ijjd, moai-lj8g, moai-ekg6 moai-mkzo moai-i07x moai-zgc1 moai-v5of
