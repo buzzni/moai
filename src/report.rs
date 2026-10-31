@@ -3506,9 +3506,9 @@ pub fn due_overflow_of<'a>(all: &'a [Issue], id: &str) -> Vec<&'a Issue> {
 /// - 기한·자리(에픽·마일스톤)가 그대로인 쓰기는 묻지도 않는다 — 쓰는 쪽이 락을 쥔 채 부르는 자리다
 /// - 조상을 늦추는 쓰기나 기한 곁에 제목을 고친 쓰기가 남은 넘침을 제 탓으로 대면, 받는 쪽은 그때마다 남의 기한을
 ///   고치러 간다. 그래서 쓰기 앞의 모습을 고친 줄 하나만 되돌려 다시 잰다 — 다른 줄은 이 쓰기가 안 건드린다
-/// - 계획 밖의 줄(미룬 것과 그 밑)과 멤버가 다 닫힌 묶음은 뺀다: `status` 의 `due_beyond_parent` 가 안 세는 줄을
-///   "센다" 고 하면 거짓말이다. 묶음의 칸은 멤버에서 읽는다
-pub fn overflow_by(all: &[Issue], before: &Issue, after: &Issue, cfg: &Config) -> Vec<String> {
+/// - 계획 밖의 줄과 닫힌 묶음은 문맥을 곁들인 [`overflow_in_context`] 가 뺀다 — 이 후보를 먼저 골라야
+///   쓰기가 넘침 없는 판에서 아카이브를 새로 읽지 않는다
+pub fn overflow_by(all: &[Issue], before: &Issue, after: &Issue) -> Vec<String> {
     let moved = before.due_on != after.due_on || before.epic != after.epic || before.milestone != after.milestone;
     if !moved {
         return Vec::new();
@@ -3521,11 +3521,20 @@ pub fn overflow_by(all: &[Issue], before: &Issue, after: &Issue, cfg: &Config) -
     let mut was_all = all.to_vec();
     was_all[k] = before.clone();
     let was: BTreeSet<String> = due_overflow_of(&was_all, &after.id).into_iter().map(|i| i.id.clone()).collect();
-    let off = deferred_roots(all);
-    let ids: Vec<&str> = now.iter().map(String::as_str).collect();
-    let states = group_states_of(all, cfg, &ids);
+    now.into_iter().filter(|id| !was.contains(id)).collect()
+}
+
+/// Filter live overflow candidates using the board's archive-aware closure and deferral.
+/// The write ceiling itself remains live-only; callers load context only for actual candidates.
+pub fn overflow_in_context(context: &[Issue], candidates: Vec<String>, cfg: &Config) -> Vec<String> {
+    if candidates.is_empty() {
+        return candidates;
+    }
+    let off = deferred_roots(context);
+    let ids: Vec<&str> = candidates.iter().map(String::as_str).collect();
+    let states = group_states_of(context, cfg, &ids);
     let shut = |id: &str| states.iter().any(|((_, g), col)| *g == id && *col == crate::config::DONE);
-    now.into_iter().filter(|id| !was.contains(id) && !off.contains_key(id.as_str()) && !shut(id)).collect()
+    candidates.into_iter().filter(|id| !off.contains_key(id.as_str()) && !shut(id)).collect()
 }
 
 /// **뿌리로 올라간 생각** — 제 부모 밑에 접히지 않는 backlog 의 id.
@@ -7197,6 +7206,33 @@ mod tests {
             let epics = Handing::over(&live, &lines);
             assert_eq!(DueLadder::over(&lines, &epics).ceiling(&live[2]).unwrap().above.id, "argos-m001");
         }
+    }
+
+    #[test]
+    fn overflow_notices_filter_archived_closure_but_keep_the_live_write_ceiling() {
+        let mut before = make("argos-mmmm", Kind::Milestone, "todo");
+        before.due_on = Some("2026-10-31".into());
+        let mut after = before.clone();
+        after.due_on = Some("2026-10-26".into());
+        let mut epic = make("argos-eeee", Kind::Epic, "todo");
+        epic.milestone = Some(after.id.clone());
+        epic.due_on = Some("2026-10-29".into());
+        let finished = member("argos-dddd", &epic.id, "done");
+        let mut live = vec![after.clone(), epic];
+        let archive = vec![finished];
+        let candidates = overflow_by(&live, &before, &after);
+        assert_eq!(candidates, ["argos-eeee"]);
+        let context = with_archive(&live, &archive, &BTreeSet::new());
+        assert!(overflow_in_context(&context, candidates, &cfg()).is_empty());
+        // Derived closure filters the notice, not the live write ceiling.
+        assert_eq!(first_beyond(&live, &["argos-eeee"]).unwrap().1.above.id, "argos-mmmm");
+        live.push(member("argos-rrrr", "argos-eeee", "todo"));
+        let context = with_archive(&live, &archive, &BTreeSet::new());
+        assert_eq!(overflow_in_context(&context, overflow_by(&live, &before, &after), &cfg()), ["argos-eeee"]);
+        live[1].deferred_at = Some("2026-10-01T00:00:00Z".into());
+        let context = with_archive(&live, &archive, &BTreeSet::new());
+        assert!(overflow_in_context(&context, overflow_by(&live, &before, &after), &cfg()).is_empty());
+        assert!(overflow_by(&live, &after, &after).is_empty(), "unchanged writes need no context");
     }
 
     #[test]

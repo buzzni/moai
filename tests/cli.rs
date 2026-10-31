@@ -11988,6 +11988,40 @@ fn the_overflow_notice_names_what_this_write_pushed_over() {
     assert!(ok(s.path(), &["status", "--json"]).contains("due_beyond_parent"), "남은 넘침을 보드가 안 비춘다");
 }
 
+#[test]
+fn overflow_notices_match_status_for_archived_and_reopened_groups() {
+    for reopened in [false, true] {
+        let s = init("due-overflow-archived-closure");
+        let p = s.path();
+        let m = field(&ok(p, &["milestone", "add", "release", "--due", "2026-09-30", "--json"]), "id");
+        let e =
+            field(&ok(p, &["epic", "add", "restored epic", "--milestone", &m, "--due", "2026-09-29", "--json"]), "id");
+        let done = add(p, &["completed member", "--parent", &e]);
+        ok(p, &["mv", &done, "done"]);
+        let now = "2026-10-01T00:00:00Z";
+        ok_at(p, now, &["archive"]);
+        ok_at(p, now, &["mv", &e, "todo"]);
+        if reopened {
+            add(p, &["new work", "--parent", &e]);
+        }
+        let out = at(p, now, &["edit", &m, "--due", "2026-09-20"]);
+        assert!(out.status.success(), "{}", text(&out));
+        let said = String::from_utf8_lossy(&out.stderr);
+        assert_eq!(said.contains(&e), reopened, "{said}");
+        let board: serde_json::Value = serde_json::from_str(&ok_at(p, now, &["status", "--json"])).unwrap();
+        let ids = board["warnings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|w| w["kind"] == "due_beyond_parent")
+            .map(|w| w["ids"].clone())
+            .unwrap_or_else(|| serde_json::json!([]));
+        assert_eq!(ids, if reopened { serde_json::json!([e]) } else { serde_json::json!([]) }, "{board}");
+        // Accepting a later deadline on that restored epic still obeys the live write ceiling.
+        assert!(!at(p, now, &["edit", &e, "--due", "2026-09-28"]).status.success());
+    }
+}
+
 /// **도는 마일스톤 안이 기한보다 먼저다**(리뷰) — AGENTS 블록의 약속("`p0` 이 먼저고 마일스톤이 둘째다")이
 /// `ready` 의 차례에도 선다. 같은 자리 안에서는 이른 기한이 먼저다.
 #[test]
