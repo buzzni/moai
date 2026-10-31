@@ -451,6 +451,13 @@ pub fn reaches_out(active: &[Issue], wanted: &[&str]) -> bool {
     walks_out(active, wanted.iter().copied(), true, |_| false)
 }
 
+/// [`reaches_out`] without blockers — only a parent, epic or milestone above `wanted` that no live row holds counts.
+/// `moai due apply` gates its archive read on this: a blocker never places a row, lends it a deadline, closes its
+/// groups or defers it, so following blockers read (and refused on) an archive the answer never depends on.
+pub fn places_out(active: &[Issue], wanted: &[&str]) -> bool {
+    walks_out(active, wanted.iter().copied(), false, |_| false)
+}
+
 /// The walk [`needs_context`] and [`reaches_out`] share: from `wanted` up through every parent, epic and milestone
 /// (and every blocker, with `blockers`), true at the first id no live row holds or the first row `stop` picks.
 fn walks_out<'a>(

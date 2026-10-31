@@ -1299,19 +1299,22 @@ pub fn archived_with_groups(
     issues: &[crate::model::Issue],
     rows: &[&str],
 ) -> R<Vec<crate::model::Issue>> {
-    Ok(archived_group_context(root, issues, rows)?.issues)
+    Ok(archived_group_context(root, issues, rows, crate::archive::reaches_out)?.issues)
 }
 
 /// The same conditional group/reference read, retaining diagnostics for callers whose write
 /// decision requires complete context. Other context callers keep their existing lenient behavior.
+/// `reaches` is the reference gate: [`crate::archive::reaches_out`] for writes that judge blockers,
+/// [`crate::archive::places_out`] for `moai due apply`, whose answer never follows a blocker.
 pub fn archived_group_context(
     root: &std::path::Path,
     issues: &[crate::model::Issue],
     rows: &[&str],
+    reaches: fn(&[crate::model::Issue], &[&str]) -> bool,
 ) -> R<crate::store::Load> {
     // Check kind before searching the requested IDs; ordinary rows need only the reference gate.
     let groups = issues.iter().any(|i| crate::report::is_group(i) && rows.contains(&i.id.as_str()));
-    match groups || crate::archive::reaches_out(issues, rows) {
+    match groups || reaches(issues, rows) {
         true => crate::archive::read(root),
         false => Ok(crate::store::Load::default()),
     }

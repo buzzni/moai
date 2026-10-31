@@ -7622,6 +7622,20 @@ fn due_apply_refuses_incomplete_required_archive_context_without_writing() {
 
     let unrelated = init("due-broken-unneeded-context");
     let own = add(unrelated.path(), &["own deadline", "--due", "2026-09-11"]);
+    // A blocker never places a row, lends it a deadline, closes its groups or defers it — an open row
+    // waiting on work that left the live snapshot must not pull the archive into due apply.
+    let waiting = add(unrelated.path(), &["waits on moved work"]);
+    let snapshot = issues(unrelated.path())
+        .lines()
+        .map(|line| {
+            let mut row: serde_json::Value = serde_json::from_str(line).unwrap();
+            if row["id"] == waiting {
+                row["blocked_by"] = serde_json::json!(["argos-gone"]);
+            }
+            format!("{row}\n")
+        })
+        .collect::<String>();
+    std::fs::write(unrelated.path().join(".moai/issues.jsonl"), snapshot).unwrap();
     let archive = unrelated.path().join(".moai/archive");
     std::fs::create_dir_all(&archive).unwrap();
     std::fs::write(archive.join("2026.jsonl"), [0xff]).unwrap();

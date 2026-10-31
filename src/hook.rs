@@ -5582,7 +5582,7 @@ fn in_unit<'a>(unit: &BTreeSet<&str>, ties: &report::Ties<'a>, i: &'a Issue) -> 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Away {
     /// 규칙 5 가 산 스냅샷에 없는 id 를 찾는 아카이브(moai-bth3) — **읽는 손은 `cmd/hook.rs` 가 건넨다**([`Archive`]).
-    /// This reader is also used for rule-2 suggestions, only after an empty-focus refusal is certain.
+    /// Rule 5 calls it only when the picked ID is not live. Rule 2 also calls it for suggestions, only after an empty-focus refusal is certain.
     pub archive: Option<Archive>,
     /// 옆 워크트리들의 이름 후보(`worktree::away`) — 그 줄 자신, 그 밑의 자식, 그 에픽·마일스톤에
     /// 든 줄을 가리킨다.
@@ -6842,9 +6842,17 @@ fn edit_held(
     // Only the refusal path needs suggestions. Successful calls above keep their
     // archive budget; this reader is supplied by cmd/hook, so the judge stays pure.
     let archived = away.archive.as_ref().map(|a| (a.read)(&a.root)).unwrap_or_default();
-    let context = report::with_archive(issues, &archived, &BTreeSet::new());
+    // An empty archive joins nothing — borrow the live rows instead of copying the whole snapshot.
+    let joined;
+    let context: &[Issue] = match archived.is_empty() {
+        true => issues,
+        false => {
+            joined = report::with_archive(issues, &archived, &BTreeSet::new());
+            &joined
+        }
+    };
     let live: BTreeSet<&str> = issues.iter().map(|i| i.id.as_str()).collect();
-    let picks: String = report::ready(&context, cfg)
+    let picks: String = report::ready(context, cfg)
         .into_iter()
         .filter(|i| live.contains(i.id.as_str()))
         .filter(mine)
