@@ -174,7 +174,10 @@ fn split_words(text: &str) -> R<Vec<String>> {
 
 pub fn state(ctx: &Ctx, target: Option<&str>, rows: bool) -> R<Vec<String>> {
     #[cfg(not(unix))]
-    return Err(Fail::coded("control sockets are unavailable on this OS", code::UNSUPPORTED));
+    {
+        let _ = (ctx, target, rows);
+        Err(Fail::coded("control sockets are unavailable on this OS", code::UNSUPPORTED))
+    }
     #[cfg(unix)]
     {
         let windows = call::windows()?;
@@ -290,7 +293,10 @@ fn verb_request(ctx: &Ctx, target: Option<&str>, verb: wire::Verb) -> R<Vec<Stri
 
 fn invoke(ctx: &Ctx, target: Option<&str>, verb: wire::Verb, needs_actor: bool) -> R<Vec<String>> {
     #[cfg(not(unix))]
-    return Err(Fail::coded("control sockets are unavailable on this OS", code::UNSUPPORTED));
+    {
+        let _ = (ctx, target, verb, needs_actor);
+        Err(Fail::coded("control sockets are unavailable on this OS", code::UNSUPPORTED))
+    }
     #[cfg(unix)]
     {
         let windows = call::windows()?;

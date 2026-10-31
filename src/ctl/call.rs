@@ -1,9 +1,12 @@
 use std::path::{Path, PathBuf};
+#[cfg(unix)]
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-use super::wire::{self, Reply, Request, Verb};
+#[cfg(unix)]
+use super::wire::{self, Verb};
+use super::wire::{Reply, Request};
 use crate::fail::{Fail, R, code};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
