@@ -12,6 +12,10 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+### Fixed
+
+- `moai due apply` skips the deadlines of epics and milestones whose live members read closed, including groups closed by deferring remaining work, so parked backlog is not repeatedly raised by those deadlines. Archive-aware closure is tracked in moai-nfct. (moai-w30o.pkr)
+
 ## [0.39.0] - 2026-10-31
 
 ### Added
