@@ -939,7 +939,7 @@ worker's line is written by the supervisor.
   where an incoming message waits for its person's approval — look at that
   window
 
-Decided in: moai-2w0s moai-hxma moai-0zjo moai-nqdc moai-bl3x moai-gelm moai-tllo moai-mdzx moai-xs2h moai-h8tn moai-snyk moai-u5wr moai-b6cw moai-ew4o moai-dhxm moai-ml0d moai-nas5 moai-kxkw moai-dj4j moai-54yc moai-bkn4 moai-084j moai-keka moai-zynt moai-j9nf moai-jtvp moai-obxm moai-six5 moai-iu73 moai-r0x8 moai-u99i moai-uqf7 moai-p5sz moai-xpa8 moai-9tqo moai-pxui moai-uzhx moai-wk7i moai-jdwk moai-1m21 moai-d1zn moai-xvvr moai-ns7a
+Decided in: moai-2w0s moai-hxma moai-0zjo moai-nqdc moai-bl3x moai-gelm moai-tllo moai-mdzx moai-xs2h moai-h8tn moai-snyk moai-u5wr moai-b6cw moai-ew4o moai-dhxm moai-ml0d moai-nas5 moai-kxkw moai-dj4j moai-54yc moai-bkn4 moai-084j moai-keka moai-zynt moai-j9nf moai-jtvp moai-obxm moai-six5 moai-iu73 moai-r0x8 moai-u99i moai-uqf7 moai-p5sz moai-xpa8 moai-9tqo moai-pxui moai-uzhx moai-wk7i moai-jdwk moai-1m21 moai-d1zn moai-xvvr moai-ns7a moai-zgc1
 
 ## Archive storage
 
