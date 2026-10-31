@@ -181,7 +181,7 @@ struct Adrift {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Mode {
     Browse,
-    Proposals(usize),
+    Proposals(Option<String>),
     /// `/` 로 연 빠른 검색. 곁의 것은 찾을 자리 — 칸의 Tab·Shift-Tab 이 돌린다(moai-kojj).
     Grep(Input, GrepIn),
     /// `f` 로 연 거름망. **CLI 와 같은 `항목=값` 문법이다.**
@@ -1439,6 +1439,8 @@ pub struct App {
     ctl_turn: Option<CtlTurn>,
     ctl_owner: bool,
     proposal_back: Option<Box<Mode>>,
+    /// The id in the last drawn banner. An expired first row must not turn a person's y/n into an answer for row two.
+    proposal_banner_id: Option<String>,
     ctl_opened: bool,
     pub proposals: std::sync::Arc<crate::ctl::proposal::Book>,
     /// Repository from which this window was opened, even while the overview shows another project.
@@ -1801,11 +1803,14 @@ pub struct App {
 
 impl App {
     fn answer_proposal(&mut self, accepted: bool) {
-        let at = match self.mode {
-            Mode::Proposals(at) => at,
-            _ => 0,
+        let id = match &self.mode {
+            Mode::Proposals(Some(id)) => Some(id.clone()),
+            Mode::Proposals(None) => None,
+            _ => self.proposal_banner_id.clone().or_else(|| self.proposals.rows().first().map(|row| row.id.clone())),
         };
-        let Some(row) = self.proposals.rows().into_iter().nth(at) else { return };
+        let Some(row) = id.and_then(|id| self.proposals.rows().into_iter().find(|row| row.id == id)) else {
+            return;
+        };
         if let Some(back) = self.proposal_back.take() {
             self.mode = *back;
         }
@@ -1836,18 +1841,20 @@ impl App {
     fn proposal_key(&mut self, key: ratatui::crossterm::event::KeyEvent) {
         use keys::Key;
         use ratatui::crossterm::event::KeyCode;
-        let count = self.proposals.rows().len();
         if Key::plain('y').matches(key) {
             self.answer_proposal(true);
         } else if Key::plain('n').matches(key) {
             self.answer_proposal(false);
         } else if Key::any(KeyCode::Esc).matches(key) {
             self.mode = self.proposal_back.take().map_or(Mode::Browse, |back| *back);
-        } else if let Mode::Proposals(at) = &mut self.mode {
+        } else if let Mode::Proposals(selected) = &mut self.mode {
+            let rows = self.proposals.rows();
+            let at = selected.as_ref().and_then(|id| rows.iter().position(|row| &row.id == id));
             if Key::plain('j').matches(key) || Key::any(KeyCode::Down).matches(key) {
-                *at = (*at + 1).min(count.saturating_sub(1));
+                *selected =
+                    rows.get(at.map_or(0, |at| (at + 1).min(rows.len().saturating_sub(1)))).map(|row| row.id.clone());
             } else if Key::plain('k').matches(key) || Key::any(KeyCode::Up).matches(key) {
-                *at = at.saturating_sub(1);
+                *selected = rows.get(at.unwrap_or(0).saturating_sub(1)).map(|row| row.id.clone());
             }
         }
     }
@@ -1922,6 +1929,12 @@ impl App {
                     && view::Field::named(name).is_none()
                 {
                     return Reply::error("unsupported", "unknown explorer cell");
+                }
+                if let Some(Verb::Zone { name }) = then.as_deref()
+                    && name != "none"
+                    && !crate::tz::names().0.iter().any(|zone| zone == name)
+                {
+                    return Reply::error("bad_input", format!("unknown timezone: {name}"));
                 }
                 self.proposals.add(
                     &format!("tui-{}", std::process::id()),
@@ -3107,6 +3120,7 @@ impl App {
             ctl_opened: false,
             ctl_owner: false,
             proposal_back: None,
+            proposal_banner_id: None,
             proposals: std::sync::Arc::new(crate::ctl::proposal::Book::new()),
             ctl_root: String::new(),
             last_human: std::time::Instant::now(),
@@ -6936,7 +6950,9 @@ impl App {
             B::ProposalDecline => self.answer_proposal(false),
             B::Proposals => {
                 self.proposal_back = Some(Box::new(self.mode.clone()));
-                self.mode = Mode::Proposals(0);
+                self.mode = Mode::Proposals(
+                    self.proposal_banner_id.clone().or_else(|| self.proposals.rows().first().map(|row| row.id.clone())),
+                );
             }
             B::Help => self.open_help(rows),
             B::FocusPrev => self.focus = self.focus.prev(),
@@ -13381,6 +13397,52 @@ mod tests {
     }
 
     #[test]
+    fn proposal_selection_keeps_the_displayed_id_when_an_earlier_row_disappears() {
+        let (_scratch, mut app) = writable("proposal-stable-id");
+        let first =
+            app.proposals.add("tui", "first", None, 900, None).data.unwrap()["id"].as_str().unwrap().to_string();
+        let second =
+            app.proposals.add("tui", "second", None, 900, None).data.unwrap()["id"].as_str().unwrap().to_string();
+        app.hit("SPC a l");
+        assert!(matches!(&app.mode, Mode::Proposals(Some(id)) if id == &first));
+        app.proposals.finish(&first, "withdrawn", None);
+        app.hit("y");
+        assert_eq!(app.proposals.get(&second).data.unwrap()["state"], "pending");
+        app.hit("j");
+        app.hit("y");
+        assert_eq!(app.proposals.get(&second).data.unwrap()["state"], "accepted");
+    }
+
+    #[test]
+    fn a_stale_banner_never_answers_the_next_proposal() {
+        let (_scratch, mut app) = writable("proposal-banner-stable-id");
+        let first =
+            app.proposals.add("tui", "first", None, 900, None).data.unwrap()["id"].as_str().unwrap().to_string();
+        let second =
+            app.proposals.add("tui", "second", None, 900, None).data.unwrap()["id"].as_str().unwrap().to_string();
+        app.proposal_banner_id = Some(first.clone());
+        app.proposals.finish(&first, "withdrawn", None);
+        app.hit("SPC a y");
+        assert_eq!(app.proposals.get(&second).data.unwrap()["state"], "pending");
+    }
+
+    #[test]
+    fn proposal_zone_is_checked_before_it_reaches_the_explorer() {
+        use crate::ctl::wire::Verb;
+        let (_scratch, mut app) = writable("proposal-zone-check");
+        let propose = |name: &str| Verb::Propose {
+            text: "Change time zone?".into(),
+            then: Some(Box::new(Verb::Zone { name: name.into() })),
+            ttl: 900,
+            wait: 0,
+        };
+        assert_eq!(app.ctl(&ctl_req(propose("Mars/Olympus"), None)).code.as_deref(), Some("bad_input"));
+        assert!(app.proposals.rows().is_empty());
+        assert!(app.ctl(&ctl_req(propose("UTC"), None)).ok);
+        assert_eq!(app.proposals.rows().len(), 1);
+    }
+
+    #[test]
     fn an_accepted_write_is_written_by_the_window_owner() {
         use crate::ctl::wire::Verb;
         let (_scratch, mut a) = writable("proposal-write-owner");
@@ -13491,10 +13553,10 @@ mod tests {
     }
 
     #[test]
-    fn a_follow_up_that_cannot_run_is_not_reported_as_accepted() {
+    fn a_zone_follow_up_that_cannot_run_is_refused_before_display() {
         use crate::ctl::wire::Verb;
         let (_scratch, mut a) = writable("proposal-failed");
-        a.ctl(&ctl_req(
+        let refused = a.ctl(&ctl_req(
             Verb::Propose {
                 text: "Paris time?".into(),
                 then: Some(Box::new(Verb::Zone { name: "Europe/Pari".into() })),
@@ -13503,12 +13565,8 @@ mod tests {
             },
             None,
         ));
-        a.hit("SPC a y");
-        let failed = crate::i18n::fill(
-            crate::i18n::say(a.site.lang, "tui.propose.failed"),
-            &[("why", "unknown timezone: Europe/Pari")],
-        );
-        assert_eq!(a.notice.as_deref(), Some(failed.as_str()));
+        assert_eq!(refused.code.as_deref(), Some("bad_input"));
+        assert!(a.proposals.rows().is_empty());
     }
 
     #[test]

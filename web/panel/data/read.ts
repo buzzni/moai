@@ -6,8 +6,8 @@
  * `"unread": true` on `moai show --json` rows and on `moai show <id> --json`. The key is there only when true and
  * absent otherwise; with the person unknown it is absent everywhere. So when no row carries it, NEW is simply off.
  *
- * Writes (se-ehdi.o5u, moai-ly88). `POST /api/read/<id>`, `/api/read-all`, `/api/read-group/<id>` run `moai read -- <id>`,
- * `read --all`, `read --epic=<id>`, which write the per-person file beside the user config; nothing goes to the
+ * Writes (se-ehdi.o5u, moai-ly88). `POST /api/read/<id>`, `/api/read-ids/<ids>`, `/api/read-all`, `/api/read-group/<id>` run `moai read -- <id>`,
+ * `read --atomic -- <ids>`, `read --all`, `read --epic=<id>`, which write the per-person file beside the user config; nothing goes to the
  * tracker. The envelope's `out` is `read --json`:
  * `{"read":[ids written now],"missing":[ids not in the tracker],"held":[ids a hand-written value blocked],
  *   "problems":[prose],"at":"<when the command ran>"}`. Ids that were already read at their current
@@ -34,9 +34,10 @@ export const unreadIds = (rows: readonly Row[]): string[] => rows.filter(isUnrea
 /** A write's endpoint: a POST, with `?worktree=1` while the overlay is on. */
 const post = (path: string, worktree: boolean): Endpoint => ({ path, method: 'POST', ...(worktree ? { query: { worktree: '1' } } : {}) })
 
-/** The three writes `moai web` takes (src/web/api.rs write_argv_of); no body. `worktree` adds the one query they take. */
+/** Read-mark writes `moai web` takes (src/web/api.rs write_argv_of); no body. `worktree` adds the one query they take. */
 export const READ_ENDPOINT = {
   one: (id: string, worktree = false): Endpoint => post(`/api/read/${encodeURIComponent(id)}`, worktree),
+  many: (ids: readonly string[], worktree = false): Endpoint => post(`/api/read-ids/${ids.map(encodeURIComponent).join(',')}`, worktree),
   all: (worktree = false): Endpoint => post('/api/read-all', worktree),
   group: (id: string, worktree = false): Endpoint => post(`/api/read-group/${encodeURIComponent(id)}`, worktree),
 } as const
@@ -84,6 +85,9 @@ async function write(client: Client, endpoint: Endpoint, ctl?: Readonly<Record<s
 /** `r`: the drawn row. Only its id travels; see the note on stale draws above. */
 export const markRead = (client: Client, row: Pick<Row, 'id'>, worktree = false, ctl?: Readonly<Record<string, string>>): Promise<Marked> => write(client, READ_ENDPOINT.one(row.id, worktree), ctl)
 
+/** A ctl read uses one CLI transaction, including validation of every ID before any mark is written. */
+export const markManyRead = (client: Client, ids: readonly string[], worktree = false): Promise<Marked> => write(client, READ_ENDPOINT.many(ids, worktree))
+
 /** `SPC m a`: everything unread that came to me. */
 export const markAllRead = (client: Client, worktree = false, ctl?: Readonly<Record<string, string>>): Promise<Marked> => write(client, READ_ENDPOINT.all(worktree), ctl)
 
@@ -98,6 +102,7 @@ export const markGroupRead = (client: Client, groupId: string, worktree = false,
 export interface ReadMarks {
   /** `r`: the row under the cursor. */
   one(id: string): Promise<Outcome | null>
+  ids(ids: readonly string[]): Promise<Outcome | null>
   /** `SPC m a`: everything unread. */
   all(): Promise<Outcome | null>
   /** `SPC m g`: a milestone's or epic's members. */
@@ -121,6 +126,7 @@ export function readMarks(client: Client, after: (written: ReadonlySet<string>) 
   }
   return {
     one: (id) => marked(markRead(client, { id }, overlay(), identity())),
+    ids: (ids) => marked(markManyRead(client, ids, overlay())),
     all: () => marked(markAllRead(client, overlay(), identity())),
     group: (id) => marked(markGroupRead(client, id, overlay(), identity())),
   }

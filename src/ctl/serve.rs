@@ -67,7 +67,7 @@ impl Listener {
     }
 }
 
-pub type Handler = Arc<dyn Fn(Request) -> Reply + Send + Sync>;
+pub type Handler = Arc<dyn Fn(Request, &dyn Fn() -> bool) -> Reply + Send + Sync>;
 
 #[cfg(unix)]
 struct Leave(Arc<AtomicUsize>);
@@ -212,7 +212,7 @@ fn handle(
                     Reply::error("busy", "too many proposal waiters")
                 } else {
                     let wait = wait_seconds(&req) > 0;
-                    let reply = handler.unwrap()(req);
+                    let reply = handler.unwrap()(req, &|| client_connected(stream));
                     if wait {
                         waiting.fetch_sub(1, Ordering::AcqRel);
                     }
@@ -241,7 +241,7 @@ fn handle(
                             first
                         } else {
                             let id = first.data.as_ref().and_then(|d| d["id"].as_str()).unwrap_or_default().to_string();
-                            book.map_or(first, |book| book.wait(&id, wait))
+                            book.map_or(first, |book| book.wait_while(&id, wait, || client_connected(stream)))
                         }
                     };
                     if wait > 0 {
@@ -255,6 +255,20 @@ fn handle(
         Err(e) => Reply::error("bad_input", e.to_string()),
     };
     let _ = write_reply(stream, &reply);
+}
+
+#[cfg(unix)]
+fn client_connected(stream: &std::os::unix::net::UnixStream) -> bool {
+    use std::os::fd::AsRawFd;
+    // A nonblocking peek leaves the socket's blocking mode alone; zero is EOF. Rust's UnixStream::peek is unstable.
+    let mut byte = [0u8; 1];
+    let read =
+        unsafe { libc::recv(stream.as_raw_fd(), byte.as_mut_ptr().cast(), 1, libc::MSG_PEEK | libc::MSG_DONTWAIT) };
+    match read {
+        0 => false,
+        n if n > 0 => true,
+        _ => matches!(std::io::Error::last_os_error().kind(), std::io::ErrorKind::WouldBlock),
+    }
 }
 
 #[cfg(unix)]
@@ -317,5 +331,70 @@ mod tests {
             matches!(incoming.try_recv(), Err(mpsc::TryRecvError::Empty)),
             "an action reached the paused owner loop"
         );
+    }
+
+    #[test]
+    fn four_disconnected_waiters_release_their_slots_for_a_fifth() {
+        use std::os::unix::net::UnixStream;
+        let book = Arc::new(super::super::proposal::Book::new());
+        let waiting = Arc::new(AtomicUsize::new(0));
+        let editing = Arc::new(Editing::default());
+        let (tx, incoming) = mpsc::channel::<Incoming>();
+        let owner_book = Arc::clone(&book);
+        let owner = std::thread::spawn(move || {
+            for turn in incoming {
+                let Verb::Propose { text, ttl, .. } = turn.request.verb else { panic!("expected proposal") };
+                let answer = owner_book.add("window", &text, None, ttl, None);
+                turn.answer.send(answer).unwrap();
+            }
+        });
+        let ask = |label: &str| {
+            let (mut client, server) = UnixStream::pair().unwrap();
+            let request = wire::request(
+                Verb::Propose { text: label.into(), then: None, ttl: 60, wait: 30 },
+                Duration::from_secs(5),
+            );
+            serde_json::to_writer(&mut client, &request).unwrap();
+            client.write_all(b"\n").unwrap();
+            (client, server)
+        };
+        let mut handles = Vec::new();
+        for n in 0..4 {
+            let (client, mut server) = ask(&format!("disconnected {n}"));
+            let tx = tx.clone();
+            let book = Arc::clone(&book);
+            let waiting = Arc::clone(&waiting);
+            let editing = Arc::clone(&editing);
+            handles.push(std::thread::spawn(move || {
+                let mut leave = None;
+                handle(&mut server, &tx, None, Some(&book), &mut leave, &waiting, &editing);
+            }));
+            drop(client);
+        }
+        for handle in handles {
+            handle.join().unwrap();
+        }
+        assert_eq!(waiting.load(Ordering::Acquire), 0);
+        let (client, mut server) = ask("live fifth");
+        let fifth_tx = tx.clone();
+        let fifth_book = Arc::clone(&book);
+        let fifth_waiting = Arc::clone(&waiting);
+        let fifth_editing = Arc::clone(&editing);
+        let fifth = std::thread::spawn(move || {
+            let mut leave = None;
+            handle(&mut server, &fifth_tx, None, Some(&fifth_book), &mut leave, &fifth_waiting, &fifth_editing);
+        });
+        let until = Instant::now() + Duration::from_secs(2);
+        while book.rows().len() < 5 && Instant::now() < until {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert_eq!(book.rows().len(), 5);
+        book.finish("window/5", "accepted", None);
+        let mut line = String::new();
+        BufReader::new(client).read_line(&mut line).unwrap();
+        assert_eq!(serde_json::from_str::<Reply>(&line).unwrap().data.unwrap()["state"], "accepted");
+        fifth.join().unwrap();
+        drop(tx);
+        owner.join().unwrap();
     }
 }

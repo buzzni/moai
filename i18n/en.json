@@ -1254,6 +1254,7 @@
   "sheet.refuse_unparsable": "{said} — nothing is written until that is fixed",
   "sheet.refuse_not_ours": "these are not {root}'s read marks, so nothing is written — delete the file by hand",
   "sheet.refuse_not_a_table": "`{table}` is not a `[{table}]` table ({is}), so no read marks are written — fix it by hand",
+  "sheet.refuse_atomic_held": "read marks unchanged: hand-written values hold {ids}",
   "stats.head": "Counted  {kind} {n}",
   "stats.picked": "picked {n}: {kinds}",
   "stats.by": "By {axis}",

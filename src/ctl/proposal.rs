@@ -124,7 +124,13 @@ impl Book {
         answer
     }
 
+    #[cfg(test)]
     pub fn wait(&self, id: &str, seconds: u64) -> Reply {
+        self.wait_while(id, seconds, || true)
+    }
+
+    /// Check the caller between wakeups so a vanished socket does not occupy a waiter slot until the TTL.
+    pub fn wait_while(&self, id: &str, seconds: u64, mut connected: impl FnMut() -> bool) -> Reply {
         let end = Instant::now() + Duration::from_secs(seconds);
         let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         loop {
@@ -138,8 +144,14 @@ impl Book {
             if row.state != "pending" || Instant::now() >= end {
                 return Reply::success(row.value());
             }
+            if !connected() {
+                return Reply::error("gone", "proposal waiter disconnected");
+            }
             let left = end.min(row.made + row.ttl).saturating_duration_since(Instant::now());
-            (inner, _) = self.changed.wait_timeout(inner, left).unwrap_or_else(|e| e.into_inner());
+            (inner, _) = self
+                .changed
+                .wait_timeout(inner, left.min(Duration::from_millis(200)))
+                .unwrap_or_else(|e| e.into_inner());
         }
     }
 

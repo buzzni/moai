@@ -96,6 +96,12 @@ pub fn run(ctx: &Ctx, args: ReadArgs) -> R<Vec<String>> {
         }
     }
     missing.extend(want.iter().filter(|id| !known.contains(id.as_str())).cloned());
+    if args.atomic && !missing.is_empty() {
+        return Err(Fail::coded(
+            format!("read marks unchanged: missing {}", missing.iter().cloned().collect::<Vec<_>>().join(", ")),
+            super::code::BAD_INPUT,
+        ));
+    }
     let targets: BTreeSet<&str> = want.iter().map(String::as_str).filter(|id| known.contains(id)).collect();
 
     // 적을 것이 없으면 읽음 파일에 손을 안 댄다 — 빈 쓰기 하나 때문에 설정 디렉터리와 락 파일이
@@ -121,7 +127,7 @@ pub fn run(ctx: &Ctx, args: ReadArgs) -> R<Vec<String>> {
         let wrote = crate::read_marks::update(&path, &repo.root, lang, |sheet| {
             let lines = load.issues.iter().filter(|i| targets.contains(i.id.as_str()));
             let marks = crate::query::read_marks_of(lines, &sheet.marks().0);
-            let wrote = sheet.mark(&marks)?;
+            let wrote = if args.atomic { sheet.mark_atomic(&marks)? } else { sheet.mark(&marks)? };
             // **트래커에 없는 id 를 여기서 걷는다**(moai-dt5q, 사용자 결정 2) — 이 자리는 트래커를 이미
             // 들고 있다. 닫힌 줄은 안 걷는다: 걷으면 그 줄이 다시 설 때 [NEW] 가 되살아나, 읽음의 뜻이
             // "본 적 있다" 에서 "최근에 본 적 있다" 로 바뀐다.

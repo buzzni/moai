@@ -9,6 +9,7 @@ export interface EventsOptions {
   onVisible?: () => void
   onHello?: (hello: { tab: string; token: string }) => void
   onCtl?: (message: { seq: number; request: Record<string, unknown> }) => void
+  onValidateZone?: (message: { seq: number; name: string }) => void
   onProposal?: (entry: { id: string; text: string; then?: { verb: string; [key: string]: unknown } | null; remaining_ms?: number }) => void
   onProposalClosed?: (id: string) => void
   factory?: (url: string) => EventSource
@@ -95,6 +96,13 @@ export function openEvents(options: EventsOptions): Events {
           if (typeof message.seq === 'number' && message.request && typeof message.request === 'object') {
             options.onCtl?.({ seq: message.seq, request: message.request as Record<string, unknown> })
           }
+        } catch { /* ignore a malformed server event */ }
+      })
+      opened.addEventListener('validate_zone', (event) => {
+        if (source !== opened) return
+        try {
+          const message = JSON.parse((event as MessageEvent).data) as { seq?: unknown; name?: unknown }
+          if (typeof message.seq === 'number' && typeof message.name === 'string') options.onValidateZone?.({ seq: message.seq, name: message.name })
         } catch { /* ignore a malformed server event */ }
       })
       opened.addEventListener('proposal', (event) => {

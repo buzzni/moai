@@ -198,6 +198,25 @@ pub fn split_project(query: &[(String, String)]) -> Result<(Option<String>, Vec<
 /// 날이 선 줄)도 `edit` 의 말 그대로다. 끝점이 아니면 `None`.
 pub fn write_argv_of(path: &str, query: &[(String, String)]) -> Option<Result<Vec<String>, Bad>> {
     let strs = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+    if let Some(ids) = path.strip_prefix("/api/read-ids/") {
+        let ids: Vec<&str> = ids.split(',').collect();
+        let built = if ids.is_empty() || ids.len() > 100 {
+            Err(Bad::Shape("ids".into()))
+        } else {
+            ids.iter().try_for_each(|id| issue_id(id)).map(|()| {
+                let mut args = strs(&["read", "--atomic", "--"]);
+                args.extend(ids.iter().map(|id| (*id).to_string()));
+                args
+            })
+        };
+        return Some(overlay_of(query).and_then(|on| {
+            let mut args = built?;
+            if on {
+                args.insert(1, "--worktree".into());
+            }
+            Ok(args)
+        }));
+    }
     if let Some(id) = path.strip_prefix("/api/plan/") {
         return Some(issue_id(id).and_then(|()| plan_argv(id, query)));
     }
@@ -728,6 +747,11 @@ mod tests {
         let w = |path: &str| write_argv_of(path, &[]).map(|r| r.unwrap());
         assert_eq!(w("/api/read/moai-1abc"), Some(strs(&["read", "--", "moai-1abc"])));
         assert_eq!(w("/api/read-all"), Some(strs(&["read", "--all"])));
+        assert_eq!(
+            w("/api/read-ids/moai-1abc,moai-2def"),
+            Some(strs(&["read", "--atomic", "--", "moai-1abc", "moai-2def"]))
+        );
+        assert!(matches!(write_argv_of("/api/read-ids/moai-1abc,bad", &[]), Some(Err(Bad::Shape(_)))));
         assert_eq!(w("/api/read-group/moai-1abc"), Some(strs(&["read", "--epic=moai-1abc"])));
         for bad in ["/api/read/issue", "/api/read/-e", "/api/read-group/--all", "/api/read/"] {
             assert!(matches!(write_argv_of(bad, &[]), Some(Err(Bad::Shape(_)))), "{bad}");
