@@ -5582,7 +5582,7 @@ fn in_unit<'a>(unit: &BTreeSet<&str>, ties: &report::Ties<'a>, i: &'a Issue) -> 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Away {
     /// 규칙 5 가 산 스냅샷에 없는 id 를 찾는 아카이브(moai-bth3) — **읽는 손은 `cmd/hook.rs` 가 건넨다**([`Archive`]).
-    /// 이 모듈은 저장소를 안 읽는다는 결정(모듈 머리) 그대로다. 집는 id 가 산 스냅샷에 없을 때만 부른다.
+    /// This reader is also used for rule-2 suggestions, only after an empty-focus refusal is certain.
     pub archive: Option<Archive>,
     /// 옆 워크트리들의 이름 후보(`worktree::away`) — 그 줄 자신, 그 밑의 자식, 그 에픽·마일스톤에
     /// 든 줄을 가리킨다.
@@ -6839,8 +6839,14 @@ fn edit_held(
     // **본 칸을 함께 준다**(`--from`). 이 줄은 여럿이 같은 트래커를 쓰는 저장소에서 지어지므로, 짓고
     // 치는 사이에 옆이 그 일을 집거나 닫을 수 있다 — 그러면 옮기지 않고 말한다. 안 주던 판은 낡은
     // 스냅샷의 "집으라" 대로 이미 닫힌 일을 도로 열었다(리뷰 moai-ju21.70g).
-    let picks: String = report::ready(issues, cfg)
+    // Only the refusal path needs suggestions. Successful calls above keep their
+    // archive budget; this reader is supplied by cmd/hook, so the judge stays pure.
+    let archived = away.archive.as_ref().map(|a| (a.read)(&a.root)).unwrap_or_default();
+    let context = report::with_archive(issues, &archived, &BTreeSet::new());
+    let live: BTreeSet<&str> = issues.iter().map(|i| i.id.as_str()).collect();
+    let picks: String = report::ready(&context, cfg)
         .into_iter()
+        .filter(|i| live.contains(i.id.as_str()))
         .filter(mine)
         .take(3)
         .map(|i| format!("  moai mv {} in_progress --from {}   {}\n", i.id, i.status.as_str(), i.title))
@@ -10267,6 +10273,56 @@ mod tests {
             Decision::Deny(r) => r,
             other => panic!("막지 않았다 — {other:?}"),
         }
+    }
+
+    #[test]
+    fn rule_two_suggestions_use_archive_context_only_on_the_refusal_path() {
+        thread_local! { static READS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) }; }
+        fn archived(_: &Path) -> Vec<Issue> {
+            READS.set(READS.get() + 1);
+            let mut parent = issue("t-pppp", "done");
+            parent.milestone = Some("t-m002".into());
+            let mut done = issue("t-dddd", "done");
+            done.milestone = Some("t-m001".into());
+            let stale = issue("t-aaaa", "todo");
+            let mut archive_only = issue("t-zzzz", "todo");
+            archive_only.priority = Some(0);
+            vec![parent, done, stale, archive_only]
+        }
+        let root = abs("/repo");
+        let mut original = epic("t-m001");
+        original.kind = Kind::Milestone;
+        original.due_on = Some("2026-10-01".into());
+        let mut placed = epic("t-m002");
+        placed.kind = Kind::Milestone;
+        placed.due_on = Some("2026-10-17".into());
+        let mut child = issue("t-pppp.ccc", "todo");
+        child.milestone = Some(original.id.clone());
+        let mut own = issue("t-aaaa", "todo");
+        own.milestone = Some(placed.id.clone());
+        own.due_on = Some("2026-10-16".into());
+        let mut rows = vec![original, placed, child, own];
+        let away = Away { archive: Some(Archive { root: root.clone(), read: archived }), ..here() };
+        let refused = guard_edit(&rows, &cfg(), &away, &root, "src/lib.rs");
+        let text = denied(&refused);
+        assert!(text.find("t-aaaa").unwrap() < text.find("t-pppp.ccc").unwrap(), "{text}");
+        assert_eq!(READS.get(), 1);
+        assert!(!text.contains("moai mv t-zzzz"), "archive-only work was suggested");
+        // A stale archived copy must not override live deferral, and hidden twins must stay hidden.
+        rows[3].deferred_at = Some("2026-10-01T00:00:00Z".into());
+        let refused = guard_edit(&rows, &cfg(), &away, &root, "src/lib.rs");
+        assert!(!denied(&refused).contains("moai mv t-aaaa"));
+        let mut twin = rows[2].clone();
+        twin.kind = Kind::Backlog;
+        rows.push(twin);
+        let refused = guard_edit(&rows, &cfg(), &away, &root, "src/lib.rs");
+        assert!(!denied(&refused).contains("moai mv t-pppp.ccc"));
+        READS.set(0);
+        rows[3].deferred_at = None;
+        rows[3].status = Status::new("in_progress");
+        assert_eq!(guard_edit(&rows, &cfg(), &away, &root, "src/lib.rs"), Decision::Pass);
+        assert_eq!(guard_edit(&rows, &cfg(), &away, &root, ""), Decision::Pass);
+        assert_eq!(READS.get(), 0, "successful edit checks read archive context");
     }
 
     /// 옆 워크트리가 쥔 것이 없다 — 대부분의 시험이 선 자리.

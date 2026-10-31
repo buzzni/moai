@@ -7511,6 +7511,25 @@ fn due_apply_status_ready_and_prime_follow_archived_parent_placement() {
     assert_eq!(dry["raised"][0]["due_from"], epic, "{dry}");
 }
 
+#[test]
+fn rule_two_pickup_suggestions_match_ready_with_archived_placement() {
+    let s = init("hook-due-archive-placement");
+    let p = s.path();
+    due_archived_placement(p, Some("2026-10-01"), "2026-10-17");
+    let own = add(p, &["own deadline", "--milestone", "moai-m002", "--due", "2026-10-16"]);
+    let ready: serde_json::Value = serde_json::from_str(&ok(p, &["ready", "--json"])).unwrap();
+    assert_eq!(ready["ready"][0]["id"], own, "{ready}");
+    let why = refusal(&call(
+        &s,
+        "Edit",
+        r#"{"file_path":"src/lib.rs","old_string":"x","new_string":"y"}"#,
+        "archive-pick-order",
+    ));
+    assert!(why.find(&format!("moai mv {own}")).unwrap() < why.find("moai mv moai-pppp.ccc").unwrap(), "{why}");
+    let prime: serde_json::Value = serde_json::from_str(&ok(p, &["prime", "--json"])).unwrap();
+    assert_eq!(prime["ready"][0]["id"], own, "{prime}");
+}
+
 /// Incomplete required archive context must not turn a closed group's unknown state into an
 /// irreversible priority raise. Unrelated broken archives still stay outside the read gate.
 #[test]
