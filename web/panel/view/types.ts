@@ -104,6 +104,11 @@ export interface PaneView {
    * the key router. Returns true when the pane did it, false when the action is not one it knows.
    */
   command?(action: string, args?: Readonly<Record<string, string | number>>): boolean
+  /** The Gantt name grid's width in pixels, shared with its drag handle. */
+  setGrid?(width: number): number
+  gridWidth?(): number
+  /** Open a wiki page through the pane's own loader and anchor navigation. */
+  openWiki?(slug: string, anchor?: string): Promise<void>
   /** `SPC v r`: the body as raw markdown or rendered (the wiki's page, the detail's body; the router calls it). */
   toggleRaw?(): void
   /** The body is shown as raw markdown now (the `SPC v r` menu item's state). */

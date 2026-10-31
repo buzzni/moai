@@ -42,7 +42,9 @@ subcommands() {
 
 walk() {
   local said sub
-  said=$("$moai" "$@" --help)
+  # Clap pads columns even when an argument has no description; avoid trailing
+  # spaces in the checked-in reference while preserving every help word.
+  said=$("$moai" "$@" --help | sed 's/[[:blank:]]*$//')
   printf '\n## `moai %s`\n\n```\n%s\n```\n' "$*" "$said"
   for sub in $(subcommands "$said"); do
     walk "$@" "$sub"
@@ -71,7 +73,7 @@ of the screen does follow it - see `moai --help` for how to pick a language.
 
 ```
 HEAD
-  top=$("$moai" --help)
+  top=$("$moai" --help | sed 's/[[:blank:]]*$//')
   printf '%s\n```\n' "$top"
   for sub in $(subcommands "$top"); do
     walk "$sub"

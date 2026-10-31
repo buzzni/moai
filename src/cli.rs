@@ -169,6 +169,9 @@ pub enum ColorArg {
 // (`every_help_heredoc_is_copyable`, moai-foc3).
 #[derive(Subcommand, Debug)]
 pub enum Cmd {
+    /// Control an already open explorer or web tab
+    #[command(subcommand)]
+    Ctl(CtlCmd),
     /// Board, warnings, flow. A session starts here
     #[command(after_help = "  It blocks nothing. No approval, no gate.
   Instead it surfaces issues with no epic, reviews stalled for days, and how
@@ -566,6 +569,8 @@ BACKLOG
   close hint.
     {spc:browse.grep}    search              {key:browse.filter}    filter             {key:browse.jot}    jot
     {spc:browse.help}    keys                {key:browse.quit}    quit
+    {key:browse.proposal_accept}  accept a suggestion; {key:browse.proposal_decline} declines
+    {key:browse.proposals}  open the suggestion list
     {key:browse.pick}  register            {key:browse.unregister}  drop from the list
   Screen — which one stands; the root menu names it, as in [board]:
     {key:browse.go_list}  list                {key:browse.go_board}  board — described below
@@ -1314,6 +1319,213 @@ Examples:
         /// Write nothing; print that block (to paste it)
         #[arg(long, conflicts_with_all = ["prefix", "no_agents", "driver", "no_driver", "tracking", "guide", "skill", "no_skill", "with", "register", "no_register", "yes", "check"])]
         print: bool,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum CtlCmd {
+    /// Suggest an action in an open window
+    Propose {
+        text: String,
+        /// A named ctl verb to run if the person accepts
+        #[arg(long = "then")]
+        then_cmd: Option<String>,
+        /// Wait for an answer in seconds
+        #[arg(long, default_value_t = 0)]
+        wait: u64,
+        /// Expiry in seconds (1–3600)
+        #[arg(long, default_value_t = 900)]
+        ttl: u64,
+        #[arg(short = 't', long = "target", help = "Window id from moai ctl ls")]
+        target: Option<String>,
+    },
+    /// Read a suggestion's answer, optionally waiting for it
+    Answer {
+        id: String,
+        #[arg(long, default_value_t = 0)]
+        wait: u64,
+        #[arg(short = 't', long = "target", help = "Window id from moai ctl ls")]
+        target: Option<String>,
+    },
+    /// Take down a suggestion that is still pending
+    Withdraw {
+        id: String,
+        #[arg(short = 't', long = "target", help = "Window id from moai ctl ls")]
+        target: Option<String>,
+    },
+    /// List the windows this user already opened
+    #[command(
+        after_help = "  Without --all, list only windows in this repository.\n  No window is an empty list and a successful exit."
+    )]
+    Ls {
+        /// Include windows from other repositories
+        #[arg(long)]
+        all: bool,
+    },
+    /// Read the current state of one open window
+    #[command(
+        after_help = "  Without -t, choose the most recently used window in this repository.\n  Use moai ctl ls --all to find an id; -t never starts a window."
+    )]
+    State {
+        /// Window id from moai ctl ls
+        #[arg(short = 't', long = "target")]
+        target: Option<String>,
+        /// Include visible row ids and depths (up to 2000)
+        #[arg(long)]
+        rows: bool,
+    },
+    /// Press keys in an open window using its own key bindings
+    #[command(
+        after_help = "  Quote each key sequence: moai ctl keys 'SPC m a'.\n  The spelling is the same as keys.toml; moai keys lists it.\n  --text pastes into a field already opened in this window."
+    )]
+    Keys {
+        /// Key sequences, such as 'SPC m a' or 'Ctrl-w w'
+        #[arg(value_name = "keys")]
+        seqs: Vec<String>,
+        /// Paste literal text into an open field
+        #[arg(long, value_name = "text")]
+        text: Option<String>,
+        /// Window id from moai ctl ls
+        #[arg(short = 't', long = "target")]
+        target: Option<String>,
+    },
+    /// Run an action by its stable name, independent of keys.toml
+    Do {
+        /// Such as browse.read_all or browse.go_board
+        name: String,
+        /// Window id from moai ctl ls
+        #[arg(short = 't', long = "target")]
+        target: Option<String>,
+    },
+    /// List this window's named actions and whether each is enabled
+    Actions {
+        /// Window id from moai ctl ls
+        #[arg(short = 't', long = "target")]
+        target: Option<String>,
+    },
+    /// Set the explorer order, such as title:desc,priority:desc
+    #[command(
+        after_help = "  Example: moai ctl sort 'title:desc,priority:desc'.\n  --default also updates the default order."
+    )]
+    Sort {
+        words: String,
+        #[arg(long)]
+        default: bool,
+        #[arg(short = 't', long, help = "Window id from moai ctl ls")]
+        target: Option<String>,
+    },
+    /// Apply a filter, or remove the current filter
+    #[command(after_help = "  Example: moai ctl filter 'status=todo tag=parser'.")]
+    Filter {
+        query: Option<String>,
+        #[arg(long)]
+        clear: bool,
+        #[arg(short = 't', long, help = "Window id from moai ctl ls")]
+        target: Option<String>,
+    },
+    /// Search issues in a chosen field
+    #[command(after_help = "  Example: moai ctl find 'parser' --in title.")]
+    Find {
+        query: String,
+        #[arg(long = "in", default_value = "all")]
+        scope: String,
+        #[arg(short = 't', long, help = "Window id from moai ctl ls")]
+        target: Option<String>,
+    },
+    /// Show list, board, gantt, stats, or wiki
+    #[command(after_help = "  Example: moai ctl screen board.")]
+    Screen {
+        name: String,
+        #[arg(short = 't', long, help = "Window id from moai ctl ls")]
+        target: Option<String>,
+    },
+    /// Show or hide a view axis, including column:<name>
+    #[command(after_help = "  Example: moai ctl view deferred on.")]
+    View {
+        name: String,
+        value: String,
+        #[arg(short = 't', long, help = "Window id from moai ctl ls")]
+        target: Option<String>,
+    },
+    /// Show or hide a list field
+    #[command(after_help = "  Example: moai ctl cell assignee off.")]
+    Cell {
+        name: String,
+        value: String,
+        #[arg(short = 't', long, help = "Window id from moai ctl ls")]
+        target: Option<String>,
+    },
+    /// Show, hide, or place the detail pane
+    #[command(after_help = "  Example: moai ctl detail right.")]
+    Detail {
+        name: String,
+        #[arg(short = 't', long, help = "Window id from moai ctl ls")]
+        target: Option<String>,
+    },
+    /// Select an issue or a project
+    #[command(after_help = "  Example: moai ctl goto moai-1234 --enter.")]
+    Goto {
+        id: Option<String>,
+        #[arg(long)]
+        enter: bool,
+        #[arg(long)]
+        project: Option<String>,
+        #[arg(short = 't', long, help = "Window id from moai ctl ls")]
+        target: Option<String>,
+    },
+    /// Mark selected issues, a group, or all NEW issues read
+    #[command(after_help = "  Example: moai ctl read --all.\n  Mark the person's NEW rows only when asked.")]
+    Read {
+        ids: Vec<String>,
+        #[arg(long)]
+        all: bool,
+        #[arg(long)]
+        group: Option<String>,
+        #[arg(short = 't', long, help = "Window id from moai ctl ls")]
+        target: Option<String>,
+    },
+    /// Open a wiki page or search wiki pages
+    #[command(after_help = "  Example: moai ctl wiki 'guide#start'.")]
+    Wiki {
+        slug: Option<String>,
+        #[arg(long)]
+        search: Option<String>,
+        #[arg(short = 't', long, help = "Window id from moai ctl ls")]
+        target: Option<String>,
+    },
+    /// Set pane shares
+    #[command(
+        next_line_help = true,
+        after_help = "  Example: moai ctl pane --list-width 60.\n  Terminal size belongs to tmux resize-pane or the window manager."
+    )]
+    Pane {
+        #[arg(long)]
+        list_width: Option<String>,
+        #[arg(long)]
+        list_height: Option<String>,
+        #[arg(long)]
+        wiki_width: Option<String>,
+        #[arg(long)]
+        gantt_label: Option<String>,
+        /// Web Gantt name grid width in pixels (not the TUI's character cells)
+        #[arg(long)]
+        gantt_grid: Option<String>,
+        #[arg(short = 't', long, help = "Window id from moai ctl ls")]
+        target: Option<String>,
+    },
+    /// Select the explorer's timezone
+    #[command(after_help = "  Example: moai ctl zone Europe/Paris.")]
+    Zone {
+        name: String,
+        #[arg(short = 't', long, help = "Window id from moai ctl ls")]
+        target: Option<String>,
+    },
+    /// Select a web tab's theme; terminal colours follow the terminal
+    #[command(after_help = "  Example: moai ctl theme dark -t 4242.1 (a web tab's id from moai ctl ls).")]
+    Theme {
+        name: String,
+        #[arg(short = 't', long, help = "Window id from moai ctl ls")]
+        target: Option<String>,
     },
 }
 

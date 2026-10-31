@@ -584,6 +584,13 @@ the message's `Due:` is then the one the backlog item already carries, or `none`
 
 ### In a session
 
+When a person asks an agent to show something in their open explorer or web tab,
+the agent can use `moai ctl ls` and `moai ctl state` to find that window, then
+change its view or offer a `moai ctl propose` suggestion. The window stays under
+the person's control; [Control an open window](ctl.md) explains its verbs,
+suggestions, and read-mark rules. Tracker column moves and notes still use
+`moai mv` and `moai note`.
+
 When you ask to watch the workers' windows, and for a Codex worker, the workers
 are sessions. The supervisor talks to them with Claude Code's own tools —
 `ListAgents` to see who is here, `SendMessage` to hand over work and to report
@@ -932,7 +939,7 @@ worker's line is written by the supervisor.
   where an incoming message waits for its person's approval — look at that
   window
 
-Decided in: moai-2w0s moai-hxma moai-0zjo moai-nqdc moai-bl3x moai-gelm moai-tllo moai-mdzx moai-xs2h moai-h8tn moai-snyk moai-u5wr moai-b6cw moai-ew4o moai-dhxm moai-ml0d moai-nas5 moai-kxkw moai-dj4j moai-54yc moai-bkn4 moai-084j moai-keka moai-zynt moai-j9nf moai-jtvp moai-obxm moai-six5 moai-iu73 moai-r0x8 moai-u99i moai-uqf7 moai-p5sz moai-xpa8 moai-9tqo moai-pxui moai-uzhx moai-wk7i moai-jdwk moai-1m21 moai-d1zn moai-xvvr moai-ns7a
+Decided in: moai-2w0s moai-hxma moai-0zjo moai-nqdc moai-bl3x moai-gelm moai-tllo moai-mdzx moai-xs2h moai-h8tn moai-snyk moai-u5wr moai-b6cw moai-ew4o moai-dhxm moai-ml0d moai-nas5 moai-kxkw moai-dj4j moai-54yc moai-bkn4 moai-084j moai-keka moai-zynt moai-j9nf moai-jtvp moai-obxm moai-six5 moai-iu73 moai-r0x8 moai-u99i moai-uqf7 moai-p5sz moai-xpa8 moai-9tqo moai-pxui moai-uzhx moai-wk7i moai-jdwk moai-1m21 moai-d1zn moai-xvvr moai-ns7a moai-zgc1
 
 ## Archive storage
 

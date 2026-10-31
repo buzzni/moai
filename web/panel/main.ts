@@ -13,6 +13,8 @@ import { useNaming } from './data/people.js'
 import { headerProjects, projectHref, type ProjectEntry } from './data/projects.js'
 import { writePlan, type PlanChange } from './data/plan.js'
 import { isUnread, readMarks } from './data/read.js'
+import { openEvents, type Events } from './data/events.js'
+import { createCtl, type Reply as CtlReply } from './ctl.js'
 import { BACKOFF_MS, createRefresher, POLL_MS } from './data/refresh.js'
 import { sortQuery, useVocabulary } from './data/query.js'
 import {
@@ -26,6 +28,7 @@ import { createStore, matchKey, type BoardData, type State } from './store.js'
 import { listLines, narrow } from './view/list-model.js'
 import { PANES } from './view/panes.js'
 import { describe, mountShell, type Activity } from './view/shell.js'
+import { createProposalView } from './view/propose.js'
 import type { WikiSource } from './view/types.js'
 
 /** The browser's fetch, naming no project: the home's boot is read through it. */
@@ -296,6 +299,7 @@ async function start(): Promise<void> {
   }
   /** The zone the page drew in at the last change — followZone (subscribed before the listener below) moves it first. */
   let zoneSeen = zoneNow()
+  let events: Events | null = null
   store.subscribe((state, previous) => {
     if (matchKey(state) !== matchKey(previous)) {
       clearTimeout(asking)
@@ -308,7 +312,10 @@ async function start(): Promise<void> {
     // A new order is moai's to make: the tree is read again in it.
     if (state.sort !== previous.sort && state.board.value) void refresher.refresh()
     // The worktree overlay turned on or off: the rows are read again with it or without it.
-    if (state.view.worktree !== previous.view.worktree && state.board.value) void refresher.refresh()
+    if (state.view.worktree !== previous.view.worktree && state.board.value) {
+      events?.reconnect()
+      void refresher.refresh()
+    }
     // The zone the page draws in turned (`SPC o t`, or the boot's arrived): the tree's `overdue` is judged in it. What
     // followZone set is compared, not worked out again — that asks Intl for a zone on every dispatch, every j and k.
     const zone = zoneNow()
@@ -375,7 +382,13 @@ async function start(): Promise<void> {
     }
   }
   const refresher = createRefresher({ load: ({ automatic }) => loadBoard(automatic), stamp, onReach: (reached) => shell.offline(!reached), onBackoff: (on) => shell.backoff(on) })
-
+  const eventUrl = (): string => {
+    const query = new URLSearchParams()
+    if (project) query.set('project', project)
+    if (store.getState().view.worktree) query.set('worktree', '1')
+    const params = query.toString()
+    return `/api/events${params ? `?${params}` : ''}`
+  }
   let choice = 0
   async function choose(id: string) {
     const mine = ++choice
@@ -414,6 +427,10 @@ async function start(): Promise<void> {
    * marks come back with them — and the detail on screen when it marked that row: nothing else reads the detail
    * again, and its NEW would outlive the mark.
    */
+  let ctlIdentity: { seq: number; token: string } | null = null
+  // Read marks are the window owner's (docs/web.md), as in the explorer: no ctl caller identity rides on them. With it
+  // the child ran `read --all` as the caller, `no_actor` refused a caller without one, and a `do read.all` write still
+  // queued behind the ctl reply met its request already gone (410).
   const read = readMarks(client, (written) => {
     const shown = store.getState().shown.value
     // A list read already running began before the write and cannot hold its marks: `fresh` reads again after it.
@@ -492,7 +509,75 @@ async function start(): Promise<void> {
   client.subscribe(() => shell.activity(activity()))
   // The one keydown listener: keys → the key table's actions → the store and the panes (keys/wiring.ts), with the
   // SPC menu, the shortcut help and the "click to use the keyboard" hint.
-  wireKeys({ document, store, shell, copy, read, openProject, index: indexOf })
+  let tab: { id: string; token: string } | null = null
+  let ctlExecuting = 0
+  const answering = new Set<string>()
+  let ctl: ReturnType<typeof createCtl>
+  const proposals = createProposalView(document, copy.propose, (entry, accepted) => {
+    if (ctlExecuting > 0 || !tab || answering.has(entry.id)) return
+    answering.add(entry.id)
+    const here = tab
+    void (async () => {
+      const ran = accepted && entry.then ? await ctl.run(entry.then, 0, '') : null
+      const query = new URLSearchParams({ token: here.token, id: entry.id })
+      const response = await window.fetch(`/api/ctl/${encodeURIComponent(here.id)}/proposal?${query}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ state: accepted ? 'accepted' : 'declined', ran }),
+      })
+      if (response.ok) proposals.remove(entry.id)
+    })().catch(() => {}).finally(() => answering.delete(entry.id))
+  })
+  const keys = wireKeys({ document, store, shell, copy, read, openProject, index: indexOf,
+    proposal: { pending: () => proposals.count() > 0, accept: () => { if (ctlExecuting === 0) proposals.accept() },
+      decline: () => { if (ctlExecuting === 0) proposals.decline() }, list: () => { if (ctlExecuting === 0) proposals.list() } },
+  })
+  ctl = createCtl({ store, keys, shell, read, drawnOrder, proposals: () => proposals.rows(),
+    openProject: (path) => {
+      const found = store.getState().projects.find((entry) => entry.path === path)
+      if (!found) return false
+      openProject(found)
+      return true
+    },
+    wikiSearch: async (query) => {
+      const found = await loadWikiSearch(client, query)
+      if (!found.ok || !found.value || typeof found.value !== 'object') return null
+      const hits = (found.value as { hits?: { slug?: string; anchor?: string }[] }).hits
+      return hits?.[0]?.slug ? { slug: `${hits[0].slug}${hits[0].anchor ? `#${hits[0].anchor}` : ''}`, hits } : null
+    },
+    withIdentity: (seq, token, work) => {
+      if (seq === 0) return work()
+      const before = ctlIdentity
+      ctlIdentity = { seq, token }
+      try { return work() } finally { ctlIdentity = before }
+    },
+  })
+  let lastSeen = 0
+  const seen = () => {
+    if (!tab || document.visibilityState === 'hidden') return
+    lastSeen = Date.now()
+    const query = new URLSearchParams({ token: tab.token, screen: store.getState().tab })
+    void window.fetch(`/api/ctl/${encodeURIComponent(tab.id)}/seen?${query}`, { method: 'POST' }).catch(() => {})
+  }
+  window.addEventListener('focus', seen)
+  document.addEventListener('keydown', () => { if (Date.now() - lastSeen >= 5_000) seen() })
+  document.addEventListener('click', () => { if (Date.now() - lastSeen >= 5_000) seen() })
+  events = openEvents({ url: eventUrl, onStamp: (at) => refresher.saw(at), onUp: () => refresher.pause(),
+    onDown: () => { tab = null; proposals.clear(); refresher.resume() }, onVisible: () => { void refresher.check(); seen() },
+    onHello: (hello) => { tab = { id: hello.tab, token: hello.token }; seen() },
+    onCtl: ({ seq, request }) => {
+      const here = tab
+      if (!here) return
+      ctlExecuting += 1
+      void ctl.run(request as { verb: string }, seq, here.token).then((reply: CtlReply) => {
+        const query = new URLSearchParams({ seq: String(seq), token: here.token })
+        return window.fetch(`/api/ctl/${encodeURIComponent(here.id)}?${query}`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(reply),
+        })
+      }).catch(() => {}).finally(() => { ctlExecuting -= 1 })
+    },
+    onProposal: (entry) => proposals.show(entry),
+    onProposalClosed: (id) => proposals.remove(id),
+  })
 
   document.body.tabIndex = -1
   document.body.focus({ preventScroll: true })

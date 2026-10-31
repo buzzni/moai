@@ -12,6 +12,20 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+## [0.39.0] - 2026-10-31
+
+### Added
+
+- `moai ctl ls` and `moai ctl state` list the explorers open for you and read what one shows, over a socket only you can reach. (moai-zgc1.blf)
+- `moai ctl keys`, `moai ctl do` and `moai ctl actions` press keys and run named actions in an open explorer, exactly as its own keys would. (moai-zgc1.soo)
+- `moai ctl sort`, `filter`, `find`, `screen`, `view`, `cell`, `detail`, `goto`, `read`, `wiki`, `pane` and `zone` change an open explorer by name, including the pane sizes only the mouse could change before. (moai-zgc1.rho)
+- `moai ctl` reaches visible loopback tabs of `moai web` too: list, read and drive them, switch their theme and resize their detail. (moai-zgc1.hte)
+- `moai ctl propose` puts a suggestion in front of the person in an open explorer or web tab; they accept or dismiss it there (`SPC a y`, `SPC a n`), an accepted action runs as the window owner, and `moai ctl answer` reads what they chose. (moai-zgc1.np6)
+
+### Changed
+
+- The web page follows the tracker over one server-sent event stream instead of asking every two seconds, and falls back to asking when the stream is refused or lost. (moai-zgc1.01v)
+
 ## [0.38.0] - 2026-10-30
 
 ### Changed

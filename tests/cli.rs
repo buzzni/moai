@@ -84,6 +84,335 @@ thread_local! {
         static NTH: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
         Scratch::new(&format!("config-fence-{}", NTH.fetch_add(1, std::sync::atomic::Ordering::Relaxed)))
     };
+    // A socket path has a short OS limit. Keep this separate from the often long
+    // cargo test directory, and fence every CLI child before any ctl test runs.
+    static CTL_FENCE: Scratch = {
+        static NTH: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let base = if cfg!(unix) { Path::new("/tmp") } else { Path::new(env!("CARGO_TARGET_TMPDIR")) };
+        let path = base.join(format!("moai-ctl-{}-{}", std::process::id(), NTH.fetch_add(1, std::sync::atomic::Ordering::Relaxed)));
+        std::fs::create_dir(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700)).unwrap();
+        }
+        Scratch(path)
+    };
+}
+
+#[test]
+#[cfg(unix)]
+fn ctl_never_reaches_the_runners_sockets() {
+    use std::os::unix::net::UnixListener;
+    let s = Scratch::new("ctl-xdg");
+    let xdg = s.path().join("moai");
+    std::fs::create_dir(&xdg).unwrap();
+    let socket = xdg.join("9999.sock");
+    let listener = UnixListener::bind(&socket).unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let output = staged(&["ctl", "ls", "--all", "--json"])
+        .env("XDG_RUNTIME_DIR", s.path())
+        .current_dir(s.path())
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(json["windows"], serde_json::json!([]));
+    assert!(listener.accept().is_err(), "the test reached a socket outside MOAI_CTL_DIR");
+}
+
+#[test]
+fn ctl_state_without_a_window_says_no_window() {
+    let s = Scratch::new("ctl-empty");
+    let output = moai(s.path(), &["ctl", "state", "--json"]);
+    assert!(!output.status.success());
+    let json: serde_json::Value = serde_json::from_slice(&output.stderr).unwrap();
+    assert_eq!(json["code"], if cfg!(unix) { "no_window" } else { "unsupported" });
+}
+
+#[test]
+#[cfg(unix)]
+fn ctl_lists_and_reads_an_open_explorer() {
+    use std::io::{Read, Write};
+    use std::os::fd::{AsRawFd, FromRawFd};
+    use std::os::unix::process::CommandExt;
+    use std::time::{Duration, Instant};
+
+    let s = init("ctl-pty");
+    let (mut master_fd, mut slave_fd) = (-1, -1);
+    let size = libc::winsize { ws_row: 30, ws_col: 120, ws_xpixel: 0, ws_ypixel: 0 };
+    assert_eq!(
+        unsafe {
+            libc::openpty(
+                &mut master_fd,
+                &mut slave_fd,
+                std::ptr::null_mut(),
+                std::ptr::null_mut::<libc::termios>(),
+                &size as *const _ as *mut _,
+            )
+        },
+        0
+    );
+    let (mut master, slave) = unsafe { (std::fs::File::from_raw_fd(master_fd), std::fs::File::from_raw_fd(slave_fd)) };
+    for fd in [master.as_raw_fd(), slave.as_raw_fd()] {
+        assert_ne!(unsafe { libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC) }, -1);
+    }
+    assert_ne!(unsafe { libc::fcntl(master.as_raw_fd(), libc::F_SETFL, libc::O_NONBLOCK) }, -1);
+    let mut command = staged(&["tui"]);
+    command
+        .current_dir(s.path())
+        .env("TERM", "xterm")
+        .stdin(slave.try_clone().unwrap())
+        .stdout(slave.try_clone().unwrap())
+        .stderr(slave);
+    unsafe {
+        command.pre_exec(|| {
+            if libc::setsid() == -1 || libc::ioctl(0, libc::TIOCSCTTY as _, 0) == -1 {
+                return Err(std::io::Error::last_os_error());
+            }
+            Ok(())
+        });
+    }
+    struct Child(std::process::Child);
+    impl Drop for Child {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+    let mut child = Child(command.spawn().unwrap());
+    drop(command);
+    let deadline = Instant::now() + Duration::from_secs(15);
+    let mut shown = String::new();
+    let mut window_id = None;
+    while Instant::now() < deadline {
+        let mut buf = [0; 8192];
+        match master.read(&mut buf) {
+            Ok(n) => {
+                let chunk = String::from_utf8_lossy(&buf[..n]);
+                for _ in 0..chunk.matches("\x1b[6n").count() {
+                    master.write_all(b"\x1b[1;1R").unwrap();
+                }
+                shown.push_str(&chunk);
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock || e.raw_os_error() == Some(libc::EIO) => {}
+            Err(e) => panic!("PTY: {e}"),
+        }
+        let out = ok(s.path(), &["ctl", "ls", "--json"]);
+        let json: serde_json::Value = serde_json::from_str(&out).unwrap();
+        if let Some(id) = json["windows"].as_array().unwrap().first().and_then(|w| w["id"].as_str()) {
+            window_id = Some(id.to_string());
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(30));
+    }
+    let id = window_id.unwrap_or_else(|| panic!("explorer did not register: {shown}"));
+    assert_eq!(id, format!("tui-{}", child.0.id()));
+    let out = ok(s.path(), &["ctl", "state", "--json"]);
+    let json: serde_json::Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(json["screen"], "list");
+    assert_eq!(json["sort"], serde_json::json!(["priority"]));
+    let pressed = ok(s.path(), &["ctl", "keys", "SPC g b", "--json"]);
+    assert_eq!(serde_json::from_str::<serde_json::Value>(&pressed).unwrap()["screen"], "board");
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&ok(s.path(), &["ctl", "state", "--json"])).unwrap()["screen"],
+        "board"
+    );
+    let done = ok(s.path(), &["ctl", "do", "browse.go_list", "--json"]);
+    assert_eq!(serde_json::from_str::<serde_json::Value>(&done).unwrap()["screen"], "list");
+    let actions = ok(s.path(), &["ctl", "actions", "--json"]);
+    assert!(actions.contains("browse.read_all"), "{actions}");
+    let sorted = ok(s.path(), &["ctl", "sort", "title:desc,priority:desc", "--json"]);
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&sorted).unwrap()["sort"],
+        serde_json::json!(["title:desc", "priority:desc"])
+    );
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&ok(s.path(), &["ctl", "state", "--json"])).unwrap()["sort"],
+        serde_json::json!(["title:desc", "priority:desc"])
+    );
+    for command in [
+        vec!["ctl", "do", "browse.quit", "--json"],
+        vec!["ctl", "keys", "SPC q", "--json"],
+        vec!["ctl", "keys", "Ctrl-c", "--json"],
+    ] {
+        let out = moai(s.path(), &command);
+        assert!(!out.status.success(), "{command:?}");
+        let error: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+        assert_eq!(error["code"], "refused", "{command:?}: {error}");
+    }
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&ok(s.path(), &["ctl", "state", "--json"])).unwrap()["screen"],
+        "list"
+    );
+    let socket = CTL_FENCE.with(|f| f.path().join(format!("{}.sock", child.0.id())));
+    for (proto, deadline, code) in [(2, 9_999_999_999_999u64, "unsupported"), (1, 1, "timeout")] {
+        let mut peer = std::os::unix::net::UnixStream::connect(&socket).unwrap();
+        peer.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+        writeln!(peer, "{{\"proto\":{proto},\"id\":1,\"verb\":\"hello\",\"actor\":null,\"deadline_ms\":{deadline},\"lang\":\"en\"}}").unwrap();
+        let mut answer = String::new();
+        peer.read_to_string(&mut answer).unwrap();
+        let reply: serde_json::Value = serde_json::from_str(&answer).unwrap();
+        assert_eq!(reply["code"], code, "{answer}");
+    }
+    master.write_all(b"\x03").unwrap();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while child.0.try_wait().unwrap().is_none() && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert!(child.0.try_wait().unwrap().is_some(), "explorer did not exit after human Ctrl-C");
+    assert!(!socket.exists());
+}
+
+#[cfg(unix)]
+struct ProposalPtyChild(std::process::Child);
+
+#[cfg(unix)]
+impl Drop for ProposalPtyChild {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+
+#[cfg(unix)]
+fn proposal_pty(name: &str) -> (Scratch, std::fs::File, ProposalPtyChild) {
+    use std::io::{Read, Write};
+    use std::os::fd::{AsRawFd, FromRawFd};
+    use std::os::unix::process::CommandExt;
+    use std::time::{Duration, Instant};
+
+    let scratch = init(name);
+    let (mut master_fd, mut slave_fd) = (-1, -1);
+    let size = libc::winsize { ws_row: 30, ws_col: 120, ws_xpixel: 0, ws_ypixel: 0 };
+    assert_eq!(
+        unsafe {
+            libc::openpty(
+                &mut master_fd,
+                &mut slave_fd,
+                std::ptr::null_mut(),
+                std::ptr::null_mut::<libc::termios>(),
+                &size as *const _ as *mut _,
+            )
+        },
+        0
+    );
+    let (mut master, slave) = unsafe { (std::fs::File::from_raw_fd(master_fd), std::fs::File::from_raw_fd(slave_fd)) };
+    for fd in [master.as_raw_fd(), slave.as_raw_fd()] {
+        assert_ne!(unsafe { libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC) }, -1);
+    }
+    assert_ne!(unsafe { libc::fcntl(master.as_raw_fd(), libc::F_SETFL, libc::O_NONBLOCK) }, -1);
+    let mut command = staged(&["tui"]);
+    command
+        .current_dir(scratch.path())
+        .env("TERM", "xterm")
+        .stdin(slave.try_clone().unwrap())
+        .stdout(slave.try_clone().unwrap())
+        .stderr(slave);
+    unsafe {
+        command.pre_exec(|| {
+            if libc::setsid() == -1 || libc::ioctl(0, libc::TIOCSCTTY as _, 0) == -1 {
+                return Err(std::io::Error::last_os_error());
+            }
+            Ok(())
+        });
+    }
+    let child = ProposalPtyChild(command.spawn().unwrap());
+    let deadline = Instant::now() + Duration::from_secs(15);
+    let mut shown = String::new();
+    while Instant::now() < deadline {
+        let mut buf = [0; 8192];
+        match master.read(&mut buf) {
+            Ok(n) => {
+                let chunk = String::from_utf8_lossy(&buf[..n]);
+                for _ in 0..chunk.matches("\x1b[6n").count() {
+                    master.write_all(b"\x1b[1;1R").unwrap();
+                }
+                shown.push_str(&chunk);
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock || e.raw_os_error() == Some(libc::EIO) => {}
+            Err(e) => panic!("PTY: {e}"),
+        }
+        let windows = json_of(&ok(scratch.path(), &["ctl", "ls", "--json"]));
+        if windows["windows"].as_array().is_some_and(|rows| !rows.is_empty()) {
+            return (scratch, master, child);
+        }
+        std::thread::sleep(Duration::from_millis(30));
+    }
+    panic!("explorer did not register: {shown}");
+}
+
+#[test]
+#[cfg(unix)]
+fn ctl_propose_waits_for_the_person() {
+    use std::io::Write;
+    use std::time::{Duration, Instant};
+
+    let (s, mut master, _child) = proposal_pty("ctl-propose-pty");
+    let mut command =
+        staged(&["ctl", "propose", "Show the board?", "--then", "screen board", "--wait", "10", "--json"]);
+    command.current_dir(s.path());
+    let waiting = std::thread::spawn(move || command.output().unwrap());
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while Instant::now() < deadline {
+        let state = json_of(&ok(s.path(), &["ctl", "state", "--json"]));
+        if state["proposals"].as_array().is_some_and(|rows| !rows.is_empty()) {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(30));
+    }
+    master.write_all(b" ay").unwrap();
+    let finished = waiting.join().unwrap();
+    assert!(finished.status.success(), "{}", String::from_utf8_lossy(&finished.stderr));
+    let answer = json_of(&String::from_utf8_lossy(&finished.stdout));
+    assert_eq!(answer["state"], "accepted", "{answer}");
+    assert_eq!(answer["ran"]["ok"], true, "{answer}");
+    assert_eq!(json_of(&ok(s.path(), &["ctl", "state", "--json"]))["screen"], "board");
+}
+
+#[test]
+#[cfg(unix)]
+fn ctl_withdraw_takes_it_down() {
+    let (s, _master, _child) = proposal_pty("ctl-withdraw-pty");
+    let made = json_of(&ok(s.path(), &["ctl", "propose", "Later?", "--json"]));
+    let id = made["id"].as_str().unwrap();
+    let state = json_of(&ok(s.path(), &["ctl", "state", "--json"]));
+    assert_eq!(state["proposals"].as_array().unwrap().len(), 1);
+    let gone = json_of(&ok(s.path(), &["ctl", "withdraw", id, "--json"]));
+    assert_eq!(gone["state"], "withdrawn");
+    let state = json_of(&ok(s.path(), &["ctl", "state", "--json"]));
+    assert!(state["proposals"].as_array().unwrap().is_empty());
+    assert_eq!(json_of(&ok(s.path(), &["ctl", "answer", id, "--json"]))["state"], "withdrawn");
+}
+
+#[test]
+#[cfg(unix)]
+fn a_waiter_past_the_slots_is_refused_before_its_suggestion_shows() {
+    use std::time::{Duration, Instant};
+
+    let (s, _master, child) = proposal_pty("ctl-waiter-slots");
+    let waiting: Vec<_> = (0..4)
+        .map(|n| {
+            let mut command = staged(&["ctl", "propose", &format!("Wait {n}?"), "--wait", "30", "--json"]);
+            command.current_dir(s.path());
+            std::thread::spawn(move || command.output().unwrap())
+        })
+        .collect();
+    let shown = || json_of(&ok(s.path(), &["ctl", "state", "--json"]))["proposals"].as_array().map_or(0, Vec::len);
+    let until = Instant::now() + Duration::from_secs(10);
+    while shown() < 4 {
+        assert!(Instant::now() < until, "four waiting suggestions did not stand");
+        std::thread::sleep(Duration::from_millis(30));
+    }
+    let fifth = moai(s.path(), &["ctl", "propose", "Fifth?", "--wait", "30", "--json"]);
+    assert!(!fifth.status.success());
+    assert_eq!(json_of(&String::from_utf8_lossy(&fifth.stderr))["code"], "busy");
+    // The refused waiter never reached the window: no suggestion stands under an id its caller never got.
+    assert_eq!(shown(), 4);
+    drop(child);
+    for handle in waiting {
+        assert!(!handle.join().unwrap().status.success(), "a waiter outlived its window");
+    }
 }
 
 // 링크를 푼 자리 — Windows 의 `\\?\` 까지 걷은, 도구가 내는 철자다(moai-lag7.rrm). 시험이 도구의 철자와 견줄 때 쓴다.
@@ -171,6 +500,7 @@ fn isolated(program: impl AsRef<std::ffi::OsStr>) -> Command {
     let home = Path::new(env!("CARGO_TARGET_TMPDIR")).join("moai-cli-home");
     std::fs::create_dir_all(&home).unwrap();
     let config = CONFIG_FENCE.with(|fence| fence.path().join("config.toml"));
+    let ctl_dir = CTL_FENCE.with(|fence| fence.path().to_path_buf());
     let mut cmd = Command::new(program);
     // **걷기가 먼저다.** `Command` 의 환경은 이름마다 마지막에 부른 것이 이긴다 —
     // 아래 `.env` 보다 뒤에 두면, 목록에 `GIT_CONFIG_GLOBAL` 같은 이름이 느는 날
@@ -197,6 +527,8 @@ fn isolated(program: impl AsRef<std::ffi::OsStr>) -> Command {
         // `MOAI_CONFIG` 를 주면 그 값이 이긴다. `XDG_CONFIG_HOME` 도 걷어야 설정을
         // 덮어쓴 시험이 그것을 지웠을 때 사람의 설정으로 되돌아가지 않는다.
         .env("MOAI_CONFIG", config)
+        .env("MOAI_CTL_DIR", ctl_dir)
+        .env_remove("XDG_RUNTIME_DIR")
         .env_remove("XDG_CONFIG_HOME")
         // 키 파일(moai-aqmg)도 사람의 것이 새면 안 된다 — `--help` 가 그 키로 그려져 도움말을 재는 시험이 돌리는
         // 사람마다 달라진다. 걷으면 위의 없는 설정 곁(`keys.toml`)을 보니 기본 키다.
@@ -8842,6 +9174,7 @@ fn idea_and_issue_share_one_list_of_verbs() {
 /// `--json` 훑기가 실제로 부르는 명령들. **위 시험이 이 목록을 도움말과 견준다** —
 /// 목록을 여기 한 자리에 두어야 그 견줌이 뜻을 갖는다.
 const JSON_SWEEP: &[&str] = &[
+    "ctl",
     "writing",
     "init",
     // 저장소의 설정을 기본값을 채워 읽는다(moai-wk7i.qtq).
@@ -9582,6 +9915,7 @@ fn every_command_still_speaks_json() {
     let epic = field(&ok(s.path(), &["add", "에픽", "--type", "epic", "--json"]), "id");
 
     let cases = [
+        vec!["ctl", "ls", "--json"],
         vec!["writing", "--json"],
         vec!["status", "--json"],
         vec!["ready", "--json"],
@@ -13832,6 +14166,23 @@ fn the_agents_block_teaches_idea() {
     for want in ["moai backlog add", "moai backlog ls", "moai backlog promote", "moai defer"] {
         assert!(block.contains(want), "{want} 가 없다 — {block}");
     }
+}
+
+#[test]
+fn the_agents_block_teaches_ctl_without_mv() {
+    let s = init("agentsctl");
+    let block = std::fs::read_to_string(s.path().join("AGENTS.md")).unwrap();
+    for want in [
+        "moai ctl ls",
+        "moai ctl state",
+        "moai ctl propose '<why>' --then '<verb>'",
+        "moai ctl propose '<why>' --wait <seconds>",
+        "--take -m 'accepted proposal <proposal id> in the explorer'",
+        "moai ctl read` only on request",
+    ] {
+        assert!(block.contains(want), "{want} is missing from the managed block");
+    }
+    assert!(!block.contains("moai ctl mv") && !block.contains("moai ctl note"), "tracker writes became ctl verbs");
 }
 
 /// **마크다운은 `idea add` 로 들어오지 않는다.** `#` 이 에픽이고 `-` 가
@@ -31973,6 +32324,342 @@ fn http(port: u16, method: &str, path: &str, host: Option<&str>) -> (u16, String
 
 fn get(port: u16, path: &str) -> (u16, String, String) {
     http(port, "GET", path, Some(&format!("127.0.0.1:{port}")))
+}
+
+fn events(port: u16) -> std::io::BufReader<std::net::TcpStream> {
+    use std::io::{BufRead as _, Write as _};
+    let mut stream = dial(port);
+    stream.set_read_timeout(Some(std::time::Duration::from_secs(5))).unwrap();
+    write!(stream, "GET /api/events HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n\r\n").unwrap();
+    let mut reader = std::io::BufReader::new(stream);
+    let mut head = String::new();
+    loop {
+        let mut line = String::new();
+        reader.read_line(&mut line).unwrap();
+        if line == "\r\n" {
+            break;
+        }
+        assert!(!line.is_empty(), "events connection closed before its header: {head}");
+        head.push_str(&line);
+    }
+    assert!(head.starts_with("HTTP/1.1 200 OK") && head.contains("text/event-stream"), "{head}");
+    assert!(!head.contains("Content-Length"), "{head}");
+    reader
+}
+
+fn next_event_stamp(reader: &mut std::io::BufReader<std::net::TcpStream>) -> String {
+    use std::io::BufRead as _;
+    loop {
+        let mut line = String::new();
+        reader.read_line(&mut line).unwrap();
+        assert!(!line.is_empty(), "events connection closed before a stamp");
+        if let Some(data) = line.strip_prefix("data: ")
+            && let Some(stamp) = json_of(data)["stamp"].as_str()
+        {
+            return stamp.to_string();
+        }
+    }
+}
+
+#[cfg(unix)]
+fn event_named(reader: &mut std::io::BufReader<std::net::TcpStream>, want: &str) -> serde_json::Value {
+    use std::io::BufRead as _;
+    let mut event = String::new();
+    loop {
+        let mut line = String::new();
+        reader.read_line(&mut line).unwrap();
+        assert!(!line.is_empty(), "event stream closed before {want}");
+        if let Some(name) = line.strip_prefix("event: ") {
+            event = name.trim().to_string();
+        } else if let Some(data) = line.strip_prefix("data: ")
+            && event == want
+        {
+            return json_of(data);
+        }
+    }
+}
+
+#[cfg(unix)]
+fn ctl_post(port: u16, path: &str, body: &str, content_type: &str, token: bool) -> (u16, String) {
+    use std::io::{Read as _, Write as _};
+    let mut stream = dial(port);
+    stream.set_read_timeout(Some(std::time::Duration::from_secs(5))).unwrap();
+    let origin = if token { format!("Origin: http://127.0.0.1:{port}\r\n") } else { String::new() };
+    write!(stream, "POST {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n{origin}Content-Type: {content_type}\r\nContent-Length: {}\r\n\r\n{body}", body.len()).unwrap();
+    let mut answer = String::new();
+    stream.read_to_string(&mut answer).unwrap();
+    (answer.split(' ').nth(1).unwrap().parse().unwrap(), answer)
+}
+
+#[test]
+#[cfg(unix)]
+fn web_ctl_lists_a_visible_tab_and_reads_its_state() {
+    let s = init("web-ctl-tab");
+    let web = serve(s.path());
+    let mut stream = events(web.port);
+    let hello = event_named(&mut stream, "hello");
+    let id = hello["tab"].as_str().unwrap().to_string();
+    let token = hello["token"].as_str().unwrap().to_string();
+    assert_eq!(token.len(), 32);
+    let seen = format!("/api/ctl/{id}/seen?token={token}&screen=gantt");
+    assert_eq!(ctl_post(web.port, &seen, "", "application/json", true).0, 200);
+    let until = std::time::Instant::now() + std::time::Duration::from_secs(3);
+    loop {
+        let listed = moai(s.path(), &["ctl", "ls", "--json"]);
+        if listed.status.success() {
+            let windows = json_of(&String::from_utf8_lossy(&listed.stdout));
+            if windows["windows"].as_array().unwrap().iter().any(|w| w["id"] == id && w["screen"] == "gantt") {
+                break;
+            }
+        }
+        assert!(std::time::Instant::now() < until, "web tab was not listed");
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    let mut cmd = staged(&["ctl", "state", "-t", &id, "--json"]);
+    cmd.current_dir(s.path());
+    let waiting = std::thread::spawn(move || cmd.output().unwrap());
+    let pushed = event_named(&mut stream, "ctl");
+    assert_eq!(pushed["request"]["verb"], "state");
+    let seq = pushed["seq"].as_u64().unwrap();
+    let path = format!("/api/ctl/{id}?seq={seq}&token={token}");
+    let answer = ctl_post(web.port, &path, r#"{"ok":true,"data":{"screen":"gantt"}}"#, "application/json", true);
+    assert_eq!(answer.0, 200, "{}", answer.1);
+    let finished = waiting.join().unwrap();
+    assert!(finished.status.success(), "{}", String::from_utf8_lossy(&finished.stderr));
+    assert_eq!(json_of(&String::from_utf8_lossy(&finished.stdout))["screen"], "gantt");
+}
+
+#[test]
+#[cfg(unix)]
+fn web_ctl_reply_needs_origin_token_and_json() {
+    let s = init("web-ctl-reply-guard");
+    let web = serve(s.path());
+    let mut stream = events(web.port);
+    let hello = event_named(&mut stream, "hello");
+    let id = hello["tab"].as_str().unwrap();
+    let token = hello["token"].as_str().unwrap();
+    let path = format!("/api/ctl/{id}?seq=1&token={token}");
+    let reply = r#"{"ok":true,"data":{}}"#;
+    assert_eq!(ctl_post(web.port, &path, reply, "application/json", false).0, 403);
+    assert_eq!(ctl_post(web.port, &path.replace(token, "wrong"), reply, "application/json", true).0, 403);
+    assert_eq!(ctl_post(web.port, &path, reply, "text/plain", true).0, 400);
+    assert_eq!(ctl_post(web.port, &path, "not json", "application/json", true).0, 400);
+    assert_eq!(ctl_post(web.port, &path, reply, "application/json", true).0, 410);
+}
+
+#[test]
+#[cfg(unix)]
+fn web_ctl_reply_body_is_capped() {
+    use std::io::{Read as _, Write as _};
+    let s = init("web-ctl-cap");
+    let web = serve(s.path());
+    let mut stream = dial(web.port);
+    stream.set_read_timeout(Some(std::time::Duration::from_secs(5))).unwrap();
+    write!(stream, "POST /api/ctl/1.1?seq=1&token=x HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nOrigin: http://127.0.0.1:{}\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n", web.port, web.port, 1024 * 1024 + 1).unwrap();
+    let mut answer = String::new();
+    stream.read_to_string(&mut answer).unwrap();
+    assert!(answer.starts_with("HTTP/1.1 413"), "{answer}");
+    assert!(answer.contains("too_large"), "{answer}");
+}
+
+#[test]
+#[cfg(unix)]
+fn a_body_on_any_other_path_is_still_refused() {
+    let s = init("web-ctl-body-only");
+    let web = serve(s.path());
+    let answer = ctl_post(web.port, "/api/read-all", "{}", "application/json", true);
+    assert_eq!(answer.0, 400, "{}", answer.1);
+    let answer = ctl_post(web.port, "/api/rows", "{}", "application/json", true);
+    assert_eq!(answer.0, 400, "{}", answer.1);
+}
+
+#[test]
+#[cfg(unix)]
+fn web_ctl_gone_when_the_stream_ends() {
+    let s = init("web-ctl-gone");
+    let web = serve(s.path());
+    let mut stream = events(web.port);
+    let hello = event_named(&mut stream, "hello");
+    let id = hello["tab"].as_str().unwrap().to_string();
+    let mut cmd = staged(&["ctl", "state", "-t", &id, "--json"]);
+    cmd.current_dir(s.path());
+    let waiting = std::thread::spawn(move || cmd.output().unwrap());
+    let _ = event_named(&mut stream, "ctl");
+    drop(stream);
+    let finished = waiting.join().unwrap();
+    assert!(!finished.status.success());
+    assert_eq!(json_of(&String::from_utf8_lossy(&finished.stderr))["code"], "gone");
+}
+
+#[test]
+#[cfg(unix)]
+fn web_ctl_propose_reaches_a_tab_and_returns_its_answer() {
+    let s = init("web-ctl-propose");
+    let web = serve(s.path());
+    let mut stream = events(web.port);
+    let hello = event_named(&mut stream, "hello");
+    let tab = hello["tab"].as_str().unwrap().to_string();
+    let token = hello["token"].as_str().unwrap().to_string();
+    let mut cmd =
+        staged(&["ctl", "propose", "Show board?", "--then", "screen board", "--wait", "10", "-t", &tab, "--json"]);
+    cmd.current_dir(s.path());
+    let waiting = std::thread::spawn(move || cmd.output().unwrap());
+    let card = event_named(&mut stream, "proposal");
+    assert_eq!(card["text"], "Show board?");
+    assert_eq!(card["then"]["verb"], "screen");
+    let id = card["id"].as_str().unwrap();
+    let path = format!("/api/ctl/{tab}/proposal?token={token}&id={id}");
+    let wrong_token = ctl_post(
+        web.port,
+        &format!("/api/ctl/{tab}/proposal?token=wrong&id={id}"),
+        r#"{"state":"declined"}"#,
+        "application/json",
+        true,
+    );
+    assert_eq!(wrong_token.0, 403, "{}", wrong_token.1);
+    let wrong_origin = ctl_post(web.port, &path, r#"{"state":"declined"}"#, "application/json", false);
+    assert_eq!(wrong_origin.0, 403, "{}", wrong_origin.1);
+    let posted = ctl_post(
+        web.port,
+        &path,
+        r#"{"state":"accepted","ran":{"ok":true,"data":{"screen":"board"}}}"#,
+        "application/json",
+        true,
+    );
+    assert_eq!(posted.0, 200, "{}", posted.1);
+    let finished = waiting.join().unwrap();
+    assert!(finished.status.success(), "{}", String::from_utf8_lossy(&finished.stderr));
+    let answer = json_of(&String::from_utf8_lossy(&finished.stdout));
+    assert_eq!(answer["state"], "accepted");
+    assert_eq!(answer["ran"]["data"]["screen"], "board");
+}
+
+#[test]
+#[cfg(unix)]
+fn web_ctl_write_carries_the_callers_name() {
+    let s = init("web-ctl-caller");
+    let issue = field(&ok(s.path(), &["add", "planned row", "--json"]), "id");
+    let web = serve(s.path());
+    let mut stream = events(web.port);
+    let hello = event_named(&mut stream, "hello");
+    let tab = hello["tab"].as_str().unwrap().to_string();
+    let token = hello["token"].as_str().unwrap().to_string();
+    let mut cmd = staged(&["--user", "Caller (caller@example.test)", "ctl", "screen", "list", "-t", &tab, "--json"]);
+    cmd.current_dir(s.path());
+    let waiting = std::thread::spawn(move || cmd.output().unwrap());
+    let pushed = event_named(&mut stream, "ctl");
+    let seq = pushed["seq"].as_u64().unwrap();
+    let path = format!("/api/plan/{issue}?day=2026-10-30&ctl={seq}&token={token}");
+    let written = ctl_post(web.port, &path, "", "application/json", true);
+    assert_eq!(written.0, 200, "{}", written.1);
+    assert_eq!(json_of(written.1.split_once("\r\n\r\n").unwrap().1)["exit"], 0);
+    let answer = ctl_post(
+        web.port,
+        &format!("/api/ctl/{tab}?seq={seq}&token={token}"),
+        r#"{"ok":true,"data":{}}"#,
+        "application/json",
+        true,
+    );
+    assert_eq!(answer.0, 200);
+    assert!(waiting.join().unwrap().status.success());
+    let shown = json_of(&ok(s.path(), &["show", &issue, "--json"]));
+    assert_eq!(shown["due_on"], "2026-10-30", "{shown}");
+}
+
+#[test]
+#[cfg(unix)]
+fn web_ctl_write_refuses_a_request_without_an_actor() {
+    let s = init("web-ctl-no-actor");
+    let issue = field(&ok(s.path(), &["add", "planned row", "--json"]), "id");
+    let web = serve(s.path());
+    let mut stream = events(web.port);
+    let hello = event_named(&mut stream, "hello");
+    let tab = hello["tab"].as_str().unwrap().to_string();
+    let token = hello["token"].as_str().unwrap().to_string();
+    let mut cmd = staged(&["ctl", "state", "-t", &tab, "--json"]);
+    cmd.current_dir(s.path());
+    let waiting = std::thread::spawn(move || cmd.output().unwrap());
+    let pushed = event_named(&mut stream, "ctl");
+    let seq = pushed["seq"].as_u64().unwrap();
+    let path = format!("/api/plan/{issue}?day=2026-10-30&ctl={seq}&token={token}");
+    let refused = ctl_post(web.port, &path, "", "application/json", true);
+    assert_eq!(refused.0, 400);
+    assert!(refused.1.contains("no_actor"), "{}", refused.1);
+    let answer = ctl_post(
+        web.port,
+        &format!("/api/ctl/{tab}?seq={seq}&token={token}"),
+        r#"{"ok":true,"data":{}}"#,
+        "application/json",
+        true,
+    );
+    assert_eq!(answer.0, 200);
+    assert!(waiting.join().unwrap().status.success());
+    let shown = json_of(&ok(s.path(), &["show", &issue, "--json"]));
+    assert!(shown.get("due_on").is_none(), "{shown}");
+}
+
+#[test]
+fn web_events_push_a_stamp_when_the_tracker_moves() {
+    let s = init("web-events-move");
+    let web = serve(s.path());
+    let mut stream = events(web.port);
+    let first = next_event_stamp(&mut stream);
+    assert_eq!(first.len(), 16);
+    ok(s.path(), &["add", "second row"]);
+    let second = next_event_stamp(&mut stream);
+    assert_ne!(first, second);
+}
+
+#[test]
+fn web_events_beyond_the_cap_are_busy_and_reads_still_answer() {
+    let s = init("web-events-cap");
+    let web = serve(s.path());
+    let mut streams = Vec::new();
+    for _ in 0..8 {
+        let mut stream = events(web.port);
+        next_event_stamp(&mut stream);
+        streams.push(stream);
+    }
+    let (status, _, body) = get(web.port, "/api/events");
+    assert_eq!(status, 503, "{body}");
+    assert_eq!(json_of(&body)["code"], "busy");
+    assert_eq!(get(web.port, "/api/stamp").0, 200);
+}
+
+#[test]
+fn web_events_refuse_a_foreign_host() {
+    let s = init("web-events-host");
+    let web = serve(s.path());
+    let (status, _, body) = http(web.port, "GET", "/api/events", Some("evil.example"));
+    assert_eq!(status, 403, "{body}");
+    assert_eq!(json_of(&body)["code"], "forbidden_host");
+}
+
+#[test]
+fn web_events_give_their_slot_back_when_the_tab_goes() {
+    let s = init("web-events-release");
+    let web = serve(s.path());
+    let mut streams = Vec::new();
+    for _ in 0..8 {
+        let mut stream = events(web.port);
+        next_event_stamp(&mut stream);
+        streams.push(stream);
+    }
+    drop(streams);
+    let until = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        let mut stream = dial(web.port);
+        use std::io::{Read as _, Write as _};
+        write!(stream, "GET /api/events HTTP/1.1\r\nHost: 127.0.0.1:{}\r\n\r\n", web.port).unwrap();
+        stream.set_read_timeout(Some(std::time::Duration::from_secs(2))).unwrap();
+        let mut start = [0; 12];
+        stream.read_exact(&mut start).unwrap();
+        if &start == b"HTTP/1.1 200" {
+            break;
+        }
+        assert!(std::time::Instant::now() < until, "closed streams did not return their slots");
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
 }
 
 /// 본문 없는 POST 하나 — `Origin` 을 줄 때만 싣는다. 브라우저가 보내는 꼴이다(읽음 표시, moai-ly88).

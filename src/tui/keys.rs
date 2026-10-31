@@ -327,6 +327,9 @@ pub const ANYWHERE: &[Bind<Anywhere>] = &[row!(Anywhere::Quit, Some("Ctrl-C"), K
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Browse {
     Quit,
+    ProposalAccept,
+    ProposalDecline,
+    Proposals,
     FocusNext,
     FocusPrev,
     /// 한 칸 그쪽으로 — `Ctrl-w h`·`l`·`k`·`j`. **순환이 아니다**: 이웃이 없으면 제자리고
@@ -840,6 +843,9 @@ pub const BROWSE: &[Bind<Browse>] = {
         row!(Grep, None, LEADER, Key::plain('/')),
         row!(Filter, Some("SPC f"), LEADER, Key::plain('f')),
         row!(Jot, Some("SPC n"), LEADER, Key::plain('n')),
+        row!(ProposalAccept, Some("SPC a y"), LEADER, Key::plain('a'), Key::plain('y')),
+        row!(ProposalDecline, Some("SPC a n"), LEADER, Key::plain('a'), Key::plain('n')),
+        row!(Proposals, Some("SPC a l"), LEADER, Key::plain('a'), Key::plain('l')),
         row!(Quit, Some("SPC q"), LEADER, Key::plain('q')),
         row!(Pick, Some("SPC p a"), LEADER, Key::plain('p'), Key::plain('a')),
         row!(Unregister, Some("SPC p d"), LEADER, Key::plain('p'), Key::plain('d')),
@@ -964,6 +970,7 @@ pub const BROWSE: &[Bind<Browse>] = {
 /// 켜짐을 가르는 값. **든 쪽이 잰다** — 여기는 `App` 을 모른다.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Ctx {
+    pub proposals: bool,
     /// 화면의 말(moai-9it4). **키 표도 고른 말로 말한다** — 여기 든 낱말은 메뉴와 아랫바에
     /// 그대로 서는 화면 글이다. 부르는 쪽이 `Site::lang` 에서 채운다(`App::key_ctx`).
     pub lang: Lang,
@@ -1126,6 +1133,8 @@ impl Browse {
     pub fn enabled(self, c: &Ctx) -> Result<(), Off> {
         use Browse::*;
         match self {
+            ProposalAccept | ProposalDecline | Proposals if c.proposals => Ok(()),
+            ProposalAccept | ProposalDecline | Proposals => Err(Off::Quiet),
             // **통계 창 위에서는 화면 고르기만 선다**(moai-z46r, 사용자 결정) — 창이 목록과 상세를 통째로 덮어, 다른
             // 항목은 눌러도 보이는 것이 없다. 이동은 켜 둔다: 메뉴를 닫는 이동키(moai-y8v2)가 그 자리에서 창을 굴린다
             // (`App::stats_key`). 끄면 열린 메뉴에서 `j` 가 먹통이다.
@@ -1353,6 +1362,9 @@ impl Browse {
         use Browse::*;
         match self {
             Quit => say(c.lang, "tui.act.quit"),
+            ProposalAccept => say(c.lang, "tui.propose.accept"),
+            ProposalDecline => say(c.lang, "tui.propose.decline"),
+            Proposals => say(c.lang, "tui.propose.list"),
             FocusNext => c.next_pane,
             FocusPrev => c.prev_pane,
             Focus(Side::Left) => c.left_pane,
@@ -1940,6 +1952,16 @@ pub fn parse(name: &str) -> Option<KeyEvent> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn proposal_keys_are_quiet_without_a_proposal() {
+        let absent = Ctx::default();
+        assert_eq!(Browse::ProposalAccept.enabled(&absent), Err(Off::Quiet));
+        assert_eq!(Browse::ProposalDecline.enabled(&absent), Err(Off::Quiet));
+        assert_eq!(Browse::Proposals.enabled(&absent), Err(Off::Quiet));
+        let present = Ctx { proposals: true, ..absent };
+        assert_eq!(Browse::ProposalAccept.enabled(&present), Ok(()));
+    }
 
     fn press(code: KeyCode) -> KeyEvent {
         KeyEvent::new(code, KeyModifiers::NONE)

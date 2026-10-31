@@ -8,6 +8,7 @@ mod archive;
 mod cli;
 mod cmd;
 mod config;
+mod ctl;
 mod draft;
 mod fail;
 mod git;

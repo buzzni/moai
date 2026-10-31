@@ -278,6 +278,11 @@ impl App {
                     }
                     false
                 }
+                // The suggestion line is drawn over this window too, and its keys answer here as on the list.
+                Some(act @ (Browse::ProposalAccept | Browse::ProposalDecline | Browse::Proposals)) => {
+                    self.run(act, &rows);
+                    true
+                }
                 _ => false,
             };
         }

@@ -821,6 +821,28 @@ mod tests {
         a.cursor = ids(a).iter().position(|i| i == id).unwrap();
     }
 
+    /// An accepted suggestion writes under the window owner's name even when its caller gave none. The jot of
+    /// `an_accepted_write_is_written_by_the_window_owner` is written by the person's own `Ctrl-s`; here the
+    /// acceptance itself writes, so dropping `ctl_owner` turns this red with `no_actor`.
+    #[test]
+    fn an_accepted_nudge_writes_as_the_window_owner() {
+        use crate::ctl::wire::{self, Verb};
+        let (dir, mut a) = on_disk("nudge-accepted");
+        a.hit("SPC g g");
+        put_cursor(&mut a, "argos-0003");
+        let then = Verb::Do { name: "gantt.nudge_later".into() };
+        let proposed = a.ctl(&wire::request(
+            Verb::Propose { text: "A day later?".into(), then: Some(Box::new(then)), ttl: 900, wait: 0 },
+            std::time::Duration::from_secs(5),
+        ));
+        assert!(proposed.ok, "{proposed:?}");
+        let id = proposed.data.unwrap()["id"].as_str().unwrap().to_string();
+        a.hit("SPC a y");
+        let answer = a.proposals.get(&id).data.unwrap();
+        assert_eq!(answer["ran"]["ok"], true, "{answer}");
+        assert_eq!(dates_on_disk(&dir, "argos-0003"), (Some("2026-10-21".into()), Some("2026-10-25".into())));
+    }
+
     /// 주 체크아웃의 줄을 덮은 판과 옆에만 있는 줄을 함께 겹친다.
     fn overlaid_on_disk(name: &str) -> (crate::scratch::Scratch, App) {
         let dir = crate::scratch::Scratch::new(&format!("tui-gantt-overlay-{name}"));

@@ -43,6 +43,14 @@ registered itself. Only registered projects can be read this way.
 
 The page has four tabs.
 
+A visible tab can receive `moai ctl propose` suggestions from another terminal.
+The nonmodal card at the lower right starts with `» Suggestion` (or `» 제안`),
+shows the proposed action, and offers Accept and Decline. The same choices are
+available at `SPC a y` and `SPC a n`; `SPC a l` steps through several pending
+suggestions. The card leaves the current tab and input alone. A suggestion
+expires and disappears if nobody answers it. See [Control an open
+window](ctl.md#suggest-something-to-the-person) for waits and follow-up actions.
+
 | Tab | Shows | Switch |
 |---|---|---|
 | **Board** | A kanban: one column per status, with backlog and deferred columns and one lane per [milestone](glossary.md#milestone). Closed milestone lanes start folded. Epics are not cards; their members stand in their own columns. Select a lane title to see its milestone detail; use its chevron to fold or open it. | `SPC g b` |
@@ -245,24 +253,48 @@ refused in the same words.
 ## It follows the tracker
 
 When someone writes the tracker — you in another terminal, a worker in another
-window — the page notices and reads again. It asks the server for a short
-stamp, folded from the files its answers come from (the tracker's snapshot,
+window — the server sends the page a changed stamp over one event stream, and
+the page reads again. The stamp is folded from the files its answers come from (the tracker's snapshot,
 journal, archive and config, plus your own user config and the read marks kept
 beside it, which say what is new to you), and reloads the list only when the
 stamp has changed. With the worktree overlay on, the stamp also folds the other
 worktrees' snapshots, so a write in a sibling worktree moves the page within
-those two seconds; with it off, a sibling's writes leave the page alone. It asks every two seconds while the tab is visible, and not at
-all while it is hidden; shown again, it asks at once. The issue open in the
+about a second; with it off, a sibling's writes leave the page alone. A hidden
+tab closes its stream and asks nothing; shown again, it opens a stream and checks
+the stamp at once. The issue open in the
 detail is read again with it, and the cursor, the folded groups and what you are
-typing stay where they were. A tracker nobody touches costs one tiny question and
-no reread. What changes with the clock alone — a deadline passing, done work
+typing stay where they were. A tracker nobody touches causes no reread. What changes with the clock alone — a deadline passing, done work
 ageing into the archive — shows on the next reload, or when you click the
 refresh time.
 
-When the server stops, one line says it cannot be reached, and the page asks
-again every ten seconds; the line goes once the server answers. A read that
+If the stream is refused or lost, the page asks for the stamp every two seconds
+and tries the stream again after thirty seconds. More than eight visible tabs
+on one server, or more than about six visible tabs connected to one host in a
+browser, may leave some tabs asking instead. When the server stops, one line
+says it cannot be reached, and the page asks again every ten seconds; the line
+goes once the server answers. A read that
 comes back refused or cut short (`busy`, `timeout`, a Cancel) is asked again on
 the next look, so the list never stays on the rows from before a change.
+
+## Driven from another terminal
+
+`moai ctl ls` lists each visible tab as a separate `web` window. Use its id with
+`moai ctl state -t <id> --json` or the [control commands](ctl.md) to select a row,
+change the tab, press its keys, resize the detail, or change its theme. The server
+sends a control request down that tab's event stream and waits for its reply.
+Hiding a tab closes the stream, so hidden tabs are absent from `ls` and cannot
+be changed. Showing it again gives it a new id. Only a browser connected from
+loopback joins the ctl tab registry. A page opened from a remote address can
+read the tracker but receives no ctl token or requests and is absent from `ls`.
+Control never opens or closes a browser window.
+
+The page replies only through a same-origin POST carrying the tab's stream
+token; the server limits its JSON body to 1 MiB. The key help, a human-focused
+input or menu, a half-typed key sequence or an open sort editor returns
+`person_busy`. Tracker writes requested by ctl carry the caller's identity; read
+marks remain the web server owner's, so `moai ctl read --all` marks the owner's
+NEW rows. Column moves
+and notes remain CLI commands (`moai mv`, `moai note`).
 
 ## See it from another machine
 
@@ -274,6 +306,10 @@ Then open `http://localhost:6624/` on your own machine. This is the way to go
 rather than `--host 0.0.0.0`, which serves the tracker to anyone on the network —
 and lets them move its planned days, since a Gantt bar dragged on their page
 writes the tracker as yours does.
+The browser tab reached through this SSH forward appears to the server as a
+loopback peer and is visible to `moai ctl` running on the host machine; the ctl
+socket is local to that machine. A direct remote tab on `--host 0.0.0.0` is not
+a ctl target.
 
 Whatever it binds, the server answers only requests whose `Host` header is
 `localhost` or an IP address. A request with another name — what a page on some
@@ -295,7 +331,9 @@ comes from the start. The rest come from the server while it runs:
 | `method_not_allowed` | Anything but `GET`, except the `POST` that marks rows read or moves a Gantt bar's days; the `Allow` header names the method the path takes (`POST` on those write paths, `GET` elsewhere) |
 | `bad_input` | A request the server could not read, one carrying a body, or a query this path does not take or whose value is the wrong shape (a `sort` moai does not know, a flag other than `1`, a Gantt move that is not an edge and a whole number of days, a Gantt day that is not `YYYY-MM-DD`, a time zone that is not a zone name or an offset) |
 | `not_found` | No such path |
-| `busy` | Too many requests at once; try again |
+| `busy` | Too many requests at once (32 ordinary requests or eight event streams); the page falls back to stamp polling when its stream is refused |
+| `gone` | The target web tab closed, or its ctl request expired before the reply arrived |
+| `no_actor` | A ctl-requested write had no caller identity; set `--user 'Name (email)'` or `MOAI_ACTOR` on the ctl command |
 | `timeout` | The child `moai` did not answer in time |
 | `too_large` | The child's answer was larger than the server will pass on |
 | `error` | The child `moai` could not be run, or died before it answered |
@@ -404,4 +442,4 @@ lanes.
 The page does not show the stats screen, and what it writes is a Gantt bar's days
 and your read marks.
 
-Decided in: moai-skjr, moai-e9hi, moai-8r2l, moai-0aa7, moai-jshy, moai-d86e.3ud, moai-ijjd, moai-lj8g, moai-ekg6 moai-mkzo moai-i07x
+Decided in: moai-skjr, moai-e9hi, moai-8r2l, moai-0aa7, moai-jshy, moai-d86e.3ud, moai-ijjd, moai-lj8g, moai-ekg6 moai-mkzo moai-i07x moai-zgc1

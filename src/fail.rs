@@ -44,6 +44,11 @@ pub mod code {
     pub const BUSY: &str = "busy";
     pub const TIMEOUT: &str = "timeout";
     pub const TOO_LARGE: &str = "too_large";
+    pub const NO_WINDOW: &str = "no_window";
+    pub const GONE: &str = "gone";
+    pub const REFUSED: &str = "refused";
+    pub const PERSON_BUSY: &str = "person_busy";
+    pub const UNSUPPORTED: &str = "unsupported";
 }
 
 impl Fail {
