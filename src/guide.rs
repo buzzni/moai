@@ -5038,8 +5038,9 @@ Root: <root>
    with TaskStop
 3. Hold what came back against "Five places the review keeps finding" in <steps file>, and
    look yourself at any of the five the review left out
-4. Leave the reviewer's own words on the review issue — write them to a file in your
-   scratchpad and run moai -C "<root>" note <review id> -b - < <that file>
+4. Leave the reviewer's own words on the review issue — write them to
+   `<scratchpad>/<epic>/review.md`, beside this epic's `brief.md`, and run
+   moai -C "<root>" note <review id> -b - < "<scratchpad>/<epic>/review.md"
 {over}
 5. Hand back with SubagentHandback. The first line is Model ran: anthropic/<your real model
    name> — the name in your system prompt, not an alias. When 1 ran the review by hand, the
@@ -5769,6 +5770,11 @@ notes), then
 ## The review brief
 
 In a subagent, 7 raises the review on this prompt — copy it whole and fill every slot.
+Create `<scratchpad>/<epic>/` first and save the filled prompt as
+`<scratchpad>/<epic>/brief.md`. Pass that absolute path to the review subagent with
+instructions to read the whole file before starting. Use this epic's directory for all
+review scratch files; a shared `<scratchpad>/brief.md` lets parallel epics overwrite each
+other's prompts.
 
 {brief}
 "#
@@ -7850,6 +7856,21 @@ stop sending outside work while a release runs",
             "중첩 서브에이전트가 딴 에이전트 프로그램으로 읽힌다"
         );
         assert!(worker_branches().contains(&indent(&prompt, "    ")), "일꾼 글에 리뷰 브리프가 없다");
+        // 에픽 둘이 같은 scratchpad 에서 돌아도 브리프와 원문이 서로 덮이지 않는다(moai-i26i.p00).
+        let branches = worker_branches();
+        let review = section(&branches, "## The review brief");
+        for step in [
+            "Create `<scratchpad>/<epic>/` first",
+            "`<scratchpad>/<epic>/brief.md`",
+            "Pass that absolute path to the review subagent",
+            "read the whole file before starting",
+        ] {
+            assert!(review.contains(step), "리뷰 브리프의 에픽별 전달 절차가 없다 — {step}");
+        }
+        assert!(
+            prompt.contains("moai -C \"<root>\" note <review id> -b - < \"<scratchpad>/<epic>/review.md\""),
+            "리뷰 원문을 에픽별 파일에서 올리지 않는다"
+        );
         for piece in ["Skill(code-review, \"<grade> --fix <root>/.worktrees/<epic>\")", "TaskStop", "background fork"] {
             assert!(prompt.contains(piece), "리뷰 브리프에 {piece} 가 없다");
         }
