@@ -34205,3 +34205,56 @@ fn heartbeat_dialects_missing_session_and_zero_threshold() {
     hook_at_home(&s, s.path(), None, &[], "session-start", &serde_json::json!({"cwd":s.path()}).to_string());
     assert_eq!(std::fs::read_dir(&dir).unwrap().count(), before);
 }
+
+#[test]
+fn terminal_takeover_clears_a_lost_session_without_a_new_pick() {
+    let s = init("terminal-heartbeat-takeover");
+    let id = field(&ok(s.path(), &["add", "terminal takeover", "--json"]), "id");
+    ok(s.path(), &["mv", &id, "in_progress"]);
+    let config = s.path().join("hookcfg/config.toml");
+    let input = serde_json::json!({"session_id":"old-holder", "cwd":s.path(), "tool_name":"Read", "tool_input":{"file_path":"/tmp/outside"}}).to_string();
+    hook_at_home(&s, s.path(), None, &[], "pre-tool-use", &input);
+    let dir = std::fs::read_dir(config.parent().unwrap().join("beats")).unwrap().next().unwrap().unwrap().path();
+    let beat = dir.join("old-holder");
+    let picks = config.parent().unwrap().join("picks").join(dir.file_name().unwrap());
+    std::fs::create_dir_all(&picks).unwrap();
+    let record = picks.join("old-holder");
+    // A real ordering nonce with a fixed tracker-clock stamp; MOAI_NOW and mtime deliberately use different clocks.
+    let nonce = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+    std::fs::write(&record, format!("{nonce}\t{id}\t1789099923\n")).unwrap();
+    std::fs::File::open(&beat)
+        .unwrap()
+        .set_modified(std::time::SystemTime::now() - std::time::Duration::from_secs(3600))
+        .unwrap();
+    let call = |args: &[&str]| {
+        let output = staged(args).current_dir(s.path()).env("MOAI_CONFIG", &config).output().unwrap();
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        serde_json::from_slice::<serde_json::Value>(&output.stdout).unwrap()
+    };
+    assert_eq!(call(&["show", &id, "--json"])["session"]["state"], "lost");
+    assert!(call(&["status", "--json"])["warnings"].as_array().unwrap().iter().any(|w| w["kind"] == "lost_session"));
+    let old_pick = std::fs::read(&record).unwrap();
+    let output =
+        staged(&["mv", &id, "in_progress", "--from", "in_progress", "--take", "-m", "person approved", "--json"])
+            .current_dir(s.path())
+            .env("MOAI_CONFIG", &config)
+            .env("MOAI_NOW", "2026-09-11T04:12:04Z")
+            .env("MOAI_ACTOR", "Successor (successor@example.com)")
+            .env_remove("CLAUDE_CODE_SESSION_ID")
+            .env_remove("CODEX_THREAD_ID")
+            .env_remove("ANTIGRAVITY_CONVERSATION_ID")
+            .output()
+            .unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert_eq!(std::fs::read(&record).unwrap(), old_pick, "terminal wrote no new pick");
+    let after = call(&["show", &id, "--json"]);
+    assert_eq!(after["assignee"], "Successor");
+    assert_eq!(after["status_since"], NOW);
+    assert!(after.get("session").is_none(), "{after}");
+    assert!(!call(&["status", "--json"])["warnings"].as_array().unwrap().iter().any(|w| w["kind"] == "lost_session"));
+    let rows = call(&["show", "--all", "--json", "--fields", "id,session"]);
+    assert!(rows.as_array().unwrap().iter().find(|r| r["id"] == id).unwrap().get("session").is_none());
+    // A later hook can re-establish the holder using the existing pick format, with no snapshot-field addition.
+    std::fs::write(&record, format!("{}\t{id}\t1789099924\n", nonce + 1)).unwrap();
+    assert_eq!(call(&["show", &id, "--json"])["session"]["state"], "lost");
+}

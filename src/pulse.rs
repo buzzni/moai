@@ -172,9 +172,21 @@ fn read_at(picks: &Path, beats: &Path, issues: &[Issue], cfg: &Config, mut pulse
         .filter_map(Result::ok)
         .filter_map(|e| Some((e.file_name().to_str()?.to_owned(), regular_text(&e.path())?.1)))
         .collect();
-    let since: BTreeMap<_, _> =
-        issues.iter().filter_map(|i| Some((i.id.as_str(), crate::model::parse_rfc3339(&i.status_since)?))).collect();
-    let holders = Picks::holders(files.iter().map(|(s, t)| (s, t)), &|id| since.get(id).copied());
+    let rows: BTreeMap<_, _> = issues.iter().map(|i| (i.id.as_str(), i)).collect();
+    // A terminal takeover changes updated_at without moving the column or writing a session pick. Compare the
+    // existing tracker-clock stamp, not the wall-clock ordering nonce (MOAI_NOW may differ). Legacy records without
+    // a stamp use their wall time. This cutoff has no status-move slack: a later snapshot write ends the observation.
+    // Filter before choosing a holder, so an old certain pick cannot hide a fresh tentative pick after that write.
+    let accepts = |id: &str, holder: &crate::hook::Holder| {
+        let picked_at = holder.stamp_secs.or_else(|| i64::try_from(holder.at_nanos / 1_000_000_000).ok());
+        !matches!((picked_at, rows.get(id).and_then(|i| crate::model::parse_rfc3339(&i.updated_at))),
+            (Some(picked_at), Some(updated_at)) if updated_at > picked_at)
+    };
+    let holders = Picks::holders(
+        files.iter().map(|(s, t)| (s, t)),
+        &|id| rows.get(id).and_then(|i| crate::model::parse_rfc3339(&i.status_since)),
+        &accepts,
+    );
     let mut cache = BTreeMap::new();
     for (id, holder) in holders {
         if !eligible.contains(id.as_str()) || safe_sid_of(&holder.session).as_deref() != Some(holder.session.as_str()) {
@@ -334,5 +346,57 @@ mod tests {
             std::os::unix::fs::symlink(picks.join("sid"), &file).unwrap();
             assert!(read().beats.is_empty());
         }
+    }
+    #[test]
+    fn a_later_snapshot_write_ends_a_hold_until_a_new_pick() {
+        let temp = crate::scratch::Scratch::new("pulse-snapshot-takeover");
+        let picks = temp.path().join("picks");
+        let beats = temp.path().join("beats");
+        std::fs::create_dir(&picks).unwrap();
+        std::fs::create_dir(&beats).unwrap();
+        let cfg = Config::parse("prefix = \"moai\"\n").unwrap();
+        let mut row = Issue::new(
+            "moai-a".into(),
+            "A".into(),
+            crate::model::Kind::Issue,
+            crate::model::Status::new("in_progress"),
+            "1970-01-01T02:46:40Z",
+        );
+        let record = picks.join("sid");
+        // The ordering nonce deliberately differs from the tracker clock: compare the stored tracker stamp.
+        std::fs::write(&record, Picks::line(99_000_000_000_000, Some(10000), &row.id, true)).unwrap();
+        let file = beats.join("sid");
+        std::fs::write(&file, "claude\tStop\n").unwrap();
+        at(&file, 10000);
+        let read = |row: &Issue| {
+            read_at(
+                &picks,
+                &beats,
+                std::slice::from_ref(row),
+                &cfg,
+                Pulse { threshold_secs: 1800, ..Default::default() },
+            )
+        };
+        let pulse = read(&row);
+        assert!(crate::report::session_of(&row, &cfg, &pulse, 11801).unwrap().lost);
+        assert!(!crate::report::session_of(&row, &cfg, &pulse, 10001).unwrap().lost);
+        row.updated_at = crate::model::format_rfc3339(10001);
+        assert!(read(&row).beats.is_empty(), "one second after a pick is already a later write");
+        at(&file, 13600);
+        assert!(read(&row).beats.is_empty(), "a heartbeat alone must not reclaim a stale pick");
+        std::fs::write(&record, Picks::line(99_000_000_000_001, Some(10001), &row.id, true)).unwrap();
+        let pulse = read(&row);
+        assert!(!crate::report::session_of(&row, &cfg, &pulse, 13601).unwrap().lost);
+        assert!(crate::report::session_of(&row, &cfg, &pulse, 15401).unwrap().lost);
+        // A stale certain pick must not mask a new tentative pick by a successor.
+        std::fs::write(&record, Picks::line(99_000_000_000_000, Some(10000), &row.id, true)).unwrap();
+        std::fs::write(picks.join("next"), Picks::line(99_000_000_000_001, Some(10001), &row.id, false)).unwrap();
+        std::fs::write(beats.join("next"), "codex\tPreToolUse\n").unwrap();
+        at(&beats.join("next"), 13600);
+        assert_eq!(read(&row).beats[&row.id].session, "next");
+        std::fs::remove_file(picks.join("next")).unwrap();
+        // Legacy records have no tracker-clock stamp; their existing wall timestamp is the only comparison.
+        std::fs::write(&record, Picks::line(10_000_000_000_000, None, &row.id, true)).unwrap();
+        assert!(read(&row).beats.is_empty());
     }
 }

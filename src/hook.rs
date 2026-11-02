@@ -6042,6 +6042,8 @@ pub struct Picks {
 pub struct Holder {
     pub session: String,
     pub at_nanos: u128,
+    /// Existing pick-record timestamp on the tracker clock; never written as a new field.
+    pub stamp_secs: Option<i64>,
     pub sure: bool,
 }
 
@@ -6095,6 +6097,7 @@ impl Picks {
     pub fn holders<S: AsRef<str>, T: AsRef<str>>(
         files: impl IntoIterator<Item = (S, T)>,
         since: &dyn Fn(&str) -> Option<i64>,
+        accept: &dyn Fn(&str, &Holder) -> bool,
     ) -> std::collections::BTreeMap<String, Holder> {
         let mut out: std::collections::BTreeMap<String, Holder> = Default::default();
         for (sid, text) in files {
@@ -6104,7 +6107,12 @@ impl Picks {
                 if id == Self::UNNAMED || !Self::current(stamp, since(id)) {
                     continue;
                 }
-                let holder = Holder { session: sid.as_ref().into(), at_nanos, sure };
+                let holder = Holder { session: sid.as_ref().into(), at_nanos, stamp_secs: stamp, sure };
+                // Filter observations before choosing the winner: a stale certain pick must not shadow a fresh
+                // tentative one. The caller owns the extra criterion; fold's ownership rules stay unchanged.
+                if !accept(id, &holder) {
+                    continue;
+                }
                 let replace = out
                     .get(id)
                     .is_none_or(|old| (sure, at_nanos, sid.as_ref()) > (old.sure, old.at_nanos, old.session.as_str()));
@@ -17916,16 +17924,17 @@ mod holder_tests {
         let certain = Picks::line(10, Some(1000), "a", true);
         let tentative = Picks::line(20, Some(1000), "a", false);
         let files = [("one", certain.as_str()), ("two", tentative.as_str())];
-        assert_eq!(Picks::holders(files, &|_| Some(1000))["a"].session, "one");
+        assert_eq!(Picks::holders(files, &|_| Some(1000), &|_, _| true)["a"].session, "one");
         assert!(Picks::fold("one", files, &|_| Some(1000), 20).mine.contains("a"));
         let older = Picks::line(9, Some(1000), "a", false);
         assert_eq!(
-            Picks::holders([("one", older.as_str()), ("two", tentative.as_str())], &|_| Some(1000))["a"].session,
+            Picks::holders([("one", older.as_str()), ("two", tentative.as_str())], &|_| Some(1000), &|_, _| true)["a"]
+                .session,
             "two"
         );
-        assert!(Picks::holders(files, &|_| Some(1061)).is_empty());
-        assert!(Picks::holders([("sid", "999\ta\t1000")], &|_| None).is_empty());
+        assert!(Picks::holders(files, &|_| Some(1061), &|_, _| true).is_empty());
+        assert!(Picks::holders([("sid", "999\ta\t1000")], &|_| None, &|_, _| true).is_empty());
         let unnamed = Picks::line(99, Some(1000), Picks::UNNAMED, true);
-        assert!(Picks::holders([("sid", unnamed)], &|_| None).is_empty());
+        assert!(Picks::holders([("sid", unnamed)], &|_| None, &|_, _| true).is_empty());
     }
 }

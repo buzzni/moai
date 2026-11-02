@@ -446,6 +446,11 @@ The same-column move records a pick too. For another person's row, ask first,
 then use `--take -m '<who approved>'`. To put work down, use `moai mv <id> <first-column>`
 or `moai defer <id> -m '<why>'`.
 
+A later snapshot write (including a terminal `--take`) ends the old pick's
+session observation. Without a new session pick the row becomes unknown, so
+its lost-session mark clears. A new pick at or after the write establishes the
+holder again; a heartbeat from the old session alone does not reclaim it.
+
 Without a heartbeat here the session is **unknown**, not lost: the row keeps
 turning as before. This includes older sessions, sessions without hooks and
 sessions on another machine. Heartbeats live beside the user config under
