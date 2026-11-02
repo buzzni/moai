@@ -268,6 +268,25 @@ test('a short Gantt fills the dates through zoom, fit and resize; its range ends
   assert.equal(root.querySelector('.g-range').textContent.split(' ~ ')[1], axisEnd)
 })
 
+test('a pane drawn with no width starts at today when it first gets one; the resize keeps that offset', () => {
+  let resize
+  const { root, view } = mount(null, build(), [0, 560], (win) => {
+    win.ResizeObserver = class {
+      constructor(callback) { resize = callback }
+      observe() {}
+      disconnect() {}
+    }
+  })
+  const box = root.querySelector('.g-scroll')
+  assert.equal(box.scrollLeft, 0, 'the premise — a pane with no width is not placed yet')
+  Object.defineProperty(box, 'clientWidth', { get: () => 2000, configurable: true })
+  resize()
+  const placed = box.scrollLeft
+  assert.ok(placed > 0, 'the first show did not place the dates at today')
+  view.command('gantt.today')
+  assert.equal(placed, box.scrollLeft, 'the resize put back the offset from before the first placement')
+})
+
 test('the grid draws the whole tree: id, glyph, branch, title, progress, assignee', () => {
   const { root } = mount()
   const rows = [...root.querySelectorAll('.g-row')]
@@ -1201,9 +1220,9 @@ test('zoom, fit with a new step and Ctrl+wheel each build one window at their fi
 
 test('edge moves use the tree plan even when the list read disagrees about absent edges', async () => {
   for (const [planned, fields, grip] of [
-    [own('2026-10-26', null), { due_on: '2026-10-30' }, 'end', '--due none'],
-    [own('2026-10-26', '2026-10-27'), { starts_on: '' }, 'start', '--shift-start 1'],
-    [own('2026-10-26', '2026-10-27'), {}, 'end', '--shift-due -1'],
+    [own('2026-10-26', null), { due_on: '2026-10-30' }, 'end'],
+    [own('2026-10-26', '2026-10-27'), { starts_on: '' }, 'start'],
+    [own('2026-10-26', '2026-10-27'), {}, 'end'],
   ]) {
     const rows = ROWS.map((r) => r.id === 'e1.c' ? { ...r, ...fields } : r)
     const gantt = { ...GANTT, 'e1.c': g('e1.c', { planned }) }
@@ -1219,11 +1238,11 @@ test('edge moves use the tree plan even when the list read disagrees about absen
 })
 
 
-test('filled edges stay derived through a whole-bar move and undo; resizing creates only the chosen edge', async () => {
+test('filled edges stay derived through a whole-bar move; resizing creates only the chosen edge', async () => {
   for (const [planned, grip, edge] of [
-    [{ ...own('2026-10-20', '2026-10-27'), start_filled: true }, 'body', 'end', '--shift-due -1'],
-    [own('2026-10-26', null), 'body', 'start', '--shift-start -1'],
-    [{ ...own('2026-10-20', '2026-10-27'), start_filled: true }, 'start', 'start', '--start none'],
+    [{ ...own('2026-10-20', '2026-10-27'), start_filled: true }, 'body', 'end'],
+    [own('2026-10-26', null), 'body', 'start'],
+    [{ ...own('2026-10-20', '2026-10-27'), start_filled: true }, 'start', 'start'],
   ]) {
     const gantt = { ...GANTT, 'e1.c': g('e1.c', { planned }) }
     const { root, dom, moves } = writing(ROWS, gantt)

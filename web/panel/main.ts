@@ -142,9 +142,11 @@ async function start(): Promise<void> {
    * refresher does (data/refresh.ts BACKOFF_MS): each try is a `tui --deep` child, and each failure is told again.
    */
   let chartFailures = 0
-  const sameTreeView = (state: State, sort: State['sort'], view: State['view'], zone?: string): boolean =>
+  // `zone` is what the read asked in; undefined is a zone too (the browser's own, data/zone.ts), so whether to
+  // compare it is said apart.
+  const sameTreeView = (state: State, sort: State['sort'], view: State['view'], zoned: boolean, zone: string | undefined): boolean =>
     state.sort === sort && state.view.worktree === view.worktree && state.view.showArchived === view.showArchived &&
-    (zone === undefined || zoneNow() === zone)
+    (!zoned || zoneNow() === zone)
   async function ensureChart(): Promise<void> {
     const state = store.getState()
     const board = state.board.value
@@ -164,7 +166,7 @@ async function start(): Promise<void> {
     chartReading = false
     const after = store.getState()
     const current = generation === loads && !after.board.loading && after.board.value?.rows === board.rows &&
-      sameTreeView(after, sort, view, zone)
+      sameTreeView(after, sort, view, true, zone)
     if (current && result.ok) {
       treeHasGantt = true
       chartFailures = 0
@@ -264,7 +266,7 @@ async function start(): Promise<void> {
     // So does the worktree overlay, or the archive shown, turned while it ran (the tree is asked for both).
     // The zone picked while it ran is the same: the tree's `overdue` was judged in the zone before.
     const after = store.getState()
-    if (!sameTreeView(after, sort, view, gantt ? zone : undefined)) setTimeout(() => void refresher.refresh(), 0)
+    if (!sameTreeView(after, sort, view, gantt, zone)) setTimeout(() => void refresher.refresh(), 0)
     else if (after.tab === 'gantt' && !gantt) void ensureChart()
     return true
   }

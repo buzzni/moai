@@ -645,6 +645,8 @@ pub(super) fn commit_plan(app: &mut App) {
     app.load_read();
     let seen = app.site.seen.clone();
     let root = app.site.repo.as_ref().map(|repo| repo.root.clone());
+    // Asked before the write lock, as `moai edit` does — it may start git.
+    let undo_here = root.as_deref().is_some_and(crate::text::undo_here);
     let mut written: Option<crate::model::Issue> = None;
     let wrote = app.write(commit_plan, |issues, cfg, _, _| {
         // **시각은 락을 쥔 뒤에 뜬다**(`cmd::mv` 의 moai-u5bk.3wq 와 같은 자, 리뷰) — 밖에서 뜨면 그새 옆이 담은 줄보다 이른 도장이
@@ -688,7 +690,7 @@ pub(super) fn commit_plan(app: &mut App) {
             _ => None,
         };
         if let Some(root) = &root {
-            undo = crate::text::edit_command(root, &id, &crate::model::date_undo(&before, &after, shift));
+            undo = crate::text::edit_command(root, undo_here, &id, &crate::model::date_undo(&before, &after, shift));
         }
         Ok((Vec::new(), Touched { id: id.clone(), done }))
     });

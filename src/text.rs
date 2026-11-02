@@ -170,17 +170,28 @@ pub fn shell_word(s: &str) -> String {
 }
 
 /// A copyable date undo targets the tracker explicitly, regardless of the caller's cwd.
-pub fn edit_command(root: &std::path::Path, id: &str, args: &[String]) -> Option<String> {
+///
+/// `here` is [`undo_here`]: a write that `MOAI_HERE` kept on a linked worktree's own tracker says so too — pasted
+/// without it, `-C <that worktree>` moves to the main checkout's tracker, which holds the same ids.
+pub fn edit_command(root: &std::path::Path, here: bool, id: &str, args: &[String]) -> Option<String> {
     if args.is_empty() {
         return None;
     }
     let root = crate::path::slashed(&root.to_string_lossy(), cfg!(windows));
     Some(format!(
-        "moai -C {} edit {} {}",
-        quoted(&root),
+        "{}moai -C {} edit {} {}",
+        if here { "MOAI_HERE=1 " } else { "" },
+        shell_word(&root),
         quoted(id),
         args.iter().map(|s| quoted(s)).collect::<Vec<_>>().join(" ")
     ))
+}
+
+/// Does a date undo for `root` have to carry `MOAI_HERE=1` ([`edit_command`])? **Ask it before taking the write
+/// lock** — telling a linked worktree's own tracker apart reads git's files and may start git
+/// ([`crate::worktree::tracker_root`]), and a read held under the lock keeps the next session's write waiting.
+pub fn undo_here(root: &std::path::Path) -> bool {
+    crate::store::here_wanted() && crate::worktree::tracker_root(root).is_some()
 }
 
 /// 낱말 하나를 **껍데기가 도로 그 낱말 하나로 읽도록** 감싼다. [`shell_word`] 는 여기에 경로의
@@ -301,6 +312,22 @@ mod tests {
         assert_eq!(shell_word("/w/\u{1b}[2J"), r"$'/w/\x1b[2J'");
         assert_eq!(shell_word("/w/\u{85}"), r"$'/w/\xc2\x85'");
         assert!(!shell_word("/w/a\nb").chars().any(char::is_control), "한 줄 자리에 제어문자가 샜다");
+    }
+
+    /// A date undo pinned to a worktree's own tracker carries `MOAI_HERE=1`; nothing to undo is no line.
+    #[test]
+    fn edit_command_names_the_tracker_it_wrote() {
+        let args = ["--shift".to_string(), "-1".to_string()];
+        let root = std::path::Path::new("/w/My Projects");
+        assert_eq!(
+            edit_command(root, false, "argos-0001", &args).as_deref(),
+            Some("moai -C '/w/My Projects' edit argos-0001 --shift -1")
+        );
+        assert_eq!(
+            edit_command(root, true, "argos-0001", &args).as_deref(),
+            Some("MOAI_HERE=1 moai -C '/w/My Projects' edit argos-0001 --shift -1")
+        );
+        assert_eq!(edit_command(root, true, "argos-0001", &[]), None);
     }
 
     /// **감싼 것을 껍데기가 풀면 원문이다.** 모양만 보는 단언은 따옴표 규칙을 잘못 외워도

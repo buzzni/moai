@@ -26,8 +26,11 @@ export const planEndpoint = (id: string, change: PlanChange): Endpoint => ({
   query: 'day' in change ? { day: change.day } : 'start' in change ? { start: change.start } : { edge: change.edge, days: String(change.days) },
 })
 
-/** `said`: what moai wrote on stderr beside the answer — the rows a pulled-in deadline now overtakes. */
-/** `undo` is computed from the locked before/after pair and names the tracker with -C. */
+/**
+ * `said`: what moai wrote on stderr beside the answer — the rows a pulled-in deadline now overtakes. `undo`: the
+ * `moai edit` line that puts the move back, built by the write from the row it read under the lock; it names the
+ * tracker with -C and guards an absolute restore with --if-start/--if-due. Absent when the write moved no date.
+ */
 export type Planned = { ok: true; undo?: string; said?: string[] } | { ok: false; outcome: Outcome }
 
 export async function writePlan(client: Client, id: string, change: PlanChange): Promise<Planned> {

@@ -1492,7 +1492,7 @@ pub fn date_undo(before: &Issue, after: &Issue, shift: Option<(Edge, i64)>) -> V
     }
     // A shift creates at most one edge and moves no other edge at the same time.
     if let Some(&(edge, days)) = relative.first() {
-        let flag = if relative.len() == 2 { "--shift" } else { edge.shift_flag() };
+        let flag = if relative.len() == 2 { Edge::Body } else { edge }.shift_flag();
         args.extend([flag.to_string(), (-days).to_string()]);
     }
     args

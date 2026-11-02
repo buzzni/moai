@@ -117,9 +117,9 @@ pub struct Range {
     pub to: String,
 }
 
-/// The rows and the span of all of them, as one value. Only the tests read it now: the explorer and `tui --json` take
-/// [`rows`] and measure the rows they keep with [`RangeContext`] (moai-w7ms.lrt). Ungated, the bin target's dead_code
-/// lint fails CI's `clippy --all-targets -- -D warnings`.
+/// The rows and the span of all of them, as one value. Only the tests read it now: the explorer takes [`rows`] and
+/// `tui --json` takes [`rows_at`], and they measure the rows they keep with [`RangeContext`] (moai-w7ms.lrt). Ungated,
+/// the bin target's dead_code lint fails CI's `clippy --all-targets -- -D warnings`.
 #[cfg(test)]
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Gantt<'a> {
@@ -289,7 +289,8 @@ fn made_day(i: &Issue, zone: &Zone) -> Option<String> {
 ///
 /// - 빈 시작은 만든 날([`made_day`])이고, 기한이 그보다 이르면 기한 날이다. 만든 날을 못 읽으면 기한 날이다
 /// - 빈 끝은 시작 날이다
-/// - **채움 표시는 "적힌 날이 없다" 하나만 뜻한다** — 화면이 그것으로 쓸 쪽과 되돌릴 명령을 고른다(web 의 끌기·`undoOf`).
+/// - **채움 표시는 "적힌 날이 없다" 하나만 뜻한다** — 화면이 그것으로 쓸 쪽을 고른다(web 의 끌기). 되돌릴 명령은
+///   쓰기가 락 안의 줄로 낸다(`model::date_undo`).
 ///   시작이 기한보다 늦게 적힌 옛 줄(쓰기는 거절하지만 읽기는 관대하다)도 시작은 적힌 날이다: 채웠다고 하면 되돌리기가
 ///   `--start none` 이 되어 사람이 적은 시작을 지운다. 거꾸로 선 막대는 그리는 쪽이 시작의 하루로 줄인다
 pub fn own_plan(i: &Issue, zone: &Zone) -> Option<Planned> {

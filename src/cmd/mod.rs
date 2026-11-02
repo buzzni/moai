@@ -1024,7 +1024,6 @@ fn surface_issue<S: serde::Serializer>(issue: &crate::model::Issue, serializer: 
 /// 결정). 모르는 필드 보존은 파일의 약속이고, 출력의 약속은 우리 키가 참이라는 것이다. 파일은
 /// 그대로다(`moai status` 가 비춘다).
 pub const OURS: &[&str] = &[
-    "undo",
     // `Row` 가 제 필드로 곁들이는 것.
     "derived_status",
     "derived_epic",
@@ -1056,9 +1055,10 @@ pub const OURS: &[&str] = &[
     // `show --json`(목록도 하나도)이 곁들이는 선 마일스톤과 아카이브(moai-wk7i.rmc).
     "derived_milestone",
     "archived",
-    // `edit --json` 이 곁들이는 남은 소속.
+    // `edit --json` 이 곁들이는 남은 소속과 날 되돌리기.
     "inherited_epic",
     "inherited_milestone",
+    "undo",
     // `ready --json` 의 `others` 가 곁들이는 까닭(moai-0zjo, [`Other`]).
     "owner",
     "session",

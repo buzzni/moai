@@ -296,6 +296,10 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
   let measuredWidth = 0
   let leftAnchor = 0
   let resizeEnd: ReturnType<typeof setTimeout> | undefined
+  /** An offset read at a width the anchor was not measured at may be the browser's clamp: it does not move the anchor. */
+  const noteAnchor = (): void => {
+    if (!measuredWidth || scroll.clientWidth === measuredWidth) leftAnchor = scroll.scrollLeft
+  }
 
   function resizeAxis(left: number, reserve = 0): void {
     if (!axis || !base || !built) return
@@ -603,7 +607,7 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
     })
     for (const tick of built.top) tick.el.style.paddingLeft = tick.from < v0 && tick.to > v0 ? `${v0 - tick.from + 4}px` : ''
     rangeText.textContent = `${dayText(wallAt(axis, v0))} ~ ${dayText(wallAt(axis, Math.min(v1, widthOf(axis))))}`
-    if (!measuredWidth || scroll.clientWidth === measuredWidth) leftAnchor = scroll.scrollLeft
+    noteAnchor()
   }
 
   /** Only the cursor moved: the selection mark, the arrows, the row in view. */
@@ -1061,7 +1065,7 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
   paintGrid()
   let frame = 0
   const onScroll = () => {
-    if (!measuredWidth || scroll.clientWidth === measuredWidth) leftAnchor = scroll.scrollLeft
+    noteAnchor()
     if (!win?.requestAnimationFrame) return paintView()
     win.cancelAnimationFrame(frame)
     frame = win.requestAnimationFrame(paintView)
@@ -1070,9 +1074,12 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
   const observer = win && 'ResizeObserver' in win ? new win.ResizeObserver(() => {
     if (!scroll.clientWidth) return
     const changed = measuredWidth !== scroll.clientWidth
-    const left = measuredWidth && changed ? leftAnchor : scroll.scrollLeft
+    let left = measuredWidth && changed ? leftAnchor : scroll.scrollLeft
+    const placing = !positioned
     paintGrid()
     position()
+    // A first show places the dates at today: that is where this view starts, not an offset to put back over it.
+    if (placing && positioned) left = scroll.scrollLeft
     if (changed) {
       // A screen of temporary dates absorbs the next resize frames. A settled
       // resize trims it back; it never becomes the next zoom's range or anchor.

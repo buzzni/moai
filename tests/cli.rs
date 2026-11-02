@@ -34437,12 +34437,53 @@ fn date_undo_targets_its_project_and_refuses_later_writes() {
     assert_eq!(std::fs::read(target.join(".moai/issues.jsonl")).unwrap(), before);
 }
 
-/// Observe the child waiting on our lock, then change the row as the lock's owner.
+/// A write `MOAI_HERE` kept on a linked worktree's own tracker hands back an undo that says so (review
+/// moai-yigx.2hv 1). Without it, `-C <worktree>` moves to the main checkout's tracker, which holds the same id.
+/// The copied line is run from the main checkout with no `MOAI_HERE` of its own.
+#[cfg(unix)]
+#[test]
+fn date_undo_of_a_worktree_tracker_names_moai_here() {
+    let s = Scratch::new("undohere");
+    let main = s.path().join("main");
+    std::fs::create_dir_all(&main).unwrap();
+    git(&main, &["init", "-q"]);
+    ok(&main, &["init", "argos"]);
+    let id = field(&ok(&main, &["add", "both trackers", "--start", "2026-09-20", "--json"]), "id");
+    git(&main, &["add", "-A"]);
+    git(&main, &["commit", "-q", "-m", "split"]);
+    git(&main, &["worktree", "add", "-q", ".worktrees/feat", "-b", "feat"]);
+    let inside = main.join(".worktrees/feat");
+    let main_file = main.join(".moai/issues.jsonl");
+    let main_before = std::fs::read(&main_file).unwrap();
+
+    let out = ok_here(&inside, &["edit", &id, "--start", "2026-09-21", "--json"]);
+    let undo = json_of(&out)["undo"].as_str().unwrap().to_string();
+    assert!(undo.starts_with("MOAI_HERE=1 moai -C "), "{undo}");
+    assert!(undo.ends_with("--start 2026-09-20 --if-start 2026-09-21"), "{undo}");
+    let mut cmd = isolated("bash");
+    cmd.current_dir(&main)
+        .arg("-c")
+        .arg(format!("MOAI_HERE=1 \"$1\" {}", undo.strip_prefix("MOAI_HERE=1 moai ").unwrap()))
+        .arg("undo")
+        .arg(BIN);
+    let ran = cmd.output().unwrap();
+    assert!(ran.status.success(), "{}", text(&ran));
+    assert!(issues(&inside).contains("\"starts_on\":\"2026-09-20\""), "the worktree's row was not put back");
+    assert_eq!(std::fs::read(&main_file).unwrap(), main_before, "the undo reached the main checkout");
+
+    // A write that went to the main checkout names it, with no `MOAI_HERE` to carry.
+    let out = ok(&inside, &["edit", &id, "--start", "2026-09-22", "--json"]);
+    let undo = json_of(&out)["undo"].as_str().unwrap().to_string();
+    assert!(undo.starts_with("moai -C "), "{undo}");
+}
+
+/// Observe the child opening our held lock, then change the row as the lock's owner.
 /// A guard evaluated before taking the lock would accept the obsolete value.
 #[cfg(target_os = "linux")]
 #[test]
 fn conditional_dates_recheck_after_waiting_for_the_write_lock() {
     use fs2::FileExt;
+    use std::os::unix::fs::MetadataExt;
     let s = init("conditional-lock");
     let id = add(s.path(), &["locked", "--start", "2026-09-20"]);
     let lock = std::fs::OpenOptions::new().read(true).write(true).open(s.path().join(".moai/lock")).unwrap();
@@ -34453,14 +34494,22 @@ fn conditional_dates_recheck_after_waiting_for_the_write_lock() {
         .stderr(Stdio::piped())
         .spawn()
         .unwrap();
+    let held = lock.metadata().unwrap();
     let until = std::time::Instant::now() + std::time::Duration::from_secs(3);
     loop {
-        let waiting = std::fs::read_to_string(format!("/proc/{}/wchan", child.id())).unwrap_or_default();
-        if waiting.contains("nanosleep") {
+        // The descriptor exists before either a polling or blocking flock can
+        // acquire our held lock. Match its file identity, not a kernel wait name.
+        let opened = std::fs::read_dir(format!("/proc/{}/fd", child.id()))
+            .into_iter()
+            .flatten()
+            .flatten()
+            .filter_map(|entry| std::fs::metadata(entry.path()).ok())
+            .any(|file| file.dev() == held.dev() && file.ino() == held.ino());
+        if opened {
             break;
         }
-        assert!(child.try_wait().unwrap().is_none(), "child exited before waiting on the lock");
-        assert!(std::time::Instant::now() < until, "child never waited on the held lock: {waiting}");
+        assert!(child.try_wait().unwrap().is_none(), "child exited before opening the lock");
+        assert!(std::time::Instant::now() < until, "child never opened the held lock");
         std::thread::sleep(std::time::Duration::from_millis(5));
     }
     let file = s.path().join(".moai/issues.jsonl");

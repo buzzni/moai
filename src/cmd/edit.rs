@@ -182,6 +182,8 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
         .map(|a| super::assignee_arg(a, || model::actor(ctx.user.as_deref(), &repo.root)))
         .transpose()
         .map_err(|e| Fail::no_actor(&e, lang))?;
+    // Whether the date undo names `MOAI_HERE` is asked outside the lock too — it may start git.
+    let undo_here = crate::text::undo_here(&repo.root);
 
     // Read outside the tracker lock; compare this snapshot to the row actually read under it.
     let read_config = crate::user_config::path();
@@ -408,7 +410,12 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
             Ok((
                 vec![],
                 Edited {
-                    undo: crate::text::edit_command(&repo.root, &out.id, &model::date_undo(&before, &out, shift)),
+                    undo: crate::text::edit_command(
+                        &repo.root,
+                        undo_here,
+                        &out.id,
+                        &model::date_undo(&before, &out, shift),
+                    ),
                     issue: out,
                     was_read,
                     epic,
