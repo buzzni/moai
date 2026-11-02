@@ -96,13 +96,25 @@ pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
         // `--no-gantt` 는 그 값과 거르개 문맥 셈을 함께 뺀다 — 간트를 안 보이는 웹 탭은 트리만 읽는다.
         let wh = (deep && !no_gantt).then(|| ground.here(&load.issues));
         let gantt = wh.as_ref().map(|wh| {
-            crate::report::gantt::rows(&load.issues, &index, wh, &repo.config, &crate::model::now(), ctx.zone())
+            let positions: std::collections::BTreeSet<usize> = entries.iter().filter_map(|(e, _)| e.at()).collect();
+            crate::report::gantt::rows_at(
+                &load.issues,
+                &index,
+                wh,
+                &repo.config,
+                &crate::model::now(),
+                ctx.zone(),
+                positions,
+            )
+            .into_iter()
+            .map(|row| (row.at, row))
+            .collect::<std::collections::BTreeMap<_, _>>()
         });
         let rows: Vec<Row> = entries
             .into_iter()
             .map(|(e, home)| {
                 let mut row = Row::of(&index, &load.issues, &states, &e, home, ctx.lang());
-                row.gantt = gantt.as_ref().zip(e.at()).map(|(g, at)| &g[at]);
+                row.gantt = gantt.as_ref().zip(e.at()).and_then(|(g, at)| g.get(&at));
                 row
             })
             .collect();

@@ -162,6 +162,20 @@ pub fn rows<'a>(
     now: &str,
     zone: &Zone,
 ) -> Vec<Row<'a>> {
+    rows_at(all, index, wh, cfg, now, zone, 0..all.len())
+}
+
+/// Measure only requested rows, preserving the complete context for inherited group
+/// plans, actual spans, progress and blocking. Returned rows retain their original `at`.
+pub fn rows_at<'a>(
+    all: &'a [Issue],
+    index: &Index,
+    wh: &'a Where<'a>,
+    cfg: &Config,
+    now: &str,
+    zone: &Zone,
+    positions: impl IntoIterator<Item = usize>,
+) -> Vec<Row<'a>> {
     // 막음 지도는 막힌 줄이 있을 때만 짓는다 — 저장소 전부를 훑는 셈이다.
     let blocks = all.iter().any(|i| !i.blocked_by.is_empty()).then(|| BlockMaps::over(all, cfg));
     // 줄마다 그 줄을 계획에서 뺀 미룸들 — 미룬 줄이 없으면 빈 지도다. 묶음의 계획에서 멤버를 빼는 자([`planned_of`])가 쓴다.
@@ -179,9 +193,10 @@ pub fn rows<'a>(
     let now_at = parse_rfc3339(now);
     // **날 경계는 읽는 사람의 달에서 긋는다**(moai-h2th) — 한 번만 옮긴다.
     let today = zone.shift(now);
-    all.iter()
-        .enumerate()
-        .map(|(at, i)| {
+    positions
+        .into_iter()
+        .map(|at| {
+            let i = &all[at];
             // **목록이 폴더로 여는 묶음만 멤버를 거느린다**(`Index::is_dir`, 리뷰) — 같은 id 의 앞줄(`duplicate_id`)은
             // 잎으로 그려지는데, 자리로만 물으면 뒷줄의 멤버·셈을 함께 입어 같은 막대가 둘 선다(moai-sfml 이 목록에서 걷은 그것).
             let dir = (is_group(i) && index.is_dir(all, at)).then(|| index.dir_path(all, at));
@@ -371,23 +386,44 @@ impl RangeContext {
     /// 실제의 날은 **읽은 시각에서** 낸다 — 관대한 읽기가 받은 `2026-02-30T…` 를 글대로 자르면 달력에 없는 날이 폭의 끝에
     /// 선다.
     pub fn range_of<'r, 'a: 'r>(&self, rows: impl IntoIterator<Item = &'r Row<'a>>) -> Option<Range> {
-        let day = |t: &str| parse_rfc3339(t).map(|s| format_rfc3339(s)[..10].to_string());
-        let mut days: Vec<String> = Vec::new();
+        use std::borrow::Cow;
+        // Borrow planned bounds and fold as they arrive. A one-row measurement
+        // allocates only its two returned bounds, plus normalized actual instants.
+        fn add<'d>(bounds: &mut Option<(Cow<'d, str>, Cow<'d, str>)>, day: Cow<'d, str>) {
+            match bounds {
+                Some((lo, hi)) => {
+                    if day < *lo {
+                        *lo = day;
+                    } else if day > *hi {
+                        *hi = day;
+                    }
+                }
+                None => *bounds = Some((day.clone(), day)),
+            }
+        }
+        let mut bounds = None;
         for r in rows {
             if let Some(p) = &r.planned {
-                days.extend([p.start.clone(), p.end.clone()]);
+                add(&mut bounds, Cow::Borrowed(&p.start));
+                add(&mut bounds, Cow::Borrowed(&p.end));
             }
             if let Actual::Span { start, end } = &r.actual {
-                days.extend(day(start));
-                match end {
-                    Some(e) => days.extend(day(e)),
-                    None => days.extend(self.today.clone()),
+                for instant in [Some(*start), *end].into_iter().flatten() {
+                    if let Some(at) = parse_rfc3339(instant) {
+                        let mut day = format_rfc3339(at);
+                        day.truncate(10);
+                        add(&mut bounds, Cow::Owned(day));
+                    }
+                }
+                if end.is_none()
+                    && let Some(today) = &self.today
+                {
+                    add(&mut bounds, Cow::Borrowed(today));
                 }
             }
         }
-        let from = days.iter().min()?.clone();
-        let to = days.iter().max()?.clone();
-        Some(Range { from, to })
+        let (from, to) = bounds?;
+        Some(Range { from: from.into_owned(), to: to.into_owned() })
     }
 }
 
@@ -427,6 +463,44 @@ mod tests {
 
     fn by<'g, 'a>(g: &'g Gantt<'a>, id: &str) -> &'g Row<'a> {
         g.rows.iter().find(|r| r.id == id).unwrap_or_else(|| panic!("{id} 줄이 없다"))
+    }
+
+    /// Reproducible local measurement; no timing threshold belongs in CI.
+    #[test]
+    #[ignore]
+    fn measure_single_row_ranges() {
+        let mut issue = row("argos-0001", Kind::Issue, "in_progress");
+        issue.starts_on = Some("2026-10-01".into());
+        issue.due_on = Some("2026-10-30".into());
+        issue.started_at = Some("2026-10-18T23:30:00Z".into());
+        let all = [issue];
+        let chart = read(&all);
+        let context = RangeContext::new(NOW, &Zone::utc());
+        let clock = std::time::Instant::now();
+        for _ in 0..200_000 {
+            std::hint::black_box(context.range_of(std::hint::black_box([&chart.rows[0]])));
+        }
+        eprintln!("200000 single-row ranges: {:?}", clock.elapsed());
+    }
+
+    #[test]
+    fn selected_rows_keep_all_group_context_and_original_positions() {
+        let epic = row("argos-0001", Kind::Epic, "todo");
+        let mut child = member("argos-0002", "argos-0001", "done");
+        child.starts_on = Some("2026-10-01".into());
+        child.due_on = Some("2026-10-25".into());
+        child.started_at = Some("2026-10-02T00:00:00Z".into());
+        child.done_at = Some("2026-10-22T00:00:00Z".into());
+        let all = [epic, child, row("argos-0003", Kind::Issue, "todo")];
+        let cfg = cfg();
+        let wh = Where::of(&all, &cfg);
+        let index = Index::of(&all);
+        let zone = Zone::utc();
+        let full = rows(&all, &index, &wh, &cfg, NOW, &zone);
+        let selected = rows_at(&all, &index, &wh, &cfg, NOW, &zone, [0, 2]);
+        assert_eq!(selected, vec![full[0].clone(), full[2].clone()]);
+        assert_eq!(selected[0].planned.as_ref().unwrap().end, "2026-10-25");
+        assert_eq!(selected[1].at, 2);
     }
 
     #[test]
