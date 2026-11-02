@@ -12,6 +12,10 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+### Fixed
+
+- **v0.42.0 shipped no binaries.** Its x86_64 Windows build went over the 15 MB size budget after pictures arrived, which stopped the release; the budget is now 20 MB and every platform is built. (moai-3cei.bh8.dd8)
+
 ## [0.42.0] - 2026-11-02
 
 ### Added
