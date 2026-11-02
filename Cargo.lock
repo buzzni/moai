@@ -640,6 +640,7 @@ dependencies = [
  "ring",
  "serde",
  "serde_json",
+ "signal-hook",
  "toml_edit",
  "unicode-segmentation",
  "unicode-width",
