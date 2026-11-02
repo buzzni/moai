@@ -103,7 +103,7 @@ impl Tabs {
         Ok(Some(Stream { tabs: self, joined: None }))
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, unix))]
     pub fn join(&self, here: &Path, overlay: bool, resume: Option<(&str, &str)>) -> std::io::Result<Joined> {
         Ok(self.join_limited(here, overlay, resume, None)?.unwrap())
     }
