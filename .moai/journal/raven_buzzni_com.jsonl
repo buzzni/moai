@@ -10944,3 +10944,4 @@
 {"ts":"2026-11-02T10:56:43Z","id":"moai-kd6v","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"v0.43.0 릴리스"}
 {"ts":"2026-11-02T10:56:43Z","id":"moai-kd6v.yt8","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"v0.43.0 릴리스 진행 — 병합·판 올리기·소식·PR"}
 {"ts":"2026-11-02T10:56:49Z","id":"moai-kd6v.yt8","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-11-02T11:04:05Z","id":"moai-kd6v.yt8","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: PR 병합(squash 금지) 뒤 tag on merge 승인 → 릴리스 확인, milestone-moai-brr2 워크트리·가지·target 정리, moai-kd6v.yt8 닫기"}
