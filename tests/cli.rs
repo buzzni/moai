@@ -1515,7 +1515,7 @@ fn an_old_planting_hears_that_only_the_comments_changed() {
     // 옛 바이너리가 심은 모양 — 규칙은 같고 주석만 한국어다.
     std::fs::write(
         &attrs,
-        "# moai — 이슈 트래커\n.moai/issues.jsonl   text eol=lf merge=moai\n.moai/archive/*.jsonl text eol=lf merge=moai\n.moai/images/** binary\n\
+        "# moai — 이슈 트래커\n.moai/issues.jsonl   text eol=lf merge=moai\n.moai/archive/*.jsonl text eol=lf merge=moai\n\
          .moai/journal.jsonl  text eol=lf merge=union\n.moai/journal/*.jsonl  text eol=lf merge=union\n",
     )
     .unwrap();
@@ -1675,7 +1675,7 @@ fn a_repository_can_say_in_gitattributes_that_it_does_not_want_the_driver() {
         root.join(".gitattributes"),
         "# 이 저장소는 스냅샷에 머지 드라이버를 안 쓴다\n\
          .moai/issues.jsonl   text eol=lf -merge\n\
-         .moai/images/** binary\n\
+         \
          .moai/journal.jsonl  text eol=lf merge=union\n\
          .moai/journal/*.jsonl  text eol=lf merge=union\n",
     )
@@ -34288,3 +34288,37 @@ fn web_serves_binary_images_and_refuses_non_picture_paths() {
         assert_eq!(get(web.port, &format!("/api/image?path={path}")).0, 404);
     }
 }
+
+#[test]
+fn an_upgrade_does_not_warn_about_the_image_shelf_lock() {
+    let s = init("image-upgrade-dotfiles");
+    let ignore = s.path().join(".gitignore");
+    let before = std::fs::read_to_string(&ignore).unwrap().replace("**/images/.lock\n", "");
+    std::fs::write(&ignore, before).unwrap();
+    std::fs::create_dir_all(s.path().join(".moai/images")).unwrap();
+    std::fs::write(s.path().join(".moai/images/.lock"), "").unwrap();
+    for phase in 0..2 {
+        if phase == 1 { ok(s.path(), &["init"]); }
+        let status = ok(s.path(), &["status", "--json"]);
+        assert!(!status.contains("gitignore_rules") && !status.contains("gitattributes_rules"), "{status}");
+    }
+    assert!(std::fs::read_to_string(ignore).unwrap().contains("**/images/.lock"));
+}
+
+#[cfg(unix)]
+#[test]
+fn an_upgrade_with_a_linked_tracker_ignores_the_image_lock() {
+    use std::os::unix::fs::symlink;
+    let s = init("image-upgrade-link");
+    std::fs::rename(s.path().join(".moai"), s.path().join("tracker")).unwrap();
+    symlink("tracker", s.path().join(".moai")).unwrap();
+    ok(s.path(), &["init"]);
+    let ignore = s.path().join(".gitignore");
+    std::fs::write(&ignore, std::fs::read_to_string(&ignore).unwrap().replace("**/images/.lock\n", "")).unwrap();
+    for phase in 0..2 {
+        if phase == 1 { ok(s.path(), &["init"]); }
+        let status = ok(s.path(), &["status", "--json"]);
+        assert!(!status.contains("gitignore_rules") && !status.contains("gitattributes_rules"), "{status}");
+    }
+}
+

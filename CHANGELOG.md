@@ -14,7 +14,7 @@ does not tag — see `CONTRIBUTING.md`.
 
 ### Added
 
-- **Pictures in issues and the wiki.** `moai image add` stores content-addressed pictures and can append them to an issue. PNG and JPEG are compressed by default; `--original` or `image_compress = "off"` keeps the input. Shell terminals and the web display supported pictures, while the explorer shows a placeholder and local link. Windows needs no additional software. Run `moai init` again to add the `.moai/images/** binary` attribute and the `**/images/.lock` ignore line; until then `init --check` reports stale and `moai status` warns once per file. (moai-7eeq)
+- **Pictures in issues and the wiki.** `moai image add` stores content-addressed pictures and can append them to an issue. PNG and JPEG are compressed by default; `--original` or `image_compress = "off"` keeps the input. Shell terminals and the web display supported pictures, while the explorer shows a placeholder and local link. Windows needs no additional software. Run `moai init` again to add the `**/images/.lock` ignore line for the shelf lock. (moai-7eeq)
 
 ## [0.41.0] - 2026-11-02
 

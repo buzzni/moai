@@ -804,7 +804,11 @@ fn gaps_in(files: &[Dotfile]) -> Vec<(&'static str, &'static str, Vec<String>)> 
                 return None;
             };
             let text = text.unwrap_or_default();
-            let missing: Vec<String> = missing_rules(&text, &d.block).into_iter().map(str::to_string).collect();
+            // The shelf lock is transient; a missing ignore rule neither loses merge rules
+            // nor includes a worktree. Init still plants it, but status does not raise a false warning.
+            let missing: Vec<String> = missing_rules(&text, &d.block).into_iter()
+                .filter(|line| *line != "**/images/.lock")
+                .map(str::to_string).collect();
             (!missing.is_empty()).then_some((d.name, d.kind, missing))
         })
         .collect()
@@ -1257,7 +1261,6 @@ const GITATTRIBUTES: &str = "\
 # clone without it this word is ignored and git's default merge runs.
 .moai/issues.jsonl   text eol=lf merge=moai
 .moai/archive/*.jsonl text eol=lf merge=moai
-.moai/images/** binary
 # The journal is append-only, order does not matter, and it is never read to
 # compute state. union is right here.
 # It is filed per writer, by email — `.moai/journal/you_example_com.jsonl`.

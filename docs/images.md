@@ -14,6 +14,6 @@ The repository's `.moai/config.toml` controls `image_compress = "on"` or `"off"`
 
 The explorer shows placeholders and local links. The [web view](web.md) displays issue and wiki pictures in the browser. Windows needs no additional image software.
 
-Run `moai init` again in an existing repository to add the `.moai/images/** binary` attribute and the `**/images/.lock` ignore line (the shelf's lock file). Until then `moai init --check` reports the managed files as stale and `moai status` shows one warning for each file; nothing is blocked.
+Run `moai init` again in an existing repository to add the `**/images/.lock` ignore line for the shelf lock file. Existing repositories can keep working before doing so.
 
 Decided in: moai-7eeq
