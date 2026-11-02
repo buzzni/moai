@@ -83,7 +83,21 @@ pub fn show(ctx: &Ctx, slug: &str) -> R<Vec<String>> {
     if ctx.json {
         return page_json(ctx.lang(), &wiki, page, &seen);
     }
-    Ok(crate::view::wiki::page(ctx.lang(), page, wiki.uncounted(&page.slug), &seen, ctx.zone()))
+    let mut out = crate::view::wiki::page(ctx.lang(), page, wiki.uncounted(&page.slug), &seen, ctx.zone());
+    if !page.conflict
+        && let Some(body) = &page.body
+    {
+        crate::image::term::prepare(
+            &mut out,
+            body,
+            crate::image::From::Wiki { page_rel: &page.path, wiki_dir: &dir },
+            repo.here(),
+            &dir,
+            ctx.lang(),
+            ctx.registry().image_draw.as_deref(),
+        );
+    }
+    Ok(out)
 }
 
 /// `moai wiki search <낱말…>` — 위키를 절 단위로 찾아 순위대로 낸다(moai-g8pt). 낱말은 빈칸 하나로 이어 한 질의다.

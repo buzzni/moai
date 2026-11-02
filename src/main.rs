@@ -18,6 +18,7 @@ mod held;
 mod hook;
 mod i18n;
 mod id;
+mod image;
 mod init_choice;
 mod latest;
 mod markdown;
@@ -467,6 +468,17 @@ fn survived<T>(f: impl FnOnce() -> T) -> Option<T> {
 }
 
 fn print(lines: &[String]) {
+    match image::term::print(lines) {
+        Ok(true) => return,
+        Ok(false) => {}
+        Err(e) => {
+            if e.kind() != std::io::ErrorKind::BrokenPipe {
+                eprintln!("moai: {e}");
+                std::process::exit(1);
+            }
+            return;
+        }
+    }
     // 한 번에 쓴다 — 줄마다 쓰면 중간에 끊긴 출력이 반쪽 JSON 으로 흐를 수 있다.
     if lines.is_empty() {
         return;

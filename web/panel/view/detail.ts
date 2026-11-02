@@ -28,6 +28,7 @@ import {
 } from './detail-format.ts'
 import { statusGlyph } from './list-model.ts'
 import { renderMarkdown } from './markdown.ts'
+import { imageUrl } from './image.ts'
 import { firstStatus, spins , lostMark } from './spin.ts'
 import { branchMark } from './branch.ts'
 import { newChip } from './unread.ts'
@@ -40,7 +41,7 @@ type Groups = BoardData['groups']
 
 /** The body as markdown (view/markdown.ts: raw HTML stays text, links are only recorded, never followed). */
 export function renderBody(doc: Document, text: string): HTMLElement {
-  const { root } = renderMarkdown(doc, text)
+  const { root } = renderMarkdown(doc, text, { resolveImage: src => imageUrl(doc, src) })
   root.classList.add('moai-detail-body')
   return root
 }

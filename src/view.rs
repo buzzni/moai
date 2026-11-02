@@ -2753,7 +2753,8 @@ pub fn body_lines(body: &str) -> Vec<String> {
     // 파일에서 온 글이다. 그리기 전에 제어문자를 걷어낸다 — ESC 가 든 줄은
     // 그대로 찍으면 화면을 다시 칠한다. **부르는 쪽을 믿지 않는다** — 두 번
     // 걸러도 결과는 같고, 한 번 빠뜨리면 화면이 남의 손에 넘어간다.
-    let blocks = crate::markdown::parse(&crate::text::sanitize(body));
+    let mut blocks = crate::markdown::parse(&crate::text::sanitize(body));
+    crate::image::labels(&mut blocks, crate::i18n::Lang::En);
     // **줄로 펴는 일은 `markdown` 이 한다.** 글머리·들여쓰기 같은 결정이
     // 표면마다 갈라지면 CLI 와 탐색기가 같은 본문을 다르게 그린다.
     // 여기가 할 일은 뜻을 색으로 옮기는 것뿐이다.
@@ -2787,7 +2788,7 @@ fn role_style(r: crate::markdown::Role) -> Style {
         Role::Strong | Role::Heading => style::STRONG,
         Role::Emphasis => style::EM,
         Role::Code => style::CODE,
-        Role::Link => style::EPIC_REF,
+        Role::Link | Role::Image => style::EPIC_REF,
         Role::Mark => style::DIM,
     }
 }
@@ -5111,7 +5112,8 @@ mod tests {
     }
 
     /// 그린 줄은 폭을 넘지 않는다 — **폭을 넘기는 인라인 코드 한 덩이만 빼고**
-    /// (moai-krh7). 한글이 두 칸이라 글자 수로 세면 걸린다.
+    /// (moai-krh7). 홀로 선 그림의 줄도 안 접지만(moai-7eeq, `markdown::lay_one`) 이 본문에는 없다.
+    /// 한글이 두 칸이라 글자 수로 세면 걸린다.
     ///
     /// 상한은 `BODY` 에 들여쓰기(`PAD`)를 더한 값이다. 여유를 더 주면 그만큼
     /// 넘치는 줄을 통과시킨다. 셸은 넘긴 줄을 화면에서만 접어 복사하면 온전하니

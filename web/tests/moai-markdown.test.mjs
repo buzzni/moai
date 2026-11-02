@@ -465,3 +465,23 @@ test('task lists: marker span at the start of an item, no input', () => {
   assertSafe(r.root)
   assert.match(css, /\.m-md-task/)
 })
+
+test('images: only an explicit resolver creates a lazy image; alt stays an attribute', () => {
+  const source = '![<script>alert(1)</script>](.moai/images/0123456789abcdef.png)'
+  assert.equal(md(source).root.querySelector('img'), null)
+  const { root } = md(source, { resolveImage: src => src.startsWith('.moai/images/') ? '/api/image?path=' + encodeURIComponent(src) : null })
+  const img = root.querySelector('img')
+  assert.equal(img.alt, '<script>alert(1)</script>')
+  assert.equal(img.getAttribute('loading'), 'lazy')
+  assert.equal(root.querySelector('script'), null)
+  assert.equal(md('![x](https://example.com/x.png)', { resolveImage: () => null }).root.querySelector('img'), null)
+})
+
+test('image paths mirror the server policy and retain the selected project', async () => {
+  const { imageUrl } = await import(new URL('view/image.ts', panel))
+  const doc = new JSDOM('', { url: 'http://localhost/?project=%2Fwork%2Fother' }).window.document
+  const url = imageUrl(doc, '.moai/images/0123456789abcdef.jpg')
+  assert.equal(new URL(url, 'http://localhost').searchParams.get('project'), '/work/other')
+  assert.equal(new URL(imageUrl(doc, '../images/x.png', {page:'docs/lessons/a.md',dir:'docs'}), 'http://localhost').searchParams.get('path'), 'docs/images/x.png')
+  for (const src of ['https://x/a.png', '/a.png', 'C:/a.png', '%2e%2e/a.png', '../../x.png', '../.git/x.png', 'x.svg']) assert.equal(imageUrl(doc, src, {page:'docs/a.md',dir:'docs'}), null, src)
+})

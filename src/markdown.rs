@@ -33,6 +33,7 @@ pub enum Overflow {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Role {
     Plain,
+    Image,
     Strong,
     Emphasis,
     Code,
@@ -85,6 +86,11 @@ pub enum Block {
         spans: Vec<Span>,
     },
     Para(Vec<Span>),
+    Image {
+        quote: u8,
+        alt: String,
+        dest: String,
+    },
     /// 번호는 줄마다 [`Item::marker`] 가 든다 — 블록에 `ordered` 를 또 두면
     /// 둘이 어긋날 수 있고, 어긋나면 어느 쪽이 참인지 정할 길이 없다.
     ///
@@ -140,6 +146,8 @@ pub(crate) const OPTIONS: Options = Options::ENABLE_TABLES;
 /// 여러 곳이 저마다 세게 되고, 반드시 한 곳이 어긋난다.
 #[derive(Default)]
 struct Fold {
+    image_start: Option<(usize, String)>,
+    lone_image: Option<(String, String, String)>,
     out: Vec<Block>,
     /// 지금 모으는 조각들. 문단·제목·인용·표 칸이 모두 여기로 온다.
     spans: Vec<Span>,
@@ -357,11 +365,19 @@ impl Fold {
                 self.open.push(self.dests.len());
                 self.dests.push(dest_url.to_string());
             }
-            // **그림도 주소를 남긴다.** 그림은 터미널에 뜨지 않으므로 대체글만
+            // 새 문단은 홀로 선 그림의 후보를 비운다 — 문단 머리에서 시작해 그 문단 끝까지 혼자인 그림만
+            // [`Block::Image`] 가 된다(`TagEnd::Paragraph`).
+            Tag::Paragraph => {
+                self.lone_image = None;
+            }
+            // **그림도 주소를 남긴다.** 글 가운데 선 그림은 터미널에 뜨지 않으므로 대체글만
             // 남기면 무엇을 가리켰는지 `--raw` 밖에 길이 없다 — 링크에 대고
             // 적어 둔 까닭 그대로다. 대체글은 제 둘레의 뜻을 그대로 쓴다:
             // 그림은 링크가 아니라 누를 데가 없다.
-            Tag::Image { dest_url, .. } => self.urls.push(dest_url.to_string()),
+            Tag::Image { dest_url, .. } => {
+                self.image_start = Some((self.spans.iter().map(|s| s.text.len()).sum(), dest_url.to_string()));
+                self.urls.push(dest_url.to_string());
+            }
             // **모으던 목록 줄을 먼저 매듭짓는다.** 이 세 블록은 저마다
             // `spans` 를 통째로 걷어 가므로, 목록 항목의 글이 남아 있으면 그
             // 글까지 같이 걷어 간다 — `- 하나` 뒤의 `## 제목` 이 `하나제목`
@@ -420,7 +436,17 @@ impl Fold {
                 self.trail_url();
                 self.open.pop();
             }
-            TagEnd::Image => self.trail_url(),
+            TagEnd::Image => {
+                let started = self.image_start.take();
+                let text: String = self.spans.iter().map(|s| s.text.as_str()).collect();
+                self.trail_url();
+                if let Some((0, dest)) = started {
+                    let expected: String = self.spans.iter().map(|s| s.text.as_str()).collect();
+                    self.lone_image = Some((text, dest, expected));
+                } else {
+                    self.lone_image = None;
+                }
+            }
             TagEnd::Heading(_) => {
                 let level = self.heading.take().unwrap_or(1);
                 let spans = self.take();
@@ -450,6 +476,13 @@ impl Fold {
             TagEnd::BlockQuote(_) => self.quote = self.quote.saturating_sub(1),
             TagEnd::Paragraph => {
                 let spans = self.take();
+                if let Some((alt, dest, expected)) = self.lone_image.take()
+                    && self.list.is_none()
+                    && spans.iter().map(|s| s.text.as_str()).collect::<String>() == expected
+                {
+                    self.out.push(Block::Image { quote: self.quote_depth(), alt, dest });
+                    return;
+                }
                 if spans.is_empty() {
                     return;
                 }
@@ -735,6 +768,24 @@ fn lay_one(out: &mut Vec<Vec<Span>>, b: &Block, width: usize, overflow: Overflow
             // 이어지는 줄은 `#` 폭만큼 물려 쓴다.
             let hang = " ".repeat(crate::text::width(&hash));
             flow(out, &spans, &hash, &hang, width, overflow);
+        }
+        Block::Image { quote, alt, dest } => {
+            let spans = vec![Span { text: alt.clone(), role: Role::Image, link: None }, mark(format!(" {dest}"))];
+            // **The shell keeps a picture reference on one line**, like an overlong code span (moai-krh7): the
+            // terminal soft-wraps it on screen, and `image::term::prepare` finds the placeholder and its path on
+            // the same line to draw, link and label it. Folded at 76 columns, a screenshot named
+            // `Screenshot 2026-11-02 at 10.23.45 AM` split the label from its path and was never drawn.
+            if overflow == Overflow::Keep {
+                let lead = bars(*quote);
+                let mut row = Vec::new();
+                if !lead.is_empty() {
+                    row.push(mark(lead));
+                }
+                row.extend(spans);
+                out.push(row);
+            } else {
+                flow(out, &spans, &bars(*quote), &bars(*quote), width, overflow);
+            }
         }
         Block::Para(spans) => flow(out, &marked(spans), "", "", width, overflow),
         Block::Quote { quote, spans } => {
@@ -1076,6 +1127,7 @@ mod real {
                     super::Block::Quote { .. } => "인용",
                     super::Block::Table { .. } => "표",
                     super::Block::Rule => "줄",
+                    super::Block::Image { .. } => "그림",
                 };
                 *kinds.entry(k).or_insert(0) += 1;
             }
@@ -1800,5 +1852,40 @@ mod tests {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod image_tests {
+    use super::*;
+    #[test]
+    fn a_lone_image_is_its_own_block() {
+        assert!(matches!(&parse("![shot](a.png)")[0],Block::Image{alt,dest,quote:0} if alt=="shot" && dest=="a.png"));
+        assert!(matches!(&parse("![](a.png)")[0],Block::Image{alt,..} if alt.is_empty()));
+    }
+    #[test]
+    fn an_image_inside_a_sentence_stays_text() {
+        assert!(matches!(parse("before ![shot](a.png) after")[0], Block::Para(_)));
+        assert!(matches!(parse("![a](a.png) ![b](b.png)")[0], Block::Para(_)));
+    }
+    #[test]
+    fn an_image_in_a_quote_keeps_its_bar() {
+        assert!(matches!(parse("> ![shot](a.png)")[0], Block::Image { quote: 1, .. }));
+    }
+    #[test]
+    fn a_long_image_reference_stays_on_one_shell_line() {
+        let dest = ".moai/images/0123456789abcdef.png";
+        let blocks = parse(&format!("![Screenshot 2026-11-02 at 10.23.45 AM with a long name]({dest})"));
+        let kept = layout(&blocks, 40, Overflow::Keep);
+        assert_eq!(kept.len(), 1, "{kept:?}");
+        assert!(kept[0].last().is_some_and(|s| s.text.ends_with(dest)));
+        assert!(layout(&blocks, 40, Overflow::Break).len() > 1);
+    }
+    #[test]
+    fn headings_after_an_image_keep_their_lines() {
+        let blocks = parse("![a](a.png)\n\n## Next\n");
+        let (lines, starts) = layout_at(&blocks, 76, Overflow::Keep);
+        assert_eq!(starts, [0, 2]);
+        assert!(lines[2].iter().any(|s| s.text == "Next"));
     }
 }
