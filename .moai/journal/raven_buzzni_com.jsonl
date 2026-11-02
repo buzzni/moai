@@ -10813,3 +10813,4 @@
 {"ts":"2026-11-02T06:01:39Z","id":"moai-e3f6","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"v0.41.0 릴리스"}
 {"ts":"2026-11-02T06:01:39Z","id":"moai-e3f6.97s","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"v0.41.0 릴리스 진행 — 병합·판 올리기·소식·PR"}
 {"ts":"2026-11-02T06:01:44Z","id":"moai-e3f6.97s","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-11-02T06:20:38Z","id":"moai-e3f6.97s","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: PR #66 병합(squash 금지) 뒤 tag on merge 승인 → 릴리스 확인, 마일스톤 워크트리·가지·target 정리, moai-e3f6.97s 닫기. 그 뒤 v0.42.0(이미지) 에픽은 develop 에서 시작."}
