@@ -345,6 +345,7 @@ gets through — run it as given. None of them waits on a person except rule 5.
    [epic](glossary.md#epic) (`-e <epic>`) or under the held issue
    (`--parent <id>`). Something for later goes in as `moai backlog add`, which this
    rule never stops; nor does it stop a whole plan created with `moai add --from`
+   or milestone creation, which groups a release rather than creating an issue
 2. **Pick something up before you change the repository.** A file edit
    (`Edit`, `Write`, Codex's `apply_patch`, Antigravity's file-writing tools) or
    a shell write (`>`, `>>`, `sed -i`, `tee`, the destination of `cp`, `mv` or
