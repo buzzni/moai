@@ -12,6 +12,18 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+### Added
+
+- Shell and explorer pictures draw through kitty inside tmux with `allow-passthrough on|all`; auto detection also recognizes SSH Ghostty sessions through `TERM=xterm-ghostty`. (moai-zidx)
+
+### Changed
+
+- Explorer previews encode in a bounded background worker and appear as they finish; cached image files are checked at the follow cadence rather than on each frame. (moai-zidx)
+
+### Fixed
+
+- Image placeholder paths remain clickable across wrapped lines and when their labels scroll offscreen. Resize bursts retry queued previews and skip stale encoding jobs. (moai-zidx)
+
 ## [0.44.0] - 2026-11-02
 
 ### Added
