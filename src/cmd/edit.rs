@@ -495,6 +495,7 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
     }
     let children: Vec<&Issue> = children.iter().collect();
     let seen = view::Seen {
+        session: None,
         // **쓰기 경로에는 쌍둥이가 없으니**(`cmd::Row::from` 과 같은 까닭 — `store::with_write` 가
         // 중복 id 에 쓰기를 통째로 물린다) id 로 접은 지도가 곧 줄마다의 답이다 — `moai show`
         // 쪽만 줄로 되묻는 재료를 든다(moai-wre3).

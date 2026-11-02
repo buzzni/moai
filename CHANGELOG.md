@@ -12,6 +12,15 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+### Added
+
+- **Lost-session marks.** The hook leaves a heartbeat for its session on every event; work whose holding session has
+  been silent over `session_lost_minutes` (30 by default, `0` turns it off) stands as `lost_session` in `moai status`,
+  pauses its spinner with a red `!` in the explorer and the web (the web list and Gantt tint the row red), and
+  `moai show <id>` says which session went quiet, when, and how to resume or take it over (`--json`: `session`).
+  Rows whose session never left a heartbeat are unknown, not lost. Heartbeats live on the machine that wrote them,
+  so a session on another machine is unknown here. (moai-4v3h)
+
 ## [0.40.0] - 2026-10-31
 
 ### Added

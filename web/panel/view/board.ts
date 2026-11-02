@@ -15,7 +15,7 @@ import { segLabel } from './crumbs.ts'
 import { narrow, segKey, statusGlyph, statusOf } from './list-model.ts'
 import { chip, el, emptyState, icon } from './components.ts'
 import { newChip } from './unread.ts'
-import { firstStatus, glint, spins } from './spin.ts'
+import { firstStatus, glint, spins , lostMark } from './spin.ts'
 import { branchMark, branchOf } from './branch.ts'
 import type { MountPane, PaneView, ViewContext } from './types.ts'
 import { fill } from '../i18n/index.ts'
@@ -63,8 +63,11 @@ function draw(ctx: ViewContext, state: State, index: IssueIndex, model: BoardMod
     const status = statusOf(row)
     const { glyph, tone } = statusGlyph(status, state.boot)
     // What someone holds moves as in the TUI (view/spin.ts): the glyph turns and a band runs over the title.
-    const moving = spins(index, at, firstColumn, state.boot?.statuses)
-    first.append(' ', el(doc, 'span', { class: `m-st-${tone}${moving ? ' m-spin' : ''}`, title: (copy.stats as Record<string, string>)[status] ?? status }, glyph))
+    const spin = spins(index, at, firstColumn, state.boot?.statuses)
+    const moving = spin === 'turning'
+    const paused = spin === 'paused'
+    first.append(' ', el(doc, 'span', { class: `m-st-${tone}${paused ? ' m-spin m-spin-paused' : moving ? ' m-spin' : ''}`, title: (copy.stats as Record<string, string>)[status] ?? status }, glyph))
+    if (paused) first.append(lostMark(doc, copy.list.sessionLost))
     if (typeof row.priority === 'number') first.append(' ', el(doc, 'span', { class: priorityClass(row.priority) }, `p${row.priority}`))
     if (index.isDir(at)) {
       const [d, w] = index.tally(index.dirPath(at))
@@ -126,7 +129,7 @@ function draw(ctx: ViewContext, state: State, index: IssueIndex, model: BoardMod
       const label = nameOf(column.key)
       const lanes = el(doc, 'div', { class: 'm-lane', role: 'list', 'data-status': column.key, 'aria-label': fill(column.cards.length === 1 ? copy.board.columnLabelOne : copy.board.columnLabelMany, { name: label, count: column.cards.length }) })
       // The column's glyph turns while a card in it does, as the TUI's column head does.
-      const turning = column.cards.some((at) => spins(index, at, firstColumn, state.boot?.statuses))
+      const turning = column.cards.some((at) => spins(index, at, firstColumn, state.boot?.statuses) === 'turning')
       lanes.append(el(doc, 'div', { class: 'm-lane-head' },
         el(doc, 'span', { 'aria-hidden': 'true', class: turning ? `m-spin m-st-${column.key}` : null }, glyphOf(column.key, state.boot)), el(doc, 'span', {}, label), el(doc, 'span', { class: 'm-count' }, String(column.cards.length))))
       if (!column.cards.length) lanes.append(el(doc, 'div', { class: 'm-lane-empty' }, copy.board.noCards))

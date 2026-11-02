@@ -563,6 +563,15 @@ it — nor because its name is gone, since a worker restarted with
 supervisor waits for the person to say that window has ended. Whether stalled
 work is carried on or put down is the person's call.
 
+The hook's **heartbeat** adds a separate `lost_session` signal: a worktree can
+still stand after its holding session goes silent. `moai show <id>` gives the
+last event, time and resume or takeover commands. The explorer and web pause
+that row's spinner and add `!`; the web also tints the row red. This is local
+to this machine; no heartbeat means unknown, not lost. A long build or a session
+waiting after `Stop` can be silent too. Check it with the person before handing
+it on. See [An agent session died](recovery.md#an-agent-session-died) for the
+commands and the configurable 30-minute threshold.
+
 **Work inside a milestone has a branch of its own** (moai-nvju). The base
 branch the message carries is the root branch for work outside every milestone,
 and `milestone/<milestone id>` for work inside a live one — even one that has
@@ -798,6 +807,12 @@ session that is still responding or waiting on you.
 
 ### Bring back sessions that died
 
+`moai status`'s `lost_session` warning and `moai show <id>`'s Session line
+use the local heartbeat to point out silent holders, including a session whose
+worktree is still there. Follow [the recovery guide](recovery.md#an-agent-session-died)
+for an individual Claude, Codex or Antigravity conversation; the skill below
+recovers Claude sessions together.
+
 When the supervisor and its workers died together — the machine restarted, the
 container was OOM-killed — open one Claude Code session in the root and ask it
 to bring them back ("recover the sessions", "되살려"). It loads `moai-recover`
@@ -939,7 +954,7 @@ worker's line is written by the supervisor.
   where an incoming message waits for its person's approval — look at that
   window
 
-Decided in: moai-2w0s moai-hxma moai-0zjo moai-nqdc moai-bl3x moai-gelm moai-tllo moai-mdzx moai-xs2h moai-h8tn moai-snyk moai-u5wr moai-b6cw moai-ew4o moai-dhxm moai-ml0d moai-nas5 moai-kxkw moai-dj4j moai-54yc moai-bkn4 moai-084j moai-keka moai-zynt moai-j9nf moai-jtvp moai-obxm moai-six5 moai-iu73 moai-r0x8 moai-u99i moai-uqf7 moai-p5sz moai-xpa8 moai-9tqo moai-pxui moai-uzhx moai-wk7i moai-jdwk moai-1m21 moai-d1zn moai-xvvr moai-ns7a moai-zgc1
+Decided in: moai-2w0s moai-hxma moai-0zjo moai-nqdc moai-bl3x moai-gelm moai-tllo moai-mdzx moai-xs2h moai-h8tn moai-snyk moai-u5wr moai-b6cw moai-ew4o moai-dhxm moai-ml0d moai-nas5 moai-kxkw moai-dj4j moai-54yc moai-bkn4 moai-084j moai-keka moai-zynt moai-j9nf moai-jtvp moai-obxm moai-six5 moai-iu73 moai-r0x8 moai-u99i moai-uqf7 moai-p5sz moai-xpa8 moai-9tqo moai-pxui moai-uzhx moai-wk7i moai-jdwk moai-1m21 moai-d1zn moai-xvvr moai-ns7a moai-zgc1 moai-4v3h
 
 ## Archive storage
 

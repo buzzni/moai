@@ -438,3 +438,20 @@ test('history and work start expanded, preserve lines and remember a collapsed s
   view.render(stateWith({ value: { id: row.id, row: { ...row, title: 'changed' } } }), index)
   assert.equal(root.querySelector('[data-fold=journal]').open, false)
 })
+
+test('session detail shows recovery verbatim only while lost and omits unknown sessions', () => {
+  const session = { state: 'lost', agent: 'claude', session_id: 'sid', last_event: 'Stop', silent_minutes: 60, last_seen: '2026-11-01T00:00:00Z', recover: ['claude --resume sid', 'moai mv a review --from review'] }
+  const { root, view } = mount()
+  const show = (session) => {
+    const row = { id: 'a', title: 'A', status: 'review', ...(session ? {session} : {}) }
+    view.render(stateWith({ value: { id: 'a', row } }), build([row]))
+  }
+  show(session)
+  assert.match(root.textContent, /Signal lost/)
+  assert.match(root.textContent, /claude --resume sid/)
+  show({...session, state: 'alive', recover: []})
+  assert.match(root.textContent, /Alive/)
+  assert.doesNotMatch(root.textContent, /claude --resume sid/)
+  show(undefined)
+  assert.doesNotMatch(root.textContent, /Session/)
+})

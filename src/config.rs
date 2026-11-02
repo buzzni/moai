@@ -446,6 +446,8 @@ pub struct Config {
     /// 저장소를 같이 쓰는 사람과 세션이 같은 답을 봐야 한다. 문턱([`Thresholds`])이 여기 사는 것과 같은 까닭이다.
     /// 무엇이 아카이브인지 재는 자는 [`crate::report::archived`] 하나다 — 이것은 그 날수만 든다.
     pub archive_days: i64,
+    /// Local hook silence threshold in minutes; zero disables heartbeat I/O.
+    pub session_lost_minutes: i64,
     /// 위키 페이지가 사는 디렉터리 — **적힌 날글자 그대로다**(moai-ihu4). 평평한 키 `wiki_dir`, 안 적으면 `docs`.
     ///
     /// **여기서는 재지 않는다.** 상대 경로인가·`..` 이 없는가·체크아웃 안이고 `.git/` 밖인가는 쓰는 자리
@@ -558,6 +560,10 @@ pub const WIKI_DIR: &str = "docs";
 /// [`Config::wiki_dir`] 를 적는 키.
 pub const WIKI_KEY: &str = "wiki_dir";
 
+/// The flat key for [`Config::session_lost_minutes`] — named once, like [`ARCHIVE_KEY`], so the table check and the
+/// reader cannot spell it apart.
+pub const SESSION_LOST_KEY: &str = "session_lost_minutes";
+
 /// [`Config::models`] 의 표 이름 — 사용자 설정과 같은 이름이다([`crate::user_config::MODELS`]).
 pub const MODELS_TABLE: &str = crate::user_config::MODELS;
 
@@ -610,10 +616,13 @@ impl Config {
         // **테이블 안에 적은 날수는 소리낸다** — 문턱과 같은 까닭이다([`Thresholds::check_keys`]). `[archive]`
         // 밑의 `archive_days` 는 이 파서가 안 읽어, 조용히 넘기면 고친 값이 영영 안 먹는다.
         // `[wiki]` 밑의 `wiki_dir` 도 같다 — 넘기면 고친 자리가 영영 안 먹고 위키는 `docs` 를 읽는다.
-        if let Some(e) = es.iter().find(|e| e.table.is_some() && [ARCHIVE_KEY, WIKI_KEY].contains(&e.key)) {
+        if let Some(e) =
+            es.iter().find(|e| e.table.is_some() && [ARCHIVE_KEY, WIKI_KEY, SESSION_LOST_KEY].contains(&e.key))
+        {
             return Err(Trouble::ThresholdInTable { line: e.line, named: e.key.into() });
         }
         let archive_days = days(es, ARCHIVE_KEY, ARCHIVE_DAYS)?;
+        let session_lost_minutes = days(es, SESSION_LOST_KEY, 30)?;
         let wiki_dir = text(es, WIKI_KEY)?.unwrap_or_else(|| WIKI_DIR.into());
         let due = DueRule::parse(es)?;
 
@@ -628,7 +637,18 @@ impl Config {
             .filter(|e| e.table == Some(crate::user_config::WRITING))
             .map(|e| ModelEntry { key: e.key.to_string(), raw: e.value.to_string(), line: e.line })
             .collect();
-        Ok(Config { prefix, statuses, naming, status, archive_days, wiki_dir, due, models, writing })
+        Ok(Config {
+            prefix,
+            statuses,
+            naming,
+            status,
+            archive_days,
+            session_lost_minutes,
+            wiki_dir,
+            due,
+            models,
+            writing,
+        })
     }
 
     /// 새 이슈가 놓이는 칸. 목록의 첫 칸이다.
@@ -1170,5 +1190,25 @@ status_due_days      = 17
                 .backlog_pile,
             4
         );
+    }
+}
+
+#[cfg(test)]
+mod session_tests {
+    use super::*;
+    #[test]
+    fn session_lost_minutes_defaults_and_validation() {
+        assert_eq!(Config::parse("prefix = \"moai\"\n").unwrap().session_lost_minutes, 30);
+        for n in [0, 1, 90] {
+            assert_eq!(
+                Config::parse(&format!("prefix = \"moai\"\nsession_lost_minutes = {n}\n"))
+                    .unwrap()
+                    .session_lost_minutes,
+                n
+            );
+        }
+        for tail in ["session_lost_minutes = -1", "[session]\nsession_lost_minutes = 30"] {
+            assert!(Config::parse(&format!("prefix = \"moai\"\n{tail}\n")).is_err());
+        }
     }
 }

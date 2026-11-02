@@ -5,6 +5,20 @@ straight to a definition — `[epic](glossary.md#epic)`. Each entry says what th
 word means here in a few lines and points at the page that teaches it. Flags are
 in [the CLI reference](cli.md).
 
+## Heartbeat
+
+The hook's local mark that a session handled an event. It lives beside the user
+config, outside the tracker and journal; its modification time is the last
+signal. No mark on this machine means unknown, including another machine's
+session. See [lost session](#lost-session).
+
+## Lost session
+
+A holding session whose heartbeat has been silent for more than
+`session_lost_minutes` (30 by default). The warning and paused `!` mark ask the
+person to check and resume or take over the work; silence alone does not prove
+that a session died. See [recovery](recovery.md#an-agent-session-died).
+
 ## Archive
 
 Work that has stood in `done` for longer than `archive_days` (two weeks unless
@@ -338,4 +352,4 @@ not pile commits onto one branch. The tracker stays in the main checkout; the
 wiki pages ride the branch. More in
 [the workflow](workflow.md#work-in-a-worktree).
 
-Decided in: moai-tllo moai-snyk moai-u5wr moai-dhxm moai-kxkw moai-jtvp moai-bth3 moai-obxm moai-9tqo moai-uzhx moai-pyi4 moai-jdwk moai-lj8g moai-d1zn moai-ns7a moai-mkzo moai-w30o
+Decided in: moai-tllo moai-snyk moai-u5wr moai-dhxm moai-kxkw moai-jtvp moai-bth3 moai-obxm moai-9tqo moai-uzhx moai-pyi4 moai-jdwk moai-lj8g moai-d1zn moai-ns7a moai-mkzo moai-w30o moai-4v3h

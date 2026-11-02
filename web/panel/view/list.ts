@@ -21,7 +21,7 @@ import {
   statusGlyph, statusOf, twigParts, TWIG_TEXT, windowRange, revealOffset, type ColumnSet, type ListLine, type RightColumn,
 } from "./list-model.ts"
 import { newChip } from "./unread.ts"
-import { firstStatus, glint, spins } from "./spin.ts"
+import { firstStatus, glint, spins , lostMark } from "./spin.ts"
 import { branchMark, branchOf } from "./branch.ts"
 import { highlight } from "./toolbar.ts"
 import type { MountPane, PaneView } from "./types.ts"
@@ -199,11 +199,14 @@ export const mountList: MountPane = (root, ctx): PaneView => {
       node.append(cell(`moai-c-p${p === undefined ? "" : ` m-p${Math.max(0, Math.min(3, p))}`}`, p === undefined ? "" : `p${p}`))
     }
     // What someone holds moves as in the TUI (view/spin.ts): the glyph turns and a band runs over the name.
-    const moving = line.kind === "row" && spins(index, line.at, firstStatus(state?.boot), state?.boot?.statuses)
+    const spin = line.kind === "row" ? spins(index, line.at, firstStatus(state?.boot), state?.boot?.statuses) : 'still'
+    const moving = spin === 'turning'
+    const paused = spin === 'paused'
     if (row) {
       const { glyph, tone } = statusGlyph(statusOf(row), state?.boot)
-      const status = cell(`moai-c-st m-st-${tone}${moving ? " m-spin" : ""}`, glyph)
+      const status = cell(`moai-c-st m-st-${tone}${paused ? " m-spin m-spin-paused" : moving ? " m-spin" : ""}`, glyph)
       status.title = copy.stats[statusOf(row)] ?? statusOf(row)
+      if (paused) { status.append(lostMark(doc, words.sessionLost)); node.dataset.lost = "1" }
       node.append(status)
     } else node.append(cell("moai-c-st"))
 

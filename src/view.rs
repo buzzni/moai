@@ -884,6 +884,7 @@ fn says(w: &Warning, screen: Screen) -> String {
         // **죽었다고 단정하지 않는다.** 워크트리 없이 main 에서 하는 일일 수도 있다 — 그래서 고칠
         // 손을 하나로 정하지 않고, 이어 할 것이면 워크트리를 다시 띄우라는 길까지 댄다.
         "stranded" => one(say(lang, "warn.stranded")),
+        "lost_session" => aged(say(lang, "warn.lost_session"), w.minutes.unwrap_or(0)),
         // `days` 는 "막힌 기간" 이 아니라 "지금 칸에 머문 기간" 이다 — 막 막힌
         // 것을 "며칠째 막혀 있다" 고 잘못 말하지 않으려고 이렇게 적는다.
         "blocked_stale" => aged(say(lang, "warn.blocked_stale"), w.days.unwrap_or(0)),
@@ -1807,6 +1808,75 @@ pub struct Seen<'a> {
     /// 여기서 다시 판단하지 않는다 — 안 잰 것(`None`)만이 아무 말도 안 하는 자리라, 그것을
     /// "자리 없다" 로 말하는 일은 없다.
     pub places: Option<crate::report::Place<'a>>,
+    pub session: Option<crate::report::SessionState>,
+}
+
+/// Recovery wording is shared by CLI, JSON and the explorer; the web displays JSON verbatim.
+///
+/// **The lines are typed as they stand**, so the id and the columns go in as shell words (`crate::text::quoted`) — a
+/// column named `하는 중` must not split in two, the same rule `cmd::mv` keeps for the takeover line it hands out
+/// (moai-0zjo). Putting work down names the configured first column, not a literal `todo`.
+pub fn recover_lines(lang: Lang, issue: &Issue, state: &crate::report::SessionState, cfg: &Config) -> Vec<String> {
+    if !state.lost {
+        return Vec::new();
+    }
+    let (id, col, first_col) = (
+        crate::text::quoted(&issue.id),
+        crate::text::quoted(issue.status.as_str()),
+        crate::text::quoted(cfg.first_status()),
+    );
+    let first = match state.beat.agent {
+        crate::report::Agent::Claude => say(lang, "detail.recover_claude"),
+        crate::report::Agent::Codex => say(lang, "detail.recover_codex"),
+        crate::report::Agent::Antigravity => say(lang, "detail.recover_antigravity"),
+    };
+    [
+        first,
+        say(lang, "detail.recover_resume_own"),
+        say(lang, "detail.recover_take"),
+        say(lang, "detail.recover_put_down"),
+    ]
+    .into_iter()
+    .map(|text| fill(text, &[("sid", &state.beat.session), ("id", &id), ("col", &col), ("first", &first_col)]))
+    .collect()
+}
+
+pub fn session_line(lang: Lang, state: &crate::report::SessionState) -> String {
+    let sid: String = state.beat.session.chars().take(8).collect();
+    fill(
+        if state.lost { say(lang, "detail.session_lost") } else { say(lang, "detail.session_alive") },
+        &[
+            ("agent", state.beat.agent.as_str()),
+            ("sid", &sid),
+            ("event", &state.beat.last_event),
+            ("minutes", &(state.silent_secs / 60).to_string()),
+        ],
+    )
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct Session {
+    pub state: &'static str,
+    pub agent: &'static str,
+    pub session_id: String,
+    pub last_event: String,
+    pub last_seen: String,
+    pub silent_minutes: i64,
+    pub recover: Vec<String>,
+}
+
+impl Session {
+    pub fn of(lang: Lang, issue: &Issue, state: &crate::report::SessionState, cfg: &Config) -> Self {
+        Session {
+            state: if state.lost { "lost" } else { "alive" },
+            agent: state.beat.agent.as_str(),
+            session_id: state.beat.session.clone(),
+            last_event: state.beat.last_event.clone(),
+            last_seen: crate::model::format_rfc3339(state.beat.last_seen_secs),
+            silent_minutes: state.silent_secs / 60,
+            recover: recover_lines(lang, issue, state, cfg),
+        }
+    }
 }
 
 /// **손으로 옮긴 칸이 서 있는 칸과 다르면** 그렇다고 말하는 낱말. CLI 상세와
@@ -2016,6 +2086,16 @@ pub fn detail(
             out.push(format!("  {place}   {}", paint(style::WARN, say(lang, "detail.place_lost"))))
         }
         None => {}
+    }
+    if let Some(session) = &seen.session {
+        out.push(format!(
+            "  {}   {}",
+            row_label(say(lang, "detail.session"), lang),
+            paint(if session.lost { style::WARN } else { style::DIM }, &session_line(lang, session))
+        ));
+        for line in recover_lines(lang, i, session, cfg) {
+            out.push(format!("  →  {line}"));
+        }
     }
     // **막음도 상세에서 말한다**(moai-rvcb). id 로 콕 집어 펼친 이 화면이 "왜 ready 에 안
     // 나오나" 에 답하는 자리인데, 막힘·미룬 막음·끊긴 막음이 탐색기에만 있었다. 막는가는
@@ -4605,11 +4685,56 @@ mod tests {
             states: BTreeMap::new(),
             blocks: Vec::new(),
             places: None,
+            session: None,
         }
     }
 
     fn no_epics() -> crate::report::EpicLabels<'static> {
         crate::report::EpicLabels::titled(BTreeMap::new())
+    }
+
+    #[test]
+    fn recovery_lines_share_agent_commands_and_real_columns_in_both_languages() {
+        let row =
+            Issue::new("argos-0001".into(), "work".into(), Kind::Issue, Status::new("review"), "2026-11-01T00:00:00Z");
+        let mut session = crate::report::SessionState {
+            beat: crate::report::Beat {
+                session: "sid-123".into(),
+                agent: crate::report::Agent::Claude,
+                last_event: "Stop".into(),
+                last_seen_secs: 0,
+            },
+            silent_secs: 3600,
+            lost: true,
+        };
+        for lang in [Lang::En, Lang::Ko] {
+            for (agent, first) in [
+                (crate::report::Agent::Claude, "claude --resume sid-123"),
+                (crate::report::Agent::Codex, "codex resume sid-123"),
+                (crate::report::Agent::Antigravity, ""),
+            ] {
+                session.beat.agent = agent;
+                let lines = recover_lines(lang, &row, &session, &cfg());
+                assert_eq!(lines.len(), 4);
+                assert!(lines[0].starts_with(first));
+                assert!(lines[1].contains("moai mv argos-0001 review --from review"));
+                assert!(lines[2].contains("--take -m '"));
+                assert!(lines[3].contains("moai mv argos-0001 todo"));
+                assert!(lines[3].contains("moai defer argos-0001"));
+            }
+            session.lost = false;
+            assert!(recover_lines(lang, &row, &session, &cfg()).is_empty());
+            session.lost = true;
+        }
+        // A column the shell would split is handed out as one word, and putting work down names the configured
+        // first column — the commands are typed as they stand.
+        let custom = Config::parse("prefix = \"argos\"\nstatuses = \"backlog, 하는 중, done\"\n").unwrap();
+        let held =
+            Issue::new("argos-0001".into(), "work".into(), Kind::Issue, Status::new("하는 중"), "2026-11-01T00:00:00Z");
+        let lines = recover_lines(Lang::En, &held, &session, &custom);
+        assert!(lines[1].contains("moai mv argos-0001 '하는 중' --from '하는 중'"), "{lines:?}");
+        assert!(lines[3].contains("moai mv argos-0001 backlog"), "{lines:?}");
+        assert!(!lines[3].contains("todo"), "{lines:?}");
     }
 
     /// **에픽 칸의 괄호는 그리는 쪽이 한 겹만 단다**(moai-snus). `report::epic_labels` 가

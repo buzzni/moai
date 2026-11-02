@@ -8,6 +8,20 @@ Moving, editing and noting are done
 with the CLI. Every key is in `moai tui --help`; this page says which ones to
 reach for, and [the glossary](glossary.md) says what the words mean.
 
+## A session went silent
+
+A held row normally turns its spinner and moves a light over its title. When
+its local hook heartbeat passes `session_lost_minutes` (30 by default), its
+spinner pauses at `⠋!` in red and the title stops moving. The two-character
+row head keeps the tree aligned. A group turns only while at least one member
+still turns; a group never gets a paused mark itself.
+
+The Session line in the detail names the last event and silence duration and
+shows the same recovery commands as `moai show <id>`. The banner counts silent
+holders. A fresh heartbeat brings motion back at the next metadata poll,
+within 30 seconds. Without a heartbeat on this machine the session is unknown
+and its row keeps turning. See [recovery](recovery.md#an-agent-session-died).
+
 ## Open it
 
 - **Inside a repository**, `moai tui` opens that project
@@ -524,4 +538,4 @@ write there either.
   an email on every write and `git config` had none. The answer holds for this
   run; set `user.name` and `user.email` to stop it asking
 
-Decided in: moai-e9hi moai-724f moai-z46r moai-9nfw moai-47mz moai-irrj moai-ucx8 moai-1hka moai-h2rh moai-gelm moai-m6ni moai-p3r9 moai-o3cb moai-fyul moai-ogaw moai-tllo moai-fc97 moai-jtvp moai-bth3 moai-9tqo moai-wk7i moai-pxiy moai-i4hf moai-lj8g moai-ccow moai-d1zn moai-ekg6 moai-uwi9 moai-mkzo moai-i07x moai-zgc1 moai-4km9
+Decided in: moai-e9hi moai-724f moai-z46r moai-9nfw moai-47mz moai-irrj moai-ucx8 moai-1hka moai-h2rh moai-gelm moai-m6ni moai-p3r9 moai-o3cb moai-fyul moai-ogaw moai-tllo moai-fc97 moai-jtvp moai-bth3 moai-9tqo moai-wk7i moai-pxiy moai-i4hf moai-lj8g moai-ccow moai-d1zn moai-ekg6 moai-uwi9 moai-mkzo moai-i07x moai-zgc1 moai-4km9 moai-4v3h
