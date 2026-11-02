@@ -12,6 +12,10 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+### Changed
+
+- Hook rule 1 permits milestone creation while work is held, while continuing to guard unrelated issues and epics. (moai-ccuy.svo)
+
 ## [0.41.0] - 2026-11-02
 
 ### Added
