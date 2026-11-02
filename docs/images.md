@@ -12,8 +12,8 @@ The repository's `.moai/config.toml` controls `image_compress = "on"` or `"off"`
 
 `moai show` and `moai wiki show` show a picture in supporting terminals: kitty and Ghostty use kitty graphics, iTerm2 and WezTerm use iTerm2 graphics, and Windows Terminal, foot and mlterm use sixel. A terminal launched from a tmux shell can inherit `TMUX`; moai compares stdout with the server's pane ttys so that a separate kitty window still draws. A failed check keeps graphics off. Other terminals, including real tmux panes and screen, show a text placeholder and a clickable local file link. `MOAI_IMAGES=off|kitty|iterm|sixel|auto` overrides detection; the user setting `[images] draw` accepts the same values. Pipes, JSON and raw output contain no image controls. In the shell GIF and WebP always stay a placeholder with its link, because moai decodes only PNG and JPEG; the web view displays all four.
 
-The explorer shows placeholders and local links. The [web view](web.md) displays issue and wiki pictures in the browser. Windows needs no additional image software.
+The explorer draws PNG and JPEG pictures in the detail pane and wiki window in kitty and Ghostty. Pictures scroll with the text, and popups cover them like ordinary text cells. Each picture keeps its placeholder and local link above it. Previews preserve aspect ratio, use at most half the screen height (up to 20 rows), and cache up to eight pictures; further pictures keep their text and links. Resizing or changing a cached file rebuilds previews. Going to the editor clears uploaded pictures and returning uploads visible pictures again. Raw view, `MOAI_IMAGES=off`, real tmux panes and other terminal protocols keep placeholders and local links. The [web view](web.md) displays issue and wiki pictures in the browser. Windows needs no additional image software.
 
 Run `moai init` again in an existing repository to add the `**/images/.lock` ignore line for the shelf lock file. Existing repositories can keep working before doing so.
 
-Decided in: moai-7eeq
+Decided in: moai-7eeq, moai-blkz
