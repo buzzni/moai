@@ -10941,3 +10941,6 @@
 {"ts":"2026-11-02T10:25:51Z","id":"moai-3cei.bh8.dd8","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"check-size.sh·CLAUDE.md·README·CONTRIBUTING·워크플로 주석을 20MB 로, required 잡 이름은 그대로. CHANGELOG Fixed 로 0.42.1, 소식 release-posts/v0.42.1 (v0.42.0 그림 재사용)"}
 {"ts":"2026-11-02T10:55:41Z","id":"moai-3cei.bh8","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 (high — 마일스톤 병합·판 올리기·소식·PR, CI fmt 와 Windows 예산 핫픽스; 그림은 sonnet-5.5 서브에이전트)"}
 {"ts":"2026-11-02T10:55:41Z","id":"moai-3cei.bh8","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"v0.42.1 나감: PR #69 병합(984145e7), release #55 성공, GitHub 릴리스 v0.42.1. v0.42.0 태그는 빌드 없이 남는다(#54, Windows 예산 초과 → 예산 20MB). 마일스톤 워크트리·가지·target 정리"}
+{"ts":"2026-11-02T10:56:43Z","id":"moai-kd6v","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"v0.43.0 릴리스"}
+{"ts":"2026-11-02T10:56:43Z","id":"moai-kd6v.yt8","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"v0.43.0 릴리스 진행 — 병합·판 올리기·소식·PR"}
+{"ts":"2026-11-02T10:56:49Z","id":"moai-kd6v.yt8","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
