@@ -1331,6 +1331,17 @@ pub fn archived_group_context(
     }
 }
 
+/// Placement/closure context only. Overflow candidates never need their blockers read.
+/// The full diagnostic set remains available to irreversible writers such as due apply.
+pub fn archived_places(root: &std::path::Path, issues: &[crate::model::Issue], rows: &[&str]) -> R<crate::store::Load> {
+    let groups = issues.iter().any(|i| crate::report::is_group(i) && rows.contains(&i.id.as_str()));
+    if groups || crate::archive::places_out(issues, rows) {
+        crate::archive::groups(root, issues, rows)
+    } else {
+        Ok(crate::store::Load::default())
+    }
+}
+
 /// 산 줄에 [`archived_for`] 의 줄을 겹친 문맥 — 보드와 같은 자([`crate::report::with_archive`])다. 산 줄이 이기고,
 /// 산 파일에 못 읽는 줄로 선 id 의 아카이브 사본은 안 겹친다. 겹칠 것이 없으면 산 줄을 그대로 빌린다.
 pub fn in_context<'a>(
@@ -1560,6 +1571,27 @@ mod tests {
     use crate::model::{Issue, Kind, Status};
 
     /// **Windows 의 `PATH` 찾기를 리눅스에서 잰다**(moai-j9gv.cl6) — 있는 파일은 손으로 준 목록이다.
+    #[test]
+    fn overflow_context_does_not_open_archives_for_blockers_alone() {
+        let dir = crate::scratch::Scratch::new("overflow-blocker-gate");
+        std::fs::create_dir_all(dir.join(".moai/archive")).unwrap();
+        std::fs::write(dir.join(".moai/archive/2026.jsonl"), "not a row\n").unwrap();
+        let mut row = crate::model::Issue::new(
+            "argos-aaaa".into(),
+            "candidate".into(),
+            crate::model::Kind::Issue,
+            crate::model::Status::new("todo"),
+            "2026-10-01T00:00:00Z",
+        );
+        row.blocked_by = vec!["argos-bbbb".into()];
+        let load = archived_places(&dir, std::slice::from_ref(&row), &["argos-aaaa"]).unwrap();
+        assert!(load.errors.is_empty() && load.issues.is_empty(), "blocker alone opened the archive");
+        // A placement reference still opens and validates the required archive.
+        row.epic = Some("argos-eeee".into());
+        let load = archived_places(&dir, &[row], &["argos-aaaa"]).unwrap();
+        assert_eq!(load.errors.len(), 1);
+    }
+
     #[test]
     fn the_windows_path_walk_tries_pathext_in_order() {
         use std::path::{Path, PathBuf};

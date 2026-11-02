@@ -320,7 +320,13 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
             // 고친 줄이 되살린 묶음이면 그 칸도 아카이브에 남은 멤버에서 읽는다([`super::archived_with_groups`]).
             let context_ids: Vec<&str> =
                 std::iter::once(out.id.as_str()).chain(overflow.iter().map(String::as_str)).collect();
-            let archived = super::archived_with_groups(&repo.root, live, &context_ids)?;
+            // Only the edited row needs blocker diagnostics. Overflow candidates need
+            // placement and closure; a blocker on an unrelated candidate must not open the archive.
+            let archived = if crate::archive::reaches_out(live, &[out.id.as_str()]) {
+                crate::archive::read(&repo.root)?.issues
+            } else {
+                super::archived_places(&repo.root, live, &context_ids)?.issues
+            };
             let issues = super::in_context(live, &archived, unread);
             let issues = &issues[..];
             let overflow = crate::report::overflow_in_context(issues, overflow, cfg);

@@ -170,6 +170,40 @@ pub fn read(root: &Path) -> R<Load> {
     Ok(out)
 }
 
+/// Archive context for placement and group closure, without blocker edges. Every source is
+/// still validated by `read`: dropping unrelated diagnostics would let an incomplete archive
+/// cause irreversible due-priority raises. Only the reached rows enter the derived maps.
+///
+/// Follow placement in both directions: ancestors can move a member, and a group's archived
+/// members decide its column. Include live edges too, since a live parent can bridge an archived
+/// child to a group. Twins keep all their edges and their original stable order; callers merge
+/// through `in_context`, which preserves live and unreadable-live precedence.
+pub fn groups(root: &Path, active: &[Issue], wanted: &[&str]) -> R<Load> {
+    let mut load = read(root)?;
+    let mut edges: HashMap<&str, Vec<&str>> = HashMap::new();
+    for row in active.iter().chain(&load.issues) {
+        let id = row.id.as_str();
+        for parent in std::iter::successors(crate::id::parent_of(id), |id| crate::id::parent_of(id))
+            .chain(row.epic.as_deref())
+            .chain(row.milestone.as_deref())
+        {
+            edges.entry(id).or_default().push(parent);
+            edges.entry(parent).or_default().push(id);
+        }
+    }
+    let mut reached: HashSet<&str> = HashSet::new();
+    let mut pending = wanted.to_vec();
+    while let Some(id) = pending.pop() {
+        if reached.insert(id) {
+            pending.extend(edges.get(id).into_iter().flatten().copied());
+        }
+    }
+    // Own the selected ids before releasing the rows the graph borrows.
+    let picked: HashSet<String> = reached.into_iter().map(str::to_string).collect();
+    load.issues.retain(|row| picked.contains(row.id.as_str()));
+    Ok(load)
+}
+
 fn read_error(file: PathBuf, message: String) -> crate::store::LoadError {
     crate::store::LoadError { source: Some(file), line: 0, message, text: String::new(), id: None }
 }
@@ -1169,6 +1203,50 @@ mod tests {
         };
         assert_eq!(board(&near.issues), board(&all.issues));
         assert!(board(&near.issues).contains("milestone_overdue"), "{}", board(&near.issues));
+    }
+
+    #[test]
+    fn group_context_keeps_placement_twins_and_errors_but_not_blockers() {
+        let s = scratch("archive-groups");
+        let mut group = row("argos-e001", Kind::Epic, "todo");
+        group.due_on = Some("2026-01-01".into());
+        let parent = row("argos-e001.aaa", Kind::Issue, "done");
+        let mut child = row("argos-e001.aaa.bbb", Kind::Issue, "done");
+        child.blocked_by = vec!["argos-b001".into()];
+        let twin = row("argos-e001.aaa.bbb", Kind::Backlog, "todo");
+        put(
+            &s,
+            &[
+                group.clone(),
+                child,
+                twin,
+                row("argos-b001", Kind::Issue, "done"),
+                row("argos-z001", Kind::Issue, "done"),
+            ],
+        );
+        let file = path(&s, "2025");
+        let mut src = fs::read_to_string(&file).unwrap();
+        src.push_str("{\"id\":\"argos-bad1\",\"kind\":\"future\"}\n");
+        fs::write(&file, src).unwrap();
+        let near = groups(&s, &[group, parent], &["argos-e001"]).unwrap();
+        assert_eq!(
+            near.issues.iter().map(|i| i.id.as_str()).collect::<Vec<_>>(),
+            ["argos-e001", "argos-e001.aaa.bbb", "argos-e001.aaa.bbb"]
+        );
+        let all = read(&s).unwrap();
+        let errors = |load: &Load| {
+            load.errors
+                .iter()
+                .map(|e| (e.source.clone(), e.line, e.id.clone(), e.message.clone(), e.text.clone()))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(errors(&near), errors(&all));
+        // Live rows and opaque live IDs keep the same precedence after selecting context.
+        let live = [row("argos-e001.aaa.bbb", Kind::Issue, "todo")];
+        let opaque = BTreeSet::from(["argos-e001"]);
+        let joined = report::with_archive(&live, &near.issues, &opaque);
+        assert_eq!(joined.len(), 1);
+        assert_eq!(joined[0].status.as_str(), "todo");
     }
 
     #[cfg(unix)]

@@ -5921,13 +5921,49 @@ pub fn due_raises<'a>(
     {
         return Vec::new();
     }
-    // Placement, closure and deferral all come from the same context as the board.
-    // Only the rows being raised come from the live snapshot.
     let soil = Soil::of(context);
-    let closed = closed_group_ids(&soil.stands(context, cfg));
-    let ladder = DueLadder::over_with_stones(&soil.lines, &soil.epic, Some(&soil.milestone));
-    let raises = due_candidates_over(live, now, zone, rule, &ladder, &|g| closed.contains(g.id.as_str()));
-    due_in_plan(raises, context, &soil)
+    DueJudge::over(context, &soil).raises(live, now, zone, cfg)
+}
+
+/// Whether a due-priority judgment can change a live row at all.
+pub(crate) fn due_pending(live: &[Issue], rule: &crate::config::DueRule) -> bool {
+    rule.auto && live.iter().any(|i| due_open(i) && i.priority() > 0)
+}
+
+/// With no live dates, only missing placement references can reveal a deadline. Let the
+/// caller check that cheap gate before building maps for an otherwise undated repository.
+pub(crate) fn due_undated_ids(live: &[Issue]) -> Option<Vec<&str>> {
+    (!live.iter().any(|i| i.deadline().is_some()))
+        .then(|| live.iter().filter(|i| due_open(i) && i.priority() > 0).map(|i| i.id.as_str()).collect())
+}
+
+/// One set of placement maps and one ladder per snapshot. The unlocked preview and the
+/// locked write construct separate judges; no pre-lock decision is reused for writing.
+pub(crate) struct DueJudge<'m, 'a> {
+    context: &'a [Issue],
+    soil: &'m Soil<'a>,
+    ladder: DueLadder<'m, 'a>,
+}
+
+impl<'m, 'a> DueJudge<'m, 'a> {
+    pub fn over(context: &'a [Issue], soil: &'m Soil<'a>) -> Self {
+        Self { context, soil, ladder: DueLadder::over_with_stones(&soil.lines, &soil.epic, Some(&soil.milestone)) }
+    }
+
+    pub fn context_ids(&self, now: &str, zone: &crate::tz::Zone, rule: &crate::config::DueRule) -> Vec<&'a str> {
+        let candidates = if rule.auto && self.context.iter().any(|i| i.deadline().is_some()) {
+            due_candidates_over(self.context, now, zone, rule, &self.ladder, &|_| false)
+        } else {
+            Vec::new()
+        };
+        due_context_ids_over(self.context, &candidates, &self.ladder, self.soil)
+    }
+
+    pub fn raises(&self, live: &'a [Issue], now: &str, zone: &crate::tz::Zone, cfg: &Config) -> Vec<Raise<'a>> {
+        let closed = closed_group_ids(&self.soil.stands(self.context, cfg));
+        let raises = due_candidates_over(live, now, zone, &cfg.due, &self.ladder, &|g| closed.contains(g.id.as_str()));
+        due_in_plan(raises, self.context, self.soil)
+    }
 }
 
 /// `moai due apply` 의 **탐침** — 아카이브를 펼지 정하려고 `live` 만으로 고른 후보다([`due_context_ids`]). 판정은 줄마다
@@ -5943,6 +5979,7 @@ pub fn due_raises<'a>(
 /// **물려받은 미룸과 가려짐도 아직 안 걸렀다**(리뷰) — 펼지는 미룸을 거르기 **전**의 후보로 재야 한다: 아카이브의 부모가
 /// 그 줄이 선 마일스톤을 바꿔 미룸을 풀 수 있어, 산 줄만으로 계획 밖이던 줄이 문맥을 펴면 계획 안으로 돌아온다. 후보는
 /// 미룸과 무관하게 산 줄만으로 서므로, 후보가 다 산 줄 안에 머물면 그 미룸의 답도 아카이브와 무관하다.
+#[cfg(test)]
 pub fn due_candidates<'a>(
     live: &'a [Issue],
     now: &str,
@@ -5974,7 +6011,19 @@ pub fn due_candidates<'a>(
 /// 후보는 **탐침의 것**이어야 한다 — 닫힘을 아는 후보는 읽어야 할 묶음 밑의 줄을 이미 뺐다. 닫힌 묶음에 담아 둔 생각은
 /// 탐침에서 그 묶음의 기한을 늘 따르므로, 그런 줄이 있는 동안은 회차마다 아카이브를 읽는다 — 닫힘은 멤버에서 읽는
 /// 파생값이고 담아 두지 않는다(CLAUDE.md).
+#[cfg(test)]
 pub fn due_context_ids<'a>(live: &'a [Issue], candidates: &[Raise<'a>]) -> Vec<&'a str> {
+    let soil = Soil::of(live);
+    let ladder = DueLadder::over_with_stones(&soil.lines, &soil.epic, Some(&soil.milestone));
+    due_context_ids_over(live, candidates, &ladder, &soil)
+}
+
+fn due_context_ids_over<'a>(
+    live: &'a [Issue],
+    candidates: &[Raise<'a>],
+    ladder: &DueLadder<'_, 'a>,
+    soil: &Soil<'a>,
+) -> Vec<&'a str> {
     // An archived parent can expose an earlier deadline even when the live probe
     // has no candidates or no deadline at all. Let the reference gate inspect every
     // open row that could still be raised; fully live ordinary paths stay archive-free.
@@ -5990,15 +6039,11 @@ pub fn due_context_ids<'a>(live: &'a [Issue], candidates: &[Raise<'a>]) -> Vec<&
     if by_group.is_empty() {
         return ids.into_iter().collect();
     }
-    let lines = Lines::of(live);
-    let epics = Handing::over(live, &lines);
-    // 미룬 줄이 있을 때만 마일스톤 지도를 짓고, 사다리와 미룸이 그 한 벌을 나눠 쓴다.
-    let stones = live.iter().any(is_put_off).then(|| milestones_over(live, &epics, &lines));
-    let ladder = DueLadder::over_with_stones(&lines, &epics, stones.as_ref());
-    let shelf = stones.as_ref().map(|m| Shelf::new(&lines, &epics, m));
+    let lines = &soil.lines;
+    let shelf = Shelf::new(lines, &soil.epic, &soil.milestone);
     // 산 줄의 미룸으로 계획 밖인 생각은 문맥을 펴도 계획 밖이다 — 그 미룸이 걸린 줄이 다 산 줄이라서다(참조가 밖으로
     // 닿으면 `archive::places_out` 이 따로 편다). 어차피 안 올리니 그 묶음의 멤버를 읽을 까닭이 없다.
-    for r in by_group.into_iter().filter(|r| shelf.as_ref().is_none_or(|s| s.nearest(r.issue).is_none())) {
+    for r in by_group.into_iter().filter(|r| shelf.nearest(r.issue).is_none()) {
         let own = r.issue.deadline();
         ids.extend(ladder.above(r.issue).into_iter().filter(|id| {
             !ladder.off.contains(id)
