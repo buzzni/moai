@@ -83,10 +83,10 @@ export interface ViewContext {
   /** One line under the banners (the shell's result line): what a gantt move did, or why it did nothing. */
   say?(text: string, problem?: boolean): void
   /**
-   * Write a row's planned days (data/plan.ts, moai-d86e.3ud) and say how it went; `undo` is the `moai edit` line that
-   * puts them back. Absent where nothing writes (the tests' shell): the gantt then moves no bar.
+   * Write a row's planned days (data/plan.ts, moai-d86e.3ud) and say how it went. The write returns its
+   * guarded undo command. Absent where nothing writes (the tests' shell): the gantt then moves no bar.
    */
-  movePlan?(id: string, change: PlanChange, undo: string): Promise<void>
+  movePlan?(id: string, change: PlanChange): Promise<void>
 }
 
 export interface PaneView {

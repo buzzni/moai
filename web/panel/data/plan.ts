@@ -27,25 +27,16 @@ export const planEndpoint = (id: string, change: PlanChange): Endpoint => ({
 })
 
 /** `said`: what moai wrote on stderr beside the answer — the rows a pulled-in deadline now overtakes. */
-export type Planned = { ok: true; said?: string[] } | { ok: false; outcome: Outcome }
+/** `undo` is computed from the locked before/after pair and names the tracker with -C. */
+export type Planned = { ok: true; undo?: string; said?: string[] } | { ok: false; outcome: Outcome }
 
 export async function writePlan(client: Client, id: string, change: PlanChange): Promise<Planned> {
   // Never shared, and Cancel does not stop it: a write of its own, as a read mark is (data/read.ts).
   const outcome = await client.request(planEndpoint(id, change), { priority: PRIORITY.detail, share: false })
-  if (outcome.kind === 'passed') return { ok: true, ...(outcome.notes ? { said: outcome.notes } : {}) }
+  if (outcome.kind === 'passed') {
+    const out = outcome.output
+    const undo = typeof out === 'object' && out !== null && 'undo' in out && typeof out.undo === 'string' ? out.undo : undefined
+    return { ok: true, ...(undo ? { undo } : {}), ...(outcome.notes ? { said: outcome.notes } : {}) }
+  }
   return { ok: false, outcome }
-}
-
-/**
- * Undo the same move, preserving changes to the other edge since the page read it. The write's answer carries only
- * the resulting row, so when an edge was absent at read time, clearing it is approximate: another writer may have
- * set that edge before this move landed. A new one-day plan is guarded by --if-unplanned and can clear both edges.
- */
-export function undoOf(id: string, change: PlanChange, read: { start: string | null; due: string | null }): string {
-  const cmd = `moai edit ${id}`
-  if ('day' in change) return `${cmd} --start none --due none`
-  if ('start' in change) return `${cmd} --start ${read.start ?? 'none'}`
-  if (change.edge === 'body') return `${cmd} --shift ${-change.days}`
-  if (change.edge === 'start') return read.start ? `${cmd} --shift-start ${-change.days}` : `${cmd} --start none`
-  return read.due ? `${cmd} --shift-due ${-change.days}` : `${cmd} --due none`
 }
