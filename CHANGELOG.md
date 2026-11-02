@@ -19,6 +19,7 @@ does not tag — see `CONTRIBUTING.md`.
 
 ### Changed
 
+- `ctl state.menu` uses the same string/null key spelling on the explorer and web; read-only state/actions remain available during key help. Proposal refusals share translated words, while caller identity retains name and email. (moai-4xmq)
 - Deadline-priority and overflow calculations retain the archive placement context they need; Gantt writes reuse diagnostics from the locked snapshot. (moai-4slm)
 - Supervisor backlog plans share the decision and contract guidance used by `moai-plan`; epic-end review prompts and results use separate directories per epic. (moai-i26i)
 - Gantt date reads skip hidden row calculations while preserving complete group rollups; web scrolling retains overlapping DOM nodes and releases replaced chart trees. (moai-yigx)
@@ -26,6 +27,7 @@ does not tag — see `CONTRIBUTING.md`.
 
 ### Fixed
 
+- Web proposal acceptance reserves the action on the server before execution. Explorer ctl read batches are atomic, and extra browser tabs fall back to polling beyond three live streams to keep reads responsive. (moai-4xmq)
 - Hook pickup suggestions ignore stale archived copies of unreadable live rows, matching `ready` and `prime`. (moai-4slm)
 - Gantt undo targets its original tracker and refuses stale absolute restores; web undo uses the locked write result. Widening the web Gantt preserves the left visible date without repeating full row placement. (moai-yigx)
 - Image placeholder paths remain clickable across wrapped lines and when their labels scroll offscreen. Resize bursts retry queued previews and skip stale encoding jobs. (moai-zidx)
