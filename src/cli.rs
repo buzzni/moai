@@ -169,6 +169,9 @@ pub enum ColorArg {
 // (`every_help_heredoc_is_copyable`, moai-foc3).
 #[derive(Subcommand, Debug)]
 pub enum Cmd {
+    /// Store a picture and print a markdown reference
+    #[command(subcommand)]
+    Image(ImageCmd),
     /// Control an already open explorer or web tab
     #[command(subcommand)]
     Ctl(CtlCmd),
@@ -3008,4 +3011,33 @@ impl Scope {
             Scope::User => "user",
         }
     }
+}
+
+#[derive(Subcommand, Debug)]
+pub enum ImageCmd {
+    /// Shrink and store pictures; optionally append them to an issue body
+    #[command(after_help = "  moai image add shot.png --to moai-abcd
+  moai image add shot.png --wiki lessons/example
+  moai note moai-abcd \"$(moai image add shot.png)\"
+
+  Files are validated before writing. GIF and WebP keep their original bytes.")]
+    Add(ImageAddArgs),
+}
+#[derive(Args, Debug)]
+pub struct ImageAddArgs {
+    /// Picture files (PNG, JPEG, GIF or WebP; detected from bytes)
+    #[arg(required = true, value_name = "file", num_args = 1..)]
+    pub files: Vec<std::path::PathBuf>,
+    /// Append references to this issue body
+    #[arg(long, conflicts_with = "wiki", value_name = "id")]
+    pub to: Option<String>,
+    /// Store in the wiki; optionally name the page
+    #[arg(long, num_args = 0..=1, default_missing_value = "", value_name = "slug")]
+    pub wiki: Option<String>,
+    /// Description (defaults to the file name)
+    #[arg(long, value_name = "text")]
+    pub alt: Option<String>,
+    /// Keep the original bytes for this invocation
+    #[arg(long)]
+    pub original: bool,
 }

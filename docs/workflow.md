@@ -1,5 +1,8 @@
 # Day-to-day workflow
 
+
+See [pictures in issues and the wiki](images.md) for adding and viewing images.
+
 How work moves through moai when several sessions — people, agents, or both —
 share one repository: picking work up, planning it, doing it in a worktree,
 reviewing it and getting it merged. The first part holds in any repository that
@@ -353,4 +356,4 @@ where its contributors read them rather than repeated here:
   broken data, the same as a broken line in `issues.jsonl` — see [An archive file
   cannot be read](recovery.md#an-archive-file-cannot-be-read)
 
-Decided in: moai-0zjo moai-40ht moai-bx6t moai-9793 moai-ug3j moai-gelm moai-tllo moai-snyk moai-zynt moai-j9nf moai-jtvp moai-fx9t moai-bth3 moai-r0x8 moai-9tqo moai-g8pt moai-lj8g moai-1m21 moai-uwi9 moai-ns7a moai-mkzo moai-w30o moai-4v3h moai-ccuy
+Decided in: moai-0zjo moai-40ht moai-bx6t moai-9793 moai-ug3j moai-gelm moai-tllo moai-snyk moai-zynt moai-j9nf moai-jtvp moai-fx9t moai-bth3 moai-r0x8 moai-9tqo moai-g8pt moai-lj8g moai-1m21 moai-uwi9 moai-ns7a moai-mkzo moai-w30o moai-4v3h moai-7eeq moai-ccuy

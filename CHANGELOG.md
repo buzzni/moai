@@ -17,6 +17,18 @@ does not tag — see `CONTRIBUTING.md`.
 - Hook rule 1 permits milestone creation while work is held, while continuing to guard unrelated issues and epics. (moai-ccuy.svo)
 - `moai-plan` focuses plans on decisions, contracts and failure conditions, and rewrites superseded designs after answers. (moai-ccuy.lng)
 
+## [0.42.1] - 2026-11-02
+
+### Fixed
+
+- **v0.42.0 shipped no binaries.** Its x86_64 Windows build went over the 15 MB size budget after pictures arrived, which stopped the release; the budget is now 20 MB and every platform is built. (moai-3cei.bh8.dd8)
+
+## [0.42.0] - 2026-11-02
+
+### Added
+
+- **Pictures in issues and the wiki.** `moai image add` stores content-addressed pictures and can append them to an issue. PNG and JPEG are compressed by default; `--original` or `image_compress = "off"` keeps the input. Shell terminals and the web display supported pictures, while the explorer shows a placeholder and local link. Windows needs no additional software. Run `moai init` again to add the `**/images/.lock` ignore line for the shelf lock. (moai-7eeq)
+
 ## [0.41.0] - 2026-11-02
 
 ### Added

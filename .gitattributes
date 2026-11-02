@@ -36,3 +36,5 @@ scripts/git-hooks/*  text eol=lf
 # `cargo build` never needs node. Marking it generated collapses the bundle diff;
 # read the change under web/ instead.
 src/web/dist/**      linguist-generated=true
+
+docs/images/** binary

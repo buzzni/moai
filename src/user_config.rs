@@ -393,6 +393,8 @@ pub struct Registry {
     /// 새 판 묻기를 설정이 껐는가 — `[update] check`(moai-d74q). 적힌 것이 없으면 `None` 이고
     /// 그때는 켠 것이다([`crate::latest::gate`]).
     pub update_check: Option<bool>,
+    /// Shell image protocol override. Invalid values safely disable graphics.
+    pub image_draw: Option<String>,
     /// 받을 저장소 — `[update] repo`(moai-zsfr.2em). **꼴이 맞는 값만 든다**([`crate::latest::repo_ok`]) —
     /// 틀린 값은 `None` 이고 까닭은 `update_problems` 에 선다. 적힌 것이 없어도 `None` 이고, 그때는
     /// [`crate::latest::DEFAULT_REPO`] 다([`crate::latest::repo_from`]).
@@ -736,6 +738,13 @@ pub fn read(path: Option<&Path>) -> Registry {
             reg.read_problems = problems;
             let (check, mut problems) = doc.update_check();
             reg.update_check = check;
+            reg.image_draw = doc
+                .doc
+                .get("images")
+                .and_then(|i| i.as_table_like())
+                .and_then(|t| t.get("draw"))
+                .and_then(|v| v.as_str())
+                .map(str::to_string);
             let (repo, repo_problems) = doc.update_repo();
             reg.update_repo = repo;
             problems.extend(repo_problems);

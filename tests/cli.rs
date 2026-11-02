@@ -1675,6 +1675,7 @@ fn a_repository_can_say_in_gitattributes_that_it_does_not_want_the_driver() {
         root.join(".gitattributes"),
         "# 이 저장소는 스냅샷에 머지 드라이버를 안 쓴다\n\
          .moai/issues.jsonl   text eol=lf -merge\n\
+         \
          .moai/journal.jsonl  text eol=lf merge=union\n\
          .moai/journal/*.jsonl  text eol=lf merge=union\n",
     )
@@ -9453,6 +9454,7 @@ fn idea_and_issue_share_one_list_of_verbs() {
 /// `--json` 훑기가 실제로 부르는 명령들. **위 시험이 이 목록을 도움말과 견준다** —
 /// 목록을 여기 한 자리에 두어야 그 견줌이 뜻을 갖는다.
 const JSON_SWEEP: &[&str] = &[
+    "image",
     "ctl",
     "writing",
     "init",
@@ -10193,7 +10195,9 @@ fn every_command_still_speaks_json() {
     let id = field(&made, "id");
     let epic = field(&ok(s.path(), &["add", "에픽", "--type", "epic", "--json"]), "id");
 
+    std::fs::write(s.path().join("sweep.gif"), b"GIF89a\x01\x00\x01\x00").unwrap();
     let cases = [
+        vec!["image", "add", "sweep.gif", "--json"],
         vec!["ctl", "ls", "--json"],
         vec!["writing", "--json"],
         vec!["status", "--json"],
@@ -34257,4 +34261,93 @@ fn terminal_takeover_clears_a_lost_session_without_a_new_pick() {
     // A later hook can re-establish the holder using the existing pick format, with no snapshot-field addition.
     std::fs::write(&record, format!("{}\t{id}\t1789099924\n", nonce + 1)).unwrap();
     assert_eq!(call(&["show", &id, "--json"])["session"]["state"], "lost");
+}
+
+#[test]
+fn web_serves_binary_images_and_refuses_non_picture_paths() {
+    use std::io::{Read as _, Write as _};
+    let s = init("web-image-binary");
+    std::fs::create_dir_all(s.path().join(".moai/images")).unwrap();
+    let mut png = std::io::Cursor::new(Vec::new());
+    image::DynamicImage::new_rgb8(2, 2).write_to(&mut png, image::ImageFormat::Png).unwrap();
+    let png = png.into_inner();
+    std::fs::write(s.path().join(".moai/images/0123456789abcdef.png"), &png).unwrap();
+    let web = serve(s.path());
+    let mut stream = dial(web.port);
+    stream.set_read_timeout(Some(std::time::Duration::from_secs(10))).unwrap();
+    write!(stream, "GET /api/image?path=.moai/images/0123456789abcdef.png HTTP/1.1\r\nHost: localhost\r\n\r\n")
+        .unwrap();
+    let mut response = Vec::new();
+    stream.read_to_end(&mut response).unwrap();
+    let at = response.windows(4).position(|b| b == b"\r\n\r\n").unwrap();
+    let head = std::str::from_utf8(&response[..at]).unwrap();
+    assert!(head.contains("200"));
+    assert!(head.contains("Content-Type: image/png"));
+    assert_eq!(&response[at + 4..], png);
+    for path in [".moai/issues.jsonl", ".git/config", "../outside.png", "docs/a.svg"] {
+        assert_eq!(get(web.port, &format!("/api/image?path={path}")).0, 404);
+    }
+}
+
+#[test]
+fn an_upgrade_does_not_warn_about_the_image_shelf_lock() {
+    let s = init("image-upgrade-dotfiles");
+    let ignore = s.path().join(".gitignore");
+    let before = std::fs::read_to_string(&ignore).unwrap().replace("**/images/.lock\n", "");
+    std::fs::write(&ignore, before).unwrap();
+    std::fs::create_dir_all(s.path().join(".moai/images")).unwrap();
+    std::fs::write(s.path().join(".moai/images/.lock"), "").unwrap();
+    for phase in 0..2 {
+        if phase == 1 {
+            ok(s.path(), &["init"]);
+        }
+        let status = ok(s.path(), &["status", "--json"]);
+        assert!(!status.contains("gitignore_rules") && !status.contains("gitattributes_rules"), "{status}");
+    }
+    assert!(std::fs::read_to_string(ignore).unwrap().contains("**/images/.lock"));
+}
+
+#[cfg(unix)]
+#[test]
+fn an_upgrade_with_a_linked_tracker_ignores_the_image_lock() {
+    use std::os::unix::fs::symlink;
+    let s = init("image-upgrade-link");
+    std::fs::rename(s.path().join(".moai"), s.path().join("tracker")).unwrap();
+    symlink("tracker", s.path().join(".moai")).unwrap();
+    ok(s.path(), &["init"]);
+    let ignore = s.path().join(".gitignore");
+    std::fs::write(&ignore, std::fs::read_to_string(&ignore).unwrap().replace("**/images/.lock\n", "")).unwrap();
+    for phase in 0..2 {
+        if phase == 1 {
+            ok(s.path(), &["init"]);
+        }
+        let status = ok(s.path(), &["status", "--json"]);
+        assert!(!status.contains("gitignore_rules") && !status.contains("gitattributes_rules"), "{status}");
+    }
+}
+
+#[test]
+fn image_add_marks_the_written_version_for_only_its_user() {
+    let s = init("image-own-read");
+    let writer = s.path().join("writer/config.toml");
+    let other = s.path().join("other/config.toml");
+    let id = field(&ok_with(s.path(), &writer, &["add", "test", "--json"]), "id");
+    ok_with(s.path(), &writer, &["read", &id]);
+    let pic = s.path().join("shot.png");
+    image::DynamicImage::new_rgba8(2, 2).save_with_format(&pic, image::ImageFormat::Png).unwrap();
+    let writer_env = [("MOAI_CONFIG", writer.to_str().unwrap())];
+    ok_env(s.path(), LATER, &writer_env, &["image", "add", pic.to_str().unwrap(), "--to", &id]);
+    let row = json_of(&ok_with(s.path(), &writer, &["show", &id, "--json"]));
+    assert_eq!(row["updated_at"], LATER, "{row}");
+    assert!(read_sheet(&writer, s.path()).contains(LATER));
+    assert!(row.get("unread").is_none(), "{row}");
+    assert_eq!(json_of(&ok_with(s.path(), &other, &["show", &id, "--json"]))["unread"], true);
+    ok_env(
+        s.path(),
+        "2026-09-13T00:00:00Z",
+        &[("MOAI_CONFIG", other.to_str().unwrap())],
+        &["edit", &id, "--body", "unseen"],
+    );
+    ok_env(s.path(), "2026-09-14T00:00:00Z", &writer_env, &["image", "add", pic.to_str().unwrap(), "--to", &id]);
+    assert_eq!(json_of(&ok_with(s.path(), &writer, &["show", &id, "--json"]))["unread"], true);
 }
