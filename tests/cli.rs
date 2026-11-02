@@ -521,12 +521,11 @@ fn temp_at(cmd: &mut Command, dir: impl AsRef<std::ffi::OsStr>) -> &mut Command 
 /// 시험이 제 값을 주려면 이 뒤에 `.env` 로 덮는다. `PATH` 는 두고 간다 — moai 가
 /// git 을 부르고, `claude` 가 없는 자리가 필요한 시험은 `Claude` 가 따로 만든다.
 fn isolated(program: impl AsRef<std::ffi::OsStr>) -> Command {
-    // HOME 은 시험용 한 자리로 고정하고 **모든 시험이 함께 쓴다** — 울타리는 사용자 설정에만 선다.
-    // 사용자 설정은 CONFIG_FENCE 의 시험 스레드별 자리로 갈라 두므로, 설정 곁에 쓰는 read/·picks/ 도
-    // 시험이 끝나면 함께 걷힌다. 시험이 뒤에 준 `MOAI_CONFIG` 는 울타리 밖이라 그 시험의 Scratch 안에 둔다.
-    let home = Path::new(env!("CARGO_TARGET_TMPDIR")).join("moai-cli-home");
+    // HOME 도 설정과 같은 시험 스레드의 울타리에 둔다. 같은 시험의 명령끼리는 집을 나눠 쓰고,
+    // 정상 종료·패닉 모두 CONFIG_FENCE 의 Scratch::drop 이 집과 설정 곁의 파일까지 걷는다.
+    // 뒤에 HOME·MOAI_CONFIG 를 덮는 호출자는 그 자리를 제 Scratch 안에 둔다.
+    let (home, config) = CONFIG_FENCE.with(|fence| (fence.path().join("home"), fence.path().join("config.toml")));
     std::fs::create_dir_all(&home).unwrap();
-    let config = CONFIG_FENCE.with(|fence| fence.path().join("config.toml"));
     let ctl_dir = CTL_FENCE.with(|fence| fence.path().to_path_buf());
     let mut cmd = Command::new(program);
     // **걷기가 먼저다.** `Command` 의 환경은 이름마다 마지막에 부른 것이 이긴다 —
@@ -9688,6 +9687,58 @@ fn config_of(cmd: &Command) -> PathBuf {
     let (_, value) =
         cmd.get_envs().find(|(key, _)| *key == std::ffi::OsStr::new("MOAI_CONFIG")).expect("MOAI_CONFIG 를 안 줬다");
     PathBuf::from(value.expect("MOAI_CONFIG 를 걷었다"))
+}
+
+/// HOME 을 덮는 Claude·hook·PowerShell 호출자는 제 Scratch 가 집을 쥔다.
+/// 나머지는 설정과 함께 시험 스레드의 울타리를 따른다.
+fn home_of(cmd: &Command) -> PathBuf {
+    let (_, value) = cmd.get_envs().find(|(key, _)| *key == std::ffi::OsStr::new("HOME")).expect("HOME 를 안 줬다");
+    PathBuf::from(value.expect("HOME 를 걷었다"))
+}
+
+#[test]
+fn test_homes_share_within_a_test_and_isolate_concurrent_tests() {
+    let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
+    let threads: Vec<_> = (0..2)
+        .map(|n| {
+            let barrier = barrier.clone();
+            std::thread::spawn(move || {
+                let home = home_of(&isolated(BIN));
+                assert_eq!(home, home_of(&isolated(BIN)), "같은 시험의 명령이 집을 함께 쓰지 않는다");
+                std::fs::write(home.join(format!("from-{n}")), "written under HOME").unwrap();
+                barrier.wait();
+                let other = home.join(format!("from-{}", 1 - n));
+                let leaked = other.exists();
+                barrier.wait(); // 둘 다 읽기 전에 어느 쪽의 TLS 도 걷히지 않는다.
+                assert!(!leaked, "다른 시험이 HOME 에 쓴 파일이 보인다: {}", other.display());
+                home
+            })
+        })
+        .collect();
+    let homes: Vec<_> = threads.into_iter().map(|t| t.join().unwrap()).collect();
+    assert_ne!(homes[0], homes[1]);
+    assert!(homes.iter().all(|home| !home.exists()), "끝난 시험의 HOME 이 남았다");
+}
+
+#[test]
+fn test_homes_are_removed_after_success_and_panic() {
+    for fails in [false, true] {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let joined = std::thread::spawn(move || {
+            let home = home_of(&isolated(BIN));
+            std::fs::create_dir(home.join(".claude")).unwrap();
+            std::fs::write(home.join(".claude/settings.json"), "{}").unwrap();
+            tx.send(home).unwrap();
+            assert!(!fails, "HOME unwind probe");
+        })
+        .join();
+        let home = match rx.try_recv() {
+            Ok(home) => home,
+            Err(_) => std::panic::resume_unwind(joined.expect_err("HOME 자리를 안 보내고 끝났다")),
+        };
+        assert_eq!(joined.is_err(), fails);
+        assert!(!home.exists(), "시험 뒤 HOME 이 남았다(패닉 {fails}): {}", home.display());
+    }
 }
 
 #[test]
