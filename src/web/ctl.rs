@@ -171,11 +171,12 @@ impl Tabs {
                 if let Some(Verb::Zone { name }) = then.as_deref()
                     && name != "none"
                 {
+                    let deadline_ms = request.deadline_ms.min(wire::now_ms().saturating_add(5_000));
                     let checked = self.dispatch(
                         &target,
-                        json!({"verb": "validate_zone", "name": name, "deadline_ms": request.deadline_ms}),
+                        json!({"verb": "validate_zone", "name": name, "deadline_ms": deadline_ms}),
                         None,
-                        request.deadline_ms,
+                        deadline_ms,
                     );
                     if !checked.ok {
                         return checked;

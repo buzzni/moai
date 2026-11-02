@@ -151,8 +151,7 @@ test('a refused or pending claim never executes the stale card, and double click
   }
 })
 
-// The server's half (src/web/ctl.rs validate_zone) is tested against a stand-in page; this is the page's half: the
-// `validate_zone` event it listens for, and the reply it posts back for a zone it can and cannot draw.
+// Browser validation uses the same ctl envelope and reply path as actions, without changing the view.
 test('the page answers a zone check before a zone suggestion is shown', async (t) => {
   const p = await page(t, { fakeStream: true })
   const source = p.streams[0]

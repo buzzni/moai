@@ -27,7 +27,7 @@ const RETRY_MS = 30_000
  * A stream that was open and then ended — the server closes each after thirty minutes, or the connection dropped — is
  * opened again after three seconds (the `retry:` the server sends), well inside the server's thirty-second resume grace
  * (src/web/ctl.rs RESUME_GRACE), so the tab keeps its ctl id, token and pending suggestions. Waiting RETRY_MS there
- * always arrived after the grace. A stream refused before it opened still waits RETRY_MS.
+ * always arrived after the grace. A refused resume keeps retrying within that grace; a first connection or one past grace waits RETRY_MS.
  */
 const RESUME_MS = 3_000
 const clockDefault: Clock = {
@@ -47,6 +47,7 @@ export function openEvents(options: EventsOptions): Events {
   let retry: unknown = null
   let stopped = false
   let up = false
+  let resumeUntil = 0
 
   const clear = () => {
     if (retry !== null) clock.clearTimeout(retry)
@@ -58,6 +59,7 @@ export function openEvents(options: EventsOptions): Events {
     options.onDown()
   }
   const close = () => {
+    if (up) resumeUntil = clock.now() + 30_000
     source?.close()
     source = null
     down()
@@ -123,7 +125,7 @@ export function openEvents(options: EventsOptions): Events {
         const wasUp = up
         close()
         if (!wasUp) options.onDown()
-        later(wasUp ? Math.min(RESUME_MS, options.retryMs ?? RETRY_MS) : undefined)
+        later(wasUp || clock.now() < resumeUntil ? Math.min(RESUME_MS, options.retryMs ?? RETRY_MS) : undefined)
       }
     } catch {
       options.onDown()

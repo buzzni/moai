@@ -28,8 +28,9 @@ use std::time::{Duration, Instant};
 
 /// 동시에 도는 연결의 상한 — 넘치면 503 을 쓰고 닫는다. 페이지 하나가 한 번에 여는 부름은 몇 개다.
 pub const BUSY_MAX: usize = 32;
-/// Long-lived event streams have their own slots and never occupy ordinary request capacity.
-pub const STREAMS_MAX: usize = 8;
+/// Keep persistent streams below an HTTP/1 browser's per-origin connection budget. Overflow tabs use the
+/// page's polling fallback, leaving connections for ordinary reads and proposal claims/results.
+pub const STREAMS_MAX: usize = 3;
 /// 요청 머리 **전체**를 읽는 시한 — `read` 한 번의 시한이 아니다([`read_head`]).
 const READ_LIMIT: Duration = Duration::from_secs(5);
 /// 503 뒤에 늦게 오는 요청 머리를 별도 스레드에서 비우는 전체 시한. 조용하거나 한 바이트씩 보내는
@@ -892,6 +893,84 @@ mod tests {
         assert_eq!(listed.data.unwrap()["windows"][0]["id"], id);
         drop(reader);
         drop(client);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn proposal_http_requires_a_claim_before_the_action_result() {
+        use std::io::{Read, Write};
+        let scratch = crate::scratch::Scratch::new("web-proposal-claim-http");
+        std::fs::create_dir_all(scratch.join(".moai")).unwrap();
+        std::fs::write(scratch.join(".moai/config.toml"), "prefix = \"moai\"\n").unwrap();
+        std::fs::write(scratch.join(".moai/issues.jsonl"), "").unwrap();
+        let site =
+            Site::new(run::Spawner { exe: "unused-child".into(), cwd: scratch.path().into(), user: None }, Lang::En);
+        let tab = site.tabs.join(scratch.path(), false, None).unwrap();
+        let mut request = crate::ctl::wire::request(
+            crate::ctl::wire::Verb::Propose {
+                text: "Show board?".into(),
+                then: Some(Box::new(crate::ctl::wire::Verb::Screen { name: "board".into() })),
+                ttl: 900,
+                wait: 0,
+            },
+            Duration::from_secs(5),
+        );
+        request.target = Some(tab.id.clone());
+        let id = site.tabs.handle(request).data.unwrap()["id"].as_str().unwrap().to_string();
+        let post = |body: &str, token: &str, origin: &str| {
+            let (mut client, server) = pair();
+            client.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+            write!(client, "POST /api/ctl/{}/proposal?token={token}&id={id} HTTP/1.1\r\nHost: localhost\r\nOrigin: {origin}\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}", tab.id, body.len()).unwrap();
+            std::thread::scope(|scope| {
+                scope.spawn(|| handle(server, &site, Leave(Arc::new(AtomicUsize::new(1)))));
+                let mut response = String::new();
+                client.read_to_string(&mut response).unwrap();
+                response
+            })
+        };
+        let claim = r#"{"state":"claim"}"#;
+        assert!(post(claim, "wrong", "http://localhost").starts_with("HTTP/1.1 403 "));
+        assert!(post(claim, &tab.token, "http://elsewhere").starts_with("HTTP/1.1 403 "));
+        let result = r#"{"state":"accepted","ran":{"ok":true,"data":{"screen":"board"}}}"#;
+        assert!(post(result, &tab.token, "http://localhost").starts_with("HTTP/1.1 409 "));
+        let permission = post(claim, &tab.token, "http://localhost");
+        assert!(permission.starts_with("HTTP/1.1 200 "), "{permission}");
+        let value: serde_json::Value = serde_json::from_str(permission.split("\r\n\r\n").nth(1).unwrap()).unwrap();
+        assert_eq!(value["then"]["name"], "board");
+        assert!(post(claim, &tab.token, "http://localhost").starts_with("HTTP/1.1 409 "));
+        assert!(post(result, &tab.token, "http://localhost").starts_with("HTTP/1.1 200 "));
+        let mut answer =
+            crate::ctl::wire::request(crate::ctl::wire::Verb::Answer { id, wait: 0 }, Duration::from_secs(1));
+        answer.target = Some(tab.id);
+        let value = site.tabs.handle(answer).data.unwrap();
+        assert_eq!(value["state"], "accepted");
+        assert_eq!(value["ran"]["data"]["screen"], "board");
+    }
+
+    #[test]
+    fn event_stream_overflow_refuses_promptly_and_returns_its_slot() {
+        use std::io::{Read, Write};
+        let scratch = crate::scratch::Scratch::new("web-event-slots");
+        std::fs::create_dir_all(scratch.join(".moai")).unwrap();
+        std::fs::write(scratch.join(".moai/config.toml"), "prefix = \"moai\"\n").unwrap();
+        std::fs::write(scratch.join(".moai/issues.jsonl"), "").unwrap();
+        let site =
+            Site::new(run::Spawner { exe: "unused-child".into(), cwd: scratch.path().into(), user: None }, Lang::En);
+        // Model the open streams, then pass the next request through the real HTTP handler.
+        site.streams.store(STREAMS_MAX, Ordering::SeqCst);
+        assert_eq!(STREAMS_MAX, 3, "persistent streams consumed the browser's read connections");
+        let (mut client, server) = pair();
+        client.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+        client.write_all(b"GET /api/events HTTP/1.1\r\nHost: localhost\r\n\r\n").unwrap();
+        let busy = Arc::new(AtomicUsize::new(1));
+        std::thread::scope(|scope| {
+            scope.spawn(|| handle(server, &site, Leave(busy.clone())));
+            let mut result = String::new();
+            client.read_to_string(&mut result).unwrap();
+            assert!(result.starts_with("HTTP/1.1 503 "), "{result}");
+        });
+        assert_eq!(site.streams.load(Ordering::SeqCst), STREAMS_MAX, "a refused stream leaked a slot");
+        assert_eq!(busy.load(Ordering::SeqCst), 0);
     }
 
     /// 루프백에 짝 하나 — (부르는 쪽, 받은 쪽).

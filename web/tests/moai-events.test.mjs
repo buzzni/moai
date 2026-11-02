@@ -120,7 +120,7 @@ test('a stream refused before open leaves polling available', async () => {
 
 // The server keeps a tab for thirty seconds after its stream ends (src/web/ctl.rs RESUME_GRACE): a stream that was open
 // (the server's thirty-minute end, a dropped connection) must come back well inside that, or the tab loses its ctl id
-// and its suggestions. One refused before it opened still waits thirty seconds.
+// and its suggestions. Refused resumes retry inside that grace, then return to thirty-second backoff.
 test('an open stream that ends comes back inside the server resume grace', async () => {
   const p = setup()
   await p.refresher.refresh()
@@ -131,10 +131,14 @@ test('an open stream that ends comes back inside the server resume grace', async
   await p.time.advance(1)
   assert.equal(p.sources.length, 2)
   p.sources[1].onerror()
+  await p.time.advance(3_000)
+  assert.equal(p.sources.length, 3, 'a refused resume lost its grace')
+  await p.time.advance(24_000)
+  p.sources[2].onerror()
   await p.time.advance(29_999)
-  assert.equal(p.sources.length, 2, 'a stream refused before it opened was retried early')
+  assert.equal(p.sources.length, 3, 'retry did not back off after grace ended')
   await p.time.advance(1)
-  assert.equal(p.sources.length, 3)
+  assert.equal(p.sources.length, 4)
   p.events.stop()
   p.refresher.stop()
 })
@@ -155,4 +159,15 @@ test('a pushed stamp during a read is checked after that read settles', async ()
   release()
   await pushed
   refresher.stop()
+})
+
+test('a resumed stream refused before open retries within grace while the old slot is being returned', async () => {
+  const p = setup()
+  p.sources[0].onopen()
+  p.events.reconnect()
+  p.sources[1].onerror()
+  await p.time.advance(3000)
+  assert.equal(p.sources.length, 3)
+  p.sources[2].onopen()
+  p.events.stop(); p.refresher.stop()
 })
