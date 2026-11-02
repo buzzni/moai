@@ -62,7 +62,7 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
     let (lost, unread) = crate::worktree::stranded_at(repo.here(), &repo.config, &load.issues, swept, &now);
     st.warnings.extend(lost);
     let wall_now = crate::pulse::now_secs();
-    let pulse = crate::pulse::read(&repo.root, &load.issues, &repo.config, wall_now);
+    let pulse = crate::pulse::read(&repo.root, &load.issues, &repo.config);
     st.warnings.extend(report::lost_warning(&load.issues, &repo.config, &pulse, wall_now));
     // **못 읽은 워크트리는 한 줄씩 말한다**(moai-lt7h) — 자리 판정은 그 스냅샷을 안 보지만
     // (moai-jn4d.ewm) 깨진 파일은 고칠 사람이 있어야 고쳐진다. 옆 워크트리의 문제로 세는 자리는
@@ -409,7 +409,7 @@ fn overview(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
             let (lost, unread) = crate::worktree::stranded_at(repo.here(), &repo.config, &load.issues, p.swept, &now);
             status.warnings.extend(lost);
             let wall_now = crate::pulse::now_secs();
-            let pulse = crate::pulse::read(&repo.root, &load.issues, &repo.config, wall_now);
+            let pulse = crate::pulse::read(&repo.root, &load.issues, &repo.config);
             status.warnings.extend(report::lost_warning(&load.issues, &repo.config, &pulse, wall_now));
             // **설치가 어긋난 것도 여기서 센다**(moai-zog5, 2026-09-22 사용자 결정) — 안쪽
             // `moai status` 와 탐색기의 프로젝트 층이 이미 세는 그 셋이다([`install_notices`]).

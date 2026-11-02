@@ -5140,6 +5140,15 @@ pub struct Pulse {
     pub beats: BTreeMap<String, Beat>,
 }
 
+impl Pulse {
+    /// Whether any held row's session is silent past the threshold, by the same measure as [`session_of`]. The cheap
+    /// gate in front of every walk over rows: with nothing lost, no row pauses and no group loses its spin.
+    pub fn any_lost(&self, now: i64) -> bool {
+        self.threshold_secs > 0
+            && self.beats.values().any(|b| now.saturating_sub(b.last_seen_secs).max(0) > self.threshold_secs)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Beat {
     pub session: String,
@@ -5155,13 +5164,17 @@ pub struct SessionState {
     pub lost: bool,
 }
 
+/// Whether a row can have a holding session at all: started work, not deferred, with heartbeats on. Callers that
+/// would read heartbeats ask this first, so a row that never carries `session` costs no heartbeat I/O.
+pub fn may_hold_session(issue: &Issue, cfg: &Config) -> bool {
+    cfg.session_lost_minutes != 0
+        && is_work(issue)
+        && cfg.is_started(issue.status.as_str())
+        && issue.deferred_at.is_none()
+}
+
 pub fn session_of(issue: &Issue, cfg: &Config, pulse: &Pulse, now: i64) -> Option<SessionState> {
-    if cfg.session_lost_minutes == 0
-        || pulse.threshold_secs == 0
-        || !is_work(issue)
-        || !cfg.is_started(issue.status.as_str())
-        || issue.deferred_at.is_some()
-    {
+    if pulse.threshold_secs == 0 || !may_hold_session(issue, cfg) {
         return None;
     }
     let beat = pulse.beats.get(&issue.id)?;
@@ -5170,7 +5183,8 @@ pub fn session_of(issue: &Issue, cfg: &Config, pulse: &Pulse, now: i64) -> Optio
 }
 
 pub fn lost_sessions<'a>(issues: &'a [Issue], cfg: &Config, pulse: &Pulse, now: i64) -> Vec<&'a Issue> {
-    if cfg.session_lost_minutes == 0 {
+    // The explorer's banner asks this every frame; without a silent beat there is nothing to walk the rows for.
+    if cfg.session_lost_minutes == 0 || !pulse.any_lost(now) {
         return Vec::new();
     }
     let mut rows: Vec<_> =

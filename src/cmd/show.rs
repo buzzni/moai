@@ -514,8 +514,11 @@ fn listed(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>, keys: &Keys) -> 
         } else {
             unread_here(ctx, &repo, &load.issues)
         };
+        // **Heartbeats are read only when a shown row can carry `session`** — a list of todo or closed rows, or one with
+        // the key left out of `--fields`, opens no pick record.
         let wall_now = crate::pulse::now_secs();
-        let pulse = keys.wants("session").then(|| crate::pulse::read(&repo.root, &load.issues, &repo.config, wall_now));
+        let pulse = (keys.wants("session") && shown.iter().any(|i| report::may_hold_session(i, &repo.config)))
+            .then(|| crate::pulse::read(&repo.root, &load.issues, &repo.config));
         let rows: Vec<Listed> = shown
             .iter()
             .map(|i| Listed {
@@ -531,7 +534,7 @@ fn listed(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>, keys: &Keys) -> 
                         .as_ref()
                         .and_then(|p| report::session_of(i, &repo.config, p, wall_now))
                         .as_ref()
-                        .map(|state| view::Session::of(ctx.lang(), i, state)),
+                        .map(|state| view::Session::of(ctx.lang(), i, state, &repo.config)),
                 ),
                 journal_error: errors.get(home(&repo, &origin, &i.id)).map_or(&[], Vec::as_slice),
                 // **키는 늘 선다**(moai-2l8n) — 하나를 펼칠 때와 같은 약속이다. 빈 배열은
@@ -956,8 +959,10 @@ fn one(
     // 워크트리가 없으면 `places` 가 아무 키도 안 내므로(moai-tbin) 여기 가드를 따로 두지 않는다 —
     // 두면 "자리를 물을 수 있는가" 를 재는 자가 둘이 된다.
     let places = report::places_in(&footing, &trees, &model::now()).remove(&issue.id);
+    // Unfolding a row that cannot carry `session` (a group, todo, done, deferred) reads no heartbeat.
     let wall_now = crate::pulse::now_secs();
-    let pulse = wants(&["session"]).then(|| crate::pulse::read(&repo.root, all, &repo.config, wall_now));
+    let pulse = (wants(&["session"]) && report::may_hold_session(issue, &repo.config))
+        .then(|| crate::pulse::read(&repo.root, all, &repo.config));
     let session = pulse.as_ref().and_then(|p| report::session_of(issue, &repo.config, p, wall_now));
     let seen = view::Seen {
         session,
@@ -1071,7 +1076,7 @@ fn one(
         if let Some(session) = &seen.session {
             extra.push((
                 "session",
-                serde_json::to_string(&view::Session::of(ctx.lang(), issue, session))
+                serde_json::to_string(&view::Session::of(ctx.lang(), issue, session, &repo.config))
                     .map_err(|e| Fail::new(e.to_string()))?,
             ));
         }

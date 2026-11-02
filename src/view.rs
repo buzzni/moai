@@ -1812,10 +1812,19 @@ pub struct Seen<'a> {
 }
 
 /// Recovery wording is shared by CLI, JSON and the explorer; the web displays JSON verbatim.
-pub fn recover_lines(lang: Lang, issue: &Issue, state: &crate::report::SessionState) -> Vec<String> {
+///
+/// **The lines are typed as they stand**, so the id and the columns go in as shell words (`crate::text::quoted`) — a
+/// column named `하는 중` must not split in two, the same rule `cmd::mv` keeps for the takeover line it hands out
+/// (moai-0zjo). Putting work down names the configured first column, not a literal `todo`.
+pub fn recover_lines(lang: Lang, issue: &Issue, state: &crate::report::SessionState, cfg: &Config) -> Vec<String> {
     if !state.lost {
         return Vec::new();
     }
+    let (id, col, first_col) = (
+        crate::text::quoted(&issue.id),
+        crate::text::quoted(issue.status.as_str()),
+        crate::text::quoted(cfg.first_status()),
+    );
     let first = match state.beat.agent {
         crate::report::Agent::Claude => say(lang, "detail.recover_claude"),
         crate::report::Agent::Codex => say(lang, "detail.recover_codex"),
@@ -1828,7 +1837,7 @@ pub fn recover_lines(lang: Lang, issue: &Issue, state: &crate::report::SessionSt
         say(lang, "detail.recover_put_down"),
     ]
     .into_iter()
-    .map(|text| fill(text, &[("sid", &state.beat.session), ("id", &issue.id), ("col", issue.status.as_str())]))
+    .map(|text| fill(text, &[("sid", &state.beat.session), ("id", &id), ("col", &col), ("first", &first_col)]))
     .collect()
 }
 
@@ -1857,7 +1866,7 @@ pub struct Session {
 }
 
 impl Session {
-    pub fn of(lang: Lang, issue: &Issue, state: &crate::report::SessionState) -> Self {
+    pub fn of(lang: Lang, issue: &Issue, state: &crate::report::SessionState, cfg: &Config) -> Self {
         Session {
             state: if state.lost { "lost" } else { "alive" },
             agent: state.beat.agent.as_str(),
@@ -1865,7 +1874,7 @@ impl Session {
             last_event: state.beat.last_event.clone(),
             last_seen: crate::model::format_rfc3339(state.beat.last_seen_secs),
             silent_minutes: state.silent_secs / 60,
-            recover: recover_lines(lang, issue, state),
+            recover: recover_lines(lang, issue, state, cfg),
         }
     }
 }
@@ -2084,7 +2093,7 @@ pub fn detail(
             row_label(say(lang, "detail.session"), lang),
             paint(if session.lost { style::WARN } else { style::DIM }, &session_line(lang, session))
         ));
-        for line in recover_lines(lang, i, session) {
+        for line in recover_lines(lang, i, session, cfg) {
             out.push(format!("  →  {line}"));
         }
     }
@@ -4684,15 +4693,6 @@ mod tests {
         crate::report::EpicLabels::titled(BTreeMap::new())
     }
 
-    /// **에픽 칸의 괄호는 그리는 쪽이 한 겹만 단다**(moai-snus). `report::epic_labels` 가
-    /// 끊긴 참조를 `(없는 에픽)` 이라는 **글**로 내던 판은 [`prime`] 이 그것을 한 번 더 감싸
-    /// `((없는 에픽))` 을 냈고, 안 감싸는 `ready`·`list` 와 한 화면에서 모양이 갈렸다.
-    ///
-    /// **네 표면을 한 시험에서 나란히 잰다** — 재는 것은 낱말이 아니라 **괄호가 한 겹인가**와
-    /// **넷이 같은 낱말을 대는가**다. 상세는 한때 제 괄호를 단 딴 키(`detail.missing_epic`)를
-    /// 들어, 같은 자료를 두고 목록은 `(epic not there)` 라 하고 `show <id>` 는
-    /// `(no such epic)` 이라 했다(리뷰). 감싸는 자리를 [`gone_epic`] 하나로 모으고 여기서 넷을
-    /// 함께 잰다 — 한 곳만 재면 나머지가 말없이 갈린다.
     #[test]
     fn recovery_lines_share_agent_commands_and_real_columns_in_both_languages() {
         let row =
@@ -4714,19 +4714,38 @@ mod tests {
                 (crate::report::Agent::Antigravity, ""),
             ] {
                 session.beat.agent = agent;
-                let lines = recover_lines(lang, &row, &session);
+                let lines = recover_lines(lang, &row, &session, &cfg());
                 assert_eq!(lines.len(), 4);
                 assert!(lines[0].starts_with(first));
                 assert!(lines[1].contains("moai mv argos-0001 review --from review"));
                 assert!(lines[2].contains("--take -m '"));
+                assert!(lines[3].contains("moai mv argos-0001 todo"));
                 assert!(lines[3].contains("moai defer argos-0001"));
             }
             session.lost = false;
-            assert!(recover_lines(lang, &row, &session).is_empty());
+            assert!(recover_lines(lang, &row, &session, &cfg()).is_empty());
             session.lost = true;
         }
+        // A column the shell would split is handed out as one word, and putting work down names the configured
+        // first column — the commands are typed as they stand.
+        let custom = Config::parse("prefix = \"argos\"\nstatuses = \"backlog, 하는 중, done\"\n").unwrap();
+        let held =
+            Issue::new("argos-0001".into(), "work".into(), Kind::Issue, Status::new("하는 중"), "2026-11-01T00:00:00Z");
+        let lines = recover_lines(Lang::En, &held, &session, &custom);
+        assert!(lines[1].contains("moai mv argos-0001 '하는 중' --from '하는 중'"), "{lines:?}");
+        assert!(lines[3].contains("moai mv argos-0001 backlog"), "{lines:?}");
+        assert!(!lines[3].contains("todo"), "{lines:?}");
     }
 
+    /// **에픽 칸의 괄호는 그리는 쪽이 한 겹만 단다**(moai-snus). `report::epic_labels` 가
+    /// 끊긴 참조를 `(없는 에픽)` 이라는 **글**로 내던 판은 [`prime`] 이 그것을 한 번 더 감싸
+    /// `((없는 에픽))` 을 냈고, 안 감싸는 `ready`·`list` 와 한 화면에서 모양이 갈렸다.
+    ///
+    /// **네 표면을 한 시험에서 나란히 잰다** — 재는 것은 낱말이 아니라 **괄호가 한 겹인가**와
+    /// **넷이 같은 낱말을 대는가**다. 상세는 한때 제 괄호를 단 딴 키(`detail.missing_epic`)를
+    /// 들어, 같은 자료를 두고 목록은 `(epic not there)` 라 하고 `show <id>` 는
+    /// `(no such epic)` 이라 했다(리뷰). 감싸는 자리를 [`gone_epic`] 하나로 모으고 여기서 넷을
+    /// 함께 잰다 — 한 곳만 재면 나머지가 말없이 갈린다.
     #[test]
     fn a_dangling_epic_reference_is_wrapped_once_on_every_surface() {
         let lang = Lang::Ko;

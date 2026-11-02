@@ -1885,7 +1885,7 @@
   "detail.recover_antigravity": "Antigravity 에서 그 대화를 다시 연다",
   "detail.recover_resume_own": "moai show {id} 의 Next: 노트를 읽고, 같은 사람의 새 세션이면 moai mv {id} {col} --from {col} 으로 집기를 다시 적는다",
   "detail.recover_take": "남이 이어받으면 moai mv {id} {col} --from {col} --take -m '<누가 허락했나>'",
-  "detail.recover_put_down": "내려놓으려면 moai mv {id} todo 나 moai defer {id} -m '<왜>'",
+  "detail.recover_put_down": "내려놓으려면 moai mv {id} {first} 나 moai defer {id} -m '<왜>'",
   "tui.session.lost": "! 세션 신호가 끊긴 일 {n}건",
   "page.list.sessionLost": "세션 신호 끊김",
   "page.detail.session": "세션",

@@ -149,7 +149,7 @@ fn regular_text(path: &Path) -> Option<(std::fs::Metadata, String)> {
     Some((meta, text))
 }
 
-pub fn read(root: &Path, issues: &[Issue], cfg: &Config, _now_secs: i64) -> Pulse {
+pub fn read(root: &Path, issues: &[Issue], cfg: &Config) -> Pulse {
     let pulse = Pulse { threshold_secs: cfg.session_lost_minutes.saturating_mul(60), ..Default::default() };
     if cfg.session_lost_minutes == 0 {
         return pulse;
@@ -159,6 +159,13 @@ pub fn read(root: &Path, issues: &[Issue], cfg: &Config, _now_secs: i64) -> Puls
 }
 
 fn read_at(picks: &Path, beats: &Path, issues: &[Issue], cfg: &Config, mut pulse: Pulse) -> Pulse {
+    // Apply the shared wip rule first, including deferred ancestors and eclipsed rows: with nothing held there is
+    // no pick record or heartbeat to open, and a holder of a row that is not held work never reads its beat.
+    let eligible: std::collections::BTreeSet<_> =
+        crate::report::wip(issues, cfg).into_iter().map(|i| i.id.as_str()).collect();
+    if eligible.is_empty() {
+        return pulse;
+    }
     let files: Vec<_> = std::fs::read_dir(picks)
         .into_iter()
         .flatten()
@@ -170,7 +177,7 @@ fn read_at(picks: &Path, beats: &Path, issues: &[Issue], cfg: &Config, mut pulse
     let holders = Picks::holders(files.iter().map(|(s, t)| (s, t)), &|id| since.get(id).copied());
     let mut cache = BTreeMap::new();
     for (id, holder) in holders {
-        if safe_sid_of(&holder.session).as_deref() != Some(holder.session.as_str()) {
+        if !eligible.contains(id.as_str()) || safe_sid_of(&holder.session).as_deref() != Some(holder.session.as_str()) {
             continue;
         }
         let beat = cache.entry(holder.session.clone()).or_insert_with(|| {
@@ -192,21 +199,41 @@ fn read_at(picks: &Path, beats: &Path, issues: &[Issue], cfg: &Config, mut pulse
             pulse.beats.insert(id, beat.clone());
         }
     }
-    // Apply the shared wip rule once, including deferred ancestors and eclipsed rows.
-    let eligible: std::collections::BTreeSet<_> =
-        crate::report::wip(issues, cfg).into_iter().map(|i| i.id.as_str()).collect();
-    pulse.beats.retain(|id, _| eligible.contains(id.as_str()));
     pulse
 }
 
 /// Only the state transition is folded: healthy heartbeats never invalidate a view.
 /// This path reads directory entries and metadata only, never heartbeat contents or the tracker.
+///
+/// **Who holds a row is folded too** — the pick records' names and sizes. Taking over a silent row in the same column
+/// (`moai mv <id> <col> --from <col>`) writes a pick and may write nothing to the tracker; when the new session's
+/// heartbeat was already alive, no beat changes state either, and the web kept the row paused until something else
+/// moved. Pick files only grow by appends, so a size is enough; they change only on picks, not on every tool call.
 pub fn fingerprint(root: &Path, cfg: &Config, now: i64) -> u64 {
     if cfg.session_lost_minutes == 0 {
         return 0;
     }
     let Some(dir) = beats_dir_at(root) else { return 0 };
-    fingerprint_at(&dir, cfg.session_lost_minutes.saturating_mul(60), now)
+    let beats = fingerprint_at(&dir, cfg.session_lost_minutes.saturating_mul(60), now);
+    match picks_dir_at(root) {
+        Some(picks) => picks_fingerprint_at(&picks, beats),
+        None => beats,
+    }
+}
+
+fn picks_fingerprint_at(dir: &Path, seed: u64) -> u64 {
+    let mut sizes = BTreeMap::new();
+    for entry in std::fs::read_dir(dir).into_iter().flatten().filter_map(Result::ok) {
+        if !entry.file_type().is_ok_and(|t| t.is_file()) {
+            continue;
+        }
+        if let Ok(meta) = entry.metadata() {
+            sizes.insert(entry.file_name().to_string_lossy().into_owned(), meta.len());
+        }
+    }
+    sizes.into_iter().fold(crate::text::fnv1a64_from(seed, &[1]), |hash, (sid, len)| {
+        crate::text::fnv1a64_from(crate::text::fnv1a64_from(hash, sid.as_bytes()), &len.to_le_bytes())
+    })
 }
 
 fn fingerprint_at(dir: &Path, threshold: i64, now: i64) -> u64 {
@@ -256,6 +283,22 @@ mod tests {
         assert_eq!(fingerprint(temp.path(), &disabled, 11801), 0);
         std::fs::write(temp.path().join(".temporary"), "partial").unwrap();
         assert_eq!(alive, fingerprint_at(temp.path(), 1800, 11801));
+    }
+
+    #[test]
+    fn a_new_pick_changes_the_fingerprint_without_a_state_transition() {
+        let temp = crate::scratch::Scratch::new("pulse-picks-fingerprint");
+        let picks = temp.path().join("picks");
+        std::fs::create_dir(&picks).unwrap();
+        let empty = picks_fingerprint_at(&picks, 7);
+        std::fs::write(picks.join("sid"), Picks::line(100, Some(1000), "moai-a", true)).unwrap();
+        let one = picks_fingerprint_at(&picks, 7);
+        assert_ne!(empty, one);
+        assert_eq!(one, picks_fingerprint_at(&picks, 7), "nothing moved, nothing changes");
+        let mut more = Picks::line(100, Some(1000), "moai-a", true);
+        more.push_str(&Picks::line(200, Some(1100), "moai-a", true));
+        std::fs::write(picks.join("sid"), more).unwrap();
+        assert_ne!(one, picks_fingerprint_at(&picks, 7), "an appended pick is a new holder to read");
     }
 
     #[test]

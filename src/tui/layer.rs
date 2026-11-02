@@ -402,7 +402,7 @@ pub fn summarize_with(repo: &Repo, load: &crate::store::Load, now: &str, install
     let (lost, unread) = crate::worktree::stranded_at(repo.here(), cfg, &load.issues, false, now);
     let stranded = lost.as_ref().map_or(0, |w| w.count);
     let wall_now = crate::pulse::now_secs();
-    let pulse = crate::pulse::read(&repo.root, &load.issues, cfg, wall_now);
+    let pulse = crate::pulse::read(&repo.root, &load.issues, cfg);
     let silent = crate::report::lost_warning(&load.issues, cfg, &pulse, wall_now).is_some();
     Summary {
         counts: cfg.statuses.iter().map(|s| (s.clone(), st.counts.get(s).copied().unwrap_or(0))).collect(),

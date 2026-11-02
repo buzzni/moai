@@ -2120,6 +2120,13 @@ fn banner_parts(app: &App) -> Option<(String, bool, Option<std::ops::Range<usize
             .push(fill(say(lang, "tui.banner.archive_unreadable"), &[("n", &app.site.unreadable_archive.to_string())]));
         soft += 1;
     }
+    // Work held by a silent session is named apart from the count above: it is the one warning whose fix is a session
+    // to resume, and the rows it names pause their spinners. Urgent, as the rows it names have stopped moving.
+    let lost = crate::report::lost_sessions(&app.site.issues, &app.site.cfg, &app.site.pulse, app.site.now_secs).len();
+    if lost > 0 {
+        parts.push(fill(say(lang, "tui.session.lost"), &[("n", &lost.to_string())]));
+        urgent = true;
+    }
     // **알림은 경고 뒤, 제 낱말로 선다**(moai-k6ff, 2026-09-22 사용자 결정). 프로젝트 층의 줄이 대는 `+N`
     // 이 여기 짝을 얻는다 — 그 줄에서 Enter 를 치면 여태 아무 말도 없는 화면이 섰다.
     //
@@ -2127,11 +2134,6 @@ fn banner_parts(app: &App) -> Option<(String, bool, Option<std::ops::Range<usize
     // 낱말로 부르면 오가는 사람이 둘을 다 배워야 한다. `+` 가 글에 들어 경고의 `!` 와 갈린다.
     // **급한 것이 아니라** `urgent` 를 안 세운다 — 담아 둔 것과 설치가 어긋난 것이지 고칠 계획이
     // 아니다(`view::status` 의 "알림만 있는 것은 문제 없다" 와 같은 자).
-    let lost = crate::report::lost_sessions(&app.site.issues, &app.site.cfg, &app.site.pulse, app.site.now_secs).len();
-    if lost > 0 {
-        parts.push(fill(say(lang, "tui.session.lost"), &[("n", &lost.to_string())]));
-        urgent = true;
-    }
     let notices = noticed(app, &app.site.warnings, app.site.notices);
     if notices > 0 {
         parts.push(fill(say(lang, "tui.place.notices"), &[("n", &notices.to_string())]));
@@ -3325,10 +3327,13 @@ fn card<'a>(app: &App, r: &Row, chosen: bool, w: usize, band: Option<Style>) -> 
         head.extend(mark(vec![Span::styled(i.id.clone(), quiet())], in_id));
         head.push(Span::styled(" ", ink(Style::new())));
     }
-    head.push(Span::styled(
-        row_glyph(app, site, at),
-        if site.spins(at) == Spin::Paused { row_ink(site, at) } else { ink(row_ink(site, at)) },
-    ));
+    // The paused mark keeps the band under it and only its ink red — a bare `row_ink` left a hole in the chosen card's
+    // inverted band. `spinner_on` reads the `!` beside it, so a band in a started colour still does not wake the loop.
+    let glyph_ink = match site.spins(at) {
+        Spin::Paused => ink(row_ink(site, at)).fg(from_anstyle(style::P1).fg.unwrap_or(Color::Red)),
+        _ => ink(row_ink(site, at)),
+    };
+    head.push(Span::styled(row_glyph(app, site, at), glyph_ink));
     if fields.shows(Field::Priority) {
         head.push(Span::styled(" ", ink(Style::new())));
         head.push(Span::styled(format!("p{}", i.priority()), ink(priority(i.priority()))));
@@ -4419,7 +4424,7 @@ fn about<'a>(app: &App, site: &Site, idx: usize, e: &Entry, w: usize) -> Vec<Lin
             w,
             ink,
         ));
-        for line in crate::view::recover_lines(site.lang, i, &session) {
+        for line in crate::view::recover_lines(site.lang, i, &session, &site.cfg) {
             out.extend(wrapped(&format!("→  {line}"), w, ink));
         }
         out.push(Line::from(""));

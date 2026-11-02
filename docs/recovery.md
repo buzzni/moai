@@ -443,7 +443,7 @@ Resume the session using the command shown by `moai show <id>`:
 To continue in a new session, read `moai show <id>` for its `Next:` note, then
 record your pick again with `moai mv <id> <current-column> --from <current-column>`.
 The same-column move records a pick too. For another person's row, ask first,
-then use `--take -m '<who approved>'`. To put work down, use `moai mv <id> todo`
+then use `--take -m '<who approved>'`. To put work down, use `moai mv <id> <first-column>`
 or `moai defer <id> -m '<why>'`.
 
 Without a heartbeat here the session is **unknown**, not lost: the row keeps

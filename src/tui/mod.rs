@@ -883,7 +883,7 @@ fn prepare(repo: &Repo, worktree: bool, lang: crate::i18n::Lang, held: Option<us
     warnings.add(lost);
     let now_secs = crate::pulse::now_secs();
     let pulse_fingerprint = crate::pulse::fingerprint(&repo.root, &repo.config, now_secs);
-    let pulse = crate::pulse::read(&repo.root, &issues, &repo.config, now_secs);
+    let pulse = crate::pulse::read(&repo.root, &issues, &repo.config);
     warnings.add(usize::from(crate::report::lost_warning(&issues, &repo.config, &pulse, now_secs).is_some()));
     // 옆 워크트리의 문제는 **펴서** 싣는다(moai-dpbi) — 여는 화면(`cmd::tui`)과 같은 자다.
     let mut elsewhere = said_trouble(&g.trouble, lang);
@@ -2765,11 +2765,21 @@ impl Site {
     /// 에픽이 `busy` 로 남는데, 그 멤버는 물려받은 미룸으로 멈추니 에픽만 혼자 돈다.
     /// 그래서 이 자로는 **줄이 돌면 그 위 묶음도 돌고, 묶음이 돌면 그 밑에 도는 줄이
     /// 있다.**
+    ///
+    /// **쥔 세션의 심장박동이 문턱을 넘게 끊긴 일은 멈춘다**([`Spin::Paused`], moai-4v3h) — 글리프는
+    /// `⠋!` 두 칸으로 서고 루프를 안 깨운다(`draw::spinner_on` 이 곁의 `!` 를 읽는다). 표가 없는 세션은
+    /// 모름이라 전처럼 돈다. 묶음은 멈춤이 안 된다 — 끊긴 세션이 하나라도 있으면 멤버 가운데 **도는**
+    /// 일이 있을 때만 돌고, 쥔 일이 다 멈췄으면 선다. 끊긴 것이 없으면 `busy` 그대로 돈다.
     pub fn spins(&self, at: usize) -> Spin {
         let i = &self.issues[at];
+        // **줄마다 묻는다**(리뷰 moai-jk2u.hr4) — 짝인 `report::wip` 가 자리로 세므로, 여기만
+        // 접은 지도를 짚으면 보드가 집었다고 세는 줄의 물레가 멈추고 그 거꾸로도 선다.
         if self.index.shelved_at(at).is_some() {
             return Spin::Still;
         }
+        // **도는 칸은 설정이 정한다**(moai-q59j) — 시작한 칸 모두(`Config::is_started`). 칸 이름
+        // `"in_progress"` 를 박아 두면 칸 이름을 바꾼 설정에서 아무것도 안 돌았다. 설정이 모르는
+        // 칸은 안 돈다 — 묶음의 `busy` 와 같은 자다(`report::Stand::busy`).
         let col = self.column(at);
         if !self.cfg.knows(col) || !self.cfg.is_started(col) {
             return Spin::Still;
@@ -2778,8 +2788,14 @@ impl Site {
             if !self.stand_of(i).is_some_and(|s| s.busy) {
                 return Spin::Still;
             }
+            // Nothing silent means no member pauses: a busy group turns, as before heartbeats. The member walk below
+            // costs the whole list per group row and runs several times per row every frame.
+            if !self.pulse.any_lost(self.now_secs) {
+                return Spin::Turning;
+            }
+            // Members are work, as the web's `busyGroups` reads them (`isWork`) — a backlog row is never held work.
             let turning = self.issues.iter().enumerate().any(|(n, child)| {
-                !crate::report::is_group(child)
+                crate::report::is_work(child)
                     && (if i.kind == Kind::Milestone { self.index.milestone_of(n) } else { self.index.epic_of(n) })
                         == Some(i.id.as_str())
                     && self.spins(n) == Spin::Turning
@@ -3118,7 +3134,7 @@ impl App {
         app.site.read_at = Some(std::time::Instant::now());
         app.site.now_secs = crate::pulse::now_secs();
         app.site.pulse_fingerprint = crate::pulse::fingerprint(&repo.root, &app.site.cfg, app.site.now_secs);
-        app.site.pulse = crate::pulse::read(&repo.root, &app.site.issues, &app.site.cfg, app.site.now_secs);
+        app.site.pulse = crate::pulse::read(&repo.root, &app.site.issues, &app.site.cfg);
         app.site.warnings.add(usize::from(
             crate::report::lost_warning(&app.site.issues, &app.site.cfg, &app.site.pulse, app.site.now_secs).is_some(),
         ));
@@ -10060,7 +10076,6 @@ mod tests {
         (0..a.site.issues.len()).any(|at| a.site.spins(at) == Spin::Turning)
     }
 
-    /// 돌 줄이 있는가를 적힌 칸·읽은 칸이 속이지 않는다.
     #[test]
     fn local_heartbeat_pauses_work_but_never_pauses_groups() {
         let epic = make("argos-0001", Kind::Epic);
@@ -10085,8 +10100,29 @@ mod tests {
         assert_eq!(a.site.spins(0), Spin::Turning);
         a.site.pulse.beats.clear();
         assert_eq!(a.site.spins(1), Spin::Turning);
+
+        // A backlog row in a started column is not a member that keeps the group turning — `busy` and the web's
+        // `busyGroups` count work only.
+        let mut idea = make("argos-0001.bbbb", Kind::Backlog);
+        idea.status = Status::new("in_progress");
+        let (epic, work) = (a.site.issues[0].clone(), a.site.issues[1].clone());
+        let mut b = App::new(vec![epic, work, idea], cfg(), Path::new());
+        b.site.now_secs = 13600;
+        b.site.pulse.threshold_secs = 1800;
+        b.site.pulse.beats.insert(
+            "argos-0001.aaaa".into(),
+            crate::report::Beat {
+                session: "sid".into(),
+                agent: crate::report::Agent::Claude,
+                last_event: "Stop".into(),
+                last_seen_secs: 10000,
+            },
+        );
+        assert_eq!(b.site.spins(1), Spin::Paused);
+        assert_eq!(b.site.spins(0), Spin::Still, "only the paused work member is work");
     }
 
+    /// 돌 줄이 있는가를 적힌 칸·읽은 칸이 속이지 않는다.
     #[test]
     fn a_line_spins_only_while_someone_holds_it() {
         let mut a = app();
