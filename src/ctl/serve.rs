@@ -134,7 +134,7 @@ impl Listener {
     }
 
     #[cfg(unix)]
-    fn resize(&self) -> Option<&ResizeWake> {
+    fn resize_wake(&self) -> Option<&ResizeWake> {
         self.resize.get().and_then(Option::as_ref)
     }
 
@@ -178,7 +178,7 @@ impl Listener {
             libc::pollfd { fd: terminal.unwrap_or(-1), events: libc::POLLIN, revents: 0 },
             libc::pollfd { fd: self.wake.as_raw_fd(), events: libc::POLLIN, revents: 0 },
             libc::pollfd {
-                fd: self.resize().map_or(-1, |resize| resize.read.as_raw_fd()),
+                fd: self.resize_wake().map_or(-1, |resize| resize.read.as_raw_fd()),
                 events: libc::POLLIN,
                 revents: 0,
             },
@@ -195,7 +195,7 @@ impl Listener {
                 return Err(error);
             }
         }
-        for mut wake in std::iter::once(&self.wake).chain(self.resize().map(|resize| &resize.read)) {
+        for mut wake in std::iter::once(&self.wake).chain(self.resize_wake().map(|resize| &resize.read)) {
             let mut bytes = [0; 256];
             loop {
                 match wake.read(&mut bytes) {
@@ -663,7 +663,7 @@ mod tests {
                 })
                 .unwrap()
         );
-        let own_signal = listener.resize().unwrap().signal;
+        let own_signal = listener.resize_wake().unwrap().signal;
         drop(listener);
         assert!(!signal_hook::low_level::unregister(own_signal), "dropping a window leaked its resize action");
         signal_hook::low_level::raise(signal_hook::consts::SIGWINCH).unwrap();

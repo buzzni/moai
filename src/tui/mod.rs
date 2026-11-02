@@ -5271,7 +5271,8 @@ impl App {
         }
         if took || knew {
             // Compare what is drawn, not retry stamps or attempt times. Move the old set out only when recounting;
-            // a repeated failed read keeps its held marks and does no per-row work.
+            // a repeated failure of the main sheet keeps its held marks and does no per-row work. A failing pending
+            // sheet alone still takes this path on every retry, since the main sheet was read.
             let was = std::mem::take(&mut self.site_mut(seat).expect("the seat was just loaded").unread);
             self.recount_unread_in(seat);
             changed |= self.site_of_seat(seat).is_some_and(|site| site.unread != was);
