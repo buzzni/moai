@@ -12,6 +12,10 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+### Fixed
+
+- A kitty window launched from a tmux shell draws pictures even with inherited tmux variables; real panes retain text and clickable links. (moai-6r2g)
+
 ## [0.43.0] - 2026-11-02
 
 ### Changed

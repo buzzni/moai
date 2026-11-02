@@ -1,4 +1,4 @@
-//! Shell graphics only. No terminal queries, alternate-screen state, or TUI drawing.
+//! Shared graphics protocols. No terminal escape queries; inherited TMUX is checked once against pane ttys.
 use super::From;
 use base64::{Engine, engine::general_purpose::STANDARD};
 use std::io::{IsTerminal, Write};
@@ -21,7 +21,11 @@ fn mode(s: &str) -> Option<Protocol> {
         _ => None,
     }
 }
-pub fn detect(env: impl Fn(&str) -> Option<String>, setting: Option<&str>) -> Protocol {
+pub fn detect(
+    env: impl Fn(&str) -> Option<String>,
+    setting: Option<&str>,
+    in_tmux: impl FnOnce(&str) -> Option<bool>,
+) -> Protocol {
     let explicit = env("MOAI_IMAGES");
     if let Some(chosen) = explicit.as_deref().or(setting) {
         if let Some(p) = mode(chosen) {
@@ -33,7 +37,10 @@ pub fn detect(env: impl Fn(&str) -> Option<String>, setting: Option<&str>) -> Pr
     }
     let term = env("TERM").unwrap_or_default();
     let program = env("TERM_PROGRAM").unwrap_or_default();
-    if env("TMUX").is_some() || term.starts_with("screen") || term.starts_with("tmux") {
+    if term.starts_with("screen")
+        || term.starts_with("tmux")
+        || env("TMUX").is_some_and(|value| in_tmux(&value) != Some(false))
+    {
         Protocol::Off
     } else if env("KITTY_WINDOW_ID").is_some() || term == "xterm-kitty" || program == "ghostty" {
         Protocol::Kitty
@@ -45,6 +52,46 @@ pub fn detect(env: impl Fn(&str) -> Option<String>, setting: Option<&str>) -> Pr
         Protocol::Off
     }
 }
+/// Compare stdout's device with the server's panes. Unknown means graphics stay off.
+#[cfg(unix)]
+pub fn in_tmux(value: &str) -> Option<bool> {
+    use std::os::unix::fs::MetadataExt;
+    if !std::io::stdout().is_terminal() {
+        return None;
+    }
+    let socket = value.rsplitn(3, ',').nth(2)?;
+    let mut stat = std::mem::MaybeUninit::<libc::stat>::uninit();
+    // SAFETY: fstat initializes stat on success; stdout is a valid borrowed descriptor.
+    if unsafe { libc::fstat(libc::STDOUT_FILENO, stat.as_mut_ptr()) } != 0 {
+        return None;
+    }
+    // SAFETY: checked successful initialization above.
+    let device = unsafe { stat.assume_init() }.st_rdev;
+    let output = std::process::Command::new("tmux")
+        .args(["-S", socket, "list-panes", "-a", "-F", "#{pane_tty}"])
+        .stdin(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let text = std::str::from_utf8(&output.stdout).ok()?;
+    if text.trim().is_empty() {
+        return None;
+    }
+    for tty in text.lines() {
+        if std::fs::metadata(tty).ok()?.rdev() == device {
+            return Some(true);
+        }
+    }
+    Some(false)
+}
+#[cfg(not(unix))]
+pub fn in_tmux(_: &str) -> Option<bool> {
+    None
+}
+
 /// Unknown terminal pixels use a cell twice as tall as it is wide.
 const FALLBACK_CELL: (u32, u32) = (8, 16);
 #[derive(Debug, Clone, Copy)]
@@ -172,7 +219,7 @@ struct Draw {
     line: usize,
     path: PathBuf,
     dest: String,
-    protocol: Protocol,
+    setting: Option<String>,
 }
 static DRAW: Mutex<Vec<Draw>> = Mutex::new(Vec::new());
 /// Replace only the body's known image blocks; history and raw/JSON never call this.
@@ -187,7 +234,6 @@ pub fn prepare(
 ) {
     let blocks = crate::markdown::parse(&crate::text::sanitize(body));
     let mut after = 0;
-    let protocol = detect(|k| std::env::var(k).ok(), setting);
     let context = super::Context { base, allowed, from };
     for block in blocks {
         let crate::markdown::Block::Image { alt, dest, .. } = block else { continue };
@@ -204,7 +250,7 @@ pub fn prepare(
             lines[n] = format!("{}{label} {dest}", &plain[..start]);
             after = n + 1;
             if let Some(path) = found {
-                DRAW.lock().unwrap().push(Draw { line: n, path, dest, protocol });
+                DRAW.lock().unwrap().push(Draw { line: n, path, dest, setting: setting.map(str::to_owned) });
             }
         }
     }
@@ -216,6 +262,7 @@ pub fn print(lines: &[String]) -> std::io::Result<bool> {
     if !std::io::stdout().is_terminal() || draws.is_empty() {
         return Ok(false);
     }
+    let protocol = detect(|k| std::env::var(k).ok(), draws[0].setting.as_deref(), in_tmux);
     let mut start = 0;
     for d in draws {
         if d.line < start || d.line >= lines.len() {
@@ -229,7 +276,7 @@ pub fn print(lines: &[String]) -> std::io::Result<bool> {
         let line = raw.replace(&d.dest, &linked(&d.dest, &d.path));
         let mut stdout = std::io::stdout().lock();
         writeln!(stdout, "{line}")?;
-        if d.protocol != Protocol::Off
+        if protocol != Protocol::Off
             && let Ok(bytes) = super::read_input(&d.path)
             && let Ok(img) = super::decode(&bytes)
         {
@@ -243,7 +290,7 @@ pub fn print(lines: &[String]) -> std::io::Result<bool> {
                 })
                 .unwrap_or(FALLBACK_CELL);
             let s = size(img.width(), img.height(), cols, cell);
-            let payload = match d.protocol {
+            let payload = match protocol {
                 Protocol::Kitty => super::png(&img).map(|b| kitty(&b, s)),
                 Protocol::Iterm => Ok(iterm(&bytes, s)),
                 Protocol::Sixel => Ok(sixel(&img, s)),
@@ -277,9 +324,38 @@ mod tests {
             (&[], Protocol::Off),
         ];
         for (env, want) in cases {
-            assert_eq!(detect(|k| env.iter().find(|(key, _)| *key == k).map(|(_, v)| v.to_string()), None), want);
+            assert_eq!(
+                detect(|k| env.iter().find(|(key, _)| *key == k).map(|(_, v)| v.to_string()), None, |_| None),
+                want
+            );
         }
-        assert_eq!(detect(|_| None, Some("off")), Protocol::Off);
+        assert_eq!(detect(|_| None, Some("off"), |_| panic!("explicit mode queried tmux")), Protocol::Off);
+    }
+    #[test]
+    fn inherited_tmux_and_real_panes_are_distinct() {
+        let vars =
+            [("TMUX", "/tmp/server,12,3"), ("TERM", "xterm-kitty"), ("KITTY_WINDOW_ID", "5"), ("TERM_PROGRAM", "tmux")];
+        let env = |k: &str| vars.iter().find(|(key, _)| *key == k).map(|(_, v)| v.to_string());
+        assert_eq!(detect(env, None, |_| Some(false)), Protocol::Kitty);
+        assert_eq!(detect(env, None, |_| Some(true)), Protocol::Off);
+        assert_eq!(detect(env, None, |_| None), Protocol::Off);
+        assert_eq!(detect(env, Some("kitty"), |_| panic!("override queried tmux")), Protocol::Kitty);
+        assert_eq!(
+            detect(
+                |k| if k == "TERM" { Some("screen-256color".into()) } else { env(k) },
+                None,
+                |_| panic!("screen queried tmux")
+            ),
+            Protocol::Off
+        );
+        assert_eq!(
+            detect(
+                |k| if k == "MOAI_IMAGES" { Some("off".into()) } else { env(k) },
+                None,
+                |_| panic!("override queried tmux")
+            ),
+            Protocol::Off
+        );
     }
     #[test]
     fn kitty_payload_is_chunked_at_4096_and_ends_with_m0() {
