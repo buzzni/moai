@@ -8,6 +8,16 @@ in [the CLI reference](cli.md), what to do when something ends up wrong is in
 [Recovery](recovery.md), and the words this page leans on are in
 [the glossary](glossary.md).
 
+## Set the session silence threshold
+
+The flat repository key `session_lost_minutes = 30` in `.moai/config.toml`
+sets how long a local hook heartbeat may be silent before the holding row is
+marked lost. The default is 30 minutes; `0` disables heartbeat reads and writes,
+the warning and the `session` JSON key. Use a nonnegative integer outside any
+TOML table. Long builds and sessions waiting after `Stop` can pass the threshold;
+no heartbeat here means unknown, including sessions on another machine.
+See [recovery](recovery.md#an-agent-session-died) for the signals and commands.
+
 ## Plant the tracker
 
 `moai init` in a terminal shows a short screen before it writes anything: the id
@@ -343,4 +353,4 @@ where its contributors read them rather than repeated here:
   broken data, the same as a broken line in `issues.jsonl` — see [An archive file
   cannot be read](recovery.md#an-archive-file-cannot-be-read)
 
-Decided in: moai-0zjo moai-40ht moai-bx6t moai-9793 moai-ug3j moai-gelm moai-tllo moai-snyk moai-zynt moai-j9nf moai-jtvp moai-fx9t moai-bth3 moai-r0x8 moai-9tqo moai-g8pt moai-lj8g moai-1m21 moai-uwi9 moai-ns7a moai-mkzo moai-w30o
+Decided in: moai-0zjo moai-40ht moai-bx6t moai-9793 moai-ug3j moai-gelm moai-tllo moai-snyk moai-zynt moai-j9nf moai-jtvp moai-fx9t moai-bth3 moai-r0x8 moai-9tqo moai-g8pt moai-lj8g moai-1m21 moai-uwi9 moai-ns7a moai-mkzo moai-w30o moai-4v3h

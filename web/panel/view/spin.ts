@@ -24,10 +24,14 @@ const REST = 8
  * project's first configured column and `known` its columns (`/api/boot`'s `statuses`); until the boot answers, moai's
  * default first column and no check of the rest.
  */
-export function spins(index: IssueIndex, at: number, first: string = FIRST, known?: readonly string[]): boolean {
-  if (index.shelvedAt(at) !== undefined) return false
+export type Spin = 'still' | 'turning' | 'paused'
+
+export function spins(index: IssueIndex, at: number, first: string = FIRST, known?: readonly string[]): Spin {
+  if (index.shelvedAt(at) !== undefined) return 'still'
   const row = index.rows[at]!
-  return isGroup(row) ? busyGroups(index, first, known).has(at) : started(statusOf(row), first, known)
+  if (isGroup(row)) return busyGroups(index, first, known).has(at) ? 'turning' : 'still'
+  if (!started(statusOf(row), first, known)) return 'still'
+  return row.session?.state === 'lost' ? 'paused' : 'turning'
 }
 
 const started = (status: string, first: string, known: readonly string[] | undefined): boolean =>
@@ -42,7 +46,7 @@ function busyGroups(index: IssueIndex, first: string, known: readonly string[] |
   if (kept?.rule === rule) return kept.groups
   const groups = new Set<number>()
   index.rows.forEach((row, at) => {
-    if (!isWork(row) || index.shelvedAt(at) !== undefined || !started(statusOf(row), first, known)) return
+    if (!isWork(row) || index.shelvedAt(at) !== undefined || !started(statusOf(row), first, known) || row.session?.state === 'lost') return
     for (const seg of index.homeOf(at)) {
       // `m:<id>` and `e:<id>` name the groups it stands in; the `(no milestone)` bucket and an issue's own folder do not.
       if (!((seg.startsWith('m:') && seg !== NO_MILESTONE) || seg.startsWith('e:'))) continue
@@ -78,4 +82,9 @@ export function glint(doc: Document, text: string, ...content: Array<Node | stri
   // A custom property through CSSOM: the CSP's style-src lets it through where a `style` attribute it would not.
   band.style.setProperty('--glint-time', `${glintTime(text)}ms`)
   return band
+}
+
+/** The explicit mark remains visible with reduced motion and carries its own accessible name. */
+export function lostMark(doc: Document, label: string): HTMLElement {
+  return el(doc, 'span', { class: 'm-lost', 'aria-label': label }, '!')
 }

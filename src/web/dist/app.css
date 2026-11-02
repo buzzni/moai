@@ -83,6 +83,7 @@
   /* List and Gantt column tints stay pale enough for a search mark to show on top. Todo is fainter still: the
      selected row's --selected is the same blue hue, and it must stay distinct from a todo row. */
   --todo-soft: color-mix(in srgb, #3b82f6 2%, var(--bg));
+  --lost-soft: color-mix(in srgb, var(--danger) 8%, var(--bg));
   --progress-soft: color-mix(in srgb, #F2B01E 7%, var(--bg));
   --review-soft: color-mix(in srgb, #a855f7 8%, var(--bg));
   --done-soft: color-mix(in srgb, #10B981 7%, var(--bg));
@@ -125,6 +126,11 @@ body {
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) { --lost-soft: color-mix(in srgb, var(--danger) 4%, var(--bg)); }
+}
+:root[data-theme="dark"] { --lost-soft: color-mix(in srgb, var(--danger) 4%, var(--bg)); }
 
 /*
  * Moai panel components. Specs: docs/moai-panel/look-and-feel.md section 5. Flat design: shadows only on
@@ -460,6 +466,14 @@ body.m-resizing:is([data-resize="bottom"], [data-resize="top"]) { cursor: row-re
 .m-proposal p { margin: .5rem 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 .m-proposal div { display: flex; flex-wrap: wrap; gap: .4rem; }
 
+/* The pseudo-element owns the animation, so pausing the parent alone is insufficient. */
+.m-spin-paused::before { width: 1ch; animation-play-state: paused; color: var(--danger) !important; }
+.m-lost, .m-session-lost { color: var(--danger); }
+.m-lost { font-weight: 700; margin-inline-start: .2ch; }
+@media (prefers-reduced-motion: no-preference) {
+  .m-spin-paused { color: transparent; }
+}
+
 /*
  * What a card of the kanban holds (view/board.ts): id, priority and count on one line, the title, and the chips
  * of the columns that are on, plus the first-line band and which columns carry it. The lanes, the column heads
@@ -540,6 +554,7 @@ body.m-resizing:is([data-resize="bottom"], [data-resize="top"]) { cursor: row-re
 .g-row[data-status="in_progress"]:not([aria-selected="true"]):not(:hover) { background: var(--progress-soft); }
 .g-row[data-status="review"]:not([aria-selected="true"]):not(:hover) { background: var(--review-soft); }
 .g-row[data-status="done"]:not([aria-selected="true"]):not(:hover) { background: var(--done-soft); }
+.g-row[data-lost="1"]:not([aria-selected="true"]):not(:hover) { background: var(--lost-soft); }
 .g-row:hover { background: var(--hover); }
 .g-row[aria-selected="true"] { background: var(--selected); }
 .g-row[aria-selected="true"]::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 2px; background: var(--accent); }
@@ -683,6 +698,7 @@ svg.links polygon { fill: var(--link); }
 .moai-list-body > .m-row[data-status="in_progress"]:not([aria-selected="true"]):not(:hover) { background: var(--progress-soft); }
 .moai-list-body > .m-row[data-status="review"]:not([aria-selected="true"]):not(:hover) { background: var(--review-soft); }
 .moai-list-body > .m-row[data-status="done"]:not([aria-selected="true"]):not(:hover) { background: var(--done-soft); }
+.moai-list-body > .m-row[data-lost="1"]:not([aria-selected="true"]):not(:hover) { background: var(--lost-soft); }
 
 /*
  * Rendered markdown (view/markdown.ts). Flat: borders only, tokens only. Needs tokens.css.

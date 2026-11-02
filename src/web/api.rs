@@ -16,7 +16,7 @@ use crate::i18n::{Lang, fill, say};
 
 /// `/api/rows` 가 싣는 키 — 본문은 안 싣는다(상세가 따로 읽는다). `branch` 는 옆 워크트리에서 온 줄에만 선다
 /// (`--worktree`, `cmd::Row::on`) — 빼면 `--fields` 가 그것을 걷어 페이지의 `⎇` 가 영영 안 섰다. 없는 줄에는 키가 없다.
-pub const ROW_FIELDS: &str = "id,title,kind,status,derived_status,priority,epic,derived_epic,milestone,derived_milestone,deferred_at,shelved_by,status_since,created_at,updated_at,started_at,done_at,due_on,starts_on,tags,assignee,assignee_email,blocked_by,unread,archived,branch";
+pub const ROW_FIELDS: &str = "id,title,kind,status,derived_status,priority,epic,derived_epic,milestone,derived_milestone,deferred_at,shelved_by,status_since,created_at,updated_at,started_at,done_at,due_on,starts_on,tags,assignee,assignee_email,blocked_by,unread,archived,branch,session";
 
 /// 받는 값의 이름.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -502,6 +502,9 @@ pub fn stamp(cwd: &std::path::Path, lang: Lang, overlay: bool) -> crate::fail::R
         }
         // 이웃한 경로 둘이 글자째 이어 붙어 같은 바이트열이 되지 않게 끊는다.
         h = fold(h, &[0x00]);
+    }
+    if repo.config.session_lost_minutes != 0 {
+        h = fold(h, &crate::pulse::fingerprint(&repo.root, &repo.config, crate::pulse::now_secs()).to_le_bytes());
     }
     Ok(format!("{h:016x}"))
 }

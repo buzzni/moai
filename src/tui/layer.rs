@@ -401,13 +401,16 @@ pub fn summarize_with(repo: &Repo, load: &crate::store::Load, now: &str, install
     // 자리를 재는 뿌리는 **등록한 그 체크아웃**이다(`repo.here()`) — `moai status` 와 같은 자.
     let (lost, unread) = crate::worktree::stranded_at(repo.here(), cfg, &load.issues, false, now);
     let stranded = lost.as_ref().map_or(0, |w| w.count);
+    let wall_now = crate::pulse::now_secs();
+    let pulse = crate::pulse::read(&repo.root, &load.issues, cfg);
+    let silent = crate::report::lost_warning(&load.issues, cfg, &pulse, wall_now).is_some();
     Summary {
         counts: cfg.statuses.iter().map(|s| (s.clone(), st.counts.get(s).copied().unwrap_or(0))).collect(),
         picked: crate::report::wip(&load.issues, cfg)
             .into_iter()
             .map(|i| Picked { id: i.id.clone(), title: i.title.clone(), column: i.status.as_str().to_string() })
             .collect(),
-        warnings: super::Surfaced::of(st.warnings.len() + usize::from(lost.is_some()), st.dues),
+        warnings: super::Surfaced::of(st.warnings.len() + usize::from(lost.is_some()) + usize::from(silent), st.dues),
         // **알림도 `moai status` 와 같은 자로 센다**(moai-prdh) — 순수한 셈이 낸 것(쌓인 backlog·미룬
         // 것·도는 마일스톤)에 설치가 어긋난 셋을 더한 것이 안쪽 보드가 세우는 알림이다. 층에서
         // "드러난 문제 없다" 를 보고 들어간 사람이 안쪽에서 처음 보는 것이 그 셋이었다.
@@ -1588,6 +1591,14 @@ impl App {
     /// 읽을 까닭이 없고, 올라갈 때 낡은 줄을 읽으러 띄운다(`climb`).
     pub(super) fn follow_layer(&mut self) {
         let Some(layer) = &mut self.layer else { return };
+        let pulse_changed: Vec<_> = layer
+            .places
+            .iter_mut()
+            .filter_map(|p| p.site.as_mut().and_then(|site| site.pulse_changed().then(|| p.path.clone())))
+            .collect();
+        for path in pulse_changed {
+            layer.queue(path);
+        }
         while let Some((rx, _, round)) = &layer.pending {
             let round = *round;
             match rx.try_recv() {

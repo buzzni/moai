@@ -331,3 +331,11 @@ body.m-resizing:is([data-resize="bottom"], [data-resize="top"]) { cursor: row-re
 .m-proposal[hidden] { display: none; }
 .m-proposal p { margin: .5rem 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 .m-proposal div { display: flex; flex-wrap: wrap; gap: .4rem; }
+
+/* The pseudo-element owns the animation, so pausing the parent alone is insufficient. */
+.m-spin-paused::before { width: 1ch; animation-play-state: paused; color: var(--danger) !important; }
+.m-lost, .m-session-lost { color: var(--danger); }
+.m-lost { font-weight: 700; margin-inline-start: .2ch; }
+@media (prefers-reduced-motion: no-preference) {
+  .m-spin-paused { color: transparent; }
+}

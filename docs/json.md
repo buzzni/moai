@@ -11,7 +11,7 @@ the binary the day a rule changes.
 
 `moai config --json` gives the repository's settings with the defaults filled
 in, under the names `.moai/config.toml` uses: `statuses` in board order,
-`archive_days`, `naming`, `wiki_dir`, `prefix`, the `status_*` thresholds and the
+`archive_days`, `session_lost_minutes`, `naming`, `wiki_dir`, `prefix`, the `status_*` thresholds and the
 `due_*` rule (`due_priority`, `due_p0_days`, `due_p1_days`, `due_p2_days`).
 These are the values the binary acts on, so a board drawn from them lines its
 columns up with the explorer's.
@@ -19,6 +19,46 @@ columns up with the explorer's.
 `moai status --json` carries the same column order as `statuses` beside
 `counts`. `counts` is a map in name order — draw the columns from `statuses`
 and look each count up in `counts`.
+
+## Read a holding session
+
+`moai show <id> --json` and the rows of `moai show --json` may carry `session`.
+It is absent on groups, work outside started columns, deferred work, or when
+there is no holding session with a heartbeat on this machine. No heartbeat is
+**unknown**, not lost. `session_lost_minutes = 0` omits the key everywhere.
+`--fields id,session` asks for it; leaving it out of `--fields` skips heartbeat I/O.
+`ready`, `prime` and `tui --json` do not carry it.
+
+```json
+{
+  "session": {
+    "state": "lost",
+    "agent": "claude",
+    "session_id": "session-123",
+    "last_event": "PreToolUse",
+    "last_seen": "2026-11-02T03:00:00Z",
+    "silent_minutes": 60,
+    "recover": [
+      "claude --resume session-123 (moai-recover skill if several sessions died together)",
+      "Read the Next: note in moai show moai-example; in your new session record the pick with moai mv moai-example in_progress --from in_progress",
+      "For another person, moai mv moai-example in_progress --from in_progress --take -m '<who approved>'",
+      "To put it down, moai mv moai-example todo or moai defer moai-example -m '<why>'"
+    ]
+  }
+}
+```
+
+`state` is `alive` or `lost`; alive sessions have `recover: []`. `agent` is
+`claude`, `codex` or `antigravity`. `last_event` is `SessionStart`,
+`UserPromptSubmit`, `PreToolUse` or `Stop`. `last_seen` is UTC RFC3339 from the
+heartbeat file's modification time; `silent_minutes` uses wall time, independent
+of `MOAI_NOW`. `recover` is an array in the selected language; display its lines
+verbatim instead of reconstructing agent commands.
+
+`moai status --json` adds one warning with `kind: "lost_session"`, the affected
+`ids`, `count`, `minutes` (the configured threshold) and `hint`. It has
+`notice: false`, `fatal: false`; its exit code stays 0. Minutes do not appear
+in the `days` field. A missing heartbeat contributes no warning.
 
 ## Walk the explorer's directories
 
@@ -199,4 +239,4 @@ A whole tracker with bodies runs to megabytes — this repository's
 - **Pages repeat or skip a row** — the order moved under you. Page in `id` or
   `created` order; priority and title move when someone edits a row
 
-Decided in: moai-e9hi, moai-b4dc, moai-ijjd, moai-wk7i, moai-g8pt
+Decided in: moai-e9hi, moai-b4dc, moai-ijjd, moai-wk7i, moai-g8pt moai-4v3h

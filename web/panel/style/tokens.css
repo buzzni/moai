@@ -83,6 +83,7 @@
   /* List and Gantt column tints stay pale enough for a search mark to show on top. Todo is fainter still: the
      selected row's --selected is the same blue hue, and it must stay distinct from a todo row. */
   --todo-soft: color-mix(in srgb, #3b82f6 2%, var(--bg));
+  --lost-soft: color-mix(in srgb, var(--danger) 8%, var(--bg));
   --progress-soft: color-mix(in srgb, #F2B01E 7%, var(--bg));
   --review-soft: color-mix(in srgb, #a855f7 8%, var(--bg));
   --done-soft: color-mix(in srgb, #10B981 7%, var(--bg));
@@ -125,3 +126,8 @@ body {
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) { --lost-soft: color-mix(in srgb, var(--danger) 4%, var(--bg)); }
+}
+:root[data-theme="dark"] { --lost-soft: color-mix(in srgb, var(--danger) 4%, var(--bg)); }

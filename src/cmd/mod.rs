@@ -974,6 +974,8 @@ pub struct Row<'a> {
     /// "지금 브랜치의 줄" 이다** — `derived_status` 와 같은 약속이다.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub branch: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub session: Option<crate::view::Session>,
 }
 
 /// `Issue` serializes the shared file protocol. JSON rows use the surface spelling.
@@ -1056,6 +1058,7 @@ pub const OURS: &[&str] = &[
     "inherited_milestone",
     // `ready --json` 의 `others` 가 곁들이는 까닭(moai-0zjo, [`Other`]).
     "owner",
+    "session",
 ];
 
 /// 기계에 낼 **못 읽은 저널** — `show --json` 의 `journal_error` 한 자리(moai-f2lc).
@@ -1105,6 +1108,11 @@ pub fn journal_errors(
 }
 
 impl<'a> Row<'a> {
+    pub fn with_session(mut self, session: Option<crate::view::Session>) -> Self {
+        self.session = session;
+        self
+    }
+
     /// `read` 는 칸 지도를 **(종류, id) 로 짚는 자**다(`report::GroupKey`, moai-mibi.rfn) — 열쇠는
     /// `report::stands_on` 이 그 줄에서 짓고, 묶음이 아니면 짚지도 않는다. 머지를 잘못 푼 파일에서
     /// 묶음과 id 가 같은 일 줄이나 가려진 묶음 줄이 쌍둥이의 칸을 입지 않게, `report::column` 과 같은
@@ -1150,7 +1158,7 @@ impl<'a> Row<'a> {
         // 줄이 안 적은 기본값을 여기서 세운다. 적힌 값은 줄 제 것이 그대로 나간다.
         let kind = issue.kind.is_default().then(|| issue.kind.as_str());
         let priority = issue.priority.is_none().then(|| issue.priority());
-        Row { issue, kind, priority, derived_status: derived, derived_epic, branch: None }
+        Row { issue, kind, priority, derived_status: derived, derived_epic, branch: None, session: None }
     }
 
     /// 겹쳐 본 줄이면 그 출처를 곁들인다.
@@ -1776,6 +1784,7 @@ mod tests {
             derived_status: Some("todo"),
             derived_epic: Some("moai-0001"),
             branch: Some("feat/x"),
+            session: None,
         };
         let added = keys_beyond(&i, &row);
         assert!(!added.is_empty(), "곁들인 키를 못 셌다");

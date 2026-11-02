@@ -1875,5 +1875,20 @@
   "page.wiki.noLinks": "이 페이지에는 링크가 없습니다.",
   "page.wiki.outside": "위키 밖 주소는 열지 않습니다: {href}",
   "page.wiki.loadFailed": "페이지를 불러오지 못했습니다: {reason}",
-  "page.wiki.nothingBack": "되감을 페이지가 없습니다."
+  "page.wiki.nothingBack": "되감을 페이지가 없습니다.",
+  "warn.lost_session": "세션 신호가 끊긴 일 {n}건 ({d}분 넘게) — 되살리거나 이어받는다",
+  "detail.session": "세션",
+  "detail.session_lost": "신호 끊김 — {agent} {sid} · 마지막 신호 {event} {minutes}분 전",
+  "detail.session_alive": "살아 있다 — {agent} {sid} · {minutes}분 전",
+  "detail.recover_claude": "claude --resume {sid} (여럿이 함께 죽었으면 moai-recover 스킬)",
+  "detail.recover_codex": "codex resume {sid}",
+  "detail.recover_antigravity": "Antigravity 에서 그 대화를 다시 연다",
+  "detail.recover_resume_own": "moai show {id} 의 Next: 노트를 읽고, 같은 사람의 새 세션이면 moai mv {id} {col} --from {col} 으로 집기를 다시 적는다",
+  "detail.recover_take": "남이 이어받으면 moai mv {id} {col} --from {col} --take -m '<누가 허락했나>'",
+  "detail.recover_put_down": "내려놓으려면 moai mv {id} {first} 나 moai defer {id} -m '<왜>'",
+  "tui.session.lost": "! 세션 신호가 끊긴 일 {n}건",
+  "page.list.sessionLost": "세션 신호 끊김",
+  "page.detail.session": "세션",
+  "page.detail.sessionLost": "세션 신호 끊김 — {agent} {sid} · 마지막 신호 {event} {minutes}분 전",
+  "page.detail.sessionAlive": "살아 있다 — {agent} {sid} · {minutes}분 전"
 }
