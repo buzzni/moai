@@ -17,6 +17,7 @@ struct Registry {
     next_seq: u64,
     next_stream: u64,
     tabs: HashMap<String, Tab>,
+    anonymous_streams: usize,
 }
 
 const RESUME_GRACE: Duration = Duration::from_secs(30);
@@ -51,6 +52,23 @@ pub struct Joined {
     pub stream: u64,
 }
 
+/// A stream owns either a tab (including its reconnect reservation) or one anonymous slot.
+pub struct Stream<'a> {
+    tabs: &'a Tabs,
+    pub joined: Option<Joined>,
+}
+
+impl Drop for Stream<'_> {
+    fn drop(&mut self) {
+        if let Some(joined) = &self.joined {
+            self.tabs.leave(&joined.id, joined.stream);
+        } else {
+            let mut registry = self.tabs.inner.lock().unwrap_or_else(|e| e.into_inner());
+            registry.anonymous_streams -= 1;
+        }
+    }
+}
+
 pub enum Push {
     Ctl { seq: u64, request: serde_json::Value },
     Proposal { entry: serde_json::Value },
@@ -62,7 +80,41 @@ impl Tabs {
         Self { inner: Mutex::new(Registry::default()) }
     }
 
+    /// Admission and tab registration share the same lock: overflow tabs cannot take a reconnecting tab's slot.
+    pub fn stream(
+        &self,
+        here: &Path,
+        overlay: bool,
+        resume: Option<(&str, &str)>,
+        ctl: bool,
+        limit: usize,
+    ) -> std::io::Result<Option<Stream<'_>>> {
+        if ctl {
+            return self
+                .join_limited(here, overlay, resume, Some(limit))
+                .map(|joined| joined.map(|joined| Stream { tabs: self, joined: Some(joined) }));
+        }
+        let mut registry = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        registry.prune();
+        if registry.occupied() >= limit {
+            return Ok(None);
+        }
+        registry.anonymous_streams += 1;
+        Ok(Some(Stream { tabs: self, joined: None }))
+    }
+
+    #[cfg(test)]
     pub fn join(&self, here: &Path, overlay: bool, resume: Option<(&str, &str)>) -> std::io::Result<Joined> {
+        Ok(self.join_limited(here, overlay, resume, None)?.unwrap())
+    }
+
+    fn join_limited(
+        &self,
+        here: &Path,
+        overlay: bool,
+        resume: Option<(&str, &str)>,
+        limit: Option<usize>,
+    ) -> std::io::Result<Option<Joined>> {
         // The token is read before the registry lock, as every ctl request, `seen` and `ls` waits on that lock.
         let mut bytes = [0u8; 16];
         std::fs::File::open("/dev/urandom")?.read_exact(&mut bytes)?;
@@ -86,7 +138,10 @@ impl Tabs {
             for row in tab.proposals.rows() {
                 let _ = sender.send(Push::Proposal { entry: row.value() });
             }
-            return Ok(Joined { id: id.into(), token: token.into(), incoming, stream });
+            return Ok(Some(Joined { id: id.into(), token: token.into(), incoming, stream }));
+        }
+        if limit.is_some_and(|limit| registry.occupied() >= limit) {
+            return Ok(None);
         }
         let token = bytes.iter().map(|b| format!("{b:02x}")).collect::<String>();
         registry.next_tab += 1;
@@ -106,7 +161,7 @@ impl Tabs {
                 proposals: std::sync::Arc::new(crate::ctl::proposal::Book::new()),
             },
         );
-        Ok(Joined { id, token, incoming, stream })
+        Ok(Some(Joined { id, token, incoming, stream }))
     }
 
     pub fn leave(&self, id: &str, stream: u64) {
@@ -392,6 +447,10 @@ impl Tab {
 }
 
 impl Registry {
+    fn occupied(&self) -> usize {
+        self.tabs.len() + self.anonymous_streams
+    }
+
     fn prune(&mut self) {
         self.tabs.retain(|_, tab| {
             if !tab.resumable() {
@@ -416,6 +475,49 @@ mod tests {
         );
         request.target = Some(target.into());
         request
+    }
+
+    #[test]
+    fn reconnect_slots_are_reserved_and_only_valid_resumes_can_reuse_them() {
+        let tabs = Tabs::new();
+        let here = Path::new("/tmp");
+        let first = tabs.stream(here, false, None, true, 3).unwrap().unwrap();
+        let joined = first.joined.as_ref().unwrap();
+        let (id, token, old_stream) = (joined.id.clone(), joined.token.clone(), joined.stream);
+        let _others: Vec<_> = (0..2).map(|_| tabs.stream(here, false, None, true, 3).unwrap().unwrap()).collect();
+        let proposal_id = tabs.handle(proposal(&id, None)).data.unwrap()["id"].as_str().unwrap().to_string();
+        drop(first);
+        assert!(tabs.windows(None).iter().all(|row| row["id"] != id));
+        assert!(tabs.stream(here, false, None, true, 3).unwrap().is_none(), "an overflow tab stole the resume slot");
+        assert!(
+            tabs.stream(here, false, None, false, 3).unwrap().is_none(),
+            "an anonymous stream stole the resume slot"
+        );
+        assert!(tabs.stream(here, false, Some((&id, "wrong")), true, 3).unwrap().is_none());
+        let other = crate::scratch::Scratch::new("stream-resume-other-project");
+        assert!(tabs.stream(other.path(), false, Some((&id, &token)), true, 3).unwrap().is_none());
+        let resumed = tabs.stream(here, true, Some((&id, &token)), true, 3).unwrap().unwrap();
+        let joined = resumed.joined.as_ref().unwrap();
+        assert_eq!((&joined.id, &joined.token), (&id, &token));
+        assert!(matches!(joined.incoming.try_recv(), Ok(Push::Proposal { entry }) if entry["id"] == proposal_id));
+        tabs.leave(&id, old_stream);
+        assert!(tabs.windows(None).iter().any(|row| row["id"] == id), "a stale leave detached the resumed stream");
+        drop(resumed);
+        tabs.inner.lock().unwrap().tabs.get_mut(&id).unwrap().connection =
+            Connection::Detached { at: Instant::now() - RESUME_GRACE };
+        let fresh = tabs.stream(here, false, None, true, 3).unwrap().unwrap();
+        assert_ne!(fresh.joined.as_ref().unwrap().id, id);
+        assert!(!tabs.inner.lock().unwrap().tabs.contains_key(&id), "an expired reservation still consumed capacity");
+    }
+
+    #[test]
+    fn anonymous_streams_return_capacity_on_close_without_a_resume_grace() {
+        let tabs = Tabs::new();
+        let stream = tabs.stream(Path::new("/tmp"), false, None, false, 1).unwrap().unwrap();
+        assert!(stream.joined.is_none());
+        assert!(tabs.stream(Path::new("/tmp"), false, None, true, 1).unwrap().is_none());
+        drop(stream);
+        assert!(tabs.stream(Path::new("/tmp"), false, None, true, 1).unwrap().is_some());
     }
 
     #[test]

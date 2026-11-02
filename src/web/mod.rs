@@ -54,7 +54,6 @@ pub struct Site {
     pub started_in: Lang,
     /// 사용자 설정의 표식과 그것에서 읽은 것([`Site::config`]).
     picked: Mutex<Picked>,
-    streams: AtomicUsize,
     pub tabs: Arc<ctl::Tabs>,
 }
 
@@ -74,7 +73,6 @@ impl Site {
             spawner,
             started_in,
             picked: Mutex::new(Picked { stamp: None, lang: started_in, projects: Vec::new() }),
-            streams: AtomicUsize::new(0),
             tabs: Arc::new(ctl::Tabs::new()),
         }
     }
@@ -201,31 +199,23 @@ fn handle(stream: TcpStream, site: &Site, busy: Leave) {
             let target = event_target(&req, site);
             match target {
                 Ok((cwd, lang, overlay, first, resume)) => {
-                    if site.streams.fetch_add(1, Ordering::SeqCst) >= STREAMS_MAX {
-                        site.streams.fetch_sub(1, Ordering::SeqCst);
-                        (refuse(503, say(lang, "web.busy"), code::BUSY), true)
-                    } else {
-                        struct StreamLeave<'a>(&'a AtomicUsize);
-                        impl Drop for StreamLeave<'_> {
-                            fn drop(&mut self) {
-                                self.0.fetch_sub(1, Ordering::SeqCst);
-                            }
+                    let ctl_peer = stream.peer_addr().is_ok_and(local_ctl_peer);
+                    match site.tabs.stream(
+                        &cwd,
+                        overlay,
+                        resume.as_ref().map(|(id, token)| (id.as_str(), token.as_str())),
+                        cfg!(unix) && ctl_peer,
+                        STREAMS_MAX,
+                    ) {
+                        Ok(Some(admitted)) => {
+                            drop(busy);
+                            let _ = stream_admitted(&stream, &cwd, lang, overlay, first, admitted);
+                            close(&stream);
+                            return;
                         }
-                        let _stream = StreamLeave(&site.streams);
-                        drop(busy);
-                        let ctl_peer = stream.peer_addr().is_ok_and(local_ctl_peer);
-                        let _ = stream_events(
-                            &stream,
-                            &cwd,
-                            lang,
-                            overlay,
-                            first,
-                            &site.tabs,
-                            ctl_peer,
-                            resume.as_ref().map(|(id, token)| (id.as_str(), token.as_str())),
-                        );
-                        close(&stream);
-                        return;
+                        // Refused requests keep their ordinary slot until the response is sent.
+                        Ok(None) => (refuse(503, say(lang, "web.busy"), code::BUSY), true),
+                        Err(error) => (refuse(500, &error.to_string(), code::ERROR), true),
                     }
                 }
                 Err(refused) => (refused, true),
@@ -389,6 +379,7 @@ fn local_ctl_peer(peer: std::net::SocketAddr) -> bool {
     peer.ip().is_loopback()
 }
 
+#[cfg(test)]
 fn stream_events(
     stream: &TcpStream,
     cwd: &std::path::Path,
@@ -399,22 +390,30 @@ fn stream_events(
     ctl_peer: bool,
     resume: Option<(&str, &str)>,
 ) -> std::io::Result<()> {
-    use std::io::Write as _;
     // Local ctl sockets are Unix-only; the tracker stream remains available on Windows.
     // A remote page can read the web UI when the server binds externally, but it must never receive a ctl request,
     // the caller's actor, or a token that can answer or write as that caller. SSH port forwarding arrives on loopback.
-    let joined = if cfg!(unix) && ctl_peer { Some(tabs.join(cwd, overlay, resume)?) } else { None };
-    struct TabLeave<'a>(&'a ctl::Tabs, String, u64);
-    impl Drop for TabLeave<'_> {
-        fn drop(&mut self) {
-            self.0.leave(&self.1, self.2);
-        }
-    }
-    let _tab = joined.as_ref().map(|joined| TabLeave(tabs, joined.id.clone(), joined.stream));
+    let Some(admitted) = tabs.stream(cwd, overlay, resume, cfg!(unix) && ctl_peer, STREAMS_MAX)? else {
+        let busy = refuse(503, say(lang, "web.busy"), code::BUSY);
+        return http::write(&mut Within::of(stream, ANSWER_LIMIT), &busy, true);
+    };
+    stream_admitted(stream, cwd, lang, overlay, first, admitted)
+}
+
+fn stream_admitted(
+    stream: &TcpStream,
+    cwd: &std::path::Path,
+    lang: Lang,
+    overlay: bool,
+    first: String,
+    admitted: ctl::Stream<'_>,
+) -> std::io::Result<()> {
+    use std::io::Write as _;
+    let joined = admitted.joined.as_ref();
     let mut writer = Within::of(stream, WRITE_LIMIT);
     http::write_stream_head(&mut writer)?;
     writer.write_all(b"retry: 3000\n\n")?;
-    if let Some(joined) = &joined {
+    if let Some(joined) = joined {
         writer.write_all(
             format!("event: hello\ndata: {}\n\n", serde_json::json!({"tab": joined.id, "token": joined.token}))
                 .as_bytes(),
@@ -424,7 +423,7 @@ fn stream_events(
     writer.flush()?;
     let (until, mut ping, mut seen) = (Instant::now() + Duration::from_secs(30 * 60), Instant::now(), first);
     while Instant::now() < until {
-        let pushed = match &joined {
+        let pushed = match joined {
             Some(joined) => match joined.incoming.recv_timeout(Duration::from_secs(1)) {
                 Ok(push) => Some(push),
                 Err(std::sync::mpsc::RecvTimeoutError::Timeout) => None,
@@ -894,6 +893,74 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
+    fn a_reserved_tab_resumes_before_overflow_even_at_the_stream_limit() {
+        use std::io::{BufRead, Write};
+        fn open(site: Arc<Site>, path: &str) -> (std::io::BufReader<TcpStream>, std::thread::JoinHandle<()>) {
+            let (mut client, server) = pair();
+            client.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+            write!(client, "GET {path} HTTP/1.1\r\nHost: localhost\r\n\r\n").unwrap();
+            let worker = std::thread::spawn(move || handle(server, &site, Leave(Arc::new(AtomicUsize::new(1)))));
+            (std::io::BufReader::new(client), worker)
+        }
+        fn next_data(reader: &mut impl BufRead) -> serde_json::Value {
+            loop {
+                let mut line = String::new();
+                reader.read_line(&mut line).unwrap();
+                assert!(!line.is_empty(), "stream ended before its event");
+                if let Some(data) = line.strip_prefix("data: ") {
+                    return serde_json::from_str(data).unwrap();
+                }
+            }
+        }
+        let scratch = crate::scratch::Scratch::new("web-resume-reserved-http");
+        std::fs::create_dir_all(scratch.join(".moai")).unwrap();
+        std::fs::write(scratch.join(".moai/config.toml"), "prefix = \"moai\"\n").unwrap();
+        std::fs::write(scratch.join(".moai/issues.jsonl"), "").unwrap();
+        let site = Arc::new(Site::new(
+            run::Spawner { exe: "unused-child".into(), cwd: scratch.path().into(), user: None },
+            Lang::En,
+        ));
+        let (mut first, first_worker) = open(site.clone(), "/api/events");
+        let hello = next_data(&mut first);
+        let (id, token) = (hello["tab"].as_str().unwrap(), hello["token"].as_str().unwrap());
+        let mut others = Vec::new();
+        for _ in 1..STREAMS_MAX {
+            let (mut reader, worker) = open(site.clone(), "/api/events");
+            assert!(next_data(&mut reader)["tab"].is_string());
+            others.push((reader, worker));
+        }
+        let mut proposed = crate::ctl::wire::request(
+            crate::ctl::wire::Verb::Propose { text: "Keep this card".into(), then: None, ttl: 900, wait: 0 },
+            Duration::from_secs(5),
+        );
+        proposed.target = Some(id.into());
+        let proposal_id = site.tabs.handle(proposed).data.unwrap()["id"].clone();
+        drop(first);
+        first_worker.join().unwrap();
+        let (mut overflow, worker) = open(site.clone(), "/api/events");
+        let mut head = String::new();
+        overflow.read_line(&mut head).unwrap();
+        assert!(head.starts_with("HTTP/1.1 503 "), "overflow stole the detached slot: {head}");
+        drop(overflow);
+        worker.join().unwrap();
+        let (mut resumed, worker) = open(site, &format!("/api/events?resume={id}&token={token}"));
+        assert_eq!(next_data(&mut resumed), hello, "resume changed the ctl id or token");
+        loop {
+            let entry = next_data(&mut resumed);
+            if entry["id"] == proposal_id {
+                break;
+            }
+        }
+        drop(resumed);
+        worker.join().unwrap();
+        for (reader, worker) in others {
+            drop(reader);
+            worker.join().unwrap();
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn proposal_http_requires_a_claim_before_the_action_result() {
         use std::io::{Read, Write};
         let scratch = crate::scratch::Scratch::new("web-proposal-claim-http");
@@ -954,7 +1021,9 @@ mod tests {
         let site =
             Site::new(run::Spawner { exe: "unused-child".into(), cwd: scratch.path().into(), user: None }, Lang::En);
         // Model the open streams, then pass the next request through the real HTTP handler.
-        site.streams.store(STREAMS_MAX, Ordering::SeqCst);
+        let _streams: Vec<_> = (0..STREAMS_MAX)
+            .map(|_| site.tabs.stream(scratch.path(), false, None, false, STREAMS_MAX).unwrap().unwrap())
+            .collect();
         assert_eq!(STREAMS_MAX, 3, "persistent streams consumed the browser's read connections");
         let (mut client, server) = pair();
         client.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
@@ -966,7 +1035,10 @@ mod tests {
             client.read_to_string(&mut result).unwrap();
             assert!(result.starts_with("HTTP/1.1 503 "), "{result}");
         });
-        assert_eq!(site.streams.load(Ordering::SeqCst), STREAMS_MAX, "a refused stream leaked a slot");
+        assert!(
+            site.tabs.stream(scratch.path(), false, None, false, STREAMS_MAX).unwrap().is_none(),
+            "a refusal freed an owned slot"
+        );
         assert_eq!(busy.load(Ordering::SeqCst), 0);
     }
 

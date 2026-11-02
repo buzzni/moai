@@ -6,6 +6,8 @@ use std::time::{Duration, Instant};
 
 const MAX_OPEN: usize = 5;
 const RETAIN: Duration = Duration::from_secs(600);
+/// A claimed action has bounded time to report; a missing result must not live for the lifetime of the tab.
+const RESULT_LIMIT: Duration = Duration::from_secs(600);
 
 pub struct Book {
     inner: Mutex<Entries>,
@@ -33,7 +35,7 @@ pub struct Entry {
     pub ttl: Duration,
     finished: Option<Instant>,
     /// A web accept owns execution before the page runs its follow-up. Not a second public state.
-    claimed: bool,
+    claimed: Option<Instant>,
 }
 
 impl Entry {
@@ -64,7 +66,7 @@ impl Book {
             return Reply::error("gone", "window closed");
         }
         expire(&mut inner);
-        if inner.rows.iter().filter(|row| row.state == "pending" && !row.claimed).count() >= MAX_OPEN {
+        if inner.rows.iter().filter(|row| row.state == "pending").count() >= MAX_OPEN {
             return Reply::error("refused", "five proposals are already open");
         }
         inner.next += 1;
@@ -79,7 +81,7 @@ impl Book {
             made: Instant::now(),
             ttl: Duration::from_secs(ttl),
             finished: None,
-            claimed: false,
+            claimed: None,
         };
         let answer = Reply::success(row.value());
         inner.rows.push(row);
@@ -90,7 +92,7 @@ impl Book {
     pub fn rows(&self) -> Vec<Entry> {
         let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         expire(&mut inner);
-        inner.rows.iter().filter(|row| row.state == "pending" && !row.claimed).cloned().collect()
+        inner.rows.iter().filter(|row| row.state == "pending" && row.claimed.is_none()).cloned().collect()
     }
 
     pub fn next_expiry_in(&self) -> Option<Duration> {
@@ -98,7 +100,7 @@ impl Book {
         inner
             .rows
             .iter()
-            .filter(|row| row.state == "pending" && !row.claimed)
+            .filter(|row| row.state == "pending" && row.claimed.is_none())
             .map(|row| row.ttl.saturating_sub(row.made.elapsed()))
             .min()
     }
@@ -119,7 +121,7 @@ impl Book {
             return Reply::error("not_found", "proposal not found");
         };
         // `answer` still reads a claimed row as `pending`; "already answered" sent its withdrawer to a contradiction.
-        if row.claimed {
+        if row.state == "pending" && row.claimed.is_some() {
             return Reply::error("refused", "proposal was accepted and its action is running");
         }
         if row.state != "pending" {
@@ -142,20 +144,21 @@ impl Book {
         let Some(row) = inner.rows.iter_mut().find(|row| row.id == id) else {
             return Reply::error("not_found", "proposal not found");
         };
-        if row.state != "pending" || row.claimed {
+        if row.state != "pending" || row.claimed.is_some() {
             return Reply::error("refused", "proposal already answered");
         }
-        row.claimed = true;
+        row.claimed = Some(Instant::now());
         Reply::success(row.value())
     }
 
     /// Publish the result only after the authorized page finishes; waiters still see the final action result.
     pub fn complete(&self, id: &str, ran: Option<Reply>) -> Reply {
         let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        expire(&mut inner);
         let Some(row) = inner.rows.iter_mut().find(|row| row.id == id) else {
             return Reply::error("not_found", "proposal not found");
         };
-        if row.state != "pending" || !row.claimed {
+        if row.state != "pending" || row.claimed.is_none() {
             return Reply::error("refused", "proposal was not claimed or already completed");
         }
         row.state = "accepted".into();
@@ -189,8 +192,8 @@ impl Book {
             if !connected() {
                 return Reply::error("gone", "proposal waiter disconnected");
             }
-            // A claimed row never expires, so its TTL is no wakeup: past it, a zero timeout spun this loop until `end`.
-            let until = if row.claimed { end } else { end.min(row.made + row.ttl) };
+            // A claim ignores the proposal TTL but has its own result deadline. Never sleep on a past TTL.
+            let until = end.min(row.claimed.map_or(row.made + row.ttl, |at| at + RESULT_LIMIT));
             let left = until.saturating_duration_since(Instant::now());
             (inner, _) = self
                 .changed
@@ -224,7 +227,15 @@ impl Book {
 fn expire(inner: &mut Entries) {
     let now = Instant::now();
     for row in &mut inner.rows {
-        if row.state == "pending" && !row.claimed && now.duration_since(row.made) >= row.ttl {
+        if row.state == "pending" && row.claimed.is_some_and(|at| now.duration_since(at) >= RESULT_LIMIT) {
+            row.state = "accepted".into();
+            row.ran = Some(Reply::error(
+                "timeout",
+                "proposal action result was not reported within ten minutes; execution may have completed",
+            ));
+            row.finished = Some(now);
+        }
+        if row.state == "pending" && row.claimed.is_none() && now.duration_since(row.made) >= row.ttl {
             row.state = "expired".into();
             row.finished = Some(now);
         }
@@ -282,6 +293,38 @@ mod tests {
         assert!(wakeups <= 10, "the waiter spun {wakeups} times");
         let withdrawn = book.finish("window/1", "withdrawn", None);
         assert_eq!(withdrawn.message.as_deref(), Some("proposal was accepted and its action is running"));
+    }
+
+    #[test]
+    fn missing_action_results_are_bounded_and_eventually_pruned() {
+        let book = Book::new();
+        for _ in 0..MAX_OPEN {
+            let id = book.add("window", "hello", None, 900, None).data.unwrap()["id"].as_str().unwrap().to_string();
+            assert!(book.claim(&id).ok);
+        }
+        assert!(!book.add("window", "sixth", None, 900, None).ok, "incomplete claims escaped the pending bound");
+        {
+            let mut inner = book.inner.lock().unwrap();
+            for row in &mut inner.rows {
+                row.claimed = Some(Instant::now() - RESULT_LIMIT);
+            }
+        }
+        let answer = book.wait("window/1", 30).data.unwrap();
+        assert_eq!(answer["state"], "accepted");
+        assert_eq!(answer["ran"]["code"], "timeout");
+        assert!(answer["ran"]["message"].as_str().unwrap().contains("may have completed"));
+        assert!(!book.complete("window/1", None).ok, "a late completion rewrote the terminal result");
+        assert!(book.add("window", "new slot", None, 900, None).ok);
+        {
+            let mut inner = book.inner.lock().unwrap();
+            for row in &mut inner.rows {
+                if row.finished.is_some() {
+                    row.finished = Some(Instant::now() - RETAIN);
+                }
+            }
+        }
+        assert_eq!(book.get("window/1").code.as_deref(), Some("not_found"));
+        assert_eq!(book.inner.lock().unwrap().rows.len(), 1, "timed-out claims were retained forever");
     }
 
     #[test]
