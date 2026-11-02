@@ -10993,3 +10993,4 @@
 {"ts":"2026-11-02T13:44:48Z","id":"moai-8dap.jig","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"v0.44.0 릴리스 진행 — 병합·판 올리기·소식·PR"}
 {"ts":"2026-11-02T13:44:48Z","id":"moai-8dap.eye","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"kitty·Ghostty 에서 탐색기 그림을 보고 릴리스 그림을 찍는다"}
 {"ts":"2026-11-02T13:44:54Z","id":"moai-8dap.jig","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-11-02T13:51:40Z","id":"moai-8dap.jig","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 사람이 moai-8dap.eye(kitty/Ghostty 그림 캡처·시각 확인)를 끝내면 draft PR 을 Ready 로 → 병합(squash 금지) → tag on merge 승인 → 릴리스 확인, milestone-moai-r4jn 워크트리·가지·target 정리, moai-8dap.jig 닫기. macOS 빌드는 이 기계에서 못 쟀다 — 태그의 release 워크플로가 처음 짓는다"}
