@@ -32945,6 +32945,13 @@ fn web_ctl_propose_reaches_a_tab_and_returns_its_answer() {
     assert_eq!(wrong_token.0, 403, "{}", wrong_token.1);
     let wrong_origin = ctl_post(web.port, &path, r#"{"state":"declined"}"#, "application/json", false);
     assert_eq!(wrong_origin.0, 403, "{}", wrong_origin.1);
+    let unclaimed = ctl_post(web.port, &path, r#"{"state":"accepted"}"#, "application/json", true);
+    assert_eq!(unclaimed.0, 409, "{}", unclaimed.1);
+    let claimed = ctl_post(web.port, &path, r#"{"state":"claim"}"#, "application/json", true);
+    assert_eq!(claimed.0, 200, "{}", claimed.1);
+    assert_eq!(json_of(claimed.1.split_once("\r\n\r\n").unwrap().1)["then"]["name"], "board");
+    let repeated = ctl_post(web.port, &path, r#"{"state":"claim"}"#, "application/json", true);
+    assert_eq!(repeated.0, 409, "{}", repeated.1);
     let posted = ctl_post(
         web.port,
         &path,
@@ -33041,7 +33048,7 @@ fn web_events_beyond_the_cap_are_busy_and_reads_still_answer() {
     let s = init("web-events-cap");
     let web = serve(s.path());
     let mut streams = Vec::new();
-    for _ in 0..8 {
+    for _ in 0..3 {
         let mut stream = events(web.port);
         next_event_stamp(&mut stream);
         streams.push(stream);
@@ -33049,9 +33056,9 @@ fn web_events_beyond_the_cap_are_busy_and_reads_still_answer() {
     let (status, _, body) = get(web.port, "/api/events");
     assert_eq!(status, 503, "{body}");
     assert_eq!(json_of(&body)["code"], "busy");
-    // STREAMS_MAX is eight and BUSY_MAX is 32. Twenty-four incomplete ordinary requests must still leave room
-    // for a read; if the eight event streams retain BUSY slots, this next request becomes the 33rd and gets 503.
-    let _ordinary: Vec<_> = (0..24).map(|_| dial(web.port)).collect();
+    // STREAMS_MAX is three and BUSY_MAX is 32. Thirty incomplete ordinary requests must still leave room
+    // for a read; if event streams retain BUSY slots, this next request exceeds BUSY_MAX and gets 503.
+    let _ordinary: Vec<_> = (0..30).map(|_| dial(web.port)).collect();
     let (status, _, body) = get(web.port, "/api/stamp");
     assert_eq!(status, 200, "event streams retained ordinary request slots: {body}");
 }
@@ -33070,7 +33077,7 @@ fn web_events_give_their_slot_back_when_the_tab_goes() {
     let s = init("web-events-release");
     let web = serve(s.path());
     let mut streams = Vec::new();
-    for _ in 0..8 {
+    for _ in 0..3 {
         let mut stream = events(web.port);
         next_event_stamp(&mut stream);
         streams.push(stream);
