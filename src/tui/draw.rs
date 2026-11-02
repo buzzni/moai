@@ -4,7 +4,6 @@
 //! 규칙 하나를 CLI 에서 그대로 들고 온다: **색이 혼자 뜻을 지지 않는다.**
 //! 모든 색에 글리프나 낱말이 붙는다.
 
-use super::Surfaced;
 use super::form::{Field, Form, Target};
 use super::keys::{
     self, Browse, Confirm, Ctx, Goto, JOT, Jot, LEADER, Menu, PATH, PROMPT, Pick, Prompt, label, labels, said,
@@ -15,6 +14,7 @@ use super::picker::{self, Picker};
 use super::scroll::Move;
 use super::scroll::Scroll;
 use super::{App, Hung, Input, Mode, Pane, Row, Seat, Site};
+use super::{Spin, Surfaced};
 use crate::i18n::{Lang, fill, say};
 use crate::nav::{Entry, Twig};
 use crate::query::GrepIn;
@@ -468,9 +468,11 @@ pub fn screen(f: &mut Frame, app: &mut App) {
 /// 고른 카드의 반전도 칸의 `fg` 를 그대로 둔다. 바탕 갈래는 밝은 바탕 띠가 돌아와도 카드의 스피너가 같은 칸
 /// 머리줄 스피너에 기대지 않고 제 힘으로 깨우게 남긴 그물이다 — `a_spinner_on_a_board_band_still_counts` 가 두 꼴을 본다.
 fn spinner_on(buf: &ratatui::buffer::Buffer, colours: &[Color]) -> bool {
-    buf.content
-        .iter()
-        .any(|c| style::SPIN.contains(&c.symbol()) && (colours.contains(&c.fg) || colours.contains(&c.bg)))
+    buf.content.iter().enumerate().any(|(n, c)| {
+        let paused = n % usize::from(buf.area.width.max(1)) + 1 < usize::from(buf.area.width)
+            && buf.content.get(n + 1).is_some_and(|next| next.symbol() == "!");
+        !paused && style::SPIN.contains(&c.symbol()) && (colours.contains(&c.fg) || colours.contains(&c.bg))
+    })
 }
 
 /// 도는 글리프가 입을 수 있는 색 — 이 화면에 줄을 낸 프로젝트들([`App::sites`])의 **시작한 칸**이다.
@@ -2125,6 +2127,11 @@ fn banner_parts(app: &App) -> Option<(String, bool, Option<std::ops::Range<usize
     // 낱말로 부르면 오가는 사람이 둘을 다 배워야 한다. `+` 가 글에 들어 경고의 `!` 와 갈린다.
     // **급한 것이 아니라** `urgent` 를 안 세운다 — 담아 둔 것과 설치가 어긋난 것이지 고칠 계획이
     // 아니다(`view::status` 의 "알림만 있는 것은 문제 없다" 와 같은 자).
+    let lost = crate::report::lost_sessions(&app.site.issues, &app.site.cfg, &app.site.pulse, app.site.now_secs).len();
+    if lost > 0 {
+        parts.push(fill(say(lang, "tui.session.lost"), &[("n", &lost.to_string())]));
+        urgent = true;
+    }
     let notices = noticed(app, &app.site.warnings, app.site.notices);
     if notices > 0 {
         parts.push(fill(say(lang, "tui.place.notices"), &[("n", &notices.to_string())]));
@@ -3259,10 +3266,10 @@ fn lane_line<'a>(app: &App, laid: &super::Laid, lane: usize, w: usize) -> Line<'
                 if app.fields.shows(Field::Id) {
                     head.push(Span::styled(format!("{id} "), dim()));
                 }
-                head.push(Span::styled(row_glyph(app, site, at), glyph_style(site.column(at))));
+                head.push(Span::styled(row_glyph(app, site, at), row_ink(site, at)));
                 head.push(Span::raw(" "));
                 let title = site.issues[at].title.clone();
-                if site.spins(at) {
+                if site.spins(at) == Spin::Turning {
                     head.extend(shimmer(title, app.spin));
                 } else {
                     head.push(Span::styled(title, bold()));
@@ -3318,7 +3325,10 @@ fn card<'a>(app: &App, r: &Row, chosen: bool, w: usize, band: Option<Style>) -> 
         head.extend(mark(vec![Span::styled(i.id.clone(), quiet())], in_id));
         head.push(Span::styled(" ", ink(Style::new())));
     }
-    head.push(Span::styled(row_glyph(app, site, at), ink(glyph_style(site.column(at)))));
+    head.push(Span::styled(
+        row_glyph(app, site, at),
+        if site.spins(at) == Spin::Paused { row_ink(site, at) } else { ink(row_ink(site, at)) },
+    ));
     if fields.shows(Field::Priority) {
         head.push(Span::styled(" ", ink(Style::new())));
         head.push(Span::styled(format!("p{}", i.priority()), ink(priority(i.priority()))));
@@ -3428,7 +3438,7 @@ pub(super) fn card_title_lines(app: &App, r: &Row, w: usize) -> usize {
 pub(super) fn card_body(app: &App, r: &Row, w: usize) -> Vec<Line<'static>> {
     let Some((site, at, parts)) = card_parts(app, r) else { return Vec::new() };
     let query = app.grep_query().filter(|(g, _)| g.sees_title()).map(|(_, q)| q);
-    let spins = site.spins(at);
+    let spins = site.spins(at) == Spin::Turning;
     crate::markdown::wrap_spans(&parts, card_room(w), crate::markdown::Overflow::Break)
         .into_iter()
         .map(|line| {
@@ -3634,7 +3644,7 @@ fn row_line<'a>(app: &App, r: &Row, tally: &str, budget: usize, fields: super::v
     // 있을 때만 돌린다**: 도는 글리프는 "지금 누가 손대고 있다" 는 말인데 묶음의
     // `in_progress` 는 멤버 하나가 끝났다는 말일 수도 있다(`App::spins`).
     let glyph_at = head.len();
-    head.push(Span::styled(row_glyph(app, site, at), glyph_style(site.column(at))));
+    head.push(Span::styled(row_glyph(app, site, at), row_ink(site, at)));
     head.push(Span::raw(" "));
     // **가지가 [NEW]·`⎇ <가지>` 보다 앞이다**(moai-r6rm, 사용자가 그린 그림) — 가지는 이 줄이
     // 어디에 달렸는지를 말하므로 줄마다 같은 칸에 서야 눈이 그 선을 따라간다. 뒤에 두면 안 읽은
@@ -3734,7 +3744,7 @@ fn row_line<'a>(app: &App, r: &Row, tally: &str, budget: usize, fields: super::v
     // 일은 집었을 때, 에픽·마일스톤은 그 밑에 집은 일이 실제로 있을 때(moai-x5eg), 미룬 것은 안
     // 돈다(moai-tawj). 묶음을 따로 빼 두면 목록 뿌리에서 무엇이 움직이는지 글리프 한 칸으로만
     // 읽혀, 여러 에픽을 훑어 내릴 때 눈에 안 걸린다(moai-eomg). 뜻은 여전히 글리프가 진다.
-    if site.spins(at) {
+    if site.spins(at) == Spin::Turning {
         spans.extend(mark(shimmer(title, app.spin), in_title));
     } else {
         spans.extend(mark(vec![Span::raw(title)], in_title));
@@ -4298,8 +4308,15 @@ fn wrapped<'a>(text: &str, w: usize, style: Style) -> Vec<Line<'a>> {
 /// 그 줄의 글리프. 도는 것은 지금 누가 손대고 있는 줄이다 — **돌지는 [`App::spins`]
 /// 가 정한다**(루프는 그려진 글리프로 깬다 — `App::spun`).
 fn glyph_of(app: &App, site: &Site, at: usize) -> &'static str {
-    let col = site.column(at);
-    if site.spins(at) { style::spin_frame(app.spin) } else { style::glyph(col) }
+    match site.spins(at) {
+        Spin::Turning => style::spin_frame(app.spin),
+        Spin::Paused => "⠋!",
+        Spin::Still => style::glyph(site.column(at)),
+    }
+}
+
+fn row_ink(site: &Site, at: usize) -> Style {
+    if site.spins(at) == Spin::Paused { from_anstyle(style::P1) } else { glyph_style(site.column(at)) }
 }
 
 /// 목록 줄의 글리프 — **도는 줄은 스피너 뒤에 그 칸의 멈춘 글리프를 붙인다**(moai-q59j).
@@ -4312,14 +4329,18 @@ fn glyph_of(app: &App, site: &Site, at: usize) -> &'static str {
 /// 붙은 줄만 트리 선이 한두 칸 안으로 밀렸다. 까닭과 되살릴 때 먼저 풀 것은 `style` 에 적어 두었다.
 fn row_glyph(app: &App, site: &Site, at: usize) -> String {
     let col = style::glyph(site.column(at));
-    if site.spins(at) { format!("{}{col}", style::spin_frame(app.spin)) } else { format!(" {col}") }
+    match site.spins(at) {
+        Spin::Turning => format!("{}{col}", style::spin_frame(app.spin)),
+        Spin::Paused => "⠋!".into(),
+        Spin::Still => format!(" {col}"),
+    }
 }
 
 /// 칸별 건수의 글리프. **센 줄 가운데 도는 줄이 있을 때만 돈다**([`App::spins`]) — 칸
 /// 이름만 보고 돌리면 미룬 `in_progress` 하나뿐인 칸이, 줄은 다 멈췄는데 건수만 돌아 계획에서
 /// 뺀 일을 "지금 손대는 중" 이라 말하고 그 스피너로 루프를 깨운다(`App::spun`).
 fn count_glyph(app: &App, site: &Site, work: &[usize], st: &str) -> &'static str {
-    let turning = work.iter().any(|&at| site.issues[at].status.as_str() == st && site.spins(at));
+    let turning = work.iter().any(|&at| site.issues[at].status.as_str() == st && site.spins(at) == Spin::Turning);
     if turning { style::spin_frame(app.spin) } else { style::glyph(st) }
 }
 
@@ -4331,7 +4352,7 @@ fn count_glyph_across(app: &App, work: &[(Seat, usize)], st: &str) -> &'static s
         // **막음은 `spins` 까지 덮는다** — 그쪽도 첨자를 그대로 짚어(`Site::spins`), 읽기 좋으라고
         // 두 조건을 맞바꾸기만 해도 막음이 사라진다. `&&` 의 차례에 목숨을 걸지 않는다.
         let Some(site) = app.site_of_seat(seat) else { return false };
-        site.issues.get(at).is_some_and(|i| i.status.as_str() == st && site.spins(at))
+        site.issues.get(at).is_some_and(|i| i.status.as_str() == st && site.spins(at) == Spin::Turning)
     });
     if turning { style::spin_frame(app.spin) } else { style::glyph(st) }
 }
@@ -4391,10 +4412,22 @@ fn about<'a>(app: &App, site: &Site, idx: usize, e: &Entry, w: usize) -> Vec<Lin
     out.extend(wrapped(&i.title, w, bold()).into_iter().map(|l| mark_line(l, in_title)));
     out.push(Line::from(""));
 
+    if let Some(session) = crate::report::session_of(i, &site.cfg, &site.pulse, site.now_secs) {
+        let ink = if session.lost { from_anstyle(style::WARN) } else { dim() };
+        out.extend(wrapped(
+            &format!("{}  {}", say(site.lang, "detail.session"), crate::view::session_line(site.lang, &session)),
+            w,
+            ink,
+        ));
+        for line in crate::view::recover_lines(site.lang, i, &session) {
+            out.extend(wrapped(&format!("→  {line}"), w, ink));
+        }
+        out.push(Line::from(""));
+    }
     // 칸은 글리프와 낱말을 함께 낸다. 색이 없어도 뜻이 남아야 한다.
     let st = site.column(idx).to_string();
     let mut head = vec![
-        Span::styled(format!("{} {st}", glyph_of(app, site, idx)), glyph_style(&st)),
+        Span::styled(format!("{} {st}", glyph_of(app, site, idx)), row_ink(site, idx)),
         Span::raw("  ·  "),
         Span::styled(format!("p{}", i.priority()), priority(i.priority())),
     ];
@@ -9495,7 +9528,10 @@ pub(super) mod tests {
         held.epic = Some("argos-0001".into());
         issues.extend([held_epic, held]);
         let mut a = every(issues);
-        assert!(a.site.spins(a.site.index.find("argos-0001").unwrap()), "시험의 전제 — 그 에픽은 돈다");
+        assert!(
+            a.site.spins(a.site.index.find("argos-0001").unwrap()) == Spin::Turning,
+            "시험의 전제 — 그 에픽은 돈다"
+        );
 
         let off = render(&mut a, 100, 10).join("\n");
         assert!(!off.contains("argos-0001"), "시험의 전제 — 도는 에픽이 창 밖이어야 한다\n{off}");
@@ -9554,6 +9590,49 @@ pub(super) mod tests {
             "시험의 전제 — 건수가 돈다\n{lines}"
         );
         assert!(a.spun, "머리의 도는 건수로 안 깬다\n{lines}");
+    }
+
+    #[test]
+    fn paused_spinner_is_two_red_cells_and_never_wakes_the_loop() {
+        let work = Issue::new(
+            "argos-0001".into(),
+            "Silent work".into(),
+            Kind::Issue,
+            Status::new("in_progress"),
+            "2026-09-01T00:00:00Z",
+        );
+        let mut a = every(vec![work]);
+        a.site.now_secs = 13600;
+        a.site.pulse.threshold_secs = 1800;
+        a.site.pulse.beats.insert(
+            "argos-0001".into(),
+            crate::report::Beat {
+                session: "sid".into(),
+                agent: crate::report::Agent::Claude,
+                last_event: "Stop".into(),
+                last_seen_secs: 10000,
+            },
+        );
+        assert_eq!(row_glyph(&a, &a.site, 0), "⠋!");
+        assert_eq!(crate::text::width(&row_glyph(&a, &a.site, 0)), 2);
+        let red = from_anstyle(style::P1).fg.unwrap();
+        assert_eq!(row_ink(&a.site, 0).fg, Some(red));
+        let drawn = render_buf(&mut a, 100, 30);
+        assert!(!a.spun, "the paused-only screen must not wake the animation loop");
+        let cells: Vec<_> = drawn.content.iter().filter(|c| c.symbol() == "⠋" || c.symbol() == "!").collect();
+        assert!(cells.iter().any(|c| c.symbol() == "⠋" && c.fg == red));
+        assert!(cells.iter().any(|c| c.symbol() == "!" && c.fg == red));
+        let narrow = about(&a, &a.site, 0, &Entry::Leaf { at: 0 }, 30);
+        let words: String = narrow.iter().flat_map(|l| l.spans.iter().map(|s| s.content.as_ref())).collect();
+        assert!(words.contains(say(a.site.lang, "detail.session")) && words.contains("claude --resume sid"), "{words}");
+        assert!(narrow.iter().all(|l| l.width() <= 30));
+
+        let mut buf = ratatui::buffer::Buffer::empty(Rect::new(0, 0, 2, 1));
+        buf[(0, 0)].set_symbol("⠋").set_fg(red);
+        buf[(1, 0)].set_symbol("!").set_fg(red);
+        assert!(!spinner_on(&buf, &[red]), "even a red configured column must stay asleep");
+        buf[(1, 0)].set_symbol("▸");
+        assert!(spinner_on(&buf, &[red]));
     }
 
     /// **보드 카드의 띠 위 스피너도 제 힘으로 깨운다**(moai-bg2i, moai-i07x) — 이제 검정 바탕에

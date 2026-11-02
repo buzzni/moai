@@ -1885,5 +1885,6 @@
   "detail.recover_antigravity": "Reopen that conversation in Antigravity",
   "detail.recover_resume_own": "Read the Next: note in moai show {id}; in your new session record the pick with moai mv {id} {col} --from {col}",
   "detail.recover_take": "For another person, moai mv {id} {col} --from {col} --take -m '<who approved>'",
-  "detail.recover_put_down": "To put it down, moai mv {id} todo or moai defer {id} -m '<why>'"
+  "detail.recover_put_down": "To put it down, moai mv {id} todo or moai defer {id} -m '<why>'",
+  "tui.session.lost": "! Work held by a silent session {n}"
 }
