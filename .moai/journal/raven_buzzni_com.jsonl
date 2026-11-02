@@ -11004,3 +11004,117 @@
 {"ts":"2026-11-02T15:14:54Z","id":"moai-8dap.jig","kind":"note","by":"Raven","by_email":"raven@buzzni.com","text":"v0.44.0 이 나갔다 (2026-11-03)\n\n- PR #71 을 merge commit 으로 병합(1d7df832, squash 아님) — 사람이 정한 RavenBuzzni 계정으로. 이 Mac 의 활성 gh 계정 RavenKyu 는 읽기뿐이었다\n- tag on merge 는 사람이 승인했다(에이전트의 승인은 권한 판정이 \"Production Deploy\" 로 막았다). 태그 v0.44.0 이 병합 커밋에 섰다\n- release 41468085808 성공: 다섯 대상 모두. aarch64-apple-darwin 도 처음으로 지어졌다\n- smoke 41468092090 성공\n- 압축을 푼 바이너리(20MB = 20,971,520 바이트 예산): x86_64 Windows 16,074,752 · x86_64 Linux musl 14,341,808 · aarch64 Windows 13,262,336 · aarch64 macOS 11,738,992\n- Discord: 글 1개와 그림 2개, 셋 다 올라갔다(posted 3/3)\n- 남은 것: Linux 기계의 `.worktrees/milestone-moai-r4jn` 워크트리, `milestone/moai-r4jn` 가지, `/tmp/cargo-target/milestone-moai-r4jn` 정리 — 이 Mac 에는 없다"}
 {"ts":"2026-11-02T15:14:54Z","id":"moai-8dap.jig","kind":"note","by":"Raven","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 (medium — 병합·승인 뒤 릴리스 확인과 닫기)"}
 {"ts":"2026-11-02T15:14:54Z","id":"moai-8dap.jig","kind":"status","by":"Raven","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"v0.44.0 릴리스·Discord 소식까지 확인했다"}
+{"ts":"2026-11-02T15:50:05Z","id":"moai-ul7x","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"탐색기에서 접힌 그림 주소도 누를 수 있게"}
+{"ts":"2026-11-02T15:50:05Z","id":"moai-cc7w","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"Codex 세션의 집기 표시와 워크트리 판정"}
+{"ts":"2026-11-02T15:50:05Z","id":"moai-m6sl","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"아주 작은 터미널에서 제안 표시 확인"}
+{"ts":"2026-11-02T15:50:05Z","id":"moai-eat8","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"서버 판이 바뀐 뒤 웹 탭의 재접속 회복"}
+{"ts":"2026-11-02T15:50:05Z","id":"moai-7fsd","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"제안 미리 검사를 시간대 밖으로 넓히기"}
+{"ts":"2026-11-02T15:50:05Z","id":"moai-7qz9","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"다른 트래커를 -C 로 집은 세션의 심장박동"}
+{"ts":"2026-11-02T15:50:05Z","id":"moai-k1ns","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"v0.45.0"}
+{"ts":"2026-11-02T15:50:10Z","id":"moai-zidx","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"탐색기 그림 다듬기"}
+{"ts":"2026-11-02T15:50:10Z","id":"moai-zidx.7nc","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"접힌 그림 자리표시의 경로에 링크 걸기"}
+{"ts":"2026-11-02T15:50:10Z","id":"moai-zidx","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Unfolded from moai-20k4 — 탐색기 그림 자리표시가 줄을 넘기면 경로에 링크가 안 걸린다"}
+{"ts":"2026-11-02T15:50:10Z","id":"moai-20k4","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"Unfolded into moai-zidx, 1 issue"}
+{"ts":"2026-11-02T15:50:34Z","id":"moai-zidx.mdg","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"그림 파일 확인을 매 프레임에서 빼기"}
+{"ts":"2026-11-02T15:50:34Z","id":"moai-zidx.mdg","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Unfolded from moai-tgqk — 탐색기 그림 파일 확인을 매 프레임에서 빼기"}
+{"ts":"2026-11-02T15:50:34Z","id":"moai-tgqk","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"Unfolded into moai-zidx as moai-zidx.mdg"}
+{"ts":"2026-11-02T15:50:34Z","id":"moai-zidx.ine","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"그림 인코딩을 UI 스레드 밖으로"}
+{"ts":"2026-11-02T15:50:34Z","id":"moai-zidx.ine","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Unfolded from moai-o7a4 — 탐색기 그림 인코딩을 UI 스레드 밖으로"}
+{"ts":"2026-11-02T15:50:34Z","id":"moai-o7a4","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"Unfolded into moai-zidx as moai-zidx.ine"}
+{"ts":"2026-11-02T15:50:35Z","id":"moai-zidx.h5c","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"ssh 너머 Ghostty 에서 그림 그리기"}
+{"ts":"2026-11-02T15:50:35Z","id":"moai-zidx.h5c","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Unfolded from moai-9do9 — ssh 너머 Ghostty 도 그림을 그리게"}
+{"ts":"2026-11-02T15:50:35Z","id":"moai-9do9","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"Unfolded into moai-zidx as moai-zidx.h5c"}
+{"ts":"2026-11-02T15:50:36Z","id":"moai-zidx.cif","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"tmux 안 kitty 에서 그림 그리기 (passthrough)"}
+{"ts":"2026-11-02T15:50:36Z","id":"moai-zidx.cif","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Unfolded from moai-iqkx — tmux 안 kitty 에서 그림 — passthrough"}
+{"ts":"2026-11-02T15:50:36Z","id":"moai-iqkx","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"Unfolded into moai-zidx as moai-zidx.cif"}
+{"ts":"2026-11-02T15:50:36Z","id":"moai-4xmq","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"ctl·웹 제안 흐름 정리"}
+{"ts":"2026-11-02T15:50:36Z","id":"moai-4xmq.zv3","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"웹 제안 통신 상태를 한곳으로 모으기"}
+{"ts":"2026-11-02T15:50:36Z","id":"moai-4xmq","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Unfolded from moai-0nt8 — 웹 제안 통신 상태를 한곳으로 모으기"}
+{"ts":"2026-11-02T15:50:36Z","id":"moai-0nt8","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"Unfolded into moai-4xmq, 1 issue"}
+{"ts":"2026-11-02T15:50:37Z","id":"moai-4xmq.kzb","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"웹 제안 수락 때 서버 허락을 먼저 받기"}
+{"ts":"2026-11-02T15:50:37Z","id":"moai-4xmq.kzb","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Unfolded from moai-4177 — 웹 제안 수락 때 서버 허락을 먼저 받기"}
+{"ts":"2026-11-02T15:50:37Z","id":"moai-4177","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"Unfolded into moai-4xmq as moai-4xmq.kzb"}
+{"ts":"2026-11-02T15:50:38Z","id":"moai-4xmq.ago","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"제안 거절 문구를 탐색기와 웹 모두 번역하기"}
+{"ts":"2026-11-02T15:50:38Z","id":"moai-4xmq.ago","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Unfolded from moai-70zx — 제안 거절 문구를 탐색기와 웹 모두 번역하기"}
+{"ts":"2026-11-02T15:50:38Z","id":"moai-70zx","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"Unfolded into moai-4xmq as moai-4xmq.ago"}
+{"ts":"2026-11-02T15:50:38Z","id":"moai-4xmq.zka","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"키 도움말이 열린 동안 ctl 읽기 명령 받기 정하기"}
+{"ts":"2026-11-02T15:50:38Z","id":"moai-4xmq.zka","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Unfolded from moai-22xn — 키 도움말이 열린 동안 ctl 이 무엇을 받을지 정하기"}
+{"ts":"2026-11-02T15:50:38Z","id":"moai-22xn","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"Unfolded into moai-4xmq as moai-4xmq.zka"}
+{"ts":"2026-11-02T15:50:39Z","id":"moai-4xmq.bya","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"탐색기의 ctl read 를 한 번에 처리하기"}
+{"ts":"2026-11-02T15:50:39Z","id":"moai-4xmq.bya","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Unfolded from moai-cjug — 탐색기의 ctl read 를 한 번에 처리하기"}
+{"ts":"2026-11-02T15:50:39Z","id":"moai-cjug","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"Unfolded into moai-4xmq as moai-4xmq.bya"}
+{"ts":"2026-11-02T15:50:40Z","id":"moai-4xmq.17p","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"ctl state 의 눌린 키 표기 맞추기"}
+{"ts":"2026-11-02T15:50:40Z","id":"moai-4xmq.17p","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Unfolded from moai-w8v3 — ctl state 의 눌린 키 표기를 탐색기와 웹에서 맞추기"}
+{"ts":"2026-11-02T15:50:40Z","id":"moai-w8v3","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"Unfolded into moai-4xmq as moai-4xmq.17p"}
+{"ts":"2026-11-02T15:50:40Z","id":"moai-4xmq.aak","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"ctl 의 사람 이름 표기 점검"}
+{"ts":"2026-11-02T15:50:40Z","id":"moai-4xmq.aak","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Unfolded from moai-chq0 — ctl 의 사람 이름 표기 방식 점검"}
+{"ts":"2026-11-02T15:50:40Z","id":"moai-chq0","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"Unfolded into moai-4xmq as moai-4xmq.aak"}
+{"ts":"2026-11-02T15:50:41Z","id":"moai-4xmq.n20","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"웹 탭 여럿일 때 브라우저 연결 고갈 막기"}
+{"ts":"2026-11-02T15:50:41Z","id":"moai-4xmq.n20","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Unfolded from moai-s4qv — 웹 탭을 여럿 열 때 브라우저 연결 고갈 막기"}
+{"ts":"2026-11-02T15:50:41Z","id":"moai-s4qv","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"Unfolded into moai-4xmq as moai-4xmq.n20"}
+{"ts":"2026-11-02T15:50:41Z","id":"moai-yigx","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"간트 되돌리기·웹 간트 다듬기"}
+{"ts":"2026-11-02T15:50:41Z","id":"moai-yigx.ya4","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"간트 절대 되돌리기에 조건부 쓰기"}
+{"ts":"2026-11-02T15:50:41Z","id":"moai-yigx","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Unfolded from moai-svrp — 간트 절대 되돌리기에 조건부 쓰기"}
+{"ts":"2026-11-02T15:50:41Z","id":"moai-svrp","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"Unfolded into moai-yigx, 1 issue"}
+{"ts":"2026-11-02T15:50:42Z","id":"moai-yigx.cd9","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"간트 되돌리기 명령에 프로젝트 경로"}
+{"ts":"2026-11-02T15:50:42Z","id":"moai-yigx.cd9","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Unfolded from moai-rpap — 간트 되돌리기 명령에 프로젝트 경로"}
+{"ts":"2026-11-02T15:50:42Z","id":"moai-rpap","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"Unfolded into moai-yigx as moai-yigx.cd9"}
+{"ts":"2026-11-02T15:50:43Z","id":"moai-yigx.q7k","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"웹 간트 창을 넓힐 때 보던 날짜 지키기"}
+{"ts":"2026-11-02T15:50:43Z","id":"moai-yigx.q7k","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Unfolded from moai-2au1 — 웹 간트 창을 넓힐 때 보던 날짜 지키기"}
+{"ts":"2026-11-02T15:50:43Z","id":"moai-2au1","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"Unfolded into moai-yigx as moai-yigx.q7k"}
+{"ts":"2026-11-02T15:50:44Z","id":"moai-yigx.3y2","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"웹 간트 창을 넓힐 때 다시 그리기 줄이기"}
+{"ts":"2026-11-02T15:50:44Z","id":"moai-yigx.3y2","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Unfolded from moai-wk5t — 웹 간트 창을 넓힐 때 다시 그리기 줄이기"}
+{"ts":"2026-11-02T15:50:44Z","id":"moai-wk5t","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"Unfolded into moai-yigx as moai-yigx.3y2"}
+{"ts":"2026-11-02T15:50:44Z","id":"moai-yigx.3zg","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"간트 창과 읽기 경로의 잔 비용 정리"}
+{"ts":"2026-11-02T15:50:44Z","id":"moai-yigx.3zg","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Unfolded from moai-f0pl — 간트 창과 읽기 경로의 잔 비용 정리"}
+{"ts":"2026-11-02T15:50:44Z","id":"moai-f0pl","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"Unfolded into moai-yigx as moai-yigx.3zg"}
+{"ts":"2026-11-02T15:50:45Z","id":"moai-yigx.9qm","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"웹 간트에서 숨긴 보관 줄 계산 줄이기"}
+{"ts":"2026-11-02T15:50:45Z","id":"moai-yigx.9qm","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Unfolded from moai-ffc9 — 웹 간트에서 숨긴 보관 줄 계산 줄이기"}
+{"ts":"2026-11-02T15:50:45Z","id":"moai-ffc9","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"Unfolded into moai-yigx as moai-yigx.9qm"}
+{"ts":"2026-11-02T15:50:45Z","id":"moai-4slm","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"보관 읽기·쓰기 경로 비용 줄이기"}
+{"ts":"2026-11-02T15:50:45Z","id":"moai-4slm.dtq","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"due apply 의 보관 파일 반복 읽기 줄이기"}
+{"ts":"2026-11-02T15:50:45Z","id":"moai-4slm","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Unfolded from moai-0ar2 — due apply 의 보관 파일 반복 읽기 줄이기"}
+{"ts":"2026-11-02T15:50:45Z","id":"moai-0ar2","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"Unfolded into moai-4slm, 1 issue"}
+{"ts":"2026-11-02T15:50:46Z","id":"moai-4slm.rek","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"넘침 알림 계산에서 보관 파일 읽기 줄이기"}
+{"ts":"2026-11-02T15:50:46Z","id":"moai-4slm.rek","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Unfolded from moai-13zo — 넘침 알림 계산에서 보관 파일 읽기 줄이기"}
+{"ts":"2026-11-02T15:50:46Z","id":"moai-13zo","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"Unfolded into moai-4slm as moai-4slm.rek"}
+{"ts":"2026-11-02T15:50:47Z","id":"moai-4slm.xy0","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"간트 쓰기에서 스냅샷을 두 번 읽지 않기"}
+{"ts":"2026-11-02T15:50:47Z","id":"moai-4slm.xy0","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Unfolded from moai-tyg2 — 간트 쓰기에서 스냅샷을 두 번 읽지 않기"}
+{"ts":"2026-11-02T15:50:47Z","id":"moai-tyg2","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"Unfolded into moai-4slm as moai-4slm.xy0"}
+{"ts":"2026-11-02T15:50:47Z","id":"moai-4slm.ygo","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"훅의 집기 제안을 moai ready 와 맞추기"}
+{"ts":"2026-11-02T15:50:47Z","id":"moai-4slm.ygo","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Unfolded from moai-ljwv — 훅의 집기 제안을 moai ready 와 맞추기"}
+{"ts":"2026-11-02T15:50:47Z","id":"moai-ljwv","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"Unfolded into moai-4slm as moai-4slm.ygo"}
+{"ts":"2026-11-02T15:50:48Z","id":"moai-lunf","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"탐색기 쉬는 중 비용·이벤트 반응"}
+{"ts":"2026-11-02T15:50:48Z","id":"moai-lunf.i7k","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"읽음 표시 재시도 때 헛 다시 그리기 줄이기"}
+{"ts":"2026-11-02T15:50:48Z","id":"moai-lunf","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Unfolded from moai-rdpe — 읽음 표시 재시도 때 헛 다시 그리기 줄이기"}
+{"ts":"2026-11-02T15:50:48Z","id":"moai-rdpe","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"Unfolded into moai-lunf, 1 issue"}
+{"ts":"2026-11-02T15:50:49Z","id":"moai-lunf.v36","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"터미널 크기 변경에 쉬던 탐색기가 바로 깨기"}
+{"ts":"2026-11-02T15:50:49Z","id":"moai-lunf.v36","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Unfolded from moai-nq0l — 터미널 크기를 바꾸면 쉬던 탐색기가 바로 깨기"}
+{"ts":"2026-11-02T15:50:49Z","id":"moai-nq0l","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"Unfolded into moai-lunf as moai-lunf.v36"}
+{"ts":"2026-11-02T15:50:49Z","id":"moai-lunf.bi7","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"개요 다시 읽기의 기본 접기 시험 더하기"}
+{"ts":"2026-11-02T15:50:49Z","id":"moai-lunf.bi7","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Unfolded from moai-ugfm — 개요 화면 다시 읽기의 기본 접기 시험 더하기"}
+{"ts":"2026-11-02T15:50:49Z","id":"moai-ugfm","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"Unfolded into moai-lunf as moai-lunf.bi7"}
+{"ts":"2026-11-02T15:50:50Z","id":"moai-i26i","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"감독 스킬 브리프 다듬기"}
+{"ts":"2026-11-02T15:50:50Z","id":"moai-i26i.1j6","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"backlog 펼치기 브리프도 결정·계약 중심으로"}
+{"ts":"2026-11-02T15:50:50Z","id":"moai-i26i","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Unfolded from moai-amis — 감독의 backlog 펼치기 브리프도 결정·계약 중심으로"}
+{"ts":"2026-11-02T15:50:50Z","id":"moai-amis","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"Unfolded into moai-i26i, 1 issue"}
+{"ts":"2026-11-02T15:50:51Z","id":"moai-i26i.p00","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"리뷰 서브에이전트 브리프를 에픽별 경로로"}
+{"ts":"2026-11-02T15:50:51Z","id":"moai-i26i.p00","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Unfolded from moai-ilgv — 감독의 리뷰 서브에이전트 브리프를 에픽별 경로로"}
+{"ts":"2026-11-02T15:50:51Z","id":"moai-ilgv","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"Unfolded into moai-i26i as moai-i26i.p00"}
+{"ts":"2026-11-02T15:50:51Z","id":"moai-fcj3","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"작은 정리 모음"}
+{"ts":"2026-11-02T15:50:51Z","id":"moai-fcj3.czd","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"Cargo.toml lint 허용 목록 설명 새로 쓰기"}
+{"ts":"2026-11-02T15:50:51Z","id":"moai-fcj3","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Unfolded from moai-olp3 — Cargo.toml 의 lint 허용 목록 설명 새로 쓰기"}
+{"ts":"2026-11-02T15:50:51Z","id":"moai-olp3","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"Unfolded into moai-fcj3, 1 issue"}
+{"ts":"2026-11-02T15:50:52Z","id":"moai-fcj3.72o","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"CLI 시험마다 따로 쓰는 HOME 주기"}
+{"ts":"2026-11-02T15:50:52Z","id":"moai-fcj3.72o","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Unfolded from moai-z0dx — CLI 시험마다 따로 쓰는 HOME 주기"}
+{"ts":"2026-11-02T15:50:52Z","id":"moai-z0dx","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"Unfolded into moai-fcj3 as moai-fcj3.72o"}
+{"ts":"2026-11-02T15:50:53Z","id":"moai-fcj3.p3x","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"셸로 감싼 머지 드라이버의 신호 종료 알아보기"}
+{"ts":"2026-11-02T15:50:53Z","id":"moai-fcj3.p3x","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Unfolded from moai-sajo — 셸로 감싼 머지 드라이버가 신호로 죽은 것을 알아보기"}
+{"ts":"2026-11-02T15:50:53Z","id":"moai-sajo","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"Unfolded into moai-fcj3 as moai-fcj3.p3x"}
+{"ts":"2026-11-02T15:50:54Z","id":"moai-fcj3.qho","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"제목의 전각 물결표 날짜 처리"}
+{"ts":"2026-11-02T15:50:54Z","id":"moai-fcj3.qho","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Unfolded from moai-3czy — 제목의 전각 물결표 날짜 처리"}
+{"ts":"2026-11-02T15:50:54Z","id":"moai-3czy","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"Unfolded into moai-fcj3 as moai-fcj3.qho"}
+{"ts":"2026-11-02T15:50:54Z","id":"moai-fcj3.syv","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"위키의 포크 이슈 참조를 없는 줄과 구분"}
+{"ts":"2026-11-02T15:50:54Z","id":"moai-fcj3.syv","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Unfolded from moai-mcc1 — 위키의 포크 이슈 참조를 없는 줄과 구분한다"}
+{"ts":"2026-11-02T15:50:54Z","id":"moai-mcc1","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"Unfolded into moai-fcj3 as moai-fcj3.syv"}
+{"ts":"2026-11-02T15:51:10Z","id":"moai-zidx.cif","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"펼치기 전 확인: 2026-11-02 백로그 정리에서 사람이 \"에픽 1에 넣음\" 을 골랐다. tmux 안 kitty 에 한해 그림 에픽(moai-7eeq)의 \"tmux 안은 글\" 결정을 뒤집는다."}
