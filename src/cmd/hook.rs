@@ -27,6 +27,7 @@
 use super::{Ctx, R};
 use crate::cli::Dialect;
 use crate::hook::{Decision, Event, Input};
+use crate::pulse::{picks_dir_at, prune_records, safe_sid_of};
 use crate::report;
 use crate::store::Repo;
 use crate::{model, view};
@@ -198,6 +199,11 @@ fn decide(
         Ok(None) => return None,
         Err(_) => Repo::find_here(&cwd, crate::i18n::Lang::default).ok()??,
     };
+    if repo.config.session_lost_minutes != 0
+        && let Some(sid) = safe_sid(input)
+    {
+        crate::pulse::beat(&repo.root, &sid, dialect, event);
+    }
     let load = repo.read().ok()?;
     // **못 읽은 줄을 그대로 넘긴다.** 빈 슬라이스를 넘기면 보드에서
     // `unreadable_line` 경고만 조용히 빠지는데, 그것은 실린 보드 말고는
@@ -979,33 +985,6 @@ fn picks_dir(repo: &Repo) -> Option<PathBuf> {
     picks_dir_at(&repo.root)
 }
 
-/// [`picks_dir`] 를 트래커의 뿌리로 — [`add_picked`] 의 손이 `Repo` 를 안 붙들고 물을 때 잰다.
-fn picks_dir_at(root: &Path) -> Option<PathBuf> {
-    let config = crate::user_config::path().filter(|p| p.is_absolute())?;
-    Some(config.parent()?.join("picks").join(format!("{:016x}", picks_key(root))))
-}
-
-/// [`picks_dir`] 의 이름 — 트래커의 자리를 센 값이다.
-///
-/// **`MOAI_HERE` 로 루트에 안 옮긴 딸린 워크트리는 제 뿌리로 센다**(moai-59k3.yo6). 그 워크트리와
-/// 루트는 `tracker_place` 가 같은 값(공용 디렉터리, 꼭대기에서 뿌리까지)을 내는데 보는 스냅샷은
-/// 다르다 — 한 자리에 적던 판은 루트의 남의 집기 하나가 워크트리의 `held()` 를 비지 않게 만들어
-/// 규칙 2 를 껐다. 옮길 루트가 있는데([`crate::worktree::tracker_root`]) 이 뿌리가 거기 없다는 것이
-/// 곧 갈라 놓은 트래커다. 맨몸 저장소의 워크트리는 옮길 루트가 없어 전처럼 한 자리를 함께 쓴다.
-fn picks_key(root: &Path) -> u64 {
-    let shared = match crate::worktree::tracker_root(root) {
-        Some(_) => None,
-        None => crate::worktree::tracker_place(root),
-    };
-    match shared {
-        Some((common, rel)) => crate::text::fnv1a64_from(
-            crate::text::fnv1a64_from(crate::text::fnv1a64(common.as_os_str().as_encoded_bytes()), &[0]),
-            rel.as_os_str().as_encoded_bytes(),
-        ),
-        None => crate::text::fnv1a64(crate::path::real(root).as_os_str().as_encoded_bytes()),
-    }
-}
-
 /// 이 세션이 `ids` 를 지금 집었다고 적는다. 못 적으면 조용히 넘어간다 — 빠진 기록은 기록 없는 줄의 판정이다: 다른
 /// 세션의 기록이 없는 판에서는 전과 같고, 있는 판에서는 그 줄이 누구의 것인지 모른다(`hook::Picks::crowded`).
 fn record_picks(input: &Input, repo: &Repo, ids: &[(String, bool)]) {
@@ -1081,46 +1060,7 @@ fn record_picks_as(sid: &str, repo: &Repo, ids: &[(String, bool)]) {
         let _ = f.write_all(lines.as_bytes());
     }
     PICKS_READ.lock().unwrap_or_else(std::sync::PoisonError::into_inner).retain(|(at, _)| *at != dir);
-    prune_picks(home, &dir, sid);
-}
-
-/// **오래 안 적힌 세션의 기록은 치운다**(리뷰 moai-3k2d.1df). 읽는 쪽([`read_picks`])은 판정마다 이 디렉터리를
-/// 통째로 읽는데, 세션마다 파일이 하나씩 쌓이고 아무도 안 지우면 그 값이 기계가 떠 있는 동안 는다. 두 주 넘게
-/// 한 줄도 안 적은 세션의 기록을 지운다 — 지운 줄은 기록이 없던 때처럼 판정한다. 적을 때만 치운다 — 드물다.
-///
-/// **다른 트래커의 자리도 치운다**(리뷰 moai-59k3.4c3). temp 에 둘 때는 기계가 치웠지만 설정 곁은 아무도
-/// 안 치운다 — 지운 워크트리·옮긴 저장소의 자리는 다시 안 적혀, 제 자리만 치우던 판에서는 영영 남았다.
-/// 옆 자리는 오래된 기록만 지우고, 빈 디렉터리는 걷는다(`remove_dir` 는 빈 것만 지운다).
-fn prune_picks(home: &Path, dir: &Path, sid: &str) {
-    const KEEP: std::time::Duration = std::time::Duration::from_secs(14 * 24 * 60 * 60);
-    let stale = |entry: &std::fs::DirEntry| {
-        entry
-            .metadata()
-            .ok()
-            .and_then(|m| m.modified().ok())
-            .and_then(|t| t.elapsed().ok())
-            .is_some_and(|age| age > KEEP)
-    };
-    let sweep = |at: &Path, keep: Option<&str>| {
-        let Ok(entries) = std::fs::read_dir(at) else { return };
-        for entry in entries.filter_map(Result::ok) {
-            if keep.is_some_and(|k| entry.file_name() == k) {
-                continue;
-            }
-            if stale(&entry) {
-                let _ = std::fs::remove_file(entry.path());
-            }
-        }
-    };
-    sweep(dir, Some(sid));
-    let Ok(others) = std::fs::read_dir(home) else { return };
-    for entry in others.filter_map(Result::ok) {
-        if entry.path() == dir || !entry.file_type().is_ok_and(|t| t.is_dir()) {
-            continue;
-        }
-        sweep(&entry.path(), None);
-        let _ = std::fs::remove_dir(entry.path());
-    }
+    prune_records(home, &dir, sid);
 }
 
 /// 적어 둔 집기를 읽어 이 세션의 눈으로 가른다 — 가르는 자는 `hook::Picks::fold` 다. 여기는 읽기만 한다.
@@ -1184,13 +1124,6 @@ thread_local! {
 /// 세션 id 를 경로 조각으로 — 사람이 준 글자를 그대로 쓰지 않는다.
 fn safe_sid(input: &Input) -> Option<String> {
     safe_sid_of(input.session_id.as_deref()?)
-}
-
-/// [`safe_sid`] 의 속 — 훅 입력이 아닌 자리(`moai mv` 의 환경, [`record_own_picks`])도 **같은 조각**을 지어야
-/// 훅이 그 기록을 제 세션의 것으로 읽는다.
-fn safe_sid_of(sid: &str) -> Option<String> {
-    let safe: String = sid.chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' { c } else { '_' }).collect();
-    (!safe.is_empty()).then_some(safe)
 }
 
 /// 껍데기 토막 하나를 판정할 트래커.

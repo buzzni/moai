@@ -5116,6 +5116,80 @@ pub struct Overrun {
     pub above_due: String,
 }
 
+/// Agent names in the local heartbeat protocol, independent of CLI argument spelling.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Agent {
+    Claude,
+    Codex,
+    Antigravity,
+}
+impl Agent {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Claude => "claude",
+            Self::Codex => "codex",
+            Self::Antigravity => "antigravity",
+        }
+    }
+}
+
+/// Local observations supplied by pulse I/O; no disk access belongs in this module.
+#[derive(Debug, Clone, Default)]
+pub struct Pulse {
+    pub threshold_secs: i64,
+    pub beats: BTreeMap<String, Beat>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Beat {
+    pub session: String,
+    pub agent: Agent,
+    pub last_event: String,
+    pub last_seen_secs: i64,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SessionState {
+    pub beat: Beat,
+    pub silent_secs: i64,
+    pub lost: bool,
+}
+
+pub fn session_of(issue: &Issue, cfg: &Config, pulse: &Pulse, now: i64) -> Option<SessionState> {
+    if cfg.session_lost_minutes == 0
+        || pulse.threshold_secs == 0
+        || !is_work(issue)
+        || !cfg.is_started(issue.status.as_str())
+        || issue.deferred_at.is_some()
+    {
+        return None;
+    }
+    let beat = pulse.beats.get(&issue.id)?;
+    let silent_secs = now.saturating_sub(beat.last_seen_secs).max(0);
+    Some(SessionState { beat: beat.clone(), silent_secs, lost: silent_secs > pulse.threshold_secs })
+}
+
+pub fn lost_sessions<'a>(issues: &'a [Issue], cfg: &Config, pulse: &Pulse, now: i64) -> Vec<&'a Issue> {
+    if cfg.session_lost_minutes == 0 {
+        return Vec::new();
+    }
+    let mut rows: Vec<_> =
+        wip(issues, cfg).into_iter().filter(|i| session_of(i, cfg, pulse, now).is_some_and(|s| s.lost)).collect();
+    rows.sort_by(|a, b| crate::query::display_order(a, b));
+    rows
+}
+
+pub fn lost_warning(issues: &[Issue], cfg: &Config, pulse: &Pulse, now: i64) -> Option<Warning> {
+    let rows = lost_sessions(issues, cfg, pulse, now);
+    if rows.is_empty() {
+        return None;
+    }
+    let mut warning =
+        Warning::new("lost_session", ids_of(&rows)).hint("moai show <id>  ·  moai mv <id> <column> --from <column>");
+    warning.minutes = Some(cfg.session_lost_minutes);
+    Some(warning)
+}
+
 /// 드러난 것 하나. `kind` 가 **타입 붙은 열거값**이라 받는 쪽이 산문을
 /// 파싱하지 않고 분기한다.
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -5126,6 +5200,8 @@ pub struct Warning {
     pub ids: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub days: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub minutes: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub limit: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -5187,6 +5263,7 @@ impl Warning {
             count: ids.len(),
             ids,
             days: None,
+            minutes: None,
             limit: None,
             ratio: None,
             hint: None,
@@ -6858,6 +6935,41 @@ mod tests {
 
     fn make(id: &str, kind: Kind, status: &str) -> Issue {
         Issue::new(id.into(), format!("{id} 제목"), kind, Status::new(status), "2026-09-01T00:00:00Z")
+    }
+
+    #[test]
+    fn local_sessions_respect_threshold_unknown_groups_deferral_and_warning_units() {
+        let cfg = cfg();
+        let mut a = make("argos-0001", Kind::Issue, "in_progress");
+        let mut b = make("argos-0002", Kind::Issue, "review");
+        a.priority = Some(2);
+        b.priority = Some(0);
+        let beat =
+            Beat { session: "sid".into(), agent: Agent::Claude, last_event: "Stop".into(), last_seen_secs: 10000 };
+        let mut pulse =
+            Pulse { threshold_secs: 1800, beats: BTreeMap::from([(a.id.clone(), beat.clone()), (b.id.clone(), beat)]) };
+        assert!(session_of(&a, &cfg, &pulse, 11800).is_some_and(|s| !s.lost));
+        assert!(session_of(&a, &cfg, &pulse, 11801).is_some_and(|s| s.lost && s.silent_secs == 1801));
+        let rows = vec![a.clone(), b];
+        let warning = lost_warning(&rows, &cfg, &pulse, 13600).unwrap();
+        assert_eq!(warning.ids, ["argos-0002", "argos-0001"]);
+        assert_eq!(warning.minutes, Some(30));
+        assert_eq!(warning.days, None);
+        assert!(!warning.notice && !warning.fatal);
+        assert!(warning.hint.unwrap().contains("moai show"));
+        a.kind = Kind::Epic;
+        assert!(session_of(&a, &cfg, &pulse, 13600).is_none());
+        a.kind = Kind::Issue;
+        a.deferred_at = Some("2026-11-01T00:00:00Z".into());
+        assert!(session_of(&a, &cfg, &pulse, 13600).is_none());
+        a.deferred_at = None;
+        a.status = Status::new("todo");
+        assert!(session_of(&a, &cfg, &pulse, 13600).is_none());
+        pulse.beats.clear();
+        assert!(session_of(&rows[0], &cfg, &pulse, 13600).is_none());
+        assert!(lost_warning(&rows, &cfg, &pulse, 13600).is_none());
+        pulse.threshold_secs = 0;
+        assert!(session_of(&rows[0], &cfg, &pulse, 13600).is_none());
     }
 
     #[test]

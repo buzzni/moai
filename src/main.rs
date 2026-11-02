@@ -25,6 +25,7 @@ mod model;
 mod nav;
 mod path;
 mod projects;
+mod pulse;
 mod query;
 mod read_marks;
 mod report;

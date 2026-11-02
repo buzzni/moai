@@ -6037,6 +6037,14 @@ pub struct Picks {
     pub crowded: bool,
 }
 
+/// The session holding a row, read from the existing pick-record format.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Holder {
+    pub session: String,
+    pub at_nanos: u128,
+    pub sure: bool,
+}
+
 impl Picks {
     /// 기록이 줄의 **지금 칸보다 이만큼 앞서면** 그 뒤 훅 밖에서 옮긴 줄의 것으로 본다([`Picks::fold`]).
     /// 칸의 때(`status_since`)는 명령이 돈 때라 기록보다 조금 늦고, 락을 기다리면 더 늦는다 — 그 틈을 준다.
@@ -6068,6 +6076,43 @@ impl Picks {
             Some(secs) => format!("{at}\t{id}\t{secs}{maybe}\n"),
             None => format!("{at}\t{id}\t{maybe}\n"),
         }
+    }
+
+    fn parse_line(line: &str) -> Option<(u128, &str, Option<i64>, bool)> {
+        let mut parts = line.split('\t');
+        let at = parts.next()?.parse().ok()?;
+        let id = parts.next()?;
+        let stamp = parts.next().and_then(|s| s.parse().ok());
+        Some((at, id, stamp, parts.next() != Some("?")))
+    }
+
+    fn current(stamp: Option<i64>, since: Option<i64>) -> bool {
+        !matches!((stamp, since), (Some(stamp), Some(since)) if stamp.saturating_add(Self::SLACK_SECS) < since)
+    }
+
+    /// Last certain pick wins; without a certain pick, use the last tentative one.
+    pub fn holders<S: AsRef<str>, T: AsRef<str>>(
+        files: impl IntoIterator<Item = (S, T)>,
+        since: &dyn Fn(&str) -> Option<i64>,
+    ) -> std::collections::BTreeMap<String, Holder> {
+        let mut out: std::collections::BTreeMap<String, Holder> = Default::default();
+        for (sid, text) in files {
+            for line in text.as_ref().split_inclusive('\n') {
+                let Some(line) = line.strip_suffix('\n') else { continue };
+                let Some((at_nanos, id, stamp, sure)) = Self::parse_line(line) else { continue };
+                if id == Self::UNNAMED || !Self::current(stamp, since(id)) {
+                    continue;
+                }
+                let holder = Holder { session: sid.as_ref().into(), at_nanos, sure };
+                let replace = out
+                    .get(id)
+                    .is_none_or(|old| (sure, at_nanos, sid.as_ref()) > (old.sure, old.at_nanos, old.session.as_str()));
+                if replace {
+                    out.insert(id.into(), holder);
+                }
+            }
+        }
+        out
     }
 
     /// 세션마다 적어 둔 집기(`(세션, 그 세션의 글)`)를 `me` 의 눈으로 가른다 — 줄마다 **마지막으로** 집은
@@ -6119,20 +6164,14 @@ impl Picks {
             let mine = sid.as_ref() == me;
             for line in text.as_ref().split_inclusive('\n') {
                 let Some(line) = line.strip_suffix('\n') else { continue };
-                let mut parts = line.split('\t');
-                let (Some(at), Some(id)) = (parts.next(), parts.next()) else { continue };
-                let Ok(at) = at.parse::<u128>() else { continue };
+                let Some((at, id, stamp, sure)) = Self::parse_line(line) else { continue };
                 crowded |= !mine && now != 0 && now.abs_diff(at) <= Self::LIVE_NANOS;
                 if id == Self::UNNAMED {
                     continue;
                 }
-                let stamp = parts.next().and_then(|s| s.parse::<i64>().ok());
-                if let (Some(stamp), Some(since)) = (stamp, since(id))
-                    && stamp + Self::SLACK_SECS < since
-                {
+                if !Self::current(stamp, since(id)) {
                     continue;
                 }
-                let sure = parts.next() != Some("?");
                 let seen = last.entry(id.to_string()).or_default();
                 if !mine {
                     seen.theirs = seen.theirs.max(Some(at));
@@ -17865,5 +17904,27 @@ mod tests {
         assert!(counted("src/main.rs"));
         assert!(!counted(".moai/issues.jsonl"));
         assert!(!counted("/elsewhere/_workspace/final.md"));
+    }
+}
+
+#[cfg(test)]
+mod holder_tests {
+    use super::*;
+    #[test]
+    fn holders_share_the_fold_parser_and_choose_certain_then_latest() {
+        let certain = Picks::line(10, Some(1000), "a", true);
+        let tentative = Picks::line(20, Some(1000), "a", false);
+        let files = [("one", certain.as_str()), ("two", tentative.as_str())];
+        assert_eq!(Picks::holders(files, &|_| Some(1000))["a"].session, "one");
+        assert!(Picks::fold("one", files, &|_| Some(1000), 20).mine.contains("a"));
+        let older = Picks::line(9, Some(1000), "a", false);
+        assert_eq!(
+            Picks::holders([("one", older.as_str()), ("two", tentative.as_str())], &|_| Some(1000))["a"].session,
+            "two"
+        );
+        assert!(Picks::holders(files, &|_| Some(1061)).is_empty());
+        assert!(Picks::holders([("sid", "999\ta\t1000")], &|_| None).is_empty());
+        let unnamed = Picks::line(99, Some(1000), Picks::UNNAMED, true);
+        assert!(Picks::holders([("sid", unnamed)], &|_| None).is_empty());
     }
 }
