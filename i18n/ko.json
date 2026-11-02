@@ -1890,5 +1890,8 @@
   "page.list.sessionLost": "세션 신호 끊김",
   "page.detail.session": "세션",
   "page.detail.sessionLost": "세션 신호 끊김 — {agent} {sid} · 마지막 신호 {event} {minutes}분 전",
-  "page.detail.sessionAlive": "살아 있다 — {agent} {sid} · {minutes}분 전"
+  "page.detail.sessionAlive": "살아 있다 — {agent} {sid} · {minutes}분 전",
+  "image.placeholder": "그림",
+  "image.missing": "그림 없음",
+  "image.large": "{file}: {bytes}바이트가 {limit}바이트를 넘습니다. 압축하거나 작은 그림을 넣으세요"
 }

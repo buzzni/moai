@@ -1890,5 +1890,8 @@
   "page.list.sessionLost": "Session signal lost",
   "page.detail.session": "Session",
   "page.detail.sessionLost": "Signal lost — {agent} {sid} · last signal {event} {minutes} min ago",
-  "page.detail.sessionAlive": "Alive — {agent} {sid} · {minutes} min ago"
+  "page.detail.sessionAlive": "Alive — {agent} {sid} · {minutes} min ago",
+  "image.placeholder": "image",
+  "image.missing": "image missing",
+  "image.large": "{file}: {bytes} bytes exceeds {limit}; use image compression or a smaller picture"
 }

@@ -454,6 +454,8 @@ pub struct Config {
     /// ([`crate::wiki::dir_of`])가 잰다 — `Config::parse` 가 거절하면 경로 오타 하나가 위키와 아무 상관 없는
     /// `moai status` 까지 세운다. 따옴표와 자리(테이블 밖)는 이 파일의 다른 글 키와 같은 자로 잰다.
     pub wiki_dir: String,
+    /// Raw flat image settings; validated only by image operations so status stays available.
+    pub images: Vec<ModelEntry>,
     /// 기한이 우선순위를 올리는 규칙(moai-dr8a) — 평평한 키 `due_priority`·`due_p0_days`·`due_p1_days`·`due_p2_days`.
     pub due: DueRule,
     /// `[models]` 표 — **이 저장소가 권하는** 역할별 모델(moai-w25x.jud, 2026-10-26 사용자 결정). 적힌 그대로다.
@@ -645,6 +647,13 @@ impl Config {
             archive_days,
             session_lost_minutes,
             wiki_dir,
+            // Flat keys only, like every other repository key: an `image_*` written under some `[table]` is
+            // not this setting, and reading it as one would let a table silently change compression.
+            images: es
+                .iter()
+                .filter(|e| e.table.is_none() && e.key.starts_with("image_"))
+                .map(|e| ModelEntry { key: e.key.into(), raw: e.value.into(), line: e.line })
+                .collect(),
             due,
             models,
             writing,

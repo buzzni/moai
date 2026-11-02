@@ -1,5 +1,8 @@
 # Windows
 
+
+See [pictures in issues and the wiki](images.md) for adding and viewing images.
+
 moai ships two Windows builds, `x86_64-pc-windows-msvc` and
 `aarch64-pc-windows-msvc`, with the C runtime linked in — `moai.exe` starts on a clean machine without the Visual C++
 redistributable. This page covers installing it, upgrading it, its config,
@@ -191,4 +194,4 @@ It installs nothing on its own and never edits `PATH`. What it does step by step
 and what to check on a real machine, is in `CONTRIBUTING.md` under "Developing on
 Windows".
 
-Decided in: moai-l3mn moai-j9gv moai-uwzg moai-yc8r moai-zgc1
+Decided in: moai-l3mn moai-j9gv moai-uwzg moai-yc8r moai-zgc1 moai-7eeq

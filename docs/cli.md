@@ -22,6 +22,7 @@ Issue tracker. No approval gate. `moai status` shows the discipline.
 Usage: moai [OPTIONS] [COMMAND]
 
 Commands:
+  image         Store a picture and print a markdown reference
   ctl           Control an already open explorer or web tab
   status        Board, warnings, flow. A session starts here
   ready         What you can pick up now
@@ -119,6 +120,55 @@ much you have opened at once.
 
 `moai <command> --help` tells you all of that command. If the repository has
 an AGENTS.md, how to work in that repository is written there.
+```
+
+## `moai image`
+
+```
+Store a picture and print a markdown reference
+
+Usage: moai image [OPTIONS] <COMMAND>
+
+Commands:
+  add   Shrink and store pictures; optionally append them to an issue body
+  help  Print this message or the help of the given subcommand(s)
+
+Options:
+      --json                 Machine-readable output. Every human line goes away
+      --no-color             Turn colour off (same as `--color never`)
+      --color <how>          auto|always|never (auto by default, off when piped)
+  -C, --dir <path>           Run in this directory (same as `git -C`)
+      --user <name (email)>  Who is doing this (from `git config` when absent)
+  -h, --help                 Print help
+```
+
+## `moai image add`
+
+```
+Shrink and store pictures; optionally append them to an issue body
+
+Usage: moai image add [OPTIONS] <file>...
+
+Arguments:
+  <file>...  Picture files (PNG, JPEG, GIF or WebP; detected from bytes)
+
+Options:
+      --to <id>              Append references to this issue body
+      --wiki [<slug>]        Store in the wiki; optionally name the page
+      --alt <text>           Description (defaults to the file name)
+      --original             Keep the original bytes for this invocation
+      --json                 Machine-readable output. Every human line goes away
+      --no-color             Turn colour off (same as `--color never`)
+      --color <how>          auto|always|never (auto by default, off when piped)
+  -C, --dir <path>           Run in this directory (same as `git -C`)
+      --user <name (email)>  Who is doing this (from `git config` when absent)
+  -h, --help                 Print help
+
+  moai image add shot.png --to moai-abcd
+  moai image add shot.png --wiki lessons/example
+  moai note moai-abcd "$(moai image add shot.png)"
+
+  Files are validated before writing. GIF and WebP keep their original bytes.
 ```
 
 ## `moai ctl`

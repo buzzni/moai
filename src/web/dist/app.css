@@ -764,6 +764,8 @@ svg.links polygon { fill: var(--link); }
 }
 .m-md-task[data-checked="true"]::before { content: "\2713"; }
 
+.m-md-image { max-width: 100%; height: auto; }
+
 /*
  * The shell's own parts (view/shell.ts, view/crumbs.ts): the frame fills the panel, the path line, the
  * banners and the result line under it, the panes, and the run's activity floating over their foot. Needs tokens.css and components.css.
