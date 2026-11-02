@@ -13,6 +13,7 @@ use crate::view;
 /// 늘어놓으면 자리를 바꿔 적어도 컴파일러가 안 잡는다.
 struct Edited {
     issue: Issue,
+    undo: Option<String>,
     was_read: bool,
     epic: Option<Issue>,
     children: Vec<Issue>,
@@ -146,6 +147,8 @@ struct Out<'a> {
     #[serde(flatten)]
     row: super::Row<'a>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    undo: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     inherited_epic: Option<&'a Inherited>,
     #[serde(skip_serializing_if = "Option::is_none")]
     inherited_milestone: Option<&'a InheritedMilestone>,
@@ -179,6 +182,8 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
         .map(|a| super::assignee_arg(a, || model::actor(ctx.user.as_deref(), &repo.root)))
         .transpose()
         .map_err(|e| Fail::no_actor(&e, lang))?;
+    // Whether the date undo names `MOAI_HERE` is asked outside the lock too — it may start git.
+    let undo_here = crate::text::undo_here(&repo.root);
 
     // Read outside the tracker lock; compare this snapshot to the row actually read under it.
     let read_config = crate::user_config::path();
@@ -197,6 +202,27 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
             let Some(i) = issues.iter_mut().find(|i| i.id == args.id) else {
                 return Err(Fail::not_found(&args.id, lang));
             };
+            for (flag, expected, actual) in [
+                ("--if-start", args.if_start.as_deref(), i.starts_on.as_deref()),
+                ("--if-due", args.if_due.as_deref(), i.due_on.as_deref()),
+            ] {
+                if let Some(expected) = expected
+                    && actual != super::clearable(expected).as_deref()
+                {
+                    return Err(Fail::coded(
+                        crate::i18n::fill(
+                            crate::i18n::say(lang, "refuse.edit_stale"),
+                            &[
+                                ("id", &args.id),
+                                ("flag", flag),
+                                ("expected", expected),
+                                ("actual", actual.unwrap_or("none")),
+                            ],
+                        ),
+                        crate::fail::code::STALE,
+                    ));
+                }
+            }
             let before = i.clone();
             let was_read = seen.as_ref().is_some_and(|m| !crate::query::changed_since_seen(&before, m));
 
@@ -337,6 +363,7 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
                     vec![],
                     Edited {
                         issue: before,
+                        undo: None,
                         was_read,
                         epic: None,
                         children: Vec::new(),
@@ -383,6 +410,12 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
             Ok((
                 vec![],
                 Edited {
+                    undo: crate::text::edit_command(
+                        &repo.root,
+                        undo_here,
+                        &out.id,
+                        &model::date_undo(&before, &out, shift),
+                    ),
                     issue: out,
                     was_read,
                     epic,
@@ -426,6 +459,7 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
 
     let Edited {
         issue: edited,
+        undo,
         was_read: _,
         epic,
         children,
@@ -470,6 +504,7 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
         // 키가 둘 서거나, 끊긴 줄이 안 끊긴 것처럼 읽힌다. `Row::of` 가 `cmd::OURS` 로 걷는다.
         return super::json_line(&Out {
             row: super::Row::from(&edited, &read),
+            undo: undo.as_deref(),
             inherited_epic: kept.as_ref(),
             inherited_milestone: kept_milestone.as_ref(),
         });
@@ -616,6 +651,7 @@ mod tests {
         };
         let out = Out {
             row: super::super::Row::from(&i, &read),
+            undo: Some("moai -C /project edit argos-0001 --start none --if-start 2026-11-02"),
             inherited_epic: Some(&epic),
             inherited_milestone: Some(&milestone),
         };

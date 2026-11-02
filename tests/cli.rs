@@ -33709,6 +33709,9 @@ fn web_moves_a_plan_only_from_its_own_page() {
     let bare = field(&ok_with(s.path(), &cfg, &["add", "날 없음", "-e", &epic, "--json"]), "id");
     let (_, _, body) = post(web.port, &format!("/api/plan/{bare}?day=2026-10-30"), Some(&mine));
     assert_eq!(json_of(&body)["exit"], 0, "{body}");
+    let undo = json_of(&body)["out"]["undo"].as_str().unwrap().to_string();
+    assert!(undo.contains("--start none --if-start 2026-10-30 --due none --if-due 2026-10-30"), "{undo}");
+    assert!(undo.starts_with("moai -C "), "{undo}");
     let (_, _, body) = post(web.port, &format!("/api/plan/{bare}?day=2026-11-01"), Some(&mine));
     assert_ne!(json_of(&body)["exit"], 0, "날이 선 줄에 다시 세웠다 — {body}");
     let row = json_of(&ok_with(s.path(), &cfg, &["show", &bare, "--json"]));
@@ -34350,4 +34353,171 @@ fn image_add_marks_the_written_version_for_only_its_user() {
     );
     ok_env(s.path(), "2026-09-14T00:00:00Z", &writer_env, &["image", "add", pic.to_str().unwrap(), "--to", &id]);
     assert_eq!(json_of(&ok_with(s.path(), &writer, &["show", &id, "--json"]))["unread"], true);
+}
+
+/// Guards reject the entire edit (including non-date fields), before writing or marking read.
+#[test]
+fn conditional_dates_refuse_stale_edits_atomically() {
+    let s = init("conditional-dates");
+    let id = add(s.path(), &["guarded", "--start", "2026-09-20", "--due", "2026-09-22"]);
+    let before = std::fs::read(s.path().join(".moai/issues.jsonl")).unwrap();
+    for (start, due) in [("2026-09-19", "2026-09-22"), ("2026-09-20", "none")] {
+        let out = moai(
+            s.path(),
+            &[
+                "edit",
+                &id,
+                "--title",
+                "wrong",
+                "--start",
+                "none",
+                "--due",
+                "none",
+                "--if-start",
+                start,
+                "--if-due",
+                due,
+                "--json",
+            ],
+        );
+        assert!(!out.status.success());
+        let err: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+        assert_eq!(err["code"], "stale");
+        assert_eq!(std::fs::read(s.path().join(".moai/issues.jsonl")).unwrap(), before);
+    }
+    ok(
+        s.path(),
+        &["edit", &id, "--start", "none", "--due", "none", "--if-start", "2026-09-20", "--if-due", "2026-09-22"],
+    );
+    ok(s.path(), &["edit", &id, "--start", "2026-09-21", "--if-start", "none", "--if-due", "none"]);
+    for bad in ["+1", "2026-02-30", "2026-09-21T00:00:00Z"] {
+        assert!(!moai(s.path(), &["edit", &id, "--start", "none", "--if-start", bad]).status.success());
+    }
+    assert!(!moai(s.path(), &["edit", &id, "--if-start", "none"]).status.success());
+}
+
+/// Execute the actual copied command from a different cwd with the same ID. Paths contain
+/// whitespace, apostrophes, shell substitution and an exclamation mark; none may be evaluated.
+#[cfg(unix)]
+#[test]
+fn date_undo_targets_its_project_and_refuses_later_writes() {
+    let s = init("undo-target");
+    let target = s.path().join("a b'c $(touch WRONG)! `touch BAD`");
+    std::fs::create_dir(&target).unwrap();
+    ok(&target, &["init", "test"]);
+    let id = add(&target, &["target", "--due", "2026-09-25"]);
+    let other = add(s.path(), &["other", "--start", "2026-09-20", "--due", "2026-09-25"]);
+    // Give the other tracker the same ID, independent of its random generator.
+    let file = s.path().join(".moai/issues.jsonl");
+    let raw = std::fs::read_to_string(&file).unwrap().replace(&other, &id);
+    std::fs::write(&file, raw).unwrap();
+    let other_before = std::fs::read(&file).unwrap();
+    let out = ok(&target, &["edit", &id, "--start", "2026-09-21", "--json"]);
+    let value: serde_json::Value = serde_json::from_str(&out).unwrap();
+    let undo = value["undo"].as_str().unwrap();
+    assert!(undo.contains("--start none --if-start 2026-09-21"));
+    let execute = || {
+        let mut cmd = isolated("bash");
+        // Use the tested binary for the first command word, retaining every quoted argument.
+        cmd.current_dir(s.path())
+            .arg("-c")
+            .arg(format!("\"$1\" {}", undo.strip_prefix("moai ").unwrap()))
+            .arg("undo")
+            .arg(BIN);
+        cmd.output().unwrap()
+    };
+    assert!(execute().status.success());
+    assert_eq!(std::fs::read(&file).unwrap(), other_before);
+    assert!(!target.join("WRONG").exists() && !s.path().join("WRONG").exists());
+    assert!(!s.path().join("BAD").exists());
+    // The stored value changed since the command was issued: replay must refuse.
+    ok(&target, &["edit", &id, "--start", "2026-09-22"]);
+    let before = std::fs::read(target.join(".moai/issues.jsonl")).unwrap();
+    assert!(!execute().status.success());
+    assert_eq!(std::fs::read(target.join(".moai/issues.jsonl")).unwrap(), before);
+}
+
+/// A write `MOAI_HERE` kept on a linked worktree's own tracker hands back an undo that says so (review
+/// moai-yigx.2hv 1). Without it, `-C <worktree>` moves to the main checkout's tracker, which holds the same id.
+/// The copied line is run from the main checkout with no `MOAI_HERE` of its own.
+#[cfg(unix)]
+#[test]
+fn date_undo_of_a_worktree_tracker_names_moai_here() {
+    let s = Scratch::new("undohere");
+    let main = s.path().join("main");
+    std::fs::create_dir_all(&main).unwrap();
+    git(&main, &["init", "-q"]);
+    ok(&main, &["init", "argos"]);
+    let id = field(&ok(&main, &["add", "both trackers", "--start", "2026-09-20", "--json"]), "id");
+    git(&main, &["add", "-A"]);
+    git(&main, &["commit", "-q", "-m", "split"]);
+    git(&main, &["worktree", "add", "-q", ".worktrees/feat", "-b", "feat"]);
+    let inside = main.join(".worktrees/feat");
+    let main_file = main.join(".moai/issues.jsonl");
+    let main_before = std::fs::read(&main_file).unwrap();
+
+    let out = ok_here(&inside, &["edit", &id, "--start", "2026-09-21", "--json"]);
+    let undo = json_of(&out)["undo"].as_str().unwrap().to_string();
+    assert!(undo.starts_with("MOAI_HERE=1 moai -C "), "{undo}");
+    assert!(undo.ends_with("--start 2026-09-20 --if-start 2026-09-21"), "{undo}");
+    let mut cmd = isolated("bash");
+    cmd.current_dir(&main)
+        .arg("-c")
+        .arg(format!("MOAI_HERE=1 \"$1\" {}", undo.strip_prefix("MOAI_HERE=1 moai ").unwrap()))
+        .arg("undo")
+        .arg(BIN);
+    let ran = cmd.output().unwrap();
+    assert!(ran.status.success(), "{}", text(&ran));
+    assert!(issues(&inside).contains("\"starts_on\":\"2026-09-20\""), "the worktree's row was not put back");
+    assert_eq!(std::fs::read(&main_file).unwrap(), main_before, "the undo reached the main checkout");
+
+    // A write that went to the main checkout names it, with no `MOAI_HERE` to carry.
+    let out = ok(&inside, &["edit", &id, "--start", "2026-09-22", "--json"]);
+    let undo = json_of(&out)["undo"].as_str().unwrap().to_string();
+    assert!(undo.starts_with("moai -C "), "{undo}");
+}
+
+/// Observe the child opening our held lock, then change the row as the lock's owner.
+/// A guard evaluated before taking the lock would accept the obsolete value.
+#[cfg(target_os = "linux")]
+#[test]
+fn conditional_dates_recheck_after_waiting_for_the_write_lock() {
+    use fs2::FileExt;
+    use std::os::unix::fs::MetadataExt;
+    let s = init("conditional-lock");
+    let id = add(s.path(), &["locked", "--start", "2026-09-20"]);
+    let lock = std::fs::OpenOptions::new().read(true).write(true).open(s.path().join(".moai/lock")).unwrap();
+    lock.lock_exclusive().unwrap();
+    let mut child = staged(&["edit", &id, "--start", "none", "--if-start", "2026-09-20", "--json"])
+        .current_dir(s.path())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let held = lock.metadata().unwrap();
+    let until = std::time::Instant::now() + std::time::Duration::from_secs(3);
+    loop {
+        // The descriptor exists before either a polling or blocking flock can
+        // acquire our held lock. Match its file identity, not a kernel wait name.
+        let opened = std::fs::read_dir(format!("/proc/{}/fd", child.id()))
+            .into_iter()
+            .flatten()
+            .flatten()
+            .filter_map(|entry| std::fs::metadata(entry.path()).ok())
+            .any(|file| file.dev() == held.dev() && file.ino() == held.ino());
+        if opened {
+            break;
+        }
+        assert!(child.try_wait().unwrap().is_none(), "child exited before opening the lock");
+        assert!(std::time::Instant::now() < until, "child never opened the held lock");
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    let file = s.path().join(".moai/issues.jsonl");
+    let changed = issues(s.path()).replace("2026-09-20", "2026-09-21");
+    std::fs::write(&file, &changed).unwrap();
+    FileExt::unlock(&lock).unwrap();
+    let out = child.wait_with_output().unwrap();
+    assert!(!out.status.success());
+    assert_eq!(serde_json::from_slice::<serde_json::Value>(&out.stderr).unwrap()["code"], "stale");
+    assert_eq!(issues(s.path()), changed);
 }

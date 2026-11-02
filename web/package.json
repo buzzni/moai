@@ -5,7 +5,8 @@
   "scripts": {
     "build": "node build.mjs",
     "typecheck": "tsc -p tsconfig.json",
-    "test": "node --import ./tests/i18n-loader.mjs --test tests/*.test.mjs"
+    "test": "node --import ./tests/i18n-loader.mjs --test tests/*.test.mjs",
+    "test:gantt-browser": "node --test tests/gantt.browser.mjs"
   },
   "devDependencies": {
     "@types/node": "^26.6.4",

@@ -187,6 +187,7 @@
   "refuse.msg_stdin_empty": "`-m -` read stdin and found no text — nothing was written. Pour the text in: `-m - < <file>`",
   "refuse.mv_empty_msg": "`-m` is empty — nothing was moved. To move without a message, leave `-m` out",
   "refuse.edit_nothing": "You did not say what to edit. `moai edit --help` lists what can be edited.",
+  "refuse.edit_stale": "{id} no longer matches {flag} {expected} (stored: {actual}) — nothing was written",
   "refuse.edit_planned": "{id} holds planned days by now — nothing was written; move them with `moai edit {id} --shift <N>`",
   "refuse.init_no_prefix": "Cannot make a prefix from the directory name. `moai init <prefix>`",
   "refuse.config_no_place": "The user config has no place — give one of MOAI_CONFIG, XDG_CONFIG_HOME or HOME",

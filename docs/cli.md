@@ -1373,6 +1373,10 @@ Options:
   -a, --assignee <who|none>  Give `name (email)`. `none` clears it, `me` is you
       --start <date|none>    Start, a day or `+N` days. `none` clears it
       --due <date|none>      Deadline, a day or `+N` days. `none` clears it
+      --if-start <day|none>  Only if start is this exact day (`none`: absent)
+                             Checked under lock; mismatch writes nothing
+      --if-due <day|none>    Only if deadline is this day (`none`: absent)
+                             Checked under lock; mismatch writes nothing
       --shift <±N>           Move the planned days N days, as the row
                              holds them when written
       --shift-start <±N>     Move the start alone (none: from the due)
@@ -3502,7 +3506,8 @@ Order:
   When a move is refused (a start after the deadline, a day past the deadline
   above) the refusal is on the banner; a move that went through names the
   `moai edit` line that puts it back. Relative moves undo only the dates moved;
-  restoring an absolute date may overwrite a later change to that field.
+  absolute restorations check --if-start/--if-due under the write lock and
+  refuse if that field changed. The command names its project with -C.
   Clicking a row puts the cursor on it and the wheel scrolls the rows; a
   sideways wheel, or Shift and the wheel, slides the dates, and so does
   dragging the date header. Dragging the line between the rows and the dates

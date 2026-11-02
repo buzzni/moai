@@ -257,8 +257,11 @@ same as `moai edit --start --due`: a start after the deadline, or a day past the
 deadline above, is refused and the refusal stands on the banner. A move that went
 through names the `moai edit` line that puts it back, and the rows it pushed past
 this deadline. Relative moves are undone by shifting only the dates that moved.
-Undo of a newly created date or a chosen start uses an absolute value and can
-overwrite a later change to that field. A row held only in the archive, or an
+Undo of a newly created date or a chosen start carries `--if-start` or `--if-due`
+for the value the move wrote. If that field changed afterward, undo refuses with
+`stale` and writes nothing; reread the row before choosing another edit. The
+copyable command names the project with `-C`, so it also works from another
+directory. A row held only in the archive, or an
 archive copy of a live row, cannot be moved or planned here. A live row remains
 writable even if its age makes it look archived. An epic whose bar spans its
 members does not move — move the members.
@@ -541,4 +544,4 @@ write there either.
   an email on every write and `git config` had none. The answer holds for this
   run; set `user.name` and `user.email` to stop it asking
 
-Decided in: moai-e9hi moai-724f moai-z46r moai-9nfw moai-47mz moai-irrj moai-ucx8 moai-1hka moai-h2rh moai-gelm moai-m6ni moai-p3r9 moai-o3cb moai-fyul moai-ogaw moai-tllo moai-fc97 moai-jtvp moai-bth3 moai-9tqo moai-wk7i moai-pxiy moai-i4hf moai-lj8g moai-ccow moai-d1zn moai-ekg6 moai-uwi9 moai-mkzo moai-i07x moai-zgc1 moai-4km9 moai-4v3h moai-7eeq
+Decided in: moai-e9hi moai-724f moai-z46r moai-9nfw moai-47mz moai-irrj moai-ucx8 moai-1hka moai-h2rh moai-gelm moai-m6ni moai-p3r9 moai-o3cb moai-fyul moai-ogaw moai-tllo moai-fc97 moai-jtvp moai-bth3 moai-9tqo moai-wk7i moai-pxiy moai-i4hf moai-lj8g moai-ccow moai-d1zn moai-ekg6 moai-uwi9 moai-mkzo moai-i07x moai-zgc1 moai-4km9 moai-4v3h moai-7eeq moai-yigx

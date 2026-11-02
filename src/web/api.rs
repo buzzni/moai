@@ -290,13 +290,16 @@ fn plan_argv(id: &str, query: &[(String, String)]) -> Result<Vec<String>, Bad> {
 /// 막대의 어느 쪽을 옮기나(`edge`) → `edit` 의 플래그. **잇는 자리는 여기 하나다**(moai-vj8w 리뷰) — 모양 검사와 플래그
 /// 고르기가 글자를 따로 가르면, 검사에만 낱말을 더한 날 그 낱말이 나머지 갈래(`--shift`)로 떨어져 끝 하나를 끈 것이 막대
 /// 통째를 옮긴다([`argv`] 의 글이 적어 둔 그 덫이다).
+/// The flag itself is [`crate::model::Edge::shift_flag`] — the undo line (`model::date_undo`) spells it there too.
 fn shift_flag(edge: &str) -> Option<&'static str> {
-    match edge {
-        "start" => Some("--shift-start"),
-        "body" => Some("--shift"),
-        "end" => Some("--shift-due"),
-        _ => None,
-    }
+    use crate::model::Edge;
+    let edge = match edge {
+        "start" => Edge::Start,
+        "body" => Edge::Body,
+        "end" => Edge::End,
+        _ => return None,
+    };
+    Some(edge.shift_flag())
 }
 
 /// 옮기는 날 수의 꼴 — 0 아닌 정수, 여섯 자리까지, 앞에 `-` 하나. `+N` 은 안 받는다(페이지가 안 낸다). 폭은 `edit --shift*`
