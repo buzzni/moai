@@ -5244,31 +5244,39 @@ impl App {
     /// **자리를 받는 자가 하나다**(리뷰) — [`App::recount_unread`] 가 [`App::recount_unread_in`] 의
     /// `Seat::Here` 인 것과 같은 자다. 층 판을 따로 적던 판은 두 몸이 글자째 같아, 한쪽에만 드는
     /// 고침이 층의 줄에서만 안 서는 자리를 열어 두었다.
-    fn load_read_in(&mut self, seat: Seat) {
-        let Some(site) = self.site_of_seat(seat) else { return };
+    /// Returns whether [NEW] or the displayed notice changed, independently of retry bookkeeping.
+    fn load_read_in(&mut self, seat: Seat) -> bool {
+        let Some(site) = self.site_of_seat(seat) else { return false };
         // **뿌리는 트래커가 사는 곳이다**(`Repo::root`), `App::here()` 가 아니다(리뷰). 그쪽은 이
         // 세션이 **선 체크아웃**이라 딸린 워크트리에서는 트래커의 자리와 갈린다(`Repo::here`). 읽음의
         // 키는 이슈 id 고 그 id 는 트래커에서 오므로 자리는 트래커를 따라야 한다 — 쓰는 자
         // ([`App::mark_read`]·`cmd::read`·[`App::follow_site`])는 처음부터 `root` 로 골랐는데 읽는 자만
         // `here()` 로 골라, 워크트리에서 띄운 탐색기가 제가 적은 파일을 다시 못 읽었다. `r` 을 누르면
         // [NEW] 가 내렸다가 다음 걸음에 도로 섰다.
-        let Some(root) = site.repo.as_ref().map(|r| r.root.clone()) else { return };
+        let Some(root) = site.repo.as_ref().map(|r| r.root.clone()) else { return false };
         // **몰라진 그 한 번은 다시 센다**(moai-2gep) — 들고 있는 표가 없으면 [NEW] 를 안 세는데
         // (`App::recount_unread_in`), 그 답은 이미 세 놓은 줄을 지워야 선다. 몰랐다가 또 모르는
         // 걸음은 답이 같으니 안 센다 — 그 길은 시계가 돌 때마다 오고, 세는 값이 줄 수만큼이다.
         let knew = site.read_tried.trouble.is_none();
-        let Some(got) = self.read_marks_of(&root) else { return };
+        let Some(got) = self.read_marks_of(&root) else { return false };
         // 못 들었으면 표가 그대로라 다시 셀 까닭이 없다 — 잠깐 못 읽는 동안은 이 길이 걸음마다 돈다.
         let took = got.marks.trouble.is_none();
-        let Some(site) = self.site_mut(seat) else { return };
+        let Some(site) = self.site_mut(seat) else { return false };
         // 까닭은 한 줄로 댄다 — 조용히 [NEW] 가 서면 왜 그런지 볼 데가 없다.
         let told = Self::take_read(site, got);
+        let mut changed = false;
         if let Some(told) = told {
+            changed = self.notice.as_ref() != Some(&told);
             self.notice = Some(told);
         }
         if took || knew {
+            // Compare what is drawn, not retry stamps or attempt times. Move the old set out only when recounting;
+            // a repeated failed read keeps its held marks and does no per-row work.
+            let was = std::mem::take(&mut self.site_mut(seat).expect("the seat was just loaded").unread);
             self.recount_unread_in(seat);
+            changed |= self.site_of_seat(seat).is_some_and(|site| site.unread != was);
         }
+        changed
     }
 
     /// 펼쳐 둔 프로젝트 **전부**의 읽음을 다시 든다([`App::load_read_in`], moai-7irq) — 옛 `[read]` 가
@@ -5370,8 +5378,8 @@ impl App {
         if !stale {
             return;
         }
-        self.follow_changed = true;
-        self.load_read_in(seat);
+        let changed = self.load_read_in(seat);
+        self.follow_changed |= changed;
     }
 
     /// 사용자 설정 파일이 바뀌었으면 거기 사는 둘을 다시 든다 — 적어 둔 읽음과 층의 줄(moai-en4u).
@@ -11763,6 +11771,73 @@ mod tests {
 
         a.follow();
         assert!(!a.site.unread.contains("argos-0002"), "대기 자리에 적힌 도장이 화면에 안 닿았다");
+    }
+
+    /// A socket at a sheet path fails to open with a transient I/O error without depending on chmod or root.
+    /// Count the read follower's redraw flag consumed by follow(), excluding unrelated asynchronous followers.
+    /// Attempts must still advance even when there is no reason to draw.
+    #[test]
+    #[cfg(unix)]
+    fn failed_read_retries_stay_quiet_and_recovery_redraws() {
+        use std::os::unix::net::UnixListener;
+        for pending in [false, true] {
+            // macOS TMPDIR can already exceed a Unix socket's path budget; use a short private fixture in /tmp.
+            let s = Scratch::in_place(std::path::Path::new("/tmp"), if pending { "lrp" } else { "lrs" });
+            let config = s.path().join("user.toml");
+            let root = s.path().join("proj");
+            std::fs::create_dir_all(&root).unwrap();
+            let mut a = app();
+            for row in &mut a.site.issues {
+                row.assignee = Some("Raven".into());
+            }
+            a.site.repo = Some(crate::store::Repo::at(root.clone(), cfg()));
+            a.user_config = Some(config.clone());
+            a.site.me = Some("Raven".into());
+            let place = crate::read_marks::place_of(&config, &root);
+            std::fs::create_dir_all(place.at.parent().unwrap()).unwrap();
+            let header = format!("path = {:?}\n\n[read]\n", root.display().to_string());
+            let mark = format!(
+                "\"argos-0009\" = {:?}\n",
+                a.site.issues.iter().find(|i| i.id == "argos-0009").unwrap().updated_at
+            );
+            std::fs::write(&place.at, &header).unwrap();
+            a.load_read();
+            assert!(a.site.unread.contains("argos-0009"));
+            let at = if pending { place.pending.unwrap() } else { place.at };
+            if at.exists() {
+                std::fs::remove_file(&at).unwrap();
+            }
+            let socket = UnixListener::bind(&at).unwrap();
+            let follow = |a: &mut App| {
+                a.follow_changed = false;
+                a.follow_read();
+                a.follow_changed
+            };
+            // The first failure may clear [NEW] or display a pending-sheet notice; settle that visible transition.
+            assert!(follow(&mut a));
+            let trouble = if pending { &a.site.read_pending } else { &a.site.read_tried };
+            assert_eq!(trouble.trouble, Some(crate::user_config::Trouble::Reading));
+            let mut tried = trouble.at;
+            let redraws = (0..8)
+                .filter(|_| {
+                    let redraw = follow(&mut a);
+                    let trouble = if pending { &a.site.read_pending } else { &a.site.read_tried };
+                    assert!(trouble.at > tried, "a quiet retry must still read the sheet");
+                    tried = trouble.at;
+                    redraw
+                })
+                .count();
+            assert_eq!(redraws, 0, "unchanged failed attempts redrew the idle explorer");
+            drop(socket);
+            std::fs::remove_file(&at).unwrap();
+            std::fs::write(&at, format!("{header}{mark}")).unwrap();
+            assert!(follow(&mut a), "recovery changed visible read marks without requesting a redraw");
+            assert!(!a.site.unread.contains("argos-0009"));
+            assert!(a.site.unread.contains("argos-0002"));
+            assert_eq!(a.site.read_tried.trouble, None);
+            assert_eq!(a.site.read_pending.trouble, None);
+            assert!(!follow(&mut a), "successful recovery left a redraw tail");
+        }
     }
 
     /// **읽음 파일도 다시 읽을 때를 갈래로 잰다**(moai-po6v) — 설정과 **한 자다**([`App::follow_config`],
