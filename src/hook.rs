@@ -5595,6 +5595,8 @@ fn in_unit<'a>(unit: &BTreeSet<&str>, ties: &report::Ties<'a>, i: &'a Issue) -> 
 /// 이름으로 띄운 워크트리에서도 쥐었다(moai-m62u) — 그 세션의 초점이 비어 규칙 2 에 막혔다.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Away {
+    /// IDs held by unreadable live rows; stale archive copies cannot supply their placement.
+    pub opaque: BTreeSet<String>,
     /// 규칙 5 가 산 스냅샷에 없는 id 를 찾는 아카이브(moai-bth3) — **읽는 손은 `cmd/hook.rs` 가 건넨다**([`Archive`]).
     /// Rule 5 calls it only when the picked ID is not live. Rule 2 also calls it for suggestions, only after an empty-focus refusal is certain.
     pub archive: Option<Archive>,
@@ -6910,7 +6912,7 @@ fn edit_held(
     let context: &[Issue] = match archived.is_empty() {
         true => issues,
         false => {
-            joined = report::with_archive(issues, &archived, &BTreeSet::new());
+            joined = report::with_archive(issues, &archived, &away.opaque.iter().map(String::as_str).collect());
             &joined
         }
     };

@@ -648,7 +648,7 @@ pub(super) fn commit_plan(app: &mut App) {
     // Asked before the write lock, as `moai edit` does — it may start git.
     let undo_here = root.as_deref().is_some_and(crate::text::undo_here);
     let mut written: Option<crate::model::Issue> = None;
-    let wrote = app.write(commit_plan, |issues, cfg, _, _| {
+    let wrote = app.write(commit_plan, |issues, cfg, _, _, unread| {
         // **시각은 락을 쥔 뒤에 뜬다**(`cmd::mv` 의 moai-u5bk.3wq 와 같은 자, 리뷰) — 밖에서 뜨면 그새 옆이 담은 줄보다 이른 도장이
         // 서서 줄의 도장이 거꾸로 간다.
         let at = crate::model::now();
@@ -673,16 +673,8 @@ pub(super) fn commit_plan(app: &mut App) {
         {
             let ids: Vec<&str> = candidates.iter().map(String::as_str).collect();
             // Re-read under the write lock: the screen's archive context can be stale.
-            let archived = crate::cmd::archived_with_groups(root, issues, &ids)?;
-            // App::write exposes reserved IDs including archived IDs, not unread live
-            // IDs alone. Read the live diagnostics under the same lock rather than
-            // suppressing every archived member or borrowing stale screen diagnostics.
-            let unread = if archived.is_empty() {
-                Vec::new()
-            } else {
-                crate::store::Repo::at(root.clone(), cfg.clone()).read()?.errors
-            };
-            let context = crate::cmd::in_context(issues, &archived, &unread);
+            let archived = crate::cmd::archived_places(root, issues, &ids)?.issues;
+            let context = crate::cmd::in_context(issues, &archived, unread);
             overflow = crate::report::overflow_in_context(&context, candidates, cfg);
         }
         let shift = match plan {
@@ -851,7 +843,9 @@ mod tests {
                 snapshot.push_str("{\"id\":\"argos-dddd\",\"kind\":\"unreadable\"}\n");
             }
             std::fs::write(dir.join(".moai/issues.jsonl"), snapshot).unwrap();
+            let reads = crate::store::snapshot_reads();
             a.write_plan(PlanMove { id: "argos-mmmm".into(), plan: Plan::Shift(crate::model::Edge::End, -5) });
+            assert_eq!(crate::store::snapshot_reads() - reads, 2, "one locked read and one screen reload");
             assert!(!a.write_failed, "{:?}", a.trouble);
             assert_eq!(dates_on_disk(&dir, "argos-mmmm").1.as_deref(), Some("2026-10-26"));
             let notice = a.notice.as_deref().unwrap();

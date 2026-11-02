@@ -1303,31 +1303,46 @@ pub fn archived_for(
 /// [`archived_for`] 에 더해 **묶음의 칸을 읽어야 하는 쪽**이 부른다 — 받은 id 가운데 산 묶음이 있으면 늘 읽는다. 묶음의
 /// 칸은 멤버에서 읽는데(`read_of`), 되살린 묶음의 멤버는 아카이브에 남아 있다 — 산 줄로만 읽으면 보드가 done 으로 세는
 /// 그 묶음을 `--json` 의 `derived_status` 가 첫 칸으로 낸다. `mv` 가 묶음이면 늘 읽는 것([`crate::archive::needs_context`])과
-/// 같은 까닭이고, 참조만 재는 `add -e` 는 이 길을 안 지난다(그 묶음의 멤버를 안 읽는다). 고친 줄의 칸을 내는 쓰기와,
-/// 닫힌 묶음의 기한을 안 따르는 `moai due apply`(`report::due_context_ids` 가 고른 묶음)가 이 길이다.
+/// 같은 까닭이고, 참조만 재는 `add -e` 는 이 길을 안 지난다(그 묶음의 멤버를 안 읽는다). 막는 줄까지 따라 재는 `link`·`defer`
+/// 가 이 길이다 — 자리와 닫힘만 재는 쓰기(`edit` 의 넘침·간트·`moai due apply`)는 [`archived_places`] 다.
 pub fn archived_with_groups(
     root: &std::path::Path,
     issues: &[crate::model::Issue],
     rows: &[&str],
 ) -> R<Vec<crate::model::Issue>> {
-    Ok(archived_group_context(root, issues, rows, crate::archive::reaches_out)?.issues)
+    match wants_group(issues, rows) || crate::archive::reaches_out(issues, rows) {
+        true => Ok(crate::archive::read(root)?.issues),
+        false => Ok(Vec::new()),
+    }
 }
 
-/// The same conditional group/reference read, retaining diagnostics for callers whose write
-/// decision requires complete context. Other context callers keep their existing lenient behavior.
-/// `reaches` is the reference gate: [`crate::archive::reaches_out`] for writes that judge blockers,
-/// [`crate::archive::places_out`] for `moai due apply`, whose answer never follows a blocker.
-pub fn archived_group_context(
+/// Whether one of `rows` is a live group — its column is read from members the archive may hold.
+/// Check kind before searching the requested IDs; ordinary rows need only the reference gate.
+fn wants_group(issues: &[crate::model::Issue], rows: &[&str]) -> bool {
+    issues.iter().any(|i| crate::report::is_group(i) && rows.contains(&i.id.as_str()))
+}
+
+/// Placement/closure context only. Overflow candidates never need their blockers read.
+/// The full diagnostic set remains available to irreversible writers such as due apply.
+pub fn archived_places(root: &std::path::Path, issues: &[crate::model::Issue], rows: &[&str]) -> R<crate::store::Load> {
+    archived_places_and(root, issues, rows, &[])
+}
+
+/// [`archived_places`] whose context also carries `riders` — ids that never open the archive on their
+/// own, but whose placement component must come along once it is open. `moai edit` passes the edited
+/// row's blockers: a live group blocking it reads its column from members that may sit in the archive,
+/// and the full read this replaced always carried them.
+pub fn archived_places_and(
     root: &std::path::Path,
     issues: &[crate::model::Issue],
     rows: &[&str],
-    reaches: fn(&[crate::model::Issue], &[&str]) -> bool,
+    riders: &[&str],
 ) -> R<crate::store::Load> {
-    // Check kind before searching the requested IDs; ordinary rows need only the reference gate.
-    let groups = issues.iter().any(|i| crate::report::is_group(i) && rows.contains(&i.id.as_str()));
-    match groups || reaches(issues, rows) {
-        true => crate::archive::read(root),
-        false => Ok(crate::store::Load::default()),
+    if wants_group(issues, rows) || crate::archive::places_out(issues, rows) {
+        let wanted: Vec<&str> = rows.iter().chain(riders).copied().collect();
+        crate::archive::groups(root, issues, &wanted)
+    } else {
+        Ok(crate::store::Load::default())
     }
 }
 
@@ -1558,6 +1573,55 @@ pub fn shelved(pairs: &[(String, Vec<String>)]) -> Vec<Shelved<'_>> {
 mod tests {
     use super::*;
     use crate::model::{Issue, Kind, Status};
+
+    /// Overflow candidates need placement and closure only — a blocker alone never opens the archive.
+    #[test]
+    fn overflow_context_does_not_open_archives_for_blockers_alone() {
+        let dir = crate::scratch::Scratch::new("overflow-blocker-gate");
+        std::fs::create_dir_all(dir.join(".moai/archive")).unwrap();
+        std::fs::write(dir.join(".moai/archive/2026.jsonl"), "not a row\n").unwrap();
+        let mut row = Issue::new(
+            "argos-aaaa".into(),
+            "candidate".into(),
+            Kind::Issue,
+            Status::new("todo"),
+            "2026-10-01T00:00:00Z",
+        );
+        row.blocked_by = vec!["argos-bbbb".into()];
+        let load = archived_places(&dir, std::slice::from_ref(&row), &["argos-aaaa"]).unwrap();
+        assert!(load.errors.is_empty() && load.issues.is_empty(), "blocker alone opened the archive");
+        // A placement reference still opens and validates the required archive.
+        row.epic = Some("argos-eeee".into());
+        let load = archived_places(&dir, &[row], &["argos-aaaa"]).unwrap();
+        assert_eq!(load.errors.len(), 1);
+    }
+
+    /// Riders never open the archive, but once it is open their component comes along — `moai edit`
+    /// judges its blockers from it, and a revived blocking epic reads its column from archived members.
+    #[test]
+    fn place_context_carries_riders_only_once_the_archive_is_open() {
+        let dir = crate::scratch::Scratch::new("place-riders");
+        std::fs::create_dir_all(dir.join(".moai/archive")).unwrap();
+        let at = "2026-10-01T00:00:00Z";
+        let member = Issue::new("argos-bbbb.aaa".into(), "member".into(), Kind::Issue, Status::new("done"), at);
+        let mut file = serde_json::to_string(&member).unwrap();
+        file.push('\n');
+        std::fs::write(dir.join(".moai/archive/2026.jsonl"), file).unwrap();
+        let blocker = Issue::new("argos-bbbb".into(), "revived".into(), Kind::Epic, Status::new("done"), at);
+        let mut edited = Issue::new("argos-aaaa".into(), "edited".into(), Kind::Issue, Status::new("todo"), at);
+        edited.blocked_by = vec!["argos-bbbb".into()];
+        let live = [edited.clone(), blocker.clone()];
+        // Nothing among the rows opens the archive: the rider alone does not either.
+        let load = archived_places_and(&dir, &live, &["argos-aaaa"], &["argos-bbbb"]).unwrap();
+        assert!(load.issues.is_empty());
+        // A row that does open it brings the rider's archived member along.
+        let group = Issue::new("argos-gggg".into(), "group".into(), Kind::Epic, Status::new("todo"), at);
+        let live = [edited, blocker, group];
+        let load = archived_places_and(&dir, &live, &["argos-aaaa", "argos-gggg"], &["argos-bbbb"]).unwrap();
+        assert_eq!(load.issues.iter().map(|i| i.id.as_str()).collect::<Vec<_>>(), ["argos-bbbb.aaa"]);
+        let load = archived_places(&dir, &live, &["argos-aaaa", "argos-gggg"]).unwrap();
+        assert!(load.issues.is_empty(), "the rider's component came without the rider");
+    }
 
     /// **Windows 의 `PATH` 찾기를 리눅스에서 잰다**(moai-j9gv.cl6) — 있는 파일은 손으로 준 목록이다.
     #[test]

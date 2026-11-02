@@ -3451,6 +3451,8 @@ impl App {
     /// **동기다.** 로컬 파일 하나라 짧고, 그동안 화면은 멈춘다. 비동기 런타임을
     /// 들이면 CLI 전체가 async 로 물든다. 락을 못 잡으면 `with_write` 가 5초 뒤
     /// 아무것도 안 쓰고 물러나고, 그 말이 그대로 화면에 선다.
+    /// 콜백의 마지막 인자는 락 안에서 읽은 살아 있는 파일의 진단이다. 예약된 id 와 구분해
+    /// 보관 문맥을 겹칠 때 쓰며, 진단을 얻으려고 스냅샷을 다시 읽지 않는다.
     #[must_use = "None 이면 쓰지 못했다 — 적던 것을 닫으면 사람이 적은 것을 잃는다"]
     pub fn write(
         &mut self,
@@ -3460,6 +3462,7 @@ impl App {
             &Config,
             &std::collections::BTreeSet<String>,
             &crate::model::Actor,
+            &[crate::store::LoadError],
         ) -> crate::fail::R<(Vec<crate::model::JournalEntry>, Touched)>,
     ) -> Option<String> {
         // 앞 쓰기의 알림은 이 쓰기가 무엇이 되든 낡았다 — 실패한 뒤에 옛 `✓` 가 남으면
@@ -3508,7 +3511,13 @@ impl App {
         // 저널 실패는 프로세스 전체에 쌓인다 — 이 쓰기 뒤에 이 저장소에 새로 선 것만 이 쓰기의 것이다.
         let missed_before = crate::store::journal_misses().len();
         let root = repo.root.clone();
-        let written = by.and_then(|by| repo.with_write(|| lang, |issues, cfg, reserved| f(issues, cfg, reserved, &by)));
+        let written = by.and_then(|by| {
+            repo.with_write_after(
+                || lang,
+                |issues, unread, cfg, reserved| f(issues, cfg, reserved, &by, unread),
+                |_| Ok(()),
+            )
+        });
         match written {
             Ok(touched) => {
                 // 담긴 것은 참이라 성공으로 닫는다 — 실패로 내면 폼이 열린 채 남아 다시 누르면
@@ -8054,7 +8063,7 @@ fn save_backlog(app: &mut App) {
     }
     let at = crate::model::now();
     let kept = say(app.site.lang, "tui.jot.kept");
-    let wrote = app.write(save_backlog, move |issues, cfg, reserved, by| {
+    let wrote = app.write(save_backlog, move |issues, cfg, reserved, by, _| {
         let id = crate::store::new_id(issues, cfg, reserved, None, &title);
         let mut backlog = Issue::new(id, title, Kind::Backlog, Status::new(cfg.first_status()), &at);
         (backlog.assignee, backlog.assignee_email) = by.as_assignee();
@@ -9532,7 +9541,7 @@ mod tests {
         a.layout = view::Layout::Board;
         let wrote = a.write(
             |_| {},
-            |issues, _, _, by| {
+            |issues, _, _, by, _| {
                 let at = "2026-09-13T00:00:00Z";
                 issues.push(member("argos-0003", "argos-0001"));
                 Ok((
@@ -14162,7 +14171,7 @@ mod tests {
     fn add_backlog(a: &mut App, id: &'static str) -> Option<String> {
         a.write(
             |_| {},
-            move |issues, _, _, by| {
+            move |issues, _, _, by, _| {
                 issues.push(Issue::new(
                     id.into(),
                     "떠오른 것".into(),
@@ -14242,7 +14251,7 @@ mod tests {
 
         let wrote = a.write(
             |_| {},
-            |issues, _, _, by| {
+            |issues, _, _, by, _| {
                 let at = "2026-09-13T00:00:00Z";
                 issues.push(member("argos-0003", "argos-0001"));
                 Ok((
@@ -15049,7 +15058,7 @@ mod tests {
     #[test]
     fn a_touched_id_missing_after_the_reread_moves_nothing() {
         let (_scratch, mut a) = writable("land-missing");
-        let wrote = a.write(|_| {}, |_, _, _, _| Ok((vec![], Touched { id: "argos-9999".into(), done: "담김" })));
+        let wrote = a.write(|_| {}, |_, _, _, _, _| Ok((vec![], Touched { id: "argos-9999".into(), done: "담김" })));
         assert_eq!(wrote.as_deref(), Some("argos-9999"));
         assert_eq!((a.cursor, on(&a).as_deref()), (0, Some("argos-0001")));
         assert_eq!(a.notice.as_deref(), Some("✓ 담김 · argos-9999 — 다시 읽은 목록에 없다"));
@@ -15087,7 +15096,7 @@ mod tests {
 
         let out = a.write(
             |_| {},
-            |issues, _, _, _| {
+            |issues, _, _, _, _| {
                 issues.push(Issue::new(
                     "argos-0002".into(),
                     "t".into(),
@@ -15110,7 +15119,7 @@ mod tests {
         // 여러 줄 거절문(고칠 명령까지 내는 것)은 배너 한 줄로 이어진다.
         let out = a.write(
             |_| {},
-            |_, _, _, _| -> crate::fail::R<(Vec<crate::model::JournalEntry>, Touched)> {
+            |_, _, _, _, _| -> crate::fail::R<(Vec<crate::model::JournalEntry>, Touched)> {
                 Err("첫 줄\n      고칠 명령".into())
             },
         );
@@ -15128,7 +15137,7 @@ mod tests {
         let file = scratch.join(".moai/issues.jsonl");
         let out = a.write(
             |_| {},
-            |_, _, _, _| -> crate::fail::R<(Vec<crate::model::JournalEntry>, Touched)> { Err("락".into()) },
+            |_, _, _, _, _| -> crate::fail::R<(Vec<crate::model::JournalEntry>, Touched)> { Err("락".into()) },
         );
         assert!(out.is_none());
 
@@ -15155,7 +15164,7 @@ mod tests {
 
         let out = a.write(
             |_| {},
-            |_, _, _, _| -> crate::fail::R<(Vec<crate::model::JournalEntry>, Touched)> {
+            |_, _, _, _, _| -> crate::fail::R<(Vec<crate::model::JournalEntry>, Touched)> {
                 panic!("누군지 모르는데 닫는 함수를 불렀다")
             },
         );

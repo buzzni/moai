@@ -7590,6 +7590,115 @@ fn rule_two_pickup_suggestions_match_ready_with_archived_placement() {
     assert_eq!(prime["ready"][0]["id"], own, "{prime}");
 }
 
+/// A future live epic must suppress its archived copy in rule 2 just as in ready/prime.
+#[test]
+fn rule_two_pickup_suggestions_ignore_an_opaque_live_epics_archived_copy() {
+    let s = init("hook-opaque-archive-placement");
+    let p = s.path();
+    let row = |id: &str, kind: &str| {
+        serde_json::json!({
+            "id": id, "title": id, "kind": kind, "status": "todo",
+            "assignee": "Tester", "assignee_email": "tester@example.com",
+            "created_at": "2026-09-01T00:00:00Z", "updated_at": "2026-09-01T00:00:00Z",
+            "status_since": "2026-09-01T00:00:00Z"
+        })
+    };
+    let mut epic = row("moai-eeee", "epic");
+    epic["due_on"] = "2026-09-01".into();
+    let mut own = row("moai-oooo", "issue");
+    own["due_on"] = "2026-09-10".into();
+    let child = row("moai-eeee.ccc", "issue");
+    let opaque = row("moai-eeee", "future-epic");
+    std::fs::write(p.join(".moai/issues.jsonl"), format!("{opaque}\n{child}\n{own}\n")).unwrap();
+    std::fs::create_dir_all(p.join(".moai/archive")).unwrap();
+    std::fs::write(p.join(".moai/archive/2026.jsonl"), format!("{epic}\n")).unwrap();
+    let ready: serde_json::Value = serde_json::from_slice(&moai(p, &["ready", "--json"]).stdout).unwrap();
+    let prime: serde_json::Value = serde_json::from_slice(&moai(p, &["prime", "--json"]).stdout).unwrap();
+    assert_eq!(ready["ready"][0]["id"], "moai-oooo", "{ready}");
+    assert_eq!(prime["ready"][0]["id"], "moai-oooo", "{prime}");
+    for (tool, input) in [
+        ("Edit", r#"{"file_path":"src/lib.rs","old_string":"x","new_string":"y"}"#),
+        ("Bash", r#"{"command":"echo x > src/lib.rs"}"#),
+    ] {
+        let why = refusal(&call(&s, tool, input, "opaque-archive-pick-order"));
+        assert!(why.contains("moai mv moai-oooo"), "{why}");
+        if let Some(child) = why.find("moai mv moai-eeee.ccc") {
+            assert!(why.find("moai mv moai-oooo").unwrap() < child, "{why}");
+        }
+    }
+}
+
+/// Editing a live epic opens its placement context; the epic's blocker rides along. A revived
+/// blocking epic whose members stayed archived reads done there, so the edit detail must not
+/// call it an empty, holding group (the full read this context replaced never did).
+#[test]
+fn edit_judges_a_revived_blocking_epic_from_its_archived_members() {
+    let s = init("edit-revived-blocker");
+    let p = s.path();
+    let row = |id: &str, kind: &str, status: &str| {
+        serde_json::json!({
+            "id": id, "title": id, "kind": kind, "status": status,
+            "created_at": "2026-09-01T00:00:00Z", "updated_at": "2026-09-01T00:00:00Z",
+            "status_since": "2026-09-01T00:00:00Z"
+        })
+    };
+    let blocker = row("argos-bbbb", "epic", "done");
+    let mut edited = row("argos-xxxx", "epic", "todo");
+    edited["blocked_by"] = serde_json::json!(["argos-bbbb"]);
+    let member = row("argos-xxxx.aaa", "issue", "todo");
+    std::fs::write(p.join(".moai/issues.jsonl"), format!("{blocker}\n{edited}\n{member}\n")).unwrap();
+    std::fs::create_dir_all(p.join(".moai/archive")).unwrap();
+    let archived = row("argos-bbbb.aaa", "issue", "done");
+    std::fs::write(p.join(".moai/archive/2026.jsonl"), format!("{archived}\n")).unwrap();
+    let shown = ok(p, &["edit", "argos-xxxx", "--title", "renamed"]);
+    let line = shown.lines().find(|l| l.contains("argos-bbbb")).unwrap_or_default();
+    assert!(line.contains('✓') && !line.contains("no members"), "{shown}");
+}
+
+/// Observe the real edit command, not just its context helper: only the overflow candidate
+/// names an archived blocker, so pulling its ancestor's deadline in must never open the archive.
+#[cfg(target_os = "linux")]
+#[test]
+fn edit_overflow_does_not_open_archive_for_a_candidates_blocker() {
+    use std::io::Read;
+    use std::os::fd::FromRawFd;
+    use std::os::unix::ffi::OsStrExt;
+    let s = init("edit-overflow-blocker-open");
+    let p = s.path();
+    let row = |id: &str| {
+        serde_json::json!({
+            "id": id, "title": id, "status": "todo",
+            "created_at": "2026-09-01T00:00:00Z", "updated_at": "2026-09-01T00:00:00Z",
+            "status_since": "2026-09-01T00:00:00Z"
+        })
+    };
+    let mut parent = row("argos-pppp");
+    parent["due_on"] = "2099-11-30".into();
+    let mut child = row("argos-pppp.ccc");
+    child["due_on"] = "2099-11-28".into();
+    child["blocked_by"] = serde_json::json!(["argos-bbbb"]);
+    let mut blocker = row("argos-bbbb");
+    blocker["status"] = "done".into();
+    std::fs::write(p.join(".moai/issues.jsonl"), format!("{parent}\n{child}\n")).unwrap();
+    std::fs::create_dir_all(p.join(".moai/archive")).unwrap();
+    let archive = p.join(".moai/archive/2026.jsonl");
+    std::fs::write(&archive, format!("{blocker}\n")).unwrap();
+    // The descriptor is owned immediately; no process environment or shared global counter changes.
+    let fd = unsafe { libc::inotify_init1(libc::IN_NONBLOCK | libc::IN_CLOEXEC) };
+    assert!(fd >= 0, "{}", std::io::Error::last_os_error());
+    let mut watch = unsafe { std::fs::File::from_raw_fd(fd) };
+    let path = std::ffi::CString::new(archive.as_os_str().as_bytes()).unwrap();
+    assert!(unsafe { libc::inotify_add_watch(fd, path.as_ptr(), libc::IN_OPEN) } >= 0);
+    let out = moai(p, &["edit", "argos-pppp", "--due", "2099-11-20"]);
+    assert!(out.status.success(), "{}", text(&out));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("argos-pppp.ccc"), "{}", text(&out));
+    let opened = watch.read(&mut [0u8; 4096]);
+    assert!(
+        matches!(opened, Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock),
+        "edit opened the archive for an overflow candidate's blocker: {opened:?}"
+    );
+}
+
 /// Incomplete required archive context must not turn a closed group's unknown state into an
 /// irreversible priority raise. Unrelated broken archives still stay outside the read gate.
 #[test]
