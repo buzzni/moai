@@ -5875,7 +5875,7 @@ fn followed<'a>(own: Option<&'a str>, above: Option<Ceiling<'a>>) -> Option<(&'a
     }
 }
 
-/// 올릴 줄 하나 — [`due_raises`] 가 내는 것을 `moai due apply` 가 적는다. 탐침([`due_candidates`])도 같은 꼴을 내지만 그쪽은
+/// 올릴 줄 하나 — [`due_raises`] 가 내는 것을 `moai due apply` 가 적는다. 탐침([`DueJudge::context_ids`])도 같은 꼴을 내지만 그쪽은
 /// 닫힌 묶음의 기한도 따르므로 적을 답이 아니다.
 #[derive(Debug, Clone)]
 pub struct Raise<'a> {
@@ -5905,7 +5905,7 @@ pub struct Raise<'a> {
 /// 재는 자를 두면 보드의 칸과 이 동사의 칸이 언젠가 갈린다(moai-w30o.m70 2번이 그렇게 갈렸다).
 ///
 /// **`context` 는 `live` 를 품는다**(`cmd::in_context` 가 그렇게 잇는다) — 빈 문맥을 주면 아무 묶음도 안 닫히고 아무
-/// 미룸도 안 걸린다. `moai due apply` 는 먼저 [`due_candidates`] 로 아카이브를 펼지 정한다([`due_context_ids`]).
+/// 미룸도 안 걸린다. `moai due apply` 는 먼저 탐침([`DueJudge::context_ids`])으로 아카이브를 펼지 정한다.
 pub fn due_raises<'a>(
     live: &'a [Issue],
     context: &'a [Issue],
@@ -5913,12 +5913,8 @@ pub fn due_raises<'a>(
     zone: &crate::tz::Zone,
     cfg: &Config,
 ) -> Vec<Raise<'a>> {
-    let rule = &cfg.due;
     // Nothing to raise means no map to build: `raise_to` only ever lowers the number, so a `p0` row never moves.
-    if !rule.auto
-        || !live.iter().any(|i| due_open(i) && i.priority() > 0)
-        || !context.iter().any(|i| i.deadline().is_some())
-    {
+    if !due_pending(live, &cfg.due) || !context.iter().any(|i| i.deadline().is_some()) {
         return Vec::new();
     }
     let soil = Soil::of(context);
@@ -5967,7 +5963,8 @@ impl<'m, 'a> DueJudge<'m, 'a> {
 }
 
 /// `moai due apply` 의 **탐침** — 아카이브를 펼지 정하려고 `live` 만으로 고른 후보다([`due_context_ids`]). 판정은 줄마다
-/// [`due_priority`] 다.
+/// [`due_priority`] 다. 바이너리는 [`DueJudge::context_ids`] 로 같은 몸([`due_candidates_over`])을 부르고, 이 꼴은 시험의
+/// 짧은 길이다 — 사다리는 [`DueLadder::over`] 로 따로 짓는다.
 ///
 /// **묶음이 닫혔는가는 모르는 것으로 친다** — 묶음을 다 열린 것으로 잰다. 아카이브로 간 멤버가 산 줄로는 빈 묶음을 닫고,
 /// 아카이브의 부모가 산 멤버를 다른 묶음으로 옮겨 닫힌 듯한 묶음을 열 수도 있어 산 줄만으로는 못 정한다.
@@ -5997,7 +5994,8 @@ pub fn due_candidates<'a>(
 }
 
 /// 탐침([`due_candidates`])과 열린 줄에서 **아카이브를 읽어야 답이 갈릴 수 있는 id** — `cmd::due` 가 이것으로 아카이브를
-/// 펼지 정한다(`cmd::archived_group_context` 에 `archive::places_out` 을 문으로). 둘이다.
+/// 펼지 정한다(`cmd::archived_places` — `archive::places_out` 을 문으로). 바이너리는 [`DueJudge::context_ids`] 로 같은
+/// 몸([`due_context_ids_over`])을 부르고, 이 꼴은 시험의 짧은 길이다. 둘이다.
 ///
 /// - 올릴 수 있는 열린 줄의 id — 탐침에 없어도 참조가 산 줄 밖으로 닿으면 새 조상·기한·미룸을 잴 문맥이 든다
 /// - 탐침이 **묶음의 기한을 따른 생각** 위의 묶음 가운데 닫힘이 그 답을 바꿀 수 있는 것 — 멤버가 아카이브에 있을 수
