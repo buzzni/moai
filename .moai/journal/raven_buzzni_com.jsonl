@@ -10814,3 +10814,15 @@
 {"ts":"2026-11-02T06:01:39Z","id":"moai-e3f6.97s","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"v0.41.0 릴리스 진행 — 병합·판 올리기·소식·PR"}
 {"ts":"2026-11-02T06:01:44Z","id":"moai-e3f6.97s","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-11-02T06:20:38Z","id":"moai-e3f6.97s","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: PR #66 병합(squash 금지) 뒤 tag on merge 승인 → 릴리스 확인, 마일스톤 워크트리·가지·target 정리, moai-e3f6.97s 닫기. 그 뒤 v0.42.0(이미지) 에픽은 develop 에서 시작."}
+{"ts":"2026-11-02T06:28:48Z","id":"moai-w94g","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"탐색기 상세·위키 창에 그림 그리기"}
+{"ts":"2026-11-02T06:31:40Z","id":"moai-e3f6.97s","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"todo","note":"PR #66 병합을 사람이 하기를 기다리는 동안 잠시 내려놓는다 — v0.42.0 마일스톤을 만들려고(훅 규칙 1). 바로 다시 집는다"}
+{"ts":"2026-11-02T06:31:41Z","id":"moai-6uqk","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"v0.42.0"}
+{"ts":"2026-11-02T06:31:46Z","id":"moai-7eeq","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"이슈와 위키에 그림을 넣는다"}
+{"ts":"2026-11-02T06:31:46Z","id":"moai-7eeq.d9s","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"그림을 줄여 담는 자리"}
+{"ts":"2026-11-02T06:31:46Z","id":"moai-7eeq.jp8","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"moai image add 명령"}
+{"ts":"2026-11-02T06:31:46Z","id":"moai-7eeq.hmu","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"본문의 그림을 글 자리표시로 보인다"}
+{"ts":"2026-11-02T06:31:46Z","id":"moai-7eeq.sdp","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"셸 화면에 그림 — show·wiki show"}
+{"ts":"2026-11-02T06:31:46Z","id":"moai-7eeq.h8v","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"웹 상세·위키에 그림"}
+{"ts":"2026-11-02T06:31:46Z","id":"moai-7eeq.lb1","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"위키와 CHANGELOG — 그림 넣기"}
+{"ts":"2026-11-02T06:31:55Z","id":"moai-7eeq","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 (high — plan: interview and detailed plan)"}
+{"ts":"2026-11-02T06:31:55Z","id":"moai-e3f6.97s","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
