@@ -884,6 +884,7 @@ fn says(w: &Warning, screen: Screen) -> String {
         // **죽었다고 단정하지 않는다.** 워크트리 없이 main 에서 하는 일일 수도 있다 — 그래서 고칠
         // 손을 하나로 정하지 않고, 이어 할 것이면 워크트리를 다시 띄우라는 길까지 댄다.
         "stranded" => one(say(lang, "warn.stranded")),
+        "lost_session" => aged(say(lang, "warn.lost_session"), w.minutes.unwrap_or(0)),
         // `days` 는 "막힌 기간" 이 아니라 "지금 칸에 머문 기간" 이다 — 막 막힌
         // 것을 "며칠째 막혀 있다" 고 잘못 말하지 않으려고 이렇게 적는다.
         "blocked_stale" => aged(say(lang, "warn.blocked_stale"), w.days.unwrap_or(0)),

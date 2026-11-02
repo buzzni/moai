@@ -1875,5 +1875,6 @@
   "page.wiki.noLinks": "This page has no links.",
   "page.wiki.outside": "Outside the wiki, not opened: {href}",
   "page.wiki.loadFailed": "The page could not be loaded: {reason}",
-  "page.wiki.nothingBack": "There is no page to go back to."
+  "page.wiki.nothingBack": "There is no page to go back to.",
+  "warn.lost_session": "Held by a session silent over {d} min {n} — resume it or take it over"
 }
