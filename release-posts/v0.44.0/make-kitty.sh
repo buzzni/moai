@@ -18,6 +18,12 @@ MOAI=$(realpath -- "${MOAI:-$root/target/release/moai}")
 export DEMO_NOW=2026-11-02T12:00:00Z
 scratch=$(mktemp -d)
 trap 'rm -rf "$scratch"' EXIT
+# seed.sh counts days with GNU date (`date -d`). macOS's date has no -d, so lend it
+# Homebrew's gdate (brew install coreutils) under that name for this run.
+if ! date -d now >/dev/null 2>&1; then
+  gdate=$(command -v gdate) || { echo 'make-kitty.sh: needs GNU date — brew install coreutils' >&2; exit 1; }
+  mkdir "$scratch/bin" && ln -s "$gdate" "$scratch/bin/date" && PATH="$scratch/bin:$PATH"
+fi
 repo="$scratch/lantern"
 bash "$root/scripts/site-demo/seed.sh" "$repo" >/dev/null
 export MOAI_CONFIG="$repo/.demo-home/config.toml" MOAI_NO_UPDATE_CHECK=1 MOAI_LANG=en
