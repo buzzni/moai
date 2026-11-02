@@ -32967,6 +32967,26 @@ fn web_ctl_propose_reaches_a_tab_and_returns_its_answer() {
     assert_eq!(answer["ran"]["data"]["screen"], "board");
 }
 
+/// A given `--user` is given (`model::actor`): `propose` refuses a malformed one the way every other ctl verb does,
+/// instead of putting an unsigned card in front of the person (review moai-4xmq.sqe 6).
+#[test]
+#[cfg(unix)]
+fn web_ctl_propose_refuses_a_malformed_user_before_any_card() {
+    let s = init("web-ctl-propose-bad-user");
+    let web = serve(s.path());
+    let mut stream = events(web.port);
+    let hello = event_named(&mut stream, "hello");
+    let tab = hello["tab"].as_str().unwrap().to_string();
+    let refused = moai(s.path(), &["ctl", "propose", "unsigned?", "-t", &tab, "--user", "Raven", "--json"]);
+    assert!(!refused.status.success(), "{refused:?}");
+    assert_eq!(json_of(&String::from_utf8_lossy(&refused.stderr))["code"], "bad_input", "{refused:?}");
+    // The next card the tab sees is the signed one: the malformed call put nothing up.
+    ok(s.path(), &["ctl", "propose", "signed?", "-t", &tab, "--json"]);
+    let card = event_named(&mut stream, "proposal");
+    assert_eq!(card["text"], "signed?", "{card}");
+    assert_eq!(card["from"], ACTOR, "{card}");
+}
+
 #[test]
 #[cfg(unix)]
 fn web_ctl_plan_applies_the_requested_day() {

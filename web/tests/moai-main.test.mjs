@@ -151,6 +151,25 @@ test('a refused or pending claim never executes the stale card, and double click
   }
 })
 
+test('a lost action result is posted again, so the claimed suggestion does not stay pending', async (t) => {
+  const results = []
+  const p = await page(t, { fakeStream: true, proposalReply: async (body) => {
+    if (body.state === 'claim') return { ok: true, status: 200, text: async () => JSON.stringify({ then: null }) }
+    results.push(body.state)
+    if (results.length === 1) throw new TypeError('network error')
+    return results.length === 2 ? { ok: false, status: 503, text: async () => '{}' } : { ok: true, status: 200, text: async () => '{}' }
+  } })
+  const source = p.streams[0]
+  source.onopen(); source.hello('123.1', 'token')
+  source.proposal({ id: '123.1/1', text: 'Fine?', then: null, remaining_ms: 900000 })
+  p.dom.window.document.querySelector('.m-proposal').querySelectorAll('button')[2].click()
+  await until(() => results.length === 3)
+  assert.deepEqual(results, ['accepted', 'accepted', 'accepted'])
+  await new Promise((resolve) => setTimeout(resolve, 20))
+  assert.equal(results.length, 3, 'a delivered result was posted again')
+  p.dom.window.close()
+})
+
 // Browser validation uses the same ctl envelope and reply path as actions, without changing the view.
 test('the page answers a zone check before a zone suggestion is shown', async (t) => {
   const p = await page(t, { fakeStream: true })

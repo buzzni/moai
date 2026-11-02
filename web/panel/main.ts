@@ -542,7 +542,13 @@ async function start(): Promise<void> {
       const claimed = JSON.parse(await permission.text()) as { then?: { verb: string; [key: string]: unknown } | null }
       proposals.remove(entry.id)
       const ran = claimed.then ? await ctl.run(claimed.then, 0, '') : null
-      await post('accepted', ran)
+      // The claimed row stays `pending` for every waiter until this result lands, and nothing else will ever send it.
+      // The server refuses a second completion (409), so retrying a transient failure never reports twice.
+      for (let attempt = 1; ; attempt += 1) {
+        const response = await post('accepted', ran).catch(() => null)
+        if ((response && response.status < 500) || attempt === 3) return
+        await new Promise((resolve) => window.setTimeout(resolve, 1_000 * attempt))
+      }
     })().catch(() => {}).finally(() => answering.delete(entry.id))
   })
   const keys = wireKeys({ document, store, shell, copy, read, openProject, index: indexOf,

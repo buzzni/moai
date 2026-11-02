@@ -293,10 +293,8 @@ fn ctl_post(stream: &TcpStream, req: &Request, site: &Site) -> Response {
             Ok(value) => value,
             Err(_) => return refuse(400, "invalid proposal answer", code::BAD_INPUT),
         };
-        let accepted = match body["state"].as_str() {
-            Some("accepted") => true,
-            Some("declined") => false,
-            Some("claim") => true,
+        let state = match body["state"].as_str() {
+            Some(state @ ("claim" | "accepted" | "declined")) => state,
             _ => return refuse(400, "proposal answer needs claim, accepted or declined", code::BAD_INPUT),
         };
         let ran = match body.get("ran") {
@@ -306,10 +304,9 @@ fn ctl_post(stream: &TcpStream, req: &Request, site: &Site) -> Response {
             },
             _ => None,
         };
-        let reply = if body["state"] == "claim" {
-            site.tabs.proposal_claim(id, token, proposal_id)
-        } else {
-            site.tabs.proposal_reply(id, token, proposal_id, accepted, ran)
+        let reply = match state {
+            "claim" => site.tabs.proposal_claim(id, token, proposal_id),
+            _ => site.tabs.proposal_reply(id, token, proposal_id, state == "accepted", ran),
         };
         return match reply {
             Ok(reply) if reply.ok => {

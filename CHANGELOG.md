@@ -27,7 +27,7 @@ does not tag — see `CONTRIBUTING.md`.
 
 ### Fixed
 
-- Web proposal acceptance reserves the action on the server before execution. Explorer ctl read batches are atomic, and extra browser tabs fall back to polling beyond three live streams to keep reads responsive. (moai-4xmq)
+- Proposal acceptance reserves the suggestion before its follow-up runs, on the web server and in the explorer, so an expiry during the action no longer drops its result; waiting on an accepted web suggestion no longer spins a CPU core, and the page retries a failed result report. `ctl propose` refuses a malformed `--user` or `MOAI_ACTOR` instead of proposing unsigned. Explorer ctl read batches are atomic, and extra browser tabs fall back to polling beyond three live streams to keep reads responsive. (moai-4xmq)
 - Hook pickup suggestions ignore stale archived copies of unreadable live rows, matching `ready` and `prime`. (moai-4slm)
 - Gantt undo targets its original tracker and refuses stale absolute restores; web undo uses the locked write result. Widening the web Gantt preserves the left visible date without repeating full row placement. (moai-yigx)
 - Image placeholder paths remain clickable across wrapped lines and when their labels scroll offscreen. Resize bursts retry queued previews and skip stale encoding jobs. (moai-zidx)

@@ -118,7 +118,11 @@ impl Book {
         let Some(row) = inner.rows.iter_mut().find(|row| row.id == id) else {
             return Reply::error("not_found", "proposal not found");
         };
-        if row.state != "pending" || row.claimed {
+        // `answer` still reads a claimed row as `pending`; "already answered" sent its withdrawer to a contradiction.
+        if row.claimed {
+            return Reply::error("refused", "proposal was accepted and its action is running");
+        }
+        if row.state != "pending" {
             return Reply::error("refused", "proposal already answered");
         }
         row.state = state.into();
@@ -129,8 +133,9 @@ impl Book {
         answer
     }
 
-    /// Reserve a pending proposal atomically against expiry, withdrawal and another accept. The page must get
-    /// this reply before executing; a lost claim reply never authorizes a retry to execute it twice.
+    /// Reserve a pending proposal atomically against expiry, withdrawal and another accept. The answering window
+    /// (the web page, or the explorer's own key) must get this reply before executing; a lost claim reply never
+    /// authorizes a retry to execute it twice.
     pub fn claim(&self, id: &str) -> Reply {
         let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         expire(&mut inner);
@@ -184,7 +189,9 @@ impl Book {
             if !connected() {
                 return Reply::error("gone", "proposal waiter disconnected");
             }
-            let left = end.min(row.made + row.ttl).saturating_duration_since(Instant::now());
+            // A claimed row never expires, so its TTL is no wakeup: past it, a zero timeout spun this loop until `end`.
+            let until = if row.claimed { end } else { end.min(row.made + row.ttl) };
+            let left = until.saturating_duration_since(Instant::now());
             (inner, _) = self
                 .changed
                 .wait_timeout(inner, left.min(Duration::from_millis(200)))
@@ -257,6 +264,24 @@ mod tests {
         book.add("window", "expired", None, 1, None);
         book.inner.lock().unwrap().rows.last_mut().unwrap().made -= Duration::from_secs(2);
         assert!(!book.claim("window/5").ok);
+    }
+
+    #[test]
+    fn a_waiter_on_a_claimed_row_past_its_ttl_sleeps_instead_of_spinning() {
+        let book = Book::new();
+        book.add("window", "hello", None, 1, None);
+        assert!(book.claim("window/1").ok);
+        book.inner.lock().unwrap().rows[0].made -= Duration::from_secs(2);
+        let mut wakeups = 0;
+        let answer = book.wait_while("window/1", 1, || {
+            wakeups += 1;
+            true
+        });
+        assert_eq!(answer.data.unwrap()["state"], "pending");
+        // 200 ms naps over one second; the zero timeout past the TTL woke it thousands of times.
+        assert!(wakeups <= 10, "the waiter spun {wakeups} times");
+        let withdrawn = book.finish("window/1", "withdrawn", None);
+        assert_eq!(withdrawn.message.as_deref(), Some("proposal was accepted and its action is running"));
     }
 
     #[test]

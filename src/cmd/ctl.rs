@@ -41,8 +41,12 @@ pub fn propose(
     let window = window_for(ctx, &windows, target)?;
     let mut request = wire::request(wire::Verb::Propose { text, then, ttl, wait }, Duration::from_secs(wait + 10));
     request.lang = format!("{:?}", ctx.lang()).to_lowercase();
-    request.actor =
-        crate::model::actor(ctx.user.as_deref(), std::path::Path::new(&window.root)).ok().map(|a| transport_actor(&a));
+    // A given `--user` is given (`model::actor`): a malformed one refuses here as in [`invoke`], not proposes unsigned.
+    request.actor = match crate::model::actor(ctx.user.as_deref(), std::path::Path::new(&window.root)) {
+        Ok(a) => Some(transport_actor(&a)),
+        Err(e @ crate::model::NoActor::Malformed { .. }) => return Err(Fail::no_actor(&e, ctx.lang())),
+        Err(_) => None,
+    };
     proposal_reply(ctx, call::send(window, &request)?)
 }
 

@@ -1839,6 +1839,11 @@ impl App {
         if let Some(back) = self.proposal_back.take() {
             self.mode = *back;
         }
+        // **Reserve before running**, as the web page does (`Book::claim`): an expiry that lands while the action runs
+        // otherwise turned the finished action into `expired` and dropped its result for every waiter.
+        if accepted && !self.proposals.claim(&row.id).ok {
+            return;
+        }
         let ran = if accepted {
             row.then.map(|verb| {
                 let request = crate::ctl::wire::request(verb, std::time::Duration::from_secs(5));
@@ -1855,7 +1860,11 @@ impl App {
             None
         };
         let failed = ran.as_ref().filter(|r| !r.ok).map(|r| r.message.clone().unwrap_or_default());
-        self.proposals.finish(&row.id, if accepted { "accepted" } else { "declined" }, ran);
+        if accepted {
+            self.proposals.complete(&row.id, ran);
+        } else {
+            self.proposals.finish(&row.id, "declined", ran);
+        }
         self.notice = Some(match failed {
             Some(why) => fill(say(self.site.lang, "tui.propose.failed"), &[("why", &why)]),
             None if accepted => say(self.site.lang, "tui.propose.accepted").into(),
