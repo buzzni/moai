@@ -5463,12 +5463,16 @@ fn learn_writes(args: &[String], cfg: &Config) -> Vec<String> {
 /// **`backlog promote -e <에픽>` 도 생성이다**(moai-f3ml.lm7). 새 에픽을 세우는 promote 는
 /// 그 자체로 한 단위라 자유롭지만, `-e` 는 이미 선 에픽에 멤버를 넣는다 — 안 보면
 /// `backlog add` 뒤에 `promote -e <남의 에픽>` 으로 `add -e <남의 에픽>` 이 막히는 자리를 지나간다.
+///
+/// **마일스톤 만들기는 일을 세우지 않는다**(moai-ccuy.svo) — 릴리스 묶음이라 쥔 일의 에픽이나 자식으로
+/// 세울 수 없다. 거르는 자리를 여기 둔다: [`create_in`] 에서만 거르면 [`guard_moai`] 가 이 답으로 초점을
+/// 지어([`held`]) 마일스톤 한 줄에도 사람을 풀고 소속 지도를 지었다.
 fn creates(seg: &Seg) -> bool {
     let Some(args) = moai_args(seg) else { return false };
     let verbs = positionals(args);
     match verbs.first().copied() {
-        Some("add") => !adds_backlog(args, &verbs),
-        Some("issue" | "epic" | "milestone") => verbs.get(1).copied() == Some("add"),
+        Some("add") => !adds_backlog(args, &verbs) && !adds_milestone(args, &verbs),
+        Some("issue" | "epic") => verbs.get(1).copied() == Some("add"),
         Some("backlog" | "idea") => promotes_into(seg),
         _ => false,
     }
@@ -5485,9 +5489,9 @@ fn adds_backlog(args: &[String], verbs: &[&str]) -> bool {
     }
 }
 
-/// Milestones group a release, rather than creating work outside the held unit.
-fn adds_milestone(args: &[String]) -> bool {
-    let verbs = positionals(args);
+/// `milestone add` 나 `add --type milestone` — **릴리스를 묶는** 두 철자. [`adds_backlog`] 와 같은 꼴이다.
+/// 종류를 고정한 네임스페이스(`issue add --type milestone`)는 고정한 쪽이 이겨 이슈를 세운다.
+fn adds_milestone(args: &[String], verbs: &[&str]) -> bool {
     match verbs.first().copied() {
         Some("milestone") => verbs.get(1).copied() == Some("add"),
         Some("add") => flag_values(args, &["--type"]).last().is_some_and(|kind| kind == "milestone"),
@@ -6535,8 +6539,9 @@ fn create_in<'a>(
     // 이 규칙이 지키려던 단 하나다. 토막마다 제 소속을 댄다
     // ([`tests::every_creating_segment_names_its_own_unit`] 이 그 뜻을 못박는다).
     let makes = line.used().enumerate().filter(|(k, _)| only(*k)).find(|(_, seg)| {
-        // `add` 만 본다. `backlog add` 는 담는 자리고, `--from` 은 에픽과 그
-        // 자식들을 한 단위로 세우는 자리라 새는 줄이 아니다.
+        // `add` 만 본다. `backlog add` 는 담는 자리고, 마일스톤은 릴리스를 묶는 자리라
+        // [`creates`] 가 둘 다 거른다. `--from` 은 에픽과 그 자식들을 한 단위로 세우는
+        // 자리라 새는 줄이 아니다.
         //
         // **`--from` 도 토큰으로 본다.** 글자로 찾으면 제목이 그 낱말을 담은
         // `moai add "--from 을 나중에"` 가 규칙을 통째로 지나간다 — 동사를
@@ -6546,7 +6551,6 @@ fn create_in<'a>(
         // [`Wrapper::stops`] 에서 멈춘다, moai-m4ze).
         let Some(args) = moai_args(seg) else { return false };
         creates(seg)
-            && !adds_milestone(args)
             && (promotes_into(seg) || !args.iter().any(|t| t == "--from" || t.starts_with("--from=")))
             // **도움말은 만들지 않는다.** 우리가 심는 스킬이 "모르면
             // `moai <명령> --help` 를 보라" 고 적어 두는데, 그 길을 막으면
@@ -14518,7 +14522,7 @@ mod tests {
     /// 어느 일에서 나왔는지를 잃는데, 그것이 규칙 1 이 지키려던 단 하나다.
     ///
     /// `create_in` 이 **첫 만드는 토막만** 재던 자리다 — 리뷰 moai-ju21.70g 의 고침(0de7d49)이
-    /// `find` 의 거르개를 토막마다 돌리면서 함께 닫혔고, 이 시험이 그 뜻을 못박는다. 자유로운 둘
+    /// `find` 의 거르개를 토막마다 돌리면서 함께 닫혔고, 이 시험이 그 뜻을 못박는다. 자유로운 셋
     /// (`backlog add`·`add --from`·마일스톤 생성)은 그대로 둔다.
     #[test]
     fn every_creating_segment_names_its_own_unit() {
@@ -14659,7 +14663,9 @@ mod tests {
             "moai issue add \"딴 일\"",
             "moai epic add '딴 에픽'",
             "moai add '딴 일' --type epic",
+            // 종류를 고정한 쪽이 이긴다 — 이 둘은 이슈와 에픽을 만든다.
             "moai issue add '딴 일' --type milestone",
+            "moai epic add '딴 에픽' --type milestone",
             // 종류를 고정한 쪽이 이긴다 — 이것은 이슈를 만든다.
             "moai issue add \"딴 일\" --type backlog",
             // 제목에 든 낱말은 플래그가 아니다.
@@ -14678,6 +14684,7 @@ mod tests {
             "moai add '떠오른 것' --type backlog",
             "moai add --type=backlog \"떠오른 것\"",
             "moai --json add --type backlog \"떠오른 것\"",
+            // 마일스톤은 일이 아니라 릴리스 묶음이다(moai-ccuy.svo) — 두 철자 다 자유다.
             "moai milestone add 'v0.2'",
             "moai add 'v0.2' --type milestone",
             "moai add --type=milestone 'v0.2'",
