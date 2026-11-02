@@ -83,6 +83,7 @@ export interface ShellCopy {
 }
 
 export interface ListCopy {
+  sessionLost: string
   /** Accessible name of the list. */
   label: string
   /** The `..` line's name: one level up. */
@@ -159,6 +160,9 @@ export interface GanttCopy {
 }
 
 export interface DetailCopy {
+  session: string
+  sessionLost: string
+  sessionAlive: string
   /** Accessible name of the detail pane. */
   label: string
   /** The pane is shown but nothing is chosen. */

@@ -633,10 +633,10 @@ test('spin: the first column is the configured one once the boot says it, else t
   const index = build(rows)
   assert.equal(SPIN.firstStatus(null), 'todo')
   assert.equal(SPIN.firstStatus({ statuses: ['backlog', 'todo', 'done'] }), 'backlog')
-  assert.equal(SPIN.spins(index, 0), false, 'todo is the first column by default')
-  assert.equal(SPIN.spins(index, 1), true, 'a column between the first and done is a started one')
-  assert.equal(SPIN.spins(index, 0, 'backlog'), true, 'with backlog first, todo is started')
-  assert.equal(SPIN.spins(index, 1, 'backlog'), false)
+  assert.equal(SPIN.spins(index, 0), 'still', 'todo is the first column by default')
+  assert.equal(SPIN.spins(index, 1), 'turning', 'a column between the first and done is a started one')
+  assert.equal(SPIN.spins(index, 0, 'backlog'), 'turning', 'with backlog first, todo is started')
+  assert.equal(SPIN.spins(index, 1, 'backlog'), 'still')
 })
 
 test('spin: a group moves only while work under it moves, and a column the config does not know never moves (tui::App::spins)', () => {
@@ -650,16 +650,16 @@ test('spin: a group moves only while work under it moves, and a column the confi
   const with_ = (change) => build(rows.map((row) => (row.id === 'e1.b' ? { ...row, ...change } : row)))
   // One member done and the rest waiting stands the group in a started column (`column_of`): half done, not being done.
   const half = build(rows)
-  assert.equal(SPIN.spins(half, half.find('e1')), false)
-  assert.equal(SPIN.spins(half, half.find('m1')), false)
+  assert.equal(SPIN.spins(half, half.find('e1')), 'still')
+  assert.equal(SPIN.spins(half, half.find('m1')), 'still')
   const held = with_({ status: 'in_progress' })
-  assert.equal(SPIN.spins(held, held.find('e1')), true, 'work under it moves')
-  assert.equal(SPIN.spins(held, held.find('m1')), true, 'and so does every group above it')
+  assert.equal(SPIN.spins(held, held.find('e1')), 'turning', 'work under it moves')
+  assert.equal(SPIN.spins(held, held.find('m1')), 'turning', 'and so does every group above it')
   const shelved = with_({ status: 'in_progress', deferred_at: '2026-01-01', shelved_by: 'e1.b' })
-  assert.equal(SPIN.spins(shelved, shelved.find('e1')), false, 'deferred work does not make it busy')
+  assert.equal(SPIN.spins(shelved, shelved.find('e1')), 'still', 'deferred work does not make it busy')
   // A column left from an older config stands still once the boot names the columns.
-  assert.equal(SPIN.spins(half, half.find('x'), 'todo', ['todo', 'in_progress', 'review', 'done']), false)
-  assert.equal(SPIN.spins(half, half.find('x')), true, 'before the boot answers, the columns are not known')
+  assert.equal(SPIN.spins(half, half.find('x'), 'todo', ['todo', 'in_progress', 'review', 'done']), 'still')
+  assert.equal(SPIN.spins(half, half.find('x')), 'turning', 'before the boot answers, the columns are not known')
 })
 
 test('branch mark: the holder, else where the row came from; the name kept by its tail; none on a done row', () => {
@@ -702,4 +702,18 @@ test('board view: review moves too, as every started column does in the TUI (Con
   assert.equal(card('t1').querySelector('.m-spin, .m-glint'), null)
   assert.equal(card('d1').querySelector('.m-spin, .m-glint'), null)
   assert.ok(root.querySelector('.m-lane[data-status="review"] .m-lane-head .m-spin'))
+})
+
+test('lost heartbeat pauses only held work; groups turn only while a member turns', () => {
+  const rows = [
+    { id: 'ep', kind: 'epic', derived_status: 'in_progress' },
+    { id: 'ep.a', derived_epic: 'ep', status: 'in_progress', session: { state: 'lost' } },
+  ]
+  let index = build(rows)
+  assert.equal(SPIN.spins(index, 1), 'paused')
+  assert.equal(SPIN.spins(index, 0), 'still')
+  index = build([...rows, { id: 'ep.b', derived_epic: 'ep', status: 'review' }])
+  assert.equal(SPIN.spins(index, 0), 'turning')
+  assert.equal(SPIN.spins(build([{...rows[1], session: { state: 'alive' }}]), 0), 'turning')
+  assert.equal(SPIN.spins(build([{...rows[1], shelved_by: 'ep.a'}]), 0), 'still')
 })
