@@ -380,6 +380,7 @@
   "tui.propose.verb.pane": "resize pane",
   "tui.propose.verb.zone": "timezone",
   "tui.propose.verb.theme": "theme",
+  "page.ctl.personOnly": "only the person can answer a proposal",
   "page.propose.title": "Suggestion",
   "page.propose.accept": "Accept",
   "page.propose.decline": "Decline",

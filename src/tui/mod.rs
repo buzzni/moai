@@ -1911,6 +1911,7 @@ impl App {
                     "last_input_ago_ms": self.last_human.elapsed().as_millis() as u64,
                 }))
             }
+            // Observations stay available even while help or a human-owned input blocks mutations.
             Verb::State { rows } => Reply::success(self.ctl_state(*rows)),
             Verb::Keys { .. } => self.ctl_keys(req, |app, ev| {
                 match ev {
@@ -2466,7 +2467,7 @@ impl App {
         match act {
             B::Quit => Some(say(self.site.lang, "tui.ctl.quit").into()),
             B::ProposalAccept | B::ProposalDecline | B::Proposals => {
-                Some("only the person can answer a proposal".into())
+                Some(say(self.site.lang, "page.ctl.personOnly").into())
             }
             _ => None,
         }
@@ -5600,7 +5601,9 @@ impl App {
                 let lang = || self.site.lang;
                 let wrote = crate::read_marks::update(&config, &root, lang, |sheet| {
                     let marks = pick(&sheet.marks().0);
-                    let written = sheet.mark(&marks)?;
+                    // ctl read is a batch transaction: a hand-written later id must leave earlier marks alone.
+                    let written =
+                        if self.ctl_turn.is_some() { sheet.mark_atomic(&marks)? } else { sheet.mark(&marks)? };
                     if fresh_enough {
                         sheet.prune(&known);
                     }
@@ -5626,6 +5629,9 @@ impl App {
                     }
                     Err(e) => {
                         let why = crate::text::one_line(&e.to_string());
+                        if let Some(turn) = self.ctl_turn.as_mut() {
+                            turn.error = Some(crate::ctl::wire::Reply::error(e.code, e.message.clone()));
+                        }
                         self.notice = Some(fill(say(self.site.lang, "tui.read.unwritten"), &[("why", &why)]));
                         return;
                     }
@@ -7059,7 +7065,7 @@ impl App {
         match act {
             B::ProposalAccept | B::ProposalDecline | B::Proposals if self.ctl_turn.is_some() => {
                 self.ctl_turn.as_mut().unwrap().error =
-                    Some(crate::ctl::wire::Reply::error("refused", "only the person can answer a proposal"));
+                    Some(crate::ctl::wire::Reply::error("refused", say(self.site.lang, "page.ctl.personOnly")));
             }
             B::Quit if self.ctl_turn.is_some() => {
                 self.ctl_turn.as_mut().unwrap().error =
@@ -13836,6 +13842,15 @@ mod tests {
         assert_eq!(a.ctl_state(false)["menu"], "g");
         a.hit("Esc");
         assert_eq!(a.ctl_state(false)["menu"], serde_json::Value::Null);
+        a.mode = Mode::Browse;
+        for prefix in ["Alt-x", "Ctrl-Alt-Shift-Tab"] {
+            let (keys, problems) = keymap::build(&format!("[browse]\ngo_board = '{prefix} x'\n"));
+            assert!(problems.is_empty(), "{problems:?}");
+            a.keys = keys;
+            a.hit(prefix);
+            assert_eq!(a.ctl_state(false)["menu"], prefix);
+            a.chord.clear();
+        }
     }
 
     #[test]
@@ -13982,6 +13997,109 @@ mod tests {
         assert!(one.ok, "{one:?}");
         let again = a.ctl(&ctl_req(Verb::View { name: "deferred".into(), on: true }, None));
         assert_eq!(again.data.as_ref().unwrap()["changed"], false);
+    }
+
+    #[test]
+    fn ctl_reads_are_atomic_for_ids_group_and_all_and_report_refusal() {
+        use crate::ctl::wire::Verb;
+        let scratch = Scratch::new("ctl-read-atomic");
+        let root = scratch.path().join("project");
+        std::fs::create_dir_all(&root).unwrap();
+        let config = scratch.path().join("user.toml");
+        let mut a = app();
+        a.site.repo = Some(Repo::at(root.clone(), cfg()));
+        a.user_config = Some(config.clone());
+        a.site.me = Some("Reader (reader@example.com)".into());
+        for issue in &mut a.site.issues {
+            issue.assignee = Some("Reader".into());
+            issue.assignee_email = Some("reader@example.com".into());
+        }
+        a.recount_unread();
+        assert!(a.site.unread.contains("argos-0004"));
+        let at = crate::read_marks::place_of(&config, &root).at;
+        std::fs::create_dir_all(at.parent().unwrap()).unwrap();
+        let original = format!("path = {:?}\n\n[read]\n\"argos-0004\" = 1\n", root.display().to_string());
+        std::fs::write(&at, &original).unwrap();
+        for verb in [
+            Verb::Read { ids: vec!["argos-0003".into(), "argos-0004".into()], all: false, group: None },
+            Verb::Read { ids: vec![], all: true, group: None },
+            Verb::Read { ids: vec![], all: false, group: Some("argos-0001".into()) },
+        ] {
+            let seen = a.site.seen.clone();
+            let unread = a.site.unread.clone();
+            let result = a.ctl(&ctl_req(verb, None));
+            assert_eq!(result.code.as_deref(), Some("refused"), "{result:?}");
+            assert_eq!(std::fs::read_to_string(&at).unwrap(), original);
+            assert_eq!(a.site.seen, seen);
+            assert_eq!(a.site.unread, unread);
+        }
+        // A missing later id also refuses before any mark is written.
+        assert!(
+            !a.ctl(&ctl_req(
+                Verb::Read { ids: vec!["argos-0001".into(), "missing".into()], all: false, group: None },
+                None
+            ))
+            .ok
+        );
+        assert_eq!(std::fs::read_to_string(&at).unwrap(), original);
+        // An ordinary human read still skips only the held id, preserving its established behaviour.
+        a.mark_ids(Seat::Here, &[a.site.index.find("argos-0003").unwrap(), a.site.index.find("argos-0004").unwrap()]);
+        assert!(a.site.seen.contains_key("argos-0003"));
+        assert!(!a.site.seen.contains_key("argos-0004"));
+        // Removing the hand-written value lets the same ctl batch succeed and reach disk.
+        std::fs::write(&at, format!("path = {:?}\n", root.display().to_string())).unwrap();
+        assert!(
+            a.ctl(&ctl_req(
+                Verb::Read { ids: vec!["argos-0003".into(), "argos-0004".into()], all: false, group: None },
+                None
+            ))
+            .ok
+        );
+        let seen = crate::read_marks::read(&config, &root, &std::collections::BTreeMap::new()).seen;
+        assert!(seen.contains_key("argos-0003") && seen.contains_key("argos-0004"));
+    }
+
+    #[test]
+    fn ctl_help_allows_observation_and_blocks_mutations() {
+        use crate::ctl::wire::Verb;
+        let (_scratch, mut a) = writable("ctl-help-policy");
+        a.hit("?");
+        assert!(a.help.is_some());
+        assert!(a.ctl(&ctl_req(Verb::State { rows: true }, None)).ok);
+        assert!(a.ctl(&ctl_req(Verb::Actions, None)).ok);
+        for verb in [
+            Verb::Screen { name: "board".into() },
+            Verb::Read { ids: vec![], all: true, group: None },
+            Verb::Keys { seqs: vec!["Esc".into()], text: None },
+        ] {
+            assert_eq!(a.ctl(&ctl_req(verb, None)).code.as_deref(), Some("person_busy"));
+            assert!(a.help.is_some());
+        }
+    }
+
+    #[test]
+    fn ctl_proposal_refusals_share_the_translated_words() {
+        use crate::ctl::wire::Verb;
+        let (_scratch, mut a) = writable("ctl-proposal-translated");
+        assert!(a.proposals.add("test", "A suggestion", None, 900, None).ok);
+        for lang in [crate::i18n::Lang::En, crate::i18n::Lang::Ko] {
+            a.site.lang = lang;
+            let expected = say(lang, "page.ctl.personOnly");
+            let listing = a.ctl(&ctl_req(Verb::Actions, None)).data.unwrap();
+            for (name, seq) in [
+                ("browse.proposal_accept", "SPC a y"),
+                ("browse.proposal_decline", "SPC a n"),
+                ("browse.proposals", "SPC a l"),
+            ] {
+                let row = listing["actions"].as_array().unwrap().iter().find(|row| row["name"] == name).unwrap();
+                assert_eq!(row["why"], expected);
+                assert_eq!(a.ctl(&ctl_req(Verb::Do { name: name.into() }, None)).message.as_deref(), Some(expected));
+                assert_eq!(
+                    a.ctl(&ctl_req(Verb::Keys { seqs: vec![seq.into()], text: None }, None)).message.as_deref(),
+                    Some(expected)
+                );
+            }
+        }
     }
 
     #[test]
