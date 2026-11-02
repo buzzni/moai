@@ -295,7 +295,8 @@ fn ctl_post(stream: &TcpStream, req: &Request, site: &Site) -> Response {
         let accepted = match body["state"].as_str() {
             Some("accepted") => true,
             Some("declined") => false,
-            _ => return refuse(400, "proposal answer needs accepted or declined", code::BAD_INPUT),
+            Some("claim") => true,
+            _ => return refuse(400, "proposal answer needs claim, accepted or declined", code::BAD_INPUT),
         };
         let ran = match body.get("ran") {
             Some(value) if !value.is_null() => match serde_json::from_value::<crate::ctl::wire::Reply>(value.clone()) {
@@ -304,7 +305,12 @@ fn ctl_post(stream: &TcpStream, req: &Request, site: &Site) -> Response {
             },
             _ => None,
         };
-        return match site.tabs.proposal_reply(id, token, proposal_id, accepted, ran) {
+        let reply = if body["state"] == "claim" {
+            site.tabs.proposal_claim(id, token, proposal_id)
+        } else {
+            site.tabs.proposal_reply(id, token, proposal_id, accepted, ran)
+        };
+        return match reply {
             Ok(reply) if reply.ok => {
                 Response::new(200, http::JSON, serde_json::to_vec(&reply.data).unwrap_or_default())
             }
@@ -446,9 +452,6 @@ fn stream_events(
             let mut writer = Within::of(stream, WRITE_LIMIT);
             let (name, data) = match push {
                 ctl::Push::Ctl { seq, request } => ("ctl", serde_json::json!({"seq": seq, "request": request})),
-                ctl::Push::ValidateZone { seq, name } => {
-                    ("validate_zone", serde_json::json!({"seq": seq, "name": name}))
-                }
                 ctl::Push::Proposal { entry } => ("proposal", entry),
                 ctl::Push::ProposalClosed { id } => ("proposal_closed", serde_json::json!({"id": id})),
             };

@@ -21,7 +21,7 @@ import {
   archiveDue, loadAllRows, loadArchived, loadBoot, loadDetail, loadGroups, loadMatches, loadProjects, loadTree, loadWikiListing, loadWikiPage, loadWikiSearch, matchEndpoints, sameGroups, withArchive,
   type Boot, type Loaded,
 } from './data/source.js'
-import { effectiveZone, useZone, validZone, zoneNow } from './data/zone.js'
+import { effectiveZone, useZone, zoneNow } from './data/zone.js'
 import { copyFor, fill, speaks } from './i18n/index.js'
 import { wireKeys } from './keys/wiring.js'
 import { createStore, matchKey, type BoardData, type State } from './store.js'
@@ -524,13 +524,25 @@ async function start(): Promise<void> {
     answering.add(entry.id)
     const here = tab
     void (async () => {
-      const ran = accepted && entry.then ? await ctl.run(entry.then, 0, '') : null
       const query = new URLSearchParams({ token: here.token, id: entry.id })
-      const response = await window.fetch(`/api/ctl/${encodeURIComponent(here.id)}/proposal?${query}`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ state: accepted ? 'accepted' : 'declined', ran }),
+      const post = (state: string, ran: CtlReply | null = null) => window.fetch(`/api/ctl/${encodeURIComponent(here.id)}/proposal?${query}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ state, ran }),
       })
-      if (response.ok) proposals.remove(entry.id)
+      if (!accepted) {
+        const response = await post('declined')
+        if (response.ok || response.status === 409 || response.status === 410) proposals.remove(entry.id)
+        return
+      }
+      const permission = await post('claim')
+      if (!permission.ok) {
+        if (permission.status === 409 || permission.status === 410) proposals.remove(entry.id)
+        return
+      }
+      // The server's reserved entry is authoritative, including its follow-up. Never run from a stale card.
+      const claimed = JSON.parse(await permission.text()) as { then?: { verb: string; [key: string]: unknown } | null }
+      proposals.remove(entry.id)
+      const ran = claimed.then ? await ctl.run(claimed.then, 0, '') : null
+      await post('accepted', ran)
     })().catch(() => {}).finally(() => answering.delete(entry.id))
   })
   const keys = wireKeys({ document, store, shell, copy, read, openProject, index: indexOf,
@@ -584,16 +596,6 @@ async function start(): Promise<void> {
           method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(reply),
         })
       }).catch(() => {}).finally(() => { ctlExecuting -= 1 })
-    },
-    onValidateZone: ({ seq, name }) => {
-      const here = tab
-      if (!here) return
-      const query = new URLSearchParams({ seq: String(seq), token: here.token })
-      const reply: CtlReply = name === 'none' || validZone(name)
-        ? { ok: true, data: {} } : { ok: false, code: 'bad_input', message: 'unknown time zone' }
-      void window.fetch(`/api/ctl/${encodeURIComponent(here.id)}?${query}`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(reply),
-      }).catch(() => {})
     },
     onProposal: (entry) => proposals.show(entry),
     onProposalClosed: (id) => proposals.remove(id),

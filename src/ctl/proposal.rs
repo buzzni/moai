@@ -32,6 +32,8 @@ pub struct Entry {
     pub made: Instant,
     pub ttl: Duration,
     finished: Option<Instant>,
+    /// A web accept owns execution before the page runs its follow-up. Not a second public state.
+    claimed: bool,
 }
 
 impl Entry {
@@ -62,7 +64,7 @@ impl Book {
             return Reply::error("gone", "window closed");
         }
         expire(&mut inner);
-        if inner.rows.iter().filter(|row| row.state == "pending").count() >= MAX_OPEN {
+        if inner.rows.iter().filter(|row| row.state == "pending" && !row.claimed).count() >= MAX_OPEN {
             return Reply::error("refused", "five proposals are already open");
         }
         inner.next += 1;
@@ -77,6 +79,7 @@ impl Book {
             made: Instant::now(),
             ttl: Duration::from_secs(ttl),
             finished: None,
+            claimed: false,
         };
         let answer = Reply::success(row.value());
         inner.rows.push(row);
@@ -87,7 +90,7 @@ impl Book {
     pub fn rows(&self) -> Vec<Entry> {
         let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         expire(&mut inner);
-        inner.rows.iter().filter(|row| row.state == "pending").cloned().collect()
+        inner.rows.iter().filter(|row| row.state == "pending" && !row.claimed).cloned().collect()
     }
 
     pub fn next_expiry_in(&self) -> Option<Duration> {
@@ -95,7 +98,7 @@ impl Book {
         inner
             .rows
             .iter()
-            .filter(|row| row.state == "pending")
+            .filter(|row| row.state == "pending" && !row.claimed)
             .map(|row| row.ttl.saturating_sub(row.made.elapsed()))
             .min()
     }
@@ -115,7 +118,7 @@ impl Book {
         let Some(row) = inner.rows.iter_mut().find(|row| row.id == id) else {
             return Reply::error("not_found", "proposal not found");
         };
-        if row.state != "pending" {
+        if row.state != "pending" || row.claimed {
             return Reply::error("refused", "proposal already answered");
         }
         row.state = state.into();
@@ -124,6 +127,38 @@ impl Book {
         let answer = Reply::success(row.value());
         self.changed.notify_all();
         answer
+    }
+
+    /// Reserve a pending proposal atomically against expiry, withdrawal and another accept. The page must get
+    /// this reply before executing; a lost claim reply never authorizes a retry to execute it twice.
+    pub fn claim(&self, id: &str) -> Reply {
+        let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        expire(&mut inner);
+        let Some(row) = inner.rows.iter_mut().find(|row| row.id == id) else {
+            return Reply::error("not_found", "proposal not found");
+        };
+        if row.state != "pending" || row.claimed {
+            return Reply::error("refused", "proposal already answered");
+        }
+        row.claimed = true;
+        Reply::success(row.value())
+    }
+
+    /// Publish the result only after the authorized page finishes; waiters still see the final action result.
+    pub fn complete(&self, id: &str, ran: Option<Reply>) -> Reply {
+        let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let Some(row) = inner.rows.iter_mut().find(|row| row.id == id) else {
+            return Reply::error("not_found", "proposal not found");
+        };
+        if row.state != "pending" || !row.claimed {
+            return Reply::error("refused", "proposal was not claimed or already completed");
+        }
+        row.state = "accepted".into();
+        row.ran = ran;
+        row.finished = Some(Instant::now());
+        let reply = Reply::success(row.value());
+        self.changed.notify_all();
+        reply
     }
 
     #[cfg(test)]
@@ -182,7 +217,7 @@ impl Book {
 fn expire(inner: &mut Entries) {
     let now = Instant::now();
     for row in &mut inner.rows {
-        if row.state == "pending" && now.duration_since(row.made) >= row.ttl {
+        if row.state == "pending" && !row.claimed && now.duration_since(row.made) >= row.ttl {
             row.state = "expired".into();
             row.finished = Some(now);
         }
@@ -199,6 +234,30 @@ impl Default for Book {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_claim_wins_once_and_waiters_get_the_completed_result() {
+        let book = Book::new();
+        book.add("window", "hello", None, 1, None);
+        assert!(!book.complete("window/1", None).ok, "completion bypassed authorization");
+        assert!(book.claim("window/1").ok);
+        assert!(!book.claim("window/1").ok, "a second page could execute again");
+        assert!(!book.finish("window/1", "withdrawn", None).ok);
+        assert!(book.rows().is_empty(), "a claimed card came back on reconnect");
+        book.inner.lock().unwrap().rows[0].made -= Duration::from_secs(2);
+        assert_eq!(book.get("window/1").data.unwrap()["state"], "pending");
+        assert!(book.complete("window/1", Some(Reply::success(json!({"changed": true})))).ok);
+        assert_eq!(book.wait("window/1", 0).data.unwrap()["ran"]["data"]["changed"], true);
+        assert!(!book.complete("window/1", None).ok);
+        for state in ["withdrawn", "declined", "accepted"] {
+            let id = book.add("window", "closed", None, 1, None).data.unwrap()["id"].as_str().unwrap().to_string();
+            assert!(book.finish(&id, state, None).ok);
+            assert!(!book.claim(&id).ok, "claimed {state}");
+        }
+        book.add("window", "expired", None, 1, None);
+        book.inner.lock().unwrap().rows.last_mut().unwrap().made -= Duration::from_secs(2);
+        assert!(!book.claim("window/5").ok);
+    }
 
     #[test]
     fn a_sixth_proposal_is_refused_and_answers_free_a_slot() {
