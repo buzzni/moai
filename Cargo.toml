@@ -77,6 +77,9 @@ moai-gantt    = { path = "crates/moai-gantt" }
 # 그대로였다(그날 228초) — `libc` 는 어차피 컴파일되던 것이다.
 [target.'cfg(unix)'.dependencies]
 libc          = "0.2"
+# Crossterm already uses this version and registry. Add only the self-pipe API for the TUI's idle wait;
+# keep event parsing on the owner thread, including while handing the terminal to an editor.
+signal-hook = { version = "0.3", default-features = false }
 
 # 두 패키지(`moai`·`moai-gantt`)가 `[lints] workspace = true` 로 같이 쓴다.
 # CI 의 ci-gate 가 clippy 를 `-D warnings` 로 돌린다. 그러니 여기 적힌 네 줄은
