@@ -44,7 +44,7 @@ the address becomes `/?project=<its path>`, so a reload or a bookmark stays on
 it. The project the server was started in comes first when it is not
 registered itself. Only registered projects can be read this way.
 
-The server keeps at most three visible tabs on live event streams. Additional tabs continue updating by polling every two seconds and retry a live connection every 30 seconds. Only tabs with a live stream appear in `moai ctl ls` and receive new suggestions. Hiding or closing a streaming tab frees a place; this limit keeps ordinary reads responsive when many tabs are open.
+The server keeps at most three visible tabs on live event streams. Additional tabs continue updating by polling every two seconds and retry a live connection every 30 seconds. Only tabs with a live stream appear in `moai ctl ls` and receive new suggestions. Hiding or closing a streaming tab reserves its place for its 30-second reconnect grace; afterwards it frees a place; this limit keeps ordinary reads responsive when many tabs are open.
 
 The page has four tabs.
 
