@@ -247,7 +247,7 @@ fn inherited_tmux_uses_stdout_device_and_skips_queries_without_pictures() {
     let tmux = bin.join("tmux");
     std::fs::write(
         &tmux,
-        "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$TEST_QUERY_LOG\"\ncase \"$*\" in *display-message*) printf '%s\\n' \"$TEST_CLIENT\";; *) printf '%s\\n' \"$TEST_PANE_TTY\";; esac\n",
+        "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$TEST_QUERY_LOG\"\nprintf '%s\\nMOAI_CLIENT\\n%s\\n' \"$TEST_PANE_TTY\" \"$TEST_CLIENT\"\n",
     )
     .unwrap();
     std::fs::set_permissions(&tmux, std::fs::Permissions::from_mode(0o755)).unwrap();
@@ -307,6 +307,8 @@ fn inherited_tmux_uses_stdout_device_and_skips_queries_without_pictures() {
     assert!(!run_pty(&plain, &other, None, None).contains("\x1b_G"));
     assert!(!log.exists(), "picture-free body queried tmux");
     assert!(run_pty(&id, &other, None, None).contains("\x1b_Ga=T"));
+    assert_eq!(std::fs::read_to_string(&log).unwrap().matches("list-panes").count(), 1);
+    assert!(std::fs::read_to_string(&log).unwrap().contains("; display-message"));
     assert!(
         std::fs::read_to_string(&log).unwrap().contains("-S /tmp/moai-blkz-only-test list-panes -a -F #{pane_tty}")
     );

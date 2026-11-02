@@ -65,29 +65,15 @@ pub fn detect_terminal(setting: Option<&str>) -> Protocol {
     if setting.is_some_and(|s| s != "auto") {
         return detect(|k| std::env::var(k).ok(), setting, |_| None);
     }
-    let pane = std::env::var("TMUX").ok().map(|value| (in_tmux(&value), value));
-    if let Some((Some(true), value)) = &pane {
-        return if tmux_kitty(value) { Protocol::KittyTmux } else { Protocol::Off };
+    // One process and one timeout for both the tty comparison and the client's permission.
+    let pane = std::env::var("TMUX").ok().and_then(|value| tmux_state(&value));
+    if let Some((true, kitty)) = pane {
+        return if kitty { Protocol::KittyTmux } else { Protocol::Off };
     }
-    detect(|k| std::env::var(k).ok(), setting, |_| pane.as_ref().and_then(|(answer, _)| *answer))
+    detect(|k| std::env::var(k).ok(), setting, |_| pane.map(|(inside, _)| inside))
 }
-#[cfg(unix)]
-fn tmux_kitty(value: &str) -> bool {
-    let Some(socket) = value.rsplitn(3, ',').nth(2) else { return false };
-    let mut command = std::process::Command::new("tmux");
-    command.args(["-S", socket, "display-message", "-p"]);
-    if let Ok(pane) = std::env::var("TMUX_PANE") {
-        command.args(["-t", &pane]);
-    }
-    command.arg("#{client_termname}\n#{allow-passthrough}");
-    tmux_output(command, std::time::Duration::from_secs(2))
-        .and_then(|b| String::from_utf8(b).ok())
-        .is_some_and(|s| passthrough_client(&s))
-}
-#[cfg(not(unix))]
-fn tmux_kitty(_: &str) -> bool {
-    false
-}
+// Only the unix probe reads a reply; without the gate the Windows clippy job (`-D warnings`) fails on dead code.
+#[cfg(any(unix, test))]
 fn passthrough_client(reply: &str) -> bool {
     let mut lines = reply.lines();
     lines.next() == Some("xterm-kitty") && matches!(lines.next(), Some("on" | "all"))
@@ -109,7 +95,7 @@ pub fn passthrough(payload: &[u8]) -> Vec<u8> {
 }
 /// Compare stdout's device with the server's panes. Unknown means graphics stay off.
 #[cfg(unix)]
-pub fn in_tmux(value: &str) -> Option<bool> {
+fn tmux_state(value: &str) -> Option<(bool, bool)> {
     use std::os::{fd::AsFd, unix::fs::MetadataExt};
     let stdout = std::io::stdout();
     if !stdout.is_terminal() {
@@ -119,23 +105,28 @@ pub fn in_tmux(value: &str) -> Option<bool> {
     // Read through `MetadataExt::rdev` on both sides: `libc::stat::st_rdev` is `i32` on macOS and `u64` on Linux.
     let device = std::fs::File::from(stdout.as_fd().try_clone_to_owned().ok()?).metadata().ok()?.rdev();
     let mut command = std::process::Command::new("tmux");
-    command.args(["-S", socket, "list-panes", "-a", "-F", "#{pane_tty}"]);
+    command.args(["-S", socket, "list-panes", "-a", "-F", "#{pane_tty}", ";", "display-message", "-p"]);
+    if let Ok(pane) = std::env::var("TMUX_PANE") {
+        command.args(["-t", &pane]);
+    }
+    command.arg("MOAI_CLIENT\n#{client_termname}\n#{allow-passthrough}");
     let output = tmux_output(command, std::time::Duration::from_secs(2))?;
     let text = std::str::from_utf8(&output).ok()?;
-    if text.trim().is_empty() {
+    let (panes, client) = text.split_once("MOAI_CLIENT\n").unwrap_or((text, ""));
+    if panes.trim().is_empty() {
         return None;
     }
     // A pane whose tty no longer stats (a dead pane kept by `remain-on-exit`) cannot be our open stdout, so it does
     // not decide anything. Only when no pane could be checked at all is the answer unknown.
     let mut checked = false;
-    for tty in text.lines() {
+    for tty in panes.lines() {
         let Ok(meta) = std::fs::metadata(tty) else { continue };
         if meta.rdev() == device {
-            return Some(true);
+            return Some((true, passthrough_client(client)));
         }
         checked = true;
     }
-    checked.then_some(false)
+    checked.then_some((false, false))
 }
 /// Bound the whole probe, including stdout collection. A nonblocking socket avoids a reader thread that could
 /// outlive the timeout if an inherited stdout remains open in a descendant of the client.
@@ -187,7 +178,7 @@ fn tmux_output(mut command: std::process::Command, timeout: std::time::Duration)
     result
 }
 #[cfg(not(unix))]
-pub fn in_tmux(_: &str) -> Option<bool> {
+fn tmux_state(_: &str) -> Option<(bool, bool)> {
     None
 }
 

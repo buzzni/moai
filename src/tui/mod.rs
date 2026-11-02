@@ -4114,13 +4114,19 @@ impl App {
         self.follow_changed || was_loading != self.loading()
     }
 
+    /// Lay the detail body and the wiki page out again: a picture they placed, or were waiting on, changed
+    /// (a result landed, a file changed, the geometry dropped the cache — `Images::poll`, `Images::geometry`).
+    fn relay_pictures(&mut self) {
+        self.body = None;
+        if let Mode::Wiki(w) = &mut self.mode {
+            w.laid = None;
+        }
+    }
+
     /// [`App::follow`] 의 걸음들 — 화면에 닿는 것을 바꾸면 `follow_changed` 를 세운다.
     fn follow_steps(&mut self) {
         if self.images.poll() {
-            self.body = None;
-            if let Mode::Wiki(w) = &mut self.mode {
-                w.laid = None;
-            }
+            self.relay_pictures();
             self.follow_changed = true;
         }
         self.reap();

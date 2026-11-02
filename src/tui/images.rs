@@ -29,6 +29,10 @@ pub struct Images {
     deleted: Vec<u32>,
     next: u32,
     worker: Option<Worker>,
+    /// A layout asked for a picture that got no entry (the queue was full) or lost its pending entry to eviction.
+    /// No held layout carries a placeholder for it, so `valid` never fails and no result will name it — the next
+    /// [`Images::poll`] lays the views out again instead.
+    retry: bool,
     #[cfg(test)]
     synchronous: bool,
 }
@@ -36,12 +40,16 @@ struct Worker {
     tx: std::sync::mpsc::SyncSender<Job>,
     rx: std::sync::mpsc::Receiver<Done>,
     handle: Option<std::thread::JoinHandle<()>>,
+    /// Bumped whenever the cache drops every entry (a new geometry). Queued jobs from an older epoch are skipped,
+    /// not decoded — a resize would otherwise make the new pictures wait behind up to `LIMIT` stale decodes.
+    epoch: std::sync::Arc<std::sync::atomic::AtomicU32>,
 }
 struct Job {
     id: u32,
     path: PathBuf,
     cols: usize,
     geometry: (u16, u16, u16, u16),
+    epoch: u32,
 }
 struct Done {
     id: u32,
@@ -52,8 +60,14 @@ impl Worker {
     fn new() -> Self {
         let (tx, jobs) = std::sync::mpsc::sync_channel::<Job>(LIMIT);
         let (results, rx) = std::sync::mpsc::sync_channel(LIMIT);
+        let epoch = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0));
+        let current = std::sync::Arc::clone(&epoch);
         let handle = std::thread::spawn(move || {
             while let Ok(job) = jobs.recv() {
+                // Its entry is already gone; the result would be discarded by id anyway.
+                if job.epoch != current.load(std::sync::atomic::Ordering::Relaxed) {
+                    continue;
+                }
                 let stamp = crate::store::stamp(&job.path);
                 let encoded = prepare(&job.path, job.cols, job.geometry).and_then(|(img, size)| {
                     crate::image::png(&img).ok().map(|png| (size, term::kitty_virtual(&png, size, job.id)))
@@ -63,7 +77,7 @@ impl Worker {
                 }
             }
         });
-        Self { tx, rx, handle: Some(handle) }
+        Self { tx, rx, handle: Some(handle), epoch }
     }
 }
 struct Entry {
@@ -88,23 +102,40 @@ impl Images {
             deleted: Vec::new(),
             next: 0,
             worker: None,
+            retry: false,
             synchronous: true,
         }
     }
-    /// Called before layout; pixel changes matter even if the terminal has the same cell count.
+    #[cfg(test)]
+    pub(crate) fn testing_async() -> Self {
+        let mut images = Self::testing();
+        images.synchronous = false;
+        images
+    }
+    /// Called before layout; pixel changes matter even if the terminal has the same cell count. True when the change
+    /// dropped cached pictures: a pending one is in no held layout for `valid` to catch, so the caller lays the
+    /// views out again. A cache that held nothing (images off, nothing drawn yet) has nothing to lay out again.
     pub fn geometry(&mut self, width: u16, height: u16) -> bool {
         let window = if self.off() { None } else { ratatui::crossterm::terminal::window_size().ok() };
         let pixels = window.map_or((0, 0), |w| (w.width, w.height));
         let geometry = (width, height, pixels.0, pixels.1);
         let changed = geometry != self.geometry;
         self.geometry = geometry;
-        if changed {
-            self.clear_entries();
-        }
-        changed
+        changed && self.clear_entries()
     }
-    fn clear_entries(&mut self) {
+    /// Whether there was anything to drop.
+    fn clear_entries(&mut self) -> bool {
+        let held = !self.entries.is_empty();
         self.deleted.extend(self.entries.drain(..).filter(|e| e.sent).map(|e| e.id));
+        if let Some(worker) = &self.worker {
+            worker.epoch.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        }
+        held
+    }
+    /// Pictures are still on their way, or have to be asked for again: the loop polls at its fast step until they
+    /// land instead of waiting out the file watch's step.
+    pub fn busy(&self) -> bool {
+        self.retry || self.entries.iter().any(|e| e.pending)
     }
     fn enabled(&mut self) -> bool {
         self.active
@@ -140,20 +171,26 @@ impl Images {
             self.entries.push_back(entry);
             self.entries.len() - 1
         } else {
+            // A process-specific 24-bit namespace; zero is never a valid id.
             if self.next == 0 {
                 self.next = ((std::process::id().wrapping_mul(2654435761)) & 0xff_ffff).max(1);
             }
             let id = self.next;
             self.next = (self.next % 0xff_ffff) + 1;
-            let job = Job { id, path: path.into(), cols, geometry: self.geometry };
-            if self.worker.get_or_insert_with(Worker::new).tx.try_send(job).is_err() {
+            let worker = self.worker.get_or_insert_with(Worker::new);
+            let epoch = worker.epoch.load(std::sync::atomic::Ordering::Relaxed);
+            let job = Job { id, path: path.into(), cols, geometry: self.geometry, epoch };
+            if worker.tx.try_send(job).is_err() {
+                self.retry = true;
                 return Vec::new();
             }
             if self.entries.len() == LIMIT
                 && let Some(old) = self.entries.pop_front()
-                && old.sent
             {
-                self.deleted.push(old.id);
+                if old.sent {
+                    self.deleted.push(old.id);
+                }
+                self.retry |= old.pending;
             }
             self.entries.push_back(Entry {
                 path: path.into(),
@@ -167,16 +204,18 @@ impl Images {
             });
             self.entries.len() - 1
         };
+        // By id, not index: the test wait below polls, and a poll may drop other (stale) entries.
+        let id = self.entries[index].id;
         #[cfg(test)]
         if self.synchronous {
             let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-            while self.entries[index].pending {
+            while self.entries.iter().any(|e| e.id == id && e.pending) {
                 self.poll();
                 assert!(std::time::Instant::now() < deadline);
                 std::thread::sleep(std::time::Duration::from_millis(1));
             }
         }
-        let e = &self.entries[index];
+        let Some(e) = self.entries.iter().find(|e| e.id == id) else { return Vec::new() };
         (0..e.size.rows as usize)
             .map(|row| {
                 Line::from(Span::styled(
@@ -189,7 +228,7 @@ impl Images {
     /// File checks belong to the idle follow cadence, never the frame/layout path.
     /// Results are matched by unique placement id, so an old resize or eviction cannot install stale pixels.
     pub fn poll(&mut self) -> bool {
-        let mut changed = false;
+        let mut changed = std::mem::take(&mut self.retry);
         if let Some(worker) = &mut self.worker {
             if worker.handle.as_ref().is_some_and(|h| h.is_finished())
                 && let Some(handle) = worker.handle.take()
@@ -642,6 +681,23 @@ mod tests {
         assert!(images.poll());
         assert!(ready(&mut images, &p, 20).is_empty());
         assert!(!images.poll(), "failed encoding must stay cached until the file changes");
+        images.active = false;
+    }
+    /// A picture that never got an entry (full queue) or lost its pending entry to eviction has no placeholder in
+    /// any held layout and no result that names it — only the retry flag lays the view out again. One request past
+    /// `LIMIT` takes one of the two paths whichever way the worker races.
+    #[test]
+    fn a_picture_refused_or_evicted_before_it_landed_lays_the_view_out_again() {
+        let root = crate::scratch::Scratch::new("async-retry");
+        let paths: Vec<_> = (0..=LIMIT).map(|n| picture(&root, &format!("{n}.png"))).collect();
+        let mut images = images();
+        images.synchronous = false;
+        for p in &paths {
+            assert!(images.lines(p, 20).is_empty());
+        }
+        assert!(images.retry && images.busy());
+        assert!(images.poll(), "the lost picture must ask for another layout");
+        assert!(!images.retry);
         images.active = false;
     }
     #[test]
