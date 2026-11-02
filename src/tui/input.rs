@@ -656,7 +656,7 @@ mod tests {
     /// 보고 [`components_know_neither_the_terminal_nor_the_store`] 가 훑는다 — 새
     /// 파일이 조각이 아니면 이유를 적어 여기 더한다. 목록을 조각 쪽으로 두면 새 조각이
     /// 목록에 안 올라 조용히 안 훑인다.
-    const NOT_COMPONENTS: [(&str, &str); 12] = [
+    const NOT_COMPONENTS: [(&str, &str); 13] = [
         ("mod.rs", "App — 저장소(Repo)를 들고 키를 칸에 나눈다"),
         ("gantt.rs", "간트 배치 — App·Site 의 펼침을 고치고, 저장소의 줄(crate::model)을 위젯의 줄(GanttRow)로 옮긴다"),
         (
@@ -668,6 +668,10 @@ mod tests {
             "init 의 선택 상자 — 터미널을 켜고 그리고 키를 넘긴다. 고르는 상태와 키는 조각 crate::init_choice 가 든다",
         ),
         ("draw.rs", "그림 — Frame 에 찍는다"),
+        (
+            "images.rs",
+            "그림 전송과 캐시 — 파일을 읽고 PNG로 축소하며 Painter가 쓸 terminal graphics와 placeholder 칸을 만든다",
+        ),
         (
             "hint.rs",
             "거름망 칸의 안내 — 저장소의 줄(crate::model)에서 고를 값을 모으고, 값 자리는 거름망의 쪼개는 자(crate::query)로 읽는다. 좁히기는 같은 파일 위쪽에 든다",
