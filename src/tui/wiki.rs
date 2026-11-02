@@ -335,7 +335,8 @@ impl Window {
         for (text, dest) in p.body.as_deref().map(crate::wiki::links_in).unwrap_or_default() {
             items.push(self.aim(p, text, dest));
         }
-        for r in &p.issues {
+        // 외부 이슈는 위의 출처 링크로 이미 고를 수 있다. 없는 로컬 이슈로 다시 내지 않는다.
+        for r in p.issues.iter().filter(|r| r.external.is_none()) {
             let title = r.exists.then(|| self.titles.get(&r.id).cloned().unwrap_or_default());
             items.push(Target::Issue { id: r.id.clone(), title });
         }
@@ -1745,6 +1746,22 @@ pub(super) mod tests {
 
     fn choose(a: &App) -> &super::Choose {
         window(a).choose.as_ref().expect("고르기 창이 안 열렸다")
+    }
+
+    #[test]
+    fn foreign_issues_are_offered_as_source_links_without_missing_local_duplicates() {
+        use super::Target;
+        let url = "https://example.com/fork/43";
+        let body = format!("# Fork\n\n[argos-0001]({url} \"external issue\") argos-gone\n");
+        let (_s, mut a) = wiki_app("foreign-links", &[("README.md", &body)]);
+        a.hit("SPC g w Enter Enter");
+        assert_eq!(
+            choose(&a).items,
+            [
+                Target::Out { text: "argos-0001".into(), dest: url.into() },
+                Target::Issue { id: "argos-gone".into(), title: None },
+            ]
+        );
     }
 
     /// **본문의 Enter 는 그 페이지의 링크와 id 를 고르는 창이다** — 링크는 적힌 차례, id 는 그 뒤. 페이지를 고르면

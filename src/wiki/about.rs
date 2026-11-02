@@ -84,7 +84,7 @@ fn selected<'a>(
     // 판은 한 페이지를 `lessons` 와 `named_in` 에 두 번 세웠다(리뷰 moai-4s5n.u8x). `related` 가 `named_in` 을 빼던 그
     // 자를 교훈까지 넓힌 것이다.
     let mut seen: HashSet<&str> = lessons.iter().map(String::as_str).collect();
-    let names = |p: &Page, id: &str| p.issues.iter().any(|r| r.id == id);
+    let names = |p: &Page, id: &str| p.issues.iter().any(|r| r.id == id && r.external.is_none());
     let named_in: Vec<Named> = pages
         .iter()
         .filter(|p| !seen.contains(p.slug.as_str()))
@@ -117,7 +117,7 @@ mod tests {
             title: p.title.unwrap_or_else(|| slug.into()),
             path: format!("docs/{slug}.md"),
             bytes: body.len() as u64,
-            issues: p.ids.into_iter().map(|id| IssueRef { id, exists: true }).collect(),
+            issues: p.ids.into_iter().map(|id| IssueRef { id, exists: true, external: None }).collect(),
             links: Vec::new(),
             headings: p.headings,
             linked_from: Vec::new(),
@@ -144,6 +144,22 @@ mod tests {
             a.named_in.iter().map(|n| (n.page.slug.as_str(), n.via)).collect(),
             a.related.iter().map(|h| h.page.slug.as_str()).collect(),
         )
+    }
+
+    #[test]
+    fn foreign_references_do_not_name_a_local_issue_with_the_same_id() {
+        let mut foreign = page("fork", "# Fork\n");
+        foreign.issues.push(IssueRef {
+            id: "moai-ab12".into(),
+            exists: false,
+            external: Some("https://example.com/fork".into()),
+        });
+        let pages = [foreign, page("local", "# Local\n\nmoai-ab12\n")];
+        let i = issue("moai-ab12", "unrelated", &[]);
+        let a = about(&pages, &i, None, &[]);
+        assert_eq!(slugs(&a).0, [("local", "moai-ab12")]);
+        let child = issue("moai-ab12.x1y", "unrelated", &[]);
+        assert_eq!(slugs(&about(&pages, &child, Some("moai-ab12"), &[])).0, [("local", "moai-ab12")]);
     }
 
     #[test]

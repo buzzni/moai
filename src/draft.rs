@@ -18,6 +18,7 @@
 //! `@2026-10-30` 은 기한, `@2026-10-25~2026-10-30` 은 시작~기한, `@2026-10-25~` 은 시작만. `@` 뒤가
 //! 숫자(또는 `~` 와 숫자)일 때만 날짜로 읽는다: `@raven` 같은 끝 낱말은 제목이다. 꼴이 틀리거나 시작이 기한보다 뒤면
 //! 줄 번호와 거절한다 — 시작 자리를 비운 `@~2026-10-30` 도 받지 않고 거절한다(제목에 말없이 남기지 않는다).
+//! 범위의 `～`(U+FF5E)·`〜`(U+301C)도 `~` 로 읽고, 되뽑을 때는 ASCII `~` 를 쓴다(moai-fcj3.qho).
 //! 전각 `＠`(U+FF20)도 같은 표식이다(moai-uwi9.kr5) — `＠2026-10-30` 은 기한이고, 제목의 글자면 `\＠…` 로 적는다.
 //!
 //! **이스케이프는 네 자리뿐이다** — 앞머리 `\[` 와 끝쪽에 이어진 `\#낱말`(moai-a5pz)·`\@숫자…`(moai-ghkp.u1w, `\＠숫자…` 도),
@@ -64,6 +65,7 @@ pub fn at_form(start: Option<&str>, due: Option<&str>) -> Option<String> {
 /// **`@~숫자…` 도 날짜 자리다**(moai-xf0p.due 리뷰) — 시작 자리를 비운 꼴은 받지 않지만, 날짜 자리로 안 보면 그
 /// 낱말이 말없이 제목에 남아 기한만 적으려던 줄이 기한 없이 만들어진다(종료 0). 날짜 자리로 보면 [`split_parts`] 가
 /// 빈 시작을 꼴 틀림으로 줄 번호와 거절하고, 그 글자를 제목으로 쓰려면 다른 날짜 낱말처럼 `\@~…` 로 적는다.
+/// 전각 구분자 `～`·`〜` 도 같은 자로 가른다(moai-fcj3.qho).
 fn is_due_word(w: &str) -> bool {
     due_part(w).is_some()
 }
@@ -73,7 +75,7 @@ fn is_due_word(w: &str) -> bool {
 /// 다시 떼고 `unwrap` 하던 판은 [`is_due_word`] 에만 더한 표식 하나가 거절이 아니라 패닉이 되는 자리였다.
 fn due_part(w: &str) -> Option<&str> {
     let date = w.strip_prefix(['@', '＠'])?;
-    let first = date.strip_prefix('~').unwrap_or(date);
+    let first = date.strip_prefix(['~', '～', '〜']).unwrap_or(date);
     first.starts_with(|c: char| c.is_ascii_digit() || ('０'..='９').contains(&c)).then_some(date)
 }
 
@@ -122,7 +124,7 @@ fn split_parts(raw: &str, n: usize, lang: Lang) -> Result<Parts, String> {
     while let Some((head, last)) = rest.rsplit_once(char::is_whitespace) {
         if let Some(date) = due_part(last) {
             // `@시작~기한`·`@시작~`·`@기한` — `~` 앞이 시작이고 뒤가 기한이다. 비어 있는 쪽은 그쪽이 없다는 뜻이다.
-            let (first, second) = match date.split_once('~') {
+            let (first, second) = match date.split_once(['~', '～', '〜']) {
                 Some((a, "")) => (Some(a), None),
                 Some((a, b)) => (Some(a), Some(b)),
                 None => (None, Some(date)),
@@ -578,6 +580,47 @@ mod tests {
         let back = one(&render(&issue("epic", Kind::Epic, None, &[]), &[&task]));
         assert_eq!((back[1].title.as_str(), back[1].due.as_deref()), ("task ＠2026-10-30", None));
         assert_eq!(one("# epic\n- 회의 \\＠3층\n")[1].title, "회의 ＠3층");
+    }
+
+    #[test]
+    fn wide_tildes_parse_ranges_reject_bad_ranges_and_preserve_escaped_titles() {
+        for tilde in ['～', '〜'] {
+            for marker in ['@', '＠'] {
+                let parsed = one(&format!(
+                    "# epic {marker}2026-10-25{tilde}2026-10-31\n- task #bug {marker}2026-10-26{tilde}\n"
+                ));
+                assert_eq!(
+                    (parsed[0].start.as_deref(), parsed[0].due.as_deref()),
+                    (Some("2026-10-25"), Some("2026-10-31"))
+                );
+                assert_eq!((parsed[1].start.as_deref(), parsed[1].due.as_deref()), (Some("2026-10-26"), None));
+                for date in [
+                    format!("{tilde}2026-10-30"),
+                    format!("2026-10-31{tilde}2026-10-30"),
+                    format!("2026-10-25{tilde}2026-02-30"),
+                    format!("2026-10-25{tilde}2026-10-30~2026-10-31"),
+                    format!("２０２６-10-25{tilde}2026-10-30"),
+                ] {
+                    let word = format!("{marker}{date}");
+                    let err = parse(&format!("# epic\n- task {word}\n")).unwrap_err();
+                    assert!(err.contains("2줄") && err.contains(&word), "{err}");
+                    assert_eq!(one(&format!("# epic\n- task \\{word}\n"))[1].title, format!("task {word}"));
+                }
+                // Literal titles keep the original separator while actual dates render canonically.
+                let epic = issue("epic", Kind::Epic, None, &[]);
+                let mut task = issue(&format!("task {marker}2026-10-25{tilde}2026-10-30"), Kind::Issue, None, &[]);
+                task.starts_on = Some("2026-10-25".into());
+                task.due_on = Some("2026-10-30".into());
+                let rendered = render(&epic, &[&task]);
+                assert!(rendered.contains("@2026-10-25~2026-10-30"));
+                let back = one(&rendered);
+                assert_eq!(back[1].title, task.title);
+                assert_eq!(
+                    (back[1].start.as_ref(), back[1].due.as_ref()),
+                    (task.starts_on.as_ref(), task.due_on.as_ref())
+                );
+            }
+        }
     }
 
     /// **`@` 는 시작~기한 꼴도 받는다**(moai-xf0p.due) — `@시작~기한`, `@시작~`(시작만), `@기한`(전처럼). 에픽 줄과

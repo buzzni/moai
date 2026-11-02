@@ -3037,9 +3037,12 @@ Options:
   `dir_abs` is `dir` as an absolute path in this checkout - absent when
   `wiki_dir` points outside it or that path is not UTF-8. `seen_count` is that
   `×N` - always there, 0 on a page that is not a lesson. `issues` is
-  [{"id","exists"}] - the ids with this tracker's prefix the page names
-  outside code blocks; the name of a skill moai plants (`moai-wiki`) is never
-  one. `links` is
+  [{"id","exists","external"}] - the ids with this tracker's prefix the page
+  names outside code blocks; the name of a skill moai plants (`moai-wiki`) is
+  never one. An id written as the text of an http(s) link titled
+  "external issue" belongs to another repository: it carries `external`, that
+  link's URL, and `exists` false, and no notice counts it - the same id named
+  elsewhere on the page stands again without `external`. `links` is
   [{"text","to","anchor","resolved","anchor_resolved"}] - relative links to a
   `.md` page of this wiki, `to` being the target slug (the page itself for a
   bare `#anchor`). `anchor` is the part after `#` and `anchor_resolved` says
