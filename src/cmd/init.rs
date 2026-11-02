@@ -804,7 +804,13 @@ fn gaps_in(files: &[Dotfile]) -> Vec<(&'static str, &'static str, Vec<String>)> 
                 return None;
             };
             let text = text.unwrap_or_default();
-            let missing: Vec<String> = missing_rules(&text, &d.block).into_iter().map(str::to_string).collect();
+            // The shelf lock is transient; a missing ignore rule neither loses merge rules
+            // nor includes a worktree. Init still plants it, but status does not raise a false warning.
+            let missing: Vec<String> = missing_rules(&text, &d.block)
+                .into_iter()
+                .filter(|line| *line != "**/images/.lock")
+                .map(str::to_string)
+                .collect();
             (!missing.is_empty()).then_some((d.name, d.kind, missing))
         })
         .collect()
@@ -1281,6 +1287,7 @@ const GITIGNORE: &str = "\
 .moai/*.tmp.*
 /.worktrees/
 /.claude/worktrees/
+**/images/.lock
 ";
 
 /// **새로 심는 접두어의 최대 길이**(moai-f7xs). id 는 `<접두어>-<4자>` 이고 사람과

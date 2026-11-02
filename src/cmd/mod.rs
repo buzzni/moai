@@ -12,6 +12,7 @@ pub mod defer;
 pub mod due;
 pub mod edit;
 pub mod hook;
+pub mod image;
 pub mod init;
 pub mod keys;
 pub mod link;
@@ -734,6 +735,7 @@ fn dispatch(ctx: &Ctx, cli: Cli) -> R<Vec<String>> {
         // `Typed` 에 동사를 더하는 날 backlog 만 조용히 안 따라온다.
         Cmd::Backlog(BacklogCmd::Common(t)) => typed(ctx, *t, Kind::Backlog),
         Cmd::Backlog(BacklogCmd::Promote(a)) => backlog::promote(ctx, a),
+        Cmd::Image(crate::cli::ImageCmd::Add(a)) => image::add(ctx, a),
         Cmd::Wiki(WikiCmd::Ls) => wiki::ls(ctx),
         Cmd::Wiki(WikiCmd::Show { slug }) => wiki::show(ctx, &slug),
         Cmd::Wiki(WikiCmd::Search { words, limit }) => wiki::search(ctx, &words, limit),

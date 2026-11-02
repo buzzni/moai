@@ -1227,6 +1227,18 @@ fn one(
             }
         }
     }
+    // 본문의 그림 줄에 제 말의 자리표시를 달고, 셸이 그릴 그림을 적어 둔다(`image::term::print`). 원문(`--raw`)은 안 건드린다.
+    if !raw && let Some(body) = &issue.body {
+        crate::image::term::prepare(
+            &mut out,
+            body,
+            crate::image::From::Issue,
+            &repo.root,
+            ".moai/images",
+            ctx.lang(),
+            ctx.registry().image_draw.as_deref(),
+        );
+    }
     // **말은 명령 층이 한 번 풀어 준다**(`Ctx::lang`) — 위의 `seen.screen` 이 든 것과 같은
     // 값이다. 머리글만 다른 말로 서면 한 번 펼친 화면 안에서 말이 갈린다.
     out.extend(view::commits(&commits, ctx.lang()));

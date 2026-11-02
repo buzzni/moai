@@ -492,6 +492,7 @@ const CHEATSHEET: &str = r#"    moai status                            board · 
     moai ready                             what you can pick up right now
     moai show <id>                         body, children, history. Why it was decided is here
     moai show -g <keyword>                 find out whether it is written down already
+    moai image add <file> --to <id>        attach a picture (shrunk) to an issue
     moai wiki search '<words>'             what the manual (and the lessons) say about it
     moai show -s todo -t bug               filters (comma = or, repeated flag = and, except -a: or)
     moai show --tree                       epic → issue → child

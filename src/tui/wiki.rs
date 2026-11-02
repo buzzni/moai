@@ -72,6 +72,7 @@ pub struct Window {
     /// 한눈 보기에서 열었으면 그 프로젝트의 자리. 고른 id 가 그 프로젝트로 들어가 선다(2026-10-04 사용자 결정).
     /// **첨자가 아니라 경로다** — 창이 떠 있는 동안 층의 줄이 다시 서면 첨자는 다른 프로젝트를 가리킨다.
     pub from: Option<PathBuf>,
+    pub image_home: Option<PathBuf>,
     pages: Vec<Page>,
     /// 순위 색인 — 이 창의 페이지에서 **처음 찾을 때** 한 번 짓는다. 창을 다시 열면 페이지와 함께 새로 선다. 연 순간 짓던
     /// 판은 찾지 않고 페이지만 넘겨 보는 창에도 위키 전부를 토큰으로 풀었다.
@@ -189,6 +190,7 @@ impl Window {
         let folded =
             wiki.pages.iter().map(|p| (p.title.to_lowercase(), p.body.as_deref().map(str::to_lowercase))).collect();
         Window {
+            image_home: None,
             project,
             dir,
             from,
@@ -777,7 +779,10 @@ impl App {
             return;
         }
         // **연 키는 탐색의 열을 비운 뒤에 온다** — 메뉴로 열었으면 메뉴가 이미 닫혔다(`menu::feed`).
-        self.mode = Mode::Wiki(Box::new(Window::new(name, dir, from, wiki, titles, self.keys)));
+        let image_home = from.clone().or_else(|| self.site.repo.as_ref().map(|r| r.here().to_path_buf()));
+        let mut window = Window::new(name, dir, from, wiki, titles, self.keys);
+        window.image_home = image_home;
+        self.mode = Mode::Wiki(Box::new(window));
     }
 
     /// 고르기 창의 키 하나(본문 칸의 `Enter` 가 연 창). 고른 것이 페이지면 그리로 건너가고, id 면 창을 닫고 그 줄에 서며,

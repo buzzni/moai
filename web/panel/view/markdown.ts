@@ -1,6 +1,6 @@
 // A small, safe markdown renderer for the wiki tab. Block pass first, then an inline pass; the DOM is built
 // with createElement and text nodes only, so nothing the page says can become markup. Raw HTML stays literal
-// text, images are never created, and links carry no href: the target lives in data-* attributes and the view
+// text, images are created only through resolveImage, and links carry no href: the target lives in data-* attributes and the view
 // decides what a click does.
 
 import { el } from "./components.ts"
@@ -14,6 +14,7 @@ export type LinkTarget =
   | { kind: "external"; href: string }
 
 export interface RenderOptions {
+  resolveImage?: (src: string) => string | null
   resolveLink?: (href: string) => LinkTarget
   issueIds?: Iterable<string>
 }
@@ -60,6 +61,7 @@ function defaultResolve(href: string): LinkTarget {
 }
 
 interface Ctx {
+  image?: (src: string) => string | null
   doc: Document
   resolve: (href: string) => LinkTarget
   issueRe: RegExp | null
@@ -81,6 +83,7 @@ export function renderMarkdown(doc: Document, source: string, options: RenderOpt
   const ctx: Ctx = {
     doc,
     resolve: options.resolveLink ?? defaultResolve,
+    image: options.resolveImage,
     issueRe,
     issueSet: new Set(ids),
     headings: [],
@@ -716,7 +719,16 @@ function inlineInto(ctx: Ctx, parent: Node, s: string, noLinks: boolean): void {
     }
     if (c === "!" && s.charAt(i + 1) === "[") {
       const m = noLinks ? null : parseLinkAt(s, i + 1)
-      if (m) { flush(); parent.appendChild(doc.createTextNode(s.slice(i, m.end))); i = m.end }
+      if (m) {
+        flush()
+        const src = ctx.image?.(m.dest)
+        if (src) {
+          const img = doc.createElement("img")
+          img.src = src; img.alt = m.text; img.setAttribute("loading", "lazy"); img.className = "m-md-image"
+          parent.appendChild(img)
+        } else parent.appendChild(doc.createTextNode(s.slice(i, m.end)))
+        i = m.end
+      }
       else { buf += c; i++ }
       continue
     }

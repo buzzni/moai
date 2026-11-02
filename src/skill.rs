@@ -1650,6 +1650,7 @@ mod tests {
                     .replace("<combined file>", "/tmp/epic-body.txt")
                     .replace("<body file>", "/tmp/member-body.txt")
                     .replace("<keyword>", "parser")
+                    .replace("<file>", "/tmp/shot.png")
                     .replace("<milestone>", "t-m")
                     // 감독이 싣는 기한(`Due:`, moai-7bqy.fvo) — 일꾼 1 이 에픽에 단다.
                     .replace("<due>", "2026-12-31")
