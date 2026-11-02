@@ -12,6 +12,8 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+## [0.44.0] - 2026-11-02
+
 ### Added
 
 - Explorer detail and wiki panes display kitty/Ghostty image previews that scroll with text and respect popups; other terminals retain clickable placeholders. (moai-blkz.pz8)
