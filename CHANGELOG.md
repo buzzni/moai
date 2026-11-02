@@ -12,6 +12,8 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+## [0.41.0] - 2026-11-02
+
 ### Added
 
 - **Lost-session marks.** The hook leaves a heartbeat for its session on every event; work whose holding session has
