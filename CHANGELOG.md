@@ -12,6 +12,13 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+## [0.43.0] - 2026-11-02
+
+### Changed
+
+- Hook rule 1 permits milestone creation while work is held, while continuing to guard unrelated issues and epics. (moai-ccuy.svo)
+- `moai-plan` focuses plans on decisions, contracts and failure conditions, and rewrites superseded designs after answers. (moai-ccuy.lng)
+
 ## [0.42.1] - 2026-11-02
 
 ### Fixed

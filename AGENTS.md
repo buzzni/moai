@@ -1,4 +1,4 @@
-<!-- moai:begin v:0.41.0 hash:2ebdbf79 -->
+<!-- moai:begin v:0.42.1 hash:001ea3ee -->
 ## Issue tracker — moai
 
 This repository's work lives in `.moai/issues.jsonl`.
@@ -571,6 +571,7 @@ under that issue (`--parent <id>`). If the epic cannot deliver what it promised 
 even when you cannot do it now (fork 1). If it is not for now, park it with
 `moai backlog add` — a backlog item is always free of this rule, and so is
 `moai add --from` (what it creates is an epic and its children, one unit on its own).
+Creating a milestone is also free of this rule: it groups a release rather than creating an issue.
 
 **2. Pick something up before you change the repository.** `moai mv <id> in_progress`.
 What counts is work inside the repository — `.moai/`, `.claude/`, `.agents/`, `.codex/`,

@@ -674,6 +674,7 @@ fn plan_brief_draft() -> String {
     format!(
         r#"Draft a plan from the interview record at <interview path> and the repository at <root>. Writing: <writing>. Work only in the scratchpad; do not write to the tracker or change repository files.
 {core}
+Keep the person's decisions and exclusions, storage, concurrency, path security and output contracts, numbers and budgets, member order and review focus. Give entry-point files and functions as navigation hints; line numbers, proposed signatures and types are hints, not contracts. Describe acceptance tests by the failure conditions they must catch, not exhaustive test function names. Make example commands executable with configured column names, the first column, spaces and shell quoting; when unknown use a placeholder such as `<first column>`. Put shared files and order in the epic once; a member's `order and the files it shares` names only its own place and files and points to the epic — do not repeat file lists or explanations in every member.
 Write a plan file, an epic body file and one body file per member in the scratchpad. Preserve the mapping from each plan title to its body file. Return first `Model ran: anthropic/<your real model name>`, then `plan: <absolute file>`, `epic body: <absolute file>`, and for each member `<title> <low|medium|high> — <reason>; body: <absolute file>`. Return each unresolved decision as `gap: <what>`; do not ask the user.
 {rubric}"#,
         core = plan_core(),
@@ -1341,6 +1342,7 @@ under that issue (`--parent <id>`). If the epic {PLEDGE}, it is one of those two
 even when you cannot do it now (fork 1). If it is not for now, park it with
 `moai backlog add` — a backlog item is always free of this rule, and so is
 `moai add --from` (what it creates is an epic and its children, one unit on its own).
+Creating a milestone is also free of this rule: it groups a release rather than creating an issue.
 
 **2. {two}.** `moai mv <id> in_progress`.
 What counts is work inside the repository — `.moai/`, `.claude/`, `.agents/`, `.codex/`,
@@ -1935,8 +1937,8 @@ The host interviews the person, then a planning subagent drafts a grounded plan.
 
 {brief}
 
-4. Present the epic and member titles, difficulty and any `gap:` lines once. If gaps remain, ask only about those and resume the same `agentId` with the answers; the subagent never asks the person. Present the revised plan and obtain approval before writing the tracker. The person decides whether to attach a running milestone; omit `--milestone` without explicit consent. Encode dates in the plan or use `--due` and `--start` only as answered.
-5. After approval, the host registers new work with `moai add --from <plan file> --body -` (stream the epic body), adding `--milestone <id>` only when approved. If the person approved a new milestone, create it after approval with `moai milestone add`, using only the agreed version and dates, then attach it; hook rule 1 refuses a new milestone while this session holds a picked-up row, so then ask the person to create it. For a backlog use `moai backlog promote <id> --from <plan file>`; preserve its inherited milestone and body: combine the carried body and approved epic details into a scratch file, then replace the body with `moai edit <epic> -b - < <combined file>`. Apply an explicitly approved milestone and dates to the epic; do not override an inherited milestone without that approval. Map returned member IDs to titles and apply each body with `moai edit <member> -b - < <body file>`. Record `model: anthropic/<Model ran> (<highest difficulty> — plan: interview and detailed plan)` on the epic, using the actual model name without repeating the vendor. Do not pick up the work.
+4. Present the epic and member titles, difficulty and any `gap:` lines once. If gaps remain, ask only about those and resume the same `agentId` with the answers; the subagent never asks the person. Have that same subagent rewrite the plan and bodies to reflect the answers, removing superseded designs from the active text and collecting what was removed and why briefly in one history section at the end of the epic body. Keep drafts of removed members for the backlog: the subagent returns each as `removed: <title>; body: <absolute file>`. Present the revised plan and obtain approval before writing the tracker. The person decides whether to attach a running milestone; omit `--milestone` without explicit consent. Encode dates in the plan or use `--due` and `--start` only as answered.
+5. After approval, park removed member drafts in the backlog. For each `removed:` line, pass its exact title as one argument and stream its body file with `-b -`; quote both for the shell, including any single quotes in the title. The host registers new work with `moai add --from <plan file> --body -` (stream the epic body), adding `--milestone <id>` only when approved. If the person approved a new milestone, create it after approval with `moai milestone add`, using only the agreed version and dates, then attach it. For a backlog use `moai backlog promote <id> --from <plan file>`; preserve its inherited milestone and body: combine the carried body and approved epic details into a scratch file, then replace the body with `moai edit <epic> -b - < <combined file>`. Apply an explicitly approved milestone and dates to the epic; do not override an inherited milestone without that approval. Map returned member IDs to titles and apply each body with `moai edit <member> -b - < <body file>`. Record `model: anthropic/<Model ran> (<highest difficulty> — plan: interview and detailed plan)` on the epic, using the actual model name without repeating the vendor. Do not pick up the work.
 "#,
         brief = indent(&plan_brief_draft(), "    ")
     )
@@ -6914,6 +6916,46 @@ stop sending outside work while a release runs",
         assert!(worker().contains(REVIEW_FOCUS));
         assert!(worker_codex().contains(REVIEW_FOCUS), "a Codex worker drops the planned review focus");
         assert!(supervise().contains("effort: <effort_plan>"));
+    }
+
+    #[test]
+    fn plan_draft_keeps_decisions_and_contracts_without_prescribing_implementation() {
+        let draft = plan_brief_draft();
+        for contract in [
+            "person's decisions and exclusions",
+            "storage, concurrency, path security and output contracts",
+            "numbers and budgets",
+            "member order and review focus",
+            "navigation hints",
+            "proposed signatures and types are hints, not contracts",
+            "failure conditions they must catch",
+            "configured column names",
+            "spaces and shell quoting",
+            "<first column>",
+            "shared files and order in the epic once",
+            "do not repeat file lists or explanations",
+            // 멤버 머리의 `order and the files it shares`(DETAILED_BODY)와 "에픽에 한 번" 이 한 브리프에서 갈리지 않게.
+            "a member's `order and the files it shares` names only its own place and files and points to the epic",
+        ] {
+            assert!(draft.contains(contract), "missing plan contract: {contract}");
+        }
+        let skill = plan();
+        for contract in [
+            "same subagent rewrite the plan and bodies",
+            "removing superseded designs",
+            "history section at the end of the epic body",
+            "park removed member drafts in the backlog",
+            // 뺀 멤버의 초안을 호스트가 찾을 자리 — 돌려주는 꼴이 없으면 5 의 담기가 짐작이 된다.
+            "`removed: <title>; body: <absolute file>`",
+            "For each `removed:` line",
+            "pass its exact title as one argument",
+            "including any single quotes in the title",
+            "create it after approval with `moai milestone add`",
+        ] {
+            assert!(skill.contains(contract), "missing plan step: {contract}");
+        }
+        assert!(!skill.contains("hook rule 1 refuses a new milestone"));
+        assert!(rules().contains("Creating a milestone is also free of this rule"));
     }
 
     /// **`plan` 역할이 감독의 펼치기를 맡는다**(moai-w25x.jby, 2026-10-26 사용자 결정) — 표에 적어도 아무 데서 안 듣던
