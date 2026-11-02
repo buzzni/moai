@@ -663,7 +663,8 @@ mod tests {
         else {
             panic!("fifth proposal was not sent")
         };
-        tabs.proposal_reply(&joined.id, &joined.token, entry["id"].as_str().unwrap(), true, None).unwrap();
+        assert!(tabs.proposal_claim(&joined.id, &joined.token, entry["id"].as_str().unwrap()).unwrap().ok);
+        assert!(tabs.proposal_reply(&joined.id, &joined.token, entry["id"].as_str().unwrap(), true, None).unwrap().ok);
         let mut line = String::new();
         BufReader::new(client).read_line(&mut line).unwrap();
         assert_eq!(serde_json::from_str::<Reply>(&line).unwrap().data.unwrap()["state"], "accepted");

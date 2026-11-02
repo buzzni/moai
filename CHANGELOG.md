@@ -20,6 +20,7 @@ does not tag — see `CONTRIBUTING.md`.
 
 ### Changed
 
+- `ctl state.menu` uses the same string/null key spelling on the explorer and web, and proposal refusals share translated words. (moai-4xmq)
 - Deadline-priority and overflow calculations retain the archive placement context they need; Gantt writes reuse diagnostics from the locked snapshot. (moai-4slm)
 - Supervisor backlog plans share the decision and contract guidance used by `moai-plan`; epic-end review prompts and results use separate directories per epic. (moai-i26i)
 - Gantt date reads skip hidden row calculations while preserving complete group rollups; web scrolling retains overlapping DOM nodes and releases replaced chart trees. (moai-yigx)
@@ -27,6 +28,7 @@ does not tag — see `CONTRIBUTING.md`.
 
 ### Fixed
 
+- Proposal acceptance reserves the suggestion before its follow-up runs, on the web server and in the explorer, so an expiry during the action no longer drops its result; waiting on an accepted web suggestion no longer spins a CPU core, and the page retries a failed result report. `ctl propose` refuses a malformed `--user` or `MOAI_ACTOR` instead of proposing unsigned. Explorer ctl read batches are atomic, and extra browser tabs fall back to polling beyond three live streams to keep reads responsive. Reconnecting tabs reserve their slot for the grace period; unreported action results are bounded and eventually expire with an explicit timeout. (moai-4xmq)
 - `init` preserves merge-driver settings when a shell wrapper may have relayed a signal exit. CLI tests use a separate HOME per test thread, cleaned up on success or panic; lint allowance comments reflect their current uses. (moai-fcj3)
 - Hook pickup suggestions ignore stale archived copies of unreadable live rows, matching `ready` and `prime`. (moai-4slm)
 - Gantt undo targets its original tracker and refuses stale absolute restores; web undo uses the locked write result. Widening the web Gantt preserves the left visible date without repeating full row placement. (moai-yigx)

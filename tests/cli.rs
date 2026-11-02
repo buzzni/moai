@@ -32810,10 +32810,14 @@ fn get(port: u16, path: &str) -> (u16, String, String) {
 }
 
 fn events(port: u16) -> std::io::BufReader<std::net::TcpStream> {
+    events_path(port, "/api/events")
+}
+
+fn events_path(port: u16, path: &str) -> std::io::BufReader<std::net::TcpStream> {
     use std::io::{BufRead as _, Write as _};
     let mut stream = dial(port);
     stream.set_read_timeout(Some(std::time::Duration::from_secs(5))).unwrap();
-    write!(stream, "GET /api/events HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n\r\n").unwrap();
+    write!(stream, "GET {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n\r\n").unwrap();
     let mut reader = std::io::BufReader::new(stream);
     let mut head = String::new();
     loop {
@@ -33002,6 +33006,13 @@ fn web_ctl_propose_reaches_a_tab_and_returns_its_answer() {
     assert_eq!(wrong_token.0, 403, "{}", wrong_token.1);
     let wrong_origin = ctl_post(web.port, &path, r#"{"state":"declined"}"#, "application/json", false);
     assert_eq!(wrong_origin.0, 403, "{}", wrong_origin.1);
+    let unclaimed = ctl_post(web.port, &path, r#"{"state":"accepted"}"#, "application/json", true);
+    assert_eq!(unclaimed.0, 409, "{}", unclaimed.1);
+    let claimed = ctl_post(web.port, &path, r#"{"state":"claim"}"#, "application/json", true);
+    assert_eq!(claimed.0, 200, "{}", claimed.1);
+    assert_eq!(json_of(claimed.1.split_once("\r\n\r\n").unwrap().1)["then"]["name"], "board");
+    let repeated = ctl_post(web.port, &path, r#"{"state":"claim"}"#, "application/json", true);
+    assert_eq!(repeated.0, 409, "{}", repeated.1);
     let posted = ctl_post(
         web.port,
         &path,
@@ -33015,6 +33026,26 @@ fn web_ctl_propose_reaches_a_tab_and_returns_its_answer() {
     let answer = json_of(&String::from_utf8_lossy(&finished.stdout));
     assert_eq!(answer["state"], "accepted");
     assert_eq!(answer["ran"]["data"]["screen"], "board");
+}
+
+/// A given `--user` is given (`model::actor`): `propose` refuses a malformed one the way every other ctl verb does,
+/// instead of putting an unsigned card in front of the person (review moai-4xmq.sqe 6).
+#[test]
+#[cfg(unix)]
+fn web_ctl_propose_refuses_a_malformed_user_before_any_card() {
+    let s = init("web-ctl-propose-bad-user");
+    let web = serve(s.path());
+    let mut stream = events(web.port);
+    let hello = event_named(&mut stream, "hello");
+    let tab = hello["tab"].as_str().unwrap().to_string();
+    let refused = moai(s.path(), &["ctl", "propose", "unsigned?", "-t", &tab, "--user", "Raven", "--json"]);
+    assert!(!refused.status.success(), "{refused:?}");
+    assert_eq!(json_of(&String::from_utf8_lossy(&refused.stderr))["code"], "bad_input", "{refused:?}");
+    // The next card the tab sees is the signed one: the malformed call put nothing up.
+    ok(s.path(), &["ctl", "propose", "signed?", "-t", &tab, "--json"]);
+    let card = event_named(&mut stream, "proposal");
+    assert_eq!(card["text"], "signed?", "{card}");
+    assert_eq!(card["from"], ACTOR, "{card}");
 }
 
 #[test]
@@ -33098,7 +33129,7 @@ fn web_events_beyond_the_cap_are_busy_and_reads_still_answer() {
     let s = init("web-events-cap");
     let web = serve(s.path());
     let mut streams = Vec::new();
-    for _ in 0..8 {
+    for _ in 0..3 {
         let mut stream = events(web.port);
         next_event_stamp(&mut stream);
         streams.push(stream);
@@ -33106,9 +33137,9 @@ fn web_events_beyond_the_cap_are_busy_and_reads_still_answer() {
     let (status, _, body) = get(web.port, "/api/events");
     assert_eq!(status, 503, "{body}");
     assert_eq!(json_of(&body)["code"], "busy");
-    // STREAMS_MAX is eight and BUSY_MAX is 32. Twenty-four incomplete ordinary requests must still leave room
-    // for a read; if the eight event streams retain BUSY slots, this next request becomes the 33rd and gets 503.
-    let _ordinary: Vec<_> = (0..24).map(|_| dial(web.port)).collect();
+    // STREAMS_MAX is three and BUSY_MAX is 32. Thirty incomplete ordinary requests must still leave room
+    // for a read; if event streams retain BUSY slots, this next request exceeds BUSY_MAX and gets 503.
+    let _ordinary: Vec<_> = (0..30).map(|_| dial(web.port)).collect();
     let (status, _, body) = get(web.port, "/api/stamp");
     assert_eq!(status, 200, "event streams retained ordinary request slots: {body}");
 }
@@ -33123,11 +33154,40 @@ fn web_events_refuse_a_foreign_host() {
 }
 
 #[test]
+#[cfg(unix)]
+fn web_events_reserve_the_slot_until_a_tab_resumes_or_its_grace_ends() {
+    let s = init("web-events-reserved-resume");
+    let web = serve(s.path());
+    let mut first = events(web.port);
+    let hello = event_named(&mut first, "hello");
+    let id = hello["tab"].as_str().unwrap();
+    let token = hello["token"].as_str().unwrap();
+    let mut others = Vec::new();
+    for _ in 0..2 {
+        let mut stream = events(web.port);
+        event_named(&mut stream, "hello");
+        others.push(stream);
+    }
+    ok(s.path(), &["ctl", "propose", "Keep this card", "-t", id, "--json"]);
+    let card = event_named(&mut first, "proposal");
+    drop(first);
+    // Even before the old stream is observed closing, an overflow tab cannot take its identity's place.
+    assert_eq!(get(web.port, "/api/events").0, 503);
+    let mut resumed = events_path(web.port, &format!("/api/events?resume={id}&token={token}"));
+    assert_eq!(event_named(&mut resumed, "hello"), hello);
+    assert_eq!(event_named(&mut resumed, "proposal")["id"], card["id"]);
+    assert_eq!(get(web.port, "/api/stamp").0, 200);
+    drop(others);
+}
+
+// Windows streams have no ctl identity to reserve, so anonymous capacity returns immediately.
+#[test]
+#[cfg(not(unix))]
 fn web_events_give_their_slot_back_when_the_tab_goes() {
     let s = init("web-events-release");
     let web = serve(s.path());
     let mut streams = Vec::new();
-    for _ in 0..8 {
+    for _ in 0..3 {
         let mut stream = events(web.port);
         next_event_stamp(&mut stream);
         streams.push(stream);

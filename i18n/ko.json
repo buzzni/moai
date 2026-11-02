@@ -380,6 +380,7 @@
   "tui.propose.verb.pane": "칸 크기",
   "tui.propose.verb.zone": "시간대",
   "tui.propose.verb.theme": "테마",
+  "page.ctl.personOnly": "제안에는 사람만 답할 수 있다",
   "page.propose.title": "제안",
   "page.propose.accept": "받기",
   "page.propose.decline": "거절",

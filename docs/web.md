@@ -44,6 +44,8 @@ the address becomes `/?project=<its path>`, so a reload or a bookmark stays on
 it. The project the server was started in comes first when it is not
 registered itself. Only registered projects can be read this way.
 
+The server keeps at most three visible tabs on live event streams. Additional tabs continue updating by polling every two seconds and retry a live connection every 30 seconds. Only tabs with a live stream appear in `moai ctl ls` and receive new suggestions. Hiding or closing a streaming tab reserves its place for its 30-second reconnect grace; afterwards it frees a place; this limit keeps ordinary reads responsive when many tabs are open.
+
 The page has four tabs.
 
 A visible tab can receive `moai ctl propose` suggestions from another terminal.
@@ -300,7 +302,7 @@ the next look, so the list never stays on the rows from before a change.
 
 ## Driven from another terminal
 
-`moai ctl ls` lists each visible tab as a separate `web` window. Use its id with
+`moai ctl ls` lists each visible tab with an admitted event stream as a separate `web` window. At most three streams are open on this server; additional tabs use polling until a place becomes free. Use its id with
 `moai ctl state -t <id> --json` or the [control commands](ctl.md) to select a row,
 change the tab, press its keys, resize the detail, or change its theme. The server
 sends a control request down that tab's event stream and waits for its reply.
@@ -313,7 +315,7 @@ Control never opens or closes a browser window.
 The page replies only through a same-origin POST carrying the tab's stream
 token; the server limits its JSON body to 1 MiB. The key help, a human-focused
 input or menu, a half-typed key sequence or an open sort editor returns
-`person_busy`. Tracker writes requested by ctl carry the caller's identity; read
+`person_busy` for mutations; `state` and `actions` remain available. Tracker writes requested by ctl carry the caller's identity; read
 marks remain the web server owner's, so `moai ctl read --all` marks the owner's
 NEW rows. A `moai ctl read` with several IDs validates the whole set before it marks any, so a missing or blocked later ID leaves earlier marks untouched. Column moves
 and notes remain CLI commands (`moai mv`, `moai note`).
@@ -464,4 +466,4 @@ lanes.
 The page does not show the stats screen, and what it writes is a Gantt bar's days
 and your read marks.
 
-Decided in: moai-skjr, moai-e9hi, moai-8r2l, moai-0aa7, moai-jshy, moai-d86e.3ud, moai-ijjd, moai-lj8g, moai-ekg6 moai-mkzo moai-i07x moai-zgc1 moai-v5of moai-4v3h moai-7eeq moai-yigx
+Decided in: moai-skjr, moai-e9hi, moai-8r2l, moai-0aa7, moai-jshy, moai-d86e.3ud, moai-ijjd, moai-lj8g, moai-ekg6 moai-mkzo moai-i07x moai-zgc1 moai-v5of moai-4v3h moai-7eeq moai-yigx moai-4xmq
