@@ -1515,7 +1515,7 @@ fn an_old_planting_hears_that_only_the_comments_changed() {
     // 옛 바이너리가 심은 모양 — 규칙은 같고 주석만 한국어다.
     std::fs::write(
         &attrs,
-        "# moai — 이슈 트래커\n.moai/issues.jsonl   text eol=lf merge=moai\n.moai/archive/*.jsonl text eol=lf merge=moai\n\
+        "# moai — 이슈 트래커\n.moai/issues.jsonl   text eol=lf merge=moai\n.moai/archive/*.jsonl text eol=lf merge=moai\n.moai/images/** binary\n\
          .moai/journal.jsonl  text eol=lf merge=union\n.moai/journal/*.jsonl  text eol=lf merge=union\n",
     )
     .unwrap();
@@ -1675,6 +1675,7 @@ fn a_repository_can_say_in_gitattributes_that_it_does_not_want_the_driver() {
         root.join(".gitattributes"),
         "# 이 저장소는 스냅샷에 머지 드라이버를 안 쓴다\n\
          .moai/issues.jsonl   text eol=lf -merge\n\
+         .moai/images/** binary\n\
          .moai/journal.jsonl  text eol=lf merge=union\n\
          .moai/journal/*.jsonl  text eol=lf merge=union\n",
     )
@@ -9453,6 +9454,7 @@ fn idea_and_issue_share_one_list_of_verbs() {
 /// `--json` 훑기가 실제로 부르는 명령들. **위 시험이 이 목록을 도움말과 견준다** —
 /// 목록을 여기 한 자리에 두어야 그 견줌이 뜻을 갖는다.
 const JSON_SWEEP: &[&str] = &[
+    "image",
     "ctl",
     "writing",
     "init",
@@ -10193,7 +10195,9 @@ fn every_command_still_speaks_json() {
     let id = field(&made, "id");
     let epic = field(&ok(s.path(), &["add", "에픽", "--type", "epic", "--json"]), "id");
 
+    std::fs::write(s.path().join("sweep.gif"), b"GIF89a\x01\x00\x01\x00").unwrap();
     let cases = [
+        vec!["image", "add", "sweep.gif", "--json"],
         vec!["ctl", "ls", "--json"],
         vec!["writing", "--json"],
         vec!["status", "--json"],
@@ -34257,4 +34261,30 @@ fn terminal_takeover_clears_a_lost_session_without_a_new_pick() {
     // A later hook can re-establish the holder using the existing pick format, with no snapshot-field addition.
     std::fs::write(&record, format!("{}\t{id}\t1789099924\n", nonce + 1)).unwrap();
     assert_eq!(call(&["show", &id, "--json"])["session"]["state"], "lost");
+}
+
+#[test]
+fn web_serves_binary_images_and_refuses_non_picture_paths() {
+    use std::io::{Read as _, Write as _};
+    let s = init("web-image-binary");
+    std::fs::create_dir_all(s.path().join(".moai/images")).unwrap();
+    let mut png = std::io::Cursor::new(Vec::new());
+    image::DynamicImage::new_rgb8(2, 2).write_to(&mut png, image::ImageFormat::Png).unwrap();
+    let png = png.into_inner();
+    std::fs::write(s.path().join(".moai/images/0123456789abcdef.png"), &png).unwrap();
+    let web = serve(s.path());
+    let mut stream = dial(web.port);
+    stream.set_read_timeout(Some(std::time::Duration::from_secs(10))).unwrap();
+    write!(stream, "GET /api/image?path=.moai/images/0123456789abcdef.png HTTP/1.1\r\nHost: localhost\r\n\r\n")
+        .unwrap();
+    let mut response = Vec::new();
+    stream.read_to_end(&mut response).unwrap();
+    let at = response.windows(4).position(|b| b == b"\r\n\r\n").unwrap();
+    let head = std::str::from_utf8(&response[..at]).unwrap();
+    assert!(head.contains("200"));
+    assert!(head.contains("Content-Type: image/png"));
+    assert_eq!(&response[at + 4..], png);
+    for path in [".moai/issues.jsonl", ".git/config", "../outside.png", "docs/a.svg"] {
+        assert_eq!(get(web.port, &format!("/api/image?path={path}")).0, 404);
+    }
 }

@@ -1425,7 +1425,17 @@ impl Laid {
 /// 말과 꼴은 `moai wiki show` 와 같다(`view::wiki::page`). 머리글마다 선 줄도 낸다([`WikiLaid::heads`]) — 원문으로 선
 /// 줄은 `wiki::Heading::line` 이 이미 세었고, 그린 본문은 `markdown::layout_at` 이 잰다. 링크 칸은 그린 본문에만 선다 —
 /// 원문은 적힌 글이지 그린 글이 아니라 링크가 어느 칸인지를 안 잰다(2026-10-04, 일꾼이 정했다 — moai-p61w 노트).
+#[cfg(test)]
 fn wiki_lines(p: &crate::wiki::Page, w: usize, raw: bool, lang: Lang) -> Laid {
+    wiki_lines_in(p, w, raw, lang, None)
+}
+fn wiki_lines_in(
+    p: &crate::wiki::Page,
+    w: usize,
+    raw: bool,
+    lang: Lang,
+    image: Option<&crate::image::Context<'_>>,
+) -> Laid {
     let warn = from_anstyle(style::WARN);
     let as_written = |above: usize| p.headings.iter().map(|h| above + h.line).collect();
     // 줄 끝을 고른 뒤에 편다 — `\r` 로만 줄을 가른 페이지도 머리글이 `Page::headings` 와 한 줄씩 맞선다.
@@ -1440,7 +1450,7 @@ fn wiki_lines(p: &crate::wiki::Page, w: usize, raw: bool, lang: Lang) -> Laid {
             Laid::bare(out, heads)
         }
         (Some(body), _) if raw => Laid::bare(body_lines(crate::wiki::unmarked(body), w, true), as_written(0)),
-        (Some(body), _) => laid_body(crate::wiki::unmarked(body), w),
+        (Some(body), _) => laid_body_in(crate::wiki::unmarked(body), w, lang, image),
         (None, Some(u)) => {
             let said = fill(say(lang, "wiki.body_unread"), &[("said", &crate::view::wiki::unread(lang, p, u))]);
             Laid::bare(wrapped(&format!("! {said}"), w, warn), Vec::new())
@@ -1466,7 +1476,12 @@ fn wiki_page(f: &mut Frame, w: &mut super::wiki::Window, at: Rect, raw: bool, la
     // 든 것이 그 페이지·그 폭·그 토글의 것이 아닐 때만 다시 편다.
     let fresh = match w.current() {
         Some(p) if !w.laid.as_ref().is_some_and(|l| l.slug == p.slug && l.w == width && l.raw == raw) => {
-            let Laid { lines, heads, links, cells } = wiki_lines(p, width, raw, lang);
+            let image = w.image_home.as_ref().map(|base| crate::image::Context {
+                base,
+                allowed: &w.dir,
+                from: crate::image::From::Wiki { page_rel: &p.path, wiki_dir: &w.dir },
+            });
+            let Laid { lines, heads, links, cells } = wiki_lines_in(p, width, raw, lang, image.as_ref());
             Some(WikiLaid { slug: p.slug.clone(), w: width, raw, lines, heads, links, cells })
         }
         _ => None,
@@ -4661,7 +4676,14 @@ fn about<'a>(app: &App, site: &Site, idx: usize, e: &Entry, w: usize) -> Vec<Lin
         // 달라졌으면) 여기서 편다. 캐시는 **값일 뿐이라** 없어도 그림이 같다.
         let laid = match app.body.as_ref().filter(|b| b.fits(&i.id, body, w, app.raw)) {
             Some(held) => held.lines.clone(),
-            None => body_lines(body, w, app.raw),
+            None => {
+                if app.raw {
+                    body_lines(body, w, true)
+                } else {
+                    let image = site.repo.as_ref().map(crate::image::Context::issue);
+                    laid_body_in(body, w, site.lang, image.as_ref()).lines
+                }
+            }
         };
         out.extend(laid.into_iter().map(|l| mark_line(l, in_body)));
     }
@@ -5116,7 +5138,16 @@ fn fill_body(app: &mut App, rows: &[Row], w: usize) {
     let fresh = match standing {
         // 든 것이 그 줄·그 글·그 폭의 것이면 그대로 둔다.
         Some((i, body)) if app.body.as_ref().is_some_and(|held| held.fits(&i.id, body, w, raw)) => return,
-        Some((i, body)) => Some(Body { id: i.id.clone(), text: body.clone(), w, raw, lines: body_lines(body, w, raw) }),
+        Some((i, body)) => {
+            let site = seat_at.and_then(|(seat, _)| app.site_of_seat(seat));
+            let image = site.and_then(|s| s.repo.as_ref()).map(crate::image::Context::issue);
+            let lines = if raw {
+                body_lines(body, w, true)
+            } else {
+                laid_body_in(body, w, site.map_or(Lang::En, |s| s.lang), image.as_ref()).lines
+            };
+            Some(Body { id: i.id.clone(), text: body.clone(), w, raw, lines })
+        }
         None => None,
     };
     app.body = fresh;
@@ -5196,8 +5227,16 @@ fn body_lines<'a>(body: &str, w: usize, raw: bool) -> Vec<Line<'a>> {
 /// `markdown` 은 파서가 낸 머리글마다 [`crate::markdown::Block::Heading`] 하나를 낸다. 링크의 주소와 칸도 함께 낸다
 /// (moai-p61w) — 칸은 편 줄 그대로에서 잰다([`crate::markdown::link_cells`]).
 fn laid_body(body: &str, w: usize) -> Laid {
+    laid_body_in(body, w, Lang::En, None)
+}
+fn laid_body_in(body: &str, w: usize, lang: Lang, image: Option<&crate::image::Context<'_>>) -> Laid {
     let clean = crate::text::sanitize(body);
-    let (blocks, links) = crate::markdown::parse_links(&clean);
+    let (mut blocks, links) = crate::markdown::parse_links(&clean);
+    if let Some(image) = image {
+        image.labels(&mut blocks, lang);
+    } else {
+        crate::image::labels(&mut blocks, lang);
+    }
     // **패널 폭 그대로 편다.** 넉넉한 바닥값을 얹으면 좁은 창에서 패널보다 넓은
     // 줄이 나오고, 그 줄은 `Paragraph` 가 말없이 다시 접는다 — 다시 접힌 줄은
     // 글머리 밑으로 물리지 않고 표의 칸도 맞지 않는다. `markdown` 은 0 도 받는다.
@@ -5236,7 +5275,7 @@ fn role_style(r: crate::markdown::Role) -> Style {
         Role::Strong | Role::Heading => Style::new().add_modifier(Modifier::BOLD),
         Role::Emphasis => Style::new().add_modifier(Modifier::ITALIC),
         Role::Code => Style::new().fg(Color::Cyan),
-        Role::Link => Style::new().fg(Color::LightBlue).add_modifier(Modifier::DIM),
+        Role::Link | Role::Image => Style::new().fg(Color::LightBlue).add_modifier(Modifier::DIM),
         Role::Mark => dim(),
     }
 }
@@ -6256,7 +6295,13 @@ impl Painter {
         term: &mut ratatui::Terminal<B>,
         app: &mut App,
     ) -> Result<(), B::Error> {
-        self.paint(term, |f| screen(f, app))
+        self.paint(term, |f| {
+            screen(f, app);
+            use std::io::IsTerminal;
+            if std::io::stdout().is_terminal() && !app.raw {
+                image_hyperlinks(f.buffer_mut(), app);
+            }
+        })
     }
 
     /// 그림을 받아 그린다 — [`draw`](Self::draw) 의 몸이다. 시험이 [`screen`] 없이 칸을 바로 놓으려고 가른다.
@@ -13428,5 +13473,93 @@ mod bench {
             term.draw(|f| super::screen(f, &mut app)).unwrap();
         }
         println!("펼친 프레임 {:?}", t.elapsed() / frames);
+    }
+}
+
+/// OSC 8 is cell metadata, never image graphics. ForcedWidth makes terminal escape
+/// bytes invisible to ratatui's diff, so a changed cell or a popup clears the link.
+fn image_hyperlinks(buffer: &mut ratatui::buffer::Buffer, app: &App) {
+    let mut targets = Vec::new();
+    if let Mode::Wiki(w) = &app.mode {
+        if w.choose.is_none()
+            && let (Some(base), Some(p)) = (&w.image_home, w.current())
+            && !p.conflict
+        {
+            let context = crate::image::Context {
+                base,
+                allowed: &w.dir,
+                from: crate::image::From::Wiki { page_rel: &p.path, wiki_dir: &w.dir },
+            };
+            targets = context.links(p.body.as_deref().unwrap_or_default());
+        }
+    } else if matches!(app.mode, Mode::Browse)
+        && let Some(row) = app.current()
+        && let Some(site) = app.site_of_row(&row)
+        && let Some(repo) = &site.repo
+        && let Some(body) = app.body.as_ref()
+    {
+        targets = crate::image::Context::issue(repo).links(&body.text);
+    }
+    link_image_cells(buffer, &targets);
+}
+fn link_image_cells(buffer: &mut ratatui::buffer::Buffer, targets: &[(String, std::path::PathBuf)]) {
+    use ratatui::buffer::CellDiffOption;
+    for y in buffer.area.y..buffer.area.bottom() {
+        let mut text = String::new();
+        let mut cells = Vec::new();
+        for x in buffer.area.x..buffer.area.right() {
+            let symbol = buffer[(x, y)].symbol();
+            if symbol.is_empty() {
+                continue;
+            }
+            cells.push((text.len(), x));
+            text.push_str(symbol);
+        }
+        // Only image placeholder rows. Notes, code, headings and raw remain plain.
+        if !text.contains("[image") && !text.contains("[그림") {
+            continue;
+        }
+        for (dest, path) in targets {
+            if let Some(at) = text.find(dest) {
+                let url = crate::image::term::file_url(&path.to_string_lossy());
+                for &(_, x) in cells.iter().filter(|(byte, _)| *byte >= at && *byte < at + dest.len()) {
+                    let cell = &mut buffer[(x, y)];
+                    let symbol = cell.symbol().to_string();
+                    let width = crate::text::width(&symbol).max(1) as u16;
+                    cell.set_symbol(&format!("\x1b]8;;{url}\x1b\\{symbol}\x1b]8;;\x1b\\"));
+                    cell.set_diff_option(CellDiffOption::ForcedWidth(std::num::NonZeroU16::new(width).unwrap()));
+                }
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod image_placeholder_tests {
+    use super::*;
+    #[test]
+    fn the_detail_shows_the_image_placeholder_and_raw_keeps_markdown() {
+        let body = "![shot](.moai/images/0123456789abcdef.png)";
+        let lines = body_lines(body, 100, false);
+        assert!(lines[0].to_string().contains("[image: shot] .moai/images/"));
+        assert_eq!(body_lines(body, 100, true)[0].to_string(), body);
+        let root = crate::scratch::Scratch::new("tui-image-missing");
+        let context = crate::image::Context { base: &root, allowed: ".moai/images", from: crate::image::From::Issue };
+        assert!(laid_body_in(body, 100, Lang::Ko, Some(&context)).lines[0].to_string().contains("[그림 없음: shot]"));
+    }
+    #[test]
+    fn image_hyperlinks_keep_cell_width_and_are_erased_by_plain_cells() {
+        use ratatui::buffer::{Buffer, CellWidth};
+        let mut buffer = Buffer::empty(Rect::new(0, 0, 100, 1));
+        let path = ".moai/images/0123456789abcdef.png";
+        buffer.set_string(0, 0, format!("[image: shot] {path}"), Style::default());
+        let targets = vec![(path.into(), std::path::PathBuf::from("/tmp/shot space.png"))];
+        link_image_cells(&mut buffer, &targets);
+        let at = "[image: shot] ".len() as u16;
+        assert!(buffer[(at, 0)].symbol().contains("file:///tmp/shot%20space.png"));
+        assert_eq!(buffer[(at, 0)].cell_width(), 1);
+        let mut plain = Buffer::empty(buffer.area);
+        plain.set_string(0, 0, "popup", Style::default());
+        assert!(buffer.diff(&plain).iter().any(|(x, _, _)| *x == at));
     }
 }

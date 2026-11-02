@@ -1257,6 +1257,7 @@ const GITATTRIBUTES: &str = "\
 # clone without it this word is ignored and git's default merge runs.
 .moai/issues.jsonl   text eol=lf merge=moai
 .moai/archive/*.jsonl text eol=lf merge=moai
+.moai/images/** binary
 # The journal is append-only, order does not matter, and it is never read to
 # compute state. union is right here.
 # It is filed per writer, by email — `.moai/journal/you_example_com.jsonl`.
@@ -1281,6 +1282,7 @@ const GITIGNORE: &str = "\
 .moai/*.tmp.*
 /.worktrees/
 /.claude/worktrees/
+**/images/.lock
 ";
 
 /// **새로 심는 접두어의 최대 길이**(moai-f7xs). id 는 `<접두어>-<4자>` 이고 사람과

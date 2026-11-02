@@ -21,6 +21,13 @@ rust-version = "1.88"
 workspace = true
 
 [dependencies]
+# Picture codecs are pure Rust; keep AVIF/EXR/TIFF/rayon out of the binary.
+# 2026-11-02: before 13,641,968 B; after image support 14,302,528 B (+660,560 B,
+# 91% of 15 MiB). This is the cost at introduction, not the current size.
+# Clean release build: 348.648 s under load; release LTO remains enabled.
+image = { version = "=0.25.10", default-features = false, features = ["jpeg", "png"] }
+ring = "0.17"
+base64 = "0.23"
 # `wrap_help` 는 켜지 않는다 — 도움말에 실제 개행을 넣어 좁은 창에서 예시 명령이 복사하면
 # 깨진다. 까닭은 src/cli.rs 의 `Cli` 위 주석에 있다 (moai-opjn).
 clap          = { version = "4", features = ["derive", "color", "unicode"] }

@@ -1,4 +1,4 @@
-<!-- moai:begin v:0.39.0 hash:7b50465a -->
+<!-- moai:begin v:0.41.0 hash:e6db0f65 -->
 ## Issue tracker — moai
 
 This repository's work lives in `.moai/issues.jsonl`.
@@ -10,6 +10,7 @@ Start a session by running `moai status`. The board and the warnings come up on 
     moai prime                             what you hold and what is next, nothing else
     moai ready                             what you can pick up right now
     moai show <id>                         body, children, history. Why it was decided is here
+    moai image add <file> --to <id>   attach a picture (shrunk) to an issue
     moai show -g <keyword>                 find out whether it is written down already
     moai wiki search '<words>'             what the manual (and the lessons) say about it
     moai show -s todo -t bug               filters (comma = or, repeated flag = and, except -a: or)

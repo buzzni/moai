@@ -6,6 +6,7 @@
 
 import { COPY, fill, type WikiCopy } from "../i18n/index.ts"
 import { banner, button, chip, el, emptyState, listRow, searchBox, type ChipTone } from "./components.ts"
+import { imageUrl } from "./image.ts"
 import { githubAnchor, renderMarkdown, type LinkTarget } from "./markdown.ts"
 import { FORCE_BOTTOM_BELOW } from "./responsive.ts"
 import { createSplit, normalizeRatio } from "./split.ts"
@@ -708,6 +709,7 @@ export function createWikiView(doc: Document, props: WikiViewProps): WikiView {
       const known = pages.length ? new Set(pages.map((p) => p.slug)) : undefined
       try {
         const rendered = renderMarkdown(doc, page.body, {
+          resolveImage: (src) => imageUrl(doc, src, { page: page!.path, dir }),
           resolveLink: (href) => resolveWikiTarget(from, href, known),
           // An id moai found no issue for (exists: false) stays text: there is no row to jump to.
           issueIds: page.issues.filter((issue) => issue.exists !== false).map((issue) => issue.id),

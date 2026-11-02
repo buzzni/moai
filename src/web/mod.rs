@@ -628,6 +628,22 @@ pub fn answer(req: &Request, site: &Site) -> Response {
     // 부른 쪽은 제가 준 것이 먹은 답이라 믿는다([`api::argv`]).
     let bare = || api::none_of(&query).map_err(|bad| refuse(400, &bad.said(lang), code::BAD_INPUT));
     match req.path.as_str() {
+        "/api/image" => {
+            let Some((key, path)) = query.first().filter(|_| query.len() == 1) else {
+                return refuse(404, "image not found", code::NOT_FOUND);
+            };
+            if key != "path" {
+                return refuse(404, "image not found", code::NOT_FOUND);
+            }
+            match crate::store::Repo::find_from(&cwd, || lang)
+                .ok()
+                .flatten()
+                .and_then(|repo| crate::image::served(&repo, path))
+            {
+                Some((kind, bytes)) => Response::new(200, kind.mime(), bytes),
+                None => refuse(404, "image not found", code::NOT_FOUND),
+            }
+        }
         "/api/boot" => match bare().and_then(|()| {
             boot::boot(&cwd, site.spawner.user.as_deref(), lang, &site.registered())
                 .map_err(|e| refuse(500, &e.message, e.code))
@@ -1074,5 +1090,95 @@ mod tests {
         let mut got = Vec::new();
         client.read_to_end(&mut got).unwrap();
         assert!(got.starts_with(b"HTTP/1.1 503 "), "{}", String::from_utf8_lossy(&got));
+    }
+}
+
+#[cfg(test)]
+mod image_tests {
+    use super::*;
+    fn site() -> (crate::scratch::Scratch, Site) {
+        let root = crate::scratch::Scratch::new("web-images");
+        std::fs::create_dir_all(root.join(".moai/images")).unwrap();
+        std::fs::create_dir(root.join("docs")).unwrap();
+        std::fs::write(root.join(".moai/config.toml"), "prefix = \"pic\"\n").unwrap();
+        std::fs::write(root.join(".moai/issues.jsonl"), "").unwrap();
+        let site =
+            Site::new(run::Spawner { exe: "unused-child".into(), cwd: root.path().into(), user: None }, Lang::En);
+        (root, site)
+    }
+    fn request(path: &str, host: &str) -> Request {
+        http::read(&mut std::io::Cursor::new(format!("GET {path} HTTP/1.1\r\nHost: {host}\r\n\r\n").into_bytes()))
+            .unwrap()
+    }
+    fn png() -> Vec<u8> {
+        crate::image::png(&image::DynamicImage::new_rgb8(2, 2)).unwrap()
+    }
+    #[test]
+    fn a_tracker_image_is_served_with_its_type() {
+        let (root, site) = site();
+        let b = png();
+        std::fs::write(root.join(".moai/images/0123456789abcdef.png"), &b).unwrap();
+        let response = answer(&request("/api/image?path=.moai/images/0123456789abcdef.png", "localhost"), &site);
+        assert_eq!(response.status, 200);
+        assert_eq!(response.kind, "image/png");
+        assert_eq!(response.body, b);
+    }
+    #[test]
+    fn a_wiki_image_is_served_from_the_wiki_dir() {
+        let (root, site) = site();
+        let b = png();
+        std::fs::create_dir(root.join("docs/images")).unwrap();
+        std::fs::write(root.join("docs/images/shot.png"), &b).unwrap();
+        let response = answer(&request("/api/image?path=docs/images/shot.png", "localhost"), &site);
+        assert_eq!(response.status, 200);
+        assert_eq!(response.body, b);
+    }
+    #[test]
+    fn paths_outside_the_two_places_are_404_and_foreign_hosts_are_first() {
+        let (_root, site) = site();
+        for path in [
+            "../outside.png",
+            "/etc/passwd",
+            ".moai/issues.jsonl",
+            ".git/config",
+            "C:/x.png",
+            "docs/../../x.png",
+            "docs/%252e%252e/x.png",
+            "docs/x.svg",
+            "data:a.png",
+        ] {
+            let req = request(&format!("/api/image?path={path}"), "localhost");
+            assert_eq!(answer(&req, &site).status, 404, "{path}");
+        }
+        assert_eq!(answer(&request("/api/image?path=.git/config", "evil.example"), &site).status, 403);
+        assert_eq!(answer(&request("/api/image?path=docs/a.png&path=docs/b.png", "localhost"), &site).status, 404);
+    }
+    #[test]
+    fn svg_bytes_are_never_served_even_with_a_png_name() {
+        let (root, site) = site();
+        std::fs::write(root.join("docs/shot.png"), b"<svg xmlns='http://www.w3.org/2000/svg'></svg>").unwrap();
+        assert_eq!(answer(&request("/api/image?path=docs/shot.png", "localhost"), &site).status, 404);
+    }
+    #[test]
+    fn oversized_images_are_not_read() {
+        let (root, site) = site();
+        let file = std::fs::File::create(root.join("docs/large.png")).unwrap();
+        file.set_len(20 * 1024 * 1024 + 1).unwrap();
+        assert_eq!(answer(&request("/api/image?path=docs/large.png", "localhost"), &site).status, 404);
+    }
+    #[cfg(unix)]
+    #[test]
+    fn symlinks_cannot_serve_outside_or_git_files() {
+        use std::os::unix::fs::symlink;
+        let (root, site) = site();
+        let outside = crate::scratch::Scratch::new("image-outside");
+        std::fs::write(outside.join("x.png"), png()).unwrap();
+        symlink(outside.join("x.png"), root.join("docs/x.png")).unwrap();
+        assert_eq!(answer(&request("/api/image?path=docs/x.png", "localhost"), &site).status, 404);
+        std::fs::remove_dir_all(root.join("docs")).unwrap();
+        std::fs::create_dir(root.join(".git")).unwrap();
+        std::fs::write(root.join(".git/x.png"), png()).unwrap();
+        symlink(root.join(".git"), root.join("docs")).unwrap();
+        assert_eq!(answer(&request("/api/image?path=docs/x.png", "localhost"), &site).status, 404);
     }
 }

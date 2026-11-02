@@ -1,0 +1,315 @@
+//! Shell graphics only. No terminal queries, alternate-screen state, or TUI drawing.
+use super::{From, local_file, resolve};
+use base64::{Engine, engine::general_purpose::STANDARD};
+use std::io::{IsTerminal, Write};
+use std::path::{Path, PathBuf};
+use std::sync::Mutex;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Protocol {
+    Kitty,
+    Iterm,
+    Sixel,
+    Off,
+}
+fn mode(s: &str) -> Option<Protocol> {
+    match s {
+        "kitty" => Some(Protocol::Kitty),
+        "iterm" => Some(Protocol::Iterm),
+        "sixel" => Some(Protocol::Sixel),
+        "off" => Some(Protocol::Off),
+        _ => None,
+    }
+}
+pub fn detect(env: impl Fn(&str) -> Option<String>, setting: Option<&str>) -> Protocol {
+    let explicit = env("MOAI_IMAGES");
+    if let Some(chosen) = explicit.as_deref().or(setting) {
+        if let Some(p) = mode(chosen) {
+            return p;
+        }
+        if chosen != "auto" {
+            return Protocol::Off;
+        }
+    }
+    let term = env("TERM").unwrap_or_default();
+    let program = env("TERM_PROGRAM").unwrap_or_default();
+    if env("TMUX").is_some() || term.starts_with("screen") || term.starts_with("tmux") {
+        Protocol::Off
+    } else if env("KITTY_WINDOW_ID").is_some() || term == "xterm-kitty" || program == "ghostty" {
+        Protocol::Kitty
+    } else if ["iTerm.app", "WezTerm"].contains(&program.as_str()) || env("LC_TERMINAL").as_deref() == Some("iTerm2") {
+        Protocol::Iterm
+    } else if env("WT_SESSION").is_some() || term.starts_with("foot") || term == "mlterm" {
+        Protocol::Sixel
+    } else {
+        Protocol::Off
+    }
+}
+/// Unknown terminal pixels use a cell twice as tall as it is wide.
+const FALLBACK_CELL: (u32, u32) = (8, 16);
+#[derive(Debug, Clone, Copy)]
+pub struct Size {
+    pub cols: u32,
+    pub rows: u32,
+    pub pixels: (u32, u32),
+}
+pub fn size(w: u32, h: u32, cols: u32, cell: (u32, u32)) -> Size {
+    let (cw, ch) = (cell.0.max(1), cell.1.max(1));
+    let mut scale = (cols.clamp(1, 76) * cw) as f64 / w.max(1) as f64;
+    scale = scale.min((30 * ch) as f64 / h.max(1) as f64).min(1.0);
+    let pixels = ((w as f64 * scale).round().max(1.0) as u32, (h as f64 * scale).round().max(1.0) as u32);
+    Size { cols: pixels.0.div_ceil(cw), rows: pixels.1.div_ceil(ch), pixels }
+}
+pub fn kitty(png: &[u8], s: Size) -> Vec<u8> {
+    let encoded = STANDARD.encode(png);
+    let mut out = Vec::new();
+    let chunks: Vec<_> = encoded.as_bytes().chunks(4096).collect();
+    for (n, c) in chunks.iter().enumerate() {
+        let more = usize::from(n + 1 < chunks.len());
+        let header = if n == 0 {
+            format!("\x1b_Ga=T,f=100,c={},r={},q=2,m={more};", s.cols, s.rows)
+        } else {
+            format!("\x1b_Gm={more};")
+        };
+        out.extend_from_slice(header.as_bytes());
+        out.extend_from_slice(c);
+        out.extend_from_slice(b"\x1b\\");
+    }
+    out.extend_from_slice(b"\n");
+    out
+}
+pub fn iterm(bytes: &[u8], s: Size) -> Vec<u8> {
+    format!(
+        "\x1b]1337;File=inline=1;size={};width={};height={};preserveAspectRatio=1:{}\x07\n",
+        bytes.len(),
+        s.cols,
+        s.rows,
+        STANDARD.encode(bytes)
+    )
+    .into_bytes()
+}
+pub fn sixel(img: &image::DynamicImage, s: Size) -> Vec<u8> {
+    let img = img.resize_exact(s.pixels.0, s.pixels.1, image::imageops::FilterType::Triangle).to_rgba8();
+    let (w, h) = img.dimensions();
+    let mut out = format!("\x1bPq\"1;1;{w};{h}");
+    for r in 0..6 {
+        for g in 0..6 {
+            for b in 0..6 {
+                let n = r * 36 + g * 6 + b;
+                out.push_str(&format!("#{n};2;{};{};{}", r * 20, g * 20, b * 20));
+            }
+        }
+    }
+    for y in (0..h).step_by(6) {
+        for color in 0..216 {
+            let mut row = vec![0u8; w as usize];
+            for x in 0..w {
+                for dy in 0..6 {
+                    if y + dy < h {
+                        let p = img.get_pixel(x, y + dy);
+                        if p[3] < 128 {
+                            continue;
+                        }
+                        let q = |c: u8| (c as u32 * 5 + 127) / 255;
+                        if q(p[0]) * 36 + q(p[1]) * 6 + q(p[2]) == color {
+                            row[x as usize] |= 1 << dy;
+                        }
+                    }
+                }
+            }
+            let Some(last) = row.iter().rposition(|b| *b != 0) else { continue };
+            out.push_str(&format!("#{color}"));
+            let mut x = 0;
+            while x <= last {
+                let value = row[x];
+                let mut end = x + 1;
+                while end <= last && row[end] == value {
+                    end += 1;
+                }
+                if end - x >= 4 {
+                    out.push_str(&format!("!{}{}", end - x, (value + 63) as char));
+                } else {
+                    for _ in x..end {
+                        out.push((value + 63) as char);
+                    }
+                }
+                x = end;
+            }
+            out.push('$');
+        }
+        if y + 6 < h {
+            out.push('-');
+        }
+    }
+    out.push_str("\x1b\\");
+    out.push_str(&"\n".repeat(s.rows as usize));
+    out.into_bytes()
+}
+pub fn file_url(path: &str) -> String {
+    let path = path.replace('\\', "/");
+    let mut out = if path.starts_with('/') { "file://".to_string() } else { "file:///".to_string() };
+    for b in path.bytes() {
+        if b.is_ascii_alphanumeric() || b"/-._~:".contains(&b) {
+            out.push(b as char);
+        } else {
+            out.push_str(&format!("%{b:02X}"));
+        }
+    }
+    out
+}
+fn linked(text: &str, path: &Path) -> String {
+    format!("\x1b]8;;{}\x1b\\{text}\x1b]8;;\x1b\\", file_url(&path.to_string_lossy()))
+}
+#[derive(Clone)]
+struct Draw {
+    line: usize,
+    path: PathBuf,
+    dest: String,
+    protocol: Protocol,
+}
+static DRAW: Mutex<Vec<Draw>> = Mutex::new(Vec::new());
+/// Replace only the body's known image blocks; history and raw/JSON never call this.
+pub fn prepare(
+    lines: &mut [String],
+    body: &str,
+    from: From<'_>,
+    base: &Path,
+    allowed: &str,
+    lang: crate::i18n::Lang,
+    setting: Option<&str>,
+) {
+    let blocks = crate::markdown::parse(&crate::text::sanitize(body));
+    let mut after = 0;
+    let protocol = detect(|k| std::env::var(k).ok(), setting);
+    for block in blocks {
+        let crate::markdown::Block::Image { alt, dest, .. } = block else { continue };
+        let found = resolve(
+            &dest,
+            match &from {
+                From::Issue => From::Issue,
+                From::Wiki { page_rel, wiki_dir } => From::Wiki { page_rel, wiki_dir },
+            },
+        )
+        .ok()
+        .and_then(|rel| local_file(base, allowed, &rel));
+        let missing = found.is_none() && !dest.starts_with("https://") && !dest.starts_with("http://");
+        let word = crate::i18n::say(lang, if missing { "image.missing" } else { "image.placeholder" });
+        let label = if alt.is_empty() { format!("[{word}]") } else { format!("[{word}: {alt}]") };
+        // The neutral view uses English labels; match the literal path and image marker,
+        // not arbitrary occurrences of an alt in a heading or prose.
+        if let Some(n) = lines.iter().enumerate().skip(after).find_map(|(n, l)| {
+            let plain = crate::style::plain(l);
+            (plain.contains("[image") && plain.ends_with(&format!(" {dest}"))).then_some(n)
+        }) {
+            let plain = crate::style::plain(&lines[n]);
+            let start = plain.find("[image").unwrap();
+            lines[n] = format!("{}{label} {dest}", &plain[..start]);
+            after = n + 1;
+            if let Some(path) = found {
+                DRAW.lock().unwrap().push(Draw { line: n, path, dest, protocol });
+            }
+        }
+    }
+}
+/// Interleave text (through anstream) and terminal bytes (directly). stdout is
+/// tested here too: forcing a protocol never puts escape bytes in a pipe.
+pub fn print(lines: &[String]) -> std::io::Result<bool> {
+    let draws = std::mem::take(&mut *DRAW.lock().unwrap());
+    if !std::io::stdout().is_terminal() || draws.is_empty() {
+        return Ok(false);
+    }
+    let mut start = 0;
+    for d in draws {
+        if d.line < start || d.line >= lines.len() {
+            continue;
+        }
+        if d.line > start {
+            writeln!(anstream::stdout(), "{}", lines[start..d.line].join("\n"))?;
+        }
+        anstream::stdout().flush()?;
+        let raw = crate::style::plain(&lines[d.line]);
+        let line = raw.replace(&d.dest, &linked(&d.dest, &d.path));
+        let mut stdout = std::io::stdout().lock();
+        writeln!(stdout, "{line}")?;
+        if d.protocol != Protocol::Off
+            && let Ok(bytes) = super::read_input(&d.path)
+            && let Ok(img) = super::decode(&bytes)
+        {
+            let window = ratatui::crossterm::terminal::window_size().ok();
+            let cols = window.as_ref().map_or(76, |w| w.columns as u32);
+            let cell = window
+                .as_ref()
+                .and_then(|w| {
+                    (w.columns > 0 && w.rows > 0 && w.width > 0 && w.height > 0)
+                        .then(|| (w.width as u32 / w.columns as u32, w.height as u32 / w.rows as u32))
+                })
+                .unwrap_or(FALLBACK_CELL);
+            let s = size(img.width(), img.height(), cols, cell);
+            let payload = match d.protocol {
+                Protocol::Kitty => super::png(&img).map(|b| kitty(&b, s)),
+                Protocol::Iterm => Ok(iterm(&bytes, s)),
+                Protocol::Sixel => Ok(sixel(&img, s)),
+                Protocol::Off => Ok(vec![]),
+            };
+            if let Ok(payload) = payload {
+                stdout.write_all(&payload)?;
+            }
+        }
+        stdout.flush()?;
+        start = d.line + 1;
+    }
+    if start < lines.len() {
+        writeln!(anstream::stdout(), "{}", lines[start..].join("\n"))?;
+    }
+    Ok(true)
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn detect_table() {
+        let cases: [(&[(&str, &str)], Protocol); 8] = [
+            (&[("TERM", "xterm-kitty")], Protocol::Kitty),
+            (&[("TERM_PROGRAM", "ghostty")], Protocol::Kitty),
+            (&[("TERM_PROGRAM", "WezTerm")], Protocol::Iterm),
+            (&[("WT_SESSION", "1")], Protocol::Sixel),
+            (&[("TERM", "foot")], Protocol::Sixel),
+            (&[("TMUX", "x"), ("KITTY_WINDOW_ID", "1")], Protocol::Off),
+            (&[("MOAI_IMAGES", "kitty"), ("TMUX", "x")], Protocol::Kitty),
+            (&[], Protocol::Off),
+        ];
+        for (env, want) in cases {
+            assert_eq!(detect(|k| env.iter().find(|(key, _)| *key == k).map(|(_, v)| v.to_string()), None), want);
+        }
+        assert_eq!(detect(|_| None, Some("off")), Protocol::Off);
+    }
+    #[test]
+    fn kitty_payload_is_chunked_at_4096_and_ends_with_m0() {
+        let s = size(100, 50, 76, FALLBACK_CELL);
+        let b = kitty(&vec![42; 12000], s);
+        let b = String::from_utf8(b).unwrap();
+        assert!(b.contains("m=1;"));
+        assert!(b.contains("m=0;"));
+        for chunk in b.split("\x1b_G").skip(1) {
+            assert!(chunk.split_once(';').unwrap().1.split("\x1b\\").next().unwrap().len() <= 4096);
+        }
+    }
+    #[test]
+    fn iterm_payload_names_its_size() {
+        assert!(String::from_utf8(iterm(b"abc", size(1, 1, 76, FALLBACK_CELL))).unwrap().contains("size=3;"));
+    }
+    #[test]
+    fn sixel_output_is_a_dcs_with_at_most_256_colours() {
+        let img = image::DynamicImage::new_rgb8(5, 5);
+        let b = sixel(&img, size(5, 5, 76, FALLBACK_CELL));
+        let s = String::from_utf8(b).unwrap();
+        assert!(s.starts_with("\x1bPq"));
+        assert_eq!(s.matches(";2;").count(), 216);
+        assert!(s.contains("\x1b\\"));
+    }
+    #[test]
+    fn osc8_file_url_encodes_spaces_and_windows_drives() {
+        assert_eq!(file_url("C:\\a b\\x.png"), "file:///C:/a%20b/x.png");
+        assert_eq!(file_url("/a/한\x1b.png"), "file:///a/%ED%95%9C%1B.png");
+    }
+}
