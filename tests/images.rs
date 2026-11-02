@@ -227,3 +227,100 @@ fn a_long_alt_still_gets_its_localized_placeholder_in_show() {
         "{out}"
     );
 }
+
+/// A real stdout pty exercises the shared tty check without reaching the person's tmux server.
+#[cfg(unix)]
+#[test]
+fn inherited_tmux_uses_stdout_device_and_skips_queries_without_pictures() {
+    use std::{
+        fs::File,
+        io::Read,
+        os::{fd::FromRawFd, unix::fs::PermissionsExt},
+    };
+    let s = init("image-tmux-tty");
+    let plain = json(&ok(&s, &["add", "plain", "-b", "no pictures", "--json"]))["id"].as_str().unwrap().to_owned();
+    let id = json(&ok(&s, &["add", "picture", "--json"]))["id"].as_str().unwrap().to_owned();
+    let p = picture(&s, 4, 4);
+    add(&s, &p, &["--to", &id]);
+    let bin = s.join("bin");
+    std::fs::create_dir(&bin).unwrap();
+    let tmux = bin.join("tmux");
+    std::fs::write(
+        &tmux,
+        "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$TEST_QUERY_LOG\"\nprintf '%s\\n' \"$TEST_PANE_TTY\"\n",
+    )
+    .unwrap();
+    std::fs::set_permissions(&tmux, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let log = s.join("queries");
+    // `panes` answers what the fake server lists, given the pty this run writes to.
+    let run_pty = |id: &str, panes: &dyn Fn(&str) -> String, forced: Option<&str>| {
+        let (mut master, mut slave) = (-1, -1);
+        // `c_char` is `u8` on aarch64 Linux, and Apple's `openpty` takes `*mut` termios/winsize.
+        let mut name: [libc::c_char; 256] = [0; 256];
+        // SAFETY: openpty writes valid descriptors and a tty name to the supplied buffers.
+        assert_eq!(
+            unsafe {
+                libc::openpty(&mut master, &mut slave, name.as_mut_ptr(), std::ptr::null_mut(), std::ptr::null_mut())
+            },
+            0
+        );
+        // Tests in this binary spawn children in parallel; a child that inherited the slave would hold off the
+        // master's end of file until it exits.
+        for fd in [master, slave] {
+            // SAFETY: fd is one of the descriptors openpty just returned.
+            unsafe { libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC) };
+        }
+        // SAFETY: successful openpty transferred ownership of both fresh descriptors.
+        let (mut master, slave) = unsafe { (File::from_raw_fd(master), File::from_raw_fd(slave)) };
+        // SAFETY: openpty supplied a NUL-terminated pathname in name.
+        let tty = unsafe { std::ffi::CStr::from_ptr(name.as_ptr()) }.to_str().unwrap();
+        let mut cmd = command(&s);
+        cmd.args(["show", id])
+            .env("TMUX", "/tmp/moai-blkz-only-test,1,0")
+            .env("TERM", "xterm-kitty")
+            .env("KITTY_WINDOW_ID", "5")
+            .env("TERM_PROGRAM", "tmux")
+            .env("PATH", &bin)
+            .env("TEST_QUERY_LOG", &log)
+            .env("TEST_PANE_TTY", panes(tty))
+            .env_remove("MOAI_IMAGES")
+            .stdout(slave);
+        if let Some(mode) = forced {
+            cmd.env("MOAI_IMAGES", mode);
+        }
+        let status = cmd.status().unwrap();
+        assert!(status.success());
+        drop(cmd);
+        let mut bytes = Vec::new();
+        let mut chunk = [0; 4096];
+        loop {
+            match master.read(&mut chunk) {
+                Ok(0) | Err(_) => break,
+                Ok(n) => bytes.extend_from_slice(&chunk[..n]),
+            }
+        }
+        String::from_utf8(bytes).unwrap()
+    };
+    let other = |_: &str| "/dev/null".to_owned();
+    let own = |tty: &str| tty.to_owned();
+    assert!(!run_pty(&plain, &other, None).contains("\x1b_G"));
+    assert!(!log.exists(), "picture-free body queried tmux");
+    assert!(run_pty(&id, &other, None).contains("\x1b_Ga=T"));
+    assert!(
+        std::fs::read_to_string(&log).unwrap().contains("-S /tmp/moai-blkz-only-test list-panes -a -F #{pane_tty}")
+    );
+    // A dead pane (remain-on-exit) lists a tty that no longer stats: it cannot be our stdout, so it decides nothing.
+    let dead = "/nonexistent/moai-blkz-dead-pane";
+    assert!(
+        run_pty(&id, &|_| format!("{dead}\n/dev/null"), None).contains("\x1b_Ga=T"),
+        "a dead pane turned graphics off"
+    );
+    // Only when no pane could be checked at all is the answer unknown, and unknown keeps graphics off.
+    assert!(!run_pty(&id, &|_| dead.to_owned(), None).contains("\x1b_G"));
+    let text = run_pty(&id, &own, None);
+    assert!(!text.contains("\x1b_G"));
+    assert!(text.contains("\x1b]8;;file://"));
+    std::fs::remove_file(&log).unwrap();
+    assert!(run_pty(&id, &own, Some("kitty")).contains("\x1b_Ga=T"));
+    assert!(!log.exists(), "explicit graphics queried tmux");
+}

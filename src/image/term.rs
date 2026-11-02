@@ -1,4 +1,4 @@
-//! Shell graphics only. No terminal queries, alternate-screen state, or TUI drawing.
+//! Shared graphics protocols. No terminal escape queries; inherited TMUX is checked once against pane ttys.
 use super::From;
 use base64::{Engine, engine::general_purpose::STANDARD};
 use std::io::{IsTerminal, Write};
@@ -21,7 +21,11 @@ fn mode(s: &str) -> Option<Protocol> {
         _ => None,
     }
 }
-pub fn detect(env: impl Fn(&str) -> Option<String>, setting: Option<&str>) -> Protocol {
+pub fn detect(
+    env: impl Fn(&str) -> Option<String>,
+    setting: Option<&str>,
+    in_tmux: impl FnOnce(&str) -> Option<bool>,
+) -> Protocol {
     let explicit = env("MOAI_IMAGES");
     if let Some(chosen) = explicit.as_deref().or(setting) {
         if let Some(p) = mode(chosen) {
@@ -33,7 +37,10 @@ pub fn detect(env: impl Fn(&str) -> Option<String>, setting: Option<&str>) -> Pr
     }
     let term = env("TERM").unwrap_or_default();
     let program = env("TERM_PROGRAM").unwrap_or_default();
-    if env("TMUX").is_some() || term.starts_with("screen") || term.starts_with("tmux") {
+    if term.starts_with("screen")
+        || term.starts_with("tmux")
+        || env("TMUX").is_some_and(|value| in_tmux(&value) != Some(false))
+    {
         Protocol::Off
     } else if env("KITTY_WINDOW_ID").is_some() || term == "xterm-kitty" || program == "ghostty" {
         Protocol::Kitty
@@ -45,6 +52,90 @@ pub fn detect(env: impl Fn(&str) -> Option<String>, setting: Option<&str>) -> Pr
         Protocol::Off
     }
 }
+/// Compare stdout's device with the server's panes. Unknown means graphics stay off.
+#[cfg(unix)]
+pub fn in_tmux(value: &str) -> Option<bool> {
+    use std::os::{fd::AsFd, unix::fs::MetadataExt};
+    let stdout = std::io::stdout();
+    if !stdout.is_terminal() {
+        return None;
+    }
+    let socket = value.rsplitn(3, ',').nth(2)?;
+    // Read through `MetadataExt::rdev` on both sides: `libc::stat::st_rdev` is `i32` on macOS and `u64` on Linux.
+    let device = std::fs::File::from(stdout.as_fd().try_clone_to_owned().ok()?).metadata().ok()?.rdev();
+    let mut command = std::process::Command::new("tmux");
+    command.args(["-S", socket, "list-panes", "-a", "-F", "#{pane_tty}"]);
+    let output = tmux_output(command, std::time::Duration::from_secs(2))?;
+    let text = std::str::from_utf8(&output).ok()?;
+    if text.trim().is_empty() {
+        return None;
+    }
+    // A pane whose tty no longer stats (a dead pane kept by `remain-on-exit`) cannot be our open stdout, so it does
+    // not decide anything. Only when no pane could be checked at all is the answer unknown.
+    let mut checked = false;
+    for tty in text.lines() {
+        let Ok(meta) = std::fs::metadata(tty) else { continue };
+        if meta.rdev() == device {
+            return Some(true);
+        }
+        checked = true;
+    }
+    checked.then_some(false)
+}
+/// Bound the whole probe, including stdout collection. A nonblocking socket avoids a reader thread that could
+/// outlive the timeout if an inherited stdout remains open in a descendant of the client.
+#[cfg(unix)]
+fn tmux_output(mut command: std::process::Command, timeout: std::time::Duration) -> Option<Vec<u8>> {
+    use std::{
+        io::Read,
+        os::{fd::OwnedFd, unix::net::UnixStream},
+        process::Stdio,
+        time::{Duration, Instant},
+    };
+    let (mut reader, writer) = UnixStream::pair().ok()?;
+    reader.set_nonblocking(true).ok()?;
+    let stdout: OwnedFd = writer.into();
+    let mut child = command.stdin(Stdio::null()).stderr(Stdio::null()).stdout(Stdio::from(stdout)).spawn().ok()?;
+    let began = Instant::now();
+    let result = (|| {
+        let mut output = Vec::new();
+        loop {
+            let status = child.try_wait().ok()?;
+            let mut chunk = [0; 4096];
+            loop {
+                match reader.read(&mut chunk) {
+                    Ok(0) => break,
+                    Ok(n) => {
+                        // A pane list is small; excessive output is an unknown answer too.
+                        if output.len() + n > 1024 * 1024 {
+                            return None;
+                        }
+                        output.extend_from_slice(&chunk[..n]);
+                    }
+                    Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => break,
+                    Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+                    Err(_) => return None,
+                }
+            }
+            if let Some(status) = status {
+                return status.success().then_some(output);
+            }
+            let left = timeout.checked_sub(began.elapsed())?;
+            std::thread::sleep(left.min(Duration::from_millis(10)));
+        }
+    })();
+    if result.is_none() {
+        // Kill and reap the client on timeout/read failure; never leave a hung probe behind.
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+    result
+}
+#[cfg(not(unix))]
+pub fn in_tmux(_: &str) -> Option<bool> {
+    None
+}
+
 /// Unknown terminal pixels use a cell twice as tall as it is wide.
 const FALLBACK_CELL: (u32, u32) = (8, 16);
 #[derive(Debug, Clone, Copy)]
@@ -61,21 +152,28 @@ pub fn size(w: u32, h: u32, cols: u32, cell: (u32, u32)) -> Size {
     Size { cols: pixels.0.div_ceil(cw), rows: pixels.1.div_ceil(ch), pixels }
 }
 pub fn kitty(png: &[u8], s: Size) -> Vec<u8> {
+    kitty_chunks(png, format!("a=T,f=100,c={},r={},q=2", s.cols, s.rows), true)
+}
+pub fn kitty_virtual(png: &[u8], s: Size, id: u32) -> Vec<u8> {
+    kitty_chunks(png, format!("a=T,U=1,f=100,i={id},c={},r={},q=2", s.cols, s.rows), false)
+}
+pub fn kitty_delete(id: u32) -> Vec<u8> {
+    format!("\x1b_Ga=d,d=I,i={id},q=2;\x1b\\").into_bytes()
+}
+fn kitty_chunks(png: &[u8], first: String, newline: bool) -> Vec<u8> {
     let encoded = STANDARD.encode(png);
     let mut out = Vec::new();
     let chunks: Vec<_> = encoded.as_bytes().chunks(4096).collect();
     for (n, c) in chunks.iter().enumerate() {
         let more = usize::from(n + 1 < chunks.len());
-        let header = if n == 0 {
-            format!("\x1b_Ga=T,f=100,c={},r={},q=2,m={more};", s.cols, s.rows)
-        } else {
-            format!("\x1b_Gm={more};")
-        };
+        let header = if n == 0 { format!("\x1b_G{first},m={more};") } else { format!("\x1b_Gm={more};") };
         out.extend_from_slice(header.as_bytes());
         out.extend_from_slice(c);
         out.extend_from_slice(b"\x1b\\");
     }
-    out.extend_from_slice(b"\n");
+    if newline {
+        out.extend_from_slice(b"\n");
+    }
     out
 }
 pub fn iterm(bytes: &[u8], s: Size) -> Vec<u8> {
@@ -172,7 +270,7 @@ struct Draw {
     line: usize,
     path: PathBuf,
     dest: String,
-    protocol: Protocol,
+    setting: Option<String>,
 }
 static DRAW: Mutex<Vec<Draw>> = Mutex::new(Vec::new());
 /// Replace only the body's known image blocks; history and raw/JSON never call this.
@@ -187,7 +285,6 @@ pub fn prepare(
 ) {
     let blocks = crate::markdown::parse(&crate::text::sanitize(body));
     let mut after = 0;
-    let protocol = detect(|k| std::env::var(k).ok(), setting);
     let context = super::Context { base, allowed, from };
     for block in blocks {
         let crate::markdown::Block::Image { alt, dest, .. } = block else { continue };
@@ -204,7 +301,7 @@ pub fn prepare(
             lines[n] = format!("{}{label} {dest}", &plain[..start]);
             after = n + 1;
             if let Some(path) = found {
-                DRAW.lock().unwrap().push(Draw { line: n, path, dest, protocol });
+                DRAW.lock().unwrap().push(Draw { line: n, path, dest, setting: setting.map(str::to_owned) });
             }
         }
     }
@@ -216,6 +313,7 @@ pub fn print(lines: &[String]) -> std::io::Result<bool> {
     if !std::io::stdout().is_terminal() || draws.is_empty() {
         return Ok(false);
     }
+    let protocol = detect(|k| std::env::var(k).ok(), draws[0].setting.as_deref(), in_tmux);
     let mut start = 0;
     for d in draws {
         if d.line < start || d.line >= lines.len() {
@@ -229,7 +327,7 @@ pub fn print(lines: &[String]) -> std::io::Result<bool> {
         let line = raw.replace(&d.dest, &linked(&d.dest, &d.path));
         let mut stdout = std::io::stdout().lock();
         writeln!(stdout, "{line}")?;
-        if d.protocol != Protocol::Off
+        if protocol != Protocol::Off
             && let Ok(bytes) = super::read_input(&d.path)
             && let Ok(img) = super::decode(&bytes)
         {
@@ -243,7 +341,7 @@ pub fn print(lines: &[String]) -> std::io::Result<bool> {
                 })
                 .unwrap_or(FALLBACK_CELL);
             let s = size(img.width(), img.height(), cols, cell);
-            let payload = match d.protocol {
+            let payload = match protocol {
                 Protocol::Kitty => super::png(&img).map(|b| kitty(&b, s)),
                 Protocol::Iterm => Ok(iterm(&bytes, s)),
                 Protocol::Sixel => Ok(sixel(&img, s)),
@@ -277,9 +375,55 @@ mod tests {
             (&[], Protocol::Off),
         ];
         for (env, want) in cases {
-            assert_eq!(detect(|k| env.iter().find(|(key, _)| *key == k).map(|(_, v)| v.to_string()), None), want);
+            assert_eq!(
+                detect(|k| env.iter().find(|(key, _)| *key == k).map(|(_, v)| v.to_string()), None, |_| None),
+                want
+            );
         }
-        assert_eq!(detect(|_| None, Some("off")), Protocol::Off);
+        assert_eq!(detect(|_| None, Some("off"), |_| panic!("explicit mode queried tmux")), Protocol::Off);
+    }
+    #[test]
+    fn inherited_tmux_and_real_panes_are_distinct() {
+        let vars =
+            [("TMUX", "/tmp/server,12,3"), ("TERM", "xterm-kitty"), ("KITTY_WINDOW_ID", "5"), ("TERM_PROGRAM", "tmux")];
+        let env = |k: &str| vars.iter().find(|(key, _)| *key == k).map(|(_, v)| v.to_string());
+        assert_eq!(detect(env, None, |_| Some(false)), Protocol::Kitty);
+        assert_eq!(detect(env, None, |_| Some(true)), Protocol::Off);
+        assert_eq!(detect(env, None, |_| None), Protocol::Off);
+        assert_eq!(detect(env, Some("kitty"), |_| panic!("override queried tmux")), Protocol::Kitty);
+        assert_eq!(
+            detect(
+                |k| if k == "TERM" { Some("screen-256color".into()) } else { env(k) },
+                None,
+                |_| panic!("screen queried tmux")
+            ),
+            Protocol::Off
+        );
+        assert_eq!(
+            detect(
+                |k| if k == "MOAI_IMAGES" { Some("off".into()) } else { env(k) },
+                None,
+                |_| panic!("override queried tmux")
+            ),
+            Protocol::Off
+        );
+    }
+    #[cfg(unix)]
+    #[test]
+    fn tmux_probe_times_out_without_a_real_server() {
+        let mut command = std::process::Command::new("/bin/sh");
+        // Output alone must not count as success before the client finishes.
+        command.args(["-c", "printf '/dev/null\\n'; while :; do :; done"]);
+        let began = std::time::Instant::now();
+        let answer = tmux_output(command, std::time::Duration::from_millis(50));
+        assert!(answer.is_none(), "a timed-out probe must leave graphics off");
+        assert!(began.elapsed() < std::time::Duration::from_secs(2), "the probe did not respect its deadline");
+        let mut command = std::process::Command::new("/bin/sh");
+        command.args(["-c", "printf '/dev/null\\n'"]);
+        assert_eq!(tmux_output(command, std::time::Duration::from_secs(2)), Some(b"/dev/null\n".to_vec()));
+        let mut command = std::process::Command::new("/bin/sh");
+        command.args(["-c", "printf '/dev/null\\n'; exit 1"]);
+        assert!(tmux_output(command, std::time::Duration::from_secs(2)).is_none());
     }
     #[test]
     fn kitty_payload_is_chunked_at_4096_and_ends_with_m0() {
