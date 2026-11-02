@@ -60,6 +60,20 @@ verbatim instead of reconstructing agent commands.
 `notice: false`, `fatal: false`; its exit code stays 0. Minutes do not appear
 in the `days` field. A missing heartbeat contributes no warning.
 
+## Use the undo returned by a date edit
+
+`moai edit <id> --json` adds `undo` when the write changes a readable planned date.
+It is a copyable command built from the before/after values under the write lock,
+not the earlier row a client may have drawn. No changed dates means no `undo` key.
+
+Display that command as returned. It names the project with `-C` and preserves a
+tracker-selection override when the write targeted a linked worktree's own
+tracker. Relative inverses move only the edges that changed. Absolute restores
+carry `--if-start` and/or `--if-due`; those accept an exact calendar day or `none`
+for absence. All supplied conditions are checked under the lock before any field
+changes. A mismatch exits nonzero, leaves the row unchanged, and returns the
+usual error object on stderr with `code: "stale"`.
+
 ## Walk the explorer's directories
 
 `moai tui --json` prints one directory of the explorer — the project root, or
@@ -239,4 +253,4 @@ A whole tracker with bodies runs to megabytes — this repository's
 - **Pages repeat or skip a row** — the order moved under you. Page in `id` or
   `created` order; priority and title move when someone edits a row
 
-Decided in: moai-e9hi, moai-b4dc, moai-ijjd, moai-wk7i, moai-g8pt moai-4v3h
+Decided in: moai-e9hi, moai-b4dc, moai-ijjd, moai-wk7i, moai-g8pt moai-4v3h moai-yigx

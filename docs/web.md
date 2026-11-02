@@ -163,20 +163,26 @@ sent is the move, not the days (only the written edge when the other was filled)
 stands then, so a row someone moved in the two seconds before the page read it again
 moves on from where they put it. A filled start is the exception: dragging its left
 end sends the chosen date as `moai edit <id> --start <day>`. This explicit choice
-wins over a start written meanwhile; the deadline stays as moai reads it. Undo
-clears that newly chosen start when the read plan had none. A double-click plans its day as `moai edit <id>
+wins over a start written meanwhile; the deadline stays as moai reads it. A double-click plans its day as `moai edit <id>
 --start <day> --due <day> --if-unplanned`, refused if the row gained days meanwhile.
 A move moai refuses (a start after the deadline, a day past the deadline of the
 epic, milestone or parent above) is told in moai's own words under the banners and
 the bar goes back. While the write and refresh run, the bar keeps the dropped days
-through scrolling and redraws. A move that went through says the `moai edit` line
-that shifts the same edge back by the same number of days. Changes to the other
-edge stay in place. If that edge had no day when the page read it, undo clears it;
-a day another session added to that edge before the write would be cleared too.
-A newly planned day is undone by clearing both days. The TUI also names an inverse
-move, choosing the written edges from the dates read inside the write. Undo that
-clears a newly created date or restores an explicitly chosen start still writes an
-absolute value; another session's later change to that field can be overwritten.
+through scrolling and redraws. A move that went through gives a copyable undo
+command built from the dates moai read and wrote under the lock. It names the
+project with `-C`, so pasting it from another directory still targets that tracker.
+Relative moves shift back only the dates that moved, preserving the other edge.
+A date created by the write is cleared; an explicitly chosen start is restored to
+its value just before the write, including a start another session wrote before
+this move landed. A new one-day plan clears both days.
+
+Absolute restores carry `--if-start` or `--if-due` for each restored field. If
+another session changed one of those fields after the move, undo refuses with
+`stale` and writes nothing. Reread the row before deciding what to change; dropping
+the condition would overwrite that newer date. The TUI uses the same undo rules.
+Widening the Gantt keeps the left visible date in place and extends the dates to
+fill the view.
+
 A bar an epic or milestone counts from its members
 (hatched) does not move — move the members. Nor does a row the write cannot reach:
 one the worktree overlay shows from another worktree, and an archived row.
@@ -458,4 +464,4 @@ lanes.
 The page does not show the stats screen, and what it writes is a Gantt bar's days
 and your read marks.
 
-Decided in: moai-skjr, moai-e9hi, moai-8r2l, moai-0aa7, moai-jshy, moai-d86e.3ud, moai-ijjd, moai-lj8g, moai-ekg6 moai-mkzo moai-i07x moai-zgc1 moai-v5of moai-4v3h moai-7eeq
+Decided in: moai-skjr, moai-e9hi, moai-8r2l, moai-0aa7, moai-jshy, moai-d86e.3ud, moai-ijjd, moai-lj8g, moai-ekg6 moai-mkzo moai-i07x moai-zgc1 moai-v5of moai-4v3h moai-7eeq moai-yigx

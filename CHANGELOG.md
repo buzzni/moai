@@ -14,14 +14,17 @@ does not tag — see `CONTRIBUTING.md`.
 
 ### Added
 
+- `moai edit --if-start/--if-due` supports atomic date preconditions; successful date edits return a copyable undo command in JSON. (moai-yigx)
 - Shell and explorer pictures draw through kitty inside tmux with `allow-passthrough on|all`; auto detection also recognizes SSH Ghostty sessions through `TERM=xterm-ghostty`. (moai-zidx)
 
 ### Changed
 
+- Gantt date reads skip hidden row calculations while preserving complete group rollups; web scrolling retains overlapping DOM nodes and releases replaced chart trees. (moai-yigx)
 - Explorer previews encode in a bounded background worker and appear as they finish; cached image files are checked at the follow cadence rather than on each frame. (moai-zidx)
 
 ### Fixed
 
+- Gantt undo targets its original tracker and refuses stale absolute restores; web undo uses the locked write result. Widening the web Gantt preserves the left visible date without repeating full row placement. (moai-yigx)
 - Image placeholder paths remain clickable across wrapped lines and when their labels scroll offscreen. Resize bursts retry queued previews and skip stale encoding jobs. (moai-zidx)
 
 ## [0.44.0] - 2026-11-02
