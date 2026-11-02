@@ -104,7 +104,9 @@ pub fn notices<'a>(pages: impl IntoIterator<Item = &'a Page>) -> Notices<'a> {
                 n.missed.push(three);
             }
         }
-        n.missing.extend(p.issues.iter().filter(|i| !i.exists).map(|i| (p.slug.as_str(), i.id.as_str())));
+        n.missing.extend(
+            p.issues.iter().filter(|i| !i.exists && i.external.is_none()).map(|i| (p.slug.as_str(), i.id.as_str())),
+        );
     }
     n
 }
@@ -120,7 +122,7 @@ pub struct Page {
     pub path: String,
     /// 파일 크기. 못 연 페이지면 0 이다 — 그때는 [`Page::error`] 가 선다.
     pub bytes: u64,
-    /// 본문이 대는 이슈 id, 처음 나온 차례로 하나씩.
+    /// 본문이 대는 로컬 id, 처음 나온 차례로 하나씩. 그 뒤에 외부 id·출처 쌍을 처음 나온 차례로 둔다.
     pub issues: Vec<IssueRef>,
     /// 다른 페이지로 가는 링크, 적힌 차례로. 같은 페이지의 머리글로 가는 `#앵커` 도 여기 선다 — `to` 가 이 페이지다.
     pub links: Vec<Link>,
@@ -141,8 +143,11 @@ pub struct Page {
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct IssueRef {
     pub id: String,
-    /// 그 id 의 줄이 트래커에 있는가.
+    /// 그 id 의 줄이 이 저장소의 트래커에 있는가. 외부 참조는 조회하지 않아 false 다.
     pub exists: bool,
+    /// 명시적으로 다른 저장소의 이슈로 표시한 링크의 출처 URL. 원격 존재 여부는 묻지 않는다.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub external: Option<String>,
 }
 
 impl Page {
@@ -576,7 +581,9 @@ fn page_at(
             if let Some(title) = parsed.title {
                 page.title = title;
             }
-            page.issues = parsed.ids.into_iter().map(|id| IssueRef { exists: known(&id), id }).collect();
+            page.issues =
+                parsed.ids.into_iter().map(|id| IssueRef { exists: known(&id), id, external: None }).collect();
+            page.issues.extend(parsed.external);
             page.links = parsed
                 .links
                 .into_iter()
@@ -625,6 +632,8 @@ pub struct Parsed {
     pub title: Option<String>,
     /// 접두어가 맞는 id, 처음 나온 차례로 하나씩.
     pub ids: Vec<String>,
+    /// `"external issue"` 제목이 붙은 HTTP(S) 링크의 id 와 출처. 로컬 id 와 별도로 센다.
+    pub external: Vec<IssueRef>,
     /// `(글, 가리키는 곳)` — 페이지 링크만([`target`]), 같은 짝은 한 번.
     pub links: Vec<(String, Aim)>,
     /// 머리글마다 앵커와 줄, 적힌 차례로([`Page::headings`]).
@@ -643,6 +652,9 @@ pub struct Parsed {
 ///   꼴로는 id 다(2026-10-04 사용자 결정, moai-mdzx.3pm). 그 id 의 줄이 트래커에 있어도 안 센다 — 페이지에서 그
 ///   낱말은 스킬이다. **걷은 스킬의 이름도 든다**([`crate::skill::EVER_PLANTED`], moai-six5.1xz) — 0.9.0 이 걷은
 ///   `moai-work` 를 이야기하는 페이지가 그 낱말을 없는 id 로 세면 안 된다
+/// - `[moai-ab12](https://… "external issue")` 는 명시적으로 다른 저장소의 이슈다(moai-fcj3.syv).
+///   그 링크의 글에 든 id 는 로컬 id 에 세지 않고 출처 URL 과 함께 `external` 에 둔다. 같은 id 를 링크 밖에서
+///   따로 쓰면 그 로컬 참조도 남는다. 링크 제목이 없거나 HTTP(S)가 아닌 링크는 기존 로컬 참조다.
 /// - 링크는 [`target`] 이 페이지 링크로 푸는 것만 든다
 /// - 머리글은 모든 단이 앵커를 받는다([`Anchors`]). 앵커를 짓는 글은 GitHub 이 화면에 그리는 글이다 — 인라인 코드는
 ///   백틱 없이, 링크는 글만, 그림의 대체글은 빼고, 줄바꿈은 줄바꿈 글자로(그래서 [`anchor`] 가 걷는다)
@@ -657,6 +669,7 @@ pub fn parse(slug: &str, body: &str, prefix: &str) -> Parsed {
     let mut text = String::new();
     // 링크 안에서 모으는 글 — 링크는 겹치지 않는다(CommonMark).
     let mut link: Option<(String, String)> = None;
+    let mut external: Option<String> = None;
     // 지금 모으는 머리글의 글과 그 머리글이 선 줄 — 머리글은 겹치지 않는다.
     let mut heading: Option<(String, usize)> = None;
     let mut anchors = Anchors::default();
@@ -682,6 +695,19 @@ pub fn parse(slug: &str, body: &str, prefix: &str) -> Parsed {
             }
         }
     };
+    let collect_ids = |s: &str, external: Option<&str>, out: &mut Parsed| {
+        if let Some(url) = external {
+            let mut found = Vec::new();
+            ids(s, &mut found);
+            for id in found {
+                if !out.external.iter().any(|r| r.id == id && r.external.as_deref() == Some(url)) {
+                    out.external.push(IssueRef { id, exists: false, external: Some(url.to_string()) });
+                }
+            }
+        } else {
+            ids(s, &mut out.ids);
+        }
+    };
     for (event, range) in Parser::new_ext(body, crate::markdown::OPTIONS).into_offset_iter() {
         match event {
             Event::Text(_) | Event::Code(_) if code_block > 0 => {}
@@ -700,8 +726,8 @@ pub fn parse(slug: &str, body: &str, prefix: &str) -> Parsed {
                 }
             }
             Event::Code(t) => {
-                ids(&std::mem::take(&mut text), &mut out.ids);
-                ids(&t, &mut out.ids);
+                collect_ids(&std::mem::take(&mut text), external.as_deref(), &mut out);
+                collect_ids(&t, external.as_deref(), &mut out);
                 if in_title {
                     title.get_or_insert_with(String::new).push_str(&t);
                 }
@@ -716,7 +742,7 @@ pub fn parse(slug: &str, body: &str, prefix: &str) -> Parsed {
                 }
             }
             other => {
-                ids(&std::mem::take(&mut text), &mut out.ids);
+                collect_ids(&std::mem::take(&mut text), external.as_deref(), &mut out);
                 match other {
                     Event::Start(Tag::CodeBlock(_)) => code_block += 1,
                     Event::End(TagEnd::CodeBlock) => code_block = code_block.saturating_sub(1),
@@ -746,8 +772,14 @@ pub fn parse(slug: &str, body: &str, prefix: &str) -> Parsed {
                     }
                     Event::Start(Tag::Image { .. }) => image += 1,
                     Event::End(TagEnd::Image) => image = image.saturating_sub(1),
-                    Event::Start(Tag::Link { dest_url, .. }) => link = Some((dest_url.to_string(), String::new())),
+                    Event::Start(Tag::Link { dest_url, title, .. }) => {
+                        external = (title.as_ref() == "external issue"
+                            && (dest_url.starts_with("https://") || dest_url.starts_with("http://")))
+                        .then(|| dest_url.to_string());
+                        link = Some((dest_url.to_string(), String::new()));
+                    }
                     Event::End(TagEnd::Link) => {
+                        external = None;
                         if let Some((dest, words)) = link.take()
                             && let Some(aim) = target(slug, &dest)
                         {
@@ -762,7 +794,7 @@ pub fn parse(slug: &str, body: &str, prefix: &str) -> Parsed {
             }
         }
     }
-    ids(&text, &mut out.ids);
+    collect_ids(&text, external.as_deref(), &mut out);
     out
 }
 
@@ -1136,12 +1168,50 @@ mod tests {
         let z = w.find("z").unwrap();
         assert_eq!(
             z.issues,
-            [IssueRef { id: "moai-ab12".into(), exists: true }, IssueRef { id: "moai-cd34".into(), exists: false }]
+            [
+                IssueRef { id: "moai-ab12".into(), exists: true, external: None },
+                IssueRef { id: "moai-cd34".into(), exists: false, external: None }
+            ]
         );
         assert_eq!(z.bytes, "# alpha\n\nmoai-ab12 moai-cd34\n".len() as u64);
         assert_eq!(w.find("guide/Beta").unwrap().links[0].to, "README");
         assert!(w.find("guide/beta").is_none(), "슬러그는 대소문자를 가른다");
         assert!(w.skipped.is_empty() && !w.fell_short());
+    }
+
+    #[test]
+    fn external_issue_links_keep_their_source_without_becoming_missing_local_issues() {
+        let s = Scratch::new("wiki-external");
+        let url = "https://github.com/fork/moai/pull/43";
+        let body = format!(
+            "# Fork\n\n[moai-pxiy]({url} \"external issue\") \
+             [`moai-pxiy`]({url} \"external issue\") \
+             [moai-pxiy](https://example.com/other \"external issue\")\n\n\
+             moai-gone [moai-ab12](https://example.com/local) \
+             [moai-ab12](local.md \"external issue\")\n\n\
+             ```md\n[moai-demo]({url} \"external issue\")\n```\n"
+        );
+        write(s.path(), "docs/fork.md", &body);
+        // Even a colliding local id does not make the explicitly foreign reference local.
+        let w = load(s.path(), "docs", "moai", &|id| id == "moai-ab12" || id == "moai-pxiy").unwrap();
+        let p = w.find("fork").unwrap();
+        let local: Vec<_> =
+            p.issues.iter().filter(|r| r.external.is_none()).map(|r| (r.id.as_str(), r.exists)).collect();
+        assert_eq!(local, [("moai-gone", false), ("moai-ab12", true)]);
+        let foreign: Vec<_> = p.issues.iter().filter(|r| r.external.is_some()).collect();
+        assert_eq!(foreign.len(), 2, "같은 id 여도 다른 출처를 잃지 않는다");
+        assert!(foreign.iter().all(|r| r.id == "moai-pxiy" && !r.exists));
+        assert_eq!(foreign[0].external.as_deref(), Some(url));
+        assert_eq!(notices([p]).missing, [("fork", "moai-gone")]);
+        let json = serde_json::to_value(&p.issues).unwrap();
+        assert!(json[0].get("external").is_none());
+        assert_eq!(json[2]["external"], url);
+        assert_eq!(json[2]["exists"], false);
+
+        let parsed = parse("fork", &format!("[moai-pxiy]({url} \"external issue\") moai-pxiy"), "moai");
+        assert_eq!(parsed.ids, ["moai-pxiy"]);
+        assert_eq!(parsed.external.len(), 1, "링크 밖의 로컬 참조도 남긴다");
+        assert!(parse("fork", "[moai-ab12](file:///tmp/x \"external issue\")", "moai").external.is_empty());
     }
 
     /// `wiki_dir` 을 쓰는 자리에서 잰다 — 없으면 `no_dir`(못 읽은 것이 아니다), 파일이면 `not_a_dir`, 절대·`..`·
