@@ -154,6 +154,31 @@ each raised row's `due_on`, with `due_from` naming the ancestor when it is not t
 own; on `moai status --json` the `due_priority_behind` notice carries it per id in
 `deadlines`, beside the days left in `ages`.
 
+## Read wiki issue references
+
+`moai wiki ls --json` and `moai wiki show <slug> --json` carry `issues` for
+each page. A local reference has `id` and `exists`, which says whether that id
+is present in this tracker, including the archive. `external` is absent.
+
+A reference marked by an HTTP(S) source link titled `"external issue"` carries
+`external`, the link's URL, and `exists: false`. No remote existence check is
+made. This reference is excluded from missing-local-issue notices, local issue
+`named_in` results and duplicate local issue choices in the explorer.
+
+Check for `external` before treating `exists: false` as a missing local id.
+Local ids appear first in order of first mention, followed by external id/URL
+pairs in their first-mentioned order. A local and external reference with the
+same id can both appear, as can external references to different URLs; key a
+reference by its source as well as its id.
+
+```json
+[
+  {"id": "moai-ab12", "exists": true},
+  {"id": "moai-gone", "exists": false},
+  {"id": "moai-ab12", "exists": false, "external": "https://example.com/fork/43"}
+]
+```
+
 ## Read the wiki about one row
 
 `moai show <id> --json` also carries `wiki`, the wiki pages about that row, read
@@ -253,4 +278,4 @@ A whole tracker with bodies runs to megabytes — this repository's
 - **Pages repeat or skip a row** — the order moved under you. Page in `id` or
   `created` order; priority and title move when someone edits a row
 
-Decided in: moai-e9hi, moai-b4dc, moai-ijjd, moai-wk7i, moai-g8pt moai-4v3h moai-yigx
+Decided in: moai-e9hi, moai-b4dc, moai-ijjd, moai-wk7i, moai-g8pt moai-4v3h moai-yigx moai-fcj3
