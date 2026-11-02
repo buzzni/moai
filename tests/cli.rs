@@ -32810,10 +32810,14 @@ fn get(port: u16, path: &str) -> (u16, String, String) {
 }
 
 fn events(port: u16) -> std::io::BufReader<std::net::TcpStream> {
+    events_path(port, "/api/events")
+}
+
+fn events_path(port: u16, path: &str) -> std::io::BufReader<std::net::TcpStream> {
     use std::io::{BufRead as _, Write as _};
     let mut stream = dial(port);
     stream.set_read_timeout(Some(std::time::Duration::from_secs(5))).unwrap();
-    write!(stream, "GET /api/events HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n\r\n").unwrap();
+    write!(stream, "GET {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n\r\n").unwrap();
     let mut reader = std::io::BufReader::new(stream);
     let mut head = String::new();
     loop {
@@ -33150,6 +33154,35 @@ fn web_events_refuse_a_foreign_host() {
 }
 
 #[test]
+#[cfg(unix)]
+fn web_events_reserve_the_slot_until_a_tab_resumes_or_its_grace_ends() {
+    let s = init("web-events-reserved-resume");
+    let web = serve(s.path());
+    let mut first = events(web.port);
+    let hello = event_named(&mut first, "hello");
+    let id = hello["tab"].as_str().unwrap();
+    let token = hello["token"].as_str().unwrap();
+    let mut others = Vec::new();
+    for _ in 0..2 {
+        let mut stream = events(web.port);
+        event_named(&mut stream, "hello");
+        others.push(stream);
+    }
+    ok(s.path(), &["ctl", "propose", "Keep this card", "-t", id, "--json"]);
+    let card = event_named(&mut first, "proposal");
+    drop(first);
+    // Even before the old stream is observed closing, an overflow tab cannot take its identity's place.
+    assert_eq!(get(web.port, "/api/events").0, 503);
+    let mut resumed = events_path(web.port, &format!("/api/events?resume={id}&token={token}"));
+    assert_eq!(event_named(&mut resumed, "hello"), hello);
+    assert_eq!(event_named(&mut resumed, "proposal")["id"], card["id"]);
+    assert_eq!(get(web.port, "/api/stamp").0, 200);
+    drop(others);
+}
+
+// Windows streams have no ctl identity to reserve, so anonymous capacity returns immediately.
+#[test]
+#[cfg(not(unix))]
 fn web_events_give_their_slot_back_when_the_tab_goes() {
     let s = init("web-events-release");
     let web = serve(s.path());
