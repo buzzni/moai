@@ -142,6 +142,8 @@ pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
     let root = app.here().unwrap_or_else(|| ".".into());
     app.site.me = app.whoami(&root);
     // 층이 없어도 `a` 로 첫 등록을 한다 — 그때 쓸 설정 자리와 고르기 창이 처음 열 자리(moai-plvy).
+    app.images.active = std::io::stdout().is_terminal();
+    app.images.setting = reg.image_draw.clone();
     app.user_config = config;
     app.config_stamp = config_stamp;
     // **띄울 때 진 읽기도 걸음이 갚는다**(moai-po6v) — 표식은 읽기 전에 쟀으니 진 뒤에도 파일의 것과
@@ -315,6 +317,8 @@ fn outside(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
     // 묻는다 — 전역 git 설정이면 그것으로 선다. 층에서 프로젝트로 들어가면 그 뿌리에서 다시 푼다
     // (`App::enter_project`) — 프로젝트에만 적힌 git 설정이어도 [NEW] 가 선다.
     app.site.me = app.whoami(&std::env::current_dir().unwrap_or_else(|_| ".".into()));
+    app.images.active = std::io::stdout().is_terminal();
+    app.images.setting = reg.image_draw.clone();
     app.user_config = config;
     app.config_stamp = config_stamp;
     // **띄울 때 진 읽기도 걸음이 갚는다**(moai-po6v) — 표식은 읽기 전에 쟀으니 진 뒤에도 파일의 것과
@@ -447,6 +451,7 @@ fn screen(mut app: App) -> R<Vec<String>> {
     let out = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         loop_until_quit(&mut term, &mut app, &mut left, control.as_ref())
     }));
+    let _ = app.images.cleanup(&mut std::io::stdout().lock());
     drop(control);
     // 루프는 사건마다 터미널의 잡기를 `wants_mouse` 에 맞춰 두므로, 제대로 끝난 자리의 값이 곧 터미널의 것이다.
     // 오류·패닉으로 끝난 길에서는 어긋날 수 있는데, 그때 드는 것은 헛 왕복 한 번이지 새는 글이 아니다.
@@ -1847,6 +1852,7 @@ fn loop_until_quit(
                     )),
                 );
             }
+            app.images.cleanup(&mut std::io::stdout().lock())?;
             suspend(caught, app.rolled_at);
             let got = write_in_editor(&edit.editor, &edit.text, &std::env::temp_dir(), app.site.lang, left);
             // **받은 글을 올리기보다 먼저 담는다.** 올리기가 실패하면 루프가 끝나는데, 먼저 담아

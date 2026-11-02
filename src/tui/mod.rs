@@ -11,6 +11,7 @@ pub mod form;
 mod gantt;
 mod help;
 mod hint;
+pub mod images;
 pub mod init_screen;
 pub mod input;
 pub mod jotfile;
@@ -1507,6 +1508,7 @@ pub struct App {
     /// 가 채운다. 그리는 쪽은 `&App` 만 빌려 제자리에서 못 넣고, 안 넣으면 프레임마다 같은 본문을
     /// 다시 판다. 값일 뿐이라 비어 있어도 그림은 같다 — 그때는 그리는 쪽이 그 자리에서 편다.
     body: Option<draw::Body>,
+    pub images: images::Images,
     /// 상세의 "걸린 노트" 절을 펼쳐 둔 한 벌(리뷰 moai-wcy8.rbj, [`draw::NoteHits`]) — [`App::body`] 와 같은
     /// 까닭으로 `draw::fill_note_hits` 가 그리기 전에 채운다. 값일 뿐이다.
     note_hits: Option<draw::NoteHits>,
@@ -3233,6 +3235,7 @@ impl App {
             notice: None,
             keys: keys::Keymap::default(),
             body: None,
+            images: images::Images::default(),
             note_hits: None,
             wiki_about: None,
             board_width: None,

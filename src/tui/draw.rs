@@ -298,7 +298,7 @@ pub fn screen(f: &mut Frame, app: &mut App) {
         Mode::Sort(e) => sort_edit(f, e, body, lang),
         Mode::Proposals(id) => proposals_window(f, app.proposals.rows(), id.as_deref(), body, lang),
         Mode::Stats(w) => stats_window(f, w, body, lang),
-        Mode::Wiki(w) => wiki_at = Some(wiki_window(f, w, body, raw, share, lang)),
+        Mode::Wiki(w) => wiki_at = Some(wiki_window(f, w, body, raw, share, lang, &mut app.images)),
         Mode::Ask(ask) => {
             if let Mode::Backlog(form) = ask.back.as_mut() {
                 jot(f, form, body, false, tint, lang);
@@ -1277,6 +1277,7 @@ fn wiki_window(
     raw: bool,
     share: Option<u16>,
     lang: Lang,
+    images: &mut super::images::Images,
 ) -> super::mouse::WikiAt {
     f.render_widget(Clear, at);
     // 본문이 설 자리가 없으면(좁은 창) 목록만 선다 — 두 칸의 바닥([`LIST_MIN_H`]·[`DETAIL_MIN_H`])을 다 못 채우는 폭이다.
@@ -1297,7 +1298,7 @@ fn wiki_window(
         w.unpick_unseen(false);
     }
     let rows = wiki_list(f, w, list_at, lang);
-    let links = page_at.map(|page_at| wiki_page(f, w, page_at, raw, lang)).unwrap_or_default();
+    let links = page_at.map(|page_at| wiki_page(f, w, page_at, raw, lang, images)).unwrap_or_default();
     // 고르기 창은 본문 칸을 덮는다 — 고를 것이 그 페이지의 것이라 그 자리에 선다. 본문이 접혔으면 목록을 덮는다.
     let title = w.current().map(|p| crate::text::one_line(&p.title)).unwrap_or_default();
     if let Some(c) = &mut w.choose {
@@ -1430,7 +1431,7 @@ impl Laid {
 /// 원문은 적힌 글이지 그린 글이 아니라 링크가 어느 칸인지를 안 잰다(2026-10-04, 일꾼이 정했다 — moai-p61w 노트).
 #[cfg(test)]
 fn wiki_lines(p: &crate::wiki::Page, w: usize, raw: bool, lang: Lang) -> Laid {
-    wiki_lines_in(p, w, raw, lang, None)
+    wiki_lines_in(p, w, raw, lang, None, None)
 }
 /// [`wiki_lines`] 의 몸 — 그림의 자리표시를 `lang` 의 말로 달고, `image` 가 있으면 그 자리에서 못 찾는 그림을 `없음` 으로 단다.
 fn wiki_lines_in(
@@ -1439,6 +1440,7 @@ fn wiki_lines_in(
     raw: bool,
     lang: Lang,
     image: Option<&crate::image::Context<'_>>,
+    graphics: Option<&mut super::images::Images>,
 ) -> Laid {
     let warn = from_anstyle(style::WARN);
     let as_written = |above: usize| p.headings.iter().map(|h| above + h.line).collect();
@@ -1454,7 +1456,14 @@ fn wiki_lines_in(
             Laid::bare(out, heads)
         }
         (Some(body), _) if raw => Laid::bare(body_lines(crate::wiki::unmarked(body), w, true), as_written(0)),
-        (Some(body), _) => laid_body_in(crate::wiki::unmarked(body), w, lang, image),
+        (Some(body), _) => {
+            let body = crate::wiki::unmarked(body);
+            let mut laid = laid_body_in(body, w, lang, image);
+            if let Some(graphics) = graphics {
+                expand_images(&mut laid, body, w, lang, image, graphics);
+            }
+            laid
+        }
         (None, Some(u)) => {
             let said = fill(say(lang, "wiki.body_unread"), &[("said", &crate::view::wiki::unread(lang, p, u))]);
             Laid::bare(wrapped(&format!("! {said}"), w, warn), Vec::new())
@@ -1468,7 +1477,14 @@ fn wiki_lines_in(
 ///
 /// 보이는 링크 칸의 화면 자리를 낸다(moai-p61w) — 마우스가 다음 사건에서 맞힌다(`mouse::WikiAt::links`). 칠하는 칸과
 /// 같은 자리에서 잰다([`shown_links`]): 골라진 링크를 칠한 칸이 곧 누르면 그 링크인 칸이다.
-fn wiki_page(f: &mut Frame, w: &mut super::wiki::Window, at: Rect, raw: bool, lang: Lang) -> Vec<(Rect, usize)> {
+fn wiki_page(
+    f: &mut Frame,
+    w: &mut super::wiki::Window,
+    at: Rect,
+    raw: bool,
+    lang: Lang,
+    graphics: &mut super::images::Images,
+) -> Vec<(Rect, usize)> {
     let focused = w.focus == super::wiki::Side::Page;
     let block = pane_frame(focused).padding(Padding::horizontal(left_gutter() as u16));
     let inner = block.inner(at);
@@ -1479,13 +1495,19 @@ fn wiki_page(f: &mut Frame, w: &mut super::wiki::Window, at: Rect, raw: bool, la
         .unwrap_or_default();
     // 든 것이 그 페이지·그 폭·그 토글의 것이 아닐 때만 다시 편다.
     let fresh = match w.current() {
-        Some(p) if !w.laid.as_ref().is_some_and(|l| l.slug == p.slug && l.w == width && l.raw == raw) => {
+        Some(p)
+            if !w
+                .laid
+                .as_ref()
+                .is_some_and(|l| l.slug == p.slug && l.w == width && l.raw == raw && graphics.valid(&l.lines)) =>
+        {
             let image = w.image_home.as_ref().map(|base| crate::image::Context {
                 base,
                 allowed: &w.dir,
                 from: crate::image::From::Wiki { page_rel: &p.path, wiki_dir: &w.dir },
             });
-            let Laid { lines, heads, links, cells } = wiki_lines_in(p, width, raw, lang, image.as_ref());
+            let Laid { lines, heads, links, cells } =
+                wiki_lines_in(p, width, raw, lang, image.as_ref(), Some(graphics));
             // Same gate as the hyperlink pass used to apply each frame: drawn (not raw), readable, no conflict.
             let images = match (&image, &p.body) {
                 (Some(image), Some(body)) if !raw && !p.conflict => image.links(crate::wiki::unmarked(body)),
@@ -5103,6 +5125,9 @@ fn about_wiki_lines<'a>(lang: crate::i18n::Lang, a: &WikiAbout) -> Vec<Line<'a>>
 
 /// 한 줄의 조각들에서 찾은 글자를 칠한다([`mark`]) — 줄의 모양(스타일·정렬)은 그대로다.
 fn mark_line(mut line: Line<'static>, q: Option<&str>) -> Line<'static> {
+    if line.spans.iter().any(|s| s.content.contains(super::images::PLACEHOLDER)) {
+        return line;
+    }
     line.spans = mark(std::mem::take(&mut line.spans), q);
     line
 }
@@ -5143,19 +5168,27 @@ fn fill_body(app: &mut App, rows: &[Row], w: usize) {
         Some(Row::Up | Row::Project(_)) | None => None,
     };
     let raw = app.raw;
+    let mut graphics = std::mem::take(&mut app.images);
     // **견줄 때는 빌려만 쓴다**(리뷰) — 든 것이 그대로 맞으면 베낄 것이 하나도 없다. 프레임마다
     // 글을 통째로 베껴 놓고 견주면, 걷으려던 프레임당 일이 큰 본문에서 memcpy 로 도로 선다.
     let standing = seat_at.and_then(|(seat, at)| app.issue_at(seat, at)).and_then(|i| i.body.as_ref().map(|b| (i, b)));
     let fresh = match standing {
         // 든 것이 그 줄·그 글·그 폭의 것이면 그대로 둔다.
-        Some((i, body)) if app.body.as_ref().is_some_and(|held| held.fits(&i.id, body, w, raw)) => return,
+        Some((i, body))
+            if app.body.as_ref().is_some_and(|held| held.fits(&i.id, body, w, raw) && graphics.valid(&held.lines)) =>
+        {
+            app.images = graphics;
+            return;
+        }
         Some((i, body)) => {
             let site = seat_at.and_then(|(seat, _)| app.site_of_seat(seat));
             let image = site.and_then(|s| s.repo.as_ref()).map(crate::image::Context::issue);
             let lines = if raw {
                 body_lines(body, w, true)
             } else {
-                laid_body_in(body, w, site.map_or(Lang::En, |s| s.lang), image.as_ref()).lines
+                let mut laid = laid_body_in(body, w, site.map_or(Lang::En, |s| s.lang), image.as_ref());
+                expand_images(&mut laid, body, w, site.map_or(Lang::En, |s| s.lang), image.as_ref(), &mut graphics);
+                laid.lines
             };
             let images = match (&image, raw) {
                 (Some(image), false) => image.links(body),
@@ -5166,6 +5199,7 @@ fn fill_body(app: &mut App, rows: &[Row], w: usize) {
         None => None,
     };
     app.body = fresh;
+    app.images = graphics;
 }
 
 /// 상세의 "걸린 노트" 절을 펴 둔 한 벌(리뷰 moai-wcy8.rbj) — [`Body`] 와 같은 까닭이다. **노트는 본문보다
@@ -5272,6 +5306,58 @@ fn laid_body_in(body: &str, w: usize, lang: Lang, image: Option<&crate::image::C
         .map(|line| Line::from(line.into_iter().map(|s| Span::styled(s.text, role_style(s.role))).collect::<Vec<_>>()))
         .collect();
     Laid { lines, heads, links, cells }
+}
+
+/// Expand only image blocks; remap every heading and link through the same line map.
+fn expand_images(
+    laid: &mut Laid,
+    body: &str,
+    width: usize,
+    lang: Lang,
+    context: Option<&crate::image::Context<'_>>,
+    graphics: &mut super::images::Images,
+) {
+    if !graphics.active {
+        return;
+    }
+    let Some(context) = context else { return };
+    let mut blocks = crate::markdown::parse(&crate::text::sanitize(body));
+    context.labels(&mut blocks, lang);
+    let (_, starts) = crate::markdown::layout_at(&blocks, width, crate::markdown::Overflow::Break);
+    let mut additions = std::collections::BTreeMap::new();
+    let mut count = 0;
+    for (n, block) in blocks.iter().enumerate() {
+        if let crate::markdown::Block::Image { dest, .. } = block
+            && count < 8
+            && let Some(path) = context.file(dest)
+        {
+            let lines = graphics.lines(&path, width);
+            if !lines.is_empty() {
+                count += 1;
+            }
+            // labels may wrap; insert after all lines belonging to the image block.
+            let end = starts.get(n + 1).map_or(laid.lines.len(), |s| s.saturating_sub(1));
+            additions.insert(end, lines);
+        }
+    }
+    let old = std::mem::take(&mut laid.lines);
+    let mut map = vec![0; old.len()];
+    for (n, line) in old.into_iter().enumerate() {
+        if let Some(extra) = additions.remove(&n) {
+            laid.lines.extend(extra);
+        }
+        map[n] = laid.lines.len();
+        laid.lines.push(line);
+    }
+    if let Some(extra) = additions.remove(&map.len()) {
+        laid.lines.extend(extra);
+    }
+    for head in &mut laid.heads {
+        *head = map[*head];
+    }
+    for cell in &mut laid.cells {
+        cell.line = map[cell.line];
+    }
 }
 
 /// 링크의 `#앵커` 로 건너와 선 머리글의 줄 — 앞에 [`LANDED`] 를 단다(2026-10-04 사용자 결정, moai-tllo). 페이지 끝
@@ -6311,12 +6397,22 @@ impl Painter {
         term: &mut ratatui::Terminal<B>,
         app: &mut App,
     ) -> Result<(), B::Error> {
+        let area = term.size().ok();
+        if let Some(area) = area
+            && app.images.geometry(area.width, area.height)
+        {
+            app.body = None;
+            if let Mode::Wiki(w) = &mut app.mode {
+                w.laid = None;
+            }
+        }
         self.paint(term, |f| {
             screen(f, app);
             use std::io::IsTerminal;
             if std::io::stdout().is_terminal() && !app.raw {
                 image_hyperlinks(f.buffer_mut(), app);
             }
+            let _ = app.images.frame(f.buffer_mut(), &mut std::io::stdout().lock());
         })
     }
 
@@ -13549,6 +13645,78 @@ fn link_image_cells(buffer: &mut ratatui::buffer::Buffer, targets: &[(String, st
 #[cfg(test)]
 mod image_placeholder_tests {
     use super::*;
+    #[test]
+    fn graphics_remap_headings_links_and_preserve_ids_under_search() {
+        let root = crate::scratch::Scratch::new("tui-image-headings");
+        std::fs::create_dir_all(root.join(".moai/images")).unwrap();
+        image::DynamicImage::new_rgb8(160, 160).save(root.join(".moai/images/0123456789abcdef.png")).unwrap();
+        let context = crate::image::Context { base: &root, allowed: ".moai/images", from: crate::image::From::Issue };
+        let body = "# Before\n\n![긴 그림 설명](.moai/images/0123456789abcdef.png)\n\n## After\n\n[a link](https://example.com)";
+        let mut laid = laid_body_in(body, 30, Lang::Ko, Some(&context));
+        let old_head = laid.heads[1];
+        let old_link = laid.cells[0].line;
+        let mut images = super::super::images::Images::testing();
+        expand_images(&mut laid, body, 30, Lang::Ko, Some(&context), &mut images);
+        let added = laid.lines.iter().filter(|l| l.to_string().contains(super::super::images::PLACEHOLDER)).count();
+        assert!(added > 0);
+        assert_eq!(laid.heads[1], old_head + added);
+        assert_eq!(laid.cells[0].line, old_link + added);
+        assert!(laid.lines[laid.heads[1]].to_string().contains("After"));
+        let line = laid.lines.iter().find(|l| l.to_string().contains(super::super::images::PLACEHOLDER)).unwrap();
+        assert_eq!(mark_line(line.clone(), Some("\u{10eeee}")), *line);
+        let mut term = ratatui::Terminal::new(ratatui::backend::TestBackend::new(30, 20)).unwrap();
+        let mut painter = Painter::default();
+        let mut bytes = Vec::new();
+        painter
+            .paint(&mut term, |f| {
+                f.render_widget(Paragraph::new(laid.lines.clone()), f.area());
+                images.frame(f.buffer_mut(), &mut bytes).unwrap();
+            })
+            .unwrap();
+        assert!(String::from_utf8_lossy(&bytes).contains("U=1"));
+        bytes.clear();
+        painter
+            .paint(&mut term, |f| {
+                f.render_widget(Paragraph::new(laid.lines.clone()).scroll((1, 0)), f.area());
+                images.frame(f.buffer_mut(), &mut bytes).unwrap();
+            })
+            .unwrap();
+        assert!(bytes.is_empty());
+        images.active = false;
+    }
+    #[test]
+    fn wiki_graphics_share_bom_and_cr_normalization_and_raw_gate() {
+        let root = crate::scratch::Scratch::new("wiki-image-normalization");
+        std::fs::create_dir_all(root.join("docs/images")).unwrap();
+        image::DynamicImage::new_rgb8(160, 160).save(root.join("docs/images/a.png")).unwrap();
+        let context = crate::image::Context {
+            base: &root,
+            allowed: "docs",
+            from: crate::image::From::Wiki { page_rel: "docs/page.md", wiki_dir: "docs" },
+        };
+        let body = "\u{feff}![shot](images/a.png)\r\r## After\r\r[link](https://example.com)";
+        let page = crate::wiki::Page {
+            slug: "page".into(),
+            title: "page".into(),
+            path: "docs/page.md".into(),
+            bytes: body.len() as u64,
+            issues: Vec::new(),
+            links: Vec::new(),
+            headings: crate::wiki::parse("page", body, "moai").headings,
+            linked_from: Vec::new(),
+            conflict: false,
+            error: None,
+            body: Some(body.into()),
+        };
+        let mut images = super::super::images::Images::testing();
+        let drawn = wiki_lines_in(&page, 30, false, Lang::En, Some(&context), Some(&mut images));
+        assert!(drawn.lines.iter().any(|l| l.to_string().contains(super::super::images::PLACEHOLDER)));
+        assert!(drawn.lines[drawn.heads[0]].to_string().contains("After"));
+        assert!(drawn.lines[drawn.cells[0].line].to_string().contains("link"));
+        let raw = wiki_lines_in(&page, 30, true, Lang::En, Some(&context), Some(&mut images));
+        assert!(!raw.lines.iter().any(|l| l.to_string().contains(super::super::images::PLACEHOLDER)));
+        images.active = false;
+    }
     #[test]
     fn the_detail_shows_the_image_placeholder_and_raw_keeps_markdown() {
         let body = "![shot](.moai/images/0123456789abcdef.png)";

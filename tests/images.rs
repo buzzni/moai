@@ -227,3 +227,80 @@ fn a_long_alt_still_gets_its_localized_placeholder_in_show() {
         "{out}"
     );
 }
+
+/// A real stdout pty exercises the shared tty check without reaching the person's tmux server.
+#[cfg(unix)]
+#[test]
+fn inherited_tmux_uses_stdout_device_and_skips_queries_without_pictures() {
+    use std::{
+        fs::File,
+        io::Read,
+        os::{fd::FromRawFd, unix::fs::PermissionsExt},
+    };
+    let s = init("image-tmux-tty");
+    let plain = json(&ok(&s, &["add", "plain", "-b", "no pictures", "--json"]))["id"].as_str().unwrap().to_owned();
+    let id = json(&ok(&s, &["add", "picture", "--json"]))["id"].as_str().unwrap().to_owned();
+    let p = picture(&s, 4, 4);
+    add(&s, &p, &["--to", &id]);
+    let bin = s.join("bin");
+    std::fs::create_dir(&bin).unwrap();
+    let tmux = bin.join("tmux");
+    std::fs::write(
+        &tmux,
+        "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$TEST_QUERY_LOG\"\nprintf '%s\\n' \"$TEST_PANE_TTY\"\n",
+    )
+    .unwrap();
+    std::fs::set_permissions(&tmux, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let log = s.join("queries");
+    let run_pty = |id: &str, real_pane: bool, forced: Option<&str>| {
+        let (mut master, mut slave) = (-1, -1);
+        let mut name = [0i8; 256];
+        // SAFETY: openpty writes valid descriptors and a tty name to the supplied buffers.
+        assert_eq!(
+            unsafe { libc::openpty(&mut master, &mut slave, name.as_mut_ptr(), std::ptr::null(), std::ptr::null()) },
+            0
+        );
+        // SAFETY: successful openpty transferred ownership of both fresh descriptors.
+        let (mut master, slave) = unsafe { (File::from_raw_fd(master), File::from_raw_fd(slave)) };
+        // SAFETY: openpty supplied a NUL-terminated pathname in name.
+        let tty = unsafe { std::ffi::CStr::from_ptr(name.as_ptr()) }.to_str().unwrap();
+        let mut cmd = command(&s);
+        cmd.args(["show", id])
+            .env("TMUX", "/tmp/moai-blkz-only-test,1,0")
+            .env("TERM", "xterm-kitty")
+            .env("KITTY_WINDOW_ID", "5")
+            .env("TERM_PROGRAM", "tmux")
+            .env("PATH", &bin)
+            .env("TEST_QUERY_LOG", &log)
+            .env("TEST_PANE_TTY", if real_pane { tty } else { "/dev/null" })
+            .env_remove("MOAI_IMAGES")
+            .stdout(slave);
+        if let Some(mode) = forced {
+            cmd.env("MOAI_IMAGES", mode);
+        }
+        let status = cmd.status().unwrap();
+        assert!(status.success());
+        drop(cmd);
+        let mut bytes = Vec::new();
+        let mut chunk = [0; 4096];
+        loop {
+            match master.read(&mut chunk) {
+                Ok(0) | Err(_) => break,
+                Ok(n) => bytes.extend_from_slice(&chunk[..n]),
+            }
+        }
+        String::from_utf8(bytes).unwrap()
+    };
+    assert!(!run_pty(&plain, false, None).contains("\x1b_G"));
+    assert!(!log.exists(), "picture-free body queried tmux");
+    assert!(run_pty(&id, false, None).contains("\x1b_Ga=T"));
+    assert!(
+        std::fs::read_to_string(&log).unwrap().contains("-S /tmp/moai-blkz-only-test list-panes -a -F #{pane_tty}")
+    );
+    let text = run_pty(&id, true, None);
+    assert!(!text.contains("\x1b_G"));
+    assert!(text.contains("\x1b]8;;file://"));
+    std::fs::remove_file(&log).unwrap();
+    assert!(run_pty(&id, true, Some("kitty")).contains("\x1b_Ga=T"));
+    assert!(!log.exists(), "explicit graphics queried tmux");
+}

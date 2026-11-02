@@ -108,21 +108,28 @@ pub fn size(w: u32, h: u32, cols: u32, cell: (u32, u32)) -> Size {
     Size { cols: pixels.0.div_ceil(cw), rows: pixels.1.div_ceil(ch), pixels }
 }
 pub fn kitty(png: &[u8], s: Size) -> Vec<u8> {
+    kitty_chunks(png, format!("a=T,f=100,c={},r={},q=2", s.cols, s.rows), true)
+}
+pub fn kitty_virtual(png: &[u8], s: Size, id: u32) -> Vec<u8> {
+    kitty_chunks(png, format!("a=T,U=1,f=100,i={id},c={},r={},q=2", s.cols, s.rows), false)
+}
+pub fn kitty_delete(id: u32) -> Vec<u8> {
+    format!("\x1b_Ga=d,d=I,i={id},q=2;\x1b\\").into_bytes()
+}
+fn kitty_chunks(png: &[u8], first: String, newline: bool) -> Vec<u8> {
     let encoded = STANDARD.encode(png);
     let mut out = Vec::new();
     let chunks: Vec<_> = encoded.as_bytes().chunks(4096).collect();
     for (n, c) in chunks.iter().enumerate() {
         let more = usize::from(n + 1 < chunks.len());
-        let header = if n == 0 {
-            format!("\x1b_Ga=T,f=100,c={},r={},q=2,m={more};", s.cols, s.rows)
-        } else {
-            format!("\x1b_Gm={more};")
-        };
+        let header = if n == 0 { format!("\x1b_G{first},m={more};") } else { format!("\x1b_Gm={more};") };
         out.extend_from_slice(header.as_bytes());
         out.extend_from_slice(c);
         out.extend_from_slice(b"\x1b\\");
     }
-    out.extend_from_slice(b"\n");
+    if newline {
+        out.extend_from_slice(b"\n");
+    }
     out
 }
 pub fn iterm(bytes: &[u8], s: Size) -> Vec<u8> {
