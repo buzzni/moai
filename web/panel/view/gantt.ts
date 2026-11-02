@@ -30,7 +30,7 @@ import {
   PX_PER_DAY, rangeOf, MIN_GRID, ROW_H, shiftPlan, wallAt, wallOf, weekends, widthOf, xOf, ZOOMS, zoomToFit, type Axis, type Edge, type GanttLine,
   type Placed, type Tick, type Zoom,
 } from './gantt-model.ts'
-import { firstStatus, glint, spins } from './spin.ts'
+import { firstStatus, glint, spins , lostMark } from './spin.ts'
 import { narrow, revealOffset, statusGlyph, statusOf, twigParts, TWIG_TEXT, windowRange } from './list-model.ts'
 import type { MountPane, PaneView } from './types.ts'
 
@@ -274,11 +274,14 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
     if (row && status !== null) {
       const { glyph, tone } = statusGlyph(status, m.boot)
       const name = String(row.title ?? row.id)
-      const moving = line.kind === 'row' && spins(m.index, line.at, firstStatus(m.boot), m.boot?.statuses)
+      const spin = line.kind === 'row' ? spins(m.index, line.at, firstStatus(m.boot), m.boot?.statuses) : 'still'
+      const moving = spin === 'turning'
+      const paused = spin === 'paused'
       title.append(row.kind === 'milestone' ? '◆ ' : '', moving ? glint(doc, name) : name)
       title.title = name
       const progress = g?.progress.kind === 'rollup' && g.progress.total > 0 ? `${g.progress.done}/${g.progress.total}` : ''
-      const st = el(doc, 'span', { class: `c-st m-st-${tone}${moving ? ' m-spin' : ''}`, title: (copy.stats as Record<string, string>)[status] ?? status }, glyph)
+      const st = el(doc, 'span', { class: `c-st m-st-${tone}${paused ? ' m-spin m-spin-paused' : moving ? ' m-spin' : ''}`, title: (copy.stats as Record<string, string>)[status] ?? status }, glyph)
+      if (paused) { st.append(lostMark(doc, copy.list.sessionLost)); node.dataset.lost = '1' }
       node.append(el(doc, 'span', { class: 'c-id' }, row.id), st, title, el(doc, 'span', { class: 'c-n' }, progress), el(doc, 'span', { class: 'c-who' }, assigneeOf(row)))
     } else {
       title.append(line.kind === 'bucket' ? segLabel(line.seg, m.index, copy) : '')

@@ -708,6 +708,9 @@ impl Ground {
 /// 여기 드는 셈은 전부 `&[Issue]` 에 대한 순수 함수라 스레드로 옮길 수 있다 —
 /// `report`·`query` 를 순수하게 둔 계약이 여기서 값을 한다.
 pub struct Fresh {
+    pulse: crate::report::Pulse,
+    now_secs: i64,
+    pulse_fingerprint: u64,
     /// 어느 프로젝트를 읽었나 — 받는 쪽이 지금 프로젝트와 견준다([`App::receive`]).
     root: std::path::PathBuf,
     stamp: Stamp,
@@ -878,10 +881,17 @@ fn prepare(repo: &Repo, worktree: bool, lang: crate::i18n::Lang, held: Option<us
     let (lost, said) = placed(repo, &issues, g.swept, &now, lang);
     // 순수한 셈이 못 내는 몫은 여기서 더한다 — 자리 판정은 디스크를 읽어야 안다.
     warnings.add(lost);
+    let now_secs = crate::pulse::now_secs();
+    let pulse_fingerprint = crate::pulse::fingerprint(&repo.root, &repo.config, now_secs);
+    let pulse = crate::pulse::read(&repo.root, &issues, &repo.config);
+    warnings.add(usize::from(crate::report::lost_warning(&issues, &repo.config, &pulse, now_secs).is_some()));
     // 옆 워크트리의 문제는 **펴서** 싣는다(moai-dpbi) — 여는 화면(`cmd::tui`)과 같은 자다.
     let mut elsewhere = said_trouble(&g.trouble, lang);
     elsewhere.extend(said);
     Ok(Fresh {
+        pulse,
+        now_secs,
+        pulse_fingerprint,
         root: repo.root.clone(),
         stamp,
         index,
@@ -1227,6 +1237,14 @@ fn warnings_in<'a>(
     (Surfaced::of(st.warnings.len(), st.dues), st.notices.len())
 }
 
+/// Whether a held row is moving, paused by a lost heartbeat, or still.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Spin {
+    Still,
+    Turning,
+    Paused,
+}
+
 /// 프로젝트 하나에 딸린 것 — 그 프로젝트의 줄과, 그 줄을 재고 그리는 데 드는 모든 것(moai-pqmg).
 ///
 /// **한 덩이로 묶은 까닭은 여럿을 들려고다.** 한눈 보기가 프로젝트마다 커밋 칸·안 읽음 `[NEW]`·
@@ -1240,6 +1258,10 @@ fn warnings_in<'a>(
 /// 그 사람이 누구로 적히는가* 는 뿌리마다 다르다(프로젝트마다 git 설정이 다를 수 있다). 푸는 값이
 /// 비싸 셀 때마다 다시 풀 수 없어, 푼 답을 그 프로젝트 곁에 둔다.
 pub struct Site {
+    pub pulse: crate::report::Pulse,
+    pub now_secs: i64,
+    pulse_fingerprint: u64,
+    pulse_polled: Option<std::time::Instant>,
     /// 이 화면의 말(moai-ra67). **탐색기도 고른 말로 선다** — 한때 이 층에 말이 안 닿아
     /// `layer::shut` 이 `Lang::Ko` 를 손으로 줬고, 그 한 줄이 "탐색기는 아직 한국어로 선다" 는
     /// 뜻이었다. 명령 층에서 한 번 풀어(`Ctx::lang`) 여기 놓는다 — `view::Screen` 이 CLI 에서
@@ -2648,6 +2670,10 @@ impl Site {
         unreadable: Vec<Option<String>>,
     ) -> Site {
         let mut site = Site {
+            pulse: Default::default(),
+            now_secs: crate::pulse::now_secs(),
+            pulse_fingerprint: 0,
+            pulse_polled: None,
             // 기본값은 도구의 것이다(moai-9it4). 한때 여기가 `Lang::Ko` 였고 그 한 줄이 "탐색기는
             // 아직 한국어로 선다" 는 뜻이었다 — 말이 안 닿은 자리에서 영어를 집으면 한국어 화면
             // 한가운데 몇 줄만 영어로 섰기 때문이다. 이제 탐색기의 글이 다 말묶음에서 오므로 그
@@ -2739,20 +2765,58 @@ impl Site {
     /// 에픽이 `busy` 로 남는데, 그 멤버는 물려받은 미룸으로 멈추니 에픽만 혼자 돈다.
     /// 그래서 이 자로는 **줄이 돌면 그 위 묶음도 돌고, 묶음이 돌면 그 밑에 도는 줄이
     /// 있다.**
-    pub fn spins(&self, at: usize) -> bool {
+    ///
+    /// **쥔 세션의 심장박동이 문턱을 넘게 끊긴 일은 멈춘다**([`Spin::Paused`], moai-4v3h) — 글리프는
+    /// `⠋!` 두 칸으로 서고 루프를 안 깨운다(`draw::spinner_on` 이 곁의 `!` 를 읽는다). 표가 없는 세션은
+    /// 모름이라 전처럼 돈다. 묶음은 멈춤이 안 된다 — 끊긴 세션이 하나라도 있으면 멤버 가운데 **도는**
+    /// 일이 있을 때만 돌고, 쥔 일이 다 멈췄으면 선다. 끊긴 것이 없으면 `busy` 그대로 돈다.
+    pub fn spins(&self, at: usize) -> Spin {
         let i = &self.issues[at];
         // **줄마다 묻는다**(리뷰 moai-jk2u.hr4) — 짝인 `report::wip` 가 자리로 세므로, 여기만
         // 접은 지도를 짚으면 보드가 집었다고 세는 줄의 물레가 멈추고 그 거꾸로도 선다.
         if self.index.shelved_at(at).is_some() {
-            return false;
+            return Spin::Still;
         }
-        let busy = !crate::report::is_group(i) || self.stand_of(i).is_some_and(|s| s.busy);
         // **도는 칸은 설정이 정한다**(moai-q59j) — 시작한 칸 모두(`Config::is_started`). 칸 이름
         // `"in_progress"` 를 박아 두면 칸 이름을 바꾼 설정에서 아무것도 안 돌았다. 설정이 모르는
-        // 칸은 안 돈다 — 묶음의 `busy` 와 같은 자다(`report::Stand::busy`). 바쁜 묶음은 늘 시작한
-        // 칸으로 읽히므로 묶음에는 이 검사가 답을 안 바꾼다 — 줄(일)을 위한 것이다.
+        // 칸은 안 돈다 — 묶음의 `busy` 와 같은 자다(`report::Stand::busy`).
         let col = self.column(at);
-        busy && self.cfg.knows(col) && self.cfg.is_started(col)
+        if !self.cfg.knows(col) || !self.cfg.is_started(col) {
+            return Spin::Still;
+        }
+        if crate::report::is_group(i) {
+            if !self.stand_of(i).is_some_and(|s| s.busy) {
+                return Spin::Still;
+            }
+            // Nothing silent means no member pauses: a busy group turns, as before heartbeats. The member walk below
+            // costs the whole list per group row and runs several times per row every frame.
+            if !self.pulse.any_lost(self.now_secs) {
+                return Spin::Turning;
+            }
+            // Members are work, as the web's `busyGroups` reads them (`isWork`) — a backlog row is never held work.
+            let turning = self.issues.iter().enumerate().any(|(n, child)| {
+                crate::report::is_work(child)
+                    && (if i.kind == Kind::Milestone { self.index.milestone_of(n) } else { self.index.epic_of(n) })
+                        == Some(i.id.as_str())
+                    && self.spins(n) == Spin::Turning
+            });
+            return if turning { Spin::Turning } else { Spin::Still };
+        }
+        if crate::report::session_of(i, &self.cfg, &self.pulse, self.now_secs).is_some_and(|s| s.lost) {
+            Spin::Paused
+        } else {
+            Spin::Turning
+        }
+    }
+
+    /// Thirty-second metadata polling stays independent of the 120ms animation tick.
+    fn pulse_changed(&mut self) -> bool {
+        if self.pulse_polled.is_some_and(|at| at.elapsed() < std::time::Duration::from_secs(30)) {
+            return false;
+        }
+        self.pulse_polled = Some(std::time::Instant::now());
+        let Some(repo) = &self.repo else { return false };
+        crate::pulse::fingerprint(&repo.root, &self.cfg, crate::pulse::now_secs()) != self.pulse_fingerprint
     }
 
     /// 그 줄이 **서 있는** 칸 — 묶음이면 멤버에서 읽은 칸, 아니면 제 칸. CLI 가
@@ -3068,6 +3132,12 @@ impl App {
         app.site.stamp = stamp;
         // 띄울 때 읽은 것도 들인 읽기다 — 안 찍으면 조용한 저장소에서 시계로는 영영 다시 안 읽는다.
         app.site.read_at = Some(std::time::Instant::now());
+        app.site.now_secs = crate::pulse::now_secs();
+        app.site.pulse_fingerprint = crate::pulse::fingerprint(&repo.root, &app.site.cfg, app.site.now_secs);
+        app.site.pulse = crate::pulse::read(&repo.root, &app.site.issues, &app.site.cfg);
+        app.site.warnings.add(usize::from(
+            crate::report::lost_warning(&app.site.issues, &app.site.cfg, &app.site.pulse, app.site.now_secs).is_some(),
+        ));
         app.site.repo = Some(repo);
         app
     }
@@ -3739,6 +3809,10 @@ impl App {
         if let Some(count) = f.asked_install {
             self.site.install = Some(layer::Told::now(count));
         }
+        self.site.pulse = f.pulse;
+        self.site.now_secs = f.now_secs;
+        self.site.pulse_fingerprint = f.pulse_fingerprint;
+        self.site.pulse_polled = Some(std::time::Instant::now());
         self.take(f.issues, f.index, f.ground, f.now);
     }
 
@@ -4076,6 +4150,7 @@ impl App {
             }
             return;
         }
+        let pulse_changed = self.site.pulse_changed();
         let Some(repo) = &self.site.repo else { return };
         // **시계도 다시 읽을 까닭이다**(moai-z4r4) — 배너의 수에는 한 시간 틈과 날로 재는 경고가 들어
         // 파일이 그대로여도 답이 바뀐다. 층과 **같은 자**(`layer::due`)로 재므로, 안 읽으면 틈을 넘긴
@@ -4088,7 +4163,8 @@ impl App {
         // 동안만 듣는다**(리뷰 moai-mkyg.n60) — 다시 읽기가 새로 짓는 저널의 것은 노트뿐이라, 노트가 없으면 같은 화면을
         // 한 번 더 짓는다. 거름망을 걷어도 든 노트는 남아 다음 `/` 와 통계 창이 그것을 쓰므로, 걸린 거름망이 아니라
         // 든 노트로 가른다.
-        let moved = (std::mem::take(&mut self.reread) && (self.site.ground.notes.is_some() || self.sees_notes()))
+        let moved = pulse_changed
+            || (std::mem::take(&mut self.reread) && (self.site.ground.notes.is_some() || self.sees_notes()))
             || layer::due(self.site.read_at)
             || stamp_of(repo) != self.site.stamp
             || self
@@ -5882,6 +5958,10 @@ impl App {
                 }
                 site.me = me;
                 site.now = fresh.now;
+                site.now_secs = fresh.now_secs;
+                site.pulse = fresh.pulse;
+                site.pulse_fingerprint = fresh.pulse_fingerprint;
+                site.pulse_polled = Some(std::time::Instant::now());
                 site.stamp = fresh.stamp;
                 site.warnings = fresh.warnings;
                 // 들어간 화면의 배너가 대는 못 읽는 줄도 산 줄만이다(moai-e18s) — `Site::of` 는 받은 목록을 다 센다.
@@ -9993,7 +10073,53 @@ mod tests {
     /// 도는 줄이 있는지 — 줄마다의 답([`App::spins`])을 모은 것. 루프가 깨는 것은 이것이
     /// 아니라 **그려진 화면**이다(`App::spun`, draw 시험) — 여기는 줄의 자만 본다.
     fn any_spins(a: &App) -> bool {
-        (0..a.site.issues.len()).any(|at| a.site.spins(at))
+        (0..a.site.issues.len()).any(|at| a.site.spins(at) == Spin::Turning)
+    }
+
+    #[test]
+    fn local_heartbeat_pauses_work_but_never_pauses_groups() {
+        let epic = make("argos-0001", Kind::Epic);
+        let mut work = make("argos-0001.aaaa", Kind::Issue);
+        work.status = Status::new("in_progress");
+        let mut a = App::new(vec![epic, work], cfg(), Path::new());
+        a.site.now_secs = 13600;
+        a.site.pulse.threshold_secs = 1800;
+        a.site.pulse.beats.insert(
+            "argos-0001.aaaa".into(),
+            crate::report::Beat {
+                session: "sid".into(),
+                agent: crate::report::Agent::Claude,
+                last_event: "Stop".into(),
+                last_seen_secs: 10000,
+            },
+        );
+        assert_eq!(a.site.spins(1), Spin::Paused);
+        assert_eq!(a.site.spins(0), Spin::Still);
+        a.site.pulse.beats.get_mut("argos-0001.aaaa").unwrap().last_seen_secs = 13600;
+        assert_eq!(a.site.spins(1), Spin::Turning);
+        assert_eq!(a.site.spins(0), Spin::Turning);
+        a.site.pulse.beats.clear();
+        assert_eq!(a.site.spins(1), Spin::Turning);
+
+        // A backlog row in a started column is not a member that keeps the group turning — `busy` and the web's
+        // `busyGroups` count work only.
+        let mut idea = make("argos-0001.bbbb", Kind::Backlog);
+        idea.status = Status::new("in_progress");
+        let (epic, work) = (a.site.issues[0].clone(), a.site.issues[1].clone());
+        let mut b = App::new(vec![epic, work, idea], cfg(), Path::new());
+        b.site.now_secs = 13600;
+        b.site.pulse.threshold_secs = 1800;
+        b.site.pulse.beats.insert(
+            "argos-0001.aaaa".into(),
+            crate::report::Beat {
+                session: "sid".into(),
+                agent: crate::report::Agent::Claude,
+                last_event: "Stop".into(),
+                last_seen_secs: 10000,
+            },
+        );
+        assert_eq!(b.site.spins(1), Spin::Paused);
+        assert_eq!(b.site.spins(0), Spin::Still, "only the paused work member is work");
     }
 
     /// 돌 줄이 있는가를 적힌 칸·읽은 칸이 속이지 않는다.
@@ -10031,7 +10157,7 @@ mod tests {
                 let mut i = make("argos-0001", Kind::Issue);
                 i.status = Status::new(st);
                 let a = App::new(vec![i], cfg.clone(), Path::new());
-                assert_eq!(a.site.spins(0), want, "{st} 칸이 도는가 — {:?}", cfg.statuses);
+                assert_eq!(a.site.spins(0) == Spin::Turning, want, "{st} 칸이 도는가 — {:?}", cfg.statuses);
             }
         }
     }
@@ -10041,7 +10167,10 @@ mod tests {
     #[test]
     fn a_group_spins_only_while_a_member_is_held() {
         fn spun(a: &App) -> Vec<&str> {
-            (0..a.site.issues.len()).filter(|&at| a.site.spins(at)).map(|at| a.site.issues[at].id.as_str()).collect()
+            (0..a.site.issues.len())
+                .filter(|&at| a.site.spins(at) == Spin::Turning)
+                .map(|at| a.site.issues[at].id.as_str())
+                .collect()
         }
         let mut mile = make("argos-0005", Kind::Milestone);
         mile.status = Status::new("todo");

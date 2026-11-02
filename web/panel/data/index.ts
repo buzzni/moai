@@ -18,6 +18,7 @@ export type Kind = 'issue' | 'epic' | 'milestone' | 'backlog'
 
 /** One row as `moai --json show --all` (and `backlog show`) prints it, with the tree's keys. Only `id` is required. */
 export interface Row {
+  session?: { state: 'lost' | 'alive'; agent: string; session_id: string; last_event: string; last_seen: string; silent_minutes: number; recover: string[] }
   id: string
   title?: string
   kind?: Kind | string

@@ -1875,5 +1875,20 @@
   "page.wiki.noLinks": "This page has no links.",
   "page.wiki.outside": "Outside the wiki, not opened: {href}",
   "page.wiki.loadFailed": "The page could not be loaded: {reason}",
-  "page.wiki.nothingBack": "There is no page to go back to."
+  "page.wiki.nothingBack": "There is no page to go back to.",
+  "warn.lost_session": "Held by a session silent over {d} min {n} — resume it or take it over",
+  "detail.session": "Session",
+  "detail.session_lost": "Signal lost — {agent} {sid} · last signal {event} {minutes} min ago",
+  "detail.session_alive": "Alive — {agent} {sid} · {minutes} min ago",
+  "detail.recover_claude": "claude --resume {sid} (moai-recover skill if several sessions died together)",
+  "detail.recover_codex": "codex resume {sid}",
+  "detail.recover_antigravity": "Reopen that conversation in Antigravity",
+  "detail.recover_resume_own": "Read the Next: note in moai show {id}; in your new session record the pick with moai mv {id} {col} --from {col}",
+  "detail.recover_take": "For another person, moai mv {id} {col} --from {col} --take -m '<who approved>'",
+  "detail.recover_put_down": "To put it down, moai mv {id} {first} or moai defer {id} -m '<why>'",
+  "tui.session.lost": "! Work held by a silent session {n}",
+  "page.list.sessionLost": "Session signal lost",
+  "page.detail.session": "Session",
+  "page.detail.sessionLost": "Signal lost — {agent} {sid} · last signal {event} {minutes} min ago",
+  "page.detail.sessionAlive": "Alive — {agent} {sid} · {minutes} min ago"
 }

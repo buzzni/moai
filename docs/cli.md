@@ -4188,12 +4188,13 @@ Options:
   moai config --json    one object - the keys of .moai/config.toml
 
   Reads .moai/config.toml and fills in what it leaves out with the values moai
-  uses: prefix, statuses (in board order), naming, archive_days, wiki_dir, the
-  status_* thresholds and the due_* rule that `moai due apply` reads. These
-  are the values this binary acts on, so a surface drawing the board reads
-  them here instead of parsing the file again. --json adds path, the file it
-  read. A [models] table is left to `moai models`, which lays it under your
-  user config. A [writing] table is left to `moai writing`.
+  uses: prefix, statuses (in board order), naming, archive_days,
+  session_lost_minutes, wiki_dir, the status_* thresholds and the due_* rule
+  that `moai due apply` reads. These are the values this binary acts on, so a
+  surface drawing the board reads them here instead of parsing the file again.
+  --json adds path, the file it read. A [models] table is left to
+  `moai models`, which lays it under your user config. A [writing] table is
+  left to `moai writing`.
 
   It only reads; edit the file by hand to change a setting.
 ```

@@ -113,6 +113,17 @@ Started work and busy groups use the list’s spinner and moving light over the
 title. Deferred work stays still. Bars do not animate; reduced-motion settings
 also stop the spinner and title motion.
 
+When a holding session's local heartbeat has been silent beyond
+`session_lost_minutes`, the spinner pauses with a red `!` and the title stops
+moving. The list and Gantt tint that row red in either theme; selection and hover
+keep their own backgrounds. Board cards carry the mark while their status
+colour stays the same. The Session section in detail shows the last signal and
+the recovery lines from `moai show --json` verbatim. A fresh heartbeat restores
+motion after the next events check (normally one to two seconds). No heartbeat
+here means unknown, including another machine's session, and keeps the old
+motion. See [recovery](recovery.md#an-agent-session-died).
+
+
 The page only places these: which span a group covers and whether a row is late is
 decided by moai (`moai tui --deep --json` carries it as `gantt`). Lateness is counted
 in the time zone the page draws in ([Time zone](#time-zone)): the page asks for the
@@ -444,4 +455,4 @@ lanes.
 The page does not show the stats screen, and what it writes is a Gantt bar's days
 and your read marks.
 
-Decided in: moai-skjr, moai-e9hi, moai-8r2l, moai-0aa7, moai-jshy, moai-d86e.3ud, moai-ijjd, moai-lj8g, moai-ekg6 moai-mkzo moai-i07x moai-zgc1 moai-v5of
+Decided in: moai-skjr, moai-e9hi, moai-8r2l, moai-0aa7, moai-jshy, moai-d86e.3ud, moai-ijjd, moai-lj8g, moai-ekg6 moai-mkzo moai-i07x moai-zgc1 moai-v5of moai-4v3h

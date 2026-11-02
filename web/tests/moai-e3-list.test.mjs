@@ -576,3 +576,22 @@ test('list rows expose their status for todo, progress, review and done backgrou
     assert.match(tokensCss, new RegExp(`${token}: color-mix\\(`))
   }
 })
+
+test('lost session pauses the glyph with an accessible mark and tints only the held row', () => {
+  const panel = mount([
+    { id: 'lost', title: 'Silent work', status: 'in_progress', session: { state: 'lost' } },
+    { id: 'alive', title: 'Living work', status: 'review', session: { state: 'alive' } },
+    { id: 'unknown', title: 'Unknown work', status: 'in_progress' },
+  ])
+  const row = panel.root.querySelector('[data-id="lost"]')
+  assert.equal(row.dataset.lost, '1')
+  assert.ok(row.querySelector('.m-spin-paused'))
+  assert.ok(row.querySelector('.m-lost[aria-label]'))
+  assert.equal(row.querySelector('.m-lost').textContent, '!')
+  assert.equal(row.querySelector('.m-glint'), null)
+  for (const id of ['alive', 'unknown']) {
+    const other = panel.root.querySelector(`[data-id="${id}"]`)
+    assert.ok(other.querySelector('.m-spin'))
+    assert.equal(other.querySelector('.m-lost'), null)
+  }
+})

@@ -28,7 +28,7 @@ import {
 } from './detail-format.ts'
 import { statusGlyph } from './list-model.ts'
 import { renderMarkdown } from './markdown.ts'
-import { firstStatus, spins } from './spin.ts'
+import { firstStatus, spins , lostMark } from './spin.ts'
 import { branchMark } from './branch.ts'
 import { newChip } from './unread.ts'
 import { highlight } from './toolbar.ts'
@@ -121,8 +121,11 @@ export const mountDetail: MountPane = (root: HTMLElement, ctx: ViewContext): Pan
     // The status glyph before the id, as the list and the board draw it, and turning while the work is held.
     const boot = last?.state.boot
     const { glyph, tone } = statusGlyph(head.status, boot)
-    const moving = listed !== undefined && spins(index!, listed, firstStatus(boot), boot?.statuses)
-    const glyphNode = el(doc, 'span', { class: `moai-detail-glyph m-st-${tone}${moving ? ' m-spin' : ''}`, 'aria-hidden': 'true' }, glyph)
+    const spin = listed !== undefined ? spins(index!, listed, firstStatus(boot), boot?.statuses) : 'still'
+    const moving = spin === 'turning'
+    const paused = spin === 'paused'
+    const glyphNode = el(doc, 'span', { class: `moai-detail-glyph m-st-${tone}${paused ? ' m-spin m-spin-paused' : moving ? ' m-spin' : ''}`, 'aria-hidden': paused ? null : 'true' }, glyph)
+    if (paused) glyphNode.append(lostMark(doc, copy.list.sessionLost))
     // The worktree the row came from, after the id, as the TUI's detail (`Origin::branch`, se-etwu): `show --worktree`
     // carries it, and so does the list's row when the detail was read plain.
     const from = [row.branch, held?.branch].find((value): value is string => typeof value === 'string' && value !== '')
@@ -139,6 +142,12 @@ export const mountDetail: MountPane = (root: HTMLElement, ctx: ViewContext): Pan
       const list = el(doc, 'dl', { class: 'moai-detail-fields' })
       for (const field of fields) list.append(el(doc, 'dt', {}, field.label), el(doc, 'dd', { 'data-field': field.key }, field.value))
       out.push(list)
+    }
+    if (row.session) {
+      const session = row.session
+      const text = fill(session.state === 'lost' ? d.sessionLost : d.sessionAlive, { agent: session.agent, sid: session.session_id, event: session.last_event, minutes: session.silent_minutes })
+      const line = el(doc, 'p', { class: session.state === 'lost' ? 'm-session-lost' : null }, text)
+      out.push(section(doc, d.session, line, session.state === 'lost' ? el(doc, 'pre', { class: 'moai-detail-raw' }, session.recover.join('\n')) : null))
     }
     const blockedBy = blockedByOf(row)
     if (blockedBy.length) out.push(section(doc, d.blockedBy, idList(doc, blockedBy, index, copy, true, row)))

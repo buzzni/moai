@@ -16,6 +16,7 @@ struct Out<'a> {
     statuses: &'a [String],
     naming: &'static str,
     archive_days: i64,
+    session_lost_minutes: i64,
     wiki_dir: &'a str,
     status_review_days: i64,
     status_wip_days: i64,
@@ -53,6 +54,7 @@ impl<'a> Out<'a> {
             statuses: &cfg.statuses,
             naming: cfg.naming.as_str(),
             archive_days: cfg.archive_days,
+            session_lost_minutes: cfg.session_lost_minutes,
             wiki_dir: &cfg.wiki_dir,
             status_review_days: review_days,
             status_wip_days: wip_days,
@@ -84,11 +86,12 @@ pub fn run(ctx: &Ctx) -> R<Vec<String>> {
     // `[writing]` 도 같은 이유로 `moai writing` 이 낸다.
     let t = |v: &dyn std::fmt::Display| v.to_string();
     let q = |v: &str| format!("{v:?}");
-    let pairs: [(&str, String); 18] = [
+    let pairs: [(&str, String); 19] = [
         ("prefix", q(out.prefix)),
         ("statuses", q(&out.statuses.join(","))),
         ("naming", q(out.naming)),
         ("archive_days", t(&out.archive_days)),
+        ("session_lost_minutes", t(&out.session_lost_minutes)),
         ("wiki_dir", q(out.wiki_dir)),
         ("status_review_days", t(&out.status_review_days)),
         ("status_wip_days", t(&out.status_wip_days)),
