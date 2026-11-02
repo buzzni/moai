@@ -4116,6 +4116,13 @@ impl App {
 
     /// [`App::follow`] 의 걸음들 — 화면에 닿는 것을 바꾸면 `follow_changed` 를 세운다.
     fn follow_steps(&mut self) {
+        if self.images.poll() {
+            self.body = None;
+            if let Mode::Wiki(w) = &mut self.mode {
+                w.laid = None;
+            }
+            self.follow_changed = true;
+        }
         self.reap();
         self.follow_config();
         self.follow_read();
