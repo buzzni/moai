@@ -1494,7 +1494,7 @@ mod tests {
     ///
     /// 위키 스킬의 훑기가 세우는 일(`moai add 'wiki: …' -t docs`)도 새 단위다 — 사람이 따로 청한
     /// 일이라 집은 일의 에픽에 들지 않는다. 스킬은 이 거절을 미리 말하고 집은 일을 먼저 끝내라 한다.
-    const DENIED_WHILE_HELD: &[&str] = &["moai epic add", "moai milestone add", "moai add 'wiki: "];
+    const DENIED_WHILE_HELD: &[&str] = &["moai epic add", "moai add 'wiki: "];
 
     /// **심는 글이 가르치는 명령은 규칙에 막히면 안 된다.**
     ///
