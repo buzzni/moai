@@ -806,9 +806,11 @@ fn gaps_in(files: &[Dotfile]) -> Vec<(&'static str, &'static str, Vec<String>)> 
             let text = text.unwrap_or_default();
             // The shelf lock is transient; a missing ignore rule neither loses merge rules
             // nor includes a worktree. Init still plants it, but status does not raise a false warning.
-            let missing: Vec<String> = missing_rules(&text, &d.block).into_iter()
+            let missing: Vec<String> = missing_rules(&text, &d.block)
+                .into_iter()
                 .filter(|line| *line != "**/images/.lock")
-                .map(str::to_string).collect();
+                .map(str::to_string)
+                .collect();
             (!missing.is_empty()).then_some((d.name, d.kind, missing))
         })
         .collect()

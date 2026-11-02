@@ -34298,7 +34298,9 @@ fn an_upgrade_does_not_warn_about_the_image_shelf_lock() {
     std::fs::create_dir_all(s.path().join(".moai/images")).unwrap();
     std::fs::write(s.path().join(".moai/images/.lock"), "").unwrap();
     for phase in 0..2 {
-        if phase == 1 { ok(s.path(), &["init"]); }
+        if phase == 1 {
+            ok(s.path(), &["init"]);
+        }
         let status = ok(s.path(), &["status", "--json"]);
         assert!(!status.contains("gitignore_rules") && !status.contains("gitattributes_rules"), "{status}");
     }
@@ -34316,7 +34318,9 @@ fn an_upgrade_with_a_linked_tracker_ignores_the_image_lock() {
     let ignore = s.path().join(".gitignore");
     std::fs::write(&ignore, std::fs::read_to_string(&ignore).unwrap().replace("**/images/.lock\n", "")).unwrap();
     for phase in 0..2 {
-        if phase == 1 { ok(s.path(), &["init"]); }
+        if phase == 1 {
+            ok(s.path(), &["init"]);
+        }
         let status = ok(s.path(), &["status", "--json"]);
         assert!(!status.contains("gitignore_rules") && !status.contains("gitattributes_rules"), "{status}");
     }
@@ -34338,7 +34342,12 @@ fn image_add_marks_the_written_version_for_only_its_user() {
     assert!(read_sheet(&writer, s.path()).contains(LATER));
     assert!(row.get("unread").is_none(), "{row}");
     assert_eq!(json_of(&ok_with(s.path(), &other, &["show", &id, "--json"]))["unread"], true);
-    ok_env(s.path(), "2026-09-13T00:00:00Z", &[("MOAI_CONFIG", other.to_str().unwrap())], &["edit", &id, "--body", "unseen"]);
+    ok_env(
+        s.path(),
+        "2026-09-13T00:00:00Z",
+        &[("MOAI_CONFIG", other.to_str().unwrap())],
+        &["edit", &id, "--body", "unseen"],
+    );
     ok_env(s.path(), "2026-09-14T00:00:00Z", &writer_env, &["image", "add", pic.to_str().unwrap(), "--to", &id]);
     assert_eq!(json_of(&ok_with(s.path(), &writer, &["show", &id, "--json"]))["unread"], true);
 }
