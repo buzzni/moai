@@ -25,8 +25,9 @@ pub struct Listener {
     pub incoming: mpsc::Receiver<Incoming>,
     #[cfg(unix)]
     wake: std::os::unix::net::UnixStream,
+    /// Set once by the owner thread's first idle wait; `Some(None)` is a pipe that could not be made.
     #[cfg(unix)]
-    resize: std::sync::OnceLock<ResizeWake>,
+    resize: std::cell::OnceCell<Option<ResizeWake>>,
     path: std::path::PathBuf,
     stop: Arc<AtomicBool>,
     book: Option<Arc<super::proposal::Book>>,
@@ -117,17 +118,24 @@ impl Listener {
     /// crossterm queues its resize before our pipe wakes the owner, even on a different thread. Registering in
     /// bind_with would reverse that order. Recheck once after subscribing: a signal between the first parse and
     /// registration queued a crossterm event without writing our pipe, and must not be slept over.
+    ///
+    /// **The pipe is best effort and tried once.** Without it a resize waits for the next tick, as before it existed; a
+    /// socketpair refused with EMFILE must not end the explorer over an optional wakeup.
     #[cfg(unix)]
     fn prepare_input(&self, mut parsed: impl FnMut() -> std::io::Result<bool>) -> std::io::Result<bool> {
         if parsed()? {
             return Ok(true);
         }
-        if self.resize.get().is_none() {
-            let resize = ResizeWake::new()?;
-            self.resize.get_or_init(|| resize);
-            return parsed();
+        if self.resize.get().is_some() {
+            return Ok(false);
         }
-        Ok(false)
+        let _ = self.resize.set(ResizeWake::new().ok());
+        parsed()
+    }
+
+    #[cfg(unix)]
+    fn resize(&self) -> Option<&ResizeWake> {
+        self.resize.get().and_then(Option::as_ref)
     }
 
     /// One idle wait on the terminal, control and resize sockets; `parsed` then asks crossterm for an event.
@@ -170,7 +178,7 @@ impl Listener {
             libc::pollfd { fd: terminal.unwrap_or(-1), events: libc::POLLIN, revents: 0 },
             libc::pollfd { fd: self.wake.as_raw_fd(), events: libc::POLLIN, revents: 0 },
             libc::pollfd {
-                fd: self.resize.get().map_or(-1, |resize| resize.read.as_raw_fd()),
+                fd: self.resize().map_or(-1, |resize| resize.read.as_raw_fd()),
                 events: libc::POLLIN,
                 revents: 0,
             },
@@ -180,13 +188,14 @@ impl Listener {
         let ready = unsafe { libc::poll(fds.as_mut_ptr(), fds.len() as libc::nfds_t, ms.min(i32::MAX as u128) as i32) };
         if ready < 0 {
             let error = std::io::Error::last_os_error();
-            // An interrupted wait still lets the owner check crossterm. SIGWINCH also leaves a resize byte, so a
-            // signal on another thread or immediately before poll cannot leave us asleep until the idle deadline.
+            // An interrupted wait still lets the owner check crossterm. Once the resize pipe exists, SIGWINCH also
+            // leaves a byte, so a signal on another thread or just before poll cannot leave us asleep until the idle
+            // deadline; without the pipe (see prepare_input) such a resize waits for that deadline, as it did before.
             if error.kind() != std::io::ErrorKind::Interrupted {
                 return Err(error);
             }
         }
-        for mut wake in std::iter::once(&self.wake).chain(self.resize.get().map(|resize| &resize.read)) {
+        for mut wake in std::iter::once(&self.wake).chain(self.resize().map(|resize| &resize.read)) {
             let mut bytes = [0; 256];
             loop {
                 match wake.read(&mut bytes) {
@@ -308,7 +317,7 @@ impl Listener {
                 }
             }
         })?;
-        Ok(Self { incoming, wake, resize: std::sync::OnceLock::new(), path, stop, book: keep_book, editing })
+        Ok(Self { incoming, wake, resize: std::cell::OnceCell::new(), path, stop, book: keep_book, editing })
     }
 }
 
@@ -467,7 +476,7 @@ mod tests {
         let listener = Listener {
             incoming,
             wake,
-            resize: std::sync::OnceLock::new(),
+            resize: std::cell::OnceCell::new(),
             path: std::env::temp_dir().join(format!("moai-{name}-unused-{}", std::process::id())),
             stop: Arc::new(AtomicBool::new(false)),
             book: None,
@@ -563,10 +572,11 @@ mod tests {
                 .env(CHILD, "1")
                 .output()
                 .unwrap();
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            // A filter that matches nothing also exits 0. Renaming this test or its module must fail, not pass vacuously.
             assert!(
-                output.status.success(),
-                "{}\n{}",
-                String::from_utf8_lossy(&output.stdout),
+                output.status.success() && stdout.contains("test result: ok. 1 passed;"),
+                "{stdout}\n{}",
                 String::from_utf8_lossy(&output.stderr)
             );
             return;
@@ -653,7 +663,7 @@ mod tests {
                 })
                 .unwrap()
         );
-        let own_signal = listener.resize.get().unwrap().signal;
+        let own_signal = listener.resize().unwrap().signal;
         drop(listener);
         assert!(!signal_hook::low_level::unregister(own_signal), "dropping a window leaked its resize action");
         signal_hook::low_level::raise(signal_hook::consts::SIGWINCH).unwrap();

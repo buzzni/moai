@@ -3786,7 +3786,9 @@ mod tests {
                     !folds.contains(&site.index.dir_path(&site.issues, running)),
                     "{name}: first read folded a running milestone"
                 );
-                (closed, running, place.read_at)
+                // The site's own stamp: `follow_site` sets it when it swaps a fresh Site in. `place.read_at` is the summary
+                // sweep's and would move on a re-look even if the site were never replaced.
+                (closed, running, site.read_at)
             };
             a.cursor = a
                 .rows()
@@ -3817,9 +3819,8 @@ mod tests {
             a.layer.as_mut().unwrap().queue(dir);
             a.read_wanted();
             settle(&mut a);
-            let place = &a.layer.as_ref().unwrap().places[0];
-            assert!(place.read_at > read, "{name}: a replacement read must really complete");
-            let site = place.site.as_ref().unwrap();
+            let site = a.layer.as_ref().unwrap().places[0].site.as_ref().unwrap();
+            assert!(site.read_at > read, "{name}: a replacement read must really complete");
             assert_eq!(
                 if gantt { &site.gantt_shut } else { &site.board_shut },
                 &chosen,
