@@ -1522,6 +1522,7 @@ fn probe_once(root: &Path, cmd: &str) -> Option<Probe> {
 
 /// 셸의 128+signal 관례에 맞는 종료 코드인가. 단순히 128 이상을 모두 신호라고 보지 않는다.
 /// POSIX 의 sigaddset 이 이 판에서 유효한 신호 번호를 재므로 Linux·macOS 의 번호 차이도 따른다.
+/// 그 libc 가 제 몫으로 잡아 둔 번호는 받지 않는다 — glibc 의 32·33 이 그렇다(그래서 160·161 은 `Alien` 이다).
 #[cfg(unix)]
 fn shell_signal(code: i32) -> bool {
     if !(129..=255).contains(&code) {
@@ -3060,14 +3061,21 @@ mod tests {
 
         // 안쪽 프로세스만 죽으면 래퍼는 정상적으로 128+signal 을 내고 끝난다.
         // plant_for_init 이 그 불확실함을 이유로 기존 설정을 덮지 않는 것까지 잰다.
-        crate::git::run(dir, &["init", "-q"]).unwrap();
+        // INT·QUIT 는 쓰지 않는다 — 작업 제어 없는 셸이 `&` 로 띄운 판(배경으로 돌린 `cargo test`)은 둘을 무시한 채
+        // 물려줘, `kill -INT $$` 가 아무것도 안 하고 래퍼가 0 으로 끝난다. 그 규칙에 안 드는 번호로 잰다.
+        // 임시 저장소는 `git::isolated` 로 짓는다 — 돌리는 사람의 전역 git 설정(`init.templateDir` 따위)을 안 읽는다.
+        let git = |args: &[&str]| {
+            let out = crate::git::isolated(dir).args(args).output().unwrap();
+            assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+        };
+        git(&["init", "-q"]);
         std::fs::write(dir.join(".gitattributes"), format!("{SNAPSHOT} merge={DRIVER}\n")).unwrap();
-        for signal in ["INT", "KILL", "TERM"] {
+        for signal in ["KILL", "TERM", "USR1"] {
             let wrapper =
                 write(&format!("wrapped-{signal}"), &format!("#!/bin/sh\nsh -c 'kill -{signal} $$'\nexit $?\n"));
             assert!(matches!(at(&wrapper), Probe::Unknown), "래퍼의 {signal} 을 딴 도구라고 했다");
             let planted = driver_command(wrapper.to_str().unwrap());
-            crate::git::run(dir, &["config", "--local", &driver_key(), &planted]).unwrap();
+            git(&["config", "--local", &driver_key(), &planted]);
             assert!(matches!(plant_for_init(dir), Planting::Unmeasured));
             assert_eq!(crate::git::run(dir, &["config", "--local", "--get", &driver_key()]).unwrap().trim(), planted);
         }

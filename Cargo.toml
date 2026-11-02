@@ -97,7 +97,7 @@ too_many_arguments = "allow"
 # `worktree.rs` 와 `web/api.rs` 의 split_project, `web/mod.rs` 의 event_target·ctl_write_query 에,
 # 콜백·공유 값은 `cmd/hook.rs` 의 PICKS_READ, `hook.rs` 의 find, `store.rs` 의 torn,
 # `tui/draw.rs` 의 draw, `tui/layer.rs` 의 reading 에 선다. 시험의 자료 표도 같은 예외다
-# (`model.rs`·`query.rs`·`tui/keys.rs`·`tests/cli.rs`).
+# (`hook.rs`·`model.rs`·`query.rs`·`tui/keys.rs`·`tests/cli.rs`).
 type_complexity = "allow"
 # `projects::State` 와 `store` 의 Stop·Trouble·ConfigWriteStop 은 실패한 까닭을 통째로
 # 들고 온다. 박싱하면 그 값을 읽는 자리가 모두 한 겹 깊어지는데, 사람이 한 번 부르는

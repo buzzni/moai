@@ -773,9 +773,10 @@ pub fn parse(slug: &str, body: &str, prefix: &str) -> Parsed {
                     Event::Start(Tag::Image { .. }) => image += 1,
                     Event::End(TagEnd::Image) => image = image.saturating_sub(1),
                     Event::Start(Tag::Link { dest_url, title, .. }) => {
-                        external = (title.as_ref() == "external issue"
-                            && (dest_url.starts_with("https://") || dest_url.starts_with("http://")))
-                        .then(|| dest_url.to_string());
+                        // 스킴은 대소문자를 안 가린다(RFC 3986) — `HTTPS://…` 가 로컬 id 로 새어 "없는 id" 가 되지 않게.
+                        let scheme = |s: &str| dest_url.get(..s.len()).is_some_and(|h| h.eq_ignore_ascii_case(s));
+                        external = (title.as_ref() == "external issue" && (scheme("https://") || scheme("http://")))
+                            .then(|| dest_url.to_string());
                         link = Some((dest_url.to_string(), String::new()));
                     }
                     Event::End(TagEnd::Link) => {
@@ -1212,6 +1213,8 @@ mod tests {
         assert_eq!(parsed.ids, ["moai-pxiy"]);
         assert_eq!(parsed.external.len(), 1, "링크 밖의 로컬 참조도 남긴다");
         assert!(parse("fork", "[moai-ab12](file:///tmp/x \"external issue\")", "moai").external.is_empty());
+        let upper = parse("fork", "[moai-ab12](HTTPS://example.com/x \"external issue\")", "moai");
+        assert!(upper.ids.is_empty() && upper.external.len() == 1, "대문자 스킴을 로컬 id 로 셌다: {upper:?}");
     }
 
     /// `wiki_dir` 을 쓰는 자리에서 잰다 — 없으면 `no_dir`(못 읽은 것이 아니다), 파일이면 `not_a_dir`, 절대·`..`·

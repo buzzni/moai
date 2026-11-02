@@ -9703,14 +9703,20 @@ fn test_homes_share_within_a_test_and_isolate_concurrent_tests() {
         .map(|n| {
             let barrier = barrier.clone();
             std::thread::spawn(move || {
-                let home = home_of(&isolated(BIN));
-                assert_eq!(home, home_of(&isolated(BIN)), "같은 시험의 명령이 집을 함께 쓰지 않는다");
-                std::fs::write(home.join(format!("from-{n}")), "written under HOME").unwrap();
+                // 장벽 앞에서 넘어진 쪽도 두 장벽을 다 지난다 — 안 지나면 다른 쪽이 장벽에서 영영 멈춰
+                // 시험이 붉어지는 대신 끝나지 않는다. 넘어진 까닭은 장벽 뒤에 그대로 올린다.
+                let setup = std::panic::catch_unwind(|| {
+                    let home = home_of(&isolated(BIN));
+                    assert_eq!(home, home_of(&isolated(BIN)), "같은 시험의 명령이 집을 함께 쓰지 않는다");
+                    std::fs::write(home.join(format!("from-{n}")), "written under HOME").unwrap();
+                    home
+                });
                 barrier.wait();
-                let other = home.join(format!("from-{}", 1 - n));
-                let leaked = other.exists();
+                let other = setup.as_ref().ok().map(|home| home.join(format!("from-{}", 1 - n)));
+                let leaked = other.as_ref().is_some_and(|p| p.exists());
                 barrier.wait(); // 둘 다 읽기 전에 어느 쪽의 TLS 도 걷히지 않는다.
-                assert!(!leaked, "다른 시험이 HOME 에 쓴 파일이 보인다: {}", other.display());
+                let home = setup.unwrap_or_else(|e| std::panic::resume_unwind(e));
+                assert!(!leaked, "다른 시험이 HOME 에 쓴 파일이 보인다: {other:?}");
                 home
             })
         })
