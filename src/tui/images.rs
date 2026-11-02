@@ -28,6 +28,57 @@ pub struct Images {
     entries: VecDeque<Entry>,
     deleted: Vec<u32>,
     next: u32,
+    worker: Option<Worker>,
+    /// A layout asked for a picture that got no entry (the queue was full) or lost its pending entry to eviction.
+    /// No held layout carries a placeholder for it, so `valid` never fails and no result will name it — the next
+    /// [`Images::poll`] lays the views out again instead.
+    retry: bool,
+    #[cfg(test)]
+    synchronous: bool,
+}
+struct Worker {
+    tx: std::sync::mpsc::SyncSender<Job>,
+    rx: std::sync::mpsc::Receiver<Done>,
+    handle: Option<std::thread::JoinHandle<()>>,
+    /// Bumped whenever the cache drops every entry (a new geometry). Queued jobs from an older epoch are skipped,
+    /// not decoded — a resize would otherwise make the new pictures wait behind up to `LIMIT` stale decodes.
+    epoch: std::sync::Arc<std::sync::atomic::AtomicU32>,
+}
+struct Job {
+    id: u32,
+    path: PathBuf,
+    cols: usize,
+    geometry: (u16, u16, u16, u16),
+    epoch: u32,
+}
+struct Done {
+    id: u32,
+    stamp: crate::store::Stamp,
+    encoded: Option<(Size, Vec<u8>)>,
+}
+impl Worker {
+    fn new() -> Self {
+        let (tx, jobs) = std::sync::mpsc::sync_channel::<Job>(LIMIT);
+        let (results, rx) = std::sync::mpsc::sync_channel(LIMIT);
+        let epoch = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0));
+        let current = std::sync::Arc::clone(&epoch);
+        let handle = std::thread::spawn(move || {
+            while let Ok(job) = jobs.recv() {
+                // Its entry is already gone; the result would be discarded by id anyway.
+                if job.epoch != current.load(std::sync::atomic::Ordering::Relaxed) {
+                    continue;
+                }
+                let stamp = crate::store::stamp(&job.path);
+                let encoded = prepare(&job.path, job.cols, job.geometry).and_then(|(img, size)| {
+                    crate::image::png(&img).ok().map(|png| (size, term::kitty_virtual(&png, size, job.id)))
+                });
+                if results.send(Done { id: job.id, stamp, encoded }).is_err() {
+                    break;
+                }
+            }
+        });
+        Self { tx, rx, handle: Some(handle), epoch }
+    }
 }
 struct Entry {
     path: PathBuf,
@@ -37,6 +88,7 @@ struct Entry {
     id: u32,
     payload: Vec<u8>,
     sent: bool,
+    pending: bool,
 }
 impl Images {
     #[cfg(test)]
@@ -49,39 +101,57 @@ impl Images {
             entries: VecDeque::new(),
             deleted: Vec::new(),
             next: 0,
+            worker: None,
+            retry: false,
+            synchronous: true,
         }
     }
-    /// Called before layout; pixel changes matter even if the terminal has the same cell count.
+    #[cfg(test)]
+    pub(crate) fn testing_async() -> Self {
+        let mut images = Self::testing();
+        images.synchronous = false;
+        images
+    }
+    /// Called before layout; pixel changes matter even if the terminal has the same cell count. True when the change
+    /// dropped cached pictures: a pending one is in no held layout for `valid` to catch, so the caller lays the
+    /// views out again. A cache that held nothing (images off, nothing drawn yet) has nothing to lay out again.
     pub fn geometry(&mut self, width: u16, height: u16) -> bool {
         let window = if self.off() { None } else { ratatui::crossterm::terminal::window_size().ok() };
         let pixels = window.map_or((0, 0), |w| (w.width, w.height));
         let geometry = (width, height, pixels.0, pixels.1);
         let changed = geometry != self.geometry;
         self.geometry = geometry;
-        let stale = self.entries.iter().any(|e| crate::store::stamp(&e.path) != e.stamp);
-        if changed || stale {
-            self.clear_entries();
-        }
-        changed || stale
+        changed && self.clear_entries()
     }
-    fn clear_entries(&mut self) {
+    /// Whether there was anything to drop.
+    fn clear_entries(&mut self) -> bool {
+        let held = !self.entries.is_empty();
         self.deleted.extend(self.entries.drain(..).filter(|e| e.sent).map(|e| e.id));
+        if let Some(worker) = &self.worker {
+            worker.epoch.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        }
+        held
+    }
+    /// Pictures are still on their way, or have to be asked for again: the loop polls at its fast step until they
+    /// land instead of waiting out the file watch's step.
+    pub fn busy(&self) -> bool {
+        self.retry || self.entries.iter().any(|e| e.pending)
     }
     fn enabled(&mut self) -> bool {
         self.active
-            && *self
-                .protocol
-                .get_or_insert_with(|| term::detect(|k| std::env::var(k).ok(), self.setting.as_deref(), term::in_tmux))
-                == Protocol::Kitty
+            && matches!(
+                *self.protocol.get_or_insert_with(|| term::detect_terminal(self.setting.as_deref())),
+                Protocol::Kitty | Protocol::KittyTmux
+            )
     }
     /// Known to draw nothing: not a terminal, or detection already answered another protocol. Unknown is not off.
     pub fn off(&self) -> bool {
-        !self.active || self.protocol.is_some_and(|p| p != Protocol::Kitty)
+        !self.active || self.protocol.is_some_and(|p| !matches!(p, Protocol::Kitty | Protocol::KittyTmux))
     }
     /// Only placeholder spans this cache made (an RGB id colour) are checked — text that happens to contain the
     /// placeholder character never makes a held body stale, and without kitty there is nothing to scan.
     pub fn valid(&self, lines: &[Line<'_>]) -> bool {
-        if self.protocol != Some(Protocol::Kitty) || !self.active {
+        if !matches!(self.protocol, Some(Protocol::Kitty | Protocol::KittyTmux)) || !self.active {
             return true;
         }
         lines.iter().flat_map(|l| &l.spans).all(|s| match s.style.fg {
@@ -95,43 +165,57 @@ impl Images {
         if cols == 0 || !self.enabled() {
             return Vec::new();
         }
-        let stamp = crate::store::stamp(path);
-        let found = self.entries.iter().position(|e| e.path == path && e.stamp == stamp && e.cols == cols);
+        let found = self.entries.iter().position(|e| e.path == path && e.cols == cols);
         let index = if let Some(index) = found {
             let entry = self.entries.remove(index).unwrap();
             self.entries.push_back(entry);
             self.entries.len() - 1
         } else {
-            let Some((img, size)) = self.prepare(path, cols) else {
-                return Vec::new();
-            };
-            let Ok(png) = crate::image::png(&img) else {
-                return Vec::new();
-            };
-            if self.entries.len() == LIMIT
-                && let Some(old) = self.entries.pop_front()
-                && old.sent
-            {
-                self.deleted.push(old.id);
-            }
             // A process-specific 24-bit namespace; zero is never a valid id.
             if self.next == 0 {
                 self.next = ((std::process::id().wrapping_mul(2654435761)) & 0xff_ffff).max(1);
             }
             let id = self.next;
             self.next = (self.next % 0xff_ffff) + 1;
+            let worker = self.worker.get_or_insert_with(Worker::new);
+            let epoch = worker.epoch.load(std::sync::atomic::Ordering::Relaxed);
+            let job = Job { id, path: path.into(), cols, geometry: self.geometry, epoch };
+            if worker.tx.try_send(job).is_err() {
+                self.retry = true;
+                return Vec::new();
+            }
+            if self.entries.len() == LIMIT
+                && let Some(old) = self.entries.pop_front()
+            {
+                if old.sent {
+                    self.deleted.push(old.id);
+                }
+                self.retry |= old.pending;
+            }
             self.entries.push_back(Entry {
                 path: path.into(),
-                stamp,
+                stamp: None,
                 cols,
-                size,
+                size: Size { cols: 0, rows: 0, pixels: (0, 0) },
                 id,
-                payload: term::kitty_virtual(&png, size, id),
+                payload: Vec::new(),
                 sent: false,
+                pending: true,
             });
             self.entries.len() - 1
         };
-        let e = &self.entries[index];
+        // By id, not index: the test wait below polls, and a poll may drop other (stale) entries.
+        let id = self.entries[index].id;
+        #[cfg(test)]
+        if self.synchronous {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            while self.entries.iter().any(|e| e.id == id && e.pending) {
+                self.poll();
+                assert!(std::time::Instant::now() < deadline);
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+        }
+        let Some(e) = self.entries.iter().find(|e| e.id == id) else { return Vec::new() };
         (0..e.size.rows as usize)
             .map(|row| {
                 Line::from(Span::styled(
@@ -141,29 +225,45 @@ impl Images {
             })
             .collect()
     }
-    fn prepare(&self, path: &Path, cols: usize) -> Option<(image::DynamicImage, Size)> {
-        let bytes = crate::image::read_input(path).ok()?;
-        let img = crate::image::decode(&bytes).ok()?;
-        let (w, h, pw, ph) = self.geometry;
-        let cell = if w > 0 && h > 0 && pw > 0 && ph > 0 {
-            (u32::from(pw / w).max(1), u32::from(ph / h).max(1))
-        } else {
-            (8, 16)
-        };
-        let mut size = term::size(img.width(), img.height(), u32::try_from(cols).unwrap_or(u32::MAX), cell);
-        let rows = u32::from((h / 2).clamp(1, 20));
-        if size.rows > rows {
-            let scale = (rows * cell.1) as f64 / size.pixels.1 as f64;
-            size.pixels = ((size.pixels.0 as f64 * scale).round().max(1.) as u32, rows * cell.1);
-            size.cols = size.pixels.0.div_ceil(cell.0);
-            size.rows = rows;
+    /// File checks belong to the idle follow cadence, never the frame/layout path.
+    /// Results are matched by unique placement id, so an old resize or eviction cannot install stale pixels.
+    pub fn poll(&mut self) -> bool {
+        let mut changed = std::mem::take(&mut self.retry);
+        if let Some(worker) = &mut self.worker {
+            if worker.handle.as_ref().is_some_and(|h| h.is_finished())
+                && let Some(handle) = worker.handle.take()
+                && let Err(payload) = handle.join()
+            {
+                std::panic::resume_unwind(payload);
+            }
+            while let Ok(done) = worker.rx.try_recv() {
+                if let Some(entry) = self.entries.iter_mut().find(|e| e.id == done.id) {
+                    entry.stamp = done.stamp;
+                    entry.pending = false;
+                    if let Some((size, payload)) = done.encoded {
+                        entry.size = size;
+                        entry.payload = payload;
+                    }
+                    changed = true;
+                }
+            }
         }
-        Some((img.resize_exact(size.pixels.0, size.pixels.1, image::imageops::FilterType::Triangle), size))
+        let mut stale = Vec::new();
+        self.entries.retain(|e| {
+            let keep = e.pending || crate::store::stamp(&e.path) == e.stamp;
+            if !keep && e.sent {
+                stale.push(e.id);
+            }
+            changed |= !keep;
+            keep
+        });
+        self.deleted.extend(stale);
+        changed
     }
     /// Runs after popups and search styles, before the backend emits the frame's diff.
     pub fn frame(&mut self, buffer: &mut Buffer, out: &mut impl Write) -> std::io::Result<()> {
         for id in self.deleted.drain(..) {
-            out.write_all(&term::kitty_delete(id))?;
+            write_graphics(out, &term::kitty_delete(id), self.protocol)?;
         }
         // One pass over the frame, not one per cached picture.
         let mut visible = vec![false; self.entries.len()];
@@ -181,7 +281,7 @@ impl Images {
         }
         for (e, visible) in self.entries.iter_mut().zip(visible) {
             if visible && !e.sent {
-                out.write_all(&e.payload)?;
+                write_graphics(out, &e.payload, self.protocol)?;
                 e.sent = true;
             }
         }
@@ -189,11 +289,11 @@ impl Images {
     }
     pub fn cleanup(&mut self, out: &mut impl Write) -> std::io::Result<()> {
         for id in self.deleted.drain(..) {
-            out.write_all(&term::kitty_delete(id))?;
+            write_graphics(out, &term::kitty_delete(id), self.protocol)?;
         }
         for e in &mut self.entries {
             if e.sent {
-                out.write_all(&term::kitty_delete(e.id))?;
+                write_graphics(out, &term::kitty_delete(e.id), self.protocol)?;
                 e.sent = false;
             }
         }
@@ -207,10 +307,33 @@ impl Drop for Images {
         }
     }
 }
+fn prepare(path: &Path, cols: usize, geometry: (u16, u16, u16, u16)) -> Option<(image::DynamicImage, Size)> {
+    let bytes = crate::image::read_input(path).ok()?;
+    let img = crate::image::decode(&bytes).ok()?;
+    let (w, h, pw, ph) = geometry;
+    let cell =
+        if w > 0 && h > 0 && pw > 0 && ph > 0 { (u32::from(pw / w).max(1), u32::from(ph / h).max(1)) } else { (8, 16) };
+    let mut size = term::size(img.width(), img.height(), u32::try_from(cols).unwrap_or(u32::MAX), cell);
+    let rows = u32::from((h / 2).clamp(1, 20));
+    if size.rows > rows {
+        let scale = (rows * cell.1) as f64 / size.pixels.1 as f64;
+        size.pixels = ((size.pixels.0 as f64 * scale).round().max(1.) as u32, rows * cell.1);
+        size.cols = size.pixels.0.div_ceil(cell.0);
+        size.rows = rows;
+    }
+    Some((img.resize_exact(size.pixels.0, size.pixels.1, image::imageops::FilterType::Triangle), size))
+}
+fn write_graphics(out: &mut impl Write, payload: &[u8], protocol: Option<Protocol>) -> std::io::Result<()> {
+    if protocol == Some(Protocol::KittyTmux) {
+        out.write_all(&term::passthrough(payload))
+    } else {
+        out.write_all(payload)
+    }
+}
 fn color(id: u32) -> Color {
     Color::Rgb((id >> 16) as u8, (id >> 8) as u8, id as u8)
 }
-fn symbol(row: usize, col: usize) -> String {
+pub(crate) fn symbol(row: usize, col: usize) -> String {
     format!("{PLACEHOLDER}{}{}", DIACRITICS[row], DIACRITICS[col])
 }
 
@@ -518,6 +641,16 @@ const DIACRITICS: &[char] = &[
 mod tests {
     use super::*;
     use ratatui::{Terminal, backend::TestBackend, widgets::Paragraph};
+    fn ready(images: &mut Images, path: &Path, cols: usize) -> Vec<Line<'static>> {
+        images.lines(path, cols);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while images.entries.iter().any(|e| e.pending) {
+            images.poll();
+            assert!(std::time::Instant::now() < deadline);
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        images.lines(path, cols)
+    }
     fn images() -> Images {
         Images::testing()
     }
@@ -527,11 +660,52 @@ mod tests {
         p
     }
     #[test]
+    fn asynchronous_results_invalidate_layout_and_old_resize_results_are_discarded() {
+        let root = crate::scratch::Scratch::new("async-image");
+        let p = picture(&root, "one.png");
+        let mut images = images();
+        images.synchronous = false;
+        assert!(images.lines(&p, 20).is_empty(), "first layout must only enqueue");
+        let old_id = images.entries[0].id;
+        images.geometry(80, 6);
+        assert!(images.lines(&p, 20).is_empty());
+        assert_ne!(old_id, images.entries[0].id);
+        let lines = ready(&mut images, &p, 20);
+        assert_eq!(lines.len(), 3);
+        assert_eq!(images.entries.len(), 1);
+        assert!(!images.poll(), "idle follow must not request another frame");
+        std::fs::write(&p, b"corrupt").unwrap();
+        // Geometry/layout must not stat a cached file; follow alone invalidates it.
+        assert!(!images.geometry(80, 6));
+        assert_eq!(images.lines(&p, 20).len(), 3);
+        assert!(images.poll());
+        assert!(ready(&mut images, &p, 20).is_empty());
+        assert!(!images.poll(), "failed encoding must stay cached until the file changes");
+        images.active = false;
+    }
+    /// A picture that never got an entry (full queue) or lost its pending entry to eviction has no placeholder in
+    /// any held layout and no result that names it — only the retry flag lays the view out again. One request past
+    /// `LIMIT` takes one of the two paths whichever way the worker races.
+    #[test]
+    fn a_picture_refused_or_evicted_before_it_landed_lays_the_view_out_again() {
+        let root = crate::scratch::Scratch::new("async-retry");
+        let paths: Vec<_> = (0..=LIMIT).map(|n| picture(&root, &format!("{n}.png"))).collect();
+        let mut images = images();
+        images.synchronous = false;
+        for p in &paths {
+            assert!(images.lines(p, 20).is_empty());
+        }
+        assert!(images.retry && images.busy());
+        assert!(images.poll(), "the lost picture must ask for another layout");
+        assert!(!images.retry);
+        images.active = false;
+    }
+    #[test]
     fn placeholder_cells_upload_once_scroll_cover_cleanup_and_resume() {
         let root = crate::scratch::Scratch::new("virtual-kitty");
         let path = picture(&root, "image.png");
         let mut images = images();
-        let lines = images.lines(&path, 20);
+        let lines = ready(&mut images, &path, 20);
         let entry = &images.entries[0];
         let id = entry.id;
         assert_eq!(lines[0].spans[0].style.fg, Some(color(id)));
@@ -582,19 +756,19 @@ mod tests {
         let mut images = images();
         images.geometry(80, 40);
         let p = picture(&root, "0.png");
-        let old = images.lines(&p, 20);
+        let old = ready(&mut images, &p, 20);
         let id = images.entries[0].id;
         images.entries[0].sent = true;
         for n in 1..=LIMIT {
-            images.lines(&picture(&root, &format!("{n}.png")), 20);
+            ready(&mut images, &picture(&root, &format!("{n}.png")), 20);
         }
         assert_eq!(images.entries.len(), LIMIT);
         assert!(!images.valid(&old));
         assert_eq!(images.deleted, vec![id]);
-        let lines = images.lines(&p, 20);
+        let lines = ready(&mut images, &p, 20);
         assert!(images.valid(&lines));
         std::fs::write(&p, b"corrupt now").unwrap();
-        assert!(images.geometry(80, 40));
+        assert!(images.poll());
         assert!(!images.valid(&lines));
         assert!(images.lines(&p, 20).is_empty());
         images.active = false;
@@ -606,8 +780,8 @@ mod tests {
         let root = crate::scratch::Scratch::new("virtual-two-views");
         let mut images = images();
         let paths: Vec<_> = (0..PER_VIEW).map(|n| picture(&root, &format!("{n}.png"))).collect();
-        let detail: Vec<_> = paths.iter().flat_map(|p| images.lines(p, 20)).collect();
-        let wiki: Vec<_> = paths.iter().flat_map(|p| images.lines(p, 30)).collect();
+        let detail: Vec<_> = paths.iter().flat_map(|p| ready(&mut images, p, 20)).collect();
+        let wiki: Vec<_> = paths.iter().flat_map(|p| ready(&mut images, p, 30)).collect();
         assert!(images.valid(&detail), "the wiki page evicted the detail's pictures");
         assert!(images.valid(&wiki));
         // Text that merely contains the placeholder character is not a stale picture.
@@ -619,9 +793,9 @@ mod tests {
         let root = crate::scratch::Scratch::new("virtual-resize");
         let p = picture(&root, "image.png");
         let mut images = images();
-        let old = images.lines(&p, 20);
+        let old = ready(&mut images, &p, 20);
         assert!(images.geometry(80, 6));
-        let new = images.lines(&p, 20);
+        let new = ready(&mut images, &p, 20);
         assert!(!images.valid(&old));
         assert_eq!(new.len(), 3);
         images.active = false;

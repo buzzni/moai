@@ -8,6 +8,7 @@ use std::sync::Mutex;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Protocol {
     Kitty,
+    KittyTmux,
     Iterm,
     Sixel,
     Off,
@@ -42,7 +43,11 @@ pub fn detect(
         || env("TMUX").is_some_and(|value| in_tmux(&value) != Some(false))
     {
         Protocol::Off
-    } else if env("KITTY_WINDOW_ID").is_some() || term == "xterm-kitty" || program == "ghostty" {
+    } else if env("KITTY_WINDOW_ID").is_some()
+        || term == "xterm-kitty"
+        || term == "xterm-ghostty"
+        || program == "ghostty"
+    {
         Protocol::Kitty
     } else if ["iTerm.app", "WezTerm"].contains(&program.as_str()) || env("LC_TERMINAL").as_deref() == Some("iTerm2") {
         Protocol::Iterm
@@ -52,9 +57,45 @@ pub fn detect(
         Protocol::Off
     }
 }
+/// Resolve tmux separately from protocol hints: server-inherited kitty variables are
+/// not evidence about the attached client. Never change the user's passthrough option.
+pub fn detect_terminal(setting: Option<&str>) -> Protocol {
+    let chosen = std::env::var("MOAI_IMAGES").ok();
+    let setting = chosen.as_deref().or(setting);
+    if setting.is_some_and(|s| s != "auto") {
+        return detect(|k| std::env::var(k).ok(), setting, |_| None);
+    }
+    // One process and one timeout for both the tty comparison and the client's permission.
+    let pane = std::env::var("TMUX").ok().and_then(|value| tmux_state(&value));
+    if let Some((true, kitty)) = pane {
+        return if kitty { Protocol::KittyTmux } else { Protocol::Off };
+    }
+    detect(|k| std::env::var(k).ok(), setting, |_| pane.map(|(inside, _)| inside))
+}
+// Only the unix probe reads a reply; without the gate the Windows clippy job (`-D warnings`) fails on dead code.
+#[cfg(any(unix, test))]
+fn passthrough_client(reply: &str) -> bool {
+    let mut lines = reply.lines();
+    lines.next() == Some("xterm-kitty") && matches!(lines.next(), Some("on" | "all"))
+}
+/// Wrap every APC separately: tmux's DCS parser has a bounded input buffer.
+pub fn passthrough(payload: &[u8]) -> Vec<u8> {
+    let mut out = Vec::new();
+    for part in payload.split_inclusive(|b| *b == b'\\') {
+        out.extend_from_slice(b"\x1bPtmux;");
+        for byte in part {
+            out.push(*byte);
+            if *byte == 27 {
+                out.push(27);
+            }
+        }
+        out.extend_from_slice(b"\x1b\\");
+    }
+    out
+}
 /// Compare stdout's device with the server's panes. Unknown means graphics stay off.
 #[cfg(unix)]
-pub fn in_tmux(value: &str) -> Option<bool> {
+fn tmux_state(value: &str) -> Option<(bool, bool)> {
     use std::os::{fd::AsFd, unix::fs::MetadataExt};
     let stdout = std::io::stdout();
     if !stdout.is_terminal() {
@@ -64,23 +105,28 @@ pub fn in_tmux(value: &str) -> Option<bool> {
     // Read through `MetadataExt::rdev` on both sides: `libc::stat::st_rdev` is `i32` on macOS and `u64` on Linux.
     let device = std::fs::File::from(stdout.as_fd().try_clone_to_owned().ok()?).metadata().ok()?.rdev();
     let mut command = std::process::Command::new("tmux");
-    command.args(["-S", socket, "list-panes", "-a", "-F", "#{pane_tty}"]);
+    command.args(["-S", socket, "list-panes", "-a", "-F", "#{pane_tty}", ";", "display-message", "-p"]);
+    if let Ok(pane) = std::env::var("TMUX_PANE") {
+        command.args(["-t", &pane]);
+    }
+    command.arg("MOAI_CLIENT\n#{client_termname}\n#{allow-passthrough}");
     let output = tmux_output(command, std::time::Duration::from_secs(2))?;
     let text = std::str::from_utf8(&output).ok()?;
-    if text.trim().is_empty() {
+    let (panes, client) = text.split_once("MOAI_CLIENT\n").unwrap_or((text, ""));
+    if panes.trim().is_empty() {
         return None;
     }
     // A pane whose tty no longer stats (a dead pane kept by `remain-on-exit`) cannot be our open stdout, so it does
     // not decide anything. Only when no pane could be checked at all is the answer unknown.
     let mut checked = false;
-    for tty in text.lines() {
+    for tty in panes.lines() {
         let Ok(meta) = std::fs::metadata(tty) else { continue };
         if meta.rdev() == device {
-            return Some(true);
+            return Some((true, passthrough_client(client)));
         }
         checked = true;
     }
-    checked.then_some(false)
+    checked.then_some((false, false))
 }
 /// Bound the whole probe, including stdout collection. A nonblocking socket avoids a reader thread that could
 /// outlive the timeout if an inherited stdout remains open in a descendant of the client.
@@ -132,7 +178,7 @@ fn tmux_output(mut command: std::process::Command, timeout: std::time::Duration)
     result
 }
 #[cfg(not(unix))]
-pub fn in_tmux(_: &str) -> Option<bool> {
+fn tmux_state(_: &str) -> Option<(bool, bool)> {
     None
 }
 
@@ -313,7 +359,7 @@ pub fn print(lines: &[String]) -> std::io::Result<bool> {
     if !std::io::stdout().is_terminal() || draws.is_empty() {
         return Ok(false);
     }
-    let protocol = detect(|k| std::env::var(k).ok(), draws[0].setting.as_deref(), in_tmux);
+    let protocol = detect_terminal(draws[0].setting.as_deref());
     let mut start = 0;
     for d in draws {
         if d.line < start || d.line >= lines.len() {
@@ -343,6 +389,25 @@ pub fn print(lines: &[String]) -> std::io::Result<bool> {
             let s = size(img.width(), img.height(), cols, cell);
             let payload = match protocol {
                 Protocol::Kitty => super::png(&img).map(|b| kitty(&b, s)),
+                Protocol::KittyTmux => super::png(&img).map(|b| {
+                    static NEXT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(1);
+                    let id = (std::process::id()
+                        .wrapping_mul(2654435761)
+                        .wrapping_add(NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed))
+                        % 0xff_ffff)
+                        + 1;
+                    let mut out = passthrough(&kitty_virtual(&b, s, id));
+                    for row in 0..s.rows as usize {
+                        out.extend_from_slice(
+                            format!("\x1b[38;2;{};{};{}m", id >> 16, (id >> 8) & 255, id & 255).as_bytes(),
+                        );
+                        for col in 0..s.cols as usize {
+                            out.extend_from_slice(crate::tui::images::symbol(row, col).as_bytes());
+                        }
+                        out.extend_from_slice(b"\x1b[39m\n");
+                    }
+                    out
+                }),
                 Protocol::Iterm => Ok(iterm(&bytes, s)),
                 Protocol::Sixel => Ok(sixel(&img, s)),
                 Protocol::Off => Ok(vec![]),
@@ -363,10 +428,25 @@ pub fn print(lines: &[String]) -> std::io::Result<bool> {
 mod tests {
     use super::*;
     #[test]
+    fn passthrough_requires_kitty_and_explicit_permission_and_wraps_each_chunk() {
+        assert!(passthrough_client("xterm-kitty\non\n"));
+        assert!(passthrough_client("xterm-kitty\nall\n"));
+        for reply in ["xterm-kitty\noff", "xterm-ghostty\non", "xterm-256color\non", "xterm-kitty", ""] {
+            assert!(!passthrough_client(reply));
+        }
+        let payload = b"\x1b_Ga=T,m=1;abc\x1b\\\x1b_Gm=0;def\x1b\\";
+        let wrapped = passthrough(payload);
+        assert_eq!(
+            wrapped,
+            b"\x1bPtmux;\x1b\x1b_Ga=T,m=1;abc\x1b\x1b\\\x1b\\\x1bPtmux;\x1b\x1b_Gm=0;def\x1b\x1b\\\x1b\\"
+        );
+    }
+    #[test]
     fn detect_table() {
-        let cases: [(&[(&str, &str)], Protocol); 8] = [
+        let cases: [(&[(&str, &str)], Protocol); 9] = [
             (&[("TERM", "xterm-kitty")], Protocol::Kitty),
             (&[("TERM_PROGRAM", "ghostty")], Protocol::Kitty),
+            (&[("TERM", "xterm-ghostty")], Protocol::Kitty),
             (&[("TERM_PROGRAM", "WezTerm")], Protocol::Iterm),
             (&[("WT_SESSION", "1")], Protocol::Sixel),
             (&[("TERM", "foot")], Protocol::Sixel),
