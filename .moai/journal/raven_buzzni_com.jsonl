@@ -10929,3 +10929,4 @@
 {"ts":"2026-11-02T09:13:01Z","id":"moai-3cei","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"v0.42.0 릴리스"}
 {"ts":"2026-11-02T09:13:01Z","id":"moai-3cei.bh8","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"v0.42.0 릴리스 진행 — 병합·판 올리기·소식·PR"}
 {"ts":"2026-11-02T09:13:07Z","id":"moai-3cei.bh8","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-11-02T09:32:35Z","id":"moai-3cei.bh8","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: PR 병합(squash 금지) 뒤 tag on merge 승인 → 릴리스 확인, milestone-moai-6uqk 워크트리·가지·target 정리, moai-3cei.bh8 닫기"}
