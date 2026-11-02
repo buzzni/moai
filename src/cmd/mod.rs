@@ -1024,6 +1024,7 @@ fn surface_issue<S: serde::Serializer>(issue: &crate::model::Issue, serializer: 
 /// 결정). 모르는 필드 보존은 파일의 약속이고, 출력의 약속은 우리 키가 참이라는 것이다. 파일은
 /// 그대로다(`moai status` 가 비춘다).
 pub const OURS: &[&str] = &[
+    "undo",
     // `Row` 가 제 필드로 곁들이는 것.
     "derived_status",
     "derived_epic",

@@ -24,6 +24,8 @@ pub mod code {
     /// `bad_input` 과 갈라 둔다 — 고칠 곳이 argv 가 아니라 설정이다.
     pub const NO_ACTOR: &str = "no_actor";
     pub const ALREADY_EXISTS: &str = "already_exists";
+    /// A conditional write no longer matches the stored dates.
+    pub const STALE: &str = "stale";
     pub const LOCKED: &str = "locked";
     pub const BROKEN: &str = "broken";
     /// 도는 바이너리를 `moai update` 로 못 올린다(moai-zsfr.2p9) — cargo 가 지은 자리, 쓸 수 없는 자리,

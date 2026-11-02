@@ -169,6 +169,20 @@ pub fn shell_word(s: &str) -> String {
     quoted(s)
 }
 
+/// A copyable date undo targets the tracker explicitly, regardless of the caller's cwd.
+pub fn edit_command(root: &std::path::Path, id: &str, args: &[String]) -> Option<String> {
+    if args.is_empty() {
+        return None;
+    }
+    let root = crate::path::slashed(&root.to_string_lossy(), cfg!(windows));
+    Some(format!(
+        "moai -C {} edit {} {}",
+        quoted(&root),
+        quoted(id),
+        args.iter().map(|s| quoted(s)).collect::<Vec<_>>().join(" ")
+    ))
+}
+
 /// 낱말 하나를 **껍데기가 도로 그 낱말 하나로 읽도록** 감싼다. [`shell_word`] 는 여기에 경로의
 /// 규칙(맨 `-` 에 `./`)을 하나 더 얹은 것이다 — 경로가 아닌 낱말은 이쪽으로 온다.
 ///
