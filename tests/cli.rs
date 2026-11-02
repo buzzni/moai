@@ -34322,3 +34322,23 @@ fn an_upgrade_with_a_linked_tracker_ignores_the_image_lock() {
     }
 }
 
+#[test]
+fn image_add_marks_the_written_version_for_only_its_user() {
+    let s = init("image-own-read");
+    let writer = s.path().join("writer/config.toml");
+    let other = s.path().join("other/config.toml");
+    let id = field(&ok_with(s.path(), &writer, &["add", "test", "--json"]), "id");
+    ok_with(s.path(), &writer, &["read", &id]);
+    let pic = s.path().join("shot.png");
+    image::DynamicImage::new_rgba8(2, 2).save_with_format(&pic, image::ImageFormat::Png).unwrap();
+    let writer_env = [("MOAI_CONFIG", writer.to_str().unwrap())];
+    ok_env(s.path(), LATER, &writer_env, &["image", "add", pic.to_str().unwrap(), "--to", &id]);
+    let row = json_of(&ok_with(s.path(), &writer, &["show", &id, "--json"]));
+    assert_eq!(row["updated_at"], LATER, "{row}");
+    assert!(read_sheet(&writer, s.path()).contains(LATER));
+    assert!(row.get("unread").is_none(), "{row}");
+    assert_eq!(json_of(&ok_with(s.path(), &other, &["show", &id, "--json"]))["unread"], true);
+    ok_env(s.path(), "2026-09-13T00:00:00Z", &[("MOAI_CONFIG", other.to_str().unwrap())], &["edit", &id, "--body", "unseen"]);
+    ok_env(s.path(), "2026-09-14T00:00:00Z", &writer_env, &["image", "add", pic.to_str().unwrap(), "--to", &id]);
+    assert_eq!(json_of(&ok_with(s.path(), &writer, &["show", &id, "--json"]))["unread"], true);
+}
