@@ -7227,6 +7227,7 @@ fn config_json_fills_defaults_and_keeps_written_values() {
     assert_eq!(v["prefix"], "argos", "{v}");
     assert_eq!(v["statuses"], serde_json::json!(["todo", "wip", "done"]), "{v}");
     assert_eq!(v["archive_days"], 5, "{v}");
+    assert_eq!(v["session_lost_minutes"], 30, "{v}");
     assert_eq!(v["status_wip_limit"], 7, "{v}");
     // 안 적은 키는 바이너리의 기본값이다.
     assert_eq!(v["naming"], "full", "{v}");
@@ -34101,4 +34102,106 @@ fn writing_reads_precedence_and_warns_without_writing() {
     assert_eq!(got["written"], serde_json::json!(["detail"]));
     assert_eq!(got["repo"], serde_json::json!([]));
     ok(s.path(), &["status"]);
+}
+
+#[test]
+fn local_heartbeat_surfaces_lost_alive_unknown_and_disabled_without_tracker_writes() {
+    let s = init("local-heartbeat");
+    let id = field(&ok(s.path(), &["add", "heartbeat work", "--json"]), "id");
+    ok(s.path(), &["mv", &id, "in_progress"]);
+    let config = s.path().join("hookcfg/config.toml");
+    let call = |args: &[&str]| staged(args).current_dir(s.path()).env("MOAI_CONFIG", &config).output().unwrap();
+    let snapshot = issues(s.path());
+    let journal_before: Vec<_> = std::fs::read_dir(s.path().join(".moai/journal"))
+        .unwrap()
+        .map(|e| {
+            let p = e.unwrap().path();
+            (p.clone(), std::fs::read(p).unwrap())
+        })
+        .collect();
+    let input = serde_json::json!({"session_id":"heartbeat-session", "cwd":s.path(), "tool_name":"Read", "tool_input":{"file_path":"/tmp/outside"}}).to_string();
+    for (event, wire) in [
+        ("session-start", "SessionStart"),
+        ("user-prompt-submit", "UserPromptSubmit"),
+        ("pre-tool-use", "PreToolUse"),
+        ("stop", "Stop"),
+    ] {
+        hook_at_home(&s, s.path(), None, &[], event, &input);
+        let dirs: Vec<_> =
+            std::fs::read_dir(config.parent().unwrap().join("beats")).unwrap().map(|e| e.unwrap().path()).collect();
+        assert_eq!(dirs.len(), 1);
+        assert_eq!(std::fs::read_to_string(dirs[0].join("heartbeat-session")).unwrap(), format!("claude\t{wire}\n"));
+    }
+    let beat_dir = std::fs::read_dir(config.parent().unwrap().join("beats")).unwrap().next().unwrap().unwrap().path();
+    let key = beat_dir.file_name().unwrap();
+    let picks = config.parent().unwrap().join("picks").join(key);
+    std::fs::create_dir_all(&picks).unwrap();
+    std::fs::write(picks.join("heartbeat-session"), format!("100\t{id}\t{}\n", 1789099923)).unwrap(); // NOW's tracker clock
+    let beat = beat_dir.join("heartbeat-session");
+    let age = std::time::SystemTime::now() - std::time::Duration::from_secs(3600);
+    std::fs::File::open(&beat).unwrap().set_modified(age).unwrap();
+    let show = || {
+        let out = call(&["show", &id, "--json"]);
+        assert!(out.status.success());
+        serde_json::from_slice::<serde_json::Value>(&out.stdout).unwrap()
+    };
+    let lost = show();
+    assert_eq!(lost["session"]["state"], "lost");
+    assert_eq!(lost["session"]["session_id"], "heartbeat-session");
+    assert_eq!(lost["session"]["last_event"], "Stop");
+    assert!(lost["session"]["silent_minutes"].as_i64().unwrap() >= 60);
+    assert!(lost["session"]["recover"][0].as_str().unwrap().starts_with("claude --resume heartbeat-session"));
+    assert!(
+        lost["session"]["recover"][1]
+            .as_str()
+            .unwrap()
+            .contains(&format!("moai mv {id} in_progress --from in_progress"))
+    );
+    let status = call(&["status", "--json"]);
+    assert!(status.status.success());
+    let status: serde_json::Value = serde_json::from_slice(&status.stdout).unwrap();
+    let warning = status["warnings"].as_array().unwrap().iter().find(|w| w["kind"] == "lost_session").unwrap();
+    assert_eq!(warning["minutes"], 30);
+    assert!(warning.get("days").is_none());
+    let list: serde_json::Value =
+        serde_json::from_slice(&call(&["show", "--all", "--json", "--fields", "id,session"]).stdout).unwrap();
+    assert_eq!(list.as_array().unwrap().iter().find(|r| r["id"] == id).unwrap()["session"], lost["session"]);
+    let filtered: serde_json::Value =
+        serde_json::from_slice(&call(&["show", &id, "--json", "--fields", "id,title"]).stdout).unwrap();
+    assert!(filtered.get("session").is_none());
+    let human = call(&["show", &id]);
+    assert!(String::from_utf8_lossy(&human.stdout).contains("→  claude --resume"));
+    std::fs::File::open(&beat).unwrap().set_modified(std::time::SystemTime::now()).unwrap();
+    assert_eq!(show()["session"]["state"], "alive");
+    assert_eq!(show()["session"]["recover"], serde_json::json!([]));
+    std::fs::remove_file(&beat).unwrap();
+    assert!(show().get("session").is_none());
+    let without = call(&["status", "--json"]);
+    assert!(!String::from_utf8_lossy(&without.stdout).contains("lost_session"));
+    std::fs::write(s.path().join(".moai/config.toml"), "prefix = \"argos\"\nsession_lost_minutes = 0\n").unwrap();
+    hook_at_home(&s, s.path(), None, &[], "pre-tool-use", &input);
+    assert!(!beat.exists());
+    std::fs::write(&beat, "claude\tStop\n").unwrap();
+    std::fs::File::open(&beat).unwrap().set_modified(age).unwrap();
+    assert!(show().get("session").is_none());
+    assert_eq!(issues(s.path()), snapshot);
+    for (path, bytes) in journal_before {
+        assert_eq!(std::fs::read(path).unwrap(), bytes);
+    }
+}
+
+#[test]
+fn heartbeat_dialects_missing_session_and_zero_threshold() {
+    let s = init("heartbeat-dialects");
+    let input = serde_json::json!({"session_id":"codex-session", "cwd":s.path(), "tool_name":"Read", "tool_input":{"file_path":"/tmp/outside"}}).to_string();
+    hook_argv(&s, s.path(), None, &[], &["hook", "pre-tool-use", "--dialect", "codex"], &input);
+    let home = s.path().join("hookcfg/beats");
+    let dir = std::fs::read_dir(&home).unwrap().next().unwrap().unwrap().path();
+    assert_eq!(std::fs::read_to_string(dir.join("codex-session")).unwrap(), "codex\tPreToolUse\n");
+    let agy = serde_json::json!({"conversationId":"agy-session", "workspacePaths":[s.path()], "toolCall":{"name":"view_file", "args":{"AbsolutePath":"/tmp/outside"}}}).to_string();
+    hook_argv(&s, s.path(), None, &[], &["hook", "pre-tool-use", "--dialect", "antigravity"], &agy);
+    assert_eq!(std::fs::read_to_string(dir.join("agy-session")).unwrap(), "antigravity\tPreToolUse\n");
+    let before = std::fs::read_dir(&dir).unwrap().count();
+    hook_at_home(&s, s.path(), None, &[], "session-start", &serde_json::json!({"cwd":s.path()}).to_string());
+    assert_eq!(std::fs::read_dir(&dir).unwrap().count(), before);
 }

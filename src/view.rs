@@ -1808,6 +1808,66 @@ pub struct Seen<'a> {
     /// 여기서 다시 판단하지 않는다 — 안 잰 것(`None`)만이 아무 말도 안 하는 자리라, 그것을
     /// "자리 없다" 로 말하는 일은 없다.
     pub places: Option<crate::report::Place<'a>>,
+    pub session: Option<crate::report::SessionState>,
+}
+
+/// Recovery wording is shared by CLI, JSON and the explorer; the web displays JSON verbatim.
+pub fn recover_lines(lang: Lang, issue: &Issue, state: &crate::report::SessionState) -> Vec<String> {
+    if !state.lost {
+        return Vec::new();
+    }
+    let first = match state.beat.agent {
+        crate::report::Agent::Claude => say(lang, "detail.recover_claude"),
+        crate::report::Agent::Codex => say(lang, "detail.recover_codex"),
+        crate::report::Agent::Antigravity => say(lang, "detail.recover_antigravity"),
+    };
+    [
+        first,
+        say(lang, "detail.recover_resume_own"),
+        say(lang, "detail.recover_take"),
+        say(lang, "detail.recover_put_down"),
+    ]
+    .into_iter()
+    .map(|text| fill(text, &[("sid", &state.beat.session), ("id", &issue.id), ("col", issue.status.as_str())]))
+    .collect()
+}
+
+pub fn session_line(lang: Lang, state: &crate::report::SessionState) -> String {
+    let sid: String = state.beat.session.chars().take(8).collect();
+    fill(
+        if state.lost { say(lang, "detail.session_lost") } else { say(lang, "detail.session_alive") },
+        &[
+            ("agent", state.beat.agent.as_str()),
+            ("sid", &sid),
+            ("event", &state.beat.last_event),
+            ("minutes", &(state.silent_secs / 60).to_string()),
+        ],
+    )
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct Session {
+    pub state: &'static str,
+    pub agent: &'static str,
+    pub session_id: String,
+    pub last_event: String,
+    pub last_seen: String,
+    pub silent_minutes: i64,
+    pub recover: Vec<String>,
+}
+
+impl Session {
+    pub fn of(lang: Lang, issue: &Issue, state: &crate::report::SessionState) -> Self {
+        Session {
+            state: if state.lost { "lost" } else { "alive" },
+            agent: state.beat.agent.as_str(),
+            session_id: state.beat.session.clone(),
+            last_event: state.beat.last_event.clone(),
+            last_seen: crate::model::format_rfc3339(state.beat.last_seen_secs),
+            silent_minutes: state.silent_secs / 60,
+            recover: recover_lines(lang, issue, state),
+        }
+    }
 }
 
 /// **손으로 옮긴 칸이 서 있는 칸과 다르면** 그렇다고 말하는 낱말. CLI 상세와
@@ -2017,6 +2077,16 @@ pub fn detail(
             out.push(format!("  {place}   {}", paint(style::WARN, say(lang, "detail.place_lost"))))
         }
         None => {}
+    }
+    if let Some(session) = &seen.session {
+        out.push(format!(
+            "  {}   {}",
+            row_label(say(lang, "detail.session"), lang),
+            paint(if session.lost { style::WARN } else { style::DIM }, &session_line(lang, session))
+        ));
+        for line in recover_lines(lang, i, session) {
+            out.push(format!("  →  {line}"));
+        }
     }
     // **막음도 상세에서 말한다**(moai-rvcb). id 로 콕 집어 펼친 이 화면이 "왜 ready 에 안
     // 나오나" 에 답하는 자리인데, 막힘·미룬 막음·끊긴 막음이 탐색기에만 있었다. 막는가는
@@ -4606,6 +4676,7 @@ mod tests {
             states: BTreeMap::new(),
             blocks: Vec::new(),
             places: None,
+            session: None,
         }
     }
 
@@ -4622,6 +4693,40 @@ mod tests {
     /// 들어, 같은 자료를 두고 목록은 `(epic not there)` 라 하고 `show <id>` 는
     /// `(no such epic)` 이라 했다(리뷰). 감싸는 자리를 [`gone_epic`] 하나로 모으고 여기서 넷을
     /// 함께 잰다 — 한 곳만 재면 나머지가 말없이 갈린다.
+    #[test]
+    fn recovery_lines_share_agent_commands_and_real_columns_in_both_languages() {
+        let row =
+            Issue::new("argos-0001".into(), "work".into(), Kind::Issue, Status::new("review"), "2026-11-01T00:00:00Z");
+        let mut session = crate::report::SessionState {
+            beat: crate::report::Beat {
+                session: "sid-123".into(),
+                agent: crate::report::Agent::Claude,
+                last_event: "Stop".into(),
+                last_seen_secs: 0,
+            },
+            silent_secs: 3600,
+            lost: true,
+        };
+        for lang in [Lang::En, Lang::Ko] {
+            for (agent, first) in [
+                (crate::report::Agent::Claude, "claude --resume sid-123"),
+                (crate::report::Agent::Codex, "codex resume sid-123"),
+                (crate::report::Agent::Antigravity, ""),
+            ] {
+                session.beat.agent = agent;
+                let lines = recover_lines(lang, &row, &session);
+                assert_eq!(lines.len(), 4);
+                assert!(lines[0].starts_with(first));
+                assert!(lines[1].contains("moai mv argos-0001 review --from review"));
+                assert!(lines[2].contains("--take -m '"));
+                assert!(lines[3].contains("moai defer argos-0001"));
+            }
+            session.lost = false;
+            assert!(recover_lines(lang, &row, &session).is_empty());
+            session.lost = true;
+        }
+    }
+
     #[test]
     fn a_dangling_epic_reference_is_wrapped_once_on_every_surface() {
         let lang = Lang::Ko;

@@ -514,6 +514,8 @@ fn listed(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>, keys: &Keys) -> 
         } else {
             unread_here(ctx, &repo, &load.issues)
         };
+        let wall_now = crate::pulse::now_secs();
+        let pulse = keys.wants("session").then(|| crate::pulse::read(&repo.root, &load.issues, &repo.config, wall_now));
         let rows: Vec<Listed> = shown
             .iter()
             .map(|i| Listed {
@@ -523,7 +525,14 @@ fn listed(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>, keys: &Keys) -> 
                     wh.epic.handed().get(i.id.as_str()).copied(),
                     &wh.kinds,
                 )
-                .on(&origin),
+                .on(&origin)
+                .with_session(
+                    pulse
+                        .as_ref()
+                        .and_then(|p| report::session_of(i, &repo.config, p, wall_now))
+                        .as_ref()
+                        .map(|state| view::Session::of(ctx.lang(), i, state)),
+                ),
                 journal_error: errors.get(home(&repo, &origin, &i.id)).map_or(&[], Vec::as_slice),
                 // **키는 늘 선다**(moai-2l8n) — 하나를 펼칠 때와 같은 약속이다. 빈 배열은
                 // "이 일을 한 AI 를 아무도 안 적었다" 는 사실이고, 키가 없으면 되쓴 줄의
@@ -947,7 +956,11 @@ fn one(
     // 워크트리가 없으면 `places` 가 아무 키도 안 내므로(moai-tbin) 여기 가드를 따로 두지 않는다 —
     // 두면 "자리를 물을 수 있는가" 를 재는 자가 둘이 된다.
     let places = report::places_in(&footing, &trees, &model::now()).remove(&issue.id);
+    let wall_now = crate::pulse::now_secs();
+    let pulse = wants(&["session"]).then(|| crate::pulse::read(&repo.root, all, &repo.config, wall_now));
+    let session = pulse.as_ref().and_then(|p| report::session_of(issue, &repo.config, p, wall_now));
     let seen = view::Seen {
+        session,
         // **줄로 묻는 그릇으로 든다**(moai-wre3) — 접은 지도를 그대로 들던 때는 같은 id 의
         // 자식 둘이 한 화면에서 뒷줄의 답을 함께 받았다. 여기 자식 줄에는 쌍둥이가 설 수 있다.
         roots: report::Shelved::of(all),
@@ -1054,6 +1067,13 @@ fn one(
             // 워크트리가 있다·자리가 없다). 사람 화면이 가르는 것을 받는 쪽도 가를 수 있어야 한다.
             extra.push(("workplaces", serde_json::to_string(p.at()).map_err(|e| Fail::new(e.to_string()))?));
             extra.push(("place", serde_json::to_string(p.word()).map_err(|e| Fail::new(e.to_string()))?));
+        }
+        if let Some(session) = &seen.session {
+            extra.push((
+                "session",
+                serde_json::to_string(&view::Session::of(ctx.lang(), issue, session))
+                    .map_err(|e| Fail::new(e.to_string()))?,
+            ));
         }
         // 트래커 커밋까지 **전부** 낸다 — `tracker` 표시가 붙으니 거를지는 받는 쪽이 정한다.
         // 사람 화면만 뺀다(`view::commits`).
