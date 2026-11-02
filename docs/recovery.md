@@ -422,10 +422,37 @@ archive file's line number.
 
 ## An agent session died
 
-Follow [Bring back sessions that died](agents.md#bring-back-sessions-that-died)
-for Claude Code; a Saycode session is reopened through Saycode. Codex sessions
-are not in the session map and `moai-recover` does not resume them. Open a Codex
-session yourself and read its epic notes to continue (moai-uzhx).
+A hook heartbeat is the session's local mark on this machine. After more than
+`session_lost_minutes` of silence (30 minutes by default), `moai status` shows
+`lost_session`, the explorer and web pause the row's spinner with a red `!`,
+and the web list and Gantt tint the row red. `moai show <id>` and the detail
+panes name the session, its last event and how long it has been silent.
+`Stop` means the turn ended; a session waiting on its person, or a long build,
+can also pass the threshold. Silence is a signal to check, not proof of death.
+
+Resume the session using the command shown by `moai show <id>`:
+
+- Claude Code: `claude --resume <session-id>`. When several died together,
+  follow [Bring back sessions that died](agents.md#bring-back-sessions-that-died)
+  and ask for the `moai-recover` skill.
+- Codex: `codex resume <session-id>`. The Claude session map and `moai-recover`
+  do not resume Codex sessions.
+- Antigravity: reopen that conversation in Antigravity. A Saycode conversation
+  is reopened through Saycode.
+
+To continue in a new session, read `moai show <id>` for its `Next:` note, then
+record your pick again with `moai mv <id> <current-column> --from <current-column>`.
+The same-column move records a pick too. For another person's row, ask first,
+then use `--take -m '<who approved>'`. To put work down, use `moai mv <id> todo`
+or `moai defer <id> -m '<why>'`.
+
+Without a heartbeat here the session is **unknown**, not lost: the row keeps
+turning as before. This includes older sessions, sessions without hooks and
+sessions on another machine. Heartbeats live beside the user config under
+`beats/<tracker-key>/<session-id>`; their modification time is the last signal.
+They never enter the tracker or journal. Set the flat repository key
+`session_lost_minutes = 0` to disable heartbeat reads, writes and marks.
+Nothing is blocked; the warning leaves the exit code at 0.
 
 ## When nothing else fits
 
@@ -433,4 +460,4 @@ The state is two text files under version control. `git log -p -- .moai/` shows
 every change anyone made to them, and any commit that had them whole is a
 recovery point.
 
-Decided in: moai-uzhx moai-bth3 moai-r0x8 moai-w30o
+Decided in: moai-uzhx moai-bth3 moai-r0x8 moai-w30o moai-4v3h
