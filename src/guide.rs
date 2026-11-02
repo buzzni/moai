@@ -666,7 +666,7 @@ const PLAN_MEMBER_EXTRA: &str = "where and how (files, functions, structures) ·
 /// 돌려준다. 공통 글에 "gap 으로 돌려 달라" 를 두면 감독의 펼치기가 아무도 안 읽는 줄을 낸다.
 fn plan_core() -> String {
     format!(
-        "Read the request, its evidence and enough code and tracker context to ground the split. Write short titles and concrete, actionable bodies with file and function locations, constraints, acceptance tests and review focus. For detailed writing use, for the epic: {PLAN_EPIC_BODY}; for a development member: {DETAILED_BODY}, adding {PLAN_MEMBER_EXTRA} after `what is decided`. Name the epic review section `{REVIEW_FOCUS}` (choose the English or Korean heading). For brief writing give what, where and tests. Classify each member using the difficulty rubric and explain why. Do not ask the person questions."
+        "Read the request, its evidence and enough code and tracker context to ground the split. Write short titles and concrete, actionable bodies with file and function locations, constraints, acceptance tests and review focus. For detailed writing use, for the epic: {PLAN_EPIC_BODY}; for a development member: {DETAILED_BODY}, adding {PLAN_MEMBER_EXTRA} after `what is decided`. Name the epic review section `{REVIEW_FOCUS}` (choose the English or Korean heading). For brief writing give what, where and tests. Classify each member using the difficulty rubric and explain why. Do not ask the person questions.\nKeep the person's decisions and exclusions, storage, concurrency, path security and output contracts, numbers and budgets, member order and review focus. Give entry-point files and functions as navigation hints; line numbers, proposed signatures and types are hints, not contracts. Describe acceptance tests by the failure conditions they must catch, not exhaustive test function names. Make example commands executable with configured column names, the first column, spaces and shell quoting; when unknown use a placeholder such as `<first column>`. Put shared files and order in the epic once; a member's `order and the files it shares` names only its own place and files and points to the epic — do not repeat file lists or explanations in every member."
     )
 }
 
@@ -674,7 +674,6 @@ fn plan_brief_draft() -> String {
     format!(
         r#"Draft a plan from the interview record at <interview path> and the repository at <root>. Writing: <writing>. Work only in the scratchpad; do not write to the tracker or change repository files.
 {core}
-Keep the person's decisions and exclusions, storage, concurrency, path security and output contracts, numbers and budgets, member order and review focus. Give entry-point files and functions as navigation hints; line numbers, proposed signatures and types are hints, not contracts. Describe acceptance tests by the failure conditions they must catch, not exhaustive test function names. Make example commands executable with configured column names, the first column, spaces and shell quoting; when unknown use a placeholder such as `<first column>`. Put shared files and order in the epic once; a member's `order and the files it shares` names only its own place and files and points to the epic — do not repeat file lists or explanations in every member.
 Write a plan file, an epic body file and one body file per member in the scratchpad. Preserve the mapping from each plan title to its body file. Return first `Model ran: anthropic/<your real model name>`, then `plan: <absolute file>`, `epic body: <absolute file>`, and for each member `<title> <low|medium|high> — <reason>; body: <absolute file>`. Return each unresolved decision as `gap: <what>`; do not ask the user.
 {rubric}"#,
         core = plan_core(),
@@ -6919,8 +6918,8 @@ stop sending outside work while a release runs",
     }
 
     #[test]
-    fn plan_draft_keeps_decisions_and_contracts_without_prescribing_implementation() {
-        let draft = plan_brief_draft();
+    fn planning_briefs_keep_decisions_and_contracts_without_prescribing_implementation() {
+        let briefs = [("draft", plan_brief_draft()), ("backlog", plan_brief())];
         for contract in [
             "person's decisions and exclusions",
             "storage, concurrency, path security and output contracts",
@@ -6937,7 +6936,10 @@ stop sending outside work while a release runs",
             // 멤버 머리의 `order and the files it shares`(DETAILED_BODY)와 "에픽에 한 번" 이 한 브리프에서 갈리지 않게.
             "a member's `order and the files it shares` names only its own place and files and points to the epic",
         ] {
-            assert!(draft.contains(contract), "missing plan contract: {contract}");
+            for (name, brief) in &briefs {
+                assert!(brief.contains(contract), "{name} brief misses plan contract: {contract}");
+                assert_eq!(brief.matches(contract).count(), 1, "{name} brief repeats plan contract: {contract}");
+            }
         }
         let skill = plan();
         for contract in [
