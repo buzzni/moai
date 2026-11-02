@@ -19,6 +19,7 @@ does not tag — see `CONTRIBUTING.md`.
 
 ### Changed
 
+- Supervisor backlog plans share the decision and contract guidance used by `moai-plan`; epic-end review prompts and results use separate directories per epic. (moai-i26i)
 - Gantt date reads skip hidden row calculations while preserving complete group rollups; web scrolling retains overlapping DOM nodes and releases replaced chart trees. (moai-yigx)
 - Explorer previews encode in a bounded background worker and appear as they finish; cached image files are checked at the follow cadence rather than on each frame. (moai-zidx)
 
