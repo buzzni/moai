@@ -469,7 +469,11 @@ Machine-readable lines keep their format in either mode. JSON includes `detail`,
    `plan` role's model to split the backlog item into an epic and its issues,
    hang the milestone and the deadline on the epic, and give every member a body
    the worker can start from; it hands back the epic and a difficulty per member.
-   The worker is then sent that epic from step 2
+   The worker is then sent that epic from step 2. Backlog plans and `moai-plan`
+   drafts preserve the same decisions, exclusions, contracts and budgets. File
+   locations, line numbers and proposed signatures guide navigation; acceptance
+   describes failures the tests must catch. Shared files and the overall order
+   belong in the epic, with each member pointing to its own place
 3. **It picks a role and raises a worker.** Each backlog item goes to one role —
    `develop` or `complex` by one word of difficulty, `docs` for the wiki and the
    CHANGELOG, `bulk` for mechanical work — and the supervisor raises a subagent
@@ -514,7 +518,11 @@ reviews the whole epic once, at the end, with `/code-review` at `review_grade` �
 storage format or hooks, or when the worktree carries members of two epics. A
 subagent worker raises that review as a subagent of its own on the `review`
 model, because a review called from a worker runs on the worker's model. It
-never starts another agent program. When rule 3 keeps refusing the review after
+never starts another agent program. The filled review prompt is saved as
+`<scratchpad>/<epic>/brief.md`; the reviewer reads that file before starting and
+writes its original findings beside it as `review.md`. Separate epic directories
+keep parallel reviewers from overwriting each other's input or results. When rule
+3 keeps refusing the review after
 the review issue is picked up, the worker reviews the diff by hand in its own
 session and opens the review text with `Manual review:`, so the next reader does
 not take its sweep for what the review command found.
@@ -955,7 +963,7 @@ worker's line is written by the supervisor.
   where an incoming message waits for its person's approval — look at that
   window
 
-Decided in: moai-2w0s moai-hxma moai-0zjo moai-nqdc moai-bl3x moai-gelm moai-tllo moai-mdzx moai-xs2h moai-h8tn moai-snyk moai-u5wr moai-b6cw moai-ew4o moai-dhxm moai-ml0d moai-nas5 moai-kxkw moai-dj4j moai-54yc moai-bkn4 moai-084j moai-keka moai-zynt moai-j9nf moai-jtvp moai-obxm moai-six5 moai-iu73 moai-r0x8 moai-u99i moai-uqf7 moai-p5sz moai-xpa8 moai-9tqo moai-pxui moai-uzhx moai-wk7i moai-jdwk moai-1m21 moai-d1zn moai-xvvr moai-ns7a moai-zgc1 moai-4v3h
+Decided in: moai-2w0s moai-hxma moai-0zjo moai-nqdc moai-bl3x moai-gelm moai-tllo moai-mdzx moai-xs2h moai-h8tn moai-snyk moai-u5wr moai-b6cw moai-ew4o moai-dhxm moai-ml0d moai-nas5 moai-kxkw moai-dj4j moai-54yc moai-bkn4 moai-084j moai-keka moai-zynt moai-j9nf moai-jtvp moai-obxm moai-six5 moai-iu73 moai-r0x8 moai-u99i moai-uqf7 moai-p5sz moai-xpa8 moai-9tqo moai-pxui moai-uzhx moai-wk7i moai-jdwk moai-1m21 moai-d1zn moai-xvvr moai-ns7a moai-zgc1 moai-4v3h moai-i26i
 
 ## Archive storage
 
