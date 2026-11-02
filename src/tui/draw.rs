@@ -5303,10 +5303,37 @@ fn laid_body_with(
         .filter(|(b, _)| matches!(b, crate::markdown::Block::Heading { .. }))
         .map(|(_, &at)| at)
         .collect();
+    // Carry image-path identity through wrapping, scrolling and clipping. The underline colour
+    // survives rendering as cell metadata; it is not invisible on the wire, so `link_image_cells`
+    // takes every marker off the frame before the backend emits it (`SGR 58`).
+    let mut image_rows = std::collections::BTreeMap::new();
+    for (n, block) in blocks.iter().enumerate() {
+        if let crate::markdown::Block::Image { dest, .. } = block {
+            for row in starts[n]..starts.get(n + 1).copied().unwrap_or(laid.len()) {
+                image_rows.insert(row, image_link_marker(dest));
+            }
+        }
+    }
     let cells = crate::markdown::link_cells(&laid);
     let lines = laid
         .into_iter()
-        .map(|line| Line::from(line.into_iter().map(|s| Span::styled(s.text, role_style(s.role))).collect::<Vec<_>>()))
+        .enumerate()
+        .map(|(row, line)| {
+            Line::from(
+                line.into_iter()
+                    .map(|s| {
+                        let mut style = role_style(s.role);
+                        if s.role == crate::markdown::Role::Mark
+                            && s.text.chars().any(|c| !c.is_whitespace() && c != '│' && c != '>')
+                            && let Some(marker) = image_rows.get(&row)
+                        {
+                            style.underline_color = Some(*marker);
+                        }
+                        Span::styled(s.text, style)
+                    })
+                    .collect::<Vec<_>>(),
+            )
+        })
         .collect();
     let mut out = Laid { lines, heads, links, cells };
     if let (Some(graphics), Some(image)) = (graphics, image) {
@@ -5326,13 +5353,15 @@ fn expand_images(
     graphics: &mut super::images::Images,
 ) {
     let mut additions = std::collections::BTreeMap::new();
+    let mut requested = 0;
     for (n, block) in blocks.iter().enumerate() {
         // Checked per picture: detection runs on the first local picture, not on a body without any.
-        if additions.len() == super::images::PER_VIEW || graphics.off() {
+        if requested == super::images::PER_VIEW || graphics.off() {
             break;
         }
         let crate::markdown::Block::Image { dest, .. } = block else { continue };
         let Some(path) = context.file(dest) else { continue };
+        requested += 1;
         let lines = graphics.lines(&path, width);
         if lines.is_empty() {
             continue;
@@ -6401,17 +6430,18 @@ impl Painter {
         term: &mut ratatui::Terminal<B>,
         app: &mut App,
     ) -> Result<(), B::Error> {
-        // A changed geometry or file drops the cached pictures; the held detail body and wiki page then fail
-        // `Images::valid` and lay out again — there is nothing to clear here.
-        if let Ok(area) = term.size() {
-            app.images.geometry(area.width, area.height);
+        // A changed geometry drops the cached pictures (file changes are follow's, `Images::poll`). A sent picture fails
+        // `Images::valid` by itself, but a pending one is in no held layout — so the views are dropped here.
+        if let Ok(area) = term.size()
+            && app.images.geometry(area.width, area.height)
+        {
+            app.relay_pictures();
         }
         self.paint(term, |f| {
             screen(f, app);
             use std::io::IsTerminal;
-            if std::io::stdout().is_terminal() && !app.raw {
-                image_hyperlinks(f.buffer_mut(), app);
-            }
+            // Always called: besides linking, it takes the path markers off the frame (`link_image_cells`).
+            image_hyperlinks(f.buffer_mut(), app, std::io::stdout().is_terminal() && !app.raw);
             let _ = app.images.frame(f.buffer_mut(), &mut std::io::stdout().lock());
         })
     }
@@ -13593,8 +13623,9 @@ mod bench {
 ///
 /// The targets are the ones [`fill_body`] and `wiki_page` resolved with the laid lines (moai-fauw): parsing the body
 /// and canonicalizing every picture here ran once per frame, on every key held down.
-fn image_hyperlinks(buffer: &mut ratatui::buffer::Buffer, app: &App) {
+fn image_hyperlinks(buffer: &mut ratatui::buffer::Buffer, app: &App, link: bool) {
     let targets: &[(String, std::path::PathBuf)] = match &app.mode {
+        _ if !link => &[],
         Mode::Wiki(w) if w.choose.is_none() => match (&w.laid, w.current()) {
             (Some(l), Some(p)) if l.slug == p.slug && !l.raw => &l.images,
             _ => &[],
@@ -13602,49 +13633,86 @@ fn image_hyperlinks(buffer: &mut ratatui::buffer::Buffer, app: &App) {
         Mode::Browse => app.body.as_ref().filter(|b| !b.raw).map_or(&[], |b| &b.images[..]),
         _ => &[],
     };
-    link_image_cells(buffer, targets, app.site.lang);
+    link_image_cells(buffer, targets);
 }
-fn link_image_cells(buffer: &mut ratatui::buffer::Buffer, targets: &[(String, std::path::PathBuf)], lang: Lang) {
+fn image_link_marker(dest: &str) -> Color {
+    let hash = dest.bytes().fold(2166136261u32, |h, b| (h ^ u32::from(b)).wrapping_mul(16777619));
+    Color::Rgb((hash >> 16) as u8, (hash >> 8) as u8, hash as u8)
+}
+/// Link the cells [`laid_body_with`] marked with a picture path's [`image_link_marker`], then take **every** marker off,
+/// linked or not (a missing file, a body with no targets). The underline colour only carries the path through layout:
+/// left in the buffer the backend emits it as `SGR 58;2;r;g;b`, and a terminal that does not know SGR 58 (the Linux
+/// console, Terminal.app, older conhost) reads the colour bytes as attributes — the very terminals that fall back to
+/// the link. Nothing else in the explorer sets an underline colour.
+fn link_image_cells(buffer: &mut ratatui::buffer::Buffer, targets: &[(String, std::path::PathBuf)]) {
     use ratatui::buffer::CellDiffOption;
-    if targets.is_empty() {
-        return;
-    }
-    // The placeholder's opening word in the drawn language and in English (a language that does not carry the
-    // word yet falls back to it) — read from the same table `image::label` draws with, not spelt here.
-    let marks = [format!("[{}", say(lang, "image.placeholder")), format!("[{}", say(Lang::En, "image.placeholder"))];
-    for y in buffer.area.y..buffer.area.bottom() {
-        let mut text = String::new();
-        let mut cells = Vec::new();
-        for x in buffer.area.x..buffer.area.right() {
-            let symbol = buffer[(x, y)].symbol();
-            if symbol.is_empty() {
-                continue;
-            }
-            cells.push((text.len(), x));
-            text.push_str(symbol);
-        }
-        // Only image placeholder rows. Notes, code, headings and raw remain plain.
-        if !marks.iter().any(|m| text.contains(m.as_str())) {
+    // Once per frame, not once per cell.
+    let marks: Vec<(Color, String)> = targets
+        .iter()
+        .map(|(dest, path)| (image_link_marker(dest), crate::image::term::file_url(&path.to_string_lossy())))
+        .collect();
+    for cell in &mut buffer.content {
+        if cell.underline_color == Color::Reset {
             continue;
         }
-        for (dest, path) in targets {
-            if let Some(at) = text.find(dest) {
-                let url = crate::image::term::file_url(&path.to_string_lossy());
-                for &(_, x) in cells.iter().filter(|(byte, _)| *byte >= at && *byte < at + dest.len()) {
-                    let cell = &mut buffer[(x, y)];
-                    let symbol = cell.symbol().to_string();
-                    let width = crate::text::width(&symbol).max(1) as u16;
-                    cell.set_symbol(&format!("\x1b]8;;{url}\x1b\\{symbol}\x1b]8;;\x1b\\"));
-                    cell.set_diff_option(CellDiffOption::ForcedWidth(std::num::NonZeroU16::new(width).unwrap()));
-                }
-            }
-        }
+        let mark = std::mem::replace(&mut cell.underline_color, Color::Reset);
+        let Some((_, url)) = marks.iter().find(|(m, _)| *m == mark) else {
+            continue;
+        };
+        let symbol = cell.symbol().to_string();
+        let width = crate::text::width(&symbol).max(1) as u16;
+        cell.set_symbol(&format!("\x1b]8;;{url}\x1b\\{symbol}\x1b]8;;\x1b\\"));
+        cell.set_diff_option(CellDiffOption::ForcedWidth(std::num::NonZeroU16::new(width).unwrap()));
     }
 }
 
 #[cfg(test)]
 mod image_placeholder_tests {
     use super::*;
+    #[test]
+    fn follow_receives_pictures_and_invalidates_both_held_layouts() {
+        let (root, mut app) = super::super::wiki::tests::wiki_app("picture-follow", &[("index.md", "# Page")]);
+        app.hit("SPC g w");
+        super::super::settle_reads(&mut app);
+        let path = root.join("one.png");
+        image::DynamicImage::new_rgb8(16, 16).save(&path).unwrap();
+        app.images = super::super::images::Images::testing_async();
+        assert!(app.images.lines(&path, 20).is_empty());
+        app.body = Some(Body {
+            id: "held".into(),
+            text: "held".into(),
+            w: 20,
+            raw: false,
+            lines: Vec::new(),
+            images: Vec::new(),
+        });
+        let Mode::Wiki(w) = &mut app.mode else { panic!("wiki did not open") };
+        w.laid = Some(WikiLaid {
+            slug: "index".into(),
+            w: 20,
+            raw: false,
+            lines: Vec::new(),
+            heads: Vec::new(),
+            links: Vec::new(),
+            cells: Vec::new(),
+            images: Vec::new(),
+        });
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            assert!(std::time::Instant::now() < deadline);
+            let changed = app.follow();
+            if !app.images.busy() {
+                assert!(changed, "picture arrival must request a frame");
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        assert!(app.body.is_none());
+        let Mode::Wiki(w) = &app.mode else { panic!("wiki changed mode") };
+        assert!(w.laid.is_none());
+        assert!(!app.images.lines(&path, 20).is_empty(), "the received picture must be available on relayout");
+        app.images.active = false;
+    }
     #[test]
     fn graphics_remap_headings_links_and_preserve_ids_under_search() {
         let root = crate::scratch::Scratch::new("tui-image-headings");
@@ -13729,13 +13797,57 @@ mod image_placeholder_tests {
         assert!(laid_body_in(body, 100, Lang::Ko, Some(&context)).lines[0].to_string().contains("[그림 없음: shot]"));
     }
     #[test]
+    fn wrapped_image_paths_remain_linked_when_marker_is_scrolled_out() {
+        use ratatui::{
+            buffer::Buffer,
+            widgets::{Paragraph, Widget},
+        };
+        let dest = ".moai/images/0123456789abcdef0123456789abcdef.png";
+        let body = format!("![긴 설명 long enough to wrap twice]({dest})\n\nplain {dest}");
+        for width in [12, 25, 40] {
+            let laid = laid_body_in(&body, width, Lang::En, None);
+            let mut buffer = Buffer::empty(Rect::new(0, 0, width as u16, 30));
+            Paragraph::new(laid.lines.clone()).render(buffer.area, &mut buffer);
+            let targets = vec![(dest.into(), std::path::PathBuf::from("/tmp/picture.png"))];
+            link_image_cells(&mut buffer, &targets);
+            let count = buffer.content.iter().filter(|c| c.symbol().contains("file:///tmp/picture.png")).count();
+            assert!(count >= dest.len(), "width {width}: {count} linked cells");
+            // The marker never reaches the backend (`SGR 58`).
+            assert!(buffer.content.iter().all(|c| c.underline_color == Color::Reset));
+            let start =
+                laid.lines.iter().position(|l| l.spans.iter().any(|s| s.style.underline_color.is_some())).unwrap();
+            let mut clipped = Buffer::empty(Rect::new(0, 0, width as u16, 2));
+            Paragraph::new(laid.lines).scroll(((start + 1) as u16, 0)).render(clipped.area, &mut clipped);
+            link_image_cells(&mut clipped, &targets);
+            assert!(clipped.content.iter().any(|c| c.symbol().contains("file:///tmp/picture.png")));
+            // Prose naming the same path is not a picture: `count >= dest.len()` above would pass with it linked too.
+            let prose = laid_body_in(&format!("plain {dest}"), width, Lang::En, None);
+            let mut plain = Buffer::empty(Rect::new(0, 0, width as u16, 10));
+            Paragraph::new(prose.lines).render(plain.area, &mut plain);
+            link_image_cells(&mut plain, &targets);
+            assert!(!plain.content.iter().any(|c| c.symbol().contains("file://")), "width {width}: prose was linked");
+        }
+    }
+    #[test]
+    fn unlinked_image_markers_are_taken_off_the_frame() {
+        use ratatui::buffer::Buffer;
+        let laid = laid_body_in("![shot](.moai/images/0123456789abcdef.png)", 100, Lang::En, None);
+        let mut buffer = Buffer::empty(Rect::new(0, 0, 100, 1));
+        buffer.set_line(0, 0, &laid.lines[0], 100);
+        assert!(buffer.content.iter().any(|c| c.underline_color != Color::Reset));
+        // No targets (a missing file, no repository, not a terminal): nothing is linked, and still no marker stays.
+        link_image_cells(&mut buffer, &[]);
+        assert!(buffer.content.iter().all(|c| c.underline_color == Color::Reset && !c.symbol().contains("file://")));
+    }
+    #[test]
     fn image_hyperlinks_keep_cell_width_and_are_erased_by_plain_cells() {
         use ratatui::buffer::{Buffer, CellWidth};
         let mut buffer = Buffer::empty(Rect::new(0, 0, 100, 1));
         let path = ".moai/images/0123456789abcdef.png";
-        buffer.set_string(0, 0, format!("[image: shot] {path}"), Style::default());
+        let laid = laid_body_in(&format!("![shot]({path})"), 100, Lang::En, None);
+        buffer.set_line(0, 0, &laid.lines[0], 100);
         let targets = vec![(path.into(), std::path::PathBuf::from("/tmp/shot space.png"))];
-        link_image_cells(&mut buffer, &targets, Lang::En);
+        link_image_cells(&mut buffer, &targets);
         let at = "[image: shot] ".len() as u16;
         assert!(buffer[(at, 0)].symbol().contains("file:///tmp/shot%20space.png"));
         assert_eq!(buffer[(at, 0)].cell_width(), 1);
