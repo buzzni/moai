@@ -647,9 +647,11 @@ impl Config {
             archive_days,
             session_lost_minutes,
             wiki_dir,
+            // Flat keys only, like every other repository key: an `image_*` written under some `[table]` is
+            // not this setting, and reading it as one would let a table silently change compression.
             images: es
                 .iter()
-                .filter(|e| e.key.starts_with("image_"))
+                .filter(|e| e.table.is_none() && e.key.starts_with("image_"))
                 .map(|e| ModelEntry { key: e.key.into(), raw: e.value.into(), line: e.line })
                 .collect(),
             due,

@@ -204,3 +204,26 @@ fn image_add_wiki_creates_a_missing_wiki_directory() {
     let a = add(&s, &p, &["--wiki"]);
     assert!(Path::new(a[0]["path"].as_str().unwrap()).starts_with(s.join("docs/images")));
 }
+
+#[test]
+fn image_add_to_a_missing_issue_stores_nothing() {
+    let s = init("image-no-issue");
+    let p = picture(&s, 3, 3);
+    let o = run(&s, &["image", "add", p.to_str().unwrap(), "--to", "pic-zzzz"]);
+    assert!(!o.status.success());
+    assert!(!s.join(".moai/images").exists());
+}
+
+#[test]
+fn a_long_alt_still_gets_its_localized_placeholder_in_show() {
+    let s = init("image-long-alt");
+    // A macOS screenshot name: label and path together pass the 76-column body width.
+    let body = "![Screenshot 2026-11-02 at 10.23.45 AM](.moai/images/0123456789abcdef.png)";
+    let id = json(&ok(&s, &["add", "long", "-b", body, "--json"]))["id"].as_str().unwrap().to_string();
+    let o = command(&s).env("MOAI_LANG", "ko").args(["show", &id]).output().unwrap();
+    let out = String::from_utf8(o.stdout).unwrap();
+    assert!(
+        out.contains("[그림 없음: Screenshot 2026-11-02 at 10.23.45 AM] .moai/images/0123456789abcdef.png"),
+        "{out}"
+    );
+}

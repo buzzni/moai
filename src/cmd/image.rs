@@ -11,8 +11,13 @@ pub fn add(ctx: &Ctx, args: ImageAddArgs) -> R<Vec<String>> {
     }
     let lang = ctx.lang();
     // Only --to requires identity. Validate it before storing any files.
-    if args.to.is_some() {
+    if let Some(id) = &args.to {
         crate::model::actor(ctx.user.as_deref(), &repo.root).map_err(|e| Fail::no_actor(&e, lang))?;
+        // A mistyped id is the common failure: refuse it before a picture lands on the shelf. The write below
+        // still finds the row under the lock — this read only spares the orphan file.
+        if !repo.read()?.issues.iter().any(|i| i.id == *id) {
+            return Err(Fail::not_found(id, lang));
+        }
     }
     let shelf = match &args.wiki {
         Some(_) => Shelf::wiki(repo.here(), &repo.config.wiki_dir).map_err(Fail::new)?,
@@ -59,13 +64,33 @@ pub fn add(ctx: &Ctx, args: ImageAddArgs) -> R<Vec<String>> {
     }
     if let Some(id) = &args.to {
         let text = markdown.join("\n");
-        repo.with_write(
+        // **The writer's own append is not news to them** — the same as `moai edit` (moai-uwi9.0xu): read the marks
+        // outside the lock, judge them against the row read under it, and move the mark after the lock is released.
+        let read_config = crate::user_config::path();
+        let seen = read_config.as_ref().and_then(|config| {
+            let marks = crate::read_marks::read(config, &repo.root, &ctx.registry().read);
+            marks.trouble.is_none().then_some(marks.seen)
+        });
+        let (after, was_read) = repo.with_write(
             || lang,
             |issues, cfg, _| {
-                crate::image::append(issues, cfg, id, &text, lang)?;
-                Ok((vec![], ()))
+                let (before, after) = crate::image::append(issues, cfg, id, &text, lang)?;
+                let was_read = seen.as_ref().is_some_and(|m| !crate::query::changed_since_seen(&before, m));
+                Ok((vec![], (after, was_read)))
             },
         )?;
+        if was_read && let Some(config) = read_config {
+            let said: Vec<String> = match crate::read_marks::mark_written(&config, &repo.root, lang, &after) {
+                Ok(wrote) => wrote.problems.iter().map(|p| crate::view::sheet_trouble(lang, p)).collect(),
+                Err(e) => vec![crate::i18n::fill(
+                    crate::i18n::say(lang, "edit.read_unmarked"),
+                    &[("id", &after.id), ("why", &crate::text::one_line(&e.message))],
+                )],
+            };
+            for why in said {
+                super::tell(&format!("moai: {}", crate::text::one_line(&why)));
+            }
+        }
         for o in &mut output {
             o["to"] = serde_json::json!(id);
         }

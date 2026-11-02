@@ -1162,9 +1162,13 @@ mod image_tests {
     #[test]
     fn oversized_images_are_not_read() {
         let (root, site) = site();
-        let file = std::fs::File::create(root.join("docs/large.png")).unwrap();
+        // A real PNG signature, so only the size cap can refuse it — zeros alone fail the sniff whatever the size.
+        std::fs::write(root.join("docs/large.png"), b"\x89PNG\r\n\x1a\n").unwrap();
+        let file = std::fs::OpenOptions::new().write(true).open(root.join("docs/large.png")).unwrap();
         file.set_len(20 * 1024 * 1024 + 1).unwrap();
         assert_eq!(answer(&request("/api/image?path=docs/large.png", "localhost"), &site).status, 404);
+        file.set_len(20 * 1024 * 1024).unwrap();
+        assert_eq!(answer(&request("/api/image?path=docs/large.png", "localhost"), &site).status, 200);
     }
     #[cfg(unix)]
     #[test]

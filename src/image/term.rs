@@ -1,5 +1,5 @@
 //! Shell graphics only. No terminal queries, alternate-screen state, or TUI drawing.
-use super::{From, local_file, resolve};
+use super::From;
 use base64::{Engine, engine::general_purpose::STANDARD};
 use std::io::{IsTerminal, Write};
 use std::path::{Path, PathBuf};
@@ -100,23 +100,27 @@ pub fn sixel(img: &image::DynamicImage, s: Size) -> Vec<u8> {
             }
         }
     }
+    // Quantize each pixel once; a band then fills only the colour rows it actually uses instead of
+    // rescanning the whole band for each of the 216 colours.
+    let q = |c: u8| (c as usize * 5 + 127) / 255;
+    let index: Vec<Option<usize>> =
+        img.pixels().map(|p| (p[3] >= 128).then(|| q(p[0]) * 36 + q(p[1]) * 6 + q(p[2]))).collect();
+    let mut rows = vec![vec![0u8; w as usize]; 216];
     for y in (0..h).step_by(6) {
-        for color in 0..216 {
-            let mut row = vec![0u8; w as usize];
+        let mut used = [false; 216];
+        for dy in 0..6 {
+            if y + dy >= h {
+                break;
+            }
             for x in 0..w {
-                for dy in 0..6 {
-                    if y + dy < h {
-                        let p = img.get_pixel(x, y + dy);
-                        if p[3] < 128 {
-                            continue;
-                        }
-                        let q = |c: u8| (c as u32 * 5 + 127) / 255;
-                        if q(p[0]) * 36 + q(p[1]) * 6 + q(p[2]) == color {
-                            row[x as usize] |= 1 << dy;
-                        }
-                    }
+                if let Some(color) = index[((y + dy) * w + x) as usize] {
+                    rows[color][x as usize] |= 1 << dy;
+                    used[color] = true;
                 }
             }
+        }
+        for color in (0..216).filter(|c| used[*c]) {
+            let row = &mut rows[color];
             let Some(last) = row.iter().rposition(|b| *b != 0) else { continue };
             out.push_str(&format!("#{color}"));
             let mut x = 0;
@@ -135,6 +139,7 @@ pub fn sixel(img: &image::DynamicImage, s: Size) -> Vec<u8> {
                 }
                 x = end;
             }
+            row.fill(0);
             out.push('$');
         }
         if y + 6 < h {
@@ -142,7 +147,9 @@ pub fn sixel(img: &image::DynamicImage, s: Size) -> Vec<u8> {
         }
     }
     out.push_str("\x1b\\");
-    out.push_str(&"\n".repeat(s.rows as usize));
+    // The terminal moves the text cursor below the image itself (sixel scrolling); one newline ends
+    // the line. A newline per image row left a blank gap as tall as the picture under it.
+    out.push('\n');
     out.into_bytes()
 }
 pub fn file_url(path: &str) -> String {
@@ -181,20 +188,11 @@ pub fn prepare(
     let blocks = crate::markdown::parse(&crate::text::sanitize(body));
     let mut after = 0;
     let protocol = detect(|k| std::env::var(k).ok(), setting);
+    let context = super::Context { base, allowed, from };
     for block in blocks {
         let crate::markdown::Block::Image { alt, dest, .. } = block else { continue };
-        let found = resolve(
-            &dest,
-            match &from {
-                From::Issue => From::Issue,
-                From::Wiki { page_rel, wiki_dir } => From::Wiki { page_rel, wiki_dir },
-            },
-        )
-        .ok()
-        .and_then(|rel| local_file(base, allowed, &rel));
-        let missing = found.is_none() && !dest.starts_with("https://") && !dest.starts_with("http://");
-        let word = crate::i18n::say(lang, if missing { "image.missing" } else { "image.placeholder" });
-        let label = if alt.is_empty() { format!("[{word}]") } else { format!("[{word}: {alt}]") };
+        let found = context.file(&dest);
+        let label = super::label(lang, found.is_none() && !super::remote(&dest), &alt);
         // The neutral view uses English labels; match the literal path and image marker,
         // not arbitrary occurrences of an alt in a heading or prose.
         if let Some(n) = lines.iter().enumerate().skip(after).find_map(|(n, l)| {
@@ -305,7 +303,8 @@ mod tests {
         let s = String::from_utf8(b).unwrap();
         assert!(s.starts_with("\x1bPq"));
         assert_eq!(s.matches(";2;").count(), 216);
-        assert!(s.contains("\x1b\\"));
+        // One newline ends the line; the terminal already put the cursor below the picture.
+        assert!(s.ends_with("\x1b\\\n"), "{:?}", &s[s.len().saturating_sub(8)..]);
     }
     #[test]
     fn osc8_file_url_encodes_spaces_and_windows_drives() {

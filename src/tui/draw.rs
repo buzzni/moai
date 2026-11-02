@@ -1403,6 +1403,9 @@ pub(super) struct WikiLaid {
     /// 펴진 줄에서 링크가 선 칸([`crate::markdown::link_cells`]) — 칠하는 칸, 누른 자리를 맞히는 칸, `Tab` 이 도는
     /// 차례가 다 이것이다(moai-p61w). 줄 머리부터 잰 칸이라, 줄 머리에 `▸` 가 붙은 줄은 그리는 쪽이 그만큼 민다.
     pub(super) cells: Vec<crate::markdown::LinkCell>,
+    /// Pictures the page names and the local file each resolves to — the OSC 8 targets
+    /// [`image_hyperlinks`] lays over the frame. Resolved once with the lines, not per frame.
+    images: Vec<(String, std::path::PathBuf)>,
 }
 
 /// 그린 본문 한 벌 — 줄과, 머리글마다 그 첫 줄([`WikiLaid::heads`]), 링크마다 그 주소([`WikiLaid::links`]), 링크가 선
@@ -1429,6 +1432,7 @@ impl Laid {
 fn wiki_lines(p: &crate::wiki::Page, w: usize, raw: bool, lang: Lang) -> Laid {
     wiki_lines_in(p, w, raw, lang, None)
 }
+/// [`wiki_lines`] 의 몸 — 그림의 자리표시를 `lang` 의 말로 달고, `image` 가 있으면 그 자리에서 못 찾는 그림을 `없음` 으로 단다.
 fn wiki_lines_in(
     p: &crate::wiki::Page,
     w: usize,
@@ -1482,7 +1486,12 @@ fn wiki_page(f: &mut Frame, w: &mut super::wiki::Window, at: Rect, raw: bool, la
                 from: crate::image::From::Wiki { page_rel: &p.path, wiki_dir: &w.dir },
             });
             let Laid { lines, heads, links, cells } = wiki_lines_in(p, width, raw, lang, image.as_ref());
-            Some(WikiLaid { slug: p.slug.clone(), w: width, raw, lines, heads, links, cells })
+            // Same gate as the hyperlink pass used to apply each frame: drawn (not raw), readable, no conflict.
+            let images = match (&image, &p.body) {
+                (Some(image), Some(body)) if !raw && !p.conflict => image.links(crate::wiki::unmarked(body)),
+                _ => Vec::new(),
+            };
+            Some(WikiLaid { slug: p.slug.clone(), w: width, raw, lines, heads, links, cells, images })
         }
         _ => None,
     };
@@ -5110,6 +5119,8 @@ pub(super) struct Body {
     w: usize,
     raw: bool,
     lines: Vec<Line<'static>>,
+    /// Pictures the body names and their local files — resolved with the lines ([`image_hyperlinks`]).
+    images: Vec<(String, std::path::PathBuf)>,
 }
 
 impl Body {
@@ -5146,7 +5157,11 @@ fn fill_body(app: &mut App, rows: &[Row], w: usize) {
             } else {
                 laid_body_in(body, w, site.map_or(Lang::En, |s| s.lang), image.as_ref()).lines
             };
-            Some(Body { id: i.id.clone(), text: body.clone(), w, raw, lines })
+            let images = match (&image, raw) {
+                (Some(image), false) => image.links(body),
+                _ => Vec::new(),
+            };
+            Some(Body { id: i.id.clone(), text: body.clone(), w, raw, lines, images })
         }
         None => None,
     };
@@ -5229,6 +5244,7 @@ fn body_lines<'a>(body: &str, w: usize, raw: bool) -> Vec<Line<'a>> {
 fn laid_body(body: &str, w: usize) -> Laid {
     laid_body_in(body, w, Lang::En, None)
 }
+/// [`laid_body`] 의 몸 — 그림의 자리표시를 `lang` 의 말로 달고, `image` 가 있으면 그 자리에서 못 찾는 그림을 `없음` 으로 단다.
 fn laid_body_in(body: &str, w: usize, lang: Lang, image: Option<&crate::image::Context<'_>>) -> Laid {
     let clean = crate::text::sanitize(body);
     let (mut blocks, links) = crate::markdown::parse_links(&clean);
@@ -13478,32 +13494,28 @@ mod bench {
 
 /// OSC 8 is cell metadata, never image graphics. ForcedWidth makes terminal escape
 /// bytes invisible to ratatui's diff, so a changed cell or a popup clears the link.
+///
+/// The targets are the ones [`fill_body`] and `wiki_page` resolved with the laid lines (moai-fauw): parsing the body
+/// and canonicalizing every picture here ran once per frame, on every key held down.
 fn image_hyperlinks(buffer: &mut ratatui::buffer::Buffer, app: &App) {
-    let mut targets = Vec::new();
-    if let Mode::Wiki(w) = &app.mode {
-        if w.choose.is_none()
-            && let (Some(base), Some(p)) = (&w.image_home, w.current())
-            && !p.conflict
-        {
-            let context = crate::image::Context {
-                base,
-                allowed: &w.dir,
-                from: crate::image::From::Wiki { page_rel: &p.path, wiki_dir: &w.dir },
-            };
-            targets = context.links(p.body.as_deref().unwrap_or_default());
-        }
-    } else if matches!(app.mode, Mode::Browse)
-        && let Some(row) = app.current()
-        && let Some(site) = app.site_of_row(&row)
-        && let Some(repo) = &site.repo
-        && let Some(body) = app.body.as_ref()
-    {
-        targets = crate::image::Context::issue(repo).links(&body.text);
-    }
-    link_image_cells(buffer, &targets);
+    let targets: &[(String, std::path::PathBuf)] = match &app.mode {
+        Mode::Wiki(w) if w.choose.is_none() => match (&w.laid, w.current()) {
+            (Some(l), Some(p)) if l.slug == p.slug && !l.raw => &l.images,
+            _ => &[],
+        },
+        Mode::Browse => app.body.as_ref().filter(|b| !b.raw).map_or(&[], |b| &b.images[..]),
+        _ => &[],
+    };
+    link_image_cells(buffer, targets, app.site.lang);
 }
-fn link_image_cells(buffer: &mut ratatui::buffer::Buffer, targets: &[(String, std::path::PathBuf)]) {
+fn link_image_cells(buffer: &mut ratatui::buffer::Buffer, targets: &[(String, std::path::PathBuf)], lang: Lang) {
     use ratatui::buffer::CellDiffOption;
+    if targets.is_empty() {
+        return;
+    }
+    // The placeholder's opening word in the drawn language and in English (a language that does not carry the
+    // word yet falls back to it) — read from the same table `image::label` draws with, not spelt here.
+    let marks = [format!("[{}", say(lang, "image.placeholder")), format!("[{}", say(Lang::En, "image.placeholder"))];
     for y in buffer.area.y..buffer.area.bottom() {
         let mut text = String::new();
         let mut cells = Vec::new();
@@ -13516,7 +13528,7 @@ fn link_image_cells(buffer: &mut ratatui::buffer::Buffer, targets: &[(String, st
             text.push_str(symbol);
         }
         // Only image placeholder rows. Notes, code, headings and raw remain plain.
-        if !text.contains("[image") && !text.contains("[그림") {
+        if !marks.iter().any(|m| text.contains(m.as_str())) {
             continue;
         }
         for (dest, path) in targets {
@@ -13554,7 +13566,7 @@ mod image_placeholder_tests {
         let path = ".moai/images/0123456789abcdef.png";
         buffer.set_string(0, 0, format!("[image: shot] {path}"), Style::default());
         let targets = vec![(path.into(), std::path::PathBuf::from("/tmp/shot space.png"))];
-        link_image_cells(&mut buffer, &targets);
+        link_image_cells(&mut buffer, &targets, Lang::En);
         let at = "[image: shot] ".len() as u16;
         assert!(buffer[(at, 0)].symbol().contains("file:///tmp/shot%20space.png"));
         assert_eq!(buffer[(at, 0)].cell_width(), 1);

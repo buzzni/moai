@@ -154,7 +154,8 @@ pub fn shrink(bytes: &[u8], s: &Settings) -> Result<Shrunk, String> {
         (jpeg(&img, s.quality)?, Kind::Jpeg)
     } else {
         let p = png(&img)?;
-        if img.to_rgba8().pixels().any(|p| p[3] < 255) {
+        // Only a colour type with alpha can hold a transparent pixel; skip the RGBA copy otherwise.
+        if img.color().has_alpha() && img.to_rgba8().pixels().any(|p| p[3] < 255) {
             (p, Kind::Png)
         } else {
             let j = jpeg(&img, s.quality)?;
@@ -208,10 +209,10 @@ impl Shelf {
                 {
                     return Err("invalid wiki directory".into());
                 }
-                crate::held::place(&checkout.join(rel), &crate::held::Home::of(checkout))
-                    .map_err(|e| format!("{e:?}"))?
+                let at = checkout.join(rel);
+                crate::held::place(&at, &crate::held::Home::of(checkout)).map_err(|e| crate::held::spelled(&at, &e))?
             }
-            Err(e) => return Err(format!("{e:?}")),
+            Err(e) => return Err(crate::view::wiki::dir_trouble(crate::i18n::Lang::En, wiki_dir, &e)),
         };
         Ok(Self { base: checkout.into(), dir: dir.join("images"), prefix: "images".into() })
     }
@@ -222,15 +223,23 @@ impl Shelf {
         format!("{}/{name}", self.prefix)
     }
     pub fn put(&self, img: &Shrunk) -> Result<Put, String> {
-        std::fs::create_dir_all(&self.dir).map_err(|e| e.to_string())?;
-        let base = self.base.canonicalize().map_err(|e| e.to_string())?;
-        let dir = self.dir.canonicalize().map_err(|e| e.to_string())?;
+        // Measure the existing ancestors before creating anything: `create_dir_all` follows a
+        // committed `.moai -> <outside>` or `docs -> <outside>` link and would build the shelf
+        // outside the checkout before the containment check below could refuse it (`archive` does the same).
+        let home = crate::held::Home::of(&self.base);
+        let real = crate::held::place_dir(&self.dir, &home).map_err(|e| crate::held::spelled(&self.dir, &e))?;
+        std::fs::create_dir_all(&real).map_err(|e| e.to_string())?;
+        let base = crate::path::canonical(&self.base).map_err(|e| e.to_string())?;
+        let dir = crate::path::canonical(&real).map_err(|e| e.to_string())?;
         if !dir.starts_with(&base) {
             return Err("image shelf escapes the checkout".into());
         }
         // Serialize compare + rename, including on Windows where rename cannot replace a file.
-        let lock =
-            crate::held::lock(&dir.join(".lock"), &crate::held::Home::of(&base)).map_err(|e| format!("{e:?}"))?;
+        let lock_at = dir.join(".lock");
+        let lock = crate::held::lock(&lock_at, &home).map_err(|e| match e {
+            crate::held::Fell::Unheld(why) => crate::held::spelled(&lock_at, &why),
+            crate::held::Fell::Io(e) => e.to_string(),
+        })?;
         fs2::FileExt::lock_exclusive(&lock).map_err(|e| e.to_string())?;
         let name = name_of(&img.bytes, img.kind);
         let path = self.locate(&name);
@@ -338,6 +347,24 @@ mod tests {
         assert_eq!((s.max_edge, s.quality, s.warn_bytes), (40, 90, 1024));
         let cfg = crate::config::Config::parse("prefix = \"moai\"\nimage_compress = \"typo\"\n").unwrap();
         assert!(Settings::from_config(&cfg).is_err());
+        // A key under a table is not the flat setting.
+        let cfg = crate::config::Config::parse("prefix = \"moai\"\n[other]\nimage_compress = \"off\"\n").unwrap();
+        assert!(Settings::from_config(&cfg).unwrap().compress);
+    }
+    #[cfg(unix)]
+    #[test]
+    fn a_shelf_behind_an_outside_link_builds_nothing_outside() {
+        let tmp = crate::scratch::Scratch::new("image-shelf-link");
+        let outside = crate::scratch::Scratch::new("image-shelf-outside");
+        std::os::unix::fs::symlink(outside.path(), tmp.path().join(".moai")).unwrap();
+        let shelf = Shelf {
+            base: tmp.path().into(),
+            dir: tmp.path().join(".moai").join("images"),
+            prefix: ".moai/images".into(),
+        };
+        let s = shrink(&png(&image(4, 4, 128)).unwrap(), &Settings::default()).unwrap();
+        assert!(shelf.put(&s).is_err());
+        assert!(!outside.path().join("images").exists());
     }
     #[test]
     fn putting_the_same_bytes_twice_writes_once_and_refuses_collisions() {
@@ -375,22 +402,24 @@ pub fn read_input(path: &Path) -> Result<Vec<u8>, String> {
     Ok(bytes)
 }
 /// Called only with rows re-read under the tracker lock. Field edits add no journal kind.
+/// Hands back the row as it stood before and after, so the caller can keep the writer's read mark (`cmd::edit`).
 pub fn append(
     issues: &mut [crate::model::Issue],
     cfg: &crate::config::Config,
     id: &str,
     text: &str,
     lang: crate::i18n::Lang,
-) -> crate::cmd::R<()> {
+) -> crate::cmd::R<(crate::model::Issue, crate::model::Issue)> {
     let i = issues.iter_mut().find(|i| i.id == id).ok_or_else(|| crate::cmd::Fail::not_found(id, lang))?;
     let before = i.clone();
     let old = i.body.as_deref().unwrap_or("").trim_end();
     i.body = Some(if old.is_empty() { text.into() } else { format!("{old}\n\n{text}") });
     i.settle(&before, cfg, &crate::model::now())
         .map_err(|why| crate::cmd::Fail::new(crate::view::invalid(lang, &crate::store::At::Id(id.into()), &why)))?;
-    Ok(())
+    Ok((before, i.clone()))
 }
 
+#[derive(Clone, Copy)]
 pub enum From<'a> {
     Issue,
     Wiki { page_rel: &'a str, wiki_dir: &'a str },
@@ -457,21 +486,32 @@ pub fn resolve(dest: &str, from: From<'_>) -> Result<String, &'static str> {
 }
 /// Canonical containment check at the I/O boundary, also excluding symlinks out of
 /// the approved shelf. Callers never serve/open a reference that resolve refused.
+/// Resolved through `path::canonical`, so a Windows path carries no `\\?\` prefix into an OSC 8 file URL.
 pub fn local_file(base: &Path, allowed: &str, rel: &str) -> Option<PathBuf> {
-    let base = base.canonicalize().ok()?;
-    let boundary = base.join(allowed).canonicalize().ok()?;
+    let base = crate::path::canonical(base).ok()?;
+    let boundary = crate::path::canonical(base.join(allowed)).ok()?;
     if !boundary.starts_with(&base) {
         return None;
     }
-    let path = base.join(rel).canonicalize().ok()?;
+    let path = crate::path::canonical(base.join(rel)).ok()?;
     (path.starts_with(boundary) && path.is_file()).then_some(path)
+}
+/// The placeholder every surface draws for a picture: `[image]` or `[image: alt]`, and
+/// `[image missing: alt]` when a local reference does not resolve. One spelling, so the shell
+/// (`term::prepare`) and the explorer (`Context::labels`) cannot drift apart.
+pub fn label(lang: crate::i18n::Lang, missing: bool, alt: &str) -> String {
+    let word = crate::i18n::say(lang, if missing { "image.missing" } else { "image.placeholder" });
+    if alt.is_empty() { format!("[{word}]") } else { format!("[{word}: {alt}]") }
+}
+/// A reference that is not ours to open (remote) is never called missing.
+pub fn remote(dest: &str) -> bool {
+    dest.starts_with("https://") || dest.starts_with("http://")
 }
 /// Neutral markdown knows neither language nor files. Surfaces supply both.
 pub fn labels(blocks: &mut [crate::markdown::Block], lang: crate::i18n::Lang) {
     for b in blocks {
         if let crate::markdown::Block::Image { alt, .. } = b {
-            let label = crate::i18n::say(lang, "image.placeholder");
-            *alt = if alt.is_empty() { format!("[{label}]") } else { format!("[{label}: {alt}]") };
+            *alt = label(lang, false, alt);
         }
     }
 }
@@ -524,10 +564,12 @@ pub fn served(repo: &crate::store::Repo, dest: &str) -> Option<(Kind, Vec<u8>)> 
         (repo.root.as_path(), ".moai/images", rel)
     } else {
         crate::wiki::dir_of(repo.here(), &cfg.wiki_dir).ok()?;
-        let wiki = cfg.wiki_dir.trim_end_matches('/');
-        let relative = if wiki.is_empty() || wiki == "." { dest } else { dest.strip_prefix(&format!("{wiki}/"))? };
+        // The page asks with the normalized path (`docs/images/x.png`, view/image.ts), so compare against the
+        // normalized `wiki_dir` too — `./docs` and `docs/` name the same wiki that `wiki::load` reads.
+        let wiki = cfg.wiki_dir.split('/').filter(|p| !p.is_empty() && *p != ".").collect::<Vec<_>>().join("/");
+        let relative = if wiki.is_empty() { dest } else { dest.strip_prefix(&format!("{wiki}/"))? };
         let page = format!("{wiki}/__image__.md");
-        let rel = resolve(relative, From::Wiki { page_rel: &page, wiki_dir: wiki }).ok()?;
+        let rel = resolve(relative, From::Wiki { page_rel: &page, wiki_dir: &wiki }).ok()?;
         (repo.here(), cfg.wiki_dir.as_str(), rel)
     };
     let path = local_file(base, allowed, &rel)?;
@@ -556,20 +598,14 @@ impl<'a> Context<'a> {
         Self { base: &repo.root, allowed: ".moai/images", from: From::Issue }
     }
     pub fn file(&self, dest: &str) -> Option<PathBuf> {
-        let from = match &self.from {
-            From::Issue => From::Issue,
-            From::Wiki { page_rel, wiki_dir } => From::Wiki { page_rel, wiki_dir },
-        };
-        let rel = resolve(dest, from).ok()?;
+        let rel = resolve(dest, self.from).ok()?;
         local_file(self.base, self.allowed, &rel)
     }
     pub fn labels(&self, blocks: &mut [crate::markdown::Block], lang: crate::i18n::Lang) {
         for b in blocks {
             if let crate::markdown::Block::Image { alt, dest, .. } = b {
-                let missing =
-                    !dest.starts_with("https://") && !dest.starts_with("http://") && self.file(dest).is_none();
-                let word = crate::i18n::say(lang, if missing { "image.missing" } else { "image.placeholder" });
-                *alt = if alt.is_empty() { format!("[{word}]") } else { format!("[{word}: {alt}]") };
+                let missing = !remote(dest) && self.file(dest).is_none();
+                *alt = label(lang, missing, alt);
             }
         }
     }

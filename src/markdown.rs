@@ -365,13 +365,15 @@ impl Fold {
                 self.open.push(self.dests.len());
                 self.dests.push(dest_url.to_string());
             }
-            // **그림도 주소를 남긴다.** 그림은 터미널에 뜨지 않으므로 대체글만
-            // 남기면 무엇을 가리켰는지 `--raw` 밖에 길이 없다 — 링크에 대고
-            // 적어 둔 까닭 그대로다. 대체글은 제 둘레의 뜻을 그대로 쓴다:
-            // 그림은 링크가 아니라 누를 데가 없다.
+            // 새 문단은 홀로 선 그림의 후보를 비운다 — 문단 머리에서 시작해 그 문단 끝까지 혼자인 그림만
+            // [`Block::Image`] 가 된다(`TagEnd::Paragraph`).
             Tag::Paragraph => {
                 self.lone_image = None;
             }
+            // **그림도 주소를 남긴다.** 글 가운데 선 그림은 터미널에 뜨지 않으므로 대체글만
+            // 남기면 무엇을 가리켰는지 `--raw` 밖에 길이 없다 — 링크에 대고
+            // 적어 둔 까닭 그대로다. 대체글은 제 둘레의 뜻을 그대로 쓴다:
+            // 그림은 링크가 아니라 누를 데가 없다.
             Tag::Image { dest_url, .. } => {
                 self.image_start = Some((self.spans.iter().map(|s| s.text.len()).sum(), dest_url.to_string()));
                 self.urls.push(dest_url.to_string());
@@ -769,7 +771,21 @@ fn lay_one(out: &mut Vec<Vec<Span>>, b: &Block, width: usize, overflow: Overflow
         }
         Block::Image { quote, alt, dest } => {
             let spans = vec![Span { text: alt.clone(), role: Role::Image, link: None }, mark(format!(" {dest}"))];
-            flow(out, &spans, &bars(*quote), &bars(*quote), width, overflow);
+            // **The shell keeps a picture reference on one line**, like an overlong code span (moai-krh7): the
+            // terminal soft-wraps it on screen, and `image::term::prepare` finds the placeholder and its path on
+            // the same line to draw, link and label it. Folded at 76 columns, a screenshot named
+            // `Screenshot 2026-11-02 at 10.23.45 AM` split the label from its path and was never drawn.
+            if overflow == Overflow::Keep {
+                let lead = bars(*quote);
+                let mut row = Vec::new();
+                if !lead.is_empty() {
+                    row.push(mark(lead));
+                }
+                row.extend(spans);
+                out.push(row);
+            } else {
+                flow(out, &spans, &bars(*quote), &bars(*quote), width, overflow);
+            }
         }
         Block::Para(spans) => flow(out, &marked(spans), "", "", width, overflow),
         Block::Quote { quote, spans } => {
@@ -1855,6 +1871,15 @@ mod image_tests {
     #[test]
     fn an_image_in_a_quote_keeps_its_bar() {
         assert!(matches!(parse("> ![shot](a.png)")[0], Block::Image { quote: 1, .. }));
+    }
+    #[test]
+    fn a_long_image_reference_stays_on_one_shell_line() {
+        let dest = ".moai/images/0123456789abcdef.png";
+        let blocks = parse(&format!("![Screenshot 2026-11-02 at 10.23.45 AM with a long name]({dest})"));
+        let kept = layout(&blocks, 40, Overflow::Keep);
+        assert_eq!(kept.len(), 1, "{kept:?}");
+        assert!(kept[0].last().is_some_and(|s| s.text.ends_with(dest)));
+        assert!(layout(&blocks, 40, Overflow::Break).len() > 1);
     }
     #[test]
     fn headings_after_an_image_keep_their_lines() {
