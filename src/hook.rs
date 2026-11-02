@@ -5485,6 +5485,16 @@ fn adds_backlog(args: &[String], verbs: &[&str]) -> bool {
     }
 }
 
+/// Milestones group a release, rather than creating work outside the held unit.
+fn adds_milestone(args: &[String]) -> bool {
+    let verbs = positionals(args);
+    match verbs.first().copied() {
+        Some("milestone") => verbs.get(1).copied() == Some("add"),
+        Some("add") => flag_values(args, &["--type"]).last().is_some_and(|kind| kind == "milestone"),
+        _ => false,
+    }
+}
+
 /// 도움말을 부르는가. 도움말은 아무것도 안 만들고 안 옮기고 0 으로 끝난다.
 ///
 /// **`moai` 의 인자만 준다.** 토막 전부를 주던 자리는 감싸는 명령의 `-h` 까지 세, `sudo -h moai
@@ -6536,6 +6546,7 @@ fn create_in<'a>(
         // [`Wrapper::stops`] 에서 멈춘다, moai-m4ze).
         let Some(args) = moai_args(seg) else { return false };
         creates(seg)
+            && !adds_milestone(args)
             && (promotes_into(seg) || !args.iter().any(|t| t == "--from" || t.starts_with("--from=")))
             // **도움말은 만들지 않는다.** 우리가 심는 스킬이 "모르면
             // `moai <명령> --help` 를 보라" 고 적어 두는데, 그 길을 막으면
@@ -14508,7 +14519,7 @@ mod tests {
     ///
     /// `create_in` 이 **첫 만드는 토막만** 재던 자리다 — 리뷰 moai-ju21.70g 의 고침(0de7d49)이
     /// `find` 의 거르개를 토막마다 돌리면서 함께 닫혔고, 이 시험이 그 뜻을 못박는다. 자유로운 둘
-    /// (`backlog add`·`add --from`)은 그대로 둔다.
+    /// (`backlog add`·`add --from`·마일스톤 생성)은 그대로 둔다.
     #[test]
     fn every_creating_segment_names_its_own_unit() {
         let all = vec![epic("t-e"), under("t-1", "in_progress", "t-e")];
@@ -14528,7 +14539,6 @@ mod tests {
             // 세우는 철자가 달라도 같다.
             "moai add '안' -e t-e && moai issue add '딴 일'",
             "moai add '안' -e t-e && moai epic add '딴 에픽'",
-            "moai add '안' -e t-e && moai milestone add '딴 마일스톤'",
         ] {
             assert!(
                 matches!(guard_create(&all, &cfg(), &here(), cmd), Decision::Deny(_)),
@@ -14541,6 +14551,7 @@ mod tests {
             "moai add '안' -e t-e && moai backlog add '떠오른 것'",
             "moai add '안' -e t-e && moai add '딴 일' --from -",
             "moai add '안' -e t-e && moai add '떠오른 것' --type backlog",
+            "moai add '안' -e t-e && moai milestone add 'v0.2'",
         ] {
             assert_eq!(
                 guard_create(&all, &cfg(), &here(), cmd),
@@ -14647,14 +14658,17 @@ mod tests {
         for cmd in [
             "moai issue add \"딴 일\"",
             "moai epic add '딴 에픽'",
-            "moai milestone add 'v0.2'",
             "moai add '딴 일' --type epic",
+            "moai issue add '딴 일' --type milestone",
             // 종류를 고정한 쪽이 이긴다 — 이것은 이슈를 만든다.
             "moai issue add \"딴 일\" --type backlog",
             // 제목에 든 낱말은 플래그가 아니다.
             "moai add '--type backlog'",
             // `--` 뒤는 제목이다 — 이슈 `--type=backlog` 가 선다.
             "moai add -- --type=backlog",
+            "moai add -- --type=milestone",
+            "moai milestone add 'v0.2' && moai add '딴 일'",
+            "moai add '딴 일' --type epic && moai milestone add 'v0.2'",
         ] {
             assert!(matches!(guard_create(&all, &cfg(), &here(), cmd), Decision::Deny(_)), "샜다 — {cmd}");
         }
@@ -14664,6 +14678,9 @@ mod tests {
             "moai add '떠오른 것' --type backlog",
             "moai add --type=backlog \"떠오른 것\"",
             "moai --json add --type backlog \"떠오른 것\"",
+            "moai milestone add 'v0.2'",
+            "moai add 'v0.2' --type milestone",
+            "moai add --type=milestone 'v0.2'",
         ] {
             assert_eq!(guard_create(&all, &cfg(), &here(), cmd), Decision::Pass, "막혔다 — {cmd}");
         }
