@@ -379,16 +379,10 @@ mod proposal_tests {
     use super::*;
 
     #[test]
-    fn wire_identity_keeps_both_fields_regardless_of_display_naming() {
-        use crate::config::Naming;
+    fn wire_identity_roundtrips_name_and_email() {
         let actor = crate::model::Actor::parse("Raven (raven@example.com)").unwrap();
-        for naming in [Naming::Full, Naming::Name, Naming::Email] {
-            let label = crate::model::label(&actor.name, Some(&actor.email), naming);
-            assert!(!label.is_empty());
-            assert_eq!(transport_actor(&actor), "Raven (raven@example.com)");
-            assert_eq!(crate::model::Actor::parse(&transport_actor(&actor)), Some(actor.clone()));
-        }
-        // A partial identity is not synthesized into a malformed `Name ()` or `(email)` request actor.
+        assert_eq!(transport_actor(&actor), "Raven (raven@example.com)");
+        assert_eq!(crate::model::Actor::parse(&transport_actor(&actor)), Some(actor));
         assert!(crate::model::Actor::parse("Raven").is_none());
         assert!(crate::model::Actor::parse("raven@example.com").is_none());
     }

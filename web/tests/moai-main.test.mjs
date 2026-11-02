@@ -28,7 +28,7 @@ const until = async (check) => {
   assert.fail('the page did not reach the expected state')
 }
 
-async function page(t, { holdFirst = false, initialTab, chartFailures = 0, fakeStream = false, proposalReply } = {}) {
+async function page(t, { holdFirst = false, initialTab, chartFailures = 0, fakeStream = false, proposalReply, ctlReply } = {}) {
   const dom = new JSDOM('<!doctype html><html><body><div id="moai-app"></div></body></html>', {
     url: 'http://localhost:6624/', runScripts: 'outside-only', pretendToBeVisual: true,
   })
@@ -53,6 +53,7 @@ async function page(t, { holdFirst = false, initialTab, chartFailures = 0, fakeS
     const url = new URL(path, dom.window.location.href)
     requests.push(url.pathname)
     if (init.method === 'POST') posts.push({ url, init })
+    if (ctlReply && url.pathname.startsWith('/api/ctl/') && url.searchParams.has('seq')) return ctlReply(JSON.parse(init.body))
     if (url.pathname.endsWith('/proposal')) {
       if (proposalReply) return proposalReply(JSON.parse(init.body), dom)
       return { ok: true, status: 200, text: async () => JSON.stringify({ then: { verb: 'theme', name: 'dark' } }) }
@@ -238,4 +239,18 @@ test('a page restored on Gantt asks for values in its first read', async (t) => 
   await until(() => p.bars() === 1)
   assert.equal(p.trees[0].searchParams.get('gantt'), '1')
   assert.equal(p.trees.length, 1)
+})
+
+test('a pending validation reply does not swallow the person accepting a proposal', async (t) => {
+  let release
+  const p = await page(t, { fakeStream: true, ctlReply: () => new Promise(resolve => { release = resolve }) })
+  const source = p.streams[0]
+  source.onopen(); source.hello('123.1', 'token')
+  source.ctl(1, { verb: 'validate_zone', name: 'UTC' })
+  await until(() => release !== undefined)
+  source.proposal({ id: '123.1/1', text: 'Theme?', then: { verb: 'theme', name: 'dark' }, remaining_ms: 900000 })
+  p.dom.window.document.querySelector('.m-proposal').querySelectorAll('button')[2].click()
+  await until(() => p.posts.some(({ init }) => init.body && JSON.parse(init.body).state === 'accepted'))
+  assert.equal(p.dom.window.document.documentElement.dataset.theme, 'dark')
+  release({ ok: true, status: 200, text: async () => '{}' })
 })

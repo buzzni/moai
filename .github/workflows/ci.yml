@@ -604,6 +604,8 @@ jobs:
       - run: npm ci --no-audit --no-fund
       - run: npm run typecheck
       - run: npm test
+      - run: npx playwright install --with-deps chromium firefox
+      - run: npm run test:events-browser
       - run: npm run build
       - name: 커밋된 번들이 지금 지은 것과 같다
         run: |

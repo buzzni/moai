@@ -13597,6 +13597,38 @@ mod tests {
     }
 
     #[test]
+    fn an_explorer_accept_claims_before_a_slow_followup_passes_its_ttl() {
+        use crate::ctl::wire::Verb;
+        let (scratch, mut a) = writable("proposal-claim-before-slow-action");
+        let config = scratch.join("user.toml");
+        a.user_config = Some(config.clone());
+        let before = !a.view.hide_backlog;
+        let locked =
+            crate::store::Lock::acquire(&crate::store::lock_beside(&config), || crate::i18n::Lang::En).unwrap();
+        let release = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(2400));
+            drop(locked);
+        });
+        let id = a
+            .proposals
+            .add("tui", "Toggle backlog", Some(Verb::View { name: "backlog".into(), on: !before }), 2, None)
+            .data
+            .unwrap()["id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let start = std::time::Instant::now();
+        a.answer_proposal(true);
+        release.join().unwrap();
+        assert!(start.elapsed() >= std::time::Duration::from_secs(2), "follow-up did not wait past its TTL");
+        assert_eq!(!a.view.hide_backlog, !before);
+        assert!(config.exists(), "follow-up did not write its changed setting");
+        let answer = a.proposals.get(&id).data.unwrap();
+        assert_eq!(answer["state"], "accepted", "the action ran but expiry lost its result: {answer}");
+        assert_eq!(answer["ran"]["ok"], true);
+    }
+
+    #[test]
     fn proposal_selection_keeps_the_displayed_id_when_an_earlier_row_disappears() {
         let (_scratch, mut app) = writable("proposal-stable-id");
         let first =

@@ -595,13 +595,14 @@ async function start(): Promise<void> {
     onCtl: ({ seq, request }) => {
       const here = tab
       if (!here) return
-      ctlExecuting += 1
+      const guardsProposal = request.verb !== 'validate_zone'
+      if (guardsProposal) ctlExecuting += 1
       void ctl.run(request as { verb: string }, seq, here.token).then((reply: CtlReply) => {
         const query = new URLSearchParams({ seq: String(seq), token: here.token })
         return window.fetch(`/api/ctl/${encodeURIComponent(here.id)}?${query}`, {
           method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(reply),
         })
-      }).catch(() => {}).finally(() => { ctlExecuting -= 1 })
+      }).catch(() => {}).finally(() => { if (guardsProposal) ctlExecuting -= 1 })
     },
     onProposal: (entry) => proposals.show(entry),
     onProposalClosed: (id) => proposals.remove(id),
