@@ -1456,14 +1456,7 @@ fn wiki_lines_in(
             Laid::bare(out, heads)
         }
         (Some(body), _) if raw => Laid::bare(body_lines(crate::wiki::unmarked(body), w, true), as_written(0)),
-        (Some(body), _) => {
-            let body = crate::wiki::unmarked(body);
-            let mut laid = laid_body_in(body, w, lang, image);
-            if let Some(graphics) = graphics {
-                expand_images(&mut laid, body, w, lang, image, graphics);
-            }
-            laid
-        }
+        (Some(body), _) => laid_body_with(crate::wiki::unmarked(body), w, lang, image, graphics),
         (None, Some(u)) => {
             let said = fill(say(lang, "wiki.body_unread"), &[("said", &crate::view::wiki::unread(lang, p, u))]);
             Laid::bare(wrapped(&format!("! {said}"), w, warn), Vec::new())
@@ -4704,7 +4697,8 @@ fn about<'a>(app: &App, site: &Site, idx: usize, e: &Entry, w: usize) -> Vec<Lin
         // 칠은 **그린 줄마다** 찾는다 — 접힌 줄에 걸친 글과 마크다운이 걷은 기호(`**`)에 걸친 글은 안
         // 칠해진다. 원문(`SPC v r`)에서는 기호째 칠한다.
         // 편 줄은 [`fill_body`] 가 그리기 전에 들여 둔 것이다 — 안 맞으면(든 것이 없거나 폭이
-        // 달라졌으면) 여기서 편다. 캐시는 **값일 뿐이라** 없어도 그림이 같다.
+        // 달라졌으면) 여기서 편다. 글은 캐시 없이도 같지만 그림(kitty 자리표시)은 [`fill_body`] 가 든 줄에만
+        // 선다 — 이 갈래는 `&App` 이라 그림 캐시를 못 빌린다. [`fill_body`] 가 같은 폭으로 먼저 돌아 화면은 이 갈래에 안 온다.
         let laid = match app.body.as_ref().filter(|b| b.fits(&i.id, body, w, app.raw)) {
             Some(held) => held.lines.clone(),
             None => {
@@ -5186,9 +5180,7 @@ fn fill_body(app: &mut App, rows: &[Row], w: usize) {
             let lines = if raw {
                 body_lines(body, w, true)
             } else {
-                let mut laid = laid_body_in(body, w, site.map_or(Lang::En, |s| s.lang), image.as_ref());
-                expand_images(&mut laid, body, w, site.map_or(Lang::En, |s| s.lang), image.as_ref(), &mut graphics);
-                laid.lines
+                laid_body_with(body, w, site.map_or(Lang::En, |s| s.lang), image.as_ref(), Some(&mut graphics)).lines
             };
             let images = match (&image, raw) {
                 (Some(image), false) => image.links(body),
@@ -5280,6 +5272,17 @@ fn laid_body(body: &str, w: usize) -> Laid {
 }
 /// [`laid_body`] 의 몸 — 그림의 자리표시를 `lang` 의 말로 달고, `image` 가 있으면 그 자리에서 못 찾는 그림을 `없음` 으로 단다.
 fn laid_body_in(body: &str, w: usize, lang: Lang, image: Option<&crate::image::Context<'_>>) -> Laid {
+    laid_body_with(body, w, lang, image, None)
+}
+/// [`laid_body_in`] that also opens a picture under each image block when `graphics` can draw one ([`expand_images`]) —
+/// from the same parse and layout, so a body is not read twice to place its pictures.
+fn laid_body_with(
+    body: &str,
+    w: usize,
+    lang: Lang,
+    image: Option<&crate::image::Context<'_>>,
+    graphics: Option<&mut super::images::Images>,
+) -> Laid {
     let clean = crate::text::sanitize(body);
     let (mut blocks, links) = crate::markdown::parse_links(&clean);
     if let Some(image) = image {
@@ -5296,49 +5299,50 @@ fn laid_body_in(body: &str, w: usize, lang: Lang, image: Option<&crate::image::C
     let (laid, starts) = crate::markdown::layout_at(&blocks, w, crate::markdown::Overflow::Break);
     let heads = blocks
         .iter()
-        .zip(starts)
+        .zip(&starts)
         .filter(|(b, _)| matches!(b, crate::markdown::Block::Heading { .. }))
-        .map(|(_, at)| at)
+        .map(|(_, &at)| at)
         .collect();
     let cells = crate::markdown::link_cells(&laid);
     let lines = laid
         .into_iter()
         .map(|line| Line::from(line.into_iter().map(|s| Span::styled(s.text, role_style(s.role))).collect::<Vec<_>>()))
         .collect();
-    Laid { lines, heads, links, cells }
+    let mut out = Laid { lines, heads, links, cells };
+    if let (Some(graphics), Some(image)) = (graphics, image) {
+        expand_images(&mut out, &blocks, &starts, w, image, graphics);
+    }
+    out
 }
 
-/// Expand only image blocks; remap every heading and link through the same line map.
+/// Expand only image blocks; remap every heading and link through the same line map. `blocks` and `starts` are the
+/// ones `laid` was laid out from ([`laid_body_with`]).
 fn expand_images(
     laid: &mut Laid,
-    body: &str,
+    blocks: &[crate::markdown::Block],
+    starts: &[usize],
     width: usize,
-    lang: Lang,
-    context: Option<&crate::image::Context<'_>>,
+    context: &crate::image::Context<'_>,
     graphics: &mut super::images::Images,
 ) {
-    if !graphics.active {
-        return;
-    }
-    let Some(context) = context else { return };
-    let mut blocks = crate::markdown::parse(&crate::text::sanitize(body));
-    context.labels(&mut blocks, lang);
-    let (_, starts) = crate::markdown::layout_at(&blocks, width, crate::markdown::Overflow::Break);
     let mut additions = std::collections::BTreeMap::new();
-    let mut count = 0;
     for (n, block) in blocks.iter().enumerate() {
-        if let crate::markdown::Block::Image { dest, .. } = block
-            && count < 8
-            && let Some(path) = context.file(dest)
-        {
-            let lines = graphics.lines(&path, width);
-            if !lines.is_empty() {
-                count += 1;
-            }
-            // labels may wrap; insert after all lines belonging to the image block.
-            let end = starts.get(n + 1).map_or(laid.lines.len(), |s| s.saturating_sub(1));
-            additions.insert(end, lines);
+        // Checked per picture: detection runs on the first local picture, not on a body without any.
+        if additions.len() == super::images::PER_VIEW || graphics.off() {
+            break;
         }
+        let crate::markdown::Block::Image { dest, .. } = block else { continue };
+        let Some(path) = context.file(dest) else { continue };
+        let lines = graphics.lines(&path, width);
+        if lines.is_empty() {
+            continue;
+        }
+        // labels may wrap; insert after all lines belonging to the image block.
+        let end = starts.get(n + 1).map_or(laid.lines.len(), |s| s.saturating_sub(1));
+        additions.insert(end, lines);
+    }
+    if additions.is_empty() {
+        return;
     }
     let old = std::mem::take(&mut laid.lines);
     let mut map = vec![0; old.len()];
@@ -6397,14 +6401,10 @@ impl Painter {
         term: &mut ratatui::Terminal<B>,
         app: &mut App,
     ) -> Result<(), B::Error> {
-        let area = term.size().ok();
-        if let Some(area) = area
-            && app.images.geometry(area.width, area.height)
-        {
-            app.body = None;
-            if let Mode::Wiki(w) = &mut app.mode {
-                w.laid = None;
-            }
+        // A changed geometry or file drops the cached pictures; the held detail body and wiki page then fail
+        // `Images::valid` and lay out again — there is nothing to clear here.
+        if let Ok(area) = term.size() {
+            app.images.geometry(area.width, area.height);
         }
         self.paint(term, |f| {
             screen(f, app);
@@ -13652,13 +13652,14 @@ mod image_placeholder_tests {
         image::DynamicImage::new_rgb8(160, 160).save(root.join(".moai/images/0123456789abcdef.png")).unwrap();
         let context = crate::image::Context { base: &root, allowed: ".moai/images", from: crate::image::From::Issue };
         let body = "# Before\n\n![긴 그림 설명](.moai/images/0123456789abcdef.png)\n\n## After\n\n[a link](https://example.com)";
-        let mut laid = laid_body_in(body, 30, Lang::Ko, Some(&context));
-        let old_head = laid.heads[1];
-        let old_link = laid.cells[0].line;
+        let plain = laid_body_in(body, 30, Lang::Ko, Some(&context));
+        let old_head = plain.heads[1];
+        let old_link = plain.cells[0].line;
         let mut images = super::super::images::Images::testing();
-        expand_images(&mut laid, body, 30, Lang::Ko, Some(&context), &mut images);
+        let laid = laid_body_with(body, 30, Lang::Ko, Some(&context), Some(&mut images));
         let added = laid.lines.iter().filter(|l| l.to_string().contains(super::super::images::PLACEHOLDER)).count();
         assert!(added > 0);
+        assert_eq!(laid.lines.len(), plain.lines.len() + added);
         assert_eq!(laid.heads[1], old_head + added);
         assert_eq!(laid.cells[0].line, old_link + added);
         assert!(laid.lines[laid.heads[1]].to_string().contains("After"));

@@ -141,9 +141,9 @@ pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
     // 같은 자(`App::whoami`)라 `--user` 도 같이 먹는다. 프로젝트를 옮기면 그 뿌리에서 다시 푼다.
     let root = app.here().unwrap_or_else(|| ".".into());
     app.site.me = app.whoami(&root);
-    // 층이 없어도 `a` 로 첫 등록을 한다 — 그때 쓸 설정 자리와 고르기 창이 처음 열 자리(moai-plvy).
     app.images.active = std::io::stdout().is_terminal();
     app.images.setting = reg.image_draw.clone();
+    // 층이 없어도 `a` 로 첫 등록을 한다 — 그때 쓸 설정 자리와 고르기 창이 처음 열 자리(moai-plvy).
     app.user_config = config;
     app.config_stamp = config_stamp;
     // **띄울 때 진 읽기도 걸음이 갚는다**(moai-po6v) — 표식은 읽기 전에 쟀으니 진 뒤에도 파일의 것과
@@ -1852,7 +1852,9 @@ fn loop_until_quit(
                     )),
                 );
             }
-            app.images.cleanup(&mut std::io::stdout().lock())?;
+            // Best effort, as at the end of `screen`: an error here would end the loop with the request already
+            // taken, before the editor opened and before `editor_end`/`EDITING.release` ran.
+            let _ = app.images.cleanup(&mut std::io::stdout().lock());
             suspend(caught, app.rolled_at);
             let got = write_in_editor(&edit.editor, &edit.text, &std::env::temp_dir(), app.site.lang, left);
             // **받은 글을 올리기보다 먼저 담는다.** 올리기가 실패하면 루프가 끝나는데, 먼저 담아

@@ -12,7 +12,12 @@ use std::{
 };
 
 pub const PLACEHOLDER: char = '\u{10eeee}';
-const LIMIT: usize = 8;
+/// Pictures one body or wiki page draws; further pictures keep their text and links.
+pub const PER_VIEW: usize = 8;
+/// The detail and the wiki page lay out in the same frame, so the cache holds both views' pictures. With room for
+/// only one view, the second view's pictures evicted the first's, the first re-laid and evicted the second's, and
+/// every frame decoded and re-uploaded them all.
+const LIMIT: usize = 2 * PER_VIEW;
 
 #[derive(Default)]
 pub struct Images {
@@ -48,7 +53,7 @@ impl Images {
     }
     /// Called before layout; pixel changes matter even if the terminal has the same cell count.
     pub fn geometry(&mut self, width: u16, height: u16) -> bool {
-        let window = if self.active { ratatui::crossterm::terminal::window_size().ok() } else { None };
+        let window = if self.off() { None } else { ratatui::crossterm::terminal::window_size().ok() };
         let pixels = window.map_or((0, 0), |w| (w.width, w.height));
         let geometry = (width, height, pixels.0, pixels.1);
         let changed = geometry != self.geometry;
@@ -69,14 +74,22 @@ impl Images {
                 .get_or_insert_with(|| term::detect(|k| std::env::var(k).ok(), self.setting.as_deref(), term::in_tmux))
                 == Protocol::Kitty
     }
+    /// Known to draw nothing: not a terminal, or detection already answered another protocol. Unknown is not off.
+    pub fn off(&self) -> bool {
+        !self.active || self.protocol.is_some_and(|p| p != Protocol::Kitty)
+    }
+    /// Only placeholder spans this cache made (an RGB id colour) are checked — text that happens to contain the
+    /// placeholder character never makes a held body stale, and without kitty there is nothing to scan.
     pub fn valid(&self, lines: &[Line<'_>]) -> bool {
-        if !self.active {
+        if self.protocol != Some(Protocol::Kitty) || !self.active {
             return true;
         }
-        lines
-            .iter()
-            .flat_map(|l| &l.spans)
-            .all(|s| !s.content.contains(PLACEHOLDER) || self.entries.iter().any(|e| s.style.fg == Some(color(e.id))))
+        lines.iter().flat_map(|l| &l.spans).all(|s| match s.style.fg {
+            Some(fg @ Color::Rgb(..)) if s.content.contains(PLACEHOLDER) => {
+                self.entries.iter().any(|e| fg == color(e.id))
+            }
+            _ => true,
+        })
     }
     pub fn lines(&mut self, path: &Path, cols: usize) -> Vec<Line<'static>> {
         if cols == 0 || !self.enabled() {
@@ -137,7 +150,7 @@ impl Images {
         } else {
             (8, 16)
         };
-        let mut size = term::size(img.width(), img.height(), cols.min(76) as u32, cell);
+        let mut size = term::size(img.width(), img.height(), u32::try_from(cols).unwrap_or(u32::MAX), cell);
         let rows = u32::from((h / 2).clamp(1, 20));
         if size.rows > rows {
             let scale = (rows * cell.1) as f64 / size.pixels.1 as f64;
@@ -152,15 +165,21 @@ impl Images {
         for id in self.deleted.drain(..) {
             out.write_all(&term::kitty_delete(id))?;
         }
-        for e in &mut self.entries {
-            let mut visible = false;
+        // One pass over the frame, not one per cached picture.
+        let mut visible = vec![false; self.entries.len()];
+        if !self.entries.is_empty() {
             for cell in &mut buffer.content {
-                if cell.symbol().contains(PLACEHOLDER) && cell.fg == color(e.id) {
-                    visible = true;
+                if !cell.symbol().contains(PLACEHOLDER) {
+                    continue;
+                }
+                if let Some(n) = self.entries.iter().position(|e| cell.fg == color(e.id)) {
+                    visible[n] = true;
                     cell.set_diff_option(CellDiffOption::ForcedWidth(std::num::NonZeroU16::new(1).unwrap()));
                     cell.modifier.remove(Modifier::DIM | Modifier::REVERSED | Modifier::HIDDEN);
                 }
             }
+        }
+        for (e, visible) in self.entries.iter_mut().zip(visible) {
             if visible && !e.sent {
                 out.write_all(&e.payload)?;
                 e.sent = true;
@@ -566,7 +585,7 @@ mod tests {
         let old = images.lines(&p, 20);
         let id = images.entries[0].id;
         images.entries[0].sent = true;
-        for n in 1..9 {
+        for n in 1..=LIMIT {
             images.lines(&picture(&root, &format!("{n}.png")), 20);
         }
         assert_eq!(images.entries.len(), LIMIT);
@@ -578,6 +597,21 @@ mod tests {
         assert!(images.geometry(80, 40));
         assert!(!images.valid(&lines));
         assert!(images.lines(&p, 20).is_empty());
+        images.active = false;
+    }
+    /// The detail and the wiki page lay out in one frame. Each may draw `PER_VIEW` pictures at its own width, and
+    /// neither may evict the other's — that turned every frame into a decode and re-upload of all of them.
+    #[test]
+    fn the_detail_and_the_wiki_page_keep_their_pictures_together() {
+        let root = crate::scratch::Scratch::new("virtual-two-views");
+        let mut images = images();
+        let paths: Vec<_> = (0..PER_VIEW).map(|n| picture(&root, &format!("{n}.png"))).collect();
+        let detail: Vec<_> = paths.iter().flat_map(|p| images.lines(p, 20)).collect();
+        let wiki: Vec<_> = paths.iter().flat_map(|p| images.lines(p, 30)).collect();
+        assert!(images.valid(&detail), "the wiki page evicted the detail's pictures");
+        assert!(images.valid(&wiki));
+        // Text that merely contains the placeholder character is not a stale picture.
+        assert!(images.valid(&[Line::from(Span::styled(format!("a {PLACEHOLDER} b"), Style::new().fg(Color::Cyan)))]));
         images.active = false;
     }
     #[test]

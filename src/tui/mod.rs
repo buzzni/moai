@@ -1506,7 +1506,8 @@ pub struct App {
     pub keys: keys::Keymap,
     /// 상세에 선 본문을 펼쳐 둔 한 벌(moai-fauw, [`draw::Body`]) — **그리기 전에** `draw::fill_body`
     /// 가 채운다. 그리는 쪽은 `&App` 만 빌려 제자리에서 못 넣고, 안 넣으면 프레임마다 같은 본문을
-    /// 다시 판다. 값일 뿐이라 비어 있어도 그림은 같다 — 그때는 그리는 쪽이 그 자리에서 편다.
+    /// 다시 판다. 비어 있으면 그리는 쪽이 그 자리에서 글을 편다 — 글은 같지만 kitty 그림은 여기 든 줄에만 선다
+    /// (`draw::fill_body` 만 [`App::images`] 를 빌린다).
     body: Option<draw::Body>,
     pub images: images::Images,
     /// 상세의 "걸린 노트" 절을 펼쳐 둔 한 벌(리뷰 moai-wcy8.rbj, [`draw::NoteHits`]) — [`App::body`] 와 같은

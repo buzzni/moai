@@ -55,37 +55,81 @@ pub fn detect(
 /// Compare stdout's device with the server's panes. Unknown means graphics stay off.
 #[cfg(unix)]
 pub fn in_tmux(value: &str) -> Option<bool> {
-    use std::os::unix::fs::MetadataExt;
-    if !std::io::stdout().is_terminal() {
+    use std::os::{fd::AsFd, unix::fs::MetadataExt};
+    let stdout = std::io::stdout();
+    if !stdout.is_terminal() {
         return None;
     }
     let socket = value.rsplitn(3, ',').nth(2)?;
-    let mut stat = std::mem::MaybeUninit::<libc::stat>::uninit();
-    // SAFETY: fstat initializes stat on success; stdout is a valid borrowed descriptor.
-    if unsafe { libc::fstat(libc::STDOUT_FILENO, stat.as_mut_ptr()) } != 0 {
-        return None;
-    }
-    // SAFETY: checked successful initialization above.
-    let device = unsafe { stat.assume_init() }.st_rdev;
-    let output = std::process::Command::new("tmux")
-        .args(["-S", socket, "list-panes", "-a", "-F", "#{pane_tty}"])
-        .stdin(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    let text = std::str::from_utf8(&output.stdout).ok()?;
+    // Read through `MetadataExt::rdev` on both sides: `libc::stat::st_rdev` is `i32` on macOS and `u64` on Linux.
+    let device = std::fs::File::from(stdout.as_fd().try_clone_to_owned().ok()?).metadata().ok()?.rdev();
+    let mut command = std::process::Command::new("tmux");
+    command.args(["-S", socket, "list-panes", "-a", "-F", "#{pane_tty}"]);
+    let output = tmux_output(command, std::time::Duration::from_secs(2))?;
+    let text = std::str::from_utf8(&output).ok()?;
     if text.trim().is_empty() {
         return None;
     }
+    // A pane whose tty no longer stats (a dead pane kept by `remain-on-exit`) cannot be our open stdout, so it does
+    // not decide anything. Only when no pane could be checked at all is the answer unknown.
+    let mut checked = false;
     for tty in text.lines() {
-        if std::fs::metadata(tty).ok()?.rdev() == device {
+        let Ok(meta) = std::fs::metadata(tty) else { continue };
+        if meta.rdev() == device {
             return Some(true);
         }
+        checked = true;
     }
-    Some(false)
+    checked.then_some(false)
+}
+/// Bound the whole probe, including stdout collection. A nonblocking socket avoids a reader thread that could
+/// outlive the timeout if an inherited stdout remains open in a descendant of the client.
+#[cfg(unix)]
+fn tmux_output(mut command: std::process::Command, timeout: std::time::Duration) -> Option<Vec<u8>> {
+    use std::{
+        io::Read,
+        os::{fd::OwnedFd, unix::net::UnixStream},
+        process::Stdio,
+        time::{Duration, Instant},
+    };
+    let (mut reader, writer) = UnixStream::pair().ok()?;
+    reader.set_nonblocking(true).ok()?;
+    let stdout: OwnedFd = writer.into();
+    let mut child = command.stdin(Stdio::null()).stderr(Stdio::null()).stdout(Stdio::from(stdout)).spawn().ok()?;
+    let began = Instant::now();
+    let result = (|| {
+        let mut output = Vec::new();
+        loop {
+            let status = child.try_wait().ok()?;
+            let mut chunk = [0; 4096];
+            loop {
+                match reader.read(&mut chunk) {
+                    Ok(0) => break,
+                    Ok(n) => {
+                        // A pane list is small; excessive output is an unknown answer too.
+                        if output.len() + n > 1024 * 1024 {
+                            return None;
+                        }
+                        output.extend_from_slice(&chunk[..n]);
+                    }
+                    Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => break,
+                    Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+                    Err(_) => return None,
+                }
+            }
+            if let Some(status) = status {
+                return status.success().then_some(output);
+            }
+            let left = timeout.checked_sub(began.elapsed())?;
+            std::thread::sleep(left.min(Duration::from_millis(10)));
+        }
+    })();
+    if result.is_none() {
+        // Kill and reap the client on timeout/read failure; never leave a hung probe behind.
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+    result
 }
 #[cfg(not(unix))]
 pub fn in_tmux(_: &str) -> Option<bool> {
@@ -363,6 +407,23 @@ mod tests {
             ),
             Protocol::Off
         );
+    }
+    #[cfg(unix)]
+    #[test]
+    fn tmux_probe_times_out_without_a_real_server() {
+        let mut command = std::process::Command::new("/bin/sh");
+        // Output alone must not count as success before the client finishes.
+        command.args(["-c", "printf '/dev/null\\n'; while :; do :; done"]);
+        let began = std::time::Instant::now();
+        let answer = tmux_output(command, std::time::Duration::from_millis(50));
+        assert!(answer.is_none(), "a timed-out probe must leave graphics off");
+        assert!(began.elapsed() < std::time::Duration::from_secs(2), "the probe did not respect its deadline");
+        let mut command = std::process::Command::new("/bin/sh");
+        command.args(["-c", "printf '/dev/null\\n'"]);
+        assert_eq!(tmux_output(command, std::time::Duration::from_secs(2)), Some(b"/dev/null\n".to_vec()));
+        let mut command = std::process::Command::new("/bin/sh");
+        command.args(["-c", "printf '/dev/null\\n'; exit 1"]);
+        assert!(tmux_output(command, std::time::Duration::from_secs(2)).is_none());
     }
     #[test]
     fn kitty_payload_is_chunked_at_4096_and_ends_with_m0() {
