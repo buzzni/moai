@@ -6922,11 +6922,18 @@ stop sending outside work while a release runs",
     fn plan_draft_keeps_decisions_and_contracts_without_prescribing_implementation() {
         let draft = plan_brief_draft();
         for contract in [
-            "person's decisions and exclusions", "storage, concurrency, path security and output contracts",
-            "numbers and budgets", "member order and review focus", "navigation hints",
-            "proposed signatures and types are hints, not contracts", "failure conditions they must catch",
-            "configured column names", "spaces and shell quoting", "<first column>",
-            "shared files and order in the epic once", "do not repeat file lists or explanations",
+            "person's decisions and exclusions",
+            "storage, concurrency, path security and output contracts",
+            "numbers and budgets",
+            "member order and review focus",
+            "navigation hints",
+            "proposed signatures and types are hints, not contracts",
+            "failure conditions they must catch",
+            "configured column names",
+            "spaces and shell quoting",
+            "<first column>",
+            "shared files and order in the epic once",
+            "do not repeat file lists or explanations",
             // 멤버 머리의 `order and the files it shares`(DETAILED_BODY)와 "에픽에 한 번" 이 한 브리프에서 갈리지 않게.
             "a member's `order and the files it shares` names only its own place and files and points to the epic",
         ] {
@@ -6934,11 +6941,15 @@ stop sending outside work while a release runs",
         }
         let skill = plan();
         for contract in [
-            "same subagent rewrite the plan and bodies", "removing superseded designs",
-            "history section at the end of the epic body", "park removed member drafts in the backlog",
+            "same subagent rewrite the plan and bodies",
+            "removing superseded designs",
+            "history section at the end of the epic body",
+            "park removed member drafts in the backlog",
             // 뺀 멤버의 초안을 호스트가 찾을 자리 — 돌려주는 꼴이 없으면 5 의 담기가 짐작이 된다.
-            "`removed: <title>; body: <absolute file>`", "For each `removed:` line",
-            "pass its exact title as one argument", "including any single quotes in the title",
+            "`removed: <title>; body: <absolute file>`",
+            "For each `removed:` line",
+            "pass its exact title as one argument",
+            "including any single quotes in the title",
             "create it after approval with `moai milestone add`",
         ] {
             assert!(skill.contains(contract), "missing plan step: {contract}");
