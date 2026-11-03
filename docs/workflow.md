@@ -185,7 +185,7 @@ It chooses the more urgent priority, breaking ties by the earlier date. Closed g
 members have moved to archive storage; an empty group stays in the first column. The deadline
 ceilings enforced on writes still count closed ancestors. One day left or less —
 today and past included — is `p0` for an own deadline, two or less `p1`, seven or less `p2`.
-Inherited deadlines raise at most one step per application and no further than `p1`. The command
+Inherited deadlines raise no further than `p1`. The command
 notes why on the row and never lowers priority. So the day `--due` puts on an epic bounds
 the work and raises its members as it nears. Nothing runs it for you — run it when `moai status` says rows lag their
 deadline. Within the same priority and milestone position, `moai ready` orders by that

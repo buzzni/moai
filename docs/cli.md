@@ -4196,8 +4196,8 @@ Options:
     due_p0_days  = 1      at most this many days left - p0
     due_p1_days  = 2      at most this many - p1
     due_p2_days  = 7      at most this many - p2; more days left, untouched
-  Only an own deadline raises to p0. An inherited deadline raises at most
-  one step per application and no further than p1.
+  Only an own deadline raises to p0. An inherited deadline raises no further
+  than p1.
   Only issues and backlog items that are open and in the plan are raised -
   never a group row, never a deferred one, never a row the write would refuse
   (a hand-edited date: fix it with `moai edit <id> --due`). It only raises: a

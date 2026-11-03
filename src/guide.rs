@@ -919,7 +919,7 @@ group lends no priority deadline, and an empty group stays in the first column. 
 enforced on writes still count closed ancestors. If needed archive context cannot be read, this command
 refuses without writing; repair the archive with `moai show --archived` and try again. One
 day left or less (today and past included) is `p0` for the row’s own deadline, two or
-less `p1`, seven or less `p2`; inherited deadlines raise at most one step per application and only as far as `p1`. It leaves on the row a note `Due-priority: pX → pY (N days left, due D)` in the same
+less `p1`, seven or less `p2`; inherited deadlines raise only as far as `p1`. It leaves on the row a note `Due-priority: pX → pY (N days left, due D)` in the same
 write, ending in `from <id>` when the deadline came from an ancestor. It only raises, never
 lowers, so the value a person set is never fought over and the old one stays in that
 note. A group row is never raised itself — its members are: the deadline a plan's

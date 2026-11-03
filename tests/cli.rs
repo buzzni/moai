@@ -7302,6 +7302,26 @@ fn due_apply_raises_by_deadline_notes_it_and_writes_nothing_twice() {
     assert!(ok(p, &["due", "apply"]).contains("올릴 것이 없다"));
 }
 
+#[test]
+fn inherited_priority_raise_is_complete_after_one_application() {
+    let s = init("due-idempotent-p3");
+    let p = s.path();
+    let epic = field(&ok(p, &["epic", "add", "deadline", "--due", "2026-09-11", "--json"]), "id");
+    let member = add(p, &["member", "-e", &epic, "-p", "3"]);
+    let dry: serde_json::Value = serde_json::from_str(&ok(p, &["due", "apply", "--dry-run", "--json"])).unwrap();
+    assert_eq!(dry["raised"][0]["to"], 1, "{dry}");
+    let first: serde_json::Value = serde_json::from_str(&ok(p, &["due", "apply", "--json"])).unwrap();
+    assert_eq!(first["raised"], dry["raised"]);
+    assert_eq!(first["raised"][0]["id"], member);
+    let before = issues(p);
+    let history = ok(p, &["show", &member]);
+    let again: serde_json::Value = serde_json::from_str(&ok(p, &["due", "apply", "--json"])).unwrap();
+    assert_eq!(again["raised"], serde_json::json!([]));
+    assert_eq!(issues(p), before);
+    assert_eq!(ok(p, &["show", &member]), history);
+    assert!(!ok(p, &["status", "--json"]).contains("due_priority_behind"));
+}
+
 /// 누군지 모르면 **쓸 것이 있을 때만** 멈춘다. 꺼진 규칙은 아무것도 안 바꾸고, 이미 올린 값을 되돌리지도 않는다.
 #[test]
 fn due_apply_stops_without_a_person_only_when_it_would_write_and_off_changes_nothing() {

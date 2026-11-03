@@ -83,7 +83,7 @@ Closed epics and milestones lend no priority
 deadline; their columns come from their members, including archived members. An empty
 group stays in the first column. One day left or less, today and past included, calls
 for `p0` from the row's own deadline; two or less calls for `p1`, seven or less `p2`.
-An inherited deadline raises at most one step per application and no further than `p1`. The command never lowers priority and
+An inherited deadline raises no further than `p1`. The command never lowers priority and
 leaves a `Due-priority:` note. Deadline ceilings enforced on writes still use live rows and count closed ancestors. A group row is never raised itself; its members are. An open
 issue or epic whose own deadline has passed is a [warning](#warning), `overdue`, and a priority
 behind its deadline is a [notice](#notice) that names `moai due apply`.

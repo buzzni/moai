@@ -5882,7 +5882,7 @@ fn priority_choice<'a>(
     let own_raise =
         own.and_then(|d| raise_to(crate::model::days_until(d, today)?, priority, rule).map(|p| (p, d, false)));
     let inherited = above.and_then(|d| {
-        let to = raise_to(crate::model::days_until(d, today)?, priority, rule)?.max(1).max(priority.saturating_sub(1));
+        let to = raise_to(crate::model::days_until(d, today)?, priority, rule)?.max(1);
         (to < priority).then_some((to, d, true))
     });
     match (own_raise, inherited) {
@@ -7173,7 +7173,7 @@ mod tests {
         assert!(raises.iter().all(|r| r.to == 1 && r.from.is_some()));
         rows[3].priority = Some(3);
         let first = due_raises(&rows, &rows, now, utc(), &cfg);
-        assert_eq!(first.iter().find(|r| r.issue.id == rows[3].id).unwrap().to, 2);
+        assert_eq!(first.iter().find(|r| r.issue.id == rows[3].id).unwrap().to, 1);
         rows[1].due_on = Some("2026-10-17".into());
         let raises = due_raises(&rows, &rows, now, utc(), &cfg);
         let own = raises.iter().find(|r| r.issue.id == rows[1].id).unwrap();
