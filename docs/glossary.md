@@ -73,16 +73,17 @@ and a row the one above overtook by being pulled in is a [warning](#warning),
 sets no ceiling while deferred; undoing the deferral restores it, and plans now
 beyond it stand as that same warning — the undo itself names none. It is not inherited — a member is bounded by its epic's deadline
 without carrying it. A row's planned start (`--start`, `starts_on`) is held to the same ceiling: a start later than the deadline above it is refused, and one overtaken by pulling that deadline in is the same `due_beyond_parent` warning. A start earlier than the parent's start is never refused. `moai due apply` raises an open, not deferred issue's or backlog
-item's priority as the deadline it follows nears — the earliest of its own and those of
-the open, not deferred rows above it.
+item's priority as its own deadline or an open ancestor's deadline nears. It chooses
+the more urgent priority, breaking ties by the earlier deadline.
 The rows above it are read from the archive-aware placement shown by the board. An archived parent
 can change where a live child stands, and an archived group reopened by live work can lend its
-priority deadline. The same placement and deadline choice orders `moai ready`, `moai prime`, and the
+priority deadline. The same placement orders `moai ready`, `moai prime`, and the
 next work suggested after `moai mv … done`.
 Closed epics and milestones lend no priority
 deadline; their columns come from their members, including archived members. An empty
 group stays in the first column. One day left or less, today and past included, calls
-for `p0`; two or less `p1`; seven or less `p2`. The command never lowers priority and
+for `p0` from the row's own deadline; two or less calls for `p1`, seven or less `p2`.
+An inherited deadline raises no further than `p1`. The command never lowers priority and
 leaves a `Due-priority:` note. Deadline ceilings enforced on writes still use live rows and count closed ancestors. A group row is never raised itself; its members are. An open
 issue or epic whose own deadline has passed is a [warning](#warning), `overdue`, and a priority
 behind its deadline is a [notice](#notice) that names `moai due apply`.
@@ -156,7 +157,10 @@ A thought parked for later — a row of kind `backlog`, off the board and out of
 `moai ready`, so it does not blur the plan. `moai backlog add` parks one (`SPC n`
 in [the explorer](explorer.md#park-a-thought)), and
 `moai backlog promote <id> --from -` unfolds it into an epic
-and issues and closes it. The shared file still stores `kind: "idea"` so older
+and issues and closes it. A single new member receives the original body, including
+when promoting into a standing epic. Multiple members receive an `Unfolded-from:`
+reference instead. A new epic carries the body unless `--body` supplies another.
+The shared file still stores `kind: "idea"` so older
 binaries can read it; issue JSON views report `kind: "backlog"`, except
 `rm --json`, which returns the removed rows with the stored spelling.
 The hidden `moai idea`
@@ -352,4 +356,4 @@ not pile commits onto one branch. The tracker stays in the main checkout; the
 wiki pages ride the branch. More in
 [the workflow](workflow.md#work-in-a-worktree).
 
-Decided in: moai-tllo moai-snyk moai-u5wr moai-dhxm moai-kxkw moai-jtvp moai-bth3 moai-obxm moai-9tqo moai-uzhx moai-pyi4 moai-jdwk moai-lj8g moai-d1zn moai-ns7a moai-mkzo moai-w30o moai-4v3h
+Decided in: moai-ifvh moai-tllo moai-snyk moai-u5wr moai-dhxm moai-kxkw moai-jtvp moai-bth3 moai-obxm moai-9tqo moai-uzhx moai-pyi4 moai-jdwk moai-lj8g moai-d1zn moai-ns7a moai-mkzo moai-w30o moai-4v3h
