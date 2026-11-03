@@ -756,9 +756,12 @@ mod tests {
         let root = Path::new(&root);
         let state = root.join("state");
         let tty = std::env::var("MOAI_IMAGE_REFRESH_TTY").unwrap();
-        let snapshot = |term: &str, client: usize| {
-            std::fs::write(&state, format!("{tty}\nMOAI_CLIENT\n{term}\non\n{client}\n100\n/dev/client-{client}\n"))
-                .unwrap();
+        let snapshot = |term: &str, permission: &str, client: usize| {
+            std::fs::write(
+                &state,
+                format!("{tty}\nMOAI_CLIENT\n{term}\n{permission}\n{client}\n100\n/dev/client-{client}\n"),
+            )
+            .unwrap();
         };
         let queries = || std::fs::read_to_string(root.join("queries")).unwrap_or_default().lines().count();
         let path = picture(root, "image.png");
@@ -767,13 +770,23 @@ mod tests {
         images.terminal_probes = true;
         images.poll();
         assert_eq!(queries(), 0, "picture-free follow queried tmux");
-        snapshot("xterm-ghostty", 1);
+        snapshot("xterm-ghostty", "on", 1);
+        assert!(images.lines(&path, 20).is_empty(), "on must retain text before encoding starts");
+        assert!(images.worker.is_none(), "on queued image encoding");
+        images.interest(true);
+        snapshot("xterm-ghostty", "all", 1);
+        let until = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while images.off() {
+            images.poll();
+            assert!(std::time::Instant::now() < until, "changing on to all never enabled previews");
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
         let lines = ready(&mut images, &path, 20);
         images.interest(true);
         let first = draw_picture(&mut images, lines.clone());
         assert!(String::from_utf8_lossy(&first).contains("tmux;"));
         let id = images.entries[0].id;
-        snapshot("xterm-ghostty", 2);
+        snapshot("xterm-ghostty", "all", 2);
         let until = std::time::Instant::now() + std::time::Duration::from_secs(5);
         while images.entries[0].sent {
             images.poll();
@@ -783,11 +796,29 @@ mod tests {
         }
         assert_eq!(images.entries[0].id, id);
         assert_eq!(draw_picture(&mut images, lines), first);
-        snapshot("xterm-256color", 3);
+        snapshot("xterm-256color", "all", 3);
         let until = std::time::Instant::now() + std::time::Duration::from_secs(5);
         while !images.off() {
             images.poll();
             assert!(std::time::Instant::now() < until, "unsupported reattach retained kitty");
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert!(images.lines(&path, 20).is_empty());
+        assert!(draw_picture(&mut images, Vec::new()).is_empty());
+        snapshot("xterm-ghostty", "all", 4);
+        let until = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while images.off() {
+            images.poll();
+            assert!(std::time::Instant::now() < until, "reattach to Ghostty never enabled previews");
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        let lines = ready(&mut images, &path, 20);
+        assert!(!draw_picture(&mut images, lines).is_empty());
+        snapshot("xterm-ghostty", "on", 4);
+        let until = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while !images.off() {
+            images.poll();
+            assert!(std::time::Instant::now() < until, "changing all to on retained previews");
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
         assert!(images.lines(&path, 20).is_empty());

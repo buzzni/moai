@@ -90,7 +90,7 @@ pub fn terminal_state(setting: Option<&str>) -> TerminalState {
 }
 fn passthrough_client(reply: &str) -> bool {
     let mut lines = reply.lines();
-    matches!(lines.next(), Some("xterm-kitty" | "xterm-ghostty")) && matches!(lines.next(), Some("on" | "all"))
+    matches!(lines.next(), Some("xterm-kitty" | "xterm-ghostty")) && matches!(lines.next(), Some("all"))
 }
 /// Wrap every APC separately: tmux's DCS parser has a bounded input buffer.
 pub fn passthrough(payload: &[u8]) -> Vec<u8> {
@@ -445,11 +445,9 @@ mod tests {
     #[test]
     fn passthrough_requires_supported_client_and_explicit_permission_and_wraps_each_chunk() {
         for client in ["xterm-kitty", "xterm-ghostty"] {
-            for permission in ["on", "all"] {
-                let reply = format!("{client}\n{permission}\n");
-                assert!(passthrough_client(&reply), "{reply:?}");
-            }
-            for permission in ["off", "", "unknown"] {
+            let reply = format!("{client}\nall\n");
+            assert!(passthrough_client(&reply), "{reply:?}");
+            for permission in ["on", "off", "", "unknown"] {
                 let reply = format!("{client}\n{permission}\n");
                 assert!(!passthrough_client(&reply), "{reply:?}");
             }
