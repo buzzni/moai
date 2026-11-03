@@ -3,14 +3,17 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir, networkInterfaces } from 'node:os'
-import { join, resolve } from 'node:path'
+import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { spawn, execFileSync } from 'node:child_process'
 import { once } from 'node:events'
 import { build } from 'esbuild'
 import { chromium, firefox } from 'playwright'
 
-const binary = resolve('../target/debug/moai')
-const bundle = await build({ stdin: { contents: "import { browserId } from './panel/data/browser-id.ts'; window.identify = browserId", resolveDir: process.cwd(), loader: 'ts' }, bundle: true, write: false, format: 'iife' })
+// From this file, not the working directory: `node --test web/tests/…` from the repository root finds the same files.
+const web = new URL('..', import.meta.url)
+const binary = fileURLToPath(new URL('../target/debug/moai', web))
+const bundle = await build({ stdin: { contents: "import { browserId } from './panel/data/browser-id.ts'; window.identify = browserId", resolveDir: fileURLToPath(web), loader: 'ts' }, bundle: true, write: false, format: 'iife' })
 const address = Object.values(networkInterfaces()).flat().find(i => i.family === 'IPv4' && !i.internal)?.address
 
 for (const engine of [chromium, firefox]) test(`${engine.name()}: first tabs share real server admission on remote HTTP`, async t => {
