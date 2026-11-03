@@ -11944,3 +11944,31 @@
 {"ts":"2026-11-03T13:39:25Z","id":"moai-r68e.p81","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 (medium — 릴리스 차례: 병합·판 올리기·소식·PR)"}
 {"ts":"2026-11-03T15:49:14Z","id":"moai-r68e","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"v0.46.0 이 2026-11-03T15:31:03Z 에 나갔다(사람이 PR #74 머지·태그 승인). 마일스톤 워크트리 .worktrees/milestone-moai-ra7d 와 가지 milestone/moai-ra7d(1d7dfcd9) 를 지웠다."}
 {"ts":"2026-11-03T15:49:14Z","id":"moai-r68e.p81","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"v0.46.0 이 나갔고 마일스톤 워크트리·가지를 정리했다"}
+{"ts":"2026-11-03T16:19:33Z","id":"moai-lbwx","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"v0.47.0"}
+{"ts":"2026-11-03T16:19:33Z","id":"moai-aajx","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"사람이 정할 것"}
+{"ts":"2026-11-03T16:19:33Z","id":"moai-aajx.h8g","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"로컬 ctl 스트림 자리를 지킬지"}
+{"ts":"2026-11-03T16:19:33Z","id":"moai-aajx","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Unfolded from moai-tppc — Protect local ctl stream capacity"}
+{"ts":"2026-11-03T16:19:33Z","id":"moai-tppc","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"Unfolded into moai-aajx, 1 issue"}
+{"ts":"2026-11-03T16:19:33Z","id":"moai-aajx.1m7","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"웹 ctl do·keys 읽음을 원자적으로 맞출지"}
+{"ts":"2026-11-03T16:19:33Z","id":"moai-aajx.1m7","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Unfolded from moai-faky — 웹 ctl do·keys 읽음의 원자성 결정"}
+{"ts":"2026-11-03T16:19:33Z","id":"moai-faky","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"Unfolded into moai-aajx as moai-aajx.1m7"}
+{"ts":"2026-11-03T16:19:33Z","id":"moai-aajx.9fi","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"감독 스킬 축소를 다 했다고 볼지"}
+{"ts":"2026-11-03T16:19:33Z","id":"moai-aajx.9fi","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Unfolded from moai-f00u — 감독 스킬 축소 인수 기준 결정"}
+{"ts":"2026-11-03T16:19:33Z","id":"moai-f00u","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"Unfolded into moai-aajx as moai-aajx.9fi"}
+{"ts":"2026-11-03T16:19:33Z","id":"moai-aajx.sm5","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"못 읽는 대기 읽음 파일을 알릴지"}
+{"ts":"2026-11-03T16:19:33Z","id":"moai-aajx.sm5","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Unfolded from moai-tbpg — Decide how to report unreadable pending marks"}
+{"ts":"2026-11-03T16:19:33Z","id":"moai-tbpg","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"Unfolded into moai-aajx as moai-aajx.sm5"}
+{"ts":"2026-11-03T16:19:34Z","id":"moai-aajx.kat","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"단일 멤버일 때 에픽 본문 사본을 남길지"}
+{"ts":"2026-11-03T16:19:34Z","id":"moai-aajx.kat","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Unfolded from moai-3uip — Decide sole-member epic body duplication"}
+{"ts":"2026-11-03T16:19:34Z","id":"moai-3uip","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"Unfolded into moai-aajx as moai-aajx.kat"}
+{"ts":"2026-11-03T16:19:34Z","id":"moai-aajx.uzw","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"백로그 펼치기 규약 문장 고치기"}
+{"ts":"2026-11-03T16:19:34Z","id":"moai-aajx.uzw","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Unfolded from moai-cdmm — Update backlog promotion convention"}
+{"ts":"2026-11-03T16:19:34Z","id":"moai-cdmm","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"Unfolded into moai-aajx as moai-aajx.uzw"}
+{"ts":"2026-11-03T16:19:48Z","id":"moai-5w6i","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"감독·일꾼이 정한 것 확인"}
+{"ts":"2026-11-03T16:19:48Z","id":"moai-5w6i.obw","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"물려받은 마감은 p1 까지만 올린다"}
+{"ts":"2026-11-03T16:19:48Z","id":"moai-5w6i.6lk","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"promote 가 단일 멤버에 본문을 넘긴다"}
+{"ts":"2026-11-03T16:19:48Z","id":"moai-5w6i.8yi","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"Web Locks 없는 페이지도 제 브라우저 id 를 쓴다"}
+{"ts":"2026-11-03T16:19:48Z","id":"moai-5w6i.guq","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"보관 문맥·훅 판단 셋(1qz4)"}
+{"ts":"2026-11-03T16:19:48Z","id":"moai-5w6i.1t2","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"대기 읽음 파일 실패를 처음부터 알리지 않는다"}
+{"ts":"2026-11-03T16:19:48Z","id":"moai-5w6i.3zg","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"일반 배정문에서 저장소 전용 target 지시를 뺐다"}
+{"ts":"2026-11-03T16:19:48Z","id":"moai-5w6i.89z","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"v0.46.0 소식을 그림 없이 냈다"}
