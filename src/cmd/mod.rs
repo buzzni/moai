@@ -1654,7 +1654,7 @@ mod tests {
     /// A live group rider opens the archive so its members can supply closure — `moai edit`
     /// judges its blockers from it, and a revived blocking epic reads its column from archived members.
     #[test]
-    fn place_context_carries_riders_only_once_the_archive_is_open() {
+    fn live_group_riders_open_and_join_placement_context() {
         let dir = crate::scratch::Scratch::new("place-riders");
         std::fs::create_dir_all(dir.join(".moai/archive")).unwrap();
         let at = "2026-10-01T00:00:00Z";
