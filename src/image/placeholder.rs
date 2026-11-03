@@ -27,6 +27,7 @@ pub(crate) fn row(row: usize, cols: usize) -> String {
     out
 }
 
+#[cfg(test)]
 pub(crate) fn symbol(row: usize, col: usize) -> String {
     format!("{PLACEHOLDER}{}{}", DIACRITICS[row], DIACRITICS[col])
 }
