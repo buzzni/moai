@@ -12,6 +12,10 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+### Changed
+
+- Clarified how backlog promotion carries regression markers and how issue rows are counted without counting copied epic or backlog bodies. (moai-aajx)
+
 ## [0.46.0] - 2026-11-03
 
 ### Added
