@@ -2347,6 +2347,10 @@ session, only after the person says yes (`moai-tmux`, `moai-cmux` or `moai-sayco
 **A worker is every idle session of this
 repository in `ListAgents`, except you** — a row whose name starts with the root
 directory's slug and a `-` (2). Nobody registers and nobody is asked which windows count.
+For Codex assignments, `moai supervise message` inserts the repository's optional
+`[supervise] extra_lines` immediately before `from:`. Check those lines with the other
+fields; they carry repository-specific worker instructions.
+
 The message you send is the whole assignment, and it names the file of the worker's steps,
 which the worker reads (3).
 

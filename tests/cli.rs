@@ -35004,6 +35004,25 @@ fn supervisor_watch_resumes_same_second_and_generates_assignment() {
     assert!(message.contains("Writing: detailed"), "{message}");
     assert!(!message.contains("Subdir:"), "{message}");
 
+    // The absence of the setting leaves every byte unchanged. Configured lines retain
+    // their order and substitute only the documented placeholders.
+    let config_path = s.path().join(".moai/config.toml");
+    let original = std::fs::read_to_string(&config_path).unwrap();
+    std::fs::write(&config_path, format!("{original}\n[supervise]\nextra_lines = [\"First <id>\", \"Root <root>\"]\n"))
+        .unwrap();
+    let configured = send(id);
+    assert!(configured.status.success(), "{}", String::from_utf8_lossy(&configured.stderr));
+    let expected =
+        message.replace("from: supervisor", &format!("First {id}\nRoot {}\nfrom: supervisor", s.path().display()));
+    assert_eq!(String::from_utf8(configured.stdout).unwrap(), expected);
+    std::fs::write(&config_path, format!("{original}\n[supervise]\nextra_lines = []\n")).unwrap();
+    assert_eq!(send(id).stdout, message.as_bytes());
+    std::fs::write(&config_path, format!("{original}\n[supervise]\nextra_lines = 42\n")).unwrap();
+    assert!(!send(id).status.success());
+    assert!(moai(s.path(), &["status"]).status.success(), "bad optional setting broke status");
+    std::fs::write(&config_path, original).unwrap();
+    assert_eq!(send(id).stdout, message.as_bytes());
+
     let backlog = field(&ok(s.path(), &["backlog", "add", "a thought", "--json"]), "id");
     let out = send(&backlog);
     let head = String::from_utf8_lossy(&out.stdout).lines().next().unwrap_or_default().to_string();

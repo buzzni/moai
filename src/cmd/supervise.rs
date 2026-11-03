@@ -143,8 +143,24 @@ pub fn message(ctx: &Ctx, id: &str, f: &Fields) -> R<Vec<String>> {
     };
     let subdir = f.subdir.map(|s| format!("Subdir: {s}\n")).unwrap_or_default();
     let beside = crate::guide::BESIDE.replace("<other work>", f.alongside);
+    // Validate only here: a typo in this optional setting must not disable unrelated commands.
+    let extra = match repo.config.supervise.iter().find(|entry| entry.key == "extra_lines") {
+        None => String::new(),
+        Some(entry) => {
+            let lines: Vec<String> = serde_json::from_str(&entry.raw).map_err(|_| {
+                Fail::new(format!(
+                    "[supervise] extra_lines on line {} must be a single-line array of quoted strings",
+                    entry.line
+                ))
+            })?;
+            if lines.iter().any(|line| line.contains(['\n', '\r'])) {
+                return Err(Fail::new("[supervise] extra_lines entries must each be one line"));
+            }
+            lines.into_iter().map(|line| format!("{}\n", line.replace("<id>", id).replace("<root>", &root))).collect()
+        }
+    };
     let text = format!(
-        "{first}\nRead first: moai show {id}\nModel: {}\nEffort: {}\nWorker: codex\nSubagents: none\nWriting: {writing}\n{beside}\nRoot branch: {}\nBase branch: {}\nMilestone: {}\nDue: {}\nRoot: {root}\n{subdir}Person: {}\nWorktree: aim every command at the worktree absolute path (workdir or cd) — never edit the root checkout.\nfrom: {}",
+        "{first}\nRead first: moai show {id}\nModel: {}\nEffort: {}\nWorker: codex\nSubagents: none\nWriting: {writing}\n{beside}\nRoot branch: {}\nBase branch: {}\nMilestone: {}\nDue: {}\nRoot: {root}\n{subdir}Person: {}\nWorktree: aim every command at the worktree absolute path (workdir or cd) — never edit the root checkout.\n{extra}from: {}",
         f.model,
         f.effort,
         f.root_branch,

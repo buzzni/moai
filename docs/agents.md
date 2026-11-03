@@ -984,3 +984,15 @@ stays out of the plan until that epic is undone, and `mv` names it (moai-b6w3).
 Archived IDs stay reserved, and `status`
 reports IDs duplicated across storage files. `init` installs the archive merge
 attributes alongside the active snapshot's rule (moai-fx9t).
+
+Repository-specific Codex assignment instructions can be set in `.moai/config.toml`:
+
+```toml
+[supervise]
+extra_lines = ["First instruction", "Work on <id> in <root>"]
+```
+
+The single-line array is inserted in order immediately before `from:` by `moai supervise
+message`. `<id>` is the assigned epic or backlog ID and `<root>` is the repository root;
+other text is literal. The setting is repository-only and has no effect when absent. Each
+entry must be a single line; use double-quoted strings without escaped quotes.

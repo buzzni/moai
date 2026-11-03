@@ -2,3 +2,6 @@
 prefix = "moai"
 statuses = "todo,in_progress,review,done"
 archive_days = 2
+
+[supervise]
+extra_lines = ["Worktree target: before the first build, link target to /tmp/cargo-target/<worktree name>."]
