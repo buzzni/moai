@@ -12,6 +12,8 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+## [0.46.0] - 2026-11-03
+
 ### Added
 
 - `moai backlog promote --body` sets the new epic’s body while preserving the original backlog context. (moai-ifvh)
