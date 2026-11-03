@@ -12,6 +12,14 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+### Changed
+
+- `moai web` budgets live event streams per browser: each browser keeps up to three, told apart by a random id the page keeps in local storage, so another browser or a remote viewer no longer takes the places of the person's ctl tabs; 32 streams across every browser remain the server's ceiling. (moai-xvw3)
+
+### Fixed
+
+- `moai read --atomic` now accepts `--all` and `--epic`; a web tab's `ctl read --all` and `--group` are atomic like the explorer's: a missing group or a hand-written value refuses the batch and leaves every mark unchanged. The person's own read keys keep skipping only the held row. (moai-xvw3)
+
 ## [0.45.0] - 2026-11-03
 
 ### Added

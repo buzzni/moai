@@ -44,7 +44,7 @@ the address becomes `/?project=<its path>`, so a reload or a bookmark stays on
 it. The project the server was started in comes first when it is not
 registered itself. Only registered projects can be read this way.
 
-The server keeps at most three visible tabs on live event streams. Additional tabs continue updating by polling every two seconds and retry a live connection every 30 seconds. Only tabs with a live stream appear in `moai ctl ls` and receive new suggestions. Hiding or closing a streaming tab reserves its place for its 30-second reconnect grace; afterwards it frees a place; this limit keeps ordinary reads responsive when many tabs are open.
+Each browser keeps at most three visible tabs on live event streams, and the server at most 32 across every browser. The page tells its browser apart by a random id kept in its local storage; pages that cannot keep one share a single budget. Additional tabs continue updating by polling every two seconds and retry a live connection every 30 seconds. Only tabs with a live stream appear in `moai ctl ls` and receive new suggestions. Hiding or closing a streaming tab reserves its place for its 30-second reconnect grace; afterwards it frees a place; this limit keeps ordinary reads responsive when many tabs are open.
 
 The page has four tabs.
 
@@ -302,7 +302,7 @@ the next look, so the list never stays on the rows from before a change.
 
 ## Driven from another terminal
 
-`moai ctl ls` lists each visible tab with an admitted event stream as a separate `web` window. At most three streams are open on this server; additional tabs use polling until a place becomes free. Use its id with
+`moai ctl ls` lists each visible tab with an admitted event stream as a separate `web` window. At most three streams per browser are open on this server; additional tabs use polling until a place becomes free. Use its id with
 `moai ctl state -t <id> --json` or the [control commands](ctl.md) to select a row,
 change the tab, press its keys, resize the detail, or change its theme. The server
 sends a control request down that tab's event stream and waits for its reply.
@@ -355,7 +355,7 @@ comes from the start. The rest come from the server while it runs:
 | `method_not_allowed` | Anything but `GET`, except the `POST` that marks rows read or moves a Gantt bar's days; the `Allow` header names the method the path takes (`POST` on those write paths, `GET` elsewhere) |
 | `bad_input` | A request the server could not read, one carrying a body, or a query this path does not take or whose value is the wrong shape (a `sort` moai does not know, a flag other than `1`, a Gantt move that is not an edge and a whole number of days, a Gantt day that is not `YYYY-MM-DD`, a time zone that is not a zone name or an offset) |
 | `not_found` | No such path |
-| `busy` | Too many requests at once (32 ordinary requests or eight event streams); the page falls back to stamp polling when its stream is refused |
+| `busy` | Too many requests at once (32 ordinary requests, three event streams in one browser, or 32 event streams in all); the page falls back to stamp polling when its stream is refused |
 | `gone` | The target web tab closed, or its ctl request expired before the reply arrived |
 | `no_actor` | A ctl-requested write had no caller identity; set `--user 'Name (email)'` or `MOAI_ACTOR` on the ctl command |
 | `timeout` | The child `moai` did not answer in time |

@@ -195,7 +195,9 @@ test('the page reads changed stamps from its event stream and ignores repeats', 
   p.streams[0].stamp('changed')
   await new Promise((resolve) => setTimeout(resolve, 20))
   assert.equal(p.trees.length, 2)
-  assert.equal(p.streams[0].url, '/api/events?worktree=1')
+  const eventUrl = new URL(p.streams[0].url, 'http://localhost')
+  assert.equal(eventUrl.searchParams.get('worktree'), '1')
+  assert.match(eventUrl.searchParams.get('browser'), /^[0-9a-f]{32}$/)
 })
 
 test('opening Gantt fetches values once and subsequent visits reuse them', async (t) => {

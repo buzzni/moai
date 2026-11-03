@@ -2591,7 +2591,7 @@ pub struct ReadArgs {
     pub ids: Vec<String>,
 
     /// Write no mark if any ID is missing or held
-    #[arg(long, requires = "ids")]
+    #[arg(long)]
     pub atomic: bool,
 
     /// Everything unread that came to me
