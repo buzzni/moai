@@ -28,7 +28,7 @@ use std::time::{Duration, Instant};
 
 /// 동시에 도는 연결의 상한 — 넘치면 503 을 쓰고 닫는다. 페이지 하나가 한 번에 여는 부름은 몇 개다.
 pub const BUSY_MAX: usize = 32;
-/// Keep persistent streams below an HTTP/1 browser's per-origin connection budget. Overflow tabs use the
+/// Keep persistent streams per browser below its HTTP/1 per-origin connection budget. Overflow tabs use the
 /// page's polling fallback, leaving connections for ordinary reads and proposal claims/results.
 pub const STREAMS_MAX: usize = 3;
 /// 요청 머리 **전체**를 읽는 시한 — `read` 한 번의 시한이 아니다([`read_head`]).
@@ -198,14 +198,15 @@ fn handle(stream: TcpStream, site: &Site, busy: Leave) {
         Ok(req) if req.path == "/api/events" => {
             let target = event_target(&req, site);
             match target {
-                Ok((cwd, lang, overlay, first, resume)) => {
+                Ok((cwd, lang, overlay, first, resume, browser)) => {
                     let ctl_peer = stream.peer_addr().is_ok_and(local_ctl_peer);
-                    match site.tabs.stream(
+                    match site.tabs.stream_for(
                         &cwd,
                         overlay,
                         resume.as_ref().map(|(id, token)| (id.as_str(), token.as_str())),
                         cfg!(unix) && ctl_peer,
                         STREAMS_MAX,
+                        &browser,
                     ) {
                         Ok(Some(admitted)) => {
                             drop(busy);
@@ -339,7 +340,7 @@ fn ctl_post(stream: &TcpStream, req: &Request, site: &Site) -> Response {
 fn event_target(
     req: &Request,
     site: &Site,
-) -> Result<(std::path::PathBuf, Lang, bool, String, Option<(String, String)>), Response> {
+) -> Result<(std::path::PathBuf, Lang, bool, String, Option<(String, String)>, String), Response> {
     let lang = site.lang();
     if !http::host_ok(req.host.as_deref()) {
         return Err(refuse(403, say(lang, "web.foreign_host"), code::FORBIDDEN_HOST));
@@ -356,9 +357,14 @@ fn event_target(
     };
     let mut resume = None;
     let mut token = None;
+    let mut browser = None;
     let mut rest = Vec::new();
     for (key, value) in query {
         match key.as_str() {
+            "browser" if browser.is_none() && value.len() == 32 && value.bytes().all(|b| b.is_ascii_hexdigit()) => {
+                browser = Some(value)
+            }
+            "browser" => return Err(refuse(400, "invalid browser id", code::BAD_INPUT)),
             "resume" if resume.is_none() && value.len() <= 80 => resume = Some(value),
             "token" if token.is_none() && value.len() == 32 && value.bytes().all(|b| b.is_ascii_hexdigit()) => {
                 token = Some(value)
@@ -372,7 +378,7 @@ fn event_target(
     }
     let overlay = api::overlay_of(&rest).map_err(|bad| refuse(400, &bad.said(lang), code::BAD_INPUT))?;
     let first = api::stamp(&cwd, lang, overlay).map_err(|e| refuse(500, &e.message, e.code))?;
-    Ok((cwd, lang, overlay, first, resume.zip(token)))
+    Ok((cwd, lang, overlay, first, resume.zip(token), browser.unwrap_or_default()))
 }
 
 fn local_ctl_peer(peer: std::net::SocketAddr) -> bool {

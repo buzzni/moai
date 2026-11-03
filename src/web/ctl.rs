@@ -17,13 +17,14 @@ struct Registry {
     next_seq: u64,
     next_stream: u64,
     tabs: HashMap<String, Tab>,
-    anonymous_streams: usize,
+    anonymous_streams: HashMap<String, usize>,
 }
 
 const RESUME_GRACE: Duration = Duration::from_secs(30);
 
 struct Tab {
     token: String,
+    browser: String,
     root: String,
     here: String,
     overlay: bool,
@@ -56,6 +57,7 @@ pub struct Joined {
 pub struct Stream<'a> {
     tabs: &'a Tabs,
     pub joined: Option<Joined>,
+    browser: String,
 }
 
 impl Drop for Stream<'_> {
@@ -64,7 +66,12 @@ impl Drop for Stream<'_> {
             self.tabs.leave(&joined.id, joined.stream);
         } else {
             let mut registry = self.tabs.inner.lock().unwrap_or_else(|e| e.into_inner());
-            registry.anonymous_streams -= 1;
+            if let Some(count) = registry.anonymous_streams.get_mut(&self.browser) {
+                *count -= 1;
+                if *count == 0 {
+                    registry.anonymous_streams.remove(&self.browser);
+                }
+            }
         }
     }
 }
@@ -81,6 +88,7 @@ impl Tabs {
     }
 
     /// Admission and tab registration share the same lock: overflow tabs cannot take a reconnecting tab's slot.
+    #[cfg(test)]
     pub fn stream(
         &self,
         here: &Path,
@@ -89,23 +97,35 @@ impl Tabs {
         ctl: bool,
         limit: usize,
     ) -> std::io::Result<Option<Stream<'_>>> {
+        self.stream_for(here, overlay, resume, ctl, limit, "")
+    }
+
+    pub fn stream_for(
+        &self,
+        here: &Path,
+        overlay: bool,
+        resume: Option<(&str, &str)>,
+        ctl: bool,
+        limit: usize,
+        browser: &str,
+    ) -> std::io::Result<Option<Stream<'_>>> {
         if ctl {
-            return self
-                .join_limited(here, overlay, resume, Some(limit))
-                .map(|joined| joined.map(|joined| Stream { tabs: self, joined: Some(joined) }));
+            return self.join_limited(here, overlay, resume, Some(limit), browser).map(|joined| {
+                joined.map(|joined| Stream { tabs: self, joined: Some(joined), browser: browser.into() })
+            });
         }
         let mut registry = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         registry.prune();
-        if registry.occupied() >= limit {
+        if registry.occupied(browser) >= limit {
             return Ok(None);
         }
-        registry.anonymous_streams += 1;
-        Ok(Some(Stream { tabs: self, joined: None }))
+        *registry.anonymous_streams.entry(browser.into()).or_default() += 1;
+        Ok(Some(Stream { tabs: self, joined: None, browser: browser.into() }))
     }
 
     #[cfg(all(test, unix))]
     pub fn join(&self, here: &Path, overlay: bool, resume: Option<(&str, &str)>) -> std::io::Result<Joined> {
-        Ok(self.join_limited(here, overlay, resume, None)?.unwrap())
+        Ok(self.join_limited(here, overlay, resume, None, "")?.unwrap())
     }
 
     fn join_limited(
@@ -114,6 +134,7 @@ impl Tabs {
         overlay: bool,
         resume: Option<(&str, &str)>,
         limit: Option<usize>,
+        browser: &str,
     ) -> std::io::Result<Option<Joined>> {
         // The token is read before the registry lock, as every ctl request, `seen` and `ls` waits on that lock.
         let mut bytes = [0u8; 16];
@@ -126,6 +147,7 @@ impl Tabs {
         if let Some((id, token)) = resume
             && let Some(tab) = registry.tabs.get_mut(id)
             && tab.token == token
+            && tab.browser == browser
             && crate::user_config::same_dir(Path::new(&tab.here), here)
         {
             // **The overlay is the page's view, not its identity** — turning the worktree overlay on or off is the
@@ -140,7 +162,7 @@ impl Tabs {
             }
             return Ok(Some(Joined { id: id.into(), token: token.into(), incoming, stream }));
         }
-        if limit.is_some_and(|limit| registry.occupied() >= limit) {
+        if limit.is_some_and(|limit| registry.occupied(browser) >= limit) {
             return Ok(None);
         }
         let token = bytes.iter().map(|b| format!("{b:02x}")).collect::<String>();
@@ -150,6 +172,7 @@ impl Tabs {
             id.clone(),
             Tab {
                 token: token.clone(),
+                browser: browser.into(),
                 root: crate::store::Repo::opened_root(here).display().to_string(),
                 here: here.display().to_string(),
                 overlay,
@@ -447,8 +470,9 @@ impl Tab {
 }
 
 impl Registry {
-    fn occupied(&self) -> usize {
-        self.tabs.len() + self.anonymous_streams
+    fn occupied(&self, browser: &str) -> usize {
+        self.tabs.values().filter(|tab| tab.browser == browser).count()
+            + self.anonymous_streams.get(browser).copied().unwrap_or(0)
     }
 
     fn prune(&mut self) {
@@ -508,6 +532,22 @@ mod tests {
         let fresh = tabs.stream(here, false, None, true, 3).unwrap().unwrap();
         assert_ne!(fresh.joined.as_ref().unwrap().id, id);
         assert!(!tabs.inner.lock().unwrap().tabs.contains_key(&id), "an expired reservation still consumed capacity");
+    }
+
+    #[test]
+    fn browser_budgets_and_resume_reservations_are_independent() {
+        let tabs = Tabs::new();
+        let here = Path::new(".");
+        let first = tabs.stream_for(here, false, None, true, 2, "a").unwrap().unwrap();
+        let joined = first.joined.as_ref().unwrap();
+        let (id, token) = (joined.id.clone(), joined.token.clone());
+        let _a = tabs.stream_for(here, false, None, false, 2, "a").unwrap().unwrap();
+        assert!(tabs.stream_for(here, false, None, true, 2, "a").unwrap().is_none());
+        let _remote = tabs.stream_for(here, false, None, false, 2, "remote").unwrap().unwrap();
+        let _b = tabs.stream_for(here, false, None, true, 2, "b").unwrap().unwrap();
+        drop(first);
+        assert!(tabs.stream_for(here, false, None, true, 2, "a").unwrap().is_none());
+        assert!(tabs.stream_for(here, false, Some((&id, &token)), true, 2, "a").unwrap().is_some());
     }
 
     #[test]

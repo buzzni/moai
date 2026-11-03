@@ -388,8 +388,19 @@ async function start(): Promise<void> {
   }
   const refresher = createRefresher({ load: ({ automatic }) => loadBoard(automatic), stamp, onReach: (reached) => shell.offline(!reached), onBackoff: (on) => shell.backoff(on) })
   let tab: { id: string; token: string } | null = null
+  const browserId = (() => {
+    try {
+      const key = "moai-browser-id"
+      const old = localStorage.getItem(key)
+      if (old && /^[0-9a-f]{32}$/.test(old)) return old
+      const id = Array.from(crypto.getRandomValues(new Uint8Array(16)), (n) => n.toString(16).padStart(2, "0")).join("")
+      localStorage.setItem(key, id)
+      return id
+    } catch { return null }
+  })()
   const eventUrl = (): string => {
     const query = new URLSearchParams()
+    if (browserId) query.set('browser', browserId)
     if (project) query.set('project', project)
     if (store.getState().view.worktree) query.set('worktree', '1')
     if (tab) { query.set('resume', tab.id); query.set('token', tab.token) }
