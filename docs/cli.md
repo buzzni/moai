@@ -22,6 +22,8 @@ Issue tracker. No approval gate. `moai status` shows the discipline.
 Usage: moai [OPTIONS] [COMMAND]
 
 Commands:
+  watch         Wait for a matching journal note; this command only reads
+  supervise     Print a supervisor assignment
   image         Store a picture and print a markdown reference
   ctl           Control an already open explorer or web tab
   status        Board, warnings, flow. A session starts here
@@ -120,6 +122,82 @@ much you have opened at once.
 
 `moai <command> --help` tells you all of that command. If the repository has
 an AGENTS.md, how to work in that repository is written there.
+```
+
+## `moai watch`
+
+```
+Wait for a matching journal note; this command only reads
+
+Usage: moai watch [OPTIONS] <ID>
+
+Arguments:
+  <ID>
+
+Options:
+      --since <SINCE>        [default: 1970-01-01T00:00:00Z]
+      --cursor <CURSOR>      Resume from the cursor returned by an earlier watch
+      --heads <HEADS>
+      --json                 Machine-readable output. Every human line goes away
+      --no-color             Turn colour off (same as `--color never`)
+      --color <how>          auto|always|never (auto by default, off when piped)
+  -C, --dir <path>           Run in this directory (same as `git -C`)
+      --user <name (email)>  Who is doing this (from `git config` when absent)
+  -h, --help                 Print help
+
+  Outputs one JSON event with id, ts, head and resumable cursor. Existing
+  matching notes at or after --since return immediately. Reuse --cursor
+  with the same id and heads; identical notes in one second are one event.
+  Defaults: report:, Review-ready:, Unfolded:, Decision needed:, and
+  진행 중 결정이 필요합니다. The journal is checked every two seconds.
+```
+
+## `moai supervise`
+
+```
+Print a supervisor assignment
+
+Usage: moai supervise [OPTIONS] <COMMAND>
+
+Commands:
+  message  Produce a Codex assignment from the issue and explicit session fields
+  help     Print this message or the help of the given subcommand(s)
+
+Options:
+      --json                 Machine-readable output. Every human line goes away
+      --no-color             Turn colour off (same as `--color never`)
+      --color <how>          auto|always|never (auto by default, off when piped)
+  -C, --dir <path>           Run in this directory (same as `git -C`)
+      --user <name (email)>  Who is doing this (from `git config` when absent)
+  -h, --help                 Print help
+```
+
+## `moai supervise message`
+
+```
+Produce a Codex assignment from the issue and explicit session fields
+
+Usage: moai supervise message [OPTIONS] <id>
+
+Arguments:
+  <ID>
+
+Options:
+      --model <MODEL>
+      --effort <EFFORT>
+      --base <BASE>
+      --root-branch <b>
+      --from <FROM>
+      --alongside <work>     [default: none]
+      --milestone <id>       [default: none]
+      --writing <WRITING>    [default: detailed]
+      --person <PERSON>      [default: here]
+      --json                 Machine-readable output. Every human line goes away
+      --no-color             Turn colour off (same as `--color never`)
+      --color <how>          auto|always|never (auto by default, off when piped)
+  -C, --dir <path>           Run in this directory (same as `git -C`)
+      --user <name (email)>  Who is doing this (from `git config` when absent)
+  -h, --help                 Print help
 ```
 
 ## `moai image`
@@ -4286,7 +4364,8 @@ Options:
   config gives it.
 
   Model names are strings. review_grade, effort, effort_complex and
-  effort_plan accept low, medium, high, xhigh or max. Invalid values fall back
+  effort_plan accept low, medium, high, xhigh or max. review_raise accepts
+  never (default) or write-path. Invalid values fall back
   per key and warn; unknown keys warn. written lists the valid, known keys from
   your user config, repo the ones the repository table set that your config
   did not, and repo_path that file (null when it set none). The level lines

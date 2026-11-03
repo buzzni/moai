@@ -169,6 +169,30 @@ pub enum ColorArg {
 // (`every_help_heredoc_is_copyable`, moai-foc3).
 #[derive(Subcommand, Debug)]
 pub enum Cmd {
+    /// Wait for a matching journal note; this command only reads.
+    #[command(after_help = "  Outputs one JSON event with id, ts, head and resumable cursor. Existing
+  matching notes at or after --since return immediately. Reuse --cursor
+  with the same id and heads; identical notes in one second are one event.
+  Defaults: report:, Review-ready:, Unfolded:, Decision needed:, and
+  진행 중 결정이 필요합니다. The journal is checked every two seconds.")]
+    Watch {
+        id: String,
+        #[arg(long, default_value = "1970-01-01T00:00:00Z")]
+        since: String,
+        /// Resume from the cursor returned by an earlier watch.
+        #[arg(long)]
+        cursor: Option<String>,
+        #[arg(
+            long,
+            default_value = "report:,Review-ready:,Unfolded:,Decision needed:,진행 중 결정이 필요합니다",
+            value_delimiter = ',',
+            hide_default_value = true
+        )]
+        heads: Vec<String>,
+    },
+    /// Print a supervisor assignment.
+    #[command(subcommand)]
+    Supervise(SuperviseCmd),
     /// Store a picture and print a markdown reference
     #[command(subcommand)]
     Image(ImageCmd),
@@ -1330,6 +1354,33 @@ Examples:
         /// Write nothing; print that block (to paste it)
         #[arg(long, conflicts_with_all = ["prefix", "no_agents", "driver", "no_driver", "tracking", "guide", "skill", "no_skill", "with", "register", "no_register", "yes", "check"])]
         print: bool,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum SuperviseCmd {
+    /// Produce a Codex assignment from the issue and explicit session fields.
+    #[command(override_usage = "moai supervise message [OPTIONS] <id>")]
+    Message {
+        id: String,
+        #[arg(long)]
+        model: String,
+        #[arg(long)]
+        effort: String,
+        #[arg(long)]
+        base: String,
+        #[arg(long, value_name = "b")]
+        root_branch: String,
+        #[arg(long)]
+        from: String,
+        #[arg(long, default_value = "none", value_name = "work")]
+        alongside: String,
+        #[arg(long, default_value = "none", value_name = "id")]
+        milestone: String,
+        #[arg(long, default_value = "detailed")]
+        writing: String,
+        #[arg(long, default_value = "here")]
+        person: String,
     },
 }
 

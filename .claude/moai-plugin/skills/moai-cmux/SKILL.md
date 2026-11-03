@@ -527,73 +527,11 @@ is already in the box: do not paste again. Tell the person which tab holds it un
 
 ### Watch the epic for the Codex report
 
-Use one `Monitor` per epic, on the supervisor's side only:
-`Monitor(description: "codex report on <epic>", timeout_ms: 1800000, command: <script below>)`.
-Save the script in the scratchpad; the command is `bash "<script>" "<root>" <epic> <last-seen-ts>`.
-Before pasting the assignment, read `moai -C "<root>" show <epic> --json` once and save the
-latest `journal[].ts` as `<last-seen-ts>` (an empty journal uses `1970-01-01T00:00:00Z`).
-Arm the monitor with that cursor so a quick report cannot arrive between send and baseline.
-A backlog sent `from step 1` has no epic yet: watch that backlog id in `<epic>`'s place.
-Codex writes `Unfolded: <epic>` on it right after unfolding, which ends that watch; arm the
-next one on the epic it names with `1970-01-01T00:00:00Z` — every note on a new epic is new.
-
-```sh
-python3 - "$1" "$2" "$3" <<'MOAI_CODEX_WATCH'
-import datetime, json, subprocess, sys, time
-root, epic, cursor = sys.argv[1:]
-def stamp(ts):
-    return datetime.datetime.fromisoformat(ts.replace("Z", "+00:00"))
-heads = ("report:", "Review-ready:", "Unfolded:", "Decision needed:")
-ends = ("report:", "Review-ready:", "Unfolded:")
-asks = "진행 중 결정이 필요합니다"
-try:
-    # Stamps are whole seconds: a line in the cursor's second is new only if not seen yet.
-    # Before any newer line, that second is the baseline the cursor was read from.
-    since, seen = stamp(cursor), None
-    while True:
-        result = subprocess.run(["moai", "-C", root, "show", epic, "--json"],
-                                capture_output=True, text=True)
-        if result.returncode:
-            print(f"{epic}\t{cursor}\tshow failed ({result.returncode}): "
-                  + (result.stderr or result.stdout).strip().replace("\n", " "), flush=True)
-            sys.exit(1)
-        row = json.loads(result.stdout)
-        if row.get("journal_error"):
-            raise ValueError("journal_error: " + json.dumps(row["journal_error"]))
-        finished = False
-        for note in row["journal"]:
-            at, key = stamp(note["ts"]), json.dumps(note, sort_keys=True)
-            if at < since or (at == since and (seen is None or key in seen)):
-                continue
-            if at > since:
-                since, cursor, seen = at, note["ts"], set()
-            seen.add(key)
-            if note["kind"] != "note":
-                continue
-            lines = (note.get("text") or "").splitlines()
-            head = lines[0] if lines else ""
-            if head.startswith(heads) or asks in head:
-                print(f"{epic}\t{note['ts']}\t{head}", flush=True)
-                finished = finished or head.startswith(ends)
-        if finished:
-            sys.exit(0)
-        time.sleep(30)
-except (OSError, ValueError, KeyError, TypeError) as error:
-    print(f"{epic}\t{cursor}\twatch failed: {error}", flush=True)
-    sys.exit(1)
-MOAI_CODEX_WATCH
-```
-
-This reads our own tracker every 30 seconds; session discovery can knock on other sessions.
-It watches `journal` entries with `kind=note`, `text` and `ts`, not history or notes keys.
-`Review-ready:` asks for the supervisor's review; decision heads ask for the person. Read the
-whole note with `moai show <epic>` and act on it. A failed read is an alert, never success.
-When the monitor says `expired` after 30 minutes, re-arm it from the last processed timestamp;
-keep that cursor, not a new baseline that could skip a report written at expiry. Duplicate
-alerts after re-arming are harmless: check the note and its timestamp before acting again.
-`Unfolded:`, `Review-ready:` and `report:` each end this watch. After the review, paste "merge
-and close — review <id> done" and re-arm for the final report from the `Review-ready:`
-timestamp. A decision head (`Decision needed:`, or `진행 중 결정이 필요합니다` anywhere in the
-first line) keeps it running. For the final report use the supervisor's
-5 and write `Report-checked:` only after its checks. This watch never runs on the Claude
-session path, which already has `notify_when_idle` and report messages.
+Before sending, record the latest journal timestamp. Arm a `Monitor` with
+`moai -C "<root>" watch <epic> --since <timestamp>`; it prints one JSON event containing
+`head`, `ts`, and a resumable `cursor`. It returns immediately for a matching existing
+note. To continue, start the next monitor with `--cursor <cursor>`. Keep the cursor on
+expiry; identical notes in the same second are one event. A failed read is an alert.
+Watch the backlog until `Unfolded:`, then watch its new epic from the beginning. On
+`Decision needed:` ask the person, on `Review-ready:` start review, and on `report:`
+check the final report and write `Report-checked:`. Never poll the worker screen.

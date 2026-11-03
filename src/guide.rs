@@ -199,8 +199,7 @@ const EPIC_MAX: &str = "any member touched the write path, concurrency, the stor
 /// 한 칸 더) 가운데 첫째와 셋째를 합친 것이다 — 리뷰가 두 에픽의 계약을 같이 보아야 하니
 /// `표면을 가로지르면 한 칸 더` 와 같은 결이고, 실제로 선 판 둘의 `max` 와도 맞는다.
 /// 이 저장소 CLAUDE.md 의 리뷰 표와 `the_rubric_is_the_review_table` 이 이 글을 견준다.
-const BUNDLE: &str =
-    "A worktree that carries members of two epics is measured as one epic";
+const BUNDLE: &str = "A worktree that carries members of two epics is measured as one epic";
 
 /// 리뷰가 되풀이해 잡는 다섯 자리(moai-jza6). 2026-09-20~21 에 리뷰가 잡았지만 브리프에는
 /// 없던 것들이고, 다섯 다 한 번이 아니라 여러 판에서 되풀이됐다 — 그때까지는 감독이 브리프마다
@@ -3623,14 +3622,9 @@ Codex can leave its last frame over a shell. Never use another server's pane ids
 
 ### Read the Codex input box
 
-    tmux display -p -t <pane> '#{{pane_in_mode}} #{{pane_dead}}'
-    tmux capture-pane -p -e -t <pane>
-
-If the first value is `1`, the person is in copy mode: the pane is theirs, so do not type.
-If the second is `1`, Codex has exited and the pane kept its last screen: no box, do not type.
-If it prints neither value, the pane is gone: do not type.
-
-{CODEX_EMPTY_BOX}
+Run `python3 "<moai-tmux skill dir>/scripts/codex-pane.py" ready <pane>` immediately
+before input. It checks mode, liveness and the composer and refuses uncertainty. The
+pane must already be identified as belonging to this repository. {CODEX_EMPTY_BOX}
 
 ### Open a Codex worker
 
@@ -3649,41 +3643,18 @@ no hook stands.
 
 ### Clear a reported Codex worker
 
-Clear only after its report passed the supervisor's checks and `Report-checked:` is
-written, its work has stopped, and its live Codex process and empty input box are confirmed.
-Use `/clear`, with text and Enter in separate calls:
-
-    tmux send-keys -t <pane> /clear
-    tmux capture-pane -p -e -t <pane>
-    tmux send-keys -t <pane> Enter
-    tmux capture-pane -p -e -t <pane>
-
-Each look is a separate call. Before the Enter, the composer holds `/clear` and nothing
-else — if it does not, stop and tell the person. Do not send a fixed number of Enters blindly.
-Confirm the old conversation is gone, the cwd is the same, and the fresh composer is empty
-before sending work.
-An unexpected menu, question or permission prompt belongs to the person: tell them which
-pane shows it, and read the pane again after they answer. If `/clear` remains typed or the
-result is unclear, stop and tell them — a later Enter could erase the next work.
+Only after `Report-checked:` and its work has stopped, run
+`python3 "<moai-tmux skill dir>/scripts/codex-pane.py" clear <pane>`. The helper checks
+before typing, verifies `/clear` before Enter and checks the fresh composer. If it refuses,
+stop and tell the person; a menu, question or permission prompt is theirs.
 
 ### Paste the assignment
 
-Codex has no `SendMessage` delivery: paste the assignment directly, only after rechecking
-the live process and empty input box. A message held for the person's approval is still
-held; pasting it would skip their gate. Use the supervisor's `message()` assignment fields,
-with `<codex>` as the model in `Model:` (not a Claude model), plus `Worker: codex`. Write
-the whole assignment in a scratchpad file, ending with `from: <your ListAgents name>`. Its first line names the absolute path of
-`references/worker-codex.md` beside `worker.md` in `moai-supervise` as the steps file.
-Use the same block transport as "When a message does not arrive":
-
-    tmux load-buffer -b moai-send <file>
-    tmux paste-buffer -p -d -b moai-send -t <pane>
-    tmux send-keys -t <pane> Enter
-
-Run each line separately: bracketed paste preserves the multiline assignment, and the
-separate Enter submits it once. It also appends to an existing draft, so the empty check
-is essential. Tell the person which pane received the assignment. "Label the pane" above
-applies unchanged: set `@moai` on this `%N`, and ask before showing labels on borders.
+The helper is `scripts/codex-pane.py` in the moai-tmux skill. Use `moai supervise message <epic> --help` to assemble the assignment text; its first line names the absolute path to `references/worker-codex.md`. Save it
+under the epic scratch directory. Confirm the fields and the person's approval, then run
+`python3 "<moai-tmux skill dir>/scripts/codex-pane.py" send <pane> <file>`; it rechecks
+before pasting and before submission. Tell the person which pane received it. "Label the
+pane" applies unchanged: set `@moai` on this pane and ask before showing labels.
 
 {REPORT_WATCH}
 "#
@@ -3985,76 +3956,14 @@ neither is an error or an answer without `state`."#;
 /// Codex 보고만 트래커에서 기다린다. 두 손(cmux·tmux)이 같은 스크립트를 싣는다(moai-uzhx.yv8).
 pub const REPORT_WATCH: &str = r#"### Watch the epic for the Codex report
 
-Use one `Monitor` per epic, on the supervisor's side only:
-`Monitor(description: "codex report on <epic>", timeout_ms: 1800000, command: <script below>)`.
-Save the script in the scratchpad; the command is `bash "<script>" "<root>" <epic> <last-seen-ts>`.
-Before pasting the assignment, read `moai -C "<root>" show <epic> --json` once and save the
-latest `journal[].ts` as `<last-seen-ts>` (an empty journal uses `1970-01-01T00:00:00Z`).
-Arm the monitor with that cursor so a quick report cannot arrive between send and baseline.
-A backlog sent `from step 1` has no epic yet: watch that backlog id in `<epic>`'s place.
-Codex writes `Unfolded: <epic>` on it right after unfolding, which ends that watch; arm the
-next one on the epic it names with `1970-01-01T00:00:00Z` — every note on a new epic is new.
-
-```sh
-python3 - "$1" "$2" "$3" <<'MOAI_CODEX_WATCH'
-import datetime, json, subprocess, sys, time
-root, epic, cursor = sys.argv[1:]
-def stamp(ts):
-    return datetime.datetime.fromisoformat(ts.replace("Z", "+00:00"))
-heads = ("report:", "Review-ready:", "Unfolded:", "Decision needed:")
-ends = ("report:", "Review-ready:", "Unfolded:")
-asks = "진행 중 결정이 필요합니다"
-try:
-    # Stamps are whole seconds: a line in the cursor's second is new only if not seen yet.
-    # Before any newer line, that second is the baseline the cursor was read from.
-    since, seen = stamp(cursor), None
-    while True:
-        result = subprocess.run(["moai", "-C", root, "show", epic, "--json"],
-                                capture_output=True, text=True)
-        if result.returncode:
-            print(f"{epic}\t{cursor}\tshow failed ({result.returncode}): "
-                  + (result.stderr or result.stdout).strip().replace("\n", " "), flush=True)
-            sys.exit(1)
-        row = json.loads(result.stdout)
-        if row.get("journal_error"):
-            raise ValueError("journal_error: " + json.dumps(row["journal_error"]))
-        finished = False
-        for note in row["journal"]:
-            at, key = stamp(note["ts"]), json.dumps(note, sort_keys=True)
-            if at < since or (at == since and (seen is None or key in seen)):
-                continue
-            if at > since:
-                since, cursor, seen = at, note["ts"], set()
-            seen.add(key)
-            if note["kind"] != "note":
-                continue
-            lines = (note.get("text") or "").splitlines()
-            head = lines[0] if lines else ""
-            if head.startswith(heads) or asks in head:
-                print(f"{epic}\t{note['ts']}\t{head}", flush=True)
-                finished = finished or head.startswith(ends)
-        if finished:
-            sys.exit(0)
-        time.sleep(30)
-except (OSError, ValueError, KeyError, TypeError) as error:
-    print(f"{epic}\t{cursor}\twatch failed: {error}", flush=True)
-    sys.exit(1)
-MOAI_CODEX_WATCH
-```
-
-This reads our own tracker every 30 seconds; session discovery can knock on other sessions.
-It watches `journal` entries with `kind=note`, `text` and `ts`, not history or notes keys.
-`Review-ready:` asks for the supervisor's review; decision heads ask for the person. Read the
-whole note with `moai show <epic>` and act on it. A failed read is an alert, never success.
-When the monitor says `expired` after 30 minutes, re-arm it from the last processed timestamp;
-keep that cursor, not a new baseline that could skip a report written at expiry. Duplicate
-alerts after re-arming are harmless: check the note and its timestamp before acting again.
-`Unfolded:`, `Review-ready:` and `report:` each end this watch. After the review, paste "merge
-and close — review <id> done" and re-arm for the final report from the `Review-ready:`
-timestamp. A decision head (`Decision needed:`, or `진행 중 결정이 필요합니다` anywhere in the
-first line) keeps it running. For the final report use the supervisor's
-5 and write `Report-checked:` only after its checks. This watch never runs on the Claude
-session path, which already has `notify_when_idle` and report messages."#;
+Before sending, record the latest journal timestamp. Arm a `Monitor` with
+`moai -C "<root>" watch <epic> --since <timestamp>`; it prints one JSON event containing
+`head`, `ts`, and a resumable `cursor`. It returns immediately for a matching existing
+note. To continue, start the next monitor with `--cursor <cursor>`. Keep the cursor on
+expiry; identical notes in the same second are one event. A failed read is an alert.
+Watch the backlog until `Unfolded:`, then watch its new epic from the beginning. On
+`Decision needed:` ask the person, on `Review-ready:` start review, and on `report:`
+check the final report and write `Report-checked:`. Never poll the worker screen."#;
 
 /// 화면을 읽은 뒤의 Codex 입력창 잣대 — 읽는 명령은 각 손이 앞에 둔다(moai-uzhx.yv8).
 pub const CODEX_EMPTY_BOX: &str = r#"The lowest current composer starts with `›` (U+203A) and an ordinary space (U+0020).
@@ -6809,10 +6718,7 @@ stop sending outside work while a release runs",
             rule.contains("`review` model at `review_grade`") && rule.contains("`moai models --json`"),
             "에픽 끝 리뷰가 역할의 모델과 등급을 설정에서 안 읽는다 — {rule}"
         );
-        assert!(
-            rule.contains(EPIC_MAX) && rule.contains("review_raise"),
-            "EPIC_MAX 가 max 로 안 올린다 — {rule}"
-        );
+        assert!(rule.contains(EPIC_MAX) && rule.contains("review_raise"), "EPIC_MAX 가 max 로 안 올린다 — {rule}");
         // 옛 사다리("한 칸 위", `medium` 이면 가운데 모델)가 돌아오면 붉어진다 — 그 아래 칸이 리뷰를 싼 모델에 맡겼다.
         assert!(
             !rule.contains("one step above the heaviest member") && !rule.contains("means `"),
@@ -6993,7 +6899,7 @@ stop sending outside work while a release runs",
         // 거절한다), 에픽의 표는 본문까지 다 지은 뒤다(다시 선 감독은 표가 선 에픽을 곧장 보낸다).
         let at = |piece: &str| brief.find(piece).unwrap_or_else(|| panic!("브리프에 {piece} 가 없다"));
         assert!(at(MILESTONE_CLEAR) < at("--due <due>"), "죽은 릴리스를 걷기 전에 기한을 건다");
-        assert!(at("-b - < <that file>") < at(PLAN_SENT), "에픽을 다 짓기 전에 보낸 표를 단다");
+        assert!(at("<scratchpad>/<epic>/<member>.md") < at(PLAN_SENT), "에픽을 다 짓기 전에 보낸 표를 단다");
         assert!(s.contains(&indent(&brief, "    ")), "감독 글에 펼치기 브리프가 없다");
         assert!(s.contains(PLAN_FIRST), "펼친 에픽을 걸음 2 부터 보내지 않는다");
         let two = &s[s.find("**2-2.").unwrap()..s.find("**3. Send.**").unwrap()];
@@ -7039,7 +6945,8 @@ stop sending outside work while a release runs",
                 assert!(keys.contains(&key), "역할 {role} 의 effort 키 {key} 가 설정에 없다");
             }
         }
-        let models = keys.iter().filter(|k| !k.starts_with("effort") && **k != "review_grade" && **k != "review_raise").count();
+        let models =
+            keys.iter().filter(|k| !k.starts_with("effort") && **k != "review_grade" && **k != "review_raise").count();
         assert_eq!(models, ROLES.len(), "설정의 역할과 표의 역할 수가 다르다");
         for (level, role, _) in DIFFICULTY {
             assert!(ROLES.iter().any(|(r, _, _)| *r == role), "난이도 {level} 의 역할 {role} 이 표에 없다");
@@ -8409,94 +8316,10 @@ stop sending outside work while a release runs",
     }
 
     #[test]
-    fn the_codex_watch_heads_never_match_what_promote_writes() {
-        // cmd/backlog.rs writes these three forms; only the worker writes `Unfolded: <epic>`.
-        let samples =
-            ["Unfolded from moai-x — t", "Unfolded into moai-e as moai-e.a1b", "Unfolded into moai-e, 2 issues"];
-        for name in ["heads", "ends"] {
-            let prefix = format!("{name} = (");
-            let line = REPORT_WATCH.lines().find(|l| l.starts_with(&prefix)).expect("watch tuple missing");
-            let heads: Vec<_> = line.split('"').skip(1).step_by(2).collect();
-            assert!(!heads.is_empty(), "{line}");
-            assert!(heads.contains(&"Unfolded:"), "{line}");
-            for head in heads {
-                assert!(head.ends_with(':'), "{head}");
-                for sample in samples {
-                    assert!(!sample.starts_with(head), "{sample} matches {name}: {head}");
-                }
-            }
-        }
-        // Keep the matcher tied to those tuples, rather than a looser `startswith("Unfolded")`.
-        assert!(REPORT_WATCH.contains("if head.startswith(heads) or asks in head:"));
-        assert!(REPORT_WATCH.contains("finished = finished or head.startswith(ends)"));
-    }
-
-    #[test]
-    fn codex_report_watch_reads_the_actual_journal_and_is_valid_shell() {
-        for part in [
-            "Monitor(",
-            "timeout_ms: 1800000",
-            "moai -C \"<root>\" show <epic> --json",
-            "report:",
-            "Review-ready:",
-            "Decision needed:",
-            "진행 중 결정이 필요합니다",
-            "row[\"journal\"]",
-            "note[\"kind\"]",
-            "note.get(\"text\")",
-            "note[\"ts\"]",
-            "journal_error",
-            "time.sleep(30)",
-            "sys.exit(1)",
-        ] {
-            assert!(REPORT_WATCH.contains(part), "보고 기다리기에 없다 — {part}");
-        }
-        assert!(!REPORT_WATCH.contains("ListAgents"), "보고를 세션 훑기로 기다린다");
-        let script = REPORT_WATCH.split("```sh\n").nth(1).unwrap().split("```").next().unwrap();
-        let Some(bash) = needed("bash") else { return };
-        let out = std::process::Command::new(bash).args(["-n", "-c", script]).output().unwrap();
-        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
-    }
-
-    /// **보고 기다리기의 파이썬을 실제로 돌린다** — `bash -n` 은 heredoc 안의 파이썬을 안 읽는다. 가짜 `moai` 가 낸
-    /// 저널에서 커서의 초에 선 옛 `report:` 는 건너뛰고(기준선), `<id> 진행 중 …` 꼴의 결정 물음은 집고, 새 `report:` 에서
-    /// 끝난다. 30초 잠은 첫 읽기에 끝나니 안 든다.
-    #[cfg(unix)]
-    #[test]
-    fn codex_report_watch_skips_the_baseline_and_ends_on_a_report() {
-        use std::os::unix::fs::PermissionsExt;
-        if tool("python3").is_none() {
-            return; // python3 가 없는 기계 — 글만 잰다.
-        }
-        let s = crate::scratch::Scratch::new("codex-watch");
-        let bin = s.path().join("bin");
-        std::fs::create_dir_all(&bin).unwrap();
-        let note =
-            |ts: &str, text: &str| serde_json::json!({"ts": ts, "id": "e", "kind": "note", "by": "x", "text": text});
-        let row = serde_json::json!({"id": "e", "journal": [
-            note("2026-10-12T00:00:00Z", "report: e (an earlier round)"),
-            {"ts": "2026-10-12T00:00:05Z", "id": "e", "kind": "status", "by": "x", "from": "todo", "to": "done"},
-            note("2026-10-12T00:00:05Z", "e 진행 중 결정이 필요합니다.\n- 상황: …"),
-            note("2026-10-12T00:00:06Z", "Next: none"),
-            note("2026-10-12T00:00:07Z", "report: e\n- merged"),
-        ]});
-        let shown = s.path().join("show.json");
-        std::fs::write(&shown, row.to_string()).unwrap();
-        let fake = bin.join("moai");
-        std::fs::write(&fake, format!("#!/bin/sh\ncat '{}'\n", shown.display())).unwrap();
-        std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
-        let script = REPORT_WATCH.split("```sh\n").nth(1).unwrap().split("```").next().unwrap();
-        let path = path_with(&bin);
-        // 시작 파일이 PATH 를 바꾸지 않게 한다 — 두 경로는 crate::test_shell 이 막는다.
-        let out = crate::test_shell::shell("bash")
-            .args(["-c", script, "watch", "/root", "e", "2026-10-12T00:00:00Z"])
-            .env("PATH", path)
-            .output()
-            .unwrap();
-        let said = String::from_utf8_lossy(&out.stdout);
-        assert!(out.status.success(), "{said}{}", String::from_utf8_lossy(&out.stderr));
-        let heads: Vec<_> = said.lines().map(|l| l.split('\t').nth(2).unwrap_or(l)).collect();
-        assert_eq!(heads, ["e 진행 중 결정이 필요합니다.", "report: e"]);
+    fn codex_watch_guidance_names_the_resumable_command() {
+        assert!(REPORT_WATCH.contains("watch <epic> --since"));
+        assert!(REPORT_WATCH.contains("--cursor <cursor>"));
+        assert!(REPORT_WATCH.contains("identical notes"));
     }
 
     #[test]
@@ -9684,46 +9507,22 @@ stop sending outside work while a release runs",
         assert!(codex.contains(CODEX_WORKER_RULES), "Codex 모델·리뷰 규약이 공용 글과 다르다");
         assert!(worker_branches().contains("## The review brief\n"), "Codex가 가리키는 리뷰 브리프가 없다");
         for part in [
-            "moai models --json",
-            "WebSearch",
-            "The review brief",
-            "tmux list-panes -a -F '#{pane_id}<TAB>#{pane_current_command}<TAB>#{pane_current_path}<TAB>#{pane_pid}'",
-            "`pane_current_command` is `codex`",
-            "`pane_current_path` is `<root>`",
-            "`ps -axo pid=,ppid=,args=`",
-            "two levels of its descendants",
-            "`node …/bin/codex`",
-            "a shell such as `zsh`",
-            "Repeat this check just before each input",
-            "`$TMUX_PANE`",
-            "tmux display -p -t <pane> '#{pane_in_mode} #{pane_dead}'",
-            "tmux capture-pane -p -e -t <pane>",
+            "codex-pane.py",
+            "ready <pane>",
+            "clear <pane>",
+            "send <pane> <file>",
+            "moai supervise message",
+            "Report-checked:",
             "ask the person **once**",
-            "only on their yes",
-            "-c \"<root>\" 'codex --model <codex>' \\; set-option -p remain-on-exit on\n",
-            "`Report-checked:`",
-            "tmux send-keys -t <pane> /clear\n",
-            "text and Enter in separate calls",
-            "An unexpected menu, question or permission prompt belongs to the person: tell them which\npane shows it",
-            "the composer holds `/clear` and nothing\nelse",
-            "Do not send a fixed number of Enters blindly",
-            "tmux load-buffer -b moai-send <file>",
-            "tmux paste-buffer -p -d -b moai-send -t <pane>",
-            "tmux send-keys -t <pane> Enter",
-            "from: <your ListAgents name>",
-            "references/worker-codex.md",
-            "Label the pane",
-            "`@moai`",
-            "Do not assume cmux's wrapper",
         ] {
-            assert!(codex.contains(part), "tmux 의 Codex 절에 없다 — {part}");
+            assert!(codex.contains(part), "missing {part}");
         }
         for line in text.lines().filter(|line| line.contains("gpt-")) {
             assert_eq!(line, "the person under `[models] codex`. Default example: `gpt-6.1-sol`.");
         }
         assert!(!codex.contains("/clear Enter"), "Codex /clear 와 Enter 를 한 호출에 친다");
         assert!(!codex.contains("/new"), "Codex 를 작업 디렉터리 메뉴를 띄우는 /new 로 비운다");
-        assert!(tmux_calls(codex) >= 12, "새 Codex 절의 tmux 줄을 안 잰다");
+
         let launches: Vec<_> = codex.lines().filter(|line| line.contains("'codex ")).collect();
         assert_eq!(launches.len(), 1, "Codex 띄우는 줄이 하나가 아니다");
     }

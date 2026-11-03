@@ -3574,7 +3574,9 @@ pub fn models_trouble(lang: Lang, why: &crate::user_config::ModelsTrouble) -> St
             let levels = fill(say(lang, "models.want_level"), &[("known", &MODEL_LEVELS.join("|"))]);
             want(key, &levels, &crate::text::one_line(&format!("{raw:?}")))
         }
-        ModelsTrouble::NotARaise { key, raw } => want(key, "never|write-path", &crate::text::one_line(&format!("{raw:?}"))),
+        ModelsTrouble::NotARaise { key, raw } => {
+            want(key, "never|write-path", &crate::text::one_line(&format!("{raw:?}")))
+        }
         ModelsTrouble::UnknownKey { key } => {
             fill(say(lang, "models.unknown_key"), &[("key", &crate::text::one_line(&format!("{MODELS}.{key}")))])
         }

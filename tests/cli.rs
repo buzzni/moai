@@ -9564,6 +9564,8 @@ fn idea_and_issue_share_one_list_of_verbs() {
 const JSON_SWEEP: &[&str] = &[
     "image",
     "ctl",
+    "watch",
+    "supervise",
     "writing",
     "init",
     // 저장소의 설정을 기본값을 채워 읽는다(moai-wk7i.qtq).
@@ -10361,8 +10363,26 @@ fn every_command_still_speaks_json() {
     let id = field(&made, "id");
     let epic = field(&ok(s.path(), &["add", "에픽", "--type", "epic", "--json"]), "id");
 
+    ok(s.path(), &["note", &epic, "report: sweep"]);
     std::fs::write(s.path().join("sweep.gif"), b"GIF89a\x01\x00\x01\x00").unwrap();
     let cases = [
+        vec!["watch", &epic, "--json"],
+        vec![
+            "supervise",
+            "message",
+            &epic,
+            "--model",
+            "codex",
+            "--effort",
+            "high",
+            "--base",
+            "base",
+            "--root-branch",
+            "develop",
+            "--from",
+            "supervisor",
+            "--json",
+        ],
         vec!["image", "add", "sweep.gif", "--json"],
         vec!["ctl", "ls", "--json"],
         vec!["writing", "--json"],
@@ -32602,8 +32622,8 @@ fn models_human_output_marks_defaults_and_shows_efforts_and_path() {
     let cfg = s.path().join("config.toml");
     std::fs::write(&cfg, "[models]\ndevelop = \"sonnet\"\neffort = \"high\"\n").unwrap();
     let out = ok_with(s.path(), &cfg, &["models"]);
-    assert_eq!(out.lines().count(), 12, "{out}");
-    assert_eq!(out.matches("default").count(), 9, "{out}");
+    assert_eq!(out.lines().count(), 13, "{out}");
+    assert_eq!(out.matches("default").count(), 10, "{out}");
     let line = |key: &str| out.lines().find(|line| line.starts_with(&format!("{key} "))).unwrap().to_string();
     assert!(
         line("develop").contains("sonnet") && !line("develop").contains("default"),
@@ -32627,7 +32647,7 @@ fn models_human_output_marks_defaults_and_shows_efforts_and_path() {
     // 허용한 모델 이름의 줄바꿈도 표에서는 한 줄로 그린다.
     std::fs::write(&cfg, "[models]\nplan = \"a\\nb\"\n").unwrap();
     let out = ok_with(s.path(), &cfg, &["models"]);
-    assert_eq!(out.lines().count(), 12, "{out}");
+    assert_eq!(out.lines().count(), 13, "{out}");
 }
 
 /// **저장소는 권하고 사람이 고른다**(moai-w25x.jud, 2026-10-26 사용자 결정) — `.moai/config.toml` 의 `[models]` 가
@@ -34746,4 +34766,41 @@ fn conditional_dates_recheck_after_waiting_for_the_write_lock() {
     assert!(!out.status.success());
     assert_eq!(serde_json::from_slice::<serde_json::Value>(&out.stderr).unwrap()["code"], "stale");
     assert_eq!(issues(s.path()), changed);
+}
+
+#[test]
+fn supervisor_watch_resumes_same_second_and_generates_assignment() {
+    let s = init("supervisor-watch");
+    let added = ok(s.path(), &["epic", "add", "watch work", "--json"]);
+    let parsed: serde_json::Value = serde_json::from_str(&added).unwrap();
+    let id = parsed["id"].as_str().unwrap();
+    ok(s.path(), &["note", id, "Review-ready: first"]);
+    ok(s.path(), &["note", id, "Review-ready: first"]);
+    ok(s.path(), &["note", id, "report: second"]);
+    let result = ok(s.path(), &["watch", id, "--since", NOW]);
+    let first: serde_json::Value = serde_json::from_str(&result).unwrap();
+    assert_eq!(first["head"], "Review-ready: first");
+    let result = ok(s.path(), &["watch", id, "--cursor", first["cursor"].as_str().unwrap()]);
+    let second: serde_json::Value = serde_json::from_str(&result).unwrap();
+    assert_eq!(second["head"], "report: second");
+    let message = ok(
+        s.path(),
+        &[
+            "supervise",
+            "message",
+            id,
+            "--model",
+            "test (high)",
+            "--effort",
+            "high",
+            "--base",
+            "base",
+            "--root-branch",
+            "develop",
+            "--from",
+            "supervisor",
+        ],
+    );
+    assert!(message.contains(&format!("Read first: moai show {id}")));
+    assert!(message.contains("Worker: codex") && message.contains("Base branch: base"));
 }
