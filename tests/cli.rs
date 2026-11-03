@@ -7276,7 +7276,7 @@ fn due_apply_raises_by_deadline_notes_it_and_writes_nothing_twice() {
     };
     assert_eq!((dry["due_priority"].as_str(), dry["dry_run"].as_bool()), (Some("auto"), Some(true)), "{dry}");
     assert_eq!(dry["raised"].as_array().unwrap().len(), 2, "{dry}");
-    assert_eq!(row(&dry, 0), (inherits.clone(), 2, 0, 1), "급한 것이 앞이고 에픽의 기한을 따른다 — {dry}");
+    assert_eq!(row(&dry, 0), (inherits.clone(), 2, 1, 1), "급한 것이 앞이고 에픽의 기한을 따른다 — {dry}");
     assert_eq!(dry["raised"][0]["due_from"], serde_json::json!(epic), "{dry}");
     assert_eq!(row(&dry, 1), (own.clone(), 3, 2, 3), "{dry}");
     assert!(dry["raised"][1].get("due_from").is_none(), "제 기한에 조상을 댔다 — {dry}");
@@ -7287,10 +7287,10 @@ fn due_apply_raises_by_deadline_notes_it_and_writes_nothing_twice() {
         let v: serde_json::Value = serde_json::from_str(&ok(p, &["show", id, "--json"])).unwrap();
         v["priority"].as_u64().unwrap()
     };
-    assert_eq!((prio(&inherits), prio(&own), prio(&far), prio(&urgent), prio(&shelved)), (0, 2, 2, 0, 2));
+    assert_eq!((prio(&inherits), prio(&own), prio(&far), prio(&urgent), prio(&shelved)), (1, 2, 2, 0, 2));
     assert!(ok(p, &["show", &epic, "--json"]).contains(r#""priority":2"#), "에픽 줄 자신을 올렸다");
     let said = ok(p, &["show", &inherits]);
-    assert!(said.contains(&format!("Due-priority: p2 → p0 (1 days left, due 2026-09-12 from {epic})")), "{said}");
+    assert!(said.contains(&format!("Due-priority: p2 → p1 (1 days left, due 2026-09-12 from {epic})")), "{said}");
     assert!(ok(p, &["show", &own]).contains("Due-priority: p3 → p2 (3 days left, due 2026-09-14)"));
     assert!(!ok(p, &["show", &far]).contains("Due-priority"), "안 올린 줄에 노트를 달았다");
 
@@ -7300,6 +7300,26 @@ fn due_apply_raises_by_deadline_notes_it_and_writes_nothing_twice() {
     assert_eq!(again["raised"], serde_json::json!([]), "{again}");
     assert_eq!((issues(p), ok(p, &["show", &inherits])), (snap, history), "올릴 것이 없는데 썼다");
     assert!(ok(p, &["due", "apply"]).contains("올릴 것이 없다"));
+}
+
+#[test]
+fn inherited_priority_raise_is_complete_after_one_application() {
+    let s = init("due-idempotent-p3");
+    let p = s.path();
+    let epic = field(&ok(p, &["epic", "add", "deadline", "--due", "2026-09-11", "--json"]), "id");
+    let member = add(p, &["member", "-e", &epic, "-p", "3"]);
+    let dry: serde_json::Value = serde_json::from_str(&ok(p, &["due", "apply", "--dry-run", "--json"])).unwrap();
+    assert_eq!(dry["raised"][0]["to"], 1, "{dry}");
+    let first: serde_json::Value = serde_json::from_str(&ok(p, &["due", "apply", "--json"])).unwrap();
+    assert_eq!(first["raised"], dry["raised"]);
+    assert_eq!(first["raised"][0]["id"], member);
+    let before = issues(p);
+    let history = ok(p, &["show", &member]);
+    let again: serde_json::Value = serde_json::from_str(&ok(p, &["due", "apply", "--json"])).unwrap();
+    assert_eq!(again["raised"], serde_json::json!([]));
+    assert_eq!(issues(p), before);
+    assert_eq!(ok(p, &["show", &member]), history);
+    assert!(!ok(p, &["status", "--json"]).contains("due_priority_behind"));
 }
 
 /// 누군지 모르면 **쓸 것이 있을 때만** 멈춘다. 꺼진 규칙은 아무것도 안 바꾸고, 이미 올린 값을 되돌리지도 않는다.
@@ -7370,7 +7390,7 @@ fn due_apply_skips_a_row_the_write_would_refuse() {
         let v: serde_json::Value = serde_json::from_str(&ok(p, &["show", id, "--json"])).unwrap();
         v["priority"].as_u64().unwrap()
     };
-    assert_eq!((prio(&clean), prio(&broken)), (0, 2), "멀쩡한 멤버가 안 올랐거나 손으로 푼 줄을 고쳤다");
+    assert_eq!((prio(&clean), prio(&broken)), (1, 2), "멀쩡한 멤버가 안 올랐거나 손으로 푼 줄을 고쳤다");
     let board = ok(p, &["status", "--json"]);
     assert!(!board.contains("due_priority_behind"), "보드가 늘 멈출 동사를 시킨다 — {board}");
 }
@@ -7507,11 +7527,14 @@ fn due_apply_status_ready_and_prime_follow_archived_parent_placement() {
         let child = dry["raised"].as_array().unwrap().iter().find(|r| r["id"] == "moai-pppp.ccc").unwrap();
         assert_eq!(child["due_from"], "moai-m002", "{dry}");
         assert_eq!(child["due_on"], placed_due, "{dry}");
-        // The own-date row either wins by its own date or ties on the shared milestone.
+        // The own-date row raises to p0 by its own date; the child's inherited date stops at p1, so the notice
+        // puts the own-date row first even when the inherited date is earlier (review moai-ifvh.31s).
         let expected = vec![own.as_str(), "moai-pppp.ccc"];
         let board: serde_json::Value = serde_json::from_str(&ok_at(p, now, &["status", "--json"])).unwrap();
         let notice = board["notices"].as_array().unwrap().iter().find(|w| w["kind"] == "due_priority_behind").unwrap();
         assert_eq!(notice["ids"], serde_json::json!(expected), "{board}");
+        let order: Vec<&str> = dry["raised"].as_array().unwrap().iter().map(|r| r["id"].as_str().unwrap()).collect();
+        assert_eq!(order, expected, "due apply orders its raises unlike the board: {dry}");
         // Ready breaks equal deadlines by creation time; status notices break them by ID.
         let expected_ready = if placed_due < "2026-10-16" { vec!["moai-pppp.ccc", own.as_str()] } else { expected };
         let ready: serde_json::Value = serde_json::from_str(&ok_at(p, now, &["ready", "--json"])).unwrap();
@@ -8879,18 +8902,77 @@ fn promote_carries_the_milestone_and_the_body() {
     let made = issues(s.path());
     // 에픽 하나에만 적힌다 — idea 줄이 들고 있던 것까지 두 줄이다.
     assert_eq!(made.matches(&format!(r#""milestone":"{stone}""#)).count(), 2, "{made}");
-    assert_eq!(made.matches(r#""body":"왜 한 묶음인가""#).count(), 2, "본문이 에픽에 안 갔다\n{made}");
+    assert_eq!(made.matches(r#""body":"왜 한 묶음인가""#).count(), 3, "본문이 에픽과 멤버에 안 갔다\n{made}");
     // **어느 줄이 들었는지까지 본다**(리뷰). 수만 세던 판정은 본문이 멤버에 가고 에픽이 빈 채로
     // 선 꼴에서도 그대로 지났다 — 계획에 에픽 하나와 이슈 하나뿐이라 수로는 둘을 못 가른다.
     let pick = |mark: &str| made.lines().find(|l| l.contains(mark)).unwrap_or_else(|| panic!("{mark}\n{made}"));
     let (epic, member) = (pick(r#""kind":"epic""#), pick(r#""title":"첫 이슈""#));
     assert!(epic.contains(r#""body":"왜 한 묶음인가""#), "에픽이 본문을 안 받았다\n{epic}");
     assert!(epic.contains(&format!(r#""milestone":"{stone}""#)), "에픽이 마일스톤을 안 받았다\n{epic}");
-    // 멤버는 에픽에서 물려받으므로 제 줄에는 둘 다 없다 — 적으면 그것이 파생값을 저장하는 것이다.
-    assert!(!member.contains(r#""body""#), "멤버에 본문을 베꼈다\n{member}");
+    // 마일스톤은 에픽에서 물려받으므로 제 줄에 없다 — 적으면 그것이 파생값을 저장하는 것이다. 본문은 물려받는 값이
+    // 아니라서, 계획의 멤버가 하나면 그 멤버가 backlog 의 본문을 받는다(moai-ifvh.y8m).
+    assert!(member.contains(r#""body":"왜 한 묶음인가""#), "멤버에 본문이 없다\n{member}");
     assert!(!member.contains(r#""milestone""#), "멤버에 마일스톤을 적었다\n{member}");
     let under = ok(s.path(), &["show", "--milestone", &stone]);
     assert!(under.contains("캐시 층") && under.contains("첫 이슈"), "{under}");
+}
+
+#[test]
+fn promote_propagates_context_and_explicit_epic_body() {
+    let s = init("promotecontext");
+    let idea = ok(s.path(), &["backlog", "add", "source", "-b", "original\nbody", "-q"]).trim().to_string();
+    let out = from_stdin(
+        s.path(),
+        &["backlog", "promote", &idea, "--from", "-", "--body", "bundle"],
+        "# new epic\n- first\n- second\n",
+    );
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let rows = issues(s.path());
+    let line = |title: &str| rows.lines().find(|l| l.contains(&format!("\"title\":\"{title}\""))).unwrap();
+    assert!(line("new epic").contains("\"body\":\"bundle\""));
+    for title in ["first", "second"] {
+        assert!(line(title).contains(&format!("Unfolded-from: {idea}")));
+    }
+    let epic = add(s.path(), &["standing", "--type", "epic"]);
+    let another = ok(s.path(), &["backlog", "add", "other", "-b", "original\nbody", "-q"]).trim().to_string();
+    let out = from_stdin(s.path(), &["backlog", "promote", &another, "-e", &epic, "--from", "-"], "- sole\n");
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let rows = issues(s.path());
+    assert!(rows.lines().find(|l| l.contains("\"title\":\"sole\"")).unwrap().contains("original\\nbody"));
+
+    // 다툼을 거절하는 말과 빈 stdin 의 말은 이 동사의 것이다 — `moai add` 를 권하면 따라 친 부름이 backlog 를 닫지
+    // 않은 채 계획을 한 벌 더 세운다(리뷰 moai-ifvh.31s).
+    let third = ok(s.path(), &["backlog", "add", "third", "-b", "third body", "-q"]).trim().to_string();
+    let before = issues(s.path());
+    let out = from_stdin(s.path(), &["backlog", "promote", &third, "--from", "-", "--body", "-"], "# e\n- x\n");
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success() && err.contains("moai backlog promote"), "{err}");
+    assert!(!err.contains("moai add"), "promote 의 거절이 add 를 권한다\n{err}");
+    assert_eq!(issues(s.path()), before, "거절해 놓고 썼다");
+    let plan = s.path().join("third-plan.md");
+    std::fs::write(&plan, "# third epic\n- one\n- two\n").unwrap();
+    let out =
+        from_stdin(s.path(), &["backlog", "promote", &third, "--from", &plan.to_string_lossy(), "--body", "-"], "");
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(out.status.success(), "{err}");
+    assert!(
+        !err.contains("본문은 적지 않았다") && !err.contains("no body was written"),
+        "backlog 의 본문을 데려가면서 본문이 없다고 말한다\n{err}"
+    );
+    assert!(
+        issues(s.path()).lines().any(|l| l.contains("\"title\":\"third epic\"") && l.contains("third body")),
+        "빈 --body 뒤에 backlog 의 본문을 안 데려갔다"
+    );
+
+    // 계획이 stdin 을 쥔 판에 `--body <있는 파일>` 이면, 계획을 파일로 옮기는 줄을 **이 동사로** 댄다 — `moai add` 를
+    // 권하면 따라 친 부름이 backlog 를 닫지 않은 채 계획을 한 벌 더 세운다(리뷰 moai-ifvh.31s 3번).
+    let fourth = ok(s.path(), &["backlog", "add", "fourth", "-q"]).trim().to_string();
+    std::fs::write(s.path().join("why.md"), "a file by that name").unwrap();
+    let out = from_stdin(s.path(), &["backlog", "promote", &fourth, "--from", "-", "--body", "why.md"], "# f\n- y\n");
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(out.status.success(), "{err}");
+    assert!(err.contains("moai backlog promote <id> --from <계획 파일> --body - < why.md"), "{err}");
+    assert!(!err.contains("moai add"), "promote 의 알림이 add 를 권한다\n{err}");
 }
 
 /// **본문은 에픽이 여럿이어도 첫 뿌리 하나만 든다**(리뷰). 마일스톤은 멤버가 물려받는
@@ -8917,10 +8999,11 @@ fn a_multi_epic_unfold_copies_the_body_once() {
     assert!(front.contains(r#""body":"왜 한 묶음인가""#), "첫 뿌리가 본문을 안 받았다\n{front}");
 }
 
-/// **이미 선 에픽에 펼칠 때는 둘 다 안 데려간다**(moai-07v1). 그 에픽이 이미 임자라,
+/// **이미 선 에픽에 펼칠 때는 마일스톤을 안 데려간다**(moai-07v1). 그 에픽이 이미 임자라,
 /// 멤버마다 idea 의 마일스톤을 적으면 에픽의 것을 덮어 `show --milestone` 이 두 곳에 선다.
+/// 본문은 다르다 — 계획의 멤버가 하나면 그 멤버가 idea 의 본문을 받는다(moai-ifvh.y8m).
 #[test]
-fn promote_into_a_standing_epic_carries_nothing() {
+fn promote_into_a_standing_epic_carries_no_milestone_and_the_body_to_a_sole_member() {
     let s = init("promoteinto");
     let m1 = ok(s.path(), &["milestone", "add", "v1", "-q"]).trim().to_string();
     let m2 = ok(s.path(), &["milestone", "add", "v2", "-q"]).trim().to_string();
@@ -8934,7 +9017,7 @@ fn promote_into_a_standing_epic_carries_nothing() {
     let made = issues(s.path());
     // `m2` 는 idea 줄에만 남고, 만든 멤버는 에픽에서 `m1` 을 물려받는다.
     assert_eq!(made.matches(&format!(r#""milestone":"{m2}""#)).count(), 1, "선 에픽의 멤버에 적었다\n{made}");
-    assert_eq!(made.matches(r#""body":"idea 의 본문""#).count(), 1, "멤버에 본문을 베꼈다\n{made}");
+    assert_eq!(made.matches(r#""body":"idea 의 본문""#).count(), 2, "멤버에 본문이 없다\n{made}");
     assert!(ok(s.path(), &["show", "--milestone", &m1]).contains("멤버 하나"), "에픽에서 안 물려받았다");
 }
 
@@ -9564,6 +9647,8 @@ fn idea_and_issue_share_one_list_of_verbs() {
 const JSON_SWEEP: &[&str] = &[
     "image",
     "ctl",
+    "watch",
+    "supervise",
     "writing",
     "init",
     // 저장소의 설정을 기본값을 채워 읽는다(moai-wk7i.qtq).
@@ -10361,8 +10446,29 @@ fn every_command_still_speaks_json() {
     let id = field(&made, "id");
     let epic = field(&ok(s.path(), &["add", "에픽", "--type", "epic", "--json"]), "id");
 
+    ok(s.path(), &["note", &epic, "report: sweep"]);
+    std::fs::write(s.path().join("sweep-steps.md"), "steps\n").unwrap();
     std::fs::write(s.path().join("sweep.gif"), b"GIF89a\x01\x00\x01\x00").unwrap();
     let cases = [
+        vec!["watch", &epic, "--json"],
+        vec![
+            "supervise",
+            "message",
+            &epic,
+            "--model",
+            "codex",
+            "--effort",
+            "high",
+            "--base",
+            "base",
+            "--root-branch",
+            "develop",
+            "--from",
+            "supervisor",
+            "--steps",
+            "sweep-steps.md",
+            "--json",
+        ],
         vec!["image", "add", "sweep.gif", "--json"],
         vec!["ctl", "ls", "--json"],
         vec!["writing", "--json"],
@@ -14377,6 +14483,52 @@ fn promote_can_be_rehearsed() {
     assert_eq!(issues(s.path()), before, "연습인데 썼다");
 }
 
+#[test]
+fn promote_human_preview_names_bodies_without_writing() {
+    let s = init("promote-preview-bodies");
+    let p = s.path();
+    let idea = ok(p, &["backlog", "add", "source", "-b", "original", "-q"]).trim().to_string();
+    let epic = add(p, &["standing", "--type", "epic"]);
+    let before = issues(p);
+    let preview = |args: &[&str], plan: &str| {
+        let out = from_stdin(p, args, plan);
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        String::from_utf8(out.stdout).unwrap()
+    };
+    let single =
+        preview(&["backlog", "promote", &idea, "--from", "-", "--body", "bundle", "--dry-run"], "# new epic\n- sole\n");
+    assert!(single.contains("new epic") && single.contains("sole") && single.contains("원본 본문"), "{single}");
+    assert!(single.contains("첫 에픽"), "{single}");
+    let standing = preview(&["backlog", "promote", &idea, "-e", &epic, "--from", "-", "--dry-run"], "- sole\n");
+    assert!(standing.contains("sole") && standing.contains("원본 본문"), "{standing}");
+    let multiple =
+        preview(&["backlog", "promote", &idea, "-e", &epic, "--from", "-", "--dry-run"], "- first\n- second\n");
+    assert!(multiple.contains(&format!("Unfolded-from: {idea}")) && multiple.contains("각 멤버"), "{multiple}");
+    let new_multiple =
+        preview(&["backlog", "promote", &idea, "--from", "-", "--dry-run"], "# new epic\n- first\n- second\n");
+    assert!(
+        new_multiple.contains("첫 에픽") && new_multiple.contains(&format!("Unfolded-from: {idea}")),
+        "{new_multiple}"
+    );
+    // 기계 출력은 `--body` 로 준 새 글이 설 자리만 댄다 — `add --from --body` 와 같은 어휘다(moai-30hd 가 지킨 계약).
+    let json = preview(
+        &["backlog", "promote", &idea, "--from", "-", "--body", "bundle", "--dry-run", "--json"],
+        "# new epic\n- sole\n",
+    );
+    assert!(json.contains(r#""body_on":0"#), "{json}");
+    // 넘치는 `--body` 는 연습도 진짜도 거절한다 — 연습이 그 글을 재지 않으면 사람이 "좋다" 한 뒤에 진짜가 물린다.
+    let big = "x".repeat(70_000);
+    for dry in [true, false] {
+        let mut argv = vec!["backlog", "promote", idea.as_str(), "--from", "-", "--body", big.as_str()];
+        if dry {
+            argv.push("--dry-run");
+        }
+        let out = from_stdin(p, &argv, "# new epic\n- sole\n");
+        assert!(!out.status.success(), "dry_run={dry}: 넘치는 --body 를 받았다");
+    }
+    assert_eq!(issues(p), before);
+}
+
 /// 연습과 `--json` 을 같이 줘도 기계 출력이다. `add --from` 쪽과 **같은
 /// 모양**이라야 계획을 미리 검사하는 코드가 두 동사에 두 벌 필요하지 않다.
 #[test]
@@ -15391,6 +15543,17 @@ fn an_oversized_carried_body_names_the_idea_and_the_way_out() {
         assert_eq!(real.status.code(), Some(1), "{was}");
     }
     ok(s.path(), &["defer", &stone, "--undo"]);
+
+    // A single member in an existing epic carries the same body and must reject it too.
+    let epic = add(s.path(), &["existing epic", "--type", "epic"]);
+    for extra in [
+        &["backlog", "promote", &id, "-e", &epic, "--from", "-", "--dry-run"][..],
+        &["backlog", "promote", &id, "-e", &epic, "--from", "-"][..],
+    ] {
+        let out = from_stdin(s.path(), extra, "- member\n");
+        assert!(!out.status.success());
+        assert!(String::from_utf8_lossy(&out.stderr).contains(&format!("moai edit {id} -b -")));
+    }
 
     // 그 길이 실제로 통한다 — 줄이면 같은 부름이 그대로 지난다.
     let out = from_stdin(s.path(), &["edit", &id, "-b", "-"], "짧게 줄인 본문");
@@ -32520,7 +32683,7 @@ fn models_json_reads_user_config_outside_a_tracker_and_only_reads() {
         serde_json::json!({
             "plan": "fable", "develop": "opus-6", "complex": "opus", "review": "opus",
             "docs": "sonnet", "bulk": "haiku", "codex": "future-model",
-            "review_grade": "xhigh", "effort": "max", "effort_complex": "high", "effort_plan": "xhigh",
+            "review_grade": "xhigh", "review_raise": "never", "effort": "max", "effort_complex": "high", "effort_plan": "xhigh",
             "written": ["develop", "codex", "effort"], "repo": [], "path": cfg, "repo_path": null,
         })
     );
@@ -32548,7 +32711,7 @@ fn models_missing_file_uses_all_defaults_and_keeps_the_path() {
         serde_json::json!({
             "plan": "fable", "develop": "sonnet", "complex": "opus", "review": "opus",
             "docs": "sonnet", "bulk": "haiku", "codex": "gpt-6.1-sol",
-            "review_grade": "xhigh", "effort": "medium", "effort_complex": "high", "effort_plan": "xhigh",
+            "review_grade": "xhigh", "review_raise": "never", "effort": "medium", "effort_complex": "high", "effort_plan": "xhigh",
             "written": [], "repo": [], "path": cfg, "repo_path": null,
         })
     );
@@ -32602,8 +32765,8 @@ fn models_human_output_marks_defaults_and_shows_efforts_and_path() {
     let cfg = s.path().join("config.toml");
     std::fs::write(&cfg, "[models]\ndevelop = \"sonnet\"\neffort = \"high\"\n").unwrap();
     let out = ok_with(s.path(), &cfg, &["models"]);
-    assert_eq!(out.lines().count(), 12, "{out}");
-    assert_eq!(out.matches("default").count(), 9, "{out}");
+    assert_eq!(out.lines().count(), 13, "{out}");
+    assert_eq!(out.matches("default").count(), 10, "{out}");
     let line = |key: &str| out.lines().find(|line| line.starts_with(&format!("{key} "))).unwrap().to_string();
     assert!(
         line("develop").contains("sonnet") && !line("develop").contains("default"),
@@ -32627,7 +32790,7 @@ fn models_human_output_marks_defaults_and_shows_efforts_and_path() {
     // 허용한 모델 이름의 줄바꿈도 표에서는 한 줄로 그린다.
     std::fs::write(&cfg, "[models]\nplan = \"a\\nb\"\n").unwrap();
     let out = ok_with(s.path(), &cfg, &["models"]);
-    assert_eq!(out.lines().count(), 12, "{out}");
+    assert_eq!(out.lines().count(), 13, "{out}");
 }
 
 /// **저장소는 권하고 사람이 고른다**(moai-w25x.jud, 2026-10-26 사용자 결정) — `.moai/config.toml` 의 `[models]` 가
@@ -33867,6 +34030,39 @@ fn web_marks_read_only_from_its_own_page() {
     assert_eq!(status, 404, "GET 으로 읽음을 적는 길이 섰다");
 }
 
+#[test]
+fn web_ctl_group_and_all_refuse_atomically() {
+    let s = init("web-atomic-group-all");
+    let cfg = s.path().join("user.toml");
+    let mine = |args: &[&str]| ok_with(s.path(), &cfg, args);
+    let epic = field(&mine(&["epic", "add", "group", "--json"]), "id");
+    let a = field(&mine(&["add", "first", "-e", &epic, "--json"]), "id");
+    let b = field(&mine(&["add", "second", "-e", &epic, "--json"]), "id");
+    mine(&["read", &a]);
+    let [(sheet, was)]: [(PathBuf, String); 1] = read_sheets(&cfg, s.path()).try_into().unwrap();
+    let initial = format!("{was}\"{b}\" = 3\n");
+    std::fs::write(&sheet, &initial).unwrap();
+    // A fresh member and the group itself remain unread alongside the held member.
+    mine(&["add", "third", "-e", &epic]);
+    let web = serve_with(s.path(), |cmd| {
+        cmd.env("MOAI_CONFIG", &cfg);
+    });
+    let origin = format!("http://127.0.0.1:{}", web.port);
+    for path in [
+        "/api/ctl-read-all".to_string(),
+        format!("/api/ctl-read-group/{epic}"),
+        "/api/ctl-read-group/moai-zzzz".to_string(),
+    ] {
+        let (status, _, body) = post(web.port, &path, Some(&origin));
+        assert_eq!(status, 200, "{body}");
+        assert_ne!(json_of(&body)["exit"], 0, "{path}: {body}");
+        assert_eq!(std::fs::read_to_string(&sheet).unwrap(), initial, "{path}");
+    }
+    let (_, _, body) = post(web.port, "/api/read-all", Some(&origin));
+    assert_eq!(json_of(&body)["exit"], 0, "{body}");
+    assert_ne!(std::fs::read_to_string(&sheet).unwrap(), initial);
+}
+
 /// **간트의 막대 끌기는 `moai edit` 의 길로 트래커에 쓴다**(moai-d86e.3ud) — 이 페이지에서 보낸 것만 받고, 날이 아니라
 /// 옮기는 뜻(`edge`·`days`, 하루 세우기는 `day`)을 실어 `edit` 이 락 안에서 날을 잰다(moai-vj8w.02c). 거절(시작이 기한
 /// 뒤·위 기한 넘김·그새 날이 선 줄)은 `edit` 의 말 그대로 봉투의 `err` 에 서고, 모양이 틀리면 자식을 안 띄운다.
@@ -34746,4 +34942,96 @@ fn conditional_dates_recheck_after_waiting_for_the_write_lock() {
     assert!(!out.status.success());
     assert_eq!(serde_json::from_slice::<serde_json::Value>(&out.stderr).unwrap()["code"], "stale");
     assert_eq!(issues(s.path()), changed);
+}
+
+#[test]
+fn supervisor_watch_resumes_same_second_and_generates_assignment() {
+    let s = init("supervisor-watch");
+    let added = ok(s.path(), &["epic", "add", "watch work", "--json"]);
+    let parsed: serde_json::Value = serde_json::from_str(&added).unwrap();
+    let id = parsed["id"].as_str().unwrap();
+    ok(s.path(), &["note", id, "Review-ready: first"]);
+    ok(s.path(), &["note", id, "Review-ready: first"]);
+    ok(s.path(), &["note", id, "report: second"]);
+    let result = ok(s.path(), &["watch", id, "--since", NOW]);
+    let first: serde_json::Value = serde_json::from_str(&result).unwrap();
+    assert_eq!(first["head"], "Review-ready: first");
+    let cursor = first["cursor"].as_str().unwrap();
+    // The cursor holds digests, not the notes — it goes back on the command line every time.
+    assert!(cursor.len() < 200, "{cursor}");
+    let result = ok(s.path(), &["watch", id, "--cursor", cursor]);
+    let second: serde_json::Value = serde_json::from_str(&result).unwrap();
+    assert_eq!(second["head"], "report: second");
+    // A cursor is bound to the row it was read from.
+    let other = field(&ok(s.path(), &["epic", "add", "other", "--json"]), "id");
+    let out = moai(s.path(), &["watch", &other, "--cursor", cursor]);
+    assert!(!out.status.success(), "a cursor from another row was accepted");
+
+    let steps = s.path().join(".claude/moai-plugin/skills/moai-supervise/references/worker-codex.md");
+    std::fs::create_dir_all(steps.parent().unwrap()).unwrap();
+    std::fs::write(&steps, "steps\n").unwrap();
+    let send = |id: &str| {
+        moai(
+            s.path(),
+            &[
+                "supervise",
+                "message",
+                id,
+                "--model",
+                "test (high)",
+                "--effort",
+                "high",
+                "--base",
+                "base",
+                "--root-branch",
+                "develop",
+                "--from",
+                "supervisor",
+            ],
+        )
+    };
+    let out = send(id);
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let message = String::from_utf8_lossy(&out.stdout).to_string();
+    let head = message.lines().next().unwrap();
+    assert!(head.starts_with(&format!("You are handed epic {id} — watch work.")), "{head}");
+    assert!(head.contains("worker-codex.md") && head.ends_with("from step 2."), "{head}");
+    assert!(message.contains(&format!("Read first: moai show {id}")));
+    assert!(message.contains("Worker: codex") && message.contains("Base branch: base"));
+    assert!(message.contains("Work running alongside: none — do not touch those files (4-3)"));
+    assert!(!message.contains("/tmp/cargo-target/"), "repository-specific target path leaked: {message}");
+    // `Writing:` is the person's value, not one the command picks.
+    assert!(message.contains("Writing: detailed"), "{message}");
+    assert!(!message.contains("Subdir:"), "{message}");
+
+    let backlog = field(&ok(s.path(), &["backlog", "add", "a thought", "--json"]), "id");
+    let out = send(&backlog);
+    let head = String::from_utf8_lossy(&out.stdout).lines().next().unwrap_or_default().to_string();
+    assert!(head.starts_with(&format!("You are handed backlog {backlog} — a thought.")), "{head}");
+    assert!(head.ends_with("from step 1."), "{head}");
+
+    let issue = field(&ok(s.path(), &["add", "plain work", "--json"]), "id");
+    assert!(!send(&issue).status.success(), "an issue was handed out as an epic");
+    std::fs::remove_file(&steps).unwrap();
+    let out = send(id);
+    assert!(!out.status.success() && String::from_utf8_lossy(&out.stderr).contains("--steps"));
+}
+
+/// **The default heads never match what `promote` writes** — the old report watch carried this
+/// guard, and only the worker writes `Unfolded: <epic>`. A decision asked in Korean stands anywhere
+/// in the first line, and a column move is never an event.
+#[test]
+fn supervisor_watch_heads_skip_promote_notes_and_moves() {
+    let s = init("supervisor-heads");
+    let backlog = field(&ok(s.path(), &["backlog", "add", "a thought", "--json"]), "id");
+    let out = from_stdin(
+        s.path(),
+        &["backlog", "promote", &backlog, "--from", "-"],
+        "# Unfolded epic\n- [p2] first member\n",
+    );
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    ok(s.path(), &["note", &backlog, &format!("{backlog} 진행 중 결정이 필요합니다.\n- 상황: x")]);
+    let result = ok(s.path(), &["watch", &backlog, "--since", NOW]);
+    let event: serde_json::Value = serde_json::from_str(&result).unwrap();
+    assert_eq!(event["head"], format!("{backlog} 진행 중 결정이 필요합니다."));
 }

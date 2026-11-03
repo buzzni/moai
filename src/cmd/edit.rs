@@ -322,13 +322,16 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
                 std::iter::once(out.id.as_str()).chain(overflow.iter().map(String::as_str)).collect();
             // Only the edited row needs blocker diagnostics. Overflow candidates need
             // placement and closure; a blocker on an unrelated candidate must not open the archive.
-            // Once it is open, the edited row's blockers ride along: `Blocked::of` reads a blocking
-            // group's column from its members, which a revived group keeps in the archive.
-            let blockers: Vec<&str> = out.blocked_by.iter().map(String::as_str).collect();
-            let archived = if crate::archive::reaches_out(live, &[out.id.as_str()]) {
+            // A live blocking group opens the selective archive context: `Blocked::of` reads
+            // its column from members that a revived group can keep in the archive. An edit that
+            // changed nothing draws no detail, so its blockers open nothing under the lock.
+            let blockers: Vec<&str> =
+                if changed { out.blocked_by.iter().map(String::as_str).collect() } else { Vec::new() };
+            let (full, outside) = crate::archive::edit_out(live, &out.id, &context_ids);
+            let archived = if full {
                 crate::archive::read(&repo.root)?.issues
             } else {
-                super::archived_places_and(&repo.root, live, &context_ids, &blockers)?.issues
+                super::archived_places_and_if(&repo.root, live, &context_ids, &blockers, outside)?.issues
             };
             let issues = super::in_context(live, &archived, unread);
             let issues = &issues[..];

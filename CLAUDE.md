@@ -416,40 +416,27 @@ CI 의 잡 이름 `release 바이너리 15MB 예산` 은 required check 라 옛 
 
 **에픽의 멤버는 따로 보지 않는다. 멤버가 다 끝나면 에픽 끝에서 한 번 본다.**
 에픽 끝은 **`review` 모델(기본 opus)로 `review_grade`(기본 `xhigh`)** 의 `/code-review <등급> --fix`
-다. 쓰기 경로·동시성·저장 형식·훅을 건드린 멤버가 들면 `max` 다. 범위는
+다. `[models] review_raise` 는 기본 `never` 이며 `write-path` 일 때만 쓰기 경로 등 또는 두 에픽 묶음을 한 칸 올린다. 범위는
 `git merge-base develop HEAD` 부터 에픽 전체의 diff 다. 에픽에 안 든 이슈 하나는 끝날 때 에픽 밖
 이슈 하나 줄(`low`·`medium`·`high`)에서 골라 본다.
 
 | 무엇을 | 등급 | 고르는 자 |
 |---|---|---|
-| 에픽 끝 | `xhigh` | `review` 모델로 — 사람의 `[models]` 의 `review_grade` 가 바꾼다. 아래 `max` 줄은 멤버를 아래 세 줄로 잰다 |
-| | `max` | **any member touched the write path, concurrency, the storage format or hooks** 인 에픽 |
+| 에픽 끝 | `review_grade` | `review` 모델로 — 기본 `xhigh`; `review_raise = "never"` 이면 승격하지 않는다 |
+| | 한 칸 위 | `review_raise = "write-path"` 이고 **any member touched the write path, concurrency, the storage format or hooks** 일 때 |
 | 에픽 밖 이슈 하나 | `low` | text, comments, a one-line fix; behaviour unchanged |
 | | `medium` | a behaviour change inside one file, ringed by tests |
 | | `high` | several files, the write path, concurrency, the storage format, hooks; hard to undo |
-| 에픽 둘에 걸친 묶음 | `xhigh` 에서 한 칸 위 = `max` | **A worktree that carries members of two epics is measured as one epic and then raised one more step** |
+| 에픽 둘에 걸친 묶음 | 설정에 따라 한 칸 위 | **A worktree that carries members of two epics is measured as one epic**; `review_raise = "write-path"` 일 때만 승격 |
 
 **잣대 칸이 영어인 것은 계약이다** — `moai init` 이 써 넣는 블록과 감독 스킬이 영어로 통일된
 2026-09-20 사용자 결정(`moai-54k2`)에 따라 `guide::DIFFICULTY`·`EPIC_MAX` 가 영어가 되었고,
 `the_rubric_is_the_review_table` 이 이 표의 그 칸과 글자째 견준다. 한쪽만 고치면 붉어진다.
 
-**에픽 둘에 걸친 묶음은 한 에픽처럼 재고 거기서 한 칸 더 올린다**(2026-09-22 사용자 결정,
-`moai-h89f`). 옆 워크트리가 파일을 쥐어 서로 다른 에픽의 멤버가 한 가지에 실리는 판이
-2026-09-20 에만 두 번 섰는데(`moai-giz3` 을 `moai-3bry` 에 얹은 판, `moai-uc5v`·`moai-c4nk`
-에 `moai-8d49` 를 얹은 판), 표는 `에픽 끝` 과 `에픽 밖 이슈 하나` 둘만 재어 그 판을 아무도
-안 쟀다 — 그날은 감독과 일꾼이 그때그때 골라 둘 다 `max` 였다. 맞았지만 규약이 시킨 것은
-아니다. 리뷰가 두 에픽의 계약을 같이 봐야 하니 `표면을 가로지르면 한 칸 더` 와 같은 결이고,
-실제로 선 판 둘의 `max` 와도 맞는다. 잣대 칸은 `guide::BUNDLE` 과 한 글이다.
-올리는 칸의 천장은 `max` 다 — 쓰기 경로를 건드린 멤버가 든 묶음처럼 이미 `max` 인 자리에서는
-한 칸 더가 갈 곳이 없으니 그대로 `max` 다(리뷰 `moai-9tlp.67r` 13번).
+**승격은 설정으로만 허용한다**(2026-11-03 사용자 결정, `moai-p9dh.lyc`). `review_raise = "write-path"` 는 위 조건이나 두 에픽 묶음에 한 칸 승격하며 중복 승격은 없다. `max` 가 상한이다. 기본 `never` 는 설정된 등급을 그대로 쓴다. 작업자의 제안이 설정과 다르면 감독은 설정으로 바로잡고 리뷰 이슈의 관점에 이유를 적는다.
 
-**에픽 끝 리뷰는 `review` 모델과 `review_grade` 다**(2026-10-12 사용자 결정, `moai-9tqo`). 기본은
-opus 로 `xhigh`, 위 `max` 줄이나 묶음이면 `max` — 사다리는 `xhigh`·`max` 둘이다. 바닥을 올린
-까닭은 "한 칸 위" 의 아래 칸이 리뷰를 싼 모델에 맡긴 데 있다 — `medium` 이면 sonnet 이었고,
-sonnet 일꾼 창에서 부른 리뷰는 창의 모델을 물려받았다. 에픽 밖 이슈 하나는 난이도 사다리를
-그대로 둔다 — 등급은 `low`·`medium`·`high`, 모델은 `low`·`medium` 이면 `develop` 의 모델,
-`high` 면 `review` 의 모델이다. 고른 등급과 까닭은 리뷰 이슈의 관점(`-b`)에 한 줄로 적는다 —
-다음 사람이 "왜 max 였나" 를 거기서 읽는다.
+에픽 밖 이슈 하나는 난이도 사다리를 그대로 둔다 — 등급은 `low`·`medium`·`high`, 모델은 `low`·`medium` 이면
+`develop` 의 모델, `high` 면 `review` 의 모델이다. 고른 등급과 까닭은 리뷰 이슈의 관점(`-b`)에 한 줄로 적는다.
 
 **모델은 역할로 고르고, 역할의 모델은 사람의 것이다**(2026-10-12 사용자 결정, `moai-9tqo`).
 감독은 일꾼을 역할의 모델로 띄운 서브에이전트로 세우고(세션 일꾼 길은 사람이 창을 보고 싶을 때와
@@ -462,7 +449,7 @@ Codex 일꾼에 남는다), 역할마다의 모델은 사람의 사용자 설정
 | `plan` | 계획 — 요청을 에픽과 이슈로 가른다 | fable | `xhigh` (`effort_plan`) |
 | `develop` | 개발 — 대부분의 일 | sonnet | `medium` |
 | `complex` | 쓰기 경로·동시성·저장 형식·훅·여러 파일의 계약을 함께 바꾸는 것 | opus | `high` |
-| `review` | 에픽 끝 리뷰, 에픽마다 한 번 | opus | `xhigh` (위 `max` 줄이면 `max`) |
+| `review` | 에픽 끝 리뷰, 에픽마다 한 번 | opus | `review_grade` 기본 `xhigh` (`review_raise = "write-path"` 이고 위 한 칸 위 줄이면 한 칸 위) |
 | `docs` | 위키·CHANGELOG 만 고치는 것 | sonnet | `medium` |
 | `bulk` | 분류·요약, 64KB 넘는 리뷰 원문 줄이기, 같은 꼴의 기계적 고침 | haiku | `medium` |
 | `codex` | Codex 일꾼 — 서브에이전트가 아니다 | gpt-6.1-sol | — |

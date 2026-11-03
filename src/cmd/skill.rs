@@ -3046,6 +3046,9 @@ mod tests {
         std::fs::write(&tmux, "---\nname: moai-tmux\ndescription: old\n---\n").unwrap();
         assert_eq!(stale_trees(&root, "t"), [(skill::DIR, Agent::Claude)], "심긴 선택 스킬의 낡은 글을 못 봤다");
         std::fs::write(&tmux, crate::guide::tmux()).unwrap();
+        let helper = plugin.join("skills/moai-tmux/scripts/codex-pane.py");
+        std::fs::create_dir_all(helper.parent().unwrap()).unwrap();
+        std::fs::write(helper, include_str!("../skill_scripts/codex-pane.py")).unwrap();
         assert_eq!(stale_trees(&root, "t"), [], "지금 판의 선택 스킬을 어긋남으로 셌다");
     }
 

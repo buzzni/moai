@@ -27,8 +27,8 @@ function setup() {
   const read = {
     one: async (id) => { called.push(id); return null },
     ids: async (ids) => { called.push([...ids]); return ids.includes('moai-missing') ? { kind: 'moai-error', message: 'missing ID' } : null },
-    all: async () => { called.push('all'); return null },
-    group: async (id) => { called.push(`group:${id}`); return null },
+    all: async (atomic) => { called.push(atomic ? 'all:atomic' : 'all'); return null },
+    group: async (id, atomic) => { called.push(`group:${id}${atomic ? ':atomic' : ''}`); return null },
   }
   const keys = wireKeys({ document: doc, store, shell, copy: copyFor('en'), read, platform: 'other' })
   const ctl = createCtl({ store, keys, shell, read, drawnOrder: () => ['moai-example'],
@@ -66,6 +66,16 @@ test('read through a key binding uses the current read mark path', async () => {
   assert.equal(reply.ok, true)
   await new Promise((resolve) => setImmediate(resolve))
   assert.deepEqual(p.called, ['all'])
+  p.dom.window.close()
+})
+
+test('ctl all and group select atomic writes', async () => {
+  const p = setup()
+  assert.equal((await p.ctl.run({ verb: 'read', all: true }, 1, 'token')).ok, true)
+  assert.equal((await p.ctl.run({ verb: 'read', group: 'moai-example' }, 2, 'token')).ok, true)
+  assert.deepEqual(p.called, ['all:atomic', 'group:moai-example:atomic'])
+  p.keys.destroy()
+  p.shell.destroy()
   p.dom.window.close()
 })
 
@@ -190,4 +200,17 @@ test('actions, do and keys use the shared English/Korean person-only refusal', a
     }
     p.dom.window.close()
   }
+})
+
+test('the read adapter sends atomic all and group to the ctl endpoints and the defaults to the ordinary ones', async () => {
+  const calls = []
+  // The read adapter exposes the distinction independently of the keyboard router.
+  const { readMarks } = await panelModule('data/read.ts')
+  const client = { request: async (endpoint) => { calls.push(endpoint); return { kind: 'passed', out: { read: [], missing: [], held: [], problems: [] } } } }
+  const read = readMarks(client, async () => {})
+  await read.all(true)
+  await read.group('moai-1234', true)
+  await read.all()
+  await read.group('moai-1234')
+  assert.deepEqual(calls.map((c) => c.path), ['/api/ctl-read-all', '/api/ctl-read-group/moai-1234', '/api/read-all', '/api/read-group/moai-1234'])
 })

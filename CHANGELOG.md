@@ -12,6 +12,25 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+## [0.46.0] - 2026-11-03
+
+### Added
+
+- `moai backlog promote --body` sets the new epic’s body while preserving the original backlog context. (moai-ifvh)
+- `moai watch` follows supervisor note heads with resumable cursors, and `moai supervise message` prints Codex assignments without controlling sessions. The tmux skill provides guarded pane helpers. (moai-p9dh)
+
+### Changed
+
+- Backlog promotion carries the original body to a sole member and adds source references to split members; dry runs show where that context goes. Inherited deadlines raise priorities at most to p1 in one application, reserving p0 for an issue’s own deadline. (moai-ifvh)
+- Epic review grades follow `[models] review_grade`, with escalation opt-in through `review_raise`; planning and review scratch files use task-specific directories. (moai-p9dh)
+- `moai web` budgets live event streams per browser: each browser keeps up to three, told apart by a random id kept in IndexedDB, so another browser or a remote viewer no longer takes the places of the person's ctl tabs; 32 streams across every browser remain the server's ceiling. A transaction coordinates simultaneously opened first tabs even over plain HTTP; an existing local-storage id migrates, and local storage remains the fallback when IndexedDB is unavailable. Pages unable to keep an id share the fallback budget. (moai-xvw3)
+
+### Fixed
+
+- Editing an issue reads archived members of a live blocking group, and hook ownership checks let unreadable live IDs take precedence over stale archived copies. Due and edit archive probes reuse their placement work. (moai-1qz4)
+- `moai read --atomic` now accepts `--all` and `--epic`; a web tab's `ctl read --all` and `--group` are atomic like the explorer's: a missing group or a hand-written value refuses the batch and leaves every mark unchanged. The person's own read keys keep skipping only the held row. (moai-xvw3)
+- The explorer no longer repeats a read-mark notice while it retries a read file it could not read: a newer notice stays, a retry of an unchanged file stops after three seconds and falls back to once a minute, and a pending read file it cannot read stays quiet like the main one. (moai-kc3z)
+
 ## [0.45.0] - 2026-11-03
 
 ### Added
