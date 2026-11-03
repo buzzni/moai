@@ -197,7 +197,8 @@ test('the page reads changed stamps from its event stream and ignores repeats', 
   assert.equal(p.trees.length, 2)
   const eventUrl = new URL(p.streams[0].url, 'http://localhost')
   assert.equal(eventUrl.searchParams.get('worktree'), '1')
-  assert.match(eventUrl.searchParams.get('browser'), /^[0-9a-f]{32}$/)
+  // jsdom has no Web Locks, so this tab uses the server's shared fallback bucket.
+  assert.equal(eventUrl.searchParams.get('browser'), null)
 })
 
 test('opening Gantt fetches values once and subsequent visits reuse them', async (t) => {

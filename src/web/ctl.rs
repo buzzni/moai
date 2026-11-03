@@ -567,6 +567,27 @@ mod tests {
     }
 
     #[test]
+    fn simultaneous_first_tabs_share_three_slots() {
+        let tabs = Tabs::new();
+        let here = Path::new("/tmp");
+        let gate = std::sync::Barrier::new(8);
+        let admitted = std::thread::scope(|scope| {
+            let workers: Vec<_> = (0..8)
+                .map(|_| {
+                    scope.spawn(|| {
+                        gate.wait();
+                        tabs.stream_for(here, false, None, true, 3, "first-browser").unwrap().is_some()
+                    })
+                })
+                .collect();
+            workers.into_iter().map(|worker| worker.join().unwrap()).filter(|admitted| *admitted).count()
+        });
+        assert_eq!(admitted, 3);
+        assert!(tabs.stream_for(here, false, None, true, 3, "first-browser").unwrap().is_none());
+        assert!(tabs.stream_for(here, false, None, true, 3, "other-browser").unwrap().is_some());
+    }
+
+    #[test]
     fn invented_browser_ids_cannot_grow_streams_past_the_server_ceiling() {
         let tabs = Tabs::new();
         let here = Path::new(".");
