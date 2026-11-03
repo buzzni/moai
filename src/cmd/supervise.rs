@@ -142,11 +142,11 @@ pub fn message(ctx: &Ctx, id: &str, f: &Fields) -> R<Vec<String>> {
         }
     };
     let subdir = f.subdir.map(|s| format!("Subdir: {s}\n")).unwrap_or_default();
+    let beside = crate::guide::BESIDE.replace("<other work>", f.alongside);
     let text = format!(
-        "{first}\nRead first: moai show {id}\nModel: {}\nEffort: {}\nWorker: codex\nSubagents: none\nWriting: {writing}\nWork running alongside: {}\nRoot branch: {}\nBase branch: {}\nMilestone: {}\nDue: {}\nRoot: {root}\n{subdir}Person: {}\nWorktree: aim every command at the worktree absolute path (workdir or cd) — never edit the root checkout. Link the worktree target to /tmp/cargo-target/<name> before the first build.\nfrom: {}",
+        "{first}\nRead first: moai show {id}\nModel: {}\nEffort: {}\nWorker: codex\nSubagents: none\nWriting: {writing}\n{beside}\nRoot branch: {}\nBase branch: {}\nMilestone: {}\nDue: {}\nRoot: {root}\n{subdir}Person: {}\nWorktree: aim every command at the worktree absolute path (workdir or cd) — never edit the root checkout.\nfrom: {}",
         f.model,
         f.effort,
-        f.alongside,
         f.root_branch,
         f.base,
         f.milestone,

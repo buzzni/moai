@@ -340,7 +340,7 @@ Whether the epic-end review (7) is raised a step — only when `review_raise` al
 
 /// 메시지 머리의 옆 일 줄(moai-alsi). 새 일과 거둔 일(감독 0)이 **같은 줄**을 싣는다 — 4-3 이 "메시지의
 /// `Work running alongside`" 를 가리키니, 거둔 일의 메시지에 없으면 이어받은 일꾼은 가리키는 줄이 없는 규칙을 받는다.
-const BESIDE: &str = "Work running alongside: <other work> — do not touch those files (4-3)";
+pub(crate) const BESIDE: &str = "Work running alongside: <other work> — do not touch those files (4-3)";
 
 /// 루트 HEAD 를 대조하는 글(moai-gokz, 2026-09-18 사용자 결정). 일꾼 글([`worker`])의 걸음 앞에 한 번 선다 — 새 일과
 /// 거둔 일이 같은 스킬을 읽으니 두 벌이 없다(moai-snyk). 그 전에는 감독 글이 새 일과 거둔 일의 머리에 따로 실어,

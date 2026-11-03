@@ -34858,6 +34858,8 @@ fn supervisor_watch_resumes_same_second_and_generates_assignment() {
     assert!(head.contains("worker-codex.md") && head.ends_with("from step 2."), "{head}");
     assert!(message.contains(&format!("Read first: moai show {id}")));
     assert!(message.contains("Worker: codex") && message.contains("Base branch: base"));
+    assert!(message.contains("Work running alongside: none — do not touch those files (4-3)"));
+    assert!(!message.contains("/tmp/cargo-target/"), "repository-specific target path leaked: {message}");
     // `Writing:` is the person's value, not one the command picks.
     assert!(message.contains("Writing: detailed"), "{message}");
     assert!(!message.contains("Subdir:"), "{message}");
