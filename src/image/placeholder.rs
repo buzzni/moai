@@ -11,8 +11,20 @@ pub(crate) fn next_id(next: &mut u32) -> u32 {
     id
 }
 
+/// The foreground color that carries a placement's 24-bit ID on its placeholder cells.
+pub(crate) fn rgb(id: u32) -> (u8, u8, u8) {
+    ((id >> 16) as u8, (id >> 8) as u8, id as u8)
+}
+
+/// One row of placeholder cells. Built in place: a `String` per cell would allocate for every cell of every row.
 pub(crate) fn row(row: usize, cols: usize) -> String {
-    (0..cols).map(|col| symbol(row, col)).collect()
+    let mut out = String::with_capacity(cols * 12);
+    for col in 0..cols {
+        out.push(PLACEHOLDER);
+        out.push(DIACRITICS[row]);
+        out.push(DIACRITICS[col]);
+    }
+    out
 }
 
 pub(crate) fn symbol(row: usize, col: usize) -> String {
@@ -326,9 +338,14 @@ mod tests {
 
     #[test]
     fn ids_wrap_without_zero_and_rows_use_both_coordinates() {
+        let mut next = 0;
+        let first = next_id(&mut next);
+        assert!((1..=0xff_ffff).contains(&first), "{first:#x}");
+        assert_eq!(next_id(&mut next), first % 0xff_ffff + 1);
         let mut next = 0xff_ffff;
         assert_eq!(next_id(&mut next), 0xff_ffff);
         assert_eq!(next_id(&mut next), 1);
+        assert_eq!(rgb(0x12_3456), (0x12, 0x34, 0x56));
         assert_eq!(row(1, 2), format!("{}{}", symbol(1, 0), symbol(1, 1)));
         assert_ne!(symbol(1, 0), symbol(0, 0));
         assert_ne!(symbol(1, 0), symbol(1, 1));

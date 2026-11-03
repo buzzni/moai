@@ -5115,11 +5115,14 @@ impl App {
         // **자리를 한 번만 고른다** — 표식이 쓰는 파일과 아래에서 가려낼 자리 까닭이 한 값에서 온다.
         // 파일 하나만 받던 판은 같은 `settle` 을 두 번 돌면서도 그 까닭을 버렸다.
         let place = crate::read_marks::place_of(config, root);
-        // **읽기가 여는 파일 전부를 잰다**([`ReadStamp`], moai-65as) — 아래 `read` 는 대기 자리와
+        // **읽기가 여는 파일 전부를 잰다**([`ReadStamp`], moai-65as) — 아래 `read_in` 은 대기 자리와
         // (지금 자리가 없으면) 옛 자리까지 연다. 지금 자리 하나만 재던 판은 그 둘이 바뀌어도
         // [`App::follow_read`] 가 못 알아채, 합쳐질 줄이 내내 [NEW] 로 섰다.
         let stamp = ReadStamp::of(&place);
-        let mut marks = crate::read_marks::read(config, root, &self.legacy_read);
+        // Read from this same place: the stamp above and the pending path below must name the files this read
+        // opened. A second `place_of` inside `read` could settle differently and leak the pending diagnostic.
+        let pending = place.pending.clone();
+        let mut marks = crate::read_marks::read_in(place, &self.legacy_read);
         // **자리 탈을 줄 탈에서 가려낸다**(moai-hzfu). `Marks::problems` 는 두 갈래를 한 자루에
         // 담는다 — 자리를 고르다 만난 까닭(`place_of`)과 파일 안의 건너뛴 줄이다. `read` 는 자리
         // 까닭을 뒤에 붙여 `first()` 가 진짜 까닭을 먼저 보게 하지만, 건너뛴 줄이 하나도 없으면
@@ -5134,18 +5137,18 @@ impl App {
         // 그것을 짓는 자는 `place_of` 뿐이라 `read` 가 낸 그 갈래가 곧 제 자리 까닭이다. 글로 견주던 판은
         // 위의 `place_of` 와 `read` 안의 `place_of` 사이에 자리가 바뀌면(한쪽의 `canonicalize` 만 지면) 못
         // 빼, 그 까닭이 "이상한 줄" 로 이름 붙었다.
-        // Retryable pending-sheet I/O failures follow the same quiet policy as the main sheet.
-        // Keep unrelated malformed-line diagnostics, even when a pending read also failed.
-        if marks.pending.is_some_and(|t| t.again() != crate::user_config::Again::Never)
-            && let Some(pending) = &place.pending
-        {
-            marks.problems.retain(|p| !matches!(p, crate::read_marks::SheetTrouble::Said { at, .. } if at == pending));
-        }
         let where_why = marks
             .problems
             .iter()
             .position(|p| matches!(p, crate::read_marks::SheetTrouble::Unsettled { .. }))
             .map(|at| marks.problems.remove(at));
+        // Retryable pending-sheet I/O failures follow the same quiet policy as the main sheet.
+        // Keep unrelated malformed-line diagnostics, even when a pending read also failed.
+        if marks.pending.is_some_and(|t| t.again() != crate::user_config::Again::Never)
+            && let Some(pending) = &pending
+        {
+            marks.problems.retain(|p| !matches!(p, crate::read_marks::SheetTrouble::Said { at, .. } if at == pending));
+        }
         // **설정이 사라졌으면 없는 읽음도 사라진 것으로 든다**(moai-4qbv.i0g 리뷰). 읽음 파일은 설정
         // 파일 곁의 디렉터리에 산다(`read_marks::place_of`) — autofs·sshfs 홈이 끊기면 둘이 함께
         // 사라진다. 그때 없는 읽음을 "아직 아무것도 안 읽은 프로젝트" 로 들면 빈 표를 들여 내 줄이
@@ -5264,8 +5267,14 @@ impl App {
         // 못 들었으면 표가 그대로라 다시 셀 까닭이 없다 — 잠깐 못 읽는 동안은 이 길이 걸음마다 돈다.
         let took = got.marks.trouble.is_none();
         let Some(site) = self.site_mut(seat) else { return false };
+        // A retry of unchanged files whose failures persist reads the diagnostics the last attempt already told;
+        // telling them again would cover a newer notice on every retry. A changed file or outcome still speaks.
+        let repeat = site.read_stamp.as_ref() == Some(&got.stamp)
+            && site.read_tried.trouble == got.marks.trouble
+            && site.read_pending.trouble == got.marks.pending
+            && (got.marks.trouble.is_some() || got.marks.pending.is_some());
         // 까닭은 한 줄로 댄다 — 조용히 [NEW] 가 서면 왜 그런지 볼 데가 없다.
-        let told = Self::take_read(site, got);
+        let told = Self::take_read(site, got).filter(|_| !repeat);
         let mut changed = false;
         if let Some(told) = told {
             changed = self.notice.as_ref() != Some(&told);
@@ -6053,11 +6062,10 @@ impl App {
                         .and_then(|p| p.site.as_mut())
                     {
                         site.seen = std::mem::take(&mut held.seen);
-                        site.read_stamp = held.read_stamp.take();
                         // **갈래와 읽어 본 때는 안 옮긴다**(리뷰) — 바로 아래 [`App::take_read`] 가
                         // 이 걸음의 읽기로 둘 다 다시 적는다. 옮겨 봐야 그 자리에서 덮이고, 덮이는
-                        // 줄은 "옮겼으니 이어진다" 는 거짓말을 남긴다. 표식만 옮기는 것은 다르다 —
-                        // 잠깐의 실패([`crate::user_config::Again::Step`])에는 그쪽이 안 적는다.
+                        // 줄은 "옮겼으니 이어진다" 는 거짓말을 남긴다. 표식도 같다 — `take_read` 는
+                        // 실패한 읽기에도 표식을 적으니 옮길 까닭이 없다.
                     }
                     if let Some(got) = self.read_marks_of(&root)
                         && let Some(told) = Self::take_read(&mut site, got)
@@ -11836,7 +11844,7 @@ mod tests {
             assert_eq!(a.notice.as_deref(), Some("new user notice"));
             // Once the transient window expires, an unchanged stamp must not bypass owed().
             let trouble = if pending { &mut a.site.read_pending } else { &mut a.site.read_tried };
-            trouble.since = Some(std::time::Instant::now() - layer::BLIP);
+            trouble.since = Some(std::time::Instant::now().checked_sub(layer::BLIP).expect("the clock ran under 3s"));
             let last = trouble.at;
             assert!(!follow(&mut a));
             let trouble = if pending { &a.site.read_pending } else { &a.site.read_tried };
@@ -11852,6 +11860,47 @@ mod tests {
             assert_eq!(a.site.read_pending.trouble, None);
             assert!(!follow(&mut a), "successful recovery left a redraw tail");
         }
+    }
+
+    /// A pending-sheet retry re-reads an unchanged main sheet. Its skipped-line diagnostic is told once, when the
+    /// failure starts, and the retries that follow keep a newer notice instead of repeating it.
+    #[test]
+    #[cfg(unix)]
+    fn a_pending_retry_does_not_repeat_the_main_sheets_diagnostic() {
+        use std::os::unix::net::UnixListener;
+        let s = Scratch::in_place(std::path::Path::new("/tmp"), "lrd");
+        let config = s.path().join("user.toml");
+        let root = s.path().join("proj");
+        std::fs::create_dir_all(&root).unwrap();
+        let mut a = app();
+        a.site.repo = Some(crate::store::Repo::at(root.clone(), cfg()));
+        a.user_config = Some(config.clone());
+        let place = crate::read_marks::place_of(&config, &root);
+        std::fs::create_dir_all(place.at.parent().unwrap()).unwrap();
+        let header = format!("path = {:?}\n\n[read]\n\"argos-0009\" = 3\n", root.display().to_string());
+        std::fs::write(&place.at, &header).unwrap();
+        a.load_read();
+        let told = a.notice.clone().expect("the main sheet's skipped line is told");
+        let spool = place.pending.clone().expect("a settled place has a pending sheet");
+        let socket = UnixListener::bind(&spool).unwrap();
+        let follow = |a: &mut App| {
+            a.follow_changed = false;
+            a.follow_read();
+            a.follow_changed
+        };
+        a.notice = None;
+        follow(&mut a);
+        assert_eq!(a.site.read_pending.trouble, Some(crate::user_config::Trouble::Reading));
+        assert_eq!(a.notice.as_ref(), Some(&told), "the unrelated main-sheet diagnostic was dropped");
+        a.notice = Some("new user notice".into());
+        let mut tried = a.site.read_pending.at;
+        for _ in 0..4 {
+            assert!(!follow(&mut a), "an unchanged retry redrew the idle explorer");
+            assert!(a.site.read_pending.at > tried, "a quiet retry must still read the sheet");
+            tried = a.site.read_pending.at;
+        }
+        assert_eq!(a.notice.as_deref(), Some("new user notice"), "a retry repeated an old diagnostic");
+        drop(socket);
     }
 
     /// **읽음 파일도 다시 읽을 때를 갈래로 잰다**(moai-po6v) — 설정과 **한 자다**([`App::follow_config`],

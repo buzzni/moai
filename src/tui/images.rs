@@ -432,7 +432,8 @@ fn write_graphics(out: &mut impl Write, payload: &[u8], protocol: Option<Protoco
     }
 }
 fn color(id: u32) -> Color {
-    Color::Rgb((id >> 16) as u8, (id >> 8) as u8, id as u8)
+    let (r, g, b) = crate::image::placeholder::rgb(id);
+    Color::Rgb(r, g, b)
 }
 #[cfg(test)]
 mod tests {

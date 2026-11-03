@@ -434,10 +434,10 @@ pub fn print(lines: &[String]) -> std::io::Result<bool> {
                     static NEXT: std::sync::Mutex<u32> = std::sync::Mutex::new(0);
                     let id = super::placeholder::next_id(&mut NEXT.lock().unwrap());
                     let mut out = passthrough(&kitty_virtual(&b, s, id));
+                    let (red, green, blue) = super::placeholder::rgb(id);
+                    let fg = format!("\x1b[38;2;{red};{green};{blue}m");
                     for row in 0..s.rows as usize {
-                        out.extend_from_slice(
-                            format!("\x1b[38;2;{};{};{}m", id >> 16, (id >> 8) & 255, id & 255).as_bytes(),
-                        );
+                        out.extend_from_slice(fg.as_bytes());
                         out.extend_from_slice(super::placeholder::row(row, s.cols as usize).as_bytes());
                         out.extend_from_slice(b"\x1b[39m\n");
                     }
