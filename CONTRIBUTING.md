@@ -113,12 +113,51 @@ code in one process. It is not a published API.
 **What is public.** These modules are `pub`:
 
 - `model`, `fail`, `config`, `query`, `report` and `store`
-- `held`, `i18n`, `nav`, `tz`, `user_config`, `read_marks` and `style`, because the
-  public signatures of the first six name types from them (`i18n::Lang`, `tz::Zone`, …)
+- `held`, `i18n`, `nav`, `tz` and `user_config`, because the public signatures of the
+  first six name types from them (`i18n::Lang`, `tz::Zone`, …)
+- `read_marks` and `style`, because `user_config` names types from them
+  (`read_marks::Skipped`, `style::Hue`)
+
+The last two groups come from `cargo clippy --lib -- -W unnameable_types`: open each
+module it names, and run it again until it names none. The lint is off by default, so
+run it by hand when a public signature changes.
 
 Everything else stays inside the crate, and so does every `pub(crate)` item inside these
-modules. `tests/lib_api.rs` calls the library the way another crate would. If a change
-closes something that test uses, the test stops compiling.
+modules. `tests/lib_api.rs` calls the library the way another crate would, and it names
+all thirteen modules. If a change closes one of them, or something that test uses, the
+test stops compiling.
+
+What the open surface does not give you:
+
+- `archive` stays private. The CLI's `ready`, `prime`, `status` and `show` read archived
+  rows as context. On a tracker that has run `moai archive`, the library's answers can
+  differ from the CLI's: a milestone whose members were archived shows as an empty `todo`.
+- Some public items point at items that stay `pub(crate)`. `i18n::fill` asserts in a
+  debug build that every place is filled, and its way out, `fill_lax`, is closed.
+  `report::stats::of` takes `Work` values read from notes, and `model::parse_work` is
+  closed.
+- `cargo doc` shows `report::status` and `report::status_with_archive`, but they exist
+  only under `cfg(test)` and `cfg(doc)`. Call `report::status_unjudged`, then
+  `StatusReport::judged`.
+- The lints see less. An exported item counts as used, so `dead_code` no longer reports a
+  `pub` item in these modules that lost its last caller, and `#[expect(dead_code)]` on one
+  fails CI. Clippy's `avoid-breaking-exported-api` (on by default) also stops
+  `wrong_self_convention`, `enum_variant_names`, `upper_case_acronyms` and four more lints
+  on those items.
+
+**Writing through the library.** `Repo::with_write` takes the lock, reads the file again
+inside it, checks the rows that changed, writes them, and appends the journal entries
+the closure returns. The rest is the closure's job, as it is in each command:
+
+- Stamp `updated_at` on each row you change, with `Issue::settle`. `with_write` does not,
+  and then `--since` and `[NEW]` miss the change.
+- Mint ids inside the closure, from the `reserved` set it receives. `Load::reserved_ids`
+  does not hold archived ids, so an id from it can collide with an archived row.
+- Return only `create`, `status`, `note` and `rm` entries, and only for what you did.
+  `with_write` checks the email of an entry, not its kind.
+- Open the tracker with `Repo::open` or `Repo::find`. `Repo::at`, `Repo::find_here` and
+  `Repo::seen_from` skip the linked-worktree redirect, so a write through them lands in
+  the worktree's own `.moai`. `seen_from` is for reading only.
 
 **There is no version promise.** The public surface follows the internal code: a
 refactor may rename, move or close any of it, and the version number does not change
@@ -127,16 +166,34 @@ integrates through the CLI's `--json` output today, and through the API a later 
 will serve. It does not link this crate.
 
 **It is not safe in a long-running process yet.** The library was cut out of a binary
-that runs one command and exits, and it still depends on that:
+that runs one command and exits, and it still depends on that. These are the places we
+know of. The list is not complete:
 
-- `src/store.rs` keeps notices in process-wide statics (`MOVED`, `INVOKED`, `CLIMBED`,
-  `TALLY`, `MISSED`, `NOTED`, `UNREAD`, `UNREAD_NOW`, the thread-local `CAUGHT`,
-  `NEXT`/`MARK` and `NONCE`). `run()` empties them once, at the end. In a process
-  that serves many requests, the notices of one request leak into the next.
-- `src/cmd/mod.rs` keeps `PARTIAL`, `AFTER` and `EXIT` the same way. `src/lib.rs`
-  keeps the screen language in a `OnceLock` (`LANG`), so it is set once per process.
-- `-C <dir>` calls `std::env::set_current_dir`. It moves the working directory of the
-  whole process, and every thread moves with it.
+- `src/store.rs` collects notices in process-wide statics (`MOVED`, `CLIMBED`, `TALLY`,
+  `MISSED`, `NOTED`, `UNREAD`, `UNREAD_NOW`). `run()` reads them once, at the end, and
+  then the process exits. Nothing empties them. In a process that serves many requests,
+  they only grow, and the notices of one request come back with every later one.
+- `INVOKED`, the directory the first call started in, is a `OnceLock`. `run()` sets it
+  once, and the pick-up marks of every later write use it.
+- `src/cmd/mod.rs` keeps `PARTIAL` and `EXIT` in process-wide statics. Only `init`
+  resets `PARTIAL`, and nothing resets `EXIT`, so after one partial run every later
+  `run()` ends in failure. `cmd::run` empties `AFTER` after each command, but two
+  commands at the same time share it.
+- `src/lib.rs` keeps the language of its own end-of-run warnings in a `OnceLock`
+  (`LANG`). Command output takes its language from `cmd::Ctx`, which each call makes.
+- The working directory belongs to the process. `-C <dir>` and the hook (the `cwd` in
+  its input) call `std::env::set_current_dir`, and `Repo::find` reads
+  `std::env::current_dir`. Every thread moves with it.
+- `Repo::find_from` and `Repo::open` read `MOAI_HERE`, and the time-zone code reads
+  `TZDIR`. A caller cannot give these per call, and in edition 2024
+  `std::env::set_var` is `unsafe`.
+- `run()` and the hook set anstream's color choice for the whole process.
+  `style::paint` always writes escape codes, and only anstream streams remove them.
+- Some caches live as long as the process: `worktree::is_bare` (failed probes too), the
+  hook's `PICKS_READ` and the image queue `image::term::DRAW`.
+- `run()` parses the process arguments, installs a panic hook for Antigravity hooks that
+  it never removes, and calls `std::process::exit(1)` when stdout fails. Some commands
+  write warnings to stderr directly.
 - A command (`cmd::*::run`) returns finished output lines (`R<Vec<String>>`), not data.
 
 Moving that state into a per-call context changes logic, so it is its own epic, with
@@ -152,12 +209,14 @@ base=$(git merge-base develop HEAD)
 scripts/bindiff.py --old <old moai> --new target/release/moai        # hand-picked cases
 scripts/bindiff_fuzz.py --old <old moai> --new target/release/moai   # random command lines
 scripts/bindiff.py latency --old <old moai> --new target/release/moai -n 300
-scripts/check-refactor.py --base "$base" --mode surface              # or --mode skeleton
+scripts/check-refactor.py --base "$base" --head <last gated commit> --mode surface
 ```
 
-- `bindiff.py` runs about 500 cases in English and Korean, plus one `moai web` round.
-  For each case it compares stdout, stderr, the exit code and every file the command
-  wrote, byte for byte.
+- `bindiff.py` runs about 500 cases, each in English and in Korean, plus one `moai web`
+  round in each language. For each case it compares stdout, stderr, the exit code and
+  every file the command wrote, byte for byte.
+- `bindiff.py latency` prints the median start-up time of each binary and always exits
+  0. Compare the numbers yourself; it gives no verdict.
 - `bindiff_fuzz.py` reads the command tree from `--help` and builds random command
   lines: 10,000 per language by default, about 5 minutes. A seed and a case number
   reproduce one case (`--seed S --case K`).
@@ -167,10 +226,20 @@ scripts/check-refactor.py --base "$base" --mode surface              # or --mode
   the environment, the paths and the file times. They hide only values that change by
   design: newly minted ids, the nanosecond counter in the hook's pick records, and the
   web port and server pid.
-- `check-refactor.py` checks commits, so it refuses a dirty working tree. It needs
-  Python 3.11 or later. `skeleton` accepts only the move of `src/main.rs` into
-  `src/lib.rs`. `surface` accepts only `mod x;` → `pub mod x;` in `src/lib.rs` and
-  `pub(crate)` → `pub`.
+- `check-refactor.py` checks commits, so it refuses a dirty working tree. Both modes
+  accept new files in `scripts/`, refuse every other line (comments too), and refuse any
+  change to the files they freeze (`surface`: `build.rs`, `Cargo.toml`, `Cargo.lock`,
+  `src/id.rs`, `src/scratch.rs` and `src/git_leaks.rs`). The lists name the files of
+  this library's two epics, so change them in the script before the next refactor.
+  - `skeleton` (epic `moai-72qj`) accepts the move of `src/main.rs` into `src/lib.rs` and
+    a `[lib]` section with `doctest = false`. It needs Python 3.11 or later. It cannot
+    pass again: the `src/main.rs` it compares against is now the seven-line shim.
+  - `surface` (epic `moai-50p5`) accepts `mod x;` → `pub mod x;` in `src/lib.rs`,
+    `pub(crate)` → `pub`, a new `tests/lib_api.rs` and edits to `CONTRIBUTING.md`.
+- A commit that changes only comments does not pass `surface`. Give `--head` the last
+  commit before it, and check that commit apart: every `+` and `-` line of `git diff -U0`
+  is a comment, each file keeps its line count (a panic message carries its line
+  number), and the release binary stays the same byte for byte.
 - To regenerate `docs/cli.md` with both binaries, call each by the name `moai`. The
   `Usage:` line prints the name the binary was started as.
 

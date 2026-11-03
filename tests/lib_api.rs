@@ -1,8 +1,9 @@
 //! lib 크레이트를 **다른 크레이트처럼** 부른다(moai-50p5.gol). `moai::` 로만 닿는다.
 //!
-//! 이 파일이 쓰는 이름이 곧 지키는 공개 표면이다. 모듈 하나를 실수로 private 으로 되돌리면
-//! 여기가 컴파일에서 진다. 견줄 답은 `CARGO_BIN_EXE_moai` 바이너리의 `--json` 에서 받는다 —
-//! 같은 저장소를 두 길(lib·CLI)로 읽어 id 집합과 칸이 같아야 한다.
+//! 이 파일이 쓰는 이름이 곧 지키는 공개 표면이다. 연 모듈 열셋 가운데 하나라도 실수로 private 으로
+//! 되돌리면 여기가 컴파일에서 진다 — 시험이 직접 부르지 않는 일곱도 아래 `use` 가 이름으로 든다.
+//! 견줄 답은 `CARGO_BIN_EXE_moai` 바이너리의 `--json` 에서 받는다 — 같은 저장소를 두 길(lib·CLI)로
+//! 읽어 id 집합과 칸이 같아야 한다.
 //!
 //! `store` 의 전역 알림 값(`MOVED`·`TALLY` …)은 단언하지 않는다. 시험이 한 프로세스의
 //! 여러 스레드라 서로 섞인다.
@@ -13,38 +14,62 @@ use moai::model::{Issue, Kind};
 use moai::query::{Filter, Raw, Where};
 use moai::report;
 use moai::store::{Opened, Repo};
-use std::collections::BTreeSet;
-use std::path::{Path, PathBuf};
+// 위 여섯의 공개 시그니처가 타입 이름을 대는 모듈이라 따라 연 일곱이다(CONTRIBUTING.md 의 "The library").
+// 이 시험은 그 타입을 이름으로 쓰지 않으므로, 이 줄이 없으면 일곱 가운데 하나를 닫아도 컴파일이 선다.
+#[allow(unused_imports)]
+use moai::{fail, held, nav, read_marks, style, tz, user_config};
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::Path;
 use std::process::Command;
+
+// 임시 자리의 뿌리 — `tests/cli.rs`·`tests/images.rs` 와 **한 파일**을 읽는다. `TMPDIR` 이 체크아웃 안이면
+// 밖으로 옮기는 자가 거기 있다(moai-izeo). 맨 `temp_dir()` 위에 세우면 그 체크아웃의 `.git/config` 에 이
+// 시험의 바이너리로 머지 드라이버가 심기고(`init`), 딸린 워크트리 안이면 `init` 이 거절돼 넷이 다 붉어진다.
+// 그 파일의 `#[cfg(test)]` 시험도 여기서 함께 돈다.
+#[allow(dead_code)]
+#[path = "../src/scratch.rs"]
+mod scratch;
+// 물려받으면 git 이 바깥 저장소·바깥 설정을 보게 되는 이름들 — `tests/cli.rs` 의 `isolated` 와 한 목록이다.
+#[path = "../src/git_leaks.rs"]
+#[allow(dead_code)]
+mod git_leaks;
+
+use scratch::Scratch;
 
 const BIN: &str = env!("CARGO_BIN_EXE_moai");
 const NOW: &str = "2026-09-11T04:12:03Z";
+/// lib 쪽 쓰기가 찍는 시각. 시험 프로세스에는 `MOAI_NOW` 가 없어(`set_var` 는 병렬로 도는 시험과 겨룬다)
+/// 시각을 손으로 건넨다 — `NOW` 와 달라야 `updated_at` 이 정말 움직였는지 보인다.
+const LATER: &str = "2026-09-12T00:00:00Z";
 const ACTOR: &str = "테스터 (tester@example.com)";
 
-/// 임시 저장소 자리. 놓을 때 치운다(패닉으로 풀릴 때도).
-struct Scratch(PathBuf);
-
-impl Scratch {
-    fn new(name: &str) -> Scratch {
-        let dir = std::env::temp_dir().join(format!(
-            "moai-lib-api-{}-{}-{name}",
-            std::process::id(),
-            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
-        ));
-        // 겹치면 크게 실패한다 — 이미 있는 자리를 말없이 나눠 쓰지 않는다.
-        std::fs::create_dir(&dir).unwrap_or_else(|e| panic!("{}: {e}", dir.display()));
-        Scratch(dir)
-    }
-    fn path(&self) -> &Path {
-        &self.0
-    }
-}
-
-impl Drop for Scratch {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
-}
+/// `tests/cli.rs` 의 `isolated` 가 걷는 이름 가운데 git 목록 밖의 것 — 사람의 집·설정·세션·창.
+/// 이 시험의 명령이 지금 읽는 것은 세션 id(집기 기록) 하나뿐이지만, 따로 막은 시험만 막혀 있으면
+/// 명령을 더하는 날 결과가 기계를 따라 달라진다(`isolated` 의 주석).
+const SWEPT: &[&str] = &[
+    "USERPROFILE",
+    "CLAUDE_CONFIG_DIR",
+    "CLAUDE_CODE_PLUGIN_CACHE_DIR",
+    "MOAI_HERE",
+    "COLUMNS",
+    "XDG_RUNTIME_DIR",
+    "XDG_CONFIG_HOME",
+    "MOAI_KEYS",
+    "BASH_ENV",
+    "MOAI_API_URL",
+    "MOAI_REPO",
+    "MOAI_INSTALL_URL",
+    "TMUX",
+    "TMUX_PANE",
+    "SAYCODE_AGENT_ENV",
+    "CMUX_SURFACE_ID",
+    "CMUX_CLAUDE_TEAMS_TMUX_SHIM",
+    "CLAUDE_CODE_SESSION_ID",
+    "CODEX_THREAD_ID",
+    "CODEX_SESSION_ID",
+    "ANTIGRAVITY_CONVERSATION_ID",
+    "MOAI_AGENT",
+];
 
 /// 바이너리를 격리해서 돌린다. 사람의 설정·시계·창에 닿지 않게 환경을 못박는다.
 fn moai(dir: &Path, args: &[&str], stdin: Option<&str>) -> String {
@@ -52,6 +77,10 @@ fn moai(dir: &Path, args: &[&str], stdin: Option<&str>) -> String {
     let home = dir.join("home");
     std::fs::create_dir_all(&home).unwrap();
     let mut cmd = Command::new(BIN);
+    // **걷기가 먼저다** — `Command` 의 환경은 이름마다 마지막에 부른 것이 이긴다(`isolated` 와 같은 차례).
+    for var in git_leaks::swept(true).chain(SWEPT) {
+        cmd.env_remove(var);
+    }
     cmd.args(args)
         .current_dir(dir)
         .env("HOME", &home)
@@ -65,13 +94,15 @@ fn moai(dir: &Path, args: &[&str], stdin: Option<&str>) -> String {
         .env("MOAI_NO_UPDATE_CHECK", "1")
         .env("MOAI_LANG", "en")
         .env("NO_COLOR", "1")
-        .env_remove("MOAI_HERE")
+        .env("TZ", "UTC")
         .stdin(if stdin.is_some() { std::process::Stdio::piped() } else { std::process::Stdio::null() })
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
     let mut child = cmd.spawn().expect("moai 를 실행하지 못했다");
     if let Some(text) = stdin {
-        child.stdin.take().unwrap().write_all(text.as_bytes()).unwrap();
+        // 쓰기 실패(EPIPE)는 버린다 — moai 가 stdin 을 읽기 전에 거절하고 나가면 여기서 패닉해 아래 단언이
+        // 낼 moai 의 stderr 를 가린다(`tests/cli.rs` 의 `from_stdin` 과 같은 까닭).
+        let _ = child.stdin.take().unwrap().write_all(text.as_bytes());
     }
     let out = child.wait_with_output().unwrap();
     assert!(
@@ -92,17 +123,17 @@ fn id_of(issues: &[Issue], title: &str) -> String {
     issues.iter().find(|i| i.title == title).unwrap_or_else(|| panic!("{title} 줄이 없다")).id.clone()
 }
 
-/// 에픽 하나와 멤버 다섯: 집은 일, 미룬 일, 막힌 일, 집을 수 있는 일 둘.
-///
-/// 반환은 (저장소 자리, 제목 → id 를 찾을 때 쓸 스냅샷은 부르는 쪽이 읽는다).
+/// 에픽 하나와 멤버 다섯: 집은 일, 미룬 일, 막힌 일, 집을 수 있는 일 둘. CLI 로만 짓는다.
 fn stocked(name: &str) -> Scratch {
-    let s = Scratch::new(name);
+    let s = Scratch::new(&format!("lib-api-{name}"));
     moai(s.path(), &["init", "argos"], None);
     let plan = "# Epic\n- [p1] started\n- [p2] shelved\n- [p2] blocked\n- [p3] free-a\n- [p2] free-b\n";
-    moai(s.path(), &["add", "--from", "-"], Some(plan));
-    let all = json(s.path(), &["show", "--json"]);
+    // `add --json` 이 만든 줄을 그대로 내므로 id 를 거기서 짚는다.
+    let made: serde_json::Value = serde_json::from_str(&moai(s.path(), &["add", "--from", "-", "--json"], Some(plan)))
+        .unwrap_or_else(|e| panic!("add --json 이 JSON 이 아니다: {e}"));
     let by = |t: &str| -> String {
-        all.as_array().unwrap().iter().find(|r| r["title"] == t).unwrap()["id"].as_str().unwrap().to_string()
+        let row = made.as_array().and_then(|rows| rows.iter().find(|r| r["title"] == t));
+        row.and_then(|r| r["id"].as_str()).unwrap_or_else(|| panic!("add 가 {t} 줄을 안 냈다")).to_string()
     };
     let (started, shelved, blocked) = (by("started"), by("shelved"), by("blocked"));
     moai(s.path(), &["mv", &started, "in_progress", "--from", "todo"], None);
@@ -134,17 +165,15 @@ fn open_reads_the_same_rows_the_cli_lists() {
     let repo = open(s.path());
     let load = repo.read().unwrap_or_else(|e| panic!("{e}"));
     assert!(load.errors.is_empty(), "못 읽는 줄이 섰다: {} 줄", load.errors.len());
-
-    // 같은 줄을 CLI 로 받는다. 미룬 줄·done 은 목록에서 숨으므로 `--all --deferred` 는 쓰지 않고
-    // 숨는 것을 lib 쪽 필터로도 같게 거른다 — 아래 `query_and_the_cli_filter_agree` 가 그것을 본다.
-    let cli = json(s.path(), &["show", "--deferred", "--all", "--json"]);
-    let cli_all = json_ids(&cli);
-    let lib_all = ids(&load.issues);
-    assert!(cli_all.is_subset(&lib_all), "CLI 가 lib 에 없는 줄을 냈다: {cli_all:?} vs {lib_all:?}");
     assert_eq!(load.issues.iter().filter(|i| i.kind == Kind::Epic).count(), 1);
     assert_eq!(load.issues.len(), 6, "에픽 하나와 멤버 다섯");
 
-    // 줄 하나의 칸이 CLI 의 것과 같다.
+    // 같은 줄을 CLI 로 받는다. `--all` 은 미룬 줄과 done 을 숨기지 않으므로(이 저장소에는 아카이브가 없다)
+    // 여섯이 다 와야 한다. `--deferred` 를 얹으면 미룬 줄**만** 남아 한 줄만 견주게 된다.
+    let cli = json(s.path(), &["show", "--all", "--json"]);
+    assert_eq!(json_ids(&cli), ids(&load.issues), "lib 와 CLI 의 id 집합이 갈렸다");
+
+    // 줄마다 칸과 제목이 CLI 의 것과 같다.
     for row in cli.as_array().unwrap() {
         let id = row["id"].as_str().unwrap();
         let mine = load.issues.iter().find(|i| i.id == id).unwrap();
@@ -160,12 +189,11 @@ fn query_and_the_cli_filter_agree() {
     let load = repo.read().unwrap_or_else(|e| panic!("{e}"));
     let cfg: &Config = &repo.config;
 
-    // `-s todo` — 숨는 줄(미룬 것)은 기본으로 빠진다.
-    let filter =
-        Filter::build(Raw { status: vec!["todo".into()], ..Raw::default() }).unwrap_or_else(|_| panic!("필터"));
+    // `-s todo` — 숨는 줄(미룬 것)은 기본으로 빠진다. 빼는 것도 `matches` 의 몫이라 그것 하나로 거른다 —
+    // `hidden_by` 를 따로 얹으면 `matches` 가 숨기기를 잊어도 이 시험이 대신 빼 주어 못 잡는다.
+    let filter = Filter::build(Raw { status: vec!["todo".into()], ..Raw::default() }).expect("필터");
     let wh = Where::from_soil(&load.issues, cfg, report::Soil::of(&load.issues));
-    let mine =
-        ids(load.issues.iter().filter(|i| filter.hidden_by(i, NOW, &wh).is_none() && filter.matches(i, NOW, &wh)));
+    let mine = ids(load.issues.iter().filter(|i| filter.matches(i, NOW, &wh)));
     let cli = json_ids(&json(s.path(), &["show", "-s", "todo", "--json"]));
     assert_eq!(mine, cli, "-s todo 의 id 집합이 갈렸다");
     assert!(!mine.is_empty());
@@ -187,14 +215,21 @@ fn report_ready_and_status_match_the_cli() {
     titles.sort();
     assert_eq!(titles, ["free-a", "free-b"]);
 
-    // status: 칸별 수와 총수가 CLI 의 것과 같다.
+    // status: 총수·칸별 수·칸 차례가 CLI 의 것과 같다. 칸별 수는 맵째 견준다 — 한쪽에만 선 칸도 잡는다.
     let board = report::status_unjudged(&load.issues, &[], cfg, NOW);
     let cli = json(s.path(), &["status", "--json"]);
     assert_eq!(board.total as u64, cli["total"].as_u64().unwrap());
-    for (column, n) in &board.counts {
-        assert_eq!(*n as u64, cli["counts"][column.as_str()].as_u64().unwrap_or(0), "{column} 의 수가 갈렸다");
-    }
-    assert_eq!(board.statuses, cfg.statuses.iter().map(|s| s.as_str().to_string()).collect::<Vec<_>>());
+    let lib_counts: BTreeMap<String, u64> = board.counts.iter().map(|(k, n)| (k.clone(), *n as u64)).collect();
+    let cli_counts: BTreeMap<String, u64> = cli["counts"]
+        .as_object()
+        .expect("`counts` 가 없다")
+        .iter()
+        .map(|(k, v)| (k.clone(), v.as_u64().unwrap_or_else(|| panic!("{k} 의 수가 수가 아니다"))))
+        .collect();
+    assert_eq!(lib_counts, cli_counts, "칸별 수가 갈렸다");
+    let cli_statuses: Vec<&str> =
+        cli["statuses"].as_array().expect("`statuses` 가 없다").iter().map(|v| v.as_str().unwrap()).collect();
+    assert_eq!(board.statuses, cli_statuses, "칸 차례가 갈렸다");
 }
 
 #[test]
@@ -203,14 +238,18 @@ fn a_write_through_with_write_shows_in_the_cli() {
     let repo = open(s.path());
     let id = id_of(&repo.read().unwrap_or_else(|e| panic!("{e}")).issues, "free-a");
 
-    // CLI 의 명령이 하는 그대로: 닫는 함수가 락 안에서 다시 읽은 줄을 고치고, 남길 저널 줄을 돌려준다.
+    // `moai edit` 이 하는 그대로: 닫는 함수가 락 안에서 다시 읽은 줄을 고치고 `Issue::settle` 로 맞춘다
+    // (정규화 → 검사 → 바뀌었으면 `updated_at`). **`with_write` 는 `updated_at` 을 안 찍는다** — `settle` 을
+    // 빼면 줄은 바뀌는데 `updated_at` 이 옛 값이라 `--since`·`[NEW]` 가 그 고침을 못 본다.
     // 필드 변경(제목)은 저널에 적지 않는다 — 빈 목록이다.
     let before = repo.with_write(
         || Lang::En,
-        |issues, _cfg, _reserved| {
+        |issues, cfg, _reserved| {
             let row = issues.iter_mut().find(|i| i.id == id).expect("락 안에서 줄이 사라졌다");
-            let old = std::mem::replace(&mut row.title, "renamed through the library".to_string());
-            Ok((Vec::new(), old))
+            let was = row.clone();
+            row.title = "renamed through the library".to_string();
+            assert!(row.settle(&was, cfg, LATER).expect("settle 이 거절했다"), "제목을 고쳤는데 안 바뀌었다고 한다");
+            Ok((Vec::new(), was.title))
         },
     );
     assert_eq!(before.unwrap_or_else(|e| panic!("{e}")), "free-a");
@@ -218,8 +257,11 @@ fn a_write_through_with_write_shows_in_the_cli() {
     let shown = json(s.path(), &["show", &id, "--json"]);
     assert_eq!(shown["title"], "renamed through the library");
     assert_eq!(shown["status"], "todo", "제목만 고쳤는데 칸이 움직였다");
+    assert_eq!(shown["updated_at"], LATER, "고친 시각이 안 남았다");
 
     // 쓴 뒤에 lib 로 다시 읽어도 같다 — 두 길이 한 파일을 본다.
     let again = repo.read().unwrap_or_else(|e| panic!("{e}"));
-    assert_eq!(again.issues.iter().find(|i| i.id == id).unwrap().title, "renamed through the library");
+    let row = again.issues.iter().find(|i| i.id == id).unwrap();
+    assert_eq!(row.title, "renamed through the library");
+    assert_eq!(row.updated_at, LATER);
 }
