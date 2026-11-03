@@ -1,3 +1,4 @@
+import { routerTokens, wireToken } from './keys/names.js'
 /** The visible tab's local control interpreter. It uses the same store and key handlers as a person. */
 import { defaultDir, SORT_KEYS, type SortField } from './data/query.js'
 import { sortDefault } from './data/memory.js'
@@ -36,9 +37,7 @@ export interface CtlOptions {
 /** Public ctl state uses the explorer's string/null spelling, independently of router internals. */
 export function heldPrefix(held: { menu: string[] | null; pending: string[] }): string | null {
   const tokens = held.menu ?? held.pending
-  return tokens.length ? tokens.map((token) => token.replace(/^(?:(?:C|A|S)-)+/, (mods) =>
-    mods.replace(/C-/g, 'Ctrl-').replace(/A-/g, 'Alt-').replace(/S-/g, 'Shift-'))
-    .replace(/Backspace$/, 'Bksp')).join(' ') : null
+  return tokens.length ? tokens.map(wireToken).join(' ') : null
 }
 
 export function createCtl(options: CtlOptions) {
@@ -112,14 +111,6 @@ export function createCtl(options: CtlOptions) {
     }) })
   }
   /** The explorer's spelling, which `moai ctl keys` checks (`Ctrl-d`, `BackTab`, `Bksp`, `gg`), as this router's tokens. */
-  const routerTokens = (seq: string): string[] => seq.split(/\s+/).filter(Boolean).flatMap((token) => {
-    if (/^([a-z])\1$/i.test(token)) return [token[0]!, token[1]!]
-    const m = /^((?:(?:Ctrl|Alt|Shift)-)*)(.+)$/.exec(token)!
-    let mods = m[1]!.replace(/Ctrl-/g, 'C-').replace(/Alt-/g, 'A-').replace(/Shift-/g, 'S-')
-    let name = m[2]!
-    if (name === 'BackTab') { name = 'Tab'; if (!mods.includes('S-')) mods += 'S-' }
-    return [mods + (({ Bksp: 'Backspace', PgUp: 'PageUp', PgDn: 'PageDown' } as Record<string, string>)[name] ?? name)]
-  })
   const press = (seqs: unknown, text: unknown): Reply => {
     if (!Array.isArray(seqs) || seqs.some((seq) => typeof seq !== 'string')) return no('bad_input', 'key sequences must be strings')
     if (text !== null && text !== undefined && typeof text !== 'string') return no('bad_input', 'text must be a string')
