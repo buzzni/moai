@@ -76,7 +76,7 @@ pub fn detect_terminal(setting: Option<&str>) -> Protocol {
 #[cfg(any(unix, test))]
 fn passthrough_client(reply: &str) -> bool {
     let mut lines = reply.lines();
-    lines.next() == Some("xterm-kitty") && matches!(lines.next(), Some("on" | "all"))
+    matches!(lines.next(), Some("xterm-kitty" | "xterm-ghostty")) && matches!(lines.next(), Some("on" | "all"))
 }
 /// Wrap every APC separately: tmux's DCS parser has a bounded input buffer.
 pub fn passthrough(payload: &[u8]) -> Vec<u8> {
@@ -428,11 +428,20 @@ pub fn print(lines: &[String]) -> std::io::Result<bool> {
 mod tests {
     use super::*;
     #[test]
-    fn passthrough_requires_kitty_and_explicit_permission_and_wraps_each_chunk() {
-        assert!(passthrough_client("xterm-kitty\non\n"));
-        assert!(passthrough_client("xterm-kitty\nall\n"));
-        for reply in ["xterm-kitty\noff", "xterm-ghostty\non", "xterm-256color\non", "xterm-kitty", ""] {
-            assert!(!passthrough_client(reply));
+    fn passthrough_requires_supported_client_and_explicit_permission_and_wraps_each_chunk() {
+        for client in ["xterm-kitty", "xterm-ghostty"] {
+            for permission in ["on", "all"] {
+                let reply = format!("{client}\n{permission}\n");
+                assert!(passthrough_client(&reply), "{reply:?}");
+            }
+            for permission in ["off", "", "unknown"] {
+                let reply = format!("{client}\n{permission}\n");
+                assert!(!passthrough_client(&reply), "{reply:?}");
+            }
+            assert!(!passthrough_client(client));
+        }
+        for reply in ["xterm-256color\non", "xterm-256color\nall", "\non", ""] {
+            assert!(!passthrough_client(reply), "{reply:?}");
         }
         let payload = b"\x1b_Ga=T,m=1;abc\x1b\\\x1b_Gm=0;def\x1b\\";
         let wrapped = passthrough(payload);

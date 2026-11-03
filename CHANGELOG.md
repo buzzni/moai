@@ -16,7 +16,7 @@ does not tag — see `CONTRIBUTING.md`.
 
 - Plan date ranges accept `～` and `〜` alongside `~`; wiki issue links titled `"external issue"` preserve fork provenance through an optional `external` JSON URL without missing-local-issue notices. (moai-fcj3)
 - `moai edit --if-start/--if-due` supports atomic date preconditions; successful date edits return a copyable undo command in JSON. (moai-yigx)
-- Shell and explorer pictures draw through kitty inside tmux with `allow-passthrough on|all`; auto detection also recognizes SSH Ghostty sessions through `TERM=xterm-ghostty`. (moai-zidx)
+- Shell and explorer pictures draw through kitty or Ghostty inside tmux with `allow-passthrough on|all`; Ghostty over SSH needs remote `TERM=xterm-ghostty` and its terminfo installed there. Auto detection also recognizes that TERM outside tmux. (moai-zidx)
 
 ### Changed
 

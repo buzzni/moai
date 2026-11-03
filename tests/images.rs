@@ -323,16 +323,22 @@ fn inherited_tmux_uses_stdout_device_and_skips_queries_without_pictures() {
     let text = run_pty(&id, &own, None, None);
     assert!(!text.contains("\x1b_G"));
     assert!(text.contains("\x1b]8;;file://"));
-    for permission in ["on", "all"] {
-        let client = format!("xterm-kitty\n{permission}");
-        let graphics = run_pty(&id, &own, None, Some(&client));
-        assert!(graphics.contains("\x1bPtmux;\x1b\x1b_Ga=T,U=1"));
-        assert!(graphics.contains('\u{10eeee}'));
+    for terminal in ["xterm-kitty", "xterm-ghostty"] {
+        for permission in ["on", "all"] {
+            let client = format!("{terminal}\n{permission}");
+            let graphics = run_pty(&id, &own, None, Some(&client));
+            assert!(graphics.contains("\x1bPtmux;\x1b\x1b_Ga=T,U=1"), "{client:?}");
+            assert!(graphics.contains('\u{10eeee}'), "{client:?}");
+        }
     }
-    for client in ["xterm-kitty\noff", "xterm-ghostty\non", "xterm-256color\non"] {
+    // Every run keeps the kitty hints a server started from kitty hands its panes (TERM=xterm-kitty,
+    // KITTY_WINDOW_ID). Inside a pane only the client reply decides, so a rejected client must not fall back to
+    // plain kitty from those hints. They cannot fake a pass: only the reply yields the wrapped `U=1` upload above.
+    for client in ["xterm-kitty\noff", "xterm-ghostty\noff", "xterm-256color\non"] {
         let fallback = run_pty(&id, &own, None, Some(client));
-        assert!(!fallback.contains("\x1bPtmux;"));
-        assert!(fallback.contains("\x1b]8;;file://"));
+        assert!(!fallback.contains("\x1b_G"), "{client:?}");
+        assert!(!fallback.contains("\x1bPtmux;"), "{client:?}");
+        assert!(fallback.contains("\x1b]8;;file://"), "{client:?}");
     }
     std::fs::remove_file(&log).unwrap();
     assert!(run_pty(&id, &own, Some("kitty"), None).contains("\x1b_Ga=T"));
