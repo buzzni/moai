@@ -12,6 +12,8 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+## [0.45.0] - 2026-11-03
+
 ### Added
 
 - Plan date ranges accept `～` and `〜` alongside `~`; wiki issue links titled `"external issue"` preserve fork provenance through an optional `external` JSON URL without missing-local-issue notices. (moai-fcj3)
