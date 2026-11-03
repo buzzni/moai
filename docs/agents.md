@@ -717,6 +717,27 @@ two seconds and prints one event with a cursor to rearm from; a backlog sent bef
 its `Unfolded:` note names the epic. `Review-ready:` goes to the supervisor's
 review subagent; the second assignment follows its completed review (moai-uzhx).
 
+**Repository lines in a Codex assignment.** A repository can add its own
+instructions to every assignment `moai supervise message` assembles, in
+`.moai/config.toml`:
+
+```toml
+[supervise]
+extra_lines = ["First instruction", "Work on <id> in <root>"]
+```
+
+The lines go in order just before `from:`. `<id>` becomes the assigned epic or
+backlog ID and `<root>` the repository root; other text is literal. Without the
+table the message is unchanged. The setting is the repository's only — your user
+config cannot add lines. `supervise message` refuses a key other than
+`extra_lines`, a second `extra_lines`, a value that is not an array of
+double-quoted strings, and an entry holding a line break or another control
+character; other commands are not affected. Keep the array on one line and
+leave `\"` out of the entries: a multi-line array or an unbalanced quote is a
+malformed line in this file and stops every command. Under cmux the supervisor
+puts the same lines in the same place, or assembles the message with
+`supervise message` (moai-n6fs).
+
 ### In cmux
 
 When the supervisor runs inside a [cmux](https://github.com/manaflow-ai/cmux)
@@ -984,15 +1005,3 @@ stays out of the plan until that epic is undone, and `mv` names it (moai-b6w3).
 Archived IDs stay reserved, and `status`
 reports IDs duplicated across storage files. `init` installs the archive merge
 attributes alongside the active snapshot's rule (moai-fx9t).
-
-Repository-specific Codex assignment instructions can be set in `.moai/config.toml`:
-
-```toml
-[supervise]
-extra_lines = ["First instruction", "Work on <id> in <root>"]
-```
-
-The single-line array is inserted in order immediately before `from:` by `moai supervise
-message`. `<id>` is the assigned epic or backlog ID and `<root>` is the repository root;
-other text is literal. The setting is repository-only and has no effect when absent. Each
-entry must be a single line; use double-quoted strings without escaped quotes.

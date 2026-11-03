@@ -35006,6 +35006,12 @@ fn supervisor_watch_resumes_same_second_and_generates_assignment() {
 
     // The absence of the setting leaves every byte unchanged. Configured lines retain
     // their order and substitute only the documented placeholders.
+    // Pinned against the template itself, not only against a second unconfigured run: an empty
+    // setting that still left a blank line before `from:` would pass a run-against-run compare.
+    assert!(
+        message.trim_end().ends_with("never edit the root checkout.\nfrom: supervisor"),
+        "something stands between the Worktree line and from: — {message}"
+    );
     let config_path = s.path().join(".moai/config.toml");
     let original = std::fs::read_to_string(&config_path).unwrap();
     std::fs::write(&config_path, format!("{original}\n[supervise]\nextra_lines = [\"First <id>\", \"Root <root>\"]\n"))
@@ -35020,6 +35026,20 @@ fn supervisor_watch_resumes_same_second_and_generates_assignment() {
     std::fs::write(&config_path, format!("{original}\n[supervise]\nextra_lines = 42\n")).unwrap();
     assert!(!send(id).status.success());
     assert!(moai(s.path(), &["status"]).status.success(), "bad optional setting broke status");
+    // A misspelt key used to drop the repository's lines without a word — the miss this
+    // setting exists to prevent. So are a second key, and an escape a pasted pane acts on.
+    for bad in [
+        "extra_line = [\"First\"]".to_string(),
+        "extra_lines = [\"a\"]\nextra_lines = [\"b\"]".to_string(),
+        "extra_lines = [\"a\\nb\"]".to_string(),
+        "extra_lines = [\"a\\u001b[201~b\"]".to_string(),
+    ] {
+        std::fs::write(&config_path, format!("{original}\n[supervise]\n{bad}\n")).unwrap();
+        let out = send(id);
+        assert!(!out.status.success(), "{bad} was not refused");
+        assert!(String::from_utf8_lossy(&out.stderr).contains("[supervise]"), "{bad}: {}", text(&out));
+        assert!(moai(s.path(), &["status"]).status.success(), "{bad} broke status");
+    }
     std::fs::write(&config_path, original).unwrap();
     assert_eq!(send(id).stdout, message.as_bytes());
 

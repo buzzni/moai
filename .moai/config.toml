@@ -4,4 +4,4 @@ statuses = "todo,in_progress,review,done"
 archive_days = 2
 
 [supervise]
-extra_lines = ["Worktree target: before the first build, link target to /tmp/cargo-target/<worktree name>."]
+extra_lines = ["Worktree target: before the first build in a worktree you create, run mkdir -p /tmp/cargo-target/<name> and ln -s /tmp/cargo-target/<name> <root>/.worktrees/<name>/target, where <name> is that worktree directory (moai-<epic> or milestone-<milestone>); a link to a missing directory fails the build."]

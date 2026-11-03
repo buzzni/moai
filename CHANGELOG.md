@@ -12,6 +12,10 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+### Added
+
+- `moai supervise message` inserts the lines a repository writes under `[supervise] extra_lines` in `.moai/config.toml` just before `from:`, with `<id>` and `<root>` filled in; a misspelt key, or a value other than an array of one-line strings, refuses that command only. Keep the array on one line — a multi-line array is a malformed line in that file and stops every command. (moai-n6fs)
+
 ## [0.46.0] - 2026-11-03
 
 ### Added
