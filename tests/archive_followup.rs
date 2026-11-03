@@ -24,7 +24,11 @@ impl Repo {
             .env("MOAI_CONFIG", self.0.join("config.toml"))
             .env("MOAI_NOW", "2026-09-11T04:12:03Z")
             .env("NO_COLOR", "1")
-            .env("MOAI_NO_UPDATE_CHECK", "1");
+            .env("MOAI_NO_UPDATE_CHECK", "1")
+            // The assertions read English words ("no members"); an inherited `MOAI_LANG` would make them vacuous.
+            .env("MOAI_LANG", "en")
+            .env_remove("MOAI_HERE")
+            .env_remove("COLUMNS");
         cmd
     }
     fn run(&self, args: &[&str]) -> Output {

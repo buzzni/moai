@@ -323,8 +323,10 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
             // Only the edited row needs blocker diagnostics. Overflow candidates need
             // placement and closure; a blocker on an unrelated candidate must not open the archive.
             // A live blocking group opens the selective archive context: `Blocked::of` reads
-            // its column from members that a revived group can keep in the archive.
-            let blockers: Vec<&str> = out.blocked_by.iter().map(String::as_str).collect();
+            // its column from members that a revived group can keep in the archive. An edit that
+            // changed nothing draws no detail, so its blockers open nothing under the lock.
+            let blockers: Vec<&str> =
+                if changed { out.blocked_by.iter().map(String::as_str).collect() } else { Vec::new() };
             let (full, outside) = crate::archive::edit_out(live, &out.id, &context_ids);
             let archived = if full {
                 crate::archive::read(&repo.root)?.issues

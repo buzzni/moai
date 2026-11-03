@@ -1360,7 +1360,9 @@ pub fn archived_places(root: &std::path::Path, issues: &[crate::model::Issue], r
     archived_places_and(root, issues, rows, &[])
 }
 
-/// Use a placement gate already established by an earlier probe without walking it twice.
+/// [`archived_places`] after an earlier probe already found that `rows` reach outside — `true` skips the second
+/// walk. `false` means not established, so the gate runs in full; unlike [`archived_places_and_if`] it never
+/// means "known to stay inside".
 pub fn archived_places_if(
     root: &std::path::Path,
     issues: &[crate::model::Issue],
@@ -1380,12 +1382,12 @@ pub fn archived_places_and(
     rows: &[&str],
     riders: &[&str],
 ) -> R<crate::store::Load> {
-    let outside =
-        !wants_group(issues, riders) && !wants_group(issues, rows) && crate::archive::places_out(issues, rows);
-    archived_places_and_if(root, issues, rows, riders, outside)
+    let open = wants_group(issues, riders) || wants_group(issues, rows) || crate::archive::places_out(issues, rows);
+    places_read(root, issues, rows, riders, open)
 }
 
-/// Read the same selective context after a caller has already walked placement references.
+/// Read the same selective context after a caller has already walked placement references — `outside` is that
+/// walk's answer, so `false` here means "stays inside" and nothing is walked again.
 pub fn archived_places_and_if(
     root: &std::path::Path,
     issues: &[crate::model::Issue],
@@ -1393,12 +1395,23 @@ pub fn archived_places_and_if(
     riders: &[&str],
     outside: bool,
 ) -> R<crate::store::Load> {
-    if wants_group(issues, riders) || wants_group(issues, rows) || outside {
-        let wanted: Vec<&str> = rows.iter().chain(riders).copied().collect();
-        crate::archive::groups(root, issues, &wanted)
-    } else {
-        Ok(crate::store::Load::default())
+    let open = outside || wants_group(issues, riders) || wants_group(issues, rows);
+    places_read(root, issues, rows, riders, open)
+}
+
+/// The placement component of `rows` and `riders` when the gate opened, else nothing.
+fn places_read(
+    root: &std::path::Path,
+    issues: &[crate::model::Issue],
+    rows: &[&str],
+    riders: &[&str],
+    open: bool,
+) -> R<crate::store::Load> {
+    if !open {
+        return Ok(crate::store::Load::default());
     }
+    let wanted: Vec<&str> = rows.iter().chain(riders).copied().collect();
+    crate::archive::groups(root, issues, &wanted)
 }
 
 /// 산 줄에 [`archived_for`] 의 줄을 겹친 문맥 — 보드와 같은 자([`crate::report::with_archive`])다. 산 줄이 이기고,

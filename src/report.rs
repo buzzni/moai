@@ -5957,25 +5957,21 @@ pub(crate) fn due_pending(live: &[Issue], rule: &crate::config::DueRule) -> bool
     rule.auto && live.iter().any(|i| due_open(i) && i.priority() > 0)
 }
 
-/// With no live dates, only missing placement references can reveal a deadline. Let the
-/// caller check that cheap gate before building maps for an otherwise undated repository.
-pub(crate) fn due_undated_ids(live: &[Issue]) -> Option<Vec<&str>> {
-    (!live.iter().any(|i| i.deadline().is_some()))
-        .then(|| live.iter().filter(|i| due_open(i) && i.priority() > 0).map(|i| i.id.as_str()).collect())
-}
-
 /// A cheap probe for snapshots without any live deadline. The caller only checks
 /// whether these placement references leave the snapshot; it owns archive I/O.
 pub(crate) enum DueProbe<'a> {
+    /// No live row carries a date, so only a missing placement reference can reveal a deadline —
+    /// these are the open rows that could still be raised. The caller checks that cheap gate before
+    /// building maps for an otherwise undated repository.
     Undated(Vec<&'a str>),
     Dated,
 }
 
 pub(crate) fn due_probe(live: &[Issue]) -> DueProbe<'_> {
-    match due_undated_ids(live) {
-        Some(ids) => DueProbe::Undated(ids),
-        None => DueProbe::Dated,
+    if live.iter().any(|i| i.deadline().is_some()) {
+        return DueProbe::Dated;
     }
+    DueProbe::Undated(live.iter().filter(|i| due_open(i) && i.priority() > 0).map(|i| i.id.as_str()).collect())
 }
 
 /// One set of placement maps and one ladder per snapshot. The unlocked preview and the
@@ -6060,8 +6056,8 @@ pub fn due_candidates<'a>(
 #[cfg(test)]
 pub fn due_context_ids<'a>(live: &'a [Issue], candidates: &[Raise<'a>]) -> Vec<&'a str> {
     let soil = Soil::of(live);
-    let ladder = DueLadder::over_with_stones(&soil.lines, &soil.epic, Some(&soil.milestone));
-    due_context_ids_over(live, candidates, &ladder, &soil)
+    let judge = DueJudge::over(live, &soil);
+    due_context_ids_over(live, candidates, &judge.ladder, &soil)
 }
 
 fn due_context_ids_over<'a>(

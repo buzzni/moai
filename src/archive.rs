@@ -501,13 +501,7 @@ pub fn places_out(active: &[Issue], wanted: &[&str]) -> bool {
 /// overflow rows. Walk the shared ancestors once; full-reference traversal wins.
 /// Returns (full archive required, placement archive required).
 pub fn edit_out(active: &[Issue], edited: &str, placements: &[&str]) -> (bool, bool) {
-    let mut by_id = BTreeMap::new();
-    let mut shadowed: BTreeMap<&str, Vec<&Issue>> = BTreeMap::new();
-    for row in active {
-        if let Some(previous) = by_id.insert(row.id.as_str(), row) {
-            shadowed.entry(row.id.as_str()).or_default().push(previous);
-        }
-    }
+    let twins = Twins::of(active);
     let mut pending: Vec<(&str, bool)> = placements.iter().map(|id| (*id, false)).collect();
     pending.push((edited, true));
     let mut seen_full = BTreeSet::new();
@@ -521,14 +515,14 @@ pub fn edit_out(active: &[Issue], edited: &str, placements: &[&str]) -> (bool, b
         } else if seen_full.contains(id) || !seen_place.insert(id) {
             continue;
         }
-        let Some(&last) = by_id.get(id) else {
+        let Some(rows) = twins.rows(id) else {
             if full {
                 return (true, true);
             }
             outside = true;
             continue;
         };
-        for row in std::iter::once(last).chain(shadowed.get(id).into_iter().flatten().copied()) {
+        for row in rows {
             pending.extend(
                 [crate::id::parent_of(&row.id), row.epic.as_deref(), row.milestone.as_deref()]
                     .into_iter()
@@ -551,25 +545,17 @@ fn walks_out<'a>(
     blockers: bool,
     stop: impl Fn(&Issue) -> bool,
 ) -> bool {
-    let mut by_id = BTreeMap::new();
-    // Keep preceding twins only: healthy snapshots still allocate no per-row vectors.
-    // A gate must cover references from every row the derived readers can select.
-    let mut shadowed: BTreeMap<&str, Vec<&Issue>> = BTreeMap::new();
-    for i in active {
-        if let Some(previous) = by_id.insert(i.id.as_str(), i) {
-            shadowed.entry(i.id.as_str()).or_default().push(previous);
-        }
-    }
+    let twins = Twins::of(active);
     let mut pending: Vec<&str> = wanted.into_iter().collect();
     let mut seen = BTreeSet::new();
     while let Some(id) = pending.pop() {
         if !seen.insert(id) {
             continue;
         }
-        let Some(&last) = by_id.get(id) else {
+        let Some(rows) = twins.rows(id) else {
             return true;
         };
-        for i in std::iter::once(last).chain(shadowed.get(id).into_iter().flatten().copied()) {
+        for i in rows {
             if stop(i) {
                 return true;
             }
@@ -581,6 +567,33 @@ fn walks_out<'a>(
         }
     }
     false
+}
+
+/// The live rows by id for the reference walks ([`walks_out`], [`edit_out`]) — the last line of an id, and the lines
+/// before it apart. Keep preceding twins only: healthy snapshots still allocate no per-row vectors. A gate must cover
+/// references from every row the derived readers can select.
+struct Twins<'a> {
+    by_id: BTreeMap<&'a str, &'a Issue>,
+    shadowed: BTreeMap<&'a str, Vec<&'a Issue>>,
+}
+
+impl<'a> Twins<'a> {
+    fn of(active: &'a [Issue]) -> Self {
+        let mut by_id = BTreeMap::new();
+        let mut shadowed: BTreeMap<&str, Vec<&Issue>> = BTreeMap::new();
+        for i in active {
+            if let Some(previous) = by_id.insert(i.id.as_str(), i) {
+                shadowed.entry(i.id.as_str()).or_default().push(previous);
+            }
+        }
+        Twins { by_id, shadowed }
+    }
+
+    /// Every live row holding `id`, the last first — `None` when no live row holds it.
+    fn rows(&self, id: &str) -> Option<impl Iterator<Item = &'a Issue> + '_> {
+        let last = *self.by_id.get(id)?;
+        Some(std::iter::once(last).chain(self.shadowed.get(id).into_iter().flatten().copied()))
+    }
 }
 
 /// Group rows reopen from their derived column; only requested rows are staged. An id the live file holds — as a

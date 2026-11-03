@@ -5595,7 +5595,8 @@ fn in_unit<'a>(unit: &BTreeSet<&str>, ties: &report::Ties<'a>, i: &'a Issue) -> 
 /// 이름으로 띄운 워크트리에서도 쥐었다(moai-m62u) — 그 세션의 초점이 비어 규칙 2 에 막혔다.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Away {
-    /// IDs held by unreadable live rows; stale archive copies cannot supply their placement.
+    /// IDs held by unreadable live rows; stale archive copies cannot supply their placement, nor their owner for
+    /// rule 5 ([`take_in`] counts such an id as live and never reads the archive for it).
     pub opaque: BTreeSet<String>,
     /// 규칙 5 가 산 스냅샷에 없는 id 를 찾는 아카이브(moai-bth3) — **읽는 손은 `cmd/hook.rs` 가 건넨다**([`Archive`]).
     /// Rule 5 calls it only when the picked ID is not live. Rule 2 also calls it for suggestions, only after an empty-focus refusal is certain.
@@ -9071,7 +9072,8 @@ fn take_in(
         };
         let Some(me) = me else { continue };
         // **아카이브는 산 스냅샷에 없는 id 를 집을 때만 읽는다**(moai-bth3) — 되살리는 `mv` 도 집기라, 안 보면 남의 것이나
-        // 담당 없는 아카이브 줄이 묻지 않고 넘어간다. 읽는 손은 `cmd/hook.rs` 의 것이다([`Archive`]).
+        // 담당 없는 아카이브 줄이 묻지 않고 넘어간다. 읽는 손은 `cmd/hook.rs` 의 것이다([`Archive`]). 산 파일에 못 읽는 줄로
+        // 선 id([`Away::opaque`])는 산 것으로 친다 — 그 아카이브 사본은 낡았고, `mv` 도 그 id 를 되살리지 않는다.
         let archived: Vec<Issue> = match (
             ids.iter().any(|id| !away.opaque.contains(*id) && !issues.iter().any(|i| i.id == *id)),
             &away.archive,
