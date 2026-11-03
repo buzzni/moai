@@ -11972,3 +11972,4 @@
 {"ts":"2026-11-03T16:19:48Z","id":"moai-5w6i.1t2","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"대기 읽음 파일 실패를 처음부터 알리지 않는다"}
 {"ts":"2026-11-03T16:19:48Z","id":"moai-5w6i.3zg","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"일반 배정문에서 저장소 전용 target 지시를 뺐다"}
 {"ts":"2026-11-03T16:19:48Z","id":"moai-5w6i.89z","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"v0.46.0 소식을 그림 없이 냈다"}
+{"ts":"2026-11-03T16:24:32Z","id":"moai-lbwx","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"마감: 사람이 \"2026년 11월 6일 00시까지\" 로 정했다(2026-11-03). moai 의 마감은 날 단위라 그날이 끝날 때까지인 2026-11-05 로 적는다."}
