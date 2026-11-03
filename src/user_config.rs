@@ -64,6 +64,8 @@ pub const MODELS_DEFAULT: &[(&str, &str)] = &[
 ];
 pub const MODELS: &str = "models";
 pub const MODEL_LEVELS: &[&str] = &["low", "medium", "high", "xhigh", "max"];
+/// `review_raise` 의 낱말 — 에픽 끝 리뷰를 한 칸 올릴지(moai-p9dh.lyc). 기본은 첫째다.
+pub const REVIEW_RAISES: &[&str] = &["never", "write-path"];
 
 /// 유효한 키만 덮어쓴 완성된 표. `written`은 사용자 설정에서 유효하게 읽힌 키만 담는다.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
@@ -97,7 +99,7 @@ impl Models {
         let Some(&(key, _)) = MODELS_DEFAULT.iter().find(|&&(known, _)| known == key) else {
             return Err(ModelsTrouble::UnknownKey { key: key.to_string() });
         };
-        if key == "review_raise" && !word.is_some_and(|w| ["never", "write-path"].contains(&w)) {
+        if key == "review_raise" && !word.is_some_and(|w| REVIEW_RAISES.contains(&w)) {
             return Err(ModelsTrouble::NotARaise { key: key.into(), raw: word.map_or_else(shown, String::from) });
         }
         let level = is_level_key(key);

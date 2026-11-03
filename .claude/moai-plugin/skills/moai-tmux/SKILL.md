@@ -373,8 +373,9 @@ Codex can leave its last frame over a shell. Never use another server's pane ids
 ### Read the Codex input box
 
 Run `python3 "<moai-tmux skill dir>/scripts/codex-pane.py" ready <pane>` immediately
-before input. It checks mode, liveness and the composer and refuses uncertainty. The
-pane must already be identified as belonging to this repository. The lowest current composer starts with `›` (U+203A) and an ordinary space (U+0020).
+before input, from `<root>`. It checks mode, liveness and the composer and refuses uncertainty,
+and it refuses a pane whose current path lies outside the checkouts `git worktree list` names
+there. Identify the pane as this repository's first all the same. The lowest current composer starts with `›` (U+203A) and an ordinary space (U+0020).
 Its empty placeholder is `Ask Codex to do anything`. A past user message also starts with
 `›`: read the bottom input area, not any matching line in the conversation.
 
@@ -430,7 +431,11 @@ stop and tell the person; a menu, question or permission prompt is theirs.
 
 ### Paste the assignment
 
-The helper is `scripts/codex-pane.py` in the moai-tmux skill. Use `moai supervise message <epic> --help` to assemble the assignment text; its first line names the absolute path to `references/worker-codex.md`. Save it
+The helper is `scripts/codex-pane.py` in the moai-tmux skill. Assemble the assignment with
+`moai -C "<root>" supervise message <id>`, giving `--model` (`<codex>` and the difficulty), `--effort`,
+`--base`, `--root-branch` and `--from` (your ListAgents name) plus the other slots its `--help` lists —
+an epic goes from step 2, a backlog item from step 1. Its first line names the absolute path to `references/worker-codex.md`
+beside `worker.md` in `moai-supervise`; pass `--steps <that path>` when the skill is not planted under `<root>`. Save it
 under the epic scratch directory. Confirm the fields and the person's approval, then run
 `python3 "<moai-tmux skill dir>/scripts/codex-pane.py" send <pane> <file>`; it rechecks
 before pasting and before submission. Tell the person which pane received it. "Label the
@@ -438,10 +443,12 @@ pane" applies unchanged: set `@moai` on this pane and ask before showing labels.
 
 ### Watch the epic for the Codex report
 
-Before sending, record the latest journal timestamp. Arm a `Monitor` with
+Before sending, record the latest `journal[].ts` of `moai -C "<root>" show <epic> --json`
+(an empty journal uses `1970-01-01T00:00:00Z`). Arm a `Monitor` with
 `moai -C "<root>" watch <epic> --since <timestamp>`; it prints one JSON event containing
 `head`, `ts`, and a resumable `cursor`. It returns immediately for a matching existing
-note. To continue, start the next monitor with `--cursor <cursor>`. Keep the cursor on
+note — `--since` is inclusive, so an event at the recorded timestamp may be a note you
+already handled: check it, and if so re-arm with its `cursor`. To continue, start the next monitor with `--cursor <cursor>`. Keep the cursor on
 expiry; identical notes in the same second are one event. A failed read is an alert.
 Watch the backlog until `Unfolded:`, then watch its new epic from the beginning. On
 `Decision needed:` ask the person, on `Review-ready:` start review, and on `report:`

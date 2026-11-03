@@ -3561,7 +3561,7 @@ pub fn update_trouble(lang: Lang, why: &crate::user_config::UpdateTrouble) -> St
 
 /// `[models]`의 까닭. 명령과 탐색기가 같은 글을 쓰고, 파일 자리는 부르는 쪽이 붙인다.
 pub fn models_trouble(lang: Lang, why: &crate::user_config::ModelsTrouble) -> String {
-    use crate::user_config::{MODEL_LEVELS, MODELS, ModelsTrouble};
+    use crate::user_config::{MODEL_LEVELS, MODELS, ModelsTrouble, REVIEW_RAISES};
     let want = |key: &str, wanted: &str, found: &str| {
         fill(say(lang, "look.want"), &[("key", &format!("{MODELS}.{key}")), ("want", wanted), ("found", found)])
     };
@@ -3575,7 +3575,8 @@ pub fn models_trouble(lang: Lang, why: &crate::user_config::ModelsTrouble) -> St
             want(key, &levels, &crate::text::one_line(&format!("{raw:?}")))
         }
         ModelsTrouble::NotARaise { key, raw } => {
-            want(key, "never|write-path", &crate::text::one_line(&format!("{raw:?}")))
+            let words = fill(say(lang, "models.want_level"), &[("known", &REVIEW_RAISES.join("|"))]);
+            want(key, &words, &crate::text::one_line(&format!("{raw:?}")))
         }
         ModelsTrouble::UnknownKey { key } => {
             fill(say(lang, "models.unknown_key"), &[("key", &crate::text::one_line(&format!("{MODELS}.{key}")))])

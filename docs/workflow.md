@@ -346,8 +346,9 @@ where its contributors read them rather than repeated here:
   `milestone/<id>` for work inside a milestone, moai-nvju; branches
   are `worktree-moai-<id>`, and `target/` is a link to `/tmp/cargo-target/<name>`
   because `/home` stalls under parallel builds, moai-c5xo), the review grade table
-  (which `/code-review` level an epic gets — `xhigh` on the review model, `max` for
-  the write path and hooks, moai-9793, moai-bx6t, moai-9tqo), the roles' default
+  (which `/code-review` level an epic gets — `review_grade` on the review model, raised
+  a step for the write path and hooks only under `review_raise = "write-path"`, moai-9793,
+  moai-bx6t, moai-9tqo, moai-p9dh), the roles' default
   models, the
   [`Regression-of:` line](glossary.md#regression-of) on bugs a merged epic caused
   (moai-21zt), and how a

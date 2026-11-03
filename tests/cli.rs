@@ -10364,6 +10364,7 @@ fn every_command_still_speaks_json() {
     let epic = field(&ok(s.path(), &["add", "에픽", "--type", "epic", "--json"]), "id");
 
     ok(s.path(), &["note", &epic, "report: sweep"]);
+    std::fs::write(s.path().join("sweep-steps.md"), "steps\n").unwrap();
     std::fs::write(s.path().join("sweep.gif"), b"GIF89a\x01\x00\x01\x00").unwrap();
     let cases = [
         vec!["watch", &epic, "--json"],
@@ -10381,6 +10382,8 @@ fn every_command_still_speaks_json() {
             "develop",
             "--from",
             "supervisor",
+            "--steps",
+            "sweep-steps.md",
             "--json",
         ],
         vec!["image", "add", "sweep.gif", "--json"],
@@ -34813,27 +34816,80 @@ fn supervisor_watch_resumes_same_second_and_generates_assignment() {
     let result = ok(s.path(), &["watch", id, "--since", NOW]);
     let first: serde_json::Value = serde_json::from_str(&result).unwrap();
     assert_eq!(first["head"], "Review-ready: first");
-    let result = ok(s.path(), &["watch", id, "--cursor", first["cursor"].as_str().unwrap()]);
+    let cursor = first["cursor"].as_str().unwrap();
+    // The cursor holds digests, not the notes — it goes back on the command line every time.
+    assert!(cursor.len() < 200, "{cursor}");
+    let result = ok(s.path(), &["watch", id, "--cursor", cursor]);
     let second: serde_json::Value = serde_json::from_str(&result).unwrap();
     assert_eq!(second["head"], "report: second");
-    let message = ok(
-        s.path(),
-        &[
-            "supervise",
-            "message",
-            id,
-            "--model",
-            "test (high)",
-            "--effort",
-            "high",
-            "--base",
-            "base",
-            "--root-branch",
-            "develop",
-            "--from",
-            "supervisor",
-        ],
-    );
+    // A cursor is bound to the row it was read from.
+    let other = field(&ok(s.path(), &["epic", "add", "other", "--json"]), "id");
+    let out = moai(s.path(), &["watch", &other, "--cursor", cursor]);
+    assert!(!out.status.success(), "a cursor from another row was accepted");
+
+    let steps = s.path().join(".claude/moai-plugin/skills/moai-supervise/references/worker-codex.md");
+    std::fs::create_dir_all(steps.parent().unwrap()).unwrap();
+    std::fs::write(&steps, "steps\n").unwrap();
+    let send = |id: &str| {
+        moai(
+            s.path(),
+            &[
+                "supervise",
+                "message",
+                id,
+                "--model",
+                "test (high)",
+                "--effort",
+                "high",
+                "--base",
+                "base",
+                "--root-branch",
+                "develop",
+                "--from",
+                "supervisor",
+            ],
+        )
+    };
+    let out = send(id);
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let message = String::from_utf8_lossy(&out.stdout).to_string();
+    let head = message.lines().next().unwrap();
+    assert!(head.starts_with(&format!("You are handed epic {id} — watch work.")), "{head}");
+    assert!(head.contains("worker-codex.md") && head.ends_with("from step 2."), "{head}");
     assert!(message.contains(&format!("Read first: moai show {id}")));
     assert!(message.contains("Worker: codex") && message.contains("Base branch: base"));
+    // `Writing:` is the person's value, not one the command picks.
+    assert!(message.contains("Writing: detailed"), "{message}");
+    assert!(!message.contains("Subdir:"), "{message}");
+
+    let backlog = field(&ok(s.path(), &["backlog", "add", "a thought", "--json"]), "id");
+    let out = send(&backlog);
+    let head = String::from_utf8_lossy(&out.stdout).lines().next().unwrap_or_default().to_string();
+    assert!(head.starts_with(&format!("You are handed backlog {backlog} — a thought.")), "{head}");
+    assert!(head.ends_with("from step 1."), "{head}");
+
+    let issue = field(&ok(s.path(), &["add", "plain work", "--json"]), "id");
+    assert!(!send(&issue).status.success(), "an issue was handed out as an epic");
+    std::fs::remove_file(&steps).unwrap();
+    let out = send(id);
+    assert!(!out.status.success() && String::from_utf8_lossy(&out.stderr).contains("--steps"));
+}
+
+/// **The default heads never match what `promote` writes** — the old report watch carried this
+/// guard, and only the worker writes `Unfolded: <epic>`. A decision asked in Korean stands anywhere
+/// in the first line, and a column move is never an event.
+#[test]
+fn supervisor_watch_heads_skip_promote_notes_and_moves() {
+    let s = init("supervisor-heads");
+    let backlog = field(&ok(s.path(), &["backlog", "add", "a thought", "--json"]), "id");
+    let out = from_stdin(
+        s.path(),
+        &["backlog", "promote", &backlog, "--from", "-"],
+        "# Unfolded epic\n- [p2] first member\n",
+    );
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    ok(s.path(), &["note", &backlog, &format!("{backlog} 진행 중 결정이 필요합니다.\n- 상황: x")]);
+    let result = ok(s.path(), &["watch", &backlog, "--since", NOW]);
+    let event: serde_json::Value = serde_json::from_str(&result).unwrap();
+    assert_eq!(event["head"], format!("{backlog} 진행 중 결정이 필요합니다."));
 }

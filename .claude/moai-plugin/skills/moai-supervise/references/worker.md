@@ -36,7 +36,7 @@ said yes to taking over a row that is not yours, say — belongs to the assignme
   back one line, `Model: raise to complex — <why>`; the supervisor raises a new worker on the `complex` model
   with the same message, its `Model:` and `Effort:` lines changed to that role's. What shows only
   after you picked up, you carry on and name in the report.
-  Whether the epic-end review (7) goes to `max` is measured on this same rubric, member by member
+  Whether the epic-end review (7) is raised a step — only when `review_raise` allows it — is measured on this same rubric, member by member
 - `Effort:` — `<effort>`, the reasoning effort that goes with the model. Like the model, a
   subagent was raised on it and a session's person sets it — you do not
 - `Worker:` — `subagent` or `session`, how you were raised. A step that differs between the

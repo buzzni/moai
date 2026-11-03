@@ -169,30 +169,6 @@ pub enum ColorArg {
 // (`every_help_heredoc_is_copyable`, moai-foc3).
 #[derive(Subcommand, Debug)]
 pub enum Cmd {
-    /// Wait for a matching journal note; this command only reads.
-    #[command(after_help = "  Outputs one JSON event with id, ts, head and resumable cursor. Existing
-  matching notes at or after --since return immediately. Reuse --cursor
-  with the same id and heads; identical notes in one second are one event.
-  Defaults: report:, Review-ready:, Unfolded:, Decision needed:, and
-  진행 중 결정이 필요합니다. The journal is checked every two seconds.")]
-    Watch {
-        id: String,
-        #[arg(long, default_value = "1970-01-01T00:00:00Z")]
-        since: String,
-        /// Resume from the cursor returned by an earlier watch.
-        #[arg(long)]
-        cursor: Option<String>,
-        #[arg(
-            long,
-            default_value = "report:,Review-ready:,Unfolded:,Decision needed:,진행 중 결정이 필요합니다",
-            value_delimiter = ',',
-            hide_default_value = true
-        )]
-        heads: Vec<String>,
-    },
-    /// Print a supervisor assignment.
-    #[command(subcommand)]
-    Supervise(SuperviseCmd),
     /// Store a picture and print a markdown reference
     #[command(subcommand)]
     Image(ImageCmd),
@@ -1163,6 +1139,34 @@ Examples:
   edit the files by hand.")]
     Writing,
 
+    /// Wait for a matching journal note; this command only reads
+    #[command(after_help = "  Outputs one JSON event with id, ts, head and resumable cursor. Existing
+  matching notes at or after --since return immediately. Reuse --cursor
+  with the same id and heads; identical notes in one second are one event.
+  Defaults: report:, Review-ready:, Unfolded:, Decision needed:, and
+  진행 중 결정이 필요합니다. The journal is checked every two seconds.")]
+    Watch {
+        id: String,
+        /// First second to report, …T…Z UTC (default: epoch)
+        #[arg(long, default_value = "1970-01-01T00:00:00Z", hide_default_value = true, conflicts_with = "cursor")]
+        since: String,
+        /// Resume from the cursor returned by an earlier watch
+        #[arg(long)]
+        cursor: Option<String>,
+        /// Note first-line heads to wait for, comma separated
+        #[arg(
+            long,
+            default_value = "report:,Review-ready:,Unfolded:,Decision needed:,진행 중 결정이 필요합니다",
+            value_delimiter = ',',
+            hide_default_value = true
+        )]
+        heads: Vec<String>,
+    },
+
+    /// Print a supervisor assignment
+    #[command(subcommand)]
+    Supervise(SuperviseCmd),
+
     /// Show the explorer's keys and what your keys.toml changed
     #[command(after_help = "  moai keys               every key the explorer runs on, changed ones marked
   moai keys --template    a keys.toml with every action, commented out
@@ -1359,28 +1363,42 @@ Examples:
 
 #[derive(Subcommand, Debug)]
 pub enum SuperviseCmd {
-    /// Produce a Codex assignment from the issue and explicit session fields.
+    /// Produce a Codex assignment from the issue and explicit session fields
     #[command(override_usage = "moai supervise message [OPTIONS] <id>")]
     Message {
+        /// An epic (sent from step 2) or a backlog item (sent from step 1)
         id: String,
+        /// `Model:` — the worker's model and difficulty
         #[arg(long)]
         model: String,
+        /// `Effort:` — the reasoning effort
         #[arg(long)]
         effort: String,
-        #[arg(long)]
+        /// The branch the worktree splits from and merges into
+        #[arg(long, value_name = "branch")]
         base: String,
-        #[arg(long, value_name = "b")]
+        /// The branch the root checkout stands on
+        #[arg(long, value_name = "name")]
         root_branch: String,
-        #[arg(long)]
+        /// Your name, written as the last line `from: <name>`
+        #[arg(long, value_name = "name")]
         from: String,
+        /// worker-codex.md (default: under the root)
+        #[arg(long, value_name = "path")]
+        steps: Option<std::path::PathBuf>,
         #[arg(long, default_value = "none", value_name = "work")]
         alongside: String,
         #[arg(long, default_value = "none", value_name = "id")]
         milestone: String,
-        #[arg(long, default_value = "detailed")]
-        writing: String,
+        /// detailed or brief (default: `moai writing`)
+        #[arg(long, value_name = "detail")]
+        writing: Option<String>,
+        /// here or away
         #[arg(long, default_value = "here")]
         person: String,
+        /// Only for a subdirectory project in a monorepo
+        #[arg(long, value_name = "dir")]
+        subdir: Option<String>,
     },
 }
 

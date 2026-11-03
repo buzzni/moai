@@ -3,10 +3,24 @@ use super::{Ctx, Fail, R};
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use std::collections::BTreeSet;
 
+/// Where a watch resumes: the journal second it stopped in and the lines of that second it
+/// already handled. `id` binds the cursor to the row it was read from — a cursor carried over to
+/// another row would skip that row's notes up to a second that means nothing there.
+///
+/// **A line is held by its digest, not its text.** The cursor goes back on the command line and
+/// through the supervisor's context on every event; a multi-kilobyte report written in that
+/// second would ride along each time and can outgrow one argument (`E2BIG`).
 #[derive(serde::Serialize, serde::Deserialize)]
 struct Cursor {
+    id: String,
     ts: String,
     seen: BTreeSet<String>,
+}
+
+/// One journal line's identity within a second — identical lines are one event.
+fn digest(note: &crate::model::JournalEntry) -> R<String> {
+    let line = serde_json::to_vec(note).map_err(|e| Fail::new(e.to_string()))?;
+    Ok(URL_SAFE_NO_PAD.encode(&ring::digest::digest(&ring::digest::SHA256, &line).as_ref()[..16]))
 }
 
 pub fn watch(ctx: &Ctx, id: &str, since: &str, cursor: Option<&str>, heads: &[String]) -> R<Vec<String>> {
@@ -16,23 +30,27 @@ pub fn watch(ctx: &Ctx, id: &str, since: &str, cursor: Option<&str>, heads: &[St
     let mut cursor = match cursor {
         Some(encoded) => {
             let bytes = URL_SAFE_NO_PAD.decode(encoded).map_err(|_| Fail::new("invalid watch cursor"))?;
-            serde_json::from_slice::<Cursor>(&bytes).map_err(|_| Fail::new("invalid watch cursor"))?
+            let cursor = serde_json::from_slice::<Cursor>(&bytes).map_err(|_| Fail::new("invalid watch cursor"))?;
+            if cursor.id != id {
+                return Err(Fail::new(format!("this watch cursor belongs to {}, not {id}", cursor.id)));
+            }
+            cursor
         }
-        None => Cursor { ts: since.to_owned(), seen: BTreeSet::new() },
+        None => Cursor { id: id.to_owned(), ts: since.to_owned(), seen: BTreeSet::new() },
     };
-    let stamp = cursor.ts.as_bytes();
-    if stamp.len() != 20
-        || [4, 7, 10, 13, 16, 19].iter().zip(b"--T::Z").any(|(&i, &b)| stamp[i] != b)
-        || stamp.iter().enumerate().any(|(i, b)| ![4, 7, 10, 13, 16, 19].contains(&i) && !b.is_ascii_digit())
-    {
+    if crate::model::parse_rfc3339(&cursor.ts).is_none() {
         return Err(Fail::new("watch requires a UTC timestamp YYYY-MM-DDTHH:MM:SSZ"));
     }
     let repo = super::open_repo(ctx)?;
     if !repo.read()?.issues.iter().any(|issue| issue.id == id) {
         return Err(Fail::not_found(id, ctx.lang()));
     }
+    let want = BTreeSet::from([id]);
     loop {
-        let notes = repo.journal_of(id);
+        // Parse only the lines that can name this id (or hide it behind a `\u` escape) — the journal
+        // is read again every two seconds, and decoding all of it each time is most of the work.
+        let notes =
+            repo.journal_by_id(&want, |line| line.contains(id) || line.contains("\\u")).remove(id).unwrap_or_default();
         if !crate::store::journal_unread().is_empty() {
             return Err(Fail::new("watch could not read the journal"));
         }
@@ -40,7 +58,7 @@ pub fn watch(ctx: &Ctx, id: &str, since: &str, cursor: Option<&str>, heads: &[St
             if note.ts < cursor.ts {
                 continue;
             }
-            let key = serde_json::to_string(&note).map_err(|e| Fail::new(e.to_string()))?;
+            let key = digest(&note)?;
             if note.ts == cursor.ts && cursor.seen.contains(&key) {
                 continue;
             }
@@ -66,29 +84,75 @@ pub fn watch(ctx: &Ctx, id: &str, since: &str, cursor: Option<&str>, heads: &[St
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-pub fn message(
-    ctx: &Ctx,
-    id: &str,
-    model: &str,
-    effort: &str,
-    base: &str,
-    root_branch: &str,
-    from: &str,
-    alongside: &str,
-    milestone: &str,
-    writing: &str,
-    person: &str,
-) -> R<Vec<String>> {
+/// The session fields the supervisor supplies; the row gives the rest.
+pub struct Fields<'a> {
+    pub model: &'a str,
+    pub effort: &'a str,
+    pub base: &'a str,
+    pub root_branch: &'a str,
+    pub from: &'a str,
+    pub steps: Option<&'a std::path::Path>,
+    pub alongside: &'a str,
+    pub milestone: &'a str,
+    pub writing: Option<&'a str>,
+    pub person: &'a str,
+    pub subdir: Option<&'a str>,
+}
+
+/// The Codex assignment, in the slots of `guide::message`. The first line is the one the supervisor
+/// sends a Claude worker — an epic from step 2, a backlog item from step 1 — with the steps file in
+/// it, so the two assignments never point at different steps.
+pub fn message(ctx: &Ctx, id: &str, f: &Fields) -> R<Vec<String>> {
+    use crate::model::Kind;
     let repo = super::open_repo(ctx)?;
     let rows = repo.read()?.issues;
     let row = rows.iter().find(|r| r.id == id).ok_or_else(|| Fail::not_found(id, ctx.lang()))?;
-    let root = repo.root.display();
-    let path = format!("{root}/.claude/moai-plugin/skills/moai-supervise/references/worker-codex.md");
+    let root = repo.root.display().to_string();
+    // **The steps file is where the skill was planted.** A plugin installed at user scope lives in
+    // Claude Code's plugin cache, not under the root — a path that does not exist sends Codex to read
+    // nothing, so it is refused here, naming the flag that fixes it.
+    let steps = match f.steps {
+        Some(path) => path.to_path_buf(),
+        None => repo.root.join(crate::skill::DIR).join("skills/moai-supervise/references/worker-codex.md"),
+    };
+    if !steps.is_file() {
+        return Err(Fail::new(format!(
+            "no steps file at {} — pass --steps <the moai-supervise skill's references/worker-codex.md>",
+            steps.display()
+        )));
+    }
+    let steps = std::path::absolute(&steps).unwrap_or(steps).display().to_string();
+    let first = match row.kind {
+        Kind::Epic => crate::guide::PLAN_FIRST.replace("<epic>", id),
+        Kind::Backlog => crate::guide::BACKLOG_FIRST.replace("<id>", id),
+        other => {
+            return Err(Fail::new(format!(
+                "supervise message takes an epic or a backlog item — {id} is {}",
+                other.as_str()
+            )));
+        }
+    }
+    .replace("<steps file>", &steps)
+    .replace("<title>", &row.title);
+    // `Writing:` is the person's value, never one this command picks (`moai writing`).
+    let writing = match f.writing {
+        Some(w) => w.to_owned(),
+        None => {
+            ctx.registry().writing.with_repo(&repo.config.writing).0.values.get("detail").cloned().unwrap_or_default()
+        }
+    };
+    let subdir = f.subdir.map(|s| format!("Subdir: {s}\n")).unwrap_or_default();
     let text = format!(
-        "You are handed epic {id} — {}. It is already unfolded; do not promote.\nRead {path} and follow its steps from step 2.\nRead first: moai show {id}\nModel: {model}\nEffort: {effort}\nWorker: codex\nSubagents: none\nWriting: {writing}\nWork running alongside: {alongside}\nRoot branch: {root_branch}\nBase branch: {base}\nMilestone: {milestone}\nDue: {}\nRoot: {root}\nPerson: {person}\nWorktree: aim every command at the worktree absolute path (workdir or cd) — never edit the root checkout. Link the worktree target to /tmp/cargo-target/<name> before the first build.\nfrom: {from}",
-        row.title,
-        row.due_on.as_deref().unwrap_or("none")
+        "{first}\nRead first: moai show {id}\nModel: {}\nEffort: {}\nWorker: codex\nSubagents: none\nWriting: {writing}\nWork running alongside: {}\nRoot branch: {}\nBase branch: {}\nMilestone: {}\nDue: {}\nRoot: {root}\n{subdir}Person: {}\nWorktree: aim every command at the worktree absolute path (workdir or cd) — never edit the root checkout. Link the worktree target to /tmp/cargo-target/<name> before the first build.\nfrom: {}",
+        f.model,
+        f.effort,
+        f.alongside,
+        f.root_branch,
+        f.base,
+        f.milestone,
+        row.due_on.as_deref().unwrap_or("none"),
+        f.person,
+        f.from,
     );
     if ctx.json { super::json_line(&serde_json::json!({"message": text})) } else { Ok(vec![text]) }
 }

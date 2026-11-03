@@ -527,10 +527,12 @@ is already in the box: do not paste again. Tell the person which tab holds it un
 
 ### Watch the epic for the Codex report
 
-Before sending, record the latest journal timestamp. Arm a `Monitor` with
+Before sending, record the latest `journal[].ts` of `moai -C "<root>" show <epic> --json`
+(an empty journal uses `1970-01-01T00:00:00Z`). Arm a `Monitor` with
 `moai -C "<root>" watch <epic> --since <timestamp>`; it prints one JSON event containing
 `head`, `ts`, and a resumable `cursor`. It returns immediately for a matching existing
-note. To continue, start the next monitor with `--cursor <cursor>`. Keep the cursor on
+note — `--since` is inclusive, so an event at the recorded timestamp may be a note you
+already handled: check it, and if so re-arm with its `cursor`. To continue, start the next monitor with `--cursor <cursor>`. Keep the cursor on
 expiry; identical notes in the same second are one event. A failed read is an alert.
 Watch the backlog until `Unfolded:`, then watch its new epic from the beginning. On
 `Decision needed:` ask the person, on `Review-ready:` start review, and on `report:`

@@ -184,8 +184,8 @@ const RAISE_HEAD: &str = "Model: raise to complex";
 /// CLAUDE.md "막혔을 때" 의 꼴(상황·선택지·권장)을 영어 머리로 옮긴 것이다 — 스킬은 모든 저장소에 심긴다.
 const DECISION_HEAD: &str = "decision needed: <id>";
 
-/// 에픽 끝 리뷰를 `max` 로 올리는 멤버. **멤버를 따로 안 보니**(moai-bx6t) 이 한 줄이 그
-/// 멤버가 받는 유일한 비싼 눈이다. 일꾼 브리프 7 과 이 저장소 CLAUDE.md 의 리뷰 표가 같은
+/// 에픽 끝 리뷰를 한 칸 올리는 멤버 — **`review_raise = "write-path"` 일 때만 올린다**(2026-11-03 사용자 결정,
+/// moai-p9dh.lyc). 기본 `never` 에서는 `review_grade` 그대로다. 그 전에는 늘 `max` 로 올렸다. 일꾼 브리프 7 과 이 저장소 CLAUDE.md 의 리뷰 표가 같은
 /// 글을 쓴다 — 손으로 두 벌 적은 첫 판은 둘 다 `high` 잣대의 `동시성` 을 빠뜨렸다(위
 /// `DIFFICULTY` 가 한 번 겪은 그 샘이다). `the_rubric_is_the_review_table` 이 둘을 견준다.
 const EPIC_MAX: &str = "any member touched the write path, concurrency, the storage format or hooks";
@@ -195,9 +195,8 @@ const EPIC_MAX: &str = "any member touched the write path, concurrency, the stor
 /// `에픽 끝` 과 `에픽 밖 이슈 하나` 둘만 재어 그 판을 아무도 안 잰다 — 그날은 감독과 일꾼이
 /// 그때그때 골라 둘 다 `max` 였다. 맞았지만 규약이 시킨 것은 아니다.
 ///
-/// **한 에픽처럼 재고 한 칸 더 올린다.** 후보 셋(한 덩이로 재기·에픽마다 재서 높은 쪽·무조건
-/// 한 칸 더) 가운데 첫째와 셋째를 합친 것이다 — 리뷰가 두 에픽의 계약을 같이 보아야 하니
-/// `표면을 가로지르면 한 칸 더` 와 같은 결이고, 실제로 선 판 둘의 `max` 와도 맞는다.
+/// **한 에픽처럼 잰다.** 그 위에 한 칸 더 올리는 것은 `review_raise = "write-path"` 일 때뿐이고 [`EPIC_MAX`] 와
+/// 합쳐 한 번만 오른다(2026-11-03 사용자 결정, moai-p9dh.lyc). 그 전에는 늘 한 칸 더 올렸다(moai-h89f).
 /// 이 저장소 CLAUDE.md 의 리뷰 표와 `the_rubric_is_the_review_table` 이 이 글을 견준다.
 const BUNDLE: &str = "A worktree that carries members of two epics is measured as one epic";
 
@@ -265,10 +264,10 @@ fn top_role() -> &'static str {
 
 /// Epic-end review grade follows the person’s settings; escalation is opt-in.
 fn epic_review_rule() -> String {
-    let (model, grade) = (model_default("review"), model_default("review_grade"));
+    let (model, grade, raise) = (model_default("review"), model_default("review_grade"), model_default("review_raise"));
     format!(
         "**The epic-end review runs on the `review` model at `review_grade`** — read both and `review_raise` from\n\
-         `moai models --json` (defaults `{model}`, `{grade}`, `never`).\n\
+         `moai models --json` (defaults `{model}`, `{grade}`, `{raise}`).\n\
          With `review_raise = \"write-path\"`, raise one step if {EPIC_MAX}, or if the worktree carries members of two epics. Raise at most once, capped at `max`; `never` leaves the configured grade unchanged.\n\
          {BUNDLE}. If a worker's proposed grade differs, the supervisor corrects it from the settings and records why in the review issue angle."
     )
@@ -335,7 +334,7 @@ change them. If it reads heavier than `Model:` says, stop before you pick anythi
 back one line, `{RAISE_HEAD} — <why>`; the supervisor raises a new worker on the `{top}` model
 with the same message, its `Model:` and `Effort:` lines changed to that role's. What shows only
 after you picked up, you carry on and name in the report.
-Whether the epic-end review (7) goes to `max` is measured on this same rubric, member by member"#
+Whether the epic-end review (7) is raised a step — only when `review_raise` allows it — is measured on this same rubric, member by member"#
     )
 }
 
@@ -2672,7 +2671,8 @@ model and effort come from the `moai models --json` you read at the start of the
 {defaults}
 
 Development is split by one word of difficulty — `develop` or `complex`. The same rubric
-decides, member by member, whether the epic-end review goes to `max` (the worker's 7). Keep
+decides, member by member, whether the epic-end review is raised a step when `review_raise`
+allows it (the worker's 7). Keep
 two axes and the message carries two sets of judgement, and on the day they differ the cheap
 model takes the write path.
 
@@ -3623,8 +3623,9 @@ Codex can leave its last frame over a shell. Never use another server's pane ids
 ### Read the Codex input box
 
 Run `python3 "<moai-tmux skill dir>/scripts/codex-pane.py" ready <pane>` immediately
-before input. It checks mode, liveness and the composer and refuses uncertainty. The
-pane must already be identified as belonging to this repository. {CODEX_EMPTY_BOX}
+before input, from `<root>`. It checks mode, liveness and the composer and refuses uncertainty,
+and it refuses a pane whose current path lies outside the checkouts `git worktree list` names
+there. Identify the pane as this repository's first all the same. {CODEX_EMPTY_BOX}
 
 ### Open a Codex worker
 
@@ -3650,7 +3651,11 @@ stop and tell the person; a menu, question or permission prompt is theirs.
 
 ### Paste the assignment
 
-The helper is `scripts/codex-pane.py` in the moai-tmux skill. Use `moai supervise message <epic> --help` to assemble the assignment text; its first line names the absolute path to `references/worker-codex.md`. Save it
+The helper is `scripts/codex-pane.py` in the moai-tmux skill. Assemble the assignment with
+`moai -C "<root>" supervise message <id>`, giving `--model` (`<codex>` and the difficulty), `--effort`,
+`--base`, `--root-branch` and `--from` (your ListAgents name) plus the other slots its `--help` lists —
+an epic goes from step 2, a backlog item from step 1. Its first line names the absolute path to `references/worker-codex.md`
+beside `worker.md` in `moai-supervise`; pass `--steps <that path>` when the skill is not planted under `<root>`. Save it
 under the epic scratch directory. Confirm the fields and the person's approval, then run
 `python3 "<moai-tmux skill dir>/scripts/codex-pane.py" send <pane> <file>`; it rechecks
 before pasting and before submission. Tell the person which pane received it. "Label the
@@ -3956,10 +3961,12 @@ neither is an error or an answer without `state`."#;
 /// Codex 보고만 트래커에서 기다린다. 두 손(cmux·tmux)이 같은 스크립트를 싣는다(moai-uzhx.yv8).
 pub const REPORT_WATCH: &str = r#"### Watch the epic for the Codex report
 
-Before sending, record the latest journal timestamp. Arm a `Monitor` with
+Before sending, record the latest `journal[].ts` of `moai -C "<root>" show <epic> --json`
+(an empty journal uses `1970-01-01T00:00:00Z`). Arm a `Monitor` with
 `moai -C "<root>" watch <epic> --since <timestamp>`; it prints one JSON event containing
 `head`, `ts`, and a resumable `cursor`. It returns immediately for a matching existing
-note. To continue, start the next monitor with `--cursor <cursor>`. Keep the cursor on
+note — `--since` is inclusive, so an event at the recorded timestamp may be a note you
+already handled: check it, and if so re-arm with its `cursor`. To continue, start the next monitor with `--cursor <cursor>`. Keep the cursor on
 expiry; identical notes in the same second are one event. A failed read is an alert.
 Watch the backlog until `Unfolded:`, then watch its new epic from the beginning. On
 `Decision needed:` ask the person, on `Review-ready:` start review, and on `report:`
@@ -4807,7 +4814,7 @@ const STAY_LINE: &str = "Worktree: stay in the root and reach it by absolute pat
 /// `the_message_carries_every_slot_the_steps_read` 가 둘을 견준다.
 fn message() -> String {
     format!(
-        r#"    You are handed backlog <id> — <title>. Read <steps file> and follow its steps from step 1.
+        r#"    {BACKLOG_FIRST}
     Read first: moai show <id>
     {MODEL_SLOT}
     {EFFORT_SLOT}
@@ -4828,7 +4835,12 @@ fn message() -> String {
 
 /// 감독의 2-2 가 펼치기를 맡기는 메시지의 첫 줄(moai-w25x.jby) — 이미 펼친 에픽을 걸음 2 부터. 4-3 으로 남은 멤버를
 /// 보낼 때(감독 5)와 한 줄이라 한 자리에 둔다.
-const PLAN_FIRST: &str = "You are handed epic <epic> — <title>. It is already unfolded; do not promote. Read <steps file> and follow its steps from step 2.";
+pub(crate) const PLAN_FIRST: &str = "You are handed epic <epic> — <title>. It is already unfolded; do not promote. Read <steps file> and follow its steps from step 2.";
+
+/// [`message`] 의 첫 줄 — backlog 를 걸음 1 부터(펼치기부터) 맡긴다. `moai supervise message` 가 backlog 에 같은 줄을
+/// 쓴다: 둘로 적으면 Codex 에 붙이는 배정만 다른 걸음을 가리키는 날이 온다.
+pub(crate) const BACKLOG_FIRST: &str =
+    "You are handed backlog <id> — <title>. Read <steps file> and follow its steps from step 1.";
 
 /// 감독이 `plan` 역할의 모델로 세우는 펼치기 서브에이전트의 프롬프트(moai-w25x.jby, 2026-10-26 사용자 결정). 역할 표의
 /// `plan` 이 어디에도 안 쓰였다 — 일꾼은 제 모델로 펼쳐, 사람이 그 키를 적어도 안 들었다(리뷰 moai-9tqo.jdi 15번).
@@ -6718,7 +6730,10 @@ stop sending outside work while a release runs",
             rule.contains("`review` model at `review_grade`") && rule.contains("`moai models --json`"),
             "에픽 끝 리뷰가 역할의 모델과 등급을 설정에서 안 읽는다 — {rule}"
         );
-        assert!(rule.contains(EPIC_MAX) && rule.contains("review_raise"), "EPIC_MAX 가 max 로 안 올린다 — {rule}");
+        assert!(
+            rule.contains(EPIC_MAX) && rule.contains("review_raise"),
+            "EPIC_MAX 가 review_raise 로 한 칸 올리는 조건이 아니다 — {rule}"
+        );
         // 옛 사다리("한 칸 위", `medium` 이면 가운데 모델)가 돌아오면 붉어진다 — 그 아래 칸이 리뷰를 싼 모델에 맡겼다.
         assert!(
             !rule.contains("one step above the heaviest member") && !rule.contains("means `"),
@@ -6973,11 +6988,11 @@ stop sending outside work while a release runs",
             let row = format!("| `{level}` | {how} |");
             assert!(claude.contains(&row), "CLAUDE.md 의 리뷰 표와 {level} 의 잣대가 갈라졌다 — {row}");
         }
-        // 에픽 끝을 `max` 로 올리는 멤버도 두 자리가 같은 글이다 — 멤버를 따로 안 보니
-        // 여기서 `동시성` 이 빠지면 그 멤버는 한 번도 비싼 눈을 안 받는다.
+        // 에픽 끝을 한 칸 올리는 멤버(`review_raise = "write-path"` 일 때)도 두 자리가 같은 글이다 — 멤버를
+        // 따로 안 보니 여기서 `동시성` 이 빠지면 그 설정을 켠 사람의 그 멤버가 한 번도 더 비싼 눈을 안 받는다.
         let brief = worker();
-        assert!(claude.contains(EPIC_MAX), "CLAUDE.md 의 에픽 끝 max 줄이 브리프와 갈라졌다 — {EPIC_MAX}");
-        assert!(brief.contains(EPIC_MAX), "브리프 7 이 에픽 끝 max 줄을 안 쓴다 — {EPIC_MAX}");
+        assert!(claude.contains(EPIC_MAX), "CLAUDE.md 의 에픽 끝 승격 줄이 브리프와 갈라졌다 — {EPIC_MAX}");
+        assert!(brief.contains(EPIC_MAX), "브리프 7 이 에픽 끝 승격 줄을 안 쓴다 — {EPIC_MAX}");
         // 에픽 둘에 걸친 묶음도 같은 꼴로 두 자리에 선다(moai-h89f) — 표에만 적으면 일꾼이
         // 받는 것은 브리프뿐이라 그 판을 재는 잣대가 리뷰를 부르는 창에 한 번도 안 닿는다.
         assert!(claude.contains(BUNDLE), "CLAUDE.md 의 리뷰 표에 에픽 둘에 걸친 묶음이 없다 — {BUNDLE}");
@@ -7747,9 +7762,6 @@ stop sending outside work while a release runs",
         assert!(nine.contains("**In a subagent, skip this step**"), "서브에이전트가 제 모델 줄을 적는다");
     }
 
-    /// **리뷰는 일꾼의 중첩 서브에이전트로 돈다**(2026-10-12 사용자 결정 5, moai-9tqo.p1p). 일꾼 안에서 부른 리뷰는
-    /// 일꾼의 모델을 물려받으니 `review` 역할의 모델로 따로 세운다. 브리프는 fxp 가 잰 꼴을 든다 — `Skill` 은
-    /// 백그라운드 포크라 끝난 알림을 기다리고, `--fix` 는 커밋 없이 남기고, 남은 것은 `TaskStop` 으로 멈춘다.
     #[test]
     fn planning_and_review_scratch_are_scoped_to_the_work() {
         let draft = plan_brief_draft();
@@ -7763,6 +7775,9 @@ stop sending outside work while a release runs",
         assert!(worker().contains("<scratchpad>/<epic>/angle.md"));
     }
 
+    /// **리뷰는 일꾼의 중첩 서브에이전트로 돈다**(2026-10-12 사용자 결정 5, moai-9tqo.p1p). 일꾼 안에서 부른 리뷰는
+    /// 일꾼의 모델을 물려받으니 `review` 역할의 모델로 따로 세운다. 브리프는 fxp 가 잰 꼴을 든다 — `Skill` 은
+    /// 백그라운드 포크라 끝난 알림을 기다리고, `--fix` 는 커밋 없이 남기고, 남은 것은 `TaskStop` 으로 멈춘다.
     #[test]
     fn a_subagent_worker_raises_the_review_on_the_review_brief() {
         let (brief, prompt) = (worker(), review_brief());
@@ -8320,6 +8335,21 @@ stop sending outside work while a release runs",
         assert!(REPORT_WATCH.contains("watch <epic> --since"));
         assert!(REPORT_WATCH.contains("--cursor <cursor>"));
         assert!(REPORT_WATCH.contains("identical notes"));
+    }
+
+    /// **Codex 칸 도우미의 시험을 `cargo test` 가 돌린다**(리뷰 moai-p9dh.dz7) — `tests/codex_pane_test.py` 는 아무
+    /// 길에도 안 걸려 있어, 도우미를 고쳐도 붉어지는 것이 없었다. tmux 는 모두 가짜라 사람의 서버에 안 닿는다.
+    #[test]
+    fn the_codex_pane_helper_tests_run() {
+        let Some(python) = tool("python3") else { return };
+        let test = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/codex_pane_test.py");
+        let out = std::process::Command::new(python).args(["-I", "-B"]).arg(&test).output().unwrap();
+        assert!(
+            out.status.success(),
+            "{}{}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        );
     }
 
     #[test]
@@ -9511,7 +9541,8 @@ stop sending outside work while a release runs",
             "ready <pane>",
             "clear <pane>",
             "send <pane> <file>",
-            "moai supervise message",
+            "supervise message <id>`",
+            "--steps <that path>",
             "Report-checked:",
             "ask the person **once**",
         ] {

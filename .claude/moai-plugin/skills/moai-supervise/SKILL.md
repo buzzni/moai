@@ -414,7 +414,8 @@ model and effort come from the `moai models --json` you read at the start of the
 With nothing written and no repository table, the defaults are `plan` `fable` · `develop` `sonnet` · `complex` `opus` · `review` `opus` · `docs` `sonnet` · `bulk` `haiku` · `codex` `gpt-6.1-sol` · `review_grade` `xhigh` · `review_raise` `never` · `effort` `medium` · `effort_complex` `high` · `effort_plan` `xhigh`.
 
 Development is split by one word of difficulty — `develop` or `complex`. The same rubric
-decides, member by member, whether the epic-end review goes to `max` (the worker's 7). Keep
+decides, member by member, whether the epic-end review is raised a step when `review_raise`
+allows it (the worker's 7). Keep
 two axes and the message carries two sets of judgement, and on the day they differ the cheap
 model takes the write path.
 

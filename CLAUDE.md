@@ -433,9 +433,10 @@ CI 의 잡 이름 `release 바이너리 15MB 예산` 은 required check 라 옛 
 2026-09-20 사용자 결정(`moai-54k2`)에 따라 `guide::DIFFICULTY`·`EPIC_MAX` 가 영어가 되었고,
 `the_rubric_is_the_review_table` 이 이 표의 그 칸과 글자째 견준다. 한쪽만 고치면 붉어진다.
 
-**승격은 설정으로만 허용한다.** `review_raise = "write-path"` 는 위 조건이나 두 에픽 묶음에 한 칸 승격하며 중복 승격은 없다. `max` 가 상한이다. 기본 `never` 는 설정된 등급을 그대로 쓴다. 작업자의 제안이 설정과 다르면 감독은 설정으로 바로잡고 리뷰 이슈의 관점에 이유를 적는다.
+**승격은 설정으로만 허용한다**(2026-11-03 사용자 결정, `moai-p9dh.lyc`). `review_raise = "write-path"` 는 위 조건이나 두 에픽 묶음에 한 칸 승격하며 중복 승격은 없다. `max` 가 상한이다. 기본 `never` 는 설정된 등급을 그대로 쓴다. 작업자의 제안이 설정과 다르면 감독은 설정으로 바로잡고 리뷰 이슈의 관점에 이유를 적는다.
 
-에픽 밖 이슈 하나는 난이도 사다리를 그대로 둔다. 고른 등급과 까닭은 리뷰 이슈의 관점에 적는다.
+에픽 밖 이슈 하나는 난이도 사다리를 그대로 둔다 — 등급은 `low`·`medium`·`high`, 모델은 `low`·`medium` 이면
+`develop` 의 모델, `high` 면 `review` 의 모델이다. 고른 등급과 까닭은 리뷰 이슈의 관점(`-b`)에 한 줄로 적는다.
 
 **모델은 역할로 고르고, 역할의 모델은 사람의 것이다**(2026-10-12 사용자 결정, `moai-9tqo`).
 감독은 일꾼을 역할의 모델로 띄운 서브에이전트로 세우고(세션 일꾼 길은 사람이 창을 보고 싶을 때와
@@ -448,7 +449,7 @@ Codex 일꾼에 남는다), 역할마다의 모델은 사람의 사용자 설정
 | `plan` | 계획 — 요청을 에픽과 이슈로 가른다 | fable | `xhigh` (`effort_plan`) |
 | `develop` | 개발 — 대부분의 일 | sonnet | `medium` |
 | `complex` | 쓰기 경로·동시성·저장 형식·훅·여러 파일의 계약을 함께 바꾸는 것 | opus | `high` |
-| `review` | 에픽 끝 리뷰, 에픽마다 한 번 | opus | `xhigh` (위 `max` 줄이면 `max`) |
+| `review` | 에픽 끝 리뷰, 에픽마다 한 번 | opus | `review_grade` 기본 `xhigh` (`review_raise = "write-path"` 이고 위 한 칸 위 줄이면 한 칸 위) |
 | `docs` | 위키·CHANGELOG 만 고치는 것 | sonnet | `medium` |
 | `bulk` | 분류·요약, 64KB 넘는 리뷰 원문 줄이기, 같은 꼴의 기계적 고침 | haiku | `medium` |
 | `codex` | Codex 일꾼 — 서브에이전트가 아니다 | gpt-6.1-sol | — |
