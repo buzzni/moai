@@ -104,6 +104,76 @@ git config blame.ignoreRevsFile .git-blame-ignore-revs
 A clone that skips this is no worse off than before; `blame` just stops at the
 formatting commit.
 
+## The library
+
+The `moai` package has a library target, `src/lib.rs`, next to the binary. `src/main.rs`
+only calls `moai::run()`. The library is there so that a later daemon can run the same
+code in one process. It is not a published API.
+
+**What is public.** These modules are `pub`:
+
+- `model`, `fail`, `config`, `query`, `report` and `store`
+- `held`, `i18n`, `nav`, `tz`, `user_config`, `read_marks` and `style`, because the
+  public signatures of the first six name types from them (`i18n::Lang`, `tz::Zone`, …)
+
+Everything else stays inside the crate, and so does every `pub(crate)` item inside these
+modules. `tests/lib_api.rs` calls the library the way another crate would. If a change
+closes something that test uses, the test stops compiling.
+
+**There is no version promise.** The public surface follows the internal code: a
+refactor may rename, move or close any of it, and the version number does not change
+for that. `CHANGELOG.md` lists what a person using the binary sees. A third-party tool
+integrates through the CLI's `--json` output today, and through the API a later daemon
+will serve. It does not link this crate.
+
+**It is not safe in a long-running process yet.** The library was cut out of a binary
+that runs one command and exits, and it still depends on that:
+
+- `src/store.rs` keeps notices in process-wide statics (`MOVED`, `INVOKED`, `CLIMBED`,
+  `TALLY`, `MISSED`, `NOTED`, `UNREAD`, `UNREAD_NOW`, the thread-local `CAUGHT`,
+  `NEXT`/`MARK` and `NONCE`). `run()` empties them once, at the end. In a process
+  that serves many requests, the notices of one request leak into the next.
+- `src/cmd/mod.rs` keeps `PARTIAL`, `AFTER` and `EXIT` the same way. `src/lib.rs`
+  keeps the screen language in a `OnceLock` (`LANG`), so it is set once per process.
+- `-C <dir>` calls `std::env::set_current_dir`. It moves the working directory of the
+  whole process, and every thread moves with it.
+- A command (`cmd::*::run`) returns finished output lines (`R<Vec<String>>`), not data.
+
+Moving that state into a per-call context changes logic, so it is its own epic, with
+the same gates as below. Until it is done, do not build a daemon on this crate.
+
+**How a refactor that must not change behaviour is gated.** The split into library and
+binary merged only after three tools in `scripts/` reported no change. Use them again for
+the next refactor of this kind:
+
+```sh
+base=$(git merge-base develop HEAD)
+# build the binary at $base in a scratch place, and delete it afterwards
+scripts/bindiff.py --old <old moai> --new target/release/moai        # hand-picked cases
+scripts/bindiff_fuzz.py --old <old moai> --new target/release/moai   # random command lines
+scripts/bindiff.py latency --old <old moai> --new target/release/moai -n 300
+scripts/check-refactor.py --base "$base" --mode surface              # or --mode skeleton
+```
+
+- `bindiff.py` runs about 500 cases in English and Korean, plus one `moai web` round.
+  For each case it compares stdout, stderr, the exit code and every file the command
+  wrote, byte for byte.
+- `bindiff_fuzz.py` reads the command tree from `--help` and builds random command
+  lines: 10,000 per language by default, about 5 minutes. A seed and a case number
+  reproduce one case (`--seed S --case K`).
+- **Run each tool with the same binary as old and new first.** It must report 0
+  differences, or the tool cannot be trusted.
+- The tools fix the causes of noise instead of hiding output: the clock (`MOAI_NOW`),
+  the environment, the paths and the file times. They hide only values that change by
+  design: newly minted ids, the nanosecond counter in the hook's pick records, and the
+  web port and server pid.
+- `check-refactor.py` checks commits, so it refuses a dirty working tree. It needs
+  Python 3.11 or later. `skeleton` accepts only the move of `src/main.rs` into
+  `src/lib.rs`. `surface` accepts only `mod x;` → `pub mod x;` in `src/lib.rs` and
+  `pub(crate)` → `pub`.
+- To regenerate `docs/cli.md` with both binaries, call each by the name `moai`. The
+  `Usage:` line prints the name the binary was started as.
+
 ## The web page
 
 `moai web` serves a page built from `web/`, a TypeScript project (the Saycode
