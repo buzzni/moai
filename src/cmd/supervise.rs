@@ -143,8 +143,45 @@ pub fn message(ctx: &Ctx, id: &str, f: &Fields) -> R<Vec<String>> {
     };
     let subdir = f.subdir.map(|s| format!("Subdir: {s}\n")).unwrap_or_default();
     let beside = crate::guide::BESIDE.replace("<other work>", f.alongside);
+    // Validate only here: a bad key or value in this optional table must not disable unrelated
+    // commands. (A line the file parser itself cannot read — a multi-line array, an unbalanced
+    // quote — still stops every command, like any malformed line in this file.)
+    // **A misspelt key is refused, not skipped** — skipping it drops the repository's instruction
+    // without a word, which is the very miss this setting exists to prevent (moai-n6fs).
+    let mut extra = String::new();
+    let mut written = None;
+    for entry in &repo.config.supervise {
+        if entry.key != "extra_lines" {
+            return Err(Fail::new(format!(
+                "[supervise] {} on line {} is not a setting — the table takes only extra_lines",
+                entry.key, entry.line
+            )));
+        }
+        if let Some(first) = written.replace(entry.line) {
+            return Err(Fail::new(format!(
+                "[supervise] extra_lines is written twice, on lines {first} and {}",
+                entry.line
+            )));
+        }
+        let lines: Vec<String> = serde_json::from_str(&entry.raw).map_err(|_| {
+            Fail::new(format!(
+                "[supervise] extra_lines on line {} must be a single-line array of double-quoted strings",
+                entry.line
+            ))
+        })?;
+        // One line each, and nothing a terminal acts on: the message is pasted into a worker's
+        // pane, where an escape sequence could end the bracketed paste and submit half of it.
+        if lines.iter().any(|line| line.chars().any(|c| c.is_control() || matches!(c, '\u{2028}' | '\u{2029}'))) {
+            return Err(Fail::new(format!(
+                "[supervise] extra_lines on line {}: each entry must be one line without control characters",
+                entry.line
+            )));
+        }
+        extra =
+            lines.into_iter().map(|line| format!("{}\n", line.replace("<id>", id).replace("<root>", &root))).collect();
+    }
     let text = format!(
-        "{first}\nRead first: moai show {id}\nModel: {}\nEffort: {}\nWorker: codex\nSubagents: none\nWriting: {writing}\n{beside}\nRoot branch: {}\nBase branch: {}\nMilestone: {}\nDue: {}\nRoot: {root}\n{subdir}Person: {}\nWorktree: aim every command at the worktree absolute path (workdir or cd) — never edit the root checkout.\nfrom: {}",
+        "{first}\nRead first: moai show {id}\nModel: {}\nEffort: {}\nWorker: codex\nSubagents: none\nWriting: {writing}\n{beside}\nRoot branch: {}\nBase branch: {}\nMilestone: {}\nDue: {}\nRoot: {root}\n{subdir}Person: {}\nWorktree: aim every command at the worktree absolute path (workdir or cd) — never edit the root checkout.\n{extra}from: {}",
         f.model,
         f.effort,
         f.root_branch,
