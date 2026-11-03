@@ -5664,7 +5664,7 @@ pub struct Dues {
     late: Vec<(String, String)>,
     /// (id, 따를 기한, 지금 우선순위) — 기한이 올릴 수 있는 줄([`due_eligible`]) 가운데 따를 기한이 있는 것. 뒤처진
     /// 것이 `due_priority_behind` 알림이 된다. 판정은 `moai due apply` 와 같은 자([`raise_to`])다.
-    behind: Vec<(String, String, u8)>,
+    behind: Vec<(String, Option<String>, Option<String>, u8)>,
     /// 기한 규칙 — 문턱을 든다([`raise_to`]). 꺼졌으면 알림이 안 선다: 끈 사람에게 `moai due apply` 를 치라고 하면 그
     /// 동사는 아무것도 안 한다.
     rule: crate::config::DueRule,
@@ -5779,9 +5779,9 @@ impl Dues {
     /// 기한에 뒤처진 줄 — (id, 남은 날, 따를 기한). 판정은 `moai due apply` 와 같은 [`raise_to`] 다 — 꺼진 규칙은
     /// 거기서 아무 줄도 안 부른다.
     fn behind_on<'s>(&'s self, today: &'s str) -> impl Iterator<Item = (&'s str, i64, &'s str)> + 's {
-        self.behind.iter().filter_map(move |(id, due, p)| {
-            let left = crate::model::days_until(due, today)?;
-            raise_to(left, *p, &self.rule).map(|_| (id.as_str(), left, due.as_str()))
+        self.behind.iter().filter_map(move |(id, own, above, p)| {
+            let (_, due, _) = priority_choice(own.as_deref(), above.as_deref(), today, *p, &self.rule)?;
+            Some((id.as_str(), crate::model::days_until(due, today)?, due))
         })
     }
 
@@ -5824,6 +5824,7 @@ impl Dues {
 ///
 /// 지난 기한은 남은 날이 음수라 늘 `p0` 칸에 든다. 문턱은 "이하" 다: `p2_days = 7` 이면 7일 남은 `p3` 줄이 `p2` 가 된다.
 /// 꼴이 틀린 기한은 답이 없다.
+#[cfg(test)]
 pub fn due_priority(i: &Issue, due: &str, today: &str, rule: &crate::config::DueRule) -> Option<u8> {
     if !due_eligible(i) {
         return None;
@@ -5862,6 +5863,26 @@ fn raise_to(left: i64, priority: u8, rule: &crate::config::DueRule) -> Option<u8
         _ => return None,
     };
     (want < priority).then_some(want)
+}
+
+// Both deadlines matter: an earlier inherited date cannot hide an own p0 deadline.
+fn priority_choice<'a>(
+    own: Option<&'a str>,
+    above: Option<&'a str>,
+    today: &str,
+    priority: u8,
+    rule: &crate::config::DueRule,
+) -> Option<(u8, &'a str, bool)> {
+    let own_raise =
+        own.and_then(|d| raise_to(crate::model::days_until(d, today)?, priority, rule).map(|p| (p, d, false)));
+    let inherited = above.and_then(|d| {
+        let to = raise_to(crate::model::days_until(d, today)?, priority, rule)?.max(1).max(priority.saturating_sub(1));
+        (to < priority).then_some((to, d, true))
+    });
+    match (own_raise, inherited) {
+        (Some(a), Some(b)) => Some(if a.0 < b.0 || (a.0 == b.0 && a.1 <= b.1) { a } else { b }),
+        (a, b) => a.or(b),
+    }
 }
 
 /// 따를 기한 — 제 것과 조상의 것([`DueLadder::open_ceiling`]) 가운데 가장 이른 것, 그리고 그것이 조상의 것이면 그
@@ -6069,9 +6090,12 @@ fn due_candidates_over<'a>(
     live.iter()
         .filter(|i| due_open(i))
         .filter_map(|i| {
-            let (due, from) = followed(i.deadline(), ladder.open_ceiling_row(i, closed))?;
-            // 쓰기의 검사까지 든 자([`due_eligible`])는 여기서 판정이 묻는다 — 따를 기한이 선 줄만 치른다.
-            let to = due_priority(i, due, &today, rule)?;
+            let above = ladder.open_ceiling_row(i, closed);
+            let (to, due, inherited) = priority_choice(i.deadline(), above.map(|c| c.due), &today, i.priority(), rule)?;
+            if !due_eligible(i) {
+                return None;
+            }
+            let from = if inherited { above.map(|c| c.above) } else { None };
             let left = crate::model::days_until(due, &today)?;
             Some(Raise { issue: i, to, left, due, from })
         })
@@ -6861,9 +6885,10 @@ fn status_in_scope<'a, 'c>(
                 .enumerate()
                 .filter(|(k, i)| due_open(i) && visible(i) && off[*k].is_none() && !eclipsed(i))
                 .filter_map(|(_, i)| {
-                    let (due, _) = followed(i.deadline(), priority.and_then(|l| l.open_ceiling_row(i, &closed)))?;
-                    // 쓰기의 검사는 따를 기한이 선 줄만 치른다([`due_open`]).
-                    due_eligible(i).then(|| (i.id.clone(), due.to_string(), i.priority()))
+                    let own = i.deadline();
+                    let above = priority.and_then(|l| l.open_ceiling_row(i, &closed)).map(|c| c.due);
+                    ((own.is_some() || above.is_some()) && due_eligible(i))
+                        .then(|| (i.id.clone(), own.map(str::to_string), above.map(str::to_string), i.priority()))
                 })
                 .collect(),
         },
@@ -7121,6 +7146,33 @@ mod tests {
         assert_eq!(due_priority(&row(3), "2026-10-26", today, &wide), Some(2));
     }
 
+    #[test]
+    fn inherited_deadlines_stop_at_p1_and_own_deadline_can_reach_p0() {
+        let now = "2026-10-16T12:00:00Z";
+        let mut milestone = make("argos-aaaa", Kind::Milestone, "todo");
+        milestone.due_on = Some("2026-10-16".into());
+        let mut rows = vec![milestone];
+        for n in 0..10 {
+            let mut row = make(&format!("argos-{n:04}"), Kind::Issue, "todo");
+            row.milestone = Some("argos-aaaa".into());
+            row.priority = Some(2);
+            rows.push(row);
+        }
+        let cfg = due_cfg(crate::config::DueRule::DEFAULT);
+        let raises = due_raises(&rows, &rows, now, utc(), &cfg);
+        assert_eq!(raises.len(), 10);
+        assert!(raises.iter().all(|r| r.to == 1 && r.from.is_some()));
+        rows[3].priority = Some(3);
+        let first = due_raises(&rows, &rows, now, utc(), &cfg);
+        assert_eq!(first.iter().find(|r| r.issue.id == rows[3].id).unwrap().to, 2);
+        rows[1].due_on = Some("2026-10-17".into());
+        let raises = due_raises(&rows, &rows, now, utc(), &cfg);
+        let own = raises.iter().find(|r| r.issue.id == rows[1].id).unwrap();
+        assert_eq!((own.to, own.from), (0, None));
+        rows[2].priority = Some(1);
+        assert!(!due_raises(&rows, &rows, now, utc(), &cfg).iter().any(|r| r.issue.id == rows[2].id));
+    }
+
     /// 날 경계는 **읽는 사람의 달**이다 — UTC 로 15일 20시는 서울로 16일 새벽이라, 17일 기한이 이틀에서 하루가 된다.
     #[test]
     fn due_raises_reads_the_reader_s_day() {
@@ -7161,8 +7213,8 @@ mod tests {
             got,
             [
                 ("argos-ssss", 0, "2026-10-14", None),
-                ("argos-llll", 0, "2026-10-17", Some("argos-eeee")),
-                ("argos-mmmm", 0, "2026-10-17", Some("argos-eeee")),
+                ("argos-llll", 1, "2026-10-17", Some("argos-eeee")),
+                ("argos-mmmm", 1, "2026-10-17", Some("argos-eeee")),
             ],
             "급한 것이 앞이고, 에픽 줄과 미룬 에픽 밑은 빠진다"
         );

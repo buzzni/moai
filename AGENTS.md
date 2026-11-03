@@ -1,4 +1,4 @@
-<!-- moai:begin v:0.42.1 hash:001ea3ee -->
+<!-- moai:begin v:0.45.0 hash:55f95d5f -->
 ## Issue tracker — moai
 
 This repository's work lives in `.moai/issues.jsonl`.
@@ -230,13 +230,11 @@ that grew long while you parked it and that length spreads into the issues, so
 write a short new title when you unfold — the original text stays on that backlog,
 and the history line about being unfolded from it leads back there.
 
-**The backlog's milestone and body go onto the epic by themselves.** `promote` puts
-both on the epic it unfolds — a milestone is inherited, so the epic alone carries
-it to every member, the ones added later included, and the body is what lets
-`moai show <epic>` say why these issues are one bundle. Not onto every issue: the
-original stays on the closed backlog and the history leads back to it, and the one
-place worth filling is the epic, so the window that picks a member up does not
-have to press every member to find out what this is. The backlog item's own deadline
+**The backlog's milestone and body go onto the new epic.** An explicit `--body`
+replaces the epic body. When the plan has one member, that member also receives the
+original backlog body, including when unfolding into a standing epic. When it has
+several members, each receives `Unfolded-from: <backlog id>` so its source is easy
+to find. The original remains on the closed backlog. The backlog item's own deadline
 comes over onto the epic too, unless the plan's `#` line carries an `@` of its own — onto
 the epic only, since a deadline bounds the members without being inherited.
 
@@ -246,7 +244,7 @@ in that epic's release even with an empty field of its own, and a field of its o
 that loses to the epic it sits in never reaches the new epic. One reader answers
 where a row belongs, on every surface.
 
-**Unfolding into a standing epic (`-e <epic>`) carries neither**, and no deadline either.
+**Unfolding into a standing epic (`-e <epic>`) carries no milestone or deadline.**
 That epic is already the owner — its members inherit its milestone, and writing the backlog's
 over theirs would stand one bundle in two places.
 
@@ -321,14 +319,14 @@ as `due_beyond_parent`.
 
 **A near deadline raises priority, by one verb.** `moai due apply` (`--dry-run` shows it
 first) raises an open, not deferred issue or backlog item by the deadline it follows —
-the earliest of its own and those of the open, not deferred milestone, epic and parents it
-stands under. A group's column comes from its members, including archived members: a closed
+its own deadline and the earliest deadline of its open, not deferred milestone, epic
+and parents. It uses the deadline that calls for the higher priority; ties use the earlier day. A group's column comes from its members, including archived members: a closed
 group lends no priority deadline, and an empty group stays in the first column. Deadline limits
 enforced on writes still count closed ancestors. If needed archive context cannot be read, this command
 refuses without writing; repair the archive with `moai show --archived` and try again. One
-day left or less (today and past included) is `p0`, two or less `p1`, seven or less `p2`,
-and it leaves on the row a note `Due-priority: pX → pY (N days left, due D)` in the same
-write, ending in `from <id>` when the deadline was that row's. It only raises, never
+day left or less (today and past included) is `p0` for the row’s own deadline, two or
+less `p1`, seven or less `p2`; inherited deadlines raise at most one step per application and only as far as `p1`. It leaves on the row a note `Due-priority: pX → pY (N days left, due D)` in the same
+write, ending in `from <id>` when the deadline came from an ancestor. It only raises, never
 lowers, so the value a person set is never fought over and the old one stays in that
 note. A group row is never raised itself — its members are: the deadline a plan's
 `--due` puts on an epic raises its members as it nears. Reading never writes, so nothing

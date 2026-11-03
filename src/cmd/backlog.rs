@@ -176,8 +176,21 @@ pub fn promote(ctx: &Ctx, args: PromoteArgs) -> R<Vec<String>> {
     // `add --from` 과 **한 길**이다 — 읽기·템플릿 채우기·형식 읽기(moai-cypw).
     // `-e` 면 에픽은 이미 있다 — 계획은 그 에픽에 넣을 이슈만 적는다(moai-f3ml).
     let shape = if args.epic.is_some() { Shape::Members } else { Shape::Plan };
+    if crate::cmd::add::reads_stdin(&args.from) && args.body.as_deref().is_some_and(crate::cmd::add::reads_stdin) {
+        return Err(Fail::coded(
+            format!(
+                "{}\n      {}",
+                crate::i18n::say(ctx.lang(), "refuse.plan_body_stdin"),
+                crate::i18n::say(ctx.lang(), "refuse.plan_body_stdin_how")
+            ),
+            super::code::BAD_INPUT,
+        ));
+    }
+    let explicit_body =
+        crate::cmd::add::read_body_told(args.body.clone(), ctx, crate::cmd::add::reads_stdin(&args.from))?;
     let drafts = crate::cmd::add::read_plan(&args.from, &args.var, shape, ctx.lang())?;
     let into = args.epic.as_deref();
+    let members = drafts.iter().filter(|d| d.kind == model::Kind::Issue).count();
 
     // **연습은 저장소를 안 만진다.** AI 가 펼친 안을 사람이 한 번 보고
     // "좋다" 하는 자리라, 여기서 쓰면 그 "좋다" 가 뒤늦은 말이 된다.
@@ -221,7 +234,10 @@ pub fn promote(ctx: &Ctx, args: PromoteArgs) -> R<Vec<String>> {
         // 두던 판은 둘을 깼다 — 제목도 본문도 넘치는 판에서 연습은 제목을, 진짜는 본문을 댔고,
         // 죽은 릴리스에 걸린 생각이면 연습만 그 알림 한 줄을 더 찍었다. 둘 다 `say_if_dead` 의
         // 약속("연습과 진짜가 같은 줄을 낸다")과 어긋난다.
-        check_carried_body(&args.id, carried_body(thought, into))?;
+        check_carried_body(
+            &args.id,
+            if members == 1 || (into.is_none() && explicit_body.is_none()) { thought.body.as_deref() } else { None },
+        )?;
         let stone = stone_of(&load.issues, &args.id, into);
         say_if_inherited(&load.issues, thought, stone.as_deref(), ctx.lang());
         say_if_dead(&load.issues, &repo.config, stone.as_deref(), ctx.lang());
@@ -232,7 +248,7 @@ pub fn promote(ctx: &Ctx, args: PromoteArgs) -> R<Vec<String>> {
         // 것이 아니라 그 생각이다(moai-oejf). 바로 위가 제 자로 잰다.
         let rooted = crate::cmd::add::Rooted {
             milestone: stone.as_deref(),
-            body: None,
+            body: explicit_body.as_deref(),
             due: carried_due(thought, into),
             start: carried_start(thought, into),
         };
@@ -327,10 +343,17 @@ pub fn promote(ctx: &Ctx, args: PromoteArgs) -> R<Vec<String>> {
             //
             // **베껴 둔다** — `create_drafts` 가 `issues` 를 빌려 쓰므로 그 앞에서 `thought` 의
             // 빌림이 끝나야 한다. 위의 제목·담당과 같은 까닭이다.
-            let text = carried_body(thought, into).map(str::to_string);
+            let member_body =
+                if members == 1 { thought.body.clone() } else { Some(format!("Unfolded-from: {}", args.id)) };
+            if members == 1 {
+                check_carried_body(&args.id, member_body.as_deref())?;
+            }
+            let text = explicit_body.clone().or_else(|| carried_body(thought, into).map(str::to_string));
             // **거절은 `create_drafts` 앞이다**(moai-oejf) — 뒤에 두면 `store` 가 이 쓰기가
             // 짓는 에픽의 제목을 대고, 받는 쪽은 제 계획의 첫 줄을 줄이러 간다.
-            check_carried_body(&args.id, text.as_deref())?;
+            if explicit_body.is_none() {
+                check_carried_body(&args.id, text.as_deref())?;
+            }
             let stone = stone_of(issues, &args.id, into);
             say_if_inherited(issues, thought, stone.as_deref(), lang);
             say_if_dead(issues, cfg, stone.as_deref(), lang);
@@ -343,8 +366,16 @@ pub fn promote(ctx: &Ctx, args: PromoteArgs) -> R<Vec<String>> {
                 start: start.as_deref(),
             };
 
-            let (mut entries, made) =
+            let first_new = issues.len();
+            let (mut entries, mut made) =
                 crate::cmd::add::create_drafts(issues, cfg, reserved, &drafts, into, rooted, &heir, &by, &at)?;
+
+            for (member, row) in made.iter_mut().zip(&mut issues[first_new..]) {
+                if member.kind == model::Kind::Issue {
+                    member.body = member_body.clone();
+                    row.body = member.body.clone();
+                }
+            }
 
             // **어느 쪽에서 봐도 이어진다.** 펼친 계획에서 "어디서 나왔나" 를
             // 물을 수도, 담아 둔 생각에서 "무엇이 됐나" 를 물을 수도 있다.

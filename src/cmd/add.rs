@@ -85,7 +85,7 @@ pub fn read_plan(from: &str, vars: &[String], shape: draft::Shape, lang: crate::
 /// 잰 뒤에 쓰는 자리는 [`run`] 의 다툼 검사 하나다 — [`read_body`] 와 [`read_source`] 는 여전히
 /// `-` 만 stdin 으로 연다. 그 둘을 넓히면 `/dev/stdin` 이 없는 기계에서 뜻이 갈리지만, **다툰다고
 /// 말하는 것**은 그 파일이 실제로 stdin 이든 아니든 맞다: 둘 다 열리면 먼저 읽는 쪽이 다 마신다.
-fn reads_stdin(arg: &str) -> bool {
+pub(crate) fn reads_stdin(arg: &str) -> bool {
     matches!(arg, "-" | "/dev/stdin" | "/dev/fd/0" | "/proc/self/fd/0")
 }
 
@@ -157,7 +157,7 @@ pub fn read_body_said(arg: Option<String>, ctx: &Ctx) -> R<Option<String>> {
 /// [`read_body_said`] 의 몸 — `plan_on_stdin` 은 **계획이 이미 stdin 을 쥐었는가**다(리뷰). 그 판에
 /// `--body - < 파일` 을 권하면 따라 친 부름이 `refuse.plan_body_stdin` 으로 거절된다 — 이 알림을 낳은
 /// 바로 그 부름(`moai add --from - --body plan.md`)이 그 판이라, 그때는 계획을 파일로 옮기라고 댄다.
-fn read_body_told(arg: Option<String>, ctx: &Ctx, plan_on_stdin: bool) -> R<Option<String>> {
+pub(crate) fn read_body_told(arg: Option<String>, ctx: &Ctx, plan_on_stdin: bool) -> R<Option<String>> {
     let given = if plan_on_stdin { Given::BodyPlanOnStdin } else { Given::Body };
     say_if_text_names_a_file(arg.as_deref(), ctx, given);
     let from_stdin = arg.as_deref() == Some("-");

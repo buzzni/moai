@@ -7276,7 +7276,7 @@ fn due_apply_raises_by_deadline_notes_it_and_writes_nothing_twice() {
     };
     assert_eq!((dry["due_priority"].as_str(), dry["dry_run"].as_bool()), (Some("auto"), Some(true)), "{dry}");
     assert_eq!(dry["raised"].as_array().unwrap().len(), 2, "{dry}");
-    assert_eq!(row(&dry, 0), (inherits.clone(), 2, 0, 1), "급한 것이 앞이고 에픽의 기한을 따른다 — {dry}");
+    assert_eq!(row(&dry, 0), (inherits.clone(), 2, 1, 1), "급한 것이 앞이고 에픽의 기한을 따른다 — {dry}");
     assert_eq!(dry["raised"][0]["due_from"], serde_json::json!(epic), "{dry}");
     assert_eq!(row(&dry, 1), (own.clone(), 3, 2, 3), "{dry}");
     assert!(dry["raised"][1].get("due_from").is_none(), "제 기한에 조상을 댔다 — {dry}");
@@ -7287,10 +7287,10 @@ fn due_apply_raises_by_deadline_notes_it_and_writes_nothing_twice() {
         let v: serde_json::Value = serde_json::from_str(&ok(p, &["show", id, "--json"])).unwrap();
         v["priority"].as_u64().unwrap()
     };
-    assert_eq!((prio(&inherits), prio(&own), prio(&far), prio(&urgent), prio(&shelved)), (0, 2, 2, 0, 2));
+    assert_eq!((prio(&inherits), prio(&own), prio(&far), prio(&urgent), prio(&shelved)), (1, 2, 2, 0, 2));
     assert!(ok(p, &["show", &epic, "--json"]).contains(r#""priority":2"#), "에픽 줄 자신을 올렸다");
     let said = ok(p, &["show", &inherits]);
-    assert!(said.contains(&format!("Due-priority: p2 → p0 (1 days left, due 2026-09-12 from {epic})")), "{said}");
+    assert!(said.contains(&format!("Due-priority: p2 → p1 (1 days left, due 2026-09-12 from {epic})")), "{said}");
     assert!(ok(p, &["show", &own]).contains("Due-priority: p3 → p2 (3 days left, due 2026-09-14)"));
     assert!(!ok(p, &["show", &far]).contains("Due-priority"), "안 올린 줄에 노트를 달았다");
 
@@ -7370,7 +7370,7 @@ fn due_apply_skips_a_row_the_write_would_refuse() {
         let v: serde_json::Value = serde_json::from_str(&ok(p, &["show", id, "--json"])).unwrap();
         v["priority"].as_u64().unwrap()
     };
-    assert_eq!((prio(&clean), prio(&broken)), (0, 2), "멀쩡한 멤버가 안 올랐거나 손으로 푼 줄을 고쳤다");
+    assert_eq!((prio(&clean), prio(&broken)), (1, 2), "멀쩡한 멤버가 안 올랐거나 손으로 푼 줄을 고쳤다");
     let board = ok(p, &["status", "--json"]);
     assert!(!board.contains("due_priority_behind"), "보드가 늘 멈출 동사를 시킨다 — {board}");
 }
@@ -7511,7 +7511,9 @@ fn due_apply_status_ready_and_prime_follow_archived_parent_placement() {
         let expected = vec![own.as_str(), "moai-pppp.ccc"];
         let board: serde_json::Value = serde_json::from_str(&ok_at(p, now, &["status", "--json"])).unwrap();
         let notice = board["notices"].as_array().unwrap().iter().find(|w| w["kind"] == "due_priority_behind").unwrap();
-        assert_eq!(notice["ids"], serde_json::json!(expected), "{board}");
+        let expected_notice =
+            if placed_due < "2026-10-16" { vec!["moai-pppp.ccc", own.as_str()] } else { expected.clone() };
+        assert_eq!(notice["ids"], serde_json::json!(expected_notice), "{board}");
         // Ready breaks equal deadlines by creation time; status notices break them by ID.
         let expected_ready = if placed_due < "2026-10-16" { vec!["moai-pppp.ccc", own.as_str()] } else { expected };
         let ready: serde_json::Value = serde_json::from_str(&ok_at(p, now, &["ready", "--json"])).unwrap();
@@ -8879,7 +8881,7 @@ fn promote_carries_the_milestone_and_the_body() {
     let made = issues(s.path());
     // 에픽 하나에만 적힌다 — idea 줄이 들고 있던 것까지 두 줄이다.
     assert_eq!(made.matches(&format!(r#""milestone":"{stone}""#)).count(), 2, "{made}");
-    assert_eq!(made.matches(r#""body":"왜 한 묶음인가""#).count(), 2, "본문이 에픽에 안 갔다\n{made}");
+    assert_eq!(made.matches(r#""body":"왜 한 묶음인가""#).count(), 3, "본문이 에픽과 멤버에 안 갔다\n{made}");
     // **어느 줄이 들었는지까지 본다**(리뷰). 수만 세던 판정은 본문이 멤버에 가고 에픽이 빈 채로
     // 선 꼴에서도 그대로 지났다 — 계획에 에픽 하나와 이슈 하나뿐이라 수로는 둘을 못 가른다.
     let pick = |mark: &str| made.lines().find(|l| l.contains(mark)).unwrap_or_else(|| panic!("{mark}\n{made}"));
@@ -8887,10 +8889,34 @@ fn promote_carries_the_milestone_and_the_body() {
     assert!(epic.contains(r#""body":"왜 한 묶음인가""#), "에픽이 본문을 안 받았다\n{epic}");
     assert!(epic.contains(&format!(r#""milestone":"{stone}""#)), "에픽이 마일스톤을 안 받았다\n{epic}");
     // 멤버는 에픽에서 물려받으므로 제 줄에는 둘 다 없다 — 적으면 그것이 파생값을 저장하는 것이다.
-    assert!(!member.contains(r#""body""#), "멤버에 본문을 베꼈다\n{member}");
+    assert!(member.contains(r#""body":"왜 한 묶음인가""#), "멤버에 본문이 없다\n{member}");
     assert!(!member.contains(r#""milestone""#), "멤버에 마일스톤을 적었다\n{member}");
     let under = ok(s.path(), &["show", "--milestone", &stone]);
     assert!(under.contains("캐시 층") && under.contains("첫 이슈"), "{under}");
+}
+
+#[test]
+fn promote_propagates_context_and_explicit_epic_body() {
+    let s = init("promotecontext");
+    let idea = ok(s.path(), &["backlog", "add", "source", "-b", "original\nbody", "-q"]).trim().to_string();
+    let out = from_stdin(
+        s.path(),
+        &["backlog", "promote", &idea, "--from", "-", "--body", "bundle"],
+        "# new epic\n- first\n- second\n",
+    );
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let rows = issues(s.path());
+    let line = |title: &str| rows.lines().find(|l| l.contains(&format!("\"title\":\"{title}\""))).unwrap();
+    assert!(line("new epic").contains("\"body\":\"bundle\""));
+    for title in ["first", "second"] {
+        assert!(line(title).contains(&format!("Unfolded-from: {idea}")));
+    }
+    let epic = add(s.path(), &["standing", "--type", "epic"]);
+    let another = ok(s.path(), &["backlog", "add", "other", "-b", "original\nbody", "-q"]).trim().to_string();
+    let out = from_stdin(s.path(), &["backlog", "promote", &another, "-e", &epic, "--from", "-"], "- sole\n");
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let rows = issues(s.path());
+    assert!(rows.lines().find(|l| l.contains("\"title\":\"sole\"")).unwrap().contains("original\\nbody"));
 }
 
 /// **본문은 에픽이 여럿이어도 첫 뿌리 하나만 든다**(리뷰). 마일스톤은 멤버가 물려받는
@@ -8934,7 +8960,7 @@ fn promote_into_a_standing_epic_carries_nothing() {
     let made = issues(s.path());
     // `m2` 는 idea 줄에만 남고, 만든 멤버는 에픽에서 `m1` 을 물려받는다.
     assert_eq!(made.matches(&format!(r#""milestone":"{m2}""#)).count(), 1, "선 에픽의 멤버에 적었다\n{made}");
-    assert_eq!(made.matches(r#""body":"idea 의 본문""#).count(), 1, "멤버에 본문을 베꼈다\n{made}");
+    assert_eq!(made.matches(r#""body":"idea 의 본문""#).count(), 2, "멤버에 본문이 없다\n{made}");
     assert!(ok(s.path(), &["show", "--milestone", &m1]).contains("멤버 하나"), "에픽에서 안 물려받았다");
 }
 
@@ -15414,6 +15440,17 @@ fn an_oversized_carried_body_names_the_idea_and_the_way_out() {
         assert_eq!(real.status.code(), Some(1), "{was}");
     }
     ok(s.path(), &["defer", &stone, "--undo"]);
+
+    // A single member in an existing epic carries the same body and must reject it too.
+    let epic = add(s.path(), &["existing epic", "--type", "epic"]);
+    for extra in [
+        &["backlog", "promote", &id, "-e", &epic, "--from", "-", "--dry-run"][..],
+        &["backlog", "promote", &id, "-e", &epic, "--from", "-"][..],
+    ] {
+        let out = from_stdin(s.path(), extra, "- member\n");
+        assert!(!out.status.success());
+        assert!(String::from_utf8_lossy(&out.stderr).contains(&format!("moai edit {id} -b -")));
+    }
 
     // 그 길이 실제로 통한다 — 줄이면 같은 부름이 그대로 지난다.
     let out = from_stdin(s.path(), &["edit", &id, "-b", "-"], "짧게 줄인 본문");
