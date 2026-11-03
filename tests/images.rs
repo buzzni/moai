@@ -286,6 +286,10 @@ fn inherited_tmux_uses_stdout_device_and_skips_queries_without_pictures() {
             .env("TEST_CLIENT", client.unwrap_or(""))
             .env_remove("MOAI_IMAGES")
             .stdout(slave);
+        if client.is_some() {
+            // Inside tmux, choose graphics from its attached client, without inherited kitty hints.
+            cmd.env("TERM", "tmux-256color").env_remove("KITTY_WINDOW_ID");
+        }
         if let Some(mode) = forced {
             cmd.env("MOAI_IMAGES", mode);
         }
@@ -323,16 +327,19 @@ fn inherited_tmux_uses_stdout_device_and_skips_queries_without_pictures() {
     let text = run_pty(&id, &own, None, None);
     assert!(!text.contains("\x1b_G"));
     assert!(text.contains("\x1b]8;;file://"));
-    for permission in ["on", "all"] {
-        let client = format!("xterm-kitty\n{permission}");
-        let graphics = run_pty(&id, &own, None, Some(&client));
-        assert!(graphics.contains("\x1bPtmux;\x1b\x1b_Ga=T,U=1"));
-        assert!(graphics.contains('\u{10eeee}'));
+    for terminal in ["xterm-kitty", "xterm-ghostty"] {
+        for permission in ["on", "all"] {
+            let client = format!("{terminal}\n{permission}");
+            let graphics = run_pty(&id, &own, None, Some(&client));
+            assert!(graphics.contains("\x1bPtmux;\x1b\x1b_Ga=T,U=1"), "{client:?}");
+            assert!(graphics.contains('\u{10eeee}'), "{client:?}");
+        }
     }
-    for client in ["xterm-kitty\noff", "xterm-ghostty\non", "xterm-256color\non"] {
+    for client in ["xterm-kitty\noff", "xterm-ghostty\noff", "xterm-256color\non"] {
         let fallback = run_pty(&id, &own, None, Some(client));
-        assert!(!fallback.contains("\x1bPtmux;"));
-        assert!(fallback.contains("\x1b]8;;file://"));
+        assert!(!fallback.contains("\x1b_G"), "{client:?}");
+        assert!(!fallback.contains("\x1bPtmux;"), "{client:?}");
+        assert!(fallback.contains("\x1b]8;;file://"), "{client:?}");
     }
     std::fs::remove_file(&log).unwrap();
     assert!(run_pty(&id, &own, Some("kitty"), None).contains("\x1b_Ga=T"));
