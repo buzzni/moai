@@ -286,10 +286,6 @@ fn inherited_tmux_uses_stdout_device_and_skips_queries_without_pictures() {
             .env("TEST_CLIENT", client.unwrap_or(""))
             .env_remove("MOAI_IMAGES")
             .stdout(slave);
-        if client.is_some() {
-            // Inside tmux, choose graphics from its attached client, without inherited kitty hints.
-            cmd.env("TERM", "tmux-256color").env_remove("KITTY_WINDOW_ID");
-        }
         if let Some(mode) = forced {
             cmd.env("MOAI_IMAGES", mode);
         }
@@ -335,6 +331,9 @@ fn inherited_tmux_uses_stdout_device_and_skips_queries_without_pictures() {
             assert!(graphics.contains('\u{10eeee}'), "{client:?}");
         }
     }
+    // Every run keeps the kitty hints a server started from kitty hands its panes (TERM=xterm-kitty,
+    // KITTY_WINDOW_ID). Inside a pane only the client reply decides, so a rejected client must not fall back to
+    // plain kitty from those hints. They cannot fake a pass: only the reply yields the wrapped `U=1` upload above.
     for client in ["xterm-kitty\noff", "xterm-ghostty\noff", "xterm-256color\non"] {
         let fallback = run_pty(&id, &own, None, Some(client));
         assert!(!fallback.contains("\x1b_G"), "{client:?}");
