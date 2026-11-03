@@ -13,6 +13,7 @@ import { useNaming } from './data/people.js'
 import { headerProjects, projectHref, type ProjectEntry } from './data/projects.js'
 import { writePlan, type PlanChange } from './data/plan.js'
 import { isUnread, readMarks } from './data/read.js'
+import { browserId as loadBrowserId } from './data/browser-id.js'
 import { openEvents, type Events } from './data/events.js'
 import { createCtl, type Reply as CtlReply } from './ctl.js'
 import { BACKOFF_MS, createRefresher, POLL_MS } from './data/refresh.js'
@@ -388,8 +389,10 @@ async function start(): Promise<void> {
   }
   const refresher = createRefresher({ load: ({ automatic }) => loadBoard(automatic), stamp, onReach: (reached) => shell.offline(!reached), onBackoff: (on) => shell.backoff(on) })
   let tab: { id: string; token: string } | null = null
+  let browserId: string | null = null
   const eventUrl = (): string => {
     const query = new URLSearchParams()
+    if (browserId) query.set('browser', browserId)
     if (project) query.set('project', project)
     if (store.getState().view.worktree) query.set('worktree', '1')
     if (tab) { query.set('resume', tab.id); query.set('token', tab.token) }
@@ -589,24 +592,27 @@ async function start(): Promise<void> {
   // Showing the tab again is the person's doing; a reconnect while it stayed visible is not (hello's seen is passive).
   // The server takes `seen` and a proposal answer from a tab whose stream is still reconnecting (src/web/ctl.rs
   // `resumable`), so neither is lost to the gap before the resumed stream's hello.
-  events = openEvents({ url: eventUrl, onStamp: (at) => refresher.saw(at), onUp: () => refresher.pause(),
-    onDown: () => { refresher.resume() }, onVisible: () => { void refresher.check(); seen() },
-    onHello: (hello) => { proposals.clear(); tab = { id: hello.tab, token: hello.token }; seen(false) },
-    onCtl: ({ seq, request }) => {
-      const here = tab
-      if (!here) return
-      const guardsProposal = request.verb !== 'validate_zone'
-      if (guardsProposal) ctlExecuting += 1
-      void ctl.run(request as { verb: string }, seq, here.token).then((reply: CtlReply) => {
-        const query = new URLSearchParams({ seq: String(seq), token: here.token })
-        return window.fetch(`/api/ctl/${encodeURIComponent(here.id)}?${query}`, {
-          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(reply),
-        })
-      }).catch(() => {}).finally(() => { if (guardsProposal) ctlExecuting -= 1 })
-    },
-    onProposal: (entry) => proposals.show(entry),
-    onProposalClosed: (id) => proposals.remove(id),
-  })
+  void (async () => {
+    browserId = await loadBrowserId()
+    events = openEvents({ url: eventUrl, onStamp: (at) => refresher.saw(at), onUp: () => refresher.pause(),
+      onDown: () => { refresher.resume() }, onVisible: () => { void refresher.check(); seen() },
+      onHello: (hello) => { proposals.clear(); tab = { id: hello.tab, token: hello.token }; seen(false) },
+      onCtl: ({ seq, request }) => {
+        const here = tab
+        if (!here) return
+        const guardsProposal = request.verb !== 'validate_zone'
+        if (guardsProposal) ctlExecuting += 1
+        void ctl.run(request as { verb: string }, seq, here.token).then((reply: CtlReply) => {
+          const query = new URLSearchParams({ seq: String(seq), token: here.token })
+          return window.fetch(`/api/ctl/${encodeURIComponent(here.id)}?${query}`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(reply),
+          })
+        }).catch(() => {}).finally(() => { if (guardsProposal) ctlExecuting -= 1 })
+      },
+      onProposal: (entry) => proposals.show(entry),
+      onProposalClosed: (id) => proposals.remove(id),
+    })
+  })()
 
   document.body.tabIndex = -1
   document.body.focus({ preventScroll: true })

@@ -33887,6 +33887,39 @@ fn web_marks_read_only_from_its_own_page() {
     assert_eq!(status, 404, "GET 으로 읽음을 적는 길이 섰다");
 }
 
+#[test]
+fn web_ctl_group_and_all_refuse_atomically() {
+    let s = init("web-atomic-group-all");
+    let cfg = s.path().join("user.toml");
+    let mine = |args: &[&str]| ok_with(s.path(), &cfg, args);
+    let epic = field(&mine(&["epic", "add", "group", "--json"]), "id");
+    let a = field(&mine(&["add", "first", "-e", &epic, "--json"]), "id");
+    let b = field(&mine(&["add", "second", "-e", &epic, "--json"]), "id");
+    mine(&["read", &a]);
+    let [(sheet, was)]: [(PathBuf, String); 1] = read_sheets(&cfg, s.path()).try_into().unwrap();
+    let initial = format!("{was}\"{b}\" = 3\n");
+    std::fs::write(&sheet, &initial).unwrap();
+    // A fresh member and the group itself remain unread alongside the held member.
+    mine(&["add", "third", "-e", &epic]);
+    let web = serve_with(s.path(), |cmd| {
+        cmd.env("MOAI_CONFIG", &cfg);
+    });
+    let origin = format!("http://127.0.0.1:{}", web.port);
+    for path in [
+        "/api/ctl-read-all".to_string(),
+        format!("/api/ctl-read-group/{epic}"),
+        "/api/ctl-read-group/moai-zzzz".to_string(),
+    ] {
+        let (status, _, body) = post(web.port, &path, Some(&origin));
+        assert_eq!(status, 200, "{body}");
+        assert_ne!(json_of(&body)["exit"], 0, "{path}: {body}");
+        assert_eq!(std::fs::read_to_string(&sheet).unwrap(), initial, "{path}");
+    }
+    let (_, _, body) = post(web.port, "/api/read-all", Some(&origin));
+    assert_eq!(json_of(&body)["exit"], 0, "{body}");
+    assert_ne!(std::fs::read_to_string(&sheet).unwrap(), initial);
+}
+
 /// **간트의 막대 끌기는 `moai edit` 의 길로 트래커에 쓴다**(moai-d86e.3ud) — 이 페이지에서 보낸 것만 받고, 날이 아니라
 /// 옮기는 뜻(`edge`·`days`, 하루 세우기는 `day`)을 실어 `edit` 이 락 안에서 날을 잰다(moai-vj8w.02c). 거절(시작이 기한
 /// 뒤·위 기한 넘김·그새 날이 선 줄)은 `edit` 의 말 그대로 봉투의 `err` 에 서고, 모양이 틀리면 자식을 안 띄운다.

@@ -6,6 +6,7 @@ import { validZone } from './data/zone.js'
 import type { KeyWiring } from './keys/wiring.js'
 import { bindingsFor, bindingKeys, isAvailable } from './keys/table.js'
 import { detectPlatform } from './keys/router.js'
+import { routerTokens, wireToken } from './keys/names.js'
 import type { Store, Tab, ColumnName } from './store.js'
 import { clampRatio, DEFAULT_RATIO } from './view/split.js'
 import { DEFAULT_GRID } from './view/gantt-model.js'
@@ -36,9 +37,7 @@ export interface CtlOptions {
 /** Public ctl state uses the explorer's string/null spelling, independently of router internals. */
 export function heldPrefix(held: { menu: string[] | null; pending: string[] }): string | null {
   const tokens = held.menu ?? held.pending
-  return tokens.length ? tokens.map((token) => token.replace(/^(?:(?:C|A|S)-)+/, (mods) =>
-    mods.replace(/C-/g, 'Ctrl-').replace(/A-/g, 'Alt-').replace(/S-/g, 'Shift-'))
-    .replace(/Backspace$/, 'Bksp')).join(' ') : null
+  return tokens.length ? tokens.map(wireToken).join(' ') : null
 }
 
 export function createCtl(options: CtlOptions) {
@@ -111,15 +110,7 @@ export function createCtl(options: CtlOptions) {
         ...(name.startsWith('proposal.') ? { why: personOnly() } : keyed ? { why: 'needs its key: use moai ctl keys' } : {}) }
     }) })
   }
-  /** The explorer's spelling, which `moai ctl keys` checks (`Ctrl-d`, `BackTab`, `Bksp`, `gg`), as this router's tokens. */
-  const routerTokens = (seq: string): string[] => seq.split(/\s+/).filter(Boolean).flatMap((token) => {
-    if (/^([a-z])\1$/i.test(token)) return [token[0]!, token[1]!]
-    const m = /^((?:(?:Ctrl|Alt|Shift)-)*)(.+)$/.exec(token)!
-    let mods = m[1]!.replace(/Ctrl-/g, 'C-').replace(/Alt-/g, 'A-').replace(/Shift-/g, 'S-')
-    let name = m[2]!
-    if (name === 'BackTab') { name = 'Tab'; if (!mods.includes('S-')) mods += 'S-' }
-    return [mods + (({ Bksp: 'Backspace', PgUp: 'PageUp', PgDn: 'PageDown' } as Record<string, string>)[name] ?? name)]
-  })
+  /** Presses the explorer's spelling (`Ctrl-d`, `BackTab`, `Bksp`, `gg`), read into this router's tokens by keys/names.ts. */
   const press = (seqs: unknown, text: unknown): Reply => {
     if (!Array.isArray(seqs) || seqs.some((seq) => typeof seq !== 'string')) return no('bad_input', 'key sequences must be strings')
     if (text !== null && text !== undefined && typeof text !== 'string') return no('bad_input', 'text must be a string')
@@ -161,8 +152,8 @@ export function createCtl(options: CtlOptions) {
   const mark = async (request: Request, seq: number, token: string): Promise<Reply> => {
     const ids = request.ids
     let result
-    if (request.all === true) result = await options.withIdentity(seq, token, () => read.all())
-    else if (typeof request.group === 'string') result = await options.withIdentity(seq, token, () => read.group(String(request.group)))
+    if (request.all === true) result = await options.withIdentity(seq, token, () => read.all(true))
+    else if (typeof request.group === 'string') result = await options.withIdentity(seq, token, () => read.group(String(request.group), true))
     else if (Array.isArray(ids) && ids.every((id) => typeof id === 'string')) {
       if (ids.length === 0) return no('bad_input', 'give ids, all or group')
       result = await options.withIdentity(seq, token, () => read.ids(ids as string[]))

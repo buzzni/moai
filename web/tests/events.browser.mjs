@@ -78,3 +78,31 @@ for (const engine of [chromium, firefox]) test(`${engine.name()}: overflow tabs 
   assert.ok(after.rejected >= 8 - streamLimit)
   assert.ok(after.polls.filter(count => count > 0).length >= 8 - streamLimit, 'overflow tabs did not poll')
 })
+
+const identityBundle = await build({ stdin: { contents: `
+  import { browserId } from './panel/data/browser-id.ts';
+  window.identify = browserId;
+`, resolveDir: new URL('..', import.meta.url).pathname, loader: 'ts' }, bundle: true, write: false, format: 'iife' })
+
+for (const engine of [chromium, firefox]) test(`${engine.name()}: simultaneous first tabs share one browser identity`, async t => {
+  const server = createServer((req, res) => {
+    if (req.url === '/identity.js') { res.setHeader('Content-Type', 'text/javascript'); return res.end(identityBundle.outputFiles[0].text) }
+    res.end('<script src="/identity.js"></script>')
+  })
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
+  t.after(() => { server.closeAllConnections(); server.close() })
+  const browser = await engine.launch()
+  t.after(() => browser.close())
+  const url = `http://127.0.0.1:${server.address().port}`
+  const context = await browser.newContext()
+  const other = await browser.newContext()
+  t.after(() => Promise.all([context.close(), other.close()]))
+  const pages = await Promise.all(Array.from({ length: 8 }, () => context.newPage()))
+  const remote = await other.newPage()
+  await Promise.all([...pages, remote].map(page => page.goto(url)))
+  const ids = await Promise.all(pages.map(page => page.evaluate(() => window.identify())))
+  const otherId = await remote.evaluate(() => window.identify())
+  assert.match(ids[0], /^[0-9a-f]{32}$/)
+  assert.equal(new Set(ids).size, 1)
+  assert.notEqual(otherId, ids[0])
+})
