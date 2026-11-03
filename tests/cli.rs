@@ -9564,6 +9564,8 @@ fn idea_and_issue_share_one_list_of_verbs() {
 const JSON_SWEEP: &[&str] = &[
     "image",
     "ctl",
+    "watch",
+    "supervise",
     "writing",
     "init",
     // 저장소의 설정을 기본값을 채워 읽는다(moai-wk7i.qtq).
@@ -10361,8 +10363,29 @@ fn every_command_still_speaks_json() {
     let id = field(&made, "id");
     let epic = field(&ok(s.path(), &["add", "에픽", "--type", "epic", "--json"]), "id");
 
+    ok(s.path(), &["note", &epic, "report: sweep"]);
+    std::fs::write(s.path().join("sweep-steps.md"), "steps\n").unwrap();
     std::fs::write(s.path().join("sweep.gif"), b"GIF89a\x01\x00\x01\x00").unwrap();
     let cases = [
+        vec!["watch", &epic, "--json"],
+        vec![
+            "supervise",
+            "message",
+            &epic,
+            "--model",
+            "codex",
+            "--effort",
+            "high",
+            "--base",
+            "base",
+            "--root-branch",
+            "develop",
+            "--from",
+            "supervisor",
+            "--steps",
+            "sweep-steps.md",
+            "--json",
+        ],
         vec!["image", "add", "sweep.gif", "--json"],
         vec!["ctl", "ls", "--json"],
         vec!["writing", "--json"],
@@ -32520,7 +32543,7 @@ fn models_json_reads_user_config_outside_a_tracker_and_only_reads() {
         serde_json::json!({
             "plan": "fable", "develop": "opus-6", "complex": "opus", "review": "opus",
             "docs": "sonnet", "bulk": "haiku", "codex": "future-model",
-            "review_grade": "xhigh", "effort": "max", "effort_complex": "high", "effort_plan": "xhigh",
+            "review_grade": "xhigh", "review_raise": "never", "effort": "max", "effort_complex": "high", "effort_plan": "xhigh",
             "written": ["develop", "codex", "effort"], "repo": [], "path": cfg, "repo_path": null,
         })
     );
@@ -32548,7 +32571,7 @@ fn models_missing_file_uses_all_defaults_and_keeps_the_path() {
         serde_json::json!({
             "plan": "fable", "develop": "sonnet", "complex": "opus", "review": "opus",
             "docs": "sonnet", "bulk": "haiku", "codex": "gpt-6.1-sol",
-            "review_grade": "xhigh", "effort": "medium", "effort_complex": "high", "effort_plan": "xhigh",
+            "review_grade": "xhigh", "review_raise": "never", "effort": "medium", "effort_complex": "high", "effort_plan": "xhigh",
             "written": [], "repo": [], "path": cfg, "repo_path": null,
         })
     );
@@ -32602,8 +32625,8 @@ fn models_human_output_marks_defaults_and_shows_efforts_and_path() {
     let cfg = s.path().join("config.toml");
     std::fs::write(&cfg, "[models]\ndevelop = \"sonnet\"\neffort = \"high\"\n").unwrap();
     let out = ok_with(s.path(), &cfg, &["models"]);
-    assert_eq!(out.lines().count(), 12, "{out}");
-    assert_eq!(out.matches("default").count(), 9, "{out}");
+    assert_eq!(out.lines().count(), 13, "{out}");
+    assert_eq!(out.matches("default").count(), 10, "{out}");
     let line = |key: &str| out.lines().find(|line| line.starts_with(&format!("{key} "))).unwrap().to_string();
     assert!(
         line("develop").contains("sonnet") && !line("develop").contains("default"),
@@ -32627,7 +32650,7 @@ fn models_human_output_marks_defaults_and_shows_efforts_and_path() {
     // 허용한 모델 이름의 줄바꿈도 표에서는 한 줄로 그린다.
     std::fs::write(&cfg, "[models]\nplan = \"a\\nb\"\n").unwrap();
     let out = ok_with(s.path(), &cfg, &["models"]);
-    assert_eq!(out.lines().count(), 12, "{out}");
+    assert_eq!(out.lines().count(), 13, "{out}");
 }
 
 /// **저장소는 권하고 사람이 고른다**(moai-w25x.jud, 2026-10-26 사용자 결정) — `.moai/config.toml` 의 `[models]` 가
@@ -34779,4 +34802,96 @@ fn conditional_dates_recheck_after_waiting_for_the_write_lock() {
     assert!(!out.status.success());
     assert_eq!(serde_json::from_slice::<serde_json::Value>(&out.stderr).unwrap()["code"], "stale");
     assert_eq!(issues(s.path()), changed);
+}
+
+#[test]
+fn supervisor_watch_resumes_same_second_and_generates_assignment() {
+    let s = init("supervisor-watch");
+    let added = ok(s.path(), &["epic", "add", "watch work", "--json"]);
+    let parsed: serde_json::Value = serde_json::from_str(&added).unwrap();
+    let id = parsed["id"].as_str().unwrap();
+    ok(s.path(), &["note", id, "Review-ready: first"]);
+    ok(s.path(), &["note", id, "Review-ready: first"]);
+    ok(s.path(), &["note", id, "report: second"]);
+    let result = ok(s.path(), &["watch", id, "--since", NOW]);
+    let first: serde_json::Value = serde_json::from_str(&result).unwrap();
+    assert_eq!(first["head"], "Review-ready: first");
+    let cursor = first["cursor"].as_str().unwrap();
+    // The cursor holds digests, not the notes — it goes back on the command line every time.
+    assert!(cursor.len() < 200, "{cursor}");
+    let result = ok(s.path(), &["watch", id, "--cursor", cursor]);
+    let second: serde_json::Value = serde_json::from_str(&result).unwrap();
+    assert_eq!(second["head"], "report: second");
+    // A cursor is bound to the row it was read from.
+    let other = field(&ok(s.path(), &["epic", "add", "other", "--json"]), "id");
+    let out = moai(s.path(), &["watch", &other, "--cursor", cursor]);
+    assert!(!out.status.success(), "a cursor from another row was accepted");
+
+    let steps = s.path().join(".claude/moai-plugin/skills/moai-supervise/references/worker-codex.md");
+    std::fs::create_dir_all(steps.parent().unwrap()).unwrap();
+    std::fs::write(&steps, "steps\n").unwrap();
+    let send = |id: &str| {
+        moai(
+            s.path(),
+            &[
+                "supervise",
+                "message",
+                id,
+                "--model",
+                "test (high)",
+                "--effort",
+                "high",
+                "--base",
+                "base",
+                "--root-branch",
+                "develop",
+                "--from",
+                "supervisor",
+            ],
+        )
+    };
+    let out = send(id);
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let message = String::from_utf8_lossy(&out.stdout).to_string();
+    let head = message.lines().next().unwrap();
+    assert!(head.starts_with(&format!("You are handed epic {id} — watch work.")), "{head}");
+    assert!(head.contains("worker-codex.md") && head.ends_with("from step 2."), "{head}");
+    assert!(message.contains(&format!("Read first: moai show {id}")));
+    assert!(message.contains("Worker: codex") && message.contains("Base branch: base"));
+    assert!(message.contains("Work running alongside: none — do not touch those files (4-3)"));
+    assert!(!message.contains("/tmp/cargo-target/"), "repository-specific target path leaked: {message}");
+    // `Writing:` is the person's value, not one the command picks.
+    assert!(message.contains("Writing: detailed"), "{message}");
+    assert!(!message.contains("Subdir:"), "{message}");
+
+    let backlog = field(&ok(s.path(), &["backlog", "add", "a thought", "--json"]), "id");
+    let out = send(&backlog);
+    let head = String::from_utf8_lossy(&out.stdout).lines().next().unwrap_or_default().to_string();
+    assert!(head.starts_with(&format!("You are handed backlog {backlog} — a thought.")), "{head}");
+    assert!(head.ends_with("from step 1."), "{head}");
+
+    let issue = field(&ok(s.path(), &["add", "plain work", "--json"]), "id");
+    assert!(!send(&issue).status.success(), "an issue was handed out as an epic");
+    std::fs::remove_file(&steps).unwrap();
+    let out = send(id);
+    assert!(!out.status.success() && String::from_utf8_lossy(&out.stderr).contains("--steps"));
+}
+
+/// **The default heads never match what `promote` writes** — the old report watch carried this
+/// guard, and only the worker writes `Unfolded: <epic>`. A decision asked in Korean stands anywhere
+/// in the first line, and a column move is never an event.
+#[test]
+fn supervisor_watch_heads_skip_promote_notes_and_moves() {
+    let s = init("supervisor-heads");
+    let backlog = field(&ok(s.path(), &["backlog", "add", "a thought", "--json"]), "id");
+    let out = from_stdin(
+        s.path(),
+        &["backlog", "promote", &backlog, "--from", "-"],
+        "# Unfolded epic\n- [p2] first member\n",
+    );
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    ok(s.path(), &["note", &backlog, &format!("{backlog} 진행 중 결정이 필요합니다.\n- 상황: x")]);
+    let result = ok(s.path(), &["watch", &backlog, "--since", NOW]);
+    let event: serde_json::Value = serde_json::from_str(&result).unwrap();
+    assert_eq!(event["head"], format!("{backlog} 진행 중 결정이 필요합니다."));
 }
