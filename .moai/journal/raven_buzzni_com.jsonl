@@ -11973,3 +11973,35 @@
 {"ts":"2026-11-03T16:19:48Z","id":"moai-5w6i.3zg","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"일반 배정문에서 저장소 전용 target 지시를 뺐다"}
 {"ts":"2026-11-03T16:19:48Z","id":"moai-5w6i.89z","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"v0.46.0 소식을 그림 없이 냈다"}
 {"ts":"2026-11-03T16:24:32Z","id":"moai-lbwx","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"마감: 사람이 \"2026년 11월 6일 00시까지\" 로 정했다(2026-11-03). moai 의 마감은 날 단위라 그날이 끝날 때까지인 2026-11-05 로 적는다."}
+{"ts":"2026-11-03T16:31:34Z","id":"moai-aajx.1m7","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"결정(사람, 2026-11-03): 지금 동작을 유지한다. 웹의 ctl do·keys 읽음은 사람 키와 같은 경로로 두고, 원자적 묶음 읽음은 ctl read --all/--group 을 쓴다. docs/ctl.md 31줄의 설명으로 충분하다."}
+{"ts":"2026-11-03T16:31:34Z","id":"moai-aajx.1m7","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"지금 동작 유지로 결정"}
+{"ts":"2026-11-03T16:37:34Z","id":"moai-aajx.h8g","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"결정(사람, 2026-11-03): 지금의 공유 상한(서버 전체 32, 브라우저마다 3)을 유지한다. moai web 은 기본이 127.0.0.1 이고 --host 로 다른 주소를 열면 이미 \"누구나 읽고 날짜를 옮길 수 있다\" 고 경고하므로, loopback 자리 독점은 따로 막지 않는다."}
+{"ts":"2026-11-03T16:37:35Z","id":"moai-aajx.h8g","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"공유 상한 유지로 결정"}
+{"ts":"2026-11-03T16:48:25Z","id":"moai-aajx.9fi","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"결정(사람, 2026-11-03): 받아들인다. moai-p9dh.33f 가 약속한 Codex 절차 부분은 헬퍼로 옮겨 줄었다(tmux 538→455, cmux 599→539). 감독 SKILL.md 의 Codex 부분은 처음부터 안내 몇 줄이었다. 감독 SKILL.md 전체(827줄) 와 사용자 context 를 줄이는 일은 새 에픽 \"사용자 context 줄이기\" 로 따로 연다."}
+{"ts":"2026-11-03T16:48:25Z","id":"moai-aajx.9fi","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"Codex 절차 축소는 채움으로 받아들임"}
+{"ts":"2026-11-03T16:48:25Z","id":"moai-w0zr","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"사용자 context 줄이기"}
+{"ts":"2026-11-03T16:48:25Z","id":"moai-w0zr.vs8","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"AGENTS 블록과 moai 스킬을 약속과 차례로 다시 나누기"}
+{"ts":"2026-11-03T16:48:25Z","id":"moai-w0zr.lft","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"감독 스킬을 일꾼 갈래·창 프로그램별로 나누기"}
+{"ts":"2026-11-03T16:48:25Z","id":"moai-w0zr.48e","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"일꾼 단계 worker.md 줄이기"}
+{"ts":"2026-11-03T16:51:04Z","id":"moai-aajx.sm5","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"결정(사람, 2026-11-03): 필요 없다. 탐색기는 대기 읽음 파일을 계속 못 읽어도 조용히 둔다. 읽음 표시만 걸린 드문 경우이고 파일이 다시 읽히면 저절로 합쳐진다. status 알림도 만들지 않는다."}
+{"ts":"2026-11-03T16:51:05Z","id":"moai-aajx.sm5","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"조용히 두기로 결정"}
+{"ts":"2026-11-03T16:52:10Z","id":"moai-aajx.kat","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"결정(사람, 2026-11-03): 에픽과 단일 멤버가 둘 다 백로그 본문을 갖는다(지금 동작 유지). 에픽 본문은 묶음의 까닭, 멤버 본문은 일꾼이 읽는 자리다. Regression-of: 는 멤버 줄만 센다 — 이 한 줄은 moai-aajx.uzw 에서 CLAUDE.md 에 더한다."}
+{"ts":"2026-11-03T16:52:10Z","id":"moai-aajx.kat","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"둘 다 갖는 지금 동작 유지"}
+{"ts":"2026-11-03T16:52:10Z","id":"moai-aajx.uzw","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"정할 것 정해짐(moai-aajx.kat): CLAUDE.md \"머지 뒤 버그에는 표식을 단다\" 절의 \"backlog 로 담았다가 펼치면 본문이 안 따라가니 펼친 이슈에 다시 적는다\" 를 바꾼다 — 멤버가 하나면 본문이 그 멤버에도 따라가니 이미 있는지 보고 더하지 않는다, 멤버가 여럿이면 펼친 이슈에 다시 적는다, Regression-of: 는 멤버 줄만 센다. 문서만 고치는 일(docs 역할)."}
+{"ts":"2026-11-03T17:02:08Z","id":"moai-1qz4.up3","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"결정(사람, 2026-11-03): 계약 자리를 옮기지 않는다. src/cmd/due.rs judged 의 이른 반환은 report::due_probe 와 archive::places_out 두 판단을 잇는 것으로 본다. report 가 파일을 열지 않는다는 순수성이 먼저다."}
+{"ts":"2026-11-03T17:02:08Z","id":"moai-1qz4.up3","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"지금 자리 유지로 결정"}
+{"ts":"2026-11-03T17:03:25Z","id":"moai-5w6i.obw","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"확인(사람, 2026-11-03): 물려받은 마감은 p1 까지만 올린다. 지금 동작 그대로 둔다."}
+{"ts":"2026-11-03T17:03:25Z","id":"moai-5w6i.obw","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"사람이 확인: p1 상한 유지"}
+{"ts":"2026-11-03T17:03:25Z","id":"moai-5w6i.1t2","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"확인(사람, 2026-11-03): moai-aajx.sm5 에서 \"조용히 둔다\" 로 정한 것으로 확인됐다."}
+{"ts":"2026-11-03T17:03:25Z","id":"moai-5w6i.1t2","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"sm5 결정으로 확인"}
+{"ts":"2026-11-03T17:03:25Z","id":"moai-5w6i.6lk","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"확인(사람, 2026-11-03): moai-aajx.kat 에서 \"에픽과 단일 멤버가 둘 다 갖는다\" 로 정한 것으로 확인됐다."}
+{"ts":"2026-11-03T17:03:26Z","id":"moai-5w6i.6lk","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"kat 결정으로 확인"}
+{"ts":"2026-11-03T17:05:09Z","id":"moai-5w6i.8yi","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"확인(사람, 2026-11-03): 원격 페이지도 제 브라우저 id 를 갖고 각자 세 자리를 쓰는 지금 동작 유지. 서버 전체 32 상한은 moai-aajx.h8g 에서 그대로 두기로 했다."}
+{"ts":"2026-11-03T17:05:09Z","id":"moai-5w6i.8yi","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"사람이 확인"}
+{"ts":"2026-11-03T17:05:40Z","id":"moai-5w6i.guq","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"확인(사람, 2026-11-03): moai-1qz4 의 판단 셋(6kc 기한 없는 탐침을 report 에, ql2 살아 있는 blocker 묶음이면 보관 문맥을 연다, zxh 규칙 5 에서 살아 있는 불투명 id 우선)을 그대로 둔다."}
+{"ts":"2026-11-03T17:05:40Z","id":"moai-5w6i.guq","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"사람이 확인"}
+{"ts":"2026-11-03T17:07:53Z","id":"moai-n6fs","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"배정문 끝에 저장소가 적은 줄 붙이기"}
+{"ts":"2026-11-03T17:07:53Z","id":"moai-5w6i.3zg","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"확인(사람, 2026-11-03): 범용 배정문에서 저장소 전용 target 지시를 뺀 것은 유지. 대신 2번 — 저장소 설정(.moai/config.toml)에 적은 줄을 supervise message 가 배정문 끝에 붙이게 한다. 같은 에픽의 새 멤버로 연다."}
+{"ts":"2026-11-03T17:07:53Z","id":"moai-5w6i.3zg","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"확인, 저장소 설정으로 붙이는 일을 새 멤버로"}
+{"ts":"2026-11-03T17:09:11Z","id":"moai-5w6i.89z","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"확인(사람, 2026-11-03): v0.46.0 은 보이는 화면 변화가 없어 그림 없이 낸 판단을 그대로 둔다."}
+{"ts":"2026-11-03T17:09:11Z","id":"moai-5w6i.89z","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"사람이 확인"}
