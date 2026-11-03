@@ -16,7 +16,7 @@ does not tag — see `CONTRIBUTING.md`.
 
 - Plan date ranges accept `～` and `〜` alongside `~`; wiki issue links titled `"external issue"` preserve fork provenance through an optional `external` JSON URL without missing-local-issue notices. (moai-fcj3)
 - `moai edit --if-start/--if-due` supports atomic date preconditions; successful date edits return a copyable undo command in JSON. (moai-yigx)
-- Shell and explorer pictures draw through kitty or Ghostty inside tmux with `allow-passthrough on|all`; Ghostty over SSH needs remote `TERM=xterm-ghostty` and its terminfo installed there. Auto detection also recognizes that TERM outside tmux. (moai-zidx)
+- Shell and explorer pictures draw through kitty or Ghostty inside tmux with `allow-passthrough all`; Ghostty over SSH needs remote `TERM=xterm-ghostty` and its terminfo installed there. Auto detection also recognizes that TERM outside tmux. (moai-zidx)
 
 ### Changed
 
@@ -33,7 +33,7 @@ does not tag — see `CONTRIBUTING.md`.
 - `init` preserves merge-driver settings when a shell wrapper may have relayed a signal exit. CLI tests use a separate HOME per test thread, cleaned up on success or panic; lint allowance comments reflect their current uses. (moai-fcj3)
 - Hook pickup suggestions ignore stale archived copies of unreadable live rows, matching `ready` and `prime`. (moai-4slm)
 - Gantt undo targets its original tracker and refuses stale absolute restores; web undo uses the locked write result. Widening the web Gantt preserves the left visible date without repeating full row placement. (moai-yigx)
-- Image placeholder paths remain clickable across wrapped lines and when their labels scroll offscreen. Resize bursts retry queued previews and skip stale encoding jobs. (moai-zidx)
+- Image placeholder paths remain clickable across wrapped lines and when their labels scroll offscreen. Resize bursts retry queued previews and skip stale encoding jobs. Reattaching tmux refreshes image support and uploads previews for the new client. (moai-zidx)
 
 ## [0.44.0] - 2026-11-02
 
