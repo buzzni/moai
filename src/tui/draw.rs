@@ -6440,7 +6440,7 @@ impl Painter {
         self.paint(term, |f| {
             screen(f, app);
             use std::io::IsTerminal;
-            // Always called: besides linking, it takes the path markers off the frame (`link_image_cells`).
+            // Only a drawn detail or wiki page with local pictures lets `Images::poll` recheck tmux.
             let pictures = picture_targets(app, !app.raw);
             let interested = !pictures.is_empty()
                 && match &app.mode {
@@ -6449,6 +6449,7 @@ impl Painter {
                     _ => false,
                 };
             app.images.interest(interested);
+            // Always called: besides linking, it takes the path markers off the frame (`link_image_cells`).
             image_hyperlinks(f.buffer_mut(), app, std::io::stdout().is_terminal() && !app.raw);
             let _ = app.images.frame(f.buffer_mut(), &mut std::io::stdout().lock());
         })

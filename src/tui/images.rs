@@ -18,6 +18,9 @@ pub const PER_VIEW: usize = 8;
 /// only one view, the second view's pictures evicted the first's, the first re-laid and evicted the second's, and
 /// every frame decoded and re-uploaded them all.
 const LIMIT: usize = 2 * PER_VIEW;
+/// The spacing of tmux client rechecks while a picture view is open — the explorer's follow step, not its fast
+/// encoding step.
+const REFRESH: std::time::Duration = std::time::Duration::from_millis(700);
 
 #[derive(Default)]
 pub struct Images {
@@ -26,7 +29,8 @@ pub struct Images {
     protocol: Option<Protocol>,
     client: Option<String>,
     interested: bool,
-    refresh: Option<std::sync::mpsc::Receiver<term::TerminalState>>,
+    /// A recheck on its way; `None` inside means tmux could not answer it ([`term::observe_terminal`]).
+    refresh: Option<std::sync::mpsc::Receiver<Option<term::TerminalState>>>,
     refresh_at: Option<std::time::Instant>,
     geometry: (u16, u16, u16, u16),
     entries: VecDeque<Entry>,
@@ -156,42 +160,54 @@ impl Images {
             let state = term::terminal_state(self.setting.as_deref());
             self.protocol = Some(state.protocol);
             self.client = state.client;
+            // That was a probe too: the follow cycle's recheck keeps its spacing behind it.
+            self.refresh_at = Some(std::time::Instant::now() + REFRESH);
         }
         matches!(self.protocol, Some(Protocol::Kitty | Protocol::KittyTmux))
     }
     /// The painter already knows the local image targets in the displayed body/page. An old cached picture must
     /// not keep probing tmux after navigation to a picture-free view, raw mode or a collapsed detail pane.
+    /// Coming back does not reset the spacing: holding a key over issues with and without pictures would otherwise
+    /// start a probe per issue. Away longer than [`REFRESH`], the next recheck is already due.
     pub fn interest(&mut self, interested: bool) {
-        if interested && !self.interested {
-            self.refresh_at = None;
-        }
         self.interested = interested;
     }
+    /// True when the frame owes the terminal something: another protocol, or uploads the new client never saw.
     fn apply_terminal(&mut self, state: term::TerminalState) -> bool {
         if self.protocol == Some(state.protocol) && self.client == state.client {
             return false;
         }
-        if self.protocol != Some(state.protocol) {
+        let changed = if self.protocol != Some(state.protocol) {
             self.clear_entries();
+            // These ids belonged to the previous protocol. In particular, never send kitty deletions to a new,
+            // unsupported terminal, even when there were evictions waiting for a frame before it attached.
+            self.deleted.clear();
+            true
         } else {
+            // Same protocol, another client: the payloads stay and only the uploads are owed again. Queued
+            // deletions stay too — a client still attached beside it holds those ids, and `q=2` keeps a deletion
+            // of an id this client never saw silent.
+            let mut resend = false;
             for entry in &mut self.entries {
-                entry.sent = false;
+                resend |= std::mem::take(&mut entry.sent);
             }
-        }
-        // These ids belonged to the previous client. In particular, never send kitty deletions to a new,
-        // unsupported terminal, even when there were evictions waiting for a frame before it attached.
-        self.deleted.clear();
+            resend
+        };
         self.protocol = Some(state.protocol);
         self.client = state.client;
-        true
+        changed
     }
     fn refresh_terminal(&mut self) -> bool {
         let mut changed = false;
         if let Some(rx) = &self.refresh {
             match rx.try_recv() {
-                Ok(state) => {
+                Ok(answer) => {
                     self.refresh = None;
-                    if self.interested && self.active {
+                    // `None`: tmux did not answer. Keep what is known rather than drop working previews.
+                    if let Some(state) = answer
+                        && self.interested
+                        && self.active
+                    {
                         changed = self.apply_terminal(state);
                     }
                 }
@@ -207,15 +223,18 @@ impl Images {
         #[cfg(not(test))]
         let may_probe = true;
         use std::io::IsTerminal;
-        let chosen = std::env::var("MOAI_IMAGES").ok();
-        let auto = chosen.as_deref().or(self.setting.as_deref()).is_none_or(|s| s == "auto");
+        // A supported direct terminal with no client is outside tmux (a window launched from a tmux shell). Its
+        // stdout device never becomes a pane. Off or unknown must still be rechecked to detect a later attach.
+        let outside_pane =
+            self.client.is_none() && matches!(self.protocol, Some(Protocol::Kitty | Protocol::Iterm | Protocol::Sixel));
         if may_probe
             && self.active
             && std::io::stdout().is_terminal()
             && self.interested
-            && auto
+            && !outside_pane
             && cfg!(unix)
             && std::env::var_os("TMUX").is_some()
+            && term::auto_detects(self.setting.as_deref())
             && self.refresh.is_none()
             && self.refresh_at.is_none_or(|due| now >= due)
         {
@@ -224,13 +243,13 @@ impl Images {
             if std::thread::Builder::new()
                 .name("image-terminal".into())
                 .spawn(move || {
-                    let _ = tx.send(term::terminal_state(setting.as_deref()));
+                    let _ = tx.send(term::observe_terminal(setting.as_deref()));
                 })
                 .is_ok()
             {
                 self.refresh = Some(rx);
             }
-            self.refresh_at = Some(now + std::time::Duration::from_millis(700));
+            self.refresh_at = Some(now + REFRESH);
         }
         changed
     }
@@ -756,12 +775,14 @@ mod tests {
         let root = Path::new(&root);
         let state = root.join("state");
         let tty = std::env::var("MOAI_IMAGE_REFRESH_TTY").unwrap();
+        // Rename into place: a probe running meanwhile must read the old reply or the new one, never half of one.
+        let write_state = |text: &str| {
+            let next = root.join("state.next");
+            std::fs::write(&next, text).unwrap();
+            std::fs::rename(&next, &state).unwrap();
+        };
         let snapshot = |term: &str, permission: &str, client: usize| {
-            std::fs::write(
-                &state,
-                format!("{tty}\nMOAI_CLIENT\n{term}\n{permission}\n{client}\n100\n/dev/client-{client}\n"),
-            )
-            .unwrap();
+            write_state(&format!("{tty}\nMOAI_CLIENT\n{term}\n{permission}\n{client}\n100\n/dev/client-{client}\n"));
         };
         let queries = || std::fs::read_to_string(root.join("queries")).unwrap_or_default().lines().count();
         let path = picture(root, "image.png");
@@ -795,7 +816,19 @@ mod tests {
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
         assert_eq!(images.entries[0].id, id);
-        assert_eq!(draw_picture(&mut images, lines), first);
+        assert_eq!(draw_picture(&mut images, lines.clone()), first);
+        // tmux lists no pane (a timeout or a vanished server answers the same): unknown, so the working state stays.
+        write_state("");
+        let asked = queries();
+        let until = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while queries() == asked || images.refresh.is_some() {
+            images.poll();
+            assert!(std::time::Instant::now() < until, "no recheck ran against the silent tmux");
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert!(!images.off(), "an unanswered recheck turned previews off");
+        assert_eq!(images.entries[0].id, id, "an unanswered recheck dropped the encoded picture");
+        assert!(draw_picture(&mut images, lines).is_empty(), "an unanswered recheck re-uploaded");
         snapshot("xterm-256color", "all", 3);
         let until = std::time::Instant::now() + std::time::Duration::from_secs(5);
         while !images.off() {
@@ -918,8 +951,11 @@ mod tests {
     /// Feed a completed background probe through the same follow path as production, without changing process
     /// environment shared by parallel tests. The protocol remains kitty/tmux while the client identity changes.
     fn refreshed(images: &mut Images, protocol: Protocol, client: &str) -> bool {
+        answered(images, Some(term::TerminalState { protocol, client: Some(client.into()) }))
+    }
+    fn answered(images: &mut Images, answer: Option<term::TerminalState>) -> bool {
         let (tx, rx) = std::sync::mpsc::channel();
-        tx.send(term::TerminalState { protocol, client: Some(client.into()) }).unwrap();
+        tx.send(answer).unwrap();
         images.refresh = Some(rx);
         images.interest(true);
         images.poll()
@@ -933,7 +969,7 @@ mod tests {
         out
     }
     #[test]
-    fn same_size_tmux_reattach_reuploads_without_reencoding() {
+    fn same_protocol_client_swap_reuploads_without_reencoding() {
         let root = crate::scratch::Scratch::new("tmux-reattach");
         let path = picture(&root, "one.png");
         let mut images = images();
@@ -975,10 +1011,47 @@ mod tests {
         images.active = false;
     }
     #[test]
+    fn an_unanswered_recheck_keeps_previews_and_pending_deletions() {
+        let root = crate::scratch::Scratch::new("tmux-unanswered");
+        let path = picture(&root, "one.png");
+        let mut images = images();
+        images.protocol = Some(Protocol::KittyTmux);
+        images.client = Some("ghostty/client-1".into());
+        let lines = ready(&mut images, &path, 20);
+        let id = images.entries[0].id;
+        draw_picture(&mut images, lines.clone());
+        images.deleted.push(123);
+        assert!(!answered(&mut images, None), "an unanswered recheck asked for a redraw");
+        assert_eq!(images.protocol, Some(Protocol::KittyTmux));
+        assert_eq!(images.client.as_deref(), Some("ghostty/client-1"));
+        assert_eq!(images.entries[0].id, id);
+        assert!(images.entries[0].sent);
+        assert_eq!(images.deleted, [123]);
+        images.active = false;
+    }
+    #[test]
+    fn another_client_owes_only_what_was_uploaded() {
+        let root = crate::scratch::Scratch::new("tmux-client-swap");
+        let path = picture(&root, "one.png");
+        let mut images = images();
+        images.protocol = Some(Protocol::Off);
+        images.client = Some("xterm/client-1".into());
+        assert!(!refreshed(&mut images, Protocol::Off, "xterm/client-2"), "an unsupported swap laid views out");
+        images.protocol = Some(Protocol::KittyTmux);
+        images.client = Some("ghostty/client-2".into());
+        ready(&mut images, &path, 20);
+        assert!(!refreshed(&mut images, Protocol::KittyTmux, "ghostty/client-3"), "nothing uploaded, nothing owed");
+        // An eviction's deletion still reaches a client attached beside the new one.
+        images.deleted.push(123);
+        refreshed(&mut images, Protocol::KittyTmux, "ghostty/client-4");
+        assert_eq!(images.deleted, [123]);
+        images.active = false;
+    }
+    #[test]
     fn completed_terminal_probe_is_ignored_after_leaving_picture_view() {
         let mut images = images();
         let (tx, rx) = std::sync::mpsc::channel();
-        tx.send(term::TerminalState { protocol: Protocol::Off, client: Some("other".into()) }).unwrap();
+        tx.send(Some(term::TerminalState { protocol: Protocol::Off, client: Some("other".into()) })).unwrap();
         images.refresh = Some(rx);
         images.interest(false);
         assert!(!images.poll());

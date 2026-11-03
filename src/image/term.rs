@@ -57,8 +57,6 @@ pub fn detect(
         Protocol::Off
     }
 }
-/// Resolve tmux separately from protocol hints: server-inherited kitty variables are
-/// not evidence about the attached client. Never change the user's passthrough option.
 pub fn detect_terminal(setting: Option<&str>) -> Protocol {
     terminal_state(setting).protocol
 }
@@ -69,23 +67,39 @@ pub struct TerminalState {
     pub protocol: Protocol,
     pub client: Option<String>,
 }
+/// Whether detection is automatic. An explicit `MOAI_IMAGES` or setting never probes tmux, even with TMUX inherited.
+pub fn auto_detects(setting: Option<&str>) -> bool {
+    std::env::var("MOAI_IMAGES").ok().as_deref().or(setting).is_none_or(|s| s == "auto")
+}
+/// The first detection. A tmux that cannot answer keeps graphics off.
 pub fn terminal_state(setting: Option<&str>) -> TerminalState {
-    let chosen = std::env::var("MOAI_IMAGES").ok();
-    let setting = chosen.as_deref().or(setting);
-    if setting.is_some_and(|s| s != "auto") {
-        return TerminalState { protocol: detect(|k| std::env::var(k).ok(), setting, |_| None), client: None };
+    observe_terminal(setting).unwrap_or_else(|| resolve(setting, None))
+}
+/// Resolve tmux separately from protocol hints: server-inherited kitty variables are
+/// not evidence about the attached client. Never change the user's passthrough option.
+/// `None` when tmux could not answer (a timeout, a server that went away). A recheck keeps what it knew then: one
+/// slow probe must not drop working previews, and an inherited TMUX whose server exited says nothing about a
+/// separate kitty window.
+pub fn observe_terminal(setting: Option<&str>) -> Option<TerminalState> {
+    if !auto_detects(setting) {
+        return Some(resolve(setting, None));
     }
-    // One process and one timeout for both the tty comparison and the client's permission.
-    let pane = std::env::var("TMUX").ok().and_then(|value| tmux_state(&value));
-    if let Some((true, client)) = &pane {
-        return TerminalState {
-            protocol: if passthrough_client(client) { Protocol::KittyTmux } else { Protocol::Off },
-            client: Some(client.clone()),
-        };
+    match std::env::var("TMUX") {
+        // One process and one timeout for both the tty comparison and the client's permission.
+        Ok(value) => tmux_state(&value).map(|pane| resolve(setting, Some(pane))),
+        Err(_) => Some(resolve(setting, None)),
     }
-    TerminalState {
-        protocol: detect(|k| std::env::var(k).ok(), setting, |_| pane.as_ref().map(|(inside, _)| *inside)),
-        client: None,
+}
+fn resolve(setting: Option<&str>, pane: Option<(bool, String)>) -> TerminalState {
+    match pane {
+        Some((true, client)) => TerminalState {
+            protocol: if passthrough_client(&client) { Protocol::KittyTmux } else { Protocol::Off },
+            client: Some(client),
+        },
+        pane => TerminalState {
+            protocol: detect(|k| std::env::var(k).ok(), setting, |_| pane.map(|(inside, _)| inside)),
+            client: None,
+        },
     }
 }
 fn passthrough_client(reply: &str) -> bool {
