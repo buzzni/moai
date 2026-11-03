@@ -500,7 +500,8 @@ pub fn local_file(base: &Path, allowed: &str, rel: &str) -> Option<PathBuf> {
 /// `[image missing: alt]` when a local reference does not resolve. One spelling, so the shell
 /// (`term::prepare`) and the explorer (`Context::labels`) cannot drift apart.
 pub fn label(lang: crate::i18n::Lang, missing: bool, alt: &str) -> String {
-    let word = crate::i18n::say(lang, if missing { "image.missing" } else { "image.placeholder" });
+    let word =
+        if missing { crate::i18n::say(lang, "image.missing") } else { crate::i18n::say(lang, "image.placeholder") };
     if alt.is_empty() { format!("[{word}]") } else { format!("[{word}: {alt}]") }
 }
 /// A reference that is not ours to open (remote) is never called missing.

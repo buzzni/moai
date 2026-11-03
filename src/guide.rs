@@ -666,7 +666,7 @@ const PLAN_MEMBER_EXTRA: &str = "where and how (files, functions, structures) ·
 /// 돌려준다. 공통 글에 "gap 으로 돌려 달라" 를 두면 감독의 펼치기가 아무도 안 읽는 줄을 낸다.
 fn plan_core() -> String {
     format!(
-        "Read the request, its evidence and enough code and tracker context to ground the split. Write short titles and concrete, actionable bodies with file and function locations, constraints, acceptance tests and review focus. For detailed writing use, for the epic: {PLAN_EPIC_BODY}; for a development member: {DETAILED_BODY}, adding {PLAN_MEMBER_EXTRA} after `what is decided`. Name the epic review section `{REVIEW_FOCUS}` (choose the English or Korean heading). For brief writing give what, where and tests. Classify each member using the difficulty rubric and explain why. Do not ask the person questions."
+        "Read the request, its evidence and enough code and tracker context to ground the split. Write short titles and concrete, actionable bodies with file and function locations, constraints, acceptance tests and review focus. For detailed writing use, for the epic: {PLAN_EPIC_BODY}; for a development member: {DETAILED_BODY}, adding {PLAN_MEMBER_EXTRA} after `what is decided`. Name the epic review section `{REVIEW_FOCUS}` (choose the English or Korean heading). For brief writing give what, where and tests. Classify each member using the difficulty rubric and explain why. Do not ask the person questions.\nKeep the person's decisions and exclusions, storage, concurrency, path security and output contracts, numbers and budgets, member order and review focus. Give entry-point files and functions as navigation hints; line numbers, proposed signatures and types are hints, not contracts. Describe acceptance tests by the failure conditions they must catch, not exhaustive test function names. Under `acceptance (which tests)`, write those failure conditions; test names are optional navigation hints. Make example commands executable with configured column names, the first column, spaces and shell quoting; when unknown use a placeholder such as `<first column>`. Put shared files and order in the epic once; a member's `order and the files it shares` names only its own place and files and points to the epic — do not repeat file lists or explanations in every member."
     )
 }
 
@@ -674,7 +674,6 @@ fn plan_brief_draft() -> String {
     format!(
         r#"Draft a plan from the interview record at <interview path> and the repository at <root>. Writing: <writing>. Work only in the scratchpad; do not write to the tracker or change repository files.
 {core}
-Keep the person's decisions and exclusions, storage, concurrency, path security and output contracts, numbers and budgets, member order and review focus. Give entry-point files and functions as navigation hints; line numbers, proposed signatures and types are hints, not contracts. Describe acceptance tests by the failure conditions they must catch, not exhaustive test function names. Make example commands executable with configured column names, the first column, spaces and shell quoting; when unknown use a placeholder such as `<first column>`. Put shared files and order in the epic once; a member's `order and the files it shares` names only its own place and files and points to the epic — do not repeat file lists or explanations in every member.
 Write a plan file, an epic body file and one body file per member in the scratchpad. Preserve the mapping from each plan title to its body file. Return first `Model ran: anthropic/<your real model name>`, then `plan: <absolute file>`, `epic body: <absolute file>`, and for each member `<title> <low|medium|high> — <reason>; body: <absolute file>`. Return each unresolved decision as `gap: <what>`; do not ask the user.
 {rubric}"#,
         core = plan_core(),
@@ -4945,6 +4944,7 @@ const PLAN_FIRST: &str = "You are handed epic <epic> — <title>. It is already 
 /// (릴리스·기한·본문) 뒤에 단다: 다시 선 감독은 그 표가 선 에픽을 곧장 걸음 2 부터 보내므로, 앞에 달면 덜 지은 에픽이
 /// 간다. 릴리스를 기한보다 먼저 건다 — 죽은 릴리스의 이른 기한이 사람의 기한을 거절한다(일꾼의 걸음 1 과 같은 차례).
 fn plan_brief() -> String {
+    let milestone_attach = MILESTONE_ATTACH.replacen("moai ", "moai -C \"<root>\" ", 1);
     format!(
         r#"You unfold backlog <id> — <title> — for the supervisor of this repository. You split it
 into an epic and its issues; you do not develop it, pick anything up, raise a worktree or
@@ -4969,7 +4969,7 @@ Writing: <writing>
    clears nothing `promote` carried, but for a dead release: when a line `promote` printed
    names the release it carried as already closed or deferred, clear it — left on, it
    re-opens a release that is out, or takes the whole plan out of the plan:
-   {MILESTONE_ATTACH}
+   {milestone_attach}
    {MILESTONE_CLEAR}
    moai -C "<root>" edit <epic> --due <due>
    A refusal because the day is later than the milestone's leaves the epic as it stands.
@@ -5005,6 +5005,11 @@ const MILESTONE_CLEAR: &str = "moai -C \"<root>\" edit <epic> --milestone none";
 /// 감독이 일꾼에게 보내면 그 일꾼의 `Sent:` 가 뒤에 선다.
 const PLAN_SENT: &str = "moai -C \"<root>\" note <epic> 'Sent: plan <id>'";
 
+/// 리뷰 브리프를 넘기는 파일(moai-i26i.p00). 에픽마다 한 디렉터리라 나란히 도는 리뷰가 서로의 브리프를 안 덮는다.
+/// 갈래 글의 절과 걸음 7 의 `Agent(…)` 줄이 이 한 글을 쓴다 — 따로 적던 판은 절이 경로를 넘기라 하고 7 은 글을 통째로
+/// `prompt` 에 실으라 했다.
+const REVIEW_BRIEF_AT: &str = "<scratchpad>/<epic>/brief.md";
+
 /// 서브에이전트 일꾼이 7 에서 세우는 리뷰 서브에이전트의 프롬프트(moai-9tqo.p1p). **리뷰는 일꾼의 중첩
 /// 서브에이전트로 돈다**(2026-10-12 사용자 결정 5) — 일꾼 안에서 부른 리뷰는 일꾼의 모델을 물려받으니(moai-9tqo.fxp
 /// 4: `code-review` 포크의 모델이 부른 쪽의 것이었다), `review` 역할의 모델로 따로 세워야 그 모델로 돈다.
@@ -5039,8 +5044,9 @@ Root: <root>
    with TaskStop
 3. Hold what came back against "Five places the review keeps finding" in <steps file>, and
    look yourself at any of the five the review left out
-4. Leave the reviewer's own words on the review issue — write them to a file in your
-   scratchpad and run moai -C "<root>" note <review id> -b - < <that file>
+4. Leave the reviewer's own words on the review issue — write them to
+   `<scratchpad>/<epic>/review.md`, beside this epic's `brief.md`, and run
+   moai -C "<root>" note <review id> -b - < "<scratchpad>/<epic>/review.md"
 {over}
 5. Hand back with SubagentHandback. The first line is Model ran: anthropic/<your real model
    name> — the name in your system prompt, not an alias. When 1 ran the review by hand, the
@@ -5413,11 +5419,12 @@ root"), never in the root
    as below, **pick the review issue up** —
    `moai -C "<root>" mv <review id> in_progress --from todo` — and only then raise it on the
    review brief ("The review brief" in `{BRANCHES_FILE}`), every slot filled, for the reason below.
+   Save it as `{REVIEW_BRIEF_AT}`, as that section says, and pass the path, not the text.
    It leaves its fixes uncommitted and the reviewer's
    words on the review issue, and hands back what it fixed and what it left — take that in as
    below
 
-       Agent(subagent_type: "general-purpose", model: <review model>, description: "review <epic>", prompt: <the review brief>)
+       Agent(subagent_type: "general-purpose", model: <review model>, description: "review <epic>", prompt: "Read {REVIEW_BRIEF_AT} whole before you start, then follow it")
    Write the grade you picked and why in one line in the angle (`-b`). The diff runs from
    where the branch left <base branch> — `git -C "<root>/.worktrees/<epic>" merge-base <base branch> HEAD`;
    asked in the root, `HEAD` is the root's own tip and the range comes out empty. You pulled it
@@ -5770,6 +5777,11 @@ notes), then
 ## The review brief
 
 In a subagent, 7 raises the review on this prompt — copy it whole and fill every slot.
+Create `<scratchpad>/<epic>/` first and save the filled prompt as
+`{REVIEW_BRIEF_AT}`. Pass that absolute path to the review subagent with
+instructions to read the whole file before starting. Use this epic's directory for all
+review scratch files; a shared `<scratchpad>/brief.md` lets parallel epics overwrite each
+other's prompts.
 
 {brief}
 "#
@@ -6919,16 +6931,17 @@ stop sending outside work while a release runs",
     }
 
     #[test]
-    fn plan_draft_keeps_decisions_and_contracts_without_prescribing_implementation() {
-        let draft = plan_brief_draft();
+    fn planning_briefs_keep_decisions_and_contracts_without_prescribing_implementation() {
+        let (core, briefs) = (plan_core(), [("draft", plan_brief_draft()), ("backlog", plan_brief())]);
         for contract in [
             "person's decisions and exclusions",
             "storage, concurrency, path security and output contracts",
             "numbers and budgets",
             "member order and review focus",
-            "navigation hints",
+            "Give entry-point files and functions as navigation hints",
             "proposed signatures and types are hints, not contracts",
             "failure conditions they must catch",
+            "Under `acceptance (which tests)`, write those failure conditions",
             "configured column names",
             "spaces and shell quoting",
             "<first column>",
@@ -6937,7 +6950,12 @@ stop sending outside work while a release runs",
             // 멤버 머리의 `order and the files it shares`(DETAILED_BODY)와 "에픽에 한 번" 이 한 브리프에서 갈리지 않게.
             "a member's `order and the files it shares` names only its own place and files and points to the epic",
         ] {
-            assert!(draft.contains(contract), "missing plan contract: {contract}");
+            // 공통 글에 선다(moai-i26i.1j6) — 두 브리프에 따로 적으면 한쪽만 고쳐져도 아래 셈은 푸르다.
+            assert!(core.contains(contract), "plan contract stands outside plan_core: {contract}");
+            for (name, brief) in &briefs {
+                assert!(brief.contains(contract), "{name} brief misses plan contract: {contract}");
+                assert_eq!(brief.matches(contract).count(), 1, "{name} brief repeats plan contract: {contract}");
+            }
         }
         let skill = plan();
         for contract in [
@@ -6972,7 +6990,7 @@ stop sending outside work while a release runs",
         for step in [
             "backlog promote <id> --dry-run --from -",
             "backlog promote <id> --from -",
-            MILESTONE_ATTACH,
+            "moai -C \"<root>\" edit <epic> --milestone <milestone>",
             "moai -C \"<root>\" edit <epic> --due <due>",
             MILESTONE_CLEAR,
             PLAN_SENT,
@@ -7847,7 +7865,25 @@ stop sending outside work while a release runs",
             seven.contains("still this session, not another"),
             "중첩 서브에이전트가 딴 에이전트 프로그램으로 읽힌다"
         );
-        assert!(worker_branches().contains(&indent(&prompt, "    ")), "일꾼 글에 리뷰 브리프가 없다");
+        let branches = worker_branches();
+        assert!(branches.contains(&indent(&prompt, "    ")), "일꾼 글에 리뷰 브리프가 없다");
+        // 에픽 둘이 같은 scratchpad 에서 돌아도 브리프와 원문이 서로 덮이지 않는다(moai-i26i.p00).
+        // 7 의 `Agent(…)` 도 그 파일의 경로를 넘긴다 — 글을 통째로 `prompt` 에 싣던 줄이 남으면 절과 7 이 갈린다.
+        assert!(raise.contains(REVIEW_BRIEF_AT), "7 이 에픽별 브리프 파일을 안 넘긴다 — {raise}");
+        assert!(!raise.contains("prompt: <the review brief>"), "7 이 브리프를 경로 대신 글로 싣는다 — {raise}");
+        let review = section(&branches, "## The review brief");
+        for step in [
+            "Create `<scratchpad>/<epic>/` first",
+            "`<scratchpad>/<epic>/brief.md`",
+            "Pass that absolute path to the review subagent",
+            "read the whole file before starting",
+        ] {
+            assert!(review.contains(step), "리뷰 브리프의 에픽별 전달 절차가 없다 — {step}");
+        }
+        assert!(
+            prompt.contains("moai -C \"<root>\" note <review id> -b - < \"<scratchpad>/<epic>/review.md\""),
+            "리뷰 원문을 에픽별 파일에서 올리지 않는다"
+        );
         for piece in ["Skill(code-review, \"<grade> --fix <root>/.worktrees/<epic>\")", "TaskStop", "background fork"] {
             assert!(prompt.contains(piece), "리뷰 브리프에 {piece} 가 없다");
         }

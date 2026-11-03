@@ -28,8 +28,9 @@ use std::time::{Duration, Instant};
 
 /// 동시에 도는 연결의 상한 — 넘치면 503 을 쓰고 닫는다. 페이지 하나가 한 번에 여는 부름은 몇 개다.
 pub const BUSY_MAX: usize = 32;
-/// Long-lived event streams have their own slots and never occupy ordinary request capacity.
-pub const STREAMS_MAX: usize = 8;
+/// Keep persistent streams below an HTTP/1 browser's per-origin connection budget. Overflow tabs use the
+/// page's polling fallback, leaving connections for ordinary reads and proposal claims/results.
+pub const STREAMS_MAX: usize = 3;
 /// 요청 머리 **전체**를 읽는 시한 — `read` 한 번의 시한이 아니다([`read_head`]).
 const READ_LIMIT: Duration = Duration::from_secs(5);
 /// 503 뒤에 늦게 오는 요청 머리를 별도 스레드에서 비우는 전체 시한. 조용하거나 한 바이트씩 보내는
@@ -53,7 +54,6 @@ pub struct Site {
     pub started_in: Lang,
     /// 사용자 설정의 표식과 그것에서 읽은 것([`Site::config`]).
     picked: Mutex<Picked>,
-    streams: AtomicUsize,
     pub tabs: Arc<ctl::Tabs>,
 }
 
@@ -73,7 +73,6 @@ impl Site {
             spawner,
             started_in,
             picked: Mutex::new(Picked { stamp: None, lang: started_in, projects: Vec::new() }),
-            streams: AtomicUsize::new(0),
             tabs: Arc::new(ctl::Tabs::new()),
         }
     }
@@ -200,31 +199,23 @@ fn handle(stream: TcpStream, site: &Site, busy: Leave) {
             let target = event_target(&req, site);
             match target {
                 Ok((cwd, lang, overlay, first, resume)) => {
-                    if site.streams.fetch_add(1, Ordering::SeqCst) >= STREAMS_MAX {
-                        site.streams.fetch_sub(1, Ordering::SeqCst);
-                        (refuse(503, say(lang, "web.busy"), code::BUSY), true)
-                    } else {
-                        struct StreamLeave<'a>(&'a AtomicUsize);
-                        impl Drop for StreamLeave<'_> {
-                            fn drop(&mut self) {
-                                self.0.fetch_sub(1, Ordering::SeqCst);
-                            }
+                    let ctl_peer = stream.peer_addr().is_ok_and(local_ctl_peer);
+                    match site.tabs.stream(
+                        &cwd,
+                        overlay,
+                        resume.as_ref().map(|(id, token)| (id.as_str(), token.as_str())),
+                        cfg!(unix) && ctl_peer,
+                        STREAMS_MAX,
+                    ) {
+                        Ok(Some(admitted)) => {
+                            drop(busy);
+                            let _ = stream_admitted(&stream, &cwd, lang, overlay, first, admitted);
+                            close(&stream);
+                            return;
                         }
-                        let _stream = StreamLeave(&site.streams);
-                        drop(busy);
-                        let ctl_peer = stream.peer_addr().is_ok_and(local_ctl_peer);
-                        let _ = stream_events(
-                            &stream,
-                            &cwd,
-                            lang,
-                            overlay,
-                            first,
-                            &site.tabs,
-                            ctl_peer,
-                            resume.as_ref().map(|(id, token)| (id.as_str(), token.as_str())),
-                        );
-                        close(&stream);
-                        return;
+                        // Refused requests keep their ordinary slot until the response is sent.
+                        Ok(None) => (refuse(503, say(lang, "web.busy"), code::BUSY), true),
+                        Err(error) => (refuse(500, &error.to_string(), code::ERROR), true),
                     }
                 }
                 Err(refused) => (refused, true),
@@ -292,10 +283,9 @@ fn ctl_post(stream: &TcpStream, req: &Request, site: &Site) -> Response {
             Ok(value) => value,
             Err(_) => return refuse(400, "invalid proposal answer", code::BAD_INPUT),
         };
-        let accepted = match body["state"].as_str() {
-            Some("accepted") => true,
-            Some("declined") => false,
-            _ => return refuse(400, "proposal answer needs accepted or declined", code::BAD_INPUT),
+        let state = match body["state"].as_str() {
+            Some(state @ ("claim" | "accepted" | "declined")) => state,
+            _ => return refuse(400, "proposal answer needs claim, accepted or declined", code::BAD_INPUT),
         };
         let ran = match body.get("ran") {
             Some(value) if !value.is_null() => match serde_json::from_value::<crate::ctl::wire::Reply>(value.clone()) {
@@ -304,7 +294,11 @@ fn ctl_post(stream: &TcpStream, req: &Request, site: &Site) -> Response {
             },
             _ => None,
         };
-        return match site.tabs.proposal_reply(id, token, proposal_id, accepted, ran) {
+        let reply = match state {
+            "claim" => site.tabs.proposal_claim(id, token, proposal_id),
+            _ => site.tabs.proposal_reply(id, token, proposal_id, state == "accepted", ran),
+        };
+        return match reply {
             Ok(reply) if reply.ok => {
                 Response::new(200, http::JSON, serde_json::to_vec(&reply.data).unwrap_or_default())
             }
@@ -385,6 +379,7 @@ fn local_ctl_peer(peer: std::net::SocketAddr) -> bool {
     peer.ip().is_loopback()
 }
 
+#[cfg(test)]
 fn stream_events(
     stream: &TcpStream,
     cwd: &std::path::Path,
@@ -395,22 +390,30 @@ fn stream_events(
     ctl_peer: bool,
     resume: Option<(&str, &str)>,
 ) -> std::io::Result<()> {
-    use std::io::Write as _;
     // Local ctl sockets are Unix-only; the tracker stream remains available on Windows.
     // A remote page can read the web UI when the server binds externally, but it must never receive a ctl request,
     // the caller's actor, or a token that can answer or write as that caller. SSH port forwarding arrives on loopback.
-    let joined = if cfg!(unix) && ctl_peer { Some(tabs.join(cwd, overlay, resume)?) } else { None };
-    struct TabLeave<'a>(&'a ctl::Tabs, String, u64);
-    impl Drop for TabLeave<'_> {
-        fn drop(&mut self) {
-            self.0.leave(&self.1, self.2);
-        }
-    }
-    let _tab = joined.as_ref().map(|joined| TabLeave(tabs, joined.id.clone(), joined.stream));
+    let Some(admitted) = tabs.stream(cwd, overlay, resume, cfg!(unix) && ctl_peer, STREAMS_MAX)? else {
+        let busy = refuse(503, say(lang, "web.busy"), code::BUSY);
+        return http::write(&mut Within::of(stream, ANSWER_LIMIT), &busy, true);
+    };
+    stream_admitted(stream, cwd, lang, overlay, first, admitted)
+}
+
+fn stream_admitted(
+    stream: &TcpStream,
+    cwd: &std::path::Path,
+    lang: Lang,
+    overlay: bool,
+    first: String,
+    admitted: ctl::Stream<'_>,
+) -> std::io::Result<()> {
+    use std::io::Write as _;
+    let joined = admitted.joined.as_ref();
     let mut writer = Within::of(stream, WRITE_LIMIT);
     http::write_stream_head(&mut writer)?;
     writer.write_all(b"retry: 3000\n\n")?;
-    if let Some(joined) = &joined {
+    if let Some(joined) = joined {
         writer.write_all(
             format!("event: hello\ndata: {}\n\n", serde_json::json!({"tab": joined.id, "token": joined.token}))
                 .as_bytes(),
@@ -420,7 +423,7 @@ fn stream_events(
     writer.flush()?;
     let (until, mut ping, mut seen) = (Instant::now() + Duration::from_secs(30 * 60), Instant::now(), first);
     while Instant::now() < until {
-        let pushed = match &joined {
+        let pushed = match joined {
             Some(joined) => match joined.incoming.recv_timeout(Duration::from_secs(1)) {
                 Ok(push) => Some(push),
                 Err(std::sync::mpsc::RecvTimeoutError::Timeout) => None,
@@ -446,9 +449,6 @@ fn stream_events(
             let mut writer = Within::of(stream, WRITE_LIMIT);
             let (name, data) = match push {
                 ctl::Push::Ctl { seq, request } => ("ctl", serde_json::json!({"seq": seq, "request": request})),
-                ctl::Push::ValidateZone { seq, name } => {
-                    ("validate_zone", serde_json::json!({"seq": seq, "name": name}))
-                }
                 ctl::Push::Proposal { entry } => ("proposal", entry),
                 ctl::Push::ProposalClosed { id } => ("proposal_closed", serde_json::json!({"id": id})),
             };
@@ -889,6 +889,157 @@ mod tests {
         assert_eq!(listed.data.unwrap()["windows"][0]["id"], id);
         drop(reader);
         drop(client);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_reserved_tab_resumes_before_overflow_even_at_the_stream_limit() {
+        use std::io::{BufRead, Write};
+        fn open(site: Arc<Site>, path: &str) -> (std::io::BufReader<TcpStream>, std::thread::JoinHandle<()>) {
+            let (mut client, server) = pair();
+            client.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+            write!(client, "GET {path} HTTP/1.1\r\nHost: localhost\r\n\r\n").unwrap();
+            let worker = std::thread::spawn(move || handle(server, &site, Leave(Arc::new(AtomicUsize::new(1)))));
+            (std::io::BufReader::new(client), worker)
+        }
+        fn next_data(reader: &mut impl BufRead) -> serde_json::Value {
+            loop {
+                let mut line = String::new();
+                reader.read_line(&mut line).unwrap();
+                assert!(!line.is_empty(), "stream ended before its event");
+                if let Some(data) = line.strip_prefix("data: ") {
+                    return serde_json::from_str(data).unwrap();
+                }
+            }
+        }
+        let scratch = crate::scratch::Scratch::new("web-resume-reserved-http");
+        std::fs::create_dir_all(scratch.join(".moai")).unwrap();
+        std::fs::write(scratch.join(".moai/config.toml"), "prefix = \"moai\"\n").unwrap();
+        std::fs::write(scratch.join(".moai/issues.jsonl"), "").unwrap();
+        let site = Arc::new(Site::new(
+            run::Spawner { exe: "unused-child".into(), cwd: scratch.path().into(), user: None },
+            Lang::En,
+        ));
+        let (mut first, first_worker) = open(site.clone(), "/api/events");
+        let hello = next_data(&mut first);
+        let (id, token) = (hello["tab"].as_str().unwrap(), hello["token"].as_str().unwrap());
+        let mut others = Vec::new();
+        for _ in 1..STREAMS_MAX {
+            let (mut reader, worker) = open(site.clone(), "/api/events");
+            assert!(next_data(&mut reader)["tab"].is_string());
+            others.push((reader, worker));
+        }
+        let mut proposed = crate::ctl::wire::request(
+            crate::ctl::wire::Verb::Propose { text: "Keep this card".into(), then: None, ttl: 900, wait: 0 },
+            Duration::from_secs(5),
+        );
+        proposed.target = Some(id.into());
+        let proposal_id = site.tabs.handle(proposed).data.unwrap()["id"].clone();
+        drop(first);
+        first_worker.join().unwrap();
+        let (mut overflow, worker) = open(site.clone(), "/api/events");
+        let mut head = String::new();
+        overflow.read_line(&mut head).unwrap();
+        assert!(head.starts_with("HTTP/1.1 503 "), "overflow stole the detached slot: {head}");
+        drop(overflow);
+        worker.join().unwrap();
+        let (mut resumed, worker) = open(site, &format!("/api/events?resume={id}&token={token}"));
+        assert_eq!(next_data(&mut resumed), hello, "resume changed the ctl id or token");
+        loop {
+            let entry = next_data(&mut resumed);
+            if entry["id"] == proposal_id {
+                break;
+            }
+        }
+        drop(resumed);
+        worker.join().unwrap();
+        for (reader, worker) in others {
+            drop(reader);
+            worker.join().unwrap();
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn proposal_http_requires_a_claim_before_the_action_result() {
+        use std::io::{Read, Write};
+        let scratch = crate::scratch::Scratch::new("web-proposal-claim-http");
+        std::fs::create_dir_all(scratch.join(".moai")).unwrap();
+        std::fs::write(scratch.join(".moai/config.toml"), "prefix = \"moai\"\n").unwrap();
+        std::fs::write(scratch.join(".moai/issues.jsonl"), "").unwrap();
+        let site =
+            Site::new(run::Spawner { exe: "unused-child".into(), cwd: scratch.path().into(), user: None }, Lang::En);
+        let tab = site.tabs.join(scratch.path(), false, None).unwrap();
+        let mut request = crate::ctl::wire::request(
+            crate::ctl::wire::Verb::Propose {
+                text: "Show board?".into(),
+                then: Some(Box::new(crate::ctl::wire::Verb::Screen { name: "board".into() })),
+                ttl: 900,
+                wait: 0,
+            },
+            Duration::from_secs(5),
+        );
+        request.target = Some(tab.id.clone());
+        let id = site.tabs.handle(request).data.unwrap()["id"].as_str().unwrap().to_string();
+        let post = |body: &str, token: &str, origin: &str| {
+            let (mut client, server) = pair();
+            client.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+            write!(client, "POST /api/ctl/{}/proposal?token={token}&id={id} HTTP/1.1\r\nHost: localhost\r\nOrigin: {origin}\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}", tab.id, body.len()).unwrap();
+            std::thread::scope(|scope| {
+                scope.spawn(|| handle(server, &site, Leave(Arc::new(AtomicUsize::new(1)))));
+                let mut response = String::new();
+                client.read_to_string(&mut response).unwrap();
+                response
+            })
+        };
+        let claim = r#"{"state":"claim"}"#;
+        assert!(post(claim, "wrong", "http://localhost").starts_with("HTTP/1.1 403 "));
+        assert!(post(claim, &tab.token, "http://elsewhere").starts_with("HTTP/1.1 403 "));
+        let result = r#"{"state":"accepted","ran":{"ok":true,"data":{"screen":"board"}}}"#;
+        assert!(post(result, &tab.token, "http://localhost").starts_with("HTTP/1.1 409 "));
+        let permission = post(claim, &tab.token, "http://localhost");
+        assert!(permission.starts_with("HTTP/1.1 200 "), "{permission}");
+        let value: serde_json::Value = serde_json::from_str(permission.split("\r\n\r\n").nth(1).unwrap()).unwrap();
+        assert_eq!(value["then"]["name"], "board");
+        assert!(post(claim, &tab.token, "http://localhost").starts_with("HTTP/1.1 409 "));
+        assert!(post(result, &tab.token, "http://localhost").starts_with("HTTP/1.1 200 "));
+        let mut answer =
+            crate::ctl::wire::request(crate::ctl::wire::Verb::Answer { id, wait: 0 }, Duration::from_secs(1));
+        answer.target = Some(tab.id);
+        let value = site.tabs.handle(answer).data.unwrap();
+        assert_eq!(value["state"], "accepted");
+        assert_eq!(value["ran"]["data"]["screen"], "board");
+    }
+
+    #[test]
+    fn event_stream_overflow_refuses_promptly_and_returns_its_slot() {
+        use std::io::{Read, Write};
+        let scratch = crate::scratch::Scratch::new("web-event-slots");
+        std::fs::create_dir_all(scratch.join(".moai")).unwrap();
+        std::fs::write(scratch.join(".moai/config.toml"), "prefix = \"moai\"\n").unwrap();
+        std::fs::write(scratch.join(".moai/issues.jsonl"), "").unwrap();
+        let site =
+            Site::new(run::Spawner { exe: "unused-child".into(), cwd: scratch.path().into(), user: None }, Lang::En);
+        // Model the open streams, then pass the next request through the real HTTP handler.
+        let _streams: Vec<_> = (0..STREAMS_MAX)
+            .map(|_| site.tabs.stream(scratch.path(), false, None, false, STREAMS_MAX).unwrap().unwrap())
+            .collect();
+        assert_eq!(STREAMS_MAX, 3, "persistent streams consumed the browser's read connections");
+        let (mut client, server) = pair();
+        client.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+        client.write_all(b"GET /api/events HTTP/1.1\r\nHost: localhost\r\n\r\n").unwrap();
+        let busy = Arc::new(AtomicUsize::new(1));
+        std::thread::scope(|scope| {
+            scope.spawn(|| handle(server, &site, Leave(busy.clone())));
+            let mut result = String::new();
+            client.read_to_string(&mut result).unwrap();
+            assert!(result.starts_with("HTTP/1.1 503 "), "{result}");
+        });
+        assert!(
+            site.tabs.stream(scratch.path(), false, None, false, STREAMS_MAX).unwrap().is_none(),
+            "a refusal freed an owned slot"
+        );
+        assert_eq!(busy.load(Ordering::SeqCst), 0);
     }
 
     /// 루프백에 짝 하나 — (부르는 쪽, 받은 쪽).

@@ -134,6 +134,16 @@ pub struct Repo {
     moved_from: Option<PathBuf>,
 }
 
+#[cfg(test)]
+thread_local! {
+    static SNAPSHOT_READS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
+pub(crate) fn snapshot_reads() -> usize {
+    SNAPSHOT_READS.get()
+}
+
 impl Repo {
     /// The only repository-config write path: lock, reread, edit one flat key,
     /// parse the result, then atomically replace the file. It writes no journal.
@@ -1061,6 +1071,8 @@ impl Repo {
     /// [`Repo::rooted`] 가 먼저 했고, 여기서 다시 재는 것은 그 뒤에 링크가 갈린 경우를 위해서다. 여기는 화면
     /// 말을 모르는 자리라 그 거절은 말 없는 꼴([`crate::held::spelled`])로 선다.
     pub fn read(&self) -> R<Load> {
+        #[cfg(test)]
+        SNAPSHOT_READS.set(SNAPSHOT_READS.get() + 1);
         Ok(read_snapshot(&self.root).map_err(Unsnapped::into_fail)?.unwrap_or_default())
     }
 

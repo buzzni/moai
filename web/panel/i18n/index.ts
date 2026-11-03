@@ -348,6 +348,7 @@ export interface WikiCopy {
 }
 
 export interface Copy {
+  ctl: { personOnly: string }
   propose: { title: string; accept: string; decline: string; previous: string; next: string }
   hint: string
   refreshedAt: string

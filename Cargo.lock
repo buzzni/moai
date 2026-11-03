@@ -625,7 +625,7 @@ dependencies = [
 
 [[package]]
 name = "moai"
-version = "0.44.0"
+version = "0.45.0"
 dependencies = [
  "anstream",
  "anstyle",
@@ -640,6 +640,7 @@ dependencies = [
  "ring",
  "serde",
  "serde_json",
+ "signal-hook",
  "toml_edit",
  "unicode-segmentation",
  "unicode-width",

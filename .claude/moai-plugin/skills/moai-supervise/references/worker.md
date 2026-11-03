@@ -386,11 +386,12 @@ root"), never in the root
    as below, **pick the review issue up** —
    `moai -C "<root>" mv <review id> in_progress --from todo` — and only then raise it on the
    review brief ("The review brief" in `worker-branches.md`), every slot filled, for the reason below.
+   Save it as `<scratchpad>/<epic>/brief.md`, as that section says, and pass the path, not the text.
    It leaves its fixes uncommitted and the reviewer's
    words on the review issue, and hands back what it fixed and what it left — take that in as
    below
 
-       Agent(subagent_type: "general-purpose", model: <review model>, description: "review <epic>", prompt: <the review brief>)
+       Agent(subagent_type: "general-purpose", model: <review model>, description: "review <epic>", prompt: "Read <scratchpad>/<epic>/brief.md whole before you start, then follow it")
    Write the grade you picked and why in one line in the angle (`-b`). The diff runs from
    where the branch left <base branch> — `git -C "<root>/.worktrees/<epic>" merge-base <base branch> HEAD`;
    asked in the root, `HEAD` is the root's own tip and the range comes out empty. You pulled it

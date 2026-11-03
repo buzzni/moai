@@ -253,6 +253,7 @@ test('late counts survive a chart-only tree replacement but not a later board', 
   const groups = new Map([['m', { todo: 1 }]])
   state = reduce(state, { type: 'groups', data: first, groups })
   assert.equal(state.board.value.tree, tree)
+  assert.equal('chartSource' in state.board.value, false, 'the previous tree must not be retained')
   assert.equal(state.board.value.groups, groups)
   const second = { rows, loadedAt: 2 }
   state = reduce(state, { type: 'board-loaded', data: second })

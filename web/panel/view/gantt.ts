@@ -17,7 +17,7 @@
  */
 import { assigneeOf } from '../data/people.ts'
 import { MEMORY_KEY, settingsStorage } from '../data/memory.ts'
-import { undoOf, type PlanChange } from '../data/plan.ts'
+import { type PlanChange } from '../data/plan.ts'
 import { zoneNow } from '../data/zone.ts'
 import { startsFolded, pathKey, type GanttRow, type IssueIndex, type Row } from '../data/index.ts'
 import { fill } from '../i18n/index.ts'
@@ -291,6 +291,33 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
     return node
   }
 
+  // Keep the last offset measured at the old width: layout may clamp scrollLeft
+  // before either the scroll event or ResizeObserver is delivered.
+  let measuredWidth = 0
+  let leftAnchor = 0
+  let resizeEnd: ReturnType<typeof setTimeout> | undefined
+  /** An offset read at a width the anchor was not measured at may be the browser's clamp: it does not move the anchor. */
+  const noteAnchor = (): void => {
+    if (!measuredWidth || scroll.clientWidth === measuredWidth) leftAnchor = scroll.scrollLeft
+  }
+
+  function resizeAxis(left: number, reserve = 0): void {
+    if (!axis || !base || !built) return
+    const [from, to] = fillRange(base, zoom, left + viewWidth() + reserve)
+    if (axis.to !== to || axis.from !== from) {
+      axis = { zoom, from, to }
+      const width = widthOf(axis)
+      right.style.width = `${width}px`
+      built.svg.setAttribute('width', String(width))
+      // Bars have the same step and origin. Only the date window needs extending.
+      drawn = null
+    }
+    scroll.scrollLeft = left
+    measuredWidth = scroll.clientWidth
+    leftAnchor = scroll.scrollLeft
+    paintView()
+  }
+
   function draw(scrollTo?: (a: Axis) => number): void {
     if (!model || !state) return
     if (holding) return void (drawLater = true)
@@ -336,6 +363,8 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
     for (const [z, b] of zoomButtons) b.setAttribute('aria-pressed', String(z === zoom))
     paintArrows()
     paintView()
+    measuredWidth = scroll.clientWidth
+    leftAnchor = scroll.scrollLeft
   }
 
   /** What is in view now: the lines `[r0, r1)` and the dates' pixels `[x0, x1]`, with no margin. */
@@ -361,6 +390,17 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
     if (!drawn) return false
     const v = inView()
     return v.r0 >= drawn.r0 && v.r1 <= drawn.r1 && v.x0 >= drawn.x0 && v.x1 <= drawn.x1
+  }
+
+  /** Leave nodes already in order attached; only entering or replaced nodes move. */
+  function reconcile(parent: HTMLElement, nodes: Element[]): void {
+    const keep = new Set(nodes)
+    for (const node of Array.from(parent.children)) if (!keep.has(node)) node.remove()
+    let next = parent.firstElementChild
+    for (const node of nodes) {
+      if (node === next) next = next.nextElementSibling
+      else parent.insertBefore(node, next)
+    }
   }
 
   /**
@@ -459,8 +499,8 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
       lanes.push(lane)
       b.lanes.set(n, lane)
     }
-    lanesBox.replaceChildren(...b.shade, ...lanes, b.svg, b.today)
-    rowsBox.replaceChildren(...rows)
+    reconcile(lanesBox, [...b.shade, ...lanes, b.svg, b.today])
+    reconcile(rowsBox, rows)
 
     // The date decorations remain when only the vertical window changes.
     if (!datesChanged) return
@@ -567,6 +607,7 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
     })
     for (const tick of built.top) tick.el.style.paddingLeft = tick.from < v0 && tick.to > v0 ? `${v0 - tick.from + 4}px` : ''
     rangeText.textContent = `${dayText(wallAt(axis, v0))} ~ ${dayText(wallAt(axis, Math.min(v1, widthOf(axis))))}`
+    noteAnchor()
   }
 
   /** Only the cursor moved: the selection mark, the arrows, the row in view. */
@@ -867,9 +908,9 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
    * bar on screen was drawn from the read before it — a second drag would be drawn, and its undo line built, from days
    * the first has already moved, while moai adds the second move on top of the first.
    */
-  function write(movePlan: NonNullable<typeof ctx.movePlan>, id: string, change: PlanChange, undo: string): void {
+  function write(movePlan: NonNullable<typeof ctx.movePlan>, id: string, change: PlanChange): void {
     writing.add(id)
-    void movePlan(id, change, undo).finally(() => {
+    void movePlan(id, change).finally(() => {
       writing.delete(id)
       moved.delete(id)
       // Even a refresh drew the overlay: remove it to show the days moai measured inside its lock.
@@ -950,10 +991,7 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
         const writtenEdge = edge === 'body' ? (g.planned!.start_filled ? 'end' : g.planned!.end_filled ? 'start' : edge) : edge
         const intent: PlanChange = edge === 'start' && g.planned!.start_filled
           ? { start: change.start! } : { edge: writtenEdge, days }
-        write(movePlan, row.id, intent, undoOf(row.id, intent, {
-          start: g.planned?.start_filled ? null : g.planned?.start ?? null,
-          due: g.planned?.end_filled ? null : g.planned?.end ?? null,
-        }))
+        write(movePlan, row.id, intent)
       }
       resume()
     })
@@ -973,7 +1011,7 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
       // `--if-unplanned` writes nothing over it.
       if (writing.has(row.id)) return
       const day = dayText(floorDay(wallAt(a, event.clientX - lane.getBoundingClientRect().left)))
-      write(movePlan, row.id, { day }, undoOf(row.id, { day }, { start: null, due: null }))
+      write(movePlan, row.id, { day })
     })
   }
 
@@ -1027,16 +1065,28 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
   paintGrid()
   let frame = 0
   const onScroll = () => {
+    noteAnchor()
     if (!win?.requestAnimationFrame) return paintView()
     win.cancelAnimationFrame(frame)
     frame = win.requestAnimationFrame(paintView)
   }
   scroll.addEventListener('scroll', onScroll, { passive: true })
   const observer = win && 'ResizeObserver' in win ? new win.ResizeObserver(() => {
+    if (!scroll.clientWidth) return
+    const changed = measuredWidth !== scroll.clientWidth
+    let left = measuredWidth && changed ? leftAnchor : scroll.scrollLeft
+    const placing = !positioned
     paintGrid()
     position()
-    if (axis && viewWidth() > widthOf(axis) - scroll.scrollLeft) draw()
-    else paintView()
+    // A first show places the dates at today: that is where this view starts, not an offset to put back over it.
+    if (placing && positioned) left = scroll.scrollLeft
+    if (changed) {
+      // A screen of temporary dates absorbs the next resize frames. A settled
+      // resize trims it back; it never becomes the next zoom's range or anchor.
+      resizeAxis(left, Math.max(viewWidth(), 256))
+      clearTimeout(resizeEnd)
+      resizeEnd = setTimeout(() => resizeAxis(leftAnchor), 150)
+    } else paintView()
   }) : null
   observer?.observe(scroll)
 
@@ -1092,6 +1142,7 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
     },
     gridWidth: () => gridW,
     leave() {
+      clearTimeout(resizeEnd)
       shut.clear()
       foldVersion++
       seeded = false
@@ -1101,6 +1152,8 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
       pane.focus({ preventScroll: true })
     },
     destroy() {
+      clearTimeout(resizeEnd)
+      win?.cancelAnimationFrame(frame)
       observer?.disconnect()
       scroll.removeEventListener('scroll', onScroll)
       pane.remove()

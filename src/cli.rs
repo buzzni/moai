@@ -778,7 +778,8 @@ BACKLOG
   When a move is refused (a start after the deadline, a day past the deadline
   above) the refusal is on the banner; a move that went through names the
   `moai edit` line that puts it back. Relative moves undo only the dates moved;
-  restoring an absolute date may overwrite a later change to that field.
+  absolute restorations check --if-start/--if-due under the write lock and
+  refuse if that field changed. The command names its project with -C.
   Clicking a row puts the cursor on it and the wheel scrolls the rows; a
   sideways wheel, or Shift and the wheel, slides the dates, and so does
   dragging the date header. Dragging the line between the rows and the dates
@@ -1580,9 +1581,12 @@ pub enum WikiCmd {
   `dir_abs` is `dir` as an absolute path in this checkout - absent when
   `wiki_dir` points outside it or that path is not UTF-8. `seen_count` is that
   `×N` - always there, 0 on a page that is not a lesson. `issues` is
-  [{\"id\",\"exists\"}] - the ids with this tracker's prefix the page names
-  outside code blocks; the name of a skill moai plants (`moai-wiki`) is never
-  one. `links` is
+  [{\"id\",\"exists\",\"external\"}] - the ids with this tracker's prefix the page
+  names outside code blocks; the name of a skill moai plants (`moai-wiki`) is
+  never one. An id written as the text of an http(s) link titled
+  \"external issue\" belongs to another repository: it carries `external`, that
+  link's URL, and `exists` false, and no notice counts it - the same id named
+  elsewhere on the page stands again without `external`. `links` is
   [{\"text\",\"to\",\"anchor\",\"resolved\",\"anchor_resolved\"}] - relative links to a
   `.md` page of this wiki, `to` being the target slug (the page itself for a
   bare `#anchor`). `anchor` is the part after `#` and `anchor_resolved` says
@@ -2502,6 +2506,16 @@ pub struct EditArgs {
     #[arg(long, value_name = "date|none")]
     pub due: Option<String>,
 
+    /// Only if start is this exact day (`none`: absent)
+    /// Checked under lock; mismatch writes nothing
+    #[arg(long, value_name = "day|none", requires = "dates", value_parser = expected_day, verbatim_doc_comment)]
+    pub if_start: Option<String>,
+
+    /// Only if deadline is this day (`none`: absent)
+    /// Checked under lock; mismatch writes nothing
+    #[arg(long, value_name = "day|none", requires = "dates", value_parser = expected_day, verbatim_doc_comment)]
+    pub if_due: Option<String>,
+
     /// Move the planned days N days, as the row
     /// holds them when written
     #[arg(long, value_name = "±N", allow_negative_numbers = true, verbatim_doc_comment, value_parser = shift_days(),
@@ -2522,6 +2536,14 @@ pub struct EditArgs {
     /// with no planned day; else refuse
     #[arg(long, requires = "dates", verbatim_doc_comment)]
     pub if_unplanned: bool,
+}
+
+fn expected_day(s: &str) -> Result<String, String> {
+    if s == "none" || crate::model::parse_date(s).is_some() {
+        Ok(s.to_string())
+    } else {
+        Err("expected YYYY-MM-DD or none".to_string())
+    }
 }
 
 /// `edit --shift*` 의 날 수 — **web 의 끌기가 받는 폭과 같다**(여섯 자리, `web::api::is_days`, moai-vj8w 리뷰). 막지 않으면

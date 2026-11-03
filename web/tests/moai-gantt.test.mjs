@@ -251,6 +251,7 @@ test('a short Gantt fills the dates through zoom, fit and resize; its range ends
 
   // A wider pane must remeasure the axis from the current offset (more than the day of margin), keeping that offset.
   box.scrollLeft = Math.max(0, right() - visible() - 1)
+  box.dispatchEvent(new dom.window.Event('scroll'))
   Object.defineProperty(box, 'clientWidth', { get: () => 2600, configurable: true })
   const before = box.scrollLeft
   assert.ok(before > model.PX_PER_DAY.day, 'the premise — the offset is more than the margin absorbs')
@@ -265,6 +266,25 @@ test('a short Gantt fills the dates through zoom, fit and resize; its range ends
   const from = model.rangeOf([null], NOW)[0]
   const axisEnd = model.dayText(from + right() / model.PX_PER_DAY[root.querySelector('.g-seg [aria-pressed="true"]').dataset.zoom] * model.DAY)
   assert.equal(root.querySelector('.g-range').textContent.split(' ~ ')[1], axisEnd)
+})
+
+test('a pane drawn with no width starts at today when it first gets one; the resize keeps that offset', () => {
+  let resize
+  const { root, view } = mount(null, build(), [0, 560], (win) => {
+    win.ResizeObserver = class {
+      constructor(callback) { resize = callback }
+      observe() {}
+      disconnect() {}
+    }
+  })
+  const box = root.querySelector('.g-scroll')
+  assert.equal(box.scrollLeft, 0, 'the premise — a pane with no width is not placed yet')
+  Object.defineProperty(box, 'clientWidth', { get: () => 2000, configurable: true })
+  resize()
+  const placed = box.scrollLeft
+  assert.ok(placed > 0, 'the first show did not place the dates at today')
+  view.command('gantt.today')
+  assert.equal(placed, box.scrollLeft, 'the resize put back the offset from before the first placement')
 })
 
 test('the grid draws the whole tree: id, glyph, branch, title, progress, assignee', () => {
@@ -697,8 +717,8 @@ const writing = (rows = ROWS, gantt = GANTT, answer = async () => {}) => {
     intents: { choose: (id) => calls.push(`choose:${id}`), point: (id) => calls.push(`point:${id}`) },
     layout: () => ({ detailVisible: false }), focusPane: () => {},
     say: (text, problem) => said.push([text, problem]),
-    movePlan: (id, change, undo) => {
-      moves.push({ id, change, undo })
+    movePlan: (id, change) => {
+      moves.push({ id, change })
       return answer()
     },
   }
@@ -733,7 +753,7 @@ test('dragging a bar\'s middle moves the plan by whole days, once, on release; t
   assert.deepEqual(moves, [], 'nothing is written while it moves')
   press(dom, l, 'pointerup', mid + 70)
   l.click()
-  assert.deepEqual(moves, [{ id: 'e1.c', change: { edge: 'body', days: 2 }, undo: 'moai edit e1.c --shift -2' }])
+  assert.deepEqual(moves, [{ id: 'e1.c', change: { edge: 'body', days: 2 } }])
   assert.deepEqual(calls, [], 'the click a drag ends with chose the row')
   l.click()
   assert.deepEqual(calls, ['choose:e1.c'], 'the next click chooses as before')
@@ -834,7 +854,7 @@ test('a milestone\'s own diamond moves with its bar\'s end; the undo inverts the
   const cb = laidOut(c.querySelector('.b-plan'))
   press(dom, c, 'pointerdown', px(cb, 'left') + 40)
   press(dom, c, 'pointerup', px(cb, 'left') + 80)
-  assert.equal(moves.at(-1).undo, 'moai edit e1.c --shift -1')
+  assert.deepEqual(moves.at(-1).change, { edge: 'body', days: 1 })
 })
 
 test('a deadline-only row drags its filled bar; a group counted from its members says why and moves nothing', () => {
@@ -863,7 +883,7 @@ test('a double click on a day of a row with no days plans that day; a group or a
   const { root, dom, moves } = writing(rows, gantt)
   const day = days('2026-10-30') + 5
   for (const id of ['z', 'y', 'e1.c']) press(dom, lane(root, id), 'dblclick', day)
-  assert.deepEqual(moves, [{ id: 'z', change: { day: '2026-10-30' }, undo: 'moai edit z --start none --due none' }])
+  assert.deepEqual(moves, [{ id: 'z', change: { day: '2026-10-30' } }])
 })
 
 test('a row only a sibling worktree shows is not drawn movable, and a double click plans nothing (moai-vj8w.93u)', () => {
@@ -1173,25 +1193,14 @@ test('a cursor sent to a row beyond the window brings that row in (moai-vj8w.2fh
   assert.equal(dom.window.document.querySelectorAll('.lane[aria-selected="true"]').length, 1)
 })
 
-test('undo inverts each move, clearing an edge only when it was absent at read time', async () => {
-  const { undoOf } = await panelModule('data/plan.ts')
-  const read = { start: '2026-10-26', due: '2026-10-27' }
-  assert.equal(undoOf('x', { edge: 'body', days: 2 }, read), 'moai edit x --shift -2')
-  assert.equal(undoOf('x', { edge: 'start', days: -3 }, read), 'moai edit x --shift-start 3')
-  assert.equal(undoOf('x', { edge: 'end', days: 1 }, read), 'moai edit x --shift-due -1')
-  assert.equal(undoOf('x', { edge: 'start', days: 1 }, { ...read, start: null }), 'moai edit x --start none')
-  assert.equal(undoOf('x', { edge: 'end', days: 1 }, { ...read, due: null }), 'moai edit x --due none')
-  assert.equal(undoOf('x', { day: '2026-10-27' }, { start: null, due: null }), 'moai edit x --start none --due none')
-  assert.equal(undoOf('x', { start: '2026-10-21' }, { start: null, due: '2026-10-27' }), 'moai edit x --start none')
-})
 
 test('zoom, fit with a new step and Ctrl+wheel each build one window at their final scroll position', () => {
   const { root, view, dom } = mount(null, build(), [1000, 560])
   const box = scrollable(root)
   const lanes = root.querySelector('.g-lanes')
-  const replace = lanes.replaceChildren.bind(lanes)
+  const insert = lanes.insertBefore.bind(lanes)
   let builds = 0
-  lanes.replaceChildren = (...nodes) => { builds++; replace(...nodes) }
+  lanes.insertBefore = (node, before) => { if (node.matches('svg.links') && node.parentElement !== lanes) builds++; return insert(node, before) }
   const once = (action) => {
     builds = 0
     action()
@@ -1209,11 +1218,11 @@ test('zoom, fit with a new step and Ctrl+wheel each build one window at their fi
   })))
 })
 
-test('edge undo uses the tree plan even when the list read disagrees about absent edges', async () => {
-  for (const [planned, fields, grip, expected] of [
-    [own('2026-10-26', null), { due_on: '2026-10-30' }, 'end', '--due none'],
-    [own('2026-10-26', '2026-10-27'), { starts_on: '' }, 'start', '--shift-start 1'],
-    [own('2026-10-26', '2026-10-27'), {}, 'end', '--shift-due -1'],
+test('edge moves use the tree plan even when the list read disagrees about absent edges', async () => {
+  for (const [planned, fields, grip] of [
+    [own('2026-10-26', null), { due_on: '2026-10-30' }, 'end'],
+    [own('2026-10-26', '2026-10-27'), { starts_on: '' }, 'start'],
+    [own('2026-10-26', '2026-10-27'), {}, 'end'],
   ]) {
     const rows = ROWS.map((r) => r.id === 'e1.c' ? { ...r, ...fields } : r)
     const gantt = { ...GANTT, 'e1.c': g('e1.c', { planned }) }
@@ -1223,17 +1232,17 @@ test('edge undo uses the tree plan even when the list read disagrees about absen
     const from = grip === 'start' ? px(bar, 'left') + 1 : px(bar, 'left') + px(bar, 'width') - 1
     press(dom, l, 'pointerdown', from)
     press(dom, l, 'pointerup', from + (grip === 'start' ? -40 : 40))
-    assert.equal(moves.at(-1)?.undo, `moai edit e1.c ${expected}`)
+    assert.equal(moves.at(-1)?.change.edge, grip)
     await tick()
   }
 })
 
 
-test('filled edges stay derived through a whole-bar move and undo; resizing creates only the chosen edge', async () => {
-  for (const [planned, grip, edge, undo] of [
-    [{ ...own('2026-10-20', '2026-10-27'), start_filled: true }, 'body', 'end', '--shift-due -1'],
-    [own('2026-10-26', null), 'body', 'start', '--shift-start -1'],
-    [{ ...own('2026-10-20', '2026-10-27'), start_filled: true }, 'start', 'start', '--start none'],
+test('filled edges stay derived through a whole-bar move; resizing creates only the chosen edge', async () => {
+  for (const [planned, grip, edge] of [
+    [{ ...own('2026-10-20', '2026-10-27'), start_filled: true }, 'body', 'end'],
+    [own('2026-10-26', null), 'body', 'start'],
+    [{ ...own('2026-10-20', '2026-10-27'), start_filled: true }, 'start', 'start'],
   ]) {
     const gantt = { ...GANTT, 'e1.c': g('e1.c', { planned }) }
     const { root, dom, moves } = writing(ROWS, gantt)
@@ -1252,7 +1261,7 @@ test('filled edges stay derived through a whole-bar move and undo; resizing crea
     press(dom, l, 'pointerup', x + 40)
     const absolute = grip === 'start' && planned.start_filled
     const change = absolute ? { start: '2026-10-21' } : { edge, days: 1 }
-    assert.deepEqual(moves, [{ id: 'e1.c', change, undo: `moai edit e1.c ${undo}` }])
+    assert.deepEqual(moves, [{ id: 'e1.c', change }])
     const { planEndpoint } = await panelModule('data/plan.ts')
     assert.deepEqual(planEndpoint('e1.c', moves[0].change).query, absolute ? { start: '2026-10-21' } : { edge, days: '1' })
     await tick()
@@ -1414,4 +1423,13 @@ test('gantt row status tints follow refreshed data and preserve selection and ho
   for (const [status, token] of [['todo', '--todo-soft'], ['in_progress', '--progress-soft'], ['review', '--review-soft'], ['done', '--done-soft']]) {
     assert.ok(css.includes(`.g-row[data-status="${status}"]:not([aria-selected="true"]):not(:hover) { background: var(${token}); }`))
   }
+})
+
+test('plan writes use the undo returned from the locked write rather than guessing from the drawn days', async () => {
+  const { writePlan } = await panelModule('data/plan.ts')
+  const undo = "moai -C '/another project' edit x --start 2026-10-20 --if-start 2026-10-22"
+  const result = await writePlan({ request: async () => ({ kind: 'passed', output: { id: 'x', undo }, notes: ['kept'] }) }, 'x', { start: '2026-10-22' })
+  assert.deepEqual(result, { ok: true, undo, said: ['kept'] })
+  const unchanged = await writePlan({ request: async () => ({ kind: 'passed', output: { id: 'x' } }) }, 'x', { start: '2026-10-22' })
+  assert.deepEqual(unchanged, { ok: true })
 })

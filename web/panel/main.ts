@@ -21,7 +21,7 @@ import {
   archiveDue, loadAllRows, loadArchived, loadBoot, loadDetail, loadGroups, loadMatches, loadProjects, loadTree, loadWikiListing, loadWikiPage, loadWikiSearch, matchEndpoints, sameGroups, withArchive,
   type Boot, type Loaded,
 } from './data/source.js'
-import { effectiveZone, useZone, validZone, zoneNow } from './data/zone.js'
+import { effectiveZone, useZone, zoneNow } from './data/zone.js'
 import { copyFor, fill, speaks } from './i18n/index.js'
 import { wireKeys } from './keys/wiring.js'
 import { createStore, matchKey, type BoardData, type State } from './store.js'
@@ -142,6 +142,11 @@ async function start(): Promise<void> {
    * refresher does (data/refresh.ts BACKOFF_MS): each try is a `tui --deep` child, and each failure is told again.
    */
   let chartFailures = 0
+  // `zone` is what the read asked in; undefined is a zone too (the browser's own, data/zone.ts), so whether to
+  // compare it is said apart.
+  const sameTreeView = (state: State, sort: State['sort'], view: State['view'], zoned: boolean, zone: string | undefined): boolean =>
+    state.sort === sort && state.view.worktree === view.worktree && state.view.showArchived === view.showArchived &&
+    (!zoned || zoneNow() === zone)
   async function ensureChart(): Promise<void> {
     const state = store.getState()
     const board = state.board.value
@@ -161,7 +166,7 @@ async function start(): Promise<void> {
     chartReading = false
     const after = store.getState()
     const current = generation === loads && !after.board.loading && after.board.value?.rows === board.rows &&
-      after.sort === sort && after.view.worktree === view.worktree && after.view.showArchived === view.showArchived && zoneNow() === zone
+      sameTreeView(after, sort, view, true, zone)
     if (current && result.ok) {
       treeHasGantt = true
       chartFailures = 0
@@ -261,7 +266,7 @@ async function start(): Promise<void> {
     // So does the worktree overlay, or the archive shown, turned while it ran (the tree is asked for both).
     // The zone picked while it ran is the same: the tree's `overdue` was judged in the zone before.
     const after = store.getState()
-    if ((gantt && zoneNow() !== zone) || after.sort !== sort || after.view.worktree !== view.worktree || after.view.showArchived !== view.showArchived) setTimeout(() => void refresher.refresh(), 0)
+    if (!sameTreeView(after, sort, view, gantt, zone)) setTimeout(() => void refresher.refresh(), 0)
     else if (after.tab === 'gantt' && !gantt) void ensureChart()
     return true
   }
@@ -449,7 +454,7 @@ async function start(): Promise<void> {
    * `moai edit` line that puts it back, with what moai said beside it (rows a pulled-in deadline now overtakes). A
    * refusal is told in moai's words.
    */
-  async function movePlan(id: string, change: PlanChange, undo: string): Promise<void> {
+  async function movePlan(id: string, change: PlanChange): Promise<void> {
     const done = await writePlan(client, id, change)
     if (!done.ok) return shell.refuse(done.outcome)
     await Promise.all([
@@ -457,7 +462,7 @@ async function start(): Promise<void> {
       store.getState().shown.value?.id === id ? rereadDetail(id, loads + 1) : undefined,
     ])
     const words = copy.gantt.move
-    shell.say([fill(words.moved, { id }), fill(words.undo, { cmd: undo }), ...(done.said ?? [])].join(' · '))
+    shell.say([fill(words.moved, { id }), ...(done.undo ? [fill(words.undo, { cmd: done.undo })] : []), ...(done.said ?? [])].join(' · '))
   }
 
   /** What an outcome says, as one line of text (the wiki's error state takes a string). */
@@ -519,13 +524,31 @@ async function start(): Promise<void> {
     answering.add(entry.id)
     const here = tab
     void (async () => {
-      const ran = accepted && entry.then ? await ctl.run(entry.then, 0, '') : null
       const query = new URLSearchParams({ token: here.token, id: entry.id })
-      const response = await window.fetch(`/api/ctl/${encodeURIComponent(here.id)}/proposal?${query}`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ state: accepted ? 'accepted' : 'declined', ran }),
+      const post = (state: string, ran: CtlReply | null = null) => window.fetch(`/api/ctl/${encodeURIComponent(here.id)}/proposal?${query}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ state, ran }),
       })
-      if (response.ok) proposals.remove(entry.id)
+      if (!accepted) {
+        const response = await post('declined')
+        if (response.ok || response.status === 409 || response.status === 410) proposals.remove(entry.id)
+        return
+      }
+      const permission = await post('claim')
+      if (!permission.ok) {
+        if (permission.status === 409 || permission.status === 410) proposals.remove(entry.id)
+        return
+      }
+      // The server's reserved entry is authoritative, including its follow-up. Never run from a stale card.
+      const claimed = JSON.parse(await permission.text()) as { then?: { verb: string; [key: string]: unknown } | null }
+      proposals.remove(entry.id)
+      const ran = claimed.then ? await ctl.run(claimed.then, 0, '') : null
+      // The claimed row stays `pending` for every waiter until this result lands, and nothing else will ever send it.
+      // The server refuses a second completion (409), so retrying a transient failure never reports twice.
+      for (let attempt = 1; ; attempt += 1) {
+        const response = await post('accepted', ran).catch(() => null)
+        if ((response && response.status < 500) || attempt === 3) return
+        await new Promise((resolve) => window.setTimeout(resolve, 1_000 * attempt))
+      }
     })().catch(() => {}).finally(() => answering.delete(entry.id))
   })
   const keys = wireKeys({ document, store, shell, copy, read, openProject, index: indexOf,
@@ -572,23 +595,14 @@ async function start(): Promise<void> {
     onCtl: ({ seq, request }) => {
       const here = tab
       if (!here) return
-      ctlExecuting += 1
+      const guardsProposal = request.verb !== 'validate_zone'
+      if (guardsProposal) ctlExecuting += 1
       void ctl.run(request as { verb: string }, seq, here.token).then((reply: CtlReply) => {
         const query = new URLSearchParams({ seq: String(seq), token: here.token })
         return window.fetch(`/api/ctl/${encodeURIComponent(here.id)}?${query}`, {
           method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(reply),
         })
-      }).catch(() => {}).finally(() => { ctlExecuting -= 1 })
-    },
-    onValidateZone: ({ seq, name }) => {
-      const here = tab
-      if (!here) return
-      const query = new URLSearchParams({ seq: String(seq), token: here.token })
-      const reply: CtlReply = name === 'none' || validZone(name)
-        ? { ok: true, data: {} } : { ok: false, code: 'bad_input', message: 'unknown time zone' }
-      void window.fetch(`/api/ctl/${encodeURIComponent(here.id)}?${query}`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(reply),
-      }).catch(() => {})
+      }).catch(() => {}).finally(() => { if (guardsProposal) ctlExecuting -= 1 })
     },
     onProposal: (entry) => proposals.show(entry),
     onProposalClosed: (id) => proposals.remove(id),

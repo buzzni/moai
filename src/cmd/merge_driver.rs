@@ -1437,6 +1437,7 @@ pub(crate) const PROBE_BUDGET: std::time::Duration = std::time::Duration::from_s
 /// | 0 으로 끝났는데 제 이름을 안 댄다 — 모르는 인자를 흘려 듣는 래퍼다 | `Alien` |
 /// | 자리가 없다·권한이 없다 | `Dead` |
 /// | 126·127 로 끝났다 — 껍데기와 로더가 "못 돌렸다" 고 낼 때 쓰는 값이다 | `Dead` |
+/// | 128+유효한 신호 번호 — 셸 래퍼가 안쪽의 신호 종료를 옮긴 것일 수 있다 | `Unknown` |
 /// | 그 밖의 비영 | `Alien` |
 /// | 그 밖의 못 띄움·시간 넘김·신호에 맞아 죽음 | `Unknown`(입을 다문다) |
 ///
@@ -1510,10 +1511,29 @@ fn probe_once(root: &Path, cmd: &str) -> Option<Probe> {
         // 껍데기와 로더의 낱말이다 — 공유 라이브러리를 못 찾은 판, exec 에 막힌 래퍼. 그 이름의
         // 딴 도구가 아니라 그 자리가 못 도는 것이다.
         Some(126 | 127) => Probe::Dead,
+        // 셸 래퍼는 안쪽의 신호 종료를 128+번호로 옮긴다. 명시적 exit 와 구별할 수 없어
+        // 그 번호가 실제 신호일 때만 못 잰 것으로 둔다 — init 이 사람의 드라이버를 덮지 않게.
+        Some(code) if shell_signal(code) => Probe::Unknown,
         Some(_) => Probe::Alien,
         // 신호에 맞아 죽었다(유닉스에서만 선다) — OOM 킬러가 가장 흔하다.
         None => Probe::Unknown,
     })
+}
+
+/// 셸의 128+signal 관례에 맞는 종료 코드인가. 단순히 128 이상을 모두 신호라고 보지 않는다.
+/// POSIX 의 sigaddset 이 이 판에서 유효한 신호 번호를 재므로 Linux·macOS 의 번호 차이도 따른다.
+/// 그 libc 가 제 몫으로 잡아 둔 번호는 받지 않는다 — glibc 의 32·33 이 그렇다(그래서 160·161 은 `Alien` 이다).
+#[cfg(unix)]
+fn shell_signal(code: i32) -> bool {
+    if !(129..=255).contains(&code) {
+        return false;
+    }
+    // SAFETY: sigemptyset 이 집합을 초기화한 뒤에만 sigaddset 에 건넨다. 두 함수는 이 지역
+    // 값만 바꾸고 핸들러를 심거나 프로세스에 신호를 보내지 않는다.
+    unsafe {
+        let mut set = std::mem::MaybeUninit::<libc::sigset_t>::uninit();
+        libc::sigemptyset(set.as_mut_ptr()) == 0 && libc::sigaddset(set.as_mut_ptr(), code - 128) == 0
+    }
 }
 
 /// 유닉스가 아닌 판의 [`probe`].
@@ -3038,6 +3058,32 @@ mod tests {
         // 도구" 라고 불렀다. 16GiB 상한에 세션 예닐곱이 도는 이 기계에서 가까운 자리다.
         let killed = write("맞아죽는다", "#!/bin/sh\nkill -9 $$\n");
         assert!(matches!(at(&killed), Probe::Unknown), "신호에 맞아 죽은 것을 딴 도구라고 했다");
+
+        // 안쪽 프로세스만 죽으면 래퍼는 정상적으로 128+signal 을 내고 끝난다.
+        // plant_for_init 이 그 불확실함을 이유로 기존 설정을 덮지 않는 것까지 잰다.
+        // INT·QUIT 는 쓰지 않는다 — 작업 제어 없는 셸이 `&` 로 띄운 판(배경으로 돌린 `cargo test`)은 둘을 무시한 채
+        // 물려줘, `kill -INT $$` 가 아무것도 안 하고 래퍼가 0 으로 끝난다. 그 규칙에 안 드는 번호로 잰다.
+        // 임시 저장소는 `git::isolated` 로 짓는다 — 돌리는 사람의 전역 git 설정(`init.templateDir` 따위)을 안 읽는다.
+        let git = |args: &[&str]| {
+            let out = crate::git::isolated(dir).args(args).output().unwrap();
+            assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+        };
+        git(&["init", "-q"]);
+        std::fs::write(dir.join(".gitattributes"), format!("{SNAPSHOT} merge={DRIVER}\n")).unwrap();
+        for signal in ["KILL", "TERM", "USR1"] {
+            let wrapper =
+                write(&format!("wrapped-{signal}"), &format!("#!/bin/sh\nsh -c 'kill -{signal} $$'\nexit $?\n"));
+            assert!(matches!(at(&wrapper), Probe::Unknown), "래퍼의 {signal} 을 딴 도구라고 했다");
+            let planted = driver_command(wrapper.to_str().unwrap());
+            git(&["config", "--local", &driver_key(), &planted]);
+            assert!(matches!(plant_for_init(dir), Planting::Unmeasured));
+            assert_eq!(crate::git::run(dir, &["config", "--local", "--get", &driver_key()]).unwrap().trim(), planted);
+        }
+        // 신호 번호가 아닌 일반 종료는 여전히 Alien 이고 126·127 의 Dead 와도 다르다.
+        for code in [1, 2, 125, 128, 255] {
+            let ordinary = write(&format!("ordinary-{code}"), &format!("#!/bin/sh\nexit {code}\n"));
+            assert!(matches!(at(&ordinary), Probe::Alien), "일반 종료 {code} 을 신호로 읽었다");
+        }
 
         // 126·127 은 껍데기와 로더가 "못 돌렸다" 고 낼 때 쓰는 값이다 — 자리 이야기지 이름
         // 이야기가 아니다(공유 라이브러리를 못 찾은 판이 127 이다).

@@ -89,6 +89,11 @@ notes), then
 ## The review brief
 
 In a subagent, 7 raises the review on this prompt — copy it whole and fill every slot.
+Create `<scratchpad>/<epic>/` first and save the filled prompt as
+`<scratchpad>/<epic>/brief.md`. Pass that absolute path to the review subagent with
+instructions to read the whole file before starting. Use this epic's directory for all
+review scratch files; a shared `<scratchpad>/brief.md` lets parallel epics overwrite each
+other's prompts.
 
     You run the epic-end review of <epic> — <title> — for the worker that raised you. You are a
     subagent of the same session, so the hook reads you as that worker.
@@ -110,8 +115,9 @@ In a subagent, 7 raises the review on this prompt — copy it whole and fill eve
        with TaskStop
     3. Hold what came back against "Five places the review keeps finding" in <steps file>, and
        look yourself at any of the five the review left out
-    4. Leave the reviewer's own words on the review issue — write them to a file in your
-       scratchpad and run moai -C "<root>" note <review id> -b - < <that file>
+    4. Leave the reviewer's own words on the review issue — write them to
+       `<scratchpad>/<epic>/review.md`, beside this epic's `brief.md`, and run
+       moai -C "<root>" note <review id> -b - < "<scratchpad>/<epic>/review.md"
        If the text runs past 64KB, summarize it — put `Summary: original <size>KB agent-<task-id>` on
        the first line, keep every finding's number and place, and shorten only the sentences. Leave fences and indentation alone
     5. Hand back with SubagentHandback. The first line is Model ran: anthropic/<your real model

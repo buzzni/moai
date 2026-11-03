@@ -28,7 +28,7 @@ const until = async (check) => {
   assert.fail('the page did not reach the expected state')
 }
 
-async function page(t, { holdFirst = false, initialTab, chartFailures = 0, fakeStream = false } = {}) {
+async function page(t, { holdFirst = false, initialTab, chartFailures = 0, fakeStream = false, proposalReply, ctlReply } = {}) {
   const dom = new JSDOM('<!doctype html><html><body><div id="moai-app"></div></body></html>', {
     url: 'http://localhost:6624/', runScripts: 'outside-only', pretendToBeVisual: true,
   })
@@ -47,13 +47,17 @@ async function page(t, { holdFirst = false, initialTab, chartFailures = 0, fakeS
     ctl(seq, request) { this.listeners.ctl({ data: JSON.stringify({ seq, request }) }) }
     proposal(entry) { this.listeners.proposal({ data: JSON.stringify(entry) }) }
     proposalClosed(id) { this.listeners.proposal_closed({ data: JSON.stringify({ id }) }) }
-    validateZone(seq, name) { this.listeners.validate_zone({ data: JSON.stringify({ seq, name }) }) }
   }
   let release
   dom.window.fetch = async (path, init = {}) => {
     const url = new URL(path, dom.window.location.href)
     requests.push(url.pathname)
     if (init.method === 'POST') posts.push({ url, init })
+    if (ctlReply && url.pathname.startsWith('/api/ctl/') && url.searchParams.has('seq')) return ctlReply(JSON.parse(init.body))
+    if (url.pathname.endsWith('/proposal')) {
+      if (proposalReply) return proposalReply(JSON.parse(init.body), dom)
+      return { ok: true, status: 200, text: async () => JSON.stringify({ then: { verb: 'theme', name: 'dark' } }) }
+    }
     let body
     if (url.pathname === '/api/boot') body = boot
     else if (url.pathname === '/api/stamp') body = { stamp: 'unchanged' }
@@ -103,8 +107,10 @@ test('a suggestion card waits for the person, then runs its action and posts the
   assert.match(card.textContent, /» Suggestion/)
   assert.equal(card.hidden, false)
   card.querySelectorAll('button')[2].click()
-  await until(() => p.posts.some(({ url }) => url.pathname === '/api/ctl/123.1/proposal'))
-  const answer = p.posts.find(({ url }) => url.pathname === '/api/ctl/123.1/proposal')
+  await until(() => p.posts.filter(({ url }) => url.pathname === '/api/ctl/123.1/proposal').length === 2)
+  const proposalPosts = p.posts.filter(({ url }) => url.pathname === '/api/ctl/123.1/proposal')
+  assert.equal(JSON.parse(proposalPosts[0].init.body).state, 'claim')
+  const answer = proposalPosts[1]
   assert.equal(answer.url.searchParams.get('token'), 'token')
   assert.equal(answer.url.searchParams.get('id'), '123.1/1')
   assert.equal(JSON.parse(answer.init.body).state, 'accepted')
@@ -113,16 +119,67 @@ test('a suggestion card waits for the person, then runs its action and posts the
   await until(() => card.hidden)
 })
 
-// The server's half (src/web/ctl.rs validate_zone) is tested against a stand-in page; this is the page's half: the
-// `validate_zone` event it listens for, and the reply it posts back for a zone it can and cannot draw.
+test('a refused or pending claim never executes the stale card, and double clicks claim once', async (t) => {
+  for (const status of [409, 410, 403, 200]) {
+    let release
+    let calls = 0
+    const p = await page(t, { fakeStream: true, proposalReply: async (body) => {
+      calls++
+      if (body.state === 'claim') {
+        await new Promise((resolve) => { release = resolve })
+        return { ok: status === 200, status, text: async () => JSON.stringify({ then: { verb: 'theme', name: 'light' } }) }
+      }
+      return { ok: true, status: 200, text: async () => '{}' }
+    } })
+    const source = p.streams[0]
+    source.onopen(); source.hello('123.1', 'token')
+    source.proposal({ id: '123.1/1', text: 'Theme?', then: { verb: 'theme', name: 'dark' }, remaining_ms: 900000 })
+    const button = p.dom.window.document.querySelector('.m-proposal').querySelectorAll('button')[2]
+    button.click(); button.click()
+    await until(() => release !== undefined)
+    assert.equal(calls, 1)
+    assert.equal(p.dom.window.document.documentElement.dataset.theme, undefined)
+    release()
+    if (status === 200) {
+      await until(() => calls === 2)
+      assert.equal(p.dom.window.document.documentElement.dataset.theme, 'light')
+    } else {
+      await new Promise((resolve) => setTimeout(resolve, 20))
+      assert.equal(p.dom.window.document.documentElement.dataset.theme, undefined)
+      assert.equal(calls, 1)
+    }
+    p.dom.window.close()
+  }
+})
+
+test('a lost action result is posted again, so the claimed suggestion does not stay pending', async (t) => {
+  const results = []
+  const p = await page(t, { fakeStream: true, proposalReply: async (body) => {
+    if (body.state === 'claim') return { ok: true, status: 200, text: async () => JSON.stringify({ then: null }) }
+    results.push(body.state)
+    if (results.length === 1) throw new TypeError('network error')
+    return results.length === 2 ? { ok: false, status: 503, text: async () => '{}' } : { ok: true, status: 200, text: async () => '{}' }
+  } })
+  const source = p.streams[0]
+  source.onopen(); source.hello('123.1', 'token')
+  source.proposal({ id: '123.1/1', text: 'Fine?', then: null, remaining_ms: 900000 })
+  p.dom.window.document.querySelector('.m-proposal').querySelectorAll('button')[2].click()
+  await until(() => results.length === 3)
+  assert.deepEqual(results, ['accepted', 'accepted', 'accepted'])
+  await new Promise((resolve) => setTimeout(resolve, 20))
+  assert.equal(results.length, 3, 'a delivered result was posted again')
+  p.dom.window.close()
+})
+
+// Browser validation uses the same ctl envelope and reply path as actions, without changing the view.
 test('the page answers a zone check before a zone suggestion is shown', async (t) => {
   const p = await page(t, { fakeStream: true })
   const source = p.streams[0]
   source.onopen()
   source.hello('123.1', 'token')
   const replies = (seq) => p.posts.filter(({ url }) => url.pathname === '/api/ctl/123.1' && url.searchParams.get('seq') === String(seq))
-  source.validateZone(4, 'UTC')
-  source.validateZone(5, 'Mars/Olympus')
+  source.ctl(4, { verb: 'validate_zone', name: 'UTC' })
+  source.ctl(5, { verb: 'validate_zone', name: 'Mars/Olympus' })
   await until(() => replies(4).length === 1 && replies(5).length === 1)
   assert.equal(replies(4)[0].url.searchParams.get('token'), 'token')
   assert.equal(JSON.parse(replies(4)[0].init.body).ok, true)
@@ -182,4 +239,18 @@ test('a page restored on Gantt asks for values in its first read', async (t) => 
   await until(() => p.bars() === 1)
   assert.equal(p.trees[0].searchParams.get('gantt'), '1')
   assert.equal(p.trees.length, 1)
+})
+
+test('a pending validation reply does not swallow the person accepting a proposal', async (t) => {
+  let release
+  const p = await page(t, { fakeStream: true, ctlReply: () => new Promise(resolve => { release = resolve }) })
+  const source = p.streams[0]
+  source.onopen(); source.hello('123.1', 'token')
+  source.ctl(1, { verb: 'validate_zone', name: 'UTC' })
+  await until(() => release !== undefined)
+  source.proposal({ id: '123.1/1', text: 'Theme?', then: { verb: 'theme', name: 'dark' }, remaining_ms: 900000 })
+  p.dom.window.document.querySelector('.m-proposal').querySelectorAll('button')[2].click()
+  await until(() => p.posts.some(({ init }) => init.body && JSON.parse(init.body).state === 'accepted'))
+  assert.equal(p.dom.window.document.documentElement.dataset.theme, 'dark')
+  release({ ok: true, status: 200, text: async () => '{}' })
 })

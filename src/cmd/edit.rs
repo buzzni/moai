@@ -13,6 +13,7 @@ use crate::view;
 /// 늘어놓으면 자리를 바꿔 적어도 컴파일러가 안 잡는다.
 struct Edited {
     issue: Issue,
+    undo: Option<String>,
     was_read: bool,
     epic: Option<Issue>,
     children: Vec<Issue>,
@@ -146,6 +147,8 @@ struct Out<'a> {
     #[serde(flatten)]
     row: super::Row<'a>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    undo: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     inherited_epic: Option<&'a Inherited>,
     #[serde(skip_serializing_if = "Option::is_none")]
     inherited_milestone: Option<&'a InheritedMilestone>,
@@ -179,6 +182,8 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
         .map(|a| super::assignee_arg(a, || model::actor(ctx.user.as_deref(), &repo.root)))
         .transpose()
         .map_err(|e| Fail::no_actor(&e, lang))?;
+    // Whether the date undo names `MOAI_HERE` is asked outside the lock too — it may start git.
+    let undo_here = crate::text::undo_here(&repo.root);
 
     // Read outside the tracker lock; compare this snapshot to the row actually read under it.
     let read_config = crate::user_config::path();
@@ -197,6 +202,27 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
             let Some(i) = issues.iter_mut().find(|i| i.id == args.id) else {
                 return Err(Fail::not_found(&args.id, lang));
             };
+            for (flag, expected, actual) in [
+                ("--if-start", args.if_start.as_deref(), i.starts_on.as_deref()),
+                ("--if-due", args.if_due.as_deref(), i.due_on.as_deref()),
+            ] {
+                if let Some(expected) = expected
+                    && actual != super::clearable(expected).as_deref()
+                {
+                    return Err(Fail::coded(
+                        crate::i18n::fill(
+                            crate::i18n::say(lang, "refuse.edit_stale"),
+                            &[
+                                ("id", &args.id),
+                                ("flag", flag),
+                                ("expected", expected),
+                                ("actual", actual.unwrap_or("none")),
+                            ],
+                        ),
+                        crate::fail::code::STALE,
+                    ));
+                }
+            }
             let before = i.clone();
             let was_read = seen.as_ref().is_some_and(|m| !crate::query::changed_since_seen(&before, m));
 
@@ -291,10 +317,19 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
             // 상세의 자식 줄은 산 줄에서 고른다(`live`) — 겹친 문맥은 위로 닿을 때만 서므로, 거기서 고르면 아카이브의
             // 자식이 부름마다 섰다 말았다 한다.
             let live = &issues[..];
-            // 고친 줄이 되살린 묶음이면 그 칸도 아카이브에 남은 멤버에서 읽는다([`super::archived_with_groups`]).
+            // 고친 줄이 되살린 묶음이면 그 칸도 아카이브에 남은 멤버에서 읽는다([`super::archived_places`]).
             let context_ids: Vec<&str> =
                 std::iter::once(out.id.as_str()).chain(overflow.iter().map(String::as_str)).collect();
-            let archived = super::archived_with_groups(&repo.root, live, &context_ids)?;
+            // Only the edited row needs blocker diagnostics. Overflow candidates need
+            // placement and closure; a blocker on an unrelated candidate must not open the archive.
+            // Once it is open, the edited row's blockers ride along: `Blocked::of` reads a blocking
+            // group's column from its members, which a revived group keeps in the archive.
+            let blockers: Vec<&str> = out.blocked_by.iter().map(String::as_str).collect();
+            let archived = if crate::archive::reaches_out(live, &[out.id.as_str()]) {
+                crate::archive::read(&repo.root)?.issues
+            } else {
+                super::archived_places_and(&repo.root, live, &context_ids, &blockers)?.issues
+            };
             let issues = super::in_context(live, &archived, unread);
             let issues = &issues[..];
             let overflow = crate::report::overflow_in_context(issues, overflow, cfg);
@@ -337,6 +372,7 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
                     vec![],
                     Edited {
                         issue: before,
+                        undo: None,
                         was_read,
                         epic: None,
                         children: Vec::new(),
@@ -383,6 +419,12 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
             Ok((
                 vec![],
                 Edited {
+                    undo: crate::text::edit_command(
+                        &repo.root,
+                        undo_here,
+                        &out.id,
+                        &model::date_undo(&before, &out, shift),
+                    ),
                     issue: out,
                     was_read,
                     epic,
@@ -426,6 +468,7 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
 
     let Edited {
         issue: edited,
+        undo,
         was_read: _,
         epic,
         children,
@@ -470,6 +513,7 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
         // 키가 둘 서거나, 끊긴 줄이 안 끊긴 것처럼 읽힌다. `Row::of` 가 `cmd::OURS` 로 걷는다.
         return super::json_line(&Out {
             row: super::Row::from(&edited, &read),
+            undo: undo.as_deref(),
             inherited_epic: kept.as_ref(),
             inherited_milestone: kept_milestone.as_ref(),
         });
@@ -616,6 +660,7 @@ mod tests {
         };
         let out = Out {
             row: super::super::Row::from(&i, &read),
+            undo: Some("moai -C /project edit argos-0001 --start none --if-start 2026-11-02"),
             inherited_epic: Some(&epic),
             inherited_milestone: Some(&milestone),
         };

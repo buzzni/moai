@@ -61,12 +61,13 @@ pub fn run(ctx: &Ctx, cmd: DueCmd) -> R<Vec<String>> {
 
 /// 판정을 제 것으로 든다 — 판정은 빌린 줄을 내고, 쓰기는 그 줄을 고친다. 올리는 것은 **산 줄뿐이다**.
 ///
-/// **아카이브는 답이 거기 걸릴 때만 편다**(리뷰, [`super::archived_for`]) — 쓰기는 이것을 락을 쥔 채 부른다. 기한 든 줄이
+/// **아카이브는 답이 거기 걸릴 때만 편다**(리뷰, [`super::archived_places`]) — 쓰기는 이것을 락을 쥔 채 부른다. 기한 든 줄이
 /// 하나라도 서면 늘 펴던 판은 감독의 회차마다 락 너머로 아카이브 전부를 풀었다(moai-bth3·moai-tzzt 가 쓰기 길에서 걷어 낸
-/// 그것이다). 그래서 먼저 산 줄만으로 **탐침**을 대고([`crate::report::due_candidates`] — 묶음은 다 열린 것으로 친다), 답이
-/// 아카이브에 걸릴 수 있는 id 를 고른다([`crate::report::due_context_ids`]): 참조가 산 줄 밖으로 닿는 후보, 그리고 후보가
-/// 기한을 빌린 묶음 가운데 닫힘이 그 답을 바꿀 수 있는 것(멤버가 아카이브에 있을 수 있다). 펴든 안 펴든 마지막 답은 그
-/// 문맥으로 다시 잰다([`crate::report::due_raises`]) — 조상·기한·묶음의 닫힘·미룸 모두 보드의 문맥에서.
+/// 그것이다). 그래서 먼저 산 줄만으로 **탐침**을 대고(`report::DueJudge::context_ids` — 묶음은 다 열린 것으로 친다), 답이
+/// 아카이브에 걸릴 수 있는 id 를 고른다: 참조가 산 줄 밖으로 닿는 후보, 그리고 후보가
+/// 기한을 빌린 묶음 가운데 닫힘이 그 답을 바꿀 수 있는 것(멤버가 아카이브에 있을 수 있다). 편 문맥은 그 id 에 자리로 이어진
+/// 줄만 든다([`crate::archive::groups`]). 펴면 마지막 답은 그 문맥으로 다시 재고([`crate::report::due_raises`]), 안 펴면
+/// 탐침이 지은 지도로 잰다 — 조상·기한·묶음의 닫힘·미룸 모두 보드의 문맥에서.
 /// 탐침이 비어도 올릴 수 있는 열린 줄의 참조를 살핀다 — 아카이브의 부모가 새 기한을 드러낼 수 있다. 막는 줄은 안 따른다
 /// ([`crate::archive::places_out`]) — 자리·기한·닫힘·미룸 어느 것도 바꾸지 않으니, 따르면 답과 무관한 아카이브를 읽고
 /// 그 못 읽는 줄에 거절했다.
@@ -79,9 +80,18 @@ fn judged(
     cfg: &crate::config::Config,
     now: &str,
 ) -> R<Vec<Raised>> {
-    let candidates = crate::report::due_candidates(issues, now, zone, &cfg.due);
-    let ids = crate::report::due_context_ids(issues, &candidates);
-    let archived = super::archived_group_context(root, issues, &ids, crate::archive::places_out)?;
+    if !crate::report::due_pending(issues, &cfg.due) {
+        return Ok(Vec::new());
+    }
+    if let Some(ids) = crate::report::due_undated_ids(issues)
+        && !crate::archive::places_out(issues, &ids)
+    {
+        return Ok(Vec::new());
+    }
+    let soil = crate::report::Soil::of(issues);
+    let judge = crate::report::DueJudge::over(issues, &soil);
+    let ids = judge.context_ids(now, zone, &cfg.due);
+    let archived = super::archived_places(root, issues, &ids)?;
     if let Some(error) = archived.errors.first() {
         let source = error.source.clone().unwrap_or_else(|| crate::archive::dir(root));
         return Err(Fail::coded(
@@ -92,6 +102,9 @@ fn judged(
             ),
             crate::fail::code::BROKEN,
         ));
+    }
+    if archived.issues.is_empty() {
+        return Ok(judge.raises(issues, now, zone, cfg).iter().map(Raised::of).collect());
     }
     let context = super::in_context(issues, &archived.issues, unread);
     Ok(crate::report::due_raises(issues, &context, now, zone, cfg).iter().map(Raised::of).collect())
