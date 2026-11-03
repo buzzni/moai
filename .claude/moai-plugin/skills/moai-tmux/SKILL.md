@@ -435,8 +435,9 @@ The helper is `scripts/codex-pane.py` in the moai-tmux skill. Assemble the assig
 `moai -C "<root>" supervise message <id>`, giving `--model` (`<codex>` and the difficulty), `--effort`,
 `--base`, `--root-branch` and `--from` (your ListAgents name) plus the other slots its `--help` lists —
 an epic goes from step 2, a backlog item from step 1. Its first line names the absolute path to `references/worker-codex.md`
-beside `worker.md` in `moai-supervise`; pass `--steps <that path>` when the skill is not planted under `<root>`. Save it
-under the epic scratch directory. Confirm the fields and the person's approval, then run
+beside `worker.md` in `moai-supervise`; pass `--steps <that path>` when the skill is not planted under `<root>`. Lines the
+repository wrote under `[supervise] extra_lines` in `.moai/config.toml` stand just before `from:`. Save it
+under the epic scratch directory. Confirm the fields, those lines included, and the person's approval, then run
 `python3 "<moai-tmux skill dir>/scripts/codex-pane.py" send <pane> <file>`; it rechecks
 before pasting and before submission. Tell the person which pane received it. "Label the
 pane" applies unchanged: set `@moai` on this pane and ask before showing labels.

@@ -717,6 +717,27 @@ two seconds and prints one event with a cursor to rearm from; a backlog sent bef
 its `Unfolded:` note names the epic. `Review-ready:` goes to the supervisor's
 review subagent; the second assignment follows its completed review (moai-uzhx).
 
+**Repository lines in a Codex assignment.** A repository can add its own
+instructions to every assignment `moai supervise message` assembles, in
+`.moai/config.toml`:
+
+```toml
+[supervise]
+extra_lines = ["First instruction", "Work on <id> in <root>"]
+```
+
+The lines go in order just before `from:`. `<id>` becomes the assigned epic or
+backlog ID and `<root>` the repository root; other text is literal. Without the
+table the message is unchanged. The setting is the repository's only — your user
+config cannot add lines. `supervise message` refuses a key other than
+`extra_lines`, a second `extra_lines`, a value that is not an array of
+double-quoted strings, and an entry holding a line break or another control
+character; other commands are not affected. Keep the array on one line and
+leave `\"` out of the entries: a multi-line array or an unbalanced quote is a
+malformed line in this file and stops every command. Under cmux the supervisor
+puts the same lines in the same place, or assembles the message with
+`supervise message` (moai-n6fs).
+
 ### In cmux
 
 When the supervisor runs inside a [cmux](https://github.com/manaflow-ai/cmux)
@@ -968,7 +989,7 @@ worker's line is written by the supervisor.
   where an incoming message waits for its person's approval — look at that
   window
 
-Decided in: moai-2w0s moai-hxma moai-0zjo moai-nqdc moai-bl3x moai-gelm moai-tllo moai-mdzx moai-xs2h moai-h8tn moai-snyk moai-u5wr moai-b6cw moai-ew4o moai-dhxm moai-ml0d moai-nas5 moai-kxkw moai-dj4j moai-54yc moai-bkn4 moai-084j moai-keka moai-zynt moai-j9nf moai-jtvp moai-obxm moai-six5 moai-iu73 moai-r0x8 moai-u99i moai-uqf7 moai-p5sz moai-xpa8 moai-9tqo moai-pxui moai-uzhx moai-wk7i moai-jdwk moai-1m21 moai-d1zn moai-xvvr moai-ns7a moai-zgc1 moai-4v3h moai-i26i moai-p9dh
+Decided in: moai-2w0s moai-hxma moai-0zjo moai-nqdc moai-bl3x moai-gelm moai-tllo moai-mdzx moai-xs2h moai-h8tn moai-snyk moai-u5wr moai-b6cw moai-ew4o moai-dhxm moai-ml0d moai-nas5 moai-kxkw moai-dj4j moai-54yc moai-bkn4 moai-084j moai-keka moai-zynt moai-j9nf moai-jtvp moai-obxm moai-six5 moai-iu73 moai-r0x8 moai-u99i moai-uqf7 moai-p5sz moai-xpa8 moai-9tqo moai-pxui moai-uzhx moai-wk7i moai-jdwk moai-1m21 moai-d1zn moai-xvvr moai-ns7a moai-zgc1 moai-4v3h moai-i26i moai-p9dh moai-5w6i
 
 ## Archive storage
 

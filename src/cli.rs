@@ -1103,7 +1103,7 @@ Examples:
   surface drawing the board reads them here instead of parsing the file again.
   --json adds path, the file it read. A [models] table is left to
   `moai models`, which lays it under your user config. A [writing] table is
-  left to `moai writing`.
+  left to `moai writing`, and a [supervise] table to `moai supervise message`.
 
   It only reads; edit the file by hand to change a setting.")]
     Config,

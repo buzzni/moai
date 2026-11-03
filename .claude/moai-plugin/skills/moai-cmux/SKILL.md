@@ -515,7 +515,9 @@ command or paste the work over it.
 Use the supervisor's `message()` assignment fields, with `<codex>` as the model in `Model:`
 (not a Claude model), plus `Worker: codex`. Replace the steps-file path in the first line with the **absolute** path
 to `references/worker-codex.md` beside the supervisor skill. The last line is
-`from: <supervisor name>`. Save the whole message in the scratchpad and paste only after
+`from: <supervisor name>`. If `.moai/config.toml` has `[supervise] extra_lines`, those lines go
+just before it — `moai -C "<root>" supervise message <id>` assembles the whole message with them,
+flags as its `--help` lists. Save the whole message in the scratchpad and paste only after
 the live PID, cwd and empty box checks. Use the same "Label the tab" rules above.
 
     cmux paste --surface <surface> --submit - < <file>

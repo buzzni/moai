@@ -464,6 +464,8 @@ pub struct Config {
     /// `[writing]` 표 — **이 저장소가 권하는** 글의 자세함(moai-d1zn). `[models]` 와 같은 꼴의 줄이라 같은 [`ModelEntry`] 로
     /// 적힌 그대로 들고, 값은 `moai writing` 과 훅이 [`crate::user_config::Writing::with_repo`] 로 잰다 — 여기서 거절하지 않는다.
     pub writing: Vec<ModelEntry>,
+    /// Repository-only supervisor assignment settings, validated by the message command.
+    pub supervise: Vec<ModelEntry>,
 }
 
 /// `.moai/config.toml` 의 `[models]` 한 줄 — **값은 여기서 재지 않는다.** 아는 키인가·등급 낱말인가·큰따옴표 글인가는
@@ -658,6 +660,11 @@ impl Config {
             due,
             models,
             writing,
+            supervise: es
+                .iter()
+                .filter(|e| e.table == Some("supervise"))
+                .map(|e| ModelEntry { key: e.key.into(), raw: e.value.into(), line: e.line })
+                .collect(),
         })
     }
 
