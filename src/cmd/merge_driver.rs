@@ -259,7 +259,7 @@ pub fn run(ctx: &Ctx, args: MergeDriverArgs) -> R<Vec<String>> {
         };
     }
     // 종료 코드가 git 에게 "충돌" 이다. **`--json` 은 답을 먼저 낸다** — `json_line` 은 찍지
-    // 않고 줄을 돌려주고 `main` 은 `Err` 에서 그 줄을 버리므로(`main::fail`), 그냥 `Err` 로
+    // 않고 줄을 돌려주고 `crate::run` 은 `Err` 에서 그 줄을 버리므로(`src/lib.rs` 의 `fail`), 그냥 `Err` 로
     // 나가면 `conflicts` 가 어디에도 안 선다. `note_partial` 이 "다 낸 뒤에 비영" 을 맡는다.
     if ctx.json {
         super::note_partial();

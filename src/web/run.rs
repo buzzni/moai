@@ -5,7 +5,7 @@
 //! 묶으면 키 차례가 바뀐다(`serde_json` 의 `Map` 은 키로 늘어놓는다).
 //!
 //! **프로세스 안에서 `cmd::*::run` 을 안 부른다** — CLI 한 판을 전제로 한 전역 누적값(`store` 의 알림 칸들,
-//! `cmd` 의 종료 코드·`AFTER`)을 `main` 이 끝에서 비우는데 서버는 끝이 없고, `-C` 는 프로세스 cwd 를 바꾼다.
+//! `cmd` 의 종료 코드·`AFTER`)은 `crate::run` 이 끝에 한 번 읽을 뿐 비우는 자가 없는데(프로세스가 끝나며 걷힌다) 서버는 끝이 없고, `-C` 는 프로세스 cwd 를 바꾼다.
 
 use std::io::Read;
 use std::path::PathBuf;
@@ -178,7 +178,7 @@ fn drain(
 ///
 /// - `out` 은 stdout 이 JSON 값 하나일 때 그 원문
 /// - `err` 는 실패(`exit` ≠ 0)한 판의 오류 객체 원문 — `--json` 으로 넘어진 moai 는 그것을 stderr 의 **맨 끝 한
-///   줄**로 낸다(`main::fail`). stderr 통째가 그 객체인 것이 흔한 판이지만, 그 앞에 `cmd::tell` 이 그 자리에서
+///   줄**로 낸다(`src/lib.rs` 의 `fail`). stderr 통째가 그 객체인 것이 흔한 판이지만, 그 앞에 `cmd::tell` 이 그 자리에서
 ///   낸 줄(못 읽은 줄의 알림 따위)이 설 수 있다 — 통째만 보던 판은 스냅샷에 깨진 줄 하나만 있어도 `code` 를
 ///   `said` 의 글 한 줄로 묻어, 페이지가 `not_found`·`bad_filter` 를 못 갈랐다
 /// - 나머지 stderr 의 줄은 `said` 에. 성공한 판의 경고(`moai: …`)가 여기 선다

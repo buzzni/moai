@@ -15126,7 +15126,7 @@ mod tests {
     /// 되레 놓친다. 저장소 밖은 링크를 풀어도 밖이어야 한다.
     ///
     /// 링크를 만드는 시험이라 unix 에서만 돈다 — 가리지 않으면 unix 가 아닌 곳에서 이 한 시험이
-    /// 아니라 바이너리의 시험 전부가 컴파일되지 않는다(`user_config`·`read_marks` 의 링크 시험과 같다).
+    /// 아니라 lib 타깃의 시험 전부가 컴파일되지 않는다(`user_config`·`read_marks` 의 링크 시험과 같다).
     #[test]
     #[cfg(unix)]
     fn a_linked_spelling_still_lands_inside_the_repo() {
