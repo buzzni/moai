@@ -329,11 +329,13 @@ fn inherited_tmux_uses_stdout_device_and_skips_queries_without_pictures() {
         assert!(graphics.contains("\x1bPtmux;\x1b\x1b_Ga=T,U=1"), "{client:?}");
         assert!(graphics.contains('\u{10eeee}'), "{client:?}");
     }
-    let client = "xterm-256color\nall\n123\n100\n/dev/client\nghostty 1.4.0";
+    // Ghostty over SSH with TERM=xterm-256color, known by its XTVERSION answer once tmux gives it RGB.
+    let client =
+        "xterm-256color\nall\n123\n100\n/dev/client\nbpaste,ccolour,clipboard,cstyle,focus,RGB,title\nghostty 1.4.0";
     let graphics = run_pty(&id, &own, None, Some(client));
     assert!(graphics.contains("\x1bPtmux;\x1b\x1b_Ga=T,U=1"));
     assert!(graphics.contains('\u{10eeee}'));
-    assert!(std::fs::read_to_string(&log).unwrap().contains("#{client_termtype}"));
+    assert!(std::fs::read_to_string(&log).unwrap().contains("#{client_termfeatures}\n#{client_termtype}"));
     // Every run keeps the kitty hints a server started from kitty hands its panes (TERM=xterm-kitty,
     // KITTY_WINDOW_ID). Inside a pane only the client reply decides, so a rejected client must not fall back to
     // plain kitty from those hints. They cannot fake a pass: only the reply yields the wrapped `U=1` upload above.
@@ -344,7 +346,9 @@ fn inherited_tmux_uses_stdout_device_and_skips_queries_without_pictures() {
         "xterm-ghostty\noff",
         "xterm-256color\non",
         "xterm-256color\nall",
-        "xterm-256color\non\n123\n100\n/dev/client\nghostty 1.4.0",
+        "xterm-256color\non\n123\n100\n/dev/client\nbpaste,ccolour,clipboard,cstyle,focus,RGB,title\nghostty 1.4.0",
+        // What tmux 3.4 printed for that client without RGB: the id colour would reach Ghostty as a palette index.
+        "xterm-256color\nall\n123\n100\n/dev/client\nbpaste,ccolour,clipboard,cstyle,focus,title\nghostty 1.4.0",
     ] {
         let fallback = run_pty(&id, &own, None, Some(client));
         assert!(!fallback.contains("\x1b_G"), "{client:?}");

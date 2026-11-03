@@ -103,13 +103,20 @@ fn resolve(setting: Option<&str>, pane: Option<(bool, String)>) -> TerminalState
         },
     }
 }
+/// The reply is the probe's client lines: name, passthrough, pid, created, tty, features, terminal type. The
+/// terminal type is the client's XTVERSION answer and comes last, so a line break inside it shifts nothing.
 fn passthrough_client(reply: &str) -> bool {
     let mut lines = reply.lines();
     let name = lines.next().unwrap_or_default();
     let permission = lines.next();
-    let termtype = lines.nth(3).unwrap_or_default();
+    let features = lines.nth(3).unwrap_or_default();
+    let termtype = lines.next().unwrap_or_default();
+    // The placeholder names its image by a 24-bit foreground. Without RGB tmux reduces that colour to a palette
+    // index and the terminal looks up another image. The named entries carry `setrgbf`, which tmux does not list
+    // as a feature; a Ghostty known only by XTVERSION (`TERM=xterm-256color` over SSH) needs `RGB` listed.
     permission == Some("all")
-        && (matches!(name, "xterm-kitty" | "xterm-ghostty" | "ghostty") || termtype.starts_with("ghostty "))
+        && (matches!(name, "xterm-kitty" | "xterm-ghostty" | "ghostty")
+            || (termtype.starts_with("ghostty ") && features.split(',').any(|feature| feature == "RGB")))
 }
 /// Wrap every APC separately: tmux's DCS parser has a bounded input buffer.
 pub fn passthrough(payload: &[u8]) -> Vec<u8> {
@@ -143,7 +150,7 @@ fn tmux_state(value: &str) -> Option<(bool, String)> {
         command.args(["-t", &pane]);
     }
     command
-        .arg("MOAI_CLIENT\n#{client_termname}\n#{allow-passthrough}\n#{client_pid}\n#{client_created}\n#{client_tty}\n#{client_termtype}");
+        .arg("MOAI_CLIENT\n#{client_termname}\n#{allow-passthrough}\n#{client_pid}\n#{client_created}\n#{client_tty}\n#{client_termfeatures}\n#{client_termtype}");
     let output = tmux_output(command, std::time::Duration::from_secs(2))?;
     let text = std::str::from_utf8(&output).ok()?;
     let (panes, client) = text.split_once("MOAI_CLIENT\n").unwrap_or((text, ""));
@@ -475,14 +482,27 @@ mod tests {
         for reply in ["xterm-256color\non", "xterm-256color\nall", "\non", ""] {
             assert!(!passthrough_client(reply), "{reply:?}");
         }
+        // What tmux 3.4 printed for a real Ghostty 1.4.0 over SSH with TERM=xterm-256color, and the same client once
+        // `terminal-features` gives it RGB.
+        let measured = "bpaste,ccolour,clipboard,cstyle,focus,title";
+        let rgb = "bpaste,ccolour,clipboard,cstyle,focus,RGB,title";
         for (reply, expected) in [
-            ("xterm-256color\nall\n123\n100\n/dev/pts/1\nghostty 1.4.0\n", true),
-            ("xterm-256color\non\n123\n100\n/dev/pts/1\nghostty 1.4.0\n", false),
-            ("xterm-256color\nall\n123\n100\n/dev/pts/1\n", false),
-            ("xterm-kitty\nall\n123\n100\n/dev/pts/1\n", true),
-            ("xterm-256color\nall\n123\n100\n/dev/pts/1\nghosttyish 1.4\n", false),
+            (format!("xterm-256color\nall\n123\n100\n/dev/pts/1\n{rgb}\nghostty 1.4.0\n"), true),
+            (format!("xterm-256color\non\n123\n100\n/dev/pts/1\n{rgb}\nghostty 1.4.0\n"), false),
+            // Without RGB tmux turns the placeholder's id colour into a palette index: keep the link.
+            (format!("xterm-256color\nall\n123\n100\n/dev/pts/1\n{measured}\nghostty 1.4.0\n"), false),
+            ("xterm-256color\nall\n123\n100\n/dev/pts/1\nRGBX,xRGB\nghostty 1.4.0\n".to_owned(), false),
+            (format!("xterm-256color\nall\n123\n100\n/dev/pts/1\n{rgb}\n"), false),
+            (format!("xterm-256color\nall\n123\n100\n/dev/pts/1\n{rgb}\nghosttyish 1.4\n"), false),
+            (format!("xterm-256color\nall\n123\n100\n/dev/pts/1\n{rgb}\nGhostty 1.4.0\n"), false),
+            // An old tmux prints neither format: the name alone decides.
+            ("xterm-kitty\nall\n123\n100\n/dev/pts/1\n\n\n".to_owned(), true),
+            (format!("xterm-ghostty\nall\n123\n100\n/dev/pts/1\n{measured}\nghostty 1.4.0\n"), true),
+            // A line break inside the XTVERSION answer stays inside the last field.
+            (format!("xterm-256color\nall\n123\n100\n/dev/pts/1\n{rgb}\nghostty 1.4.0\nextra\n"), true),
+            (format!("xterm-256color\nall\n123\n100\n/dev/pts/1\n{rgb}\nother\nghostty 1.4.0\n"), false),
         ] {
-            assert_eq!(passthrough_client(reply), expected, "{reply:?}");
+            assert_eq!(passthrough_client(&reply), expected, "{reply:?}");
         }
         let payload = b"\x1b_Ga=T,m=1;abc\x1b\\\x1b_Gm=0;def\x1b\\";
         let wrapped = passthrough(payload);
