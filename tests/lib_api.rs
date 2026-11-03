@@ -161,9 +161,11 @@ fn query_and_the_cli_filter_agree() {
     let cfg: &Config = &repo.config;
 
     // `-s todo` — 숨는 줄(미룬 것)은 기본으로 빠진다.
-    let filter = Filter::build(Raw { status: vec!["todo".into()], ..Raw::default() }).unwrap_or_else(|_| panic!("필터"));
+    let filter =
+        Filter::build(Raw { status: vec!["todo".into()], ..Raw::default() }).unwrap_or_else(|_| panic!("필터"));
     let wh = Where::from_soil(&load.issues, cfg, report::Soil::of(&load.issues));
-    let mine = ids(load.issues.iter().filter(|i| filter.hidden_by(i, NOW, &wh).is_none() && filter.matches(i, NOW, &wh)));
+    let mine =
+        ids(load.issues.iter().filter(|i| filter.hidden_by(i, NOW, &wh).is_none() && filter.matches(i, NOW, &wh)));
     let cli = json_ids(&json(s.path(), &["show", "-s", "todo", "--json"]));
     assert_eq!(mine, cli, "-s todo 의 id 집합이 갈렸다");
     assert!(!mine.is_empty());
@@ -203,11 +205,14 @@ fn a_write_through_with_write_shows_in_the_cli() {
 
     // CLI 의 명령이 하는 그대로: 닫는 함수가 락 안에서 다시 읽은 줄을 고치고, 남길 저널 줄을 돌려준다.
     // 필드 변경(제목)은 저널에 적지 않는다 — 빈 목록이다.
-    let before = repo.with_write(|| Lang::En, |issues, _cfg, _reserved| {
-        let row = issues.iter_mut().find(|i| i.id == id).expect("락 안에서 줄이 사라졌다");
-        let old = std::mem::replace(&mut row.title, "renamed through the library".to_string());
-        Ok((Vec::new(), old))
-    });
+    let before = repo.with_write(
+        || Lang::En,
+        |issues, _cfg, _reserved| {
+            let row = issues.iter_mut().find(|i| i.id == id).expect("락 안에서 줄이 사라졌다");
+            let old = std::mem::replace(&mut row.title, "renamed through the library".to_string());
+            Ok((Vec::new(), old))
+        },
+    );
     assert_eq!(before.unwrap_or_else(|e| panic!("{e}")), "free-a");
 
     let shown = json(s.path(), &["show", &id, "--json"]);
