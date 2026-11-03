@@ -1120,7 +1120,8 @@ Examples:
   config gives it.
 
   Model names are strings. review_grade, effort, effort_complex and
-  effort_plan accept low, medium, high, xhigh or max. Invalid values fall back
+  effort_plan accept low, medium, high, xhigh or max. review_raise accepts
+  never (default) or write-path. Invalid values fall back
   per key and warn; unknown keys warn. written lists the valid, known keys from
   your user config, repo the ones the repository table set that your config
   did not, and repo_path that file (null when it set none). The level lines

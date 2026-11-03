@@ -200,7 +200,7 @@ const EPIC_MAX: &str = "any member touched the write path, concurrency, the stor
 /// `표면을 가로지르면 한 칸 더` 와 같은 결이고, 실제로 선 판 둘의 `max` 와도 맞는다.
 /// 이 저장소 CLAUDE.md 의 리뷰 표와 `the_rubric_is_the_review_table` 이 이 글을 견준다.
 const BUNDLE: &str =
-    "A worktree that carries members of two epics is measured as one epic and then raised one more step";
+    "A worktree that carries members of two epics is measured as one epic";
 
 /// 리뷰가 되풀이해 잡는 다섯 자리(moai-jza6). 2026-09-20~21 에 리뷰가 잡았지만 브리프에는
 /// 없던 것들이고, 다섯 다 한 번이 아니라 여러 판에서 되풀이됐다 — 그때까지는 감독이 브리프마다
@@ -264,22 +264,14 @@ fn top_role() -> &'static str {
     DIFFICULTY[DIFFICULTY.len() - 1].1
 }
 
-/// 에픽 끝 리뷰의 모델과 등급 — **`review` 역할의 모델로 `review_grade` 에서 본다**(2026-10-12 사용자 결정,
-/// moai-9tqo). 기본은 opus·`xhigh` 이고, 쓰기 경로·동시성·저장 형식·훅을 건드린 멤버가 들면(`EPIC_MAX`) `max`,
-/// 에픽 둘에 걸친 묶음(`BUNDLE`)은 한 칸 위다 — 사다리는 `xhigh`·`max` 둘이다.
-///
-/// 옛 규칙은 "가장 무거운 멤버의 한 칸 위" 였다(moai-bx6t, 2026-09-18). 글 한 줄 고친 멤버 하나짜리 에픽까지 가장
-/// 비싼 리뷰를 받던 첫 판을 거슬러 세운 것인데, 그 사다리의 아래 칸(`medium` 이면 sonnet)이 리뷰를 싼 모델에 맡겼다
-/// — sonnet 일꾼 창에서 부른 리뷰는 창의 모델을 물려받는다. 바닥을 `xhigh` 로 올리고 모델을 역할에서 읽는다.
-/// "표면을 가로지르면 한 칸 더" 도 함께 걷었다 — 바닥이 `xhigh` 라 한 칸 더가 곧 `max` 이고, 그 자리는 위 둘이 맡는다.
+/// Epic-end review grade follows the person’s settings; escalation is opt-in.
 fn epic_review_rule() -> String {
     let (model, grade) = (model_default("review"), model_default("review_grade"));
     format!(
-        "**The epic-end review runs on the `review` model at `review_grade`** — read both from\n\
-         `moai models --json` (defaults `{model}` and `{grade}`).\n\
-         **If {EPIC_MAX}**, the grade is `max`.\n\
-         **{BUNDLE}** — the review has to read both epics' contracts at once.\n\
-         A step above the default `{grade}` is `max`, and `max` is the top of the ladder: a step above it is still `max`."
+        "**The epic-end review runs on the `review` model at `review_grade`** — read both and `review_raise` from\n\
+         `moai models --json` (defaults `{model}`, `{grade}`, `never`).\n\
+         With `review_raise = \"write-path\"`, raise one step if {EPIC_MAX}, or if the worktree carries members of two epics. Raise at most once, capped at `max`; `never` leaves the configured grade unchanged.\n\
+         {BUNDLE}. If a worker's proposed grade differs, the supervisor corrects it from the settings and records why in the review issue angle."
     )
 }
 
@@ -2308,7 +2300,7 @@ values in a `[models]` table of its `.moai/config.toml`; the person's own keys w
 Read it at the start of every round; a value changed mid-round counts from the next one.
 
     moai models --json      one object: a model per role (plan, develop, complex, review,
-                            docs, bulk, codex), review_grade, effort, effort_complex, effort_plan,
+                            docs, bulk, codex), review_grade, review_raise, effort, effort_complex, effort_plan,
                             written — the keys the person set — and repo — the keys the
                             repository recommended, read from repo_path; the rest are defaults
 
@@ -3375,7 +3367,7 @@ tell the person; do not guess or change the value.
 Codex tests and commits its work, writes `Review-ready:` as an epic note, and stops.
 It waits for the supervisor's review and the second assignment; it does not review itself.
 
-When `Review-ready:` arrives, read its whole note. Pick the review issue up
+When `Review-ready:` arrives, read its whole note. Recompute the grade from `review_grade` and `review_raise` as the shared epic review rule says; if its proposed grade differs, use the configured result and record the correction and reason in the review issue angle. Pick the review issue up
 (`moai -C "<root>" mv <review id> in_progress`) and run a review subagent in the reported
 worktree with its configured `review` model and "The review brief" in
 `references/worker-branches.md`; refer to that brief, do not copy it here. Once the review has ended and its words are on the review issue, send
@@ -5845,7 +5837,7 @@ Create the review issue using the shared command, called with `moai -C "<root>"`
 
     {review}
 
-Fill the angle with the grade, why, and "review by the supervisor's review subagent", then
+Read `review_grade` and `review_raise` from `moai models --json` and apply the shared rule in worker.md 7. Fill the angle with the resulting grade, why, and "review by the supervisor's review subagent", then
 the epic body's `{REVIEW_FOCUS}` section (either heading) and the focus development
 added, as worker.md's 7 says.
 Do not run the review yourself. Move each finished member to review, one id per call:
@@ -5860,7 +5852,7 @@ review issue id in a note whose first line is `Review-ready: <epic>`:
 moai -C "<root>" note <epic> -b - <<'CODEX_REVIEW'
 Review-ready: <epic>
 - Worktree: <absolute path>; branch: <branch>; merge-base: <hash>
-- Review issue: <review id>; tested: <checks and results>
+- Review issue: <review id>; grade: <grade>; tested: <checks and results>
 CODEX_REVIEW
 ```
 
@@ -6818,7 +6810,7 @@ stop sending outside work while a release runs",
             "에픽 끝 리뷰가 역할의 모델과 등급을 설정에서 안 읽는다 — {rule}"
         );
         assert!(
-            rule.contains(&format!("**If {EPIC_MAX}**, the grade is `max`")),
+            rule.contains(EPIC_MAX) && rule.contains("review_raise"),
             "EPIC_MAX 가 max 로 안 올린다 — {rule}"
         );
         // 옛 사다리("한 칸 위", `medium` 이면 가운데 모델)가 돌아오면 붉어진다 — 그 아래 칸이 리뷰를 싼 모델에 맡겼다.
@@ -7047,7 +7039,7 @@ stop sending outside work while a release runs",
                 assert!(keys.contains(&key), "역할 {role} 의 effort 키 {key} 가 설정에 없다");
             }
         }
-        let models = keys.iter().filter(|k| !k.starts_with("effort") && **k != "review_grade").count();
+        let models = keys.iter().filter(|k| !k.starts_with("effort") && **k != "review_grade" && **k != "review_raise").count();
         assert_eq!(models, ROLES.len(), "설정의 역할과 표의 역할 수가 다르다");
         for (level, role, _) in DIFFICULTY {
             assert!(ROLES.iter().any(|(r, _, _)| *r == role), "난이도 {level} 의 역할 {role} 이 표에 없다");

@@ -337,7 +337,7 @@ tell the person; do not guess or change the value.
 Codex tests and commits its work, writes `Review-ready:` as an epic note, and stops.
 It waits for the supervisor's review and the second assignment; it does not review itself.
 
-When `Review-ready:` arrives, read its whole note. Pick the review issue up
+When `Review-ready:` arrives, read its whole note. Recompute the grade from `review_grade` and `review_raise` as the shared epic review rule says; if its proposed grade differs, use the configured result and record the correction and reason in the review issue angle. Pick the review issue up
 (`moai -C "<root>" mv <review id> in_progress`) and run a review subagent in the reported
 worktree with its configured `review` model and "The review brief" in
 `references/worker-branches.md`; refer to that brief, do not copy it here. Once the review has ended and its words are on the review issue, send

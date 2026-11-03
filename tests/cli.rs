@@ -32520,7 +32520,7 @@ fn models_json_reads_user_config_outside_a_tracker_and_only_reads() {
         serde_json::json!({
             "plan": "fable", "develop": "opus-6", "complex": "opus", "review": "opus",
             "docs": "sonnet", "bulk": "haiku", "codex": "future-model",
-            "review_grade": "xhigh", "effort": "max", "effort_complex": "high", "effort_plan": "xhigh",
+            "review_grade": "xhigh", "review_raise": "never", "effort": "max", "effort_complex": "high", "effort_plan": "xhigh",
             "written": ["develop", "codex", "effort"], "repo": [], "path": cfg, "repo_path": null,
         })
     );
@@ -32548,7 +32548,7 @@ fn models_missing_file_uses_all_defaults_and_keeps_the_path() {
         serde_json::json!({
             "plan": "fable", "develop": "sonnet", "complex": "opus", "review": "opus",
             "docs": "sonnet", "bulk": "haiku", "codex": "gpt-6.1-sol",
-            "review_grade": "xhigh", "effort": "medium", "effort_complex": "high", "effort_plan": "xhigh",
+            "review_grade": "xhigh", "review_raise": "never", "effort": "medium", "effort_complex": "high", "effort_plan": "xhigh",
             "written": [], "repo": [], "path": cfg, "repo_path": null,
         })
     );

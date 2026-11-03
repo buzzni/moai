@@ -28,7 +28,7 @@ values in a `[models]` table of its `.moai/config.toml`; the person's own keys w
 Read it at the start of every round; a value changed mid-round counts from the next one.
 
     moai models --json      one object: a model per role (plan, develop, complex, review,
-                            docs, bulk, codex), review_grade, effort, effort_complex, effort_plan,
+                            docs, bulk, codex), review_grade, review_raise, effort, effort_complex, effort_plan,
                             written — the keys the person set — and repo — the keys the
                             repository recommended, read from repo_path; the rest are defaults
 
@@ -411,7 +411,7 @@ model and effort come from the `moai models --json` you read at the start of the
 | `bulk` | sorting and summing up, a review text past 64KB, the same mechanical fix many times | `effort` |
 | `codex` | a Codex worker — never a subagent ("Codex workers") | — |
 
-With nothing written and no repository table, the defaults are `plan` `fable` · `develop` `sonnet` · `complex` `opus` · `review` `opus` · `docs` `sonnet` · `bulk` `haiku` · `codex` `gpt-6.1-sol` · `review_grade` `xhigh` · `effort` `medium` · `effort_complex` `high` · `effort_plan` `xhigh`.
+With nothing written and no repository table, the defaults are `plan` `fable` · `develop` `sonnet` · `complex` `opus` · `review` `opus` · `docs` `sonnet` · `bulk` `haiku` · `codex` `gpt-6.1-sol` · `review_grade` `xhigh` · `review_raise` `never` · `effort` `medium` · `effort_complex` `high` · `effort_plan` `xhigh`.
 
 Development is split by one word of difficulty — `develop` or `complex`. The same rubric
 decides, member by member, whether the epic-end review goes to `max` (the worker's 7). Keep
@@ -434,11 +434,10 @@ The Codex worker's role is `codex`, and its sections say how it is sent.
 The epic-end review is that epic's only review, because the members are not reviewed
 separately (the worker's 5 and 7).
 
-**The epic-end review runs on the `review` model at `review_grade`** — read both from
-`moai models --json` (defaults `opus` and `xhigh`).
-**If any member touched the write path, concurrency, the storage format or hooks**, the grade is `max`.
-**A worktree that carries members of two epics is measured as one epic and then raised one more step** — the review has to read both epics' contracts at once.
-A step above the default `xhigh` is `max`, and `max` is the top of the ladder: a step above it is still `max`.
+**The epic-end review runs on the `review` model at `review_grade`** — read both and `review_raise` from
+`moai models --json` (defaults `opus`, `xhigh`, `never`).
+With `review_raise = "write-path"`, raise one step if any member touched the write path, concurrency, the storage format or hooks, or if the worktree carries members of two epics. Raise at most once, capped at `max`; `never` leaves the configured grade unchanged.
+A worktree that carries members of two epics is measured as one epic. If a worker's proposed grade differs, the supervisor corrects it from the settings and records why in the review issue angle.
 
 The supervisor picks before reading any code, so this is a suggestion; the last word
 belongs to the worker who read the issue. A session's model cannot be changed by a message
