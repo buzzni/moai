@@ -461,7 +461,7 @@ The word is `plan`, not `subagent` — no worker holds this backlog, so it is no
 
     You unfold backlog <id> — <title> — for the supervisor of this repository. You split it
     into an epic and its issues; you do not develop it, pick anything up, raise a worktree or
-    change a repository file — the tracker and your scratchpad are yours.
+    change a repository file — the tracker and your scratchpad are yours. Create `<scratchpad>/<backlog id>/` before writing any plan files. Use that directory until the epic exists; then create `<scratchpad>/<epic>/` and use it for all subsequent bodies and review files. Never share a task directory across concurrent work.
     Root: <root>
     Milestone: <milestone>
     Due: <due>
@@ -492,8 +492,8 @@ The word is `plan`, not `subagent` — no worker holds this backlog, so it is no
        goal · context (files and lines, the precedent) · what is decided · steps · acceptance (which tests) · out of scope · order and the files it shares · role.
        `brief`: what to change · where (file and function) · how to test it. A design question the
        backlog and its notes do not settle goes in it, open, for the worker to ask — do not
-       settle it here. Write it to a file in your scratchpad and run
-       moai -C "<root>" edit <member> -b - < <that file>
+       settle it here. Write each body under `<scratchpad>/<epic>/`, using a distinct filename per member, and run
+       moai -C "<root>" edit <member> -b - < "<scratchpad>/<epic>/<member>.md"
     5. Mark the epic, last — a supervisor that starts again sends an epic it finds marked so, so
        mark it only once 3 and 4 stand:
        moai -C "<root>" note <epic> 'Sent: plan <id>'

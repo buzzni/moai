@@ -672,9 +672,9 @@ fn plan_core() -> String {
 
 fn plan_brief_draft() -> String {
     format!(
-        r#"Draft a plan from the interview record at <interview path> and the repository at <root>. Writing: <writing>. Work only in the scratchpad; do not write to the tracker or change repository files.
+        r#"Draft a plan from the interview record at <interview path> and the repository at <root>. Writing: <writing>. Work only in <plan dir>, the absolute task directory supplied by the caller; do not write to the tracker or change repository files.
 {core}
-Write a plan file, an epic body file and one body file per member in the scratchpad. Preserve the mapping from each plan title to its body file. Return first `Model ran: anthropic/<your real model name>`, then `plan: <absolute file>`, `epic body: <absolute file>`, and for each member `<title> <low|medium|high> — <reason>; body: <absolute file>`. Return each unresolved decision as `gap: <what>`; do not ask the user.
+Write a plan file, an epic body file and one body file per member under <plan dir>. Preserve the mapping from each plan title to its body file. Return first `Model ran: anthropic/<your real model name>`, then `plan: <absolute file>`, `epic body: <absolute file>`, and for each member `<title> <low|medium|high> — <reason>; body: <absolute file>`. Return each unresolved decision as `gap: <what>`; do not ask the user.
 {rubric}"#,
         core = plan_core(),
         rubric = difficulty_rubric()
@@ -1932,7 +1932,7 @@ The host interviews the person, then a planning subagent drafts a grounded plan.
 
 1. Read `moai models --json` and `moai writing --json`. Compare the `plan` identifier case-insensitively: a name containing `fable` qualifies; a name containing `opus` qualifies only when `effort_plan` is `xhigh` or `max`. All other names fail. On failure stop before interviewing or creating anything; print one line naming the keys to change (`plan` and, when needed, `effort_plan`), recommending `fable` or `opus` with `effort_plan = "xhigh"`. Identify the source from `written`, then `repo`, else default; the user config overrides repository recommendations. Never substitute a model automatically.
 2. Inspect the repository, tracker and wiki for what can be learned without asking. Use `AskUserQuestion` to complete the interview: goal and done state, scope and exclusions, acceptance, protected areas and settled design, milestone (including explicit consent to join a running release or a new version), deadline and start, priority, review focus and risks. Ask follow-ups until decisions are settled. Never invent a start or deadline. No answer means no deadline.
-3. Save the interview, including the person's answers verbatim, in a scratchpad file. Pass its absolute path, root and `Writing:` detail to the subagent. Call `Agent(subagent_type: "general-purpose", model: <plan>, effort: <effort_plan>, description: "draft plan", prompt: <draft brief>)` with this brief. If `Agent` refuses the `plan` name (it takes only the names it can raise a subagent on), stop and tell the person which key to change, as in 1 — never substitute another model:
+3. Create a unique task directory with `mktemp -d "<scratchpad>/plan.XXXXXXXX"` before an epic exists. Save the interview, including the person's answers verbatim, as `<plan dir>/interview.md`. Pass the absolute plan directory and interview path, root and `Writing:` detail to the subagent. Keep all drafts and combined bodies there, even after an epic is created; do not reuse the directory for another plan. Call `Agent(subagent_type: "general-purpose", model: <plan>, effort: <effort_plan>, description: "draft plan", prompt: <draft brief>)` with this brief. If `Agent` refuses the `plan` name (it takes only the names it can raise a subagent on), stop and tell the person which key to change, as in 1 — never substitute another model:
 
 {brief}
 
@@ -4948,7 +4948,7 @@ fn plan_brief() -> String {
     format!(
         r#"You unfold backlog <id> — <title> — for the supervisor of this repository. You split it
 into an epic and its issues; you do not develop it, pick anything up, raise a worktree or
-change a repository file — the tracker and your scratchpad are yours.
+change a repository file — the tracker and your scratchpad are yours. Create `<scratchpad>/<backlog id>/` before writing any plan files. Use that directory until the epic exists; then create `<scratchpad>/<epic>/` and use it for all subsequent bodies and review files. Never share a task directory across concurrent work.
 Root: <root>
 Milestone: <milestone>
 Due: <due>
@@ -4978,8 +4978,8 @@ Writing: <writing>
    {DETAILED_BODY}.
    `brief`: what to change · where (file and function) · how to test it. A design question the
    backlog and its notes do not settle goes in it, open, for the worker to ask — do not
-   settle it here. Write it to a file in your scratchpad and run
-   moai -C "<root>" edit <member> -b - < <that file>
+   settle it here. Write each body under `<scratchpad>/<epic>/`, using a distinct filename per member, and run
+   moai -C "<root>" edit <member> -b - < "<scratchpad>/<epic>/<member>.md"
 5. Mark the epic, last — a supervisor that starts again sends an epic it finds marked so, so
    mark it only once 3 and 4 stand:
    {PLAN_SENT}
@@ -5431,7 +5431,7 @@ root"), never in the root
    in 6, so the conflict resolution is inside it too. Read the epic body and put the contents
    of its `{REVIEW_FOCUS}` section (either heading) first in the review issue angle,
    followed by any focus discovered during development — a section of several lines or one
-   holding a single quote goes in through `-b -` from a scratch file, not inside `-b '…'`.
+   holding a single quote goes in through `-b -` from `<scratchpad>/<epic>/angle.md`, not inside `-b '…'`. Create the epic directory first; never share the angle file with another epic.
    If neither heading exists, write the angle as before. Create the review issue (rule 3)
 
        {review}
@@ -7851,6 +7851,19 @@ stop sending outside work while a release runs",
     /// **리뷰는 일꾼의 중첩 서브에이전트로 돈다**(2026-10-12 사용자 결정 5, moai-9tqo.p1p). 일꾼 안에서 부른 리뷰는
     /// 일꾼의 모델을 물려받으니 `review` 역할의 모델로 따로 세운다. 브리프는 fxp 가 잰 꼴을 든다 — `Skill` 은
     /// 백그라운드 포크라 끝난 알림을 기다리고, `--fix` 는 커밋 없이 남기고, 남은 것은 `TaskStop` 으로 멈춘다.
+    #[test]
+    fn planning_and_review_scratch_are_scoped_to_the_work() {
+        let draft = plan_brief_draft();
+        assert!(draft.contains("<plan dir>"));
+        let plan = plan();
+        assert!(plan.contains("mktemp -d"));
+        assert!(plan.contains("<plan dir>/interview.md"));
+        let unfold = plan_brief();
+        assert!(unfold.contains("<scratchpad>/<backlog id>/"));
+        assert!(unfold.contains("<scratchpad>/<epic>/<member>.md"));
+        assert!(worker().contains("<scratchpad>/<epic>/angle.md"));
+    }
+
     #[test]
     fn a_subagent_worker_raises_the_review_on_the_review_brief() {
         let (brief, prompt) = (worker(), review_brief());

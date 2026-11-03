@@ -398,7 +398,7 @@ root"), never in the root
    in 6, so the conflict resolution is inside it too. Read the epic body and put the contents
    of its `Review focus / 리뷰에서 볼 것` section (either heading) first in the review issue angle,
    followed by any focus discovered during development — a section of several lines or one
-   holding a single quote goes in through `-b -` from a scratch file, not inside `-b '…'`.
+   holding a single quote goes in through `-b -` from `<scratchpad>/<epic>/angle.md`, not inside `-b '…'`. Create the epic directory first; never share the angle file with another epic.
    If neither heading exists, write the angle as before. Create the review issue (rule 3)
 
        moai add 'review — <what you are looking at>' -t review --parent <epic> -b '<what you are looking for and why>'
