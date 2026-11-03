@@ -662,7 +662,7 @@ fn bulk(
     // 본문은 **첫 뿌리 하나**다(moai-kqid) — 물려받는 값이 아니라, 뿌리마다 적으면 같은 글이
     // 에픽 수만큼 베껴진다. 고르는 자는 `create_drafts` 하나고 `backlog promote` 가 데려가는
     // 본문도 그 자리를 지난다.
-    let rooted = Rooted { milestone, body, due, start };
+    let rooted = Rooted { milestone, body, due, start, member_body: None };
 
     if dry_run {
         check_plan(&drafts, rooted, ctx.lang())?;
@@ -755,7 +755,8 @@ pub fn is_root(i: &Issue) -> bool {
 }
 
 /// 계획의 **뿌리**(id 부모가 없는 줄)가 받아 갈 것. 멤버는 거기서 물려받으므로 여기서 안 적는다 —
-/// 멤버마다 적으면 그것이 파생값을 저장하는 것이고, 에픽을 옮기는 날 멤버가 안 따라온다.
+/// 멤버마다 적으면 그것이 파생값을 저장하는 것이고, 에픽을 옮기는 날 멤버가 안 따라온다. 물려받지 않는 멤버의
+/// 본문 하나만 예외다([`Rooted::member_body`]).
 ///
 /// `add --from --milestone` 이 마일스톤을 주고(moai-xoyg), `backlog promote` 가 담아 둔 생각의
 /// 마일스톤과 본문을 준다(moai-07v1). **`-e <에픽>` 으로 선 에픽에 펼칠 때는 뿌리가 없어**
@@ -782,6 +783,11 @@ pub struct Rooted<'a> {
     /// 뿌리마다 서는 계획 시작일(moai-xf0p.due) — `add --from --start` 와 `backlog promote` 가 데려가는 시작일이다.
     /// [`Rooted::due`] 와 같은 규칙이다: 멤버에는 안 내리고, 줄이 제 `@날짜` 를 들었으면 그것이 이긴다.
     pub start: Option<&'a str>,
+    /// **멤버마다** 서는 본문 — 이 묶음에서 뿌리가 아닌 줄이 받는 하나뿐인 값이다(moai-ifvh.y8m). `backlog promote` 만
+    /// 준다: 멤버가 하나면 backlog 의 본문, 여럿이면 `Unfolded-from: <backlog>` 한 줄이다. 본문은 물려받는 값이 아니라
+    /// 멤버에 적어도 파생값을 담는 것이 아니다. **빚는 자리에서 적는다** — 만든 뒤 `issues` 의 꼬리를 첨자로 짚어 고치던
+    /// 판은 정규화(`store::admit`)를 건너뛰었고, 연습([`check_plan_rows`])이 빚는 줄과 진짜가 쓰는 줄이 갈렸다.
+    pub member_body: Option<&'a str>,
 }
 
 impl<'a> Rooted<'a> {
@@ -908,6 +914,9 @@ pub fn create_drafts(
             if let Some(text) = body.take() {
                 issue.body = Some(text.to_string());
             }
+        } else if let Some(text) = rooted.member_body {
+            // 뿌리가 아닌 줄이 곧 멤버다 — `#` 줄은 늘 뿌리고(`Shape::Plan`), 선 에픽에 펼치는 꼴에는 `#` 줄이 없다.
+            issue.body = Some(text.to_string());
         }
         (issue.assignee, issue.assignee_email) = who.clone();
         let (entry, issue) = store::admit(issues, cfg, issue, by)?;

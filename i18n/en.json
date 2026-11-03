@@ -1041,7 +1041,7 @@
   "add.due_nowhere": "--due {due} goes on no epic — every `#` line carries its own @date",
   "add.start_nowhere": "--start {start} goes on no epic — every `#` line carries its own @date",
   "add.body_stdin_empty": "`--body -` read stdin and nothing came — no body was written",
-  "backlog.body_stdin_empty": "`--body -` read stdin and nothing came — the new epic gets the backlog's own body",
+  "backlog.body_stdin_empty": "`--body -` read stdin and nothing came — the new epic gets the backlog's own body, if it has one",
   "add.body_names_a_file": "`--body` takes the text itself — the body is the words `{text}`, not the file by that name. To use the file's contents, `--body - < {path}`",
   "add.body_names_a_file_plan_on_stdin": "`--body` takes the text itself — the body is the words `{text}`, not the file by that name. `--from -` already reads stdin, so to use the file's contents put the plan in a file — `moai add --from <plan file> --body - < {path}`",
   "backlog.body_names_a_file_plan_on_stdin": "`--body` takes the text itself — the body is the words `{text}`, not the file by that name. `--from -` already reads stdin, so to use the file's contents put the plan in a file — `moai backlog promote <id> --from <plan file> --body - < {path}`",

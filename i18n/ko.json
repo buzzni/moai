@@ -1041,7 +1041,7 @@
   "add.due_nowhere": "--due {due} 는 어느 에픽에도 안 선다 — `#` 줄마다 제 @날짜가 있다",
   "add.start_nowhere": "--start {start} 는 어느 에픽에도 안 선다 — `#` 줄마다 제 @날짜가 있다",
   "add.body_stdin_empty": "`--body -` 가 stdin 을 읽었는데 아무것도 안 왔다 — 본문은 적지 않았다",
-  "backlog.body_stdin_empty": "`--body -` 가 stdin 을 읽었는데 아무것도 안 왔다 — 새 에픽은 backlog 의 본문을 받는다",
+  "backlog.body_stdin_empty": "`--body -` 가 stdin 을 읽었는데 아무것도 안 왔다 — 새 에픽은 backlog 에 본문이 있으면 그것을 받는다",
   "add.body_names_a_file": "`--body` 는 글 자체를 받는다 — 같은 이름의 파일이 있지만 본문은 그 파일이 아니라 `{text}` 라는 글자다. 파일 내용을 쓰려면 `--body - < {path}`",
   "add.body_names_a_file_plan_on_stdin": "`--body` 는 글 자체를 받는다 — 같은 이름의 파일이 있지만 본문은 그 파일이 아니라 `{text}` 라는 글자다. `--from -` 이 이미 stdin 을 읽으니, 파일 내용을 쓰려면 계획을 파일로 준다 — `moai add --from <계획 파일> --body - < {path}`",
   "backlog.body_names_a_file_plan_on_stdin": "`--body` 는 글 자체를 받는다 — 같은 이름의 파일이 있지만 본문은 그 파일이 아니라 `{text}` 라는 글자다. `--from -` 이 이미 stdin 을 읽으니, 파일 내용을 쓰려면 계획을 파일로 준다 — `moai backlog promote <id> --from <계획 파일> --body - < {path}`",

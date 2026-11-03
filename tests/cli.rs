@@ -8963,6 +8963,16 @@ fn promote_propagates_context_and_explicit_epic_body() {
         issues(s.path()).lines().any(|l| l.contains("\"title\":\"third epic\"") && l.contains("third body")),
         "빈 --body 뒤에 backlog 의 본문을 안 데려갔다"
     );
+
+    // 계획이 stdin 을 쥔 판에 `--body <있는 파일>` 이면, 계획을 파일로 옮기는 줄을 **이 동사로** 댄다 — `moai add` 를
+    // 권하면 따라 친 부름이 backlog 를 닫지 않은 채 계획을 한 벌 더 세운다(리뷰 moai-ifvh.31s 3번).
+    let fourth = ok(s.path(), &["backlog", "add", "fourth", "-q"]).trim().to_string();
+    std::fs::write(s.path().join("why.md"), "a file by that name").unwrap();
+    let out = from_stdin(s.path(), &["backlog", "promote", &fourth, "--from", "-", "--body", "why.md"], "# f\n- y\n");
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(out.status.success(), "{err}");
+    assert!(err.contains("moai backlog promote <id> --from <계획 파일> --body - < why.md"), "{err}");
+    assert!(!err.contains("moai add"), "promote 의 알림이 add 를 권한다\n{err}");
 }
 
 /// **본문은 에픽이 여럿이어도 첫 뿌리 하나만 든다**(리뷰). 마일스톤은 멤버가 물려받는
@@ -14500,6 +14510,22 @@ fn promote_human_preview_names_bodies_without_writing() {
         new_multiple.contains("첫 에픽") && new_multiple.contains(&format!("Unfolded-from: {idea}")),
         "{new_multiple}"
     );
+    // 기계 출력은 `--body` 로 준 새 글이 설 자리만 댄다 — `add --from --body` 와 같은 어휘다(moai-30hd 가 지킨 계약).
+    let json = preview(
+        &["backlog", "promote", &idea, "--from", "-", "--body", "bundle", "--dry-run", "--json"],
+        "# new epic\n- sole\n",
+    );
+    assert!(json.contains(r#""body_on":0"#), "{json}");
+    // 넘치는 `--body` 는 연습도 진짜도 거절한다 — 연습이 그 글을 재지 않으면 사람이 "좋다" 한 뒤에 진짜가 물린다.
+    let big = "x".repeat(70_000);
+    for dry in [true, false] {
+        let mut argv = vec!["backlog", "promote", idea.as_str(), "--from", "-", "--body", big.as_str()];
+        if dry {
+            argv.push("--dry-run");
+        }
+        let out = from_stdin(p, &argv, "# new epic\n- sole\n");
+        assert!(!out.status.success(), "dry_run={dry}: 넘치는 --body 를 받았다");
+    }
     assert_eq!(issues(p), before);
 }
 

@@ -4635,7 +4635,8 @@ impl<'a> Picking<'a> {
         // 뒤다. 읽을 때만 재고 저장하지 않는다: `moai due apply` 가 우선순위를 올리기 전의 틈을 이 차례가 메운다.
         // **마일스톤 안인가 뒤에 선다**(리뷰) — AGENTS 블록의 약속("`p0` 이 먼저고 마일스톤이 둘째다")이 차례에도
         // 서야 한다. 그 앞에 두던 판은 1년 뒤 날을 든 밖의 `p0` 이 도는 마일스톤 안의 `p0` 을 앞질렀다. 기한은
-        // **따르는 기한**이다(moai-uwi9.rff) — `due apply` 와 같은 자([`followed`]·[`DueLadder::open_ceiling`])로 잰다.
+        // **따르는 기한**이다(moai-uwi9.rff) — `due apply` 와 같은 조상([`DueLadder::open_ceiling`])에서 제 것과 견주어 가장
+        // 이른 날([`followed`])이다. 오를 우선순위를 고르는 `due apply`([`priority_choice`])와 달리 여기는 날만 본다.
         let pct = |i: &Issue| group.at(i).and_then(|e| self.progress.get(e)).copied().unwrap_or(0);
         // 마일스톤 지도는 **지은 판에만 빌린다**([`Ties::epics_only`] 는 `None`) — 그때는 사다리가 저 지도를 안 읽는다(미룬 줄이
         // 없다). 빈 지도를 "지었다" 로 건네면 두 문이 갈리는 날 미룬 마일스톤의 기한이 말없이 차례에 든다.
@@ -5664,7 +5665,7 @@ pub struct Dues {
     late: Vec<(String, String)>,
     /// (id, 제 기한, 조상의 가장 이른 열린 기한, 지금 우선순위) — 기한이 올릴 수 있는 줄([`due_eligible`]) 가운데 둘 중
     /// 하나라도 선 것. 뒤처진 것이 `due_priority_behind` 알림이 된다. 판정은 `moai due apply` 와 같은 자
-    /// ([`priority_choice`])다 — 물려받은 기한은 한 번에 한 칸, `p1` 까지만 올리므로 두 기한을 따로 든다.
+    /// ([`priority_choice`])다 — 물려받은 기한은 `p1` 에서 멈추고 `p0` 은 제 기한만 부르므로 두 기한을 따로 든다.
     behind: Vec<(String, Option<String>, Option<String>, u8)>,
     /// 기한 규칙 — 문턱을 든다([`raise_to`]). 꺼졌으면 알림이 안 선다: 끈 사람에게 `moai due apply` 를 치라고 하면 그
     /// 동사는 아무것도 안 한다.
@@ -5869,9 +5870,11 @@ fn raise_to(left: i64, priority: u8, rule: &crate::config::DueRule) -> Option<u8
 }
 
 /// 제 기한과 조상의 기한(가장 이른 열린 것) 가운데 **더 급한 우선순위를 부르는 쪽** — (오를 값, 따른 기한, 물려받았나)
-/// (moai-ifvh.2ub, Decided alone). `p0` 은 제 기한만 부른다. 물려받은 기한은 한 번에 한 칸, `p1` 까지만 올린다 —
-/// 마일스톤 기한 하나가 멤버 전부를 `p0` 으로 올려 핫픽스 자리를 지우지 않게. 같은 칸이면 이른 날이, 같은 날이면 제
-/// 기한이 남는다. 이른 조상의 기한이 제 `p0` 기한을 가리지 못하게 둘을 따로 잰다.
+/// (moai-ifvh.2ub, Decided alone). `p0` 은 제 기한만 부른다. 물려받은 기한은 `p1` 까지만 올린다 — 마일스톤 기한
+/// 하나가 멤버 전부를 `p0` 으로 올려 핫픽스 자리를 지우지 않게. **한 번에 다 올린다**(moai-feg4) — 한 칸씩 올리던 판은
+/// `p3` 멤버를 두 회차에 걸쳐 올려, 첫 회차 뒤에도 보드가 `moai due apply` 를 또 시켰다. 그래서 두 번째 회차는 아무것도
+/// 안 쓴다. 같은 칸이면 이른 날이, 같은 날이면 제 기한이 남는다. 이른 조상의 기한이 제 `p0` 기한을 가리지 못하게 둘을
+/// 따로 잰다.
 fn priority_choice<'a>(
     own: Option<&'a str>,
     above: Option<&'a str>,
@@ -5920,7 +5923,7 @@ pub struct Raise<'a> {
 /// `live` 가운데 **기한에 뒤처진 줄** 전부를, 급한 것부터(moai-dr8a) — `moai due apply` 가 적는 답이다.
 ///
 /// **제 기한과 조상의 기한을 함께 잰다**(Decided alone, moai-dr8a.7rs — 판정은 moai-ifvh.2ub 의 [`priority_choice`]:
-/// 물려받은 기한은 한 번에 한 칸, `p1` 까지). 사람의 기한은 계획을
+/// 물려받은 기한은 `p1` 까지, 한 회차에 다). 사람의 기한은 계획을
 /// 따라 에픽에 선다(AGENTS 의 갈래 3, 감독의 `Due:` 줄, 일꾼 걸음 1) — 제 기한만 보면 계획의 기한이 멤버를 하나도 안
 /// 올린다. 조상은 쓰기가 위계를 재는 자([`DueLadder`])가 고르는 그대로다 — 선 마일스톤, 든 에픽, 접어 그리는 부모 —
 /// 다만 **닫힌 부모도 닫힌 묶음도 안 센다**([`DueLadder::open_ceiling`]). **읽을 때 재고 담지 않는다** — 멤버에 기한을
