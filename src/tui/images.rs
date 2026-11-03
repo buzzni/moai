@@ -18,12 +18,20 @@ pub const PER_VIEW: usize = 8;
 /// only one view, the second view's pictures evicted the first's, the first re-laid and evicted the second's, and
 /// every frame decoded and re-uploaded them all.
 const LIMIT: usize = 2 * PER_VIEW;
+/// The spacing of tmux client rechecks while a picture view is open — the explorer's follow step, not its fast
+/// encoding step.
+const REFRESH: std::time::Duration = std::time::Duration::from_millis(700);
 
 #[derive(Default)]
 pub struct Images {
     pub active: bool,
     pub setting: Option<String>,
     protocol: Option<Protocol>,
+    client: Option<String>,
+    interested: bool,
+    /// A recheck on its way; `None` inside means tmux could not answer it ([`term::observe_terminal`]).
+    refresh: Option<std::sync::mpsc::Receiver<Option<term::TerminalState>>>,
+    refresh_at: Option<std::time::Instant>,
     geometry: (u16, u16, u16, u16),
     entries: VecDeque<Entry>,
     deleted: Vec<u32>,
@@ -35,6 +43,8 @@ pub struct Images {
     retry: bool,
     #[cfg(test)]
     synchronous: bool,
+    #[cfg(test)]
+    terminal_probes: bool,
 }
 struct Worker {
     tx: std::sync::mpsc::SyncSender<Job>,
@@ -97,6 +107,10 @@ impl Images {
             active: true,
             setting: None,
             protocol: Some(Protocol::Kitty),
+            client: None,
+            interested: false,
+            refresh: None,
+            refresh_at: None,
             geometry: (80, 40, 640, 640),
             entries: VecDeque::new(),
             deleted: Vec::new(),
@@ -104,6 +118,7 @@ impl Images {
             worker: None,
             retry: false,
             synchronous: true,
+            terminal_probes: false,
         }
     }
     #[cfg(test)]
@@ -138,11 +153,105 @@ impl Images {
         self.retry || self.entries.iter().any(|e| e.pending)
     }
     fn enabled(&mut self) -> bool {
-        self.active
-            && matches!(
-                *self.protocol.get_or_insert_with(|| term::detect_terminal(self.setting.as_deref())),
-                Protocol::Kitty | Protocol::KittyTmux
-            )
+        if !self.active {
+            return false;
+        }
+        if self.protocol.is_none() {
+            let state = term::terminal_state(self.setting.as_deref());
+            self.protocol = Some(state.protocol);
+            self.client = state.client;
+            // That was a probe too: the follow cycle's recheck keeps its spacing behind it.
+            self.refresh_at = Some(std::time::Instant::now() + REFRESH);
+        }
+        matches!(self.protocol, Some(Protocol::Kitty | Protocol::KittyTmux))
+    }
+    /// The painter already knows the local image targets in the displayed body/page. An old cached picture must
+    /// not keep probing tmux after navigation to a picture-free view, raw mode or a collapsed detail pane.
+    /// Coming back does not reset the spacing: holding a key over issues with and without pictures would otherwise
+    /// start a probe per issue. Away longer than [`REFRESH`], the next recheck is already due.
+    pub fn interest(&mut self, interested: bool) {
+        self.interested = interested;
+    }
+    /// True when the frame owes the terminal something: another protocol, or uploads the new client never saw.
+    fn apply_terminal(&mut self, state: term::TerminalState) -> bool {
+        if self.protocol == Some(state.protocol) && self.client == state.client {
+            return false;
+        }
+        let changed = if self.protocol != Some(state.protocol) {
+            self.clear_entries();
+            // These ids belonged to the previous protocol. In particular, never send kitty deletions to a new,
+            // unsupported terminal, even when there were evictions waiting for a frame before it attached.
+            self.deleted.clear();
+            true
+        } else {
+            // Same protocol, another client: the payloads stay and only the uploads are owed again. Queued
+            // deletions stay too — a client still attached beside it holds those ids, and `q=2` keeps a deletion
+            // of an id this client never saw silent.
+            let mut resend = false;
+            for entry in &mut self.entries {
+                resend |= std::mem::take(&mut entry.sent);
+            }
+            resend
+        };
+        self.protocol = Some(state.protocol);
+        self.client = state.client;
+        changed
+    }
+    fn refresh_terminal(&mut self) -> bool {
+        let mut changed = false;
+        if let Some(rx) = &self.refresh {
+            match rx.try_recv() {
+                Ok(answer) => {
+                    self.refresh = None;
+                    // `None`: tmux did not answer. Keep what is known rather than drop working previews.
+                    if let Some(state) = answer
+                        && self.interested
+                        && self.active
+                    {
+                        changed = self.apply_terminal(state);
+                    }
+                }
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => self.refresh = None,
+                Err(std::sync::mpsc::TryRecvError::Empty) => {}
+            }
+        }
+        // Use the existing follow cadence, not Images::busy's fast encoding cadence. At most one bounded probe
+        // can run. Explicit overrides retain their no-probe contract, including when TMUX was inherited.
+        let now = std::time::Instant::now();
+        #[cfg(test)]
+        let may_probe = self.terminal_probes;
+        #[cfg(not(test))]
+        let may_probe = true;
+        use std::io::IsTerminal;
+        // A supported direct terminal with no client is outside tmux (a window launched from a tmux shell). Its
+        // stdout device never becomes a pane. Off or unknown must still be rechecked to detect a later attach.
+        let outside_pane =
+            self.client.is_none() && matches!(self.protocol, Some(Protocol::Kitty | Protocol::Iterm | Protocol::Sixel));
+        if may_probe
+            && self.active
+            && std::io::stdout().is_terminal()
+            && self.interested
+            && !outside_pane
+            && cfg!(unix)
+            && std::env::var_os("TMUX").is_some()
+            && term::auto_detects(self.setting.as_deref())
+            && self.refresh.is_none()
+            && self.refresh_at.is_none_or(|due| now >= due)
+        {
+            let (tx, rx) = std::sync::mpsc::sync_channel(1);
+            let setting = self.setting.clone();
+            if std::thread::Builder::new()
+                .name("image-terminal".into())
+                .spawn(move || {
+                    let _ = tx.send(term::observe_terminal(setting.as_deref()));
+                })
+                .is_ok()
+            {
+                self.refresh = Some(rx);
+            }
+            self.refresh_at = Some(now + REFRESH);
+        }
+        changed
     }
     /// Known to draw nothing: not a terminal, or detection already answered another protocol. Unknown is not off.
     pub fn off(&self) -> bool {
@@ -228,7 +337,7 @@ impl Images {
     /// File checks belong to the idle follow cadence, never the frame/layout path.
     /// Results are matched by unique placement id, so an old resize or eviction cannot install stale pixels.
     pub fn poll(&mut self) -> bool {
-        let mut changed = std::mem::take(&mut self.retry);
+        let mut changed = self.refresh_terminal() | std::mem::take(&mut self.retry);
         if let Some(worker) = &mut self.worker {
             if worker.handle.as_ref().is_some_and(|h| h.is_finished())
                 && let Some(handle) = worker.handle.take()
@@ -658,6 +767,297 @@ mod tests {
         let p = root.join(name);
         image::DynamicImage::new_rgb8(160, 160).save(&p).unwrap();
         p
+    }
+    #[cfg(unix)]
+    #[test]
+    fn tmux_refresh_pty_child() {
+        let Ok(root) = std::env::var("MOAI_IMAGE_REFRESH_CHILD") else { return };
+        let root = Path::new(&root);
+        let state = root.join("state");
+        let tty = std::env::var("MOAI_IMAGE_REFRESH_TTY").unwrap();
+        // Rename into place: a probe running meanwhile must read the old reply or the new one, never half of one.
+        let write_state = |text: &str| {
+            let next = root.join("state.next");
+            std::fs::write(&next, text).unwrap();
+            std::fs::rename(&next, &state).unwrap();
+        };
+        let snapshot = |term: &str, permission: &str, client: usize| {
+            write_state(&format!("{tty}\nMOAI_CLIENT\n{term}\n{permission}\n{client}\n100\n/dev/client-{client}\n"));
+        };
+        let queries = || std::fs::read_to_string(root.join("queries")).unwrap_or_default().lines().count();
+        let path = picture(root, "image.png");
+        let mut images = Images::default();
+        images.active = true;
+        images.terminal_probes = true;
+        images.poll();
+        assert_eq!(queries(), 0, "picture-free follow queried tmux");
+        snapshot("xterm-ghostty", "on", 1);
+        assert!(images.lines(&path, 20).is_empty(), "on must retain text before encoding starts");
+        assert!(images.worker.is_none(), "on queued image encoding");
+        images.interest(true);
+        snapshot("xterm-ghostty", "all", 1);
+        let until = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while images.off() {
+            images.poll();
+            assert!(std::time::Instant::now() < until, "changing on to all never enabled previews");
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        let lines = ready(&mut images, &path, 20);
+        images.interest(true);
+        let first = draw_picture(&mut images, lines.clone());
+        assert!(String::from_utf8_lossy(&first).contains("tmux;"));
+        let id = images.entries[0].id;
+        snapshot("xterm-ghostty", "all", 2);
+        let until = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while images.entries[0].sent {
+            images.poll();
+            assert!(std::time::Instant::now() < until, "same-size reattach never reset sent");
+            assert!(!images.busy(), "terminal refresh enabled fast polling");
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert_eq!(images.entries[0].id, id);
+        assert_eq!(draw_picture(&mut images, lines.clone()), first);
+        // tmux lists no pane (a timeout or a vanished server answers the same): unknown, so the working state stays.
+        write_state("");
+        let asked = queries();
+        let until = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while queries() == asked || images.refresh.is_some() {
+            images.poll();
+            assert!(std::time::Instant::now() < until, "no recheck ran against the silent tmux");
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert!(!images.off(), "an unanswered recheck turned previews off");
+        assert_eq!(images.entries[0].id, id, "an unanswered recheck dropped the encoded picture");
+        assert!(draw_picture(&mut images, lines).is_empty(), "an unanswered recheck re-uploaded");
+        snapshot("xterm-256color", "all", 3);
+        let until = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while !images.off() {
+            images.poll();
+            assert!(std::time::Instant::now() < until, "unsupported reattach retained kitty");
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert!(images.lines(&path, 20).is_empty());
+        assert!(draw_picture(&mut images, Vec::new()).is_empty());
+        snapshot("xterm-ghostty", "all", 4);
+        let until = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while images.off() {
+            images.poll();
+            assert!(std::time::Instant::now() < until, "reattach to Ghostty never enabled previews");
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        let lines = ready(&mut images, &path, 20);
+        assert!(!draw_picture(&mut images, lines).is_empty());
+        snapshot("xterm-ghostty", "on", 4);
+        let until = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while !images.off() {
+            images.poll();
+            assert!(std::time::Instant::now() < until, "changing all to on retained previews");
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert!(images.lines(&path, 20).is_empty());
+        assert!(draw_picture(&mut images, Vec::new()).is_empty());
+        images.interest(false);
+        // Let an already running query finish; no new queries may start after leaving this view.
+        let until = std::time::Instant::now() + std::time::Duration::from_secs(3);
+        while images.refresh.is_some() {
+            images.poll();
+            assert!(std::time::Instant::now() < until);
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        let count = queries();
+        images.refresh_at = None;
+        for _ in 0..10 {
+            images.poll();
+        }
+        assert_eq!(queries(), count, "old cached pictures kept querying tmux");
+        images.active = false;
+    }
+    #[cfg(unix)]
+    #[test]
+    fn tmux_refresh_uses_live_mock_replies_on_a_real_stdout_pty() {
+        use std::{
+            fs::File,
+            os::{fd::FromRawFd, unix::fs::PermissionsExt},
+            process::{Command, Stdio},
+        };
+        let root = crate::scratch::Scratch::new("tmux-refresh-pty");
+        let bin = root.join("bin");
+        std::fs::create_dir(&bin).unwrap();
+        let script = bin.join("tmux");
+        std::fs::write(&script, "#!/bin/sh\nprintf 'query\\n' >> \"$MOAI_IMAGE_REFRESH_CHILD/queries\"\n/bin/cat \"$MOAI_IMAGE_REFRESH_CHILD/state\"\n").unwrap();
+        std::fs::set_permissions(script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let (mut master, mut slave) = (-1, -1);
+        let mut name: [libc::c_char; 256] = [0; 256];
+        // SAFETY: openpty writes only to valid descriptors and the tty-name buffer.
+        assert_eq!(
+            unsafe {
+                libc::openpty(&mut master, &mut slave, name.as_mut_ptr(), std::ptr::null_mut(), std::ptr::null_mut())
+            },
+            0
+        );
+        for fd in [master, slave] {
+            // SAFETY: both descriptors were just opened by openpty.
+            unsafe { libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC) };
+        }
+        // SAFETY: openpty transferred ownership of two fresh descriptors and a NUL-terminated tty name.
+        let (mut master, slave, tty) =
+            unsafe { (File::from_raw_fd(master), File::from_raw_fd(slave), std::ffi::CStr::from_ptr(name.as_ptr())) };
+        let reader = std::thread::spawn(move || {
+            use std::io::Read;
+            let mut out = Vec::new();
+            let mut chunk = [0; 4096];
+            while let Ok(n) = master.read(&mut chunk) {
+                if n == 0 {
+                    break;
+                }
+                out.extend_from_slice(&chunk[..n]);
+            }
+            out
+        });
+        let mut cmd = Command::new(std::env::current_exe().unwrap());
+        let mut child = cmd
+            .args(["--exact", "tui::images::tests::tmux_refresh_pty_child", "--nocapture"])
+            .env("MOAI_IMAGE_REFRESH_CHILD", root.path())
+            .env("MOAI_IMAGE_REFRESH_TTY", tty.to_str().unwrap())
+            .env("PATH", bin)
+            .env("TMUX", "/tmp/moai-zidx-fake-only,1,0")
+            .env("TMUX_PANE", "%0")
+            .env("TERM", "tmux-256color")
+            .env_remove("MOAI_IMAGES")
+            .stdin(Stdio::null())
+            .stdout(slave)
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        drop(cmd);
+        let until = std::time::Instant::now() + std::time::Duration::from_secs(15);
+        while child.try_wait().unwrap().is_none() {
+            if std::time::Instant::now() >= until {
+                child.kill().unwrap();
+                child.wait().unwrap();
+                panic!("terminal refresh child timed out");
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        let output = child.wait_with_output().unwrap();
+        let stdout = reader.join().unwrap();
+        assert!(
+            output.status.success(),
+            "{}\n{}",
+            String::from_utf8_lossy(&stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    /// Feed a completed background probe through the same follow path as production, without changing process
+    /// environment shared by parallel tests. The protocol remains kitty/tmux while the client identity changes.
+    fn refreshed(images: &mut Images, protocol: Protocol, client: &str) -> bool {
+        answered(images, Some(term::TerminalState { protocol, client: Some(client.into()) }))
+    }
+    fn answered(images: &mut Images, answer: Option<term::TerminalState>) -> bool {
+        let (tx, rx) = std::sync::mpsc::channel();
+        tx.send(answer).unwrap();
+        images.refresh = Some(rx);
+        images.interest(true);
+        images.poll()
+    }
+    fn draw_picture(images: &mut Images, lines: Vec<Line<'static>>) -> Vec<u8> {
+        let mut buffer = Buffer::empty(ratatui::layout::Rect::new(0, 0, 20, 10));
+        use ratatui::widgets::Widget;
+        Paragraph::new(lines).render(buffer.area, &mut buffer);
+        let mut out = Vec::new();
+        images.frame(&mut buffer, &mut out).unwrap();
+        out
+    }
+    #[test]
+    fn same_protocol_client_swap_reuploads_without_reencoding() {
+        let root = crate::scratch::Scratch::new("tmux-reattach");
+        let path = picture(&root, "one.png");
+        let mut images = images();
+        images.protocol = Some(Protocol::KittyTmux);
+        images.client = Some("ghostty/client-1".into());
+        let lines = ready(&mut images, &path, 20);
+        let id = images.entries[0].id;
+        let payload = draw_picture(&mut images, lines.clone());
+        assert!(payload.starts_with(b"\x1bPtmux;"));
+        assert!(images.entries[0].sent);
+        assert!(!refreshed(&mut images, Protocol::KittyTmux, "ghostty/client-1"));
+        assert!(draw_picture(&mut images, lines.clone()).is_empty());
+        assert!(refreshed(&mut images, Protocol::KittyTmux, "ghostty/client-2"));
+        assert_eq!(images.entries[0].id, id);
+        assert!(!images.entries[0].pending, "reattach queued an unnecessary decode");
+        assert_eq!(draw_picture(&mut images, lines), payload);
+        images.active = false;
+    }
+    #[test]
+    fn unsupported_tmux_reattach_drops_placements_and_queued_deletions() {
+        let root = crate::scratch::Scratch::new("tmux-unsupported");
+        let path = picture(&root, "one.png");
+        let mut images = images();
+        images.protocol = Some(Protocol::KittyTmux);
+        images.client = Some("ghostty/client-1".into());
+        let lines = ready(&mut images, &path, 20);
+        draw_picture(&mut images, lines);
+        images.deleted.push(123);
+        assert!(refreshed(&mut images, Protocol::Off, "iterm/client-2"));
+        assert!(images.off());
+        assert!(images.entries.is_empty());
+        assert!(images.deleted.is_empty());
+        assert!(images.lines(&path, 20).is_empty(), "unsupported terminal retained placeholder rows");
+        assert!(draw_picture(&mut images, Vec::new()).is_empty(), "sent graphics to an unsupported terminal");
+        assert!(refreshed(&mut images, Protocol::KittyTmux, "ghostty/client-3"));
+        let lines = ready(&mut images, &path, 20);
+        assert!(!lines.is_empty());
+        assert!(!draw_picture(&mut images, lines).is_empty());
+        images.active = false;
+    }
+    #[test]
+    fn an_unanswered_recheck_keeps_previews_and_pending_deletions() {
+        let root = crate::scratch::Scratch::new("tmux-unanswered");
+        let path = picture(&root, "one.png");
+        let mut images = images();
+        images.protocol = Some(Protocol::KittyTmux);
+        images.client = Some("ghostty/client-1".into());
+        let lines = ready(&mut images, &path, 20);
+        let id = images.entries[0].id;
+        draw_picture(&mut images, lines.clone());
+        images.deleted.push(123);
+        assert!(!answered(&mut images, None), "an unanswered recheck asked for a redraw");
+        assert_eq!(images.protocol, Some(Protocol::KittyTmux));
+        assert_eq!(images.client.as_deref(), Some("ghostty/client-1"));
+        assert_eq!(images.entries[0].id, id);
+        assert!(images.entries[0].sent);
+        assert_eq!(images.deleted, [123]);
+        images.active = false;
+    }
+    #[test]
+    fn another_client_owes_only_what_was_uploaded() {
+        let root = crate::scratch::Scratch::new("tmux-client-swap");
+        let path = picture(&root, "one.png");
+        let mut images = images();
+        images.protocol = Some(Protocol::Off);
+        images.client = Some("xterm/client-1".into());
+        assert!(!refreshed(&mut images, Protocol::Off, "xterm/client-2"), "an unsupported swap laid views out");
+        images.protocol = Some(Protocol::KittyTmux);
+        images.client = Some("ghostty/client-2".into());
+        ready(&mut images, &path, 20);
+        assert!(!refreshed(&mut images, Protocol::KittyTmux, "ghostty/client-3"), "nothing uploaded, nothing owed");
+        // An eviction's deletion still reaches a client attached beside the new one.
+        images.deleted.push(123);
+        refreshed(&mut images, Protocol::KittyTmux, "ghostty/client-4");
+        assert_eq!(images.deleted, [123]);
+        images.active = false;
+    }
+    #[test]
+    fn completed_terminal_probe_is_ignored_after_leaving_picture_view() {
+        let mut images = images();
+        let (tx, rx) = std::sync::mpsc::channel();
+        tx.send(Some(term::TerminalState { protocol: Protocol::Off, client: Some("other".into()) })).unwrap();
+        images.refresh = Some(rx);
+        images.interest(false);
+        assert!(!images.poll());
+        assert_eq!(images.protocol, Some(Protocol::Kitty));
+        assert!(!images.busy(), "terminal observation must not enable fast polling");
+        images.active = false;
     }
     #[test]
     fn asynchronous_results_invalidate_layout_and_old_resize_results_are_discarded() {
