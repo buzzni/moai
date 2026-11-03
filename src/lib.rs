@@ -55,7 +55,7 @@ use std::process::ExitCode;
 /// 잘라 쓰는 것은 흔한 사용이라 크래시가 아니라 조용한 종료여야 한다.
 ///
 /// **끝내지 않고 버리기만 한다.** 여기서 `exit` 하면 명령이 제 판정을
-/// `main` 까지 못 들고 간다 — `moai show | head` 가 오류를 찾아 놓고 0 으로 끝난다.
+/// `run` 까지 못 들고 간다 — `moai show | head` 가 오류를 찾아 놓고 0 으로 끝난다.
 macro_rules! outln {
     ($($a:tt)*) => {{
         if let Err(e) = writeln!(anstream::stdout().lock(), $($a)*) {
@@ -535,14 +535,14 @@ mod tests {
         for bad in ["outln!", concat!("print", "ln!("), concat!("anstream::", "stdout"), "io::stdout"] {
             assert!(!notices.contains(bad), "경고 넷 가운데 하나가 stdout 에 쓴다 — {bad}");
         }
-        // 차례. 둘 다 `fn main` 의 `Ok` 갈래가 첫 자리라 처음 나온 곳끼리 견준다.
+        // 차례. 둘 다 `fn run` 의 `Ok` 갈래가 첫 자리라 처음 나온 곳끼리 견준다.
         let printed = src.find(concat!("print", "(&lines);")).expect("`print(&lines);` 가 없다");
         let last = src.find(concat!("redirected", "(!quiet);")).expect("`redirected(!quiet);` 가 없다");
         assert!(last < printed, "`print(&lines)` 가 경고 넷보다 앞에 섰다 — 훅의 판정 앞에 남의 줄이 선다");
     }
 
     /// **훅이 패닉하면 잡아서 `None` 이다**(moai-r2nn.kep) — 잡힌 호출은 값을 못 내고, 안 패닉한 호출은 값을 그대로 낸다.
-    /// 어느 말씨에 거는지는 `fn main` 이 정한다(Antigravity 만) — 여기는 잡는 몸통만 잰다.
+    /// 어느 말씨에 거는지는 `fn run` 이 정한다(Antigravity 만) — 여기는 잡는 몸통만 잰다.
     #[test]
     fn a_panic_in_a_hook_is_caught_and_yields_nothing() {
         assert_eq!(survived(|| 7), Some(7));
@@ -579,7 +579,7 @@ mod tests {
     ///
     /// `show --json` 의 `journal_error` 가 어느 줄이 값을 치렀는지를 대고(moai-f2lc), 저널을
     /// 안 읽는 명령에서 "이 판이 온전치 않다" 를 말하는 자는 이 코드 하나로 남는다.
-    /// `main` 이 [`cmd::had_partial`] 로 갈리므로 그 깃발을 직접 잰다 —
+    /// `run` 이 [`cmd::had_partial`] 로 갈리므로 그 깃발을 직접 잰다 —
     /// 깃발은 한 번 서면 안 내려가니 병렬 시험끼리 섞여도 이 쪽은 흔들리지 않는다.
     #[test]
     fn an_unread_journal_makes_the_run_fail() {

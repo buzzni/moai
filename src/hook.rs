@@ -6606,7 +6606,7 @@ fn create_in<'a>(
     //
     // **`mkdir` 이 `init` 앞에 선다**(리뷰) — 트래커가 없다고 적히는 자리는 [`crate::cmd::hook`] 의
     // `route_one` 에서 **아직 있지도 않은** 자리뿐이고(`!dir.is_dir()` 가지에서만 그 표가 선다),
-    // `moai -C <없는 자리>` 는 [`crate::main`] 의 `set_current_dir` 에서 곧바로 진다. 맨 `init` 만
+    // `moai -C <없는 자리>` 는 [`crate::run`] 의 `set_current_dir` 에서 곧바로 진다. 맨 `init` 만
     // 대던 판은 안 도는 줄을 안 도는 줄로 바꿨을 뿐이다 — 이 이슈(moai-bt1f)가 고치려던 그 모양이다.
     let fresh: String =
         aim(at).filter(|a| !a.tracker).and_then(|a| a.at.to_str().map(dir_word)).map_or_else(String::new, |d| {
