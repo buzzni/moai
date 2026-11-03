@@ -14473,6 +14473,36 @@ fn promote_can_be_rehearsed() {
     assert_eq!(issues(s.path()), before, "연습인데 썼다");
 }
 
+#[test]
+fn promote_human_preview_names_bodies_without_writing() {
+    let s = init("promote-preview-bodies");
+    let p = s.path();
+    let idea = ok(p, &["backlog", "add", "source", "-b", "original", "-q"]).trim().to_string();
+    let epic = add(p, &["standing", "--type", "epic"]);
+    let before = issues(p);
+    let preview = |args: &[&str], plan: &str| {
+        let out = from_stdin(p, args, plan);
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        String::from_utf8(out.stdout).unwrap()
+    };
+    let single =
+        preview(&["backlog", "promote", &idea, "--from", "-", "--body", "bundle", "--dry-run"], "# new epic\n- sole\n");
+    assert!(single.contains("new epic") && single.contains("sole") && single.contains("원본 본문"), "{single}");
+    assert!(single.contains("첫 에픽"), "{single}");
+    let standing = preview(&["backlog", "promote", &idea, "-e", &epic, "--from", "-", "--dry-run"], "- sole\n");
+    assert!(standing.contains("sole") && standing.contains("원본 본문"), "{standing}");
+    let multiple =
+        preview(&["backlog", "promote", &idea, "-e", &epic, "--from", "-", "--dry-run"], "- first\n- second\n");
+    assert!(multiple.contains(&format!("Unfolded-from: {idea}")) && multiple.contains("각 멤버"), "{multiple}");
+    let new_multiple =
+        preview(&["backlog", "promote", &idea, "--from", "-", "--dry-run"], "# new epic\n- first\n- second\n");
+    assert!(
+        new_multiple.contains("첫 에픽") && new_multiple.contains(&format!("Unfolded-from: {idea}")),
+        "{new_multiple}"
+    );
+    assert_eq!(issues(p), before);
+}
+
 /// 연습과 `--json` 을 같이 줘도 기계 출력이다. `add --from` 쪽과 **같은
 /// 모양**이라야 계획을 미리 검사하는 코드가 두 동사에 두 벌 필요하지 않다.
 #[test]

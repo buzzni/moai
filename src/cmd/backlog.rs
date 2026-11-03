@@ -269,6 +269,25 @@ pub fn promote(ctx: &Ctx, args: PromoteArgs) -> R<Vec<String>> {
             drafts.iter().filter(|d| d.epic.is_none()).count(),
             ctx.lang(),
         ));
+        if into.is_none() {
+            out.extend(crate::cmd::add::body_line(
+                &drafts,
+                explicit_body.as_deref().or(thought.body.as_deref()).filter(|b| !b.is_empty()),
+                ctx.lang(),
+            ));
+        }
+        if members == 1 && thought.body.as_deref().is_some_and(|b| !b.is_empty()) {
+            if let Some(member) = drafts.iter().find(|d| d.kind == model::Kind::Issue) {
+                let said = crate::i18n::fill(
+                    crate::i18n::say(ctx.lang(), "backlog.member_body_on"),
+                    &[("title", &member.title)],
+                );
+                out.push(paint(style::DIM, &said));
+            }
+        } else if members > 1 {
+            let said = crate::i18n::fill(crate::i18n::say(ctx.lang(), "backlog.member_source_on"), &[("id", &args.id)]);
+            out.push(paint(style::DIM, &said));
+        }
         if let Some(e) = into {
             let said = crate::i18n::fill(crate::i18n::say(ctx.lang(), "backlog.into_epic"), &[("id", e)]);
             out.push(paint(style::DIM, &said));

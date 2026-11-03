@@ -1047,6 +1047,8 @@
   "backlog.body_names_a_file_plan_on_stdin": "`--body` takes the text itself — the body is the words `{text}`, not the file by that name. `--from -` already reads stdin, so to use the file's contents put the plan in a file — `moai backlog promote <id> --from <plan file> --body - < {path}`",
   "add.note_names_a_file": "`--body` takes the text itself — the note is the words `{text}`, not the file by that name. To use the file's contents, `--body - < {path}`",
   "add.msg_names_a_file": "`-m` takes the text itself — the journal gets the words `{text}`, not the file by that name. To use the file's contents, `-m - < {path}`",
+  "backlog.member_body_on": "the source body stands on the member, {title}",
+  "backlog.member_source_on": "each member receives Unfolded-from: {id}",
   "backlog.will_unfold": "To unfold",
   "backlog.unfolded": "Unfolded",
   "backlog.into_epic": "goes in as a member of {id}",
