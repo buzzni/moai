@@ -157,7 +157,7 @@ pub const EVER_PLANTED: [(&str, &[&str]); 9] = [
         &["SKILL.md", "references/worker.md", "references/worker-branches.md", "references/worker-codex.md"],
     ),
     ("moai-wiki", &["SKILL.md"]),
-    ("moai-tmux", &["SKILL.md"]),
+    ("moai-tmux", &["SKILL.md", "scripts/codex-pane.py"]),
     ("moai-cmux", &["SKILL.md"]),
     ("moai-saycode", &["SKILL.md"]),
     ("moai-recover", &["SKILL.md"]),
@@ -229,7 +229,14 @@ pub fn skills() -> Vec<Skill> {
         // tmux 스킬은 감독이 `$TMUX` 안에서 돌 때만 읽는다(2026-10-10 사용자 결정, moai-u99i) — 감독 스킬에 섞으면 tmux 를
         // 안 쓰는 감독도 칸을 만지는 걸음을 매번 읽는다. 감독 스킬과 같은 까닭으로 Claude Code 에만 선다. 고른 사람에게만
         // 심는다([`OPTIONAL`], moai-3r7l).
-        Skill { name: tmux, files: vec![("SKILL.md", crate::guide::tmux())], claude_only: true },
+        Skill {
+            name: tmux,
+            files: vec![
+                ("SKILL.md", crate::guide::tmux()),
+                ("scripts/codex-pane.py", include_str!("skill_scripts/codex-pane.py").to_string()),
+            ],
+            claude_only: true,
+        },
         // cmux 스킬은 감독이 cmux 탭 안에서(tmux 밖) 돌 때만 읽는다(2026-10-10 사용자 결정, moai-p5sz) — tmux 스킬의 짝이라
         // 같은 까닭으로 따로 서고, Claude Code 에만 서고, 고른 사람에게만 심는다.
         Skill { name: cmux, files: vec![("SKILL.md", crate::guide::cmux())], claude_only: true },
@@ -1659,6 +1666,7 @@ mod tests {
                     .replace("<what you found>", "what I found")
                     .replace("<why>", "why")
                     .replace("<seconds>", "10")
+                    .replace("<timestamp>", "2026-01-01T00:00:00Z")
                     .replace("<column>", "review")
                     .replace("<seen column>", "in_progress")
                     .replace("<proposal id>", "tui-1/1")
@@ -1927,10 +1935,7 @@ mod tests {
                 .any(|d| p.starts_with(d))
             })
             .count();
-        assert_eq!(
-            only_claude, 9,
-            "감독 스킬은 SKILL.md 와 일꾼 글 셋, tmux·cmux·Saycode·되살리기 스킬은 SKILL.md 하나씩이다"
-        );
+        assert_eq!(only_claude, 10, "감독 스킬과 일꾼 글, tmux helper 및 Claude 전용 스킬을 센다");
         assert_eq!(
             shared.len() + 3 + only_claude,
             claude.len(),

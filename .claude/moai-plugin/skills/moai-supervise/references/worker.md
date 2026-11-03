@@ -36,7 +36,7 @@ said yes to taking over a row that is not yours, say — belongs to the assignme
   back one line, `Model: raise to complex — <why>`; the supervisor raises a new worker on the `complex` model
   with the same message, its `Model:` and `Effort:` lines changed to that role's. What shows only
   after you picked up, you carry on and name in the report.
-  Whether the epic-end review (7) goes to `max` is measured on this same rubric, member by member
+  Whether the epic-end review (7) is raised a step — only when `review_raise` allows it — is measured on this same rubric, member by member
 - `Effort:` — `<effort>`, the reasoning effort that goes with the model. Like the model, a
   subagent was raised on it and a session's person sets it — you do not
 - `Worker:` — `subagent` or `session`, how you were raised. A step that differs between the
@@ -373,11 +373,10 @@ root"), never in the root
    — aimed at the worktree: you stand in the root, and a call with no target reviews the
    root's diff. The members were not reviewed separately, so this once is the only review.
    **It runs inside this session** — never start another agent program for it.
-   **The epic-end review runs on the `review` model at `review_grade`** — read both from
-   `moai models --json` (defaults `opus` and `xhigh`).
-   **If any member touched the write path, concurrency, the storage format or hooks**, the grade is `max`.
-   **A worktree that carries members of two epics is measured as one epic and then raised one more step** — the review has to read both epics' contracts at once.
-   A step above the default `xhigh` is `max`, and `max` is the top of the ladder: a step above it is still `max`.
+   **The epic-end review runs on the `review` model at `review_grade`** — read both and `review_raise` from
+   `moai models --json` (defaults `opus`, `xhigh`, `never`).
+   With `review_raise = "write-path"`, raise one step if any member touched the write path, concurrency, the storage format or hooks, or if the worktree carries members of two epics. Raise at most once, capped at `max`; `never` leaves the configured grade unchanged.
+   A worktree that carries members of two epics is measured as one epic. If a worker's proposed grade differs, the supervisor corrects it from the settings and records why in the review issue angle.
    If the window is not on that model, ask the person watching it to change it before you
    call — `/model <that model>` (a review agent inherits the window's model).
    **In a subagent** the review is a subagent of your own — still this session, not another
@@ -398,7 +397,7 @@ root"), never in the root
    in 6, so the conflict resolution is inside it too. Read the epic body and put the contents
    of its `Review focus / 리뷰에서 볼 것` section (either heading) first in the review issue angle,
    followed by any focus discovered during development — a section of several lines or one
-   holding a single quote goes in through `-b -` from a scratch file, not inside `-b '…'`.
+   holding a single quote goes in through `-b -` from `<scratchpad>/<epic>/angle.md`, not inside `-b '…'`. Create the epic directory first; never share the angle file with another epic.
    If neither heading exists, write the angle as before. Create the review issue (rule 3)
 
        moai add 'review — <what you are looking at>' -t review --parent <epic> -b '<what you are looking for and why>'

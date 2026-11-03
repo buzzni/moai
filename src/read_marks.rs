@@ -425,7 +425,13 @@ impl Marks {
 /// 고른 것이고, 그 저울은 표가 안 자란다는 말에 매여 있다 — 이 바이너리가 그 표에 다시 적는 날
 /// 그 결정부터 다시 본다.
 pub fn read(config: &Path, root: &Path, legacy: &BTreeMap<String, String>) -> Marks {
-    let mut place = place_of(config, root);
+    read_in(place_of(config, root), legacy)
+}
+
+/// [`read`] at a place the caller already chose. A caller that also stamps or names the files it reads must read
+/// them from the same [`Place`]: a second [`place_of`] can settle differently (one `canonicalize` failing) and then
+/// the stamp, the read and the paths in [`SheetTrouble`] describe different files.
+pub fn read_in(mut place: Place, legacy: &BTreeMap<String, String>) -> Marks {
     let mut marks = read_one(&place.at, &place.root);
     // **자리를 고르다 만난 까닭은 뒤에 붙인다**(리뷰). 앞에 두던 판은 `problems.first()` 하나만 보는
     // 탐색기가 표를 못 든 진짜 까닭 대신 이것을 대고, 낱말까지 "이상한 줄" 로 어긋났다.

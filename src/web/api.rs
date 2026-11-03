@@ -191,23 +191,40 @@ pub fn split_project(query: &[(String, String)]) -> Result<(Option<String>, Vec<
     Ok((project, rest))
 }
 
-/// 쓰는 길 — **읽음 표시 넷과 계획 날 하나다**. 읽음은 사용자 설정 곁의 제 파일에만 적히고 트래커에는 안
+/// 쓰는 길 — **읽음 표시 여섯과 계획 날 하나다**. 읽음은 사용자 설정 곁의 제 파일에만 적히고 트래커에는 안
 /// 적힌다(`moai read --help`, 2026-10-22 사람 결정, moai-ly88). **계획 날(`/api/plan/<id>`)은 트래커에 쓰는 하나뿐인
 /// 길이다**(moai-d86e.3ud) — 간트의 막대 끌기가 `moai edit <id> --shift*=<N>`(하루 세우기는 `--start --due
 /// --if-unplanned`, moai-vj8w.02c)을 자식으로 부르니 `store::with_write` 를 지나고, 거절(시작이 기한 뒤·위 기한 넘김·그새
 /// 날이 선 줄)도 `edit` 의 말 그대로다. 끝점이 아니면 `None`.
 ///
 /// `/api/read-ids/<id>,<id>…` 는 ctl 의 `read <ids>` 다(moai-v5of.om1) — `read --atomic` 하나로 다 적거나 하나도 안
-/// 적는다. **개수는 따로 안 막는다** — 탐색기의 ctl read 와 CLI 도 안 막고, 요청 머리의 상한(`http::HEAD_MAX`)이 이미 선다.
+/// 적는다. ctl 전용 all/group 끝점도 같은 `--atomic` 을 쓴다. **개수는 따로 안 막는다** — 탐색기의 ctl read 와 CLI 도 안 막고, 요청 머리의 상한(`http::HEAD_MAX`)이 이미 선다.
 pub fn write_argv_of(path: &str, query: &[(String, String)]) -> Option<Result<Vec<String>, Bad>> {
     let strs = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
     if let Some(id) = path.strip_prefix("/api/plan/") {
         return Some(issue_id(id).and_then(|()| plan_argv(id, query)));
     }
-    let built = match (path, path.strip_prefix("/api/read/"), path.strip_prefix("/api/read-group/")) {
-        ("/api/read-all", _, _) => Ok(strs(&["read", "--all"])),
-        (_, Some(id), _) => issue_id(id).map(|()| strs(&["read", "--", id])),
-        (_, _, Some(id)) => issue_id(id).map(|()| vec!["read".to_string(), format!("--epic={id}")]),
+    let group = |id: &str, atomic: bool| {
+        issue_id(id).map(|()| {
+            let mut args = vec!["read".to_string()];
+            if atomic {
+                args.push("--atomic".into());
+            }
+            args.push(format!("--epic={id}"));
+            args
+        })
+    };
+    let built = match (
+        path,
+        path.strip_prefix("/api/read/"),
+        path.strip_prefix("/api/read-group/"),
+        path.strip_prefix("/api/ctl-read-group/"),
+    ) {
+        ("/api/read-all", ..) => Ok(strs(&["read", "--all"])),
+        ("/api/ctl-read-all", ..) => Ok(strs(&["read", "--atomic", "--all"])),
+        (_, Some(id), _, _) => issue_id(id).map(|()| strs(&["read", "--", id])),
+        (_, _, Some(id), _) => group(id, false),
+        (_, _, _, Some(id)) => group(id, true),
         _ => {
             let ids = path.strip_prefix("/api/read-ids/")?;
             ids.split(',').try_for_each(issue_id).map(|()| {
@@ -744,6 +761,8 @@ mod tests {
         let w = |path: &str| write_argv_of(path, &[]).map(|r| r.unwrap());
         assert_eq!(w("/api/read/moai-1abc"), Some(strs(&["read", "--", "moai-1abc"])));
         assert_eq!(w("/api/read-all"), Some(strs(&["read", "--all"])));
+        assert_eq!(w("/api/ctl-read-all"), Some(strs(&["read", "--atomic", "--all"])));
+        assert_eq!(w("/api/ctl-read-group/moai-1abc"), Some(strs(&["read", "--atomic", "--epic=moai-1abc"])));
         assert_eq!(
             w("/api/read-ids/moai-1abc,moai-2def"),
             Some(strs(&["read", "--atomic", "--", "moai-1abc", "moai-2def"]))

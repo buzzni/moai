@@ -28,11 +28,12 @@ const until = async (check) => {
   assert.fail('the page did not reach the expected state')
 }
 
-async function page(t, { holdFirst = false, initialTab, chartFailures = 0, fakeStream = false, proposalReply, ctlReply } = {}) {
+async function page(t, { holdFirst = false, initialTab, chartFailures = 0, fakeStream = false, proposalReply, ctlReply, indexedDB } = {}) {
   const dom = new JSDOM('<!doctype html><html><body><div id="moai-app"></div></body></html>', {
     url: 'http://localhost:6624/', runScripts: 'outside-only', pretendToBeVisual: true,
   })
   t.after(() => dom.window.close())
+  if (indexedDB) Object.defineProperty(dom.window, 'indexedDB', { configurable: true, value: indexedDB })
   if (initialTab) dom.window.localStorage.setItem('moai.web', JSON.stringify({ tab: initialTab }))
   const trees = []
   const requests = []
@@ -195,7 +196,22 @@ test('the page reads changed stamps from its event stream and ignores repeats', 
   p.streams[0].stamp('changed')
   await new Promise((resolve) => setTimeout(resolve, 20))
   assert.equal(p.trees.length, 2)
-  assert.equal(p.streams[0].url, '/api/events?worktree=1')
+  const eventUrl = new URL(p.streams[0].url, 'http://localhost')
+  assert.equal(eventUrl.searchParams.get('worktree'), '1')
+  // jsdom has no IndexedDB: the local-storage fallback still keeps the id.
+  assert.equal(eventUrl.searchParams.get('browser'), p.dom.window.localStorage.getItem('moai-browser-id'))
+  assert.match(eventUrl.searchParams.get('browser'), /^[0-9a-f]{32}$/)
+})
+
+test('the board is read while browser identity initialization waits', async (t) => {
+  let request
+  const p = await page(t, { fakeStream: true, indexedDB: { open: () => (request = {}) } })
+  assert.equal(p.streams.length, 0)
+  request.onerror()
+  await until(() => p.streams.length === 1)
+  const id = p.dom.window.localStorage.getItem('moai-browser-id')
+  assert.match(id, /^[0-9a-f]{32}$/)
+  assert.equal(new URL(p.streams[0].url, 'http://localhost').searchParams.get('browser'), id)
 })
 
 test('opening Gantt fetches values once and subsequent visits reuse them', async (t) => {

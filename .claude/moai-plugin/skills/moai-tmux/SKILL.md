@@ -337,7 +337,7 @@ tell the person; do not guess or change the value.
 Codex tests and commits its work, writes `Review-ready:` as an epic note, and stops.
 It waits for the supervisor's review and the second assignment; it does not review itself.
 
-When `Review-ready:` arrives, read its whole note. Pick the review issue up
+When `Review-ready:` arrives, read its whole note. Recompute the grade from `review_grade` and `review_raise` as the shared epic review rule says; if its proposed grade differs, use the configured result and record the correction and reason in the review issue angle. Pick the review issue up
 (`moai -C "<root>" mv <review id> in_progress`) and run a review subagent in the reported
 worktree with its configured `review` model and "The review brief" in
 `references/worker-branches.md`; refer to that brief, do not copy it here. Once the review has ended and its words are on the review issue, send
@@ -372,14 +372,10 @@ Codex can leave its last frame over a shell. Never use another server's pane ids
 
 ### Read the Codex input box
 
-    tmux display -p -t <pane> '#{pane_in_mode} #{pane_dead}'
-    tmux capture-pane -p -e -t <pane>
-
-If the first value is `1`, the person is in copy mode: the pane is theirs, so do not type.
-If the second is `1`, Codex has exited and the pane kept its last screen: no box, do not type.
-If it prints neither value, the pane is gone: do not type.
-
-The lowest current composer starts with `›` (U+203A) and an ordinary space (U+0020).
+Run `python3 "<moai-tmux skill dir>/scripts/codex-pane.py" ready <pane>` immediately
+before input, from `<root>`. It checks mode, liveness and the composer and refuses uncertainty,
+and it refuses a pane whose current path lies outside the checkouts `git worktree list` names
+there. Identify the pane as this repository's first all the same. The lowest current composer starts with `›` (U+203A) and an ordinary space (U+0020).
 Its empty placeholder is `Ask Codex to do anything`. A past user message also starts with
 `›`: read the bottom input area, not any matching line in the conversation.
 
@@ -428,111 +424,32 @@ no hook stands.
 
 ### Clear a reported Codex worker
 
-Clear only after its report passed the supervisor's checks and `Report-checked:` is
-written, its work has stopped, and its live Codex process and empty input box are confirmed.
-Use `/clear`, with text and Enter in separate calls:
-
-    tmux send-keys -t <pane> /clear
-    tmux capture-pane -p -e -t <pane>
-    tmux send-keys -t <pane> Enter
-    tmux capture-pane -p -e -t <pane>
-
-Each look is a separate call. Before the Enter, the composer holds `/clear` and nothing
-else — if it does not, stop and tell the person. Do not send a fixed number of Enters blindly.
-Confirm the old conversation is gone, the cwd is the same, and the fresh composer is empty
-before sending work.
-An unexpected menu, question or permission prompt belongs to the person: tell them which
-pane shows it, and read the pane again after they answer. If `/clear` remains typed or the
-result is unclear, stop and tell them — a later Enter could erase the next work.
+Only after `Report-checked:` and its work has stopped, run
+`python3 "<moai-tmux skill dir>/scripts/codex-pane.py" clear <pane>`. The helper checks
+before typing, verifies `/clear` before Enter and checks the fresh composer. If it refuses,
+stop and tell the person; a menu, question or permission prompt is theirs.
 
 ### Paste the assignment
 
-Codex has no `SendMessage` delivery: paste the assignment directly, only after rechecking
-the live process and empty input box. A message held for the person's approval is still
-held; pasting it would skip their gate. Use the supervisor's `message()` assignment fields,
-with `<codex>` as the model in `Model:` (not a Claude model), plus `Worker: codex`. Write
-the whole assignment in a scratchpad file, ending with `from: <your ListAgents name>`. Its first line names the absolute path of
-`references/worker-codex.md` beside `worker.md` in `moai-supervise` as the steps file.
-Use the same block transport as "When a message does not arrive":
-
-    tmux load-buffer -b moai-send <file>
-    tmux paste-buffer -p -d -b moai-send -t <pane>
-    tmux send-keys -t <pane> Enter
-
-Run each line separately: bracketed paste preserves the multiline assignment, and the
-separate Enter submits it once. It also appends to an existing draft, so the empty check
-is essential. Tell the person which pane received the assignment. "Label the pane" above
-applies unchanged: set `@moai` on this `%N`, and ask before showing labels on borders.
+The helper is `scripts/codex-pane.py` in the moai-tmux skill. Assemble the assignment with
+`moai -C "<root>" supervise message <id>`, giving `--model` (`<codex>` and the difficulty), `--effort`,
+`--base`, `--root-branch` and `--from` (your ListAgents name) plus the other slots its `--help` lists —
+an epic goes from step 2, a backlog item from step 1. Its first line names the absolute path to `references/worker-codex.md`
+beside `worker.md` in `moai-supervise`; pass `--steps <that path>` when the skill is not planted under `<root>`. Save it
+under the epic scratch directory. Confirm the fields and the person's approval, then run
+`python3 "<moai-tmux skill dir>/scripts/codex-pane.py" send <pane> <file>`; it rechecks
+before pasting and before submission. Tell the person which pane received it. "Label the
+pane" applies unchanged: set `@moai` on this pane and ask before showing labels.
 
 ### Watch the epic for the Codex report
 
-Use one `Monitor` per epic, on the supervisor's side only:
-`Monitor(description: "codex report on <epic>", timeout_ms: 1800000, command: <script below>)`.
-Save the script in the scratchpad; the command is `bash "<script>" "<root>" <epic> <last-seen-ts>`.
-Before pasting the assignment, read `moai -C "<root>" show <epic> --json` once and save the
-latest `journal[].ts` as `<last-seen-ts>` (an empty journal uses `1970-01-01T00:00:00Z`).
-Arm the monitor with that cursor so a quick report cannot arrive between send and baseline.
-A backlog sent `from step 1` has no epic yet: watch that backlog id in `<epic>`'s place.
-Codex writes `Unfolded: <epic>` on it right after unfolding, which ends that watch; arm the
-next one on the epic it names with `1970-01-01T00:00:00Z` — every note on a new epic is new.
-
-```sh
-python3 - "$1" "$2" "$3" <<'MOAI_CODEX_WATCH'
-import datetime, json, subprocess, sys, time
-root, epic, cursor = sys.argv[1:]
-def stamp(ts):
-    return datetime.datetime.fromisoformat(ts.replace("Z", "+00:00"))
-heads = ("report:", "Review-ready:", "Unfolded:", "Decision needed:")
-ends = ("report:", "Review-ready:", "Unfolded:")
-asks = "진행 중 결정이 필요합니다"
-try:
-    # Stamps are whole seconds: a line in the cursor's second is new only if not seen yet.
-    # Before any newer line, that second is the baseline the cursor was read from.
-    since, seen = stamp(cursor), None
-    while True:
-        result = subprocess.run(["moai", "-C", root, "show", epic, "--json"],
-                                capture_output=True, text=True)
-        if result.returncode:
-            print(f"{epic}\t{cursor}\tshow failed ({result.returncode}): "
-                  + (result.stderr or result.stdout).strip().replace("\n", " "), flush=True)
-            sys.exit(1)
-        row = json.loads(result.stdout)
-        if row.get("journal_error"):
-            raise ValueError("journal_error: " + json.dumps(row["journal_error"]))
-        finished = False
-        for note in row["journal"]:
-            at, key = stamp(note["ts"]), json.dumps(note, sort_keys=True)
-            if at < since or (at == since and (seen is None or key in seen)):
-                continue
-            if at > since:
-                since, cursor, seen = at, note["ts"], set()
-            seen.add(key)
-            if note["kind"] != "note":
-                continue
-            lines = (note.get("text") or "").splitlines()
-            head = lines[0] if lines else ""
-            if head.startswith(heads) or asks in head:
-                print(f"{epic}\t{note['ts']}\t{head}", flush=True)
-                finished = finished or head.startswith(ends)
-        if finished:
-            sys.exit(0)
-        time.sleep(30)
-except (OSError, ValueError, KeyError, TypeError) as error:
-    print(f"{epic}\t{cursor}\twatch failed: {error}", flush=True)
-    sys.exit(1)
-MOAI_CODEX_WATCH
-```
-
-This reads our own tracker every 30 seconds; session discovery can knock on other sessions.
-It watches `journal` entries with `kind=note`, `text` and `ts`, not history or notes keys.
-`Review-ready:` asks for the supervisor's review; decision heads ask for the person. Read the
-whole note with `moai show <epic>` and act on it. A failed read is an alert, never success.
-When the monitor says `expired` after 30 minutes, re-arm it from the last processed timestamp;
-keep that cursor, not a new baseline that could skip a report written at expiry. Duplicate
-alerts after re-arming are harmless: check the note and its timestamp before acting again.
-`Unfolded:`, `Review-ready:` and `report:` each end this watch. After the review, paste "merge
-and close — review <id> done" and re-arm for the final report from the `Review-ready:`
-timestamp. A decision head (`Decision needed:`, or `진행 중 결정이 필요합니다` anywhere in the
-first line) keeps it running. For the final report use the supervisor's
-5 and write `Report-checked:` only after its checks. This watch never runs on the Claude
-session path, which already has `notify_when_idle` and report messages.
+Before sending, record the latest `journal[].ts` of `moai -C "<root>" show <epic> --json`
+(an empty journal uses `1970-01-01T00:00:00Z`). Arm a `Monitor` with
+`moai -C "<root>" watch <epic> --since <timestamp>`; it prints one JSON event containing
+`head`, `ts`, and a resumable `cursor`. It returns immediately for a matching existing
+note — `--since` is inclusive, so an event at the recorded timestamp may be a note you
+already handled: check it, and if so re-arm with its `cursor`. To continue, start the next monitor with `--cursor <cursor>`. Keep the cursor on
+expiry; identical notes in the same second are one event. A failed read is an alert.
+Watch the backlog until `Unfolded:`, then watch its new epic from the beginning. On
+`Decision needed:` ask the person, on `Review-ready:` start review, and on `report:`
+check the final report and write `Report-checked:`. Never poll the worker screen.

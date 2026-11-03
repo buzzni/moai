@@ -1058,8 +1058,9 @@ Examples:
     #[command(after_help = "  moai due apply             raise what its deadline calls for, note each one
   moai due apply --dry-run   show what it would raise, write nothing
 
-  A row follows the earliest deadline among its own and those of the rows it
-  is drawn under - its milestone, its epic, its parents. Only open, not
+  The row's own deadline and the earliest deadline of its ancestors are
+  compared; the more urgent priority wins, and ties use the earlier date.
+  Its ancestors are its milestone, epic and parents. Only open, not
   deferred ancestors lend a priority deadline. A group's column is read from
   its members, including archived members; a closed group lends none, and an
   empty group stays in the first column. Deadline limits enforced on writes
@@ -1070,13 +1071,15 @@ Examples:
     due_p0_days  = 1      at most this many days left - p0
     due_p1_days  = 2      at most this many - p1
     due_p2_days  = 7      at most this many - p2; more days left, untouched
+  Only an own deadline raises to p0. An inherited deadline raises no further
+  than p1.
   Only issues and backlog items that are open and in the plan are raised -
   never a group row, never a deferred one, never a row the write would refuse
   (a hand-edited date: fix it with `moai edit <id> --due`). It only raises: a
   priority that is already that urgent stays, and nothing is ever lowered back.
 
   Each raise leaves a note in the same write, which keeps the old value:
-    Due-priority: p2 → p0 (1 days left, due 2026-10-17 from <epic>)
+    Due-priority: p2 → p1 (1 days left, due 2026-10-17 from <epic>)
   With nothing to raise it writes nothing and asks nobody who you are.
   `due_priority = \"off\"` in .moai/config.toml stops it from changing
   anything from then on; what it raised before stays. `moai status` says
@@ -1120,7 +1123,8 @@ Examples:
   config gives it.
 
   Model names are strings. review_grade, effort, effort_complex and
-  effort_plan accept low, medium, high, xhigh or max. Invalid values fall back
+  effort_plan accept low, medium, high, xhigh or max. review_raise accepts
+  never (default) or write-path. Invalid values fall back
   per key and warn; unknown keys warn. written lists the valid, known keys from
   your user config, repo the ones the repository table set that your config
   did not, and repo_path that file (null when it set none). The level lines
@@ -1137,6 +1141,34 @@ Examples:
   takes precedence. Invalid values warn and fall back. This command only reads;
   edit the files by hand.")]
     Writing,
+
+    /// Wait for a matching journal note; this command only reads
+    #[command(after_help = "  Outputs one JSON event with id, ts, head and resumable cursor. Existing
+  matching notes at or after --since return immediately. Reuse --cursor
+  with the same id and heads; identical notes in one second are one event.
+  Defaults: report:, Review-ready:, Unfolded:, Decision needed:, and
+  진행 중 결정이 필요합니다. The journal is checked every two seconds.")]
+    Watch {
+        id: String,
+        /// First second to report, …T…Z UTC (default: epoch)
+        #[arg(long, default_value = "1970-01-01T00:00:00Z", hide_default_value = true, conflicts_with = "cursor")]
+        since: String,
+        /// Resume from the cursor returned by an earlier watch
+        #[arg(long)]
+        cursor: Option<String>,
+        /// Note first-line heads to wait for, comma separated
+        #[arg(
+            long,
+            default_value = "report:,Review-ready:,Unfolded:,Decision needed:,진행 중 결정이 필요합니다",
+            value_delimiter = ',',
+            hide_default_value = true
+        )]
+        heads: Vec<String>,
+    },
+
+    /// Print a supervisor assignment
+    #[command(subcommand)]
+    Supervise(SuperviseCmd),
 
     /// Show the explorer's keys and what your keys.toml changed
     #[command(after_help = "  moai keys               every key the explorer runs on, changed ones marked
@@ -1329,6 +1361,47 @@ Examples:
         /// Write nothing; print that block (to paste it)
         #[arg(long, conflicts_with_all = ["prefix", "no_agents", "driver", "no_driver", "tracking", "guide", "skill", "no_skill", "with", "register", "no_register", "yes", "check"])]
         print: bool,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum SuperviseCmd {
+    /// Produce a Codex assignment from the issue and explicit session fields
+    #[command(override_usage = "moai supervise message [OPTIONS] <id>")]
+    Message {
+        /// An epic (sent from step 2) or a backlog item (sent from step 1)
+        id: String,
+        /// `Model:` — the worker's model and difficulty
+        #[arg(long)]
+        model: String,
+        /// `Effort:` — the reasoning effort
+        #[arg(long)]
+        effort: String,
+        /// The branch the worktree splits from and merges into
+        #[arg(long, value_name = "branch")]
+        base: String,
+        /// The branch the root checkout stands on
+        #[arg(long, value_name = "name")]
+        root_branch: String,
+        /// Your name, written as the last line `from: <name>`
+        #[arg(long, value_name = "name")]
+        from: String,
+        /// worker-codex.md (default: under the root)
+        #[arg(long, value_name = "path")]
+        steps: Option<std::path::PathBuf>,
+        #[arg(long, default_value = "none", value_name = "work")]
+        alongside: String,
+        #[arg(long, default_value = "none", value_name = "id")]
+        milestone: String,
+        /// detailed or brief (default: `moai writing`)
+        #[arg(long, value_name = "detail")]
+        writing: Option<String>,
+        /// here or away
+        #[arg(long, default_value = "here")]
+        person: String,
+        /// Only for a subdirectory project in a monorepo
+        #[arg(long, value_name = "dir")]
+        subdir: Option<String>,
     },
 }
 
@@ -1862,6 +1935,10 @@ pub struct PromoteArgs {
     /// Unfold as members of this standing epic
     #[arg(short, long, value_name = "epic")]
     pub epic: Option<String>,
+
+    /// Body for the new epic; `-` reads stdin
+    #[arg(short, long, value_name = "text", conflicts_with = "epic")]
+    pub body: Option<String>,
 
     /// Fill `{{name}}` in the template (repeatable)
     #[arg(long = "var", value_name = "name=value")]
@@ -2591,7 +2668,7 @@ pub struct ReadArgs {
     pub ids: Vec<String>,
 
     /// Write no mark if any ID is missing or held
-    #[arg(long, requires = "ids")]
+    #[arg(long)]
     pub atomic: bool,
 
     /// Everything unread that came to me

@@ -659,24 +659,4 @@ export function helpSections(
   return sections
 }
 
-const KEY_NAMES: Readonly<Record<string, string>> = {
-  Up: "↑",
-  Down: "↓",
-  Left: "←",
-  Right: "→",
-  Backspace: "Bksp",
-  PageUp: "PgUp",
-  PageDown: "PgDn",
-}
-
-/** A key or sequence for a <kbd>: 'C-d' → 'Ctrl-d', 'S-Tab' → 'Shift-Tab', 'g g' → 'gg', 'Up' → '↑', 'SPC w w' stays. */
-export function keyLabel(notation: string): string {
-  if (notation === "g g") return "gg"
-  return tokens(notation)
-    .map((token) => {
-      const m = /^((?:[CAS]-)*)(.+)$/.exec(token)!
-      const mods = m[1]!.replace(/C-/g, "Ctrl-").replace(/A-/g, "Alt-").replace(/S-/g, "Shift-")
-      return mods + (KEY_NAMES[m[2]!] ?? m[2]!)
-    })
-    .join(" ")
-}
+export { keyLabel } from "./names.ts"

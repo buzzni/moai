@@ -29,6 +29,7 @@ pub mod show;
 pub mod skill;
 pub mod stats;
 pub mod status;
+pub mod supervise;
 pub mod tui;
 pub mod update;
 pub mod web;
@@ -701,6 +702,37 @@ fn dispatch(ctx: &Ctx, cli: Cli) -> R<Vec<String>> {
         // `.moai` 밖에서도 선다.
         Cmd::Project(ProjectCmd::Add { path }) => project::add(ctx, &path),
         Cmd::Project(ProjectCmd::Ls) => project::ls(ctx),
+        Cmd::Watch { id, since, cursor, heads } => supervise::watch(ctx, &id, &since, cursor.as_deref(), &heads),
+        Cmd::Supervise(crate::cli::SuperviseCmd::Message {
+            id,
+            model,
+            effort,
+            base,
+            root_branch,
+            from,
+            steps,
+            alongside,
+            milestone,
+            writing,
+            person,
+            subdir,
+        }) => supervise::message(
+            ctx,
+            &id,
+            &supervise::Fields {
+                model: &model,
+                effort: &effort,
+                base: &base,
+                root_branch: &root_branch,
+                from: &from,
+                steps: steps.as_deref(),
+                alongside: &alongside,
+                milestone: &milestone,
+                writing: writing.as_deref(),
+                person: &person,
+                subdir: subdir.as_deref(),
+            },
+        ),
         Cmd::Models => models::run(ctx),
         Cmd::Writing => writing::run(ctx),
         // 사람의 키 파일을 읽기만 한다(moai-so7w) — 트래커를 안 찾는다.
@@ -1328,8 +1360,20 @@ pub fn archived_places(root: &std::path::Path, issues: &[crate::model::Issue], r
     archived_places_and(root, issues, rows, &[])
 }
 
-/// [`archived_places`] whose context also carries `riders` — ids that never open the archive on their
-/// own, but whose placement component must come along once it is open. `moai edit` passes the edited
+/// [`archived_places`] after an earlier probe already found that `rows` reach outside — `true` skips the second
+/// walk. `false` means not established, so the gate runs in full; unlike [`archived_places_and_if`] it never
+/// means "known to stay inside".
+pub fn archived_places_if(
+    root: &std::path::Path,
+    issues: &[crate::model::Issue],
+    rows: &[&str],
+    outside: bool,
+) -> R<crate::store::Load> {
+    if outside { crate::archive::groups(root, issues, rows) } else { archived_places(root, issues, rows) }
+}
+
+/// [`archived_places`] whose context also carries `riders` — ids whose live groups open the archive for member-derived closure, and whose placement
+/// component must come along once it is open. `moai edit` passes the edited
 /// row's blockers: a live group blocking it reads its column from members that may sit in the archive,
 /// and the full read this replaced always carried them.
 pub fn archived_places_and(
@@ -1338,12 +1382,36 @@ pub fn archived_places_and(
     rows: &[&str],
     riders: &[&str],
 ) -> R<crate::store::Load> {
-    if wants_group(issues, rows) || crate::archive::places_out(issues, rows) {
-        let wanted: Vec<&str> = rows.iter().chain(riders).copied().collect();
-        crate::archive::groups(root, issues, &wanted)
-    } else {
-        Ok(crate::store::Load::default())
+    let open = wants_group(issues, riders) || wants_group(issues, rows) || crate::archive::places_out(issues, rows);
+    places_read(root, issues, rows, riders, open)
+}
+
+/// Read the same selective context after a caller has already walked placement references — `outside` is that
+/// walk's answer, so `false` here means "stays inside" and nothing is walked again.
+pub fn archived_places_and_if(
+    root: &std::path::Path,
+    issues: &[crate::model::Issue],
+    rows: &[&str],
+    riders: &[&str],
+    outside: bool,
+) -> R<crate::store::Load> {
+    let open = outside || wants_group(issues, riders) || wants_group(issues, rows);
+    places_read(root, issues, rows, riders, open)
+}
+
+/// The placement component of `rows` and `riders` when the gate opened, else nothing.
+fn places_read(
+    root: &std::path::Path,
+    issues: &[crate::model::Issue],
+    rows: &[&str],
+    riders: &[&str],
+    open: bool,
+) -> R<crate::store::Load> {
+    if !open {
+        return Ok(crate::store::Load::default());
     }
+    let wanted: Vec<&str> = rows.iter().chain(riders).copied().collect();
+    crate::archive::groups(root, issues, &wanted)
 }
 
 /// 산 줄에 [`archived_for`] 의 줄을 겹친 문맥 — 보드와 같은 자([`crate::report::with_archive`])다. 산 줄이 이기고,
@@ -1596,10 +1664,10 @@ mod tests {
         assert_eq!(load.errors.len(), 1);
     }
 
-    /// Riders never open the archive, but once it is open their component comes along — `moai edit`
+    /// A live group rider opens the archive so its members can supply closure — `moai edit`
     /// judges its blockers from it, and a revived blocking epic reads its column from archived members.
     #[test]
-    fn place_context_carries_riders_only_once_the_archive_is_open() {
+    fn live_group_riders_open_and_join_placement_context() {
         let dir = crate::scratch::Scratch::new("place-riders");
         std::fs::create_dir_all(dir.join(".moai/archive")).unwrap();
         let at = "2026-10-01T00:00:00Z";
@@ -1611,10 +1679,10 @@ mod tests {
         let mut edited = Issue::new("argos-aaaa".into(), "edited".into(), Kind::Issue, Status::new("todo"), at);
         edited.blocked_by = vec!["argos-bbbb".into()];
         let live = [edited.clone(), blocker.clone()];
-        // Nothing among the rows opens the archive: the rider alone does not either.
+        // A live blocking group opens the archive even for an ordinary edited row.
         let load = archived_places_and(&dir, &live, &["argos-aaaa"], &["argos-bbbb"]).unwrap();
-        assert!(load.issues.is_empty());
-        // A row that does open it brings the rider's archived member along.
+        assert_eq!(load.issues.iter().map(|i| i.id.as_str()).collect::<Vec<_>>(), ["argos-bbbb.aaa"]);
+        // Another group also opens it and brings the rider's archived member along.
         let group = Issue::new("argos-gggg".into(), "group".into(), Kind::Epic, Status::new("todo"), at);
         let live = [edited, blocker, group];
         let load = archived_places_and(&dir, &live, &["argos-aaaa", "argos-gggg"], &["argos-bbbb"]).unwrap();

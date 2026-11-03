@@ -17,13 +17,17 @@ struct Registry {
     next_seq: u64,
     next_stream: u64,
     tabs: HashMap<String, Tab>,
-    anonymous_streams: usize,
+    anonymous_streams: HashMap<String, usize>,
 }
 
 const RESUME_GRACE: Duration = Duration::from_secs(30);
 
+/// Streams and reconnect reservations across every browser together; one browser's budget is the caller's `limit`.
+pub const STREAMS_TOTAL_MAX: usize = super::BUSY_MAX;
+
 struct Tab {
     token: String,
+    browser: String,
     root: String,
     here: String,
     overlay: bool,
@@ -56,6 +60,7 @@ pub struct Joined {
 pub struct Stream<'a> {
     tabs: &'a Tabs,
     pub joined: Option<Joined>,
+    browser: String,
 }
 
 impl Drop for Stream<'_> {
@@ -64,7 +69,12 @@ impl Drop for Stream<'_> {
             self.tabs.leave(&joined.id, joined.stream);
         } else {
             let mut registry = self.tabs.inner.lock().unwrap_or_else(|e| e.into_inner());
-            registry.anonymous_streams -= 1;
+            if let Some(count) = registry.anonymous_streams.get_mut(&self.browser) {
+                *count -= 1;
+                if *count == 0 {
+                    registry.anonymous_streams.remove(&self.browser);
+                }
+            }
         }
     }
 }
@@ -80,7 +90,8 @@ impl Tabs {
         Self { inner: Mutex::new(Registry::default()) }
     }
 
-    /// Admission and tab registration share the same lock: overflow tabs cannot take a reconnecting tab's slot.
+    /// [`Tabs::stream_for`] for the shared bucket a page without a browser id falls into.
+    #[cfg(test)]
     pub fn stream(
         &self,
         here: &Path,
@@ -89,23 +100,37 @@ impl Tabs {
         ctl: bool,
         limit: usize,
     ) -> std::io::Result<Option<Stream<'_>>> {
+        self.stream_for(here, overlay, resume, ctl, limit, "")
+    }
+
+    /// Admission and tab registration share the same lock: overflow tabs cannot take a reconnecting tab's slot.
+    /// `limit` is one browser's budget; [`STREAMS_TOTAL_MAX`] bounds every browser together.
+    pub fn stream_for(
+        &self,
+        here: &Path,
+        overlay: bool,
+        resume: Option<(&str, &str)>,
+        ctl: bool,
+        limit: usize,
+        browser: &str,
+    ) -> std::io::Result<Option<Stream<'_>>> {
         if ctl {
-            return self
-                .join_limited(here, overlay, resume, Some(limit))
-                .map(|joined| joined.map(|joined| Stream { tabs: self, joined: Some(joined) }));
+            return self.join_limited(here, overlay, resume, Some(limit), browser).map(|joined| {
+                joined.map(|joined| Stream { tabs: self, joined: Some(joined), browser: browser.into() })
+            });
         }
         let mut registry = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         registry.prune();
-        if registry.occupied() >= limit {
+        if !registry.admits(browser, limit) {
             return Ok(None);
         }
-        registry.anonymous_streams += 1;
-        Ok(Some(Stream { tabs: self, joined: None }))
+        *registry.anonymous_streams.entry(browser.into()).or_default() += 1;
+        Ok(Some(Stream { tabs: self, joined: None, browser: browser.into() }))
     }
 
     #[cfg(all(test, unix))]
     pub fn join(&self, here: &Path, overlay: bool, resume: Option<(&str, &str)>) -> std::io::Result<Joined> {
-        Ok(self.join_limited(here, overlay, resume, None)?.unwrap())
+        Ok(self.join_limited(here, overlay, resume, None, "")?.unwrap())
     }
 
     fn join_limited(
@@ -114,6 +139,7 @@ impl Tabs {
         overlay: bool,
         resume: Option<(&str, &str)>,
         limit: Option<usize>,
+        browser: &str,
     ) -> std::io::Result<Option<Joined>> {
         // The token is read before the registry lock, as every ctl request, `seen` and `ls` waits on that lock.
         let mut bytes = [0u8; 16];
@@ -126,6 +152,7 @@ impl Tabs {
         if let Some((id, token)) = resume
             && let Some(tab) = registry.tabs.get_mut(id)
             && tab.token == token
+            && tab.browser == browser
             && crate::user_config::same_dir(Path::new(&tab.here), here)
         {
             // **The overlay is the page's view, not its identity** — turning the worktree overlay on or off is the
@@ -140,7 +167,7 @@ impl Tabs {
             }
             return Ok(Some(Joined { id: id.into(), token: token.into(), incoming, stream }));
         }
-        if limit.is_some_and(|limit| registry.occupied() >= limit) {
+        if limit.is_some_and(|limit| !registry.admits(browser, limit)) {
             return Ok(None);
         }
         let token = bytes.iter().map(|b| format!("{b:02x}")).collect::<String>();
@@ -150,6 +177,7 @@ impl Tabs {
             id.clone(),
             Tab {
                 token: token.clone(),
+                browser: browser.into(),
                 root: crate::store::Repo::opened_root(here).display().to_string(),
                 here: here.display().to_string(),
                 overlay,
@@ -447,8 +475,17 @@ impl Tab {
 }
 
 impl Registry {
-    fn occupied(&self) -> usize {
-        self.tabs.len() + self.anonymous_streams
+    fn occupied(&self, browser: &str) -> usize {
+        self.tabs.values().filter(|tab| tab.browser == browser).count()
+            + self.anonymous_streams.get(browser).copied().unwrap_or(0)
+    }
+
+    /// A new stream fits under its browser's budget and under the ceiling for every browser together. An admitted
+    /// stream leaves the ordinary `BUSY_MAX` count and the browser id is the page's own claim, so without the
+    /// second check a client inventing ids would hold threads and sockets without bound.
+    fn admits(&self, browser: &str, limit: usize) -> bool {
+        let total = self.tabs.len() + self.anonymous_streams.values().sum::<usize>();
+        self.occupied(browser) < limit && total < STREAMS_TOTAL_MAX
     }
 
     fn prune(&mut self) {
@@ -508,6 +545,60 @@ mod tests {
         let fresh = tabs.stream(here, false, None, true, 3).unwrap().unwrap();
         assert_ne!(fresh.joined.as_ref().unwrap().id, id);
         assert!(!tabs.inner.lock().unwrap().tabs.contains_key(&id), "an expired reservation still consumed capacity");
+    }
+
+    #[test]
+    fn browser_budgets_and_resume_reservations_are_independent() {
+        let tabs = Tabs::new();
+        let here = Path::new(".");
+        let first = tabs.stream_for(here, false, None, true, 2, "a").unwrap().unwrap();
+        let joined = first.joined.as_ref().unwrap();
+        let (id, token) = (joined.id.clone(), joined.token.clone());
+        let _a = tabs.stream_for(here, false, None, false, 2, "a").unwrap().unwrap();
+        assert!(tabs.stream_for(here, false, None, true, 2, "a").unwrap().is_none());
+        let _remote = tabs.stream_for(here, false, None, false, 2, "remote").unwrap().unwrap();
+        let _b = tabs.stream_for(here, false, None, true, 2, "b").unwrap().unwrap();
+        drop(first);
+        assert!(tabs.stream_for(here, false, None, true, 2, "a").unwrap().is_none());
+        // Another browser holding the id and token does not take over "a"'s reservation: it gets a tab of its own.
+        let foreign = tabs.stream_for(here, false, Some((&id, &token)), true, 2, "b").unwrap().unwrap();
+        assert_ne!(foreign.joined.as_ref().unwrap().id, id, "a resume crossed browsers");
+        assert!(tabs.stream_for(here, false, Some((&id, &token)), true, 2, "a").unwrap().is_some());
+    }
+
+    /// The page's half (web/panel/data/browser-id.ts) gives simultaneous first tabs one id; this is the server's half,
+    /// at the budget the server ships rather than a number of its own.
+    #[test]
+    fn simultaneous_first_tabs_share_three_slots() {
+        use super::super::STREAMS_MAX;
+        let tabs = Tabs::new();
+        let here = Path::new("/tmp");
+        let gate = std::sync::Barrier::new(8);
+        let admitted = std::thread::scope(|scope| {
+            let workers: Vec<_> = (0..8)
+                .map(|_| {
+                    scope.spawn(|| {
+                        gate.wait();
+                        tabs.stream_for(here, false, None, true, STREAMS_MAX, "first-browser").unwrap().is_some()
+                    })
+                })
+                .collect();
+            workers.into_iter().map(|worker| worker.join().unwrap()).filter(|admitted| *admitted).count()
+        });
+        assert_eq!(admitted, 3, "one browser's budget is three streams");
+        assert!(tabs.stream_for(here, false, None, true, STREAMS_MAX, "first-browser").unwrap().is_none());
+        assert!(tabs.stream_for(here, false, None, true, STREAMS_MAX, "other-browser").unwrap().is_some());
+    }
+
+    #[test]
+    fn invented_browser_ids_cannot_grow_streams_past_the_server_ceiling() {
+        let tabs = Tabs::new();
+        let here = Path::new(".");
+        let _held: Vec<_> = (0..STREAMS_TOTAL_MAX)
+            .map(|n| tabs.stream_for(here, false, None, false, 3, &format!("{n:032x}")).unwrap().unwrap())
+            .collect();
+        assert!(tabs.stream_for(here, false, None, false, 3, "fresh").unwrap().is_none());
+        assert!(tabs.stream_for(here, false, None, true, 3, "fresh").unwrap().is_none());
     }
 
     #[test]

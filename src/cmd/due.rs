@@ -83,15 +83,19 @@ fn judged(
     if !crate::report::due_pending(issues, &cfg.due) {
         return Ok(Vec::new());
     }
-    if let Some(ids) = crate::report::due_undated_ids(issues)
-        && !crate::archive::places_out(issues, &ids)
-    {
-        return Ok(Vec::new());
-    }
+    let outside = match crate::report::due_probe(issues) {
+        crate::report::DueProbe::Undated(ids) => {
+            if !crate::archive::places_out(issues, &ids) {
+                return Ok(Vec::new());
+            }
+            true
+        }
+        crate::report::DueProbe::Dated => false,
+    };
     let soil = crate::report::Soil::of(issues);
     let judge = crate::report::DueJudge::over(issues, &soil);
     let ids = judge.context_ids(now, zone, &cfg.due);
-    let archived = super::archived_places(root, issues, &ids)?;
+    let archived = super::archived_places_if(root, issues, &ids, outside)?;
     if let Some(error) = archived.errors.first() {
         let source = error.source.clone().unwrap_or_else(|| crate::archive::dir(root));
         return Err(Fail::coded(
@@ -199,4 +203,27 @@ fn apply(ctx: &Ctx, dry_run: bool) -> R<Vec<String>> {
         out.push(paint(style::DIM, crate::i18n::say(lang, "due.dry_run")).to_string());
     }
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::{Issue, Kind, Status};
+
+    #[test]
+    fn undated_due_entry_walks_placement_once_even_with_archived_parent() {
+        let root = crate::scratch::Scratch::new("due-probe-walk");
+        std::fs::create_dir_all(root.join(".moai/archive")).unwrap();
+        let now = "2026-10-16T00:00:00Z";
+        let live = Issue::new("argos-aaaa.bbb".into(), "live".into(), Kind::Issue, Status::new("todo"), now);
+        let mut parent = Issue::new("argos-aaaa".into(), "parent".into(), Kind::Epic, Status::new("todo"), now);
+        parent.due_on = Some("2026-10-17".into());
+        std::fs::write(root.join(".moai/archive/2026.jsonl"), format!("{}\n", serde_json::to_string(&parent).unwrap()))
+            .unwrap();
+        let cfg = crate::config::Config::parse("prefix = \"argos\"\n").unwrap();
+        crate::archive::PLACE_WALKS.with(|n| n.set(0));
+        let raises = judged(&root, &[live], &[], &crate::tz::Zone::utc(), &cfg, now).unwrap();
+        assert_eq!(raises.len(), 1);
+        crate::archive::PLACE_WALKS.with(|n| assert_eq!(n.get(), 1));
+    }
 }

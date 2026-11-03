@@ -3,6 +3,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { createServer } from 'node:http'
+import { networkInterfaces } from 'node:os'
 import { readFile } from 'node:fs/promises'
 import { build } from 'esbuild'
 import { chromium, firefox } from 'playwright'
@@ -77,4 +78,69 @@ for (const engine of [chromium, firefox]) test(`${engine.name()}: overflow tabs 
   assert.equal(after.active, streamLimit)
   assert.ok(after.rejected >= 8 - streamLimit)
   assert.ok(after.polls.filter(count => count > 0).length >= 8 - streamLimit, 'overflow tabs did not poll')
+})
+
+const identityBundle = await build({ stdin: { contents: `
+  import { browserId } from './panel/data/browser-id.ts';
+  window.identify = browserId;
+`, resolveDir: new URL('..', import.meta.url).pathname, loader: 'ts' }, bundle: true, write: false, format: 'iife' })
+
+for (const engine of [chromium, firefox]) test(`${engine.name()}: transactional identity on plain remote HTTP`, async t => {
+  const server = createServer((req, res) => {
+    if (req.url === '/identity.js') { res.setHeader('Content-Type', 'text/javascript'); return res.end(identityBundle.outputFiles[0].text) }
+    res.end('<script src="/identity.js"></script>')
+  })
+  await new Promise(resolve => server.listen(0, '0.0.0.0', resolve))
+  t.after(() => { server.closeAllConnections(); server.close() })
+  const address = Object.values(networkInterfaces()).flat().find(i => i.family === 'IPv4' && !i.internal)?.address
+  assert.ok(address, 'a non-loopback address is required to test an insecure origin')
+  const browser = await engine.launch()
+  t.after(() => browser.close())
+  const url = `http://${address}:${server.address().port}`
+  const context = await browser.newContext()
+  const other = await browser.newContext()
+  t.after(() => Promise.all([context.close(), other.close()]))
+  const pages = await Promise.all(Array.from({ length: 8 }, () => context.newPage()))
+  const remote = await other.newPage()
+  await Promise.all([...pages, remote].map(page => page.goto(url)))
+  assert.equal(await pages[0].evaluate(() => isSecureContext), false)
+  // Simulate storage views that cannot communicate during the first load: localStorage-only coordination must fail.
+  await Promise.all(pages.map(page => page.evaluate(() => {
+    Storage.prototype.getItem = () => null
+    Storage.prototype.setItem = () => {}
+  })))
+  // Hold the first write transaction open until all tabs have queued theirs. This makes their first
+  // reads overlap deterministically, instead of depending on a narrow scheduling window.
+  await pages[0].evaluate(async () => {
+    const db = await new Promise((resolve, reject) => {
+      const request = indexedDB.open('moai-browser-id', 1)
+      request.onupgradeneeded = () => request.result.createObjectStore('identity')
+      request.onsuccess = () => resolve(request.result)
+      request.onerror = () => reject(request.error)
+    })
+    window.releaseIdentity = false
+    const tx = db.transaction('identity', 'readwrite')
+    const store = tx.objectStore('identity')
+    const spin = () => { if (!window.releaseIdentity) store.get('hold').onsuccess = spin }
+    spin()
+    tx.oncomplete = () => db.close()
+  })
+  const idsPending = pages.map(page => page.evaluate(() => window.identify()))
+  await new Promise(resolve => setTimeout(resolve, 300))
+  await pages[0].evaluate(() => { window.releaseIdentity = true })
+  const ids = await Promise.all(idsPending)
+  const otherId = await remote.evaluate(() => window.identify())
+  assert.match(ids[0], /^[0-9a-f]{32}$/)
+  assert.equal(new Set(ids).size, 1)
+  assert.notEqual(otherId, ids[0])
+  assert.equal(await pages[0].evaluate(() => window.identify()), ids[0])
+  const legacy = await browser.newContext()
+  t.after(() => legacy.close())
+  const migrated = await legacy.newPage()
+  await migrated.goto(url)
+  const old = 'a'.repeat(32)
+  await migrated.evaluate(id => localStorage.setItem('moai-browser-id', id), old)
+  assert.equal(await migrated.evaluate(() => window.identify()), old)
+  await migrated.evaluate(() => localStorage.removeItem('moai-browser-id'))
+  assert.equal(await migrated.evaluate(() => window.identify()), old)
 })
