@@ -179,16 +179,17 @@ Deferred ancestors, including those under a deferred group, set no ceiling until
 you restore them. Restoring a deferral keeps the plans you wrote; `moai status`
 names any that now exceed an ancestor (`due_beyond_parent`) — the undo itself does
 not. As deadlines near, `moai due apply`
-raises the priority of each open, not deferred issue and backlog item by the deadline
-it follows — the earliest of its own and those of its open, not deferred milestone,
-epic and parents. Closed groups lend no priority deadline, even when their finished
+raises the priority of each open, not deferred issue and backlog item by its own
+deadline and the earliest deadline of its open, not deferred milestone, epic and parents.
+It chooses the more urgent priority, breaking ties by the earlier date. Closed groups lend no priority deadline, even when their finished
 members have moved to archive storage; an empty group stays in the first column. The deadline
 ceilings enforced on writes still count closed ancestors. One day left or less —
-today and past included — is `p0`, two or less `p1`, seven or less `p2`. The command
+today and past included — is `p0` for an own deadline, two or less `p1`, seven or less `p2`.
+Inherited deadlines raise at most one step per application and no further than `p1`. The command
 notes why on the row and never lowers priority. So the day `--due` puts on an epic bounds
 the work and raises its members as it nears. Nothing runs it for you — run it when `moai status` says rows lag their
 deadline. Within the same priority and milestone position, `moai ready` orders by that
-same followed deadline, with no deadline last. The thresholds and `due_priority = "off"`
+earliest followed deadline, with no deadline last. The thresholds and `due_priority = "off"`
 live in `.moai/config.toml`. If the command needs archive context and cannot read it
 completely, it refuses without changing priorities or adding notes. Repair the source
 listed by `moai show --archived`, then run it again.
@@ -380,4 +381,4 @@ where its contributors read them rather than repeated here:
   broken data, the same as a broken line in `issues.jsonl` — see [An archive file
   cannot be read](recovery.md#an-archive-file-cannot-be-read)
 
-Decided in: moai-0zjo moai-40ht moai-bx6t moai-9793 moai-ug3j moai-gelm moai-tllo moai-snyk moai-zynt moai-j9nf moai-jtvp moai-fx9t moai-bth3 moai-r0x8 moai-9tqo moai-g8pt moai-lj8g moai-1m21 moai-uwi9 moai-ns7a moai-mkzo moai-w30o moai-4v3h moai-7eeq moai-ccuy moai-fcj3 moai-p9dh
+Decided in: moai-ifvh moai-0zjo moai-40ht moai-bx6t moai-9793 moai-ug3j moai-gelm moai-tllo moai-snyk moai-zynt moai-j9nf moai-jtvp moai-fx9t moai-bth3 moai-r0x8 moai-9tqo moai-g8pt moai-lj8g moai-1m21 moai-uwi9 moai-ns7a moai-mkzo moai-w30o moai-4v3h moai-7eeq moai-ccuy moai-fcj3 moai-p9dh
