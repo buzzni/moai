@@ -14,7 +14,7 @@
  * `updated_at` are not rewritten and so appear in none of `read`, `missing`, `held`. A missing id or group
  * (a row removed, or one only the archive holds) still writes the rest and prints that answer, but ends the run
  * non-zero; the answer is handed out all the same, with `missing` naming it. `read --atomic` (ctl's `read <ids>`)
- * is the exception: a missing id (`not_found`) or a held one (`refused`) writes nothing and prints no answer.
+ * is the exception: ctl IDs, all, and group use it; a missing id (`not_found`) or a held one (`refused`) writes nothing and prints no answer.
  *
  * The worktree overlay (moai-m4ez.gcp). With `SPC v w` on the writes carry `?worktree=1` (`read --worktree`): the ids are
  * looked up in the rows the overlay shows, so a row only another worktree holds is marked, and a row another worktree
@@ -39,8 +39,8 @@ const post = (path: string, worktree: boolean): Endpoint => ({ path, method: 'PO
 export const READ_ENDPOINT = {
   one: (id: string, worktree = false): Endpoint => post(`/api/read/${encodeURIComponent(id)}`, worktree),
   many: (ids: readonly string[], worktree = false): Endpoint => post(`/api/read-ids/${ids.map(encodeURIComponent).join(',')}`, worktree),
-  all: (worktree = false): Endpoint => post('/api/read-all', worktree),
-  group: (id: string, worktree = false): Endpoint => post(`/api/read-group/${encodeURIComponent(id)}`, worktree),
+  all: (worktree = false, atomic = false): Endpoint => post(atomic ? '/api/ctl-read-all' : '/api/read-all', worktree),
+  group: (id: string, worktree = false, atomic = false): Endpoint => post(`/api/${atomic ? 'ctl-read-group' : 'read-group'}/${encodeURIComponent(id)}`, worktree),
 } as const
 
 /** What `moai read --json` prints. */
@@ -106,10 +106,10 @@ export interface ReadMarks {
   one(id: string): Promise<Outcome | null>
   /** ctl's `read <ids>`: all of them or none (`read --atomic`). */
   ids(ids: readonly string[]): Promise<Outcome | null>
-  /** `SPC m a`: everything unread. */
-  all(): Promise<Outcome | null>
-  /** `SPC m g`: a milestone's or epic's members. */
-  group(id: string): Promise<Outcome | null>
+  /** Everything unread; ctl passes atomic, the keyboard uses the default. */
+  all(atomic?: boolean): Promise<Outcome | null>
+  /** A group and its members; ctl passes atomic, the keyboard uses the default. */
+  group(id: string, atomic?: boolean): Promise<Outcome | null>
 }
 
 export function readMarks(client: Client, after: (written: ReadonlySet<string>) => Promise<unknown>, overlay: () => boolean = () => false, identity: () => Readonly<Record<string, string>> | undefined = () => undefined): ReadMarks {
@@ -130,7 +130,7 @@ export function readMarks(client: Client, after: (written: ReadonlySet<string>) 
   return {
     one: (id) => marked(markRead(client, { id }, overlay(), identity())),
     ids: (ids) => marked(markManyRead(client, ids, overlay())),
-    all: () => marked(markAllRead(client, overlay(), identity())),
-    group: (id) => marked(markGroupRead(client, id, overlay(), identity())),
+    all: (atomic = false) => marked(write(client, READ_ENDPOINT.all(overlay(), atomic), identity())),
+    group: (id, atomic = false) => marked(write(client, READ_ENDPOINT.group(id, overlay(), atomic), identity())),
   }
 }

@@ -198,7 +198,7 @@ pub fn split_project(query: &[(String, String)]) -> Result<(Option<String>, Vec<
 /// 날이 선 줄)도 `edit` 의 말 그대로다. 끝점이 아니면 `None`.
 ///
 /// `/api/read-ids/<id>,<id>…` 는 ctl 의 `read <ids>` 다(moai-v5of.om1) — `read --atomic` 하나로 다 적거나 하나도 안
-/// 적는다. **개수는 따로 안 막는다** — 탐색기의 ctl read 와 CLI 도 안 막고, 요청 머리의 상한(`http::HEAD_MAX`)이 이미 선다.
+/// 적는다. ctl 전용 all/group 끝점도 같은 `--atomic` 을 쓴다. **개수는 따로 안 막는다** — 탐색기의 ctl read 와 CLI 도 안 막고, 요청 머리의 상한(`http::HEAD_MAX`)이 이미 선다.
 pub fn write_argv_of(path: &str, query: &[(String, String)]) -> Option<Result<Vec<String>, Bad>> {
     let strs = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
     if let Some(id) = path.strip_prefix("/api/plan/") {
@@ -206,6 +206,11 @@ pub fn write_argv_of(path: &str, query: &[(String, String)]) -> Option<Result<Ve
     }
     let built = match (path, path.strip_prefix("/api/read/"), path.strip_prefix("/api/read-group/")) {
         ("/api/read-all", _, _) => Ok(strs(&["read", "--all"])),
+        ("/api/ctl-read-all", _, _) => Ok(strs(&["read", "--atomic", "--all"])),
+        (_, _, _) if path.starts_with("/api/ctl-read-group/") => {
+            let id = path.strip_prefix("/api/ctl-read-group/").unwrap();
+            issue_id(id).map(|()| vec!["read".into(), "--atomic".into(), format!("--epic={id}")])
+        }
         (_, Some(id), _) => issue_id(id).map(|()| strs(&["read", "--", id])),
         (_, _, Some(id)) => issue_id(id).map(|()| vec!["read".to_string(), format!("--epic={id}")]),
         _ => {
@@ -744,6 +749,8 @@ mod tests {
         let w = |path: &str| write_argv_of(path, &[]).map(|r| r.unwrap());
         assert_eq!(w("/api/read/moai-1abc"), Some(strs(&["read", "--", "moai-1abc"])));
         assert_eq!(w("/api/read-all"), Some(strs(&["read", "--all"])));
+        assert_eq!(w("/api/ctl-read-all"), Some(strs(&["read", "--atomic", "--all"])));
+        assert_eq!(w("/api/ctl-read-group/moai-1abc"), Some(strs(&["read", "--atomic", "--epic=moai-1abc"])));
         assert_eq!(
             w("/api/read-ids/moai-1abc,moai-2def"),
             Some(strs(&["read", "--atomic", "--", "moai-1abc", "moai-2def"]))

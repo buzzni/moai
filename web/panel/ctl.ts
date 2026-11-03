@@ -152,8 +152,8 @@ export function createCtl(options: CtlOptions) {
   const mark = async (request: Request, seq: number, token: string): Promise<Reply> => {
     const ids = request.ids
     let result
-    if (request.all === true) result = await options.withIdentity(seq, token, () => read.all())
-    else if (typeof request.group === 'string') result = await options.withIdentity(seq, token, () => read.group(String(request.group)))
+    if (request.all === true) result = await options.withIdentity(seq, token, () => read.all(true))
+    else if (typeof request.group === 'string') result = await options.withIdentity(seq, token, () => read.group(String(request.group), true))
     else if (Array.isArray(ids) && ids.every((id) => typeof id === 'string')) {
       if (ids.length === 0) return no('bad_input', 'give ids, all or group')
       result = await options.withIdentity(seq, token, () => read.ids(ids as string[]))
