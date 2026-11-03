@@ -82,11 +82,46 @@ pub fn read_plan(from: &str, vars: &[String], shape: draft::Shape, lang: crate::
 
 /// 이 인자가 **stdin 을 읽는가.** `-` 가 그 뜻이지만, 같은 구멍을 가리키는 철자가 더 있다.
 ///
-/// 잰 뒤에 쓰는 자리는 [`run`] 의 다툼 검사 하나다 — [`read_body`] 와 [`read_source`] 는 여전히
+/// 잰 뒤에 쓰는 자리는 [`read_plan_body`] 의 다툼 검사 하나다 — [`read_body`] 와 [`read_source`] 는 여전히
 /// `-` 만 stdin 으로 연다. 그 둘을 넓히면 `/dev/stdin` 이 없는 기계에서 뜻이 갈리지만, **다툰다고
 /// 말하는 것**은 그 파일이 실제로 stdin 이든 아니든 맞다: 둘 다 열리면 먼저 읽는 쪽이 다 마신다.
 fn reads_stdin(arg: &str) -> bool {
     matches!(arg, "-" | "/dev/stdin" | "/dev/fd/0" | "/proc/self/fd/0")
+}
+
+/// 계획(`--from`)과 함께 오는 `--body` 를 읽는 동사 — 거절문과 알림이 **그 동사로** 고칠 길을 댄다.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PlanVerb {
+    /// `moai add --from`
+    Add,
+    /// `moai backlog promote`
+    Promote,
+}
+
+/// 계획과 함께 오는 `--body` 를 읽는다 — `add --from` 과 `backlog promote` 가 **한 자로** 잰다(리뷰 moai-ifvh.31s).
+/// stdin 을 정말 다투는 판(둘 다 stdin)만 거절하고, 거절문과 알림은 부른 동사의 명령을 댄다 — `promote` 에
+/// `moai add --from …` 을 권하면 따라 친 부름이 backlog 를 닫지 않은 채 같은 계획을 한 벌 더 세운다.
+/// **본문은 계획보다 먼저 읽는다.** 다툼을 걷어 냈으므로 여기서 stdin 을 읽는 쪽은 많아야 하나다.
+pub(crate) fn read_plan_body(from: &str, body: Option<String>, ctx: &Ctx, verb: PlanVerb) -> R<Option<String>> {
+    let plan_on_stdin = reads_stdin(from);
+    if plan_on_stdin && body.as_deref().is_some_and(reads_stdin) {
+        let lang = ctx.lang();
+        let how = match verb {
+            PlanVerb::Add => crate::i18n::say(lang, "refuse.plan_body_stdin_how"),
+            PlanVerb::Promote => crate::i18n::say(lang, "refuse.promote_body_stdin_how"),
+        };
+        return Err(Fail::coded(
+            format!("{}\n      {how}", crate::i18n::say(lang, "refuse.plan_body_stdin")),
+            super::code::BAD_INPUT,
+        ));
+    }
+    let given = match (verb, plan_on_stdin) {
+        (PlanVerb::Add, false) => Given::Body,
+        (PlanVerb::Add, true) => Given::BodyPlanOnStdin,
+        (PlanVerb::Promote, false) => Given::PromoteBody,
+        (PlanVerb::Promote, true) => Given::PromoteBodyPlanOnStdin,
+    };
+    read_body_told(body, ctx, given)
 }
 
 /// `-` 이면 stdin. `add` 와 `edit` 이 같은 규칙을 쓴다.
@@ -151,19 +186,27 @@ pub fn read_msg(arg: Option<String>, lang: crate::i18n::Lang) -> R<Option<String
 /// **반대쪽 판도 한 줄로 말한다** — argv 에 적힌 글이 파일 이름이면 "글로 받았다" 고 알린다. 그 말은
 /// [`say_if_text_names_a_file`] 한 자리가 한다.
 pub fn read_body_said(arg: Option<String>, ctx: &Ctx) -> R<Option<String>> {
-    read_body_told(arg, ctx, false)
+    read_body_told(arg, ctx, Given::Body)
 }
 
-/// [`read_body_said`] 의 몸 — `plan_on_stdin` 은 **계획이 이미 stdin 을 쥐었는가**다(리뷰). 그 판에
-/// `--body - < 파일` 을 권하면 따라 친 부름이 `refuse.plan_body_stdin` 으로 거절된다 — 이 알림을 낳은
-/// 바로 그 부름(`moai add --from - --body plan.md`)이 그 판이라, 그때는 계획을 파일로 옮기라고 댄다.
-fn read_body_told(arg: Option<String>, ctx: &Ctx, plan_on_stdin: bool) -> R<Option<String>> {
-    let given = if plan_on_stdin { Given::BodyPlanOnStdin } else { Given::Body };
+/// [`read_body_said`] 의 몸 — `given` 은 **누구의 `--body` 인가**와 **계획이 이미 stdin 을 쥐었는가**다(리뷰). 그
+/// 판에 `--body - < 파일` 을 권하면 따라 친 부름이 `refuse.plan_body_stdin` 으로 거절된다 — 이 알림을 낳은 바로 그
+/// 부름(`moai add --from - --body plan.md`)이 그 판이라, 그때는 계획을 파일로 옮기라고 댄다.
+///
+/// **빈 stdin 의 말도 동사를 따른다** — `promote` 는 `--body` 가 비면 backlog 의 본문을 새 에픽에 데려가므로
+/// "본문은 적지 않았다" 가 거짓이 된다.
+fn read_body_told(arg: Option<String>, ctx: &Ctx, given: Given) -> R<Option<String>> {
     say_if_text_names_a_file(arg.as_deref(), ctx, given);
     let from_stdin = arg.as_deref() == Some("-");
     let body = read_body(arg)?;
     if from_stdin && body.is_none() {
-        eprintln!("moai: {}", crate::i18n::say(ctx.lang(), "add.body_stdin_empty"));
+        let said = match given {
+            Given::PromoteBody | Given::PromoteBodyPlanOnStdin => {
+                crate::i18n::say(ctx.lang(), "backlog.body_stdin_empty")
+            }
+            _ => crate::i18n::say(ctx.lang(), "add.body_stdin_empty"),
+        };
+        eprintln!("moai: {said}");
     }
     Ok(body)
 }
@@ -176,6 +219,10 @@ pub enum Given {
     /// 계획이 stdin 을 이미 쥔 판의 `--body`(`add --from -`). `--body - < 파일` 을 권하면 따라 친 부름이
     /// `refuse.plan_body_stdin` 으로 거절되므로 계획을 파일로 옮기라고 댄다([`read_body_told`]).
     BodyPlanOnStdin,
+    /// `backlog promote` 의 `--body` — 새 에픽의 본문이다. 권하는 `--body - < 파일` 은 `add` 와 같다.
+    PromoteBody,
+    /// 계획이 stdin 을 이미 쥔 판의 `backlog promote --body`. 권하는 명령이 `add` 가 아니라 `promote` 다.
+    PromoteBodyPlanOnStdin,
     /// `note -b` — **노트에는 본문이 없다**(moai-yivo.8lh). 깃발은 같은 `--body` 라 권하는 명령은 같고, 글이
     /// 가는 자리만 노트라고 댄다.
     Note,
@@ -209,8 +256,9 @@ pub fn say_if_text_names_a_file(arg: Option<&str>, ctx: &Ctx, given: Given) {
     };
     let lang = ctx.lang();
     let how = match given {
-        Given::Body => crate::i18n::say(lang, "add.body_names_a_file"),
+        Given::Body | Given::PromoteBody => crate::i18n::say(lang, "add.body_names_a_file"),
         Given::BodyPlanOnStdin => crate::i18n::say(lang, "add.body_names_a_file_plan_on_stdin"),
+        Given::PromoteBodyPlanOnStdin => crate::i18n::say(lang, "backlog.body_names_a_file_plan_on_stdin"),
         Given::Note => crate::i18n::say(lang, "add.note_names_a_file"),
         Given::Msg => crate::i18n::say(lang, "add.msg_names_a_file"),
     };
@@ -405,21 +453,8 @@ pub fn run(ctx: &Ctx, args: AddArgs, kind_override: Option<Kind>) -> R<Vec<Strin
         // **`-` 라는 철자가 아니라 stdin 인가를 잰다**(리뷰). 글자만 견주던 판은
         // `moai add --from /dev/stdin --body -` 를 그대로 지나 보냈고, 그러면 `read_body` 가
         // stdin 을 다 마신 뒤 `read_source` 가 빈 것을 읽어 **계획이 비었다** 고 거절했다 —
-        // 받는 쪽은 제가 제대로 준 계획을 고치러 갔다.
-        if reads_stdin(from) && args.body.as_deref().is_some_and(reads_stdin) {
-            let lang = ctx.lang();
-            return Err(Fail::coded(
-                format!(
-                    "{}\n      {}",
-                    crate::i18n::say(lang, "refuse.plan_body_stdin"),
-                    crate::i18n::say(lang, "refuse.plan_body_stdin_how"),
-                ),
-                super::code::BAD_INPUT,
-            ));
-        }
-        // **본문은 계획보다 먼저 읽는다.** 바로 위가 둘 다 `-` 인 부름을 걷어 냈으므로 여기서
-        // stdin 을 읽는 쪽은 많아야 하나다.
-        let body = read_body_told(args.body.clone(), ctx, reads_stdin(from))?;
+        // 받는 쪽은 제가 제대로 준 계획을 고치러 갔다. 재는 자는 `backlog promote` 와 한 몸이다([`read_plan_body`]).
+        let body = read_plan_body(from, args.body.clone(), ctx, PlanVerb::Add)?;
         // `--due +N` 은 여기서 날짜로 바꾼다 — 연습과 진짜가 같은 날을 낸다(락 밖, [`super::due_arg`]). **빈 값은 없는
         // 것이다**(리뷰) — 쓰기는 빈 기한을 지우므로(`Issue::normalize`) 여기서 안 걸러 두면 연습만 `@ ` 를 그린다.
         // **오늘은 한 번만 읽는다**(리뷰) — `--start +0 --due +0` 을 두 번 읽은 시계로 풀면, 그 사이에 자정이 지나는
@@ -627,7 +662,7 @@ fn bulk(
     // 본문은 **첫 뿌리 하나**다(moai-kqid) — 물려받는 값이 아니라, 뿌리마다 적으면 같은 글이
     // 에픽 수만큼 베껴진다. 고르는 자는 `create_drafts` 하나고 `backlog promote` 가 데려가는
     // 본문도 그 자리를 지난다.
-    let rooted = Rooted { milestone, body, due, start };
+    let rooted = Rooted { milestone, body, due, start, member_body: None };
 
     if dry_run {
         check_plan(&drafts, rooted, ctx.lang())?;
@@ -720,7 +755,8 @@ pub fn is_root(i: &Issue) -> bool {
 }
 
 /// 계획의 **뿌리**(id 부모가 없는 줄)가 받아 갈 것. 멤버는 거기서 물려받으므로 여기서 안 적는다 —
-/// 멤버마다 적으면 그것이 파생값을 저장하는 것이고, 에픽을 옮기는 날 멤버가 안 따라온다.
+/// 멤버마다 적으면 그것이 파생값을 저장하는 것이고, 에픽을 옮기는 날 멤버가 안 따라온다. 물려받지 않는 멤버의
+/// 본문 하나만 예외다([`Rooted::member_body`]).
 ///
 /// `add --from --milestone` 이 마일스톤을 주고(moai-xoyg), `backlog promote` 가 담아 둔 생각의
 /// 마일스톤과 본문을 준다(moai-07v1). **`-e <에픽>` 으로 선 에픽에 펼칠 때는 뿌리가 없어**
@@ -747,6 +783,11 @@ pub struct Rooted<'a> {
     /// 뿌리마다 서는 계획 시작일(moai-xf0p.due) — `add --from --start` 와 `backlog promote` 가 데려가는 시작일이다.
     /// [`Rooted::due`] 와 같은 규칙이다: 멤버에는 안 내리고, 줄이 제 `@날짜` 를 들었으면 그것이 이긴다.
     pub start: Option<&'a str>,
+    /// **멤버마다** 서는 본문 — 이 묶음에서 뿌리가 아닌 줄이 받는 하나뿐인 값이다(moai-ifvh.y8m). `backlog promote` 만
+    /// 준다: 멤버가 하나면 backlog 의 본문, 여럿이면 `Unfolded-from: <backlog>` 한 줄이다. 본문은 물려받는 값이 아니라
+    /// 멤버에 적어도 파생값을 담는 것이 아니다. **빚는 자리에서 적는다** — 만든 뒤 `issues` 의 꼬리를 첨자로 짚어 고치던
+    /// 판은 정규화(`store::admit`)를 건너뛰었고, 연습([`check_plan_rows`])이 빚는 줄과 진짜가 쓰는 줄이 갈렸다.
+    pub member_body: Option<&'a str>,
 }
 
 impl<'a> Rooted<'a> {
@@ -873,6 +914,9 @@ pub fn create_drafts(
             if let Some(text) = body.take() {
                 issue.body = Some(text.to_string());
             }
+        } else if let Some(text) = rooted.member_body {
+            // 뿌리가 아닌 줄이 곧 멤버다 — `#` 줄은 늘 뿌리고(`Shape::Plan`), 선 에픽에 펼치는 꼴에는 `#` 줄이 없다.
+            issue.body = Some(text.to_string());
         }
         (issue.assignee, issue.assignee_email) = who.clone();
         let (entry, issue) = store::admit(issues, cfg, issue, by)?;

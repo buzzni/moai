@@ -2914,6 +2914,7 @@ Arguments:
 Options:
       --from <file|->        Epic and issues from markdown. `-` is stdin
   -e, --epic <epic>          Unfold as members of this standing epic
+  -b, --body <text>          Body for the new epic; `-` reads stdin
       --var <name=value>     Fill `{{name}}` in the template (repeatable)
       --dry-run              Create nothing; only say what would be created
       --json                 Machine-readable output. Every human line goes away
@@ -4182,8 +4183,9 @@ Options:
   moai due apply             raise what its deadline calls for, note each one
   moai due apply --dry-run   show what it would raise, write nothing
 
-  A row follows the earliest deadline among its own and those of the rows it
-  is drawn under - its milestone, its epic, its parents. Only open, not
+  The row's own deadline and the earliest deadline of its ancestors are
+  compared; the more urgent priority wins, and ties use the earlier date.
+  Its ancestors are its milestone, epic and parents. Only open, not
   deferred ancestors lend a priority deadline. A group's column is read from
   its members, including archived members; a closed group lends none, and an
   empty group stays in the first column. Deadline limits enforced on writes
@@ -4194,13 +4196,15 @@ Options:
     due_p0_days  = 1      at most this many days left - p0
     due_p1_days  = 2      at most this many - p1
     due_p2_days  = 7      at most this many - p2; more days left, untouched
+  Only an own deadline raises to p0. An inherited deadline raises no further
+  than p1.
   Only issues and backlog items that are open and in the plan are raised -
   never a group row, never a deferred one, never a row the write would refuse
   (a hand-edited date: fix it with `moai edit <id> --due`). It only raises: a
   priority that is already that urgent stays, and nothing is ever lowered back.
 
   Each raise leaves a note in the same write, which keeps the old value:
-    Due-priority: p2 → p0 (1 days left, due 2026-10-17 from <epic>)
+    Due-priority: p2 → p1 (1 days left, due 2026-10-17 from <epic>)
   With nothing to raise it writes nothing and asks nobody who you are.
   `due_priority = "off"` in .moai/config.toml stops it from changing
   anything from then on; what it raised before stays. `moai status` says
