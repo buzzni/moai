@@ -444,8 +444,19 @@ def order_for_learning(files: dict[str, bytes | None]) -> list[str]:
     return journals + rest
 
 
+# 입력 저장소에 줄로 선 id(스냅샷·아카이브). `known_ids` 가 채운다. 실행 뒤 스냅샷에 새로 선 줄의 id 는 저널·문서에
+# 이미 적힌 글과 우연히 같아도 새 id 다 — 지운 줄의 id 나 문서의 예시 id 가 다시 지어질 수 있다(36^4 칸). 안 그러면
+# 한쪽만 "아는 id" 라 가려지지 않고 차이로 나온다(퍼저 시드 101 사례 2972).
+ROWS: set[bytes] = set()
+ROW_ID = re.compile(rb'(?m)^\{"id":"(moai-[0-9a-z]{4}(?:\.[0-9a-z]{3})*)"')
+
+
 def masked(o: Outcome, known: set[bytes]) -> tuple[Masker, Outcome]:
-    mk = Masker(known)
+    rows: set[bytes] = set()
+    for k, v in o.files.items():
+        if v is not None and k.startswith("repo/.moai/") and k.endswith(".jsonl") and "journal" not in k:
+            rows.update(ROW_ID.findall(v))
+    mk = Masker(known - (rows - ROWS))
     mk.learn(o.stdout)
     mk.learn(o.stderr)
     for k in order_for_learning(o.files):
@@ -506,8 +517,20 @@ def settle(o: Outcome) -> Outcome:
     return Outcome(o.code, o.stdout, o.stderr, files)
 
 
+# `--color always` 의 글은 id 앞에 색 끝의 `m` 이 붙어(`ESC[2mmoai-abcd`) 가리개의 `\b` 가 id 를 못 본다. 가리개를
+# 넓히는 대신 색 끝 뒤에 단어 아닌 바이트 하나를 두 판에 똑같이 끼운다 — 다른 차이는 그대로 남는다.
+SGR = re.compile(rb"(\x1b\[[0-9;]*m)")
+
+
+def unglue(o: Outcome) -> Outcome:
+    def sep(m: re.Match[bytes]) -> bytes:
+        return m.group(1) + b"\x1f"
+
+    return Outcome(o.code, SGR.sub(sep, o.stdout), SGR.sub(sep, o.stderr), o.files)
+
+
 def compare(a: Outcome, b: Outcome, known: set[bytes]) -> list[str]:
-    a, b = settle(a), settle(b)
+    a, b = unglue(settle(a)), unglue(settle(b))
     ma, _ = masked(a, known)
     mb, _ = masked(b, known)
     out: list[str] = []
@@ -1047,6 +1070,10 @@ def known_ids(template: Template) -> set[bytes]:
             if f.is_file():
                 known.update(ID_RE.findall(f.read_bytes()))
     known.add(b"moai-zzzz")
+    ROWS.clear()
+    for f in [template.path / ".moai" / "issues.jsonl", *sorted((template.path / ".moai" / "archive").glob("*.jsonl"))]:
+        if f.is_file():
+            ROWS.update(ROW_ID.findall(f.read_bytes()))
     return known
 
 
