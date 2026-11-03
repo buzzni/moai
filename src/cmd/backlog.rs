@@ -176,18 +176,9 @@ pub fn promote(ctx: &Ctx, args: PromoteArgs) -> R<Vec<String>> {
     // `add --from` 과 **한 길**이다 — 읽기·템플릿 채우기·형식 읽기(moai-cypw).
     // `-e` 면 에픽은 이미 있다 — 계획은 그 에픽에 넣을 이슈만 적는다(moai-f3ml).
     let shape = if args.epic.is_some() { Shape::Members } else { Shape::Plan };
-    if crate::cmd::add::reads_stdin(&args.from) && args.body.as_deref().is_some_and(crate::cmd::add::reads_stdin) {
-        return Err(Fail::coded(
-            format!(
-                "{}\n      {}",
-                crate::i18n::say(ctx.lang(), "refuse.plan_body_stdin"),
-                crate::i18n::say(ctx.lang(), "refuse.plan_body_stdin_how")
-            ),
-            super::code::BAD_INPUT,
-        ));
-    }
+    // `--body` 는 새 에픽의 본문이다 — `add --from --body` 와 **한 자**로 읽고, 고칠 길은 이 동사로 댄다.
     let explicit_body =
-        crate::cmd::add::read_body_told(args.body.clone(), ctx, crate::cmd::add::reads_stdin(&args.from))?;
+        crate::cmd::add::read_plan_body(&args.from, args.body.clone(), ctx, crate::cmd::add::PlanVerb::Promote)?;
     let drafts = crate::cmd::add::read_plan(&args.from, &args.var, shape, ctx.lang())?;
     let into = args.epic.as_deref();
     let members = drafts.iter().filter(|d| d.kind == model::Kind::Issue).count();
@@ -336,15 +327,23 @@ pub fn promote(ctx: &Ctx, args: PromoteArgs) -> R<Vec<String>> {
             // 밖에 서고, 본문을 끊으면 `moai show <에픽>` 이 왜 이것들이 한 묶음인지를 못 낸다 —
             // 둘 다 AGENTS.md 가 "펼친 뒤 손으로" 라고 적어 메우던 자리다.
             //
-            // **`-e <에픽>` 이면 안 준다.** 그 에픽이 이미 임자고, 멤버는 거기서 마일스톤을
+            // **`-e <에픽>` 이면 에픽 쪽에는 안 준다.** 그 에픽이 이미 임자고, 멤버는 거기서 마일스톤을
             // 물려받는다 — 멤버마다 backlog 의 것을 적으면 에픽의 것을 덮어 `show --milestone` 이
             // 한 묶음을 두 곳에 세운다. 뿌리가 없어 [`create_drafts`] 가 어차피 안 적지만,
             // 안 준다고 여기 적어 두는 편이 그 규칙을 한 자리에서 읽게 한다.
             //
+            // **멤버의 본문은 따로 고른다**(moai-ifvh.y8m, Decided alone) — 계획의 멤버가 하나면 그 멤버가
+            // backlog 의 본문을 받고(`-e` 로 선 에픽에 펼칠 때도), 여럿이면 저마다 `Unfolded-from: <backlog>`
+            // 한 줄을 받는다. 일꾼이 집어 읽는 것은 멤버의 본문이라, 이력을 거슬러 올라가지 않게 한다.
+            // 빈 본문은 없는 본문이다 — 쓰기의 정규화(`Issue::normalize`)와 같은 자라 내는 줄과 파일이 안 갈린다.
+            //
             // **베껴 둔다** — `create_drafts` 가 `issues` 를 빌려 쓰므로 그 앞에서 `thought` 의
             // 빌림이 끝나야 한다. 위의 제목·담당과 같은 까닭이다.
-            let member_body =
-                if members == 1 { thought.body.clone() } else { Some(format!("Unfolded-from: {}", args.id)) };
+            let member_body = if members == 1 {
+                thought.body.clone().filter(|b| !b.is_empty())
+            } else {
+                Some(format!("Unfolded-from: {}", args.id))
+            };
             if members == 1 {
                 check_carried_body(&args.id, member_body.as_deref())?;
             }

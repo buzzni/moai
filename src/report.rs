@@ -5244,7 +5244,7 @@ pub struct Warning {
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     pub ages: BTreeMap<String, i64>,
     /// id → `ages` 의 남은 날수를 **잰 기한**(`YYYY-MM-DD`) — 그 날이 줄 제 `due_on` 이 아닐 때만 싣는다. 지금은
-    /// `due_priority_behind` 하나다: 그 줄은 제 기한과 조상의 기한 가운데 가장 이른 것을 따르므로(moai-dr8a.7rs),
+    /// `due_priority_behind` 하나다: 그 줄은 제 기한이나 조상의 기한을 따르므로(moai-dr8a.7rs, moai-ifvh.2ub),
     /// 보이는 쪽이 줄의 `due_on` 을 내면 빈 날짜나 남은 날과 어긋난 날이 선다(리뷰). 잰 자리가 싣고 보이는 쪽은 읽기만
     /// 한다 — `ages` 와 같은 자다.
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
@@ -5662,8 +5662,9 @@ pub struct Dues {
     /// `overdue` 경고가 된다 — 마일스톤의 `milestone_overdue` 와 짝이다. 물려받은 기한은 안 센다: 그것은 조상의
     /// 경고가 이미 말한다.
     late: Vec<(String, String)>,
-    /// (id, 따를 기한, 지금 우선순위) — 기한이 올릴 수 있는 줄([`due_eligible`]) 가운데 따를 기한이 있는 것. 뒤처진
-    /// 것이 `due_priority_behind` 알림이 된다. 판정은 `moai due apply` 와 같은 자([`raise_to`])다.
+    /// (id, 제 기한, 조상의 가장 이른 열린 기한, 지금 우선순위) — 기한이 올릴 수 있는 줄([`due_eligible`]) 가운데 둘 중
+    /// 하나라도 선 것. 뒤처진 것이 `due_priority_behind` 알림이 된다. 판정은 `moai due apply` 와 같은 자
+    /// ([`priority_choice`])다 — 물려받은 기한은 한 번에 한 칸, `p1` 까지만 올리므로 두 기한을 따로 든다.
     behind: Vec<(String, Option<String>, Option<String>, u8)>,
     /// 기한 규칙 — 문턱을 든다([`raise_to`]). 꺼졌으면 알림이 안 선다: 끈 사람에게 `moai due apply` 를 치라고 하면 그
     /// 동사는 아무것도 안 한다.
@@ -5755,13 +5756,14 @@ impl Dues {
             return Vec::new();
         }
         let today = zone.shift(now);
-        let mut rows: Vec<(&str, i64, &str)> = self.behind_on(&today).collect();
+        let mut rows: Vec<(&str, u8, i64, &str)> = self.behind_on(&today).collect();
         if rows.is_empty() {
             return Vec::new();
         }
-        rows.sort_by(|a, b| a.1.cmp(&b.1).then_with(|| a.0.cmp(b.0)));
+        // 급한 것이 앞이다 — **오를 우선순위, 남은 날, id** 차례로 `moai due apply` 와 같다([`due_in_plan`]).
+        rows.sort_by(|a, b| a.1.cmp(&b.1).then(a.2.cmp(&b.2)).then_with(|| a.0.cmp(b.0)));
         let mut w = Warning::new("due_priority_behind", rows.iter().map(|(id, ..)| (*id).to_string()).collect());
-        for (id, d, due) in &rows {
+        for (id, _, d, due) in &rows {
             w.ages.insert((*id).to_string(), *d);
             w.deadlines.insert((*id).to_string(), (*due).to_string());
         }
@@ -5776,12 +5778,12 @@ impl Dues {
             .filter(|(_, d)| *d < 0)
     }
 
-    /// 기한에 뒤처진 줄 — (id, 남은 날, 따를 기한). 판정은 `moai due apply` 와 같은 [`raise_to`] 다 — 꺼진 규칙은
-    /// 거기서 아무 줄도 안 부른다.
-    fn behind_on<'s>(&'s self, today: &'s str) -> impl Iterator<Item = (&'s str, i64, &'s str)> + 's {
+    /// 기한에 뒤처진 줄 — (id, 오를 우선순위, 남은 날, 따른 기한). 판정은 `moai due apply` 와 같은 [`priority_choice`]
+    /// 다 — 꺼진 규칙은 거기서 아무 줄도 안 부른다.
+    fn behind_on<'s>(&'s self, today: &'s str) -> impl Iterator<Item = (&'s str, u8, i64, &'s str)> + 's {
         self.behind.iter().filter_map(move |(id, own, above, p)| {
-            let (_, due, _) = priority_choice(own.as_deref(), above.as_deref(), today, *p, &self.rule)?;
-            Some((id.as_str(), crate::model::days_until(due, today)?, due))
+            let (to, due, _) = priority_choice(own.as_deref(), above.as_deref(), today, *p, &self.rule)?;
+            Some((id.as_str(), to, crate::model::days_until(due, today)?, due))
         })
     }
 
@@ -5811,7 +5813,7 @@ impl Dues {
 
 /// 남은 날수가 부르는 우선순위 — **올릴 것이 있을 때만** 그 값이다(moai-dr8a.7rs, 2026-10-16 사용자 결정).
 ///
-/// `due` 는 그 줄이 따를 기한이고([`due_raises`] 가 고른다 — 제 기한과 열린 조상의 기한 가운데 가장 이른 것), `today` 는
+/// `due` 는 그 줄이 따를 기한이고(제 기한으로 잰다 — 조상의 기한과 견주는 판정은 [`priority_choice`] 다), `today` 는
 /// **읽는 사람의 달로 옮긴 지금**이다(`zone.shift(now)`). 기한은 달력의 날이라, 날 경계는 [`Dues`] 와 같은 자
 /// ([`crate::model::days_until`])로 읽는 사람의 시간대에서 긋는다.
 ///
@@ -5850,8 +5852,9 @@ fn due_open(i: &Issue) -> bool {
     matches!(i.kind, Kind::Issue | Kind::Backlog) && !i.status.is_done() && !i.is_deferred()
 }
 
-/// 남은 날과 지금의 우선순위로 오를 값 — [`due_priority`] 의 판정 몸이다. `status` 는 줄을 놓고 이 둘만 들었다가
-/// 그릴 때 읽는 사람의 달로 재므로([`Dues`]) 줄 없이 이것을 부른다. 판정이 한 자리라 둘이 안 갈린다.
+/// 남은 날과 지금의 우선순위로 오를 값 — 기한 하나의 사다리다. 제 기한과 조상의 기한을 견주는 것은
+/// [`priority_choice`] 고, `status`([`Dues`])와 `moai due apply`([`due_candidates_over`])가 그것 하나를 부른다.
+/// 판정이 한 자리라 둘이 안 갈린다.
 fn raise_to(left: i64, priority: u8, rule: &crate::config::DueRule) -> Option<u8> {
     if !rule.auto {
         return None;
@@ -5865,7 +5868,10 @@ fn raise_to(left: i64, priority: u8, rule: &crate::config::DueRule) -> Option<u8
     (want < priority).then_some(want)
 }
 
-// Both deadlines matter: an earlier inherited date cannot hide an own p0 deadline.
+/// 제 기한과 조상의 기한(가장 이른 열린 것) 가운데 **더 급한 우선순위를 부르는 쪽** — (오를 값, 따른 기한, 물려받았나)
+/// (moai-ifvh.2ub, Decided alone). `p0` 은 제 기한만 부른다. 물려받은 기한은 한 번에 한 칸, `p1` 까지만 올린다 —
+/// 마일스톤 기한 하나가 멤버 전부를 `p0` 으로 올려 핫픽스 자리를 지우지 않게. 같은 칸이면 이른 날이, 같은 날이면 제
+/// 기한이 남는다. 이른 조상의 기한이 제 `p0` 기한을 가리지 못하게 둘을 따로 잰다.
 fn priority_choice<'a>(
     own: Option<&'a str>,
     above: Option<&'a str>,
@@ -5913,7 +5919,8 @@ pub struct Raise<'a> {
 
 /// `live` 가운데 **기한에 뒤처진 줄** 전부를, 급한 것부터(moai-dr8a) — `moai due apply` 가 적는 답이다.
 ///
-/// **따르는 기한은 제 것과 조상의 것 가운데 가장 이른 것이다**(Decided alone, moai-dr8a.7rs). 사람의 기한은 계획을
+/// **제 기한과 조상의 기한을 함께 잰다**(Decided alone, moai-dr8a.7rs — 판정은 moai-ifvh.2ub 의 [`priority_choice`]:
+/// 물려받은 기한은 한 번에 한 칸, `p1` 까지). 사람의 기한은 계획을
 /// 따라 에픽에 선다(AGENTS 의 갈래 3, 감독의 `Due:` 줄, 일꾼 걸음 1) — 제 기한만 보면 계획의 기한이 멤버를 하나도 안
 /// 올린다. 조상은 쓰기가 위계를 재는 자([`DueLadder`])가 고르는 그대로다 — 선 마일스톤, 든 에픽, 접어 그리는 부모 —
 /// 다만 **닫힌 부모도 닫힌 묶음도 안 센다**([`DueLadder::open_ceiling`]). **읽을 때 재고 담지 않는다** — 멤버에 기한을
@@ -5984,7 +5991,7 @@ impl<'m, 'a> DueJudge<'m, 'a> {
 }
 
 /// `moai due apply` 의 **탐침** — 아카이브를 펼지 정하려고 `live` 만으로 고른 후보다([`due_context_ids`]). 판정은 줄마다
-/// [`due_priority`] 다. 바이너리는 [`DueJudge::context_ids`] 로 같은 몸([`due_candidates_over`])을 부르고, 이 꼴은 시험의
+/// [`priority_choice`] 다. 바이너리는 [`DueJudge::context_ids`] 로 같은 몸([`due_candidates_over`])을 부르고, 이 꼴은 시험의
 /// 짧은 길이다 — 사다리는 [`DueLadder::over`] 로 따로 짓는다.
 ///
 /// **묶음이 닫혔는가는 모르는 것으로 친다** — 묶음을 다 열린 것으로 잰다. 아카이브로 간 멤버가 산 줄로는 빈 묶음을 닫고,
@@ -6020,7 +6027,7 @@ pub fn due_candidates<'a>(
 ///
 /// - 올릴 수 있는 열린 줄의 id — 탐침에 없어도 참조가 산 줄 밖으로 닿으면 새 조상·기한·미룸을 잴 문맥이 든다
 /// - 탐침이 **묶음의 기한을 따른 생각** 위의 묶음 가운데 닫힘이 그 답을 바꿀 수 있는 것 — 멤버가 아카이브에 있을 수
-///   있어서다. 제 기한이나 열린 부모가 이긴 줄은 닫힌 묶음을 빼도 답이 같다(`followed` 는 같은 날이면 제 기한을,
+///   있어서다. 제 기한이나 열린 부모가 이긴 줄은 닫힌 묶음을 빼도 답이 같다([`priority_choice`] 는 같은 날이면 제 기한을,
 ///   [`DueLadder::lowest`] 는 같은 날이면 앞선 조상 — 마일스톤, 에픽, 부모 — 을 남긴다). **이슈는 안 본다**: 열린 이슈는
 ///   제가 따르는 묶음에 멤버로 세어져 그 묶음이 어느 문맥에서든 열려 있다 — 참조가 산 줄 안에 머무는 한이고, 밖으로 닿으면
 ///   위의 첫째가 아카이브를 편다. 계획 밖이면 어차피 안 올린다. 멤버로 안 세는 생각만 남고, 산 줄의 미룸으로 계획 밖인
@@ -6074,7 +6081,7 @@ fn due_context_ids_over<'a>(
     ids.into_iter().collect()
 }
 
-/// 따르는 기한으로 올릴 후보 — 판정은 줄마다 [`due_priority`] 다. 사다리와 묶음의 닫힘은 부르는 쪽이 준다
+/// 따르는 기한으로 올릴 후보 — 판정은 줄마다 [`priority_choice`] 다. 사다리와 묶음의 닫힘은 부르는 쪽이 준다
 /// ([`due_raises`] 는 문맥의 지도와 칸, [`due_candidates`] 는 산 줄의 지도와 "모른다" 곧 다 열림). `live` 의 줄은 사다리의
 /// 지도에서 같은 줄로 다시 찾는다([`DueLadder::open_ceiling_row`]). 계획 밖(물려받은 미룸)과 가려진 줄은 아직 안 걸렀다 —
 /// [`due_in_plan`] 이 문맥으로 거른다.
@@ -6129,8 +6136,10 @@ fn due_in_plan<'a, 'c>(candidates: Vec<Raise<'a>>, context: &'c [Issue], soil: &
     let hidden = soil.eclipsed();
     let mut out: Vec<Raise<'a>> =
         candidates.into_iter().filter(|r| off.root(r.issue).is_none() && !hidden(r.issue)).collect();
-    // 급한 것이 앞이다 — 남은 날, 그다음 id. 보드는 앞의 셋만 그린다.
-    out.sort_by(|a, b| a.left.cmp(&b.left).then_with(|| a.issue.id.cmp(&b.issue.id)));
+    // 급한 것이 앞이다 — 오를 우선순위, 남은 날, 그다음 id. 보드는 앞의 셋만 그린다. **남은 날만으로 세우지
+    // 않는다**(리뷰 moai-ifvh.31s): 물려받은 기한은 `p1` 에서 멈추므로, 지난 마일스톤 기한을 따르는 `p1` 멤버 서른이
+    // 오늘이 기한인 제 `p0` 줄을 접힌 "N건 더" 뒤로 밀었다.
+    out.sort_by(|a, b| a.to.cmp(&b.to).then(a.left.cmp(&b.left)).then_with(|| a.issue.id.cmp(&b.issue.id)));
     out
 }
 
@@ -7169,6 +7178,11 @@ mod tests {
         let raises = due_raises(&rows, &rows, now, utc(), &cfg);
         let own = raises.iter().find(|r| r.issue.id == rows[1].id).unwrap();
         assert_eq!((own.to, own.from), (0, None));
+        // 제 기한의 `p0` 이 앞이다 — 물려받은 날(오늘)이 제 날(내일)보다 일러도 `p1` 열 줄 뒤로 밀리지 않는다(리뷰).
+        assert_eq!(raises[0].issue.id, rows[1].id, "제 p0 이 물려받은 p1 뒤에 섰다");
+        let st = status(&rows, &[], &cfg, now, utc());
+        let behind = st.notices.iter().find(|w| w.kind == "due_priority_behind").expect("알림이 없다");
+        assert_eq!(behind.ids.first(), Some(&rows[1].id), "보드가 제 p0 을 물려받은 p1 뒤에 세웠다");
         rows[2].priority = Some(1);
         assert!(!due_raises(&rows, &rows, now, utc(), &cfg).iter().any(|r| r.issue.id == rows[2].id));
     }
@@ -7403,7 +7417,13 @@ mod tests {
                 vec!["argos-aaaa", "argos-pppp.ccc"]
             };
             let board = status_with_archive(&live, &archive, &[], &cfg(), now, utc());
-            assert_eq!(board.notices.iter().find(|n| n.kind == "due_priority_behind").unwrap().ids, expected);
+            // The notice orders by the priority each row rises to: the own-date row reaches p0, while the
+            // inherited date stops at p1 however early it is (review moai-ifvh.31s). Ready still orders the
+            // equal current priorities by the earliest followed deadline.
+            assert_eq!(
+                board.notices.iter().find(|n| n.kind == "due_priority_behind").unwrap().ids,
+                ["argos-aaaa", "argos-pppp.ccc"]
+            );
             let picks = Picking::of(&all, &cfg()).picks(false).0;
             assert_eq!(picks.iter().map(|i| i.id.as_str()).collect::<Vec<_>>(), expected);
             // Write validation deliberately keeps the live placement and its ceiling.
@@ -8915,7 +8935,9 @@ mod tests {
         let ids: Vec<_> = ready_in(&context, &cfg()).0.iter().map(|i| i.id.as_str()).collect();
         assert_eq!(ids, ["argos-000a", "argos-000b"]);
         let raises = due_raises(&live, &context, "2026-10-29T00:00:00Z", utc(), &cfg());
-        assert_eq!(raises.iter().map(|r| r.issue.id.as_str()).collect::<Vec<_>>(), ["argos-000a", "argos-000b"]);
+        // Both rows rise; the own deadline reaches p0 and comes first, the revived epic's date stops at p1.
+        let got: Vec<_> = raises.iter().map(|r| (r.issue.id.as_str(), r.to, r.from.map(|f| f.id.as_str()))).collect();
+        assert_eq!(got, [("argos-000b", 0, None), ("argos-000a", 1, Some("argos-0001"))]);
     }
 
     #[test]

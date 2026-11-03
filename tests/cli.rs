@@ -7507,13 +7507,14 @@ fn due_apply_status_ready_and_prime_follow_archived_parent_placement() {
         let child = dry["raised"].as_array().unwrap().iter().find(|r| r["id"] == "moai-pppp.ccc").unwrap();
         assert_eq!(child["due_from"], "moai-m002", "{dry}");
         assert_eq!(child["due_on"], placed_due, "{dry}");
-        // The own-date row either wins by its own date or ties on the shared milestone.
+        // The own-date row raises to p0 by its own date; the child's inherited date stops at p1, so the notice
+        // puts the own-date row first even when the inherited date is earlier (review moai-ifvh.31s).
         let expected = vec![own.as_str(), "moai-pppp.ccc"];
         let board: serde_json::Value = serde_json::from_str(&ok_at(p, now, &["status", "--json"])).unwrap();
         let notice = board["notices"].as_array().unwrap().iter().find(|w| w["kind"] == "due_priority_behind").unwrap();
-        let expected_notice =
-            if placed_due < "2026-10-16" { vec!["moai-pppp.ccc", own.as_str()] } else { expected.clone() };
-        assert_eq!(notice["ids"], serde_json::json!(expected_notice), "{board}");
+        assert_eq!(notice["ids"], serde_json::json!(expected), "{board}");
+        let order: Vec<&str> = dry["raised"].as_array().unwrap().iter().map(|r| r["id"].as_str().unwrap()).collect();
+        assert_eq!(order, expected, "due apply orders its raises unlike the board: {dry}");
         // Ready breaks equal deadlines by creation time; status notices break them by ID.
         let expected_ready = if placed_due < "2026-10-16" { vec!["moai-pppp.ccc", own.as_str()] } else { expected };
         let ready: serde_json::Value = serde_json::from_str(&ok_at(p, now, &["ready", "--json"])).unwrap();
@@ -8888,7 +8889,8 @@ fn promote_carries_the_milestone_and_the_body() {
     let (epic, member) = (pick(r#""kind":"epic""#), pick(r#""title":"첫 이슈""#));
     assert!(epic.contains(r#""body":"왜 한 묶음인가""#), "에픽이 본문을 안 받았다\n{epic}");
     assert!(epic.contains(&format!(r#""milestone":"{stone}""#)), "에픽이 마일스톤을 안 받았다\n{epic}");
-    // 멤버는 에픽에서 물려받으므로 제 줄에는 둘 다 없다 — 적으면 그것이 파생값을 저장하는 것이다.
+    // 마일스톤은 에픽에서 물려받으므로 제 줄에 없다 — 적으면 그것이 파생값을 저장하는 것이다. 본문은 물려받는 값이
+    // 아니라서, 계획의 멤버가 하나면 그 멤버가 backlog 의 본문을 받는다(moai-ifvh.y8m).
     assert!(member.contains(r#""body":"왜 한 묶음인가""#), "멤버에 본문이 없다\n{member}");
     assert!(!member.contains(r#""milestone""#), "멤버에 마일스톤을 적었다\n{member}");
     let under = ok(s.path(), &["show", "--milestone", &stone]);
@@ -8917,6 +8919,30 @@ fn promote_propagates_context_and_explicit_epic_body() {
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
     let rows = issues(s.path());
     assert!(rows.lines().find(|l| l.contains("\"title\":\"sole\"")).unwrap().contains("original\\nbody"));
+
+    // 다툼을 거절하는 말과 빈 stdin 의 말은 이 동사의 것이다 — `moai add` 를 권하면 따라 친 부름이 backlog 를 닫지
+    // 않은 채 계획을 한 벌 더 세운다(리뷰 moai-ifvh.31s).
+    let third = ok(s.path(), &["backlog", "add", "third", "-b", "third body", "-q"]).trim().to_string();
+    let before = issues(s.path());
+    let out = from_stdin(s.path(), &["backlog", "promote", &third, "--from", "-", "--body", "-"], "# e\n- x\n");
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success() && err.contains("moai backlog promote"), "{err}");
+    assert!(!err.contains("moai add"), "promote 의 거절이 add 를 권한다\n{err}");
+    assert_eq!(issues(s.path()), before, "거절해 놓고 썼다");
+    let plan = s.path().join("third-plan.md");
+    std::fs::write(&plan, "# third epic\n- one\n- two\n").unwrap();
+    let out =
+        from_stdin(s.path(), &["backlog", "promote", &third, "--from", &plan.to_string_lossy(), "--body", "-"], "");
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(out.status.success(), "{err}");
+    assert!(
+        !err.contains("본문은 적지 않았다") && !err.contains("no body was written"),
+        "backlog 의 본문을 데려가면서 본문이 없다고 말한다\n{err}"
+    );
+    assert!(
+        issues(s.path()).lines().any(|l| l.contains("\"title\":\"third epic\"") && l.contains("third body")),
+        "빈 --body 뒤에 backlog 의 본문을 안 데려갔다"
+    );
 }
 
 /// **본문은 에픽이 여럿이어도 첫 뿌리 하나만 든다**(리뷰). 마일스톤은 멤버가 물려받는
@@ -8943,10 +8969,11 @@ fn a_multi_epic_unfold_copies_the_body_once() {
     assert!(front.contains(r#""body":"왜 한 묶음인가""#), "첫 뿌리가 본문을 안 받았다\n{front}");
 }
 
-/// **이미 선 에픽에 펼칠 때는 둘 다 안 데려간다**(moai-07v1). 그 에픽이 이미 임자라,
+/// **이미 선 에픽에 펼칠 때는 마일스톤을 안 데려간다**(moai-07v1). 그 에픽이 이미 임자라,
 /// 멤버마다 idea 의 마일스톤을 적으면 에픽의 것을 덮어 `show --milestone` 이 두 곳에 선다.
+/// 본문은 다르다 — 계획의 멤버가 하나면 그 멤버가 idea 의 본문을 받는다(moai-ifvh.y8m).
 #[test]
-fn promote_into_a_standing_epic_carries_nothing() {
+fn promote_into_a_standing_epic_carries_no_milestone_and_the_body_to_a_sole_member() {
     let s = init("promoteinto");
     let m1 = ok(s.path(), &["milestone", "add", "v1", "-q"]).trim().to_string();
     let m2 = ok(s.path(), &["milestone", "add", "v2", "-q"]).trim().to_string();

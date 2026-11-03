@@ -1,4 +1,4 @@
-<!-- moai:begin v:0.45.0 hash:55f95d5f -->
+<!-- moai:begin v:0.45.0 hash:305793b4 -->
 ## Issue tracker — moai
 
 This repository's work lives in `.moai/issues.jsonl`.
@@ -388,7 +388,7 @@ column, it is running. There is no command that opens it and no new field.
 - If two milestones are running, both are inside, and the ordering within them is the one below (`p` · deadline · age)
 - **Within one `p` the nearer deadline comes first**, whether a milestone runs or not, and a
   row with none comes last. It follows the earliest deadline of the row and its open,
-  not deferred milestone, epic and parents, as `due apply` does. Group closure includes
+  not deferred milestone, epic and parents — the ancestors `due apply` reads. Group closure includes
   archived members. Where a milestone runs, its work still comes before outside work of the same `p`
 - **A setup with only two columns has no running milestone** — there is no column
   that says "started but not finished", so the rule itself does not stand. In that
