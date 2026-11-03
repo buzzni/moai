@@ -469,6 +469,7 @@ The word is `plan`, not `subagent` — no worker holds this backlog, so it is no
     Writing: <writing>
 
     Read the request, its evidence and enough code and tracker context to ground the split. Write short titles and concrete, actionable bodies with file and function locations, constraints, acceptance tests and review focus. For detailed writing use, for the epic: why this bundle · the person's decisions · promises · order and the files it shares · review focus; for a development member: goal · context (files and lines, the precedent) · what is decided · steps · acceptance (which tests) · out of scope · order and the files it shares · role, adding where and how (files, functions, structures) · important contracts and pitfalls after `what is decided`. Name the epic review section `Review focus / 리뷰에서 볼 것` (choose the English or Korean heading). For brief writing give what, where and tests. Classify each member using the difficulty rubric and explain why. Do not ask the person questions.
+    Keep the person's decisions and exclusions, storage, concurrency, path security and output contracts, numbers and budgets, member order and review focus. Give entry-point files and functions as navigation hints; line numbers, proposed signatures and types are hints, not contracts. Describe acceptance tests by the failure conditions they must catch, not exhaustive test function names. Under `acceptance (which tests)`, write those failure conditions; test names are optional navigation hints. Make example commands executable with configured column names, the first column, spaces and shell quoting; when unknown use a placeholder such as `<first column>`. Put shared files and order in the epic once; a member's `order and the files it shares` names only its own place and files and points to the epic — do not repeat file lists or explanations in every member.
 
     1. Read it — moai -C "<root>" show <id> — and as much of the code as the split needs. If it
        already stands done, hand back `already unfolded: <id>` and stop: unfolding again puts up
@@ -482,7 +483,7 @@ The word is `plan`, not `subagent` — no worker holds this backlog, so it is no
        clears nothing `promote` carried, but for a dead release: when a line `promote` printed
        names the release it carried as already closed or deferred, clear it — left on, it
        re-opens a release that is out, or takes the whole plan out of the plan:
-       moai edit <epic> --milestone <milestone>
+       moai -C "<root>" edit <epic> --milestone <milestone>
        moai -C "<root>" edit <epic> --milestone none
        moai -C "<root>" edit <epic> --due <due>
        A refusal because the day is later than the milestone's leaves the epic as it stands.

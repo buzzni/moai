@@ -1463,6 +1463,51 @@ pub enum Edge {
     End,
 }
 
+/// Undo only the dates this write changed. Existing dates shifted relatively keep their
+/// relative inverse; created or explicitly chosen edges restore absolutely, guarded by
+/// the value this write stored. Both CLI and TUI call this with their locked snapshots.
+pub fn date_undo(before: &Issue, after: &Issue, shift: Option<(Edge, i64)>) -> Vec<String> {
+    let mut args = Vec::new();
+    let mut relative = Vec::new();
+    for (edge, flag, guard, old, new) in [
+        (Edge::Start, "--start", "--if-start", before.planned_start(), after.planned_start()),
+        (Edge::End, "--due", "--if-due", before.deadline(), after.deadline()),
+    ] {
+        if old == new {
+            continue;
+        }
+        if let Some((moved, days)) = shift
+            && old.is_some()
+            && (moved == Edge::Body || moved == edge)
+        {
+            relative.push((edge, days));
+        } else {
+            args.extend([
+                flag.to_string(),
+                old.unwrap_or("none").to_string(),
+                guard.to_string(),
+                new.unwrap_or("none").to_string(),
+            ]);
+        }
+    }
+    // A shift creates at most one edge and moves no other edge at the same time.
+    if let Some(&(edge, days)) = relative.first() {
+        let flag = if relative.len() == 2 { Edge::Body } else { edge }.shift_flag();
+        args.extend([flag.to_string(), (-days).to_string()]);
+    }
+    args
+}
+
+impl Edge {
+    pub fn shift_flag(self) -> &'static str {
+        match self {
+            Self::Start => "--shift-start",
+            Self::Body => "--shift",
+            Self::End => "--shift-due",
+        }
+    }
+}
+
 /// 날 고치기 — (시작, 기한). 바깥 `None` 은 그대로 두기, `Some(None)` 은 비우기다([`Issue::set_dates`]).
 pub type DateChange = (Option<Option<String>>, Option<Option<String>>);
 

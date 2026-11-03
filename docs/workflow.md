@@ -87,6 +87,19 @@ sections that hold those words, best first; several words are one query, and a
 section holding more of them comes first. Both read the wiki of the checkout you
 are in, so in a worktree they see that branch's pages.
 
+Use bare ids for this repository's issues. To preserve credit for an issue from
+another repository, make the id a source link titled `"external issue"`, for
+example:
+
+```markdown
+[moai-pxiy](https://github.com/buzzni/moai/pull/43 "external issue")
+```
+
+HTTP(S) scheme names are case insensitive. The wiki keeps the source URL and
+excludes that reference from missing-local-issue notices and local issue links.
+A bare mention of the same id elsewhere on the page still refers to this tracker.
+See [wiki reference JSON](json.md#read-wiki-issue-references) for the two forms.
+
 **Write down a mistake the next session would make too.** A lesson is one page under
 `lessons/` in the wiki, written by `moai wiki learn` — it makes the page and notes
 `Lesson: lessons/<slug>` on the row it came from:
@@ -154,6 +167,10 @@ read on a plan line only. A trailing `@` word beginning with an ASCII or fullwid
 digit is a date position: malformed dates are refused with a line number. The fullwidth
 `＠` is also a date marker; escape either marker, for example `\＠2026-10-30`, when
 it is meant as title text.
+The range separator can also be `～` (U+FF5E) or `〜` (U+301C):
+`@2026-10-25～2026-10-31` carries the same dates as the ASCII form. Exported
+plans use ASCII `~`. A range with no start, such as `@〜2026-10-31`, is refused;
+escape the marker (`\@〜2026-10-31`) to keep it as title text instead.
 
 A member's deadline cannot pass its epic's, nor an epic's its milestone's — the write
 is refused and names the day to give instead. A start is held to the same ceiling: it cannot
@@ -265,6 +282,12 @@ with a worktree, or pass `--as <path>`. If that path is gone, git falls
 back to its own merge and conflict markers come back; `moai status` says so. A
 clone without the driver merges exactly as plain git does.
 
+If a driver exits by signal, `init` leaves its existing setting in place. A shell
+wrapper can relay that as `128 + signal`; moai treats codes accepted as signals
+by the platform's libc as uncertain and preserves the setting too. An explicit
+exit with the same code is indistinguishable, so this also preserves such a
+setting. Libc-reserved signals, such as glibc's 32 and 33, do not qualify.
+
 ## Name the issue in the commit
 
 Put the id in the commit subject — `feat: draw the blocked line (<id>)`.
@@ -356,4 +379,4 @@ where its contributors read them rather than repeated here:
   broken data, the same as a broken line in `issues.jsonl` — see [An archive file
   cannot be read](recovery.md#an-archive-file-cannot-be-read)
 
-Decided in: moai-0zjo moai-40ht moai-bx6t moai-9793 moai-ug3j moai-gelm moai-tllo moai-snyk moai-zynt moai-j9nf moai-jtvp moai-fx9t moai-bth3 moai-r0x8 moai-9tqo moai-g8pt moai-lj8g moai-1m21 moai-uwi9 moai-ns7a moai-mkzo moai-w30o moai-4v3h moai-7eeq moai-ccuy
+Decided in: moai-0zjo moai-40ht moai-bx6t moai-9793 moai-ug3j moai-gelm moai-tllo moai-snyk moai-zynt moai-j9nf moai-jtvp moai-fx9t moai-bth3 moai-r0x8 moai-9tqo moai-g8pt moai-lj8g moai-1m21 moai-uwi9 moai-ns7a moai-mkzo moai-w30o moai-4v3h moai-7eeq moai-ccuy moai-fcj3

@@ -319,7 +319,8 @@ fn decide(
             };
             // **사람은 묻는 자리에서 푼다**(moai-0zjo 리뷰, [`crate::hook::Person`]) — 여기서는 푸는 길만 건넨다.
             let me = person_at(&repo, ctx);
-            let base = away_of(input, &repo, &load.issues, &me);
+            let mut base = away_of(input, &repo, &load.issues, &me);
+            base.opaque = load.errors.iter().filter_map(|e| e.id.clone()).collect();
             let settled = settle(input, &repo, &load.issues, base, &|issues, away| {
                 match call {
                     // 규칙의 차례는 `guard_shell_in` 이 정한다. 여기는 껍데기의 자리와 제 토막만 준다.
@@ -347,7 +348,8 @@ fn decide(
                         let Ok(load) = other.read() else { return Decision::Pass };
                         let only = |k: usize| routes.get(k) == Some(&Route::There(n));
                         // 사람은 **그 트래커의 뿌리에서** 푼다 — 남의 저장소의 git 설정이 그 저장소의 사람이다.
-                        let away = away_of(input, other, &load.issues, &person_at(other, ctx));
+                        let mut away = away_of(input, other, &load.issues, &person_at(other, ctx));
+                        away.opaque = load.errors.iter().filter_map(|e| e.id.clone()).collect();
                         settle(input, other, &load.issues, away, &|issues, away| {
                             crate::hook::guard_moai(issues, &other.config, away, line, &only, &|_| {
                                 Some(crate::hook::Aimed::stands(other.root.as_path()))
@@ -787,6 +789,7 @@ fn settle<'a>(
                 me: base.me.clone(),
                 recordable: Some(issues.iter().map(|i| i.id.clone()).collect()),
                 archive: base.archive.clone(),
+                opaque: base.opaque.clone(),
                 homes: base.homes.clone(),
                 marked: base.marked.clone(),
                 main: base.main.clone(),

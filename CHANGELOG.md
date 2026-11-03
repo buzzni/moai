@@ -12,6 +12,29 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+### Added
+
+- Plan date ranges accept `～` and `〜` alongside `~`; wiki issue links titled `"external issue"` preserve fork provenance through an optional `external` JSON URL without missing-local-issue notices. (moai-fcj3)
+- `moai edit --if-start/--if-due` supports atomic date preconditions; successful date edits return a copyable undo command in JSON. (moai-yigx)
+- Shell and explorer pictures draw through kitty or Ghostty inside tmux with `allow-passthrough all`; Ghostty over SSH can be recognized by its tmux client terminal type even with `TERM=xterm-256color`, once tmux gives that client the `RGB` feature (`set -as terminal-features ',xterm-256color:RGB'`). Auto detection also recognizes `TERM=xterm-ghostty` and `TERM=ghostty` outside tmux, and reattaching tmux uploads explorer previews to the new client. (moai-zidx)
+
+### Changed
+
+- `ctl state.menu` uses the same string/null key spelling on the explorer and web, and proposal refusals share translated words. (moai-4xmq)
+- Deadline-priority and overflow calculations retain the archive placement context they need; Gantt writes reuse diagnostics from the locked snapshot. (moai-4slm)
+- Supervisor backlog plans share the decision and contract guidance used by `moai-plan`; epic-end review prompts and results use separate directories per epic. (moai-i26i)
+- Gantt date reads skip hidden row calculations while preserving complete group rollups; web scrolling retains overlapping DOM nodes and releases replaced chart trees. (moai-yigx)
+- Explorer previews encode in a bounded background worker and appear as they finish; cached image files are checked at the follow cadence rather than on each frame. (moai-zidx)
+
+### Fixed
+
+- Explorer read-mark retries redraw only when unread markers or the displayed notice change, and terminal resizes wake the idle explorer promptly. If the optional resize notification pipe cannot be created, the explorer keeps running with its normal idle fallback. (moai-lunf)
+- Proposal acceptance reserves the suggestion before its follow-up runs, on the web server and in the explorer, so an expiry during the action no longer drops its result; waiting on an accepted web suggestion no longer spins a CPU core, and the page retries a failed result report. `ctl propose` refuses a malformed `--user` or `MOAI_ACTOR` instead of proposing unsigned. Explorer ctl read batches are atomic, and extra browser tabs fall back to polling beyond three live streams to keep reads responsive. Reconnecting tabs reserve their slot for the grace period; unreported action results are bounded and eventually expire with an explicit timeout. (moai-4xmq)
+- `init` preserves merge-driver settings when a shell wrapper may have relayed a signal exit. CLI tests use a separate HOME per test thread, cleaned up on success or panic; lint allowance comments reflect their current uses. (moai-fcj3)
+- Hook pickup suggestions ignore stale archived copies of unreadable live rows, matching `ready` and `prime`. (moai-4slm)
+- Gantt undo targets its original tracker and refuses stale absolute restores; web undo uses the locked write result. Widening the web Gantt preserves the left visible date without repeating full row placement. (moai-yigx)
+- Image placeholder paths remain clickable across wrapped lines and when their labels scroll offscreen. Resize bursts retry queued previews and skip stale encoding jobs. (moai-zidx)
+
 ## [0.44.0] - 2026-11-02
 
 ### Added

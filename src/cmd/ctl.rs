@@ -41,9 +41,12 @@ pub fn propose(
     let window = window_for(ctx, &windows, target)?;
     let mut request = wire::request(wire::Verb::Propose { text, then, ttl, wait }, Duration::from_secs(wait + 10));
     request.lang = format!("{:?}", ctx.lang()).to_lowercase();
-    request.actor = crate::model::actor(ctx.user.as_deref(), std::path::Path::new(&window.root))
-        .ok()
-        .map(|a| format!("{} ({})", a.name, a.email));
+    // A given `--user` is given (`model::actor`): a malformed one refuses here as in [`invoke`], not proposes unsigned.
+    request.actor = match crate::model::actor(ctx.user.as_deref(), std::path::Path::new(&window.root)) {
+        Ok(a) => Some(transport_actor(&a)),
+        Err(e @ crate::model::NoActor::Malformed { .. }) => return Err(Fail::no_actor(&e, ctx.lang())),
+        Err(_) => None,
+    };
     proposal_reply(ctx, call::send(window, &request)?)
 }
 
@@ -66,6 +69,12 @@ pub fn withdraw(ctx: &Ctx, target: Option<&str>, id: String) -> R<Vec<String>> {
     let window = window_for(ctx, &windows, target)?;
     let request = wire::request(wire::Verb::Withdraw { id }, Duration::from_secs(5));
     proposal_reply(ctx, call::send(window, &request)?)
+}
+
+/// This is wire identity, reparsed by the receiving TUI and web writes. Keep both fields even when the
+/// repository's display naming is Name or Email; a display label cannot be sent back as `--user`.
+fn transport_actor(actor: &crate::model::Actor) -> String {
+    crate::model::label(&actor.name, Some(&actor.email), crate::config::Naming::Full)
 }
 
 /// The window a request goes to: the one `-t` names, else the most recent of the caller's repository. The root is read
@@ -307,7 +316,7 @@ fn invoke(ctx: &Ctx, target: Option<&str>, verb: wire::Verb, needs_actor: bool) 
         request.lang = format!("{:?}", ctx.lang()).to_lowercase();
         if needs_actor {
             request.actor = match crate::model::actor(ctx.user.as_deref(), std::path::Path::new(&window.root)) {
-                Ok(a) => Some(format!("{} ({})", a.name, a.email)),
+                Ok(a) => Some(transport_actor(&a)),
                 Err(e @ crate::model::NoActor::Malformed { .. }) => return Err(Fail::no_actor(&e, ctx.lang())),
                 Err(_) => None,
             };
@@ -368,6 +377,15 @@ fn code_of(code_name: Option<&str>) -> &'static str {
 #[cfg(test)]
 mod proposal_tests {
     use super::*;
+
+    #[test]
+    fn wire_identity_roundtrips_name_and_email() {
+        let actor = crate::model::Actor::parse("Raven (raven@example.com)").unwrap();
+        assert_eq!(transport_actor(&actor), "Raven (raven@example.com)");
+        assert_eq!(crate::model::Actor::parse(&transport_actor(&actor)), Some(actor));
+        assert!(crate::model::Actor::parse("Raven").is_none());
+        assert!(crate::model::Actor::parse("raven@example.com").is_none());
+    }
 
     #[test]
     fn control_preserves_broken_and_error_codes() {

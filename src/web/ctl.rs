@@ -17,6 +17,7 @@ struct Registry {
     next_seq: u64,
     next_stream: u64,
     tabs: HashMap<String, Tab>,
+    anonymous_streams: usize,
 }
 
 const RESUME_GRACE: Duration = Duration::from_secs(30);
@@ -26,14 +27,17 @@ struct Tab {
     root: String,
     here: String,
     overlay: bool,
-    sender: Option<mpsc::Sender<Push>>,
-    stream: u64,
-    detached: Option<Instant>,
+    connection: Connection,
     opened: Instant,
     last_input: Instant,
     screen: String,
     pending: HashMap<u64, Pending>,
     proposals: std::sync::Arc<crate::ctl::proposal::Book>,
+}
+
+enum Connection {
+    Connected { sender: mpsc::Sender<Push>, stream: u64 },
+    Detached { at: Instant },
 }
 
 struct Pending {
@@ -48,9 +52,25 @@ pub struct Joined {
     pub stream: u64,
 }
 
+/// A stream owns either a tab (including its reconnect reservation) or one anonymous slot.
+pub struct Stream<'a> {
+    tabs: &'a Tabs,
+    pub joined: Option<Joined>,
+}
+
+impl Drop for Stream<'_> {
+    fn drop(&mut self) {
+        if let Some(joined) = &self.joined {
+            self.tabs.leave(&joined.id, joined.stream);
+        } else {
+            let mut registry = self.tabs.inner.lock().unwrap_or_else(|e| e.into_inner());
+            registry.anonymous_streams -= 1;
+        }
+    }
+}
+
 pub enum Push {
-    Ctl { seq: u64, request: Request },
-    ValidateZone { seq: u64, name: String },
+    Ctl { seq: u64, request: serde_json::Value },
     Proposal { entry: serde_json::Value },
     ProposalClosed { id: String },
 }
@@ -60,7 +80,41 @@ impl Tabs {
         Self { inner: Mutex::new(Registry::default()) }
     }
 
+    /// Admission and tab registration share the same lock: overflow tabs cannot take a reconnecting tab's slot.
+    pub fn stream(
+        &self,
+        here: &Path,
+        overlay: bool,
+        resume: Option<(&str, &str)>,
+        ctl: bool,
+        limit: usize,
+    ) -> std::io::Result<Option<Stream<'_>>> {
+        if ctl {
+            return self
+                .join_limited(here, overlay, resume, Some(limit))
+                .map(|joined| joined.map(|joined| Stream { tabs: self, joined: Some(joined) }));
+        }
+        let mut registry = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        registry.prune();
+        if registry.occupied() >= limit {
+            return Ok(None);
+        }
+        registry.anonymous_streams += 1;
+        Ok(Some(Stream { tabs: self, joined: None }))
+    }
+
+    #[cfg(all(test, unix))]
     pub fn join(&self, here: &Path, overlay: bool, resume: Option<(&str, &str)>) -> std::io::Result<Joined> {
+        Ok(self.join_limited(here, overlay, resume, None)?.unwrap())
+    }
+
+    fn join_limited(
+        &self,
+        here: &Path,
+        overlay: bool,
+        resume: Option<(&str, &str)>,
+        limit: Option<usize>,
+    ) -> std::io::Result<Option<Joined>> {
         // The token is read before the registry lock, as every ctl request, `seen` and `ls` waits on that lock.
         let mut bytes = [0u8; 16];
         std::fs::File::open("/dev/urandom")?.read_exact(&mut bytes)?;
@@ -77,17 +131,17 @@ impl Tabs {
             // **The overlay is the page's view, not its identity** — turning the worktree overlay on or off is the
             // page's own reconnect (main.ts `events.reconnect()`), so requiring the old value refused every one of them.
             tab.overlay = overlay;
-            tab.stream = stream;
-            tab.detached = None;
-            tab.proposals.close_at(None);
-            tab.sender = Some(sender.clone());
+            tab.connect(sender.clone(), stream);
             for (_, pending) in tab.pending.drain() {
                 let _ = pending.answer.send(Reply::error("gone", "tab stream replaced"));
             }
             for row in tab.proposals.rows() {
                 let _ = sender.send(Push::Proposal { entry: row.value() });
             }
-            return Ok(Joined { id: id.into(), token: token.into(), incoming, stream });
+            return Ok(Some(Joined { id: id.into(), token: token.into(), incoming, stream }));
+        }
+        if limit.is_some_and(|limit| registry.occupied() >= limit) {
+            return Ok(None);
         }
         let token = bytes.iter().map(|b| format!("{b:02x}")).collect::<String>();
         registry.next_tab += 1;
@@ -99,9 +153,7 @@ impl Tabs {
                 root: crate::store::Repo::opened_root(here).display().to_string(),
                 here: here.display().to_string(),
                 overlay,
-                sender: Some(sender),
-                stream,
-                detached: None,
+                connection: Connection::Connected { sender, stream },
                 opened: Instant::now(),
                 last_input: Instant::now(),
                 screen: "list".into(),
@@ -109,17 +161,16 @@ impl Tabs {
                 proposals: std::sync::Arc::new(crate::ctl::proposal::Book::new()),
             },
         );
-        Ok(Joined { id, token, incoming, stream })
+        Ok(Some(Joined { id, token, incoming, stream }))
     }
 
     pub fn leave(&self, id: &str, stream: u64) {
         let mut registry = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(tab) = registry.tabs.get_mut(id)
-            && tab.stream == stream
+            && matches!(tab.connection, Connection::Connected { stream: current, .. } if current == stream)
         {
             let now = Instant::now();
-            tab.sender = None;
-            tab.detached = Some(now);
+            tab.connection = Connection::Detached { at: now };
             // Proposal waiters ride out a reconnect, but a tab nobody reopens must still answer them `gone` — prune only
             // runs on a later join, which may never come.
             tab.proposals.close_at(Some(now + RESUME_GRACE));
@@ -175,7 +226,13 @@ impl Tabs {
                 if let Some(Verb::Zone { name }) = then.as_deref()
                     && name != "none"
                 {
-                    let checked = self.validate_zone(&target, name);
+                    let deadline_ms = request.deadline_ms.min(wire::now_ms().saturating_add(5_000));
+                    let checked = self.dispatch(
+                        &target,
+                        json!({"verb": "validate_zone", "name": name, "deadline_ms": deadline_ms}),
+                        None,
+                        deadline_ms,
+                    );
                     if !checked.ok {
                         return checked;
                     }
@@ -185,7 +242,7 @@ impl Tabs {
                 }
                 let book = {
                     let registry = self.inner.lock().unwrap_or_else(|e| e.into_inner());
-                    let Some(tab) = registry.tabs.get(&target).filter(|tab| tab.sender.is_some()) else {
+                    let Some(tab) = registry.tabs.get(&target).filter(|tab| tab.sender().is_some()) else {
                         return Reply::error("gone", "tab closed");
                     };
                     tab.proposals.clone()
@@ -196,11 +253,11 @@ impl Tabs {
                 }
                 let entry = reply.data.clone().unwrap_or_default();
                 let mut registry = self.inner.lock().unwrap_or_else(|e| e.into_inner());
-                let Some(tab) = registry.tabs.get_mut(&target).filter(|tab| tab.sender.is_some()) else {
+                let Some(tab) = registry.tabs.get_mut(&target).filter(|tab| tab.sender().is_some()) else {
                     let _ = book.finish(entry["id"].as_str().unwrap_or_default(), "withdrawn", None);
                     return Reply::error("gone", "tab closed");
                 };
-                if tab.sender.as_ref().unwrap().send(Push::Proposal { entry: entry.clone() }).is_err() {
+                if tab.sender().unwrap().send(Push::Proposal { entry: entry.clone() }).is_err() {
                     let _ = book.finish(entry["id"].as_str().unwrap_or_default(), "withdrawn", None);
                     return Reply::error("gone", "tab closed");
                 }
@@ -227,7 +284,7 @@ impl Tabs {
                 };
                 let reply = tab.proposals.finish(id, "withdrawn", None);
                 if reply.ok
-                    && let Some(sender) = &tab.sender
+                    && let Some(sender) = tab.sender()
                 {
                     let _ = sender.send(Push::ProposalClosed { id: id.clone() });
                 }
@@ -235,27 +292,33 @@ impl Tabs {
             }
             _ => {}
         }
+        self.dispatch(&target, serde_json::to_value(&request).unwrap(), request.actor.clone(), request.deadline_ms)
+    }
+
+    /// All browser requests use one envelope and one pending/reply lifecycle, including read-only validation.
+    fn dispatch(&self, target: &str, request: serde_json::Value, actor: Option<String>, deadline_ms: u64) -> Reply {
+        if deadline_ms <= wire::now_ms() {
+            return Reply::error("timeout", "control request expired");
+        }
         let (answer, receiver) = mpsc::channel();
         let seq = {
             let mut registry = self.inner.lock().unwrap_or_else(|e| e.into_inner());
             registry.next_seq += 1;
             let seq = registry.next_seq;
-            let Some(tab) = registry.tabs.get_mut(&target).filter(|tab| tab.sender.is_some()) else {
+            let Some(tab) = registry.tabs.get_mut(target).filter(|tab| tab.sender().is_some()) else {
                 return Reply::error("gone", "tab closed");
             };
-            tab.pending.insert(seq, Pending { answer, actor: request.actor.clone() });
-            if tab.sender.as_ref().unwrap().send(Push::Ctl { seq, request: request.clone() }).is_err() {
+            tab.pending.insert(seq, Pending { answer, actor });
+            if tab.sender().unwrap().send(Push::Ctl { seq, request }).is_err() {
                 tab.pending.remove(&seq);
                 return Reply::error("gone", "tab closed");
             }
             seq
         };
-        let wait = Duration::from_millis(request.deadline_ms.saturating_sub(wire::now_ms()).min(30_000));
+        let wait = Duration::from_millis(deadline_ms.saturating_sub(wire::now_ms()).min(30_000));
         let result =
             receiver.recv_timeout(wait).unwrap_or_else(|_| Reply::error("timeout", "tab did not answer in time"));
-        if result.code.as_deref() == Some("timeout")
-            && let Some(tab) = self.inner.lock().unwrap_or_else(|e| e.into_inner()).tabs.get_mut(&target)
-        {
+        if let Some(tab) = self.inner.lock().unwrap_or_else(|e| e.into_inner()).tabs.get_mut(target) {
             tab.pending.remove(&seq);
         }
         result
@@ -266,7 +329,7 @@ impl Tabs {
         registry
             .tabs
             .iter()
-            .filter(|(id, tab)| tab.sender.is_some() || (target == Some(id.as_str()) && tab.resumable()))
+            .filter(|(id, tab)| tab.sender().is_some() || (target == Some(id.as_str()) && tab.resumable()))
             .map(|(id, tab)| {
                 json!({
                     "id": id, "kind": "web", "pid": std::process::id(), "version": env!("CARGO_PKG_VERSION"),
@@ -318,6 +381,21 @@ impl Tabs {
         pending.actor.clone().ok_or("no_actor")
     }
 
+    pub fn proposal_claim(&self, id: &str, token: &str, proposal: &str) -> Result<Reply, &'static str> {
+        let registry = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let Some(tab) = registry.tabs.get(id).filter(|tab| tab.resumable()) else { return Err("gone") };
+        if tab.token != token {
+            return Err("forbidden");
+        }
+        let reply = tab.proposals.claim(proposal);
+        if reply.ok
+            && let Some(sender) = tab.sender()
+        {
+            let _ = sender.send(Push::ProposalClosed { id: proposal.into() });
+        }
+        Ok(reply)
+    }
+
     pub fn proposal_reply(
         &self,
         id: &str,
@@ -327,59 +405,55 @@ impl Tabs {
         ran: Option<Reply>,
     ) -> Result<Reply, &'static str> {
         let mut registry = self.inner.lock().unwrap_or_else(|e| e.into_inner());
-        // **An answer given while the stream reconnects is kept** — the page has already run the follow-up by then;
-        // refusing it left the card up, the proposal pending, and the resume showing it again to be accepted twice.
+        // Claims and their results remain valid during the reconnect grace. After it, no new action is authorized.
         let Some(tab) = registry.tabs.get_mut(id).filter(|tab| tab.resumable()) else { return Err("gone") };
         if tab.token != token {
             return Err("forbidden");
         }
-        let reply = tab.proposals.finish(proposal, if accepted { "accepted" } else { "declined" }, ran);
+        let reply = if accepted {
+            tab.proposals.complete(proposal, ran)
+        } else {
+            tab.proposals.finish(proposal, "declined", None)
+        };
         if reply.ok
-            && let Some(sender) = &tab.sender
+            && let Some(sender) = tab.sender()
         {
             let _ = sender.send(Push::ProposalClosed { id: proposal.into() });
         }
         Ok(reply)
     }
-
-    fn validate_zone(&self, id: &str, name: &str) -> Reply {
-        let (answer, receiver) = mpsc::channel();
-        let seq = {
-            let mut registry = self.inner.lock().unwrap_or_else(|e| e.into_inner());
-            registry.next_seq += 1;
-            let seq = registry.next_seq;
-            let Some(tab) = registry.tabs.get_mut(id).filter(|tab| tab.sender.is_some()) else {
-                return Reply::error("gone", "tab closed");
-            };
-            tab.pending.insert(seq, Pending { answer, actor: None });
-            if tab.sender.as_ref().unwrap().send(Push::ValidateZone { seq, name: name.into() }).is_err() {
-                tab.pending.remove(&seq);
-                return Reply::error("gone", "tab closed");
-            }
-            seq
-        };
-        let result = receiver
-            .recv_timeout(Duration::from_secs(5))
-            .unwrap_or_else(|_| Reply::error("timeout", "tab did not validate time zone"));
-        if let Some(tab) = self.inner.lock().unwrap_or_else(|e| e.into_inner()).tabs.get_mut(id) {
-            tab.pending.remove(&seq);
-        }
-        result
-    }
 }
 
 impl Tab {
-    /// Its stream is open, or it ended less than [`RESUME_GRACE`] ago and a resume will keep this tab. The page's own
-    /// token calls and agents' proposal answer/withdraw calls reach it; new actions need an open stream.
+    fn sender(&self) -> Option<&mpsc::Sender<Push>> {
+        match &self.connection {
+            Connection::Connected { sender, .. } => Some(sender),
+            Connection::Detached { .. } => None,
+        }
+    }
+
+    fn connect(&mut self, sender: mpsc::Sender<Push>, stream: u64) {
+        self.connection = Connection::Connected { sender, stream };
+        self.proposals.close_at(None);
+    }
+
+    /// Token calls and proposal wait/withdraw can reach a reconnecting tab; new actions need an open stream.
     fn resumable(&self) -> bool {
-        self.detached.is_none_or(|at| at.elapsed() < RESUME_GRACE)
+        match self.connection {
+            Connection::Connected { .. } => true,
+            Connection::Detached { at } => at.elapsed() < RESUME_GRACE,
+        }
     }
 }
 
 impl Registry {
+    fn occupied(&self) -> usize {
+        self.tabs.len() + self.anonymous_streams
+    }
+
     fn prune(&mut self) {
         self.tabs.retain(|_, tab| {
-            if tab.detached.is_some_and(|at| at.elapsed() >= RESUME_GRACE) {
+            if !tab.resumable() {
                 tab.proposals.close();
                 false
             } else {
@@ -401,6 +475,49 @@ mod tests {
         );
         request.target = Some(target.into());
         request
+    }
+
+    #[test]
+    fn reconnect_slots_are_reserved_and_only_valid_resumes_can_reuse_them() {
+        let tabs = Tabs::new();
+        let here = Path::new("/tmp");
+        let first = tabs.stream(here, false, None, true, 3).unwrap().unwrap();
+        let joined = first.joined.as_ref().unwrap();
+        let (id, token, old_stream) = (joined.id.clone(), joined.token.clone(), joined.stream);
+        let _others: Vec<_> = (0..2).map(|_| tabs.stream(here, false, None, true, 3).unwrap().unwrap()).collect();
+        let proposal_id = tabs.handle(proposal(&id, None)).data.unwrap()["id"].as_str().unwrap().to_string();
+        drop(first);
+        assert!(tabs.windows(None).iter().all(|row| row["id"] != id));
+        assert!(tabs.stream(here, false, None, true, 3).unwrap().is_none(), "an overflow tab stole the resume slot");
+        assert!(
+            tabs.stream(here, false, None, false, 3).unwrap().is_none(),
+            "an anonymous stream stole the resume slot"
+        );
+        assert!(tabs.stream(here, false, Some((&id, "wrong")), true, 3).unwrap().is_none());
+        let other = crate::scratch::Scratch::new("stream-resume-other-project");
+        assert!(tabs.stream(other.path(), false, Some((&id, &token)), true, 3).unwrap().is_none());
+        let resumed = tabs.stream(here, true, Some((&id, &token)), true, 3).unwrap().unwrap();
+        let joined = resumed.joined.as_ref().unwrap();
+        assert_eq!((&joined.id, &joined.token), (&id, &token));
+        assert!(matches!(joined.incoming.try_recv(), Ok(Push::Proposal { entry }) if entry["id"] == proposal_id));
+        tabs.leave(&id, old_stream);
+        assert!(tabs.windows(None).iter().any(|row| row["id"] == id), "a stale leave detached the resumed stream");
+        drop(resumed);
+        tabs.inner.lock().unwrap().tabs.get_mut(&id).unwrap().connection =
+            Connection::Detached { at: Instant::now() - RESUME_GRACE };
+        let fresh = tabs.stream(here, false, None, true, 3).unwrap().unwrap();
+        assert_ne!(fresh.joined.as_ref().unwrap().id, id);
+        assert!(!tabs.inner.lock().unwrap().tabs.contains_key(&id), "an expired reservation still consumed capacity");
+    }
+
+    #[test]
+    fn anonymous_streams_return_capacity_on_close_without_a_resume_grace() {
+        let tabs = Tabs::new();
+        let stream = tabs.stream(Path::new("/tmp"), false, None, false, 1).unwrap().unwrap();
+        assert!(stream.joined.is_none());
+        assert!(tabs.stream(Path::new("/tmp"), false, None, true, 1).unwrap().is_none());
+        drop(stream);
+        assert!(tabs.stream(Path::new("/tmp"), false, None, true, 1).unwrap().is_some());
     }
 
     #[test]
@@ -448,7 +565,8 @@ mod tests {
         let resumed = tabs.join(Path::new("/tmp"), false, Some((&first.id, &first.token))).unwrap();
         assert!(resumed.incoming.try_recv().is_err());
         tabs.leave(&resumed.id, resumed.stream);
-        tabs.inner.lock().unwrap().tabs.get_mut(&resumed.id).unwrap().detached = Some(Instant::now() - RESUME_GRACE);
+        tabs.inner.lock().unwrap().tabs.get_mut(&resumed.id).unwrap().connection =
+            Connection::Detached { at: Instant::now() - RESUME_GRACE };
         assert!(tabs.windows(Some(&resumed.id)).is_empty());
     }
 
@@ -498,6 +616,7 @@ mod tests {
         assert!(book.closes_at().is_some(), "leave scheduled no end for the tab's waiters");
         let resumed = tabs.join(Path::new("/tmp"), false, Some((&first.id, &first.token))).unwrap();
         assert_eq!(book.closes_at(), None, "the resume kept the scheduled end");
+        assert!(tabs.proposal_claim(&resumed.id, &resumed.token, &format!("{}/1", first.id)).unwrap().ok);
         tabs.proposal_reply(&resumed.id, &resumed.token, &format!("{}/1", first.id), true, None).unwrap();
         assert_eq!(answered.join().unwrap().data.unwrap()["state"], "accepted");
         // The stream ends for good: the waiter hears `gone` once the grace has run out, though no tab ever joins again.
@@ -521,6 +640,7 @@ mod tests {
         assert_eq!(tabs.handle(proposal(&first.id, None)).code.as_deref(), Some("gone"));
         // … but the page's own calls land: the person came back to the tab and answered its card.
         tabs.seen(&first.id, &first.token, "board", true).unwrap();
+        assert!(tabs.proposal_claim(&first.id, &first.token, &id).unwrap().ok);
         let answer = tabs.proposal_reply(&first.id, &first.token, &id, true, None).unwrap();
         assert_eq!(answer.data.unwrap()["state"], "accepted");
         let resumed = tabs.join(Path::new("/tmp"), false, Some((&first.id, &first.token))).unwrap();
@@ -529,7 +649,8 @@ mod tests {
         assert!(listed["windows"][0]["last_input_ago_ms"].as_u64().unwrap() < 10_000);
         // Past the grace the tab is gone for the page as well.
         tabs.leave(&resumed.id, resumed.stream);
-        tabs.inner.lock().unwrap().tabs.get_mut(&first.id).unwrap().detached = Some(Instant::now() - RESUME_GRACE);
+        tabs.inner.lock().unwrap().tabs.get_mut(&first.id).unwrap().connection =
+            Connection::Detached { at: Instant::now() - RESUME_GRACE };
         assert_eq!(tabs.seen(&first.id, &first.token, "list", true), Err("gone"));
     }
 
@@ -541,11 +662,12 @@ mod tests {
             let request = proposal(&joined.id, Some(Verb::Zone { name: name.into() }));
             let of = Arc::clone(&tabs);
             let running = std::thread::spawn(move || of.handle(request));
-            let Push::ValidateZone { seq, name: sent } = joined.incoming.recv_timeout(Duration::from_secs(2)).unwrap()
-            else {
+            let Push::Ctl { seq, request: sent } = joined.incoming.recv_timeout(Duration::from_secs(2)).unwrap() else {
                 panic!("zone validation was not sent to the tab");
             };
-            assert_eq!(sent, name);
+            assert_eq!(sent["verb"], "validate_zone");
+            assert_eq!(sent["name"], name);
+            assert!(sent["deadline_ms"].as_u64().unwrap() > wire::now_ms());
             let reply = if valid { Reply::success(json!({})) } else { Reply::error("bad_input", "unknown time zone") };
             tabs.reply(&joined.id, &joined.token, seq, reply).unwrap();
             let answer = running.join().unwrap();
@@ -559,14 +681,54 @@ mod tests {
     }
 
     #[test]
+    fn a_claim_needs_a_live_token_and_cannot_race_with_withdrawal() {
+        let tabs = Tabs::new();
+        let tab = tabs.join(Path::new("/tmp"), false, None).unwrap();
+        let id = tabs.handle(proposal(&tab.id, None)).data.unwrap()["id"].as_str().unwrap().to_string();
+        assert_eq!(tabs.proposal_claim(&tab.id, "wrong", &id).unwrap_err(), "forbidden");
+        assert!(!tabs.proposal_reply(&tab.id, &tab.token, &id, true, None).unwrap().ok);
+        assert!(tabs.proposal_claim(&tab.id, &tab.token, &id).unwrap().ok);
+        assert!(!tabs.proposal_claim(&tab.id, &tab.token, &id).unwrap().ok);
+        let mut withdraw = wire::request(Verb::Withdraw { id: id.clone() }, Duration::from_secs(1));
+        withdraw.target = Some(tab.id.clone());
+        assert!(!tabs.handle(withdraw).ok);
+        assert!(tabs.proposal_reply(&tab.id, &tab.token, &id, true, Some(Reply::success(json!({})))).unwrap().ok);
+        tabs.leave(&tab.id, tab.stream);
+        tabs.inner.lock().unwrap().tabs.get_mut(&tab.id).unwrap().connection =
+            Connection::Detached { at: Instant::now() - RESUME_GRACE };
+        assert_eq!(tabs.proposal_claim(&tab.id, &tab.token, &id).unwrap_err(), "gone");
+    }
+
+    #[test]
+    fn expired_validation_and_replaced_streams_clear_the_same_pending_queue() {
+        let tabs = Arc::new(Tabs::new());
+        let tab = tabs.join(Path::new("/tmp"), false, None).unwrap();
+        let request = json!({"verb": "validate_zone", "name": "UTC", "deadline_ms": wire::now_ms() - 1});
+        assert_eq!(tabs.dispatch(&tab.id, request, None, wire::now_ms() - 1).code.as_deref(), Some("timeout"));
+        assert!(tab.incoming.try_recv().is_err());
+        let of = tabs.clone();
+        let id = tab.id.clone();
+        let waiting = std::thread::spawn(move || {
+            of.dispatch(&id, json!({"verb": "validate_zone", "name": "UTC"}), None, wire::now_ms() + 5000)
+        });
+        let Push::Ctl { seq, .. } = tab.incoming.recv_timeout(Duration::from_secs(2)).unwrap() else {
+            panic!("missing envelope")
+        };
+        let _resumed = tabs.join(Path::new("/tmp"), false, Some((&tab.id, &tab.token))).unwrap();
+        assert_eq!(waiting.join().unwrap().code.as_deref(), Some("gone"));
+        assert_eq!(tabs.reply(&tab.id, &tab.token, seq, Reply::success(json!({}))), Err("gone"));
+        assert!(tabs.inner.lock().unwrap().tabs[&tab.id].pending.is_empty());
+    }
+
+    #[test]
     fn a_resume_token_expires_and_cannot_claim_a_different_tab() {
         let tabs = Tabs::new();
         let first = tabs.join(Path::new("/tmp"), false, None).unwrap();
         tabs.leave(&first.id, first.stream);
         let wrong = tabs.join(Path::new("/tmp"), false, Some((&first.id, "00000000000000000000000000000000"))).unwrap();
         assert_ne!(wrong.id, first.id);
-        tabs.inner.lock().unwrap().tabs.get_mut(&first.id).unwrap().detached =
-            Some(Instant::now() - RESUME_GRACE - Duration::from_secs(1));
+        tabs.inner.lock().unwrap().tabs.get_mut(&first.id).unwrap().connection =
+            Connection::Detached { at: Instant::now() - RESUME_GRACE - Duration::from_secs(1) };
         let expired = tabs.join(Path::new("/tmp"), false, Some((&first.id, &first.token))).unwrap();
         assert_ne!(expired.id, first.id);
         assert!(!tabs.inner.lock().unwrap().tabs.contains_key(&first.id));
