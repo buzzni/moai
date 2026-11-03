@@ -501,9 +501,12 @@ pub fn places_out(active: &[Issue], wanted: &[&str]) -> bool {
 /// overflow rows. Walk the shared ancestors once; full-reference traversal wins.
 /// Returns (full archive required, placement archive required).
 pub fn edit_out(active: &[Issue], edited: &str, placements: &[&str]) -> (bool, bool) {
-    let mut by_id: BTreeMap<&str, Vec<&Issue>> = BTreeMap::new();
+    let mut by_id = BTreeMap::new();
+    let mut shadowed: BTreeMap<&str, Vec<&Issue>> = BTreeMap::new();
     for row in active {
-        by_id.entry(&row.id).or_default().push(row);
+        if let Some(previous) = by_id.insert(row.id.as_str(), row) {
+            shadowed.entry(row.id.as_str()).or_default().push(previous);
+        }
     }
     let mut pending: Vec<(&str, bool)> = placements.iter().map(|id| (*id, false)).collect();
     pending.push((edited, true));
@@ -518,14 +521,14 @@ pub fn edit_out(active: &[Issue], edited: &str, placements: &[&str]) -> (bool, b
         } else if seen_full.contains(id) || !seen_place.insert(id) {
             continue;
         }
-        let Some(rows) = by_id.get(id) else {
+        let Some(&last) = by_id.get(id) else {
             if full {
                 return (true, true);
             }
             outside = true;
             continue;
         };
-        for row in rows {
+        for row in std::iter::once(last).chain(shadowed.get(id).into_iter().flatten().copied()) {
             pending.extend(
                 [crate::id::parent_of(&row.id), row.epic.as_deref(), row.milestone.as_deref()]
                     .into_iter()
