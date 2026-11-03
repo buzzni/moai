@@ -14,7 +14,9 @@
 직전에 푼다. 그래서 같은 시드·같은 번호는 늘 같은 사례다. 명령 나무가 같을 때(같은 `--old`)에 한해서.
 
 **안전.** 값 풀의 경로는 `{repo}`·`{home}`·`{tmp}` 아래이거나 없는 경로뿐이다 — 실제 경로는 하나도 없다.
-`..` 도 쓰지 않는다(자리의 바깥으로 나간다). 빼는 것: `update`(망), `web`(`--dry-run` 만), `tui`(`--json` 만).
+`..` 도 쓰지 않는다(자리의 바깥으로 나간다). 다만 `-C {home}` 처럼 `.moai` 가 없는 자리에서 친 moai 는 위로 올라가
+트래커를 잡으니, `--work` 위에 트래커가 서 있으면 시작하지 않는다(`bindiff.tracker_above`).
+빼는 것: `update`(망), `web`(`--dry-run` 만), `tui`(`--json` 만).
 
 종료 코드: 차이나 흔들림(다시 돌리니 사라진 차이)이 있으면 1, 없으면 0, 준비가 안 되면 2.
 """
@@ -28,6 +30,7 @@ import json
 import os
 import random
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -38,10 +41,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import bindiff  # noqa: E402
-from bindiff import Case, Sandbox, Template, compare, known_ids, reap  # noqa: E402
+from bindiff import Case, Sandbox, Template, compare, known_ids  # noqa: E402
 
 TIMEOUT = 10.0
-SKIP_CMDS = {"update", "help"}  # help 는 아래에서 따로 낸다
 
 
 def say(*parts: object) -> None:
@@ -82,7 +84,8 @@ class Node:
     text: str
 
 
-OPT_RE = re.compile(r"^ {2,6}(?:(-\w), )?(--[\w-]+)(?: <([^>]+)>)?(?: {2,}(.*))?$")
+# 값을 안 받아도 되는 플래그(`--wiki [<slug>]`)도 받는다 — `<…>` 만 받던 판은 그 플래그를 말없이 빼 한 번도 안 돌렸다.
+OPT_RE = re.compile(r"^ {2,6}(?:(-\w), )?(--[\w-]+)(?: \[?<([^>]+)>\]?)?(?: {2,}(.*))?$")
 REF_RE = re.compile(r"`(--[\w-]+)")
 
 
@@ -209,6 +212,10 @@ FILTERS = [
 ]
 FIELDS = ["id,title,status", "id", "", "nope", "id,id", "title,body,notes", "status,priority,updated"]
 WORDS = ["worktree", "칸", "status", "", "the", "moai show", "x" * 50, "--", "-v", "ready", "milestone", "'quote", "\"dq\"", "*", "a b c"]
+# 위키 쪽(`docs/` 의 페이지 이름)과 없는 것·틀린 것. `wiki show <slug>` 가 늘 "없는 쪽" 만 돌지 않게.
+SLUGS = ["cli", "workflow", "agents", "ctl", "explorer", "glossary", "json", "nope", "", "CLI", "../cli", "cli.md"]
+# `add --from … --var <name=value>`. 계획의 `{{v}}` 를 채우는 갈래.
+VARS = ["v=1.2", "version=2.0", "v=", "=x", "x", "", "v=1=2", "한=값"]
 PATHS_DIR = ["{repo}", "{repo}/src", "{repo}/docs", "{repo}/.moai", "{home}", "{tmp}", "{tmp}/nope", "/nonexistent-moai-fuzz/x", "", ".", "src", "docs", "{repo}/Cargo.toml"]
 PATHS_FILE = ["{tmp}/dot.png", "{tmp}/note.txt", "{tmp}/plan.md", "{tmp}/missing", "/nonexistent-moai-fuzz/f", "", "{repo}/Cargo.toml", "{repo}/.moai/issues.jsonl", "{tmp}", "{repo}/src"]
 CHOICES = {
@@ -227,6 +234,8 @@ CHOICES = {
 HOOK_EVENTS = ["session-start", "user-prompt-submit", "pre-tool-use", "stop", "pre-invocation", "nope", ""]
 CTL_WORDS = ["list", "board", "gantt", "stats", "wiki", "column:todo", "priority", "title", "UTC", "Asia/Seoul", "dark", "light", "x", "", "show", "hide", "left", "right", "bottom"]
 HASHES = ["abc123", "0" * 16, "", "x"]
+# `merge-driver` 의 자리 인자와 `merge_files` 가 까는 파일 이름(git 의 `%O %A %B`).
+MERGE_SLOTS = {"base": "O", "ours": "A", "theirs": "B"}
 GLOBAL_FLAGS = {"--json", "--no-color", "--color", "--dir", "--user", "--help", "--version"}
 
 
@@ -248,6 +257,17 @@ def kind_of(name: str, hint: str | None, desc: str) -> str:
         return "id+" if "none" in h or n in ("epic", "milestone", "parent") else "id"
     if n == "target":
         return "target"
+    if n == "path" and "id" in h:  # `tui --path <id|basket>`
+        return "id"
+    if n in ("grep", "words", "query"):
+        return "words"
+    if n == "var":
+        return "var"
+    # **칸보다 먼저 본다** — `add --from <file|->`·`backlog promote --from <file|->` 의 `--from` 은 계획이다. 칸 규칙 뒤에
+    # 두던 판은 그 둘에 칸 이름만 주어 계획 갈래(`{tmp}/plan.md`·stdin 의 계획)가 거의 안 돌았다. `mv`·`defer` 의
+    # `--from <column>` 은 그대로 칸이다.
+    if "from" in n and "file" in h:
+        return "plan"
     if n in ("status", "from", "column"):
         return "column"
     if n == "priority":
@@ -284,10 +304,10 @@ def kind_of(name: str, hint: str | None, desc: str) -> str:
         return "text"
     if n in CHOICES:
         return "choice:" + n
+    if h in CHOICES:  # `--with <skill>`·`--without <skill>` 처럼 이름 대신 값 꼴이 고르는 것
+        return "choice:" + h
     if "|" in h and "id" not in h and "date" not in h and "who" not in h:
         return "pipe"
-    if "from" in n and "file" in h:
-        return "plan"
     return "text"
 
 
@@ -325,6 +345,12 @@ def pick_value(r: random.Random, kind: str, hint: str | None, hist: list[str]) -
         return r.choice(HOOK_EVENTS)
     if kind == "hash":
         return r.choice(HASHES)
+    if kind == "words":
+        return r.choice(WORDS) if x < 0.85 else r.choice(TEXTS)
+    if kind == "var":
+        return r.choice(VARS)
+    if kind == "slug":
+        return r.choice(SLUGS)
     if kind == "host":
         return r.choice(["127.0.0.1", "localhost", "0.0.0.0", "x", "", "::1"])
     if kind == "target":
@@ -372,12 +398,7 @@ def free_text(r: random.Random) -> str:
 
 def rows_text(r: random.Random) -> list[str]:
     """merge-driver 용 한 줄 한 이슈."""
-    rows = []
-    for k, t in enumerate(["하나", "둘", "셋", "넷"]):
-        rows.append(
-            '{"id":"moai-aaa%s","title":"%s","status":"todo","created":"2026-11-01T00:00:00Z","updated":"2026-11-01T00:00:00Z"}' % ("abcd"[k], t)
-        )
-    return rows
+    return [bindiff.merge_row("moai-aaa" + "abcd"[k], t) for k, t in enumerate(["하나", "둘", "셋", "넷"])]
 
 
 def merge_files(r: random.Random) -> dict[str, bytes]:
@@ -410,10 +431,6 @@ def merge_files(r: random.Random) -> dict[str, bytes]:
     for name, ls in (("O", base), ("A", mut(base)), ("B", mut(base))):
         files[name] = ("\n".join(ls) + r.choice(["\n", "\n", ""])).encode()
     return files
-
-
-def tiny_png() -> bytes:
-    return bindiff.tiny_png()
 
 
 # ── 사례 짓기 ─────────────────────────────────────────────────────────
@@ -587,11 +604,13 @@ def make_case(g: Gen, seed: str, k: int) -> Case:
 
     units: list[list[str]] = []
     stdin_text = False
+    plan_in = False
     for f in chosen:
         for _ in range(2 if r.random() < 0.06 and f.value is not None else 1):
             v = flag_value(r, node, f, hist)
             if v == "-":
                 stdin_text = True
+                plan_in = plan_in or kind_of(f.long, f.value, f.desc) == "plan"
             units.append(render_flag(r, f, v))
 
     # 위치 인자
@@ -600,7 +619,9 @@ def make_case(g: Gen, seed: str, k: int) -> Case:
     for p in node.positionals:
         if drop_all:
             break
-        if not p.required and r.random() < 0.45:
+        # 머지 드라이버의 세 파일은 사례 앞에 `{tmp}/O·A·B` 로 깐다(`merge_files`) — 셋이 다 서야 이슈별 3-way 가 돈다.
+        merging = path[:1] == ["merge-driver"] and p.name in MERGE_SLOTS
+        if not p.required and r.random() < (0.1 if merging else 0.45):
             continue
         if p.required and r.random() < 0.05:
             continue
@@ -609,8 +630,12 @@ def make_case(g: Gen, seed: str, k: int) -> Case:
             kind = "id"
         if p.name in ("file", "base", "ours", "theirs") or p.name.startswith("file"):
             kind = "file"
-        if p.name.lower() in ("text", "title", "lesson", "words", "query", "keys", "prefix", "name", "value", "slug"):
+        if p.name.lower() in ("text", "title", "lesson", "keys", "prefix", "name", "value"):
             kind = "text"
+        if p.name.lower() in ("words", "query"):
+            kind = "words"
+        if p.name.lower() == "slug":
+            kind = "slug"
         if p.name.lower() in ("name", "value") and path[:1] == ["ctl"]:
             kind = "ctl"
         n = r.choice([1, 1, 1, 2, 3]) if p.variadic else 1
@@ -624,6 +649,8 @@ def make_case(g: Gen, seed: str, k: int) -> Case:
                 vals.append(r.choice(CHOICES["colour"]))
             elif p.name == "marker":
                 vals.append(r.choice(["7", "5", "x", ""]))
+            elif merging:
+                vals.append("{tmp}/" + MERGE_SLOTS[p.name] if r.random() < 0.85 else r.choice(PATHS_FILE))
             elif p.name == "path" and path[:1] == ["merge-driver"]:
                 vals.append(r.choice([".moai/issues.jsonl", "x", "", "{repo}/.moai/issues.jsonl"]))
             elif kind == "text" and r.random() < 0.15 and p.name.lower() in ("text", "title"):
@@ -655,7 +682,7 @@ def make_case(g: Gen, seed: str, k: int) -> Case:
         sample = None
         if dialect in g.hook_samples and g.hook_samples[dialect] and r.random() < 0.7:
             sample = r.choice(g.hook_samples[dialect])
-        event = hook_event_for(sample["stem"]) if sample else r.choice(HOOK_EVENTS[:5] + HOOK_EVENTS[:4])
+        event = bindiff.hook_event_of(sample["stem"]) if sample else r.choice(HOOK_EVENTS[:5] + HOOK_EVENTS[:4])
         if r.random() < 0.04:
             event = r.choice(HOOK_EVENTS)
         body = [event] + (["--dialect", dialect] if dialect else [])
@@ -685,7 +712,9 @@ def make_case(g: Gen, seed: str, k: int) -> Case:
     args = (glob + path + forced + body) if head else (path + forced + body + glob)
 
     if stdin is None:
-        if "-" in args or stdin_text:
+        if plan_in and r.random() < 0.8:
+            stdin = plan_text(r).encode()
+        elif "-" in args or stdin_text:
             stdin = free_text(r).encode()
         elif r.random() < 0.08:
             stdin = free_text(r).encode()
@@ -710,7 +739,7 @@ def make_case(g: Gen, seed: str, k: int) -> Case:
     blob = "\0".join(args) + "\0" + (stdin.decode(errors="replace") if stdin else "")
     if "{tmp}" in blob or path[:1] == ["merge-driver"]:
         files.update(merge_files(r))
-        files["dot.png"] = tiny_png() if r.random() < 0.85 else b"not a png"
+        files["dot.png"] = bindiff.tiny_png() if r.random() < 0.85 else b"not a png"
         files["note.txt"] = "메모\n".encode()
         files["plan.md"] = plan_text(r).encode()
 
@@ -718,10 +747,6 @@ def make_case(g: Gen, seed: str, k: int) -> Case:
     # 안전: NUL 이 든 글은 argv 로 못 간다
     args = [a.replace("\0", "") for a in args]
     return Case(str(k), args, stdin=stdin, env=env, before=before, timeout=TIMEOUT)
-
-
-def hook_event_for(stem: str) -> str:
-    return bindiff.hook_event_of(stem)
 
 
 def hook_stdin(r: random.Random, sample: dict | None, event: str) -> bytes | None:
@@ -808,37 +833,22 @@ def resolve_text(s: str) -> str:
 
 
 def resolve_case(c: Case) -> Case:
-    return Case(
-        c.name,
-        [resolve_text(a) for a in c.args],
+    # `dataclasses.replace` 다 — 칸을 손으로 옮기던 판은 `cwd` 를 떨궜다. 나중에 `Case` 에 칸이 늘어도 따라온다.
+    return dataclasses.replace(
+        c,
+        args=[resolve_text(a) for a in c.args],
         stdin=resolve_text(c.stdin.decode()).encode() if c.stdin is not None else None,
         env={k: (resolve_text(v) if v is not None else None) for k, v in c.env.items()},
-        before=c.before,
-        timeout=c.timeout,
     )
-
-
-# ── 비교 ──────────────────────────────────────────────────────────────
-
-def fuzz_compare(a: bindiff.Outcome, b: bindiff.Outcome, known: set[bytes]) -> list[str]:
-    # 색 끝에 붙은 id(`ESC[2mmoai-abcd`)와 우연히 아는 id 와 같아진 새 id 는 `bindiff.compare` 가 원인에서
-    # 다룬다(`unglue`·`ROWS`). 여기서 따로 고치지 않는다.
-    return compare(a, b, known)
 
 
 # ── 돌림 ──────────────────────────────────────────────────────────────
 
 
-def shq(s: str) -> str:
-    import shlex
-
-    return shlex.quote(s)
-
-
 def describe(c: Case) -> list[str]:
-    out = ["    moai " + " ".join(shq(a) for a in c.args)]
+    out = ["    moai " + shlex.join(c.args)]
     if c.env:
-        out.append("    env " + " ".join(f"{k}={'<unset>' if v is None else shq(v)}" for k, v in c.env.items()))
+        out.append("    env " + " ".join(f"{k}={'<unset>' if v is None else shlex.quote(v)}" for k, v in c.env.items()))
     if c.stdin is not None:
         t = c.stdin.decode(errors="replace")
         out.append(f"    stdin ({len(c.stdin)}바이트) {t[:300]!r}" + (" …" if len(t) > 300 else ""))
@@ -883,25 +893,24 @@ def fuzz(args: argparse.Namespace, old: Path, new: Path, work: Path, template: T
             for lang in args.lang:
                 try:
                     a = box.run(old, case, lang)
-                    reap()
                     b = box.run(new, case, lang)
-                    reap()
-                    d = fuzz_compare(a, b, known)
+                    # 가리개는 `bindiff.compare` 하나다 — 퍼저 쪽에서 따로 넓히지 않는다.
+                    d = compare(a, b, known | bindiff.case_ids(case))
                     flaky = False
                     if d:
                         # 한 번 더 돌려 가른다. 다시 돌려도 나오면 두 판의 차이다. 사라지면 "흔들림" 이다 — 가리개가
                         # 아는 흔들림(새 id·집기 나노초)은 bindiff 가 이미 다루니, 남은 흔들림은 제품의 비결정이거나
                         # 이 도구의 틈이다. 어느 쪽이든 관문을 지나게 두지 않는다(실패로 센다).
                         a2 = box.run(old, case, lang)
-                        reap()
                         b2 = box.run(new, case, lang)
-                        reap()
-                        d2 = fuzz_compare(a2, b2, known)
+                        d2 = compare(a2, b2, known | bindiff.case_ids(case))
                         if not d2:
                             flaky = True
                         else:
                             d = d2
-                except Exception as e:
+                except (Exception, SystemExit) as e:
+                    # `bindiff.git` 은 `SystemExit` 로 진다 — `Exception` 만 받던 판은 한 자리의 git 하나가 진 것으로 일꾼이
+                    # 통째로 죽고, 남은 일꾼이 줄을 다 비운 뒤에야 그 하나만 찍혀 찾은 차이의 목록이 사라졌다.
                     with lock:
                         harness.append((k, lang, f"실행 실패: {e!r}"))
                     continue
@@ -913,14 +922,13 @@ def fuzz(args: argparse.Namespace, old: Path, new: Path, work: Path, template: T
                         say(f"흔들림(다시 돌리니 사라짐): 사례 {k} [{lang}]")
                     elif d:
                         found.append((k, lang, case, d))
-                        say(f"차이: 사례 {k} [{lang}] moai {' '.join(shq(x) for x in case.args)[:120]}")
+                        say(f"차이: 사례 {k} [{lang}] moai {shlex.join(case.args)[:120]}")
                     if done[0] % 500 == 0:
                         say(f"  {done[0]}/{total}  {time.time() - started:.0f}초")
 
     with futures.ThreadPoolExecutor(jobs) as ex:
         list(ex.map(worker, boxes))
     took = time.time() - started
-    reap()
 
     print(f"시드 {seed}, 사례 {len(todo)}개 × 언어 {','.join(args.lang)} = {done[0]}번 견줌, 차이 {len(found)}, 흔들림 {len(shaky)}, {took:.0f}초")
     print("옛 판의 종료 코드: " + ", ".join(f"{k} {v}번" for k, v in sorted(codes.items(), key=lambda kv: -kv[1])))
@@ -929,13 +937,14 @@ def fuzz(args: argparse.Namespace, old: Path, new: Path, work: Path, template: T
     for k, lang, case, d in sorted(found, key=lambda t: (t[0], t[1])):
         print(f"\n### 시드 {seed} 사례 {k} [{lang}]")
         print("\n".join(describe(case)))
-        print(f"    다시: bindiff_fuzz.py --old {old} --new {new} --seed {seed} --case {k} --lang {lang}")
+        print(f"    다시: bindiff_fuzz.py --old {old} --new {new} --commit {args.commit} --seed {seed} --case {k} --lang {lang}")
         print("\n".join("    | " + x for x in d[:30]))
     for k, lang, case, d in sorted(shaky, key=lambda t: (t[0], t[1])):
         print(f"\n### 흔들림 — 시드 {seed} 사례 {k} [{lang}]: 다시 돌리니 차이가 사라졌다. 원인을 찾을 때까지 실패로 센다")
         print("\n".join(describe(case)))
         print("\n".join("    | " + x for x in d[:12]))
-    if harness:
+    if harness or done[0] == 0:
+        # 아무것도 안 견준 판(`--cases 0`, 빈 `--lang`)은 "차이 0" 이 아니다.
         return 2
     return 1 if found or shaky else 0
 
@@ -971,6 +980,10 @@ def main(argv: list[str]) -> int:
         tmp = tempfile.mkdtemp(prefix="bindiff-fuzz-")
         work = Path(tmp)
     try:
+        above = bindiff.tracker_above(work)
+        if above:
+            say(f"bindiff_fuzz: 자리({work}) 위에 트래커({above / '.moai'})가 있다 — `-C {{home}}` 같은 사례의 쓰기가 거기에 든다. 트래커 밖의 --work 를 준다")
+            return 2
         template = Template(work, args.commit, old)
         template.build()
         bindiff.HOOK_BIN[:] = [str(old)]
@@ -986,7 +999,6 @@ def main(argv: list[str]) -> int:
         say(str(e))
         return 2
     finally:
-        reap()
         if tmp and not args.keep:
             shutil.rmtree(tmp, ignore_errors=True)
 

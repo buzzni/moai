@@ -95,7 +95,8 @@ class Refusal:
 
 
 def git(root, *args, check=True):
-    p = subprocess.run(["git", "-C", root, *args], capture_output=True)
+    # 사람의 git 설정이 출력의 꼴을 못 바꾸게 한다 — `color.ui=always` 면 `diff` 의 줄마다 색이 붙어 `+`·`-` 를 못 읽는다.
+    p = subprocess.run(["git", "-C", root, "-c", "color.ui=never", *args], capture_output=True)
     if check and p.returncode != 0:
         die(2, f"git {' '.join(args)} 가 실패했다: {p.stderr.decode(errors='replace').strip()}")
     return p
@@ -215,21 +216,30 @@ HUNK = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@")
 
 
 def check_cargo_toml(root, base, head, bad):
-    out = git(root, "diff", "-U0", "--no-ext-diff", "--no-renames", base, head, "--", "Cargo.toml").stdout
+    # `--inter-hunk-context=0` — `diff.interHunkContext` 가 서 있으면 붙은 덩이 사이에 바뀌지 않은 줄이 끼어 줄 번호가 밀린다.
+    out = git(
+        root, "diff", "-U0", "--inter-hunk-context=0", "--no-color", "--no-ext-diff", "--no-renames", base, head, "--", "Cargo.toml"
+    ).stdout
     text = out.decode("utf-8", errors="surrogateescape")
     added = {}  # 머리 줄 번호 -> 글
     new_no = 0
+    in_hunk = False
     for ln in text.split("\n"):
         m = HUNK.match(ln)
         if m:
             new_no = int(m.group(1))
+            in_hunk = True
             continue
-        if ln.startswith("---") or ln.startswith("+++") or ln.startswith("\\"):
+        # 머리(`diff --git`·`index`·`---`·`+++`)는 첫 `@@` 앞에만 선다. 그 뒤의 `---x`·`+++x` 는 `--x`·`++x` 를 지우고
+        # 더한 줄이다 — 머리로 알고 건너뛰던 판은 그런 줄을 못 봤다.
+        if not in_hunk or ln.startswith("\\"):
             continue
         if ln.startswith("-"):
             bad.at("Cargo.toml", new_no, ln[1:], "지운 줄 — Cargo.toml 은 줄을 지우지 않는다")
         elif ln.startswith("+"):
             added[new_no] = ln[1:]
+            new_no += 1
+        elif ln.startswith(" "):  # 맥락 줄 — `-U0` 이면 안 서지만, 서도 줄 번호는 따라간다
             new_no += 1
     for no, ln in sorted(added.items()):
         s = ln.strip()
@@ -240,6 +250,22 @@ def check_cargo_toml(root, base, head, bad):
     # 새 [lib] 절 하나. 줄 번호가 아니라 내용으로 센다.
     base_t = show(root, base, "Cargo.toml") or ""
     head_t = show(root, head, "Cargo.toml") or ""
+    # **뜻으로도 잰다.** 위의 줄 규칙은 `#` 로 시작하거나 빈 줄을 주석으로 받는데, 여러 줄 문자열(`"""…"""`) 안에서는
+    # 그 줄도 값의 글이다. TOML 로 읽어 머리가 기준에 `[lib] doctest = false` 하나만 더한 것인지 본다.
+    try:
+        import tomllib
+    except ImportError:
+        die(2, "Cargo.toml 을 뜻으로 견주려면 Python 3.11 이상(tomllib)이 필요하다")
+    try:
+        meant_base, meant_head = tomllib.loads(base_t), tomllib.loads(head_t)
+    except tomllib.TOMLDecodeError as e:
+        bad.add(f"Cargo.toml 을 TOML 로 읽지 못했다: {e}")
+        return
+    lib = meant_head.pop("lib", None)
+    if lib != {"doctest": False}:
+        bad.add(f"Cargo.toml: [lib] 절의 뜻이 doctest = false 하나가 아니다 — {lib!r}")
+    if meant_head != meant_base:
+        bad.add("Cargo.toml: [lib] 말고도 값이 바뀌었다 (TOML 로 읽어 견줬다)")
     if re.search(r"^\[lib\]\s*$", base_t, re.M):
         bad.add("Cargo.toml: 기준에 이미 [lib] 절이 있다.")
         return
@@ -272,30 +298,89 @@ def check_cargo_toml(root, base, head, bad):
 MOD_DECL = re.compile(r"^(\s*)mod (\w+);$")
 
 
-def _in_code(a, idx):
-    """`a[idx]` 가 주석·문자열 밖인가 — 어림이다. 의심스러우면 거짓이라 거절 쪽으로 틀린다."""
-    pre = a[:idx]
-    s = a.lstrip()
-    if s.startswith("//") or s.startswith("*") or s.startswith("/*"):
-        return False
-    if "//" in pre or "/*" in pre:
-        return False
-    if pre.count('"') % 2 == 1:
-        return False
-    return True
+RAW_OPEN = re.compile(r'[bc]?r(#*)"')
+CHAR_LIT = re.compile(r"'(?:\\(?:x[0-9a-fA-F]{2}|u\{[0-9a-fA-F]{1,6}\}|.)|[^\\'])'")
 
 
-def allowed_pair(a, b, is_lib):
-    """(허용했는가, 거절 까닭). 줄 하나의 앞뒤가 정확히 허용된 치환인가."""
+def scan(line, state, stop=None):
+    """줄 하나를 `state`(그 줄이 시작할 때의 어휘 상태)에서 훑는다.
+
+    상태는 `None`(코드)·`("str",)`·`("raw", 샵 수)`·`("block", 깊이)` 넷이다. `stop` 을 주면 `line[stop]` 이 코드인지를,
+    안 주면 줄 끝의 상태를 낸다. **여러 줄에 걸친 문자열·raw 문자열·블록 주석을 앞 줄에서 이어 받는다** — 줄 하나만 보던
+    어림(`"` 의 홀짝, 줄 머리의 `//`·`*`)은 여러 줄 문자열 안의 `pub(crate) ` 를 코드로 읽어 글자열이 바뀐 diff 를 통과시켰다.
+    """
+    i, n = 0, len(line)
+    while i < n:
+        if stop is not None and i >= stop:
+            return state is None
+        if state is None:
+            if line.startswith("//", i):
+                return False if stop is not None else None
+            if line.startswith("/*", i):
+                state, i = ("block", 1), i + 2
+                continue
+            m = RAW_OPEN.match(line, i)
+            if m and (i == 0 or not (line[i - 1].isalnum() or line[i - 1] == "_")):
+                state, i = ("raw", len(m.group(1))), m.end()
+                continue
+            if line[i] == '"':
+                state, i = ("str",), i + 1
+                continue
+            if line[i] == "'":
+                m = CHAR_LIT.match(line, i)
+                i = m.end() if m else i + 1  # 닫는 따옴표가 없으면 수명(`'a`)이다
+                continue
+            i += 1
+        elif state[0] == "block":
+            if line.startswith("*/", i):
+                state, i = (None if state[1] == 1 else ("block", state[1] - 1)), i + 2
+            elif line.startswith("/*", i):
+                state, i = ("block", state[1] + 1), i + 2
+            else:
+                i += 1
+        elif state[0] == "str":
+            if line[i] == "\\":
+                i += 2
+            elif line[i] == '"':
+                state, i = None, i + 1
+            else:
+                i += 1
+        else:  # raw
+            close = '"' + "#" * state[1]
+            if line.startswith(close, i):
+                state, i = None, i + len(close)
+            else:
+                i += 1
+    if stop is not None:
+        return state is None
+    return state
+
+
+def line_states(lines):
+    """줄마다 그 줄이 시작할 때의 어휘 상태([`scan`])."""
+    out, state = [], None
+    for ln in lines:
+        out.append(state)
+        state = scan(ln, state)
+    return out
+
+
+def allowed_pair(a, b, is_lib, state=None):
+    """(허용했는가, 거절 까닭). 줄 하나의 앞뒤가 정확히 허용된 치환인가. `state` 는 `a` 가 시작할 때의 어휘 상태다.
+
+    바꾼 자리는 **코드여야 한다** — 주석·문자열(여러 줄에 걸친 것 포함) 안이면, 또는 못 가리면 거절한다.
+    """
     if a == b:
         return True, ""
     if is_lib:
         m = MOD_DECL.match(a)
         if m and b == f"{m.group(1)}pub mod {m.group(2)};":
+            if not scan(a, state, stop=len(m.group(1))):
+                return False, "주석·문자열 안의 글이 바뀌었다"
             return True, ""
     if "pub(crate) " in a and b == a.replace("pub(crate) ", "pub "):
         for m in re.finditer(re.escape("pub(crate) "), a):
-            if not _in_code(a, m.start()):
+            if not scan(a, state, stop=m.start()):
                 return False, "주석·문자열 안의 글이 바뀌었다"
         return True, ""
     sa, sb = strip_vis(a), strip_vis(b)
@@ -319,8 +404,9 @@ def pair_all(a_lines, b_lines, is_lib):
     if len(a_lines) != len(b_lines):
         return None
     bad = []
+    states = line_states(a_lines)
     for i, (a, b) in enumerate(zip(a_lines, b_lines)):
-        ok, why = allowed_pair(a, b, is_lib)
+        ok, why = allowed_pair(a, b, is_lib, states[i])
         if not ok:
             bad.append((i + 1, b, why, a))
     return bad

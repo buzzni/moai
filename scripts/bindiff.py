@@ -8,11 +8,14 @@
 
 **왜 있나.** 동작을 바꾸지 않는다고 약속한 리팩터(lib/bin 가르기, 가시성 열기)의 머지 관문이다.
 사람의 눈 대신 "같은 입력에 같은 출력" 을 기계로 본다. 견주는 것은 넷이다 — stdout, stderr, 종료
-코드, 그리고 그 명령이 쓴 파일 전부(저장소의 바뀐 파일·`.git` 의 설정·`HOME`·`TMPDIR`·`MOAI_CTL_DIR`).
+코드, 그리고 그 명령이 쓴 파일 전부와 그 권한(저장소의 바뀐 파일·`.git` 의 설정·info·hooks·`HOME`·`TMPDIR`·
+`MOAI_CTL_DIR`). 저장소 안의 빈 디렉터리는 git 이 안 보여 못 견준다.
 
 **흔들림은 가리지 않고 원인을 고정한다.** 시계는 `MOAI_NOW`, 자리는 같은 경로, 파일의 mtime 은
-매 사례 앞에 한 값으로 맞춘다. 사람 목소리·언어·색·폭도 환경으로 고정한다. 가리는 것은 하나뿐이다 —
-`add` 가 새로 지은 id. id 는 제목·나노초·pid 로 지어(`src/id.rs` 의 `seed`) 부를 때마다 다르다.
+매 사례 앞에 한 값으로 맞춘다. 사람 목소리·언어·색·폭도 환경으로 고정한다. 못 고정하는 것만 가린다 —
+`add` 가 새로 지은 id(제목·나노초·pid 로 지어 부를 때마다 다르다, `src/id.rs` 의 `seed`), 훅의 집기 기록의
+벽시계 나노초(`PICK_NONCE`), `web` 이 띄울 때마다 받는 포트와 pid. 색 끝 뒤에는 단어 아닌 바이트 하나를 두 판에
+똑같이 끼운다(`unglue`).
 
 **옛 판과 새 판은 같은 자리에서 차례로 돈다.** 출력에 저장소 경로가 찍히니 자리가 다르면 그것부터
 갈린다. 그래서 사례 하나마다 자리를 되돌리고 옛 판, 다시 되돌리고 새 판을 돌린다. 여러 사례를
@@ -31,8 +34,10 @@ import difflib
 import json
 import os
 import re
+import shlex
 import shutil
 import signal
+import stat
 import statistics
 import subprocess
 import sys
@@ -53,7 +58,9 @@ OTHER = "Other Person (other@example.com)"
 LANGS = ("en", "ko")
 TIMEOUT = 20.0
 
-ID_RE = re.compile(rb"\bmoai-[0-9a-z]{4}(?:\.[0-9a-z]{3})*\b")
+# 앞의 `\b` 를 글자 `moai-` 뒤의 lookbehind 로 둔다 — 맞는 것은 같고(이 저장소의 문서·소스·트래커와 무작위 글 5만 개로
+# 견줬다), 맨 앞에 너비 없는 것이 서면 `re` 가 글자 머리로 건너뛰지 못해 바이트마다 맞춰 본다(열 배쯤 느리다).
+ID_RE = re.compile(rb"moai-(?<=\bmoai-)[0-9a-z]{4}(?:\.[0-9a-z]{3})*\b")
 
 
 def say(*parts: object) -> None:
@@ -261,6 +268,17 @@ def base_env(home: Path, tmp: Path, ctl: Path, lang: str) -> dict[str, str]:
     }
 
 
+def pin(path: str, follow: bool) -> None:
+    """mtime 을 `MTIME` 으로. **이미 그 값이면 안 건드린다** — `utime` 은 ctime 을 늘 올려, 매번 찍던 판은 벽시계의 초가
+    넘어갈 때마다 git 이 체크아웃 전부를 바뀐 것으로 보고 다시 해시했다(사례의 4분의 1 남짓이 거기 들었다). moai 는
+    ctime 을 안 읽는다."""
+    try:
+        if os.stat(path, follow_symlinks=follow).st_mtime_ns != MTIME * 1_000_000_000:
+            os.utime(path, (MTIME, MTIME), follow_symlinks=follow)
+    except OSError:
+        pass
+
+
 class Sandbox:
     """사례를 돌리는 자리 하나. 템플릿에서 clone 하고, 사례마다 처음 상태로 되돌린다."""
 
@@ -272,6 +290,10 @@ class Sandbox:
         self.ctl = root / "ctl"
         self.template = template
         self.pristine: dict[str, bytes] = {}
+        # 이 자리의 `before` 가 띄운 자식(락을 쥔 `flock` 따위). 사례가 끝나면 **이 자리의 것만** 거둔다 —
+        # 모듈 전역 목록이던 판은 옆 일꾼이 제 사례 뒤에 부른 `reap()` 이 이 자리의 락을 사례 도중에 풀어,
+        # `--jobs` 가 1 보다 크면 "락을 쥔 상태" 사례가 락 없는 쓰기를 견줬다.
+        self.held: list[subprocess.Popen] = []
 
     def build(self) -> None:
         shutil.rmtree(self.root, ignore_errors=True)
@@ -293,7 +315,8 @@ class Sandbox:
 
     def reset(self) -> None:
         git(self.repo, "reset", "-q", "--hard", "bindiff")
-        git(self.repo, "clean", "-qfdx")
+        # `-f` 를 둘 준다 — 하나면 명령이 지은 안쪽 저장소(`.git` 을 든 디렉터리)를 안 지워 다음 사례에 남긴다.
+        git(self.repo, "clean", "-qffdx")
         for d in (".git/info", ".git/hooks"):
             for p in sorted((self.repo / d).rglob("*"), reverse=True):
                 rel = str(p.relative_to(self.repo))
@@ -306,6 +329,9 @@ class Sandbox:
         for d in (self.home, self.tmp, self.ctl):
             shutil.rmtree(d, ignore_errors=True)
             d.mkdir(parents=True)
+        # `MOAI_CTL_DIR` 이 0700 이 아니면 moai 는 ctl 을 통째로 거절한다(`src/ctl/place.rs` 의 `ensure`). umask 대로
+        # 0755 로 두던 판은 `ctl` 의 모든 사례가 그 거절 한 갈래만 견줬다.
+        self.ctl.chmod(0o700)
         (self.home / ".config").mkdir()
         self.pin_mtimes()
 
@@ -316,11 +342,16 @@ class Sandbox:
                 if dirpath == str(self.repo):
                     dirnames[:] = [d for d in dirnames if d != ".git"]
                 for n in filenames:
-                    try:
-                        os.utime(os.path.join(dirpath, n), (MTIME, MTIME), follow_symlinks=False)
-                    except OSError:
-                        pass
-                os.utime(dirpath, (MTIME, MTIME))
+                    pin(os.path.join(dirpath, n), follow=False)
+                pin(dirpath, follow=True)
+
+    def ctl_reachable(self) -> bool:
+        """ctl 소켓(`<ctl>/<pid>.sock`)이 유닉스 소켓 자리의 상한 안에 드는가(`src/ctl/place.rs` 의 `socket`).
+
+        넘으면 `web` 이 ctl 을 못 열고 stderr 에 그 까닭만 댄다 — 두 판 다 그 한 갈래로 같아, 탭 등록 길이 안 견줘진다.
+        """
+        limit = 104 if sys.platform == "darwin" else 108
+        return len(os.fsencode(self.ctl)) + len("/4194304.sock") < limit
 
     def place(self, v: str) -> str:
         return v.replace("{repo}", str(self.repo)).replace("{home}", str(self.home)).replace("{tmp}", str(self.tmp))
@@ -366,6 +397,15 @@ class Sandbox:
                     files[rel] = b"<special>"
                 else:
                     files[rel] = p.read_bytes()
+        # **권한도 쓴 것이다** — moai 는 남이 못 쓰게 몇 디렉터리를 0700 으로 짓는다(`src/pulse.rs`·`src/cmd/hook.rs`·
+        # `src/read_marks.rs`). 바이트만 견주면 그 줄을 잃은 판도 같다고 나온다. 열쇠마다 곁에 권한을 둔다
+        # (열쇠의 머리 `repo/`·`home/`·`tmp/`·`ctl/` 가 곧 자리 아래 경로다).
+        for key in list(files):
+            try:
+                mode = (self.root / key).lstat().st_mode
+            except OSError:
+                continue
+            files[key + " (mode)"] = b"%o" % stat.S_IMODE(mode)
         return files
 
     def exe(self, moai: Path) -> Path:
@@ -383,29 +423,32 @@ class Sandbox:
     def run(self, moai: Path, case: Case, lang: str) -> Outcome:
         self.reset()
         moai = self.exe(moai)
-        if callable(case.before):
-            case.before(self)
-            self.pin_mtimes()
-        cwd = self.repo / case.cwd if case.cwd else self.repo
-        # 자리표는 여기서 푼다 — 사례는 일꾼들이 나눠 쓰니 고쳐 쓰지 않는다.
-        args = [self.place(a) for a in case.args]
-        stdin = case.stdin
-        if stdin is not None:
-            stdin = self.place(stdin.decode()).encode()
         try:
-            p = subprocess.run(
-                [str(moai), *args],
-                cwd=cwd,
-                env=self.env(lang, case.env),
-                input=stdin if stdin is not None else b"",
-                capture_output=True,
-                timeout=case.timeout,
-                start_new_session=True,
-            )
-            code: int | str = p.returncode
-            out, err = p.stdout, p.stderr
-        except subprocess.TimeoutExpired as e:
-            code, out, err = "timeout", e.stdout or b"", e.stderr or b""
+            if callable(case.before):
+                case.before(self)
+                self.pin_mtimes()
+            cwd = self.repo / case.cwd if case.cwd else self.repo
+            # 자리표는 여기서 푼다 — 사례는 일꾼들이 나눠 쓰니 고쳐 쓰지 않는다.
+            args = [self.place(a) for a in case.args]
+            stdin = case.stdin
+            if stdin is not None:
+                stdin = self.place(stdin.decode()).encode()
+            try:
+                p = subprocess.run(
+                    [str(moai), *args],
+                    cwd=cwd,
+                    env=self.env(lang, case.env),
+                    input=stdin if stdin is not None else b"",
+                    capture_output=True,
+                    timeout=case.timeout,
+                    start_new_session=True,
+                )
+                code: int | str = p.returncode
+                out, err = p.stdout, p.stderr
+            except subprocess.TimeoutExpired as e:
+                code, out, err = "timeout", e.stdout or b"", e.stderr or b""
+        finally:
+            reap(self.held)
         return Outcome(code, out, err, self.snapshot())
 
 
@@ -416,7 +459,11 @@ class Masker:
     """`add` 가 새로 지은 id 를 `<new-N>` 으로. N 은 처음 나온 차례다 — stdout, stderr, 저널, 나머지 파일 순.
 
     저널은 쓴 차례대로 붙으니 거기서 처음 나온 차례가 만든 차례다. `issues.jsonl` 은 id 로 정렬돼
-    있어 새 id 가 어디 끼는지가 판마다 다르다 — 그래서 그 파일은 아래 `compare_lines` 가 따로 본다.
+    있어 새 id 가 어디 끼는지가 판마다 다르다 — 그래서 저널 밖의 파일은 아래 `compare_lines` 가 따로 본다.
+
+    **가리는 것은 새로 지은 마디뿐이다.** `<부모>.<몸>` 꼴의 새 id 는 부모를 그대로(부모도 새것이면 그 자리표로) 두고
+    마지막 마디만 가린다 — 부모는 id 에만 적혀 있어(`src/id.rs` 의 `parent_of`), 통째로 가리던 판은 엉뚱한 부모 밑에
+    지은 자식도 같다고 보았다.
     """
 
     def __init__(self, known: set[bytes]):
@@ -425,9 +472,17 @@ class Masker:
 
     def learn(self, data: bytes) -> None:
         for m in ID_RE.finditer(data):
-            tok = m.group(0)
-            if tok not in self.known and tok not in self.map:
-                self.map[tok] = b"<new-%d>" % (len(self.map) + 1)
+            self.name(m.group(0))
+
+    def name(self, tok: bytes) -> bytes:
+        """`tok` 의 자리표. 아는 id 는 그대로다."""
+        if tok in self.known:
+            return tok
+        if tok not in self.map:
+            head, dot, _ = tok.rpartition(b".")
+            prefix = self.name(head) + b"." if dot else b""
+            self.map[tok] = prefix + b"<new-%d>" % (len(self.map) + 1)
+        return self.map[tok]
 
     def mask(self, data: bytes) -> bytes:
         if not self.map:
@@ -451,7 +506,7 @@ ROWS: set[bytes] = set()
 ROW_ID = re.compile(rb'(?m)^\{"id":"(moai-[0-9a-z]{4}(?:\.[0-9a-z]{3})*)"')
 
 
-def masked(o: Outcome, known: set[bytes]) -> tuple[Masker, Outcome]:
+def masker(o: Outcome, known: set[bytes]) -> Masker:
     rows: set[bytes] = set()
     for k, v in o.files.items():
         if v is not None and k.startswith("repo/.moai/") and k.endswith(".jsonl") and "journal" not in k:
@@ -463,7 +518,7 @@ def masked(o: Outcome, known: set[bytes]) -> tuple[Masker, Outcome]:
         v = o.files[k]
         if v is not None:
             mk.learn(v)
-    return mk, o
+    return mk
 
 
 def compare_text(label: str, a: bytes, b: bytes) -> list[str]:
@@ -478,8 +533,15 @@ def compare_text(label: str, a: bytes, b: bytes) -> list[str]:
         n=1,
     )
     lines = list(diff)
-    if not lines:  # 끝 줄바꿈 하나만 다르다
-        lines = [f"--- old/{label}", f"+++ new/{label}", f"  (끝 줄바꿈이 다르다: {a[-1:]!r} 대 {b[-1:]!r})"]
+    if not lines:
+        # 줄로 쪼개면 같다 — 끝 줄바꿈, `\r\n` 대 `\n`, 바꿔 읽힌 깨진 바이트, `splitlines` 가 줄 끝으로 읽는 글자(`\x1c`·
+        # U+2028 …). "끝 줄바꿈" 이라고만 적던 판은 같은 두 바이트를 찍어 진짜 차이를 헛것으로 보이게 했다.
+        k = next((i for i in range(min(len(a), len(b))) if a[i] != b[i]), min(len(a), len(b)))
+        lines = [
+            f"--- old/{label}",
+            f"+++ new/{label}",
+            f"  (줄로는 같다 — 바이트 {k} 에서 갈린다: {a[max(0, k - 12):k + 12]!r} 대 {b[max(0, k - 12):k + 12]!r})",
+        ]
     if len(lines) > 60:
         lines = lines[:60] + [f"  … ({len(lines) - 60}줄 더)"]
     return lines
@@ -489,14 +551,15 @@ def compare_lines(label: str, a: bytes, b: bytes, ma: Masker, mb: Masker) -> lis
     """새 id 가 든 줄은 가린 뒤 모음으로, 나머지 줄은 차례째 견준다.
 
     정렬된 파일에서 새 id 의 자리는 id 값이 정한다 — 그 자리만 차이로 안 친다. 새 id 가 없는 줄의
-    차례는 그대로 본다.
+    차례는 그대로 본다. 차례가 뜻인 저널은 이 길을 안 탄다(`compare`).
     """
     al, bl = a.split(b"\n"), b.split(b"\n")
-    a_old = b"\n".join(x for x in al if not ma.fresh(x))
-    b_old = b"\n".join(x for x in bl if not mb.fresh(x))
+    af, bf = [ma.fresh(x) for x in al], [mb.fresh(x) for x in bl]
+    a_old = b"\n".join(x for x, f in zip(al, af) if not f)
+    b_old = b"\n".join(x for x, f in zip(bl, bf) if not f)
     out = compare_text(label, a_old, b_old)
-    a_new = sorted(ma.mask(x) for x in al if ma.fresh(x))
-    b_new = sorted(mb.mask(x) for x in bl if mb.fresh(x))
+    a_new = sorted(ma.mask(x) for x, f in zip(al, af) if f)
+    b_new = sorted(mb.mask(x) for x, f in zip(bl, bf) if f)
     if a_new != b_new:
         out += compare_text(label + " (새 id 의 줄)", b"\n".join(a_new), b"\n".join(b_new))
     return out
@@ -530,9 +593,11 @@ def unglue(o: Outcome) -> Outcome:
 
 
 def compare(a: Outcome, b: Outcome, known: set[bytes]) -> list[str]:
+    if a == b:
+        # 바이트째 같으면 가리개도 같게 배운다 — 끝까지 견줘도 답은 []다.
+        return []
     a, b = unglue(settle(a)), unglue(settle(b))
-    ma, _ = masked(a, known)
-    mb, _ = masked(b, known)
+    ma, mb = masker(a, known), masker(b, known)
     out: list[str] = []
     if a.code != b.code:
         out.append(f"종료 코드: old {a.code} / new {b.code}")
@@ -552,11 +617,33 @@ def compare(a: Outcome, b: Outcome, known: set[bytes]) -> list[str]:
             if (va is None) != (vb is None):
                 out.append(f"파일: {k} 가 한쪽만 디렉터리다")
             continue
+        if "/.moai/journal/" in k:
+            # **저널은 붙는 차례가 곧 이력이다** — 새 id 가 든 줄도 차례째 견준다. 모음으로 견주던 판은 새 id 의 번호가
+            # stdout 에서 먼저 정해지면 만든 줄의 차례가 뒤바뀌어도, 옛 id 의 줄 사이로 자리를 옮겨도 차이 0 이었다.
+            out += compare_text(k, ma.mask(va), mb.mask(vb))
+            continue
         out += compare_lines(k, va, vb, ma, mb)
+        if SORTED_FILE.match(k) and id_sorted(va) != id_sorted(vb):
+            # 모음 비교는 새 줄의 자리를 안 본다. 그 자리를 정하는 규칙(id 차례)이 지켜졌는지는 두 판이 같아야 한다 —
+            # 안 보던 판은 새 줄을 끝에 붙여 정렬을 깬 판(머지 드라이버가 기대는 꼴)도 같다고 보았다.
+            out.append(f"파일: {k} 의 id 차례 정렬이 한쪽만 섰다 (old {id_sorted(va)} / new {id_sorted(vb)})")
     return out
 
 
+# id 로 정렬해 쓰는 파일(스냅샷·아카이브). 새 줄의 자리는 id 값이 정하니 자리 대신 "정렬이 섰는가" 를 견준다.
+SORTED_FILE = re.compile(r"^repo/\.moai/(?:issues|archive/[^/]+)\.jsonl$")
+
+
+def id_sorted(data: bytes) -> bool:
+    ids = ROW_ID.findall(data)
+    return ids == sorted(ids)
+
+
 # ── 사례 목록 ─────────────────────────────────────────────────────────
+
+
+# `wiki learn` 이 받는 교훈의 꼴(세 절이 다 서야 쓴다).
+LESSON = "## What happened\n\n- x\n\n## Why\n\n- y\n\n## Do this instead\n\n- z\n".encode()
 
 
 def cases(ids: dict[str, str], help_tree: list[list[str]]) -> list[Case]:
@@ -727,6 +814,8 @@ def cases(ids: dict[str, str], help_tree: list[list[str]]) -> list[Case]:
         ("edit shift", ["edit", i["m1"], "--shift", "2"], None),
         ("edit shift-due", ["edit", i["m1"], "--shift-due", "-1"], None),
         ("edit if-unplanned", ["edit", i["m1"], "--due", "2026-11-06", "--if-unplanned"], None),
+        # m1 은 계획의 줄(`@2026-11-05`)이 날을 주어 위 사례는 거절 갈래만 돈다 — 날이 없는 m3 으로 쓰는 갈래를 함께 본다.
+        ("edit if-unplanned unplanned", ["edit", i["m3"], "--due", "2026-11-06", "--if-unplanned"], None),
         ("note", ["note", i["m3"], "찾은 것"], None),
         ("note -b -", ["note", i["m3"], "-b", "-"], "여러 줄\n둘째 줄 'quote'\n".encode()),
         ("note model", ["note", i["m3"], "model: anthropic/sonnet-5.5 (medium — 시험)"], None),
@@ -735,7 +824,8 @@ def cases(ids: dict[str, str], help_tree: list[list[str]]) -> list[Case]:
         ("defer --undo", ["defer", i["m5"], "--undo"], None),
         ("defer epic", ["defer", i["epic"], "-m", "통째로"], None),
         ("link", ["link", i["m1"], "--blocks", i["m3"]], None),
-        ("link clear", ["link", i["m3"], "--blocks", i["m4"], "--clear"], None),
+        # 막음 풀기는 `--unblocks` 다 — `--clear` 로 적던 판은 없는 플래그라 두 판 다 clap 의 오류만 냈다.
+        ("link unblocks", ["link", i["m3"], "--unblocks", i["m4"]], None),
         ("rm", ["rm", i["m3"]], None),
         ("rm epic", ["rm", i["epic"]], None),
         ("read", ["read", i["m1"]], None),
@@ -761,17 +851,49 @@ def cases(ids: dict[str, str], help_tree: list[list[str]]) -> list[Case]:
         ("epic add", ["epic", "add", "새 묶음"], None),
         ("milestone add", ["milestone", "add", "v10.0.0", "--due", "2026-12-01"], None),
         ("issue add", ["issue", "add", "이슈 동사"], None),
-        ("image add", ["image", "add", "{repo}/../dot.png", "--to", i["m3"]], None),
         ("image add no file", ["image", "add", "{repo}/none.png", "--to", i["m3"]], None),
         ("project add", ["project", "add", "{repo}"], None),
-        ("project ls after add", ["project", "ls"], None),
         ("init again", ["init"], None),
         ("merge-driver --install", ["merge-driver", "--install", "--as", "/usr/local/bin/moai-x"], None),
         ("skill install", ["skill", "install"], None),
-        ("wiki learn", ["wiki", "learn", "--help"], None),
+        # 교훈을 실제로 적는다(페이지 + 이슈의 노트). `--help` 만 돌리던 판은 쓰는 길을 한 번도 안 견줬다 — 도움말은 위의
+        # 명령 나무가 이미 돈다.
+        ("wiki learn", ["wiki", "learn", "End a check on the step that must pass", "--issue", i["m3"], "-b", "-"], LESSON),
+        ("wiki learn --dry-run", ["wiki", "learn", "End a check on the step that must pass", "--issue", i["m3"], "-b", "-", "--dry-run"], LESSON),
     ]
     for name, args, stdin in w:
         both(name, *args, stdin=stdin)
+
+    # 그림을 넣는 갈래. 그림은 사례 앞에 tmp 에 깐다 — `{repo}/../dot.png` 로 가리키던 판은 꾸밈 자리(`<work>/dot.png`)를
+    # 가리킨 줄 알았지만 자리마다 `<work>/box<N>/dot.png` 라 없는 파일이었고, "image add" 가 "image add no file" 과
+    # 같은 오류 갈래만 견줬다.
+    def lay_png(sb: Sandbox) -> None:
+        (sb.tmp / "dot.png").write_bytes(tiny_png())
+
+    both("image add", "image", "add", "{tmp}/dot.png", "--to", i["m3"], before=lay_png)
+
+    # 등록한 뒤의 목록. 사례마다 처음 상태에서 도니 등록은 사례 앞에 옛 판으로 해 둔다 — `w` 에 이어 적던 판은 앞 사례의
+    # 등록이 지워진 뒤라 "project ls" 를 한 번 더 견줄 뿐이었다.
+    def registered(sb: Sandbox) -> None:
+        subprocess.run([HOOK_BIN[0], "project", "add", str(sb.repo)], cwd=sb.repo, env=sb.env("en", {}), capture_output=True)
+
+    both("project ls after add", "project", "ls", before=registered)
+
+    # **보관은 시계를 당겨 본다** — 고정 시각(`NOW`)에서는 입력 저장소가 보낼 만한 묶음을 이미 다 보내 두어 `archive` 가
+    # "0줄" 로만 끝났다. 닫힌 지 `archive_days` 가 지난 시각에서 옮기는 길을 견준다.
+    later = {"MOAI_NOW": "2027-01-01T00:00:00Z"}
+    both("archive later", "archive", env=later)
+    both("archive later --dry-run", "archive", "--dry-run", env=later)
+
+    # 살아 있는 줄과 보관 사본이 함께 선 판에서 `--drop` 이 사본을 걷는 길. 보관된 줄 하나를 스냅샷에 되살려 둔다 —
+    # 그대로는 살아 있는 줄이 없어 늘 거절 갈래만 돌았다.
+    def live_copy(sb: Sandbox) -> None:
+        arch = sorted((sb.repo / ".moai" / "archive").glob("*.jsonl"))[0]
+        line = arch.read_bytes().split(b"\n")[0]
+        snap = sb.repo / ".moai" / "issues.jsonl"
+        snap.write_bytes(snap.read_bytes() + line + b"\n")
+
+    both("archive --drop live", "archive", "--drop", i["archived"], before=live_copy)
 
     # 오류 갈래
     for name, args in [
@@ -804,7 +926,7 @@ def cases(ids: dict[str, str], help_tree: list[list[str]]) -> list[Case]:
         lock = sb.repo / ".moai" / "lock"
         lock.touch()
         p = subprocess.Popen(["flock", "-x", str(lock), "sleep", "30"], start_new_session=True)
-        HELD.append(p)
+        sb.held.append(p)
         for _ in range(100):
             r = subprocess.run(["flock", "-xn", str(lock), "true"])
             if r.returncode != 0:
@@ -838,9 +960,6 @@ def cases(ids: dict[str, str], help_tree: list[list[str]]) -> list[Case]:
     return c
 
 
-HELD: list[subprocess.Popen] = []
-
-
 def hook_cases(ids: dict[str, str]) -> list[Case]:
     """`moai hook` 에 사건을 stdin 으로. Claude 꼴은 손으로 짓고, codex·antigravity 는 기록한 자료를 쓴다."""
     out: list[Case] = []
@@ -866,6 +985,18 @@ def hook_cases(ids: dict[str, str]) -> list[Case]:
     for name, t in tools:
         body = {"session_id": "s1", "cwd": "{repo}", "hook_event_name": "PreToolUse", **t}
         out.append(Case(f"hook pre-tool-use {name}", ["hook", "pre-tool-use"], stdin=json.dumps(body, ensure_ascii=False).encode()))
+    # **빈손의 훅** — 꾸밈이 `ACTOR` 에게 m1(진행)·m2(리뷰)를 쥐여 두어 위 사례는 "먼저 집는다"(규칙 2)의 거절에 안 닿는다.
+    # 아무것도 안 쥔 사람(`OTHER`)으로 같은 사건을 준다.
+    for name, t in tools:
+        body = {"session_id": "s2", "cwd": "{repo}", "hook_event_name": "PreToolUse", **t}
+        out.append(
+            Case(
+                f"hook empty-handed pre-tool-use {name}",
+                ["hook", "pre-tool-use"],
+                stdin=json.dumps(body, ensure_ascii=False).encode(),
+                env={"MOAI_ACTOR": OTHER},
+            )
+        )
     # 집은 것이 있을 때의 훅. 같은 세션이 먼저 집어 두면 규칙 1·2 가 돈다.
     def held(sb: Sandbox) -> None:
         env = sb.env("en", {"CLAUDE_CODE_SESSION_ID": "s1"})
@@ -930,13 +1061,24 @@ def hook_event_of(stem: str) -> str:
     return "pre-tool-use"
 
 
+def merge_row(id_: str, title: str) -> str:
+    """머지 드라이버에 줄 이슈 한 줄. **스냅샷이 쓰는 열쇠 그대로다** — `created_at`·`updated_at`·`status_since` 는
+    기본값이 없어(`src/model.rs` 의 `Issue`) 하나라도 빠지면 그 줄은 이슈로 안 읽히고, 드라이버는 이슈별 3-way 대신
+    통째로 부딪힌 줄로 다룬다. `created`/`updated` 로 적던 판은 다섯 벌과 퍼저의 머지 사례가 다 그 갈래만 견줬다."""
+    row = {
+        "id": id_,
+        "title": title,
+        "status": "todo",
+        "created_at": "2026-11-01T00:00:00Z",
+        "updated_at": "2026-11-01T00:00:00Z",
+        "status_since": "2026-11-01T00:00:00Z",
+    }
+    return json.dumps(row, ensure_ascii=False, separators=(",", ":"))
+
+
 def merge_cases() -> list[Case]:
     """`merge-driver <base> <ours> <theirs>`. 세 파일을 사례 앞에 tmp 에 깐다 — 답은 ours 에 쓰이니 그것도 견준다."""
-    base = [
-        '{"id":"moai-aaaa","title":"하나","status":"todo","created":"2026-11-01T00:00:00Z","updated":"2026-11-01T00:00:00Z"}',
-        '{"id":"moai-bbbb","title":"둘","status":"todo","created":"2026-11-01T00:00:00Z","updated":"2026-11-01T00:00:00Z"}',
-        '{"id":"moai-cccc","title":"셋","status":"todo","created":"2026-11-01T00:00:00Z","updated":"2026-11-01T00:00:00Z"}',
-    ]
+    base = [merge_row("moai-aaaa", "하나"), merge_row("moai-bbbb", "둘"), merge_row("moai-cccc", "셋")]
 
     def edit(lines: list[str], k: int, old: str, new: str) -> list[str]:
         out = list(lines)
@@ -1014,31 +1156,49 @@ def web_round(sb: Sandbox, moai: Path, lang: str, routes: list[str]) -> Outcome:
         stderr=subprocess.PIPE,
         start_new_session=True,
     )
+    # 부르는 쪽 환경의 `http_proxy` 를 안 탄다 — 루프백 주소도 `no_proxy` 에 없으면 프록시로 간다.
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
     body = []
+    port = ""
+    served = False
     try:
         first = p.stdout.readline() if p.stdout else b""
         try:
             url = json.loads(first)["url"].rstrip("/")
-        except (ValueError, KeyError):
-            return Outcome("no url", first, b"", {})
-        port = url.rsplit(":", 1)[1]
-        body.append(first.replace(port.encode(), b"<port>"))
-        for r in routes:
-            req = urllib.request.Request(url + r, headers={"Host": "localhost"})
-            try:
-                with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
-                    data = resp.read()
-                    body.append(f"== GET {r} {resp.status} {resp.headers.get('Content-Type')}\n".encode() + data + b"\n")
-            except urllib.error.HTTPError as e:
-                body.append(f"== GET {r} {e.code}\n".encode() + e.read() + b"\n")
+            served = True
+        except (ValueError, KeyError, TypeError):
+            body.append(first)
+        if served:
+            port = url.rsplit(":", 1)[1]
+            body.append(first.replace(port.encode(), b"<port>"))
+            for r in routes:
+                req = urllib.request.Request(url + r, headers={"Host": "localhost"})
+                try:
+                    with opener.open(req, timeout=TIMEOUT) as resp:
+                        data = resp.read()
+                        body.append(f"== GET {r} {resp.status} {resp.headers.get('Content-Type')}\n".encode() + data + b"\n")
+                except urllib.error.HTTPError as e:
+                    body.append(f"== GET {r} {e.code}\n".encode() + e.read() + b"\n")
     finally:
         os.killpg(p.pid, signal.SIGTERM)
         try:
-            _, err = p.communicate(timeout=5)
+            rest, err = p.communicate(timeout=5)
         except subprocess.TimeoutExpired:
             os.killpg(p.pid, signal.SIGKILL)
-            _, err = p.communicate()
-    return Outcome("served", b"".join(body), b"", sb.snapshot())
+            rest, err = p.communicate()
+    # **stdout 의 나머지·stderr·끝난 꼴도 견준다** — 첫 줄만 보던 판은 서버가 stderr 에 낸 경고(예: ctl 을 못 쓴다)도,
+    # 끄기 전에 스스로 죽은 것도, 주소를 못 낸 판의 까닭도 못 봤다. 띄울 때마다 다른 것은 OS 가 고른 두 값 — 포트와
+    # 서버의 pid(ctl 소켓 `<pid>.sock` 의 이름) — 뿐이라, 이 판이 아는 그 두 값만 자리표로 바꾼다(첫 줄의 포트와 같은 자다).
+    sock = f"/{p.pid}.sock"
+
+    def fixed(data: bytes) -> bytes:
+        if port:
+            data = data.replace(port.encode(), b"<port>")
+        return data.replace(sock.encode(), b"/<pid>.sock")
+
+    files = {k.replace(sock, "/<pid>.sock"): v for k, v in sb.snapshot().items()}
+    code = f"{'served' if served else 'no url'} ({p.returncode})"
+    return Outcome(code, b"".join(body) + fixed(rest or b""), fixed(err or b""), files)
 
 
 WEB_ROUTES = [
@@ -1070,22 +1230,55 @@ def known_ids(template: Template) -> set[bytes]:
             if f.is_file():
                 known.update(ID_RE.findall(f.read_bytes()))
     known.add(b"moai-zzzz")
+    known.update(FIXTURE_IDS)
     ROWS.clear()
     for f in [template.path / ".moai" / "issues.jsonl", *sorted((template.path / ".moai" / "archive").glob("*.jsonl"))]:
         if f.is_file():
             ROWS.update(ROW_ID.findall(f.read_bytes()))
+    # 사례 앞 꾸밈이 줄로 세우는 id(깨진 줄)도 명령이 지은 것이 아니다.
+    ROWS.update(FIXTURE_IDS)
     return known
+
+
+# 사례 앞 꾸밈이 까는 id — 머지 드라이버의 세 파일(`merge_row`)과 깨진 줄(`moai-brok`). 명령이 지은 것이 아니라 입력이니
+# 가리지 않는다 — 가리던 판은 그 줄을 다른 id 로 댄 판도 같다고 보았다.
+FIXTURE_IDS = {b"moai-aaaa", b"moai-bbbb", b"moai-cccc", b"moai-aaab", b"moai-aaac", b"moai-aaad", b"moai-brok"}
+
+
+def case_ids(case: Case) -> set[bytes]:
+    """사례가 argv·stdin·env 로 건넨 id 꼴의 글. 명령이 지은 것이 아니니 가리지 않는다 — 가리면 없는 id 를 받아 엉뚱한
+    id 를 되뇐 판도 같아 보인다."""
+    parts = [a.encode() for a in case.args] + [case.stdin or b""] + [v.encode() for v in case.env.values() if v]
+    return set(ID_RE.findall(b"\0".join(parts)))
+
+
+def tracker_above(work: Path) -> Path | None:
+    """`work` 나 그 위에 선 트래커(`.moai`)의 자리. 없으면 None.
+
+    `-C {home}`·`-C {tmp}`·훅의 `cwd` 처럼 `.moai` 가 없는 자리에서 친 moai 는 위로 올라가 트래커를 잡는다
+    (`store::Repo::find`). 자리 위에 진짜 트래커가 있으면 그 사례의 쓰기가 거기에 들고 — 스냅샷은 그것을 못 보고, 두 판은
+    다른 입력을 받는다. 저장소 안(`target/`, 워크트리)에 `--work` 를 두면 그 트래커가 이 저장소의 것이다.
+    """
+    for d in (work, *work.parents):
+        if (d / ".moai").exists():
+            return d
+    return None
 
 
 def run_cases(args: argparse.Namespace, old: Path, new: Path, work: Path, template: Template, todo: list[Case]) -> int:
     known = known_ids(template)
     jobs = max(1, args.jobs)
     boxes = [Sandbox(work / f"box{k}", template) for k in range(jobs)]
-    for b in boxes:
-        b.build()
+    with futures.ThreadPoolExecutor(jobs) as ex:
+        list(ex.map(lambda b: b.build(), boxes))
+    if not all(b.ctl_reachable() for b in boxes):
+        say(f"bindiff: 자리 경로({work})가 길어 ctl 소켓을 못 짓는다 — `web` 의 ctl 갈래는 두 판 다 '못 쓴다' 로만 견준다. 짧은 --work 를 준다")
     pending = [(case, lang) for case in todo for lang in args.lang]
     lock = threading.Lock()
     failed: list[tuple[str, str, list[str]]] = []
+    # 도구가 진 사례(git 이 진 되돌림 따위). 일꾼째 죽던 판은 남은 일꾼이 줄을 다 비운 뒤 traceback 하나로 끝나, 찾은 차이도
+    # 못 찍고 "차이" 와 같은 종료 코드 1 을 냈다.
+    harness: list[tuple[str, str, str]] = []
     done = [0]
     # 옛 판의 종료 코드 분포. 사례가 다 오류로 끝나면 "차이 0" 이 아무것도 말하지 않는다.
     codes: dict[str, int] = {}
@@ -1097,11 +1290,15 @@ def run_cases(args: argparse.Namespace, old: Path, new: Path, work: Path, templa
                 if not pending:
                     return
                 case, lang = pending.pop(0)
-            a = box.run(old, case, lang)
-            reap()
-            b = box.run(new, case, lang)
-            reap()
-            d = compare(a, b, known)
+            try:
+                a = box.run(old, case, lang)
+                b = box.run(new, case, lang)
+                d = compare(a, b, known | case_ids(case))
+            except (Exception, SystemExit) as e:  # `git()` 은 SystemExit 로 진다
+                with lock:
+                    harness.append((case.name, lang, repr(e)))
+                    say(f"도구 오류: [{lang}] {case.name} {e!r}")
+                continue
             with lock:
                 done[0] += 1
                 codes[str(a.code)] = codes.get(str(a.code), 0) + 1
@@ -1125,13 +1322,17 @@ def run_cases(args: argparse.Namespace, old: Path, new: Path, work: Path, templa
             say(f"차이: [{lang}] web")
 
     took = time.time() - started
+    if done[0] == 0:
+        # 아무것도 안 견준 판은 "차이 0" 이 아니다 — `--only` 의 오타 하나가 관문을 헛되이 지나게 한다.
+        say("bindiff: 견준 사례가 없다 (--only·--lang 을 본다)")
+        return 2
     report = work / "report.txt"
     with report.open("w") as f:
         for name, lang, d in failed:
             case = next((c for c in todo if c.name == name), None)
             f.write(f"### [{lang}] {name}\n")
             if case:
-                f.write(f"    moai {' '.join(case.args)}\n")
+                f.write(f"    moai {shlex.join(case.args)}\n")
                 if case.env:
                     f.write(f"    env {case.env}\n")
                 if case.stdin:
@@ -1139,18 +1340,22 @@ def run_cases(args: argparse.Namespace, old: Path, new: Path, work: Path, templa
             f.write("\n".join(d) + "\n\n")
     print(f"사례 {len(todo)}개 × 언어 {len(args.lang)} = {done[0]}번 견줌, 차이 {len(failed)}, {took:.0f}초")
     print("옛 판의 종료 코드: " + ", ".join(f"{k} {v}번" for k, v in sorted(codes.items())))
+    for name, lang, why in harness[:20]:
+        print(f"도구 오류: [{lang}] {name} {why}")
     if failed:
         print(f"차이의 전문: {report}")
         for name, lang, d in failed[: args.show]:
             print(f"\n### [{lang}] {name}")
             print("\n".join(d[:30]))
-        return 1
-    return 0
+    if harness:
+        return 2
+    return 1 if failed else 0
 
 
-def reap() -> None:
-    while HELD:
-        p = HELD.pop()
+def reap(held: list[subprocess.Popen]) -> None:
+    """`held` 의 자식을 죽이고 거둔다. 부르는 자는 `Sandbox.run` 하나다 — 제 자리가 띄운 것(`Sandbox.held`)만 거둔다."""
+    while held:
+        p = held.pop()
         try:
             os.killpg(p.pid, signal.SIGKILL)
         except ProcessLookupError:
@@ -1225,6 +1430,10 @@ def main(argv: list[str]) -> int:
         tmp = tempfile.mkdtemp(prefix="bindiff-")
         work = Path(tmp)
     try:
+        above = tracker_above(work)
+        if above:
+            say(f"bindiff: 자리({work}) 위에 트래커({above / '.moai'})가 있다 — 자리 밖으로 올라간 쓰기가 거기에 든다. 트래커 밖의 --work 를 준다")
+            return 2
         # 꾸밈은 옛 판이 한다 — 두 판이 받는 입력이 같으면 누가 꾸몄는지는 상관없다.
         template = Template(work, args.commit, old)
         template.build()
@@ -1235,8 +1444,11 @@ def main(argv: list[str]) -> int:
         if args.only:
             todo = [c for c in todo if re.search(args.only, c.name)]
         return run_cases(args, old, new, work, template, todo)
+    except SystemExit as e:
+        # 준비(clone·꾸밈)가 진 판은 2 다 — 차이(1)와 갈라야 관문이 고장 난 도구를 바뀐 동작으로 안 읽는다.
+        say(str(e))
+        return 2
     finally:
-        reap()
         if tmp and not args.keep:
             shutil.rmtree(tmp, ignore_errors=True)
 
