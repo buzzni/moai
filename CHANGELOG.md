@@ -14,7 +14,7 @@ does not tag — see `CONTRIBUTING.md`.
 
 ### Changed
 
-- `moai web` budgets live event streams per browser: each browser keeps up to three, told apart by a random id the page keeps in local storage, so another browser or a remote viewer no longer takes the places of the person's ctl tabs; 32 streams across every browser remain the server's ceiling. Simultaneously opened first tabs coordinate the id; pages without Web Locks or storage share the fallback budget. (moai-xvw3)
+- `moai web` budgets live event streams per browser: each browser keeps up to three, told apart by a random id the page keeps in local storage, so another browser or a remote viewer no longer takes the places of the person's ctl tabs; 32 streams across every browser remain the server's ceiling. Simultaneously opened first tabs agree on the id through Web Locks where the browser offers them (a loopback address or HTTPS); pages that cannot keep the id share the fallback budget. (moai-xvw3)
 
 ### Fixed
 

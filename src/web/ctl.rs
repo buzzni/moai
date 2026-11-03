@@ -566,8 +566,11 @@ mod tests {
         assert!(tabs.stream_for(here, false, Some((&id, &token)), true, 2, "a").unwrap().is_some());
     }
 
+    /// The page's half (web/panel/data/browser-id.ts) gives simultaneous first tabs one id; this is the server's half,
+    /// at the budget the server ships rather than a number of its own.
     #[test]
     fn simultaneous_first_tabs_share_three_slots() {
+        use super::super::STREAMS_MAX;
         let tabs = Tabs::new();
         let here = Path::new("/tmp");
         let gate = std::sync::Barrier::new(8);
@@ -576,15 +579,15 @@ mod tests {
                 .map(|_| {
                     scope.spawn(|| {
                         gate.wait();
-                        tabs.stream_for(here, false, None, true, 3, "first-browser").unwrap().is_some()
+                        tabs.stream_for(here, false, None, true, STREAMS_MAX, "first-browser").unwrap().is_some()
                     })
                 })
                 .collect();
             workers.into_iter().map(|worker| worker.join().unwrap()).filter(|admitted| *admitted).count()
         });
-        assert_eq!(admitted, 3);
-        assert!(tabs.stream_for(here, false, None, true, 3, "first-browser").unwrap().is_none());
-        assert!(tabs.stream_for(here, false, None, true, 3, "other-browser").unwrap().is_some());
+        assert_eq!(admitted, 3, "one browser's budget is three streams");
+        assert!(tabs.stream_for(here, false, None, true, STREAMS_MAX, "first-browser").unwrap().is_none());
+        assert!(tabs.stream_for(here, false, None, true, STREAMS_MAX, "other-browser").unwrap().is_some());
     }
 
     #[test]
