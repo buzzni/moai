@@ -117,3 +117,53 @@ fn edit_and_show_agree_on_blocker_members_in_each_live_state() {
         }
     }
 }
+
+#[cfg(target_os = "linux")]
+#[test]
+fn due_rejudges_after_waiting_for_the_write_lock() {
+    use fs2::FileExt;
+    use std::os::unix::fs::MetadataExt;
+    use std::time::{Duration, Instant};
+
+    let repo = Repo::new("due-lock");
+    let mut issue = row("argos-aaaa", "issue", "todo");
+    issue["due_on"] = "2026-09-11".into();
+    repo.write(".moai/issues.jsonl", &format!("{issue}\n"));
+    let lock = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(repo.0.join(".moai/lock"))
+        .unwrap();
+    lock.lock_exclusive().unwrap();
+    let mut child = repo.command(&["due", "apply"]).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().unwrap();
+    let held = lock.metadata().unwrap();
+    let until = Instant::now() + Duration::from_secs(5);
+    loop {
+        let opened = std::fs::read_dir(format!("/proc/{}/fd", child.id()))
+            .into_iter()
+            .flatten()
+            .flatten()
+            .filter_map(|entry| std::fs::metadata(entry.path()).ok())
+            .any(|file| file.dev() == held.dev() && file.ino() == held.ino());
+        if opened {
+            break;
+        }
+        assert!(child.try_wait().unwrap().is_none(), "due exited before reaching the write lock");
+        assert!(Instant::now() < until, "due never reached the write lock");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    issue["due_on"] = "2026-12-01".into();
+    let snapshot = format!("{issue}\n");
+    repo.write(".moai/issues.jsonl", &snapshot);
+    FileExt::unlock(&lock).unwrap();
+    let output = child.wait_with_output().unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert_eq!(std::fs::read(repo.0.join(".moai/issues.jsonl")).unwrap(), snapshot.as_bytes());
+    let journal = repo.0.join(".moai/journal");
+    assert!(
+        !journal.exists() || std::fs::read_dir(journal).unwrap().next().is_none(),
+        "a stale preview wrote a journal entry"
+    );
+}
