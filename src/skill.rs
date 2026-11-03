@@ -610,7 +610,7 @@ pub fn planted_exe(text: &str) -> Option<String> {
 /// 잰다), NUL 은 통째로 버려진다(bash 는 그때 제 경고를 stderr 에 한 줄 얹는다). `moai` 의
 /// JSON 은 U+0000 을 `\u0000` 으로 쓰므로 지금은 둘 다 안 닿는다.
 ///
-/// **`moai` 쪽도 한 자리를 옮겼다**(같은 결정). `src/main.rs` 는 이제
+/// **`moai` 쪽도 한 자리를 옮겼다**(같은 결정). `src/lib.rs` 의 `run` 은 이제
 /// `carried`·`unjournaled`·`unread_journals`·`redirected` 를 먼저 돌리고 `print(&lines)` 를 맨
 /// 뒤에 둔다 — 넷 다 stderr 에만 쓰므로 stdout 의 차례는 안 바뀌고, 판정을 흘려보낸 뒤에 101 이
 /// 올 자리가 그 넷뿐이었으니 이제 **101 은 stdout 이 비었다는 뜻**이다. 셸 한 줄의 가정이 아니라
@@ -626,7 +626,7 @@ pub fn planted_exe(text: &str) -> Option<String> {
 /// **받아 두는 갈래가 그 자리에서 잃는 것을 늘렸다**(리뷰 moai-514e.0er). 옛 줄은 `moai` 의 fd 1
 /// 이 곧 `claude` 의 파이프라, 죽기 전에 쓴 바이트는 이미 건너가 있었다. 이 줄은 그것을 `$o` 에
 /// 들고 있다가 `moai` 가 끝난 **뒤에** 흘려보내므로, 그룹째 죽는 때에는 판정까지 통째로
-/// 사라진다(같은 날의 측정값: 옛 줄 53B, 이 줄 0B). `src/main.rs` 가 `print(&lines)` 를 맨 뒤로
+/// 사라진다(같은 날의 측정값: 옛 줄 53B, 이 줄 0B). `run`(그때는 `src/main.rs`)이 `print(&lines)` 를 맨 뒤로
 /// 옮겨 그 틈이 마이크로초라는 것이 지금 서는 근거고, **그 틈은 0 이 아니다** — 여기서 지는
 /// 쪽은 막아야 할 쓰기가 통과하는 쪽이다. 도장을 다시 볼 때 이것도 함께 잰다.
 ///
@@ -643,7 +643,7 @@ pub fn planted_exe(text: &str) -> Option<String> {
 /// 손실도 옛날 그대로다(목록은 `cmd::hook` 의 `once_per_session` 이 든다).
 ///
 /// **`printf` 가 SIGPIPE 에 맞아도 0 으로 나간다**(리뷰 moai-514e.0er). 옛 줄에서는 fd 1 을
-/// `moai` 가 쥐었고 `src/main.rs` 의 `outln!` 이 `BrokenPipe` 를 삼켜 0 으로 끝났다. 이 줄은
+/// `moai` 가 쥐었고 `outln!`(그때는 `src/main.rs`, 지금은 `src/lib.rs`)이 `BrokenPipe` 를 삼켜 0 으로 끝났다. 이 줄은
 /// **껍데기가** 그 fd 에 쓰므로 받는 쪽이 먼저 닫으면 껍데기가 시그널에 죽어 **141** 로 나간다
 /// (2026-09-23 에 dash·bash 둘 다 그랬다. 옛 줄은 같은 자리에서 0 이었다). 아래 시험이 못박은
 /// "종료 코드는 어느 갈래에서도 0" 이 그 한 값으로 깨지고, 훅의 비영 종료가 무엇을 하는지는
@@ -831,12 +831,12 @@ fn codex_cmd_line(exe: &str, event: &str) -> String {
 /// - exe 철자는 [`portable_exe`] 를 지난다 — 따옴표 없이 적으니 두 셸 어디서도 뜻이 없는 글자만 받는다
 ///
 /// **셸이 못 하는 것은 moai 가 한다**(moai-r2nn.kep) — 이 줄에는 출력을 붙잡아 거를 셸이 없으니, `moai hook --dialect antigravity` 가
-/// 제 안에서 패닉하면 잡아 stdout 에 아무것도 안 내고 0 으로 끝난다(`main` 의 `survived`). 판정을 못 내면 통과다. Claude·Codex 의
+/// 제 안에서 패닉하면 잡아 stdout 에 아무것도 안 내고 0 으로 끝난다(`src/lib.rs` 의 `survived`). 판정을 못 내면 통과다. Claude·Codex 의
 /// POSIX 줄은 101 을 보고 알림을 내므로 그쪽 갈래는 안 잡는다. **남는 한계**: 없는 `moai` 는 셸이 stderr 에 한 줄(sh `not found`·cmd
 /// `is not recognized`)을 남기고, `--dialect` 를 모르는 옛 `moai` 는 clap 이 2 로 끝내 `|| exit 0` 이 통과로 바꾼다.
 ///
 /// **Unix 의 Antigravity 가 잃는 것** — 옛 POSIX 줄이 하던 셋이다. (1) `MOAI_HOOK_HANDOFF` 쪽지: 표식을 `moai` 가
-/// 제 안에서 세우는 옛 갈래로 물러선다(`cmd::hook` 의 `once_per_session`). (2) `trap … PIPE`: `main` 의 `outln!` 이
+/// 제 안에서 세우는 옛 갈래로 물러선다(`cmd::hook` 의 `once_per_session`). (2) `trap … PIPE`: `src/lib.rs` 의 `outln!` 이
 /// BrokenPipe 를 삼켜 같은 몫을 한다. (3) `set +e`: 치환이 없어져 필요가 없다. 그리고 agy 에는 원래 알림(`systemMessage`)
 /// 이 없었다 — 못 도는 판은 빈 출력이었고 지금도 그렇다. 잃는 것이 사람에게 보이는 동작을 바꾸지 않아 받아들인다.
 fn portable_line(exe: &str, event: &str, dialect_word: &str) -> String {
@@ -2082,7 +2082,7 @@ mod tests {
     ///
     /// 지금은 모든 자식이 `Stdio::piped()`·`Stdio::from(파일)` 이라 깨끗하다. **행동으로는 못 잡으니**
     /// (안 걸리면 아무 시험도 안 붉어지고, 걸리면 15초씩 멈춘다) 소스를 글자로 훑는다 —
-    /// `main.rs` 의 `the_notices_never_reach_stdout_and_print_stands_last` 와 같은 자다.
+    /// `lib.rs` 의 `the_notices_never_reach_stdout_and_print_stands_last` 와 같은 자다.
     #[test]
     fn nothing_hands_its_stdout_down_to_a_child() {
         let mut dirs = vec![PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/src"))];
