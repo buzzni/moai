@@ -1,4 +1,5 @@
 //! Content-addressed pictures. Storage belongs to Shelf; references stay in markdown.
+pub(crate) mod placeholder;
 pub mod term;
 use image::{DynamicImage, ImageDecoder, ImageFormat, ImageReader};
 use std::io::{Cursor, Write};
