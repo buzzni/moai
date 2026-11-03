@@ -11693,3 +11693,9 @@
 {"ts":"2026-11-03T07:23:30Z","id":"moai-ut5w.1v6","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"v0.45.0 릴리스 진행 — 병합·판 올리기·소식·PR"}
 {"ts":"2026-11-03T07:23:30Z","id":"moai-ut5w.rjy","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"tmux 안 Ghostty 에서 탐색기 그림을 찍는다"}
 {"ts":"2026-11-03T07:23:35Z","id":"moai-ut5w.1v6","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-11-03T07:36:29Z","id":"moai-ut5w.1v6","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 병합(8d8e36c5)·판 올리기(27a7f227)·post.md·make-tmux.sh 까지 했다. 사람이 make-tmux.sh 로 tmux 안 그림 두 장을 media/ 에 올리면, 설명 줄 → post.py --preview → docs(release-posts) 커밋 → push develop → gh pr create --base main --head develop --title v0.45.0."}
+{"ts":"2026-11-03T08:14:46Z","id":"moai-ut5w.rjy","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"사람이 2026-11-03 Ghostty → ssh → tmux 에서 make-tmux.sh 로 두 장을 찍어 올렸다. 창 제목·tmux 상태줄의 내부 호스트 이름은 사람의 결정으로 감독이 잘라 냈다(3ab43e89)."}
+{"ts":"2026-11-03T08:14:46Z","id":"moai-ut5w.rjy","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"사람이 찍은 그림 두 장이 3ab43e89 에 실렸다"}
+{"ts":"2026-11-03T08:14:47Z","id":"moai-ut5w.1v6","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 (medium — 릴리스 차례: 병합·판 올리기·소식·PR)"}
+{"ts":"2026-11-03T08:14:47Z","id":"moai-ut5w.1v6","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"PR #73 (develop → main) 을 열었다. 남은 것: 관리자가 머지(squash 금지)와 Actions 의 tag on merge 승인 → v0.45.0 태그·릴리스·Discord. 릴리스가 나가면 git worktree remove .worktrees/milestone-moai-k1ns, git branch -d milestone/moai-k1ns, rm -rf /tmp/cargo-target/milestone-moai-k1ns."}
+{"ts":"2026-11-03T08:14:47Z","id":"moai-ut5w.1v6","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"develop 에 0.45.0 이 서고 PR #73 이 열렸다. 태그는 관리자 승인 뒤"}
