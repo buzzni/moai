@@ -76,3 +76,44 @@ fn rule_five_ignores_an_opaque_live_rows_archived_owner() {
     let result = text(child.wait_with_output().unwrap());
     assert!(!result.contains("Rule 5"), "{result}");
 }
+
+#[test]
+fn edit_and_show_agree_on_blocker_members_in_each_live_state() {
+    for state in ["done", "reopened", "deferred", "opaque"] {
+        let repo = Repo::new(state);
+        let blocker = row("argos-bbbb", "epic", "todo");
+        let mut issue = row("argos-xxxx", "issue", "todo");
+        issue["blocked_by"] = serde_json::json!(["argos-bbbb"]);
+        let mut live = format!("{blocker}\n{issue}\n");
+        let archived = row("argos-bbbb.aaa", "issue", "done");
+        match state {
+            "reopened" => live.push_str(&format!("{}\n", row("argos-bbbb.aaa", "issue", "in_progress"))),
+            "deferred" => {
+                let mut member = row("argos-bbbb.aaa", "issue", "todo");
+                member["deferred_at"] = "2026-09-10T00:00:00Z".into();
+                live.push_str(&format!("{member}\n"));
+            }
+            "opaque" => live.push_str(&format!("{}\n", row("argos-bbbb.aaa", "future-kind", "todo"))),
+            _ => (),
+        }
+        repo.write(".moai/issues.jsonl", &live);
+        repo.write(".moai/archive/2026.jsonl", &format!("{archived}\n"));
+        if state == "opaque" {
+            let edited = text(repo.run(&["edit", "argos-xxxx", "--title", "renamed"]));
+            let blocker = edited.lines().find(|l| l.contains("argos-bbbb")).unwrap_or_default();
+            assert!(!blocker.contains('✓'), "opaque live member must suppress its archived copy: {edited}");
+            continue;
+        }
+        let shown = text(repo.run(&["show", "argos-xxxx"]));
+        let edited = text(repo.run(&["edit", "argos-xxxx", "--title", "renamed"]));
+        let line = |out: &str| out.lines().find(|l| l.contains("argos-bbbb")).unwrap_or_default().to_owned();
+        assert!(!line(&shown).is_empty(), "{state}: {shown}");
+        assert_eq!(line(&shown), line(&edited), "{state}: show={shown}; edit={edited}");
+        if state == "done" {
+            assert!(line(&shown).contains('✓'), "{shown}");
+        }
+        if state == "reopened" {
+            assert!(!line(&shown).contains('✓'), "{shown}");
+        }
+    }
+}
