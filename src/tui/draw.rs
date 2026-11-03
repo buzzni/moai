@@ -6441,6 +6441,14 @@ impl Painter {
             screen(f, app);
             use std::io::IsTerminal;
             // Always called: besides linking, it takes the path markers off the frame (`link_image_cells`).
+            let pictures = picture_targets(app, !app.raw);
+            let interested = !pictures.is_empty()
+                && match &app.mode {
+                    Mode::Browse => app.drawn.detail.is_some(),
+                    Mode::Wiki(_) => app.drawn.wiki.as_ref().is_some_and(|w| w.page.is_some()),
+                    _ => false,
+                };
+            app.images.interest(interested);
             image_hyperlinks(f.buffer_mut(), app, std::io::stdout().is_terminal() && !app.raw);
             let _ = app.images.frame(f.buffer_mut(), &mut std::io::stdout().lock());
         })
@@ -13624,7 +13632,10 @@ mod bench {
 /// The targets are the ones [`fill_body`] and `wiki_page` resolved with the laid lines (moai-fauw): parsing the body
 /// and canonicalizing every picture here ran once per frame, on every key held down.
 fn image_hyperlinks(buffer: &mut ratatui::buffer::Buffer, app: &App, link: bool) {
-    let targets: &[(String, std::path::PathBuf)] = match &app.mode {
+    link_image_cells(buffer, picture_targets(app, link));
+}
+fn picture_targets(app: &App, link: bool) -> &[(String, std::path::PathBuf)] {
+    match &app.mode {
         _ if !link => &[],
         Mode::Wiki(w) if w.choose.is_none() => match (&w.laid, w.current()) {
             (Some(l), Some(p)) if l.slug == p.slug && !l.raw => &l.images,
@@ -13632,8 +13643,7 @@ fn image_hyperlinks(buffer: &mut ratatui::buffer::Buffer, app: &App, link: bool)
         },
         Mode::Browse => app.body.as_ref().filter(|b| !b.raw).map_or(&[], |b| &b.images[..]),
         _ => &[],
-    };
-    link_image_cells(buffer, targets);
+    }
 }
 fn image_link_marker(dest: &str) -> Color {
     let hash = dest.bytes().fold(2166136261u32, |h, b| (h ^ u32::from(b)).wrapping_mul(16777619));

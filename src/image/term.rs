@@ -1,4 +1,4 @@
-//! Shared graphics protocols. No terminal escape queries; inherited TMUX is checked once against pane ttys.
+//! Shared graphics protocols. No terminal escape queries; inherited TMUX is checked against pane ttys.
 use super::From;
 use base64::{Engine, engine::general_purpose::STANDARD};
 use std::io::{IsTerminal, Write};
@@ -60,20 +60,34 @@ pub fn detect(
 /// Resolve tmux separately from protocol hints: server-inherited kitty variables are
 /// not evidence about the attached client. Never change the user's passthrough option.
 pub fn detect_terminal(setting: Option<&str>) -> Protocol {
+    terminal_state(setting).protocol
+}
+
+/// The protocol and the attached client generation must travel together: a new client may have the same size.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TerminalState {
+    pub protocol: Protocol,
+    pub client: Option<String>,
+}
+pub fn terminal_state(setting: Option<&str>) -> TerminalState {
     let chosen = std::env::var("MOAI_IMAGES").ok();
     let setting = chosen.as_deref().or(setting);
     if setting.is_some_and(|s| s != "auto") {
-        return detect(|k| std::env::var(k).ok(), setting, |_| None);
+        return TerminalState { protocol: detect(|k| std::env::var(k).ok(), setting, |_| None), client: None };
     }
     // One process and one timeout for both the tty comparison and the client's permission.
     let pane = std::env::var("TMUX").ok().and_then(|value| tmux_state(&value));
-    if let Some((true, kitty)) = pane {
-        return if kitty { Protocol::KittyTmux } else { Protocol::Off };
+    if let Some((true, client)) = &pane {
+        return TerminalState {
+            protocol: if passthrough_client(client) { Protocol::KittyTmux } else { Protocol::Off },
+            client: Some(client.clone()),
+        };
     }
-    detect(|k| std::env::var(k).ok(), setting, |_| pane.map(|(inside, _)| inside))
+    TerminalState {
+        protocol: detect(|k| std::env::var(k).ok(), setting, |_| pane.as_ref().map(|(inside, _)| *inside)),
+        client: None,
+    }
 }
-// Only the unix probe reads a reply; without the gate the Windows clippy job (`-D warnings`) fails on dead code.
-#[cfg(any(unix, test))]
 fn passthrough_client(reply: &str) -> bool {
     let mut lines = reply.lines();
     matches!(lines.next(), Some("xterm-kitty" | "xterm-ghostty")) && matches!(lines.next(), Some("on" | "all"))
@@ -95,7 +109,7 @@ pub fn passthrough(payload: &[u8]) -> Vec<u8> {
 }
 /// Compare stdout's device with the server's panes. Unknown means graphics stay off.
 #[cfg(unix)]
-fn tmux_state(value: &str) -> Option<(bool, bool)> {
+fn tmux_state(value: &str) -> Option<(bool, String)> {
     use std::os::{fd::AsFd, unix::fs::MetadataExt};
     let stdout = std::io::stdout();
     if !stdout.is_terminal() {
@@ -109,7 +123,8 @@ fn tmux_state(value: &str) -> Option<(bool, bool)> {
     if let Ok(pane) = std::env::var("TMUX_PANE") {
         command.args(["-t", &pane]);
     }
-    command.arg("MOAI_CLIENT\n#{client_termname}\n#{allow-passthrough}");
+    command
+        .arg("MOAI_CLIENT\n#{client_termname}\n#{allow-passthrough}\n#{client_pid}\n#{client_created}\n#{client_tty}");
     let output = tmux_output(command, std::time::Duration::from_secs(2))?;
     let text = std::str::from_utf8(&output).ok()?;
     let (panes, client) = text.split_once("MOAI_CLIENT\n").unwrap_or((text, ""));
@@ -122,11 +137,11 @@ fn tmux_state(value: &str) -> Option<(bool, bool)> {
     for tty in panes.lines() {
         let Ok(meta) = std::fs::metadata(tty) else { continue };
         if meta.rdev() == device {
-            return Some((true, passthrough_client(client)));
+            return Some((true, client.to_owned()));
         }
         checked = true;
     }
-    checked.then_some((false, false))
+    checked.then_some((false, String::new()))
 }
 /// Bound the whole probe, including stdout collection. A nonblocking socket avoids a reader thread that could
 /// outlive the timeout if an inherited stdout remains open in a descendant of the client.
@@ -178,7 +193,7 @@ fn tmux_output(mut command: std::process::Command, timeout: std::time::Duration)
     result
 }
 #[cfg(not(unix))]
-fn tmux_state(_: &str) -> Option<(bool, bool)> {
+fn tmux_state(_: &str) -> Option<(bool, String)> {
     None
 }
 
