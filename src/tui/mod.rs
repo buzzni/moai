@@ -5134,6 +5134,13 @@ impl App {
         // 그것을 짓는 자는 `place_of` 뿐이라 `read` 가 낸 그 갈래가 곧 제 자리 까닭이다. 글로 견주던 판은
         // 위의 `place_of` 와 `read` 안의 `place_of` 사이에 자리가 바뀌면(한쪽의 `canonicalize` 만 지면) 못
         // 빼, 그 까닭이 "이상한 줄" 로 이름 붙었다.
+        // Retryable pending-sheet I/O failures follow the same quiet policy as the main sheet.
+        // Keep unrelated malformed-line diagnostics, even when a pending read also failed.
+        if marks.pending.is_some_and(|t| t.again() != crate::user_config::Again::Never)
+            && let Some(pending) = &place.pending
+        {
+            marks.problems.retain(|p| !matches!(p, crate::read_marks::SheetTrouble::Said { at, .. } if at == pending));
+        }
         let where_why = marks
             .problems
             .iter()
@@ -5164,8 +5171,8 @@ impl App {
     fn take_read(site: &mut Site, got: Got) -> Option<String> {
         let Got { marks, stamp, where_why } = got;
         // **다시 읽을 때는 갈래가 정한다**(moai-po6v) — [`App::follow_config`] 와 **한 자다**
-        // ([`crate::user_config::Again`]). 잠깐인 것만 표식을 안 올려 다음 걸음이 같은 차이를 다시 보게
-        // 한다. 권한은 다시 해도 같아 걸음마다 읽으면 헛돌지만, 되돌리는 `chmod` 이 고친 때도 길이도
+        // ([`crate::user_config::Again`]). 표식이 같아도 `owed` 가 잠깐인 것을 다시 본다.
+        // 권한은 다시 해도 같아 걸음마다 읽으면 헛돌지만, 되돌리는 `chmod` 이 고친 때도 길이도
         // 안 바꿔 표식으로는 영영 못 벗어난다 — 그래서 표식은 올리고 시계로 다시 본다
         // ([`App::follow_read`]). 깨진 것·남의 것은 사람이 고쳐야 같아지고 고치면 파일이 바뀐다.
         // **대기 자리를 못 든 것도 다시 볼 까닭이다**(moai-ocly). 그 파일은 있으면 아직 안 합친 도장이
@@ -5180,14 +5187,9 @@ impl App {
         // (아래 `marks.trouble.is_none()`).
         site.read_tried.saw(marks.trouble);
         site.read_pending.saw(marks.pending);
-        // **표식은 둘 다 잠깐이 아닐 때만 올린다** — 한쪽이 "다음 걸음에" 면 그 걸음이 같은 차이를 다시
-        // 봐야 한다.
-        let step = |t: Option<crate::user_config::Trouble>| {
-            t.map(crate::user_config::Trouble::again) == Some(crate::user_config::Again::Step)
-        };
-        if !step(marks.trouble) && !step(marks.pending) {
-            site.read_stamp = Some(stamp);
-        }
+        // Remember every attempted stamp. The retry debt above controls unchanged failures,
+        // including the bound on transient failures; a new stamp still wakes the follower.
+        site.read_stamp = Some(stamp);
         // **못 든 것과 한 줄 건너뛴 것을 가른다**(리뷰). 못 들었으면 들고 있던 것을 둔다 — 빈 표를
         // 들이면 내 줄이 통째로 [NEW] 로 선다. 건너뛴 줄 하나는 나머지를 버릴 까닭이 아니다: 버리던
         // 판은 손으로 적은 맨 점 키 하나가 그 프로젝트의 [NEW] 를 영영 세워 두었고, 같은 파일을 읽는
@@ -5198,8 +5200,8 @@ impl App {
         //
         // **가르는 것은 지금 자리의 갈래다**(리뷰) — 아래 `seen` 을 들일지를 가르는 그 값이다. 대기
         // 자리의 갈래를 함께 보던 판은 표를 **들이고도** "읽음을 못 들었다"(`tui.read.unheld`)고 말해,
-        // 화면의 상태와 화면의 말이 서로를 부정했다. 대기 자리의 까닭은 `problems` 에 실려 아래 `None`
-        // 갈래의 "줄 하나가 이상하다" 로 제 이름으로 선다.
+        // 화면의 상태와 화면의 말이 서로를 부정했다. 재시도할 대기 자리 I/O 탈은 `read_marks_of` 에서
+        // 걸러 조용히 두고, 나머지 줄 탈은 아래 `None` 갈래에서 댄다.
         let told = match marks.trouble {
             // **못 읽은 것은 말하지 않는다** — 잠깐인 것은 다음 걸음에 지나가고, 다시 해도 같은 것은
             // 시계가 돌 때마다 같은 줄을 세워 사람이 방금 띄운 말을 덮는다. 설정은 배너가 늘 이고
@@ -11814,8 +11816,10 @@ mod tests {
                 a.follow_read();
                 a.follow_changed
             };
-            // The first failure may clear [NEW] or display a pending-sheet notice; settle that visible transition.
-            assert!(follow(&mut a));
+            // A main-sheet failure can clear [NEW]; retryable failures stay silent for both sheets.
+            let changed = follow(&mut a);
+            assert_eq!(changed, !pending);
+            a.notice = Some("new user notice".into());
             let trouble = if pending { &a.site.read_pending } else { &a.site.read_tried };
             assert_eq!(trouble.trouble, Some(crate::user_config::Trouble::Reading));
             let mut tried = trouble.at;
@@ -11829,6 +11833,15 @@ mod tests {
                 })
                 .count();
             assert_eq!(redraws, 0, "unchanged failed attempts redrew the idle explorer");
+            assert_eq!(a.notice.as_deref(), Some("new user notice"));
+            // Once the transient window expires, an unchanged stamp must not bypass owed().
+            let trouble = if pending { &mut a.site.read_pending } else { &mut a.site.read_tried };
+            trouble.since = Some(std::time::Instant::now() - layer::BLIP);
+            let last = trouble.at;
+            assert!(!follow(&mut a));
+            let trouble = if pending { &a.site.read_pending } else { &a.site.read_tried };
+            assert_eq!(trouble.at, last, "expired transient failure was retried on every step");
+            assert_eq!(a.notice.as_deref(), Some("new user notice"));
             drop(socket);
             std::fs::remove_file(&at).unwrap();
             std::fs::write(&at, format!("{header}{mark}")).unwrap();
