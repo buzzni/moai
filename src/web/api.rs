@@ -191,7 +191,7 @@ pub fn split_project(query: &[(String, String)]) -> Result<(Option<String>, Vec<
     Ok((project, rest))
 }
 
-/// 쓰는 길 — **읽음 표시 넷과 계획 날 하나다**. 읽음은 사용자 설정 곁의 제 파일에만 적히고 트래커에는 안
+/// 쓰는 길 — **읽음 표시 여섯과 계획 날 하나다**. 읽음은 사용자 설정 곁의 제 파일에만 적히고 트래커에는 안
 /// 적힌다(`moai read --help`, 2026-10-22 사람 결정, moai-ly88). **계획 날(`/api/plan/<id>`)은 트래커에 쓰는 하나뿐인
 /// 길이다**(moai-d86e.3ud) — 간트의 막대 끌기가 `moai edit <id> --shift*=<N>`(하루 세우기는 `--start --due
 /// --if-unplanned`, moai-vj8w.02c)을 자식으로 부르니 `store::with_write` 를 지나고, 거절(시작이 기한 뒤·위 기한 넘김·그새
@@ -204,15 +204,27 @@ pub fn write_argv_of(path: &str, query: &[(String, String)]) -> Option<Result<Ve
     if let Some(id) = path.strip_prefix("/api/plan/") {
         return Some(issue_id(id).and_then(|()| plan_argv(id, query)));
     }
-    let built = match (path, path.strip_prefix("/api/read/"), path.strip_prefix("/api/read-group/")) {
-        ("/api/read-all", _, _) => Ok(strs(&["read", "--all"])),
-        ("/api/ctl-read-all", _, _) => Ok(strs(&["read", "--atomic", "--all"])),
-        (_, _, _) if path.starts_with("/api/ctl-read-group/") => {
-            let id = path.strip_prefix("/api/ctl-read-group/").unwrap();
-            issue_id(id).map(|()| vec!["read".into(), "--atomic".into(), format!("--epic={id}")])
-        }
-        (_, Some(id), _) => issue_id(id).map(|()| strs(&["read", "--", id])),
-        (_, _, Some(id)) => issue_id(id).map(|()| vec!["read".to_string(), format!("--epic={id}")]),
+    let group = |id: &str, atomic: bool| {
+        issue_id(id).map(|()| {
+            let mut args = vec!["read".to_string()];
+            if atomic {
+                args.push("--atomic".into());
+            }
+            args.push(format!("--epic={id}"));
+            args
+        })
+    };
+    let built = match (
+        path,
+        path.strip_prefix("/api/read/"),
+        path.strip_prefix("/api/read-group/"),
+        path.strip_prefix("/api/ctl-read-group/"),
+    ) {
+        ("/api/read-all", ..) => Ok(strs(&["read", "--all"])),
+        ("/api/ctl-read-all", ..) => Ok(strs(&["read", "--atomic", "--all"])),
+        (_, Some(id), _, _) => issue_id(id).map(|()| strs(&["read", "--", id])),
+        (_, _, Some(id), _) => group(id, false),
+        (_, _, _, Some(id)) => group(id, true),
         _ => {
             let ids = path.strip_prefix("/api/read-ids/")?;
             ids.split(',').try_for_each(issue_id).map(|()| {

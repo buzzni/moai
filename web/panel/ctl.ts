@@ -1,4 +1,3 @@
-import { routerTokens, wireToken } from './keys/names.js'
 /** The visible tab's local control interpreter. It uses the same store and key handlers as a person. */
 import { defaultDir, SORT_KEYS, type SortField } from './data/query.js'
 import { sortDefault } from './data/memory.js'
@@ -7,6 +6,7 @@ import { validZone } from './data/zone.js'
 import type { KeyWiring } from './keys/wiring.js'
 import { bindingsFor, bindingKeys, isAvailable } from './keys/table.js'
 import { detectPlatform } from './keys/router.js'
+import { routerTokens, wireToken } from './keys/names.js'
 import type { Store, Tab, ColumnName } from './store.js'
 import { clampRatio, DEFAULT_RATIO } from './view/split.js'
 import { DEFAULT_GRID } from './view/gantt-model.js'
@@ -110,7 +110,7 @@ export function createCtl(options: CtlOptions) {
         ...(name.startsWith('proposal.') ? { why: personOnly() } : keyed ? { why: 'needs its key: use moai ctl keys' } : {}) }
     }) })
   }
-  /** The explorer's spelling, which `moai ctl keys` checks (`Ctrl-d`, `BackTab`, `Bksp`, `gg`), as this router's tokens. */
+  /** Presses the explorer's spelling (`Ctrl-d`, `BackTab`, `Bksp`, `gg`), read into this router's tokens by keys/names.ts. */
   const press = (seqs: unknown, text: unknown): Reply => {
     if (!Array.isArray(seqs) || seqs.some((seq) => typeof seq !== 'string')) return no('bad_input', 'key sequences must be strings')
     if (text !== null && text !== undefined && typeof text !== 'string') return no('bad_input', 'text must be a string')

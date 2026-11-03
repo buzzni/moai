@@ -2,8 +2,11 @@
 const display: Readonly<Record<string, string>> = { Up: "↑", Down: "↓", Left: "←", Right: "→", Backspace: "Bksp", PageUp: "PgUp", PageDown: "PgDn" }
 const aliases: Readonly<Record<string, string>> = { Bksp: "Backspace", PgUp: "PageUp", PgDn: "PageDown" }
 
+/** Router modifiers to their spelled-out names: 'C-A-S-' → 'Ctrl-Alt-Shift-'. */
+const spelledMods = (mods: string): string => mods.replace(/C-/g, "Ctrl-").replace(/A-/g, "Alt-").replace(/S-/g, "Shift-")
+
 export function wireToken(token: string): string {
-  return token.replace(/^(?:(?:C|A|S)-)+/, (mods) => mods.replace(/C-/g, "Ctrl-").replace(/A-/g, "Alt-").replace(/S-/g, "Shift-")).replace(/Backspace$/, "Bksp")
+  return token.replace(/^(?:(?:C|A|S)-)+/, spelledMods).replace(/Backspace$/, "Bksp")
 }
 export function routerTokens(seq: string): string[] {
   return seq.split(/\s+/).filter(Boolean).flatMap((token) => {
@@ -19,7 +22,6 @@ export function keyLabel(notation: string): string {
   if (notation === "g g") return "gg"
   return notation.split(" ").filter(Boolean).map((token) => {
     const m = /^((?:[CAS]-)*)(.+)$/.exec(token)!
-    const mods = m[1]!.replace(/C-/g, "Ctrl-").replace(/A-/g, "Alt-").replace(/S-/g, "Shift-")
-    return mods + (display[m[2]!] ?? m[2]!)
+    return spelledMods(m[1]!) + (display[m[2]!] ?? m[2]!)
   }).join(" ")
 }

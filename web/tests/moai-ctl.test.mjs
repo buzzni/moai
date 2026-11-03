@@ -202,7 +202,7 @@ test('actions, do and keys use the shared English/Korean person-only refusal', a
   }
 })
 
-test('ctl all and group request atomic writes while key bindings retain the ordinary path', async () => {
+test('the read adapter sends atomic all and group to the ctl endpoints and the defaults to the ordinary ones', async () => {
   const calls = []
   // The read adapter exposes the distinction independently of the keyboard router.
   const { readMarks } = await panelModule('data/read.ts')

@@ -1,7 +1,8 @@
 //! `moai web` — 127.0.0.1 에서 트래커를 페이지로 낸다. 받기 고리와 길.
 //!
 //! **연결마다 스레드 하나.** 보통 요청은 자식 `moai --json …` 하나를 띄워 그 답을 옮긴다([`run`]).
-//! 사건 흐름은 제 스레드에서 1초마다 표식을 재며, 보통 요청의 [`BUSY_MAX`] 와 따로 [`STREAMS_MAX`] 를 센다.
+//! 사건 흐름은 제 스레드에서 1초마다 표식을 재며, 보통 요청의 [`BUSY_MAX`] 와 따로 브라우저마다 [`STREAMS_MAX`] 를,
+//! 모든 브라우저를 합쳐 [`ctl::STREAMS_TOTAL_MAX`] 를 센다.
 //! 비동기 런타임은 쓰지 않는다.
 //!
 //! **트래커에 쓰는 길은 계획 날 하나다.** 보통 API 길은 GET 이고, 쓰기 POST 는 둘이다([`api::write_argv_of`]) — 읽음 표시(2026-10-22
@@ -29,7 +30,8 @@ use std::time::{Duration, Instant};
 /// 동시에 도는 연결의 상한 — 넘치면 503 을 쓰고 닫는다. 페이지 하나가 한 번에 여는 부름은 몇 개다.
 pub const BUSY_MAX: usize = 32;
 /// Keep persistent streams per browser below its HTTP/1 per-origin connection budget. Overflow tabs use the
-/// page's polling fallback, leaving connections for ordinary reads and proposal claims/results.
+/// page's polling fallback, leaving connections for ordinary reads and proposal claims/results. Every browser
+/// together is bounded by [`ctl::STREAMS_TOTAL_MAX`].
 pub const STREAMS_MAX: usize = 3;
 /// 요청 머리 **전체**를 읽는 시한 — `read` 한 번의 시한이 아니다([`read_head`]).
 const READ_LIMIT: Duration = Duration::from_secs(5);

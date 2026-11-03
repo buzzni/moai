@@ -7,7 +7,8 @@
  * absent otherwise; with the person unknown it is absent everywhere. So when no row carries it, NEW is simply off.
  *
  * Writes (se-ehdi.o5u, moai-ly88). `POST /api/read/<id>`, `/api/read-ids/<ids>`, `/api/read-all`, `/api/read-group/<id>` run `moai read -- <id>`,
- * `read --atomic -- <ids>`, `read --all`, `read --epic=<id>`, which write the per-person file beside the user config; nothing goes to the
+ * `read --atomic -- <ids>`, `read --all`, `read --epic=<id>`; ctl's `/api/ctl-read-all` and `/api/ctl-read-group/<id>` run
+ * `read --atomic --all` and `read --atomic --epic=<id>`. They write the per-person file beside the user config; nothing goes to the
  * tracker. The envelope's `out` is `read --json`:
  * `{"read":[ids written now],"missing":[ids not in the tracker],"held":[ids a hand-written value blocked],
  *   "problems":[prose],"at":"<when the command ran>"}`. Ids that were already read at their current
@@ -89,11 +90,11 @@ export const markRead = (client: Client, row: Pick<Row, 'id'>, worktree = false,
 /** A ctl read uses one CLI transaction, including validation of every ID before any mark is written. */
 export const markManyRead = (client: Client, ids: readonly string[], worktree = false): Promise<Marked> => write(client, READ_ENDPOINT.many(ids, worktree))
 
-/** `SPC m a`: everything unread that came to me. */
-export const markAllRead = (client: Client, worktree = false, ctl?: Readonly<Record<string, string>>): Promise<Marked> => write(client, READ_ENDPOINT.all(worktree), ctl)
+/** `SPC m a`: everything unread that came to me. ctl passes `atomic` (`read --atomic --all`). */
+export const markAllRead = (client: Client, worktree = false, ctl?: Readonly<Record<string, string>>, atomic = false): Promise<Marked> => write(client, READ_ENDPOINT.all(worktree, atomic), ctl)
 
-/** `SPC m g`: a group's members and what is drawn under it. */
-export const markGroupRead = (client: Client, groupId: string, worktree = false, ctl?: Readonly<Record<string, string>>): Promise<Marked> => write(client, READ_ENDPOINT.group(groupId, worktree), ctl)
+/** `SPC m g`: a group's members and what is drawn under it. ctl passes `atomic` (`read --atomic --epic`). */
+export const markGroupRead = (client: Client, groupId: string, worktree = false, ctl?: Readonly<Record<string, string>>, atomic = false): Promise<Marked> => write(client, READ_ENDPOINT.group(groupId, worktree, atomic), ctl)
 
 /**
  * The writes as the keys call them (keys/wiring.ts `r`, `SPC m a`, `SPC m g`) and as ctl's `read <ids>` does (ctl.ts),
@@ -130,7 +131,7 @@ export function readMarks(client: Client, after: (written: ReadonlySet<string>) 
   return {
     one: (id) => marked(markRead(client, { id }, overlay(), identity())),
     ids: (ids) => marked(markManyRead(client, ids, overlay())),
-    all: (atomic = false) => marked(write(client, READ_ENDPOINT.all(overlay(), atomic), identity())),
-    group: (id, atomic = false) => marked(write(client, READ_ENDPOINT.group(id, overlay(), atomic), identity())),
+    all: (atomic = false) => marked(markAllRead(client, overlay(), identity(), atomic)),
+    group: (id, atomic = false) => marked(markGroupRead(client, id, overlay(), identity(), atomic)),
   }
 }
