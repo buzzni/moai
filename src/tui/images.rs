@@ -768,6 +768,48 @@ mod tests {
         image::DynamicImage::new_rgb8(160, 160).save(&p).unwrap();
         p
     }
+    #[test]
+    fn painter_interest_controls_follow_for_wiki_views() {
+        use crate::tui::{Mode, draw::Painter};
+        let (root, mut app) = crate::tui::wiki::tests::wiki_app(
+            "painter-interest",
+            &[("README.md", "# Picture\n\n![shot](images/a.png)"), ("plain.md", "# Plain")],
+        );
+        std::fs::create_dir_all(root.join("docs/images")).unwrap();
+        picture(&root.join("docs/images"), "a.png");
+        app.images = Images::testing();
+        app.hit("SPC g w");
+        crate::tui::settle_reads(&mut app);
+        let mut terminal = Terminal::new(TestBackend::new(100, 30)).unwrap();
+        let mut painter = Painter::default();
+        painter.draw(&mut terminal, &mut app).unwrap();
+        assert!(app.images.interested, "drawn picture page must enable refresh");
+        let (tx, rx) = std::sync::mpsc::channel();
+        tx.send(Some(term::TerminalState { protocol: Protocol::KittyTmux, client: Some("new client".into()) }))
+            .unwrap();
+        app.images.refresh = Some(rx);
+        assert!(app.follow(), "client transition must request a redraw through follow");
+        assert!(matches!(app.images.protocol, Some(Protocol::KittyTmux)));
+        let Mode::Wiki(w) = &mut app.mode else { panic!("wiki closed") };
+        assert!(w.follow("plain"));
+        crate::tui::settle_reads(&mut app);
+        painter.draw(&mut terminal, &mut app).unwrap();
+        assert!(!app.images.interested, "picture-free page must stop refresh");
+        let Mode::Wiki(w) = &mut app.mode else { panic!("wiki closed") };
+        assert!(w.follow("README"));
+        crate::tui::settle_reads(&mut app);
+        app.raw = true;
+        painter.draw(&mut terminal, &mut app).unwrap();
+        assert!(!app.images.interested, "raw view must stop refresh");
+        app.raw = false;
+        painter.draw(&mut terminal, &mut app).unwrap();
+        assert!(app.images.interested, "returning to picture view must resume refresh");
+        app.hit("Esc");
+        painter.draw(&mut terminal, &mut app).unwrap();
+        assert!(!app.images.interested, "hidden wiki must stop refresh");
+        app.images.active = false;
+    }
+
     #[cfg(unix)]
     #[test]
     fn tmux_refresh_pty_child() {
@@ -785,12 +827,55 @@ mod tests {
             write_state(&format!("{tty}\nMOAI_CLIENT\n{term}\n{permission}\n{client}\n100\n/dev/client-{client}\n"));
         };
         let queries = || std::fs::read_to_string(root.join("queries")).unwrap_or_default().lines().count();
+        if let Ok(expected) = std::env::var("MOAI_DIRECT_PROTOCOL") {
+            let expected = match expected.as_str() {
+                "kitty" => Protocol::Kitty,
+                "iterm" => Protocol::Iterm,
+                "sixel" => Protocol::Sixel,
+                _ => panic!("unknown direct protocol"),
+            };
+            write_state("/dev/null\n");
+            let mut direct = Images::default();
+            direct.active = true;
+            direct.terminal_probes = true;
+            let before = queries();
+            direct.enabled(); // initial auto-detection probes the inherited server once
+            assert_eq!(direct.protocol, Some(expected));
+            assert_eq!(queries(), before + 1);
+            assert!(direct.client.is_none());
+            direct.interest(true);
+            for _ in 0..10 {
+                direct.refresh_at = None;
+                direct.poll();
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            assert_eq!(queries(), before + 1, "outside-pane {expected:?} repeatedly probed tmux");
+            direct.active = false;
+            return;
+        }
         let path = picture(root, "image.png");
         let mut images = Images::default();
         images.active = true;
         images.terminal_probes = true;
         images.poll();
         assert_eq!(queries(), 0, "picture-free follow queried tmux");
+        write_state(""); // Initial tmux response is unknown; later refresh must still attach.
+        let mut unknown = Images::default();
+        unknown.active = true;
+        unknown.terminal_probes = true;
+        assert!(unknown.lines(&path, 20).is_empty());
+        assert!(unknown.off());
+        unknown.interest(true);
+        unknown.refresh_at = None;
+        snapshot("xterm-ghostty", "all", 1);
+        let until = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while unknown.off() {
+            unknown.poll();
+            assert!(std::time::Instant::now() < until, "unknown initial response never refreshed");
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        unknown.active = false;
+        std::fs::remove_file(root.join("queries")).unwrap();
         snapshot("xterm-ghostty", "on", 1);
         assert!(images.lines(&path, 20).is_empty(), "on must retain text before encoding starts");
         assert!(images.worker.is_none(), "on queued image encoding");
@@ -914,6 +999,33 @@ mod tests {
             }
             out
         });
+        for (protocol, term, program) in [
+            ("kitty", "xterm-kitty", ""),
+            ("iterm", "xterm-256color", "iTerm.app"),
+            ("iterm", "xterm-256color", "WezTerm"),
+            ("sixel", "foot", ""),
+        ] {
+            let output = Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", "tui::images::tests::tmux_refresh_pty_child", "--nocapture"])
+                .env("MOAI_IMAGE_REFRESH_CHILD", root.path())
+                .env("MOAI_IMAGE_REFRESH_TTY", tty.to_str().unwrap())
+                .env("MOAI_DIRECT_PROTOCOL", protocol)
+                .env("PATH", &bin)
+                .env("TMUX", "/tmp/moai-zidx-fake-only,1,0")
+                .env("TERM", term)
+                .env("TERM_PROGRAM", program)
+                .env_remove("MOAI_IMAGES")
+                .env_remove("KITTY_WINDOW_ID")
+                .env_remove("WT_SESSION")
+                .env_remove("LC_TERMINAL")
+                .stdin(Stdio::null())
+                .stdout(slave.try_clone().unwrap())
+                .stderr(Stdio::piped())
+                .output()
+                .unwrap();
+            assert!(output.status.success(), "{protocol}: {}", String::from_utf8_lossy(&output.stderr));
+        }
+        std::fs::remove_file(root.join("queries")).unwrap();
         let mut cmd = Command::new(std::env::current_exe().unwrap());
         let mut child = cmd
             .args(["--exact", "tui::images::tests::tmux_refresh_pty_child", "--nocapture"])
