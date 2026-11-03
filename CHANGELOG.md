@@ -25,6 +25,7 @@ does not tag — see `CONTRIBUTING.md`.
 
 ### Fixed
 
+- Editing an issue reads archived members of a live blocking group, and hook ownership checks let unreadable live IDs take precedence over stale archived copies. Due and edit archive probes reuse their placement work. (moai-1qz4)
 - `moai read --atomic` now accepts `--all` and `--epic`; a web tab's `ctl read --all` and `--group` are atomic like the explorer's: a missing group or a hand-written value refuses the batch and leaves every mark unchanged. The person's own read keys keep skipping only the held row. (moai-xvw3)
 - The explorer no longer repeats a read-mark notice while it retries a read file it could not read: a newer notice stays, a retry of an unchanged file stops after three seconds and falls back to once a minute, and a pending read file it cannot read stays quiet like the main one. (moai-kc3z)
 

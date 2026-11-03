@@ -5957,11 +5957,21 @@ pub(crate) fn due_pending(live: &[Issue], rule: &crate::config::DueRule) -> bool
     rule.auto && live.iter().any(|i| due_open(i) && i.priority() > 0)
 }
 
-/// With no live dates, only missing placement references can reveal a deadline. Let the
-/// caller check that cheap gate before building maps for an otherwise undated repository.
-pub(crate) fn due_undated_ids(live: &[Issue]) -> Option<Vec<&str>> {
-    (!live.iter().any(|i| i.deadline().is_some()))
-        .then(|| live.iter().filter(|i| due_open(i) && i.priority() > 0).map(|i| i.id.as_str()).collect())
+/// A cheap probe for snapshots without any live deadline. The caller only checks
+/// whether these placement references leave the snapshot; it owns archive I/O.
+pub(crate) enum DueProbe<'a> {
+    /// No live row carries a date, so only a missing placement reference can reveal a deadline —
+    /// these are the open rows that could still be raised. The caller checks that cheap gate before
+    /// building maps for an otherwise undated repository.
+    Undated(Vec<&'a str>),
+    Dated,
+}
+
+pub(crate) fn due_probe(live: &[Issue]) -> DueProbe<'_> {
+    if live.iter().any(|i| i.deadline().is_some()) {
+        return DueProbe::Dated;
+    }
+    DueProbe::Undated(live.iter().filter(|i| due_open(i) && i.priority() > 0).map(|i| i.id.as_str()).collect())
 }
 
 /// One set of placement maps and one ladder per snapshot. The unlocked preview and the
@@ -5977,12 +5987,16 @@ impl<'m, 'a> DueJudge<'m, 'a> {
         Self { context, soil, ladder: DueLadder::over_with_stones(&soil.lines, &soil.epic, Some(&soil.milestone)) }
     }
 
-    pub fn context_ids(&self, now: &str, zone: &crate::tz::Zone, rule: &crate::config::DueRule) -> Vec<&'a str> {
-        let candidates = if rule.auto && self.context.iter().any(|i| i.deadline().is_some()) {
+    fn candidates(&self, now: &str, zone: &crate::tz::Zone, rule: &crate::config::DueRule) -> Vec<Raise<'a>> {
+        if rule.auto && self.context.iter().any(|i| i.deadline().is_some()) {
             due_candidates_over(self.context, now, zone, rule, &self.ladder, &|_| false)
         } else {
             Vec::new()
-        };
+        }
+    }
+
+    pub fn context_ids(&self, now: &str, zone: &crate::tz::Zone, rule: &crate::config::DueRule) -> Vec<&'a str> {
+        let candidates = self.candidates(now, zone, rule);
         due_context_ids_over(self.context, &candidates, &self.ladder, self.soil)
     }
 
@@ -5995,7 +6009,7 @@ impl<'m, 'a> DueJudge<'m, 'a> {
 
 /// `moai due apply` 의 **탐침** — 아카이브를 펼지 정하려고 `live` 만으로 고른 후보다([`due_context_ids`]). 판정은 줄마다
 /// [`priority_choice`] 다. 바이너리는 [`DueJudge::context_ids`] 로 같은 몸([`due_candidates_over`])을 부르고, 이 꼴은 시험의
-/// 짧은 길이다 — 사다리는 [`DueLadder::over`] 로 따로 짓는다.
+/// 짧은 길이다 — 같은 [`DueJudge`] 생성자로 사다리를 짓는다.
 ///
 /// **묶음이 닫혔는가는 모르는 것으로 친다** — 묶음을 다 열린 것으로 잰다. 아카이브로 간 멤버가 산 줄로는 빈 묶음을 닫고,
 /// 아카이브의 부모가 산 멤버를 다른 묶음으로 옮겨 닫힌 듯한 묶음을 열 수도 있어 산 줄만으로는 못 정한다.
@@ -6018,10 +6032,9 @@ pub fn due_candidates<'a>(
     if !rule.auto || !live.iter().any(|i| i.deadline().is_some()) {
         return Vec::new();
     }
-    let lines = Lines::of(live);
-    let epic_of = Handing::over(live, &lines);
-    let ladder = DueLadder::over(&lines, &epic_of);
-    due_candidates_over(live, now, zone, rule, &ladder, &|_| false)
+    let soil = Soil::of(live);
+    let judge = DueJudge::over(live, &soil);
+    judge.candidates(now, zone, rule)
 }
 
 /// 탐침([`due_candidates`])과 열린 줄에서 **아카이브를 읽어야 답이 갈릴 수 있는 id** — `cmd::due` 가 이것으로 아카이브를
@@ -6043,8 +6056,8 @@ pub fn due_candidates<'a>(
 #[cfg(test)]
 pub fn due_context_ids<'a>(live: &'a [Issue], candidates: &[Raise<'a>]) -> Vec<&'a str> {
     let soil = Soil::of(live);
-    let ladder = DueLadder::over_with_stones(&soil.lines, &soil.epic, Some(&soil.milestone));
-    due_context_ids_over(live, candidates, &ladder, &soil)
+    let judge = DueJudge::over(live, &soil);
+    due_context_ids_over(live, candidates, &judge.ladder, &soil)
 }
 
 fn due_context_ids_over<'a>(
