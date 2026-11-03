@@ -12,8 +12,13 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+### Added
+
+- `moai watch` follows supervisor note heads with resumable cursors, and `moai supervise message` prints Codex assignments without controlling sessions. The tmux skill provides guarded pane helpers. (moai-p9dh)
+
 ### Changed
 
+- Epic review grades follow `[models] review_grade`, with escalation opt-in through `review_raise`; planning and review scratch files use task-specific directories. (moai-p9dh)
 - `moai web` budgets live event streams per browser: each browser keeps up to three, told apart by a random id kept in IndexedDB, so another browser or a remote viewer no longer takes the places of the person's ctl tabs; 32 streams across every browser remain the server's ceiling. A transaction coordinates simultaneously opened first tabs even over plain HTTP; an existing local-storage id migrates, and local storage remains the fallback when IndexedDB is unavailable. Pages unable to keep an id share the fallback budget. (moai-xvw3)
 
 ### Fixed

@@ -346,8 +346,9 @@ where its contributors read them rather than repeated here:
   `milestone/<id>` for work inside a milestone, moai-nvju; branches
   are `worktree-moai-<id>`, and `target/` is a link to `/tmp/cargo-target/<name>`
   because `/home` stalls under parallel builds, moai-c5xo), the review grade table
-  (which `/code-review` level an epic gets — `xhigh` on the review model, `max` for
-  the write path and hooks, moai-9793, moai-bx6t, moai-9tqo), the roles' default
+  (which `/code-review` level an epic gets — `review_grade` on the review model, raised
+  a step for the write path and hooks only under `review_raise = "write-path"`, moai-9793,
+  moai-bx6t, moai-9tqo, moai-p9dh), the roles' default
   models, the
   [`Regression-of:` line](glossary.md#regression-of) on bugs a merged epic caused
   (moai-21zt), and how a
@@ -379,4 +380,4 @@ where its contributors read them rather than repeated here:
   broken data, the same as a broken line in `issues.jsonl` — see [An archive file
   cannot be read](recovery.md#an-archive-file-cannot-be-read)
 
-Decided in: moai-0zjo moai-40ht moai-bx6t moai-9793 moai-ug3j moai-gelm moai-tllo moai-snyk moai-zynt moai-j9nf moai-jtvp moai-fx9t moai-bth3 moai-r0x8 moai-9tqo moai-g8pt moai-lj8g moai-1m21 moai-uwi9 moai-ns7a moai-mkzo moai-w30o moai-4v3h moai-7eeq moai-ccuy moai-fcj3
+Decided in: moai-0zjo moai-40ht moai-bx6t moai-9793 moai-ug3j moai-gelm moai-tllo moai-snyk moai-zynt moai-j9nf moai-jtvp moai-fx9t moai-bth3 moai-r0x8 moai-9tqo moai-g8pt moai-lj8g moai-1m21 moai-uwi9 moai-ns7a moai-mkzo moai-w30o moai-4v3h moai-7eeq moai-ccuy moai-fcj3 moai-p9dh

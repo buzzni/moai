@@ -29,6 +29,7 @@ pub mod show;
 pub mod skill;
 pub mod stats;
 pub mod status;
+pub mod supervise;
 pub mod tui;
 pub mod update;
 pub mod web;
@@ -701,6 +702,37 @@ fn dispatch(ctx: &Ctx, cli: Cli) -> R<Vec<String>> {
         // `.moai` 밖에서도 선다.
         Cmd::Project(ProjectCmd::Add { path }) => project::add(ctx, &path),
         Cmd::Project(ProjectCmd::Ls) => project::ls(ctx),
+        Cmd::Watch { id, since, cursor, heads } => supervise::watch(ctx, &id, &since, cursor.as_deref(), &heads),
+        Cmd::Supervise(crate::cli::SuperviseCmd::Message {
+            id,
+            model,
+            effort,
+            base,
+            root_branch,
+            from,
+            steps,
+            alongside,
+            milestone,
+            writing,
+            person,
+            subdir,
+        }) => supervise::message(
+            ctx,
+            &id,
+            &supervise::Fields {
+                model: &model,
+                effort: &effort,
+                base: &base,
+                root_branch: &root_branch,
+                from: &from,
+                steps: steps.as_deref(),
+                alongside: &alongside,
+                milestone: &milestone,
+                writing: writing.as_deref(),
+                person: &person,
+                subdir: subdir.as_deref(),
+            },
+        ),
         Cmd::Models => models::run(ctx),
         Cmd::Writing => writing::run(ctx),
         // 사람의 키 파일을 읽기만 한다(moai-so7w) — 트래커를 안 찾는다.
