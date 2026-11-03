@@ -19,10 +19,10 @@ pub(crate) fn rgb(id: u32) -> (u8, u8, u8) {
 /// One row of placeholder cells. Built in place: a `String` per cell would allocate for every cell of every row.
 pub(crate) fn row(row: usize, cols: usize) -> String {
     let mut out = String::with_capacity(cols * 12);
-    for col in 0..cols {
+    for &column in &DIACRITICS[..cols] {
         out.push(PLACEHOLDER);
         out.push(DIACRITICS[row]);
-        out.push(DIACRITICS[col]);
+        out.push(column);
     }
     out
 }
