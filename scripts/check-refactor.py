@@ -8,7 +8,8 @@
 하나라도 있으면 그 파일과 줄을 찍고 1 로 끝난다. 통과하면 한 줄을 찍고 0 이다.
 
   skeleton  에픽 moai-72qj. `src/main.rs` 의 몸이 `src/lib.rs` 로 옮겨 가고, 바뀐 줄은
-            `fn main() -> ExitCode {` -> `pub fn run() -> ExitCode {` 하나뿐이다.
+            `fn main() -> ExitCode {` -> `pub fn run() -> ExitCode {` 와, 제 소스를 경로로 읽는 시험의
+            `"/src/main.rs"` -> `"/src/lib.rs"` 둘뿐이다.
   surface   에픽 moai-50p5. 가시성만 바뀐다 — `src/lib.rs` 의 `mod x;` -> `pub mod x;`
             와 모듈 안의 `pub(crate) ` -> `pub `. 맨 private -> `pub` 은 거절한다
             (glob import 가 새 이름을 끌어와 std prelude 의 같은 이름을 가리면, 컴파일되면서
@@ -53,6 +54,11 @@ GOLDEN_MAIN = (
 
 MAIN_OLD = "fn main() -> ExitCode {"
 MAIN_NEW = "pub fn run() -> ExitCode {"
+# 옮겨 간 시험 하나가 제 소스를 경로로 읽는다(`the_notices_never_reach_stdout_and_print_stands_last` —
+# 경고 넷이 stdout 에 안 쓰는지를 글자로 훑는다). 몸이 lib.rs 로 가면 그 경로도 따라가야 한다 — 안 그러면
+# 일곱 줄짜리 새 main.rs 를 읽고 `fn carried()` 가 없다며 진다(moai-72qj.nwl). 받는 둘째 줄은 이것 하나다.
+SELF_OLD = '        let src = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/src/main.rs")).unwrap();'
+SELF_NEW = '        let src = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/src/lib.rs")).unwrap();'
 
 # surface 에서 한 줄도 안 바뀌어야 하는 것. `#[path]` 로 시험 크레이트에도 드는 셋이 앞이다.
 SURFACE_FROZEN = (
@@ -133,7 +139,7 @@ def lines_of(text):
 
 
 def check_skeleton(root, base, head, files, bad):
-    # 1. main.rs(기준) 의 몸이 lib.rs(머리) 로 옮겨 갔고, 바뀐 줄은 하나뿐이다.
+    # 1. main.rs(기준) 의 몸이 lib.rs(머리) 로 옮겨 갔고, 바뀐 줄은 `fn main` 과 제 소스를 읽는 시험 한 줄뿐이다.
     old_main = show(root, base, "src/main.rs")
     new_lib = show(root, head, "src/lib.rs")
     if new_lib is None:
@@ -145,24 +151,22 @@ def check_skeleton(root, base, head, files, bad):
         a, b = lines_of(old_main), lines_of(new_lib)
         if len(a) != len(b):
             bad.add(f"src/lib.rs 의 줄 수({len(b)})가 기준 src/main.rs({len(a)}) 와 다르다 — 줄을 더하거나 뺐다.")
-        diffs = []
-        for i in range(min(len(a), len(b))):
-            if a[i] != b[i]:
-                diffs.append(i)
-        ok_one = len(diffs) == 1 and a[diffs[0]] == MAIN_OLD and b[diffs[0]] == MAIN_NEW
-        if not ok_one:
-            if not diffs and len(a) == len(b):
-                bad.add(f"src/lib.rs 가 기준 src/main.rs 와 같다 — `{MAIN_OLD}` 를 `{MAIN_NEW}` 로 바꿔야 한다.")
-            for i in diffs:
-                if a[i] == MAIN_OLD and b[i] == MAIN_NEW and len(diffs) > 1:
-                    continue
+        diffs = [i for i in range(min(len(a), len(b))) if a[i] != b[i]]
+        # 받는 짝은 둘이고, 기준에 그 줄이 있으면 둘 다 꼭 바뀌어야 한다.
+        for old, new in ((MAIN_OLD, MAIN_NEW), (SELF_OLD, SELF_NEW)):
+            want = sum(1 for x in a if x == old)
+            got = sum(1 for i in diffs if (a[i], b[i]) == (old, new))
+            if want != 1:
+                bad.add(f"기준 src/main.rs 에 `{old.strip()}` 가 {want}번 있다 — 한 번이어야 이 검사가 선다.")
+            elif got != 1:
+                bad.add(f"src/lib.rs: `{old.strip()}` 를 `{new.strip()}` 로 바꿔야 한다.")
+        for i in diffs:
+            if (a[i], b[i]) not in ((MAIN_OLD, MAIN_NEW), (SELF_OLD, SELF_NEW)):
                 bad.at("src/lib.rs", i + 1, b[i], f"기준: {a[i]!r}")
-            if len(a) != len(b):
-                n = min(len(a), len(b))
-                longer, name = (b, "src/lib.rs") if len(b) > len(a) else (a, "기준 src/main.rs")
-                bad.at(name, n + 1, longer[n], "줄 수가 갈리는 첫 줄")
-        elif len(a) != len(b):
-            pass
+        if len(a) != len(b):
+            n = min(len(a), len(b))
+            longer, name = (b, "src/lib.rs") if len(b) > len(a) else (a, "기준 src/main.rs")
+            bad.at(name, n + 1, longer[n], "줄 수가 갈리는 첫 줄")
 
     # 2. 새 main.rs 는 정한 글과 바이트째 같다.
     head_main = show(root, head, "src/main.rs")
