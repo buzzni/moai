@@ -485,11 +485,59 @@ pub fn reaches_out(active: &[Issue], wanted: &[&str]) -> bool {
     walks_out(active, wanted.iter().copied(), true, |_| false)
 }
 
+#[cfg(test)]
+thread_local! { pub(crate) static PLACE_WALKS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) }; }
+
 /// [`reaches_out`] without blockers — only a parent, epic or milestone above `wanted` that no live row holds counts.
 /// `moai due apply` gates its archive read on this: a blocker never places a row, lends it a deadline, closes its
 /// groups or defers it, so following blockers read (and refused on) an archive the answer never depends on.
 pub fn places_out(active: &[Issue], wanted: &[&str]) -> bool {
+    #[cfg(test)]
+    PLACE_WALKS.with(|n| n.set(n.get() + 1));
     walks_out(active, wanted.iter().copied(), false, |_| false)
+}
+
+/// Edit needs full reference context for the edited row, but only placement for
+/// overflow rows. Walk the shared ancestors once; full-reference traversal wins.
+/// Returns (full archive required, placement archive required).
+pub fn edit_out(active: &[Issue], edited: &str, placements: &[&str]) -> (bool, bool) {
+    let mut by_id: BTreeMap<&str, Vec<&Issue>> = BTreeMap::new();
+    for row in active {
+        by_id.entry(&row.id).or_default().push(row);
+    }
+    let mut pending: Vec<(&str, bool)> = placements.iter().map(|id| (*id, false)).collect();
+    pending.push((edited, true));
+    let mut seen_full = BTreeSet::new();
+    let mut seen_place = BTreeSet::new();
+    let mut outside = false;
+    while let Some((id, full)) = pending.pop() {
+        if full {
+            if !seen_full.insert(id) {
+                continue;
+            }
+        } else if seen_full.contains(id) || !seen_place.insert(id) {
+            continue;
+        }
+        let Some(rows) = by_id.get(id) else {
+            if full {
+                return (true, true);
+            }
+            outside = true;
+            continue;
+        };
+        for row in rows {
+            pending.extend(
+                [crate::id::parent_of(&row.id), row.epic.as_deref(), row.milestone.as_deref()]
+                    .into_iter()
+                    .flatten()
+                    .map(|id| (id, full)),
+            );
+            if full {
+                pending.extend(row.blocked_by.iter().map(|id| (id.as_str(), true)));
+            }
+        }
+    }
+    (false, outside)
 }
 
 /// The walk [`needs_context`] and [`reaches_out`] share: from `wanted` up through every parent, epic and milestone
@@ -904,6 +952,37 @@ mod tests {
     fn put(root: &Path, rows: &[Issue]) {
         let text: String = rows.iter().map(|row| format!("{}\n", serde_json::to_string(row).unwrap())).collect();
         fs::write(path(root, "2025"), text).unwrap();
+    }
+
+    #[test]
+    fn edit_walk_preserves_full_and_placement_gates_with_twins_and_cycles() {
+        let mut edited = row("argos-aaaa", Kind::Issue, "todo");
+        edited.blocked_by.push("argos-bbbb".into());
+        let mut blocker = row("argos-bbbb", Kind::Issue, "todo");
+        blocker.blocked_by.push("argos-aaaa".into());
+        let mut overflow = row("argos-cccc", Kind::Issue, "todo");
+        overflow.blocked_by.push("argos-missing".into());
+        for full_missing in [false, true] {
+            for place_missing in [false, true] {
+                let mut rows = vec![edited.clone(), blocker.clone(), overflow.clone()];
+                if full_missing {
+                    rows[1].epic = Some("argos-absent".into());
+                }
+                if place_missing {
+                    rows[2].epic = Some("argos-outside".into());
+                }
+                let mut twin = rows[0].clone();
+                twin.kind = Kind::Backlog;
+                rows.push(twin);
+                let full = reaches_out(&rows, &["argos-aaaa"]);
+                let place = places_out(&rows, &["argos-aaaa", "argos-cccc"]);
+                let (actual_full, actual_place) = edit_out(&rows, "argos-aaaa", &["argos-aaaa", "argos-cccc"]);
+                assert_eq!(actual_full, full);
+                if !full {
+                    assert_eq!(actual_place, place);
+                }
+            }
+        }
     }
 
     #[test]

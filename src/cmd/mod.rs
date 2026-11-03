@@ -1360,8 +1360,18 @@ pub fn archived_places(root: &std::path::Path, issues: &[crate::model::Issue], r
     archived_places_and(root, issues, rows, &[])
 }
 
-/// [`archived_places`] whose context also carries `riders` — ids that never open the archive on their
-/// own, but whose placement component must come along once it is open. `moai edit` passes the edited
+/// Use a placement gate already established by an earlier probe without walking it twice.
+pub fn archived_places_if(
+    root: &std::path::Path,
+    issues: &[crate::model::Issue],
+    rows: &[&str],
+    outside: bool,
+) -> R<crate::store::Load> {
+    if outside { crate::archive::groups(root, issues, rows) } else { archived_places(root, issues, rows) }
+}
+
+/// [`archived_places`] whose context also carries `riders` — ids whose live groups open the archive for member-derived closure, and whose placement
+/// component must come along once it is open. `moai edit` passes the edited
 /// row's blockers: a live group blocking it reads its column from members that may sit in the archive,
 /// and the full read this replaced always carried them.
 pub fn archived_places_and(
@@ -1370,7 +1380,20 @@ pub fn archived_places_and(
     rows: &[&str],
     riders: &[&str],
 ) -> R<crate::store::Load> {
-    if wants_group(issues, rows) || crate::archive::places_out(issues, rows) {
+    let outside =
+        !wants_group(issues, riders) && !wants_group(issues, rows) && crate::archive::places_out(issues, rows);
+    archived_places_and_if(root, issues, rows, riders, outside)
+}
+
+/// Read the same selective context after a caller has already walked placement references.
+pub fn archived_places_and_if(
+    root: &std::path::Path,
+    issues: &[crate::model::Issue],
+    rows: &[&str],
+    riders: &[&str],
+    outside: bool,
+) -> R<crate::store::Load> {
+    if wants_group(issues, riders) || wants_group(issues, rows) || outside {
         let wanted: Vec<&str> = rows.iter().chain(riders).copied().collect();
         crate::archive::groups(root, issues, &wanted)
     } else {
@@ -1628,7 +1651,7 @@ mod tests {
         assert_eq!(load.errors.len(), 1);
     }
 
-    /// Riders never open the archive, but once it is open their component comes along — `moai edit`
+    /// A live group rider opens the archive so its members can supply closure — `moai edit`
     /// judges its blockers from it, and a revived blocking epic reads its column from archived members.
     #[test]
     fn place_context_carries_riders_only_once_the_archive_is_open() {
@@ -1643,10 +1666,10 @@ mod tests {
         let mut edited = Issue::new("argos-aaaa".into(), "edited".into(), Kind::Issue, Status::new("todo"), at);
         edited.blocked_by = vec!["argos-bbbb".into()];
         let live = [edited.clone(), blocker.clone()];
-        // Nothing among the rows opens the archive: the rider alone does not either.
+        // A live blocking group opens the archive even for an ordinary edited row.
         let load = archived_places_and(&dir, &live, &["argos-aaaa"], &["argos-bbbb"]).unwrap();
-        assert!(load.issues.is_empty());
-        // A row that does open it brings the rider's archived member along.
+        assert_eq!(load.issues.iter().map(|i| i.id.as_str()).collect::<Vec<_>>(), ["argos-bbbb.aaa"]);
+        // Another group also opens it and brings the rider's archived member along.
         let group = Issue::new("argos-gggg".into(), "group".into(), Kind::Epic, Status::new("todo"), at);
         let live = [edited, blocker, group];
         let load = archived_places_and(&dir, &live, &["argos-aaaa", "argos-gggg"], &["argos-bbbb"]).unwrap();

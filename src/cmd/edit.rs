@@ -325,10 +325,11 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
             // Once it is open, the edited row's blockers ride along: `Blocked::of` reads a blocking
             // group's column from its members, which a revived group keeps in the archive.
             let blockers: Vec<&str> = out.blocked_by.iter().map(String::as_str).collect();
-            let archived = if crate::archive::reaches_out(live, &[out.id.as_str()]) {
+            let (full, outside) = crate::archive::edit_out(live, &out.id, &context_ids);
+            let archived = if full {
                 crate::archive::read(&repo.root)?.issues
             } else {
-                super::archived_places_and(&repo.root, live, &context_ids, &blockers)?.issues
+                super::archived_places_and_if(&repo.root, live, &context_ids, &blockers, outside)?.issues
             };
             let issues = super::in_context(live, &archived, unread);
             let issues = &issues[..];
