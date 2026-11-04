@@ -281,6 +281,11 @@ impl Params {
         RpcError::invalid_params(format!("{}: params.{key}: {why}", self.method))
     }
 
+    /// 꼭 줄 키가 빠졌다 — clap 의 `required` 자리다(쓰기 메서드의 `id`·`to`).
+    pub(super) fn missing(&self, key: &str) -> RpcError {
+        RpcError::invalid_params(format!("{}: params.{key} is required", self.method))
+    }
+
     /// 남은 키가 있으면 거절한다 — 가장 앞의 이름을 댄다.
     pub(super) fn done(self) -> Result<(), RpcError> {
         match self.map.keys().next() {

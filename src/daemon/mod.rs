@@ -1,4 +1,4 @@
-//! 데몬 — 로컬 읽기 API (moai-5n6m).
+//! 데몬 — 로컬 읽기·쓰기 API (moai-5n6m, 쓰기는 moai-3hgm).
 //!
 //! - `rpc` 는 JSON-RPC 2.0 **메시지 층**이다. 전송(Unix 소켓의 줄, 나중의 HTTP)을 모르고 `cmd`·`store` 의 어떤
 //!   타입도 이름 대지 않는다.
@@ -23,18 +23,22 @@ pub mod project;
 mod read;
 #[cfg(unix)]
 pub mod server;
+#[cfg(unix)]
+mod write;
 
 /// 데몬을 멈추는 메서드. 판이 달라도 이름은 그대로여야 한다 — 새 바이너리의 `moai daemon stop` 이 옛 판 데몬을
 /// 멈추는 길이 이것뿐이다.
 #[cfg(unix)]
 pub const SHUTDOWN: &str = "daemon.shutdown";
 
-/// 데몬이 섬기는 메서드 표. `hello`·`ping` 위에 읽기 메서드 여섯과 `changes`(`read::register`, moai-5n6m.q16·cb9)를
-/// 단다 — 다음 메서드도 여기서 단다. 데몬의 수명에 딸린 [`SHUTDOWN`] 은 `server::serve` 가 제 손으로 단다.
+/// 데몬이 섬기는 메서드 표. `hello`·`ping` 위에 읽기 메서드 여섯과 `changes`(`read::register`, moai-5n6m.q16·cb9),
+/// 쓰기 메서드 일곱(`write::register`, moai-3hgm.k7s)을 단다 — 다음 메서드도 여기서 단다. 데몬의 수명에 딸린
+/// [`SHUTDOWN`] 은 `server::serve` 가 제 손으로 단다.
 #[cfg(unix)]
 pub fn methods() -> rpc::Methods {
     let mut methods = rpc::Methods::new();
     read::register(&mut methods);
+    write::register(&mut methods);
     methods
 }
 
@@ -72,22 +76,25 @@ mod tests {
     /// 메서드가 없는 명령과 그 까닭. **규칙**: 최상위 명령이 `<명령>.` 으로 시작하는 메서드를 하나라도 가지면 그 명령은
     /// 하위 명령마다(`project.ls`·`project.add`) 따로 가린다. 하나도 없으면 명령 하나로 센다(`wiki`·`ctl`).
     /// 새 명령이 생기면 이 표에 까닭을 적거나 메서드를 더해야 이 시험이 푸르다.
+    ///
+    /// `add --from`(계획으로 만들기)은 명령이 아니라 깃발이라 표에 줄이 없다 — `add` 메서드가 `from` 을 모르는 키로
+    /// 거절한다(`daemon::write`).
     const NOT_SERVED: &[(&str, &str)] = &[
         ("image", "파일을 저장한다 — 쓰기"),
         ("ctl", "사람의 열린 탐색기를 몬다 — 화면"),
-        ("archive", "파일을 옮긴다 — 쓰기"),
-        ("add", "쓰기 — 다음 에픽(moai-itt1)"),
-        ("mv", "쓰기 — 다음 에픽(moai-itt1)"),
-        ("edit", "쓰기 — 다음 에픽(moai-itt1)"),
-        ("rm", "쓰기 — 다음 에픽(moai-itt1)"),
-        ("note", "쓰기 — 다음 에픽(moai-itt1)"),
-        ("defer", "쓰기 — 다음 에픽(moai-itt1)"),
+        ("archive", "파일을 옮긴다 — 쓰기. 이번 쓰기 메서드에 안 든다(moai-3hgm)"),
         ("read", "읽음 표시 — 사용자 설정을 쓴다"),
-        ("link", "쓰기 — 다음 에픽(moai-itt1)"),
-        ("issue", "종류를 박은 별명 — show·add 따위의 틀. 메서드는 `show` 의 `type` 으로 간다"),
-        ("epic", "종류를 박은 별명 — 메서드는 `show` 의 `type` 으로 간다"),
-        ("milestone", "종류를 박은 별명 — 메서드는 `show` 의 `type` 으로 간다"),
-        ("backlog", "종류를 박은 별명 — 메서드는 `show` 의 `type` 으로 간다"),
+        ("issue", "종류를 박은 별명 — `issue add` 는 `add` 의 `kind`, `issue show` 는 `show` 의 `type` 으로 간다"),
+        ("epic", "종류를 박은 별명 — `epic add` 는 `add` 의 `kind`, `epic show` 는 `show` 의 `type` 으로 간다"),
+        (
+            "milestone",
+            "종류를 박은 별명 — `milestone add` 는 `add` 의 `kind`, `milestone show` 는 `show` 의 `type` 으로 간다",
+        ),
+        (
+            "backlog",
+            "종류를 박은 별명 — `backlog add` 는 `add` 의 `kind`, `backlog show` 는 `show` 의 `type` 으로 간다. \
+             `backlog promote` 는 계획(`--from`)으로 만드는 쓰기라 이번에 안 낸다(moai-3hgm)",
+        ),
         ("wiki", "위키 페이지 — 트래커의 읽기가 아니다"),
         ("tui", "화면"),
         ("web", "화면 — 제 서버가 있다"),
@@ -97,13 +104,13 @@ mod tests {
         ("project.add", "쓰기 — 사용자 설정을 쓴다"),
         ("project.rm", "쓰기 — 사용자 설정을 쓴다"),
         ("project.color", "쓰기 — 사용자 설정을 쓴다"),
-        ("due", "쓰기 — 우선순위를 올린다"),
+        ("due", "쓰기 — 우선순위를 올린다. 이번 쓰기 메서드에 안 든다(moai-3hgm)"),
         ("config", "저장소 설정을 읽는다 — 아직 짝이 없다"),
         ("models", "사용자 설정을 읽는다 — 아직 짝이 없다"),
         ("writing", "사용자 설정을 읽는다 — 아직 짝이 없다"),
         ("keys", "화면의 키 표"),
         ("update", "스스로 바꾼다 — 배관"),
-        ("init", "쓰기"),
+        ("init", "트래커를 심는다 — 쓰기. 데몬은 걸어 둔 프로젝트만 맡는다"),
         ("daemon", "데몬 자신 — 소켓을 거치지 않는다"),
         ("watch", "노트를 기다리며 막는다 — 요청 하나가 연결의 스레드를 묶는다. 기다림은 `changes` 폴링이 맡는다"),
         ("supervise", "감독 배관 — 에이전트 조율"),

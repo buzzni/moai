@@ -43,6 +43,10 @@ impl Fence {
             .env_remove("XDG_RUNTIME_DIR")
             .env_remove("XDG_CONFIG_HOME")
             .env_remove("MOAI_ACTOR")
+            // git 의 사람은 시험이 준 것만 — 돌리는 셸의 `GIT_CONFIG_GLOBAL` 이 새면 `no_actor` 를 재는 시험이 헛돈다.
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .env("GIT_CONFIG_NOSYSTEM", "1")
             .env("MOAI_LANG", "en")
             .env("MOAI_NOW", "2026-11-04T12:00:00Z")
             .env("MOAI_NO_UPDATE_CHECK", "1")
@@ -75,8 +79,14 @@ impl Fence {
 
     /// `daemon start --json` 을 띄우고 첫 줄(묶은 뒤에 나온다)을 기다린다.
     fn start(&self) -> (Daemon, Value) {
-        let mut child =
-            self.cmd(&["daemon", "start", "--json"]).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().unwrap();
+        self.start_with(&[])
+    }
+
+    /// [`Fence::start`] 에 환경을 더 세워 띄운다 — 데몬을 띄운 셸의 값이 요청에 새는가를 잰다.
+    fn start_with(&self, env: &[(&str, &str)]) -> (Daemon, Value) {
+        let mut cmd = self.cmd(&["daemon", "start", "--json"]);
+        cmd.envs(env.iter().copied());
+        let mut child = cmd.stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().unwrap();
         let stdout = child.stdout.take().unwrap();
         let (tx, rx) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
@@ -1033,4 +1043,197 @@ fn changes_resets_after_a_restart() {
     let (_daemon, mut wire) = served(&f);
     let (_, changed, removed, reset) = poll(&mut wire, 1, project, Some(&cursor));
     assert!(reset && changed.is_empty() && removed.is_empty(), "다시 띄운 데몬이 옛 커서로 이어 갔다");
+}
+
+// ---- 쓰기 메서드(moai-3hgm.k7s) ----------------------------------------------------------------------------------
+
+/// 쓰기 요청 하나 — `project` 를 채워 보낸다. `actor` 는 `params` 에 준 것만 간다: 사람을 모르는 길을 재려면 빼고
+/// 보낸다. 같음 시험(moai-3hgm.pmc)도 이것으로 보낸다.
+fn write(wire: &mut Wire, root: &Path, n: u64, method: &str, params: Value) -> Value {
+    let mut sent = params;
+    sent["project"] = json!(root.to_str().unwrap());
+    wire.call(n, method, sent)
+}
+
+/// 선 쓰기의 `result` — 봉투의 네 키가 다 섰고 `exit` 가 0 인지 본다.
+fn wrote(wire: &mut Wire, root: &Path, n: u64, method: &str, params: Value) -> Value {
+    let reply = write(wire, root, n, method, params.clone());
+    let result = reply["result"].clone();
+    assert!(result.is_object(), "{method} {params}: {reply}");
+    assert_eq!(result["exit"], 0, "{method} {params}: {reply}");
+    assert_eq!(result["partial"], false, "{method} {params}: {reply}");
+    assert!(result["messages"].is_array(), "{method} {params}: {reply}");
+    result
+}
+
+/// CLI 로 읽은 줄 하나(`show <id> --json`).
+fn row(f: &Fence, root: &Path, id: &str) -> Value {
+    cli(f, root, &["show", id])
+}
+
+/// **일곱 메서드가 CLI 의 쓰기 경로로 쓴다** — 쓴 것을 CLI 의 `show` 가 그대로 읽는다. 메서드마다 하나씩, 그리고 CLI 가
+/// stderr 와 종료 코드로 말하는 두 갈래(남의 줄을 집은 것, `from` 에 진 집기)가 `messages`·`exit` 로 선다.
+#[test]
+fn the_write_methods_write_what_the_cli_reads() {
+    let f = Fence::new();
+    let root = f.project("proj");
+    let actor = json!(ACTOR);
+    let (_daemon, mut wire) = served(&f);
+    let id_of = |title: &str| id_titled(&f, &root, title);
+    let (alpha, beta) = (id_of("alpha"), id_of("beta"));
+
+    // add — 종류 없이, 그리고 `kind` 로 `epic add`·`backlog add` 를.
+    let made = wrote(
+        &mut wire,
+        &root,
+        1,
+        "add",
+        json!({ "actor": actor, "title": "gamma", "tag": "x,y", "priority": 1, "body": "-" }),
+    );
+    let gamma = made["value"]["id"].as_str().unwrap().to_string();
+    let shown = row(&f, &root, &gamma);
+    assert_eq!((&shown["title"], &shown["tags"], &shown["priority"]), (&json!("gamma"), &json!(["x", "y"]), &json!(1)));
+    assert_eq!(shown["body"], "-", "글 자리의 `-` 는 글이다 — {shown}");
+    assert_eq!(shown["assignee_email"], "tester@example.com", "{shown}");
+    let epic = wrote(&mut wire, &root, 2, "add", json!({ "actor": actor, "kind": "epic", "title": "Storage" }));
+    assert_eq!(epic["value"]["kind"], "epic", "{epic}");
+    let idea = wrote(&mut wire, &root, 3, "add", json!({ "actor": actor, "kind": "backlog", "title": "an idea" }));
+    assert_eq!(idea["value"]["kind"], "backlog", "{idea}");
+
+    // mv — 집기, 그리고 본 칸이 달라진 뒤의 늦은 집기는 `stale`·`partial`·`exit` 1 이다(CLI 의 종료 코드 1).
+    wrote(&mut wire, &root, 4, "mv", json!({ "actor": actor, "id": alpha, "to": "in_progress", "from": "todo" }));
+    assert_eq!(row(&f, &root, &alpha)["status"], "in_progress");
+    let late = write(&mut wire, &root, 5, "mv", json!({ "actor": actor, "id": alpha, "to": "review", "from": "todo" }));
+    let late = &late["result"];
+    assert_eq!((&late["exit"], &late["partial"]), (&json!(1), &json!(true)), "{late}");
+    assert_eq!(late["value"]["stale"][0]["id"], json!(alpha), "{late}");
+    assert!(!late["messages"].as_array().unwrap().is_empty(), "진 집기가 아무 말도 안 했다 — {late}");
+    assert_eq!(row(&f, &root, &alpha)["status"], "in_progress", "진 집기가 옮겼다");
+
+    // 남의 줄 — 막지 않고 옮기며, CLI 가 stderr 에 내는 한 줄이 `messages` 에 선다(훅 규칙 5 는 API 에 없다).
+    let theirs = wrote(
+        &mut wire,
+        &root,
+        6,
+        "add",
+        json!({ "actor": actor, "title": "theirs", "assignee": "Lee (lee@example.com)" }),
+    );
+    let theirs = theirs["value"]["id"].as_str().unwrap().to_string();
+    let moved = wrote(&mut wire, &root, 7, "mv", json!({ "actor": actor, "id": theirs, "to": "in_progress" }));
+    assert_eq!(moved["value"]["theirs"][0]["id"], json!(theirs), "{moved}");
+    assert!(moved["messages"].as_array().unwrap().iter().any(|m| m.as_str().unwrap().contains(&theirs)), "{moved}");
+    let taken = wrote(
+        &mut wire,
+        &root,
+        8,
+        "mv",
+        json!({ "actor": actor, "id": theirs, "to": "review", "take": true, "msg": "Lee said yes" }),
+    );
+    assert_eq!(taken["value"]["taken"][0]["id"], json!(theirs), "{taken}");
+    assert_eq!(row(&f, &root, &theirs)["assignee_email"], "tester@example.com");
+
+    // edit·note·defer·link·rm.
+    wrote(
+        &mut wire,
+        &root,
+        9,
+        "edit",
+        json!({ "actor": actor, "id": beta, "title": "beta two", "tag": ["ui"], "due": "2026-12-01" }),
+    );
+    let shown = row(&f, &root, &beta);
+    assert_eq!(
+        (&shown["title"], &shown["tags"], &shown["due_on"]),
+        (&json!("beta two"), &json!(["ui"]), &json!("2026-12-01"))
+    );
+    let noted = wrote(&mut wire, &root, 10, "note", json!({ "actor": actor, "id": beta, "text": "-" }));
+    assert_eq!((&noted["value"]["text"], &noted["value"]["by_email"]), (&json!("-"), &json!("tester@example.com")));
+    wrote(&mut wire, &root, 11, "defer", json!({ "actor": actor, "id": [beta], "msg": "next quarter" }));
+    assert!(row(&f, &root, &beta)["deferred_at"].is_string(), "미루지 않았다");
+    wrote(&mut wire, &root, 12, "defer", json!({ "actor": actor, "id": beta, "undo": true }));
+    assert!(row(&f, &root, &beta).get("deferred_at").is_none(), "되돌리지 않았다");
+    wrote(&mut wire, &root, 13, "link", json!({ "actor": actor, "id": alpha, "blocks": beta }));
+    assert_eq!(row(&f, &root, &beta)["blocked_by"], json!([alpha]));
+    wrote(&mut wire, &root, 14, "rm", json!({ "actor": actor, "id": gamma }));
+    let gone = f.refused(&["-C", root.to_str().unwrap(), "--json", "show", &gamma]);
+    assert_eq!(gone["code"], "not_found", "{gone}");
+}
+
+/// **틀린 요청은 `-32602`, 명령이 넘어지면 `-32000` 에 CLI 의 `code`** — 같은 부름을 CLI 로 쳐서 코드를 견준다.
+#[test]
+fn a_bad_write_is_invalid_params_and_a_failed_one_carries_the_cli_code() {
+    let f = Fence::new();
+    let root = f.project("proj");
+    let project = root.to_str().unwrap();
+    let alpha = id_titled(&f, &root, "alpha");
+    let (_daemon, mut wire) = served(&f);
+
+    for (n, (method, params, named)) in [
+        ("add", json!({ "title": "t", "from": "-" }), "from"),
+        ("add", json!({ "title": "t", "priority": "high" }), "priority"),
+        ("mv", json!({ "id": alpha }), "to"),
+        ("mv", json!({ "id": alpha, "to": "done", "take": "yes" }), "take"),
+        ("edit", json!({ "id": alpha, "shift": 1, "start": "+1" }), "shift"),
+        ("note", json!({ "id": alpha, "txt": "typo" }), "txt"),
+        ("defer", json!({ "id": alpha, "undo": "no" }), "undo"),
+        ("rm", json!({}), "id"),
+        ("link", json!({ "id": alpha, "blocks": { "x": 1 } }), "blocks"),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let mut sent = params.clone();
+        sent["actor"] = json!(ACTOR);
+        let got = write(&mut wire, &root, n as u64 + 1, method, sent);
+        assert_eq!(got["error"]["code"], -32602, "{method} {params}: {got}");
+        assert!(got["error"]["message"].as_str().unwrap().contains(named), "{method} {params}: 키를 안 댄다 — {got}");
+    }
+
+    // 명령이 넘어진 것 — 같은 부름을 CLI 로 쳐서 `code` 와 말을 견준다.
+    for (n, (method, params, argv)) in [
+        ("note", json!({ "id": "proj-zzzz", "text": "x" }), vec!["note", "proj-zzzz", "x"]),
+        ("mv", json!({ "id": alpha, "to": "doing" }), vec!["mv", &alpha, "doing"]),
+        ("add", json!({ "title": "t", "priority": 7 }), vec!["add", "t", "-p", "7"]),
+        ("add", json!({}), vec!["add"]),
+        ("edit", json!({ "id": alpha }), vec!["edit", &alpha]),
+        ("rm", json!({ "line": 99 }), vec!["rm", "--line", "99"]),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let mut sent = params.clone();
+        sent["actor"] = json!(ACTOR);
+        let got = write(&mut wire, &root, 100 + n as u64, method, sent);
+        let mut all = vec!["-C", project, "--json", "--user", ACTOR];
+        all.extend_from_slice(&argv);
+        let want = f.refused(&all);
+        assert_eq!(got["error"]["code"], -32000, "{method} {params}: {got}");
+        assert_eq!(got["error"]["data"]["code"], want["code"], "{method} {params}: {got} / {want}");
+        assert_eq!(got["error"]["message"], want["error"], "{method} {params}: {got} / {want}");
+    }
+}
+
+/// **요청의 `actor` → 그 프로젝트의 git 설정 → `no_actor`** — 데몬을 띄운 셸의 `MOAI_ACTOR` 는 안 읽는다. 걸어 둔
+/// 프로젝트는 git 저장소가 아니고 시험의 git 설정에 사람이 없다. 같은 요청에 `actor` 를 주면 선다.
+#[test]
+fn a_write_from_nobody_known_is_no_actor_whatever_the_daemon_was_started_with() {
+    let f = Fence::new();
+    let root = f.project("proj");
+    let alpha = id_titled(&f, &root, "alpha");
+    let (_daemon, _) = f.start_with(&[("MOAI_ACTOR", "Daemon (daemon@example.com)")]);
+    let mut wire = Wire::open(&f.socket());
+
+    for (n, (method, params)) in [
+        ("add", json!({ "title": "who" })),
+        ("note", json!({ "id": alpha, "text": "who" })),
+        ("mv", json!({ "id": alpha, "to": "in_progress" })),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let got = write(&mut wire, &root, n as u64 + 1, method, params.clone());
+        assert_eq!(got["error"]["code"], -32000, "{method} {params}: {got}");
+        assert_eq!(got["error"]["data"]["code"], "no_actor", "데몬의 MOAI_ACTOR 를 읽었다 — {method}: {got}");
+    }
+    let named = wrote(&mut wire, &root, 9, "note", json!({ "id": alpha, "text": "me", "actor": ACTOR }));
+    assert_eq!(named["value"]["by_email"], "tester@example.com", "{named}");
 }

@@ -72,7 +72,6 @@ impl Read {
 
 /// 돌릴 쓰기 명령 — **값은 CLI 의 인자 구조체 그대로다**(moai-3hgm.25e). 명령 함수가 받는 꼴을 따로 짜면 두 길이
 /// 갈린다. 글 자리(본문·까닭·노트)는 받은 그대로 글이다 — `-` 한 글자도(모듈 머리).
-#[cfg_attr(not(test), expect(dead_code, reason = "쓰기 메서드(moai-3hgm.k7s)가 부른다"))]
 pub(crate) enum Write {
     /// `moai add`. `kind` 가 서면 `moai <kind> add` 다 — `cmd::typed` 가 부르는 `add::run(ctx, args, Some(kind))` 그대로.
     /// **계획(`--from`)은 안 낸다**: 그 길은 stdin 이나 파일을 읽어, 통이 걸리면 거절된다(`add::read_source`).
@@ -132,7 +131,6 @@ pub(crate) struct Request {
 }
 
 /// 쓰기 요청 하나 — 명령 밖의 다섯 칸은 [`Request`] 와 같은 뜻이다(moai-3hgm.25e).
-#[cfg_attr(not(test), expect(dead_code, reason = "쓰기 메서드(moai-3hgm.k7s)가 짓는다"))]
 pub(crate) struct WriteRequest {
     pub root: PathBuf,
     pub write: Write,
@@ -174,7 +172,6 @@ pub(crate) fn read(req: Request) -> Answer {
 /// 쓰기 명령 하나를 요청으로 돌린다(moai-3hgm.25e) — [`read`] 와 같은 약속이다. 쓰기는 CLI 와 같은
 /// `store::with_write` 를 지나고, 쓰기 뒤에 CLI 가 stderr 에 내는 꼬리(못 읽는 줄을 들고 쓴 것·못 적은 저널·덧붙일
 /// 말·못 읽은 저널·올라가 잡은 트래커·루트로 옮겨 쓴 자리)는 [`Answer::messages`] 로 돌아온다.
-#[cfg_attr(not(test), expect(dead_code, reason = "쓰기 메서드(moai-3hgm.k7s)가 부른다"))]
 pub(crate) fn write(req: WriteRequest) -> Answer {
     let WriteRequest { root, write, actor, lang, zone, reg } = req;
     let ctx = Ctx::asked(true, actor, true, lang, zone, reg);

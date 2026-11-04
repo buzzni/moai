@@ -136,7 +136,6 @@ impl Methods {
     }
 
     /// 쓰기 메서드를 단다 — 멈추는 데몬이 돌던 이 요청을 시한 없이 끝까지 기다린다([`Entry::write`]).
-    #[cfg_attr(not(test), expect(dead_code, reason = "쓰기 메서드는 다음 멤버(moai-3hgm.k7s)가 단다"))]
     pub fn register_write(
         &mut self,
         name: &str,
