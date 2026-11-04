@@ -1,414 +1,226 @@
-//! `changes` — 커서 뒤로 바뀐 줄과 사라진 줄을 고른다(moai-5n6m.2ki). **순수 함수다.**
+//! `changes` — 옛 스냅샷과 지금 스냅샷을 줄마다 견주어 바뀐 id 와 사라진 id 를 고른다(moai-8ts9). **순수 함수다.**
 //!
-//! 받는 것은 읽어 건넨 활성 스냅샷 `&[Issue]` 와 저널 줄(`rm`·`note`), 커서 글, 지금 시각뿐이다. 파일을 열지도 찍지도
-//! 않는다. 답은 **줄 본문이 아니라 id** 다 — 스냅샷이 진실이고, 클라이언트가 바뀐 줄을 다시 읽는다.
+//! 받는 것은 부르는 쪽이 읽어 건넨 **목록의 줄**(`serde_json::Value`)과 저널의 `note` 줄뿐이다. 파일을 열지도 찍지도
+//! 않는다. 무엇을 기억하고 언제 잊는지는 데몬의 몫이다(`daemon::changes`) — 여기는 두 [`Seen`] 의 차만 안다.
 //!
-//! 이것은 **저널을 접어 상태를 만드는 일이 아니다.** 저널에서 얻는 것은 "이 id 를 다시 읽어라" 는 가리킴 둘뿐이다 —
-//! `rm` 줄은 스냅샷에서 사라진 줄을 찾고(`show --removed` 와 같은 자리), `note` 줄은 스냅샷의 `updated_at` 을 안
-//! 건드리는 메모가 붙은 줄을 찾는다(`show -g` 와 같은 자리). 어느 종류를 읽을지는 부르는 쪽이 고른다(이 함수는
-//! 종류를 모른다 — `rm` 이 아닌 줄은 모두 "바뀜" 이다). 저널에 새 필드도, 스냅샷에 새 필드도 없다.
+//! ## 견주는 것
 //!
-//! ## 커서
+//! - **목록의 줄**: 클라이언트가 `reset` 때 다시 읽는 그 목록(`show` 의 `all: true`)의 줄을 id 마다 지문으로 줄인다.
+//!   그 줄에는 파생값이 든다 — 묶음의 칸(`derived_status`), 멤버의 에픽(`derived_epic`)과 물려받은 마일스톤
+//!   (`derived_milestone`), 미룬 조상(`shelved_by`), 노트에서 읽은 `work`. 그래서 마지막 멤버가 닫혀 에픽의 칸이
+//!   바뀌거나 에픽이 마일스톤에 들어 멤버의 마일스톤이 바뀌면, 파일의 그 줄이 그대로여도 지문이 달라진다
+//!   (리뷰 `moai-5n6m.e9f` 의 6). `updated_at` 을 보지 않으므로 `git pull`·병합·손 고침으로 옛 도장 그대로 들어온
+//!   줄도 잡는다(같은 리뷰의 4)
+//! - **노트**: 메모는 스냅샷의 줄을 안 바꾸므로 저널의 `note` 줄을 id 마다 모아 지문으로 줄인다(2026-11-04 사람의
+//!   결정 — 노트가 붙은 줄도 `changed` 다). 글은 지문으로만 들고 내지 않는다. **시각의 창이 없다** — 도장이 아니라
+//!   줄의 있고 없음을 견주므로, 시각을 락 밖에서 뜬 `note` 가 락을 오래 기다려 늦게 확정되어도(리뷰의 1),
+//!   다른 clone 에서 옛 도장으로 들어와도 다음 견줌에 선다
 //!
-//! 클라이언트가 해석하지 않는 불투명 글(base64url 의 JSON)이다. **서버에 아무것도 안 둔다** — 데몬이 다시 떠도
-//! 커서는 산다(`cmd::supervise` 의 `watch` 커서와 같은 꼴이다). 담는 것은 다섯이다.
+//! 이것은 **저널을 접어 상태를 만드는 일이 아니다.** 노트에서 얻는 것은 "이 id 를 다시 읽어라" 는 가리킴뿐이고,
+//! 스냅샷에도 저널에도 새 필드가 없다. 지운 줄은 저널의 `rm` 이 아니라 두 목록의 차로 안다.
 //!
-//! - `t`: 창의 시작(초). 커서를 낸 때에서 [`LAG`] 초 앞이다. 그 뒤에 `updated_at`·`ts` 가 찍힌 줄만 후보다
-//! - `seen`: 커서를 낼 때 창 안에 있던 줄의 **지문**. 후보 가운데 지문이 같은 줄은 안 바뀐 것이다
-//! - `n`: 그때의 활성 줄 수. 줄이 아무 말 없이 사라지거나 불어난 것(아카이브·병합·손 고침)을 잰다
-//! - `a`: 아카이브 디렉터리의 표식. 바뀌었으면 줄이 옮겨 갔을 수 있다
-//! - `s`: 프로젝트(뿌리 경로)의 지문
-//!
-//! **동률.** `updated_at` 의 해상도는 초다. 같은 초에 줄 둘이 바뀌어도, 같은 줄이 같은 초에 두 번 바뀌어도 놓치지
-//! 않는다 — 둘째 고침은 줄의 직렬화를 바꿔 지문이 다르다. 창을 [`LAG`] 초 앞에서 열어 두는 것은, 시각을 먼저 뜬 쓰기가
-//! 락을 기다리다 우리 읽기 뒤에 확정되는 틈 때문이다. `note`·`rm`·`defer` 는 시각을 **락을 잡기 전에** 뜨고, 락은
-//! 둘(제 락과 링크 너머의 락)을 저마다 `store` 의 `LOCK_TIMEOUT`(5초)까지 기다린다 — 그래서 [`LAG`] 는 그 기다림에
-//! 스냅샷을 쓰는 동안을 더한 것보다 길다(시험 `the_window_outlasts_the_lock_wait` 가 둘을 맨다). 창 안의 줄은 지문으로
-//! 걸러서 같은 줄을 두 번 알리지 않는다.
-//!
-//! **`reset`.** 아래 어느 하나라도 서면 목록을 비우고 `reset: true` 를 낸다 — 클라이언트는 전체를 다시 읽고 이
-//! 답의 새 커서로 이어 간다. 커서가 없거나 못 읽거나 다른 프로젝트의 것, 시계가 커서보다 뒤로 갔다, 저널을 못
-//! 읽었거나 창에 들었을 수 있는 못 푼 조각이 있다, 아카이브 표식이 바뀌었다, 줄 수가 저널로 설명되지 않는다.
-//! **새 커서는 `reset` 일 때도 늘 담긴다.**
-//!
-//! 알려진 틈: 줄 수가 저널과 비긴 아카이브(같은 창에 `rm` 이 있었다)는 표식이 막고, 줄을 더하거나 빼는 병합은 줄 수가
-//! 막는다. **있는 줄만 고친 병합·`git pull`·`checkout` 은 못 잡는다** — 들어온 줄의 `updated_at` 은 창보다 오래됐고 줄
-//! 수도 표식도 그대로라, 바뀜으로도 `reset` 으로도 안 선다. 그것을 잡으려면 창 밖의 줄까지 지문을 커서에 실어야 한다.
-//!
-//! **이름이 서는 것은 제 줄이 바뀐 id 뿐이다.** 묶음의 칸·진척(멤버에서 읽는다)이나 멤버가 물려받는 마일스톤처럼
-//! 다른 줄에서 오는 값은 그 줄을 안 고치므로, 그 값이 바뀐 줄의 id 는 안 선다. 받은 id 만 다시 읽는 클라이언트는
-//! 그 id 의 묶음과 멤버도 다시 읽거나 목록을 다시 읽는다.
+//! **목록 밖의 값은 견주지 않는다.** `show <id>` 만 내는 것(`children`·`members`·`journal`·`commits`·`wiki`)은 목록의
+//! 줄에 없다. 펼친 줄 하나를 들고 있는 클라이언트는 그 id 나 그 줄이 대는 id 가 이름에 서면 그것을 다시 읽는다.
 
-use crate::model::{Issue, JournalEntry, parse_rfc3339};
-use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
-use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, BTreeSet};
+use crate::model::JournalEntry;
+use ring::digest::{Context, SHA256};
+use serde::Serialize;
+use serde_json::Value;
+use std::collections::BTreeMap;
 
-/// 커서의 판. 못 알아보는 판은 `reset` 이다.
-const VERSION: u32 = 1;
+/// 줄 하나(또는 노트 묶음 하나)의 지문.
+type Mark = [u8; 16];
 
-/// 창을 커서를 낸 때보다 앞에서 연다(초). 시각을 뜬 쓰기가 락을 기다려 우리 읽기 뒤에 확정되는 틈을 덮는다.
-///
-/// **락의 기다림보다 길어야 한다.** `note`·`rm`·`defer` 는 시각을 락 밖에서 뜨고 `store` 는 락 둘(제 락과 링크 너머의
-/// 락)을 저마다 5초까지 기다린다 — 2초로 두던 판은 3초를 기다린 메모를 창 앞의 도장으로 받아 `reset` 없이 말없이
-/// 넘겼다. 커서가 드는 것은 이 창 안의 줄뿐이라 길게 두어도 커서는 거의 안 는다.
-pub const LAG: i64 = 15;
-
-#[derive(Debug, Serialize, Deserialize)]
-struct Cursor {
-    v: u32,
-    s: String,
-    t: i64,
-    a: String,
-    n: usize,
-    /// 창 안에 있던 활성 줄 — id → 지문.
-    rows: BTreeMap<String, String>,
-    /// 창 안에 있던 저널 줄의 지문.
-    log: BTreeSet<String>,
+/// 한 때의 스냅샷을 견줄 꼴로 줄인 것 — id 마다 목록의 줄과 노트의 지문.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct Seen {
+    rows: BTreeMap<String, Mark>,
+    /// 목록에 선 id 의 노트만 든다 — 목록에 없는 줄의 메모는 알릴 것이 없다.
+    notes: BTreeMap<String, Mark>,
 }
 
-/// 답. 줄 본문은 싣지 않는다.
+impl Seen {
+    /// 목록의 줄(`id` 를 든 객체)과 `note` 저널 줄에서. `id` 가 없는 줄은 견줄 이름이 없어 뺀다.
+    ///
+    /// **같은 id 가 둘 선 목록**(`duplicate_id`)은 그 줄들을 차례대로 한 지문에 넣는다 — 하나만 바뀌어도 선다.
+    /// 노트는 **차례를 안 따진다** — 저널 파일의 차례는 병합이 바꿀 수 있고, 그것은 바뀜이 아니다.
+    pub fn of(rows: &[Value], notes: &[JournalEntry]) -> Seen {
+        let mut by_id: BTreeMap<&str, Context> = BTreeMap::new();
+        for row in rows {
+            let Some(id) = row.get("id").and_then(Value::as_str) else { continue };
+            let bytes = serde_json::to_vec(row).unwrap_or_default();
+            let ctx = by_id.entry(id).or_insert_with(|| Context::new(&SHA256));
+            ctx.update(&(bytes.len() as u64).to_le_bytes());
+            ctx.update(&bytes);
+        }
+        let rows: BTreeMap<String, Mark> = by_id.into_iter().map(|(id, ctx)| (id.to_string(), finish(ctx))).collect();
+        let mut each: BTreeMap<&str, Vec<Mark>> = BTreeMap::new();
+        for e in notes.iter().filter(|e| rows.contains_key(&e.id)) {
+            each.entry(&e.id).or_default().push(mark(&serde_json::to_vec(e).unwrap_or_default()));
+        }
+        let notes = each
+            .into_iter()
+            .map(|(id, mut marks)| {
+                marks.sort_unstable();
+                let mut ctx = Context::new(&SHA256);
+                for m in &marks {
+                    ctx.update(m);
+                }
+                (id.to_string(), finish(ctx))
+            })
+            .collect();
+        Seen { rows, notes }
+    }
+
+    /// 이 스냅샷 전체의 지문 — 줄 하나·노트 하나만 달라도 다르다. 커서가 이것으로 기억을 찾는다.
+    pub fn fingerprint(&self) -> String {
+        let mut ctx = Context::new(&SHA256);
+        for (tag, map) in [(b"r", &self.rows), (b"n", &self.notes)] {
+            for (id, m) in map {
+                ctx.update(tag);
+                ctx.update(&(id.len() as u64).to_le_bytes());
+                ctx.update(id.as_bytes());
+                ctx.update(m);
+            }
+        }
+        use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
+        URL_SAFE_NO_PAD.encode(finish(ctx))
+    }
+
+    /// 메모리에서 차지하는 크기의 어림(바이트) — 기억의 상한을 셈하는 데 쓴다. 맵의 마디 몫을 줄마다 64 로 친다.
+    pub fn weight(&self) -> usize {
+        self.rows.keys().chain(self.notes.keys()).map(|id| id.len() + std::mem::size_of::<Mark>() + 64).sum()
+    }
+}
+
+fn finish(ctx: Context) -> Mark {
+    let mut out = [0u8; 16];
+    out.copy_from_slice(&ctx.finish().as_ref()[..16]);
+    out
+}
+
+fn mark(bytes: &[u8]) -> Mark {
+    let mut ctx = Context::new(&SHA256);
+    ctx.update(bytes);
+    finish(ctx)
+}
+
+/// 답. 줄 본문은 싣지 않는다 — 스냅샷이 진실이고, 클라이언트가 바뀐 줄을 다시 읽는다.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Changes {
     pub cursor: String,
-    /// 커서 뒤로 바뀐(새로 생기거나 고친 줄, 메모가 붙은 줄) 산 줄의 id. 차례는 id 순이다.
+    /// 옛 스냅샷 뒤로 새로 섰거나, 목록의 줄이 달라졌거나(파생값 포함), 노트가 달라진 id. 차례는 id 순이다.
     pub changed: Vec<String>,
-    /// 커서 뒤로 `rm` 이 지웠고 지금 스냅샷에 없는 id.
+    /// 옛 목록에 있었고 지금 목록에 없는 id — `rm`, 아카이브로 옮김, done 에 `archive_days` 넘게 서서 목록에서 빠짐.
     pub removed: Vec<String>,
-    /// 참이면 두 목록은 비었다 — 전체를 다시 읽는다.
+    /// 참이면 두 목록은 비었다 — 견줄 옛 스냅샷이 없으니 전체를 다시 읽는다.
     pub reset: bool,
 }
 
-/// 부르는 쪽이 읽어 건네는 것.
-pub struct Input<'a> {
-    /// 활성 스냅샷. 아카이브는 넣지 않는다.
-    pub issues: &'a [Issue],
-    /// 저널 줄 — `rm` 과 `note`. 다른 종류를 건네면 그것도 "바뀜" 이다.
-    pub journal: &'a [JournalEntry],
-    /// 저널에서 못 푼 조각이 댄 `ts`. `None` 은 도장을 못 읽은 것이다.
-    pub torn: &'a [Option<&'a str>],
-    /// 읽지 못한 저널 파일이 있었다.
-    pub unread: bool,
-    /// 프로젝트를 가르는 글(뿌리 경로).
-    pub scope: &'a str,
-    /// 아카이브 디렉터리의 표식 — 바뀌면 줄이 옮겨 갔을 수 있다.
-    pub archive: &'a str,
-    /// 지금(초).
-    pub now: i64,
-}
-
-/// 커서 뒤로 바뀐 것. 커서가 없으면 `reset` 이다 — 클라이언트는 전체를 읽고 이 답의 커서로 이어 간다.
-pub fn changes(input: &Input, cursor: Option<&str>) -> Changes {
-    let fresh = fresh(input);
-    let reset = || Changes { cursor: fresh.clone(), changed: Vec::new(), removed: Vec::new(), reset: true };
-    let Some(old) = cursor.and_then(decode) else { return reset() };
-    if old.v != VERSION || old.s != digest(input.scope.as_bytes()) {
-        return reset();
-    }
-    if old.t > input.now {
-        return reset();
-    }
-    if old.a != input.archive {
-        return reset();
-    }
-    if input.unread || input.torn.iter().any(|ts| ts.and_then(parse_rfc3339).is_none_or(|t| t >= old.t)) {
-        return reset();
-    }
-
-    let mut changed: BTreeSet<&str> = BTreeSet::new();
-    for issue in input.issues {
-        let in_window = parse_rfc3339(&issue.updated_at).is_none_or(|t| t >= old.t);
-        if in_window && old.rows.get(&issue.id) != Some(&row_digest(issue)) {
-            changed.insert(&issue.id);
-        }
-    }
-    let mut gone: BTreeSet<&str> = BTreeSet::new();
-    let mut deleted = 0usize;
-    for e in input.journal {
-        // 도장을 못 읽는 줄은 어느 창에도 안 든다 — `show --removed --since` 와 같은 약속이다.
-        if parse_rfc3339(&e.ts).is_none_or(|t| t < old.t) || old.log.contains(&entry_digest(e)) {
-            continue;
-        }
-        if e.removes_issue() {
-            deleted += 1;
-            gone.insert(&e.id);
-        } else {
-            changed.insert(&e.id);
-        }
-    }
-    // 지금 있는 줄만 "바뀜" 이다 — 사라진 줄의 메모는 알릴 것이 없다. 지웠다가 다시 지은 id 는 있는 쪽이 이긴다.
-    let present: BTreeSet<&str> = input.issues.iter().map(|i| i.id.as_str()).collect();
-    changed.retain(|id| present.contains(id));
-    changed.extend(gone.iter().filter(|id| present.contains(*id)));
-    gone.retain(|id| !present.contains(id));
-
-    // 줄 수가 저널로 설명되는가 — 새 줄(창 안에서 지어졌고 커서가 몰랐던 줄)만큼 늘고, 지움 줄 수 이하로 준다.
-    let added = input
-        .issues
+/// 옛 스냅샷(`None` 이면 모른다 — 커서가 없거나, 못 읽거나, 기억에서 밀려났다)과 지금을 견준 답. `cursor` 는 `new` 를
+/// 가리키는 글이고, 부르는 쪽이 짓는다.
+pub fn changes(old: Option<&Seen>, new: &Seen, cursor: String) -> Changes {
+    let Some(old) = old else { return Changes { cursor, changed: Vec::new(), removed: Vec::new(), reset: true } };
+    let changed = new
+        .rows
         .iter()
-        .filter(|i| parse_rfc3339(&i.created_at).is_some_and(|t| t >= old.t) && !old.rows.contains_key(&i.id))
-        .count();
-    let upper = old.n + added;
-    let lower = upper.saturating_sub(deleted);
-    if input.issues.len() > upper || input.issues.len() < lower {
-        return reset();
-    }
-
-    Changes {
-        cursor: fresh,
-        changed: changed.into_iter().map(str::to_string).collect(),
-        removed: gone.into_iter().map(str::to_string).collect(),
-        reset: false,
-    }
-}
-
-/// 지금 상태의 커서 글.
-fn fresh(input: &Input) -> String {
-    let t = input.now - LAG;
-    let rows = input
-        .issues
-        .iter()
-        .filter(|i| parse_rfc3339(&i.updated_at).is_none_or(|u| u >= t))
-        .map(|i| (i.id.clone(), row_digest(i)))
+        .filter(|(id, m)| old.rows.get(*id) != Some(m) || old.notes.get(*id) != new.notes.get(*id))
+        .map(|(id, _)| id.clone())
         .collect();
-    let log = input.journal.iter().filter(|e| parse_rfc3339(&e.ts).is_some_and(|u| u >= t)).map(entry_digest).collect();
-    let cursor = Cursor {
-        v: VERSION,
-        s: digest(input.scope.as_bytes()),
-        t,
-        a: input.archive.to_string(),
-        n: input.issues.len(),
-        rows,
-        log,
-    };
-    // `Cursor` 는 문자열 키의 맵과 수뿐이라 직렬화가 넘어질 길이 없다.
-    URL_SAFE_NO_PAD.encode(serde_json::to_vec(&cursor).unwrap_or_default())
-}
-
-fn decode(text: &str) -> Option<Cursor> {
-    serde_json::from_slice(&URL_SAFE_NO_PAD.decode(text).ok()?).ok()
-}
-
-fn digest(bytes: &[u8]) -> String {
-    URL_SAFE_NO_PAD.encode(&ring::digest::digest(&ring::digest::SHA256, bytes).as_ref()[..12])
-}
-
-/// 줄의 지문 — 줄이 파일에 쓰이는 그 직렬화다. 같은 초의 둘째 고침은 이것이 달라진다.
-fn row_digest(issue: &Issue) -> String {
-    digest(&serde_json::to_vec(issue).unwrap_or_default())
-}
-
-/// 저널 줄의 지문 — 같은 초에 같은 줄이 둘이면 하나로 센다(`watch` 와 같은 약속이다).
-fn entry_digest(entry: &JournalEntry) -> String {
-    digest(&serde_json::to_vec(entry).unwrap_or_default())
+    let removed = old.rows.keys().filter(|id| !new.rows.contains_key(*id)).cloned().collect();
+    Changes { cursor, changed, removed, reset: false }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{Actor, Kind, Status};
+    use crate::model::Actor;
+    use serde_json::json;
 
-    const T0: &str = "2026-11-04T10:00:00Z";
-    const SCOPE: &str = "/p/a";
-
-    fn secs(s: &str) -> i64 {
-        parse_rfc3339(s).unwrap()
+    fn row(id: &str, title: &str) -> Value {
+        json!({ "id": id, "title": title, "status": "todo", "updated_at": "2026-11-04T09:00:00Z" })
     }
 
-    fn row(id: &str, at: &str) -> Issue {
-        Issue::new(id.into(), format!("{id} 제목"), Kind::Issue, Status::new("todo"), at)
+    fn note(id: &str, text: &str, at: &str) -> JournalEntry {
+        JournalEntry::note(id, text, at, &Actor { name: "나".into(), email: "me@example.com".into() })
     }
 
-    fn edited(mut i: Issue, title: &str, at: &str) -> Issue {
-        i.title = title.into();
-        i.updated_at = at.into();
-        i
-    }
-
-    fn by() -> Actor {
-        Actor { name: "나".into(), email: "me@example.com".into() }
-    }
-
-    fn rm(id: &str, at: &str) -> JournalEntry {
-        JournalEntry::removed(id, "제목", at, &by())
-    }
-
-    fn note(id: &str, at: &str) -> JournalEntry {
-        JournalEntry::note(id, "메모", at, &by())
-    }
-
-    fn input<'a>(issues: &'a [Issue], journal: &'a [JournalEntry], now: &str) -> Input<'a> {
-        Input { issues, journal, torn: &[], unread: false, scope: SCOPE, archive: "", now: secs(now) }
-    }
-
-    /// 한 번 읽어 커서를 받는다.
-    fn first(issues: &[Issue], journal: &[JournalEntry], now: &str) -> String {
-        changes(&input(issues, journal, now), None).cursor
+    fn diff(old: &Seen, new: &Seen) -> (Vec<String>, Vec<String>) {
+        let got = changes(Some(old), new, String::new());
+        assert!(!got.reset);
+        (got.changed, got.removed)
     }
 
     #[test]
-    fn no_cursor_resets_and_hands_out_a_cursor() {
-        let rows = [row("a-1", T0)];
-        let got = changes(&input(&rows, &[], T0), None);
-        assert!(got.reset && got.changed.is_empty() && got.removed.is_empty());
-        // 그 커서로 바로 이으면 바뀐 것이 없다.
-        let next = changes(&input(&rows, &[], T0), Some(&got.cursor));
-        assert_eq!(next, Changes { cursor: next.cursor.clone(), changed: vec![], removed: vec![], reset: false });
+    fn no_old_snapshot_resets() {
+        let new = Seen::of(&[row("a-1", "하나")], &[]);
+        let got = changes(None, &new, "c".into());
+        assert_eq!(got, Changes { cursor: "c".into(), changed: vec![], removed: vec![], reset: true });
     }
 
     #[test]
-    fn rows_changed_after_the_cursor_are_named_and_unchanged_ones_are_not() {
-        let t1 = "2026-11-04T10:00:10Z";
-        let old = [row("a-1", "2026-11-04T09:00:00Z"), row("a-2", T0)];
-        let cursor = first(&old, &[], T0);
-        let now = [old[0].clone(), edited(old[1].clone(), "고침", t1), row("a-3", t1)];
-        let got = changes(&input(&now, &[], t1), Some(&cursor));
-        assert!(!got.reset, "{got:?}");
-        assert_eq!(got.changed, ["a-2", "a-3"]);
-        assert!(got.removed.is_empty());
+    fn the_same_snapshot_is_the_same_fingerprint_and_no_change() {
+        let rows = [row("a-1", "하나"), row("a-2", "둘")];
+        let notes = [note("a-1", "메모", "2026-11-04T09:00:00Z")];
+        let (a, b) = (Seen::of(&rows, &notes), Seen::of(&rows, &notes));
+        assert_eq!(a.fingerprint(), b.fingerprint());
+        assert_eq!(diff(&a, &b), (vec![], vec![]));
+    }
+
+    /// **도장은 보지 않는다** — `updated_at` 이 그대로인 채 내용만 바뀐 줄(`git pull` 이 들인 남의 고침)도 선다.
+    #[test]
+    fn a_row_that_kept_its_stamp_but_changed_is_named() {
+        let old = Seen::of(&[row("a-1", "하나"), row("a-2", "둘")], &[]);
+        let new = Seen::of(&[row("a-1", "남이 고침"), row("a-2", "둘")], &[]);
+        assert_ne!(old.fingerprint(), new.fingerprint());
+        assert_eq!(diff(&old, &new), (vec!["a-1".to_string()], vec![]));
+    }
+
+    /// 파생값만 달라진 줄도 선다 — 목록의 줄에 실려 있기 때문이다(에픽의 칸, 멤버의 물려받은 마일스톤).
+    #[test]
+    fn a_derived_value_that_moved_is_named() {
+        let mut epic = row("e-1", "에픽");
+        let old = Seen::of(&[epic.clone(), row("e-1.x", "멤버")], &[]);
+        epic["derived_status"] = json!("done");
+        let mut member = row("e-1.x", "멤버");
+        member["derived_milestone"] = json!("m-1");
+        let new = Seen::of(&[epic, member], &[]);
+        assert_eq!(diff(&old, &new), (vec!["e-1".to_string(), "e-1.x".to_string()], vec![]));
     }
 
     #[test]
-    fn two_rows_changed_in_the_cursors_own_second_are_both_caught() {
-        let old = [row("a-1", T0), row("a-2", "2026-11-04T09:00:00Z")];
-        let cursor = first(&old, &[], T0);
-        // 커서를 낸 바로 그 초에 둘이 바뀌고 하나가 생긴다.
-        let now = [edited(old[0].clone(), "고침", T0), edited(old[1].clone(), "고침", T0), row("a-3", T0)];
-        let got = changes(&input(&now, &[], T0), Some(&cursor));
-        assert!(!got.reset, "{got:?}");
-        assert_eq!(got.changed, ["a-1", "a-2", "a-3"]);
+    fn a_new_row_is_changed_and_a_missing_row_is_removed() {
+        let old = Seen::of(&[row("a-1", "하나"), row("a-2", "둘")], &[]);
+        let new = Seen::of(&[row("a-1", "하나"), row("a-3", "셋")], &[]);
+        assert_eq!(diff(&old, &new), (vec!["a-3".to_string()], vec!["a-2".to_string()]));
+    }
+
+    /// 노트는 시각과 상관없이 선다 — 옛 도장의 노트(늦게 확정됐거나 병합으로 들어온 것)도. 목록에 없는 줄의 노트는
+    /// 알릴 것이 없다. 노트의 차례만 바뀐 것은 바뀜이 아니다.
+    #[test]
+    fn a_note_names_its_row_whatever_its_stamp() {
+        let rows = [row("a-1", "하나"), row("a-2", "둘")];
+        let first = note("a-1", "첫 메모", "2026-11-04T09:00:00Z");
+        let old = Seen::of(&rows, std::slice::from_ref(&first));
+        let late = note("a-2", "늦은 메모", "2026-01-01T00:00:00Z");
+        let gone = note("nowhere", "없는 줄", "2026-11-04T09:00:00Z");
+        let new = Seen::of(&rows, &[late.clone(), first.clone(), gone]);
+        assert_eq!(diff(&old, &new), (vec!["a-2".to_string()], vec![]));
+        let shuffled = Seen::of(&rows, &[first, late]);
+        assert_eq!(shuffled.fingerprint(), new.fingerprint());
     }
 
     #[test]
-    fn a_row_changed_twice_in_one_second_is_not_lost() {
-        let base = row("a-1", "2026-11-04T09:00:00Z");
-        let once = edited(base.clone(), "첫 고침", T0);
-        let cursor = first(std::slice::from_ref(&once), &[], T0);
-        // 같은 초에 한 번 더 — `updated_at` 은 그대로고 줄만 달라졌다.
-        let twice = edited(once.clone(), "둘째 고침", T0);
-        let got = changes(&input(std::slice::from_ref(&twice), &[], T0), Some(&cursor));
-        assert_eq!(got.changed, ["a-1"]);
-        // 이미 알린 모습 그대로면 다시 알리지 않는다.
-        let again = changes(&input(std::slice::from_ref(&once), &[], T0), Some(&cursor));
-        assert!(again.changed.is_empty() && !again.reset);
+    fn a_twin_id_is_named_when_either_line_moves() {
+        let old = Seen::of(&[row("a-1", "하나"), row("a-1", "쌍둥이")], &[]);
+        let new = Seen::of(&[row("a-1", "하나"), row("a-1", "쌍둥이 고침")], &[]);
+        assert_eq!(diff(&old, &new), (vec!["a-1".to_string()], vec![]));
     }
 
     #[test]
-    fn a_change_inside_the_lag_window_is_named_once() {
-        // 시각은 LAG 안에서 떴지만 우리 읽기 뒤에 확정된 쓰기 — 커서 시각보다 1초 앞의 도장이다.
-        let cursor = first(&[], &[], "2026-11-04T10:00:05Z");
-        let late = [row("a-1", "2026-11-04T10:00:04Z")];
-        let got = changes(&input(&late, &[], "2026-11-04T10:00:06Z"), Some(&cursor));
-        assert_eq!(got.changed, ["a-1"]);
-        let after = changes(&input(&late, &[], "2026-11-04T10:00:06Z"), Some(&got.cursor));
-        assert!(after.changed.is_empty());
-    }
-
-    #[test]
-    fn removed_rows_come_from_rm_lines_after_the_cursor_and_only_if_gone() {
-        let t1 = "2026-11-04T10:00:10Z";
-        let rows = [row("a-1", "2026-11-04T09:00:00Z"), row("a-2", "2026-11-04T09:00:00Z")];
-        let old_rm = [rm("a-0", "2026-11-04T08:00:00Z")];
-        let cursor = first(&rows, &old_rm, T0);
-        // a-2 를 지웠다. 옛 지움(a-0)은 커서 앞이라 다시 안 나온다.
-        let now = [rows[0].clone()];
-        let log = [old_rm[0].clone(), rm("a-2", t1)];
-        let got = changes(&input(&now, &log, t1), Some(&cursor));
-        assert!(!got.reset, "{got:?}");
-        assert_eq!(got.removed, ["a-2"]);
-        assert!(got.changed.is_empty());
-        // 지웠다가 같은 id 로 다시 지었으면 지운 것이 아니라 바뀐 것이다.
-        let back = [rows[0].clone(), row("a-2", "2026-11-04T10:00:11Z")];
-        let got = changes(&input(&back, &log, "2026-11-04T10:00:11Z"), Some(&cursor));
-        assert_eq!(got.changed, ["a-2"]);
-        assert!(got.removed.is_empty() && !got.reset, "{got:?}");
-    }
-
-    #[test]
-    fn a_note_names_its_row_but_a_note_on_a_missing_row_is_dropped() {
-        let t1 = "2026-11-04T10:00:10Z";
-        let rows = [row("a-1", "2026-11-04T09:00:00Z")];
-        let cursor = first(&rows, &[], T0);
-        let log = [note("a-1", t1), note("gone", t1)];
-        let got = changes(&input(&rows, &log, t1), Some(&cursor));
-        assert_eq!(got.changed, ["a-1"]);
-        // 같은 초에 같은 메모를 또 알리지 않는다.
-        let next = changes(&input(&rows, &log, t1), Some(&got.cursor));
-        assert!(next.changed.is_empty());
-    }
-
-    #[test]
-    fn a_garbled_or_foreign_or_unknown_cursor_resets() {
-        let rows = [row("a-1", T0)];
-        let good = first(&rows, &[], T0);
-        let foreign = changes(&Input { scope: "/p/b", ..input(&rows, &[], T0) }, Some(&good));
-        assert!(foreign.reset);
-        for bad in ["", "not base64!", "e30", &URL_SAFE_NO_PAD.encode(br#"{"v":9}"#)] {
-            assert!(changes(&input(&rows, &[], T0), Some(bad)).reset, "{bad}");
-        }
-        let other_version = URL_SAFE_NO_PAD.encode(
-            serde_json::to_vec(
-                &serde_json::json!({"v":2,"s":digest(SCOPE.as_bytes()),"t":0,"a":"","n":1,"rows":{},"log":[]}),
-            )
-            .unwrap(),
-        );
-        assert!(changes(&input(&rows, &[], T0), Some(&other_version)).reset);
-    }
-
-    /// **창이 락의 기다림보다 길다** — 시각을 락 밖에서 뜬 쓰기(`note`·`rm`·`defer`)가 락을 다 기다린 뒤 확정되어도
-    /// 그 도장이 다음 커서의 창 안에 든다. 덤은 락을 잡은 뒤 스냅샷을 쓰고(fsync·rename) 저널을 덧붙이는 동안이다.
-    #[test]
-    fn the_window_outlasts_the_lock_wait() {
-        // 락은 둘(제 락·링크 너머의 락)이고 저마다 다 기다릴 수 있다.
-        let wait = 2 * crate::store::LOCK_TIMEOUT.as_secs();
-        assert!(LAG as u64 >= wait + 5, "LAG {LAG}초가 락의 기다림 {wait}초에 쓰는 동안을 더한 것을 못 덮는다");
-        // 락을 거의 다 기다린 메모 — 도장은 락 밖의 12:00:00, 확정은 12:00:04. 그 사이 12:00:03 에 받은 커서로 묻는다.
-        let rows = [row("a-1", "2026-11-04T09:00:00Z")];
-        let cursor = first(&rows, &[], "2026-11-04T12:00:03Z");
-        let log = [note("a-1", "2026-11-04T12:00:00Z")];
-        let got = changes(&input(&rows, &log, "2026-11-04T12:00:05Z"), Some(&cursor));
-        assert_eq!(got.changed, ["a-1"], "락을 기다린 메모를 놓쳤다 — {got:?}");
-    }
-
-    #[test]
-    fn a_clock_that_went_back_resets() {
-        let rows = [row("a-1", T0)];
-        let cursor = first(&rows, &[], "2026-11-04T10:00:30Z");
-        let got = changes(&input(&rows, &[], "2026-11-04T10:00:00Z"), Some(&cursor));
-        assert!(got.reset);
-    }
-
-    #[test]
-    fn rows_that_vanish_without_an_rm_line_reset() {
-        let rows = [row("a-1", "2026-11-04T09:00:00Z"), row("a-2", "2026-11-04T09:00:00Z")];
-        let cursor = first(&rows, &[], T0);
-        // 아카이브·손 고침·병합이 줄을 빼 갔다 — 저널이 설명하지 못한다.
-        let got = changes(&input(&rows[..1], &[], "2026-11-04T10:00:10Z"), Some(&cursor));
-        assert!(got.reset && got.changed.is_empty());
-        // 늘어난 것도 마찬가지다 — 병합이 커서보다 오래된 도장의 줄을 들였다.
-        let more = [rows[0].clone(), rows[1].clone(), row("a-3", "2026-11-04T08:00:00Z")];
-        assert!(changes(&input(&more, &[], "2026-11-04T10:00:10Z"), Some(&cursor)).reset);
-    }
-
-    #[test]
-    fn an_archive_mark_that_moved_resets() {
-        let rows = [row("a-1", "2026-11-04T09:00:00Z")];
-        let cursor = first(&rows, &[], T0);
-        let moved = Input { archive: "2026.jsonl:1:2", ..input(&rows, &[], T0) };
-        assert!(changes(&moved, Some(&cursor)).reset);
-    }
-
-    #[test]
-    fn a_journal_that_could_hide_a_change_resets() {
-        let rows = [row("a-1", "2026-11-04T09:00:00Z")];
-        let cursor = first(&rows, &[], T0);
-        let t1 = "2026-11-04T10:00:10Z";
-        // 못 읽은 저널 파일, 도장을 못 읽은 조각, 창에 들었을 수 있는 조각은 reset 이다.
-        assert!(changes(&Input { unread: true, ..input(&rows, &[], t1) }, Some(&cursor)).reset);
-        assert!(changes(&Input { torn: &[None], ..input(&rows, &[], t1) }, Some(&cursor)).reset);
-        assert!(changes(&Input { torn: &[Some(t1)], ..input(&rows, &[], t1) }, Some(&cursor)).reset);
-        // 창 앞의 조각은 이 커서가 놓칠 것이 없다.
-        let old = [Some("2026-11-04T08:00:00Z")];
-        assert!(!changes(&Input { torn: &old, ..input(&rows, &[], t1) }, Some(&cursor)).reset);
+    fn weight_grows_with_rows() {
+        let small = Seen::of(&[row("a-1", "하나")], &[]);
+        let big = Seen::of(&[row("a-1", "하나"), row("a-2", "둘")], &[]);
+        assert!(big.weight() > small.weight() && small.weight() > 0);
     }
 }
