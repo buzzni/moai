@@ -181,6 +181,8 @@ How the params are read:
 
 Who writes is `actor`, else the project's git config, else nobody: the write fails with `-32000` and `data.code` `no_actor`, and the message is the CLI's (where it says `--user`, send `actor`). The daemon's own `MOAI_ACTOR` is not read (see the `actor` key above). An `actor` that is not `Name (email)` is `bad_input`.
 
+Two settings of the shell that started the daemon still hold for every request, because a request cannot give them: `MOAI_HERE` and `MOAI_NOW`. With `MOAI_HERE=1` set there, a write to a registered linked worktree goes into that worktree's own `.moai`, not into the main checkout's tracker, which is the split the CLI avoids by default. Start the daemon from a shell without them.
+
 **A write on someone else's row is not stopped.** A `mv` into a started column of a row whose assignee is someone else, or nobody, goes through, as it does for a person at a terminal. The CLI's one-line notice comes in `messages`, and `value.theirs` names the row. `take: true` is `--take`: you become the assignee, and a `Taken-over:` note keeps whose it was.
 
 **Hook rule 5 does not stand on this API — words only.** The hook that refuses an agent's `moai mv` on someone else's row reads the agent's shell commands. A request on the socket passes no hook. An agent that writes through the daemon keeps the rule itself: ask the person first, and on a yes send `take: true` with a `msg` that says who said yes.
