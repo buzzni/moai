@@ -192,6 +192,96 @@ fn start_status_hello_ping_and_stop() {
     assert_eq!(again["stopped"], false, "{again}");
 }
 
+/// 연결을 새는 클라이언트가 상한(32)을 다 쥐어도 `status` 가 pid 를 대고 `stop` 이 데몬을 멈춘다(moai-uezh). 상한을
+/// 넘은 연결에서는 `hello`·`daemon.shutdown` 만 돌고 나머지는 `busy` 와 pid 로 거절된다.
+#[test]
+fn a_daemon_at_its_connection_cap_still_answers_status_and_stops() {
+    let f = Fence::new();
+    let (daemon, first) = f.start();
+    let pid = first["pid"].as_u64().unwrap();
+    // 하나하나 답을 받아 둔다 — 그러면 서른둘 모두 연결 스레드에 들어 상한을 센 뒤다.
+    let held: Vec<Wire> = (0..32)
+        .map(|n| {
+            let mut wire = Wire::open(&f.socket());
+            assert_eq!(wire.call(n, "ping", json!({}))["result"], json!({}), "{n}번째 연결");
+            wire
+        })
+        .collect();
+    let mut over = Wire::open(&f.socket());
+    let refused = over.call(99, "ping", json!({}));
+    assert_eq!(refused["error"]["data"]["code"], "busy", "상한을 넘은 ping 이 돌았다 — {refused}");
+    assert_eq!(refused["error"]["data"]["pid"], pid, "{refused}");
+
+    let status = f.json(&["daemon", "status", "--json"]);
+    assert_eq!(status["running"], true, "{status}");
+    assert_eq!(status["pid"], pid, "{status}");
+    let again = f.json(&["daemon", "start", "--json"]);
+    assert_eq!(again["started"], false, "{again}");
+    let stopped = f.json(&["daemon", "stop", "--json"]);
+    assert_eq!(stopped["stopped"], true, "{stopped}");
+    assert_eq!(stopped["pid"], pid, "{stopped}");
+    assert!(daemon.wait().success(), "멈춘 데몬이 0 으로 끝나지 않았다");
+    assert!(!f.socket().exists(), "멈춘 데몬이 소켓을 남겼다");
+    drop(held);
+}
+
+/// 상한을 넘은 연결의 수명 길(넷)마저 말없는 연결이 쥐면 `hello` 도 못 받는다 — 그때 `status` 는 `busy` 로 넘어지되
+/// 데몬의 pid 를 댄다. 수명 길은 2초 안에 말이 없는 연결을 닫으니, 그 뒤에는 다시 닿는다(moai-uezh).
+#[test]
+fn a_daemon_too_full_even_for_hello_is_named_by_pid_and_frees_up() {
+    let f = Fence::new();
+    let (daemon, first) = f.start();
+    let pid = first["pid"].as_u64().unwrap();
+    let held: Vec<Wire> = (0..32)
+        .map(|n| {
+            let mut wire = Wire::open(&f.socket());
+            assert_eq!(wire.call(n, "ping", json!({}))["result"], json!({}), "{n}번째 연결");
+            wire
+        })
+        .collect();
+    // 받는 스레드는 붙은 차례로 받는다 — 말없는 넷이 수명 길을 먼저 쥐고, 다섯째는 곧바로 거절된다.
+    let silent: Vec<UnixStream> = (0..4).map(|_| UnixStream::connect(f.socket()).unwrap()).collect();
+    // 데몬은 요청을 안 읽고 거절을 쓰고 닫는다 — 그 닫기가 먼저면 이쪽 쓰기가 끊기니, 쓰기는 넘기고 답을 읽는다.
+    let mut fifth = Wire::open(&f.socket());
+    let _ = fifth.writer.write_all(b"{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"hello\",\"params\":{\"proto\":1}}\n");
+    let mut line = String::new();
+    fifth.reader.read_line(&mut line).unwrap();
+    let refused: Value =
+        serde_json::from_str(&line).unwrap_or_else(|e| panic!("거절이 JSON 이 아니다: {e} — {line:?}"));
+    assert_eq!(refused["error"]["data"]["code"], "busy", "수명 길이 찼는데 hello 가 돌았다 — {refused}");
+    assert_eq!(refused["error"]["data"]["pid"], pid, "{refused}");
+    let error = f.refused(&["daemon", "status", "--json"]);
+    assert_eq!(error["code"], "busy", "{error}");
+    assert!(error.to_string().contains(&format!("pid {pid}")), "거절이 pid 를 안 댄다 — {error}");
+    // 말없는 넷은 시한(2초)에 닫힌다 — 그 뒤 stop 이 닿는다.
+    std::thread::sleep(Duration::from_millis(2500));
+    let stopped = f.json(&["daemon", "stop", "--json"]);
+    assert_eq!(stopped["pid"], pid, "{stopped}");
+    assert!(daemon.wait().success(), "멈춘 데몬이 0 으로 끝나지 않았다");
+    drop((held, silent));
+}
+
+/// 멈추는 답을 쓴 연결은 제 소켓에 붙어 받는 스레드를 깨운다 — 그 파일이 지워졌으면 붙기가 실패한다. 그래도 받는
+/// 스레드는 제 간격(`TICK`)마다 `stop` 을 보아 그친다(moai-uezh). 파일이 없으니 `moai daemon stop` 은 데몬을
+/// 못 찾는다 — 멈추는 길은 이미 열린 연결로 보내는 `daemon.shutdown` 이다.
+#[test]
+fn a_daemon_whose_socket_file_was_removed_still_stops() {
+    let f = Fence::new();
+    let (daemon, mut wire) = served(&f);
+    let pid = wire.call(1, "hello", json!({ "proto": 1 }))["result"]["pid"].clone();
+    std::fs::remove_file(f.socket()).unwrap();
+    assert!(UnixStream::connect(f.socket()).is_err(), "지운 소켓에 아직 붙는다 — 깨우는 붙기가 실패하는 자리가 아니다");
+    let bye = wire.call(2, "daemon.shutdown", json!({}));
+    assert_eq!(bye["result"]["pid"], pid, "{bye}");
+    let asked = std::time::Instant::now();
+    assert!(daemon.wait().success(), "멈춘 데몬이 0 으로 끝나지 않았다");
+    assert!(
+        asked.elapsed() < Duration::from_secs(5),
+        "멈추기까지 {:?} — 받는 스레드가 stop 을 늦게 봤다",
+        asked.elapsed()
+    );
+}
+
 #[test]
 fn a_second_start_does_not_double_up() {
     let f = Fence::new();
@@ -612,6 +702,17 @@ fn an_unknown_key_a_bad_lang_tz_or_value_is_invalid_params() {
     assert_eq!(limit["error"]["code"], -32602, "{limit}");
     let shape = wire.call(7, "show", json!({ "project": project, "tree": "yes" }));
     assert_eq!(shape["error"]["code"], -32602, "{shape}");
+    // 환경 키도 글이 아니면 거절한다 — 말없이 빠지면 데몬의 사람·말로 답한다.
+    let who = wire.call(9, "ready", json!({ "project": project, "actor": { "name": "Kim", "email": "k@x" } }));
+    assert_eq!(who["error"]["code"], -32602, "{who}");
+    assert!(who["error"]["message"].as_str().unwrap().contains("actor"), "{who}");
+    let lang_shape = wire.call(10, "changes", json!({ "project": project, "lang": ["ko"] }));
+    assert_eq!(lang_shape["error"]["code"], -32602, "{lang_shape}");
+    // 열거형은 CLI 처럼 글자 크기를 가린다. 위 끝을 넘은 값은 그 끝을 댄다.
+    let axis = wire.call(11, "stats", json!({ "project": project, "by": "STATUS" }));
+    assert_eq!(axis["error"]["code"], -32602, "{axis}");
+    let last = wire.call(12, "stats", json!({ "project": project, "last": 1001 }));
+    assert!(last["error"]["message"].as_str().unwrap().contains("1000"), "{last}");
     // 좋은 lang 은 화면 말을 바꾼다.
     let ko = wire.call(8, "status", json!({ "project": project, "lang": "ko" }));
     assert!(ko["result"]["value"].is_object() || ko["result"]["value"].is_array(), "{ko}");
@@ -692,4 +793,160 @@ fn changes_over_the_socket_sees_what_the_cli_writes() {
     assert_eq!(none["error"]["code"], -32602, "{none}");
     let loose = wire.call(8, "changes", json!({ "project": f.0.display().to_string() }));
     assert_eq!(loose["error"]["data"]["code"], "not_registered", "{loose}");
+}
+
+// ---- changes 가 기억한 스냅샷과 견준다(moai-8ts9) ------------------------------------------------------------------
+
+/// `changes` 한 번 — `(커서, 바뀜, 사라짐, reset)`. 바뀜은 id 순이다.
+fn poll(wire: &mut Wire, n: u64, project: &str, cursor: Option<&str>) -> (String, Vec<String>, Vec<String>, bool) {
+    let mut params = json!({ "project": project });
+    if let Some(c) = cursor {
+        params["cursor"] = json!(c);
+    }
+    let reply = wire.call(n, "changes", params);
+    let value = &reply["result"]["value"];
+    let ids = |v: &Value| -> Vec<String> {
+        v.as_array().unwrap_or_else(|| panic!("{reply}")).iter().map(|x| x.as_str().unwrap().to_string()).collect()
+    };
+    (
+        value["cursor"].as_str().unwrap().to_string(),
+        ids(&value["changed"]),
+        ids(&value["removed"]),
+        value["reset"] == true,
+    )
+}
+
+/// 에픽 하나(멤버 둘)와 마일스톤 하나를 더 든 걸어 둔 프로젝트 — `(뿌리, 에픽, 멤버 둘, 마일스톤)`.
+fn grouped(f: &Fence) -> (PathBuf, String, [String; 2], String) {
+    let root = f.project("proj");
+    let d = root.to_str().unwrap().to_string();
+    let plan = f.0.join("plan.md");
+    std::fs::write(&plan, "# grouped\n- one\n- two\n").unwrap();
+    for args in [
+        vec!["-C", &d, "add", "--from", plan.to_str().unwrap(), "--user", ACTOR],
+        vec!["-C", &d, "milestone", "add", "v1", "--user", ACTOR],
+    ] {
+        let out = f.run(&args);
+        assert!(out.status.success(), "moai {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+    }
+    let rows = cli(f, &root, &["show", "--all", "--fields", "id,title,kind"]);
+    let id = |kind: &str, title: &str| -> String {
+        rows.as_array().unwrap().iter().find(|r| r["kind"] == kind && r["title"] == title).unwrap()["id"]
+            .as_str()
+            .unwrap()
+            .to_string()
+    };
+    (root.clone(), id("epic", "grouped"), [id("issue", "one"), id("issue", "two")], id("milestone", "v1"))
+}
+
+/// 걸어 둔 프로젝트에서 제목으로 id 를 찾는다.
+fn id_titled(f: &Fence, root: &Path, title: &str) -> String {
+    let rows = cli(f, root, &["show", "--all", "--fields", "id,title"]);
+    rows.as_array().unwrap().iter().find(|r| r["title"] == title).unwrap()["id"].as_str().unwrap().to_string()
+}
+
+/// **`updated_at` 을 옛 값으로 둔 채 들어온 줄도 선다**(리뷰 `moai-5n6m.e9f` 의 4). 다른 clone 에서 한 시간 전에 고친
+/// 줄이 `git pull` 로 들어온 꼴이다 — 창(`updated_at`)으로 거르던 판은 바뀜으로도 `reset` 으로도 안 냈다.
+#[test]
+fn changes_sees_a_row_pulled_in_with_an_old_stamp() {
+    let f = Fence::new();
+    let root = f.project("proj");
+    let project = root.to_str().unwrap();
+    let alpha = id_titled(&f, &root, "alpha");
+    let (_daemon, mut wire) = served(&f);
+    let (cursor, _, _, reset) = poll(&mut wire, 1, project, None);
+    assert!(reset);
+
+    let path = root.join(".moai/issues.jsonl");
+    let text = std::fs::read_to_string(&path).unwrap();
+    let pulled: String = text
+        .lines()
+        .map(|line| {
+            let mut row: Value = serde_json::from_str(line).unwrap();
+            if row["id"] == alpha.as_str() {
+                row["title"] = json!("alpha from a pull");
+                row["updated_at"] = json!("2026-11-04T11:00:00Z");
+            }
+            format!("{row}\n")
+        })
+        .collect();
+    std::fs::write(&path, pulled).unwrap();
+    let (_, changed, removed, reset) = poll(&mut wire, 2, project, Some(&cursor));
+    assert_eq!((changed, removed, reset), (vec![alpha], vec![], false), "옛 도장으로 들어온 고침을 놓쳤다");
+}
+
+/// **파생값만 바뀐 줄도 선다**(리뷰의 6). 마지막 멤버가 닫히면 에픽의 칸이, 에픽이 마일스톤에 들면 멤버가 물려받는
+/// 마일스톤이 바뀐다 — 그 값을 든 줄은 파일에서 그대로다. 제 줄이 바뀐 id 만 내던 판은 그 줄을 안 냈다.
+#[test]
+fn changes_names_rows_whose_derived_values_moved() {
+    let f = Fence::new();
+    let (root, epic, [one, two], milestone) = grouped(&f);
+    let project = root.to_str().unwrap();
+    let (_daemon, mut wire) = served(&f);
+    let (cursor, _, _, reset) = poll(&mut wire, 1, project, None);
+    assert!(reset);
+
+    for id in [&one, &two] {
+        let out = f.run(&["-C", project, "mv", id, "done", "--user", ACTOR]);
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    }
+    let (cursor, changed, _, reset) = poll(&mut wire, 2, project, Some(&cursor));
+    assert!(!reset);
+    assert!(changed.contains(&epic), "마지막 멤버가 닫혔는데 에픽이 안 섰다 — {changed:?}");
+
+    let out = f.run(&["-C", project, "edit", &epic, "--milestone", &milestone, "--user", ACTOR]);
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let (_, changed, _, reset) = poll(&mut wire, 3, project, Some(&cursor));
+    assert!(!reset);
+    for member in [&one, &two] {
+        assert!(changed.contains(member), "에픽을 마일스톤에 넣었는데 {member} 가 안 섰다 — {changed:?}");
+    }
+}
+
+/// **기억에서 밀려난 지문은 `reset` 이다**(프로젝트마다 최근 8벌). 커서에 상태를 싣던 판은 그대로 이어 갔다.
+#[test]
+fn changes_resets_an_evicted_cursor() {
+    let f = Fence::new();
+    let root = f.project("proj");
+    let project = root.to_str().unwrap();
+    let alpha = id_titled(&f, &root, "alpha");
+    let (_daemon, mut wire) = served(&f);
+    let (old, _, _, _) = poll(&mut wire, 1, project, None);
+    let (same, changed, _, reset) = poll(&mut wire, 2, project, Some(&old));
+    assert_eq!((changed, reset), (vec![], false));
+    assert_eq!(same, old, "안 바뀐 스냅샷이 다른 커서를 냈다");
+
+    // 아홉 번 바뀌며 이어 가면 첫 스냅샷은 밀려난다.
+    let mut cursor = old.clone();
+    for n in 0..9u64 {
+        let title = format!("alpha {n}");
+        let out = f.run(&["-C", project, "edit", &alpha, "--title", &title, "--user", ACTOR]);
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        let (next, changed, _, reset) = poll(&mut wire, 10 + n, project, Some(&cursor));
+        assert_eq!((changed, reset), (vec![alpha.clone()], false));
+        cursor = next;
+    }
+    let (_, changed, removed, reset) = poll(&mut wire, 30, project, Some(&old));
+    assert!(reset && changed.is_empty() && removed.is_empty(), "밀려난 지문이 reset 이 아니다");
+    assert!(!poll(&mut wire, 31, project, Some(&cursor)).3, "지금 커서가 살아 있지 않다");
+}
+
+/// **기억은 데몬의 것이다** — 다시 띄운 데몬은 옛 커서를 모르고, 스냅샷이 같아도 `reset` 이다(2026-11-04 사람이
+/// 받아들인 대가). 서버에 아무것도 안 두던 판은 그대로 이어 갔다.
+#[test]
+fn changes_resets_after_a_restart() {
+    let f = Fence::new();
+    let root = f.project("proj");
+    let project = root.to_str().unwrap();
+    let (daemon, mut wire) = served(&f);
+    let (cursor, _, _, _) = poll(&mut wire, 1, project, None);
+    assert!(!poll(&mut wire, 2, project, Some(&cursor)).3);
+
+    drop(wire);
+    let stopped = f.json(&["daemon", "stop", "--json"]);
+    assert_eq!(stopped["stopped"], true, "{stopped}");
+    assert!(daemon.wait().success());
+    let (_daemon, mut wire) = served(&f);
+    let (_, changed, removed, reset) = poll(&mut wire, 1, project, Some(&cursor));
+    assert!(reset && changed.is_empty() && removed.is_empty(), "다시 띄운 데몬이 옛 커서로 이어 갔다");
 }

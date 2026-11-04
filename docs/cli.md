@@ -3761,7 +3761,9 @@ Options:
   -h, --help                 Print help
 
   --json gives {stopped, pid, socket}. With nothing running, stopped is
-  false and it still exits 0. It works on a daemon of another version too.
+  false and it still exits 0. It works on a daemon of another version too,
+  and on one at its connection cap (32): past the cap the daemon still
+  answers hello and daemon.shutdown, and refuses the rest with busy.
 ```
 
 ## `moai daemon status`
@@ -3781,10 +3783,14 @@ Options:
 
   --json gives {supported, running, socket, stale_socket, this_version,
   this_proto}, and pid, version, proto and same_version while one runs.
-  same_version is false when the daemon is another build than this moai -
-  restart it with moai daemon stop, then moai daemon start. stale_socket is
-  a socket left by a daemon that is gone; moai daemon start clears it.
-  It only reads, and exits 0 whether or not a daemon runs.
+  same_version is false when the daemon is another version or proto than
+  this moai - restart it with moai daemon stop, then moai daemon start. A
+  rebuild of the same version still reads true. stale_socket is a socket
+  left by a daemon that is gone; moai daemon start clears it. It only reads,
+  and exits 0 whether or not a daemon runs; a file there that is not your
+  socket, an answer that is not a daemon's, or a daemon so full that it
+  cannot even answer hello (busy, with its pid) is an error. A daemon at
+  its connection cap still answers status.
 ```
 
 ## `moai hook`

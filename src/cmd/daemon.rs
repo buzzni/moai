@@ -204,8 +204,8 @@ mod os {
         failed(say(lang, "daemon.foreign"), &[("socket", &shown(path)), ("said", why)], code::ERROR)
     }
 
-    fn busy(lang: Lang, path: &Path) -> Fail {
-        failed(say(lang, "daemon.busy"), &[("socket", &shown(path))], code::BUSY)
+    fn busy(lang: Lang, path: &Path, pid: Option<u32>) -> Fail {
+        failed(say(lang, "daemon.busy"), &[("socket", &shown(path)), ("pid", &pid_text(pid))], code::BUSY)
     }
 
     pub fn start(ctx: &Ctx) -> R<Vec<String>> {
@@ -221,7 +221,7 @@ mod os {
             }
             match client::probe(&path) {
                 Probe::Running(hello) => return already(ctx, &path, &hello),
-                Probe::Busy => return Err(busy(lang, &path)),
+                Probe::Busy(pid) => return Err(busy(lang, &path, pid)),
                 _ if Instant::now() >= deadline => {
                     return Err(failed(
                         say(lang, "daemon.starting_elsewhere"),
@@ -236,7 +236,7 @@ mod os {
         if let Some(meta) = own_or_refuse(lang, &path)? {
             match client::probe(&path) {
                 Probe::Running(hello) => return already(ctx, &path, &hello),
-                Probe::Busy => return Err(busy(lang, &path)),
+                Probe::Busy(pid) => return Err(busy(lang, &path, pid)),
                 Probe::Foreign(why) => return Err(not_a_daemon(lang, &path, &why)),
                 Probe::Absent => {}
                 Probe::Dead => server::remove_if_same(&path, meta.ino())
@@ -294,7 +294,7 @@ mod os {
                 }
                 return Ok(vec![fill(say(lang, "daemon.not_running"), &[("socket", &socket)])]);
             }
-            Probe::Busy => return Err(busy(lang, &path)),
+            Probe::Busy(pid) => return Err(busy(lang, &path, pid)),
             Probe::Foreign(why) => return Err(not_a_daemon(lang, &path, &why)),
         };
         match client::call(&path, SHUTDOWN, serde_json::json!({})) {
@@ -343,7 +343,7 @@ mod os {
             }
             Probe::Absent => {}
             Probe::Dead => s.stale_socket = meta.is_some(),
-            Probe::Busy => return Err(busy(lang, &path)),
+            Probe::Busy(pid) => return Err(busy(lang, &path, pid)),
             Probe::Foreign(why) => return Err(not_a_daemon(lang, &path, &why)),
         }
         render_status(ctx, &s)

@@ -70,6 +70,9 @@ pub(crate) struct Request {
     pub lang: Option<crate::i18n::Lang>,
     /// 시간대. 없으면 CLI 와 같이 `TZ`, 그다음 `/etc/localtime` 이다.
     pub zone: Option<crate::tz::Zone>,
+    /// 부르는 쪽이 이 요청을 풀려고 이미 읽은 사용자 설정. 없으면 명령이 처음 물을 때 읽는다 — 주면 한 요청이 같은
+    /// 파일을 두 번 안 판다.
+    pub reg: Option<crate::user_config::Registry>,
 }
 
 /// 요청 하나의 답.
@@ -84,12 +87,12 @@ pub(crate) struct Answer {
 
 /// 읽기 명령 하나를 요청으로 돌린다. **프로세스의 현재 디렉터리도, 프로세스 전역의 알림 통도 안 건드린다.**
 pub(crate) fn read(req: Request) -> Answer {
-    let Request { root, read, actor, lang, zone } = req;
+    let Request { root, read, actor, lang, zone, reg } = req;
     let side: crate::side::Shared =
         Arc::new(Mutex::new(crate::side::Side { here: root, ..crate::side::Side::default() }));
     let entered = crate::side::enter(Some(side.clone()));
     // `chdir` 은 참이다 — 요청한 쪽은 그 자리에 서 있지 않으니, 그 자리에서 칠 명령은 `-C <뿌리>` 를 붙여 댄다.
-    let ctx = Ctx::asked(true, actor, true, lang, zone);
+    let ctx = Ctx::asked(true, actor, true, lang, zone, reg);
     let out = match read {
         Read::Status { worktree } => super::status::run(&ctx, worktree),
         Read::Ready { worktree, limit } => super::ready::run(&ctx, worktree, limit),
@@ -224,6 +227,7 @@ mod tests {
             actor: Some(ACTOR.to_string()),
             lang: Some(lang),
             zone: None,
+            reg: None,
         })
     }
 

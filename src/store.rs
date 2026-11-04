@@ -2097,7 +2097,6 @@ impl Unread {
 /// 읽는다(moai-mkyg.ncj).
 static UNREAD: std::sync::Mutex<Vec<Unread>> = std::sync::Mutex::new(Vec::new());
 
-///
 /// **요청의 통이 걸렸으면 그 통의 것이다**(`crate::side`, moai-5n6m.m0b) — 적는 [`note_missed`] 가 그리로 가므로 읽는
 /// 자리도 같아야 한다. `show --json` 의 `journal_error` 와 `stats` 가 여기서 읽는다.
 pub fn journal_unread() -> Vec<Unread> {

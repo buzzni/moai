@@ -69,15 +69,19 @@ impl Ctx {
 
     /// 요청 하나의 문맥(`cmd::request`, moai-5n6m.m0b) — 화면 말과 시간대를 **요청이 준 것으로** 박아 둔다.
     /// 안 준 것은 CLI 와 같이 늦게 푼다(`MOAI_LANG`·설정, `TZ`). 둘 다 프로세스의 것이라 요청마다 못 바꾸는
-    /// 자리였다.
+    /// 자리였다. 부르는 쪽이 이미 읽은 사용자 설정(`reg`)도 받는다 — 받으면 [`Ctx::registry`] 가 다시 안 읽는다.
     pub(crate) fn asked(
         json: bool,
         user: Option<String>,
         chdir: bool,
         lang: Option<crate::i18n::Lang>,
         zone: Option<crate::tz::Zone>,
+        reg: Option<crate::user_config::Registry>,
     ) -> Ctx {
         let mut ctx = Ctx::new(json, user, chdir);
+        if let Some(reg) = reg {
+            let _ = ctx.reg.set(reg);
+        }
         if let Some(lang) = lang {
             let _ = ctx.lang.set(lang);
         }
