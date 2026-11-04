@@ -12,6 +12,8 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+## [0.50.0] - 2026-11-04
+
 ### Changed
 
 - The web list and kanban fill unused space below their content with a subtle hatch, including when groups are folded. (moai-v0h5)
