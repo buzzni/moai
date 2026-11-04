@@ -8,6 +8,7 @@ pub mod archive;
 pub mod backlog;
 pub mod config;
 pub mod ctl;
+pub mod daemon;
 pub mod defer;
 pub mod due;
 pub mod edit;
@@ -772,6 +773,8 @@ fn dispatch(ctx: &Ctx, cli: Cli) -> R<Vec<String>> {
         Cmd::Wiki(WikiCmd::Show { slug }) => wiki::show(ctx, &slug),
         Cmd::Wiki(WikiCmd::Search { words, limit }) => wiki::search(ctx, &words, limit),
         Cmd::Wiki(WikiCmd::Learn(a)) => wiki::learn(ctx, a),
+        // 섬기는 판(`start`)은 멈출 때까지 안 돌아온다 — 첫 줄은 `daemon::run` 이 직접 찍는다.
+        Cmd::Daemon(d) => daemon::run(ctx, d),
     }
 }
 
