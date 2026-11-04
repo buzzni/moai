@@ -44,7 +44,6 @@ pub fn run(ctx: &Ctx, args: DeferArgs) -> R<Vec<String>> {
         return Err(Fail::coded(crate::i18n::say(ctx.lang(), "refuse.defer_empty_why"), super::code::BAD_INPUT));
     }
     let from = args.from.map(crate::model::Status::new);
-    let at = model::now();
     // **누구인지는 락 밖에서 묻는다 — `mv` 와 한 자다.** `model::actor` 는 `git` 을 두
     // 번 띄운다. 펴는 자리는 아래, 칸 검사를 다 지난 뒤다.
     let who = model::actor(ctx.user.as_deref(), &repo.root).map_err(|e| Fail::no_actor(&e, ctx.lang()));
@@ -57,6 +56,10 @@ pub fn run(ctx: &Ctx, args: DeferArgs) -> R<Vec<String>> {
     let (moved, read): (Moved, super::Read) = repo.with_write_after(
         || lang,
         |issues, unread, cfg, _| {
+            // **시각은 락을 쥔 뒤에 뜬다**(moai-3hgm.pp2, `mv` 의 리뷰 moai-u5bk.3wq 와 한 자). 밖에서 뜨면 락을 최대
+            // 5초 기다린 미루기가 그 사이 옆이 담은 줄보다 이른 `updated_at`·`deferred_at` 과 저널 도장을 들어, 줄의
+            // 도장이 거꾸로 간다. 한 번만 떠서 그 넷이 한 순간을 가리키게 둔다.
+            let at = model::now();
             let asked: Vec<&str> = args.ids.iter().map(String::as_str).collect();
             // **아카이브로 간 줄도 미루고 도로 집는다**(moai-b6w3). 미룬 에픽이 멤버와 함께 아카이브로 가면, 되살린
             // 멤버를 계획 밖에 두는 미룸이 그 에픽 줄에 남는다 — 산 줄만 찾던 판은 `defer <에픽> --undo` 를 "없다" 로

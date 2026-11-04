@@ -8089,9 +8089,11 @@ fn save_backlog(app: &mut App) {
     if !app.stand_at(into.as_ref()) {
         return;
     }
-    let at = crate::model::now();
     let kept = say(app.site.lang, "tui.jot.kept");
     let wrote = app.write(save_backlog, move |issues, cfg, reserved, by, _| {
+        // **도장은 락을 쥔 뒤에 뜬다**(moai-3hgm.pp2) — `moai add`·`backlog add` 와 간트의 옮기기([`gantt`])와 같은 자다.
+        // 밖에서 뜨면 누구인지 묻고 락을 기다린 동안만큼 이른 `created_at` 과 저널 도장이 선다.
+        let at = crate::model::now();
         let id = crate::store::new_id(issues, cfg, reserved, None, &title);
         let mut backlog = Issue::new(id, title, Kind::Backlog, Status::new(cfg.first_status()), &at);
         (backlog.assignee, backlog.assignee_email) = by.as_assignee();

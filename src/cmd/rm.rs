@@ -40,12 +40,15 @@ pub fn run(ctx: &Ctx, args: RmArgs) -> R<Vec<String>> {
         };
         return line(ctx, &repo, n, want);
     }
-    let at = model::now();
     let by = model::actor(ctx.user.as_deref(), &repo.root).map_err(|e| Fail::no_actor(&e, ctx.lang()))?;
 
     let (gone, missing, dangling): (Vec<Issue>, Vec<String>, Vec<String>) = repo.with_write(
         || ctx.lang(),
         |issues, _, _| {
+            // **시각은 락을 쥔 뒤에 뜬다**(moai-3hgm.pp2, `mv` 의 리뷰 moai-u5bk.3wq 와 한 자). 밖에서 뜨면 락을 최대
+            // 5초 기다린 지우기가 그 사이 옆이 적은 줄보다 이른 도장으로 저널에 선다. 누구인지는 그대로 락 밖이다 —
+            // `git` 을 두 번 띄운다.
+            let at = model::now();
             let (mut gone, mut missing, mut dangling) = (Vec::new(), Vec::new(), Vec::new());
             let mut entries = Vec::new();
             // **소속 참조는 `status` 의 자로 앞뒤를 견준다**(moai-4bio, 리뷰 moai-3hxc.uhh). 지운 마일스톤이나
@@ -213,11 +216,12 @@ fn line(ctx: &Ctx, repo: &crate::store::Repo, n: usize, want: Option<&str>) -> R
     };
 
     let (e, matches) = if let Some(want) = want {
-        let at = model::now();
         let by = model::actor(ctx.user.as_deref(), &repo.root).map_err(|e| Fail::no_actor(&e, lang))?;
         repo.with_write_lines(
             || ctx.lang(),
             |_, unread, _, _| {
+                // 시각은 락을 쥔 뒤에 뜬다 — id 로 지우는 길(위 [`run`])과 같은 까닭이다(moai-3hgm.pp2).
+                let at = model::now();
                 // 락 안에서 다시 읽은 줄로 찾고 거절문도 그것으로 짓는다 — 밖에서 본 번호는 낡았을 수 있다.
                 let Some(k) = unread.iter().position(|e| e.line == n) else { return Err(refuse(unread)) };
                 // 해시는 대소문자를 안 가린다 — 손으로 옮겨 친 값이 대문자여도 같은 줄이다.

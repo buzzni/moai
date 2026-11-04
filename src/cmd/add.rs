@@ -546,11 +546,12 @@ pub fn run(ctx: &Ctx, args: AddArgs, kind_override: Option<Kind>) -> R<Vec<Strin
     repo.config
         .require_known(status.as_str())
         .map_err(|e| Fail::coded(crate::view::no_such_column(ctx.lang(), &e), super::code::BAD_STATUS))?;
-    let at = model::now();
     let by = model::actor(ctx.user.as_deref(), &repo.root).map_err(|e| Fail::no_actor(&e, ctx.lang()))?;
-    // `--due +N` 은 락 밖에서 날짜로 바꾼다 — 시간대를 풀면 tzdb 를 연다([`super::due_arg`]).
-    let due = args.due.as_deref().map(|d| super::due_arg(ctx, d, &at));
-    let start = args.start.as_deref().map(|d| super::due_arg(ctx, d, &at));
+    // `--due +N` 은 락 밖에서 날짜로 바꾼다 — 시간대를 풀면 tzdb 를 연다([`super::due_arg`]). 이 시계는 날을 재는 데만
+    // 쓴다 — 줄과 저널의 도장은 락 안에서 다시 뜬다(아래, `edit` 과 한 꼴).
+    let today = model::now();
+    let due = args.due.as_deref().map(|d| super::due_arg(ctx, d, &today));
+    let start = args.start.as_deref().map(|d| super::due_arg(ctx, d, &today));
 
     // 만든 줄과, 그것이 묶음이면 **멤버에서 읽은 칸.** 에픽을 먼저 만들고 멤버를
     // 나중에 다는 순서가 흔하지만 그 반대도 있다 — 이미 멤버가 있는 에픽을 뒤늦게
@@ -575,6 +576,11 @@ pub fn run(ctx: &Ctx, args: AddArgs, kind_override: Option<Kind>) -> R<Vec<Strin
             }
             let id = store::new_id(issues, cfg, reserved, args.parent.as_deref(), &title);
 
+            // **도장은 락을 쥔 뒤에 뜬다**(moai-3hgm.pp2, `mv` 의 리뷰 moai-u5bk.3wq 와 한 자). 밖에서 뜨면 락을 최대 5초
+            // 기다린 만들기가 그 사이 옆이 담은 줄보다 이른 `created_at`·`updated_at` 과 저널 도장을 든다 — 넷은 이
+            // 한 값이다(`store::admit` 이 저널에 `created_at` 을 옮긴다). `--due +N` 의 날은 위에서 락 밖의 시각으로 잰
+            // 그대로다.
+            let at = model::now();
             let mut issue = Issue::new(id, title.clone(), kind, status.clone(), &at);
             issue.epic = args.epic.clone();
             issue.milestone = args.milestone.clone();
@@ -727,12 +733,14 @@ fn bulk(
         return Ok(out);
     }
 
-    let at = model::now();
     let by = model::actor(ctx.user.as_deref(), &repo.root).map_err(|e| Fail::no_actor(&e, ctx.lang()))?;
     let who = assignee_of(assignee.as_deref(), &by);
     let (made, read, known): (Vec<Issue>, super::Read, bool) = repo.with_write(
         || ctx.lang(),
         |issues, cfg, reserved| {
+            // 도장은 락을 쥔 뒤에 뜬다 — 하나짜리 `add` 와 `backlog promote` 와 같은 까닭이다(moai-3hgm.pp2). 기한의
+            // `+N` 은 부르는 쪽([`run`])이 락 밖의 시각으로 이미 날로 바꿨다.
+            let at = model::now();
             let (entries, made) = create_drafts(issues, cfg, reserved, &drafts, None, rooted, &who, &by, &at)?;
             let ids: Vec<&str> = made.iter().map(|i| i.id.as_str()).collect();
             let read = super::read_of(issues, cfg, &ids, ctx.json);

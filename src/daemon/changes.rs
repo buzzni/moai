@@ -453,7 +453,8 @@ mod tests {
         assert_eq!((changed, removed, reset), (vec![a], vec![], false));
     }
 
-    /// 옛 도장의 노트도 선다 — 시각의 창이 없다. 락을 오래 기다린 `note`(리뷰의 1)와 병합으로 들어온 노트가 이 꼴이다.
+    /// 옛 도장의 노트도 선다 — 시각의 창이 없다. 시각을 락 밖에서 뜨던 옛 바이너리가 락을 오래 기다린 `note`(리뷰의 1)와
+    /// 병합으로 들어온 노트가 이 꼴이다.
     #[test]
     fn a_note_with_an_old_stamp_is_seen() {
         let (_keep, root) = project("changes-old-note");

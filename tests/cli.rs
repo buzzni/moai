@@ -34948,6 +34948,114 @@ fn conditional_dates_recheck_after_waiting_for_the_write_lock() {
     assert_eq!(issues(s.path()), changed);
 }
 
+/// **쓰기의 도장은 락을 쥔 뒤에 뜬다**(moai-3hgm.pp2, 리뷰 moai-5n6m.e9f 의 1). `note`·`defer`·`rm`·`add`·`add --from`·
+/// `link` 가 시각을 락 밖에서 뜨던 판은, 락을 기다린 쓰기가 기다리기 전의 도장으로 저널과 스냅샷에 섰다.
+///
+/// 시계를 고정하면 값이 같아 못 가르므로 실제 시계로 돈다([`staged_live`]). 여섯이 모두 우리가 쥔 락을 연 것을 본 뒤
+/// (`/proc/<pid>/fd`) 그 초 `o` 를 재고, 시계가 다음 초로 넘어갈 때까지 쥐었다가 놓는다. 락 밖에서 뜬 도장은 락을 열기
+/// 전이라 `o` 이하이고, 락을 쥔 뒤에 뜬 도장은 놓은 초 `released`(> `o`) 이상이다. 쥐는 것은 1초 남짓이라 `store` 의
+/// 락 기다림(5초) 안에 든다.
+#[cfg(target_os = "linux")]
+#[test]
+fn writes_stamp_the_time_after_the_lock_is_acquired() {
+    use fs2::FileExt;
+    use std::os::unix::fs::MetadataExt;
+    use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+    let secs = || SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs() as i64;
+    let s = init("stamp-after-lock");
+    let noted = add(s.path(), &["노트 달 줄"]);
+    let deferred = add(s.path(), &["미룰 줄"]);
+    let removed = add(s.path(), &["지울 줄"]);
+    let blocker = add(s.path(), &["막는 줄"]);
+    let blocked = add(s.path(), &["막힐 줄"]);
+    let plan = s.path().join("plan.md");
+    std::fs::write(&plan, "# 기다린 에픽\n- [p2] 기다린 멤버\n").unwrap();
+    let plan = plan.to_str().unwrap().to_string();
+
+    let lock = std::fs::OpenOptions::new().read(true).write(true).open(s.path().join(".moai/lock")).unwrap();
+    lock.lock_exclusive().unwrap();
+    let runs: [(&str, Vec<&str>); 6] = [
+        ("note", vec!["note", &noted, "기다린 노트"]),
+        ("defer", vec!["defer", &deferred, "-m", "기다린 미루기"]),
+        ("rm", vec!["rm", &removed]),
+        ("add", vec!["add", "기다린 만들기"]),
+        ("add --from", vec!["add", "--from", &plan]),
+        ("link", vec!["link", &blocker, "--blocks", &blocked]),
+    ];
+    let mut children: Vec<(&str, std::process::Child)> = runs
+        .iter()
+        .map(|(what, args)| {
+            let child = staged_live(args)
+                .current_dir(s.path())
+                .stdin(Stdio::null())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .unwrap();
+            (*what, child)
+        })
+        .collect();
+    let held = lock.metadata().unwrap();
+    let opened = |pid: u32| {
+        std::fs::read_dir(format!("/proc/{pid}/fd"))
+            .into_iter()
+            .flatten()
+            .flatten()
+            .filter_map(|entry| std::fs::metadata(entry.path()).ok())
+            .any(|file| file.dev() == held.dev() && file.ino() == held.ino())
+    };
+    let until = Instant::now() + Duration::from_secs(4);
+    while !children.iter().all(|(_, c)| opened(c.id())) {
+        for (what, c) in children.iter_mut() {
+            assert!(c.try_wait().unwrap().is_none(), "{what} exited before reaching the write lock");
+        }
+        assert!(Instant::now() < until, "a write never reached the held lock");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    // 모두가 락을 연 뒤에 잰 초 — 락 밖에서 뜬 도장은 이 초를 못 넘는다.
+    let o = secs();
+    while secs() <= o {
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let released = secs();
+    FileExt::unlock(&lock).unwrap();
+    for (what, child) in children {
+        let out = child.wait_with_output().unwrap();
+        assert!(out.status.success(), "{what} failed: {}", String::from_utf8_lossy(&out.stderr));
+    }
+
+    let at = |ts: &str| moai::model::parse_rfc3339(ts).unwrap_or_else(|| panic!("bad stamp {ts}"));
+    let lines: Vec<serde_json::Value> = journal(s.path()).lines().map(|l| serde_json::from_str(l).unwrap()).collect();
+    let stamp = |kind: &str, pick: &dyn Fn(&serde_json::Value) -> bool| -> String {
+        let e = lines.iter().find(|e| e["kind"] == kind && pick(e)).unwrap_or_else(|| panic!("no {kind} line"));
+        let ts = e["ts"].as_str().unwrap().to_string();
+        assert!(at(&ts) >= released, "{kind} {e} was stamped before the lock was released ({released})");
+        ts
+    };
+    stamp("note", &|e| e["id"] == noted.as_str() && e["text"] == "기다린 노트");
+    stamp("rm", &|e| e["id"] == removed.as_str());
+    let why = stamp("note", &|e| e["id"] == deferred.as_str() && e["text"] == "기다린 미루기");
+    let made = stamp("create", &|e| e["title"] == "기다린 만들기");
+    stamp("create", &|e| e["title"] == "기다린 에픽");
+    stamp("create", &|e| e["title"] == "기다린 멤버");
+
+    let rows: Vec<serde_json::Value> = issues(s.path()).lines().map(|l| serde_json::from_str(l).unwrap()).collect();
+    let row = |pick: &dyn Fn(&serde_json::Value) -> bool| rows.iter().find(|r| pick(r)).unwrap().clone();
+    // 한 쓰기의 도장은 한 순간이다 — 저널과 스냅샷이 같은 값을 든다.
+    let d = row(&|r| r["id"] == deferred.as_str());
+    assert_eq!(
+        (&d["deferred_at"], &d["planned_at"], &d["updated_at"]),
+        (&why.clone().into(), &why.clone().into(), &why.into())
+    );
+    let m = row(&|r| r["title"] == "기다린 만들기");
+    assert_eq!(
+        (&m["created_at"], &m["updated_at"], &m["status_since"]),
+        (&made.clone().into(), &made.clone().into(), &made.into())
+    );
+    let b = row(&|r| r["id"] == blocked.as_str());
+    assert!(at(b["updated_at"].as_str().unwrap()) >= released, "link stamped before the lock was released: {b}");
+}
+
 #[test]
 fn supervisor_watch_resumes_same_second_and_generates_assignment() {
     let s = init("supervisor-watch");
