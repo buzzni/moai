@@ -5167,6 +5167,13 @@ impl App {
         Some(Got { marks, stamp, where_why })
     }
 
+    /// The same read inputs and outcomes cannot introduce a new file diagnostic on a reread.
+    fn repeated_read(site: &Site, got: &Got) -> bool {
+        site.read_stamp.as_ref() == Some(&got.stamp)
+            && site.read_tried.trouble == got.marks.trouble
+            && site.read_pending.trouble == got.marks.pending
+    }
+
     /// 들어 온 읽음을 한 [`Site`] 에 얹는다 — **들일지, 표식을 올릴지, 무엇을 말할지가 한 자리에 있다**
     /// (리뷰). [`App::load_read`] 와 [`App::follow_site`] 가 저마다 적던 판은 둘이 이미 갈렸다.
     ///
@@ -5269,10 +5276,7 @@ impl App {
         let Some(site) = self.site_mut(seat) else { return false };
         // A retry of unchanged files whose failures persist reads the diagnostics the last attempt already told;
         // telling them again would cover a newer notice on every retry. A changed file or outcome still speaks.
-        let repeat = site.read_stamp.as_ref() == Some(&got.stamp)
-            && site.read_tried.trouble == got.marks.trouble
-            && site.read_pending.trouble == got.marks.pending
-            && (got.marks.trouble.is_some() || got.marks.pending.is_some());
+        let repeat = Self::repeated_read(site, &got);
         // 까닭은 한 줄로 댄다 — 조용히 [NEW] 가 서면 왜 그런지 볼 데가 없다.
         let told = Self::take_read(site, got).filter(|_| !repeat);
         let mut changed = false;
@@ -6071,11 +6075,7 @@ impl App {
                         //
                         // They are only read here: a project snapshot refresh must not repeat the same read-file
                         // diagnostic. Compare before replacing the site; changed stamps or outcomes still speak.
-                        repeat = got.as_ref().is_some_and(|got| {
-                            held.read_stamp.as_ref() == Some(&got.stamp)
-                                && held.read_tried.trouble == got.marks.trouble
-                                && held.read_pending.trouble == got.marks.pending
-                        });
+                        repeat = got.as_ref().is_some_and(|got| Self::repeated_read(held, got));
                     }
                     if let Some(got) = got
                         && let Some(told) = Self::take_read(&mut site, got).filter(|_| !repeat)
@@ -11891,6 +11891,9 @@ mod tests {
         std::fs::write(&place.at, &header).unwrap();
         a.load_read();
         let told = a.notice.clone().expect("the main sheet's skipped line is told");
+        a.notice = Some("newer user notice".into());
+        a.load_read();
+        assert_eq!(a.notice.as_deref(), Some("newer user notice"), "an unchanged bad line was repeated on reload");
         let spool = place.pending.clone().expect("a settled place has a pending sheet");
         let socket = UnixListener::bind(&spool).unwrap();
         let follow = |a: &mut App| {

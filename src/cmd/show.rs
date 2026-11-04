@@ -277,9 +277,8 @@ fn listed(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>, keys: &Keys) -> 
     // judging through `with_archive` dropped those too, so one unrelated unreadable line changed `show <epic>`.
     let shadowed: std::collections::BTreeSet<String> =
         opaque.iter().filter(|id| !readable.contains(id.as_str())).cloned().collect();
-    let live: std::collections::BTreeSet<String> =
-        readable.into_iter().map(str::to_string).chain(opaque).collect();
-    let load = crate::archive::read_all(&repo.root, active_load)?;
+    let live: std::collections::BTreeSet<String> = readable.into_iter().map(str::to_string).chain(opaque).collect();
+    let mut load = crate::archive::read_all(&repo.root, active_load)?;
     super::report_load_errors(ctx.lang(), &repo.issues_path(), &load.errors);
 
     let target = match kind_filter {
@@ -317,8 +316,8 @@ fn listed(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>, keys: &Keys) -> 
             return plan(ctx, &load.issues, issue, args.raw);
         }
         // Copied only when one is unfolded and some id is shadowed — a list view never reads it.
-        let judged: Option<Vec<Issue>> = (!shadowed.is_empty())
-            .then(|| load.issues.iter().filter(|i| !shadowed.contains(&i.id)).cloned().collect());
+        let judged: Option<Vec<Issue>> =
+            (!shadowed.is_empty()).then(|| load.issues.iter().filter(|i| !shadowed.contains(&i.id)).cloned().collect());
         return one(
             ctx,
             &repo,
@@ -332,6 +331,9 @@ fn listed(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>, keys: &Keys) -> 
             keys,
         );
     }
+
+    // Lists, filters and tree rollups must judge the same live-first context as the detail view.
+    load.issues.retain(|row| !shadowed.contains(&row.id));
 
     // **`--raw` 도 조용히 버리지 않는다.** 본문은 하나를 펼칠 때만 나오므로
     // 목록 자리의 `--raw` 는 아무 일도 하지 않는다. 말없이 먹으면 부르는 쪽은

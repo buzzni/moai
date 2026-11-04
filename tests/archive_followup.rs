@@ -103,7 +103,10 @@ fn edit_and_show_agree_on_blocker_members_in_each_live_state() {
         repo.write(".moai/issues.jsonl", &live);
         repo.write(".moai/archive/2026.jsonl", &format!("{archived}\n"));
         let output = repo.run(&["show", "argos-xxxx"]);
-        if state != "opaque" {
+        if state == "opaque" {
+            assert!(!output.status.success());
+            assert!(String::from_utf8_lossy(&output.stderr).contains("unreadable"));
+        } else {
             assert!(output.status.success());
         }
         let shown = String::from_utf8(output.stdout).unwrap();
@@ -123,6 +126,19 @@ fn edit_and_show_agree_on_blocker_members_in_each_live_state() {
                 serde_json::from_slice(&repo.run(&["show", "argos-bbbb", "--json"]).stdout).unwrap();
             assert_eq!(epic["derived_status"], "todo", "{epic}");
             assert_eq!(epic["members"], serde_json::json!([]), "{epic}");
+            for args in [&["show", "--all", "--archived"][..], &["show", "--all", "--archived", "--tree"][..]] {
+                let out = String::from_utf8(repo.run(args).stdout).unwrap();
+                assert!(out.contains("argos-bbbb"), "{args:?}: {out}");
+                assert!(!out.contains("argos-bbbb.aaa"), "stale archived member in {args:?}: {out}");
+                let epic_line = out.lines().find(|l| l.contains("argos-bbbb")).unwrap();
+                assert!(!epic_line.contains('✓'), "stale done rollup in {args:?}: {out}");
+            }
+            let rows: serde_json::Value =
+                serde_json::from_slice(&repo.run(&["show", "--all", "--archived", "--json"]).stdout).unwrap();
+            let rows = rows.as_array().unwrap();
+            assert!(!rows.iter().any(|r| r["id"] == "argos-bbbb.aaa"), "{rows:?}");
+            let epic = rows.iter().find(|r| r["id"] == "argos-bbbb").unwrap();
+            assert_ne!(epic["derived_status"], "done", "{epic}");
             let status = repo.run(&["status", "--json"]);
             let status: serde_json::Value = serde_json::from_slice(&status.stdout).unwrap();
             assert_eq!(status["epics"][0]["derived_status"], "todo", "{status}");
