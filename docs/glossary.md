@@ -43,9 +43,9 @@ where `owner` says `theirs` or `unowned` — see [take over](#take-over).
 
 The numbered steps a [worker](#worker) follows for work a
 [supervisor](#supervisor) sent, from [pick up](#pick-up) to merge and report.
-They stand in a file of the supervisor skill, `references/worker.md` — the parts only some
-steps need beside it in `worker-setup.md`, `worker-review.md`, `worker-finish.md`, and
-`worker-tmux-tests.md`, its rare branches in `references/worker-branches.md` — and a step
+The common steps and review brief stand in the supervisor skill's `references/worker.md`.
+Rare setup and tmux-test procedures are beside it in `worker-setup.md` and
+`worker-tmux-tests.md`, with other rare branches in `references/worker-branches.md`. A step
 that goes differently for a subagent worker says so in a line of its own. Each
 assignment message carries the lines for this assignment — the backlog, the
 model and the effort, whether the worker is a subagent or a session, the work
