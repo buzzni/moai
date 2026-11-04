@@ -158,7 +158,7 @@ A failed command is not an envelope: it is an `-32000` error (see [Errors](#erro
 
 ### Write methods
 
-| Method | Params (`id` and `to` are required) | Same as |
+| Method | Params (`id` is required where listed, except on `rm`, which takes `id` or `line`; `to` is required on `mv`) | Same as |
 |---|---|---|
 | `add` | `title`, `body`, `epic`, `milestone`, `parent`, `status`, `assignee`, `start`, `due`: string; `tag`: string or [string]; `priority`: int; `kind`: `"issue"`, `"epic"`, `"milestone"` or `"backlog"` | `moai add`, or `moai <kind> add` |
 | `mv` | `id`: string or [string]; `to`: string (the column); `from`, `msg`: string; `take`: bool | `moai mv <id>… <to>` |
