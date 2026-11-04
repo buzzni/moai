@@ -385,6 +385,9 @@ test('list view: no index yet shows loading, then the rows', () => {
   assert.equal(dom.lines().length, 3)
   assert.equal(dom.root.lastElementChild.className, 'm-fill')
   assert.equal(dom.root.lastElementChild.hidden, false)
+  // Back to no index after rows were drawn: the fill was shown, so this is what the loading branch has to undo.
+  dom.pane.render({ ...initialState(), board: { value: null, loading: true, problem: null } }, null)
+  assert.equal(dom.root.querySelector('.m-fill').hidden, true)
 })
 
 test('virtual scroll: 5000 rows draw only a window, follow the scroll, and keep the cursor in view', () => {

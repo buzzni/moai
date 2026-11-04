@@ -118,7 +118,7 @@
 .m-shell .m-split-list { display: flex; flex-direction: column; overflow: hidden; }
 .m-pane-main { flex: 1 1 auto; min-height: 0; overflow: auto; }
 .m-pane-main[data-pane="list"]:not([hidden]), .m-pane-main[data-pane="board"]:not([hidden]) { display: flex; flex-direction: column; }
-.m-pane-main[data-pane="list"] > *, .m-pane-main[data-pane="board"] > * { flex: none; }
+.m-pane-main[data-pane="list"] > :not(.m-fill), .m-pane-main[data-pane="board"] > :not(.m-fill) { flex: none; }
 .m-pane-main > .m-fill { flex: 1 0 32px; background: var(--hatch-fill); }
 .m-pane-main:focus, .m-pane-detail:focus, .m-pane-wiki:focus { outline: 0; }
 .m-pane-wiki { overflow: auto; }
