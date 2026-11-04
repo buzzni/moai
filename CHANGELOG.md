@@ -12,6 +12,12 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+## [0.49.0] - 2026-11-04
+
+### Changed
+
+- The moai block `moai init` writes into AGENTS.md now keeps only the standing rules (about 45KB down to 6KB); the detail moved to the `moai` skill's `references/commands.md`. The supervisor and worker steps split their rarer branches into separate reference files, so a subagent worker reads about 35KB instead of 51KB. Run `moai init` and `moai skill install` again to pick it up. (moai-w0zr)
+
 ## [0.48.0] - 2026-11-04
 
 ### Added

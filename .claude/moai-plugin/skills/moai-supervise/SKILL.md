@@ -63,72 +63,7 @@ as 0 does, once the person agrees that the session it ran in is gone.
 
 ## Workers in sessions
 
-When the workers are sessions, **moai carries no messaging.** The supervisor and its
-workers talk with Claude Code's own tools:
-
-- `ListAgents` lists the live sessions, and subagents too — each row's name, its kind
-  (`interactive`, `bg`), whether it is busy or idle, and its tmux pane if it has one
-- `SendMessage(to: <name>, message: …)` sends to one session. With `notify_when_idle: true`
-  you also get one notice when that session goes idle; leave `message` out and it only
-  subscribes
-- A reply comes in as a cross-session message. Answer it by copying its `from` as `to`
-
-**Every session here is an interactive one the person can see.** Outside tmux, cmux and Saycode
-the supervisor launches no session; inside one of them it may open a worker pane or
-session, only after the person says yes (`moai-tmux`, `moai-cmux` or `moai-saycode`, below).
-**A worker is every idle session of this
-repository in `ListAgents`, except you** — a row whose name starts with the root
-directory's slug and a `-` (2). Nobody registers and nobody is asked which windows count.
-The message you send is the whole assignment, and it names the file of the worker's steps,
-which the worker reads (3). A Codex worker's assignment also carries the repository's
-optional `[supervise] extra_lines` just before `from:` — `moai supervise message` inserts them
-(`moai-tmux`, `moai-cmux`).
-
-Five things about the messaging, one line each:
-
-- A session in a different permission mode holds an incoming message for its person's
-  approval — a worker that stays idle after you sent may be waiting on that
-- `notify_when_idle` answers only for a session on this machine — one reason a worker is a
-  session on this machine (2)
-- A subagent sends under its parent session's address — a message can come from a session
-  that did not write it itself
-- `@path` in a message attaches nothing — a file the worker has to read is named by its
-  absolute path, and the worker reads it itself (3)
-- Never poll `ListAgents` in a loop — the report comes to you (4)
-
-**Inside tmux, load `moai-tmux` too.** When `$TMUX` is set in your shell — and is not cmux's
-stand-in (the next paragraph) — the skill `moai-tmux` gives you hands on the workers' panes,
-at five points of the round: offer new worker panes when no worker is idle (2), label the
-pane you send to and deliver a message `SendMessage` could not (3), read a stalled worker's
-pane (4), and clear a reported worker's window before its next work (5). It finds each
-worker's pane from its `ListAgents` name, and never types into a box that holds anything.
-**Without `$TMUX` nothing of it applies** — every step below goes through messages and the
-person, as written, unless you are inside cmux (the next paragraph). `moai-tmux` is an optional
-skill: it stands only where it was chosen (`moai skill install --with moai-tmux`, or its row in `moai
-init`). Inside tmux without it, tell the person that one line plants it, and carry on as if
-outside tmux.
-
-**Inside cmux, load `moai-cmux` instead.** When `CMUX_SURFACE_ID` is set in your shell and
-`$TMUX` is not, `moai-cmux` gives you the same hands on the workers' cmux tabs, at the same
-five points, and reads the same session map. It needs cmux 0.65.0 or later and says so itself.
-**A `$TMUX` that starts with `/tmp/cmux-` is cmux's own stand-in**, not a tmux server —
-`cmux claude-teams` sets it for Claude Code's agent teams, and the `tmux` on its `PATH` is cmux
-in disguise — so with it you are inside cmux: `moai-cmux`. When both are set otherwise you run in
-tmux inside a cmux tab — what you type goes to tmux, so it is
-`moai-tmux`. **With neither, nothing of either applies.** `moai-cmux` is optional the same
-way (`moai skill install --with moai-cmux`); inside cmux without it, tell the person that one
-line plants it, and carry on as if outside cmux.
-
-**Inside Saycode, load `moai-saycode` too — it comes first.** When `SAYCODE_AGENT_ENV` is `1`
-in your shell and Saycode's `whoami` answers ok, the skill `moai-saycode` drives every worker
-Saycode lists at the same five points, through Saycode instead of a pane: it opens new worker
-sessions (2), sends the work as a prompt and is told when the turn ends (3), reads a stalled
-worker's state (4), and clears a reported worker (5). A Saycode session often runs inside tmux
-or cmux as well; then `moai-tmux` or `moai-cmux` is only for a worker Saycode does not list,
-and for the pane labels (the person's decision). **When several stand, Saycode comes first,
-then tmux, then cmux** (tmux in a cmux tab is tmux, above). `moai-saycode`
-is optional the same way (`moai skill install --with moai-saycode`); inside Saycode without
-it, tell the person that one line plants it.
+When using sessions, read `references/supervise-sessions.md` before selecting workers.
 
 ## Before the round
 
@@ -156,89 +91,18 @@ accident. Ask the person to put the root on a branch, and stop.
 
 Fill the name you read into `<root branch>` in the message you send the worker.
 
-**Each work has a base branch** — the branch its worktree splits from and merges back
-into. It is decided per work, by the release the work stands under — the one
-`moai show --milestone` lists it under, read in 1:
-
-- **Outside every milestone** — it stands under none, or under one that has shipped or been
-  deferred (a `p0` fix, say) — it is the root branch, as it always was
-- **Inside a live milestone** it is that milestone's own branch, `milestone/<milestone id>`,
-  even while nothing runs yet and `<milestone>` in 3 says `none` — the first epic sent is
-  what starts it. Every epic of the milestone merges there, and the root branch takes the
-  milestone branch in once, at the release, so what a milestone has not shipped yet does
-  not stand on the root branch. The branch is checked out in a long-lived worktree of its
-  own, `.worktrees/milestone-<milestone id>`, because the root stays on the root branch. The
-  worker handed the milestone's first epic raises it when it is missing (its "The milestone
-  branch") — you do not raise it, and you do not remove it; it goes after the release
-
-Fill that into `<base branch>` in the message and in the check of 5. For stalled work (0)
-it is the release its epic stands under (`moai show <epic>`). **The worker does not
-read either again** — asked inside a worktree, git answers with that worktree's own branch.
+**Each work has a base branch** — read the release from `moai show --milestone` in 1. Outside a live milestone (including shipped or deferred), use the root branch. Inside a live milestone use `milestone/<milestone id>`, even before it starts, when `<milestone>` in 3 says `none`. The worker raises a missing milestone branch in `.worktrees/milestone-<milestone id>` and merges there; the root takes it only at release. Keep that worktree until the release. For stalled work read the release on its epic. Fill `<base branch>` in the message and check in 5; the worker must not infer it from its own worktree.
 
 ## One round
 
-**0. Reclaim first — work that lost its place.** When a session dies the row it picked
-up stays `in_progress` and nobody carries it on. Look at this before picking new backlog.
+**0. Reclaim first — work that lost its place.** Before new backlog, inspect `moai status --json` for `stranded` warnings and `moai show <id>` for `Place` (use `--worktree` for both inside a worktree). Only `none` is reclaimed; `not showing yet` is fresh and `<path> (<branch>)` is active there. A root pickup may show `none` without being abandoned, so ask a busy session or the person what it holds. An epic or issue id in a worktree directory or branch (`<id>` or `worktree-<id>`), or its pickup mark, determines place; sibling snapshots do not. Pickups under an hour old do not show. `broken_worktrees` and sibling-trouble warnings report overlay errors, not stranded work.
 
-    moai status --json                     the ids of warnings whose kind is "stranded"
-                                           (inside a worktree it stands only with `--worktree`)
-    moai show <id>                         the `Place` line — one of the three words below
-                                           (inside a worktree this too needs `--worktree`)
+A worktree can remain after its session dies and then is not `stranded`. A missing `ListAgents` name does not prove the window ended: a resumed session gets a new name, and an idle one may await its person. Find it by worktree, ask the person which window owns it and hand it on only after they say it ended. Move the old name's sends and refusals to its new name if it returns. When carrying on, send one idle worker before new backlog, using message 3 with `<other work>` filled and these first lines:
 
-`stranded` is a row that was picked up while no live worktree holds that work — either
-the worktree is gone, or **the work was being done in the root with no worktree**. This
-row alone does not tell the two apart: if `ListAgents` shows a `busy` session of this
-repository, it may be that one, so ask what it is holding before handing the work on —
-a worker with a message, any other window through the person.
+    You are handed the stalled work in <epic> — the previous session did not finish it. Read <steps file> and follow its steps from "Carrying on stalled work".
+    Read first: moai show <epic> (history and notes) · moai show <member> (the place too — a place stands on work only)
 
-The `Place` line (`place` under `--json`) has three values. **Only `none` is handed on.**
-
-    <path> (<branch>)  at        it runs there. Aim at it and carry on
-    not showing yet    fresh     just picked up — the gap while the worker raises its worktree. Leave it
-    none               lost      it lost its place — only this one is reclaimed
-
-**A place is read from two things only** — the worktree's name (a directory named `<id>`,
-or a branch `<id>` or `worktree-<id>`, the row's epic counting too) and the pick-up mark
-`moai mv` leaves in the worktree it was typed in. Sibling snapshots are not read for it, so
-a broken one never hides a verdict. **One gap remains:** a row picked up in the root and then
-carried into a worktree whose name is not its id (an agent's `worktree-agent-<hash>`) has
-no mark there and shows `none` while that session may still be at work — the hook reads
-the same two things and has the same gap. A worker that follows its steps raises the
-worktree under its epic's name, so the name already points at the row.
-
-**The `Trouble in sibling worktrees <n>` on the person's screen is a different matter.**
-That one counts every worktree whose snapshot could not be read, and the other problems
-met while overlaying too (a snapshot with unparseable rows, a worktree list that could not
-be read). It says there is something to fix and leaves `stranded` as it is. Machines see
-the broken worktrees by `broken_worktrees` under `status --json` — look at that key when
-you are hunting for the worktree to fix.
-
-A row picked up less than an hour ago does not show (that is the gap while a worker
-raises its worktree). **A worktree that is still there while the session working in it
-died does not show under `stranded`** as long as its name or mark points at the row (the
-gap above aside) — it is a worktree in `git worktree list` whose
-worker — the session you sent that work to — no longer answers. **A name gone from
-`ListAgents` is not an ended session**: the name belongs to the process, so a window resumed
-with `claude --resume` comes back under a new name, still in that worktree. A session that
-still stands there, idle, has not ended either: its person may be answering it, or it may be
-holding your message for approval. Look for the worker by its worktree, not its name — ask
-the person which window works in it. Hand its work on
-only once the person says that window has ended; until then it is that worker's. When it
-comes back under a new name, move what you keep under the old one — the work you sent, a
-refusal — to the new name (2).
-
-- When there is such work, hand carrying it on to one idle worker **before any new
-  backlog**. Send the message in 3 with its first two lines changed to the two below, and
-  the rest filled as 3 says (`<other work>` too — 4-3 points at that line). The steps file
-  sends the worker on to the section the first line names, which stands beside it in
-  `references/worker-branches.md`
-
-      You are handed the stalled work in <epic> — the previous session did not finish it. Read <steps file> and follow its steps from "Carrying on stalled work".
-      Read first: moai show <epic> (history and notes) · moai show <member> (the place too — a place stands on work only)
-
-- **Whether it is carried on or put down is not the supervisor's call.** If it looks like
-  work to put down (`moai mv <id> todo`, `moai defer <id> -m '<why>'`), ask the person
-- Work handed on to be carried is, like a backlog item, not sent again until its report is checked
+Ask the person before putting work down (`moai mv <id> todo` or `moai defer <id> -m '<why>'`); do not send carried work again until its report is checked.
 
 **1. Pick.** First raise what a near deadline calls for, once a round — reading never writes, so a
 deadline raises nothing until someone runs the verb, and the order `moai ready` gives is
@@ -326,45 +190,7 @@ result is the only address to wake that worker again (`SendMessage(to: <agentId>
 keep it in the send mark (1). Your own subagents stand in `ListAgents` under "Subagents";
 they are not session workers.
 
-**A session.** Call `ListAgents` once. A worker is a row that
-
-- belongs to this repository. `ListAgents` shows no directory; a session takes its name from
-  the directory it was opened in, slugged — lowercased, every run of characters other than
-  `a-z` and `0-9` turned into one `-`, cut at 4 words or 40 characters — then `-` and a short
-  hex suffix: `moa-issue-bc` for `moa-issue`, `tvshop-updater-ca` for `tvshop_updater`. A row
-  whose name does not start with the root's slug and a `-` — renamed, or opened somewhere
-  else — is not one. **A name that does start so is still only a candidate**: `api-gateway-1c`
-  starts with `api-`, and a session opened in a clone named `moai-web` starts with `moai-`.
-  The worker confirms it: the message carries `Root:`, and a session standing in
-  another repository refuses the work, so it comes out of the candidates (below)
-- is a session a person opened — under "Peer sessions" and `interactive`. Not a subagent,
-  yours or another session's (they stand under "Subagents", and a message to one resumes that
-  subagent instead), and not a `bg` session
-- runs on this machine — a Remote Control or cloud session cannot read the steps file at the
-  path you name (3), and sends no idle notice
-- reads `idle`
-- is not you, and not a supervisor (one per repository, above)
-- inside Saycode, is not a session Saycode started — those are counted from Saycode's own list,
-  so none is counted twice (`moai-saycode`, "Which session is which worker")
-
-Its name is what you send to. Nobody registers: any idle session a person opened here is a
-worker, and the message is the whole assignment.
-
-- **Leave out a worker whose sent work has not had its report checked.** It goes idle
-  whenever its turn ends — while it asks its person something, say — and it is still
-  holding your work. A resumed window comes back under a new name (0): while a worker you
-  sent to is gone from `ListAgents` with its report unchecked, a name you have not sent to
-  may be that worker — ask the person before sending to it
-- **If no row is left, nobody is free here.** Tell the person, and stop — do not send to a
-  session of another repository. Inside Saycode, ask the person first whether to open new
-  worker sessions (`moai-saycode`, "No idle worker left"). Otherwise, inside
-  tmux, ask the person first whether to open new worker panes
-  (`moai-tmux`, "No idle worker left"); inside cmux, whether to open new worker tabs
-  (`moai-cmux`, "No idle worker left"). On a no, stop
-- **A worker that refused the work comes out of the candidates and is not sent to
-  again.** Some sessions take work only from their own person
-- **A test agent is no worker.** One raised for a test is opened outside the repository (a
-  scratchpad), so its name is not this repository's
+**A session.** Read `references/supervise-sessions.md` for session selection and delivery.
 
 Either way, the root checkout and, for a subdirectory project in a monorepo, the path down
 to it come from the lines below. The root is where `.moai` stands, so for a monorepo it is the
@@ -571,59 +397,11 @@ and if the message does not arrive, deliver it into the tab —
 `moai-cmux`, "Label the tab" and "When a message does not arrive".
 Inside Saycode, a worker Saycode lists gets the message as a prompt instead of `SendMessage` —
 `moai-saycode`, "Send work".
-Fill in `<id>`, `<title>`, `<steps file>`, `<root branch>`, `<base branch>`, `<milestone>`, `<due>`, `<model>`, `<difficulty>`, `<why>`, `<effort>`, `<worker kind>`, `<subagent ladder>`, `<writing>`, `<other work>`, `<root>`, `<person>` and — only for a subdirectory project — `<subdir>`.
-Copy `<writing>` from this round's `moai writing --json` `detail`, without choosing it yourself.
-`<root>` is the `root dir` from 2. **Leave it unfilled** and a worker that stands in a
-worktree reads its own place as the root. With no `subdir` line in 2, leave the `Subdir:` line out
-of the message.
-`<milestone>` is the release that backlog already stands under **and that is still alive**,
-read in 1 — `none` when it stands under none, `none` when the one it stands under has
-shipped or been deferred (the worker would otherwise re-open a release that is already
-out, which is what `promote` itself declines to carry), and `none` when nothing is
-running. It is never a release you picked for it: work is not pulled into a running
-milestone (1). **Leave it unfilled** and the worker hangs the placeholder itself on the
-epic, which the tool refuses because it is not an id at all. **A wrong id it does not
-refuse** — the check is the shape, not whether that milestone stands, so a stale one goes
-in with exit 0: one line on stderr says there is no such milestone, and `moai status`
-counts the epic as `dangling_milestone`. Copy it off
-the release `moai show --milestone` stands that backlog under; do not write it from memory.
-`<due>` is when the person wants this work done, as `YYYY-MM-DD` — the backlog's own
-`due_on` when it carries one (`promote` carries that onto the epic anyway), else the day
-the person gave when you asked. **Ask when it is due as you pick work whose backlog
-carries none** — never required, always asked; the backlog's own is an answer the person
-already gave. A day given as "in three days" you write as the day it lands on.
-It is `none` when neither stands — with `Person: away` there is nobody to ask, so it is
-the backlog's own `due_on` or `none`: a deadline is the person's, and you never make one
-up. The plan subagent (2-2) — or a worker you send the backlog itself — hangs it on the epic it
-unfolds; the epic's deadline then bounds every member's, and `moai due apply`
-raises the members' priority as it nears.
-`<model>`, `<difficulty>` and `<why>` are the role's model you read in 2-1, the difficulty
-you measured and your reason; `<effort>` is that role's effort (2-1), the same value you pass
-to `Agent`. **Leave them unfilled** and those placeholders travel as they are, so the note
-left at the close says `<model>` instead of what actually did the work.
-`<worker kind>` is `subagent` or `session` — how you raised it in 2.
-The `Worktree:` line goes as written to both: a session's `EnterWorktree` into
-`.worktrees/` asks its person to approve every call, and no allow rule turns that off.
-`<subagent ladder>` is the models the worker may hand pieces of the work to, copied from the
-`moai models --json` of this round, each role with the effort 2-1 reads for it —
-`bulk <model> (<effort>) · develop <model> (<effort>) · complex <model> (<effort>)`, the
-person's table as it stands. The worker does not read the table again. It is `none` for a Codex
-worker — `Agent` is Claude Code's — and otherwise only when the person said the workers do
-their work themselves; a word of your own about subagents does not go in the message beyond
-this line.
-Do not use a single quote inside `<why>` — it closes the single quote in the worker's 9-1
-and the rest of the text leaks into the shell.
-`<other work>` is the sibling worktrees you measured in 1, the work you send in this same
-round, and the files that work holds — `none` if there is none. What the supervisor
-measured before sending cannot cover a file that turns out to be needed mid-epic, so when
-the worker meets such a file it does not fix it: it leaves it as a member and reports it
-(its 4-3).
-`<person>` is `here`, or `away` when the person told you they are stepping away — the
-worker then settles a design question by its own recommendation instead of waiting on an
-answer, writes down what it decided, and stops at what cannot be undone.
-Do not fill `<grade>` — that is the review grade the worker picks in 7, after developing.
-Do not fill `<vendor>` either — it belongs to the `model:` line written at the close (5, and
-a session worker's 9-1).
+Fill every message slot: `<id>`, `<title>`, `<steps file>`, `<root branch>`, `<base branch>`, `<milestone>`, `<due>`, `<model>`, `<difficulty>`, `<why>`, `<effort>`, `<worker kind>`, `<subagent ladder>`, `<writing>`, `<other work>`, `<root>`, `<person>`, and `<subdir>` only for a subdirectory project — with no `subdir` line in 2, leave the `Subdir:` line out. Use the root dir from 2, the branches decided before the round, and this round's `moai writing --json` detail.
+
+`<milestone>` is the living release the backlog stands under in `moai show --milestone`, or `none` if absent, closed, deferred or nothing is running. Never choose a release for it. A stale but well-formed id is accepted and reported as `dangling_milestone`; copy it from the show result. `<due>` is the backlog's `due_on`, else the day the person gives when asked; ask for work with no deadline, never invent one, and use `none` without an answer (including `Person: away`). The epic's deadline bounds members and raises their priority via `moai due apply`.
+
+Copy `<model>`, `<difficulty>`, `<why>` and `<effort>` from 2-1; do not put a single quote in `<why>`. Copy the ladder as `bulk <model> (<effort>) · develop <model> (<effort>) · complex <model> (<effort>)` from this round; `none` for Codex or when the person says workers do the work themselves. Add no other subagent directive. The `Worktree:` line goes unchanged. `<other work>` names sibling worktrees, concurrent sends and the files they hold, or `none`; the worker leaves a needed held file as a member (4-3). `<person>` is `here`, or `away` only when the person says so. Leave `<grade>` and `<vendor>` for the worker's review and close, not in the message.
 
     You are handed backlog <id> — <title>. Read <steps file> and follow its steps from step 1.
     Read first: moai show <id>
@@ -663,15 +441,7 @@ Every wake ends in another notification; read the last. A subagent worker also l
 report on the epic as a note before it hands back — a supervisor that started again has lost
 the notification, and reads that note (below).
 
-**A session's report comes back as a cross-session message** from the worker,
-`report: <epic>` at its head, and it wakes you. The idle notice that
-`notify_when_idle` sends is not a report: a worker goes idle whenever its turn ends — while
-it waits on its person's answer, say — and one that asked its person something sends nothing
-until it is answered. **Do not poll `ListAgents`** — the report comes to you. Inside tmux, an
-idle notice with no report is the moment to read that worker's pane once (`moai-tmux`, "When a
-worker stalls") and tell the person what it shows — inside cmux, its tab (`moai-cmux`, "When a
-worker stalls"). Inside Saycode, that moment is the wait ending with no report —
-`moai-saycode`, "Take the report" and "When a worker stalls".
+For a session report, read `references/supervise-sessions.md` before checking it.
 
 **A report reaches only the name it was sent to.** A supervisor that started again —
 restarted, or resumed with `claude --resume` — stands under a new name, and a worker whose
@@ -690,11 +460,6 @@ note that discusses this protocol carries the same words. Read each match with
 note follows it on the same epic. Check each one that does not as in 5. A worker holding
 sent work you have no report for is still left out in 2 — ask it, or its person, how it
 stands.
-
-For a session worker, if the supervisor is in the root, then in the gap after the worker
-picks the member up and before it raises its worktree, the hook may hold that member as "still picked up" when
-the supervisor's turn ends. **That member is the worker's** — do not move it, do not
-defer it, do not put a note on it; just finish the turn.
 
 **5. Check the report and send the next.** Look at three things before you believe a report.
 

@@ -14396,7 +14396,7 @@ mod tests {
         // 둘째 물음은 규칙 글과 같은 글이다.
         let pledge = crate::guide::PLEDGE;
         assert!(why.contains(&format!("If t-e {pledge}")), "{why}");
-        assert!(crate::guide::agents().contains(&format!("If the epic {pledge}")), "규칙 글이 갈라졌다");
+        assert!(crate::guide::reference().contains(&format!("If the epic {pledge}")), "규칙 글이 갈라졌다");
     }
 
     /// **거절문의 모서리 넷**(리뷰 moai-ju21.70g) — 옮겨 친 `-C` 는 한 낱말로 감싸고, 에픽 아닌 줄은
@@ -14738,7 +14738,7 @@ mod tests {
     /// 자리다. `.git/` 과 `node_modules/` 는 글이 일부러 안 댄다(그 밑에서 일하는 사람이 없다).
     #[test]
     fn rule_two_names_every_directory_it_skips() {
-        let agents = crate::guide::agents();
+        let agents = crate::guide::reference();
         let at = agents.find("What counts is work inside the repository").expect("규칙 2 의 글이 없다");
         let list = &agents[at..at + agents[at..].find(" do not.").expect("규칙 2 의 목록이 안 끝난다")];
         let named: Vec<&str> = list.split('`').skip(1).step_by(2).filter_map(|w| w.strip_suffix('/')).collect();
