@@ -148,7 +148,7 @@ Every method except `hello`, `ping` and `daemon.shutdown` answers in one envelop
 
     {"value": <what --json prints>, "messages": ["…"], "partial": false}
 
-- `value` is the CLI's `--json` output, as a value.
+- `value` is the CLI's `--json` output, byte for byte: the same text, with the keys in the order the CLI prints them. One output line is carried as it is; several lines are carried as an array of those lines. `jq .result.value` (or `-c`) and `moai --json …` print the same JSON, so you can compare them directly.
 - `messages` are the lines the CLI would have written to stderr, without colour.
 - `partial` is `true` when the CLI would have exited 1 with a partial answer, for example when a torn snapshot line could not be read. Read `value`, and tell the person.
 

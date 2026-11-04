@@ -39,10 +39,11 @@
 //! `not_registered`·`not_a_project`·CLI 의 코드).
 
 use super::project;
-use super::rpc::{Methods, RequestEnv, RpcError};
+use super::rpc::{self, Methods, Reply, RequestEnv, RpcError};
 use crate::cli::{AxisArg, BucketArg, FilterArgs, PageArgs, ShowArgs, StatsArgs, WorktreeArg};
 use crate::cmd::request::{self, Read, Request};
 use clap::ValueEnum as _;
+use serde::Serialize;
 use serde_json::{Map, Value, json};
 
 pub fn register(methods: &mut Methods) {
@@ -68,7 +69,7 @@ pub fn register(methods: &mut Methods) {
 /// `changes` — 데몬이 기억한 옛 스냅샷 뒤로 바뀐 id(moai-5n6m.cb9, moai-8ts9). 같은 봉투에 싼다: 클라이언트가 어느
 /// 메서드든 `result.value` 를 벗겨 읽게 두려는 것이다. 견주는 목록은 [`whole`] — 클라이언트의 "전부 읽기" 와 같은
 /// 요청을 `serve` 와 같은 사람·말·시간대·설정으로 돌린다. 읽는 규칙(커서·`reset`·기억)은 `changes` 모듈에 있다.
-fn changes(env: &RequestEnv, params: Value, memory: &super::changes::Memory) -> Result<Value, RpcError> {
+fn changes(env: &RequestEnv, params: Value, memory: &super::changes::Memory) -> Result<Reply, RpcError> {
     let mut p = Params::new("changes", params)?;
     let cursor = p.string("cursor")?;
     p.done()?;
@@ -97,7 +98,7 @@ fn serve(
     params: Value,
     needs_project: bool,
     build: impl FnOnce(&mut Params) -> Result<Read, RpcError>,
-) -> Result<Value, RpcError> {
+) -> Result<Reply, RpcError> {
     let mut p = Params::new(method, params)?;
     let read = build(&mut p)?;
     p.done()?;
@@ -117,14 +118,15 @@ fn serve(
         request::read(Request { root, read, actor: env.actor.clone(), lang: lang_asked, zone, reg: Some(reg) });
     match answer.out {
         Ok(lines) => {
+            // 줄마다 JSON 인지만 보고 바이트는 그대로 싣는다 — CLI `--json` 의 키 차례가 답에도 선다(moai-3hgm.whp).
             let mut values = Vec::with_capacity(lines.len());
             for line in &lines {
-                values.push(serde_json::from_str::<Value>(line).map_err(|e| {
-                    RpcError::new(super::rpc::code::INTERNAL, format!("{method} printed no JSON: {e}"))
+                values.push(rpc::raw_line(line).ok_or_else(|| {
+                    RpcError::new(rpc::code::INTERNAL, format!("{method} printed a line that is not JSON"))
                 })?);
             }
-            let value = if values.len() == 1 { values.remove(0) } else { Value::Array(values) };
-            Ok(json!({ "value": value, "messages": answer.messages, "partial": answer.partial }))
+            let value = if values.len() == 1 { values.remove(0) } else { rpc::reply(&values)? };
+            envelope(&value, &answer.messages, answer.partial)
         }
         Err(fail) => {
             let mut error = RpcError::moai(fail.code, fail.message);
@@ -134,6 +136,17 @@ fn serve(
             Err(error)
         }
     }
+}
+
+/// 모든 메서드가 쓰는 봉투. `value` 는 이미 쓰인 글이든 직렬화할 값이든 그 글이 그대로 선다.
+pub(super) fn envelope(value: &impl Serialize, messages: &[String], partial: bool) -> Result<Reply, RpcError> {
+    #[derive(Serialize)]
+    struct Envelope<'a, V: Serialize + ?Sized> {
+        messages: &'a [String],
+        partial: bool,
+        value: &'a V,
+    }
+    rpc::reply(&Envelope { messages, partial, value })
 }
 
 fn show(p: &mut Params) -> Result<Read, RpcError> {

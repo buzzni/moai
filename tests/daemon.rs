@@ -136,17 +136,29 @@ impl Wire {
         Wire { reader: BufReader::new(stream.try_clone().unwrap()), writer: stream }
     }
 
-    fn send_raw(&mut self, bytes: &[u8]) -> Value {
+    /// 답 한 줄을 파싱하지 않고 그대로 — 바이트를 견줄 때 쓴다.
+    fn send_text(&mut self, bytes: &[u8]) -> String {
         self.writer.write_all(bytes).unwrap();
         self.writer.flush().unwrap();
         let mut line = String::new();
         self.reader.read_line(&mut line).unwrap();
+        line
+    }
+
+    fn send_raw(&mut self, bytes: &[u8]) -> Value {
+        let line = self.send_text(bytes);
         serde_json::from_str(&line).unwrap_or_else(|e| panic!("답이 JSON 이 아니다: {e} — {line:?}"))
     }
 
     fn call(&mut self, id: u64, method: &str, params: Value) -> Value {
         let line = json!({ "jsonrpc": "2.0", "id": id, "method": method, "params": params });
         self.send_raw(format!("{line}\n").as_bytes())
+    }
+
+    /// `call` 과 같되 답 줄을 파싱하지 않은 글로 돌려준다.
+    fn call_text(&mut self, id: u64, method: &str, params: Value) -> String {
+        let line = json!({ "jsonrpc": "2.0", "id": id, "method": method, "params": params });
+        self.send_text(format!("{line}\n").as_bytes())
     }
 }
 
@@ -503,7 +515,8 @@ fn compare(f: &Fence, wire: &mut Wire, root: &Path, n: u64, method: &str, params
     sent["project"] = json!(root.to_str().unwrap());
     sent["actor"] = json!(ACTOR);
     let lang = params.get("lang").and_then(Value::as_str).unwrap_or("en");
-    let reply = wire.call(n, method, sent);
+    let text = wire.call_text(n, method, sent);
+    let reply: Value = serde_json::from_str(&text).unwrap_or_else(|e| panic!("답이 JSON 이 아니다: {e} — {text:?}"));
     let out = cli_with(f, root, argv, &[("MOAI_LANG", lang)]);
     let ctx = format!("{method} {params} / moai {argv:?}");
     if out.stdout.is_empty() {
@@ -520,6 +533,20 @@ fn compare(f: &Fence, wire: &mut Wire, root: &Path, n: u64, method: &str, params
     let result = &reply["result"];
     assert!(result.is_object(), "{ctx}: {reply}");
     assert_eq!(result["value"], want, "{ctx}");
+    // 값만이 아니라 바이트도 — `value` 는 CLI 가 찍은 줄 그대로다(키 차례 포함, moai-3hgm.whp). 줄이 여럿이면 그 줄들의 배열.
+    #[derive(serde::Deserialize)]
+    struct Line {
+        result: Result,
+    }
+    #[derive(serde::Deserialize)]
+    struct Result {
+        value: Box<serde_json::value::RawValue>,
+    }
+    let carried: Line = serde_json::from_str(&text).unwrap();
+    let stdout = String::from_utf8(out.stdout.clone()).unwrap();
+    let lines: Vec<&str> = stdout.lines().collect();
+    let printed = if lines.len() == 1 { lines[0].to_string() } else { format!("[{}]", lines.join(",")) };
+    assert_eq!(carried.result.value.get(), printed, "value 의 바이트 ≠ CLI stdout — {ctx}");
     let stderr: Vec<String> = String::from_utf8_lossy(&out.stderr)
         .lines()
         .map(|l| l.trim_end().to_string())

@@ -8,6 +8,8 @@
 //!   처리 함수에 간다. 모르는 필드는 무시한다 — 새 클라이언트가 옛 데몬을 넘어뜨리지 않게.
 //! - 알림(`id` 없음)은 받되 아무것도 돌리지 않고 답하지 않는다. 배치(배열)는 -32600.
 
+use serde::Serialize;
+use serde_json::value::RawValue;
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
 use std::io::BufRead;
@@ -73,7 +75,21 @@ impl RequestEnv {
     }
 }
 
-pub type Handler = Box<dyn Fn(&RequestEnv, Value) -> Result<Value, RpcError> + Send + Sync>;
+/// 메서드가 돌려주는 결과 — 이미 쓰인 JSON 글 그대로다. `Value` 로 거치면 객체 키가 abc 차례로 바뀌어(`preserve_order`
+/// 가 꺼져 있다) CLI 가 낸 바이트를 잃는다. `RawValue` 는 글을 파싱만 하고 그대로 싣는다(moai-3hgm.whp).
+pub type Reply = Box<RawValue>;
+
+/// 직렬화할 수 있는 값을 [`Reply`] 로 쓴다. 키 차례는 그 값의 직렬화가 정한 차례다.
+pub fn reply(value: &impl Serialize) -> Result<Reply, RpcError> {
+    serde_json::value::to_raw_value(value).map_err(|e| RpcError::new(code::INTERNAL, e.to_string()))
+}
+
+/// 한 줄의 JSON 글을 파싱만 하고 바이트 그대로 [`Reply`] 로 쓴다. JSON 이 아니면 `None`.
+pub fn raw_line(line: &str) -> Option<Reply> {
+    RawValue::from_string(line.to_string()).ok()
+}
+
+pub type Handler = Box<dyn Fn(&RequestEnv, Value) -> Result<Reply, RpcError> + Send + Sync>;
 
 /// 메서드 이름 → 처리 함수.
 pub struct Methods {
@@ -91,7 +107,7 @@ impl Methods {
     pub fn new() -> Self {
         let mut methods = Self { table: BTreeMap::new() };
         methods.register("hello", hello);
-        methods.register("ping", |_, _| Ok(json!({})));
+        methods.register("ping", |_, _| reply(&json!({})));
         methods
     }
 
@@ -104,7 +120,7 @@ impl Methods {
     pub fn register(
         &mut self,
         name: &str,
-        handler: impl Fn(&RequestEnv, Value) -> Result<Value, RpcError> + Send + Sync + 'static,
+        handler: impl Fn(&RequestEnv, Value) -> Result<Reply, RpcError> + Send + Sync + 'static,
     ) {
         self.table.insert(name.to_string(), Box::new(handler));
     }
@@ -159,11 +175,24 @@ impl Methods {
         let env = RequestEnv::from_params(&params);
         let ran = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| handler(&env, params)));
         Some(match ran {
-            Ok(Ok(result)) => json!({ "jsonrpc": "2.0", "id": id, "result": result }).to_string(),
+            Ok(Ok(result)) => success(&id, &result),
             Ok(Err(e)) => failure(&id, &e),
             Err(_) => failure(&id, &RpcError::new(code::INTERNAL, "internal error")),
         })
     }
+}
+
+/// 성공 답 한 줄. `result` 는 [`Reply`] 의 바이트가 그대로 들어간다(키 차례를 안 바꾼다).
+fn success(id: &Value, result: &RawValue) -> String {
+    #[derive(Serialize)]
+    struct Success<'a> {
+        id: &'a Value,
+        jsonrpc: &'static str,
+        result: &'a RawValue,
+    }
+    // 이 글은 `Value`·`RawValue` 뿐이라 직렬화가 실패할 길이 없다. 그래도 터뜨리지 않고 오류 답으로 바꾼다.
+    serde_json::to_string(&Success { id, jsonrpc: "2.0", result })
+        .unwrap_or_else(|e| failure(id, &RpcError::new(code::INTERNAL, e.to_string())))
 }
 
 fn failure(id: &Value, error: &RpcError) -> String {
@@ -190,7 +219,7 @@ pub fn too_long() -> String {
 /// `hello` — 클라이언트가 `proto` 를 말하고, 데몬은 제 `proto` 와 바이너리 판, 프로세스 번호(`pid`)를 답한다.
 /// `pid` 는 `moai daemon status`·`stop` 이 대는 값이다 — 거절하는 답의 `data` 에도 싣는다.
 /// 옛 `proto` 는 받는다(데몬이 더 새로우면 옛 클라이언트의 말을 알아듣는다). 새 `proto` 는 거절한다.
-fn hello(_: &RequestEnv, params: Value) -> Result<Value, RpcError> {
+fn hello(_: &RequestEnv, params: Value) -> Result<Reply, RpcError> {
     let proto = params
         .get("proto")
         .and_then(Value::as_u64)
@@ -208,7 +237,7 @@ fn hello(_: &RequestEnv, params: Value) -> Result<Value, RpcError> {
         );
         return Err(error);
     }
-    Ok(json!({ "proto": PROTO, "version": env!("CARGO_PKG_VERSION"), "pid": std::process::id() }))
+    reply(&json!({ "proto": PROTO, "version": env!("CARGO_PKG_VERSION"), "pid": std::process::id() }))
 }
 
 /// 줄 읽기의 결과.
@@ -349,7 +378,7 @@ mod tests {
         let flag = ran.clone();
         methods.register("touch", move |_, _| {
             flag.store(true, std::sync::atomic::Ordering::SeqCst);
-            Ok(json!(null))
+            reply(&json!(null))
         });
         assert_eq!(methods.handle(br#"{"jsonrpc":"2.0","method":"touch"}"#), None);
         assert!(!ran.load(std::sync::atomic::Ordering::SeqCst));
@@ -389,7 +418,7 @@ mod tests {
     #[test]
     fn the_env_comes_from_params_and_moai_failures_carry_the_cli_code() {
         let mut methods = Methods::new();
-        methods.register("env", |env, _| Ok(json!([env.project, env.actor, env.lang, env.tz])));
+        methods.register("env", |env, _| reply(&json!([env.project, env.actor, env.lang, env.tz])));
         methods.register("gone", |_, _| Err(RpcError::moai("not_found", "no such issue")));
         methods.register("boom", |_, _| panic!("handler bug"));
         let reply = call(

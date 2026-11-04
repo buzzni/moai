@@ -110,7 +110,7 @@ pub fn serve(bound: Bound, mut methods: Methods) -> std::io::Result<()> {
     // 스레드가 `TICK` 에 먼저 깨어도 답을 쓰기까지는 `Running` 이 세어 두어 `DRAIN` 이 기다린다.
     methods.register(super::SHUTDOWN, move |_, _| {
         flag.store(true, Ordering::Release);
-        Ok(json!({ "pid": std::process::id() }))
+        rpc::reply(&json!({ "pid": std::process::id() }))
     });
     let methods = Arc::new(methods);
     let open = Arc::new(AtomicUsize::new(0));

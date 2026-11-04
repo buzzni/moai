@@ -111,10 +111,11 @@ fn mark(bytes: &[u8]) -> Mark {
 
 /// 답. 줄 본문은 싣지 않는다 — 스냅샷이 진실이고, 클라이언트가 바뀐 줄을 다시 읽는다.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+// 필드 차례가 곧 답의 키 차례다(`value` 는 직렬화한 글 그대로 간다) — 문서의 예와 같게 abc 차례로 둔다.
 pub struct Changes {
-    pub cursor: String,
     /// 옛 스냅샷 뒤로 새로 섰거나, 목록의 줄이 달라졌거나(파생값 포함), 노트가 달라진 id. 차례는 id 순이다.
     pub changed: Vec<String>,
+    pub cursor: String,
     /// 옛 목록에 있었고 지금 목록에 없는 id — `rm`, 아카이브로 옮김, done 에 `archive_days` 넘게 서서 목록에서 빠짐.
     pub removed: Vec<String>,
     /// 참이면 두 목록은 비었다 — 견줄 옛 스냅샷이 없으니 전체를 다시 읽는다.

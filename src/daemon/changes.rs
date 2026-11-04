@@ -36,7 +36,7 @@
 //! 그것을 가리키는 커서를 막 내준 참이다. 기억은 프로세스의 것이라 데몬을 다시 띄우면 비고, 옛 커서는 인스턴스
 //! 표식이 달라 `reset` 이다(2026-11-04 사람이 받아들인 대가). 스냅샷에도 저널에도 아무것도 안 쓴다.
 
-use super::rpc::RpcError;
+use super::rpc::{Reply, RpcError};
 use crate::cmd::request::Request;
 use crate::daemon::diff::{Changes, Seen};
 use crate::i18n::Lang;
@@ -178,11 +178,9 @@ fn decode<'c>(cursor: &'c str, instance: &str) -> Option<&'c str> {
 
 /// 메서드 몸통 — `whole` 은 부르는 쪽이 지은 "전부 읽기"(`show` 에 `all: true`)의 요청, `lang` 은 요청의 화면 말이다.
 /// 읽기 메서드와 같은 봉투(`{value, messages, partial}`)로 낸다.
-pub(crate) fn handle(memory: &Memory, whole: Request, lang: Lang, cursor: Option<&str>) -> Result<Value, RpcError> {
+pub(crate) fn handle(memory: &Memory, whole: Request, lang: Lang, cursor: Option<&str>) -> Result<Reply, RpcError> {
     let polled = poll(memory, whole, lang, cursor)?;
-    let value =
-        serde_json::to_value(polled.changes).map_err(|e| RpcError::new(super::rpc::code::INTERNAL, e.to_string()))?;
-    Ok(serde_json::json!({ "value": value, "messages": polled.messages, "partial": polled.partial }))
+    super::read::envelope(&polled.changes, &polled.messages, polled.partial)
 }
 
 /// 한 번의 폴링 — 순수 함수의 답과, 읽다가 곁에 남은 것(CLI 라면 stderr 줄과 종료 코드 1).
