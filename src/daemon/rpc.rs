@@ -106,7 +106,7 @@ impl Methods {
     /// 줄 하나(끝의 개행은 있어도 없어도 된다)를 처리해 답할 줄을 돌려준다. 알림이면 `None`.
     pub fn handle(&self, line: &[u8]) -> Option<String> {
         if line.len() > LINE_MAX {
-            return Some(failure(&Value::Null, &RpcError::new(code::INVALID_REQUEST, "request line exceeds 1 MiB")));
+            return Some(too_long());
         }
         let value: Value = match serde_json::from_slice(line) {
             Ok(value) => value,
@@ -164,7 +164,18 @@ fn failure(id: &Value, error: &RpcError) -> String {
     json!({ "jsonrpc": "2.0", "id": id, "error": error.to_value() }).to_string()
 }
 
-/// `hello` — 클라이언트가 `proto` 를 말하고, 데몬은 제 `proto` 와 바이너리 판을 답한다.
+/// 요청을 못 읽어 `id` 를 모르는 거절 — 전송이 줄을 다 읽기 전에 내는 답(연결 상한 등)이 쓴다.
+pub fn refusal(error: &RpcError) -> String {
+    failure(&Value::Null, error)
+}
+
+/// 상한을 넘은 줄의 답. [`read_line`] 이 `Line::TooLong` 을 낸 자리와 [`Methods::handle`] 이 같은 글로 답한다.
+pub fn too_long() -> String {
+    refusal(&RpcError::new(code::INVALID_REQUEST, "request line exceeds 1 MiB"))
+}
+
+/// `hello` — 클라이언트가 `proto` 를 말하고, 데몬은 제 `proto` 와 바이너리 판, 프로세스 번호(`pid`)를 답한다.
+/// `pid` 는 `moai daemon status`·`stop` 이 대는 값이다 — 거절하는 답의 `data` 에도 싣는다.
 /// 옛 `proto` 는 받는다(데몬이 더 새로우면 옛 클라이언트의 말을 알아듣는다). 새 `proto` 는 거절한다.
 fn hello(_: &RequestEnv, params: Value) -> Result<Value, RpcError> {
     let proto = params
@@ -180,11 +191,11 @@ fn hello(_: &RequestEnv, params: Value) -> Result<Value, RpcError> {
             ),
         );
         error.data = Some(
-            json!({ "code": "unsupported_proto", "proto": PROTO, "client_proto": proto, "version": env!("CARGO_PKG_VERSION") }),
+            json!({ "code": "unsupported_proto", "proto": PROTO, "client_proto": proto, "version": env!("CARGO_PKG_VERSION"), "pid": std::process::id() }),
         );
         return Err(error);
     }
-    Ok(json!({ "proto": PROTO, "version": env!("CARGO_PKG_VERSION") }))
+    Ok(json!({ "proto": PROTO, "version": env!("CARGO_PKG_VERSION"), "pid": std::process::id() }))
 }
 
 /// 줄 읽기의 결과.
@@ -342,6 +353,7 @@ mod tests {
         );
         assert_eq!(reply["result"]["proto"], PROTO);
         assert_eq!(reply["result"]["version"], env!("CARGO_PKG_VERSION"));
+        assert_eq!(reply["result"]["pid"], std::process::id());
         assert_eq!(reply["jsonrpc"], "2.0");
         assert_eq!(reply["id"], 1);
     }
