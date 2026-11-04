@@ -1565,6 +1565,61 @@ and closing steps, read `references/commands.md`.
 "#.to_string()
 }
 
+// Conditional procedures are kept as exact slices of the canonical text. The main
+// skill points to the file at the step where the condition becomes relevant.
+fn guide_slice<'a>(text: &'a str, start: &str, end: &str) -> &'a str {
+    let from = text.find(start).expect("guide section start");
+    let to = from + text[from..].find(end).expect("guide section end");
+    &text[from..to]
+}
+
+pub fn supervise_sessions() -> String {
+    let full = supervise_full();
+    format!("{}\n{}\n{}", guide_slice(&full, "## Workers in sessions", "## Before the round"),
+        guide_slice(&full, "**A session.**", "**2-1. Pick the role"),
+        guide_slice(&full, "**A session's report comes back", "**5. Check the report"))
+}
+pub fn supervise_reclaim() -> String {
+    let full = supervise_full();
+    guide_slice(&full, "**0. Reclaim first", "**1. Pick.**").to_string()
+}
+pub fn supervise_planning() -> String {
+    let full = supervise_full();
+    guide_slice(&full, "**2-2. Unfold", "**3. Send.**").to_string()
+}
+pub fn supervise_send() -> String {
+    let full = supervise_full();
+    guide_slice(&full, "**3. Send.**", "**4. Wait.**").to_string()
+}
+pub fn supervise() -> String {
+    let mut text = supervise_full();
+    for (start, end, pointer) in [
+        ("**0. Reclaim first", "**1. Pick.**", "**0. Reclaim first — work that lost its place.** Read `references/supervise-reclaim.md` to check for and reclaim stranded work.\n\n"),
+        ("## Workers in sessions", "## Before the round", "## Workers in sessions\n\nWhen using sessions, read `references/supervise-sessions.md` before selecting workers.\n\n"),
+        ("**A session.**", "**2-1. Pick the role", "**A session.** Read `references/supervise-sessions.md` for session selection and delivery.\n\n"),
+        ("**A session's report comes back", "**5. Check the report", "For a session report, read `references/supervise-sessions.md` before checking it.\n\n"),
+        ("**2-2. Unfold", "**3. Send.**", "**2-2. Unfold with the `plan` role.** Read `references/supervise-planning.md` for this step.\n\n"),
+        ("**3. Send.**", "**4. Wait.**", "**3. Send.** Read `references/supervise-send.md` for the assignment and delivery steps.\n\n"),
+    ] {
+        let part = guide_slice(&text, start, end).to_owned();
+        text = text.replacen(&part, pointer, 1);
+    }
+    text
+}
+pub fn session_map_reference() -> String {
+    format!("# Session map\n\n```sh\n{SESSIONS}\n```\n")
+}
+pub fn codex_worker_reference() -> String { CODEX_WORKER_RULES.to_string() }
+fn terminal_shared(text: String) -> String {
+    text.replace(&format!("```sh\n{SESSIONS}\n```"),
+        "Read `../moai-supervise/references/session-map.md` and run its session map.")
+        .replace(CODEX_WORKER_RULES,
+        "Read `../moai-supervise/references/codex-workers.md` for the shared Codex model and review rules.")
+}
+pub fn tmux() -> String { terminal_shared(tmux_full()) }
+pub fn cmux() -> String { terminal_shared(cmux_full()) }
+pub fn saycode() -> String { terminal_shared(saycode_full()) }
+
 /// 스킬의 참고 문서. 부를 때만 읽힌다.
 pub fn reference() -> String {
     let backlog = backlog();
@@ -2242,7 +2297,7 @@ Decided in: <epic>
 /// 루트의 가지는 `<root branch>` 이고, `<base branch>` 는 일마다 갈린다 — 마일스톤 안의 일은 `milestone/<milestone>`,
 /// 밖의 일(`p0` 따위)은 루트의 가지. 병합 확인(5)도 그 일의 `<base branch>` 를 본다 — 마일스톤 일의 병합은 릴리스 전에는
 /// 루트의 가지에 없다. `milestone/` 은 가지 이름이 아니라 이 규약의 앞붙이라 `the_brief_names_no_branch` 에 안 걸린다.
-pub fn supervise() -> String {
+fn supervise_full() -> String {
     let message = message();
     let table = difficulty_table();
     let roles = roles_table();
@@ -3387,7 +3442,7 @@ the person's words. Labels do not grant permission to type."#;
 /// 파일은 안 고친다.
 ///
 /// Claude Code 에만 심는다([`crate::skill::Skill::claude_only`]) — 감독 스킬과 같은 까닭이다.
-pub fn tmux() -> String {
+fn tmux_full() -> String {
     let open_claude = open_pane("<root>", "claude --model <model>");
     let open_codex = open_pane("<root>", "codex --model <codex>");
     format!(
@@ -3680,7 +3735,7 @@ pane" applies unchanged: set `@moai` on this pane and ask before showing labels.
 /// `SendMessage` 로 오고, 감독은 그것을 보고의 이슈 id 와 `Sent:` 노트(`saycode <id>`)로 일에 잇는다.
 ///
 /// Claude Code 에만 심는다([`crate::skill::Skill::claude_only`]) — 감독 스킬과 같은 까닭이다.
-pub fn saycode() -> String {
+fn saycode_full() -> String {
     format!(
         r#"---
 name: moai-saycode
@@ -4029,7 +4084,7 @@ If any check is unclear or any input is refused, do not type again; ask the pers
 ///   닫을 길이 없어 시험 탭에 띄우지 않았다
 ///
 /// Claude Code 에만 심는다([`crate::skill::Skill::claude_only`]) — 감독 스킬과 같은 까닭이다.
-pub fn cmux() -> String {
+fn cmux_full() -> String {
     format!(
         r#"---
 name: moai-cmux
@@ -5802,6 +5857,11 @@ fn indent(text: &str, by: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    fn supervise() -> String { super::supervise_full() }
+    fn tmux() -> String { super::tmux_full() }
+    fn cmux() -> String { super::cmux_full() }
+    fn saycode() -> String { super::saycode_full() }
+
     use super::*;
 
     /// 셸 글을 재는 도구(`bash`·`python3`)의 자리 — 돌려 봐서 서는 것만 낸다. 없으면 한 줄 말하고 `None` 이다
@@ -5891,6 +5951,29 @@ mod tests {
         for piece in [CHEATSHEET, FORKS, WRITING, DETAIL, CTL, GROUPS, DEFERRING, PROJECTS, LANGUAGE, UPDATES, MERGE_DRIVER, ARCHIVE_STORAGE, COMMITS, WORK, WIKI, CLOSING] {
             assert!(reference.contains(piece), "missing reference content: {}", piece.lines().next().unwrap());
         }
+    }
+
+    #[test]
+    fn conditional_supervisor_guides_preserve_every_extracted_section() {
+        let full = super::supervise_full();
+        let short = super::supervise();
+        assert!(short.len() * 2 <= full.len(), "{} vs {}", short.len(), full.len());
+        for (start, end, reference) in [
+            ("**0. Reclaim first", "**1. Pick.**", super::supervise_reclaim()),
+            ("## Workers in sessions", "## Before the round", super::supervise_sessions()),
+            ("**A session.**", "**2-1. Pick the role", super::supervise_sessions()),
+            ("**A session's report comes back", "**5. Check the report", super::supervise_sessions()),
+            ("**2-2. Unfold", "**3. Send.**", super::supervise_planning()),
+            ("**3. Send.**", "**4. Wait.**", super::supervise_send()),
+        ] { assert!(reference.contains(super::guide_slice(&full, start, end))); }
+        for name in ["supervise-reclaim.md", "supervise-sessions.md", "supervise-planning.md", "supervise-send.md"] { assert!(short.contains(name)); }
+        for text in [super::tmux(), super::cmux(), super::saycode()] {
+            assert!(text.contains("session-map.md"));
+            assert!(!text.contains(SESSIONS));
+        }
+        for text in [super::tmux(), super::cmux()] { assert!(text.contains("codex-workers.md")); }
+        assert!(super::session_map_reference().contains(SESSIONS));
+        assert_eq!(super::codex_worker_reference(), CODEX_WORKER_RULES);
     }
 
     #[test]

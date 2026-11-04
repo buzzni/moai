@@ -211,6 +211,12 @@ pub fn skills() -> Vec<Skill> {
             name: supervisor,
             files: vec![
                 ("SKILL.md", crate::guide::supervise()),
+                ("references/supervise-reclaim.md", crate::guide::supervise_reclaim()),
+                ("references/supervise-sessions.md", crate::guide::supervise_sessions()),
+                ("references/supervise-planning.md", crate::guide::supervise_planning()),
+                ("references/supervise-send.md", crate::guide::supervise_send()),
+                ("references/session-map.md", crate::guide::session_map_reference()),
+                ("references/codex-workers.md", crate::guide::codex_worker_reference()),
                 ("references/worker.md", crate::guide::worker()),
                 // 드문 갈래는 곁 파일이다(moai-w25x.mgu) — 본 글이 절 이름으로 가리킨다.
                 ("references/worker-branches.md", crate::guide::worker_branches()),
