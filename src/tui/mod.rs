@@ -5167,6 +5167,13 @@ impl App {
         Some(Got { marks, stamp, where_why })
     }
 
+    /// The same read inputs and outcomes cannot introduce a new file diagnostic on a reread.
+    fn repeated_read(site: &Site, got: &Got) -> bool {
+        site.read_stamp.as_ref() == Some(&got.stamp)
+            && site.read_tried.trouble == got.marks.trouble
+            && site.read_pending.trouble == got.marks.pending
+    }
+
     /// 들어 온 읽음을 한 [`Site`] 에 얹는다 — **들일지, 표식을 올릴지, 무엇을 말할지가 한 자리에 있다**
     /// (리뷰). [`App::load_read`] 와 [`App::follow_site`] 가 저마다 적던 판은 둘이 이미 갈렸다.
     ///
@@ -5269,10 +5276,7 @@ impl App {
         let Some(site) = self.site_mut(seat) else { return false };
         // A retry of unchanged files whose failures persist reads the diagnostics the last attempt already told;
         // telling them again would cover a newer notice on every retry. A changed file or outcome still speaks.
-        let repeat = site.read_stamp.as_ref() == Some(&got.stamp)
-            && site.read_tried.trouble == got.marks.trouble
-            && site.read_pending.trouble == got.marks.pending
-            && (got.marks.trouble.is_some() || got.marks.pending.is_some());
+        let repeat = Self::repeated_read(site, &got);
         // 까닭은 한 줄로 댄다 — 조용히 [NEW] 가 서면 왜 그런지 볼 데가 없다.
         let told = Self::take_read(site, got).filter(|_| !repeat);
         let mut changed = false;
@@ -6055,6 +6059,8 @@ impl App {
                 // 둔다" 가 빈 말이 되어, 못 읽은 읽음 파일 하나가 그 프로젝트의 줄을 통째로 [NEW] 로
                 // 세웠다. 갈음할 옛 줄에서 먼저 옮겨 든다 — 베끼지 않는다(그 줄은 곧 버려진다).
                 if let Some(root) = site.repo.as_ref().map(|r| r.root.clone()) {
+                    let got = self.read_marks_of(&root);
+                    let mut repeat = false;
                     if let Some(held) = self
                         .layer
                         .as_mut()
@@ -6066,9 +6072,13 @@ impl App {
                         // 이 걸음의 읽기로 둘 다 다시 적는다. 옮겨 봐야 그 자리에서 덮이고, 덮이는
                         // 줄은 "옮겼으니 이어진다" 는 거짓말을 남긴다. 표식도 같다 — `take_read` 는
                         // 실패한 읽기에도 표식을 적으니 옮길 까닭이 없다.
+                        //
+                        // They are only read here: a project snapshot refresh must not repeat the same read-file
+                        // diagnostic. Compare before replacing the site; changed stamps or outcomes still speak.
+                        repeat = got.as_ref().is_some_and(|got| Self::repeated_read(held, got));
                     }
-                    if let Some(got) = self.read_marks_of(&root)
-                        && let Some(told) = Self::take_read(&mut site, got)
+                    if let Some(got) = got
+                        && let Some(told) = Self::take_read(&mut site, got).filter(|_| !repeat)
                     {
                         self.notice = Some(told);
                     }
@@ -11881,6 +11891,9 @@ mod tests {
         std::fs::write(&place.at, &header).unwrap();
         a.load_read();
         let told = a.notice.clone().expect("the main sheet's skipped line is told");
+        a.notice = Some("newer user notice".into());
+        a.load_read();
+        assert_eq!(a.notice.as_deref(), Some("newer user notice"), "an unchanged bad line was repeated on reload");
         let spool = place.pending.clone().expect("a settled place has a pending sheet");
         let socket = UnixListener::bind(&spool).unwrap();
         let follow = |a: &mut App| {
