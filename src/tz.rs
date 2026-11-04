@@ -1019,6 +1019,14 @@ impl System {
         System(std::sync::OnceLock::new(), source)
     }
 
+    /// 이미 고른 시간대 — 출처를 안 묻고, 풀다 만난 것도 없다. 요청이 제 시간대를 들고 오는 자리
+    /// (`cmd::request`, moai-5n6m.m0b)가 쓴다: `TZ` 는 프로세스의 것이라 요청마다 못 준다.
+    pub(crate) fn fixed(zone: Zone) -> System {
+        let system = System::from(SOURCE);
+        let _ = system.0.set((zone, None));
+        system
+    }
+
     /// 이 기계의 시간대. 처음 부를 때 출처로 한 번 푼다.
     pub fn zone(&self) -> &Zone {
         &self.0.get_or_init(self.1).0

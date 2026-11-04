@@ -24,6 +24,7 @@ pub mod prime;
 pub mod project;
 pub mod read;
 pub mod ready;
+pub(crate) mod request;
 pub mod rm;
 pub mod show;
 pub mod skill;
@@ -63,6 +64,26 @@ pub struct Ctx {
 impl Ctx {
     pub fn new(json: bool, user: Option<String>, chdir: bool) -> Ctx {
         Ctx { json, user, chdir, reg: OnceLock::new(), lang: OnceLock::new(), zone: crate::tz::System::default() }
+    }
+
+    /// 요청 하나의 문맥(`cmd::request`, moai-5n6m.m0b) — 화면 말과 시간대를 **요청이 준 것으로** 박아 둔다.
+    /// 안 준 것은 CLI 와 같이 늦게 푼다(`MOAI_LANG`·설정, `TZ`). 둘 다 프로세스의 것이라 요청마다 못 바꾸는
+    /// 자리였다.
+    pub(crate) fn asked(
+        json: bool,
+        user: Option<String>,
+        chdir: bool,
+        lang: Option<crate::i18n::Lang>,
+        zone: Option<crate::tz::Zone>,
+    ) -> Ctx {
+        let mut ctx = Ctx::new(json, user, chdir);
+        if let Some(lang) = lang {
+            let _ = ctx.lang.set(lang);
+        }
+        if let Some(zone) = zone {
+            ctx.zone = crate::tz::System::fixed(zone);
+        }
+        ctx
     }
 
     /// 사용자 설정. **이 문으로 드는 명령은 한 판에 한 번만 읽는다**(moai-cigu) — 등록 목록도
@@ -166,8 +187,22 @@ static PARTIAL: AtomicBool = AtomicBool::new(false);
 static AFTER: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
 
 /// [`AFTER`] 에 한 줄 — 명령이 `Ok` 로 끝나면 [`run`] 이 [`tell`] 로 낸다.
+///
+/// **요청의 통이 걸렸으면 거기 쌓는다**(`crate::side`, moai-5n6m.m0b) — 두 요청이 함께 돌면 [`AFTER`] 하나를 나눠 써
+/// 서로의 줄을 낸다.
 pub(crate) fn tell_after(line: String) {
-    AFTER.lock().unwrap_or_else(|e| e.into_inner()).push(line);
+    match crate::side::current() {
+        Some(side) => side.lock().unwrap_or_else(|e| e.into_inner()).after.push(line),
+        None => AFTER.lock().unwrap_or_else(|e| e.into_inner()).push(line),
+    }
+}
+
+/// [`tell_after`] 가 쌓은 줄을 꺼낸다 — 요청의 통이 걸렸으면 그 통의 것이다.
+fn take_after() -> Vec<String> {
+    if let Some(after) = crate::side::with(|s| std::mem::take(&mut s.after)) {
+        return after;
+    }
+    std::mem::take(&mut *AFTER.lock().unwrap_or_else(|e| e.into_inner()))
 }
 
 /// `--due`·`--start` 에 친 값 — `+N` 이면 **오늘에서 N 일 뒤**의 날짜로 바꾼다(moai-ghkp.kz7, [`crate::model::relative_due`]).
@@ -393,11 +428,15 @@ pub fn chosen_exit() -> u8 {
     EXIT.load(Ordering::Relaxed)
 }
 
+/// **요청의 통이 걸렸으면 그 통의 깃발이다**(`crate::side`, moai-5n6m.m0b) — [`PARTIAL`] 은 한 번 서면 안 내려가, 오래
+/// 사는 프로세스에서는 한 요청의 부분 실패가 뒤의 모든 요청에 선다.
 pub fn note_partial() {
-    PARTIAL.store(true, Ordering::Relaxed);
+    if crate::side::with(|s| s.partial = true).is_none() {
+        PARTIAL.store(true, Ordering::Relaxed);
+    }
 }
 pub fn had_partial() -> bool {
-    PARTIAL.load(Ordering::Relaxed)
+    crate::side::with(|s| s.partial).unwrap_or_else(|| PARTIAL.load(Ordering::Relaxed))
 }
 /// 깃발을 거두며 그때까지의 값을 낸다 — 이어 부른 명령의 부분 실패를 제 종료 코드에 안 싣는 자리(`init`)가 쓴다.
 pub fn take_partial() -> bool {
@@ -561,16 +600,29 @@ pub(crate) fn name_capped<T>(lang: crate::i18n::Lang, items: &[T], one: impl Fn(
 /// stderr 에 한 줄 — **stderr 가 끊겨도 넘어지지 않는다**(리뷰). `eprintln!` 은 읽는 쪽이 사라진 파이프(EPIPE)
 /// 에서 패닉해, 이미 고른 답까지 못 내고 101 로 끝난다. `main` 의 끝 알림이 `writeln!` 의 실패를 버리는 것과
 /// 같은 자다.
+///
+/// **요청의 통이 걸렸으면 거기 담는다**(`crate::side`, moai-5n6m.m0b) — 데몬의 stderr 는 요청한 쪽에 안 닿고, 두
+/// 요청이 함께 돌면 서로의 줄이 섞인다.
 pub(crate) fn tell(line: &str) {
     use std::io::Write as _;
+    if crate::side::with(|s| s.told.push(line.to_string())).is_some() {
+        return;
+    }
     let _ = writeln!(std::io::stderr().lock(), "{line}");
 }
 
 pub fn run(mut cli: Cli) -> R<Vec<String>> {
     let ctx = Ctx::new(cli.json, cli.user.take(), cli.dir.is_some());
     let out = dispatch(&ctx, cli);
+    finish(&ctx, &out);
+    out
+}
+
+/// 명령이 선 뒤의 꼬리 — [`run`] 과 요청의 입구(`cmd::request`)가 **같이 부른다**. 두 벌로 적으면 한쪽만 고쳐져
+/// 데몬의 알림이 CLI 의 stderr 와 갈린다.
+pub(crate) fn finish(ctx: &Ctx, out: &R<Vec<String>>) {
     // **선 판에서만 낸다**([`AFTER`]) — 넘어진 판의 것은 버린다.
-    let after = std::mem::take(&mut *AFTER.lock().unwrap_or_else(|e| e.into_inner()));
+    let after = take_after();
     if out.is_ok() {
         after.iter().for_each(|line| tell(line));
     }
@@ -588,9 +640,8 @@ pub fn run(mut cli: Cli) -> R<Vec<String>> {
     if let Some(why) = ctx.zone_trouble()
         && !(ctx.json && out.is_err())
     {
-        eprintln!("{}", crate::view::zone_trouble(ctx.lang(), why));
+        tell(&crate::view::zone_trouble(ctx.lang(), why));
     }
-    out
 }
 
 fn dispatch(ctx: &Ctx, cli: Cli) -> R<Vec<String>> {

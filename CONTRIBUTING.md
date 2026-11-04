@@ -205,6 +205,24 @@ know of. The list is not complete:
 Moving that state into a per-call context changes logic, so it is its own epic, with
 the same gates as below. Until it is done, do not build a daemon on this crate.
 
+**The one exception is the crate-internal read entry** (`cmd::request::read`,
+moai-5n6m.m0b). It runs `status`, `ready`, `prime`, `show`, `stats` and `project ls`
+for one request, through the same `cmd::*::run` functions the CLI calls, and is safe to
+call from several threads at once:
+
+- It does not move the working directory. The request names its project root, and the
+  read path asks `side::cwd()` instead of `std::env::current_dir`. The answer is what
+  `moai -C <root> --json <command>` gives when run from that root.
+- The notices, the partial flag and the climbed and unread places of that request go
+  into its own `side::Side`, which the entry hangs on the calling thread for the length
+  of the call. `projects::each` hands it to the threads it starts. Without a hung `Side`
+  (the CLI) every one of them goes where it went before, so CLI output is unchanged.
+- The language, the time zone and the actor come with the request. What the request
+  leaves out still comes from the environment and the user config.
+- The caller makes one call per request and does not start threads of its own that call
+  into moai inside it. Anything called outside the entry still uses the process-wide
+  state listed above. The write path (`MOVED`, `TALLY`, `MISSED`, `NOTED`) is not covered.
+
 **How a refactor that must not change behaviour is gated.** The split into library and
 binary merged only after three tools in `scripts/` reported no change. Use them again for
 the next refactor of this kind:
