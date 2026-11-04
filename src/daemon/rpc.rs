@@ -95,6 +95,12 @@ impl Methods {
         methods
     }
 
+    /// 단 메서드 이름들 — 명령 훑기 시험이 쓴다.
+    #[cfg(test)]
+    pub fn names(&self) -> Vec<&str> {
+        self.table.keys().map(String::as_str).collect()
+    }
+
     pub fn register(
         &mut self,
         name: &str,

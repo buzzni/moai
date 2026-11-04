@@ -4,7 +4,7 @@
 //! 여기는 **읽어 건네는** 얇은 층이다 — 요청의 통([`crate::side`])을 세우고 그 안에서 스냅샷과 저널을 읽는다.
 //! 프로세스의 현재 디렉터리는 옮기지 않는다(`cmd::request::read` 와 같은 약속).
 //!
-//! **메서드 표에는 아직 안 단다** — `project` 를 푸는 자리(q16)와 함께 `methods()` 에 묶는 것은 다음 멤버의 일이다.
+//! 메서드 표에는 `read::register` 가 단다(moai-5n6m.cb9) — 거기서 `project` 를 풀고 이 몸통을 부른다. 봉투에 싸서 낸다.
 //!
 //! ## 메서드 `changes`
 //!
@@ -17,7 +17,6 @@
 //! - `cursor` 를 안 주면 `reset: true` 와 첫 커서를 낸다
 //! - `changed` 는 새로 생겼거나 고쳤거나 **메모가 붙은** 산 줄이다. 메모는 스냅샷의 줄을 안 바꾸므로 저널의 `note`
 //!   줄로 찾는다 — 그 줄의 내용을 읽지 않고 id 만 쓴다. `removed` 는 `rm` 이 지웠고 지금 없는 id 다
-#![cfg_attr(not(test), expect(dead_code, reason = "읽기 메서드와 project 푸는 자리가 묶는다(moai-5n6m.cb9)"))]
 
 use super::rpc::RpcError;
 use crate::query::changes::{Changes, Input};
