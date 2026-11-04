@@ -12,6 +12,10 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+### Added
+
+- moai also builds as a library crate (`src/lib.rs`) with 13 public modules: `config`, `fail`, `held`, `i18n`, `model`, `nav`, `query`, `read_marks`, `report`, `store`, `style`, `tz` and `user_config`. It has no version promise yet and is not yet safe in a long-running process; see “The library” in `CONTRIBUTING.md`. (moai-zzs0)
+
 ## [0.47.0] - 2026-11-03
 
 ### Added
