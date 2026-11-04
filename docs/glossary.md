@@ -43,8 +43,9 @@ where `owner` says `theirs` or `unowned` — see [take over](#take-over).
 
 The numbered steps a [worker](#worker) follows for work a
 [supervisor](#supervisor) sent, from [pick up](#pick-up) to merge and report.
-They stand in a file of the supervisor skill, `references/worker.md` — its rare branches
-beside it in `references/worker-branches.md` — and a step
+They stand in a file of the supervisor skill, `references/worker.md` — the parts only some
+steps need beside it in `worker-setup.md`, `worker-review.md`, `worker-finish.md`, and
+`worker-tmux-tests.md`, its rare branches in `references/worker-branches.md` — and a step
 that goes differently for a subagent worker says so in a line of its own. Each
 assignment message carries the lines for this assignment — the backlog, the
 model and the effort, whether the worker is a subagent or a session, the work
@@ -356,4 +357,4 @@ not pile commits onto one branch. The tracker stays in the main checkout; the
 wiki pages ride the branch. More in
 [the workflow](workflow.md#work-in-a-worktree).
 
-Decided in: moai-ifvh moai-tllo moai-snyk moai-u5wr moai-dhxm moai-kxkw moai-jtvp moai-bth3 moai-obxm moai-9tqo moai-uzhx moai-pyi4 moai-jdwk moai-lj8g moai-d1zn moai-ns7a moai-mkzo moai-w30o moai-4v3h
+Decided in: moai-ifvh moai-tllo moai-snyk moai-u5wr moai-dhxm moai-kxkw moai-jtvp moai-bth3 moai-obxm moai-9tqo moai-uzhx moai-pyi4 moai-jdwk moai-lj8g moai-d1zn moai-ns7a moai-mkzo moai-w30o moai-4v3h moai-w0zr
