@@ -65,6 +65,23 @@ pub(crate) fn current() -> Option<Shared> {
     HUNG.with_borrow(|h| h.clone())
 }
 
+/// **요청 안인가** — 이 스레드에 통이 걸렸는가(리뷰 moai-3hgm.puw 10번). 통은 요청을 부른 쪽만 걸므로 CLI 에서는 늘
+/// 거짓이고, 그래서 아래 자리들이 이것으로 가른 갈래는 CLI 에서 서지 않는다.
+///
+/// 이 물음을 맨 `current().is_some()` 으로 자리마다 다시 적던 판은, 환경이나 프로세스에 기대는 새 자리가 그 검사를
+/// 빠뜨리기 쉬웠다. 요청 안에서 다르게 하는 일은 모두 이것으로 묻고, 여기 적는다 — 무엇을 가르는지가 한 자리에 선다.
+///
+/// - `model::actor` — 데몬의 `MOAI_ACTOR` 를 안 읽는다. 요청을 보낸 사람이 아니다(moai-3hgm.k7s)
+/// - `hook::record_own_picks` — 세션의 집기를 안 적는다. 데몬의 `CLAUDE_CODE_SESSION_ID` 는 요청의 것이 아니다
+///   (moai-3hgm.25e)
+/// - `cmd::refuse_if_flag_like` — 깃발 같은 값과 `-` 한 글자를 재지 않는다. 요청의 필드는 형이 있는 글이고, 그 검사가
+///   훑는 argv 는 데몬의 것이다(moai-3hgm.25e)
+/// - `cmd::add` 의 `read_source` — 계획 파일을 안 연다. `stdin_text` — stdin 을 안 읽고 거절한다. `dash_reads_stdin` —
+///   글 자리의 `-` 를 글로 받는다. 요청에는 stdin 이 없다(moai-3hgm.25e)
+pub(crate) fn hung() -> bool {
+    HUNG.with_borrow(Option::is_some)
+}
+
 /// 걸린 통에 `f` 를 부른다. **통이 없으면 부르지 않고 `None` 이다** — 부르는 쪽이 그때 옛 길로 간다.
 ///
 /// **`f` 안에서 이 모듈을 다시 부르지 않는다** — 통의 자물쇠를 쥔 채라, 같은 스레드에서 [`with`] 를 또 부르면

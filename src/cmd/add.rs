@@ -28,7 +28,7 @@ fn assignee_of(arg: Option<&str>, by: &Actor) -> (Option<String>, Option<String>
 fn read_source(from: &str) -> R<String> {
     match from {
         "-" => stdin_text(),
-        path if crate::side::current().is_some() => {
+        path if crate::side::hung() => {
             Err(Fail::coded(format!("{path}: a request does not read a plan"), super::code::BAD_INPUT))
         }
         path => std::fs::read_to_string(path).map_err(|e| Fail::new(format!("{path}: {e}"))),
@@ -41,7 +41,7 @@ fn read_source(from: &str) -> R<String> {
 /// 그 요청의 스레드가 영영 선다 — 그리고 그 사이 다른 요청이 같은 프로세스의 stdin 을 다툰다. 기다리지 않고 바로
 /// 거절한다. 요청이 글을 주는 길은 필드다([`dash_reads_stdin`]).
 fn stdin_text() -> R<String> {
-    if crate::side::current().is_some() {
+    if crate::side::hung() {
         return Err(Fail::coded("stdin: a request has no stdin", super::code::BAD_INPUT));
     }
     let mut s = String::new();
@@ -55,7 +55,7 @@ fn stdin_text() -> R<String> {
 /// API 로 온 `-` 한 글자도 그대로 그 글이어야 한다 — stdin 을 뜻하게 두면 그 글을 건넬 길이 없다.
 /// `refuse_if_flag_like` 가 통이 걸리면 서지 않는 것과 한 결정이다.
 fn dash_reads_stdin(arg: Option<&str>) -> bool {
-    arg == Some("-") && crate::side::current().is_none()
+    arg == Some("-") && !crate::side::hung()
 }
 
 /// `--from` 의 계획 한 덩이를 읽어 **형식을 읽고 템플릿 변수를 채운다**(moai-cypw).

@@ -1239,7 +1239,7 @@ pub fn actor(flag: Option<&str>, root: &Path) -> Result<Actor, NoActor> {
     // 통이 걸린 요청은 이 프로세스의 환경을 안 읽는다 — 읽으면 데몬을 띄운 사람이 요청마다 저널에 적히고, 읽기의
     // `ready` 도 그 사람으로 내 것과 남의 것을 가른다. `hook::record_own_picks` 가 같은 까닭으로
     // `CLAUDE_CODE_SESSION_ID` 를 안 읽는다(moai-3hgm.25e). 통이 없는 CLI 는 그대로다.
-    if crate::side::current().is_none()
+    if !crate::side::hung()
         && let Ok(raw) = std::env::var("MOAI_ACTOR")
         && !raw.trim().is_empty()
     {

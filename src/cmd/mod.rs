@@ -930,7 +930,7 @@ pub fn refuse_if_flag_like(value: &str, at: FlagLike<'_>, lang: crate::i18n::Lan
     // 넘긴 판과 stdin 을 바란 `-` 인데, 요청의 필드는 형이 있는 글이라 둘 다 없다 — 깃발 같은 제목도 `-` 한 글자도
     // 사람이 준 글이다(`add::read_body` 도 그 `-` 를 글로 받는다). 그리고 아래의 argv 훑기는 데몬의 argv
     // (`moai daemon start`)를 읽는다.
-    if crate::side::current().is_some() {
+    if crate::side::hung() {
         return Ok(());
     }
     // **`-` 한 글자는 빠져나갈 길보다 먼저 잰다** — 위 doc 의 둘째 절이다. `--`·`--title=-` 도 이것을 못 연다.

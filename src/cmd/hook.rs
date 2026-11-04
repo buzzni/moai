@@ -1027,7 +1027,7 @@ const OTHER_AGENT_SESSIONS: [&str; 2] = ["CODEX_THREAD_ID", "ANTIGRAVITY_CONVERS
 /// 띄운 셸의 것이라, Claude 세션에서 띄운 데몬이면 그 뒤 모든 요청의 집기가 그 세션의 것으로 적힌다(위 Codex 와 같은 꼴).
 pub(crate) fn record_own_picks(repo: &Repo, ids: &[String]) {
     let other_agent = OTHER_AGENT_SESSIONS.iter().any(|k| std::env::var_os(k).is_some_and(|v| !v.is_empty()));
-    if ids.is_empty() || other_agent || crate::side::current().is_some() {
+    if ids.is_empty() || other_agent || crate::side::hung() {
         return;
     }
     let Some(sid) = std::env::var("CLAUDE_CODE_SESSION_ID").ok().as_deref().and_then(safe_sid_of) else { return };
