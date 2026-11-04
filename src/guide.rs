@@ -6367,7 +6367,8 @@ mod tests {
                 assert!(!text.contains(gone), "{surface} 이 걷은 헤드리스 예제를 아직 가리킨다 — {gone}");
             }
         }
-        for (surface, text) in [("참고 문서", reference())] {
+        {
+            let (surface, text) = ("참고 문서", reference());
             assert!(
                 text.contains("the moai binary never launches or drives a session itself"),
                 "{surface} 이 바이너리가 세션을 띄우지 않는다는 말을 잃었다"
