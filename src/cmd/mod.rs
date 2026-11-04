@@ -426,11 +426,15 @@ pub fn path_exts(raw: Option<&std::ffi::OsStr>) -> Vec<String> {
 /// 코드를 부른 쪽이 못 읽는다.
 static EXIT: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
 
+/// **요청의 통이 걸렸으면 그 통의 코드다**(`crate::side`, moai-3hgm.25e) — [`EXIT`] 는 프로세스 하나에 하나라, 오래 사는
+/// 프로세스에서는 한 요청이 고른 코드가 뒤의 모든 요청의 코드로 남는다. [`note_partial`] 과 같은 꼴이다.
 pub fn exit_with(code: u8) {
-    EXIT.store(code, Ordering::Relaxed);
+    if crate::side::with(|s| s.exit = code).is_none() {
+        EXIT.store(code, Ordering::Relaxed);
+    }
 }
 pub fn chosen_exit() -> u8 {
-    EXIT.load(Ordering::Relaxed)
+    crate::side::with(|s| s.exit).unwrap_or_else(|| EXIT.load(Ordering::Relaxed))
 }
 
 /// **요청의 통이 걸렸으면 그 통의 깃발이다**(`crate::side`, moai-5n6m.m0b) — [`PARTIAL`] 은 한 번 서면 안 내려가, 오래

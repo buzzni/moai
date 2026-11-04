@@ -227,8 +227,11 @@ impl Repo {
 /// 마지막 하나만 알렸다. 같은 자리에 열 번 써도 줄은 하나다.
 static MOVED: std::sync::Mutex<Vec<(PathBuf, PathBuf)>> = std::sync::Mutex::new(Vec::new());
 
-/// 옮겨 쓴 자리들 — 없으면 비어 있다. `main` 이 끝에 한 번 읽는다.
+/// 옮겨 쓴 자리들 — 없으면 비어 있다. `main` 이 끝에 한 번 읽는다. 요청의 통이 걸렸으면 그 통의 것이다(moai-3hgm.25e).
 pub fn redirects() -> Vec<(PathBuf, PathBuf)> {
+    if let Some(moved) = crate::side::with(|s| s.moved.clone()) {
+        return moved;
+    }
     MOVED.lock().unwrap_or_else(|e| e.into_inner()).clone()
 }
 
@@ -1161,11 +1164,18 @@ impl Repo {
         // 정리가 진 것까지 거기 실으면 남은 이력을 잃었다고 말하고, 탐색기는 첫 줄만 보여 진짜 잃은 이력을 가렸다.
         for t in note {
             let said = crate::view::store_trouble(lang(), &t);
-            let to = match t {
-                Trouble::JournalLost { .. } => &MISSED,
-                _ => &NOTED,
-            };
-            to.lock().unwrap_or_else(|e| e.into_inner()).push((self.root.clone(), said));
+            let lost = matches!(t, Trouble::JournalLost { .. });
+            let one = (self.root.clone(), said);
+            // **요청의 통이 걸렸으면 거기만 적는다**(`crate::side`, moai-3hgm.25e) — 프로세스의 두 통은 비우지 않아,
+            // 데몬에서는 한 요청이 못 적은 저널이 뒤의 모든 요청의 말로 다시 선다.
+            let hung = crate::side::with(|s| {
+                let to = if lost { &mut s.missed } else { &mut s.noted };
+                to.push(one.clone());
+            });
+            if hung.is_none() {
+                let to = if lost { &MISSED } else { &NOTED };
+                to.lock().unwrap_or_else(|e| e.into_inner()).push(one);
+            }
         }
         Ok(out)
     }
@@ -1394,12 +1404,15 @@ impl Repo {
             write_atomic_inside(&self.issues_path(), after.as_bytes(), &self.root)?;
             self.note_held(&original, &issues);
         }
-        let mut tallies = TALLY.lock().unwrap_or_else(|e| e.into_inner());
-        match tallies.iter_mut().find(|(root, _)| *root == self.root) {
+        // **요청의 통이 걸렸으면 그 통에 센다**(`crate::side`, moai-3hgm.25e) — 프로세스의 셈은 늘기만 해, 데몬에서는
+        // 한 요청이 들고 간 줄을 뒤의 모든 요청이 "그대로 두고 썼다" 로 다시 말한다.
+        let fold = |tallies: &mut Vec<(PathBuf, Tally)>| match tallies.iter_mut().find(|(root, _)| *root == self.root) {
             Some((_, t)) => *t = t.after(wrote, opaque.len()),
             None => tallies.push((self.root.clone(), Tally::default().after(wrote, opaque.len()))),
+        };
+        if crate::side::with(|s| fold(&mut s.tallies)).is_none() {
+            fold(&mut TALLY.lock().unwrap_or_else(|e| e.into_inner()));
         }
-        drop(tallies);
         // **닫힘이 줄을 바꿨으면 저널 실패는 실패가 아니다**(moai-52z9). 줄은 이미 들어갔는데
         // `Err` 를 내면 사람은 다시 부르고, `add` 는 id 가 다른 같은 이슈를 하나 더 세운다.
         // 순서는 그대로다 — 빠진 일기가 거짓말하는 일기보다 싸다. 고칠 것은 말이다:
@@ -1456,10 +1469,15 @@ impl Repo {
         if (wrote || (!entries.is_empty() && failed.is_none()))
             && let Some(from) = &self.moved_from
         {
-            let mut moved = MOVED.lock().unwrap_or_else(|e| e.into_inner());
             let pair = (from.clone(), self.dir());
-            if !moved.contains(&pair) {
-                moved.push(pair);
+            let push = |moved: &mut Vec<(PathBuf, PathBuf)>| {
+                if !moved.contains(&pair) {
+                    moved.push(pair.clone());
+                }
+            };
+            // 요청의 통이 걸렸으면 거기만 적는다(moai-3hgm.25e) — 위 셈과 같은 까닭이다.
+            if crate::side::with(|s| push(&mut s.moved)).is_none() {
+                push(&mut MOVED.lock().unwrap_or_else(|e| e.into_inner()));
             }
         }
         if let Err(e) = after_commit(&out) {
@@ -1982,7 +2000,11 @@ impl Tally {
 /// 입을 다문다. 처음 쓴 차례대로 둔다.
 static TALLY: std::sync::Mutex<Vec<(PathBuf, Tally)>> = std::sync::Mutex::new(Vec::new());
 
+/// 요청의 통이 걸렸으면 그 통의 셈이다(moai-3hgm.25e).
 pub fn unreadable_tallies() -> Vec<(PathBuf, Tally)> {
+    if let Some(tallies) = crate::side::with(|s| s.tallies.clone()) {
+        return tallies;
+    }
     TALLY.lock().unwrap_or_else(|e| e.into_inner()).clone()
 }
 
@@ -1993,7 +2015,11 @@ pub fn unreadable_tallies() -> Vec<(PathBuf, Tally)> {
 /// 대체 화면 안의 알림은 닫으면 사라지기 때문이다.
 static MISSED: std::sync::Mutex<Vec<(PathBuf, String)>> = std::sync::Mutex::new(Vec::new());
 
+/// 요청의 통이 걸렸으면 그 통의 것이다(moai-3hgm.25e).
 pub fn journal_misses() -> Vec<(PathBuf, String)> {
+    if let Some(missed) = crate::side::with(|s| s.missed.clone()) {
+        return missed;
+    }
     MISSED.lock().unwrap_or_else(|e| e.into_inner()).clone()
 }
 
@@ -2002,7 +2028,11 @@ pub fn journal_misses() -> Vec<(PathBuf, String)> {
 /// 까닭은 말이다 — 그 통은 "썼지만 이력은 못 남겼다" 로 펴진다. `main` 이 끝에 한 번, 같은 말은 한 번만 낸다.
 static NOTED: std::sync::Mutex<Vec<(PathBuf, String)>> = std::sync::Mutex::new(Vec::new());
 
+/// 요청의 통이 걸렸으면 그 통의 것이다(moai-3hgm.25e).
 pub fn write_notes() -> Vec<(PathBuf, String)> {
+    if let Some(noted) = crate::side::with(|s| s.noted.clone()) {
+        return noted;
+    }
     NOTED.lock().unwrap_or_else(|e| e.into_inner()).clone()
 }
 

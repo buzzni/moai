@@ -5,6 +5,10 @@
 //! (`store` 의 `UNREAD`). 명령 하나를 돌리고 끝나는 CLI 는 이것을 프로세스 전역에 담아 `main` 이 끝에 한 번
 //! 읽는다. 오래 사는 프로세스(데몬)에서 그 전역은 늘기만 하고, 스레드 둘이 함께 돌면 서로의 줄이 섞인다.
 //!
+//! **쓰기가 남기는 것도 여기 든다**(moai-3hgm.25e) — 고른 종료 코드(`cmd::exit_with`), 쓰기가 못 읽는 줄을 두고 본
+//! 셈(`TALLY`), 못 적은 저널(`MISSED`)과 덧붙일 말(`NOTED`), 워크트리에서 루트로 옮겨 쓴 자리(`MOVED`). `main` 의
+//! 꼬리(`crate::run`)가 그 다섯을 끝에 한 번 읽어 stderr 에 내는 것을, 요청은 제 답의 말로 돌려받는다.
+//!
 //! **그래서 요청마다 제 통([`Side`])을 세운다.** 통은 요청을 부른 쪽([`crate::cmd::request`])이 짓고, 그 부름이
 //! 도는 동안 이 스레드에 걸어 둔다([`enter`]). 쓰는 자리는 [`with`] 로 걸린 통을 먼저 찾고, 없으면 옛 길(전역·
 //! stderr)로 간다. **CLI 는 통을 안 건다** — 그래서 CLI 의 출력은 이 모듈이 서기 전과 바이트째 같다.
@@ -37,6 +41,16 @@ pub(crate) struct Side {
     pub climbed: Vec<(PathBuf, PathBuf)>,
     /// 못 읽어 건너뛴 저널 자리, 만난 차례대로(`store::note_missed`).
     pub unread: Vec<crate::store::Unread>,
+    /// 명령이 고른 종료 코드 — 0 이면 안 고른 것이다(`cmd::exit_with`, moai-3hgm.25e).
+    pub exit: u8,
+    /// 쓰기가 못 읽는 줄을 두고 본 것, 저장소마다(`store` 의 `TALLY`, moai-3hgm.25e).
+    pub tallies: Vec<(PathBuf, crate::store::Tally)>,
+    /// 스냅샷은 담겼는데 저널에 못 적은 까닭 — `(뿌리, 말)`(`store` 의 `MISSED`).
+    pub missed: Vec<(PathBuf, String)>,
+    /// 쓰기는 담겼고 덧붙일 말 — `(뿌리, 말)`(`store` 의 `NOTED`).
+    pub noted: Vec<(PathBuf, String)>,
+    /// 딸린 워크트리에서 루트의 트래커로 옮겨 쓴 자리 — `(선 자리, 쓴 트래커)`(`store` 의 `MOVED`).
+    pub moved: Vec<(PathBuf, PathBuf)>,
 }
 
 /// 걸어 두는 값 — 요청 안에서 띄운 실이 함께 쓰므로 `Arc<Mutex<…>>` 다.
