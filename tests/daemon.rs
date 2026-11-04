@@ -612,6 +612,17 @@ fn an_unknown_key_a_bad_lang_tz_or_value_is_invalid_params() {
     assert_eq!(limit["error"]["code"], -32602, "{limit}");
     let shape = wire.call(7, "show", json!({ "project": project, "tree": "yes" }));
     assert_eq!(shape["error"]["code"], -32602, "{shape}");
+    // 환경 키도 글이 아니면 거절한다 — 말없이 빠지면 데몬의 사람·말로 답한다.
+    let who = wire.call(9, "ready", json!({ "project": project, "actor": { "name": "Kim", "email": "k@x" } }));
+    assert_eq!(who["error"]["code"], -32602, "{who}");
+    assert!(who["error"]["message"].as_str().unwrap().contains("actor"), "{who}");
+    let lang_shape = wire.call(10, "changes", json!({ "project": project, "lang": ["ko"] }));
+    assert_eq!(lang_shape["error"]["code"], -32602, "{lang_shape}");
+    // 열거형은 CLI 처럼 글자 크기를 가린다. 위 끝을 넘은 값은 그 끝을 댄다.
+    let axis = wire.call(11, "stats", json!({ "project": project, "by": "STATUS" }));
+    assert_eq!(axis["error"]["code"], -32602, "{axis}");
+    let last = wire.call(12, "stats", json!({ "project": project, "last": 1001 }));
+    assert!(last["error"]["message"].as_str().unwrap().contains("1000"), "{last}");
     // 좋은 lang 은 화면 말을 바꾼다.
     let ko = wire.call(8, "status", json!({ "project": project, "lang": "ko" }));
     assert!(ko["result"]["value"].is_object() || ko["result"]["value"].is_array(), "{ko}");

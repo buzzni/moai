@@ -64,7 +64,7 @@ pub fn register(methods: &mut Methods) {
 }
 
 /// `changes` — 커서 뒤로 바뀐 id(moai-5n6m.cb9). 같은 봉투에 싼다: 클라이언트가 어느 메서드든 `result.value` 를
-/// 벗겨 읽게 두려는 것이다. CLI 의 stderr 줄도 덜 받은 답도 없으니 `messages` 는 비고 `partial` 은 거짓이다.
+/// 벗겨 읽게 두려는 것이다. `messages`·`partial` 은 읽다가 만난 못 읽는 줄·저널이다(`changes::poll`).
 /// 읽는 규칙(커서·`reset`)은 `changes::handle` 에 있다.
 fn changes(env: &RequestEnv, params: Value) -> Result<Value, RpcError> {
     let mut p = Params::new("changes", params)?;
@@ -74,8 +74,7 @@ fn changes(env: &RequestEnv, params: Value) -> Result<Value, RpcError> {
     let lang = project::lang(env, &reg)?;
     project::zone(env)?;
     let root = project::resolve(env, lang, &reg)?;
-    let value = super::changes::handle(&root, &json!({ "cursor": cursor }))?;
-    Ok(json!({ "value": value, "messages": [], "partial": false }))
+    super::changes::handle(&root, lang, &json!({ "cursor": cursor }))
 }
 
 /// 한 메서드의 한 요청. 차례: 필드 읽기(`-32602`) → 말·시간대(`-32602`) → 프로젝트(`-32602`·`-32000`) → 돌리기.
@@ -94,11 +93,15 @@ fn serve(
     let zone = project::zone(env)?;
     let root = match needs_project {
         true => project::resolve(env, lang, &reg)?,
-        // `project.ls` 는 자리를 안 쓴다 — 설정을 읽을 뿐이다.
-        false => std::path::PathBuf::new(),
+        // `project.ls` 는 자리를 안 쓴다 — 설정을 읽을 뿐이다. 그래도 빈 자리는 두지 않는다: `side::cwd()` 가 `""` 를 내면
+        // 그것을 잇거나 올라가는 길이 데몬이 선 자리에 기대 상대 경로를 댄다. CLI 의 `moai project ls` 가 데몬이 선
+        // 자리에서 친 것과 같게 그 자리를 절대 경로로 준다.
+        false => std::env::current_dir().unwrap_or_default(),
     };
     let lang_asked = env.lang.is_some().then_some(lang);
-    let answer = request::read(Request { root, read, actor: env.actor.clone(), lang: lang_asked, zone });
+    // 푼 설정을 그대로 넘긴다 — 명령이 `Ctx::registry` 로 같은 파일을 다시 파지 않게.
+    let answer =
+        request::read(Request { root, read, actor: env.actor.clone(), lang: lang_asked, zone, reg: Some(reg) });
     match answer.out {
         Ok(lines) => {
             let mut values = Vec::with_capacity(lines.len());
@@ -146,10 +149,11 @@ fn show(p: &mut Params) -> Result<Read, RpcError> {
 fn stats(p: &mut Params) -> Result<Read, RpcError> {
     let mut by = Vec::new();
     for word in p.strings("by")?.iter().flat_map(|s| split(s)) {
-        by.push(AxisArg::from_str(&word, true).map_err(|_| p.bad("by", format!("unknown axis {word:?}")))?);
+        // 글자 크기를 가린다 — clap 의 `value_enum` 이 그렇다(`--by STATUS` 는 CLI 에서 거절이다).
+        by.push(AxisArg::from_str(&word, false).map_err(|_| p.bad("by", format!("unknown axis {word:?}")))?);
     }
     let bucket = match p.string("bucket")? {
-        Some(word) => Some(BucketArg::from_str(&word, true).map_err(|_| p.bad("bucket", "use \"day\" or \"week\""))?),
+        Some(word) => Some(BucketArg::from_str(&word, false).map_err(|_| p.bad("bucket", "use \"day\" or \"week\""))?),
         None => None,
     };
     Ok(Read::Stats(Box::new(StatsArgs { by, bucket, last: p.count("last", 1, 1000)?, filter: filter(p)? })))
@@ -199,9 +203,14 @@ impl Params {
             Value::Object(map) => map,
             _ => return Err(RpcError::invalid_params(format!("{method}: params must be an object"))),
         };
-        // 모든 메서드가 아는 키 — 값은 `RequestEnv` 가 읽는다.
+        // 모든 메서드가 아는 키 — 값은 `RequestEnv` 가 읽는다. **글이 아니면 거절한다** — `RequestEnv` 는 글만 읽어,
+        // `actor: {name, email}` 이 말없이 빠지면 그 요청은 데몬의 `MOAI_ACTOR`·git 의 사람으로 내 것과 남의 것을 가른다.
         for key in ["project", "actor", "lang", "tz"] {
-            map.remove(key);
+            if let Some(v) = map.remove(key)
+                && !matches!(v, Value::String(_) | Value::Null)
+            {
+                return Err(RpcError::invalid_params(format!("{method}: params.{key}: must be a string")));
+            }
         }
         Ok(Params { method: method.to_string(), map })
     }
@@ -264,7 +273,8 @@ impl Params {
         match self.int(key)? {
             None => Ok(None),
             Some(n) if (min..=max).contains(&n) => Ok(Some(n as usize)),
-            Some(n) => Err(self.bad(key, format!("{n} is out of range (at least {min})"))),
+            Some(n) if max == i64::MAX => Err(self.bad(key, format!("{n} is out of range (at least {min})"))),
+            Some(n) => Err(self.bad(key, format!("{n} is out of range ({min} to {max})"))),
         }
     }
 }
