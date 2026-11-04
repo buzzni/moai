@@ -12,6 +12,7 @@ mod cli;
 mod cmd;
 pub mod config;
 mod ctl;
+mod daemon;
 mod draft;
 pub mod fail;
 mod git;
