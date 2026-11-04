@@ -165,9 +165,9 @@ the closure returns. The rest is the closure's job, as it is in each command:
 
 **There is no version promise.** The public surface follows the internal code: a
 refactor may rename, move or close any of it, and the version number does not change
-for that. `CHANGELOG.md` lists what a person using the binary sees. A third-party tool
-integrates through the CLI's `--json` output today, and through the API a later daemon
-will serve. It does not link this crate.
+for that. `CHANGELOG.md` announced the library once and otherwise lists what a person
+using the binary sees. A third-party tool integrates through the CLI's `--json` output
+today, and through the API a later daemon will serve. It does not link this crate.
 
 **It is not safe in a long-running process yet.** The library was cut out of a binary
 that runs one command and exits, and it still depends on that. These are the places we
@@ -178,7 +178,8 @@ know of. The list is not complete:
   then the process exits. Nothing empties them. In a process that serves many requests,
   they only grow, and the notices of one request come back with every later one.
 - `INVOKED`, the directory the first call started in, is a `OnceLock`. `run()` sets it
-  once, and the pick-up marks of every later write use it.
+  once, and the pick-up marks of every later write use it. Without `run()` it stays
+  empty, and a write marks the linked worktree the `Repo` was opened from, if any.
 - `src/cmd/mod.rs` keeps `PARTIAL` and `EXIT` in process-wide statics. Only `init`
   resets `PARTIAL`, and nothing resets `EXIT`, so after one partial run every later
   `run()` ends in failure. `cmd::run` empties `AFTER` after each command, but two
@@ -188,8 +189,9 @@ know of. The list is not complete:
 - The working directory belongs to the process. `-C <dir>` and the hook (the `cwd` in
   its input) call `std::env::set_current_dir`, and `Repo::find` reads
   `std::env::current_dir`. Every thread moves with it.
-- `Repo::find_from` and `Repo::open` read `MOAI_HERE`, and the time-zone code reads
-  `TZDIR`. A caller cannot give these per call, and in edition 2024
+- `Repo::find_from` and `Repo::open` read `MOAI_HERE`, `model::now` reads `MOAI_NOW`,
+  `model::actor` reads `MOAI_ACTOR` (then `git config`), and the time-zone code reads
+  `TZ` and `TZDIR`. A caller cannot give these per call, and in edition 2024
   `std::env::set_var` is `unsafe`.
 - `run()` and the hook set anstream's color choice for the whole process.
   `style::paint` always writes escape codes, and only anstream streams remove them.
@@ -240,6 +242,8 @@ scripts/check-refactor.py --base "$base" --head <last gated commit> --mode surfa
     pass again: the `src/main.rs` it compares against is now the seven-line shim.
   - `surface` (epic `moai-50p5`) accepts `mod x;` → `pub mod x;` in `src/lib.rs`,
     `pub(crate)` → `pub`, a new `tests/lib_api.rs` and edits to `CONTRIBUTING.md`.
+  - `moai show` finds neither epic: PR #72 dropped its tracker rows before the merge.
+    `git show 468080df^:.moai/issues.jsonl` still holds them and their members.
 - A commit that changes only comments does not pass `surface`. Give `--head` the last
   commit before it, and check that commit apart: every `+` and `-` line of `git diff -U0`
   is a comment, each file keeps its line count (a panic message carries its line
