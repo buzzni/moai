@@ -175,6 +175,13 @@ pub fn refusal(error: &RpcError) -> String {
     failure(&Value::Null, error)
 }
 
+/// 요청 줄의 `method` — 객체가 아니거나 이름이 글이 아니면 `None`. 전송이 줄을 돌리기 전에 메서드를 가려야 할 때
+/// (상한에 찬 데몬의 수명 길) 쓴다. 판단은 거기까지다 — 요청이 맞는지는 [`Methods::handle`] 이 본다.
+pub fn method_of(line: &[u8]) -> Option<String> {
+    let value: Value = serde_json::from_slice(line).ok()?;
+    Some(value.get("method")?.as_str()?.to_string())
+}
+
 /// 상한을 넘은 줄의 답. [`read_line`] 이 `Line::TooLong` 을 낸 자리와 [`Methods::handle`] 이 같은 글로 답한다.
 pub fn too_long() -> String {
     refusal(&RpcError::new(code::INVALID_REQUEST, "request line exceeds 1 MiB"))

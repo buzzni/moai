@@ -192,6 +192,75 @@ fn start_status_hello_ping_and_stop() {
     assert_eq!(again["stopped"], false, "{again}");
 }
 
+/// 연결을 새는 클라이언트가 상한(32)을 다 쥐어도 `status` 가 pid 를 대고 `stop` 이 데몬을 멈춘다(moai-uezh). 상한을
+/// 넘은 연결에서는 `hello`·`daemon.shutdown` 만 돌고 나머지는 `busy` 와 pid 로 거절된다.
+#[test]
+fn a_daemon_at_its_connection_cap_still_answers_status_and_stops() {
+    let f = Fence::new();
+    let (daemon, first) = f.start();
+    let pid = first["pid"].as_u64().unwrap();
+    // 하나하나 답을 받아 둔다 — 그러면 서른둘 모두 연결 스레드에 들어 상한을 센 뒤다.
+    let held: Vec<Wire> = (0..32)
+        .map(|n| {
+            let mut wire = Wire::open(&f.socket());
+            assert_eq!(wire.call(n, "ping", json!({}))["result"], json!({}), "{n}번째 연결");
+            wire
+        })
+        .collect();
+    let mut over = Wire::open(&f.socket());
+    let refused = over.call(99, "ping", json!({}));
+    assert_eq!(refused["error"]["data"]["code"], "busy", "상한을 넘은 ping 이 돌았다 — {refused}");
+    assert_eq!(refused["error"]["data"]["pid"], pid, "{refused}");
+
+    let status = f.json(&["daemon", "status", "--json"]);
+    assert_eq!(status["running"], true, "{status}");
+    assert_eq!(status["pid"], pid, "{status}");
+    let again = f.json(&["daemon", "start", "--json"]);
+    assert_eq!(again["started"], false, "{again}");
+    let stopped = f.json(&["daemon", "stop", "--json"]);
+    assert_eq!(stopped["stopped"], true, "{stopped}");
+    assert_eq!(stopped["pid"], pid, "{stopped}");
+    assert!(daemon.wait().success(), "멈춘 데몬이 0 으로 끝나지 않았다");
+    assert!(!f.socket().exists(), "멈춘 데몬이 소켓을 남겼다");
+    drop(held);
+}
+
+/// 상한을 넘은 연결의 수명 길(넷)마저 말없는 연결이 쥐면 `hello` 도 못 받는다 — 그때 `status` 는 `busy` 로 넘어지되
+/// 데몬의 pid 를 댄다. 수명 길은 2초 안에 말이 없는 연결을 닫으니, 그 뒤에는 다시 닿는다(moai-uezh).
+#[test]
+fn a_daemon_too_full_even_for_hello_is_named_by_pid_and_frees_up() {
+    let f = Fence::new();
+    let (daemon, first) = f.start();
+    let pid = first["pid"].as_u64().unwrap();
+    let held: Vec<Wire> = (0..32)
+        .map(|n| {
+            let mut wire = Wire::open(&f.socket());
+            assert_eq!(wire.call(n, "ping", json!({}))["result"], json!({}), "{n}번째 연결");
+            wire
+        })
+        .collect();
+    // 받는 스레드는 붙은 차례로 받는다 — 말없는 넷이 수명 길을 먼저 쥐고, 다섯째는 곧바로 거절된다.
+    let silent: Vec<UnixStream> = (0..4).map(|_| UnixStream::connect(f.socket()).unwrap()).collect();
+    // 데몬은 요청을 안 읽고 거절을 쓰고 닫는다 — 그 닫기가 먼저면 이쪽 쓰기가 끊기니, 쓰기는 넘기고 답을 읽는다.
+    let mut fifth = Wire::open(&f.socket());
+    let _ = fifth.writer.write_all(b"{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"hello\",\"params\":{\"proto\":1}}\n");
+    let mut line = String::new();
+    fifth.reader.read_line(&mut line).unwrap();
+    let refused: Value =
+        serde_json::from_str(&line).unwrap_or_else(|e| panic!("거절이 JSON 이 아니다: {e} — {line:?}"));
+    assert_eq!(refused["error"]["data"]["code"], "busy", "수명 길이 찼는데 hello 가 돌았다 — {refused}");
+    assert_eq!(refused["error"]["data"]["pid"], pid, "{refused}");
+    let error = f.refused(&["daemon", "status", "--json"]);
+    assert_eq!(error["code"], "busy", "{error}");
+    assert!(error.to_string().contains(&format!("pid {pid}")), "거절이 pid 를 안 댄다 — {error}");
+    // 말없는 넷은 시한(2초)에 닫힌다 — 그 뒤 stop 이 닿는다.
+    std::thread::sleep(Duration::from_millis(2500));
+    let stopped = f.json(&["daemon", "stop", "--json"]);
+    assert_eq!(stopped["pid"], pid, "{stopped}");
+    assert!(daemon.wait().success(), "멈춘 데몬이 0 으로 끝나지 않았다");
+    drop((held, silent));
+}
+
 /// 멈추는 답을 쓴 연결은 제 소켓에 붙어 받는 스레드를 깨운다 — 그 파일이 지워졌으면 붙기가 실패한다. 그래도 받는
 /// 스레드는 제 간격(`TICK`)마다 `stop` 을 보아 그친다(moai-uezh). 파일이 없으니 `moai daemon stop` 은 데몬을
 /// 못 찾는다 — 멈추는 길은 이미 열린 연결로 보내는 `daemon.shutdown` 이다.

@@ -5,6 +5,12 @@
 //! 다시 쓰지 않는다. 그래서 요청 하나가 도는 스레드에서 다른 요청이 도는 일이 없고, 한 요청이 스레드에 남긴 것은
 //! 그 연결 밖으로 새지 않는다. 라이브러리가 요청마다 스레드 하나를 요구해도(moai-5n6m.m0b) 이 자리가 그것을 진다.
 //!
+//! **상한에 차도 멈출 수 있다**(moai-uezh). [`MAX_CONNECTIONS`] 를 넘은 연결은 곧바로 거절하지 않고 수명 길
+//! ([`LIFECYCLE`], [`LIFECYCLE_SLOTS`] 개)로 보낸다 — 새 스레드 하나가 짧은 시한([`LIFECYCLE_WAIT`]) 안에 줄 하나를
+//! 읽어 `hello` 나 [`super::SHUTDOWN`] 이면 돌리고, 다른 메서드면 `busy` 로 거절하고 닫는다. 연결을 새는 클라이언트가
+//! 상한을 다 쥐어도 `moai daemon status·stop·start` 가 데몬에 닿는다. 그 길도 새 스레드라 위의 약속은 그대로다.
+//! 그 길마저 차면 받는 스레드가 `busy` 한 줄을 쓰고 닫는다. 두 거절의 `data` 에는 `pid` 가 실린다.
+//!
 //! 사용자당 하나는 자물쇠 파일(`daemon.lock` 의 `flock`, `fs2`)이 지킨다. 데몬은 섬기는 내내 그것을 쥐고, 프로세스가
 //! 죽으면 커널이 놓는다 — 그래서 자물쇠를 쥔 쪽이 본 소켓은 죽은 데몬의 것이다. 쥐지 않고 "붙어 보고 지우기"
 //! 만 하면, 둘이 동시에 뜰 때 늦은 쪽이 먼저 뜬 쪽의 새 소켓을 지운다.
@@ -18,8 +24,14 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
-/// 동시에 여는 연결의 상한. 넘으면 오류 한 줄(`data.code` 가 `busy`)을 주고 닫는다.
+/// 동시에 여는 연결의 상한. 넘은 연결은 수명 길([`LIFECYCLE`])로 간다.
 pub const MAX_CONNECTIONS: usize = 32;
+/// 상한을 넘어서도 섬기는 메서드 — 데몬을 찾고(`hello`) 멈추는(`daemon.shutdown`) 것. 둘 다 곧바로 답한다.
+const LIFECYCLE: &[&str] = &["hello", super::SHUTDOWN];
+/// 상한을 넘은 연결을 동시에 몇 개까지 수명 길로 받나. 넘으면 `busy` 한 줄을 쓰고 닫는다.
+const LIFECYCLE_SLOTS: usize = 4;
+/// 수명 길의 읽기·쓰기 시한 — 붙어서 말이 없는 연결이 그 자리를 오래 쥐지 않게. `client::TIMEOUT` 과 같은 값이다.
+const LIFECYCLE_WAIT: Duration = Duration::from_secs(2);
 /// 아무 말 없는 연결을 닫는 시한 — 잊힌 연결이 상한을 다 채우지 않게.
 const IDLE: Duration = Duration::from_secs(600);
 /// 답을 쓰는 시한 — 안 읽는 쪽에 스레드가 묶이지 않게.
@@ -102,6 +114,7 @@ pub fn serve(bound: Bound, mut methods: Methods) -> std::io::Result<()> {
     });
     let methods = Arc::new(methods);
     let open = Arc::new(AtomicUsize::new(0));
+    let lane = Arc::new(AtomicUsize::new(0));
     let busy = Arc::new(AtomicUsize::new(0));
     let path = Arc::new(bound.path.clone());
     while !stop.load(Ordering::Acquire) {
@@ -121,21 +134,28 @@ pub fn serve(bound: Bound, mut methods: Methods) -> std::io::Result<()> {
             std::thread::sleep(Duration::from_millis(100));
             continue;
         };
-        if open.fetch_add(1, Ordering::AcqRel) >= MAX_CONNECTIONS {
-            open.fetch_sub(1, Ordering::AcqRel);
-            // 받는 스레드는 거절을 읽어 가기를 기다리지 않는다.
-            let _ = stream.set_nonblocking(true);
-            let refusal = rpc::refusal(&RpcError::moai(crate::fail::code::BUSY, "too many connections to the daemon"));
-            let _ = writeln!(stream, "{refusal}");
-            continue;
-        }
-        let leave = Leave(Arc::clone(&open));
+        // 상한 안이면 보통 연결, 넘었으면 수명 길, 그것도 찼으면 거절이다.
+        let seat = Leave::enter(&open, MAX_CONNECTIONS)
+            .map(|leave| (leave, false))
+            .or_else(|| Leave::enter(&lane, LIFECYCLE_SLOTS).map(|leave| (leave, true)));
+        let (leave, full) = match seat {
+            Some(seat) => seat,
+            None => {
+                // 받는 스레드는 거절을 읽어 가기를 기다리지 않는다.
+                let _ = stream.set_nonblocking(true);
+                let _ = writeln!(stream, "{}", refusal("too many connections to the daemon"));
+                continue;
+            }
+        };
         let (methods, stop, path, busy) =
             (Arc::clone(&methods), Arc::clone(&stop), Arc::clone(&path), Arc::clone(&busy));
         // 띄우지 못하면 닫힌 클로저가 `leave` 를 놓아 수가 돌아온다.
         let _ = std::thread::Builder::new().name("moai-daemon-conn".into()).spawn(move || {
             let _leave = leave;
-            connection(stream, &methods, &stop, &path, &busy);
+            match full {
+                false => connection(stream, &methods, &stop, &path, &busy),
+                true => lifecycle(stream, &methods, &stop, &path, &busy),
+            }
         });
     }
     // 돌던 요청은 끝나게 둔다 — 말없이 기다리는 연결은 기다리지 않는다.
@@ -166,7 +186,26 @@ fn pending(listener: &UnixListener, wait: Duration) -> std::io::Result<bool> {
     }
 }
 
+/// 상한에 찬 데몬의 거절 — `data.code` 는 `busy`, `data.pid` 는 이 데몬이다. `id` 는 읽기 전이라 모른다(null).
+fn refusal(why: &str) -> String {
+    let mut error = RpcError::moai(crate::fail::code::BUSY, why);
+    error.data = Some(json!({ "code": crate::fail::code::BUSY, "pid": std::process::id() }));
+    rpc::refusal(&error)
+}
+
+/// 센 자리 하나 — 떨어지면 수를 돌려놓는다.
 struct Leave(Arc<AtomicUsize>);
+
+impl Leave {
+    /// `count` 가 `cap` 밑이면 하나를 세고 자리를 준다. 찼으면 세지 않고 `None`.
+    fn enter(count: &Arc<AtomicUsize>, cap: usize) -> Option<Leave> {
+        if count.fetch_add(1, Ordering::AcqRel) >= cap {
+            count.fetch_sub(1, Ordering::AcqRel);
+            return None;
+        }
+        Some(Leave(Arc::clone(count)))
+    }
+}
 impl Drop for Leave {
     fn drop(&mut self) {
         self.0.fetch_sub(1, Ordering::AcqRel);
@@ -189,6 +228,39 @@ impl Drop for Running<'_> {
     fn drop(&mut self) {
         self.0.fetch_sub(1, Ordering::AcqRel);
     }
+}
+
+/// 상한을 넘은 연결 하나 — 줄 하나만 읽어 [`LIFECYCLE`] 의 메서드면 돌리고, 아니면 `busy` 로 거절하고 닫는다.
+/// 어느 쪽이든 그 연결의 다음 줄은 안 읽는다.
+fn lifecycle(stream: UnixStream, methods: &Methods, stop: &AtomicBool, path: &Path, busy: &AtomicUsize) {
+    if stream.set_read_timeout(Some(LIFECYCLE_WAIT)).is_err() || stream.set_write_timeout(Some(LIFECYCLE_WAIT)).is_err()
+    {
+        return;
+    }
+    let Ok(read_half) = stream.try_clone() else { return };
+    let mut reader = BufReader::new(read_half);
+    let mut writer = stream;
+    let (reply, running) = match rpc::read_line(&mut reader) {
+        Ok(rpc::Line::Eof) | Err(_) => return,
+        Ok(rpc::Line::Text(line)) if rpc::method_of(&line).is_some_and(|m| LIFECYCLE.contains(&m.as_str())) => {
+            let running = Running::start(busy);
+            (methods.handle(&line), Some(running))
+        }
+        Ok(_) => (Some(refusal("too many connections to the daemon; only hello and daemon.shutdown are served")), None),
+    };
+    if let Some(reply) = reply {
+        let _ = writeln!(writer, "{reply}").and_then(|()| writer.flush());
+    }
+    drop(running);
+    if stop.load(Ordering::Acquire) {
+        wake(path);
+    }
+}
+
+/// 받는 스레드를 곧바로 깨운다 — 제 소켓에 한 번 붙는다. 붙기가 실패해도(소켓 파일이 지워졌다) 받는 스레드는
+/// [`TICK`] 안에 스스로 `stop` 을 본다.
+fn wake(path: &Path) {
+    let _ = UnixStream::connect(path);
 }
 
 /// 연결 하나 — 줄을 읽고, 돌리고, 답을 쓰고, 다음 줄을 읽는다. 앞 요청의 답을 쓰기 전에는 다음 줄을 안 읽는다.
@@ -216,9 +288,7 @@ fn connection(stream: UnixStream, methods: &Methods, stop: &AtomicBool, path: &P
         }
         drop(running);
         if stop.load(Ordering::Acquire) {
-            // 받기를 곧바로 깨운다 — 그 스레드가 `stop` 을 보고 그친다. 붙기가 실패해도(소켓 파일이 지워졌다)
-            // 받는 스레드는 [`TICK`] 안에 스스로 `stop` 을 본다.
-            let _ = UnixStream::connect(path);
+            wake(path);
             return;
         }
     }

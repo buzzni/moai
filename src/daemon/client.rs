@@ -44,8 +44,9 @@ pub enum Probe {
     Dead,
     /// 데몬이 답했다. 이 바이너리가 말하는 `proto` 를 거절한 옛 데몬도 여기다 — 거절에 실린 판으로 선다.
     Running(Hello),
-    /// 데몬이 연결 상한에 찼다고 답했다.
-    Busy,
+    /// 데몬이 연결 상한에 차서 `hello` 도 못 받았다 — 상한을 넘은 연결의 수명 길(`server::LIFECYCLE`)마저 찼다.
+    /// 거절에 실린 `pid` 를 든다(옛 판은 안 싣는다).
+    Busy(Option<u32>),
     /// 무언가 받았지만 데몬의 말로 답하지 않았다.
     Foreign(String),
 }
@@ -64,7 +65,9 @@ pub fn probe(path: &Path) -> Probe {
         Ok(Err(error)) => {
             let data = error.data.clone().unwrap_or(Value::Null);
             match data.get("code").and_then(Value::as_str) {
-                Some(code) if code == crate::fail::code::BUSY => Probe::Busy,
+                Some(code) if code == crate::fail::code::BUSY => {
+                    Probe::Busy(data.get("pid").and_then(Value::as_u64).and_then(|p| u32::try_from(p).ok()))
+                }
                 Some("unsupported_proto") => Hello::of(&data).map_or(Probe::Foreign(error.message), Probe::Running),
                 _ => Probe::Foreign(error.message),
             }
