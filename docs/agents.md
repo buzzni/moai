@@ -612,6 +612,8 @@ the person's control; [Control an open window](ctl.md) explains its verbs,
 suggestions, and read-mark rules. Tracker column moves and notes still use
 `moai mv` and `moai note`.
 
+A third-party program that needs to read the tracker often can use the local read API instead of running the CLI each time; see [Read the tracker through the daemon](daemon.md).
+
 When you ask to watch the workers' windows, and for a Codex worker, the workers
 are sessions. The supervisor talks to them with Claude Code's own tools —
 `ListAgents` to see who is here, `SendMessage` to hand over work and to report
