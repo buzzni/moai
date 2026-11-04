@@ -1237,3 +1237,31 @@ fn a_write_from_nobody_known_is_no_actor_whatever_the_daemon_was_started_with() 
     let named = wrote(&mut wire, &root, 9, "note", json!({ "id": alpha, "text": "me", "actor": ACTOR }));
     assert_eq!(named["value"]["by_email"], "tester@example.com", "{named}");
 }
+
+/// **링크 철자로 걸어 둔 프로젝트도 CLI 와 같은 자리를 댄다**(moai-3hgm.k7s) — `-C <링크>` 의 CLI 는 물리 경로에 서서
+/// 그 뿌리를 말에 댄다. 데몬이 설정의 철자를 그대로 쓰면 같은 쓰기의 말이 링크를 댄다. 남의 줄을 집는 `mv` 의 말이
+/// 뿌리를 댄다(`moai -C <뿌리> mv … --take`).
+#[test]
+fn a_project_registered_through_a_symlink_names_the_root_the_cli_names() {
+    let f = Fence::new();
+    let root = f.project("proj");
+    let link = f.0.join("proj-link");
+    std::os::unix::fs::symlink(&root, &link).unwrap();
+    std::fs::write(f.0.join("config.toml"), format!("[[project]]\npath = {:?}\n", link.to_str().unwrap())).unwrap();
+    let theirs = |n: &str| {
+        let out =
+            f.run(&["-C", root.to_str().unwrap(), "add", n, "--user", ACTOR, "-a", "Lee (lee@example.com)", "-q"]);
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        String::from_utf8(out.stdout).unwrap().trim().to_string()
+    };
+    let (one, two) = (theirs("one"), theirs("two"));
+    let (_daemon, mut wire) = served(&f);
+
+    let got = wrote(&mut wire, &link, 1, "mv", json!({ "actor": ACTOR, "id": one, "to": "in_progress" }));
+    let out = cli_with(&f, &link, &["mv", &two, "in_progress"], &[]);
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let said = String::from_utf8_lossy(&out.stderr).replace(&two, &one);
+    let messages: Vec<&str> = got["messages"].as_array().unwrap().iter().map(|m| m.as_str().unwrap()).collect();
+    assert_eq!(messages, said.lines().collect::<Vec<_>>(), "링크로 걸어 둔 프로젝트의 말이 CLI 와 다르다");
+    assert!(said.contains(root.to_str().unwrap()), "CLI 가 물리 경로를 안 댔다 — 견줄 거리가 없다: {said}");
+}

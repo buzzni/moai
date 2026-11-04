@@ -38,6 +38,10 @@ pub fn zone(env: &RequestEnv) -> Result<Option<crate::tz::Zone>, RpcError> {
 ///
 /// 걸어 둔 항목에는 이름이 없다(`project ls` 의 이름은 경로에서 파생한 값이라 겹칠 수 있다) — 그래서 **경로로만**
 /// 가린다. 설정은 요청마다 다시 읽는다 — 데몬이 도는 동안 `moai project add` 한 것이 바로 선다.
+///
+/// **돌려주는 자리는 링크를 푼 것이다**(moai-3hgm.k7s) — CLI 의 `-C <자리>` 는 그리로 옮겨 선 뒤 커널이 주는 물리
+/// 경로(`current_dir`)에서 트래커를 찾으므로, 말에 대는 뿌리가 그 철자다. `project add` 는 푼 경로를 적지만 손으로
+/// 고친 설정에는 링크 철자가 설 수 있다 — 그대로 넘기면 같은 요청의 말이 CLI 와 다른 자리를 댄다.
 pub fn resolve(
     env: &RequestEnv,
     lang: crate::i18n::Lang,
@@ -57,7 +61,7 @@ pub fn resolve(
         crate::store::Spot::Absent => {
             Err(RpcError::moai(code::NOT_A_PROJECT, fill(say(lang, "web.not_a_project"), &[("path", value)])))
         }
-        _ => Ok(dir.clone()),
+        _ => Ok(crate::path::canonical(dir).unwrap_or_else(|_| dir.clone())),
     }
 }
 
