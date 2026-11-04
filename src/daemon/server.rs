@@ -94,7 +94,8 @@ pub fn bind(path: &Path) -> std::io::Result<Bound> {
 pub fn serve(bound: Bound, mut methods: Methods) -> std::io::Result<()> {
     let stop = Arc::new(AtomicBool::new(false));
     let flag = Arc::clone(&stop);
-    // 답을 쓴 뒤에 받기를 깨운다(`connection`) — 여기서 깨우면 답이 나가기 전에 프로세스가 끝날 수 있다.
+    // 답을 쓴 뒤에 받기를 깨운다(`connection`) — 여기서 깨우면 답이 나가기 전에 프로세스가 끝날 수 있다. 받는
+    // 스레드가 `TICK` 에 먼저 깨어도 답을 쓰기까지는 `Running` 이 세어 두어 `DRAIN` 이 기다린다.
     methods.register(super::SHUTDOWN, move |_, _| {
         flag.store(true, Ordering::Release);
         Ok(json!({ "pid": std::process::id() }))
@@ -172,6 +173,24 @@ impl Drop for Leave {
     }
 }
 
+/// 돌고 있는 요청 하나 — 처리 함수에 들기 전에 세고, **답을 쓴 뒤에** 놓는다. 멈추는 데몬은 이 수가 0 이 되기를
+/// 기다리니(`DRAIN`), `daemon.shutdown` 의 답이 나가기 전에 받는 스레드가 `stop` 을 보아도(`TICK`) 프로세스가
+/// 그 답보다 먼저 끝나지 않는다.
+struct Running<'a>(&'a AtomicUsize);
+
+impl<'a> Running<'a> {
+    fn start(busy: &'a AtomicUsize) -> Running<'a> {
+        busy.fetch_add(1, Ordering::AcqRel);
+        Running(busy)
+    }
+}
+
+impl Drop for Running<'_> {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::AcqRel);
+    }
+}
+
 /// 연결 하나 — 줄을 읽고, 돌리고, 답을 쓰고, 다음 줄을 읽는다. 앞 요청의 답을 쓰기 전에는 다음 줄을 안 읽는다.
 fn connection(stream: UnixStream, methods: &Methods, stop: &AtomicBool, path: &Path, busy: &AtomicUsize) {
     if stream.set_read_timeout(Some(IDLE)).is_err() || stream.set_write_timeout(Some(WRITE)).is_err() {
@@ -181,15 +200,13 @@ fn connection(stream: UnixStream, methods: &Methods, stop: &AtomicBool, path: &P
     let mut reader = BufReader::new(read_half);
     let mut writer = stream;
     loop {
-        let reply = match rpc::read_line(&mut reader) {
+        let (reply, running) = match rpc::read_line(&mut reader) {
             Ok(rpc::Line::Eof) | Err(_) => return,
             // 상한을 넘은 줄은 이미 버렸다 — 거절하고 이 연결로 다음 줄을 받는다.
-            Ok(rpc::Line::TooLong) => Some(rpc::too_long()),
+            Ok(rpc::Line::TooLong) => (Some(rpc::too_long()), None),
             Ok(rpc::Line::Text(line)) => {
-                busy.fetch_add(1, Ordering::AcqRel);
-                let reply = methods.handle(&line);
-                busy.fetch_sub(1, Ordering::AcqRel);
-                reply
+                let running = Running::start(busy);
+                (methods.handle(&line), Some(running))
             }
         };
         if let Some(reply) = reply
@@ -197,6 +214,7 @@ fn connection(stream: UnixStream, methods: &Methods, stop: &AtomicBool, path: &P
         {
             return;
         }
+        drop(running);
         if stop.load(Ordering::Acquire) {
             // 받기를 곧바로 깨운다 — 그 스레드가 `stop` 을 보고 그친다. 붙기가 실패해도(소켓 파일이 지워졌다)
             // 받는 스레드는 [`TICK`] 안에 스스로 `stop` 을 본다.
