@@ -102,13 +102,11 @@ fn edit_and_show_agree_on_blocker_members_in_each_live_state() {
         }
         repo.write(".moai/issues.jsonl", &live);
         repo.write(".moai/archive/2026.jsonl", &format!("{archived}\n"));
-        if state == "opaque" {
-            let edited = text(repo.run(&["edit", "argos-xxxx", "--title", "renamed"]));
-            let blocker = edited.lines().find(|l| l.contains("argos-bbbb")).unwrap_or_default();
-            assert!(!blocker.contains('✓'), "opaque live member must suppress its archived copy: {edited}");
-            continue;
+        let output = repo.run(&["show", "argos-xxxx"]);
+        if state != "opaque" {
+            assert!(output.status.success());
         }
-        let shown = text(repo.run(&["show", "argos-xxxx"]));
+        let shown = String::from_utf8(output.stdout).unwrap();
         let edited = text(repo.run(&["edit", "argos-xxxx", "--title", "renamed"]));
         let line = |out: &str| out.lines().find(|l| l.contains("argos-bbbb")).unwrap_or_default().to_owned();
         assert!(!line(&shown).is_empty(), "{state}: {shown}");
@@ -116,8 +114,18 @@ fn edit_and_show_agree_on_blocker_members_in_each_live_state() {
         if state == "done" {
             assert!(line(&shown).contains('✓'), "{shown}");
         }
-        if state == "reopened" {
+        if state == "reopened" || state == "opaque" {
             assert!(!line(&shown).contains('✓'), "{shown}");
+        }
+        if state == "opaque" {
+            let status = repo.run(&["status", "--json"]);
+            let status: serde_json::Value = serde_json::from_slice(&status.stdout).unwrap();
+            assert_eq!(status["epics"][0]["derived_status"], "todo", "{status}");
+            assert!(
+                status["warnings"].as_array().unwrap().iter().any(|w| w["kind"] == "blocked_stale"
+                    && w["ids"].as_array().unwrap().iter().any(|id| id == "argos-xxxx")),
+                "{status}"
+            );
         }
     }
 }

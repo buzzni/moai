@@ -270,8 +270,10 @@ fn listed(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>, keys: &Keys) -> 
     let crate::worktree::Gathered { load: active_load, origin, .. } =
         super::gather(ctx, &repo, args.worktree.worktree)?;
     // 산 줄의 id — 읽힌 줄과, 못 읽어도 id 를 대는 줄. 이것 밖의 줄은 아카이브 파일에서만 왔다(`Where::stored`).
+    let opaque = active_load.reserved_ids();
+    let active_rows = (!opaque.is_empty()).then(|| active_load.issues.clone());
     let live: std::collections::BTreeSet<String> =
-        active_load.issues.iter().map(|i| i.id.clone()).chain(active_load.reserved_ids()).collect();
+        active_load.issues.iter().map(|i| i.id.clone()).chain(opaque.iter().cloned()).collect();
     let load = crate::archive::read_all(&repo.root, active_load)?;
     super::report_load_errors(ctx.lang(), &repo.issues_path(), &load.errors);
 
@@ -309,7 +311,21 @@ fn listed(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>, keys: &Keys) -> 
         if args.as_plan {
             return plan(ctx, &load.issues, issue, args.raw);
         }
-        return one(ctx, &repo, &load.issues, issue, args.raw, &origin, args.worktree.worktree, &live, keys);
+        let judged = active_rows
+            .as_ref()
+            .map(|active| report::with_archive(active, &load.issues, &opaque.iter().map(String::as_str).collect()));
+        return one(
+            ctx,
+            &repo,
+            &load.issues,
+            issue,
+            args.raw,
+            &origin,
+            args.worktree.worktree,
+            &live,
+            judged.as_deref().unwrap_or(&load.issues),
+            keys,
+        );
     }
 
     // **`--raw` 도 조용히 버리지 않는다.** 본문은 하나를 펼칠 때만 나오므로
@@ -894,6 +910,7 @@ fn one(
     origin: &crate::worktree::Origin,
     worktree: bool,
     live: &BTreeSet<String>,
+    judged: &[Issue],
     keys: &Keys,
 ) -> R<Vec<String>> {
     // **`--fields` 가 안 고른 값비싼 키는 짓지 않는다**(리뷰) — 도움말이 "안 고른 키는 셈하지 않는다" 고 대는데
@@ -964,6 +981,8 @@ fn one(
     let pulse = (wants(&["session"]) && report::may_hold_session(issue, &repo.config))
         .then(|| crate::pulse::read(&repo.root, all, &repo.config));
     let session = pulse.as_ref().and_then(|p| report::session_of(issue, &repo.config, p, wall_now));
+    // Keep archive duplicates for display diagnostics, but do not let a stale archived copy
+    // supply a blocker member when an unreadable live row reserves that ID.
     let seen = view::Seen {
         session,
         // **줄로 묻는 그릇으로 든다**(moai-wre3) — 접은 지도를 그대로 들던 때는 같은 id 의
@@ -973,7 +992,7 @@ fn one(
         // moai-mibi.rfn) — 한때 곁에 펼친 줄과 그 자식만의 종류 지도를 따로 지었다.
         states: report::group_states_of(all, &repo.config, &near),
         screen: view::Screen::new(ctx.lang()).at(ctx.clock()).over(origin),
-        blocks: report::blocks_of(all, &repo.config, issue),
+        blocks: report::blocks_of(judged, &repo.config, issue),
         places,
     };
     // **커밋은 저장하지 않고 git 에서 읽는다**(moai-1w2l) — 커밋 제목에 이 id 를 적은 것.
