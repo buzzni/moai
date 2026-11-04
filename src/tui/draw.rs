@@ -13474,7 +13474,7 @@ mod eyeball {
 mod bench {
     /// Run against a fixed copy of a tracker, including archive, before and after a change.
     /// MOAI_GANTT_BENCH=/tmp/tracker CARGO_PROFILE_TEST_OPT_LEVEL=3 cargo test
-    /// --bin moai gantt_frame_costs -- --ignored --nocapture
+    /// --lib gantt_frame_costs -- --ignored --nocapture
     ///
     /// The rows are read the way moai reads them (`store::read_snapshot`, `archive::read_all`, the explorer's order —
     /// moai-w7ms review): a fixture with no archive directory, with other files beside the archive's `.jsonl`, with a
@@ -13519,7 +13519,7 @@ mod bench {
 
     /// **한 프레임에 드는 값을 잰다**(moai-wt4n·moai-m7iy). 에픽 `BENCH_EPICS`(기본 500)개에 멤버를
     /// 열아홉씩, 느슨한 일을 에픽 수만큼 세워 뿌리 목록을 그린다 — 뿌리는 에픽 줄마다 진척 셈을 낸다.
-    /// `CARGO_PROFILE_TEST_OPT_LEVEL=3 cargo test --bin moai -- --ignored --nocapture a_frame_costs` 로
+    /// `CARGO_PROFILE_TEST_OPT_LEVEL=3 cargo test --lib -- --ignored --nocapture a_frame_costs` 로
     /// 부른다(최적화 없는 dev 는 열 배 넘게 느려 값이 아무 말도 안 한다). **`--release` 는 안 붙인다** —
     /// 시험에 붙이지 않는다는 규약(CLAUDE.md)이고, 붙이면 `tests/cli.rs` 가 부를 `target/release/moai` 를
     /// LTO 없는 판으로 덮는다.

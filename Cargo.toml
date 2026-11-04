@@ -17,6 +17,11 @@ repository = "https://github.com/buzzni/moai"
 # README 가 그 밖의 기계에 소스 빌드를 대고 있어, 그 사람이 처음 받는 말이 이것이다.
 rust-version = "1.88"
 
+[lib]
+# 몸은 src/lib.rs 에 있고 src/main.rs 는 moai::run() 을 부르기만 한다. 바이너리 크레이트일 때는 문서 주석의
+# 코드 울타리가 시험으로 돈 적이 없어, lib 이 되며 처음 돌지 않게 끈다(moai-72qj.nwl).
+doctest = false
+
 [lints]
 workspace = true
 

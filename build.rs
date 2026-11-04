@@ -46,7 +46,7 @@ fn main() {
     });
     let path = PathBuf::from(get("OUT_DIR")).join("moai-version.res");
     fs::write(&path, versioninfo::res_file(&data)).expect("moai-version.res 를 못 썼다");
-    // bins 에만 건다 — 통합 시험(`tests/*.rs`)의 실행 파일에는 안 든다. `src/main.rs` 의 단위 시험
-    // 실행 파일은 bin 타깃을 시험 모드로 지은 것이라 함께 든다(cargo 의 `-bins` 는 모드를 안 가린다).
+    // bins 에만 건다 — 통합 시험(`tests/*.rs`)의 실행 파일에는 안 든다. 단위 시험은 lib 타깃(`src/lib.rs`)에
+    // 있어 그 실행 파일에도 안 든다(moai-72qj). `.res` 는 버전 정보(RT_VERSION) 하나뿐이라 시험이 읽을 것이 없다.
     println!("cargo:rustc-link-arg-bins={}", path.display());
 }
