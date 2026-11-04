@@ -111,4 +111,18 @@ mod tests {
         assert!(caught.is_err());
         assert!(current().is_none(), "패닉한 요청의 통이 스레드에 남았다");
     }
+
+    /// **`projects::each` 가 띄운 실도 요청의 통에 담는다** — 읽기 길에서 실을 띄우는 자리가 거기 하나다. 물려주지
+    /// 않으면 실이 낸 줄이 요청을 떠나 데몬의 stderr 로 간다(`project.ls` 는 걸어 둔 프로젝트가 둘이면 실을 띄운다).
+    #[test]
+    fn the_threads_projects_each_starts_inherit_the_side() {
+        let side: Shared = Arc::new(Mutex::new(Side::default()));
+        {
+            let _in = enter(Some(side.clone()));
+            crate::projects::each(&[1, 2, 3], |n| crate::cmd::tell(&format!("line {n}")));
+        }
+        let mut told = side.lock().unwrap().told.clone();
+        told.sort();
+        assert_eq!(told, ["line 1", "line 2", "line 3"], "실의 줄이 통을 떠났다");
+    }
 }
