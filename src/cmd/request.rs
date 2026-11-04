@@ -8,7 +8,8 @@
 //! - 자리는 프로세스의 현재 디렉터리가 아니라 요청의 `root` 다([`crate::side::Side::here`]). CLI 로 치면
 //!   `moai -C <root> <명령> --json` 을 그 `root` 에서 친 것이다
 //! - 곁에 남는 것은 요청의 통([`crate::side`])에 모이고, 끝에 [`Answer`] 로 돌아온다. 프로세스 전역은 안 건드린다
-//! - 화면 말·시간대·사람은 요청이 준다. 안 준 것은 CLI 와 같이 푼다(`MOAI_LANG`·설정, `TZ`, `MOAI_ACTOR`·git 설정)
+//! - 화면 말·시간대·사람은 요청이 준다. 안 준 것은 CLI 와 같이 푼다(`MOAI_LANG`·설정, `TZ`, git 설정) — **사람만은
+//!   이 프로세스의 `MOAI_ACTOR` 를 안 읽는다**(moai-3hgm.k7s, `model::actor`): 그 값은 데몬을 띄운 셸의 것이다
 //!
 //! **명령을 다시 짜지 않는다.** 읽기 여섯(`status`·`ready`·`prime`·`show`·`stats`·`project ls`)과 쓰기 일곱(`add`·
 //! `mv`·`edit`·`note`·`defer`·`rm`·`link`)의 `cmd::*::run` 을 그대로 부르고, 명령 뒤의 꼬리도 CLI 와 한 함수다
@@ -118,7 +119,8 @@ pub(crate) struct Request {
     /// 이 요청이 선 프로젝트 — `moai -C <root>` 의 그 자리다. 거기서 위로 `.moai` 를 찾는 것도 CLI 와 같다.
     pub root: PathBuf,
     pub read: Read,
-    /// `--user` 와 같은 뜻의 `이름 (메일)`. 없으면 CLI 와 같이 `MOAI_ACTOR`, 그다음 그 프로젝트의 git 설정이다.
+    /// `--user` 와 같은 뜻의 `이름 (메일)`. 없으면 그 프로젝트의 git 설정이고, 그것도 없으면 모르는 사람이다(쓰기는
+    /// `no_actor` 로 멈춘다). **이 프로세스의 `MOAI_ACTOR` 는 안 읽는다**(moai-3hgm.k7s, `model::actor`).
     pub actor: Option<String>,
     /// 화면 말. 없으면 CLI 와 같이 `MOAI_LANG`, 그다음 사용자 설정이다.
     pub lang: Option<crate::i18n::Lang>,
@@ -882,6 +884,77 @@ mod tests {
         assert!(
             after != before && after.values().any(|t| t.contains(&second)),
             "같은 환경의 CLI 가 집기를 안 적었다 — 이 시험이 기록 자리를 잘못 본다"
+        );
+    }
+
+    /// 데몬을 띄운 셸의 사람 — 요청이 안 읽어야 할 `MOAI_ACTOR` 다.
+    const DAEMON: &str = "Daemon (daemon@example.com)";
+
+    /// **요청은 데몬의 `MOAI_ACTOR` 를 안 읽는다**(moai-3hgm.k7s) — 그 값은 데몬을 띄운 셸의 것이라 요청을 보낸 쪽을
+    /// 말해 주지 않는다. `actor` 도 git 설정도 없으면 쓰기는 `no_actor` 로 멈추고, 읽기는 모르는 사람이라 아무것도
+    /// 안 가른다. 같은 환경의 CLI 는 그 값으로 쓰고 가른다 — 시험이 환경을 옳게 세웠는지를 그쪽이 잰다.
+    #[test]
+    fn a_request_never_reads_the_daemons_moai_actor() {
+        let dir = crate::scratch::Scratch::new("request-actor");
+        rerun_with("cmd::request::tests::inner_never_reads_moai_actor", dir.path(), None, &[("MOAI_ACTOR", DAEMON)]);
+    }
+
+    #[test]
+    #[ignore = "a_request_never_reads_the_daemons_moai_actor 가 MOAI_ACTOR 를 세워 띄운다"]
+    fn inner_never_reads_moai_actor() {
+        let dir = std::path::PathBuf::from(std::env::var_os(PLACE).expect("바깥 시험이 띄운다"));
+        let a = dir.join("alpha");
+        project(&a, "alpha");
+        let first = id_titled(&a, "첫 일");
+        let parsed = |args: &[&str]| {
+            let cli = crate::cli::Cli::try_parse_from(std::iter::once("moai").chain(args.iter().copied())).unwrap();
+            cli.cmd.unwrap()
+        };
+        let unasked = |args: &[&str]| {
+            let write = Write::of(parsed(args)).unwrap_or_else(|_| panic!("{args:?} 는 쓰기 명령이 아니다"));
+            super::write(WriteRequest {
+                root: a.clone(),
+                write,
+                actor: None,
+                lang: Some(Lang::En),
+                zone: None,
+                reg: None,
+            })
+        };
+        let cli_bare = |args: &[&str]| {
+            Command::new(bin()).arg("-C").arg(&a).arg("--json").args(args).current_dir(&a).output().unwrap()
+        };
+
+        // 쓰기 — 요청은 멈추고, 같은 환경의 CLI 는 `MOAI_ACTOR` 로 쓴다.
+        let got = unasked(&["note", &first, "누가 썼나"]);
+        let e = got.out.expect_err("사람을 모르는 요청의 쓰기가 섰다 — 데몬의 MOAI_ACTOR 를 읽었다");
+        assert_eq!(e.code, super::super::code::NO_ACTOR, "{}", e.message);
+        let ran = cli_bare(&["note", &first, "누가 썼나"]);
+        assert!(
+            ran.status.success(),
+            "같은 환경의 CLI 가 MOAI_ACTOR 로 못 썼다: {}",
+            String::from_utf8_lossy(&ran.stderr)
+        );
+        let note: serde_json::Value = serde_json::from_slice(&ran.stdout).unwrap();
+        assert_eq!(
+            note["by_email"], "daemon@example.com",
+            "CLI 가 MOAI_ACTOR 를 안 읽었다 — 이 시험이 환경을 잘못 세웠다"
+        );
+
+        // 읽기 — 모르는 사람이라 테스터의 줄이 `others` 로 안 간다. CLI 는 데몬의 사람으로 가른다.
+        let others = |out: &str| -> usize {
+            let v: serde_json::Value = serde_json::from_str(out).unwrap();
+            v["others"].as_array().unwrap().len()
+        };
+        let read = Read::of(parsed(&["ready"])).unwrap_or_else(|_| panic!("ready 는 읽기 명령이다"));
+        let asked =
+            super::read(Request { root: a.clone(), read, actor: None, lang: Some(Lang::En), zone: None, reg: None });
+        let out = asked.out.unwrap_or_else(|e| panic!("ready 가 넘어졌다 — {}", e.message)).join("\n");
+        assert_eq!(others(&out), 0, "요청의 ready 가 데몬의 사람으로 남의 줄을 갈랐다: {out}");
+        let ran = cli_bare(&["ready"]);
+        assert!(
+            others(&String::from_utf8_lossy(&ran.stdout)) > 0,
+            "같은 환경의 CLI 가 가르지 않았다 — 견줄 거리가 없다"
         );
     }
 }

@@ -114,7 +114,7 @@ Every method takes a `params` object. These keys are known to every method:
 | Key | Meaning |
 |---|---|
 | `project` | Absolute path of a registered project. Required, except for `hello`, `ping`, `project.ls` and `daemon.shutdown`. |
-| `actor` | `"Name (email)"`, like `--user`. Otherwise the project's git config decides, as for the CLI. The daemon never asks a person. |
+| `actor` | `"Name (email)"`, like `--user`. Otherwise the project's git config (`user.name`, `user.email`) decides. `MOAI_ACTOR` is **not** read: it belongs to the shell that started the daemon, which says nothing about who sent the request. With neither, a write fails with `-32000` and `data.code` `no_actor`, and a read sets nothing apart as yours or someone else's. The daemon never asks a person. |
 | `lang` | Words for messages: `en`, `ko`, `zh`, `ja`, `es`. Otherwise `MOAI_LANG`, then your user config. |
 | `tz` | A time zone name or POSIX rule. Otherwise as the CLI reads it. |
 
