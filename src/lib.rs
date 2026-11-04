@@ -269,15 +269,31 @@ fn carried() {
     // 자리의 저장소가 아닌 곳이면 `-C` 로 그 뿌리를 댄다. 대지 않으면 `moai show` 가
     // 엉뚱한 저장소의 줄을 내거나 "init 하라" 고 한다.
     let tallies = store::unreadable_tallies();
-    if tallies.iter().all(|(_, t)| t.carried == 0 && t.seen == 0) {
+    if !carried_any(&tallies) {
         return;
     }
-    let lang = said_lang();
     let here = store::Repo::find(said_lang).ok().flatten().map(|r| r.root);
+    for line in carried_lines(said_lang(), here.as_deref(), &tallies) {
+        let _ = writeln!(anstream::stderr().lock(), "{line}");
+    }
+}
+
+/// [`carried`] 가 말할 것이 있는가 — 빈 판은 자리도 말도 안 고른다. **순수하다.**
+fn carried_any(tallies: &[(std::path::PathBuf, store::Tally)]) -> bool {
+    tallies.iter().any(|(_, t)| t.carried != 0 || t.seen != 0)
+}
+
+/// [`carried`] 의 줄, 저장소마다 하나 — 요청의 입구(`cmd::request`)도 같은 줄을 짓는다(moai-3hgm.25e). **순수하다.**
+fn carried_lines(
+    lang: i18n::Lang,
+    here: Option<&std::path::Path>,
+    tallies: &[(std::path::PathBuf, store::Tally)],
+) -> Vec<String> {
+    let mut lines = Vec::new();
     for (root, tally) in tallies {
         // **갈래마다 제 `say` 를 적는다** — 키를 변수로 고르면 소스를 훑는 시험
         // (`i18n::tests::keys_in`)의 눈에서 그 키가 사라진다.
-        let said = match tally {
+        let said = match *tally {
             store::Tally { carried: n @ 1.., .. } => {
                 i18n::fill(i18n::say(lang, "warn.carried_wrote"), &[("n", &n.to_string())])
             }
@@ -289,20 +305,16 @@ fn carried() {
                 i18n::fill(i18n::say(lang, "warn.carried_untouched"), &[("n", &n.to_string())])
             }
         };
-        let show = match &here {
-            Some(h) if *h == root => "moai show".to_string(),
+        let show = match here {
+            Some(h) if h == root.as_path() => "moai show".to_string(),
             _ => format!("moai -C {} show", root.display()),
         };
-        let _ = writeln!(
-            anstream::stderr().lock(),
-            // **어느 줄인지 아는 명령을 댄다.** `moai status` 는 수만 말하고
-            // 줄 번호와 까닭은 `report_load_errors` 를 지나는 쪽(`show`·`ready`)
-            // 만 낸다 — 없는 답을 가리키면 손으로 고칠 길이 도구 밖에만 남는다.
-            "{}{}",
-            style::paint(style::WARN, "moai: "),
-            i18n::fill(i18n::say(lang, "warn.carried_where"), &[("said", &said), ("show", &show)])
-        );
+        // **어느 줄인지 아는 명령을 댄다.** `moai status` 는 수만 말하고
+        // 줄 번호와 까닭은 `report_load_errors` 를 지나는 쪽(`show`·`ready`)
+        // 만 낸다 — 없는 답을 가리키면 손으로 고칠 길이 도구 밖에만 남는다.
+        lines.push(warned(&i18n::fill(i18n::say(lang, "warn.carried_where"), &[("said", &said), ("show", &show)])));
     }
+    lines
 }
 
 /// **어디에 썼는지 옮겨 쓴 자리마다 한 줄로 알린다**(moai-y7go) — 딸린 워크트리에서 친 `moai` 는
@@ -330,16 +342,16 @@ fn redirected(climbs: bool) {
         let _ = writeln!(anstream::stderr().lock(), "{}", climb_line(said_lang(), &from, &to));
     }
     for (from, to) in store::redirects() {
-        let _ = writeln!(
-            anstream::stderr().lock(),
-            "{}{}",
-            style::paint(style::WARN, "moai: "),
-            i18n::fill(
-                i18n::say(said_lang(), "warn.tracker_moved"),
-                &[("from", &from.display().to_string()), ("to", &to.display().to_string())]
-            )
-        );
+        let _ = writeln!(anstream::stderr().lock(), "{}", moved_line(said_lang(), &from, &to));
     }
+}
+
+/// 루트의 트래커로 옮겨 썼다는 한 줄 — [`redirected`] 와 요청의 입구(`cmd::request`)가 같이 짓는다. **순수하다.**
+fn moved_line(lang: i18n::Lang, from: &std::path::Path, to: &std::path::Path) -> String {
+    warned(&i18n::fill(
+        i18n::say(lang, "warn.tracker_moved"),
+        &[("from", &from.display().to_string()), ("to", &to.display().to_string())],
+    ))
 }
 
 /// 올라가 잡았다는 한 줄 — [`redirected`] 와 요청의 입구(`cmd::request`)가 같이 짓는다. **순수하다.**
@@ -366,20 +378,28 @@ fn unjournaled() {
     if missed.is_empty() {
         return;
     }
-    let lang = said_lang();
     let here = store::Repo::find(said_lang).ok().flatten().map(|r| r.root);
-    for (root, why) in missed {
-        let whose = match &here {
-            Some(h) if *h == root => String::new(),
-            _ => format!(" ({})", root.display()),
-        };
-        let _ = writeln!(
-            anstream::stderr().lock(),
-            "{}{}",
-            style::paint(style::WARN, "moai: "),
-            i18n::fill(i18n::say(lang, "warn.unjournaled"), &[("whose", &whose), ("why", &why)])
-        );
+    for line in unjournaled_lines(said_lang(), here.as_deref(), &missed) {
+        let _ = writeln!(anstream::stderr().lock(), "{line}");
     }
+}
+
+/// [`unjournaled`] 의 줄 — 요청의 입구(`cmd::request`)도 같은 줄을 짓는다(moai-3hgm.25e). **순수하다.**
+fn unjournaled_lines(
+    lang: i18n::Lang,
+    here: Option<&std::path::Path>,
+    missed: &[(std::path::PathBuf, String)],
+) -> Vec<String> {
+    let whose = |root: &std::path::Path| match here {
+        Some(h) if h == root => String::new(),
+        _ => format!(" ({})", root.display()),
+    };
+    missed
+        .iter()
+        .map(|(root, why)| {
+            warned(&i18n::fill(i18n::say(lang, "warn.unjournaled"), &[("whose", &whose(root)), ("why", why)]))
+        })
+        .collect()
 }
 
 /// 쓰기는 담겼고 **이력도 남았는데** 덧붙일 말이 있으면 말한다(moai-bth3 리뷰, `store::write_notes`) — 되살린 뒤
@@ -394,17 +414,26 @@ fn noted() {
         return;
     }
     let here = store::Repo::find(said_lang).ok().flatten().map(|r| r.root);
+    for line in noted_lines(here.as_deref(), &notes) {
+        let _ = writeln!(anstream::stderr().lock(), "{line}");
+    }
+}
+
+/// [`noted`] 의 줄, 같은 말은 한 번 — 요청의 입구(`cmd::request`)도 같은 줄을 짓는다(moai-3hgm.25e). **순수하다.**
+fn noted_lines(here: Option<&std::path::Path>, notes: &[(std::path::PathBuf, String)]) -> Vec<String> {
     let mut said = std::collections::BTreeSet::new();
+    let mut lines = Vec::new();
     for (root, note) in notes {
-        if !said.insert((root.clone(), note.clone())) {
+        if !said.insert((root, note)) {
             continue;
         }
-        let whose = match &here {
-            Some(h) if *h == root => String::new(),
+        let whose = match here {
+            Some(h) if h == root.as_path() => String::new(),
             _ => format!(" ({})", root.display()),
         };
-        let _ = writeln!(anstream::stderr().lock(), "{}{note}{whose}", style::paint(style::WARN, "moai: "));
+        lines.push(warned(&format!("{note}{whose}")));
     }
+    lines
 }
 
 /// 못 읽어 건너뛴 저널 자리를 말한다(moai-6924).
