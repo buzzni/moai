@@ -1455,7 +1455,8 @@ pub fn agents_link() -> String {
 /// 나뉜 자리는 이렇다 — 보드(`status`)는 사람이 한 화면으로 훑는 것이고, `prime` 은
 /// 세션 첫머리와 접힌 뒤에 **다시 주입되는** 짧은 한 판이다. 둘 다 [`CHEATSHEET`] 에 선다.
 pub fn agents() -> String {
-    format!(r#"## Issue tracker — moai
+    format!(
+        r#"## Issue tracker — moai
 
 This repository's work lives in `.moai/issues.jsonl`.
 Do not use TodoWrite or a markdown TODO list. {NO_GATE}
@@ -1538,7 +1539,8 @@ and record repeatable mistakes with `moai wiki search` and `moai wiki learn`.
 - Projects, language, update checks, merge driver and archive: `references/commands.md`.
 - Supervisor, workers and wiki: `references/commands.md` and the relevant installed skill.
 - Refresh this block with `moai init`; `moai init --check` reports whether it is stale.
-"#)
+"#
+    )
 }
 
 /// 스킬의 SKILL.md. **본문은 한 화면이다** — 전체 명령은 `reference` 로 내린다.
@@ -1565,6 +1567,67 @@ and closing steps, read `references/commands.md`.
 "#.to_string()
 }
 
+pub fn worker_setup() -> String {
+    let full = worker_full();
+    format!(
+        "{}\n{}\n{}",
+        guide_slice(&full, "## In a subagent", "## Before the steps"),
+        guide_slice(&full, "## The milestone branch", "## The steps"),
+        guide_slice(&full, "1. Unfold it in the root", "2. Pick the members")
+    )
+}
+pub fn worker_review() -> String {
+    let full = worker_full();
+    guide_slice(&full, "7. Before merging", "7-1. Before merging").to_string()
+}
+pub fn worker_finish() -> String {
+    let full = worker_full();
+    guide_slice(&full, "7-1. Before merging", "8. Merge from the root").to_string()
+}
+pub fn worker_tmux_tests() -> String {
+    let full = worker_full();
+    guide_slice(&full, "4-2. **If you test tmux", "4-3. **If you would have to touch").to_string()
+}
+pub fn worker() -> String {
+    let mut text = worker_full();
+    for (start, end, pointer) in [
+        (
+            "## In a subagent",
+            "## Before the steps",
+            "## In a subagent\n\nIf raised as a subagent, read `worker-setup.md` — In a subagent.\n\n",
+        ),
+        (
+            "## The milestone branch",
+            "## The steps",
+            "## The milestone branch\n\nFor a milestone base, read `worker-setup.md` — The milestone branch.\n\n",
+        ),
+        (
+            "1. Unfold it in the root",
+            "2. Pick the members",
+            "1. For a backlog assignment, unfold it in the root as `worker-setup.md` step 1 says.\n",
+        ),
+        (
+            "4-2. **If you test tmux",
+            "4-3. **If you would have to touch",
+            "4-2. If testing tmux, follow `worker-tmux-tests.md` before starting a test server.\n",
+        ),
+        (
+            "7. Before merging",
+            "7-1. Before merging",
+            "7. Before merging, follow `worker-review.md` for the epic review, its grade and handoff. Codex follows `worker-codex.md` step 7 instead.\n",
+        ),
+        (
+            "7-1. Before merging",
+            "8. Merge from the root",
+            "7-1. Reclaim unfinished epic promises as `worker-finish.md` step 7-1 says.\n7-2. For a milestone, sort handed-on work as `worker-finish.md` step 7-2 says.\n7-3. Check the changelog as `worker-finish.md` step 7-3 says.\n7-4. Check the wiki and lessons as `worker-finish.md` step 7-4 says.\n",
+        ),
+    ] {
+        let part = guide_slice(&text, start, end).to_owned();
+        text = text.replacen(&part, pointer, 1);
+    }
+    text
+}
+
 // Conditional procedures are kept as exact slices of the canonical text. The main
 // skill points to the file at the step where the condition becomes relevant.
 fn guide_slice<'a>(text: &'a str, start: &str, end: &str) -> &'a str {
@@ -1575,9 +1638,12 @@ fn guide_slice<'a>(text: &'a str, start: &str, end: &str) -> &'a str {
 
 pub fn supervise_sessions() -> String {
     let full = supervise_full();
-    format!("{}\n{}\n{}", guide_slice(&full, "## Workers in sessions", "## Before the round"),
+    format!(
+        "{}\n{}\n{}",
+        guide_slice(&full, "## Workers in sessions", "## Before the round"),
         guide_slice(&full, "**A session.**", "**2-1. Pick the role"),
-        guide_slice(&full, "**A session's report comes back", "**5. Check the report"))
+        guide_slice(&full, "**A session's report comes back", "**5. Check the report")
+    )
 }
 pub fn supervise_reclaim() -> String {
     let full = supervise_full();
@@ -1594,12 +1660,36 @@ pub fn supervise_send() -> String {
 pub fn supervise() -> String {
     let mut text = supervise_full();
     for (start, end, pointer) in [
-        ("**0. Reclaim first", "**1. Pick.**", "**0. Reclaim first — work that lost its place.** Read `references/supervise-reclaim.md` to check for and reclaim stranded work.\n\n"),
-        ("## Workers in sessions", "## Before the round", "## Workers in sessions\n\nWhen using sessions, read `references/supervise-sessions.md` before selecting workers.\n\n"),
-        ("**A session.**", "**2-1. Pick the role", "**A session.** Read `references/supervise-sessions.md` for session selection and delivery.\n\n"),
-        ("**A session's report comes back", "**5. Check the report", "For a session report, read `references/supervise-sessions.md` before checking it.\n\n"),
-        ("**2-2. Unfold", "**3. Send.**", "**2-2. Unfold with the `plan` role.** Read `references/supervise-planning.md` for this step.\n\n"),
-        ("**3. Send.**", "**4. Wait.**", "**3. Send.** Read `references/supervise-send.md` for the assignment and delivery steps.\n\n"),
+        (
+            "**0. Reclaim first",
+            "**1. Pick.**",
+            "**0. Reclaim first — work that lost its place.** Read `references/supervise-reclaim.md` to check for and reclaim stranded work.\n\n",
+        ),
+        (
+            "## Workers in sessions",
+            "## Before the round",
+            "## Workers in sessions\n\nWhen using sessions, read `references/supervise-sessions.md` before selecting workers.\n\n",
+        ),
+        (
+            "**A session.**",
+            "**2-1. Pick the role",
+            "**A session.** Read `references/supervise-sessions.md` for session selection and delivery.\n\n",
+        ),
+        (
+            "**A session's report comes back",
+            "**5. Check the report",
+            "For a session report, read `references/supervise-sessions.md` before checking it.\n\n",
+        ),
+        (
+            "**2-2. Unfold",
+            "**3. Send.**",
+            "**2-2. Unfold with the `plan` role.** Read `references/supervise-planning.md` for this step.\n\n",
+        ),
+        (
+            "**3. Send.**",
+            "**4. Wait.**",
+            "**3. Send.** Read `references/supervise-send.md` for the assignment and delivery steps.\n\n",
+        ),
     ] {
         let part = guide_slice(&text, start, end).to_owned();
         text = text.replacen(&part, pointer, 1);
@@ -1609,16 +1699,28 @@ pub fn supervise() -> String {
 pub fn session_map_reference() -> String {
     format!("# Session map\n\n```sh\n{SESSIONS}\n```\n")
 }
-pub fn codex_worker_reference() -> String { CODEX_WORKER_RULES.to_string() }
-fn terminal_shared(text: String) -> String {
-    text.replace(&format!("```sh\n{SESSIONS}\n```"),
-        "Read `../moai-supervise/references/session-map.md` and run its session map.")
-        .replace(CODEX_WORKER_RULES,
-        "Read `../moai-supervise/references/codex-workers.md` for the shared Codex model and review rules.")
+pub fn codex_worker_reference() -> String {
+    CODEX_WORKER_RULES.to_string()
 }
-pub fn tmux() -> String { terminal_shared(tmux_full()) }
-pub fn cmux() -> String { terminal_shared(cmux_full()) }
-pub fn saycode() -> String { terminal_shared(saycode_full()) }
+fn terminal_shared(text: String) -> String {
+    text.replace(
+        &format!("```sh\n{SESSIONS}\n```"),
+        "Read `../moai-supervise/references/session-map.md` and run its session map.",
+    )
+    .replace(
+        CODEX_WORKER_RULES,
+        "Read `../moai-supervise/references/codex-workers.md` for the shared Codex model and review rules.",
+    )
+}
+pub fn tmux() -> String {
+    terminal_shared(tmux_full())
+}
+pub fn cmux() -> String {
+    terminal_shared(cmux_full())
+}
+pub fn saycode() -> String {
+    terminal_shared(saycode_full())
+}
 
 /// 스킬의 참고 문서. 부를 때만 읽힌다.
 pub fn reference() -> String {
@@ -5057,7 +5159,7 @@ pub const BRANCHES_FILE: &str = "worker-branches.md";
 /// `git -C <그 워크트리>`** 로 친다. 충돌도 그 워크트리를 절대 경로로 겨눠 푼다 — 일꾼은 어느 워크트리에도 들지 않는다
 /// ([`STAY_IN_ROOT`], moai-9js2).
 /// `branch -d` 를 루트에서 치면 루트의 가지가 아직 그 병합을 안 들어 "not fully merged" 로 거절한다(재 봤다).
-pub fn worker() -> String {
+fn worker_full() -> String {
     let rule = indent(&model_rule(), "  ");
     let detail = indent(DETAIL, "  ");
     let review = make_review("--parent <epic>");
@@ -5802,7 +5904,7 @@ Create the review issue using the shared command, called with `moai -C "<root>"`
 
     {review}
 
-Read `review_grade` and `review_raise` from `moai models --json` and apply the shared rule in worker.md 7. Fill the angle with the resulting grade, why, and "review by the supervisor's review subagent", then
+Read `review_grade` and `review_raise` from `moai models --json` and apply the shared rule in `worker-review.md` step 7. Fill the angle with the resulting grade, why, and "review by the supervisor's review subagent", then
 the epic body's `{REVIEW_FOCUS}` section (either heading) and the focus development
 added, as worker.md's 7 says.
 Do not run the review yourself. Move each finished member to review, one id per call:
@@ -5857,10 +5959,21 @@ fn indent(text: &str, by: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    fn supervise() -> String { super::supervise_full() }
-    fn tmux() -> String { super::tmux_full() }
-    fn cmux() -> String { super::cmux_full() }
-    fn saycode() -> String { super::saycode_full() }
+    fn worker() -> String {
+        super::worker_full()
+    }
+    fn supervise() -> String {
+        super::supervise_full()
+    }
+    fn tmux() -> String {
+        super::tmux_full()
+    }
+    fn cmux() -> String {
+        super::cmux_full()
+    }
+    fn saycode() -> String {
+        super::saycode_full()
+    }
 
     use super::*;
 
@@ -5946,11 +6059,56 @@ mod tests {
         for text in [&agents, &skill] {
             assert!(text.contains("references/commands.md"));
         }
-        let common = agents.lines().filter(|line| line.len() >= 40 && skill.lines().any(|other| other == *line)).count();
+        let common =
+            agents.lines().filter(|line| line.len() >= 40 && skill.lines().any(|other| other == *line)).count();
         assert_eq!(common, 0, "long duplicated lines: {common}");
-        for piece in [CHEATSHEET, FORKS, WRITING, DETAIL, CTL, GROUPS, DEFERRING, PROJECTS, LANGUAGE, UPDATES, MERGE_DRIVER, ARCHIVE_STORAGE, COMMITS, WORK, WIKI, CLOSING] {
+        for piece in [
+            CHEATSHEET,
+            FORKS,
+            WRITING,
+            DETAIL,
+            CTL,
+            GROUPS,
+            DEFERRING,
+            PROJECTS,
+            LANGUAGE,
+            UPDATES,
+            MERGE_DRIVER,
+            ARCHIVE_STORAGE,
+            COMMITS,
+            WORK,
+            WIKI,
+            CLOSING,
+        ] {
             assert!(reference.contains(piece), "missing reference content: {}", piece.lines().next().unwrap());
         }
+    }
+
+    #[test]
+    fn conditional_worker_guides_preserve_steps_and_extracted_text() {
+        let full = super::worker_full();
+        let short = super::worker();
+        assert!(short.len() * 100 <= full.len() * 60, "{} vs {}", short.len(), full.len());
+        for (start, end, reference) in [
+            ("## In a subagent", "## Before the steps", super::worker_setup()),
+            ("## The milestone branch", "## The steps", super::worker_setup()),
+            ("1. Unfold it in the root", "2. Pick the members", super::worker_setup()),
+            ("4-2. **If you test tmux", "4-3. **If you would have to touch", super::worker_tmux_tests()),
+            ("7. Before merging", "7-1. Before merging", super::worker_review()),
+            ("7-1. Before merging", "8. Merge from the root", super::worker_finish()),
+        ] {
+            assert!(reference.contains(super::guide_slice(&full, start, end)));
+        }
+        for name in ["worker-setup.md", "worker-review.md", "worker-finish.md", "worker-tmux-tests.md"] {
+            assert!(short.contains(name));
+        }
+        for step in [
+            "1.", "2.", "3.", "4.", "4-1.", "4-2.", "4-3.", "5.", "6.", "7.", "7-1.", "7-2.", "7-3.", "7-4.", "8.",
+            "9.", "9-1.", "10.", "11.", "12.",
+        ] {
+            assert!(short.lines().any(|line| line.starts_with(step)), "missing step {step}");
+        }
+        assert!(super::worker_codex().contains("worker-review.md"));
     }
 
     #[test]
@@ -5965,13 +6123,19 @@ mod tests {
             ("**A session's report comes back", "**5. Check the report", super::supervise_sessions()),
             ("**2-2. Unfold", "**3. Send.**", super::supervise_planning()),
             ("**3. Send.**", "**4. Wait.**", super::supervise_send()),
-        ] { assert!(reference.contains(super::guide_slice(&full, start, end))); }
-        for name in ["supervise-reclaim.md", "supervise-sessions.md", "supervise-planning.md", "supervise-send.md"] { assert!(short.contains(name)); }
+        ] {
+            assert!(reference.contains(super::guide_slice(&full, start, end)));
+        }
+        for name in ["supervise-reclaim.md", "supervise-sessions.md", "supervise-planning.md", "supervise-send.md"] {
+            assert!(short.contains(name));
+        }
         for text in [super::tmux(), super::cmux(), super::saycode()] {
             assert!(text.contains("session-map.md"));
             assert!(!text.contains(SESSIONS));
         }
-        for text in [super::tmux(), super::cmux()] { assert!(text.contains("codex-workers.md")); }
+        for text in [super::tmux(), super::cmux()] {
+            assert!(text.contains("codex-workers.md"));
+        }
         assert!(super::session_map_reference().contains(SESSIONS));
         assert_eq!(super::codex_worker_reference(), CODEX_WORKER_RULES);
     }
@@ -8572,7 +8736,10 @@ stop sending outside work while a release runs",
             FORKS.contains("`--due` on `moai add` or `moai backlog add`"),
             "혼자 만드는 줄에 기한을 다는 길이 없다"
         );
-        assert!(agents.contains("Ask about the deadline and any running milestone in the same breath"), "기능 요청 2 단계가 기한을 안 묻는다");
+        assert!(
+            agents.contains("Ask about the deadline and any running milestone in the same breath"),
+            "기능 요청 2 단계가 기한을 안 묻는다"
+        );
         assert!(
             GROUPS.contains("`moai due apply`") && GROUPS.contains("puts on an epic raises its members as it nears"),
             "그룹 글이 에픽의 기한이 멤버를 올린다고 안 댄다"

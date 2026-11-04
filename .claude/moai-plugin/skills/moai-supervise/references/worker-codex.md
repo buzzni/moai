@@ -51,7 +51,7 @@ Create the review issue using the shared command, called with `moai -C "<root>"`
 
     moai add 'review — <what you are looking at>' -t review --parent <epic> -b '<what you are looking for and why>'
 
-Read `review_grade` and `review_raise` from `moai models --json` and apply the shared rule in worker.md 7. Fill the angle with the resulting grade, why, and "review by the supervisor's review subagent", then
+Read `review_grade` and `review_raise` from `moai models --json` and apply the shared rule in `worker-review.md` step 7. Fill the angle with the resulting grade, why, and "review by the supervisor's review subagent", then
 the epic body's `Review focus / 리뷰에서 볼 것` section (either heading) and the focus development
 added, as worker.md's 7 says.
 Do not run the review yourself. Move each finished member to review, one id per call:

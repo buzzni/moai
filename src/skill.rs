@@ -154,7 +154,22 @@ pub const EVER_PLANTED: [(&str, &[&str]); 9] = [
     ("moai", &["SKILL.md", "references/commands.md"]),
     (
         "moai-supervise",
-        &["SKILL.md", "references/worker.md", "references/worker-branches.md", "references/worker-codex.md"],
+        &[
+            "SKILL.md",
+            "references/worker.md",
+            "references/worker-branches.md",
+            "references/worker-codex.md",
+            "references/supervise-reclaim.md",
+            "references/supervise-sessions.md",
+            "references/supervise-planning.md",
+            "references/supervise-send.md",
+            "references/session-map.md",
+            "references/codex-workers.md",
+            "references/worker-setup.md",
+            "references/worker-review.md",
+            "references/worker-finish.md",
+            "references/worker-tmux-tests.md",
+        ],
     ),
     ("moai-wiki", &["SKILL.md"]),
     ("moai-tmux", &["SKILL.md", "scripts/codex-pane.py"]),
@@ -218,6 +233,10 @@ pub fn skills() -> Vec<Skill> {
                 ("references/session-map.md", crate::guide::session_map_reference()),
                 ("references/codex-workers.md", crate::guide::codex_worker_reference()),
                 ("references/worker.md", crate::guide::worker()),
+                ("references/worker-setup.md", crate::guide::worker_setup()),
+                ("references/worker-review.md", crate::guide::worker_review()),
+                ("references/worker-finish.md", crate::guide::worker_finish()),
+                ("references/worker-tmux-tests.md", crate::guide::worker_tmux_tests()),
                 // 드문 갈래는 곁 파일이다(moai-w25x.mgu) — 본 글이 절 이름으로 가리킨다.
                 ("references/worker-branches.md", crate::guide::worker_branches()),
                 ("references/worker-codex.md", crate::guide::worker_codex()),
@@ -1623,6 +1642,14 @@ mod tests {
             crate::guide::plan(),
             crate::guide::worker(),
             crate::guide::worker_branches(),
+            crate::guide::supervise_sessions(),
+            crate::guide::supervise_reclaim(),
+            crate::guide::supervise_planning(),
+            crate::guide::supervise_send(),
+            crate::guide::worker_setup(),
+            crate::guide::worker_review(),
+            crate::guide::worker_finish(),
+            crate::guide::worker_tmux_tests(),
         ];
         // **걸음 글 안에 박힌 `` `moai …` `` 도 뽑는다**(moai-8na5). 줄 머리만 보던 판은 브리프 2·10·12
         // 의 멤버를 옮기는 줄과 에픽에 남기는 노트를 훅 시험 밖에 두었다 — 거기서 무엇을 바꿔도 초록이었다.
@@ -1891,7 +1918,24 @@ mod tests {
                     }
                     continue;
                 }
-                assert!(body.contains(&format!("`{rel}`")), "{} 의 SKILL.md 가 곁에 심는 {rel} 를 안 부른다", s.name);
+                if s.name == "moai-supervise" && rel.starts_with("references/") {
+                    let basename = rel.rsplit('/').next().unwrap();
+                    let in_sibling = s.files.iter().any(|(other, text)| other != rel && text.contains(basename));
+                    let in_terminal = [crate::guide::tmux(), crate::guide::cmux(), crate::guide::saycode()]
+                        .iter()
+                        .any(|text| text.contains(basename));
+                    assert!(
+                        body.contains(&format!("`{rel}`")) || in_sibling || in_terminal,
+                        "{} does not link installed reference {rel}",
+                        s.name
+                    );
+                } else {
+                    assert!(
+                        body.contains(&format!("`{rel}`")),
+                        "{} 의 SKILL.md 가 곁에 심는 {rel} 를 안 부른다",
+                        s.name
+                    );
+                }
             }
         }
     }
@@ -1941,7 +1985,7 @@ mod tests {
                 .any(|d| p.starts_with(d))
             })
             .count();
-        assert_eq!(only_claude, 10, "감독 스킬과 일꾼 글, tmux helper 및 Claude 전용 스킬을 센다");
+        assert_eq!(only_claude, 20, "감독 스킬과 일꾼 글, tmux helper 및 Claude 전용 스킬을 센다");
         assert_eq!(
             shared.len() + 3 + only_claude,
             claude.len(),
