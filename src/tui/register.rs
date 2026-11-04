@@ -444,7 +444,7 @@ mod tests {
     /// 가리켜도), 감춘 점 디렉터리의 수. 파일은 줄로 안 선다.
     ///
     /// 링크를 만드는 시험이라 unix 에서만 돈다 — 가리지 않으면 unix 가 아닌 곳에서 이 한
-    /// 시험이 아니라 **바이너리의 시험 전부**가 컴파일되지 않는다(`user_config` 의 링크 시험과 같다).
+    /// 시험이 아니라 **lib 타깃의 시험 전부**가 컴파일되지 않는다(`user_config` 의 링크 시험과 같다).
     #[cfg(unix)]
     #[test]
     fn the_picker_marks_moai_and_registered_and_hides_dot_directories() {
