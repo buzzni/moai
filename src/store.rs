@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 /// 락을 못 잡으면 **아무것도 쓰지 않고** 물러난다.
-pub(crate) const LOCK_TIMEOUT: Duration = Duration::from_secs(5);
+const LOCK_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// 쓰기 경로가 **말 없이** 들고 나오는 까닭(moai-iq7j, 2026-09-21).
 ///
