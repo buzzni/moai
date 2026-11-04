@@ -192,6 +192,27 @@ fn start_status_hello_ping_and_stop() {
     assert_eq!(again["stopped"], false, "{again}");
 }
 
+/// 멈추는 답을 쓴 연결은 제 소켓에 붙어 받는 스레드를 깨운다 — 그 파일이 지워졌으면 붙기가 실패한다. 그래도 받는
+/// 스레드는 제 간격(`TICK`)마다 `stop` 을 보아 그친다(moai-uezh). 파일이 없으니 `moai daemon stop` 은 데몬을
+/// 못 찾는다 — 멈추는 길은 이미 열린 연결로 보내는 `daemon.shutdown` 이다.
+#[test]
+fn a_daemon_whose_socket_file_was_removed_still_stops() {
+    let f = Fence::new();
+    let (daemon, mut wire) = served(&f);
+    let pid = wire.call(1, "hello", json!({ "proto": 1 }))["result"]["pid"].clone();
+    std::fs::remove_file(f.socket()).unwrap();
+    assert!(UnixStream::connect(f.socket()).is_err(), "지운 소켓에 아직 붙는다 — 깨우는 붙기가 실패하는 자리가 아니다");
+    let bye = wire.call(2, "daemon.shutdown", json!({}));
+    assert_eq!(bye["result"]["pid"], pid, "{bye}");
+    let asked = std::time::Instant::now();
+    assert!(daemon.wait().success(), "멈춘 데몬이 0 으로 끝나지 않았다");
+    assert!(
+        asked.elapsed() < Duration::from_secs(5),
+        "멈추기까지 {:?} — 받는 스레드가 stop 을 늦게 봤다",
+        asked.elapsed()
+    );
+}
+
 #[test]
 fn a_second_start_does_not_double_up() {
     let f = Fence::new();
