@@ -484,7 +484,7 @@ mod tests {
     use std::sync::atomic::AtomicUsize as Nth;
 
     /// 시험용 메서드가 자는 시간과, 그보다 짧은 읽기의 시한.
-    const SLOW: Duration = Duration::from_millis(1200);
+    const SLOW: Duration = Duration::from_millis(2000);
     const SHORT_DRAIN: Duration = Duration::from_millis(300);
 
     /// 이 프로세스 안의 데몬 하나 — 제 자리(소켓 경로는 108 바이트 밑이라 `/tmp` 아래 짧게)와 처리 함수가 남긴 것.
