@@ -12,6 +12,11 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+### Added
+
+- `moai daemon start|stop|status` runs a per-user local daemon in the foreground (systemd, launchd or `&` keep it) and serves a read-only JSON-RPC 2.0 API over a Unix socket (`daemon.socket` beside the `moai ctl` sockets): `status`, `ready`, `prime`, `show`, `stats`, `project.ls` and a `changes` poll, each returning the CLI's `--json` answer for a registered project. There is no network access, writes are not served yet, and Windows reports `unsupported`. See `docs/daemon.md`. (moai-5n6m)
+- The CLI is unchanged: it still reads and writes `.moai/` directly and works with no daemon running. (moai-5n6m)
+
 ## [0.48.0] - 2026-11-04
 
 ### Added
