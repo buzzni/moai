@@ -1439,8 +1439,10 @@ pub enum DaemonCmd {
   it with moai daemon stop, then moai daemon start.
 
   A socket left by a daemon that is gone is removed and the daemon starts.
-  A file there that is not your socket is left alone and refused. Ctrl-C
-  leaves the socket behind; the next start clears it.")]
+  A file there that is not your socket is left alone and refused. A running
+  daemon so full that it cannot even answer hello stops it with the code
+  busy, naming its pid. Ctrl-C leaves the socket behind; the next start
+  clears it.")]
     Start,
     /// Ask the running daemon to exit and wait until it has
     #[command(after_help = "  --json gives {stopped, pid, socket}. With nothing running, stopped is
