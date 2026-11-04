@@ -27,8 +27,8 @@ pub mod server;
 #[cfg(unix)]
 pub const SHUTDOWN: &str = "daemon.shutdown";
 
-/// 데몬이 섬기는 메서드 표. `hello`·`ping` 위에 읽기 메서드 여섯(`read::register`, moai-5n6m.q16)을 단다 — 다음
-/// 메서드도 여기서 단다. 데몬의 수명에 딸린 [`SHUTDOWN`] 은 `server::serve` 가 제 손으로 단다.
+/// 데몬이 섬기는 메서드 표. `hello`·`ping` 위에 읽기 메서드 여섯과 `changes`(`read::register`, moai-5n6m.q16·cb9)를
+/// 단다 — 다음 메서드도 여기서 단다. 데몬의 수명에 딸린 [`SHUTDOWN`] 은 `server::serve` 가 제 손으로 단다.
 #[cfg(unix)]
 pub fn methods() -> rpc::Methods {
     let mut methods = rpc::Methods::new();

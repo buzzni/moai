@@ -111,7 +111,7 @@ pub fn serve(bound: Bound, mut methods: Methods) -> std::io::Result<()> {
             open.fetch_sub(1, Ordering::AcqRel);
             // 받는 스레드는 거절을 읽어 가기를 기다리지 않는다.
             let _ = stream.set_nonblocking(true);
-            let refusal = rpc::refusal(&RpcError::moai("busy", "too many connections to the daemon"));
+            let refusal = rpc::refusal(&RpcError::moai(crate::fail::code::BUSY, "too many connections to the daemon"));
             let _ = writeln!(stream, "{refusal}");
             continue;
         }

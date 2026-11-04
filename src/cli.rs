@@ -1449,10 +1449,13 @@ pub enum DaemonCmd {
     /// Whether a daemon runs: pid, version, proto and socket
     #[command(after_help = "  --json gives {supported, running, socket, stale_socket, this_version,
   this_proto}, and pid, version, proto and same_version while one runs.
-  same_version is false when the daemon is another build than this moai -
-  restart it with moai daemon stop, then moai daemon start. stale_socket is
-  a socket left by a daemon that is gone; moai daemon start clears it.
-  It only reads, and exits 0 whether or not a daemon runs.")]
+  same_version is false when the daemon is another version or proto than
+  this moai - restart it with moai daemon stop, then moai daemon start. A
+  rebuild of the same version still reads true. stale_socket is a socket
+  left by a daemon that is gone; moai daemon start clears it. It only reads,
+  and exits 0 whether or not a daemon runs; a file there that is not your
+  socket, a daemon at its connection cap or an answer that is not a
+  daemon's is an error.")]
     Status,
 }
 

@@ -64,7 +64,7 @@ pub fn probe(path: &Path) -> Probe {
         Ok(Err(error)) => {
             let data = error.data.clone().unwrap_or(Value::Null);
             match data.get("code").and_then(Value::as_str) {
-                Some("busy") => Probe::Busy,
+                Some(code) if code == crate::fail::code::BUSY => Probe::Busy,
                 Some("unsupported_proto") => Hello::of(&data).map_or(Probe::Foreign(error.message), Probe::Running),
                 _ => Probe::Foreign(error.message),
             }
