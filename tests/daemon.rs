@@ -38,12 +38,13 @@ impl Fence {
         cmd.args(args)
             .current_dir(&self.0)
             .env("HOME", self.0.join("home"))
-            .env("MOAI_CONFIG", self.0.join("no-config.toml"))
+            .env("MOAI_CONFIG", self.0.join("config.toml"))
             .env("MOAI_CTL_DIR", &self.0)
             .env_remove("XDG_RUNTIME_DIR")
             .env_remove("XDG_CONFIG_HOME")
             .env_remove("MOAI_ACTOR")
             .env("MOAI_LANG", "en")
+            .env("MOAI_NOW", "2026-11-04T12:00:00Z")
             .env("MOAI_NO_UPDATE_CHECK", "1")
             .env("NO_COLOR", "1")
             .stdin(Stdio::null());
@@ -294,4 +295,149 @@ fn a_file_that_is_not_a_socket_is_left_alone() {
     let error = f.refused(&["daemon", "start", "--json"]);
     assert_eq!(error["code"], "already_exists", "{error}");
     assert_eq!(std::fs::read_to_string(f.socket()).unwrap(), "not a socket", "남의 파일을 건드렸다");
+}
+
+// ---- 읽기 메서드(moai-5n6m.q16) ---------------------------------------------------------------------------------
+
+impl Fence {
+    /// 걸어 둔 프로젝트 하나(이슈 둘) — 등록은 제 `MOAI_CONFIG` 에 한다.
+    fn project(&self, name: &str) -> PathBuf {
+        let dir = self.0.join(name);
+        std::fs::create_dir(&dir).unwrap();
+        let d = dir.to_str().unwrap();
+        for args in [
+            vec!["-C", d, "init"],
+            vec!["-C", d, "add", "alpha", "--user", ACTOR, "-p", "1", "-t", "bug"],
+            vec!["-C", d, "add", "beta", "--user", ACTOR],
+            vec!["project", "add", d],
+        ] {
+            let out = self.run(&args);
+            assert!(out.status.success(), "moai {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+        }
+        dir
+    }
+}
+
+const ACTOR: &str = "Tester (tester@example.com)";
+
+/// 데몬을 띄우고 연결 하나를 연다.
+fn served(f: &Fence) -> (Daemon, Wire) {
+    let (daemon, _) = f.start();
+    (daemon, Wire::open(&f.socket()))
+}
+
+/// CLI 의 `--json` stdout 한 줄.
+fn cli(f: &Fence, root: &Path, args: &[&str]) -> Value {
+    let mut all = vec!["-C", root.to_str().unwrap(), "--json"];
+    all.extend_from_slice(args);
+    f.json(&all)
+}
+
+#[test]
+fn the_read_methods_answer_as_the_cli_does() {
+    let f = Fence::new();
+    let root = f.project("proj");
+    let project = root.to_str().unwrap();
+    let (_daemon, mut wire) = served(&f);
+
+    let cases: Vec<(&str, Value, Vec<&str>)> = vec![
+        ("status", json!({}), vec!["status"]),
+        ("ready", json!({ "limit": 1 }), vec!["ready", "-n", "1"]),
+        ("prime", json!({}), vec!["prime"]),
+        ("show", json!({}), vec!["show"]),
+        (
+            "show",
+            json!({ "status": "todo", "tag": "bug", "sort": "priority" }),
+            vec!["show", "-s", "todo", "-t", "bug", "--sort", "priority"],
+        ),
+        (
+            "show",
+            json!({ "tree": true, "fields": ["id", "title"], "priority": 1 }),
+            vec!["show", "--tree", "--fields", "id,title", "-p", "1"],
+        ),
+        (
+            "stats",
+            json!({ "by": ["status", "tag"], "bucket": "day", "last": 3 }),
+            vec!["stats", "--by", "status,tag", "--bucket", "day", "--last", "3"],
+        ),
+        ("project.ls", json!({}), vec!["project", "ls"]),
+    ];
+    for (n, (method, mut params, argv)) in cases.into_iter().enumerate() {
+        params["project"] = json!(project);
+        params["actor"] = json!(ACTOR);
+        let reply = wire.call(n as u64 + 1, method, params);
+        let result = &reply["result"];
+        assert!(result.is_object(), "{method}: {reply}");
+        let mut want_argv = vec!["--user", ACTOR];
+        want_argv.extend(&argv);
+        let want = cli(&f, &root, &want_argv);
+        assert_eq!(result["value"], want, "{method} {argv:?}");
+        assert_eq!(result["partial"], false, "{method}");
+        assert!(result["messages"].is_array(), "{method}: {result}");
+    }
+    // 한 id — 이슈 하나.
+    let alpha = cli(&f, &root, &["show", "-g", "alpha", "--fields", "id"])[0]["id"].as_str().unwrap().to_string();
+    let reply = wire.call(50, "show", json!({ "project": project, "id": alpha }));
+    assert_eq!(reply["result"]["value"], cli(&f, &root, &["show", &alpha]), "{reply}");
+}
+
+#[test]
+fn an_unregistered_or_missing_project_is_refused() {
+    let f = Fence::new();
+    let _root = f.project("proj");
+    let loose = f.0.join("loose");
+    std::fs::create_dir(&loose).unwrap();
+    let (_daemon, mut wire) = served(&f);
+
+    let missing = wire.call(1, "status", json!({}));
+    assert_eq!(missing["error"]["code"], -32602, "{missing}");
+    assert!(missing["error"]["message"].as_str().unwrap().contains("project"), "{missing}");
+
+    let unknown = wire.call(2, "status", json!({ "project": loose.to_str().unwrap() }));
+    assert_eq!(unknown["error"]["code"], -32000, "{unknown}");
+    assert_eq!(unknown["error"]["data"]["code"], "not_registered", "{unknown}");
+    // 상대 경로는 걸어 둔 것으로 치지 않는다.
+    let relative = wire.call(3, "status", json!({ "project": "proj" }));
+    assert_eq!(relative["error"]["data"]["code"], "not_registered", "{relative}");
+}
+
+#[test]
+fn an_unknown_key_a_bad_lang_tz_or_value_is_invalid_params() {
+    let f = Fence::new();
+    let root = f.project("proj");
+    let project = root.to_str().unwrap();
+    let (_daemon, mut wire) = served(&f);
+
+    let typo = wire.call(1, "show", json!({ "project": project, "staus": "todo" }));
+    assert_eq!(typo["error"]["code"], -32602, "{typo}");
+    assert!(typo["error"]["message"].as_str().unwrap().contains("staus"), "키 이름을 안 댄다 — {typo}");
+    // 읽기 메서드는 argv 를 받지 않는다.
+    let argv = wire.call(2, "show", json!({ "project": project, "argv": ["--all"] }));
+    assert_eq!(argv["error"]["code"], -32602, "{argv}");
+    let lang = wire.call(3, "status", json!({ "project": project, "lang": "xx" }));
+    assert_eq!(lang["error"]["code"], -32602, "{lang}");
+    let tz = wire.call(4, "status", json!({ "project": project, "tz": "Mars/Base" }));
+    assert_eq!(tz["error"]["code"], -32602, "{tz}");
+    let kind = wire.call(5, "show", json!({ "project": project, "type": "nope" }));
+    assert_eq!(kind["error"]["code"], -32602, "{kind}");
+    let limit = wire.call(6, "ready", json!({ "project": project, "limit": 0 }));
+    assert_eq!(limit["error"]["code"], -32602, "{limit}");
+    let shape = wire.call(7, "show", json!({ "project": project, "tree": "yes" }));
+    assert_eq!(shape["error"]["code"], -32602, "{shape}");
+    // 좋은 lang 은 화면 말을 바꾼다.
+    let ko = wire.call(8, "status", json!({ "project": project, "lang": "ko" }));
+    assert!(ko["result"]["value"].is_object() || ko["result"]["value"].is_array(), "{ko}");
+}
+
+#[test]
+fn a_cli_failure_is_carried_with_its_code() {
+    let f = Fence::new();
+    let root = f.project("proj");
+    let project = root.to_str().unwrap();
+    let (_daemon, mut wire) = served(&f);
+
+    let want = f.refused(&["-C", project, "--json", "show", "no-such-id"]);
+    let got = wire.call(1, "show", json!({ "project": project, "id": "no-such-id" }));
+    assert_eq!(got["error"]["code"], -32000, "{got}");
+    assert_eq!(got["error"]["data"]["code"], want["code"], "{got} / {want}");
 }

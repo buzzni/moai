@@ -2466,7 +2466,7 @@ pub struct ReadyArgs {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SortFields(pub Vec<crate::query::Field>);
 
-fn sort_fields(raw: &str) -> Result<SortFields, String> {
+pub(crate) fn sort_fields(raw: &str) -> Result<SortFields, String> {
     crate::query::parse_order(raw).map(SortFields).map_err(|e| e.to_string())
 }
 

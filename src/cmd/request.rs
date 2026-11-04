@@ -17,7 +17,7 @@
 //! 여럿이 함께 불러도 된다). 프로세스의 현재 디렉터리를 옮기지 않는다. 요청 안에서 제 손으로 실을 띄워 moai 를
 //! 부르면 그 실은 통을 모른다 — 그런 실도 이 입구를 지난다. 이 입구 밖에서 부른 `store`·`cmd` 는 옛 길(프로세스
 //! 전역·stderr)로 간다.
-#![cfg_attr(not(test), expect(dead_code, reason = "데몬의 읽기 메서드(moai-5n6m.q16)가 부를 입구다"))]
+#![cfg_attr(not(any(test, unix)), allow(dead_code, reason = "부르는 데몬 메서드는 유닉스에만 선다"))]
 
 use super::{Ctx, R};
 use crate::cli::{Cmd, ProjectCmd, ShowArgs, StatsArgs};
@@ -45,6 +45,7 @@ pub(crate) enum Read {
 
 impl Read {
     /// CLI 가 푼 명령에서 — 여섯 밖의 것은 그대로 돌려준다. 시험이 CLI 와 같은 인자로 두 길을 견줄 때 쓴다.
+    #[cfg_attr(not(test), expect(dead_code, reason = "시험만 부른다"))]
     pub(crate) fn of(cmd: Cmd) -> Result<Read, Box<Cmd>> {
         Ok(match cmd {
             Cmd::Status(w) => Read::Status { worktree: w.worktree },
