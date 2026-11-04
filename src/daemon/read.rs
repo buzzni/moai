@@ -30,7 +30,7 @@
 //! | `show` | `id: string`(이슈 id 또는 종류), `tree`·`removed`·`worktree`·`reverse: bool`, `fields: string\|[string]`, `sort: string`, `limit: int>=1`, `after: string`, 거르개 |
 //! | `stats` | `by: string\|[string]`(축), `bucket: "day"\|"week"`, `last: int 1..=1000`, 거르개 |
 //! | `project.ls` | 없음 (`project` 도 안 쓴다) |
-//! | `changes` | `cursor: string`(`value` 는 `{cursor, changed, removed, reset}`) |
+//! | `changes` | `cursor: string`(`value` 는 `{cursor, changed, removed, reset}`, 견주는 목록은 `show` 의 `all: true`) |
 //!
 //! 거르개: `status`·`tag`·`no_tag`·`epic`·`milestone`·`parent`·`priority`·`assignee`·`since`·`created`·`done`·`filter`
 //! 는 `string|number|[…]`(쉼표는 "또는", 배열은 "그리고", 담당만 배열도 "또는"), `type`·`grep: string`, `stale: int`,
@@ -60,21 +60,34 @@ pub fn register(methods: &mut Methods) {
     methods.register("show", |env, p| serve(env, "show", p, true, show));
     methods.register("stats", |env, p| serve(env, "stats", p, true, stats));
     methods.register("project.ls", |env, p| serve(env, "project.ls", p, false, |_| Ok(Read::ProjectLs)));
-    methods.register("changes", changes);
+    // 기억은 데몬 하나에 하나다 — 연결 스레드가 모두 이 복제로 같은 것을 나눠 쓴다(`changes::Memory`).
+    let memory = super::changes::Memory::new();
+    methods.register("changes", move |env, p| changes(env, p, &memory));
 }
 
-/// `changes` — 커서 뒤로 바뀐 id(moai-5n6m.cb9). 같은 봉투에 싼다: 클라이언트가 어느 메서드든 `result.value` 를
-/// 벗겨 읽게 두려는 것이다. `messages`·`partial` 은 읽다가 만난 못 읽는 줄·저널이다(`changes::poll`).
-/// 읽는 규칙(커서·`reset`)은 `changes::handle` 에 있다.
-fn changes(env: &RequestEnv, params: Value) -> Result<Value, RpcError> {
+/// `changes` — 데몬이 기억한 옛 스냅샷 뒤로 바뀐 id(moai-5n6m.cb9, moai-8ts9). 같은 봉투에 싼다: 클라이언트가 어느
+/// 메서드든 `result.value` 를 벗겨 읽게 두려는 것이다. 견주는 목록은 [`whole`] — 클라이언트의 "전부 읽기" 와 같은
+/// 요청을 `serve` 와 같은 사람·말·시간대·설정으로 돌린다. 읽는 규칙(커서·`reset`·기억)은 `changes` 모듈에 있다.
+fn changes(env: &RequestEnv, params: Value, memory: &super::changes::Memory) -> Result<Value, RpcError> {
     let mut p = Params::new("changes", params)?;
     let cursor = p.string("cursor")?;
     p.done()?;
     let reg = project::registry();
     let lang = project::lang(env, &reg)?;
-    project::zone(env)?;
+    let zone = project::zone(env)?;
     let root = project::resolve(env, lang, &reg)?;
-    super::changes::handle(&root, lang, &json!({ "cursor": cursor }))
+    let lang_asked = env.lang.is_some().then_some(lang);
+    let whole = Request { root, read: whole()?, actor: env.actor.clone(), lang: lang_asked, zone, reg: Some(reg) };
+    super::changes::handle(memory, whole, lang, cursor.as_deref())
+}
+
+/// "전부 읽기" — `show` 메서드에 `all: true` 하나만 준 것과 같은 읽기다. `changes` 가 견주는 목록이고, `reset` 을
+/// 받은 클라이언트가 다시 읽는 목록이다. 같은 빌더(`show`)로 지어 두 길이 갈릴 자리를 없앤다.
+pub(super) fn whole() -> Result<Read, RpcError> {
+    let mut p = Params::new("show", json!({ "all": true }))?;
+    let read = show(&mut p)?;
+    p.done()?;
+    Ok(read)
 }
 
 /// 한 메서드의 한 요청. 차례: 필드 읽기(`-32602`) → 말·시간대(`-32602`) → 프로젝트(`-32602`·`-32000`) → 돌리기.

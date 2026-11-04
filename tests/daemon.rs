@@ -794,3 +794,159 @@ fn changes_over_the_socket_sees_what_the_cli_writes() {
     let loose = wire.call(8, "changes", json!({ "project": f.0.display().to_string() }));
     assert_eq!(loose["error"]["data"]["code"], "not_registered", "{loose}");
 }
+
+// ---- changes 가 기억한 스냅샷과 견준다(moai-8ts9) ------------------------------------------------------------------
+
+/// `changes` 한 번 — `(커서, 바뀜, 사라짐, reset)`. 바뀜은 id 순이다.
+fn poll(wire: &mut Wire, n: u64, project: &str, cursor: Option<&str>) -> (String, Vec<String>, Vec<String>, bool) {
+    let mut params = json!({ "project": project });
+    if let Some(c) = cursor {
+        params["cursor"] = json!(c);
+    }
+    let reply = wire.call(n, "changes", params);
+    let value = &reply["result"]["value"];
+    let ids = |v: &Value| -> Vec<String> {
+        v.as_array().unwrap_or_else(|| panic!("{reply}")).iter().map(|x| x.as_str().unwrap().to_string()).collect()
+    };
+    (
+        value["cursor"].as_str().unwrap().to_string(),
+        ids(&value["changed"]),
+        ids(&value["removed"]),
+        value["reset"] == true,
+    )
+}
+
+/// 에픽 하나(멤버 둘)와 마일스톤 하나를 더 든 걸어 둔 프로젝트 — `(뿌리, 에픽, 멤버 둘, 마일스톤)`.
+fn grouped(f: &Fence) -> (PathBuf, String, [String; 2], String) {
+    let root = f.project("proj");
+    let d = root.to_str().unwrap().to_string();
+    let plan = f.0.join("plan.md");
+    std::fs::write(&plan, "# grouped\n- one\n- two\n").unwrap();
+    for args in [
+        vec!["-C", &d, "add", "--from", plan.to_str().unwrap(), "--user", ACTOR],
+        vec!["-C", &d, "milestone", "add", "v1", "--user", ACTOR],
+    ] {
+        let out = f.run(&args);
+        assert!(out.status.success(), "moai {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+    }
+    let rows = cli(f, &root, &["show", "--all", "--fields", "id,title,kind"]);
+    let id = |kind: &str, title: &str| -> String {
+        rows.as_array().unwrap().iter().find(|r| r["kind"] == kind && r["title"] == title).unwrap()["id"]
+            .as_str()
+            .unwrap()
+            .to_string()
+    };
+    (root.clone(), id("epic", "grouped"), [id("issue", "one"), id("issue", "two")], id("milestone", "v1"))
+}
+
+/// 걸어 둔 프로젝트에서 제목으로 id 를 찾는다.
+fn id_titled(f: &Fence, root: &Path, title: &str) -> String {
+    let rows = cli(f, root, &["show", "--all", "--fields", "id,title"]);
+    rows.as_array().unwrap().iter().find(|r| r["title"] == title).unwrap()["id"].as_str().unwrap().to_string()
+}
+
+/// **`updated_at` 을 옛 값으로 둔 채 들어온 줄도 선다**(리뷰 `moai-5n6m.e9f` 의 4). 다른 clone 에서 한 시간 전에 고친
+/// 줄이 `git pull` 로 들어온 꼴이다 — 창(`updated_at`)으로 거르던 판은 바뀜으로도 `reset` 으로도 안 냈다.
+#[test]
+fn changes_sees_a_row_pulled_in_with_an_old_stamp() {
+    let f = Fence::new();
+    let root = f.project("proj");
+    let project = root.to_str().unwrap();
+    let alpha = id_titled(&f, &root, "alpha");
+    let (_daemon, mut wire) = served(&f);
+    let (cursor, _, _, reset) = poll(&mut wire, 1, project, None);
+    assert!(reset);
+
+    let path = root.join(".moai/issues.jsonl");
+    let text = std::fs::read_to_string(&path).unwrap();
+    let pulled: String = text
+        .lines()
+        .map(|line| {
+            let mut row: Value = serde_json::from_str(line).unwrap();
+            if row["id"] == alpha.as_str() {
+                row["title"] = json!("alpha from a pull");
+                row["updated_at"] = json!("2026-11-04T11:00:00Z");
+            }
+            format!("{row}\n")
+        })
+        .collect();
+    std::fs::write(&path, pulled).unwrap();
+    let (_, changed, removed, reset) = poll(&mut wire, 2, project, Some(&cursor));
+    assert_eq!((changed, removed, reset), (vec![alpha], vec![], false), "옛 도장으로 들어온 고침을 놓쳤다");
+}
+
+/// **파생값만 바뀐 줄도 선다**(리뷰의 6). 마지막 멤버가 닫히면 에픽의 칸이, 에픽이 마일스톤에 들면 멤버가 물려받는
+/// 마일스톤이 바뀐다 — 그 값을 든 줄은 파일에서 그대로다. 제 줄이 바뀐 id 만 내던 판은 그 줄을 안 냈다.
+#[test]
+fn changes_names_rows_whose_derived_values_moved() {
+    let f = Fence::new();
+    let (root, epic, [one, two], milestone) = grouped(&f);
+    let project = root.to_str().unwrap();
+    let (_daemon, mut wire) = served(&f);
+    let (cursor, _, _, reset) = poll(&mut wire, 1, project, None);
+    assert!(reset);
+
+    for id in [&one, &two] {
+        let out = f.run(&["-C", project, "mv", id, "done", "--user", ACTOR]);
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    }
+    let (cursor, changed, _, reset) = poll(&mut wire, 2, project, Some(&cursor));
+    assert!(!reset);
+    assert!(changed.contains(&epic), "마지막 멤버가 닫혔는데 에픽이 안 섰다 — {changed:?}");
+
+    let out = f.run(&["-C", project, "edit", &epic, "--milestone", &milestone, "--user", ACTOR]);
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let (_, changed, _, reset) = poll(&mut wire, 3, project, Some(&cursor));
+    assert!(!reset);
+    for member in [&one, &two] {
+        assert!(changed.contains(member), "에픽을 마일스톤에 넣었는데 {member} 가 안 섰다 — {changed:?}");
+    }
+}
+
+/// **기억에서 밀려난 지문은 `reset` 이다**(프로젝트마다 최근 8벌). 커서에 상태를 싣던 판은 그대로 이어 갔다.
+#[test]
+fn changes_resets_an_evicted_cursor() {
+    let f = Fence::new();
+    let root = f.project("proj");
+    let project = root.to_str().unwrap();
+    let alpha = id_titled(&f, &root, "alpha");
+    let (_daemon, mut wire) = served(&f);
+    let (old, _, _, _) = poll(&mut wire, 1, project, None);
+    let (same, changed, _, reset) = poll(&mut wire, 2, project, Some(&old));
+    assert_eq!((changed, reset), (vec![], false));
+    assert_eq!(same, old, "안 바뀐 스냅샷이 다른 커서를 냈다");
+
+    // 아홉 번 바뀌며 이어 가면 첫 스냅샷은 밀려난다.
+    let mut cursor = old.clone();
+    for n in 0..9u64 {
+        let title = format!("alpha {n}");
+        let out = f.run(&["-C", project, "edit", &alpha, "--title", &title, "--user", ACTOR]);
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        let (next, changed, _, reset) = poll(&mut wire, 10 + n, project, Some(&cursor));
+        assert_eq!((changed, reset), (vec![alpha.clone()], false));
+        cursor = next;
+    }
+    let (_, changed, removed, reset) = poll(&mut wire, 30, project, Some(&old));
+    assert!(reset && changed.is_empty() && removed.is_empty(), "밀려난 지문이 reset 이 아니다");
+    assert!(!poll(&mut wire, 31, project, Some(&cursor)).3, "지금 커서가 살아 있지 않다");
+}
+
+/// **기억은 데몬의 것이다** — 다시 띄운 데몬은 옛 커서를 모르고, 스냅샷이 같아도 `reset` 이다(2026-11-04 사람이
+/// 받아들인 대가). 서버에 아무것도 안 두던 판은 그대로 이어 갔다.
+#[test]
+fn changes_resets_after_a_restart() {
+    let f = Fence::new();
+    let root = f.project("proj");
+    let project = root.to_str().unwrap();
+    let (daemon, mut wire) = served(&f);
+    let (cursor, _, _, _) = poll(&mut wire, 1, project, None);
+    assert!(!poll(&mut wire, 2, project, Some(&cursor)).3);
+
+    drop(wire);
+    let stopped = f.json(&["daemon", "stop", "--json"]);
+    assert_eq!(stopped["stopped"], true, "{stopped}");
+    assert!(daemon.wait().success());
+    let (_daemon, mut wire) = served(&f);
+    let (_, changed, removed, reset) = poll(&mut wire, 1, project, Some(&cursor));
+    assert!(reset && changed.is_empty() && removed.is_empty(), "다시 띄운 데몬이 옛 커서로 이어 갔다");
+}
