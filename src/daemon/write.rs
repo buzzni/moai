@@ -85,7 +85,7 @@ fn add(p: &mut Params) -> Result<Write, RpcError> {
         title: p.string("title")?,
         epic: p.string("epic")?,
         milestone: p.string("milestone")?,
-        tag: list(p, "tag")?,
+        tag: p.list("tag")?,
         priority: priority(p)?,
         status: p.string("status")?,
         body: p.string("body")?,
@@ -114,8 +114,8 @@ fn edit(p: &mut Params) -> Result<Write, RpcError> {
         id: needed(p, "id")?,
         title: p.string("title")?,
         body: p.string("body")?,
-        tag: list(p, "tag")?,
-        untag: list(p, "untag")?,
+        tag: p.list("tag")?,
+        untag: p.list("untag")?,
         epic: p.string("epic")?,
         milestone: p.string("milestone")?,
         priority: priority(p)?,
@@ -197,8 +197,8 @@ fn rm(p: &mut Params) -> Result<Write, RpcError> {
 fn link(p: &mut Params) -> Result<Write, RpcError> {
     Ok(Write::Link(Box::new(LinkArgs {
         id: needed(p, "id")?,
-        blocks: list(p, "blocks")?,
-        unblocks: list(p, "unblocks")?,
+        blocks: p.list("blocks")?,
+        unblocks: p.list("unblocks")?,
     })))
 }
 
@@ -214,11 +214,6 @@ fn ids(p: &mut Params, key: &str) -> Result<Vec<String>, RpcError> {
         return Err(p.missing(key));
     }
     Ok(ids)
-}
-
-/// 쉼표로 가르는 목록 — CLI 의 `value_delimiter = ','` 와 같다. 배열은 깃발을 여러 번 준 것이다.
-fn list(p: &mut Params, key: &str) -> Result<Vec<String>, RpcError> {
-    Ok(p.strings(key)?.iter().flat_map(|s| read::split(s)).collect())
 }
 
 /// `-p` — clap 은 u8 로만 읽고, 0~3 은 쓰기가 잰다(`Issue::validate_fields`). 그래서 여기도 u8 밖만 거절하고 4~255 는

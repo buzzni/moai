@@ -200,7 +200,7 @@ fn show(p: &mut Params) -> Result<Read, RpcError> {
         tree: p.flag("tree")?,
         as_plan: false,
         removed: p.flag("removed")?,
-        fields: p.strings("fields")?.into_iter().flat_map(|s| split(&s)).collect(),
+        fields: p.list("fields")?,
         worktree: WorktreeArg { worktree: p.flag("worktree")? },
         filter: filter(p)?,
         page,
@@ -209,7 +209,7 @@ fn show(p: &mut Params) -> Result<Read, RpcError> {
 
 fn stats(p: &mut Params) -> Result<Read, RpcError> {
     let mut by = Vec::new();
-    for word in p.strings("by")?.iter().flat_map(|s| split(s)) {
+    for word in p.list("by")? {
         // 글자 크기를 가린다 — clap 의 `value_enum` 이 그렇다(`--by STATUS` 는 CLI 에서 거절이다).
         by.push(AxisArg::from_str(&word, false).map_err(|_| p.bad("by", format!("unknown axis {word:?}")))?);
     }
@@ -245,10 +245,6 @@ fn filter(p: &mut Params) -> Result<FilterArgs, RpcError> {
         archived: p.flag("archived")?,
         filter: p.strings("filter")?,
     })
-}
-
-pub(super) fn split(s: &str) -> Vec<String> {
-    s.split(',').map(str::to_string).collect()
 }
 
 /// 한 요청의 필드. 읽은 키는 지우고, 남은 키가 모르는 키다. 쓰기 메서드(`daemon::write`)도 같은 것으로 읽는다 —
@@ -327,6 +323,16 @@ impl Params {
                 word(&v).map(|w| vec![w]).ok_or_else(|| self.bad(key, "must be a string, a number or an array of them"))
             }
         }
+    }
+
+    /// 쉼표로 가르는 목록 — CLI 의 `value_delimiter = ','` 와 같다. [`Params::strings`] 로 받은 낱말마다 쉼표로 가른다:
+    /// 배열은 깃발을 여러 번 준 것이고, 쉼표는 한 깃발 안의 여럿이다. 가른 조각은 다듬지 않고 빈 조각도 그대로 둔다 —
+    /// clap 이 그렇다.
+    ///
+    /// **가르는 자는 여기 하나다**(리뷰 moai-3hgm.puw 12번). 읽기의 `fields`·`by` 와 쓰기의 `tag`·`untag`·`blocks`·
+    /// `unblocks` 가 이것으로 읽는다 — 자리마다 따로 가르면 규칙(다듬기·빈 조각 버리기)을 고치는 날 몇 자리만 바뀐다.
+    pub(super) fn list(&mut self, key: &str) -> Result<Vec<String>, RpcError> {
+        Ok(self.strings(key)?.iter().flat_map(|s| s.split(',').map(str::to_string)).collect())
     }
 
     pub(super) fn int(&mut self, key: &str) -> Result<Option<i64>, RpcError> {
