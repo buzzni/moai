@@ -71,6 +71,7 @@
   /* Derived: the host does not give these. */
   --hover: color-mix(in srgb, var(--text) 8%, var(--bg));
   --selected: color-mix(in srgb, var(--accent) 10%, var(--bg));
+  --hatch-fill: repeating-linear-gradient(135deg, color-mix(in srgb, var(--muted) 4%, transparent) 0 4px, transparent 4px 10px);
   --muted-bg: color-mix(in srgb, var(--text) 6%, var(--bg));
   --accent-hover: color-mix(in srgb, var(--accent) 88%, black);
   --danger-soft: color-mix(in srgb, var(--danger) 10%, var(--bg));
@@ -885,6 +886,9 @@ svg.links polygon { fill: var(--link); }
 /* ---- Panes: the list and board each scroll on their own, so a tab change keeps each one's offset. ---- */
 .m-shell .m-split-list { display: flex; flex-direction: column; overflow: hidden; }
 .m-pane-main { flex: 1 1 auto; min-height: 0; overflow: auto; }
+.m-pane-main[data-pane="list"]:not([hidden]), .m-pane-main[data-pane="board"]:not([hidden]) { display: flex; flex-direction: column; }
+.m-pane-main[data-pane="list"] > :not(.m-fill), .m-pane-main[data-pane="board"] > :not(.m-fill) { flex: none; }
+.m-pane-main > .m-fill { flex: 1 0 32px; background: var(--hatch-fill); }
 .m-pane-main:focus, .m-pane-detail:focus, .m-pane-wiki:focus { outline: 0; }
 .m-pane-wiki { overflow: auto; }
 
