@@ -43,6 +43,8 @@ impl Fence {
             .env_remove("XDG_RUNTIME_DIR")
             .env_remove("XDG_CONFIG_HOME")
             .env_remove("MOAI_ACTOR")
+            // 옮김을 끄는 손잡이도 시험이 준 것만 — 돌리는 셸에서 새면 CLI 쪽 견주기가 워크트리의 제 트래커에 쓴다.
+            .env_remove("MOAI_HERE")
             // git 의 사람은 시험이 준 것만 — 돌리는 셸의 `GIT_CONFIG_GLOBAL` 이 새면 `no_actor` 를 재는 시험이 헛돈다.
             .env("GIT_CONFIG_GLOBAL", "/dev/null")
             .env("GIT_CONFIG_SYSTEM", "/dev/null")
@@ -1832,12 +1834,9 @@ fn texts(files: std::collections::BTreeMap<String, Vec<u8>>) -> std::collections
     files.into_iter().map(|(k, v)| (k, String::from_utf8_lossy(&v).into_owned())).collect()
 }
 
-/// **걸어 둔 워크트리를 `project` 로 주면 루트의 트래커에 쓰고, 그 자리를 `messages` 에 댄다** — `moai -C <워크트리>`
-/// 의 CLI 가 stderr 에 내는 그 한 줄이다(`lib::redirected`, moai-y7go). 데몬은 걸어 둔 자리만 받는다 — 루트만 걸어 둔
-/// 채 워크트리를 대면 `not_registered` 이고 아무것도 안 쓴다. 워크트리의 `.moai` 는 갈라져 나온 그대로다.
-#[test]
-fn a_write_through_a_registered_worktree_lands_in_the_main_checkout_as_on_the_cli() {
-    let f = Fence::new();
+/// 딸린 워크트리 하나를 든 저장소 — 주 체크아웃 `main` 에 트래커를 심어 줄 둘(`alpha`, 남의 줄 `theirs`)과 함께 커밋하고
+/// `side` 로 갈라 낸다. 워크트리의 `.moai` 는 그 커밋의 것이다. 아무것도 걸어 두지 않는다 — `(main, side, alpha, theirs)`.
+fn with_a_worktree(f: &Fence) -> (PathBuf, PathBuf, String, String) {
     let main = f.0.join("main");
     std::fs::create_dir(&main).unwrap();
     let git = |args: &[&str]| {
@@ -1854,12 +1853,22 @@ fn a_write_through_a_registered_worktree_lands_in_the_main_checkout_as_on_the_cl
     git(&["init", "-q"]);
     let out = f.run(&["-C", main.to_str().unwrap(), "init"]);
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
-    let alpha = made(&f, &main, &["add", "alpha"]);
-    let theirs = made(&f, &main, &["add", "theirs", "-a", "Lee (lee@example.com)"]);
+    let alpha = made(f, &main, &["add", "alpha"]);
+    let theirs = made(f, &main, &["add", "theirs", "-a", "Lee (lee@example.com)"]);
     git(&["add", "-A"]);
     git(&["commit", "-q", "-m", "fixture"]);
     let side = f.0.join("side");
     git(&["worktree", "add", "-q", "-b", "side", side.to_str().unwrap()]);
+    (main, side, alpha, theirs)
+}
+
+/// **걸어 둔 워크트리를 `project` 로 주면 루트의 트래커에 쓰고, 그 자리를 `messages` 에 댄다** — `moai -C <워크트리>`
+/// 의 CLI 가 stderr 에 내는 그 한 줄이다(`lib::redirected`, moai-y7go). 데몬은 걸어 둔 자리만 받는다 — 루트만 걸어 둔
+/// 채 워크트리를 대면 `not_registered` 이고 아무것도 안 쓴다. 워크트리의 `.moai` 는 갈라져 나온 그대로다.
+#[test]
+fn a_write_through_a_registered_worktree_lands_in_the_main_checkout_as_on_the_cli() {
+    let f = Fence::new();
+    let (main, side, alpha, theirs) = with_a_worktree(&f);
     let out = f.run(&["project", "add", main.to_str().unwrap()]);
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
     let (_daemon, mut wire) = served(&f);
@@ -1896,6 +1905,58 @@ fn a_write_through_a_registered_worktree_lands_in_the_main_checkout_as_on_the_cl
         );
     }
     assert_eq!(files_of(&side_moai), side_before, "워크트리의 .moai 를 고쳤다");
+}
+
+/// **데몬을 띄운 셸의 `MOAI_HERE=1` 은 요청에 안 선다**(리뷰 moai-3hgm.puw 3번) — 데몬의 `MOAI_ACTOR` 를 안 읽는 것과
+/// 같은 자다(moai-3hgm.k7s). 요청에는 그 손잡이를 줄 길이 없으니, 걸어 둔 워크트리로 간 요청은 그것 없이 친 CLI 처럼
+/// 루트의 트래커를 읽고 쓰고, 따라 칠 명령(`rm` 의 `line` 이 내는 것, `edit` 의 날짜 되돌리기)에도 `MOAI_HERE=1` 이
+/// 안 붙는다. 읽던 판은 워크트리의 제 `.moai` 에 써 옮김이 막으려던 갈라진 스냅샷을 지었고, `rm` 의 거절문이
+/// `MOAI_HERE=1 moai -C <워크트리> rm --line 1` 을 댔다.
+#[test]
+fn the_daemons_own_moai_here_does_not_keep_a_request_on_the_worktrees_tracker() {
+    let f = Fence::new();
+    let (main, side, alpha, _) = with_a_worktree(&f);
+    for dir in [&main, &side] {
+        let out = f.run(&["project", "add", dir.to_str().unwrap()]);
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    }
+    let (_daemon, _) = f.start_with(&[("MOAI_HERE", "1")]);
+    let mut wire = Wire::open(&f.socket());
+    let side_moai = side.join(".moai");
+    let side_before = files_of(&side_moai);
+    for (n, (method, params, argv)) in [
+        ("note", json!({ "id": alpha, "text": "from the worktree" }), vec!["note", &alpha, "from the worktree"]),
+        ("add", json!({ "title": "made in the worktree" }), vec!["add", "made in the worktree"]),
+        ("edit", json!({ "id": alpha, "due": "2026-12-01" }), vec!["edit", &alpha, "--due", "2026-12-01"]),
+        // 보여 준 해시 없이 `yes` 만 준 지우기는 넘어지며 따라 칠 보기 명령을 댄다(`rm::to_type`).
+        ("rm", json!({ "line": 1, "yes": true }), vec!["rm", "--line", "1", "--yes"]),
+    ]
+    .iter()
+    .enumerate()
+    {
+        let reply = same_write(&f, &mut wire, (&side, &main), n as u64 + 1, (method, params, argv, Want::Same));
+        assert!(!reply.to_string().contains("MOAI_HERE"), "{method}: 요청이 안 바란 손잡이를 댔다 — {reply}");
+    }
+    assert_eq!(files_of(&side_moai), side_before, "데몬의 MOAI_HERE 로 워크트리의 .moai 에 썼다");
+
+    // 제 `.moai` 가 없는 딸린 워크트리 — 걸어 둔 프로젝트를 푸는 자리(`daemon::project::resolve`)는 통을 걸기 전이라 따로
+    // 섰다. 손잡이를 따르던 판은 요청이 옮겨 갈 이 자리를 `not_a_project` 로 거절했다.
+    let bare = f.0.join("bare");
+    let out = Command::new("git")
+        .args(["worktree", "add", "-q", "--detach", bare.to_str().unwrap()])
+        .current_dir(&main)
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "git worktree add: {}", String::from_utf8_lossy(&out.stderr));
+    std::fs::remove_dir_all(bare.join(".moai")).unwrap();
+    let out = f.run(&["project", "add", bare.to_str().unwrap()]);
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let (params, argv) =
+        (json!({ "id": alpha, "text": "from a bare worktree" }), ["note", &alpha, "from a bare worktree"]);
+    same_write(&f, &mut wire, (&bare, &main), 9, ("note", &params, &argv, Want::Same));
+    assert!(!bare.join(".moai").exists(), "제 .moai 없는 워크트리에 트래커를 세웠다");
 }
 
 /// 그 프로세스가 이 파일을 열어 쥐고 있나 — `/proc/<pid>/fd` 의 장치·아이노드로 견준다(이름이 아니라 파일로).

@@ -57,7 +57,12 @@ pub fn resolve(
     let Some(dir) = found else {
         return Err(RpcError::moai(code::NOT_REGISTERED, fill(say(lang, "web.not_registered"), &[("path", value)])));
     };
-    match crate::store::spot(&crate::store::Repo::opened_root(dir)) {
+    // **요청이 열 트래커로 잰다** — 데몬의 `MOAI_HERE` 를 안 따른다(리뷰 moai-3hgm.puw 3번). 이 물음은 요청의 통을 걸기
+    // 전이라 `store::here_wanted` 의 가드([`crate::side::hung`])가 안 선다. `Repo::opened_root` 로 물으면 그 셸의
+    // `MOAI_HERE=1` 하나로, 제 `.moai` 없는 딸린 워크트리를 — 요청은 주 체크아웃의 트래커로 옮겨 갈 것을 — 여기서
+    // `not_a_project` 로 거절한다. 옮기는 자는 `Repo::redirect` 의 그것(`worktree::tracker_root`)에서 손잡이만 뺀 것이다.
+    let tracker = crate::worktree::tracker_root(dir).unwrap_or_else(|| dir.clone());
+    match crate::store::spot(&tracker) {
         crate::store::Spot::Absent => {
             Err(RpcError::moai(code::NOT_A_PROJECT, fill(say(lang, "web.not_a_project"), &[("path", value)])))
         }

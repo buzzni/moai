@@ -72,6 +72,8 @@ pub(crate) fn current() -> Option<Shared> {
 /// 빠뜨리기 쉬웠다. 요청 안에서 다르게 하는 일은 모두 이것으로 묻고, 여기 적는다 — 무엇을 가르는지가 한 자리에 선다.
 ///
 /// - `model::actor` — 데몬의 `MOAI_ACTOR` 를 안 읽는다. 요청을 보낸 사람이 아니다(moai-3hgm.k7s)
+/// - `store::here_wanted` — 데몬의 `MOAI_HERE` 를 안 읽는다. 딸린 워크트리로 간 요청은 주 체크아웃의 트래커로 옮겨
+///   간다(리뷰 moai-3hgm.puw 3번)
 /// - `hook::record_own_picks` — 세션의 집기를 안 적는다. 데몬의 `CLAUDE_CODE_SESSION_ID` 는 요청의 것이 아니다
 ///   (moai-3hgm.25e)
 /// - `cmd::refuse_if_flag_like` — 깃발 같은 값과 `-` 한 글자를 재지 않는다. 요청의 필드는 형이 있는 글이고, 그 검사가

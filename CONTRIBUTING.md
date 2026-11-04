@@ -232,8 +232,10 @@ moai-5n6m.m0b, and `cmd::request::write`, moai-3hgm.25e). `read` runs `status`, 
   started the process, not to the request.
 - The caller makes one call per request and does not start threads of its own that call
   into moai inside it. Anything called outside the entry still uses the process-wide
-  state listed above. The write path still reads `MOAI_HERE` and `MOAI_NOW` from the
-  process environment. It records no session pick-ups: the process's
+  state listed above. The write path still reads `MOAI_NOW` from the process
+  environment. It does not read `MOAI_HERE`: with a `Side` hung, `store::here_wanted`
+  is false (moai-3hgm.puw), so a request to a linked worktree goes to the main
+  checkout's tracker. It records no session pick-ups: the process's
   `CLAUDE_CODE_SESSION_ID` belongs to whatever shell started it, not to the request.
 
 **How a refactor that must not change behaviour is gated.** The split into library and
