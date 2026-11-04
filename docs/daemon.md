@@ -33,7 +33,7 @@ There is one daemon per user. A second `start` never runs a second daemon:
 - If a daemon died and left its socket, `start` removes the leftover and starts. Ctrl-C also leaves the socket behind; the next `start` clears it.
 - If a file at the socket path is not a socket of yours, `start` refuses and touches nothing.
 
-`stop` exits 0 when it stopped the daemon or when none was running (`stopped` is `false`). `--json` gives `{stopped, pid, socket}`. It works on a daemon of any version and on one that is at its connection cap (see [The protocol](#the-protocol)). It waits up to 10 seconds for the daemon to end; if the daemon does not end in that time, `stop` fails with a timeout.
+`stop` exits 0 when it stopped the daemon or when none was running (`stopped` is `false`). `--json` gives `{stopped, pid, socket}`. It works on a daemon of any version and on one that is at its connection cap (see [The protocol](#the-protocol)). It waits up to 10 seconds for the daemon to end; if the daemon does not end in that time, `stop` fails with a timeout. What the daemon does while it ends is in [Stopping a daemon](#stopping-a-daemon).
 
 `status --json` gives:
 
@@ -75,6 +75,7 @@ Messages are [JSON-RPC 2.0](https://www.jsonrpc.org/specification). Each request
 - At most 32 connections are open at once for ordinary use. A connection past the cap goes to one of 4 lifecycle slots. The daemon reads one line from it, waiting at most 2 seconds. It answers `hello` and `daemon.shutdown` there; for any other method it answers `-32000` with `data` `{code: "busy", pid}` and `id` `null`, and closes the connection. Either way that connection serves one request only. So a client that leaks connections cannot lock `moai daemon status`, `start` and `stop` out.
 - When the 4 lifecycle slots are full too, the next connection gets the same `busy` line (with the pid) at once, without being read, and is closed. The slots free within 2 seconds. In this state `moai daemon status`, `start` and `stop` fail with the code `busy`, and the message names the pid.
 - A connection that says nothing for 10 minutes is closed.
+- While the daemon stops, a request on a connection that was already open is not run. It gets `-32000` with `data` `{code: "stopping", pid}` and its own `id`, and the connection is closed. See [Stopping a daemon](#stopping-a-daemon).
 - Each request carries its own context in `params`. A connection keeps no state between requests, so `hello` is optional. The only thing the daemon remembers across requests is the snapshots that `changes` compares (see below).
 
 ### Check the version with `hello`
@@ -220,7 +221,17 @@ The epic `repo-32tm` is in the first and third answer although its own line was 
 
 ## Stopping a daemon
 
-`moai daemon stop` sends the method `daemon.shutdown`. The daemon finishes the requests it is running (up to 5 seconds), removes its socket and ends. Its accept loop looks at the stop flag every 0.5 second, so the daemon ends even when its own wake-up connection fails.
+`moai daemon stop` sends the method `daemon.shutdown`. Then the daemon:
+
+1. Removes its socket file and stops listening. From this moment `moai daemon status` says no daemon is running (exit 0), and a new `moai daemon start` waits for this daemon to end.
+2. Finishes the requests it was running. A write runs to the end, however long it takes. A read gets up to 5 seconds; a read that is still running then is cut, and nothing is lost. Writes are not served yet; this rule is in place for them.
+3. Ends.
+
+A request that comes in on an open connection after step 1 is not run. It gets `-32000` with `data` `{code: "stopping", pid}` and its own `id`. When a write gets this answer, it did not change the tracker: send it again to a new daemon, or run the CLI. A client that connects in the same instant as step 1 can be closed with no answer at all.
+
+`stop` waits up to 10 seconds for the daemon to end. A write that takes longer makes `stop` fail with `timeout`; the daemon still ends after the write. A `start` run while a daemon stops waits up to 5 seconds. If the old daemon takes longer, `start` fails with "another daemon holds … but does not answer yet": run it again.
+
+The accept loop looks at the stop flag every 0.5 second, so the daemon ends even when its own wake-up connection fails.
 
 One case has no tool path yet (backlog `moai-69bs`): if the socket file was removed while the daemon runs, new clients cannot find it. `moai daemon stop` says "no daemon is running", `status` says the same, and `moai daemon start` waits 5 seconds and fails with "another daemon holds … but does not answer yet", because the daemon still holds `daemon.lock`. A client that is still connected can send `daemon.shutdown` on its open connection. Otherwise end the process by its pid (the `start` line printed it), for example with `kill <pid>`.
 
