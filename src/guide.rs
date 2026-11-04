@@ -2348,7 +2348,9 @@ session, only after the person says yes (`moai-tmux`, `moai-cmux` or `moai-sayco
 repository in `ListAgents`, except you** — a row whose name starts with the root
 directory's slug and a `-` (2). Nobody registers and nobody is asked which windows count.
 The message you send is the whole assignment, and it names the file of the worker's steps,
-which the worker reads (3).
+which the worker reads (3). A Codex worker's assignment also carries the repository's
+optional `[supervise] extra_lines` just before `from:` — `moai supervise message` inserts them
+(`moai-tmux`, `moai-cmux`).
 
 Five things about the messaging, one line each:
 
@@ -3653,8 +3655,9 @@ The helper is `scripts/codex-pane.py` in the moai-tmux skill. Assemble the assig
 `moai -C "<root>" supervise message <id>`, giving `--model` (`<codex>` and the difficulty), `--effort`,
 `--base`, `--root-branch` and `--from` (your ListAgents name) plus the other slots its `--help` lists —
 an epic goes from step 2, a backlog item from step 1. Its first line names the absolute path to `references/worker-codex.md`
-beside `worker.md` in `moai-supervise`; pass `--steps <that path>` when the skill is not planted under `<root>`. Save it
-under the epic scratch directory. Confirm the fields and the person's approval, then run
+beside `worker.md` in `moai-supervise`; pass `--steps <that path>` when the skill is not planted under `<root>`. Lines the
+repository wrote under `[supervise] extra_lines` in `.moai/config.toml` stand just before `from:`. Save it
+under the epic scratch directory. Confirm the fields, those lines included, and the person's approval, then run
 `python3 "<moai-tmux skill dir>/scripts/codex-pane.py" send <pane> <file>`; it rechecks
 before pasting and before submission. Tell the person which pane received it. "Label the
 pane" applies unchanged: set `@moai` on this pane and ask before showing labels.
@@ -4392,7 +4395,9 @@ command or paste the work over it.
 Use the supervisor's `message()` assignment fields, with `<codex>` as the model in `Model:`
 (not a Claude model), plus `Worker: codex`. Replace the steps-file path in the first line with the **absolute** path
 to `references/worker-codex.md` beside the supervisor skill. The last line is
-`from: <supervisor name>`. Save the whole message in the scratchpad and paste only after
+`from: <supervisor name>`. If `.moai/config.toml` has `[supervise] extra_lines`, those lines go
+just before it — `moai -C "<root>" supervise message <id>` assembles the whole message with them,
+flags as its `--help` lists. Save the whole message in the scratchpad and paste only after
 the live PID, cwd and empty box checks. Use the same "Label the tab" rules above.
 
     cmux paste --surface <surface> --submit - < <file>

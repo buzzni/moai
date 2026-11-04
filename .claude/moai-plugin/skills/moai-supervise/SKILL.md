@@ -80,7 +80,9 @@ session, only after the person says yes (`moai-tmux`, `moai-cmux` or `moai-sayco
 repository in `ListAgents`, except you** — a row whose name starts with the root
 directory's slug and a `-` (2). Nobody registers and nobody is asked which windows count.
 The message you send is the whole assignment, and it names the file of the worker's steps,
-which the worker reads (3).
+which the worker reads (3). A Codex worker's assignment also carries the repository's
+optional `[supervise] extra_lines` just before `from:` — `moai supervise message` inserts them
+(`moai-tmux`, `moai-cmux`).
 
 Five things about the messaging, one line each:
 
