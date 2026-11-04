@@ -487,10 +487,12 @@ Machine-readable lines keep their format in either mode. JSON includes `detail`,
    line naming the work and telling the worker to read the
    [brief](glossary.md#brief) — the worker's numbered steps, a file of the
    supervisor skill (`references/worker.md`) given by its absolute path — and
-   from which step to follow it. The rare branches (you away, a subdirectory
-   project, carrying on stalled work, a review the hook keeps refusing, the review
-   brief) stand beside it in `references/worker-branches.md`, which the worker
-   reads when its assignment takes one. The lines after that fill this assignment — the
+   from which step to follow it. The review brief a subagent worker hands its
+   reviewer stands in that file too. The rare branches (you away, a subdirectory
+   project, carrying on stalled work, a review the hook keeps refusing) stand
+   beside it in `references/worker-branches.md`, and the milestone branch and
+   unfolding a backlog in `references/worker-setup.md`; the worker reads those
+   when its assignment takes one. The lines after that fill this assignment — the
    backlog, the model, the effort and the difficulty, whether the worker is a
    subagent or a session, the models and efforts per role it may hand pieces of
    its work to (`Subagents:` — `none` for a Codex worker), the work running alongside, the root branch and the
