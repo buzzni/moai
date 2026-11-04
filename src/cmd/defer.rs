@@ -189,13 +189,16 @@ pub fn run(ctx: &Ctx, args: DeferArgs) -> R<Vec<String>> {
 
     for id in &moved.missing {
         super::note_partial();
-        eprintln!("moai: {}", crate::i18n::fill(crate::i18n::say(lang, "refuse.not_found"), &[("id", id)]));
+        super::tell(&format!("moai: {}", crate::i18n::fill(crate::i18n::say(lang, "refuse.not_found"), &[("id", id)])));
     }
     // 진 줄은 못 찾은 줄과 같은 표면 하나(stderr)와 같은 종료 코드로 선다 —
     // `mv --from` 과 한 자다. 나머지 id 는 그대로 처리한다.
     for (id, now) in &moved.stale {
         super::note_partial();
-        eprintln!("moai: {}", crate::i18n::fill(crate::i18n::say(lang, "defer.stale"), &[("id", id), ("now", now)]));
+        super::tell(&format!(
+            "moai: {}",
+            crate::i18n::fill(crate::i18n::say(lang, "defer.stale"), &[("id", id), ("now", now)])
+        ));
     }
 
     if ctx.json {

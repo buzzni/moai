@@ -206,7 +206,7 @@ fn read_body_told(arg: Option<String>, ctx: &Ctx, given: Given) -> R<Option<Stri
             }
             _ => crate::i18n::say(ctx.lang(), "add.body_stdin_empty"),
         };
-        eprintln!("moai: {said}");
+        super::tell(&format!("moai: {said}"));
     }
     Ok(body)
 }
@@ -1245,7 +1245,10 @@ pub fn milestone_line(milestone: Option<&str>, known: bool, roots: usize, lang: 
 /// `add.no_such_epic` 도 `--json` 을 가리지 않는다.
 pub fn say_no_such_milestone(milestone: Option<&str>, known: bool, lang: crate::i18n::Lang) {
     if let Some(id) = milestone.filter(|_| !known) {
-        eprintln!("moai: {}", crate::i18n::fill(crate::i18n::say(lang, "add.no_such_milestone"), &[("id", id)]));
+        super::tell(&format!(
+            "moai: {}",
+            crate::i18n::fill(crate::i18n::say(lang, "add.no_such_milestone"), &[("id", id)])
+        ));
     }
 }
 
@@ -1272,7 +1275,7 @@ pub fn say_held_epic(row: &Issue, held: Option<crate::report::HeldEpic>, lang: c
         HeldEpic::NotAnEpic => crate::i18n::say(lang, "add.no_such_epic"),
         HeldEpic::Group => crate::i18n::say(lang, "add.group_in_epic"),
     };
-    eprintln!("moai: {}", crate::i18n::fill(said, &[("id", e)]));
+    super::tell(&format!("moai: {}", crate::i18n::fill(said, &[("id", e)])));
 }
 
 pub fn tally(drafts: &[Draft], lang: crate::i18n::Lang) -> String {

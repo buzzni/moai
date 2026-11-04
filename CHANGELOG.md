@@ -18,7 +18,7 @@ does not tag — see `CONTRIBUTING.md`.
 
 ### Fixed
 
-- `moai status`, `show`, `prime` and `project` no longer panic when stderr is closed (a broken pipe) while they print a notice; the notice is dropped and the answer still comes out. (moai-5n6m)
+- `moai status`, `show`, `prime`, `project`, `add`, `mv`, `edit`, `defer`, `rm` and `backlog promote` no longer panic when stderr is closed (a broken pipe) while they print a notice; the notice is dropped and the answer still comes out. (moai-5n6m, moai-3hgm.25e)
 
 ## [0.48.0] - 2026-11-04
 
