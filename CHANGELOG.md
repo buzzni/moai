@@ -12,6 +12,10 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+### Changed
+
+- Reduce always-loaded guidance by moving detailed moai rules and supervisor and worker branches into skill references. (moai-w0zr)
+
 ## [0.48.0] - 2026-11-04
 
 ### Added
