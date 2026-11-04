@@ -186,7 +186,8 @@ fn pending(listener: &UnixListener, wait: Duration) -> std::io::Result<bool> {
     }
 }
 
-/// 상한에 찬 데몬의 거절 — `data.code` 는 `busy`, `data.pid` 는 이 데몬이다. `id` 는 읽기 전이라 모른다(null).
+/// 상한에 찬 데몬의 거절 — `data.code` 는 `busy`, `data.pid` 는 이 데몬이다. `id` 는 null 이다: 받는 스레드는 줄을
+/// 읽기 전이고, 줄을 읽은 수명 길도 같은 꼴로 답한다 — 그 연결로는 요청 하나뿐이라 짝을 맞출 다른 답이 없다.
 fn refusal(why: &str) -> String {
     let mut error = RpcError::moai(crate::fail::code::BUSY, why);
     error.data = Some(json!({ "code": crate::fail::code::BUSY, "pid": std::process::id() }));
