@@ -3,6 +3,9 @@
 //! **여기는 렌더러다.** argv 를 읽고, 코어를 부르고, 나온 줄을 찍고,
 //! `Result` 를 종료 코드로 바꾼다. 계산이 여기 있으면 나중에 TUI 도
 //! 같은 것을 다시 짜야 한다.
+//!
+//! **라이브러리로도 선다**(PR #72) — 연 모듈 열셋, 판 약속이 없다는 것, 오래 사는 프로세스에서 아직 안전하지
+//! 않다는 것은 `CONTRIBUTING.md` 의 "The library" 에 있다.
 
 mod archive;
 mod cli;
@@ -110,6 +113,9 @@ fn parse() -> cli::Cli {
     }
 }
 
+/// 바이너리의 입구 — `src/main.rs` 가 한 번 부른다. **라이브러리로 부르는 쪽의 입구가 아니다**: 프로세스의 argv 를
+/// 읽고, `-C` 면 프로세스 cwd 를 옮기고, 색 선택과 (Antigravity 훅이면) 패닉 훅을 프로세스 전체에 걸고, stdout 이
+/// 깨지면 `exit(1)` 한다.
 pub fn run() -> ExitCode {
     let cli = parse();
 

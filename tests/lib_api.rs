@@ -14,8 +14,9 @@ use moai::model::{Issue, Kind};
 use moai::query::{Filter, Raw, Where};
 use moai::report;
 use moai::store::{Opened, Repo};
-// 위 여섯의 공개 시그니처가 타입 이름을 대는 모듈이라 따라 연 일곱이다(CONTRIBUTING.md 의 "The library").
-// 이 시험은 그 타입을 이름으로 쓰지 않으므로, 이 줄이 없으면 일곱 가운데 하나를 닫아도 컴파일이 선다.
+// 이 시험이 이름으로 쓰지 않는 일곱이다 — `fail` 은 CONTRIBUTING.md "The library" 의 첫 여섯에 들고(위의 `i18n` 은
+// 따라 연 쪽이다), 나머지 여섯은 공개 시그니처가 타입 이름을 대서 따라 연 것이다. 이 줄이 없으면 일곱 가운데 하나를
+// 닫아도 컴파일이 선다.
 #[allow(unused_imports)]
 use moai::{fail, held, nav, read_marks, style, tz, user_config};
 use std::collections::{BTreeMap, BTreeSet};
