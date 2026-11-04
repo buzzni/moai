@@ -68,6 +68,9 @@ pub fn probe(path: &Path) -> Probe {
                 Some(code) if code == crate::fail::code::BUSY => {
                     Probe::Busy(data.get("pid").and_then(Value::as_u64).and_then(|p| u32::try_from(p).ok()))
                 }
+                // 멈추는 데몬이 붙은 뒤에 문을 닫았다(`server::Work`, moai-3hgm.uz0). 그 데몬은 문을 닫기 전에 소켓 파일을
+                // 지웠으니 다음 붙기는 `Absent` 다 — 지금 답도 그렇게 읽어 `status`·`stop`·`start` 가 같은 말을 한다.
+                Some(code) if code == crate::fail::code::STOPPING => Probe::Absent,
                 Some("unsupported_proto") => Hello::of(&data).map_or(Probe::Foreign(error.message), Probe::Running),
                 _ => Probe::Foreign(error.message),
             }

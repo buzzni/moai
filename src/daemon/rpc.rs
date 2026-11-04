@@ -91,9 +91,18 @@ pub fn raw_line(line: &str) -> Option<Reply> {
 
 pub type Handler = Box<dyn Fn(&RequestEnv, Value) -> Result<Reply, RpcError> + Send + Sync>;
 
+/// 단 메서드 하나 — 처리 함수와, 그것이 트래커를 바꾸는가.
+struct Entry {
+    handler: Handler,
+    /// 쓰기 메서드다. 멈추는 데몬은 돌던 쓰기를 끝까지 기다리고 읽기는 `DRAIN` 까지만 기다린다(사람의 결정 B,
+    /// moai-3hgm). 그 갈림을 전송(`server`)이 알아야 해 메서드를 달 때 받는다 — 이름으로 가리는 표를 따로 두면
+    /// 새 쓰기 메서드가 그 표를 빠뜨려 말없이 읽기로 끊긴다.
+    write: bool,
+}
+
 /// 메서드 이름 → 처리 함수.
 pub struct Methods {
-    table: BTreeMap<String, Handler>,
+    table: BTreeMap<String, Entry>,
 }
 
 impl Default for Methods {
@@ -117,46 +126,70 @@ impl Methods {
         self.table.keys().map(String::as_str).collect()
     }
 
+    /// 읽기 메서드를 단다.
     pub fn register(
         &mut self,
         name: &str,
         handler: impl Fn(&RequestEnv, Value) -> Result<Reply, RpcError> + Send + Sync + 'static,
     ) {
-        self.table.insert(name.to_string(), Box::new(handler));
+        self.table.insert(name.to_string(), Entry { handler: Box::new(handler), write: false });
+    }
+
+    /// 쓰기 메서드를 단다 — 멈추는 데몬이 돌던 이 요청을 시한 없이 끝까지 기다린다([`Entry::write`]).
+    #[cfg_attr(not(test), expect(dead_code, reason = "쓰기 메서드는 다음 멤버(moai-3hgm.k7s)가 단다"))]
+    pub fn register_write(
+        &mut self,
+        name: &str,
+        handler: impl Fn(&RequestEnv, Value) -> Result<Reply, RpcError> + Send + Sync + 'static,
+    ) {
+        self.table.insert(name.to_string(), Entry { handler: Box::new(handler), write: true });
     }
 
     /// 줄 하나(끝의 개행은 있어도 없어도 된다)를 처리해 답할 줄을 돌려준다. 알림이면 `None`.
+    #[cfg(test)]
     pub fn handle(&self, line: &[u8]) -> Option<String> {
+        match self.prepare(line) {
+            Prepared::Answered(answer) => answer,
+            Prepared::Call(call) => Some(call.run()),
+        }
+    }
+
+    /// 줄 하나를 파싱해 부를 처리 함수까지 찾는다 — 부르지는 않는다. 둘로 가른 까닭: 전송이 그 사이에서 요청을
+    /// 세어 들인다(`server` 의 `Work::admit`). 쓰기인지는 메서드를 찾아야 알고, 들이지 않은 요청은 처리 함수에
+    /// 닿지 않아야 한다(moai-3hgm.uz0).
+    pub fn prepare(&self, line: &[u8]) -> Prepared<'_> {
         if line.len() > LINE_MAX {
-            return Some(too_long());
+            return Prepared::Answered(Some(too_long()));
         }
         let value: Value = match serde_json::from_slice(line) {
             Ok(value) => value,
             Err(e) => {
-                return Some(failure(&Value::Null, &RpcError::new(code::PARSE_ERROR, format!("parse error: {e}"))));
+                let error = RpcError::new(code::PARSE_ERROR, format!("parse error: {e}"));
+                return Prepared::Answered(Some(failure(&Value::Null, &error)));
             }
         };
-        self.handle_value(value)
+        self.prepare_value(value)
     }
 
-    fn handle_value(&self, value: Value) -> Option<String> {
+    fn prepare_value(&self, value: Value) -> Prepared<'_> {
+        let answered = |id: &Value, error: RpcError| Prepared::Answered(Some(failure(id, &error)));
         let Value::Object(object) = value else {
             let why = if value.is_array() { "batch requests are not supported" } else { "request must be an object" };
-            return Some(failure(&Value::Null, &RpcError::new(code::INVALID_REQUEST, why)));
+            return answered(&Value::Null, RpcError::new(code::INVALID_REQUEST, why));
         };
         // id 는 문자열·숫자·null 만 되고, 없으면 알림이다. 되돌려 줄 수 없는 id 는 null 로 답한다.
         let id = match object.get("id") {
             None => None,
             Some(id @ (Value::String(_) | Value::Number(_) | Value::Null)) => Some(id.clone()),
             Some(_) => {
-                return Some(failure(
+                return answered(
                     &Value::Null,
-                    &RpcError::new(code::INVALID_REQUEST, "id must be a string, number or null"),
-                ));
+                    RpcError::new(code::INVALID_REQUEST, "id must be a string, number or null"),
+                );
             }
         };
         let reply_id = id.clone().unwrap_or(Value::Null);
-        let invalid = |why: &str| Some(failure(&reply_id, &RpcError::new(code::INVALID_REQUEST, why)));
+        let invalid = |why: &str| answered(&reply_id, RpcError::new(code::INVALID_REQUEST, why));
         if object.get("jsonrpc") != Some(&json!("2.0")) {
             return invalid("jsonrpc must be \"2.0\"");
         }
@@ -168,17 +201,50 @@ impl Methods {
             return invalid("params must be an object or an array");
         }
         // 알림: 받았다는 것까지만 — 아무것도 돌리지 않고 답하지 않는다.
-        let id = id?;
-        let Some(handler) = self.table.get(method) else {
-            return Some(failure(&id, &RpcError::new(code::METHOD_NOT_FOUND, format!("method not found: {method}"))));
+        let Some(id) = id else { return Prepared::Answered(None) };
+        let Some(entry) = self.table.get(method) else {
+            return answered(&id, RpcError::new(code::METHOD_NOT_FOUND, format!("method not found: {method}")));
         };
+        Prepared::Call(Call { id, entry, params })
+    }
+}
+
+/// [`Methods::prepare`] 의 결과.
+pub enum Prepared<'a> {
+    /// 처리 함수 없이 정해진 답 — 틀린 요청·없는 메서드·상한을 넘은 줄. `None` 은 알림이라 답하지 않는다.
+    Answered(Option<String>),
+    /// 처리 함수를 부를 요청 — 부르는 것은 [`Call::run`].
+    Call(Call<'a>),
+}
+
+/// 파싱을 마치고 처리 함수를 찾은 요청 하나. 아직 아무것도 돌리지 않았다.
+pub struct Call<'a> {
+    id: Value,
+    entry: &'a Entry,
+    params: Value,
+}
+
+impl Call<'_> {
+    /// 쓰기 메서드를 부르는가([`Methods::register_write`]).
+    pub fn writes(&self) -> bool {
+        self.entry.write
+    }
+
+    /// 처리 함수를 돌려 답할 줄을 쓴다. 처리 함수가 터져도 답한다(`-32603`).
+    pub fn run(self) -> String {
+        let Call { id, entry, params } = self;
         let env = RequestEnv::from_params(&params);
-        let ran = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| handler(&env, params)));
-        Some(match ran {
+        let ran = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| (entry.handler)(&env, params)));
+        match ran {
             Ok(Ok(result)) => success(&id, &result),
             Ok(Err(e)) => failure(&id, &e),
             Err(_) => failure(&id, &RpcError::new(code::INTERNAL, "internal error")),
-        })
+        }
+    }
+
+    /// 돌리지 않고 거절하는 답 — 이 요청의 `id` 를 싣는다.
+    pub fn refuse(&self, error: &RpcError) -> String {
+        failure(&self.id, error)
     }
 }
 

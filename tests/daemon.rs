@@ -294,6 +294,59 @@ fn a_daemon_whose_socket_file_was_removed_still_stops() {
     );
 }
 
+/// 멈추는 데몬이 돌던 읽기를 기다리는 동안 `moai daemon status` 는 "떠 있지 않다" 로 0 이다 — 데몬은 기다리기 전에
+/// 소켓 파일부터 지운다(moai-3hgm.uz0). 옛 판은 기다리는 동안 듣기를 열어 두어 새 연결이 대기열에 서서 답을 못 받고,
+/// `status` 가 2초 뒤 "데몬이 아니다" 로 넘어졌다. 돌던 읽기는 5초(`DRAIN`)까지 기다리고 끊는다 — 그 읽기는 안 읽히는
+/// 큰 답(소켓 버퍼를 넘는 `show`)이라 데몬의 쓰기 시한(30초)까지 막혀 있을 것이었다.
+#[test]
+fn status_says_not_running_while_a_stopping_daemon_waits_for_a_read() {
+    let f = Fence::new();
+    let root = f.project("big");
+    let body = "x".repeat(60_000);
+    for n in 0..24 {
+        let mut child = f
+            .cmd(&["-C", root.to_str().unwrap(), "add", &format!("big {n}"), "--user", ACTOR, "-b", "-"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        child.stdin.take().unwrap().write_all(body.as_bytes()).unwrap();
+        let out = child.wait_with_output().unwrap();
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    }
+    let (mut daemon, first) = f.start();
+    let pid = first["pid"].as_u64().unwrap();
+    // 답은 1MB 를 넘는다 — 안 읽으면 데몬의 쓰기가 소켓 버퍼에 막혀 이 읽기가 도는 채로 선다.
+    let mut stuck = Wire::open(&f.socket());
+    let show = json!({ "jsonrpc": "2.0", "id": 1, "method": "show", "params": { "project": root, "all": true } });
+    stuck.writer.write_all(format!("{show}\n").as_bytes()).unwrap();
+    std::thread::sleep(Duration::from_millis(500));
+
+    let asked = std::time::Instant::now();
+    let stop = f.cmd(&["daemon", "stop", "--json"]).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().unwrap();
+    while f.socket().exists() {
+        assert!(asked.elapsed() < Duration::from_secs(3), "멈추는 데몬이 소켓 파일을 안 지웠다");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let status = f.json(&["daemon", "status", "--json"]);
+    assert_eq!(status["running"], false, "{status}");
+    assert_eq!(status["stale_socket"], false, "{status}");
+    assert!(status.get("pid").is_none(), "{status}");
+    assert!(daemon.0.try_wait().unwrap().is_none(), "status 를 물을 때 데몬이 이미 끝났다 — 기다리는 사이를 못 봤다");
+
+    let out = stop.wait_with_output().unwrap();
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let stopped: Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(stopped["stopped"], true, "{stopped}");
+    assert_eq!(stopped["pid"], pid, "{stopped}");
+    assert!(daemon.wait().success(), "멈춘 데몬이 0 으로 끝나지 않았다");
+    let took = asked.elapsed();
+    assert!(took >= Duration::from_secs(4), "돌던 읽기를 {took:?} 만 기다렸다 — DRAIN 은 5초다");
+    assert!(took < Duration::from_secs(9), "돌던 읽기를 {took:?} 기다렸다 — 읽기는 5초에 끊는다");
+    drop(stuck);
+}
+
 #[test]
 fn a_second_start_does_not_double_up() {
     let f = Fence::new();

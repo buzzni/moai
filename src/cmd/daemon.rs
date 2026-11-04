@@ -129,7 +129,7 @@ mod os {
 
     /// 남의 `start` 가 자물쇠를 쥔 채 아직 소켓을 안 묶었을 때, 또는 멈추는 데몬이 아직 안 끝났을 때 기다리는 시한.
     const WAIT: Duration = Duration::from_secs(5);
-    /// `stop` 이 데몬이 끝나기를 기다리는 시한 — 데몬은 돌던 요청을 5초까지 기다린다.
+    /// `stop` 이 데몬이 끝나기를 기다리는 시한 — 데몬은 돌던 읽기를 5초까지, 쓰기는 끝까지 기다린다(`server::Work`).
     const STOP_WAIT: Duration = Duration::from_secs(10);
     const POLL: Duration = Duration::from_millis(50);
 

@@ -44,6 +44,9 @@ pub mod code {
     pub const NOT_A_PROJECT: &str = "not_a_project";
     pub const METHOD_NOT_ALLOWED: &str = "method_not_allowed";
     pub const BUSY: &str = "busy";
+    /// 데몬이 멈추는 중이라 이 요청을 **돌리지 않았다**(moai-3hgm.uz0). `busy` 와 가르는 까닭: 같은 데몬에 다시
+    /// 보낼 일이 아니라 새 데몬(또는 CLI)으로 다시 보낼 일이고, 쓰기라면 "안 들었다" 가 확실하다.
+    pub const STOPPING: &str = "stopping";
     pub const TIMEOUT: &str = "timeout";
     pub const TOO_LARGE: &str = "too_large";
     pub const NO_WINDOW: &str = "no_window";
