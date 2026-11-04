@@ -239,7 +239,9 @@ fn lifecycle(stream: UnixStream, methods: &Methods, stop: &AtomicBool, path: &Pa
         return;
     }
     let Ok(read_half) = stream.try_clone() else { return };
-    let mut reader = BufReader::new(read_half);
+    // 시한은 줄 하나 전체에 건다 — 소켓의 읽기 시한은 `read` 한 번마다라, 몇 초마다 한 바이트씩 보내는 연결이
+    // 자리를 끝없이 쥐면 넷이 수명 길을 막아 `status`·`stop` 이 다시 `busy` 에 갇힌다.
+    let mut reader = BufReader::new(Deadline { stream: read_half, until: Instant::now() + LIFECYCLE_WAIT });
     let mut writer = stream;
     let (reply, running) = match rpc::read_line(&mut reader) {
         Ok(rpc::Line::Eof) | Err(_) => return,
@@ -255,6 +257,23 @@ fn lifecycle(stream: UnixStream, methods: &Methods, stop: &AtomicBool, path: &Pa
     drop(running);
     if stop.load(Ordering::Acquire) {
         wake(path);
+    }
+}
+
+/// 시한이 줄 하나 전체에 걸린 읽기 — `read` 마다 남은 시간을 소켓의 읽기 시한으로 다시 건다. 시한이 지나면 `TimedOut`.
+struct Deadline {
+    stream: UnixStream,
+    until: Instant,
+}
+
+impl std::io::Read for Deadline {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        let left = self.until.saturating_duration_since(Instant::now());
+        if left.is_zero() {
+            return Err(std::io::ErrorKind::TimedOut.into());
+        }
+        self.stream.set_read_timeout(Some(left))?;
+        self.stream.read(buf)
     }
 }
 
@@ -292,5 +311,31 @@ fn connection(stream: UnixStream, methods: &Methods, stop: &AtomicBool, path: &P
             wake(path);
             return;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 수명 길의 시한은 줄 하나 전체에 걸린다 — 시한보다 짧은 간격으로 한 바이트씩 흘리는 연결도 시한 안에 놓인다.
+    /// 읽기 하나마다의 시한이던 판은 그런 연결 넷이 수명 길을 끝없이 쥐어 `status`·`stop` 을 `busy` 에 가뒀다.
+    #[test]
+    fn a_trickling_connection_leaves_the_lifecycle_lane_on_time() {
+        let (ours, mut theirs) = UnixStream::pair().unwrap();
+        let drip = std::thread::spawn(move || {
+            let started = Instant::now();
+            while started.elapsed() < LIFECYCLE_WAIT * 3 {
+                if theirs.write_all(b" ").is_err() {
+                    return;
+                }
+                std::thread::sleep(Duration::from_millis(200));
+            }
+        });
+        let (stop, busy) = (AtomicBool::new(false), AtomicUsize::new(0));
+        let started = Instant::now();
+        lifecycle(ours, &Methods::new(), &stop, Path::new("/nonexistent/moai-test.sock"), &busy);
+        assert!(started.elapsed() < LIFECYCLE_WAIT * 2, "흘리는 연결이 수명 길을 {:?} 쥐었다", started.elapsed());
+        drip.join().unwrap();
     }
 }
