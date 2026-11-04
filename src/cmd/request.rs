@@ -756,23 +756,41 @@ mod tests {
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt as _;
-            let journal = a.join(".moai/journal");
-            let shut = |mode: u32| {
-                for e in std::fs::read_dir(&journal).unwrap() {
-                    std::fs::set_permissions(e.unwrap().path(), std::fs::Permissions::from_mode(mode)).unwrap();
+            /// 저널을 못 쓰게 닫아 두고, **놓일 때 다시 연다** — 사이에서 터져 풀려도(리뷰 moai-3hgm.puw 8번). 성공한
+            /// 길에서만 열던 판은 `cli_wrote`·`asked_wrote` 가 터지면 저널 디렉터리가 0o555 로 남아, 스크래치 치우기가
+            /// 그 안을 못 지우고 시험 디렉터리가 남았다.
+            struct Shut<'a>(&'a Path);
+            fn chmod(journal: &Path, file: u32, dir: u32) -> std::io::Result<()> {
+                let mode = std::fs::Permissions::from_mode;
+                std::fs::set_permissions(journal, mode(dir))?;
+                for e in std::fs::read_dir(journal)? {
+                    std::fs::set_permissions(e?.path(), mode(file))?;
                 }
-                let dir_mode = if mode == 0o444 { 0o555 } else { 0o755 };
-                std::fs::set_permissions(&journal, std::fs::Permissions::from_mode(dir_mode)).unwrap();
-            };
+                Ok(())
+            }
+            impl<'a> Shut<'a> {
+                fn new(journal: &'a Path) -> Shut<'a> {
+                    // 디렉터리를 먼저 닫아도 그 안의 파일은 고칠 수 있다 — 0o555 는 읽기·지나기를 둔다.
+                    chmod(journal, 0o444, 0o555).unwrap();
+                    Shut(journal)
+                }
+            }
+            impl Drop for Shut<'_> {
+                fn drop(&mut self) {
+                    // 풀리는 중에 터지면 시험 바이너리가 통째로 죽는다 — 여는 길은 넘어져도 삼킨다.
+                    let _ = chmod(self.0, 0o644, 0o755);
+                }
+            }
+            let journal = a.join(".moai/journal");
             let moai = a.join(".moai");
             let before = files_of(&moai);
-            shut(0o444);
+            let shut = Shut::new(&journal);
             let want = cli_wrote(&a, &a, "en", &["mv", &first, "done"]);
-            shut(0o644);
+            drop(shut);
             put_back(&moai, &before);
-            shut(0o444);
+            let shut = Shut::new(&journal);
             let got = asked_wrote(&a, &a, Lang::En, &["mv", &first, "done"]);
-            shut(0o644);
+            drop(shut);
             assert_eq!(got, want, "못 적은 저널의 쓰기가 CLI 와 다르다");
         }
 
