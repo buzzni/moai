@@ -108,7 +108,7 @@ pub(crate) fn read(req: Request) -> Answer {
         if !said.is_empty() {
             let here = crate::store::Repo::find(|| ctx.lang()).ok().flatten().map(|r| r.root);
             mine = crate::any_mine(here.as_deref(), &unread);
-            tail.extend(said);
+            tail.extend(said.iter().map(|l| crate::warned(l)));
         }
         let climbed = crate::side::with(|s| s.climbed.clone()).unwrap_or_default();
         tail.extend(climbed.iter().map(|(from, to)| crate::climb_line(ctx.lang(), from, to)));
@@ -254,6 +254,30 @@ mod tests {
         moai(&["project", "add", "."]);
     }
 
+    /// 저널을 못 읽게 막는다 — 저널을 읽는 `show`·`stats` 가 그 자리를 대고 1 로 끝난다(`store::note_missed` 의 길).
+    /// 막아도 읽히는 자리(root)면 빈 목록이다. 시험 끝에 [`unlock`] 으로 풀어야 임시 자리가 치워진다.
+    #[cfg(unix)]
+    fn lock_journals(dir: &Path) -> Vec<std::path::PathBuf> {
+        use std::os::unix::fs::PermissionsExt as _;
+        let files: Vec<_> = std::fs::read_dir(dir.join(".moai/journal")).unwrap().map(|e| e.unwrap().path()).collect();
+        for f in &files {
+            std::fs::set_permissions(f, std::fs::Permissions::from_mode(0o000)).unwrap();
+        }
+        if files.iter().any(|f| std::fs::read(f).is_ok()) {
+            unlock(&files);
+            return Vec::new();
+        }
+        files
+    }
+
+    #[cfg(unix)]
+    fn unlock(files: &[std::path::PathBuf]) {
+        use std::os::unix::fs::PermissionsExt as _;
+        for f in files {
+            std::fs::set_permissions(f, std::fs::Permissions::from_mode(0o644)).unwrap();
+        }
+    }
+
     /// 못 읽는 줄 하나 — `ready`·`stats` 가 stderr 에 그 파일의 자리를 대고 1 로 끝난다.
     fn garble(dir: &Path) {
         use std::io::Write as _;
@@ -284,6 +308,9 @@ mod tests {
             serde_json::from_str::<serde_json::Value>(&ran.out).unwrap()[0]["id"].as_str().unwrap().to_string()
         };
         let (ida, idb) = (id(&a), id(&b));
+        // 저널 자리는 `a` 에서 막는다 — `b` 는 못 읽는 스냅샷 줄을 든다. 셋째 통(못 읽은 저널)도 CLI 와 견준다.
+        #[cfg(unix)]
+        let locked = lock_journals(&a);
         let turns = [
             (&a, "en", Lang::En, &ida),
             (&b, "ko", Lang::Ko, &idb),
@@ -318,6 +345,14 @@ mod tests {
         // 잰 것이 비지 않았다 — 못 읽는 줄을 든 쪽은 알림과 부분 실패를 정말 냈다.
         let ready = asked(&b, Lang::En, &["ready"]);
         assert!(ready.partial && !ready.messages.is_empty(), "못 읽는 줄이 아무 말도 안 냈다");
+        #[cfg(unix)]
+        if !locked.is_empty() {
+            let shown = asked(&a, Lang::En, &["show", &ida]);
+            let at = locked[0].display().to_string();
+            assert!(shown.partial, "못 읽은 저널로 부분 실패가 안 섰다");
+            assert!(shown.messages.iter().any(|m| m.starts_with("moai: ") && m.contains(&at)), "{:?}", shown.messages);
+            unlock(&locked);
+        }
         // **프로세스 전역은 그대로다** — 요청이 남긴 것은 다 제 답으로 돌아갔다.
         assert!(!super::super::had_partial(), "요청의 부분 실패가 프로세스 깃발에 남았다");
         assert!(crate::store::journal_unread().is_empty() && crate::store::climbs().is_empty());

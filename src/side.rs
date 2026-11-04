@@ -52,6 +52,9 @@ pub(crate) fn current() -> Option<Shared> {
 }
 
 /// 걸린 통에 `f` 를 부른다. **통이 없으면 부르지 않고 `None` 이다** — 부르는 쪽이 그때 옛 길로 간다.
+///
+/// **`f` 안에서 이 모듈을 다시 부르지 않는다** — 통의 자물쇠를 쥔 채라, 같은 스레드에서 [`with`] 를 또 부르면
+/// 영영 멈춘다(`cmd::tell`·`cmd::note_partial` 도 이것을 지난다).
 pub(crate) fn with<T>(f: impl FnOnce(&mut Side) -> T) -> Option<T> {
     let side = current()?;
     let mut side = side.lock().unwrap_or_else(|e| e.into_inner());
