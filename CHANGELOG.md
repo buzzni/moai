@@ -19,6 +19,7 @@ does not tag — see `CONTRIBUTING.md`.
 ### Fixed
 
 - `moai status`, `show`, `prime`, `project`, `add`, `mv`, `edit`, `defer`, `rm` and `backlog promote` no longer panic when stderr is closed (a broken pipe) while they print a notice; the notice is dropped and the answer still comes out. (moai-5n6m, moai-3hgm.25e)
+- `moai note`, `defer`, `rm`, `link`, `add` (with `--from` too), `wiki learn` and the explorer’s `SPC n` take their timestamp after they hold the tracker lock, not before, so a write that waited for another one no longer goes into the journal and the snapshot (`updated_at`, `created_at`, `deferred_at`) with the earlier time. (moai-3hgm.pp2)
 
 ## [0.48.0] - 2026-11-04
 
