@@ -16,6 +16,8 @@ pub mod changes;
 #[cfg(unix)]
 pub mod client;
 #[cfg(unix)]
+pub mod diff;
+#[cfg(unix)]
 pub mod project;
 #[cfg(unix)]
 mod read;

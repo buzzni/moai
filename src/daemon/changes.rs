@@ -1,7 +1,7 @@
 //! `changes` 메서드의 몸통(moai-5n6m.2ki, moai-8ts9) — 데몬이 기억한 옛 스냅샷과 지금을 줄마다 견주어, 클라이언트의
 //! 커서 뒤로 바뀐 id 와 사라진 id 를 낸다.
 //!
-//! 견주는 계산은 순수 함수 [`crate::query::changes`] 에 있다(무엇을 견주는지, 파생값이 왜 잡히는지도 거기 적혀 있다).
+//! 견주는 계산은 순수 함수 [`crate::daemon::diff`] 에 있다(무엇을 견주는지, 파생값이 왜 잡히는지도 거기 적혀 있다).
 //! 여기는 둘이다 — **읽어 건네는** 층(목록은 읽기 입구 `cmd::request::read` 로, 노트는 요청의 통 안에서 저널로)과,
 //! 연결 스레드가 나눠 쓰는 **기억**([`Memory`]).
 //!
@@ -38,8 +38,8 @@
 
 use super::rpc::RpcError;
 use crate::cmd::request::Request;
+use crate::daemon::diff::{Changes, Seen};
 use crate::i18n::Lang;
-use crate::query::changes::{Changes, Seen};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -227,7 +227,7 @@ pub(crate) fn poll(memory: &Memory, whole: Request, lang: Lang, cursor: Option<&
     let fingerprint = seen.fingerprint();
     let asked = cursor.and_then(|c| decode(c, &memory.instance));
     let old = memory.swap(&project, asked, &fingerprint, &seen);
-    let changes = crate::query::changes::changes(old.as_deref(), &seen, encode(&memory.instance, &fingerprint));
+    let changes = crate::daemon::diff::changes(old.as_deref(), &seen, encode(&memory.instance, &fingerprint));
     Ok(Polled { changes, messages, partial: answer.partial || read.partial })
 }
 

@@ -17,8 +17,6 @@
 use crate::model::{Issue, Kind, days_since, parse_date, parse_instant, parse_rfc3339};
 use std::collections::{BTreeMap, BTreeSet};
 
-pub mod changes;
-
 /// `epic=none` 처럼 "값이 없는 것" 을 고르는 자리.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Sel {
