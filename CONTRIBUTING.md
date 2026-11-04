@@ -225,12 +225,15 @@ moai-5n6m.m0b, and `cmd::request::write`, moai-3hgm.25e). `read` runs `status`, 
 - A write request has no stdin and no argv. With a `Side` hung, a `-` in a text field is
   that text, reading stdin (`add --from -`) is refused at once, a plan file is not read,
   and `refuse_if_flag_like` does not run (it scans the process arguments).
-- The language, the time zone and the actor come with the request. What the request
-  leaves out still comes from the environment and the user config.
+- The language, the time zone and the actor come with the request. A language or time
+  zone the request leaves out still comes from the environment and the user config. An
+  actor it leaves out comes from the project's git config only: with a `Side` hung,
+  `model::actor` skips `MOAI_ACTOR` (moai-3hgm.k7s), which belongs to whatever shell
+  started the process, not to the request.
 - The caller makes one call per request and does not start threads of its own that call
   into moai inside it. Anything called outside the entry still uses the process-wide
-  state listed above. The write path still reads the process environment listed above
-  (`MOAI_HERE`, `MOAI_NOW`, `MOAI_ACTOR`). It records no session pick-ups: the process's
+  state listed above. The write path still reads `MOAI_HERE` and `MOAI_NOW` from the
+  process environment. It records no session pick-ups: the process's
   `CLAUDE_CODE_SESSION_ID` belongs to whatever shell started it, not to the request.
 
 **How a refactor that must not change behaviour is gated.** The split into library and
