@@ -118,7 +118,7 @@ Every method takes a `params` object. These keys are known to every method:
 | `lang` | Words for messages: `en`, `ko`, `zh`, `ja`, `es`. Otherwise `MOAI_LANG`, then your user config. |
 | `tz` | A time zone name or POSIX rule. Otherwise as the CLI reads it. |
 
-`project` must be a path you registered with `moai project add`, written as an absolute path. A relative path or an unregistered one is `-32000` with `data.code` `not_registered`. A registered directory that has no `.moai` of its own is `not_a_project`; the daemon does not search upward for a parent's tracker. The registered list is read on every request, so a project added while the daemon runs works at once.
+`project` must be a path you registered with `moai project add`, written as an absolute path. A relative path or an unregistered one is `-32000` with `data.code` `not_registered`. A registered directory that has no `.moai` of its own is `not_a_project`; the daemon does not search upward for a parent's tracker. The registered list is read on every request, so a project added while the daemon runs works at once. A linked git worktree is not covered by registering its main checkout: register the worktree path itself (`moai project add <worktree>`) to send requests for it, and they read and write the main checkout's tracker, as the CLI does there.
 
 Any other key a method does not list is refused with `-32602`, naming the key. A misspelt filter would otherwise be dropped silently and return a list that looks right.
 
