@@ -9113,12 +9113,12 @@ fn take_in(
         return refuse(
             5,
             format!(
-                "{whose} Ask the person watching before you pick it up.\n\
+                "{whose} Ask the person watching before you pick up any of the listed rows that are not yours.\n\
                  On a yes, take it over and say who said yes — you become the assignee in the same\n\
                  write, and a note keeps whose it was:\n\
                  \x20 {}{user} mv {} {}{from} {}",
                 echo_moai(aim(k).and_then(Aimed::standing), &seg.words),
-                row.id,
+                ids.iter().map(|id| echo_dir(id)).collect::<Vec<_>>().join(" "),
                 echo_dir(to),
                 crate::guide::TAKE_YES,
             ),
@@ -10971,6 +10971,9 @@ mod tests {
         assert!(why.starts_with(&crate::guide::rule_head(5)), "{why}");
         assert!(why.contains("t-1 is B (b@x.io)'s."), "{why}");
         assert!(why.contains("moai mv t-1 in_progress --from todo --take -m '<who said yes>'"), "{why}");
+        let why = denied(&judge("moai --user 'C (c@x.io)' mv t-3 t-1 t-2 in_progress --from todo", &away)).to_string();
+        assert!(why.contains("moai --user 'C (c@x.io)' mv t-3 t-1 t-2 in_progress --from todo --take"), "{why}");
+        assert!(why.contains("any of the listed rows that are not yours"), "{why}");
         let why = denied(&judge("moai mv t-2 in_progress", &away)).to_string();
         assert!(why.contains("t-2 has no assignee."), "{why}");
 
