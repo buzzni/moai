@@ -11,7 +11,7 @@
 //!
 //!     params: { "project": "<q16 이 푼다>", "cursor": "<이전 답의 cursor>"? }
 //!     result: { "value": { "cursor": "...", "changed": ["<id>", …], "removed": ["<id>", …], "reset": false },
-//!               "messages": [...], "partial": false }
+//!               "exit": 0, "messages": [...], "partial": false }
 //!
 //! - **"전부 읽기" 는 `show` 에 `all: true` 하나만 준 것이다**(같은 `project`, 다른 거르개·쪽 없이). `changes` 가 견주는
 //!   목록이 바로 그것이다 — `reset: true` 를 받으면 클라이언트는 그 목록을 다시 읽고 이 답의 `cursor` 로 이어 간다.
@@ -24,7 +24,7 @@
 //! - `cursor` 는 불투명 글이다 — 안에 데몬 인스턴스의 표식과 견준 스냅샷의 지문이 든다. 못 읽거나, 다른 데몬(다시
 //!   띄운 데몬 포함)의 것이거나, 기억에서 밀려난 지문이면 오류가 아니라 `reset: true` 다. `cursor` 를 안 주면 `reset:
 //!   true` 와 첫 커서를 낸다. `reset` 이면 두 목록은 비었다
-//! - 봉투의 `messages`·`partial` 은 읽기 메서드와 같다 — 목록을 읽다 만난 못 읽는 줄·못 읽은 저널 파일을 CLI 의 말로
+//! - 봉투의 `exit`·`messages`·`partial` 은 읽기 메서드와 같다 — 목록을 읽다 만난 못 읽는 줄·못 읽은 저널 파일을 CLI 의 말로
 //!   대고, CLI 라면 1 로 끝났을 판이면 `partial` 이다. **못 읽은 저널 파일은 `reset` 을 세우지 않는다** — 다시 읽어도
 //!   그 파일은 못 읽으니 `reset` 은 아무것도 되찾지 못한다. 그 파일의 노트는 읽을 수 있게 될 때까지 안 서고, 읽히는
 //!   판에 그 id 가 `changed` 에 선다. 덜 읽은 목록도 기억한다 — 클라이언트의 전부 읽기도 같은 목록을 받는다
@@ -177,10 +177,10 @@ fn decode<'c>(cursor: &'c str, instance: &str) -> Option<&'c str> {
 }
 
 /// 메서드 몸통 — `whole` 은 부르는 쪽이 지은 "전부 읽기"(`show` 에 `all: true`)의 요청, `lang` 은 요청의 화면 말이다.
-/// 읽기 메서드와 같은 봉투(`{value, messages, partial}`)로 낸다.
+/// 읽기 메서드와 같은 봉투(`{exit, messages, partial, value}`)로 낸다.
 pub(crate) fn handle(memory: &Memory, whole: Request, lang: Lang, cursor: Option<&str>) -> Result<Reply, RpcError> {
     let polled = poll(memory, whole, lang, cursor)?;
-    super::read::envelope(&polled.changes, &polled.messages, polled.partial)
+    super::read::envelope(&polled.changes, &polled.messages, polled.partial, polled.exit)
 }
 
 /// 한 번의 폴링 — 순수 함수의 답과, 읽다가 곁에 남은 것(CLI 라면 stderr 줄과 종료 코드 1).
@@ -188,6 +188,9 @@ pub(crate) struct Polled {
     pub changes: Changes,
     pub messages: Vec<String>,
     pub partial: bool,
+    /// CLI 에 짝이 없는 메서드라 "CLI 가 고를 코드" 는 목록 읽기(`show --all`)의 것이고, 노트를 못 다 읽었으면 1 이다 —
+    /// 읽기 메서드의 `exit` 와 같은 자(moai-3hgm.k7s).
+    pub exit: u8,
 }
 
 /// 목록과 노트를 읽어 [`Seen`] 을 짓고(락 밖), 기억과 바꿔 끼운 뒤(락 안), 견준다(락 밖).
@@ -226,7 +229,8 @@ pub(crate) fn poll(memory: &Memory, whole: Request, lang: Lang, cursor: Option<&
     let asked = cursor.and_then(|c| decode(c, &memory.instance));
     let old = memory.swap(&project, asked, &fingerprint, &seen);
     let changes = crate::daemon::diff::changes(old.as_deref(), &seen, encode(&memory.instance, &fingerprint));
-    Ok(Polled { changes, messages, partial: answer.partial || read.partial })
+    let partial = answer.partial || read.partial;
+    Ok(Polled { changes, messages, partial, exit: answer.exit.max(u8::from(partial)) })
 }
 
 /// 저널의 `note` 줄과, 읽다가 곁에 남은 것.

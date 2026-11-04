@@ -150,8 +150,7 @@ pub(crate) struct Answer {
     /// 덜 받은 답이다 — CLI 라면 `out` 을 다 낸 뒤 1 로 끝났다.
     pub partial: bool,
     /// CLI 가 고를 종료 코드 — `crate::run` 과 같은 자다: 넘어졌으면 1, 명령이 고른 코드가 있으면 그것, 덜 받은
-    /// 답이면 1, 아니면 0(moai-3hgm.25e).
-    #[cfg_attr(not(test), expect(dead_code, reason = "쓰기 메서드(moai-3hgm.k7s)가 읽는다"))]
+    /// 답이면 1, 아니면 0(moai-3hgm.25e). 데몬의 봉투가 `exit` 로 싣는다(moai-3hgm.k7s).
     pub exit: u8,
 }
 

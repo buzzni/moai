@@ -614,6 +614,8 @@ fn compare(f: &Fence, wire: &mut Wire, root: &Path, n: u64, method: &str, params
         .collect();
     assert_eq!(messages, stderr, "messages ≠ stderr — {ctx}");
     assert_eq!(result["partial"], json!(!out.status.success()), "partial ≠ 종료 코드 — {ctx}");
+    // `exit` 는 늘 서고 CLI 의 종료 코드다(moai-3hgm.k7s).
+    assert_eq!(result["exit"], json!(out.status.code().expect("시그널로 끝났다")), "exit ≠ 종료 코드 — {ctx}");
 }
 
 #[test]
@@ -736,6 +738,7 @@ fn a_torn_snapshot_line_is_carried_as_messages_and_partial() {
     }
     let reply = wire.call(9, "show", json!({ "project": root.to_str().unwrap(), "actor": ACTOR }));
     assert_eq!(reply["result"]["partial"], true, "{reply}");
+    assert_eq!(reply["result"]["exit"], 1, "{reply}");
     assert!(!reply["result"]["messages"].as_array().unwrap().is_empty(), "{reply}");
 }
 
@@ -831,6 +834,7 @@ fn changes_over_the_socket_sees_what_the_cli_writes() {
     let value = &first["result"]["value"];
     assert_eq!(value["reset"], true, "{first}");
     assert_eq!(first["result"]["partial"], false, "{first}");
+    assert_eq!(first["result"]["exit"], 0, "{first}");
     assert_eq!(first["result"]["messages"], json!([]), "{first}");
     let cursor = value["cursor"].as_str().unwrap().to_string();
 

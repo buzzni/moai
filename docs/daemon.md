@@ -147,11 +147,14 @@ The named fields are typed, but the daemon does not parse an argv. Send `{"statu
 
 Every method except `hello`, `ping` and `daemon.shutdown` answers in one envelope:
 
-    {"value": <what --json prints>, "messages": ["…"], "partial": false}
+    {"exit": 0, "messages": ["…"], "partial": false, "value": <what --json prints>}
 
 - `value` is the CLI's `--json` output, byte for byte: the same text, with the keys in the order the CLI prints them. One output line is carried as it is; several lines are carried as an array of those lines. `jq .result.value` (or `-c`) and `moai --json …` print the same JSON, so you can compare them directly.
 - `messages` are the lines the CLI would have written to stderr, without colour.
 - `partial` is `true` when the CLI would have exited 1 with a partial answer, for example when a torn snapshot line could not be read. Read `value`, and tell the person.
+- `exit` is the exit code the CLI would have ended with, always there. For every method served today it is `1` exactly when `partial` is `true`, and `0` otherwise — for example a `mv` with `from` that lost a race carries the row under `stale` in `value`, `partial` `true` and `exit` `1`. It is a key of its own so that a command that picks another code needs no new key: branch on `exit` to know whether the command did all you asked.
+
+A failed command is not an envelope: it is an `-32000` error (see [Errors](#errors)), where the CLI would always have exited 1.
 
 ### Not served
 
@@ -181,7 +184,7 @@ The daemon remembers recent snapshots in memory: per project up to 8, and about 
 
 The first call has no cursor. It returns `reset: true`, empty lists and a first cursor:
 
-    {"id":1,"jsonrpc":"2.0","result":{"messages":[],"partial":false,"value":{"changed":[],"cursor":"2.45nGrtyfl2RFrAJx.cM72ha603YZB1hBJv5pmCA","removed":[],"reset":true}}}
+    {"id":1,"jsonrpc":"2.0","result":{"exit":0,"messages":[],"partial":false,"value":{"changed":[],"cursor":"2.45nGrtyfl2RFrAJx.cM72ha603YZB1hBJv5pmCA","removed":[],"reset":true}}}
 
 ### What a client does
 
@@ -198,7 +201,7 @@ The first call has no cursor. It returns `reset: true`, empty lists and a first 
 
 A reset also comes with a fresh cursor, so a client never needs to ask twice. A bad cursor is a reset, not an error, but a cursor that is not a string is `-32602`. A project with no tracker is still an error.
 
-An unreadable journal file does not cause a reset: a re-read would not read it either. The daemon names the file in `messages` and sets `partial` to `true`. The notes in that file are not seen until it can be read; then the ids they belong to show up in `changed`.
+An unreadable journal file does not cause a reset: a re-read would not read it either. The daemon names the file in `messages` and sets `partial` to `true` (and `exit` to `1`). The notes in that file are not seen until it can be read; then the ids they belong to show up in `changed`.
 
 A real run, with the answers trimmed to the interesting part. The project has an epic with two issues (`repo-bld6`, `repo-slt3`):
 
