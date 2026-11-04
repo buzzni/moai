@@ -12,6 +12,8 @@
 pub mod rpc;
 
 #[cfg(unix)]
+pub mod changes;
+#[cfg(unix)]
 pub mod client;
 #[cfg(unix)]
 pub mod project;
