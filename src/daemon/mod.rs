@@ -14,6 +14,10 @@ pub mod rpc;
 #[cfg(unix)]
 pub mod client;
 #[cfg(unix)]
+pub mod project;
+#[cfg(unix)]
+mod read;
+#[cfg(unix)]
 pub mod server;
 
 /// 데몬을 멈추는 메서드. 판이 달라도 이름은 그대로여야 한다 — 새 바이너리의 `moai daemon stop` 이 옛 판 데몬을
@@ -21,11 +25,13 @@ pub mod server;
 #[cfg(unix)]
 pub const SHUTDOWN: &str = "daemon.shutdown";
 
-/// 데몬이 섬기는 메서드 표. **읽기 메서드(moai-5n6m.q16)는 여기서 단다** — `hello`·`ping` 위에
-/// `methods.register("<이름>", …)` 로. 데몬의 수명에 딸린 [`SHUTDOWN`] 은 `server::serve` 가 제 손으로 단다.
+/// 데몬이 섬기는 메서드 표. `hello`·`ping` 위에 읽기 메서드 여섯(`read::register`, moai-5n6m.q16)을 단다 — 다음
+/// 메서드도 여기서 단다. 데몬의 수명에 딸린 [`SHUTDOWN`] 은 `server::serve` 가 제 손으로 단다.
 #[cfg(unix)]
 pub fn methods() -> rpc::Methods {
-    rpc::Methods::new()
+    let mut methods = rpc::Methods::new();
+    read::register(&mut methods);
+    methods
 }
 
 /// 사용자당 하나인 소켓의 자리 — `moai ctl` 과 같은 디렉터리(`ctl::place::dir`)의 `daemon.socket`.
