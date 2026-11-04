@@ -69,19 +69,57 @@ fn entries(src: &str) -> Result<Vec<Entry<'_>>, Trouble> {
     let src = src.strip_prefix('\u{feff}').unwrap_or(src); // BOM
     let mut out = Vec::new();
     let mut table = None;
-    for (i, line) in src.lines().enumerate() {
+    let mut offset = 0;
+    let lines: Vec<(usize, &str)> = src
+        .split_inclusive('\n')
+        .map(|line| {
+            let start = offset;
+            offset += line.len();
+            (start, line.trim_end_matches(['\r', '\n']))
+        })
+        .collect();
+    let mut i = 0;
+    while i < lines.len() {
+        let (start, line) = lines[i];
         let n = i + 1;
+        // This optional setting is TOML, including literal strings and multiline arrays.
+        // Leave every other part of the historical config subset on its existing parser.
+        if table == Some("supervise") {
+            if let Some((key, raw)) = line.split_once('=')
+                && key.trim() == "extra_lines"
+                && raw.trim_start().starts_with('[')
+            {
+                let value_start = start + line.find('=').expect("split above") + 1;
+                let mut end = start + line.len();
+                while src[value_start..end].trim().parse::<toml_edit::Value>().is_err() && i + 1 < lines.len() {
+                    let next = lines[i + 1].1.trim();
+                    // A new assignment or table belongs to the ordinary parser, even after a malformed value.
+                    if (next.starts_with('[') && !next.starts_with("[]"))
+                        || (!next.starts_with(['\"', '\'', '#', ']']) && next.contains('='))
+                    {
+                        break;
+                    }
+                    i += 1;
+                    end = lines[i].0 + lines[i].1.len();
+                    if next.starts_with(']') {
+                        break;
+                    }
+                }
+                out.push(Entry { key: key.trim(), value: src[value_start..end].trim(), line: n, table });
+                i += 1;
+                continue;
+            }
+        }
         let l = strip_comment(line, n)?.trim();
-        if l.is_empty() {
-            continue;
+        if !l.is_empty() {
+            if let Some(t) = l.strip_prefix('[') {
+                table = Some(t.strip_suffix(']').unwrap_or(t).trim());
+            } else {
+                let (k, v) = l.split_once('=').ok_or(Trouble::NotAPair { line: n })?;
+                out.push(Entry { key: k.trim(), value: v.trim(), line: n, table });
+            }
         }
-        if let Some(t) = l.strip_prefix('[') {
-            // 모양이 어긋난 머리로 파일 전체를 거절하지 않는다 — 전에도 `[` 줄은 그냥 넘겼다.
-            table = Some(t.strip_suffix(']').unwrap_or(t).trim());
-            continue;
-        }
-        let (k, v) = l.split_once('=').ok_or(Trouble::NotAPair { line: n })?;
-        out.push(Entry { key: k.trim(), value: v.trim(), line: n, table });
+        i += 1;
     }
     Ok(out)
 }

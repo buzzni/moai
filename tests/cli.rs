@@ -35032,6 +35032,16 @@ fn supervisor_watch_resumes_same_second_and_generates_assignment() {
     let expected =
         message.replace("from: supervisor", &format!("First {id}\nRoot {}\nfrom: supervisor", s.path().display()));
     assert_eq!(String::from_utf8(configured.stdout).unwrap(), expected);
+    // Literal strings, comments, trailing commas and multiline arrays are TOML, not JSON.
+    std::fs::write(
+        &config_path,
+        format!("{original}\n[supervise]\nextra_lines = [\n  'First <id>', # a comment\n  \"Root <root>\",\n]\n"),
+    )
+    .unwrap();
+    let configured = send(id);
+    assert!(configured.status.success(), "{}", String::from_utf8_lossy(&configured.stderr));
+    assert_eq!(String::from_utf8(configured.stdout).unwrap(), expected);
+    assert!(moai(s.path(), &["status"]).status.success(), "valid multiline TOML broke status");
     std::fs::write(&config_path, format!("{original}\n[supervise]\nextra_lines = []\n")).unwrap();
     assert_eq!(send(id).stdout, message.as_bytes());
     std::fs::write(&config_path, format!("{original}\n[supervise]\nextra_lines = 42\n")).unwrap();

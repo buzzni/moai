@@ -144,8 +144,7 @@ pub fn message(ctx: &Ctx, id: &str, f: &Fields) -> R<Vec<String>> {
     let subdir = f.subdir.map(|s| format!("Subdir: {s}\n")).unwrap_or_default();
     let beside = crate::guide::BESIDE.replace("<other work>", f.alongside);
     // Validate only here: a bad key or value in this optional table must not disable unrelated
-    // commands. (A line the file parser itself cannot read — a multi-line array, an unbalanced
-    // quote — still stops every command, like any malformed line in this file.)
+    // commands. Other malformed config lines retain the shared parser's existing behavior.
     // **A misspelt key is refused, not skipped** — skipping it drops the repository's instruction
     // without a word, which is the very miss this setting exists to prevent (moai-n6fs).
     let mut extra = String::new();
@@ -163,12 +162,16 @@ pub fn message(ctx: &Ctx, id: &str, f: &Fields) -> R<Vec<String>> {
                 entry.line
             )));
         }
-        let lines: Vec<String> = serde_json::from_str(&entry.raw).map_err(|_| {
-            Fail::new(format!(
-                "[supervise] extra_lines on line {} must be a single-line array of double-quoted strings",
-                entry.line
-            ))
-        })?;
+        let lines: Vec<String> = entry
+            .raw
+            .parse::<toml_edit::Value>()
+            .ok()
+            .and_then(|value| {
+                value.as_array().and_then(|array| array.iter().map(|item| item.as_str().map(str::to_string)).collect())
+            })
+            .ok_or_else(|| {
+                Fail::new(format!("[supervise] extra_lines on line {} must be a TOML array of strings", entry.line))
+            })?;
         // One line each, and nothing a terminal acts on: the message is pasted into a worker's
         // pane, where an escape sequence could end the bracketed paste and submit half of it.
         if lines.iter().any(|line| line.chars().any(|c| c.is_control() || matches!(c, '\u{2028}' | '\u{2029}'))) {
