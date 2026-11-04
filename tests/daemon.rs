@@ -333,52 +333,240 @@ fn cli(f: &Fence, root: &Path, args: &[&str]) -> Value {
     f.json(&all)
 }
 
+/// CLI 를 환경만 덮어 돌린다 — 화면 말·시계를 요청마다 바꿔 견주려는 것이다.
+fn cli_with(f: &Fence, root: &Path, args: &[&str], env: &[(&str, &str)]) -> Output {
+    let mut all = vec!["-C", root.to_str().unwrap(), "--json", "--user", ACTOR];
+    all.extend_from_slice(args);
+    let mut cmd = f.cmd(&all);
+    for (k, v) in env {
+        cmd.env(k, v);
+    }
+    cmd.output().unwrap()
+}
+
+/// 견주기용 프로젝트 — 에픽·마일스톤·태그·메모·미룸·지운 줄·옆 워크트리의 더 늦은 고침을 모두 든다.
+/// 시계는 열두 시로 못 박혀 있고, 옆 워크트리의 고침만 열두 시 반이라 겹친 화면에서 이긴다.
+fn rich(f: &Fence, name: &str) -> PathBuf {
+    let dir = f.0.join(name);
+    std::fs::create_dir(&dir).unwrap();
+    let d = dir.to_str().unwrap();
+    let git = |args: &[&str]| {
+        let out = Command::new("git")
+            .args(["-c", "user.name=Tester", "-c", "user.email=tester@example.com"])
+            .args(args)
+            .current_dir(&dir)
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+    };
+    git(&["init", "-q"]);
+    let moai = |args: &[&str]| {
+        let mut all = vec!["-C", d];
+        all.extend_from_slice(args);
+        let out = f.run(&all);
+        assert!(out.status.success(), "moai {all:?}: {}", String::from_utf8_lossy(&out.stderr));
+        String::from_utf8(out.stdout).unwrap()
+    };
+    let id_of = |title: &str| -> String {
+        let rows = f.json(&["-C", d, "--json", "show", "--all", "--fields", "id,title"]);
+        rows.as_array().unwrap().iter().find(|r| r["title"] == title).unwrap()["id"].as_str().unwrap().to_string()
+    };
+    moai(&["init"]);
+    moai(&["milestone", "add", "v1", "--user", ACTOR]);
+    let ms = id_of("v1");
+    moai(&["epic", "add", "Storage", "--user", ACTOR, "--milestone", &ms]);
+    let epic = id_of("Storage");
+    moai(&["add", "parser bug", "--user", ACTOR, "-p", "1", "-t", "bug", "-t", "parser", "-e", &epic]);
+    moai(&["add", "ui polish", "--user", ACTOR, "-t", "ui", "-t", "bug", "-p", "3"]);
+    moai(&["add", "later thing", "--user", ACTOR, "-a", "none"]);
+    moai(&["add", "doomed", "--user", ACTOR]);
+    moai(&["add", "swamped", "--user", ACTOR, "-p", "0"]);
+    let (parser, later, doomed, swamped) =
+        (id_of("parser bug"), id_of("later thing"), id_of("doomed"), id_of("swamped"));
+    moai(&["note", &parser, "found the cause in the lexer", "--user", ACTOR]);
+    moai(&["mv", &parser, "in_progress", "--user", ACTOR]);
+    moai(&["defer", &later, "-m", "next quarter", "--user", ACTOR]);
+    moai(&["rm", &doomed, "--user", ACTOR]);
+    moai(&["mv", &swamped, "in_progress", "--user", ACTOR]);
+    moai(&["mv", &swamped, "review", "--user", ACTOR]);
+    moai(&["project", "add", d]);
+    // 옆 워크트리 — 올라온 사본과 달라진 줄 하나를 더 늦은 때에 둔다.
+    git(&["add", "-A"]);
+    git(&["commit", "-q", "-m", "fixture"]);
+    let side = f.0.join(format!("{name}-side"));
+    git(&["worktree", "add", "-q", "-b", "wx", side.to_str().unwrap()]);
+    let out = f
+        .cmd(&["-C", side.to_str().unwrap(), "mv", &swamped, "done", "--user", ACTOR])
+        .env("MOAI_NOW", "2026-11-04T12:30:00Z")
+        .env("MOAI_HERE", "1")
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    dir
+}
+
+/// 요청 하나와 CLI 한 번의 견줌 — 값은 JSON 값으로, `messages` 는 stderr 줄로, `partial` 은 종료 코드로.
+fn compare(f: &Fence, wire: &mut Wire, root: &Path, n: u64, method: &str, params: &Value, argv: &[&str]) {
+    let mut sent = params.clone();
+    sent["project"] = json!(root.to_str().unwrap());
+    sent["actor"] = json!(ACTOR);
+    let lang = params.get("lang").and_then(Value::as_str).unwrap_or("en");
+    let reply = wire.call(n, method, sent);
+    let out = cli_with(f, root, argv, &[("MOAI_LANG", lang)]);
+    let ctx = format!("{method} {params} / moai {argv:?}");
+    if out.stdout.is_empty() {
+        // CLI 가 넘어졌다 — API 도 같은 코드로 넘어지고 stderr 줄을 곁에 싣는다.
+        let said: Value =
+            serde_json::from_slice(&out.stderr).unwrap_or_else(|e| panic!("오류가 JSON 이 아니다: {e} — {ctx}"));
+        assert_eq!(reply["error"]["code"], -32000, "{ctx}: {reply}");
+        assert_eq!(reply["error"]["data"]["code"], said["code"], "{ctx}: {reply}");
+        assert_eq!(reply["error"]["message"], said["error"], "{ctx}: {reply}");
+        return;
+    }
+    let want: Value = serde_json::from_slice(&out.stdout)
+        .unwrap_or_else(|e| panic!("CLI 가 JSON 을 안 냈다: {e} — {ctx}\n{}", String::from_utf8_lossy(&out.stderr)));
+    let result = &reply["result"];
+    assert!(result.is_object(), "{ctx}: {reply}");
+    assert_eq!(result["value"], want, "{ctx}");
+    let stderr: Vec<String> = String::from_utf8_lossy(&out.stderr)
+        .lines()
+        .map(|l| l.trim_end().to_string())
+        .filter(|l| !l.is_empty())
+        .collect();
+    let messages: Vec<String> = result["messages"]
+        .as_array()
+        .unwrap_or_else(|| panic!("messages 가 배열이 아니다: {ctx}"))
+        .iter()
+        .flat_map(|m| m.as_str().unwrap().lines().map(|l| l.trim_end().to_string()).collect::<Vec<_>>())
+        .filter(|l| !l.is_empty())
+        .collect();
+    assert_eq!(messages, stderr, "messages ≠ stderr — {ctx}");
+    assert_eq!(result["partial"], json!(!out.status.success()), "partial ≠ 종료 코드 — {ctx}");
+}
+
 #[test]
 fn the_read_methods_answer_as_the_cli_does() {
     let f = Fence::new();
-    let root = f.project("proj");
-    let project = root.to_str().unwrap();
+    let root = rich(&f, "proj");
     let (_daemon, mut wire) = served(&f);
 
-    let cases: Vec<(&str, Value, Vec<&str>)> = vec![
+    // (메서드, 요청 필드, CLI 인자). 거르개: 쉼표는 "또는", 배열은 "그리고".
+    let mut cases: Vec<(&str, Value, Vec<&str>)> = vec![
         ("status", json!({}), vec!["status"]),
+        ("status", json!({ "worktree": true }), vec!["status", "--worktree"]),
+        ("status", json!({ "lang": "ko" }), vec!["status"]),
+        ("ready", json!({}), vec!["ready"]),
         ("ready", json!({ "limit": 1 }), vec!["ready", "-n", "1"]),
+        ("ready", json!({ "worktree": true }), vec!["ready", "--worktree"]),
+        ("ready", json!({ "lang": "ko", "worktree": true }), vec!["ready", "--worktree"]),
         ("prime", json!({}), vec!["prime"]),
+        ("prime", json!({ "worktree": true }), vec!["prime", "--worktree"]),
         ("show", json!({}), vec!["show"]),
+        ("show", json!({ "all": true }), vec!["show", "--all"]),
+        ("show", json!({ "archived": true, "all": true }), vec!["show", "--all", "--archived"]),
+        ("show", json!({ "deferred": true }), vec!["show", "--deferred"]),
+        ("show", json!({ "worktree": true }), vec!["show", "--worktree"]),
+        ("show", json!({ "worktree": true, "all": true, "tree": true }), vec!["show", "--worktree", "--all", "--tree"]),
+        ("show", json!({ "status": "todo,in_progress" }), vec!["show", "-s", "todo,in_progress"]),
+        ("show", json!({ "status": ["todo", "in_progress"] }), vec!["show", "-s", "todo", "-s", "in_progress"]),
+        ("show", json!({ "tag": "bug,ui" }), vec!["show", "-t", "bug,ui"]),
+        ("show", json!({ "tag": ["bug", "parser"] }), vec!["show", "-t", "bug", "-t", "parser"]),
+        ("show", json!({ "no_tag": "ui" }), vec!["show", "--no-tag", "ui"]),
+        ("show", json!({ "priority": 1 }), vec!["show", "-p", "1"]),
+        ("show", json!({ "priority": "0,1" }), vec!["show", "-p", "0,1"]),
+        ("show", json!({ "assignee": ["none", "me"] }), vec!["show", "-a", "none", "-a", "me"]),
+        ("show", json!({ "grep": "lexer" }), vec!["show", "-g", "lexer"]),
+        ("show", json!({ "type": "epic" }), vec!["show", "--type", "epic"]),
+        ("show", json!({ "type": "milestone", "tree": true }), vec!["show", "--type", "milestone", "--tree"]),
+        ("show", json!({ "stale": 0 }), vec!["show", "--stale", "0"]),
+        ("show", json!({ "since": "2026-11-04T11:00:00Z" }), vec!["show", "--since", "2026-11-04T11:00:00Z"]),
+        ("show", json!({ "filter": ["status=todo"] }), vec!["show", "--filter", "status=todo"]),
+        ("show", json!({ "tree": true }), vec!["show", "--tree"]),
+        ("show", json!({ "tree": true, "lang": "ko" }), vec!["show", "--tree"]),
+        ("show", json!({ "removed": true }), vec!["show", "--removed"]),
+        ("show", json!({ "fields": ["id", "title"] }), vec!["show", "--fields", "id,title"]),
+        ("show", json!({ "fields": "id,status" }), vec!["show", "--fields", "id,status"]),
+        ("show", json!({ "sort": "priority,id" }), vec!["show", "--sort", "priority,id"]),
+        ("show", json!({ "sort": "priority", "reverse": true }), vec!["show", "--sort", "priority", "--reverse"]),
         (
             "show",
-            json!({ "status": "todo", "tag": "bug", "sort": "priority" }),
-            vec!["show", "-s", "todo", "-t", "bug", "--sort", "priority"],
+            json!({ "sort": "id", "limit": 2, "fields": "id" }),
+            vec!["show", "--sort", "id", "-n", "2", "--fields", "id"],
         ),
-        (
-            "show",
-            json!({ "tree": true, "fields": ["id", "title"], "priority": 1 }),
-            vec!["show", "--tree", "--fields", "id,title", "-p", "1"],
-        ),
+        ("stats", json!({}), vec!["stats"]),
+        ("stats", json!({ "by": ["status", "tag"] }), vec!["stats", "--by", "status,tag"]),
         (
             "stats",
-            json!({ "by": ["status", "tag"], "bucket": "day", "last": 3 }),
-            vec!["stats", "--by", "status,tag", "--bucket", "day", "--last", "3"],
+            json!({ "by": "assignee", "bucket": "day", "last": 3 }),
+            vec!["stats", "--by", "assignee", "--bucket", "day", "--last", "3"],
         ),
+        ("stats", json!({ "bucket": "week", "last": 2 }), vec!["stats", "--bucket", "week", "--last", "2"]),
+        ("stats", json!({ "status": "todo", "tag": "bug" }), vec!["stats", "-s", "todo", "-t", "bug"]),
+        ("stats", json!({ "lang": "ko", "by": "status" }), vec!["stats", "--by", "status"]),
         ("project.ls", json!({}), vec!["project", "ls"]),
+        ("project.ls", json!({ "lang": "ko" }), vec!["project", "ls"]),
     ];
-    for (n, (method, mut params, argv)) in cases.into_iter().enumerate() {
-        params["project"] = json!(project);
-        params["actor"] = json!(ACTOR);
-        let reply = wire.call(n as u64 + 1, method, params);
-        let result = &reply["result"];
-        assert!(result.is_object(), "{method}: {reply}");
-        let mut want_argv = vec!["--user", ACTOR];
-        want_argv.extend(&argv);
-        let want = cli(&f, &root, &want_argv);
-        assert_eq!(result["value"], want, "{method} {argv:?}");
-        assert_eq!(result["partial"], false, "{method}");
-        assert!(result["messages"].is_array(), "{method}: {result}");
+    // 쪽 넘기기 — 첫 쪽의 마지막 id 가 둘째 쪽의 `after` 다.
+    let page = cli_with(&f, &root, &["show", "--sort", "id", "-n", "2", "--fields", "id"], &[]);
+    let first: Value = serde_json::from_slice(&page.stdout).unwrap();
+    let last = first.as_array().unwrap().last().unwrap()["id"].as_str().unwrap().to_string();
+    cases.push((
+        "show",
+        json!({ "sort": "id", "limit": 2, "after": last, "fields": "id" }),
+        vec!["show", "--sort", "id", "-n", "2", "--after", &last, "--fields", "id"],
+    ));
+    // 한 id — 이슈 하나(글·이력·덧붙은 층까지).
+    let rows = cli_with(&f, &root, &["show", "--all", "--fields", "id,title"], &[]);
+    let rows: Value = serde_json::from_slice(&rows.stdout).unwrap();
+    let id = rows.as_array().unwrap().iter().find(|r| r["title"] == "parser bug").unwrap()["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    cases.push(("show", json!({ "id": id }), vec!["show", &id]));
+    cases.push(("show", json!({ "id": id, "worktree": true }), vec!["show", &id, "--worktree"]));
+    cases.push(("show", json!({ "id": id, "lang": "ko" }), vec!["show", &id]));
+
+    // 겹쳐 본 길이 밋밋한 길과 다르다는 것부터 — 같지 않은 것을 견주지 않으면 이 시험은 아무것도 안 잰다.
+    let plain = cli_with(&f, &root, &["show", "--all"], &[]);
+    let over = cli_with(&f, &root, &["show", "--all", "--worktree"], &[]);
+    assert_ne!(plain.stdout, over.stdout, "옆 워크트리의 고침이 안 겹쳤다 — 견줄 거리가 없다");
+
+    for (n, (method, params, argv)) in cases.iter().enumerate() {
+        compare(&f, &mut wire, &root, n as u64 + 1, method, params, argv);
     }
-    // 한 id — 이슈 하나.
-    let alpha = cli(&f, &root, &["show", "-g", "alpha", "--fields", "id"])[0]["id"].as_str().unwrap().to_string();
-    let reply = wire.call(50, "show", json!({ "project": project, "id": alpha }));
-    assert_eq!(reply["result"]["value"], cli(&f, &root, &["show", &alpha]), "{reply}");
+}
+
+#[test]
+fn a_torn_snapshot_line_is_carried_as_messages_and_partial() {
+    let f = Fence::new();
+    let root = f.project("proj");
+    let snapshot = root.join(".moai/issues.jsonl");
+    let mut text = std::fs::read_to_string(&snapshot).unwrap();
+    text.push_str("{this line is torn\n");
+    std::fs::write(&snapshot, text).unwrap();
+    let (_daemon, mut wire) = served(&f);
+
+    // CLI 는 값을 내고도 1 로 끝나며 stderr 에 못 읽은 줄을 댄다 — 그 둘이 `partial` 과 `messages` 다.
+    let out = cli_with(&f, &root, &["show"], &[]);
+    assert_eq!(out.status.code(), Some(1), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(!out.stderr.is_empty());
+    for (n, (method, params, argv)) in [
+        ("show", json!({}), vec!["show"]),
+        ("status", json!({}), vec!["status"]),
+        ("ready", json!({}), vec!["ready"]),
+        ("stats", json!({}), vec!["stats"]),
+        ("show", json!({ "lang": "ko" }), vec!["show"]),
+    ]
+    .iter()
+    .enumerate()
+    {
+        compare(&f, &mut wire, &root, n as u64 + 1, method, params, argv);
+    }
+    let reply = wire.call(9, "show", json!({ "project": root.to_str().unwrap(), "actor": ACTOR }));
+    assert_eq!(reply["result"]["partial"], true, "{reply}");
+    assert!(!reply["result"]["messages"].as_array().unwrap().is_empty(), "{reply}");
 }
 
 #[test]
@@ -440,4 +628,68 @@ fn a_cli_failure_is_carried_with_its_code() {
     let got = wire.call(1, "show", json!({ "project": project, "id": "no-such-id" }));
     assert_eq!(got["error"]["code"], -32000, "{got}");
     assert_eq!(got["error"]["data"]["code"], want["code"], "{got} / {want}");
+}
+
+#[test]
+fn changes_over_the_socket_sees_what_the_cli_writes() {
+    let f = Fence::new();
+    let root = f.project("proj");
+    let project = root.to_str().unwrap();
+    let ids =
+        |v: &Value| -> Vec<String> { v.as_array().unwrap().iter().map(|x| x.as_str().unwrap().to_string()).collect() };
+    let (_daemon, mut wire) = served(&f);
+
+    let id_of = |title: &str| -> String {
+        let rows = cli(&f, &root, &["show", "--all", "--fields", "id,title"]);
+        rows.as_array().unwrap().iter().find(|r| r["title"] == title).unwrap()["id"].as_str().unwrap().to_string()
+    };
+    let (alpha, beta) = (id_of("alpha"), id_of("beta"));
+
+    // 커서가 없으면 처음 — 전체를 다시 읽으라는 `reset` 과 첫 커서. 봉투는 읽기 메서드와 같다.
+    let first = wire.call(1, "changes", json!({ "project": project }));
+    let value = &first["result"]["value"];
+    assert_eq!(value["reset"], true, "{first}");
+    assert_eq!(first["result"]["partial"], false, "{first}");
+    assert_eq!(first["result"]["messages"], json!([]), "{first}");
+    let cursor = value["cursor"].as_str().unwrap().to_string();
+
+    // CLI 로 쓴다 — 하나 짓고, 하나에 메모를 붙이고, 하나를 지운다.
+    for args in [
+        vec!["-C", project, "add", "gamma", "--user", ACTOR],
+        vec!["-C", project, "note", &alpha, "a memo", "--user", ACTOR],
+        vec!["-C", project, "rm", &beta, "--user", ACTOR],
+    ] {
+        let out = f.run(&args);
+        assert!(out.status.success(), "moai {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+    }
+    let gamma = id_of("gamma");
+
+    let second = wire.call(2, "changes", json!({ "project": project, "cursor": cursor }));
+    let value = &second["result"]["value"];
+    assert_eq!(value["reset"], false, "{second}");
+    let mut changed = ids(&value["changed"]);
+    changed.sort();
+    let mut want = vec![alpha.clone(), gamma];
+    want.sort();
+    assert_eq!(changed, want, "지은 줄과 메모가 붙은 줄이 바뀜이다 — {second}");
+    assert_eq!(ids(&value["removed"]), [beta], "{second}");
+
+    // 새 커서로 이어 가면 같은 것을 두 번 알리지 않는다.
+    let next = value["cursor"].as_str().unwrap().to_string();
+    let third = wire.call(3, "changes", json!({ "project": project, "cursor": next }));
+    assert_eq!(third["result"]["value"]["changed"], json!([]), "{third}");
+    assert_eq!(third["result"]["value"]["removed"], json!([]), "{third}");
+    assert_eq!(third["result"]["value"]["reset"], false, "{third}");
+
+    // 못 읽는 커서는 오류가 아니라 reset 이다. 다른 메서드처럼 모르는 키·안 걸어 둔 프로젝트는 거절한다.
+    let junk = wire.call(4, "changes", json!({ "project": project, "cursor": "not-a-cursor" }));
+    assert_eq!(junk["result"]["value"]["reset"], true, "{junk}");
+    let typo = wire.call(5, "changes", json!({ "project": project, "cursr": "x" }));
+    assert_eq!(typo["error"]["code"], -32602, "{typo}");
+    let shape = wire.call(6, "changes", json!({ "project": project, "cursor": 5 }));
+    assert_eq!(shape["error"]["code"], -32602, "{shape}");
+    let none = wire.call(7, "changes", json!({}));
+    assert_eq!(none["error"]["code"], -32602, "{none}");
+    let loose = wire.call(8, "changes", json!({ "project": f.0.display().to_string() }));
+    assert_eq!(loose["error"]["data"]["code"], "not_registered", "{loose}");
 }

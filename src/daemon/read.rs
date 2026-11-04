@@ -1,4 +1,4 @@
-//! 읽기 메서드 여섯(moai-5n6m.q16) — `status`·`ready`·`prime`·`show`·`stats`·`project.ls`.
+//! 읽기 메서드 여섯(moai-5n6m.q16) — `status`·`ready`·`prime`·`show`·`stats`·`project.ls` — 과 `changes`(moai-5n6m.cb9).
 //!
 //! 답은 `moai -C <root> --json <명령>` 과 같다(`cmd::request::read` 가 같은 명령 함수를 돌린다). 이 층이 하는 일은
 //! 둘이다 — 요청의 **이름 붙은 필드**를 CLI 가 받는 값(`cli::ShowArgs` 등)으로 바꾸고, 돌아온 줄을 JSON 으로 싼다.
@@ -30,6 +30,7 @@
 //! | `show` | `id: string`(이슈 id 또는 종류), `tree`·`removed`·`worktree`·`reverse: bool`, `fields: string\|[string]`, `sort: string`, `limit: int>=1`, `after: string`, 거르개 |
 //! | `stats` | `by: string\|[string]`(축), `bucket: "day"\|"week"`, `last: int 1..=1000`, 거르개 |
 //! | `project.ls` | 없음 (`project` 도 안 쓴다) |
+//! | `changes` | `cursor: string`(`value` 는 `{cursor, changed, removed, reset}`) |
 //!
 //! 거르개: `status`·`tag`·`no_tag`·`epic`·`milestone`·`parent`·`priority`·`assignee`·`since`·`created`·`done`·`filter`
 //! 는 `string|number|[…]`(쉼표는 "또는", 배열은 "그리고", 담당만 배열도 "또는"), `type`·`grep: string`, `stale: int`,
@@ -59,6 +60,22 @@ pub fn register(methods: &mut Methods) {
     methods.register("show", |env, p| serve(env, "show", p, true, show));
     methods.register("stats", |env, p| serve(env, "stats", p, true, stats));
     methods.register("project.ls", |env, p| serve(env, "project.ls", p, false, |_| Ok(Read::ProjectLs)));
+    methods.register("changes", changes);
+}
+
+/// `changes` — 커서 뒤로 바뀐 id(moai-5n6m.cb9). 같은 봉투에 싼다: 클라이언트가 어느 메서드든 `result.value` 를
+/// 벗겨 읽게 두려는 것이다. CLI 의 stderr 줄도 덜 받은 답도 없으니 `messages` 는 비고 `partial` 은 거짓이다.
+/// 읽는 규칙(커서·`reset`)은 `changes::handle` 에 있다.
+fn changes(env: &RequestEnv, params: Value) -> Result<Value, RpcError> {
+    let mut p = Params::new("changes", params)?;
+    let cursor = p.string("cursor")?;
+    p.done()?;
+    let reg = project::registry();
+    let lang = project::lang(env, &reg)?;
+    project::zone(env)?;
+    let root = project::resolve(env, lang, &reg)?;
+    let value = super::changes::handle(&root, &json!({ "cursor": cursor }))?;
+    Ok(json!({ "value": value, "messages": [], "partial": false }))
 }
 
 /// 한 메서드의 한 요청. 차례: 필드 읽기(`-32602`) → 말·시간대(`-32602`) → 프로젝트(`-32602`·`-32000`) → 돌리기.
