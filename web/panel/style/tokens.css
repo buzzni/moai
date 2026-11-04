@@ -71,6 +71,7 @@
   /* Derived: the host does not give these. */
   --hover: color-mix(in srgb, var(--text) 8%, var(--bg));
   --selected: color-mix(in srgb, var(--accent) 10%, var(--bg));
+  --hatch-fill: repeating-linear-gradient(135deg, color-mix(in srgb, var(--muted) 4%, transparent) 0 4px, transparent 4px 10px);
   --muted-bg: color-mix(in srgb, var(--text) 6%, var(--bg));
   --accent-hover: color-mix(in srgb, var(--accent) 88%, black);
   --danger-soft: color-mix(in srgb, var(--danger) 10%, var(--bg));

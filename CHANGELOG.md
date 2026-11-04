@@ -12,6 +12,15 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+### Changed
+
+- The web list and kanban fill unused space below their content with a subtle hatch, including when groups are folded. (moai-v0h5)
+
+### Fixed
+
+- Rule 5 takeover suggestions name every affected owner and preserve all requested IDs; layer refreshes no longer repeat unchanged read diagnostics, and `show` honors unreadable live IDs over stale archived copies when judging groups. (moai-8rf1)
+- `[supervise] extra_lines` accepts TOML arrays, including multiline arrays, literal strings, trailing commas and comments. Multiline arrays stop every command in v0.49 and earlier binaries; upgrade those binaries before using them. JSON-only escapes such as `\/` are now refused. (moai-8rf1)
+
 ## [0.49.0] - 2026-11-04
 
 ### Changed

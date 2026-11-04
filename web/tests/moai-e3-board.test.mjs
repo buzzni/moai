@@ -158,6 +158,11 @@ test('closed milestone lanes fold while epic members remain ordinary cards', () 
   const state = { ...initialState(), tab: 'board', view: { ...initialState().view, hideDeferred: false } }
   const { root, view, index } = mount(state, rows)
   const head = (id) => root.querySelector(`.m-swim-head[data-lane="m:${id}"]`)
+  assert.equal(root.lastElementChild.className, 'm-fill')
+  assert.equal(root.lastElementChild.hidden, false)
+  // A pane narrower than the columns scrolls sideways; the fill spans the board's width, not only the pane's.
+  assert.equal(root.lastElementChild.style.minWidth, root.querySelector('.m-board-wrap').style.minWidth)
+  assert.notEqual(root.lastElementChild.style.minWidth, '')
   assert.equal(head('m1').querySelector('.moai-toggle').getAttribute('aria-expanded'), 'false')
   assert.equal(head('m1').querySelector('.moai-toggle').tabIndex, 0, 'the browser Tab reaches the fold button')
   assert.equal(head('m1').querySelector('.m-swim-title').tabIndex, 0, 'the browser Tab reaches the milestone title')
@@ -362,6 +367,12 @@ test('board view: assignee chip only when the column is on; empty board says so'
   assert.match(mount(on).root.querySelector('[data-id="e1.b"]').textContent, /kim/)
   const empty = mount(base, [])
   assert.match(empty.root.textContent, /Nothing here/)
+  assert.equal(empty.root.querySelector('.m-fill').hidden, true)
+  // A drawn board that loses its index hides the fill again: it starts hidden, so only this reaches the else branch.
+  const drawn = mount(base)
+  assert.equal(drawn.root.querySelector('.m-fill').hidden, false)
+  drawn.view.render(base, null)
+  assert.equal(drawn.root.querySelector('.m-fill').hidden, true)
 })
 
 test('board view: a card chip carries its whole words in its title, so the stylesheet may cut it at the card edge (moai-rqec)', () => {

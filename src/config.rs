@@ -1,6 +1,7 @@
 //! `.moai/config.toml` 의 아주 작은 부분집합 파서와 설정 값.
 //!
-//! 중첩도 배열도 쓰지 않으므로 TOML 라이브러리를 넣지 않는다.
+//! 중첩도 배열도 쓰지 않으므로 TOML 라이브러리로 파일을 읽지 않는다. 하나뿐인 예외는 `[supervise] extra_lines`
+//! 의 값이다 — 그 배열만 [`toml_value`] 가 TOML 로 읽는다(moai-8rf1.qq8).
 //! **엄격하게 읽는다** — 설정 오타가 조용히 통과하면 id 접두어가 틀어지거나
 //! 상태 목록이 비고, 둘 다 되돌리기 어렵다.
 
@@ -39,6 +40,19 @@ fn strip_comment(line: &str, n: usize) -> Result<&str, Trouble> {
     Ok(&line[..cut])
 }
 
+/// The one value this file reads as TOML (`[supervise] extra_lines`), as written after `key =`.
+///
+/// Parsed as a one-key document, not with `Value::from_str`: that refuses anything after the value, so a trailing
+/// `# note` — a comment on every other line of this file — turned a valid array into a refusal. A second key or a
+/// table caught in `raw` is not this value either.
+pub fn toml_value(raw: &str) -> Option<toml_edit::Value> {
+    let doc: toml_edit::DocumentMut = format!("v = {raw}").parse().ok()?;
+    if doc.len() != 1 {
+        return None;
+    }
+    doc.get("v")?.as_value().cloned()
+}
+
 /// 값은 반드시 큰따옴표로 감싼다. `trim_matches` 로 벗기면
 /// `prefix = "argos" 오타` 가 `argos" 오타` 로 조용히 통과한다.
 fn value(raw: &str) -> Option<&str> {
@@ -69,19 +83,59 @@ fn entries(src: &str) -> Result<Vec<Entry<'_>>, Trouble> {
     let src = src.strip_prefix('\u{feff}').unwrap_or(src); // BOM
     let mut out = Vec::new();
     let mut table = None;
-    for (i, line) in src.lines().enumerate() {
+    let mut offset = 0;
+    let lines: Vec<(usize, &str)> = src
+        .split_inclusive('\n')
+        .map(|line| {
+            let start = offset;
+            offset += line.len();
+            (start, line.trim_end_matches(['\r', '\n']))
+        })
+        .collect();
+    let mut i = 0;
+    while i < lines.len() {
+        let (start, line) = lines[i];
         let n = i + 1;
+        // This optional setting is TOML, including literal strings and multiline arrays.
+        // Leave every other part of the historical config subset on its existing parser.
+        if table == Some("supervise")
+            && let Some((key, raw)) = line.split_once('=')
+            && key.trim() == "extra_lines"
+            && raw.trim_start().starts_with('[')
+        {
+            let value_start = start + line.find('=').expect("split above") + 1;
+            let mut end = start + line.len();
+            while toml_value(src[value_start..end].trim()).is_none() && i + 1 < lines.len() {
+                let next = lines[i + 1].1.trim();
+                // A new assignment or table belongs to the ordinary parser, even after a malformed value.
+                // Only a bare key before `=` is an assignment — an element such as `, "a = b"` is not.
+                let assigns = next.split_once('=').is_some_and(|(k, _)| {
+                    let k = k.trim();
+                    !k.is_empty() && k.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.'))
+                });
+                if (next.starts_with('[') && !next.starts_with("[]")) || assigns {
+                    break;
+                }
+                i += 1;
+                end = lines[i].0 + lines[i].1.len();
+                if next.starts_with(']') {
+                    break;
+                }
+            }
+            out.push(Entry { key: key.trim(), value: src[value_start..end].trim(), line: n, table });
+            i += 1;
+            continue;
+        }
         let l = strip_comment(line, n)?.trim();
-        if l.is_empty() {
-            continue;
+        if !l.is_empty() {
+            if let Some(t) = l.strip_prefix('[') {
+                table = Some(t.strip_suffix(']').unwrap_or(t).trim());
+            } else {
+                let (k, v) = l.split_once('=').ok_or(Trouble::NotAPair { line: n })?;
+                out.push(Entry { key: k.trim(), value: v.trim(), line: n, table });
+            }
         }
-        if let Some(t) = l.strip_prefix('[') {
-            // 모양이 어긋난 머리로 파일 전체를 거절하지 않는다 — 전에도 `[` 줄은 그냥 넘겼다.
-            table = Some(t.strip_suffix(']').unwrap_or(t).trim());
-            continue;
-        }
-        let (k, v) = l.split_once('=').ok_or(Trouble::NotAPair { line: n })?;
-        out.push(Entry { key: k.trim(), value: v.trim(), line: n, table });
+        i += 1;
     }
     Ok(out)
 }
@@ -464,7 +518,8 @@ pub struct Config {
     /// `[writing]` 표 — **이 저장소가 권하는** 글의 자세함(moai-d1zn). `[models]` 와 같은 꼴의 줄이라 같은 [`ModelEntry`] 로
     /// 적힌 그대로 들고, 값은 `moai writing` 과 훅이 [`crate::user_config::Writing::with_repo`] 로 잰다 — 여기서 거절하지 않는다.
     pub writing: Vec<ModelEntry>,
-    /// Repository-only supervisor assignment settings, validated by the message command.
+    /// Repository-only supervisor assignment settings, validated by the message command. The `extra_lines`
+    /// entry's `raw` is the TOML value as written — comments and line breaks kept — for [`toml_value`].
     pub supervise: Vec<ModelEntry>,
 }
 
