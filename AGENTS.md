@@ -1,4 +1,4 @@
-<!-- moai:begin v:0.48.0 hash:88bd8919 -->
+<!-- moai:begin v:0.48.0 hash:9cc33c9d -->
 ## Issue tracker — moai
 
 This repository's work lives in `.moai/issues.jsonl`.
@@ -7,6 +7,7 @@ Start a session with `moai status`. `moai ready --json` separates your ready wor
 other people's or unowned work (`others`), and deferred or blocked work (`held`).
 
     moai prime · moai ready                 what you hold and can pick up
+    moai tui                                open the explorer
     moai show <id> · moai show -g <keyword> details and search
     moai add '<title>' -p 1 -t bug -e <epic> create
     moai mv <id> in_progress                pick up → review → done
