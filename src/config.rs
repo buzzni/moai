@@ -341,6 +341,7 @@ impl Thresholds {
 ///
 /// **올리는 자는 `moai due apply` 하나다** — 이 값은 그 동사와 `moai status` 의 알림이 읽을 뿐, 읽는 길이 줄을
 /// 고치지 않는다. 문턱은 "남은 날이 이 날수 **이하**" 다: 오늘·지난 기한은 남은 날이 0 이하라 언제나 `p0` 칸에 든다.
+/// 다만 `p0` 은 줄 제 기한만 부르고, 조상에게서 물려받은 기한은 `p1` 에서 멈춘다(moai-ifvh.2ub, `report::priority_choice`).
 ///
 /// **평평한 키로 둔다** — [`Thresholds`] 와 같은 까닭이다. 그리고 **`status_` 접두어를 안 쓴다**: 옛 바이너리는
 /// 모르는 `status_*` 키에서 설정 전체를 거절하므로, 그 이름을 쓰면 새 키를 적은 저장소에서 옛 바이너리가 통째로
@@ -463,6 +464,8 @@ pub struct Config {
     /// `[writing]` 표 — **이 저장소가 권하는** 글의 자세함(moai-d1zn). `[models]` 와 같은 꼴의 줄이라 같은 [`ModelEntry`] 로
     /// 적힌 그대로 들고, 값은 `moai writing` 과 훅이 [`crate::user_config::Writing::with_repo`] 로 잰다 — 여기서 거절하지 않는다.
     pub writing: Vec<ModelEntry>,
+    /// Repository-only supervisor assignment settings, validated by the message command.
+    pub supervise: Vec<ModelEntry>,
 }
 
 /// `.moai/config.toml` 의 `[models]` 한 줄 — **값은 여기서 재지 않는다.** 아는 키인가·등급 낱말인가·큰따옴표 글인가는
@@ -657,6 +660,11 @@ impl Config {
             due,
             models,
             writing,
+            supervise: es
+                .iter()
+                .filter(|e| e.table == Some("supervise"))
+                .map(|e| ModelEntry { key: e.key.into(), raw: e.value.into(), line: e.line })
+                .collect(),
         })
     }
 

@@ -3755,6 +3755,80 @@ mod tests {
         }
     }
 
+    /// Exercise follow_site's first overview read, then its replacement of an already loaded site. Both layouts
+    /// must seed default_folds(None) once and preserve an explicit opening across the next asynchronous reread.
+    #[test]
+    fn overview_reads_seed_closed_milestones_and_keep_manual_openings() {
+        for (name, layout_key, gantt) in
+            [("overview-board-folds", "SPC g b", false), ("overview-gantt-folds", "SPC g g", true)]
+        {
+            let s = Scratch::fenced(name);
+            let dir = mixed_milestone_project(&s);
+            let cfg = s.register(&[&dir]);
+            let mut a = layered(&cfg);
+            a.hit(layout_key);
+            a.cursor = a.rows().iter().position(|r| matches!(r, Row::Project(0))).unwrap();
+            a.hit("l");
+            settle(&mut a);
+            let (closed, running, read) = {
+                let place = &a.layer.as_ref().unwrap().places[0];
+                let site = place.site.as_ref().expect("the first overview read installed a site");
+                let closed = site.index.find("argos-0200").unwrap();
+                let running = site.index.find("argos-0400").unwrap();
+                assert!(site.closed(closed));
+                assert!(!site.closed(running));
+                let folds = if gantt { &site.gantt_shut } else { &site.board_shut };
+                assert!(
+                    folds.contains(&site.index.dir_path(&site.issues, closed)),
+                    "{name}: first read left a closed milestone open"
+                );
+                assert!(
+                    !folds.contains(&site.index.dir_path(&site.issues, running)),
+                    "{name}: first read folded a running milestone"
+                );
+                // The site's own stamp: `follow_site` sets it when it swaps a fresh Site in. `place.read_at` is the summary
+                // sweep's and would move on a re-look even if the site were never replaced.
+                (closed, running, site.read_at)
+            };
+            a.cursor = a
+                .rows()
+                .iter()
+                .position(|r| matches!(r, Row::Item(crate::tui::Seat::Place(0), e, _) if e.at() == Some(closed)))
+                .unwrap();
+            a.hit("l");
+            // Also retain a manual fold of the running milestone, so clearing all folds cannot pass this test.
+            a.cursor = a
+                .rows()
+                .iter()
+                .position(|r| matches!(r, Row::Item(crate::tui::Seat::Place(0), e, _) if e.at() == Some(running)))
+                .unwrap();
+            a.hit("h");
+            let chosen = {
+                let site = a.layer.as_ref().unwrap().places[0].site.as_ref().unwrap();
+                let folds = if gantt { &site.gantt_shut } else { &site.board_shut };
+                assert!(
+                    !folds.contains(&site.index.dir_path(&site.issues, closed)),
+                    "{name}: l did not open the closed milestone"
+                );
+                assert!(
+                    folds.contains(&site.index.dir_path(&site.issues, running)),
+                    "{name}: h did not fold the running milestone"
+                );
+                folds.clone()
+            };
+            a.layer.as_mut().unwrap().queue(dir);
+            a.read_wanted();
+            settle(&mut a);
+            let site = a.layer.as_ref().unwrap().places[0].site.as_ref().unwrap();
+            assert!(site.read_at > read, "{name}: a replacement read must really complete");
+            assert_eq!(
+                if gantt { &site.gantt_shut } else { &site.board_shut },
+                &chosen,
+                "{name}: reread changed the person's folds"
+            );
+        }
+    }
+
     /// **Entering a project from the overview opens its running milestones as a first read does** (moai-zxd0 review).
     /// `enter_project` swaps a blank `Site` in and loads the rows through `apply_fresh`, which keeps folds as a reread
     /// must — the seed in `Site::of` never ran, so every milestone of a project entered with `Enter` or a digit stood

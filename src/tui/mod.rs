@@ -1839,6 +1839,11 @@ impl App {
         if let Some(back) = self.proposal_back.take() {
             self.mode = *back;
         }
+        // **Reserve before running**, as the web page does (`Book::claim`): an expiry that lands while the action runs
+        // otherwise turned the finished action into `expired` and dropped its result for every waiter.
+        if accepted && !self.proposals.claim(&row.id).ok {
+            return;
+        }
         let ran = if accepted {
             row.then.map(|verb| {
                 let request = crate::ctl::wire::request(verb, std::time::Duration::from_secs(5));
@@ -1855,7 +1860,11 @@ impl App {
             None
         };
         let failed = ran.as_ref().filter(|r| !r.ok).map(|r| r.message.clone().unwrap_or_default());
-        self.proposals.finish(&row.id, if accepted { "accepted" } else { "declined" }, ran);
+        if accepted {
+            self.proposals.complete(&row.id, ran);
+        } else {
+            self.proposals.finish(&row.id, "declined", ran);
+        }
         self.notice = Some(match failed {
             Some(why) => fill(say(self.site.lang, "tui.propose.failed"), &[("why", &why)]),
             None if accepted => say(self.site.lang, "tui.propose.accepted").into(),
@@ -1911,6 +1920,7 @@ impl App {
                     "last_input_ago_ms": self.last_human.elapsed().as_millis() as u64,
                 }))
             }
+            // Observations stay available even while help or a human-owned input blocks mutations.
             Verb::State { rows } => Reply::success(self.ctl_state(*rows)),
             Verb::Keys { .. } => self.ctl_keys(req, |app, ev| {
                 match ev {
@@ -2466,7 +2476,7 @@ impl App {
         match act {
             B::Quit => Some(say(self.site.lang, "tui.ctl.quit").into()),
             B::ProposalAccept | B::ProposalDecline | B::Proposals => {
-                Some("only the person can answer a proposal".into())
+                Some(say(self.site.lang, "page.ctl.personOnly").into())
             }
             _ => None,
         }
@@ -3450,6 +3460,8 @@ impl App {
     /// **동기다.** 로컬 파일 하나라 짧고, 그동안 화면은 멈춘다. 비동기 런타임을
     /// 들이면 CLI 전체가 async 로 물든다. 락을 못 잡으면 `with_write` 가 5초 뒤
     /// 아무것도 안 쓰고 물러나고, 그 말이 그대로 화면에 선다.
+    /// 콜백의 마지막 인자는 락 안에서 읽은 살아 있는 파일의 진단이다. 예약된 id 와 구분해
+    /// 보관 문맥을 겹칠 때 쓰며, 진단을 얻으려고 스냅샷을 다시 읽지 않는다.
     #[must_use = "None 이면 쓰지 못했다 — 적던 것을 닫으면 사람이 적은 것을 잃는다"]
     pub fn write(
         &mut self,
@@ -3459,6 +3471,7 @@ impl App {
             &Config,
             &std::collections::BTreeSet<String>,
             &crate::model::Actor,
+            &[crate::store::LoadError],
         ) -> crate::fail::R<(Vec<crate::model::JournalEntry>, Touched)>,
     ) -> Option<String> {
         // 앞 쓰기의 알림은 이 쓰기가 무엇이 되든 낡았다 — 실패한 뒤에 옛 `✓` 가 남으면
@@ -3507,7 +3520,13 @@ impl App {
         // 저널 실패는 프로세스 전체에 쌓인다 — 이 쓰기 뒤에 이 저장소에 새로 선 것만 이 쓰기의 것이다.
         let missed_before = crate::store::journal_misses().len();
         let root = repo.root.clone();
-        let written = by.and_then(|by| repo.with_write(|| lang, |issues, cfg, reserved| f(issues, cfg, reserved, &by)));
+        let written = by.and_then(|by| {
+            repo.with_write_after(
+                || lang,
+                |issues, unread, cfg, reserved| f(issues, cfg, reserved, &by, unread),
+                |_| Ok(()),
+            )
+        });
         match written {
             Ok(touched) => {
                 // 담긴 것은 참이라 성공으로 닫는다 — 실패로 내면 폼이 열린 채 남아 다시 누르면
@@ -4114,8 +4133,21 @@ impl App {
         self.follow_changed || was_loading != self.loading()
     }
 
+    /// Lay the detail body and the wiki page out again: a picture they placed, or were waiting on, changed
+    /// (a result landed, a file changed, the geometry dropped the cache — `Images::poll`, `Images::geometry`).
+    fn relay_pictures(&mut self) {
+        self.body = None;
+        if let Mode::Wiki(w) = &mut self.mode {
+            w.laid = None;
+        }
+    }
+
     /// [`App::follow`] 의 걸음들 — 화면에 닿는 것을 바꾸면 `follow_changed` 를 세운다.
     fn follow_steps(&mut self) {
+        if self.images.poll() {
+            self.relay_pictures();
+            self.follow_changed = true;
+        }
         self.reap();
         self.follow_config();
         self.follow_read();
@@ -5083,11 +5115,14 @@ impl App {
         // **자리를 한 번만 고른다** — 표식이 쓰는 파일과 아래에서 가려낼 자리 까닭이 한 값에서 온다.
         // 파일 하나만 받던 판은 같은 `settle` 을 두 번 돌면서도 그 까닭을 버렸다.
         let place = crate::read_marks::place_of(config, root);
-        // **읽기가 여는 파일 전부를 잰다**([`ReadStamp`], moai-65as) — 아래 `read` 는 대기 자리와
+        // **읽기가 여는 파일 전부를 잰다**([`ReadStamp`], moai-65as) — 아래 `read_in` 은 대기 자리와
         // (지금 자리가 없으면) 옛 자리까지 연다. 지금 자리 하나만 재던 판은 그 둘이 바뀌어도
         // [`App::follow_read`] 가 못 알아채, 합쳐질 줄이 내내 [NEW] 로 섰다.
         let stamp = ReadStamp::of(&place);
-        let mut marks = crate::read_marks::read(config, root, &self.legacy_read);
+        // Read from this same place: the stamp above and the pending path below must name the files this read
+        // opened. A second `place_of` inside `read` could settle differently and leak the pending diagnostic.
+        let pending = place.pending.clone();
+        let mut marks = crate::read_marks::read_in(place, &self.legacy_read);
         // **자리 탈을 줄 탈에서 가려낸다**(moai-hzfu). `Marks::problems` 는 두 갈래를 한 자루에
         // 담는다 — 자리를 고르다 만난 까닭(`place_of`)과 파일 안의 건너뛴 줄이다. `read` 는 자리
         // 까닭을 뒤에 붙여 `first()` 가 진짜 까닭을 먼저 보게 하지만, 건너뛴 줄이 하나도 없으면
@@ -5107,6 +5142,13 @@ impl App {
             .iter()
             .position(|p| matches!(p, crate::read_marks::SheetTrouble::Unsettled { .. }))
             .map(|at| marks.problems.remove(at));
+        // Retryable pending-sheet I/O failures follow the same quiet policy as the main sheet.
+        // Keep unrelated malformed-line diagnostics, even when a pending read also failed.
+        if marks.pending.is_some_and(|t| t.again() != crate::user_config::Again::Never)
+            && let Some(pending) = &pending
+        {
+            marks.problems.retain(|p| !matches!(p, crate::read_marks::SheetTrouble::Said { at, .. } if at == pending));
+        }
         // **설정이 사라졌으면 없는 읽음도 사라진 것으로 든다**(moai-4qbv.i0g 리뷰). 읽음 파일은 설정
         // 파일 곁의 디렉터리에 산다(`read_marks::place_of`) — autofs·sshfs 홈이 끊기면 둘이 함께
         // 사라진다. 그때 없는 읽음을 "아직 아무것도 안 읽은 프로젝트" 로 들면 빈 표를 들여 내 줄이
@@ -5132,8 +5174,8 @@ impl App {
     fn take_read(site: &mut Site, got: Got) -> Option<String> {
         let Got { marks, stamp, where_why } = got;
         // **다시 읽을 때는 갈래가 정한다**(moai-po6v) — [`App::follow_config`] 와 **한 자다**
-        // ([`crate::user_config::Again`]). 잠깐인 것만 표식을 안 올려 다음 걸음이 같은 차이를 다시 보게
-        // 한다. 권한은 다시 해도 같아 걸음마다 읽으면 헛돌지만, 되돌리는 `chmod` 이 고친 때도 길이도
+        // ([`crate::user_config::Again`]). 표식이 같아도 `owed` 가 잠깐인 것을 다시 본다.
+        // 권한은 다시 해도 같아 걸음마다 읽으면 헛돌지만, 되돌리는 `chmod` 이 고친 때도 길이도
         // 안 바꿔 표식으로는 영영 못 벗어난다 — 그래서 표식은 올리고 시계로 다시 본다
         // ([`App::follow_read`]). 깨진 것·남의 것은 사람이 고쳐야 같아지고 고치면 파일이 바뀐다.
         // **대기 자리를 못 든 것도 다시 볼 까닭이다**(moai-ocly). 그 파일은 있으면 아직 안 합친 도장이
@@ -5148,14 +5190,9 @@ impl App {
         // (아래 `marks.trouble.is_none()`).
         site.read_tried.saw(marks.trouble);
         site.read_pending.saw(marks.pending);
-        // **표식은 둘 다 잠깐이 아닐 때만 올린다** — 한쪽이 "다음 걸음에" 면 그 걸음이 같은 차이를 다시
-        // 봐야 한다.
-        let step = |t: Option<crate::user_config::Trouble>| {
-            t.map(crate::user_config::Trouble::again) == Some(crate::user_config::Again::Step)
-        };
-        if !step(marks.trouble) && !step(marks.pending) {
-            site.read_stamp = Some(stamp);
-        }
+        // Remember every attempted stamp. The retry debt above controls unchanged failures,
+        // including the bound on transient failures; a new stamp still wakes the follower.
+        site.read_stamp = Some(stamp);
         // **못 든 것과 한 줄 건너뛴 것을 가른다**(리뷰). 못 들었으면 들고 있던 것을 둔다 — 빈 표를
         // 들이면 내 줄이 통째로 [NEW] 로 선다. 건너뛴 줄 하나는 나머지를 버릴 까닭이 아니다: 버리던
         // 판은 손으로 적은 맨 점 키 하나가 그 프로젝트의 [NEW] 를 영영 세워 두었고, 같은 파일을 읽는
@@ -5166,8 +5203,8 @@ impl App {
         //
         // **가르는 것은 지금 자리의 갈래다**(리뷰) — 아래 `seen` 을 들일지를 가르는 그 값이다. 대기
         // 자리의 갈래를 함께 보던 판은 표를 **들이고도** "읽음을 못 들었다"(`tui.read.unheld`)고 말해,
-        // 화면의 상태와 화면의 말이 서로를 부정했다. 대기 자리의 까닭은 `problems` 에 실려 아래 `None`
-        // 갈래의 "줄 하나가 이상하다" 로 제 이름으로 선다.
+        // 화면의 상태와 화면의 말이 서로를 부정했다. 재시도할 대기 자리 I/O 탈은 `read_marks_of` 에서
+        // 걸러 조용히 두고, 나머지 줄 탈은 아래 `None` 갈래에서 댄다.
         let told = match marks.trouble {
             // **못 읽은 것은 말하지 않는다** — 잠깐인 것은 다음 걸음에 지나가고, 다시 해도 같은 것은
             // 시계가 돌 때마다 같은 줄을 세워 사람이 방금 띄운 말을 덮는다. 설정은 배너가 늘 이고
@@ -5212,31 +5249,46 @@ impl App {
     /// **자리를 받는 자가 하나다**(리뷰) — [`App::recount_unread`] 가 [`App::recount_unread_in`] 의
     /// `Seat::Here` 인 것과 같은 자다. 층 판을 따로 적던 판은 두 몸이 글자째 같아, 한쪽에만 드는
     /// 고침이 층의 줄에서만 안 서는 자리를 열어 두었다.
-    fn load_read_in(&mut self, seat: Seat) {
-        let Some(site) = self.site_of_seat(seat) else { return };
+    /// Returns whether [NEW] or the displayed notice changed, independently of retry bookkeeping.
+    fn load_read_in(&mut self, seat: Seat) -> bool {
+        let Some(site) = self.site_of_seat(seat) else { return false };
         // **뿌리는 트래커가 사는 곳이다**(`Repo::root`), `App::here()` 가 아니다(리뷰). 그쪽은 이
         // 세션이 **선 체크아웃**이라 딸린 워크트리에서는 트래커의 자리와 갈린다(`Repo::here`). 읽음의
         // 키는 이슈 id 고 그 id 는 트래커에서 오므로 자리는 트래커를 따라야 한다 — 쓰는 자
         // ([`App::mark_read`]·`cmd::read`·[`App::follow_site`])는 처음부터 `root` 로 골랐는데 읽는 자만
         // `here()` 로 골라, 워크트리에서 띄운 탐색기가 제가 적은 파일을 다시 못 읽었다. `r` 을 누르면
         // [NEW] 가 내렸다가 다음 걸음에 도로 섰다.
-        let Some(root) = site.repo.as_ref().map(|r| r.root.clone()) else { return };
+        let Some(root) = site.repo.as_ref().map(|r| r.root.clone()) else { return false };
         // **몰라진 그 한 번은 다시 센다**(moai-2gep) — 들고 있는 표가 없으면 [NEW] 를 안 세는데
         // (`App::recount_unread_in`), 그 답은 이미 세 놓은 줄을 지워야 선다. 몰랐다가 또 모르는
         // 걸음은 답이 같으니 안 센다 — 그 길은 시계가 돌 때마다 오고, 세는 값이 줄 수만큼이다.
         let knew = site.read_tried.trouble.is_none();
-        let Some(got) = self.read_marks_of(&root) else { return };
+        let Some(got) = self.read_marks_of(&root) else { return false };
         // 못 들었으면 표가 그대로라 다시 셀 까닭이 없다 — 잠깐 못 읽는 동안은 이 길이 걸음마다 돈다.
         let took = got.marks.trouble.is_none();
-        let Some(site) = self.site_mut(seat) else { return };
+        let Some(site) = self.site_mut(seat) else { return false };
+        // A retry of unchanged files whose failures persist reads the diagnostics the last attempt already told;
+        // telling them again would cover a newer notice on every retry. A changed file or outcome still speaks.
+        let repeat = site.read_stamp.as_ref() == Some(&got.stamp)
+            && site.read_tried.trouble == got.marks.trouble
+            && site.read_pending.trouble == got.marks.pending
+            && (got.marks.trouble.is_some() || got.marks.pending.is_some());
         // 까닭은 한 줄로 댄다 — 조용히 [NEW] 가 서면 왜 그런지 볼 데가 없다.
-        let told = Self::take_read(site, got);
+        let told = Self::take_read(site, got).filter(|_| !repeat);
+        let mut changed = false;
         if let Some(told) = told {
+            changed = self.notice.as_ref() != Some(&told);
             self.notice = Some(told);
         }
         if took || knew {
+            // Compare what is drawn, not retry stamps or attempt times. Move the old set out only when recounting;
+            // a repeated failure of the main sheet keeps its held marks and does no per-row work. A failing pending
+            // sheet alone still takes this path on every retry, since the main sheet was read.
+            let was = std::mem::take(&mut self.site_mut(seat).expect("the seat was just loaded").unread);
             self.recount_unread_in(seat);
+            changed |= self.site_of_seat(seat).is_some_and(|site| site.unread != was);
         }
+        changed
     }
 
     /// 펼쳐 둔 프로젝트 **전부**의 읽음을 다시 든다([`App::load_read_in`], moai-7irq) — 옛 `[read]` 가
@@ -5338,8 +5390,8 @@ impl App {
         if !stale {
             return;
         }
-        self.follow_changed = true;
-        self.load_read_in(seat);
+        let changed = self.load_read_in(seat);
+        self.follow_changed |= changed;
     }
 
     /// 사용자 설정 파일이 바뀌었으면 거기 사는 둘을 다시 든다 — 적어 둔 읽음과 층의 줄(moai-en4u).
@@ -5587,7 +5639,9 @@ impl App {
                 let lang = || self.site.lang;
                 let wrote = crate::read_marks::update(&config, &root, lang, |sheet| {
                     let marks = pick(&sheet.marks().0);
-                    let written = sheet.mark(&marks)?;
+                    // ctl read is a batch transaction: a hand-written later id must leave earlier marks alone.
+                    let written =
+                        if self.ctl_turn.is_some() { sheet.mark_atomic(&marks)? } else { sheet.mark(&marks)? };
                     if fresh_enough {
                         sheet.prune(&known);
                     }
@@ -5613,6 +5667,9 @@ impl App {
                     }
                     Err(e) => {
                         let why = crate::text::one_line(&e.to_string());
+                        if let Some(turn) = self.ctl_turn.as_mut() {
+                            turn.error = Some(crate::ctl::wire::Reply::error(e.code, e.message.clone()));
+                        }
                         self.notice = Some(fill(say(self.site.lang, "tui.read.unwritten"), &[("why", &why)]));
                         return;
                     }
@@ -6005,11 +6062,10 @@ impl App {
                         .and_then(|p| p.site.as_mut())
                     {
                         site.seen = std::mem::take(&mut held.seen);
-                        site.read_stamp = held.read_stamp.take();
                         // **갈래와 읽어 본 때는 안 옮긴다**(리뷰) — 바로 아래 [`App::take_read`] 가
                         // 이 걸음의 읽기로 둘 다 다시 적는다. 옮겨 봐야 그 자리에서 덮이고, 덮이는
-                        // 줄은 "옮겼으니 이어진다" 는 거짓말을 남긴다. 표식만 옮기는 것은 다르다 —
-                        // 잠깐의 실패([`crate::user_config::Again::Step`])에는 그쪽이 안 적는다.
+                        // 줄은 "옮겼으니 이어진다" 는 거짓말을 남긴다. 표식도 같다 — `take_read` 는
+                        // 실패한 읽기에도 표식을 적으니 옮길 까닭이 없다.
                     }
                     if let Some(got) = self.read_marks_of(&root)
                         && let Some(told) = Self::take_read(&mut site, got)
@@ -7046,7 +7102,7 @@ impl App {
         match act {
             B::ProposalAccept | B::ProposalDecline | B::Proposals if self.ctl_turn.is_some() => {
                 self.ctl_turn.as_mut().unwrap().error =
-                    Some(crate::ctl::wire::Reply::error("refused", "only the person can answer a proposal"));
+                    Some(crate::ctl::wire::Reply::error("refused", say(self.site.lang, "page.ctl.personOnly")));
             }
             B::Quit if self.ctl_turn.is_some() => {
                 self.ctl_turn.as_mut().unwrap().error =
@@ -8035,7 +8091,7 @@ fn save_backlog(app: &mut App) {
     }
     let at = crate::model::now();
     let kept = say(app.site.lang, "tui.jot.kept");
-    let wrote = app.write(save_backlog, move |issues, cfg, reserved, by| {
+    let wrote = app.write(save_backlog, move |issues, cfg, reserved, by, _| {
         let id = crate::store::new_id(issues, cfg, reserved, None, &title);
         let mut backlog = Issue::new(id, title, Kind::Backlog, Status::new(cfg.first_status()), &at);
         (backlog.assignee, backlog.assignee_email) = by.as_assignee();
@@ -9513,7 +9569,7 @@ mod tests {
         a.layout = view::Layout::Board;
         let wrote = a.write(
             |_| {},
-            |issues, _, _, by| {
+            |issues, _, _, by, _| {
                 let at = "2026-09-13T00:00:00Z";
                 issues.push(member("argos-0003", "argos-0001"));
                 Ok((
@@ -11728,6 +11784,125 @@ mod tests {
         assert!(!a.site.unread.contains("argos-0002"), "대기 자리에 적힌 도장이 화면에 안 닿았다");
     }
 
+    /// A socket at a sheet path fails to open with a transient I/O error without depending on chmod or root.
+    /// Count the read follower's redraw flag consumed by follow(), excluding unrelated asynchronous followers.
+    /// Attempts must still advance even when there is no reason to draw.
+    #[test]
+    #[cfg(unix)]
+    fn failed_read_retries_stay_quiet_and_recovery_redraws() {
+        use std::os::unix::net::UnixListener;
+        for pending in [false, true] {
+            // macOS TMPDIR can already exceed a Unix socket's path budget; use a short private fixture in /tmp.
+            let s = Scratch::in_place(std::path::Path::new("/tmp"), if pending { "lrp" } else { "lrs" });
+            let config = s.path().join("user.toml");
+            let root = s.path().join("proj");
+            std::fs::create_dir_all(&root).unwrap();
+            let mut a = app();
+            for row in &mut a.site.issues {
+                row.assignee = Some("Raven".into());
+            }
+            a.site.repo = Some(crate::store::Repo::at(root.clone(), cfg()));
+            a.user_config = Some(config.clone());
+            a.site.me = Some("Raven".into());
+            let place = crate::read_marks::place_of(&config, &root);
+            std::fs::create_dir_all(place.at.parent().unwrap()).unwrap();
+            let header = format!("path = {:?}\n\n[read]\n", root.display().to_string());
+            let mark = format!(
+                "\"argos-0009\" = {:?}\n",
+                a.site.issues.iter().find(|i| i.id == "argos-0009").unwrap().updated_at
+            );
+            std::fs::write(&place.at, &header).unwrap();
+            a.load_read();
+            assert!(a.site.unread.contains("argos-0009"));
+            let at = if pending { place.pending.unwrap() } else { place.at };
+            if at.exists() {
+                std::fs::remove_file(&at).unwrap();
+            }
+            let socket = UnixListener::bind(&at).unwrap();
+            let follow = |a: &mut App| {
+                a.follow_changed = false;
+                a.follow_read();
+                a.follow_changed
+            };
+            // A main-sheet failure can clear [NEW]; retryable failures stay silent for both sheets.
+            let changed = follow(&mut a);
+            assert_eq!(changed, !pending);
+            a.notice = Some("new user notice".into());
+            let trouble = if pending { &a.site.read_pending } else { &a.site.read_tried };
+            assert_eq!(trouble.trouble, Some(crate::user_config::Trouble::Reading));
+            let mut tried = trouble.at;
+            let redraws = (0..8)
+                .filter(|_| {
+                    let redraw = follow(&mut a);
+                    let trouble = if pending { &a.site.read_pending } else { &a.site.read_tried };
+                    assert!(trouble.at > tried, "a quiet retry must still read the sheet");
+                    tried = trouble.at;
+                    redraw
+                })
+                .count();
+            assert_eq!(redraws, 0, "unchanged failed attempts redrew the idle explorer");
+            assert_eq!(a.notice.as_deref(), Some("new user notice"));
+            // Once the transient window expires, an unchanged stamp must not bypass owed().
+            let trouble = if pending { &mut a.site.read_pending } else { &mut a.site.read_tried };
+            trouble.since = Some(std::time::Instant::now().checked_sub(layer::BLIP).expect("the clock ran under 3s"));
+            let last = trouble.at;
+            assert!(!follow(&mut a));
+            let trouble = if pending { &a.site.read_pending } else { &a.site.read_tried };
+            assert_eq!(trouble.at, last, "expired transient failure was retried on every step");
+            assert_eq!(a.notice.as_deref(), Some("new user notice"));
+            drop(socket);
+            std::fs::remove_file(&at).unwrap();
+            std::fs::write(&at, format!("{header}{mark}")).unwrap();
+            assert!(follow(&mut a), "recovery changed visible read marks without requesting a redraw");
+            assert!(!a.site.unread.contains("argos-0009"));
+            assert!(a.site.unread.contains("argos-0002"));
+            assert_eq!(a.site.read_tried.trouble, None);
+            assert_eq!(a.site.read_pending.trouble, None);
+            assert!(!follow(&mut a), "successful recovery left a redraw tail");
+        }
+    }
+
+    /// A pending-sheet retry re-reads an unchanged main sheet. Its skipped-line diagnostic is told once, when the
+    /// failure starts, and the retries that follow keep a newer notice instead of repeating it.
+    #[test]
+    #[cfg(unix)]
+    fn a_pending_retry_does_not_repeat_the_main_sheets_diagnostic() {
+        use std::os::unix::net::UnixListener;
+        let s = Scratch::in_place(std::path::Path::new("/tmp"), "lrd");
+        let config = s.path().join("user.toml");
+        let root = s.path().join("proj");
+        std::fs::create_dir_all(&root).unwrap();
+        let mut a = app();
+        a.site.repo = Some(crate::store::Repo::at(root.clone(), cfg()));
+        a.user_config = Some(config.clone());
+        let place = crate::read_marks::place_of(&config, &root);
+        std::fs::create_dir_all(place.at.parent().unwrap()).unwrap();
+        let header = format!("path = {:?}\n\n[read]\n\"argos-0009\" = 3\n", root.display().to_string());
+        std::fs::write(&place.at, &header).unwrap();
+        a.load_read();
+        let told = a.notice.clone().expect("the main sheet's skipped line is told");
+        let spool = place.pending.clone().expect("a settled place has a pending sheet");
+        let socket = UnixListener::bind(&spool).unwrap();
+        let follow = |a: &mut App| {
+            a.follow_changed = false;
+            a.follow_read();
+            a.follow_changed
+        };
+        a.notice = None;
+        follow(&mut a);
+        assert_eq!(a.site.read_pending.trouble, Some(crate::user_config::Trouble::Reading));
+        assert_eq!(a.notice.as_ref(), Some(&told), "the unrelated main-sheet diagnostic was dropped");
+        a.notice = Some("new user notice".into());
+        let mut tried = a.site.read_pending.at;
+        for _ in 0..4 {
+            assert!(!follow(&mut a), "an unchanged retry redrew the idle explorer");
+            assert!(a.site.read_pending.at > tried, "a quiet retry must still read the sheet");
+            tried = a.site.read_pending.at;
+        }
+        assert_eq!(a.notice.as_deref(), Some("new user notice"), "a retry repeated an old diagnostic");
+        drop(socket);
+    }
+
     /// **읽음 파일도 다시 읽을 때를 갈래로 잰다**(moai-po6v) — 설정과 **한 자다**([`App::follow_config`],
     /// [`crate::user_config::Again`]). 갈라 두면 같은 `Trouble` 을 두 곳이 달리 읽어, 한쪽을 고친 날
     /// 다른 쪽이 조용히 옛 뜻으로 남는다.
@@ -13560,6 +13735,38 @@ mod tests {
     }
 
     #[test]
+    fn an_explorer_accept_claims_before_a_slow_followup_passes_its_ttl() {
+        use crate::ctl::wire::Verb;
+        let (scratch, mut a) = writable("proposal-claim-before-slow-action");
+        let config = scratch.join("user.toml");
+        a.user_config = Some(config.clone());
+        let before = !a.view.hide_backlog;
+        let locked =
+            crate::store::Lock::acquire(&crate::store::lock_beside(&config), || crate::i18n::Lang::En).unwrap();
+        let release = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(2400));
+            drop(locked);
+        });
+        let id = a
+            .proposals
+            .add("tui", "Toggle backlog", Some(Verb::View { name: "backlog".into(), on: !before }), 2, None)
+            .data
+            .unwrap()["id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let start = std::time::Instant::now();
+        a.answer_proposal(true);
+        release.join().unwrap();
+        assert!(start.elapsed() >= std::time::Duration::from_secs(2), "follow-up did not wait past its TTL");
+        assert_eq!(!a.view.hide_backlog, !before);
+        assert!(config.exists(), "follow-up did not write its changed setting");
+        let answer = a.proposals.get(&id).data.unwrap();
+        assert_eq!(answer["state"], "accepted", "the action ran but expiry lost its result: {answer}");
+        assert_eq!(answer["ran"]["ok"], true);
+    }
+
+    #[test]
     fn proposal_selection_keeps_the_displayed_id_when_an_earlier_row_disappears() {
         let (_scratch, mut app) = writable("proposal-stable-id");
         let first =
@@ -13823,6 +14030,15 @@ mod tests {
         assert_eq!(a.ctl_state(false)["menu"], "g");
         a.hit("Esc");
         assert_eq!(a.ctl_state(false)["menu"], serde_json::Value::Null);
+        a.mode = Mode::Browse;
+        for prefix in ["Alt-x", "Ctrl-Alt-Shift-Tab"] {
+            let (keys, problems) = keymap::build(&format!("[browse]\ngo_board = '{prefix} x'\n"));
+            assert!(problems.is_empty(), "{problems:?}");
+            a.keys = keys;
+            a.hit(prefix);
+            assert_eq!(a.ctl_state(false)["menu"], prefix);
+            a.chord.clear();
+        }
     }
 
     #[test]
@@ -13972,6 +14188,109 @@ mod tests {
     }
 
     #[test]
+    fn ctl_reads_are_atomic_for_ids_group_and_all_and_report_refusal() {
+        use crate::ctl::wire::Verb;
+        let scratch = Scratch::new("ctl-read-atomic");
+        let root = scratch.path().join("project");
+        std::fs::create_dir_all(&root).unwrap();
+        let config = scratch.path().join("user.toml");
+        let mut a = app();
+        a.site.repo = Some(Repo::at(root.clone(), cfg()));
+        a.user_config = Some(config.clone());
+        a.site.me = Some("Reader (reader@example.com)".into());
+        for issue in &mut a.site.issues {
+            issue.assignee = Some("Reader".into());
+            issue.assignee_email = Some("reader@example.com".into());
+        }
+        a.recount_unread();
+        assert!(a.site.unread.contains("argos-0004"));
+        let at = crate::read_marks::place_of(&config, &root).at;
+        std::fs::create_dir_all(at.parent().unwrap()).unwrap();
+        let original = format!("path = {:?}\n\n[read]\n\"argos-0004\" = 1\n", root.display().to_string());
+        std::fs::write(&at, &original).unwrap();
+        for verb in [
+            Verb::Read { ids: vec!["argos-0003".into(), "argos-0004".into()], all: false, group: None },
+            Verb::Read { ids: vec![], all: true, group: None },
+            Verb::Read { ids: vec![], all: false, group: Some("argos-0001".into()) },
+        ] {
+            let seen = a.site.seen.clone();
+            let unread = a.site.unread.clone();
+            let result = a.ctl(&ctl_req(verb, None));
+            assert_eq!(result.code.as_deref(), Some("refused"), "{result:?}");
+            assert_eq!(std::fs::read_to_string(&at).unwrap(), original);
+            assert_eq!(a.site.seen, seen);
+            assert_eq!(a.site.unread, unread);
+        }
+        // A missing later id also refuses before any mark is written.
+        assert!(
+            !a.ctl(&ctl_req(
+                Verb::Read { ids: vec!["argos-0001".into(), "missing".into()], all: false, group: None },
+                None
+            ))
+            .ok
+        );
+        assert_eq!(std::fs::read_to_string(&at).unwrap(), original);
+        // An ordinary human read still skips only the held id, preserving its established behaviour.
+        a.mark_ids(Seat::Here, &[a.site.index.find("argos-0003").unwrap(), a.site.index.find("argos-0004").unwrap()]);
+        assert!(a.site.seen.contains_key("argos-0003"));
+        assert!(!a.site.seen.contains_key("argos-0004"));
+        // Removing the hand-written value lets the same ctl batch succeed and reach disk.
+        std::fs::write(&at, format!("path = {:?}\n", root.display().to_string())).unwrap();
+        assert!(
+            a.ctl(&ctl_req(
+                Verb::Read { ids: vec!["argos-0003".into(), "argos-0004".into()], all: false, group: None },
+                None
+            ))
+            .ok
+        );
+        let seen = crate::read_marks::read(&config, &root, &std::collections::BTreeMap::new()).seen;
+        assert!(seen.contains_key("argos-0003") && seen.contains_key("argos-0004"));
+    }
+
+    #[test]
+    fn ctl_help_allows_observation_and_blocks_mutations() {
+        use crate::ctl::wire::Verb;
+        let (_scratch, mut a) = writable("ctl-help-policy");
+        a.hit("?");
+        assert!(a.help.is_some());
+        assert!(a.ctl(&ctl_req(Verb::State { rows: true }, None)).ok);
+        assert!(a.ctl(&ctl_req(Verb::Actions, None)).ok);
+        for verb in [
+            Verb::Screen { name: "board".into() },
+            Verb::Read { ids: vec![], all: true, group: None },
+            Verb::Keys { seqs: vec!["Esc".into()], text: None },
+        ] {
+            assert_eq!(a.ctl(&ctl_req(verb, None)).code.as_deref(), Some("person_busy"));
+            assert!(a.help.is_some());
+        }
+    }
+
+    #[test]
+    fn ctl_proposal_refusals_share_the_translated_words() {
+        use crate::ctl::wire::Verb;
+        let (_scratch, mut a) = writable("ctl-proposal-translated");
+        assert!(a.proposals.add("test", "A suggestion", None, 900, None).ok);
+        for lang in [crate::i18n::Lang::En, crate::i18n::Lang::Ko] {
+            a.site.lang = lang;
+            let expected = say(lang, "page.ctl.personOnly");
+            let listing = a.ctl(&ctl_req(Verb::Actions, None)).data.unwrap();
+            for (name, seq) in [
+                ("browse.proposal_accept", "SPC a y"),
+                ("browse.proposal_decline", "SPC a n"),
+                ("browse.proposals", "SPC a l"),
+            ] {
+                let row = listing["actions"].as_array().unwrap().iter().find(|row| row["name"] == name).unwrap();
+                assert_eq!(row["why"], expected);
+                assert_eq!(a.ctl(&ctl_req(Verb::Do { name: name.into() }, None)).message.as_deref(), Some(expected));
+                assert_eq!(
+                    a.ctl(&ctl_req(Verb::Keys { seqs: vec![seq.into()], text: None }, None)).message.as_deref(),
+                    Some(expected)
+                );
+            }
+        }
+    }
+
+    #[test]
     fn ctl_goto_read_pane_and_theme_have_bounded_effects() {
         use crate::ctl::wire::Verb;
         let (_scratch, mut a) = writable("ctl-goto-pane");
@@ -14031,7 +14350,7 @@ mod tests {
     fn add_backlog(a: &mut App, id: &'static str) -> Option<String> {
         a.write(
             |_| {},
-            move |issues, _, _, by| {
+            move |issues, _, _, by, _| {
                 issues.push(Issue::new(
                     id.into(),
                     "떠오른 것".into(),
@@ -14111,7 +14430,7 @@ mod tests {
 
         let wrote = a.write(
             |_| {},
-            |issues, _, _, by| {
+            |issues, _, _, by, _| {
                 let at = "2026-09-13T00:00:00Z";
                 issues.push(member("argos-0003", "argos-0001"));
                 Ok((
@@ -14918,7 +15237,7 @@ mod tests {
     #[test]
     fn a_touched_id_missing_after_the_reread_moves_nothing() {
         let (_scratch, mut a) = writable("land-missing");
-        let wrote = a.write(|_| {}, |_, _, _, _| Ok((vec![], Touched { id: "argos-9999".into(), done: "담김" })));
+        let wrote = a.write(|_| {}, |_, _, _, _, _| Ok((vec![], Touched { id: "argos-9999".into(), done: "담김" })));
         assert_eq!(wrote.as_deref(), Some("argos-9999"));
         assert_eq!((a.cursor, on(&a).as_deref()), (0, Some("argos-0001")));
         assert_eq!(a.notice.as_deref(), Some("✓ 담김 · argos-9999 — 다시 읽은 목록에 없다"));
@@ -14956,7 +15275,7 @@ mod tests {
 
         let out = a.write(
             |_| {},
-            |issues, _, _, _| {
+            |issues, _, _, _, _| {
                 issues.push(Issue::new(
                     "argos-0002".into(),
                     "t".into(),
@@ -14979,7 +15298,7 @@ mod tests {
         // 여러 줄 거절문(고칠 명령까지 내는 것)은 배너 한 줄로 이어진다.
         let out = a.write(
             |_| {},
-            |_, _, _, _| -> crate::fail::R<(Vec<crate::model::JournalEntry>, Touched)> {
+            |_, _, _, _, _| -> crate::fail::R<(Vec<crate::model::JournalEntry>, Touched)> {
                 Err("첫 줄\n      고칠 명령".into())
             },
         );
@@ -14997,7 +15316,7 @@ mod tests {
         let file = scratch.join(".moai/issues.jsonl");
         let out = a.write(
             |_| {},
-            |_, _, _, _| -> crate::fail::R<(Vec<crate::model::JournalEntry>, Touched)> { Err("락".into()) },
+            |_, _, _, _, _| -> crate::fail::R<(Vec<crate::model::JournalEntry>, Touched)> { Err("락".into()) },
         );
         assert!(out.is_none());
 
@@ -15024,7 +15343,7 @@ mod tests {
 
         let out = a.write(
             |_| {},
-            |_, _, _, _| -> crate::fail::R<(Vec<crate::model::JournalEntry>, Touched)> {
+            |_, _, _, _, _| -> crate::fail::R<(Vec<crate::model::JournalEntry>, Touched)> {
                 panic!("누군지 모르는데 닫는 함수를 불렀다")
             },
         );

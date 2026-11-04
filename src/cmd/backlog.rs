@@ -112,6 +112,35 @@ fn carried_body<'a>(thought: &'a Issue, into: Option<&str>) -> Option<&'a str> {
     }
 }
 
+/// 펼치기가 **멤버에** 줄 본문(moai-ifvh.y8m, Decided alone) — 계획의 멤버가 하나면 backlog 의 본문이고(`-e` 로 선
+/// 에픽에 펼칠 때도), 여럿이면 저마다 `Unfolded-from: <backlog>` 한 줄이다. 멤버가 없으면 없다.
+///
+/// **한 자리에서 고른다**([`carried_body`] 와 같은 까닭) — 연습의 미리보기와 진짜가 따로 고르면 한쪽만 고치는 날 연습이
+/// 진짜와 다른 본문을 댄다. 빈 본문은 없는 본문이다 — 쓰기의 정규화(`Issue::normalize`)가 어차피 지우는 글을 미리보기가
+/// "선다" 고 하지 않게.
+fn member_body(thought: &Issue, members: usize, id: &str) -> Option<String> {
+    match members {
+        0 => None,
+        1 => thought.body.clone().filter(|b| !b.is_empty()),
+        _ => Some(format!("Unfolded-from: {id}")),
+    }
+}
+
+/// 펼치기가 **재는** backlog 의 본문(moai-oejf) — 단 하나의 멤버가 받거나([`member_body`]), `--body` 없이 새 에픽이
+/// 데려갈 때([`carried_body`]) 그 글이다. 연습과 진짜가 이 하나로 고른다 — 따로 적던 판은 연습이 식 하나, 진짜가
+/// `if` 둘로 같은 답을 냈고, 둘째 `if` 는 같은 글을 한 번 더 쟀다.
+fn measured_body<'a>(
+    thought: &'a Issue,
+    into: Option<&str>,
+    explicit: Option<&str>,
+    members: usize,
+) -> Option<&'a str> {
+    match members {
+        1 => thought.body.as_deref(),
+        _ => explicit.is_none().then(|| carried_body(thought, into)).flatten(),
+    }
+}
+
 /// 펼치기가 에픽에 데려갈 기한(moai-ghkp.u1w) — 본문과 같은 자리, 같은 규칙이다. **`-e <에픽>` 이면
 /// 없다** — 그 에픽이 이미 임자고 기한은 멤버에게 안 내린다(`add::Rooted::due`). 꼴이 틀린 값은 안
 /// 데려간다: 데려가면 이 생각과 무관한 계획이 그 값 때문에 거절된다. 무엇이 기한인지는 이 자리가 안 가른다
@@ -176,8 +205,12 @@ pub fn promote(ctx: &Ctx, args: PromoteArgs) -> R<Vec<String>> {
     // `add --from` 과 **한 길**이다 — 읽기·템플릿 채우기·형식 읽기(moai-cypw).
     // `-e` 면 에픽은 이미 있다 — 계획은 그 에픽에 넣을 이슈만 적는다(moai-f3ml).
     let shape = if args.epic.is_some() { Shape::Members } else { Shape::Plan };
+    // `--body` 는 새 에픽의 본문이다 — `add --from --body` 와 **한 자**로 읽고, 고칠 길은 이 동사로 댄다.
+    let explicit_body =
+        crate::cmd::add::read_plan_body(&args.from, args.body.clone(), ctx, crate::cmd::add::PlanVerb::Promote)?;
     let drafts = crate::cmd::add::read_plan(&args.from, &args.var, shape, ctx.lang())?;
     let into = args.epic.as_deref();
+    let members = drafts.iter().filter(|d| d.kind == model::Kind::Issue).count();
 
     // **연습은 저장소를 안 만진다.** AI 가 펼친 안을 사람이 한 번 보고
     // "좋다" 하는 자리라, 여기서 쓰면 그 "좋다" 가 뒤늦은 말이 된다.
@@ -221,20 +254,23 @@ pub fn promote(ctx: &Ctx, args: PromoteArgs) -> R<Vec<String>> {
         // 두던 판은 둘을 깼다 — 제목도 본문도 넘치는 판에서 연습은 제목을, 진짜는 본문을 댔고,
         // 죽은 릴리스에 걸린 생각이면 연습만 그 알림 한 줄을 더 찍었다. 둘 다 `say_if_dead` 의
         // 약속("연습과 진짜가 같은 줄을 낸다")과 어긋난다.
-        check_carried_body(&args.id, carried_body(thought, into))?;
+        check_carried_body(&args.id, measured_body(thought, into, explicit_body.as_deref(), members))?;
+        let for_members = member_body(thought, members, &args.id);
         let stone = stone_of(&load.issues, &args.id, into);
         say_if_inherited(&load.issues, thought, stone.as_deref(), ctx.lang());
         say_if_dead(&load.issues, &repo.config, stone.as_deref(), ctx.lang());
         // **순서도 진짜와 같다.** 맨 앞에 두면 없는 id 에 큰 계획을 준 부름에 `bad_input` 을
         // 내는데 진짜는 `not_found` 를 낸다 — 제목을 줄여 다시 부르고서야 id 가 없다는 것을 알고,
         // `code` 로 갈라지는 쪽은 그 사이 엉뚱한 갈래를 탄다. 여기가 바로 그 어긋남을 없애려던 고침이다.
-        // 데려가는 본문은 여기 안 준다 — 그것은 이 생각이 이미 든 글이라 가리킬 줄이 계획의
-        // 것이 아니라 그 생각이다(moai-oejf). 바로 위가 제 자로 잰다.
+        // 에픽이 데려가는 본문은 여기 안 준다 — 그것은 이 생각이 이미 든 글이라 가리킬 줄이 계획의
+        // 것이 아니라 그 생각이다(moai-oejf). 바로 위가 제 자로 잰다. 멤버의 본문은 준다 — `check_plan` 은 그것을
+        // 안 재고(재는 것은 위의 `check_carried_body` 다), `check_plan_rows` 가 진짜와 같은 줄을 빚게 한다.
         let rooted = crate::cmd::add::Rooted {
             milestone: stone.as_deref(),
-            body: None,
+            body: explicit_body.as_deref(),
             due: carried_due(thought, into),
             start: carried_start(thought, into),
+            member_body: for_members.as_deref(),
         };
         crate::cmd::add::check_plan(&drafts, rooted, ctx.lang())?;
         // **기한의 꼴과 위계도 진짜의 자로 잰다**(리뷰) — 데려간 기한이 데려간 마일스톤보다 늦거나, 계획의 `@날짜` 가
@@ -245,8 +281,9 @@ pub fn promote(ctx: &Ctx, args: PromoteArgs) -> R<Vec<String>> {
         let known = crate::cmd::add::is_milestone(&load.issues, stone.as_deref());
         if ctx.json {
             crate::cmd::add::say_no_such_milestone(stone.as_deref(), known, ctx.lang());
-            // 본문이 설 자리는 안 낸다 — 펼치기가 데려가는 글은 그 생각이 이미 들고 있어
-            // `moai show <backlog>` 가 낸다(moai-07v1). `add --from --body` 만 새 글이라 그쪽이 댄다.
+            // 데려가는 본문이 설 자리와 멤버의 본문은 안 낸다 — 그 글은 생각이 이미 들고 있어 `moai show <backlog>` 가
+            // 낸다(moai-07v1). 기계 출력의 모양은 그대로 둔다(moai-30hd). `--body` 로 준 새 글만 `add --from --body` 와
+            // 같이 `body_on` 으로 댄다 — `rooted.body` 가 그 글 하나다.
             return crate::cmd::add::json_rehearsal(&drafts, Some(&args.id), into, rooted);
         }
         let mut out = vec![paint(style::HEAD, crate::i18n::say(ctx.lang(), "backlog.will_unfold"))];
@@ -262,6 +299,24 @@ pub fn promote(ctx: &Ctx, args: PromoteArgs) -> R<Vec<String>> {
             drafts.iter().filter(|d| d.epic.is_none()).count(),
             ctx.lang(),
         ));
+        if into.is_none() {
+            out.extend(crate::cmd::add::body_line(
+                &drafts,
+                explicit_body.as_deref().or(thought.body.as_deref()).filter(|b| !b.is_empty()),
+                ctx.lang(),
+            ));
+        }
+        // 멤버가 받을 글은 진짜와 같은 자([`member_body`])로 고른 그것이다 — 하나면 그 멤버를, 여럿이면 출처 줄을 댄다.
+        if let Some(member) = for_members.as_ref().and(drafts.iter().find(|d| d.kind == model::Kind::Issue)) {
+            let said = match members {
+                1 => crate::i18n::fill(
+                    crate::i18n::say(ctx.lang(), "backlog.member_body_on"),
+                    &[("title", &member.title)],
+                ),
+                _ => crate::i18n::fill(crate::i18n::say(ctx.lang(), "backlog.member_source_on"), &[("id", &args.id)]),
+            };
+            out.push(paint(style::DIM, &said));
+        }
         if let Some(e) = into {
             let said = crate::i18n::fill(crate::i18n::say(ctx.lang(), "backlog.into_epic"), &[("id", e)]);
             out.push(paint(style::DIM, &said));
@@ -320,17 +375,24 @@ pub fn promote(ctx: &Ctx, args: PromoteArgs) -> R<Vec<String>> {
             // 밖에 서고, 본문을 끊으면 `moai show <에픽>` 이 왜 이것들이 한 묶음인지를 못 낸다 —
             // 둘 다 AGENTS.md 가 "펼친 뒤 손으로" 라고 적어 메우던 자리다.
             //
-            // **`-e <에픽>` 이면 안 준다.** 그 에픽이 이미 임자고, 멤버는 거기서 마일스톤을
+            // **`-e <에픽>` 이면 에픽 쪽에는 안 준다.** 그 에픽이 이미 임자고, 멤버는 거기서 마일스톤을
             // 물려받는다 — 멤버마다 backlog 의 것을 적으면 에픽의 것을 덮어 `show --milestone` 이
             // 한 묶음을 두 곳에 세운다. 뿌리가 없어 [`create_drafts`] 가 어차피 안 적지만,
             // 안 준다고 여기 적어 두는 편이 그 규칙을 한 자리에서 읽게 한다.
             //
+            // **멤버의 본문은 따로 고른다**(moai-ifvh.y8m, Decided alone) — 계획의 멤버가 하나면 그 멤버가
+            // backlog 의 본문을 받고(`-e` 로 선 에픽에 펼칠 때도), 여럿이면 저마다 `Unfolded-from: <backlog>`
+            // 한 줄을 받는다. 일꾼이 집어 읽는 것은 멤버의 본문이라, 이력을 거슬러 올라가지 않게 한다.
+            // 고르는 자는 연습과 한 몸이다([`member_body`]).
+            //
             // **베껴 둔다** — `create_drafts` 가 `issues` 를 빌려 쓰므로 그 앞에서 `thought` 의
             // 빌림이 끝나야 한다. 위의 제목·담당과 같은 까닭이다.
-            let text = carried_body(thought, into).map(str::to_string);
+            let for_members = member_body(thought, members, &args.id);
+            let text = explicit_body.clone().or_else(|| carried_body(thought, into).map(str::to_string));
             // **거절은 `create_drafts` 앞이다**(moai-oejf) — 뒤에 두면 `store` 가 이 쓰기가
-            // 짓는 에픽의 제목을 대고, 받는 쪽은 제 계획의 첫 줄을 줄이러 간다.
-            check_carried_body(&args.id, text.as_deref())?;
+            // 짓는 에픽(또는 멤버)의 제목을 대고, 받는 쪽은 제 계획의 첫 줄을 줄이러 간다. 재는 글은 연습과 한 자로
+            // 고른다([`measured_body`]).
+            check_carried_body(&args.id, measured_body(thought, into, explicit_body.as_deref(), members))?;
             let stone = stone_of(issues, &args.id, into);
             say_if_inherited(issues, thought, stone.as_deref(), lang);
             say_if_dead(issues, cfg, stone.as_deref(), lang);
@@ -341,6 +403,7 @@ pub fn promote(ctx: &Ctx, args: PromoteArgs) -> R<Vec<String>> {
                 body: text.as_deref(),
                 due: due.as_deref(),
                 start: start.as_deref(),
+                member_body: for_members.as_deref(),
             };
 
             let (mut entries, made) =

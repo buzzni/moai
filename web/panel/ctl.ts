@@ -6,9 +6,11 @@ import { validZone } from './data/zone.js'
 import type { KeyWiring } from './keys/wiring.js'
 import { bindingsFor, bindingKeys, isAvailable } from './keys/table.js'
 import { detectPlatform } from './keys/router.js'
+import { routerTokens, wireToken } from './keys/names.js'
 import type { Store, Tab, ColumnName } from './store.js'
 import { clampRatio, DEFAULT_RATIO } from './view/split.js'
 import { DEFAULT_GRID } from './view/gantt-model.js'
+import { copyFor } from './i18n/index.js'
 import type { Shell } from './view/shell.js'
 
 export interface Request { verb: string; [key: string]: unknown }
@@ -32,9 +34,16 @@ export interface CtlOptions {
   withIdentity<T>(seq: number, token: string, work: () => T): T
 }
 
+/** Public ctl state uses the explorer's string/null spelling, independently of router internals. */
+export function heldPrefix(held: { menu: string[] | null; pending: string[] }): string | null {
+  const tokens = held.menu ?? held.pending
+  return tokens.length ? tokens.map(wireToken).join(' ') : null
+}
+
 export function createCtl(options: CtlOptions) {
   const { store, keys, shell, read } = options
   const doc = shell.el.ownerDocument
+  const personOnly = () => copyFor(doc.documentElement.lang).ctl.personOnly
   let ownedInput: Element | null = null
   let ownedMenu = false
   let ownedHeld = false
@@ -64,7 +73,7 @@ export function createCtl(options: CtlOptions) {
   const screen = (name: unknown): name is Tab => name === 'board' || name === 'list' || name === 'gantt' || name === 'wiki'
   const after = (): Reply => {
     const state = current()
-    return yes({ screen: state.tab, cursor: state.cursor, mode: keys.context().mode, menu: keys.router.state().menu, changed: true })
+    return yes({ screen: state.tab, cursor: state.cursor, mode: keys.context().mode, menu: heldPrefix(keys.router.state()), changed: true })
   }
   const state = (rows: boolean): Reply => {
     const s = current()
@@ -72,7 +81,7 @@ export function createCtl(options: CtlOptions) {
     const index = new Map((s.board.value?.rows ?? []).map((row) => [row.id, row]))
     return yes({
       screen: s.tab, path: s.path, cursor: s.cursor, focus: s.focus, mode: keys.context().mode,
-      menu: keys.router.state().menu,
+      menu: heldPrefix(keys.router.state()),
       filter: s.filter.applied ? { text: s.filter.applied, kind: 'filter', scope: 'all' } : s.search.text ? { text: s.search.text, kind: 'grep', scope: 'all' } : null,
       sort: s.sort.fields.map((field) => field.dir === defaultDir(field.key) ? field.key : `${field.key}:${field.dir}`),
       view: { hidden: s.view.hiddenStatuses, deferred: !s.view.hideDeferred, backlog: !s.view.hideBacklog,
@@ -98,18 +107,10 @@ export function createCtl(options: CtlOptions) {
       const keyed = bindings.some((binding) => binding.args !== undefined)
       return { name, keys: bindings.flatMap((binding) => bindingKeys(binding, platform)),
         enabled: !name.startsWith('proposal.') && !keyed && bindings.some((binding) => isAvailable(binding, context)),
-        ...(name.startsWith('proposal.') ? { why: 'only the person can answer a proposal' } : keyed ? { why: 'needs its key: use moai ctl keys' } : {}) }
+        ...(name.startsWith('proposal.') ? { why: personOnly() } : keyed ? { why: 'needs its key: use moai ctl keys' } : {}) }
     }) })
   }
-  /** The explorer's spelling, which `moai ctl keys` checks (`Ctrl-d`, `BackTab`, `Bksp`, `gg`), as this router's tokens. */
-  const routerTokens = (seq: string): string[] => seq.split(/\s+/).filter(Boolean).flatMap((token) => {
-    if (/^([a-z])\1$/i.test(token)) return [token[0]!, token[1]!]
-    const m = /^((?:(?:Ctrl|Alt|Shift)-)*)(.+)$/.exec(token)!
-    let mods = m[1]!.replace(/Ctrl-/g, 'C-').replace(/Alt-/g, 'A-').replace(/Shift-/g, 'S-')
-    let name = m[2]!
-    if (name === 'BackTab') { name = 'Tab'; if (!mods.includes('S-')) mods += 'S-' }
-    return [mods + (({ Bksp: 'Backspace', PgUp: 'PageUp', PgDn: 'PageDown' } as Record<string, string>)[name] ?? name)]
-  })
+  /** Presses the explorer's spelling (`Ctrl-d`, `BackTab`, `Bksp`, `gg`), read into this router's tokens by keys/names.ts. */
   const press = (seqs: unknown, text: unknown): Reply => {
     if (!Array.isArray(seqs) || seqs.some((seq) => typeof seq !== 'string')) return no('bad_input', 'key sequences must be strings')
     if (text !== null && text !== undefined && typeof text !== 'string') return no('bad_input', 'text must be a string')
@@ -151,8 +152,8 @@ export function createCtl(options: CtlOptions) {
   const mark = async (request: Request, seq: number, token: string): Promise<Reply> => {
     const ids = request.ids
     let result
-    if (request.all === true) result = await options.withIdentity(seq, token, () => read.all())
-    else if (typeof request.group === 'string') result = await options.withIdentity(seq, token, () => read.group(String(request.group)))
+    if (request.all === true) result = await options.withIdentity(seq, token, () => read.all(true))
+    else if (typeof request.group === 'string') result = await options.withIdentity(seq, token, () => read.group(String(request.group), true))
     else if (Array.isArray(ids) && ids.every((id) => typeof id === 'string')) {
       if (ids.length === 0) return no('bad_input', 'give ids, all or group')
       result = await options.withIdentity(seq, token, () => read.ids(ids as string[]))
@@ -164,10 +165,12 @@ export function createCtl(options: CtlOptions) {
     // The socket caller may have timed out while this event waited in the browser queue. The explorer drops that
     // request before dispatch too; running it now would change the person's view after the caller saw a timeout.
     if (typeof request.deadline_ms === 'number' && Date.now() >= request.deadline_ms) return no('timeout', 'control request expired')
+    if (request.verb === 'validate_zone') return request.name === 'none' || typeof request.name === 'string' && validZone(request.name)
+      ? yes() : no('bad_input', 'unknown time zone')
     if (request.verb === 'state') return state(request.rows === true)
     if (request.verb === 'actions') return actions()
-    if (request.verb === 'do' && typeof request.name === 'string' && request.name.startsWith('proposal.')) return no('refused', 'only the person can answer a proposal')
-    if (request.verb === 'keys' && Array.isArray(request.seqs) && request.seqs.some((value) => typeof value === 'string' && /(?:^|\s)SPC\s+a\s+[ynl](?:\s|$)/.test(value))) return no('refused', 'only the person can answer a proposal')
+    if (request.verb === 'do' && typeof request.name === 'string' && request.name.startsWith('proposal.')) return no('refused', personOnly())
+    if (request.verb === 'keys' && Array.isArray(request.seqs) && request.seqs.some((value) => typeof value === 'string' && /(?:^|\s)SPC\s+a\s+[ynl](?:\s|$)/.test(value))) return no('refused', personOnly())
     if (busy()) return no('person_busy', 'the person is using an input or menu')
     try {
       return await options.withIdentity(seq, token, () => execute(request, seq, token))

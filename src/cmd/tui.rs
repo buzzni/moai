@@ -96,13 +96,25 @@ pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
         // `--no-gantt` 는 그 값과 거르개 문맥 셈을 함께 뺀다 — 간트를 안 보이는 웹 탭은 트리만 읽는다.
         let wh = (deep && !no_gantt).then(|| ground.here(&load.issues));
         let gantt = wh.as_ref().map(|wh| {
-            crate::report::gantt::rows(&load.issues, &index, wh, &repo.config, &crate::model::now(), ctx.zone())
+            let positions: std::collections::BTreeSet<usize> = entries.iter().filter_map(|(e, _)| e.at()).collect();
+            crate::report::gantt::rows_at(
+                &load.issues,
+                &index,
+                wh,
+                &repo.config,
+                &crate::model::now(),
+                ctx.zone(),
+                positions,
+            )
+            .into_iter()
+            .map(|row| (row.at, row))
+            .collect::<std::collections::BTreeMap<_, _>>()
         });
         let rows: Vec<Row> = entries
             .into_iter()
             .map(|(e, home)| {
                 let mut row = Row::of(&index, &load.issues, &states, &e, home, ctx.lang());
-                row.gantt = gantt.as_ref().zip(e.at()).map(|(g, at)| &g[at]);
+                row.gantt = gantt.as_ref().zip(e.at()).and_then(|(g, at)| g.get(&at));
                 row
             })
             .collect();
@@ -1711,6 +1723,9 @@ fn history_poll(waited: std::time::Duration) -> std::time::Duration {
 /// the file watch's step when none does. One answer for before and after `App::follow`.
 fn poll_after(app: &App) -> std::time::Duration {
     match app.history_alone() {
+        // A picture being encoded lands on the next `follow` (`Images::poll`) — at the file watch's step it stood
+        // as text for up to 700ms after it was ready.
+        _ if app.images.busy() => LOAD_POLL,
         Some(waited) => history_poll(waited),
         None if app.loading() || app.reaping() || app.gathering_commits() => LOAD_POLL,
         None => TICK,
@@ -1779,8 +1794,8 @@ fn loop_until_quit(
             dirty = app.trouble != told;
             // **그리다 띄운 읽기도 곧 받으러 깬다**(moai-w7ms 리뷰) — 상세의 이력은 그리는 자가 띄운다
             // (`draw::fill_history`). 그리기 전에 정한 때(쉬던 화면이면 700ms 뒤)를 그대로 기다리면 짧은 읽기도 그만큼
-            // 늦게 선다 — 아래의 당김은 기다린 **뒤에야** 돈다.
-            if app.loading() {
+            // 늦게 선다 — 아래의 당김은 기다린 **뒤에야** 돈다. 그리며 맡긴 그림(`Images::busy`)도 같다.
+            if app.loading() || app.images.busy() {
                 stale_due = stale_due.min(std::time::Instant::now() + poll_after(app));
             }
         }
@@ -1878,7 +1893,7 @@ fn loop_until_quit(
         }
         let now = std::time::Instant::now();
         // 키가 읽기를 띄웠으면(층으로 올라가기 따위) 느린 걸음까지 기다리지 않고 받으러 깬다.
-        if app.loading() {
+        if app.loading() || app.images.busy() {
             stale_due = stale_due.min(now + poll_after(app));
         }
         if now >= stale_due {
@@ -1907,6 +1922,27 @@ mod tests {
         use std::time::Duration;
         assert_eq!(super::history_poll(Duration::from_millis(299)), super::LOAD_POLL);
         assert_eq!(super::history_poll(super::HISTORY_GRACE), super::HISTORY_SLOW_POLL);
+    }
+
+    #[test]
+    fn pending_pictures_use_the_fast_poll_until_follow_receives_them() {
+        let root = crate::scratch::Scratch::new("picture-poll-cadence");
+        let path = root.join("one.png");
+        image::DynamicImage::new_rgb8(16, 16).save(&path).unwrap();
+        let mut app = burst_app();
+        app.images = crate::tui::images::Images::testing_async();
+        assert_eq!(super::poll_after(&app), super::TICK);
+        assert!(app.images.lines(&path, 20).is_empty());
+        assert!(app.images.busy());
+        assert_eq!(super::poll_after(&app), std::time::Duration::from_millis(30));
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while app.images.busy() {
+            assert!(std::time::Instant::now() < deadline);
+            app.follow();
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        assert_eq!(super::poll_after(&app), super::TICK);
+        app.images.active = false;
     }
 
     fn burst_app() -> App {

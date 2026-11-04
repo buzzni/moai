@@ -226,7 +226,7 @@ fn decide(
             }
             // 누구의 것인지 모르는 줄은 싣지 않는다 — 남의 일을 "압축 전부터 집고 있다" 로 떠안긴다(moai-4jsy).
             // `Stop` 이 붙드는 것과 같은 자로 잰다([`releasing`]).
-            let (away, latest, _) = releasing(input, &repo, &load.issues, &person_at(&repo, ctx));
+            let (away, latest, _) = releasing(input, &repo, &load.issues, &unreadable, &person_at(&repo, ctx));
             crate::hook::carried(
                 &load.issues,
                 latest.as_deref().unwrap_or(&load.issues),
@@ -319,7 +319,7 @@ fn decide(
             };
             // **사람은 묻는 자리에서 푼다**(moai-0zjo 리뷰, [`crate::hook::Person`]) — 여기서는 푸는 길만 건넨다.
             let me = person_at(&repo, ctx);
-            let base = away_of(input, &repo, &load.issues, &me);
+            let base = away_of(input, &repo, &load.issues, &unreadable, &me);
             let settled = settle(input, &repo, &load.issues, base, &|issues, away| {
                 match call {
                     // 규칙의 차례는 `guard_shell_in` 이 정한다. 여기는 껍데기의 자리와 제 토막만 준다.
@@ -347,7 +347,7 @@ fn decide(
                         let Ok(load) = other.read() else { return Decision::Pass };
                         let only = |k: usize| routes.get(k) == Some(&Route::There(n));
                         // 사람은 **그 트래커의 뿌리에서** 푼다 — 남의 저장소의 git 설정이 그 저장소의 사람이다.
-                        let away = away_of(input, other, &load.issues, &person_at(other, ctx));
+                        let away = away_of(input, other, &load.issues, &load.unreadable(), &person_at(other, ctx));
                         settle(input, other, &load.issues, away, &|issues, away| {
                             crate::hook::guard_moai(issues, &other.config, away, line, &only, &|_| {
                                 Some(crate::hook::Aimed::stands(other.root.as_path()))
@@ -471,7 +471,7 @@ fn closing_hold(
         let warnings = warned(repo, issues, unreadable, ctx.zone());
         // **누구의 것인지 모르는 줄로는 붙들지 않는다**(moai-ntl6). 에픽이 닫히는지와 집은 줄이 아직
         // 집혀 있는지는 옆까지 겹친 줄로 잰다(moai-8ema). 둘 다 [`releasing`] 이 잰다.
-        let (away, latest, picks) = releasing(input, repo, issues, &person_at(repo, ctx));
+        let (away, latest, picks) = releasing(input, repo, issues, unreadable, &person_at(repo, ctx));
         let hold = crate::hook::closing(
             issues,
             latest.as_deref().unwrap_or(issues),
@@ -787,6 +787,7 @@ fn settle<'a>(
                 me: base.me.clone(),
                 recordable: Some(issues.iter().map(|i| i.id.clone()).collect()),
                 archive: base.archive.clone(),
+                opaque: base.opaque.clone(),
                 homes: base.homes.clone(),
                 marked: base.marked.clone(),
                 main: base.main.clone(),
@@ -877,7 +878,14 @@ fn person_at(repo: &Repo, ctx: &Ctx) -> crate::hook::Person {
 /// 집은 줄은 옆 이름이 가리켜도 제 것이다. 막는 판정에도 실어야 루트에 선 서브에이전트 일꾼에게 규칙 1 이
 /// 다시 선다 — 이름이 그 줄을 빼면 첫 판정이 지나가 [`settle`] 이 다시 볼 일도 없다. 옆 이름이 없으면 이길
 /// 것이 없으니 기록을 안 읽는다.
-fn away_of(input: &Input, repo: &Repo, issues: &[model::Issue], me: &crate::hook::Person) -> crate::hook::Away {
+fn away_of(
+    input: &Input,
+    repo: &Repo,
+    issues: &[model::Issue],
+    unreadable: &[report::Unreadable],
+    me: &crate::hook::Person,
+) -> crate::hook::Away {
+    let opaque = unreadable.iter().filter_map(|u| u.id.map(str::to_owned)).collect();
     // 규칙 5 가 아카이브의 줄을 찾는 손(moai-bth3) — 읽는 것은 여기(`cmd/`)고, `hook` 은 집는 id 가 산 스냅샷에 없을
     // 때나 규칙 2 의 빈손 거절에서 집을 일을 내밀 때만 이 손을 부른다. 못 읽는 아카이브 파일은 건너뛴다(`archive::read` 가 너그럽다).
     let archive = Some(crate::hook::Archive {
@@ -890,13 +898,13 @@ fn away_of(input: &Input, repo: &Repo, issues: &[model::Issue], me: &crate::hook
     let picking = input.tool_name.as_deref() == Some("Bash")
         && input.tool_input.get("command").and_then(serde_json::Value::as_str).is_some_and(|c| c.contains("mv"));
     if report::wip(issues, &repo.config).is_empty() && !picking {
-        return crate::hook::Away { me: me.clone(), archive, ..Default::default() };
+        return crate::hook::Away { me: me.clone(), archive, opaque, ..Default::default() };
     }
     // **제 이름은 세션이 선 체크아웃에서 읽는다 — 트래커의 자리가 아니다**(moai-y7go). 트래커를
     // 찾는 길이 딸린 워크트리를 루트로 옮기므로(`Repo::find_from`) `repo.root` 는 늘 루트다. 거기서
     // 이름을 읽으면 워크트리 안에서 도는 세션이 제 이름을 잃고, 제 워크트리가 쥔 일이 통째로 "옆의
     // 것" 이 되어 규칙 2 가 그 자리의 쓰기를 막는다.
-    let mut away = crate::hook::Away { me: me.clone(), archive, ..crate::worktree::away(repo.here()) };
+    let mut away = crate::hook::Away { me: me.clone(), archive, opaque, ..crate::worktree::away(repo.here()) };
     add_picked(input, repo, &mut away);
     away
 }
@@ -953,9 +961,10 @@ fn releasing(
     input: &Input,
     repo: &Repo,
     issues: &[model::Issue],
+    unreadable: &[report::Unreadable],
     me: &crate::hook::Person,
 ) -> (crate::hook::Away, Option<Vec<model::Issue>>, crate::hook::Picks) {
-    let mut away = away_of(input, repo, issues, me);
+    let mut away = away_of(input, repo, issues, unreadable, me);
     if crate::hook::held(issues, &repo.config, &away).is_empty() {
         return (away, None, Default::default());
     }

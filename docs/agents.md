@@ -413,6 +413,7 @@ docs    = "sonnet"        # a backlog item that only touches the wiki or the CHA
 bulk    = "haiku"         # sorting, summing up, a review text past 64KB, the same mechanical fix
 codex   = "gpt-6.1-sol"   # a Codex worker
 review_grade   = "xhigh"  # low|medium|high|xhigh|max
+review_raise   = "never"  # never|write-path — raise the epic-end review one step
 effort         = "medium" # develop, docs, bulk
 effort_complex = "high"   # complex
 effort_plan    = "xhigh"  # plan
@@ -469,7 +470,11 @@ Machine-readable lines keep their format in either mode. JSON includes `detail`,
    `plan` role's model to split the backlog item into an epic and its issues,
    hang the milestone and the deadline on the epic, and give every member a body
    the worker can start from; it hands back the epic and a difficulty per member.
-   The worker is then sent that epic from step 2
+   The worker is then sent that epic from step 2. Backlog plans and `moai-plan`
+   drafts preserve the same decisions, exclusions, contracts and budgets. File
+   locations, line numbers and proposed signatures guide navigation; acceptance
+   describes failures the tests must catch. Shared files and the overall order
+   belong in the epic, with each member pointing to its own place
 3. **It picks a role and raises a worker.** Each backlog item goes to one role —
    `develop` or `complex` by one word of difficulty, `docs` for the wiki and the
    CHANGELOG, `bulk` for mechanical work — and the supervisor raises a subagent
@@ -510,11 +515,17 @@ Machine-readable lines keep their format in either mode. JSON includes `detail`,
 
 **The epic-end review is the epic's only one, on the review model.** The worker
 reviews the whole epic once, at the end, with `/code-review` at `review_grade` —
-`xhigh` by default, `max` when a member touched the write path, concurrency, the
-storage format or hooks, or when the worktree carries members of two epics. A
+`xhigh` by default. The grade is raised one step, at most once and never past `max`,
+only when `review_raise = "write-path"` and a member touched the write path,
+concurrency, the storage format or hooks, or the worktree carries members of two
+epics; the default `never` keeps `review_grade` as written. A
 subagent worker raises that review as a subagent of its own on the `review`
 model, because a review called from a worker runs on the worker's model. It
-never starts another agent program. When rule 3 keeps refusing the review after
+never starts another agent program. The filled review prompt is saved as
+`<scratchpad>/<epic>/brief.md`; the reviewer reads that file before starting and
+writes its original findings beside it as `review.md`. Separate epic directories
+keep parallel reviewers from overwriting each other's input or results. When rule
+3 keeps refusing the review after
 the review issue is picked up, the worker reviews the diff by hand in its own
 session and opens the review text with `Manual review:`, so the next reader does
 not take its sweep for what the review command found.
@@ -694,15 +705,38 @@ terminal (`#{pane_tty}`), never by reading another process's environment
 **Codex workers.** The skill finds Codex from the running server's pane
 command, path and live process, including a shell launcher's child; it does not
 add Codex to the Claude session map. It checks the screen, live PID and completed
-report together, leaving copy mode, drafts and dialogs to you. `/clear` text and
-Enter are separate calls; you handle any unexpected menu or prompt. Assignments use
-`load-buffer`, `paste-buffer -p` and a separate Enter. New panes require your
+report together, leaving copy mode, drafts and dialogs to you. Those checks, the
+`/clear` (text and Enter separately) and the paste (`load-buffer`, `paste-buffer -p`
+and a separate Enter) run through the skill's `scripts/codex-pane.py ready|clear|send`,
+which refuses rather than guesses; you handle any unexpected menu or prompt. The
+assignment text comes from `moai supervise message`. New panes require your
 yes and use `[models] codex`, read from `moai models --json`; once a round the
 supervisor checks official models with `WebSearch` and tells you if that value
-is outdated. A `Monitor` watches epic notes every 30 seconds for up to 30 minutes,
-then is rearmed if needed; a backlog sent before its epic exists is watched until
+is outdated. A `Monitor` runs `moai watch <epic>`, which reads the epic's notes every
+two seconds and prints one event with a cursor to rearm from; a backlog sent before its epic exists is watched until
 its `Unfolded:` note names the epic. `Review-ready:` goes to the supervisor's
 review subagent; the second assignment follows its completed review (moai-uzhx).
+
+**Repository lines in a Codex assignment.** A repository can add its own
+instructions to every assignment `moai supervise message` assembles, in
+`.moai/config.toml`:
+
+```toml
+[supervise]
+extra_lines = ["First instruction", "Work on <id> in <root>"]
+```
+
+The lines go in order just before `from:`. `<id>` becomes the assigned epic or
+backlog ID and `<root>` the repository root; other text is literal. Without the
+table the message is unchanged. The setting is the repository's only — your user
+config cannot add lines. `supervise message` refuses a key other than
+`extra_lines`, a second `extra_lines`, a value that is not an array of
+double-quoted strings, and an entry holding a line break or another control
+character; other commands are not affected. Keep the array on one line and
+leave `\"` out of the entries: a multi-line array or an unbalanced quote is a
+malformed line in this file and stops every command. Under cmux the supervisor
+puts the same lines in the same place, or assembles the message with
+`supervise message` (moai-n6fs).
 
 ### In cmux
 
@@ -761,8 +795,8 @@ reads the screen and sends Enter separately; you handle any unexpected menu or p
 It pastes a multiline assignment with `cmux paste --surface <UUID> --submit -`
 from a file. New tabs require your yes and use `[models] codex`; the supervisor
 reads `moai models --json` and checks official models with `WebSearch` once a
-round. A `Monitor` watches epic notes every 30 seconds for up to 30 minutes,
-then is rearmed if needed; a backlog sent before its epic exists is watched until
+round. A `Monitor` runs `moai watch <epic>`, which reads the epic's notes every two
+seconds and prints one event with a cursor to rearm from; a backlog sent before its epic exists is watched until
 its `Unfolded:` note names the epic. Codex stops at `Review-ready:` for the supervisor's
 review subagent and waits for its second assignment. Refused input is never
 forced, and drafts and permission prompts remain yours (moai-uzhx).
@@ -955,7 +989,7 @@ worker's line is written by the supervisor.
   where an incoming message waits for its person's approval — look at that
   window
 
-Decided in: moai-2w0s moai-hxma moai-0zjo moai-nqdc moai-bl3x moai-gelm moai-tllo moai-mdzx moai-xs2h moai-h8tn moai-snyk moai-u5wr moai-b6cw moai-ew4o moai-dhxm moai-ml0d moai-nas5 moai-kxkw moai-dj4j moai-54yc moai-bkn4 moai-084j moai-keka moai-zynt moai-j9nf moai-jtvp moai-obxm moai-six5 moai-iu73 moai-r0x8 moai-u99i moai-uqf7 moai-p5sz moai-xpa8 moai-9tqo moai-pxui moai-uzhx moai-wk7i moai-jdwk moai-1m21 moai-d1zn moai-xvvr moai-ns7a moai-zgc1 moai-4v3h
+Decided in: moai-2w0s moai-hxma moai-0zjo moai-nqdc moai-bl3x moai-gelm moai-tllo moai-mdzx moai-xs2h moai-h8tn moai-snyk moai-u5wr moai-b6cw moai-ew4o moai-dhxm moai-ml0d moai-nas5 moai-kxkw moai-dj4j moai-54yc moai-bkn4 moai-084j moai-keka moai-zynt moai-j9nf moai-jtvp moai-obxm moai-six5 moai-iu73 moai-r0x8 moai-u99i moai-uqf7 moai-p5sz moai-xpa8 moai-9tqo moai-pxui moai-uzhx moai-wk7i moai-jdwk moai-1m21 moai-d1zn moai-xvvr moai-ns7a moai-zgc1 moai-4v3h moai-i26i moai-p9dh moai-5w6i
 
 ## Archive storage
 

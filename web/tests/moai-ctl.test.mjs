@@ -4,7 +4,7 @@ import { test } from 'node:test'
 import { JSDOM } from 'jsdom'
 import { panelModule } from './moai-panel-modules.mjs'
 
-const { createCtl } = await panelModule('ctl.ts')
+const { createCtl, heldPrefix } = await panelModule('ctl.ts')
 const { createStore } = await panelModule('store.ts')
 const { copyFor } = await panelModule('i18n/index.ts')
 const { mountShell } = await panelModule('view/shell.ts')
@@ -27,8 +27,8 @@ function setup() {
   const read = {
     one: async (id) => { called.push(id); return null },
     ids: async (ids) => { called.push([...ids]); return ids.includes('moai-missing') ? { kind: 'moai-error', message: 'missing ID' } : null },
-    all: async () => { called.push('all'); return null },
-    group: async (id) => { called.push(`group:${id}`); return null },
+    all: async (atomic) => { called.push(atomic ? 'all:atomic' : 'all'); return null },
+    group: async (id, atomic) => { called.push(`group:${id}${atomic ? ':atomic' : ''}`); return null },
   }
   const keys = wireKeys({ document: doc, store, shell, copy: copyFor('en'), read, platform: 'other' })
   const ctl = createCtl({ store, keys, shell, read, drawnOrder: () => ['moai-example'],
@@ -66,6 +66,16 @@ test('read through a key binding uses the current read mark path', async () => {
   assert.equal(reply.ok, true)
   await new Promise((resolve) => setImmediate(resolve))
   assert.deepEqual(p.called, ['all'])
+  p.dom.window.close()
+})
+
+test('ctl all and group select atomic writes', async () => {
+  const p = setup()
+  assert.equal((await p.ctl.run({ verb: 'read', all: true }, 1, 'token')).ok, true)
+  assert.equal((await p.ctl.run({ verb: 'read', group: 'moai-example' }, 2, 'token')).ok, true)
+  assert.deepEqual(p.called, ['all:atomic', 'group:moai-example:atomic'])
+  p.keys.destroy()
+  p.shell.destroy()
   p.dom.window.close()
 })
 
@@ -145,4 +155,62 @@ test('keys take the explorer\'s spelling, which moai ctl keys checks', async () 
     assert.equal(reply.ok, true, `${seq}: ${JSON.stringify(reply)}`)
     p.dom.window.close()
   }
+})
+
+test('state uses string/null held prefixes for menus, chords, modifiers and remapped tokens', async () => {
+  const p = setup()
+  for (const prefix of ['SPC', 'g']) {
+    p.keys.router.press(prefix)
+    const reply = await p.ctl.run({ verb: 'state' }, 1, 'token')
+    assert.equal(reply.data.menu, prefix.replace('C-', 'Ctrl-'))
+    p.keys.router.reset()
+  }
+  p.keys.router.press('SPC'); p.keys.router.press('v')
+  assert.equal((await p.ctl.run({ verb: 'state' }, 2, 'token')).data.menu, 'SPC v')
+  p.keys.router.reset()
+  assert.equal((await p.ctl.run({ verb: 'state' }, 3, 'token')).data.menu, null)
+  assert.equal(heldPrefix({ menu: null, pending: ['C-A-S-Tab', 'Backspace', 'Q'] }), 'Ctrl-Alt-Shift-Tab Bksp Q')
+  assert.equal(heldPrefix({ menu: ['SPC', 'x'], pending: [] }), 'SPC x')
+  p.dom.window.close()
+})
+
+test('help permits state/actions and blocks keys, read marks and screen changes', async () => {
+  const p = setup()
+  p.keys.router.press('?')
+  assert.equal(p.keys.help.isOpen(), true)
+  for (const verb of ['state', 'actions']) assert.equal((await p.ctl.run({ verb }, 1, 'token')).ok, true)
+  for (const request of [{ verb: 'screen', name: 'board' }, { verb: 'read', all: true }, { verb: 'keys', seqs: ['Esc'] }]) {
+    assert.equal((await p.ctl.run(request, 2, 'token')).code, 'person_busy')
+    assert.equal(p.keys.help.isOpen(), true)
+  }
+  assert.deepEqual(p.called, [])
+  p.dom.window.close()
+})
+
+test('actions, do and keys use the shared English/Korean person-only refusal', async () => {
+  for (const lang of ['en', 'ko']) {
+    const p = setup()
+    p.doc.documentElement.lang = lang
+    const expected = copyFor(lang).ctl.personOnly
+    const rows = (await p.ctl.run({ verb: 'actions' }, 1, 'token')).data.actions
+    for (const [name, key] of [['proposal.accept', 'y'], ['proposal.decline', 'n'], ['proposal.list', 'l']]) {
+      assert.equal(rows.find((row) => row.name === name).why, expected)
+      assert.equal((await p.ctl.run({ verb: 'do', name }, 2, 'token')).message, expected)
+      assert.equal((await p.ctl.run({ verb: 'keys', seqs: [`SPC a ${key}`] }, 3, 'token')).message, expected)
+    }
+    p.dom.window.close()
+  }
+})
+
+test('the read adapter sends atomic all and group to the ctl endpoints and the defaults to the ordinary ones', async () => {
+  const calls = []
+  // The read adapter exposes the distinction independently of the keyboard router.
+  const { readMarks } = await panelModule('data/read.ts')
+  const client = { request: async (endpoint) => { calls.push(endpoint); return { kind: 'passed', out: { read: [], missing: [], held: [], problems: [] } } } }
+  const read = readMarks(client, async () => {})
+  await read.all(true)
+  await read.group('moai-1234', true)
+  await read.all()
+  await read.group('moai-1234')
+  assert.deepEqual(calls.map((c) => c.path), ['/api/ctl-read-all', '/api/ctl-read-group/moai-1234', '/api/read-all', '/api/read-group/moai-1234'])
 })

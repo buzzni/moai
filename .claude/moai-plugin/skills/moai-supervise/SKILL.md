@@ -28,7 +28,7 @@ values in a `[models]` table of its `.moai/config.toml`; the person's own keys w
 Read it at the start of every round; a value changed mid-round counts from the next one.
 
     moai models --json      one object: a model per role (plan, develop, complex, review,
-                            docs, bulk, codex), review_grade, effort, effort_complex, effort_plan,
+                            docs, bulk, codex), review_grade, review_raise, effort, effort_complex, effort_plan,
                             written — the keys the person set — and repo — the keys the
                             repository recommended, read from repo_path; the rest are defaults
 
@@ -80,7 +80,9 @@ session, only after the person says yes (`moai-tmux`, `moai-cmux` or `moai-sayco
 repository in `ListAgents`, except you** — a row whose name starts with the root
 directory's slug and a `-` (2). Nobody registers and nobody is asked which windows count.
 The message you send is the whole assignment, and it names the file of the worker's steps,
-which the worker reads (3).
+which the worker reads (3). A Codex worker's assignment also carries the repository's
+optional `[supervise] extra_lines` just before `from:` — `moai supervise message` inserts them
+(`moai-tmux`, `moai-cmux`).
 
 Five things about the messaging, one line each:
 
@@ -411,10 +413,11 @@ model and effort come from the `moai models --json` you read at the start of the
 | `bulk` | sorting and summing up, a review text past 64KB, the same mechanical fix many times | `effort` |
 | `codex` | a Codex worker — never a subagent ("Codex workers") | — |
 
-With nothing written and no repository table, the defaults are `plan` `fable` · `develop` `sonnet` · `complex` `opus` · `review` `opus` · `docs` `sonnet` · `bulk` `haiku` · `codex` `gpt-6.1-sol` · `review_grade` `xhigh` · `effort` `medium` · `effort_complex` `high` · `effort_plan` `xhigh`.
+With nothing written and no repository table, the defaults are `plan` `fable` · `develop` `sonnet` · `complex` `opus` · `review` `opus` · `docs` `sonnet` · `bulk` `haiku` · `codex` `gpt-6.1-sol` · `review_grade` `xhigh` · `review_raise` `never` · `effort` `medium` · `effort_complex` `high` · `effort_plan` `xhigh`.
 
 Development is split by one word of difficulty — `develop` or `complex`. The same rubric
-decides, member by member, whether the epic-end review goes to `max` (the worker's 7). Keep
+decides, member by member, whether the epic-end review is raised a step when `review_raise`
+allows it (the worker's 7). Keep
 two axes and the message carries two sets of judgement, and on the day they differ the cheap
 model takes the write path.
 
@@ -434,11 +437,10 @@ The Codex worker's role is `codex`, and its sections say how it is sent.
 The epic-end review is that epic's only review, because the members are not reviewed
 separately (the worker's 5 and 7).
 
-**The epic-end review runs on the `review` model at `review_grade`** — read both from
-`moai models --json` (defaults `opus` and `xhigh`).
-**If any member touched the write path, concurrency, the storage format or hooks**, the grade is `max`.
-**A worktree that carries members of two epics is measured as one epic and then raised one more step** — the review has to read both epics' contracts at once.
-A step above the default `xhigh` is `max`, and `max` is the top of the ladder: a step above it is still `max`.
+**The epic-end review runs on the `review` model at `review_grade`** — read both and `review_raise` from
+`moai models --json` (defaults `opus`, `xhigh`, `never`).
+With `review_raise = "write-path"`, raise one step if any member touched the write path, concurrency, the storage format or hooks, or if the worktree carries members of two epics. Raise at most once, capped at `max`; `never` leaves the configured grade unchanged.
+A worktree that carries members of two epics is measured as one epic. If a worker's proposed grade differs, the supervisor corrects it from the settings and records why in the review issue angle.
 
 The supervisor picks before reading any code, so this is a suggestion; the last word
 belongs to the worker who read the issue. A session's model cannot be changed by a message
@@ -461,7 +463,7 @@ The word is `plan`, not `subagent` — no worker holds this backlog, so it is no
 
     You unfold backlog <id> — <title> — for the supervisor of this repository. You split it
     into an epic and its issues; you do not develop it, pick anything up, raise a worktree or
-    change a repository file — the tracker and your scratchpad are yours.
+    change a repository file — the tracker and your scratchpad are yours. Create `<scratchpad>/<backlog id>/` before writing any plan files. Use that directory until the epic exists; then create `<scratchpad>/<epic>/` and use it for all subsequent bodies and review files. Never share a task directory across concurrent work.
     Root: <root>
     Milestone: <milestone>
     Due: <due>
@@ -469,6 +471,7 @@ The word is `plan`, not `subagent` — no worker holds this backlog, so it is no
     Writing: <writing>
 
     Read the request, its evidence and enough code and tracker context to ground the split. Write short titles and concrete, actionable bodies with file and function locations, constraints, acceptance tests and review focus. For detailed writing use, for the epic: why this bundle · the person's decisions · promises · order and the files it shares · review focus; for a development member: goal · context (files and lines, the precedent) · what is decided · steps · acceptance (which tests) · out of scope · order and the files it shares · role, adding where and how (files, functions, structures) · important contracts and pitfalls after `what is decided`. Name the epic review section `Review focus / 리뷰에서 볼 것` (choose the English or Korean heading). For brief writing give what, where and tests. Classify each member using the difficulty rubric and explain why. Do not ask the person questions.
+    Keep the person's decisions and exclusions, storage, concurrency, path security and output contracts, numbers and budgets, member order and review focus. Give entry-point files and functions as navigation hints; line numbers, proposed signatures and types are hints, not contracts. Describe acceptance tests by the failure conditions they must catch, not exhaustive test function names. Under `acceptance (which tests)`, write those failure conditions; test names are optional navigation hints. Make example commands executable with configured column names, the first column, spaces and shell quoting; when unknown use a placeholder such as `<first column>`. Put shared files and order in the epic once; a member's `order and the files it shares` names only its own place and files and points to the epic — do not repeat file lists or explanations in every member.
 
     1. Read it — moai -C "<root>" show <id> — and as much of the code as the split needs. If it
        already stands done, hand back `already unfolded: <id>` and stop: unfolding again puts up
@@ -482,7 +485,7 @@ The word is `plan`, not `subagent` — no worker holds this backlog, so it is no
        clears nothing `promote` carried, but for a dead release: when a line `promote` printed
        names the release it carried as already closed or deferred, clear it — left on, it
        re-opens a release that is out, or takes the whole plan out of the plan:
-       moai edit <epic> --milestone <milestone>
+       moai -C "<root>" edit <epic> --milestone <milestone>
        moai -C "<root>" edit <epic> --milestone none
        moai -C "<root>" edit <epic> --due <due>
        A refusal because the day is later than the milestone's leaves the epic as it stands.
@@ -491,8 +494,8 @@ The word is `plan`, not `subagent` — no worker holds this backlog, so it is no
        goal · context (files and lines, the precedent) · what is decided · steps · acceptance (which tests) · out of scope · order and the files it shares · role.
        `brief`: what to change · where (file and function) · how to test it. A design question the
        backlog and its notes do not settle goes in it, open, for the worker to ask — do not
-       settle it here. Write it to a file in your scratchpad and run
-       moai -C "<root>" edit <member> -b - < <that file>
+       settle it here. Write each body under `<scratchpad>/<epic>/`, using a distinct filename per member, and run
+       moai -C "<root>" edit <member> -b - < "<scratchpad>/<epic>/<member>.md"
     5. Mark the epic, last — a supervisor that starts again sends an epic it finds marked so, so
        mark it only once 3 and 4 stand:
        moai -C "<root>" note <epic> 'Sent: plan <id>'

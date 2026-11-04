@@ -1,4 +1,4 @@
-//! Shared graphics protocols. No terminal escape queries; inherited TMUX is checked once against pane ttys.
+//! Shared graphics protocols. No terminal escape queries; inherited TMUX is checked against pane ttys.
 use super::From;
 use base64::{Engine, engine::general_purpose::STANDARD};
 use std::io::{IsTerminal, Write};
@@ -8,6 +8,7 @@ use std::sync::Mutex;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Protocol {
     Kitty,
+    KittyTmux,
     Iterm,
     Sixel,
     Off,
@@ -42,7 +43,12 @@ pub fn detect(
         || env("TMUX").is_some_and(|value| in_tmux(&value) != Some(false))
     {
         Protocol::Off
-    } else if env("KITTY_WINDOW_ID").is_some() || term == "xterm-kitty" || program == "ghostty" {
+    } else if env("KITTY_WINDOW_ID").is_some()
+        || term == "xterm-kitty"
+        || term == "xterm-ghostty"
+        || term == "ghostty"
+        || program == "ghostty"
+    {
         Protocol::Kitty
     } else if ["iTerm.app", "WezTerm"].contains(&program.as_str()) || env("LC_TERMINAL").as_deref() == Some("iTerm2") {
         Protocol::Iterm
@@ -52,9 +58,84 @@ pub fn detect(
         Protocol::Off
     }
 }
+pub fn detect_terminal(setting: Option<&str>) -> Protocol {
+    terminal_state(setting).protocol
+}
+
+/// The protocol and the attached client generation must travel together: a new client may have the same size.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TerminalState {
+    pub protocol: Protocol,
+    pub client: Option<String>,
+}
+/// Whether detection is automatic. An explicit `MOAI_IMAGES` or setting never probes tmux, even with TMUX inherited.
+pub fn auto_detects(setting: Option<&str>) -> bool {
+    std::env::var("MOAI_IMAGES").ok().as_deref().or(setting).is_none_or(|s| s == "auto")
+}
+/// The first detection. A tmux that cannot answer keeps graphics off.
+pub fn terminal_state(setting: Option<&str>) -> TerminalState {
+    observe_terminal(setting).unwrap_or_else(|| resolve(setting, None))
+}
+/// Resolve tmux separately from protocol hints: server-inherited kitty variables are
+/// not evidence about the attached client. Never change the user's passthrough option.
+/// `None` when tmux could not answer (a timeout, a server that went away). A recheck keeps what it knew then: one
+/// slow probe must not drop working previews, and an inherited TMUX whose server exited says nothing about a
+/// separate kitty window.
+pub fn observe_terminal(setting: Option<&str>) -> Option<TerminalState> {
+    if !auto_detects(setting) {
+        return Some(resolve(setting, None));
+    }
+    match std::env::var("TMUX") {
+        // One process and one timeout for both the tty comparison and the client's permission.
+        Ok(value) => tmux_state(&value).map(|pane| resolve(setting, Some(pane))),
+        Err(_) => Some(resolve(setting, None)),
+    }
+}
+fn resolve(setting: Option<&str>, pane: Option<(bool, String)>) -> TerminalState {
+    match pane {
+        Some((true, client)) => TerminalState {
+            protocol: if passthrough_client(&client) { Protocol::KittyTmux } else { Protocol::Off },
+            client: Some(client),
+        },
+        pane => TerminalState {
+            protocol: detect(|k| std::env::var(k).ok(), setting, |_| pane.map(|(inside, _)| inside)),
+            client: None,
+        },
+    }
+}
+/// The reply is the probe's client lines: name, passthrough, pid, created, tty, features, terminal type. The
+/// terminal type is the client's XTVERSION answer and comes last, so a line break inside it shifts nothing.
+fn passthrough_client(reply: &str) -> bool {
+    let mut lines = reply.lines();
+    let name = lines.next().unwrap_or_default();
+    let permission = lines.next();
+    let features = lines.nth(3).unwrap_or_default();
+    let termtype = lines.next().unwrap_or_default();
+    // The placeholder names its image by a 24-bit foreground. Without RGB tmux reduces that colour to a palette
+    // index and the terminal looks up another image. The named entries carry `setrgbf`, which tmux does not list
+    // as a feature; a Ghostty known only by XTVERSION (`TERM=xterm-256color` over SSH) needs `RGB` listed.
+    permission == Some("all")
+        && (matches!(name, "xterm-kitty" | "xterm-ghostty" | "ghostty")
+            || (termtype.starts_with("ghostty ") && features.split(',').any(|feature| feature == "RGB")))
+}
+/// Wrap every APC separately: tmux's DCS parser has a bounded input buffer.
+pub fn passthrough(payload: &[u8]) -> Vec<u8> {
+    let mut out = Vec::new();
+    for part in payload.split_inclusive(|b| *b == b'\\') {
+        out.extend_from_slice(b"\x1bPtmux;");
+        for byte in part {
+            out.push(*byte);
+            if *byte == 27 {
+                out.push(27);
+            }
+        }
+        out.extend_from_slice(b"\x1b\\");
+    }
+    out
+}
 /// Compare stdout's device with the server's panes. Unknown means graphics stay off.
 #[cfg(unix)]
-pub fn in_tmux(value: &str) -> Option<bool> {
+fn tmux_state(value: &str) -> Option<(bool, String)> {
     use std::os::{fd::AsFd, unix::fs::MetadataExt};
     let stdout = std::io::stdout();
     if !stdout.is_terminal() {
@@ -64,23 +145,29 @@ pub fn in_tmux(value: &str) -> Option<bool> {
     // Read through `MetadataExt::rdev` on both sides: `libc::stat::st_rdev` is `i32` on macOS and `u64` on Linux.
     let device = std::fs::File::from(stdout.as_fd().try_clone_to_owned().ok()?).metadata().ok()?.rdev();
     let mut command = std::process::Command::new("tmux");
-    command.args(["-S", socket, "list-panes", "-a", "-F", "#{pane_tty}"]);
+    command.args(["-S", socket, "list-panes", "-a", "-F", "#{pane_tty}", ";", "display-message", "-p"]);
+    if let Ok(pane) = std::env::var("TMUX_PANE") {
+        command.args(["-t", &pane]);
+    }
+    command
+        .arg("MOAI_CLIENT\n#{client_termname}\n#{allow-passthrough}\n#{client_pid}\n#{client_created}\n#{client_tty}\n#{client_termfeatures}\n#{client_termtype}");
     let output = tmux_output(command, std::time::Duration::from_secs(2))?;
     let text = std::str::from_utf8(&output).ok()?;
-    if text.trim().is_empty() {
+    let (panes, client) = text.split_once("MOAI_CLIENT\n").unwrap_or((text, ""));
+    if panes.trim().is_empty() {
         return None;
     }
     // A pane whose tty no longer stats (a dead pane kept by `remain-on-exit`) cannot be our open stdout, so it does
     // not decide anything. Only when no pane could be checked at all is the answer unknown.
     let mut checked = false;
-    for tty in text.lines() {
+    for tty in panes.lines() {
         let Ok(meta) = std::fs::metadata(tty) else { continue };
         if meta.rdev() == device {
-            return Some(true);
+            return Some((true, client.to_owned()));
         }
         checked = true;
     }
-    checked.then_some(false)
+    checked.then_some((false, String::new()))
 }
 /// Bound the whole probe, including stdout collection. A nonblocking socket avoids a reader thread that could
 /// outlive the timeout if an inherited stdout remains open in a descendant of the client.
@@ -132,7 +219,7 @@ fn tmux_output(mut command: std::process::Command, timeout: std::time::Duration)
     result
 }
 #[cfg(not(unix))]
-pub fn in_tmux(_: &str) -> Option<bool> {
+fn tmux_state(_: &str) -> Option<(bool, String)> {
     None
 }
 
@@ -313,7 +400,7 @@ pub fn print(lines: &[String]) -> std::io::Result<bool> {
     if !std::io::stdout().is_terminal() || draws.is_empty() {
         return Ok(false);
     }
-    let protocol = detect(|k| std::env::var(k).ok(), draws[0].setting.as_deref(), in_tmux);
+    let protocol = detect_terminal(draws[0].setting.as_deref());
     let mut start = 0;
     for d in draws {
         if d.line < start || d.line >= lines.len() {
@@ -343,6 +430,19 @@ pub fn print(lines: &[String]) -> std::io::Result<bool> {
             let s = size(img.width(), img.height(), cols, cell);
             let payload = match protocol {
                 Protocol::Kitty => super::png(&img).map(|b| kitty(&b, s)),
+                Protocol::KittyTmux => super::png(&img).map(|b| {
+                    static NEXT: std::sync::Mutex<u32> = std::sync::Mutex::new(0);
+                    let id = super::placeholder::next_id(&mut NEXT.lock().unwrap());
+                    let mut out = passthrough(&kitty_virtual(&b, s, id));
+                    let (red, green, blue) = super::placeholder::rgb(id);
+                    let fg = format!("\x1b[38;2;{red};{green};{blue}m");
+                    for row in 0..s.rows as usize {
+                        out.extend_from_slice(fg.as_bytes());
+                        out.extend_from_slice(super::placeholder::row(row, s.cols as usize).as_bytes());
+                        out.extend_from_slice(b"\x1b[39m\n");
+                    }
+                    out
+                }),
                 Protocol::Iterm => Ok(iterm(&bytes, s)),
                 Protocol::Sixel => Ok(sixel(&img, s)),
                 Protocol::Off => Ok(vec![]),
@@ -363,10 +463,55 @@ pub fn print(lines: &[String]) -> std::io::Result<bool> {
 mod tests {
     use super::*;
     #[test]
+    fn passthrough_requires_supported_client_and_explicit_permission_and_wraps_each_chunk() {
+        for client in ["xterm-kitty", "xterm-ghostty", "ghostty"] {
+            let reply = format!("{client}\nall\n");
+            assert!(passthrough_client(&reply), "{reply:?}");
+            for permission in ["on", "off", "", "unknown"] {
+                let reply = format!("{client}\n{permission}\n");
+                assert!(!passthrough_client(&reply), "{reply:?}");
+            }
+            assert!(!passthrough_client(client));
+        }
+        for reply in ["xterm-256color\non", "xterm-256color\nall", "\non", ""] {
+            assert!(!passthrough_client(reply), "{reply:?}");
+        }
+        // What tmux 3.4 printed for a real Ghostty 1.4.0 over SSH with TERM=xterm-256color, and the same client once
+        // `terminal-features` gives it RGB.
+        let measured = "bpaste,ccolour,clipboard,cstyle,focus,title";
+        let rgb = "bpaste,ccolour,clipboard,cstyle,focus,RGB,title";
+        for (reply, expected) in [
+            (format!("xterm-256color\nall\n123\n100\n/dev/pts/1\n{rgb}\nghostty 1.4.0\n"), true),
+            (format!("xterm-256color\non\n123\n100\n/dev/pts/1\n{rgb}\nghostty 1.4.0\n"), false),
+            // Without RGB tmux turns the placeholder's id colour into a palette index: keep the link.
+            (format!("xterm-256color\nall\n123\n100\n/dev/pts/1\n{measured}\nghostty 1.4.0\n"), false),
+            ("xterm-256color\nall\n123\n100\n/dev/pts/1\nRGBX,xRGB\nghostty 1.4.0\n".to_owned(), false),
+            (format!("xterm-256color\nall\n123\n100\n/dev/pts/1\n{rgb}\n"), false),
+            (format!("xterm-256color\nall\n123\n100\n/dev/pts/1\n{rgb}\nghosttyish 1.4\n"), false),
+            (format!("xterm-256color\nall\n123\n100\n/dev/pts/1\n{rgb}\nGhostty 1.4.0\n"), false),
+            // An old tmux prints neither format: the name alone decides.
+            ("xterm-kitty\nall\n123\n100\n/dev/pts/1\n\n\n".to_owned(), true),
+            (format!("xterm-ghostty\nall\n123\n100\n/dev/pts/1\n{measured}\nghostty 1.4.0\n"), true),
+            // A line break inside the XTVERSION answer stays inside the last field.
+            (format!("xterm-256color\nall\n123\n100\n/dev/pts/1\n{rgb}\nghostty 1.4.0\nextra\n"), true),
+            (format!("xterm-256color\nall\n123\n100\n/dev/pts/1\n{rgb}\nother\nghostty 1.4.0\n"), false),
+        ] {
+            assert_eq!(passthrough_client(&reply), expected, "{reply:?}");
+        }
+        let payload = b"\x1b_Ga=T,m=1;abc\x1b\\\x1b_Gm=0;def\x1b\\";
+        let wrapped = passthrough(payload);
+        assert_eq!(
+            wrapped,
+            b"\x1bPtmux;\x1b\x1b_Ga=T,m=1;abc\x1b\x1b\\\x1b\\\x1bPtmux;\x1b\x1b_Gm=0;def\x1b\x1b\\\x1b\\"
+        );
+    }
+    #[test]
     fn detect_table() {
-        let cases: [(&[(&str, &str)], Protocol); 8] = [
+        let cases: [(&[(&str, &str)], Protocol); 10] = [
             (&[("TERM", "xterm-kitty")], Protocol::Kitty),
             (&[("TERM_PROGRAM", "ghostty")], Protocol::Kitty),
+            (&[("TERM", "xterm-ghostty")], Protocol::Kitty),
+            (&[("TERM", "ghostty")], Protocol::Kitty),
             (&[("TERM_PROGRAM", "WezTerm")], Protocol::Iterm),
             (&[("WT_SESSION", "1")], Protocol::Sixel),
             (&[("TERM", "foot")], Protocol::Sixel),

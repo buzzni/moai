@@ -993,3 +993,18 @@ test('zone: SPC o t opens the picker (an action, not a toggle) and shows the zon
   assert.deepEqual(ids(), ['option.timezone'])
   assert.equal(router.state().menu, null)
 })
+
+test('ctl wire names and display labels share token conversion', async () => {
+  const { routerTokens, wireToken } = await import(new URL('keys/names.ts', panel))
+  for (const [wire, tokens, held, label] of [
+    ['Ctrl-Alt-Shift-Tab', ['C-A-S-Tab'], 'Ctrl-Alt-Shift-Tab', 'Ctrl-Alt-Shift-Tab'],
+    ['BackTab', ['S-Tab'], 'Shift-Tab', 'Shift-Tab'],
+    ['Bksp', ['Backspace'], 'Bksp', 'Bksp'],
+    ['PgUp', ['PageUp'], 'PageUp', 'PgUp'],
+    ['gg', ['g', 'g'], 'g g', 'gg'],
+  ]) {
+    assert.deepEqual(routerTokens(wire), tokens)
+    assert.equal(tokens.map(wireToken).join(' '), held)
+    assert.equal(keyLabel(tokens.join(' ')), label)
+  }
+})

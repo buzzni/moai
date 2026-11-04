@@ -87,6 +87,19 @@ sections that hold those words, best first; several words are one query, and a
 section holding more of them comes first. Both read the wiki of the checkout you
 are in, so in a worktree they see that branch's pages.
 
+Use bare ids for this repository's issues. To preserve credit for an issue from
+another repository, make the id a source link titled `"external issue"`, for
+example:
+
+```markdown
+[moai-pxiy](https://github.com/buzzni/moai/pull/43 "external issue")
+```
+
+HTTP(S) scheme names are case insensitive. The wiki keeps the source URL and
+excludes that reference from missing-local-issue notices and local issue links.
+A bare mention of the same id elsewhere on the page still refers to this tracker.
+See [wiki reference JSON](json.md#read-wiki-issue-references) for the two forms.
+
 **Write down a mistake the next session would make too.** A lesson is one page under
 `lessons/` in the wiki, written by `moai wiki learn` — it makes the page and notes
 `Lesson: lessons/<slug>` on the row it came from:
@@ -154,6 +167,10 @@ read on a plan line only. A trailing `@` word beginning with an ASCII or fullwid
 digit is a date position: malformed dates are refused with a line number. The fullwidth
 `＠` is also a date marker; escape either marker, for example `\＠2026-10-30`, when
 it is meant as title text.
+The range separator can also be `～` (U+FF5E) or `〜` (U+301C):
+`@2026-10-25～2026-10-31` carries the same dates as the ASCII form. Exported
+plans use ASCII `~`. A range with no start, such as `@〜2026-10-31`, is refused;
+escape the marker (`\@〜2026-10-31`) to keep it as title text instead.
 
 A member's deadline cannot pass its epic's, nor an epic's its milestone's — the write
 is refused and names the day to give instead. A start is held to the same ceiling: it cannot
@@ -162,16 +179,17 @@ Deferred ancestors, including those under a deferred group, set no ceiling until
 you restore them. Restoring a deferral keeps the plans you wrote; `moai status`
 names any that now exceed an ancestor (`due_beyond_parent`) — the undo itself does
 not. As deadlines near, `moai due apply`
-raises the priority of each open, not deferred issue and backlog item by the deadline
-it follows — the earliest of its own and those of its open, not deferred milestone,
-epic and parents. Closed groups lend no priority deadline, even when their finished
+raises the priority of each open, not deferred issue and backlog item by its own
+deadline and the earliest deadline of its open, not deferred milestone, epic and parents.
+It chooses the more urgent priority, breaking ties by the earlier date. Closed groups lend no priority deadline, even when their finished
 members have moved to archive storage; an empty group stays in the first column. The deadline
 ceilings enforced on writes still count closed ancestors. One day left or less —
-today and past included — is `p0`, two or less `p1`, seven or less `p2`. The command
+today and past included — is `p0` for an own deadline, two or less `p1`, seven or less `p2`.
+Inherited deadlines raise no further than `p1`. The command
 notes why on the row and never lowers priority. So the day `--due` puts on an epic bounds
 the work and raises its members as it nears. Nothing runs it for you — run it when `moai status` says rows lag their
 deadline. Within the same priority and milestone position, `moai ready` orders by that
-same followed deadline, with no deadline last. The thresholds and `due_priority = "off"`
+earliest followed deadline, with no deadline last. The thresholds and `due_priority = "off"`
 live in `.moai/config.toml`. If the command needs archive context and cannot read it
 completely, it refuses without changing priorities or adding notes. Repair the source
 listed by `moai show --archived`, then run it again.
@@ -265,6 +283,12 @@ with a worktree, or pass `--as <path>`. If that path is gone, git falls
 back to its own merge and conflict markers come back; `moai status` says so. A
 clone without the driver merges exactly as plain git does.
 
+If a driver exits by signal, `init` leaves its existing setting in place. A shell
+wrapper can relay that as `128 + signal`; moai treats codes accepted as signals
+by the platform's libc as uncertain and preserves the setting too. An explicit
+exit with the same code is indistinguishable, so this also preserves such a
+setting. Libc-reserved signals, such as glibc's 32 and 33, do not qualify.
+
 ## Name the issue in the commit
 
 Put the id in the commit subject — `feat: draw the blocked line (<id>)`.
@@ -323,8 +347,9 @@ where its contributors read them rather than repeated here:
   `milestone/<id>` for work inside a milestone, moai-nvju; branches
   are `worktree-moai-<id>`, and `target/` is a link to `/tmp/cargo-target/<name>`
   because `/home` stalls under parallel builds, moai-c5xo), the review grade table
-  (which `/code-review` level an epic gets — `xhigh` on the review model, `max` for
-  the write path and hooks, moai-9793, moai-bx6t, moai-9tqo), the roles' default
+  (which `/code-review` level an epic gets — `review_grade` on the review model, raised
+  a step for the write path and hooks only under `review_raise = "write-path"`, moai-9793,
+  moai-bx6t, moai-9tqo, moai-p9dh), the roles' default
   models, the
   [`Regression-of:` line](glossary.md#regression-of) on bugs a merged epic caused
   (moai-21zt), and how a
@@ -356,4 +381,4 @@ where its contributors read them rather than repeated here:
   broken data, the same as a broken line in `issues.jsonl` — see [An archive file
   cannot be read](recovery.md#an-archive-file-cannot-be-read)
 
-Decided in: moai-0zjo moai-40ht moai-bx6t moai-9793 moai-ug3j moai-gelm moai-tllo moai-snyk moai-zynt moai-j9nf moai-jtvp moai-fx9t moai-bth3 moai-r0x8 moai-9tqo moai-g8pt moai-lj8g moai-1m21 moai-uwi9 moai-ns7a moai-mkzo moai-w30o moai-4v3h moai-7eeq moai-ccuy
+Decided in: moai-ifvh moai-0zjo moai-40ht moai-bx6t moai-9793 moai-ug3j moai-gelm moai-tllo moai-snyk moai-zynt moai-j9nf moai-jtvp moai-fx9t moai-bth3 moai-r0x8 moai-9tqo moai-g8pt moai-lj8g moai-1m21 moai-uwi9 moai-ns7a moai-mkzo moai-w30o moai-4v3h moai-7eeq moai-ccuy moai-fcj3 moai-p9dh

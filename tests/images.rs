@@ -247,13 +247,13 @@ fn inherited_tmux_uses_stdout_device_and_skips_queries_without_pictures() {
     let tmux = bin.join("tmux");
     std::fs::write(
         &tmux,
-        "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$TEST_QUERY_LOG\"\nprintf '%s\\n' \"$TEST_PANE_TTY\"\n",
+        "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$TEST_QUERY_LOG\"\nprintf '%s\\nMOAI_CLIENT\\n%s\\n' \"$TEST_PANE_TTY\" \"$TEST_CLIENT\"\n",
     )
     .unwrap();
     std::fs::set_permissions(&tmux, std::fs::Permissions::from_mode(0o755)).unwrap();
     let log = s.join("queries");
     // `panes` answers what the fake server lists, given the pty this run writes to.
-    let run_pty = |id: &str, panes: &dyn Fn(&str) -> String, forced: Option<&str>| {
+    let run_pty = |id: &str, panes: &dyn Fn(&str) -> String, forced: Option<&str>, client: Option<&str>| {
         let (mut master, mut slave) = (-1, -1);
         // `c_char` is `u8` on aarch64 Linux, and Apple's `openpty` takes `*mut` termios/winsize.
         let mut name: [libc::c_char; 256] = [0; 256];
@@ -283,6 +283,7 @@ fn inherited_tmux_uses_stdout_device_and_skips_queries_without_pictures() {
             .env("PATH", &bin)
             .env("TEST_QUERY_LOG", &log)
             .env("TEST_PANE_TTY", panes(tty))
+            .env("TEST_CLIENT", client.unwrap_or(""))
             .env_remove("MOAI_IMAGES")
             .stdout(slave);
         if let Some(mode) = forced {
@@ -303,24 +304,59 @@ fn inherited_tmux_uses_stdout_device_and_skips_queries_without_pictures() {
     };
     let other = |_: &str| "/dev/null".to_owned();
     let own = |tty: &str| tty.to_owned();
-    assert!(!run_pty(&plain, &other, None).contains("\x1b_G"));
+    assert!(!run_pty(&plain, &other, None, None).contains("\x1b_G"));
     assert!(!log.exists(), "picture-free body queried tmux");
-    assert!(run_pty(&id, &other, None).contains("\x1b_Ga=T"));
+    assert!(run_pty(&id, &other, None, None).contains("\x1b_Ga=T"));
+    assert_eq!(std::fs::read_to_string(&log).unwrap().matches("list-panes").count(), 1);
+    assert!(std::fs::read_to_string(&log).unwrap().contains("; display-message"));
     assert!(
         std::fs::read_to_string(&log).unwrap().contains("-S /tmp/moai-blkz-only-test list-panes -a -F #{pane_tty}")
     );
     // A dead pane (remain-on-exit) lists a tty that no longer stats: it cannot be our stdout, so it decides nothing.
     let dead = "/nonexistent/moai-blkz-dead-pane";
     assert!(
-        run_pty(&id, &|_| format!("{dead}\n/dev/null"), None).contains("\x1b_Ga=T"),
+        run_pty(&id, &|_| format!("{dead}\n/dev/null"), None, None).contains("\x1b_Ga=T"),
         "a dead pane turned graphics off"
     );
     // Only when no pane could be checked at all is the answer unknown, and unknown keeps graphics off.
-    assert!(!run_pty(&id, &|_| dead.to_owned(), None).contains("\x1b_G"));
-    let text = run_pty(&id, &own, None);
+    assert!(!run_pty(&id, &|_| dead.to_owned(), None, None).contains("\x1b_G"));
+    let text = run_pty(&id, &own, None, None);
     assert!(!text.contains("\x1b_G"));
     assert!(text.contains("\x1b]8;;file://"));
+    for terminal in ["xterm-kitty", "xterm-ghostty", "ghostty"] {
+        let client = format!("{terminal}\nall");
+        let graphics = run_pty(&id, &own, None, Some(&client));
+        assert!(graphics.contains("\x1bPtmux;\x1b\x1b_Ga=T,U=1"), "{client:?}");
+        assert!(graphics.contains('\u{10eeee}'), "{client:?}");
+    }
+    // Ghostty over SSH with TERM=xterm-256color, known by its XTVERSION answer once tmux gives it RGB.
+    let client =
+        "xterm-256color\nall\n123\n100\n/dev/client\nbpaste,ccolour,clipboard,cstyle,focus,RGB,title\nghostty 1.4.0";
+    let graphics = run_pty(&id, &own, None, Some(client));
+    assert!(graphics.contains("\x1bPtmux;\x1b\x1b_Ga=T,U=1"));
+    assert!(graphics.contains('\u{10eeee}'));
+    assert!(std::fs::read_to_string(&log).unwrap().contains("#{client_termfeatures}\n#{client_termtype}"));
+    // Every run keeps the kitty hints a server started from kitty hands its panes (TERM=xterm-kitty,
+    // KITTY_WINDOW_ID). Inside a pane only the client reply decides, so a rejected client must not fall back to
+    // plain kitty from those hints. They cannot fake a pass: only the reply yields the wrapped `U=1` upload above.
+    for client in [
+        "xterm-kitty\non",
+        "xterm-ghostty\non",
+        "xterm-kitty\noff",
+        "xterm-ghostty\noff",
+        "xterm-256color\non",
+        "xterm-256color\nall",
+        "xterm-256color\non\n123\n100\n/dev/client\nbpaste,ccolour,clipboard,cstyle,focus,RGB,title\nghostty 1.4.0",
+        // What tmux 3.4 printed for that client without RGB: the id colour would reach Ghostty as a palette index.
+        "xterm-256color\nall\n123\n100\n/dev/client\nbpaste,ccolour,clipboard,cstyle,focus,title\nghostty 1.4.0",
+    ] {
+        let fallback = run_pty(&id, &own, None, Some(client));
+        assert!(!fallback.contains("\x1b_G"), "{client:?}");
+        assert!(!fallback.contains("\x1bPtmux;"), "{client:?}");
+        assert!(!fallback.contains('\u{10eeee}'), "{client:?}");
+        assert!(fallback.contains("\x1b]8;;file://"), "{client:?}");
+    }
     std::fs::remove_file(&log).unwrap();
-    assert!(run_pty(&id, &own, Some("kitty")).contains("\x1b_Ga=T"));
+    assert!(run_pty(&id, &own, Some("kitty"), None).contains("\x1b_Ga=T"));
     assert!(!log.exists(), "explicit graphics queried tmux");
 }

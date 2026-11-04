@@ -184,8 +184,8 @@ const RAISE_HEAD: &str = "Model: raise to complex";
 /// CLAUDE.md "막혔을 때" 의 꼴(상황·선택지·권장)을 영어 머리로 옮긴 것이다 — 스킬은 모든 저장소에 심긴다.
 const DECISION_HEAD: &str = "decision needed: <id>";
 
-/// 에픽 끝 리뷰를 `max` 로 올리는 멤버. **멤버를 따로 안 보니**(moai-bx6t) 이 한 줄이 그
-/// 멤버가 받는 유일한 비싼 눈이다. 일꾼 브리프 7 과 이 저장소 CLAUDE.md 의 리뷰 표가 같은
+/// 에픽 끝 리뷰를 한 칸 올리는 멤버 — **`review_raise = "write-path"` 일 때만 올린다**(2026-11-03 사용자 결정,
+/// moai-p9dh.lyc). 기본 `never` 에서는 `review_grade` 그대로다. 그 전에는 늘 `max` 로 올렸다. 일꾼 브리프 7 과 이 저장소 CLAUDE.md 의 리뷰 표가 같은
 /// 글을 쓴다 — 손으로 두 벌 적은 첫 판은 둘 다 `high` 잣대의 `동시성` 을 빠뜨렸다(위
 /// `DIFFICULTY` 가 한 번 겪은 그 샘이다). `the_rubric_is_the_review_table` 이 둘을 견준다.
 const EPIC_MAX: &str = "any member touched the write path, concurrency, the storage format or hooks";
@@ -195,12 +195,10 @@ const EPIC_MAX: &str = "any member touched the write path, concurrency, the stor
 /// `에픽 끝` 과 `에픽 밖 이슈 하나` 둘만 재어 그 판을 아무도 안 잰다 — 그날은 감독과 일꾼이
 /// 그때그때 골라 둘 다 `max` 였다. 맞았지만 규약이 시킨 것은 아니다.
 ///
-/// **한 에픽처럼 재고 한 칸 더 올린다.** 후보 셋(한 덩이로 재기·에픽마다 재서 높은 쪽·무조건
-/// 한 칸 더) 가운데 첫째와 셋째를 합친 것이다 — 리뷰가 두 에픽의 계약을 같이 보아야 하니
-/// `표면을 가로지르면 한 칸 더` 와 같은 결이고, 실제로 선 판 둘의 `max` 와도 맞는다.
+/// **한 에픽처럼 잰다.** 그 위에 한 칸 더 올리는 것은 `review_raise = "write-path"` 일 때뿐이고 [`EPIC_MAX`] 와
+/// 합쳐 한 번만 오른다(2026-11-03 사용자 결정, moai-p9dh.lyc). 그 전에는 늘 한 칸 더 올렸다(moai-h89f).
 /// 이 저장소 CLAUDE.md 의 리뷰 표와 `the_rubric_is_the_review_table` 이 이 글을 견준다.
-const BUNDLE: &str =
-    "A worktree that carries members of two epics is measured as one epic and then raised one more step";
+const BUNDLE: &str = "A worktree that carries members of two epics is measured as one epic";
 
 /// 리뷰가 되풀이해 잡는 다섯 자리(moai-jza6). 2026-09-20~21 에 리뷰가 잡았지만 브리프에는
 /// 없던 것들이고, 다섯 다 한 번이 아니라 여러 판에서 되풀이됐다 — 그때까지는 감독이 브리프마다
@@ -264,22 +262,14 @@ fn top_role() -> &'static str {
     DIFFICULTY[DIFFICULTY.len() - 1].1
 }
 
-/// 에픽 끝 리뷰의 모델과 등급 — **`review` 역할의 모델로 `review_grade` 에서 본다**(2026-10-12 사용자 결정,
-/// moai-9tqo). 기본은 opus·`xhigh` 이고, 쓰기 경로·동시성·저장 형식·훅을 건드린 멤버가 들면(`EPIC_MAX`) `max`,
-/// 에픽 둘에 걸친 묶음(`BUNDLE`)은 한 칸 위다 — 사다리는 `xhigh`·`max` 둘이다.
-///
-/// 옛 규칙은 "가장 무거운 멤버의 한 칸 위" 였다(moai-bx6t, 2026-09-18). 글 한 줄 고친 멤버 하나짜리 에픽까지 가장
-/// 비싼 리뷰를 받던 첫 판을 거슬러 세운 것인데, 그 사다리의 아래 칸(`medium` 이면 sonnet)이 리뷰를 싼 모델에 맡겼다
-/// — sonnet 일꾼 창에서 부른 리뷰는 창의 모델을 물려받는다. 바닥을 `xhigh` 로 올리고 모델을 역할에서 읽는다.
-/// "표면을 가로지르면 한 칸 더" 도 함께 걷었다 — 바닥이 `xhigh` 라 한 칸 더가 곧 `max` 이고, 그 자리는 위 둘이 맡는다.
+/// Epic-end review grade follows the person’s settings; escalation is opt-in.
 fn epic_review_rule() -> String {
-    let (model, grade) = (model_default("review"), model_default("review_grade"));
+    let (model, grade, raise) = (model_default("review"), model_default("review_grade"), model_default("review_raise"));
     format!(
-        "**The epic-end review runs on the `review` model at `review_grade`** — read both from\n\
-         `moai models --json` (defaults `{model}` and `{grade}`).\n\
-         **If {EPIC_MAX}**, the grade is `max`.\n\
-         **{BUNDLE}** — the review has to read both epics' contracts at once.\n\
-         A step above the default `{grade}` is `max`, and `max` is the top of the ladder: a step above it is still `max`."
+        "**The epic-end review runs on the `review` model at `review_grade`** — read both and `review_raise` from\n\
+         `moai models --json` (defaults `{model}`, `{grade}`, `{raise}`).\n\
+         With `review_raise = \"write-path\"`, raise one step if {EPIC_MAX}, or if the worktree carries members of two epics. Raise at most once, capped at `max`; `never` leaves the configured grade unchanged.\n\
+         {BUNDLE}. If a worker's proposed grade differs, the supervisor corrects it from the settings and records why in the review issue angle."
     )
 }
 
@@ -344,13 +334,13 @@ change them. If it reads heavier than `Model:` says, stop before you pick anythi
 back one line, `{RAISE_HEAD} — <why>`; the supervisor raises a new worker on the `{top}` model
 with the same message, its `Model:` and `Effort:` lines changed to that role's. What shows only
 after you picked up, you carry on and name in the report.
-Whether the epic-end review (7) goes to `max` is measured on this same rubric, member by member"#
+Whether the epic-end review (7) is raised a step — only when `review_raise` allows it — is measured on this same rubric, member by member"#
     )
 }
 
 /// 메시지 머리의 옆 일 줄(moai-alsi). 새 일과 거둔 일(감독 0)이 **같은 줄**을 싣는다 — 4-3 이 "메시지의
 /// `Work running alongside`" 를 가리키니, 거둔 일의 메시지에 없으면 이어받은 일꾼은 가리키는 줄이 없는 규칙을 받는다.
-const BESIDE: &str = "Work running alongside: <other work> — do not touch those files (4-3)";
+pub(crate) const BESIDE: &str = "Work running alongside: <other work> — do not touch those files (4-3)";
 
 /// 루트 HEAD 를 대조하는 글(moai-gokz, 2026-09-18 사용자 결정). 일꾼 글([`worker`])의 걸음 앞에 한 번 선다 — 새 일과
 /// 거둔 일이 같은 스킬을 읽으니 두 벌이 없다(moai-snyk). 그 전에는 감독 글이 새 일과 거둔 일의 머리에 따로 실어,
@@ -666,16 +656,15 @@ const PLAN_MEMBER_EXTRA: &str = "where and how (files, functions, structures) ·
 /// 돌려준다. 공통 글에 "gap 으로 돌려 달라" 를 두면 감독의 펼치기가 아무도 안 읽는 줄을 낸다.
 fn plan_core() -> String {
     format!(
-        "Read the request, its evidence and enough code and tracker context to ground the split. Write short titles and concrete, actionable bodies with file and function locations, constraints, acceptance tests and review focus. For detailed writing use, for the epic: {PLAN_EPIC_BODY}; for a development member: {DETAILED_BODY}, adding {PLAN_MEMBER_EXTRA} after `what is decided`. Name the epic review section `{REVIEW_FOCUS}` (choose the English or Korean heading). For brief writing give what, where and tests. Classify each member using the difficulty rubric and explain why. Do not ask the person questions."
+        "Read the request, its evidence and enough code and tracker context to ground the split. Write short titles and concrete, actionable bodies with file and function locations, constraints, acceptance tests and review focus. For detailed writing use, for the epic: {PLAN_EPIC_BODY}; for a development member: {DETAILED_BODY}, adding {PLAN_MEMBER_EXTRA} after `what is decided`. Name the epic review section `{REVIEW_FOCUS}` (choose the English or Korean heading). For brief writing give what, where and tests. Classify each member using the difficulty rubric and explain why. Do not ask the person questions.\nKeep the person's decisions and exclusions, storage, concurrency, path security and output contracts, numbers and budgets, member order and review focus. Give entry-point files and functions as navigation hints; line numbers, proposed signatures and types are hints, not contracts. Describe acceptance tests by the failure conditions they must catch, not exhaustive test function names. Under `acceptance (which tests)`, write those failure conditions; test names are optional navigation hints. Make example commands executable with configured column names, the first column, spaces and shell quoting; when unknown use a placeholder such as `<first column>`. Put shared files and order in the epic once; a member's `order and the files it shares` names only its own place and files and points to the epic — do not repeat file lists or explanations in every member."
     )
 }
 
 fn plan_brief_draft() -> String {
     format!(
-        r#"Draft a plan from the interview record at <interview path> and the repository at <root>. Writing: <writing>. Work only in the scratchpad; do not write to the tracker or change repository files.
+        r#"Draft a plan from the interview record at <interview path> and the repository at <root>. Writing: <writing>. Work only in <plan dir>, the absolute task directory supplied by the caller; do not write to the tracker or change repository files.
 {core}
-Keep the person's decisions and exclusions, storage, concurrency, path security and output contracts, numbers and budgets, member order and review focus. Give entry-point files and functions as navigation hints; line numbers, proposed signatures and types are hints, not contracts. Describe acceptance tests by the failure conditions they must catch, not exhaustive test function names. Make example commands executable with configured column names, the first column, spaces and shell quoting; when unknown use a placeholder such as `<first column>`. Put shared files and order in the epic once; a member's `order and the files it shares` names only its own place and files and points to the epic — do not repeat file lists or explanations in every member.
-Write a plan file, an epic body file and one body file per member in the scratchpad. Preserve the mapping from each plan title to its body file. Return first `Model ran: anthropic/<your real model name>`, then `plan: <absolute file>`, `epic body: <absolute file>`, and for each member `<title> <low|medium|high> — <reason>; body: <absolute file>`. Return each unresolved decision as `gap: <what>`; do not ask the user.
+Write a plan file, an epic body file and one body file per member under <plan dir>. Preserve the mapping from each plan title to its body file. Return first `Model ran: anthropic/<your real model name>`, then `plan: <absolute file>`, `epic body: <absolute file>`, and for each member `<title> <low|medium|high> — <reason>; body: <absolute file>`. Return each unresolved decision as `gap: <what>`; do not ask the user.
 {rubric}"#,
         core = plan_core(),
         rubric = difficulty_rubric()
@@ -785,13 +774,11 @@ that grew long while you parked it and that length spreads into the issues, so
 write a short new title when you unfold — the original text stays on that backlog,
 and the history line about being unfolded from it leads back there.
 
-**The backlog's milestone and body go onto the epic by themselves.** `promote` puts
-both on the epic it unfolds — a milestone is inherited, so the epic alone carries
-it to every member, the ones added later included, and the body is what lets
-`moai show <epic>` say why these issues are one bundle. Not onto every issue: the
-original stays on the closed backlog and the history leads back to it, and the one
-place worth filling is the epic, so the window that picks a member up does not
-have to press every member to find out what this is. The backlog item's own deadline
+**The backlog's milestone and body go onto the new epic.** An explicit `--body`
+replaces the epic body. When the plan has one member, that member also receives the
+original backlog body, including when unfolding into a standing epic. When it has
+several members, each receives `Unfolded-from: <backlog id>` so its source is easy
+to find. The original remains on the closed backlog. The backlog item's own deadline
 comes over onto the epic too, unless the plan's `#` line carries an `@` of its own — onto
 the epic only, since a deadline bounds the members without being inherited.
 
@@ -801,7 +788,7 @@ in that epic's release even with an empty field of its own, and a field of its o
 that loses to the epic it sits in never reaches the new epic. One reader answers
 where a row belongs, on every surface.
 
-**Unfolding into a standing epic (`-e <epic>`) carries neither**, and no deadline either.
+**Unfolding into a standing epic (`-e <epic>`) carries no milestone or deadline.**
 That epic is already the owner — its members inherit its milestone, and writing the backlog's
 over theirs would stand one bundle in two places.
 
@@ -926,14 +913,14 @@ as `due_beyond_parent`.
 
 **A near deadline raises priority, by one verb.** `moai due apply` (`--dry-run` shows it
 first) raises an open, not deferred issue or backlog item by the deadline it follows —
-the earliest of its own and those of the open, not deferred milestone, epic and parents it
-stands under. A group's column comes from its members, including archived members: a closed
+its own deadline and the earliest deadline of its open, not deferred milestone, epic
+and parents. It uses the deadline that calls for the higher priority; ties use the earlier day. A group's column comes from its members, including archived members: a closed
 group lends no priority deadline, and an empty group stays in the first column. Deadline limits
 enforced on writes still count closed ancestors. If needed archive context cannot be read, this command
 refuses without writing; repair the archive with `moai show --archived` and try again. One
-day left or less (today and past included) is `p0`, two or less `p1`, seven or less `p2`,
-and it leaves on the row a note `Due-priority: pX → pY (N days left, due D)` in the same
-write, ending in `from <id>` when the deadline was that row's. It only raises, never
+day left or less (today and past included) is `p0` for the row’s own deadline, two or
+less `p1`, seven or less `p2`; inherited deadlines raise only as far as `p1`. It leaves on the row a note `Due-priority: pX → pY (N days left, due D)` in the same
+write, ending in `from <id>` when the deadline came from an ancestor. It only raises, never
 lowers, so the value a person set is never fought over and the old one stays in that
 note. A group row is never raised itself — its members are: the deadline a plan's
 `--due` puts on an epic raises its members as it nears. Reading never writes, so nothing
@@ -995,7 +982,7 @@ column, it is running. There is no command that opens it and no new field.
 - If two milestones are running, both are inside, and the ordering within them is the one below (`p` · deadline · age)
 - **Within one `p` the nearer deadline comes first**, whether a milestone runs or not, and a
   row with none comes last. It follows the earliest deadline of the row and its open,
-  not deferred milestone, epic and parents, as `due apply` does. Group closure includes
+  not deferred milestone, epic and parents — the ancestors `due apply` reads. Group closure includes
   archived members. Where a milestone runs, its work still comes before outside work of the same `p`
 - **A setup with only two columns has no running milestone** — there is no column
   that says "started but not finished", so the rule itself does not stand. In that
@@ -1933,7 +1920,7 @@ The host interviews the person, then a planning subagent drafts a grounded plan.
 
 1. Read `moai models --json` and `moai writing --json`. Compare the `plan` identifier case-insensitively: a name containing `fable` qualifies; a name containing `opus` qualifies only when `effort_plan` is `xhigh` or `max`. All other names fail. On failure stop before interviewing or creating anything; print one line naming the keys to change (`plan` and, when needed, `effort_plan`), recommending `fable` or `opus` with `effort_plan = "xhigh"`. Identify the source from `written`, then `repo`, else default; the user config overrides repository recommendations. Never substitute a model automatically.
 2. Inspect the repository, tracker and wiki for what can be learned without asking. Use `AskUserQuestion` to complete the interview: goal and done state, scope and exclusions, acceptance, protected areas and settled design, milestone (including explicit consent to join a running release or a new version), deadline and start, priority, review focus and risks. Ask follow-ups until decisions are settled. Never invent a start or deadline. No answer means no deadline.
-3. Save the interview, including the person's answers verbatim, in a scratchpad file. Pass its absolute path, root and `Writing:` detail to the subagent. Call `Agent(subagent_type: "general-purpose", model: <plan>, effort: <effort_plan>, description: "draft plan", prompt: <draft brief>)` with this brief. If `Agent` refuses the `plan` name (it takes only the names it can raise a subagent on), stop and tell the person which key to change, as in 1 — never substitute another model:
+3. Create a unique task directory with `mktemp -d "<scratchpad>/plan.XXXXXXXX"` before an epic exists. Save the interview, including the person's answers verbatim, as `<plan dir>/interview.md`. Pass the absolute plan directory and interview path, root and `Writing:` detail to the subagent. Keep all drafts and combined bodies there, even after an epic is created; do not reuse the directory for another plan. Call `Agent(subagent_type: "general-purpose", model: <plan>, effort: <effort_plan>, description: "draft plan", prompt: <draft brief>)` with this brief. If `Agent` refuses the `plan` name (it takes only the names it can raise a subagent on), stop and tell the person which key to change, as in 1 — never substitute another model:
 
 {brief}
 
@@ -2309,7 +2296,7 @@ values in a `[models]` table of its `.moai/config.toml`; the person's own keys w
 Read it at the start of every round; a value changed mid-round counts from the next one.
 
     moai models --json      one object: a model per role (plan, develop, complex, review,
-                            docs, bulk, codex), review_grade, effort, effort_complex, effort_plan,
+                            docs, bulk, codex), review_grade, review_raise, effort, effort_complex, effort_plan,
                             written — the keys the person set — and repo — the keys the
                             repository recommended, read from repo_path; the rest are defaults
 
@@ -2361,7 +2348,9 @@ session, only after the person says yes (`moai-tmux`, `moai-cmux` or `moai-sayco
 repository in `ListAgents`, except you** — a row whose name starts with the root
 directory's slug and a `-` (2). Nobody registers and nobody is asked which windows count.
 The message you send is the whole assignment, and it names the file of the worker's steps,
-which the worker reads (3).
+which the worker reads (3). A Codex worker's assignment also carries the repository's
+optional `[supervise] extra_lines` just before `from:` — `moai supervise message` inserts them
+(`moai-tmux`, `moai-cmux`).
 
 Five things about the messaging, one line each:
 
@@ -2682,7 +2671,8 @@ model and effort come from the `moai models --json` you read at the start of the
 {defaults}
 
 Development is split by one word of difficulty — `develop` or `complex`. The same rubric
-decides, member by member, whether the epic-end review goes to `max` (the worker's 7). Keep
+decides, member by member, whether the epic-end review is raised a step when `review_raise`
+allows it (the worker's 7). Keep
 two axes and the message carries two sets of judgement, and on the day they differ the cheap
 model takes the write path.
 
@@ -3376,7 +3366,7 @@ tell the person; do not guess or change the value.
 Codex tests and commits its work, writes `Review-ready:` as an epic note, and stops.
 It waits for the supervisor's review and the second assignment; it does not review itself.
 
-When `Review-ready:` arrives, read its whole note. Pick the review issue up
+When `Review-ready:` arrives, read its whole note. Recompute the grade from `review_grade` and `review_raise` as the shared epic review rule says; if its proposed grade differs, use the configured result and record the correction and reason in the review issue angle. Pick the review issue up
 (`moai -C "<root>" mv <review id> in_progress`) and run a review subagent in the reported
 worktree with its configured `review` model and "The review brief" in
 `references/worker-branches.md`; refer to that brief, do not copy it here. Once the review has ended and its words are on the review issue, send
@@ -3632,14 +3622,10 @@ Codex can leave its last frame over a shell. Never use another server's pane ids
 
 ### Read the Codex input box
 
-    tmux display -p -t <pane> '#{{pane_in_mode}} #{{pane_dead}}'
-    tmux capture-pane -p -e -t <pane>
-
-If the first value is `1`, the person is in copy mode: the pane is theirs, so do not type.
-If the second is `1`, Codex has exited and the pane kept its last screen: no box, do not type.
-If it prints neither value, the pane is gone: do not type.
-
-{CODEX_EMPTY_BOX}
+Run `python3 "<moai-tmux skill dir>/scripts/codex-pane.py" ready <pane>` immediately
+before input, from `<root>`. It checks mode, liveness and the composer and refuses uncertainty,
+and it refuses a pane whose current path lies outside the checkouts `git worktree list` names
+there. Identify the pane as this repository's first all the same. {CODEX_EMPTY_BOX}
 
 ### Open a Codex worker
 
@@ -3658,41 +3644,23 @@ no hook stands.
 
 ### Clear a reported Codex worker
 
-Clear only after its report passed the supervisor's checks and `Report-checked:` is
-written, its work has stopped, and its live Codex process and empty input box are confirmed.
-Use `/clear`, with text and Enter in separate calls:
-
-    tmux send-keys -t <pane> /clear
-    tmux capture-pane -p -e -t <pane>
-    tmux send-keys -t <pane> Enter
-    tmux capture-pane -p -e -t <pane>
-
-Each look is a separate call. Before the Enter, the composer holds `/clear` and nothing
-else — if it does not, stop and tell the person. Do not send a fixed number of Enters blindly.
-Confirm the old conversation is gone, the cwd is the same, and the fresh composer is empty
-before sending work.
-An unexpected menu, question or permission prompt belongs to the person: tell them which
-pane shows it, and read the pane again after they answer. If `/clear` remains typed or the
-result is unclear, stop and tell them — a later Enter could erase the next work.
+Only after `Report-checked:` and its work has stopped, run
+`python3 "<moai-tmux skill dir>/scripts/codex-pane.py" clear <pane>`. The helper checks
+before typing, verifies `/clear` before Enter and checks the fresh composer. If it refuses,
+stop and tell the person; a menu, question or permission prompt is theirs.
 
 ### Paste the assignment
 
-Codex has no `SendMessage` delivery: paste the assignment directly, only after rechecking
-the live process and empty input box. A message held for the person's approval is still
-held; pasting it would skip their gate. Use the supervisor's `message()` assignment fields,
-with `<codex>` as the model in `Model:` (not a Claude model), plus `Worker: codex`. Write
-the whole assignment in a scratchpad file, ending with `from: <your ListAgents name>`. Its first line names the absolute path of
-`references/worker-codex.md` beside `worker.md` in `moai-supervise` as the steps file.
-Use the same block transport as "When a message does not arrive":
-
-    tmux load-buffer -b moai-send <file>
-    tmux paste-buffer -p -d -b moai-send -t <pane>
-    tmux send-keys -t <pane> Enter
-
-Run each line separately: bracketed paste preserves the multiline assignment, and the
-separate Enter submits it once. It also appends to an existing draft, so the empty check
-is essential. Tell the person which pane received the assignment. "Label the pane" above
-applies unchanged: set `@moai` on this `%N`, and ask before showing labels on borders.
+The helper is `scripts/codex-pane.py` in the moai-tmux skill. Assemble the assignment with
+`moai -C "<root>" supervise message <id>`, giving `--model` (`<codex>` and the difficulty), `--effort`,
+`--base`, `--root-branch` and `--from` (your ListAgents name) plus the other slots its `--help` lists —
+an epic goes from step 2, a backlog item from step 1. Its first line names the absolute path to `references/worker-codex.md`
+beside `worker.md` in `moai-supervise`; pass `--steps <that path>` when the skill is not planted under `<root>`. Lines the
+repository wrote under `[supervise] extra_lines` in `.moai/config.toml` stand just before `from:`. Save it
+under the epic scratch directory. Confirm the fields, those lines included, and the person's approval, then run
+`python3 "<moai-tmux skill dir>/scripts/codex-pane.py" send <pane> <file>`; it rechecks
+before pasting and before submission. Tell the person which pane received it. "Label the
+pane" applies unchanged: set `@moai` on this pane and ask before showing labels.
 
 {REPORT_WATCH}
 "#
@@ -3994,76 +3962,16 @@ neither is an error or an answer without `state`."#;
 /// Codex 보고만 트래커에서 기다린다. 두 손(cmux·tmux)이 같은 스크립트를 싣는다(moai-uzhx.yv8).
 pub const REPORT_WATCH: &str = r#"### Watch the epic for the Codex report
 
-Use one `Monitor` per epic, on the supervisor's side only:
-`Monitor(description: "codex report on <epic>", timeout_ms: 1800000, command: <script below>)`.
-Save the script in the scratchpad; the command is `bash "<script>" "<root>" <epic> <last-seen-ts>`.
-Before pasting the assignment, read `moai -C "<root>" show <epic> --json` once and save the
-latest `journal[].ts` as `<last-seen-ts>` (an empty journal uses `1970-01-01T00:00:00Z`).
-Arm the monitor with that cursor so a quick report cannot arrive between send and baseline.
-A backlog sent `from step 1` has no epic yet: watch that backlog id in `<epic>`'s place.
-Codex writes `Unfolded: <epic>` on it right after unfolding, which ends that watch; arm the
-next one on the epic it names with `1970-01-01T00:00:00Z` — every note on a new epic is new.
-
-```sh
-python3 - "$1" "$2" "$3" <<'MOAI_CODEX_WATCH'
-import datetime, json, subprocess, sys, time
-root, epic, cursor = sys.argv[1:]
-def stamp(ts):
-    return datetime.datetime.fromisoformat(ts.replace("Z", "+00:00"))
-heads = ("report:", "Review-ready:", "Unfolded:", "Decision needed:")
-ends = ("report:", "Review-ready:", "Unfolded:")
-asks = "진행 중 결정이 필요합니다"
-try:
-    # Stamps are whole seconds: a line in the cursor's second is new only if not seen yet.
-    # Before any newer line, that second is the baseline the cursor was read from.
-    since, seen = stamp(cursor), None
-    while True:
-        result = subprocess.run(["moai", "-C", root, "show", epic, "--json"],
-                                capture_output=True, text=True)
-        if result.returncode:
-            print(f"{epic}\t{cursor}\tshow failed ({result.returncode}): "
-                  + (result.stderr or result.stdout).strip().replace("\n", " "), flush=True)
-            sys.exit(1)
-        row = json.loads(result.stdout)
-        if row.get("journal_error"):
-            raise ValueError("journal_error: " + json.dumps(row["journal_error"]))
-        finished = False
-        for note in row["journal"]:
-            at, key = stamp(note["ts"]), json.dumps(note, sort_keys=True)
-            if at < since or (at == since and (seen is None or key in seen)):
-                continue
-            if at > since:
-                since, cursor, seen = at, note["ts"], set()
-            seen.add(key)
-            if note["kind"] != "note":
-                continue
-            lines = (note.get("text") or "").splitlines()
-            head = lines[0] if lines else ""
-            if head.startswith(heads) or asks in head:
-                print(f"{epic}\t{note['ts']}\t{head}", flush=True)
-                finished = finished or head.startswith(ends)
-        if finished:
-            sys.exit(0)
-        time.sleep(30)
-except (OSError, ValueError, KeyError, TypeError) as error:
-    print(f"{epic}\t{cursor}\twatch failed: {error}", flush=True)
-    sys.exit(1)
-MOAI_CODEX_WATCH
-```
-
-This reads our own tracker every 30 seconds; session discovery can knock on other sessions.
-It watches `journal` entries with `kind=note`, `text` and `ts`, not history or notes keys.
-`Review-ready:` asks for the supervisor's review; decision heads ask for the person. Read the
-whole note with `moai show <epic>` and act on it. A failed read is an alert, never success.
-When the monitor says `expired` after 30 minutes, re-arm it from the last processed timestamp;
-keep that cursor, not a new baseline that could skip a report written at expiry. Duplicate
-alerts after re-arming are harmless: check the note and its timestamp before acting again.
-`Unfolded:`, `Review-ready:` and `report:` each end this watch. After the review, paste "merge
-and close — review <id> done" and re-arm for the final report from the `Review-ready:`
-timestamp. A decision head (`Decision needed:`, or `진행 중 결정이 필요합니다` anywhere in the
-first line) keeps it running. For the final report use the supervisor's
-5 and write `Report-checked:` only after its checks. This watch never runs on the Claude
-session path, which already has `notify_when_idle` and report messages."#;
+Before sending, record the latest `journal[].ts` of `moai -C "<root>" show <epic> --json`
+(an empty journal uses `1970-01-01T00:00:00Z`). Arm a `Monitor` with
+`moai -C "<root>" watch <epic> --since <timestamp>`; it prints one JSON event containing
+`head`, `ts`, and a resumable `cursor`. It returns immediately for a matching existing
+note — `--since` is inclusive, so an event at the recorded timestamp may be a note you
+already handled: check it, and if so re-arm with its `cursor`. To continue, start the next monitor with `--cursor <cursor>`. Keep the cursor on
+expiry; identical notes in the same second are one event. A failed read is an alert.
+Watch the backlog until `Unfolded:`, then watch its new epic from the beginning. On
+`Decision needed:` ask the person, on `Review-ready:` start review, and on `report:`
+check the final report and write `Report-checked:`. Never poll the worker screen."#;
 
 /// 화면을 읽은 뒤의 Codex 입력창 잣대 — 읽는 명령은 각 손이 앞에 둔다(moai-uzhx.yv8).
 pub const CODEX_EMPTY_BOX: &str = r#"The lowest current composer starts with `›` (U+203A) and an ordinary space (U+0020).
@@ -4487,7 +4395,9 @@ command or paste the work over it.
 Use the supervisor's `message()` assignment fields, with `<codex>` as the model in `Model:`
 (not a Claude model), plus `Worker: codex`. Replace the steps-file path in the first line with the **absolute** path
 to `references/worker-codex.md` beside the supervisor skill. The last line is
-`from: <supervisor name>`. Save the whole message in the scratchpad and paste only after
+`from: <supervisor name>`. If `.moai/config.toml` has `[supervise] extra_lines`, those lines go
+just before it — `moai -C "<root>" supervise message <id>` assembles the whole message with them,
+flags as its `--help` lists. Save the whole message in the scratchpad and paste only after
 the live PID, cwd and empty box checks. Use the same "Label the tab" rules above.
 
     cmux paste --surface <surface> --submit - < <file>
@@ -4907,7 +4817,7 @@ const STAY_LINE: &str = "Worktree: stay in the root and reach it by absolute pat
 /// `the_message_carries_every_slot_the_steps_read` 가 둘을 견준다.
 fn message() -> String {
     format!(
-        r#"    You are handed backlog <id> — <title>. Read <steps file> and follow its steps from step 1.
+        r#"    {BACKLOG_FIRST}
     Read first: moai show <id>
     {MODEL_SLOT}
     {EFFORT_SLOT}
@@ -4928,7 +4838,12 @@ fn message() -> String {
 
 /// 감독의 2-2 가 펼치기를 맡기는 메시지의 첫 줄(moai-w25x.jby) — 이미 펼친 에픽을 걸음 2 부터. 4-3 으로 남은 멤버를
 /// 보낼 때(감독 5)와 한 줄이라 한 자리에 둔다.
-const PLAN_FIRST: &str = "You are handed epic <epic> — <title>. It is already unfolded; do not promote. Read <steps file> and follow its steps from step 2.";
+pub(crate) const PLAN_FIRST: &str = "You are handed epic <epic> — <title>. It is already unfolded; do not promote. Read <steps file> and follow its steps from step 2.";
+
+/// [`message`] 의 첫 줄 — backlog 를 걸음 1 부터(펼치기부터) 맡긴다. `moai supervise message` 가 backlog 에 같은 줄을
+/// 쓴다: 둘로 적으면 Codex 에 붙이는 배정만 다른 걸음을 가리키는 날이 온다.
+pub(crate) const BACKLOG_FIRST: &str =
+    "You are handed backlog <id> — <title>. Read <steps file> and follow its steps from step 1.";
 
 /// 감독이 `plan` 역할의 모델로 세우는 펼치기 서브에이전트의 프롬프트(moai-w25x.jby, 2026-10-26 사용자 결정). 역할 표의
 /// `plan` 이 어디에도 안 쓰였다 — 일꾼은 제 모델로 펼쳐, 사람이 그 키를 적어도 안 들었다(리뷰 moai-9tqo.jdi 15번).
@@ -4945,10 +4860,11 @@ const PLAN_FIRST: &str = "You are handed epic <epic> — <title>. It is already 
 /// (릴리스·기한·본문) 뒤에 단다: 다시 선 감독은 그 표가 선 에픽을 곧장 걸음 2 부터 보내므로, 앞에 달면 덜 지은 에픽이
 /// 간다. 릴리스를 기한보다 먼저 건다 — 죽은 릴리스의 이른 기한이 사람의 기한을 거절한다(일꾼의 걸음 1 과 같은 차례).
 fn plan_brief() -> String {
+    let milestone_attach = MILESTONE_ATTACH.replacen("moai ", "moai -C \"<root>\" ", 1);
     format!(
         r#"You unfold backlog <id> — <title> — for the supervisor of this repository. You split it
 into an epic and its issues; you do not develop it, pick anything up, raise a worktree or
-change a repository file — the tracker and your scratchpad are yours.
+change a repository file — the tracker and your scratchpad are yours. Create `<scratchpad>/<backlog id>/` before writing any plan files. Use that directory until the epic exists; then create `<scratchpad>/<epic>/` and use it for all subsequent bodies and review files. Never share a task directory across concurrent work.
 Root: <root>
 Milestone: <milestone>
 Due: <due>
@@ -4969,7 +4885,7 @@ Writing: <writing>
    clears nothing `promote` carried, but for a dead release: when a line `promote` printed
    names the release it carried as already closed or deferred, clear it — left on, it
    re-opens a release that is out, or takes the whole plan out of the plan:
-   {MILESTONE_ATTACH}
+   {milestone_attach}
    {MILESTONE_CLEAR}
    moai -C "<root>" edit <epic> --due <due>
    A refusal because the day is later than the milestone's leaves the epic as it stands.
@@ -4978,8 +4894,8 @@ Writing: <writing>
    {DETAILED_BODY}.
    `brief`: what to change · where (file and function) · how to test it. A design question the
    backlog and its notes do not settle goes in it, open, for the worker to ask — do not
-   settle it here. Write it to a file in your scratchpad and run
-   moai -C "<root>" edit <member> -b - < <that file>
+   settle it here. Write each body under `<scratchpad>/<epic>/`, using a distinct filename per member, and run
+   moai -C "<root>" edit <member> -b - < "<scratchpad>/<epic>/<member>.md"
 5. Mark the epic, last — a supervisor that starts again sends an epic it finds marked so, so
    mark it only once 3 and 4 stand:
    {PLAN_SENT}
@@ -5004,6 +4920,11 @@ const MILESTONE_CLEAR: &str = "moai -C \"<root>\" edit <epic> --milestone none";
 /// 펼치기가 펼친 에픽에 다는 보낸 표(리뷰 moai-w25x.54r) — 감독의 1 이 `moai show -g 'Sent:'` 로 다시 읽는 그 낱말이다.
 /// 감독이 일꾼에게 보내면 그 일꾼의 `Sent:` 가 뒤에 선다.
 const PLAN_SENT: &str = "moai -C \"<root>\" note <epic> 'Sent: plan <id>'";
+
+/// 리뷰 브리프를 넘기는 파일(moai-i26i.p00). 에픽마다 한 디렉터리라 나란히 도는 리뷰가 서로의 브리프를 안 덮는다.
+/// 갈래 글의 절과 걸음 7 의 `Agent(…)` 줄이 이 한 글을 쓴다 — 따로 적던 판은 절이 경로를 넘기라 하고 7 은 글을 통째로
+/// `prompt` 에 실으라 했다.
+const REVIEW_BRIEF_AT: &str = "<scratchpad>/<epic>/brief.md";
 
 /// 서브에이전트 일꾼이 7 에서 세우는 리뷰 서브에이전트의 프롬프트(moai-9tqo.p1p). **리뷰는 일꾼의 중첩
 /// 서브에이전트로 돈다**(2026-10-12 사용자 결정 5) — 일꾼 안에서 부른 리뷰는 일꾼의 모델을 물려받으니(moai-9tqo.fxp
@@ -5039,8 +4960,9 @@ Root: <root>
    with TaskStop
 3. Hold what came back against "Five places the review keeps finding" in <steps file>, and
    look yourself at any of the five the review left out
-4. Leave the reviewer's own words on the review issue — write them to a file in your
-   scratchpad and run moai -C "<root>" note <review id> -b - < <that file>
+4. Leave the reviewer's own words on the review issue — write them to
+   `<scratchpad>/<epic>/review.md`, beside this epic's `brief.md`, and run
+   moai -C "<root>" note <review id> -b - < "<scratchpad>/<epic>/review.md"
 {over}
 5. Hand back with SubagentHandback. The first line is Model ran: anthropic/<your real model
    name> — the name in your system prompt, not an alias. When 1 ran the review by hand, the
@@ -5413,18 +5335,19 @@ root"), never in the root
    as below, **pick the review issue up** —
    `moai -C "<root>" mv <review id> in_progress --from todo` — and only then raise it on the
    review brief ("The review brief" in `{BRANCHES_FILE}`), every slot filled, for the reason below.
+   Save it as `{REVIEW_BRIEF_AT}`, as that section says, and pass the path, not the text.
    It leaves its fixes uncommitted and the reviewer's
    words on the review issue, and hands back what it fixed and what it left — take that in as
    below
 
-       Agent(subagent_type: "general-purpose", model: <review model>, description: "review <epic>", prompt: <the review brief>)
+       Agent(subagent_type: "general-purpose", model: <review model>, description: "review <epic>", prompt: "Read {REVIEW_BRIEF_AT} whole before you start, then follow it")
    Write the grade you picked and why in one line in the angle (`-b`). The diff runs from
    where the branch left <base branch> — `git -C "<root>/.worktrees/<epic>" merge-base <base branch> HEAD`;
    asked in the root, `HEAD` is the root's own tip and the range comes out empty. You pulled it
    in 6, so the conflict resolution is inside it too. Read the epic body and put the contents
    of its `{REVIEW_FOCUS}` section (either heading) first in the review issue angle,
    followed by any focus discovered during development — a section of several lines or one
-   holding a single quote goes in through `-b -` from a scratch file, not inside `-b '…'`.
+   holding a single quote goes in through `-b -` from `<scratchpad>/<epic>/angle.md`, not inside `-b '…'`. Create the epic directory first; never share the angle file with another epic.
    If neither heading exists, write the angle as before. Create the review issue (rule 3)
 
        {review}
@@ -5770,6 +5693,11 @@ notes), then
 ## The review brief
 
 In a subagent, 7 raises the review on this prompt — copy it whole and fill every slot.
+Create `<scratchpad>/<epic>/` first and save the filled prompt as
+`{REVIEW_BRIEF_AT}`. Pass that absolute path to the review subagent with
+instructions to read the whole file before starting. Use this epic's directory for all
+review scratch files; a shared `<scratchpad>/brief.md` lets parallel epics overwrite each
+other's prompts.
 
 {brief}
 "#
@@ -5833,7 +5761,7 @@ Create the review issue using the shared command, called with `moai -C "<root>"`
 
     {review}
 
-Fill the angle with the grade, why, and "review by the supervisor's review subagent", then
+Read `review_grade` and `review_raise` from `moai models --json` and apply the shared rule in worker.md 7. Fill the angle with the resulting grade, why, and "review by the supervisor's review subagent", then
 the epic body's `{REVIEW_FOCUS}` section (either heading) and the focus development
 added, as worker.md's 7 says.
 Do not run the review yourself. Move each finished member to review, one id per call:
@@ -5848,7 +5776,7 @@ review issue id in a note whose first line is `Review-ready: <epic>`:
 moai -C "<root>" note <epic> -b - <<'CODEX_REVIEW'
 Review-ready: <epic>
 - Worktree: <absolute path>; branch: <branch>; merge-base: <hash>
-- Review issue: <review id>; tested: <checks and results>
+- Review issue: <review id>; grade: <grade>; tested: <checks and results>
 CODEX_REVIEW
 ```
 
@@ -6806,8 +6734,8 @@ stop sending outside work while a release runs",
             "에픽 끝 리뷰가 역할의 모델과 등급을 설정에서 안 읽는다 — {rule}"
         );
         assert!(
-            rule.contains(&format!("**If {EPIC_MAX}**, the grade is `max`")),
-            "EPIC_MAX 가 max 로 안 올린다 — {rule}"
+            rule.contains(EPIC_MAX) && rule.contains("review_raise"),
+            "EPIC_MAX 가 review_raise 로 한 칸 올리는 조건이 아니다 — {rule}"
         );
         // 옛 사다리("한 칸 위", `medium` 이면 가운데 모델)가 돌아오면 붉어진다 — 그 아래 칸이 리뷰를 싼 모델에 맡겼다.
         assert!(
@@ -6919,16 +6847,17 @@ stop sending outside work while a release runs",
     }
 
     #[test]
-    fn plan_draft_keeps_decisions_and_contracts_without_prescribing_implementation() {
-        let draft = plan_brief_draft();
+    fn planning_briefs_keep_decisions_and_contracts_without_prescribing_implementation() {
+        let (core, briefs) = (plan_core(), [("draft", plan_brief_draft()), ("backlog", plan_brief())]);
         for contract in [
             "person's decisions and exclusions",
             "storage, concurrency, path security and output contracts",
             "numbers and budgets",
             "member order and review focus",
-            "navigation hints",
+            "Give entry-point files and functions as navigation hints",
             "proposed signatures and types are hints, not contracts",
             "failure conditions they must catch",
+            "Under `acceptance (which tests)`, write those failure conditions",
             "configured column names",
             "spaces and shell quoting",
             "<first column>",
@@ -6937,7 +6866,12 @@ stop sending outside work while a release runs",
             // 멤버 머리의 `order and the files it shares`(DETAILED_BODY)와 "에픽에 한 번" 이 한 브리프에서 갈리지 않게.
             "a member's `order and the files it shares` names only its own place and files and points to the epic",
         ] {
-            assert!(draft.contains(contract), "missing plan contract: {contract}");
+            // 공통 글에 선다(moai-i26i.1j6) — 두 브리프에 따로 적으면 한쪽만 고쳐져도 아래 셈은 푸르다.
+            assert!(core.contains(contract), "plan contract stands outside plan_core: {contract}");
+            for (name, brief) in &briefs {
+                assert!(brief.contains(contract), "{name} brief misses plan contract: {contract}");
+                assert_eq!(brief.matches(contract).count(), 1, "{name} brief repeats plan contract: {contract}");
+            }
         }
         let skill = plan();
         for contract in [
@@ -6972,7 +6906,7 @@ stop sending outside work while a release runs",
         for step in [
             "backlog promote <id> --dry-run --from -",
             "backlog promote <id> --from -",
-            MILESTONE_ATTACH,
+            "moai -C \"<root>\" edit <epic> --milestone <milestone>",
             "moai -C \"<root>\" edit <epic> --due <due>",
             MILESTONE_CLEAR,
             PLAN_SENT,
@@ -6983,7 +6917,7 @@ stop sending outside work while a release runs",
         // 거절한다), 에픽의 표는 본문까지 다 지은 뒤다(다시 선 감독은 표가 선 에픽을 곧장 보낸다).
         let at = |piece: &str| brief.find(piece).unwrap_or_else(|| panic!("브리프에 {piece} 가 없다"));
         assert!(at(MILESTONE_CLEAR) < at("--due <due>"), "죽은 릴리스를 걷기 전에 기한을 건다");
-        assert!(at("-b - < <that file>") < at(PLAN_SENT), "에픽을 다 짓기 전에 보낸 표를 단다");
+        assert!(at("<scratchpad>/<epic>/<member>.md") < at(PLAN_SENT), "에픽을 다 짓기 전에 보낸 표를 단다");
         assert!(s.contains(&indent(&brief, "    ")), "감독 글에 펼치기 브리프가 없다");
         assert!(s.contains(PLAN_FIRST), "펼친 에픽을 걸음 2 부터 보내지 않는다");
         let two = &s[s.find("**2-2.").unwrap()..s.find("**3. Send.**").unwrap()];
@@ -7029,7 +6963,8 @@ stop sending outside work while a release runs",
                 assert!(keys.contains(&key), "역할 {role} 의 effort 키 {key} 가 설정에 없다");
             }
         }
-        let models = keys.iter().filter(|k| !k.starts_with("effort") && **k != "review_grade").count();
+        let models =
+            keys.iter().filter(|k| !k.starts_with("effort") && **k != "review_grade" && **k != "review_raise").count();
         assert_eq!(models, ROLES.len(), "설정의 역할과 표의 역할 수가 다르다");
         for (level, role, _) in DIFFICULTY {
             assert!(ROLES.iter().any(|(r, _, _)| *r == role), "난이도 {level} 의 역할 {role} 이 표에 없다");
@@ -7056,11 +6991,11 @@ stop sending outside work while a release runs",
             let row = format!("| `{level}` | {how} |");
             assert!(claude.contains(&row), "CLAUDE.md 의 리뷰 표와 {level} 의 잣대가 갈라졌다 — {row}");
         }
-        // 에픽 끝을 `max` 로 올리는 멤버도 두 자리가 같은 글이다 — 멤버를 따로 안 보니
-        // 여기서 `동시성` 이 빠지면 그 멤버는 한 번도 비싼 눈을 안 받는다.
+        // 에픽 끝을 한 칸 올리는 멤버(`review_raise = "write-path"` 일 때)도 두 자리가 같은 글이다 — 멤버를
+        // 따로 안 보니 여기서 `동시성` 이 빠지면 그 설정을 켠 사람의 그 멤버가 한 번도 더 비싼 눈을 안 받는다.
         let brief = worker();
-        assert!(claude.contains(EPIC_MAX), "CLAUDE.md 의 에픽 끝 max 줄이 브리프와 갈라졌다 — {EPIC_MAX}");
-        assert!(brief.contains(EPIC_MAX), "브리프 7 이 에픽 끝 max 줄을 안 쓴다 — {EPIC_MAX}");
+        assert!(claude.contains(EPIC_MAX), "CLAUDE.md 의 에픽 끝 승격 줄이 브리프와 갈라졌다 — {EPIC_MAX}");
+        assert!(brief.contains(EPIC_MAX), "브리프 7 이 에픽 끝 승격 줄을 안 쓴다 — {EPIC_MAX}");
         // 에픽 둘에 걸친 묶음도 같은 꼴로 두 자리에 선다(moai-h89f) — 표에만 적으면 일꾼이
         // 받는 것은 브리프뿐이라 그 판을 재는 잣대가 리뷰를 부르는 창에 한 번도 안 닿는다.
         assert!(claude.contains(BUNDLE), "CLAUDE.md 의 리뷰 표에 에픽 둘에 걸친 묶음이 없다 — {BUNDLE}");
@@ -7538,9 +7473,9 @@ stop sending outside work while a release runs",
             (MILESTONE_ATTACH, "사람이 들일 때 치는 줄이 없다"),
             (MILESTONE_FROM, "헛 id 를 못 가르니 어디서 베끼는지 대야 한다"),
             ("`dangling_milestone`", "틀린 id 가 언제 드러나는지 안 적었다"),
-            ("milestone and body go onto the epic by themselves", "도구가 데려간다는 말이 없다"),
-            ("Not onto every issue", "이슈마다 베끼는 것으로 읽힌다"),
-            ("`-e <epic>`) carries neither", "선 에픽에 펼칠 때는 안 데려간다는 말이 없다"),
+            ("milestone and body go onto the new epic", "도구가 데려간다는 말이 없다"),
+            ("When the plan has one member", "단일 멤버 본문을 설명한다"),
+            ("`-e <epic>`) carries no milestone or deadline", "선 에픽의 소속과 기한을 설명한다"),
             (
                 "not the release that is running, leave it where it stands",
                 "든 것이 딴 릴리스일 때 그대로 두라는 말이 없다",
@@ -7830,6 +7765,19 @@ stop sending outside work while a release runs",
         assert!(nine.contains("**In a subagent, skip this step**"), "서브에이전트가 제 모델 줄을 적는다");
     }
 
+    #[test]
+    fn planning_and_review_scratch_are_scoped_to_the_work() {
+        let draft = plan_brief_draft();
+        assert!(draft.contains("<plan dir>"));
+        let plan = plan();
+        assert!(plan.contains("mktemp -d"));
+        assert!(plan.contains("<plan dir>/interview.md"));
+        let unfold = plan_brief();
+        assert!(unfold.contains("<scratchpad>/<backlog id>/"));
+        assert!(unfold.contains("<scratchpad>/<epic>/<member>.md"));
+        assert!(worker().contains("<scratchpad>/<epic>/angle.md"));
+    }
+
     /// **리뷰는 일꾼의 중첩 서브에이전트로 돈다**(2026-10-12 사용자 결정 5, moai-9tqo.p1p). 일꾼 안에서 부른 리뷰는
     /// 일꾼의 모델을 물려받으니 `review` 역할의 모델로 따로 세운다. 브리프는 fxp 가 잰 꼴을 든다 — `Skill` 은
     /// 백그라운드 포크라 끝난 알림을 기다리고, `--fix` 는 커밋 없이 남기고, 남은 것은 `TaskStop` 으로 멈춘다.
@@ -7847,7 +7795,25 @@ stop sending outside work while a release runs",
             seven.contains("still this session, not another"),
             "중첩 서브에이전트가 딴 에이전트 프로그램으로 읽힌다"
         );
-        assert!(worker_branches().contains(&indent(&prompt, "    ")), "일꾼 글에 리뷰 브리프가 없다");
+        let branches = worker_branches();
+        assert!(branches.contains(&indent(&prompt, "    ")), "일꾼 글에 리뷰 브리프가 없다");
+        // 에픽 둘이 같은 scratchpad 에서 돌아도 브리프와 원문이 서로 덮이지 않는다(moai-i26i.p00).
+        // 7 의 `Agent(…)` 도 그 파일의 경로를 넘긴다 — 글을 통째로 `prompt` 에 싣던 줄이 남으면 절과 7 이 갈린다.
+        assert!(raise.contains(REVIEW_BRIEF_AT), "7 이 에픽별 브리프 파일을 안 넘긴다 — {raise}");
+        assert!(!raise.contains("prompt: <the review brief>"), "7 이 브리프를 경로 대신 글로 싣는다 — {raise}");
+        let review = section(&branches, "## The review brief");
+        for step in [
+            "Create `<scratchpad>/<epic>/` first",
+            "`<scratchpad>/<epic>/brief.md`",
+            "Pass that absolute path to the review subagent",
+            "read the whole file before starting",
+        ] {
+            assert!(review.contains(step), "리뷰 브리프의 에픽별 전달 절차가 없다 — {step}");
+        }
+        assert!(
+            prompt.contains("moai -C \"<root>\" note <review id> -b - < \"<scratchpad>/<epic>/review.md\""),
+            "리뷰 원문을 에픽별 파일에서 올리지 않는다"
+        );
         for piece in ["Skill(code-review, \"<grade> --fix <root>/.worktrees/<epic>\")", "TaskStop", "background fork"] {
             assert!(prompt.contains(piece), "리뷰 브리프에 {piece} 가 없다");
         }
@@ -8368,94 +8334,25 @@ stop sending outside work while a release runs",
     }
 
     #[test]
-    fn the_codex_watch_heads_never_match_what_promote_writes() {
-        // cmd/backlog.rs writes these three forms; only the worker writes `Unfolded: <epic>`.
-        let samples =
-            ["Unfolded from moai-x — t", "Unfolded into moai-e as moai-e.a1b", "Unfolded into moai-e, 2 issues"];
-        for name in ["heads", "ends"] {
-            let prefix = format!("{name} = (");
-            let line = REPORT_WATCH.lines().find(|l| l.starts_with(&prefix)).expect("watch tuple missing");
-            let heads: Vec<_> = line.split('"').skip(1).step_by(2).collect();
-            assert!(!heads.is_empty(), "{line}");
-            assert!(heads.contains(&"Unfolded:"), "{line}");
-            for head in heads {
-                assert!(head.ends_with(':'), "{head}");
-                for sample in samples {
-                    assert!(!sample.starts_with(head), "{sample} matches {name}: {head}");
-                }
-            }
-        }
-        // Keep the matcher tied to those tuples, rather than a looser `startswith("Unfolded")`.
-        assert!(REPORT_WATCH.contains("if head.startswith(heads) or asks in head:"));
-        assert!(REPORT_WATCH.contains("finished = finished or head.startswith(ends)"));
+    fn codex_watch_guidance_names_the_resumable_command() {
+        assert!(REPORT_WATCH.contains("watch <epic> --since"));
+        assert!(REPORT_WATCH.contains("--cursor <cursor>"));
+        assert!(REPORT_WATCH.contains("identical notes"));
     }
 
+    /// **Codex 칸 도우미의 시험을 `cargo test` 가 돌린다**(리뷰 moai-p9dh.dz7) — `tests/codex_pane_test.py` 는 아무
+    /// 길에도 안 걸려 있어, 도우미를 고쳐도 붉어지는 것이 없었다. tmux 는 모두 가짜라 사람의 서버에 안 닿는다.
     #[test]
-    fn codex_report_watch_reads_the_actual_journal_and_is_valid_shell() {
-        for part in [
-            "Monitor(",
-            "timeout_ms: 1800000",
-            "moai -C \"<root>\" show <epic> --json",
-            "report:",
-            "Review-ready:",
-            "Decision needed:",
-            "진행 중 결정이 필요합니다",
-            "row[\"journal\"]",
-            "note[\"kind\"]",
-            "note.get(\"text\")",
-            "note[\"ts\"]",
-            "journal_error",
-            "time.sleep(30)",
-            "sys.exit(1)",
-        ] {
-            assert!(REPORT_WATCH.contains(part), "보고 기다리기에 없다 — {part}");
-        }
-        assert!(!REPORT_WATCH.contains("ListAgents"), "보고를 세션 훑기로 기다린다");
-        let script = REPORT_WATCH.split("```sh\n").nth(1).unwrap().split("```").next().unwrap();
-        let Some(bash) = needed("bash") else { return };
-        let out = std::process::Command::new(bash).args(["-n", "-c", script]).output().unwrap();
-        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
-    }
-
-    /// **보고 기다리기의 파이썬을 실제로 돌린다** — `bash -n` 은 heredoc 안의 파이썬을 안 읽는다. 가짜 `moai` 가 낸
-    /// 저널에서 커서의 초에 선 옛 `report:` 는 건너뛰고(기준선), `<id> 진행 중 …` 꼴의 결정 물음은 집고, 새 `report:` 에서
-    /// 끝난다. 30초 잠은 첫 읽기에 끝나니 안 든다.
-    #[cfg(unix)]
-    #[test]
-    fn codex_report_watch_skips_the_baseline_and_ends_on_a_report() {
-        use std::os::unix::fs::PermissionsExt;
-        if tool("python3").is_none() {
-            return; // python3 가 없는 기계 — 글만 잰다.
-        }
-        let s = crate::scratch::Scratch::new("codex-watch");
-        let bin = s.path().join("bin");
-        std::fs::create_dir_all(&bin).unwrap();
-        let note =
-            |ts: &str, text: &str| serde_json::json!({"ts": ts, "id": "e", "kind": "note", "by": "x", "text": text});
-        let row = serde_json::json!({"id": "e", "journal": [
-            note("2026-10-12T00:00:00Z", "report: e (an earlier round)"),
-            {"ts": "2026-10-12T00:00:05Z", "id": "e", "kind": "status", "by": "x", "from": "todo", "to": "done"},
-            note("2026-10-12T00:00:05Z", "e 진행 중 결정이 필요합니다.\n- 상황: …"),
-            note("2026-10-12T00:00:06Z", "Next: none"),
-            note("2026-10-12T00:00:07Z", "report: e\n- merged"),
-        ]});
-        let shown = s.path().join("show.json");
-        std::fs::write(&shown, row.to_string()).unwrap();
-        let fake = bin.join("moai");
-        std::fs::write(&fake, format!("#!/bin/sh\ncat '{}'\n", shown.display())).unwrap();
-        std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
-        let script = REPORT_WATCH.split("```sh\n").nth(1).unwrap().split("```").next().unwrap();
-        let path = path_with(&bin);
-        // 시작 파일이 PATH 를 바꾸지 않게 한다 — 두 경로는 crate::test_shell 이 막는다.
-        let out = crate::test_shell::shell("bash")
-            .args(["-c", script, "watch", "/root", "e", "2026-10-12T00:00:00Z"])
-            .env("PATH", path)
-            .output()
-            .unwrap();
-        let said = String::from_utf8_lossy(&out.stdout);
-        assert!(out.status.success(), "{said}{}", String::from_utf8_lossy(&out.stderr));
-        let heads: Vec<_> = said.lines().map(|l| l.split('\t').nth(2).unwrap_or(l)).collect();
-        assert_eq!(heads, ["e 진행 중 결정이 필요합니다.", "report: e"]);
+    fn the_codex_pane_helper_tests_run() {
+        let Some(python) = tool("python3") else { return };
+        let test = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/codex_pane_test.py");
+        let out = std::process::Command::new(python).args(["-I", "-B"]).arg(&test).output().unwrap();
+        assert!(
+            out.status.success(),
+            "{}{}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        );
     }
 
     #[test]
@@ -9643,46 +9540,23 @@ stop sending outside work while a release runs",
         assert!(codex.contains(CODEX_WORKER_RULES), "Codex 모델·리뷰 규약이 공용 글과 다르다");
         assert!(worker_branches().contains("## The review brief\n"), "Codex가 가리키는 리뷰 브리프가 없다");
         for part in [
-            "moai models --json",
-            "WebSearch",
-            "The review brief",
-            "tmux list-panes -a -F '#{pane_id}<TAB>#{pane_current_command}<TAB>#{pane_current_path}<TAB>#{pane_pid}'",
-            "`pane_current_command` is `codex`",
-            "`pane_current_path` is `<root>`",
-            "`ps -axo pid=,ppid=,args=`",
-            "two levels of its descendants",
-            "`node …/bin/codex`",
-            "a shell such as `zsh`",
-            "Repeat this check just before each input",
-            "`$TMUX_PANE`",
-            "tmux display -p -t <pane> '#{pane_in_mode} #{pane_dead}'",
-            "tmux capture-pane -p -e -t <pane>",
+            "codex-pane.py",
+            "ready <pane>",
+            "clear <pane>",
+            "send <pane> <file>",
+            "supervise message <id>`",
+            "--steps <that path>",
+            "Report-checked:",
             "ask the person **once**",
-            "only on their yes",
-            "-c \"<root>\" 'codex --model <codex>' \\; set-option -p remain-on-exit on\n",
-            "`Report-checked:`",
-            "tmux send-keys -t <pane> /clear\n",
-            "text and Enter in separate calls",
-            "An unexpected menu, question or permission prompt belongs to the person: tell them which\npane shows it",
-            "the composer holds `/clear` and nothing\nelse",
-            "Do not send a fixed number of Enters blindly",
-            "tmux load-buffer -b moai-send <file>",
-            "tmux paste-buffer -p -d -b moai-send -t <pane>",
-            "tmux send-keys -t <pane> Enter",
-            "from: <your ListAgents name>",
-            "references/worker-codex.md",
-            "Label the pane",
-            "`@moai`",
-            "Do not assume cmux's wrapper",
         ] {
-            assert!(codex.contains(part), "tmux 의 Codex 절에 없다 — {part}");
+            assert!(codex.contains(part), "missing {part}");
         }
         for line in text.lines().filter(|line| line.contains("gpt-")) {
             assert_eq!(line, "the person under `[models] codex`. Default example: `gpt-6.1-sol`.");
         }
         assert!(!codex.contains("/clear Enter"), "Codex /clear 와 Enter 를 한 호출에 친다");
         assert!(!codex.contains("/new"), "Codex 를 작업 디렉터리 메뉴를 띄우는 /new 로 비운다");
-        assert!(tmux_calls(codex) >= 12, "새 Codex 절의 tmux 줄을 안 잰다");
+
         let launches: Vec<_> = codex.lines().filter(|line| line.contains("'codex ")).collect();
         assert_eq!(launches.len(), 1, "Codex 띄우는 줄이 하나가 아니다");
     }

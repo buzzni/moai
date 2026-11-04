@@ -55,8 +55,6 @@ export interface Loadable<T> {
 
 export interface BoardData {
   rows: Row[]
-  /** Board whose late counts still belong after a chart-only tree replacement. */
-  chartSource?: BoardData
   /** `/api/tree` (`tui --json --deep`): where every row stands and in which order (data/index.ts). */
   tree?: TreeRow[]
   /** What moai said on stderr beside the lists (source.ts Rows): a line it could not read, a notice. */
@@ -393,11 +391,11 @@ export function reduce(state: State, action: Action): State {
       return { ...state, board: { ...state.board, loading: false, problem: action.problem } }
     case 'chart-tree':
       if (!state.board.value || state.board.value.rows !== action.rows || state.board.loading) return state
-      return { ...state, board: { ...state.board, problem: action.clearProblem && state.board.problem === action.clearProblem ? null : state.board.problem, value: { ...state.board.value, tree: action.tree, chartSource: state.board.value.chartSource ?? state.board.value } } }
+      return { ...state, board: { ...state.board, problem: action.clearProblem && state.board.problem === action.clearProblem ? null : state.board.problem, value: { ...state.board.value, tree: action.tree } } }
     case 'groups': {
       // Only the counts change: the rows, and so the cursor and the drawn order, stay.
-      if (state.board.value !== action.data && state.board.value?.chartSource !== action.data) return state
-      const { groups: _drawn, chartSource: _source, ...uncounted } = state.board.value!
+      if (state.board.value?.rows !== action.data.rows || state.board.value.loadedAt !== action.data.loadedAt) return state
+      const { groups: _drawn, ...uncounted } = state.board.value!
       return { ...state, board: { ...state.board, value: action.groups ? { ...uncounted, groups: action.groups } : uncounted } }
     }
     case 'boot':

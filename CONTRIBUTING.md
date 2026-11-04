@@ -72,7 +72,11 @@ threads that must share config files are given the test thread's
 `config_of(&cmd)` as `MOAI_CONFIG`; a value set after `isolated()` takes
 precedence over the default fence. Any other explicit `MOAI_CONFIG` lies outside
 the fence, so put it inside a scratch directory the test owns, or what is
-written beside it outlives the test. `HOME` is not fenced: every test shares it.
+written beside it outlives the test. `HOME` is `<fence>/home`: commands in one
+test thread share it, and other test threads get separate homes. It is removed
+with the fence on success or panic. `home_of(&cmd)` returns that path. A helper
+thread that needs the test's home must receive it explicitly; a later `HOME`
+override takes precedence and must point inside a scratch directory the test owns.
 
 Clippy runs with `-D warnings`. Lints this project deliberately carries are
 listed under `[workspace.lints.clippy]` in `Cargo.toml`, each with the reason it is there.

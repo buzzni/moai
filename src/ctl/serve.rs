@@ -25,10 +25,39 @@ pub struct Listener {
     pub incoming: mpsc::Receiver<Incoming>,
     #[cfg(unix)]
     wake: std::os::unix::net::UnixStream,
+    /// Set once by the owner thread's first idle wait; `Some(None)` is a pipe that could not be made.
+    #[cfg(unix)]
+    resize: std::cell::OnceCell<Option<ResizeWake>>,
     path: std::path::PathBuf,
     stop: Arc<AtomicBool>,
     book: Option<Arc<super::proposal::Book>>,
     editing: Arc<Editing>,
+}
+
+/// An additional signal-hook action, sharing crossterm's SIGWINCH registry rather than replacing its handler.
+/// Dropping a window removes only its action; web listeners never initialize this pipe.
+#[cfg(unix)]
+struct ResizeWake {
+    read: std::os::unix::net::UnixStream,
+    signal: signal_hook::SigId,
+}
+
+#[cfg(unix)]
+impl ResizeWake {
+    fn new() -> std::io::Result<Self> {
+        let (read, write) = std::os::unix::net::UnixStream::pair()?;
+        read.set_nonblocking(true)?;
+        write.set_nonblocking(true)?;
+        let signal = signal_hook::low_level::pipe::register(signal_hook::consts::SIGWINCH, write)?;
+        Ok(Self { read, signal })
+    }
+}
+
+#[cfg(unix)]
+impl Drop for ResizeWake {
+    fn drop(&mut self) {
+        signal_hook::low_level::unregister(self.signal);
+    }
 }
 
 #[derive(Default)]
@@ -58,16 +87,16 @@ impl Editing {
 /// Owner-loop wakeups and editor suspension; application state stays on the owner thread.
 impl Listener {
     /// Wait for terminal input or a newly queued owner-loop request. Crossterm still parses and consumes every
-    /// terminal event on the owner thread; this socket only interrupts its idle wait.
+    /// terminal event on the owner thread; control and resize sockets only interrupt its idle wait.
     pub fn poll_input(&self, timeout: std::time::Duration) -> std::io::Result<bool> {
         use ratatui::crossterm::event;
-        if event::poll(std::time::Duration::ZERO)? {
-            return Ok(true);
-        }
         #[cfg(unix)]
         {
             use std::io::IsTerminal;
             use std::os::fd::AsRawFd;
+            if self.prepare_input(|| event::poll(std::time::Duration::ZERO))? {
+                return Ok(true);
+            }
             // Match crossterm's input source even when stdin is redirected. Crossterm opens /dev/tty once; so does
             // this wait, rather than once per turn of the owner loop.
             static TTY: std::sync::OnceLock<std::fs::File> = std::sync::OnceLock::new();
@@ -85,12 +114,36 @@ impl Listener {
         event::poll(timeout)
     }
 
-    /// One idle wait on the terminal and the wake socket; `parsed` then asks crossterm whether an event came of it.
+    /// Initialize crossterm BEFORE our registration. Signal-hook invokes actions in registration order, so
+    /// crossterm queues its resize before our pipe wakes the owner, even on a different thread. Registering in
+    /// bind_with would reverse that order. Recheck once after subscribing: a signal between the first parse and
+    /// registration queued a crossterm event without writing our pipe, and must not be slept over.
+    ///
+    /// **The pipe is best effort and tried once.** Without it a resize waits for the next tick, as before it existed; a
+    /// socketpair refused with EMFILE must not end the explorer over an optional wakeup.
+    #[cfg(unix)]
+    fn prepare_input(&self, mut parsed: impl FnMut() -> std::io::Result<bool>) -> std::io::Result<bool> {
+        if parsed()? {
+            return Ok(true);
+        }
+        if self.resize.get().is_some() {
+            return Ok(false);
+        }
+        let _ = self.resize.set(ResizeWake::new().ok());
+        parsed()
+    }
+
+    #[cfg(unix)]
+    fn resize_wake(&self) -> Option<&ResizeWake> {
+        self.resize.get().and_then(Option::as_ref)
+    }
+
+    /// One idle wait on the terminal, control and resize sockets; `parsed` then asks crossterm for an event.
     ///
     /// **A terminal that stays readable while crossterm reports nothing is not waited on again this turn.** Crossterm's
     /// source is edge-triggered and returns as soon as its 1 KiB read yields an event, so input past that read stays in
     /// the terminal and is reported only when more arrives. This level-triggered wait would return at once on every turn
-    /// and spin the owner loop until the next keypress; the rest of the turn waits on the wake socket alone instead, as
+    /// and spin the owner loop until the next keypress; the rest of the turn waits on control and resize instead, as
     /// crossterm's own wait slept until new input.
     #[cfg(unix)]
     fn wait_input(
@@ -104,15 +157,19 @@ impl Listener {
         if parsed()? {
             return Ok(true);
         }
-        if typed && self.wait_on(Some(terminal), Duration::ZERO)? {
-            self.wait_on(None, timeout.saturating_sub(started.elapsed()))?;
+        if typed {
+            if self.wait_on(Some(terminal), Duration::ZERO)? {
+                self.wait_on(None, timeout.saturating_sub(started.elapsed()))?;
+            }
+            // The second check may itself have drained a resize that arrived after parsed(). Consume that event
+            // now too, rather than relying on another owner-loop turn to find crossterm's queued notification.
             return parsed();
         }
         Ok(false)
     }
 
-    /// Wait for terminal input or control work and drain wake bytes. Only terminal readiness, without a control wake,
-    /// permits wait_input to sleep again for a parser that has no event.
+    /// Wait for terminal input, control work or resize, draining notifications BEFORE crossterm consumes its event.
+    /// Only terminal readiness without either notification permits wait_input to sleep again for an empty parser.
     #[cfg(unix)]
     fn wait_on(&self, terminal: Option<std::os::fd::RawFd>, timeout: Duration) -> std::io::Result<bool> {
         use std::os::fd::AsRawFd;
@@ -120,32 +177,39 @@ impl Listener {
         let mut fds = [
             libc::pollfd { fd: terminal.unwrap_or(-1), events: libc::POLLIN, revents: 0 },
             libc::pollfd { fd: self.wake.as_raw_fd(), events: libc::POLLIN, revents: 0 },
+            libc::pollfd {
+                fd: self.resize_wake().map_or(-1, |resize| resize.read.as_raw_fd()),
+                events: libc::POLLIN,
+                revents: 0,
+            },
         ];
         // Round up: a fractional millisecond must not turn an idle wait into a busy loop.
         let ms = timeout.as_nanos().div_ceil(1_000_000);
         let ready = unsafe { libc::poll(fds.as_mut_ptr(), fds.len() as libc::nfds_t, ms.min(i32::MAX as u128) as i32) };
         if ready < 0 {
             let error = std::io::Error::last_os_error();
-            // A SIGWINCH delivered to this thread interrupts poll; let crossterm read its resize notification. One that
-            // lands on another thread, or just before this poll, is seen at the end of the wait.
+            // An interrupted wait still lets the owner check crossterm. Once the resize pipe exists, SIGWINCH also
+            // leaves a byte, so a signal on another thread or just before poll cannot leave us asleep until the idle
+            // deadline; without the pipe (see prepare_input) such a resize waits for that deadline, as it did before.
             if error.kind() != std::io::ErrorKind::Interrupted {
                 return Err(error);
             }
         }
-        let mut wake = &self.wake;
-        let mut bytes = [0; 256];
-        loop {
-            match wake.read(&mut bytes) {
-                Ok(0) => break,
-                Ok(_) => {}
-                Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
-                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => break,
-                Err(e) => return Err(e),
+        for mut wake in std::iter::once(&self.wake).chain(self.resize_wake().map(|resize| &resize.read)) {
+            let mut bytes = [0; 256];
+            loop {
+                match wake.read(&mut bytes) {
+                    Ok(0) => break,
+                    Ok(_) => {}
+                    Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+                    Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => break,
+                    Err(e) => return Err(e),
+                }
             }
         }
         // A simultaneous notification must win: it has already been drained, so sleeping again could delay the
         // queued request until the idle deadline even though that request woke this wait.
-        Ok(ready > 0 && fds[0].revents != 0 && fds[1].revents == 0)
+        Ok(ready > 0 && fds[0].revents != 0 && fds[1].revents == 0 && fds[2].revents == 0)
     }
 
     /// Cache Hello before handing the terminal to the editor. Directed actions then return person_busy.
@@ -253,7 +317,7 @@ impl Listener {
                 }
             }
         })?;
-        Ok(Self { incoming, wake, path, stop, book: keep_book, editing })
+        Ok(Self { incoming, wake, resize: std::cell::OnceCell::new(), path, stop, book: keep_book, editing })
     }
 }
 
@@ -412,6 +476,7 @@ mod tests {
         let listener = Listener {
             incoming,
             wake,
+            resize: std::cell::OnceCell::new(),
             path: std::env::temp_dir().join(format!("moai-{name}-unused-{}", std::process::id())),
             stop: Arc::new(AtomicBool::new(false)),
             book: None,
@@ -491,6 +556,119 @@ mod tests {
         assert!(listener.wait_input(terminal.as_raw_fd(), Duration::from_secs(3), || Ok(true)).unwrap());
         assert!(start.elapsed() < Duration::from_secs(1));
         drop(keep_notify);
+    }
+
+    /// Signals are process-wide. Run this test in its own process so its SIGWINCH cannot wake another idle test.
+    #[test]
+    fn resize_wakes_before_and_during_waits_on_other_threads() {
+        const CHILD: &str = "MOAI_LUNF_RESIZE_TEST";
+        if std::env::var_os(CHILD).is_none() {
+            let output = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "ctl::serve::tests::resize_wakes_before_and_during_waits_on_other_threads",
+                    "--nocapture",
+                ])
+                .env(CHILD, "1")
+                .output()
+                .unwrap();
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            // A filter that matches nothing also exits 0. Renaming this test or its module must fail, not pass vacuously.
+            assert!(
+                output.status.success() && stdout.contains("test result: ok. 1 passed;"),
+                "{stdout}\n{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            return;
+        }
+        use std::os::fd::AsRawFd;
+        use std::os::unix::net::UnixStream;
+        let (listener, _tx, _keep_notify) = wake_listener("lunf-resize");
+        // Stand in for crossterm's earlier action. The owner must observe it before its own pipe wakes.
+        let queued = Arc::new(AtomicBool::new(false));
+        let parser_signal = signal_hook::flag::register(signal_hook::consts::SIGWINCH, queued.clone()).unwrap();
+        let (terminal, mut typed) = UnixStream::pair().unwrap();
+        let parsed = || Ok(queued.swap(false, Ordering::SeqCst));
+        // A signal after crossterm's initial check but before our pipe exists needs the post-subscription recheck.
+        let mut first = true;
+        assert!(
+            listener
+                .prepare_input(|| {
+                    if std::mem::take(&mut first) {
+                        signal_hook::low_level::raise(signal_hook::consts::SIGWINCH).unwrap();
+                        Ok(false)
+                    } else {
+                        parsed()
+                    }
+                })
+                .unwrap()
+        );
+        signal_hook::low_level::raise(signal_hook::consts::SIGWINCH).unwrap();
+        let start = Instant::now();
+        assert!(listener.wait_input(terminal.as_raw_fd(), Duration::from_secs(3), parsed).unwrap());
+        assert!(start.elapsed() < Duration::from_secs(1), "a resize just before poll was lost");
+        let idle = Instant::now();
+        assert!(!listener.wait_input(terminal.as_raw_fd(), Duration::from_millis(60), parsed).unwrap());
+        assert!(idle.elapsed() >= Duration::from_millis(50), "a consumed resize left a fast idle tail");
+
+        let sender = std::thread::spawn(|| {
+            std::thread::sleep(Duration::from_millis(20));
+            // raise delivers to this helper, so interrupting the owner's poll cannot make this test pass.
+            signal_hook::low_level::raise(signal_hook::consts::SIGWINCH).unwrap();
+        });
+        let start = Instant::now();
+        assert!(listener.wait_input(terminal.as_raw_fd(), Duration::from_secs(3), parsed).unwrap());
+        assert!(
+            start.elapsed() < Duration::from_secs(1),
+            "a resize delivered on another thread slept until the idle deadline"
+        );
+        sender.join().unwrap();
+
+        // Persistent terminal readiness takes the fallback wait with terminal=None. It must still watch resize.
+        typed.write_all(b"x").unwrap();
+        let (tx, rx) = mpsc::channel();
+        let sender = std::thread::spawn(move || {
+            rx.recv().unwrap();
+            std::thread::sleep(Duration::from_millis(20));
+            signal_hook::low_level::raise(signal_hook::consts::SIGWINCH).unwrap();
+        });
+        let mut tx = Some(tx);
+        let start = Instant::now();
+        assert!(
+            listener
+                .wait_input(terminal.as_raw_fd(), Duration::from_secs(3), || {
+                    if let Some(tx) = tx.take() {
+                        tx.send(()).unwrap();
+                    }
+                    parsed()
+                })
+                .unwrap()
+        );
+        assert!(start.elapsed() < Duration::from_secs(1), "the stalled-terminal fallback ignored resize");
+        sender.join().unwrap();
+
+        // Also cover the narrow gap between the first parse and the zero-time terminal check.
+        let mut first = true;
+        assert!(
+            listener
+                .wait_input(terminal.as_raw_fd(), Duration::from_secs(3), || {
+                    if std::mem::take(&mut first) {
+                        std::thread::spawn(|| signal_hook::low_level::raise(signal_hook::consts::SIGWINCH).unwrap())
+                            .join()
+                            .unwrap();
+                        Ok(false)
+                    } else {
+                        parsed()
+                    }
+                })
+                .unwrap()
+        );
+        let own_signal = listener.resize_wake().unwrap().signal;
+        drop(listener);
+        assert!(!signal_hook::low_level::unregister(own_signal), "dropping a window leaked its resize action");
+        signal_hook::low_level::raise(signal_hook::consts::SIGWINCH).unwrap();
+        assert!(parsed().unwrap(), "dropping a window removed the parser's signal action too");
+        signal_hook::low_level::unregister(parser_signal);
     }
 
     #[test]
@@ -663,7 +841,8 @@ mod tests {
         else {
             panic!("fifth proposal was not sent")
         };
-        tabs.proposal_reply(&joined.id, &joined.token, entry["id"].as_str().unwrap(), true, None).unwrap();
+        assert!(tabs.proposal_claim(&joined.id, &joined.token, entry["id"].as_str().unwrap()).unwrap().ok);
+        assert!(tabs.proposal_reply(&joined.id, &joined.token, entry["id"].as_str().unwrap(), true, None).unwrap().ok);
         let mut line = String::new();
         BufReader::new(client).read_line(&mut line).unwrap();
         assert_eq!(serde_json::from_str::<Reply>(&line).unwrap().data.unwrap()["state"], "accepted");

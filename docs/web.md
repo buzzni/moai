@@ -44,6 +44,8 @@ the address becomes `/?project=<its path>`, so a reload or a bookmark stays on
 it. The project the server was started in comes first when it is not
 registered itself. Only registered projects can be read this way.
 
+Each browser keeps at most three visible tabs on live event streams, and the server at most 32 across every browser. The page stores a random browser id in IndexedDB. A single transaction makes simultaneously opened tabs agree, including over plain HTTP; an existing local-storage id is kept on migration. If IndexedDB is unavailable or does not answer within five seconds, the page falls back to local storage, where simultaneous first tabs may obtain different ids; a page that did reach IndexedDB copies its id there, so later fallbacks in that browser keep it. Pages that cannot keep an id share a single fallback budget. Additional tabs continue updating by polling every two seconds and retry a live connection every 30 seconds. Only tabs with a live stream appear in `moai ctl ls` and receive new suggestions. Hiding or closing a streaming tab reserves its place for its 30-second reconnect grace; afterwards it frees a place; this limit keeps ordinary reads responsive when many tabs are open.
+
 The page has four tabs.
 
 A visible tab can receive `moai ctl propose` suggestions from another terminal.
@@ -163,20 +165,26 @@ sent is the move, not the days (only the written edge when the other was filled)
 stands then, so a row someone moved in the two seconds before the page read it again
 moves on from where they put it. A filled start is the exception: dragging its left
 end sends the chosen date as `moai edit <id> --start <day>`. This explicit choice
-wins over a start written meanwhile; the deadline stays as moai reads it. Undo
-clears that newly chosen start when the read plan had none. A double-click plans its day as `moai edit <id>
+wins over a start written meanwhile; the deadline stays as moai reads it. A double-click plans its day as `moai edit <id>
 --start <day> --due <day> --if-unplanned`, refused if the row gained days meanwhile.
 A move moai refuses (a start after the deadline, a day past the deadline of the
 epic, milestone or parent above) is told in moai's own words under the banners and
 the bar goes back. While the write and refresh run, the bar keeps the dropped days
-through scrolling and redraws. A move that went through says the `moai edit` line
-that shifts the same edge back by the same number of days. Changes to the other
-edge stay in place. If that edge had no day when the page read it, undo clears it;
-a day another session added to that edge before the write would be cleared too.
-A newly planned day is undone by clearing both days. The TUI also names an inverse
-move, choosing the written edges from the dates read inside the write. Undo that
-clears a newly created date or restores an explicitly chosen start still writes an
-absolute value; another session's later change to that field can be overwritten.
+through scrolling and redraws. A move that went through gives a copyable undo
+command built from the dates moai read and wrote under the lock. It names the
+project with `-C`, so pasting it from another directory still targets that tracker.
+Relative moves shift back only the dates that moved, preserving the other edge.
+A date created by the write is cleared; an explicitly chosen start is restored to
+its value just before the write, including a start another session wrote before
+this move landed. A new one-day plan clears both days.
+
+Absolute restores carry `--if-start` or `--if-due` for each restored field. If
+another session changed one of those fields after the move, undo refuses with
+`stale` and writes nothing. Reread the row before deciding what to change; dropping
+the condition would overwrite that newer date. The TUI uses the same undo rules.
+Widening the Gantt keeps the left visible date in place and extends the dates to
+fill the view.
+
 A bar an epic or milestone counts from its members
 (hatched) does not move — move the members. Nor does a row the write cannot reach:
 one the worktree overlay shows from another worktree, and an archived row.
@@ -294,7 +302,7 @@ the next look, so the list never stays on the rows from before a change.
 
 ## Driven from another terminal
 
-`moai ctl ls` lists each visible tab as a separate `web` window. Use its id with
+`moai ctl ls` lists each visible tab with an admitted event stream as a separate `web` window. At most three streams per browser are open on this server; additional tabs use polling until a place becomes free. Use its id with
 `moai ctl state -t <id> --json` or the [control commands](ctl.md) to select a row,
 change the tab, press its keys, resize the detail, or change its theme. The server
 sends a control request down that tab's event stream and waits for its reply.
@@ -307,7 +315,7 @@ Control never opens or closes a browser window.
 The page replies only through a same-origin POST carrying the tab's stream
 token; the server limits its JSON body to 1 MiB. The key help, a human-focused
 input or menu, a half-typed key sequence or an open sort editor returns
-`person_busy`. Tracker writes requested by ctl carry the caller's identity; read
+`person_busy` for mutations; `state` and `actions` remain available. Tracker writes requested by ctl carry the caller's identity; read
 marks remain the web server owner's, so `moai ctl read --all` marks the owner's
 NEW rows. A `moai ctl read` with several IDs validates the whole set before it marks any, so a missing or blocked later ID leaves earlier marks untouched. Column moves
 and notes remain CLI commands (`moai mv`, `moai note`).
@@ -347,7 +355,7 @@ comes from the start. The rest come from the server while it runs:
 | `method_not_allowed` | Anything but `GET`, except the `POST` that marks rows read or moves a Gantt bar's days; the `Allow` header names the method the path takes (`POST` on those write paths, `GET` elsewhere) |
 | `bad_input` | A request the server could not read, one carrying a body, or a query this path does not take or whose value is the wrong shape (a `sort` moai does not know, a flag other than `1`, a Gantt move that is not an edge and a whole number of days, a Gantt day that is not `YYYY-MM-DD`, a time zone that is not a zone name or an offset) |
 | `not_found` | No such path |
-| `busy` | Too many requests at once (32 ordinary requests or eight event streams); the page falls back to stamp polling when its stream is refused |
+| `busy` | Too many requests at once (32 ordinary requests, three event streams in one browser, or 32 event streams in all); the page falls back to stamp polling when its stream is refused |
 | `gone` | The target web tab closed, or its ctl request expired before the reply arrived |
 | `no_actor` | A ctl-requested write had no caller identity; set `--user 'Name (email)'` or `MOAI_ACTOR` on the ctl command |
 | `timeout` | The child `moai` did not answer in time |
@@ -458,4 +466,4 @@ lanes.
 The page does not show the stats screen, and what it writes is a Gantt bar's days
 and your read marks.
 
-Decided in: moai-skjr, moai-e9hi, moai-8r2l, moai-0aa7, moai-jshy, moai-d86e.3ud, moai-ijjd, moai-lj8g, moai-ekg6 moai-mkzo moai-i07x moai-zgc1 moai-v5of moai-4v3h moai-7eeq
+Decided in: moai-skjr, moai-e9hi, moai-8r2l, moai-0aa7, moai-jshy, moai-d86e.3ud, moai-ijjd, moai-lj8g, moai-ekg6 moai-mkzo moai-i07x moai-zgc1 moai-v5of moai-4v3h moai-7eeq moai-yigx moai-4xmq

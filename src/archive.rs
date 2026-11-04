@@ -170,6 +170,40 @@ pub fn read(root: &Path) -> R<Load> {
     Ok(out)
 }
 
+/// Archive context for placement and group closure, without blocker edges. Every source is
+/// still validated by `read`: dropping unrelated diagnostics would let an incomplete archive
+/// cause irreversible due-priority raises. Only the reached rows enter the derived maps.
+///
+/// Follow placement in both directions: ancestors can move a member, and a group's archived
+/// members decide its column. Include live edges too, since a live parent can bridge an archived
+/// child to a group. Twins keep all their edges and their original stable order; callers merge
+/// through `in_context`, which preserves live and unreadable-live precedence.
+pub fn groups(root: &Path, active: &[Issue], wanted: &[&str]) -> R<Load> {
+    let mut load = read(root)?;
+    let mut edges: HashMap<&str, Vec<&str>> = HashMap::new();
+    for row in active.iter().chain(&load.issues) {
+        let id = row.id.as_str();
+        for parent in std::iter::successors(crate::id::parent_of(id), |id| crate::id::parent_of(id))
+            .chain(row.epic.as_deref())
+            .chain(row.milestone.as_deref())
+        {
+            edges.entry(id).or_default().push(parent);
+            edges.entry(parent).or_default().push(id);
+        }
+    }
+    let mut reached: HashSet<&str> = HashSet::new();
+    let mut pending = wanted.to_vec();
+    while let Some(id) = pending.pop() {
+        if reached.insert(id) {
+            pending.extend(edges.get(id).into_iter().flatten().copied());
+        }
+    }
+    // Own the selected ids before releasing the rows the graph borrows.
+    let picked: HashSet<String> = reached.into_iter().map(str::to_string).collect();
+    load.issues.retain(|row| picked.contains(row.id.as_str()));
+    Ok(load)
+}
+
 fn read_error(file: PathBuf, message: String) -> crate::store::LoadError {
     crate::store::LoadError { source: Some(file), line: 0, message, text: String::new(), id: None }
 }
@@ -451,11 +485,56 @@ pub fn reaches_out(active: &[Issue], wanted: &[&str]) -> bool {
     walks_out(active, wanted.iter().copied(), true, |_| false)
 }
 
+#[cfg(test)]
+thread_local! { pub(crate) static PLACE_WALKS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) }; }
+
 /// [`reaches_out`] without blockers — only a parent, epic or milestone above `wanted` that no live row holds counts.
 /// `moai due apply` gates its archive read on this: a blocker never places a row, lends it a deadline, closes its
 /// groups or defers it, so following blockers read (and refused on) an archive the answer never depends on.
 pub fn places_out(active: &[Issue], wanted: &[&str]) -> bool {
+    #[cfg(test)]
+    PLACE_WALKS.with(|n| n.set(n.get() + 1));
     walks_out(active, wanted.iter().copied(), false, |_| false)
+}
+
+/// Edit needs full reference context for the edited row, but only placement for
+/// overflow rows. Walk the shared ancestors once; full-reference traversal wins.
+/// Returns (full archive required, placement archive required).
+pub fn edit_out(active: &[Issue], edited: &str, placements: &[&str]) -> (bool, bool) {
+    let twins = Twins::of(active);
+    let mut pending: Vec<(&str, bool)> = placements.iter().map(|id| (*id, false)).collect();
+    pending.push((edited, true));
+    let mut seen_full = BTreeSet::new();
+    let mut seen_place = BTreeSet::new();
+    let mut outside = false;
+    while let Some((id, full)) = pending.pop() {
+        if full {
+            if !seen_full.insert(id) {
+                continue;
+            }
+        } else if seen_full.contains(id) || !seen_place.insert(id) {
+            continue;
+        }
+        let Some(rows) = twins.rows(id) else {
+            if full {
+                return (true, true);
+            }
+            outside = true;
+            continue;
+        };
+        for row in rows {
+            pending.extend(
+                [crate::id::parent_of(&row.id), row.epic.as_deref(), row.milestone.as_deref()]
+                    .into_iter()
+                    .flatten()
+                    .map(|id| (id, full)),
+            );
+            if full {
+                pending.extend(row.blocked_by.iter().map(|id| (id.as_str(), true)));
+            }
+        }
+    }
+    (false, outside)
 }
 
 /// The walk [`needs_context`] and [`reaches_out`] share: from `wanted` up through every parent, epic and milestone
@@ -466,25 +545,17 @@ fn walks_out<'a>(
     blockers: bool,
     stop: impl Fn(&Issue) -> bool,
 ) -> bool {
-    let mut by_id = BTreeMap::new();
-    // Keep preceding twins only: healthy snapshots still allocate no per-row vectors.
-    // A gate must cover references from every row the derived readers can select.
-    let mut shadowed: BTreeMap<&str, Vec<&Issue>> = BTreeMap::new();
-    for i in active {
-        if let Some(previous) = by_id.insert(i.id.as_str(), i) {
-            shadowed.entry(i.id.as_str()).or_default().push(previous);
-        }
-    }
+    let twins = Twins::of(active);
     let mut pending: Vec<&str> = wanted.into_iter().collect();
     let mut seen = BTreeSet::new();
     while let Some(id) = pending.pop() {
         if !seen.insert(id) {
             continue;
         }
-        let Some(&last) = by_id.get(id) else {
+        let Some(rows) = twins.rows(id) else {
             return true;
         };
-        for i in std::iter::once(last).chain(shadowed.get(id).into_iter().flatten().copied()) {
+        for i in rows {
             if stop(i) {
                 return true;
             }
@@ -496,6 +567,33 @@ fn walks_out<'a>(
         }
     }
     false
+}
+
+/// The live rows by id for the reference walks ([`walks_out`], [`edit_out`]) — the last line of an id, and the lines
+/// before it apart. Keep preceding twins only: healthy snapshots still allocate no per-row vectors. A gate must cover
+/// references from every row the derived readers can select.
+struct Twins<'a> {
+    by_id: BTreeMap<&'a str, &'a Issue>,
+    shadowed: BTreeMap<&'a str, Vec<&'a Issue>>,
+}
+
+impl<'a> Twins<'a> {
+    fn of(active: &'a [Issue]) -> Self {
+        let mut by_id = BTreeMap::new();
+        let mut shadowed: BTreeMap<&str, Vec<&Issue>> = BTreeMap::new();
+        for i in active {
+            if let Some(previous) = by_id.insert(i.id.as_str(), i) {
+                shadowed.entry(i.id.as_str()).or_default().push(previous);
+            }
+        }
+        Twins { by_id, shadowed }
+    }
+
+    /// Every live row holding `id`, the last first — `None` when no live row holds it.
+    fn rows(&self, id: &str) -> Option<impl Iterator<Item = &'a Issue> + '_> {
+        let last = *self.by_id.get(id)?;
+        Some(std::iter::once(last).chain(self.shadowed.get(id).into_iter().flatten().copied()))
+    }
 }
 
 /// Group rows reopen from their derived column; only requested rows are staged. An id the live file holds — as a
@@ -873,6 +971,37 @@ mod tests {
     }
 
     #[test]
+    fn edit_walk_preserves_full_and_placement_gates_with_twins_and_cycles() {
+        let mut edited = row("argos-aaaa", Kind::Issue, "todo");
+        edited.blocked_by.push("argos-bbbb".into());
+        let mut blocker = row("argos-bbbb", Kind::Issue, "todo");
+        blocker.blocked_by.push("argos-aaaa".into());
+        let mut overflow = row("argos-cccc", Kind::Issue, "todo");
+        overflow.blocked_by.push("argos-missing".into());
+        for full_missing in [false, true] {
+            for place_missing in [false, true] {
+                let mut rows = vec![edited.clone(), blocker.clone(), overflow.clone()];
+                if full_missing {
+                    rows[1].epic = Some("argos-absent".into());
+                }
+                if place_missing {
+                    rows[2].epic = Some("argos-outside".into());
+                }
+                let mut twin = rows[0].clone();
+                twin.kind = Kind::Backlog;
+                rows.push(twin);
+                let full = reaches_out(&rows, &["argos-aaaa"]);
+                let place = places_out(&rows, &["argos-aaaa", "argos-cccc"]);
+                let (actual_full, actual_place) = edit_out(&rows, "argos-aaaa", &["argos-aaaa", "argos-cccc"]);
+                assert_eq!(actual_full, full);
+                if !full {
+                    assert_eq!(actual_place, place);
+                }
+            }
+        }
+    }
+
+    #[test]
     fn archive_never_splits_a_live_epic_or_parent_review_bundle() {
         let rows = vec![
             row("argos-e001", Kind::Epic, "done"),
@@ -1169,6 +1298,50 @@ mod tests {
         };
         assert_eq!(board(&near.issues), board(&all.issues));
         assert!(board(&near.issues).contains("milestone_overdue"), "{}", board(&near.issues));
+    }
+
+    #[test]
+    fn group_context_keeps_placement_twins_and_errors_but_not_blockers() {
+        let s = scratch("archive-groups");
+        let mut group = row("argos-e001", Kind::Epic, "todo");
+        group.due_on = Some("2026-01-01".into());
+        let parent = row("argos-e001.aaa", Kind::Issue, "done");
+        let mut child = row("argos-e001.aaa.bbb", Kind::Issue, "done");
+        child.blocked_by = vec!["argos-b001".into()];
+        let twin = row("argos-e001.aaa.bbb", Kind::Backlog, "todo");
+        put(
+            &s,
+            &[
+                group.clone(),
+                child,
+                twin,
+                row("argos-b001", Kind::Issue, "done"),
+                row("argos-z001", Kind::Issue, "done"),
+            ],
+        );
+        let file = path(&s, "2025");
+        let mut src = fs::read_to_string(&file).unwrap();
+        src.push_str("{\"id\":\"argos-bad1\",\"kind\":\"future\"}\n");
+        fs::write(&file, src).unwrap();
+        let near = groups(&s, &[group, parent], &["argos-e001"]).unwrap();
+        assert_eq!(
+            near.issues.iter().map(|i| i.id.as_str()).collect::<Vec<_>>(),
+            ["argos-e001", "argos-e001.aaa.bbb", "argos-e001.aaa.bbb"]
+        );
+        let all = read(&s).unwrap();
+        let errors = |load: &Load| {
+            load.errors
+                .iter()
+                .map(|e| (e.source.clone(), e.line, e.id.clone(), e.message.clone(), e.text.clone()))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(errors(&near), errors(&all));
+        // Live rows and opaque live IDs keep the same precedence after selecting context.
+        let live = [row("argos-e001.aaa.bbb", Kind::Issue, "todo")];
+        let opaque = BTreeSet::from(["argos-e001"]);
+        let joined = report::with_archive(&live, &near.issues, &opaque);
+        assert_eq!(joined.len(), 1);
+        assert_eq!(joined[0].status.as_str(), "todo");
     }
 
     #[cfg(unix)]
