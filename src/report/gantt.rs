@@ -119,7 +119,8 @@ pub struct Range {
 
 /// The rows and the span of all of them, as one value. Only the tests read it now: the explorer takes [`rows`] and
 /// `tui --json` takes [`rows_at`], and they measure the rows they keep with [`RangeContext`] (moai-w7ms.lrt). Ungated,
-/// the bin target's dead_code lint fails CI's `clippy --all-targets -- -D warnings`.
+/// it would stand in the public `moai::report::gantt` (moai-50p5) as an item only tests call, and `dead_code` stays
+/// silent on exported items.
 #[cfg(test)]
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Gantt<'a> {

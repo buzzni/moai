@@ -806,7 +806,7 @@ fn child_as(
     }
 }
 
-/// 서버의 거절 — `{"code":"…","error":"…"}`. `moai --json` 이 넘어질 때(`main::fail`)와 같은 꼴, 같은 차례다.
+/// 서버의 거절 — `{"code":"…","error":"…"}`. `moai --json` 이 넘어질 때(`src/lib.rs` 의 `fail`)와 같은 꼴, 같은 차례다.
 pub fn refuse(status: u16, said: &str, code: &str) -> Response {
     let body = serde_json::json!({ "error": said, "code": code }).to_string();
     Response::new(status, http::JSON, body.into_bytes())
