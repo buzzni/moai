@@ -3755,6 +3755,39 @@ mod tests {
         }
     }
 
+    #[test]
+    fn project_refresh_does_not_repeat_unchanged_read_diagnostic() {
+        let s = Scratch::fenced("layer-refresh-read-notice");
+        let dir = s.project("one", &[("argos-0001", "one", "todo")]);
+        let cfg = s.register(&[&dir]);
+        let at = crate::read_marks::place_of(&cfg, &dir).at;
+        std::fs::create_dir_all(at.parent().unwrap()).unwrap();
+        let header = format!("path = {:?}\n\n[read]\n", dir.display().to_string());
+        std::fs::write(&at, format!("{header}\"argos-0001\" = 3\n")).unwrap();
+        let mut a = layered(&cfg);
+        a.user_config = Some(cfg);
+        a.want_site(0);
+        settle(&mut a);
+        assert!(a.notice.is_some(), "first read reports the malformed entry");
+        a.notice = Some("newer notice".into());
+        write_lines(&dir, &[("argos-0001", "changed snapshot", "todo")]);
+        a.layer.as_mut().unwrap().queue(dir.clone());
+        a.read_wanted();
+        settle(&mut a);
+        assert_eq!(a.notice.as_deref(), Some("newer notice"));
+        std::fs::write(&at, format!("{header}\"argos-0001\" = 4\n# changed\n")).unwrap();
+        a.layer.as_mut().unwrap().queue(dir.clone());
+        a.read_wanted();
+        settle(&mut a);
+        assert_ne!(a.notice.as_deref(), Some("newer notice"), "a changed read file reports its error");
+        std::fs::write(&at, &header).unwrap();
+        a.layer.as_mut().unwrap().queue(dir);
+        a.read_wanted();
+        settle(&mut a);
+        let site = a.layer.as_ref().unwrap().places[0].site.as_ref().unwrap();
+        assert_eq!(site.read_tried.trouble, None);
+    }
+
     /// Exercise follow_site's first overview read, then its replacement of an already loaded site. Both layouts
     /// must seed default_folds(None) once and preserve an explicit opening across the next asynchronous reread.
     #[test]
