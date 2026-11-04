@@ -271,9 +271,14 @@ fn listed(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>, keys: &Keys) -> 
         super::gather(ctx, &repo, args.worktree.worktree)?;
     // 산 줄의 id — 읽힌 줄과, 못 읽어도 id 를 대는 줄. 이것 밖의 줄은 아카이브 파일에서만 왔다(`Where::stored`).
     let opaque = active_load.reserved_ids();
-    let active_rows = (!opaque.is_empty()).then(|| active_load.issues.clone());
+    let readable: std::collections::BTreeSet<&str> = active_load.issues.iter().map(|i| i.id.as_str()).collect();
+    // Ids only an unreadable live line holds: every row read under one of them is a stale archive copy
+    // (moai-8rf1.hb3). An id with a readable live row keeps its archive twins, as when nothing is unreadable —
+    // judging through `with_archive` dropped those too, so one unrelated unreadable line changed `show <epic>`.
+    let shadowed: std::collections::BTreeSet<String> =
+        opaque.iter().filter(|id| !readable.contains(id.as_str())).cloned().collect();
     let live: std::collections::BTreeSet<String> =
-        active_load.issues.iter().map(|i| i.id.clone()).chain(opaque.iter().cloned()).collect();
+        readable.into_iter().map(str::to_string).chain(opaque).collect();
     let load = crate::archive::read_all(&repo.root, active_load)?;
     super::report_load_errors(ctx.lang(), &repo.issues_path(), &load.errors);
 
@@ -311,9 +316,9 @@ fn listed(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>, keys: &Keys) -> 
         if args.as_plan {
             return plan(ctx, &load.issues, issue, args.raw);
         }
-        let judged = active_rows
-            .as_ref()
-            .map(|active| report::with_archive(active, &load.issues, &opaque.iter().map(String::as_str).collect()));
+        // Copied only when one is unfolded and some id is shadowed — a list view never reads it.
+        let judged: Option<Vec<Issue>> = (!shadowed.is_empty())
+            .then(|| load.issues.iter().filter(|i| !shadowed.contains(&i.id)).cloned().collect());
         return one(
             ctx,
             &repo,
@@ -916,7 +921,12 @@ fn one(
     // **`--fields` 가 안 고른 값비싼 키는 짓지 않는다**(리뷰) — 도움말이 "안 고른 키는 셈하지 않는다" 고 대는데
     // 하나를 펼치는 이 길만 저널·`git log`·옆 워크트리·거름망·읽음 파일을 늘 다 읽었다. 사람 화면은 다 쓴다.
     let wants = |any: &[&str]| !ctx.json || any.iter().any(|k| keys.wants(k));
+    // Count duplicate lines over every copy read, archive duplicates included — that is the diagnostic.
     let twins = report::duplicate_lines(all, &issue.id);
+    // Everything else reads the judged context: a stale archived copy of an ID an unreadable live row still holds
+    // must not supply a member, a child or a blocker member — `edit` and `status` never read it (moai-8rf1.hb3).
+    // Judging only the blockers left `show <epic>` reporting a done member that `show <blocked issue>` called absent.
+    let all = judged;
     let children = report::children_of(all, &issue.id);
     // **이력은 줄이 온 워크트리의 저널에서 읽는다** (`Origin::root`). 스냅샷은
     // 옆 워크트리의 줄을 내는데 이력만 이쪽에서 읽으면, 거기서 옮긴 칸이 이력에
@@ -981,8 +991,6 @@ fn one(
     let pulse = (wants(&["session"]) && report::may_hold_session(issue, &repo.config))
         .then(|| crate::pulse::read(&repo.root, all, &repo.config));
     let session = pulse.as_ref().and_then(|p| report::session_of(issue, &repo.config, p, wall_now));
-    // Keep archive duplicates for display diagnostics, but do not let a stale archived copy
-    // supply a blocker member when an unreadable live row reserves that ID.
     let seen = view::Seen {
         session,
         // **줄로 묻는 그릇으로 든다**(moai-wre3) — 접은 지도를 그대로 들던 때는 같은 id 의
@@ -992,7 +1000,7 @@ fn one(
         // moai-mibi.rfn) — 한때 곁에 펼친 줄과 그 자식만의 종류 지도를 따로 지었다.
         states: report::group_states_of(all, &repo.config, &near),
         screen: view::Screen::new(ctx.lang()).at(ctx.clock()).over(origin),
-        blocks: report::blocks_of(judged, &repo.config, issue),
+        blocks: report::blocks_of(all, &repo.config, issue),
         places,
     };
     // **커밋은 저장하지 않고 git 에서 읽는다**(moai-1w2l) — 커밋 제목에 이 id 를 적은 것.

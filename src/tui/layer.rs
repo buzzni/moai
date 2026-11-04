@@ -3780,12 +3780,15 @@ mod tests {
         a.read_wanted();
         settle(&mut a);
         assert_ne!(a.notice.as_deref(), Some("newer notice"), "a changed read file reports its error");
-        std::fs::write(&at, &header).unwrap();
+        // Recovery: a fixed file is read and its marks are taken. A malformed entry never set `read_tried.trouble`
+        // (that is a file-level outcome), so only the taken mark shows the repaired read was adopted.
+        std::fs::write(&at, format!("{header}\"argos-0001\" = \"2026-09-14T00:00:00Z\"\n")).unwrap();
         a.layer.as_mut().unwrap().queue(dir);
         a.read_wanted();
         settle(&mut a);
         let site = a.layer.as_ref().unwrap().places[0].site.as_ref().unwrap();
         assert_eq!(site.read_tried.trouble, None);
+        assert_eq!(site.seen.get("argos-0001").map(String::as_str), Some("2026-09-14T00:00:00Z"));
     }
 
     /// Exercise follow_site's first overview read, then its replacement of an already loaded site. Both layouts

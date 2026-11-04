@@ -118,6 +118,11 @@ fn edit_and_show_agree_on_blocker_members_in_each_live_state() {
             assert!(!line(&shown).contains('✓'), "{shown}");
         }
         if state == "opaque" {
+            // The epic itself agrees: the archived copy of its opaque member is no done member.
+            let epic: serde_json::Value =
+                serde_json::from_slice(&repo.run(&["show", "argos-bbbb", "--json"]).stdout).unwrap();
+            assert_eq!(epic["derived_status"], "todo", "{epic}");
+            assert_eq!(epic["members"], serde_json::json!([]), "{epic}");
             let status = repo.run(&["status", "--json"]);
             let status: serde_json::Value = serde_json::from_slice(&status.stdout).unwrap();
             assert_eq!(status["epics"][0]["derived_status"], "todo", "{status}");
@@ -128,6 +133,21 @@ fn edit_and_show_agree_on_blocker_members_in_each_live_state() {
             );
         }
     }
+}
+
+/// Only the archive copies of an id an unreadable live line holds are set aside. An unreadable line elsewhere
+/// must not change how `show` unfolds an epic whose readable member also has an archive twin.
+#[test]
+fn an_unrelated_unreadable_line_leaves_show_of_an_archive_twin_alone() {
+    let repo = Repo::new("twin");
+    let live = format!("{}\n{}\n", row("argos-eeee", "epic", "todo"), row("argos-eeee.mmm", "issue", "todo"));
+    repo.write(".moai/issues.jsonl", &live);
+    repo.write(".moai/archive/2026.jsonl", &format!("{}\n", row("argos-eeee.mmm", "issue", "done")));
+    let shown = |repo: &Repo| String::from_utf8(repo.run(&["show", "argos-eeee"]).stdout).unwrap();
+    let before = shown(&repo);
+    assert!(before.contains("argos-eeee.mmm"), "{before}");
+    repo.write(".moai/issues.jsonl", &format!("{live}{}\n", row("argos-zzzz", "future-kind", "todo")));
+    assert_eq!(shown(&repo), before);
 }
 
 #[cfg(target_os = "linux")]

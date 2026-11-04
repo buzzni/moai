@@ -6064,8 +6064,13 @@ impl App {
                         .and_then(|p| p.site.as_mut())
                     {
                         site.seen = std::mem::take(&mut held.seen);
-                        // A project snapshot refresh must not repeat the same read-file diagnostic.
-                        // Compare before replacing the site; changed stamps or outcomes still speak.
+                        // **갈래와 읽어 본 때는 안 옮긴다**(리뷰) — 바로 아래 [`App::take_read`] 가
+                        // 이 걸음의 읽기로 둘 다 다시 적는다. 옮겨 봐야 그 자리에서 덮이고, 덮이는
+                        // 줄은 "옮겼으니 이어진다" 는 거짓말을 남긴다. 표식도 같다 — `take_read` 는
+                        // 실패한 읽기에도 표식을 적으니 옮길 까닭이 없다.
+                        //
+                        // They are only read here: a project snapshot refresh must not repeat the same read-file
+                        // diagnostic. Compare before replacing the site; changed stamps or outcomes still speak.
                         repeat = got.as_ref().is_some_and(|got| {
                             held.read_stamp.as_ref() == Some(&got.stamp)
                                 && held.read_tried.trouble == got.marks.trouble

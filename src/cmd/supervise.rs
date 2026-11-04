@@ -162,10 +162,7 @@ pub fn message(ctx: &Ctx, id: &str, f: &Fields) -> R<Vec<String>> {
                 entry.line
             )));
         }
-        let lines: Vec<String> = entry
-            .raw
-            .parse::<toml_edit::Value>()
-            .ok()
+        let lines: Vec<String> = crate::config::toml_value(&entry.raw)
             .and_then(|value| {
                 value.as_array().and_then(|array| array.iter().map(|item| item.as_str().map(str::to_string)).collect())
             })
