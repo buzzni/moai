@@ -66,7 +66,8 @@ export const mountList: MountPane = (root, ctx): PaneView => {
   const body = el(doc, "div", { class: "moai-list-body", role: "rowgroup" })
   const list = el(doc, "div", { class: "m-list moai-list", role: "treegrid", tabindex: 0, "aria-label": words.label }, head, body)
   const empty = el(doc, "div", { class: "moai-list-empty", hidden: true })
-  root.replaceChildren(note, list, empty)
+  const fillSpace = el(doc, "div", { class: "m-fill", "aria-hidden": "true", hidden: true })
+  root.replaceChildren(note, list, empty, fillSpace)
 
   /**
    * A button of the list that the redraw it causes destroys or hides (the fold toggle, a name-line sort, "Show
@@ -317,6 +318,7 @@ export const mountList: MountPane = (root, ctx): PaneView => {
       head.hidden = true
       note.hidden = true
       list.removeAttribute("aria-activedescendant")
+      fillSpace.hidden = true
       empty.hidden = !current.board.loading
       empty.replaceChildren(...(current.board.loading ? [emptyState(doc, { title: copy.loading })] : []))
       return
@@ -351,6 +353,7 @@ export const mountList: MountPane = (root, ctx): PaneView => {
     const nothing = !model.lines.some((line) => line.kind !== "up")
     head.hidden = !columns.names || nothing
     if (!head.hidden) drawHead(columns, current)
+    fillSpace.hidden = nothing
     empty.hidden = !nothing
     empty.replaceChildren(...(nothing ? [emptyState(doc, { title: copy.empty })] : []))
     body.style.height = `${model.lines.length * ROW_HEIGHT}px`

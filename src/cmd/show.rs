@@ -270,9 +270,15 @@ fn listed(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>, keys: &Keys) -> 
     let crate::worktree::Gathered { load: active_load, origin, .. } =
         super::gather(ctx, &repo, args.worktree.worktree)?;
     // 산 줄의 id — 읽힌 줄과, 못 읽어도 id 를 대는 줄. 이것 밖의 줄은 아카이브 파일에서만 왔다(`Where::stored`).
-    let live: std::collections::BTreeSet<String> =
-        active_load.issues.iter().map(|i| i.id.clone()).chain(active_load.reserved_ids()).collect();
-    let load = crate::archive::read_all(&repo.root, active_load)?;
+    let opaque = active_load.reserved_ids();
+    let readable: std::collections::BTreeSet<&str> = active_load.issues.iter().map(|i| i.id.as_str()).collect();
+    // Ids only an unreadable live line holds: every row read under one of them is a stale archive copy
+    // (moai-8rf1.hb3). An id with a readable live row keeps its archive twins, as when nothing is unreadable —
+    // judging through `with_archive` dropped those too, so one unrelated unreadable line changed `show <epic>`.
+    let shadowed: std::collections::BTreeSet<String> =
+        opaque.iter().filter(|id| !readable.contains(id.as_str())).cloned().collect();
+    let live: std::collections::BTreeSet<String> = readable.into_iter().map(str::to_string).chain(opaque).collect();
+    let mut load = crate::archive::read_all(&repo.root, active_load)?;
     super::report_load_errors(ctx.lang(), &repo.issues_path(), &load.errors);
 
     let target = match kind_filter {
@@ -309,8 +315,25 @@ fn listed(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>, keys: &Keys) -> 
         if args.as_plan {
             return plan(ctx, &load.issues, issue, args.raw);
         }
-        return one(ctx, &repo, &load.issues, issue, args.raw, &origin, args.worktree.worktree, &live, keys);
+        // Copied only when one is unfolded and some id is shadowed — a list view never reads it.
+        let judged: Option<Vec<Issue>> =
+            (!shadowed.is_empty()).then(|| load.issues.iter().filter(|i| !shadowed.contains(&i.id)).cloned().collect());
+        return one(
+            ctx,
+            &repo,
+            &load.issues,
+            issue,
+            args.raw,
+            &origin,
+            args.worktree.worktree,
+            &live,
+            judged.as_deref().unwrap_or(&load.issues),
+            keys,
+        );
     }
+
+    // Lists, filters and tree rollups must judge the same live-first context as the detail view.
+    load.issues.retain(|row| !shadowed.contains(&row.id));
 
     // **`--raw` 도 조용히 버리지 않는다.** 본문은 하나를 펼칠 때만 나오므로
     // 목록 자리의 `--raw` 는 아무 일도 하지 않는다. 말없이 먹으면 부르는 쪽은
@@ -894,12 +917,18 @@ fn one(
     origin: &crate::worktree::Origin,
     worktree: bool,
     live: &BTreeSet<String>,
+    judged: &[Issue],
     keys: &Keys,
 ) -> R<Vec<String>> {
     // **`--fields` 가 안 고른 값비싼 키는 짓지 않는다**(리뷰) — 도움말이 "안 고른 키는 셈하지 않는다" 고 대는데
     // 하나를 펼치는 이 길만 저널·`git log`·옆 워크트리·거름망·읽음 파일을 늘 다 읽었다. 사람 화면은 다 쓴다.
     let wants = |any: &[&str]| !ctx.json || any.iter().any(|k| keys.wants(k));
+    // Count duplicate lines over every copy read, archive duplicates included — that is the diagnostic.
     let twins = report::duplicate_lines(all, &issue.id);
+    // Everything else reads the judged context: a stale archived copy of an ID an unreadable live row still holds
+    // must not supply a member, a child or a blocker member — `edit` and `status` never read it (moai-8rf1.hb3).
+    // Judging only the blockers left `show <epic>` reporting a done member that `show <blocked issue>` called absent.
+    let all = judged;
     let children = report::children_of(all, &issue.id);
     // **이력은 줄이 온 워크트리의 저널에서 읽는다** (`Origin::root`). 스냅샷은
     // 옆 워크트리의 줄을 내는데 이력만 이쪽에서 읽으면, 거기서 옮긴 칸이 이력에

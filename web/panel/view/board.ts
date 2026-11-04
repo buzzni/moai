@@ -31,6 +31,8 @@ export const glyphOf = (key: string, boot?: Boot | null): string =>
 const LANE_MIN = 200
 const LANE_GAP = 4
 const BOARD_PAD = 6
+/** The board's least width for this many columns: narrower panels scroll sideways, and the fill under it spans as far. */
+const boardWidth = (columns: number) => `${columns * LANE_MIN + (columns - 1) * LANE_GAP + 2 * BOARD_PAD}px`
 
 const priorityClass = (priority: number) => `m-p${Math.min(3, Math.max(0, Math.round(priority)))}`
 
@@ -140,9 +142,8 @@ function draw(ctx: ViewContext, state: State, index: IssueIndex, model: BoardMod
   }
   // Narrow panels scroll sideways instead of squeezing the columns below their minimum. The numbers are the
   // stylesheet's (components.css 5.7): a column's minimum, the gap between columns, the board's padding.
-  const columns = model.keys.length
   const wrap = el(doc, 'div', { class: 'm-board-wrap' })
-  wrap.style.minWidth = `${columns * LANE_MIN + (columns - 1) * LANE_GAP + 2 * BOARD_PAD}px`
+  wrap.style.minWidth = boardWidth(model.keys.length)
   wrap.append(...out)
   return [wrap]
 }
@@ -163,7 +164,8 @@ function locate(model: BoardModel, index: IssueIndex, cursor: string | null): { 
 export const mountBoard: MountPane = (root, ctx): PaneView => {
   const doc = ctx.document
   const pane = el(doc, 'div', { class: 'm-board-pane', 'aria-label': ctx.copy.board.label })
-  root.replaceChildren(pane)
+  const fillSpace = el(doc, 'div', { class: 'm-fill', 'aria-hidden': 'true', hidden: true })
+  root.replaceChildren(pane, fillSpace)
   let cursor: string | null = null
   let drawn: { state: State; index: IssueIndex; model: BoardModel; key: string } | null = null
   const shut = new Set<string>()
@@ -335,11 +337,15 @@ export const mountBoard: MountPane = (root, ctx): PaneView => {
           // The board is a layout of the list: the same filter and search narrow it (list-model.ts narrow).
           const found = narrow(state, index)
           const model = groupBoard(index, { path: state.path, view: state.view, cursor: state.cursor, match: found.match, reveal: found.searching, shut }, state.boot?.statuses)
+          fillSpace.hidden = !model.total
+          // As wide as the board: a pane narrower than the columns scrolls sideways, and the hatch runs under them all.
+          fillSpace.style.minWidth = boardWidth(model.keys.length)
           drawn = { state, index, model, key: drawKey }
           pane.replaceChildren(...draw(ctx, state, index, model, flip))
         }
       } else {
         drawn = null
+        fillSpace.hidden = true
         pane.replaceChildren()
       }
       if (key !== undefined) {
@@ -372,6 +378,7 @@ export const mountBoard: MountPane = (root, ctx): PaneView => {
     },
     destroy() {
       pane.remove()
+      fillSpace.remove()
     },
   }
 }
