@@ -319,7 +319,7 @@ pub fn ls(ctx: &Ctx) -> R<Vec<String>> {
     }
 
     for p in crate::view::settings_problems(reg, ctx.lang()) {
-        eprintln!("moai: {}", one_line(&p));
+        super::tell(&format!("moai: {}", one_line(&p)));
     }
     let mut out = Vec::new();
     if rows.is_empty() {

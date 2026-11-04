@@ -219,7 +219,8 @@ fn bare(ctx: &Ctx, lang: crate::i18n::Lang, refused: Option<&super::Fail>) -> R<
 /// - `moai init` 은 **부른 자리**에 심는다(`cmd::init::run` 의 `current_dir`). 밑자리(`proj/src`)에서 그대로 대면
 ///   이 체크아웃이 아니라 `src` 에 트래커가 선다 — 꼭대기가 여기와 다르면 `moai -C <꼭대기> init` 을 댄다
 fn climbed_away() -> Option<view::Climbed> {
-    let here = std::env::current_dir().ok()?;
+    // 요청의 통이 걸렸으면 그 자리다(`crate::side::cwd`) — 데몬이 선 디렉터리에서 올라간 것을 대지 않는다.
+    let here = crate::side::cwd().ok()?;
     if crate::store::init_belongs_at(&here).is_some() {
         return None;
     }

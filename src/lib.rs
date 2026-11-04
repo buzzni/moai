@@ -35,6 +35,7 @@ pub mod read_marks;
 pub mod report;
 #[cfg(test)]
 mod scratch;
+mod side;
 mod skill;
 pub mod store;
 pub mod style;
@@ -325,15 +326,7 @@ fn redirected(climbs: bool) {
     // **"썼다" 고 하지 않는다.** 이 줄은 *찾기*의 결과라 `status`·`ready`·`show` 도 지나는데,
     // 아래 `redirects()` 처럼 쓴 것으로 적으면 읽기만 한 명령이 없던 쓰기를 주장한다.
     for (from, to) in climbs.then(store::climbs).unwrap_or_default() {
-        let _ = writeln!(
-            anstream::stderr().lock(),
-            "{}{}",
-            style::paint(style::WARN, "moai: "),
-            i18n::fill(
-                i18n::say(said_lang(), "warn.tracker_climbed"),
-                &[("from", &from.display().to_string()), ("to", &to.display().to_string())]
-            )
-        );
+        let _ = writeln!(anstream::stderr().lock(), "{}", climb_line(said_lang(), &from, &to));
     }
     for (from, to) in store::redirects() {
         let _ = writeln!(
@@ -346,6 +339,18 @@ fn redirected(climbs: bool) {
             )
         );
     }
+}
+
+/// 올라가 잡았다는 한 줄 — [`redirected`] 와 요청의 입구(`cmd::request`)가 같이 짓는다. **순수하다.**
+fn climb_line(lang: i18n::Lang, from: &std::path::Path, to: &std::path::Path) -> String {
+    format!(
+        "{}{}",
+        style::paint(style::WARN, "moai: "),
+        i18n::fill(
+            i18n::say(lang, "warn.tracker_climbed"),
+            &[("from", &from.display().to_string()), ("to", &to.display().to_string())]
+        )
+    )
 }
 
 /// 스냅샷은 썼는데 저널에 못 적었으면 말한다(moai-52z9).
