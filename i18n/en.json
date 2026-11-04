@@ -1406,7 +1406,7 @@
   "daemon.already": "a daemon is already running — pid {pid}, moai {version}, {socket}",
   "daemon.other_version": "a daemon of moai {running} is running (pid {pid}), and this is moai {this}. Restart it: moai daemon stop, then moai daemon start",
   "daemon.starting_elsewhere": "another daemon holds {socket} but does not answer yet — try again in a moment",
-  "daemon.busy": "the daemon at {socket} has too many connections — try again",
+  "daemon.busy": "the daemon (pid {pid}) at {socket} has too many connections, even for hello — try again in a few seconds",
   "daemon.occupied": "{socket} is not a socket of yours — it is left alone; remove it by hand if it is yours to remove",
   "daemon.foreign": "something at {socket} answered, but not as a moai daemon: {said}",
   "daemon.no_place": "the daemon socket cannot be used: {said}",

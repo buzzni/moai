@@ -1444,7 +1444,9 @@ pub enum DaemonCmd {
     Start,
     /// Ask the running daemon to exit and wait until it has
     #[command(after_help = "  --json gives {stopped, pid, socket}. With nothing running, stopped is
-  false and it still exits 0. It works on a daemon of another version too.")]
+  false and it still exits 0. It works on a daemon of another version too,
+  and on one at its connection cap (32): past the cap the daemon still
+  answers hello and daemon.shutdown, and refuses the rest with busy.")]
     Stop,
     /// Whether a daemon runs: pid, version, proto and socket
     #[command(after_help = "  --json gives {supported, running, socket, stale_socket, this_version,
@@ -1454,8 +1456,9 @@ pub enum DaemonCmd {
   rebuild of the same version still reads true. stale_socket is a socket
   left by a daemon that is gone; moai daemon start clears it. It only reads,
   and exits 0 whether or not a daemon runs; a file there that is not your
-  socket, a daemon at its connection cap or an answer that is not a
-  daemon's is an error.")]
+  socket, an answer that is not a daemon's, or a daemon so full that it
+  cannot even answer hello (busy, with its pid) is an error. A daemon at
+  its connection cap still answers status.")]
     Status,
 }
 
