@@ -371,6 +371,7 @@ test('list view: the hidden note counts what the view hides, and show all lifts 
   store.dispatch({ type: 'view', view: { hiddenStatuses: ['done', 'todo', 'in_progress'] } })
   assert.equal(root.querySelector('.moai-list-empty').hidden, false)
   assert.equal(root.querySelector('.moai-list-head').hidden, true)
+  assert.equal(root.querySelector('.m-fill').hidden, true)
 })
 
 test('list view: no index yet shows loading, then the rows', () => {
@@ -378,9 +379,12 @@ test('list view: no index yet shows loading, then the rows', () => {
   dom.pane.render({ ...initialState(), board: { value: null, loading: true, problem: null } }, null)
   assert.equal(dom.lines().length, 0)
   assert.match(dom.root.querySelector('.moai-list-empty').textContent, /Loading/)
+  assert.equal(dom.root.querySelector('.m-fill').hidden, true)
   dom.render()
   assert.equal(dom.root.querySelector('.moai-list-empty').hidden, true)
   assert.equal(dom.lines().length, 3)
+  assert.equal(dom.root.lastElementChild.className, 'm-fill')
+  assert.equal(dom.root.lastElementChild.hidden, false)
 })
 
 test('virtual scroll: 5000 rows draw only a window, follow the scroll, and keep the cursor in view', () => {

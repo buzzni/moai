@@ -163,7 +163,8 @@ function locate(model: BoardModel, index: IssueIndex, cursor: string | null): { 
 export const mountBoard: MountPane = (root, ctx): PaneView => {
   const doc = ctx.document
   const pane = el(doc, 'div', { class: 'm-board-pane', 'aria-label': ctx.copy.board.label })
-  root.replaceChildren(pane)
+  const fillSpace = el(doc, 'div', { class: 'm-fill', 'aria-hidden': 'true', hidden: true })
+  root.replaceChildren(pane, fillSpace)
   let cursor: string | null = null
   let drawn: { state: State; index: IssueIndex; model: BoardModel; key: string } | null = null
   const shut = new Set<string>()
@@ -335,11 +336,13 @@ export const mountBoard: MountPane = (root, ctx): PaneView => {
           // The board is a layout of the list: the same filter and search narrow it (list-model.ts narrow).
           const found = narrow(state, index)
           const model = groupBoard(index, { path: state.path, view: state.view, cursor: state.cursor, match: found.match, reveal: found.searching, shut }, state.boot?.statuses)
+          fillSpace.hidden = !model.total
           drawn = { state, index, model, key: drawKey }
           pane.replaceChildren(...draw(ctx, state, index, model, flip))
         }
       } else {
         drawn = null
+        fillSpace.hidden = true
         pane.replaceChildren()
       }
       if (key !== undefined) {
