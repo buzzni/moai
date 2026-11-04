@@ -848,4 +848,41 @@ mod tests {
         std::io::Read::read_to_string(&mut std::io::stdin(), &mut left).unwrap();
         assert_eq!(left, "SENTINEL\n", "통이 걸린 요청이 프로세스의 stdin 을 읽었다");
     }
+
+    /// **요청은 세션의 집기를 안 적는다**(moai-3hgm.25e) — 데몬의 `CLAUDE_CODE_SESSION_ID` 는 그것을 띄운 셸의 것이다.
+    /// 적으면 Claude 세션에서 띄운 데몬의 모든 `mv` 가 그 세션의 집기로 서서, 그 세션의 훅이 남의 줄을 제 것으로 읽는다.
+    /// 같은 환경의 CLI 는 적는다 — 시험이 기록 자리를 옳게 보는지를 그쪽이 잰다.
+    #[test]
+    fn a_request_records_no_pickup_for_the_daemons_session() {
+        let dir = crate::scratch::Scratch::new("request-picks");
+        rerun_with(
+            "cmd::request::tests::inner_records_no_pickup",
+            dir.path(),
+            None,
+            &[("CLAUDE_CODE_SESSION_ID", "daemon-shell")],
+        );
+    }
+
+    #[test]
+    #[ignore = "a_request_records_no_pickup_for_the_daemons_session 이 세션 값을 세워 띄운다"]
+    fn inner_records_no_pickup() {
+        let dir = std::path::PathBuf::from(std::env::var_os(PLACE).expect("바깥 시험이 띄운다"));
+        let a = dir.join("alpha");
+        project(&a, "alpha");
+        // 집기 기록은 사용자 설정 곁(`<MOAI_CONFIG 의 자리>/picks`)에 선다. 짓는 `project` 의 CLI `mv` 가 이미 하나 적었다.
+        let picks = dir.join("picks");
+        let recorded = || if picks.is_dir() { texts(files_of(&picks)) } else { Default::default() };
+        let (first, second) = (id_titled(&a, "첫 일"), id_titled(&a, "둘째 일"));
+        let before = recorded();
+        let got = write_at(&a, Lang::En, &["mv", &first, "in_progress"]);
+        assert!(got.out.is_ok() && got.exit == 0, "요청의 집기가 넘어졌다: {:?}", got.messages);
+        assert_eq!(recorded(), before, "요청이 데몬의 세션으로 집기를 적었다");
+        let ran = cli_wrote(&a, &a, "en", &["mv", &second, "in_progress"]);
+        assert_eq!(ran.exit, 0, "{ran:?}");
+        let after = recorded();
+        assert!(
+            after != before && after.values().any(|t| t.contains(&second)),
+            "같은 환경의 CLI 가 집기를 안 적었다 — 이 시험이 기록 자리를 잘못 본다"
+        );
+    }
 }

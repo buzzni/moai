@@ -230,7 +230,8 @@ moai-5n6m.m0b, and `cmd::request::write`, moai-3hgm.25e). `read` runs `status`, 
 - The caller makes one call per request and does not start threads of its own that call
   into moai inside it. Anything called outside the entry still uses the process-wide
   state listed above. The write path still reads the process environment listed above
-  (`MOAI_HERE`, `MOAI_NOW`, `MOAI_ACTOR`).
+  (`MOAI_HERE`, `MOAI_NOW`, `MOAI_ACTOR`). It records no session pick-ups: the process's
+  `CLAUDE_CODE_SESSION_ID` belongs to whatever shell started it, not to the request.
 
 **How a refactor that must not change behaviour is gated.** The split into library and
 binary merged only after three tools in `scripts/` reported no change. Use them again for
