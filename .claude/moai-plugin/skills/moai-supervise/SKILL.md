@@ -91,7 +91,7 @@ accident. Ask the person to put the root on a branch, and stop.
 
 Fill the name you read into `<root branch>` in the message you send the worker.
 
-**Each work has a base branch** — read the release from `moai show --milestone` in 1. Outside a live milestone (including shipped or deferred), use the root branch. Inside a live milestone use `milestone/<milestone id>`, even before it starts. The worker raises a missing milestone branch in `.worktrees/milestone-<milestone id>` and merges there; the root takes it only at release. Never remove that long-lived worktree. For stalled work read the release on its epic. Fill `<base branch>` in the message and check in 5; the worker must not infer it from its own worktree.
+**Each work has a base branch** — read the release from `moai show --milestone` in 1. Outside a live milestone (including shipped or deferred), use the root branch. Inside a live milestone use `milestone/<milestone id>`, even before it starts, when `<milestone>` in 3 says `none`. The worker raises a missing milestone branch in `.worktrees/milestone-<milestone id>` and merges there; the root takes it only at release. Keep that worktree until the release. For stalled work read the release on its epic. Fill `<base branch>` in the message and check in 5; the worker must not infer it from its own worktree.
 
 ## One round
 
@@ -191,6 +191,40 @@ keep it in the send mark (1). Your own subagents stand in `ListAgents` under "Su
 they are not session workers.
 
 **A session.** Read `references/supervise-sessions.md` for session selection and delivery.
+
+Either way, the root checkout and, for a subdirectory project in a monorepo, the path down
+to it come from the lines below. The root is where `.moai` stands, so for a monorepo it is the
+subdirectory that has `.moai`, and a worktree stands for the whole repository — the worker
+has to aim at the same subdirectory inside it (its step 3). The first line is `root dir`;
+a `subdir` line stands only when the root is not the top of the repository.
+
+```sh
+python3 - "$(git worktree list --porcelain | sed -n 's/^worktree //p' | head -1)" "$(git rev-parse --show-toplevel)" <<'PY'
+import os, sys
+if not sys.argv[1]:
+    sys.exit("call this inside a git repository")
+top, here = os.path.realpath(sys.argv[2]), os.path.realpath(os.getcwd())
+while here not in (top, os.path.dirname(here)) and not os.path.isdir(os.path.join(here, ".moai")):
+    here = os.path.dirname(here)
+root = os.path.realpath(os.path.join(sys.argv[1], os.path.relpath(here, top)))
+print("root dir", root)
+if os.path.relpath(here, top) != ".":
+    print("subdir", os.path.relpath(here, top))
+unsafe = ['"', '$', chr(96)] + ([] if os.sep == chr(92) else [chr(92)])
+if any(c in root for c in unsafe) or chr(92) * 2 in root or root.endswith(chr(92)):
+    print("unquotable root", root)
+PY
+```
+
+`<root>` and `<cwd>` stand in double quotes on every shell line here, so a path with a
+space stays one word. Double quotes still read `"`, `$`, a backtick and `\`: a path holding
+any of them is not one these lines can carry — build none, and tell the person which path
+it is. A Windows path (`C:\Users\…`) is the one exception for `\`: double quotes keep a
+single `\` between two names as it is. Inside cmux's `--command '…'` the path sits inside
+single quotes as well: write each `'` in it as `'\''` there.
+
+If `unquotable root` is printed, stop this round and tell the person that path. Send no
+assignment with that `Root:`; the person handles its quoting.
 
 **2-1. Pick the role, then read its model.** Each backlog goes to one role, and that role's
 model and effort come from the `moai models --json` you read at the start of the round.
@@ -363,11 +397,11 @@ and if the message does not arrive, deliver it into the tab —
 `moai-cmux`, "Label the tab" and "When a message does not arrive".
 Inside Saycode, a worker Saycode lists gets the message as a prompt instead of `SendMessage` —
 `moai-saycode`, "Send work".
-Fill every message slot: `<id>`, `<title>`, `<steps file>`, `<root branch>`, `<base branch>`, `<milestone>`, `<due>`, `<model>`, `<difficulty>`, `<why>`, `<effort>`, `<worker kind>`, `<subagent ladder>`, `<writing>`, `<other work>`, `<root>`, `<person>` and `<subdir>` only for a subdirectory project. Use the root dir from 2, the branches decided before the round, and this round's `moai writing --json` detail.
+Fill every message slot: `<id>`, `<title>`, `<steps file>`, `<root branch>`, `<base branch>`, `<milestone>`, `<due>`, `<model>`, `<difficulty>`, `<why>`, `<effort>`, `<worker kind>`, `<subagent ladder>`, `<writing>`, `<other work>`, `<root>`, `<person>`, and `<subdir>` only for a subdirectory project — with no `subdir` line in 2, leave the `Subdir:` line out. Use the root dir from 2, the branches decided before the round, and this round's `moai writing --json` detail.
 
 `<milestone>` is the living release the backlog stands under in `moai show --milestone`, or `none` if absent, closed, deferred or nothing is running. Never choose a release for it. A stale but well-formed id is accepted and reported as `dangling_milestone`; copy it from the show result. `<due>` is the backlog's `due_on`, else the day the person gives when asked; ask for work with no deadline, never invent one, and use `none` without an answer (including `Person: away`). The epic's deadline bounds members and raises their priority via `moai due apply`.
 
-Copy `<model>`, `<difficulty>`, `<why>` and `<effort>` from 2-1; do not put a single quote in `<why>`. `<worker kind>` is `subagent` or `session`. Copy the ladder as `bulk <model> (<effort>) · develop <model> (<effort>) · complex <model> (<effort>)` from this round; `none` for Codex or when the person says workers do the work themselves. Add no other subagent directive. The `Worktree:` line goes unchanged. `<other work>` names sibling worktrees, concurrent sends and the files they hold, or `none`; the worker leaves a needed held file as a member (4-3). `<person>` is `here`, or `away` only when the person says so. Leave `<grade>` and `<vendor>` for the worker's review and close, not in the message.
+Copy `<model>`, `<difficulty>`, `<why>` and `<effort>` from 2-1; do not put a single quote in `<why>`. Copy the ladder as `bulk <model> (<effort>) · develop <model> (<effort>) · complex <model> (<effort>)` from this round; `none` for Codex or when the person says workers do the work themselves. Add no other subagent directive. The `Worktree:` line goes unchanged. `<other work>` names sibling worktrees, concurrent sends and the files they hold, or `none`; the worker leaves a needed held file as a member (4-3). `<person>` is `here`, or `away` only when the person says so. Leave `<grade>` and `<vendor>` for the worker's review and close, not in the message.
 
     You are handed backlog <id> — <title>. Read <steps file> and follow its steps from step 1.
     Read first: moai show <id>
@@ -408,6 +442,24 @@ report on the epic as a note before it hands back — a supervisor that started 
 the notification, and reads that note (below).
 
 For a session report, read `references/supervise-sessions.md` before checking it.
+
+**A report reaches only the name it was sent to.** A supervisor that started again —
+restarted, or resumed with `claude --resume` — stands under a new name, and a worker whose
+report to the old one fails leaves it on the epic as a note with `report: <epic>` at its
+head. So when you start or resume, before waiting, read what the tracker holds:
+
+    moai show -s in_progress,review        the work sent and picked up, not done
+    moai show -g 'Sent:'                   sent and not done — a backlog not unfolded yet, or an
+                                           epic not picked up yet; neither is a candidate, and
+                                           a last `Sent: plan …` goes back to 2-2
+    moai show -g 'report:' --all           the epics carrying a report nobody received
+
+**Only a note that opens with the marker counts** — `-g` matches any text, and a body or a
+note that discusses this protocol carries the same words. Read each match with
+`moai show <id>` and look at its history: a report stands checked once a `Report-checked:`
+note follows it on the same epic. Check each one that does not as in 5. A worker holding
+sent work you have no report for is still left out in 2 — ask it, or its person, how it
+stands.
 
 **5. Check the report and send the next.** Look at three things before you believe a report.
 

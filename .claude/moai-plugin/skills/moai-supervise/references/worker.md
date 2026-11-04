@@ -94,7 +94,6 @@ A message that hands over no work is not work: if it asks something, answer it w
 
 Run the root branch check, merge, worktree removal and tracker commits in the root. If already in a worktree, return with `ExitWorktree(keep)` if you entered it that way, otherwise `cd "<root>"`. A merge run inside the worktree lands nothing; removing your current directory strands the shell. Rule 2 refuses root writes when all held work has worktrees and names where to write instead; never work around it.
 
-
 ## In a subagent
 
 When `Worker:` says `subagent`, the supervisor raised you with `Agent` inside its own session,
@@ -199,8 +198,8 @@ other's prompts.
    counts; on a yes, run the line the refusal hands you (`--take -m '<who said yes>'`), on a
    no leave that member and tell the supervisor.
    **In a subagent** there is nobody to ask: without a yes in the message, leave that member
-   and name it in the report. Handed an epic `from step 2`, measure first as 1 does, before
-   you pick anything up
+   and name it in the report. Handed an epic `from step 2`, measure first as `Model:` says,
+   before you pick anything up
 3. Right after 2, branch from the local <base branch> with
    `git worktree add -b worktree-<epic> .worktrees/<epic> <base branch>` from the root, and do
    not go in: from here on aim every command at `<root>/.worktrees/<epic>` ("Stay in the
@@ -221,7 +220,7 @@ other's prompts.
    and end. The supervisor asks the person and wakes you with the answer (`SendMessage`);
    carry on from where you stopped
 
-4-1. **The tracker you edit is always the root's.** Follow the moai block's worktree tracker rule. Use `moai -C "<root>"` to make the target explicit; never set `MOAI_HERE`. Give review subagents the same rule. Put `-e <epic>` on backlog parked mid-epic so 7-1 finds it. If this worktree's `.moai` changed, undo it in the worktree with `git -C "<root>/.worktrees/<epic>" checkout -- .moai`; never undo the shared root tracker. If already committed, undo that commit too and park again from the root.
+4-1. **The tracker you edit is always the root's.** Follow the moai block's worktree tracker rule. `<root>` is the message's `Root:` — do not guess it from inside the worktree. Use `moai -C "<root>"` to make the target explicit; never set `MOAI_HERE`. Give review subagents the same rule. Put `-e <epic>` on backlog parked mid-epic so 7-1 finds it. If this worktree's `.moai` changed, undo it in the worktree with `git -C "<root>/.worktrees/<epic>" checkout -- .moai`; never undo the shared root tracker. If already committed, undo that commit too and park again from the root.
 
 4-2. If testing tmux, follow `worker-tmux-tests.md` before starting a test server.
 
@@ -261,9 +260,9 @@ other's prompts.
    has its worktree standing ("Stay in the root"), and this line is what holds the rest.
    Inside a milestone that is the milestone branch, not `<root branch>` — the epics merged
    beside you are there
-7. Review the whole epic once before merging, in this session, never another agent program. In Codex follow `worker-codex.md` step 7 instead. Read `review`, `review_grade`, and `review_raise` from `moai models --json`; use the configured grade, raising at most one step to `max` only when `review_raise = "write-path"` and a member touched the write path, concurrency, storage or hooks, or this worktree carries two epics. Ask the person to change a session's model if needed. In a subagent, pick up the review issue before raising a review subagent on the configured model and the filled "The review brief" above in `worker.md`; save it at `<scratchpad>/<epic>/brief.md` and pass the path.
+7. Review the whole epic once before merging — still this session, not another agent program. In Codex follow `worker-codex.md` step 7 instead. Read `review`, `review_grade` and `review_raise` from `moai models --json` and use `review_grade`. Only with `review_raise = "write-path"` raise it one step, once and capped at `max`, when a member touched the write path, concurrency, the storage format or hooks, or this worktree carries members of two epics (measured as one epic); `never` keeps the configured grade. Ask the person to put a session on the `review` model if it is not.
 
-   Read the epic's `Review focus / 리뷰에서 볼 것` section, then add development focus and the grade and reason to the angle. Use `<scratchpad>/<epic>/angle.md` and `-b -` for multiline or quoted angles; never share scratch directories. The range starts at `git -C "<root>/.worktrees/<epic>" merge-base <base branch> HEAD`, after pulling the base in 6. Create the review issue under the epic (rule 3):
+   Put the epic's `Review focus / 리뷰에서 볼 것` section (either heading) first in the angle, then development focus and the grade and reason. Use `<scratchpad>/<epic>/angle.md` and `-b -` for multiline or quoted angles; never share scratch directories. The range starts at `git -C "<root>/.worktrees/<epic>" merge-base <base branch> HEAD`, after pulling the base in 6. Create the review issue under the epic (rule 3):
 
        moai -C "<root>" add 'review — <what you are looking at>' -t review --parent <epic> -b '<what you are looking for and why>'
 
@@ -271,15 +270,15 @@ other's prompts.
 
        moai -C "<root>" mv <member> review --from in_progress
 
-   Pass over members left in the first column; leave already-reviewed members there. If `review` is not a column, leave members in `in_progress`. Pick up the review issue before calling review:
+   A member left in the first column (4-3, 7-1) answers with a non-zero code and stays — that is the pass-over, not a lost pick-up as in 2; one already in `review` stays too. moai answers in the screen's language, so read what it says: if it refuses `review` itself as not a column, leave the members in `in_progress`. Then **pick the review issue up**, and only then call the review:
 
        moai -C "<root>" mv <review id> in_progress --from todo
 
-   In a subagent, raise the review with:
+   In a session call `/code-review <grade> --fix <root>/.worktrees/<epic>`. In a subagent fill "The review brief" above, save it as `<scratchpad>/<epic>/brief.md` and raise it on the `review` model:
 
        Agent(subagent_type: "general-purpose", model: <review model>, description: "review <epic>", prompt: "Read <scratchpad>/<epic>/brief.md whole before you start, then follow it")
 
-   In a session call `/code-review <grade> --fix <root>/.worktrees/<epic>`. If a hook refuses, run its correction; if rule 3 still refuses after the review is picked up, follow "When the review stays refused" in `worker-branches.md` and review by hand, never by starting another agent program. In a subagent raise the configured review subagent only after pickup; it leaves its fixes uncommitted and its own words on the review issue.
+   It leaves its fixes uncommitted and its own words on the review issue. If a hook refuses, run its correction. **If the review stays refused** — picked up, every correction run, rule 3 still tying it to a row not this epic's — do not work around the hook and start no other agent program: review by hand as "When the review stays refused" in `worker-branches.md` says.
 
    **Five places the review keeps finding.** Add them to the angle and hold them against the actual review: a new item taking another's doc block; a test that cannot go red on a revert; setup duplicated across paths; comments or docs disagreeing with behavior; and a path newly opening a file it did not open before. The angle does not reach the review command by itself.
 
@@ -299,7 +298,7 @@ other's prompts.
 
     git commit -m "docs(changelog): <what this epic changed> (<epic>)" -- CHANGELOG.md
 
-7-4. If there is a wiki (`moai wiki ls`), ask whether a person-facing key, command, flag, file, format or procedure changed. If so follow `moai-wiki` in the worktree and commit there before merging; aim wiki calls at `moai -C "<root>/.worktrees/<epic>"` because bare calls read the root. `<wiki dir>` is `dir` in `moai wiki ls --json`. If not, write nothing; nothing checks this. If one rule could have stopped a review finding, follow Lessons in `moai-wiki` in the same commit.
+7-4. If there is a wiki (`moai wiki ls`), ask whether a person-facing key, command, flag, file, format or procedure changed. If so follow `moai-wiki` in the worktree and commit there before merging; aim wiki calls at `moai -C "<root>/.worktrees/<epic>"` because bare calls read the root, and both git lines below at `git -C "<root>/.worktrees/<epic>"`. `<wiki dir>` is `dir` in `moai wiki ls --json`. If not, write nothing; nothing checks this. If one rule could have stopped a review finding, follow Lessons in `moai-wiki` in the same commit.
 
     git add -- <wiki dir>
     git commit -m "docs(wiki): <what changed> (<epic>)" -- <wiki dir>

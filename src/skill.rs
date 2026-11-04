@@ -1918,21 +1918,24 @@ mod tests {
                     }
                     continue;
                 }
+                // 옛 자리의 파일은 새 자리를 댄다 — 대는 파일과 그 걸음·절이 실제로 서야 옛 일꾼이 길을 잃지 않는다.
+                let legacy = [
+                    ("references/supervise-reclaim.md", "SKILL.md", &["**0. Reclaim first"][..]),
+                    ("references/supervise-planning.md", "SKILL.md", &["**2-2. Unfold"][..]),
+                    ("references/supervise-send.md", "SKILL.md", &["**3. Send.**"][..]),
+                    ("references/worker-review.md", "references/worker.md", &["\n7. ", "## The review brief"][..]),
+                    ("references/worker-finish.md", "references/worker.md", &["\n7-1. ", "\n7-4. "][..]),
+                ];
                 if s.name == "moai-supervise"
-                    && [
-                        "references/supervise-reclaim.md",
-                        "references/supervise-planning.md",
-                        "references/supervise-send.md",
-                        "references/worker-review.md",
-                        "references/worker-finish.md",
-                    ]
-                    .contains(rel)
+                    && let Some((_, dest, marks)) = legacy.iter().find(|(old, _, _)| old == rel)
                 {
                     let (_, compat) = s.files.iter().find(|(name, _)| name == rel).unwrap();
-                    assert!(
-                        compat.contains("SKILL.md") || compat.contains("worker.md"),
-                        "legacy reference {rel} has no destination"
-                    );
+                    let name = dest.rsplit('/').next().unwrap();
+                    assert!(compat.contains(name), "legacy reference {rel} does not name {dest}");
+                    let (_, target) = s.files.iter().find(|(name, _)| name == dest).unwrap();
+                    for mark in *marks {
+                        assert!(target.contains(mark), "legacy reference {rel} sends to {dest}, which lacks {mark:?}");
+                    }
                     continue;
                 }
                 if s.name == "moai-supervise" && rel.starts_with("references/") {

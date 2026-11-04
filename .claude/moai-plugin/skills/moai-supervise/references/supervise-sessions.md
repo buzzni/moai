@@ -108,40 +108,6 @@ worker, and the message is the whole assignment.
 - **A test agent is no worker.** One raised for a test is opened outside the repository (a
   scratchpad), so its name is not this repository's
 
-Either way, the root checkout and, for a subdirectory project in a monorepo, the path down
-to it come from the lines below. The root is where `.moai` stands, so for a monorepo it is the
-subdirectory that has `.moai`, and a worktree stands for the whole repository — the worker
-has to aim at the same subdirectory inside it (its step 3). The first line is `root dir`;
-a `subdir` line stands only when the root is not the top of the repository.
-
-```sh
-python3 - "$(git worktree list --porcelain | sed -n 's/^worktree //p' | head -1)" "$(git rev-parse --show-toplevel)" <<'PY'
-import os, sys
-if not sys.argv[1]:
-    sys.exit("call this inside a git repository")
-top, here = os.path.realpath(sys.argv[2]), os.path.realpath(os.getcwd())
-while here not in (top, os.path.dirname(here)) and not os.path.isdir(os.path.join(here, ".moai")):
-    here = os.path.dirname(here)
-root = os.path.realpath(os.path.join(sys.argv[1], os.path.relpath(here, top)))
-print("root dir", root)
-if os.path.relpath(here, top) != ".":
-    print("subdir", os.path.relpath(here, top))
-unsafe = ['"', '$', chr(96)] + ([] if os.sep == chr(92) else [chr(92)])
-if any(c in root for c in unsafe) or chr(92) * 2 in root or root.endswith(chr(92)):
-    print("unquotable root", root)
-PY
-```
-
-`<root>` and `<cwd>` stand in double quotes on every shell line here, so a path with a
-space stays one word. Double quotes still read `"`, `$`, a backtick and `\`: a path holding
-any of them is not one these lines can carry — build none, and tell the person which path
-it is. A Windows path (`C:\Users\…`) is the one exception for `\`: double quotes keep a
-single `\` between two names as it is. Inside cmux's `--command '…'` the path sits inside
-single quotes as well: write each `'` in it as `'\''` there.
-
-If `unquotable root` is printed, stop this round and tell the person that path. Send no
-assignment with that `Root:`; the person handles its quoting.
-
 
 **A session's report comes back as a cross-session message** from the worker,
 `report: <epic>` at its head, and it wakes you. The idle notice that
@@ -153,23 +119,6 @@ worker stalls") and tell the person what it shows — inside cmux, its tab (`moa
 worker stalls"). Inside Saycode, that moment is the wait ending with no report —
 `moai-saycode`, "Take the report" and "When a worker stalls".
 
-**A report reaches only the name it was sent to.** A supervisor that started again —
-restarted, or resumed with `claude --resume` — stands under a new name, and a worker whose
-report to the old one fails leaves it on the epic as a note with `report: <epic>` at its
-head. So when you start or resume, before waiting, read what the tracker holds:
-
-    moai show -s in_progress,review        the work sent and picked up, not done
-    moai show -g 'Sent:'                   sent and not done — a backlog not unfolded yet, or an
-                                           epic not picked up yet; neither is a candidate, and
-                                           a last `Sent: plan …` goes back to 2-2
-    moai show -g 'report:' --all           the epics carrying a report nobody received
-
-**Only a note that opens with the marker counts** — `-g` matches any text, and a body or a
-note that discusses this protocol carries the same words. Read each match with
-`moai show <id>` and look at its history: a report stands checked once a `Report-checked:`
-note follows it on the same epic. Check each one that does not as in 5. A worker holding
-sent work you have no report for is still left out in 2 — ask it, or its person, how it
-stands.
 
 For a session worker, if the supervisor is in the root, then in the gap after the worker
 picks the member up and before it raises its worktree, the hook may hold that member as "still picked up" when
