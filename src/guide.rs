@@ -704,7 +704,7 @@ rule anything enforces."#;
 /// 아무것도 안 가리킨다. 첫 판은 `moai edit --tag` 가 빈 태그를 그대로 쓴다고 적었는데
 /// (`src/cmd/edit.rs` 와 `query::split_tags` 는 처음부터 빈 낱말을 걸렀다) 없는 버그를
 /// 예시로 내민 셈이었다. 자리는 `<파일>:<줄>` 처럼 자리 표시로 둔다.
-const WRITING_EXAMPLE: &str = r#"The rule is under "What to write in an issue" in `SKILL.md`. This is one set that keeps it.
+const WRITING_EXAMPLE: &str = r#"The rule is under "What to write in an issue" above. This is one set that keeps it.
 The title goes as an argument, the body through `-b -`.
 
 ```sh
@@ -1532,6 +1532,8 @@ and record repeatable mistakes with `moai wiki search` and `moai wiki learn`.
 
 ### Further details
 
+References below are in the installed `moai` skill.
+
 - Explorer control: `references/commands.md` and `moai ctl --help`.
 - Backlog promotion, deferral, groups and deadlines: `references/commands.md` and command help.
   While a milestone is running, work inside it comes first; `p0` is the outside hotfix slot.
@@ -1754,6 +1756,24 @@ them, so where they differ the help wins.
 ## Before you close the session
 
 {CLOSING}
+
+## When a feature request comes in
+
+1. Look at the epics that already exist with `moai status`. If it may overlap, `moai show -g <keyword>`, and `moai wiki search <keyword>` for what the manual says.
+2. Show a plan split the way fork 3 says, once, ask when it is due in the same breath,
+   and on a "yes" create it in one go. No answer leaves the deadline empty.
+3. Pick it up with `moai mv <id> in_progress`, and move it to `done` when it is finished.
+4. Park what you find along the way that is out of scope with `moai backlog add` — if the
+   epic promised it, it is not a backlog item even when you cannot do it now (fork 1).
+5. Why it was decided goes on the issue with `moai note <id>`. The next session reads
+   it with `moai show <id>`.
+
+## Refreshing the guide
+
+When the tool grows and this block goes stale, call `moai init` again. It touches
+neither the issues nor the journal; it rewrites this block only. To see only
+whether it is stale, `moai init --check` — it writes nothing and answers
+`current`, `stale` or `missing`.
 
 ## The supervisor and its workers
 

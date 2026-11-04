@@ -1,4 +1,4 @@
-<!-- moai:begin v:0.48.0 hash:e09df25b -->
+<!-- moai:begin v:0.48.0 hash:88bd8919 -->
 ## Issue tracker — moai
 
 This repository's work lives in `.moai/issues.jsonl`.
@@ -74,6 +74,8 @@ Run `moai status`, leave `moai note <id> 'Next: <what comes next>'` for unfinish
 and record repeatable mistakes with `moai wiki search` and `moai wiki learn`.
 
 ### Further details
+
+References below are in the installed `moai` skill.
 
 - Explorer control: `references/commands.md` and `moai ctl --help`.
 - Backlog promotion, deferral, groups and deadlines: `references/commands.md` and command help.

@@ -288,6 +288,24 @@ If this session made a mistake the next one would make too, write it down as a l
 you still hold the row it came from (the page is a change to the repository, as rule 2 counts it) —
 `moai wiki search '<its words>'` first, then `moai wiki learn`; `moai-wiki` says which mistakes count.
 
+## When a feature request comes in
+
+1. Look at the epics that already exist with `moai status`. If it may overlap, `moai show -g <keyword>`, and `moai wiki search <keyword>` for what the manual says.
+2. Show a plan split the way fork 3 says, once, ask when it is due in the same breath,
+   and on a "yes" create it in one go. No answer leaves the deadline empty.
+3. Pick it up with `moai mv <id> in_progress`, and move it to `done` when it is finished.
+4. Park what you find along the way that is out of scope with `moai backlog add` — if the
+   epic promised it, it is not a backlog item even when you cannot do it now (fork 1).
+5. Why it was decided goes on the issue with `moai note <id>`. The next session reads
+   it with `moai show <id>`.
+
+## Refreshing the guide
+
+When the tool grows and this block goes stale, call `moai init` again. It touches
+neither the issues nor the journal; it rewrites this block only. To see only
+whether it is stale, `moai init --check` — it writes nothing and answers
+`current`, `stale` or `missing`.
+
 ## The supervisor and its workers
 
 In Claude Code, `moai skill install` also plants `moai-supervise`. A person calls it in
@@ -724,7 +742,7 @@ the hook refuses it (rule 5). Who you are is matched by name or email, the same 
 
 ## What to write in an issue — an example
 
-The rule is under "What to write in an issue" in `SKILL.md`. This is one set that keeps it.
+The rule is under "What to write in an issue" above. This is one set that keeps it.
 The title goes as an argument, the body through `-b -`.
 
 ```sh
