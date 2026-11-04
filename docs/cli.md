@@ -3711,7 +3711,8 @@ Options:
   same directory as moai ctl's: MOAI_CTL_DIR, else $XDG_RUNTIME_DIR/moai,
   else moai-<uid> in the temporary directory, owned by you alone.
 
-  On Windows the commands exist and answer unsupported.
+  On Windows start and stop answer unsupported; status says supported is
+  false and exits 0.
 ```
 
 ## `moai daemon start`
