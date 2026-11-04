@@ -1455,123 +1455,90 @@ pub fn agents_link() -> String {
 /// 나뉜 자리는 이렇다 — 보드(`status`)는 사람이 한 화면으로 훑는 것이고, `prime` 은
 /// 세션 첫머리와 접힌 뒤에 **다시 주입되는** 짧은 한 판이다. 둘 다 [`CHEATSHEET`] 에 선다.
 pub fn agents() -> String {
-    let backlog = backlog();
-    format!(
-        r#"## Issue tracker — moai
+    format!(r#"## Issue tracker — moai
 
 This repository's work lives in `.moai/issues.jsonl`.
 Do not use TodoWrite or a markdown TODO list. {NO_GATE}
+Start a session with `moai status`. `moai ready --json` separates your ready work,
+other people's or unowned work (`others`), and deferred or blocked work (`held`).
 
-Start a session by running `moai status`. The board and the warnings come up on one screen.
+    moai prime · moai ready                 what you hold and can pick up
+    moai show <id> · moai show -g <keyword> details and search
+    moai add '<title>' -p 1 -t bug -e <epic> create
+    moai mv <id> in_progress                pick up → review → done
+    moai note <id> '<what you found>'        leave a memo
+    moai backlog add '<thought>'            park work for later
+    moai wiki search '<words>'              search the manual
 
-{CHEATSHEET}
-
-{CTL}
-
-{PEOPLE}
+Every command accepts `--json`; use `moai <command> --help` for details.
+In shared repositories pick up one id at a time with `moai mv <id> in_progress --from todo`;
+a stale move fails rather than overwriting another session. `defer` also accepts `--from`.
+A linked worktree's `moai`
+reads and writes the main checkout's tracker; do not edit its `.moai` snapshot.
 
 ### The three forks
 
-{FORKS}
+1. Use `moai add` for work you would pick up now; use `moai backlog add` for later.
+   If an epic cannot deliver its promise without it, create a member in that epic even
+   when it cannot be done now; do not park or defer that promise.
+2. Use `moai defer <id> -m '<why>'` for work not done now; never mark it done.
+3. If a request spans files, show one plan with an epic and three to seven issues and ask
+   before coding. Use `/moai-plan` in Claude Code, or plan in this session in Codex and
+   Antigravity. Ask about the deadline and any running milestone in the same breath;
+   attach the milestone only on a yes. Ask when a requested issue or backlog item is due too;
+   no answer means no deadline, and a start date is the person's to choose. On a yes use
+   `moai add --from -`. See `references/commands.md` for plan syntax and exceptions.
 
 ### What to write in an issue
 
-{WRITING}
+Pass a short title and a separate markdown body (`-b -`); use lists, not narrative or emoji.
+The person's `[writing] detail` wins; default to `detailed`. Read `moai writing --json`
+if the board did not say it. Detailed bodies cover goal, context, decisions, steps, tests,
+out of scope, order, shared files and role; brief ones give what, where and next. Notes
+record what was done and what remains. Keep machine-readable lines `model:`, `Lesson:`,
+`Report-checked:`, `Review-ready:`, `Regression-of:`, `Summary:`, `Sent:`, `Next:`,
+`report:`, `Model ran:`, `Subagent ran:`, `Unfolded:`, `Decided alone:` and `Plan stopped:`
+in their original format. Do not shorten a reviewer's own words.
 
-{DETAIL}
+### The five things the hook watches
 
-### Park what is out of scope
+1. **New issues stay inside what you picked up.** Create them in the same epic or under
+   the issue; park later work in backlog. An epic's unfinished promise remains a member.
+2. **Pick something up before you change the repository.** `moai mv <id> in_progress`.
+   Shell writes count too; tracker, agent settings, worktrees, target and scratch do not.
+3. **A review is an issue too.** Create it before calling a review:
+   `moai add 'review — <what>' -t review --parent <id> -b '<angle>'`. Pick it up, record
+   the reviewer's words separately from your decision, and close with `-m '<decision>'`.
+   In Claude Code review with `/code-review`; in Codex and Antigravity use the review this
+   session has, else read the diff yourself. Never start another agent program for review.
+4. **Never kill the person's tmux server.** Test on a separate server with
+   `env -u TMUX tmux -L <unique name> …`; under cmux the shim drops `-L` and `-S`, so
+   use a real tmux by absolute path: `env -u TMUX <real tmux> -L <unique name> …`.
+5. **Ask before you pick up someone else's work**, including an unowned row; on yes use
+   `moai mv <id> in_progress --from todo --take -m '<who said yes>'`.
+Hooks do not cover every agent or tool call; keep these rules yourself. Details and the
+commands for refusals are in `references/commands.md`.
 
-{backlog}
+### Commits and closing
 
-### When work already created is not for now
+Put the issue id in the commit subject; squash commits need a `Refs: <id>` trailer.
+A commit containing only a pickup or close starts `chore(tracker):`.
+Before closing, record the AI that did the work without token counts:
+    moai note <id> 'model: <vendor>/<model> (<grade> — <why>)'
 
-{DEFERRING}
+Run `moai status`, leave `moai note <id> 'Next: <what comes next>'` for unfinished work,
+and record repeatable mistakes with `moai wiki search` and `moai wiki learn`.
 
-### There are two kinds of group
+### Further details
 
-{GROUPS}
-
-### Several projects
-
-{PROJECTS}
-
-### The language on screen
-
-{LANGUAGE}
-
-### Checking for a new release
-
-{UPDATES}
-
-### When a feature request comes in
-
-1. Look at the epics that already exist with `moai status`. If it may overlap, `moai show -g <keyword>`, and `moai wiki search <keyword>` for what the manual says.
-2. Show a plan split the way fork 3 says, once, ask when it is due in the same breath,
-   and on a "yes" create it in one go. No answer leaves the deadline empty.
-3. Pick it up with `moai mv <id> in_progress`, and move it to `done` when it is finished.
-4. Park what you find along the way that is out of scope with `moai backlog add` — if the
-   epic promised it, it is not a backlog item even when you cannot do it now (fork 1).
-5. Why it was decided goes on the issue with `moai note <id>`. The next session reads
-   it with `moai show <id>`.
-
-### Name the id in the commit
-
-{COMMITS}
-
-When the tool grows and this block goes stale, call `moai init` again. It touches
-neither the issues nor the journal; it rewrites this block only. To see only
-whether it is stale, `moai init --check` — it writes nothing and answers
-`current`, `stale` or `missing`.
-
-### When the issue file has to be merged
-
-{MERGE_DRIVER}
-
-### Move old closed work into archive files
-
-{ARCHIVE_STORAGE}
-
-### Name the AI that did the work
-
-{WORK}
-
-### The five things the hook actually watches
-
-They stand once `moai skill install` has planted the hooks for your agent.
-
-{rules}
-
-### The supervisor and its workers
-
-In Claude Code, `moai skill install` also plants `moai-supervise`. A person calls it in
-one window to hand the backlog that have piled up, one at a time, to workers and take
-their reports. A worker is a subagent the supervisor raises with Claude Code's `Agent`, on
-the model its role calls for — which model each role runs on is the person's, `[models]` in
-their user config, and `moai models` shows it. When the person wants to watch the workers'
-windows, and for a Codex worker, the workers are the idle sessions of this repository that
-`ListAgents` shows instead — nobody registers. Either way the supervisor sends each one its
-assignment with a line naming the file of the worker's steps to read, and the worker
-reports back. moai carries no messaging, and the moai binary never
-launches or drives a session. When the supervisor runs inside tmux, its companion skill
-`moai-tmux` lets it clear a worker's pane, paste a message into it, and open new worker
-panes — an ordinary interactive `claude` the person sees, opened only after the person says
-yes. Inside cmux (0.65.0 or later) `moai-cmux` does the same with cmux's tabs, and inside a
-Saycode session `moai-saycode` does it through Saycode's `happy agent` and comes first. Each is
-planted only where it is chosen: `moai skill install --with moai-tmux` (or `--with moai-cmux`,
-`--with moai-saycode`) plants it and `--without` takes it out. Nothing runs headless. The supervisor picks, sends and checks; it does not fix and it
-does not merge.
-
-### The wiki
-
-{WIKI}
-
-### Before you close the session
-
-{CLOSING}
-"#,
-        rules = rules()
-    )
+- Explorer control: `references/commands.md` and `moai ctl --help`.
+- Backlog promotion, deferral, groups and deadlines: `references/commands.md` and command help.
+  While a milestone is running, work inside it comes first; `p0` is the outside hotfix slot.
+  The tool does not block outside work; never pull work into a running milestone yourself.
+- Projects, language, update checks, merge driver and archive: `references/commands.md`.
+- Supervisor, workers and wiki: `references/commands.md` and the relevant installed skill.
+- Refresh this block with `moai init`; `moai init --check` reports whether it is stale.
+"#)
 }
 
 /// 스킬의 SKILL.md. **본문은 한 화면이다** — 전체 명령은 `reference` 로 내린다.
@@ -1585,19 +1552,31 @@ does not merge.
 /// 두고 **발동어는 두 말을 함께 싣는다**: 여기서 아끼는 것은 토큰이 아니라 발동이다.
 /// `the_skill_description_keeps_its_korean_triggers` 가 그것을 못박는다.
 pub fn skill() -> String {
-    format!(
-        r#"---
+    r#"---
 name: moai
 description: Use for this repository's work and issue tracking. "what should I do first", "sort out the to-dos", "create an issue", "how is it going", "let us do this later", "뭐부터 할까", "할 일 정리", "이슈 만들어", "진행 상황", "이거 나중에 하자", when a feature request has to be split into several parts, or when something out of scope comes to mind mid-task. Use this instead of TodoWrite or a markdown TODO list.
 ---
 
 # moai — this repository's issue tracker
 
-The work lives in `.moai/issues.jsonl`. {NO_GATE}
+Follow the repository's moai instructions. Search the manual with `moai wiki search`. Start with `moai status` and use `moai ready`
+to find work. For command details, the three forks, writing, hook rules, per-agent verbs,
+and closing steps, read `references/commands.md`.
+"#.to_string()
+}
+
+/// 스킬의 참고 문서. 부를 때만 읽힌다.
+pub fn reference() -> String {
+    let backlog = backlog();
+    format!(
+        r#"# Every command
+
+`moai --help` and `moai <command> --help` are the truth. This file is a summary of
+them, so where they differ the help wins.
+
+## Core workflow and contracts
 
 {CHEATSHEET}
-
-Whoever creates an issue is its assignee, for free.
 
 ## The three forks
 
@@ -1619,21 +1598,26 @@ Whoever creates an issue is its assignee, for free.
 
 {CLOSING}
 
-Every command and the `--from` syntax are in `references/commands.md`.
-"#,
-        rules = rules(),
-        verbs = verbs_section()
-    )
-}
+## The supervisor and its workers
 
-/// 스킬의 참고 문서. 부를 때만 읽힌다.
-pub fn reference() -> String {
-    let backlog = backlog();
-    format!(
-        r#"# Every command
+In Claude Code, `moai skill install` also plants `moai-supervise`. A person calls it in
+one window to hand the backlog that have piled up, one at a time, to workers and take
+their reports. A worker is a subagent the supervisor raises with Claude Code's `Agent`, on
+the model its role calls for — which model each role runs on is the person's, `[models]` in
+their user config, and `moai models` shows it. When the person wants to watch the workers'
+windows, and for a Codex worker, the workers are the idle sessions of this repository that
+`ListAgents` shows instead — nobody registers. Either way the supervisor sends each one its
+assignment with a line naming the file of the worker's steps to read, and the worker
+reports back. moai carries no messaging, and the moai binary never
+launches or drives a session. When the supervisor runs inside tmux, its companion skill
+`moai-tmux` lets it clear a worker's pane, paste a message into it, and open new worker
+panes — an ordinary interactive `claude` the person sees, opened only after the person says
+yes. Inside cmux (0.65.0 or later) `moai-cmux` does the same with cmux's tabs, and inside a
+Saycode session `moai-saycode` does it through Saycode's `happy agent` and comes first. Each is
+planted only where it is chosen: `moai skill install --with moai-tmux` (or `--with moai-cmux`,
+`--with moai-saycode`) plants it and `--without` takes it out. Nothing runs headless. The supervisor picks, sends and checks; it does not fix and it
+does not merge.
 
-`moai --help` and `moai <command> --help` are the truth. This file is a summary of
-them, so where they differ the help wins.
 
 {CTL}
 
@@ -1902,7 +1886,9 @@ that commit. In that spot, pin it with `--user "Name (email)"` or `MOAI_ACTOR`.
 commit column are read from that tracker's `.moai` root — even with another repository
 nested inside the project (a submodule, `vendor`), a `moai` called in there does not
 write that repository's name.
-"#
+"#,
+        rules = rules(),
+        verbs = verbs_section()
     )
 }
 
@@ -5894,21 +5880,32 @@ mod tests {
     /// **공통 조각은 두 표면에 똑같이 든다.** 한쪽만 고치면 여기서 붉어진다 —
     /// 조각을 거치지 않고 표면에 글을 직접 적는 순간 두 벌이 다시 생긴다.
     #[test]
+    fn compact_guidance_preserves_the_reference_and_avoids_duplicate_lines() {
+        let (agents, skill, reference) = (agents(), skill(), reference());
+        assert!(agents.len() <= 8192, "AGENTS block is {} bytes", agents.len());
+        for text in [&agents, &skill] {
+            assert!(text.contains("references/commands.md"));
+        }
+        let common = agents.lines().filter(|line| line.len() >= 40 && skill.lines().any(|other| other == *line)).count();
+        assert_eq!(common, 0, "long duplicated lines: {common}");
+        for piece in [CHEATSHEET, FORKS, WRITING, DETAIL, CTL, GROUPS, DEFERRING, PROJECTS, LANGUAGE, UPDATES, MERGE_DRIVER, ARCHIVE_STORAGE, COMMITS, WORK, WIKI, CLOSING] {
+            assert!(reference.contains(piece), "missing reference content: {}", piece.lines().next().unwrap());
+        }
+    }
+
+    #[test]
     fn both_surfaces_carry_the_same_pieces() {
         let (agents, skill, reference) = (agents(), skill(), reference());
-        for piece in [CHEATSHEET, FORKS, NO_GATE, WRITING, DETAIL, CLOSING] {
-            let head = piece.lines().next().unwrap();
-            assert!(agents.contains(piece), "AGENTS 블록에 없다 — {head}");
-            assert!(skill.contains(piece), "스킬에 없다 — {head}");
+        for piece in [CHEATSHEET, FORKS, WRITING, DETAIL, CLOSING] {
+            assert!(reference.contains(piece), "reference missing {}", piece.lines().next().unwrap());
         }
-        assert!(CLOSING.contains(&handoff("<id>")), "안내의 핸드오프 줄이 훅과 갈라졌다");
-        let rules = rules();
-        assert!(agents.contains(&rules) && skill.contains(&rules), "규칙 셋이 갈라졌다");
+        assert!(agents.contains(NO_GATE));
+        assert!(agents.contains("references/commands.md") && skill.contains("references/commands.md"));
+        assert!(CLOSING.contains(&handoff("<id>")));
+        assert!(reference.contains(&rules()) && reference.contains(&verbs_section()));
         let backlog = backlog();
         for piece in [GROUPS, backlog.as_str(), DEFERRING, PEOPLE, PROJECTS, LANGUAGE, UPDATES, COMMITS, WIKI, CTL] {
-            let head = piece.lines().next().unwrap();
-            assert!(agents.contains(piece), "AGENTS 블록에 없다 — {head}");
-            assert!(reference.contains(piece), "참고 문서에 없다 — {head}");
+            assert!(reference.contains(piece), "reference missing {}", piece.lines().next().unwrap());
         }
     }
 
@@ -6102,7 +6099,7 @@ mod tests {
                 assert!(!text.contains(gone), "{surface} 이 걷은 헤드리스 예제를 아직 가리킨다 — {gone}");
             }
         }
-        for (surface, text) in [("AGENTS 블록", agents()), ("스킬", skill())] {
+        for (surface, text) in [("참고 문서", reference())] {
             assert!(
                 text.contains("the moai binary never launches or drives a session itself"),
                 "{surface} 이 바이너리가 세션을 띄우지 않는다는 말을 잃었다"
@@ -6117,8 +6114,8 @@ mod tests {
                 "{surface} 이 옛 말(감독도 안 만진다)을 들고 있다"
             );
         }
-        let block = agents();
-        let team = &block[block.find("### The supervisor and its workers").expect("감독 절이 없다")..];
+        let block = reference();
+        let team = &block[block.find("## The supervisor and its workers").expect("감독 절이 없다")..];
         assert!(
             team.contains("the moai binary never\nlaunches or drives a session"),
             "감독 절이 바이너리의 말을 잃었다"
@@ -6196,7 +6193,7 @@ mod tests {
     /// 규칙의 이름이 스킬에 그대로 선다. 훅의 거절문 쪽은 `hook` 의 시험이 본다.
     #[test]
     fn the_skill_names_each_rule_as_the_hook_does() {
-        let skill = skill();
+        let skill = reference();
         for n in 1..=RULES.len() {
             let title = format!("**{n}. {}.**", RULES[n - 1]);
             assert!(skill.contains(&title), "스킬에 규칙 {n} 의 이름이 없다 — {title}");
@@ -6586,7 +6583,7 @@ mod tests {
     /// 만든다 — 옛 moai 가 죽은 자리다.
     #[test]
     fn the_milestone_first_rule_stands_in_all_three_teachings() {
-        let (agents, supervise, brief) = (agents(), supervise(), worker());
+        let (agents, supervise, brief) = (reference(), supervise(), worker());
         // 감독 스킬은 이제 걸음을 안 품는다(moai-snyk) — 통째로 재도 일꾼의 같은 글이 메우지 않는다.
         assert!(!supervise.contains(&brief), "감독 스킬이 일꾼의 걸음을 품는다");
         let head = supervise.as_str();
@@ -7488,7 +7485,7 @@ stop sending outside work while a release runs",
         }
         // **심는 두 표면이 같은 글을 받는다** — 한쪽만 고치면 그 글을 읽은 세션만 걸음을 안다.
         let (agents, reference) = (agents(), reference());
-        assert!(agents.contains(&backlog), "AGENTS 블록의 backlog 절이 갈라졌다");
+        assert!(agents.contains("Backlog promotion"), "AGENTS block lacks backlog pointer");
         assert!(reference.contains(&backlog), "참고 문서의 backlog 절이 갈라졌다");
     }
 
@@ -8211,8 +8208,8 @@ stop sending outside work while a release runs",
         // 표면마다 센다 — 합쳐 세면 두 표면에 드는 조각이, 한 표면에만 있는 heredoc 이 빠진
         // 자리를 메운다.
         for (name, text, want) in [
-            ("agents", agents(), 2),
-            ("skill", skill(), 1),
+            ("agents", agents(), 0),
+            ("skill", skill(), 0),
             ("reference", reference(), 3),
             ("supervise", supervise(), 1),
         ] {
@@ -8385,7 +8382,7 @@ stop sending outside work while a release runs",
     fn the_skills_carry_the_words_table_and_rule_three_points_at_it() {
         let section = verbs_section();
         let title = section.lines().next().unwrap().trim_start_matches("## ");
-        assert!(skill().contains(&section), "moai 스킬에 낱말표가 없다");
+        assert!(reference().contains(&section), "moai reference lacks the words table");
         // **감독과 일꾼 글은 표 없이 도구를 바로 적는다**(moai-obxm) — 둘 다 Claude Code 에만 가니, 표를 실으면 받는 창이
         // 없는 열을 읽고 *기울인* 걸음 이름은 한 번 더 건너뛰는 길이 된다.
         for (whose, text) in [("감독 스킬", supervise()), ("일꾼 글", worker()), ("일꾼 갈래 글", worker_branches())]
@@ -8492,7 +8489,7 @@ stop sending outside work while a release runs",
             FORKS.contains("`--due` on `moai add` or `moai backlog add`"),
             "혼자 만드는 줄에 기한을 다는 길이 없다"
         );
-        assert!(agents.contains("ask when it is due in the same breath"), "기능 요청 2 단계가 기한을 안 묻는다");
+        assert!(agents.contains("Ask about the deadline and any running milestone in the same breath"), "기능 요청 2 단계가 기한을 안 묻는다");
         assert!(
             GROUPS.contains("`moai due apply`") && GROUPS.contains("puts on an epic raises its members as it nears"),
             "그룹 글이 에픽의 기한이 멤버를 올린다고 안 댄다"
