@@ -428,9 +428,16 @@ fn connection(stream: UnixStream, methods: &Methods, stop: &AtomicBool, path: &P
             Ok(rpc::Line::Text(line)) => match turn(methods, work, &line) {
                 Turn::Ran(reply, running) => (reply, running),
                 Turn::Refused(refused) => {
-                    // 데몬은 곧 끝난다 — 안 읽는 쪽을 기다리지 않는다. 못 썼어도 돌리지 않은 것은 같다.
-                    let _ = writer.set_nonblocking(true);
-                    let _ = writeln!(writer, "{refused}");
+                    // **거절은 줄째 나가거나 아예 안 나간다**(리뷰 moai-3hgm.puw 7번). 막지 않는 쓰기로 내던 판은 앞의
+                    // 답을 안 읽어 버퍼가 찬 쪽에 줄의 앞머리만 쓰고(`writeln!` 은 몸과 줄바꿈을 따로 쓴다) 닫아, 그쪽이
+                    // 줄바꿈 없는 잘린 JSON 을 받았다. 그래서 다른 답과 같이 막는 쓰기로, 연결 첫머리에 건 [`WRITE`]
+                    // 시한 안에서 쓴다. 줄 하나를 한 번에 쓴다 — 짧은 줄 하나가 소켓에 통째로 들거나 안 든다.
+                    //
+                    // 이 기다림은 멈추기를 늘이지 않는다: 들이지 못한 요청이라 자리([`Running`])가 없고, `Work::close`
+                    // 는 이 스레드를 안 기다린다. 데몬은 기다림이 끝나면 이 쓰기가 섰든 아니든 끝나고, 그때 못 쓴 쪽은
+                    // 거절 없이 깨끗한 EOF 를 받는다. 수명 길([`lifecycle`])도 같은 꼴로 막는 쓰기를 쓴다. 못 썼어도
+                    // 돌리지 않은 것은 같다.
+                    let _ = writer.write_all(format!("{refused}\n").as_bytes()).and_then(|()| writer.flush());
                     return;
                 }
             },
@@ -666,6 +673,56 @@ mod tests {
         assert_eq!(writing.answer().expect("쓰기의 답")["result"], "written");
         daemon.join();
         assert!(!daemon.finished("touch"));
+    }
+
+    /// **멈추는 데몬의 거절은 버퍼가 찬 연결에도 줄째 간다**(리뷰 moai-3hgm.puw 7번) — 앞의 답을 안 읽어 데몬에서 그쪽으로
+    /// 가는 버퍼가 찬 연결이다. 그쪽이 읽어 자리가 나면 거절이 나가고, 앞의 답 뒤에 줄바꿈까지 든 한 줄로 선다. 막지 않는
+    /// 쓰기로 내던 판은 거기서 못 쓰거나 앞머리만 쓰고 닫아, 그쪽은 쌓인 답 뒤에 거절 없는 EOF 나 잘린 줄을 받았다.
+    #[test]
+    fn a_stopping_refusal_to_a_full_socket_waits_for_room_and_goes_out_whole() {
+        use std::io::Read as _;
+        let (ours, theirs) = UnixStream::pair().unwrap();
+        // 데몬 쪽에서 그쪽으로 가는 버퍼를 채운다 — 그쪽이 안 읽은 앞의 답들이다.
+        let filler = ours.try_clone().unwrap();
+        filler.set_nonblocking(true).unwrap();
+        let mut queued = 0;
+        loop {
+            match (&filler).write(b"queued\n") {
+                Ok(n) => queued += n,
+                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => break,
+                Err(e) => panic!("버퍼를 못 채웠다: {e}"),
+            }
+        }
+        // O_NONBLOCK 은 복제한 fd 와 나눈다 — 연결은 막는 소켓을 받는다. 복제는 닫는다: 남으면 그쪽이 EOF 를 못 본다.
+        filler.set_nonblocking(false).unwrap();
+        drop(filler);
+        let work = Arc::new(Work::default());
+        work.close(Instant::now());
+        let mut methods = Methods::new();
+        methods.register_write("touch", |_, _| rpc::reply(&json!("touched")));
+        let served = {
+            let work = Arc::clone(&work);
+            std::thread::spawn(move || {
+                let nowhere = Path::new("/nonexistent/moai-test.sock");
+                connection(ours, &methods, &AtomicBool::new(false), nowhere, &work);
+            })
+        };
+        let line = json!({ "jsonrpc": "2.0", "id": 7, "method": "touch", "params": {} });
+        writeln!(&theirs, "{line}").unwrap();
+        // 거절이 찬 버퍼에 닿을 틈을 준다 — 옛 판은 여기서 못 쓰고 닫았다. 새 판은 이 틈과 상관없이 읽기를 기다린다.
+        std::thread::sleep(Duration::from_millis(300));
+        theirs.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
+        let mut got = Vec::new();
+        (&theirs).read_to_end(&mut got).unwrap();
+        served.join().unwrap();
+        let text = String::from_utf8(got).unwrap();
+        let whole = text.strip_suffix('\n').expect("거절이 줄바꿈 없이 끝났다");
+        let (earlier, last) = whole.rsplit_once('\n').expect("앞의 답 뒤에 줄이 없다");
+        let refused: Value =
+            serde_json::from_str(last).unwrap_or_else(|e| panic!("마지막 줄이 거절이 아니다: {e} — {last:?}"));
+        assert_eq!(refused["id"], 7, "{refused}");
+        assert_eq!(refused["error"]["data"]["code"], crate::fail::code::STOPPING, "{refused}");
+        assert_eq!(earlier.len() + 1, queued, "앞의 답을 잃었다");
     }
 
     /// 막 읽은 요청과 멈추기가 겨룬다 — 쉬던 연결의 쓰기와 `daemon.shutdown` 을 함께 보낸다. 어느 쪽이 이기든 그 요청은
