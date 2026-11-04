@@ -1,24 +1,3 @@
-## In a subagent
-
-When `Worker:` says `subagent`, the supervisor raised you with `Agent` inside its own session,
-and four things a session has are not yours. The rule for each stands here once; a step that
-needs more says so in a line of its own, **In a subagent**.
-
-- **No `EnterWorktree` or `ExitWorktree`.** A session does without them too ("Stay in the
-  root"); for you they do not exist
-- **No `AskUserQuestion`, and nobody watches you.** Where a step asks the person, hand back
-  instead and end (4). `Person: away` still decides by recommendation —
-  "When the person is away" in `worker-branches.md`
-- **No `/model`.** The model and the effort you were raised on stay (the assignment's `Model:` line)
-- **What you hand back is the report** (12) — `SubagentHandback`, and your turn ends with it.
-  Where a step says to tell the supervisor and stop, that is your hand-back; where it says to
-  tell the supervisor and go on, it goes in the report. A message that hands over no work is
-  answered the same way
-- **Your tool calls carry the supervisor's session.** The hook reads you two as one: your
-  pick-ups are recorded as the supervisor's, its rules see what the supervisor's other workers
-  hold, and the supervisor's turn-end holds what you hold
-
-
 ## The milestone branch
 
 When `Base branch:` reads `milestone/<milestone id>`, the work is inside a milestone —

@@ -91,28 +91,18 @@ accident. Ask the person to put the root on a branch, and stop.
 
 Fill the name you read into `<root branch>` in the message you send the worker.
 
-**Each work has a base branch** — the branch its worktree splits from and merges back
-into. It is decided per work, by the release the work stands under — the one
-`moai show --milestone` lists it under, read in 1:
-
-- **Outside every milestone** — it stands under none, or under one that has shipped or been
-  deferred (a `p0` fix, say) — it is the root branch, as it always was
-- **Inside a live milestone** it is that milestone's own branch, `milestone/<milestone id>`,
-  even while nothing runs yet and `<milestone>` in 3 says `none` — the first epic sent is
-  what starts it. Every epic of the milestone merges there, and the root branch takes the
-  milestone branch in once, at the release, so what a milestone has not shipped yet does
-  not stand on the root branch. The branch is checked out in a long-lived worktree of its
-  own, `.worktrees/milestone-<milestone id>`, because the root stays on the root branch. The
-  worker handed the milestone's first epic raises it when it is missing (its "The milestone
-  branch") — you do not raise it, and you do not remove it; it goes after the release
-
-Fill that into `<base branch>` in the message and in the check of 5. For stalled work (0)
-it is the release its epic stands under (`moai show <epic>`). **The worker does not
-read either again** — asked inside a worktree, git answers with that worktree's own branch.
+**Each work has a base branch** — read the release from `moai show --milestone` in 1. Outside a live milestone (including shipped or deferred), use the root branch. Inside a live milestone use `milestone/<milestone id>`, even before it starts. The worker raises a missing milestone branch in `.worktrees/milestone-<milestone id>` and merges there; the root takes it only at release. Never remove that long-lived worktree. For stalled work read the release on its epic. Fill `<base branch>` in the message and check in 5; the worker must not infer it from its own worktree.
 
 ## One round
 
-**0. Reclaim first — work that lost its place.** Read `references/supervise-reclaim.md` to check for and reclaim stranded work.
+**0. Reclaim first — work that lost its place.** Before new backlog, inspect `moai status --json` for `stranded` warnings and `moai show <id>` for `Place` (use `--worktree` for both inside a worktree). Only `none` is reclaimed; `not showing yet` is fresh and `<path> (<branch>)` is active there. A root pickup may show `none` without being abandoned, so ask a busy session or the person what it holds. An epic or issue id in a worktree directory or branch (`<id>` or `worktree-<id>`), or its pickup mark, determines place; sibling snapshots do not. Pickups under an hour old do not show. `broken_worktrees` and sibling-trouble warnings report overlay errors, not stranded work.
+
+A worktree can remain after its session dies and then is not `stranded`. A missing `ListAgents` name does not prove the window ended: a resumed session gets a new name, and an idle one may await its person. Find it by worktree, ask the person which window owns it and hand it on only after they say it ended. Move the old name's sends and refusals to its new name if it returns. When carrying on, send one idle worker before new backlog, using message 3 with `<other work>` filled and these first lines:
+
+    You are handed the stalled work in <epic> — the previous session did not finish it. Read <steps file> and follow its steps from "Carrying on stalled work".
+    Read first: moai show <epic> (history and notes) · moai show <member> (the place too — a place stands on work only)
+
+Ask the person before putting work down (`moai mv <id> todo` or `moai defer <id> -m '<why>'`); do not send carried work again until its report is checked.
 
 **1. Pick.** First raise what a near deadline calls for, once a round — reading never writes, so a
 deadline raises nothing until someone runs the verb, and the order `moai ready` gives is
@@ -250,9 +240,151 @@ and cannot be changed by config — the person in that window changes it with `/
 subagent's model is fixed when you raise it: a worker that finds the work heavier hands back
 `Model: raise to complex` before it picks anything up (4).
 
-**2-2. Unfold with the `plan` role.** Read `references/supervise-planning.md` for this step.
+**2-2. Unfold with the `plan` role.** A backlog item goes to its worker already unfolded.
+Splitting work into an epic and its issues is the `plan` role's (2-1) — a worker on `develop`
+or `complex` would otherwise plan on its own model. So before you send a backlog item, raise one
+subagent on the `plan` role's model and `effort_plan` on the brief
+below, every slot filled as in 3:
 
-**3. Send.** Read `references/supervise-send.md` for the assignment and delivery steps.
+    Agent(subagent_type: "general-purpose", model: <plan model>, effort: <effort_plan>, description: "plan <id>", prompt: <the plan brief>)
+
+**Mark the backlog the moment you raise it** — `moai note <id> 'Sent: plan <agentId>'`, as 1 says
+for a send: until the plan hands back, that backlog still stands in `moai backlog ls`, and a
+second plan subagent raised for it unfolds it twice (`promote` unfolds a closed backlog too).
+The word is `plan`, not `subagent` — no worker holds this backlog, so it is not stalled work.
+
+    You unfold backlog <id> — <title> — for the supervisor of this repository. You split it
+    into an epic and its issues; you do not develop it, pick anything up, raise a worktree or
+    change a repository file — the tracker and your scratchpad are yours. Create `<scratchpad>/<backlog id>/` before writing any plan files. Use that directory until the epic exists; then create `<scratchpad>/<epic>/` and use it for all subsequent bodies and review files. Never share a task directory across concurrent work.
+    Root: <root>
+    Milestone: <milestone>
+    Due: <due>
+    Person: <person>
+    Writing: <writing>
+
+    Read the request, its evidence and enough code and tracker context to ground the split. Write short titles and concrete, actionable bodies with file and function locations, constraints, acceptance tests and review focus. For detailed writing use, for the epic: why this bundle · the person's decisions · promises · order and the files it shares · review focus; for a development member: goal · context (files and lines, the precedent) · what is decided · steps · acceptance (which tests) · out of scope · order and the files it shares · role, adding where and how (files, functions, structures) · important contracts and pitfalls after `what is decided`. Name the epic review section `Review focus / 리뷰에서 볼 것` (choose the English or Korean heading). For brief writing give what, where and tests. Classify each member using the difficulty rubric and explain why. Do not ask the person questions.
+    Keep the person's decisions and exclusions, storage, concurrency, path security and output contracts, numbers and budgets, member order and review focus. Give entry-point files and functions as navigation hints; line numbers, proposed signatures and types are hints, not contracts. Describe acceptance tests by the failure conditions they must catch, not exhaustive test function names. Under `acceptance (which tests)`, write those failure conditions; test names are optional navigation hints. Make example commands executable with configured column names, the first column, spaces and shell quoting; when unknown use a placeholder such as `<first column>`. Put shared files and order in the epic once; a member's `order and the files it shares` names only its own place and files and points to the epic — do not repeat file lists or explanations in every member.
+
+    1. Read it — moai -C "<root>" show <id> — and as much of the code as the split needs. If it
+       already stands done, hand back `already unfolded: <id>` and stop: unfolding again puts up
+       two epics.
+    2. Write the plan: one `# <epic title>` line and one `- [pN] <member title>` line per issue. A plan
+       line becomes the title verbatim, so write short new titles. Look first, then unfold:
+       moai -C "<root>" backlog promote <id> --dry-run --from -
+       moai -C "<root>" backlog promote <id> --from -
+    3. Hang the release on the epic, then the deadline, each unless its slot says `none` — the
+       release first, as a dead one's earlier deadline refuses the person's. `Milestone: none`
+       clears nothing `promote` carried, but for a dead release: when a line `promote` printed
+       names the release it carried as already closed or deferred, clear it — left on, it
+       re-opens a release that is out, or takes the whole plan out of the plan:
+       moai -C "<root>" edit <epic> --milestone <milestone>
+       moai -C "<root>" edit <epic> --milestone none
+       moai -C "<root>" edit <epic> --due <due>
+       A refusal because the day is later than the milestone's leaves the epic as it stands.
+    4. Give the epic a body, as `Writing:` says — `detailed`: the epic headings of the shared instructions above; combine it with the backlog context already carried onto it in a scratch file and write that combined body with `moai -C "<root>" edit <epic> -b - < <epic body file>`. Give every member a body the worker can start from, as `Writing:` says. `detailed`: these
+       headings, each a list, with the two the shared instructions add after `what is decided` —
+       goal · context (files and lines, the precedent) · what is decided · steps · acceptance (which tests) · out of scope · order and the files it shares · role.
+       `brief`: what to change · where (file and function) · how to test it. A design question the
+       backlog and its notes do not settle goes in it, open, for the worker to ask — do not
+       settle it here. Write each body under `<scratchpad>/<epic>/`, using a distinct filename per member, and run
+       moai -C "<root>" edit <member> -b - < "<scratchpad>/<epic>/<member>.md"
+    5. Mark the epic, last — a supervisor that starts again sends an epic it finds marked so, so
+       mark it only once 3 and 4 stand:
+       moai -C "<root>" note <epic> 'Sent: plan <id>'
+       Then hand back. The first line is Model ran: anthropic/<your real model name> — the name in
+       your system prompt, not an alias. The second is epic: <epic id>. Then one line per member,
+       <member> <low|medium|high> — <reason>, on this rubric:
+       - `low` — text, comments, a one-line fix; behaviour unchanged
+       - `medium` — a behaviour change inside one file, ringed by tests
+       - `high` — several files, the write path, concurrency, the storage format, hooks; hard to undo
+       Open the reason with `docs` for a member that only touches the wiki or the CHANGELOG, and
+       with `bulk` for sorting, summing up or the same mechanical fix many times. Then a line
+       `not hung: <what and why>` for each release or deadline 3 left as it was or cleared.
+       If you could not unfold, the first line after Model ran: is `not unfolded: <reason>`.
+
+It hands back the epic it unfolded and a difficulty per member. Then
+
+- **write its `model:` line on the epic** — `moai note <epic> 'model: anthropic/<model ran> (<heaviest difficulty> — plan: unfolded <id>)'`;
+  `<model ran>` is the name after `anthropic/` on its `Model ran:` line — copy the vendor once
+- **measure the role (2-1) on the members it handed back**, not on the backlog — the members
+  are written now: `docs` or `bulk` when every member's reason opens with that word, else the
+  heaviest of them picks `develop` or `complex`
+- **tell the person each `not hung:` line** — a deadline they gave that did not land, or a dead
+  release the plan cleared off the epic; nothing else carries it to them
+- **send that epic `from step 2`**: the message of 3 with its first two lines swapped for the two below,
+  and the `Sent:` mark (1) on the epic. The backlog is done once unfolded and leaves the candidates by itself
+
+      You are handed epic <epic> — <title>. It is already unfolded; do not promote. Read <steps file> and follow its steps from step 2.
+      Read first: moai show <epic>
+
+**When you start again (4)**, a backlog whose last `Sent:` is `plan <agentId>`, with no
+`Plan stopped:` after it, lost its plan subagent with the round: once the person agrees that the
+session it ran in is gone, raise a new one for it. An epic whose last `Sent:` is `plan <backlog id>`
+— the plan marks it last, once the epic is whole — was unfolded and never sent: measure the role
+from its members' bodies (2-1) and send it from step 2. Its plan's `model:` line went with the
+notification; do not write one from memory.
+
+If it hands back `already unfolded:` or `not unfolded:`, send nothing for that backlog — someone
+unfolded it, or the plan subagent could not; read its reason and tell the person. On
+`not unfolded:` also close the backlog's mark — `moai note <id> 'Plan stopped: <its reason>'` —
+or every start again sends it to a new plan; it is a candidate again when the person says so. **A worker
+you send a backlog to directly** (the message of 3 as it stands, `from step 1`) still unfolds it
+itself — that is the path when the person asks for it, not the usual one.
+
+**3. Send.** Send **one** backlog to one worker. The message is the lines below, every
+slot filled. The worker knows nothing of this conversation, so what is not in the message
+does not reach it — except the worker's steps: they stand in this skill's
+`references/worker.md`, and the first line tells the worker to `Read` that file and follow
+it. Its rare branches stand beside it in `references/worker-branches.md`, and the worker
+reads the section it needs by itself — you name only the first file. The worker stands in this same repository with the same plugin loaded, so the file is
+there for it. **Do not copy the file into the message** — name it.
+
+To a subagent the message is the `prompt` of the `Agent` call in 2, with `Worker: subagent`.
+To a session it goes with `Worker: session`:
+
+    SendMessage(to: <worker>, message: <the lines below>, notify_when_idle: true)
+
+`notify_when_idle` is for a session only — a subagent's end comes as a notification by itself.
+
+`<steps file>` is that file's absolute path: this skill's base directory — Claude Code shows
+it as "Base directory for this skill" when the skill loads — followed by
+`/references/worker.md`. Write it out whole; `@path` attaches nothing.
+**If that base directory lies outside `<root>`** — the plugin installed at user scope, in
+Claude Code's plugin cache — the worker's read of it is a read outside its working directory,
+and in the default permission mode Claude Code asks its person first; the plugin cache is no
+exception. A worker whose person is away waits on that prompt and sends nothing. Tell the
+person once, before the first send, and let them choose: a person in the worker's window
+answers it, or `permissions.additionalDirectories` in their settings holding that plugin
+directory lets it through. The settings are theirs — do not write them.
+Inside tmux, label the worker's pane as you send and, if the message does not arrive, deliver
+it into the pane — `moai-tmux`, "Label the pane" and "When a message does not arrive".
+Inside cmux, label the worker's tab as you send, once the person said yes to labels this round,
+and if the message does not arrive, deliver it into the tab —
+`moai-cmux`, "Label the tab" and "When a message does not arrive".
+Inside Saycode, a worker Saycode lists gets the message as a prompt instead of `SendMessage` —
+`moai-saycode`, "Send work".
+Fill every message slot: `<id>`, `<title>`, `<steps file>`, `<root branch>`, `<base branch>`, `<milestone>`, `<due>`, `<model>`, `<difficulty>`, `<why>`, `<effort>`, `<worker kind>`, `<subagent ladder>`, `<writing>`, `<other work>`, `<root>`, `<person>` and `<subdir>` only for a subdirectory project. Use the root dir from 2, the branches decided before the round, and this round's `moai writing --json` detail.
+
+`<milestone>` is the living release the backlog stands under in `moai show --milestone`, or `none` if absent, closed, deferred or nothing is running. Never choose a release for it. A stale but well-formed id is accepted and reported as `dangling_milestone`; copy it from the show result. `<due>` is the backlog's `due_on`, else the day the person gives when asked; ask for work with no deadline, never invent one, and use `none` without an answer (including `Person: away`). The epic's deadline bounds members and raises their priority via `moai due apply`.
+
+Copy `<model>`, `<difficulty>`, `<why>` and `<effort>` from 2-1; do not put a single quote in `<why>`. `<worker kind>` is `subagent` or `session`. Copy the ladder as `bulk <model> (<effort>) · develop <model> (<effort>) · complex <model> (<effort>)` from this round; `none` for Codex or when the person says workers do the work themselves. Add no other subagent directive. The `Worktree:` line goes unchanged. `<other work>` names sibling worktrees, concurrent sends and the files they hold, or `none`; the worker leaves a needed held file as a member (4-3). `<person>` is `here`, or `away` only when the person says so. Leave `<grade>` and `<vendor>` for the worker's review and close, not in the message.
+
+    You are handed backlog <id> — <title>. Read <steps file> and follow its steps from step 1.
+    Read first: moai show <id>
+    Model: <model> (<difficulty> — <why>)
+    Effort: <effort>
+    Worker: <worker kind>
+    Subagents: <subagent ladder>
+    Writing: <writing>
+    Work running alongside: <other work> — do not touch those files (4-3)
+    Root branch: <root branch>
+    Base branch: <base branch>
+    Milestone: <milestone>
+    Due: <due>
+    Root: <root>
+    Subdir: <subdir>
+    Person: <person>
+    Worktree: stay in the root and reach it by absolute path — never EnterWorktree, every call into .worktrees/ asks the person to approve it
 
 **4. Wait.** End your turn.
 

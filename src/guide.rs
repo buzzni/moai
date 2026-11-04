@@ -1596,16 +1596,26 @@ pub fn worker_setup() -> String {
     let full = worker_full();
     // 셋째 조각은 걸음 1 하나다 — 제 머리 없이 이으면 "The milestone branch" 절의 끝으로 읽힌다.
     format!(
-        "{}\n{}\n## Step 1 — unfold a backlog\n\n{}",
-        guide_slice(&full, "## In a subagent", "## Before the steps"),
+        "{}\n## Step 1 — unfold a backlog\n\n{}",
         guide_slice(&full, "## The milestone branch", "## The steps"),
         guide_slice(&full, "1. Unfold it in the root", "2. Pick the members")
     )
 }
+pub fn legacy_worker_review() -> String {
+    "# Review moved\n\nRead `worker.md` step 7 and The review brief.\n".to_string()
+}
+pub fn legacy_worker_finish() -> String {
+    "# Follow-up moved\n\nRead `worker.md` steps 7-1 through 7-4.\n".to_string()
+}
+pub fn legacy_supervisor_step(step: &str) -> String {
+    format!("# Supervisor step moved\n\nRead `../SKILL.md` step {step}.\n")
+}
+#[cfg(test)]
 pub fn worker_review() -> String {
     let full = worker_full();
     guide_slice(&full, "7. Before merging", "7-1. Before merging").to_string()
 }
+#[cfg(test)]
 pub fn worker_finish() -> String {
     let full = worker_full();
     guide_slice(&full, "7-1. Before merging", "8. Merge from the root").to_string()
@@ -1614,14 +1624,34 @@ pub fn worker_tmux_tests() -> String {
     let full = worker_full();
     guide_slice(&full, "4-2. **If you test tmux", "4-3. **If you would have to touch").to_string()
 }
+fn worker_review_brief_section() -> String {
+    let brief = indent(&review_brief(), "    ");
+    format!(
+        r#"## The review brief
+
+In a subagent, 7 raises the review on this prompt — copy it whole and fill every slot.
+Create `<scratchpad>/<epic>/` first and save the filled prompt as
+`{REVIEW_BRIEF_AT}`. Pass that absolute path to the review subagent with
+instructions to read the whole file before starting. Use this epic's directory for all
+review scratch files; a shared `<scratchpad>/brief.md` lets parallel epics overwrite each
+other's prompts.
+
+{brief}"#
+    )
+}
 pub fn worker() -> String {
     let mut text = worker_full();
+    text = text
+        .replace(", and, in a subagent, the review brief of 7 (\"The review\nbrief\")", ". The review brief is below");
+    text = text.replace(STAY_IN_ROOT, r#"## Stay in the root
+
+**Never call `EnterWorktree`**, in a session or subagent: every call into `.worktrees/` asks the person for approval, no allow rule turns it off, and subagents have no such tool. Aim each command at `<root>/.worktrees/<epic>` with `git -C` or `(cd "<root>/.worktrees/<epic>" && …)` and every Read and Edit at an absolute worktree path, including conflict resolution. A session's shell retains `cd`; parentheses keep it in the root. A subagent's Bash starts in the root each call.
+
+Run the root branch check, merge, worktree removal and tracker commits in the root. If already in a worktree, return with `ExitWorktree(keep)` if you entered it that way, otherwise `cd "<root>"`. A merge run inside the worktree lands nothing; removing your current directory strands the shell. Rule 2 refuses root writes when all held work has worktrees and names where to write instead; never work around it.
+"#);
+    // The assignment supplies the writing setting; the shared moai guide owns its detail.
+    text = text.replace(&indent(DETAIL, "  "), "  Follow `Writing:` and the moai block's issue-writing rules; the moai skill's\n  `references/commands.md` has the detailed and brief formats.");
     for (start, end, pointer) in [
-        (
-            "## In a subagent",
-            "## Before the steps",
-            "## In a subagent\n\nIf raised as a subagent, read `worker-setup.md` — In a subagent.\n\n",
-        ),
         (
             "## The milestone branch",
             "## The steps",
@@ -1633,27 +1663,75 @@ pub fn worker() -> String {
             "1. For a backlog assignment, unfold it in the root as `worker-setup.md` step 1 says.\n",
         ),
         (
+            "7. Before merging",
+            "7-1. Before merging",
+            r#"7. Review the whole epic once before merging, in this session, never another agent program. In Codex follow `worker-codex.md` step 7 instead. Read `review`, `review_grade`, and `review_raise` from `moai models --json`; use the configured grade, raising at most one step to `max` only when `review_raise = "write-path"` and a member touched the write path, concurrency, storage or hooks, or this worktree carries two epics. Ask the person to change a session's model if needed. In a subagent, pick up the review issue before raising a review subagent on the configured model and the filled "The review brief" above in `worker.md`; save it at `<scratchpad>/<epic>/brief.md` and pass the path.
+
+   Read the epic's `Review focus / 리뷰에서 볼 것` section, then add development focus and the grade and reason to the angle. Use `<scratchpad>/<epic>/angle.md` and `-b -` for multiline or quoted angles; never share scratch directories. The range starts at `git -C "<root>/.worktrees/<epic>" merge-base <base branch> HEAD`, after pulling the base in 6. Create the review issue under the epic (rule 3):
+
+       moai -C "<root>" add 'review — <what you are looking at>' -t review --parent <epic> -b '<what you are looking for and why>'
+
+   In the same breath move finished members one id per call:
+
+       moai -C "<root>" mv <member> review --from in_progress
+
+   Pass over members left in the first column; leave already-reviewed members there. If `review` is not a column, leave members in `in_progress`. Pick up the review issue before calling review:
+
+       moai -C "<root>" mv <review id> in_progress --from todo
+
+   In a subagent, raise the review with:
+
+       Agent(subagent_type: "general-purpose", model: <review model>, description: "review <epic>", prompt: "Read <scratchpad>/<epic>/brief.md whole before you start, then follow it")
+
+   In a session call `/code-review <grade> --fix <root>/.worktrees/<epic>`. If a hook refuses, run its correction; if rule 3 still refuses after the review is picked up, follow "When the review stays refused" in `worker-branches.md` and review by hand, never by starting another agent program. In a subagent raise the configured review subagent only after pickup; it leaves its fixes uncommitted and its own words on the review issue.
+
+   **Five places the review keeps finding.** Add them to the angle and hold them against the actual review: a new item taking another's doc block; a test that cannot go red on a revert; setup duplicated across paths; comments or docs disagreeing with behavior; and a path newly opening a file it did not open before. The angle does not reach the review command by itself.
+
+   While review runs do not touch, reset, rebase or amend the branch or worktree. Wait for it, stop anything it left running with `TaskStop` and inspect the worktree. Take fixes in a separate `fix:` commit; note handoffs with issue IDs. Merge with `--no-ff`, never squash or rebase: commit subjects identify issues and milestone merge hashes remain stable.
+
+"#,
+        ),
+        (
+            "7-1. Before merging",
+            "8. Merge from the root",
+            r#"7-1. Before merging, inspect backlog parked mid-epic (`moai -C "<root>" show --type backlog -e <epic>`) and review handoffs. If the epic cannot deliver without one, it is an unfinished member, even if it waits on a decision or a sibling's file. Do not promote an already closed backlog. Unfold only `- issue` lines into the standing epic:
+
+    moai -C "<root>" backlog promote <backlog id> -e <epic> --from -
+   Leave reclaimed members in the first column, not deferred and not in this merge: review 7 did not see them. Name them in the `Next:` note (11); the session that closes the epic reviews it again.
+
+7-2. If the epic ran in a milestone, sort handed-on work by the release bar. Bug-level work stays in the epic or another epic in that milestone; work the release can do without goes outside:
+
+    moai -C "<root>" edit <that row> -e none --milestone none
+   Both flags matter because the milestone is inherited. Use the existing `#bug` tag and `Regression-of:` test to judge bug-level; do not invent another tag or field.
+
+7-3. If there is a CHANGELOG, check the upcoming release section and add this epic's entry in the worktree before merging. Aim the commit at `git -C "<root>/.worktrees/<epic>"`. Commit all of the epic's entries once after members and review fixes; if a later fix changes what ships, update its entry in that fix, not a second changelog commit. Nothing blocks an empty section.
+
+    git commit -m "docs(changelog): <what this epic changed> (<epic>)" -- CHANGELOG.md
+
+7-4. If there is a wiki (`moai wiki ls`), ask whether a person-facing key, command, flag, file, format or procedure changed. If so follow `moai-wiki` in the worktree and commit there before merging; aim wiki calls at `moai -C "<root>/.worktrees/<epic>"` because bare calls read the root. `<wiki dir>` is `dir` in `moai wiki ls --json`. If not, write nothing; nothing checks this. If one rule could have stopped a review finding, follow Lessons in `moai-wiki` in the same commit.
+
+    git add -- <wiki dir>
+    git commit -m "docs(wiki): <what changed> (<epic>)" -- <wiki dir>
+
+"#,
+        ),
+        (
+            "4-1. **The tracker you edit is always the root's.**",
+            "4-2. **If you test tmux",
+            "4-1. **The tracker you edit is always the root's.** Follow the moai block's worktree tracker rule. Use `moai -C \"<root>\"` to make the target explicit; never set `MOAI_HERE`. Give review subagents the same rule. Put `-e <epic>` on backlog parked mid-epic so 7-1 finds it. If this worktree's `.moai` changed, undo it in the worktree with `git -C \"<root>/.worktrees/<epic>\" checkout -- .moai`; never undo the shared root tracker. If already committed, undo that commit too and park again from the root.\n\n",
+        ),
+        (
             "4-2. **If you test tmux",
             "4-3. **If you would have to touch",
             // 잔걸음(`4-3.`·`7-1.`…)은 `1.` 이 아닌 표시라 문단을 못 끊는다 — 앞뒤에 빈 줄이 서야 위 걸음에 안 붙는다
             // (`the_worker_steps_follow_the_markdown_list_rules`, 심는 글로도 잰다).
             "4-2. If testing tmux, follow `worker-tmux-tests.md` before starting a test server.\n\n",
         ),
-        (
-            "7. Before merging",
-            "7-1. Before merging",
-            "7. Before merging, follow `worker-review.md` for the epic review, its grade and handoff. Codex follows `worker-codex.md` step 7 instead.\n\n",
-        ),
-        (
-            "7-1. Before merging",
-            "8. Merge from the root",
-            "7-1. Reclaim unfinished epic promises as `worker-finish.md` step 7-1 says.\n\n7-2. For a milestone, sort handed-on work as `worker-finish.md` step 7-2 says.\n\n7-3. Check the changelog as `worker-finish.md` step 7-3 says.\n\n7-4. Check the wiki and lessons as `worker-finish.md` step 7-4 says.\n\n",
-        ),
     ] {
         let part = guide_slice(&text, start, end).to_owned();
         text = text.replacen(&part, pointer, 1);
     }
-    text
+    text.replacen("## The steps", &format!("{}\n\n## The steps", worker_review_brief_section()), 1)
 }
 
 // Conditional procedures are kept as exact slices of the canonical text. The main
@@ -1673,14 +1751,17 @@ pub fn supervise_sessions() -> String {
         guide_slice(&full, "**A session's report comes back", "**5. Check the report")
     )
 }
+#[cfg(test)]
 pub fn supervise_reclaim() -> String {
     let full = supervise_full();
     guide_slice(&full, "**0. Reclaim first", "**1. Pick.**").to_string()
 }
+#[cfg(test)]
 pub fn supervise_planning() -> String {
     let full = supervise_full();
     guide_slice(&full, "**2-2. Unfold", "**3. Send.**").to_string()
 }
+#[cfg(test)]
 pub fn supervise_send() -> String {
     let full = supervise_full();
     guide_slice(&full, "**3. Send.**", "**4. Wait.**").to_string()
@@ -1689,9 +1770,36 @@ pub fn supervise() -> String {
     let mut text = supervise_full();
     for (start, end, pointer) in [
         (
+            "**Each work has a base branch**",
+            "## One round",
+            r#"**Each work has a base branch** — read the release from `moai show --milestone` in 1. Outside a live milestone (including shipped or deferred), use the root branch. Inside a live milestone use `milestone/<milestone id>`, even before it starts. The worker raises a missing milestone branch in `.worktrees/milestone-<milestone id>` and merges there; the root takes it only at release. Never remove that long-lived worktree. For stalled work read the release on its epic. Fill `<base branch>` in the message and check in 5; the worker must not infer it from its own worktree.
+
+"#,
+        ),
+        (
             "**0. Reclaim first",
             "**1. Pick.**",
-            "**0. Reclaim first — work that lost its place.** Read `references/supervise-reclaim.md` to check for and reclaim stranded work.\n\n",
+            r#"**0. Reclaim first — work that lost its place.** Before new backlog, inspect `moai status --json` for `stranded` warnings and `moai show <id>` for `Place` (use `--worktree` for both inside a worktree). Only `none` is reclaimed; `not showing yet` is fresh and `<path> (<branch>)` is active there. A root pickup may show `none` without being abandoned, so ask a busy session or the person what it holds. An epic or issue id in a worktree directory or branch (`<id>` or `worktree-<id>`), or its pickup mark, determines place; sibling snapshots do not. Pickups under an hour old do not show. `broken_worktrees` and sibling-trouble warnings report overlay errors, not stranded work.
+
+A worktree can remain after its session dies and then is not `stranded`. A missing `ListAgents` name does not prove the window ended: a resumed session gets a new name, and an idle one may await its person. Find it by worktree, ask the person which window owns it and hand it on only after they say it ended. Move the old name's sends and refusals to its new name if it returns. When carrying on, send one idle worker before new backlog, using message 3 with `<other work>` filled and these first lines:
+
+    You are handed the stalled work in <epic> — the previous session did not finish it. Read <steps file> and follow its steps from "Carrying on stalled work".
+    Read first: moai show <epic> (history and notes) · moai show <member> (the place too — a place stands on work only)
+
+Ask the person before putting work down (`moai mv <id> todo` or `moai defer <id> -m '<why>'`); do not send carried work again until its report is checked.
+
+"#,
+        ),
+        (
+            "Fill in `<id>`, `<title>`, `<steps file>`,",
+            "    You are handed backlog <id>",
+            r#"Fill every message slot: `<id>`, `<title>`, `<steps file>`, `<root branch>`, `<base branch>`, `<milestone>`, `<due>`, `<model>`, `<difficulty>`, `<why>`, `<effort>`, `<worker kind>`, `<subagent ladder>`, `<writing>`, `<other work>`, `<root>`, `<person>` and `<subdir>` only for a subdirectory project. Use the root dir from 2, the branches decided before the round, and this round's `moai writing --json` detail.
+
+`<milestone>` is the living release the backlog stands under in `moai show --milestone`, or `none` if absent, closed, deferred or nothing is running. Never choose a release for it. A stale but well-formed id is accepted and reported as `dangling_milestone`; copy it from the show result. `<due>` is the backlog's `due_on`, else the day the person gives when asked; ask for work with no deadline, never invent one, and use `none` without an answer (including `Person: away`). The epic's deadline bounds members and raises their priority via `moai due apply`.
+
+Copy `<model>`, `<difficulty>`, `<why>` and `<effort>` from 2-1; do not put a single quote in `<why>`. `<worker kind>` is `subagent` or `session`. Copy the ladder as `bulk <model> (<effort>) · develop <model> (<effort>) · complex <model> (<effort>)` from this round; `none` for Codex or when the person says workers do the work themselves. Add no other subagent directive. The `Worktree:` line goes unchanged. `<other work>` names sibling worktrees, concurrent sends and the files they hold, or `none`; the worker leaves a needed held file as a member (4-3). `<person>` is `here`, or `away` only when the person says so. Leave `<grade>` and `<vendor>` for the worker's review and close, not in the message.
+
+"#,
         ),
         (
             "## Workers in sessions",
@@ -1707,16 +1815,6 @@ pub fn supervise() -> String {
             "**A session's report comes back",
             "**5. Check the report",
             "For a session report, read `references/supervise-sessions.md` before checking it.\n\n",
-        ),
-        (
-            "**2-2. Unfold",
-            "**3. Send.**",
-            "**2-2. Unfold with the `plan` role.** Read `references/supervise-planning.md` for this step.\n\n",
-        ),
-        (
-            "**3. Send.**",
-            "**4. Wait.**",
-            "**3. Send.** Read `references/supervise-send.md` for the assignment and delivery steps.\n\n",
         ),
     ] {
         let part = guide_slice(&text, start, end).to_owned();
@@ -3564,9 +3662,9 @@ It waits for the supervisor's review and the second assignment; it does not revi
 When `Review-ready:` arrives, read its whole note. Recompute the grade from `review_grade` and `review_raise` as the shared epic review rule says; if its proposed grade differs, use the configured result and record the correction and reason in the review issue angle. Pick the review issue up
 (`moai -C "<root>" mv <review id> in_progress`) and run a review subagent in the reported
 worktree with its configured `review` model and "The review brief" in
-`references/worker-branches.md`; refer to that brief, do not copy it here. Once the review has ended and its words are on the review issue, send
+`references/worker.md`; refer to that brief, do not copy it here. Once the review has ended and its words are on the review issue, send
 "merge and close — review <id> done" with the same file-paste path and fresh input checks.
-Leave the review issue open: Codex takes the fixes in and closes it (`worker-review.md` step 7 and worker.md 10).
+Leave the review issue open: Codex takes the fixes in and closes it (`worker.md` step 7 and worker.md 10).
 Do not clear the conversation between these two assignments. Watch for the final report,
 then apply the supervisor's 5 and write `Report-checked:` after the checks pass.
 
@@ -5795,7 +5893,6 @@ root"), never in the root
 /// 갈래 — 사람이 비운 판, 모노레포의 하위 디렉터리, 멈춘 일 잇기, 거절이 안 풀리는 리뷰, 서브에이전트의 리뷰 브리프 —
 /// 는 여기로 옮겼다. 본 글의 줄이 어느 절을 읽을지 이름으로 댄다. 걸음 번호는 본 글의 것이다 — 여기는 번호를 안 매긴다.
 pub fn worker_branches() -> String {
-    let brief = indent(&review_brief(), "    ");
     format!(
         r#"# Worker steps — the rare branches
 
@@ -5884,17 +5981,6 @@ notes), then
   session's share is unknown` to the end of the reason — the previous session's model is
   written nowhere, and without it the whole member reads as this window's work
 - Then go on with the steps from 4-1 to the end
-
-## The review brief
-
-In a subagent, 7 raises the review on this prompt — copy it whole and fill every slot.
-Create `<scratchpad>/<epic>/` first and save the filled prompt as
-`{REVIEW_BRIEF_AT}`. Pass that absolute path to the review subagent with
-instructions to read the whole file before starting. Use this epic's directory for all
-review scratch files; a shared `<scratchpad>/brief.md` lets parallel epics overwrite each
-other's prompts.
-
-{brief}
 "#
     )
 }
@@ -5956,14 +6042,14 @@ Create the review issue using the shared command, called with `moai -C "<root>"`
 
     {review}
 
-Read `review_grade` and `review_raise` from `moai models --json` and apply the shared rule in `worker-review.md` step 7. Fill the angle with the resulting grade, why, and "review by the supervisor's review subagent", then
+Read `review_grade` and `review_raise` from `moai models --json` and apply the shared rule in `worker.md` step 7. Fill the angle with the resulting grade, why, and "review by the supervisor's review subagent", then
 the epic body's `{REVIEW_FOCUS}` section (either heading) and the focus development
-added, as `worker-review.md` step 7 says.
+added, as `worker.md` step 7 says.
 Do not run the review yourself. Move each finished member to review, one id per call:
 
     {TO_REVIEW}
 
-Keep `worker-review.md`'s handling of missing review columns and members left in todo.
+Keep `worker.md`'s handling of missing review columns and members left in todo.
 Record the worktree absolute path, branch, `git merge-base <base branch> HEAD` hash and
 review issue id in a note whose first line is `Review-ready: <epic>`:
 
@@ -5977,7 +6063,7 @@ CODEX_REVIEW
 
 The note stands in the root's file, where the supervisor reads it — it needs no commit.
 Stop until the supervisor pastes "merge and close — review <id> done"; its reviewer used
-"The review brief" in `references/worker-branches.md` and its review model in this worktree. Then finish 7 as `worker-review.md` says — the
+"The review brief" in `references/worker.md` and its review model in this worktree. Then finish 7 as `worker.md` says — the
 review's fixes stand uncommitted in the worktree: take them in as a separate `fix:` commit
 and note what you hand on with the issue id — and go on with 7-1 to 11, and 12 below.
 
@@ -6142,9 +6228,8 @@ mod tests {
     fn conditional_worker_guides_preserve_steps_and_extracted_text() {
         let full = super::worker_full();
         let short = super::worker();
-        assert!(short.len() * 100 <= full.len() * 60, "{} vs {}", short.len(), full.len());
+        assert!(short.len() * 10 < 50_934 * 7, "default subagent worker reads {} bytes", short.len());
         for (start, end, reference) in [
-            ("## In a subagent", "## Before the steps", super::worker_setup()),
             ("## The milestone branch", "## The steps", super::worker_setup()),
             ("1. Unfold it in the root", "2. Pick the members", super::worker_setup()),
             ("4-2. **If you test tmux", "4-3. **If you would have to touch", super::worker_tmux_tests()),
@@ -6153,7 +6238,7 @@ mod tests {
         ] {
             assert!(reference.contains(super::guide_slice(&full, start, end)));
         }
-        for name in ["worker-setup.md", "worker-review.md", "worker-finish.md", "worker-tmux-tests.md"] {
+        for name in ["worker-setup.md", "worker-tmux-tests.md"] {
             assert!(short.contains(name));
         }
         for step in [
@@ -6162,14 +6247,21 @@ mod tests {
         ] {
             assert!(short.lines().any(|line| line.starts_with(step)), "missing step {step}");
         }
-        assert!(super::worker_codex().contains("worker-review.md"));
+        assert!(super::worker_codex().contains("worker.md"));
+        assert!(short.contains("## In a subagent"));
+        assert!(short.contains("review_grade") && short.contains("review_raise"));
+        assert!(short.contains("backlog promote <backlog id> -e <epic> --from -"));
+        assert!(short.contains("git add -- <wiki dir>"));
     }
 
     #[test]
     fn conditional_supervisor_guides_preserve_every_extracted_section() {
         let full = super::supervise_full();
         let short = super::supervise();
-        assert!(short.len() * 2 <= full.len(), "{} vs {}", short.len(), full.len());
+        assert!(short.len() * 10 < 60_052 * 7, "subagent supervisor reads {} bytes", short.len());
+        for marker in ["**0. Reclaim first", "**2-2. Unfold", "**3. Send.**"] {
+            assert!(short.contains(marker));
+        }
         for (start, end, reference) in [
             ("**0. Reclaim first", "**1. Pick.**", super::supervise_reclaim()),
             ("## Workers in sessions", "## Before the round", super::supervise_sessions()),
@@ -6180,9 +6272,7 @@ mod tests {
         ] {
             assert!(reference.contains(super::guide_slice(&full, start, end)));
         }
-        for name in ["supervise-reclaim.md", "supervise-sessions.md", "supervise-planning.md", "supervise-send.md"] {
-            assert!(short.contains(name));
-        }
+        assert!(short.contains("supervise-sessions.md"));
         for text in [super::tmux(), super::cmux(), super::saycode()] {
             assert!(text.contains("session-map.md"));
             assert!(!text.contains(SESSIONS));
@@ -8114,7 +8204,7 @@ stop sending outside work while a release runs",
             seven.contains("still this session, not another"),
             "중첩 서브에이전트가 딴 에이전트 프로그램으로 읽힌다"
         );
-        let branches = worker_branches();
+        let branches = super::worker();
         assert!(branches.contains(&indent(&prompt, "    ")), "일꾼 글에 리뷰 브리프가 없다");
         // 에픽 둘이 같은 scratchpad 에서 돌아도 브리프와 원문이 서로 덮이지 않는다(moai-i26i.p00).
         // 7 의 `Agent(…)` 도 그 파일의 경로를 넘긴다 — 글을 통째로 `prompt` 에 싣던 줄이 남으면 절과 7 이 갈린다.
@@ -9681,7 +9771,7 @@ stop sending outside work while a release runs",
         let codex = section(&text, "## Codex workers");
         assert!(codex.contains(CODEX_EMPTY_BOX) && codex.contains(REPORT_WATCH));
         assert!(codex.contains(CODEX_WORKER_RULES), "Codex 모델·리뷰 규약이 공용 글과 다르다");
-        assert!(worker_branches().contains("## The review brief\n"), "Codex가 가리키는 리뷰 브리프가 없다");
+        assert!(super::worker().contains("## The review brief\n"), "Codex가 가리키는 리뷰 브리프가 없다");
         for part in [
             "--command 'cd \"<root>\" && codex --model <codex>'",
             "moai models --json",
@@ -9865,7 +9955,7 @@ stop sending outside work while a release runs",
         assert!(codex.contains(CODEX_EMPTY_BOX), "Codex 입력창 잣대가 공용 글과 다르다");
         assert!(codex.contains(REPORT_WATCH), "Codex 보고 기다리기가 공용 글과 다르다");
         assert!(codex.contains(CODEX_WORKER_RULES), "Codex 모델·리뷰 규약이 공용 글과 다르다");
-        assert!(worker_branches().contains("## The review brief\n"), "Codex가 가리키는 리뷰 브리프가 없다");
+        assert!(super::worker().contains("## The review brief\n"), "Codex가 가리키는 리뷰 브리프가 없다");
         for part in [
             "codex-pane.py",
             "ready <pane>",

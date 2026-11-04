@@ -226,16 +226,16 @@ pub fn skills() -> Vec<Skill> {
             name: supervisor,
             files: vec![
                 ("SKILL.md", crate::guide::supervise()),
-                ("references/supervise-reclaim.md", crate::guide::supervise_reclaim()),
+                ("references/supervise-reclaim.md", crate::guide::legacy_supervisor_step("0")),
                 ("references/supervise-sessions.md", crate::guide::supervise_sessions()),
-                ("references/supervise-planning.md", crate::guide::supervise_planning()),
-                ("references/supervise-send.md", crate::guide::supervise_send()),
+                ("references/supervise-planning.md", crate::guide::legacy_supervisor_step("2-2")),
+                ("references/supervise-send.md", crate::guide::legacy_supervisor_step("3")),
                 ("references/session-map.md", crate::guide::session_map_reference()),
                 ("references/codex-workers.md", crate::guide::codex_worker_reference()),
                 ("references/worker.md", crate::guide::worker()),
                 ("references/worker-setup.md", crate::guide::worker_setup()),
-                ("references/worker-review.md", crate::guide::worker_review()),
-                ("references/worker-finish.md", crate::guide::worker_finish()),
+                ("references/worker-review.md", crate::guide::legacy_worker_review()),
+                ("references/worker-finish.md", crate::guide::legacy_worker_finish()),
                 ("references/worker-tmux-tests.md", crate::guide::worker_tmux_tests()),
                 // 드문 갈래는 곁 파일이다(moai-w25x.mgu) — 본 글이 절 이름으로 가리킨다.
                 ("references/worker-branches.md", crate::guide::worker_branches()),
@@ -1916,6 +1916,23 @@ mod tests {
                     for (hand, text) in [("moai-tmux", crate::guide::tmux()), ("moai-cmux", crate::guide::cmux())] {
                         assert!(text.contains(*rel), "{hand} 가 Codex 일꾼에게 {rel} 를 안 댄다");
                     }
+                    continue;
+                }
+                if s.name == "moai-supervise"
+                    && [
+                        "references/supervise-reclaim.md",
+                        "references/supervise-planning.md",
+                        "references/supervise-send.md",
+                        "references/worker-review.md",
+                        "references/worker-finish.md",
+                    ]
+                    .contains(rel)
+                {
+                    let (_, compat) = s.files.iter().find(|(name, _)| name == rel).unwrap();
+                    assert!(
+                        compat.contains("SKILL.md") || compat.contains("worker.md"),
+                        "legacy reference {rel} has no destination"
+                    );
                     continue;
                 }
                 if s.name == "moai-supervise" && rel.starts_with("references/") {
