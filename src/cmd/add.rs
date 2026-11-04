@@ -21,16 +21,41 @@ fn assignee_of(arg: Option<&str>, by: &Actor) -> (Option<String>, Option<String>
 ///
 /// [`read_plan`] 만 부른다 — `add --from` 과 `backlog promote --from` 은 그쪽 한 길로 읽는다. 여기를
 /// 따로 부르면 템플릿 채우기를 건너뛴 계획이 선다.
+///
+/// **요청의 통이 걸렸으면 아무것도 안 읽는다**(moai-3hgm.25e) — 계획으로 만들기는 데몬이 내지 않는 길이다. `-` 는
+/// [`stdin_text`] 가 거절하고, 파일도 안 연다: `/dev/stdin` 같은 철자는 데몬의 stdin 을 기다리고, 상대 경로는 데몬이
+/// 선 자리에 기대 요청의 자리와 어긋난다.
 fn read_source(from: &str) -> R<String> {
     match from {
-        "-" => {
-            let mut s = String::new();
-            std::io::Read::read_to_string(&mut std::io::stdin(), &mut s)
-                .map_err(|e| Fail::new(format!("stdin: {e}")))?;
-            Ok(s)
+        "-" => stdin_text(),
+        path if crate::side::current().is_some() => {
+            Err(Fail::coded(format!("{path}: a request does not read a plan"), super::code::BAD_INPUT))
         }
         path => std::fs::read_to_string(path).map_err(|e| Fail::new(format!("{path}: {e}"))),
     }
+}
+
+/// stdin 을 다 읽는다 — **요청의 통이 걸렸으면 읽지 않고 거절한다**(moai-3hgm.25e).
+///
+/// 요청(데몬)에는 stdin 이 없다. 데몬의 stdin 은 그것을 띄운 터미널이거나 아무도 안 닫는 파이프일 수 있어, 읽으면
+/// 그 요청의 스레드가 영영 선다 — 그리고 그 사이 다른 요청이 같은 프로세스의 stdin 을 다툰다. 기다리지 않고 바로
+/// 거절한다. 요청이 글을 주는 길은 필드다([`dash_reads_stdin`]).
+fn stdin_text() -> R<String> {
+    if crate::side::current().is_some() {
+        return Err(Fail::coded("stdin: a request has no stdin", super::code::BAD_INPUT));
+    }
+    let mut s = String::new();
+    std::io::Read::read_to_string(&mut std::io::stdin(), &mut s).map_err(|e| Fail::new(format!("stdin: {e}")))?;
+    Ok(s)
+}
+
+/// 글 자리에 온 `-` 가 **stdin 을 읽으라는 말인가** — 요청의 통이 걸렸으면 아니다, 그 `-` 는 글이다(moai-3hgm.25e).
+///
+/// 요청의 필드는 형이 있는 글이라 clap 이 깃발과 값을 헷갈릴 자리가 없고, 데몬은 본문·까닭을 글로 건넨다. 그러니
+/// API 로 온 `-` 한 글자도 그대로 그 글이어야 한다 — stdin 을 뜻하게 두면 그 글을 건넬 길이 없다.
+/// `refuse_if_flag_like` 가 통이 걸리면 서지 않는 것과 한 결정이다.
+fn dash_reads_stdin(arg: Option<&str>) -> bool {
+    arg == Some("-") && crate::side::current().is_none()
 }
 
 /// `--from` 의 계획 한 덩이를 읽어 **형식을 읽고 템플릿 변수를 채운다**(moai-cypw).
@@ -125,13 +150,13 @@ pub(crate) fn read_plan_body(from: &str, body: Option<String>, ctx: &Ctx, verb: 
 }
 
 /// `-` 이면 stdin. `add` 와 `edit` 이 같은 규칙을 쓴다.
+///
+/// 요청의 통이 걸렸으면 `-` 도 글이다([`dash_reads_stdin`]).
 pub fn read_body(arg: Option<String>) -> R<Option<String>> {
     match arg.as_deref() {
         None => Ok(None),
-        Some("-") => {
-            let mut s = String::new();
-            std::io::Read::read_to_string(&mut std::io::stdin(), &mut s)
-                .map_err(|e| Fail::new(format!("stdin: {e}")))?;
+        Some("-") if dash_reads_stdin(arg.as_deref()) => {
+            let s = stdin_text()?;
             let s = s.trim_end_matches('\n').to_string();
             Ok((!s.is_empty()).then_some(s))
         }
@@ -160,8 +185,10 @@ pub fn read_body(arg: Option<String>) -> R<Option<String>> {
 /// **argv 의 글이 파일 이름이면 알리는 것은 부르는 쪽이다**(moai-yivo.xe9) — "저널에 남는 것은 그 글자다" 는 그
 /// 글이 실제로 저널에 들었을 때만 참이라, `mv`·`defer` 가 쓰기가 선 뒤에 [`say_if_text_names_a_file`] 를 부른다.
 /// 여기서 알리던 판은 거절된 부름에도 그 말을 했다(리뷰 moai-yivo.b5h).
+///
+/// 요청의 통이 걸렸으면 `-` 도 argv 의 글처럼 그대로 돌려준다([`dash_reads_stdin`]).
 pub fn read_msg(arg: Option<String>, lang: crate::i18n::Lang) -> R<Option<String>> {
-    if arg.as_deref() != Some("-") {
+    if !dash_reads_stdin(arg.as_deref()) {
         return Ok(arg);
     }
     let text = read_body(arg)?.unwrap_or_default();
@@ -197,7 +224,7 @@ pub fn read_body_said(arg: Option<String>, ctx: &Ctx) -> R<Option<String>> {
 /// "본문은 적지 않았다" 가 거짓이 된다.
 fn read_body_told(arg: Option<String>, ctx: &Ctx, given: Given) -> R<Option<String>> {
     say_if_text_names_a_file(arg.as_deref(), ctx, given);
-    let from_stdin = arg.as_deref() == Some("-");
+    let from_stdin = dash_reads_stdin(arg.as_deref());
     let body = read_body(arg)?;
     if from_stdin && body.is_none() {
         let said = match given {
@@ -287,7 +314,9 @@ fn names_a_file(text: &str) -> Option<std::path::PathBuf> {
     if invoked.as_deref().is_some_and(|at| at.join(typed).is_file()) {
         return Some(typed.to_path_buf());
     }
-    let here = std::env::current_dir().ok()?;
+    // 지금 자리는 요청의 통이 먼저 댄다(`crate::side::cwd`, moai-3hgm.25e) — 데몬이 선 자리를 재면 요청과 상관없는
+    // 파일 이름으로 알린다. 통이 걸렸으면 친 자리와 같아 아래 갈래가 안 선다.
+    let here = crate::side::cwd().ok()?;
     let moved = invoked.as_deref() != Some(here.as_path());
     (moved && here.join(typed).is_file()).then(|| here.join(typed))
 }

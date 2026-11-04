@@ -926,6 +926,13 @@ fn typed(ctx: &Ctx, cmd: Typed, kind: Kind) -> R<Vec<String>> {
 /// 없어 `--` 가 안 듣는다 — 그 자리는 `--title=<값>` 으로 붙여 쓰는 것이 길이다.
 pub fn refuse_if_flag_like(value: &str, at: FlagLike<'_>, lang: crate::i18n::Lang) -> R<()> {
     use crate::i18n::{fill, say};
+    // **요청의 통이 걸렸으면 재지 않는다**(`crate::side`, moai-3hgm.25e). 이 검사가 막는 것은 clap 이 깃발을 값으로
+    // 넘긴 판과 stdin 을 바란 `-` 인데, 요청의 필드는 형이 있는 글이라 둘 다 없다 — 깃발 같은 제목도 `-` 한 글자도
+    // 사람이 준 글이다(`add::read_body` 도 그 `-` 를 글로 받는다). 그리고 아래의 argv 훑기는 데몬의 argv
+    // (`moai daemon start`)를 읽는다.
+    if crate::side::current().is_some() {
+        return Ok(());
+    }
     // **`-` 한 글자는 빠져나갈 길보다 먼저 잰다** — 위 doc 의 둘째 절이다. `--`·`--title=-` 도 이것을 못 연다.
     if value == "-" {
         return Err(lone_dash(at, lang));
