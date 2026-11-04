@@ -67,6 +67,26 @@ and then the only way out is outside the tool — one line on stderr says where 
 wrote. So that worktree's `.moai/issues.jsonl` stays as it was when the worktree
 split off, and the current rows are in the main checkout's file.
 
+### The person's open explorer
+
+`moai ctl` reaches only a person's already open `moai tui` or visible `moai web`
+tab from another terminal. It opens no window and drives no agent session. To show
+the person a view or a finding, run `moai ctl ls`, then `moai ctl state`. The verbs
+are in `docs/ctl.md` and `moai ctl --help`.
+
+The view belongs to the person. Sort, view, cell and pane choices persist in their
+settings; unless asked to change one, `moai ctl propose '<why>' --then '<verb>'`
+asks first. `[NEW]` is theirs too: use `moai ctl read` only on request, since an
+agent sharing their identity clears their read marks. On `person_busy`, wait once
+or propose; never retry in a loop. ctl refuses to close their window. Tests set
+`MOAI_CTL_DIR` to an isolated directory so they cannot reach it.
+
+Column moves and notes use `moai mv` and `moai note`, not ctl verbs. To suggest one
+in the person's open window, use `moai ctl propose '<why>' --wait <seconds>` and no
+`--then`, then run the tracker command on acceptance. For someone else's row,
+acceptance is permission:
+`moai mv <id> <column> --from <seen column> --take -m 'accepted proposal <proposal id> in the explorer'`.
+
 ## The three forks
 
 **1. `add` or `backlog`** — what decides is *whether you would pick it up now.*
@@ -325,27 +345,6 @@ Saycode session `moai-saycode` does it through Saycode's `happy agent` and comes
 planted only where it is chosen: `moai skill install --with moai-tmux` (or `--with moai-cmux`,
 `--with moai-saycode`) plants it and `--without` takes it out. Nothing runs headless. The supervisor picks, sends and checks; it does not fix and it
 does not merge.
-
-
-### The person's open explorer
-
-`moai ctl` reaches only a person's already open `moai tui` or visible `moai web`
-tab from another terminal. It opens no window and drives no agent session. To show
-the person a view or a finding, run `moai ctl ls`, then `moai ctl state`. The verbs
-are in `docs/ctl.md` and `moai ctl --help`.
-
-The view belongs to the person. Sort, view, cell and pane choices persist in their
-settings; unless asked to change one, `moai ctl propose '<why>' --then '<verb>'`
-asks first. `[NEW]` is theirs too: use `moai ctl read` only on request, since an
-agent sharing their identity clears their read marks. On `person_busy`, wait once
-or propose; never retry in a loop. ctl refuses to close their window. Tests set
-`MOAI_CTL_DIR` to an isolated directory so they cannot reach it.
-
-Column moves and notes use `moai mv` and `moai note`, not ctl verbs. To suggest one
-in the person's open window, use `moai ctl propose '<why>' --wait <seconds>` and no
-`--then`, then run the tracker command on acceptance. For someone else's row,
-acceptance is permission:
-`moai mv <id> <column> --from <seen column> --take -m 'accepted proposal <proposal id> in the explorer'`.
 
 ## There are two kinds of group
 

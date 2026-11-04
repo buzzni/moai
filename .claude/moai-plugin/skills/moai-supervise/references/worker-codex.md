@@ -53,12 +53,12 @@ Create the review issue using the shared command, called with `moai -C "<root>"`
 
 Read `review_grade` and `review_raise` from `moai models --json` and apply the shared rule in `worker-review.md` step 7. Fill the angle with the resulting grade, why, and "review by the supervisor's review subagent", then
 the epic body's `Review focus / 리뷰에서 볼 것` section (either heading) and the focus development
-added, as worker.md's 7 says.
+added, as `worker-review.md` step 7 says.
 Do not run the review yourself. Move each finished member to review, one id per call:
 
     moai -C "<root>" mv <member> review --from in_progress
 
-Keep worker.md's handling of missing review columns and members left in todo.
+Keep `worker-review.md`'s handling of missing review columns and members left in todo.
 Record the worktree absolute path, branch, `git merge-base <base branch> HEAD` hash and
 review issue id in a note whose first line is `Review-ready: <epic>`:
 
@@ -72,7 +72,7 @@ CODEX_REVIEW
 
 The note stands in the root's file, where the supervisor reads it — it needs no commit.
 Stop until the supervisor pastes "merge and close — review <id> done"; its reviewer used
-"The review brief" in `references/worker-branches.md` and its review model in this worktree. Then finish 7 as worker.md says — the
+"The review brief" in `references/worker-branches.md` and its review model in this worktree. Then finish 7 as `worker-review.md` says — the
 review's fixes stand uncommitted in the worktree: take them in as a separate `fix:` commit
 and note what you hand on with the issue id — and go on with 7-1 to 11, and 12 below.
 

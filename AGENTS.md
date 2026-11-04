@@ -1,4 +1,4 @@
-<!-- moai:begin v:0.48.0 hash:9cc33c9d -->
+<!-- moai:begin v:0.48.0 hash:3cab4705 -->
 ## Issue tracker — moai
 
 This repository's work lives in `.moai/issues.jsonl`.
@@ -16,6 +16,9 @@ other people's or unowned work (`others`), and deferred or blocked work (`held`)
     moai wiki search '<words>'              search the manual
 
 Every command accepts `--json`; use `moai <command> --help` for details.
+`references/commands.md` below is the installed `moai` skill's reference —
+`.claude/moai-plugin/skills/moai/` for Claude, `.agents/skills/moai/` for Codex and Antigravity.
+`moai skill install` plants it; without it, command help is the reference.
 In shared repositories pick up one id at a time with `moai mv <id> in_progress --from todo`;
 a stale move fails rather than overwriting another session. `defer` also accepts `--from`.
 A linked worktree's `moai`
@@ -61,6 +64,7 @@ in their original format. Do not shorten a reviewer's own words.
    use a real tmux by absolute path: `env -u TMUX <real tmux> -L <unique name> …`.
 5. **Ask before you pick up someone else's work**, including an unowned row; on yes use
    `moai mv <id> in_progress --from todo --take -m '<who said yes>'`.
+
 Hooks do not cover every agent or tool call; keep these rules yourself. Details and the
 commands for refusals are in `references/commands.md`.
 
@@ -69,14 +73,13 @@ commands for refusals are in `references/commands.md`.
 Put the issue id in the commit subject; squash commits need a `Refs: <id>` trailer.
 A commit containing only a pickup or close starts `chore(tracker):`.
 Before closing, record the AI that did the work without token counts:
+
     moai note <id> 'model: <vendor>/<model> (<grade> — <why>)'
 
 Run `moai status`, leave `moai note <id> 'Next: <what comes next>'` for unfinished work,
 and record repeatable mistakes with `moai wiki search` and `moai wiki learn`.
 
 ### Further details
-
-References below are in the installed `moai` skill.
 
 - Explorer control: `references/commands.md` and `moai ctl --help`.
 - Backlog promotion, deferral, groups and deadlines: `references/commands.md` and command help.

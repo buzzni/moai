@@ -9,7 +9,7 @@ needs more says so in a line of its own, **In a subagent**.
 - **No `AskUserQuestion`, and nobody watches you.** Where a step asks the person, hand back
   instead and end (4). `Person: away` still decides by recommendation —
   "When the person is away" in `worker-branches.md`
-- **No `/model`.** The model and the effort you were raised on stay (`Model:` above)
+- **No `/model`.** The model and the effort you were raised on stay (the assignment's `Model:` line)
 - **What you hand back is the report** (12) — `SubagentHandback`, and your turn ends with it.
   Where a step says to tell the supervisor and stop, that is your hand-back; where it says to
   tell the supervisor and go on, it goes in the report. A message that hands over no work is
@@ -61,6 +61,8 @@ root"), never in the root
 
     git -C .worktrees/milestone-<milestone id> merge --no-ff <root branch> -m "merge: take <root branch> in for <epic>"
 
+
+## Step 1 — unfold a backlog
 
 1. Unfold it in the root — the one way to turn a backlog item into work is
    `moai backlog promote <id> --from -`. Unfold into an epic plus issues even for a single

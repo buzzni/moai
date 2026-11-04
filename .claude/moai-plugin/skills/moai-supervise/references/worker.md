@@ -225,6 +225,7 @@ For a milestone base, read `worker-setup.md` — The milestone branch.
    from the root
 
 4-2. If testing tmux, follow `worker-tmux-tests.md` before starting a test server.
+
 4-3. **If you would have to touch a file that work running alongside holds, do not fix it** —
    the files named by `Work running alongside` in the message, or files a sibling branch in
    `git worktree list` already changed
@@ -262,10 +263,15 @@ For a milestone base, read `worker-setup.md` — The milestone branch.
    Inside a milestone that is the milestone branch, not `<root branch>` — the epics merged
    beside you are there
 7. Before merging, follow `worker-review.md` for the epic review, its grade and handoff. Codex follows `worker-codex.md` step 7 instead.
+
 7-1. Reclaim unfinished epic promises as `worker-finish.md` step 7-1 says.
+
 7-2. For a milestone, sort handed-on work as `worker-finish.md` step 7-2 says.
+
 7-3. Check the changelog as `worker-finish.md` step 7-3 says.
+
 7-4. Check the wiki and lessons as `worker-finish.md` step 7-4 says.
+
 8. Merge from the root, where you stand ("Stay in the root").
    Before merging outside a milestone, check that the root stands on <root branch> — if it
    does not, do not merge: tell the supervisor
