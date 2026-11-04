@@ -14798,8 +14798,13 @@ fn promote_speaks_json_too() {
 fn the_agents_block_teaches_idea() {
     let s = init("agentsidea");
     let block = std::fs::read_to_string(s.path().join("AGENTS.md")).unwrap();
-    for want in ["moai backlog add", "moai backlog ls", "moai backlog promote", "moai defer"] {
+    for want in ["moai backlog add", "moai defer", "references/commands.md"] {
         assert!(block.contains(want), "{want} 가 없다 — {block}");
+    }
+    ok(s.path(), &["skill", "install", "--agent", "codex"]);
+    let reference = read(&s.path().join(".agents/skills/moai/references/commands.md"));
+    for want in ["moai backlog add", "moai backlog ls", "moai backlog promote", "moai defer"] {
+        assert!(reference.contains(want), "{want} missing from reference");
     }
 }
 
@@ -14807,6 +14812,9 @@ fn the_agents_block_teaches_idea() {
 fn the_agents_block_teaches_ctl_without_mv() {
     let s = init("agentsctl");
     let block = std::fs::read_to_string(s.path().join("AGENTS.md")).unwrap();
+    assert!(block.contains("Explorer control") && block.contains("references/commands.md"));
+    ok(s.path(), &["skill", "install", "--agent", "codex"]);
+    let reference = read(&s.path().join(".agents/skills/moai/references/commands.md"));
     for want in [
         "moai ctl ls",
         "moai ctl state",
@@ -14815,9 +14823,12 @@ fn the_agents_block_teaches_ctl_without_mv() {
         "--take -m 'accepted proposal <proposal id> in the explorer'",
         "moai ctl read` only on request",
     ] {
-        assert!(block.contains(want), "{want} is missing from the managed block");
+        assert!(reference.contains(want), "{want} is missing from the reference");
     }
-    assert!(!block.contains("moai ctl mv") && !block.contains("moai ctl note"), "tracker writes became ctl verbs");
+    assert!(
+        !reference.contains("moai ctl mv") && !reference.contains("moai ctl note"),
+        "tracker writes became ctl verbs"
+    );
 }
 
 /// **마크다운은 `idea add` 로 들어오지 않는다.** `#` 이 에픽이고 `-` 가
