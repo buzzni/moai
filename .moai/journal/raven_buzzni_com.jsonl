@@ -12228,3 +12228,8 @@
 {"ts":"2026-11-04T16:52:28Z","id":"moai-6ufw","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"v0.50.0 릴리스"}
 {"ts":"2026-11-04T16:52:33Z","id":"moai-vxtd","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"v0.50.0 릴리스 진행 — 병합·판 올리기·소식·PR"}
 {"ts":"2026-11-04T16:52:34Z","id":"moai-vxtd","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-11-04T17:21:22Z","id":"moai-vxtd","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"PR #79 머지(a897d120), tag-on-merge 승인 → v0.50.0 태그, release 워크플로 성공(바이너리 4종·GitHub 릴리스 2026-11-04T17:19Z·Discord 소식). 마일스톤 워크트리·가지·target 정리 완료."}
+{"ts":"2026-11-04T17:21:22Z","id":"moai-vxtd","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 (medium — 릴리스 차례: 병합·판 올리기·소식·PR·태그 승인)"}
+{"ts":"2026-11-04T17:21:23Z","id":"moai-vxtd","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
+{"ts":"2026-11-04T17:21:23Z","id":"moai-6ufw","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done"}
+{"ts":"2026-11-04T17:21:23Z","id":"moai-xg7x","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done"}
