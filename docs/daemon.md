@@ -1,12 +1,12 @@
-# Read the tracker through the daemon
+# Read and write the tracker through the daemon
 
-`moai daemon` runs a small local server beside the CLI. Another program — an editor plugin, a dashboard, a script — connects to it and asks for the same answers `moai status --json`, `moai ready --json` and the other read commands give, without starting a child process for each question.
+`moai daemon` runs a small local server beside the CLI. Another program — an editor plugin, a dashboard, a script — connects to it and asks for the same answers `moai status --json`, `moai ready --json` and the other read commands give, without starting a child process for each question. It can also write: `add`, `mv`, `edit`, `note`, `defer`, `rm` and `link` do what the CLI commands of the same name do.
 
 What it is:
 
 - A local daemon, one per user. It serves every project you registered with `moai project add`.
-- A read-only API. Writes (`add`, `mv`, `note` and the rest) are not served yet.
-- Reached only through a Unix socket in your own runtime directory. It listens on no network port and has no login: whoever can open the socket, which is you, can read.
+- An API for the read commands and for the everyday writes ([Write methods](#write-methods)). A write goes through the same code and the same lock as the CLI's, so the files come out the same.
+- Reached only through a Unix socket in your own runtime directory. It listens on no network port and has no login: whoever can open the socket, which is you, can read and write.
 
 What it is not:
 
@@ -94,7 +94,7 @@ Messages are [JSON-RPC 2.0](https://www.jsonrpc.org/specification). Each request
 | `-32601` | No such method. |
 | `-32602` | Bad `params`: an unknown key, a wrong type, a value out of range, an unknown `lang` or `tz`, or no `project`. `project`, `actor`, `lang` and `tz` must be strings (or `null`): an object for `actor` is refused, not dropped. |
 | `-32603` | Internal error. |
-| `-32000` | The command failed the way the CLI would. `error.data.code` is the `code` from the CLI's `--json` error (`not_found`, `not_registered`, `not_a_project`, `busy`, …). |
+| `-32000` | The command failed the way the CLI would. `error.data.code` is the `code` from the CLI's `--json` error (`not_found`, `bad_status`, `no_actor`, `not_registered`, `not_a_project`, `busy`, …). |
 | `-32001` | `hello` with a `proto` newer than the daemon's. |
 
 When the CLI would have printed notes on stderr before failing, they come in `error.data.messages`.
@@ -156,9 +156,64 @@ Every method except `hello`, `ping` and `daemon.shutdown` answers in one envelop
 
 A failed command is not an envelope: it is an `-32000` error (see [Errors](#errors)), where the CLI would always have exited 1.
 
+### Write methods
+
+| Method | Params (`id` and `to` are required) | Same as |
+|---|---|---|
+| `add` | `title`, `body`, `epic`, `milestone`, `parent`, `status`, `assignee`, `start`, `due`: string; `tag`: string or [string]; `priority`: int; `kind`: `"issue"`, `"epic"`, `"milestone"` or `"backlog"` | `moai add`, or `moai <kind> add` |
+| `mv` | `id`: string or [string]; `to`: string (the column); `from`, `msg`: string; `take`: bool | `moai mv <id>… <to>` |
+| `edit` | `id`, `title`, `body`, `epic`, `milestone`, `assignee`, `start`, `due`, `if_start`, `if_due`: string; `tag`, `untag`: string or [string]; `priority`, `shift`, `shift_start`, `shift_due`: int; `if_unplanned`: bool | `moai edit` |
+| `note` | `id`, `text`: string | `moai note <id> <text>` |
+| `defer` | `id`: string or [string]; `undo`: bool; `msg`, `from`: string | `moai defer` |
+| `rm` | `id`: string or [string], or `line`: int (give one of the two); `yes`: bool; `match`: string | `moai rm` |
+| `link` | `id`: string; `blocks`, `unblocks`: string or [string] | `moai link` |
+
+The reply is the same envelope as for reads. `value` is what the CLI's `--json` prints: the new row for `add`, the journal line for `note`, `{moved, already, missing, stale, …, taken, theirs}` for `mv`, and so on.
+
+How the params are read:
+
+- The names are the CLI's long flags, with `-` written as `_`: `--if-start` is `if_start`, `--match` is `match`. The arguments that have no flag get a name: `id` for the row, `to` for the column `mv` moves it to, `text` for the note.
+- A comma inside `tag`, `untag`, `blocks` or `unblocks` splits the value, as on the CLI. An array is the flag given several times. An `id` is never split.
+- **Text is text.** `title`, `body`, `msg` and `text` are taken as written. `"-"` is a dash, not "read stdin": a request has no stdin.
+- What the CLI refuses before the command runs is `-32602` here, and the message names the key: a missing `id` or `to`, `shift` with `start` or `due`, `if_start`, `if_due` or `if_unplanned` without `start` or `due`, an `if_due` that is not `YYYY-MM-DD` or `none`, a `shift` past ±999999, a `priority` that is not an integer from 0 to 255, `rm` with both `id` and `line`.
+- What the command refuses is `-32000` with the CLI's code and message: an unknown id (`not_found`), an unknown column (`bad_status`), a priority of 4 or more, an `add` with no title.
+- `add` makes one row. Making rows from a plan is not served: `from`, `dry_run` and `var` are unknown keys. So is `quiet`, which changes nothing under `--json`, and `type`: `kind` is that choice. `note` takes `text` only; on the CLI, `-b` gives the same text another way.
+
+Who writes is `actor`, else the project's git config, else nobody: the write fails with `-32000` and `data.code` `no_actor`, and the message is the CLI's (where it says `--user`, send `actor`). The daemon's own `MOAI_ACTOR` is not read (see the `actor` key above). An `actor` that is not `Name (email)` is `bad_input`.
+
+**A write on someone else's row is not stopped.** A `mv` into a started column of a row whose assignee is someone else, or nobody, goes through, as it does for a person at a terminal. The CLI's one-line notice comes in `messages`, and `value.theirs` names the row. `take: true` is `--take`: you become the assignee, and a `Taken-over:` note keeps whose it was.
+
+**Hook rule 5 does not stand on this API — words only.** The hook that refuses an agent's `moai mv` on someone else's row reads the agent's shell commands. A request on the socket passes no hook. An agent that writes through the daemon keeps the rule itself: ask the person first, and on a yes send `take: true` with a `msg` that says who said yes.
+
+A write that runs while the daemon stops runs to the end (see [Stopping a daemon](#stopping-a-daemon)).
+
+A real run, with the project path shortened. Request 2, not shown, moved `repo-mzkg` from `todo` to `in_progress`, so request 3 names a column the row has left:
+
+    {"jsonrpc":"2.0","id":1,"method":"add","params":{"project":"/home/me/repo","title":"lexer crash","tag":"parser,bug","priority":1}}
+    {"id":1,"jsonrpc":"2.0","result":{"exit":0,"messages":[],"partial":false,"value":{"id":"repo-gxap","title":"lexer crash","status":"todo","priority":1,"tags":["bug","parser"],"assignee":"Kim","assignee_email":"kim@example.com","created_at":"2026-11-04T14:51:14Z","updated_at":"2026-11-04T14:51:14Z","status_since":"2026-11-04T14:51:14Z","kind":"issue"}}}
+
+    {"jsonrpc":"2.0","id":3,"method":"mv","params":{"project":"/home/me/repo","id":"repo-mzkg","to":"review","from":"todo"}}
+    {"id":3,"jsonrpc":"2.0","result":{"exit":1,"messages":["moai: repo-mzkg already stands in_progress — not moved"],"partial":true,"value":{"moved":[],"already":[],"missing":[],"stale":[{"id":"repo-mzkg","status":"in_progress"}],"shelved":[],"stands":[],"unblocked":[],"closable":[],"next":[],"taken":[],"theirs":[]}}}
+
+    {"jsonrpc":"2.0","id":4,"method":"mv","params":{"project":"/home/me/repo","id":"repo-b2b3","to":"in_progress"}}
+    …"exit":0,"messages":["moai: repo-b2b3 is Lee (lee@example.com)'s — moved, but ask before you pick it up. On a yes: `moai -C /home/me/repo mv repo-b2b3 in_progress --from in_progress --take -m '<who said yes>'`"],…"theirs":[{"id":"repo-b2b3","owner":"theirs","was":"Lee (lee@example.com)"}]}}}
+
+    {"jsonrpc":"2.0","id":5,"method":"note","params":{"project":"/home/me/repo","id":"repo-mzkg","text":"looks like the lexer","actor":"Park (park@example.com)"}}
+    {"id":5,"jsonrpc":"2.0","result":{"exit":0,"messages":[],"partial":false,"value":{"ts":"2026-11-04T14:51:15Z","id":"repo-mzkg","kind":"note","by":"Park","by_email":"park@example.com","text":"looks like the lexer"}}}
+
+    {"jsonrpc":"2.0","id":6,"method":"edit","params":{"project":"/home/me/repo","id":"repo-mzkg","title":"parser bug in lexer","shift":2,"due":"+1"}}
+    {"error":{"code":-32602,"message":"edit: params.shift: cannot be used with params.due"},"id":6,"jsonrpc":"2.0"}
+
+    {"jsonrpc":"2.0","id":8,"method":"mv","params":{"project":"/home/me/repo","id":"repo-mzkg","to":"doing"}}
+    {"error":{"code":-32000,"data":{"code":"bad_status"},"message":"`doing` is not a column. The columns: todo, in_progress, review, done"},"id":8,"jsonrpc":"2.0"}
+
+With no `actor` in a project whose git config names nobody — although the daemon was started with `MOAI_ACTOR` set:
+
+    {"error":{"code":-32000,"data":{"code":"no_actor"},"message":"there is no telling who is doing this — the git user details are not there.\n\n  git config user.name  \"Name\"\n  git config user.email \"email\"\n\nTo hand it over just this once:  --user \"Name (email)\""},"id":1,"jsonrpc":"2.0"}
+
 ### Not served
 
-The write commands, and commands that exist for a person at a terminal or for tooling, have no method: `add`, `mv`, `edit`, `rm`, `note`, `defer`, `link`, `due`, `read`, `archive`, `image`, `init`, the `project add|rm|color` writes, `config`, `models`, `writing`, `wiki`, `ctl`, `tui`, `web`, `watch`, `hook`, `skill`, `supervise`, `merge-driver`, `keys` and `update`. The aliases `issue`, `epic`, `milestone` and `backlog` are `show` with `type`. A test lists every CLI command either as served or as not served with a reason, so a new command cannot slip through unnoticed.
+Commands that exist for a person at a terminal or for tooling, and the writes this API does not carry yet, have no method: `due`, `read`, `archive`, `image`, `init`, the `project add|rm|color` writes, `config`, `models`, `writing`, `wiki`, `ctl`, `tui`, `web`, `watch`, `hook`, `skill`, `supervise`, `merge-driver`, `keys` and `update`. Making rows from a plan is not served either: `add --from` (the `add` method refuses `from`) and `backlog promote`. The aliases `issue`, `epic`, `milestone` and `backlog` go through `add` with `kind` and `show` with `type`. A test lists every CLI command either as served or as not served with a reason, so a new command cannot slip through unnoticed.
 
 ## Follow changes with `changes`
 
@@ -227,7 +282,7 @@ The epic `repo-32tm` is in the first and third answer although its own line was 
 `moai daemon stop` sends the method `daemon.shutdown`. Then the daemon:
 
 1. Removes its socket file and stops listening. From this moment `moai daemon status` says no daemon is running (exit 0), and a new `moai daemon start` waits for this daemon to end.
-2. Finishes the requests it was running. A write runs to the end, however long it takes. A read gets up to 5 seconds; a read that is still running then is cut, and nothing is lost. Writes are not served yet; this rule is in place for them.
+2. Finishes the requests it was running. A write runs to the end, however long it takes. A read gets up to 5 seconds; a read that is still running then is cut, and nothing is lost.
 3. Ends.
 
 A request that comes in on an open connection after step 1 is not run. It gets `-32000` with `data` `{code: "stopping", pid}` and its own `id`. When a write gets this answer, it did not change the tracker: send it again to a new daemon, or run the CLI. A client that connects in the same instant as step 1 can be closed with no answer at all.
