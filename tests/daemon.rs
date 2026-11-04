@@ -1265,3 +1265,714 @@ fn a_project_registered_through_a_symlink_names_the_root_the_cli_names() {
     assert_eq!(messages, said.lines().collect::<Vec<_>>(), "링크로 걸어 둔 프로젝트의 말이 CLI 와 다르다");
     assert!(said.contains(root.to_str().unwrap()), "CLI 가 물리 경로를 안 댔다 — 견줄 거리가 없다: {said}");
 }
+
+// ---- 쓰기의 같음·동시 쓰기·락 시한·워크트리·멈춤(moai-3hgm.pmc) ----------------------------------------------------
+
+/// `.moai` 밑의 파일 전부 — `.moai` 에서 본 자리 → 바이트. 락 파일은 뺀다: 쓰기가 잡았다 놓은 자리일 뿐 쓴 것이 아니다
+/// (`cmd::request` 시험의 `files_of` 와 같은 자다).
+fn files_of(moai: &Path) -> std::collections::BTreeMap<String, Vec<u8>> {
+    fn walk(at: &Path, base: &Path, into: &mut std::collections::BTreeMap<String, Vec<u8>>) {
+        for e in std::fs::read_dir(at).unwrap() {
+            let path = e.unwrap().path();
+            if path.is_dir() {
+                walk(&path, base, into);
+            } else if path.file_name().is_some_and(|n| n != "lock") {
+                into.insert(path.strip_prefix(base).unwrap().display().to_string(), std::fs::read(&path).unwrap());
+            }
+        }
+    }
+    let mut into = std::collections::BTreeMap::new();
+    walk(moai, moai, &mut into);
+    into
+}
+
+/// `.moai` 를 찍어 둔 그대로 되돌린다 — CLI 가 쓴 뒤 데몬이 **같은 시작 트래커에서** 다시 쓰게.
+fn put_back(moai: &Path, snap: &std::collections::BTreeMap<String, Vec<u8>>) {
+    std::fs::remove_dir_all(moai).unwrap();
+    for (rel, bytes) in snap {
+        let at = moai.join(rel);
+        std::fs::create_dir_all(at.parent().unwrap()).unwrap();
+        std::fs::write(at, bytes).unwrap();
+    }
+}
+
+/// 스냅샷에 선 id 들.
+fn ids_of(files: &std::collections::BTreeMap<String, Vec<u8>>) -> std::collections::BTreeSet<String> {
+    let snap = files.get("issues.jsonl").map(|b| String::from_utf8_lossy(b).into_owned()).unwrap_or_default();
+    snap.lines()
+        .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+        .filter_map(|row| row["id"].as_str().map(str::to_string))
+        .collect()
+}
+
+/// 답 줄의 `result.value` 를 파싱하지 않은 바이트로 — CLI 의 stdout 과 글자째 견준다(moai-3hgm.whp).
+fn carried_value(text: &str) -> String {
+    #[derive(serde::Deserialize)]
+    struct Line {
+        result: Inner,
+    }
+    #[derive(serde::Deserialize)]
+    struct Inner {
+        value: Box<serde_json::value::RawValue>,
+    }
+    let line: Line = serde_json::from_str(text).unwrap_or_else(|e| panic!("답에 value 가 없다: {e} — {text}"));
+    line.result.value.get().to_string()
+}
+
+/// CLI 가 넘어진 판과 데몬의 오류를 견준다 — stderr 의 마지막 줄은 `{"code", "error"}` 오류 객체이고, 그 앞의 줄은
+/// `error.data.messages` 다(없으면 키가 없다). 코드는 `-32000`, `data.code` 와 말은 CLI 의 것이다.
+fn same_failure(reply: &Value, stderr: &str, ctx: &str) {
+    let mut lines: Vec<&str> = stderr.lines().collect();
+    let last = lines.pop().unwrap_or_else(|| panic!("넘어진 CLI 가 stderr 에 아무것도 안 냈다 — {ctx}"));
+    let said: Value =
+        serde_json::from_str(last).unwrap_or_else(|e| panic!("오류가 JSON 이 아니다: {e} — {ctx}: {last}"));
+    let error = &reply["error"];
+    assert_eq!(error["code"], -32000, "{ctx}: {reply}");
+    assert_eq!(error["data"]["code"], said["code"], "{ctx}: {reply}");
+    assert_eq!(error["message"], said["error"], "{ctx}: {reply}");
+    match lines.is_empty() {
+        true => assert!(
+            error["data"].get("messages").is_none(),
+            "CLI 가 말없이 넘어졌는데 messages 가 섰다 — {ctx}: {reply}"
+        ),
+        false => assert_eq!(error["data"]["messages"], json!(lines), "error.data.messages ≠ stderr — {ctx}"),
+    }
+}
+
+/// 데몬이 쓴 `.moai` 와 CLI 가 쓴 `.moai` 가 파일째·바이트째 같다 — 다르면 그 파일의 처음 갈린 줄을 댄다(통째로 찍으면
+/// 스냅샷 전체가 두 번 나와 어디가 갈렸는지 안 보인다).
+fn same_files(
+    got: &std::collections::BTreeMap<String, String>,
+    want: &std::collections::BTreeMap<String, String>,
+    ctx: &str,
+) {
+    assert_eq!(
+        got.keys().collect::<Vec<_>>(),
+        want.keys().collect::<Vec<_>>(),
+        "데몬과 CLI 가 남긴 파일이 다르다 — {ctx}"
+    );
+    for (name, text) in got {
+        let theirs = &want[name];
+        if text == theirs {
+            continue;
+        }
+        let (mut a, mut b) = (text.split_inclusive('\n'), theirs.split_inclusive('\n'));
+        let at = (1..).find(|_| a.next() != b.next()).unwrap();
+        let line = |t: &str| t.split_inclusive('\n').nth(at - 1).map(str::to_string);
+        panic!("{name} 의 {at}째 줄이 다르다 — {ctx}\n데몬: {:?}\nCLI:  {:?}", line(text), line(theirs));
+    }
+}
+
+/// 같음 표의 기대 — 둘 다 같은 것을 낸다, 또는 clap 이 거절하는 것이라 CLI 는 2 로 끝나고 데몬은 `-32602` 다(둘 다
+/// 아무것도 안 쓴다).
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum Want {
+    Same,
+    Refused,
+}
+
+/// **같은 쓰기를 같은 시작 트래커에서 CLI 와 데몬으로**(moai-3hgm.pmc) — `moai -C <root> --json --user <사람> <argv>` 를
+/// 한 번 치고, `.moai` 를 되돌린 뒤 같은 쓰기를 소켓으로 보낸다. 견주는 것은 쓴 뒤의 `.moai` 바이트(스냅샷·저널)와
+/// `value` 바이트 대 stdout, `messages` 대 stderr, `exit` 대 종료 코드다. 남는 것은 데몬이 쓴 것이다.
+///
+/// - `root` 는 요청의 `project`(= `-C` 의 자리), `tracker` 는 쓰기가 닿는 `.moai` 의 주인 — 딸린 워크트리면 둘이 갈린다
+/// - 새 줄의 id 는 시각과 프로세스로 뽑아 두 판이 다르다. 데몬 쪽의 새 id 를 CLI 의 것으로 바꿔 견주고, id 차례로 선
+///   스냅샷은 줄을 골라 견준다(`cmd::request` 시험의 `same` 과 같다)
+/// - `params` 에 `actor` 를 안 주면 둘 다 [`ACTOR`] 다. `"actor": null` 이면 CLI 도 `--user` 없이 친다 — 모르는 사람의 길
+/// - `lang` 은 CLI 의 `MOAI_LANG` 이다
+/// - CLI 는 `CLAUDE_CODE_SESSION_ID` 를 걷고 친다 — 그 값으로 집기를 적는 것은 CLI 만의 일이라(moai-3hgm.25e) 견줄 것이
+///   아니고, 시험을 돌리는 셸에 따라 갈리면 안 된다
+fn same_write(
+    f: &Fence,
+    wire: &mut Wire,
+    (root, tracker): (&Path, &Path),
+    n: u64,
+    (method, params, argv, want): (&str, &Value, &[&str], Want),
+) -> Value {
+    let ctx = format!("{method} {params} / moai {argv:?}");
+    let moai = tracker.join(".moai");
+    let actor = match params.get("actor") {
+        Some(given) => given.as_str().map(str::to_string),
+        None => Some(ACTOR.to_string()),
+    };
+    let lang = params.get("lang").and_then(Value::as_str).unwrap_or("en");
+    let before = files_of(&moai);
+
+    let mut all = vec!["-C".to_string(), root.display().to_string(), "--json".to_string()];
+    if let Some(actor) = &actor {
+        all.extend(["--user".to_string(), actor.clone()]);
+    }
+    all.extend(argv.iter().map(|a| a.to_string()));
+    let all: Vec<&str> = all.iter().map(String::as_str).collect();
+    let out = f.cmd(&all).env("MOAI_LANG", lang).env_remove("CLAUDE_CODE_SESSION_ID").output().unwrap();
+    let cli_after = files_of(&moai);
+    put_back(&moai, &before);
+
+    let mut sent = params.clone();
+    sent["project"] = json!(root.to_str().unwrap());
+    if params.get("actor").is_none() {
+        sent["actor"] = json!(ACTOR);
+    }
+    let text = wire.call_text(n, method, sent);
+    let reply: Value = serde_json::from_str(&text).unwrap_or_else(|e| panic!("답이 JSON 이 아니다: {e} — {text:?}"));
+    let got_after = files_of(&moai);
+
+    // 새 줄 — 데몬의 id 를 CLI 의 것으로 바꿔 견준다.
+    let (old, theirs, mine) = (ids_of(&before), ids_of(&cli_after), ids_of(&got_after));
+    let theirs: Vec<&String> = theirs.difference(&old).collect();
+    let mine: Vec<&String> = mine.difference(&old).collect();
+    assert_eq!(theirs.len(), mine.len(), "새 줄의 수가 다르다 — {ctx}");
+    assert!(theirs.len() <= 1, "새 줄이 여럿이면 짝을 못 짓는다 — {ctx}");
+    let swap = |s: &str| match (mine.first(), theirs.first()) {
+        (Some(m), Some(t)) => s.replace(m.as_str(), t.as_str()),
+        _ => s.to_string(),
+    };
+    let made = !theirs.is_empty();
+    let canon = |files: &std::collections::BTreeMap<String, Vec<u8>>, swapped: bool| {
+        files
+            .iter()
+            .map(|(k, v)| {
+                let text = String::from_utf8_lossy(v).into_owned();
+                let mut text = if swapped { swap(&text) } else { text };
+                if made && k == "issues.jsonl" {
+                    let mut lines: Vec<&str> = text.lines().collect();
+                    lines.sort_unstable();
+                    text = lines.join("\n");
+                }
+                (k.clone(), text)
+            })
+            .collect::<std::collections::BTreeMap<_, _>>()
+    };
+    same_files(&canon(&got_after, true), &canon(&cli_after, false), &ctx);
+
+    let code = out.status.code().expect("CLI 가 시그널로 끝났다");
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    let stderr = String::from_utf8(out.stderr).unwrap();
+    if want == Want::Refused {
+        assert_eq!(code, 2, "clap 이 거절할 줄 알았다 — {ctx}\n{stderr}");
+        assert_eq!(reply["error"]["code"], -32602, "{ctx}: {reply}");
+        assert_eq!(cli_after, before, "clap 에 거절된 CLI 가 썼다 — {ctx}");
+        assert_eq!(got_after, before, "-32602 로 거절한 데몬이 썼다 — {ctx}");
+        return reply;
+    }
+    assert_ne!(code, 2, "CLI 를 clap 이 거절했다 — 표가 틀렸다: {ctx}\n{stderr}");
+    if stdout.is_empty() {
+        assert_eq!(code, 1, "{ctx}\n{stderr}");
+        same_failure(&reply, &swap(&stderr), &ctx);
+        return reply;
+    }
+    let result = &reply["result"];
+    assert!(result.is_object(), "CLI 는 썼는데 데몬은 넘어졌다 — {ctx}: {reply}");
+    let lines: Vec<&str> = stdout.lines().collect();
+    let printed = if lines.len() == 1 { lines[0].to_string() } else { format!("[{}]", lines.join(",")) };
+    assert_eq!(swap(&carried_value(&text)), printed, "value 의 바이트 ≠ CLI stdout — {ctx}");
+    let said: String = result["messages"]
+        .as_array()
+        .unwrap_or_else(|| panic!("messages 가 배열이 아니다 — {ctx}"))
+        .iter()
+        .map(|m| format!("{}\n", m.as_str().unwrap()))
+        .collect();
+    assert_eq!(swap(&said), stderr, "messages ≠ stderr — {ctx}");
+    assert_eq!(result["exit"], json!(code), "exit ≠ 종료 코드 — {ctx}");
+    assert_eq!(result["partial"], json!(code != 0), "partial ≠ 종료 코드 — {ctx}");
+    reply
+}
+
+/// CLI 로 하나를 만들고 그 id 를 — `add -q` 는 id 만 찍는다.
+fn made(f: &Fence, root: &Path, args: &[&str]) -> String {
+    let mut all = vec!["-C", root.to_str().unwrap(), "--user", ACTOR];
+    all.extend_from_slice(args);
+    all.push("-q");
+    let out = f.run(&all);
+    assert!(out.status.success(), "moai {all:?}: {}", String::from_utf8_lossy(&out.stderr));
+    String::from_utf8(out.stdout).unwrap().trim().to_string()
+}
+
+/// **쓰기 일곱이 데몬으로도 CLI 와 같다**(moai-3hgm.pmc) — 읽기의 같음 시험(`the_read_methods_answer_as_the_cli_does`)의
+/// 쓰기 판이다. 같은 시작 트래커에서 같은 쓰기를 `moai -C <root> --json …` 와 소켓의 메서드로 하고 [`same_write`] 가
+/// 스냅샷·저널 바이트, `value` 바이트, `messages`, `exit` 를 견준다. 표는 차례대로 돌아 앞의 쓰기가 뒤의 시작 트래커다.
+///
+/// 판마다 CLI 가 다르게 말하는 갈래를 든다 — 종류 넷과 태그·본문의 `add`, 없는 에픽 밑(알림), 남의 줄·담당 없는 줄의
+/// 집기(`take` 와 없이), `from` 에 진 집기와 미루기(부분 실패), 없는 id 가 섞인 것, 본문을 지우는 `edit`, 명령이 넘어진
+/// 것(없는 칸·우선순위 7·없는 id·`no_actor`), clap 이 거절하는 것(`-32602`), 한국어 말.
+#[test]
+fn the_write_methods_write_what_the_cli_writes() {
+    let f = Fence::new();
+    let root = f.project("proj");
+    let alpha = id_titled(&f, &root, "alpha");
+    let beta = id_titled(&f, &root, "beta");
+    let epic = made(&f, &root, &["epic", "add", "Storage"]);
+    let ms = made(&f, &root, &["milestone", "add", "v1"]);
+    let member = made(&f, &root, &["add", "member", "-e", &epic]);
+    let theirs = made(&f, &root, &["add", "theirs", "-a", "Lee (lee@example.com)"]);
+    let unowned = made(&f, &root, &["add", "unowned", "-a", "none"]);
+    let bodied = made(&f, &root, &["add", "bodied", "-b", "a body\nsecond line", "-t", "x,y"]);
+    let later = made(&f, &root, &["add", "later"]);
+    let (blocker, blocked) = (made(&f, &root, &["add", "blocker"]), made(&f, &root, &["add", "blocked"]));
+    let (doomed, doomed_too) = (made(&f, &root, &["add", "doomed"]), made(&f, &root, &["add", "doomed too"]));
+    let (_daemon, mut wire) = served(&f);
+    let zzzz = "proj-zzzz";
+    use Want::{Refused, Same};
+
+    let cases: Vec<(&str, Value, Vec<&str>, Want)> = vec![
+        // add — 종류 넷, 태그·본문·우선순위, 칸·담당·날, 에픽·부모 밑, 없는 에픽 밑(알림).
+        ("add", json!({ "title": "plain" }), vec!["add", "plain"], Same),
+        ("add", json!({ "kind": "issue", "title": "an issue" }), vec!["issue", "add", "an issue"], Same),
+        ("add", json!({ "kind": "epic", "title": "Epic two" }), vec!["epic", "add", "Epic two"], Same),
+        ("add", json!({ "kind": "milestone", "title": "v2" }), vec!["milestone", "add", "v2"], Same),
+        (
+            "add",
+            json!({ "kind": "backlog", "title": "an idea", "body": "why\nand how" }),
+            vec!["backlog", "add", "an idea", "-b", "why\nand how"],
+            Same,
+        ),
+        (
+            "add",
+            json!({ "title": "tagged", "tag": "x,y", "priority": 0, "body": "line one\nline two" }),
+            vec!["add", "tagged", "-t", "x,y", "-p", "0", "-b", "line one\nline two"],
+            Same,
+        ),
+        (
+            "add",
+            json!({ "title": "tagged twice", "tag": ["b", "a,c"] }),
+            vec!["add", "tagged twice", "-t", "b", "-t", "a,c"],
+            Same,
+        ),
+        (
+            "add",
+            json!({ "title": "in the epic", "epic": epic, "status": "review", "assignee": "none",
+                    "start": "2026-11-10", "due": "2026-11-20" }),
+            vec![
+                "add",
+                "in the epic",
+                "-e",
+                &epic,
+                "-s",
+                "review",
+                "-a",
+                "none",
+                "--start",
+                "2026-11-10",
+                "--due",
+                "2026-11-20",
+            ],
+            Same,
+        ),
+        ("add", json!({ "title": "a child", "parent": alpha }), vec!["add", "a child", "--parent", &alpha], Same),
+        (
+            "add",
+            json!({ "title": "in a release", "milestone": ms }),
+            vec!["add", "in a release", "--milestone", &ms],
+            Same,
+        ),
+        ("add", json!({ "title": "lost", "epic": zzzz }), vec!["add", "lost", "-e", zzzz], Same),
+        (
+            "add",
+            json!({ "title": "그의 일", "assignee": "Lee (lee@example.com)", "lang": "ko" }),
+            vec!["add", "그의 일", "-a", "Lee (lee@example.com)"],
+            Same,
+        ),
+        ("add", json!({ "title": "p7", "priority": 7 }), vec!["add", "p7", "-p", "7"], Same),
+        ("add", json!({}), vec!["add"], Same),
+        ("add", json!({ "title": "p256", "priority": 256 }), vec!["add", "p256", "-p", "256"], Refused),
+        ("add", json!({ "title": "high", "priority": "high" }), vec!["add", "high", "-p", "high"], Refused),
+        // mv — 집기, `from` 에 진 집기, 남의 줄(말), 담당 없는 줄을 `take`, 남의 줄을 `take`, 없는 id 가 섞인 것, 없는 칸.
+        (
+            "mv",
+            json!({ "id": alpha, "to": "in_progress", "from": "todo" }),
+            vec!["mv", &alpha, "in_progress", "--from", "todo"],
+            Same,
+        ),
+        (
+            "mv",
+            json!({ "id": alpha, "to": "review", "from": "todo" }),
+            vec!["mv", &alpha, "review", "--from", "todo"],
+            Same,
+        ),
+        ("mv", json!({ "id": theirs, "to": "in_progress" }), vec!["mv", &theirs, "in_progress"], Same),
+        (
+            "mv",
+            json!({ "id": unowned, "to": "in_progress", "from": "todo", "take": true, "msg": "Kim said yes", "lang": "ko" }),
+            vec!["mv", &unowned, "in_progress", "--from", "todo", "--take", "-m", "Kim said yes"],
+            Same,
+        ),
+        (
+            "mv",
+            json!({ "id": theirs, "to": "review", "take": true, "msg": "Lee said yes" }),
+            vec!["mv", &theirs, "review", "--take", "-m", "Lee said yes"],
+            Same,
+        ),
+        ("mv", json!({ "id": [beta, zzzz], "to": "done" }), vec!["mv", &beta, zzzz, "done"], Same),
+        (
+            "mv",
+            json!({ "id": member, "to": "done", "msg": "finished" }),
+            vec!["mv", &member, "done", "-m", "finished"],
+            Same,
+        ),
+        ("mv", json!({ "id": beta, "to": "doing" }), vec!["mv", &beta, "doing"], Same),
+        // edit — 본문 지우기, 태그 더하고 빼기, 제목·우선순위·날·마일스톤, 그것을 걷기, 바뀐 것 없음, 없는 id, clap 의 짝 규칙.
+        ("edit", json!({ "id": bodied, "body": "" }), vec!["edit", &bodied, "-b", ""], Same),
+        (
+            "edit",
+            json!({ "id": bodied, "tag": "z", "untag": ["x"] }),
+            vec!["edit", &bodied, "-t", "z", "--untag", "x"],
+            Same,
+        ),
+        (
+            "edit",
+            json!({ "id": bodied, "title": "renamed", "priority": 3, "due": "2026-12-01", "milestone": ms }),
+            vec!["edit", &bodied, "--title", "renamed", "-p", "3", "--due", "2026-12-01", "--milestone", &ms],
+            Same,
+        ),
+        (
+            "edit",
+            json!({ "id": bodied, "due": "none", "milestone": "none" }),
+            vec!["edit", &bodied, "--due", "none", "--milestone", "none"],
+            Same,
+        ),
+        ("edit", json!({ "id": bodied, "tag": "z" }), vec!["edit", &bodied, "-t", "z"], Same),
+        ("edit", json!({ "id": bodied }), vec!["edit", &bodied], Same),
+        ("edit", json!({ "id": zzzz, "title": "x" }), vec!["edit", zzzz, "--title", "x"], Same),
+        (
+            "edit",
+            json!({ "id": bodied, "shift": 1, "start": "+1" }),
+            vec!["edit", &bodied, "--shift", "1", "--start", "+1"],
+            Refused,
+        ),
+        // note — 한 줄, 여러 줄, 글 없이, 없는 id, 모르는 사람.
+        (
+            "note",
+            json!({ "id": alpha, "text": "found it in the lexer" }),
+            vec!["note", &alpha, "found it in the lexer"],
+            Same,
+        ),
+        ("note", json!({ "id": alpha, "text": "two\nlines", "lang": "ko" }), vec!["note", &alpha, "two\nlines"], Same),
+        ("note", json!({ "id": alpha }), vec!["note", &alpha], Same),
+        ("note", json!({ "id": zzzz, "text": "x" }), vec!["note", zzzz, "x"], Same),
+        ("note", json!({ "id": alpha, "text": "who", "actor": null }), vec!["note", &alpha, "who"], Same),
+        // defer — 미루기와 되돌리기, `from` 에 진 미루기.
+        ("defer", json!({ "id": later, "msg": "next quarter" }), vec!["defer", &later, "-m", "next quarter"], Same),
+        ("defer", json!({ "id": later, "undo": true }), vec!["defer", &later, "--undo"], Same),
+        ("defer", json!({ "id": later, "from": "review" }), vec!["defer", &later, "--from", "review"], Same),
+        // link — 막기·풀기·없는 id.
+        ("link", json!({ "id": blocker, "blocks": blocked }), vec!["link", &blocker, "--blocks", &blocked], Same),
+        ("link", json!({ "id": blocker, "unblocks": [blocked] }), vec!["link", &blocker, "--unblocks", &blocked], Same),
+        ("link", json!({ "id": blocker, "blocks": zzzz }), vec!["link", &blocker, "--blocks", zzzz], Same),
+        // rm — 하나, 없는 id 가 섞인 것, 없는 못 읽는 줄.
+        ("rm", json!({ "id": doomed }), vec!["rm", &doomed], Same),
+        ("rm", json!({ "id": [doomed_too, zzzz] }), vec!["rm", &doomed_too, zzzz], Same),
+        ("rm", json!({ "line": 99 }), vec!["rm", "--line", "99"], Same),
+    ];
+    // 표가 재는 갈래가 실제로 섰는지 — 하나라도 안 서면 그 갈래는 견주지 않은 것이다.
+    let mut seen = std::collections::BTreeSet::new();
+    for (n, (method, params, argv, want)) in cases.iter().enumerate() {
+        let reply = same_write(&f, &mut wire, (&root, &root), n as u64 + 1, (method, params, argv, *want));
+        let result = &reply["result"];
+        if result["exit"] == 1 {
+            seen.insert("partial");
+        }
+        if result["messages"].as_array().is_some_and(|m| !m.is_empty()) {
+            seen.insert("messages");
+        }
+        if reply["error"]["code"] == -32000 {
+            seen.insert("failed");
+        }
+        if reply["error"]["code"] == -32602 {
+            seen.insert("invalid params");
+        }
+    }
+    for branch in ["failed", "invalid params", "messages", "partial"] {
+        assert!(seen.contains(branch), "표가 재려던 갈래 `{branch}` 가 한 번도 안 섰다 — {seen:?}");
+    }
+}
+
+/// `.moai/journal` 의 줄 전부 — 사람마다의 파일을 이어서.
+fn journal_lines(moai: &Path) -> Vec<String> {
+    let mut files: Vec<PathBuf> = std::fs::read_dir(moai.join("journal")).unwrap().map(|e| e.unwrap().path()).collect();
+    files.sort();
+    files
+        .iter()
+        .flat_map(|p| std::fs::read_to_string(p).unwrap().lines().map(str::to_string).collect::<Vec<_>>())
+        .collect()
+}
+
+/// **데몬의 연결 여럿과 CLI 여럿이 한 트래커에 함께 써도 잃는 줄이 없다**(moai-3hgm.pmc) — `CLAUDE.md` 의 "동시 쓰기
+/// 시험을 지우지 않는다" 에 데몬이 더하는 하나다. 데몬은 한 프로세스에서 쓰기를 스레드로 함께 돌린다. `flock` 은 열린
+/// 파일마다라(`store` 의 `Lock::inside` 는 쓰기마다 락 파일을 새로 연다) 데몬의 스레드끼리도, 데몬과 CLI 프로세스도
+/// 서로를 막는다 — 한 fd 를 나눠 쥐는 판이면 서로를 안 막아, 마지막에 rename 한 쪽이 앞의 줄을 지운다.
+///
+/// 끝난 뒤 만든 줄과 노트가 하나씩 다 있고, 스냅샷 줄 수와 저널 줄 수가 쓴 만큼 늘었고, id 가 안 겹친다. 쓰기마다의
+/// 성패는 모았다가 끝에 댄다 — 진 쪽(`locked`)이 있으면 그것이 누구였는지 이름으로 보이게.
+#[test]
+fn daemon_connections_and_cli_processes_writing_at_once_lose_nothing() {
+    const WIRES: usize = 6;
+    const PROCS: usize = 4;
+    const ROUNDS: usize = 5;
+    let f = Fence::new();
+    let root = f.project("proj");
+    let alpha = id_titled(&f, &root, "alpha");
+    let moai = root.join(".moai");
+    let snapshot = || std::fs::read_to_string(moai.join("issues.jsonl")).unwrap();
+    let (rows_before, journal_before) = (snapshot().lines().count(), journal_lines(&moai).len());
+    let (_daemon, _) = f.start();
+    // 연결은 먼저 다 연다 — 스레드 안에서 열다 넘어지면 남은 스레드가 출발선에서 영영 기다린다.
+    let wires: Vec<Wire> = (0..WIRES).map(|_| Wire::open(&f.socket())).collect();
+    let start = std::sync::Barrier::new(WIRES + PROCS);
+
+    let lost: Vec<String> = std::thread::scope(|s| {
+        let mut runs = Vec::new();
+        for (w, mut wire) in wires.into_iter().enumerate() {
+            let (start, root, alpha) = (&start, &root, &alpha);
+            runs.push(s.spawn(move || {
+                start.wait();
+                let mut lost = Vec::new();
+                for r in 0..ROUNDS {
+                    for (n, method, params) in [
+                        (2 * r, "add", json!({ "actor": ACTOR, "title": format!("wire {w} row {r}") })),
+                        (
+                            2 * r + 1,
+                            "note",
+                            json!({ "actor": ACTOR, "id": alpha, "text": format!("wire {w} note {r}") }),
+                        ),
+                    ] {
+                        let reply = write(&mut wire, root, n as u64, method, params.clone());
+                        if reply["result"]["exit"] != 0 {
+                            lost.push(format!("wire {w} {method} {params}: {reply}"));
+                        }
+                    }
+                }
+                lost
+            }));
+        }
+        for p in 0..PROCS {
+            let (start, root, alpha, f) = (&start, &root, &alpha, &f);
+            runs.push(s.spawn(move || {
+                start.wait();
+                let mut lost = Vec::new();
+                for r in 0..ROUNDS {
+                    let (title, text) = (format!("cli {p} row {r}"), format!("cli {p} note {r}"));
+                    for args in [vec!["add", title.as_str()], vec!["note", alpha.as_str(), text.as_str()]] {
+                        let mut all = vec!["-C", root.to_str().unwrap(), "--json", "--user", ACTOR];
+                        all.extend_from_slice(&args);
+                        let out = f.run(&all);
+                        if !out.status.success() {
+                            lost.push(format!("cli {p} {args:?}: {}", String::from_utf8_lossy(&out.stderr)));
+                        }
+                    }
+                }
+                lost
+            }));
+        }
+        runs.into_iter().flat_map(|r| r.join().unwrap()).collect()
+    });
+    assert!(lost.is_empty(), "함께 친 쓰기가 넘어졌다:\n{}", lost.join("\n"));
+
+    let writers: Vec<String> =
+        (0..WIRES).map(|w| format!("wire {w}")).chain((0..PROCS).map(|p| format!("cli {p}"))).collect();
+    let rows: Vec<Value> = snapshot().lines().map(|l| serde_json::from_str(l).unwrap()).collect();
+    let journal = journal_lines(&moai);
+    let added = writers.len() * ROUNDS;
+    assert_eq!(rows.len(), rows_before + added, "{added} 줄을 함께 만들었는데 스냅샷이 {}줄이다", rows.len());
+    assert_eq!(journal.len(), journal_before + 2 * added, "저널 줄 수가 쓴 만큼 안 늘었다");
+    let ids: std::collections::BTreeSet<&str> = rows.iter().map(|r| r["id"].as_str().unwrap()).collect();
+    assert_eq!(ids.len(), rows.len(), "id 가 겹쳤다");
+    let notes: Vec<Value> = journal.iter().map(|l| serde_json::from_str(l).unwrap()).collect();
+    for who in &writers {
+        for r in 0..ROUNDS {
+            let (title, text) = (format!("{who} row {r}"), format!("{who} note {r}"));
+            let made = rows.iter().filter(|row| row["title"] == title.as_str()).count();
+            assert_eq!(made, 1, "`{title}` 이 스냅샷에 {made}번 섰다");
+            let noted = notes.iter().filter(|n| n["kind"] == "note" && n["text"] == text.as_str()).count();
+            assert_eq!(noted, 1, "`{text}` 가 저널에 {noted}번 섰다");
+            let created = notes.iter().filter(|n| n["kind"] == "create" && n["title"] == title.as_str()).count();
+            assert_eq!(created, 1, "`{title}` 의 create 줄이 저널에 {created}번 섰다");
+        }
+    }
+}
+
+/// **락을 시한(5초)보다 오래 쥔 채 데몬에 쓰면 `-32000` 에 CLI 의 `locked` 다** — 말없이 넘어가지 않는다. 같은 쥔 락
+/// 아래에서 CLI 와 데몬을 함께 돌려(시험이 5초 한 번으로 끝나게) 둘 다 물러나는지, 코드·말·앞선 알림이 같은지, 아무것도
+/// 안 썼는지 본다. 락을 놓으면 데몬의 다음 쓰기는 선다 — 물러난 쓰기가 데몬에 쥔 것을 남기지 않는다.
+#[test]
+fn a_write_held_past_the_lock_timeout_is_locked_as_on_the_cli() {
+    use fs2::FileExt;
+    let f = Fence::new();
+    let root = f.project("proj");
+    let alpha = id_titled(&f, &root, "alpha");
+    let (_daemon, mut wire) = served(&f);
+    let moai = root.join(".moai");
+    let before = files_of(&moai);
+    let lock = std::fs::OpenOptions::new().read(true).write(true).open(moai.join("lock")).unwrap();
+    lock.lock_exclusive().unwrap();
+
+    let asked = std::time::Instant::now();
+    let cli = f
+        .cmd(&["-C", root.to_str().unwrap(), "--json", "--user", ACTOR, "note", &alpha, "held"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let reply = write(&mut wire, &root, 1, "note", json!({ "actor": ACTOR, "id": alpha, "text": "held" }));
+    let out = cli.wait_with_output().unwrap();
+    let waited = asked.elapsed();
+    FileExt::unlock(&lock).unwrap();
+
+    assert!(waited >= Duration::from_secs(5), "락 시한(5초) 전에 {waited:?} 만에 답했다 — 락을 안 기다렸다: {reply}");
+    assert_eq!(out.status.code(), Some(1), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(out.stdout.is_empty(), "쥔 락 아래에서 CLI 가 썼다");
+    same_failure(&reply, &String::from_utf8(out.stderr).unwrap(), "note under a held lock");
+    assert_eq!(reply["error"]["data"]["code"], "locked", "{reply}");
+    same_files(&texts(files_of(&moai)), &texts(before), "물러난 쓰기가 무엇인가를 썼다");
+
+    let after = wrote(&mut wire, &root, 2, "note", json!({ "actor": ACTOR, "id": alpha, "text": "after" }));
+    assert_eq!(after["value"]["text"], "after", "{after}");
+}
+
+fn texts(files: std::collections::BTreeMap<String, Vec<u8>>) -> std::collections::BTreeMap<String, String> {
+    files.into_iter().map(|(k, v)| (k, String::from_utf8_lossy(&v).into_owned())).collect()
+}
+
+/// **걸어 둔 워크트리를 `project` 로 주면 루트의 트래커에 쓰고, 그 자리를 `messages` 에 댄다** — `moai -C <워크트리>`
+/// 의 CLI 가 stderr 에 내는 그 한 줄이다(`lib::redirected`, moai-y7go). 데몬은 걸어 둔 자리만 받는다 — 루트만 걸어 둔
+/// 채 워크트리를 대면 `not_registered` 이고 아무것도 안 쓴다. 워크트리의 `.moai` 는 갈라져 나온 그대로다.
+#[test]
+fn a_write_through_a_registered_worktree_lands_in_the_main_checkout_as_on_the_cli() {
+    let f = Fence::new();
+    let main = f.0.join("main");
+    std::fs::create_dir(&main).unwrap();
+    let git = |args: &[&str]| {
+        let out = Command::new("git")
+            .args(["-c", "user.name=Tester", "-c", "user.email=tester@example.com"])
+            .args(args)
+            .current_dir(&main)
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+    };
+    git(&["init", "-q"]);
+    let out = f.run(&["-C", main.to_str().unwrap(), "init"]);
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let alpha = made(&f, &main, &["add", "alpha"]);
+    let theirs = made(&f, &main, &["add", "theirs", "-a", "Lee (lee@example.com)"]);
+    git(&["add", "-A"]);
+    git(&["commit", "-q", "-m", "fixture"]);
+    let side = f.0.join("side");
+    git(&["worktree", "add", "-q", "-b", "side", side.to_str().unwrap()]);
+    let out = f.run(&["project", "add", main.to_str().unwrap()]);
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let (_daemon, mut wire) = served(&f);
+    let (main_moai, side_moai) = (main.join(".moai"), side.join(".moai"));
+    let side_before = files_of(&side_moai);
+
+    // 루트만 걸어 두었다 — 워크트리는 걸어 둔 자리가 아니다.
+    let main_before = files_of(&main_moai);
+    let refused = write(&mut wire, &side, 1, "note", json!({ "actor": ACTOR, "id": alpha, "text": "not yet" }));
+    assert_eq!(refused["error"]["data"]["code"], "not_registered", "{refused}");
+    assert_eq!(files_of(&main_moai), main_before, "걸어 두지 않은 워크트리로 썼다");
+
+    let out = f.run(&["project", "add", side.to_str().unwrap()]);
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let to_root = main_moai.display().to_string();
+    for (n, (method, params, argv)) in [
+        ("note", json!({ "id": alpha, "text": "from the worktree" }), vec!["note", &alpha, "from the worktree"]),
+        ("add", json!({ "title": "made in the worktree" }), vec!["add", "made in the worktree"]),
+        ("mv", json!({ "id": theirs, "to": "in_progress" }), vec!["mv", &theirs, "in_progress"]),
+        (
+            "edit",
+            json!({ "id": alpha, "title": "alpha two", "lang": "ko" }),
+            vec!["edit", &alpha, "--title", "alpha two"],
+        ),
+    ]
+    .iter()
+    .enumerate()
+    {
+        let reply = same_write(&f, &mut wire, (&side, &main), n as u64 + 2, (method, params, argv, Want::Same));
+        let messages = reply["result"]["messages"].as_array().unwrap();
+        assert!(
+            messages.iter().any(|m| m.as_str().unwrap().contains(&to_root)),
+            "{method}: 루트로 옮겨 쓴 자리를 안 댔다 — {reply}"
+        );
+    }
+    assert_eq!(files_of(&side_moai), side_before, "워크트리의 .moai 를 고쳤다");
+}
+
+/// 그 프로세스가 이 파일을 열어 쥐고 있나 — `/proc/<pid>/fd` 의 장치·아이노드로 견준다(이름이 아니라 파일로).
+#[cfg(target_os = "linux")]
+fn opened(pid: u64, file: &std::fs::Metadata) -> bool {
+    use std::os::unix::fs::MetadataExt as _;
+    std::fs::read_dir(format!("/proc/{pid}/fd"))
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|e| std::fs::metadata(e.path()).ok())
+        .any(|m| m.dev() == file.dev() && m.ino() == file.ino())
+}
+
+/// **멈추는 데몬은 락을 기다리던 쓰기를 끝내고 그 답을 보낸다**(moai-3hgm.uz0, 사람의 결정 B) — uz0 의 시험은 시험만의
+/// 메서드로 늦췄고, 여기는 실제 쓰기 메서드를 시험이 쥔 락으로 늦춘다. 데몬이 그 락 파일을 연 것(`/proc/<pid>/fd`)을 본
+/// 뒤에 멈추기를 보낸다 — 그 쓰기는 들어와 돌고 있다. 소켓 파일이 지워진 뒤에도 데몬이 살아 있는지, 그때 이미 열려 있던
+/// 다른 연결의 새 쓰기는 돌지 않고 `stopping` 인지 본다. 락을 놓으면 기다리던 쓰기가 서서 답이 오고, 데몬은 0 으로
+/// 끝난다. 쥐는 것은 1초 안팎이라 `store` 의 락 기다림(5초) 안에 든다.
+#[cfg(target_os = "linux")]
+#[test]
+fn a_write_waiting_on_the_lock_when_the_daemon_stops_still_finishes_and_answers() {
+    use fs2::FileExt;
+    let f = Fence::new();
+    let root = f.project("proj");
+    let project = root.to_str().unwrap();
+    let alpha = id_titled(&f, &root, "alpha");
+    let (daemon, first) = f.start();
+    let pid = first["pid"].as_u64().unwrap();
+    // 연결은 먼저 다 연다 — 멈추기가 시작되면 소켓 파일이 지워져 새로 못 붙는다.
+    let mut writer = Wire::open(&f.socket());
+    let mut idle = Wire::open(&f.socket());
+    let mut bye = Wire::open(&f.socket());
+    assert_eq!(idle.call(1, "ping", json!({}))["result"], json!({}), "쉬는 연결이 연결 스레드에 안 들었다");
+    let moai = root.join(".moai");
+    let lock = std::fs::OpenOptions::new().read(true).write(true).open(moai.join("lock")).unwrap();
+    lock.lock_exclusive().unwrap();
+    let held = lock.metadata().unwrap();
+
+    let note = |id: u64, text: &str| {
+        let params = json!({ "project": project, "actor": ACTOR, "id": alpha, "text": text });
+        format!("{}\n", json!({ "jsonrpc": "2.0", "id": id, "method": "note", "params": params }))
+    };
+    writer.writer.write_all(note(1, "written while stopping").as_bytes()).unwrap();
+    let until = std::time::Instant::now() + Duration::from_secs(3);
+    while !opened(pid, &held) {
+        assert!(std::time::Instant::now() < until, "데몬이 쥔 락을 3초 안에 안 열었다 — 쓰기가 안 돌았다");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+
+    let stopped = bye.call(1, "daemon.shutdown", json!({}));
+    assert_eq!(stopped["result"]["pid"], pid, "{stopped}");
+    let asked = std::time::Instant::now();
+    while f.socket().exists() {
+        assert!(asked.elapsed() < Duration::from_secs(3), "멈추는 데몬이 소켓 파일을 안 지웠다");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    // 문(`Work`)은 소켓 파일을 지우고 듣기를 닫은 바로 뒤에 닫힌다 — 그 틈을 넉넉히 넘긴다.
+    std::thread::sleep(Duration::from_millis(200));
+    let mut daemon = daemon;
+    assert!(daemon.0.try_wait().unwrap().is_none(), "락을 기다리던 쓰기를 두고 데몬이 끝났다");
+    let late = idle.send_raw(note(2, "sent after the stop").as_bytes());
+    assert_eq!(late["error"]["data"]["code"], "stopping", "멈추는 데몬이 새 쓰기를 들였다 — {late}");
+    assert_eq!(late["id"], 2, "{late}");
+    assert!(daemon.0.try_wait().unwrap().is_none(), "락을 기다리던 쓰기를 두고 데몬이 끝났다");
+
+    FileExt::unlock(&lock).unwrap();
+    let mut line = String::new();
+    writer.reader.read_line(&mut line).unwrap();
+    let reply: Value =
+        serde_json::from_str(&line).unwrap_or_else(|e| panic!("기다리던 쓰기의 답이 없다: {e} — {line:?}"));
+    assert_eq!(reply["id"], 1, "{reply}");
+    assert_eq!(reply["result"]["exit"], 0, "{reply}");
+    assert_eq!(reply["result"]["value"]["text"], "written while stopping", "{reply}");
+    assert!(daemon.wait().success(), "멈춘 데몬이 0 으로 끝나지 않았다");
+
+    let journal = journal_lines(&moai);
+    assert!(journal.iter().any(|l| l.contains("written while stopping")), "답한 쓰기가 저널에 없다");
+    assert!(!journal.iter().any(|l| l.contains("sent after the stop")), "`stopping` 으로 거절한 쓰기가 섰다");
+}
