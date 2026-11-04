@@ -226,7 +226,8 @@ fn list(p: &mut Params, key: &str) -> Result<Vec<String>, RpcError> {
 fn priority(p: &mut Params) -> Result<Option<u8>, RpcError> {
     match p.int("priority")? {
         None => Ok(None),
-        Some(n) => u8::try_from(n).map(Some).map_err(|_| p.bad("priority", format!("{n} is not a priority (0 to 3)"))),
+        // 글은 이 자리가 실제로 거절하는 폭을 댄다 — 4~255 는 지나가 명령이 거절하므로 "0 to 3" 이라 대면 그 둘이 갈린다.
+        Some(n) => u8::try_from(n).map(Some).map_err(|_| p.bad("priority", format!("{n} is out of range (0 to 255)"))),
     }
 }
 
