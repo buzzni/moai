@@ -526,9 +526,12 @@ pub fn measure(issues: &[Issue], cfg: &Config) -> (Index, Ground) {
 fn measure_in(issues: &[Issue], cfg: &Config, soil: &crate::report::Soil<'_>) -> (Index, Ground) {
     let index = Index::in_soil(issues, soil);
     let mut ground = Ground::in_soil(issues, cfg, soil);
-    let wh = crate::query::Where::from_soil(issues, cfg, crate::report::Soil::of(issues));
-    let context = crate::query::SortContext::with_where(issues, &wh);
-    let sort = crate::query::CachedSort::from_context(issues, &context);
+    // Sort facts come from the maps this load just measured ([`Ground::here`], the filter's view and the one
+    // `tui --json` sorts with) — a fresh `Soil` here walked the membership a second time on every load.
+    let sort = {
+        let wh = ground.here(issues);
+        crate::query::CachedSort::from_context(issues, &crate::query::SortContext::with_where(issues, &wh))
+    };
     ground.sort = sort;
     (index, ground)
 }
@@ -1483,21 +1486,26 @@ struct CtlTurn {
 }
 
 /// The complete sort choice for one scope. Screen and legacy forms are projections of it.
+///
+/// `extended` is whether the choice reaches past the item order — layers or grouping were chosen — so the crumbs
+/// name every layer rather than the item order. It is kept in the settings by the `group` key: only an extended
+/// choice writes one, and a read `group` makes the choice extended again ([`App::apply_look`]).
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct SortChoice {
     order: crate::query::Order,
     group: crate::nav::Group,
-    preset: Option<crate::query::Preset>,
     extended: bool,
 }
 impl Default for SortChoice {
     fn default() -> Self {
-        Self {
-            order: crate::query::Order::default(),
-            group: crate::nav::Group::Structure,
-            preset: Some(crate::query::Preset::Release),
-            extended: false,
-        }
+        Self { order: crate::query::Order::default(), group: crate::nav::Group::Structure, extended: false }
+    }
+}
+impl SortChoice {
+    /// The preset this choice is, derived rather than kept — a kept name went stale whenever an edit made the
+    /// choice equal to a preset or a load re-read it, and an unchanged `Enter` then wrote a project table.
+    fn preset(&self) -> Option<crate::query::Preset> {
+        crate::query::Preset::ALL.into_iter().find(|p| p.group() == self.group && p.order() == self.order)
     }
 }
 #[derive(Default)]
@@ -2063,7 +2071,6 @@ impl App {
                             let rows = self.rows();
                             let (held, stood) = self.grip_of(&rows);
                             self.sort.current.group = screen;
-                            self.sort.current.preset = None;
                             self.sort.current.extended = true;
                             self.keep_order();
                             self.regrip(held, stood);
@@ -2087,7 +2094,6 @@ impl App {
                             if let Some(group) = group {
                                 self.sort.current.group = group;
                             }
-                            self.sort.current.preset = crate::query::Preset::named(&text);
                             // **One bookkeeping path for every scope** — the project's own order, the default, and a
                             // project's own order under `--default` only when it has one. Filling the scope maps by hand
                             // here left the project's item order (`order_projects`) behind: leaving and re-entering the
@@ -4802,7 +4808,7 @@ impl App {
 
     /// 설정의 차례 낱말(`["priority", "updated:desc"]`)을 탐색기의 차례로(moai-r170.8dz). **`moai show --sort` 와 한
     /// 자로 읽는다**([`crate::query::parse_order`]) — 같은 글이 두 표면에서 다른 차례가 되면 안 된다. 못 읽으면
-    /// `None`: 모르는 필드·방향, 두 번 선 필드, 빈 목록, **탐색기에 없는 필드**(`id`), 그리고 **탐색기가 못 드는
+    /// `None`: 모르는 필드·방향, 두 번 선 필드, 빈 목록, 그리고 **탐색기가 못 드는
     /// `:nulls-first`**(moai-ctxc) — 그것을 빼고 나머지로 서면 사람이 적은 차례가 말없이 다른 차례가 된다.
     /// `due:desc:nulls-first` 를 `Desc` 가 아니라고 읽던 판은 그 차례를 말없이 오름으로 세웠다.
     pub(crate) fn sorting_of(words: &[String]) -> Option<keys::Sorting> {
@@ -4883,7 +4889,6 @@ impl App {
     }
     fn adopt_common_order(&mut self, order: &crate::query::Order) {
         self.sort.current.order = order.clone();
-        self.sort.current.preset = None;
         self.sort.current.extended = true;
     }
 
@@ -4916,11 +4921,20 @@ impl App {
     }
 
     /// Switch the whole choice together when entering or leaving a project.
+    ///
+    /// A project that chose only its item order (not `extended`) takes the default's grouping, as the next start reads it
+    /// back — `look_now` writes a project's `group` only for an extended choice. Taking the grouping it was kept with
+    /// left a grouping picked later at the overview off that project until a restart (review moai-6vcm.xdf).
     pub(super) fn rescope_order(&mut self) {
-        self.sort.current = self
-            .order_home()
-            .and_then(|k| self.sort.projects.get(&k).cloned())
-            .unwrap_or_else(|| self.sort.default.clone());
+        let own = self.order_home().and_then(|k| self.sort.projects.get(&k).cloned());
+        self.sort.current = match own {
+            Some(mut choice) if !choice.extended => {
+                choice.group = self.sort.default.group;
+                choice
+            }
+            Some(choice) => choice,
+            None => self.sort.default.clone(),
+        };
     }
 
     /// Whether the held chord is the prefix of the sort window's binding (`SPC s` for `SPC s e`).
@@ -4979,8 +4993,6 @@ impl App {
                 if let Some(preset) = selected_preset {
                     self.sort.current.order = preset.order();
                     self.sort.current.group = preset.group();
-                    self.sort.current.preset = Some(preset);
-                    self.sort.current.extended = true;
                 } else {
                     let fields = |s: keys::Sorting| s.fields().iter().map(|f| Self::query_field(*f)).collect();
                     if before.milestone != preview.milestone {
@@ -4992,14 +5004,16 @@ impl App {
                     if before.item != preview.item {
                         self.sort.current.order.item = fields(preview.item);
                     }
-                    if before != preview {
-                        self.sort.current.preset = None;
-                    }
                     self.sort.current.group = preview.group;
-                    self.sort.current.extended |= preview.group != original.group
-                        || preview.milestone != original.milestone
-                        || preview.epic != original.epic;
                 }
+                // Measured against the window's opening state, not accumulated per key: choosing the preset already in
+                // force, or stepping back to where the window opened, leaves the choice as it was — so `Enter` writes
+                // nothing and pins no project table (`an_untouched_enter_in_the_sort_window_writes_nothing`).
+                let was = self.sort.original.as_ref().is_some_and(|o| o.extended);
+                self.sort.current.extended = was
+                    || preview.group != original.group
+                    || preview.milestone != original.milestone
+                    || preview.epic != original.epic;
                 self.regrip(held, stood);
             }
             sorter::Done::Cancel => {
@@ -5020,6 +5034,12 @@ impl App {
         }
     }
 
+    /// 지금 차례(`sort.current`)를 든다 — 커서는 보던 줄을 붙든다([`App::look`] 과 같은 자).
+    ///
+    /// `as_default` 는 **기본 차례(`[tui]`)로도 적는다**(사용자 결정 2026-10-09 — 편집 창의 "기본으로 적기").
+    /// 프로젝트 안에서 누르면 그 프로젝트는 제 차례가 **있을 때만** 같이 고친다 — 그러면 지금 화면과 다음에 열 화면이
+    /// 같고, 제 차례가 없던 프로젝트는 여전히 기본을 따른다. 없던 프로젝트에 같은 값을 새로 박으면 그 프로젝트가 다음
+    /// 기본을 안 따르게 묶인다.
     fn set_order(&mut self, as_default: bool) {
         let rows = self.rows();
         let (held, stood) = self.grip_of(&rows);
@@ -5036,6 +5056,8 @@ impl App {
         self.save_look();
     }
 
+    /// 지금 차례를 **지금 선 자리에** 든다 — 프로젝트 안이면 그 프로젝트의 것, 층이면 기본(사용자 결정
+    /// 2026-10-09). 적는 것은 뒤의 [`App::save_look`] 이 차이로 한다.
     fn keep_order(&mut self) {
         match self.order_home() {
             Some(path) => {
@@ -5196,29 +5218,33 @@ impl App {
             self.view.show_archived = a;
         }
         let mut base = SortChoice::default();
-        if let Some(words) = &look.order {
-            match crate::query::Order::parse(&words.join(",")) {
+        // A legacy `order` array applies to every layer; `order_layers` then overrides the layers it names. Neither
+        // makes the choice extended — this binary writes `order_layers` for every choice so the layers survive a
+        // restart, and only an extended choice writes `group` ([`SortChoice::extended`]).
+        let listed = match &look.order {
+            None => false,
+            Some(words) => match crate::query::Order::parse(&words.join(",")) {
                 Ok(order) => {
                     base.order = order;
-                    base.preset = None;
+                    true
                 }
-                Err(_) => problems.push(self.bad_order(crate::user_config::ORDER, words)),
-            }
-        }
-        if look.order.as_ref().is_none_or(|w| crate::query::Order::parse(&w.join(",")).is_err()) {
-            if let Some(word) = &look.sort {
-                if let Some(key) = keys::Order::named(word) {
-                    let field = keys::Ordered::of(key);
-                    let field = if look.sort_reversed == Some(true) { field.flipped() } else { field };
-                    let fields = vec![Self::query_field(field)];
-                    base.order = crate::query::Order { milestone: fields.clone(), epic: fields.clone(), item: fields };
-                    base.preset = None;
-                } else {
-                    problems.push(fill(
-                        say(self.site.lang, "tui.look.bad_sort"),
-                        &[("word", word), ("known", &keys::Order::ALL.map(keys::Order::name).join("·"))],
-                    ));
+                Err(_) => {
+                    problems.push(self.bad_order(crate::user_config::ORDER, words));
+                    false
                 }
+            },
+        };
+        if !listed && let Some(word) = &look.sort {
+            if let Some(key) = keys::Order::named(word) {
+                let field = keys::Ordered::of(key);
+                let field = if look.sort_reversed == Some(true) { field.flipped() } else { field };
+                let fields = vec![Self::query_field(field)];
+                base.order = crate::query::Order { milestone: fields.clone(), epic: fields.clone(), item: fields };
+            } else {
+                problems.push(fill(
+                    say(self.site.lang, "tui.look.bad_sort"),
+                    &[("word", word), ("known", &keys::Order::ALL.map(keys::Order::name).join("·"))],
+                ));
             }
         }
         if let Some(layers) = &look.layered_order {
@@ -5233,16 +5259,11 @@ impl App {
                     Err(_) => problems.push(self.bad_order(&format!("order.{level}"), words)),
                 }
             }
-            base.extended = true;
-            base.preset = None;
         }
         if let Some(group) = look.group.as_deref().and_then(sorter::screen::Group::named) {
             base.group = group;
             base.extended = true;
-            base.preset = None;
         }
-        base.preset =
-            crate::query::Preset::ALL.into_iter().find(|p| p.order() == base.order && p.group() == base.group);
         self.sort.default = base.clone();
         self.sort.projects.clear();
         let paths: std::collections::BTreeSet<_> = look
@@ -5253,12 +5274,15 @@ impl App {
             .collect();
         for path in paths {
             let mut choice = base.clone();
+            // Only a project something was read for gets its own choice. A project whose every key failed to read
+            // follows the default, as it did before it was written — a copy of the default would pin it there.
+            let mut own = false;
             if let Some(words) = look.project_order.get(path) {
                 match crate::query::Order::parse(&words.join(",")) {
                     Ok(order) => {
                         choice.order = order;
                         choice.extended = false;
-                        choice.preset = None;
+                        own = true;
                     }
                     Err(_) => problems.push(self.bad_order(
                         &format!("{}.{}", crate::user_config::project_key(path), crate::user_config::ORDER),
@@ -5269,28 +5293,29 @@ impl App {
             if let Some(layers) = look.project_layered_order.get(path) {
                 for (level, words) in layers {
                     match crate::query::parse_order(&words.join(",")) {
-                        Ok(fields) => match level.as_str() {
-                            "milestone" => choice.order.milestone = fields,
-                            "epic" => choice.order.epic = fields,
-                            "item" => choice.order.item = fields,
-                            _ => {}
-                        },
+                        Ok(fields) => {
+                            match level.as_str() {
+                                "milestone" => choice.order.milestone = fields,
+                                "epic" => choice.order.epic = fields,
+                                "item" => choice.order.item = fields,
+                                _ => continue,
+                            }
+                            own = true;
+                        }
                         Err(_) => problems.push(
                             self.bad_order(&format!("{}.order.{level}", crate::user_config::project_key(path)), words),
                         ),
                     }
                 }
-                choice.extended = true;
-                choice.preset = None;
             }
             if let Some(group) = look.project_group.get(path).and_then(|word| sorter::screen::Group::named(word)) {
                 choice.group = group;
                 choice.extended = true;
-                choice.preset = None;
+                own = true;
             }
-            choice.preset =
-                crate::query::Preset::ALL.into_iter().find(|p| p.order() == choice.order && p.group() == choice.group);
-            self.sort.projects.insert(path.clone(), choice);
+            if own {
+                self.sort.projects.insert(path.clone(), choice);
+            }
         }
         self.rescope_order();
         if let Some(words) = &look.fields {
@@ -5405,7 +5430,9 @@ impl App {
             // 안 비추면 그쪽은 이 판이 고른 차례와 무관한 옛 값으로 선다. 층별 차례는 별도 키에 적는다.
             order: Some(Self::order_words(&Self::project_sorting(&self.sort.default.order.item))),
             layered_order: Some(Self::common_words(&self.sort.default.order)),
-            group: Some(self.sort.default.group.name().to_string()),
+            // `group` marks an extended choice ([`SortChoice::extended`]) — written for every choice, the next start
+            // read each one back as extended and the crumbs named every layer for a plain `SPC s c`.
+            group: self.sort.default.extended.then(|| self.sort.default.group.name().to_string()),
             sort: Some(Self::project_sorting(&self.sort.default.order.item).first().by.name().to_string()),
             sort_reversed: Some(Self::project_sorting(&self.sort.default.order.item).first().reversed()),
             project_order: self
@@ -5420,7 +5447,13 @@ impl App {
                 .iter()
                 .map(|(k, c)| (k.clone(), Self::common_words(&c.order)))
                 .collect(),
-            project_group: self.sort.projects.iter().map(|(k, c)| (k.clone(), c.group.name().to_string())).collect(),
+            project_group: self
+                .sort
+                .projects
+                .iter()
+                .filter(|(_, c)| c.extended)
+                .map(|(k, c)| (k.clone(), c.group.name().to_string()))
+                .collect(),
             fields: Some(
                 view::Field::ALL.into_iter().filter(|f| self.fields.shows(*f)).map(|f| f.name().to_string()).collect(),
             ),
@@ -6146,7 +6179,6 @@ impl App {
                 let item = self.item_order();
                 let item = if matches!(act, B::Sort(_)) { item.press(o) } else { item.append(o) };
                 self.sort.current.order.item = item.fields().iter().map(|f| Self::query_field(*f)).collect();
-                self.sort.current.preset = None;
                 self.keep_order();
             }
             _ => return,
@@ -15927,7 +15959,7 @@ mod tests {
         assert_eq!(a.item_order(), listed, "목록이 옛 한 쌍을 못 이겼다");
         assert_eq!(a.notice, None);
 
-        // 못 읽은 목록 — `id` 는 탐색기의 차례에 없고, 두 번 선 필드는 거절이다. 알리고 옛 한 쌍으로 선다.
+        // 못 읽은 목록 — 두 번 선 필드와 빈 목록, 모르는 필드는 거절한다. 알리고 옛 한 쌍으로 선다.
         for bad in ["[\"title\", \"title:desc\"]", "[]", "[\"nope\"]"] {
             let text = format!("[tui]\norder = {bad}\nsort = \"created\"\nsort_reversed = true\n");
             let mut a = open(&text);
@@ -17090,5 +17122,69 @@ mod tests {
         a.reload();
         assert_eq!(a.site.unreadable.len(), 2, "{:?}", a.site.unreadable);
         assert_eq!(a.site.unreadable_live, 1);
+    }
+
+    /// **A plain `SPC s c` comes back plain after a restart** (review moai-6vcm.xdf). Every choice writes its layers so
+    /// they survive, but only a choice that reached past the item order writes `group` — writing it for every choice
+    /// read the next start back as extended, and the crumbs swapped `[정렬 생성↓]` for every layer's words.
+    #[test]
+    fn an_item_order_choice_survives_a_restart_as_it_was() {
+        let s = scratch("sort-item-restart");
+        let user = s.join("user.toml");
+        let mut a = App::new(vec![make("argos-0001", Kind::Issue)], cfg(), Path::new());
+        a.user_config = Some(user.clone());
+        a.load_look();
+        a.hit("SPC s c Esc");
+        let before = a.sort.current.clone();
+        assert!(!before.extended);
+        let text = std::fs::read_to_string(&user).unwrap();
+        assert!(text.contains("order_layers") && !text.contains("group"), "{text}");
+        let mut b = App::new(vec![make("argos-0001", Kind::Issue)], cfg(), Path::new());
+        b.user_config = Some(user.clone());
+        b.load_look();
+        assert_eq!(b.sort.current, before, "the restart changed the choice\n{text}");
+        let shown = super::draw::tests::render(&mut b, 120, 8).join("\n");
+        assert!(shown.contains("정렬 생성↓") && !shown.contains("묶기"), "{shown}");
+        // An extended choice keeps its group key, and so stays extended.
+        b.hit("SPC s e 3 Enter");
+        assert!(b.sort.current.extended);
+        let mut c = App::new(vec![make("argos-0001", Kind::Issue)], cfg(), Path::new());
+        c.user_config = Some(user);
+        c.load_look();
+        assert_eq!(c.sort.current, b.sort.current);
+    }
+
+    /// **Choosing the preset already in force and pressing Enter writes nothing** (review moai-6vcm.xdf). A kept preset
+    /// name and an `extended` set on every preset key made the choice differ from its opening state, so the unchanged
+    /// `Enter` pinned a project table holding the default.
+    #[test]
+    fn choosing_the_preset_in_force_writes_no_project_table() {
+        let s = scratch("sort-same-preset");
+        let user = s.join("user.toml");
+        let mut a = App::new(vec![make("argos-0001", Kind::Issue)], cfg(), Path::new());
+        a.user_config = Some(user.clone());
+        a.load_look();
+        let mut a =
+            a.with_layer(layer::fake(vec![("argos", "/x", layer::Look::Unread)], layer::At::Project("/x".into())));
+        a.hit("SPC s e 1 Enter");
+        assert!(a.sort.projects.is_empty(), "{:?}", a.sort.projects);
+        // Stepping away and back inside the window is no change either.
+        a.hit("SPC s e 3 1 Enter");
+        assert!(a.sort.projects.is_empty(), "{:?}", a.sort.projects);
+        assert!(!std::fs::read_to_string(&user).unwrap_or_default().contains("[tui.project"));
+    }
+
+    /// **A project whose order cannot be read follows the default** (review moai-6vcm.xdf) — a copy of the default stood
+    /// in for it and pinned it there, so a later default never reached it.
+    #[test]
+    fn an_unreadable_project_order_follows_the_default() {
+        let s = scratch("sort-bad-project");
+        let user = s.join("user.toml");
+        std::fs::write(&user, "[tui]\norder = [\"title\"]\n\n[tui.project.\"/x\"]\norder = [\"nope\"]\n").unwrap();
+        let mut a = App::new(vec![make("argos-0001", Kind::Issue)], cfg(), Path::new());
+        a.user_config = Some(user);
+        a.load_look();
+        assert!(a.notice.clone().unwrap_or_default().contains("nope"), "{:?}", a.notice);
+        assert!(a.sort.projects.is_empty(), "{:?}", a.sort.projects);
     }
 }

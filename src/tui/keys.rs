@@ -680,7 +680,7 @@ impl Ordered {
 ///
 /// **크기가 정해진 배열로 든다** — 한 필드는 한 번만 서니(`query::parse_order` 가 거절한다) 칸은 [`Order::ALL`] 의
 /// 수를 못 넘는다. 그래서 `Copy` 로 남는다: 키 처리의 [`Ctx`] 가 이것을 값으로 들어,
-/// `Vec` 이면 그 둘이 통째로 `Copy` 를 잃는다. 쓰지 않는 칸은 견주지 않는다(손으로 적은 `PartialEq`).
+/// `Vec` 이면 그것이 통째로 `Copy` 를 잃는다. 쓰지 않는 칸은 견주지 않는다(손으로 적은 `PartialEq`).
 #[derive(Clone, Copy)]
 pub struct Sorting {
     slots: [Ordered; Order::ALL.len()],

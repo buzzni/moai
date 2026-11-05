@@ -2111,6 +2111,44 @@ mod tests {
         assert_eq!(b.item_order(), updated_up, "제 차례가 없는 프로젝트가 기본을 안 따랐다");
     }
 
+    /// **A project that chose only its item order follows the default's grouping** (review moai-6vcm.xdf). Its choice was
+    /// one snapshot taken when it was kept, so a grouping picked later at the overview reached the project only after a
+    /// restart — which reads such a project back without a `group` of its own.
+    #[test]
+    fn a_project_with_only_an_item_order_follows_the_default_grouping() {
+        let s = Scratch::fenced("layer-sort-group");
+        let (one, two) = twins(&s);
+        let cfg = s.register(&[&one, &two]);
+        let open = || {
+            let mut a = layered(&cfg);
+            a.user_config = Some(cfg.clone());
+            a.load_look();
+            a
+        };
+        let created = super::super::keys::Sorting::by(super::super::keys::Order::Created);
+        let mut a = open();
+        a.key(key(KeyCode::Enter));
+        assert_eq!(a.here(), Some(one.clone()), "시험의 전제 — 첫 프로젝트에 들었다");
+        a.hit("SPC s c Esc");
+        a.key(key(KeyCode::Home));
+        a.hit("0");
+        // People groups by assignee, so the default now reaches past the item order.
+        a.hit("SPC s e 5 Enter");
+        assert_eq!(a.sort.current.group, crate::nav::Group::Assignee, "시험의 전제 — 층에서 묶기를 골랐다");
+        a.hit("1");
+        assert_eq!(a.here(), Some(one.clone()));
+        assert_eq!(
+            (a.item_order(), a.sort.current.group),
+            (created, crate::nav::Group::Assignee),
+            "the project kept the grouping it was kept with"
+        );
+        // The next start reads that project the same way.
+        let mut b = open();
+        b.hit("1");
+        assert_eq!(b.here(), Some(one.clone()));
+        assert_eq!((b.item_order(), b.sort.current.group), (created, crate::nav::Group::Assignee));
+    }
+
     /// **층에서 띄운 읽기는 방금 잰 줄을 덮지 않는다**(moai-800o). 들어가려다 못 열면 그 줄을
     /// 지금의 디렉터리로 고쳐 세우는데(`Look::Shut`), 그 앞에 띄운 층 읽기는 옛 디렉터리를 잰
     /// 것이다 — 늦게 닿으면 열린 줄로 되돌려, 사람이 방금 들은 "디렉터리가 없다" 와 화면이 어긋난다.

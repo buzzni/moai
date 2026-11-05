@@ -291,7 +291,7 @@ pub fn screen(f: &mut Frame, app: &mut App) {
     let (raw, share) = (app.raw, app.wiki_width.or(app.list_width));
     let mut wiki_at = None;
     let sort_order = matches!(&app.mode, Mode::Sort(_)).then(|| app.common_order());
-    let sort_preset = app.sort.current.preset;
+    let sort_preset = matches!(&app.mode, Mode::Sort(_)).then(|| app.sort.current.preset()).flatten();
     match &mut app.mode {
         Mode::Backlog(form) => jot(f, form, body, true, tint, lang),
         Mode::Pick(p) => pick(f, p, body, lang),
@@ -594,12 +594,15 @@ fn preset_word(preset: crate::query::Preset, lang: Lang) -> &'static str {
         Preset::People => say(lang, "tui.grouping.people"),
     }
 }
-fn screen_order_words(order: &super::sorter::screen::ScreenOrder, lang: Lang) -> String {
-    use crate::query::Preset;
-    for preset in Preset::ALL {
-        if *order == App::screen_preset(preset) {
-            return preset_word(preset, lang).to_string();
-        }
+/// `preset` is the exact preset the engine order is ([`super::SortChoice::preset`]) — the screen projection drops
+/// `:nulls-first`, so matching it against a preset's projection named a preset the list was not in.
+fn screen_order_words(
+    order: &super::sorter::screen::ScreenOrder,
+    preset: Option<crate::query::Preset>,
+    lang: Lang,
+) -> String {
+    if let Some(preset) = preset {
+        return preset_word(preset, lang).to_string();
     }
     let mut parts = vec![format!("{}: {}", say(lang, "tui.grouping.group"), grouping_word(order.group, lang))];
     for (level, name, sorting) in [
@@ -2799,7 +2802,7 @@ fn crumbs(f: &mut Frame, app: &App, rows: &[Row], at: Rect) {
     // 안 남으면 뺀다. 키는 안 적는다 — 메뉴의 `SPC v`(숨김)·`SPC s`(정렬)가 댄다. 층에서는 보기가 뜻이 없다.
     // 기본이 아닌 차례도 같은 뱃지에 댄다(moai-55cp) — 차례가 바뀐 줄 모르면 줄이 뒤섞인 줄 안다.
     let sorted = if app.sort.current.extended || app.sort.current.group != super::sorter::screen::Group::Structure {
-        Some(screen_order_words(&app.screen_order(), app.site.lang))
+        Some(screen_order_words(&app.screen_order(), app.sort.current.preset(), app.site.lang))
     } else {
         (app.item_order() != Default::default()).then(|| {
             fill(say(app.site.lang, "tui.badge.sorted"), &[("by", &sort_words(&app.item_order(), app.site.lang))])

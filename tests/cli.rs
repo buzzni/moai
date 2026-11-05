@@ -168,11 +168,14 @@ fn layered_sort_and_group_are_available_to_json_clients() {
 #[test]
 fn dangling_group_references_use_the_explorer_position_in_show() {
     let s = init("dangling-group");
+    // The lost rows' ids sort after the rows with no group (review moai-6vcm.xdf). Grouped by the written id, a
+    // dangling `argos-e999` sorts between the real group and the ungrouped tail, so with the lost rows first by id
+    // the old order matched the tree by chance and the epic half could not go red.
     let rows = [
         r#"{"id":"argos-e001","title":"epic","kind":"epic","status":"todo","created_at":"2026-09-01T00:00:00Z","updated_at":"2026-09-01T00:00:00Z","status_since":"2026-09-01T00:00:00Z"}"#,
         r#"{"id":"argos-m001","title":"milestone","kind":"milestone","status":"todo","created_at":"2026-09-01T00:00:00Z","updated_at":"2026-09-01T00:00:00Z","status_since":"2026-09-01T00:00:00Z"}"#,
-        r#"{"id":"argos-a001","title":"lost epic","epic":"argos-e999","status":"todo","created_at":"2026-09-01T00:00:00Z","updated_at":"2026-09-01T00:00:00Z","status_since":"2026-09-01T00:00:00Z"}"#,
-        r#"{"id":"argos-a002","title":"lost milestone","milestone":"argos-m999","status":"todo","created_at":"2026-09-01T00:00:00Z","updated_at":"2026-09-01T00:00:00Z","status_since":"2026-09-01T00:00:00Z"}"#,
+        r#"{"id":"argos-a009","title":"lost epic","epic":"argos-e999","status":"todo","created_at":"2026-09-01T00:00:00Z","updated_at":"2026-09-01T00:00:00Z","status_since":"2026-09-01T00:00:00Z"}"#,
+        r#"{"id":"argos-a008","title":"lost milestone","milestone":"argos-m999","status":"todo","created_at":"2026-09-01T00:00:00Z","updated_at":"2026-09-01T00:00:00Z","status_since":"2026-09-01T00:00:00Z"}"#,
         r#"{"id":"argos-a003","title":"valid epic","epic":"argos-e001","status":"todo","created_at":"2026-09-01T00:00:00Z","updated_at":"2026-09-01T00:00:00Z","status_since":"2026-09-01T00:00:00Z"}"#,
         r#"{"id":"argos-a004","title":"valid milestone","milestone":"argos-m001","status":"todo","created_at":"2026-09-01T00:00:00Z","updated_at":"2026-09-01T00:00:00Z","status_since":"2026-09-01T00:00:00Z"}"#,
     ];

@@ -1474,8 +1474,7 @@ pub enum SortKey {
     Due,
     /// **안 움직이는 차례**(moai-efoc) — id 는 한 번 서면 안 바뀐다. `--after` 로 넘길 때
     /// 앞 쪽을 받는 사이 다른 줄의 우선순위나 칸이 바뀌어도 이 차례는 안 밀린다. 탐색기의
-    /// 차례 표(`tui::keys::Order`)에는 없다 — id 는 씨앗 해시(`id::mint`)라 만든 차례도 아니고
-    /// 사람이 훑는 화면에서는 뜻이 없다. 쓸모는 쪽을 넘기는 기계의 커서 하나다. 안 움직이는
+    /// 차례 표(`tui::keys::Order`)에서도 고를 수 있다. 안 움직이는
     /// 차례는 이것과 [`SortKey::Created`] 둘이다 — 생성 차례의 동점도 id 로만 가른다(moai-psyu).
     Id,
     Kind,
@@ -1511,8 +1510,7 @@ impl SortKey {
     ];
 
     /// `--sort` 와 설정 파일에 적는 낱말 — 탐색기가 아는 필드는 **탐색기가 설정에 적는 이름(`tui::keys::Order::name`)과
-    /// 같다**. 한 낱말이 두 표면에서 다른 필드를 가리키면 안 된다(`cmd::show` 의 시험이 맨다). `id` 와 moai-ctxc 가 더한
-    /// 필드(`kind` 부터 `progress` 까지)는 아직 탐색기의 차례에 없다 — `App::sorting_of` 가 그 낱말을 못 읽은 차례로 낸다.
+    /// 같다**. 한 낱말이 두 표면에서 다른 필드를 가리키면 안 된다(`cmd::show` 의 시험이 맨다).
     pub fn name(self) -> &'static str {
         match self {
             SortKey::Priority => "priority",
@@ -1770,16 +1768,7 @@ impl<'a> SortContext<'a> {
         statuses: &[String],
         naming: crate::config::Naming,
     ) -> std::cmp::Ordering {
-        if order.milestone == order.epic && order.epic == order.item {
-            return self.compare(&order.item, reversed, a, b, statuses, naming);
-        }
-        let layer = |kind| match kind {
-            Kind::Milestone => 0,
-            Kind::Epic => 1,
-            _ => 2,
-        };
-        let (al, bl) = (layer(a.0.kind), layer(b.0.kind));
-        al.cmp(&bl).then_with(|| self.compare(order.for_kind(a.0.kind), reversed, a, b, statuses, naming))
+        by_layer(order, a.0.kind, b.0.kind, |fields| self.compare(fields, reversed, a, b, statuses, naming))
     }
     /// The values of that row. An id with one row answers at once; only twins are told apart, by
     /// address and then by content (a listing sorts clones of the snapshot's rows). Comparing whole
@@ -1853,28 +1842,33 @@ impl CachedSort {
         statuses: &[String],
         naming: crate::config::Naming,
     ) -> std::cmp::Ordering {
-        if order.milestone != order.epic || order.epic != order.item {
-            let layer = |kind| match kind {
-                Kind::Milestone => 0,
-                Kind::Epic => 1,
-                _ => 2,
-            };
-            let cmp = layer(a.1.kind).cmp(&layer(b.1.kind));
-            if cmp.is_ne() {
-                return cmp;
-            }
-        }
-        compare_order(
-            order.for_kind(a.1.kind),
-            false,
-            (a.1, a.2),
-            (b.1, b.2),
-            statuses,
-            naming,
-            Some(&self.0[a.0].borrowed()),
-            Some(&self.0[b.0].borrowed()),
-        )
+        // A position outside the cache (a row added after the load measured it) compares by its own fields, as
+        // `order_by` does — it must not take the explorer down.
+        let (av, bv) = (self.0.get(a.0).map(OwnedSortValues::borrowed), self.0.get(b.0).map(OwnedSortValues::borrowed));
+        by_layer(order, a.1.kind, b.1.kind, |fields| {
+            compare_order(fields, false, (a.1, a.2), (b.1, b.2), statuses, naming, av.as_ref(), bv.as_ref())
+        })
     }
+}
+
+/// Order structural peers by their own layer. A single order for every layer compares across kinds directly;
+/// otherwise milestones, then epics, then work, so mixed kinds remain a total order. The one rule for
+/// [`SortContext::compare_layers`] and [`CachedSort::compare_layers`].
+fn by_layer(
+    order: &Order,
+    a: Kind,
+    b: Kind,
+    within: impl FnOnce(&[Field]) -> std::cmp::Ordering,
+) -> std::cmp::Ordering {
+    if order.milestone == order.epic && order.epic == order.item {
+        return within(&order.item);
+    }
+    let layer = |kind| match kind {
+        Kind::Milestone => 0,
+        Kind::Epic => 1,
+        _ => 2,
+    };
+    layer(a).cmp(&layer(b)).then_with(|| within(order.for_kind(a)))
 }
 
 /// Compare rows without a snapshot. Call `SortContext::compare` when inherited or
@@ -2072,6 +2066,11 @@ impl std::fmt::Display for Order {
 }
 
 /// Sort a CLI listing using layered order and a group key before applying its cursor.
+///
+/// `index` is the caller's tree of `all` when it already built one ([`Index::in_soil`] from the filter's own
+/// membership walk); grouping by milestone or epic reads tree positions from it and builds one only when absent.
+///
+/// [`Index::in_soil`]: crate::nav::Index::in_soil
 pub fn page_order<'a>(
     shown: &mut Vec<Issue>,
     all: &'a [Issue],
@@ -2080,6 +2079,7 @@ pub fn page_order<'a>(
     order: &Order,
     group: crate::nav::Group,
     reversed: bool,
+    index: Option<&crate::nav::Index>,
     after: Option<&Issue>,
     limit: Option<usize>,
 ) -> usize {
@@ -2087,7 +2087,9 @@ pub fn page_order<'a>(
     let context = SortContext::with_where(all, wh);
     let groups: BTreeMap<&str, &Issue> = all.iter().map(|issue| (issue.id.as_str(), issue)).collect();
     // Group by the same actual tree position as the explorer, including lost rows.
-    let positions = matches!(group, Group::Milestone | Group::Epic).then(|| crate::nav::Index::of(all));
+    let by_position = matches!(group, Group::Milestone | Group::Epic);
+    let built = (by_position && index.is_none()).then(|| crate::nav::Index::of(all));
+    let positions = if by_position { index.or(built.as_ref()) } else { None };
     let mut row_indices: BTreeMap<&str, Vec<usize>> = BTreeMap::new();
     if positions.is_some() {
         for (at, row) in all.iter().enumerate() {
@@ -2096,8 +2098,8 @@ pub fn page_order<'a>(
     }
     let group_cmp = |a: &Issue, b: &Issue| {
         let (a, b) = (
-            group_value(group, a, wh, &context, positions.as_ref(), &row_indices, all),
-            group_value(group, b, wh, &context, positions.as_ref(), &row_indices, all),
+            group_value(group, a, wh, &context, positions, &row_indices, all),
+            group_value(group, b, wh, &context, positions, &row_indices, all),
         );
         if matches!(group, Group::Milestone | Group::Epic) {
             if let (Some(a), Some(b)) =
@@ -2594,7 +2596,7 @@ mod tests {
         after: Option<&Issue>,
         limit: Option<usize>,
     ) -> usize {
-        page_order(shown, all, wh, cfg, &sort.order, crate::nav::Group::None, sort.reversed, after, limit)
+        page_order(shown, all, wh, cfg, &sort.order, crate::nav::Group::None, sort.reversed, None, after, limit)
     }
 
     /// 한 이슈만 두고 고르기. 소속 지도는 그 이슈에서 뽑는다.
@@ -3966,10 +3968,10 @@ mod tests {
         let wh = Where::of(&all, &cfg);
         let order = Order::parse("id").unwrap();
         let mut first = all.clone();
-        page_order(&mut first, &all, &wh, &cfg, &order, crate::nav::Group::Assignee, false, None, Some(1));
+        page_order(&mut first, &all, &wh, &cfg, &order, crate::nav::Group::Assignee, false, None, None, Some(1));
         assert_eq!(first[0].id, "a-0002");
         let mut next = all.clone();
-        page_order(&mut next, &all, &wh, &cfg, &order, crate::nav::Group::Assignee, false, Some(&all[1]), None);
+        page_order(&mut next, &all, &wh, &cfg, &order, crate::nav::Group::Assignee, false, None, Some(&all[1]), None);
         assert_eq!(next.iter().map(|i| i.id.as_str()).collect::<Vec<_>>(), ["a-0001", "a-0003"]);
     }
 
