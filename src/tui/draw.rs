@@ -585,8 +585,8 @@ fn grouping_word(group: super::sorter::adapter::Group, lang: Lang) -> &'static s
         Group::Epic => say(lang, "tui.grouping.epic"),
     }
 }
-fn preset_word(preset: super::sorter::adapter::Preset, lang: Lang) -> &'static str {
-    use super::sorter::adapter::Preset;
+fn preset_word(preset: crate::query::Preset, lang: Lang) -> &'static str {
+    use crate::query::Preset;
     match preset {
         Preset::Release => say(lang, "tui.grouping.release"),
         Preset::Urgent => say(lang, "tui.grouping.urgent"),
@@ -596,9 +596,9 @@ fn preset_word(preset: super::sorter::adapter::Preset, lang: Lang) -> &'static s
     }
 }
 fn screen_order_words(order: &super::sorter::adapter::ScreenOrder, lang: Lang) -> String {
-    use super::sorter::adapter::{Preset, ScreenOrder};
+    use crate::query::Preset;
     for preset in [Preset::Release, Preset::Urgent, Preset::Recent, Preset::Due, Preset::People] {
-        if *order == ScreenOrder::preset(preset) {
+        if *order == App::screen_preset(preset) {
             return preset_word(preset, lang).to_string();
         }
     }
@@ -662,7 +662,7 @@ fn sort_edit(f: &mut Frame, e: &mut super::sorter::adapter::ScreenEditor, at: Re
     f.render_widget(block, at);
     let header_height = if inner.height >= 10 { 3 } else { 0 };
     if header_height > 0 {
-        use super::sorter::adapter::Preset;
+        use crate::query::Preset;
         let presets = [Preset::Release, Preset::Urgent, Preset::Recent, Preset::Due, Preset::People];
         let choices = presets
             .iter()
@@ -3421,7 +3421,9 @@ fn lane_line<'a>(app: &App, laid: &super::Laid, lane: usize, w: usize) -> Line<'
         crate::nav::Seg::Lost => head.push(Span::styled(say(lang, "nav.lost"), dim())),
         crate::nav::Seg::Epic(name) if super::virtual_group(seg) => {
             let label = super::group_label(seg).unwrap_or("");
-            let title = if name.starts_with(&format!("{}milestone:value:", super::GROUP_PREFIX))
+            let title = if name.contains(":empty:") {
+                say(site.lang, "tui.grouping.none").to_string()
+            } else if name.starts_with(&format!("{}milestone:value:", super::GROUP_PREFIX))
                 || name.starts_with(&format!("{}epic:value:", super::GROUP_PREFIX))
             {
                 site.title_of(label)
@@ -3765,6 +3767,24 @@ fn row_line<'a>(app: &App, r: &Row, tally: &str, budget: usize, fields: super::v
     let Some(site) = app.site_of_seat(seat) else { return Line::default() };
     let is_dir = matches!(e, Entry::Dir { .. });
     let Some(at) = e.at() else {
+        if let Entry::Dir { seg, .. } = e
+            && super::virtual_group(seg)
+        {
+            let label = super::group_label(seg).unwrap_or("");
+            let text = match seg {
+                crate::nav::Seg::Epic(name) if name.contains(":empty:") => {
+                    say(site.lang, "tui.grouping.none").to_string()
+                }
+                crate::nav::Seg::Epic(name)
+                    if name.starts_with(&format!("{}milestone:value:", super::GROUP_PREFIX))
+                        || name.starts_with(&format!("{}epic:value:", super::GROUP_PREFIX)) =>
+                {
+                    site.title_of(label)
+                }
+                _ => label.to_string(),
+            };
+            return Line::from(Span::styled(format!("{text}/"), dim()));
+        }
         // 바구니는 제 줄이 없다 — 이름만 낸다.
         return Line::from(Span::styled(format!("{}/", site.index.label(&site.issues, e, site.lang)), dim()));
     };

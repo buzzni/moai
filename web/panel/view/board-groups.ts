@@ -65,6 +65,7 @@ export interface BoardLook {
   itemOrder?: readonly import('./sort-panel.ts').SortPanelField[]
   levelOrder?: readonly import('./sort-panel.ts').SortPanelField[]
   milestoneOrder?: readonly import('./sort-panel.ts').SortPanelField[]
+  groupedTree?: readonly import('../data/index.ts').TreeRow[]
   shut?: ReadonlySet<string>
 }
 
@@ -140,15 +141,19 @@ export function groupBoard(index: IssueIndex, look: BoardLook, known: readonly s
   // `descendants` is in the tree's order, which is the order the list draws: a card stands where its row stands.
   const make = (seg: Seg | null, members: number[], at?: number): BoardLane => {
     const folded = !look.reveal && seg !== null && !!look.shut?.has(pathKey([seg]))
-    const ordered = look.itemOrder ? members.slice().sort((a, b) => compareItems(index, a, b, look.itemOrder!, known)) : members
+    const ordered = look.itemOrder && !look.groupedTree ? members.slice().sort((a, b) => compareItems(index, a, b, look.itemOrder!, known)) : members
     return { seg, at, count: members.length, folded,
       columns: keys.map((key) => ({ key, cards: folded ? [] : ordered.filter((m) => columnOf(index, m) === key) })) }
   }
 
-  if (look.group === 'none') return { keys, lanes: kept.length ? [make(null, kept)] : [], total: kept.length, pinned }
+  if (look.group === 'none') {
+    const server = look.groupedTree && groupBuckets(index, path, (at) => shown(at), 'none', known, false, look.itemOrder, look.levelOrder, look.groupedTree)
+    const members = server ? server.flatMap((bucket) => bucket.members) : kept
+    return { keys, lanes: members.length ? [make(null, members)] : [], total: members.length, pinned }
+  }
   if (look.group && look.group !== 'structure') {
     const shownSet = new Set(kept)
-    const lanes = groupBuckets(index, path, (at) => shownSet.has(at), look.group, known, false, look.itemOrder, look.levelOrder)
+    const lanes = groupBuckets(index, path, (at) => shownSet.has(at), look.group, known, false, look.itemOrder, look.levelOrder, look.groupedTree)
       .map((bucket) => ({ ...make(bucket.seg, bucket.members), label: bucket.label }))
     return { keys, lanes, total: kept.length, pinned }
   }

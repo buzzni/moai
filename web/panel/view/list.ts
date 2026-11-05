@@ -222,7 +222,7 @@ export const mountList: MountPane = (root, ctx): PaneView => {
     // `⎇ <branch>` before the name when another worktree holds it, as the TUI's row (view/branch.ts, se-etwu).
     const branch = row ? branchOf(row) : undefined
     if (branch) title.append(branchMark(doc, branch), " ")
-    const name = line.kind === "up" ? copy.up : line.kind === "bucket" ? (line.label ?? segLabel(line.seg, index, copy)) : String(row!.title ?? row!.id)
+    const name = line.kind === "up" ? copy.up : line.kind === "bucket" ? (line.seg.endsWith(':n') && line.seg.startsWith('group:') ? (copy.stats.none ?? '(none)') : line.label ?? segLabel(line.seg, index, copy)) : String(row!.title ?? row!.id)
     const named = line.kind === "row" ? painted(name) : [name]
     title.append(...(moving ? [glint(doc, name, ...named)] : named), folder ? "/" : "")
     if (revealed) title.append(" ", el(doc, "span", { class: "m-chip moai-hidden-mark" }, words.hiddenMark))

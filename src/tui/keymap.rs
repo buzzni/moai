@@ -472,6 +472,7 @@ fn order(o: Order) -> &'static str {
         Order::Assignee => "assignee",
         Order::Title => "title",
         Order::Due => "due",
+        other => other.name(),
     }
 }
 

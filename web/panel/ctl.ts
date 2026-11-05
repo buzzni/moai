@@ -1,5 +1,6 @@
+import { groupKnown, orderExpression, parsePanelOrder } from './view/sort-adapter.js'
 /** The visible tab's local control interpreter. It uses the same store and key handlers as a person. */
-import { defaultDir, SORT_KEYS, type SortField } from './data/query.js'
+import { defaultDir, type SortField } from './data/query.js'
 import { sortDefault } from './data/memory.js'
 import { isUnread, type ReadMarks } from './data/read.js'
 import { validZone } from './data/zone.js'
@@ -84,6 +85,7 @@ export function createCtl(options: CtlOptions) {
       menu: heldPrefix(keys.router.state()),
       filter: s.filter.applied ? { text: s.filter.applied, kind: 'filter', scope: 'all' } : s.search.text ? { text: s.search.text, kind: 'grep', scope: 'all' } : null,
       sort: s.sort.fields.map((field) => field.dir === defaultDir(field.key) ? field.key : `${field.key}:${field.dir}`),
+      order: orderExpression(s.toolbar.panel), group: s.toolbar.panel.group,
       view: { hidden: s.view.hiddenStatuses, deferred: !s.view.hideDeferred, backlog: !s.view.hideBacklog,
         archived: s.view.showArchived, worktree: s.view.worktree },
       cells: Object.entries(s.columns).filter(([, on]) => on).map(([name]) => name),
@@ -194,14 +196,18 @@ export function createCtl(options: CtlOptions) {
         store.dispatch({ type: 'tab', tab: request.name }); return after()
       case 'sort': {
         if (!Array.isArray(request.words) || request.words.some((word) => typeof word !== 'string')) return no('bad_input', 'invalid sort words')
-        const fields: SortField[] = []
-        for (const word of request.words as string[]) {
-          const [key, direction] = word.split(':')
-          if (!SORT_KEYS.includes(key as SortField['key']) || key === 'id' || (direction && direction !== 'asc' && direction !== 'desc')) return no('bad_input', 'invalid sort field')
-          fields.push({ key: key as SortField['key'], dir: (direction ?? defaultDir(key as SortField['key'])) as SortField['dir'] })
+        const words = request.words as string[]
+        if (words.length === 1 && words[0]!.startsWith('group=')) {
+          const group = words[0]!.slice(6)
+          if (!groupKnown(group)) return no('bad_input', 'invalid group')
+          store.dispatch({ type: 'toolbar', action: { type: 'sort-panel', action: { type: 'group', id: group } } })
+          return after()
         }
-        const sort = { fields, reversed: false }
-        store.dispatch({ type: 'sort', sort })
+        const panel = parsePanelOrder(words.join(','))
+        if (!panel) return no('bad_input', 'invalid sort order')
+        if (!['release', 'urgent', 'recent', 'due', 'people'].includes(words.join(',').trim())) panel.group = current().toolbar.panel.group
+        const sort = { fields: panel.order.item as SortField[], reversed: false }
+        store.dispatch({ type: 'toolbar', action: { type: 'sort-panel-restore', panel, sort } })
         if (request.default === true) {
           sortDefault.set(sort)
           store.dispatch({ type: 'sort-default', sort })

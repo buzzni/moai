@@ -109,3 +109,23 @@ test('the temporary adapter applies independent milestone and item orders to the
   state = { ...state, expanded: [pathKey(['m:m1']), pathKey(['m:m2'])] }
   assert.deepEqual(listLines(state, index, () => true).filter((line) => line.kind === 'row').map((line) => line.key), ['m1', 'b', 'a', 'm2'])
 })
+
+test('server grouping order is retained in list and board, including no grouping', async () => {
+  const { IssueIndex } = await panelModule('data/index.ts')
+  const { groupBuckets } = await panelModule('view/group-adapter.ts')
+  const { groupBoard } = await panelModule('view/board-groups.ts')
+  const { initialState } = await panelModule('store.ts')
+  const rows = [
+    { id: 'a', kind: 'issue', status: 'todo', priority: 0, assignee: 'Amy' },
+    { id: 'b', kind: 'issue', status: 'todo', priority: 3, assignee: 'Amy' },
+  ]
+  const index = new IssueIndex(rows)
+  const server = [{ kind: 'group', path: 'group:assignee:"Amy"' }, { id: 'b' }, { id: 'a' }]
+  const bucket = groupBuckets(index, [], () => true, 'assignee', [], false, [{ key: 'priority', dir: 'asc' }], [], server)[0]
+  assert.deepEqual(bucket.members.map((at) => rows[at].id), ['b', 'a'])
+  const look = { path: [], view: initialState().view, cursor: null, group: 'assignee', itemOrder: [{ key: 'priority', dir: 'asc' }], groupedTree: server }
+  const board = groupBoard(index, look)
+  assert.deepEqual(board.lanes[0].columns.flatMap((column) => column.cards).map((at) => rows[at].id), ['b', 'a'])
+  const flat = groupBoard(index, { ...look, group: 'none', groupedTree: [{ id: 'b' }, { id: 'a' }] })
+  assert.deepEqual(flat.lanes[0].columns.flatMap((column) => column.cards).map((at) => rows[at].id), ['b', 'a'])
+})

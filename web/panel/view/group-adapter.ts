@@ -1,5 +1,5 @@
-/** Temporary grouping for the pre-engine tree. Each work row appears in exactly one bucket. */
-import { isBacklog, isDone, isWork, type IssueIndex, type Keep, type Path, type Row } from '../data/index.ts'
+/** Present server groups, with an immediate local preview while a new tree is loading. */
+import { isBacklog, isDone, isWork, type IssueIndex, type Keep, type Path, type Row, type TreeRow } from '../data/index.ts'
 import { assigneeOf } from '../data/people.ts'
 import type { SortPanelField } from './sort-panel.ts'
 
@@ -28,7 +28,31 @@ export function compareItems(index: IssueIndex, a: number, b: number, fields: re
     }
     return String(left.created_at ?? '').localeCompare(String(right.created_at ?? '')) || left.id.localeCompare(right.id)
   }
-export function groupBuckets(index: IssueIndex, path: Path, keep: Keep, group: string, statuses: readonly string[] = [], includeClosed = false, order: readonly SortPanelField[] = [], levelOrder: readonly SortPanelField[] = []): Bucket[] {
+export function groupBuckets(index: IssueIndex, path: Path, keep: Keep, group: string, statuses: readonly string[] = [], includeClosed = false, order: readonly SortPanelField[] = [], levelOrder: readonly SortPanelField[] = [], server?: readonly TreeRow[]): Bucket[] {
+  if (server) {
+    const scope = new Set(index.descendants(path))
+    const result: Bucket[] = []
+    let current: Bucket | undefined
+    for (const line of server) {
+      if (line.kind === 'group' && line.path) {
+        const payload = line.path.slice(line.path.indexOf(':', 6) + 1)
+        let value: string | null
+        try { value = JSON.parse(payload) as string | null } catch { continue }
+        const ref = value === null ? undefined : index.find(value)
+        const label = value === null ? '(none)' : group === 'tag' ? `#${value}` : ref === undefined ? value : index.rows[ref]!.title ?? value
+        current = { seg: `group:${encodeURIComponent(group)}:${value === null ? 'n' : `v${encodeURIComponent(value)}`}`, label, members: [] }
+        result.push(current)
+      } else if (line.id) {
+        const at = index.find(line.id)
+        if (at === undefined || !scope.has(at) || !keep(at)) continue
+        const row = index.rows[at]!
+        if (!(isWork(row) || (isBacklog(row) && (includeClosed || !isDone(row))))) continue
+        if (group === 'none' && !current) { current = { seg: 'group:none:n', label: '(none)', members: [] }; result.push(current) }
+        current?.members.push(at)
+      }
+    }
+    return result.filter((bucket) => bucket.members.length > 0)
+  }
   const map = new Map<string | null, number[]>()
   for (const at of index.descendants(path)) {
     const row = index.rows[at]!

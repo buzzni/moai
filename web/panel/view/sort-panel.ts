@@ -1,5 +1,5 @@
 /** Sort and group controls. The caller supplies the server vocabulary and owns the state. */
-export interface SortPanelField { key: string; dir: 'asc' | 'desc' }
+export interface SortPanelField { key: string; dir: 'asc' | 'desc'; nullsFirst?: boolean }
 export interface SortPanelState {
   group: string
   order: Record<string, SortPanelField[]>

@@ -36,7 +36,8 @@ These commands act on the selected open window. Use `-t <id>` to choose one expl
 
 | Command | Example | Effect |
 |---|---|---|
-| `sort` | `moai ctl sort 'title:desc,priority:desc'` | Set the current project's order; `--default` also changes the default. |
+| `sort` | `moai ctl sort 'milestone=created:desc;item=priority,due'` | Set layer-specific order or choose a preset such as `release`; `--default` also changes the default. |
+| `group` | `moai ctl group assignee` | Group the list and board by a field; `structure` restores the tree and `none` makes a flat list. |
 | `filter` | `moai ctl filter 'status=todo tag=parser'` | Apply a filter; `--clear` removes it. |
 | `find` | `moai ctl find 'parser' --in title` | Search `all`, `id`, `title`, `tag`, `body`, or `note`. |
 | `screen` | `moai ctl screen board` | Open `list`, `board`, `gantt`, `stats`, or `wiki`. |

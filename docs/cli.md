@@ -3436,12 +3436,12 @@ Order:
   inside a project is kept for that project alone, as order under
   [tui.project."<project path>"], and one picked in 0 is kept as order under
   [tui] — the default for every project without its own. order is a list in
-  the words of `moai show --sort` but id, such as
+  the words of `moai show --sort`, including id, such as
   ["priority", "updated:asc"], and the older sort and sort_reversed pair
   is still read where order is absent and written beside it from the first
   field, for an older moai.
 
-  SPC s e opens the sort window over the list. All seven fields stand in it:
+  SPC s e opens the sort window over the list. All sorting fields stand in it:
   the ones in the order first, numbered and marked ↑ asc or ↓ desc, then the
   rest marked with a dot. j and k move, J and K move the field down or up the
   order, SPC puts it in at the end or takes it out (the last one stays), and

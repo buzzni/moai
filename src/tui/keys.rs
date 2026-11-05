@@ -543,6 +543,16 @@ pub enum Order {
     Title,
     /// 기한(moai-ghkp.7uy) — `query::SortKey::Due` 와 같은 낱말 `due` 다.
     Due,
+    Id,
+    Kind,
+    Milestone,
+    Epic,
+    Tag,
+    Started,
+    Done,
+    Starts,
+    Since,
+    Progress,
 }
 
 impl Order {
@@ -555,11 +565,38 @@ impl Order {
             Order::Assignee => say(lang, "tui.order.assignee"),
             Order::Title => say(lang, "tui.order.title"),
             Order::Due => say(lang, "tui.order.due"),
+            Order::Id => say(lang, "tui.order.id"),
+            Order::Kind => say(lang, "tui.order.kind"),
+            Order::Milestone => say(lang, "tui.order.milestone"),
+            Order::Epic => say(lang, "tui.order.epic"),
+            Order::Tag => say(lang, "tui.order.tag"),
+            Order::Started => say(lang, "tui.order.started"),
+            Order::Done => say(lang, "tui.order.done"),
+            Order::Starts => say(lang, "tui.order.starts"),
+            Order::Since => say(lang, "tui.order.since"),
+            Order::Progress => say(lang, "tui.order.progress"),
         }
     }
 
-    pub const ALL: [Order; 7] =
-        [Order::Priority, Order::Created, Order::Updated, Order::Column, Order::Assignee, Order::Title, Order::Due];
+    pub const ALL: [Order; 17] = [
+        Order::Priority,
+        Order::Created,
+        Order::Updated,
+        Order::Column,
+        Order::Assignee,
+        Order::Title,
+        Order::Due,
+        Order::Id,
+        Order::Kind,
+        Order::Milestone,
+        Order::Epic,
+        Order::Tag,
+        Order::Started,
+        Order::Done,
+        Order::Starts,
+        Order::Since,
+        Order::Progress,
+    ];
 
     /// 설정 파일에 적는 이름(moai-2bzp) — 화면 낱말과 따로다(`view::Field::name` 과 같은 까닭).
     pub fn name(self) -> &'static str {
@@ -571,6 +608,16 @@ impl Order {
             Order::Assignee => "assignee",
             Order::Title => "title",
             Order::Due => "due",
+            Order::Id => "id",
+            Order::Kind => "kind",
+            Order::Milestone => "milestone",
+            Order::Epic => "epic",
+            Order::Tag => "tag",
+            Order::Started => "started",
+            Order::Done => "done",
+            Order::Starts => "starts",
+            Order::Since => "since",
+            Order::Progress => "progress",
         }
     }
 
@@ -597,6 +644,7 @@ impl Order {
             Order::Assignee => say(lang, "tui.order_then.assignee"),
             Order::Title => say(lang, "tui.order_then.title"),
             Order::Due => say(lang, "tui.order_then.due"),
+            other => other.word(lang),
         }
     }
 }
@@ -702,7 +750,7 @@ impl Sorting {
 
 impl Default for Sorting {
     fn default() -> Sorting {
-        Sorting::by(Order::Priority)
+        Sorting::by(Order::Priority).append(Order::Due)
     }
 }
 

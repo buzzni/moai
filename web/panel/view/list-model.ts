@@ -124,13 +124,17 @@ export const hidesAnything = (view: ViewSettings): boolean => view.hiddenStatuse
  * The listing at `state.path` with the open folders unfolded in place: `..` first below the root, then each
  * level's folders, rows and buckets in moai's order ({@link IssueIndex.entries}).
  */
-export function listLines(state: Pick<State, "path" | "expanded"> & Partial<Pick<State, "toolbar" | "boot">>, index: IssueIndex, keep: Keep): ListLine[] {
+export function listLines(state: Pick<State, "path" | "expanded"> & Partial<Pick<State, "toolbar" | "boot" | "board">>, index: IssueIndex, keep: Keep): ListLine[] {
   const open = new Set(state.expanded)
   const out: ListLine[] = []
   if (state.path.length) out.push({ kind: "up", key: UP_KEY, depth: 0, path: state.path.slice(0, -1) })
   const group = state.toolbar?.panel?.group ?? 'structure'
   if (group !== 'structure') {
-    const buckets = groupBuckets(index, state.path, keep, group, state.boot?.statuses, true, state.toolbar?.panel.order.item, state.toolbar?.panel.order[group])
+    const data = state.board?.value
+    const panel = state.toolbar?.panel
+    const expression = ['milestone', 'epic', 'item'].map((level) => `${level}=${(panel?.order[level] ?? []).map((field) => `${field.key}:${field.dir}${field.nullsFirst ? ':nulls-first' : ''}`).join(',')}`).join(';')
+    const server = data?.groupedBy === group && data.groupedSort === expression ? data.groupedTree : undefined
+    const buckets = groupBuckets(index, state.path, keep, group, state.boot?.statuses, true, panel?.order.item, panel?.order[group], server)
     for (const bucket of buckets) {
       const path = [...state.path, bucket.seg]
       const opened = !open.has(pathKey(path))
@@ -145,7 +149,7 @@ export function listLines(state: Pick<State, "path" | "expanded"> & Partial<Pick
   const walk = (here: Path) => {
     const entries = index.entries(here, keep)
     const panel = state.toolbar?.panel
-    if (panel?.edited) entries.sort((a, b) => {
+    if (panel?.edited && state.board?.value?.treeSort !== ['milestone', 'epic', 'item'].map((level) => `${level}=${(panel.order[level] ?? []).map((field) => `${field.key}:${field.dir}${field.nullsFirst ? ':nulls-first' : ''}`).join(',')}`).join(';')) entries.sort((a, b) => {
       if (a.at === undefined || b.at === undefined) return a.at === b.at ? 0 : a.at === undefined ? 1 : -1
       if (a.dir !== b.dir) return a.dir ? -1 : 1
       const kind = index.rows[a.at]?.kind

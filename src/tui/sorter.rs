@@ -136,7 +136,7 @@ mod tests {
     /// 넣고, 옮기고, 방향을 뒤집고, 빼고 — 커서는 필드를 따라간다. 마지막 필드는 못 뺀다.
     #[test]
     fn toggle_reorder_and_flip_follow_the_field() {
-        let mut e = Editor::open(Sorting::default());
+        let mut e = Editor::open(Sorting::by(Order::Priority));
         // 칸(column)에 내려가 넣는다 — 끝에 제 방향으로 서고 커서가 따라간다.
         while e.here() != Order::Column {
             e.act(Sorter::Down);
@@ -175,20 +175,22 @@ mod tests {
     /// Enter·`D`·Esc 는 창을 끝낸다 — 앞의 둘은 고친 차례를 낸다.
     #[test]
     fn apply_default_and_cancel_end_the_window() {
-        let mut e = Editor::open(Sorting::default());
+        let mut e = Editor::open(Sorting::by(Order::Priority));
         e.act(Sorter::Flip);
-        let flipped = Sorting::default().press(Order::Priority);
+        let flipped = Sorting::by(Order::Priority).press(Order::Priority);
         assert_eq!(e.act(Sorter::Apply), Done::Apply(flipped));
         assert_eq!(e.act(Sorter::Default), Done::Default(flipped));
         assert_eq!(e.act(Sorter::Close), Done::Cancel);
     }
 }
 
-/// Temporary screen model until the shared query engine supplies its order and group types.
+/// Screen editing state, translated to and from the shared query engine by App.
 /// Keep engine conversion at this boundary rather than duplicating query comparisons in the UI.
 #[allow(dead_code)]
 pub(super) mod adapter {
-    use super::{Order, Ordered, Sorting};
+    use super::Sorting;
+    #[cfg(test)]
+    use super::{Order, Ordered};
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub enum Level {
@@ -242,15 +244,6 @@ pub(super) mod adapter {
     }
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    pub enum Preset {
-        Release,
-        Urgent,
-        Recent,
-        Due,
-        People,
-    }
-
-    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub struct ScreenOrder {
         pub milestone: Sorting,
         pub epic: Sorting,
@@ -259,36 +252,6 @@ pub(super) mod adapter {
     }
 
     impl ScreenOrder {
-        pub fn preset(preset: Preset) -> Self {
-            let fields = |pairs: &[(Order, bool)]| {
-                Sorting::of(&pairs.iter().map(|(by, down)| Ordered { by: *by, down: *down }).collect::<Vec<_>>())
-                    .expect("preset fields are nonempty and unique")
-            };
-            let release = Self {
-                milestone: fields(&[(Order::Due, false), (Order::Created, true)]),
-                epic: fields(&[(Order::Priority, false), (Order::Created, false)]),
-                item: fields(&[(Order::Priority, false), (Order::Due, false)]),
-                group: Group::Structure,
-            };
-            match preset {
-                Preset::Release => release,
-                Preset::Urgent => Self { group: Group::None, epic: Sorting::by(Order::Priority), ..release },
-                Preset::Recent => Self {
-                    group: Group::None,
-                    milestone: Sorting::by(Order::Updated),
-                    epic: Sorting::by(Order::Updated),
-                    item: Sorting::by(Order::Updated),
-                },
-                Preset::Due => Self {
-                    group: Group::None,
-                    milestone: Sorting::by(Order::Due),
-                    epic: Sorting::by(Order::Due),
-                    item: fields(&[(Order::Due, false), (Order::Priority, false)]),
-                },
-                Preset::People => Self { group: Group::Assignee, epic: Sorting::by(Order::Priority), ..release },
-            }
-        }
-
         pub fn get(&self, level: Level) -> Sorting {
             match level {
                 Level::Milestone => self.milestone,
@@ -373,13 +336,7 @@ pub(super) mod adapter {
                     let at = groups.iter().position(|g| *g == self.group).unwrap_or(0);
                     self.choose_group(groups[(at + 1) % groups.len()]);
                 }
-                Sorter::Preset(n) => {
-                    if let Some(p) = [Preset::Release, Preset::Urgent, Preset::Recent, Preset::Due, Preset::People]
-                        .get(n.saturating_sub(1) as usize)
-                    {
-                        self.choose_preset(*p);
-                    }
-                }
+                Sorter::Preset(_) => {}
                 _ => return self.editor().act(action),
             }
             super::Done::Stay
@@ -424,9 +381,9 @@ pub(super) mod adapter {
                 .expect("item is always active");
         }
 
-        pub fn choose_preset(&mut self, preset: Preset) {
+        pub fn choose_state(&mut self, state: ScreenOrder) {
             let original = self.original;
-            *self = Self::open(ScreenOrder::preset(preset));
+            *self = Self::open(state);
             self.original = original;
         }
     }
@@ -434,10 +391,14 @@ pub(super) mod adapter {
     #[cfg(test)]
     mod tests {
         use super::*;
+        use crate::query::Preset;
+        fn preset(p: Preset) -> ScreenOrder {
+            super::super::super::App::screen_preset(p)
+        }
 
         #[test]
         fn presets_replace_all_levels_and_group() {
-            let release = ScreenOrder::preset(Preset::Release);
+            let release = preset(Preset::Release);
             assert_eq!(
                 release.milestone.fields(),
                 &[Ordered { by: Order::Due, down: false }, Ordered { by: Order::Created, down: true }]
@@ -446,13 +407,13 @@ pub(super) mod adapter {
                 release.epic.fields(),
                 &[Ordered { by: Order::Priority, down: false }, Ordered { by: Order::Created, down: false }]
             );
-            assert_eq!(ScreenOrder::preset(Preset::Recent).item, Sorting::by(Order::Updated));
-            assert_eq!(ScreenOrder::preset(Preset::People).group, Group::Assignee);
+            assert_eq!(preset(Preset::Recent).item, Sorting::by(Order::Updated));
+            assert_eq!(preset(Preset::People).group, Group::Assignee);
         }
 
         #[test]
         fn editing_one_level_leaves_the_others_and_group_intact() {
-            let mut state = ScreenOrder::preset(Preset::Release);
+            let mut state = preset(Preset::Release);
             let before = state;
             state.set(Level::Epic, Sorting::by(Order::Title));
             assert_eq!(state.get(Level::Epic), Sorting::by(Order::Title));
@@ -461,7 +422,7 @@ pub(super) mod adapter {
 
         #[test]
         fn editor_preserves_each_tab_and_skips_inactive_tabs() {
-            let mut editor = ScreenEditor::open(ScreenOrder::preset(Preset::Release));
+            let mut editor = ScreenEditor::open(preset(Preset::Release));
             editor.editor().act(super::super::Sorter::Flip);
             let changed = editor.state().milestone;
             editor.next_level();
@@ -474,13 +435,13 @@ pub(super) mod adapter {
             assert_eq!(editor.level, Level::Item);
             editor.next_level();
             assert_eq!(editor.level, Level::Item);
-            editor.choose_preset(Preset::Release);
-            assert_eq!(editor.state(), ScreenOrder::preset(Preset::Release));
+            editor.choose_state(preset(Preset::Release));
+            assert_eq!(editor.state(), preset(Preset::Release));
         }
 
         #[test]
         fn active_tabs_follow_grouping() {
-            let mut state = ScreenOrder::preset(Preset::Release);
+            let mut state = preset(Preset::Release);
             assert!([Level::Milestone, Level::Epic, Level::Item].into_iter().all(|l| state.active(l)));
             state.group = Group::Milestone;
             assert!(state.active(Level::Milestone) && !state.active(Level::Epic) && state.active(Level::Item));

@@ -105,7 +105,7 @@ function draw(ctx: ViewContext, state: State, index: IssueIndex, model: BoardMod
 
   const laneHead = (lane: BoardLane): HTMLElement | null => {
     if (lane.seg === null) return null
-    const title = lane.label ?? (lane.at !== undefined ? (index.rows[lane.at]!.title ?? index.rows[lane.at]!.id) : segLabel(lane.seg, index, copy))
+    const title = lane.seg?.startsWith('group:') && lane.seg.endsWith(':n') ? (copy.stats.none ?? '(none)') : lane.label ?? (lane.at !== undefined ? (index.rows[lane.at]!.title ?? index.rows[lane.at]!.id) : segLabel(lane.seg, index, copy))
     const selected = lane.at !== undefined && index.rows[lane.at]!.id === state.cursor
     const head = el(doc, 'div', { class: 'm-swim-head', 'data-lane': lane.seg, 'aria-selected': String(selected), 'data-focus': lane.at === undefined ? null : `lane:${index.rows[lane.at]!.id}` })
     const path = [lane.seg]
@@ -339,7 +339,11 @@ export const mountBoard: MountPane = (root, ctx): PaneView => {
         if (!inPlace(state, index, drawKey)) {
           // The board is a layout of the list: the same filter and search narrow it (list-model.ts narrow).
           const found = narrow(state, index)
-          const model = groupBoard(index, { path: state.path, view: state.view, cursor: state.cursor, match: found.match, reveal: found.searching, shut, group: state.toolbar.panel.group, itemOrder: state.toolbar.panel.edited ? state.toolbar.panel.order.item : undefined, levelOrder: state.toolbar.panel.order[state.toolbar.panel.group], milestoneOrder: state.toolbar.panel.edited ? state.toolbar.panel.order.milestone : undefined }, state.boot?.statuses)
+          const panel = state.toolbar.panel
+          const expression = ['milestone', 'epic', 'item'].map((level) => `${level}=${(panel.order[level] ?? []).map((field) => `${field.key}:${field.dir}${field.nullsFirst ? ':nulls-first' : ''}`).join(',')}`).join(';')
+          const data = state.board.value
+          const groupedTree = data?.groupedBy === panel.group && data.groupedSort === expression ? data.groupedTree : undefined
+          const model = groupBoard(index, { path: state.path, view: state.view, cursor: state.cursor, match: found.match, reveal: found.searching, shut, group: panel.group, itemOrder: panel.edited ? panel.order.item : undefined, levelOrder: panel.order[panel.group], milestoneOrder: panel.edited ? panel.order.milestone : undefined, groupedTree }, state.boot?.statuses)
           fillSpace.hidden = !model.total
           // As wide as the board: a pane narrower than the columns scrolls sideways, and the hatch runs under them all.
           fillSpace.style.minWidth = boardWidth(model.keys.length)

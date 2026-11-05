@@ -446,7 +446,7 @@ export function createToolbar(deps: Pick<ToolbarDeps, "doc" | "copy" | "lang">, 
     }
 
     const badge = sortBadge(state.sort)
-    const label = badge.parts.map((part) => `${t.sortKeys[part.key]}${part.dir === "asc" ? "↑" : "↓"}`).join(" ")
+    const label = badge.parts.map((part) => `${t.sortKeys[part.key] ?? part.key}${part.dir === "asc" ? "↑" : "↓"}`).join(" ")
     const panelWords = vocabulary(deps.lang ?? 'ko', t.sortKeys)
     const description = describe(state.panel, panelWords)
     const sortLabel = `${t.sort}: ${description.summary || label}${badge.reversed ? ` (${t.reversed})` : ""}`

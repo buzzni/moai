@@ -59,6 +59,10 @@ export interface BoardData {
   rows: Row[]
   /** `/api/tree` (`tui --json --deep`): where every row stands and in which order (data/index.ts). */
   tree?: TreeRow[]
+  treeSort?: string
+  groupedTree?: TreeRow[]
+  groupedBy?: string
+  groupedSort?: string
   /** What moai said on stderr beside the lists (source.ts Rows): a line it could not read, a notice. */
   notes?: string[]
   /**
