@@ -286,3 +286,26 @@ test('grouping reuses the unchanged structural tree, and a changed stamp reads i
   await until(() => p.trees.length >= 4)
   assert.deepEqual(p.trees.slice(2).map((url) => url.searchParams.get('group')).sort(), ['assignee', 'structure'])
 })
+
+test('sort level tabs change the editor without reading the tree; editing order still reads it', async (t) => {
+  const p = await page(t)
+  await until(() => p.dom.window.document.querySelector('.moai-line[data-key="test-1234"]'))
+  p.dom.window.document.querySelector('.m-sort button').click()
+  const tabs = () => [...p.dom.window.document.querySelectorAll('.m-sort-panel [role=tab]')]
+  tabs().find((tab) => tab.textContent === 'Milestone').click()
+  assert.equal(tabs().find((tab) => tab.textContent === 'Milestone').getAttribute('aria-selected'), 'true')
+  await new Promise((resolve) => setTimeout(resolve, 40))
+  assert.equal(p.trees.length, 1)
+  p.dom.window.document.querySelector('.m-sort-panel section button[aria-pressed]').click()
+  await until(() => p.trees.length > 1)
+})
+
+test('a level tab changed during a tree read does not schedule another read', async (t) => {
+  const p = await page(t, { holdFirst: true })
+  p.dom.window.document.querySelector('.m-sort button').click()
+  ;[...p.dom.window.document.querySelectorAll('.m-sort-panel [role=tab]')].find((tab) => tab.textContent === 'Milestone').click()
+  p.release()
+  await until(() => p.dom.window.document.querySelector('.moai-line[data-key="test-1234"]'))
+  await new Promise((resolve) => setTimeout(resolve, 40))
+  assert.equal(p.trees.length, 1)
+})

@@ -286,7 +286,7 @@ async function start(): Promise<void> {
     // So does the worktree overlay, or the archive shown, turned while it ran (the tree is asked for both).
     // The zone picked while it ran is the same: the tree's `overdue` was judged in the zone before.
     const after = store.getState()
-    if (!sameTreeView(after, sort, view, gantt, zone) || (!gantt && after.toolbar.panel !== panel)) setTimeout(() => void refresher.refresh(), 0)
+    if (!sameTreeView(after, sort, view, gantt, zone) || (!gantt && (after.toolbar.panel.group !== panel.group || orderExpression(after.toolbar.panel) !== expression))) setTimeout(() => void refresher.refresh(), 0)
     else if (after.tab === 'gantt' && !gantt) void ensureChart()
     return true
   }
@@ -335,7 +335,8 @@ async function start(): Promise<void> {
     // Opening the chart after a tree-only read asks for its values. A transition during a read is caught at loadBoard's end.
     if (state.tab === 'gantt' && previous.tab !== 'gantt' && !treeHasGantt && state.board.value) void ensureChart()
     // A new order is moai's to make: the tree is read again in it.
-    if ((state.sort !== previous.sort || state.toolbar.panel !== previous.toolbar.panel) && state.board.value) void refresher.refresh()
+    if ((state.sort !== previous.sort || state.toolbar.panel.group !== previous.toolbar.panel.group ||
+      orderExpression(state.toolbar.panel) !== orderExpression(previous.toolbar.panel)) && state.board.value) void refresher.refresh()
     // The worktree overlay turned on or off: the rows are read again with it or without it.
     if (state.view.worktree !== previous.view.worktree && state.board.value) {
       events?.reconnect()
