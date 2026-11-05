@@ -1444,8 +1444,10 @@ pub enum DaemonCmd {
   A socket left by a daemon that is gone is removed and the daemon starts.
   A file there that is not your socket is left alone and refused. A running
   daemon so full that it cannot even answer hello stops it with the code
-  busy, naming its pid. Ctrl-C leaves the socket behind; the next start
-  clears it.")]
+  busy, naming its pid. Ctrl-C or SIGTERM stops it like moai daemon stop:
+  running requests finish, the socket is removed and it exits 0. A second
+  signal ends it at once and may leave the socket; the next start clears it.
+  A SIGINT ignored at launch (a script's &) stays ignored.")]
     Start,
     /// Ask the running daemon to exit and wait until it has
     #[command(after_help = "  --json gives {stopped, pid, socket}. With nothing running, stopped is

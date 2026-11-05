@@ -75,8 +75,25 @@ impl Fence {
 
     /// `daemon start --json` 을 띄우고 첫 줄(묶은 뒤에 나온다)을 기다린다.
     fn start(&self) -> (Daemon, Value) {
-        let mut child =
-            self.cmd(&["daemon", "start", "--json"]).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().unwrap();
+        Self::first_line(self.cmd(&["daemon", "start", "--json"]))
+    }
+
+    /// `start` 와 같되, 데몬이 SIGINT 를 무시한 채로 뜬다 — 스크립트의 `moai daemon start &` 가 그렇게 띄운다.
+    fn start_ignoring_sigint(&self) -> (Daemon, Value) {
+        use std::os::unix::process::CommandExt as _;
+        let mut cmd = self.cmd(&["daemon", "start", "--json"]);
+        // SAFETY: signal(2) is async-signal-safe, so it may run between fork and exec.
+        unsafe {
+            cmd.pre_exec(|| {
+                libc::signal(libc::SIGINT, libc::SIG_IGN);
+                Ok(())
+            });
+        }
+        Self::first_line(cmd)
+    }
+
+    fn first_line(mut cmd: Command) -> (Daemon, Value) {
+        let mut child = cmd.stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().unwrap();
         let stdout = child.stdout.take().unwrap();
         let (tx, rx) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
@@ -190,6 +207,39 @@ fn start_status_hello_ping_and_stop() {
     // 떠 있지 않을 때의 stop 도 0 이다.
     let again = f.json(&["daemon", "stop", "--json"]);
     assert_eq!(again["stopped"], false, "{again}");
+}
+
+#[test]
+fn sigterm_and_sigint_stop_cleanly() {
+    for signal in [libc::SIGTERM, libc::SIGINT] {
+        let f = Fence::new();
+        let (daemon, first) = f.start();
+        let pid = first["pid"].as_i64().unwrap() as libc::pid_t;
+        // SAFETY: pid is the child just started in this test, and signal is valid.
+        assert_eq!(unsafe { libc::kill(pid, signal) }, 0);
+        assert!(daemon.wait().success(), "signal {signal} did not exit successfully");
+        assert!(!f.socket().exists(), "signal {signal} left a socket");
+        let status = f.json(&["daemon", "status", "--json"]);
+        assert_eq!(status["running"], false);
+        assert_eq!(status["stale_socket"], false);
+    }
+}
+
+/// SIGINT 를 무시한 채 뜬 데몬은 SIGINT 에 안 멈추고(터미널의 Ctrl-C 는 그 스크립트의 것이다), SIGTERM 에는 깨끗이 멈춘다.
+#[test]
+fn an_ignored_sigint_stays_ignored() {
+    let f = Fence::new();
+    let (daemon, first) = f.start_ignoring_sigint();
+    let pid = first["pid"].as_i64().unwrap() as libc::pid_t;
+    // SAFETY: pid is the child just started in this test.
+    assert_eq!(unsafe { libc::kill(pid, libc::SIGINT) }, 0);
+    std::thread::sleep(Duration::from_millis(1500));
+    let status = f.json(&["daemon", "status", "--json"]);
+    assert_eq!(status["running"], true, "SIGINT stopped a daemon that started with it ignored: {status}");
+    // SAFETY: as above.
+    assert_eq!(unsafe { libc::kill(pid, libc::SIGTERM) }, 0);
+    assert!(daemon.wait().success(), "SIGTERM did not exit successfully");
+    assert!(!f.socket().exists(), "SIGTERM left a socket");
 }
 
 /// 연결을 새는 클라이언트가 상한(32)을 다 쥐어도 `status` 가 pid 를 대고 `stop` 이 데몬을 멈춘다(moai-uezh). 상한을
