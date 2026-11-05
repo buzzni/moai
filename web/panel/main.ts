@@ -153,6 +153,9 @@ async function start(): Promise<void> {
   const sameTreeView = (state: State, sort: State['sort'], view: State['view'], zoned: boolean, zone: string | undefined): boolean =>
     state.sort === sort && state.view.worktree === view.worktree && state.view.showArchived === view.showArchived &&
     (!zoned || zoneNow() === zone)
+  /** Whether two sort panels ask moai for the same tree: the same group, in the same order. The level tab only edits. */
+  const sameOrder = (a: State['toolbar']['panel'], b: State['toolbar']['panel']): boolean =>
+    a === b || (a.group === b.group && orderExpression(a) === orderExpression(b))
   async function ensureChart(): Promise<void> {
     const state = store.getState()
     const board = state.board.value
@@ -194,13 +197,17 @@ async function start(): Promise<void> {
 
   document.addEventListener('visibilitychange', () => { if (document.visibilityState !== 'hidden') void ensureChart() })
 
-  // Reuse only when the refresher has confirmed that the tracker stamp has not changed.
-  let structuralCache: { tree: NonNullable<BoardData['tree']>; expression: string; worktree: boolean; archived: boolean } | null = null
+  /**
+   * The structural tree (`group=structure`) the last list read took, with the stamp read before it. A refresh that may
+   * reuse (an order or a grouping turned, data/refresh.ts `reuse`) at that same stamp, in that order and view, is
+   * handed it instead of asking `/api/tree` for it again. Its own stamp, not the refresher's last seen one, says when it was read.
+   */
+  let structuralCache: { stamp: string; tree: NonNullable<BoardData['tree']>; expression: string; worktree: boolean; archived: boolean } | null = null
   /**
    * Reads the board. False when the read did not take (a refusal, a cancel, the boot still missing): data/refresh.ts
    * then leaves the stamp unseen and reads again on its next look.
    */
-  async function loadBoard(automatic = false, unchanged = false): Promise<boolean | 'failed'> {
+  async function loadBoard(automatic = false, readAt: string | null = null, reuse = false): Promise<boolean | 'failed'> {
     const load = ++loads
     quietLoad = automatic ? load : 0
     if (!booted.ok) {
@@ -227,18 +234,22 @@ async function start(): Promise<void> {
     const listing = loadAllRows(client, PRIORITY.list, load, view.worktree)
     const panel = store.getState().toolbar.panel
     const expression = orderExpression(panel)
-    const placing = loadTree(client, { query: gantt ? sortQuery(sort) : { sort: expression, group: panel.group }, priority: PRIORITY.list, epoch: load, worktree: view.worktree, archived: view.showArchived, zone, gantt })
     // The grouped tree has virtual homes. Retain a structural tree as well so navigating inside an epic
     // continues to work while the group is active; grouped order still comes from the server request.
-    const cached = unchanged && structuralCache?.expression === expression && structuralCache.worktree === view.worktree && structuralCache.archived === view.showArchived ? structuralCache.tree : null
-    const structural = !gantt && panel.group !== 'structure' && !cached
-      ? loadTree(client, { query: { sort: expression, group: 'structure' }, priority: PRIORITY.list, epoch: load, worktree: view.worktree, archived: view.showArchived, zone })
+    const grouping = !gantt && panel.group !== 'structure'
+    const cached = reuse && readAt !== null && !gantt && structuralCache?.stamp === readAt && structuralCache.expression === expression &&
+      structuralCache.worktree === view.worktree && structuralCache.archived === view.showArchived ? structuralCache.tree : null
+    const reused: Promise<Loaded<NonNullable<BoardData['tree']>>> | null = cached ? Promise.resolve({ ok: true, value: cached }) : null
+    // Grouped by structure, the tree on screen is the structural one itself: a cached one answers it too.
+    const placing = !grouping && reused ? reused : loadTree(client, { query: gantt ? sortQuery(sort) : { sort: expression, group: panel.group }, priority: PRIORITY.list, epoch: load, worktree: view.worktree, archived: view.showArchived, zone, gantt })
+    const structural = grouping
+      ? reused ?? loadTree(client, { query: { sort: expression, group: 'structure' }, priority: PRIORITY.list, epoch: load, worktree: view.worktree, archived: view.showArchived, zone })
       : null
     const counting = loadGroups(client, PRIORITY.list, load, view.worktree)
     let counted: Awaited<typeof counting> | undefined
     void counting.then((groups) => (counted = groups))
     const [loaded, grouped, structure] = await Promise.all([listing, placing, structural])
-    const placed = structure ?? (cached && !gantt && panel.group !== 'structure' ? { ok: true as const, value: cached } : grouped)
+    const placed = structure ?? grouped
     // A later load owns the screen: this one's answers, failures included, are dropped first. A superseded load's
     // reads come back cancelled, and reporting that as the board's problem cleared the newer load's spinner.
     if (load !== loads) return true
@@ -247,15 +258,14 @@ async function start(): Promise<void> {
       store.dispatch({ type: 'board-failed', problem })
       return failure(problem)
     }
-    if (!gantt) structuralCache = { tree: placed.value, expression, worktree: view.worktree, archived: view.showArchived }
-    else structuralCache = null
+    structuralCache = !gantt && readAt !== null ? { stamp: readAt, tree: placed.value, expression, worktree: view.worktree, archived: view.showArchived } : null
     const { rows, notes } = loaded.value
     const before = store.getState()
     // Counts that came first go in with the rows, so the board is not drawn twice. Until this read's counts come, a
     // refresh keeps the counts the board showed.
     const carried = counted === undefined ? before.board.value?.groups : undefined
     const counts = counted?.ok ? counted.value : carried
-    const data: BoardData = { rows, tree: placed.value, ...(!gantt ? { treeSort: expression } : {}), ...(!gantt && panel.group !== 'structure' ? { groupedTree: grouped.value, groupedBy: panel.group, groupedSort: expression } : {}), loadedAt: Date.now(), ...(notes ? { notes } : {}), ...(counts ? { groups: counts } : {}) }
+    const data: BoardData = { rows, tree: placed.value, ...(!gantt ? { treeSort: expression } : {}), ...(grouping ? { groupedTree: grouped.value, groupedBy: panel.group, groupedSort: expression } : {}), loadedAt: Date.now(), ...(notes ? { notes } : {}), ...(counts ? { groups: counts } : {}) }
     const shownBefore = before.shown.value
     // The detail on screen was read before this list and stands beside it: when its row has left the list
     // (finished, moved away) the pane goes with it, as choose() does for a read still running. A detail the list
@@ -287,7 +297,7 @@ async function start(): Promise<void> {
     // So does the worktree overlay, or the archive shown, turned while it ran (the tree is asked for both).
     // The zone picked while it ran is the same: the tree's `overdue` was judged in the zone before.
     const after = store.getState()
-    if (!sameTreeView(after, sort, view, gantt, zone) || (!gantt && (after.toolbar.panel.group !== panel.group || orderExpression(after.toolbar.panel) !== expression))) setTimeout(() => void refresher.refresh(), 0)
+    if (!sameTreeView(after, sort, view, gantt, zone) || (!gantt && !sameOrder(after.toolbar.panel, panel))) setTimeout(() => void refresher.refresh({ reuse: true }), 0)
     else if (after.tab === 'gantt' && !gantt) void ensureChart()
     return true
   }
@@ -336,8 +346,8 @@ async function start(): Promise<void> {
     // Opening the chart after a tree-only read asks for its values. A transition during a read is caught at loadBoard's end.
     if (state.tab === 'gantt' && previous.tab !== 'gantt' && !treeHasGantt && state.board.value) void ensureChart()
     // A new order is moai's to make: the tree is read again in it.
-    if ((state.sort !== previous.sort || (state.toolbar.panel !== previous.toolbar.panel && (state.toolbar.panel.group !== previous.toolbar.panel.group ||
-      orderExpression(state.toolbar.panel) !== orderExpression(previous.toolbar.panel)))) && state.board.value) void refresher.refresh()
+    // A level tab is the editor's own and reads nothing; what an order turned keeps the structural tree of the same stamp.
+    if ((state.sort !== previous.sort || !sameOrder(state.toolbar.panel, previous.toolbar.panel)) && state.board.value) void refresher.refresh({ reuse: true })
     // The worktree overlay turned on or off: the rows are read again with it or without it.
     if (state.view.worktree !== previous.view.worktree && state.board.value) {
       events?.reconnect()
@@ -408,7 +418,7 @@ async function start(): Promise<void> {
       clearTimeout(limit)
     }
   }
-  const refresher = createRefresher({ load: ({ automatic, unchanged }) => loadBoard(automatic, unchanged), stamp, onReach: (reached) => shell.offline(!reached), onBackoff: (on) => shell.backoff(on) })
+  const refresher = createRefresher({ load: ({ automatic, stamp: readAt, reuse }) => loadBoard(automatic, readAt, reuse), stamp, onReach: (reached) => shell.offline(!reached), onBackoff: (on) => shell.backoff(on) })
   let tab: { id: string; token: string } | null = null
   let browserId: string | null = null
   const eventUrl = (): string => {

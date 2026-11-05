@@ -50,6 +50,8 @@ async function page(t, { holdFirst = false, initialTab, chartFailures = 0, fakeS
     proposalClosed(id) { this.listeners.proposal_closed({ data: JSON.stringify({ id }) }) }
   }
   let release
+  // What `/api/stamp` answers: a write the stream never told of moves it (setStamp).
+  let stampNow = 'unchanged'
   dom.window.fetch = async (path, init = {}) => {
     const url = new URL(path, dom.window.location.href)
     requests.push(url.pathname)
@@ -61,7 +63,7 @@ async function page(t, { holdFirst = false, initialTab, chartFailures = 0, fakeS
     }
     let body
     if (url.pathname === '/api/boot') body = boot
-    else if (url.pathname === '/api/stamp') body = { stamp: 'unchanged' }
+    else if (url.pathname === '/api/stamp') body = { stamp: stampNow }
     else {
       let out
       if (url.pathname === '/api/tree') {
@@ -80,7 +82,7 @@ async function page(t, { holdFirst = false, initialTab, chartFailures = 0, fakeS
   await until(() => trees.length > 0)
   const tab = (id) => dom.window.document.querySelector(`[role=tab][data-tab="${id}"]`)
   const bars = () => dom.window.document.querySelectorAll('.g-lanes .b-plan').length
-  return { dom, trees, requests, posts, streams, tab, bars, release: () => release?.() }
+  return { dom, trees, requests, posts, streams, tab, bars, release: () => release?.(), setStamp: (value) => { stampNow = value } }
 }
 
 test('a ctl event changes the visible theme and replies with the tab token', async (t) => {
@@ -285,6 +287,60 @@ test('grouping reuses the unchanged structural tree, and a changed stamp reads i
   p.streams[0].stamp('changed')
   await until(() => p.trees.length >= 4)
   assert.deepEqual(p.trees.slice(2).map((url) => url.searchParams.get('group')).sort(), ['assignee', 'structure'])
+})
+
+test('a person\'s refresh reads the structural tree again, and grouping back by structure reuses it', async (t) => {
+  const p = await page(t)
+  await until(() => p.dom.window.document.querySelector('.moai-line[data-key="test-1234"]'))
+  p.dom.window.document.querySelector('.m-sort button').click()
+  const pick = (label) => [...[...p.dom.window.document.querySelectorAll('.m-sort-panel section')][1].querySelectorAll('button')]
+    .find((button) => button.textContent === label).click()
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 40))
+  pick('Assignee')
+  await until(() => p.trees.length >= 2)
+  await settle()
+  // The stamp stood still, but a refresh by hand reads everything again: the day, or the server, may have moved.
+  p.dom.window.document.querySelector('.moai-refresh').click()
+  await until(() => p.trees.length >= 4)
+  assert.deepEqual(p.trees.slice(2).map((url) => url.searchParams.get('group')).sort(), ['assignee', 'structure'])
+  await settle()
+  const rows = p.requests.filter((path) => path === '/api/rows').length
+  pick('Structure')
+  await until(() => p.requests.filter((path) => path === '/api/rows').length > rows)
+  await settle()
+  assert.equal(p.trees.length, 4, 'grouped by structure, the cached structural tree is the tree on screen')
+})
+
+test('an order turned after an unannounced write reads the structural tree again', async (t) => {
+  const p = await page(t, { fakeStream: true })
+  await until(() => p.dom.window.document.querySelector('.moai-line[data-key="test-1234"]'))
+  // The stream is up, so nothing polls: the turn below is the first to read the stamp the write moved.
+  p.streams[0].onopen()
+  p.setStamp('moved')
+  p.dom.window.document.querySelector('.m-sort button').click()
+  const group = [...p.dom.window.document.querySelectorAll('.m-sort-panel section')][1]
+  ;[...group.querySelectorAll('button')].find((button) => button.textContent === 'Assignee').click()
+  await until(() => p.trees.length >= 3)
+  await new Promise((resolve) => setTimeout(resolve, 40))
+  assert.deepEqual(p.trees.slice(1).map((url) => url.searchParams.get('group')).sort(), ['assignee', 'structure'])
+})
+
+test('a view turned during a read is not handed the structural tree of the view before', async (t) => {
+  // `SPC v w` turns the overlay (on when the page opens) off; `SPC v o` shows the archive. Each is asked of the tree.
+  for (const [key, param, value] of [['w', 'worktree', null], ['o', 'archived', '1']]) {
+    const p = await page(t, { holdFirst: true })
+    const press = (name) => p.dom.window.document.body.dispatchEvent(new p.dom.window.KeyboardEvent('keydown', { key: name, bubbles: true, cancelable: true }))
+    press(' '); press('v'); press(key)
+    p.dom.window.document.querySelector('.m-sort button').click()
+    const group = [...p.dom.window.document.querySelectorAll('.m-sort-panel section')][1]
+    ;[...group.querySelectorAll('button')].find((button) => button.textContent === 'Assignee').click()
+    p.release()
+    // The held read was asked in the view before; the read after it, at the same stamp, asks the structure in the new one.
+    await until(() => p.trees.some((url) => url.searchParams.get('group') === 'assignee'))
+    await new Promise((resolve) => setTimeout(resolve, 40))
+    assert.equal(p.trees[0].searchParams.get(param), value === null ? '1' : null, `the first read is in the view before (${param})`)
+    assert.ok(p.trees.slice(1).some((url) => url.searchParams.get('group') === 'structure' && url.searchParams.get(param) === value), `the structure is read again with ${param}=${value}`)
+  }
 })
 
 test('sort level tabs change the editor without reading the tree; editing order still reads it', async (t) => {
