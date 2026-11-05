@@ -38,8 +38,8 @@ export function groupBuckets(index: IssueIndex, path: Path, keep: Keep, group: s
         const payload = line.path.slice(line.path.indexOf(':', 6) + 1)
         let value: string | null
         try { value = JSON.parse(payload) as string | null } catch { continue }
-        const ref = value === null ? undefined : index.find(value)
-        const label = value === null ? '(none)' : group === 'tag' ? `#${value}` : ref === undefined ? value : index.rows[ref]!.title ?? value
+        const ref = value === null || (group !== 'milestone' && group !== 'epic') ? undefined : index.find(value)
+        const label = value === null ? '(none)' : group === 'priority' ? `p${value}` : group === 'tag' ? `#${value}` : ref === undefined ? value : index.rows[ref]!.title ?? value
         current = { seg: `group:${encodeURIComponent(group)}:${value === null ? 'n' : `v${encodeURIComponent(value)}`}`, label, members: [] }
         result.push(current)
       } else if (line.id) {
@@ -80,7 +80,7 @@ export function groupBuckets(index: IssueIndex, path: Path, keep: Keep, group: s
   })
 
   return values.map((value) => {
-    const ref = value === null ? undefined : index.find(value)
+    const ref = value === null || (group !== 'milestone' && group !== 'epic') ? undefined : index.find(value)
     const label = value === null ? '(none)' : group === 'priority' ? `p${value}` : group === 'tag' ? `#${value}` : ref === undefined ? value : index.rows[ref]!.title ?? value
     return { seg: `group:${encodeURIComponent(group)}:${value === null ? 'n' : `v${encodeURIComponent(value)}`}`, label, members: map.get(value)!.sort((a, b) => compareItems(index, a, b, order, statuses)) }
   })

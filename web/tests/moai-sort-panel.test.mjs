@@ -129,3 +129,13 @@ test('server grouping order is retained in list and board, including no grouping
   const flat = groupBoard(index, { ...look, group: 'none', groupedTree: [{ id: 'b' }, { id: 'a' }] })
   assert.deepEqual(flat.lanes[0].columns.flatMap((column) => column.cards).map((at) => rows[at].id), ['b', 'a'])
 })
+
+
+test('group labels resolve titles only for milestone and epic identifiers', async () => {
+  const { IssueIndex } = await panelModule('data/index.ts')
+  const { groupBuckets } = await panelModule('view/group-adapter.ts')
+  const rows = [{ id: 'Amy', kind: 'issue', title: 'A different title', status: 'todo', assignee: 'Amy' }]
+  const index = new IssueIndex(rows)
+  const server = [{ kind: 'group', path: 'group:assignee:"Amy"' }, { id: 'Amy' }]
+  assert.equal(groupBuckets(index, [], () => true, 'assignee', [], false, [], [], server)[0].label, 'Amy')
+})
