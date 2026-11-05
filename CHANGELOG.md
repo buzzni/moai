@@ -22,6 +22,7 @@ does not tag — see `CONTRIBUTING.md`.
 
 ### Fixed
 
+- `show --group epic` and `--group milestone` group rows with missing references consistently with the explorer. (moai-6vcm)
 - Web sort and grouping changes avoid redundant reads; a manual refresh remains available during a read and fetches fresh data afterward. (moai-wrod)
 
 ## [0.50.0] - 2026-11-04
