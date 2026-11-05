@@ -291,12 +291,13 @@ pub fn screen(f: &mut Frame, app: &mut App) {
     let (raw, share) = (app.raw, app.wiki_width.or(app.list_width));
     let mut wiki_at = None;
     let sort_order = matches!(&app.mode, Mode::Sort(_)).then(|| app.common_order());
+    let sort_preset = app.sort.current.preset;
     match &mut app.mode {
         Mode::Backlog(form) => jot(f, form, body, true, tint, lang),
         Mode::Pick(p) => pick(f, p, body, lang),
         Mode::Zone(z) => zone_pick(f, z, body, lang),
         Mode::ArchiveDays(p) => archive_days_pick(f, p, body, lang),
-        Mode::Sort(e) => sort_edit(f, e, sort_order.as_ref().expect("sort window order"), body, lang),
+        Mode::Sort(e) => sort_edit(f, e, sort_order.as_ref().expect("sort window order"), sort_preset, body, lang),
         Mode::Proposals(id) => proposals_window(f, app.proposals.rows(), id.as_deref(), body, lang),
         Mode::Stats(w) => stats_window(f, w, body, lang),
         Mode::Wiki(w) => wiki_at = Some(wiki_window(f, w, body, raw, share, lang, &mut app.images)),
@@ -621,6 +622,7 @@ fn sort_edit(
     f: &mut Frame,
     e: &mut super::sorter::screen::ScreenEditor,
     order: &crate::query::Order,
+    preset: Option<crate::query::Preset>,
     at: Rect,
     lang: Lang,
 ) {
@@ -679,7 +681,7 @@ fn sort_edit(
             .enumerate()
             .map(|(n, key)| {
                 let label = format!("{} {}", n + 1, preset_word(*key, lang));
-                if e.state() == App::screen_preset(*key) { format!("[{label}]") } else { label }
+                if preset == Some(*key) { format!("[{label}]") } else { label }
             })
             .collect::<Vec<_>>()
             .join(" · ");
@@ -2796,11 +2798,12 @@ fn crumbs(f: &mut Frame, app: &App, rows: &[Row], at: Rect) {
     // 줄 안다. 거름망 뱃지와 달리 **늘 서 있는 것**이라 경로의 몫을 굶기지 않는다: 경로에 여덟 칸이
     // 안 남으면 뺀다. 키는 안 적는다 — 메뉴의 `SPC v`(숨김)·`SPC s`(정렬)가 댄다. 층에서는 보기가 뜻이 없다.
     // 기본이 아닌 차례도 같은 뱃지에 댄다(moai-55cp) — 차례가 바뀐 줄 모르면 줄이 뒤섞인 줄 안다.
-    let sorted = if app.order_extended || app.screen_order.group != super::sorter::screen::Group::Structure {
-        Some(screen_order_words(&app.screen_order, app.site.lang))
+    let sorted = if app.sort.current.extended || app.sort.current.group != super::sorter::screen::Group::Structure {
+        Some(screen_order_words(&app.screen_order(), app.site.lang))
     } else {
-        (app.order != Default::default())
-            .then(|| fill(say(app.site.lang, "tui.badge.sorted"), &[("by", &sort_words(&app.order, app.site.lang))]))
+        (app.item_order() != Default::default()).then(|| {
+            fill(say(app.site.lang, "tui.badge.sorted"), &[("by", &sort_words(&app.item_order(), app.site.lang))])
+        })
     };
     // **모자라면 차례부터 뺀다**(moai-2kyl 단계 리뷰). 한 뱃지로 통째로 재면 차례를 고른 것만으로 뱃지가
     // 길어져 `[done 숨김]` 까지 사라진다 — 숨긴 줄이 사라진 줄 아는 것이 줄이 뒤섞인 줄 아는 것보다 크다.
