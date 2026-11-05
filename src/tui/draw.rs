@@ -290,12 +290,13 @@ pub fn screen(f: &mut Frame, app: &mut App) {
     // 없으면 목록·상세의 몫(`App::list_width`)을 따른다(moai-p61w).
     let (raw, share) = (app.raw, app.wiki_width.or(app.list_width));
     let mut wiki_at = None;
+    let sort_order = matches!(&app.mode, Mode::Sort(_)).then(|| app.common_order());
     match &mut app.mode {
         Mode::Backlog(form) => jot(f, form, body, true, tint, lang),
         Mode::Pick(p) => pick(f, p, body, lang),
         Mode::Zone(z) => zone_pick(f, z, body, lang),
         Mode::ArchiveDays(p) => archive_days_pick(f, p, body, lang),
-        Mode::Sort(e) => sort_edit(f, e, body, lang),
+        Mode::Sort(e) => sort_edit(f, e, sort_order.as_ref().expect("sort window order"), body, lang),
         Mode::Proposals(id) => proposals_window(f, app.proposals.rows(), id.as_deref(), body, lang),
         Mode::Stats(w) => stats_window(f, w, body, lang),
         Mode::Wiki(w) => wiki_at = Some(wiki_window(f, w, body, raw, share, lang, &mut app.images)),
@@ -616,7 +617,13 @@ fn screen_order_words(order: &super::sorter::screen::ScreenOrder, lang: Lang) ->
 /// 번호와 방향을 **글리프와 낱말로**(`1  우선순위  ↑ 오름`), 안 든 것은 `·` 로 선다 — 색이 혼자 뜻을 지지 않는다.
 /// 좁은 화면에서는 목록·상세 자리를 통째로 덮고([`zone_pick`] 과 같은 까닭: 뒤 칸의 커서가 비치면 어느 `>` 가 이 창의
 /// 것인지 안 읽힌다), 96칸 이상이면 오른쪽 52칸에 서서 미리 보는 목록을 가리지 않는다.
-fn sort_edit(f: &mut Frame, e: &mut super::sorter::screen::ScreenEditor, at: Rect, lang: Lang) {
+fn sort_edit(
+    f: &mut Frame,
+    e: &mut super::sorter::screen::ScreenEditor,
+    order: &crate::query::Order,
+    at: Rect,
+    lang: Lang,
+) {
     // Leave the list visible beside the editor when the terminal is wide enough.
     let at = if at.width >= 96 { Rect::new(at.x + at.width - 52, at.y, 52, at.height) } else { at };
     f.render_widget(Clear, at);
@@ -700,13 +707,7 @@ fn sort_edit(f: &mut Frame, e: &mut super::sorter::screen::ScreenEditor, at: Rec
         f.render_widget(Paragraph::new(header), Rect::new(inner.x, inner.y, inner.width, header_height));
     }
     let screen = e.state();
-    let fields = |s: super::keys::Sorting| s.fields().iter().map(|f| App::query_field(*f)).collect();
-    let common = crate::query::Order {
-        milestone: fields(screen.milestone),
-        epic: fields(screen.epic),
-        item: fields(screen.item),
-    };
-    let command = format!("moai ctl sort '{}' · moai ctl group {}", common, screen.group.name());
+    let command = format!("moai ctl sort '{}' · moai ctl group {}", order, screen.group.name());
     let show_command = inner.height > header_height + 2;
     if show_command {
         f.render_widget(
