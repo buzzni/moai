@@ -1531,7 +1531,7 @@ impl Doc {
         odd(&[SHOW_ARCHIVED], false, &mut show_archived);
         odd(&[SORT, SORT_REVERSED], false, &mut sort);
         // `order` 는 배열이 제 모양이다 — 위의 둘이 이미 막았으면 안 본다(`odd` 가 꺼진 깃발에서 돌아선다).
-        if new.layered_order.is_none() {
+        if !t.get(ORDER).is_some_and(|i| i.as_table_like().is_some() && layered_order_writable(i)) {
             odd(&[ORDER], true, &mut sort);
         }
         odd(&[GROUP], false, &mut group);
@@ -1547,9 +1547,9 @@ impl Doc {
         odd(&[WIKI_WIDTH], false, &mut wiki_width);
         odd(&[GANTT_LABEL], false, &mut gantt_label);
         if sort && new.layered_order.is_some() {
-            if let Some(item) = t.get(ORDER).filter(|i| !layered_order_writable(i)) {
+            if let Some(item) = t.get(ORDER_LAYERS).filter(|i| !layered_order_writable(i)) {
                 skipped.push(WriteTrouble::LookKeyNotPlain {
-                    key: ORDER.to_string(),
+                    key: ORDER_LAYERS.to_string(),
                     found: item.type_name().to_string(),
                 });
                 sort = false;
@@ -1580,9 +1580,9 @@ impl Doc {
             changed |= put_value(t, SHOW_ARCHIVED, new.show_archived.map(toml_edit::Value::from), &mut left);
         }
         if sort {
-            let order =
-                new.layered_order.as_ref().map(layered_order_value).or_else(|| new.order.as_deref().map(words_value));
-            changed |= put_value(t, ORDER, order, &mut left);
+            let legacy = new.layered_order.as_ref().and_then(|layers| layers.get("item")).or(new.order.as_ref());
+            changed |= put_value(t, ORDER, legacy.map(|words| words_value(words)), &mut left);
+            changed |= put_value(t, ORDER_LAYERS, new.layered_order.as_ref().map(layered_order_value), &mut left);
             changed |= put_value(t, SORT, new.sort.as_deref().map(toml_edit::Value::from), &mut left);
             changed |= put_value(t, SORT_REVERSED, new.sort_reversed.map(toml_edit::Value::from), &mut left);
         }
@@ -1700,6 +1700,7 @@ const SORT_REVERSED: &str = "sort_reversed";
 /// (`query::parse_order`·`query::Field` 의 Display). **있으면 [`SORT`]·[`SORT_REVERSED`] 를 이긴다** — 그 한 쌍은
 /// 옛 바이너리가 읽도록 첫 필드를 비춰 함께 적는다(`App::look_now`).
 pub(crate) const ORDER: &str = "order";
+pub(crate) const ORDER_LAYERS: &str = "order_layers";
 const GROUP: &str = "group";
 /// 프로젝트마다의 보기 — `[tui.project."<프로젝트 경로>"]`(moai-r170.8dz). 그 프로젝트 안에서는 그 표의 값이
 /// `[tui]` 의 것을 이긴다. 지금 그 표에 사는 것은 [`ORDER`] 하나고, 모르는 키는 그대로 둔다.
@@ -1913,7 +1914,7 @@ fn look_layered_order(
     t: &dyn toml_edit::TableLike,
     problems: &mut Vec<LookTrouble>,
 ) -> Option<BTreeMap<String, Vec<String>>> {
-    let item = t.get(ORDER)?;
+    let item = t.get(ORDER_LAYERS).or_else(|| t.get(ORDER).filter(|item| item.as_table_like().is_some()))?;
     let table = item.as_table_like()?;
     let mut out = BTreeMap::new();
     for level in ["milestone", "epic", "item"] {
@@ -2095,9 +2096,15 @@ fn put_project_layered(
 ) -> Result<bool, WriteTrouble> {
     let entry = project_entry(tui, path)?.as_table_like_mut().expect("project table");
     if order.is_some() {
-        if let Some(item) = entry.get(ORDER).filter(|item| !layered_order_writable(item)) {
+        if let Some(item) = entry.get(ORDER).filter(|item| !plain(item, true) && !layered_order_writable(item)) {
             return Err(WriteTrouble::LookKeyNotPlain {
                 key: format!("{}.{ORDER}", project_key(path)),
+                found: item.type_name().to_string(),
+            });
+        }
+        if let Some(item) = entry.get(ORDER_LAYERS).filter(|item| !layered_order_writable(item)) {
+            return Err(WriteTrouble::LookKeyNotPlain {
+                key: format!("{}.{ORDER_LAYERS}", project_key(path)),
                 found: item.type_name().to_string(),
             });
         }
@@ -2112,7 +2119,10 @@ fn put_project_layered(
     }
     let mut changed = false;
     if let Some(order) = order {
-        changed |= write_value(entry, ORDER, layered_order_value(order));
+        if let Some(item) = order.get("item") {
+            changed |= write_value(entry, ORDER, words_value(item));
+        }
+        changed |= write_value(entry, ORDER_LAYERS, layered_order_value(order));
     }
     if let Some(group) = group {
         changed |= write_value(entry, GROUP, toml_edit::Value::from(group));
@@ -3975,12 +3985,13 @@ mod tests {
         assert!(problems.is_empty(), "{problems:?}");
         assert_eq!(read.layered_order, new.layered_order);
         assert_eq!(read.group, new.group);
-        assert_eq!(read.order, None);
+        assert_eq!(read.order, Some(vec!["priority".into(), "due".into()]));
+        assert!(text.contains("order = [\"priority\", \"due\"]") && text.contains("order_layers = {"), "{text}");
     }
 
     #[test]
     fn layered_order_does_not_overwrite_unknown_table_keys() {
-        let text = "[tui]\norder = { item = [\"priority\"], future = [\"title\"] }\n";
+        let text = "[tui]\norder_layers = { item = [\"priority\"], future = [\"title\"] }\n";
         let mut doc = Doc::parse(text).unwrap();
         let (old, _) = doc.look();
         let mut new = old.clone();
@@ -4007,6 +4018,8 @@ mod tests {
         let (read, problems) = Doc::parse(&text).unwrap().look();
         assert!(problems.is_empty(), "{problems:?}");
         assert_eq!(read.project_layered_order, new.project_layered_order);
+        assert_eq!(read.project_order.get("/a"), Some(&vec!["due".to_string()]));
+        assert!(text.contains("order_layers = {") && text.contains("order = [\"due\"]"), "{text}");
         assert_eq!(read.project_group, new.project_group);
         assert_eq!(read.project_order.get("/b"), old.project_order.get("/b"));
     }
