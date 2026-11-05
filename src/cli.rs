@@ -666,8 +666,8 @@ BACKLOG
   ones before it tie. Each lowercase SPC s key makes the order that one field,
   and pressing it again turns it around; an uppercase one adds its field at
   the end, and pressing it again turns that field around. When the order is
-  not the default (priority, due) the path line says which it is, every field with
-  ↑ or ↓, as in sort priority↑, updated↓.
+  not the default (priority, due), the path line says which it is, with ↑ or ↓
+  on every field, as in sort priority↑, updated↓.
   Columns (SPC c) turn on and off with [shown/hidden]. Tag, epic, assignee,
   created and updated dates stand on the right of the row, and when it gets
   narrow they are dropped in that order — dates, then epic, then assignee,
@@ -682,7 +682,8 @@ BACKLOG
   list is also written to order, and its first field to sort and sort_reversed,
   so an older moai can still read the familiar keys.
 
-  SPC s opens the sort window over the list ({key:browse.sort_edit} also opens it). All sorting fields stand in it:
+  SPC s opens the sort window over the list ({key:browse.sort_edit} also opens it).
+  All sorting fields stand in it:
   the ones in the order first, numbered and marked ↑ asc or ↓ desc, then the
   rest marked with a dot. {key:sorter.down} and {key:sorter.up} move, {key:sorter.lower} and {key:sorter.raise} move the field down or up the
   order, {key:sorter.toggle} puts it in at the end or takes it out (the last one stays), and

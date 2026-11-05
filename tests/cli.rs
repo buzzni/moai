@@ -33541,7 +33541,7 @@ fn web_serves_the_page_and_the_boot() {
     assert!(boot["sort_groups"].as_array().unwrap().iter().any(|g| g == "assignee"));
     let people = boot["sort_presets"].as_array().unwrap().iter().find(|p| p["name"] == "people").unwrap();
     assert_eq!(people["group"], "assignee");
-    assert!(people["order"].as_str().unwrap().contains("item=assignee"));
+    assert!(people["order"].as_str().unwrap().contains("item=priority,due"));
     assert!(boot["columns"]["backlog"]["name"].is_string(), "{boot}");
 
     let (status, _, body) = get(web.port, "/api/status");
