@@ -143,6 +143,26 @@ test('a manual refresh reads whatever the stamp says, and a refresh while one ru
   await three
 })
 
+test('a load is told the stamp it was read at, and may reuse only when the refresh asked for it', async () => {
+  const server = fakeServer('a')
+  const clock = fakeClock()
+  const hows = []
+  const refresher = createRefresher({ load: async (how) => { hows.push(how) }, stamp: server.stamp, visibility: fakeVisibility(), clock })
+  await refresher.refresh()
+  await refresher.refresh({ reuse: true })
+  server.set('b')
+  await clock.advance(POLL_MS)
+  server.set(null)
+  await refresher.refresh({ reuse: true })
+  assert.deepEqual(hows, [
+    { automatic: false, stamp: 'a', reuse: false },
+    { automatic: false, stamp: 'a', reuse: true },
+    { automatic: true, stamp: 'b', reuse: false },
+    { automatic: false, stamp: null, reuse: true },
+  ])
+  refresher.stop()
+})
+
 test('the stamp is read before the rows, so a write during a read is the next change', async () => {
   const server = fakeServer('a')
   const clock = fakeClock()

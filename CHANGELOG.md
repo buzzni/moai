@@ -20,6 +20,10 @@ does not tag — see `CONTRIBUTING.md`.
 
 - Default release order is now layer-specific: milestones by due date then newest creation, epics by priority then creation, and work by priority then due date. Milestones and epics precede issues in `moai show` and `/api/rows`. Missing values remain last even for `due:desc`; ties always use creation then id. `--reverse` reverses field directions without reversing null placement or ties. (moai-ctxc, moai-okdc)
 
+### Fixed
+
+- Web sort and grouping changes avoid redundant reads; a manual refresh remains available during a read and fetches fresh data afterward. (moai-wrod)
+
 ## [0.50.0] - 2026-11-04
 
 ### Changed
