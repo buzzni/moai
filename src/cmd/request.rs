@@ -162,6 +162,11 @@ mod tests {
         for var in crate::git_leaks::swept(true) {
             cmd.env_remove(var);
         }
+        if inner == "cmd::request::tests::inner_omitted_actor" {
+            cmd.env("MOAI_ACTOR", "Other (other@example.com)");
+        } else {
+            cmd.env_remove("MOAI_ACTOR");
+        }
         let out = cmd
             .args(["--exact", inner, "--ignored", "--test-threads=1", "--nocapture"])
             .env(PLACE, dir)
@@ -175,7 +180,6 @@ mod tests {
             .env("TZ", "UTC")
             .env("NO_COLOR", "1")
             .env_remove("MOAI_LANG")
-            .env("MOAI_ACTOR", "Other (other@example.com)")
             .env_remove("MOAI_HERE")
             .env_remove("MOAI_KEYS")
             .env_remove("XDG_CONFIG_HOME")
