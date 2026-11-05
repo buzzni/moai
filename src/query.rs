@@ -3870,6 +3870,9 @@ mod tests {
         // The same closed state can arise from an unfinished member being deferred.
         let mut deferred = all.clone();
         deferred[1].deferred_at = Some("2026-09-10T00:00:00Z".into());
+        let mut finished = issue("a-0003", "done", &[]);
+        finished.milestone = Some(deferred[0].id.clone());
+        deferred.push(finished);
         let deferred_wh = Where::of(&deferred, &cfg);
         assert_eq!(deferred_wh.column(&deferred[0]), crate::config::DONE);
         assert_eq!(SortContext::of(&deferred).values(&deferred[1]).unwrap().due, None);
