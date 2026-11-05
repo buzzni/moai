@@ -305,7 +305,7 @@ mod tests {
         for args in
             [&["init", "-q"][..], &["config", "user.name", "테스터"], &["config", "user.email", "tester@example.com"]]
         {
-            assert!(Command::new("git").args(args).current_dir(&root).status().unwrap().success());
+            crate::git::run(&root, args).unwrap();
         }
         let added = Command::new(bin())
             .args(["--user", ACTOR, "add", "assigned", "--assignee", ACTOR])
