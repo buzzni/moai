@@ -1596,30 +1596,6 @@ impl std::fmt::Display for Field {
     }
 }
 
-/// 고른 차례 — **필드의 차례 목록과, 전체를 뒤집는가**(moai-r170.f65). 앞 필드가 같을 때만 다음 필드를 본다
-/// (SQL 의 `ORDER BY a, b DESC`). `moai show --sort`·`--reverse` 와 탐색기의 `SPC s` 가 이 꼴로 줄을 세우고,
-/// 견주는 자는 [`order_by`] 하나다 — 두 표면이 저마다 견주면 같은 낱말이 다른 차례를 낸다.
-///
-/// 한 필드를 고르던 때(`{ key, reversed }`)는 필드 하나짜리 목록이다 — 그 차례는 한 치도 안 바뀐다.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Sort {
-    pub fields: Vec<Field>,
-    pub reversed: bool,
-}
-
-impl Sort {
-    /// 그 필드 하나를 제 방향으로.
-    pub fn by(key: SortKey) -> Sort {
-        Sort { fields: vec![Field::of(key)], reversed: false }
-    }
-}
-
-impl Default for Sort {
-    fn default() -> Sort {
-        Sort::by(SortKey::Priority)
-    }
-}
-
 /// 차례 글을 못 읽은 까닭. 글은 clap 이 `--sort` 의 오류로 그대로 싣는다.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BadSort {
@@ -2021,24 +1997,6 @@ impl std::fmt::Display for Order {
     }
 }
 
-/// Sort and page the selected rows using the same comparison for sorting and the cursor.
-/// Derived values are calculated once from `all`; rows sharing an id remain on one page.
-pub fn page<'a>(
-    shown: &mut Vec<Issue>,
-    all: &'a [Issue],
-    wh: &Where<'a>,
-    cfg: &crate::config::Config,
-    sort: &Sort,
-    after: Option<&Issue>,
-    limit: Option<usize>,
-) -> usize {
-    let context = SortContext::with_where(all, wh);
-    let cmp = |a: &Issue, b: &Issue| {
-        context.compare(&sort.fields, sort.reversed, (a, wh.column(a)), (b, wh.column(b)), &cfg.statuses, cfg.naming)
-    };
-    page_by(shown, all, after, limit, &cmp)
-}
-
 /// Sort a CLI listing using layered order and a group key before applying its cursor.
 pub fn page_order<'a>(
     shown: &mut Vec<Issue>,
@@ -2165,12 +2123,12 @@ fn page_by<'a>(
     cut(shown, Some(end))
 }
 
-/// 그 줄의 id 의 머리 줄([`page`]). 머리를 모르는 줄(`all` 밖에서 온 줄)은 제가 제 머리다.
+/// 그 줄의 id 의 머리 줄([`page_order`]). 머리를 모르는 줄(`all` 밖에서 온 줄)은 제가 제 머리다.
 fn head_of<'x>(heads: &BTreeMap<&str, &'x Issue>, i: &'x Issue) -> &'x Issue {
     heads.get(i.id.as_str()).copied().unwrap_or(i)
 }
 
-/// 앞에서 `limit` 줄만 남기고 잘린 수를 돌려준다 — `moai show` 의 쪽([`page`])과 `moai ready -n` 이 같은
+/// 앞에서 `limit` 줄만 남기고 잘린 수를 돌려준다 — `moai show` 의 쪽([`page_order`])과 `moai ready -n` 이 같은
 /// 자로 자른다(moai-efoc 리뷰: 두 벌이던 자리다). 차례는 부르는 쪽이 이미 세웠다.
 pub fn cut<T>(rows: &mut Vec<T>, limit: Option<usize>) -> usize {
     match limit {
@@ -2532,6 +2490,37 @@ mod tests {
 
     fn cfg() -> crate::config::Config {
         crate::config::Config::parse("prefix = \"argos\"\n").unwrap()
+    }
+
+    // The paging tests exercise the production layered-order path with a flat group.
+    #[derive(Debug)]
+    struct TestOrder {
+        order: Order,
+        reversed: bool,
+    }
+    impl TestOrder {
+        fn fields(fields: Vec<Field>, reversed: bool) -> Self {
+            Self { order: Order { milestone: fields.clone(), epic: fields.clone(), item: fields }, reversed }
+        }
+        fn by(key: SortKey) -> Self {
+            Self::fields(vec![Field::of(key)], false)
+        }
+    }
+    impl Default for TestOrder {
+        fn default() -> Self {
+            Self::by(SortKey::Priority)
+        }
+    }
+    fn page_test<'a>(
+        shown: &mut Vec<Issue>,
+        all: &'a [Issue],
+        wh: &Where<'a>,
+        cfg: &crate::config::Config,
+        sort: &TestOrder,
+        after: Option<&Issue>,
+        limit: Option<usize>,
+    ) -> usize {
+        page_order(shown, all, wh, cfg, &sort.order, crate::nav::Group::None, sort.reversed, after, limit)
     }
 
     /// 한 이슈만 두고 고르기. 소속 지도는 그 이슈에서 뽑는다.
@@ -3640,14 +3629,14 @@ mod tests {
         }
     }
 
-    /// **목록의 기본 차례는 급한 것 → id 다** — 차례를 고르지 않은 [`page`] 가 [`display_order`] 와 같다.
+    /// 우선순위 차례는 급한 것을 앞에 두고 동점을 만든 때와 id 로 가른다.
     #[test]
     fn sorting_puts_the_urgent_first_then_id() {
         let mut v = vec![issue("a-0003", "todo", &[]), issue("a-0001", "todo", &[]), issue("a-0002", "todo", &[])];
         v[0].priority = Some(0);
         let all = v.clone();
         let c = cfg();
-        page(&mut v, &all, &Where::of(&all, &c), &c, &Sort::default(), None, None);
+        page_test(&mut v, &all, &Where::of(&all, &c), &c, &TestOrder::default(), None, None);
         let ids: Vec<&str> = v.iter().map(|i| i.id.as_str()).collect();
         assert_eq!(ids, ["a-0003", "a-0001", "a-0002"]);
     }
@@ -3658,12 +3647,12 @@ mod tests {
     fn a_page_starts_after_the_cursor_value_not_its_position() {
         let all: Vec<Issue> = (1..=5).map(|n| issue(&format!("a-000{n}"), "todo", &[])).collect();
         let c = cfg();
-        let by_id = Sort::by(SortKey::Id);
-        let run = |rows: &[Issue], sort: &Sort, after: Option<&str>, limit: Option<usize>| {
+        let by_id = TestOrder::by(SortKey::Id);
+        let run = |rows: &[Issue], sort: &TestOrder, after: Option<&str>, limit: Option<usize>| {
             let wh = Where::of(&all, &c);
             let mut v = rows.to_vec();
             let cursor = after.map(|id| all.iter().find(|i| i.id == id).unwrap());
-            let cut = page(&mut v, &all, &wh, &c, sort, cursor, limit);
+            let cut = page_test(&mut v, &all, &wh, &c, sort, cursor, limit);
             (v.into_iter().map(|i| i.id).collect::<Vec<_>>(), cut)
         };
         assert_eq!(run(&all, &by_id, None, Some(2)), (s(&["a-0001", "a-0002"]), 3), "첫 쪽");
@@ -3676,7 +3665,7 @@ mod tests {
         let hidden: Vec<Issue> = all.iter().filter(|i| i.id != "a-0002").cloned().collect();
         assert_eq!(run(&hidden, &by_id, Some("a-0002"), None).0, s(&["a-0003", "a-0004", "a-0005"]));
         // 뒤집은 차례에서 "뒤" 는 뒤집은 차례의 뒤다.
-        let back = Sort { reversed: true, ..Sort::by(SortKey::Id) };
+        let back = TestOrder { reversed: true, ..TestOrder::by(SortKey::Id) };
         assert_eq!(
             run(&all, &back, Some("a-0004"), None).0,
             s(&["a-0003", "a-0002", "a-0001"]),
@@ -3697,14 +3686,14 @@ mod tests {
             i
         };
         // `--json` 으로 도는 쪽 그대로 — 마지막 줄의 id 를 커서로 주고, `-n` 보다 짧은 쪽이 오면 멈춘다.
-        let walk = |all: &[Issue], sort: &Sort, n: usize| {
+        let walk = |all: &[Issue], sort: &TestOrder, n: usize| {
             let wh = Where::of(all, &c);
             let mut got: Vec<String> = Vec::new();
             let mut after: Option<String> = None;
             for _ in 0..20 {
                 let mut v = all.to_vec();
                 let cursor = after.as_deref().map(|id| all.iter().rfind(|i| i.id == id).unwrap());
-                page(&mut v, all, &wh, &c, sort, cursor, Some(n));
+                page_test(&mut v, all, &wh, &c, sort, cursor, Some(n));
                 got.extend(v.iter().map(|i| i.title.clone()));
                 if v.len() < n {
                     got.sort();
@@ -3714,8 +3703,8 @@ mod tests {
             }
             panic!("쪽 넘기기가 안 끝났다 — {got:?}");
         };
-        let by_priority = Sort::default();
-        let by_id = Sort::by(SortKey::Id);
+        let by_priority = TestOrder::default();
+        let by_id = TestOrder::by(SortKey::Id);
         let shapes = [
             // 앞줄이 먼저 선다 — 뒷줄로 넘으면 사이의 b·c 를 건너뛰었다.
             (
@@ -3749,7 +3738,7 @@ mod tests {
         // 쌍둥이는 머리 줄 자리에 모여 서고, 쪽은 그 둘을 가르지 않는다 — 가르느니 그 쪽을 늘린다.
         let all = vec![line("a-0001", 1, "a1"), line("a-0001", 3, "a3"), line("a-0002", 2, "b")];
         let mut v = all.clone();
-        let more = page(&mut v, &all, &Where::of(&all, &c), &c, &by_priority, None, Some(1));
+        let more = page_test(&mut v, &all, &Where::of(&all, &c), &c, &by_priority, None, Some(1));
         assert_eq!(v.iter().map(|i| i.title.as_str()).collect::<Vec<_>>(), ["a1", "a3"], "쌍둥이를 갈랐다");
         assert_eq!(more, 1, "잘린 수가 틀렸다");
     }
@@ -3770,7 +3759,15 @@ mod tests {
         let ids = |v: &[Issue]| v.iter().map(|i| i.id.clone()).collect::<Vec<_>>();
         let sorted = |key, reversed| {
             let mut v = all.clone();
-            page(&mut v, &all, &Where::of(&all, &c), &c, &Sort { reversed, ..Sort::by(key) }, None, None);
+            page_test(
+                &mut v,
+                &all,
+                &Where::of(&all, &c),
+                &c,
+                &TestOrder { reversed, ..TestOrder::by(key) },
+                None,
+                None,
+            );
             ids(&v)
         };
         for key in [SortKey::Created, SortKey::Updated] {
@@ -3785,14 +3782,14 @@ mod tests {
         // 우선순위가 다 같은 줄로 첫 쪽을 받은 뒤 a-0003 을 p0 으로 고쳤다 — 우선순위로 가르면 커서(a-0001)
         // 앞으로 올라가 빠진다. 첫 쪽은 옛 차례와 새 차례가 같아야 고친 줄이 넘는지를 잰다.
         let level = vec![urgent("a-0001", 2), urgent("a-0002", 2), urgent("a-0003", 2)];
-        let by_created = Sort::by(SortKey::Created);
+        let by_created = TestOrder::by(SortKey::Created);
         let mut first = level.clone();
-        page(&mut first, &level, &Where::of(&level, &c), &c, &by_created, None, Some(1));
+        page_test(&mut first, &level, &Where::of(&level, &c), &c, &by_created, None, Some(1));
         assert_eq!(ids(&first), s(&["a-0001"]));
         let mut edited = level.clone();
         edited[2].priority = Some(0);
         let mut rest = edited.clone();
-        page(&mut rest, &edited, &Where::of(&edited, &c), &c, &by_created, Some(&edited[0]), None);
+        page_test(&mut rest, &edited, &Where::of(&edited, &c), &c, &by_created, Some(&edited[0]), None);
         assert_eq!(ids(&rest), s(&["a-0002", "a-0003"]), "우선순위를 고친 줄이 커서를 넘었다");
     }
 
@@ -3813,9 +3810,9 @@ mod tests {
 
     fn sorted_by(all: &[Issue], raw: &str, reversed: bool) -> Vec<String> {
         let c = cfg();
-        let sort = Sort { fields: parse_order(raw).unwrap(), reversed };
+        let sort = TestOrder::fields(parse_order(raw).unwrap(), reversed);
         let mut v = all.to_vec();
-        page(&mut v, all, &Where::of(all, &c), &c, &sort, None, None);
+        page_test(&mut v, all, &Where::of(all, &c), &c, &sort, None, None);
         v.into_iter().map(|i| i.id).collect()
     }
 
@@ -3918,7 +3915,7 @@ mod tests {
         wh.states.insert((Kind::Milestone, all[0].id.as_str()), crate::config::DONE);
         fn sorted<'a>(all: &'a [Issue], wh: &Where<'a>, cfg: &crate::config::Config) -> Vec<String> {
             let mut rows = vec![all[1].clone(), all[2].clone()];
-            page(&mut rows, all, wh, cfg, &Sort::by(SortKey::Due), None, None);
+            page_test(&mut rows, all, wh, cfg, &TestOrder::by(SortKey::Due), None, None);
             rows.into_iter().map(|i| i.id).collect()
         }
         assert_eq!(sorted(&all, &wh, &cfg), ["a-0002", "a-0001"], "closed milestone must not lend its deadline");
@@ -3957,15 +3954,7 @@ mod tests {
         let mut groups = vec![all[0].clone(), all[1].clone()];
         for field in ["progress:desc", "updated:desc"] {
             groups.reverse();
-            page(
-                &mut groups,
-                &all,
-                &wh,
-                &c,
-                &Sort { fields: parse_order(field).unwrap(), reversed: false },
-                None,
-                None,
-            );
+            page_test(&mut groups, &all, &wh, &c, &TestOrder::fields(parse_order(field).unwrap(), false), None, None);
             assert_eq!(groups[0].id, "a-0002", "{field}");
         }
         let facts = SortContext::of(&all);
@@ -4002,13 +3991,13 @@ mod tests {
         let wh = Where::of(&all, &c);
         for raw in ["priority,created", "priority,created:asc", "status:desc,title", "created,status"] {
             for reversed in [false, true] {
-                let sort = Sort { fields: parse_order(raw).unwrap(), reversed };
+                let sort = TestOrder::fields(parse_order(raw).unwrap(), reversed);
                 let mut got: Vec<String> = Vec::new();
                 let mut after: Option<String> = None;
                 for _ in 0..10 {
                     let mut v = all.clone();
                     let cursor = after.as_deref().map(|id| all.iter().find(|i| i.id == id).unwrap());
-                    page(&mut v, &all, &wh, &c, &sort, cursor, Some(1));
+                    page_test(&mut v, &all, &wh, &c, &sort, cursor, Some(1));
                     let Some(last) = v.last() else { break };
                     after = Some(last.id.clone());
                     got.push(last.id.clone());

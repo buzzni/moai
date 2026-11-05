@@ -176,14 +176,6 @@ pub(crate) fn filter_of(
     Ok(filter)
 }
 
-/// 시험만 부른다 — 목록은 층별 차례와 묶기를 함께 보는 [`crate::query::page_order`] 를 지난다. 이것은 그
-/// 차례의 `item` 층만 옛 [`crate::query::Sort`] 로 옮긴다. 안 준 `--sort` 는 옛 기본 차례(우선순위)다.
-#[cfg(test)]
-fn sort_of(p: &crate::cli::PageArgs) -> crate::query::Sort {
-    let fields = p.sort.as_ref().map_or_else(|| crate::query::Sort::default().fields, |f| f.0.item.clone());
-    crate::query::Sort { fields, reversed: p.reverse }
-}
-
 pub fn run(ctx: &Ctx, mut args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String>> {
     // **키를 고르는 것은 낸 뒤에 한 자리에서 한다**(moai-wk7i.vsk) — 목록·하나·지운 줄·되뽑기가 저마다 고르면
     // 한쪽이 빠진다. 안 고른 키를 짓지 않는 것은 값이 큰 자리(저널·`git log`·옆 워크트리·거름망·읽음 파일)에서만
@@ -1364,17 +1356,17 @@ mod tests {
     fn every_explorer_order_is_the_same_sort_word() {
         use crate::tui::keys::Order;
         use clap::Parser;
-        let read = |word: &str| -> crate::query::Sort {
+        let read = |word: &str| -> crate::query::Order {
             let cli = crate::cli::Cli::try_parse_from(["moai", "show", "--sort", word])
                 .unwrap_or_else(|e| panic!("`--sort {word}` 를 못 읽었다 — {e}"));
             match cli.cmd {
-                Some(crate::cli::Cmd::Show(args)) => sort_of(&args.page),
+                Some(crate::cli::Cmd::Show(args)) => args.page.sort.unwrap().0,
                 other => panic!("show 가 아니다 — {other:?}"),
             }
         };
         for o in Order::ALL {
             assert_eq!(
-                read(if o == Order::Due { "due:asc" } else { o.name() }).fields,
+                read(if o == Order::Due { "due:asc" } else { o.name() }).item,
                 [crate::query::Field::of(crate::tui::App::sort_key(o))],
                 "`{}` 가 두 표면에서 다른 차례다",
                 o.name()
