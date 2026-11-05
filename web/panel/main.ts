@@ -194,11 +194,12 @@ async function start(): Promise<void> {
 
   document.addEventListener('visibilitychange', () => { if (document.visibilityState !== 'hidden') void ensureChart() })
 
+  // Reuse only when the refresher has confirmed that the tracker stamp has not changed.
+  let structuralCache: { tree: NonNullable<BoardData['tree']>; expression: string; worktree: boolean; archived: boolean } | null = null
   /**
    * Reads the board. False when the read did not take (a refusal, a cancel, the boot still missing): data/refresh.ts
    * then leaves the stamp unseen and reads again on its next look.
    */
-  let structuralCache: { tree: NonNullable<BoardData['tree']>; expression: string; worktree: boolean; archived: boolean } | null = null
   async function loadBoard(automatic = false, unchanged = false): Promise<boolean | 'failed'> {
     const load = ++loads
     quietLoad = automatic ? load : 0
@@ -335,8 +336,8 @@ async function start(): Promise<void> {
     // Opening the chart after a tree-only read asks for its values. A transition during a read is caught at loadBoard's end.
     if (state.tab === 'gantt' && previous.tab !== 'gantt' && !treeHasGantt && state.board.value) void ensureChart()
     // A new order is moai's to make: the tree is read again in it.
-    if ((state.sort !== previous.sort || state.toolbar.panel.group !== previous.toolbar.panel.group ||
-      orderExpression(state.toolbar.panel) !== orderExpression(previous.toolbar.panel)) && state.board.value) void refresher.refresh()
+    if ((state.sort !== previous.sort || (state.toolbar.panel !== previous.toolbar.panel && (state.toolbar.panel.group !== previous.toolbar.panel.group ||
+      orderExpression(state.toolbar.panel) !== orderExpression(previous.toolbar.panel)))) && state.board.value) void refresher.refresh()
     // The worktree overlay turned on or off: the rows are read again with it or without it.
     if (state.view.worktree !== previous.view.worktree && state.board.value) {
       events?.reconnect()

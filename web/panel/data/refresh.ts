@@ -33,6 +33,7 @@ export interface RefresherOptions {
    * child the server cut off): its stamp is not counted as seen, so the next look reads again rather than leaving the
    * rows of before on screen until someone writes the tracker. `'failed'` is `false` for a read that was answered
    * with a failure (not a cancel, which a person chose and which asks again at the usual pace): the next look waits `backoffMs`.
+   * `unchanged` means the reachable stamp matches the last successful read.
    */
   load: (how: { automatic: boolean; unchanged: boolean }) => Promise<void | boolean | 'failed'>
   /** `/api/stamp`'s answer, or null when the server could not be reached. */
