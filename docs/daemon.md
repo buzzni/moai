@@ -87,7 +87,7 @@ On macOS, save this as `~/Library/LaunchAgents/com.example.moai-daemon.plist`, r
 
 Load it with `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.example.moai-daemon.plist`. Remove it from the user domain with `launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.example.moai-daemon.plist`.
 
-A service does not inherit your shell's environment, and the socket directory depends on it (see [Where the socket is](#where-the-socket-is)). After the service starts, run `moai daemon status` in a terminal: if it says no daemon is running, the service chose another directory. Set `MOAI_CTL_DIR` to the same directory for the service (`Environment=` in the unit, `EnvironmentVariables` in the plist) and in your shell.
+A service does not inherit your shell's environment, and the socket directory depends on it (see [Where the socket is](#where-the-socket-is)). After the service starts, run `moai daemon status` in a terminal: if it says no daemon is running, check the service status and whether the service chose another directory. Set `MOAI_CTL_DIR` to the same directory for the service (`Environment=` in the unit, `EnvironmentVariables` in the plist) and in your shell.
 
 ## Upgrade the daemon
 
