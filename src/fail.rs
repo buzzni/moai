@@ -51,6 +51,9 @@ pub mod code {
     pub const REFUSED: &str = "refused";
     pub const PERSON_BUSY: &str = "person_busy";
     pub const UNSUPPORTED: &str = "unsupported";
+    /// 다른 판의 데몬이 이미 떠 있다(moai-5n6m.x8t) — 고칠 길은 `moai daemon stop` 뒤 `start` 다. 같은 판이면 실패가
+    /// 아니다(종료 0).
+    pub const VERSION_MISMATCH: &str = "version_mismatch";
 }
 
 impl Fail {

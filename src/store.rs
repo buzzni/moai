@@ -250,7 +250,13 @@ pub fn remember_invoked() {
 /// "명령을 친 체크아웃이 어디인가" 를 묻는 자리가 이것을 읽는다 — 집은 표식([`Repo::note_held`])과 겹쳐 보기가
 /// 제 워크트리를 옆에서 빼는 자리(`worktree::callers`). 지금 자리로 물러서지 않는다: 시험의 현재 디렉터리는
 /// 이 저장소의 체크아웃이라, 물러서면 시험이 만든 적 없는 워크트리가 "친 자리" 로 선다.
+///
+/// **요청의 통이 걸렸으면 그 자리다**(`crate::side`, moai-5n6m.m0b) — 데몬의 요청은 `moai -C <그 자리>` 를 그 자리에서 친
+/// 것으로 선다. 프로세스가 처음 선 자리는 그 요청과 상관없다.
 pub(crate) fn invoked_checkout() -> Option<PathBuf> {
+    if let Some(here) = crate::side::with(|s| s.here.clone()) {
+        return Some(here);
+    }
     INVOKED.get().cloned().flatten()
 }
 
@@ -260,6 +266,9 @@ pub(crate) fn invoked_checkout() -> Option<PathBuf> {
 /// `invoked`)이 `-C` 가 옮긴 지금 자리에 붙이면 없는 자리를 짚는다. `main` 을 안 지난 부름(단위 시험)에서는
 /// 지금 자리다.
 pub(crate) fn invoked_dir() -> Option<PathBuf> {
+    if let Some(here) = crate::side::with(|s| s.here.clone()) {
+        return Some(here);
+    }
     match INVOKED.get() {
         Some(at) => at.clone(),
         None => std::env::current_dir().ok(),
@@ -432,6 +441,12 @@ pub fn climbs() -> Vec<(PathBuf, PathBuf)> {
 /// 그 사실을 제 판에 싣는 표면이 쓴다(`cmd::prime`, moai-r0x8.ris) — 판이 대는 것을 stderr 가 또 대면
 /// 터미널의 사람에게 같은 말이 두 번 선다.
 pub fn take_climb(from: &Path) -> Option<PathBuf> {
+    if let Some(took) = crate::side::with(|s| {
+        let at = s.climbed.iter().position(|(f, _)| f == from)?;
+        Some(s.climbed.remove(at).1)
+    }) {
+        return took;
+    }
     let mut told = CLIMBED.lock().unwrap_or_else(|e| e.into_inner());
     let at = told.iter().position(|(f, _)| f == from)?;
     Some(told.remove(at).1)
@@ -464,12 +479,18 @@ fn look(from: &Path) -> Option<PathBuf> {
 /// **적는 것은 이 명령이 선 자리에서 올라간 때뿐이다.** 훅은 셸 명령에서 읽어 낸 남의
 /// 디렉터리로도 트래커를 찾아 보므로(`cmd::hook::route_one`), 그것까지 적으면 손도 안 댄
 /// 프로젝트를 잡았다고 말한다 — 아직 만들지도 않은 디렉터리를 대기도 한다.
+///
+/// **요청의 통이 걸렸으면 거기 적는다**(`crate::side`, moai-5n6m.m0b) — "선 자리" 도 그 통의 자리다.
 fn told_climb(from: &Path, root: &Path, climbed: bool) {
-    if climbed && std::env::current_dir().is_ok_and(|cwd| cwd == from) {
-        let mut told = CLIMBED.lock().unwrap_or_else(|e| e.into_inner());
+    if climbed && crate::side::cwd().is_ok_and(|cwd| cwd == from) {
         let pair = (from.to_path_buf(), root.to_path_buf());
-        if !told.contains(&pair) {
-            told.push(pair);
+        let push = |told: &mut Vec<(PathBuf, PathBuf)>| {
+            if !told.contains(&pair) {
+                told.push(pair.clone());
+            }
+        };
+        if crate::side::with(|s| push(&mut s.climbed)).is_none() {
+            push(&mut CLIMBED.lock().unwrap_or_else(|e| e.into_inner()));
         }
     }
 }
@@ -595,8 +616,11 @@ impl Repo {
     /// **지금 자리를 못 물은 것은 무엇을 하다 났는지 댄다**(`refuse.no_cwd`, 리뷰 moai-yivo.b5h) — errno 한 줄은
     /// 주어가 없다. 지운 워크트리에 앉은 채 부른 `moai prime` 이 "여기 트래커를 못 읽었다 — No such file or
     /// directory" 로 고칠 것을 못 댔다. `cmd::project` 의 `cwd` 와 한 말이다.
+    ///
+    /// **지금 자리는 요청의 통이 먼저 댄다**([`crate::side::cwd`], moai-5n6m.m0b) — 여러 프로젝트를 맡는 데몬은
+    /// 프로세스의 현재 디렉터리를 옮길 수 없다. 통이 없는 CLI 는 전과 같이 현재 디렉터리다.
     pub fn find(lang: impl FnOnce() -> Lang) -> R<Option<Repo>> {
-        let dir = match std::env::current_dir() {
+        let dir = match crate::side::cwd() {
             Ok(dir) => dir,
             Err(e) => {
                 let said = crate::i18n::fill(crate::i18n::say(lang(), "refuse.no_cwd"), &[("said", &e.to_string())]);
@@ -2073,7 +2097,12 @@ impl Unread {
 /// 읽는다(moai-mkyg.ncj).
 static UNREAD: std::sync::Mutex<Vec<Unread>> = std::sync::Mutex::new(Vec::new());
 
+/// **요청의 통이 걸렸으면 그 통의 것이다**(`crate::side`, moai-5n6m.m0b) — 적는 [`note_missed`] 가 그리로 가므로 읽는
+/// 자리도 같아야 한다. `show --json` 의 `journal_error` 와 `stats` 가 여기서 읽는다.
 pub fn journal_unread() -> Vec<Unread> {
+    if let Some(unread) = crate::side::with(|s| s.unread.clone()) {
+        return unread;
+    }
     UNREAD.lock().unwrap_or_else(|e| e.into_inner()).clone()
 }
 
@@ -2106,6 +2135,17 @@ fn note_missed(root: &Path, at: &Path, why: Missed) {
             c.push(one.clone());
         }
     });
+    // **요청의 통이 걸렸으면 거기만 적는다**(`crate::side`, moai-5n6m.m0b) — 프로세스의 두 목록은 늘기만 해, 데몬에서는
+    // 한 요청이 못 읽은 자리가 뒤의 모든 요청에 다시 선다. [`UNREAD_NOW`] 를 걷는 탐색기는 통을 안 건다.
+    if crate::side::with(|s| {
+        if !s.unread.contains(&one) {
+            s.unread.push(one.clone());
+        }
+    })
+    .is_some()
+    {
+        return;
+    }
     for list in [&UNREAD_NOW, &UNREAD] {
         let mut v = list.lock().unwrap_or_else(|e| e.into_inner());
         if !v.contains(&one) {

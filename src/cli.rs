@@ -934,6 +934,26 @@ BACKLOG
   on stdout; --dry-run adds dry_run, and with --port 0 there is no url.")]
     Web(WebArgs),
 
+    // **사용자당 하나인 로컬 데몬이다**(moai-5n6m) — 소켓을 묶고 섬기는 길은 `crate::daemon`, 띄우고 묻고 멈추는
+    // 길은 `cmd::daemon` 이다.
+    /// Run the local JSON-RPC daemon - one per user
+    #[command(
+        subcommand,
+        after_help = "  moai daemon start          serve in the foreground until stopped
+  moai daemon status         is one running: pid, version, socket
+  moai daemon stop           ask the running daemon to exit
+
+  One daemon serves every project of one user, over a Unix socket that
+  speaks JSON-RPC 2.0, one message per line. It sits beside the CLI: the
+  CLI reads and writes .moai as before. The socket is daemon.socket in the
+  same directory as moai ctl's: MOAI_CTL_DIR, else $XDG_RUNTIME_DIR/moai,
+  else moai-<uid> in the temporary directory, owned by you alone.
+
+  On Windows start and stop answer unsupported; status says supported is
+  false and exits 0."
+    )]
+    Daemon(DaemonCmd),
+
     /// Called by an agent's hook. Reads an event on stdin
     #[command(after_help = "  Nobody calls this by hand. The hooks `moai skill install` plants call it -
   Claude's plugin, Codex's .codex/hooks.json, Antigravity's .agents/hooks.json.
@@ -1406,6 +1426,45 @@ pub enum SuperviseCmd {
         #[arg(long, value_name = "dir")]
         subdir: Option<String>,
     },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum DaemonCmd {
+    /// Serve in the foreground until `moai daemon stop`
+    #[command(after_help = "  moai daemon start          one line names the socket, then it serves
+  moai daemon start --json   that line as {started, pid, version, proto, socket}
+
+  It stays in the foreground, so systemd, launchd or `&` can keep it; there
+  is no background mode. The first line comes once the socket listens.
+  A second start never runs a second daemon. When the running one is the same
+  version it says so and exits 0 (started is false). When it is another
+  version it names both and stops with the code version_mismatch - restart
+  it with moai daemon stop, then moai daemon start.
+
+  A socket left by a daemon that is gone is removed and the daemon starts.
+  A file there that is not your socket is left alone and refused. A running
+  daemon so full that it cannot even answer hello stops it with the code
+  busy, naming its pid. Ctrl-C leaves the socket behind; the next start
+  clears it.")]
+    Start,
+    /// Ask the running daemon to exit and wait until it has
+    #[command(after_help = "  --json gives {stopped, pid, socket}. With nothing running, stopped is
+  false and it still exits 0. It works on a daemon of another version too,
+  and on one at its connection cap (32): past the cap the daemon still
+  answers hello and daemon.shutdown, and refuses the rest with busy.")]
+    Stop,
+    /// Whether a daemon runs: pid, version, proto and socket
+    #[command(after_help = "  --json gives {supported, running, socket, stale_socket, this_version,
+  this_proto}, and pid, version, proto and same_version while one runs.
+  same_version is false when the daemon is another version or proto than
+  this moai - restart it with moai daemon stop, then moai daemon start. A
+  rebuild of the same version still reads true. stale_socket is a socket
+  left by a daemon that is gone; moai daemon start clears it. It only reads,
+  and exits 0 whether or not a daemon runs; a file there that is not your
+  socket, an answer that is not a daemon's, or a daemon so full that it
+  cannot even answer hello (busy, with its pid) is an error. A daemon at
+  its connection cap still answers status.")]
+    Status,
 }
 
 #[derive(Subcommand, Debug)]
@@ -2429,13 +2488,13 @@ pub struct ReadyArgs {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SortFields(pub crate::query::Order, pub Option<crate::nav::Group>);
 
-fn sort_fields(raw: &str) -> Result<SortFields, String> {
+pub(crate) fn sort_fields(raw: &str) -> Result<SortFields, String> {
     crate::query::Order::parse(raw)
         .map(|order| SortFields(order, crate::query::Order::preset_group(raw.trim())))
         .map_err(|e| e.to_string())
 }
 
-fn group_value(raw: &str) -> Result<crate::nav::Group, String> {
+pub(crate) fn group_value(raw: &str) -> Result<crate::nav::Group, String> {
     raw.parse()
 }
 
