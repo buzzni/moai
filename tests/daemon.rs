@@ -414,7 +414,7 @@ fn a_daemon_of_another_version_is_named_and_left_running() {
     let said = error["error"].as_str().or(error["message"].as_str()).unwrap_or_default().to_string();
     let text = error.to_string();
     assert!(text.contains("0.0.1") && text.contains(env!("CARGO_PKG_VERSION")), "두 판을 다 안 댄다 — {said} {text}");
-    assert!(text.contains("moai daemon stop"), "다시 띄우는 길을 안 댄다 — {text}");
+    assert!(text.contains("service manager"), "서비스 관리자를 통한 재시작을 안 댄다 — {text}");
     assert!(f.socket().exists(), "다른 판의 소켓을 지웠다");
 
     let status = f.json(&["daemon", "status", "--json"]);
@@ -422,6 +422,8 @@ fn a_daemon_of_another_version_is_named_and_left_running() {
     assert_eq!(status["same_version"], false, "{status}");
     assert_eq!(status["version"], "0.0.1", "{status}");
     assert_eq!(status["pid"], 4242, "{status}");
+    let human = f.run(&["daemon", "status"]);
+    assert!(String::from_utf8_lossy(&human.stdout).contains("service manager"));
 
     let mut quit = UnixStream::connect(f.socket()).unwrap();
     writeln!(quit, "{}", json!({ "quit": true })).unwrap();
