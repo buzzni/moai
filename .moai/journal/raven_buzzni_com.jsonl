@@ -12464,3 +12464,7 @@
 {"ts":"2026-11-05T10:55:11Z","id":"moai-x5sn.25w","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"받아들인다 — 지적 없음"}
 {"ts":"2026-11-05T10:55:11Z","id":"moai-x5sn","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 (low — cargo clippy --fix 로 접고 fmt·시험을 확인)"}
 {"ts":"2026-11-05T10:55:11Z","id":"moai-x5sn","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"develop 08b16878 — PR #80 을 다시 돌린다"}
+{"ts":"2026-11-05T10:55:31Z","id":"moai-2wgq.f87","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: PR #80 CI 가 clippy 고침(08b16878) 뒤 다시 도는 중 — 녹색이면 gh pr merge 80 --merge, tag-on-merge 배포 승인, release.yml·Discord 확인, 마일스톤 워크트리·가지·target 정리, moai-2wgq·moai-cgcw 닫기"}
+{"ts":"2026-11-05T11:34:23Z","id":"moai-2wgq.f87","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"릴리스 v0.51.0: PR #80 머지 ecbd4643(첫 CI 는 clippy collapsible_if 8건으로 붉어 moai-x5sn 으로 고침), tag-on-merge 배포를 감독이 승인(사람이 \"배포까지 완료해둘 것\" 으로 맡김), release.yml 전 잡 성공 — 바이너리 4종·GitHub 릴리스 2026-11-05T11:33:47Z·Discord 게시. 마일스톤 워크트리·가지·target 정리."}
+{"ts":"2026-11-05T11:34:23Z","id":"moai-2wgq.f87","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 (medium — 감독 세션이 릴리스 절차를 직접 진행)"}
+{"ts":"2026-11-05T11:34:23Z","id":"moai-2wgq.f87","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
