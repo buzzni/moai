@@ -203,6 +203,9 @@ async function start(): Promise<void> {
    * handed it instead of asking `/api/tree` for it again. Its own stamp, not the refresher's last seen one, says when it was read.
    */
   let structuralCache: { stamp: string; tree: NonNullable<BoardData['tree']>; expression: string; worktree: boolean; archived: boolean } | null = null
+  // Rows and counts have independent stamps: counts can arrive after the board, or fail on their own.
+  let rowsCache: { stamp: string; worktree: boolean; value: Extract<Awaited<ReturnType<typeof loadAllRows>>, { ok: true }>['value'] } | null = null
+  let countsCache: { stamp: string; worktree: boolean; value: Extract<Awaited<ReturnType<typeof loadGroups>>, { ok: true }>['value'] } | null = null
   /**
    * Reads the board. False when the read did not take (a refusal, a cancel, the boot still missing): data/refresh.ts
    * then leaves the stamp unseen and reads again on its next look.
@@ -231,7 +234,9 @@ async function start(): Promise<void> {
     const gantt = tab === 'gantt'
     const zone = zoneNow()
     // `SPC v w` (on by default): the other worktrees' rows over the list, as the TUI's explorer opens.
-    const listing = loadAllRows(client, PRIORITY.list, load, view.worktree)
+    const cachedRows = reuse && readAt !== null && rowsCache?.stamp === readAt && rowsCache.worktree === view.worktree ? rowsCache.value : null
+    if (!cachedRows) rowsCache = null
+    const listing = cachedRows ? Promise.resolve({ ok: true as const, value: cachedRows }) : loadAllRows(client, PRIORITY.list, load, view.worktree)
     const panel = store.getState().toolbar.panel
     const expression = orderExpression(panel)
     // The grouped tree has virtual homes. Retain a structural tree as well so navigating inside an epic
@@ -245,9 +250,14 @@ async function start(): Promise<void> {
     const structural = grouping
       ? reused ?? loadTree(client, { query: { sort: expression, group: 'structure' }, priority: PRIORITY.list, epoch: load, worktree: view.worktree, archived: view.showArchived, zone })
       : null
-    const counting = loadGroups(client, PRIORITY.list, load, view.worktree)
+    const cachedCounts = reuse && readAt !== null && countsCache?.stamp === readAt && countsCache.worktree === view.worktree ? countsCache.value : null
+    const counting = cachedCounts ? Promise.resolve({ ok: true as const, value: cachedCounts }) : loadGroups(client, PRIORITY.list, load, view.worktree)
+    if (!cachedCounts) countsCache = null
     let counted: Awaited<typeof counting> | undefined
-    void counting.then((groups) => (counted = groups))
+    void counting.then((groups) => {
+      counted = groups
+      if (groups.ok && load === loads && readAt !== null) countsCache = { stamp: readAt, worktree: view.worktree, value: groups.value }
+    })
     const [loaded, grouped, structure] = await Promise.all([listing, placing, structural])
     const placed = structure ?? grouped
     // A later load owns the screen: this one's answers, failures included, are dropped first. A superseded load's
@@ -259,6 +269,7 @@ async function start(): Promise<void> {
       return failure(problem)
     }
     structuralCache = !gantt && readAt !== null ? { stamp: readAt, tree: placed.value, expression, worktree: view.worktree, archived: view.showArchived } : null
+    rowsCache = readAt !== null ? { stamp: readAt, worktree: view.worktree, value: loaded.value } : null
     const { rows, notes } = loaded.value
     const before = store.getState()
     // Counts that came first go in with the rows, so the board is not drawn twice. Until this read's counts come, a
@@ -284,7 +295,7 @@ async function start(): Promise<void> {
     // that asked for the archive's lines (archiveDue): one that began before `SPC v o` has none, and the follow-up read below loads it.
     if (archiveDue(view.showArchived, state.view.showArchived, archiveRunning !== null, state.archive !== null)) void loadArchive()
     // What the filter and the search find moves with the rows: asked again for the rows just read.
-    void ask(true)
+    if (!cachedRows) void ask(true)
     // Counts that come later go on this board only: a later load's board has its own (store 'groups'). Counts that
     // match the ones carried (most refreshes) change nothing on screen, so the board is not drawn again for them.
     if (counted === undefined) {
