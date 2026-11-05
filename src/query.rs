@@ -1480,10 +1480,19 @@ pub enum SortKey {
     /// 사람이 훑는 화면에서는 뜻이 없다. 쓸모는 쪽을 넘기는 기계의 커서 하나다. 안 움직이는
     /// 차례는 이것과 [`SortKey::Created`] 둘이다 — 생성 차례의 동점도 id 로만 가른다(moai-psyu).
     Id,
+    Kind,
+    Milestone,
+    Epic,
+    Tag,
+    Started,
+    Done,
+    Starts,
+    Since,
+    Progress,
 }
 
 impl SortKey {
-    pub const ALL: [SortKey; 8] = [
+    pub const ALL: [SortKey; 17] = [
         SortKey::Priority,
         SortKey::Created,
         SortKey::Updated,
@@ -1492,6 +1501,15 @@ impl SortKey {
         SortKey::Title,
         SortKey::Due,
         SortKey::Id,
+        SortKey::Kind,
+        SortKey::Milestone,
+        SortKey::Epic,
+        SortKey::Tag,
+        SortKey::Started,
+        SortKey::Done,
+        SortKey::Starts,
+        SortKey::Since,
+        SortKey::Progress,
     ];
 
     /// `--sort` 와 설정 파일에 적는 낱말 — **탐색기가 설정에 적는 이름(`tui::keys::Order::name`)과 같다**.
@@ -1506,6 +1524,15 @@ impl SortKey {
             SortKey::Title => "title",
             SortKey::Due => "due",
             SortKey::Id => "id",
+            SortKey::Kind => "kind",
+            SortKey::Milestone => "milestone",
+            SortKey::Epic => "epic",
+            SortKey::Tag => "tag",
+            SortKey::Started => "started",
+            SortKey::Done => "done",
+            SortKey::Starts => "starts",
+            SortKey::Since => "since",
+            SortKey::Progress => "progress",
         }
     }
 
@@ -1530,6 +1557,8 @@ impl SortKey {
 pub enum Dir {
     Asc,
     Desc,
+    AscNullsFirst,
+    DescNullsFirst,
 }
 
 /// 차례의 한 칸 — 필드와 그 방향(SQL 의 `ORDER BY` 한 항목). 방향을 안 적었으면 그 필드의 제 방향이다
@@ -1552,11 +1581,19 @@ impl Field {
 impl std::fmt::Display for Field {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(self.key.name())?;
-        match (self.dir == self.key.default_dir(), self.dir) {
-            (true, _) => Ok(()),
-            (false, Dir::Asc) => f.write_str(":asc"),
-            (false, Dir::Desc) => f.write_str(":desc"),
+        let (dir, first) = match self.dir {
+            Dir::Asc => (Dir::Asc, false),
+            Dir::Desc => (Dir::Desc, false),
+            Dir::AscNullsFirst => (Dir::Asc, true),
+            Dir::DescNullsFirst => (Dir::Desc, true),
+        };
+        if dir != self.key.default_dir() {
+            f.write_str(if dir == Dir::Asc { ":asc" } else { ":desc" })?;
         }
+        if first {
+            f.write_str(":nulls-first")?;
+        }
+        Ok(())
     }
 }
 
@@ -1594,6 +1631,7 @@ pub enum BadSort {
     Direction(String, String),
     /// 한 필드가 두 번 섰다.
     Repeated(SortKey),
+    Layer(String),
 }
 
 impl std::fmt::Display for BadSort {
@@ -1603,6 +1641,7 @@ impl std::fmt::Display for BadSort {
             BadSort::Empty => write!(f, "an empty field - give fields separated by commas, like priority,updated:desc"),
             BadSort::Unknown(w) => write!(f, "unknown field `{w}` - the fields are {words}"),
             BadSort::Direction(w, d) => write!(f, "unknown direction `{d}` in `{w}:{d}` - a direction is asc or desc"),
+            BadSort::Layer(w) => write!(f, "invalid or repeated layer `{w}`"),
             BadSort::Repeated(k) => write!(f, "`{}` is given twice - a field stands once in the order", k.name()),
         }
     }
@@ -1621,20 +1660,32 @@ pub fn parse_order(raw: &str) -> Result<Vec<Field>, BadSort> {
         if part.is_empty() {
             return Err(BadSort::Empty);
         }
-        let (word, dir) = match part.split_once(':') {
-            None => (part, None),
-            Some((w, d)) => (w.trim(), Some(d.trim())),
-        };
+        let mut parts = part.split(':').map(str::trim);
+        let word = parts.next().unwrap_or("");
         if word.is_empty() {
             return Err(BadSort::Empty);
         }
         let key = SortKey::named(word).ok_or_else(|| BadSort::Unknown(word.to_string()))?;
-        let dir = match dir {
-            None => key.default_dir(),
-            Some("asc") => Dir::Asc,
-            Some("desc") => Dir::Desc,
-            Some(d) => return Err(BadSort::Direction(word.to_string(), d.to_string())),
-        };
+        let mut dir = key.default_dir();
+        let mut direction_seen = false;
+        let mut first = false;
+        for modifier in parts {
+            match modifier {
+                "asc" if !direction_seen && !first => {
+                    dir = Dir::Asc;
+                    direction_seen = true;
+                }
+                "desc" if !direction_seen && !first => {
+                    dir = Dir::Desc;
+                    direction_seen = true;
+                }
+                "nulls-first" if !first => first = true,
+                d => return Err(BadSort::Direction(word.to_string(), d.to_string())),
+            }
+        }
+        if first {
+            dir = if dir == Dir::Asc { Dir::AscNullsFirst } else { Dir::DescNullsFirst };
+        }
         if fields.iter().any(|f| f.key == key) {
             return Err(BadSort::Repeated(key));
         }
@@ -1643,22 +1694,82 @@ pub fn parse_order(raw: &str) -> Result<Vec<Field>, BadSort> {
     Ok(fields)
 }
 
-/// 고른 차례로 두 줄을 견준다. 줄마다 **칸을 곁에 받는다** — 묶음의 칸은 멤버에서 읽은
-/// 것이라 `Issue::status` 만 보면 목록의 글리프와 차례가 다른 칸을 본다. `statuses` 는 설정의
-/// 칸 차례다(칸 순서는 설정이 정한다). 설정에 없는 칸은 뒤로 간다.
-///
-/// - 필드를 앞에서부터 본다. 같으면 다음 필드로 — 방향은 필드마다다([`Dir`])
-/// - 담당은 **화면에 선 이름**(`model::label`, `naming`)으로 견준다 — 이름만 견주면 `naming = "email"`
-///   에서 담당 열이 가나다로 안 선다(moai-2kyl 단계 리뷰)
-/// - 다 같으면 **마지막 필드의 동점 규칙**으로 가른다 — 차례가 온전해야 쪽의 커서([`page`])가 선다. 한 필드를
-///   고르던 때의 규칙을 그대로 옮긴 것이라 필드 하나짜리 목록은 옛 차례와 한 치도 안 갈린다. 마지막 필드로
-///   고르는 까닭은 그 필드가 사람이 "여기까지 같으면" 이라 적은 끝이기 때문이다 — 생성 차례를 끝에 둔 사람은
-///   그 안에서 안 움직이는 차례를 바란 것이고, 우선순위를 고친 줄이 같은 초의 무리 안에서 커서를 넘으면 안 된다
-/// - **생성·수정이 끝이면 id 로만 가른다**(moai-psyu, 사용자 결정 2026-10-02). 계획 하나가 한 초에
-///   서서 같은 초를 나눈 줄이 흔하고(이 저장소 1561 중 859), 우선순위로 가르면 쪽을 넘기는 사이 우선순위를
-///   고친 줄이 커서를 넘는다. id 는 씨앗 해시라 같은 초 안의 차례가 만든 차례는 아니지만, 한 번 서면 안
-///   바뀐다. 그 밖의 끝(과 빈 목록)은 [`display_order`](우선순위 → id)다
-/// - `reversed` 는 가른 것까지 통째로 뒤집는다 — 필드마다의 방향은 그 필드만 뒤집고 동점 규칙은 안 뒤집는다
+/// Derived sort values for one snapshot. Built once, then shared by tree and paging comparisons.
+#[derive(Default)]
+struct SortValues<'a> {
+    due: Option<&'a str>,
+    epic: Option<&'a str>,
+    milestone: Option<&'a str>,
+    updated: Option<&'a str>,
+    progress: Option<(usize, usize)>,
+}
+
+pub struct SortContext<'a> {
+    rows: BTreeMap<&'a str, Vec<(&'a Issue, SortValues<'a>)>>,
+}
+
+impl<'a> SortContext<'a> {
+    pub fn of(all: &'a [Issue]) -> Self {
+        let soil = crate::report::Soil::of(all);
+        let ladder = crate::report::DueLadder::over(&soil.lines, &soil.epic);
+        let epics = soil.placed(Kind::Epic);
+        let stones = soil.placed(Kind::Milestone);
+        let eclipsed = soil.eclipsed();
+        // A group is visited once per member, never once per comparison.
+        let mut groups: BTreeMap<(u8, &str), (&str, usize, usize)> = BTreeMap::new();
+        for i in all.iter().filter(|i| !eclipsed(i)) {
+            let memberships = [(0, epics.at(i)), (1, stones.at(i))];
+            for (kind, id) in memberships {
+                if let Some(id) = id.filter(|id| *id != i.id) {
+                    let g = groups.entry((kind, id)).or_insert((&i.updated_at, 0, 0));
+                    g.0 = g.0.max(i.updated_at.as_str());
+                    if i.kind == Kind::Issue {
+                        g.1 += usize::from(i.status.is_done());
+                        g.2 += 1;
+                    }
+                }
+            }
+        }
+        let mut rows: BTreeMap<&str, Vec<(&Issue, SortValues<'a>)>> = BTreeMap::new();
+        for i in all {
+            let due = match (i.deadline(), ladder.ceiling(i).map(|c| c.due)) {
+                (Some(a), Some(b)) => Some(a.min(b)),
+                (a, b) => a.or(b),
+            };
+            let group = match i.kind {
+                Kind::Epic => groups.get(&(0, i.id.as_str())),
+                Kind::Milestone => groups.get(&(1, i.id.as_str())),
+                _ => None,
+            };
+            let values = SortValues {
+                due,
+                epic: epics.at(i),
+                milestone: stones.at(i),
+                updated: Some(group.map_or(i.updated_at.as_str(), |g| g.0.max(i.updated_at.as_str()))),
+                progress: group.and_then(|g| (g.2 > 0).then_some((g.1, g.2))),
+            };
+            rows.entry(&i.id).or_default().push((i, values));
+        }
+        Self { rows }
+    }
+    fn values(&self, issue: &Issue) -> Option<&SortValues<'a>> {
+        self.rows.get(issue.id.as_str())?.iter().find(|(row, _)| *row == issue).map(|(_, v)| v)
+    }
+    pub fn compare(
+        &self,
+        fields: &[Field],
+        reversed: bool,
+        a: (&Issue, &str),
+        b: (&Issue, &str),
+        statuses: &[String],
+        naming: crate::config::Naming,
+    ) -> std::cmp::Ordering {
+        compare_order(fields, reversed, a, b, statuses, naming, self.values(a.0), self.values(b.0))
+    }
+}
+
+/// Compare rows without a snapshot. Call `SortContext::compare` when inherited or
+/// aggregated fields must be resolved against the complete set of issues.
 pub fn order_by(
     fields: &[Field],
     reversed: bool,
@@ -1667,6 +1778,19 @@ pub fn order_by(
     statuses: &[String],
     naming: crate::config::Naming,
 ) -> std::cmp::Ordering {
+    compare_order(fields, reversed, a, b, statuses, naming, None, None)
+}
+
+fn compare_order(
+    fields: &[Field],
+    reversed: bool,
+    a: (&Issue, &str),
+    b: (&Issue, &str),
+    statuses: &[String],
+    naming: crate::config::Naming,
+    av: Option<&SortValues<'_>>,
+    bv: Option<&SortValues<'_>>,
+) -> std::cmp::Ordering {
     use std::cmp::Ordering;
     let rank = |column: &str| statuses.iter().position(|s| s == column).unwrap_or(statuses.len());
     let shown = |i: &Issue, name: &str| crate::model::label(name, i.assignee_email.as_deref(), naming);
@@ -1674,7 +1798,10 @@ pub fn order_by(
     let rising = |key: SortKey| match key {
         SortKey::Priority => a.0.priority().cmp(&b.0.priority()),
         SortKey::Created => a.0.created_at.cmp(&b.0.created_at),
-        SortKey::Updated => a.0.updated_at.cmp(&b.0.updated_at),
+        SortKey::Updated => av
+            .and_then(|v| v.updated)
+            .unwrap_or(&a.0.updated_at)
+            .cmp(bv.and_then(|v| v.updated).unwrap_or(&b.0.updated_at)),
         SortKey::Status => rank(a.1).cmp(&rank(b.1)),
         SortKey::Assignee => match (&a.0.assignee, &b.0.assignee) {
             (Some(x), Some(y)) => caseless(&shown(a.0, x), &shown(b.0, y)),
@@ -1683,53 +1810,117 @@ pub fn order_by(
             (None, None) => Ordering::Equal,
         },
         SortKey::Title => caseless(&a.0.title, &b.0.title),
-        SortKey::Due => due_order(a.0, b.0),
+        SortKey::Due => av.map_or(a.0.deadline(), |v| v.due).cmp(&bv.map_or(b.0.deadline(), |v| v.due)),
         SortKey::Id => a.0.id.cmp(&b.0.id),
+        SortKey::Kind => a.0.kind.as_str().cmp(b.0.kind.as_str()),
+        SortKey::Milestone => av
+            .map_or(a.0.milestone.as_deref(), |v| v.milestone)
+            .cmp(&bv.map_or(b.0.milestone.as_deref(), |v| v.milestone)),
+        SortKey::Epic => av.map_or(a.0.epic.as_deref(), |v| v.epic).cmp(&bv.map_or(b.0.epic.as_deref(), |v| v.epic)),
+        SortKey::Tag => a.0.tags.first().cmp(&b.0.tags.first()),
+        SortKey::Started => a.0.started_at.cmp(&b.0.started_at),
+        SortKey::Done => a.0.done_at.cmp(&b.0.done_at),
+        SortKey::Starts => a.0.planned_start().cmp(&b.0.planned_start()),
+        SortKey::Since => a.0.status_since.cmp(&b.0.status_since),
+        SortKey::Progress => match (av.and_then(|v| v.progress), bv.and_then(|v| v.progress)) {
+            (Some((ad, at)), Some((bd, bt))) => (ad as u128 * bt as u128).cmp(&(bd as u128 * at as u128)),
+            _ => Ordering::Equal,
+        },
     };
-    let order = fields
-        .iter()
-        .map(|f| match f.dir {
-            Dir::Asc => rising(f.key),
-            Dir::Desc => rising(f.key).reverse(),
-        })
-        .find(|o| o.is_ne())
-        .unwrap_or_else(|| match fields.last().map(|f| f.key) {
-            Some(SortKey::Created | SortKey::Updated) => a.0.id.cmp(&b.0.id),
-            _ => display_order(a.0, b.0),
-        });
-    if reversed { order.reverse() } else { order }
+    let null = |i: &Issue, v: Option<&SortValues<'_>>, key| match key {
+        SortKey::Assignee => i.assignee.is_none(),
+        SortKey::Due => v.map_or(i.deadline(), |v| v.due).is_none(),
+        SortKey::Milestone => v.map_or(i.milestone.as_deref(), |v| v.milestone).is_none(),
+        SortKey::Epic => v.map_or(i.epic.as_deref(), |v| v.epic).is_none(),
+        SortKey::Progress => v.and_then(|v| v.progress).is_none(),
+        SortKey::Tag => i.tags.is_empty(),
+        SortKey::Started => i.started_at.is_none(),
+        SortKey::Done => i.done_at.is_none(),
+        SortKey::Starts => i.planned_start().is_none(),
+        _ => false,
+    };
+    for field in fields {
+        let first = matches!(field.dir, Dir::AscNullsFirst | Dir::DescNullsFirst);
+        let missing = null(a.0, av, field.key).cmp(&null(b.0, bv, field.key));
+        if missing.is_ne() {
+            return if first { missing.reverse() } else { missing };
+        }
+        let desc = matches!(field.dir, Dir::Desc | Dir::DescNullsFirst) ^ reversed;
+        let cmp = rising(field.key);
+        if cmp.is_ne() {
+            return if desc { cmp.reverse() } else { cmp };
+        }
+    }
+    a.0.created_at.cmp(&b.0.created_at).then_with(|| a.0.id.cmp(&b.0.id))
 }
 
-/// 고른 줄을 `sort` 차례로 세우고, 커서(`after`) **뒤**에 선 줄부터 `limit` 줄만 남긴다(moai-efoc) —
-/// `moai show` 의 목록이 지나는 자리다. 돌려주는 것은 `limit` 에 잘려 나간 줄 수다 — 사람 화면이
-/// "N건 더" 를 댄다.
-///
-/// 칸은 **목록의 글리프와 같은 자**([`Where::column`])로 읽는다 — 묶음의 칸은 멤버에서 읽은 것이다.
-/// 담당은 화면에 선 이름으로 견준다(`cfg.naming`). 탐색기와 같은 [`order_by`] 를 지나므로 같은 낱말이
-/// 두 표면에서 같은 차례로 선다. 기본값(`Sort::default`)은 [`display_order`] 와 한 치도 안 갈린다.
-///
-/// **커서는 자리가 아니라 값이다**(키셋). 커서 줄의 **지금** 값으로 견주어 그보다 뒤인 줄만 남기므로,
-/// 앞 쪽을 받은 뒤 다른 줄이 생기거나 지워져도 밀리거나 겹치지 않는다 — offset 으로 넘기면 세션
-/// 여럿이 쓰는 사이 줄이 밀려 빠지거나 겹친다(에픽 본문의 결정). 커서 줄은 걸러져 목록에 없어도
-/// 된다 — 닫혀 숨었어도 값은 있다. **쪽 사이에 차례 안의 자리가 바뀐 줄은 커서 줄이든 다른 줄이든
-/// 커서를 넘어 겹치거나 빠진다**(moai-efoc 리뷰). 아무 고침에도 안 움직이는 차례는 [`SortKey::Id`] 와
-/// [`SortKey::Created`] 다 — 생성 때도 id 도 한 번 서면 안 바뀌고, 생성 차례의 동점은 id 로만
-/// 가른다(moai-psyu). `Updated` 는 동점을 같이 가르지만 고칠 때마다 제 값이 바뀌어 움직인다.
-///
-/// **여러 필드의 차례에서도 커서는 그 줄의 값이다**(moai-r170.f65) — 필드 차례대로 견준 값 전부라, 따로 커서
-/// 꼴을 들 까닭이 없다: 세우는 자와 넘는 자가 같은 [`order_by`] 를 지난다. 안 움직이는 것은 **모든 필드가**
-/// 안 움직이는 차례다(`created,id` 처럼) — 필드 하나라도 우선순위·칸·담당·제목·수정이면 그 값을 고친 줄이 넘는다.
-///
-/// **한 id 의 줄은 한 덩어리다**(moai-efoc 리뷰). 머지가 남긴 쌍둥이는 값이 달라 차례에서 떨어져 설 수
-/// 있는데 커서는 id 하나라 어느 줄에서 끊겼는지 모른다 — 줄 하나(`Load::get` 의 뒷줄)로 넘던 때는 사이의
-/// 줄을 건너뛰거나 같은 쪽을 끝없이 되받았다. 그래서 id 마다 **머리 줄**(그 id 의 줄 가운데 이 차례에서 맨
-/// 앞에 서는 것)을 세우고 쌍둥이를 그 자리에 모아 세운다. 커서도 머리로 넘어 그 id 의 줄은 다 앞 쪽에 선
-/// 것으로 치고, `limit` 은 한 id 의 줄을 가르지 않는다 — 가르느니 그 쪽을 늘린다(줄이면 받는 쪽이 짧은
-/// 쪽을 "끝났다" 로 읽는다). 머리는 **걸러지기 전의 줄 전부**(`all`)에서 고른다 — 걸러진 줄로 고르면 쪽마다
-/// 머리가 달라질 수 있다. 쌍둥이가 없는 목록에서는 머리가 곧 그 줄이라 아무것도 안 바뀐다.
-///
-/// 견주는 자가 둘이 아니다 — 세우는 것과 커서를 넘는 것이 같은 `cmp` 를 지나야, 커서 줄 바로 뒤의
-/// 줄이 두 판정 사이에서 갈리지 않는다.
+/// Independent ordering for each structural layer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Order {
+    pub milestone: Vec<Field>,
+    pub epic: Vec<Field>,
+    pub item: Vec<Field>,
+}
+
+impl Default for Order {
+    fn default() -> Self {
+        Self {
+            milestone: parse_order("due,created:desc").unwrap(),
+            epic: parse_order("priority,created:asc").unwrap(),
+            item: parse_order("priority,due").unwrap(),
+        }
+    }
+}
+impl Order {
+    pub const PRESETS: [&'static str; 5] = ["release", "urgent", "recent", "due", "people"];
+    pub fn preset(name: &str) -> Option<Self> {
+        let fields = match name {
+            "release" => return Some(Self::default()),
+            "urgent" => "priority",
+            "recent" => "updated:desc",
+            "due" => "due",
+            "people" => "assignee",
+            _ => return None,
+        };
+        let fields = parse_order(fields).ok()?;
+        Some(Self { milestone: fields.clone(), epic: fields.clone(), item: fields })
+    }
+    pub fn parse(raw: &str) -> Result<Self, BadSort> {
+        if let Some(preset) = Self::preset(raw.trim()) {
+            return Ok(preset);
+        }
+        if !raw.contains('=') {
+            let fields = parse_order(raw)?;
+            return Ok(Self { milestone: fields.clone(), epic: fields.clone(), item: fields });
+        }
+        let mut order = Self::default();
+        let mut seen = BTreeSet::new();
+        for clause in raw.split(';') {
+            let (layer, fields) = clause.split_once('=').ok_or_else(|| BadSort::Layer(clause.trim().into()))?;
+            let layer = layer.trim();
+            if !seen.insert(layer) {
+                return Err(BadSort::Layer(layer.into()));
+            }
+            let target = match layer {
+                "milestone" => &mut order.milestone,
+                "epic" => &mut order.epic,
+                "item" => &mut order.item,
+                _ => return Err(BadSort::Layer(layer.into())),
+            };
+            *target = parse_order(fields)?;
+        }
+        Ok(order)
+    }
+}
+impl std::fmt::Display for Order {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let fields = |v: &[Field]| v.iter().map(ToString::to_string).collect::<Vec<_>>().join(",");
+        write!(f, "milestone={};epic={};item={}", fields(&self.milestone), fields(&self.epic), fields(&self.item))
+    }
+}
+
+/// Sort and page the selected rows using the same comparison for sorting and the cursor.
+/// Derived values are calculated once from `all`; rows sharing an id remain on one page.
 pub fn page(
     shown: &mut Vec<Issue>,
     all: &[Issue],
@@ -1740,8 +1931,9 @@ pub fn page(
     limit: Option<usize>,
 ) -> usize {
     use std::cmp::Ordering;
+    let context = SortContext::of(all);
     let cmp = |a: &Issue, b: &Issue| {
-        order_by(&sort.fields, sort.reversed, (a, wh.column(a)), (b, wh.column(b)), &cfg.statuses, cfg.naming)
+        context.compare(&sort.fields, sort.reversed, (a, wh.column(a)), (b, wh.column(b)), &cfg.statuses, cfg.naming)
     };
     let mut heads: BTreeMap<&str, &Issue> = BTreeMap::new();
     for i in all {
@@ -2005,7 +2197,7 @@ mod tests {
         assert_eq!(ids(Some("레이븐"), None, &held), ["a-0001"]);
     }
 
-    /// **고른 차례는 제 방향이 있고, 같으면 기본 차례로 가르며, 뒤집으면 통째로 뒤집는다**(moai-55cp).
+    /// Each field has a direction; ties always fall to creation time and id.
     #[test]
     fn order_by_each_key_and_its_reverse() {
         let at = |id: &str, p: u8, created: &str, who: Option<&str>| {
@@ -2036,7 +2228,7 @@ mod tests {
             idx.iter().map(|&i| issues[i].id.as_str()).collect::<Vec<_>>()
         };
         assert_eq!(sorted(SortKey::Priority, false), ["a-2", "a-1", "a-3"], "기본 차례와 다르다");
-        assert_eq!(sorted(SortKey::Priority, true), ["a-3", "a-1", "a-2"]);
+        assert_eq!(sorted(SortKey::Priority, true), ["a-1", "a-3", "a-2"]);
         assert_eq!(sorted(SortKey::Created, false), ["a-2", "a-3", "a-1"], "새것이 위가 아니다");
         assert_eq!(sorted(SortKey::Created, true), ["a-1", "a-3", "a-2"]);
         assert_eq!(sorted(SortKey::Status, false), ["a-2", "a-1", "a-3"], "설정의 칸 차례가 아니다");
@@ -3373,10 +3565,11 @@ mod tests {
         };
         for key in [SortKey::Created, SortKey::Updated] {
             assert_eq!(sorted(key, false), s(&["a-0001", "a-0002", "a-0003"]), "{key:?} 의 동점에 우선순위가 끼었다");
-            assert_eq!(sorted(key, true), s(&["a-0003", "a-0002", "a-0001"]), "{key:?} 를 뒤집은 동점");
+            assert_eq!(sorted(key, true), s(&["a-0001", "a-0002", "a-0003"]), "{key:?} 를 뒤집은 동점");
         }
-        for key in [SortKey::Priority, SortKey::Status, SortKey::Assignee] {
-            assert_eq!(sorted(key, false), s(&["a-0002", "a-0003", "a-0001"]), "{key:?} 의 동점이 기본 차례가 아니다");
+        assert_eq!(sorted(SortKey::Priority, false), s(&["a-0002", "a-0003", "a-0001"]));
+        for key in [SortKey::Status, SortKey::Assignee] {
+            assert_eq!(sorted(key, false), s(&["a-0001", "a-0002", "a-0003"]), "{key:?} 의 동점은 생성 다음 id다");
         }
 
         // 우선순위가 다 같은 줄로 첫 쪽을 받은 뒤 a-0003 을 p0 으로 고쳤다 — 우선순위로 가르면 커서(a-0001)
@@ -3442,13 +3635,12 @@ mod tests {
         );
         // 칸이 같으면 제목 — 칸 하나로는 우선순위로 갈라 a-0004 가 a-0003 앞에 선다.
         assert_eq!(sorted_by(&all, "status,title", false), s(&["a-0001", "a-0003", "a-0004", "a-0002"]));
-        assert_eq!(sorted_by(&all, "status", false), s(&["a-0001", "a-0004", "a-0003", "a-0002"]));
+        assert_eq!(sorted_by(&all, "status", false), s(&["a-0001", "a-0003", "a-0004", "a-0002"]));
     }
 
-    /// **다 같으면 마지막 필드의 동점 규칙이다** — 생성·수정이 끝이면 id 로만, 그 밖이면 우선순위 → id. a-0003·a-0004
-    /// 는 칸도 생성도 같고 우선순위만 다르다.
+    /// The same created/id tie break applies regardless of the last field.
     #[test]
-    fn ties_after_the_last_field_follow_that_fields_rule() {
+    fn ties_after_the_last_field_use_created_and_id() {
         let all = crossing();
         assert_eq!(
             sorted_by(&all, "status,created", false),
@@ -3457,9 +3649,63 @@ mod tests {
         );
         assert_eq!(
             sorted_by(&all, "created,status", false),
-            s(&["a-0002", "a-0004", "a-0003", "a-0001"]),
-            "칸이 끝인 차례의 동점이 우선순위 → id 가 아니다"
+            s(&["a-0002", "a-0003", "a-0004", "a-0001"]),
+            "동점은 마지막 필드와 관계없이 생성 → id다"
         );
+    }
+
+    #[test]
+    fn derived_sort_values_follow_membership_and_the_due_ladder() {
+        let mut e1 = issue("a-0001", "todo", &[]);
+        e1.kind = Kind::Epic;
+        e1.due_on = Some("2026-11-05".into());
+        let mut e2 = issue("a-0002", "todo", &[]);
+        e2.kind = Kind::Epic;
+        let mut child = issue("a-0003", "done", &[]);
+        child.epic = Some(e1.id.clone());
+        child.updated_at = "2026-12-01T00:00:00Z".into();
+        let mut open = issue("a-0004", "todo", &[]);
+        open.epic = Some(e2.id.clone());
+        let all = vec![e1, e2, child, open];
+        let c = cfg();
+        let wh = Where::of(&all, &c);
+        let mut groups = vec![all[0].clone(), all[1].clone()];
+        for field in ["progress:desc", "updated:desc"] {
+            groups.reverse();
+            page(
+                &mut groups,
+                &all,
+                &wh,
+                &c,
+                &Sort { fields: parse_order(field).unwrap(), reversed: false },
+                None,
+                None,
+            );
+            assert_eq!(groups[0].id, "a-0001", "{field}");
+        }
+        let facts = SortContext::of(&all);
+        assert_eq!(facts.values(&all[2]).unwrap().due, Some("2026-11-05"));
+    }
+
+    #[test]
+    fn layered_order_round_trips_and_rejects_repeated_layers() {
+        let order = Order::parse("milestone=created:desc;item=priority,due:desc:nulls-first").unwrap();
+        assert_eq!(Order::parse(&order.to_string()), Ok(order));
+        assert!(matches!(Order::parse("item=priority;item=due"), Err(BadSort::Layer(_))));
+        assert!(Order::parse("unknown=priority").is_err());
+        let legacy = Order::parse("priority,updated:desc").unwrap();
+        assert_eq!(legacy.milestone, legacy.epic);
+        assert_eq!(legacy.epic, legacy.item);
+    }
+
+    #[test]
+    fn nulls_stay_last_in_both_directions_unless_explicitly_first() {
+        let mut a = issue("a-0001", "todo", &[]);
+        let b = issue("a-0002", "todo", &[]);
+        a.due_on = Some("2026-11-05".into());
+        let all = vec![b, a];
+        assert_eq!(sorted_by(&all, "due:desc", false), s(&["a-0001", "a-0002"]));
+        assert_eq!(sorted_by(&all, "due:desc:nulls-first", false), s(&["a-0002", "a-0001"]));
     }
 
     /// **여러 필드의 차례에서도 커서는 그 줄의 값이다** — `-n` 과 `--after` 로 걸어 받은 것이 한 번에 받은 차례와

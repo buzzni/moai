@@ -129,8 +129,8 @@ pub fn boot(cwd: &Path, user: Option<&str>, lang: Lang, registered: &[std::path:
             .map(|k| Sort {
                 name: k.name(),
                 dir: match k.default_dir() {
-                    Dir::Asc => "asc",
-                    Dir::Desc => "desc",
+                    Dir::Asc | Dir::AscNullsFirst => "asc",
+                    Dir::Desc | Dir::DescNullsFirst => "desc",
                 },
             })
             .collect(),
