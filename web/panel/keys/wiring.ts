@@ -13,7 +13,7 @@ import { NO_MILESTONE, type IssueIndex, type Path, type Row } from "../data/inde
 import type { ReadMarks } from "../data/read.ts"
 import { sortDefault, type SortDefault } from "../data/memory.ts"
 import { entryOf, numberedNames, type ProjectEntry } from "../data/projects.ts"
-import { SORT_KEYS, sortEdit, type Sort, type SortKey } from "../data/query.ts"
+import { sortEdit, type Sort, type SortKey } from "../data/query.ts"
 import { withArchive } from "../data/source.ts"
 import { effectiveZone, zoneNames } from "../data/zone.ts"
 import type { Copy } from "../i18n/index.ts"
@@ -25,9 +25,10 @@ import { createMenu, type MenuView } from "../view/menu.ts"
 import { effectivePosition, nextPosition } from "../view/responsive.ts"
 import type { Shell } from "../view/shell.ts"
 import type { ToolbarAction } from "../view/toolbar.ts"
+import { activeLevels, fieldDir, groupNames, sorterRows } from "../view/sort-adapter.ts"
 import type { PaneView } from "../view/types.ts"
 import { createZonePicker, type ZonePicker } from "../view/zones.ts"
-import { attachKeyRouter, createKeyRouter, detectPlatform, type DispatchedAction, type KeyRouter } from "./router.ts"
+import { attachKeyRouter, createKeyRouter, detectPlatform, keyToken, type DispatchedAction, type KeyRouter } from "./router.ts"
 import { bindingsFor, isAvailable, type CellField, type KeyContext, type Mode, type Platform } from "./table.ts"
 
 export type { ReadMarks }
@@ -215,9 +216,18 @@ export function wireKeys(options: KeyWiringOptions): KeyWiring {
   const wikiKey = (): boolean => (current ? panes().wiki?.handleKey?.(current) ?? false : false)
 
   // ── sort editor (sorter mode) ──
-  let sorterAt = 0
-  let sorterFrom: Sort | null = null
-  const sortKey = (): SortKey => SORT_KEYS[sorterAt]!
+  // The cursor names a field, not a row number: the rows are the level's fields first, then the rest (sort-panel.ts),
+  // so a field put in or taken out changes its row, and the cursor follows it there as the TUI's editor does. Walking
+  // the page's own eight keys instead skipped rows on screen and never reached the fields only moai knows.
+  let sorterKey = "priority"
+  let sorterFrom: { sort: Sort; panel: import("../view/sort-panel.ts").SortPanelState } | null = null
+  const sortKey = (): string => sorterKey
+  const stepSorter = (delta: 1 | -1) => {
+    const rows = sorterRows(store.getState().toolbar.panel)
+    const at = rows.indexOf(sorterKey)
+    sorterKey = rows[Math.min(rows.length - 1, Math.max(0, at + delta))] ?? sorterKey
+    paintSorter()
+  }
   const defaults = options.sortDefault ?? sortDefault
   // An order emptied of every field is the reset: the store puts back the saved default (State.defaultSort).
   const setSort = (sort: Sort) => store.dispatch({ type: "sort", sort })
@@ -235,18 +245,22 @@ export function wireKeys(options: KeyWiringOptions): KeyWiring {
     if (note) note.hidden = defaults.persistent
   }
 
+  function editPanel(fields: import('../view/sort-panel.ts').SortPanelField[]) {
+    const panel = store.getState().toolbar.panel
+    toolbar({ type: 'sort-panel', action: { type: 'fields', level: panel.level, fields } })
+  }
   function moveField(delta: 1 | -1) {
-    const sort = store.getState().sort
-    const at = sort.fields.findIndex((f) => f.key === sortKey())
+    const panel = store.getState().toolbar.panel
+    const fields = [...(panel.order[panel.level] ?? [])]
+    const at = fields.findIndex((f) => f.key === sortKey())
     const to = at + delta
-    if (at < 0 || to < 0 || to >= sort.fields.length) return
-    const fields = [...sort.fields]
+    if (at < 0 || to < 0 || to >= fields.length) return
     ;[fields[at], fields[to]] = [fields[to]!, fields[at]!]
-    setSort({ ...sort, fields })
+    editPanel(fields)
   }
 
   function closeSorter(keep: boolean) {
-    if (!keep && sorterFrom) setSort(sorterFrom)
+    if (!keep && sorterFrom) toolbar({ type: "sort-panel-restore", ...sorterFrom })
     sorterFrom = null
     if (store.getState().toolbar.sortOpen) toolbar({ type: "sort-toggle" })
     backToPane()
@@ -527,25 +541,40 @@ export function wireKeys(options: KeyWiringOptions): KeyWiring {
         const head = text.slice(0, caret).replace(/\S*\s*$/, "")
         return { text: head + text.slice(caret), caret: head.length }
       }),
-    "sorter.down": () => {
-      sorterAt = Math.min(SORT_KEYS.length - 1, sorterAt + 1)
-      paintSorter()
+    "sorter.level": () => {
+      const panel = store.getState().toolbar.panel
+      const levels = activeLevels(panel.group)
+      toolbar({ type: 'sort-panel', action: { type: 'level', id: levels[(levels.indexOf(panel.level) + 1) % levels.length]! } })
     },
-    "sorter.up": () => {
-      sorterAt = Math.max(0, sorterAt - 1)
-      paintSorter()
+    "sorter.group": () => {
+      const groups = groupNames()
+      const group = store.getState().toolbar.panel.group
+      toolbar({ type: 'sort-panel', action: { type: 'group', id: groups[(groups.indexOf(group) + 1) % groups.length]! } })
     },
+    "sorter.presetOne": () => toolbar({ type: 'sort-panel', action: { type: 'preset', id: 'release' } }),
+    "sorter.presetTwo": () => toolbar({ type: 'sort-panel', action: { type: 'preset', id: 'urgent' } }),
+    "sorter.presetThree": () => toolbar({ type: 'sort-panel', action: { type: 'preset', id: 'recent' } }),
+    "sorter.presetFour": () => toolbar({ type: 'sort-panel', action: { type: 'preset', id: 'due' } }),
+    "sorter.presetFive": () => toolbar({ type: 'sort-panel', action: { type: 'preset', id: 'people' } }),
+    "sorter.down": () => stepSorter(1),
+    "sorter.up": () => stepSorter(-1),
     "sorter.lower": () => moveField(1),
     "sorter.raise": () => moveField(-1),
     "sorter.toggle": () => {
-      const sort = store.getState().sort
+      const panel = store.getState().toolbar.panel
+      const fields = panel.order[panel.level] ?? []
       const key = sortKey()
-      setSort(sort.fields.some((f) => f.key === key) ? { ...sort, fields: sort.fields.filter((f) => f.key !== key) } : sortEdit(sort, key, "append"))
+      if (fields.some((f) => f.key === key)) { if (fields.length > 1) editPanel(fields.filter((f) => f.key !== key)) }
+      else editPanel([...fields, { key, dir: fieldDir(key) }])
     },
-    "sorter.flip": () => setSort(sortEdit(store.getState().sort, sortKey(), "flip")),
+    "sorter.flip": () => {
+      const panel = store.getState().toolbar.panel
+      editPanel((panel.order[panel.level] ?? []).map((f) => f.key === sortKey() ? { ...f, dir: f.dir === 'asc' ? 'desc' : 'asc' } : f))
+    },
     "sorter.apply": () => closeSorter(true),
     "sorter.default": () => {
       defaults.set(store.getState().sort)
+      defaults.setPanel?.(store.getState().toolbar.panel)
       store.dispatch({ type: "sort-default", sort: store.getState().sort })
       say(defaults.persistent ? copy.keys.sortDefaultSaved : copy.keys.sortDefaultSavedSession)
       // As in the TUI: D applies the order, saves it and leaves the editor (Esc after it must not undo it).
@@ -602,8 +631,8 @@ export function wireKeys(options: KeyWiringOptions): KeyWiring {
   const unsubscribe = store.subscribe((state, previous) => {
     if (state.toolbar.sortOpen && !previous.toolbar.sortOpen) {
       // The editor opens on the order's first field, and Esc puts the order it opened on back.
-      sorterFrom = previous.sort
-      sorterAt = Math.max(0, SORT_KEYS.indexOf(state.sort.fields[0]?.key ?? "priority"))
+      sorterFrom = { sort: previous.sort, panel: previous.toolbar.panel }
+      sorterKey = sorterRows(state.toolbar.panel)[0] ?? "priority"
       // Opened by a click on the sort button, which keeps the focus: SPC and Enter would click that button again
       // (attachKeyRouter leaves them to a focused button) instead of putting a field in or applying the order.
       if (bar.el.contains(doc.activeElement)) backToPane()
@@ -622,12 +651,38 @@ export function wireKeys(options: KeyWiringOptions): KeyWiring {
   // pass (copy, find: Cmd/Meta, and Ctrl off macOS; see help.ts guard). Those are swallowed here without
   // preventDefault, so the panel's shortcuts stay off and the browser still acts. The Esc branch below is a fallback
   // only: no Esc reaches it while the guard is attached.
+  let sortPrefix = false
+  let shortcutUsed = false
   const detach = attachKeyRouter(doc, {
     ...router,
     handle(event) {
       current = (event.source as KeyboardEvent | undefined) ?? null
       try {
-        return router.handle(event)
+        const token = keyToken(event)
+        if (sortPrefix && store.getState().toolbar.sortOpen && token) {
+          const shortcuts: Record<string, SortKey> = { p: 'priority', c: 'created', u: 'updated', s: 'status', a: 'assignee', t: 'title', w: 'due' }
+          const key = shortcuts[token.toLowerCase()]
+          if (key && token.length === 1) {
+            toolbar({ type: 'sort-edit', key, how: token === token.toUpperCase() ? 'flip' : 'replace' })
+            shortcutUsed = true
+            return { handled: true, preventDefault: true }
+          }
+          sortPrefix = false
+          if (token === 'e') return { handled: true, preventDefault: true }
+          if (token === 'Esc' && shortcutUsed) {
+            closeSorter(true)
+            return { handled: true, preventDefault: true }
+          }
+        }
+        const result = router.handle(event)
+        const path = router.state().menu
+        if (path?.length === 2 && path[0] === 'SPC' && path[1] === 's' && !store.getState().toolbar.sortOpen) {
+          sortPrefix = true
+          shortcutUsed = false
+          toolbar({ type: 'sort-toggle' })
+          router.reset()
+        }
+        return result
       } finally {
         current = null
       }

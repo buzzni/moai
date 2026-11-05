@@ -1374,7 +1374,7 @@ mod tests {
         };
         for o in Order::ALL {
             assert_eq!(
-                read(o.name()).fields,
+                read(if o == Order::Due { "due:asc" } else { o.name() }).fields,
                 [crate::query::Field::of(crate::tui::App::sort_key(o))],
                 "`{}` 가 두 표면에서 다른 차례다",
                 o.name()

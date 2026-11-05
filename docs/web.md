@@ -207,10 +207,11 @@ system again forgets it.
 - **Filter** (`SPC f`) takes the same `key=value` words as `--filter`. `Tab`
   completes, `Up`/`Down` pick a value and `Enter` applies. `Esc` in the list
   clears an applied search or filter
-- **Sort** (`SPC s`) works as in the explorer: `p c u s a t w` sorts by priority,
-  created, updated, status, assignee, title or deadline, and the same key again
-  turns it around. The capital letter adds the field to the end of the order. `SPC s e`
-  opens the sort editor
+- **Sort and group** (`SPC s`) opens the same preset, group and layer choices as
+  the explorer. Select the milestone, epic or item tab to edit its fields and
+  direction. Changes preview in the list and board; `Esc` cancels and `Enter`
+  keeps them. The panel shows equivalent `moai ctl` commands. Field shortcuts
+  still change the item order
 - **View** (`SPC v`) shows or hides deferred work (`l`), backlog items (`b`) and
   the archive (`o`; the page asks for the archive's rows, and for its lines in
   the tree, only while it is shown); `w` overlays what the other worktrees changed, as
@@ -440,14 +441,16 @@ lanes.
 | `Up` / `Down` | Pick a filter value |
 | `Ctrl-u` | Clear the input |
 
-**Sort editor** (`SPC s e`)
+**Sort editor** (`SPC s`)
 
 | Key | Does |
 |---|---|
 | `j` `k` | Move in the list |
 | `J` `K` | Move the field later / earlier in the order |
 | `SPC` | Add / remove the field |
-| `d` | Flip direction |
+| `d` / `r` | Flip direction |
+| `Tab` / `g` | Switch layer / grouping |
+| `1`–`5` | Choose a preset |
 | `D` | Save the order as the default: what an emptied order returns to, kept in this browser |
 | `Enter` / `Esc` | Apply / cancel |
 
@@ -466,4 +469,4 @@ lanes.
 The page does not show the stats screen, and what it writes is a Gantt bar's days
 and your read marks.
 
-Decided in: moai-skjr, moai-e9hi, moai-8r2l, moai-0aa7, moai-jshy, moai-d86e.3ud, moai-ijjd, moai-lj8g, moai-ekg6 moai-mkzo moai-i07x moai-zgc1 moai-v5of moai-4v3h moai-7eeq moai-yigx moai-4xmq
+Decided in: moai-skjr, moai-e9hi, moai-8r2l, moai-0aa7, moai-jshy, moai-d86e.3ud, moai-ijjd, moai-lj8g, moai-ekg6 moai-mkzo moai-i07x moai-zgc1 moai-v5of moai-4v3h moai-7eeq moai-yigx moai-4xmq moai-okdc

@@ -543,6 +543,16 @@ pub enum Order {
     Title,
     /// 기한(moai-ghkp.7uy) — `query::SortKey::Due` 와 같은 낱말 `due` 다.
     Due,
+    Id,
+    Kind,
+    Milestone,
+    Epic,
+    Tag,
+    Started,
+    Done,
+    Starts,
+    Since,
+    Progress,
 }
 
 impl Order {
@@ -555,11 +565,38 @@ impl Order {
             Order::Assignee => say(lang, "tui.order.assignee"),
             Order::Title => say(lang, "tui.order.title"),
             Order::Due => say(lang, "tui.order.due"),
+            Order::Id => say(lang, "tui.order.id"),
+            Order::Kind => say(lang, "tui.order.kind"),
+            Order::Milestone => say(lang, "tui.order.milestone"),
+            Order::Epic => say(lang, "tui.order.epic"),
+            Order::Tag => say(lang, "tui.order.tag"),
+            Order::Started => say(lang, "tui.order.started"),
+            Order::Done => say(lang, "tui.order.done"),
+            Order::Starts => say(lang, "tui.order.starts"),
+            Order::Since => say(lang, "tui.order.since"),
+            Order::Progress => say(lang, "tui.order.progress"),
         }
     }
 
-    pub const ALL: [Order; 7] =
-        [Order::Priority, Order::Created, Order::Updated, Order::Column, Order::Assignee, Order::Title, Order::Due];
+    pub const ALL: [Order; 17] = [
+        Order::Priority,
+        Order::Created,
+        Order::Updated,
+        Order::Column,
+        Order::Assignee,
+        Order::Title,
+        Order::Due,
+        Order::Id,
+        Order::Kind,
+        Order::Milestone,
+        Order::Epic,
+        Order::Tag,
+        Order::Started,
+        Order::Done,
+        Order::Starts,
+        Order::Since,
+        Order::Progress,
+    ];
 
     /// 설정 파일에 적는 이름(moai-2bzp) — 화면 낱말과 따로다(`view::Field::name` 과 같은 까닭).
     pub fn name(self) -> &'static str {
@@ -571,6 +608,16 @@ impl Order {
             Order::Assignee => "assignee",
             Order::Title => "title",
             Order::Due => "due",
+            Order::Id => "id",
+            Order::Kind => "kind",
+            Order::Milestone => "milestone",
+            Order::Epic => "epic",
+            Order::Tag => "tag",
+            Order::Started => "started",
+            Order::Done => "done",
+            Order::Starts => "starts",
+            Order::Since => "since",
+            Order::Progress => "progress",
         }
     }
 
@@ -597,6 +644,7 @@ impl Order {
             Order::Assignee => say(lang, "tui.order_then.assignee"),
             Order::Title => say(lang, "tui.order_then.title"),
             Order::Due => say(lang, "tui.order_then.due"),
+            other => other.word(lang),
         }
     }
 }
@@ -702,7 +750,7 @@ impl Sorting {
 
 impl Default for Sorting {
     fn default() -> Sorting {
-        Sorting::by(Order::Priority)
+        Sorting::by(Order::Priority).append(Order::Due)
     }
 }
 
@@ -1492,6 +1540,10 @@ pub enum Sorter {
     Toggle,
     /// 방향을 뒤집는다.
     Flip,
+    /// Switch the active level, grouping, or select a preset.
+    NextLevel,
+    NextGroup,
+    Preset(u8),
     /// 지금 선 자리에 입힌다 — 프로젝트 안이면 그 프로젝트의 차례로 적힌다.
     Apply,
     /// 입히고 **기본 차례(`[tui] order`)로도** 적는다 — 프로젝트 안에서도.
@@ -1512,6 +1564,14 @@ pub const SORTER: &[Bind<Sorter>] = &[
     row!(Sorter::Raise, Some("K"), Key::plain('K')),
     row!(Sorter::Toggle, Some("SPC"), Key::plain(' ')),
     row!(Sorter::Flip, Some("d"), Key::plain('d')),
+    row!(Sorter::Flip, None, Key::plain('r')),
+    row!(Sorter::NextLevel, Some("Tab"), Key::bare(KeyCode::Tab)),
+    row!(Sorter::NextGroup, Some("g"), Key::plain('g')),
+    row!(Sorter::Preset(1), Some("1"), Key::plain('1')),
+    row!(Sorter::Preset(2), Some("2"), Key::plain('2')),
+    row!(Sorter::Preset(3), Some("3"), Key::plain('3')),
+    row!(Sorter::Preset(4), Some("4"), Key::plain('4')),
+    row!(Sorter::Preset(5), Some("5"), Key::plain('5')),
     row!(Sorter::Apply, Some("Enter"), Key::bare(KeyCode::Enter)),
     row!(Sorter::Default, Some("D"), Key::plain('D')),
     row!(Sorter::Close, Some("Esc"), Key::bare(KeyCode::Esc)),
@@ -1525,6 +1585,9 @@ impl Sorter {
             Sorter::Lower | Sorter::Raise => say(lang, "tui.sorter.shift"),
             Sorter::Toggle => say(lang, "tui.sorter.toggle"),
             Sorter::Flip => say(lang, "tui.sorter.flip"),
+            Sorter::NextLevel => say(lang, "tui.sorter.level"),
+            Sorter::NextGroup => say(lang, "tui.sorter.group"),
+            Sorter::Preset(_) => say(lang, "tui.sorter.preset"),
             Sorter::Apply => say(lang, "tui.sorter.apply"),
             Sorter::Default => say(lang, "tui.sorter.default"),
             Sorter::Close => say(lang, "tui.sorter.close"),
@@ -2771,7 +2834,7 @@ mod tests {
     /// 위키 창 문단(moai-o3cb).
     const WIKIWIN: &str = "SPC g w opens the wiki window";
     /// 차례 편집 창(SORTER)을 말하는 문단(moai-r170.x22).
-    const SORTEDIT: &str = "SPC s e opens the sort window";
+    const SORTEDIT: &str = "SPC s opens the sort window";
 
     /// 같은 문단을 **같은 키로** 나눠 쓰는 표 → (그 문단, 그 표를 말하는 문장의 첫머리 말). 문장은
     /// 그 말부터 첫 `.` 까지이고 **그 문단 안에서만** 찾는다 — 도움말 어디든 찾으면 같은 말이 앞선

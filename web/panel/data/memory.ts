@@ -11,6 +11,8 @@
  * {@link normalizeMemory} is pure and cleans whatever comes back, so a value from an older or newer panel,
  * or one edited by hand, still boots with usable settings.
  */
+import { groupKnown, orderExpression, parsePanelOrder } from '../view/sort-adapter.js'
+import type { SortPanelState } from '../view/sort-panel.js'
 import { SORT_KEYS, sameSort, type Dir, type Sort, type SortField } from './query.js'
 import { COLUMN_DEFAULTS, type ColumnName, type DetailPosition, type Remembered, type State, type Store, type ViewSettings } from '../store.js'
 import { normalizeRatios } from '../view/split.js'
@@ -247,6 +249,8 @@ export interface SortDefault {
   /** The saved default, or null when none was saved. */
   get(): Sort | null
   set(sort: Sort): void
+  getPanel?(): SortPanelState | null
+  setPanel?(panel: SortPanelState): void
   clear(): void
   /** False while the default lasts for this session only. */
   readonly persistent: boolean
@@ -272,8 +276,23 @@ export function createSortDefault(storage: SettingsStorage = createSessionStorag
     set(sort) {
       write(JSON.stringify({ fields: sort.fields, reversed: sort.reversed }))
     },
+    getPanel() {
+      try {
+        const raw = storage.read(`${key}.layers`)
+        const saved = raw === null ? null : JSON.parse(raw)
+        if (!saved || typeof saved.order !== 'string' || typeof saved.group !== 'string' || !groupKnown(saved.group)) return null
+        const panel = parsePanelOrder(saved.order)
+        if (!panel) return null
+        panel.group = saved.group
+        return panel
+      } catch { return null }
+    },
+    setPanel(panel) {
+      try { storage.write(`${key}.layers`, JSON.stringify({ order: orderExpression(panel), group: panel.group })) } catch { /* storage unavailable */ }
+    },
     clear() {
       write(null)
+      try { storage.write(`${key}.layers`, null) } catch { /* storage unavailable */ }
     },
     get persistent() {
       return storage.persistent
@@ -405,7 +424,13 @@ export function remember(
   } catch {
     // Unreadable: the panel starts from its defaults.
   }
+  const panel = defaults.getPanel?.()
+  if (panel) store.dispatch({ type: 'toolbar', action: { type: 'sort-panel-restore', panel, sort: { fields: panel.order.item as SortField[], reversed: false } } })
   return store.subscribe((state, previous) => {
+    if (state.defaultSort !== previous.defaultSort) {
+      defaults.set(state.defaultSort)
+      defaults.setPanel?.(state.toolbar.panel)
+    }
     const now = rememberedOf(state)
     const before = rememberedOf(previous)
     // Another tab's choice this one follows is that tab's write already: written back, an event that arrives late puts

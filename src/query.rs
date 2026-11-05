@@ -1938,18 +1938,21 @@ impl Preset {
         Self::ALL.into_iter().find(|p| p.name() == name)
     }
     pub fn group(self) -> crate::nav::Group {
-        if self == Self::People { crate::nav::Group::Assignee } else { crate::nav::Group::Structure }
+        match self {
+            Self::Release => crate::nav::Group::Structure,
+            Self::People => crate::nav::Group::Assignee,
+            _ => crate::nav::Group::None,
+        }
     }
     pub fn order(self) -> Order {
-        let raw = match self {
-            Self::Release => return Order::default(),
-            Self::Urgent => "priority",
-            Self::Recent => "updated:desc",
-            Self::Due => "due",
-            Self::People => "assignee",
-        };
-        let fields = parse_order(raw).expect("preset fields are valid");
-        Order { milestone: fields.clone(), epic: fields.clone(), item: fields }
+        match self {
+            Self::Release => Order::default(),
+            Self::Urgent | Self::People => {
+                Order::parse("milestone=due,created:desc;epic=priority;item=priority,due").expect("preset")
+            }
+            Self::Recent => Order::parse("updated:desc").expect("preset"),
+            Self::Due => Order::parse("milestone=due;epic=due;item=due,priority").expect("preset"),
+        }
     }
 }
 
@@ -2050,9 +2053,23 @@ pub fn page_order<'a>(
 ) -> usize {
     use crate::nav::Group;
     let context = SortContext::with_where(all, wh);
-    // The same header order as the explorer's grouped tree (`nav::Group::order_values`), on borrowed values.
+    let groups: BTreeMap<&str, &Issue> = all.iter().map(|issue| (issue.id.as_str(), issue)).collect();
     let group_cmp = |a: &Issue, b: &Issue| {
         let (a, b) = (group_value(group, a, wh, &context), group_value(group, b, wh, &context));
+        if matches!(group, Group::Milestone | Group::Epic) {
+            if let (Some(a), Some(b)) =
+                (a.as_deref().and_then(|id| groups.get(id)), b.as_deref().and_then(|id| groups.get(id)))
+            {
+                return context.compare_layers(
+                    order,
+                    reversed,
+                    (a, wh.column(a)),
+                    (b, wh.column(b)),
+                    &cfg.statuses,
+                    cfg.naming,
+                );
+            }
+        }
         group.order_values(a.as_deref(), b.as_deref(), &cfg.statuses)
     };
     let cmp = |a: &Issue, b: &Issue| {
@@ -3823,6 +3840,15 @@ mod tests {
             assert_eq!(Order::preset_group(preset.name()), Some(preset.group()));
         }
         assert_eq!(Preset::People.group(), crate::nav::Group::Assignee);
+        for p in [Preset::Urgent, Preset::Recent, Preset::Due] {
+            assert_eq!(p.group(), crate::nav::Group::None);
+        }
+        assert_eq!(
+            Preset::Urgent.order(),
+            Order::parse("milestone=due,created:desc;epic=priority;item=priority,due").unwrap()
+        );
+        assert_eq!(Preset::Due.order(), Order::parse("milestone=due;epic=due;item=due,priority").unwrap());
+        assert_eq!(Preset::People.order(), Preset::Urgent.order());
     }
 
     #[test]

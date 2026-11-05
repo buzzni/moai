@@ -18,6 +18,7 @@ import { openEvents, type Events } from './data/events.js'
 import { createCtl, type Reply as CtlReply } from './ctl.js'
 import { BACKOFF_MS, createRefresher, POLL_MS } from './data/refresh.js'
 import { sortQuery, useVocabulary } from './data/query.js'
+import { orderExpression, useSortVocabulary } from './view/sort-adapter.js'
 import {
   archiveDue, loadAllRows, loadArchived, loadBoot, loadDetail, loadGroups, loadMatches, loadProjects, loadTree, loadWikiListing, loadWikiPage, loadWikiSearch, matchEndpoints, sameGroups, withArchive,
   type Boot, type Loaded,
@@ -70,6 +71,10 @@ async function start(): Promise<void> {
   /** What the boot gives the page: the words, how a person is named, the columns. The language stays the one drawn. */
   function useBoot(boot: Boot): void {
     useVocabulary(boot)
+    useSortVocabulary(boot)
+    if (boot.sort_presets?.length && !store.getState().toolbar.panel.edited) {
+      store.dispatch({ type: 'toolbar', action: { type: 'sort-panel', action: { type: 'preset', id: 'release' } } })
+    }
     useNaming(boot.naming)
     document.title = `moai — ${boot.project}`
     store.dispatch({ type: 'boot', boot })
@@ -218,14 +223,24 @@ async function start(): Promise<void> {
     const zone = zoneNow()
     // `SPC v w` (on by default): the other worktrees' rows over the list, as the TUI's explorer opens.
     const listing = loadAllRows(client, PRIORITY.list, load, view.worktree)
-    const placing = loadTree(client, { query: sortQuery(sort), priority: PRIORITY.list, epoch: load, worktree: view.worktree, archived: view.showArchived, zone, gantt })
+    const panel = store.getState().toolbar.panel
+    const expression = orderExpression(panel)
+    const placing = loadTree(client, { query: gantt ? sortQuery(sort) : { sort: expression, group: panel.group }, priority: PRIORITY.list, epoch: load, worktree: view.worktree, archived: view.showArchived, zone, gantt })
+    // The grouped tree has virtual homes. Retain a structural tree as well so navigating inside an epic
+    // continues to work while the group is active; grouped order still comes from the server request.
+    const structural = !gantt && panel.group !== 'structure'
+      ? loadTree(client, { query: { sort: expression, group: 'structure' }, priority: PRIORITY.list, epoch: load, worktree: view.worktree, archived: view.showArchived, zone })
+      : null
     const counting = loadGroups(client, PRIORITY.list, load, view.worktree)
     let counted: Awaited<typeof counting> | undefined
     void counting.then((groups) => (counted = groups))
-    const [loaded, placed] = await Promise.all([listing, placing])
+    const [loaded, grouped, structure] = await Promise.all([listing, placing, structural])
+    const placed = structure ?? grouped
+    // A later load owns the screen: this one's answers, failures included, are dropped first. A superseded load's
+    // reads come back cancelled, and reporting that as the board's problem cleared the newer load's spinner.
     if (load !== loads) return true
-    if (!loaded.ok || !placed.ok) {
-      const problem = loaded.ok ? (placed as Extract<typeof placed, { ok: false }>).outcome : loaded.outcome
+    if (!loaded.ok || !placed.ok || !grouped.ok) {
+      const problem = !loaded.ok ? loaded.outcome : !placed.ok ? placed.outcome : (grouped as Extract<typeof grouped, { ok: false }>).outcome
       store.dispatch({ type: 'board-failed', problem })
       return failure(problem)
     }
@@ -235,7 +250,7 @@ async function start(): Promise<void> {
     // refresh keeps the counts the board showed.
     const carried = counted === undefined ? before.board.value?.groups : undefined
     const counts = counted?.ok ? counted.value : carried
-    const data: BoardData = { rows, tree: placed.value, loadedAt: Date.now(), ...(notes ? { notes } : {}), ...(counts ? { groups: counts } : {}) }
+    const data: BoardData = { rows, tree: placed.value, ...(!gantt ? { treeSort: expression } : {}), ...(!gantt && panel.group !== 'structure' ? { groupedTree: grouped.value, groupedBy: panel.group, groupedSort: expression } : {}), loadedAt: Date.now(), ...(notes ? { notes } : {}), ...(counts ? { groups: counts } : {}) }
     const shownBefore = before.shown.value
     // The detail on screen was read before this list and stands beside it: when its row has left the list
     // (finished, moved away) the pane goes with it, as choose() does for a read still running. A detail the list
@@ -267,7 +282,7 @@ async function start(): Promise<void> {
     // So does the worktree overlay, or the archive shown, turned while it ran (the tree is asked for both).
     // The zone picked while it ran is the same: the tree's `overdue` was judged in the zone before.
     const after = store.getState()
-    if (!sameTreeView(after, sort, view, gantt, zone)) setTimeout(() => void refresher.refresh(), 0)
+    if (!sameTreeView(after, sort, view, gantt, zone) || (!gantt && after.toolbar.panel !== panel)) setTimeout(() => void refresher.refresh(), 0)
     else if (after.tab === 'gantt' && !gantt) void ensureChart()
     return true
   }
@@ -316,7 +331,7 @@ async function start(): Promise<void> {
     // Opening the chart after a tree-only read asks for its values. A transition during a read is caught at loadBoard's end.
     if (state.tab === 'gantt' && previous.tab !== 'gantt' && !treeHasGantt && state.board.value) void ensureChart()
     // A new order is moai's to make: the tree is read again in it.
-    if (state.sort !== previous.sort && state.board.value) void refresher.refresh()
+    if ((state.sort !== previous.sort || state.toolbar.panel !== previous.toolbar.panel) && state.board.value) void refresher.refresh()
     // The worktree overlay turned on or off: the rows are read again with it or without it.
     if (state.view.worktree !== previous.view.worktree && state.board.value) {
       events?.reconnect()

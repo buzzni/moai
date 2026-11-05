@@ -929,6 +929,21 @@ svg.links polygon { fill: var(--link); }
 .m-sort > .m-sort-pop { position: absolute; top: 100%; right: 0; z-index: 20; }
 .m-sort > .m-sort-pop .m-menu-item { gap: 4px; }
 
+/* Sort/group panel: keep controls usable in narrow popovers and both themes. */
+.m-sort-panel { display: grid; gap: 12px; min-width: 0; padding: 12px; }
+.m-sort-panel section { display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; }
+.m-sort-panel .m-sort-section-label { flex-basis: 100%; color: var(--muted); font-size: 11px; }
+.m-sort-panel button, .m-sort-panel select { color: var(--text); background: var(--bg); border: 1px solid var(--border); border-radius: 5px; padding: 4px 7px; font: inherit; }
+.m-sort-panel button[aria-pressed="true"], .m-sort-panel button[aria-selected="true"] { border-color: var(--accent); background: var(--selected); }
+.m-sort-panel button:disabled { opacity: .45; }
+.m-sort-panel button:focus-visible, .m-sort-panel select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.m-sort-panel [role="tablist"] { display: flex; flex-wrap: wrap; gap: 4px; flex-basis: 100%; }
+.m-sort-panel ol { display: grid; gap: 4px; flex-basis: 100%; padding-left: 24px; margin: 0; }
+.m-sort-panel li { padding: 4px; }
+.m-sort-panel li span { margin-right: 6px; }
+.m-sort-panel select { flex: 1 1 100px; min-width: 0; }
+.m-sort-panel pre { max-width: 100%; overflow-x: auto; white-space: pre; }
+
 /*
  * Moai panel wiki tab (design.md 4.10). Built by view/wiki.ts. Needs tokens.css, components.css and markdown.css.
  * The page list sits in the split's first pane (its "detail" slot, ratio = wiki_width) and the page on the right.

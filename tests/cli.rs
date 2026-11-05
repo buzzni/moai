@@ -255,7 +255,7 @@ fn ctl_lists_and_reads_an_open_explorer() {
     let out = ok(s.path(), &["ctl", "state", "--json"]);
     let json: serde_json::Value = serde_json::from_str(&out).unwrap();
     assert_eq!(json["screen"], "list");
-    assert_eq!(json["sort"], serde_json::json!(["priority"]));
+    assert_eq!(json["sort"], serde_json::json!(["priority", "due"]));
     let pressed = ok(s.path(), &["ctl", "keys", "SPC g b", "--json"]);
     assert_eq!(serde_json::from_str::<serde_json::Value>(&pressed).unwrap()["screen"], "board");
     assert_eq!(
@@ -266,6 +266,10 @@ fn ctl_lists_and_reads_an_open_explorer() {
     assert_eq!(serde_json::from_str::<serde_json::Value>(&done).unwrap()["screen"], "list");
     let actions = ok(s.path(), &["ctl", "actions", "--json"]);
     assert!(actions.contains("browse.read_all"), "{actions}");
+    let by_id = ok(s.path(), &["ctl", "sort", "id", "--json"]);
+    assert_eq!(serde_json::from_str::<serde_json::Value>(&by_id).unwrap()["sort"], serde_json::json!(["id"]));
+    let grouped = ok(s.path(), &["ctl", "group", "assignee", "--json"]);
+    assert_eq!(serde_json::from_str::<serde_json::Value>(&grouped).unwrap()["group"], "assignee");
     let sorted = ok(s.path(), &["ctl", "sort", "title:desc,priority:desc", "--json"]);
     assert_eq!(
         serde_json::from_str::<serde_json::Value>(&sorted).unwrap()["sort"],
@@ -33537,7 +33541,7 @@ fn web_serves_the_page_and_the_boot() {
     assert!(boot["sort_groups"].as_array().unwrap().iter().any(|g| g == "assignee"));
     let people = boot["sort_presets"].as_array().unwrap().iter().find(|p| p["name"] == "people").unwrap();
     assert_eq!(people["group"], "assignee");
-    assert!(people["order"].as_str().unwrap().contains("item=assignee"));
+    assert!(people["order"].as_str().unwrap().contains("item=priority,due"));
     assert!(boot["columns"]["backlog"]["name"].is_string(), "{boot}");
 
     let (status, _, body) = get(web.port, "/api/status");

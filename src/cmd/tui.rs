@@ -696,6 +696,7 @@ fn handle(seg: &Seg) -> String {
         Seg::Milestone(Some(id)) | Seg::Epic(id) | Seg::Issue(id) => id.clone(),
         Seg::Milestone(None) => NO_MILESTONE.into(),
         Seg::Lost => LOST.into(),
+        Seg::Group(key) => group_handle(key),
     }
 }
 
@@ -770,7 +771,17 @@ impl<'g> Row<'g> {
             crate::nav::GroupedEntry::Entry(entry) => Self::of(index, issues, states, entry, home, lang),
             crate::nav::GroupedEntry::Header(key) => Row {
                 id: None,
-                title: key.value.clone().unwrap_or_else(|| "(none)".into()),
+                title: key
+                    .value
+                    .as_deref()
+                    .map(|value| {
+                        if matches!(key.group, crate::nav::Group::Milestone | crate::nav::Group::Epic) {
+                            index.find(value).map(|at| issues[at].title.clone()).unwrap_or_else(|| value.to_string())
+                        } else {
+                            value.to_string()
+                        }
+                    })
+                    .unwrap_or_else(|| "(none)".into()),
                 kind: "group",
                 dir: true,
                 path: group_handle(key),
