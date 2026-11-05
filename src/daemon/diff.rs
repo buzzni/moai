@@ -52,7 +52,13 @@ impl Seen {
         let mut by_id: BTreeMap<&str, Context> = BTreeMap::new();
         for row in rows {
             let Some(id) = row.get("id").and_then(Value::as_str) else { continue };
-            let bytes = serde_json::to_vec(row).unwrap_or_default();
+            // These display fields depend on wall time or heartbeat, not edits to the row.
+            let mut compared = row.clone();
+            if let Some(object) = compared.as_object_mut() {
+                object.remove("session");
+                object.remove("archived");
+            }
+            let bytes = serde_json::to_vec(&compared).unwrap_or_default();
             let ctx = by_id.entry(id).or_insert_with(|| Context::new(&SHA256));
             ctx.update(&(bytes.len() as u64).to_le_bytes());
             ctx.update(&bytes);
@@ -169,6 +175,20 @@ mod tests {
         let (a, b) = (Seen::of(&rows, &notes), Seen::of(&rows, &notes));
         assert_eq!(a.fingerprint(), b.fingerprint());
         assert_eq!(diff(&a, &b), (vec![], vec![]));
+    }
+
+    #[test]
+    fn clock_and_heartbeat_fields_do_not_change_the_fingerprint() {
+        let mut item = row("a-1", "work");
+        item["session"] = json!({"silent_minutes": 0, "last_seen": "first", "lost": false});
+        let old = Seen::of(&[item.clone()], &[]);
+        item["session"] = json!({"silent_minutes": 30, "last_seen": "heartbeat", "lost": true});
+        item["archived"] = json!(true);
+        let later = Seen::of(&[item.clone()], &[]);
+        assert_eq!(old.fingerprint(), later.fingerprint());
+        assert_eq!(diff(&old, &later), (vec![], vec![]));
+        item["title"] = json!("edited");
+        assert_eq!(diff(&old, &Seen::of(&[item], &[])).0, vec!["a-1"]);
     }
 
     /// **도장은 보지 않는다** — `updated_at` 이 그대로인 채 내용만 바뀐 줄(`git pull` 이 들인 남의 고침)도 선다.
