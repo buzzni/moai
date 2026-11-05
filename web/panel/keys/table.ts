@@ -101,6 +101,7 @@ export type KeyLabel =
   | "sort.edit" | "read.all" | "read.group" | "read.groupHelp" | "proposal.accept" | "proposal.decline" | "proposal.list" | "option.detailAt" | "option.detailAtHelp"
   | "option.timezone" | "option.timezoneHelp" | "project.jumpHelp" | "menu.close" | "menu.up"
   | "prompt.apply" | "prompt.cancel" | "prompt.next" | "prompt.prev" | "prompt.up" | "prompt.down" | "prompt.clear" | "prompt.deleteWord"
+  | "sorter.level" | "sorter.group" | "sorter.presetOne" | "sorter.presetTwo" | "sorter.presetThree" | "sorter.presetFour" | "sorter.presetFive"
   | "sorter.down" | "sorter.up" | "sorter.lower" | "sorter.raise" | "sorter.toggle" | "sorter.flip" | "sorter.apply" | "sorter.default" | "sorter.cancel"
   | "wiki.enter" | "wiki.back" | "wiki.page" | "wiki.nextLink" | "wiki.prevLink" | "wiki.search" | "wiki.clear"
 
@@ -426,12 +427,19 @@ const PROMPT: ReadonlyArray<Binding> = [
 ]
 
 const SORTER: ReadonlyArray<Binding> = [
+  { action: "sorter.level", keys: ["Tab"], label: "sorter.level", group: "sorter" },
+  { action: "sorter.group", keys: ["g"], label: "sorter.group", group: "sorter" },
+  { action: "sorter.presetOne", keys: ["1"], label: "sorter.presetOne", group: "sorter" },
+  { action: "sorter.presetTwo", keys: ["2"], label: "sorter.presetTwo", group: "sorter" },
+  { action: "sorter.presetThree", keys: ["3"], label: "sorter.presetThree", group: "sorter" },
+  { action: "sorter.presetFour", keys: ["4"], label: "sorter.presetFour", group: "sorter" },
+  { action: "sorter.presetFive", keys: ["5"], label: "sorter.presetFive", group: "sorter" },
   { action: "sorter.down", keys: ["j", "Down"], label: "sorter.down", group: "sorter" },
   { action: "sorter.up", keys: ["k", "Up"], label: "sorter.up", group: "sorter" },
   { action: "sorter.lower", keys: ["J"], label: "sorter.lower", group: "sorter" },
   { action: "sorter.raise", keys: ["K"], label: "sorter.raise", group: "sorter" },
   { action: "sorter.toggle", keys: ["SPC"], label: "sorter.toggle", group: "sorter" },
-  { action: "sorter.flip", keys: ["d"], label: "sorter.flip", group: "sorter" },
+  { action: "sorter.flip", keys: ["d", "r"], label: "sorter.flip", group: "sorter" },
   { action: "sorter.apply", keys: ["Enter"], label: "sorter.apply", group: "sorter" },
   { action: "sorter.default", keys: ["D"], label: "sorter.default", group: "sorter" },
   { action: "sorter.cancel", keys: ["Esc"], label: "sorter.cancel", group: "sorter" },

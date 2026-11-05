@@ -12,6 +12,19 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+### Added
+
+- Group work with `--group` or `moai ctl group`, choose layered `--sort` expressions or presets, and sort by the new kind, milestone, epic, tag, started, done, starts, since and progress fields. The explorer and web have a combined sort and group window. Urgent, recent and due presets use a flat view; people groups by assignee and orders work by priority and due date. Layered TUI settings use `order_layers`, with the item order also written to the legacy `order` array. (moai-ctxc, moai-okdc)
+
+### Changed
+
+- Default release order is now layer-specific: milestones by due date then newest creation, epics by priority then creation, and work by priority then due date. Milestones and epics precede issues in `moai show` and `/api/rows`. Missing values remain last even for `due:desc`; ties always use creation then id. `--reverse` reverses field directions without reversing null placement or ties. (moai-ctxc, moai-okdc)
+
+### Fixed
+
+- `show --group epic` and `--group milestone` group rows with missing references consistently with the explorer. (moai-6vcm)
+- Web sort and grouping changes avoid redundant reads; a manual refresh remains available during a read and fetches fresh data afterward. (moai-wrod)
+
 ## [0.50.0] - 2026-11-04
 
 ### Changed

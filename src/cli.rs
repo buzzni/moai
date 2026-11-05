@@ -666,8 +666,8 @@ BACKLOG
   ones before it tie. Each lowercase SPC s key makes the order that one field,
   and pressing it again turns it around; an uppercase one adds its field at
   the end, and pressing it again turns that field around. When the order is
-  not the default (priority) the path line says which it is, every field with
-  ↑ or ↓, as in sort priority↑, updated↓.
+  not the default (priority, due), the path line says which it is, with ↑ or ↓
+  on every field, as in sort priority↑, updated↓.
   Columns (SPC c) turn on and off with [shown/hidden]. Tag, epic, assignee,
   created and updated dates stand on the right of the row, and when it gets
   narrow they are dropped in that order — dates, then epic, then assignee,
@@ -677,17 +677,20 @@ BACKLOG
   same file `moai project add` writes). The sort is the exception: one picked
   inside a project is kept for that project alone, as order under
   [tui.project.\"<project path>\"], and one picked in 0 is kept as order under
-  [tui] — the default for every project without its own. order is a list in
-  the words of `moai show --sort` but id, such as
-  [\"priority\", \"updated:asc\"], and the older sort and sort_reversed pair
-  is still read where order is absent and written beside it from the first
-  field, for an older moai.
+  [tui] — the default for every project without its own. order_layers holds
+  milestone, epic and item field lists; group holds the grouping. The item
+  list is also written to order, and its first field to sort and sort_reversed,
+  so an older moai can still read the familiar keys.
 
-  {key:browse.sort_edit} opens the sort window over the list. All six fields stand in it:
+  SPC s opens the sort window over the list ({key:browse.sort_edit} also opens it).
+  All sorting fields stand in it:
   the ones in the order first, numbered and marked ↑ asc or ↓ desc, then the
   rest marked with a dot. {key:sorter.down} and {key:sorter.up} move, {key:sorter.lower} and {key:sorter.raise} move the field down or up the
   order, {key:sorter.toggle} puts it in at the end or takes it out (the last one stays), and
-  {key:sorter.flip} turns its direction. {key:sorter.apply} applies the order where you stand and keeps it
+  {key:sorter.flip} turns its direction. {key:sorter.next_level} cycles through the layers;
+  {key:sorter.next_group} cycles grouping. Presets use {key:sorter.preset_1}, {key:sorter.preset_2}, {key:sorter.preset_3}, {key:sorter.preset_4}, {key:sorter.preset_5}.
+  Either r or d reverses the selected field.
+  {key:sorter.apply} applies the order where you stand and keeps it
   there — inside a project for that project, in 0 as the default. {key:sorter.default} applies
   it and keeps it as the default, the order under [tui], even inside a
   project; a project that has an order of its own gets this one too. {key:sorter.close}
@@ -1488,12 +1491,19 @@ pub enum CtlCmd {
     },
     /// Set the explorer order, such as title:desc,priority:desc
     #[command(
-        after_help = "  Example: moai ctl sort 'title:desc,priority:desc'.\n  --default also updates the default order."
+        after_help = "  Examples:\n    moai ctl sort release\n    moai ctl sort 'milestone=created:desc;item=priority,due'\n  --default also updates the default order."
     )]
     Sort {
         words: String,
         #[arg(long)]
         default: bool,
+        #[arg(short = 't', long, help = "Window id from moai ctl ls")]
+        target: Option<String>,
+    },
+    /// Set the explorer grouping
+    Group {
+        #[arg(value_parser = group_value)]
+        group: crate::nav::Group,
         #[arg(short = 't', long, help = "Window id from moai ctl ls")]
         target: Option<String>,
     },
@@ -2055,20 +2065,19 @@ pub struct AddArgs {
 
 /// 목록의 차례를 한자리에서 댄다(moai-efoc) — `moai show` 와 `moai <종류> show` 가 같은 글을 싣는다.
 /// 두 벌로 적으면 한쪽만 고쳐지는 날 같은 플래그가 명령마다 다른 뜻으로 읽힌다.
-const SHOW_LIST: &str = "  Order: --sort takes fields separated by commas, like ORDER BY - the next
-  field decides only where the ones before it tie. The fields: priority
-  (the default: urgent first), created and updated (newest first), status
-  (the column order of .moai/config.toml), assignee (the name the screen
-  shows, unowned last), title (ignoring case), due (the earliest deadline
-  first, none last), id. A field without a direction keeps the one named
-  here; :asc puts the smaller value first (p0, the oldest, the first
-  column, A) and :desc the larger - unowned or undated rows go first under
-  assignee:desc or due:desc. A field is given once. When every field ties,
-  a last field of created or updated falls to id alone, and any other to
-  priority, then id. --reverse turns the whole order around, ties included.
+const SHOW_LIST: &str = "  Order: --sort accepts release, urgent, recent, due or people; a comma list
+  applies to every layer. Use milestone=...;epic=...;item=... for independent
+  layers. Fields include priority, created, updated, status, assignee, title,
+  due, id, kind, milestone, epic, tag, started, done, starts, since and
+  progress.
+  Use :asc or :desc per field. Empty values come last in either direction;
+  :nulls-first puts them first. Ties use created then id. --reverse reverses
+  field directions, while the tie break and empty placement stay fixed.
+  --group chooses structure, none, status, assignee, priority, tag, kind,
+  milestone or epic.
 
     moai show --sort priority,updated:desc
-    moai show --sort status:asc,title
+    moai show --sort 'milestone=created:desc;item=priority,due' --group assignee
 
   Paging: -n cuts the list, and --after <id> starts the next page after the
   last id of the page before. The cursor is that row's values in the order,
@@ -2368,11 +2377,15 @@ pub struct ShowArgs {
 #[derive(Args, Debug, Default)]
 #[command(next_help_heading = "Order and paging")]
 pub struct PageArgs {
-    /// Order the list by these fields (priority when absent)
+    /// Order by preset, fields, or layered expressions
     #[arg(long, value_name = "fields", value_parser = sort_fields)]
     pub sort: Option<SortFields>,
 
-    /// Turn the order around, ties included
+    /// Group rows by a field or structure
+    #[arg(long, value_parser = group_value)]
+    pub group: Option<crate::nav::Group>,
+
+    /// Reverse field directions
     #[arg(long)]
     pub reverse: bool,
 
@@ -2403,20 +2416,27 @@ pub struct ReadyArgs {
     pub limit: Option<usize>,
 }
 
-/// `--sort` 의 낱말. **탐색기가 설정에 적는 이름과 같다**(`tui::keys::Order::name`) — 한 낱말이
-/// 두 표면에서 다른 차례를 가리키면 안 된다.
+/// `--sort` 의 낱말. 필드 이름은 **탐색기가 설정에 적는 이름과 같다**(`tui::keys::Order::name`) — 한 낱말이
+/// 두 표면에서 다른 차례를 가리키면 안 된다. `id` 와 moai-ctxc 가 더한 필드는 아직 탐색기의 차례에 없다.
 ///
-/// **필드의 쉼표 목록이고 필드마다 `:asc`·`:desc` 가 붙는다**(moai-r170.9es, 사람이 정한 꼴) — 그래서
-/// `ValueEnum` 이 아니라 글을 [`crate::query::parse_order`] 로 읽는다. 낱말과 방향을 읽는 자는 설정에 적힐
-/// 차례와 하나다 — 둘이 따로 읽으면 같은 글이 두 차례가 된다. 못 읽은 글은 clap 의 오류로 고를 낱말을 다 댄다.
-/// 낱말마다의 방향은 `Show` 의 `after_help`(`SHOW_LIST`)가 한자리에서 댄다.
+/// **프리셋 하나(`release`·`urgent`·`recent`·`due`·`people`), 층 없는 필드의 쉼표 목록(세 층에 다 선다), 또는
+/// `milestone=…;epic=…;item=…`** 이다(moai-ctxc). 필드마다 `:asc`·`:desc` 와 그 뒤의 `:nulls-first` 가 붙는다 — 그래서
+/// `ValueEnum` 이 아니라 글을 [`crate::query::Order::parse`] 로 읽는다. 읽는 자가 하나라야 웹(`/api/tree`)·`ctl` 과
+/// 같은 글이 같은 차례가 된다. 못 읽은 글은 clap 의 오류로 까닭을 댄다. 낱말마다의 방향은 `Show` 의
+/// `after_help`(`SHOW_LIST`)가 한자리에서 댄다.
 ///
-/// `Vec` 을 바로 받지 않는 것은 clap 의 derive 가 `Option<Vec<_>>` 를 "여러 번 받는 플래그" 로 읽어서다.
+/// 둘째 칸은 **프리셋이 고른 묶기**다(`people` 이면 `assignee`) — `--group` 을 함께 주면 그쪽이 이긴다.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct SortFields(pub Vec<crate::query::Field>);
+pub struct SortFields(pub crate::query::Order, pub Option<crate::nav::Group>);
 
 fn sort_fields(raw: &str) -> Result<SortFields, String> {
-    crate::query::parse_order(raw).map(SortFields).map_err(|e| e.to_string())
+    crate::query::Order::parse(raw)
+        .map(|order| SortFields(order, crate::query::Order::preset_group(raw.trim())))
+        .map_err(|e| e.to_string())
+}
+
+fn group_value(raw: &str) -> Result<crate::nav::Group, String> {
+    raw.parse()
 }
 
 /// `status`·`ready`·`show` 가 함께 받고, `read` 도 받는다 — `read` 는 트래커가 아니라 읽음 파일에 쓰고, 겹친
@@ -2812,7 +2832,11 @@ pub struct OrderArgs {
     #[arg(long, value_name = "fields", value_parser = sort_fields)]
     pub sort: Option<SortFields>,
 
-    /// Turn the order around, ties included
+    /// Group rows by a field or structure
+    #[arg(long, value_parser = group_value)]
+    pub group: Option<crate::nav::Group>,
+
+    /// Reverse field directions
     #[arg(long)]
     pub reverse: bool,
 }

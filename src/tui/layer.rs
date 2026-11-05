@@ -2011,7 +2011,7 @@ mod tests {
         // 처음 보기가 done 을 보이니(moai-muit) `SPC v 4` 는 done 을 숨긴다.
         a.hit("SPC v 4 Esc");
         a.hit("SPC s t Esc");
-        let (view, order) = (a.view.clone(), a.order);
+        let (view, order) = (a.view.clone(), a.item_order());
         assert!(view.hides(crate::config::DONE), "프로젝트 안에서 SPC v 4 가 done 을 안 숨겼다");
 
         a.key(key(KeyCode::Home));
@@ -2021,7 +2021,11 @@ mod tests {
 
         // **차례는 따라가지 않는다**(moai-r170.8dz, 2026-10-09 사용자 결정) — 프로젝트 안에서 고른 차례는 그
         // 프로젝트의 것이고, 층(`0`)은 기본 차례로 선다.
-        assert_eq!(a.order, super::super::keys::Sorting::default(), "프로젝트에서 고른 차례가 층으로 따라 올라왔다");
+        assert_eq!(
+            a.item_order(),
+            super::super::keys::Sorting::default(),
+            "프로젝트에서 고른 차례가 층으로 따라 올라왔다"
+        );
 
         a.key(key(KeyCode::Down));
         a.key(key(KeyCode::Enter));
@@ -2032,7 +2036,7 @@ mod tests {
         a.hit("2");
         assert_eq!(a.here(), Some(two.clone()), "시험의 전제 — 둘째 프로젝트에 들었다");
         assert_eq!(
-            a.order,
+            a.item_order(),
             super::super::keys::Sorting::default(),
             "제 차례가 없는 프로젝트가 옆 프로젝트의 차례로 섰다"
         );
@@ -2040,7 +2044,7 @@ mod tests {
         // 처음 프로젝트로 돌아가면 거기서 고른 차례가 다시 선다.
         a.hit("1");
         assert_eq!(a.here(), Some(one.clone()));
-        assert_eq!(a.order, order, "돌아온 프로젝트가 제 차례를 잃었다");
+        assert_eq!(a.item_order(), order, "돌아온 프로젝트가 제 차례를 잃었다");
     }
 
     /// **차례는 고른 자리에 적힌다**(moai-r170.8dz, 2026-10-09 사용자 결정) — 프로젝트 안의 `SPC s` 는 그 프로젝트의
@@ -2061,11 +2065,11 @@ mod tests {
         };
         let mut a = open();
         let title = super::super::keys::Sorting::by(super::super::keys::Order::Title);
-        assert_eq!(a.order, title, "옛 한 쌍이 층의 기본으로 안 섰다");
+        assert_eq!(a.item_order(), title, "옛 한 쌍이 층의 기본으로 안 섰다");
 
         a.key(key(KeyCode::Enter));
         assert_eq!(a.here(), Some(one.clone()));
-        assert_eq!(a.order, title, "제 차례가 없는 프로젝트가 기본을 안 따랐다");
+        assert_eq!(a.item_order(), title, "제 차례가 없는 프로젝트가 기본을 안 따랐다");
         let before = std::fs::read_to_string(&cfg).unwrap();
         a.hit("SPC s c Esc");
         let text = std::fs::read_to_string(&cfg).unwrap();
@@ -2079,7 +2083,7 @@ mod tests {
         // 층에서 고른 것은 `[tui]` 에 — 옛 한 쌍도 첫 필드를 비춘다. 프로젝트의 표는 그대로다.
         a.key(key(KeyCode::Home));
         a.hit("0");
-        assert_eq!(a.order, title, "층이 프로젝트의 차례로 섰다");
+        assert_eq!(a.item_order(), title, "층이 프로젝트의 차례로 섰다");
         a.hit("SPC s u Esc");
         a.hit("SPC s u Esc");
         let text = std::fs::read_to_string(&cfg).unwrap();
@@ -2095,16 +2099,54 @@ mod tests {
         let mut b = open();
         let updated_up = super::super::keys::Sorting::by(super::super::keys::Order::Updated)
             .press(super::super::keys::Order::Updated);
-        assert_eq!(b.order, updated_up);
+        assert_eq!(b.item_order(), updated_up);
         b.hit("1");
         assert_eq!(
-            b.order,
+            b.item_order(),
             super::super::keys::Sorting::by(super::super::keys::Order::Created),
             "프로젝트의 차례가 안 이겼다"
         );
         b.hit("2");
         assert_eq!(b.here(), Some(two.clone()));
-        assert_eq!(b.order, updated_up, "제 차례가 없는 프로젝트가 기본을 안 따랐다");
+        assert_eq!(b.item_order(), updated_up, "제 차례가 없는 프로젝트가 기본을 안 따랐다");
+    }
+
+    /// **A project that chose only its item order follows the default's grouping** (review moai-6vcm.xdf). Its choice was
+    /// one snapshot taken when it was kept, so a grouping picked later at the overview reached the project only after a
+    /// restart — which reads such a project back without a `group` of its own.
+    #[test]
+    fn a_project_with_only_an_item_order_follows_the_default_grouping() {
+        let s = Scratch::fenced("layer-sort-group");
+        let (one, two) = twins(&s);
+        let cfg = s.register(&[&one, &two]);
+        let open = || {
+            let mut a = layered(&cfg);
+            a.user_config = Some(cfg.clone());
+            a.load_look();
+            a
+        };
+        let created = super::super::keys::Sorting::by(super::super::keys::Order::Created);
+        let mut a = open();
+        a.key(key(KeyCode::Enter));
+        assert_eq!(a.here(), Some(one.clone()), "시험의 전제 — 첫 프로젝트에 들었다");
+        a.hit("SPC s c Esc");
+        a.key(key(KeyCode::Home));
+        a.hit("0");
+        // People groups by assignee, so the default now reaches past the item order.
+        a.hit("SPC s e 5 Enter");
+        assert_eq!(a.sort.current.group, crate::nav::Group::Assignee, "시험의 전제 — 층에서 묶기를 골랐다");
+        a.hit("1");
+        assert_eq!(a.here(), Some(one.clone()));
+        assert_eq!(
+            (a.item_order(), a.sort.current.group),
+            (created, crate::nav::Group::Assignee),
+            "the project kept the grouping it was kept with"
+        );
+        // The next start reads that project the same way.
+        let mut b = open();
+        b.hit("1");
+        assert_eq!(b.here(), Some(one.clone()));
+        assert_eq!((b.item_order(), b.sort.current.group), (created, crate::nav::Group::Assignee));
     }
 
     /// **층에서 띄운 읽기는 방금 잰 줄을 덮지 않는다**(moai-800o). 들어가려다 못 열면 그 줄을

@@ -19,7 +19,7 @@ them, so where they differ the help wins.
     moai tui                               walk the explorer. SPC n parks a thought
                                            on a group row: l one step · Tab expand all · h fold
     moai ctl ls · moai ctl state          open windows and their state
-    moai ctl sort|filter|find|wiki … · propose  change a view or ask first
+    moai ctl sort|group|filter|find|wiki … · propose  change a view or ask first
     moai add '<title>' -p 1 -t bug -e <epic>   create
     moai mv <id> in_progress               pick up  →  review  →  done
     moai mv <id> in_progress --take        take over someone else's row (ask first)
@@ -374,6 +374,19 @@ earliest deadline above it, but it may be earlier than the parent's start. `moai
 own start). A deferred ancestor, or one under a deferred group, sets no ceiling and lends
 `moai due apply` no deadline until its deferral is undone — the rows past it then stand
 as `due_beyond_parent`.
+
+**Sort and group words.** Use `--sort release`, `urgent`, `recent`, `due`, or `people`;
+`--group` accepts `structure`, `none`, `status`, `assignee`, `priority`, `tag`, `kind`,
+`milestone`, or `epic`. A field order without a layer applies to all layers. To set layers
+independently, quote `--sort 'milestone=created:desc;item=priority,due'`. Fields take
+`:asc`, `:desc`, and `:nulls-first`; otherwise empty values come last.
+
+| Request | Command |
+| --- | --- |
+| 판 차례로 | `moai ctl sort release` |
+| 급한 것 먼저 | `moai ctl sort urgent` |
+| 담당별로 묶어 | `moai ctl group assignee` |
+| 마일스톤은 만든 순 | `moai ctl sort 'milestone=created:desc'` |
 
 **A near deadline raises priority, by one verb.** `moai due apply` (`--dry-run` shows it
 first) raises an open, not deferred issue or backlog item by the deadline it follows —

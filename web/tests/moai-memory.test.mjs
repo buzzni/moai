@@ -154,3 +154,20 @@ test('a stale layout save does not resurrect theme or zone removed by another ta
   assert.equal('zone' in saved, false)
   assert.equal(saved.tab, 'wiki')
 })
+
+test('default sort keeps all layers and grouping when restored', async () => {
+  const { parsePanelOrder } = await panelModule('view/sort-adapter.ts')
+  const { createStore } = await panelModule('store.ts')
+  const storage = createSessionStorage()
+  const defaults = createSortDefault(storage)
+  const panel = parsePanelOrder('milestone=due;epic=priority;item=due:desc:nulls-first')
+  panel.group = 'assignee'
+  defaults.setPanel(panel)
+  const read = defaults.getPanel()
+  assert.equal(read.group, 'assignee')
+  assert.deepEqual(read.order, panel.order)
+  const store = createStore()
+  remember(store, createMemory(() => null), defaults, storage)
+  assert.equal(store.getState().toolbar.panel.group, 'assignee')
+  assert.deepEqual(store.getState().toolbar.panel.order, panel.order)
+})

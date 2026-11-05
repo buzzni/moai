@@ -1,3 +1,4 @@
+import { heading as groupHeading } from './group-adapter.ts'
 // The list tab (design §4.1, §4.7, §4.8; E3 se-c10x): the tree list in the main pane. Folders are entered
 // (Enter, double click) and left (Backspace, `..`), unfolded in place (→/←, the ▸ button), rows carry the
 // columns the user turned on that still fit, the order is moai's (the sort keys ask for it), and the view toggles hide rows
@@ -89,7 +90,7 @@ export const mountList: MountPane = (root, ctx): PaneView => {
   // ── model ──
 
   function compute(current: State, index: IssueIndex): Model {
-    const key = JSON.stringify([current.path, current.expanded, current.view, current.search.text, current.filter.applied])
+    const key = JSON.stringify([current.path, current.expanded, current.view, current.search.text, current.filter.applied, current.toolbar.panel, current.board.value?.groupedTree])
     if (model && model.index === index && model.key === key && model.matched === current.matched) return model
     // The view toggles, and what moai found for the filter and the search (list-model.ts narrow).
     const narrowed = narrow(current, index)
@@ -121,6 +122,7 @@ export const mountList: MountPane = (root, ctx): PaneView => {
   function open(line: ListLine) {
     if (line.kind === "up") return leave()
     const folder = folderOf(line)
+    if (line.kind === "bucket" && line.seg.startsWith("group:") && folder) return intents.toggleExpanded(folder.path)
     if (folder) return enterPlace(folder.path)
     intents.choose(line.key)
     if (ctx.layout().detailVisible) ctx.focusPane("detail")
@@ -221,9 +223,9 @@ export const mountList: MountPane = (root, ctx): PaneView => {
     // `⎇ <branch>` before the name when another worktree holds it, as the TUI's row (view/branch.ts, se-etwu).
     const branch = row ? branchOf(row) : undefined
     if (branch) title.append(branchMark(doc, branch), " ")
-    const name = line.kind === "up" ? copy.up : line.kind === "bucket" ? segLabel(line.seg, index, copy) : String(row!.title ?? row!.id)
+    const name = line.kind === "up" ? copy.up : line.kind === "bucket" ? (line.seg.startsWith('group:') ? groupHeading(line.seg, line.label ?? '', ctx.language, copy.stats as Record<string, string>, (status) => statusGlyph(status, state?.boot).glyph) : line.label ?? segLabel(line.seg, index, copy)) : String(row!.title ?? row!.id)
     const named = line.kind === "row" ? painted(name) : [name]
-    title.append(...(moving ? [glint(doc, name, ...named)] : named), folder ? "/" : "")
+    title.append(...(moving ? [glint(doc, name, ...named)] : named), folder ? "/" : "", line.kind === 'bucket' && line.count !== undefined ? ` ${line.done ?? 0}/${line.count}${line.detail ? ` · ${line.detail}` : ''}` : '')
     if (revealed) title.append(" ", el(doc, "span", { class: "m-chip moai-hidden-mark" }, words.hiddenMark))
     if (line.kind === "up") title.setAttribute("aria-label", words.upLabel)
     else title.title = name
@@ -444,6 +446,7 @@ export const mountList: MountPane = (root, ctx): PaneView => {
         // Tab on a folder: unfold everything under it, or fold it all when it is open.
         const folder = line && folderOf(line)
         if (!folder) return true
+        if (line?.kind === 'bucket' && line.seg.startsWith('group:')) { intents.toggleExpanded(folder.path); return true }
         const under = foldersUnder(model.index, folder.path)
         const inside = new Set(under)
         const closed = new Set(model.index.descendants(folder.path)
