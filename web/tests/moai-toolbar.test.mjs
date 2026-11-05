@@ -143,10 +143,12 @@ test('render: chips, moai\'s refusal, hidden note, hints, sort popover', () => {
   assert.deepEqual(seen.pop(), { type: 'filter-cursor', cursor: 3 })
 
   const sorting = tb.renderToolbar({ ...base, sortOpen: true }, { doc, rows, lang: 'en' }, handlers)
-  assert.equal(sorting.el.querySelectorAll('.m-sort-pop [data-key]').length, 8, 'the deadline is a sort key too')
-  assert.ok(sorting.el.querySelector('.m-sort-pop [data-key=due]'))
-  sorting.el.querySelector('[data-key=title] [data-how=append]').click()
-  assert.deepEqual(seen.pop(), { type: 'sort-edit', key: 'title', how: 'append' })
+  assert.ok(sorting.el.querySelector('.m-sort-pop [role=tablist]'))
+  assert.ok([...sorting.el.querySelectorAll('.m-sort-pop option')].some((item) => item.value === 'title'))
+  const select = sorting.el.querySelector('.m-sort-pop select')
+  select.value = 'title'
+  sorting.el.querySelector('.m-sort-pop select + button').click()
+  assert.equal(seen.pop().type, 'sort-panel')
 })
 
 test('the toolbar is built once: an update writes an input only when its text differs, never during an IME composition', () => {

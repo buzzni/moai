@@ -39,6 +39,110 @@ pub enum Seg {
     /// 에픽이라 가리키는 줄이 여기 온다. **조용히 사라지게 두지 않는다** —
     /// 탐색기에서 항목이 없어지는 것은 줄이 빠지는 것보다 나쁘다.
     Lost,
+    /// A virtual field grouping, never a persisted structural directory.
+    Group(GroupKey),
+}
+
+/// The grouping vocabulary shared by the explorer and command line.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum Group {
+    #[default]
+    Structure,
+    None,
+    Status,
+    Assignee,
+    Priority,
+    Tag,
+    Kind,
+    Milestone,
+    Epic,
+}
+
+impl Group {
+    pub const ALL: [Group; 9] = [
+        Self::Structure,
+        Self::None,
+        Self::Status,
+        Self::Assignee,
+        Self::Priority,
+        Self::Tag,
+        Self::Kind,
+        Self::Milestone,
+        Self::Epic,
+    ];
+    pub fn named(word: &str) -> Option<Self> {
+        word.parse().ok()
+    }
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Structure => "structure",
+            Self::None => "none",
+            Self::Status => "status",
+            Self::Assignee => "assignee",
+            Self::Priority => "priority",
+            Self::Tag => "tag",
+            Self::Kind => "kind",
+            Self::Milestone => "milestone",
+            Self::Epic => "epic",
+        }
+    }
+
+    /// The order of two group values — the explorer's headers and the command line's grouped list
+    /// both sort by this one rule, so a group stands in the same place on every surface. A row
+    /// without a value goes last; status follows the configured column order; the rest ignore case.
+    pub fn order_values(self, a: Option<&str>, b: Option<&str>, statuses: &[String]) -> std::cmp::Ordering {
+        use std::cmp::Ordering;
+        match (a, b) {
+            (None, None) => Ordering::Equal,
+            (None, Some(_)) => Ordering::Greater,
+            (Some(_), None) => Ordering::Less,
+            (Some(a), Some(b)) if self == Self::Kind => {
+                let rank = |v: &str| match v {
+                    "issue" => 0,
+                    "backlog" => 1,
+                    _ => 2,
+                };
+                rank(a).cmp(&rank(b)).then_with(|| a.cmp(b))
+            }
+            (Some(a), Some(b)) if self == Self::Status => {
+                let rank = |v: &str| statuses.iter().position(|s| s == v).unwrap_or(statuses.len());
+                rank(a).cmp(&rank(b)).then_with(|| a.cmp(b))
+            }
+            (Some(a), Some(b)) => crate::query::caseless(a, b).then_with(|| a.cmp(b)),
+        }
+    }
+}
+impl std::str::FromStr for Group {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::ALL.into_iter().find(|g| g.name() == s).ok_or_else(|| format!("unknown group `{s}`"))
+    }
+}
+impl std::fmt::Display for Group {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.name())
+    }
+}
+
+/// A virtual group has no persisted issue or structural path.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct GroupKey {
+    pub group: Group,
+    pub value: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GroupedEntry {
+    Header(GroupKey),
+    Entry(Entry),
+}
+impl GroupedEntry {
+    pub fn at(&self) -> Option<usize> {
+        match self {
+            Self::Header(_) => None,
+            Self::Entry(e) => e.at(),
+        }
+    }
 }
 
 pub type Path = Vec<Seg>;
@@ -467,6 +571,89 @@ impl Index {
         lit
     }
 
+    /// Build a structure tree, a flat list, or virtual field groups.  `order` is
+    /// supplied by the caller so it can choose a layer and its snapshot values.
+    /// `open_group` controls virtual headers independently of structural paths.
+    pub fn grouped_tree(
+        &self,
+        issues: &[Issue],
+        path: &Path,
+        keep: &dyn Fn(usize) -> bool,
+        order: &dyn Fn(usize, usize) -> std::cmp::Ordering,
+        group: Group,
+        statuses: &[String],
+        open_path: &dyn Fn(&Path) -> bool,
+        open_group: &dyn Fn(&GroupKey) -> bool,
+    ) -> Vec<(GroupedEntry, Twig)> {
+        if group == Group::Structure {
+            return self
+                .entries_tree(issues, path, keep, order, open_path)
+                .into_iter()
+                .map(|(entry, twig)| (GroupedEntry::Entry(entry), twig))
+                .collect();
+        }
+        let mut buckets: BTreeMap<Option<String>, Vec<usize>> = BTreeMap::new();
+        // Only the rows under `path` — `--path <epic> --group status` groups that epic's members, not the
+        // whole repository. The root's descendants are every row ([`Index::descendants`]).
+        let under = self.descendants(path);
+        scanned(under.len());
+        for at in under {
+            let issue = &issues[at];
+            if !matches!(issue.kind, Kind::Issue | Kind::Backlog) || !keep(at) {
+                continue;
+            }
+            let value = match group {
+                Group::None => None,
+                Group::Status => Some(issue.status.as_str().to_owned()),
+                Group::Assignee => issue.assignee.clone(),
+                Group::Priority => Some(format!("p{}", issue.priority())),
+                Group::Tag => issue.tags.first().cloned(),
+                Group::Kind => Some(issue.kind.as_str().to_owned()),
+                Group::Milestone => self.milestone_of(at).map(str::to_owned),
+                Group::Epic => self.epic_of(at).map(str::to_owned),
+                Group::Structure => unreachable!(),
+            };
+            buckets.entry(value).or_default().push(at);
+        }
+        let mut groups: Vec<_> = buckets.into_iter().collect();
+        groups.sort_by(|(a, _), (b, _)| {
+            if matches!(group, Group::Milestone | Group::Epic)
+                && let (Some(a), Some(b)) =
+                    (a.as_deref().and_then(|id| self.find(id)), b.as_deref().and_then(|id| self.find(id)))
+            {
+                return order(a, b);
+            }
+            group.order_values(a.as_deref(), b.as_deref(), statuses)
+        });
+        let mut out = Vec::new();
+        let total = groups.len();
+        for (group_at, (value, mut rows)) in groups.into_iter().enumerate() {
+            rows.sort_by(|a, b| order(*a, *b));
+            let more_groups = group_at + 1 < total;
+            if group == Group::None {
+                let count = rows.len();
+                out.extend(
+                    rows.into_iter()
+                        .enumerate()
+                        .map(|(n, at)| (GroupedEntry::Entry(Entry::Leaf { at }), Twig(vec![n + 1 < count]))),
+                );
+                continue;
+            }
+            let key = GroupKey { group, value };
+            let open = open_group(&key);
+            out.push((GroupedEntry::Header(key), Twig(vec![more_groups])));
+            if open {
+                let count = rows.len();
+                out.extend(
+                    rows.into_iter().enumerate().map(|(n, at)| {
+                        (GroupedEntry::Entry(Entry::Leaf { at }), Twig(vec![more_groups, n + 1 < count]))
+                    }),
+                );
+            }
+        }
+        out
+    }
+
     /// 펼친 묶음의 멤버까지 한 목록으로 — 목록에서 트리로 보는 길(moai-7qot).
     ///
     /// `open` 이 참인 자리의 멤버가 그 줄 **바로 밑에** 이어 서고, 그 멤버가 또 열렸으면 다시
@@ -766,6 +953,181 @@ mod tests {
         let mut i = make(id, Kind::Issue);
         i.epic = Some(epic.into());
         i
+    }
+
+    #[test]
+    fn structure_uses_the_corresponding_layer_order() {
+        let mut m1 = make("a-0001", Kind::Milestone);
+        m1.due_on = Some("2026-12-01".into());
+        let mut m2 = make("a-0002", Kind::Milestone);
+        m2.due_on = Some("2026-11-01".into());
+        let mut a = make("a-0003", Kind::Issue);
+        a.milestone = Some(m2.id.clone());
+        a.priority = Some(3);
+        let mut b = make("a-0004", Kind::Issue);
+        b.milestone = Some(m2.id.clone());
+        b.priority = Some(0);
+        let all = vec![m1, m2, a, b];
+        let index = Index::of(&all);
+        let context = crate::query::SortContext::of(&all);
+        let order = crate::query::Order::default();
+        let statuses = vec!["todo".to_string()];
+        let compare = |a: usize, b: usize| {
+            context.compare_layers(
+                &order,
+                false,
+                (&all[a], "todo"),
+                (&all[b], "todo"),
+                &statuses,
+                crate::config::Naming::Full,
+            )
+        };
+        let rows = index.grouped_tree(
+            &all,
+            &Path::new(),
+            &|_| true,
+            &compare,
+            Group::Structure,
+            &statuses,
+            &|_| true,
+            &|_| true,
+        );
+        let ids: Vec<_> = rows
+            .iter()
+            .filter_map(|(e, _)| match e {
+                GroupedEntry::Entry(e) => e.at().map(|i| all[i].id.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(ids, ["a-0002", "a-0004", "a-0003", "a-0001"]);
+    }
+
+    #[test]
+    fn milestone_headers_follow_the_layer_comparator() {
+        let a = make("a-m001", Kind::Milestone);
+        let b = make("a-m002", Kind::Milestone);
+        let mut x = make("a-i001", Kind::Issue);
+        x.milestone = Some(a.id.clone());
+        let mut y = make("a-i002", Kind::Issue);
+        y.milestone = Some(b.id.clone());
+        let all = vec![a, b, x, y];
+        let index = Index::of(&all);
+        let tree = index.grouped_tree(
+            &all,
+            &Path::new(),
+            &|_| true,
+            &|a, b| b.cmp(&a),
+            Group::Milestone,
+            &[],
+            &|_| true,
+            &|_| true,
+        );
+        let heads: Vec<_> = tree
+            .into_iter()
+            .filter_map(|(entry, _)| match entry {
+                GroupedEntry::Header(k) => k.value,
+                _ => None,
+            })
+            .collect();
+        assert_eq!(heads, ["a-m002", "a-m001"]);
+        assert_eq!(Group::Kind.order_values(Some("issue"), Some("backlog"), &[]), std::cmp::Ordering::Less);
+    }
+
+    #[test]
+    fn field_groups_use_status_order_and_inherited_membership() {
+        let mut m = make("a-m001", Kind::Milestone);
+        m.title = "release".into();
+        let mut e = make("a-e001", Kind::Epic);
+        e.milestone = Some(m.id.clone());
+        let mut a = epic_of("a-a001", &e.id);
+        a.status = Status::new("todo");
+        a.priority = Some(3);
+        let mut b = epic_of("a-a002", &e.id);
+        b.status = Status::new("review");
+        b.priority = Some(0);
+        let all = vec![m, e, a, b];
+        let index = Index::of(&all);
+        let cmp = |a: usize, b: usize| all[a].id.cmp(&all[b].id);
+        let groups = |group| {
+            index
+                .grouped_tree(
+                    &all,
+                    &Path::new(),
+                    &|_| true,
+                    &cmp,
+                    group,
+                    // Against the alphabet on purpose — a header order that fell back to plain string order
+                    // would put review first.
+                    &["todo".into(), "review".into()],
+                    &|_| true,
+                    &|_| true,
+                )
+                .into_iter()
+                .filter_map(|(entry, _)| match entry {
+                    GroupedEntry::Header(k) => k.value,
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(groups(Group::Status), ["todo", "review"]);
+        assert_eq!(groups(Group::Priority), ["p0", "p3"]);
+        assert_eq!(groups(Group::Epic), ["a-e001"]);
+        assert_eq!(groups(Group::Milestone), ["a-m001"]);
+        assert_eq!(groups(Group::Kind), ["issue"]);
+    }
+
+    #[test]
+    fn virtual_groups_are_ordered_filtered_and_never_duplicate_tags() {
+        let mut a = make("a-0001", Kind::Issue);
+        a.assignee = Some("Zoe".into());
+        a.tags = vec!["first".into(), "second".into()];
+        let mut b = make("a-0002", Kind::Issue);
+        b.assignee = Some("Ada".into());
+        let c = make("a-0003", Kind::Issue);
+        let all = vec![a, b, c, make("a-0004", Kind::Epic)];
+        let index = Index::of(&all);
+        let order = |a: usize, b: usize| all[a].id.cmp(&all[b].id);
+        let rows =
+            index.grouped_tree(&all, &Path::new(), &|_| true, &order, Group::Assignee, &[], &|_| true, &|_| true);
+        let headers: Vec<_> = rows
+            .iter()
+            .filter_map(|(e, _)| match e {
+                GroupedEntry::Header(k) => Some(k.value.as_deref()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(headers, [Some("Ada"), Some("Zoe"), None]);
+        let tags = index.grouped_tree(&all, &Path::new(), &|at| at == 0, &order, Group::Tag, &[], &|_| true, &|_| true);
+        assert_eq!(tags.len(), 2); // one header and one row, even with two tags
+        assert!(matches!(&tags[0].0, GroupedEntry::Header(k) if k.value.as_deref() == Some("first")));
+        let flat = index.grouped_tree(&all, &Path::new(), &|_| true, &order, Group::None, &[], &|_| true, &|_| true);
+        assert_eq!(flat.len(), 3);
+        assert!(flat.iter().all(|(e, _)| matches!(e, GroupedEntry::Entry(Entry::Leaf { .. }))));
+        let shut =
+            index.grouped_tree(&all, &Path::new(), &|_| true, &order, Group::Assignee, &[], &|_| true, &|_| false);
+        assert_eq!(shut.len(), 3);
+    }
+
+    #[test]
+    fn virtual_groups_stay_under_the_given_path() {
+        let e = make("a-e001", Kind::Epic);
+        let mut inside = epic_of("a-a001", &e.id);
+        inside.assignee = Some("Ada".into());
+        let mut outside = make("a-a002", Kind::Issue);
+        outside.assignee = Some("Zoe".into());
+        let all = vec![e, inside, outside];
+        let index = Index::of(&all);
+        let order = |a: usize, b: usize| all[a].id.cmp(&all[b].id);
+        let path = vec![Seg::Epic("a-e001".into())];
+        let rows = index.grouped_tree(&all, &path, &|_| true, &order, Group::Assignee, &[], &|_| true, &|_| true);
+        let ids: Vec<_> = rows
+            .iter()
+            .filter_map(|(e, _)| match e {
+                GroupedEntry::Entry(e) => e.at().map(|i| all[i].id.as_str()),
+                GroupedEntry::Header(k) => k.value.as_deref(),
+            })
+            .collect();
+        assert_eq!(ids, ["Ada", "a-a001"], "a row outside the epic was grouped");
     }
 
     /// **펼친 목록 한 판은 그린 줄 수만큼만 훑는다**(moai-teka). 한 층을 짓는 [`Index::entries_sorted`]

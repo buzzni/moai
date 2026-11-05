@@ -83,7 +83,7 @@ pub fn run(ctx: &Ctx, args: StatsArgs) -> R<Vec<String>> {
     Ok(crate::view::stats(&st, &load.issues, &repo.config, !ask.by.is_empty(), flow_asked, screen))
 }
 
-/// argv 의 낱말을 `report` 의 축으로 잇는다 — `report` 는 clap 을 모른다(`show::sort_of` 와 같은 자리).
+/// argv 의 낱말을 `report` 의 축으로 잇는다 — `report` 는 clap 을 모른다(CLI 입력을 푸는 자리).
 fn axis_of(a: AxisArg) -> Axis {
     match a {
         AxisArg::Status => Axis::Status,

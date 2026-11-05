@@ -79,7 +79,11 @@ pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
     drop(root);
     crate::tui::watch(&mut watched, places);
     crate::tui::watch(&mut watched, archived_marks);
-    let path = resolve(&index, &load.issues, args.path.as_deref(), ctx.lang())?;
+    let path = if ctx.json && args.path.as_deref().is_some_and(|p| p.starts_with("group:")) {
+        Vec::new()
+    } else {
+        resolve(&index, &load.issues, args.path.as_deref(), ctx.lang())?
+    };
 
     // `--json` 은 화면을 켜지 않는다. 기계로 읽는 쪽과 통합 시험이 이 길로 온다.
     if ctx.json {
@@ -113,7 +117,7 @@ pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
         let rows: Vec<Row> = entries
             .into_iter()
             .map(|(e, home)| {
-                let mut row = Row::of(&index, &load.issues, &states, &e, home, ctx.lang());
+                let mut row = Row::of_grouped(&index, &load.issues, &states, &e, home, ctx.lang());
                 row.gantt = gantt.as_ref().zip(e.at()).and_then(|(g, at)| g.get(&at));
                 row
             })
@@ -540,6 +544,7 @@ fn resolve(index: &Index, issues: &[Issue], want: Option<&str>, lang: crate::i18
 fn shaped(args: &TuiArgs) -> Option<&'static str> {
     super::show::first_given(&args.filter)
         .or_else(|| args.order.sort.is_some().then_some("--sort"))
+        .or_else(|| args.order.group.is_some().then_some("--group"))
         .or_else(|| args.order.reverse.then_some("--reverse"))
         .or_else(|| args.deep.then_some("--deep"))
         .or_else(|| args.no_archive.then_some("--no-archive"))
@@ -565,14 +570,9 @@ fn listing(
     (index, ground): (&Index, &crate::tui::Ground),
     path: &Path,
     args: TuiArgs,
-) -> R<Vec<(Entry, Option<Vec<String>>)>> {
-    let TuiArgs { path: _, filter, order, deep, worktree: _, no_archive, no_gantt: _ } = args;
+) -> R<Vec<(crate::nav::GroupedEntry, Option<Vec<String>>)>> {
+    let TuiArgs { path: requested_path, filter, order, deep, worktree: _, no_archive, no_gantt: _ } = args;
     let given = super::show::first_given(&filter).is_some();
-    if !given && order.sort.is_none() && !order.reverse && !no_archive {
-        // 거르개도 차례도 없으면 `Index::entries` 의 그 자다 — 다 남기고 목록의 차례로.
-        let by = |a: usize, b: usize| crate::query::display_order(&issues[a], &issues[b]);
-        return Ok(spread(index, issues, path, deep, &|_| true, &by));
-    }
     let kind = filter.kind;
     let filter = super::show::filter_of(ctx, repo, issues, filter, kind)?;
     let notes = filter.grep.is_some().then(|| {
@@ -592,23 +592,70 @@ fn listing(
         (!given || filter.matches(&issues[at], &now, &wh))
             && (!no_archive || !(ground.archive_copy(issues, at) || wh.archived(&issues[at], &now)))
     };
-    let fields = order.sort.map(|f| f.0);
+    let group = order.group.or_else(|| order.sort.as_ref().and_then(|s| s.1)).unwrap_or_default();
+    let selected = order.sort.map(|f| f.0).unwrap_or_default();
+    let context = crate::query::SortContext::with_where(issues, &wh);
     let cfg = &repo.config;
-    let by = |a: usize, b: usize| match &fields {
-        Some(fields) => crate::query::order_by(
-            fields,
-            order.reverse,
-            (&issues[a], wh.column(&issues[a])),
-            (&issues[b], wh.column(&issues[b])),
-            &cfg.statuses,
-            cfg.naming,
-        ),
-        None => {
-            let o = crate::query::display_order(&issues[a], &issues[b]);
-            if order.reverse { o.reverse() } else { o }
+    let by = |a: usize, b: usize| {
+        let pair = ((&issues[a], wh.column(&issues[a])), (&issues[b], wh.column(&issues[b])));
+        if group == crate::nav::Group::Structure {
+            context.compare_layers(&selected, order.reverse, pair.0, pair.1, &cfg.statuses, cfg.naming)
+        } else {
+            context.compare(&selected.item, order.reverse, pair.0, pair.1, &cfg.statuses, cfg.naming)
         }
     };
-    Ok(spread(index, issues, path, deep, &keep, &by))
+    if group == crate::nav::Group::Structure && requested_path.as_deref().is_some_and(|p| p.starts_with("group:")) {
+        return Err(Fail::coded("group path requires its matching --group", super::code::BAD_INPUT));
+    }
+    if group == crate::nav::Group::Structure {
+        return Ok(spread(index, issues, path, deep, &keep, &by)
+            .into_iter()
+            .map(|(e, home)| (crate::nav::GroupedEntry::Entry(e), home))
+            .collect());
+    }
+    let requested_group = requested_path
+        .as_deref()
+        .filter(|p| p.starts_with("group:"))
+        .map(parse_group_handle)
+        .transpose()
+        .map_err(|why| Fail::coded(why, super::code::BAD_INPUT))?;
+    if requested_group.as_ref().is_some_and(|k| k.group != group) {
+        return Err(Fail::coded("group path requires its matching --group", super::code::BAD_INPUT));
+    }
+    let rows = index.grouped_tree(issues, path, &keep, &by, group, &cfg.statuses, &|_| deep, &|_| {
+        deep || requested_group.is_some()
+    });
+    if let Some(want) = requested_group {
+        let mut selected = false;
+        let mut found = false;
+        let mut out = Vec::new();
+        for (entry, _) in rows {
+            match entry {
+                crate::nav::GroupedEntry::Header(key) => {
+                    selected = key == want;
+                    found |= selected;
+                }
+                other if selected => out.push((other, deep.then(|| vec![group_handle(&want)]))),
+                _ => {}
+            }
+        }
+        if !found {
+            return Err(Fail::not_found(&group_handle(&want), ctx.lang()));
+        }
+        return Ok(out);
+    }
+    let mut group_path: Option<String> = None;
+    Ok(rows
+        .into_iter()
+        .map(|(entry, twig)| {
+            if let crate::nav::GroupedEntry::Header(key) = &entry {
+                group_path = Some(group_handle(key));
+            }
+            let home =
+                deep.then(|| if twig.depth() > 0 { group_path.clone().into_iter().collect() } else { Vec::new() });
+            (entry, home)
+        })
+        .collect())
 }
 
 /// 한 자리의 목록을 그대로 내거나(`--deep` 아님), 탐색기가 **다 펼친 나무** 그대로 낸다(moai-0aa7.joy) — 폴더
@@ -649,7 +696,22 @@ fn handle(seg: &Seg) -> String {
         Seg::Milestone(Some(id)) | Seg::Epic(id) | Seg::Issue(id) => id.clone(),
         Seg::Milestone(None) => NO_MILESTONE.into(),
         Seg::Lost => LOST.into(),
+        Seg::Group(key) => group_handle(key),
     }
+}
+
+fn parse_group_handle(raw: &str) -> Result<crate::nav::GroupKey, String> {
+    let (group, value) = raw.strip_prefix("group:").and_then(|s| s.split_once(':')).ok_or("invalid group path")?;
+    let group = group.parse::<crate::nav::Group>()?;
+    if matches!(group, crate::nav::Group::Structure | crate::nav::Group::None) {
+        return Err("invalid group path".into());
+    }
+    let value = serde_json::from_str(value).map_err(|_| "invalid group path".to_string())?;
+    Ok(crate::nav::GroupKey { group, value })
+}
+
+fn group_handle(key: &crate::nav::GroupKey) -> String {
+    format!("group:{}:{}", key.group.name(), serde_json::to_string(&key.value).expect("group value serializes"))
 }
 
 /// `--json` 한 줄의 원소. 파일의 키 순서와 같은 뜻으로 앞에서부터 읽힌다.
@@ -697,6 +759,42 @@ struct Tally {
 }
 
 impl<'g> Row<'g> {
+    fn of_grouped(
+        index: &Index,
+        issues: &[Issue],
+        states: &std::collections::BTreeMap<crate::report::GroupKey<'_>, &str>,
+        e: &crate::nav::GroupedEntry,
+        home: Option<Vec<String>>,
+        lang: crate::i18n::Lang,
+    ) -> Row<'g> {
+        match e {
+            crate::nav::GroupedEntry::Entry(entry) => Self::of(index, issues, states, entry, home, lang),
+            crate::nav::GroupedEntry::Header(key) => Row {
+                id: None,
+                title: key
+                    .value
+                    .as_deref()
+                    .map(|value| {
+                        if matches!(key.group, crate::nav::Group::Milestone | crate::nav::Group::Epic) {
+                            index.find(value).map(|at| issues[at].title.clone()).unwrap_or_else(|| value.to_string())
+                        } else {
+                            value.to_string()
+                        }
+                    })
+                    .unwrap_or_else(|| "(none)".into()),
+                kind: "group",
+                dir: true,
+                path: group_handle(key),
+                status: None,
+                derived_status: None,
+                priority: None,
+                progress: None,
+                home,
+                gantt: None,
+            },
+        }
+    }
+
     fn of(
         index: &Index,
         issues: &[Issue],

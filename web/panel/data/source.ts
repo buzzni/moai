@@ -322,6 +322,9 @@ export interface Boot {
   columns: { backlog: BootColumn; shelved: BootColumn }
   filter_keys: string[]
   sort_fields: { name: string; dir: 'asc' | 'desc' }[]
+  sort_layers?: string[]
+  sort_groups?: string[]
+  sort_presets?: { name: string; order: string; group: string }[]
   /** The header's User line, already labelled with the project's naming as the TUI prints it; null when moai could
    *  not tell who is working, and when an older server does not send it. */
   user: string | null

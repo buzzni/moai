@@ -469,7 +469,7 @@ pub fn list(
 
     out.push(String::new());
     out.push(summary(issues, cfg, hidden, wh, lang));
-    // **다음 쪽은 마지막 줄의 id 로 연다** — 커서가 값이라(`query::page`) 앞 쪽의 마지막 줄이 곧 그 값이다.
+    // **다음 쪽은 마지막 줄의 id 로 연다** — 커서가 값이라(`query::page_order`) 앞 쪽의 마지막 줄이 곧 그 값이다.
     // "N건 더" 는 다른 잘린 목록과 한 키다([`more_of`]) — 뒤의 명령은 자료라 `{go}` 로 말묶음 밖에서 온다.
     if let Some(last) = issues.last().filter(|_| more > 0) {
         let go = format!("--after {}", one_line(&last.id));
@@ -766,7 +766,7 @@ fn place(
             walk(out, drawn, cx, &deeper, depth.max(1) + 1);
         }
         // 제 줄이 있는 잃은 에픽·마일스톤도 여기로 온다 — 줄만 내고 만다.
-        Entry::Dir { seg: Seg::Lost, at: Some(at) } => row(out, cx, *at, depth.max(1)),
+        Entry::Dir { seg: Seg::Lost | Seg::Group(_), at: Some(at) } => row(out, cx, *at, depth.max(1)),
         Entry::Leaf { at } => row(out, cx, *at, depth.max(1)),
     }
 }

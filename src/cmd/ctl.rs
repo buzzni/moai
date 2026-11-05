@@ -123,6 +123,9 @@ fn then_verb(text: &str) -> R<wire::Verb> {
         CtlCmd::Sort { words, default, target: None } => {
             wire::Verb::Sort { words: words.split(',').map(str::to_owned).collect(), default }
         }
+        CtlCmd::Group { group, target: None } => {
+            wire::Verb::Sort { words: vec![format!("group={}", group.name())], default: false }
+        }
         CtlCmd::Filter { query, clear, target: None } if clear != query.is_some() => wire::Verb::Filter { query },
         CtlCmd::Find { query, scope, target: None } => wire::Verb::Find { query, scope },
         CtlCmd::Screen { name, target: None } => wire::Verb::Screen { name },
@@ -257,8 +260,12 @@ fn validate_verb(verb: &wire::Verb) -> R<()> {
     use wire::Verb;
     let bad = |message: &str| Fail::coded(message, code::BAD_INPUT);
     match verb {
-        Verb::Sort { words, .. } if crate::tui::App::sorting_of(words).is_none() => {
-            return Err(bad("invalid explorer order; use title, priority, status, or another explorer field, not id"));
+        Verb::Sort { words, .. } => {
+            let raw = words.join(",");
+            let valid_group = raw.strip_prefix("group=").is_some_and(|s| s.parse::<crate::nav::Group>().is_ok());
+            if !valid_group && crate::query::Order::parse(&raw).is_err() {
+                return Err(bad("invalid explorer order or group"));
+            }
         }
         Verb::Find { scope, .. } if crate::query::GrepIn::named(scope).is_none() => {
             return Err(bad("--in must be all, id, title, tag, body, or note"));
@@ -403,7 +410,9 @@ mod proposal_tests {
         assert!(then_verb("keys SPC a y").is_err());
         assert!(then_verb("propose hello").is_err());
         assert!(then_verb("screen missing").is_err());
-        assert!(then_verb("sort id").is_err());
+        assert!(then_verb("sort id").is_ok());
+        assert!(then_verb("sort not-a-field").is_err());
+        assert!(then_verb("group assignee").is_ok());
         assert!(then_verb("theme neon").is_err());
     }
 }

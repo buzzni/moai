@@ -122,6 +122,89 @@ fn ctl_never_reaches_the_runners_sockets() {
 }
 
 #[test]
+fn layered_sort_and_group_are_available_to_json_clients() {
+    let s = init("layered-group");
+    let rows = [
+        r#"{"id":"argos-m001","title":"later","kind":"milestone","status":"todo","created_at":"2026-09-01T00:00:00Z","updated_at":"2026-09-01T00:00:00Z","status_since":"2026-09-01T00:00:00Z","due_on":"2026-12-01"}"#,
+        r#"{"id":"argos-m002","title":"earlier","kind":"milestone","status":"todo","created_at":"2026-09-02T00:00:00Z","updated_at":"2026-09-02T00:00:00Z","status_since":"2026-09-02T00:00:00Z","due_on":"2026-11-01"}"#,
+        r#"{"id":"argos-a001","title":"one","status":"todo","priority":2,"assignee":"Zoe","milestone":"argos-m002","created_at":"2026-09-01T00:00:00Z","updated_at":"2026-09-01T00:00:00Z","status_since":"2026-09-01T00:00:00Z"}"#,
+        r#"{"id":"argos-a002","title":"two","status":"todo","priority":0,"assignee":"Ada","milestone":"argos-m002","created_at":"2026-09-02T00:00:00Z","updated_at":"2026-09-02T00:00:00Z","status_since":"2026-09-02T00:00:00Z"}"#,
+    ];
+    std::fs::write(s.path().join(".moai/issues.jsonl"), format!("{}\n", rows.join("\n"))).unwrap();
+    let tree: serde_json::Value = serde_json::from_str(&ok(
+        s.path(),
+        &["tui", "--deep", "--no-gantt", "--sort", "milestone=due;item=priority", "--json"],
+    ))
+    .unwrap();
+    let ids: Vec<_> = tree.as_array().unwrap().iter().filter_map(|r| r["id"].as_str()).collect();
+    assert_eq!(ids, ["argos-m002", "argos-a002", "argos-a001", "argos-m001"]);
+    let grouped: serde_json::Value =
+        serde_json::from_str(&ok(s.path(), &["tui", "--deep", "--no-gantt", "--group", "assignee", "--json"])).unwrap();
+    let headers: Vec<_> = grouped.as_array().unwrap().iter().filter(|r| r["kind"] == "group").collect();
+    assert_eq!(headers.iter().map(|r| r["title"].as_str().unwrap()).collect::<Vec<_>>(), ["Ada", "Zoe"]);
+    let path = headers[0]["path"].as_str().unwrap();
+    let inside: serde_json::Value =
+        serde_json::from_str(&ok(s.path(), &["tui", "--group", "assignee", "--path", path, "--json"])).unwrap();
+    assert_eq!(inside.as_array().unwrap()[0]["id"], "argos-a002");
+    // `--sort id` alone would put Zoe's argos-a001 first (and the default puts Ada's p0 first anyway), so only
+    // the group can order Ada before Zoe here.
+    let sorted: serde_json::Value =
+        serde_json::from_str(&ok(s.path(), &["show", "--sort", "id", "--group", "assignee", "--json"])).unwrap();
+    let titles: Vec<_> = sorted.as_array().unwrap().iter().filter_map(|r| r["assignee"].as_str()).collect();
+    assert_eq!(titles, ["Ada", "Zoe"]);
+    // A flat list only orders by the group — a kind-filtered list must not come back empty.
+    let stones: serde_json::Value =
+        serde_json::from_str(&ok(s.path(), &["milestone", "show", "--group", "status", "--json"])).unwrap();
+    assert_eq!(stones.as_array().unwrap().len(), 2, "{stones}");
+    // `--path` still narrows a grouped tree: the later milestone holds no work, so it has no group.
+    let empty: serde_json::Value = serde_json::from_str(&ok(
+        s.path(),
+        &["tui", "--deep", "--no-gantt", "--group", "assignee", "--path", "argos-m001", "--json"],
+    ))
+    .unwrap();
+    assert_eq!(empty.as_array().unwrap().len(), 0, "{empty}");
+}
+
+#[test]
+fn dangling_group_references_use_the_explorer_position_in_show() {
+    let s = init("dangling-group");
+    // The lost rows' ids sort after the rows with no group (review moai-6vcm.xdf). Grouped by the written id, a
+    // dangling `argos-e999` sorts between the real group and the ungrouped tail, so with the lost rows first by id
+    // the old order matched the tree by chance and the epic half could not go red.
+    let rows = [
+        r#"{"id":"argos-e001","title":"epic","kind":"epic","status":"todo","created_at":"2026-09-01T00:00:00Z","updated_at":"2026-09-01T00:00:00Z","status_since":"2026-09-01T00:00:00Z"}"#,
+        r#"{"id":"argos-m001","title":"milestone","kind":"milestone","status":"todo","created_at":"2026-09-01T00:00:00Z","updated_at":"2026-09-01T00:00:00Z","status_since":"2026-09-01T00:00:00Z"}"#,
+        r#"{"id":"argos-a009","title":"lost epic","epic":"argos-e999","status":"todo","created_at":"2026-09-01T00:00:00Z","updated_at":"2026-09-01T00:00:00Z","status_since":"2026-09-01T00:00:00Z"}"#,
+        r#"{"id":"argos-a008","title":"lost milestone","milestone":"argos-m999","status":"todo","created_at":"2026-09-01T00:00:00Z","updated_at":"2026-09-01T00:00:00Z","status_since":"2026-09-01T00:00:00Z"}"#,
+        r#"{"id":"argos-a003","title":"valid epic","epic":"argos-e001","status":"todo","created_at":"2026-09-01T00:00:00Z","updated_at":"2026-09-01T00:00:00Z","status_since":"2026-09-01T00:00:00Z"}"#,
+        r#"{"id":"argos-a004","title":"valid milestone","milestone":"argos-m001","status":"todo","created_at":"2026-09-01T00:00:00Z","updated_at":"2026-09-01T00:00:00Z","status_since":"2026-09-01T00:00:00Z"}"#,
+    ];
+    std::fs::write(s.path().join(".moai/issues.jsonl"), format!("{}\n", rows.join("\n"))).unwrap();
+    for group in ["epic", "milestone"] {
+        let show: serde_json::Value = serde_json::from_str(&ok(
+            s.path(),
+            &["show", "--type", "issue", "--sort", "id", "--group", group, "--json"],
+        ))
+        .unwrap();
+        let tree: serde_json::Value = serde_json::from_str(&ok(
+            s.path(),
+            &["tui", "--deep", "--no-gantt", "--sort", "id", "--group", group, "--json"],
+        ))
+        .unwrap();
+        let ids = |v: &serde_json::Value| {
+            v.as_array()
+                .unwrap()
+                .iter()
+                .filter(|r| r["kind"] == "issue")
+                .map(|r| r["id"].as_str().unwrap().to_owned())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(ids(&show).len(), 4, "show={show}");
+        assert_eq!(ids(&show), ids(&tree), "group={group}; show={show}; tree={tree}");
+    }
+}
+
+#[test]
 fn ctl_state_without_a_window_says_no_window() {
     let s = Scratch::new("ctl-empty");
     let output = moai(s.path(), &["ctl", "state", "--json"]);
@@ -211,7 +294,7 @@ fn ctl_lists_and_reads_an_open_explorer() {
     let out = ok(s.path(), &["ctl", "state", "--json"]);
     let json: serde_json::Value = serde_json::from_str(&out).unwrap();
     assert_eq!(json["screen"], "list");
-    assert_eq!(json["sort"], serde_json::json!(["priority"]));
+    assert_eq!(json["sort"], serde_json::json!(["priority", "due"]));
     let pressed = ok(s.path(), &["ctl", "keys", "SPC g b", "--json"]);
     assert_eq!(serde_json::from_str::<serde_json::Value>(&pressed).unwrap()["screen"], "board");
     assert_eq!(
@@ -222,6 +305,10 @@ fn ctl_lists_and_reads_an_open_explorer() {
     assert_eq!(serde_json::from_str::<serde_json::Value>(&done).unwrap()["screen"], "list");
     let actions = ok(s.path(), &["ctl", "actions", "--json"]);
     assert!(actions.contains("browse.read_all"), "{actions}");
+    let by_id = ok(s.path(), &["ctl", "sort", "id", "--json"]);
+    assert_eq!(serde_json::from_str::<serde_json::Value>(&by_id).unwrap()["sort"], serde_json::json!(["id"]));
+    let grouped = ok(s.path(), &["ctl", "group", "assignee", "--json"]);
+    assert_eq!(serde_json::from_str::<serde_json::Value>(&grouped).unwrap()["group"], "assignee");
     let sorted = ok(s.path(), &["ctl", "sort", "title:desc,priority:desc", "--json"]);
     assert_eq!(
         serde_json::from_str::<serde_json::Value>(&sorted).unwrap()["sort"],
@@ -6444,13 +6531,11 @@ fn show_orders_the_list_by_the_key_it_is_given() {
         args.extend_from_slice(extra);
         ids_in(&ok(s.path(), &args))
     };
-    // 같은 우선순위끼리는 id 로 가른다 — id 는 무작위라 시험이 제 손으로 가른다.
-    let by_id = |a: &str, b: &str| if a < b { [a.to_string(), b.to_string()] } else { [b.to_string(), a.to_string()] };
-    let [p2a, p2b] = by_id(&banana, &cherry);
+    // Equal priority falls to creation time, then id.
 
     assert_eq!(
         order(&[]),
-        [epic.clone(), apple.clone(), p2a.clone(), p2b.clone(), member.clone()],
+        [epic.clone(), apple.clone(), banana.clone(), cherry.clone(), member.clone()],
         "기본 차례가 바뀌었다"
     );
     assert_eq!(order(&["--sort", "priority"]), order(&[]), "`priority` 가 기본 차례와 다르다");
@@ -6473,7 +6558,7 @@ fn show_orders_the_list_by_the_key_it_is_given() {
     // 적힌 칸으로 재면 p0 인 에픽이 `todo` 의 맨 앞에 선다.
     assert_eq!(
         order(&["--sort", "status"]),
-        [apple.clone(), p2a.clone(), p2b.clone(), epic.clone(), member.clone()],
+        [banana.clone(), apple.clone(), cherry.clone(), epic.clone(), member.clone()],
         "칸 차례가 묶음의 읽은 칸을 안 봤다"
     );
 
@@ -6497,7 +6582,7 @@ fn show_orders_the_list_by_the_key_it_is_given() {
     ok_at(s.path(), "2026-09-20T00:00:00Z", &["edit", &banana, "--title", "Banana 고침"]);
     assert_eq!(
         order(&["--sort", "updated"]),
-        [banana.clone(), member.clone(), epic.clone(), cherry.clone(), apple.clone()],
+        [banana.clone(), epic.clone(), member.clone(), cherry.clone(), apple.clone()],
         "고친 차례가 아니다"
     );
 }
@@ -10516,6 +10601,13 @@ fn every_command_still_speaks_json() {
         vec!["due", "apply", "--dry-run", "--json"],
         vec!["due", "apply", "--json"],
     ];
+    // With no window, the new ctl words must still return a structured JSON refusal.
+    for args in [vec!["ctl", "sort", "release", "--json"], vec!["ctl", "group", "assignee", "--json"]] {
+        let output = moai(s.path(), &args);
+        assert!(!output.status.success());
+        let value: serde_json::Value = serde_json::from_slice(&output.stderr).unwrap();
+        assert!(value.get("code").is_some());
+    }
     // **적어 둔 목록과 실제로 부르는 목록을 여기서 잇는다.** 잇지 않으면
     // `JSON_SWEEP` 에 이름만 적고 한 번도 안 부르는 명령이 생기고, 그러면
     // 위 시험은 초록인데 그 명령의 `--json` 은 아무도 안 본 것이 된다 —
@@ -33484,6 +33576,11 @@ fn web_serves_the_page_and_the_boot() {
     assert!(boot["filter_keys"].as_array().unwrap().iter().any(|k| k == "due_on"), "{boot}");
     assert!(boot["sort_fields"].as_array().unwrap().iter().any(|f| f["name"] == "due" && f["dir"] == "asc"), "{boot}");
     assert!(boot["sort_fields"].as_array().unwrap().iter().any(|f| f["name"] == "created" && f["dir"] == "desc"));
+    assert_eq!(boot["sort_layers"], serde_json::json!(["milestone", "epic", "item"]));
+    assert!(boot["sort_groups"].as_array().unwrap().iter().any(|g| g == "assignee"));
+    let people = boot["sort_presets"].as_array().unwrap().iter().find(|p| p["name"] == "people").unwrap();
+    assert_eq!(people["group"], "assignee");
+    assert!(people["order"].as_str().unwrap().contains("item=priority,due"));
     assert!(boot["columns"]["backlog"]["name"].is_string(), "{boot}");
 
     let (status, _, body) = get(web.port, "/api/status");

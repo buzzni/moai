@@ -1233,7 +1233,7 @@ mod tests {
             "{said}"
         );
         assert_eq!(
-            a.order,
+            a.item_order(),
             super::super::keys::Sorting::by(super::super::keys::Order::Title),
             "틀린 키 하나로 나머지를 버렸다"
         );

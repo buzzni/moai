@@ -90,6 +90,21 @@ list it, and a folder stands when something under it does. Filters bring
 `moai show`'s defaults with them, so done rows are hidden until `--all` or
 `-s done` asks for them; without filters the listing is every row.
 
+The default release order treats milestones, epics and work as separate layers.
+Pass a preset such as `--sort recent`, a field list for every layer, or a layered
+expression such as `--sort 'milestone=due;item=priority,due'`. Empty sort values
+come last in either direction unless `:nulls-first` is given. Ties fall to creation
+time and id. `--reverse` reverses field directions without moving empty values or
+the tie break. A followed deadline skips closed ancestors, as `moai ready` does.
+
+Use `--group none` for a flat listing, or a field such as `--group assignee` to
+create virtual headers. A header has `kind: "group"`, no `id`, and a `path` handle;
+pass that handle back with the same `--group` to list its rows. With `--deep`, a
+row's `home` contains that handle. A row with multiple tags stands only under its
+first tag. `moai show --group … --json` orders rows by the same groups without
+adding headers. The web `/api/tree` takes the same sort and group words, while
+`/api/boot` publishes their fields, layers, groups and presets.
+
 `moai tui --deep --json` prints everything under the place at once instead of
 one directory: the rows in the order of the explorer's fully unfolded tree, a
 folder row followed by what is inside it, with the filters and `--sort` of the
@@ -252,6 +267,9 @@ of it.
 
 None of this changes a column, a kind or an exit code.
 
+To count and measure these rows with SQL, see
+[Analyse the tracker with SQL](sql.md).
+
 ## Keep the payload small
 
 A whole tracker with bodies runs to megabytes — this repository's
@@ -278,4 +296,4 @@ A whole tracker with bodies runs to megabytes — this repository's
 - **Pages repeat or skip a row** — the order moved under you. Page in `id` or
   `created` order; priority and title move when someone edits a row
 
-Decided in: moai-e9hi, moai-b4dc, moai-ijjd, moai-wk7i, moai-g8pt moai-4v3h moai-yigx moai-fcj3
+Decided in: moai-e9hi, moai-b4dc, moai-ijjd, moai-wk7i, moai-g8pt moai-4v3h moai-yigx moai-fcj3 moai-ctxc
