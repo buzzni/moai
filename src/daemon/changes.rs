@@ -567,4 +567,59 @@ mod tests {
         let removed = poll(&memory, whole(&root), Lang::En, Some(&repaired.changes.cursor)).unwrap();
         assert_eq!(removed.changes.removed, vec![id]);
     }
+
+    #[test]
+    fn heartbeat_and_wall_time_do_not_change_a_cursor() {
+        let dir = Scratch::new("changes-heartbeat");
+        let out = Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "daemon::changes::tests::inner_heartbeat", "--ignored", "--nocapture"])
+            .env("MOAI_HEARTBEAT_TEST", dir.path())
+            .env("MOAI_CONFIG", dir.path().join("config.toml"))
+            .env("HOME", dir.path())
+            .env_remove("MOAI_HERE")
+            .output()
+            .unwrap();
+        let output = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+        assert!(out.status.success() && output.contains("1 passed"), "{output}");
+    }
+
+    #[test]
+    #[ignore = "run by heartbeat_and_wall_time_do_not_change_a_cursor"]
+    fn inner_heartbeat() {
+        let root = std::path::PathBuf::from(std::env::var_os("MOAI_HEARTBEAT_TEST").unwrap());
+        moai(&root, "2026-11-04T09:00:00Z", &["init", "t"]);
+        let id = add(&root, "2026-11-04T09:01:00Z", "one");
+        moai(&root, "2026-11-04T09:02:00Z", &["mv", &id, "in_progress"]);
+        let picks = crate::pulse::picks_dir_at(&root).unwrap();
+        let beats = crate::pulse::beats_dir_at(&root).unwrap();
+        std::fs::create_dir_all(&picks).unwrap();
+        std::fs::create_dir_all(&beats).unwrap();
+        let stamp = crate::model::parse_rfc3339("2026-11-04T09:02:00Z").unwrap();
+        std::fs::write(picks.join("sid"), format!("100\t{id}\t{stamp}\n")).unwrap();
+        let beat = beats.join("sid");
+        std::fs::write(&beat, "claude\tStop\n").unwrap();
+        let age = |secs| {
+            std::fs::File::open(&beat)
+                .unwrap()
+                .set_modified(std::time::SystemTime::now() - std::time::Duration::from_secs(secs))
+                .unwrap()
+        };
+        let memory = Memory::new();
+        let show = || {
+            let answer = crate::cmd::request::read(whole(&root));
+            serde_json::from_str::<Value>(&answer.out.unwrap()[0]).unwrap()
+        };
+        age(60);
+        assert!(show()[0].get("session").is_some(), "session fixture must be visible");
+        let (cursor, _, _, _) = ask(&memory, &root, None);
+        age(1801);
+        assert_eq!(show()[0]["session"]["state"], "lost");
+        let (cursor, changed, removed, reset) = ask(&memory, &root, Some(&cursor));
+        assert!(changed.is_empty() && removed.is_empty() && !reset);
+        std::fs::write(&beat, "claude\tPreToolUse\n").unwrap();
+        let (cursor, changed, _, _) = ask(&memory, &root, Some(&cursor));
+        assert!(changed.is_empty());
+        moai(&root, "2026-11-04T09:03:00Z", &["edit", &id, "--title", "edited"]);
+        assert_eq!(ask(&memory, &root, Some(&cursor)).1, vec![id]);
+    }
 }
