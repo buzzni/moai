@@ -687,7 +687,9 @@ BACKLOG
   the ones in the order first, numbered and marked ↑ asc or ↓ desc, then the
   rest marked with a dot. {key:sorter.down} and {key:sorter.up} move, {key:sorter.lower} and {key:sorter.raise} move the field down or up the
   order, {key:sorter.toggle} puts it in at the end or takes it out (the last one stays), and
-  {key:sorter.flip} turns its direction. {key:sorter.apply} applies the order where you stand and keeps it
+  {key:sorter.flip} turns its direction. Tab cycles through the layers; g cycles grouping.
+  Presets use 1–5. Either r or d reverses the selected field.
+  {key:sorter.apply} applies the order where you stand and keeps it
   there — inside a project for that project, in 0 as the default. {key:sorter.default} applies
   it and keeps it as the default, the order under [tui], even inside a
   project; a project that has an order of its own gets this one too. {key:sorter.close}
