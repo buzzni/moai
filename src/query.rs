@@ -1641,7 +1641,10 @@ impl std::fmt::Display for BadSort {
             BadSort::Unknown(w) => write!(f, "unknown field `{w}` - the fields are {words}"),
             BadSort::Direction(w, d) => {
                 // Not `{w}:{d}` — the modifier may stand after another one (`due:nulls-first:asc`).
-                write!(f, "unknown or misplaced modifier `{d}` after `{w}` - use asc or desc, then optional nulls-first")
+                write!(
+                    f,
+                    "unknown or misplaced modifier `{d}` after `{w}` - use asc or desc, then optional nulls-first"
+                )
             }
             BadSort::Layer(w) => write!(f, "invalid or repeated layer `{w}`"),
             BadSort::Repeated(k) => write!(f, "`{}` is given twice - a field stands once in the order", k.name()),
@@ -1715,7 +1718,14 @@ impl<'a> SortContext<'a> {
     pub fn of(all: &'a [Issue]) -> Self {
         let soil = crate::report::Soil::of(all);
         let eclipsed = soil.eclipsed();
-        Self::build(all, &soil.epic, &soil.lines, &eclipsed, |i| i.status_since.as_str())
+        // Closure of a group only depends on whether its derived column is done.
+        let cfg = crate::config::Config::parse("prefix = \"sort\"").expect("default config");
+        let stands = soil.stands(all, &cfg);
+        let closed = |i: &Issue| {
+            crate::report::stands_on(i, |key| stands.get(&key).map(|s| s.column)).unwrap_or(i.status.as_str())
+                == crate::config::DONE
+        };
+        Self::build(all, &soil.epic, &soil.lines, &eclipsed, &closed, |i| i.status_since.as_str())
     }
 
     /// Build from the maps the filter already holds, and give a group the time it entered the column it is
@@ -1725,7 +1735,7 @@ impl<'a> SortContext<'a> {
         let since = |i: &'a Issue| -> &'a str {
             crate::report::stands_on(i, |key| wh.since.get(&key).copied()).unwrap_or(i.status_since.as_str())
         };
-        Self::build(all, &wh.epic, wh.lines.get(), &|i| wh.eclipsed(i), since)
+        Self::build(all, &wh.epic, wh.lines.get(), &|i| wh.eclipsed(i), &|i| wh.column(i) == crate::config::DONE, since)
     }
 
     fn build(
@@ -1733,6 +1743,7 @@ impl<'a> SortContext<'a> {
         epic_of: &crate::report::Handing<'a>,
         lines: &crate::report::Lines<'a>,
         eclipsed: &dyn Fn(&Issue) -> bool,
+        closed: &dyn Fn(&Issue) -> bool,
         since: impl Fn(&'a Issue) -> &'a str,
     ) -> Self {
         let ladder = crate::report::DueLadder::over(lines, epic_of);
@@ -1755,10 +1766,7 @@ impl<'a> SortContext<'a> {
         }
         let mut rows: BTreeMap<&str, Vec<(&Issue, SortValues<'a>)>> = BTreeMap::new();
         for i in all {
-            let due = match (i.deadline(), ladder.ceiling(i).map(|c| c.due)) {
-                (Some(a), Some(b)) => Some(a.min(b)),
-                (a, b) => a.or(b),
-            };
+            let due = ladder.following(i, closed).map(|(due, _)| due);
             let group = match i.kind {
                 Kind::Epic => groups.get(&(0, i.id.as_str())),
                 Kind::Milestone => groups.get(&(1, i.id.as_str())),
@@ -3834,6 +3842,38 @@ mod tests {
         let mut next = all.clone();
         page_order(&mut next, &all, &wh, &cfg, &order, crate::nav::Group::Assignee, false, Some(&all[1]), None);
         assert_eq!(next.iter().map(|i| i.id.as_str()).collect::<Vec<_>>(), ["a-0001", "a-0003"]);
+    }
+
+    #[test]
+    fn due_order_ignores_a_closed_milestones_past_deadline() {
+        let mut stone = issue("a-m001", "todo", &[]);
+        stone.kind = Kind::Milestone;
+        stone.due_on = Some("2025-01-01".into());
+        let mut followup = issue("a-0001", "todo", &[]);
+        followup.milestone = Some(stone.id.clone());
+        let mut other = issue("a-0002", "todo", &[]);
+        other.due_on = Some("2026-11-05".into());
+        let all = vec![stone, followup, other];
+        let cfg = cfg();
+        let mut wh = Where::of(&all, &cfg);
+        // A caller can supply a derived closed column even when this snapshot contains an open follow-up.
+        wh.states.insert((Kind::Milestone, all[0].id.as_str()), crate::config::DONE);
+        fn sorted<'a>(all: &'a [Issue], wh: &Where<'a>, cfg: &crate::config::Config) -> Vec<String> {
+            let mut rows = vec![all[1].clone(), all[2].clone()];
+            page(&mut rows, all, wh, cfg, &Sort::by(SortKey::Due), None, None);
+            rows.into_iter().map(|i| i.id).collect()
+        }
+        assert_eq!(sorted(&all, &wh, &cfg), ["a-0002", "a-0001"], "closed milestone must not lend its deadline");
+        wh.states.insert((Kind::Milestone, all[0].id.as_str()), "todo");
+        assert_eq!(sorted(&all, &wh, &cfg), ["a-0001", "a-0002"], "an open milestone still lends its deadline");
+
+        // The same closed state can arise from an unfinished member being deferred.
+        let mut deferred = all.clone();
+        deferred[1].deferred_at = Some("2026-09-10T00:00:00Z".into());
+        let deferred_wh = Where::of(&deferred, &cfg);
+        assert_eq!(deferred_wh.column(&deferred[0]), crate::config::DONE);
+        assert_eq!(SortContext::of(&deferred).values(&deferred[1]).unwrap().due, None);
+        assert_eq!(SortContext::with_where(&deferred, &deferred_wh).values(&deferred[1]).unwrap().due, None);
     }
 
     #[test]
