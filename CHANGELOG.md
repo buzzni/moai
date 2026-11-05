@@ -15,13 +15,12 @@ does not tag — see `CONTRIBUTING.md`.
 ### Added
 
 - `moai daemon start|stop|status` runs a per-user local daemon in the foreground (systemd, launchd or `&` keep it) and serves a read-only JSON-RPC 2.0 API over a Unix socket (`daemon.socket` beside the `moai ctl` sockets): `status`, `ready`, `prime`, `show`, `stats`, `project.ls` and a `changes` poll, each returning the CLI's `--json` answer for a registered project. There is no network access, writes are not served yet, and Windows reports `unsupported`. The CLI does not use the daemon: it still reads and writes `.moai/` directly and works with none running. See `docs/daemon.md`. (moai-5n6m)
-
-- `moai update` reports a running daemon with a different version or protocol after a successful Unix update; `--json` includes `daemon_restart: true` when a restart is needed. Restart remains under the user or service manager’s control. (moai-ou5y.q6t)
+- The daemon stops cleanly on SIGTERM and SIGINT, as it does on `moai daemon stop`: it drains the requests it is running, removes its socket and exits 0. A signal already ignored at startup stays ignored. (moai-ou5y.gfs)
+- Daemon `changes` reports issue edits only: session heartbeats and clock-driven fields are not edits, and a live row that could not be read is not reported as removed. Requests without an actor use the project's Git identity rather than the daemon's `MOAI_ACTOR`. (moai-wbdh)
+- `moai update` reports a running daemon with a different version or protocol after a successful Unix update; `--json` then includes `daemon_restart: true`. A rebuild of the same version is not detected. Restart remains under the user or service manager's control. (moai-ou5y.q6t)
 
 ### Fixed
 
-- SIGTERM and SIGINT stop the daemon cleanly, draining active requests and removing its socket. Signals already ignored at startup remain ignored. (moai-ou5y.gfs)
-- Daemon `changes` no longer reports session heartbeat or clock changes as issue edits, and does not report unreadable live rows as removed. Requests without an actor use the project's Git identity rather than the daemon's `MOAI_ACTOR`. (moai-wbdh)
 - `moai status`, `show`, `prime` and `project` no longer panic when stderr is closed (a broken pipe) while they print a notice; the notice is dropped and the answer still comes out. (moai-5n6m)
 
 ## [0.51.0] - 2026-11-05

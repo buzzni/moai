@@ -87,10 +87,12 @@ On macOS, save this as `~/Library/LaunchAgents/com.example.moai-daemon.plist`, r
 
 Load it with `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.example.moai-daemon.plist`. Remove it from the user domain with `launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.example.moai-daemon.plist`.
 
+A service does not inherit your shell's environment, and the socket directory depends on it (see [Where the socket is](#where-the-socket-is)). After the service starts, run `moai daemon status` in a terminal: if it says no daemon is running, the service chose another directory. Set `MOAI_CTL_DIR` to the same directory for the service (`Environment=` in the unit, `EnvironmentVariables` in the plist) and in your shell.
+
 ## Upgrade the daemon
 
-1. Run `moai update`. On Unix, after a successful installation it checks the newly installed binary's daemon status. If a daemon of another version or protocol still runs, it prints a restart notice to stderr. The daemon is not restarted automatically.
-2. Restart it with `moai daemon stop && moai daemon start`, or, for the systemd service above, `systemctl --user restart moai-daemon.service`. For the launchd service above, use `launchctl kickstart -k gui/$(id -u)/com.example.moai-daemon`.
+1. Run `moai update`. On Unix, after a successful installation it checks the newly installed binary's daemon status. If a daemon of another version or protocol still runs, it prints a restart notice to stderr (under `--json`, the `daemon_restart` key below instead). The daemon is not restarted automatically.
+2. Restart it through whatever keeps it running. For the systemd service above, run `systemctl --user restart moai-daemon.service`; for the launchd service above, `launchctl kickstart -k gui/$(id -u)/com.example.moai-daemon`. For a daemon you started yourself, run `moai daemon stop`, then `moai daemon start` again where it ran before. Do not restart a service with `moai daemon stop`: the daemon exits 0, neither service above restarts a clean exit, and a `moai daemon start` typed afterwards runs in your terminal, outside the service.
 3. Run `moai daemon status` to check the replacement. A daemon rebuilt with the same version and protocol is indistinguishable from the old build by this check, so restart it manually after such a rebuild.
 
 For `moai update --json`, the result includes `"daemon_restart": true` only when that post-install check identifies a running daemon with a different version or protocol and can read its version and pid. The key is absent on other paths, including a failed update, a failed status check, no running daemon, and Windows; its absence does not prove that no restart is needed. The update exit status is unchanged by the check.
