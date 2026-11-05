@@ -1461,8 +1461,9 @@ pub enum DaemonCmd {
   same_version is false when the daemon is another version or proto than
   this moai - restart it through its service manager, or stop and start it
   if run manually. A rebuild of the same version still reads true.
-  stale_socket is a socket left by a daemon that is gone; moai daemon start clears it. It only reads,
-  and exits 0 whether or not a daemon runs; a file there that is not your
+  stale_socket is a socket left by a daemon that is gone; moai daemon start
+  clears it. It only reads, and exits 0 whether or not a daemon runs; a
+  file there that is not your
   socket, an answer that is not a daemon's, or a daemon so full that it
   cannot even answer hello (busy, with its pid) is an error. A daemon at
   its connection cap still answers status.")]
