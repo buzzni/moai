@@ -44,6 +44,25 @@ pub struct Seen {
 }
 
 impl Seen {
+    /// Keep old marks for missing rows an unreadable line may hold; an unidentified line may hide any missing row.
+    /// A row that was still read keeps its new mark — a readable twin of a broken line may have changed, and naming it
+    /// in `changed` costs a re-read where keeping the old mark would hide the edit.
+    pub fn preserve_unread(&mut self, old: &Seen, unread: &[Option<String>]) {
+        let unknown = unread.iter().any(Option::is_none);
+        for (id, mark) in &old.rows {
+            if !self.rows.contains_key(id) && (unknown || unread.iter().any(|bad| bad.as_ref() == Some(id))) {
+                self.rows.insert(id.clone(), *mark);
+                match old.notes.get(id) {
+                    Some(notes) => {
+                        self.notes.insert(id.clone(), *notes);
+                    }
+                    None => {
+                        self.notes.remove(id);
+                    }
+                }
+            }
+        }
+    }
     /// 목록의 줄(`id` 를 든 객체)과 `note` 저널 줄에서. `id` 가 없는 줄은 견줄 이름이 없어 뺀다.
     ///
     /// **같은 id 가 둘 선 목록**(`duplicate_id`)은 그 줄들을 차례대로 한 지문에 넣는다 — 하나만 바뀌어도 선다.
@@ -52,7 +71,13 @@ impl Seen {
         let mut by_id: BTreeMap<&str, Context> = BTreeMap::new();
         for row in rows {
             let Some(id) = row.get("id").and_then(Value::as_str) else { continue };
-            let bytes = serde_json::to_vec(row).unwrap_or_default();
+            // These display fields depend on wall time or heartbeat, not edits to the row.
+            let mut compared = row.clone();
+            if let Some(object) = compared.as_object_mut() {
+                object.remove("session");
+                object.remove("archived");
+            }
+            let bytes = serde_json::to_vec(&compared).unwrap_or_default();
             let ctx = by_id.entry(id).or_insert_with(|| Context::new(&SHA256));
             ctx.update(&(bytes.len() as u64).to_le_bytes());
             ctx.update(&bytes);
@@ -171,6 +196,20 @@ mod tests {
         assert_eq!(diff(&a, &b), (vec![], vec![]));
     }
 
+    #[test]
+    fn clock_and_heartbeat_fields_do_not_change_the_fingerprint() {
+        let mut item = row("a-1", "work");
+        item["session"] = json!({"silent_minutes": 0, "last_seen": "first", "lost": false});
+        let old = Seen::of(&[item.clone()], &[]);
+        item["session"] = json!({"silent_minutes": 30, "last_seen": "heartbeat", "lost": true});
+        item["archived"] = json!(true);
+        let later = Seen::of(&[item.clone()], &[]);
+        assert_eq!(old.fingerprint(), later.fingerprint());
+        assert_eq!(diff(&old, &later), (vec![], vec![]));
+        item["title"] = json!("edited");
+        assert_eq!(diff(&old, &Seen::of(&[item], &[])).0, vec!["a-1"]);
+    }
+
     /// **도장은 보지 않는다** — `updated_at` 이 그대로인 채 내용만 바뀐 줄(`git pull` 이 들인 남의 고침)도 선다.
     #[test]
     fn a_row_that_kept_its_stamp_but_changed_is_named() {
@@ -197,6 +236,24 @@ mod tests {
         let old = Seen::of(&[row("a-1", "하나"), row("a-2", "둘")], &[]);
         let new = Seen::of(&[row("a-1", "하나"), row("a-3", "셋")], &[]);
         assert_eq!(diff(&old, &new), (vec!["a-3".to_string()], vec!["a-2".to_string()]));
+    }
+
+    #[test]
+    fn unread_rows_keep_their_old_marks_until_they_can_be_read() {
+        let old = Seen::of(&[row("a-1", "one"), row("a-2", "two")], &[]);
+        let mut partial = Seen::of(&[], &[]);
+        partial.preserve_unread(&old, &[Some("a-1".into())]);
+        assert_eq!(diff(&old, &partial), (vec![], vec!["a-2".to_string()]));
+        let mut unknown = Seen::of(&[], &[]);
+        unknown.preserve_unread(&old, &[None]);
+        assert_eq!(diff(&old, &unknown), (vec![], vec![]));
+        let repaired = Seen::of(&[row("a-1", "edited"), row("a-2", "two")], &[]);
+        assert_eq!(diff(&unknown, &repaired), (vec!["a-1".to_string()], vec![]));
+        assert_eq!(diff(&unknown, &Seen::of(&[], &[])).1, vec!["a-1", "a-2"]);
+        // A readable twin of the broken line still counts: its edit is named, not masked by the old mark.
+        let mut twin = Seen::of(&[row("a-1", "edited"), row("a-2", "two")], &[]);
+        twin.preserve_unread(&old, &[Some("a-1".into())]);
+        assert_eq!(diff(&old, &twin), (vec!["a-1".to_string()], vec![]));
     }
 
     /// 노트는 시각과 상관없이 선다 — 옛 도장의 노트(늦게 확정됐거나 병합으로 들어온 것)도. 목록에 없는 줄의 노트는

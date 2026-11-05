@@ -1278,6 +1278,7 @@
   "update.fetch_failed": "{url} 을 못 받았다 — {said}. 아무것도 안 돌렸다",
   "update.no_sh": "{program} 를 못 띄웠다 — {said}",
   "update.running": "{url} 의 {script} 를 {dir} 에 돌린다",
+  "update.daemon_restart": "데몬 {version} (pid {pid})이 아직 실행 중이다 — moai daemon stop && moai daemon start",
   "update.dry_fetch": "받을 것  {url}",
   "update.dry_run": "돌릴 것  {line}",
   "look.not_a_word": "`{key}` 의 `{value}` 는 낱말이 아니다 — 건너뛴다",

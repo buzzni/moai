@@ -32640,6 +32640,36 @@ fn update_runs_install_sh_over_the_running_binary() {
     server.join().unwrap();
 }
 
+/// The installed executable is probed only after a successful installer, and its result reaches update's output.
+#[cfg(unix)]
+#[test]
+fn update_probes_the_new_binary_only_after_success() {
+    if !served() {
+        return;
+    }
+    for code in [0, 3] {
+        let s = Scratch::new("update-daemon-probe");
+        let exe = hoisted(s.path());
+        let marker = s.path().join("probed");
+        let replacement = s.path().join("replacement");
+        std::fs::write(&replacement, format!(
+            "#!/bin/sh\nprintf probed > '{}'\nprintf '%s\\n' '{{\"running\":true,\"same_version\":false,\"version\":\"old\",\"pid\":42}}'\n",
+            marker.display()
+        )).unwrap();
+        use std::os::unix::fs::PermissionsExt as _;
+        std::fs::set_permissions(&replacement, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let script = format!("mv '{}' '{}'\nexit {code}\n", replacement.display(), exe.display());
+        let (url, server) = serving_script(script, 1);
+        let out =
+            update_with(&exe, s.path(), &s.path().join("config.toml"), &[("MOAI_INSTALL_URL", &url)], &["--json"]);
+        server.join().unwrap();
+        assert_eq!(out.status.code(), Some(code), "{}", text(&out));
+        let result: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+        assert_eq!(marker.exists(), code == 0);
+        assert_eq!(result.get("daemon_restart").and_then(|v| v.as_bool()), (code == 0).then_some(true));
+    }
+}
+
 /// **받을 저장소는 사용자 설정에서 오고 `MOAI_REPO` 가 이긴다. 저장소의 `.moai/config.toml` 은 안 읽는다**
 /// (moai-zsfr.2em, 사람 결정 2026-10-08) — 클론한 저장소가 셸에 흘릴 스크립트를 고르면 안 된다.
 #[cfg(unix)]

@@ -1233,7 +1233,8 @@ pub fn actor(flag: Option<&str>, root: &Path) -> Result<Actor, NoActor> {
     if let Some(raw) = flag.map(str::trim) {
         return Actor::parse(raw).ok_or_else(|| malformed("--user", raw));
     }
-    if let Ok(raw) = std::env::var("MOAI_ACTOR")
+    if !crate::side::with(|s| s.ignore_env_actor).unwrap_or(false)
+        && let Ok(raw) = std::env::var("MOAI_ACTOR")
         && !raw.trim().is_empty()
     {
         return Actor::parse(raw.trim()).ok_or_else(|| malformed("MOAI_ACTOR", raw.trim()));

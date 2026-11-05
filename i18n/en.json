@@ -1278,6 +1278,7 @@
   "update.fetch_failed": "could not fetch {url} — {said}. Nothing was run",
   "update.no_sh": "could not start {program} — {said}",
   "update.running": "running {script} from {url} over {dir}",
+  "update.daemon_restart": "daemon {version} (pid {pid}) still runs — moai daemon stop && moai daemon start",
   "update.dry_fetch": "would fetch  {url}",
   "update.dry_run": "would run    {line}",
   "look.not_a_word": "`{value}` in `{key}` is not a word — skipped",
