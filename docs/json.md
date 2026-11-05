@@ -252,6 +252,9 @@ of it.
 
 None of this changes a column, a kind or an exit code.
 
+To count and measure these rows with SQL, see
+[Analyse the tracker with SQL](sql.md).
+
 ## Keep the payload small
 
 A whole tracker with bodies runs to megabytes — this repository's
