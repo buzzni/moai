@@ -14,6 +14,8 @@ pub struct Editor {
     /// 고치는 중의 차례. **늘 한 필드 이상이다** — 마지막 필드는 못 뺀다([`Editor::act`]). 빈 차례는 차례가 아니고
     /// (`query::parse_order` 가 거절한다), Enter 가 그것을 받으면 무엇으로 설지 정할 길이 없다.
     fields: Vec<Ordered>,
+    /// 창을 취소할 때 되돌릴 차례.
+    original: Sorting,
     /// 커서 — [`Editor::rows`] 의 자리.
     pub cursor: usize,
 }
@@ -41,7 +43,11 @@ pub enum Done {
 impl Editor {
     /// 지금 차례로 연다. 커서는 첫 필드에 선다.
     pub fn open(s: Sorting) -> Editor {
-        Editor { fields: s.fields().to_vec(), cursor: 0 }
+        Editor { fields: s.fields().to_vec(), original: s, cursor: 0 }
+    }
+
+    pub fn original(&self) -> Sorting {
+        self.original
     }
 
     /// 그릴 줄 — 차례에 든 필드가 그 차례대로, 안 든 필드가 뒤에.
@@ -180,5 +186,238 @@ mod tests {
         assert_eq!(e.act(Sorter::Apply), Done::Apply(flipped));
         assert_eq!(e.act(Sorter::Default), Done::Default(flipped));
         assert_eq!(e.act(Sorter::Close), Done::Cancel);
+    }
+}
+
+/// Temporary screen model until the shared query engine supplies its order and group types.
+/// Keep engine conversion at this boundary rather than duplicating query comparisons in the UI.
+#[allow(dead_code)]
+mod adapter {
+    use super::{Order, Ordered, Sorting};
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum Level {
+        Milestone,
+        Epic,
+        Item,
+    }
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum Group {
+        Structure,
+        None,
+        Status,
+        Assignee,
+        Priority,
+        Tag,
+        Kind,
+        Milestone,
+        Epic,
+    }
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum Preset {
+        Release,
+        Urgent,
+        Recent,
+        Due,
+        People,
+    }
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct ScreenOrder {
+        pub milestone: Sorting,
+        pub epic: Sorting,
+        pub item: Sorting,
+        pub group: Group,
+    }
+
+    impl ScreenOrder {
+        pub fn preset(preset: Preset) -> Self {
+            let fields = |pairs: &[(Order, bool)]| {
+                Sorting::of(&pairs.iter().map(|(by, down)| Ordered { by: *by, down: *down }).collect::<Vec<_>>())
+                    .expect("preset fields are nonempty and unique")
+            };
+            let release = Self {
+                milestone: fields(&[(Order::Due, false), (Order::Created, true)]),
+                epic: fields(&[(Order::Priority, false), (Order::Created, false)]),
+                item: fields(&[(Order::Priority, false), (Order::Due, false)]),
+                group: Group::Structure,
+            };
+            match preset {
+                Preset::Release => release,
+                Preset::Urgent => Self { group: Group::None, epic: Sorting::by(Order::Priority), ..release },
+                Preset::Recent => Self {
+                    group: Group::None,
+                    milestone: Sorting::by(Order::Updated),
+                    epic: Sorting::by(Order::Updated),
+                    item: Sorting::by(Order::Updated),
+                },
+                Preset::Due => Self {
+                    group: Group::None,
+                    milestone: Sorting::by(Order::Due),
+                    epic: Sorting::by(Order::Due),
+                    item: fields(&[(Order::Due, false), (Order::Priority, false)]),
+                },
+                Preset::People => Self { group: Group::Assignee, epic: Sorting::by(Order::Priority), ..release },
+            }
+        }
+
+        pub fn get(&self, level: Level) -> Sorting {
+            match level {
+                Level::Milestone => self.milestone,
+                Level::Epic => self.epic,
+                Level::Item => self.item,
+            }
+        }
+
+        pub fn set(&mut self, level: Level, value: Sorting) {
+            match level {
+                Level::Milestone => self.milestone = value,
+                Level::Epic => self.epic = value,
+                Level::Item => self.item = value,
+            }
+        }
+
+        pub fn active(&self, level: Level) -> bool {
+            match self.group {
+                Group::Structure => true,
+                Group::Milestone => level != Level::Epic,
+                Group::Epic => level != Level::Milestone,
+                _ => level == Level::Item,
+            }
+        }
+    }
+
+    /// A separate editor per level keeps field order and cursor when switching tabs.
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub struct ScreenEditor {
+        pub group: Group,
+        pub level: Level,
+        milestone: super::Editor,
+        epic: super::Editor,
+        item: super::Editor,
+    }
+
+    impl ScreenEditor {
+        pub fn open(state: ScreenOrder) -> Self {
+            let level = if state.active(Level::Milestone) {
+                Level::Milestone
+            } else if state.active(Level::Epic) {
+                Level::Epic
+            } else {
+                Level::Item
+            };
+            Self {
+                group: state.group,
+                level,
+                milestone: super::Editor::open(state.milestone),
+                epic: super::Editor::open(state.epic),
+                item: super::Editor::open(state.item),
+            }
+        }
+
+        pub fn state(&self) -> ScreenOrder {
+            ScreenOrder {
+                milestone: self.milestone.sorting(),
+                epic: self.epic.sorting(),
+                item: self.item.sorting(),
+                group: self.group,
+            }
+        }
+
+        pub fn editor(&mut self) -> &mut super::Editor {
+            match self.level {
+                Level::Milestone => &mut self.milestone,
+                Level::Epic => &mut self.epic,
+                Level::Item => &mut self.item,
+            }
+        }
+
+        pub fn choose_group(&mut self, group: Group) {
+            self.group = group;
+            if !self.state().active(self.level) {
+                self.level = if self.state().active(Level::Milestone) {
+                    Level::Milestone
+                } else if self.state().active(Level::Epic) {
+                    Level::Epic
+                } else {
+                    Level::Item
+                };
+            }
+        }
+
+        pub fn next_level(&mut self) {
+            let levels = [Level::Milestone, Level::Epic, Level::Item];
+            let start = levels.iter().position(|level| *level == self.level).unwrap_or(0);
+            self.level = (1..=levels.len())
+                .map(|n| levels[(start + n) % levels.len()])
+                .find(|level| self.state().active(*level))
+                .expect("item is always active");
+        }
+
+        pub fn choose_preset(&mut self, preset: Preset) {
+            *self = Self::open(ScreenOrder::preset(preset));
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn presets_replace_all_levels_and_group() {
+            let release = ScreenOrder::preset(Preset::Release);
+            assert_eq!(
+                release.milestone.fields(),
+                &[Ordered { by: Order::Due, down: false }, Ordered { by: Order::Created, down: true }]
+            );
+            assert_eq!(
+                release.epic.fields(),
+                &[Ordered { by: Order::Priority, down: false }, Ordered { by: Order::Created, down: false }]
+            );
+            assert_eq!(ScreenOrder::preset(Preset::Recent).item, Sorting::by(Order::Updated));
+            assert_eq!(ScreenOrder::preset(Preset::People).group, Group::Assignee);
+        }
+
+        #[test]
+        fn editing_one_level_leaves_the_others_and_group_intact() {
+            let mut state = ScreenOrder::preset(Preset::Release);
+            let before = state;
+            state.set(Level::Epic, Sorting::by(Order::Title));
+            assert_eq!(state.get(Level::Epic), Sorting::by(Order::Title));
+            assert_eq!((state.milestone, state.item, state.group), (before.milestone, before.item, before.group));
+        }
+
+        #[test]
+        fn editor_preserves_each_tab_and_skips_inactive_tabs() {
+            let mut editor = ScreenEditor::open(ScreenOrder::preset(Preset::Release));
+            editor.editor().act(super::super::Sorter::Flip);
+            let changed = editor.state().milestone;
+            editor.next_level();
+            assert_eq!(editor.level, Level::Epic);
+            editor.next_level();
+            assert_eq!(editor.level, Level::Item);
+            editor.next_level();
+            assert_eq!(editor.state().milestone, changed);
+            editor.choose_group(Group::Assignee);
+            assert_eq!(editor.level, Level::Item);
+            editor.next_level();
+            assert_eq!(editor.level, Level::Item);
+            editor.choose_preset(Preset::Release);
+            assert_eq!(editor.state(), ScreenOrder::preset(Preset::Release));
+        }
+
+        #[test]
+        fn active_tabs_follow_grouping() {
+            let mut state = ScreenOrder::preset(Preset::Release);
+            assert!([Level::Milestone, Level::Epic, Level::Item].into_iter().all(|l| state.active(l)));
+            state.group = Group::Milestone;
+            assert!(state.active(Level::Milestone) && !state.active(Level::Epic) && state.active(Level::Item));
+            state.group = Group::Epic;
+            assert!(!state.active(Level::Milestone) && state.active(Level::Epic) && state.active(Level::Item));
+            state.group = Group::Assignee;
+            assert!(!state.active(Level::Milestone) && !state.active(Level::Epic) && state.active(Level::Item));
+        }
     }
 }

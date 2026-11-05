@@ -4701,16 +4701,27 @@ impl App {
 
     /// 차례 편집 창(`SPC s e`, moai-r170.x22)의 키 하나. 창이 고친 차례를 내면 입히고 적는다.
     pub(super) fn edit_sort(&mut self, k: KeyEvent) {
-        let Mode::Sort(e) = &mut self.mode else { return };
         let Lookup::Run(act) = keys::lookup(self.keys.sorter, &[k]) else { return };
-        match e.act(act) {
-            sorter::Done::Stay => {}
-            sorter::Done::Cancel => self.mode = Mode::Browse,
+        let rows = self.rows();
+        let (held, stood) = self.grip_of(&rows);
+        let Mode::Sort(e) = &mut self.mode else { return };
+        let original = e.original();
+        let done = e.act(act);
+        let preview = e.sorting();
+        match done {
+            sorter::Done::Stay => {
+                self.order = preview;
+                self.regrip(held, stood);
+            }
+            sorter::Done::Cancel => {
+                self.order = original;
+                self.mode = Mode::Browse;
+                self.regrip(held, stood);
+            }
             sorter::Done::Apply(s) => {
                 self.mode = Mode::Browse;
-                // **안 고친 Enter 는 안 적는다**(리뷰 moai-r170.9ou) — 제 차례가 없는 프로젝트에서 창을 열고 닫기만 해도
-                // 기본과 같은 표가 박혀, 그 프로젝트가 다음 기본을 안 따르게 묶인다. 고친 것만 지금 자리에 적는다.
-                if s != self.order {
+                // Preview did not write a project override; an unchanged Enter must not create one.
+                if s != original {
                     self.set_order(s, false);
                 }
             }
@@ -14964,7 +14975,9 @@ mod tests {
         a.hit("j SPC d K");
         let shown = super::draw::tests::render(&mut a, 80, 16).join("\n");
         assert!(shown.contains(" 1  생성      ↑ 오름") && shown.contains(" 2  우선순위  ↑ 오름"), "{shown}");
-        assert_eq!(a.order, Sorting::default(), "Enter 전에 차례가 바뀌었다");
+        let preview = Sorting::of(&[Ordered::of(Order::Created).flipped(), Ordered::of(Order::Priority)]).unwrap();
+        assert_eq!(a.order, preview, "편집 중 차례를 미리 보여주지 않았다");
+        assert!(!user.exists(), "미리 보기가 설정을 기록했다");
         a.hit("Enter");
         assert_eq!(a.mode, Mode::Browse);
         let want = Sorting::of(&[Ordered::of(Order::Created).flipped(), Ordered::of(Order::Priority)]).unwrap();
