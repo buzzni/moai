@@ -13,6 +13,7 @@ import type { State } from '../store.js'
 import { BACKLOG, DEFERRED, groupBoard, type BoardLane, type BoardModel } from './board-groups.ts'
 import { segLabel } from './crumbs.ts'
 import { narrow, segKey, statusGlyph, statusOf } from './list-model.ts'
+import { orderExpression } from './sort-adapter.ts'
 import { chip, el, emptyState, icon } from './components.ts'
 import { newChip } from './unread.ts'
 import { firstStatus, glint, spins , lostMark } from './spin.ts'
@@ -340,7 +341,7 @@ export const mountBoard: MountPane = (root, ctx): PaneView => {
           // The board is a layout of the list: the same filter and search narrow it (list-model.ts narrow).
           const found = narrow(state, index)
           const panel = state.toolbar.panel
-          const expression = ['milestone', 'epic', 'item'].map((level) => `${level}=${(panel.order[level] ?? []).map((field) => `${field.key}:${field.dir}${field.nullsFirst ? ':nulls-first' : ''}`).join(',')}`).join(';')
+          const expression = orderExpression(panel)
           const data = state.board.value
           const groupedTree = data?.groupedBy === panel.group && data.groupedSort === expression ? data.groupedTree : undefined
           const model = groupBoard(index, { path: state.path, view: state.view, cursor: state.cursor, match: found.match, reveal: found.searching, shut, group: panel.group, itemOrder: panel.edited ? panel.order.item : undefined, levelOrder: panel.order[panel.group], milestoneOrder: panel.edited ? panel.order.milestone : undefined, groupedTree }, state.boot?.statuses)

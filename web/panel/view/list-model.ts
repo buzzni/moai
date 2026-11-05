@@ -6,6 +6,7 @@
 // search find is moai's too (store.ts Matched). What stays here is drawing: which of those rows the view toggles show.
 
 import { compareItems, groupBuckets } from "./group-adapter.ts"
+import { orderExpression } from "./sort-adapter.ts"
 import { partsIn, zoneNow } from "../data/zone.ts"
 import { isBacklog, LOST, NO_MILESTONE, pathKey, type IssueIndex, type Keep, type Path, type Row, type Seg, type Twig } from "../data/index.ts"
 import type { Boot } from "../data/source.ts"
@@ -132,7 +133,7 @@ export function listLines(state: Pick<State, "path" | "expanded"> & Partial<Pick
   if (group !== 'structure') {
     const data = state.board?.value
     const panel = state.toolbar?.panel
-    const expression = ['milestone', 'epic', 'item'].map((level) => `${level}=${(panel?.order[level] ?? []).map((field) => `${field.key}:${field.dir}${field.nullsFirst ? ':nulls-first' : ''}`).join(',')}`).join(';')
+    const expression = panel ? orderExpression(panel) : undefined
     const server = data?.groupedBy === group && data.groupedSort === expression ? data.groupedTree : undefined
     const buckets = groupBuckets(index, state.path, keep, group, state.boot?.statuses, true, panel?.order.item, panel?.order[group], server)
     for (const bucket of buckets) {
@@ -146,10 +147,12 @@ export function listLines(state: Pick<State, "path" | "expanded"> & Partial<Pick
     return out
   }
   const kin: boolean[] = []
+  // Built once per listing, not once per level the walk visits.
+  const treeSort = state.toolbar?.panel ? orderExpression(state.toolbar.panel) : undefined
   const walk = (here: Path) => {
     const entries = index.entries(here, keep)
     const panel = state.toolbar?.panel
-    if (panel?.edited && state.board?.value?.treeSort !== ['milestone', 'epic', 'item'].map((level) => `${level}=${(panel.order[level] ?? []).map((field) => `${field.key}:${field.dir}${field.nullsFirst ? ':nulls-first' : ''}`).join(',')}`).join(';')) entries.sort((a, b) => {
+    if (panel?.edited && state.board?.value?.treeSort !== treeSort) entries.sort((a, b) => {
       if (a.at === undefined || b.at === undefined) return a.at === b.at ? 0 : a.at === undefined ? 1 : -1
       if (a.dir !== b.dir) return a.dir ? -1 : 1
       const kind = index.rows[a.at]?.kind

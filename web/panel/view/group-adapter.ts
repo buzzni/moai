@@ -1,5 +1,5 @@
 /** Present server groups, with an immediate local preview while a new tree is loading. */
-import { isBacklog, isDone, isWork, type IssueIndex, type Keep, type Path, type Row, type TreeRow } from '../data/index.ts'
+import { isBacklog, isDone, isWork, priorityOf, type IssueIndex, type Keep, type Path, type Row, type TreeRow } from '../data/index.ts'
 import { assigneeOf } from '../data/people.ts'
 import type { SortPanelField } from './sort-panel.ts'
 
@@ -8,7 +8,9 @@ export function groupValue(group: string, row: Row, index: IssueIndex, at: numbe
   switch (group) {
     case 'status': return row.status ?? null
     case 'assignee': return assigneeOf(row) || null
-    case 'priority': return row.priority == null ? null : String(row.priority)
+    // The engine's value (`nav::Index::grouped_tree`): `p<n>`, an unset priority counted as its default — so the
+    // preview's seg and label match the server tree's, and a fold made on one survives the other.
+    case 'priority': return `p${priorityOf(row)}`
     case 'tag': return row.tags?.[0] ?? null
     case 'kind': return row.kind ?? null
     case 'milestone': return row.derived_milestone ?? row.milestone ?? index.homeOf(at).find((s) => s.startsWith('m:'))?.slice(2) ?? null
@@ -39,7 +41,7 @@ export function groupBuckets(index: IssueIndex, path: Path, keep: Keep, group: s
         let value: string | null
         try { value = JSON.parse(payload) as string | null } catch { continue }
         const ref = value === null || (group !== 'milestone' && group !== 'epic') ? undefined : index.find(value)
-        const label = value === null ? '(none)' : group === 'priority' ? `p${value}` : group === 'tag' ? `#${value}` : ref === undefined ? value : index.rows[ref]!.title ?? value
+        const label = value === null ? '(none)' : group === 'tag' ? `#${value}` : ref === undefined ? value : index.rows[ref]!.title ?? value
         current = { seg: `group:${encodeURIComponent(group)}:${value === null ? 'n' : `v${encodeURIComponent(value)}`}`, label, members: [] }
         result.push(current)
       } else if (line.id) {
@@ -71,7 +73,7 @@ export function groupBuckets(index: IssueIndex, path: Path, keep: Keep, group: s
         if (ranked) return ranked
       }
     }
-    if (group === 'priority') return Number(a) - Number(b)
+    if (group === 'priority') return Number(a.slice(1)) - Number(b.slice(1))
     if (group === 'status') {
       const rank = (v: string) => { const n = statuses.indexOf(v); return n < 0 ? statuses.length : n }
       return rank(a) - rank(b) || a.localeCompare(b)
@@ -81,7 +83,7 @@ export function groupBuckets(index: IssueIndex, path: Path, keep: Keep, group: s
 
   return values.map((value) => {
     const ref = value === null || (group !== 'milestone' && group !== 'epic') ? undefined : index.find(value)
-    const label = value === null ? '(none)' : group === 'priority' ? `p${value}` : group === 'tag' ? `#${value}` : ref === undefined ? value : index.rows[ref]!.title ?? value
+    const label = value === null ? '(none)' : group === 'tag' ? `#${value}` : ref === undefined ? value : index.rows[ref]!.title ?? value
     return { seg: `group:${encodeURIComponent(group)}:${value === null ? 'n' : `v${encodeURIComponent(value)}`}`, label, members: map.get(value)!.sort((a, b) => compareItems(index, a, b, order, statuses)) }
   })
 }

@@ -30,6 +30,24 @@ export function preset(id: string): SortPanelState {
   if (id === 'people') { group = 'assignee'; order.milestone = [f('assignee')]; order.epic = [f('assignee')]; order.item = [f('assignee')] }
   return { group, order, level: group === 'structure' ? 'milestone' : 'item', preset: id, edited: true }
 }
+/** Every field the sort window lists, in the vocabulary's order (`/api/boot`, else the page's own keys). */
+export function sortFieldNames(): string[] {
+  return engine ? engine.sort_fields.map((field) => field.name) : [...SORT_KEYS]
+}
+/** A field's own direction, as it is put in. */
+export function fieldDir(key: string): 'asc' | 'desc' {
+  return engine?.sort_fields.find((field) => field.name === key)?.dir ?? defaultDir(key as SortKey)
+}
+/** The sort window's rows for one level, top to bottom: the level's fields in their order, then the rest. */
+export function sorterRows(panel: SortPanelState): string[] {
+  const used = (panel.order[panel.level] ?? []).map((field) => field.key)
+  return [...used, ...sortFieldNames().filter((key) => !used.includes(key))]
+}
+/** The groups `g` cycles through, as the panel lists them. */
+export function groupNames(): string[] {
+  const all = ['structure', 'none', 'status', 'assignee', 'priority', 'tag', 'kind', 'milestone', 'epic']
+  return engine?.sort_groups ? all.filter((group) => engine!.sort_groups!.includes(group)) : all
+}
 export function activeLevels(group: string): string[] {
   return group === 'structure' ? ['milestone', 'epic', 'item'] : group === 'milestone' ? ['milestone', 'item'] : group === 'epic' ? ['epic', 'item'] : ['item']
 }

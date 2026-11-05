@@ -568,9 +568,6 @@ pub(super) fn sort_words(s: &super::keys::Sorting, lang: Lang) -> String {
     s.fields().iter().map(one).collect::<Vec<_>>().join(", ")
 }
 
-/// 차례 편집 창(`SPC s e`, moai-r170.x22) — 필드 여섯이 늘 다 선다. 차례에 든 것은 번호와 방향을 **글리프와 낱말로**
-/// (`1  우선순위  ↑ 오름`), 안 든 것은 `·` 로 선다 — 색이 혼자 뜻을 지지 않는다. 목록·상세 자리를 통째로 덮는다
-/// ([`zone_pick`] 과 같은 까닭: 뒤 칸의 커서가 비치면 어느 `>` 가 이 창의 것인지 안 읽힌다).
 fn grouping_word(group: super::sorter::adapter::Group, lang: Lang) -> &'static str {
     use super::sorter::adapter::Group;
     match group {
@@ -597,7 +594,7 @@ fn preset_word(preset: crate::query::Preset, lang: Lang) -> &'static str {
 }
 fn screen_order_words(order: &super::sorter::adapter::ScreenOrder, lang: Lang) -> String {
     use crate::query::Preset;
-    for preset in [Preset::Release, Preset::Urgent, Preset::Recent, Preset::Due, Preset::People] {
+    for preset in Preset::ALL {
         if *order == App::screen_preset(preset) {
             return preset_word(preset, lang).to_string();
         }
@@ -613,6 +610,10 @@ fn screen_order_words(order: &super::sorter::adapter::ScreenOrder, lang: Lang) -
     )
 }
 
+/// 차례 편집 창(`SPC s`, moai-r170.x22) — 프리셋·묶기·층 머리 세 줄 밑에 지금 층의 필드가 다 선다. 차례에 든 것은
+/// 번호와 방향을 **글리프와 낱말로**(`1  우선순위  ↑ 오름`), 안 든 것은 `·` 로 선다 — 색이 혼자 뜻을 지지 않는다.
+/// 좁은 화면에서는 목록·상세 자리를 통째로 덮고([`zone_pick`] 과 같은 까닭: 뒤 칸의 커서가 비치면 어느 `>` 가 이 창의
+/// 것인지 안 읽힌다), 96칸 이상이면 오른쪽 52칸에 서서 미리 보는 목록을 가리지 않는다.
 fn sort_edit(f: &mut Frame, e: &mut super::sorter::adapter::ScreenEditor, at: Rect, lang: Lang) {
     // Leave the list visible beside the editor when the terminal is wide enough.
     let at = if at.width >= 96 { Rect::new(at.x + at.width - 52, at.y, 52, at.height) } else { at };
@@ -663,7 +664,7 @@ fn sort_edit(f: &mut Frame, e: &mut super::sorter::adapter::ScreenEditor, at: Re
     let header_height = if inner.height >= 10 { 3 } else { 0 };
     if header_height > 0 {
         use crate::query::Preset;
-        let presets = [Preset::Release, Preset::Urgent, Preset::Recent, Preset::Due, Preset::People];
+        let presets = Preset::ALL;
         let choices = presets
             .iter()
             .enumerate()
@@ -3419,18 +3420,8 @@ fn lane_line<'a>(app: &App, laid: &super::Laid, lane: usize, w: usize) -> Line<'
         },
         crate::nav::Seg::Milestone(None) => head.push(Span::styled(say(lang, "nav.no_milestone"), dim())),
         crate::nav::Seg::Lost => head.push(Span::styled(say(lang, "nav.lost"), dim())),
-        crate::nav::Seg::Epic(name) if super::virtual_group(seg) => {
-            let label = super::group_label(seg).unwrap_or("");
-            let title = if name.contains(":empty:") {
-                say(site.lang, "tui.grouping.none").to_string()
-            } else if name.starts_with(&format!("{}milestone:value:", super::GROUP_PREFIX))
-                || name.starts_with(&format!("{}epic:value:", super::GROUP_PREFIX))
-            {
-                site.title_of(label)
-            } else {
-                label.to_string()
-            };
-            head.push(Span::styled(title, bold()));
+        crate::nav::Seg::Epic(_) if super::virtual_group(seg) => {
+            head.push(Span::styled(site.group_title(seg).unwrap_or_default(), bold()));
         }
         crate::nav::Seg::Epic(_) | crate::nav::Seg::Issue(_) => {}
     }
@@ -3768,21 +3759,8 @@ fn row_line<'a>(app: &App, r: &Row, tally: &str, budget: usize, fields: super::v
     let is_dir = matches!(e, Entry::Dir { .. });
     let Some(at) = e.at() else {
         if let Entry::Dir { seg, .. } = e
-            && super::virtual_group(seg)
+            && let Some(text) = site.group_title(seg)
         {
-            let label = super::group_label(seg).unwrap_or("");
-            let text = match seg {
-                crate::nav::Seg::Epic(name) if name.contains(":empty:") => {
-                    say(site.lang, "tui.grouping.none").to_string()
-                }
-                crate::nav::Seg::Epic(name)
-                    if name.starts_with(&format!("{}milestone:value:", super::GROUP_PREFIX))
-                        || name.starts_with(&format!("{}epic:value:", super::GROUP_PREFIX)) =>
-                {
-                    site.title_of(label)
-                }
-                _ => label.to_string(),
-            };
             return Line::from(Span::styled(format!("{text}/"), dim()));
         }
         // 바구니는 제 줄이 없다 — 이름만 낸다.

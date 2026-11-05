@@ -18,7 +18,7 @@ import { openEvents, type Events } from './data/events.js'
 import { createCtl, type Reply as CtlReply } from './ctl.js'
 import { BACKOFF_MS, createRefresher, POLL_MS } from './data/refresh.js'
 import { sortQuery, useVocabulary } from './data/query.js'
-import { useSortVocabulary } from './view/sort-adapter.js'
+import { orderExpression, useSortVocabulary } from './view/sort-adapter.js'
 import {
   archiveDue, loadAllRows, loadArchived, loadBoot, loadDetail, loadGroups, loadMatches, loadProjects, loadTree, loadWikiListing, loadWikiPage, loadWikiSearch, matchEndpoints, sameGroups, withArchive,
   type Boot, type Loaded,
@@ -224,7 +224,7 @@ async function start(): Promise<void> {
     // `SPC v w` (on by default): the other worktrees' rows over the list, as the TUI's explorer opens.
     const listing = loadAllRows(client, PRIORITY.list, load, view.worktree)
     const panel = store.getState().toolbar.panel
-    const expression = ['milestone', 'epic', 'item'].map((level) => `${level}=${(panel.order[level] ?? []).map((field) => `${field.key}:${field.dir}${field.nullsFirst ? ':nulls-first' : ''}`).join(',')}`).join(';')
+    const expression = orderExpression(panel)
     const placing = loadTree(client, { query: gantt ? sortQuery(sort) : { sort: expression, group: panel.group }, priority: PRIORITY.list, epoch: load, worktree: view.worktree, archived: view.showArchived, zone, gantt })
     // The grouped tree has virtual homes. Retain a structural tree as well so navigating inside an epic
     // continues to work while the group is active; grouped order still comes from the server request.
@@ -236,10 +236,11 @@ async function start(): Promise<void> {
     void counting.then((groups) => (counted = groups))
     const [loaded, grouped, structure] = await Promise.all([listing, placing, structural])
     const placed = structure ?? grouped
-    if (!grouped.ok) { store.dispatch({ type: 'board-failed', problem: grouped.outcome }); return failure(grouped.outcome) }
+    // A later load owns the screen: this one's answers, failures included, are dropped first. A superseded load's
+    // reads come back cancelled, and reporting that as the board's problem cleared the newer load's spinner.
     if (load !== loads) return true
-    if (!loaded.ok || !placed.ok) {
-      const problem = loaded.ok ? (placed as Extract<typeof placed, { ok: false }>).outcome : loaded.outcome
+    if (!loaded.ok || !placed.ok || !grouped.ok) {
+      const problem = !loaded.ok ? loaded.outcome : !placed.ok ? placed.outcome : (grouped as Extract<typeof grouped, { ok: false }>).outcome
       store.dispatch({ type: 'board-failed', problem })
       return failure(problem)
     }

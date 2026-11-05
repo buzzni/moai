@@ -139,3 +139,18 @@ test('group labels resolve titles only for milestone and epic identifiers', asyn
   const server = [{ kind: 'group', path: 'group:assignee:"Amy"' }, { id: 'Amy' }]
   assert.equal(groupBuckets(index, [], () => true, 'assignee', [], false, [], [], server)[0].label, 'Amy')
 })
+
+test('priority groups read the engine value p<n>: server and preview share one label and seg', async () => {
+  const { IssueIndex } = await panelModule('data/index.ts')
+  const { groupBuckets } = await panelModule('view/group-adapter.ts')
+  const rows = [
+    { id: 'a', kind: 'issue', status: 'todo', priority: 0, created_at: '2026-01-01' },
+    { id: 'b', kind: 'issue', status: 'todo', created_at: '2026-01-02' },
+  ]
+  const index = new IssueIndex(rows)
+  const server = [{ kind: 'group', path: 'group:priority:"p0"' }, { id: 'a' }, { kind: 'group', path: 'group:priority:"p2"' }, { id: 'b' }]
+  const fromServer = groupBuckets(index, [], () => true, 'priority', [], false, [], [], server)
+  const preview = groupBuckets(index, [], () => true, 'priority', [], false, [], [])
+  assert.deepEqual(fromServer.map((bucket) => bucket.label), ['p0', 'p2'])
+  assert.deepEqual(preview.map((bucket) => [bucket.seg, bucket.label]), fromServer.map((bucket) => [bucket.seg, bucket.label]))
+})

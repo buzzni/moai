@@ -265,9 +265,10 @@ test('keys: SPC s sorts by a field; SPC s e opens the sort editor (sorter mode),
   assert.equal(panel.keys.context().mode, 'sorter')
   const cursorRow = () => panel.$('.m-sort-pop [data-cursor]')?.dataset.key
   assert.equal(cursorRow(), 'title', 'the editor opens on the first field')
+  // The cursor walks the rows as drawn: the order's fields first, then the rest.
   panel.press('j')
-  assert.equal(cursorRow(), 'due')
-  panel.seq('k', 'k', 'k')
+  assert.equal(cursorRow(), 'priority')
+  panel.seq('j', 'j', 'j')
   assert.equal(cursorRow(), 'status')
   panel.press(' ')
   assert.deepEqual(panel.state().sort.fields.map((f) => f.key), ['title', 'priority', 'status'], 'SPC puts it in')
