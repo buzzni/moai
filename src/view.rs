@@ -469,7 +469,7 @@ pub fn list(
 
     out.push(String::new());
     out.push(summary(issues, cfg, hidden, wh, lang));
-    // **다음 쪽은 마지막 줄의 id 로 연다** — 커서가 값이라(`query::page`) 앞 쪽의 마지막 줄이 곧 그 값이다.
+    // **다음 쪽은 마지막 줄의 id 로 연다** — 커서가 값이라(`query::page_order`) 앞 쪽의 마지막 줄이 곧 그 값이다.
     // "N건 더" 는 다른 잘린 목록과 한 키다([`more_of`]) — 뒤의 명령은 자료라 `{go}` 로 말묶음 밖에서 온다.
     if let Some(last) = issues.last().filter(|_| more > 0) {
         let go = format!("--after {}", one_line(&last.id));

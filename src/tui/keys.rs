@@ -679,8 +679,8 @@ impl Ordered {
 /// 누르면 그 필드의 방향이 뒤집힌다. 옛 설정의 `sort_reversed = true` 도 첫 필드의 방향으로 읽는다(`App::apply_look`).
 ///
 /// **크기가 정해진 배열로 든다** — 한 필드는 한 번만 서니(`query::parse_order` 가 거절한다) 칸은 [`Order::ALL`] 의
-/// 수를 못 넘는다. 그래서 `Copy` 로 남는다: 키 처리의 [`Ctx`] 와 굴린 화면의 기억(`Adrift`)이 이것을 값으로 들어,
-/// `Vec` 이면 그 둘이 통째로 `Copy` 를 잃는다. 쓰지 않는 칸은 견주지 않는다(손으로 적은 `PartialEq`).
+/// 수를 못 넘는다. 그래서 `Copy` 로 남는다: 키 처리의 [`Ctx`] 가 이것을 값으로 들어,
+/// `Vec` 이면 그것이 통째로 `Copy` 를 잃는다. 쓰지 않는 칸은 견주지 않는다(손으로 적은 `PartialEq`).
 #[derive(Clone, Copy)]
 pub struct Sorting {
     slots: [Ordered; Order::ALL.len()],

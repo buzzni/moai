@@ -176,14 +176,6 @@ pub(crate) fn filter_of(
     Ok(filter)
 }
 
-/// 시험만 부른다 — 목록은 층별 차례와 묶기를 함께 보는 [`crate::query::page_order`] 를 지난다. 이것은 그
-/// 차례의 `item` 층만 옛 [`crate::query::Sort`] 로 옮긴다. 안 준 `--sort` 는 옛 기본 차례(우선순위)다.
-#[cfg(test)]
-fn sort_of(p: &crate::cli::PageArgs) -> crate::query::Sort {
-    let fields = p.sort.as_ref().map_or_else(|| crate::query::Sort::default().fields, |f| f.0.item.clone());
-    crate::query::Sort { fields, reversed: p.reverse }
-}
-
 pub fn run(ctx: &Ctx, mut args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String>> {
     // **키를 고르는 것은 낸 뒤에 한 자리에서 한다**(moai-wk7i.vsk) — 목록·하나·지운 줄·되뽑기가 저마다 고르면
     // 한쪽이 빠진다. 안 고른 키를 짓지 않는 것은 값이 큰 자리(저널·`git log`·옆 워크트리·거름망·읽음 파일)에서만
@@ -440,7 +432,12 @@ fn listed(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>, keys: &Keys) -> 
     // 사는 거름망(`Where::from_soil`)이 마지막에 지도를 받아 간다.
     let soil = crate::report::Soil::of(&load.issues);
     let tree_now = args.tree && !ctx.json;
-    let index = tree_now.then(|| crate::nav::Index::in_soil(&load.issues, &soil));
+    // A flat list only orders by the group; it never drops rows. Dropping non-leaf kinds here emptied
+    // `moai epic show --group status` and hid epics under `--sort people` without counting them as hidden.
+    let group = args.page.group.or_else(|| args.page.sort.as_ref().and_then(|s| s.1)).unwrap_or_default();
+    // Grouping by milestone or epic reads tree positions (`query::page_order`) — from this one map too.
+    let index = (tree_now || matches!(group, crate::nav::Group::Milestone | crate::nav::Group::Epic))
+        .then(|| crate::nav::Index::in_soil(&load.issues, &soil));
     let rolls = tree_now.then(|| report::rollup_in(&load.issues, &repo.config, &soil));
     // **`-g` 는 노트도 본다**(moai-efoc.zyc, 2026-09-30 사용자 결정). 노트는 저널에 살아 `query` 가 못 읽으니
     // 여기서 읽어 자료로 건네고, 맞는지는 `query` 가 가른다. **`-g` 를 물었을 때만 읽는다** — 거르개 없는
@@ -493,10 +490,10 @@ fn listed(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>, keys: &Keys) -> 
         }
         h
     };
-    // **커서 줄은 걸러지기 전의 줄에서 찾는다** — 값으로 넘으므로(`query::page`) 앞 쪽의 마지막 줄이
+    // **커서 줄은 걸러지기 전의 줄에서 찾는다** — 값으로 넘으므로(`query::page_order`) 앞 쪽의 마지막 줄이
     // 그사이 닫혀 목록에서 빠졌어도 넘을 수 있다. 줄 자체가 없으면(지웠다) 넘을 값이 없다: 말없이
     // 처음부터 내면 받는 쪽은 다음 쪽이라 믿고 앞 쪽을 두 번 받는다. 같은 id 의 줄이 둘이면 어느 줄이든
-    // 된다 — `page` 는 그 id 의 머리 줄로 넘는다.
+    // 된다 — `page_order` 는 그 id 의 머리 줄로 넘는다.
     //
     // 없는 id 는 **어느 명령에서나 한 낱말이다**([`Fail::not_found`], moai-95g1) — 쪽 넘김의 걸음만 곁에 단다.
     let cursor = match args.page.after.as_deref() {
@@ -512,9 +509,6 @@ fn listed(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>, keys: &Keys) -> 
             )
         })?),
     };
-    // A flat list only orders by the group; it never drops rows. Dropping non-leaf kinds here emptied
-    // `moai epic show --group status` and hid epics under `--sort people` without counting them as hidden.
-    let group = args.page.group.or_else(|| args.page.sort.as_ref().and_then(|s| s.1)).unwrap_or_default();
     let more = crate::query::page_order(
         &mut shown,
         &load.issues,
@@ -523,6 +517,7 @@ fn listed(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>, keys: &Keys) -> 
         &args.page.sort.as_ref().map_or_else(crate::query::Order::default, |s| s.0.clone()),
         group,
         args.page.reverse,
+        index.as_ref(),
         cursor,
         args.page.limit,
     );
@@ -598,7 +593,7 @@ fn listed(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>, keys: &Keys) -> 
         // **자리는 `nav` 가 정한다.** 트리와 탐색기가 자리를 따로 정하면
         // 어긋나고, 실제로 어긋났다 — 제 에픽이 부모와 다른 자식이 두 번
         // 나왔고 끊긴 참조를 가진 줄은 아예 사라졌다.
-        // 위에서 지도 한 벌로 지은 것이다 — `tree_now` 가 참일 때만 서 있다.
+        // 위에서 지도 한 벌로 지은 것이다 — `tree_now` 가 참이면 늘 서 있다.
         let (index, rolls) = (index.expect("트리 색인"), rolls.expect("에픽 굴림"));
         let keep = |at: usize| kept.contains(&at);
         let (mut out, drawn) = view::tree(&load.issues, &index, &keep, &rolls, screen);
@@ -1364,17 +1359,17 @@ mod tests {
     fn every_explorer_order_is_the_same_sort_word() {
         use crate::tui::keys::Order;
         use clap::Parser;
-        let read = |word: &str| -> crate::query::Sort {
+        let read = |word: &str| -> crate::query::Order {
             let cli = crate::cli::Cli::try_parse_from(["moai", "show", "--sort", word])
                 .unwrap_or_else(|e| panic!("`--sort {word}` 를 못 읽었다 — {e}"));
             match cli.cmd {
-                Some(crate::cli::Cmd::Show(args)) => sort_of(&args.page),
+                Some(crate::cli::Cmd::Show(args)) => args.page.sort.unwrap().0,
                 other => panic!("show 가 아니다 — {other:?}"),
             }
         };
         for o in Order::ALL {
             assert_eq!(
-                read(if o == Order::Due { "due:asc" } else { o.name() }).fields,
+                read(if o == Order::Due { "due:asc" } else { o.name() }).item,
                 [crate::query::Field::of(crate::tui::App::sort_key(o))],
                 "`{}` 가 두 표면에서 다른 차례다",
                 o.name()

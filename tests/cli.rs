@@ -166,6 +166,45 @@ fn layered_sort_and_group_are_available_to_json_clients() {
 }
 
 #[test]
+fn dangling_group_references_use_the_explorer_position_in_show() {
+    let s = init("dangling-group");
+    // The lost rows' ids sort after the rows with no group (review moai-6vcm.xdf). Grouped by the written id, a
+    // dangling `argos-e999` sorts between the real group and the ungrouped tail, so with the lost rows first by id
+    // the old order matched the tree by chance and the epic half could not go red.
+    let rows = [
+        r#"{"id":"argos-e001","title":"epic","kind":"epic","status":"todo","created_at":"2026-09-01T00:00:00Z","updated_at":"2026-09-01T00:00:00Z","status_since":"2026-09-01T00:00:00Z"}"#,
+        r#"{"id":"argos-m001","title":"milestone","kind":"milestone","status":"todo","created_at":"2026-09-01T00:00:00Z","updated_at":"2026-09-01T00:00:00Z","status_since":"2026-09-01T00:00:00Z"}"#,
+        r#"{"id":"argos-a009","title":"lost epic","epic":"argos-e999","status":"todo","created_at":"2026-09-01T00:00:00Z","updated_at":"2026-09-01T00:00:00Z","status_since":"2026-09-01T00:00:00Z"}"#,
+        r#"{"id":"argos-a008","title":"lost milestone","milestone":"argos-m999","status":"todo","created_at":"2026-09-01T00:00:00Z","updated_at":"2026-09-01T00:00:00Z","status_since":"2026-09-01T00:00:00Z"}"#,
+        r#"{"id":"argos-a003","title":"valid epic","epic":"argos-e001","status":"todo","created_at":"2026-09-01T00:00:00Z","updated_at":"2026-09-01T00:00:00Z","status_since":"2026-09-01T00:00:00Z"}"#,
+        r#"{"id":"argos-a004","title":"valid milestone","milestone":"argos-m001","status":"todo","created_at":"2026-09-01T00:00:00Z","updated_at":"2026-09-01T00:00:00Z","status_since":"2026-09-01T00:00:00Z"}"#,
+    ];
+    std::fs::write(s.path().join(".moai/issues.jsonl"), format!("{}\n", rows.join("\n"))).unwrap();
+    for group in ["epic", "milestone"] {
+        let show: serde_json::Value = serde_json::from_str(&ok(
+            s.path(),
+            &["show", "--type", "issue", "--sort", "id", "--group", group, "--json"],
+        ))
+        .unwrap();
+        let tree: serde_json::Value = serde_json::from_str(&ok(
+            s.path(),
+            &["tui", "--deep", "--no-gantt", "--sort", "id", "--group", group, "--json"],
+        ))
+        .unwrap();
+        let ids = |v: &serde_json::Value| {
+            v.as_array()
+                .unwrap()
+                .iter()
+                .filter(|r| r["kind"] == "issue")
+                .map(|r| r["id"].as_str().unwrap().to_owned())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(ids(&show).len(), 4, "show={show}");
+        assert_eq!(ids(&show), ids(&tree), "group={group}; show={show}; tree={tree}");
+    }
+}
+
+#[test]
 fn ctl_state_without_a_window_says_no_window() {
     let s = Scratch::new("ctl-empty");
     let output = moai(s.path(), &["ctl", "state", "--json"]);
