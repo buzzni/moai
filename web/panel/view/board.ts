@@ -119,7 +119,7 @@ function draw(ctx: ViewContext, state: State, index: IssueIndex, model: BoardMod
       if (lane.at === undefined) flip(path)
       else { ctx.intents.choose(index.rows[lane.at]!.id); if (ctx.layout().detailVisible) ctx.focusPane('detail') }
     })
-    head.append(toggle, name, el(doc, 'span', { class: 'm-count' }, String(lane.count)))
+    head.append(toggle, name, el(doc, 'span', { class: 'm-count' }, lane.seg.startsWith('group:') ? `${lane.done ?? 0}/${lane.count}` : String(lane.count)))
     if (lane.detail) head.append(el(doc, 'span', { class: 'm-count' }, lane.detail))
     return head
   }

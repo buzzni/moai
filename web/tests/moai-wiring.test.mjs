@@ -352,6 +352,7 @@ test('sort panel groups the rendered list and board and supports lane folding', 
   assert.deepEqual([...panel.doc.querySelectorAll('.moai-line[data-key^="group:"] .m-row-title')].map((n) => n.textContent.replace('/', '').replace(/ 0\/1$/, '')), ['Amy', 'Zoe', 'No assignee'])
   panel.store.dispatch({ type: 'tab', tab: 'board' })
   assert.deepEqual([...panel.doc.querySelectorAll('.m-swim-title')].map((n) => n.textContent), ['Amy', 'Zoe', 'No assignee'])
+  assert.equal(panel.doc.querySelector('.m-swim-head .m-count').textContent, '0/1')
   panel.doc.querySelector('.m-swim-head .moai-toggle').click()
   assert.equal(panel.doc.querySelectorAll('.m-card').length, 2)
 })

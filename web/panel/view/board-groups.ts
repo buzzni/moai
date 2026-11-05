@@ -31,6 +31,7 @@ export interface BoardLane {
   at?: number
   /** Cards before this lane's fold hides them. */
   count: number
+  done?: number
   folded: boolean
   columns: BoardColumn[]
 }
@@ -143,7 +144,7 @@ export function groupBoard(index: IssueIndex, look: BoardLook, known: readonly s
   const make = (seg: Seg | null, members: number[], at?: number): BoardLane => {
     const folded = !look.reveal && seg !== null && !!look.shut?.has(pathKey([seg]))
     const ordered = members
-    return { seg, at, count: members.length, folded,
+    return { seg, at, count: members.length, done: members.filter((m) => isDone(index.rows[m]!)).length, folded,
       columns: keys.map((key) => ({ key, cards: folded ? [] : ordered.filter((m) => columnOf(index, m) === key) })) }
   }
 
