@@ -190,6 +190,7 @@ Commands:
   do        Run an action by its stable name, independent of keys.toml
   actions   List this window's named actions and whether each is enabled
   sort      Set the explorer order, such as title:desc,priority:desc
+  group     Set the explorer grouping
   filter    Apply a filter, or remove the current filter
   find      Search issues in a chosen field
   screen    Show list, board, gantt, stats, or wiki
@@ -400,8 +401,30 @@ Options:
       --user <name (email)>  Who is doing this (from `git config` when absent)
   -h, --help                 Print help
 
-  Example: moai ctl sort 'title:desc,priority:desc'.
+  Examples:
+    moai ctl sort release
+    moai ctl sort 'milestone=created:desc;item=priority,due'
   --default also updates the default order.
+```
+
+## `moai ctl group`
+
+```
+Set the explorer grouping
+
+Usage: moai ctl group [OPTIONS] <GROUP>
+
+Arguments:
+  <GROUP>
+
+Options:
+  -t, --target <TARGET>      Window id from moai ctl ls
+      --json                 Machine-readable output. Every human line goes away
+      --no-color             Turn colour off (same as `--color never`)
+      --color <how>          auto|always|never (auto by default, off when piped)
+  -C, --dir <path>           Run in this directory (same as `git -C`)
+      --user <name (email)>  Who is doing this (from `git config` when absent)
+  -h, --help                 Print help
 ```
 
 ## `moai ctl filter`
@@ -1002,25 +1025,25 @@ Filters  (comma = or,  repeated = and):
       --filter <item=value>                  One filter string (`status=todo`)
 
 Order and paging:
-      --sort <fields>  Order the list by these fields (priority when absent)
-      --reverse        Turn the order around, ties included
+      --sort <fields>  Order by preset, fields, or layered expressions
+      --group <GROUP>  Group rows by a field or structure
+      --reverse        Reverse field directions
   -n, --limit <count>  Give at most this many rows
       --after <id>     Start after this row: the last id of the page before
 
-  Order: --sort takes fields separated by commas, like ORDER BY - the next
-  field decides only where the ones before it tie. The fields: priority
-  (the default: urgent first), created and updated (newest first), status
-  (the column order of .moai/config.toml), assignee (the name the screen
-  shows, unowned last), title (ignoring case), due (the earliest deadline
-  first, none last), id. A field without a direction keeps the one named
-  here; :asc puts the smaller value first (p0, the oldest, the first
-  column, A) and :desc the larger - unowned or undated rows go first under
-  assignee:desc or due:desc. A field is given once. When every field ties,
-  a last field of created or updated falls to id alone, and any other to
-  priority, then id. --reverse turns the whole order around, ties included.
+  Order: --sort accepts release, urgent, recent, due or people; a comma list
+  applies to every layer. Use milestone=...;epic=...;item=... for independent
+  layers. Fields include priority, created, updated, status, assignee, title,
+  due, id, kind, milestone, epic, tag, started, done, starts, since and
+  progress.
+  Use :asc or :desc per field. Empty values come last in either direction;
+  :nulls-first puts them first. Ties use created then id. --reverse reverses
+  field directions, while the tie break and empty placement stay fixed.
+  --group chooses structure, none, status, assignee, priority, tag, kind,
+  milestone or epic.
 
     moai show --sort priority,updated:desc
-    moai show --sort status:asc,title
+    moai show --sort 'milestone=created:desc;item=priority,due' --group assignee
 
   Paging: -n cuts the list, and --after <id> starts the next page after the
   last id of the page before. The cursor is that row's values in the order,
@@ -1817,25 +1840,25 @@ Filters  (comma = or,  repeated = and):
       --filter <item=value>                  One filter string (`status=todo`)
 
 Order and paging:
-      --sort <fields>  Order the list by these fields (priority when absent)
-      --reverse        Turn the order around, ties included
+      --sort <fields>  Order by preset, fields, or layered expressions
+      --group <GROUP>  Group rows by a field or structure
+      --reverse        Reverse field directions
   -n, --limit <count>  Give at most this many rows
       --after <id>     Start after this row: the last id of the page before
 
-  Order: --sort takes fields separated by commas, like ORDER BY - the next
-  field decides only where the ones before it tie. The fields: priority
-  (the default: urgent first), created and updated (newest first), status
-  (the column order of .moai/config.toml), assignee (the name the screen
-  shows, unowned last), title (ignoring case), due (the earliest deadline
-  first, none last), id. A field without a direction keeps the one named
-  here; :asc puts the smaller value first (p0, the oldest, the first
-  column, A) and :desc the larger - unowned or undated rows go first under
-  assignee:desc or due:desc. A field is given once. When every field ties,
-  a last field of created or updated falls to id alone, and any other to
-  priority, then id. --reverse turns the whole order around, ties included.
+  Order: --sort accepts release, urgent, recent, due or people; a comma list
+  applies to every layer. Use milestone=...;epic=...;item=... for independent
+  layers. Fields include priority, created, updated, status, assignee, title,
+  due, id, kind, milestone, epic, tag, started, done, starts, since and
+  progress.
+  Use :asc or :desc per field. Empty values come last in either direction;
+  :nulls-first puts them first. Ties use created then id. --reverse reverses
+  field directions, while the tie break and empty placement stay fixed.
+  --group chooses structure, none, status, assignee, priority, tag, kind,
+  milestone or epic.
 
     moai show --sort priority,updated:desc
-    moai show --sort status:asc,title
+    moai show --sort 'milestone=created:desc;item=priority,due' --group assignee
 
   Paging: -n cuts the list, and --after <id> starts the next page after the
   last id of the page before. The cursor is that row's values in the order,
@@ -2123,25 +2146,25 @@ Filters  (comma = or,  repeated = and):
       --filter <item=value>                  One filter string (`status=todo`)
 
 Order and paging:
-      --sort <fields>  Order the list by these fields (priority when absent)
-      --reverse        Turn the order around, ties included
+      --sort <fields>  Order by preset, fields, or layered expressions
+      --group <GROUP>  Group rows by a field or structure
+      --reverse        Reverse field directions
   -n, --limit <count>  Give at most this many rows
       --after <id>     Start after this row: the last id of the page before
 
-  Order: --sort takes fields separated by commas, like ORDER BY - the next
-  field decides only where the ones before it tie. The fields: priority
-  (the default: urgent first), created and updated (newest first), status
-  (the column order of .moai/config.toml), assignee (the name the screen
-  shows, unowned last), title (ignoring case), due (the earliest deadline
-  first, none last), id. A field without a direction keeps the one named
-  here; :asc puts the smaller value first (p0, the oldest, the first
-  column, A) and :desc the larger - unowned or undated rows go first under
-  assignee:desc or due:desc. A field is given once. When every field ties,
-  a last field of created or updated falls to id alone, and any other to
-  priority, then id. --reverse turns the whole order around, ties included.
+  Order: --sort accepts release, urgent, recent, due or people; a comma list
+  applies to every layer. Use milestone=...;epic=...;item=... for independent
+  layers. Fields include priority, created, updated, status, assignee, title,
+  due, id, kind, milestone, epic, tag, started, done, starts, since and
+  progress.
+  Use :asc or :desc per field. Empty values come last in either direction;
+  :nulls-first puts them first. Ties use created then id. --reverse reverses
+  field directions, while the tie break and empty placement stay fixed.
+  --group chooses structure, none, status, assignee, priority, tag, kind,
+  milestone or epic.
 
     moai show --sort priority,updated:desc
-    moai show --sort status:asc,title
+    moai show --sort 'milestone=created:desc;item=priority,due' --group assignee
 
   Paging: -n cuts the list, and --after <id> starts the next page after the
   last id of the page before. The cursor is that row's values in the order,
@@ -2429,25 +2452,25 @@ Filters  (comma = or,  repeated = and):
       --filter <item=value>                  One filter string (`status=todo`)
 
 Order and paging:
-      --sort <fields>  Order the list by these fields (priority when absent)
-      --reverse        Turn the order around, ties included
+      --sort <fields>  Order by preset, fields, or layered expressions
+      --group <GROUP>  Group rows by a field or structure
+      --reverse        Reverse field directions
   -n, --limit <count>  Give at most this many rows
       --after <id>     Start after this row: the last id of the page before
 
-  Order: --sort takes fields separated by commas, like ORDER BY - the next
-  field decides only where the ones before it tie. The fields: priority
-  (the default: urgent first), created and updated (newest first), status
-  (the column order of .moai/config.toml), assignee (the name the screen
-  shows, unowned last), title (ignoring case), due (the earliest deadline
-  first, none last), id. A field without a direction keeps the one named
-  here; :asc puts the smaller value first (p0, the oldest, the first
-  column, A) and :desc the larger - unowned or undated rows go first under
-  assignee:desc or due:desc. A field is given once. When every field ties,
-  a last field of created or updated falls to id alone, and any other to
-  priority, then id. --reverse turns the whole order around, ties included.
+  Order: --sort accepts release, urgent, recent, due or people; a comma list
+  applies to every layer. Use milestone=...;epic=...;item=... for independent
+  layers. Fields include priority, created, updated, status, assignee, title,
+  due, id, kind, milestone, epic, tag, started, done, starts, since and
+  progress.
+  Use :asc or :desc per field. Empty values come last in either direction;
+  :nulls-first puts them first. Ties use created then id. --reverse reverses
+  field directions, while the tie break and empty placement stay fixed.
+  --group chooses structure, none, status, assignee, priority, tag, kind,
+  milestone or epic.
 
     moai show --sort priority,updated:desc
-    moai show --sort status:asc,title
+    moai show --sort 'milestone=created:desc;item=priority,due' --group assignee
 
   Paging: -n cuts the list, and --after <id> starts the next page after the
   last id of the page before. The cursor is that row's values in the order,
@@ -2756,25 +2779,25 @@ Filters  (comma = or,  repeated = and):
       --filter <item=value>                  One filter string (`status=todo`)
 
 Order and paging:
-      --sort <fields>  Order the list by these fields (priority when absent)
-      --reverse        Turn the order around, ties included
+      --sort <fields>  Order by preset, fields, or layered expressions
+      --group <GROUP>  Group rows by a field or structure
+      --reverse        Reverse field directions
   -n, --limit <count>  Give at most this many rows
       --after <id>     Start after this row: the last id of the page before
 
-  Order: --sort takes fields separated by commas, like ORDER BY - the next
-  field decides only where the ones before it tie. The fields: priority
-  (the default: urgent first), created and updated (newest first), status
-  (the column order of .moai/config.toml), assignee (the name the screen
-  shows, unowned last), title (ignoring case), due (the earliest deadline
-  first, none last), id. A field without a direction keeps the one named
-  here; :asc puts the smaller value first (p0, the oldest, the first
-  column, A) and :desc the larger - unowned or undated rows go first under
-  assignee:desc or due:desc. A field is given once. When every field ties,
-  a last field of created or updated falls to id alone, and any other to
-  priority, then id. --reverse turns the whole order around, ties included.
+  Order: --sort accepts release, urgent, recent, due or people; a comma list
+  applies to every layer. Use milestone=...;epic=...;item=... for independent
+  layers. Fields include priority, created, updated, status, assignee, title,
+  due, id, kind, milestone, epic, tag, started, done, starts, since and
+  progress.
+  Use :asc or :desc per field. Empty values come last in either direction;
+  :nulls-first puts them first. Ties use created then id. --reverse reverses
+  field directions, while the tie break and empty placement stay fixed.
+  --group chooses structure, none, status, assignee, priority, tag, kind,
+  milestone or epic.
 
     moai show --sort priority,updated:desc
-    moai show --sort status:asc,title
+    moai show --sort 'milestone=created:desc;item=priority,due' --group assignee
 
   Paging: -n cuts the list, and --after <id> starts the next page after the
   last id of the page before. The cursor is that row's values in the order,
@@ -3249,7 +3272,8 @@ Filters  (comma = or,  repeated = and):
 
 Order:
       --sort <fields>  Order the listing by these fields (as `show --sort`)
-      --reverse        Turn the order around, ties included
+      --group <GROUP>  Group rows by a field or structure
+      --reverse        Reverse field directions
 
   Milestones and epics behave like directories. Move around on the left and
   what the cursor rests on is described on the right.
@@ -3417,11 +3441,13 @@ Order:
   is still read where order is absent and written beside it from the first
   field, for an older moai.
 
-  SPC s e opens the sort window over the list. All six fields stand in it:
+  SPC s e opens the sort window over the list. All seven fields stand in it:
   the ones in the order first, numbered and marked ↑ asc or ↓ desc, then the
   rest marked with a dot. j and k move, J and K move the field down or up the
   order, SPC puts it in at the end or takes it out (the last one stays), and
-  d turns its direction. Enter applies the order where you stand and keeps it
+  d turns its direction. Tab cycles through the layers; g cycles grouping.
+  Presets use 1–5. Either r or d reverses the selected field.
+  Enter applies the order where you stand and keeps it
   there — inside a project for that project, in 0 as the default. D applies
   it and keeps it as the default, the order under [tui], even inside a
   project; a project that has an order of its own gets this one too. Esc

@@ -4678,15 +4678,22 @@ impl App {
 
     /// 설정의 차례 낱말(`["priority", "updated:desc"]`)을 탐색기의 차례로(moai-r170.8dz). **`moai show --sort` 와 한
     /// 자로 읽는다**([`crate::query::parse_order`]) — 같은 글이 두 표면에서 다른 차례가 되면 안 된다. 못 읽으면
-    /// `None`: 모르는 필드·방향, 두 번 선 필드, 빈 목록, 그리고 **탐색기에 없는 필드**(`id`) — 그것을 빼고 나머지로
-    /// 서면 사람이 적은 차례가 말없이 다른 차례가 된다.
+    /// `None`: 모르는 필드·방향, 두 번 선 필드, 빈 목록, **탐색기에 없는 필드**(`id`), 그리고 **탐색기가 못 드는
+    /// `:nulls-first`**(moai-ctxc) — 그것을 빼고 나머지로 서면 사람이 적은 차례가 말없이 다른 차례가 된다.
+    /// `due:desc:nulls-first` 를 `Desc` 가 아니라고 읽던 판은 그 차례를 말없이 오름으로 세웠다.
     pub(crate) fn sorting_of(words: &[String]) -> Option<keys::Sorting> {
+        use crate::query::Dir;
         let fields = crate::query::parse_order(&words.join(",")).ok()?;
         let mine = fields
             .iter()
             .map(|f| {
                 let by = keys::Order::ALL.into_iter().find(|o| Self::sort_key(*o) == f.key)?;
-                Some(keys::Ordered { by, down: f.dir == crate::query::Dir::Desc })
+                let down = match f.dir {
+                    Dir::Asc => false,
+                    Dir::Desc => true,
+                    Dir::AscNullsFirst | Dir::DescNullsFirst => return None,
+                };
+                Some(keys::Ordered { by, down })
             })
             .collect::<Option<Vec<_>>>()?;
         keys::Sorting::of(&mine)
@@ -10492,10 +10499,11 @@ mod tests {
             dated("argos-0003", "2026-09-01T00:00:00Z"),
         ];
         let mut a = App::new(issues, cfg(), Path::new());
-        assert_eq!(row_ids(&a), ["argos-0001", "argos-0002", "argos-0003"]);
+        // 우선순위가 같으면 생성 → id 로 가른다(moai-ctxc.yi6) — 옛것이 위다.
+        assert_eq!(row_ids(&a), ["argos-0003", "argos-0001", "argos-0002"]);
         a.hit("SPC s c Esc");
         assert_eq!(row_ids(&a), ["argos-0002", "argos-0001", "argos-0003"], "새것이 위가 아니다");
-        assert_eq!(a.cursor, 1, "커서가 보던 줄(argos-0001)을 놓쳤다");
+        assert_eq!(a.cursor, 2, "커서가 보던 줄(argos-0003)을 놓쳤다");
         a.hit("SPC s c Esc");
         assert_eq!(row_ids(&a), ["argos-0003", "argos-0001", "argos-0002"], "다시 눌렀는데 안 뒤집혔다");
         // 메뉴의 표시도 같은 한 벌(`Ctx::sorting`)을 읽는다 — 고른 차례에만 붙고 방향은 낱말로 댄다(moai-y61p 단계 리뷰).
@@ -15582,6 +15590,10 @@ mod tests {
         let words = App::order_words(&s);
         assert_eq!(words, ["status", "updated:asc", "title", "created"]);
         assert_eq!(App::sorting_of(&words), Some(s));
+        // `query` 가 읽는 `:nulls-first` 를 탐색기는 못 든다 — 방향만 읽어 세우면 말없이 다른 차례다.
+        for nulls in ["due:desc:nulls-first", "due:nulls-first"] {
+            assert_eq!(App::sorting_of(&[nulls.to_string()]), None, "{nulls} 를 다른 차례로 읽었다");
+        }
     }
 
     /// **깨진 설정은 한 곳에서만 말한다**(moai-5jsn) — 층이 없다는 배너가 파싱 오류를 대므로 보기 알림은 같은
