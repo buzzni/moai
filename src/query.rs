@@ -1510,8 +1510,9 @@ impl SortKey {
         SortKey::Progress,
     ];
 
-    /// `--sort` 와 설정 파일에 적는 낱말 — **탐색기가 설정에 적는 이름(`tui::keys::Order::name`)과 같다**.
-    /// 한 낱말이 두 표면에서 다른 필드를 가리키면 안 된다(`cmd::show` 의 시험이 맨다).
+    /// `--sort` 와 설정 파일에 적는 낱말 — 탐색기가 아는 필드는 **탐색기가 설정에 적는 이름(`tui::keys::Order::name`)과
+    /// 같다**. 한 낱말이 두 표면에서 다른 필드를 가리키면 안 된다(`cmd::show` 의 시험이 맨다). `id` 와 moai-ctxc 가 더한
+    /// 필드(`kind` 부터 `progress` 까지)는 아직 탐색기의 차례에 없다 — `App::sorting_of` 가 그 낱말을 못 읽은 차례로 낸다.
     pub fn name(self) -> &'static str {
         match self {
             SortKey::Priority => "priority",
@@ -1639,7 +1640,8 @@ impl std::fmt::Display for BadSort {
             BadSort::Empty => write!(f, "an empty field - give fields separated by commas, like priority,updated:desc"),
             BadSort::Unknown(w) => write!(f, "unknown field `{w}` - the fields are {words}"),
             BadSort::Direction(w, d) => {
-                write!(f, "unknown modifier `{d}` in `{w}:{d}` - use asc or desc, then optional nulls-first")
+                // Not `{w}:{d}` — the modifier may stand after another one (`due:nulls-first:asc`).
+                write!(f, "unknown or misplaced modifier `{d}` after `{w}` - use asc or desc, then optional nulls-first")
             }
             BadSort::Layer(w) => write!(f, "invalid or repeated layer `{w}`"),
             BadSort::Repeated(k) => write!(f, "`{}` is given twice - a field stands once in the order", k.name()),
@@ -1695,13 +1697,12 @@ pub fn parse_order(raw: &str) -> Result<Vec<Field>, BadSort> {
 }
 
 /// Derived sort values for one snapshot. Built once, then shared by tree and paging comparisons.
-#[derive(Default)]
 struct SortValues<'a> {
     due: Option<&'a str>,
     epic: Option<&'a str>,
     milestone: Option<&'a str>,
-    updated: Option<&'a str>,
-    since: Option<&'a str>,
+    updated: &'a str,
+    since: &'a str,
     progress: Option<(usize, usize)>,
 }
 
@@ -1710,12 +1711,33 @@ pub struct SortContext<'a> {
 }
 
 impl<'a> SortContext<'a> {
+    /// Build from the whole snapshot, for a caller that holds no filter.
     pub fn of(all: &'a [Issue]) -> Self {
         let soil = crate::report::Soil::of(all);
-        let ladder = crate::report::DueLadder::over(&soil.lines, &soil.epic);
-        let epics = soil.placed(Kind::Epic);
-        let stones = soil.placed(Kind::Milestone);
         let eclipsed = soil.eclipsed();
+        Self::build(all, &soil.epic, &soil.lines, &eclipsed, |i| i.status_since.as_str())
+    }
+
+    /// Build from the maps the filter already holds, and give a group the time it entered the column it is
+    /// read to stand in ([`Where::since`]). Building a fresh `Soil` here walked the membership a second time
+    /// on every `moai show` and `moai tui --json` — the filter was itself built from one.
+    pub fn with_where(all: &'a [Issue], wh: &Where<'a>) -> Self {
+        let since = |i: &'a Issue| -> &'a str {
+            crate::report::stands_on(i, |key| wh.since.get(&key).copied()).unwrap_or(i.status_since.as_str())
+        };
+        Self::build(all, &wh.epic, wh.lines.get(), &|i| wh.eclipsed(i), since)
+    }
+
+    fn build(
+        all: &'a [Issue],
+        epic_of: &crate::report::Handing<'a>,
+        lines: &crate::report::Lines<'a>,
+        eclipsed: &dyn Fn(&Issue) -> bool,
+        since: impl Fn(&'a Issue) -> &'a str,
+    ) -> Self {
+        let ladder = crate::report::DueLadder::over(lines, epic_of);
+        let epics = crate::report::Placed::of(Kind::Epic, epic_of, lines);
+        let stones = crate::report::Placed::of(Kind::Milestone, epic_of, lines);
         // A group is visited once per member, never once per comparison.
         let mut groups: BTreeMap<(u8, &str), (&str, usize, usize)> = BTreeMap::new();
         for i in all.iter().filter(|i| !eclipsed(i)) {
@@ -1746,24 +1768,13 @@ impl<'a> SortContext<'a> {
                 due,
                 epic: epics.at(i),
                 milestone: stones.at(i),
-                updated: Some(group.map_or(i.updated_at.as_str(), |g| g.0.max(i.updated_at.as_str()))),
-                since: Some(&i.status_since),
+                updated: group.map_or(i.updated_at.as_str(), |g| g.0.max(i.updated_at.as_str())),
+                since: since(i),
                 progress: group.and_then(|g| (g.2 > 0).then_some((g.1, g.2))),
             };
             rows.entry(&i.id).or_default().push((i, values));
         }
         Self { rows }
-    }
-    /// Include the effective time a group entered its current column.
-    pub fn with_where(all: &'a [Issue], wh: &Where<'a>) -> Self {
-        let mut context = Self::of(all);
-        for rows in context.rows.values_mut() {
-            for (row, values) in rows {
-                values.since =
-                    crate::report::stands_on(row, |key| wh.since.get(&key).copied()).or(Some(&row.status_since));
-            }
-        }
-        context
     }
     /// Compare structural peers using their own layer; mixed kinds remain a total order.
     pub fn compare_layers(
@@ -1786,8 +1797,14 @@ impl<'a> SortContext<'a> {
         let (al, bl) = (layer(a.0.kind), layer(b.0.kind));
         al.cmp(&bl).then_with(|| self.compare(order.for_kind(a.0.kind), reversed, a, b, statuses, naming))
     }
+    /// The values of that row. An id with one row answers at once; only twins are told apart, by
+    /// address and then by content (a listing sorts clones of the snapshot's rows). Comparing whole
+    /// rows on every lookup ran a full field-by-field equality twice per comparison.
     fn values(&self, issue: &Issue) -> Option<&SortValues<'a>> {
-        self.rows.get(issue.id.as_str())?.iter().find(|(row, _)| *row == issue).map(|(_, v)| v)
+        match self.rows.get(issue.id.as_str())?.as_slice() {
+            [(_, values)] => Some(values),
+            twins => twins.iter().find(|(row, _)| std::ptr::eq(*row, issue) || *row == issue).map(|(_, v)| v),
+        }
     }
     pub fn compare(
         &self,
@@ -1832,10 +1849,9 @@ fn compare_order(
     let rising = |key: SortKey| match key {
         SortKey::Priority => a.0.priority().cmp(&b.0.priority()),
         SortKey::Created => a.0.created_at.cmp(&b.0.created_at),
-        SortKey::Updated => av
-            .and_then(|v| v.updated)
-            .unwrap_or(&a.0.updated_at)
-            .cmp(bv.and_then(|v| v.updated).unwrap_or(&b.0.updated_at)),
+        SortKey::Updated => {
+            av.map_or(a.0.updated_at.as_str(), |v| v.updated).cmp(bv.map_or(b.0.updated_at.as_str(), |v| v.updated))
+        }
         SortKey::Status => rank(a.1).cmp(&rank(b.1)),
         SortKey::Assignee => match (&a.0.assignee, &b.0.assignee) {
             (Some(x), Some(y)) => caseless(&shown(a.0, x), &shown(b.0, y)),
@@ -1855,10 +1871,9 @@ fn compare_order(
         SortKey::Started => a.0.started_at.cmp(&b.0.started_at),
         SortKey::Done => a.0.done_at.cmp(&b.0.done_at),
         SortKey::Starts => a.0.planned_start().cmp(&b.0.planned_start()),
-        SortKey::Since => av
-            .and_then(|v| v.since)
-            .unwrap_or(&a.0.status_since)
-            .cmp(bv.and_then(|v| v.since).unwrap_or(&b.0.status_since)),
+        SortKey::Since => {
+            av.map_or(a.0.status_since.as_str(), |v| v.since).cmp(bv.map_or(b.0.status_since.as_str(), |v| v.since))
+        }
         SortKey::Progress => match (av.and_then(|v| v.progress), bv.and_then(|v| v.progress)) {
             (Some((ad, at)), Some((bd, bt))) => (ad as u128 * bt as u128).cmp(&(bd as u128 * at as u128)),
             _ => Ordering::Equal,
@@ -2027,31 +2042,10 @@ pub fn page_order<'a>(
 ) -> usize {
     use crate::nav::Group;
     let context = SortContext::with_where(all, wh);
-    let value = |i: &Issue| -> Option<String> {
-        let facts = context.values(i);
-        match group {
-            Group::Structure | Group::None => None,
-            Group::Status => Some(wh.column(i).to_string()),
-            Group::Assignee => i.assignee.clone(),
-            Group::Priority => Some(format!("p{}", i.priority())),
-            Group::Tag => i.tags.first().cloned(),
-            Group::Kind => Some(i.kind.as_str().to_string()),
-            Group::Milestone => facts.and_then(|v| v.milestone).map(str::to_owned),
-            Group::Epic => facts.and_then(|v| v.epic).map(str::to_owned),
-        }
-    };
+    // The same header order as the explorer's grouped tree (`nav::Group::order_values`), on borrowed values.
     let group_cmp = |a: &Issue, b: &Issue| {
-        let (a, b) = (value(a), value(b));
-        match (a, b) {
-            (None, None) => std::cmp::Ordering::Equal,
-            (None, Some(_)) => std::cmp::Ordering::Greater,
-            (Some(_), None) => std::cmp::Ordering::Less,
-            (Some(a), Some(b)) if group == Group::Status => {
-                let rank = |s: &String| cfg.statuses.iter().position(|v| v == s).unwrap_or(cfg.statuses.len());
-                rank(&a).cmp(&rank(&b)).then_with(|| a.cmp(&b))
-            }
-            (Some(a), Some(b)) => caseless(&a, &b).then_with(|| a.cmp(&b)),
-        }
+        let (a, b) = (group_value(group, a, wh, &context), group_value(group, b, wh, &context));
+        group.order_values(a.as_deref(), b.as_deref(), &cfg.statuses)
     };
     let cmp = |a: &Issue, b: &Issue| {
         let pair = ((a, wh.column(a)), (b, wh.column(b)));
@@ -2063,6 +2057,27 @@ pub fn page_order<'a>(
         }
     };
     page_by(shown, all, after, limit, &cmp)
+}
+
+/// The value a flat list groups a row by. Only `priority` builds a string; the rest borrow.
+fn group_value<'x>(
+    group: crate::nav::Group,
+    i: &'x Issue,
+    wh: &'x Where<'_>,
+    context: &'x SortContext<'_>,
+) -> Option<std::borrow::Cow<'x, str>> {
+    use crate::nav::Group;
+    use std::borrow::Cow;
+    match group {
+        Group::Structure | Group::None => None,
+        Group::Status => Some(Cow::Borrowed(wh.column(i))),
+        Group::Assignee => i.assignee.as_deref().map(Cow::Borrowed),
+        Group::Priority => Some(Cow::Owned(format!("p{}", i.priority()))),
+        Group::Tag => i.tags.first().map(|t| Cow::Borrowed(t.as_str())),
+        Group::Kind => Some(Cow::Borrowed(i.kind.as_str())),
+        Group::Milestone => context.values(i).and_then(|v| v.milestone).map(Cow::Borrowed),
+        Group::Epic => context.values(i).and_then(|v| v.epic).map(Cow::Borrowed),
+    }
 }
 
 fn page_by<'a>(
@@ -2232,7 +2247,7 @@ pub fn read_marks_of<'a>(
 /// - 그 밖에는 자른 자리를 글자 머리로 물린다(두 글에서 같은 자리다) — 바이트가 같으면 글자 경계도 같다
 ///
 /// 이름이 `folded` 가 아닌 것은 이 모듈에서 그 낱말이 이미 "길 잃은 줄 밑에 접힌 줄"(`Where::folded`)이라서다.
-fn caseless(a: &str, b: &str) -> std::cmp::Ordering {
+pub(crate) fn caseless(a: &str, b: &str) -> std::cmp::Ordering {
     let same = |a: &str, b: &str| a.bytes().zip(b.bytes()).take_while(|(x, y)| x == y).count();
     if a.is_ascii() && b.is_ascii() {
         let n = same(a, b);
@@ -3828,11 +3843,13 @@ mod tests {
         e1.due_on = Some("2026-11-05".into());
         let mut e2 = issue("a-0002", "todo", &[]);
         e2.kind = Kind::Epic;
+        // The winner is the larger id: every row shares one creation time, so a derived value that fell
+        // back to the epic's own fields would tie and the created → id rule would put a-0001 first.
         let mut child = issue("a-0003", "done", &[]);
-        child.epic = Some(e1.id.clone());
+        child.epic = Some(e2.id.clone());
         child.updated_at = "2026-12-01T00:00:00Z".into();
         let mut open = issue("a-0004", "todo", &[]);
-        open.epic = Some(e2.id.clone());
+        open.epic = Some(e1.id.clone());
         let all = vec![e1, e2, child, open];
         let c = cfg();
         let wh = Where::of(&all, &c);
@@ -3848,10 +3865,10 @@ mod tests {
                 None,
                 None,
             );
-            assert_eq!(groups[0].id, "a-0001", "{field}");
+            assert_eq!(groups[0].id, "a-0002", "{field}");
         }
         let facts = SortContext::of(&all);
-        assert_eq!(facts.values(&all[2]).unwrap().due, Some("2026-11-05"));
+        assert_eq!(facts.values(&all[3]).unwrap().due, Some("2026-11-05"));
     }
 
     #[test]

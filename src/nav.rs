@@ -81,6 +81,23 @@ impl Group {
             Self::Epic => "epic",
         }
     }
+
+    /// The order of two group values — the explorer's headers and the command line's grouped list
+    /// both sort by this one rule, so a group stands in the same place on every surface. A row
+    /// without a value goes last; status follows the configured column order; the rest ignore case.
+    pub fn order_values(self, a: Option<&str>, b: Option<&str>, statuses: &[String]) -> std::cmp::Ordering {
+        use std::cmp::Ordering;
+        match (a, b) {
+            (None, None) => Ordering::Equal,
+            (None, Some(_)) => Ordering::Greater,
+            (Some(_), None) => Ordering::Less,
+            (Some(a), Some(b)) if self == Self::Status => {
+                let rank = |v: &str| statuses.iter().position(|s| s == v).unwrap_or(statuses.len());
+                rank(a).cmp(&rank(b)).then_with(|| a.cmp(b))
+            }
+            (Some(a), Some(b)) => crate::query::caseless(a, b).then_with(|| a.cmp(b)),
+        }
+    }
 }
 impl std::str::FromStr for Group {
     type Err = String;
@@ -563,8 +580,12 @@ impl Index {
                 .collect();
         }
         let mut buckets: BTreeMap<Option<String>, Vec<usize>> = BTreeMap::new();
-        scanned(issues.len());
-        for (at, issue) in issues.iter().enumerate() {
+        // Only the rows under `path` — `--path <epic> --group status` groups that epic's members, not the
+        // whole repository. The root's descendants are every row ([`Index::descendants`]).
+        let under = self.descendants(path);
+        scanned(under.len());
+        for at in under {
+            let issue = &issues[at];
             if !matches!(issue.kind, Kind::Issue | Kind::Backlog) || !keep(at) {
                 continue;
             }
@@ -582,16 +603,7 @@ impl Index {
             buckets.entry(value).or_default().push(at);
         }
         let mut groups: Vec<_> = buckets.into_iter().collect();
-        groups.sort_by(|(a, _), (b, _)| match (a, b) {
-            (None, None) => std::cmp::Ordering::Equal,
-            (None, Some(_)) => std::cmp::Ordering::Greater,
-            (Some(_), None) => std::cmp::Ordering::Less,
-            (Some(a), Some(b)) if group == Group::Status => {
-                let rank = |v: &String| statuses.iter().position(|s| s == v).unwrap_or(statuses.len());
-                rank(a).cmp(&rank(b)).then_with(|| a.cmp(b))
-            }
-            (Some(a), Some(b)) => a.to_lowercase().cmp(&b.to_lowercase()).then_with(|| a.cmp(b)),
-        });
+        groups.sort_by(|(a, _), (b, _)| group.order_values(a.as_deref(), b.as_deref(), statuses));
         let mut out = Vec::new();
         let total = groups.len();
         for (group_at, (value, mut rows)) in groups.into_iter().enumerate() {
@@ -992,7 +1004,9 @@ mod tests {
                     &|_| true,
                     &cmp,
                     group,
-                    &["review".into(), "todo".into()],
+                    // Against the alphabet on purpose — a header order that fell back to plain string order
+                    // would put review first.
+                    &["todo".into(), "review".into()],
                     &|_| true,
                     &|_| true,
                 )
@@ -1003,7 +1017,7 @@ mod tests {
                 })
                 .collect::<Vec<_>>()
         };
-        assert_eq!(groups(Group::Status), ["review", "todo"]);
+        assert_eq!(groups(Group::Status), ["todo", "review"]);
         assert_eq!(groups(Group::Priority), ["p0", "p3"]);
         assert_eq!(groups(Group::Epic), ["a-e001"]);
         assert_eq!(groups(Group::Milestone), ["a-m001"]);
@@ -1040,6 +1054,28 @@ mod tests {
         let shut =
             index.grouped_tree(&all, &Path::new(), &|_| true, &order, Group::Assignee, &[], &|_| true, &|_| false);
         assert_eq!(shut.len(), 3);
+    }
+
+    #[test]
+    fn virtual_groups_stay_under_the_given_path() {
+        let e = make("a-e001", Kind::Epic);
+        let mut inside = epic_of("a-a001", &e.id);
+        inside.assignee = Some("Ada".into());
+        let mut outside = make("a-a002", Kind::Issue);
+        outside.assignee = Some("Zoe".into());
+        let all = vec![e, inside, outside];
+        let index = Index::of(&all);
+        let order = |a: usize, b: usize| all[a].id.cmp(&all[b].id);
+        let path = vec![Seg::Epic("a-e001".into())];
+        let rows = index.grouped_tree(&all, &path, &|_| true, &order, Group::Assignee, &[], &|_| true, &|_| true);
+        let ids: Vec<_> = rows
+            .iter()
+            .filter_map(|(e, _)| match e {
+                GroupedEntry::Entry(e) => e.at().map(|i| all[i].id.as_str()),
+                GroupedEntry::Header(k) => k.value.as_deref(),
+            })
+            .collect();
+        assert_eq!(ids, ["Ada", "a-a001"], "a row outside the epic was grouped");
     }
 
     /// **펼친 목록 한 판은 그린 줄 수만큼만 훑는다**(moai-teka). 한 층을 짓는 [`Index::entries_sorted`]

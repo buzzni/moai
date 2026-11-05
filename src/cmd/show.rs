@@ -176,8 +176,8 @@ pub(crate) fn filter_of(
     Ok(filter)
 }
 
-/// argv 의 차례를 `query` 의 차례로 잇는다 — 필드 목록은 clap 이 이미 읽었다(`cli::SortFields`). 안 준
-/// `--sort` 는 기본 차례(우선순위)다.
+/// 시험만 부른다 — 목록은 층별 차례와 묶기를 함께 보는 [`crate::query::page_order`] 를 지난다. 이것은 그
+/// 차례의 `item` 층만 옛 [`crate::query::Sort`] 로 옮긴다. 안 준 `--sort` 는 옛 기본 차례(우선순위)다.
 #[cfg(test)]
 fn sort_of(p: &crate::cli::PageArgs) -> crate::query::Sort {
     let fields = p.sort.as_ref().map_or_else(|| crate::query::Sort::default().fields, |f| f.0.item.clone());
@@ -512,10 +512,9 @@ fn listed(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>, keys: &Keys) -> 
             )
         })?),
     };
+    // A flat list only orders by the group; it never drops rows. Dropping non-leaf kinds here emptied
+    // `moai epic show --group status` and hid epics under `--sort people` without counting them as hidden.
     let group = args.page.group.or_else(|| args.page.sort.as_ref().and_then(|s| s.1)).unwrap_or_default();
-    if group != crate::nav::Group::Structure {
-        shown.retain(|i| matches!(i.kind, Kind::Issue | Kind::Backlog));
-    }
     let more = crate::query::page_order(
         &mut shown,
         &load.issues,

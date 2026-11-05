@@ -146,10 +146,23 @@ fn layered_sort_and_group_are_available_to_json_clients() {
     let inside: serde_json::Value =
         serde_json::from_str(&ok(s.path(), &["tui", "--group", "assignee", "--path", path, "--json"])).unwrap();
     assert_eq!(inside.as_array().unwrap()[0]["id"], "argos-a002");
+    // `--sort id` alone would put Zoe's argos-a001 first (and the default puts Ada's p0 first anyway), so only
+    // the group can order Ada before Zoe here.
     let sorted: serde_json::Value =
-        serde_json::from_str(&ok(s.path(), &["show", "--group", "assignee", "--json"])).unwrap();
+        serde_json::from_str(&ok(s.path(), &["show", "--sort", "id", "--group", "assignee", "--json"])).unwrap();
     let titles: Vec<_> = sorted.as_array().unwrap().iter().filter_map(|r| r["assignee"].as_str()).collect();
     assert_eq!(titles, ["Ada", "Zoe"]);
+    // A flat list only orders by the group — a kind-filtered list must not come back empty.
+    let stones: serde_json::Value =
+        serde_json::from_str(&ok(s.path(), &["milestone", "show", "--group", "status", "--json"])).unwrap();
+    assert_eq!(stones.as_array().unwrap().len(), 2, "{stones}");
+    // `--path` still narrows a grouped tree: the later milestone holds no work, so it has no group.
+    let empty: serde_json::Value = serde_json::from_str(&ok(
+        s.path(),
+        &["tui", "--deep", "--no-gantt", "--group", "assignee", "--path", "argos-m001", "--json"],
+    ))
+    .unwrap();
+    assert_eq!(empty.as_array().unwrap().len(), 0, "{empty}");
 }
 
 #[test]
@@ -10545,7 +10558,6 @@ fn every_command_still_speaks_json() {
         vec!["due", "apply", "--dry-run", "--json"],
         vec!["due", "apply", "--json"],
     ];
-    // **적어 둔 목록과 실제로 부르는 목록을 여기서 잇는다.** 잇지 않으면
     // With no window, the new ctl words must still return a structured JSON refusal.
     for args in [vec!["ctl", "sort", "release", "--json"], vec!["ctl", "group", "assignee", "--json"]] {
         let output = moai(s.path(), &args);
@@ -10553,6 +10565,7 @@ fn every_command_still_speaks_json() {
         let value: serde_json::Value = serde_json::from_slice(&output.stderr).unwrap();
         assert!(value.get("code").is_some());
     }
+    // **적어 둔 목록과 실제로 부르는 목록을 여기서 잇는다.** 잇지 않으면
     // `JSON_SWEEP` 에 이름만 적고 한 번도 안 부르는 명령이 생기고, 그러면
     // 위 시험은 초록인데 그 명령의 `--json` 은 아무도 안 본 것이 된다 —
     // 없는 안전망을 있다고 믿는 것이 제일 나쁘다.

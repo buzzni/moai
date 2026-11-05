@@ -2413,15 +2413,16 @@ pub struct ReadyArgs {
     pub limit: Option<usize>,
 }
 
-/// `--sort` 의 낱말. **탐색기가 설정에 적는 이름과 같다**(`tui::keys::Order::name`) — 한 낱말이
-/// 두 표면에서 다른 차례를 가리키면 안 된다.
+/// `--sort` 의 낱말. 필드 이름은 **탐색기가 설정에 적는 이름과 같다**(`tui::keys::Order::name`) — 한 낱말이
+/// 두 표면에서 다른 차례를 가리키면 안 된다. `id` 와 moai-ctxc 가 더한 필드는 아직 탐색기의 차례에 없다.
 ///
-/// **필드의 쉼표 목록이고 필드마다 `:asc`·`:desc` 가 붙는다**(moai-r170.9es, 사람이 정한 꼴) — 그래서
-/// `ValueEnum` 이 아니라 글을 [`crate::query::parse_order`] 로 읽는다. 낱말과 방향을 읽는 자는 설정에 적힐
-/// 차례와 하나다 — 둘이 따로 읽으면 같은 글이 두 차례가 된다. 못 읽은 글은 clap 의 오류로 고를 낱말을 다 댄다.
-/// 낱말마다의 방향은 `Show` 의 `after_help`(`SHOW_LIST`)가 한자리에서 댄다.
+/// **프리셋 하나(`release`·`urgent`·`recent`·`due`·`people`), 층 없는 필드의 쉼표 목록(세 층에 다 선다), 또는
+/// `milestone=…;epic=…;item=…`** 이다(moai-ctxc). 필드마다 `:asc`·`:desc` 와 그 뒤의 `:nulls-first` 가 붙는다 — 그래서
+/// `ValueEnum` 이 아니라 글을 [`crate::query::Order::parse`] 로 읽는다. 읽는 자가 하나라야 웹(`/api/tree`)·`ctl` 과
+/// 같은 글이 같은 차례가 된다. 못 읽은 글은 clap 의 오류로 까닭을 댄다. 낱말마다의 방향은 `Show` 의
+/// `after_help`(`SHOW_LIST`)가 한자리에서 댄다.
 ///
-/// `Vec` 을 바로 받지 않는 것은 clap 의 derive 가 `Option<Vec<_>>` 를 "여러 번 받는 플래그" 로 읽어서다.
+/// 둘째 칸은 **프리셋이 고른 묶기**다(`people` 이면 `assignee`) — `--group` 을 함께 주면 그쪽이 이긴다.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SortFields(pub crate::query::Order, pub Option<crate::nav::Group>);
 
