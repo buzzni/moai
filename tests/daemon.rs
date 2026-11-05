@@ -192,6 +192,22 @@ fn start_status_hello_ping_and_stop() {
     assert_eq!(again["stopped"], false, "{again}");
 }
 
+#[test]
+fn sigterm_and_sigint_stop_cleanly() {
+    for signal in [libc::SIGTERM, libc::SIGINT] {
+        let f = Fence::new();
+        let (daemon, first) = f.start();
+        let pid = first["pid"].as_i64().unwrap() as libc::pid_t;
+        // SAFETY: pid is the child just started in this test, and signal is valid.
+        assert_eq!(unsafe { libc::kill(pid, signal) }, 0);
+        assert!(daemon.wait().success(), "signal {signal} did not exit successfully");
+        assert!(!f.socket().exists(), "signal {signal} left a socket");
+        let status = f.json(&["daemon", "status", "--json"]);
+        assert_eq!(status["running"], false);
+        assert_eq!(status["stale_socket"], false);
+    }
+}
+
 /// 연결을 새는 클라이언트가 상한(32)을 다 쥐어도 `status` 가 pid 를 대고 `stop` 이 데몬을 멈춘다(moai-uezh). 상한을
 /// 넘은 연결에서는 `hello`·`daemon.shutdown` 만 돌고 나머지는 `busy` 와 pid 로 거절된다.
 #[test]

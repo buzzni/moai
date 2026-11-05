@@ -43,6 +43,47 @@ const DRAIN: Duration = Duration::from_secs(5);
 /// `TICK` 과 [`DRAIN`] 의 합이 `moai daemon stop` 의 기다림(10초)보다 짧아야 한다.
 const TICK: Duration = Duration::from_millis(500);
 
+// The signal handler only changes lock-free state and restores default dispositions. Both
+// signals are masked while it runs, so the next SIGINT or SIGTERM terminates immediately.
+static SIGNAL_STOP: AtomicBool = AtomicBool::new(false);
+
+extern "C" fn shutdown_signal(_: libc::c_int) {
+    SIGNAL_STOP.store(true, Ordering::Release);
+    // SAFETY: sigaction is async-signal-safe; the zeroed action has an empty mask and
+    // SIG_DFL is valid for both signals. Both are blocked for this handler's duration.
+    unsafe {
+        let mut action: libc::sigaction = std::mem::zeroed();
+        action.sa_sigaction = libc::SIG_DFL;
+        libc::sigemptyset(&mut action.sa_mask);
+        libc::sigaction(libc::SIGINT, &action, std::ptr::null_mut());
+        libc::sigaction(libc::SIGTERM, &action, std::ptr::null_mut());
+    }
+}
+
+/// Install only in the foreground daemon, before announcing readiness.
+pub fn install_signal_handlers() -> std::io::Result<()> {
+    SIGNAL_STOP.store(false, Ordering::Release);
+    // SAFETY: initialized sigaction structs and valid pointers; no SA_RESTART, so poll
+    // can return on a signal. Restore SIGINT if installing SIGTERM fails.
+    unsafe {
+        let mut action: libc::sigaction = std::mem::zeroed();
+        action.sa_sigaction = shutdown_signal as *const () as libc::sighandler_t;
+        libc::sigemptyset(&mut action.sa_mask);
+        libc::sigaddset(&mut action.sa_mask, libc::SIGINT);
+        libc::sigaddset(&mut action.sa_mask, libc::SIGTERM);
+        let mut old: libc::sigaction = std::mem::zeroed();
+        if libc::sigaction(libc::SIGINT, &action, &mut old) != 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        if libc::sigaction(libc::SIGTERM, &action, std::ptr::null_mut()) != 0 {
+            let error = std::io::Error::last_os_error();
+            libc::sigaction(libc::SIGINT, &old, std::ptr::null_mut());
+            return Err(error);
+        }
+    }
+    Ok(())
+}
+
 /// `daemon.lock` 을 쥔다. 남이 쥐었으면 `None`. 놓는 것은 돌려받은 파일을 닫는 것(drop)이다.
 pub fn lock(socket: &Path) -> std::io::Result<Option<std::fs::File>> {
     use fs2::FileExt as _;
@@ -90,6 +131,12 @@ pub struct Bound {
     ino: u64,
 }
 
+impl Drop for Bound {
+    fn drop(&mut self) {
+        let _ = remove_if_same(&self.path, self.ino);
+    }
+}
+
 /// 소켓을 묶는다. 그 자리에 남은 것은 부르는 쪽이 자물쇠를 쥐고 먼저 치운다.
 ///
 /// **막는 받기다** — `ctl::serve` 와 같은 까닭: 받는 소켓에 O_NONBLOCK 을 걸면 BSD·macOS 는 받은 연결에도
@@ -117,7 +164,7 @@ pub fn serve(bound: Bound, mut methods: Methods) -> std::io::Result<()> {
     let lane = Arc::new(AtomicUsize::new(0));
     let busy = Arc::new(AtomicUsize::new(0));
     let path = Arc::new(bound.path.clone());
-    while !stop.load(Ordering::Acquire) {
+    while !stop.load(Ordering::Acquire) && !SIGNAL_STOP.load(Ordering::Acquire) {
         // 받기가 실패한 것(EMFILE 따위)은 넘긴다 — 데몬의 수명을 끝낼 일이 아니다.
         match pending(&bound.listener, TICK) {
             Ok(true) => {}
@@ -127,7 +174,7 @@ pub fn serve(bound: Bound, mut methods: Methods) -> std::io::Result<()> {
                 continue;
             }
         }
-        if stop.load(Ordering::Acquire) {
+        if stop.load(Ordering::Acquire) || SIGNAL_STOP.load(Ordering::Acquire) {
             break;
         }
         let Ok((mut stream, _)) = bound.listener.accept() else {
@@ -158,6 +205,7 @@ pub fn serve(bound: Bound, mut methods: Methods) -> std::io::Result<()> {
             }
         });
     }
+    stop.store(true, Ordering::Release);
     // 돌던 요청은 끝나게 둔다 — 말없이 기다리는 연결은 기다리지 않는다.
     let deadline = Instant::now() + DRAIN;
     while busy.load(Ordering::Acquire) > 0 && Instant::now() < deadline {
@@ -317,6 +365,43 @@ fn connection(stream: UnixStream, methods: &Methods, stop: &AtomicBool, path: &P
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn signal_drains_an_in_flight_response() {
+        use std::io::BufRead as _;
+        use std::sync::Barrier;
+        SIGNAL_STOP.store(false, Ordering::Release);
+        let dir = std::env::temp_dir().join(format!("moai-signal-drain-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("socket");
+        let bound = bind(&path).unwrap();
+        let entered = Arc::new(Barrier::new(2));
+        let release = Arc::new(Barrier::new(2));
+        let (on_enter, on_release) = (Arc::clone(&entered), Arc::clone(&release));
+        let mut methods = Methods::new();
+        methods.register("slow", move |_, _| {
+            on_enter.wait();
+            on_release.wait();
+            Ok(json!({"finished": true}))
+        });
+        let server = std::thread::spawn(move || serve(bound, methods).unwrap());
+        let mut stream = UnixStream::connect(&path).unwrap();
+        stream.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
+        writeln!(stream, "{{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"slow\"}}").unwrap();
+        entered.wait();
+        SIGNAL_STOP.store(true, Ordering::Release);
+        std::thread::sleep(TICK + Duration::from_millis(100));
+        assert!(!server.is_finished(), "server exited while a request was running");
+        release.wait();
+        let mut reply = String::new();
+        BufReader::new(stream).read_line(&mut reply).unwrap();
+        let reply: serde_json::Value = serde_json::from_str(&reply).unwrap();
+        assert_eq!(reply["result"]["finished"], true);
+        server.join().unwrap();
+        assert!(!path.exists());
+        SIGNAL_STOP.store(false, Ordering::Release);
+        std::fs::remove_dir(dir).unwrap();
+    }
 
     /// 수명 길의 시한은 줄 하나 전체에 걸린다 — 시한보다 짧은 간격으로 한 바이트씩 흘리는 연결도 시한 안에 놓인다.
     /// 읽기 하나마다의 시한이던 판은 그런 연결 넷이 수명 길을 끝없이 쥐어 `status`·`stop` 을 `busy` 에 가뒀다.
