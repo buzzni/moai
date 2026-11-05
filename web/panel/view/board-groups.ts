@@ -6,7 +6,7 @@
  */
 import { closedGroup, isBacklog, isDone, isWork, LOST, pathKey, type IssueIndex, type Keep, type Path, type Row, type Seg } from '../data/index.js'
 import type { ViewSettings } from '../store.js'
-import { compareItems, groupBuckets } from './group-adapter.ts'
+import { groupBuckets } from './group-adapter.ts'
 
 /** The columns moai has when `.moai/config.toml` names none, until `/api/boot` gives the project's own. */
 export const FALLBACK_STATUSES: readonly string[] = ['todo', 'in_progress', 'review', 'done']
@@ -141,7 +141,7 @@ export function groupBoard(index: IssueIndex, look: BoardLook, known: readonly s
   // `descendants` is in the tree's order, which is the order the list draws: a card stands where its row stands.
   const make = (seg: Seg | null, members: number[], at?: number): BoardLane => {
     const folded = !look.reveal && seg !== null && !!look.shut?.has(pathKey([seg]))
-    const ordered = look.itemOrder && !look.groupedTree ? members.slice().sort((a, b) => compareItems(index, a, b, look.itemOrder!, known)) : members
+    const ordered = members
     return { seg, at, count: members.length, folded,
       columns: keys.map((key) => ({ key, cards: folded ? [] : ordered.filter((m) => columnOf(index, m) === key) })) }
   }
@@ -169,11 +169,6 @@ export function groupBoard(index: IssueIndex, look: BoardLook, known: readonly s
   // Lanes in the listing's order (milestones, then the baskets, as moai lists them); no lane head first.
   const order0 = index.entries([]).filter((entry) => entry.dir).map((entry) => entry.seg)
   const segs = [...bySeg.keys()].sort((a, b) => (a === null ? -1 : order0.indexOf(a)) - (b === null ? -1 : order0.indexOf(b)))
-  if (look.milestoneOrder?.length) segs.sort((a, b) => {
-    if (a === null || b === null || a === 'm:' || b === 'm:') return a === b ? 0 : a === null || a === 'm:' ? 1 : -1
-    const ai = index.find(a.slice(2)), bi = index.find(b.slice(2))
-    return ai === undefined || bi === undefined ? 0 : compareItems(index, ai, bi, look.milestoneOrder!, known)
-  })
   const lanes = segs.map((seg) => {
     const home = seg !== null && seg.startsWith('m:') && seg !== 'm:' ? index.find(seg.slice(2)) : undefined
     return make(seg, bySeg.get(seg)!, home)

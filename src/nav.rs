@@ -39,6 +39,8 @@ pub enum Seg {
     /// 에픽이라 가리키는 줄이 여기 온다. **조용히 사라지게 두지 않는다** —
     /// 탐색기에서 항목이 없어지는 것은 줄이 빠지는 것보다 나쁘다.
     Lost,
+    /// A virtual field grouping, never a persisted structural directory.
+    Group(GroupKey),
 }
 
 /// The grouping vocabulary shared by the explorer and command line.
@@ -68,6 +70,7 @@ impl Group {
         Self::Milestone,
         Self::Epic,
     ];
+    pub fn named(word: &str) -> Option<Self> { word.parse().ok() }
     pub fn name(self) -> &'static str {
         match self {
             Self::Structure => "structure",

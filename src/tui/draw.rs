@@ -599,15 +599,15 @@ fn screen_order_words(order: &super::sorter::adapter::ScreenOrder, lang: Lang) -
             return preset_word(preset, lang).to_string();
         }
     }
-    format!(
-        "{}: {} · {} {} · {} {}",
-        say(lang, "tui.grouping.group"),
-        grouping_word(order.group, lang),
-        say(lang, "tui.grouping.milestone"),
-        sort_words(&order.milestone, lang),
-        say(lang, "tui.grouping.item"),
-        sort_words(&order.item, lang)
-    )
+    let mut parts = vec![format!("{}: {}", say(lang, "tui.grouping.group"), grouping_word(order.group, lang))];
+    for (level, name, sorting) in [
+        (super::sorter::adapter::Level::Milestone, "tui.grouping.milestone", &order.milestone),
+        (super::sorter::adapter::Level::Epic, "tui.grouping.epic", &order.epic),
+        (super::sorter::adapter::Level::Item, "tui.grouping.item", &order.item),
+    ] {
+        if order.active(level) { parts.push(format!("{} {}", say(lang, name), sort_words(sorting, lang))); }
+    }
+    parts.join(" · ")
 }
 
 /// 차례 편집 창(`SPC s`, moai-r170.x22) — 프리셋·묶기·층 머리 세 줄 밑에 지금 층의 필드가 다 선다. 차례에 든 것은
@@ -668,7 +668,10 @@ fn sort_edit(f: &mut Frame, e: &mut super::sorter::adapter::ScreenEditor, at: Re
         let choices = presets
             .iter()
             .enumerate()
-            .map(|(n, key)| format!("{} {}", n + 1, preset_word(*key, lang)))
+            .map(|(n, key)| {
+                let label = format!("{} {}", n + 1, preset_word(*key, lang));
+                if e.state() == App::screen_preset(*key) { format!("[{label}]") } else { label }
+            })
             .collect::<Vec<_>>()
             .join(" · ");
         let group = format!("{}: {}  (g)", say(lang, "tui.grouping.group"), grouping_word(e.group, lang));
@@ -678,23 +681,31 @@ fn sort_edit(f: &mut Frame, e: &mut super::sorter::adapter::ScreenEditor, at: Re
             (super::sorter::adapter::Level::Item, "tui.grouping.item"),
         ]
         .into_iter()
-        .map(|(level, key)| if e.level == level { format!("[{}]", say(lang, key)) } else { say(lang, key).to_string() })
-        .collect::<Vec<_>>()
-        .join(" · ");
+        .map(|(level, key)| {
+            let text = if e.level == level { format!("[{}]", say(lang, key)) } else { say(lang, key).to_string() };
+            if e.state().active(level) { Span::raw(format!("{text}  ")) } else { Span::styled(format!("{text}  "), dim()) }
+        })
+        .collect::<Vec<_>>();
         let header = vec![
             Line::from(clip(&choices, inner.width as usize)),
             Line::from(clip(&group, inner.width as usize)),
-            Line::from(clip(&format!("{levels}  (Tab)"), inner.width as usize)),
+            Line::from(levels),
         ];
         f.render_widget(Paragraph::new(header), Rect::new(inner.x, inner.y, inner.width, header_height));
     }
+    let screen = e.state();
+    let fields = |s: super::keys::Sorting| s.fields().iter().map(|f| App::query_field(*f)).collect();
+    let common = crate::query::Order { milestone: fields(screen.milestone), epic: fields(screen.epic), item: fields(screen.item) };
+    let command = format!("moai ctl sort '{}' · moai ctl group {}", common, screen.group.name());
+    let show_command = inner.height > header_height + 2;
+    if show_command { f.render_widget(Paragraph::new(clip(&command, inner.width as usize)), Rect::new(inner.x, inner.y + inner.height - 1, inner.width, 1)); }
     let mut state = ListState::default().with_selected(Some(e.cursor()));
     f.render_stateful_widget(
         List::new(items)
             .highlight_style(Style::new().add_modifier(Modifier::REVERSED))
             .highlight_symbol(CURSOR)
             .highlight_spacing(HighlightSpacing::Always),
-        Rect::new(inner.x, inner.y + header_height, inner.width, inner.height.saturating_sub(header_height)),
+        Rect::new(inner.x, inner.y + header_height, inner.width, inner.height.saturating_sub(header_height + u16::from(show_command))),
         &mut state,
     );
 }
@@ -3420,7 +3431,7 @@ fn lane_line<'a>(app: &App, laid: &super::Laid, lane: usize, w: usize) -> Line<'
         },
         crate::nav::Seg::Milestone(None) => head.push(Span::styled(say(lang, "nav.no_milestone"), dim())),
         crate::nav::Seg::Lost => head.push(Span::styled(say(lang, "nav.lost"), dim())),
-        crate::nav::Seg::Epic(_) if super::virtual_group(seg) => {
+        crate::nav::Seg::Group(_) => {
             head.push(Span::styled(site.group_title(seg).unwrap_or_default(), bold()));
         }
         crate::nav::Seg::Epic(_) | crate::nav::Seg::Issue(_) => {}

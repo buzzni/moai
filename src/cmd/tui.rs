@@ -696,6 +696,7 @@ fn handle(seg: &Seg) -> String {
         Seg::Milestone(Some(id)) | Seg::Epic(id) | Seg::Issue(id) => id.clone(),
         Seg::Milestone(None) => NO_MILESTONE.into(),
         Seg::Lost => LOST.into(),
+        Seg::Group(key) => group_handle(key),
     }
 }
 

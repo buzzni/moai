@@ -766,7 +766,7 @@ fn place(
             walk(out, drawn, cx, &deeper, depth.max(1) + 1);
         }
         // 제 줄이 있는 잃은 에픽·마일스톤도 여기로 온다 — 줄만 내고 만다.
-        Entry::Dir { seg: Seg::Lost, at: Some(at) } => row(out, cx, *at, depth.max(1)),
+        Entry::Dir { seg: Seg::Lost | Seg::Group(_), at: Some(at) } => row(out, cx, *at, depth.max(1)),
         Entry::Leaf { at } => row(out, cx, *at, depth.max(1)),
     }
 }

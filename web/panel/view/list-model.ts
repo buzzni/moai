@@ -5,7 +5,7 @@
 // Where a row stands and in which order is moai's (data/index.ts: `tui --json --deep`); what the filter and the
 // search find is moai's too (store.ts Matched). What stays here is drawing: which of those rows the view toggles show.
 
-import { compareItems, groupBuckets } from "./group-adapter.ts"
+import { groupBuckets } from "./group-adapter.ts"
 import { orderExpression } from "./sort-adapter.ts"
 import { partsIn, zoneNow } from "../data/zone.ts"
 import { isBacklog, LOST, NO_MILESTONE, pathKey, type IssueIndex, type Keep, type Path, type Row, type Seg, type Twig } from "../data/index.ts"
@@ -147,18 +147,8 @@ export function listLines(state: Pick<State, "path" | "expanded"> & Partial<Pick
     return out
   }
   const kin: boolean[] = []
-  // Built once per listing, not once per level the walk visits.
-  const treeSort = state.toolbar?.panel ? orderExpression(state.toolbar.panel) : undefined
   const walk = (here: Path) => {
     const entries = index.entries(here, keep)
-    const panel = state.toolbar?.panel
-    if (panel?.edited && state.board?.value?.treeSort !== treeSort) entries.sort((a, b) => {
-      if (a.at === undefined || b.at === undefined) return a.at === b.at ? 0 : a.at === undefined ? 1 : -1
-      if (a.dir !== b.dir) return a.dir ? -1 : 1
-      const kind = index.rows[a.at]?.kind
-      const level = kind === 'milestone' || kind === 'epic' ? kind : 'item'
-      return compareItems(index, a.at, b.at, panel.order[level] ?? [], state.boot?.statuses)
-    })
     entries.forEach((entry, n) => {
       kin.push(n < entries.length - 1)
       const twig = [...kin]

@@ -16,6 +16,7 @@ pub struct Editor {
     fields: Vec<Ordered>,
     /// 커서 — [`Editor::rows`] 의 자리.
     pub cursor: usize,
+    allow_progress: bool,
 }
 
 /// 창의 한 줄 — 필드와, 차례에 들었으면 그 자리(0부터)와 방향.
@@ -41,13 +42,13 @@ pub enum Done {
 impl Editor {
     /// 지금 차례로 연다. 커서는 첫 필드에 선다.
     pub fn open(s: Sorting) -> Editor {
-        Editor { fields: s.fields().to_vec(), cursor: 0 }
+        Editor { fields: s.fields().to_vec(), cursor: 0, allow_progress: true }
     }
 
     /// 그릴 줄 — 차례에 든 필드가 그 차례대로, 안 든 필드가 뒤에.
     pub fn rows(&self) -> Vec<Row> {
         let used = self.fields.iter().enumerate().map(|(n, f)| Row { by: f.by, at: Some((n, *f)) });
-        let unused = Order::ALL.into_iter().filter(|o| !self.fields.iter().any(|f| f.by == *o));
+        let unused = Order::ALL.into_iter().filter(|o| (self.allow_progress || *o != Order::Progress) && !self.fields.iter().any(|f| f.by == *o));
         used.chain(unused.map(|by| Row { by, at: None })).collect()
     }
 
@@ -72,7 +73,7 @@ impl Editor {
         let by = self.here();
         let at = self.fields.iter().position(|f| f.by == by);
         match a {
-            Sorter::Down => self.cursor = (self.cursor + 1).min(Order::ALL.len() - 1),
+            Sorter::Down => self.cursor = (self.cursor + 1).min(self.rows().len() - 1),
             Sorter::Up => self.cursor = self.cursor.saturating_sub(1),
             // 차례 안에서만 옮긴다 — 안 든 필드는 차례가 없고, 끝 필드를 더 뒤로 보내면 안 든 필드 사이로 섞인다.
             Sorter::Lower => {
@@ -199,49 +200,7 @@ pub(super) mod adapter {
         Item,
     }
 
-    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    pub enum Group {
-        Structure,
-        None,
-        Status,
-        Assignee,
-        Priority,
-        Tag,
-        Kind,
-        Milestone,
-        Epic,
-    }
-
-    impl Group {
-        pub fn name(self) -> &'static str {
-            match self {
-                Self::Structure => "structure",
-                Self::None => "none",
-                Self::Status => "status",
-                Self::Assignee => "assignee",
-                Self::Priority => "priority",
-                Self::Tag => "tag",
-                Self::Kind => "kind",
-                Self::Milestone => "milestone",
-                Self::Epic => "epic",
-            }
-        }
-        pub fn named(word: &str) -> Option<Self> {
-            [
-                Self::Structure,
-                Self::None,
-                Self::Status,
-                Self::Assignee,
-                Self::Priority,
-                Self::Tag,
-                Self::Kind,
-                Self::Milestone,
-                Self::Epic,
-            ]
-            .into_iter()
-            .find(|g| g.name() == word)
-        }
-    }
+    pub use crate::nav::Group;
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub struct ScreenOrder {
@@ -298,13 +257,15 @@ pub(super) mod adapter {
             } else {
                 Level::Item
             };
+            let mut item = super::Editor::open(state.item);
+            item.allow_progress = false;
             Self {
                 group: state.group,
                 level,
                 original: state,
                 milestone: super::Editor::open(state.milestone),
                 epic: super::Editor::open(state.epic),
-                item: super::Editor::open(state.item),
+                item,
             }
         }
 
@@ -322,17 +283,7 @@ pub(super) mod adapter {
             match action {
                 Sorter::NextLevel => self.next_level(),
                 Sorter::NextGroup => {
-                    let groups = [
-                        Group::Structure,
-                        Group::None,
-                        Group::Status,
-                        Group::Assignee,
-                        Group::Priority,
-                        Group::Tag,
-                        Group::Kind,
-                        Group::Milestone,
-                        Group::Epic,
-                    ];
+                    let groups = Group::ALL;
                     let at = groups.iter().position(|g| *g == self.group).unwrap_or(0);
                     self.choose_group(groups[(at + 1) % groups.len()]);
                 }

@@ -80,28 +80,17 @@ pub enum Seat {
     Place(usize),
 }
 
-/// Temporary virtual lane identifier; replaced by the engine's group segments at integration.
-pub const GROUP_PREFIX: &str = "\u{1f}group:";
-pub fn virtual_group(seg: &crate::nav::Seg) -> bool {
-    matches!(seg, crate::nav::Seg::Epic(name) if name.starts_with(GROUP_PREFIX))
-}
+/// Virtual group headers have a typed key, separate from structural directories.
+pub fn virtual_group(seg: &crate::nav::Seg) -> bool { matches!(seg, Seg::Group(_)) }
 pub fn group_label(seg: &crate::nav::Seg) -> Option<&str> {
     group_parts(seg).map(|(_, value)| value.unwrap_or("(none)"))
 }
-/// A virtual header's group name and value (`None` for the empty group). Read by position, never by searching the
-/// whole segment: a value is free text, and an assignee or tag holding `:empty:` must not read as the empty group.
 pub fn group_parts(seg: &crate::nav::Seg) -> Option<(&str, Option<&str>)> {
-    let crate::nav::Seg::Epic(name) = seg else { return None };
-    let (group, rest) = name.strip_prefix(GROUP_PREFIX)?.split_once(':')?;
-    let (state, value) = rest.split_once(':')?;
-    Some((group, (state == "value").then_some(value)))
+    let Seg::Group(key) = seg else { return None };
+    Some((key.group.name(), key.value.as_deref()))
 }
-fn group_segment(group: &str, key: Option<&str>) -> Seg {
-    Seg::Epic(format!(
-        "{GROUP_PREFIX}{group}:{}:{}",
-        if key.is_some() { "value" } else { "empty" },
-        key.unwrap_or("(none)")
-    ))
+fn group_segment(group: &str, value: Option<&str>) -> Seg {
+    Seg::Group(crate::nav::GroupKey { group: group.parse().expect("known group"), value: value.map(str::to_owned) })
 }
 
 /// 보드 한 장([`App::laid`]) — 칸, 레인, 그리고 줄마다 선 자리.
@@ -2046,7 +2035,7 @@ impl App {
                     if words.len() == 1 && words[0].starts_with("group=") {
                         let name = words[0].strip_prefix("group=").unwrap_or("");
                         let group = name.parse::<crate::nav::Group>().map_err(bad)?;
-                        let screen = sorter::adapter::Group::named(group.name()).expect("shared group vocabulary");
+                        let screen = group;
                         changed = self.screen_order.group != screen;
                         if changed {
                             // The cursor keeps its row across the regrouping, as a key press does.
@@ -2079,7 +2068,7 @@ impl App {
                             let (held, stood) = self.grip_of(&rows);
                             self.adopt_common_order(&order);
                             if let Some(group) = group {
-                                self.screen_order.group = sorter::adapter::Group::named(group.name()).unwrap();
+                                self.screen_order.group = group;
                             }
                             // **One bookkeeping path for every scope** — the project's own order, the default, and a
                             // project's own order under `--default` only when it has one. Filling the scope maps by hand
@@ -2678,6 +2667,7 @@ impl App {
                 Seg::Milestone(id) => id.clone().unwrap_or_else(|| "(none)".into()),
                 Seg::Epic(id) | Seg::Issue(id) => id.clone(),
                 Seg::Lost => "(lost)".into(),
+                Seg::Group(key) => key.value.clone().unwrap_or_default(),
             })
             .collect();
         let held = if !self.chord.held().is_empty() {
@@ -3060,8 +3050,15 @@ impl Site {
     pub(super) fn group_title(&self, seg: &Seg) -> Option<String> {
         let (group, value) = group_parts(seg)?;
         Some(match value {
-            None => say(self.lang, "tui.grouping.none").to_string(),
+            None => say(self.lang, match group {
+                "assignee" => "tui.grouping.no_assignee", "tag" => "tui.grouping.no_tag",
+                "milestone" => "nav.no_milestone", "epic" => "tui.grouping.no_epic", _ => "tui.grouping.none",
+            }).to_string(),
             Some(id) if group == "milestone" || group == "epic" => self.title_of(id),
+            Some(value) if group == "status" => {
+                let name = match value { "todo" => say(self.lang, "page.stats.todo"), "in_progress" => say(self.lang, "page.stats.in_progress"), "review" => say(self.lang, "page.stats.review"), "done" => say(self.lang, "page.stats.done"), _ => value };
+                format!("{} {}", crate::style::glyph(value), name)
+            }
             Some(value) => value.to_string(),
         })
     }
@@ -4800,7 +4797,7 @@ impl App {
             milestone: sorting(&order.milestone),
             epic: sorting(&order.epic),
             item: sorting(&order.item),
-            group: sorter::adapter::Group::named(preset.group().name()).expect("engine group vocabulary"),
+            group: preset.group(),
         }
     }
 
@@ -6217,7 +6214,7 @@ impl App {
         };
         home.iter().rev().find_map(|seg| match seg {
             Seg::Epic(id) | Seg::Milestone(Some(id)) => Some(id.clone()),
-            Seg::Issue(_) | Seg::Milestone(None) | Seg::Lost => None,
+            Seg::Issue(_) | Seg::Milestone(None) | Seg::Lost | Seg::Group(_) => None,
         })
     }
 
@@ -6753,7 +6750,7 @@ impl App {
             rows.push(Row::Up);
         }
         if !self.gantt() && self.screen_order.group != sorter::adapter::Group::Structure {
-            let group = self.screen_order.group.name().parse::<crate::nav::Group>().expect("group vocabulary");
+            let group = self.screen_order.group;
             rows.extend(
                 site.index
                     .grouped_tree(
@@ -6864,7 +6861,7 @@ impl App {
         use sorter::adapter::Group;
         if self.screen_order.group != Group::Structure {
             use crate::nav::{GroupKey, GroupedEntry};
-            let group = self.screen_order.group.name().parse::<crate::nav::Group>().expect("group vocabulary");
+            let group = self.screen_order.group;
             let tree = site.index.grouped_tree(
                 &site.issues,
                 &site.path,
@@ -7669,8 +7666,7 @@ impl App {
             if self.chord.held().len() > before && self.sort_prefix_held() {
                 self.screen_order.item = self.order;
                 self.sort_original_engine = Some(self.engine_order.clone());
-                let mut editor = sorter::adapter::ScreenEditor::open(self.screen_order);
-                editor.level = sorter::adapter::Level::Item;
+                let editor = sorter::adapter::ScreenEditor::open(self.screen_order);
                 self.mode = Mode::Sort(editor);
             }
             // **기다리는 열도 아무 동작을 안 돈 키다**(리뷰) — `gg` 의 첫 `g`·`Ctrl-w`·메뉴를 여는
@@ -7903,8 +7899,7 @@ impl App {
             B::SortEdit => {
                 self.screen_order.item = self.order;
                 self.sort_original_engine = Some(self.engine_order.clone());
-                let mut editor = sorter::adapter::ScreenEditor::open(self.screen_order);
-                editor.level = sorter::adapter::Level::Item;
+                let editor = sorter::adapter::ScreenEditor::open(self.screen_order);
                 self.mode = Mode::Sort(editor);
             }
             B::Timezone => {
@@ -8270,7 +8265,7 @@ impl App {
             let anchor = match &home[depth - 1] {
                 Seg::Epic(id) | Seg::Milestone(Some(id)) | Seg::Issue(id) => Anchor::Issue(id.clone()),
                 // 여기 오는 것은 지금 선 프로젝트의 줄뿐이다(위에서 `Anchor::Issue` 로 걸렀다).
-                seg @ (Seg::Milestone(None) | Seg::Lost) => Anchor::Bucket(None, seg.clone()),
+                seg @ (Seg::Milestone(None) | Seg::Lost | Seg::Group(_)) => Anchor::Bucket(None, seg.clone()),
             };
             self.row_of(rows, &anchor)
         })
@@ -8639,6 +8634,7 @@ impl App {
         let id = match seg {
             Seg::Milestone(None) => return crate::i18n::say(self.site.lang, "nav.no_milestone").into(),
             Seg::Lost => return crate::i18n::say(self.site.lang, "nav.lost").into(),
+            Seg::Group(_) => return self.site.group_title(seg).unwrap_or_default(),
             Seg::Milestone(Some(id)) | Seg::Epic(id) | Seg::Issue(id) => id,
         };
         self.site.title_of(id)
@@ -8749,7 +8745,7 @@ pub fn ask_example(lang: crate::i18n::Lang) -> &'static str {
 fn seg_id(seg: &Seg) -> Option<&str> {
     match seg {
         Seg::Milestone(Some(id)) | Seg::Epic(id) | Seg::Issue(id) => Some(id),
-        Seg::Milestone(None) | Seg::Lost => None,
+        Seg::Milestone(None) | Seg::Lost | Seg::Group(_) => None,
     }
 }
 
