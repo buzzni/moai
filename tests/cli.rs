@@ -9732,6 +9732,9 @@ fn idea_and_issue_share_one_list_of_verbs() {
 const JSON_SWEEP: &[&str] = &[
     "image",
     "ctl",
+    // 사용자당 하나인 데몬(moai-5n6m.x8t). 훑기는 `status` 만 부른다 — `start` 는 멈출 때까지 안 돌아온다.
+    // 격리된 `MOAI_CTL_DIR` 에는 데몬이 없어 `running:false` 객체 하나와 0 이다. 띄우고 멈추는 길은 `tests/daemon.rs`.
+    "daemon",
     "watch",
     "supervise",
     "writing",
@@ -10556,6 +10559,7 @@ fn every_command_still_speaks_json() {
         ],
         vec!["image", "add", "sweep.gif", "--json"],
         vec!["ctl", "ls", "--json"],
+        vec!["daemon", "status", "--json"],
         vec!["writing", "--json"],
         vec!["status", "--json"],
         vec!["ready", "--json"],

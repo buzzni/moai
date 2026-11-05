@@ -90,7 +90,7 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
     if !said_already {
         for t in &unread {
             // 글은 `view` 한 자리에서 짓는다(moai-dpbi) — 밖 한눈 보기가 같은 줄을 낸다.
-            eprintln!("{}", view::unread_worktree(ctx.lang(), &t.branch, &t.path));
+            super::tell(&view::unread_worktree(ctx.lang(), &t.branch, &t.path));
         }
     }
     // 센 것은 **낸 것뿐이다** — `gather` 가 이미 낸 줄은 `trouble` 에 이미 들어 있다.
@@ -114,7 +114,7 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
     let reg = ctx.registry();
     let said = &reg.lang_problems;
     for why in said {
-        eprintln!("{}", view::problem(ctx.lang(), reg.path.as_deref(), why));
+        super::tell(&view::problem(ctx.lang(), reg.path.as_deref(), why));
     }
     if !said.is_empty() {
         st.notices.push(report::Warning::user_config(said.len()));
