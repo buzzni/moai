@@ -113,9 +113,11 @@ Every method takes a `params` object. These keys are known to every method:
 | Key | Meaning |
 |---|---|
 | `project` | Absolute path of a registered project. Required, except for `hello`, `ping`, `project.ls` and `daemon.shutdown`. |
-| `actor` | `"Name (email)"`, like `--user`. Otherwise the project's git config decides, as for the CLI. The daemon never asks a person. |
-| `lang` | Words for messages: `en`, `ko`, `zh`, `ja`, `es`. Otherwise `MOAI_LANG`, then your user config. |
-| `tz` | A time zone name or POSIX rule. Otherwise as the CLI reads it. |
+| `actor` | `"Name (email)"`, like `--user`. Otherwise the project's git config decides; the daemon ignores its `MOAI_ACTOR`. The daemon never asks a person. |
+| `lang` | Words for messages: `en`, `ko`, `zh`, `ja`, `es`. Otherwise the daemon's `MOAI_LANG`, then its user config. |
+| `tz` | A time zone name or POSIX rule. Otherwise the daemon's `TZ`, then its system time zone. |
+
+The response does not report the resolved actor. Clients that need to know whose view they receive should supply `actor` explicitly. The daemon's home and configuration environment also determine user settings and status installation notices.
 
 `project` must be a path you registered with `moai project add`, written as an absolute path. A relative path or an unregistered one is `-32000` with `data.code` `not_registered`. A registered directory that has no `.moai` of its own is `not_a_project`; the daemon does not search upward for a parent's tracker. The registered list is read on every request, so a project added while the daemon runs works at once.
 
