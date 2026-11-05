@@ -69,4 +69,4 @@ If a waiting command closes its connection, its waiter slot is released promptly
 
 A window holds up to five pending suggestions, including reserved actions still awaiting their result. Text is limited to 500 characters and three lines, with control characters removed. `--ttl` defaults to 900 seconds and is limited to 3600; an unanswered suggestion expires and disappears. Answered suggestions remain readable for ten minutes. Waiting callers have four slots separate from ordinary ctl requests, so a set of unanswered suggestions does not stop `state` from answering.
 
-Decided in: moai-zgc1 moai-v5of moai-4km9 moai-4xmq
+Decided in: moai-zgc1 moai-v5of moai-4km9 moai-4xmq moai-okdc
