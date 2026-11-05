@@ -301,3 +301,5 @@ else:
 ## Windows
 
 Windows is not supported yet. The build works, `moai daemon start` and `stop` report `unsupported`, and `moai daemon status` says `supported: false` and exits 0. A named pipe transport is left for later. Everything else in moai runs on Windows as before.
+
+Decided in: moai-wbdh
