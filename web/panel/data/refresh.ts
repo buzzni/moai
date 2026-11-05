@@ -165,9 +165,13 @@ export function createRefresher(options: RefresherOptions): Refresher {
   }
 
   async function refresh(how: { fresh?: boolean; reuse?: boolean } = {}): Promise<void> {
-    if (how.fresh && inFlight) await inFlight.catch(() => {})
-    // The stamp first, so a write after it is a later change and is read on the next look.
-    const at = await options.stamp()
+    // Another read can start while the stamp is in flight. A fresh refresh waits for it and asks the stamp again.
+    let at: string | null
+    do {
+      if (how.fresh && inFlight) await inFlight.catch(() => {})
+      // The stamp first, so a write after it is a later change and is read on the next look.
+      at = await options.stamp()
+    } while (how.fresh && inFlight)
     reach(at !== null)
     await read(false, at, how.reuse === true)
     schedule(at === null || failing ? backoffMs : pollMs)

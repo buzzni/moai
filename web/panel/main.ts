@@ -550,7 +550,7 @@ async function start(): Promise<void> {
     wiki,
     movePlan,
     intents: {
-      refresh: () => void refresher.refresh(),
+      refresh: () => void refresher.refresh({ fresh: true }),
       choose: (id) => void choose(id),
       // Up to three reads go at once (the list is three of them): Cancel stops every one, and the reads that wait
       // behind them, in one step (data/client.ts cancelAll) rather than letting the next queued read start in the freed slot.

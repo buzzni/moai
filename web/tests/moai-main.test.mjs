@@ -28,7 +28,7 @@ const until = async (check) => {
   assert.fail('the page did not reach the expected state')
 }
 
-async function page(t, { holdFirst = false, initialTab, chartFailures = 0, fakeStream = false, proposalReply, ctlReply, indexedDB } = {}) {
+async function page(t, { holdFirst = false, holdTree = 0, initialTab, chartFailures = 0, fakeStream = false, proposalReply, ctlReply, indexedDB } = {}) {
   const dom = new JSDOM('<!doctype html><html><body><div id="moai-app"></div></body></html>', {
     url: 'http://localhost:6624/', runScripts: 'outside-only', pretendToBeVisual: true,
   })
@@ -68,7 +68,7 @@ async function page(t, { holdFirst = false, initialTab, chartFailures = 0, fakeS
       let out
       if (url.pathname === '/api/tree') {
         trees.push(url)
-        if (holdFirst && trees.length === 1) await new Promise((resolve) => { release = resolve })
+        if ((holdFirst && trees.length === 1) || trees.length === holdTree) await new Promise((resolve) => { release = resolve })
         if (url.searchParams.has('gantt') && chartFailures > 0) { chartFailures--; out = null }
         else out = [{ ...row, home: [], ...(url.searchParams.has('gantt') ? { gantt } : {}) }]
       } else if (url.pathname === '/api/rows') out = [row]
@@ -389,4 +389,22 @@ test('order and group changes reuse rows, backlog and counts only at the same st
   pick(1, 'Assignee')
   await until(() => counts()[0] === 2)
   assert.deepEqual(counts(), [2, 2, 2])
+})
+
+
+test('manual refresh during an order read waits and then reads everything afresh', async (t) => {
+  const p = await page(t, { holdTree: 2 })
+  await until(() => p.dom.window.document.querySelector('.moai-line[data-key="test-1234"]'))
+  p.dom.window.document.querySelector('.m-sort button').click()
+  ;[...[...p.dom.window.document.querySelectorAll('.m-sort-panel section')][1].querySelectorAll('button')]
+    .find((button) => button.textContent === 'Assignee').click()
+  await until(() => p.trees.length === 2)
+  p.dom.window.document.querySelector('.moai-refresh').click()
+  await new Promise((resolve) => setTimeout(resolve, 40))
+  assert.equal(p.trees.length, 2)
+  p.release()
+  await until(() => p.trees.length >= 4)
+  assert.deepEqual(p.trees.slice(2).map((url) => url.searchParams.get('group')).sort(), ['assignee', 'structure'])
+  for (const path of ['/api/rows', '/api/backlog', '/api/status'])
+    assert.equal(p.requests.filter((item) => item === path).length, 2, path)
 })

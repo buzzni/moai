@@ -400,7 +400,6 @@ export function mountShell(root: HTMLElement, options: ShellOptions): Shell {
     refresh.textContent = at ? `↻ ${at}` : copy.shell.refreshNow
     refresh.title = at ? fill(copy.refreshedAt, { time: at }) : copy.shell.refreshNow
     refresh.setAttribute("aria-label", refresh.title)
-    refresh.disabled = state.board.loading
     paintLayout(state)
     band = columnBand(layout().mainWidth)
 
