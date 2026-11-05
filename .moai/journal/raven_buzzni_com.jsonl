@@ -12455,3 +12455,12 @@
 {"ts":"2026-11-05T09:34:01Z","id":"moai-2wgq","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"v0.51.0 릴리스"}
 {"ts":"2026-11-05T09:34:01Z","id":"moai-2wgq.f87","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"v0.51.0 릴리스 진행 — 병합·판 올리기·소식·PR"}
 {"ts":"2026-11-05T09:34:10Z","id":"moai-2wgq.f87","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-11-05T10:41:45Z","id":"moai-x5sn","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"v0.51.0 CI clippy collapsible_if 8건"}
+{"ts":"2026-11-05T10:41:51Z","id":"moai-x5sn","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-11-05T10:55:11Z","id":"moai-x5sn.25w","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"review — CI clippy collapsible_if 고침"}
+{"ts":"2026-11-05T10:55:11Z","id":"moai-x5sn.25w","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-11-05T10:55:11Z","id":"moai-x5sn.25w","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"직접 읽었다(diff 1a22e6f7, 4파일 +16/-24): 8곳 모두 `if A { if let P = B { body } }` → `if A && let P = B { body }`. A 가 거짓이면 B 를 평가하지 않는 단락이 같고, else 갈래가 있는 곳이 없어 뜻이 같다. cargo fmt·clippy --all-targets -D warnings·cargo test 전체(lib 2627·CLI 977 외) 녹색."}
+{"ts":"2026-11-05T10:55:11Z","id":"moai-x5sn.25w","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 (low — 감독 세션이 diff 를 직접 읽음)"}
+{"ts":"2026-11-05T10:55:11Z","id":"moai-x5sn.25w","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"받아들인다 — 지적 없음"}
+{"ts":"2026-11-05T10:55:11Z","id":"moai-x5sn","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 (low — cargo clippy --fix 로 접고 fmt·시험을 확인)"}
+{"ts":"2026-11-05T10:55:11Z","id":"moai-x5sn","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"develop 08b16878 — PR #80 을 다시 돌린다"}
