@@ -49,7 +49,8 @@ export function groupNames(): string[] {
   return engine?.sort_groups ?? all
 }
 export function activeLevels(group: string): string[] {
-  return group === 'structure' ? ['milestone', 'epic', 'item'] : group === 'milestone' ? ['milestone', 'item'] : group === 'epic' ? ['epic', 'item'] : ['item']
+  const layers = engine?.sort_layers ?? ['milestone', 'epic', 'item']
+  return layers.filter((level) => group === 'structure' || level === 'item' || group === level)
 }
 export function vocabulary(lang: string, names: Record<SortKey, string>): SortPanelVocabulary {
   const ko = lang === 'ko'
@@ -57,8 +58,8 @@ export function vocabulary(lang: string, names: Record<SortKey, string>): SortPa
   const pairs = (items: readonly (readonly [string, string, string])[]) => items.map(([id, en, korean]) => ({ id, label: label(en, korean) }))
   return {
     presets: pairs([['release', 'Release', '판 차례'], ['urgent', 'Urgent', '급한 것 먼저'], ['recent', 'Recent', '최근 바뀐 것'], ['due', 'Due', '기한 임박'], ['people', 'People', '담당별']]),
-    groups: pairs([['structure', 'Structure', '구조'], ['none', 'None', '없음'], ['status', 'Status', '칸'], ['assignee', 'Assignee', '담당'], ['priority', 'Priority', '우선순위'], ['tag', 'Tag', '태그'], ['kind', 'Kind', '종류'], ['milestone', 'Milestone', '마일스톤'], ['epic', 'Epic', '에픽']]).filter((item) => !engine?.sort_groups || engine.sort_groups.includes(item.id)),
-    levels: pairs([['milestone', 'Milestone', '마일스톤'], ['epic', 'Epic', '에픽'], ['item', 'Item', '일']]).filter((item) => !engine?.sort_layers || engine.sort_layers.includes(item.id)),
+    groups: pairs([['structure', 'Structure', '구조'], ['none', 'None', '없음'], ['status', 'Status', '칸'], ['assignee', 'Assignee', '담당'], ['priority', 'Priority', '우선순위'], ['tag', 'Tag', '태그'], ['kind', 'Kind', '종류'], ['milestone', 'Milestone', '마일스톤'], ['epic', 'Epic', '에픽']]).filter((item) => !engine?.sort_groups || engine.sort_groups.includes(item.id)).sort((a, b) => groupNames().indexOf(a.id) - groupNames().indexOf(b.id)),
+    levels: pairs([['milestone', 'Milestone', '마일스톤'], ['epic', 'Epic', '에픽'], ['item', 'Item', '일']]).filter((item) => !engine?.sort_layers || engine.sort_layers.includes(item.id)).sort((a, b) => (engine?.sort_layers ?? ['milestone', 'epic', 'item']).indexOf(a.id) - (engine?.sort_layers ?? ['milestone', 'epic', 'item']).indexOf(b.id)),
     fields: engine ? engine.sort_fields.map(({ name, dir }) => ({ id: name, label: names[name as SortKey] ?? name, dir, ...(name === 'progress' ? { levels: ['milestone', 'epic'] } : {}) })) : SORT_KEYS.map((id) => ({ id, label: names[id] ?? id, dir: defaultDir(id) })), activeLevels,
     labels: { presets: label('Preset', '프리셋'), groups: label('Group', '묶기'), order: label('Order', '차례'), add: label('Add field', '필드 더하기'), direction: label('Reverse', '방향 뒤집기'), up: label('Move up', '위로'), down: label('Move down', '아래로'), remove: label('Remove', '빼기'), command: label('Command', '명령'), speech: label('Say', '말'), hint: label('Empty values last; ties: created, then id.', '빈 값은 끝, 같으면 만든 때와 ID로 가른다.'), saveDefault: label('Set as default', '기본으로') },
   }

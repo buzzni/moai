@@ -166,3 +166,11 @@ test('priority groups read the engine value p<n>: server and preview share one l
   assert.deepEqual(fromServer.map((bucket) => bucket.label), ['p0', 'p2'])
   assert.deepEqual(preview, [], 'wait for server instead of guessing its order')
 })
+
+test('the sort window follows boot layer and group vocabulary', async () => {
+  const { useSortVocabulary, activeLevels, groupNames } = await panelModule('view/sort-adapter.ts')
+  useSortVocabulary({ sort_layers: ['item', 'epic', 'milestone'], sort_groups: ['none', 'structure'], sort_fields: [{ name: 'priority', dir: 'asc' }] })
+  assert.deepEqual(activeLevels('structure'), ['item', 'epic', 'milestone'])
+  assert.deepEqual(activeLevels('epic'), ['item', 'epic'])
+  assert.deepEqual(groupNames(), ['none', 'structure'])
+})
