@@ -22,7 +22,7 @@ What it is not:
 
 `start` stays in the foreground. There is no background mode, so give the process to systemd or launchd, or end the line with `&`. Once the socket listens, `start` prints one line and then serves:
 
-    daemon listening on /run/user/1000/moai/daemon.socket — pid 4242, moai 0.48.0. moai daemon stop or Ctrl-C stops it
+    daemon listening on /run/user/1000/moai/daemon.socket — pid 4242, moai 0.52.0. moai daemon stop or Ctrl-C stops it
 
 With `--json` that line is `{"started": true, "pid": …, "version": "…", "proto": 1, "socket": "…"}`. A program that launches the daemon can read this line and then connect.
 
@@ -50,6 +50,52 @@ There is one daemon per user. A second `start` never runs a second daemon:
 `status` only reads and exits 0 whether or not a daemon runs. Read `running` and `same_version`, not the exit code. It fails (non-zero) when a file at the socket path is not your socket, when the answer is not a daemon's, or when the daemon is so full that it cannot even answer `hello`. The last case is `busy` and the message names the pid.
 
 `start` has the same version rule: it compares the version number and `proto`, so after you rebuild the same version, a running daemon still reads as "the same build" and keeps the old code. Stop it and start it again by hand.
+
+## Run as a user service
+
+For systemd, save the following as `~/.config/systemd/user/moai-daemon.service`, replacing the executable path with the absolute path to your installed `moai`:
+
+```ini
+[Unit]
+Description=moai read-only daemon
+
+[Service]
+ExecStart=/home/me/.local/bin/moai daemon start
+Restart=on-failure
+
+[Install]
+WantedBy=default.target
+```
+
+Run `systemctl --user daemon-reload`, then `systemctl --user enable --now moai-daemon.service`. Use `systemctl --user status moai-daemon.service` to inspect it and `systemctl --user stop moai-daemon.service` to stop it. `Restart=on-failure` does not restart a clean stop.
+
+On macOS, save this as `~/Library/LaunchAgents/com.example.moai-daemon.plist`, replacing the executable path with the absolute path to your installed binary and the label with one you control:
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key><string>com.example.moai-daemon</string>
+    <key>ProgramArguments</key>
+    <array><string>/Users/me/.local/bin/moai</string><string>daemon</string><string>start</string></array>
+    <key>RunAtLoad</key><true/>
+    <key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>
+</dict>
+</plist>
+```
+
+Load it with `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.example.moai-daemon.plist`. Remove it from the user domain with `launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.example.moai-daemon.plist`.
+
+A service does not inherit your shell's environment, and the socket directory depends on it (see [Where the socket is](#where-the-socket-is)). After the service starts, run `moai daemon status` in a terminal: if it says no daemon is running, check the service status and whether the service chose another directory. Set `MOAI_CTL_DIR` to the same directory for the service (`Environment=` in the unit, `EnvironmentVariables` in the plist) and in your shell.
+
+## Upgrade the daemon
+
+1. Run `moai update`. On Unix, after a successful installation it checks the newly installed binary's daemon status. If a daemon of another version or protocol still runs, it prints a restart notice to stderr (under `--json`, the `daemon_restart` key below instead). The daemon is not restarted automatically.
+2. Restart it through whatever keeps it running. For the systemd service above, run `systemctl --user restart moai-daemon.service`; for the launchd service above, `launchctl kickstart -k gui/$(id -u)/com.example.moai-daemon`. For a daemon you started yourself, run `moai daemon stop`, then `moai daemon start` again where it ran before. Do not restart a service with `moai daemon stop`: the daemon exits 0, neither service above restarts a clean exit, and a `moai daemon start` typed afterwards runs in your terminal, outside the service.
+3. Run `moai daemon status` to check the replacement. A daemon rebuilt with the same version and protocol is indistinguishable from the old build by this check, so restart it manually after such a rebuild.
+
+For `moai update --json`, the result includes `"daemon_restart": true` only when that post-install check identifies a running daemon with a different version or protocol and can read its version and pid. The key is absent on other paths, including a failed update, a failed status check, no running daemon, and Windows; its absence does not prove that no restart is needed. The update exit status is unchanged by the check.
 
 ## Where the socket is
 
@@ -80,7 +126,7 @@ Messages are [JSON-RPC 2.0](https://www.jsonrpc.org/specification). Each request
 ### Check the version with `hello`
 
     {"jsonrpc":"2.0","id":1,"method":"hello","params":{"proto":1}}
-    {"id":1,"jsonrpc":"2.0","result":{"pid":4242,"proto":1,"version":"0.48.0"}}
+    {"id":1,"jsonrpc":"2.0","result":{"pid":4242,"proto":1,"version":"0.52.0"}}
 
 `proto` is the message version the client speaks; this daemon speaks `1`. A client with an older `proto` is answered. A client with a newer one gets error `-32001` with `data` `{code: "unsupported_proto", proto, client_proto, version, pid}`: upgrade the daemon. A `hello` with no integer `proto` is `-32602`.
 
@@ -240,7 +286,7 @@ One case has no tool path yet (backlog `moai-69bs`): if the socket file was remo
 
     printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"hello","params":{"proto":1}}' \
       | socat - UNIX-CONNECT:"$sock"
-    {"id":1,"jsonrpc":"2.0","result":{"pid":4242,"proto":1,"version":"0.48.0"}}
+    {"id":1,"jsonrpc":"2.0","result":{"pid":4242,"proto":1,"version":"0.52.0"}}
 
     moai project add ~/repo
     printf '%s\n' '{"jsonrpc":"2.0","id":2,"method":"ready","params":{"project":"/home/me/repo","limit":3}}' \
@@ -302,4 +348,4 @@ else:
 
 Windows is not supported yet. The build works, `moai daemon start` and `stop` report `unsupported`, and `moai daemon status` says `supported: false` and exits 0. A named pipe transport is left for later. Everything else in moai runs on Windows as before.
 
-Decided in: moai-wbdh
+Decided in: moai-wbdh, moai-ou5y
