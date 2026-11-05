@@ -666,7 +666,7 @@ BACKLOG
   ones before it tie. Each lowercase SPC s key makes the order that one field,
   and pressing it again turns it around; an uppercase one adds its field at
   the end, and pressing it again turns that field around. When the order is
-  not the default (priority) the path line says which it is, every field with
+  not the default (priority, due) the path line says which it is, every field with
   ↑ or ↓, as in sort priority↑, updated↓.
   Columns (SPC c) turn on and off with [shown/hidden]. Tag, epic, assignee,
   created and updated dates stand on the right of the row, and when it gets
@@ -677,18 +677,18 @@ BACKLOG
   same file `moai project add` writes). The sort is the exception: one picked
   inside a project is kept for that project alone, as order under
   [tui.project.\"<project path>\"], and one picked in 0 is kept as order under
-  [tui] — the default for every project without its own. order is a list in
-  the words of `moai show --sort`, including id, such as
-  [\"priority\", \"updated:asc\"], and the older sort and sort_reversed pair
-  is still read where order is absent and written beside it from the first
-  field, for an older moai.
+  [tui] — the default for every project without its own. order_layers holds
+  milestone, epic and item field lists; group holds the grouping. The item
+  list is also written to order, and its first field to sort and sort_reversed,
+  so an older moai can still read the familiar keys.
 
-  {key:browse.sort_edit} opens the sort window over the list. All sorting fields stand in it:
+  SPC s opens the sort window over the list ({key:browse.sort_edit} also opens it). All sorting fields stand in it:
   the ones in the order first, numbered and marked ↑ asc or ↓ desc, then the
   rest marked with a dot. {key:sorter.down} and {key:sorter.up} move, {key:sorter.lower} and {key:sorter.raise} move the field down or up the
   order, {key:sorter.toggle} puts it in at the end or takes it out (the last one stays), and
-  {key:sorter.flip} turns its direction. Tab cycles through the layers; g cycles grouping.
-  Presets use 1–5. Either r or d reverses the selected field.
+  {key:sorter.flip} turns its direction. {key:sorter.next_level} cycles through the layers;
+  {key:sorter.next_group} cycles grouping. Presets use {key:sorter.preset_1}, {key:sorter.preset_2}, {key:sorter.preset_3}, {key:sorter.preset_4}, {key:sorter.preset_5}.
+  Either r or d reverses the selected field.
   {key:sorter.apply} applies the order where you stand and keeps it
   there — inside a project for that project, in 0 as the default. {key:sorter.default} applies
   it and keeps it as the default, the order under [tui], even inside a

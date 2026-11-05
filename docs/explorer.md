@@ -117,6 +117,7 @@ shortcuts still set the item order; capitals append a field.
 The release preset orders milestones by due date then newest creation, epics by
 priority then creation, and items by priority then due date. Empty values stay
 last regardless of direction; equal values are resolved by creation time and id.
+Urgent uses milestone due then newest creation, epic priority, and work priority then due; recent orders each layer by update time; due uses due then priority for work. These three use no grouping. People groups by assignee and orders work by priority then due.
 Choose a different preset or group by status, assignee, priority, tag, kind,
 milestone or epic; `none` shows one flat list or board lane. The board still uses
 statuses for its columns. A closed milestone starts folded.
@@ -126,19 +127,19 @@ is the default. A linked worktree shares its project's setting. For example:
 
 ```toml
 [tui]
-order = { milestone = ["due", "created:desc"], epic = ["priority", "created:asc"], item = ["priority", "due"] }
+order = ["priority", "due"]
+order_layers = { milestone = ["due", "created:desc"], epic = ["priority", "created:asc"], item = ["priority", "due"] }
 group = "structure"
 
 [tui.project."/home/me/work/app"]
-order = { milestone = ["created:desc"], epic = ["priority"], item = ["priority", "due"] }
+order = ["priority", "due"]
+order_layers = { milestone = ["created:desc"], epic = ["priority"], item = ["priority", "due"] }
 group = "assignee"
 ```
 
-An older `order = [...]` applies to every layer; `sort` and `sort_reversed` remain
-readable. The first item field is also written in the old pair for older binaries.
+An older `order = [...]` applies to every layer when `order_layers` is absent. The item layer is mirrored into `order`; its first field is also written to `sort` and `sort_reversed` for older binaries.
 See [control an open window](ctl.md#change-the-view-by-name) for layered command
-examples. Release captures should show the explorer window, the web popover and
-an assignee-grouped board.
+examples.
 
 `SPC v b` hides backlog items in the list and their column on the board.
 The choice is saved as `[tui] hide_backlog`. Existing `hide_ideas` settings

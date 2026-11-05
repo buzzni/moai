@@ -441,14 +441,16 @@ lanes.
 | `Up` / `Down` | Pick a filter value |
 | `Ctrl-u` | Clear the input |
 
-**Sort editor** (`SPC s e`)
+**Sort editor** (`SPC s`)
 
 | Key | Does |
 |---|---|
 | `j` `k` | Move in the list |
 | `J` `K` | Move the field later / earlier in the order |
 | `SPC` | Add / remove the field |
-| `d` | Flip direction |
+| `d` / `r` | Flip direction |
+| `Tab` / `g` | Switch layer / grouping |
+| `1`–`5` | Choose a preset |
 | `D` | Save the order as the default: what an emptied order returns to, kept in this browser |
 | `Enter` / `Esc` | Apply / cancel |
 

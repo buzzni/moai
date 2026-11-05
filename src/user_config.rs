@@ -1703,7 +1703,7 @@ pub(crate) const ORDER: &str = "order";
 pub(crate) const ORDER_LAYERS: &str = "order_layers";
 const GROUP: &str = "group";
 /// 프로젝트마다의 보기 — `[tui.project."<프로젝트 경로>"]`(moai-r170.8dz). 그 프로젝트 안에서는 그 표의 값이
-/// `[tui]` 의 것을 이긴다. 지금 그 표에 사는 것은 [`ORDER`] 하나고, 모르는 키는 그대로 둔다.
+/// `[tui]` 의 것을 이긴다. 그 표에 차례와 층별 차례, 묶기를 두고 모르는 키는 그대로 둔다.
 ///
 /// 뿌리의 `[[project]]`([`PROJECT`])와 **같은 낱말이지만 다른 자리다** — 그쪽은 등록 목록, 이쪽은 `[tui]` 밑의 보기다.
 const PER_PROJECT: &str = "project";
@@ -2046,7 +2046,7 @@ fn words_value(words: &[String]) -> toml_edit::Value {
 /// `[tui.project]` 는 머리 없는 표로 세워(`set_implicit`) 파일에는 `[tui.project."/a"]` 한 줄만 선다. `[tui]` 가
 /// 인라인 표(`tui = { … }`)면 그 밑도 인라인 표로 세운다 — 표 머리를 인라인 표 안에 둘 수는 없다.
 ///
-/// **자리가 표 모양이 아니면 그 프로젝트만 안 적는다**(`project = 3`·`"/a" = "x"`·`order = { … }`) — 무엇을 적어
+/// **자리가 표 모양이 아니면 그 프로젝트만 안 적는다**(`project = 3`·`"/a" = "x"`·알 수 없는 `order` 표) — 무엇을 적어
 /// 둔 것인지 모르는 채 덮으면 되돌릴 수 없다. `[tui]` 의 다른 키를 건너뛸 때와 같은 까닭을 낸다.
 fn put_project_order(tui: &mut Item, path: &str, words: &[String]) -> Result<bool, WriteTrouble> {
     let entry = project_entry(tui, path)?;
