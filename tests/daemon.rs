@@ -582,6 +582,8 @@ fn the_read_methods_answer_as_the_cli_does() {
         ("show", json!({ "group": "assignee" }), vec!["show", "--group", "assignee"]),
         ("show", json!({ "sort": "people" }), vec!["show", "--sort", "people"]),
         ("show", json!({ "sort": "release" }), vec!["show", "--sort", "release"]),
+        // 프리셋이 고른 묶기(`people` → `assignee`)보다 준 `group` 이 이긴다 — CLI 의 `--group` 과 같은 자리다.
+        ("show", json!({ "sort": "people", "group": "status" }), vec!["show", "--sort", "people", "--group", "status"]),
         ("show", json!({ "sort": "priority,id" }), vec!["show", "--sort", "priority,id"]),
         ("show", json!({ "sort": "priority", "reverse": true }), vec!["show", "--sort", "priority", "--reverse"]),
         (

@@ -136,6 +136,8 @@ Any other key a method does not list is refused with `-32602`, naming the key. A
 
 The filters for `show` and `stats` are named like the CLI flags with `-` written as `_`: `status`, `tag`, `no_tag`, `epic`, `milestone`, `parent`, `priority`, `assignee`, `since`, `created`, `done` and `filter` take a string, a number or an array of them; `type` and `grep` take a string; `stale` takes an integer; `deferred`, `all` and `archived` take a boolean. A comma inside a string means "or", and an array means "and" — except `assignee`, where an array also means "or". The meaning is the CLI's, because the daemon runs the same command code.
 
+`sort` takes what `moai show --sort` takes (a preset, a field list, or `milestone=…;epic=…;item=…`), and `group` what `--group` takes. A preset that picks a grouping (`people` groups by assignee) yields to a `group` you send, as on the CLI.
+
 `show` has no `raw` or `as_plan`: those flags print text, not a value.
 
 `by` and `bucket` are case-sensitive, as on the CLI: `"STATUS"` is refused with `-32602` (`unknown axis`). A number outside its range is refused with `-32602` and the message names the range, for example `0 is out of range (at least 1)` or `(1 to 1000)`.
