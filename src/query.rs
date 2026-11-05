@@ -1803,6 +1803,80 @@ impl<'a> SortContext<'a> {
     }
 }
 
+/// Owned, per-row sort facts, kept beside a loaded explorer snapshot.
+#[derive(Default)]
+pub struct CachedSort(Vec<OwnedSortValues>);
+
+struct OwnedSortValues {
+    due: Option<String>,
+    epic: Option<String>,
+    milestone: Option<String>,
+    updated: String,
+    since: String,
+    progress: Option<(usize, usize)>,
+}
+impl OwnedSortValues {
+    fn borrowed(&self) -> SortValues<'_> {
+        SortValues {
+            due: self.due.as_deref(),
+            epic: self.epic.as_deref(),
+            milestone: self.milestone.as_deref(),
+            updated: &self.updated,
+            since: &self.since,
+            progress: self.progress,
+        }
+    }
+}
+impl CachedSort {
+    pub fn from_context(all: &[Issue], context: &SortContext<'_>) -> Self {
+        Self(
+            all.iter()
+                .map(|row| {
+                    let v = context.values(row).expect("snapshot row");
+                    OwnedSortValues {
+                        due: v.due.map(str::to_owned),
+                        epic: v.epic.map(str::to_owned),
+                        milestone: v.milestone.map(str::to_owned),
+                        updated: v.updated.to_owned(),
+                        since: v.since.to_owned(),
+                        progress: v.progress,
+                    }
+                })
+                .collect(),
+        )
+    }
+    pub fn compare_layers(
+        &self,
+        order: &Order,
+        a: (usize, &Issue, &str),
+        b: (usize, &Issue, &str),
+        statuses: &[String],
+        naming: crate::config::Naming,
+    ) -> std::cmp::Ordering {
+        if order.milestone != order.epic || order.epic != order.item {
+            let layer = |kind| match kind {
+                Kind::Milestone => 0,
+                Kind::Epic => 1,
+                _ => 2,
+            };
+            let cmp = layer(a.1.kind).cmp(&layer(b.1.kind));
+            if cmp.is_ne() {
+                return cmp;
+            }
+        }
+        compare_order(
+            order.for_kind(a.1.kind),
+            false,
+            (a.1, a.2),
+            (b.1, b.2),
+            statuses,
+            naming,
+            Some(&self.0[a.0].borrowed()),
+            Some(&self.0[b.0].borrowed()),
+        )
+    }
+}
+
 /// Compare rows without a snapshot. Call `SortContext::compare` when inherited or
 /// aggregated fields must be resolved against the complete set of issues.
 pub fn order_by(
@@ -3959,6 +4033,51 @@ mod tests {
         }
         let facts = SortContext::of(&all);
         assert_eq!(facts.values(&all[3]).unwrap().due, Some("2026-11-05"));
+    }
+
+    #[test]
+    fn cached_sort_matches_snapshot_for_twins_and_derived_fields() {
+        let mut epic = issue("a-e001", "todo", &[]);
+        epic.kind = Kind::Epic;
+        epic.due_on = Some("2026-12-01".into());
+        let mut first = issue("a-0001", "todo", &[]);
+        first.epic = Some(epic.id.clone());
+        let mut twin = first.clone();
+        twin.epic = None;
+        twin.due_on = Some("2026-10-01".into());
+        let all = vec![epic, first, twin, issue("a-0002", "done", &[])];
+        let cfg = cfg();
+        let wh = Where::of(&all, &cfg);
+        let context = SortContext::with_where(&all, &wh);
+        let cache = CachedSort::from_context(&all, &context);
+        for key in SortKey::ALL {
+            for dir in [Dir::Asc, Dir::Desc, Dir::AscNullsFirst, Dir::DescNullsFirst] {
+                let fields = vec![Field { key, dir }];
+                let order = Order { milestone: fields.clone(), epic: fields.clone(), item: fields };
+                for (a, x) in all.iter().enumerate() {
+                    for (b, y) in all.iter().enumerate() {
+                        assert_eq!(
+                            cache.compare_layers(
+                                &order,
+                                (a, x, wh.column(x)),
+                                (b, y, wh.column(y)),
+                                &cfg.statuses,
+                                cfg.naming
+                            ),
+                            context.compare_layers(
+                                &order,
+                                false,
+                                (x, wh.column(x)),
+                                (y, wh.column(y)),
+                                &cfg.statuses,
+                                cfg.naming
+                            ),
+                            "{key:?} {dir:?} {a} {b}"
+                        );
+                    }
+                }
+            }
+        }
     }
 
     #[test]

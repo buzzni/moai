@@ -441,6 +441,7 @@ struct Stood {
 /// 지어, 거름망은 **키 하나마다** 이슈 1만 건에서 300ms 를 치렀다.
 #[derive(Default)]
 pub struct Ground {
+    sort: crate::query::CachedSort,
     stands: States,
     /// Archive answers per row and the clock they were measured at ([`Site::archived`]). Measured lazily, once per
     /// clock: a reread installs a fresh `Ground` and the layer moves [`Site::now`], and answering a row on its own
@@ -523,7 +524,13 @@ pub fn measure(issues: &[Issue], cfg: &Config) -> (Index, Ground) {
 /// 셈은 `moai status` 처럼 산 줄을 일로, 아카이브를 문맥으로 따로 받는다([`board`]). 섞은 줄이 그 문맥과 같은 줄들일
 /// 때만 [`counted_beside`] 가 이 지도로 센다.
 fn measure_in(issues: &[Issue], cfg: &Config, soil: &crate::report::Soil<'_>) -> (Index, Ground) {
-    (Index::in_soil(issues, soil), Ground::in_soil(issues, cfg, soil))
+    let index = Index::in_soil(issues, soil);
+    let mut ground = Ground::in_soil(issues, cfg, soil);
+    let wh = crate::query::Where::of(issues, cfg);
+    let context = crate::query::SortContext::with_where(issues, &wh);
+    let sort = crate::query::CachedSort::from_context(issues, &context);
+    ground.sort = sort;
+    (index, ground)
 }
 
 impl Ground {
@@ -595,6 +602,7 @@ impl Ground {
                 .collect(),
         };
         Ground {
+            sort: Default::default(),
             stands,
             archived: Default::default(),
             from_archive: Vec::new(),
@@ -6777,24 +6785,8 @@ impl App {
             return self.cards_in(seat, site, keep);
         }
         let order = self.common_order();
-        // With only issues and no deadlines there is no inherited deadline or group value to resolve.
-        // Avoid rebuilding the snapshot on every movement key in this common flat view.
-        let simple = site.issues.iter().all(|i| i.kind == Kind::Issue && i.deadline().is_none())
-            && order.item.iter().all(|f| matches!(f.key, crate::query::SortKey::Priority | crate::query::SortKey::Due));
-        let wh = (!simple)
-            .then(|| crate::query::Where::from_soil(&site.issues, &site.cfg, crate::report::Soil::of(&site.issues)));
-        let context = wh.as_ref().map(|wh| crate::query::SortContext::with_where(&site.issues, wh));
-        let cmp = |a, b| match &context {
-            Some(context) => self.order_in_context(site, context, &order, a, b),
-            None => crate::query::order_by(
-                &order.item,
-                false,
-                (&site.issues[a], site.column(a)),
-                (&site.issues[b], site.column(b)),
-                &site.cfg.statuses,
-                site.cfg.naming,
-            ),
-        };
+        let context = &site.ground.sort;
+        let cmp = |a, b| self.order_in_context(site, context, &order, a, b);
         let mut rows: Vec<Row> = Vec::new();
         let found_under = self.searched_open(site, keep);
         // **`..` 은 디렉터리에만 선다**(moai-i784). 프로젝트 뿌리에 한 줄 더 세워 층으로
@@ -6851,21 +6843,20 @@ impl App {
     /// 담당은 화면에 선 이름으로. 목록과 보드가 이 하나로 줄을 세운다.
     ///
     /// **견주는 자는 `moai show --sort` 와 하나다**(moai-r170.f65) — 층마다의 차례(`query::Order`)를 엔진의
-    /// [`crate::query::SortContext::compare_layers`] 에 넘겨, 묶음의 파생값(멤버까지의 `updated`·물려받은 기한·진행률)도
+    /// [`crate::query::CachedSort::compare_layers`] 에 넘겨, 묶음의 파생값(멤버까지의 `updated`·물려받은 기한·진행률)도
     /// 엔진이 읽는다. 전체 뒤집기는 안 쓴다 — 방향은 필드마다다.
     fn order_in_context(
         &self,
         site: &Site,
-        context: &crate::query::SortContext<'_>,
+        context: &crate::query::CachedSort,
         order: &crate::query::Order,
         a: usize,
         b: usize,
     ) -> std::cmp::Ordering {
         context.compare_layers(
             order,
-            false,
-            (&site.issues[a], site.column(a)),
-            (&site.issues[b], site.column(b)),
+            (a, &site.issues[a], site.column(a)),
+            (b, &site.issues[b], site.column(b)),
             &site.cfg.statuses,
             site.cfg.naming,
         )
@@ -6908,10 +6899,9 @@ impl App {
     /// 폴더는 제 밑에 걸린 것이 있으면 거름망을 지나도 서므로(`Index::entries_sorted`), 카드는 **제 줄이**
     /// 걸렸을 때만 선다 — 자식이 있는 일이 자식 덕에 카드로 서면 거름망이 숨긴 것이 보드에 선다.
     fn cards_in(&self, seat: Seat, site: &Site, keep: &dyn Fn(usize) -> bool) -> Vec<Row> {
-        let wh = crate::query::Where::from_soil(&site.issues, &site.cfg, crate::report::Soil::of(&site.issues));
-        let context = crate::query::SortContext::with_where(&site.issues, &wh);
+        let context = &site.ground.sort;
         let order = self.common_order();
-        let cmp = |a, b| self.order_in_context(site, &context, &order, a, b);
+        let cmp = |a, b| self.order_in_context(site, context, &order, a, b);
         use sorter::screen::Group;
         if self.screen_order.group != Group::Structure {
             use crate::nav::{GroupKey, GroupedEntry};
@@ -8894,6 +8884,7 @@ fn settle_reads(a: &mut App) {
 
 #[cfg(test)]
 mod tests {
+
     use super::*;
     use crate::model::{Kind, Status};
     use crate::scratch::Scratch;
@@ -15115,6 +15106,23 @@ mod tests {
         assert_eq!(at.data.as_ref().unwrap()["landed"], true, "{at:?}");
         let theme = a.ctl(&ctl_req(Verb::Theme { name: "dark".into() }, None));
         assert_eq!(theme.code.as_deref(), Some("unsupported"));
+    }
+
+    #[test]
+    fn reloading_rebuilds_cached_group_sort_values() {
+        let e1 = make("argos-e001", Kind::Epic);
+        let e2 = make("argos-e002", Kind::Epic);
+        let c1 = member("argos-0001", &e1.id);
+        let mut c2 = member("argos-0002", &e2.id);
+        c2.status = Status::new("done");
+        let mut app = App::new(vec![e1, e2, c1, c2], cfg(), Path::new());
+        app.engine_order = Some(crate::query::Order::parse("progress:desc").unwrap());
+        assert_eq!(row_ids(&app), ["argos-e002", "argos-e001"]);
+        let mut changed = app.site.issues.clone();
+        changed[2].status = Status::new("done");
+        changed[3].status = Status::new("todo");
+        app.adopt(changed);
+        assert_eq!(row_ids(&app), ["argos-e001", "argos-e002"]);
     }
 
     #[test]
