@@ -1,3 +1,4 @@
+import { heading as groupHeading } from './group-adapter.ts'
 /**
  * The kanban: status columns (with Backlog and deferred in front), milestone lanes at the root, cards of up
  * to three lines. Which card goes where is board-groups.ts (on where moai stands each row); this file draws it
@@ -106,7 +107,7 @@ function draw(ctx: ViewContext, state: State, index: IssueIndex, model: BoardMod
 
   const laneHead = (lane: BoardLane): HTMLElement | null => {
     if (lane.seg === null) return null
-    const title = lane.seg?.startsWith('group:') && lane.seg.endsWith(':n') ? (copy.stats.none ?? '(none)') : lane.label ?? (lane.at !== undefined ? (index.rows[lane.at]!.title ?? index.rows[lane.at]!.id) : segLabel(lane.seg, index, copy))
+    const title = lane.seg.startsWith('group:') ? groupHeading(lane.seg, lane.label ?? '', ctx.language, copy.stats as Record<string, string>, (status) => statusGlyph(status, state.boot).glyph) : lane.label ?? (lane.at !== undefined ? (index.rows[lane.at]!.title ?? index.rows[lane.at]!.id) : segLabel(lane.seg, index, copy))
     const selected = lane.at !== undefined && index.rows[lane.at]!.id === state.cursor
     const head = el(doc, 'div', { class: 'm-swim-head', 'data-lane': lane.seg, 'aria-selected': String(selected), 'data-focus': lane.at === undefined ? null : `lane:${index.rows[lane.at]!.id}` })
     const path = [lane.seg]
@@ -119,6 +120,7 @@ function draw(ctx: ViewContext, state: State, index: IssueIndex, model: BoardMod
       else { ctx.intents.choose(index.rows[lane.at]!.id); if (ctx.layout().detailVisible) ctx.focusPane('detail') }
     })
     head.append(toggle, name, el(doc, 'span', { class: 'm-count' }, String(lane.count)))
+    if (lane.detail) head.append(el(doc, 'span', { class: 'm-count' }, lane.detail))
     return head
   }
 

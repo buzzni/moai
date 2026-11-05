@@ -26,6 +26,7 @@ export interface BoardLane {
   /** The milestone's segment (`m:<id>`, `m:`, {@link LOST}); null for the one lane inside a place. */
   seg: Seg | null
   label?: string
+  detail?: string
   /** The milestone row of the lane, when it has one. */
   at?: number
   /** Cards before this lane's fold hides them. */
@@ -154,7 +155,7 @@ export function groupBoard(index: IssueIndex, look: BoardLook, known: readonly s
   if (look.group && look.group !== 'structure') {
     const shownSet = new Set(kept)
     const lanes = groupBuckets(index, path, (at) => shownSet.has(at), look.group, known, false, look.itemOrder, look.levelOrder, look.groupedTree)
-      .map((bucket) => ({ ...make(bucket.seg, bucket.members), label: bucket.label }))
+      .map((bucket) => ({ ...make(bucket.seg, bucket.members), label: bucket.label, detail: bucket.detail }))
     return { keys, lanes, total: kept.length, pinned }
   }
   if (path.length) return { keys, lanes: kept.length ? [make(null, kept)] : [], total: kept.length, pinned }

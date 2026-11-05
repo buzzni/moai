@@ -18,7 +18,7 @@ import { visibleColumns } from "./responsive.ts"
 /** One line of the list. `key` is what the store's cursor holds for it: a row's id, `..`, or a bucket's seg. */
 export type ListLine =
   | { kind: "up"; key: string; depth: 0; path: Path }
-  | { kind: "bucket"; key: string; depth: number; twig: Twig; seg: Seg; path: Path; open: boolean; label?: string }
+  | { kind: "bucket"; key: string; depth: number; twig: Twig; seg: Seg; path: Path; open: boolean; label?: string; count?: number; done?: number; detail?: string }
   | { kind: "row"; key: string; depth: number; twig: Twig; at: number; dir: boolean; path: Path | null; open: boolean }
 
 export const UP_KEY = ".."
@@ -139,7 +139,7 @@ export function listLines(state: Pick<State, "path" | "expanded"> & Partial<Pick
     for (const bucket of buckets) {
       const path = [...state.path, bucket.seg]
       const opened = !open.has(pathKey(path))
-      if (group !== 'none') out.push({ kind: 'bucket', key: bucket.seg, depth: 1, twig: [], seg: bucket.seg, path, open: opened, label: bucket.label })
+      if (group !== 'none') out.push({ kind: 'bucket', key: bucket.seg, depth: 1, twig: [], seg: bucket.seg, path, open: opened, label: bucket.label, detail: bucket.detail, count: bucket.members.length, done: bucket.members.filter((at) => index.rows[at]?.status === "done").length })
       if (group === 'none' || opened) for (const at of bucket.members) {
         out.push({ kind: 'row', key: index.rows[at]!.id, depth: group === 'none' ? 1 : 2, twig: [], at, dir: false, path: null, open: false })
       }

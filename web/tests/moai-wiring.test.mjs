@@ -16,6 +16,7 @@ const { mountWiki } = await panelModule('view/wiki.ts')
 const { wireKeys } = await panelModule('keys/wiring.ts')
 const { createSortDefault } = await panelModule('data/memory.ts')
 const { treeOf } = await import('./moai-tree-helper.mjs')
+const { orderExpression } = await panelModule('view/sort-adapter.ts')
 
 const en = copyFor('en')
 const recent = new Date(Date.now() - 86_400_000).toISOString()
@@ -168,8 +169,8 @@ test('toolbar: the sort popover and the name line change one order, the store\'s
   assert.deepEqual(panel.store.getState().sort, { fields: [{ key: 'priority', dir: 'desc' }], reversed: false })
   assert.match(panel.$('.m-toolbar-slot .m-sort button').textContent, /Priority↓/)
   assert.match(panel.$('.m-crumbs-badges').textContent, /sort priority↓/)
-  // The temporary adapter applies the preview while the new engine request is in flight.
-  assert.deepEqual(panel.listed(), ['r2', 'r1'])
+  // Keep the last server order while the new engine request is in flight.
+  assert.deepEqual(panel.listed(), ['r1', 'r2'])
   // A name-line click is the same state: title alone, and the toolbar's badge follows.
   panel.$('.moai-head-sort[data-sort="title"]').click()
   assert.deepEqual(panel.store.getState().sort, { fields: [{ key: 'title', dir: 'asc' }], reversed: false })
@@ -346,9 +347,11 @@ test('sort panel groups the rendered list and board and supports lane folding', 
   const people = [...panel.doc.querySelectorAll('.m-sort-pop button')].find((button) => button.textContent === 'People')
   people.click()
   assert.equal(panel.store.getState().toolbar.panel.group, 'assignee')
-  assert.deepEqual([...panel.doc.querySelectorAll('.moai-line[data-key^="group:"] .m-row-title')].map((n) => n.textContent.replace('/', '')), ['Amy', 'Zoe', '(none)'])
+  const groupedTree = [{ kind: 'group', path: 'group:assignee:"Amy"' }, { id: 'r1' }, { kind: 'group', path: 'group:assignee:"Zoe"' }, { id: 'r2' }, { kind: 'group', path: 'group:assignee:null' }, { id: 'r3' }]
+  panel.store.dispatch({ type: 'board-loaded', data: { rows, groupedTree, groupedBy: 'assignee', groupedSort: orderExpression(panel.store.getState().toolbar.panel), loadedAt: Date.now() } })
+  assert.deepEqual([...panel.doc.querySelectorAll('.moai-line[data-key^="group:"] .m-row-title')].map((n) => n.textContent.replace('/', '').replace(/ 0\/1$/, '')), ['Amy', 'Zoe', 'No assignee'])
   panel.store.dispatch({ type: 'tab', tab: 'board' })
-  assert.deepEqual([...panel.doc.querySelectorAll('.m-swim-title')].map((n) => n.textContent), ['Amy', 'Zoe', '(none)'])
+  assert.deepEqual([...panel.doc.querySelectorAll('.m-swim-title')].map((n) => n.textContent), ['Amy', 'Zoe', 'No assignee'])
   panel.doc.querySelector('.m-swim-head .moai-toggle').click()
   assert.equal(panel.doc.querySelectorAll('.m-card').length, 2)
 })

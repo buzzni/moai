@@ -66,9 +66,12 @@ test('toolbar preset and grouping update the shared list/board model', async () 
     { id: 'c', kind: 'issue', status: 'todo', priority: 0, created_at: '2026-01-03' },
   ]
   const index = new IssueIndex(rows)
+  const { orderExpression } = await panelModule('view/sort-adapter.ts')
+  const server = [{ kind: 'group', path: 'group:assignee:"Amy"' }, { id: 'b' }, { kind: 'group', path: 'group:assignee:"Zoe"' }, { id: 'a' }, { kind: 'group', path: 'group:assignee:null' }, { id: 'c' }]
+  state = { ...state, board: { value: { rows, groupedTree: server, groupedBy: 'assignee', groupedSort: orderExpression(state.toolbar.panel) }, loading: false, problem: null } }
   const lines = listLines(state, index, () => true)
   assert.deepEqual(lines.filter((line) => line.kind === 'bucket').map((line) => line.label), ['Amy', 'Zoe', '(none)'])
-  const board = groupBoard(index, { path: [], view: state.view, cursor: null, group: 'assignee' })
+  const board = groupBoard(index, { path: [], view: state.view, cursor: null, group: 'assignee', groupedTree: server })
   assert.deepEqual(board.lanes.map((lane) => lane.label), ['Amy', 'Zoe', '(none)'])
   assert.equal(board.total, 3)
   state = reduce(state, { type: 'toolbar', action: { type: 'sort-panel', action: { type: 'group', id: 'none' } } })
@@ -85,14 +88,15 @@ test('temporary groups keep null distinct from a literal marker and order cards'
     { id: 'c', kind: 'issue', status: 'todo', priority: 1, created_at: '2026-01-03' },
   ]
   const index = new IssueIndex(rows)
-  const groups = groupBuckets(index, [], () => true, 'tag', [], false, [{ key: 'priority', dir: 'asc' }])
+  const server = [{ kind: 'group', path: 'group:tag:"~"' }, { id: 'b' }, { id: 'a' }, { kind: 'group', path: 'group:tag:null' }, { id: 'c' }]
+  const groups = groupBuckets(index, [], () => true, 'tag', [], false, [{ key: 'priority', dir: 'asc' }], [], server)
   assert.equal(groups.length, 2)
   assert.notEqual(groups[0].seg, groups[1].seg)
   assert.deepEqual(groups[0].members.map((at) => index.rows[at].id), ['b', 'a'])
   assert.deepEqual(groups[1].members.map((at) => index.rows[at].id), ['c'])
 })
 
-test('the temporary adapter applies independent milestone and item orders to the structured list', async () => {
+test('the structured list preserves the server layer order', async () => {
   const { initialState, reduce } = await panelModule('store.ts')
   const { IssueIndex, pathKey } = await panelModule('data/index.ts')
   const { listLines } = await panelModule('view/list-model.ts')
@@ -103,7 +107,7 @@ test('the temporary adapter applies independent milestone and item orders to the
     { id: 'a', kind: 'issue', title: 'A', status: 'todo', milestone: 'm1', derived_milestone: 'm1', priority: 2 },
     { id: 'b', kind: 'issue', title: 'B', status: 'todo', milestone: 'm1', derived_milestone: 'm1', priority: 0 },
   ]
-  const index = new IssueIndex(rows, treeOf(rows))
+  const index = new IssueIndex(rows, treeOf([rows[1], rows[3], rows[2], rows[0]]))
   let state = initialState()
   state = reduce(state, { type: 'toolbar', action: { type: 'sort-panel', action: { type: 'fields', level: 'milestone', fields: [{ key: 'created', dir: 'asc' }] } } })
   state = { ...state, expanded: [pathKey(['m:m1']), pathKey(['m:m2'])] }
@@ -152,5 +156,5 @@ test('priority groups read the engine value p<n>: server and preview share one l
   const fromServer = groupBuckets(index, [], () => true, 'priority', [], false, [], [], server)
   const preview = groupBuckets(index, [], () => true, 'priority', [], false, [], [])
   assert.deepEqual(fromServer.map((bucket) => bucket.label), ['p0', 'p2'])
-  assert.deepEqual(preview.map((bucket) => [bucket.seg, bucket.label]), fromServer.map((bucket) => [bucket.seg, bucket.label]))
+  assert.deepEqual(preview, [], 'wait for server instead of guessing its order')
 })
