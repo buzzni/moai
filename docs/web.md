@@ -267,7 +267,7 @@ overlay shows, as `moai read --worktree` does: a row only another worktree holds
 can be marked, and a row another worktree changed later is marked at that later
 version, so its NEW goes away. Nothing is written to the other worktree.
 
-Nothing is stored for the page either: each list is read again when you ask.
+The page keeps the latest list while you change sort and grouping, and rereads it when the tracker changes or you refresh.
 Search, filters and sort are moai's own — the server hands them to `moai show`
 and `moai tui --deep` as `--grep`, `--filter` and `--sort` — so a filter means
 on the page what it means on the command line, and one moai does not know is
@@ -288,7 +288,7 @@ the stamp at once. The issue open in the
 detail is read again with it, and the cursor, the folded groups and what you are
 typing stay where they were. A tracker nobody touches causes no reread. What changes with the clock alone — a deadline passing, done work
 ageing into the archive — shows on the next reload, or when you click the
-refresh time.
+refresh time. You can click refresh while a read is running; the page then reads again after it finishes.
 
 If the stream is refused or lost, the page asks for the stamp every two seconds
 and tries the stream again after thirty seconds. A stream that was open and then
