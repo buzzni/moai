@@ -12233,3 +12233,24 @@
 {"ts":"2026-11-04T17:21:23Z","id":"moai-vxtd","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
 {"ts":"2026-11-04T17:21:23Z","id":"moai-6ufw","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done"}
 {"ts":"2026-11-04T17:21:23Z","id":"moai-xg7x","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done"}
+{"ts":"2026-11-05T02:22:52Z","id":"moai-cgcw","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"v0.51.0"}
+{"ts":"2026-11-05T02:22:59Z","id":"moai-ctxc","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"정렬·묶기 다시 짜기"}
+{"ts":"2026-11-05T02:22:59Z","id":"moai-ctxc.yi6","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"query: 층마다의 차례·새 필드·빈 값·동점"}
+{"ts":"2026-11-05T02:22:59Z","id":"moai-ctxc.om4","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"Group by 와 층별 나무 걸음"}
+{"ts":"2026-11-05T02:22:59Z","id":"moai-ctxc.z7l","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"탐색기 정렬·묶기 창"}
+{"ts":"2026-11-05T02:22:59Z","id":"moai-ctxc.9yd","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"보드 레인을 묶기로"}
+{"ts":"2026-11-05T02:22:59Z","id":"moai-ctxc.xl5","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"CLI·ctl 낱말과 에이전트 말 대응"}
+{"ts":"2026-11-05T02:22:59Z","id":"moai-ctxc.ay0","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"웹 정렬·묶기 창"}
+{"ts":"2026-11-05T02:22:59Z","id":"moai-ctxc.lq7","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"정렬·묶기 문서와 CHANGELOG"}
+{"ts":"2026-11-05T02:23:15Z","id":"moai-ctxc","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"웹 시안(2026-11-05): https://claude.ai/artifact/PFVDt9sJpiFUwdYLnZwAoY — 원본은 세션 scratchpad 의 sort/sort-mockup.html. 프리셋·묶기·층 탭·목록/칸반·ctl 명령과 말 대응을 보인다. 사람이 확인하기 전에는 시작하지 않는다."}
+{"ts":"2026-11-05T02:35:53Z","id":"moai-yfv3","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"wiki: SQL 로 분석하기 페이지"}
+{"ts":"2026-11-05T02:36:04Z","id":"moai-yfv3","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-11-05T02:38:06Z","id":"moai-cgcw","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"기한: 2026-11-06 00:00 까지(사용자, 2026-11-05) — 날짜 기한이라 마지막 날 2026-11-05 로 적었다(v0.50.0 moai-xg7x 와 같은 꼴)."}
+{"ts":"2026-11-05T02:39:17Z","id":"moai-yfv3.g3p","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"review — SQL 분석 위키 페이지"}
+{"ts":"2026-11-05T02:39:21Z","id":"moai-yfv3.g3p","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-11-05T02:40:03Z","id":"moai-yfv3.g3p","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"리뷰 원문 (/code-review low, anthropic/opus-5.5):\n- docs/sql.md:149 — The \"open work past its own deadline\" query filters on `status <> 'done'` but not on `kind`. The page says epics and milestones have no column of their own and their column comes from `derived_status`. So an epic or milestone whose members are all done can still have a raw `status` other than `done`, and it will show up as overdue. Use `coalesce(derived_status, status) <> 'done'`, or add `kind = 'issue'`."}
+{"ts":"2026-11-05T02:40:03Z","id":"moai-yfv3.g3p","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 (low — 문서만 바꾼 에픽 밖 이슈)"}
+{"ts":"2026-11-05T02:40:03Z","id":"moai-yfv3.g3p","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"받아들였다: 1건을 bc236431 에서 coalesce(derived_status, status) 로 고쳤다. 묶음도 기한 넘김에 남긴다 — kind 로 거르지 않았다"}
+{"ts":"2026-11-05T02:40:13Z","id":"moai-yfv3","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 (low — 위키 한 쪽, 감독 세션이 직접 썼다)"}
+{"ts":"2026-11-05T02:40:13Z","id":"moai-yfv3","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"병합: milestone/moai-cgcw ca6a476b (docs 8c1a7352, 리뷰 고침 bc236431). 쿼리는 실제 DuckDB 로 돌려 보지 못했다 — 이 기계에 duckdb 가 없고 내려받기가 자동 모드에서 거절됐다. 사람이 설치하면 페이지 쿼리를 rows.json 에 돌려 확인한다."}
+{"ts":"2026-11-05T02:40:14Z","id":"moai-yfv3","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
