@@ -315,6 +315,8 @@ mod tests {
             .env("NO_COLOR", "1")
             .env_remove("MOAI_ACTOR")
             .env_remove("MOAI_HERE")
+            // Inside a Claude session `mv` records its own pick under this id, newer than a fixture's pick.
+            .env_remove("CLAUDE_CODE_SESSION_ID")
             .output()
             .unwrap();
         assert!(out.status.success(), "moai {args:?}: {}", String::from_utf8_lossy(&out.stderr));
@@ -566,6 +568,20 @@ mod tests {
         std::fs::write(&path, "").unwrap();
         let removed = poll(&memory, whole(&root), Lang::En, Some(&repaired.changes.cursor)).unwrap();
         assert_eq!(removed.changes.removed, vec![id]);
+    }
+
+    /// An unreadable archive line holds back nothing: archive rows are never in the compared list.
+    #[test]
+    fn an_unreadable_archive_line_does_not_hold_back_removals() {
+        let (_keep, root) = project("changes-archive-line");
+        let memory = Memory::new();
+        let id = add(&root, "2026-11-04T09:01:00Z", "one");
+        let archive = crate::archive::path(&root, "2026");
+        std::fs::create_dir_all(archive.parent().unwrap()).unwrap();
+        std::fs::write(&archive, "not json\n").unwrap();
+        let (cursor, _, _, _) = ask(&memory, &root, None);
+        moai(&root, "2026-11-04T09:02:00Z", &["rm", &id]);
+        assert_eq!(ask(&memory, &root, Some(&cursor)).2, vec![id]);
     }
 
     #[test]

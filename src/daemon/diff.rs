@@ -44,11 +44,13 @@ pub struct Seen {
 }
 
 impl Seen {
-    /// Keep old marks for unreadable IDs; an unidentified line may hide any missing row.
+    /// Keep old marks for missing rows an unreadable line may hold; an unidentified line may hide any missing row.
+    /// A row that was still read keeps its new mark — a readable twin of a broken line may have changed, and naming it
+    /// in `changed` costs a re-read where keeping the old mark would hide the edit.
     pub fn preserve_unread(&mut self, old: &Seen, unread: &[Option<String>]) {
         let unknown = unread.iter().any(Option::is_none);
         for (id, mark) in &old.rows {
-            if unread.iter().any(|bad| bad.as_ref() == Some(id)) || (unknown && !self.rows.contains_key(id)) {
+            if !self.rows.contains_key(id) && (unknown || unread.iter().any(|bad| bad.as_ref() == Some(id))) {
                 self.rows.insert(id.clone(), *mark);
                 match old.notes.get(id) {
                     Some(notes) => {
@@ -248,6 +250,10 @@ mod tests {
         let repaired = Seen::of(&[row("a-1", "edited"), row("a-2", "two")], &[]);
         assert_eq!(diff(&unknown, &repaired), (vec!["a-1".to_string()], vec![]));
         assert_eq!(diff(&unknown, &Seen::of(&[], &[])).1, vec!["a-1", "a-2"]);
+        // A readable twin of the broken line still counts: its edit is named, not masked by the old mark.
+        let mut twin = Seen::of(&[row("a-1", "edited"), row("a-2", "two")], &[]);
+        twin.preserve_unread(&old, &[Some("a-1".into())]);
+        assert_eq!(diff(&old, &twin), (vec!["a-1".to_string()], vec![]));
     }
 
     /// 노트는 시각과 상관없이 선다 — 옛 도장의 노트(늦게 확정됐거나 병합으로 들어온 것)도. 목록에 없는 줄의 노트는

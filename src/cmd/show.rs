@@ -278,7 +278,11 @@ fn listed(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>, keys: &Keys) -> 
         opaque.iter().filter(|id| !readable.contains(id.as_str())).cloned().collect();
     let live: std::collections::BTreeSet<String> = readable.into_iter().map(str::to_string).chain(opaque).collect();
     let mut load = crate::archive::read_all(&repo.root, active_load)?;
-    crate::side::with(|side| side.unread_rows.extend(load.errors.iter().map(|e| e.id.clone())));
+    // Only live lines: an archive-file row is never in a list without `archived`, so its unreadable line cannot hide
+    // one, and an id-less archive line would otherwise hold back every `removed` until someone mends the archive.
+    crate::side::with(|side| {
+        side.unread_rows.extend(load.errors.iter().filter(|e| e.source.is_none()).map(|e| e.id.clone()));
+    });
     super::report_load_errors(ctx.lang(), &repo.issues_path(), &load.errors);
 
     let target = match kind_filter {

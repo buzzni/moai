@@ -175,9 +175,9 @@ The reply `value` is `{changed, cursor, removed, reset}`:
 
 ### What is compared
 
-The `session` and `archived` keys are excluded from row fingerprints: they can change with the clock or a heartbeat. If a client needs them, it must re-read them independently of `changed`.
+The `session` key is excluded from row fingerprints: it changes with the clock and with heartbeats, not with edits. If a client shows it, it must re-read it independently of `changed`. (`archived` is excluded too, but the compared list never carries it: a row that ages past `archive_days` leaves the list and is in `removed`, below.)
 
-When a snapshot line cannot be read, `changes` retains the previous fingerprint for its ID and does not report it as removed. If the ID cannot be recovered, all missing IDs are retained until a complete read. Diagnostics appear in `messages`; an unreadable active snapshot line also sets `partial`.
+When a line of `.moai/issues.jsonl` cannot be read, `changes` retains the previous fingerprint for its ID while no readable row has that ID, and does not report it as removed. If the ID cannot be recovered, all missing IDs are retained until a complete read. Unreadable lines in archive files retain nothing, because archived rows are not in the compared list. Diagnostics appear in `messages`; an unreadable line in `.moai/issues.jsonl` also sets `partial`.
 
 The daemon remembers recent snapshots in memory: per project up to 8, and about 32 MiB for all projects together. When the memory is full, the snapshot used least recently is dropped. A cursor names one remembered snapshot. On each call the daemon reads the project again, compares it with the snapshot of your cursor row by row, and remembers the new one.
 
