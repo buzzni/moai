@@ -173,6 +173,7 @@ export function toolbarReduce(state: ToolbarState, action: ToolbarAction): Toolb
       return { ...state, panel: action.panel, sort: action.sort }
     case "sort-panel": {
       const a = action.action
+      if (a.type === 'default') return { ...state, sortOpen: false }
       if (a.type === 'preset') {
         const panel = preset(a.id)
         return { ...state, panel, sort: { fields: panel.order.item as Sort['fields'], reversed: false } }
@@ -382,7 +383,7 @@ export function createToolbar(deps: Pick<ToolbarDeps, "doc" | "copy" | "lang">, 
   // The key that opens the search, next to its button (keys/table.ts `/`); the open search box carries its own.
   const searchShortcut = kbdHint(doc, "/")
   searchShortcut.setAttribute("aria-hidden", "true")
-  sortButton.setAttribute("aria-keyshortcuts", "Space s e")
+  sortButton.setAttribute("aria-keyshortcuts", "Space s")
   const bar = el(doc, "div", { class: "m-toolbar" }, icon(doc, "filter", 14), filterWrap, sortWrap, openSearch, searchShortcut)
 
   // Chips of the parsed filter (comma is OR inside one chip, a repeated key is AND between chips).

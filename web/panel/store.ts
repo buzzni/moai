@@ -380,8 +380,11 @@ export function reduce(state: State, action: Action): State {
       return { ...state, search: { text: action.text, open: state.search.open || action.text !== '' } }
     case 'filter':
       return withToolbar(state, toolbarReduce({ ...toolbarOf(state), filterText: action.text, cursor: action.text.length }, { type: 'filter-apply' }))
-    case 'toolbar':
-      return withToolbar(state, toolbarReduce(toolbarOf(state), action.action))
+    case 'toolbar': {
+      const next = withToolbar(state, toolbarReduce(toolbarOf(state), action.action))
+      return action.action.type === 'sort-panel' && action.action.action.type === 'default'
+        ? { ...next, defaultSort: copySort(state.sort) } : next
+    }
     case 'wiki':
       return { ...state, wiki: action.wiki }
     case 'board-loading':

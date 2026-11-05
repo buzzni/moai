@@ -210,6 +210,7 @@ export function createCtl(options: CtlOptions) {
         store.dispatch({ type: 'toolbar', action: { type: 'sort-panel-restore', panel, sort } })
         if (request.default === true) {
           sortDefault.set(sort)
+          sortDefault.setPanel?.(panel)
           store.dispatch({ type: 'sort-default', sort })
         }
         return after()

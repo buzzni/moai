@@ -1,4 +1,4 @@
-/** Temporary UI adapter. The engine's boot vocabulary and query replace this at integration. */
+/** Editor state and labels for the shared engine vocabulary. */
 import { SORT_KEYS, defaultDir, type SortField, type SortKey } from '../data/query.ts'
 import type { SortPanelState, SortPanelVocabulary } from './sort-panel.ts'
 
@@ -24,10 +24,10 @@ export function preset(id: string): SortPanelState {
   }
   const order = { milestone: [f('due'), f('created')], epic: [f('priority'), f('created', 'asc')], item: [f('priority'), f('due')] }
   let group = 'structure'
-  if (id === 'urgent') { order.milestone = [f('priority')]; order.epic = [f('priority')]; order.item = [f('priority')] }
-  if (id === 'recent') { order.milestone = [f('updated')]; order.epic = [f('updated')]; order.item = [f('updated')] }
-  if (id === 'due') { order.milestone = [f('due')]; order.epic = [f('due')]; order.item = [f('due')] }
-  if (id === 'people') { group = 'assignee'; order.milestone = [f('assignee')]; order.epic = [f('assignee')]; order.item = [f('assignee')] }
+  if (id === 'urgent') { group = 'none'; order.epic = [f('priority')] }
+  if (id === 'recent') { group = 'none'; order.milestone = [f('updated')]; order.epic = [f('updated')]; order.item = [f('updated')] }
+  if (id === 'due') { group = 'none'; order.milestone = [f('due')]; order.epic = [f('due')]; order.item = [f('due'), f('priority')] }
+  if (id === 'people') { group = 'assignee'; order.epic = [f('priority')] }
   return { group, order, level: group === 'structure' ? 'milestone' : 'item', preset: id, edited: true }
 }
 /** Every field the sort window lists, in the vocabulary's order (`/api/boot`, else the page's own keys). */
@@ -41,12 +41,12 @@ export function fieldDir(key: string): 'asc' | 'desc' {
 /** The sort window's rows for one level, top to bottom: the level's fields in their order, then the rest. */
 export function sorterRows(panel: SortPanelState): string[] {
   const used = (panel.order[panel.level] ?? []).map((field) => field.key)
-  return [...used, ...sortFieldNames().filter((key) => !used.includes(key))]
+  return [...used, ...sortFieldNames().filter((key) => !used.includes(key) && (panel.level !== 'item' || key !== 'progress'))]
 }
 /** The groups `g` cycles through, as the panel lists them. */
 export function groupNames(): string[] {
   const all = ['structure', 'none', 'status', 'assignee', 'priority', 'tag', 'kind', 'milestone', 'epic']
-  return engine?.sort_groups ? all.filter((group) => engine!.sort_groups!.includes(group)) : all
+  return engine?.sort_groups ?? all
 }
 export function activeLevels(group: string): string[] {
   return group === 'structure' ? ['milestone', 'epic', 'item'] : group === 'milestone' ? ['milestone', 'item'] : group === 'epic' ? ['epic', 'item'] : ['item']
@@ -56,11 +56,11 @@ export function vocabulary(lang: string, names: Record<SortKey, string>): SortPa
   const label = (en: string, korean: string) => ko ? korean : en
   const pairs = (items: readonly (readonly [string, string, string])[]) => items.map(([id, en, korean]) => ({ id, label: label(en, korean) }))
   return {
-    presets: pairs([['release', 'Release', '판 차례'], ['urgent', 'Urgent', '급한 것 먼저'], ['recent', 'Recent', '최근 변경'], ['due', 'Due', '기한 임박'], ['people', 'People', '담당별']]),
+    presets: pairs([['release', 'Release', '판 차례'], ['urgent', 'Urgent', '급한 것 먼저'], ['recent', 'Recent', '최근 바뀐 것'], ['due', 'Due', '기한 임박'], ['people', 'People', '담당별']]),
     groups: pairs([['structure', 'Structure', '구조'], ['none', 'None', '없음'], ['status', 'Status', '칸'], ['assignee', 'Assignee', '담당'], ['priority', 'Priority', '우선순위'], ['tag', 'Tag', '태그'], ['kind', 'Kind', '종류'], ['milestone', 'Milestone', '마일스톤'], ['epic', 'Epic', '에픽']]).filter((item) => !engine?.sort_groups || engine.sort_groups.includes(item.id)),
     levels: pairs([['milestone', 'Milestone', '마일스톤'], ['epic', 'Epic', '에픽'], ['item', 'Item', '일']]).filter((item) => !engine?.sort_layers || engine.sort_layers.includes(item.id)),
-    fields: engine ? engine.sort_fields.map(({ name, dir }) => ({ id: name, label: names[name as SortKey] ?? name, dir })) : SORT_KEYS.map((id) => ({ id, label: names[id] ?? id, dir: defaultDir(id) })), activeLevels,
-    labels: { presets: label('Preset', '프리셋'), groups: label('Group', '묶기'), order: label('Order', '차례'), add: label('Add field', '필드 더하기'), direction: label('Reverse', '방향 뒤집기'), up: label('Move up', '위로'), down: label('Move down', '아래로'), remove: label('Remove', '빼기'), command: label('Command', '명령'), speech: label('Say', '말') },
+    fields: engine ? engine.sort_fields.map(({ name, dir }) => ({ id: name, label: names[name as SortKey] ?? name, dir, ...(name === 'progress' ? { levels: ['milestone', 'epic'] } : {}) })) : SORT_KEYS.map((id) => ({ id, label: names[id] ?? id, dir: defaultDir(id) })), activeLevels,
+    labels: { presets: label('Preset', '프리셋'), groups: label('Group', '묶기'), order: label('Order', '차례'), add: label('Add field', '필드 더하기'), direction: label('Reverse', '방향 뒤집기'), up: label('Move up', '위로'), down: label('Move down', '아래로'), remove: label('Remove', '빼기'), command: label('Command', '명령'), speech: label('Say', '말'), hint: label('Empty values last; ties: created, then id.', '빈 값은 끝, 같으면 만든 때와 ID로 가른다.'), saveDefault: label('Set as default', '기본으로') },
   }
 }
 
@@ -82,11 +82,14 @@ export function describe(panel: SortPanelState, words: SortPanelVocabulary): { s
     const fields = (panel.order[level] ?? []).map((field) => `${words.fields.find((x) => x.id === field.key)?.label ?? field.key}${field.dir === 'asc' ? '↑' : '↓'}`).join(', ')
     return `${name} ${fields}`
   })
-  const expression = levels.map((level) => `${level}=${(panel.order[level] ?? []).map((field) => `${field.key}:${field.dir}${field.nullsFirst ? ':nulls-first' : ''}`).join(',')}`).join(';')
+  const expression = orderExpression(panel)
   const presetName = words.presets.find((x) => x.id === panel.preset)?.label
+  const groupCommand = !panel.preset || panel.group !== 'structure' ? `\nmoai ctl group ${panel.group}` : ''
+  const ko = words.labels.groups === '묶기'
   return { summary: presetName ?? `${words.labels.groups}: ${group} · ${pieces.join(' · ')}`,
-    command: `moai ctl sort '${panel.preset ?? expression}'\nmoai ctl group ${panel.group}`,
-    speech: `${group} · ${pieces.join(' · ')}` }
+    command: `moai ctl sort '${panel.preset ?? expression}'${groupCommand}\nmoai show --group ${panel.group} --sort '${panel.preset ?? expression}'`,
+    speech: ko ? `${group}별로 묶고, ${pieces.join(', ')} 순으로 정렬해줘` : `Group by ${group}, then sort ${pieces.join(', ')}.` }
+
 }
 
 /** Parse the engine's layered wire expression. The engine still validates the resulting query. */
@@ -128,5 +131,5 @@ export function groupKnown(group: string): boolean {
   return (engine?.sort_groups ?? ['structure', 'none', 'status', 'assignee', 'priority', 'tag', 'kind', 'milestone', 'epic']).includes(group)
 }
 export function orderExpression(panel: SortPanelState): string {
-  return ['milestone', 'epic', 'item'].map((level) => `${level}=${(panel.order[level] ?? []).map((field) => `${field.key}:${field.dir}${field.nullsFirst ? ':nulls-first' : ''}`).join(',')}`).join(';')
+  return ['milestone', 'epic', 'item'].map((level) => `${level}=${(panel.order[level] ?? []).map((field) => `${field.key}${field.dir === fieldDir(field.key) ? '' : `:${field.dir}`}${field.nullsFirst ? ':nulls-first' : ''}`).join(',')}`).join(';')
 }

@@ -574,6 +574,7 @@ export function wireKeys(options: KeyWiringOptions): KeyWiring {
     "sorter.apply": () => closeSorter(true),
     "sorter.default": () => {
       defaults.set(store.getState().sort)
+      defaults.setPanel?.(store.getState().toolbar.panel)
       store.dispatch({ type: "sort-default", sort: store.getState().sort })
       say(defaults.persistent ? copy.keys.sortDefaultSaved : copy.keys.sortDefaultSavedSession)
       // As in the TUI: D applies the order, saves it and leaves the editor (Esc after it must not undo it).

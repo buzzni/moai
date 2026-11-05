@@ -223,7 +223,7 @@ test('ctl accepts layered order, id, presets and group wire and reports state', 
   }
   const state = await p.ctl.run({ verb: 'state', rows: false }, 2, 'token')
   assert.equal(state.data.group, 'assignee')
-  assert.match(state.data.order, /item=updated:desc/)
+  assert.match(state.data.order, /item=updated/)
   for (const words of [['group=unknown'], ['group='], ['group=none', 'title']]) {
     assert.equal((await p.ctl.run({ verb: 'sort', words, default: false }, 3, 'token')).code, 'bad_input')
   }

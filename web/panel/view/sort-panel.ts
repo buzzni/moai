@@ -15,9 +15,10 @@ export interface SortPanelVocabulary {
   levels: readonly { id: string; label: string }[]
   fields: readonly { id: string; label: string; dir: 'asc' | 'desc'; levels?: readonly string[] }[]
   activeLevels: (group: string) => readonly string[]
-  labels: { presets: string; groups: string; order: string; add: string; direction: string; up: string; down: string; remove: string; command?: string; speech?: string }
+  labels: { presets: string; groups: string; order: string; add: string; direction: string; up: string; down: string; remove: string; command?: string; speech?: string; hint?: string; saveDefault?: string }
 }
 export type SortPanelAction =
+  | { type: 'default' }
   | { type: 'preset'; id: string }
   | { type: 'group'; id: string }
   | { type: 'level'; id: string }
@@ -123,6 +124,9 @@ export function sortPanel(doc: Document, state: SortPanelState, words: SortPanel
   })
   add.disabled = select.options.length === 0
   order.append(select, add)
+  const note = doc.createElement('p')
+  note.textContent = words.labels.hint ?? 'Empty values last; ties: created, then id.'
+  order.append(note, button(words.labels.saveDefault ?? 'Set as default', () => send({ type: 'default' })))
   if (state.command && words.labels.command) {
     const command = section(words.labels.command)
     const code = doc.createElement('pre')
