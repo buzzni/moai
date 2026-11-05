@@ -12,6 +12,8 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+## [0.51.0] - 2026-11-05
+
 ### Added
 
 - Group work with `--group` or `moai ctl group`, choose layered `--sort` expressions or presets, and sort by the new kind, milestone, epic, tag, started, done, starts, since and progress fields. The explorer and web have a combined sort and group window. Urgent, recent and due presets use a flat view; people groups by assignee and orders work by priority and due date. Layered TUI settings use `order_layers`, with the item order also written to the legacy `order` array. (moai-ctxc, moai-okdc)
