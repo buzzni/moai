@@ -43,41 +43,71 @@ const DRAIN: Duration = Duration::from_secs(5);
 /// `TICK` 과 [`DRAIN`] 의 합이 `moai daemon stop` 의 기다림(10초)보다 짧아야 한다.
 const TICK: Duration = Duration::from_millis(500);
 
-// The signal handler only changes lock-free state and restores default dispositions. Both
-// signals are masked while it runs, so the next SIGINT or SIGTERM terminates immediately.
+// The signal handler only changes lock-free state and puts back default dispositions. Both
+// signals are masked while it runs, so the next SIGINT or SIGTERM ends the process at once.
 static SIGNAL_STOP: AtomicBool = AtomicBool::new(false);
+// Whether SIGINT and SIGTERM carry our handler. A signal ignored on entry (`moai daemon start &` in a
+// script ignores SIGINT, so a terminal Ctrl-C meant for the script does not reach the daemon) stays
+// ignored, and the handler does not hand it back as SIG_DFL when the other signal arrives.
+static SIGINT_CAUGHT: AtomicBool = AtomicBool::new(false);
+static SIGTERM_CAUGHT: AtomicBool = AtomicBool::new(false);
 
-extern "C" fn shutdown_signal(_: libc::c_int) {
-    SIGNAL_STOP.store(true, Ordering::Release);
-    // SAFETY: sigaction is async-signal-safe; the zeroed action has an empty mask and
-    // SIG_DFL is valid for both signals. Both are blocked for this handler's duration.
+/// Set `signal` to `handler` with SIGINT and SIGTERM masked. `SA_RESTART` keeps the blocking calls of
+/// in-flight requests (reads, writes, `flock`) from failing with `EINTR` while they drain; `poll(2)` is
+/// never restarted on Linux or the BSDs, and the accept loop also wakes every [`TICK`].
+///
+/// # Safety
+/// `handler` is `SIG_DFL`, `SIG_IGN` or an `extern "C" fn(c_int)` that is async-signal-safe.
+unsafe fn set(signal: libc::c_int, handler: libc::sighandler_t) -> libc::c_int {
+    // SAFETY: a zeroed sigaction is valid; sigemptyset/sigaddset/sigaction are async-signal-safe and
+    // get pointers to this live struct.
     unsafe {
         let mut action: libc::sigaction = std::mem::zeroed();
-        action.sa_sigaction = libc::SIG_DFL;
-        libc::sigemptyset(&mut action.sa_mask);
-        libc::sigaction(libc::SIGINT, &action, std::ptr::null_mut());
-        libc::sigaction(libc::SIGTERM, &action, std::ptr::null_mut());
-    }
-}
-
-/// Install only in the foreground daemon, before announcing readiness.
-pub fn install_signal_handlers() -> std::io::Result<()> {
-    SIGNAL_STOP.store(false, Ordering::Release);
-    // SAFETY: initialized sigaction structs and valid pointers; no SA_RESTART, so poll
-    // can return on a signal. Restore SIGINT if installing SIGTERM fails.
-    unsafe {
-        let mut action: libc::sigaction = std::mem::zeroed();
-        action.sa_sigaction = shutdown_signal as *const () as libc::sighandler_t;
+        action.sa_sigaction = handler;
+        action.sa_flags = libc::SA_RESTART;
         libc::sigemptyset(&mut action.sa_mask);
         libc::sigaddset(&mut action.sa_mask, libc::SIGINT);
         libc::sigaddset(&mut action.sa_mask, libc::SIGTERM);
-        let mut old: libc::sigaction = std::mem::zeroed();
-        if libc::sigaction(libc::SIGINT, &action, &mut old) != 0 {
+        libc::sigaction(signal, &action, std::ptr::null_mut())
+    }
+}
+
+extern "C" fn shutdown_signal(_: libc::c_int) {
+    SIGNAL_STOP.store(true, Ordering::Release);
+    // SAFETY: SIG_DFL is valid for both signals; `set` only calls async-signal-safe functions.
+    unsafe {
+        if SIGINT_CAUGHT.load(Ordering::Acquire) {
+            set(libc::SIGINT, libc::SIG_DFL);
+        }
+        if SIGTERM_CAUGHT.load(Ordering::Acquire) {
+            set(libc::SIGTERM, libc::SIG_DFL);
+        }
+    }
+}
+
+/// Install only in the foreground daemon, before announcing readiness. A signal ignored on entry stays
+/// ignored. On failure SIGINT is put back as it was.
+pub fn install_signal_handlers() -> std::io::Result<()> {
+    SIGNAL_STOP.store(false, Ordering::Release);
+    let handler = shutdown_signal as *const () as libc::sighandler_t;
+    // SAFETY: `shutdown_signal` is async-signal-safe; the queried structs are live.
+    unsafe {
+        let mut int: libc::sigaction = std::mem::zeroed();
+        let mut term: libc::sigaction = std::mem::zeroed();
+        if libc::sigaction(libc::SIGINT, std::ptr::null(), &mut int) != 0
+            || libc::sigaction(libc::SIGTERM, std::ptr::null(), &mut term) != 0
+        {
             return Err(std::io::Error::last_os_error());
         }
-        if libc::sigaction(libc::SIGTERM, &action, std::ptr::null_mut()) != 0 {
+        let (catch_int, catch_term) = (int.sa_sigaction != libc::SIG_IGN, term.sa_sigaction != libc::SIG_IGN);
+        SIGINT_CAUGHT.store(catch_int, Ordering::Release);
+        SIGTERM_CAUGHT.store(catch_term, Ordering::Release);
+        if catch_int && set(libc::SIGINT, handler) != 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        if catch_term && set(libc::SIGTERM, handler) != 0 {
             let error = std::io::Error::last_os_error();
-            libc::sigaction(libc::SIGINT, &old, std::ptr::null_mut());
+            libc::sigaction(libc::SIGINT, &int, std::ptr::null_mut());
             return Err(error);
         }
     }
@@ -149,7 +179,7 @@ pub fn bind(path: &Path) -> std::io::Result<Bound> {
     Ok(Bound { listener, path: path.to_path_buf(), ino })
 }
 
-/// 섬긴다 — [`super::SHUTDOWN`] 이 오기까지. 돌아오기 전에 제 소켓을 지운다(그 자리가 아직 제 소켓일 때만).
+/// 섬긴다 — [`super::SHUTDOWN`] 이나 SIGTERM·SIGINT([`install_signal_handlers`])가 오기까지. 돌아오기 전에 제 소켓을 지운다(그 자리가 아직 제 소켓일 때만).
 pub fn serve(bound: Bound, mut methods: Methods) -> std::io::Result<()> {
     let stop = Arc::new(AtomicBool::new(false));
     let flag = Arc::clone(&stop);
@@ -368,6 +398,7 @@ mod tests {
 
     #[test]
     fn signal_drains_an_in_flight_response() {
+        // SIGNAL_STOP is process-wide; future tests calling serve must serialize with this one.
         use std::io::BufRead as _;
         use std::sync::Barrier;
         SIGNAL_STOP.store(false, Ordering::Release);
