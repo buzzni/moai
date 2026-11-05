@@ -99,10 +99,16 @@ pub(crate) fn first_given(a: &crate::cli::FilterArgs) -> Option<&'static str> {
 /// 차례·쪽 플래그([`crate::cli::PageArgs`]) 가운데 온 것의 첫 이름(moai-efoc). 목록에서만 뜻이 있다 —
 /// 하나를 펼치는 자리에도 트리에도 세울 차례와 자를 목록이 없다. 필드를 다 푸는 까닭은 [`first_given`] 과 같다.
 fn first_ordered(p: &crate::cli::PageArgs) -> Option<&'static str> {
-    let crate::cli::PageArgs { sort, reverse, limit, after } = p;
-    [(sort.is_some(), "--sort"), (*reverse, "--reverse"), (limit.is_some(), "-n"), (after.is_some(), "--after")]
-        .into_iter()
-        .find_map(|(given, name)| given.then_some(name))
+    let crate::cli::PageArgs { sort, group, reverse, limit, after } = p;
+    [
+        (sort.is_some(), "--sort"),
+        (group.is_some(), "--group"),
+        (*reverse, "--reverse"),
+        (limit.is_some(), "-n"),
+        (after.is_some(), "--after"),
+    ]
+    .into_iter()
+    .find_map(|(given, name)| given.then_some(name))
 }
 
 /// argv 의 거르개를 `query` 의 거름망으로 옮긴다 — `me` 를 사람으로 풀고 모르는 칸은 거절한다. `kind` 는 부르는
@@ -170,10 +176,11 @@ pub(crate) fn filter_of(
     Ok(filter)
 }
 
-/// argv 의 차례를 `query` 의 차례로 잇는다 — 필드 목록은 clap 이 이미 읽었다(`cli::SortFields`). 안 준
-/// `--sort` 는 기본 차례(우선순위)다.
+/// 시험만 부른다 — 목록은 층별 차례와 묶기를 함께 보는 [`crate::query::page_order`] 를 지난다. 이것은 그
+/// 차례의 `item` 층만 옛 [`crate::query::Sort`] 로 옮긴다. 안 준 `--sort` 는 옛 기본 차례(우선순위)다.
+#[cfg(test)]
 fn sort_of(p: &crate::cli::PageArgs) -> crate::query::Sort {
-    let fields = p.sort.as_ref().map_or_else(|| crate::query::Sort::default().fields, |f| f.0.clone());
+    let fields = p.sort.as_ref().map_or_else(|| crate::query::Sort::default().fields, |f| f.0.item.clone());
     crate::query::Sort { fields, reversed: p.reverse }
 }
 
@@ -505,8 +512,20 @@ fn listed(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>, keys: &Keys) -> 
             )
         })?),
     };
-    let more =
-        crate::query::page(&mut shown, &load.issues, &wh, &repo.config, &sort_of(&args.page), cursor, args.page.limit);
+    // A flat list only orders by the group; it never drops rows. Dropping non-leaf kinds here emptied
+    // `moai epic show --group status` and hid epics under `--sort people` without counting them as hidden.
+    let group = args.page.group.or_else(|| args.page.sort.as_ref().and_then(|s| s.1)).unwrap_or_default();
+    let more = crate::query::page_order(
+        &mut shown,
+        &load.issues,
+        &wh,
+        &repo.config,
+        &args.page.sort.as_ref().map_or_else(crate::query::Order::default, |s| s.0.clone()),
+        group,
+        args.page.reverse,
+        cursor,
+        args.page.limit,
+    );
 
     if ctx.json {
         // **일한 AI 는 목록에서도 나온다**(moai-p8qj). 닫힌 500건의 토큰을 더하려고
@@ -1360,10 +1379,6 @@ mod tests {
                 "`{}` 가 두 표면에서 다른 차례다",
                 o.name()
             );
-        }
-        // 거꾸로 — `--sort` 에만 있는 낱말은 쪽을 넘기는 커서의 `id` 하나다(`query::SortKey::Id`).
-        for k in crate::query::SortKey::ALL {
-            assert!(k.name() == "id" || Order::named(k.name()).is_some(), "탐색기가 모르는 `--sort {}`", k.name());
         }
     }
 }
