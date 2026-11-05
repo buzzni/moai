@@ -106,6 +106,14 @@ pub enum GroupedEntry {
     Header(GroupKey),
     Entry(Entry),
 }
+impl GroupedEntry {
+    pub fn at(&self) -> Option<usize> {
+        match self {
+            Self::Header(_) => None,
+            Self::Entry(e) => e.at(),
+        }
+    }
+}
 
 pub type Path = Vec<Seg>;
 
@@ -959,6 +967,47 @@ mod tests {
             })
             .collect();
         assert_eq!(ids, ["a-0002", "a-0004", "a-0003", "a-0001"]);
+    }
+
+    #[test]
+    fn field_groups_use_status_order_and_inherited_membership() {
+        let mut m = make("a-m001", Kind::Milestone);
+        m.title = "release".into();
+        let mut e = make("a-e001", Kind::Epic);
+        e.milestone = Some(m.id.clone());
+        let mut a = epic_of("a-a001", &e.id);
+        a.status = Status::new("todo");
+        a.priority = Some(3);
+        let mut b = epic_of("a-a002", &e.id);
+        b.status = Status::new("review");
+        b.priority = Some(0);
+        let all = vec![m, e, a, b];
+        let index = Index::of(&all);
+        let cmp = |a: usize, b: usize| all[a].id.cmp(&all[b].id);
+        let groups = |group| {
+            index
+                .grouped_tree(
+                    &all,
+                    &Path::new(),
+                    &|_| true,
+                    &cmp,
+                    group,
+                    &["review".into(), "todo".into()],
+                    &|_| true,
+                    &|_| true,
+                )
+                .into_iter()
+                .filter_map(|(entry, _)| match entry {
+                    GroupedEntry::Header(k) => k.value,
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(groups(Group::Status), ["review", "todo"]);
+        assert_eq!(groups(Group::Priority), ["p0", "p3"]);
+        assert_eq!(groups(Group::Epic), ["a-e001"]);
+        assert_eq!(groups(Group::Milestone), ["a-m001"]);
+        assert_eq!(groups(Group::Kind), ["issue"]);
     }
 
     #[test]

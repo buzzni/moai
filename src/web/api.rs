@@ -27,6 +27,7 @@ pub enum Param {
     Q,
     Fields,
     Sort,
+    Group,
     Reverse,
     Worktree,
     /// 위키 검색의 낱말(`wiki search -- <q>`, moai-xp7l.nyi) — 이름은 `q` 지만 `--grep` 이 아니라 자리 인자다.
@@ -44,6 +45,7 @@ impl Param {
             Param::Q => "q",
             Param::Fields => "fields",
             Param::Sort => "sort",
+            Param::Group => "group",
             Param::Reverse => "reverse",
             Param::Worktree => "worktree",
             Param::Words => "q",
@@ -78,7 +80,7 @@ pub const PROFILES: &[Profile] = &[
     Profile {
         route: "/api/tree",
         head: &["tui", "--deep"],
-        params: &[Param::Sort, Param::Reverse, Param::Worktree, Param::Archived, Param::Tz, Param::Gantt],
+        params: &[Param::Sort, Param::Group, Param::Reverse, Param::Worktree, Param::Archived, Param::Tz, Param::Gantt],
         opt_in: &[(Param::Archived, "--no-archive"), (Param::Gantt, "--no-gantt")],
     },
     Profile { route: "/api/wiki", head: &["wiki", "ls"], params: &[], opt_in: &[] },
@@ -456,11 +458,18 @@ pub fn argv(profile: &Profile, query: &[(String, String)]) -> Result<Vec<String>
             Param::Tz => {
                 zone_shape(name, value)?;
             }
+            Param::Group => {
+                shape(name, value, VALUE_MAX)?;
+                if value.parse::<crate::nav::Group>().is_err() {
+                    return Err(Bad::Shape(name.clone()));
+                }
+                out.push(format!("--group={value}"));
+            }
             Param::Sort => {
                 shape(name, value, VALUE_MAX)?;
                 // **차례의 말은 moai 의 것이다**(`query::parse_order`) — 모르는 낱말을 자식에게 넘기면 clap 이 `code` 없는
                 // 글로 거절해 페이지가 갈래를 못 읽었다(moai-m4ez.4zq). 여기서 재서 `bad_input` 으로 같은 길에 세운다.
-                if crate::query::parse_order(value).is_err() {
+                if crate::query::Order::parse(value).is_err() {
                     return Err(Bad::Shape(name.clone()));
                 }
                 out.push(format!("--sort={value}"));
@@ -665,6 +674,16 @@ mod tests {
         for bad in ["bogus", "priority:up", "priority,priority:desc", "title,", ",title", ":asc"] {
             assert_eq!(tree(bad), Err(Bad::Shape("sort".into())), "{bad:?}");
         }
+    }
+
+    #[test]
+    fn tree_accepts_the_shared_group_and_layer_vocabulary() {
+        let v = argv_of("/api/tree", &q(&[("sort", "milestone=due;item=priority,due"), ("group", "assignee")]))
+            .unwrap()
+            .unwrap();
+        assert!(v.contains(&"--sort=milestone=due;item=priority,due".to_string()));
+        assert!(v.contains(&"--group=assignee".to_string()));
+        assert!(matches!(argv_of("/api/tree", &q(&[("group", "unknown")])), Some(Err(Bad::Shape(_)))));
     }
 
     #[test]

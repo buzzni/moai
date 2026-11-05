@@ -1449,9 +1449,7 @@ pub fn display_order(a: &Issue, b: &Issue) -> std::cmp::Ordering {
 }
 
 /// 기한의 차례 — **이른 기한이 먼저고 기한 없는 줄이 뒤다**(moai-ghkp.7uy). 꼴이 틀린 값은 없는 것이다
-/// ([`Issue::deadline`]). `--sort due`·탐색기의 `SPC s w` 가 이 하나로 잰다(리뷰) — 저마다 적던 때는
-/// 같은 줄을 다른 차례로 세울 길이 열려 있었다. `ready` 는 같은 규칙(이른 것 먼저, 없는 줄 뒤)을 **제 기한이 아니라 따르는
-/// 기한**에 쓴다(moai-uwi9.rff, `report::Picking::picks`) — 그래서 이 함수를 안 부른다. 날짜는 고정폭이라 글로 견준다.
+/// ([`Issue::deadline`]). 이 함수는 자체 기한을 비교한다. 상속 기한이 필요한 정렬은 `SortContext`를 쓴다.
 pub fn due_order(a: &Issue, b: &Issue) -> std::cmp::Ordering {
     use std::cmp::Ordering;
     match (a.deadline(), b.deadline()) {
@@ -1472,7 +1470,7 @@ pub enum SortKey {
     Status,
     Assignee,
     Title,
-    /// 기한(`due_on`, moai-ghkp.7uy) — 이른 것이 먼저고 기한 없는 줄은 뒤다(내림이면 앞, 담당과 같은 결).
+    /// 기한 — 상속 기한을 포함하며 빈 값은 방향과 관계없이 뒤다.
     Due,
     /// **안 움직이는 차례**(moai-efoc) — id 는 한 번 서면 안 바뀐다. `--after` 로 넘길 때
     /// 앞 쪽을 받는 사이 다른 줄의 우선순위나 칸이 바뀌어도 이 차례는 안 밀린다. 탐색기의
@@ -1552,7 +1550,7 @@ impl SortKey {
 }
 
 /// 한 필드의 방향. **오름은 값이 작은 것이 먼저다** — 우선순위는 p0, 생성은 옛것, 칸은 설정의 앞 칸, 담당은
-/// 가나다에 담당 없는 줄이 뒤(내림이면 앞 — SQL 의 `NULLS LAST`/`FIRST` 와 같은 결이다).
+/// 가나다에 담당 없는 줄이 뒤다. 빈 값 위치는 방향과 따로 정한다.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Dir {
     Asc,
@@ -1640,7 +1638,9 @@ impl std::fmt::Display for BadSort {
         match self {
             BadSort::Empty => write!(f, "an empty field - give fields separated by commas, like priority,updated:desc"),
             BadSort::Unknown(w) => write!(f, "unknown field `{w}` - the fields are {words}"),
-            BadSort::Direction(w, d) => write!(f, "unknown direction `{d}` in `{w}:{d}` - a direction is asc or desc"),
+            BadSort::Direction(w, d) => {
+                write!(f, "unknown modifier `{d}` in `{w}:{d}` - use asc or desc, then optional nulls-first")
+            }
             BadSort::Layer(w) => write!(f, "invalid or repeated layer `{w}`"),
             BadSort::Repeated(k) => write!(f, "`{}` is given twice - a field stands once in the order", k.name()),
         }
@@ -1701,6 +1701,7 @@ struct SortValues<'a> {
     epic: Option<&'a str>,
     milestone: Option<&'a str>,
     updated: Option<&'a str>,
+    since: Option<&'a str>,
     progress: Option<(usize, usize)>,
 }
 
@@ -1746,11 +1747,23 @@ impl<'a> SortContext<'a> {
                 epic: epics.at(i),
                 milestone: stones.at(i),
                 updated: Some(group.map_or(i.updated_at.as_str(), |g| g.0.max(i.updated_at.as_str()))),
+                since: Some(&i.status_since),
                 progress: group.and_then(|g| (g.2 > 0).then_some((g.1, g.2))),
             };
             rows.entry(&i.id).or_default().push((i, values));
         }
         Self { rows }
+    }
+    /// Include the effective time a group entered its current column.
+    pub fn with_where(all: &'a [Issue], wh: &Where<'a>) -> Self {
+        let mut context = Self::of(all);
+        for rows in context.rows.values_mut() {
+            for (row, values) in rows {
+                values.since =
+                    crate::report::stands_on(row, |key| wh.since.get(&key).copied()).or(Some(&row.status_since));
+            }
+        }
+        context
     }
     /// Compare structural peers using their own layer; mixed kinds remain a total order.
     pub fn compare_layers(
@@ -1762,6 +1775,9 @@ impl<'a> SortContext<'a> {
         statuses: &[String],
         naming: crate::config::Naming,
     ) -> std::cmp::Ordering {
+        if order.milestone == order.epic && order.epic == order.item {
+            return self.compare(&order.item, reversed, a, b, statuses, naming);
+        }
         let layer = |kind| match kind {
             Kind::Milestone => 0,
             Kind::Epic => 1,
@@ -1839,7 +1855,10 @@ fn compare_order(
         SortKey::Started => a.0.started_at.cmp(&b.0.started_at),
         SortKey::Done => a.0.done_at.cmp(&b.0.done_at),
         SortKey::Starts => a.0.planned_start().cmp(&b.0.planned_start()),
-        SortKey::Since => a.0.status_since.cmp(&b.0.status_since),
+        SortKey::Since => av
+            .and_then(|v| v.since)
+            .unwrap_or(&a.0.status_since)
+            .cmp(bv.and_then(|v| v.since).unwrap_or(&b.0.status_since)),
         SortKey::Progress => match (av.and_then(|v| v.progress), bv.and_then(|v| v.progress)) {
             (Some((ad, at)), Some((bd, bt))) => (ad as u128 * bt as u128).cmp(&(bd as u128 * at as u128)),
             _ => Ordering::Equal,
@@ -1872,6 +1891,45 @@ fn compare_order(
     a.0.created_at.cmp(&b.0.created_at).then_with(|| a.0.id.cmp(&b.0.id))
 }
 
+/// Shared preset vocabulary and its complete order/group choice.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Preset {
+    Release,
+    Urgent,
+    Recent,
+    Due,
+    People,
+}
+impl Preset {
+    pub const ALL: [Self; 5] = [Self::Release, Self::Urgent, Self::Recent, Self::Due, Self::People];
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Release => "release",
+            Self::Urgent => "urgent",
+            Self::Recent => "recent",
+            Self::Due => "due",
+            Self::People => "people",
+        }
+    }
+    pub fn named(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|p| p.name() == name)
+    }
+    pub fn group(self) -> crate::nav::Group {
+        if self == Self::People { crate::nav::Group::Assignee } else { crate::nav::Group::Structure }
+    }
+    pub fn order(self) -> Order {
+        let raw = match self {
+            Self::Release => return Order::default(),
+            Self::Urgent => "priority",
+            Self::Recent => "updated:desc",
+            Self::Due => "due",
+            Self::People => "assignee",
+        };
+        let fields = parse_order(raw).expect("preset fields are valid");
+        Order { milestone: fields.clone(), epic: fields.clone(), item: fields }
+    }
+}
+
 /// Independent ordering for each structural layer.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Order {
@@ -1897,18 +1955,11 @@ impl Order {
             _ => &self.item,
         }
     }
-    pub const PRESETS: [&'static str; 5] = ["release", "urgent", "recent", "due", "people"];
+    pub fn preset_group(name: &str) -> Option<crate::nav::Group> {
+        Preset::named(name).map(Preset::group)
+    }
     pub fn preset(name: &str) -> Option<Self> {
-        let fields = match name {
-            "release" => return Some(Self::default()),
-            "urgent" => "priority",
-            "recent" => "updated:desc",
-            "due" => "due",
-            "people" => "assignee",
-            _ => return None,
-        };
-        let fields = parse_order(fields).ok()?;
-        Some(Self { milestone: fields.clone(), epic: fields.clone(), item: fields })
+        Preset::named(name).map(Preset::order)
     }
     pub fn parse(raw: &str) -> Result<Self, BadSort> {
         if let Some(preset) = Self::preset(raw.trim()) {
@@ -1946,20 +1997,82 @@ impl std::fmt::Display for Order {
 
 /// Sort and page the selected rows using the same comparison for sorting and the cursor.
 /// Derived values are calculated once from `all`; rows sharing an id remain on one page.
-pub fn page(
+pub fn page<'a>(
     shown: &mut Vec<Issue>,
-    all: &[Issue],
-    wh: &Where,
+    all: &'a [Issue],
+    wh: &Where<'a>,
     cfg: &crate::config::Config,
     sort: &Sort,
     after: Option<&Issue>,
     limit: Option<usize>,
 ) -> usize {
-    use std::cmp::Ordering;
-    let context = SortContext::of(all);
+    let context = SortContext::with_where(all, wh);
     let cmp = |a: &Issue, b: &Issue| {
         context.compare(&sort.fields, sort.reversed, (a, wh.column(a)), (b, wh.column(b)), &cfg.statuses, cfg.naming)
     };
+    page_by(shown, all, after, limit, &cmp)
+}
+
+/// Sort a CLI listing using layered order and a group key before applying its cursor.
+pub fn page_order<'a>(
+    shown: &mut Vec<Issue>,
+    all: &'a [Issue],
+    wh: &Where<'a>,
+    cfg: &crate::config::Config,
+    order: &Order,
+    group: crate::nav::Group,
+    reversed: bool,
+    after: Option<&Issue>,
+    limit: Option<usize>,
+) -> usize {
+    use crate::nav::Group;
+    let context = SortContext::with_where(all, wh);
+    let value = |i: &Issue| -> Option<String> {
+        let facts = context.values(i);
+        match group {
+            Group::Structure | Group::None => None,
+            Group::Status => Some(wh.column(i).to_string()),
+            Group::Assignee => i.assignee.clone(),
+            Group::Priority => Some(format!("p{}", i.priority())),
+            Group::Tag => i.tags.first().cloned(),
+            Group::Kind => Some(i.kind.as_str().to_string()),
+            Group::Milestone => facts.and_then(|v| v.milestone).map(str::to_owned),
+            Group::Epic => facts.and_then(|v| v.epic).map(str::to_owned),
+        }
+    };
+    let group_cmp = |a: &Issue, b: &Issue| {
+        let (a, b) = (value(a), value(b));
+        match (a, b) {
+            (None, None) => std::cmp::Ordering::Equal,
+            (None, Some(_)) => std::cmp::Ordering::Greater,
+            (Some(_), None) => std::cmp::Ordering::Less,
+            (Some(a), Some(b)) if group == Group::Status => {
+                let rank = |s: &String| cfg.statuses.iter().position(|v| v == s).unwrap_or(cfg.statuses.len());
+                rank(&a).cmp(&rank(&b)).then_with(|| a.cmp(&b))
+            }
+            (Some(a), Some(b)) => caseless(&a, &b).then_with(|| a.cmp(&b)),
+        }
+    };
+    let cmp = |a: &Issue, b: &Issue| {
+        let pair = ((a, wh.column(a)), (b, wh.column(b)));
+        match group {
+            Group::Structure => context.compare_layers(order, reversed, pair.0, pair.1, &cfg.statuses, cfg.naming),
+            Group::None => context.compare(&order.item, reversed, pair.0, pair.1, &cfg.statuses, cfg.naming),
+            _ => group_cmp(a, b)
+                .then_with(|| context.compare(&order.item, reversed, pair.0, pair.1, &cfg.statuses, cfg.naming)),
+        }
+    };
+    page_by(shown, all, after, limit, &cmp)
+}
+
+fn page_by<'a>(
+    shown: &mut Vec<Issue>,
+    all: &'a [Issue],
+    after: Option<&Issue>,
+    limit: Option<usize>,
+    cmp: &dyn Fn(&Issue, &Issue) -> std::cmp::Ordering,
+) -> usize {
+    use std::cmp::Ordering;
     let mut heads: BTreeMap<&str, &Issue> = BTreeMap::new();
     for i in all {
         if !heads.get(i.id.as_str()).is_some_and(|h| cmp(h, i) != Ordering::Greater) {
@@ -3635,7 +3748,7 @@ mod tests {
     }
 
     /// **차례는 필드의 목록이다**(moai-r170.f65) — 앞 필드가 같을 때만 다음 필드를 보고, 방향은 필드마다고,
-    /// `reversed` 는 통째로 뒤집는다. 한 필드로만 세우던 때는 둘째 필드가 아무 일도 못 했다.
+    /// `reversed` 는 필드 방향을 뒤집되 빈 값과 동점 규칙은 지킨다.
     #[test]
     fn a_sort_is_an_ordered_list_of_fields_each_with_a_direction() {
         let all = crossing();
@@ -3677,6 +3790,35 @@ mod tests {
             s(&["a-0002", "a-0003", "a-0004", "a-0001"]),
             "동점은 마지막 필드와 관계없이 생성 → id다"
         );
+    }
+
+    #[test]
+    fn presets_share_one_order_and_group_vocabulary() {
+        for preset in Preset::ALL {
+            assert_eq!(Preset::named(preset.name()), Some(preset));
+            assert_eq!(Order::preset(preset.name()), Some(preset.order()));
+            assert_eq!(Order::preset_group(preset.name()), Some(preset.group()));
+        }
+        assert_eq!(Preset::People.group(), crate::nav::Group::Assignee);
+    }
+
+    #[test]
+    fn grouped_paging_keeps_group_order_and_cursor_consistent() {
+        let mut a = issue("a-0001", "todo", &[]);
+        a.assignee = Some("Zoe".into());
+        let mut b = issue("a-0002", "todo", &[]);
+        b.assignee = Some("Ada".into());
+        let c = issue("a-0003", "todo", &[]);
+        let all = vec![a, b, c];
+        let cfg = cfg();
+        let wh = Where::of(&all, &cfg);
+        let order = Order::parse("id").unwrap();
+        let mut first = all.clone();
+        page_order(&mut first, &all, &wh, &cfg, &order, crate::nav::Group::Assignee, false, None, Some(1));
+        assert_eq!(first[0].id, "a-0002");
+        let mut next = all.clone();
+        page_order(&mut next, &all, &wh, &cfg, &order, crate::nav::Group::Assignee, false, Some(&all[1]), None);
+        assert_eq!(next.iter().map(|i| i.id.as_str()).collect::<Vec<_>>(), ["a-0001", "a-0003"]);
     }
 
     #[test]
@@ -3789,7 +3931,7 @@ mod tests {
         assert_eq!(f(SortKey::Created, Dir::Asc).to_string(), "created:asc");
         assert_eq!(f(SortKey::Priority, Dir::Desc).to_string(), "priority:desc");
         for key in SortKey::ALL {
-            for dir in [Dir::Asc, Dir::Desc] {
+            for dir in [Dir::Asc, Dir::Desc, Dir::AscNullsFirst, Dir::DescNullsFirst] {
                 assert_eq!(parse_order(&f(key, dir).to_string()), Ok(vec![f(key, dir)]));
             }
             assert_eq!(SortKey::named(key.name()), Some(key));

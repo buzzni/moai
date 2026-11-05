@@ -46,6 +46,13 @@ struct Sort {
     dir: &'static str,
 }
 
+#[derive(Serialize)]
+struct Preset {
+    name: &'static str,
+    order: String,
+    group: &'static str,
+}
+
 /// 적어 둔 판 소식 하나 — 탐색기 머리의 판 줄이 읽는 [`crate::latest::Seen`] 의 꼴. `why` 까지 기계의 낱말이다
 /// ([`crate::latest::Trouble::name`]) — 글은 페이지가 제 말로 짓는다.
 #[derive(Serialize)]
@@ -92,6 +99,9 @@ struct Boot<'a> {
     columns: Columns,
     filter_keys: &'static [&'static str],
     sort_fields: Vec<Sort>,
+    sort_layers: [&'static str; 3],
+    sort_groups: Vec<&'static str>,
+    sort_presets: Vec<Preset>,
 }
 
 /// `cwd`(자식이 도는 그 자리, [`super::run::Spawner::cwd`])에서 트래커를 찾아 바탕을 짓는다. 못 찾으면 CLI 가 내는
@@ -133,6 +143,12 @@ pub fn boot(cwd: &Path, user: Option<&str>, lang: Lang, registered: &[std::path:
                     Dir::Desc | Dir::DescNullsFirst => "desc",
                 },
             })
+            .collect(),
+        sort_layers: ["milestone", "epic", "item"],
+        sort_groups: crate::nav::Group::ALL.into_iter().map(crate::nav::Group::name).collect(),
+        sort_presets: crate::query::Preset::ALL
+            .into_iter()
+            .map(|p| Preset { name: p.name(), order: p.order().to_string(), group: p.group().name() })
             .collect(),
     };
     serde_json::to_string(&boot).map_err(|e| crate::fail::Fail::new(e.to_string()))
