@@ -568,8 +568,8 @@ pub(super) fn sort_words(s: &super::keys::Sorting, lang: Lang) -> String {
     s.fields().iter().map(one).collect::<Vec<_>>().join(", ")
 }
 
-fn grouping_word(group: super::sorter::adapter::Group, lang: Lang) -> &'static str {
-    use super::sorter::adapter::Group;
+fn grouping_word(group: super::sorter::screen::Group, lang: Lang) -> &'static str {
+    use super::sorter::screen::Group;
     match group {
         Group::Structure => say(lang, "tui.grouping.structure"),
         Group::None => say(lang, "tui.grouping.none"),
@@ -592,7 +592,7 @@ fn preset_word(preset: crate::query::Preset, lang: Lang) -> &'static str {
         Preset::People => say(lang, "tui.grouping.people"),
     }
 }
-fn screen_order_words(order: &super::sorter::adapter::ScreenOrder, lang: Lang) -> String {
+fn screen_order_words(order: &super::sorter::screen::ScreenOrder, lang: Lang) -> String {
     use crate::query::Preset;
     for preset in Preset::ALL {
         if *order == App::screen_preset(preset) {
@@ -601,11 +601,11 @@ fn screen_order_words(order: &super::sorter::adapter::ScreenOrder, lang: Lang) -
     }
     let mut parts = vec![format!("{}: {}", say(lang, "tui.grouping.group"), grouping_word(order.group, lang))];
     for (level, name, sorting) in [
-        (super::sorter::adapter::Level::Milestone, "tui.grouping.milestone", &order.milestone),
-        (super::sorter::adapter::Level::Epic, "tui.grouping.epic", &order.epic),
-        (super::sorter::adapter::Level::Item, "tui.grouping.item", &order.item),
+        (super::sorter::screen::Level::Milestone, say(lang, "tui.grouping.milestone"), &order.milestone),
+        (super::sorter::screen::Level::Epic, say(lang, "tui.grouping.epic"), &order.epic),
+        (super::sorter::screen::Level::Item, say(lang, "tui.grouping.item"), &order.item),
     ] {
-        if order.active(level) { parts.push(format!("{} {}", say(lang, name), sort_words(sorting, lang))); }
+        if order.active(level) { parts.push(format!("{} {}", name, sort_words(sorting, lang))); }
     }
     parts.join(" · ")
 }
@@ -614,7 +614,7 @@ fn screen_order_words(order: &super::sorter::adapter::ScreenOrder, lang: Lang) -
 /// 번호와 방향을 **글리프와 낱말로**(`1  우선순위  ↑ 오름`), 안 든 것은 `·` 로 선다 — 색이 혼자 뜻을 지지 않는다.
 /// 좁은 화면에서는 목록·상세 자리를 통째로 덮고([`zone_pick`] 과 같은 까닭: 뒤 칸의 커서가 비치면 어느 `>` 가 이 창의
 /// 것인지 안 읽힌다), 96칸 이상이면 오른쪽 52칸에 서서 미리 보는 목록을 가리지 않는다.
-fn sort_edit(f: &mut Frame, e: &mut super::sorter::adapter::ScreenEditor, at: Rect, lang: Lang) {
+fn sort_edit(f: &mut Frame, e: &mut super::sorter::screen::ScreenEditor, at: Rect, lang: Lang) {
     // Leave the list visible beside the editor when the terminal is wide enough.
     let at = if at.width >= 96 { Rect::new(at.x + at.width - 52, at.y, 52, at.height) } else { at };
     f.render_widget(Clear, at);
@@ -648,9 +648,9 @@ fn sort_edit(f: &mut Frame, e: &mut super::sorter::adapter::ScreenEditor, at: Re
             say(
                 lang,
                 match e.level {
-                    super::sorter::adapter::Level::Milestone => "tui.grouping.milestone",
-                    super::sorter::adapter::Level::Epic => "tui.grouping.epic",
-                    super::sorter::adapter::Level::Item => "tui.grouping.item",
+                    super::sorter::screen::Level::Milestone => "tui.grouping.milestone",
+                    super::sorter::screen::Level::Epic => "tui.grouping.epic",
+                    super::sorter::screen::Level::Item => "tui.grouping.item",
                 }
             ),
             grouping_word(e.group, lang)
@@ -676,9 +676,9 @@ fn sort_edit(f: &mut Frame, e: &mut super::sorter::adapter::ScreenEditor, at: Re
             .join(" · ");
         let group = format!("{}: {}  (g)", say(lang, "tui.grouping.group"), grouping_word(e.group, lang));
         let levels = [
-            (super::sorter::adapter::Level::Milestone, "tui.grouping.milestone"),
-            (super::sorter::adapter::Level::Epic, "tui.grouping.epic"),
-            (super::sorter::adapter::Level::Item, "tui.grouping.item"),
+            (super::sorter::screen::Level::Milestone, "tui.grouping.milestone"),
+            (super::sorter::screen::Level::Epic, "tui.grouping.epic"),
+            (super::sorter::screen::Level::Item, "tui.grouping.item"),
         ]
         .into_iter()
         .map(|(level, key)| {
@@ -801,17 +801,13 @@ fn sort_keys(f: &mut Frame, table: &[keys::Bind<super::keys::Sorter>], at: Rect,
     use super::keys::Sorter;
     let hint = |a: Sorter| key(&label(table, a), a.what(lang));
     let pair = |a: Sorter, b: Sorter| key(&labels(table, &[a, b]), a.what(lang));
-    // These keys are hidden from the old CLI help until the engine-owned help is updated.
-    let unlisted = |a: Sorter| {
-        key(&table.iter().find(|b| b.act == a).map(|b| keys::name_of_seq(b.seq)).unwrap_or_default(), a.what(lang))
-    };
     let optional = vec![
         pair(Sorter::Down, Sorter::Up),
         pair(Sorter::Lower, Sorter::Raise),
         hint(Sorter::Flip),
-        unlisted(Sorter::NextLevel),
-        unlisted(Sorter::NextGroup),
-        unlisted(Sorter::Preset(1)),
+        hint(Sorter::NextLevel),
+        hint(Sorter::NextGroup),
+        hint(Sorter::Preset(1)),
     ];
     bar(f, at, optional, vec![hint(Sorter::Toggle), hint(Sorter::Apply), hint(Sorter::Default), hint(Sorter::Close)]);
 }
@@ -2779,7 +2775,7 @@ fn crumbs(f: &mut Frame, app: &App, rows: &[Row], at: Rect) {
     // 줄 안다. 거름망 뱃지와 달리 **늘 서 있는 것**이라 경로의 몫을 굶기지 않는다: 경로에 여덟 칸이
     // 안 남으면 뺀다. 키는 안 적는다 — 메뉴의 `SPC v`(숨김)·`SPC s`(정렬)가 댄다. 층에서는 보기가 뜻이 없다.
     // 기본이 아닌 차례도 같은 뱃지에 댄다(moai-55cp) — 차례가 바뀐 줄 모르면 줄이 뒤섞인 줄 안다.
-    let sorted = if app.order_extended || app.screen_order.group != super::sorter::adapter::Group::Structure {
+    let sorted = if app.order_extended || app.screen_order.group != super::sorter::screen::Group::Structure {
         Some(screen_order_words(&app.screen_order, app.site.lang))
     } else {
         (app.order != Default::default())
@@ -3433,6 +3429,7 @@ fn lane_line<'a>(app: &App, laid: &super::Laid, lane: usize, w: usize) -> Line<'
         crate::nav::Seg::Lost => head.push(Span::styled(say(lang, "nav.lost"), dim())),
         crate::nav::Seg::Group(_) => {
             head.push(Span::styled(site.group_title(seg).unwrap_or_default(), bold()));
+            if let Some(stats) = site.group_stats(seg) { head.push(Span::styled(format!("  {stats}"), dim())); }
         }
         crate::nav::Seg::Epic(_) | crate::nav::Seg::Issue(_) => {}
     }
@@ -3772,7 +3769,8 @@ fn row_line<'a>(app: &App, r: &Row, tally: &str, budget: usize, fields: super::v
         if let Entry::Dir { seg, .. } = e
             && let Some(text) = site.group_title(seg)
         {
-            return Line::from(Span::styled(format!("{text}/"), dim()));
+            let stats = site.group_stats(seg).unwrap_or_default();
+            return Line::from(Span::styled(format!("{text}/  {stats}"), dim()));
         }
         // 바구니는 제 줄이 없다 — 이름만 낸다.
         return Line::from(Span::styled(format!("{}/", site.index.label(&site.issues, e, site.lang)), dim()));

@@ -217,7 +217,7 @@ pub enum Mode {
     ArchiveDays(archive_days::Picker),
     /// `SPC s e` 가 연 차례 편집 창(moai-r170.x22). 필드를 넣고 빼고 앞뒤를 바꾸고 방향을 뒤집는다 — 키 하나로는
     /// 차례를 갈아 끼우거나(`SPC s <소문자>`) 끝에 더하는 것(`SPC s <대문자>`)만 된다.
-    Sort(sorter::adapter::ScreenEditor),
+    Sort(sorter::screen::ScreenEditor),
     /// `SPC g s` 가 연 통계 창(moai-1hka.bq9). 목록·상세 자리를 통째로 덮고 Esc 로 닫는다 — 창 위의 `SPC g l`·`b` 도
     /// 닫고 그 배치로 선다(moai-z46r, [`App::go`]). **상자에 담는다** —
     /// 센 것 두 벌(주·날)을 들어, 그대로 두면 모드 하나가 다른 갈래 전부의 크기로 부푼다.
@@ -1652,13 +1652,13 @@ pub struct App {
     /// 층(`0`)이면 [`App::order_default`], 프로젝트 안이면 그 프로젝트의 것(없으면 기본)이고, 자리를 옮길 때
     /// [`App::rescope_order`] 가 갈아 끼운다.
     pub order: keys::Sorting,
-    screen_order: sorter::adapter::ScreenOrder,
+    screen_order: sorter::screen::ScreenOrder,
     engine_order: Option<crate::query::Order>,
     sort_original_engine: Option<Option<crate::query::Order>>,
     engine_default: Option<crate::query::Order>,
     engine_projects: std::collections::BTreeMap<String, crate::query::Order>,
-    screen_default: sorter::adapter::ScreenOrder,
-    screen_projects: std::collections::BTreeMap<String, sorter::adapter::ScreenOrder>,
+    screen_default: sorter::screen::ScreenOrder,
+    screen_projects: std::collections::BTreeMap<String, sorter::screen::ScreenOrder>,
     order_extended: bool,
     default_extended: bool,
     /// 기본 차례 — `[tui] order`(moai-r170.8dz). 층과 제 차례가 없는 프로젝트가 이것으로 선다.
@@ -3050,10 +3050,13 @@ impl Site {
     pub(super) fn group_title(&self, seg: &Seg) -> Option<String> {
         let (group, value) = group_parts(seg)?;
         Some(match value {
-            None => say(self.lang, match group {
-                "assignee" => "tui.grouping.no_assignee", "tag" => "tui.grouping.no_tag",
-                "milestone" => "nav.no_milestone", "epic" => "tui.grouping.no_epic", _ => "tui.grouping.none",
-            }).to_string(),
+            None => match group {
+                "assignee" => say(self.lang, "tui.grouping.no_assignee"),
+                "tag" => say(self.lang, "tui.grouping.no_tag"),
+                "milestone" => say(self.lang, "nav.no_milestone"),
+                "epic" => say(self.lang, "tui.grouping.no_epic"),
+                _ => say(self.lang, "tui.grouping.none"),
+            }.to_string(),
             Some(id) if group == "milestone" || group == "epic" => self.title_of(id),
             Some(value) if group == "status" => {
                 let name = match value { "todo" => say(self.lang, "page.stats.todo"), "in_progress" => say(self.lang, "page.stats.in_progress"), "review" => say(self.lang, "page.stats.review"), "done" => say(self.lang, "page.stats.done"), _ => value };
@@ -3061,6 +3064,32 @@ impl Site {
             }
             Some(value) => value.to_string(),
         })
+    }
+
+    /// Count the engine's members of a virtual header, including folded rows.
+    pub(super) fn group_stats(&self, seg: &Seg) -> Option<String> {
+        let Seg::Group(key) = seg else { return None };
+        let rows = self.index.grouped_tree(&self.issues, &self.path, &|_| true, &|_, _| std::cmp::Ordering::Equal,
+            key.group, &self.cfg.statuses, &|_| true, &|_| true);
+        let mut selected = false;
+        let (mut done, mut count) = (0, 0);
+        for (entry, _) in rows {
+            match entry {
+                crate::nav::GroupedEntry::Header(found) => selected = found == *key,
+                crate::nav::GroupedEntry::Entry(entry) if selected => if let Some(at) = entry.at() {
+                    count += 1;
+                    done += usize::from(self.issues[at].status.is_done());
+                },
+                _ => {}
+            }
+        }
+        let mut text = format!("{done}/{count}");
+        if matches!(key.group, crate::nav::Group::Milestone | crate::nav::Group::Epic) {
+            if let Some(issue) = key.value.as_deref().and_then(|id| self.index.find(id)).map(|at| &self.issues[at]) {
+                text.push_str(&format!(" · {} · {} · {} · {}", key.group.name(), issue.due_on.as_deref().unwrap_or("—"), issue.created_at, issue.updated_at));
+            }
+        }
+        Some(text)
     }
 
     pub fn title_of(&self, id: &str) -> String {
@@ -3376,11 +3405,11 @@ impl App {
             sort_original_engine: None,
             engine_default: Some(crate::query::Order::default()),
             engine_projects: Default::default(),
-            screen_order: sorter::adapter::ScreenOrder {
+            screen_order: sorter::screen::ScreenOrder {
                 item: Default::default(),
                 ..Self::screen_preset(crate::query::Preset::Release)
             },
-            screen_default: sorter::adapter::ScreenOrder {
+            screen_default: sorter::screen::ScreenOrder {
                 item: Default::default(),
                 ..Self::screen_preset(crate::query::Preset::Release)
             },
@@ -4787,13 +4816,13 @@ impl App {
         )
     }
 
-    fn screen_preset(preset: crate::query::Preset) -> sorter::adapter::ScreenOrder {
+    fn screen_preset(preset: crate::query::Preset) -> sorter::screen::ScreenOrder {
         let order = preset.order();
         let sorting = |fields: &[crate::query::Field]| {
             Self::sorting_of(&fields.iter().map(ToString::to_string).collect::<Vec<_>>())
                 .expect("engine preset is representable")
         };
-        sorter::adapter::ScreenOrder {
+        sorter::screen::ScreenOrder {
             milestone: sorting(&order.milestone),
             epic: sorting(&order.epic),
             item: sorting(&order.item),
@@ -4808,7 +4837,7 @@ impl App {
         let fields = |s: keys::Sorting| s.fields().iter().map(|f| Self::query_field(*f)).collect();
         if self.order_extended
             || matches!(self.mode, Mode::Sort(_))
-            || self.screen_order.group != sorter::adapter::Group::Structure
+            || self.screen_order.group != sorter::screen::Group::Structure
         {
             crate::query::Order {
                 milestone: fields(self.screen_order.milestone),
@@ -5284,7 +5313,7 @@ impl App {
             }
             self.order_default = self.screen_order.item;
         }
-        if let Some(group) = look.group.as_deref().and_then(sorter::adapter::Group::named) {
+        if let Some(group) = look.group.as_deref().and_then(sorter::screen::Group::named) {
             self.screen_order.group = group;
         }
         if listed.is_none() && look.layered_order.is_none() && look.sort.is_some() {
@@ -5350,7 +5379,7 @@ impl App {
                     }
                 }
             }
-            if let Some(g) = look.project_group.get(path).and_then(|word| sorter::adapter::Group::named(word)) {
+            if let Some(g) = look.project_group.get(path).and_then(|word| sorter::screen::Group::named(word)) {
                 screen.group = g;
             }
             self.order_projects.insert(path.clone(), screen.item);
@@ -5471,7 +5500,7 @@ impl App {
         .into()
     }
 
-    fn layer_words(screen: &sorter::adapter::ScreenOrder) -> std::collections::BTreeMap<String, Vec<String>> {
+    fn layer_words(screen: &sorter::screen::ScreenOrder) -> std::collections::BTreeMap<String, Vec<String>> {
         [
             ("milestone".into(), Self::order_words(&screen.milestone)),
             ("epic".into(), Self::order_words(&screen.epic)),
@@ -5488,8 +5517,7 @@ impl App {
             hide_backlog: Some(self.view.hide_backlog),
             show_archived: Some(self.view.show_archived),
             // **옛 한 쌍은 기본 차례의 첫 필드를 비춘다**(moai-r170.8dz) — 옛 바이너리는 `order` 를 모르고 이 둘만 읽어,
-            // 안 비추면 그쪽은 이 판이 고른 차례와 무관한 옛 값으로 선다. 낱말은 탐색기의 여섯 필드뿐이라 옛
-            // 바이너리가 못 읽는 값이 여기 안 선다(`id` 는 탐색기의 차례에 없다 — `App::sorting_of`).
+            // 안 비추면 그쪽은 이 판이 고른 차례와 무관한 옛 값으로 선다. 층별 차례는 별도 키에 적는다.
             order: Some(Self::order_words(&self.order_default)),
             layered_order: self.default_extended.then(|| {
                 self.engine_default
@@ -6749,7 +6777,7 @@ impl App {
         if !site.path.is_empty() {
             rows.push(Row::Up);
         }
-        if !self.gantt() && self.screen_order.group != sorter::adapter::Group::Structure {
+        if !self.gantt() && self.screen_order.group != sorter::screen::Group::Structure {
             let group = self.screen_order.group;
             rows.extend(
                 site.index
@@ -6858,7 +6886,7 @@ impl App {
         let context = crate::query::SortContext::with_where(&site.issues, &wh);
         let order = self.common_order();
         let cmp = |a, b| self.order_in_context(site, &context, &order, a, b);
-        use sorter::adapter::Group;
+        use sorter::screen::Group;
         if self.screen_order.group != Group::Structure {
             use crate::nav::{GroupKey, GroupedEntry};
             let group = self.screen_order.group;
@@ -6991,7 +7019,7 @@ impl App {
                         let height = draw::card_height(self.fields, || site.whose(at).is_some());
                         Some(Spot::Card(
                             *seat,
-                            if self.screen_order.group == sorter::adapter::Group::Structure {
+                            if self.screen_order.group == sorter::screen::Group::Structure {
                                 site.lane(at)
                             } else {
                                 virtual_lane
@@ -7666,7 +7694,7 @@ impl App {
             if self.chord.held().len() > before && self.sort_prefix_held() {
                 self.screen_order.item = self.order;
                 self.sort_original_engine = Some(self.engine_order.clone());
-                let editor = sorter::adapter::ScreenEditor::open(self.screen_order);
+                let editor = sorter::screen::ScreenEditor::open(self.screen_order);
                 self.mode = Mode::Sort(editor);
             }
             // **기다리는 열도 아무 동작을 안 돈 키다**(리뷰) — `gg` 의 첫 `g`·`Ctrl-w`·메뉴를 여는
@@ -7899,7 +7927,7 @@ impl App {
             B::SortEdit => {
                 self.screen_order.item = self.order;
                 self.sort_original_engine = Some(self.engine_order.clone());
-                let editor = sorter::adapter::ScreenEditor::open(self.screen_order);
+                let editor = sorter::screen::ScreenEditor::open(self.screen_order);
                 self.mode = Mode::Sort(editor);
             }
             B::Timezone => {
@@ -8911,7 +8939,7 @@ mod tests {
         b.priority = Some(1);
         let c = make("argos-0003", Kind::Issue);
         let mut app = App::new(vec![a, b, c], cfg(), Path::new());
-        app.screen_order.group = sorter::adapter::Group::Assignee;
+        app.screen_order.group = sorter::screen::Group::Assignee;
         app.order_extended = true;
         app.layout = view::Layout::Board;
         let rows = app.cards_in(Seat::Here, &app.site, &|_| true);
@@ -8930,7 +8958,7 @@ mod tests {
         let folded = app.cards_in(Seat::Here, &app.site, &|_| true);
         assert_eq!(folded.len(), rows.len() - 1);
         assert_eq!(app.laid(&folded).lanes.len(), 3);
-        app.screen_order.group = sorter::adapter::Group::None;
+        app.screen_order.group = sorter::screen::Group::None;
         let flat = app.cards_in(Seat::Here, &app.site, &|_| true);
         assert_eq!(flat.len(), 3);
         assert_eq!(app.laid(&flat).lanes.len(), 1);
@@ -8946,7 +8974,7 @@ mod tests {
         item.done_at = Some(crate::model::now());
         let mut app = App::new(vec![milestone, item], cfg(), Path::new());
         app.site.seed_layout_folds(None, false);
-        app.screen_order.group = sorter::adapter::Group::Milestone;
+        app.screen_order.group = sorter::screen::Group::Milestone;
         app.order_extended = true;
         app.layout = view::Layout::Board;
         let rows = app.cards_in(Seat::Here, &app.site, &|_| true);
@@ -8963,7 +8991,7 @@ mod tests {
         let mut a = make("argos-0001", Kind::Issue);
         a.assignee = Some("Zoe".into());
         let mut app = App::new(vec![a], cfg(), Path::new());
-        app.screen_order.group = sorter::adapter::Group::Assignee;
+        app.screen_order.group = sorter::screen::Group::Assignee;
         let rows = app.rows();
         app.cursor = rows.iter().position(|r| matches!(r, Row::Item(_, Entry::Dir { .. }, _))).unwrap();
         app.hit("Enter");
@@ -15064,6 +15092,19 @@ mod tests {
     }
 
     #[test]
+    fn ctl_sort_changes_the_visible_row_order() {
+        use crate::ctl::wire::Verb;
+        let mut a = make("argos-0001", Kind::Issue);
+        a.title = "Zebra".into();
+        let mut b = make("argos-0002", Kind::Issue);
+        b.title = "Apple".into();
+        let mut app = App::new(vec![a, b], cfg(), Path::new());
+        let reply = app.ctl(&ctl_req(Verb::Sort { words: vec!["title".into()], default: false }, None));
+        assert!(reply.ok, "{reply:?}");
+        assert_eq!(row_ids(&app), ["argos-0002", "argos-0001"]);
+    }
+
+    #[test]
     fn ctl_accepts_engine_orders_presets_groups_and_rejects_bad_group_wire() {
         use crate::ctl::wire::Verb;
         let (_scratch, mut app) = writable("ctl-layered-groups");
@@ -15746,12 +15787,12 @@ mod tests {
         app.user_config = Some(file.clone());
         let original = app.screen_order;
         app.hit("SPC s e 5");
-        assert_eq!(app.screen_order.group, sorter::adapter::Group::Assignee);
+        assert_eq!(app.screen_order.group, sorter::screen::Group::Assignee);
         assert!(!file.exists(), "preview wrote settings");
         app.hit("Esc");
         assert_eq!(app.screen_order, original);
         app.hit("SPC s e 5 Enter");
-        assert_eq!(app.screen_order.group, sorter::adapter::Group::Assignee);
+        assert_eq!(app.screen_order.group, sorter::screen::Group::Assignee);
         let text = std::fs::read_to_string(&file).unwrap();
         assert!(text.contains("group = \"assignee\"") && text.contains("milestone") && text.contains("item"), "{text}");
         let mut next = App::new(vec![make("argos-0001", Kind::Issue)], cfg(), Path::new());
@@ -15772,7 +15813,7 @@ mod tests {
         a.order = Sorting::by(Order::Priority);
         a.screen_order.item = a.order;
         a.engine_order = Some(crate::query::Order::parse("priority").unwrap());
-        a.hit("SPC s e");
+        a.hit("SPC s e Tab Tab");
         assert!(matches!(a.mode, Mode::Sort(_)), "SPC s e 가 창을 안 열었다 — {:?}", a.mode);
         let shown = super::draw::tests::render(&mut a, 80, 16).join("\n");
         assert!(
@@ -15819,7 +15860,7 @@ mod tests {
             a.with_layer(layer::fake(vec![("argos", "/x", layer::Look::Unread)], layer::At::Project("/x".into())));
         assert_eq!(a.order, Sorting::by(Order::Title), "제 차례가 없는 프로젝트가 기본을 안 따랐다");
         // 칸(`status`, 안 든 필드 가운데 넷째)을 넣고 `D` — 기본만 적힌다. 프로젝트의 표는 안 생긴다.
-        a.hit("SPC s e j j j j SPC D");
+        a.hit("SPC s e Tab Tab j j j j SPC D");
         let text = std::fs::read_to_string(&user).unwrap();
         assert!(text.contains("order = [\"title\", \"status\"]") && !text.contains("[tui.project"), "{text}");
         // 프로젝트 안의 Enter 는 그 프로젝트의 표에 적는다 — 기본은 그대로다.
@@ -15831,7 +15872,7 @@ mod tests {
             "{text}"
         );
         // 제 차례가 있는 프로젝트에서 `D` — 기본과 그 프로젝트의 것이 함께 고쳐진다.
-        a.hit("SPC s e d D");
+        a.hit("SPC s e Tab Tab d D");
         let text = std::fs::read_to_string(&user).unwrap();
         assert!(
             text.contains("order = [\"assignee:desc\"]")
@@ -15863,7 +15904,7 @@ mod tests {
         );
         let next = open();
         assert_eq!(next.screen_order, app.screen_order);
-        assert_eq!(next.screen_order.group, sorter::adapter::Group::Assignee);
+        assert_eq!(next.screen_order.group, sorter::screen::Group::Assignee);
     }
 
     /// **`moai ctl sort` keeps the cursor's row and the project's item order** (review moai-okdc.440). The verb once filled
@@ -15923,10 +15964,10 @@ mod tests {
         let text = std::fs::read_to_string(&user).unwrap();
         assert!(!text.contains("[tui.project"), "안 고친 Enter 가 표를 박았다\n{text}");
         // 기본이 바뀌면 그 프로젝트가 따라간다 — 박혔으면 옛 기본에 묶여 있다.
-        a.hit("SPC s e d D");
+        a.hit("SPC s e Tab Tab d D");
         assert_eq!(a.order, Sorting::of(&[keys::Ordered::of(Order::Title).flipped()]).unwrap());
         // 고친 Enter 는 그 프로젝트의 표에 적는다.
-        a.hit("SPC s e d Enter");
+        a.hit("SPC s e Tab Tab d Enter");
         let text = std::fs::read_to_string(&user).unwrap();
         assert!(text.contains("[tui.project.\"/x\"]\norder = [\"title\"]"), "{text}");
     }

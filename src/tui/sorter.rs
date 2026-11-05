@@ -1,9 +1,9 @@
-//! 차례 편집 창 — `SPC s e`(moai-r170.x22).
+//! 차례 편집 창 — `SPC s`(moai-r170.x22).
 //!
 //! **조각이다.** 차례([`Sorting`])와 키([`Sorter`])만 안다. 고친 차례를 화면에 입히고 설정에 적는 것은 든 쪽
 //! (`App::edit_sort`)이 한다 — 시간대 창(`zones`)이 고른 이름만 내고 여는 일은 `App` 이 하는 것과 같은 꼴이다.
 //!
-//! **필드 일곱이 늘 다 선다** — 차례에 든 것이 먼저 그 차례대로, 안 든 것이 뒤에 [`Order::ALL`] 의 차례로. 안 든
+//! **그 층에서 쓸 수 있는 필드가 다 선다** — 차례에 든 것이 먼저 그 차례대로, 안 든 것이 뒤에 [`Order::ALL`] 의 차례로. 안 든
 //! 필드를 숨기면 넣을 길이 따로 있어야 하고, 한 목록에서 넣고 빼면 그 길이 `SPC` 하나다.
 
 use super::keys::{Order, Ordered, Sorter, Sorting};
@@ -188,7 +188,7 @@ mod tests {
 /// Screen editing state, translated to and from the shared query engine by App.
 /// Keep engine conversion at this boundary rather than duplicating query comparisons in the UI.
 #[allow(dead_code)]
-pub(super) mod adapter {
+pub(super) mod screen {
     use super::Sorting;
     #[cfg(test)]
     use super::{Order, Ordered};
