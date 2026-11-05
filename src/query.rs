@@ -2050,9 +2050,14 @@ pub fn page_order<'a>(
 ) -> usize {
     use crate::nav::Group;
     let context = SortContext::with_where(all, wh);
-    // The same header order as the explorer's grouped tree (`nav::Group::order_values`), on borrowed values.
+    let groups: BTreeMap<&str, &Issue> = all.iter().map(|issue| (issue.id.as_str(), issue)).collect();
     let group_cmp = |a: &Issue, b: &Issue| {
         let (a, b) = (group_value(group, a, wh, &context), group_value(group, b, wh, &context));
+        if matches!(group, Group::Milestone | Group::Epic) {
+            if let (Some(a), Some(b)) = (a.as_deref().and_then(|id| groups.get(id)), b.as_deref().and_then(|id| groups.get(id))) {
+                return context.compare_layers(order, reversed, (a, wh.column(a)), (b, wh.column(b)), &cfg.statuses, cfg.naming);
+            }
+        }
         group.order_values(a.as_deref(), b.as_deref(), &cfg.statuses)
     };
     let cmp = |a: &Issue, b: &Issue| {

@@ -6895,22 +6895,6 @@ impl App {
                 }
             }
             buckets.retain(|(_, rows)| !rows.is_empty());
-            if matches!(group, crate::nav::Group::Milestone | crate::nav::Group::Epic) {
-                buckets.sort_by(|(a, _), (b, _)| {
-                    match (
-                        a.as_ref().and_then(|key| key.value.as_deref()),
-                        b.as_ref().and_then(|key| key.value.as_deref()),
-                    ) {
-                        (None, None) => std::cmp::Ordering::Equal,
-                        (None, _) => std::cmp::Ordering::Greater,
-                        (_, None) => std::cmp::Ordering::Less,
-                        (Some(a), Some(b)) => match (site.index.find(a), site.index.find(b)) {
-                            (Some(a), Some(b)) => cmp(a, b),
-                            _ => a.cmp(b),
-                        },
-                    }
-                });
-            }
             let mut rows = Vec::new();
             for (key, cards) in buckets {
                 if let Some(key) = key {

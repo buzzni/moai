@@ -91,6 +91,10 @@ impl Group {
             (None, None) => Ordering::Equal,
             (None, Some(_)) => Ordering::Greater,
             (Some(_), None) => Ordering::Less,
+            (Some(a), Some(b)) if self == Self::Kind => {
+                let rank = |v: &str| match v { "issue" => 0, "backlog" => 1, _ => 2 };
+                rank(a).cmp(&rank(b)).then_with(|| a.cmp(b))
+            }
             (Some(a), Some(b)) if self == Self::Status => {
                 let rank = |v: &str| statuses.iter().position(|s| s == v).unwrap_or(statuses.len());
                 rank(a).cmp(&rank(b)).then_with(|| a.cmp(b))
@@ -603,7 +607,14 @@ impl Index {
             buckets.entry(value).or_default().push(at);
         }
         let mut groups: Vec<_> = buckets.into_iter().collect();
-        groups.sort_by(|(a, _), (b, _)| group.order_values(a.as_deref(), b.as_deref(), statuses));
+        groups.sort_by(|(a, _), (b, _)| {
+            if matches!(group, Group::Milestone | Group::Epic) {
+                if let (Some(a), Some(b)) = (a.as_deref().and_then(|id| self.find(id)), b.as_deref().and_then(|id| self.find(id))) {
+                    return order(a, b);
+                }
+            }
+            group.order_values(a.as_deref(), b.as_deref(), statuses)
+        });
         let mut out = Vec::new();
         let total = groups.len();
         for (group_at, (value, mut rows)) in groups.into_iter().enumerate() {
@@ -979,6 +990,22 @@ mod tests {
             })
             .collect();
         assert_eq!(ids, ["a-0002", "a-0004", "a-0003", "a-0001"]);
+    }
+
+    #[test]
+    fn milestone_headers_follow_the_layer_comparator() {
+        let a = make("a-m001", Kind::Milestone);
+        let b = make("a-m002", Kind::Milestone);
+        let mut x = make("a-i001", Kind::Issue);
+        x.milestone = Some(a.id.clone());
+        let mut y = make("a-i002", Kind::Issue);
+        y.milestone = Some(b.id.clone());
+        let all = vec![a, b, x, y];
+        let index = Index::of(&all);
+        let tree = index.grouped_tree(&all, &Path::new(), &|_| true, &|a, b| b.cmp(&a), Group::Milestone, &[], &|_| true, &|_| true);
+        let heads: Vec<_> = tree.into_iter().filter_map(|(entry, _)| match entry { GroupedEntry::Header(k) => k.value, _ => None }).collect();
+        assert_eq!(heads, ["a-m002", "a-m001"]);
+        assert_eq!(Group::Kind.order_values(Some("issue"), Some("backlog"), &[]), std::cmp::Ordering::Less);
     }
 
     #[test]
