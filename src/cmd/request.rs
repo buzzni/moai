@@ -83,6 +83,7 @@ pub(crate) struct Answer {
     pub messages: Vec<String>,
     /// 덜 받은 답이다 — CLI 라면 `out` 을 다 낸 뒤 1 로 끝났다.
     pub partial: bool,
+    pub unread_rows: Vec<Option<String>>,
 }
 
 /// 읽기 명령 하나를 요청으로 돌린다. **프로세스의 현재 디렉터리도, 프로세스 전역의 알림 통도 안 건드린다.**
@@ -120,7 +121,7 @@ pub(crate) fn read(req: Request) -> Answer {
     drop(entered);
     let side = std::mem::take(&mut *side.lock().unwrap_or_else(|e| e.into_inner()));
     let messages = side.told.into_iter().chain(tail).map(|l| crate::style::plain(&l)).collect();
-    Answer { out, messages, partial: side.partial || mine }
+    Answer { out, messages, partial: side.partial || mine, unread_rows: side.unread_rows }
 }
 
 #[cfg(test)]

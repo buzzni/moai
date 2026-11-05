@@ -44,6 +44,23 @@ pub struct Seen {
 }
 
 impl Seen {
+    /// Keep old marks for unreadable IDs; an unidentified line may hide any missing row.
+    pub fn preserve_unread(&mut self, old: &Seen, unread: &[Option<String>]) {
+        let unknown = unread.iter().any(Option::is_none);
+        for (id, mark) in &old.rows {
+            if unread.iter().any(|bad| bad.as_ref() == Some(id)) || (unknown && !self.rows.contains_key(id)) {
+                self.rows.insert(id.clone(), *mark);
+                match old.notes.get(id) {
+                    Some(notes) => {
+                        self.notes.insert(id.clone(), *notes);
+                    }
+                    None => {
+                        self.notes.remove(id);
+                    }
+                }
+            }
+        }
+    }
     /// 목록의 줄(`id` 를 든 객체)과 `note` 저널 줄에서. `id` 가 없는 줄은 견줄 이름이 없어 뺀다.
     ///
     /// **같은 id 가 둘 선 목록**(`duplicate_id`)은 그 줄들을 차례대로 한 지문에 넣는다 — 하나만 바뀌어도 선다.
@@ -217,6 +234,20 @@ mod tests {
         let old = Seen::of(&[row("a-1", "하나"), row("a-2", "둘")], &[]);
         let new = Seen::of(&[row("a-1", "하나"), row("a-3", "셋")], &[]);
         assert_eq!(diff(&old, &new), (vec!["a-3".to_string()], vec!["a-2".to_string()]));
+    }
+
+    #[test]
+    fn unread_rows_keep_their_old_marks_until_they_can_be_read() {
+        let old = Seen::of(&[row("a-1", "one"), row("a-2", "two")], &[]);
+        let mut partial = Seen::of(&[], &[]);
+        partial.preserve_unread(&old, &[Some("a-1".into())]);
+        assert_eq!(diff(&old, &partial), (vec![], vec!["a-2".to_string()]));
+        let mut unknown = Seen::of(&[], &[]);
+        unknown.preserve_unread(&old, &[None]);
+        assert_eq!(diff(&old, &unknown), (vec![], vec![]));
+        let repaired = Seen::of(&[row("a-1", "edited"), row("a-2", "two")], &[]);
+        assert_eq!(diff(&unknown, &repaired), (vec!["a-1".to_string()], vec![]));
+        assert_eq!(diff(&unknown, &Seen::of(&[], &[])).1, vec!["a-1", "a-2"]);
     }
 
     /// 노트는 시각과 상관없이 선다 — 옛 도장의 노트(늦게 확정됐거나 병합으로 들어온 것)도. 목록에 없는 줄의 노트는

@@ -177,6 +177,8 @@ The reply `value` is `{changed, cursor, removed, reset}`:
 
 The `session` and `archived` keys are excluded from row fingerprints: they can change with the clock or a heartbeat. If a client needs them, it must re-read them independently of `changed`.
 
+When a snapshot line cannot be read, `changes` retains the previous fingerprint for its ID and does not report it as removed. If the ID cannot be recovered, all missing IDs are retained until a complete read. Diagnostics appear in `messages`; an unreadable active snapshot line also sets `partial`.
+
 The daemon remembers recent snapshots in memory: per project up to 8, and about 32 MiB for all projects together. When the memory is full, the snapshot used least recently is dropped. A cursor names one remembered snapshot. On each call the daemon reads the project again, compares it with the snapshot of your cursor row by row, and remembers the new one.
 
 - The rows compared are the list `show` gives with `all: true` and no other param, including the derived values (`derived_status`, `derived_epic`, `derived_milestone`, …). So an edit that came in with `git pull`, a merge or a hand edit is named even when its `updated_at` is old. An epic whose column changed because its last member closed is named too, and so is a member whose inherited milestone changed.

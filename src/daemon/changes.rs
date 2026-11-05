@@ -27,7 +27,7 @@
 //! - 봉투의 `messages`·`partial` 은 읽기 메서드와 같다 — 목록을 읽다 만난 못 읽는 줄·못 읽은 저널 파일을 CLI 의 말로
 //!   대고, CLI 라면 1 로 끝났을 판이면 `partial` 이다. **못 읽은 저널 파일은 `reset` 을 세우지 않는다** — 다시 읽어도
 //!   그 파일은 못 읽으니 `reset` 은 아무것도 되찾지 못한다. 그 파일의 노트는 읽을 수 있게 될 때까지 안 서고, 읽히는
-//!   판에 그 id 가 `changed` 에 선다. 덜 읽은 목록도 기억한다 — 클라이언트의 전부 읽기도 같은 목록을 받는다
+//!   판에 그 id 가 `changed` 에 선다. 못 읽은 스냅샷 줄의 지문은 앞 판에서 보존한다.
 //!
 //! ## 기억
 //!
@@ -87,6 +87,15 @@ impl Memory {
     fn with(keep: usize, bound: usize) -> Memory {
         let inner = Inner { keep, bound, tick: 0, bytes: 0, projects: HashMap::new() };
         Memory { instance: instance_mark().into(), inner: Arc::new(Mutex::new(inner)) }
+    }
+
+    fn lookup(&self, project: &Path, asked: Option<&str>) -> Option<Arc<Seen>> {
+        let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        inner.tick += 1;
+        let tick = inner.tick;
+        let found = inner.projects.get_mut(project)?.iter_mut().find(|k| Some(k.fingerprint.as_str()) == asked)?;
+        found.used = tick;
+        Some(found.seen.clone())
     }
 
     /// 커서가 가리키던 옛 스냅샷을 찾고, 지금 것을 넣는다. 락 안에서는 맵만 만진다 — 읽기와 견줌은 밖에서 한다.
@@ -223,10 +232,15 @@ pub(crate) fn poll(memory: &Memory, whole: Request, lang: Lang, cursor: Option<&
         }
     }
 
-    let seen = Arc::new(Seen::of(&rows, &read.notes));
-    let fingerprint = seen.fingerprint();
     let asked = cursor.and_then(|c| decode(c, &memory.instance));
-    let old = memory.swap(&project, asked, &fingerprint, &seen);
+    let old = memory.lookup(&project, asked);
+    let mut seen = Seen::of(&rows, &read.notes);
+    if let Some(old) = &old {
+        seen.preserve_unread(old, &answer.unread_rows);
+    }
+    let seen = Arc::new(seen);
+    let fingerprint = seen.fingerprint();
+    memory.swap(&project, asked, &fingerprint, &seen);
     let changes = crate::daemon::diff::changes(old.as_deref(), &seen, encode(&memory.instance, &fingerprint));
     Ok(Polled { changes, messages, partial: answer.partial || read.partial })
 }
@@ -529,5 +543,28 @@ mod tests {
             "못 읽는 줄의 자리를 안 댄다 — {:?}",
             got.messages
         );
+    }
+
+    #[test]
+    fn unread_snapshot_rows_are_not_reported_as_removed() {
+        let (_keep, root) = project("changes-preserve");
+        let memory = Memory::new();
+        let id = add(&root, "2026-11-04T09:01:00Z", "one");
+        let path = root.join(".moai/issues.jsonl");
+        let original = std::fs::read_to_string(&path).unwrap();
+        let (cursor, _, _, _) = ask(&memory, &root, None);
+        std::fs::write(&path, format!("{{\"id\":\"{id}\",\"title\":42}}\n")).unwrap();
+        let partial = poll(&memory, whole(&root), Lang::En, Some(&cursor)).unwrap();
+        assert!(partial.partial);
+        assert!(partial.changes.removed.is_empty());
+        std::fs::write(&path, "not json\n").unwrap();
+        let unknown = poll(&memory, whole(&root), Lang::En, Some(&partial.changes.cursor)).unwrap();
+        assert!(unknown.partial && unknown.changes.removed.is_empty());
+        std::fs::write(&path, &original).unwrap();
+        let repaired = poll(&memory, whole(&root), Lang::En, Some(&unknown.changes.cursor)).unwrap();
+        assert!(repaired.changes.removed.is_empty() && repaired.changes.changed.is_empty());
+        std::fs::write(&path, "").unwrap();
+        let removed = poll(&memory, whole(&root), Lang::En, Some(&repaired.changes.cursor)).unwrap();
+        assert_eq!(removed.changes.removed, vec![id]);
     }
 }

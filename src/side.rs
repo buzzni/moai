@@ -29,6 +29,8 @@ pub(crate) struct Side {
     pub here: PathBuf,
     /// Daemon reads resolve an omitted actor from git, not the daemon's environment.
     pub ignore_env_actor: bool,
+    /// Snapshot lines the request could not parse, with their IDs when recoverable.
+    pub unread_rows: Vec<Option<String>>,
     /// stderr 로 갈 줄, 낸 차례대로(`cmd::tell`).
     pub told: Vec<String>,
     /// 명령이 선 뒤에만 낼 줄(`cmd::tell_after`) — 넘어진 판에서는 버린다.
