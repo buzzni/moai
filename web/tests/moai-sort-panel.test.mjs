@@ -28,6 +28,14 @@ test('panel exposes injected vocabulary, active tabs and guards the last field',
   assert.equal(state.order.item.length, 1, 'editing does not mutate caller state')
 })
 
+test('the default button sends a save action', () => {
+  const actions = []
+  const panel = sortPanel(doc, state, words, (action) => actions.push(action))
+  const button = [...panel.querySelectorAll('button')].find((node) => node.textContent === 'Set as default')
+  button.click()
+  assert.deepEqual(actions.pop(), { type: 'default' })
+})
+
 test('field controls reorder and remove without changing the input', () => {
   const input = { ...state, order: { item: [...state.order.item, { key: 'due', dir: 'asc' }] } }
   const actions = []

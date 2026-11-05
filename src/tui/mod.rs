@@ -81,7 +81,10 @@ pub enum Seat {
 }
 
 /// Virtual group headers have a typed key, separate from structural directories.
-pub fn virtual_group(seg: &crate::nav::Seg) -> bool { matches!(seg, Seg::Group(_)) }
+pub fn virtual_group(seg: &crate::nav::Seg) -> bool {
+    matches!(seg, Seg::Group(_))
+}
+#[cfg(test)]
 pub fn group_label(seg: &crate::nav::Seg) -> Option<&str> {
     group_parts(seg).map(|(_, value)| value.unwrap_or("(none)"))
 }
@@ -3056,10 +3059,17 @@ impl Site {
                 "milestone" => say(self.lang, "nav.no_milestone"),
                 "epic" => say(self.lang, "tui.grouping.no_epic"),
                 _ => say(self.lang, "tui.grouping.none"),
-            }.to_string(),
+            }
+            .to_string(),
             Some(id) if group == "milestone" || group == "epic" => self.title_of(id),
             Some(value) if group == "status" => {
-                let name = match value { "todo" => say(self.lang, "page.stats.todo"), "in_progress" => say(self.lang, "page.stats.in_progress"), "review" => say(self.lang, "page.stats.review"), "done" => say(self.lang, "page.stats.done"), _ => value };
+                let name = match value {
+                    "todo" => say(self.lang, "page.stats.todo"),
+                    "in_progress" => say(self.lang, "page.stats.in_progress"),
+                    "review" => say(self.lang, "page.stats.review"),
+                    "done" => say(self.lang, "page.stats.done"),
+                    _ => value,
+                };
                 format!("{} {}", crate::style::glyph(value), name)
             }
             Some(value) => value.to_string(),
@@ -3069,24 +3079,40 @@ impl Site {
     /// Count the engine's members of a virtual header, including folded rows.
     pub(super) fn group_stats(&self, seg: &Seg) -> Option<String> {
         let Seg::Group(key) = seg else { return None };
-        let rows = self.index.grouped_tree(&self.issues, &self.path, &|_| true, &|_, _| std::cmp::Ordering::Equal,
-            key.group, &self.cfg.statuses, &|_| true, &|_| true);
+        let rows = self.index.grouped_tree(
+            &self.issues,
+            &self.path,
+            &|_| true,
+            &|_, _| std::cmp::Ordering::Equal,
+            key.group,
+            &self.cfg.statuses,
+            &|_| true,
+            &|_| true,
+        );
         let mut selected = false;
         let (mut done, mut count) = (0, 0);
         for (entry, _) in rows {
             match entry {
                 crate::nav::GroupedEntry::Header(found) => selected = found == *key,
-                crate::nav::GroupedEntry::Entry(entry) if selected => if let Some(at) = entry.at() {
-                    count += 1;
-                    done += usize::from(self.issues[at].status.is_done());
-                },
+                crate::nav::GroupedEntry::Entry(entry) if selected => {
+                    if let Some(at) = entry.at() {
+                        count += 1;
+                        done += usize::from(self.issues[at].status.is_done());
+                    }
+                }
                 _ => {}
             }
         }
         let mut text = format!("{done}/{count}");
         if matches!(key.group, crate::nav::Group::Milestone | crate::nav::Group::Epic) {
             if let Some(issue) = key.value.as_deref().and_then(|id| self.index.find(id)).map(|at| &self.issues[at]) {
-                text.push_str(&format!(" · {} · {} · {} · {}", key.group.name(), issue.due_on.as_deref().unwrap_or("—"), issue.created_at, issue.updated_at));
+                text.push_str(&format!(
+                    " · {} · {} · {} · {}",
+                    key.group.name(),
+                    issue.due_on.as_deref().unwrap_or("—"),
+                    issue.created_at,
+                    issue.updated_at
+                ));
             }
         }
         Some(text)
@@ -9012,7 +9038,7 @@ mod tests {
         assert_eq!(group_parts(&empty), Some(("assignee", None)));
         let app = App::new(vec![make("argos-0001", Kind::Issue)], cfg(), Path::new());
         assert_eq!(app.site.group_title(&named).as_deref(), Some("a:empty:b"));
-        assert_eq!(app.site.group_title(&empty).as_deref(), Some(say(app.site.lang, "tui.grouping.none")));
+        assert_eq!(app.site.group_title(&empty).as_deref(), Some(say(app.site.lang, "tui.grouping.no_assignee")));
     }
 
     /// **`SPC s t` leaves its menu open, and a key that menu ignores does not open the sort window** (review

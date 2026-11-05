@@ -48,7 +48,9 @@ impl Editor {
     /// 그릴 줄 — 차례에 든 필드가 그 차례대로, 안 든 필드가 뒤에.
     pub fn rows(&self) -> Vec<Row> {
         let used = self.fields.iter().enumerate().map(|(n, f)| Row { by: f.by, at: Some((n, *f)) });
-        let unused = Order::ALL.into_iter().filter(|o| (self.allow_progress || *o != Order::Progress) && !self.fields.iter().any(|f| f.by == *o));
+        let unused = Order::ALL
+            .into_iter()
+            .filter(|o| (self.allow_progress || *o != Order::Progress) && !self.fields.iter().any(|f| f.by == *o));
         used.chain(unused.map(|by| Row { by, at: None })).collect()
     }
 

@@ -1947,7 +1947,9 @@ impl Preset {
     pub fn order(self) -> Order {
         match self {
             Self::Release => Order::default(),
-            Self::Urgent | Self::People => Order::parse("milestone=due,created:desc;epic=priority;item=priority,due").expect("preset"),
+            Self::Urgent | Self::People => {
+                Order::parse("milestone=due,created:desc;epic=priority;item=priority,due").expect("preset")
+            }
             Self::Recent => Order::parse("updated:desc").expect("preset"),
             Self::Due => Order::parse("milestone=due;epic=due;item=due,priority").expect("preset"),
         }
@@ -2055,8 +2057,17 @@ pub fn page_order<'a>(
     let group_cmp = |a: &Issue, b: &Issue| {
         let (a, b) = (group_value(group, a, wh, &context), group_value(group, b, wh, &context));
         if matches!(group, Group::Milestone | Group::Epic) {
-            if let (Some(a), Some(b)) = (a.as_deref().and_then(|id| groups.get(id)), b.as_deref().and_then(|id| groups.get(id))) {
-                return context.compare_layers(order, reversed, (a, wh.column(a)), (b, wh.column(b)), &cfg.statuses, cfg.naming);
+            if let (Some(a), Some(b)) =
+                (a.as_deref().and_then(|id| groups.get(id)), b.as_deref().and_then(|id| groups.get(id)))
+            {
+                return context.compare_layers(
+                    order,
+                    reversed,
+                    (a, wh.column(a)),
+                    (b, wh.column(b)),
+                    &cfg.statuses,
+                    cfg.naming,
+                );
             }
         }
         group.order_values(a.as_deref(), b.as_deref(), &cfg.statuses)
@@ -3829,8 +3840,13 @@ mod tests {
             assert_eq!(Order::preset_group(preset.name()), Some(preset.group()));
         }
         assert_eq!(Preset::People.group(), crate::nav::Group::Assignee);
-        for p in [Preset::Urgent, Preset::Recent, Preset::Due] { assert_eq!(p.group(), crate::nav::Group::None); }
-        assert_eq!(Preset::Urgent.order(), Order::parse("milestone=due,created:desc;epic=priority;item=priority,due").unwrap());
+        for p in [Preset::Urgent, Preset::Recent, Preset::Due] {
+            assert_eq!(p.group(), crate::nav::Group::None);
+        }
+        assert_eq!(
+            Preset::Urgent.order(),
+            Order::parse("milestone=due,created:desc;epic=priority;item=priority,due").unwrap()
+        );
         assert_eq!(Preset::Due.order(), Order::parse("milestone=due;epic=due;item=due,priority").unwrap());
         assert_eq!(Preset::People.order(), Preset::Urgent.order());
     }
