@@ -2054,8 +2054,19 @@ pub fn page_order<'a>(
     use crate::nav::Group;
     let context = SortContext::with_where(all, wh);
     let groups: BTreeMap<&str, &Issue> = all.iter().map(|issue| (issue.id.as_str(), issue)).collect();
+    // Group by the same actual tree position as the explorer, including lost rows.
+    let positions = matches!(group, Group::Milestone | Group::Epic).then(|| crate::nav::Index::of(all));
+    let mut row_indices: BTreeMap<&str, Vec<usize>> = BTreeMap::new();
+    if positions.is_some() {
+        for (at, row) in all.iter().enumerate() {
+            row_indices.entry(&row.id).or_default().push(at);
+        }
+    }
     let group_cmp = |a: &Issue, b: &Issue| {
-        let (a, b) = (group_value(group, a, wh, &context), group_value(group, b, wh, &context));
+        let (a, b) = (
+            group_value(group, a, wh, &context, positions.as_ref(), &row_indices, all),
+            group_value(group, b, wh, &context, positions.as_ref(), &row_indices, all),
+        );
         if matches!(group, Group::Milestone | Group::Epic) {
             if let (Some(a), Some(b)) =
                 (a.as_deref().and_then(|id| groups.get(id)), b.as_deref().and_then(|id| groups.get(id)))
@@ -2090,6 +2101,9 @@ fn group_value<'x>(
     i: &'x Issue,
     wh: &'x Where<'_>,
     context: &'x SortContext<'_>,
+    positions: Option<&'x crate::nav::Index>,
+    row_indices: &BTreeMap<&str, Vec<usize>>,
+    all: &[Issue],
 ) -> Option<std::borrow::Cow<'x, str>> {
     use crate::nav::Group;
     use std::borrow::Cow;
@@ -2100,8 +2114,26 @@ fn group_value<'x>(
         Group::Priority => Some(Cow::Owned(format!("p{}", i.priority()))),
         Group::Tag => i.tags.first().map(|t| Cow::Borrowed(t.as_str())),
         Group::Kind => Some(Cow::Borrowed(i.kind.as_str())),
-        Group::Milestone => context.values(i).and_then(|v| v.milestone).map(Cow::Borrowed),
-        Group::Epic => context.values(i).and_then(|v| v.epic).map(Cow::Borrowed),
+        Group::Milestone | Group::Epic if !matches!(i.kind, Kind::Issue | Kind::Backlog) => {
+            let values = context.values(i)?;
+            match group {
+                Group::Epic => values.epic,
+                Group::Milestone => values.milestone,
+                _ => unreachable!(),
+            }
+            .map(Cow::Borrowed)
+        }
+        Group::Milestone | Group::Epic => {
+            let index = positions?;
+            let indices = row_indices.get(i.id.as_str())?;
+            let at = if indices.len() == 1 { indices[0] } else { *indices.iter().find(|&&at| &all[at] == i)? };
+            match group {
+                Group::Epic => index.epic_of(at),
+                Group::Milestone => index.milestone_of(at),
+                _ => unreachable!(),
+            }
+            .map(Cow::Borrowed)
+        }
     }
 }
 
