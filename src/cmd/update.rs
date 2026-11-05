@@ -84,16 +84,16 @@ pub fn run(ctx: &Ctx, a: UpdateArgs) -> R<Vec<String>> {
     let restart = (code == 0).then(|| daemon_restart(&exe)).flatten();
     #[cfg(not(unix))]
     let restart: Option<(String, u64)> = None;
-    if let Some((version, pid)) = &restart {
-        if !ctx.json {
-            tell(&format!(
-                "moai: {}",
-                crate::i18n::fill(
-                    crate::i18n::say(lang, "update.daemon_restart"),
-                    &[("version", version), ("pid", &pid.to_string())],
-                )
-            ));
-        }
+    if let Some((version, pid)) = &restart
+        && !ctx.json
+    {
+        tell(&format!(
+            "moai: {}",
+            crate::i18n::fill(
+                crate::i18n::say(lang, "update.daemon_restart"),
+                &[("version", version), ("pid", &pid.to_string())],
+            )
+        ));
     }
     if ctx.json {
         let mut result = said(&plan, Some(code));
@@ -121,25 +121,6 @@ fn restart_from_status(bytes: &[u8]) -> Option<(String, u64)> {
         return None;
     }
     Some((status["version"].as_str()?.to_owned(), status["pid"].as_u64()?))
-}
-
-#[cfg(test)]
-mod daemon_tests {
-    use super::restart_from_status;
-
-    #[test]
-    fn restart_notice_only_for_a_running_different_version() {
-        let old = br#"{"running":true,"same_version":false,"version":"0.51.0","pid":42}"#;
-        assert_eq!(restart_from_status(old), Some(("0.51.0".into(), 42)));
-        for status in [
-            &br#"{"running":false}"#[..],
-            &br#"{"running":true,"same_version":true,"version":"0.51.0","pid":42}"#[..],
-            &br#"{"running":true,"same_version":false}"#[..],
-            &b"broken"[..],
-        ] {
-            assert_eq!(restart_from_status(status), None);
-        }
-    }
 }
 
 /// 받을 저장소 — **막는 자는 여기 하나다.** `moai update` 가 이것으로 고르고, 탐색기의 새 판 안내
@@ -292,4 +273,23 @@ fn said(plan: &crate::update::Plan, code: Option<i32>) -> serde_json::Value {
         v["code"] = code.into();
     }
     v
+}
+
+#[cfg(test)]
+mod daemon_tests {
+    use super::restart_from_status;
+
+    #[test]
+    fn restart_notice_only_for_a_running_different_version() {
+        let old = br#"{"running":true,"same_version":false,"version":"0.51.0","pid":42}"#;
+        assert_eq!(restart_from_status(old), Some(("0.51.0".into(), 42)));
+        for status in [
+            &br#"{"running":false}"#[..],
+            &br#"{"running":true,"same_version":true,"version":"0.51.0","pid":42}"#[..],
+            &br#"{"running":true,"same_version":false}"#[..],
+            &b"broken"[..],
+        ] {
+            assert_eq!(restart_from_status(status), None);
+        }
+    }
 }
