@@ -1752,6 +1752,24 @@ impl<'a> SortContext<'a> {
         }
         Self { rows }
     }
+    /// Compare structural peers using their own layer; mixed kinds remain a total order.
+    pub fn compare_layers(
+        &self,
+        order: &Order,
+        reversed: bool,
+        a: (&Issue, &str),
+        b: (&Issue, &str),
+        statuses: &[String],
+        naming: crate::config::Naming,
+    ) -> std::cmp::Ordering {
+        let layer = |kind| match kind {
+            Kind::Milestone => 0,
+            Kind::Epic => 1,
+            _ => 2,
+        };
+        let (al, bl) = (layer(a.0.kind), layer(b.0.kind));
+        al.cmp(&bl).then_with(|| self.compare(order.for_kind(a.0.kind), reversed, a, b, statuses, naming))
+    }
     fn values(&self, issue: &Issue) -> Option<&SortValues<'a>> {
         self.rows.get(issue.id.as_str())?.iter().find(|(row, _)| *row == issue).map(|(_, v)| v)
     }
@@ -1872,6 +1890,13 @@ impl Default for Order {
     }
 }
 impl Order {
+    pub fn for_kind(&self, kind: Kind) -> &[Field] {
+        match kind {
+            Kind::Milestone => &self.milestone,
+            Kind::Epic => &self.epic,
+            _ => &self.item,
+        }
+    }
     pub const PRESETS: [&'static str; 5] = ["release", "urgent", "recent", "due", "people"];
     pub fn preset(name: &str) -> Option<Self> {
         let fields = match name {
