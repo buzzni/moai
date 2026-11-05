@@ -29,7 +29,7 @@ With `--json` that line is `{"started": true, "pid": …, "version": "…", "pro
 There is one daemon per user. A second `start` never runs a second daemon:
 
 - If the running one is the same version (the version number and `proto` match), `start` says so and exits 0 (`started` is `false` under `--json`).
-- If the running one is another version, `start` names both versions, exits non-zero with the code `version_mismatch`, and leaves the running daemon alone. A long-running process does not pick up a replaced binary, so a daemon started before `cargo build` or `moai update` keeps answering as the old version. Run `moai daemon stop`, then `moai daemon start`. `stop` works on a daemon of any version.
+- If the running one is another version, `start` names both versions, exits non-zero with the code `version_mismatch`, and leaves the running daemon alone. A long-running process does not pick up a replaced binary, so a daemon started before `cargo build` or `moai update` keeps answering as the old version. Restart it through its service manager, or stop and start it again if you started it yourself. See [Upgrade the daemon](#upgrade-the-daemon). `stop` works on a daemon of any version.
 - If a daemon died and left its socket, `start` removes the leftover and starts.
 - If a file at the socket path is not a socket of yours, `start` refuses and touches nothing.
 

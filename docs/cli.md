@@ -3765,7 +3765,7 @@ Options:
   A second start never runs a second daemon. When the running one is the same
   version it says so and exits 0 (started is false). When it is another
   version it names both and stops with the code version_mismatch - restart
-  it with moai daemon stop, then moai daemon start.
+  it through its service manager, or stop and start it if run manually.
 
   A socket left by a daemon that is gone is removed and the daemon starts.
   A file there that is not your socket is left alone and refused. A running
@@ -3815,9 +3815,9 @@ Options:
   --json gives {supported, running, socket, stale_socket, this_version,
   this_proto}, and pid, version, proto and same_version while one runs.
   same_version is false when the daemon is another version or proto than
-  this moai - restart it with moai daemon stop, then moai daemon start. A
-  rebuild of the same version still reads true. stale_socket is a socket
-  left by a daemon that is gone; moai daemon start clears it. It only reads,
+  this moai - restart it through its service manager, or stop and start it
+  if run manually. A rebuild of the same version still reads true.
+  stale_socket is a socket left by a daemon that is gone; moai daemon start clears it. It only reads,
   and exits 0 whether or not a daemon runs; a file there that is not your
   socket, an answer that is not a daemon's, or a daemon so full that it
   cannot even answer hello (busy, with its pid) is an error. A daemon at
