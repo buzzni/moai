@@ -5,6 +5,7 @@
 // Where a row stands and in which order is moai's (data/index.ts: `tui --json --deep`); what the filter and the
 // search find is moai's too (store.ts Matched). What stays here is drawing: which of those rows the view toggles show.
 
+import { compareItems, groupBuckets } from "./group-adapter.ts"
 import { partsIn, zoneNow } from "../data/zone.ts"
 import { isBacklog, LOST, NO_MILESTONE, pathKey, type IssueIndex, type Keep, type Path, type Row, type Seg, type Twig } from "../data/index.ts"
 import type { Boot } from "../data/source.ts"
@@ -16,7 +17,7 @@ import { visibleColumns } from "./responsive.ts"
 /** One line of the list. `key` is what the store's cursor holds for it: a row's id, `..`, or a bucket's seg. */
 export type ListLine =
   | { kind: "up"; key: string; depth: 0; path: Path }
-  | { kind: "bucket"; key: string; depth: number; twig: Twig; seg: Seg; path: Path; open: boolean }
+  | { kind: "bucket"; key: string; depth: number; twig: Twig; seg: Seg; path: Path; open: boolean; label?: string }
   | { kind: "row"; key: string; depth: number; twig: Twig; at: number; dir: boolean; path: Path | null; open: boolean }
 
 export const UP_KEY = ".."
@@ -123,13 +124,34 @@ export const hidesAnything = (view: ViewSettings): boolean => view.hiddenStatuse
  * The listing at `state.path` with the open folders unfolded in place: `..` first below the root, then each
  * level's folders, rows and buckets in moai's order ({@link IssueIndex.entries}).
  */
-export function listLines(state: Pick<State, "path" | "expanded">, index: IssueIndex, keep: Keep): ListLine[] {
+export function listLines(state: Pick<State, "path" | "expanded"> & Partial<Pick<State, "toolbar" | "boot">>, index: IssueIndex, keep: Keep): ListLine[] {
   const open = new Set(state.expanded)
   const out: ListLine[] = []
   if (state.path.length) out.push({ kind: "up", key: UP_KEY, depth: 0, path: state.path.slice(0, -1) })
+  const group = state.toolbar?.panel?.group ?? 'structure'
+  if (group !== 'structure') {
+    const buckets = groupBuckets(index, state.path, keep, group, state.boot?.statuses, true, state.toolbar?.panel.order.item, state.toolbar?.panel.order[group])
+    for (const bucket of buckets) {
+      const path = [...state.path, bucket.seg]
+      const opened = !open.has(pathKey(path))
+      if (group !== 'none') out.push({ kind: 'bucket', key: bucket.seg, depth: 1, twig: [], seg: bucket.seg, path, open: opened, label: bucket.label })
+      if (group === 'none' || opened) for (const at of bucket.members) {
+        out.push({ kind: 'row', key: index.rows[at]!.id, depth: group === 'none' ? 1 : 2, twig: [], at, dir: false, path: null, open: false })
+      }
+    }
+    return out
+  }
   const kin: boolean[] = []
   const walk = (here: Path) => {
     const entries = index.entries(here, keep)
+    const panel = state.toolbar?.panel
+    if (panel?.edited) entries.sort((a, b) => {
+      if (a.at === undefined || b.at === undefined) return a.at === b.at ? 0 : a.at === undefined ? 1 : -1
+      if (a.dir !== b.dir) return a.dir ? -1 : 1
+      const kind = index.rows[a.at]?.kind
+      const level = kind === 'milestone' || kind === 'epic' ? kind : 'item'
+      return compareItems(index, a.at, b.at, panel.order[level] ?? [], state.boot?.statuses)
+    })
     entries.forEach((entry, n) => {
       kin.push(n < entries.length - 1)
       const twig = [...kin]

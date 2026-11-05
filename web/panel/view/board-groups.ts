@@ -6,6 +6,7 @@
  */
 import { closedGroup, isBacklog, isDone, isWork, LOST, pathKey, type IssueIndex, type Keep, type Path, type Row, type Seg } from '../data/index.js'
 import type { ViewSettings } from '../store.js'
+import { compareItems, groupBuckets } from './group-adapter.ts'
 
 /** The columns moai has when `.moai/config.toml` names none, until `/api/boot` gives the project's own. */
 export const FALLBACK_STATUSES: readonly string[] = ['todo', 'in_progress', 'review', 'done']
@@ -24,6 +25,7 @@ export interface BoardColumn {
 export interface BoardLane {
   /** The milestone's segment (`m:<id>`, `m:`, {@link LOST}); null for the one lane inside a place. */
   seg: Seg | null
+  label?: string
   /** The milestone row of the lane, when it has one. */
   at?: number
   /** Cards before this lane's fold hides them. */
@@ -59,6 +61,10 @@ export interface BoardLook {
   match?: Keep
   reveal?: boolean
   /** Paths folded during this board visit. Search reveals matches without changing this set. */
+  group?: string
+  itemOrder?: readonly import('./sort-panel.ts').SortPanelField[]
+  levelOrder?: readonly import('./sort-panel.ts').SortPanelField[]
+  milestoneOrder?: readonly import('./sort-panel.ts').SortPanelField[]
   shut?: ReadonlySet<string>
 }
 
@@ -134,10 +140,18 @@ export function groupBoard(index: IssueIndex, look: BoardLook, known: readonly s
   // `descendants` is in the tree's order, which is the order the list draws: a card stands where its row stands.
   const make = (seg: Seg | null, members: number[], at?: number): BoardLane => {
     const folded = !look.reveal && seg !== null && !!look.shut?.has(pathKey([seg]))
+    const ordered = look.itemOrder ? members.slice().sort((a, b) => compareItems(index, a, b, look.itemOrder!, known)) : members
     return { seg, at, count: members.length, folded,
-      columns: keys.map((key) => ({ key, cards: folded ? [] : members.filter((m) => columnOf(index, m) === key) })) }
+      columns: keys.map((key) => ({ key, cards: folded ? [] : ordered.filter((m) => columnOf(index, m) === key) })) }
   }
 
+  if (look.group === 'none') return { keys, lanes: kept.length ? [make(null, kept)] : [], total: kept.length, pinned }
+  if (look.group && look.group !== 'structure') {
+    const shownSet = new Set(kept)
+    const lanes = groupBuckets(index, path, (at) => shownSet.has(at), look.group, known, false, look.itemOrder, look.levelOrder)
+      .map((bucket) => ({ ...make(bucket.seg, bucket.members), label: bucket.label }))
+    return { keys, lanes, total: kept.length, pinned }
+  }
   if (path.length) return { keys, lanes: kept.length ? [make(null, kept)] : [], total: kept.length, pinned }
 
   const bySeg = new Map<Seg | null, number[]>()
@@ -150,6 +164,11 @@ export function groupBoard(index: IssueIndex, look: BoardLook, known: readonly s
   // Lanes in the listing's order (milestones, then the baskets, as moai lists them); no lane head first.
   const order0 = index.entries([]).filter((entry) => entry.dir).map((entry) => entry.seg)
   const segs = [...bySeg.keys()].sort((a, b) => (a === null ? -1 : order0.indexOf(a)) - (b === null ? -1 : order0.indexOf(b)))
+  if (look.milestoneOrder?.length) segs.sort((a, b) => {
+    if (a === null || b === null || a === 'm:' || b === 'm:') return a === b ? 0 : a === null || a === 'm:' ? 1 : -1
+    const ai = index.find(a.slice(2)), bi = index.find(b.slice(2))
+    return ai === undefined || bi === undefined ? 0 : compareItems(index, ai, bi, look.milestoneOrder!, known)
+  })
   const lanes = segs.map((seg) => {
     const home = seg !== null && seg.startsWith('m:') && seg !== 'm:' ? index.find(seg.slice(2)) : undefined
     return make(seg, bySeg.get(seg)!, home)

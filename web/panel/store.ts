@@ -16,6 +16,8 @@ import type { ProjectEntry } from './data/projects.js'
 import type { Theme } from './data/theme.js'
 import type { Boot } from './data/source.js'
 import { toolbarReduce, type ToolbarAction, type ToolbarState } from './view/toolbar.js'
+import { initialPanel } from './view/sort-adapter.js'
+import type { SortPanelState } from './view/sort-panel.js'
 import type { WikiState } from './view/wiki.js'
 // The split owns the layout rules (the 640px rule, the ratio bounds and defaults); the store keeps the choices.
 import { effectivePosition, type DetailPosition } from './view/responsive.js'
@@ -113,6 +115,7 @@ export interface ToolbarUi {
   hintsOpen: boolean
   hintIndex: number
   sortOpen: boolean
+  panel: SortPanelState
 }
 
 export interface State {
@@ -208,9 +211,9 @@ function withToolbar(state: State, next: ToolbarState): State {
     ? state.filter
     : { text: next.filterText, applied: next.filterApplied }
   const ui = state.toolbar
-  const toolbar = next.cursor === ui.cursor && next.hintsOpen === ui.hintsOpen && next.hintIndex === ui.hintIndex && next.sortOpen === ui.sortOpen
+  const toolbar = next.cursor === ui.cursor && next.hintsOpen === ui.hintsOpen && next.hintIndex === ui.hintIndex && next.sortOpen === ui.sortOpen && next.panel === ui.panel
     ? ui
-    : { cursor: next.cursor, hintsOpen: next.hintsOpen, hintIndex: next.hintIndex, sortOpen: next.sortOpen }
+    : { cursor: next.cursor, hintsOpen: next.hintsOpen, hintIndex: next.hintIndex, sortOpen: next.sortOpen, panel: next.panel }
   const sort = next.sort === state.sort ? state.sort : next.sort.fields.length ? copySort(next.sort) : copySort(state.defaultSort)
   if (search === state.search && filter === state.filter && toolbar === state.toolbar && sort === state.sort) return state
   return { ...state, search, filter, toolbar, sort }
@@ -233,7 +236,7 @@ export function initialState(): State {
     defaultSort: copySort(DEFAULT_SORT),
     search: { text: '', open: false },
     filter: { text: '', applied: '' },
-    toolbar: { cursor: 0, hintsOpen: false, hintIndex: -1, sortOpen: false },
+    toolbar: { cursor: 0, hintsOpen: false, hintIndex: -1, sortOpen: false, panel: initialPanel() },
     board: idle(),
     shown: idle(),
     archive: null,
@@ -362,8 +365,10 @@ export function reduce(state: State, action: Action): State {
         columns: { ...state.columns, [action.column]: action.on },
         columnsKnown: state.columnsKnown.includes(action.column) ? state.columnsKnown : [...state.columnsKnown, action.column],
       }
-    case 'sort':
-      return { ...state, sort: action.sort.fields.length ? copySort(action.sort) : copySort(state.defaultSort) }
+    case 'sort': {
+      const sort = action.sort.fields.length ? copySort(action.sort) : copySort(state.defaultSort)
+      return { ...state, sort, toolbar: { ...state.toolbar, panel: { ...state.toolbar.panel, preset: undefined, edited: true, order: { ...state.toolbar.panel.order, item: sort.fields } } } }
+    }
     case 'sort-default':
       return { ...state, defaultSort: action.sort?.fields.length ? copySort(action.sort) : copySort(DEFAULT_SORT) }
     case 'search':

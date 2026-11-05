@@ -5,6 +5,7 @@ export interface SortPanelState {
   order: Record<string, SortPanelField[]>
   level: string
   preset?: string
+  edited?: boolean
   command?: string
   speech?: string
 }
@@ -35,9 +36,11 @@ export function sortPanel(doc: Document, state: SortPanelState, words: SortPanel
     root.append(node)
     return node
   }
+  let focusId = 0
   const button = (label: string, action: () => void): HTMLButtonElement => {
     const node = doc.createElement('button')
     node.type = 'button'
+    node.dataset.sortFocus = `button-${focusId++}`
     node.textContent = label
     node.addEventListener('click', action)
     return node
@@ -71,6 +74,8 @@ export function sortPanel(doc: Document, state: SortPanelState, words: SortPanel
   const list = doc.createElement('ol')
   fields.forEach((field, index) => {
     const row = doc.createElement('li')
+    row.dataset.key = field.key
+    row.className = 'm-menu-item'
     const name = doc.createElement('span')
     name.textContent = words.fields.find((one) => one.id === field.key)?.label ?? field.key
     row.append(name)
@@ -95,9 +100,17 @@ export function sortPanel(doc: Document, state: SortPanelState, words: SortPanel
     row.append(remove)
     list.append(row)
   })
+  for (const field of words.fields.filter((one) => !fields.some((f) => f.key === one.id) && (!one.levels || one.levels.includes(state.level)))) {
+    const row = doc.createElement('li')
+    row.dataset.key = field.id
+    row.className = 'm-menu-item m-sort-unused'
+    row.textContent = `· ${field.label}`
+    list.append(row)
+  }
   order.append(list)
   const select = doc.createElement('select')
   select.setAttribute('aria-label', words.labels.add)
+  select.dataset.sortFocus = 'select'
   for (const field of words.fields.filter((one) => !fields.some((f) => f.key === one.id) && (!one.levels || one.levels.includes(state.level)))) {
     const option = doc.createElement('option')
     option.value = field.id

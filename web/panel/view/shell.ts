@@ -189,7 +189,7 @@ export function mountShell(root: HTMLElement, options: ShellOptions): Shell {
   const toolbar = el(doc, "div", { class: "m-toolbar-slot", hidden: state.tab === "wiki" })
   // The toolbar is built once and brought to the store's state on every render (its inputs are never rebuilt
   // under the caret or an IME composition); what it does goes back to the store as a `toolbar` action.
-  const bar = createToolbar({ doc, copy: copy.toolbar }, { dispatch: (action) => store.dispatch({ type: "toolbar", action }) })
+  const bar = createToolbar({ doc, copy: copy.toolbar, lang: language as import("../i18n/index.ts").Language }, { dispatch: (action) => store.dispatch({ type: "toolbar", action }) })
   toolbar.append(bar.el)
   const crumbs = mountCrumbs(doc, copy, (path) => {
     // Going up lands on the place just left, as Backspace does (list.ts leave()).

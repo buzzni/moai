@@ -1492,6 +1492,10 @@ pub enum Sorter {
     Toggle,
     /// 방향을 뒤집는다.
     Flip,
+    /// Switch the active level, grouping, or select a preset.
+    NextLevel,
+    NextGroup,
+    Preset(u8),
     /// 지금 선 자리에 입힌다 — 프로젝트 안이면 그 프로젝트의 차례로 적힌다.
     Apply,
     /// 입히고 **기본 차례(`[tui] order`)로도** 적는다 — 프로젝트 안에서도.
@@ -1512,6 +1516,14 @@ pub const SORTER: &[Bind<Sorter>] = &[
     row!(Sorter::Raise, Some("K"), Key::plain('K')),
     row!(Sorter::Toggle, Some("SPC"), Key::plain(' ')),
     row!(Sorter::Flip, Some("d"), Key::plain('d')),
+    row!(Sorter::Flip, None, Key::plain('r')),
+    row!(Sorter::NextLevel, None, Key::bare(KeyCode::Tab)),
+    row!(Sorter::NextGroup, None, Key::plain('g')),
+    row!(Sorter::Preset(1), None, Key::plain('1')),
+    row!(Sorter::Preset(2), None, Key::plain('2')),
+    row!(Sorter::Preset(3), None, Key::plain('3')),
+    row!(Sorter::Preset(4), None, Key::plain('4')),
+    row!(Sorter::Preset(5), None, Key::plain('5')),
     row!(Sorter::Apply, Some("Enter"), Key::bare(KeyCode::Enter)),
     row!(Sorter::Default, Some("D"), Key::plain('D')),
     row!(Sorter::Close, Some("Esc"), Key::bare(KeyCode::Esc)),
@@ -1525,6 +1537,9 @@ impl Sorter {
             Sorter::Lower | Sorter::Raise => say(lang, "tui.sorter.shift"),
             Sorter::Toggle => say(lang, "tui.sorter.toggle"),
             Sorter::Flip => say(lang, "tui.sorter.flip"),
+            Sorter::NextLevel => say(lang, "tui.sorter.level"),
+            Sorter::NextGroup => say(lang, "tui.sorter.group"),
+            Sorter::Preset(_) => say(lang, "tui.sorter.preset"),
             Sorter::Apply => say(lang, "tui.sorter.apply"),
             Sorter::Default => say(lang, "tui.sorter.default"),
             Sorter::Close => say(lang, "tui.sorter.close"),

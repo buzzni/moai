@@ -253,7 +253,7 @@ test('keys: SPC s sorts by a field; SPC s e opens the sort editor (sorter mode),
   const panel = inEpic()
   panel.seq(' ', 's', 't')
   assert.deepEqual(panel.state().sort.fields, [{ key: 'title', dir: 'asc' }])
-  assert.equal(panel.$('.m-whichkey [data-key="t"] .m-wk-state').textContent, '[↑ asc]')
+  assert.equal(panel.state().toolbar.sortOpen, true, 'SPC s opens the editor')
   panel.press('t')
   assert.deepEqual(panel.state().sort.fields, [{ key: 'title', dir: 'desc' }], 'again turns it around')
   panel.press('P')
@@ -292,7 +292,7 @@ test('keys: SPC s w sorts by the deadline (moai\'s `due`)', () => {
   const panel = inEpic()
   panel.seq(' ', 's', 'w')
   assert.deepEqual(panel.state().sort.fields, [{ key: 'due', dir: 'asc' }])
-  assert.equal(panel.$('.m-whichkey [data-key="w"] .m-wk-state').textContent, '[↑ asc]')
+  assert.ok(panel.$('.m-sort-pop [data-key="due"]'), 'the editor reflects the shortcut')
 })
 
 test('keys: wiki mode — keys reach the wiki pane, SPC v r toggles raw, Tab cycles links and Esc gets out to the tab bar', async () => {
@@ -764,12 +764,12 @@ test('keys: D in the sort editor saves the order as the default; emptying the or
   assert.equal(panel.state().toolbar.sortOpen, false, 'D applies, saves and leaves the editor')
   assert.deepEqual(panel.state().sort, sortDefault.get())
   assert.deepEqual(panel.state().defaultSort, sortDefault.get(), 'the store holds the saved default (store.ts falls back to it)')
-  // Take every field out (SPC on each): the reset is the saved default, not priority alone.
+  // The last field cannot be removed; an order is never empty.
   panel.seq(' ', 's', 'e')
   panel.press(' ')
   panel.seq('k', 'k', 'k', 'k', 'k')
   panel.press(' ')
-  assert.deepEqual(panel.state().sort.fields.map((f) => f.key), ['title', 'priority'])
+  assert.deepEqual(panel.state().sort.fields.map((f) => f.key), ['priority'])
 })
 
 test('keys: where the default persists, the sort editor does not say it lasts for the session, and D says it is saved', () => {

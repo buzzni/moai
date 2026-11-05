@@ -14,8 +14,6 @@ pub struct Editor {
     /// 고치는 중의 차례. **늘 한 필드 이상이다** — 마지막 필드는 못 뺀다([`Editor::act`]). 빈 차례는 차례가 아니고
     /// (`query::parse_order` 가 거절한다), Enter 가 그것을 받으면 무엇으로 설지 정할 길이 없다.
     fields: Vec<Ordered>,
-    /// 창을 취소할 때 되돌릴 차례.
-    original: Sorting,
     /// 커서 — [`Editor::rows`] 의 자리.
     pub cursor: usize,
 }
@@ -43,11 +41,7 @@ pub enum Done {
 impl Editor {
     /// 지금 차례로 연다. 커서는 첫 필드에 선다.
     pub fn open(s: Sorting) -> Editor {
-        Editor { fields: s.fields().to_vec(), original: s, cursor: 0 }
-    }
-
-    pub fn original(&self) -> Sorting {
-        self.original
+        Editor { fields: s.fields().to_vec(), cursor: 0 }
     }
 
     /// 그릴 줄 — 차례에 든 필드가 그 차례대로, 안 든 필드가 뒤에.
@@ -108,6 +102,7 @@ impl Editor {
                     self.fields[n] = self.fields[n].flipped();
                 }
             }
+            Sorter::NextLevel | Sorter::NextGroup | Sorter::Preset(_) => {}
             Sorter::Apply => return Done::Apply(self.sorting()),
             Sorter::Default => return Done::Default(self.sorting()),
             Sorter::Close => return Done::Cancel,
@@ -192,7 +187,7 @@ mod tests {
 /// Temporary screen model until the shared query engine supplies its order and group types.
 /// Keep engine conversion at this boundary rather than duplicating query comparisons in the UI.
 #[allow(dead_code)]
-mod adapter {
+pub(super) mod adapter {
     use super::{Order, Ordered, Sorting};
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -213,6 +208,37 @@ mod adapter {
         Kind,
         Milestone,
         Epic,
+    }
+
+    impl Group {
+        pub fn name(self) -> &'static str {
+            match self {
+                Self::Structure => "structure",
+                Self::None => "none",
+                Self::Status => "status",
+                Self::Assignee => "assignee",
+                Self::Priority => "priority",
+                Self::Tag => "tag",
+                Self::Kind => "kind",
+                Self::Milestone => "milestone",
+                Self::Epic => "epic",
+            }
+        }
+        pub fn named(word: &str) -> Option<Self> {
+            [
+                Self::Structure,
+                Self::None,
+                Self::Status,
+                Self::Assignee,
+                Self::Priority,
+                Self::Tag,
+                Self::Kind,
+                Self::Milestone,
+                Self::Epic,
+            ]
+            .into_iter()
+            .find(|g| g.name() == word)
+        }
     }
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -294,6 +320,7 @@ mod adapter {
     pub struct ScreenEditor {
         pub group: Group,
         pub level: Level,
+        original: ScreenOrder,
         milestone: super::Editor,
         epic: super::Editor,
         item: super::Editor,
@@ -311,10 +338,51 @@ mod adapter {
             Self {
                 group: state.group,
                 level,
+                original: state,
                 milestone: super::Editor::open(state.milestone),
                 epic: super::Editor::open(state.epic),
                 item: super::Editor::open(state.item),
             }
+        }
+
+        pub fn original(&self) -> ScreenOrder {
+            self.original
+        }
+        pub fn rows(&mut self) -> Vec<super::Row> {
+            self.editor().rows()
+        }
+        pub fn cursor(&mut self) -> usize {
+            self.editor().cursor
+        }
+        pub fn act(&mut self, action: super::Sorter) -> super::Done {
+            use super::Sorter;
+            match action {
+                Sorter::NextLevel => self.next_level(),
+                Sorter::NextGroup => {
+                    let groups = [
+                        Group::Structure,
+                        Group::None,
+                        Group::Status,
+                        Group::Assignee,
+                        Group::Priority,
+                        Group::Tag,
+                        Group::Kind,
+                        Group::Milestone,
+                        Group::Epic,
+                    ];
+                    let at = groups.iter().position(|g| *g == self.group).unwrap_or(0);
+                    self.choose_group(groups[(at + 1) % groups.len()]);
+                }
+                Sorter::Preset(n) => {
+                    if let Some(p) = [Preset::Release, Preset::Urgent, Preset::Recent, Preset::Due, Preset::People]
+                        .get(n.saturating_sub(1) as usize)
+                    {
+                        self.choose_preset(*p);
+                    }
+                }
+                _ => return self.editor().act(action),
+            }
+            super::Done::Stay
         }
 
         pub fn state(&self) -> ScreenOrder {
@@ -357,7 +425,9 @@ mod adapter {
         }
 
         pub fn choose_preset(&mut self, preset: Preset) {
+            let original = self.original;
             *self = Self::open(ScreenOrder::preset(preset));
+            self.original = original;
         }
     }
 

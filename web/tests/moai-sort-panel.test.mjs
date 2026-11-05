@@ -51,3 +51,61 @@ test('preset and command text are exposed without interpreting markup', () => {
   assert.equal(panel.querySelector('q').textContent, '<say>')
   assert.equal(panel.querySelector('sort'), null)
 })
+
+test('toolbar preset and grouping update the shared list/board model', async () => {
+  const { initialState, reduce } = await panelModule('store.ts')
+  const { IssueIndex } = await panelModule('data/index.ts')
+  const { listLines } = await panelModule('view/list-model.ts')
+  const { groupBoard } = await panelModule('view/board-groups.ts')
+  let state = initialState()
+  state = reduce(state, { type: 'toolbar', action: { type: 'sort-panel', action: { type: 'preset', id: 'people' } } })
+  assert.equal(state.toolbar.panel.group, 'assignee')
+  const rows = [
+    { id: 'a', kind: 'issue', status: 'todo', priority: 2, assignee: 'Zoe', created_at: '2026-01-01' },
+    { id: 'b', kind: 'issue', status: 'todo', priority: 1, assignee: 'Amy', created_at: '2026-01-02' },
+    { id: 'c', kind: 'issue', status: 'todo', priority: 0, created_at: '2026-01-03' },
+  ]
+  const index = new IssueIndex(rows)
+  const lines = listLines(state, index, () => true)
+  assert.deepEqual(lines.filter((line) => line.kind === 'bucket').map((line) => line.label), ['Amy', 'Zoe', '(none)'])
+  const board = groupBoard(index, { path: [], view: state.view, cursor: null, group: 'assignee' })
+  assert.deepEqual(board.lanes.map((lane) => lane.label), ['Amy', 'Zoe', '(none)'])
+  assert.equal(board.total, 3)
+  state = reduce(state, { type: 'toolbar', action: { type: 'sort-panel', action: { type: 'group', id: 'none' } } })
+  assert.equal(listLines(state, index, () => true).filter((line) => line.kind === 'bucket').length, 0)
+  assert.equal(groupBoard(index, { path: [], view: state.view, cursor: null, group: 'none' }).lanes[0].seg, null)
+})
+
+test('temporary groups keep null distinct from a literal marker and order cards', async () => {
+  const { IssueIndex } = await panelModule('data/index.ts')
+  const { groupBuckets } = await panelModule('view/group-adapter.ts')
+  const rows = [
+    { id: 'a', kind: 'issue', status: 'todo', tags: ['~', 'extra'], priority: 2, created_at: '2026-01-02' },
+    { id: 'b', kind: 'issue', status: 'todo', tags: ['~'], priority: 0, created_at: '2026-01-01' },
+    { id: 'c', kind: 'issue', status: 'todo', priority: 1, created_at: '2026-01-03' },
+  ]
+  const index = new IssueIndex(rows)
+  const groups = groupBuckets(index, [], () => true, 'tag', [], false, [{ key: 'priority', dir: 'asc' }])
+  assert.equal(groups.length, 2)
+  assert.notEqual(groups[0].seg, groups[1].seg)
+  assert.deepEqual(groups[0].members.map((at) => index.rows[at].id), ['b', 'a'])
+  assert.deepEqual(groups[1].members.map((at) => index.rows[at].id), ['c'])
+})
+
+test('the temporary adapter applies independent milestone and item orders to the structured list', async () => {
+  const { initialState, reduce } = await panelModule('store.ts')
+  const { IssueIndex, pathKey } = await panelModule('data/index.ts')
+  const { listLines } = await panelModule('view/list-model.ts')
+  const { treeOf } = await import('./moai-tree-helper.mjs')
+  const rows = [
+    { id: 'm2', kind: 'milestone', title: 'Later', status: 'todo', created_at: '2026-02-01' },
+    { id: 'm1', kind: 'milestone', title: 'Earlier', status: 'todo', created_at: '2026-01-01' },
+    { id: 'a', kind: 'issue', title: 'A', status: 'todo', milestone: 'm1', derived_milestone: 'm1', priority: 2 },
+    { id: 'b', kind: 'issue', title: 'B', status: 'todo', milestone: 'm1', derived_milestone: 'm1', priority: 0 },
+  ]
+  const index = new IssueIndex(rows, treeOf(rows))
+  let state = initialState()
+  state = reduce(state, { type: 'toolbar', action: { type: 'sort-panel', action: { type: 'fields', level: 'milestone', fields: [{ key: 'created', dir: 'asc' }] } } })
+  state = { ...state, expanded: [pathKey(['m:m1']), pathKey(['m:m2'])] }
+  assert.deepEqual(listLines(state, index, () => true).filter((line) => line.kind === 'row').map((line) => line.key), ['m1', 'b', 'a', 'm2'])
+})

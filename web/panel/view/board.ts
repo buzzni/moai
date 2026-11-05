@@ -105,7 +105,7 @@ function draw(ctx: ViewContext, state: State, index: IssueIndex, model: BoardMod
 
   const laneHead = (lane: BoardLane): HTMLElement | null => {
     if (lane.seg === null) return null
-    const title = lane.at !== undefined ? (index.rows[lane.at]!.title ?? index.rows[lane.at]!.id) : segLabel(lane.seg, index, copy)
+    const title = lane.label ?? (lane.at !== undefined ? (index.rows[lane.at]!.title ?? index.rows[lane.at]!.id) : segLabel(lane.seg, index, copy))
     const selected = lane.at !== undefined && index.rows[lane.at]!.id === state.cursor
     const head = el(doc, 'div', { class: 'm-swim-head', 'data-lane': lane.seg, 'aria-selected': String(selected), 'data-focus': lane.at === undefined ? null : `lane:${index.rows[lane.at]!.id}` })
     const path = [lane.seg]
@@ -183,7 +183,9 @@ export const mountBoard: MountPane = (root, ctx): PaneView => {
     // Only a fold that hides the cursor moves it: the folded path must be a prefix of the cursor's home. Walking the
     // home instead let a shorter home (a lane head at the root) pass for any group.
     const home = at === undefined ? [] : drawn.index.homeOf(at)
-    if (closing && at !== undefined && path.every((seg, n) => home[n] === seg) && id !== state.cursor) {
+    const lane = drawn.model.lanes.find((lane) => lane.seg === path[0])
+    const inVirtualLane = path[0]?.startsWith('group:') && at !== undefined && lane?.columns.some((column) => column.cards.includes(at))
+    if (closing && at !== undefined && (inVirtualLane || path.every((seg, n) => home[n] === seg)) && id !== state.cursor) {
       state = { ...state, cursor: id ?? null }
       ctx.intents.point(id ?? null)
     }
@@ -327,16 +329,17 @@ export const mountBoard: MountPane = (root, ctx): PaneView => {
             const path = index.dirPath(n)
             if (path.every((seg, k) => selected[k] === seg)) continue
             shut.add(pathKey(path))
+            if (index.rows[n]!.kind === 'milestone') shut.add(pathKey([`group:milestone:v${encodeURIComponent(index.rows[n]!.id)}`]))
           }
           seeded = true
           foldVersion++
         }
         // What the cards are drawn from. The cursor is not in it: a cursor move changes two cards' marks, not the board.
-        const drawKey = JSON.stringify([state.path, state.view, state.search.text, state.filter.applied, state.columns, foldVersion])
+        const drawKey = JSON.stringify([state.path, state.view, state.search.text, state.filter.applied, state.columns, state.toolbar.panel, foldVersion])
         if (!inPlace(state, index, drawKey)) {
           // The board is a layout of the list: the same filter and search narrow it (list-model.ts narrow).
           const found = narrow(state, index)
-          const model = groupBoard(index, { path: state.path, view: state.view, cursor: state.cursor, match: found.match, reveal: found.searching, shut }, state.boot?.statuses)
+          const model = groupBoard(index, { path: state.path, view: state.view, cursor: state.cursor, match: found.match, reveal: found.searching, shut, group: state.toolbar.panel.group, itemOrder: state.toolbar.panel.edited ? state.toolbar.panel.order.item : undefined, levelOrder: state.toolbar.panel.order[state.toolbar.panel.group], milestoneOrder: state.toolbar.panel.edited ? state.toolbar.panel.order.milestone : undefined }, state.boot?.statuses)
           fillSpace.hidden = !model.total
           // As wide as the board: a pane narrower than the columns scrolls sideways, and the hatch runs under them all.
           fillSpace.style.minWidth = boardWidth(model.keys.length)

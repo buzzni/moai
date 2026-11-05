@@ -164,12 +164,12 @@ test('toolbar: a filter moai refuses is applied all the same; its words stand un
 test('toolbar: the sort popover and the name line change one order, the store\'s `sort` (moai orders the rows)', () => {
   const panel = boot()
   panel.$('.m-toolbar-slot .m-sort button').click()
-  panel.$('.m-sort-pop [data-key="priority"] [data-how="flip"]').click()
+  panel.$('.m-sort-pop [data-key="priority"] [aria-label="Reverse"]').click()
   assert.deepEqual(panel.store.getState().sort, { fields: [{ key: 'priority', dir: 'desc' }], reversed: false })
   assert.match(panel.$('.m-toolbar-slot .m-sort button').textContent, /Priority↓/)
   assert.match(panel.$('.m-crumbs-badges').textContent, /sort priority↓/)
-  // The page does not sort the rows itself: they stand in the order the tree gave them until moai is asked again.
-  assert.deepEqual(panel.listed(), ['r1', 'r2'])
+  // The temporary adapter applies the preview while the new engine request is in flight.
+  assert.deepEqual(panel.listed(), ['r2', 'r1'])
   // A name-line click is the same state: title alone, and the toolbar's badge follows.
   panel.$('.moai-head-sort[data-sort="title"]').click()
   assert.deepEqual(panel.store.getState().sort, { fields: [{ key: 'title', dir: 'asc' }], reversed: false })
@@ -333,4 +333,22 @@ test('wiki tab: a narrower panel stacks the wiki when it is resized on the wiki 
   assert.equal(view.dataset.narrow, 'false')
   panel.shell.setWidth(500)
   assert.equal(view.dataset.narrow, 'true', 'without waiting for a store change')
+})
+
+test('sort panel groups the rendered list and board and supports lane folding', () => {
+  const rows = [
+    { id: 'r1', kind: 'issue', title: 'One', status: 'todo', priority: 1, assignee: 'Amy' },
+    { id: 'r2', kind: 'issue', title: 'Two', status: 'todo', priority: 2, assignee: 'Zoe' },
+    { id: 'r3', kind: 'issue', title: 'Three', status: 'todo', priority: 0 },
+  ]
+  const panel = boot({ rows })
+  panel.$('.m-toolbar-slot .m-sort button').click()
+  const people = [...panel.doc.querySelectorAll('.m-sort-pop button')].find((button) => button.textContent === 'People')
+  people.click()
+  assert.equal(panel.store.getState().toolbar.panel.group, 'assignee')
+  assert.deepEqual([...panel.doc.querySelectorAll('.moai-line[data-key^="group:"] .m-row-title')].map((n) => n.textContent.replace('/', '')), ['Amy', 'Zoe', '(none)'])
+  panel.store.dispatch({ type: 'tab', tab: 'board' })
+  assert.deepEqual([...panel.doc.querySelectorAll('.m-swim-title')].map((n) => n.textContent), ['Amy', 'Zoe', '(none)'])
+  panel.doc.querySelector('.m-swim-head .moai-toggle').click()
+  assert.equal(panel.doc.querySelectorAll('.m-card').length, 2)
 })

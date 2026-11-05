@@ -80,6 +80,27 @@ pub enum Seat {
     Place(usize),
 }
 
+/// Temporary virtual lane identifier; replaced by the engine's group segments at integration.
+pub const GROUP_PREFIX: &str = "\u{1f}group:";
+pub fn virtual_group(seg: &crate::nav::Seg) -> bool {
+    matches!(seg, crate::nav::Seg::Epic(name) if name.starts_with(GROUP_PREFIX))
+}
+pub fn group_label(seg: &crate::nav::Seg) -> Option<&str> {
+    match seg {
+        crate::nav::Seg::Epic(name) => {
+            name.strip_prefix(GROUP_PREFIX)?.split_once(':')?.1.split_once(':').map(|(_, label)| label)
+        }
+        _ => None,
+    }
+}
+fn group_segment(group: &str, key: Option<&str>) -> Seg {
+    Seg::Epic(format!(
+        "{GROUP_PREFIX}{group}:{}:{}",
+        if key.is_some() { "value" } else { "empty" },
+        key.unwrap_or("(none)")
+    ))
+}
+
 /// 보드 한 장([`App::laid`]) — 칸, 레인, 그리고 줄마다 선 자리.
 pub struct Laid {
     pub columns: Vec<board::Column>,
@@ -204,7 +225,7 @@ pub enum Mode {
     ArchiveDays(archive_days::Picker),
     /// `SPC s e` 가 연 차례 편집 창(moai-r170.x22). 필드를 넣고 빼고 앞뒤를 바꾸고 방향을 뒤집는다 — 키 하나로는
     /// 차례를 갈아 끼우거나(`SPC s <소문자>`) 끝에 더하는 것(`SPC s <대문자>`)만 된다.
-    Sort(sorter::Editor),
+    Sort(sorter::adapter::ScreenEditor),
     /// `SPC g s` 가 연 통계 창(moai-1hka.bq9). 목록·상세 자리를 통째로 덮고 Esc 로 닫는다 — 창 위의 `SPC g l`·`b` 도
     /// 닫고 그 배치로 선다(moai-z46r, [`App::go`]). **상자에 담는다** —
     /// 센 것 두 벌(주·날)을 들어, 그대로 두면 모드 하나가 다른 갈래 전부의 크기로 부푼다.
@@ -1639,6 +1660,11 @@ pub struct App {
     /// 층(`0`)이면 [`App::order_default`], 프로젝트 안이면 그 프로젝트의 것(없으면 기본)이고, 자리를 옮길 때
     /// [`App::rescope_order`] 가 갈아 끼운다.
     pub order: keys::Sorting,
+    screen_order: sorter::adapter::ScreenOrder,
+    screen_default: sorter::adapter::ScreenOrder,
+    screen_projects: std::collections::BTreeMap<String, sorter::adapter::ScreenOrder>,
+    order_extended: bool,
+    default_extended: bool,
     /// 기본 차례 — `[tui] order`(moai-r170.8dz). 층과 제 차례가 없는 프로젝트가 이것으로 선다.
     order_default: keys::Sorting,
     /// 프로젝트마다의 차례 — `[tui.project."<경로>"] order`. 열쇠는 **설정에 적힌 경로 글 그대로**다
@@ -2880,7 +2906,19 @@ impl Site {
     /// Start a board or Gantt visit with the shared closed-milestone rule. An overview-to-project entry loads rows
     /// into a blank site, so it calls this after the load; a reread must instead preserve the person's folds.
     pub(super) fn seed_layout_folds(&mut self, selected_home: Option<&Path>, gantt: bool) {
-        let shut = self.default_folds(selected_home);
+        let mut shut = self.default_folds(selected_home);
+        if !gantt {
+            let virtual_folds: Vec<_> = shut
+                .iter()
+                .filter_map(|path| {
+                    let Some(Seg::Milestone(Some(id))) = path.last() else { return None };
+                    let mut virtual_path = self.path.clone();
+                    virtual_path.push(group_segment("milestone", Some(id)));
+                    Some(virtual_path)
+                })
+                .collect();
+            shut.extend(virtual_folds);
+        }
         if gantt { self.gantt_shut = shut } else { self.board_shut = shut }
     }
 
@@ -3277,6 +3315,17 @@ impl App {
             // 보기(`[tui]`)는 `apply_look` 이 뒤에서 덮는다.
             view: view::View { hide_deferred: true, ..view::View::default() },
             order: Default::default(),
+            screen_order: sorter::adapter::ScreenOrder {
+                item: Default::default(),
+                ..sorter::adapter::ScreenOrder::preset(sorter::adapter::Preset::Release)
+            },
+            screen_default: sorter::adapter::ScreenOrder {
+                item: Default::default(),
+                ..sorter::adapter::ScreenOrder::preset(sorter::adapter::Preset::Release)
+            },
+            screen_projects: Default::default(),
+            order_extended: false,
+            default_extended: false,
             order_default: Default::default(),
             order_projects: Default::default(),
             fields: Default::default(),
@@ -4674,12 +4723,12 @@ impl App {
         let here = self.here()?;
         let here = self.site.repo.as_ref().map_or(here, |r| r.root.clone());
         let spelled = |k: &&String| std::path::Path::new(k.as_str()) == here;
-        if let Some(k) = self.order_projects.keys().find(spelled) {
+        if let Some(k) = self.order_projects.keys().chain(self.screen_projects.keys()).find(spelled) {
             return Some(k.clone());
         }
         // 지금 자리는 한 번만 푼다 — `same_dir` 은 두 쪽을 다 풀어, 열쇠마다 부르면 같은 자리를 열쇠 수만큼 다시 판다.
         let real = crate::path::real(&here);
-        if let Some(k) = self.order_projects.keys().find(|k| {
+        if let Some(k) = self.order_projects.keys().chain(self.screen_projects.keys()).find(|k| {
             let k = std::path::Path::new(k.as_str());
             k == real || crate::path::canonical(k).is_ok_and(|k| k == real)
         }) {
@@ -4697,37 +4746,71 @@ impl App {
     /// ([`App::climb`]). 한 차례를 화면 하나가 들던 때는 A 에서 고른 것이 B 로 따라갔다(moai-r170.zp6 의 진단).
     pub(super) fn rescope_order(&mut self) {
         self.order = self.scoped_order();
+        let home = self.order_home();
+        let project = home.as_ref().and_then(|k| self.screen_projects.get(k).copied());
+        self.screen_order = project.unwrap_or(self.screen_default);
+        if project.is_none() && home.as_ref().is_some_and(|k| self.order_projects.contains_key(k)) {
+            self.screen_order.milestone = self.order;
+            self.screen_order.epic = self.order;
+        }
+        self.screen_order.item = self.order;
+        self.order_extended = project.is_some() || self.default_extended;
     }
 
     /// 차례 편집 창(`SPC s e`, moai-r170.x22)의 키 하나. 창이 고친 차례를 내면 입히고 적는다.
     pub(super) fn edit_sort(&mut self, k: KeyEvent) {
+        // SPC s opens the window immediately. Its first key may still finish an existing field shortcut.
+        if self.chord.held().len() == 2 {
+            let mut seq = self.chord.held().to_vec();
+            seq.push(k);
+            match keys::lookup(self.keys.browse, &seq) {
+                Lookup::Run(action @ (keys::Browse::Sort(_) | keys::Browse::SortAdd(_))) => {
+                    self.mode = Mode::Browse;
+                    let rows = self.rows();
+                    self.look(action, &rows);
+                    return;
+                }
+                Lookup::Run(keys::Browse::SortEdit) => {
+                    self.chord.clear();
+                    return;
+                }
+                _ => self.chord.clear(),
+            }
+        }
         let Lookup::Run(act) = keys::lookup(self.keys.sorter, &[k]) else { return };
         let rows = self.rows();
         let (held, stood) = self.grip_of(&rows);
         let Mode::Sort(e) = &mut self.mode else { return };
         let original = e.original();
         let done = e.act(act);
-        let preview = e.sorting();
+        let preview = e.state();
         match done {
             sorter::Done::Stay => {
-                self.order = preview;
+                self.screen_order = preview;
+                self.order = preview.item;
                 self.regrip(held, stood);
             }
             sorter::Done::Cancel => {
-                self.order = original;
+                self.screen_order = original;
+                self.order = original.item;
                 self.mode = Mode::Browse;
                 self.regrip(held, stood);
             }
-            sorter::Done::Apply(s) => {
+            sorter::Done::Apply(_) => {
                 self.mode = Mode::Browse;
-                // Preview did not write a project override; an unchanged Enter must not create one.
-                if s != original {
-                    self.set_order(s, false);
+                if preview != original {
+                    self.order_extended |= preview.group != original.group
+                        || preview.milestone != original.milestone
+                        || preview.epic != original.epic;
+                    self.set_order(preview.item, false);
                 }
             }
-            sorter::Done::Default(s) => {
+            sorter::Done::Default(_) => {
                 self.mode = Mode::Browse;
-                self.set_order(s, true);
+                self.order_extended |= preview.group != original.group
+                    || preview.milestone != original.milestone
+                    || preview.epic != original.epic;
+                self.set_order(preview.item, true);
             }
         }
     }
@@ -4742,12 +4825,26 @@ impl App {
         let rows = self.rows();
         let (held, stood) = self.grip_of(&rows);
         self.order = s;
+        self.screen_order.item = s;
         if as_default {
+            self.screen_default = self.screen_order;
+            self.default_extended = self.order_extended;
             self.order_default = s;
             if let Some(k) = self.order_home().filter(|k| self.order_projects.contains_key(k)) {
+                if self.screen_projects.contains_key(&k) {
+                    self.screen_projects.insert(k.clone(), self.screen_order);
+                }
                 self.order_projects.insert(k, s);
             }
         } else {
+            if let Some(path) = self.order_home() {
+                if self.order_extended {
+                    self.screen_projects.insert(path, self.screen_order);
+                }
+            } else {
+                self.screen_default = self.screen_order;
+                self.default_extended = self.order_extended;
+            }
             self.keep_order();
         }
         self.regrip(held, stood);
@@ -4757,11 +4854,19 @@ impl App {
     /// 방금 고른 차례를 **지금 선 자리에** 든다 — 프로젝트 안이면 그 프로젝트의 것, 층이면 기본(사용자 결정
     /// 2026-10-09). 적는 것은 뒤의 [`App::save_look`] 이 차이로 한다.
     fn keep_order(&mut self) {
+        self.screen_order.item = self.order;
         match self.order_home() {
             Some(k) => {
+                if self.order_extended {
+                    self.screen_projects.insert(k.clone(), self.screen_order);
+                }
                 self.order_projects.insert(k, self.order);
             }
-            None => self.order_default = self.order,
+            None => {
+                self.screen_default = self.screen_order;
+                self.default_extended = self.order_extended;
+                self.order_default = self.order;
+            }
         }
     }
 
@@ -4946,6 +5051,38 @@ impl App {
                 },
             }
         }
+        self.order_extended = look.layered_order.is_some() || look.group.is_some();
+        // Legacy arrays apply to all levels; a layered table overrides only its named levels.
+        if let Some(s) = listed {
+            self.screen_order.milestone = s;
+            self.screen_order.epic = s;
+            self.screen_order.item = s;
+        }
+        if let Some(layers) = &look.layered_order {
+            for (level, words) in layers {
+                let slot = match level.as_str() {
+                    "milestone" => &mut self.screen_order.milestone,
+                    "epic" => &mut self.screen_order.epic,
+                    "item" => &mut self.screen_order.item,
+                    _ => continue,
+                };
+                if let Some(s) = Self::sorting_of(words) {
+                    *slot = s;
+                }
+            }
+            self.order_default = self.screen_order.item;
+        }
+        if let Some(group) = look.group.as_deref().and_then(sorter::adapter::Group::named) {
+            self.screen_order.group = group;
+        }
+        if listed.is_none() && look.layered_order.is_none() {
+            self.screen_order.milestone = self.order_default;
+            self.screen_order.epic = self.order_default;
+            self.screen_order.item = self.order_default;
+        }
+        self.screen_default = self.screen_order;
+        self.default_extended = self.order_extended;
+        self.screen_projects.clear();
         // 프로젝트마다의 차례 — 못 읽은 것은 그 프로젝트만 알리고 건너뛴다. 그 프로젝트는 기본 차례로 선다.
         for (path, words) in &look.project_order {
             match Self::sorting_of(words) {
@@ -4958,7 +5095,36 @@ impl App {
                 }
             }
         }
-        self.order = self.scoped_order();
+        for path in look
+            .project_layered_order
+            .keys()
+            .chain(look.project_group.keys())
+            .collect::<std::collections::BTreeSet<_>>()
+        {
+            let mut screen = self.screen_default;
+            if let Some(layers) = look.project_layered_order.get(path) {
+                for (level, words) in layers {
+                    if let Some(s) = Self::sorting_of(words) {
+                        match level.as_str() {
+                            "milestone" => screen.milestone = s,
+                            "epic" => screen.epic = s,
+                            "item" => screen.item = s,
+                            _ => {}
+                        }
+                    } else {
+                        problems.push(
+                            self.bad_order(&format!("{}.order.{level}", crate::user_config::project_key(path)), words),
+                        );
+                    }
+                }
+            }
+            if let Some(g) = look.project_group.get(path).and_then(|word| sorter::adapter::Group::named(word)) {
+                screen.group = g;
+            }
+            self.order_projects.insert(path.clone(), screen.item);
+            self.screen_projects.insert(path.clone(), screen);
+        }
+        self.rescope_order();
         if let Some(words) = &look.fields {
             // **적은 쪽이 알던 열만 그대로 따른다**(사용자 결정 2026-09-15) — `fields` 에 안 적힌 것이
             // "껐다" 인지 "그 열을 몰랐다" 인지 가르는 것이 `fields_known` 이다. 그 목록에 없는 열은
@@ -5051,6 +5217,15 @@ impl App {
         }
     }
 
+    fn layer_words(screen: &sorter::adapter::ScreenOrder) -> std::collections::BTreeMap<String, Vec<String>> {
+        [
+            ("milestone".into(), Self::order_words(&screen.milestone)),
+            ("epic".into(), Self::order_words(&screen.epic)),
+            ("item".into(), Self::order_words(&screen.item)),
+        ]
+        .into()
+    }
+
     /// 지금 보기를 설정에 적을 모양으로.
     fn look_now(&self) -> crate::user_config::Look {
         crate::user_config::Look {
@@ -5062,9 +5237,21 @@ impl App {
             // 안 비추면 그쪽은 이 판이 고른 차례와 무관한 옛 값으로 선다. 낱말은 탐색기의 여섯 필드뿐이라 옛
             // 바이너리가 못 읽는 값이 여기 안 선다(`id` 는 탐색기의 차례에 없다 — `App::sorting_of`).
             order: Some(Self::order_words(&self.order_default)),
+            layered_order: self.default_extended.then(|| Self::layer_words(&self.screen_default)),
+            group: self.default_extended.then(|| self.screen_default.group.name().to_string()),
             sort: Some(self.order_default.first().by.name().to_string()),
             sort_reversed: Some(self.order_default.first().reversed()),
             project_order: self.order_projects.iter().map(|(k, s)| (k.clone(), Self::order_words(s))).collect(),
+            project_layered_order: self
+                .screen_projects
+                .iter()
+                .map(|(path, screen)| (path.clone(), Self::layer_words(screen)))
+                .collect(),
+            project_group: self
+                .screen_projects
+                .iter()
+                .map(|(path, screen)| (path.clone(), screen.group.name().to_string()))
+                .collect(),
             fields: Some(
                 view::Field::ALL.into_iter().filter(|f| self.fields.shows(*f)).map(|f| f.name().to_string()).collect(),
             ),
@@ -6011,7 +6198,7 @@ impl App {
                         site.board_shut = board_shut;
                     }
                     None if gantt => site.gantt_shut = site.default_folds(None),
-                    None if board => site.board_shut = site.default_folds(None),
+                    None if board => site.seed_layout_folds(None, false),
                     None => {}
                 }
                 // **누군지는 읽는 스레드가 풀어 온다**(moai-ropk, 옮긴 것은 moai-uitb) — 그 프로젝트의
@@ -6290,7 +6477,19 @@ impl App {
     /// 목록은 스택의 배열이라 견줄 때마다 힙에 짓지 않는다. 전체 뒤집기는 안 쓴다 — 방향은 필드마다다(`keys::Sorting`).
     fn order_in(&self, site: &Site, a: usize, b: usize) -> std::cmp::Ordering {
         let mut fields = [crate::query::Field::of(crate::query::SortKey::Priority); keys::Order::ALL.len()];
-        let mine = self.order.fields();
+        let chosen = if self.order_extended
+            || matches!(self.mode, Mode::Sort(_))
+            || self.screen_order.group != sorter::adapter::Group::Structure
+        {
+            match site.issues[a].kind {
+                crate::model::Kind::Milestone => self.screen_order.milestone,
+                crate::model::Kind::Epic => self.screen_order.epic,
+                _ => self.screen_order.item,
+            }
+        } else {
+            self.order
+        };
+        let mine = chosen.fields();
         for (slot, o) in fields.iter_mut().zip(mine) {
             *slot = Self::query_field(*o);
         }
@@ -6341,6 +6540,83 @@ impl App {
     /// 폴더는 제 밑에 걸린 것이 있으면 거름망을 지나도 서므로(`Index::entries_sorted`), 카드는 **제 줄이**
     /// 걸렸을 때만 선다 — 자식이 있는 일이 자식 덕에 카드로 서면 거름망이 숨긴 것이 보드에 선다.
     fn cards_in(&self, seat: Seat, site: &Site, keep: &dyn Fn(usize) -> bool) -> Vec<Row> {
+        use sorter::adapter::Group;
+        if self.screen_order.group != Group::Structure {
+            let tree =
+                site.index.entries_tree(&site.issues, &site.path, keep, &|a, b| self.order_in(site, a, b), &|_| true);
+            let mut groups: std::collections::BTreeMap<Option<String>, Vec<(usize, Entry, Twig)>> =
+                std::collections::BTreeMap::new();
+            for (entry, twig) in tree {
+                let Some(at) = entry.at().filter(|at| keep(*at)) else { continue };
+                let issue = &site.issues[at];
+                if crate::report::is_group(issue)
+                    || (crate::report::is_backlog(issue) && !crate::report::is_open_backlog(issue))
+                {
+                    continue;
+                }
+                let key = match self.screen_order.group {
+                    Group::None => None,
+                    Group::Status => Some(site.column(at).to_string()),
+                    Group::Assignee => issue.assignee.clone().filter(|s| !s.is_empty()),
+                    Group::Priority => issue.priority.map(|p| format!("p{p}")),
+                    Group::Tag => issue.tags.first().cloned(),
+                    Group::Kind => Some(issue.kind.as_str().to_string()),
+                    Group::Milestone => issue.milestone.clone().or_else(|| {
+                        site.index.home_of(at).iter().find_map(|seg| match seg {
+                            Seg::Milestone(Some(id)) => Some(id.clone()),
+                            _ => None,
+                        })
+                    }),
+                    Group::Epic => issue.epic.clone().or_else(|| {
+                        site.index.home_of(at).iter().rev().find_map(|seg| match seg {
+                            Seg::Epic(id) => Some(id.clone()),
+                            _ => None,
+                        })
+                    }),
+                    Group::Structure => unreachable!(),
+                };
+                groups.entry(key).or_default().push((at, entry, twig));
+            }
+            let mut groups: Vec<_> = groups.into_iter().collect();
+            groups.sort_by(|(a, _), (b, _)| match (a, b) {
+                (None, None) => std::cmp::Ordering::Equal,
+                (None, _) => std::cmp::Ordering::Greater,
+                (_, None) => std::cmp::Ordering::Less,
+                (Some(a), Some(b)) if matches!(self.screen_order.group, Group::Milestone | Group::Epic) => {
+                    match (site.index.find(a), site.index.find(b)) {
+                        (Some(a), Some(b)) => self.order_in(site, a, b),
+                        _ => a.cmp(b),
+                    }
+                }
+                (Some(a), Some(b)) if self.screen_order.group == Group::Priority => {
+                    let rank =
+                        |word: &String| word.strip_prefix('p').and_then(|n| n.parse::<u8>().ok()).unwrap_or(u8::MAX);
+                    rank(a).cmp(&rank(b))
+                }
+                (Some(a), Some(b)) if self.screen_order.group == Group::Status => {
+                    let rank = |s: &String| site.cfg.statuses.iter().position(|v| v == s).unwrap_or(usize::MAX);
+                    rank(a).cmp(&rank(b)).then_with(|| a.cmp(b))
+                }
+                (Some(a), Some(b)) => a.cmp(b),
+            });
+            let mut rows = Vec::new();
+            for (key, mut cards) in groups {
+                cards.sort_by(|a, b| self.order_in(site, a.0, b.0));
+                if self.screen_order.group == Group::None {
+                    rows.extend(cards.into_iter().map(|(_, e, twig)| Row::Item(seat, e, twig)));
+                    continue;
+                }
+                let seg = group_segment(self.screen_order.group.name(), key.as_deref());
+                let mut path = site.path.clone();
+                path.push(seg.clone());
+                let folded = !self.searching() && site.board_shut.contains(&path);
+                rows.push(Row::Item(seat, Entry::Dir { seg, at: None }, Twig::default()));
+                if !folded {
+                    rows.extend(cards.into_iter().map(|(_, e, twig)| Row::Item(seat, e, twig)));
+                }
+            }
+            return rows;
+        }
         let mut lanes: Vec<Option<&Seg>> = Vec::new();
         let mut cards: Vec<(usize, usize, Entry, Twig)> = Vec::new();
         let tree =
@@ -6399,24 +6675,40 @@ impl App {
             Card(Seat, Option<&'a Seg>, board::Column, usize),
         }
         // 줄마다 레인·칸·카드의 줄 수. **남의 카드는 켠 열이 없어도 발줄을 단다**(moai-oagj.y88, 사용자 결정).
+        let mut virtual_lane: Option<&Seg> = None;
         let spots: Vec<Option<Spot>> = rows
             .iter()
             .map(|r| -> Option<Spot> {
                 match r {
-                    Row::Project(n) => Some(Spot::Head(*n)),
+                    Row::Project(n) => {
+                        virtual_lane = None;
+                        Some(Spot::Head(*n))
+                    }
                     Row::Item(seat, e, _) => {
                         let site = self.site_of_seat(*seat)?;
-                        if let Entry::Dir { seg, .. } = e
-                            && site.path.is_empty()
-                            && matches!(seg, Seg::Milestone(_) | Seg::Lost)
-                        {
-                            return Some(Spot::Lane(*seat, seg));
+                        if let Entry::Dir { seg, .. } = e {
+                            if virtual_group(seg) {
+                                virtual_lane = Some(seg);
+                                return Some(Spot::Lane(*seat, seg));
+                            }
+                            if site.path.is_empty() && matches!(seg, Seg::Milestone(_) | Seg::Lost) {
+                                return Some(Spot::Lane(*seat, seg));
+                            }
                         }
                         let at = e.at().filter(|&at| at < site.issues.len())?;
                         let backlog = crate::report::is_backlog(&site.issues[at]);
                         let column = board::column_of(backlog, site.index.shelved_at(at).is_some(), site.column(at));
                         let height = draw::card_height(self.fields, || site.whose(at).is_some());
-                        Some(Spot::Card(*seat, site.lane(at), column, height))
+                        Some(Spot::Card(
+                            *seat,
+                            if self.screen_order.group == sorter::adapter::Group::Structure {
+                                site.lane(at)
+                            } else {
+                                virtual_lane
+                            },
+                            column,
+                            height,
+                        ))
                     }
                     Row::Up => None,
                 }
@@ -6708,7 +7000,7 @@ impl App {
         let row = rows.get(self.cursor)?;
         let Row::Item(seat, Entry::Dir { seg, .. }, _) = row else { return None };
         let site = self.site_of_seat(*seat)?;
-        if !site.path.is_empty() || !matches!(seg, Seg::Milestone(_) | Seg::Lost) {
+        if !virtual_group(seg) && (!site.path.is_empty() || !matches!(seg, Seg::Milestone(_) | Seg::Lost)) {
             return None;
         }
         let (_, path) = self.dir_of(Some(row.clone()))?;
@@ -7062,7 +7354,9 @@ impl App {
         // 멈춘다** — 적다 말고 포커스가 튀면 적던 것을 잃는다.
         if !matches!(self.mode, Mode::Browse) {
             // 기다리던 열은 탐색의 것이다 — 글칸에서 돌아온 뒤의 `g` 가 옛 `g` 와 잇지 않게.
-            self.chord.clear();
+            if !matches!(self.mode, Mode::Sort(_)) {
+                self.chord.clear();
+            }
             self.typing(k);
             return;
         }
@@ -7074,6 +7368,13 @@ impl App {
         let rows = self.rows();
         let ctx = self.key_ctx(&rows);
         let Some(act) = menu::feed(&mut self.chord, &ctx, k) else {
+            let held = self.chord.held();
+            if held.len() == 2 && keys::LEADER.matches(held[0]) && keys::Key::plain('s').matches(held[1]) {
+                self.screen_order.item = self.order;
+                let mut editor = sorter::adapter::ScreenEditor::open(self.screen_order);
+                editor.level = sorter::adapter::Level::Item;
+                self.mode = Mode::Sort(editor);
+            }
             // **기다리는 열도 아무 동작을 안 돈 키다**(리뷰) — `gg` 의 첫 `g`·`Ctrl-w`·메뉴를 여는
             // SPC 가 그것이고, 거기서 걷으면 메뉴의 Esc 를 고친 까닭이 메뉴 밖에 그대로 남는다.
             // 가르는 것은 [`keys::Chord::feed`] 가 남긴 열이다 — 뜻 없는 키만 열을 버리므로,
@@ -7301,7 +7602,12 @@ impl App {
             // 안 고르는 사람이 매번 천 몇백 개의 파일 머리를 내는 값을 치른다. 못 읽은 까닭은
             // 창이 들고 제 자리에서 한 줄로 댄다(moai-77ap).
             // 차례 편집 창은 지금 차례로 연다(moai-r170.x22). 고친 것은 Enter 가 입힌다 — Esc 는 아무것도 안 바꾼다.
-            B::SortEdit => self.mode = Mode::Sort(sorter::Editor::open(self.order)),
+            B::SortEdit => {
+                self.screen_order.item = self.order;
+                let mut editor = sorter::adapter::ScreenEditor::open(self.screen_order);
+                editor.level = sorter::adapter::Level::Item;
+                self.mode = Mode::Sort(editor);
+            }
             B::Timezone => {
                 let (all, why) = crate::tz::names();
                 self.mode = Mode::Zone(zones::Zones::open(all, why, self.zone.name()));
@@ -8288,6 +8594,61 @@ mod tests {
             make("argos-0009", Kind::Issue),
         ];
         App::new(issues, cfg(), Path::new())
+    }
+
+    #[test]
+    fn temporary_board_groups_assignees_and_folds_without_losing_cards() {
+        let mut a = make("argos-0001", Kind::Issue);
+        a.assignee = Some("Zoe".into());
+        a.priority = Some(2);
+        let mut b = make("argos-0002", Kind::Issue);
+        b.assignee = Some("Amy".into());
+        b.priority = Some(1);
+        let c = make("argos-0003", Kind::Issue);
+        let mut app = App::new(vec![a, b, c], cfg(), Path::new());
+        app.screen_order.group = sorter::adapter::Group::Assignee;
+        app.order_extended = true;
+        app.layout = view::Layout::Board;
+        let rows = app.cards_in(Seat::Here, &app.site, &|_| true);
+        let labels: Vec<_> = rows
+            .iter()
+            .filter_map(|row| match row {
+                Row::Item(_, Entry::Dir { seg, .. }, _) => group_label(seg),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(labels, ["Amy", "Zoe", "(none)"]);
+        let laid = app.laid(&rows);
+        assert_eq!(laid.lanes.len(), 3);
+        app.cursor = 0;
+        app.board_fold(&rows, Some(false));
+        let folded = app.cards_in(Seat::Here, &app.site, &|_| true);
+        assert_eq!(folded.len(), rows.len() - 1);
+        assert_eq!(app.laid(&folded).lanes.len(), 3);
+        app.screen_order.group = sorter::adapter::Group::None;
+        let flat = app.cards_in(Seat::Here, &app.site, &|_| true);
+        assert_eq!(flat.len(), 3);
+        assert_eq!(app.laid(&flat).lanes.len(), 1);
+    }
+
+    #[test]
+    fn milestone_group_uses_the_closed_milestone_fold_and_can_reopen_it() {
+        let mut milestone = make("argos-0001", Kind::Milestone);
+        milestone.status = Status::new(crate::config::DONE);
+        let mut item = make("argos-0002", Kind::Issue);
+        item.milestone = Some(milestone.id.clone());
+        item.status = Status::new(crate::config::DONE);
+        item.done_at = Some(crate::model::now());
+        let mut app = App::new(vec![milestone, item], cfg(), Path::new());
+        app.site.seed_layout_folds(None, false);
+        app.screen_order.group = sorter::adapter::Group::Milestone;
+        app.order_extended = true;
+        app.layout = view::Layout::Board;
+        let rows = app.cards_in(Seat::Here, &app.site, &|_| true);
+        assert_eq!(rows.len(), 1, "closed milestone should start folded");
+        app.cursor = 0;
+        app.board_fold(&rows, Some(true));
+        assert_eq!(app.cards_in(Seat::Here, &app.site, &|_| true).len(), 2);
     }
 
     fn grouped_for_folding() -> App {
@@ -11150,14 +11511,14 @@ mod tests {
         a.hit("SPC j");
         assert!(!menu::open(&a.chord), "j 가 메뉴를 안 닫았다");
         assert_eq!(a.cursor, start + 1, "j 가 커서를 안 옮겼다");
-        a.hit("SPC s k");
+        a.hit("SPC v k");
         assert!(!menu::open(&a.chord), "토글 층의 k 가 메뉴를 안 닫았다");
         assert_eq!(a.cursor, start, "토글 층의 k 가 커서를 안 옮겼다");
         a.hit("SPC G");
         assert_eq!(a.cursor, a.rows().len() - 1, "G 가 맨 아래로 안 갔다");
         a.hit("SPC g");
         assert_eq!(menu::title(a.chord.held()), "SPC g", "뿌리의 g 가 화면 묶음을 안 열었다");
-        a.hit("Esc SPC s g");
+        a.hit("Esc SPC v g");
         assert!(!menu::open(&a.chord), "g 가 메뉴를 안 닫았다");
         a.hit("g");
         assert_eq!(a.cursor, 0, "메뉴에서 시작한 gg 가 맨 위로 안 갔다");
@@ -14955,6 +15316,40 @@ mod tests {
         assert_eq!(a.order, Sorting::of(&[up(Order::Updated).flipped()]).unwrap());
     }
 
+    #[test]
+    fn sort_prefix_opens_editor_and_still_accepts_field_shortcuts() {
+        let mut app = App::new(vec![make("argos-0001", Kind::Issue)], cfg(), Path::new());
+        app.hit("SPC s");
+        assert!(matches!(app.mode, Mode::Sort(_)));
+        app.hit("t");
+        assert_eq!(app.order, keys::Sorting::by(keys::Order::Title));
+        app.hit("Esc SPC s P");
+        assert_eq!(app.order.fields().len(), 2);
+        assert_eq!(app.order.fields()[1].by, keys::Order::Priority);
+    }
+
+    #[test]
+    fn layered_preset_is_previewed_cancelled_and_saved() {
+        let dir = scratch("layered-sort-window");
+        let file = dir.join("user.toml");
+        let mut app = App::new(vec![make("argos-0001", Kind::Issue)], cfg(), Path::new());
+        app.user_config = Some(file.clone());
+        let original = app.screen_order;
+        app.hit("SPC s e 5");
+        assert_eq!(app.screen_order.group, sorter::adapter::Group::Assignee);
+        assert!(!file.exists(), "preview wrote settings");
+        app.hit("Esc");
+        assert_eq!(app.screen_order, original);
+        app.hit("SPC s e 5 Enter");
+        assert_eq!(app.screen_order.group, sorter::adapter::Group::Assignee);
+        let text = std::fs::read_to_string(&file).unwrap();
+        assert!(text.contains("group = \"assignee\"") && text.contains("milestone") && text.contains("item"), "{text}");
+        let mut next = App::new(vec![make("argos-0001", Kind::Issue)], cfg(), Path::new());
+        next.user_config = Some(file);
+        next.load_look();
+        assert_eq!(next.screen_order, app.screen_order);
+    }
+
     /// **차례 편집 창**(`SPC s e`, moai-r170.x22) — `j`·`k` 로 걷고, `SPC` 로 넣고 빼고, `d` 로 방향을, `J`·`K` 로 자리를
     /// 바꾼다. Enter 는 선 자리에 입히고 적으며, Esc 는 아무것도 안 바꾼다. 창은 여섯 필드를 번호·글리프·낱말로 그린다.
     #[test]
@@ -15031,6 +15426,31 @@ mod tests {
                 && text.contains("[tui.project.\"/x\"]\norder = [\"assignee:desc\"]"),
             "{text}"
         );
+    }
+
+    #[test]
+    fn layered_preset_saved_in_project_does_not_change_global_order() {
+        let dir = scratch("sort-project-layered");
+        let file = dir.join("user.toml");
+        std::fs::write(&file, "[tui]\norder = [\"title\"]\n").unwrap();
+        let open = || {
+            let mut app = App::new(vec![make("argos-0001", Kind::Issue)], cfg(), Path::new());
+            app.user_config = Some(file.clone());
+            app.load_look();
+            app.with_layer(layer::fake(vec![("argos", "/x", layer::Look::Unread)], layer::At::Project("/x".into())))
+        };
+        let mut app = open();
+        app.hit("SPC s 5 Enter");
+        let text = std::fs::read_to_string(&file).unwrap();
+        assert!(
+            text.contains("order = [\"title\"]")
+                && text.contains("[tui.project.\"/x\"]")
+                && text.contains("group = \"assignee\""),
+            "{text}"
+        );
+        let next = open();
+        assert_eq!(next.screen_order, app.screen_order);
+        assert_eq!(next.screen_order.group, sorter::adapter::Group::Assignee);
     }
 
     /// **창을 열고 안 고친 채 Enter 하면 아무것도 안 적는다**(리뷰 moai-r170.9ou). 제 차례가 없는 프로젝트에 기본과 같은
