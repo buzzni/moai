@@ -34,7 +34,7 @@ export interface RefresherOptions {
    * rows of before on screen until someone writes the tracker. `'failed'` is `false` for a read that was answered
    * with a failure (not a cancel, which a person chose and which asks again at the usual pace): the next look waits `backoffMs`.
    */
-  load: (how: { automatic: boolean }) => Promise<void | boolean | 'failed'>
+  load: (how: { automatic: boolean; unchanged: boolean }) => Promise<void | boolean | 'failed'>
   /** `/api/stamp`'s answer, or null when the server could not be reached. */
   stamp: () => Promise<string | null>
   /** The server could (true) or could not (false) be reached — told only when it changes. */
@@ -120,7 +120,7 @@ export function createRefresher(options: RefresherOptions): Refresher {
     if (inFlight) return inFlight
     inFlight = (async () => {
       try {
-        const took = await options.load({ automatic })
+        const took = await options.load({ automatic, unchanged: at !== null && at === seen })
         if (at !== null) seen = took === false || took === 'failed' ? null : at
         // A cancel (`false`) says nothing about the tracker, and neither does a read sent while the stamp went unanswered
         // (`at` null — a person's refresh with the server out of reach, which `onReach(false)` says already): the line

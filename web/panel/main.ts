@@ -198,7 +198,8 @@ async function start(): Promise<void> {
    * Reads the board. False when the read did not take (a refusal, a cancel, the boot still missing): data/refresh.ts
    * then leaves the stamp unseen and reads again on its next look.
    */
-  async function loadBoard(automatic = false): Promise<boolean | 'failed'> {
+  let structuralCache: { tree: NonNullable<BoardData['tree']>; expression: string; worktree: boolean; archived: boolean } | null = null
+  async function loadBoard(automatic = false, unchanged = false): Promise<boolean | 'failed'> {
     const load = ++loads
     quietLoad = automatic ? load : 0
     if (!booted.ok) {
@@ -228,14 +229,15 @@ async function start(): Promise<void> {
     const placing = loadTree(client, { query: gantt ? sortQuery(sort) : { sort: expression, group: panel.group }, priority: PRIORITY.list, epoch: load, worktree: view.worktree, archived: view.showArchived, zone, gantt })
     // The grouped tree has virtual homes. Retain a structural tree as well so navigating inside an epic
     // continues to work while the group is active; grouped order still comes from the server request.
-    const structural = !gantt && panel.group !== 'structure'
+    const cached = unchanged && structuralCache?.expression === expression && structuralCache.worktree === view.worktree && structuralCache.archived === view.showArchived ? structuralCache.tree : null
+    const structural = !gantt && panel.group !== 'structure' && !cached
       ? loadTree(client, { query: { sort: expression, group: 'structure' }, priority: PRIORITY.list, epoch: load, worktree: view.worktree, archived: view.showArchived, zone })
       : null
     const counting = loadGroups(client, PRIORITY.list, load, view.worktree)
     let counted: Awaited<typeof counting> | undefined
     void counting.then((groups) => (counted = groups))
     const [loaded, grouped, structure] = await Promise.all([listing, placing, structural])
-    const placed = structure ?? grouped
+    const placed = structure ?? (cached && !gantt && panel.group !== 'structure' ? { ok: true as const, value: cached } : grouped)
     // A later load owns the screen: this one's answers, failures included, are dropped first. A superseded load's
     // reads come back cancelled, and reporting that as the board's problem cleared the newer load's spinner.
     if (load !== loads) return true
@@ -244,6 +246,8 @@ async function start(): Promise<void> {
       store.dispatch({ type: 'board-failed', problem })
       return failure(problem)
     }
+    if (!gantt) structuralCache = { tree: placed.value, expression, worktree: view.worktree, archived: view.showArchived }
+    else structuralCache = null
     const { rows, notes } = loaded.value
     const before = store.getState()
     // Counts that came first go in with the rows, so the board is not drawn twice. Until this read's counts come, a
@@ -402,7 +406,7 @@ async function start(): Promise<void> {
       clearTimeout(limit)
     }
   }
-  const refresher = createRefresher({ load: ({ automatic }) => loadBoard(automatic), stamp, onReach: (reached) => shell.offline(!reached), onBackoff: (on) => shell.backoff(on) })
+  const refresher = createRefresher({ load: ({ automatic, unchanged }) => loadBoard(automatic, unchanged), stamp, onReach: (reached) => shell.offline(!reached), onBackoff: (on) => shell.backoff(on) })
   let tab: { id: string; token: string } | null = null
   let browserId: string | null = null
   const eventUrl = (): string => {

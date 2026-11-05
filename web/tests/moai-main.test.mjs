@@ -270,3 +270,19 @@ test('a pending validation reply does not swallow the person accepting a proposa
   assert.equal(p.dom.window.document.documentElement.dataset.theme, 'dark')
   release({ ok: true, status: 200, text: async () => '{}' })
 })
+
+test('grouping reuses the unchanged structural tree, and a changed stamp reads it again', async (t) => {
+  const p = await page(t, { fakeStream: true })
+  await until(() => p.dom.window.document.querySelector('.moai-line[data-key="test-1234"]'))
+  p.streams[0].onopen()
+  p.dom.window.document.querySelector('.m-sort button').click()
+  const group = [...p.dom.window.document.querySelectorAll('.m-sort-panel section')][1]
+  ;[...group.querySelectorAll('button')].find((button) => button.textContent === 'Assignee').click()
+  await until(() => p.trees.length >= 2)
+  await new Promise((resolve) => setTimeout(resolve, 40))
+  assert.equal(p.trees.length, 2)
+  assert.equal(p.trees[1].searchParams.get('group'), 'assignee')
+  p.streams[0].stamp('changed')
+  await until(() => p.trees.length >= 4)
+  assert.deepEqual(p.trees.slice(2).map((url) => url.searchParams.get('group')).sort(), ['assignee', 'structure'])
+})
