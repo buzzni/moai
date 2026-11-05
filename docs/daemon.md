@@ -30,7 +30,7 @@ There is one daemon per user. A second `start` never runs a second daemon:
 
 - If the running one is the same version (the version number and `proto` match), `start` says so and exits 0 (`started` is `false` under `--json`).
 - If the running one is another version, `start` names both versions, exits non-zero with the code `version_mismatch`, and leaves the running daemon alone. A long-running process does not pick up a replaced binary, so a daemon started before `cargo build` or `moai update` keeps answering as the old version. Run `moai daemon stop`, then `moai daemon start`. `stop` works on a daemon of any version.
-- If a daemon died and left its socket, `start` removes the leftover and starts. Ctrl-C also leaves the socket behind; the next `start` clears it.
+- If a daemon died and left its socket, `start` removes the leftover and starts.
 - If a file at the socket path is not a socket of yours, `start` refuses and touches nothing.
 
 `stop` exits 0 when it stopped the daemon or when none was running (`stopped` is `false`). `--json` gives `{stopped, pid, socket}`. It works on a daemon of any version and on one that is at its connection cap (see [The protocol](#the-protocol)). It waits up to 10 seconds for the daemon to end; if the daemon does not end in that time, `stop` fails with a timeout.
@@ -223,6 +223,8 @@ The epic `repo-32tm` is in the first and third answer although its own line was 
 ## Stopping a daemon
 
 `moai daemon stop` sends the method `daemon.shutdown`. The daemon finishes the requests it is running (up to 5 seconds), removes its socket and ends. Its accept loop looks at the stop flag every 0.5 second, so the daemon ends even when its own wake-up connection fails.
+
+Ctrl-C (SIGINT) and SIGTERM stop the daemon the same way: it stops accepting, finishes the requests it is running (up to 5 seconds), removes its socket, releases `daemon.lock` and exits 0. So `kill <pid>`, `systemctl stop` and `launchctl stop` end it cleanly. A second signal while it drains ends the process at once and can leave the socket behind; the next `start` clears it. A SIGINT that was ignored when the daemon started, as a script's `moai daemon start &` ignores it, stays ignored, so a Ctrl-C meant for the script does not stop the daemon.
 
 One case has no tool path yet (backlog `moai-69bs`): if the socket file was removed while the daemon runs, new clients cannot find it. `moai daemon stop` says "no daemon is running", `status` says the same, and `moai daemon start` waits 5 seconds and fails with "another daemon holds … but does not answer yet", because the daemon still holds `daemon.lock`. A client that is still connected can send `daemon.shutdown` on its open connection. Otherwise end the process by its pid (the `start` line printed it), for example with `kill <pid>`.
 
