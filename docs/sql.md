@@ -147,7 +147,7 @@ Open work past its own deadline:
 SELECT id, title, assignee, due_on::DATE AS due,
        current_date - due_on::DATE AS days_late
 FROM 'rows.json'
-WHERE status <> 'done' AND due_on IS NOT NULL AND due_on::DATE < current_date
+WHERE coalesce(derived_status, status) <> 'done' AND due_on IS NOT NULL AND due_on::DATE < current_date
 ORDER BY days_late DESC;
 ```
 
