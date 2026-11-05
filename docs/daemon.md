@@ -113,9 +113,11 @@ Every method takes a `params` object. These keys are known to every method:
 | Key | Meaning |
 |---|---|
 | `project` | Absolute path of a registered project. Required, except for `hello`, `ping`, `project.ls` and `daemon.shutdown`. |
-| `actor` | `"Name (email)"`, like `--user`. Otherwise the project's git config decides, as for the CLI. The daemon never asks a person. |
-| `lang` | Words for messages: `en`, `ko`, `zh`, `ja`, `es`. Otherwise `MOAI_LANG`, then your user config. |
-| `tz` | A time zone name or POSIX rule. Otherwise as the CLI reads it. |
+| `actor` | `"Name (email)"`, like `--user`. Otherwise the project's git config decides; the daemon ignores its `MOAI_ACTOR`. The daemon never asks a person. |
+| `lang` | Words for messages: `en`, `ko`, `zh`, `ja`, `es`. Otherwise the daemon's `MOAI_LANG`, then its user config. |
+| `tz` | A time zone name or POSIX rule. Otherwise the daemon's `TZ`, then its system time zone. |
+
+The response does not report the resolved actor. Clients that need to know whose view they receive should supply `actor` explicitly. The daemon's home and configuration environment also determine user settings and status installation notices.
 
 `project` must be a path you registered with `moai project add`, written as an absolute path. A relative path or an unregistered one is `-32000` with `data.code` `not_registered`. A registered directory that has no `.moai` of its own is `not_a_project`; the daemon does not search upward for a parent's tracker. The registered list is read on every request, so a project added while the daemon runs works at once.
 
@@ -172,6 +174,10 @@ The reply `value` is `{changed, cursor, removed, reset}`:
 - Both lists hold ids only, sorted. Read the rows again with `show` to get their content.
 
 ### What is compared
+
+The `session` key is excluded from row fingerprints: it changes with the clock and with heartbeats, not with edits. If a client shows it, it must re-read it independently of `changed`. (`archived` is excluded too, but the compared list never carries it: a row that ages past `archive_days` leaves the list and is in `removed`, below.)
+
+When a line of `.moai/issues.jsonl` cannot be read, `changes` retains the previous fingerprint for its ID while no readable row has that ID, and does not report it as removed. If the ID cannot be recovered, all missing IDs are retained until a complete read. Unreadable lines in archive files retain nothing, because archived rows are not in the compared list. Diagnostics appear in `messages`; an unreadable line in `.moai/issues.jsonl` also sets `partial`.
 
 The daemon remembers recent snapshots in memory: per project up to 8, and about 32 MiB for all projects together. When the memory is full, the snapshot used least recently is dropped. A cursor names one remembered snapshot. On each call the daemon reads the project again, compares it with the snapshot of your cursor row by row, and remembers the new one.
 
@@ -295,3 +301,5 @@ else:
 ## Windows
 
 Windows is not supported yet. The build works, `moai daemon start` and `stop` report `unsupported`, and `moai daemon status` says `supported: false` and exits 0. A named pipe transport is left for later. Everything else in moai runs on Windows as before.
+
+Decided in: moai-wbdh

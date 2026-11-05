@@ -18,6 +18,7 @@ does not tag — see `CONTRIBUTING.md`.
 
 ### Fixed
 
+- Daemon `changes` no longer reports session heartbeat or clock changes as issue edits, and does not report unreadable live rows as removed. Requests without an actor use the project's Git identity rather than the daemon's `MOAI_ACTOR`. (moai-wbdh)
 - `moai status`, `show`, `prime` and `project` no longer panic when stderr is closed (a broken pipe) while they print a notice; the notice is dropped and the answer still comes out. (moai-5n6m)
 
 ## [0.51.0] - 2026-11-05
