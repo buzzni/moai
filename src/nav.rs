@@ -617,12 +617,11 @@ impl Index {
         }
         let mut groups: Vec<_> = buckets.into_iter().collect();
         groups.sort_by(|(a, _), (b, _)| {
-            if matches!(group, Group::Milestone | Group::Epic) {
-                if let (Some(a), Some(b)) =
+            if matches!(group, Group::Milestone | Group::Epic)
+                && let (Some(a), Some(b)) =
                     (a.as_deref().and_then(|id| self.find(id)), b.as_deref().and_then(|id| self.find(id)))
-                {
-                    return order(a, b);
-                }
+            {
+                return order(a, b);
             }
             group.order_values(a.as_deref(), b.as_deref(), statuses)
         });

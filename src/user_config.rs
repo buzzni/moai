@@ -1546,14 +1546,15 @@ impl Doc {
         odd(&[LIST_HEIGHT], false, &mut list_height);
         odd(&[WIKI_WIDTH], false, &mut wiki_width);
         odd(&[GANTT_LABEL], false, &mut gantt_label);
-        if sort && new.layered_order.is_some() {
-            if let Some(item) = t.get(ORDER_LAYERS).filter(|i| !layered_order_writable(i)) {
-                skipped.push(WriteTrouble::LookKeyNotPlain {
-                    key: ORDER_LAYERS.to_string(),
-                    found: item.type_name().to_string(),
-                });
-                sort = false;
-            }
+        if sort
+            && new.layered_order.is_some()
+            && let Some(item) = t.get(ORDER_LAYERS).filter(|i| !layered_order_writable(i))
+        {
+            skipped.push(WriteTrouble::LookKeyNotPlain {
+                key: ORDER_LAYERS.to_string(),
+                found: item.type_name().to_string(),
+            });
+            sort = false;
         }
         let t = self.doc.get_mut(TUI).and_then(Item::as_table_like_mut).expect("방금 표로 섰다");
         let mut changed = false;
@@ -1862,10 +1863,10 @@ fn look_project_orders(t: &dyn toml_edit::TableLike, problems: &mut Vec<LookTrou
             continue;
         };
         let mut mine = Vec::new();
-        if !entry.get(ORDER).is_some_and(|item| item.as_table_like().is_some()) {
-            if let Some(words) = look_words(entry, ORDER, &mut mine) {
-                out.insert(path.to_string(), words);
-            }
+        if !entry.get(ORDER).is_some_and(|item| item.as_table_like().is_some())
+            && let Some(words) = look_words(entry, ORDER, &mut mine)
+        {
+            out.insert(path.to_string(), words);
         }
         problems.extend(mine.into_iter().map(|p| match p {
             LookTrouble::Want { key, want, found } => LookTrouble::Want { key: format!("{at}.{key}"), want, found },
@@ -1883,10 +1884,10 @@ fn look_project_layered(
     let mut out = BTreeMap::new();
     let Some(projects) = t.get(PER_PROJECT).and_then(Item::as_table_like) else { return out };
     for (path, item) in projects.iter() {
-        if let Some(table) = item.as_table_like() {
-            if let Some(order) = look_layered_order(table, problems) {
-                out.insert(path.to_string(), order);
-            }
+        if let Some(table) = item.as_table_like()
+            && let Some(order) = look_layered_order(table, problems)
+        {
+            out.insert(path.to_string(), order);
         }
     }
     out
@@ -1895,10 +1896,10 @@ fn look_project_groups(t: &dyn toml_edit::TableLike, problems: &mut Vec<LookTrou
     let mut out = BTreeMap::new();
     let Some(projects) = t.get(PER_PROJECT).and_then(Item::as_table_like) else { return out };
     for (path, item) in projects.iter() {
-        if let Some(table) = item.as_table_like() {
-            if let Some(group) = look_one(table, GROUP, Want::Word, |v| v.as_str().map(String::from), problems) {
-                out.insert(path.to_string(), group);
-            }
+        if let Some(table) = item.as_table_like()
+            && let Some(group) = look_one(table, GROUP, Want::Word, |v| v.as_str().map(String::from), problems)
+        {
+            out.insert(path.to_string(), group);
         }
     }
     out
@@ -2109,13 +2110,13 @@ fn put_project_layered(
             });
         }
     }
-    if group.is_some() {
-        if let Some(item) = entry.get(GROUP).filter(|item| !plain(item, false)) {
-            return Err(WriteTrouble::LookKeyNotPlain {
-                key: format!("{}.{GROUP}", project_key(path)),
-                found: item.type_name().to_string(),
-            });
-        }
+    if group.is_some()
+        && let Some(item) = entry.get(GROUP).filter(|item| !plain(item, false))
+    {
+        return Err(WriteTrouble::LookKeyNotPlain {
+            key: format!("{}.{GROUP}", project_key(path)),
+            found: item.type_name().to_string(),
+        });
     }
     let mut changed = false;
     if let Some(order) = order {
