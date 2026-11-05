@@ -80,10 +80,66 @@ pub fn run(ctx: &Ctx, a: UpdateArgs) -> R<Vec<String>> {
     // 신호로 끝났으면 코드가 없다 — 그때는 실패로만 센다.
     let code = status.code().unwrap_or(1);
     exit_with(u8::try_from(code).unwrap_or(1));
+    #[cfg(unix)]
+    let restart = (code == 0).then(|| daemon_restart(&exe)).flatten();
+    #[cfg(not(unix))]
+    let restart: Option<(String, u64)> = None;
+    if let Some((version, pid)) = &restart {
+        if !ctx.json {
+            tell(&format!(
+                "moai: {}",
+                crate::i18n::fill(
+                    crate::i18n::say(lang, "update.daemon_restart"),
+                    &[("version", version), ("pid", &pid.to_string())],
+                )
+            ));
+        }
+    }
     if ctx.json {
-        return Ok(vec![said(&plan, Some(code)).to_string()]);
+        let mut result = said(&plan, Some(code));
+        if restart.is_some() {
+            result["daemon_restart"] = true.into();
+        }
+        return Ok(vec![result.to_string()]);
     }
     Ok(Vec::new())
+}
+
+#[cfg(unix)]
+fn daemon_restart(exe: &std::path::Path) -> Option<(String, u64)> {
+    let out = Command::new(exe).args(["daemon", "status", "--json"]).stdin(Stdio::null()).output().ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    restart_from_status(&out.stdout)
+}
+
+#[cfg(any(unix, test))]
+fn restart_from_status(bytes: &[u8]) -> Option<(String, u64)> {
+    let status: serde_json::Value = serde_json::from_slice(bytes).ok()?;
+    if status["running"] != true || status["same_version"] != false {
+        return None;
+    }
+    Some((status["version"].as_str()?.to_owned(), status["pid"].as_u64()?))
+}
+
+#[cfg(test)]
+mod daemon_tests {
+    use super::restart_from_status;
+
+    #[test]
+    fn restart_notice_only_for_a_running_different_version() {
+        let old = br#"{"running":true,"same_version":false,"version":"0.51.0","pid":42}"#;
+        assert_eq!(restart_from_status(old), Some(("0.51.0".into(), 42)));
+        for status in [
+            &br#"{"running":false}"#[..],
+            &br#"{"running":true,"same_version":true,"version":"0.51.0","pid":42}"#[..],
+            &br#"{"running":true,"same_version":false}"#[..],
+            &b"broken"[..],
+        ] {
+            assert_eq!(restart_from_status(status), None);
+        }
+    }
 }
 
 /// 받을 저장소 — **막는 자는 여기 하나다.** `moai update` 가 이것으로 고르고, 탐색기의 새 판 안내
