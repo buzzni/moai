@@ -2101,19 +2101,18 @@ pub fn page_order<'a>(
             group_value(group, a, wh, &context, positions, &row_indices, all),
             group_value(group, b, wh, &context, positions, &row_indices, all),
         );
-        if matches!(group, Group::Milestone | Group::Epic) {
-            if let (Some(a), Some(b)) =
+        if matches!(group, Group::Milestone | Group::Epic)
+            && let (Some(a), Some(b)) =
                 (a.as_deref().and_then(|id| groups.get(id)), b.as_deref().and_then(|id| groups.get(id)))
-            {
-                return context.compare_layers(
-                    order,
-                    reversed,
-                    (a, wh.column(a)),
-                    (b, wh.column(b)),
-                    &cfg.statuses,
-                    cfg.naming,
-                );
-            }
+        {
+            return context.compare_layers(
+                order,
+                reversed,
+                (a, wh.column(a)),
+                (b, wh.column(b)),
+                &cfg.statuses,
+                cfg.naming,
+            );
         }
         group.order_values(a.as_deref(), b.as_deref(), &cfg.statuses)
     };

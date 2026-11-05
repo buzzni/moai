@@ -3125,16 +3125,16 @@ impl Site {
             }
         }
         let mut text = format!("{done}/{count}");
-        if matches!(key.group, crate::nav::Group::Milestone | crate::nav::Group::Epic) {
-            if let Some(issue) = key.value.as_deref().and_then(|id| self.index.find(id)).map(|at| &self.issues[at]) {
-                text.push_str(&format!(
-                    " · {} · {} · {} · {}",
-                    key.group.name(),
-                    issue.due_on.as_deref().unwrap_or("—"),
-                    issue.created_at,
-                    issue.updated_at
-                ));
-            }
+        if matches!(key.group, crate::nav::Group::Milestone | crate::nav::Group::Epic)
+            && let Some(issue) = key.value.as_deref().and_then(|id| self.index.find(id)).map(|at| &self.issues[at])
+        {
+            text.push_str(&format!(
+                " · {} · {} · {} · {}",
+                key.group.name(),
+                issue.due_on.as_deref().unwrap_or("—"),
+                issue.created_at,
+                issue.updated_at
+            ));
         }
         Some(text)
     }
