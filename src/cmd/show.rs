@@ -278,6 +278,11 @@ fn listed(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>, keys: &Keys) -> 
         opaque.iter().filter(|id| !readable.contains(id.as_str())).cloned().collect();
     let live: std::collections::BTreeSet<String> = readable.into_iter().map(str::to_string).chain(opaque).collect();
     let mut load = crate::archive::read_all(&repo.root, active_load)?;
+    // Only live lines: an archive-file row is never in a list without `archived`, so its unreadable line cannot hide
+    // one, and an id-less archive line would otherwise hold back every `removed` until someone mends the archive.
+    crate::side::with(|side| {
+        side.unread_rows.extend(load.errors.iter().filter(|e| e.source.is_none()).map(|e| e.id.clone()));
+    });
     super::report_load_errors(ctx.lang(), &repo.issues_path(), &load.errors);
 
     let target = match kind_filter {
@@ -917,7 +922,10 @@ fn plan(ctx: &Ctx, all: &[Issue], epic: &Issue, raw: bool) -> R<Vec<String>> {
         // 앞머리 `[`·끝의 `#낱말`·`@날짜` 는 render 가 이스케이프한다(moai-a5pz). 여기 오는 것은 원래
         // 역슬래시를 든 제목처럼 이스케이프로도 못 담는 것과, 꼴이 틀리거나 에픽의 기한을 넘는 기한·시작(`draft::lossy`)
         // 이라 까닭을 하나로 단정하지 않는다.
-        eprintln!("moai: {}", crate::i18n::fill(crate::i18n::say(ctx.lang(), "show.lossy_title"), &[("id", id)]));
+        super::tell(&format!(
+            "moai: {}",
+            crate::i18n::fill(crate::i18n::say(ctx.lang(), "show.lossy_title"), &[("id", id)])
+        ));
     }
     Ok(md.lines().map(str::to_string).collect())
 }

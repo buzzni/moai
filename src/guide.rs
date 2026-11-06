@@ -2152,7 +2152,8 @@ there is no such call is it the **last `text` block**.
 ```sh
 python3 -c "
 import json,sys
-b=[c for l in open(sys.argv[1])
+sys.stdout.reconfigure(encoding='utf-8')
+b=[c for l in open(sys.argv[1], encoding='utf-8')
    for c in json.loads(l).get('message',{{}}).get('content') or []
    if isinstance(c, dict)]
 h=[(c.get('input') or {{}}).get('message') or '' for c in b
@@ -8833,6 +8834,8 @@ stop sending outside work while a release runs",
 
     /// **Codex 칸 도우미의 시험을 `cargo test` 가 돌린다**(리뷰 moai-p9dh.dz7) — `tests/codex_pane_test.py` 는 아무
     /// 길에도 안 걸려 있어, 도우미를 고쳐도 붉어지는 것이 없었다. tmux 는 모두 가짜라 사람의 서버에 안 닿는다.
+    /// 도우미는 유닉스의 tmux·`ps` 위에서만 돈다 — Windows 에는 그 칸이 없어 시험의 `/repo` 도 안 선다.
+    #[cfg(unix)]
     #[test]
     fn the_codex_pane_helper_tests_run() {
         let Some(python) = tool("python3") else { return };

@@ -1,10 +1,10 @@
 use std::path::{Path, PathBuf};
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 use super::wire::{self, Verb};
 use super::wire::{Reply, Request};
 use crate::fail::{Fail, R, code};
@@ -25,26 +25,26 @@ pub struct Window {
     pub socket: PathBuf,
 }
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 pub fn windows() -> R<Vec<Window>> {
     windows_for_target(None)
 }
 
 /// Resolve an explicit window through its PID socket without contacting unrelated windows.
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 pub fn windows_for_target(target: Option<&str>) -> R<Vec<Window>> {
     let dir = super::place::dir().map_err(|e| Fail::new(e.to_string()))?;
     windows_in(&dir, target, false)
 }
 
 /// Discover a reconnecting tab only when a proposal names its exact window.
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 pub fn windows_for_proposal(target: Option<&str>) -> R<Vec<Window>> {
     let dir = super::place::dir().map_err(|e| Fail::new(e.to_string()))?;
     windows_in(&dir, target, true)
 }
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 fn target_pid(target: &str) -> Option<u32> {
     let pid = if let Some(pid) = target.strip_prefix("tui-") {
         pid
@@ -56,9 +56,8 @@ fn target_pid(target: &str) -> Option<u32> {
     pid.parse::<u32>().ok().filter(|pid| *pid > 0)
 }
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 fn windows_in(dir: &Path, target: Option<&str>, proposal: bool) -> R<Vec<Window>> {
-    use std::os::unix::fs::{FileTypeExt, MetadataExt};
     let paths = if let Some(target) = target {
         let Some(pid) = target_pid(target) else { return Ok(Vec::new()) };
         vec![dir.join(format!("{pid}.sock"))]
@@ -74,7 +73,7 @@ fn windows_in(dir: &Path, target: Option<&str>, proposal: bool) -> R<Vec<Window>
             continue;
         }
         let Ok(meta) = std::fs::symlink_metadata(&path) else { continue };
-        if !meta.file_type().is_socket() || meta.uid() != unsafe { libc::geteuid() } {
+        if !crate::transport::is_own(&path, &meta) {
             continue;
         }
         let mut req = wire::request(Verb::Hello, Duration::from_millis(1200));
@@ -100,9 +99,8 @@ fn windows_in(dir: &Path, target: Option<&str>, proposal: bool) -> R<Vec<Window>
             Err(e) if matches!(e.kind(), std::io::ErrorKind::ConnectionRefused | std::io::ErrorKind::NotFound) => {
                 // Recheck the path before removal; never follow or remove a foreign file.
                 if let Ok(now) = std::fs::symlink_metadata(&path)
-                    && now.file_type().is_socket()
-                    && now.uid() == unsafe { libc::geteuid() }
-                    && now.ino() == meta.ino()
+                    && crate::transport::is_own(&path, &now)
+                    && crate::transport::identity(&now) == crate::transport::identity(&meta)
                 {
                     let _ = std::fs::remove_file(&path);
                 }
@@ -114,17 +112,17 @@ fn windows_in(dir: &Path, target: Option<&str>, proposal: bool) -> R<Vec<Window>
     Ok(windows)
 }
 
-#[cfg(not(unix))]
+#[cfg(not(any(unix, windows)))]
 pub fn windows() -> R<Vec<Window>> {
     Ok(Vec::new())
 }
 
-#[cfg(not(unix))]
+#[cfg(not(any(unix, windows)))]
 pub fn windows_for_proposal(_: Option<&str>) -> R<Vec<Window>> {
     Ok(Vec::new())
 }
 
-#[cfg(not(unix))]
+#[cfg(not(any(unix, windows)))]
 pub fn windows_for_target(_: Option<&str>) -> R<Vec<Window>> {
     Ok(Vec::new())
 }
@@ -146,25 +144,41 @@ pub fn pick<'a>(windows: &'a [Window], root: Option<&str>, want: Option<&str>) -
     chosen.ok_or_else(|| Fail::coded("No open window here. See moai ctl ls --all, then use -t <id>.", code::NO_WINDOW))
 }
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 pub fn send_at(path: &Path, request: &Request) -> std::io::Result<Reply> {
+    exchange(crate::transport::Stream::connect(path)?, request)
+}
+
+/// One request and one reply. **The reply is read even when the write breaks.** A window with no free client slot writes
+/// `busy` and closes without reading (`serve`), and that refusal is still in the receive buffer. Without this a live
+/// window that filled up after `ctl` listed it read as gone (moai-t0ys.0dk).
+#[cfg(any(unix, windows))]
+fn exchange(mut stream: crate::transport::Stream, request: &Request) -> std::io::Result<Reply> {
+    use crate::transport::{armed, broken};
     use std::io::{BufRead, BufReader, Read, Write};
-    use std::os::unix::net::UnixStream;
-    let mut stream = UnixStream::connect(path)?;
     let ms = request.deadline_ms.saturating_sub(wire::now_ms()).max(1);
-    stream.set_read_timeout(Some(Duration::from_millis(ms)))?;
-    stream.set_write_timeout(Some(Duration::from_millis(ms)))?;
-    serde_json::to_writer(&mut stream, request)?;
-    stream.write_all(b"\n")?;
-    let mut line = Vec::new();
-    BufReader::new(stream).take(wire::LINE_MAX as u64 + 1).read_until(b'\n', &mut line)?;
+    armed(stream.set_read_timeout(Some(Duration::from_millis(ms))))?;
+    armed(stream.set_write_timeout(Some(Duration::from_millis(ms))))?;
+    let mut line = serde_json::to_vec(request)?;
+    line.push(b'\n');
+    let cut = match stream.write_all(&line) {
+        Ok(()) => None,
+        Err(e) if broken(&e) => Some(e),
+        Err(e) => return Err(e),
+    };
+    line.clear();
+    let read = BufReader::new(stream).take(wire::LINE_MAX as u64 + 1).read_until(b'\n', &mut line);
+    if let (Some(cut), true) = (cut, line.is_empty()) {
+        return Err(cut);
+    }
+    read?;
     if line.len() > wire::LINE_MAX {
         return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "control reply exceeds 1 MiB"));
     }
     serde_json::from_slice(&line).map_err(std::io::Error::other)
 }
 
-#[cfg(not(unix))]
+#[cfg(not(any(unix, windows)))]
 pub fn send_at(_: &Path, _: &Request) -> std::io::Result<Reply> {
     Err(std::io::Error::new(std::io::ErrorKind::Unsupported, "control sockets are unavailable on this OS"))
 }
@@ -202,6 +216,20 @@ mod tests {
         assert_eq!(pick(&windows, Some("/one"), None).unwrap().id, "b");
         assert_eq!(pick(&windows, Some("/one"), Some("a")).unwrap().id, "a");
         assert_eq!(pick(&windows, None, None).unwrap().id, "c");
+    }
+
+    /// A window with no free client slot writes `busy` and closes without reading the request. That refusal stays
+    /// readable, so a closed socket must not read as a window that is gone (moai-t0ys.0dk).
+    #[test]
+    #[cfg(any(unix, windows))]
+    fn a_refusal_written_before_the_close_is_read() {
+        use std::io::Write;
+        let (ours, mut theirs) = crate::transport::Stream::pair().unwrap();
+        serde_json::to_writer(&mut theirs, &Reply::error("busy", "too many control clients")).unwrap();
+        theirs.write_all(b"\n").unwrap();
+        drop(theirs);
+        let reply = exchange(ours, &wire::request(Verb::Hello, Duration::from_secs(1))).unwrap();
+        assert_eq!(reply.code.as_deref(), Some("busy"));
     }
 
     #[test]

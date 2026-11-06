@@ -7,6 +7,8 @@ is deferred and what is archived — and hands it over in `--json`. Read those
 values here instead of rebuilding the rules: a second copy of them drifts from
 the binary the day a rule changes.
 
+A program that asks often can ask a local daemon instead of starting `moai` each time; see [Read the tracker through the daemon](daemon.md).
+
 ## Read the settings first
 
 `moai config --json` gives the repository's settings with the defaults filled

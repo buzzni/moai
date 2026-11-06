@@ -22,7 +22,6 @@ pub fn run(ctx: &Ctx, args: LinkArgs) -> R<Vec<String>> {
         )));
     }
     let repo = super::open_repo(ctx)?;
-    let at = model::now();
 
     // `(대상, 막을지 없앨지)`. 어느 쪽에서 왔는지를 갖고 있어야, 다시
     // `args.blocks.contains` 로 되짚어 묻다가 판단을 두 번 다르게 하는
@@ -102,6 +101,9 @@ pub fn run(ctx: &Ctx, args: LinkArgs) -> R<Vec<String>> {
             }
 
             drop(context);
+            // **`updated_at` 의 시각은 락을 쥔 뒤에 뜬다**(moai-3hgm.pp2, `edit`·`mv` 의 리뷰 moai-u5bk.3wq 와 한 자). 밖에서
+            // 뜨면 락을 늦게 잡은 이 쓰기가 그새 옆이 담은 줄보다 이른 도장을 찍어 줄의 도장이 거꾸로 간다.
+            let at = model::now();
             let mut out = Vec::new();
             for (target, wants_block) in edits {
                 let t = issues.iter_mut().find(|i| i.id == target).expect("위에서 존재를 확인했다");
