@@ -508,9 +508,9 @@ jobs:
   # BSD 쪽 차이(받은 소켓에 O_NONBLOCK 이 물림, 소켓 경로 104 바이트)를 아무도 재지 않았다. `--no-fail-fast` 다 —
   # 첫 대상에서 멈추면 그 뒤의 시험이 안 돌아, 무엇이 지는지를 한 판에 못 본다.
   #
-  # **required 가 아니다.** 이 잡을 남길지를 사람이 아직 안 정했고, `the_probe_calls_the_command_instead_of_reading_its_mode`
-  # 의 시간 한도가 아직 안 풀렸다(moai-mud3). 툴체인·cargo 캐시의 열쇠는 `ci-gate` 의 것과 같은 꼴이다 — `runner.os` 가
-  # 이미 가른다.
+  # **남긴다**(2026-11-07 사람의 결정). 리눅스·Windows 로는 못 잡는 결함을 이 잡이 잡았다(moai-t0ys). **required 는 아니다** —
+  # `the_probe_calls_the_command_instead_of_reading_its_mode` 가 Mac 의 부하에서 시간 한도에 흔들린 적이 있다(moai-l1i1).
+  # 툴체인·cargo 캐시의 열쇠는 `ci-gate` 의 것과 같은 꼴이다 — `runner.os` 가 이미 가른다.
   macos:
     name: macOS 에서 clippy · 시험
     needs: changes
