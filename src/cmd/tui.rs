@@ -1594,11 +1594,15 @@ fn msys_command(sh: &std::path::Path, editor: &str, path: &std::path::Path) -> s
 ///
 /// 8.3 짧은 이름은 안 쓴다 — `'`·`{`·`}` 는 짧은 이름에도 그대로 남는다(`O'BRIE~1`, wine 에서 `O'BR~DML` 로 쟀다).
 ///
-/// **둘째 갈래가 못 닿는 자리가 하나 있다**(리뷰 moai-j9gv.8oh) — 임시 디렉터리가 UNC(`\\server\share\…`)면 `.cmd`·`.bat`
-/// 편집기(`code.cmd`)를 띄우는 `cmd.exe` 가 그 자리를 지금 자리로 못 세워 `%SystemRoot%` 로 옮겨 가([`super::program`]
-/// 의 글), 이름만 받은 편집기가 다른 파일을 연다. 그런 자리에 UNC 를 거는 판이 드물어 사람이 정할 일로 남겼다.
+/// **UNC 임시 경로는 어느 갈래도 안 탄다**(moai-dgcz, 리뷰 moai-j9gv.8oh) — `\\서버\공유\…` 를 그대로 넘긴다. `code.cmd` 를 띄우는
+/// `cmd.exe` 가 UNC 를 지금 자리로 못 세워 `%SystemRoot%` 로 옮겨 가고, 이름만 받은 편집기가 다른 파일을 열어 적은 생각이
+/// 사라졌다. `/` 철자도 안 쓴다 — `//서버/…` 의 머리 `/` 를 스위치로 읽는 편집기가 있다. 대가는 MSYS2 의 `nano.exe` 다:
+/// 드문 그 자리에서만 `\` 를 못 받는다.
 #[cfg(not(unix))]
 fn editor_target(path: &std::path::Path) -> (std::path::PathBuf, Option<std::path::PathBuf>) {
+    if let Some(whole) = unc_spelling(path.as_os_str()) {
+        return (whole.into(), None);
+    }
     if let Some(spelt) = editor_spelling(path.as_os_str()) {
         return (spelt.into(), None);
     }
@@ -1606,6 +1610,13 @@ fn editor_target(path: &std::path::Path) -> (std::path::PathBuf, Option<std::pat
         unreachable!("편집기에 넘길 임시 파일은 디렉터리에 이름을 붙인 자리다(private_file)")
     };
     (name.into(), Some(dir.to_path_buf()))
+}
+
+/// UNC 자리면 `\\?\` 를 걷은 그 철자다. 드라이브 자리는 없다.
+#[cfg(any(not(unix), test))]
+fn unc_spelling(path: &std::ffi::OsStr) -> Option<std::ffi::OsString> {
+    let spelt = crate::path::unverbatim(path);
+    spelt.as_encoded_bytes().starts_with(br"\\").then_some(spelt)
 }
 
 /// [`editor_target`] 의 첫 갈래 — `\\?\` 를 걷고 `\` 를 `/` 로 쓴 철자([`crate::path::slashed_os`])가 싸지 않아도 MSYS2 를
@@ -2643,6 +2654,17 @@ mod tests {
     /// **편집기가 받을 철자는 리눅스에서도 잰다**(moai-l3pp, 리뷰 moai-j9gv.8oh) — `\\?\` 를 걷고 `/` 로 쓴 `C:/…` 가 MSYS2 를
     /// 그대로 지나면 그것이고, 아니면 없다(이름만 넘기고 자리를 옮긴다). Windows 의 갈래는 CI 가 짓기만 하므로 그 몸통을
     /// 여기서 잰다 — 접두어를 안 걷거나, `\` 철자로 재거나, 갈래를 뒤집으면 붉어진다.
+    /// UNC 임시 경로는 전체를 넘긴다 — 이름만 넘기면 `cmd.exe` 가 자리를 못 세워 다른 파일을 연다(moai-dgcz).
+    #[test]
+    fn a_unc_temp_path_goes_whole_and_a_drive_path_does_not() {
+        let s = |p: &str| unc_spelling(std::ffi::OsStr::new(p));
+        let whole = std::ffi::OsStr::new(r"\\fs\home$\John Smith\Temp\moai-backlog-1-0.md");
+        assert_eq!(s(r"\\fs\home$\John Smith\Temp\moai-backlog-1-0.md").as_deref(), Some(whole));
+        assert_eq!(s(r"\\?\UNC\fs\home$\John Smith\Temp\moai-backlog-1-0.md").as_deref(), Some(whole));
+        assert_eq!(s(r"C:\Users\me\Temp\moai-backlog-1-0.md"), None);
+        assert_eq!(s(r"\\?\C:\Users\me\Temp\moai-backlog-1-0.md"), None);
+    }
+
     #[test]
     fn the_editor_spelling_is_slashed_unless_msys2_would_change_it() {
         let s = |p: &str| editor_spelling(std::ffi::OsStr::new(p));

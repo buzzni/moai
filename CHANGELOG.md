@@ -21,6 +21,7 @@ does not tag — see `CONTRIBUTING.md`.
 - `moai update` reports a running daemon with a different version or protocol after a successful Unix update; `--json` then includes `daemon_restart: true`. A rebuild of the same version is not detected. Restart remains under the user or service manager's control. (moai-ou5y.q6t)
 
 ### Fixed
+- The editor opens the right file when `TEMP` is on a network share on Windows. A jot could be lost when cmd.exe could not start in the share. (moai-dgcz)
 - Windows builds carry an 8 MiB stack, as Linux does. The default 1 MiB overflowed in development builds. (moai-6ld5.535)
 
 - `moai status`, `show`, `prime`, `project`, `add`, `mv`, `edit`, `defer`, `rm` and `backlog promote` no longer panic when stderr is closed (a broken pipe) while they print a notice; the notice is dropped and the answer still comes out. (moai-5n6m, moai-3hgm.25e)
