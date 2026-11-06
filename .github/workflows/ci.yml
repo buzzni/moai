@@ -5,7 +5,7 @@
 # 뒤에서 기다린다. 둘이 나란히 돌면 벽시계는 느린 쪽 하나다.
 #
 # 잡은 일곱이다 — `ci-gate`(fmt·clippy·시험), `changes`(바이너리에 닿는 것이 바뀌었나),
-# `msrv`(`Cargo.toml` 이 적은 판으로 서는가), `windows`(Windows 에서 clippy·시험 컴파일이 서는가),
+# `msrv`(`Cargo.toml` 이 적은 판으로 서는가), `windows`(Windows 에서 clippy 와 시험이 서는가),
 # `size-budget`(20MB 예산), `web`(페이지의 시험과 번들), `site`(소개 홈페이지가 틀과 글 묶음에서 지은 그대로인가).
 # required check 는 `main` 의 보호 규칙이 요구하는 `ci-gate` 와 `size-budget` 둘이고, 나머지 다섯
 # (`changes`·`msrv`·`windows`·`web`·`site`)이 required 가 아닌 까닭은 제
@@ -386,7 +386,7 @@ jobs:
           path: ${{ env.CACHED_PATHS }}
           key: ${{ steps.cargo-cache.outputs.cache-primary-key }}
 
-  # **Windows 에서 clippy 와 시험 컴파일이 서는가**(moai-j9gv.ae7). 릴리스가 `x86_64-pc-windows-msvc` 를
+  # **Windows 에서 clippy 와 시험이 서는가**(moai-j9gv.ae7). 릴리스가 `x86_64-pc-windows-msvc` 를
   # 내는데 그 타깃을 밟는 잡이 없으면, 유닉스 전용 API 하나가 든 PR 이 초록으로 들어가 릴리스
   # 태그에서 처음 붉어진다. 리눅스에서는 msvc 를 못 잰다 — `ring` 의 build.rs 가 `cl.exe` 를 찾는다.
   #
@@ -406,11 +406,9 @@ jobs:
   # 이 잡의 캐시가 한 번이라도 담긴 뒤에 바꾸면 그 열쇠가 그대로 맞아 못 쓰는 것을 풀고 새로 안 담으니, 그때는
   # 열쇠의 머리도 함께 바꾼다.
   #
-  # **시험은 짓기만 하고 돌리지 않는다**(2026-10-12 사용자 결정). wine 에서 재 보니 단위 시험
-  # 1,907개 중 150, cli 671개 중 222 가 졌다 — 훅의 경로 판정·유닉스 꼴 경로·시간대처럼 Windows 와 정말
-  # 다른 자리가 섞여, 열 넘게 가르면 멈추자던 선(moai-j9gv.ae7)을 크게 넘었다. 지금 이 잡이 지키는
-  # 것은 "유닉스 전용 API 하나가 든 PR 이 초록으로 들어가지 않는다" 하나고, 그것은 clippy 와
-  # `--no-run` 이 잡는다. 시험을 Windows 에서 돌리는 일은 실기에서 잰 뒤 따로 연다.
+  # **시험까지 돌린다**(2026-11-06 사용자 결정, moai-6ld5.ew1). 2026-10-12 에는 wine 에서 재어 단위 1,907개 중 150,
+  # cli 671개 중 222 가 져 짓기만 했다. 실기에서 재니 그 수는 wine 의 것이었고, 남은 17개를 고쳐 Windows 에서 전부
+  # 초록이 되어 돌린다. 유닉스 전용 API 를 잡는 것은 그대로 clippy 다.
   #
   # **ARM64 판도 clippy 로 본다**(moai-yc8r.nuu, 2026-10-26 사용자 결정). 그 타깃은 릴리스 태그만 지어, 그것을
   # 깨는 PR 이 초록으로 들어가 태그에서 처음 붉어졌다. 러너를 하나 더 세우지 않고 이 잡에 스텝 하나를 더한다 —
@@ -419,7 +417,7 @@ jobs:
   # `target/aarch64-pc-windows-msvc` 가 그 캐시에 담기는데, 열쇠가 그것을 모르면 그것 없이 담긴 옛 캐시를 맞혀
   # 새로 안 담는다.
   windows:
-    name: Windows 에서 clippy · 시험 컴파일
+    name: Windows 에서 clippy · 시험
     needs: changes
     if: ${{ !cancelled() && needs.changes.outputs.code != 'false' }}
     runs-on: windows-latest
@@ -475,8 +473,8 @@ jobs:
           rustup target add aarch64-pc-windows-msvc
           cargo clippy --target aarch64-pc-windows-msvc --all-targets --workspace --locked -- -D warnings
 
-      - name: test 를 짓는다
-        run: cargo test --workspace --locked --no-run
+      - name: test 를 돌린다
+        run: cargo test --workspace --locked
 
       # **PE 버전 정보가 들었는가**(moai-uwzg.kpx, 리뷰 moai-uwzg.i4r 6번). 위 스텝이 통합 시험을 위해
       # `target/debug/moai.exe` 를 이미 지었다 — `build.rs` 가 리소스를 안 넣게 된 PR 을 태그까지 끌고 가지

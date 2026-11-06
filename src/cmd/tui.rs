@@ -1621,7 +1621,7 @@ fn unc_spelling(path: &std::ffi::OsStr) -> Option<std::ffi::OsString> {
 
 /// [`editor_target`] 의 첫 갈래 — `\\?\` 를 걷고 `\` 를 `/` 로 쓴 철자([`crate::path::slashed_os`])가 싸지 않아도 MSYS2 를
 /// 그대로 지나면([`crate::tui::jotfile::msys_word`]) 그것이고, 아니면 없다. **환경도 파일도 안 봐 리눅스에서도 잰다**(리뷰
-/// moai-j9gv.8oh) — CI 는 Windows 의 시험을 짓기만 한다. 고르는 글자가 모두 ASCII 라 손실 있는 글로 봐도 UTF-16 단위로 본
+/// moai-j9gv.8oh). 고르는 글자가 모두 ASCII 라 손실 있는 글로 봐도 UTF-16 단위로 본
 /// 답과 같다.
 #[cfg(any(not(unix), test))]
 fn editor_spelling(path: &std::ffi::OsStr) -> Option<std::ffi::OsString> {
