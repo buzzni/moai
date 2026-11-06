@@ -266,7 +266,7 @@ impl Params {
             _ => return Err(RpcError::invalid_params(format!("{method}: params must be an object"))),
         };
         // 모든 메서드가 아는 키 — 값은 `RequestEnv` 가 읽는다. **글이 아니면 거절한다** — `RequestEnv` 는 글만 읽어,
-        // `actor: {name, email}` 이 말없이 빠지면 그 요청은 데몬의 `MOAI_ACTOR`·git 의 사람으로 내 것과 남의 것을 가른다.
+        // `actor: {name, email}` 이 말없이 빠지면 그 요청은 그 프로젝트의 git 사람으로 내 것과 남의 것을 가른다.
         for key in ["project", "actor", "lang", "tz"] {
             if let Some(v) = map.remove(key)
                 && !matches!(v, Value::String(_) | Value::Null)

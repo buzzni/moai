@@ -1190,7 +1190,8 @@ pub fn someone(name: &str) -> Actor {
 
 /// 누가 하는가. `--user` → `MOAI_ACTOR` → `git config user.name`+`user.email`.
 ///
-/// **요청의 통(`crate::side`)이 걸렸으면 `MOAI_ACTOR` 는 건너뛴다**(moai-3hgm.k7s) — 요청의 `actor` → 그 프로젝트의
+/// **요청은 `MOAI_ACTOR` 를 건너뛴다**(moai-wbdh.sbd, moai-3hgm.k7s) — `request::answer` 가 통에
+/// `Side::ignore_env_actor` 를 세운다. 요청의 `actor` → 그 프로젝트의
 /// git 설정 → 없으면 멈춘다. 데몬의 환경은 그것을 띄운 셸의 것이라 요청을 보낸 쪽이 누구인지 말해 주지 않는다.
 ///
 /// 셋 다 없으면 **멈춘다.** 예전에는 `unknown` 으로 적었는데, 그렇게 쌓인 줄은
