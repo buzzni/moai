@@ -103,7 +103,8 @@ The socket is the file `daemon.socket` in the same directory `moai ctl` uses:
 
 1. `MOAI_CTL_DIR`, if set.
 2. Otherwise `$XDG_RUNTIME_DIR/moai`.
-3. Otherwise `moai-<uid>` in the system temporary directory.
+3. Otherwise, on Windows, `moai/run` under `%LOCALAPPDATA%`.
+4. Otherwise `moai-<uid>` in the system temporary directory.
 
 moai creates the directory with mode `0700` and refuses to use one that is not yours or that is open to group or others. That directory is what keeps other users out. `moai daemon status --json` prints the exact path in `socket`.
 
@@ -429,7 +430,7 @@ On Windows the daemon runs the same way and answers the same methods. Only the t
 
 - `daemon.socket` is still a file in the same directory, but an ordinary one. It holds the pipe's name, `\\.\pipe\moai-<your SID>-<hash>`. Its presence means what a socket file means: it goes away on a clean stop, and a killed daemon leaves it behind for the next `moai daemon start` to clear.
 - The pipe is open to your account alone, and remote clients are refused. `moai` also checks that the pipe it reaches belongs to you before it sends anything.
-- Without `MOAI_CTL_DIR` or `XDG_RUNTIME_DIR` the directory is `moai-0` in your `%TEMP%`. moai checks neither its owner nor its access list: the pipe's own access list, not the directory, keeps other users out. Two shells with a different `TEMP` see two directories, and each can run its own daemon, so set `MOAI_CTL_DIR` if yours differ.
+- Without `MOAI_CTL_DIR` or `XDG_RUNTIME_DIR` the directory is `moai/run` under `%LOCALAPPDATA%`, one place per account. moai checks neither its owner nor its access list: the pipe's own access list, not the directory, keeps other users out.
 - Ctrl-C and Ctrl-Break stop the daemon the way SIGINT does, and a second one ends the process at once. Closing the console window, logging off and shutting down also start a stop, but Windows allows about five seconds, so a long write can be cut.
 - There is no half-close on a pipe. A client cannot shut down its writing side and still read; keep the pipe open until the answer arrives.
 - No service manager is set up for you. `moai daemon start` stays in the foreground, so run it in a window you keep, or from Task Scheduler at logon.
