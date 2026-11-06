@@ -88,6 +88,24 @@ impl Fence {
     fn start_with(&self, env: &[(&str, &str)]) -> (Daemon, Value) {
         let mut cmd = self.cmd(&["daemon", "start", "--json"]);
         cmd.envs(env.iter().copied());
+        Self::first_line(cmd)
+    }
+
+    /// `start` 와 같되, 데몬이 SIGINT 를 무시한 채로 뜬다 — 스크립트의 `moai daemon start &` 가 그렇게 띄운다.
+    fn start_ignoring_sigint(&self) -> (Daemon, Value) {
+        use std::os::unix::process::CommandExt as _;
+        let mut cmd = self.cmd(&["daemon", "start", "--json"]);
+        // SAFETY: signal(2) is async-signal-safe, so it may run between fork and exec.
+        unsafe {
+            cmd.pre_exec(|| {
+                libc::signal(libc::SIGINT, libc::SIG_IGN);
+                Ok(())
+            });
+        }
+        Self::first_line(cmd)
+    }
+
+    fn first_line(mut cmd: Command) -> (Daemon, Value) {
         let mut child = cmd.stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().unwrap();
         let stdout = child.stdout.take().unwrap();
         let (tx, rx) = std::sync::mpsc::channel();
@@ -214,6 +232,39 @@ fn start_status_hello_ping_and_stop() {
     // 떠 있지 않을 때의 stop 도 0 이다.
     let again = f.json(&["daemon", "stop", "--json"]);
     assert_eq!(again["stopped"], false, "{again}");
+}
+
+#[test]
+fn sigterm_and_sigint_stop_cleanly() {
+    for signal in [libc::SIGTERM, libc::SIGINT] {
+        let f = Fence::new();
+        let (daemon, first) = f.start();
+        let pid = first["pid"].as_i64().unwrap() as libc::pid_t;
+        // SAFETY: pid is the child just started in this test, and signal is valid.
+        assert_eq!(unsafe { libc::kill(pid, signal) }, 0);
+        assert!(daemon.wait().success(), "signal {signal} did not exit successfully");
+        assert!(!f.socket().exists(), "signal {signal} left a socket");
+        let status = f.json(&["daemon", "status", "--json"]);
+        assert_eq!(status["running"], false);
+        assert_eq!(status["stale_socket"], false);
+    }
+}
+
+/// SIGINT 를 무시한 채 뜬 데몬은 SIGINT 에 안 멈추고(터미널의 Ctrl-C 는 그 스크립트의 것이다), SIGTERM 에는 깨끗이 멈춘다.
+#[test]
+fn an_ignored_sigint_stays_ignored() {
+    let f = Fence::new();
+    let (daemon, first) = f.start_ignoring_sigint();
+    let pid = first["pid"].as_i64().unwrap() as libc::pid_t;
+    // SAFETY: pid is the child just started in this test.
+    assert_eq!(unsafe { libc::kill(pid, libc::SIGINT) }, 0);
+    std::thread::sleep(Duration::from_millis(1500));
+    let status = f.json(&["daemon", "status", "--json"]);
+    assert_eq!(status["running"], true, "SIGINT stopped a daemon that started with it ignored: {status}");
+    // SAFETY: as above.
+    assert_eq!(unsafe { libc::kill(pid, libc::SIGTERM) }, 0);
+    assert!(daemon.wait().success(), "SIGTERM did not exit successfully");
+    assert!(!f.socket().exists(), "SIGTERM left a socket");
 }
 
 /// 연결을 새는 클라이언트가 상한(32)을 다 쥐어도 `status` 가 pid 를 대고 `stop` 이 데몬을 멈춘다(moai-uezh). 상한을
@@ -441,7 +492,7 @@ fn a_daemon_of_another_version_is_named_and_left_running() {
     let said = error["error"].as_str().or(error["message"].as_str()).unwrap_or_default().to_string();
     let text = error.to_string();
     assert!(text.contains("0.0.1") && text.contains(env!("CARGO_PKG_VERSION")), "두 판을 다 안 댄다 — {said} {text}");
-    assert!(text.contains("moai daemon stop"), "다시 띄우는 길을 안 댄다 — {text}");
+    assert!(text.contains("service manager"), "서비스 관리자를 통한 재시작을 안 댄다 — {text}");
     assert!(f.socket().exists(), "다른 판의 소켓을 지웠다");
 
     let status = f.json(&["daemon", "status", "--json"]);
@@ -449,6 +500,8 @@ fn a_daemon_of_another_version_is_named_and_left_running() {
     assert_eq!(status["same_version"], false, "{status}");
     assert_eq!(status["version"], "0.0.1", "{status}");
     assert_eq!(status["pid"], 4242, "{status}");
+    let human = f.run(&["daemon", "status"]);
+    assert!(String::from_utf8_lossy(&human.stdout).contains("service manager"));
 
     let mut quit = UnixStream::connect(f.socket()).unwrap();
     writeln!(quit, "{}", json!({ "quit": true })).unwrap();
@@ -672,6 +725,12 @@ fn the_read_methods_answer_as_the_cli_does() {
         ("show", json!({ "removed": true }), vec!["show", "--removed"]),
         ("show", json!({ "fields": ["id", "title"] }), vec!["show", "--fields", "id,title"]),
         ("show", json!({ "fields": "id,status" }), vec!["show", "--fields", "id,status"]),
+        ("show", json!({ "group": "epic" }), vec!["show", "--group", "epic"]),
+        ("show", json!({ "group": "assignee" }), vec!["show", "--group", "assignee"]),
+        ("show", json!({ "sort": "people" }), vec!["show", "--sort", "people"]),
+        ("show", json!({ "sort": "release" }), vec!["show", "--sort", "release"]),
+        // 프리셋이 고른 묶기(`people` → `assignee`)보다 준 `group` 이 이긴다 — CLI 의 `--group` 과 같은 자리다.
+        ("show", json!({ "sort": "people", "group": "status" }), vec!["show", "--sort", "people", "--group", "status"]),
         ("show", json!({ "sort": "priority,id" }), vec!["show", "--sort", "priority,id"]),
         ("show", json!({ "sort": "priority", "reverse": true }), vec!["show", "--sort", "priority", "--reverse"]),
         (
@@ -793,6 +852,8 @@ fn an_unknown_key_a_bad_lang_tz_or_value_is_invalid_params() {
     assert_eq!(tz["error"]["code"], -32602, "{tz}");
     let kind = wire.call(5, "show", json!({ "project": project, "type": "nope" }));
     assert_eq!(kind["error"]["code"], -32602, "{kind}");
+    let group = wire.call(10, "show", json!({ "project": project, "group": "nope" }));
+    assert_eq!(group["error"]["code"], -32602, "{group}");
     let limit = wire.call(6, "ready", json!({ "project": project, "limit": 0 }));
     assert_eq!(limit["error"]["code"], -32602, "{limit}");
     let shape = wire.call(7, "show", json!({ "project": project, "tree": "yes" }));

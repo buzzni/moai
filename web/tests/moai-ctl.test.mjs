@@ -214,3 +214,18 @@ test('the read adapter sends atomic all and group to the ctl endpoints and the d
   await read.group('moai-1234')
   assert.deepEqual(calls.map((c) => c.path), ['/api/ctl-read-all', '/api/ctl-read-group/moai-1234', '/api/read-all', '/api/read-group/moai-1234'])
 })
+
+test('ctl accepts layered order, id, presets and group wire and reports state', async () => {
+  const p = setup()
+  for (const words of [['id'], ['milestone=created:desc;item=due:desc:nulls-first'], ['recent'], ['group=assignee']]) {
+    const reply = await p.ctl.run({ verb: 'sort', words, default: false }, 1, 'token')
+    assert.equal(reply.ok, true, `${words}: ${JSON.stringify(reply)}`)
+  }
+  const state = await p.ctl.run({ verb: 'state', rows: false }, 2, 'token')
+  assert.equal(state.data.group, 'assignee')
+  assert.match(state.data.order, /item=updated/)
+  for (const words of [['group=unknown'], ['group='], ['group=none', 'title']]) {
+    assert.equal((await p.ctl.run({ verb: 'sort', words, default: false }, 3, 'token')).code, 'bad_input')
+  }
+  p.keys.destroy(); p.shell.destroy(); p.dom.window.close()
+})

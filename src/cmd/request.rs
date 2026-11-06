@@ -8,8 +8,9 @@
 //! - 자리는 프로세스의 현재 디렉터리가 아니라 요청의 `root` 다([`crate::side::Side::here`]). CLI 로 치면
 //!   `moai -C <root> <명령> --json` 을 그 `root` 에서 친 것이다
 //! - 곁에 남는 것은 요청의 통([`crate::side`])에 모이고, 끝에 [`Answer`] 로 돌아온다. 프로세스 전역은 안 건드린다
-//! - 화면 말·시간대·사람은 요청이 준다. 안 준 것은 CLI 와 같이 푼다(`MOAI_LANG`·설정, `TZ`, git 설정) — **사람만은
-//!   이 프로세스의 `MOAI_ACTOR` 를 안 읽는다**(moai-3hgm.k7s, `model::actor`): 그 값은 데몬을 띄운 셸의 것이다
+//! - 화면 말·시간대·사람은 요청이 준다. 안 준 말과 시간대는 데몬 환경에서(`MOAI_LANG`·설정, `TZ`), 사람은 프로젝트
+//!   git 설정에서 푼다 — **사람만은 이 프로세스의 `MOAI_ACTOR` 를 안 읽는다**(moai-wbdh.sbd, `model::actor`): 그
+//!   값은 데몬을 띄운 셸의 것이다
 //!
 //! **명령을 다시 짜지 않는다.** 읽기 여섯(`status`·`ready`·`prime`·`show`·`stats`·`project ls`)과 쓰기 일곱(`add`·
 //! `mv`·`edit`·`note`·`defer`·`rm`·`link`)의 `cmd::*::run` 을 그대로 부르고, 명령 뒤의 꼬리도 CLI 와 한 함수다
@@ -119,7 +120,7 @@ pub(crate) struct Request {
     pub root: PathBuf,
     pub read: Read,
     /// `--user` 와 같은 뜻의 `이름 (메일)`. 없으면 그 프로젝트의 git 설정이고, 그것도 없으면 모르는 사람이다(쓰기는
-    /// `no_actor` 로 멈춘다). **이 프로세스의 `MOAI_ACTOR` 는 안 읽는다**(moai-3hgm.k7s, `model::actor`).
+    /// `no_actor` 로 멈춘다). **이 프로세스의 `MOAI_ACTOR` 는 안 읽는다**(moai-wbdh.sbd, `model::actor`).
     pub actor: Option<String>,
     /// 화면 말. 없으면 CLI 와 같이 `MOAI_LANG`, 그다음 사용자 설정이다.
     pub lang: Option<crate::i18n::Lang>,
@@ -152,6 +153,9 @@ pub(crate) struct Answer {
     /// CLI 가 고를 종료 코드 — `crate::run` 과 같은 자다: 넘어졌으면 1, 명령이 고른 코드가 있으면 그것, 덜 받은
     /// 답이면 1, 아니면 0(moai-3hgm.25e). 데몬의 봉투가 `exit` 로 싣는다(moai-3hgm.k7s).
     pub exit: u8,
+    /// 못 읽은 스냅샷 줄 — 읽어 낸 id 가 있으면 그것과 함께. `changes` 가 못 읽은 줄을 지워진 줄로 안 세려고 본다
+    /// (moai-wbdh.s7n).
+    pub unread_rows: Vec<Option<String>>,
 }
 
 /// 읽기 명령 하나를 요청으로 돌린다. **프로세스의 현재 디렉터리도, 프로세스 전역의 알림 통도 안 건드린다.**
@@ -193,7 +197,7 @@ pub(crate) fn write(req: WriteRequest) -> Answer {
 /// (`crate::run` 의 `Err` 갈래).
 fn answer(root: PathBuf, ctx: &Ctx, run: impl FnOnce(&Ctx) -> R<Vec<String>>) -> Answer {
     let side: crate::side::Shared =
-        Arc::new(Mutex::new(crate::side::Side { here: root, ..crate::side::Side::default() }));
+        Arc::new(Mutex::new(crate::side::Side { here: root, ignore_env_actor: true, ..crate::side::Side::default() }));
     let entered = crate::side::enter(Some(side.clone()));
     let out = run(ctx);
     super::finish(ctx, &out);
@@ -211,7 +215,7 @@ fn answer(root: PathBuf, ctx: &Ctx, run: impl FnOnce(&Ctx) -> R<Vec<String>>) ->
         (Ok(_), 0) => u8::from(partial),
         (Ok(_), code) => code,
     };
-    Answer { out, messages, partial, exit }
+    Answer { out, messages, partial, exit, unread_rows: side.unread_rows }
 }
 
 /// `main` 의 꼬리(`crate::run` 의 `Ok` 갈래)가 stderr 에 낼 줄 — 같은 차례, 같은 글이다. 든 것은 이 요청의 통에서
@@ -438,6 +442,57 @@ mod tests {
         use std::io::Write as _;
         let mut f = std::fs::OpenOptions::new().append(true).open(dir.join(".moai/issues.jsonl")).unwrap();
         writeln!(f, "이 줄은 JSON 이 아니다").unwrap();
+    }
+
+    #[test]
+    fn omitted_actor_uses_project_git_not_daemon_environment() {
+        let dir = crate::scratch::Scratch::new("request-actor");
+        rerun_with(
+            "cmd::request::tests::inner_omitted_actor",
+            dir.path(),
+            None,
+            &[("MOAI_ACTOR", "Other (other@example.com)")],
+        );
+    }
+
+    #[test]
+    #[ignore = "run by omitted_actor_uses_project_git_not_daemon_environment"]
+    fn inner_omitted_actor() {
+        let root = std::path::PathBuf::from(std::env::var_os(PLACE).unwrap()).join("project");
+        project(&root, "actor");
+        for args in
+            [&["init", "-q"][..], &["config", "user.name", "테스터"], &["config", "user.email", "tester@example.com"]]
+        {
+            crate::git::run(&root, args).unwrap();
+        }
+        let added = Command::new(bin())
+            .args(["--user", ACTOR, "add", "assigned", "--assignee", ACTOR])
+            .current_dir(&root)
+            .output()
+            .unwrap();
+        assert!(added.status.success(), "{}", String::from_utf8_lossy(&added.stderr));
+        let ask = |actor| {
+            super::read(Request {
+                root: root.clone(),
+                read: Read::Ready { worktree: false, limit: None },
+                actor,
+                lang: Some(Lang::En),
+                zone: None,
+                reg: None,
+            })
+            .out
+            .unwrap()
+        };
+        assert_eq!(ask(None), ask(Some(ACTOR.to_string())));
+        assert_ne!(ask(None), ask(Some("Other (other@example.com)".to_string())));
+        let side: crate::side::Shared = Arc::new(Mutex::new(crate::side::Side {
+            here: root.clone(),
+            ignore_env_actor: true,
+            ..Default::default()
+        }));
+        let _entered = crate::side::enter(Some(side));
+        assert_eq!(crate::model::actor(None, &root).unwrap().email, "tester@example.com");
+        assert_eq!(crate::model::actor(Some("Other (other@example.com)"), &root).unwrap().email, "other@example.com");
     }
 
     /// **한 프로세스에서 두 프로젝트·두 말을 번갈아 불러도 답이 저마다 CLI 와 같다**(moai-5n6m.m0b).

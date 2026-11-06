@@ -36,7 +36,8 @@ These commands act on the selected open window. Use `-t <id>` to choose one expl
 
 | Command | Example | Effect |
 |---|---|---|
-| `sort` | `moai ctl sort 'title:desc,priority:desc'` | Set the current project's order; `--default` also changes the default. |
+| `sort` | `moai ctl sort 'milestone=created:desc;item=priority,due'` | Set layer-specific order or choose a preset such as `release`; `--default` also changes the default. |
+| `group` | `moai ctl group assignee` | Group the list and board by a field; `structure` restores the tree and `none` makes a flat list. |
 | `filter` | `moai ctl filter 'status=todo tag=parser'` | Apply a filter; `--clear` removes it. |
 | `find` | `moai ctl find 'parser' --in title` | Search `all`, `id`, `title`, `tag`, `body`, or `note`. |
 | `screen` | `moai ctl screen board` | Open `list`, `board`, `gantt`, `stats`, or `wiki`. |
@@ -68,4 +69,4 @@ If a waiting command closes its connection, its waiter slot is released promptly
 
 A window holds up to five pending suggestions, including reserved actions still awaiting their result. Text is limited to 500 characters and three lines, with control characters removed. `--ttl` defaults to 900 seconds and is limited to 3600; an unanswered suggestion expires and disappears. Answered suggestions remain readable for ten minutes. Waiting callers have four slots separate from ordinary ctl requests, so a set of unanswered suggestions does not stop `state` from answering.
 
-Decided in: moai-zgc1 moai-v5of moai-4km9 moai-4xmq
+Decided in: moai-zgc1 moai-v5of moai-4km9 moai-4xmq moai-okdc

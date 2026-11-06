@@ -3441,6 +3441,13 @@ impl<'m, 'a> DueLadder<'m, 'a> {
         self.row_of(i).and_then(|r| self.open_ceiling(r, closed))
     }
 
+    /// The effective deadline for reading order: own deadline or the earliest open ancestor.
+    /// Group closure is supplied by the caller's already-derived column map.
+    pub fn following(&self, i: &Issue, closed: &dyn Fn(&Issue) -> bool) -> Option<(&'a str, Option<&'a Issue>)> {
+        let row = self.row_of(i)?;
+        followed(row.deadline(), self.open_ceiling(row, closed))
+    }
+
     /// 그 줄이 조상보다 늦으면 그 조상 — **이 지도가 든 같은 줄로** 잰다. 아카이브를 곁들인 문맥의 줄(사본)로 물어도
     /// 산 줄의 지도에서 다시 찾는다([`status_of_context`]). 지도에 없는 줄은 `None` 이다. **쌍둥이는 줄마다 잰다**(리뷰) —
     /// id 로만 찾으면 같은 id 의 줄이 다 뒷줄의 기한으로 재어져, 파일 차례가 경고를 켰다 껐다 한다(moai-u3ta 와 같은 덫).
@@ -4647,8 +4654,10 @@ impl<'a> Picking<'a> {
             .then(|| DueLadder::over_with_stones(self.ties.lines(), group, self.ties.stones.as_ref()));
         let closed = |g: &Issue| self.closed.contains(g.id.as_str());
         out.sort_by_cached_key(|&i| {
-            let due =
-                followed(i.deadline(), ladder.as_ref().and_then(|l| l.open_ceiling_row(i, &closed))).map(|(d, _)| d);
+            let due = match &ladder {
+                Some(ladder) => ladder.following(i, &closed).map(|(d, _)| d),
+                None => i.deadline(),
+            };
             (
                 i.priority(),
                 !inside(i),

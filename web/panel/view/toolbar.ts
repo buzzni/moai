@@ -5,7 +5,6 @@
 // update: the toolbar judges nothing (data/query.ts).
 
 import {
-  SORT_KEYS,
   hintsAt,
   items,
   sortBadge,
@@ -21,6 +20,8 @@ import type { Row } from "../data/index.ts"
 import { copyFor, fill, type HiddenReason, type Language, type ToolbarCopy } from "../i18n/index.ts"
 import { button, chip, el, icon, iconButton, menu, searchBox, textInput } from "./components.ts"
 import { kbdHint } from "./help.ts"
+import { sortPanel, type SortPanelAction, type SortPanelState } from "./sort-panel.ts"
+import { activeLevels, describe, initialPanel, preset, vocabulary } from "./sort-adapter.ts"
 
 // ---- strings: the i18n catalogue's toolbar group (i18n/index.ts) ---------------------------------------
 
@@ -43,6 +44,7 @@ export interface ToolbarState {
   hintIndex: number
   sortOpen: boolean
   sort: Sort
+  panel: SortPanelState
 }
 
 export const initialToolbar = (): ToolbarState => ({
@@ -55,6 +57,7 @@ export const initialToolbar = (): ToolbarState => ({
   hintIndex: -1,
   sortOpen: false,
   sort: { fields: [{ key: "priority", dir: "asc" }], reversed: false },
+  panel: initialPanel(),
 })
 
 export type ToolbarAction =
@@ -72,6 +75,8 @@ export type ToolbarAction =
   | { type: "sort-toggle" }
   | { type: "sort-edit"; key: SortKey; how: SortEdit }
   | { type: "sort-set"; sort: Sort }
+  | { type: "sort-panel"; action: SortPanelAction }
+  | { type: "sort-panel-restore"; panel: SortPanelState; sort: Sort }
 
 const isSpaceChar = (c: string | undefined): boolean => c !== undefined && /\s/.test(c)
 
@@ -158,10 +163,29 @@ export function toolbarReduce(state: ToolbarState, action: ToolbarAction): Toolb
     }
     case "sort-toggle":
       return { ...state, sortOpen: !state.sortOpen }
-    case "sort-edit":
-      return { ...state, sort: sortEdit(state.sort, action.key, action.how) }
+    case "sort-edit": {
+      const sort = sortEdit(state.sort, action.key, action.how)
+      return { ...state, sort, panel: { ...state.panel, preset: undefined, edited: true, order: { ...state.panel.order, item: sort.fields } } }
+    }
     case "sort-set":
-      return { ...state, sort: action.sort }
+      return { ...state, sort: action.sort, panel: { ...state.panel, preset: undefined, edited: true, order: { ...state.panel.order, item: action.sort.fields } } }
+    case "sort-panel-restore":
+      return { ...state, panel: action.panel, sort: action.sort }
+    case "sort-panel": {
+      const a = action.action
+      if (a.type === 'default') return { ...state, sortOpen: false }
+      if (a.type === 'preset') {
+        const panel = preset(a.id)
+        return { ...state, panel, sort: { fields: panel.order.item as Sort['fields'], reversed: false } }
+      }
+      if (a.type === 'group') {
+        const active = activeLevels(a.id)
+        return { ...state, panel: { ...state.panel, preset: undefined, edited: true, group: a.id, level: active.includes(state.panel.level) ? state.panel.level : active[0]! } }
+      }
+      if (a.type === 'level') return { ...state, panel: { ...state.panel, level: a.id } }
+      const panel = { ...state.panel, preset: undefined, edited: true, order: { ...state.panel.order, [a.level]: a.fields } }
+      return { ...state, panel, sort: a.level === 'item' ? { fields: a.fields as Sort['fields'], reversed: false } : state.sort }
+    }
   }
 }
 
@@ -359,7 +383,7 @@ export function createToolbar(deps: Pick<ToolbarDeps, "doc" | "copy" | "lang">, 
   // The key that opens the search, next to its button (keys/table.ts `/`); the open search box carries its own.
   const searchShortcut = kbdHint(doc, "/")
   searchShortcut.setAttribute("aria-hidden", "true")
-  sortButton.setAttribute("aria-keyshortcuts", "Space s e")
+  sortButton.setAttribute("aria-keyshortcuts", "Space s")
   const bar = el(doc, "div", { class: "m-toolbar" }, icon(doc, "filter", 14), filterWrap, sortWrap, openSearch, searchShortcut)
 
   // Chips of the parsed filter (comma is OR inside one chip, a repeated key is AND between chips).
@@ -423,8 +447,10 @@ export function createToolbar(deps: Pick<ToolbarDeps, "doc" | "copy" | "lang">, 
     }
 
     const badge = sortBadge(state.sort)
-    const label = badge.parts.map((part) => `${t.sortKeys[part.key]}${part.dir === "asc" ? "↑" : "↓"}`).join(" ")
-    const sortLabel = `${t.sort}: ${label}${badge.reversed ? ` (${t.reversed})` : ""}`
+    const label = badge.parts.map((part) => `${t.sortKeys[part.key] ?? part.key}${part.dir === "asc" ? "↑" : "↓"}`).join(" ")
+    const panelWords = vocabulary(deps.lang ?? 'ko', t.sortKeys)
+    const description = describe(state.panel, panelWords)
+    const sortLabel = `${t.sort}: ${description.summary || label}${badge.reversed ? ` (${t.reversed})` : ""}`
     if (sortButton.getAttribute("aria-label") !== sortLabel) {
       sortButton.setAttribute("aria-label", sortLabel)
       sortButton.title = sortLabel
@@ -433,28 +459,20 @@ export function createToolbar(deps: Pick<ToolbarDeps, "doc" | "copy" | "lang">, 
     }
     sortButton.setAttribute("aria-expanded", String(state.sortOpen))
     sortButton.dataset.sort = badge.text
-    const popKey = state.sortOpen ? JSON.stringify(state.sort) : ""
+    const popKey = state.sortOpen ? JSON.stringify([state.sort, state.panel]) : ""
     if (popKey !== sortDrawn) {
       sortDrawn = popKey
+      const activeSort = sortPop?.contains(doc.activeElement) ? (doc.activeElement as HTMLElement | null)?.dataset.sortFocus : undefined
       sortPop?.remove()
       sortPop = null
       if (state.sortOpen) {
         const pop = el(doc, "div", { class: "m-menu m-sort-pop", role: "dialog", "aria-label": t.sortEdit })
-        for (const key of SORT_KEYS) {
-          const field = state.sort.fields.find((one) => one.key === key)
-          const rowEl = el(doc, "div", { class: "m-menu-item", "data-key": key })
-          rowEl.append(el(doc, "span", { class: "m-menu-label" }, `${t.sortKeys[key]}${field ? (field.dir === "asc" ? " ↑" : " ↓") : ""}`))
-          for (const how of ["replace", "append", "flip"] as const) {
-            const b = button(doc, { label: t[how], variant: "ghost", small: true, onClick: () => dispatch({ type: "sort-edit", key, how }) })
-            b.dataset.how = how
-            rowEl.append(b)
-          }
-          pop.append(rowEl)
-        }
+        pop.append(sortPanel(doc, { ...state.panel, command: description.command, speech: description.speech }, panelWords, (action) => dispatch({ type: 'sort-panel', action })))
         // Said plainly until a settings storage keeps the default; keys/wiring.ts hides it where the default persists.
         pop.append(el(doc, "div", { class: "m-sort-note", "data-sort-note": "default" }, t.sortDefaultSessionNote))
         sortWrap.append(pop)
         sortPop = pop
+        if (activeSort) [...pop.querySelectorAll<HTMLElement>('[data-sort-focus]')].find((node) => node.dataset.sortFocus === activeSort)?.focus()
       }
     }
 

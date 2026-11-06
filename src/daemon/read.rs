@@ -30,7 +30,7 @@
 //! |---|---|
 //! | `status`·`prime` | `worktree: bool` |
 //! | `ready` | `worktree: bool`, `limit: int>=1` |
-//! | `show` | `id: string`(이슈 id 또는 종류), `tree`·`removed`·`worktree`·`reverse: bool`, `fields: string\|[string]`, `sort: string`, `limit: int>=1`, `after: string`, 거르개 |
+//! | `show` | `id: string`(이슈 id 또는 종류), `tree`·`removed`·`worktree`·`reverse: bool`, `fields: string\|[string]`, `sort: string`, `group: string`, `limit: int>=1`, `after: string`, 거르개 |
 //! | `stats` | `by: string\|[string]`(축), `bucket: "day"\|"week"`, `last: int 1..=1000`, 거르개 |
 //! | `project.ls` | 없음 (`project` 도 안 쓴다) |
 //! | `changes` | `cursor: string`(`value` 는 `{cursor, changed, removed, reset}`, 견주는 목록은 `show` 의 `all: true`) |
@@ -190,6 +190,10 @@ fn show(p: &mut Params) -> Result<Read, RpcError> {
             Some(raw) => Some(crate::cli::sort_fields(&raw).map_err(|e| p.bad("sort", e))?),
             None => None,
         },
+        group: p
+            .string("group")?
+            .map(|raw| crate::cli::group_value(&raw).map_err(|e| p.bad("group", e)))
+            .transpose()?,
         reverse: p.flag("reverse")?,
         limit: p.count("limit", 1, i64::MAX)?,
         after: p.string("after")?,

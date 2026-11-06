@@ -290,12 +290,14 @@ pub fn screen(f: &mut Frame, app: &mut App) {
     // 없으면 목록·상세의 몫(`App::list_width`)을 따른다(moai-p61w).
     let (raw, share) = (app.raw, app.wiki_width.or(app.list_width));
     let mut wiki_at = None;
+    let sort_order = matches!(&app.mode, Mode::Sort(_)).then(|| app.common_order());
+    let sort_preset = matches!(&app.mode, Mode::Sort(_)).then(|| app.sort.current.preset()).flatten();
     match &mut app.mode {
         Mode::Backlog(form) => jot(f, form, body, true, tint, lang),
         Mode::Pick(p) => pick(f, p, body, lang),
         Mode::Zone(z) => zone_pick(f, z, body, lang),
         Mode::ArchiveDays(p) => archive_days_pick(f, p, body, lang),
-        Mode::Sort(e) => sort_edit(f, e, body, lang),
+        Mode::Sort(e) => sort_edit(f, e, sort_order.as_ref().expect("sort window order"), sort_preset, body, lang),
         Mode::Proposals(id) => proposals_window(f, app.proposals.rows(), id.as_deref(), body, lang),
         Mode::Stats(w) => stats_window(f, w, body, lang),
         Mode::Wiki(w) => wiki_at = Some(wiki_window(f, w, body, raw, share, lang, &mut app.images)),
@@ -568,10 +570,67 @@ pub(super) fn sort_words(s: &super::keys::Sorting, lang: Lang) -> String {
     s.fields().iter().map(one).collect::<Vec<_>>().join(", ")
 }
 
-/// 차례 편집 창(`SPC s e`, moai-r170.x22) — 필드 여섯이 늘 다 선다. 차례에 든 것은 번호와 방향을 **글리프와 낱말로**
-/// (`1  우선순위  ↑ 오름`), 안 든 것은 `·` 로 선다 — 색이 혼자 뜻을 지지 않는다. 목록·상세 자리를 통째로 덮는다
-/// ([`zone_pick`] 과 같은 까닭: 뒤 칸의 커서가 비치면 어느 `>` 가 이 창의 것인지 안 읽힌다).
-fn sort_edit(f: &mut Frame, e: &super::sorter::Editor, at: Rect, lang: Lang) {
+fn grouping_word(group: super::sorter::screen::Group, lang: Lang) -> &'static str {
+    use super::sorter::screen::Group;
+    match group {
+        Group::Structure => say(lang, "tui.grouping.structure"),
+        Group::None => say(lang, "tui.grouping.none"),
+        Group::Status => say(lang, "tui.grouping.status"),
+        Group::Assignee => say(lang, "tui.grouping.assignee"),
+        Group::Priority => say(lang, "tui.grouping.priority"),
+        Group::Tag => say(lang, "tui.grouping.tag"),
+        Group::Kind => say(lang, "tui.grouping.kind"),
+        Group::Milestone => say(lang, "tui.grouping.milestone"),
+        Group::Epic => say(lang, "tui.grouping.epic"),
+    }
+}
+fn preset_word(preset: crate::query::Preset, lang: Lang) -> &'static str {
+    use crate::query::Preset;
+    match preset {
+        Preset::Release => say(lang, "tui.grouping.release"),
+        Preset::Urgent => say(lang, "tui.grouping.urgent"),
+        Preset::Recent => say(lang, "tui.grouping.recent"),
+        Preset::Due => say(lang, "tui.grouping.due"),
+        Preset::People => say(lang, "tui.grouping.people"),
+    }
+}
+/// `preset` is the exact preset the engine order is ([`super::SortChoice::preset`]) — the screen projection drops
+/// `:nulls-first`, so matching it against a preset's projection named a preset the list was not in.
+fn screen_order_words(
+    order: &super::sorter::screen::ScreenOrder,
+    preset: Option<crate::query::Preset>,
+    lang: Lang,
+) -> String {
+    if let Some(preset) = preset {
+        return preset_word(preset, lang).to_string();
+    }
+    let mut parts = vec![format!("{}: {}", say(lang, "tui.grouping.group"), grouping_word(order.group, lang))];
+    for (level, name, sorting) in [
+        (super::sorter::screen::Level::Milestone, say(lang, "tui.grouping.milestone"), &order.milestone),
+        (super::sorter::screen::Level::Epic, say(lang, "tui.grouping.epic"), &order.epic),
+        (super::sorter::screen::Level::Item, say(lang, "tui.grouping.item"), &order.item),
+    ] {
+        if order.active(level) {
+            parts.push(format!("{} {}", name, sort_words(sorting, lang)));
+        }
+    }
+    parts.join(" · ")
+}
+
+/// 차례 편집 창(`SPC s`, moai-r170.x22) — 프리셋·묶기·층 머리 세 줄 밑에 지금 층의 필드가 다 선다. 차례에 든 것은
+/// 번호와 방향을 **글리프와 낱말로**(`1  우선순위  ↑ 오름`), 안 든 것은 `·` 로 선다 — 색이 혼자 뜻을 지지 않는다.
+/// 좁은 화면에서는 목록·상세 자리를 통째로 덮고([`zone_pick`] 과 같은 까닭: 뒤 칸의 커서가 비치면 어느 `>` 가 이 창의
+/// 것인지 안 읽힌다), 96칸 이상이면 오른쪽 52칸에 서서 미리 보는 목록을 가리지 않는다.
+fn sort_edit(
+    f: &mut Frame,
+    e: &mut super::sorter::screen::ScreenEditor,
+    order: &crate::query::Order,
+    preset: Option<crate::query::Preset>,
+    at: Rect,
+    lang: Lang,
+) {
+    // Leave the list visible beside the editor when the terminal is wide enough.
+    let at = if at.width >= 96 { Rect::new(at.x + at.width - 52, at.y, 52, at.height) } else { at };
     f.render_widget(Clear, at);
     let rows = e.rows();
     let wide = rows.iter().map(|r| crate::text::width(r.by.word(lang))).max().unwrap_or(0);
@@ -597,19 +656,82 @@ fn sort_edit(f: &mut Frame, e: &super::sorter::Editor, at: Rect, lang: Lang) {
         .borders(Borders::ALL)
         .border_type(BorderType::Thick)
         .border_style(from_anstyle(style::FOCUS))
-        .title(format!(" {} ", say(lang, "tui.sorter.title")))
+        .title(format!(
+            " {} · {} · {} · Tab / g / 1–5 ",
+            say(lang, "tui.sorter.title"),
+            say(
+                lang,
+                match e.level {
+                    super::sorter::screen::Level::Milestone => "tui.grouping.milestone",
+                    super::sorter::screen::Level::Epic => "tui.grouping.epic",
+                    super::sorter::screen::Level::Item => "tui.grouping.item",
+                }
+            ),
+            grouping_word(e.group, lang)
+        ))
         .title_bottom(Line::from(Span::styled(
             clip(&format!(" {} ", say(lang, "tui.sorter.note")), at.width.saturating_sub(2) as usize),
             dim(),
         )));
-    let mut state = ListState::default().with_selected(Some(e.cursor));
+    let inner = block.inner(at);
+    f.render_widget(block, at);
+    let header_height = if inner.height >= 10 { 3 } else { 0 };
+    if header_height > 0 {
+        use crate::query::Preset;
+        let presets = Preset::ALL;
+        let choices = presets
+            .iter()
+            .enumerate()
+            .map(|(n, key)| {
+                let label = format!("{} {}", n + 1, preset_word(*key, lang));
+                if preset == Some(*key) { format!("[{label}]") } else { label }
+            })
+            .collect::<Vec<_>>()
+            .join(" · ");
+        let group = format!("{}: {}  (g)", say(lang, "tui.grouping.group"), grouping_word(e.group, lang));
+        let levels = [
+            (super::sorter::screen::Level::Milestone, "tui.grouping.milestone"),
+            (super::sorter::screen::Level::Epic, "tui.grouping.epic"),
+            (super::sorter::screen::Level::Item, "tui.grouping.item"),
+        ]
+        .into_iter()
+        .map(|(level, key)| {
+            let text = if e.level == level { format!("[{}]", say(lang, key)) } else { say(lang, key).to_string() };
+            if e.state().active(level) {
+                Span::raw(format!("{text}  "))
+            } else {
+                Span::styled(format!("{text}  "), dim())
+            }
+        })
+        .collect::<Vec<_>>();
+        let header = vec![
+            Line::from(clip(&choices, inner.width as usize)),
+            Line::from(clip(&group, inner.width as usize)),
+            Line::from(levels),
+        ];
+        f.render_widget(Paragraph::new(header), Rect::new(inner.x, inner.y, inner.width, header_height));
+    }
+    let screen = e.state();
+    let command = format!("moai ctl sort '{}' · moai ctl group {}", order, screen.group.name());
+    let show_command = inner.height > header_height + 2;
+    if show_command {
+        f.render_widget(
+            Paragraph::new(clip(&command, inner.width as usize)),
+            Rect::new(inner.x, inner.y + inner.height - 1, inner.width, 1),
+        );
+    }
+    let mut state = ListState::default().with_selected(Some(e.cursor()));
     f.render_stateful_widget(
         List::new(items)
-            .block(block)
             .highlight_style(Style::new().add_modifier(Modifier::REVERSED))
             .highlight_symbol(CURSOR)
             .highlight_spacing(HighlightSpacing::Always),
-        at,
+        Rect::new(
+            inner.x,
+            inner.y + header_height,
+            inner.width,
+            inner.height.saturating_sub(header_height + u16::from(show_command)),
+        ),
         &mut state,
     );
 }
@@ -705,7 +827,14 @@ fn sort_keys(f: &mut Frame, table: &[keys::Bind<super::keys::Sorter>], at: Rect,
     use super::keys::Sorter;
     let hint = |a: Sorter| key(&label(table, a), a.what(lang));
     let pair = |a: Sorter, b: Sorter| key(&labels(table, &[a, b]), a.what(lang));
-    let optional = vec![pair(Sorter::Down, Sorter::Up), pair(Sorter::Lower, Sorter::Raise), hint(Sorter::Flip)];
+    let optional = vec![
+        pair(Sorter::Down, Sorter::Up),
+        pair(Sorter::Lower, Sorter::Raise),
+        hint(Sorter::Flip),
+        hint(Sorter::NextLevel),
+        hint(Sorter::NextGroup),
+        hint(Sorter::Preset(1)),
+    ];
     bar(f, at, optional, vec![hint(Sorter::Toggle), hint(Sorter::Apply), hint(Sorter::Default), hint(Sorter::Close)]);
 }
 
@@ -2672,8 +2801,13 @@ fn crumbs(f: &mut Frame, app: &App, rows: &[Row], at: Rect) {
     // 줄 안다. 거름망 뱃지와 달리 **늘 서 있는 것**이라 경로의 몫을 굶기지 않는다: 경로에 여덟 칸이
     // 안 남으면 뺀다. 키는 안 적는다 — 메뉴의 `SPC v`(숨김)·`SPC s`(정렬)가 댄다. 층에서는 보기가 뜻이 없다.
     // 기본이 아닌 차례도 같은 뱃지에 댄다(moai-55cp) — 차례가 바뀐 줄 모르면 줄이 뒤섞인 줄 안다.
-    let sorted = (app.order != Default::default())
-        .then(|| fill(say(app.site.lang, "tui.badge.sorted"), &[("by", &sort_words(&app.order, app.site.lang))]));
+    let sorted = if app.sort.current.extended || app.sort.current.group != super::sorter::screen::Group::Structure {
+        Some(screen_order_words(&app.screen_order(), app.sort.current.preset(), app.site.lang))
+    } else {
+        (app.item_order() != Default::default()).then(|| {
+            fill(say(app.site.lang, "tui.badge.sorted"), &[("by", &sort_words(&app.item_order(), app.site.lang))])
+        })
+    };
     // **모자라면 차례부터 뺀다**(moai-2kyl 단계 리뷰). 한 뱃지로 통째로 재면 차례를 고른 것만으로 뱃지가
     // 길어져 `[done 숨김]` 까지 사라진다 — 숨긴 줄이 사라진 줄 아는 것이 줄이 뒤섞인 줄 아는 것보다 크다.
     let hidden = app.view.badge(&app.screen_statuses(), app.aged(), app.site.lang);
@@ -3320,6 +3454,12 @@ fn lane_line<'a>(app: &App, laid: &super::Laid, lane: usize, w: usize) -> Line<'
         },
         crate::nav::Seg::Milestone(None) => head.push(Span::styled(say(lang, "nav.no_milestone"), dim())),
         crate::nav::Seg::Lost => head.push(Span::styled(say(lang, "nav.lost"), dim())),
+        crate::nav::Seg::Group(_) => {
+            head.push(Span::styled(site.group_title(seg).unwrap_or_default(), bold()));
+            if let Some(stats) = site.group_stats(seg) {
+                head.push(Span::styled(format!("  {stats}"), dim()));
+            }
+        }
         crate::nav::Seg::Epic(_) | crate::nav::Seg::Issue(_) => {}
     }
     let tally = match app.fields.shows(Field::Tally).then(|| site.index.tally(&vec![seg.clone()])) {
@@ -3655,6 +3795,12 @@ fn row_line<'a>(app: &App, r: &Row, tally: &str, budget: usize, fields: super::v
     let Some(site) = app.site_of_seat(seat) else { return Line::default() };
     let is_dir = matches!(e, Entry::Dir { .. });
     let Some(at) = e.at() else {
+        if let Entry::Dir { seg, .. } = e
+            && let Some(text) = site.group_title(seg)
+        {
+            let stats = site.group_stats(seg).unwrap_or_default();
+            return Line::from(Span::styled(format!("{text}/  {stats}"), dim()));
+        }
         // 바구니는 제 줄이 없다 — 이름만 낸다.
         return Line::from(Span::styled(format!("{}/", site.index.label(&site.issues, e, site.lang)), dim()));
     };

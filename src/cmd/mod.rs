@@ -673,6 +673,11 @@ fn dispatch(ctx: &Ctx, cli: Cli) -> R<Vec<String>> {
             target.as_deref(),
             crate::ctl::wire::Verb::Sort { words: words.split(',').map(str::to_string).collect(), default },
         ),
+        Cmd::Ctl(CtlCmd::Group { group, target }) => ctl::verb(
+            ctx,
+            target.as_deref(),
+            crate::ctl::wire::Verb::Sort { words: vec![format!("group={}", group.name())], default: false },
+        ),
         Cmd::Ctl(CtlCmd::Filter { query, clear, target }) => ctl::filter(ctx, target.as_deref(), query, clear),
         Cmd::Ctl(CtlCmd::Find { query, scope, target }) => {
             ctl::verb(ctx, target.as_deref(), crate::ctl::wire::Verb::Find { query, scope })

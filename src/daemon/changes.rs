@@ -27,7 +27,7 @@
 //! - 봉투의 `exit`·`messages`·`partial` 은 읽기 메서드와 같다 — 목록을 읽다 만난 못 읽는 줄·못 읽은 저널 파일을 CLI 의 말로
 //!   대고, CLI 라면 1 로 끝났을 판이면 `partial` 이다. **못 읽은 저널 파일은 `reset` 을 세우지 않는다** — 다시 읽어도
 //!   그 파일은 못 읽으니 `reset` 은 아무것도 되찾지 못한다. 그 파일의 노트는 읽을 수 있게 될 때까지 안 서고, 읽히는
-//!   판에 그 id 가 `changed` 에 선다. 덜 읽은 목록도 기억한다 — 클라이언트의 전부 읽기도 같은 목록을 받는다
+//!   판에 그 id 가 `changed` 에 선다. 못 읽은 스냅샷 줄의 지문은 앞 판에서 보존한다.
 //!
 //! ## 기억
 //!
@@ -87,6 +87,15 @@ impl Memory {
     fn with(keep: usize, bound: usize) -> Memory {
         let inner = Inner { keep, bound, tick: 0, bytes: 0, projects: HashMap::new() };
         Memory { instance: instance_mark().into(), inner: Arc::new(Mutex::new(inner)) }
+    }
+
+    fn lookup(&self, project: &Path, asked: Option<&str>) -> Option<Arc<Seen>> {
+        let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        inner.tick += 1;
+        let tick = inner.tick;
+        let found = inner.projects.get_mut(project)?.iter_mut().find(|k| Some(k.fingerprint.as_str()) == asked)?;
+        found.used = tick;
+        Some(found.seen.clone())
     }
 
     /// 커서가 가리키던 옛 스냅샷을 찾고, 지금 것을 넣는다. 락 안에서는 맵만 만진다 — 읽기와 견줌은 밖에서 한다.
@@ -224,10 +233,15 @@ pub(crate) fn poll(memory: &Memory, whole: Request, lang: Lang, cursor: Option<&
         }
     }
 
-    let seen = Arc::new(Seen::of(&rows, &read.notes));
-    let fingerprint = seen.fingerprint();
     let asked = cursor.and_then(|c| decode(c, &memory.instance));
-    let old = memory.swap(&project, asked, &fingerprint, &seen);
+    let old = memory.lookup(&project, asked);
+    let mut seen = Seen::of(&rows, &read.notes);
+    if let Some(old) = &old {
+        seen.preserve_unread(old, &answer.unread_rows);
+    }
+    let seen = Arc::new(seen);
+    let fingerprint = seen.fingerprint();
+    memory.swap(&project, asked, &fingerprint, &seen);
     let changes = crate::daemon::diff::changes(old.as_deref(), &seen, encode(&memory.instance, &fingerprint));
     let partial = answer.partial || read.partial;
     Ok(Polled { changes, messages, partial, exit: answer.exit.max(u8::from(partial)) })
@@ -303,6 +317,8 @@ mod tests {
             .env("NO_COLOR", "1")
             .env_remove("MOAI_ACTOR")
             .env_remove("MOAI_HERE")
+            // Inside a Claude session `mv` records its own pick under this id, newer than a fixture's pick.
+            .env_remove("CLAUDE_CODE_SESSION_ID")
             .output()
             .unwrap();
         assert!(out.status.success(), "moai {args:?}: {}", String::from_utf8_lossy(&out.stderr));
@@ -532,5 +548,97 @@ mod tests {
             "못 읽는 줄의 자리를 안 댄다 — {:?}",
             got.messages
         );
+    }
+
+    #[test]
+    fn unread_snapshot_rows_are_not_reported_as_removed() {
+        let (_keep, root) = project("changes-preserve");
+        let memory = Memory::new();
+        let id = add(&root, "2026-11-04T09:01:00Z", "one");
+        let path = root.join(".moai/issues.jsonl");
+        let original = std::fs::read_to_string(&path).unwrap();
+        let (cursor, _, _, _) = ask(&memory, &root, None);
+        std::fs::write(&path, format!("{{\"id\":\"{id}\",\"title\":42}}\n")).unwrap();
+        let partial = poll(&memory, whole(&root), Lang::En, Some(&cursor)).unwrap();
+        assert!(partial.partial);
+        assert!(partial.changes.removed.is_empty());
+        std::fs::write(&path, "not json\n").unwrap();
+        let unknown = poll(&memory, whole(&root), Lang::En, Some(&partial.changes.cursor)).unwrap();
+        assert!(unknown.partial && unknown.changes.removed.is_empty());
+        std::fs::write(&path, &original).unwrap();
+        let repaired = poll(&memory, whole(&root), Lang::En, Some(&unknown.changes.cursor)).unwrap();
+        assert!(repaired.changes.removed.is_empty() && repaired.changes.changed.is_empty());
+        std::fs::write(&path, "").unwrap();
+        let removed = poll(&memory, whole(&root), Lang::En, Some(&repaired.changes.cursor)).unwrap();
+        assert_eq!(removed.changes.removed, vec![id]);
+    }
+
+    /// An unreadable archive line holds back nothing: archive rows are never in the compared list.
+    #[test]
+    fn an_unreadable_archive_line_does_not_hold_back_removals() {
+        let (_keep, root) = project("changes-archive-line");
+        let memory = Memory::new();
+        let id = add(&root, "2026-11-04T09:01:00Z", "one");
+        let archive = crate::archive::path(&root, "2026");
+        std::fs::create_dir_all(archive.parent().unwrap()).unwrap();
+        std::fs::write(&archive, "not json\n").unwrap();
+        let (cursor, _, _, _) = ask(&memory, &root, None);
+        moai(&root, "2026-11-04T09:02:00Z", &["rm", &id]);
+        assert_eq!(ask(&memory, &root, Some(&cursor)).2, vec![id]);
+    }
+
+    #[test]
+    fn heartbeat_and_wall_time_do_not_change_a_cursor() {
+        let dir = Scratch::new("changes-heartbeat");
+        let out = Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "daemon::changes::tests::inner_heartbeat", "--ignored", "--nocapture"])
+            .env("MOAI_HEARTBEAT_TEST", dir.path())
+            .env("MOAI_CONFIG", dir.path().join("config.toml"))
+            .env("HOME", dir.path())
+            .env_remove("MOAI_HERE")
+            .output()
+            .unwrap();
+        let output = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+        assert!(out.status.success() && output.contains("1 passed"), "{output}");
+    }
+
+    #[test]
+    #[ignore = "run by heartbeat_and_wall_time_do_not_change_a_cursor"]
+    fn inner_heartbeat() {
+        let root = std::path::PathBuf::from(std::env::var_os("MOAI_HEARTBEAT_TEST").unwrap());
+        moai(&root, "2026-11-04T09:00:00Z", &["init", "t"]);
+        let id = add(&root, "2026-11-04T09:01:00Z", "one");
+        moai(&root, "2026-11-04T09:02:00Z", &["mv", &id, "in_progress"]);
+        let picks = crate::pulse::picks_dir_at(&root).unwrap();
+        let beats = crate::pulse::beats_dir_at(&root).unwrap();
+        std::fs::create_dir_all(&picks).unwrap();
+        std::fs::create_dir_all(&beats).unwrap();
+        let stamp = crate::model::parse_rfc3339("2026-11-04T09:02:00Z").unwrap();
+        std::fs::write(picks.join("sid"), format!("100\t{id}\t{stamp}\n")).unwrap();
+        let beat = beats.join("sid");
+        std::fs::write(&beat, "claude\tStop\n").unwrap();
+        let age = |secs| {
+            std::fs::File::open(&beat)
+                .unwrap()
+                .set_modified(std::time::SystemTime::now() - std::time::Duration::from_secs(secs))
+                .unwrap()
+        };
+        let memory = Memory::new();
+        let show = || {
+            let answer = crate::cmd::request::read(whole(&root));
+            serde_json::from_str::<Value>(&answer.out.unwrap()[0]).unwrap()
+        };
+        age(60);
+        assert!(show()[0].get("session").is_some(), "session fixture must be visible");
+        let (cursor, _, _, _) = ask(&memory, &root, None);
+        age(1801);
+        assert_eq!(show()[0]["session"]["state"], "lost");
+        let (cursor, changed, removed, reset) = ask(&memory, &root, Some(&cursor));
+        assert!(changed.is_empty() && removed.is_empty() && !reset);
+        std::fs::write(&beat, "claude\tPreToolUse\n").unwrap();
+        let (cursor, changed, _, _) = ask(&memory, &root, Some(&cursor));
+        assert!(changed.is_empty());
+        moai(&root, "2026-11-04T09:03:00Z", &["edit", &id, "--title", "edited"]);
+        assert_eq!(ask(&memory, &root, Some(&cursor)).1, vec![id]);
     }
 }

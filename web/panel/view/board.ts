@@ -1,3 +1,4 @@
+import { heading as groupHeading } from './group-adapter.ts'
 /**
  * The kanban: status columns (with Backlog and deferred in front), milestone lanes at the root, cards of up
  * to three lines. Which card goes where is board-groups.ts (on where moai stands each row); this file draws it
@@ -13,6 +14,7 @@ import type { State } from '../store.js'
 import { BACKLOG, DEFERRED, groupBoard, type BoardLane, type BoardModel } from './board-groups.ts'
 import { segLabel } from './crumbs.ts'
 import { narrow, segKey, statusGlyph, statusOf } from './list-model.ts'
+import { orderExpression } from './sort-adapter.ts'
 import { chip, el, emptyState, icon } from './components.ts'
 import { newChip } from './unread.ts'
 import { firstStatus, glint, spins , lostMark } from './spin.ts'
@@ -31,6 +33,8 @@ export const glyphOf = (key: string, boot?: Boot | null): string =>
 const LANE_MIN = 200
 const LANE_GAP = 4
 const BOARD_PAD = 6
+/** The board's least width for this many columns: narrower panels scroll sideways, and the fill under it spans as far. */
+const boardWidth = (columns: number) => `${columns * LANE_MIN + (columns - 1) * LANE_GAP + 2 * BOARD_PAD}px`
 
 const priorityClass = (priority: number) => `m-p${Math.min(3, Math.max(0, Math.round(priority)))}`
 
@@ -103,7 +107,7 @@ function draw(ctx: ViewContext, state: State, index: IssueIndex, model: BoardMod
 
   const laneHead = (lane: BoardLane): HTMLElement | null => {
     if (lane.seg === null) return null
-    const title = lane.at !== undefined ? (index.rows[lane.at]!.title ?? index.rows[lane.at]!.id) : segLabel(lane.seg, index, copy)
+    const title = lane.seg.startsWith('group:') ? groupHeading(lane.seg, lane.label ?? '', ctx.language, copy.stats as Record<string, string>, (status) => statusGlyph(status, state.boot).glyph) : lane.label ?? (lane.at !== undefined ? (index.rows[lane.at]!.title ?? index.rows[lane.at]!.id) : segLabel(lane.seg, index, copy))
     const selected = lane.at !== undefined && index.rows[lane.at]!.id === state.cursor
     const head = el(doc, 'div', { class: 'm-swim-head', 'data-lane': lane.seg, 'aria-selected': String(selected), 'data-focus': lane.at === undefined ? null : `lane:${index.rows[lane.at]!.id}` })
     const path = [lane.seg]
@@ -115,7 +119,8 @@ function draw(ctx: ViewContext, state: State, index: IssueIndex, model: BoardMod
       if (lane.at === undefined) flip(path)
       else { ctx.intents.choose(index.rows[lane.at]!.id); if (ctx.layout().detailVisible) ctx.focusPane('detail') }
     })
-    head.append(toggle, name, el(doc, 'span', { class: 'm-count' }, String(lane.count)))
+    head.append(toggle, name, el(doc, 'span', { class: 'm-count' }, lane.seg.startsWith('group:') ? `${lane.done ?? 0}/${lane.count}` : String(lane.count)))
+    if (lane.detail) head.append(el(doc, 'span', { class: 'm-count' }, lane.detail))
     return head
   }
 
@@ -140,9 +145,8 @@ function draw(ctx: ViewContext, state: State, index: IssueIndex, model: BoardMod
   }
   // Narrow panels scroll sideways instead of squeezing the columns below their minimum. The numbers are the
   // stylesheet's (components.css 5.7): a column's minimum, the gap between columns, the board's padding.
-  const columns = model.keys.length
   const wrap = el(doc, 'div', { class: 'm-board-wrap' })
-  wrap.style.minWidth = `${columns * LANE_MIN + (columns - 1) * LANE_GAP + 2 * BOARD_PAD}px`
+  wrap.style.minWidth = boardWidth(model.keys.length)
   wrap.append(...out)
   return [wrap]
 }
@@ -163,7 +167,8 @@ function locate(model: BoardModel, index: IssueIndex, cursor: string | null): { 
 export const mountBoard: MountPane = (root, ctx): PaneView => {
   const doc = ctx.document
   const pane = el(doc, 'div', { class: 'm-board-pane', 'aria-label': ctx.copy.board.label })
-  root.replaceChildren(pane)
+  const fillSpace = el(doc, 'div', { class: 'm-fill', 'aria-hidden': 'true', hidden: true })
+  root.replaceChildren(pane, fillSpace)
   let cursor: string | null = null
   let drawn: { state: State; index: IssueIndex; model: BoardModel; key: string } | null = null
   const shut = new Set<string>()
@@ -181,7 +186,9 @@ export const mountBoard: MountPane = (root, ctx): PaneView => {
     // Only a fold that hides the cursor moves it: the folded path must be a prefix of the cursor's home. Walking the
     // home instead let a shorter home (a lane head at the root) pass for any group.
     const home = at === undefined ? [] : drawn.index.homeOf(at)
-    if (closing && at !== undefined && path.every((seg, n) => home[n] === seg) && id !== state.cursor) {
+    const lane = drawn.model.lanes.find((lane) => lane.seg === path[0])
+    const inVirtualLane = path[0]?.startsWith('group:') && at !== undefined && lane?.columns.some((column) => column.cards.includes(at))
+    if (closing && at !== undefined && (inVirtualLane || path.every((seg, n) => home[n] === seg)) && id !== state.cursor) {
       state = { ...state, cursor: id ?? null }
       ctx.intents.point(id ?? null)
     }
@@ -325,21 +332,30 @@ export const mountBoard: MountPane = (root, ctx): PaneView => {
             const path = index.dirPath(n)
             if (path.every((seg, k) => selected[k] === seg)) continue
             shut.add(pathKey(path))
+            if (index.rows[n]!.kind === 'milestone') shut.add(pathKey([`group:milestone:v${encodeURIComponent(index.rows[n]!.id)}`]))
           }
           seeded = true
           foldVersion++
         }
         // What the cards are drawn from. The cursor is not in it: a cursor move changes two cards' marks, not the board.
-        const drawKey = JSON.stringify([state.path, state.view, state.search.text, state.filter.applied, state.columns, foldVersion])
+        const drawKey = JSON.stringify([state.path, state.view, state.search.text, state.filter.applied, state.columns, state.toolbar.panel, foldVersion])
         if (!inPlace(state, index, drawKey)) {
           // The board is a layout of the list: the same filter and search narrow it (list-model.ts narrow).
           const found = narrow(state, index)
-          const model = groupBoard(index, { path: state.path, view: state.view, cursor: state.cursor, match: found.match, reveal: found.searching, shut }, state.boot?.statuses)
+          const panel = state.toolbar.panel
+          const expression = orderExpression(panel)
+          const data = state.board.value
+          const groupedTree = data?.groupedBy === panel.group && data.groupedSort === expression ? data.groupedTree : undefined
+          const model = groupBoard(index, { path: state.path, view: state.view, cursor: state.cursor, match: found.match, reveal: found.searching, shut, group: panel.group, itemOrder: panel.edited ? panel.order.item : undefined, levelOrder: panel.order[panel.group], milestoneOrder: panel.edited ? panel.order.milestone : undefined, groupedTree }, state.boot?.statuses)
+          fillSpace.hidden = !model.total
+          // As wide as the board: a pane narrower than the columns scrolls sideways, and the hatch runs under them all.
+          fillSpace.style.minWidth = boardWidth(model.keys.length)
           drawn = { state, index, model, key: drawKey }
           pane.replaceChildren(...draw(ctx, state, index, model, flip))
         }
       } else {
         drawn = null
+        fillSpace.hidden = true
         pane.replaceChildren()
       }
       if (key !== undefined) {
@@ -372,6 +388,7 @@ export const mountBoard: MountPane = (root, ctx): PaneView => {
     },
     destroy() {
       pane.remove()
+      fillSpace.remove()
     },
   }
 }

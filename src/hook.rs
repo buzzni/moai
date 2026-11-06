@@ -9081,27 +9081,39 @@ fn take_in(
             (true, Some(a)) => (a.read)(aim(k).and_then(Aimed::standing).unwrap_or(&a.root)),
             _ => Vec::new(),
         };
-        let Some((row, owner)) = ids.iter().find_map(|id| {
-            let row = issues
-                .iter()
-                .find(|i| i.id == *id)
-                .or_else(|| (!away.opaque.contains(*id)).then(|| archived.iter().find(|i| i.id == *id)).flatten())?;
-            report::owner(&me, row).map(|o| (row, o))
-        }) else {
+        // **Name every row the suggested `--take` would move** — the person is asked about the rows the
+        // refusal names, and the suggestion takes them all. Naming only the first let one yes hand over
+        // another owner's row unasked.
+        let mut named_ids = BTreeSet::new();
+        let theirs: Vec<(&Issue, report::Owner)> = ids
+            .iter()
+            .filter_map(|id| {
+                let row = issues.iter().find(|i| i.id == *id).or_else(|| {
+                    (!away.opaque.contains(*id)).then(|| archived.iter().find(|i| i.id == *id)).flatten()
+                })?;
+                report::owner(&me, row).map(|o| (row, o))
+            })
+            .filter(|(row, _)| named_ids.insert(row.id.as_str()))
+            .collect();
+        if theirs.is_empty() {
             continue;
-        };
-        let whose = match (owner, row.assignee.as_deref()) {
-            (report::Owner::Theirs, Some(a)) => format!(
-                "{} is {}'s.",
-                row.id,
-                crate::text::one_line(&crate::model::label(
-                    a,
-                    row.assignee_email.as_deref(),
-                    crate::config::Naming::Full
-                ))
-            ),
-            _ => format!("{} has no assignee.", row.id),
-        };
+        }
+        let whose = theirs
+            .iter()
+            .map(|(row, owner)| match (owner, row.assignee.as_deref()) {
+                (report::Owner::Theirs, Some(a)) => format!(
+                    "{} is {}'s.",
+                    row.id,
+                    crate::text::one_line(&crate::model::label(
+                        a,
+                        row.assignee_email.as_deref(),
+                        crate::config::Naming::Full
+                    ))
+                ),
+                _ => format!("{} has no assignee.", row.id),
+            })
+            .collect::<Vec<_>>()
+            .join(" ");
         // **본 칸을 그대로 옮겨 싣는다** — `--from` 을 걸고 막힌 사람에게 그것 없는 줄을 내밀면, 시킨
         // 대로 친 줄이 옆 세션의 집기를 덮는다.
         let from =
@@ -9113,12 +9125,12 @@ fn take_in(
         return refuse(
             5,
             format!(
-                "{whose} Ask the person watching before you pick it up.\n\
+                "{whose} Ask the person watching before you pick up any of the listed rows that are not yours.\n\
                  On a yes, take it over and say who said yes — you become the assignee in the same\n\
                  write, and a note keeps whose it was:\n\
                  \x20 {}{user} mv {} {}{from} {}",
                 echo_moai(aim(k).and_then(Aimed::standing), &seg.words),
-                row.id,
+                ids.iter().map(|id| echo_dir(id)).collect::<Vec<_>>().join(" "),
                 echo_dir(to),
                 crate::guide::TAKE_YES,
             ),
@@ -10971,6 +10983,14 @@ mod tests {
         assert!(why.starts_with(&crate::guide::rule_head(5)), "{why}");
         assert!(why.contains("t-1 is B (b@x.io)'s."), "{why}");
         assert!(why.contains("moai mv t-1 in_progress --from todo --take -m '<who said yes>'"), "{why}");
+        let why = denied(&judge("moai --user 'C (c@x.io)' mv t-3 t-1 t-2 in_progress --from todo", &away)).to_string();
+        assert!(why.contains("moai --user 'C (c@x.io)' mv t-3 t-1 t-2 in_progress --from todo --take"), "{why}");
+        assert!(why.contains("any of the listed rows that are not yours"), "{why}");
+        // Every row the suggested `--take` moves is named, so one yes cannot hand over an unnamed owner's row.
+        assert!(why.contains("t-3 is Raven's. t-1 is B (b@x.io)'s. t-2 has no assignee."), "{why}");
+        // A row named twice is asked about once.
+        let why = denied(&judge("moai mv t-1 t-1 in_progress", &away)).to_string();
+        assert_eq!(why.matches("t-1 is B (b@x.io)'s.").count(), 1, "{why}");
         let why = denied(&judge("moai mv t-2 in_progress", &away)).to_string();
         assert!(why.contains("t-2 has no assignee."), "{why}");
 
@@ -14396,7 +14416,7 @@ mod tests {
         // 둘째 물음은 규칙 글과 같은 글이다.
         let pledge = crate::guide::PLEDGE;
         assert!(why.contains(&format!("If t-e {pledge}")), "{why}");
-        assert!(crate::guide::agents().contains(&format!("If the epic {pledge}")), "규칙 글이 갈라졌다");
+        assert!(crate::guide::reference().contains(&format!("If the epic {pledge}")), "규칙 글이 갈라졌다");
     }
 
     /// **거절문의 모서리 넷**(리뷰 moai-ju21.70g) — 옮겨 친 `-C` 는 한 낱말로 감싸고, 에픽 아닌 줄은
@@ -14738,7 +14758,7 @@ mod tests {
     /// 자리다. `.git/` 과 `node_modules/` 는 글이 일부러 안 댄다(그 밑에서 일하는 사람이 없다).
     #[test]
     fn rule_two_names_every_directory_it_skips() {
-        let agents = crate::guide::agents();
+        let agents = crate::guide::reference();
         let at = agents.find("What counts is work inside the repository").expect("규칙 2 의 글이 없다");
         let list = &agents[at..at + agents[at..].find(" do not.").expect("규칙 2 의 목록이 안 끝난다")];
         let named: Vec<&str> = list.split('`').skip(1).step_by(2).filter_map(|w| w.strip_suffix('/')).collect();

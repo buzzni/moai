@@ -245,6 +245,7 @@ mod os {
         }
         let bound = server::bind(&path)
             .map_err(|e| failed(say(lang, "daemon.bind_failed"), &[("said", &e.to_string())], code::ERROR))?;
+        server::install_signal_handlers().map_err(no_lock)?;
         let socket = shown(&path);
         let first = match ctx.json {
             true => serde_json::to_string(&Started {

@@ -102,13 +102,14 @@ fn edit_and_show_agree_on_blocker_members_in_each_live_state() {
         }
         repo.write(".moai/issues.jsonl", &live);
         repo.write(".moai/archive/2026.jsonl", &format!("{archived}\n"));
+        let output = repo.run(&["show", "argos-xxxx"]);
         if state == "opaque" {
-            let edited = text(repo.run(&["edit", "argos-xxxx", "--title", "renamed"]));
-            let blocker = edited.lines().find(|l| l.contains("argos-bbbb")).unwrap_or_default();
-            assert!(!blocker.contains('✓'), "opaque live member must suppress its archived copy: {edited}");
-            continue;
+            assert!(!output.status.success());
+            assert!(String::from_utf8_lossy(&output.stderr).contains("unreadable"));
+        } else {
+            assert!(output.status.success());
         }
-        let shown = text(repo.run(&["show", "argos-xxxx"]));
+        let shown = String::from_utf8(output.stdout).unwrap();
         let edited = text(repo.run(&["edit", "argos-xxxx", "--title", "renamed"]));
         let line = |out: &str| out.lines().find(|l| l.contains("argos-bbbb")).unwrap_or_default().to_owned();
         assert!(!line(&shown).is_empty(), "{state}: {shown}");
@@ -116,10 +117,53 @@ fn edit_and_show_agree_on_blocker_members_in_each_live_state() {
         if state == "done" {
             assert!(line(&shown).contains('✓'), "{shown}");
         }
-        if state == "reopened" {
+        if state == "reopened" || state == "opaque" {
             assert!(!line(&shown).contains('✓'), "{shown}");
         }
+        if state == "opaque" {
+            // The epic itself agrees: the archived copy of its opaque member is no done member.
+            let epic: serde_json::Value =
+                serde_json::from_slice(&repo.run(&["show", "argos-bbbb", "--json"]).stdout).unwrap();
+            assert_eq!(epic["derived_status"], "todo", "{epic}");
+            assert_eq!(epic["members"], serde_json::json!([]), "{epic}");
+            for args in [&["show", "--all", "--archived"][..], &["show", "--all", "--archived", "--tree"][..]] {
+                let out = String::from_utf8(repo.run(args).stdout).unwrap();
+                assert!(out.contains("argos-bbbb"), "{args:?}: {out}");
+                assert!(!out.contains("argos-bbbb.aaa"), "stale archived member in {args:?}: {out}");
+                let epic_line = out.lines().find(|l| l.contains("argos-bbbb")).unwrap();
+                assert!(!epic_line.contains('✓'), "stale done rollup in {args:?}: {out}");
+            }
+            let rows: serde_json::Value =
+                serde_json::from_slice(&repo.run(&["show", "--all", "--archived", "--json"]).stdout).unwrap();
+            let rows = rows.as_array().unwrap();
+            assert!(!rows.iter().any(|r| r["id"] == "argos-bbbb.aaa"), "{rows:?}");
+            let epic = rows.iter().find(|r| r["id"] == "argos-bbbb").unwrap();
+            assert_ne!(epic["derived_status"], "done", "{epic}");
+            let status = repo.run(&["status", "--json"]);
+            let status: serde_json::Value = serde_json::from_slice(&status.stdout).unwrap();
+            assert_eq!(status["epics"][0]["derived_status"], "todo", "{status}");
+            assert!(
+                status["warnings"].as_array().unwrap().iter().any(|w| w["kind"] == "blocked_stale"
+                    && w["ids"].as_array().unwrap().iter().any(|id| id == "argos-xxxx")),
+                "{status}"
+            );
+        }
     }
+}
+
+/// Only the archive copies of an id an unreadable live line holds are set aside. An unreadable line elsewhere
+/// must not change how `show` unfolds an epic whose readable member also has an archive twin.
+#[test]
+fn an_unrelated_unreadable_line_leaves_show_of_an_archive_twin_alone() {
+    let repo = Repo::new("twin");
+    let live = format!("{}\n{}\n", row("argos-eeee", "epic", "todo"), row("argos-eeee.mmm", "issue", "todo"));
+    repo.write(".moai/issues.jsonl", &live);
+    repo.write(".moai/archive/2026.jsonl", &format!("{}\n", row("argos-eeee.mmm", "issue", "done")));
+    let shown = |repo: &Repo| String::from_utf8(repo.run(&["show", "argos-eeee"]).stdout).unwrap();
+    let before = shown(&repo);
+    assert!(before.contains("argos-eeee.mmm"), "{before}");
+    repo.write(".moai/issues.jsonl", &format!("{live}{}\n", row("argos-zzzz", "future-kind", "todo")));
+    assert_eq!(shown(&repo), before);
 }
 
 #[cfg(target_os = "linux")]

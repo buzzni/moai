@@ -31,6 +31,10 @@ use std::sync::{Arc, Mutex};
 pub(crate) struct Side {
     /// 이 요청이 선 자리 — CLI 에서 `moai -C <여기>` 로 부른 것과 같다.
     pub here: PathBuf,
+    /// Daemon requests resolve an omitted actor from git, not the daemon's environment.
+    pub ignore_env_actor: bool,
+    /// Snapshot lines the request could not parse, with their IDs when recoverable.
+    pub unread_rows: Vec<Option<String>>,
     /// stderr 로 갈 줄, 낸 차례대로(`cmd::tell`).
     pub told: Vec<String>,
     /// 명령이 선 뒤에만 낼 줄(`cmd::tell_after`) — 넘어진 판에서는 버린다.
@@ -69,9 +73,9 @@ pub(crate) fn current() -> Option<Shared> {
 /// 거짓이고, 그래서 아래 자리들이 이것으로 가른 갈래는 CLI 에서 서지 않는다.
 ///
 /// 이 물음을 맨 `current().is_some()` 으로 자리마다 다시 적던 판은, 환경이나 프로세스에 기대는 새 자리가 그 검사를
-/// 빠뜨리기 쉬웠다. 요청 안에서 다르게 하는 일은 모두 이것으로 묻고, 여기 적는다 — 무엇을 가르는지가 한 자리에 선다.
+/// 빠뜨리기 쉬웠다. 요청 안에서 다르게 하는 일은 이것으로 묻고, 여기 적는다 — 무엇을 가르는지가 한 자리에 선다. 하나만
+/// 다른 길로 묻는다: `model::actor` 는 `Side::ignore_env_actor` 를 본다(moai-wbdh.sbd).
 ///
-/// - `model::actor` — 데몬의 `MOAI_ACTOR` 를 안 읽는다. 요청을 보낸 사람이 아니다(moai-3hgm.k7s)
 /// - `store::here_wanted` — 데몬의 `MOAI_HERE` 를 안 읽는다. 딸린 워크트리로 간 요청은 주 체크아웃의 트래커로 옮겨
 ///   간다(리뷰 moai-3hgm.puw 3번)
 /// - `hook::record_own_picks` — 세션의 집기를 안 적는다. 데몬의 `CLAUDE_CODE_SESSION_ID` 는 요청의 것이 아니다

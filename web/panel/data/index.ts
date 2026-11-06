@@ -198,7 +198,7 @@ export class IssueIndex {
     // which need not be the later one drawn). Among lines that are not folders the first stands until one comes.
     const segs = new Map<string, Seg>()
     for (const line of tree) if (line.id !== undefined && (line.dir === true || !segs.has(line.id))) segs.set(line.id, segFor(line.id, kindOf(line)))
-    const segOfHandle = (handle: string): Seg => (handle === 'none' ? NO_MILESTONE : handle === 'lost' ? LOST : segs.get(handle) ?? `i:${handle}`)
+    const segOfHandle = (handle: string): Seg => (handle.startsWith('group:') ? handle : handle === 'none' ? NO_MILESTONE : handle === 'lost' ? LOST : segs.get(handle) ?? `i:${handle}`)
     const placed = new Set<string>()
     const place = (key: string): Place => {
       let found = this.places.get(key)
@@ -225,7 +225,7 @@ export class IssueIndex {
       const home = (line.home ?? []).map(segOfHandle)
       if (line.id === undefined) {
         // A bucket: it stands where its home says, in the tree's place among the rows there.
-        const seg = line.path === 'lost' ? LOST : NO_MILESTONE
+        const seg = line.kind === 'group' && line.path ? line.path : line.path === 'lost' ? LOST : NO_MILESTONE
         place(pathKey(home)).here.push({ seg })
         place(pathKey([...home, seg]))
         continue

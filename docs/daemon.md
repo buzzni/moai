@@ -22,15 +22,15 @@ What it is not:
 
 `start` stays in the foreground. There is no background mode, so give the process to systemd or launchd, or end the line with `&`. Once the socket listens, `start` prints one line and then serves:
 
-    daemon listening on /run/user/1000/moai/daemon.socket — pid 4242, moai 0.48.0. moai daemon stop or Ctrl-C stops it
+    daemon listening on /run/user/1000/moai/daemon.socket — pid 4242, moai 0.52.0. moai daemon stop or Ctrl-C stops it
 
 With `--json` that line is `{"started": true, "pid": …, "version": "…", "proto": 1, "socket": "…"}`. A program that launches the daemon can read this line and then connect.
 
 There is one daemon per user. A second `start` never runs a second daemon:
 
 - If the running one is the same version (the version number and `proto` match), `start` says so and exits 0 (`started` is `false` under `--json`).
-- If the running one is another version, `start` names both versions, exits non-zero with the code `version_mismatch`, and leaves the running daemon alone. A long-running process does not pick up a replaced binary, so a daemon started before `cargo build` or `moai update` keeps answering as the old version. Run `moai daemon stop`, then `moai daemon start`. `stop` works on a daemon of any version.
-- If a daemon died and left its socket, `start` removes the leftover and starts. Ctrl-C also leaves the socket behind; the next `start` clears it.
+- If the running one is another version, `start` names both versions, exits non-zero with the code `version_mismatch`, and leaves the running daemon alone. A long-running process does not pick up a replaced binary, so a daemon started before `cargo build` or `moai update` keeps answering as the old version. Restart it through its service manager, or stop and start it again if you started it yourself. See [Upgrade the daemon](#upgrade-the-daemon). `stop` works on a daemon of any version.
+- If a daemon died and left its socket, `start` removes the leftover and starts.
 - If a file at the socket path is not a socket of yours, `start` refuses and touches nothing.
 
 `stop` exits 0 when it stopped the daemon or when none was running (`stopped` is `false`). `--json` gives `{stopped, pid, socket}`. It works on a daemon of any version and on one that is at its connection cap (see [The protocol](#the-protocol)). It waits up to 10 seconds for the daemon to end; if the daemon does not end in that time, `stop` fails with a timeout. What the daemon does while it ends is in [Stopping a daemon](#stopping-a-daemon).
@@ -50,6 +50,52 @@ There is one daemon per user. A second `start` never runs a second daemon:
 `status` only reads and exits 0 whether or not a daemon runs. Read `running` and `same_version`, not the exit code. It fails (non-zero) when a file at the socket path is not your socket, when the answer is not a daemon's, or when the daemon is so full that it cannot even answer `hello`. The last case is `busy` and the message names the pid.
 
 `start` has the same version rule: it compares the version number and `proto`, so after you rebuild the same version, a running daemon still reads as "the same build" and keeps the old code. Stop it and start it again by hand.
+
+## Run as a user service
+
+For systemd, save the following as `~/.config/systemd/user/moai-daemon.service`, replacing the executable path with the absolute path to your installed `moai`:
+
+```ini
+[Unit]
+Description=moai read-only daemon
+
+[Service]
+ExecStart=/home/me/.local/bin/moai daemon start
+Restart=on-failure
+
+[Install]
+WantedBy=default.target
+```
+
+Run `systemctl --user daemon-reload`, then `systemctl --user enable --now moai-daemon.service`. Use `systemctl --user status moai-daemon.service` to inspect it and `systemctl --user stop moai-daemon.service` to stop it. `Restart=on-failure` does not restart a clean stop.
+
+On macOS, save this as `~/Library/LaunchAgents/com.example.moai-daemon.plist`, replacing the executable path with the absolute path to your installed binary and the label with one you control:
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key><string>com.example.moai-daemon</string>
+    <key>ProgramArguments</key>
+    <array><string>/Users/me/.local/bin/moai</string><string>daemon</string><string>start</string></array>
+    <key>RunAtLoad</key><true/>
+    <key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>
+</dict>
+</plist>
+```
+
+Load it with `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.example.moai-daemon.plist`. Remove it from the user domain with `launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.example.moai-daemon.plist`.
+
+A service does not inherit your shell's environment, and the socket directory depends on it (see [Where the socket is](#where-the-socket-is)). After the service starts, run `moai daemon status` in a terminal: if it says no daemon is running, check the service status and whether the service chose another directory. Set `MOAI_CTL_DIR` to the same directory for the service (`Environment=` in the unit, `EnvironmentVariables` in the plist) and in your shell.
+
+## Upgrade the daemon
+
+1. Run `moai update`. On Unix, after a successful installation it checks the newly installed binary's daemon status. If a daemon of another version or protocol still runs, it prints a restart notice to stderr (under `--json`, the `daemon_restart` key below instead). The daemon is not restarted automatically.
+2. Restart it through whatever keeps it running. For the systemd service above, run `systemctl --user restart moai-daemon.service`; for the launchd service above, `launchctl kickstart -k gui/$(id -u)/com.example.moai-daemon`. For a daemon you started yourself, run `moai daemon stop`, then `moai daemon start` again where it ran before. Do not restart a service with `moai daemon stop`: the daemon exits 0, neither service above restarts a clean exit, and a `moai daemon start` typed afterwards runs in your terminal, outside the service.
+3. Run `moai daemon status` to check the replacement. A daemon rebuilt with the same version and protocol is indistinguishable from the old build by this check, so restart it manually after such a rebuild.
+
+For `moai update --json`, the result includes `"daemon_restart": true` only when that post-install check identifies a running daemon with a different version or protocol and can read its version and pid. The key is absent on other paths, including a failed update, a failed status check, no running daemon, and Windows; its absence does not prove that no restart is needed. The update exit status is unchanged by the check.
 
 ## Where the socket is
 
@@ -81,7 +127,7 @@ Messages are [JSON-RPC 2.0](https://www.jsonrpc.org/specification). Each request
 ### Check the version with `hello`
 
     {"jsonrpc":"2.0","id":1,"method":"hello","params":{"proto":1}}
-    {"id":1,"jsonrpc":"2.0","result":{"pid":4242,"proto":1,"version":"0.48.0"}}
+    {"id":1,"jsonrpc":"2.0","result":{"pid":4242,"proto":1,"version":"0.52.0"}}
 
 `proto` is the message version the client speaks; this daemon speaks `1`. A client with an older `proto` is answered. A client with a newer one gets error `-32001` with `data` `{code: "unsupported_proto", proto, client_proto, version, pid}`: upgrade the daemon. A `hello` with no integer `proto` is `-32602`.
 
@@ -115,8 +161,10 @@ Every method takes a `params` object. These keys are known to every method:
 |---|---|
 | `project` | Absolute path of a registered project. Required, except for `hello`, `ping`, `project.ls` and `daemon.shutdown`. |
 | `actor` | `"Name (email)"`, like `--user`. Otherwise the project's git config (`user.name`, `user.email`) decides. `MOAI_ACTOR` is **not** read: it belongs to the shell that started the daemon, which says nothing about who sent the request. With neither, a write fails with `-32000` and `data.code` `no_actor`, and a read sets nothing apart as yours or someone else's. The daemon never asks a person. |
-| `lang` | Words for messages: `en`, `ko`, `zh`, `ja`, `es`. Otherwise `MOAI_LANG`, then your user config. |
-| `tz` | A time zone name or POSIX rule. Otherwise as the CLI reads it. |
+| `lang` | Words for messages: `en`, `ko`, `zh`, `ja`, `es`. Otherwise the daemon's `MOAI_LANG`, then its user config. |
+| `tz` | A time zone name or POSIX rule. Otherwise the daemon's `TZ`, then its system time zone. |
+
+The response does not report the resolved actor. Clients that need to know whose view they receive should supply `actor` explicitly. The daemon's home and configuration environment also determine user settings and status installation notices.
 
 `project` must be a path you registered with `moai project add`, written as an absolute path. A relative path or an unregistered one is `-32000` with `data.code` `not_registered`. A registered directory that has no `.moai` of its own is `not_a_project`; the daemon does not search upward for a parent's tracker. The registered list is read on every request, so a project added while the daemon runs works at once. A linked git worktree is not covered by registering its main checkout: register the worktree path itself (`moai project add <worktree>`) to send requests for it, and they read and write the main checkout's tracker, as the CLI does there.
 
@@ -129,13 +177,15 @@ Any other key a method does not list is refused with `-32602`, naming the key. A
 | `status` | `worktree: bool` | `moai status --json` |
 | `ready` | `worktree: bool`, `limit: int >= 1` | `moai ready --json` |
 | `prime` | `worktree: bool` | `moai prime --json` |
-| `show` | `id: string` (an issue id or a kind), `tree`, `removed`, `worktree`, `reverse: bool`, `fields: string or [string]`, `sort: string`, `limit: int >= 1`, `after: string`, and the filters below | `moai show … --json` |
+| `show` | `id: string` (an issue id or a kind), `tree`, `removed`, `worktree`, `reverse: bool`, `fields: string or [string]`, `sort: string`, `group: string`, `limit: int >= 1`, `after: string`, and the filters below | `moai show … --json` |
 | `stats` | `by: string or [string]`, `bucket: "day" or "week"`, `last: int 1..1000`, and the filters below | `moai stats --json` |
 | `project.ls` | none (`project` is not used) | `moai project ls --json` |
 | `changes` | `cursor: string` | no CLI command; see below |
 | `daemon.shutdown` | none; replies `{pid}` and the daemon exits | `moai daemon stop` |
 
 The filters for `show` and `stats` are named like the CLI flags with `-` written as `_`: `status`, `tag`, `no_tag`, `epic`, `milestone`, `parent`, `priority`, `assignee`, `since`, `created`, `done` and `filter` take a string, a number or an array of them; `type` and `grep` take a string; `stale` takes an integer; `deferred`, `all` and `archived` take a boolean. A comma inside a string means "or", and an array means "and" — except `assignee`, where an array also means "or". The meaning is the CLI's, because the daemon runs the same command code.
+
+`sort` takes what `moai show --sort` takes (a preset, a field list, or `milestone=…;epic=…;item=…`), and `group` what `--group` takes. A preset that picks a grouping (`people` groups by assignee) yields to a `group` you send, as on the CLI.
 
 `show` has no `raw` or `as_plan`: those flags print text, not a value.
 
@@ -232,6 +282,10 @@ The reply `value` is `{changed, cursor, removed, reset}`:
 
 ### What is compared
 
+The `session` key is excluded from row fingerprints: it changes with the clock and with heartbeats, not with edits. If a client shows it, it must re-read it independently of `changed`. (`archived` is excluded too, but the compared list never carries it: a row that ages past `archive_days` leaves the list and is in `removed`, below.)
+
+When a line of `.moai/issues.jsonl` cannot be read, `changes` retains the previous fingerprint for its ID while no readable row has that ID, and does not report it as removed. If the ID cannot be recovered, all missing IDs are retained until a complete read. Unreadable lines in archive files retain nothing, because archived rows are not in the compared list. Diagnostics appear in `messages`; an unreadable line in `.moai/issues.jsonl` also sets `partial`.
+
 The daemon remembers recent snapshots in memory: per project up to 8, and about 32 MiB for all projects together. When the memory is full, the snapshot used least recently is dropped. A cursor names one remembered snapshot. On each call the daemon reads the project again, compares it with the snapshot of your cursor row by row, and remembers the new one.
 
 - The rows compared are the list `show` gives with `all: true` and no other param, including the derived values (`derived_status`, `derived_epic`, `derived_milestone`, …). So an edit that came in with `git pull`, a merge or a hand edit is named even when its `updated_at` is old. An epic whose column changed because its last member closed is named too, and so is a member whose inherited milestone changed.
@@ -293,6 +347,8 @@ A request that comes in on an open connection after step 1 is not run. It gets `
 
 The accept loop looks at the stop flag every 0.5 second, so the daemon ends even when its own wake-up connection fails.
 
+Ctrl-C (SIGINT) and SIGTERM stop the daemon the same way: it stops accepting, finishes the requests it is running (up to 5 seconds), removes its socket, releases `daemon.lock` and exits 0. So `kill <pid>`, `systemctl stop` and `launchctl stop` end it cleanly. A second signal while it drains ends the process at once and can leave the socket behind; the next `start` clears it. A SIGINT that was ignored when the daemon started, as a script's `moai daemon start &` ignores it, stays ignored, so a Ctrl-C meant for the script does not stop the daemon.
+
 One case has no tool path yet (backlog `moai-69bs`): if the socket file was removed while the daemon runs, new clients cannot find it. `moai daemon stop` says "no daemon is running", `status` says the same, and `moai daemon start` waits 5 seconds and fails with "another daemon holds … but does not answer yet", because the daemon still holds `daemon.lock`. A client that is still connected can send `daemon.shutdown` on its open connection. Otherwise end the process by its pid (the `start` line printed it), for example with `kill <pid>`.
 
 ## Try it with `socat`
@@ -301,7 +357,7 @@ One case has no tool path yet (backlog `moai-69bs`): if the socket file was remo
 
     printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"hello","params":{"proto":1}}' \
       | socat - UNIX-CONNECT:"$sock"
-    {"id":1,"jsonrpc":"2.0","result":{"pid":4242,"proto":1,"version":"0.48.0"}}
+    {"id":1,"jsonrpc":"2.0","result":{"pid":4242,"proto":1,"version":"0.52.0"}}
 
     moai project add ~/repo
     printf '%s\n' '{"jsonrpc":"2.0","id":2,"method":"ready","params":{"project":"/home/me/repo","limit":3}}' \
@@ -362,3 +418,5 @@ else:
 ## Windows
 
 Windows is not supported yet. The build works, `moai daemon start` and `stop` report `unsupported`, and `moai daemon status` says `supported: false` and exits 0. A named pipe transport is left for later. Everything else in moai runs on Windows as before.
+
+Decided in: moai-wbdh, moai-ou5y

@@ -6,6 +6,7 @@
  */
 import { closedGroup, isBacklog, isDone, isWork, LOST, pathKey, type IssueIndex, type Keep, type Path, type Row, type Seg } from '../data/index.js'
 import type { ViewSettings } from '../store.js'
+import { groupBuckets } from './group-adapter.ts'
 
 /** The columns moai has when `.moai/config.toml` names none, until `/api/boot` gives the project's own. */
 export const FALLBACK_STATUSES: readonly string[] = ['todo', 'in_progress', 'review', 'done']
@@ -24,10 +25,13 @@ export interface BoardColumn {
 export interface BoardLane {
   /** The milestone's segment (`m:<id>`, `m:`, {@link LOST}); null for the one lane inside a place. */
   seg: Seg | null
+  label?: string
+  detail?: string
   /** The milestone row of the lane, when it has one. */
   at?: number
   /** Cards before this lane's fold hides them. */
   count: number
+  done?: number
   folded: boolean
   columns: BoardColumn[]
 }
@@ -59,6 +63,11 @@ export interface BoardLook {
   match?: Keep
   reveal?: boolean
   /** Paths folded during this board visit. Search reveals matches without changing this set. */
+  group?: string
+  itemOrder?: readonly import('./sort-panel.ts').SortPanelField[]
+  levelOrder?: readonly import('./sort-panel.ts').SortPanelField[]
+  milestoneOrder?: readonly import('./sort-panel.ts').SortPanelField[]
+  groupedTree?: readonly import('../data/index.ts').TreeRow[]
   shut?: ReadonlySet<string>
 }
 
@@ -134,10 +143,22 @@ export function groupBoard(index: IssueIndex, look: BoardLook, known: readonly s
   // `descendants` is in the tree's order, which is the order the list draws: a card stands where its row stands.
   const make = (seg: Seg | null, members: number[], at?: number): BoardLane => {
     const folded = !look.reveal && seg !== null && !!look.shut?.has(pathKey([seg]))
-    return { seg, at, count: members.length, folded,
-      columns: keys.map((key) => ({ key, cards: folded ? [] : members.filter((m) => columnOf(index, m) === key) })) }
+    const ordered = members
+    return { seg, at, count: members.length, done: members.filter((m) => isDone(index.rows[m]!)).length, folded,
+      columns: keys.map((key) => ({ key, cards: folded ? [] : ordered.filter((m) => columnOf(index, m) === key) })) }
   }
 
+  if (look.group === 'none') {
+    const server = look.groupedTree && groupBuckets(index, path, (at) => shown(at), 'none', known, false, look.itemOrder, look.levelOrder, look.groupedTree)
+    const members = server ? server.flatMap((bucket) => bucket.members) : kept
+    return { keys, lanes: members.length ? [make(null, members)] : [], total: members.length, pinned }
+  }
+  if (look.group && look.group !== 'structure') {
+    const shownSet = new Set(kept)
+    const lanes = groupBuckets(index, path, (at) => shownSet.has(at), look.group, known, false, look.itemOrder, look.levelOrder, look.groupedTree)
+      .map((bucket) => ({ ...make(bucket.seg, bucket.members), label: bucket.label, detail: bucket.detail }))
+    return { keys, lanes, total: kept.length, pinned }
+  }
   if (path.length) return { keys, lanes: kept.length ? [make(null, kept)] : [], total: kept.length, pinned }
 
   const bySeg = new Map<Seg | null, number[]>()

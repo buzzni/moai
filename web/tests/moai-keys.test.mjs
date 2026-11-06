@@ -958,7 +958,7 @@ test('projects: digits never fire inside the search or filter prompt, nor in the
   assert.equal(typed.preventDefault, false)
   const sorter = setup({ ctx: { mode: 'sorter', projects: ['argos', 'moai'] } })
   sorter.key('1')
-  assert.deepEqual([...prompt.ids(), ...sorter.ids()], [])
+  assert.deepEqual([...prompt.ids(), ...sorter.ids()], ['sorter.presetOne'])
 })
 
 test('projects: the help has one row for all nine, the bare and SPC p forms side by side', () => {

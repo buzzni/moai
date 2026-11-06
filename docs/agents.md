@@ -12,11 +12,12 @@ flags are in [the CLI reference](cli.md), and the words in
 
 ## Tell the agent how the tracker works
 
-`moai init` writes a managed block into `AGENTS.md`: every command an agent needs
-and the three forks it meets (create or backlog, defer or done, split into an epic or
-not). The block sits between `<!-- moai:begin … -->` and `<!-- moai:end -->`, and
-only the block is rewritten — your own prose around it stays, and the issues and
-the journal are never touched.
+`moai init` writes a managed block into `AGENTS.md`: the everyday commands, the three
+forks an agent meets (create or backlog, defer or done, split into an epic or not), and the
+rules it always keeps. Every other command and rule is in the `moai` skill's
+`references/commands.md`, which `moai skill install` plants. The block sits between
+`<!-- moai:begin … -->` and `<!-- moai:end -->`, and only the block is rewritten — your
+own prose around it stays, and the issues and the journal are never touched.
 
 - **Claude reads `CLAUDE.md`, not `AGENTS.md`.** `init` does not copy the block
   there (two copies would drift); put one `@AGENTS.md` line into `CLAUDE.md` and
@@ -34,7 +35,7 @@ The first `moai init` in a terminal asks, and `--guide` says it without asking:
 
 | `--guide` | What `init` writes | When to pick it |
 |---|---|---|
-| `block` | the whole guide inside the `AGENTS.md` block | what `init` has always done, and still does when a script or an agent runs it |
+| `block` | the guide inside the `AGENTS.md` block | what `init` has always done, and still does when a script or an agent runs it |
 | `file` | the guide in `.moai/guide.md`, and a few lines in the block that point at it | `AGENTS.md` is yours and you want it short — the screen's pick for a committed tracker |
 | `hook` | nothing in `AGENTS.md`; the hooks tell Claude instead | the tracker is kept out of git — the screen's pick there |
 | `none` | nothing (`--no-agents`) | you hand the guide over some other way |
@@ -486,10 +487,12 @@ Machine-readable lines keep their format in either mode. JSON includes `detail`,
    line naming the work and telling the worker to read the
    [brief](glossary.md#brief) — the worker's numbered steps, a file of the
    supervisor skill (`references/worker.md`) given by its absolute path — and
-   from which step to follow it. The rare branches (you away, a subdirectory
-   project, carrying on stalled work, a review the hook keeps refusing, the review
-   brief) stand beside it in `references/worker-branches.md`, which the worker
-   reads when its assignment takes one. The lines after that fill this assignment — the
+   from which step to follow it. The review brief a subagent worker hands its
+   reviewer stands in that file too. The rare branches (you away, a subdirectory
+   project, carrying on stalled work, a review the hook keeps refusing) stand
+   beside it in `references/worker-branches.md`, and the milestone branch and
+   unfolding a backlog in `references/worker-setup.md`; the worker reads those
+   when its assignment takes one. The lines after that fill this assignment — the
    backlog, the model, the effort and the difficulty, whether the worker is a
    subagent or a session, the models and efforts per role it may hand pieces of
    its work to (`Subagents:` — `none` for a Codex worker), the work running alongside, the root branch and the
@@ -733,10 +736,12 @@ backlog ID and `<root>` the repository root; other text is literal. Without the
 table the message is unchanged. The setting is the repository's only — your user
 config cannot add lines. `supervise message` refuses a key other than
 `extra_lines`, a second `extra_lines`, a value that is not an array of
-double-quoted strings, and an entry holding a line break or another control
-character; other commands are not affected. Keep the array on one line and
-leave `\"` out of the entries: a multi-line array or an unbalanced quote is a
-malformed line in this file and stops every command. Under cmux the supervisor
+TOML strings, and an entry holding a line break or another control
+character; other commands are not affected. The array can span lines, use
+literal or basic strings, and include comments and a trailing comma. Upgrade all
+moai binaries used for this repository before using a multiline array: v0.49
+and earlier reject the configuration for every command. JSON-only escapes such
+as `\/` are not valid TOML and are refused; write `/` instead. Under cmux the supervisor
 puts the same lines in the same place, or assembles the message with
 `supervise message` (moai-n6fs).
 
@@ -991,7 +996,7 @@ worker's line is written by the supervisor.
   where an incoming message waits for its person's approval — look at that
   window
 
-Decided in: moai-2w0s moai-hxma moai-0zjo moai-nqdc moai-bl3x moai-gelm moai-tllo moai-mdzx moai-xs2h moai-h8tn moai-snyk moai-u5wr moai-b6cw moai-ew4o moai-dhxm moai-ml0d moai-nas5 moai-kxkw moai-dj4j moai-54yc moai-bkn4 moai-084j moai-keka moai-zynt moai-j9nf moai-jtvp moai-obxm moai-six5 moai-iu73 moai-r0x8 moai-u99i moai-uqf7 moai-p5sz moai-xpa8 moai-9tqo moai-pxui moai-uzhx moai-wk7i moai-jdwk moai-1m21 moai-d1zn moai-xvvr moai-ns7a moai-zgc1 moai-4v3h moai-i26i moai-p9dh moai-5w6i
+Decided in: moai-2w0s moai-hxma moai-0zjo moai-nqdc moai-bl3x moai-gelm moai-tllo moai-mdzx moai-xs2h moai-h8tn moai-snyk moai-u5wr moai-b6cw moai-ew4o moai-dhxm moai-ml0d moai-nas5 moai-kxkw moai-dj4j moai-54yc moai-bkn4 moai-084j moai-keka moai-zynt moai-j9nf moai-jtvp moai-obxm moai-six5 moai-iu73 moai-r0x8 moai-u99i moai-uqf7 moai-p5sz moai-xpa8 moai-9tqo moai-pxui moai-uzhx moai-wk7i moai-jdwk moai-1m21 moai-d1zn moai-xvvr moai-ns7a moai-zgc1 moai-4v3h moai-i26i moai-p9dh moai-5w6i moai-w0zr moai-8rf1
 
 ## Archive storage
 

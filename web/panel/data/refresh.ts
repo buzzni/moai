@@ -33,8 +33,12 @@ export interface RefresherOptions {
    * child the server cut off): its stamp is not counted as seen, so the next look reads again rather than leaving the
    * rows of before on screen until someone writes the tracker. `'failed'` is `false` for a read that was answered
    * with a failure (not a cancel, which a person chose and which asks again at the usual pace): the next look waits `backoffMs`.
+   * `stamp` is the one read just before this load (null when it went unanswered). `reuse` is true only for a
+   * {@link Refresher.refresh} asked with `reuse` (an order or a grouping turned): answers read before at that same stamp
+   * may stand. The clock's reads and a person's refresh never reuse — a person refreshes to have everything read again,
+   * and a tree read at a stamp still changes with the day (`archive_days`) or with the server that answers it.
    */
-  load: (how: { automatic: boolean }) => Promise<void | boolean | 'failed'>
+  load: (how: { automatic: boolean; stamp: string | null; reuse: boolean }) => Promise<void | boolean | 'failed'>
   /** `/api/stamp`'s answer, or null when the server could not be reached. */
   stamp: () => Promise<string | null>
   /** The server could (true) or could not (false) be reached — told only when it changes. */
@@ -51,9 +55,10 @@ export interface RefresherOptions {
 export interface Refresher {
   /**
    * Reads now, whatever the stamp says (unless a read is running, which it then joins). `fresh` waits for a running
-   * read and then reads again: one that began before a write (a read mark) cannot hold what it wrote.
+   * read and then reads again: one that began before a write (a read mark) cannot hold what it wrote. `reuse` lets the
+   * load keep what it read before at the same stamp ({@link RefresherOptions.load}).
    */
-  refresh(how?: { fresh?: boolean }): Promise<void>
+  refresh(how?: { fresh?: boolean; reuse?: boolean }): Promise<void>
   /** Asks the stamp now and reads when it moved. */
   check(): Promise<void>
   /** A stamp pushed by the server; the same comparison and read path as polling. */
@@ -116,11 +121,11 @@ export function createRefresher(options: RefresherOptions): Refresher {
     options.onBackoff?.(now)
   }
 
-  function read(automatic: boolean, at: string | null): Promise<void> {
+  function read(automatic: boolean, at: string | null, reuse = false): Promise<void> {
     if (inFlight) return inFlight
     inFlight = (async () => {
       try {
-        const took = await options.load({ automatic })
+        const took = await options.load({ automatic, stamp: at, reuse })
         if (at !== null) seen = took === false || took === 'failed' ? null : at
         // A cancel (`false`) says nothing about the tracker, and neither does a read sent while the stamp went unanswered
         // (`at` null — a person's refresh with the server out of reach, which `onReach(false)` says already): the line
@@ -159,12 +164,16 @@ export function createRefresher(options: RefresherOptions): Refresher {
     return checking
   }
 
-  async function refresh(how: { fresh?: boolean } = {}): Promise<void> {
-    if (how.fresh && inFlight) await inFlight.catch(() => {})
-    // The stamp first, so a write after it is a later change and is read on the next look.
-    const at = await options.stamp()
+  async function refresh(how: { fresh?: boolean; reuse?: boolean } = {}): Promise<void> {
+    // Another read can start while the stamp is in flight. A fresh refresh waits for it and asks the stamp again.
+    let at: string | null
+    do {
+      if (how.fresh && inFlight) await inFlight.catch(() => {})
+      // The stamp first, so a write after it is a later change and is read on the next look.
+      at = await options.stamp()
+    } while (how.fresh && inFlight)
     reach(at !== null)
-    await read(false, at)
+    await read(false, at, how.reuse === true)
     schedule(at === null || failing ? backoffMs : pollMs)
   }
 
