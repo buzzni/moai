@@ -12,6 +12,8 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-11-06
+
 ### Added
 - `moai daemon` and `moai ctl` run on Windows, over a named pipe open to your account alone. `moai ctl` reaches an open explorer or web tab there, Ctrl-C stops the daemon cleanly, and `moai update` names a running daemon of another version. See `docs/daemon.md`. (moai-0yo3)
 
