@@ -167,10 +167,9 @@ Windows (below).
 
 ## Open windows and `moai ctl`
 
-`moai ctl` reaches an open explorer or web tab over a Unix socket, which the
-Windows builds do not have yet. `moai ctl ls` answers an empty list, and the
-commands that need a window answer `unsupported`. The web page still follows
-the tracker over its event stream. See [Control an open window](ctl.md).
+`moai ctl` reaches an open explorer or web tab over a named pipe open to your
+account alone, and `moai daemon` serves its API the same way. See
+[Control an open window](ctl.md) and [the daemon's Windows notes](daemon.md#windows).
 
 ## Build from source
 

@@ -210,7 +210,7 @@ fn ctl_state_without_a_window_says_no_window() {
     let output = moai(s.path(), &["ctl", "state", "--json"]);
     assert!(!output.status.success());
     let json: serde_json::Value = serde_json::from_slice(&output.stderr).unwrap();
-    assert_eq!(json["code"], if cfg!(unix) { "no_window" } else { "unsupported" });
+    assert_eq!(json["code"], if cfg!(any(unix, windows)) { "no_window" } else { "unsupported" });
 }
 
 #[test]
@@ -14615,11 +14615,15 @@ fn promote_human_preview_names_bodies_without_writing() {
     // 넘치는 `--body` 는 연습도 진짜도 거절한다 — 연습이 그 글을 재지 않으면 사람이 "좋다" 한 뒤에 진짜가 물린다.
     let big = "x".repeat(70_000);
     for dry in [true, false] {
-        let mut argv = vec!["backlog", "promote", idea.as_str(), "--from", "-", "--body", big.as_str()];
+        let plan = p.join("oversize-plan.md");
+        std::fs::write(&plan, "# new epic\n- sole\n").unwrap();
+        // 글은 stdin 으로 준다 — Windows 의 명령줄은 32K 에서 끊겨 70K 의 인자가 안 닿는다.
+        let plan = plan.display().to_string();
+        let mut argv = vec!["backlog", "promote", idea.as_str(), "--from", plan.as_str(), "--body", "-"];
         if dry {
             argv.push("--dry-run");
         }
-        let out = from_stdin(p, &argv, "# new epic\n- sole\n");
+        let out = from_stdin(p, &argv, &big);
         assert!(!out.status.success(), "dry_run={dry}: 넘치는 --body 를 받았다");
     }
     assert_eq!(issues(p), before);
@@ -33148,7 +33152,7 @@ fn next_event_stamp(reader: &mut std::io::BufReader<std::net::TcpStream>) -> Str
     }
 }
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 fn event_named(reader: &mut std::io::BufReader<std::net::TcpStream>, want: &str) -> serde_json::Value {
     use std::io::BufRead as _;
     let mut event = String::new();
@@ -33166,7 +33170,7 @@ fn event_named(reader: &mut std::io::BufReader<std::net::TcpStream>, want: &str)
     }
 }
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 fn ctl_post(port: u16, path: &str, body: &str, content_type: &str, token: bool) -> (u16, String) {
     use std::io::{Read as _, Write as _};
     let mut stream = dial(port);
@@ -33179,7 +33183,7 @@ fn ctl_post(port: u16, path: &str, body: &str, content_type: &str, token: bool) 
 }
 
 #[test]
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 fn web_ctl_lists_a_visible_tab_and_reads_its_state() {
     let s = init("web-ctl-tab");
     let web = serve(s.path());
@@ -33217,7 +33221,7 @@ fn web_ctl_lists_a_visible_tab_and_reads_its_state() {
 }
 
 #[test]
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 fn web_ctl_reply_needs_origin_token_and_json() {
     let s = init("web-ctl-reply-guard");
     let web = serve(s.path());
@@ -33235,7 +33239,7 @@ fn web_ctl_reply_needs_origin_token_and_json() {
 }
 
 #[test]
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 fn web_ctl_reply_body_is_capped() {
     use std::io::{Read as _, Write as _};
     let s = init("web-ctl-cap");
@@ -33261,7 +33265,7 @@ fn a_body_on_any_other_path_is_still_refused() {
 }
 
 #[test]
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 fn web_ctl_gone_when_the_stream_ends() {
     let s = init("web-ctl-gone");
     let web = serve(s.path());
@@ -33279,7 +33283,7 @@ fn web_ctl_gone_when_the_stream_ends() {
 }
 
 #[test]
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 fn web_ctl_propose_reaches_a_tab_and_returns_its_answer() {
     let s = init("web-ctl-propose");
     let web = serve(s.path());
@@ -33331,7 +33335,7 @@ fn web_ctl_propose_reaches_a_tab_and_returns_its_answer() {
 /// A given `--user` is given (`model::actor`): `propose` refuses a malformed one the way every other ctl verb does,
 /// instead of putting an unsigned card in front of the person (review moai-4xmq.sqe 6).
 #[test]
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 fn web_ctl_propose_refuses_a_malformed_user_before_any_card() {
     let s = init("web-ctl-propose-bad-user");
     let web = serve(s.path());
@@ -33349,7 +33353,7 @@ fn web_ctl_propose_refuses_a_malformed_user_before_any_card() {
 }
 
 #[test]
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 fn web_ctl_plan_applies_the_requested_day() {
     let s = init("web-ctl-caller");
     let issue = field(&ok(s.path(), &["add", "planned row", "--json"]), "id");
@@ -33381,7 +33385,7 @@ fn web_ctl_plan_applies_the_requested_day() {
 }
 
 #[test]
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 fn web_ctl_write_refuses_a_request_without_an_actor() {
     let s = init("web-ctl-no-actor");
     let issue = field(&ok(s.path(), &["add", "planned row", "--json"]), "id");
@@ -33454,7 +33458,7 @@ fn web_events_refuse_a_foreign_host() {
 }
 
 #[test]
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 fn web_events_reserve_the_slot_until_a_tab_resumes_or_its_grace_ends() {
     let s = init("web-events-reserved-resume");
     let web = serve(s.path());
@@ -33478,35 +33482,6 @@ fn web_events_reserve_the_slot_until_a_tab_resumes_or_its_grace_ends() {
     assert_eq!(event_named(&mut resumed, "proposal")["id"], card["id"]);
     assert_eq!(get(web.port, "/api/stamp").0, 200);
     drop(others);
-}
-
-// Windows streams have no ctl identity to reserve, so anonymous capacity returns immediately.
-#[test]
-#[cfg(not(unix))]
-fn web_events_give_their_slot_back_when_the_tab_goes() {
-    let s = init("web-events-release");
-    let web = serve(s.path());
-    let mut streams = Vec::new();
-    for _ in 0..3 {
-        let mut stream = events(web.port);
-        next_event_stamp(&mut stream);
-        streams.push(stream);
-    }
-    drop(streams);
-    let until = std::time::Instant::now() + std::time::Duration::from_secs(5);
-    loop {
-        let mut stream = dial(web.port);
-        use std::io::{Read as _, Write as _};
-        write!(stream, "GET /api/events HTTP/1.1\r\nHost: 127.0.0.1:{}\r\n\r\n", web.port).unwrap();
-        stream.set_read_timeout(Some(std::time::Duration::from_secs(2))).unwrap();
-        let mut start = [0; 12];
-        stream.read_exact(&mut start).unwrap();
-        if &start == b"HTTP/1.1 200" {
-            break;
-        }
-        assert!(std::time::Instant::now() < until, "closed streams did not return their slots");
-        std::thread::sleep(std::time::Duration::from_millis(100));
-    }
 }
 
 /// 본문 없는 POST 하나 — `Origin` 을 줄 때만 싣는다. 브라우저가 보내는 꼴이다(읽음 표시, moai-ly88).
@@ -34710,7 +34685,7 @@ fn local_heartbeat_surfaces_lost_alive_unknown_and_disabled_without_tracker_writ
     std::fs::write(picks.join("heartbeat-session"), format!("100\t{id}\t{}\n", 1789099923)).unwrap(); // NOW's tracker clock
     let beat = beat_dir.join("heartbeat-session");
     let age = std::time::SystemTime::now() - std::time::Duration::from_secs(3600);
-    std::fs::File::open(&beat).unwrap().set_modified(age).unwrap();
+    std::fs::File::options().write(true).open(&beat).unwrap().set_modified(age).unwrap();
     let show = || {
         let out = call(&["show", &id, "--json"]);
         assert!(out.status.success());
@@ -34742,7 +34717,7 @@ fn local_heartbeat_surfaces_lost_alive_unknown_and_disabled_without_tracker_writ
     assert!(filtered.get("session").is_none());
     let human = call(&["show", &id]);
     assert!(String::from_utf8_lossy(&human.stdout).contains("→  claude --resume"));
-    std::fs::File::open(&beat).unwrap().set_modified(std::time::SystemTime::now()).unwrap();
+    std::fs::File::options().write(true).open(&beat).unwrap().set_modified(std::time::SystemTime::now()).unwrap();
     assert_eq!(show()["session"]["state"], "alive");
     assert_eq!(show()["session"]["recover"], serde_json::json!([]));
     std::fs::remove_file(&beat).unwrap();
@@ -34753,7 +34728,7 @@ fn local_heartbeat_surfaces_lost_alive_unknown_and_disabled_without_tracker_writ
     hook_at_home(&s, s.path(), None, &[], "pre-tool-use", &input);
     assert!(!beat.exists());
     std::fs::write(&beat, "claude\tStop\n").unwrap();
-    std::fs::File::open(&beat).unwrap().set_modified(age).unwrap();
+    std::fs::File::options().write(true).open(&beat).unwrap().set_modified(age).unwrap();
     assert!(show().get("session").is_none());
     assert_eq!(issues(s.path()), snapshot);
     for (path, bytes) in journal_before {
@@ -34793,7 +34768,9 @@ fn terminal_takeover_clears_a_lost_session_without_a_new_pick() {
     // A real ordering nonce with a fixed tracker-clock stamp; MOAI_NOW and mtime deliberately use different clocks.
     let nonce = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
     std::fs::write(&record, format!("{nonce}\t{id}\t1789099923\n")).unwrap();
-    std::fs::File::open(&beat)
+    std::fs::File::options()
+        .write(true)
+        .open(&beat)
         .unwrap()
         .set_modified(std::time::SystemTime::now() - std::time::Duration::from_secs(3600))
         .unwrap();

@@ -27,7 +27,7 @@ pub fn run(ctx: &Ctx, cmd: DaemonCmd) -> R<Vec<String>> {
 /// `status --json` 의 꼴. 떠 있지 않으면 `pid`·`version`·`proto`·`same_version` 이 없다 — 없는 것이 답이다.
 #[derive(Serialize)]
 struct Status {
-    /// 이 OS 에 데몬이 있는가. Windows 는 `false` 다.
+    /// 이 OS 에 데몬이 있는가. 유닉스와 Windows 는 `true` 다.
     supported: bool,
     running: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -98,7 +98,7 @@ fn failed(said: &str, vars: &[(&str, &str)], code: &'static str) -> Fail {
     Fail::coded(fill(said, vars), code)
 }
 
-#[cfg(not(unix))]
+#[cfg(not(any(unix, windows)))]
 mod os {
     use super::*;
 
@@ -116,14 +116,13 @@ mod os {
     }
 }
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 mod os {
     use super::*;
     use crate::daemon::client::{self, Hello, Probe};
     use crate::daemon::{SHUTDOWN, rpc, server};
     use crate::i18n::Lang;
     use std::io::Write as _;
-    use std::os::unix::fs::MetadataExt;
     use std::path::{Path, PathBuf};
     use std::time::{Duration, Instant};
 
@@ -163,7 +162,7 @@ mod os {
     /// 자리에 선 파일이 제 소켓이 아니면 거절한다 — 지우지도 붙지도 않는다.
     fn own_or_refuse(lang: Lang, path: &Path) -> R<Option<std::fs::Metadata>> {
         match std::fs::symlink_metadata(path) {
-            Ok(meta) if server::is_own_socket(&meta) => Ok(Some(meta)),
+            Ok(meta) if crate::transport::is_own(path, &meta) => Ok(Some(meta)),
             Ok(_) => Err(failed(say(lang, "daemon.occupied"), &[("socket", &shown(path))], code::ALREADY_EXISTS)),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
             Err(e) => Err(failed(say(lang, "daemon.no_place"), &[("said", &e.to_string())], code::ERROR)),
@@ -239,7 +238,7 @@ mod os {
                 Probe::Busy(pid) => return Err(busy(lang, &path, pid)),
                 Probe::Foreign(why) => return Err(not_a_daemon(lang, &path, &why)),
                 Probe::Absent => {}
-                Probe::Dead => server::remove_if_same(&path, meta.ino())
+                Probe::Dead => server::remove_if_same(&path, crate::transport::identity(&meta))
                     .map_err(|e| failed(say(lang, "daemon.no_place"), &[("said", &e.to_string())], code::ERROR))?,
             }
         }

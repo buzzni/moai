@@ -947,10 +947,11 @@ BACKLOG
   speaks JSON-RPC 2.0, one message per line. It sits beside the CLI: the
   CLI reads and writes .moai as before. The socket is daemon.socket in the
   same directory as moai ctl's: MOAI_CTL_DIR, else $XDG_RUNTIME_DIR/moai,
-  else moai-<uid> in the temporary directory, owned by you alone.
+  else moai/run in %LOCALAPPDATA% on Windows, else moai-<uid> in the
+  temporary directory, owned by you alone.
 
-  On Windows start and stop answer unsupported; status says supported is
-  false and exits 0."
+  On Windows the socket is a named pipe open to your account alone, and
+  daemon.socket is a file holding the pipe's name."
     )]
     Daemon(DaemonCmd),
 

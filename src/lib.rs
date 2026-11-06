@@ -43,6 +43,7 @@ pub mod style;
 #[cfg(test)]
 mod test_shell;
 mod text;
+mod transport;
 mod tui;
 pub mod tz;
 mod update;

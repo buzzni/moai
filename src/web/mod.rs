@@ -206,7 +206,7 @@ fn handle(stream: TcpStream, site: &Site, busy: Leave) {
                         &cwd,
                         overlay,
                         resume.as_ref().map(|(id, token)| (id.as_str(), token.as_str())),
-                        cfg!(unix) && ctl_peer,
+                        cfg!(any(unix, windows)) && ctl_peer,
                         STREAMS_MAX,
                         &browser,
                     ) {
@@ -398,10 +398,10 @@ fn stream_events(
     ctl_peer: bool,
     resume: Option<(&str, &str)>,
 ) -> std::io::Result<()> {
-    // Local ctl sockets are Unix-only; the tracker stream remains available on Windows.
+    // Local ctl needs a Unix socket or a named pipe; the tracker stream stands everywhere.
     // A remote page can read the web UI when the server binds externally, but it must never receive a ctl request,
     // the caller's actor, or a token that can answer or write as that caller. SSH port forwarding arrives on loopback.
-    let Some(admitted) = tabs.stream(cwd, overlay, resume, cfg!(unix) && ctl_peer, STREAMS_MAX)? else {
+    let Some(admitted) = tabs.stream(cwd, overlay, resume, cfg!(any(unix, windows)) && ctl_peer, STREAMS_MAX)? else {
         let busy = refuse(503, say(lang, "web.busy"), code::BUSY);
         return http::write(&mut Within::of(stream, ANSWER_LIMIT), &busy, true);
     };

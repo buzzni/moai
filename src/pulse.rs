@@ -275,7 +275,9 @@ fn fingerprint_at(dir: &Path, threshold: i64, now: i64) -> u64 {
 mod tests {
     use super::*;
     fn at(path: &Path, seconds: u64) {
-        std::fs::File::open(path)
+        std::fs::File::options()
+            .write(true)
+            .open(path)
             .unwrap()
             .set_modified(std::time::UNIX_EPOCH + std::time::Duration::from_secs(seconds))
             .unwrap();

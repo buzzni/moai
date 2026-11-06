@@ -3,14 +3,19 @@
 //! 시험마다 제 `MOAI_CTL_DIR` 을 `/tmp` 아래 짧은 자리에 세운다 — 소켓 경로에는 OS 상한(108)이 있고, 사람의
 //! 데몬(`$XDG_RUNTIME_DIR/moai`)에 닿으면 안 된다. 띄운 데몬은 [`Daemon`] 이 떨어질 때 죽인다 — 단언이 넘어져도
 //! 프로세스가 남지 않게.
-#![cfg(unix)]
+#![cfg(any(unix, windows))]
+
+// 라이브러리는 이것을 안 내놓는다 — 시험만 쓰려고 공개 표면을 늘리지 않고 같은 소스를 묶는다.
+#[allow(dead_code)]
+#[path = "../src/transport.rs"]
+mod transport;
 
 use serde_json::{Value, json};
 use std::io::{BufRead, BufReader, Read, Write};
-use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Output, Stdio};
 use std::time::Duration;
+use transport::{Listener, Stream};
 
 const BIN: &str = env!("CARGO_BIN_EXE_moai");
 
@@ -18,13 +23,24 @@ struct Fence(PathBuf);
 
 impl Fence {
     fn new() -> Fence {
-        use std::os::unix::fs::PermissionsExt;
         static NTH: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
         let n = NTH.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let path = PathBuf::from(format!("/tmp/moai-daemon-{}-{n}", std::process::id()));
+        // Windows 는 푼 철자로 선다 — `TEMP` 가 8.3 꼴(CI 러너의 `RUNNER~1`)이면 CLI 는 지금 자리의 그 철자를, 데몬은 푼
+        // 철자를 대어, 두 답을 글자째 견주는 시험이 그 러너에서만 진다.
+        let base = if cfg!(unix) {
+            PathBuf::from("/tmp")
+        } else {
+            let real = std::fs::canonicalize(std::env::temp_dir()).unwrap();
+            PathBuf::from(real.to_string_lossy().trim_start_matches(r"\\?\"))
+        };
+        let path = base.join(format!("moai-daemon-{}-{n}", std::process::id()));
         let _ = std::fs::remove_dir_all(&path);
         std::fs::create_dir(&path).unwrap();
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700)).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700)).unwrap();
+        }
         std::fs::create_dir(path.join("home")).unwrap();
         Fence(path)
     }
@@ -92,6 +108,7 @@ impl Fence {
     }
 
     /// `start` 와 같되, 데몬이 SIGINT 를 무시한 채로 뜬다 — 스크립트의 `moai daemon start &` 가 그렇게 띄운다.
+    #[cfg(unix)]
     fn start_ignoring_sigint(&self) -> (Daemon, Value) {
         use std::os::unix::process::CommandExt as _;
         let mut cmd = self.cmd(&["daemon", "start", "--json"]);
@@ -155,13 +172,13 @@ impl Drop for Daemon {
 
 /// 소켓에 붙은 연결 하나 — 줄을 보내고 줄을 받는다.
 struct Wire {
-    reader: BufReader<UnixStream>,
-    writer: UnixStream,
+    reader: BufReader<Stream>,
+    writer: Stream,
 }
 
 impl Wire {
     fn open(path: &Path) -> Wire {
-        let stream = UnixStream::connect(path).unwrap();
+        let stream = Stream::connect(path).unwrap();
         stream.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
         Wire { reader: BufReader::new(stream.try_clone().unwrap()), writer: stream }
     }
@@ -234,6 +251,32 @@ fn start_status_hello_ping_and_stop() {
     assert_eq!(again["stopped"], false, "{again}");
 }
 
+/// Windows 의 신호 자리 — Ctrl-Break 를 받은 데몬도 `moai daemon stop` 과 같이 끝난다. Ctrl-C 는 제 프로세스 묶음을 따로
+/// 세운 자식에게 못 보내고, 처리기는 둘을 같은 갈래로 받는다. 시험을 돌리는 쪽에 콘솔이 없으면 하나 얻어 나눈다.
+#[cfg(windows)]
+#[test]
+fn ctrl_break_stops_cleanly() {
+    use std::os::windows::process::CommandExt as _;
+    use windows_sys::Win32::System::Console::{AllocConsole, CTRL_BREAK_EVENT, GenerateConsoleCtrlEvent};
+    use windows_sys::Win32::System::Threading::CREATE_NEW_PROCESS_GROUP;
+    // 이미 콘솔이 있으면 실패하고 그것을 그대로 쓴다.
+    // SAFETY: 인자 없는 호출이다.
+    let _ = unsafe { AllocConsole() };
+    let f = Fence::new();
+    let mut cmd = f.cmd(&["daemon", "start", "--json"]);
+    cmd.creation_flags(CREATE_NEW_PROCESS_GROUP);
+    let (daemon, first) = Fence::first_line(cmd);
+    let pid = u32::try_from(first["pid"].as_u64().unwrap()).unwrap();
+    // SAFETY: 이 시험이 막 띄운 자식의 프로세스 묶음에만 보낸다.
+    assert_ne!(unsafe { GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, pid) }, 0);
+    assert!(daemon.wait().success(), "Ctrl-Break 뒤 깨끗이 안 끝났다");
+    assert!(!f.socket().exists(), "Ctrl-Break 가 표시 파일을 남겼다");
+    let status = f.json(&["daemon", "status", "--json"]);
+    assert_eq!(status["running"], false);
+    assert_eq!(status["stale_socket"], false);
+}
+
+#[cfg(unix)]
 #[test]
 fn sigterm_and_sigint_stop_cleanly() {
     for signal in [libc::SIGTERM, libc::SIGINT] {
@@ -251,6 +294,7 @@ fn sigterm_and_sigint_stop_cleanly() {
 }
 
 /// SIGINT 를 무시한 채 뜬 데몬은 SIGINT 에 안 멈추고(터미널의 Ctrl-C 는 그 스크립트의 것이다), SIGTERM 에는 깨끗이 멈춘다.
+#[cfg(unix)]
 #[test]
 fn an_ignored_sigint_stays_ignored() {
     let f = Fence::new();
@@ -315,7 +359,7 @@ fn a_daemon_too_full_even_for_hello_is_named_by_pid_and_frees_up() {
         })
         .collect();
     // 받는 스레드는 붙은 차례로 받는다 — 말없는 넷이 수명 길을 먼저 쥐고, 다섯째는 곧바로 거절된다.
-    let silent: Vec<UnixStream> = (0..4).map(|_| UnixStream::connect(f.socket()).unwrap()).collect();
+    let silent: Vec<Stream> = (0..4).map(|_| Stream::connect(f.socket()).unwrap()).collect();
     // 데몬은 요청을 안 읽고 거절을 쓰고 닫는다 — 그 닫기가 먼저면 이쪽 쓰기가 끊기니, 쓰기는 넘기고 답을 읽는다.
     let mut fifth = Wire::open(&f.socket());
     let _ = fifth.writer.write_all(b"{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"hello\",\"params\":{\"proto\":1}}\n");
@@ -345,7 +389,7 @@ fn a_daemon_whose_socket_file_was_removed_still_stops() {
     let (daemon, mut wire) = served(&f);
     let pid = wire.call(1, "hello", json!({ "proto": 1 }))["result"]["pid"].clone();
     std::fs::remove_file(f.socket()).unwrap();
-    assert!(UnixStream::connect(f.socket()).is_err(), "지운 소켓에 아직 붙는다 — 깨우는 붙기가 실패하는 자리가 아니다");
+    assert!(Stream::connect(f.socket()).is_err(), "지운 소켓에 아직 붙는다 — 깨우는 붙기가 실패하는 자리가 아니다");
     let bye = wire.call(2, "daemon.shutdown", json!({}));
     assert_eq!(bye["result"]["pid"], pid, "{bye}");
     let asked = std::time::Instant::now();
@@ -430,7 +474,7 @@ fn a_second_start_does_not_double_up() {
 fn a_stale_socket_is_cleared_and_the_daemon_starts() {
     let f = Fence::new();
     // 묶었다가 닫은 리스너 — 파일은 남고 아무도 안 받는다. 죽은 데몬이 남긴 꼴이다.
-    drop(UnixListener::bind(f.socket()).unwrap());
+    drop(Listener::bind(f.socket()).unwrap());
     assert!(f.socket().exists());
     let status = f.json(&["daemon", "status", "--json"]);
     assert_eq!(status["running"], false, "{status}");
@@ -470,7 +514,7 @@ fn an_unknown_method_and_an_over_long_line_are_refused_over_the_wire() {
 fn a_daemon_of_another_version_is_named_and_left_running() {
     let f = Fence::new();
     // 옛 판처럼 답하는 가짜 데몬.
-    let listener = UnixListener::bind(f.socket()).unwrap();
+    let listener = Listener::bind(f.socket()).unwrap();
     let fake = std::thread::spawn(move || {
         for stream in listener.incoming() {
             let Ok(mut stream) = stream else { return };
@@ -503,7 +547,7 @@ fn a_daemon_of_another_version_is_named_and_left_running() {
     let human = f.run(&["daemon", "status"]);
     assert!(String::from_utf8_lossy(&human.stdout).contains("service manager"));
 
-    let mut quit = UnixStream::connect(f.socket()).unwrap();
+    let mut quit = Stream::connect(f.socket()).unwrap();
     writeln!(quit, "{}", json!({ "quit": true })).unwrap();
     fake.join().unwrap();
 }
@@ -1304,6 +1348,7 @@ fn a_write_from_nobody_known_is_no_actor_whatever_the_daemon_was_started_with() 
 /// **링크 철자로 걸어 둔 프로젝트도 CLI 와 같은 자리를 댄다**(moai-3hgm.k7s) — `-C <링크>` 의 CLI 는 물리 경로에 서서
 /// 그 뿌리를 말에 댄다. 데몬이 설정의 철자를 그대로 쓰면 같은 쓰기의 말이 링크를 댄다. 남의 줄을 집는 `mv` 의 말이
 /// 뿌리를 댄다(`moai -C <뿌리> mv … --take`).
+#[cfg(unix)]
 #[test]
 fn a_project_registered_through_a_symlink_names_the_root_the_cli_names() {
     let f = Fence::new();

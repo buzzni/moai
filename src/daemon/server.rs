@@ -1,4 +1,4 @@
-//! Unix 소켓의 줄 전송 — 줄 하나에 JSON-RPC 메시지 하나.
+//! 로컬 전송([`crate::transport`])의 줄 — 줄 하나에 JSON-RPC 메시지 하나.
 //!
 //! **연결마다 스레드 하나, 그 연결의 요청은 그 스레드에서 차례로 하나씩**(moai-5n6m.x8t). 받는 스레드
 //! (`serve` 를 부른 스레드)는 요청을 돌리지 않고, 연결 스레드는 연결이 끝나면 함께 끝난다 — 스레드를 모아 두고
@@ -21,9 +21,9 @@
 //! 만 하면, 둘이 동시에 뜰 때 늦은 쪽이 먼저 뜬 쪽의 새 소켓을 지운다.
 
 use super::rpc::{self, Methods, Prepared, RpcError};
+use crate::transport::{Listener, Stream};
 use serde_json::json;
 use std::io::{BufReader, Write};
-use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
@@ -56,7 +56,9 @@ static SIGNAL_STOP: AtomicBool = AtomicBool::new(false);
 // Whether SIGINT and SIGTERM carry our handler. A signal ignored on entry (`moai daemon start &` in a
 // script ignores SIGINT, so a terminal Ctrl-C meant for the script does not reach the daemon) stays
 // ignored, and the handler does not hand it back as SIG_DFL when the other signal arrives.
+#[cfg(unix)]
 static SIGINT_CAUGHT: AtomicBool = AtomicBool::new(false);
+#[cfg(unix)]
 static SIGTERM_CAUGHT: AtomicBool = AtomicBool::new(false);
 
 /// Set `signal` to `handler` with SIGINT and SIGTERM masked. `SA_RESTART` keeps the blocking calls of
@@ -67,6 +69,7 @@ static SIGTERM_CAUGHT: AtomicBool = AtomicBool::new(false);
 ///
 /// # Safety
 /// `handler` is `SIG_DFL`, `SIG_IGN` or an `extern "C" fn(c_int)` that is async-signal-safe.
+#[cfg(unix)]
 unsafe fn set(signal: libc::c_int, handler: libc::sighandler_t) -> libc::c_int {
     // SAFETY: a zeroed sigaction is valid; sigemptyset/sigaddset/sigaction are async-signal-safe and
     // get pointers to this live struct.
@@ -81,6 +84,7 @@ unsafe fn set(signal: libc::c_int, handler: libc::sighandler_t) -> libc::c_int {
     }
 }
 
+#[cfg(unix)]
 extern "C" fn shutdown_signal(_: libc::c_int) {
     SIGNAL_STOP.store(true, Ordering::Release);
     // SAFETY: SIG_DFL is valid for both signals; `set` only calls async-signal-safe functions.
@@ -96,6 +100,7 @@ extern "C" fn shutdown_signal(_: libc::c_int) {
 
 /// Install only in the foreground daemon, before announcing readiness. A signal ignored on entry stays
 /// ignored. On failure SIGINT is put back as it was.
+#[cfg(unix)]
 pub fn install_signal_handlers() -> std::io::Result<()> {
     SIGNAL_STOP.store(false, Ordering::Release);
     let handler = shutdown_signal as *const () as libc::sighandler_t;
@@ -123,17 +128,44 @@ pub fn install_signal_handlers() -> std::io::Result<()> {
     Ok(())
 }
 
+/// Windows 의 신호 자리 — 콘솔 이벤트. 돌리는 실이 따로라 유닉스의 처리기와 달리 무엇이든 불러도 된다.
+///
+/// Ctrl-C·Ctrl-Break 는 처음이면 멈추기를 세우고, 둘째는 기본 처리(프로세스 끝)로 넘긴다 — 유닉스의 둘째 신호와 같다.
+/// 창 닫기·로그오프·종료는 이 함수가 돌아오는 순간 프로세스가 끝나니, 멈추기가 끝날 틈을 벌어 준다. 운영체제가
+/// 주는 시간이 5초쯤이라 그 안에서 기다린다 — 데몬이 먼저 끝나면 기다림도 함께 끝난다.
+#[cfg(windows)]
+unsafe extern "system" fn console_event(kind: u32) -> windows_sys::core::BOOL {
+    use windows_sys::Win32::System::Console::{CTRL_BREAK_EVENT, CTRL_C_EVENT};
+    let first = !SIGNAL_STOP.swap(true, Ordering::AcqRel);
+    match kind {
+        CTRL_C_EVENT | CTRL_BREAK_EVENT => i32::from(first),
+        _ => {
+            std::thread::sleep(Duration::from_millis(4500));
+            1
+        }
+    }
+}
+
+/// 띄운 쪽이 Ctrl-C 를 꺼 두었으면(`CREATE_NEW_PROCESS_GROUP`) 받지 못할 뿐 그대로 둔다 — 멈추는 길은 `moai daemon stop` 이다.
+#[cfg(windows)]
+pub fn install_signal_handlers() -> std::io::Result<()> {
+    use windows_sys::Win32::System::Console::SetConsoleCtrlHandler;
+    SIGNAL_STOP.store(false, Ordering::Release);
+    // SAFETY: `console_event` 는 프로세스가 사는 내내 있는 함수다.
+    if unsafe { SetConsoleCtrlHandler(Some(console_event), 1) } == 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    Ok(())
+}
+
 /// `daemon.lock` 을 쥔다. 남이 쥐었으면 `None`. 놓는 것은 돌려받은 파일을 닫는 것(drop)이다.
 pub fn lock(socket: &Path) -> std::io::Result<Option<std::fs::File>> {
     use fs2::FileExt as _;
-    use std::os::unix::fs::OpenOptionsExt;
-    let file = std::fs::OpenOptions::new()
-        .read(true)
-        .write(true)
-        .create(true)
-        .truncate(false)
-        .mode(0o600)
-        .open(socket.with_file_name("daemon.lock"))?;
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true).write(true).create(true).truncate(false);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+    let file = options.open(socket.with_file_name("daemon.lock"))?;
     // `store` 의 쓰기 자물쇠와 같은 길(`fs2`, 유닉스에서는 flock)이다.
     match file.try_lock_exclusive() {
         Ok(()) => Ok(Some(file)),
@@ -147,25 +179,19 @@ pub fn lock(socket: &Path) -> std::io::Result<Option<std::fs::File>> {
     }
 }
 
-/// 이 사용자의 소켓인가 — 종류와 주인. 남의 파일은 지우지도 붙지도 않는다.
-pub fn is_own_socket(meta: &std::fs::Metadata) -> bool {
-    use std::os::unix::fs::{FileTypeExt, MetadataExt};
-    // SAFETY: geteuid 는 실패하지 않는다.
-    meta.file_type().is_socket() && meta.uid() == unsafe { libc::geteuid() }
-}
-
 /// 그 자리의 파일이 아직 `ino` 의 그 소켓일 때만 지운다 — 보고 지우는 사이에 남이 세운 것을 지우지 않는다.
 pub fn remove_if_same(path: &Path, ino: u64) -> std::io::Result<()> {
-    use std::os::unix::fs::MetadataExt;
     match std::fs::symlink_metadata(path) {
-        Ok(meta) if is_own_socket(&meta) && meta.ino() == ino => std::fs::remove_file(path),
+        Ok(meta) if crate::transport::is_own(path, &meta) && crate::transport::identity(&meta) == ino => {
+            std::fs::remove_file(path)
+        }
         _ => Ok(()),
     }
 }
 
 /// 묶은 소켓. [`serve`] 가 끝나며 제 소켓을 지운다.
 pub struct Bound {
-    listener: UnixListener,
+    listener: Listener,
     path: PathBuf,
     ino: u64,
 }
@@ -182,9 +208,8 @@ impl Drop for Bound {
 /// 그것을 물려 연결의 읽기 시한이 꺼진다. 그래서 [`serve`] 는 `poll(2)` 로 [`TICK`] 까지만 기다렸다가, 받을
 /// 연결이 섰을 때만 막는 `accept` 를 부른다.
 pub fn bind(path: &Path) -> std::io::Result<Bound> {
-    use std::os::unix::fs::MetadataExt;
-    let listener = UnixListener::bind(path)?;
-    let ino = std::fs::symlink_metadata(path)?.ino();
+    let listener = Listener::bind(path)?;
+    let ino = crate::transport::identity(&std::fs::symlink_metadata(path)?);
     Ok(Bound { listener, path: path.to_path_buf(), ino })
 }
 
@@ -213,7 +238,7 @@ fn serve_for(bound: Bound, mut methods: Methods, drain: Duration, signal: &Atomi
     let path = Arc::new(bound.path.clone());
     while !stop.load(Ordering::Acquire) && !signal.load(Ordering::Acquire) {
         // 받기가 실패한 것(EMFILE 따위)은 넘긴다 — 데몬의 수명을 끝낼 일이 아니다.
-        match pending(&bound.listener, TICK) {
+        match crate::transport::pending(&bound.listener, TICK) {
             Ok(true) => {}
             Ok(false) => continue,
             Err(_) => {
@@ -269,26 +294,6 @@ fn serve_for(bound: Bound, mut methods: Methods, drain: Duration, signal: &Atomi
     drop(bound);
     work.close(Instant::now() + drain);
     removed
-}
-
-/// 받을 연결이 섰는가 — `wait` 까지만 기다린다. 신호에 끊긴 기다림은 "아직 없다" 로 읽는다.
-///
-/// 섰다고 답한 뒤의 `accept` 는 막히지 않는다: 그 연결을 가져갈 다른 받는 쪽이 없고, 붙은 쪽이 그새 닫았어도
-/// Unix 소켓은 그 연결을 대기열에 둔 채 넘긴다(받은 쪽이 곧 EOF 를 읽는다).
-fn pending(listener: &UnixListener, wait: Duration) -> std::io::Result<bool> {
-    use std::os::unix::io::AsRawFd;
-    let mut fd = libc::pollfd { fd: listener.as_raw_fd(), events: libc::POLLIN, revents: 0 };
-    let ms = libc::c_int::try_from(wait.as_millis()).unwrap_or(libc::c_int::MAX);
-    // SAFETY: 살아 있는 `pollfd` 하나를 길이 1 로 넘긴다 — poll 은 그 `revents` 만 쓴다.
-    match unsafe { libc::poll(&mut fd, 1, ms) } {
-        0 => Ok(false),
-        n if n > 0 && fd.revents & libc::POLLIN != 0 => Ok(true),
-        n if n > 0 => Err(std::io::Error::other(format!("poll revents {:#x}", fd.revents))),
-        _ => match std::io::Error::last_os_error() {
-            e if e.kind() == std::io::ErrorKind::Interrupted => Ok(false),
-            e => Err(e),
-        },
-    }
 }
 
 /// 상한에 찬 데몬의 거절 — `data.code` 는 `busy`, `data.pid` 는 이 데몬이다. `id` 는 null 이다: 받는 스레드는 줄을
@@ -441,7 +446,7 @@ fn turn<'w>(methods: &Methods, work: &'w Work, line: &[u8]) -> Turn<'w> {
 
 /// 상한을 넘은 연결 하나 — 줄 하나만 읽어 [`LIFECYCLE`] 의 메서드면 돌리고, 아니면 `busy` 로 거절하고 닫는다.
 /// 어느 쪽이든 그 연결의 다음 줄은 안 읽는다.
-fn lifecycle(stream: UnixStream, methods: &Methods, stop: &AtomicBool, path: &Path, work: &Work) {
+fn lifecycle(stream: Stream, methods: &Methods, stop: &AtomicBool, path: &Path, work: &Work) {
     if stream.set_read_timeout(Some(LIFECYCLE_WAIT)).is_err() || stream.set_write_timeout(Some(LIFECYCLE_WAIT)).is_err()
     {
         return;
@@ -473,7 +478,7 @@ fn lifecycle(stream: UnixStream, methods: &Methods, stop: &AtomicBool, path: &Pa
 
 /// 시한이 줄 하나 전체에 걸린 읽기 — `read` 마다 남은 시간을 소켓의 읽기 시한으로 다시 건다. 시한이 지나면 `TimedOut`.
 struct Deadline {
-    stream: UnixStream,
+    stream: Stream,
     until: Instant,
 }
 
@@ -491,11 +496,11 @@ impl std::io::Read for Deadline {
 /// 받는 스레드를 곧바로 깨운다 — 제 소켓에 한 번 붙는다. 붙기가 실패해도(소켓 파일이 지워졌다) 받는 스레드는
 /// [`TICK`] 안에 스스로 `stop` 을 본다.
 fn wake(path: &Path) {
-    let _ = UnixStream::connect(path);
+    let _ = Stream::connect(path);
 }
 
 /// 연결 하나 — 줄을 읽고, 돌리고, 답을 쓰고, 다음 줄을 읽는다. 앞 요청의 답을 쓰기 전에는 다음 줄을 안 읽는다.
-fn connection(stream: UnixStream, methods: &Methods, stop: &AtomicBool, path: &Path, work: &Work) {
+fn connection(stream: Stream, methods: &Methods, stop: &AtomicBool, path: &Path, work: &Work) {
     if stream.set_read_timeout(Some(IDLE)).is_err() || stream.set_write_timeout(Some(WRITE)).is_err() {
         return;
     }
@@ -562,7 +567,7 @@ mod tests {
             rpc::reply(&json!({"finished": true}))
         });
         let server = std::thread::spawn(move || serve_for(bound, methods, DRAIN, &flag).unwrap());
-        let mut stream = UnixStream::connect(&path).unwrap();
+        let mut stream = Stream::connect(&path).unwrap();
         stream.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
         writeln!(stream, "{{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"slow\"}}").unwrap();
         entered.wait();
@@ -583,7 +588,7 @@ mod tests {
     /// 읽기 하나마다의 시한이던 판은 그런 연결 넷이 수명 길을 끝없이 쥐어 `status`·`stop` 을 `busy` 에 가뒀다.
     #[test]
     fn a_trickling_connection_leaves_the_lifecycle_lane_on_time() {
-        let (ours, mut theirs) = UnixStream::pair().unwrap();
+        let (ours, mut theirs) = Stream::pair().unwrap();
         let drip = std::thread::spawn(move || {
             let started = Instant::now();
             while started.elapsed() < LIFECYCLE_WAIT * 3 {
@@ -704,13 +709,13 @@ mod tests {
 
     /// 연결 하나 — 요청을 보내고 답 한 줄을 받는다.
     struct Wire {
-        reader: std::io::BufReader<UnixStream>,
-        writer: UnixStream,
+        reader: std::io::BufReader<Stream>,
+        writer: Stream,
     }
 
     impl Wire {
         fn open(path: &Path) -> Wire {
-            let stream = UnixStream::connect(path).unwrap();
+            let stream = Stream::connect(path).unwrap();
             stream.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
             Wire { reader: std::io::BufReader::new(stream.try_clone().unwrap()), writer: stream }
         }
@@ -747,7 +752,7 @@ mod tests {
         daemon.stop();
         daemon.wait_until_unlinked();
         assert!(matches!(client::probe(&daemon.socket()), Probe::Absent), "기다리는 데몬에 아직 붙는다");
-        let refused = UnixStream::connect(daemon.socket()).unwrap_err();
+        let refused = Stream::connect(daemon.socket()).unwrap_err();
         assert_eq!(refused.kind(), std::io::ErrorKind::NotFound, "{refused}");
         assert!(!daemon.joined(), "돌던 쓰기를 안 기다리고 끝났다");
         assert_eq!(writing.answer().expect("쓰기의 답")["result"], "written");
@@ -785,6 +790,7 @@ mod tests {
         writer.join();
         assert!(writer.finished("slow_write"), "쓰기가 끝나기 전에 돌아왔다");
         // 돌아왔을 때 답은 이미 소켓에 있다 — 실제 데몬이라면 여기서 끝나도 받는다.
+        #[cfg(unix)]
         writing.writer.shutdown(std::net::Shutdown::Write).unwrap();
         assert_eq!(writing.answer().expect("쓰기의 답")["result"], "written");
     }
@@ -820,7 +826,7 @@ mod tests {
     #[test]
     fn a_stopping_refusal_to_a_full_socket_waits_for_room_and_goes_out_whole() {
         use std::io::Read as _;
-        let (ours, theirs) = UnixStream::pair().unwrap();
+        let (ours, theirs) = Stream::pair().unwrap();
         // 데몬 쪽에서 그쪽으로 가는 버퍼를 채운다 — 그쪽이 안 읽은 앞의 답들이다.
         let filler = ours.try_clone().unwrap();
         filler.set_nonblocking(true).unwrap();

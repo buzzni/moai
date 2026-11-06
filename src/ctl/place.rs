@@ -5,6 +5,10 @@ pub fn dir() -> std::io::Result<PathBuf> {
         PathBuf::from(p)
     } else if let Some(p) = std::env::var_os("XDG_RUNTIME_DIR") {
         PathBuf::from(p).join("moai")
+    } else if let Some(p) = std::env::var_os("LOCALAPPDATA").filter(|_| cfg!(windows)) {
+        // Windows 의 임시 자리는 사용자당 하나가 아니고(`TEMP` 는 셸마다 다를 수 있다) 청소기가 표시 파일을 지운다.
+        // 그러면 사용자당 하나인 데몬이 둘이 되거나 산 데몬이 없는 것으로 읽힌다.
+        PathBuf::from(p).join("moai").join("run")
     } else {
         std::env::temp_dir().join(format!("moai-{}", uid()))
     };
