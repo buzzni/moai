@@ -198,3 +198,7 @@
 {"ts":"2026-11-06T06:58:43Z","id":"moai-dgcz","kind":"status","by":"Raven","by_email":"hong18s@gmail.com","from":"review","to":"done"}
 {"ts":"2026-11-06T06:58:43Z","id":"moai-0yo3.b6u","kind":"status","by":"Raven","by_email":"hong18s@gmail.com","from":"in_progress","to":"done","note":"14건을 c01a9b5e 로 받고 11번은 LOCALAPPDATA 로 옮겼다. 넘긴 셋(fallback 갈래, //server UNC, 빈 표시 파일)은 드물어 안 고친다. CI 68b909bb 전부 초록."}
 {"ts":"2026-11-06T07:00:30Z","id":"moai-dhr1","kind":"create","by":"Raven","by_email":"hong18s@gmail.com","title":"v0.52.0"}
+{"ts":"2026-11-06T07:01:12Z","id":"moai-3e4m","kind":"create","by":"Raven","by_email":"hong18s@gmail.com","title":"macOS 에서 전체 시험을 돌린다"}
+{"ts":"2026-11-06T07:01:12Z","id":"moai-3e4m","kind":"status","by":"Raven","by_email":"hong18s@gmail.com","from":"todo","to":"in_progress"}
+{"ts":"2026-11-06T07:02:03Z","id":"moai-3e4m","kind":"note","by":"Raven","by_email":"hong18s@gmail.com","text":"Next: draft PR #83 의 macOS 잡 결과를 보고 진 시험을 가른다. 잡을 둘지는 사람이 정한다."}
+{"ts":"2026-11-06T08:20:22Z","id":"moai-3e4m","kind":"note","by":"Raven","by_email":"hong18s@gmail.com","text":"Next: PR #83 의 macOS 잡에서 탐색기를 pty 로 띄우는 시험 5개가 진다. 첫 판의 내용은 PR 의 댓글에 있다. Mac 의 진짜 터미널에서 moai tui 와 moai ctl state 로 제품 문제인지부터 가른다. client.rs 의 EINVAL 고침은 이 가지에만 있으니 마일스톤에 들여야 한다."}
