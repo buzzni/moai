@@ -12493,3 +12493,9 @@
 {"ts":"2026-11-06T20:35:36Z","id":"moai-t0ys","kind":"note","by":"Raven","by_email":"raven@buzzni.com","text":"리뷰 moai-t0ys.0dk 를 852e6fac 까지 반영했다. 본문의 '범위 밖' 중 ctl::call 은 틀렸고 f745b5c2 로 고쳤다."}
 {"ts":"2026-11-06T20:35:36Z","id":"moai-mud3","kind":"note","by":"Raven","by_email":"raven@buzzni.com","text":"ctl_never_reaches_the_runners_sockets 는 ffb69ea3 로 고쳤다 — 기본 TMPDIR 에서 통과. 남은 것은 the_probe_calls… 의 시간 한도 하나다. 852e6fac 의 네 번 전체 시험에서는 안 졌지만 고친 것이 아니다."}
 {"ts":"2026-11-06T20:53:34Z","id":"moai-l1i1","kind":"create","by":"Raven","by_email":"raven@buzzni.com","title":"merge_driver 의 probe 시험이 Mac 의 부하에서 시간 한도에 흔들린다"}
+{"ts":"2026-11-06T21:05:21Z","id":"moai-mud3","kind":"note","by":"Raven","by_email":"raven@buzzni.com","text":"머지 38456be3. 본문의 표 가운데 the_probe_calls… 만 남아 moai-l1i1 로 옮겼다 — 받아들임의 두 줄(macOS 에서 시험이 끝나고 푸르다, 리눅스·Windows 그대로)은 CI 의 macOS 잡 3,837 통과·Windows 3,562 통과로 섰다."}
+{"ts":"2026-11-06T21:05:22Z","id":"moai-t0ys","kind":"status","by":"Raven","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"PR #83 머지 38456be3 로 milestone/moai-w3sx 에 들었다. CI 8개 초록, macOS 잡 3,837 통과."}
+{"ts":"2026-11-06T21:05:22Z","id":"moai-mud3","kind":"status","by":"Raven","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"PR #83 머지 38456be3 로 milestone/moai-w3sx 에 들었다. 남은 시간 한도는 moai-l1i1."}
+{"ts":"2026-11-06T21:05:22Z","id":"moai-3e4m","kind":"note","by":"Raven","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 (high — macOS 실기 측정과 고침)"}
+{"ts":"2026-11-06T21:05:22Z","id":"moai-3e4m","kind":"status","by":"Raven","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"Mac 에서 갈랐다: 탐색기 시험 다섯은 pty 쪽이고 제품은 정상이다(moai-mud3). 데몬·ctl 의 macOS 결함은 moai-t0ys 로 고쳤다. PR #83 머지 38456be3, macOS 잡은 남긴다(사람의 결정)."}
+{"ts":"2026-11-06T21:05:22Z","id":"moai-femk","kind":"create","by":"Raven","by_email":"raven@buzzni.com","title":"1.0 뒤의 판 규칙을 정한다 — auto 가 그때까지 멈춘다"}
