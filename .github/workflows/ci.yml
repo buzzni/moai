@@ -504,6 +504,24 @@ jobs:
           path: ${{ env.CACHED_PATHS }}
           key: ${{ steps.cargo-cache.outputs.cache-primary-key }}
 
+  # **macOS 에서 시험이 서는가**(moai-3e4m). 릴리스는 macOS 판을 짓는데 시험은 리눅스와 Windows 에서만 돌아, 데몬·ctl 의
+  # BSD 쪽 차이(받은 소켓에 O_NONBLOCK 이 물림, 소켓 경로 104 바이트)를 아무도 재지 않았다. `--no-fail-fast` 다 —
+  # 첫 대상에서 멈추면 그 뒤의 시험이 안 돌아, 무엇이 지는지를 한 판에 못 본다.
+  macos:
+    name: macOS 에서 clippy · 시험
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.code != 'false' }}
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: clippy
+        run: cargo clippy --all-targets --workspace --locked -- -D warnings
+
+      - name: test
+        run: cargo test --workspace --locked --no-fail-fast
+
   # 20MB 는 이 도구가 지고 가는 예산이다 (CLAUDE.md 의 표). 넘긴 것을 릴리스
   # 태그에서 처음 알면 그때는 되돌릴 자리가 없으니 PR 에서 잰다.
   #
