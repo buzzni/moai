@@ -12499,3 +12499,6 @@
 {"ts":"2026-11-06T21:05:22Z","id":"moai-3e4m","kind":"note","by":"Raven","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 (high — macOS 실기 측정과 고침)"}
 {"ts":"2026-11-06T21:05:22Z","id":"moai-3e4m","kind":"status","by":"Raven","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"Mac 에서 갈랐다: 탐색기 시험 다섯은 pty 쪽이고 제품은 정상이다(moai-mud3). 데몬·ctl 의 macOS 결함은 moai-t0ys 로 고쳤다. PR #83 머지 38456be3, macOS 잡은 남긴다(사람의 결정)."}
 {"ts":"2026-11-06T21:05:22Z","id":"moai-femk","kind":"create","by":"Raven","by_email":"raven@buzzni.com","title":"1.0 뒤의 판 규칙을 정한다 — auto 가 그때까지 멈춘다"}
+{"ts":"2026-11-06T21:10:00Z","id":"moai-2t6v","kind":"create","by":"Raven","by_email":"raven@buzzni.com","title":"v1.0.0 릴리스"}
+{"ts":"2026-11-06T21:10:00Z","id":"moai-xvvf","kind":"create","by":"Raven","by_email":"raven@buzzni.com","title":"판을 1.0.0 으로 올리고 main 에 들인다"}
+{"ts":"2026-11-06T21:10:00Z","id":"moai-xvvf","kind":"status","by":"Raven","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
