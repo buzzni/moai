@@ -227,8 +227,11 @@ impl Repo {
 /// 마지막 하나만 알렸다. 같은 자리에 열 번 써도 줄은 하나다.
 static MOVED: std::sync::Mutex<Vec<(PathBuf, PathBuf)>> = std::sync::Mutex::new(Vec::new());
 
-/// 옮겨 쓴 자리들 — 없으면 비어 있다. `main` 이 끝에 한 번 읽는다.
+/// 옮겨 쓴 자리들 — 없으면 비어 있다. `main` 이 끝에 한 번 읽는다. 요청의 통이 걸렸으면 그 통의 것이다(moai-3hgm.25e).
 pub fn redirects() -> Vec<(PathBuf, PathBuf)> {
+    if let Some(moved) = crate::side::with(|s| s.moved.clone()) {
+        return moved;
+    }
     MOVED.lock().unwrap_or_else(|e| e.into_inner()).clone()
 }
 
@@ -250,7 +253,13 @@ pub fn remember_invoked() {
 /// "명령을 친 체크아웃이 어디인가" 를 묻는 자리가 이것을 읽는다 — 집은 표식([`Repo::note_held`])과 겹쳐 보기가
 /// 제 워크트리를 옆에서 빼는 자리(`worktree::callers`). 지금 자리로 물러서지 않는다: 시험의 현재 디렉터리는
 /// 이 저장소의 체크아웃이라, 물러서면 시험이 만든 적 없는 워크트리가 "친 자리" 로 선다.
+///
+/// **요청의 통이 걸렸으면 그 자리다**(`crate::side`, moai-5n6m.m0b) — 데몬의 요청은 `moai -C <그 자리>` 를 그 자리에서 친
+/// 것으로 선다. 프로세스가 처음 선 자리는 그 요청과 상관없다.
 pub(crate) fn invoked_checkout() -> Option<PathBuf> {
+    if let Some(here) = crate::side::with(|s| s.here.clone()) {
+        return Some(here);
+    }
     INVOKED.get().cloned().flatten()
 }
 
@@ -260,6 +269,9 @@ pub(crate) fn invoked_checkout() -> Option<PathBuf> {
 /// `invoked`)이 `-C` 가 옮긴 지금 자리에 붙이면 없는 자리를 짚는다. `main` 을 안 지난 부름(단위 시험)에서는
 /// 지금 자리다.
 pub(crate) fn invoked_dir() -> Option<PathBuf> {
+    if let Some(here) = crate::side::with(|s| s.here.clone()) {
+        return Some(here);
+    }
     match INVOKED.get() {
         Some(at) => at.clone(),
         None => std::env::current_dir().ok(),
@@ -272,7 +284,16 @@ pub(crate) fn invoked_dir() -> Option<PathBuf> {
 /// `MOAI_HERE=0` 을 켬으로 읽어, 끄려던 사람에게 말없이 갈라진 스냅샷을 줬다.
 /// 켜는 낱말만 켠다 — `crate::skill` 의 `MOAI_BLESS` 와 같은 자다(거기도 `MOAI_BLESS=0` 이
 /// 커밋된 트리를 다시 쓰던 자리였다).
+///
+/// **요청 안에서는 늘 꺼져 있다**([`crate::side::hung`], 리뷰 moai-3hgm.puw 3번) — `model::actor` 가 `MOAI_ACTOR` 를
+/// 안 읽는 것과 같은 까닭이다(moai-3hgm.k7s). 데몬의 환경은 그것을 띄운 셸의 것이라, 읽으면 그 셸의 `MOAI_HERE=1` 하나로
+/// 걸어 둔 딸린 워크트리로 가는 모든 요청이 그 워크트리의 제 `.moai` 에 써 옮김이 막으려던 갈라진 스냅샷을 짓고, 따라
+/// 칠 명령(`rm --line` 의 것, 날짜 되돌리기)에 요청이 안 바란 `MOAI_HERE=1` 이 붙는다. 요청에는 그 손잡이를 줄 길이
+/// 없으니 요청은 옮겨 간다. 이 손잡이를 묻는 자리(찾기·`init` 의 거절·따라 칠 명령)가 모두 여기를 지나 한 자로 꺼진다.
 pub(crate) fn here_wanted() -> bool {
+    if crate::side::hung() {
+        return false;
+    }
     let v = std::env::var_os("MOAI_HERE");
     let v = v.as_ref().map(|v| v.to_string_lossy().trim().to_ascii_lowercase());
     matches!(v.as_deref(), Some("1" | "true" | "yes" | "on"))
@@ -432,6 +453,12 @@ pub fn climbs() -> Vec<(PathBuf, PathBuf)> {
 /// 그 사실을 제 판에 싣는 표면이 쓴다(`cmd::prime`, moai-r0x8.ris) — 판이 대는 것을 stderr 가 또 대면
 /// 터미널의 사람에게 같은 말이 두 번 선다.
 pub fn take_climb(from: &Path) -> Option<PathBuf> {
+    if let Some(took) = crate::side::with(|s| {
+        let at = s.climbed.iter().position(|(f, _)| f == from)?;
+        Some(s.climbed.remove(at).1)
+    }) {
+        return took;
+    }
     let mut told = CLIMBED.lock().unwrap_or_else(|e| e.into_inner());
     let at = told.iter().position(|(f, _)| f == from)?;
     Some(told.remove(at).1)
@@ -464,12 +491,18 @@ fn look(from: &Path) -> Option<PathBuf> {
 /// **적는 것은 이 명령이 선 자리에서 올라간 때뿐이다.** 훅은 셸 명령에서 읽어 낸 남의
 /// 디렉터리로도 트래커를 찾아 보므로(`cmd::hook::route_one`), 그것까지 적으면 손도 안 댄
 /// 프로젝트를 잡았다고 말한다 — 아직 만들지도 않은 디렉터리를 대기도 한다.
+///
+/// **요청의 통이 걸렸으면 거기 적는다**(`crate::side`, moai-5n6m.m0b) — "선 자리" 도 그 통의 자리다.
 fn told_climb(from: &Path, root: &Path, climbed: bool) {
-    if climbed && std::env::current_dir().is_ok_and(|cwd| cwd == from) {
-        let mut told = CLIMBED.lock().unwrap_or_else(|e| e.into_inner());
+    if climbed && crate::side::cwd().is_ok_and(|cwd| cwd == from) {
         let pair = (from.to_path_buf(), root.to_path_buf());
-        if !told.contains(&pair) {
-            told.push(pair);
+        let push = |told: &mut Vec<(PathBuf, PathBuf)>| {
+            if !told.contains(&pair) {
+                told.push(pair.clone());
+            }
+        };
+        if crate::side::with(|s| push(&mut s.climbed)).is_none() {
+            push(&mut CLIMBED.lock().unwrap_or_else(|e| e.into_inner()));
         }
     }
 }
@@ -595,8 +628,11 @@ impl Repo {
     /// **지금 자리를 못 물은 것은 무엇을 하다 났는지 댄다**(`refuse.no_cwd`, 리뷰 moai-yivo.b5h) — errno 한 줄은
     /// 주어가 없다. 지운 워크트리에 앉은 채 부른 `moai prime` 이 "여기 트래커를 못 읽었다 — No such file or
     /// directory" 로 고칠 것을 못 댔다. `cmd::project` 의 `cwd` 와 한 말이다.
+    ///
+    /// **지금 자리는 요청의 통이 먼저 댄다**([`crate::side::cwd`], moai-5n6m.m0b) — 여러 프로젝트를 맡는 데몬은
+    /// 프로세스의 현재 디렉터리를 옮길 수 없다. 통이 없는 CLI 는 전과 같이 현재 디렉터리다.
     pub fn find(lang: impl FnOnce() -> Lang) -> R<Option<Repo>> {
-        let dir = match std::env::current_dir() {
+        let dir = match crate::side::cwd() {
             Ok(dir) => dir,
             Err(e) => {
                 let said = crate::i18n::fill(crate::i18n::say(lang(), "refuse.no_cwd"), &[("said", &e.to_string())]);
@@ -1137,11 +1173,18 @@ impl Repo {
         // 정리가 진 것까지 거기 실으면 남은 이력을 잃었다고 말하고, 탐색기는 첫 줄만 보여 진짜 잃은 이력을 가렸다.
         for t in note {
             let said = crate::view::store_trouble(lang(), &t);
-            let to = match t {
-                Trouble::JournalLost { .. } => &MISSED,
-                _ => &NOTED,
-            };
-            to.lock().unwrap_or_else(|e| e.into_inner()).push((self.root.clone(), said));
+            let lost = matches!(t, Trouble::JournalLost { .. });
+            let one = (self.root.clone(), said);
+            // **요청의 통이 걸렸으면 거기만 적는다**(`crate::side`, moai-3hgm.25e) — 프로세스의 두 통은 비우지 않아,
+            // 데몬에서는 한 요청이 못 적은 저널이 뒤의 모든 요청의 말로 다시 선다.
+            let hung = crate::side::with(|s| {
+                let to = if lost { &mut s.missed } else { &mut s.noted };
+                to.push(one.clone());
+            });
+            if hung.is_none() {
+                let to = if lost { &MISSED } else { &NOTED };
+                to.lock().unwrap_or_else(|e| e.into_inner()).push(one);
+            }
         }
         Ok(out)
     }
@@ -1370,12 +1413,15 @@ impl Repo {
             write_atomic_inside(&self.issues_path(), after.as_bytes(), &self.root)?;
             self.note_held(&original, &issues);
         }
-        let mut tallies = TALLY.lock().unwrap_or_else(|e| e.into_inner());
-        match tallies.iter_mut().find(|(root, _)| *root == self.root) {
+        // **요청의 통이 걸렸으면 그 통에 센다**(`crate::side`, moai-3hgm.25e) — 프로세스의 셈은 늘기만 해, 데몬에서는
+        // 한 요청이 들고 간 줄을 뒤의 모든 요청이 "그대로 두고 썼다" 로 다시 말한다.
+        let fold = |tallies: &mut Vec<(PathBuf, Tally)>| match tallies.iter_mut().find(|(root, _)| *root == self.root) {
             Some((_, t)) => *t = t.after(wrote, opaque.len()),
             None => tallies.push((self.root.clone(), Tally::default().after(wrote, opaque.len()))),
+        };
+        if crate::side::with(|s| fold(&mut s.tallies)).is_none() {
+            fold(&mut TALLY.lock().unwrap_or_else(|e| e.into_inner()));
         }
-        drop(tallies);
         // **닫힘이 줄을 바꿨으면 저널 실패는 실패가 아니다**(moai-52z9). 줄은 이미 들어갔는데
         // `Err` 를 내면 사람은 다시 부르고, `add` 는 id 가 다른 같은 이슈를 하나 더 세운다.
         // 순서는 그대로다 — 빠진 일기가 거짓말하는 일기보다 싸다. 고칠 것은 말이다:
@@ -1432,10 +1478,15 @@ impl Repo {
         if (wrote || (!entries.is_empty() && failed.is_none()))
             && let Some(from) = &self.moved_from
         {
-            let mut moved = MOVED.lock().unwrap_or_else(|e| e.into_inner());
             let pair = (from.clone(), self.dir());
-            if !moved.contains(&pair) {
-                moved.push(pair);
+            let push = |moved: &mut Vec<(PathBuf, PathBuf)>| {
+                if !moved.contains(&pair) {
+                    moved.push(pair.clone());
+                }
+            };
+            // 요청의 통이 걸렸으면 거기만 적는다(moai-3hgm.25e) — 위 셈과 같은 까닭이다.
+            if crate::side::with(|s| push(&mut s.moved)).is_none() {
+                push(&mut MOVED.lock().unwrap_or_else(|e| e.into_inner()));
             }
         }
         if let Err(e) = after_commit(&out) {
@@ -1958,7 +2009,11 @@ impl Tally {
 /// 입을 다문다. 처음 쓴 차례대로 둔다.
 static TALLY: std::sync::Mutex<Vec<(PathBuf, Tally)>> = std::sync::Mutex::new(Vec::new());
 
+/// 요청의 통이 걸렸으면 그 통의 셈이다(moai-3hgm.25e).
 pub fn unreadable_tallies() -> Vec<(PathBuf, Tally)> {
+    if let Some(tallies) = crate::side::with(|s| s.tallies.clone()) {
+        return tallies;
+    }
     TALLY.lock().unwrap_or_else(|e| e.into_inner()).clone()
 }
 
@@ -1969,7 +2024,11 @@ pub fn unreadable_tallies() -> Vec<(PathBuf, Tally)> {
 /// 대체 화면 안의 알림은 닫으면 사라지기 때문이다.
 static MISSED: std::sync::Mutex<Vec<(PathBuf, String)>> = std::sync::Mutex::new(Vec::new());
 
+/// 요청의 통이 걸렸으면 그 통의 것이다(moai-3hgm.25e).
 pub fn journal_misses() -> Vec<(PathBuf, String)> {
+    if let Some(missed) = crate::side::with(|s| s.missed.clone()) {
+        return missed;
+    }
     MISSED.lock().unwrap_or_else(|e| e.into_inner()).clone()
 }
 
@@ -1978,7 +2037,11 @@ pub fn journal_misses() -> Vec<(PathBuf, String)> {
 /// 까닭은 말이다 — 그 통은 "썼지만 이력은 못 남겼다" 로 펴진다. `main` 이 끝에 한 번, 같은 말은 한 번만 낸다.
 static NOTED: std::sync::Mutex<Vec<(PathBuf, String)>> = std::sync::Mutex::new(Vec::new());
 
+/// 요청의 통이 걸렸으면 그 통의 것이다(moai-3hgm.25e).
 pub fn write_notes() -> Vec<(PathBuf, String)> {
+    if let Some(noted) = crate::side::with(|s| s.noted.clone()) {
+        return noted;
+    }
     NOTED.lock().unwrap_or_else(|e| e.into_inner()).clone()
 }
 
@@ -2073,7 +2136,12 @@ impl Unread {
 /// 읽는다(moai-mkyg.ncj).
 static UNREAD: std::sync::Mutex<Vec<Unread>> = std::sync::Mutex::new(Vec::new());
 
+/// **요청의 통이 걸렸으면 그 통의 것이다**(`crate::side`, moai-5n6m.m0b) — 적는 [`note_missed`] 가 그리로 가므로 읽는
+/// 자리도 같아야 한다. `show --json` 의 `journal_error` 와 `stats` 가 여기서 읽는다.
 pub fn journal_unread() -> Vec<Unread> {
+    if let Some(unread) = crate::side::with(|s| s.unread.clone()) {
+        return unread;
+    }
     UNREAD.lock().unwrap_or_else(|e| e.into_inner()).clone()
 }
 
@@ -2106,6 +2174,17 @@ fn note_missed(root: &Path, at: &Path, why: Missed) {
             c.push(one.clone());
         }
     });
+    // **요청의 통이 걸렸으면 거기만 적는다**(`crate::side`, moai-5n6m.m0b) — 프로세스의 두 목록은 늘기만 해, 데몬에서는
+    // 한 요청이 못 읽은 자리가 뒤의 모든 요청에 다시 선다. [`UNREAD_NOW`] 를 걷는 탐색기는 통을 안 건다.
+    if crate::side::with(|s| {
+        if !s.unread.contains(&one) {
+            s.unread.push(one.clone());
+        }
+    })
+    .is_some()
+    {
+        return;
+    }
     for list in [&UNREAD_NOW, &UNREAD] {
         let mut v = list.lock().unwrap_or_else(|e| e.into_inner());
         if !v.contains(&one) {

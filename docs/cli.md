@@ -45,6 +45,7 @@ Commands:
   wiki          The project wiki - the markdown pages under `docs/`, and lessons
   tui           Open the explorer (writes a jot, `SPC n`, and gantt plans)
   web           Serve this tracker as a page on 127.0.0.1
+  daemon        Run the local JSON-RPC daemon - one per user
   hook          Called by an agent's hook. Reads an event on stdin
   merge-driver  Called by git. Merges issues.jsonl per issue, three-way
   skill         Plant skills for Claude, Codex, Antigravity (safe to run again)
@@ -3704,6 +3705,125 @@ Options:
   linked worktree, it serves the main checkout's tracker, as other commands
   read it. --json prints the first line as one JSON value and nothing more
   on stdout; --dry-run adds dry_run, and with --port 0 there is no url.
+```
+
+## `moai daemon`
+
+```
+Run the local JSON-RPC daemon - one per user
+
+Usage: moai daemon [OPTIONS] <COMMAND>
+
+Commands:
+  start   Serve in the foreground until `moai daemon stop`
+  stop    Ask the running daemon to exit and wait until it has
+  status  Whether a daemon runs: pid, version, proto and socket
+  help    Print this message or the help of the given subcommand(s)
+
+Options:
+      --json                 Machine-readable output. Every human line goes away
+      --no-color             Turn colour off (same as `--color never`)
+      --color <how>          auto|always|never (auto by default, off when piped)
+  -C, --dir <path>           Run in this directory (same as `git -C`)
+      --user <name (email)>  Who is doing this (from `git config` when absent)
+  -h, --help                 Print help
+
+  moai daemon start          serve in the foreground until stopped
+  moai daemon status         is one running: pid, version, socket
+  moai daemon stop           ask the running daemon to exit
+
+  One daemon serves every project of one user, over a Unix socket that
+  speaks JSON-RPC 2.0, one message per line. It sits beside the CLI: the
+  CLI reads and writes .moai as before. The socket is daemon.socket in the
+  same directory as moai ctl's: MOAI_CTL_DIR, else $XDG_RUNTIME_DIR/moai,
+  else moai/run in %LOCALAPPDATA% on Windows, else moai-<uid> in the
+  temporary directory, owned by you alone.
+
+  On Windows the socket is a named pipe open to your account alone, and
+  daemon.socket is a file holding the pipe's name.
+```
+
+## `moai daemon start`
+
+```
+Serve in the foreground until `moai daemon stop`
+
+Usage: moai daemon start [OPTIONS]
+
+Options:
+      --json                 Machine-readable output. Every human line goes away
+      --no-color             Turn colour off (same as `--color never`)
+      --color <how>          auto|always|never (auto by default, off when piped)
+  -C, --dir <path>           Run in this directory (same as `git -C`)
+      --user <name (email)>  Who is doing this (from `git config` when absent)
+  -h, --help                 Print help
+
+  moai daemon start          one line names the socket, then it serves
+  moai daemon start --json   that line as {started, pid, version, proto, socket}
+
+  It stays in the foreground, so systemd, launchd or `&` can keep it; there
+  is no background mode. The first line comes once the socket listens.
+  A second start never runs a second daemon. When the running one is the same
+  version it says so and exits 0 (started is false). When it is another
+  version it names both and stops with the code version_mismatch - restart
+  it through its service manager, or stop and start it if run manually.
+
+  A socket left by a daemon that is gone is removed and the daemon starts.
+  A file there that is not your socket is left alone and refused. A running
+  daemon so full that it cannot even answer hello stops it with the code
+  busy, naming its pid. Ctrl-C or SIGTERM stops it like moai daemon stop:
+  running requests finish, the socket is removed and it exits 0. A second
+  signal ends it at once and may leave the socket; the next start clears it.
+  A SIGINT ignored at launch (a script's &) stays ignored.
+```
+
+## `moai daemon stop`
+
+```
+Ask the running daemon to exit and wait until it has
+
+Usage: moai daemon stop [OPTIONS]
+
+Options:
+      --json                 Machine-readable output. Every human line goes away
+      --no-color             Turn colour off (same as `--color never`)
+      --color <how>          auto|always|never (auto by default, off when piped)
+  -C, --dir <path>           Run in this directory (same as `git -C`)
+      --user <name (email)>  Who is doing this (from `git config` when absent)
+  -h, --help                 Print help
+
+  --json gives {stopped, pid, socket}. With nothing running, stopped is
+  false and it still exits 0. It works on a daemon of another version too,
+  and on one at its connection cap (32): past the cap the daemon still
+  answers hello and daemon.shutdown, and refuses the rest with busy.
+```
+
+## `moai daemon status`
+
+```
+Whether a daemon runs: pid, version, proto and socket
+
+Usage: moai daemon status [OPTIONS]
+
+Options:
+      --json                 Machine-readable output. Every human line goes away
+      --no-color             Turn colour off (same as `--color never`)
+      --color <how>          auto|always|never (auto by default, off when piped)
+  -C, --dir <path>           Run in this directory (same as `git -C`)
+      --user <name (email)>  Who is doing this (from `git config` when absent)
+  -h, --help                 Print help
+
+  --json gives {supported, running, socket, stale_socket, this_version,
+  this_proto}, and pid, version, proto and same_version while one runs.
+  same_version is false when the daemon is another version or proto than
+  this moai - restart it through its service manager, or stop and start it
+  if run manually. A rebuild of the same version still reads true.
+  stale_socket is a socket left by a daemon that is gone; moai daemon start
+  clears it. It only reads, and exits 0 whether or not a daemon runs; a
+  file there that is not your
+  socket, an answer that is not a daemon's, or a daemon so full that it
+  cannot even answer hello (busy, with its pid) is an error. A daemon at
+  its connection cap still answers status.
 ```
 
 ## `moai hook`

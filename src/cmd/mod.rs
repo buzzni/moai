@@ -8,6 +8,7 @@ pub mod archive;
 pub mod backlog;
 pub mod config;
 pub mod ctl;
+pub mod daemon;
 pub mod defer;
 pub mod due;
 pub mod edit;
@@ -24,6 +25,7 @@ pub mod prime;
 pub mod project;
 pub mod read;
 pub mod ready;
+pub(crate) mod request;
 pub mod rm;
 pub mod show;
 pub mod skill;
@@ -63,6 +65,30 @@ pub struct Ctx {
 impl Ctx {
     pub fn new(json: bool, user: Option<String>, chdir: bool) -> Ctx {
         Ctx { json, user, chdir, reg: OnceLock::new(), lang: OnceLock::new(), zone: crate::tz::System::default() }
+    }
+
+    /// 요청 하나의 문맥(`cmd::request`, moai-5n6m.m0b) — 화면 말과 시간대를 **요청이 준 것으로** 박아 둔다.
+    /// 안 준 것은 CLI 와 같이 늦게 푼다(`MOAI_LANG`·설정, `TZ`). 둘 다 프로세스의 것이라 요청마다 못 바꾸는
+    /// 자리였다. 부르는 쪽이 이미 읽은 사용자 설정(`reg`)도 받는다 — 받으면 [`Ctx::registry`] 가 다시 안 읽는다.
+    pub(crate) fn asked(
+        json: bool,
+        user: Option<String>,
+        chdir: bool,
+        lang: Option<crate::i18n::Lang>,
+        zone: Option<crate::tz::Zone>,
+        reg: Option<crate::user_config::Registry>,
+    ) -> Ctx {
+        let mut ctx = Ctx::new(json, user, chdir);
+        if let Some(reg) = reg {
+            let _ = ctx.reg.set(reg);
+        }
+        if let Some(lang) = lang {
+            let _ = ctx.lang.set(lang);
+        }
+        if let Some(zone) = zone {
+            ctx.zone = crate::tz::System::fixed(zone);
+        }
+        ctx
     }
 
     /// 사용자 설정. **이 문으로 드는 명령은 한 판에 한 번만 읽는다**(moai-cigu) — 등록 목록도
@@ -166,8 +192,22 @@ static PARTIAL: AtomicBool = AtomicBool::new(false);
 static AFTER: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
 
 /// [`AFTER`] 에 한 줄 — 명령이 `Ok` 로 끝나면 [`run`] 이 [`tell`] 로 낸다.
+///
+/// **요청의 통이 걸렸으면 거기 쌓는다**(`crate::side`, moai-5n6m.m0b) — 두 요청이 함께 돌면 [`AFTER`] 하나를 나눠 써
+/// 서로의 줄을 낸다.
 pub(crate) fn tell_after(line: String) {
-    AFTER.lock().unwrap_or_else(|e| e.into_inner()).push(line);
+    match crate::side::current() {
+        Some(side) => side.lock().unwrap_or_else(|e| e.into_inner()).after.push(line),
+        None => AFTER.lock().unwrap_or_else(|e| e.into_inner()).push(line),
+    }
+}
+
+/// [`tell_after`] 가 쌓은 줄을 꺼낸다 — 요청의 통이 걸렸으면 그 통의 것이다.
+fn take_after() -> Vec<String> {
+    if let Some(after) = crate::side::with(|s| std::mem::take(&mut s.after)) {
+        return after;
+    }
+    std::mem::take(&mut *AFTER.lock().unwrap_or_else(|e| e.into_inner()))
 }
 
 /// `--due`·`--start` 에 친 값 — `+N` 이면 **오늘에서 N 일 뒤**의 날짜로 바꾼다(moai-ghkp.kz7, [`crate::model::relative_due`]).
@@ -386,18 +426,26 @@ pub fn path_exts(raw: Option<&std::ffi::OsStr>) -> Vec<String> {
 /// 코드를 부른 쪽이 못 읽는다.
 static EXIT: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
 
+/// **요청의 통이 걸렸으면 그 통의 코드다**(`crate::side`, moai-3hgm.25e) — [`EXIT`] 는 프로세스 하나에 하나라, 오래 사는
+/// 프로세스에서는 한 요청이 고른 코드가 뒤의 모든 요청의 코드로 남는다. [`note_partial`] 과 같은 꼴이다.
 pub fn exit_with(code: u8) {
-    EXIT.store(code, Ordering::Relaxed);
+    if crate::side::with(|s| s.exit = code).is_none() {
+        EXIT.store(code, Ordering::Relaxed);
+    }
 }
 pub fn chosen_exit() -> u8 {
-    EXIT.load(Ordering::Relaxed)
+    crate::side::with(|s| s.exit).unwrap_or_else(|| EXIT.load(Ordering::Relaxed))
 }
 
+/// **요청의 통이 걸렸으면 그 통의 깃발이다**(`crate::side`, moai-5n6m.m0b) — [`PARTIAL`] 은 한 번 서면 안 내려가, 오래
+/// 사는 프로세스에서는 한 요청의 부분 실패가 뒤의 모든 요청에 선다.
 pub fn note_partial() {
-    PARTIAL.store(true, Ordering::Relaxed);
+    if crate::side::with(|s| s.partial = true).is_none() {
+        PARTIAL.store(true, Ordering::Relaxed);
+    }
 }
 pub fn had_partial() -> bool {
-    PARTIAL.load(Ordering::Relaxed)
+    crate::side::with(|s| s.partial).unwrap_or_else(|| PARTIAL.load(Ordering::Relaxed))
 }
 /// 깃발을 거두며 그때까지의 값을 낸다 — 이어 부른 명령의 부분 실패를 제 종료 코드에 안 싣는 자리(`init`)가 쓴다.
 pub fn take_partial() -> bool {
@@ -561,16 +609,29 @@ pub(crate) fn name_capped<T>(lang: crate::i18n::Lang, items: &[T], one: impl Fn(
 /// stderr 에 한 줄 — **stderr 가 끊겨도 넘어지지 않는다**(리뷰). `eprintln!` 은 읽는 쪽이 사라진 파이프(EPIPE)
 /// 에서 패닉해, 이미 고른 답까지 못 내고 101 로 끝난다. `main` 의 끝 알림이 `writeln!` 의 실패를 버리는 것과
 /// 같은 자다.
+///
+/// **요청의 통이 걸렸으면 거기 담는다**(`crate::side`, moai-5n6m.m0b) — 데몬의 stderr 는 요청한 쪽에 안 닿고, 두
+/// 요청이 함께 돌면 서로의 줄이 섞인다.
 pub(crate) fn tell(line: &str) {
     use std::io::Write as _;
+    if crate::side::with(|s| s.told.push(line.to_string())).is_some() {
+        return;
+    }
     let _ = writeln!(std::io::stderr().lock(), "{line}");
 }
 
 pub fn run(mut cli: Cli) -> R<Vec<String>> {
     let ctx = Ctx::new(cli.json, cli.user.take(), cli.dir.is_some());
     let out = dispatch(&ctx, cli);
+    finish(&ctx, &out);
+    out
+}
+
+/// 명령이 선 뒤의 꼬리 — [`run`] 과 요청의 입구(`cmd::request`)가 **같이 부른다**. 두 벌로 적으면 한쪽만 고쳐져
+/// 데몬의 알림이 CLI 의 stderr 와 갈린다.
+pub(crate) fn finish(ctx: &Ctx, out: &R<Vec<String>>) {
     // **선 판에서만 낸다**([`AFTER`]) — 넘어진 판의 것은 버린다.
-    let after = std::mem::take(&mut *AFTER.lock().unwrap_or_else(|e| e.into_inner()));
+    let after = take_after();
     if out.is_ok() {
         after.iter().for_each(|line| tell(line));
     }
@@ -588,9 +649,8 @@ pub fn run(mut cli: Cli) -> R<Vec<String>> {
     if let Some(why) = ctx.zone_trouble()
         && !(ctx.json && out.is_err())
     {
-        eprintln!("{}", crate::view::zone_trouble(ctx.lang(), why));
+        tell(&crate::view::zone_trouble(ctx.lang(), why));
     }
-    out
 }
 
 fn dispatch(ctx: &Ctx, cli: Cli) -> R<Vec<String>> {
@@ -777,6 +837,8 @@ fn dispatch(ctx: &Ctx, cli: Cli) -> R<Vec<String>> {
         Cmd::Wiki(WikiCmd::Show { slug }) => wiki::show(ctx, &slug),
         Cmd::Wiki(WikiCmd::Search { words, limit }) => wiki::search(ctx, &words, limit),
         Cmd::Wiki(WikiCmd::Learn(a)) => wiki::learn(ctx, a),
+        // 섬기는 판(`start`)은 멈출 때까지 안 돌아온다 — 첫 줄은 `daemon::run` 이 직접 찍는다.
+        Cmd::Daemon(d) => daemon::run(ctx, d),
     }
 }
 
@@ -869,6 +931,13 @@ fn typed(ctx: &Ctx, cmd: Typed, kind: Kind) -> R<Vec<String>> {
 /// 없어 `--` 가 안 듣는다 — 그 자리는 `--title=<값>` 으로 붙여 쓰는 것이 길이다.
 pub fn refuse_if_flag_like(value: &str, at: FlagLike<'_>, lang: crate::i18n::Lang) -> R<()> {
     use crate::i18n::{fill, say};
+    // **요청의 통이 걸렸으면 재지 않는다**(`crate::side`, moai-3hgm.25e). 이 검사가 막는 것은 clap 이 깃발을 값으로
+    // 넘긴 판과 stdin 을 바란 `-` 인데, 요청의 필드는 형이 있는 글이라 둘 다 없다 — 깃발 같은 제목도 `-` 한 글자도
+    // 사람이 준 글이다(`add::read_body` 도 그 `-` 를 글로 받는다). 그리고 아래의 argv 훑기는 데몬의 argv
+    // (`moai daemon start`)를 읽는다.
+    if crate::side::hung() {
+        return Ok(());
+    }
     // **`-` 한 글자는 빠져나갈 길보다 먼저 잰다** — 위 doc 의 둘째 절이다. `--`·`--title=-` 도 이것을 못 연다.
     if value == "-" {
         return Err(lone_dash(at, lang));

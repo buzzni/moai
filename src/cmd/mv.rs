@@ -422,18 +422,18 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
 
     for id in &moved.missing {
         super::note_partial();
-        eprintln!("moai: {}", crate::i18n::fill(crate::i18n::say(lang, "refuse.not_found"), &[("id", id)]));
+        super::tell(&format!("moai: {}", crate::i18n::fill(crate::i18n::say(lang, "refuse.not_found"), &[("id", id)])));
     }
     // **못 찾은 줄이 못 읽은 아카이브에 있을 수 있으면 그 자리를 댄다**(moai-bth3 리뷰) — 아카이브를 못 읽어도 쓰기는
     // 서므로, 말없이 "없다" 만 대면 사람은 그 일이 없는 줄 알고 새로 세운다.
     for said in &moved.unread_archive {
-        eprintln!(
+        super::tell(&format!(
             "moai: {}",
             crate::i18n::fill(
                 crate::i18n::say(lang, "mv.missing_in_archive"),
                 &[("said", &crate::text::one_line(said))]
             )
-        );
+        ));
     }
     // **진 집기도 못 찾은 줄과 같은 자리다.** 종료 코드로 갈려야 jq 없는 껍데기가
     // 이긴 쪽과 진 쪽을 가른다 — 여기서 실패로 끝내지는 않는다(나머지 id 는 옮겼다).
@@ -441,7 +441,10 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
     // 터미널에서 한 줄이 두 번 떴다.
     for (id, now) in &moved.stale {
         super::note_partial();
-        eprintln!("moai: {}", crate::i18n::fill(crate::i18n::say(lang, "mv.stale"), &[("id", id), ("now", now)]));
+        super::tell(&format!(
+            "moai: {}",
+            crate::i18n::fill(crate::i18n::say(lang, "mv.stale"), &[("id", id), ("now", now)])
+        ));
     }
     // **남의 줄을 `--take` 없이 집었으면 한 줄로 알린다**(moai-0zjo, 2026-10-02 사용자 결정). 옮기기는
     // 했다 — 종료 코드는 그대로다. 막는 자리는 훅 규칙 5 하나다. 사람 쪽과 `--json` 쪽 모두 stderr 다:
@@ -458,7 +461,7 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
         head.push_str(&format!(" --user {}", crate::text::quoted(who.trim())));
     }
     for w in &moved.theirs {
-        eprintln!("moai: {}", theirs_said(w, &head, to.as_str(), lang));
+        super::tell(&format!("moai: {}", theirs_said(w, &head, to.as_str(), lang)));
     }
 
     if ctx.json {

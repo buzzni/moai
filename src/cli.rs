@@ -934,6 +934,27 @@ BACKLOG
   on stdout; --dry-run adds dry_run, and with --port 0 there is no url.")]
     Web(WebArgs),
 
+    // **사용자당 하나인 로컬 데몬이다**(moai-5n6m) — 소켓을 묶고 섬기는 길은 `crate::daemon`, 띄우고 묻고 멈추는
+    // 길은 `cmd::daemon` 이다.
+    /// Run the local JSON-RPC daemon - one per user
+    #[command(
+        subcommand,
+        after_help = "  moai daemon start          serve in the foreground until stopped
+  moai daemon status         is one running: pid, version, socket
+  moai daemon stop           ask the running daemon to exit
+
+  One daemon serves every project of one user, over a Unix socket that
+  speaks JSON-RPC 2.0, one message per line. It sits beside the CLI: the
+  CLI reads and writes .moai as before. The socket is daemon.socket in the
+  same directory as moai ctl's: MOAI_CTL_DIR, else $XDG_RUNTIME_DIR/moai,
+  else moai/run in %LOCALAPPDATA% on Windows, else moai-<uid> in the
+  temporary directory, owned by you alone.
+
+  On Windows the socket is a named pipe open to your account alone, and
+  daemon.socket is a file holding the pipe's name."
+    )]
+    Daemon(DaemonCmd),
+
     /// Called by an agent's hook. Reads an event on stdin
     #[command(after_help = "  Nobody calls this by hand. The hooks `moai skill install` plants call it -
   Claude's plugin, Codex's .codex/hooks.json, Antigravity's .agents/hooks.json.
@@ -1406,6 +1427,48 @@ pub enum SuperviseCmd {
         #[arg(long, value_name = "dir")]
         subdir: Option<String>,
     },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum DaemonCmd {
+    /// Serve in the foreground until `moai daemon stop`
+    #[command(after_help = "  moai daemon start          one line names the socket, then it serves
+  moai daemon start --json   that line as {started, pid, version, proto, socket}
+
+  It stays in the foreground, so systemd, launchd or `&` can keep it; there
+  is no background mode. The first line comes once the socket listens.
+  A second start never runs a second daemon. When the running one is the same
+  version it says so and exits 0 (started is false). When it is another
+  version it names both and stops with the code version_mismatch - restart
+  it through its service manager, or stop and start it if run manually.
+
+  A socket left by a daemon that is gone is removed and the daemon starts.
+  A file there that is not your socket is left alone and refused. A running
+  daemon so full that it cannot even answer hello stops it with the code
+  busy, naming its pid. Ctrl-C or SIGTERM stops it like moai daemon stop:
+  running requests finish, the socket is removed and it exits 0. A second
+  signal ends it at once and may leave the socket; the next start clears it.
+  A SIGINT ignored at launch (a script's &) stays ignored.")]
+    Start,
+    /// Ask the running daemon to exit and wait until it has
+    #[command(after_help = "  --json gives {stopped, pid, socket}. With nothing running, stopped is
+  false and it still exits 0. It works on a daemon of another version too,
+  and on one at its connection cap (32): past the cap the daemon still
+  answers hello and daemon.shutdown, and refuses the rest with busy.")]
+    Stop,
+    /// Whether a daemon runs: pid, version, proto and socket
+    #[command(after_help = "  --json gives {supported, running, socket, stale_socket, this_version,
+  this_proto}, and pid, version, proto and same_version while one runs.
+  same_version is false when the daemon is another version or proto than
+  this moai - restart it through its service manager, or stop and start it
+  if run manually. A rebuild of the same version still reads true.
+  stale_socket is a socket left by a daemon that is gone; moai daemon start
+  clears it. It only reads, and exits 0 whether or not a daemon runs; a
+  file there that is not your
+  socket, an answer that is not a daemon's, or a daemon so full that it
+  cannot even answer hello (busy, with its pid) is an error. A daemon at
+  its connection cap still answers status.")]
+    Status,
 }
 
 #[derive(Subcommand, Debug)]
@@ -2429,13 +2492,13 @@ pub struct ReadyArgs {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SortFields(pub crate::query::Order, pub Option<crate::nav::Group>);
 
-fn sort_fields(raw: &str) -> Result<SortFields, String> {
+pub(crate) fn sort_fields(raw: &str) -> Result<SortFields, String> {
     crate::query::Order::parse(raw)
         .map(|order| SortFields(order, crate::query::Order::preset_group(raw.trim())))
         .map_err(|e| e.to_string())
 }
 
-fn group_value(raw: &str) -> Result<crate::nav::Group, String> {
+pub(crate) fn group_value(raw: &str) -> Result<crate::nav::Group, String> {
     raw.parse()
 }
 
@@ -2635,7 +2698,8 @@ pub struct EditArgs {
     pub if_unplanned: bool,
 }
 
-fn expected_day(s: &str) -> Result<String, String> {
+/// `edit --if-start`·`--if-due` 의 값 — 데몬의 `edit` 메서드도 같은 자로 읽는다(moai-3hgm.k7s).
+pub(crate) fn expected_day(s: &str) -> Result<String, String> {
     if s == "none" || crate::model::parse_date(s).is_some() {
         Ok(s.to_string())
     } else {
@@ -2647,8 +2711,11 @@ fn expected_day(s: &str) -> Result<String, String> {
 /// `Issue::shifted` 의 덧셈이 넘친다: 시험 판(overflow-checks)은 쓰기 안에서 넘어지고, 릴리스 판은 돌아 아무도 안 친
 /// 해를 거절문에 댄다. 여섯 자리는 이천칠백 해 남짓이라 손으로 옮길 날은 다 든다.
 fn shift_days() -> clap::builder::RangedI64ValueParser<i64> {
-    clap::value_parser!(i64).range(-999_999..=999_999)
+    clap::value_parser!(i64).range(SHIFT_DAYS)
 }
+
+/// [`shift_days`] 의 폭 — 데몬의 `edit` 메서드가 clap 없이 같은 폭으로 잰다(moai-3hgm.k7s).
+pub(crate) const SHIFT_DAYS: std::ops::RangeInclusive<i64> = -999_999..=999_999;
 
 #[derive(Args, Debug)]
 pub struct DeferArgs {

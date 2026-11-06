@@ -21,16 +21,41 @@ fn assignee_of(arg: Option<&str>, by: &Actor) -> (Option<String>, Option<String>
 ///
 /// [`read_plan`] 만 부른다 — `add --from` 과 `backlog promote --from` 은 그쪽 한 길로 읽는다. 여기를
 /// 따로 부르면 템플릿 채우기를 건너뛴 계획이 선다.
+///
+/// **요청의 통이 걸렸으면 아무것도 안 읽는다**(moai-3hgm.25e) — 계획으로 만들기는 데몬이 내지 않는 길이다. `-` 는
+/// [`stdin_text`] 가 거절하고, 파일도 안 연다: `/dev/stdin` 같은 철자는 데몬의 stdin 을 기다리고, 상대 경로는 데몬이
+/// 선 자리에 기대 요청의 자리와 어긋난다.
 fn read_source(from: &str) -> R<String> {
     match from {
-        "-" => {
-            let mut s = String::new();
-            std::io::Read::read_to_string(&mut std::io::stdin(), &mut s)
-                .map_err(|e| Fail::new(format!("stdin: {e}")))?;
-            Ok(s)
+        "-" => stdin_text(),
+        path if crate::side::hung() => {
+            Err(Fail::coded(format!("{path}: a request does not read a plan"), super::code::BAD_INPUT))
         }
         path => std::fs::read_to_string(path).map_err(|e| Fail::new(format!("{path}: {e}"))),
     }
+}
+
+/// stdin 을 다 읽는다 — **요청의 통이 걸렸으면 읽지 않고 거절한다**(moai-3hgm.25e).
+///
+/// 요청(데몬)에는 stdin 이 없다. 데몬의 stdin 은 그것을 띄운 터미널이거나 아무도 안 닫는 파이프일 수 있어, 읽으면
+/// 그 요청의 스레드가 영영 선다 — 그리고 그 사이 다른 요청이 같은 프로세스의 stdin 을 다툰다. 기다리지 않고 바로
+/// 거절한다. 요청이 글을 주는 길은 필드다([`dash_reads_stdin`]).
+fn stdin_text() -> R<String> {
+    if crate::side::hung() {
+        return Err(Fail::coded("stdin: a request has no stdin", super::code::BAD_INPUT));
+    }
+    let mut s = String::new();
+    std::io::Read::read_to_string(&mut std::io::stdin(), &mut s).map_err(|e| Fail::new(format!("stdin: {e}")))?;
+    Ok(s)
+}
+
+/// 글 자리에 온 `-` 가 **stdin 을 읽으라는 말인가** — 요청의 통이 걸렸으면 아니다, 그 `-` 는 글이다(moai-3hgm.25e).
+///
+/// 요청의 필드는 형이 있는 글이라 clap 이 깃발과 값을 헷갈릴 자리가 없고, 데몬은 본문·까닭을 글로 건넨다. 그러니
+/// API 로 온 `-` 한 글자도 그대로 그 글이어야 한다 — stdin 을 뜻하게 두면 그 글을 건넬 길이 없다.
+/// `refuse_if_flag_like` 가 통이 걸리면 서지 않는 것과 한 결정이다.
+fn dash_reads_stdin(arg: Option<&str>) -> bool {
+    arg == Some("-") && !crate::side::hung()
 }
 
 /// `--from` 의 계획 한 덩이를 읽어 **형식을 읽고 템플릿 변수를 채운다**(moai-cypw).
@@ -125,13 +150,13 @@ pub(crate) fn read_plan_body(from: &str, body: Option<String>, ctx: &Ctx, verb: 
 }
 
 /// `-` 이면 stdin. `add` 와 `edit` 이 같은 규칙을 쓴다.
+///
+/// 요청의 통이 걸렸으면 `-` 도 글이다([`dash_reads_stdin`]).
 pub fn read_body(arg: Option<String>) -> R<Option<String>> {
     match arg.as_deref() {
         None => Ok(None),
-        Some("-") => {
-            let mut s = String::new();
-            std::io::Read::read_to_string(&mut std::io::stdin(), &mut s)
-                .map_err(|e| Fail::new(format!("stdin: {e}")))?;
+        Some("-") if dash_reads_stdin(arg.as_deref()) => {
+            let s = stdin_text()?;
             let s = s.trim_end_matches('\n').to_string();
             Ok((!s.is_empty()).then_some(s))
         }
@@ -160,8 +185,10 @@ pub fn read_body(arg: Option<String>) -> R<Option<String>> {
 /// **argv 의 글이 파일 이름이면 알리는 것은 부르는 쪽이다**(moai-yivo.xe9) — "저널에 남는 것은 그 글자다" 는 그
 /// 글이 실제로 저널에 들었을 때만 참이라, `mv`·`defer` 가 쓰기가 선 뒤에 [`say_if_text_names_a_file`] 를 부른다.
 /// 여기서 알리던 판은 거절된 부름에도 그 말을 했다(리뷰 moai-yivo.b5h).
+///
+/// 요청의 통이 걸렸으면 `-` 도 argv 의 글처럼 그대로 돌려준다([`dash_reads_stdin`]).
 pub fn read_msg(arg: Option<String>, lang: crate::i18n::Lang) -> R<Option<String>> {
-    if arg.as_deref() != Some("-") {
+    if !dash_reads_stdin(arg.as_deref()) {
         return Ok(arg);
     }
     let text = read_body(arg)?.unwrap_or_default();
@@ -197,7 +224,7 @@ pub fn read_body_said(arg: Option<String>, ctx: &Ctx) -> R<Option<String>> {
 /// "본문은 적지 않았다" 가 거짓이 된다.
 fn read_body_told(arg: Option<String>, ctx: &Ctx, given: Given) -> R<Option<String>> {
     say_if_text_names_a_file(arg.as_deref(), ctx, given);
-    let from_stdin = arg.as_deref() == Some("-");
+    let from_stdin = dash_reads_stdin(arg.as_deref());
     let body = read_body(arg)?;
     if from_stdin && body.is_none() {
         let said = match given {
@@ -206,7 +233,7 @@ fn read_body_told(arg: Option<String>, ctx: &Ctx, given: Given) -> R<Option<Stri
             }
             _ => crate::i18n::say(ctx.lang(), "add.body_stdin_empty"),
         };
-        eprintln!("moai: {said}");
+        super::tell(&format!("moai: {said}"));
     }
     Ok(body)
 }
@@ -287,7 +314,9 @@ fn names_a_file(text: &str) -> Option<std::path::PathBuf> {
     if invoked.as_deref().is_some_and(|at| at.join(typed).is_file()) {
         return Some(typed.to_path_buf());
     }
-    let here = std::env::current_dir().ok()?;
+    // 지금 자리는 요청의 통이 먼저 댄다(`crate::side::cwd`, moai-3hgm.25e) — 데몬이 선 자리를 재면 요청과 상관없는
+    // 파일 이름으로 알린다. 통이 걸렸으면 친 자리와 같아 아래 갈래가 안 선다.
+    let here = crate::side::cwd().ok()?;
     let moved = invoked.as_deref() != Some(here.as_path());
     (moved && here.join(typed).is_file()).then(|| here.join(typed))
 }
@@ -517,11 +546,12 @@ pub fn run(ctx: &Ctx, args: AddArgs, kind_override: Option<Kind>) -> R<Vec<Strin
     repo.config
         .require_known(status.as_str())
         .map_err(|e| Fail::coded(crate::view::no_such_column(ctx.lang(), &e), super::code::BAD_STATUS))?;
-    let at = model::now();
     let by = model::actor(ctx.user.as_deref(), &repo.root).map_err(|e| Fail::no_actor(&e, ctx.lang()))?;
-    // `--due +N` 은 락 밖에서 날짜로 바꾼다 — 시간대를 풀면 tzdb 를 연다([`super::due_arg`]).
-    let due = args.due.as_deref().map(|d| super::due_arg(ctx, d, &at));
-    let start = args.start.as_deref().map(|d| super::due_arg(ctx, d, &at));
+    // `--due +N` 은 락 밖에서 날짜로 바꾼다 — 시간대를 풀면 tzdb 를 연다([`super::due_arg`]). 이 시계는 날을 재는 데만
+    // 쓴다 — 줄과 저널의 도장은 락 안에서 다시 뜬다(아래, `edit` 과 한 꼴).
+    let today = model::now();
+    let due = args.due.as_deref().map(|d| super::due_arg(ctx, d, &today));
+    let start = args.start.as_deref().map(|d| super::due_arg(ctx, d, &today));
 
     // 만든 줄과, 그것이 묶음이면 **멤버에서 읽은 칸.** 에픽을 먼저 만들고 멤버를
     // 나중에 다는 순서가 흔하지만 그 반대도 있다 — 이미 멤버가 있는 에픽을 뒤늦게
@@ -546,6 +576,11 @@ pub fn run(ctx: &Ctx, args: AddArgs, kind_override: Option<Kind>) -> R<Vec<Strin
             }
             let id = store::new_id(issues, cfg, reserved, args.parent.as_deref(), &title);
 
+            // **도장은 락을 쥔 뒤에 뜬다**(moai-3hgm.pp2, `mv` 의 리뷰 moai-u5bk.3wq 와 한 자). 밖에서 뜨면 락을 최대 5초
+            // 기다린 만들기가 그 사이 옆이 담은 줄보다 이른 `created_at`·`updated_at` 과 저널 도장을 든다 — 넷은 이
+            // 한 값이다(`store::admit` 이 저널에 `created_at` 을 옮긴다). `--due +N` 의 날은 위에서 락 밖의 시각으로 잰
+            // 그대로다.
+            let at = model::now();
             let mut issue = Issue::new(id, title.clone(), kind, status.clone(), &at);
             issue.epic = args.epic.clone();
             issue.milestone = args.milestone.clone();
@@ -698,12 +733,14 @@ fn bulk(
         return Ok(out);
     }
 
-    let at = model::now();
     let by = model::actor(ctx.user.as_deref(), &repo.root).map_err(|e| Fail::no_actor(&e, ctx.lang()))?;
     let who = assignee_of(assignee.as_deref(), &by);
     let (made, read, known): (Vec<Issue>, super::Read, bool) = repo.with_write(
         || ctx.lang(),
         |issues, cfg, reserved| {
+            // 도장은 락을 쥔 뒤에 뜬다 — 하나짜리 `add` 와 `backlog promote` 와 같은 까닭이다(moai-3hgm.pp2). 기한의
+            // `+N` 은 부르는 쪽([`run`])이 락 밖의 시각으로 이미 날로 바꿨다.
+            let at = model::now();
             let (entries, made) = create_drafts(issues, cfg, reserved, &drafts, None, rooted, &who, &by, &at)?;
             let ids: Vec<&str> = made.iter().map(|i| i.id.as_str()).collect();
             let read = super::read_of(issues, cfg, &ids, ctx.json);
@@ -1245,7 +1282,10 @@ pub fn milestone_line(milestone: Option<&str>, known: bool, roots: usize, lang: 
 /// `add.no_such_epic` 도 `--json` 을 가리지 않는다.
 pub fn say_no_such_milestone(milestone: Option<&str>, known: bool, lang: crate::i18n::Lang) {
     if let Some(id) = milestone.filter(|_| !known) {
-        eprintln!("moai: {}", crate::i18n::fill(crate::i18n::say(lang, "add.no_such_milestone"), &[("id", id)]));
+        super::tell(&format!(
+            "moai: {}",
+            crate::i18n::fill(crate::i18n::say(lang, "add.no_such_milestone"), &[("id", id)])
+        ));
     }
 }
 
@@ -1272,7 +1312,7 @@ pub fn say_held_epic(row: &Issue, held: Option<crate::report::HeldEpic>, lang: c
         HeldEpic::NotAnEpic => crate::i18n::say(lang, "add.no_such_epic"),
         HeldEpic::Group => crate::i18n::say(lang, "add.group_in_epic"),
     };
-    eprintln!("moai: {}", crate::i18n::fill(said, &[("id", e)]));
+    super::tell(&format!("moai: {}", crate::i18n::fill(said, &[("id", e)])));
 }
 
 pub fn tally(drafts: &[Draft], lang: crate::i18n::Lang) -> String {

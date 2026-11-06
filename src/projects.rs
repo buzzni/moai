@@ -97,15 +97,26 @@ pub fn open_with(reg: &Registry, worktree: bool, lang: crate::i18n::Lang) -> Vec
 /// 끝나면 안 된다. 늦어질 뿐 답은 같다.
 ///
 /// 받는 값은 항목을 빌려도 된다(`'a`) — 한눈 보기가 연 프로젝트를 빌린 보드를 스레드마다 짓는다.
+///
+/// **요청의 통을 실마다 물려준다**(`crate::side`, moai-5n6m.m0b) — 읽기 길에서 실을 띄우는 자리가 여기 하나다. 안
+/// 물려주면 한 요청 안에서 띄운 실의 알림이 그 요청을 떠나 프로세스의 전역으로 간다.
 pub fn each<'a, T: Sync, U: Send>(items: &'a [T], f: impl Fn(&'a T) -> U + Sync) -> Vec<U> {
     if items.len() < 2 {
         return items.iter().map(&f).collect();
     }
     let f = &f;
+    let side = &crate::side::current();
     std::thread::scope(|s| {
         let runs: Vec<_> = items
             .iter()
-            .map(|item| std::thread::Builder::new().spawn_scoped(s, move || f(item)).map_err(|_| item))
+            .map(|item| {
+                std::thread::Builder::new()
+                    .spawn_scoped(s, move || {
+                        let _in = crate::side::enter(side.clone());
+                        f(item)
+                    })
+                    .map_err(|_| item)
+            })
             .collect();
         runs.into_iter()
             .map(|run| match run {

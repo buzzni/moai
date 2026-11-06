@@ -947,7 +947,8 @@ there is no such call is it the **last `text` block**.
 ```sh
 python3 -c "
 import json,sys
-b=[c for l in open(sys.argv[1])
+sys.stdout.reconfigure(encoding='utf-8')
+b=[c for l in open(sys.argv[1], encoding='utf-8')
    for c in json.loads(l).get('message',{}).get('content') or []
    if isinstance(c, dict)]
 h=[(c.get('input') or {}).get('message') or '' for c in b

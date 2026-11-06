@@ -1167,7 +1167,7 @@ mod tests {
         assert!(
             told.contains(&format!(
                 "`moai -C {} edit argos-0003 --shift -1`",
-                crate::text::quoted(&dir.display().to_string())
+                crate::text::quoted(&dir.display().to_string().replace(std::path::MAIN_SEPARATOR, "/"))
             )),
             "되돌리는 명령이 없다: {told}"
         );
@@ -1266,7 +1266,7 @@ mod tests {
             assert!(
                 told.contains(&format!(
                     "`moai -C {} edit {row} {cmd}`",
-                    crate::text::quoted(&dir.display().to_string())
+                    crate::text::quoted(&dir.display().to_string().replace(std::path::MAIN_SEPARATOR, "/"))
                 )),
                 "{plan:?} 의 되돌리기가 `{cmd}` 가 아니다: {told}"
             );
@@ -1499,7 +1499,7 @@ mod tests {
         assert!(
             told.contains(&format!(
                 "`moai -C {} edit argos-0003 --shift -1`",
-                crate::text::quoted(&dir.display().to_string())
+                crate::text::quoted(&dir.display().to_string().replace(std::path::MAIN_SEPARATOR, "/"))
             )),
             "되돌리는 역이동이 없다: {told}"
         );
@@ -1513,7 +1513,7 @@ mod tests {
         assert!(
             told.contains(&format!(
                 "`moai -C {} edit argos-0003 --start none --if-start 2026-10-30`",
-                crate::text::quoted(&dir.display().to_string())
+                crate::text::quoted(&dir.display().to_string().replace(std::path::MAIN_SEPARATOR, "/"))
             )),
             "세운 시작을 안 비운다: {told}"
         );
@@ -1709,7 +1709,7 @@ mod tests {
         assert!(
             told.contains(&format!(
                 "`moai -C {} edit argos-0003 --shift-due -1`",
-                crate::text::quoted(&dir.display().to_string())
+                crate::text::quoted(&dir.display().to_string().replace(std::path::MAIN_SEPARATOR, "/"))
             )),
             "{told}"
         );
@@ -1733,7 +1733,7 @@ mod tests {
         assert!(
             told.contains(&format!(
                 "`moai -C {} edit argos-0003 --start none --if-start 2026-10-21`",
-                crate::text::quoted(&dir.display().to_string())
+                crate::text::quoted(&dir.display().to_string().replace(std::path::MAIN_SEPARATOR, "/"))
             )),
             "{told}"
         );
@@ -1784,7 +1784,7 @@ mod tests {
         assert!(
             told.contains(&format!(
                 "`moai -C {} edit argos-0003 --start 2026-10-22 --if-start 2026-10-21`",
-                crate::text::quoted(&dir.display().to_string())
+                crate::text::quoted(&dir.display().to_string().replace(std::path::MAIN_SEPARATOR, "/"))
             )),
             "되돌리기는 락 안에서 읽은 시작만 되돌린다: {told}"
         );

@@ -625,7 +625,7 @@ dependencies = [
 
 [[package]]
 name = "moai"
-version = "0.51.0"
+version = "1.0.0"
 dependencies = [
  "anstream",
  "anstyle",
@@ -645,6 +645,7 @@ dependencies = [
  "unicode-segmentation",
  "unicode-width",
  "ureq",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
