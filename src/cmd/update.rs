@@ -80,9 +80,9 @@ pub fn run(ctx: &Ctx, a: UpdateArgs) -> R<Vec<String>> {
     // 신호로 끝났으면 코드가 없다 — 그때는 실패로만 센다.
     let code = status.code().unwrap_or(1);
     exit_with(u8::try_from(code).unwrap_or(1));
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     let restart = (code == 0).then(|| daemon_restart(&exe)).flatten();
-    #[cfg(not(unix))]
+    #[cfg(not(any(unix, windows)))]
     let restart: Option<(String, u64)> = None;
     if let Some((version, pid)) = &restart
         && !ctx.json
@@ -105,7 +105,7 @@ pub fn run(ctx: &Ctx, a: UpdateArgs) -> R<Vec<String>> {
     Ok(Vec::new())
 }
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 fn daemon_restart(exe: &std::path::Path) -> Option<(String, u64)> {
     let out = Command::new(exe).args(["daemon", "status", "--json"]).stdin(Stdio::null()).output().ok()?;
     if !out.status.success() {
@@ -114,7 +114,7 @@ fn daemon_restart(exe: &std::path::Path) -> Option<(String, u64)> {
     restart_from_status(&out.stdout)
 }
 
-#[cfg(any(unix, test))]
+#[cfg(any(unix, windows, test))]
 fn restart_from_status(bytes: &[u8]) -> Option<(String, u64)> {
     let status: serde_json::Value = serde_json::from_slice(bytes).ok()?;
     if status["running"] != true || status["same_version"] != false {

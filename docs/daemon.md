@@ -6,13 +6,12 @@ What it is:
 
 - A local daemon, one per user. It serves every project you registered with `moai project add`.
 - An API for the read commands and for the everyday writes ([Write methods](#write-methods)). A write goes through the same code and the same lock as the CLI's, so the files come out the same.
-- Reached only through a Unix socket in your own runtime directory. It listens on no network port and has no login: whoever can open the socket, which is you, can read and write.
+- Reached only through a Unix socket in your own runtime directory, or on Windows a named pipe open to your account alone. It listens on no network port and has no login: whoever can open the socket, which is you, can read and write.
 
 What it is not:
 
 - It is not needed. The CLI still reads and writes `.moai/` directly, behaves exactly as before, and works with no daemon running.
 - It is not a replacement for `moai web` or `moai tui`. Those keep their own servers.
-- It does not run on Windows yet. See [Windows](#windows).
 
 ## Start, stop and ask
 
@@ -39,7 +38,7 @@ There is one daemon per user. A second `start` never runs a second daemon:
 
 | Key | Meaning |
 |---|---|
-| `supported` | `false` on Windows. |
+| `supported` | `true` on Linux, macOS and Windows. |
 | `running` | A daemon answered. |
 | `socket` | The socket path. |
 | `stale_socket` | A socket stands that no daemon answers. `start` clears it. |
@@ -96,7 +95,7 @@ A service does not inherit your shell's environment, and the socket directory de
 2. Restart it through whatever keeps it running. For the systemd service above, run `systemctl --user restart moai-daemon.service`; for the launchd service above, `launchctl kickstart -k gui/$(id -u)/com.example.moai-daemon`. For a daemon you started yourself, run `moai daemon stop`, then `moai daemon start` again where it ran before. Do not restart a service with `moai daemon stop`: the daemon exits 0, neither service above restarts a clean exit, and a `moai daemon start` typed afterwards runs in your terminal, outside the service.
 3. Run `moai daemon status` to check the replacement. A daemon rebuilt with the same version and protocol is indistinguishable from the old build by this check, so restart it manually after such a rebuild.
 
-For `moai update --json`, the result includes `"daemon_restart": true` only when that post-install check identifies a running daemon with a different version or protocol and can read its version and pid. The key is absent on other paths, including a failed update, a failed status check, no running daemon, and Windows; its absence does not prove that no restart is needed. The update exit status is unchanged by the check.
+For `moai update --json`, the result includes `"daemon_restart": true` only when that post-install check identifies a running daemon with a different version or protocol and can read its version and pid. The key is absent on other paths, including a failed update, a failed status check and no running daemon; its absence does not prove that no restart is needed. The update exit status is unchanged by the check.
 
 ## Where the socket is
 
@@ -426,6 +425,30 @@ else:
 
 ## Windows
 
-Windows is not supported yet. The build works, `moai daemon start` and `stop` report `unsupported`, and `moai daemon status` says `supported: false` and exits 0. A named pipe transport is left for later. Everything else in moai runs on Windows as before.
+On Windows the daemon runs the same way and answers the same methods. Only the transport differs: a named pipe instead of a Unix socket.
+
+- `daemon.socket` is still a file in the same directory, but an ordinary one. It holds the pipe's name, `\.\pipe\moai-<your SID>-<hash>`. Its presence means what a socket file means: it goes away on a clean stop, and a killed daemon leaves it behind for the next `moai daemon start` to clear.
+- The pipe is open to your account alone, and remote clients are refused. `moai` also checks that the pipe it reaches belongs to you before it sends anything.
+- Ctrl-C and Ctrl-Break stop the daemon the way SIGINT does, and a second one ends the process at once. Closing the console window, logging off and shutting down also start a stop, but Windows allows about five seconds, so a long write can be cut.
+- There is no half-close on a pipe. A client cannot shut down its writing side and still read; keep the pipe open until the answer arrives.
+- No service manager is set up for you. `moai daemon start` stays in the foreground, so run it in a window you keep, or from Task Scheduler at logon.
+
+Connect from PowerShell like this:
+
+```powershell
+$socket = (moai daemon status --json | ConvertFrom-Json).socket
+$name = (Get-Content -Raw $socket).Substring(9)   # drop the leading \.\pipe\
+$pipe = New-Object System.IO.Pipes.NamedPipeClientStream('.', $name, [System.IO.Pipes.PipeDirection]::InOut)
+$pipe.Connect(2000)
+$utf8 = New-Object System.Text.UTF8Encoding($false)
+$writer = New-Object System.IO.StreamWriter($pipe, $utf8)
+$writer.AutoFlush = $true
+$reader = New-Object System.IO.StreamReader($pipe, $utf8)
+$writer.WriteLine('{"jsonrpc":"2.0","id":1,"method":"hello","params":{"proto":1}}')
+$reader.ReadLine()
+$pipe.Dispose()
+```
+
+After `moai update` a running daemon keeps the old binary, which the installer has renamed to `moai.exe.<pid>.old`. Stop it and start it again.
 
 Decided in: moai-wbdh, moai-ou5y
