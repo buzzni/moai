@@ -104,7 +104,9 @@ thread_local! {
 #[cfg(unix)]
 fn ctl_never_reaches_the_runners_sockets() {
     use std::os::unix::net::UnixListener;
-    let s = Scratch::new("ctl-xdg");
+    // 소켓을 세우는 자리다 — `CTL_FENCE` 와 같은 까닭으로 `/tmp` 아래 짧게 둔다(macOS 의 상한은 104 바이트다).
+    let s = Scratch(Path::new("/tmp").join(format!("moai-xdg-{}", std::process::id())));
+    std::fs::create_dir(s.path()).unwrap();
     let xdg = s.path().join("moai");
     std::fs::create_dir(&xdg).unwrap();
     let socket = xdg.join("9999.sock");
@@ -356,18 +358,14 @@ fn ctl_lists_and_reads_an_open_explorer() {
 /// `write` 에서 막혀 ctl 에 답을 못 한다(`no_window`, os error 35). 슬레이브가 닫히면 끝난다.
 #[cfg(unix)]
 fn keep_reading_pty(master: &std::fs::File) {
-    use std::io::{Read, Write};
+    use std::io::Read;
     let mut master = master.try_clone().unwrap();
     std::thread::spawn(move || {
         let mut buf = [0; 8192];
         loop {
             match master.read(&mut buf) {
                 Ok(0) => return,
-                Ok(n) => {
-                    for _ in 0..String::from_utf8_lossy(&buf[..n]).matches("\x1b[6n").count() {
-                        let _ = master.write_all(b"\x1b[1;1R");
-                    }
-                }
+                Ok(_) => {}
                 Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
                     std::thread::sleep(std::time::Duration::from_millis(5))
                 }
