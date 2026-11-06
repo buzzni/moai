@@ -44,6 +44,25 @@ pub fn pending(listener: &Listener, wait: Duration) -> std::io::Result<bool> {
     listener.pending(wait)
 }
 
+/// 건너편이 끊었는가.
+///
+/// **A hang-up, not end-of-input.** A caller of the line protocol (docs/ctl.md) may shut down its writing half once
+/// its request is sent (`nc -N -U`, `shutdown(SHUT_WR)`) and still read the reply; a peeked EOF told it `gone` at
+/// once, and a byte it left unread hid a real close. POLLHUP comes only when both halves are shut. POLLIN is asked
+/// for because macOS reports the hang-up only through a read filter. A zero timeout leaves blocking mode alone.
+#[cfg(unix)]
+pub fn hung_up(stream: &Stream) -> bool {
+    use std::os::fd::AsRawFd;
+    let mut fd = libc::pollfd { fd: stream.as_raw_fd(), events: libc::POLLIN, revents: 0 };
+    let ready = unsafe { libc::poll(&mut fd, 1, 0) };
+    ready > 0 && fd.revents & (libc::POLLHUP | libc::POLLERR | libc::POLLNVAL) != 0
+}
+
+#[cfg(windows)]
+pub fn hung_up(stream: &Stream) -> bool {
+    stream.hung_up()
+}
+
 /// 그 자리의 것이 이 사용자의 소켓인가 — 종류와 주인. 남의 파일은 지우지도 붙지도 않는다.
 #[cfg(unix)]
 pub fn is_own(_path: &Path, meta: &std::fs::Metadata) -> bool {

@@ -2,7 +2,6 @@
 use crate::ctl::wire::{self, Reply, Request, Verb};
 use serde_json::json;
 use std::collections::HashMap;
-use std::io::Read;
 use std::path::Path;
 use std::sync::{Mutex, mpsc};
 use std::time::{Duration, Instant};
@@ -128,7 +127,7 @@ impl Tabs {
         Ok(Some(Stream { tabs: self, joined: None, browser: browser.into() }))
     }
 
-    #[cfg(all(test, unix))]
+    #[cfg(all(test, any(unix, windows)))]
     pub fn join(&self, here: &Path, overlay: bool, resume: Option<(&str, &str)>) -> std::io::Result<Joined> {
         Ok(self.join_limited(here, overlay, resume, None, "")?.unwrap())
     }
@@ -143,7 +142,9 @@ impl Tabs {
     ) -> std::io::Result<Option<Joined>> {
         // The token is read before the registry lock, as every ctl request, `seen` and `ls` waits on that lock.
         let mut bytes = [0u8; 16];
-        std::fs::File::open("/dev/urandom")?.read_exact(&mut bytes)?;
+        // `/dev/urandom` 은 Windows 에 없다 — 운영체제의 난수를 부르는 길을 어디서나 쓴다.
+        ring::rand::SecureRandom::fill(&ring::rand::SystemRandom::new(), &mut bytes)
+            .map_err(|_| std::io::Error::other("no system randomness"))?;
         let mut registry = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         registry.prune();
         registry.next_stream += 1;
@@ -500,7 +501,7 @@ impl Registry {
     }
 }
 
-#[cfg(all(test, unix))]
+#[cfg(all(test, any(unix, windows)))]
 mod tests {
     use super::*;
     use std::sync::Arc;

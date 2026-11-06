@@ -65,7 +65,7 @@ pub fn socket_path() -> std::io::Result<std::path::PathBuf> {
     Ok(path)
 }
 
-#[cfg(all(test, unix))]
+#[cfg(all(test, any(unix, windows)))]
 mod tests {
     use clap::CommandFactory as _;
 

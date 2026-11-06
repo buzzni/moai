@@ -1,17 +1,17 @@
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 use std::io::{BufRead, BufReader, Read, Write};
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 use std::sync::atomic::AtomicUsize;
 use std::sync::{
     Arc, Mutex,
     atomic::{AtomicBool, Ordering},
     mpsc,
 };
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 use std::time::Duration;
 use std::time::Instant;
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 use super::wire;
 use super::wire::{Reply, Request};
 
@@ -23,8 +23,8 @@ pub struct Incoming {
 /// The owner loop alone consumes requests and owns the application state.
 pub struct Listener {
     pub incoming: mpsc::Receiver<Incoming>,
-    #[cfg(unix)]
-    wake: std::os::unix::net::UnixStream,
+    #[cfg(any(unix, windows))]
+    wake: crate::transport::Stream,
     /// Set once by the owner thread's first idle wait; `Some(None)` is a pipe that could not be made.
     #[cfg(unix)]
     resize: std::cell::OnceCell<Option<ResizeWake>>,
@@ -67,7 +67,7 @@ struct Editing {
 }
 
 impl Editing {
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     fn answer(&self, request: &Request) -> Option<Reply> {
         if !self.active.load(Ordering::Acquire) {
             return None;
@@ -110,7 +110,21 @@ impl Listener {
             };
             self.wait_input(terminal, timeout, || event::poll(std::time::Duration::ZERO))
         }
-        #[cfg(not(unix))]
+        #[cfg(windows)]
+        {
+            // crossterm 의 기다림에 끼어들 자리가 없어 짧게 끊어 기다린다 — 요청이 오면 그 끝에서 깬다.
+            let deadline = Instant::now() + timeout;
+            loop {
+                let left = deadline.saturating_duration_since(Instant::now());
+                if event::poll(left.min(WAKE_SLICE))? {
+                    return Ok(true);
+                }
+                if self.drain_wake()? || left <= WAKE_SLICE {
+                    return Ok(false);
+                }
+            }
+        }
+        #[cfg(not(any(unix, windows)))]
         event::poll(timeout)
     }
 
@@ -212,6 +226,20 @@ impl Listener {
         Ok(ready > 0 && fds[0].revents != 0 && fds[1].revents == 0 && fds[2].revents == 0)
     }
 
+    /// 깨우는 바이트를 비운다. 하나라도 있었으면 참이다.
+    #[cfg(windows)]
+    fn drain_wake(&self) -> std::io::Result<bool> {
+        let (mut wake, mut bytes, mut woke) = (&self.wake, [0; 256], false);
+        loop {
+            match wake.read(&mut bytes) {
+                Ok(0) => return Ok(woke),
+                Ok(_) => woke = true,
+                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => return Ok(woke),
+                Err(e) => return Err(e),
+            }
+        }
+    }
+
     /// Cache Hello before handing the terminal to the editor. Directed actions then return person_busy.
     pub fn editor_begin(&self, hello: Reply) {
         *self.editing.hello.lock().unwrap_or_else(|e| e.into_inner()) = Some((hello, Instant::now()));
@@ -226,16 +254,20 @@ impl Listener {
 
 pub type Handler = Arc<dyn Fn(Request, &dyn Fn() -> bool) -> Reply + Send + Sync>;
 
-#[cfg(unix)]
+/// Windows 의 탐색기가 요청을 보는 간격 — 쉬는 동안의 깸과 `moai ctl` 의 늦음을 함께 정한다.
+#[cfg(windows)]
+const WAKE_SLICE: Duration = Duration::from_millis(50);
+
+#[cfg(any(unix, windows))]
 struct Leave(Arc<AtomicUsize>);
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 impl Drop for Leave {
     fn drop(&mut self) {
         self.0.fetch_sub(1, Ordering::AcqRel);
     }
 }
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 impl Listener {
     pub fn bind_proposals(book: Arc<super::proposal::Book>) -> std::io::Result<Self> {
         Self::bind_with(None, Some(book))
@@ -247,14 +279,12 @@ impl Listener {
     }
 
     fn bind_with(handler: Option<Handler>, book: Option<Arc<super::proposal::Book>>) -> std::io::Result<Self> {
-        use std::os::unix::fs::{FileTypeExt, MetadataExt};
-        use std::os::unix::net::UnixListener;
         let path = super::place::socket(&super::place::dir()?)?;
         if let Ok(meta) = std::fs::symlink_metadata(&path) {
-            if !meta.file_type().is_socket() || meta.uid() != unsafe { libc::geteuid() } {
+            if !crate::transport::is_own(&path, &meta) {
                 return Err(std::io::Error::new(std::io::ErrorKind::AlreadyExists, "control socket path is occupied"));
             }
-            if std::os::unix::net::UnixStream::connect(&path).is_ok() {
+            if crate::transport::Stream::connect(&path).is_ok() {
                 return Err(std::io::Error::new(std::io::ErrorKind::AddrInUse, "control socket is already listening"));
             }
             std::fs::remove_file(&path)?;
@@ -262,9 +292,9 @@ impl Listener {
         // **A blocking listener.** An idle window never wakes this thread, and the streams it accepts are blocking on
         // every platform — BSD and macOS copy O_NONBLOCK from the listener to each accepted socket, which turned the
         // client's read timeout off and cut large replies short with EAGAIN. `Drop` wakes the accept by connecting once.
-        let listener = UnixListener::bind(&path)?;
+        let listener = crate::transport::Listener::bind(&path)?;
         let (tx, incoming) = mpsc::channel();
-        let (wake, notify) = std::os::unix::net::UnixStream::pair()?;
+        let (wake, notify) = crate::transport::Stream::pair()?;
         wake.set_nonblocking(true)?;
         notify.set_nonblocking(true)?;
         let notify = Arc::new(notify);
@@ -317,11 +347,20 @@ impl Listener {
                 }
             }
         })?;
-        Ok(Self { incoming, wake, resize: std::cell::OnceCell::new(), path, stop, book: keep_book, editing })
+        Ok(Self {
+            incoming,
+            wake,
+            #[cfg(unix)]
+            resize: std::cell::OnceCell::new(),
+            path,
+            stop,
+            book: keep_book,
+            editing,
+        })
     }
 }
 
-#[cfg(not(unix))]
+#[cfg(not(any(unix, windows)))]
 impl Listener {
     pub fn bind_proposals(_: Arc<super::proposal::Book>) -> std::io::Result<Self> {
         Err(std::io::Error::new(std::io::ErrorKind::Unsupported, "control sockets are unavailable on this OS"))
@@ -336,8 +375,8 @@ impl Drop for Listener {
     fn drop(&mut self) {
         self.stop.store(true, Ordering::Release);
         // Wake the blocking accept so its thread sees `stop` and lets the listener go.
-        #[cfg(unix)]
-        let _ = std::os::unix::net::UnixStream::connect(&self.path);
+        #[cfg(any(unix, windows))]
+        let _ = crate::transport::Stream::connect(&self.path);
         if let Some(book) = &self.book {
             book.close();
         }
@@ -345,16 +384,16 @@ impl Drop for Listener {
     }
 }
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 fn handle(
-    stream: &mut std::os::unix::net::UnixStream,
+    stream: &mut crate::transport::Stream,
     tx: &mpsc::Sender<Incoming>,
     handler: Option<&Handler>,
     book: Option<&super::proposal::Book>,
     leave: &mut Option<Leave>,
     waiting: &Arc<AtomicUsize>,
     editing: &Editing,
-    notify: Option<&std::os::unix::net::UnixStream>,
+    notify: Option<&crate::transport::Stream>,
 ) {
     let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
     let mut line = Vec::new();
@@ -425,19 +464,12 @@ fn handle(
     let _ = write_reply(stream, &reply);
 }
 
-#[cfg(unix)]
-fn client_connected(stream: &std::os::unix::net::UnixStream) -> bool {
-    use std::os::fd::AsRawFd;
-    // **A hang-up, not end-of-input.** A caller of the line protocol (docs/ctl.md) may shut down its writing half once
-    // its request is sent (`nc -N -U`, `shutdown(SHUT_WR)`) and still read the reply; a peeked EOF told it `gone` at
-    // once, and a byte it left unread hid a real close. POLLHUP comes only when both halves are shut. POLLIN is asked
-    // for because macOS reports the hang-up only through a read filter. A zero timeout leaves blocking mode alone.
-    let mut fd = libc::pollfd { fd: stream.as_raw_fd(), events: libc::POLLIN, revents: 0 };
-    let ready = unsafe { libc::poll(&mut fd, 1, 0) };
-    !(ready > 0 && fd.revents & (libc::POLLHUP | libc::POLLERR | libc::POLLNVAL) != 0)
+#[cfg(any(unix, windows))]
+fn client_connected(stream: &crate::transport::Stream) -> bool {
+    !crate::transport::hung_up(stream)
 }
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 fn wait_seconds(req: &Request) -> u64 {
     match &req.verb {
         super::wire::Verb::Propose { wait, .. } | super::wire::Verb::Answer { wait, .. } => *wait,
@@ -445,7 +477,7 @@ fn wait_seconds(req: &Request) -> u64 {
     }
 }
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 fn wait_slot(waiting: &Arc<AtomicUsize>, leave: &mut Option<Leave>) -> bool {
     if waiting.fetch_add(1, Ordering::AcqRel) >= 4 {
         waiting.fetch_sub(1, Ordering::AcqRel);
@@ -455,7 +487,7 @@ fn wait_slot(waiting: &Arc<AtomicUsize>, leave: &mut Option<Leave>) -> bool {
     true
 }
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 fn write_reply(stream: &mut impl Write, reply: &Reply) -> std::io::Result<()> {
     serde_json::to_writer(&mut *stream, reply)?;
     stream.write_all(b"\n")

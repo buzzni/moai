@@ -339,6 +339,11 @@ impl Stream {
         }
     }
 
+    /// 건너편이 끊었는가 — 읽을 것이 남았어도 끊긴 것만 "끊겼다" 다.
+    pub fn hung_up(&self) -> bool {
+        !matches!(self.available(), Ok(Some(_)))
+    }
+
     /// 겹친 입출력 하나를 시한 안에 끝낸다. 시한이 지나면 걷어 내고 `TimedOut` 이다.
     fn finish(&self, wait: Option<Duration>, start: impl FnOnce(*mut OVERLAPPED) -> i32) -> Result<u32> {
         let event = event()?;

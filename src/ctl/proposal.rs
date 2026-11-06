@@ -217,8 +217,8 @@ impl Book {
         self.changed.notify_all();
     }
 
-    // Only `web::ctl`'s tests read it, and those are Unix-only (`#[cfg(all(test, unix))]`).
-    #[cfg(all(test, unix))]
+    // Only `web::ctl`'s tests read it.
+    #[cfg(all(test, any(unix, windows)))]
     pub fn closes_at(&self) -> Option<Instant> {
         self.inner.lock().unwrap_or_else(|e| e.into_inner()).closes_at
     }

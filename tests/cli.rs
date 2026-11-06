@@ -33148,7 +33148,7 @@ fn next_event_stamp(reader: &mut std::io::BufReader<std::net::TcpStream>) -> Str
     }
 }
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 fn event_named(reader: &mut std::io::BufReader<std::net::TcpStream>, want: &str) -> serde_json::Value {
     use std::io::BufRead as _;
     let mut event = String::new();
@@ -33166,7 +33166,7 @@ fn event_named(reader: &mut std::io::BufReader<std::net::TcpStream>, want: &str)
     }
 }
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 fn ctl_post(port: u16, path: &str, body: &str, content_type: &str, token: bool) -> (u16, String) {
     use std::io::{Read as _, Write as _};
     let mut stream = dial(port);
@@ -33179,7 +33179,7 @@ fn ctl_post(port: u16, path: &str, body: &str, content_type: &str, token: bool) 
 }
 
 #[test]
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 fn web_ctl_lists_a_visible_tab_and_reads_its_state() {
     let s = init("web-ctl-tab");
     let web = serve(s.path());
@@ -33217,7 +33217,7 @@ fn web_ctl_lists_a_visible_tab_and_reads_its_state() {
 }
 
 #[test]
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 fn web_ctl_reply_needs_origin_token_and_json() {
     let s = init("web-ctl-reply-guard");
     let web = serve(s.path());
@@ -33235,7 +33235,7 @@ fn web_ctl_reply_needs_origin_token_and_json() {
 }
 
 #[test]
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 fn web_ctl_reply_body_is_capped() {
     use std::io::{Read as _, Write as _};
     let s = init("web-ctl-cap");
@@ -33261,7 +33261,7 @@ fn a_body_on_any_other_path_is_still_refused() {
 }
 
 #[test]
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 fn web_ctl_gone_when_the_stream_ends() {
     let s = init("web-ctl-gone");
     let web = serve(s.path());
@@ -33279,7 +33279,7 @@ fn web_ctl_gone_when_the_stream_ends() {
 }
 
 #[test]
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 fn web_ctl_propose_reaches_a_tab_and_returns_its_answer() {
     let s = init("web-ctl-propose");
     let web = serve(s.path());
@@ -33331,7 +33331,7 @@ fn web_ctl_propose_reaches_a_tab_and_returns_its_answer() {
 /// A given `--user` is given (`model::actor`): `propose` refuses a malformed one the way every other ctl verb does,
 /// instead of putting an unsigned card in front of the person (review moai-4xmq.sqe 6).
 #[test]
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 fn web_ctl_propose_refuses_a_malformed_user_before_any_card() {
     let s = init("web-ctl-propose-bad-user");
     let web = serve(s.path());
@@ -33349,7 +33349,7 @@ fn web_ctl_propose_refuses_a_malformed_user_before_any_card() {
 }
 
 #[test]
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 fn web_ctl_plan_applies_the_requested_day() {
     let s = init("web-ctl-caller");
     let issue = field(&ok(s.path(), &["add", "planned row", "--json"]), "id");
@@ -33381,7 +33381,7 @@ fn web_ctl_plan_applies_the_requested_day() {
 }
 
 #[test]
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 fn web_ctl_write_refuses_a_request_without_an_actor() {
     let s = init("web-ctl-no-actor");
     let issue = field(&ok(s.path(), &["add", "planned row", "--json"]), "id");
