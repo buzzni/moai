@@ -513,6 +513,9 @@ jobs:
     if: ${{ !cancelled() && needs.changes.outputs.code != 'false' }}
     runs-on: macos-latest
     timeout-minutes: 30
+    # 러너의 임시 자리(`/var/folders/…`)는 길어 시험의 소켓 경로가 macOS 의 104 바이트를 넘는다.
+    env:
+      TMPDIR: /tmp
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
