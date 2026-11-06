@@ -260,7 +260,7 @@ fn ctl_lists_and_reads_an_open_explorer() {
     impl Drop for Child {
         fn drop(&mut self) {
             let _ = self.0.kill();
-            let _ = self.0.wait();
+            reap(&mut self.0);
         }
     }
     let mut child = Child(command.spawn().unwrap());
@@ -351,6 +351,18 @@ fn ctl_lists_and_reads_an_open_explorer() {
     assert!(!socket.exists());
 }
 
+/// 죽인 pty 자식을 기다린다 — **시한이 있다.** macOS 는 안 읽은 출력이 pty 에 남으면 master 가 닫힐 때까지 프로세스가 끝나기를
+/// 미룬다. master 는 이 값보다 늦게 떨어져, 막는 `wait` 는 시험을 영영 안 끝냈다(moai-3e4m).
+#[cfg(unix)]
+fn reap(child: &mut std::process::Child) {
+    for _ in 0..40 {
+        if !matches!(child.try_wait(), Ok(None)) {
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+}
+
 #[cfg(unix)]
 struct ProposalPtyChild(std::process::Child);
 
@@ -358,7 +370,7 @@ struct ProposalPtyChild(std::process::Child);
 impl Drop for ProposalPtyChild {
     fn drop(&mut self) {
         let _ = self.0.kill();
-        let _ = self.0.wait();
+        reap(&mut self.0);
     }
 }
 
@@ -30228,7 +30240,7 @@ fn init_screen_defaults_install_the_hooks_and_skills() {
     impl Drop for Child {
         fn drop(&mut self) {
             let _ = self.0.kill();
-            let _ = self.0.wait();
+            reap(&mut self.0);
         }
     }
     let mut child = Child(command.spawn().unwrap());

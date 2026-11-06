@@ -890,7 +890,8 @@ mod tests {
             let ran = daemon.finished("touch");
             // 데몬은 돌아왔다 — 돈 요청의 답은 이미 소켓에 있어야 한다. 거절은 그 뒤에 쓰일 수도 있으니 기다려 읽는다.
             let wait = if ran { Duration::from_millis(100) } else { Duration::from_secs(10) };
-            idle.reader.get_ref().set_read_timeout(Some(wait)).unwrap();
+            // macOS 는 닫힌 소켓의 시한을 거절한다 — 그 소켓의 읽기는 안 막힌다.
+            let _ = idle.reader.get_ref().set_read_timeout(Some(wait));
             let answer = idle.answer().unwrap_or_else(|| panic!("{round}번째: 막 읽은 요청이 답 없이 닫혔다"));
             match ran {
                 true => assert_eq!(answer["result"], "touched", "{round}번째: {answer}"),
