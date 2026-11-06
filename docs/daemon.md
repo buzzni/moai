@@ -62,6 +62,7 @@ Description=moai daemon
 [Service]
 ExecStart=/home/me/.local/bin/moai daemon start
 Restart=on-failure
+KillMode=mixed
 
 [Install]
 WantedBy=default.target
@@ -341,13 +342,21 @@ The epic `repo-32tm` is in the first and third answer although its own line was 
 2. Finishes the requests it was running. A write runs to the end, however long it takes. A read gets up to 5 seconds; a read that is still running then is cut, and nothing is lost.
 3. Ends.
 
-A request that comes in on an open connection after step 1 is not run. It gets `-32000` with `data` `{code: "stopping", pid}` and its own `id`. When a write gets this answer, it did not change the tracker: send it again to a new daemon, or run the CLI. A client that connects in the same instant as step 1 can be closed with no answer at all.
+A request that comes in on an open connection after step 1 is not run. It gets `-32000` with `data` `{code: "stopping", pid}` and its own `id`. When a write gets this answer, it did not change the tracker: send it again to a new daemon, or run the CLI. A client that connects in the same instant as step 1 can be closed with no answer at all. A connection that was running a request when the stop began closes after that answer, so a further request on it gets only the end of the connection; that request did not run either.
 
 `stop` waits up to 10 seconds for the daemon to end. A write that takes longer makes `stop` fail with `timeout`; the daemon still ends after the write. A `start` run while a daemon stops waits up to 5 seconds. If the old daemon takes longer, `start` fails with "another daemon holds … but does not answer yet": run it again.
 
 The accept loop looks at the stop flag every 0.5 second, so the daemon ends even when its own wake-up connection fails.
 
-Ctrl-C (SIGINT) and SIGTERM stop the daemon the same way: the steps above, then it releases `daemon.lock` and exits 0. So `kill <pid>`, `systemctl stop` and `launchctl stop` end it cleanly, and a running write still runs to the end. A service manager kills the daemon after its own stop timeout (90 seconds by default under systemd). A second signal ends the process at once, even in the middle of a write: that write can lose its journal line or leave a temp file, and a socket not removed yet stays behind; the next `start` clears it. A SIGINT that was ignored when the daemon started, as a script's `moai daemon start &` ignores it, stays ignored, so a Ctrl-C meant for the script does not stop the daemon.
+Ctrl-C (SIGINT) and SIGTERM stop the daemon the same way: the steps above, then it releases `daemon.lock` and exits 0. So `kill <pid>`, `systemctl stop` and `launchctl stop` end it cleanly, and a running write still runs to the end. A SIGINT that was ignored when the daemon started, as a script's `moai daemon start &` ignores it, stays ignored, so a Ctrl-C meant for the script does not stop the daemon.
+
+Three things still end the daemon in the middle of a write. That write can lose its journal line or leave a temp file. `issues.jsonl` stays whole, and the next `start` clears a socket left behind.
+
+- **A second signal** ends the process at once. A wrapper that forwards signals (npm, foreman, a shell `trap`) can send one right after the terminal's Ctrl-C, so do not run the daemon under one.
+- **SIGHUP** has no handler. Closing the terminal of a daemon running in the foreground sends it, so a daemon that outlives its window belongs under a service manager.
+- **A service manager's stop timeout.** systemd kills the daemon after 90 seconds by default (`TimeoutStopSec`). launchd's limit is shorter, commonly 20 seconds (`ExitTimeOut`).
+
+Ctrl-C reaches the whole foreground process group, so it also ends a `git` that a running request started. If that `git` was reading who the request is from, a write with no `actor` fails with `no_actor` and a read sets nothing apart as someone else's: send it again. The systemd example sets `KillMode=mixed` for this reason, so that SIGTERM goes to the daemon alone.
 
 One case has no tool path yet (backlog `moai-69bs`): if the socket file was removed while the daemon runs, new clients cannot find it. `moai daemon stop` says "no daemon is running", `status` says the same, and `moai daemon start` waits 5 seconds and fails with "another daemon holds … but does not answer yet", because the daemon still holds `daemon.lock`. A client that is still connected can send `daemon.shutdown` on its open connection. Otherwise end the process by its pid (the `start` line printed it), for example with `kill <pid>`.
 
