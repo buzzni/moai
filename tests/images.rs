@@ -291,7 +291,11 @@ fn inherited_tmux_uses_stdout_device_and_skips_queries_without_pictures() {
         }
         let status = cmd.status().unwrap();
         assert!(status.success());
-        drop(cmd);
+        {
+            use std::os::fd::AsRawFd;
+            // SAFETY: master is a live descriptor.
+            unsafe { libc::fcntl(master.as_raw_fd(), libc::F_SETFL, libc::O_NONBLOCK) };
+        }
         let mut bytes = Vec::new();
         let mut chunk = [0; 4096];
         loop {
@@ -300,6 +304,8 @@ fn inherited_tmux_uses_stdout_device_and_skips_queries_without_pictures() {
                 Ok(n) => bytes.extend_from_slice(&chunk[..n]),
             }
         }
+        // macOS drops unread output when the last slave closes, so read before `cmd` lets go of it.
+        drop(cmd);
         String::from_utf8(bytes).unwrap()
     };
     let other = |_: &str| "/dev/null".to_owned();

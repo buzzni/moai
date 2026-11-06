@@ -290,6 +290,7 @@ fn ctl_lists_and_reads_an_open_explorer() {
         std::thread::sleep(Duration::from_millis(30));
     }
     let id = window_id.unwrap_or_else(|| panic!("explorer did not register: {shown}"));
+    keep_reading_pty(&master);
     assert_eq!(id, format!("tui-{}", child.0.id()));
     let out = ok(s.path(), &["ctl", "state", "--json"]);
     let json: serde_json::Value = serde_json::from_str(&out).unwrap();
@@ -349,6 +350,31 @@ fn ctl_lists_and_reads_an_open_explorer() {
     }
     assert!(child.0.try_wait().unwrap().is_some(), "explorer did not exit after human Ctrl-C");
     assert!(!socket.exists());
+}
+
+/// 창이 뜬 뒤로도 진짜 터미널처럼 master 를 읽는다 — macOS 의 pty 는 출력 칸이 1KB 남짓이라, 안 읽으면 그리던 탐색기가
+/// `write` 에서 막혀 ctl 에 답을 못 한다(`no_window`, os error 35). 슬레이브가 닫히면 끝난다.
+#[cfg(unix)]
+fn keep_reading_pty(master: &std::fs::File) {
+    use std::io::{Read, Write};
+    let mut master = master.try_clone().unwrap();
+    std::thread::spawn(move || {
+        let mut buf = [0; 8192];
+        loop {
+            match master.read(&mut buf) {
+                Ok(0) => return,
+                Ok(n) => {
+                    for _ in 0..String::from_utf8_lossy(&buf[..n]).matches("\x1b[6n").count() {
+                        let _ = master.write_all(b"\x1b[1;1R");
+                    }
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                    std::thread::sleep(std::time::Duration::from_millis(5))
+                }
+                Err(_) => return,
+            }
+        }
+    });
 }
 
 /// 죽인 pty 자식을 기다린다 — **시한이 있다.** macOS 는 안 읽은 출력이 pty 에 남으면 master 가 닫힐 때까지 프로세스가 끝나기를
@@ -434,6 +460,7 @@ fn proposal_pty(name: &str) -> (Scratch, std::fs::File, ProposalPtyChild) {
         }
         let windows = json_of(&ok(scratch.path(), &["ctl", "ls", "--json"]));
         if windows["windows"].as_array().is_some_and(|rows| !rows.is_empty()) {
+            keep_reading_pty(&master);
             return (scratch, master, child);
         }
         std::thread::sleep(Duration::from_millis(30));
