@@ -25,7 +25,10 @@
 //! 여럿이 함께 불러도 된다). 프로세스의 현재 디렉터리를 옮기지 않는다. 요청 안에서 제 손으로 실을 띄워 moai 를
 //! 부르면 그 실은 통을 모른다 — 그런 실도 이 입구를 지난다. 이 입구 밖에서 부른 `store`·`cmd` 는 옛 길(프로세스
 //! 전역·stderr)로 간다.
-#![cfg_attr(not(any(test, unix)), allow(dead_code, reason = "부르는 데몬 메서드는 유닉스에만 선다"))]
+#![cfg_attr(
+    not(any(test, unix, windows)),
+    allow(dead_code, reason = "부르는 데몬 메서드는 유닉스와 Windows 에만 선다")
+)]
 
 use super::{Ctx, R};
 use crate::cli::{
@@ -155,7 +158,6 @@ pub(crate) struct Answer {
     pub exit: u8,
     /// 못 읽은 스냅샷 줄 — 읽어 낸 id 가 있으면 그것과 함께. `changes` 가 못 읽은 줄을 지워진 줄로 안 세려고 본다
     /// (moai-wbdh.s7n).
-    #[cfg_attr(all(test, not(unix)), allow(dead_code, reason = "`changes` 만 읽는데, 데몬은 유닉스에만 선다"))]
     pub unread_rows: Vec<Option<String>>,
 }
 

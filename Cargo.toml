@@ -80,6 +80,18 @@ moai-gantt    = { path = "crates/moai-gantt" }
 # 이 저장소에서 든 비용은 **+5,960바이트**다(2026-09-23 에 쟀다 — 들이기 전 8,154,112바이트,
 # 들인 뒤 8,160,072바이트, 15MB 예산의 54% 로 자리가 안 바뀐다). 클린 릴리스 빌드는
 # 그대로였다(그날 228초) — `libc` 는 어차피 컴파일되던 것이다.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_Security_Authorization",
+    "Win32_Storage_FileSystem",
+    "Win32_System_Console",
+    "Win32_System_IO",
+    "Win32_System_Pipes",
+    "Win32_System_Threading",
+] }
+
 [target.'cfg(unix)'.dependencies]
 libc          = "0.2"
 # Crossterm already uses this version and registry. Add only the self-pipe API for the TUI's idle wait;

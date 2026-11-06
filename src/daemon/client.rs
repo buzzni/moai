@@ -1,9 +1,9 @@
 //! 데몬에 붙는 쪽 — 연결 하나에 요청 하나. `moai daemon start·stop·status` 가 떠 있는 데몬을 찾고 멈추는 데 쓴다.
 
 use super::rpc::{self, RpcError};
+use crate::transport::Stream;
 use serde_json::{Value, json};
 use std::io::{BufReader, Write};
-use std::os::unix::net::UnixStream;
 use std::path::Path;
 use std::time::Duration;
 
@@ -52,7 +52,7 @@ pub enum Probe {
 }
 
 pub fn probe(path: &Path) -> Probe {
-    let mut stream = match UnixStream::connect(path) {
+    let mut stream = match Stream::connect(path) {
         Ok(stream) => stream,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Probe::Absent,
         Err(e) if e.kind() == std::io::ErrorKind::ConnectionRefused => return Probe::Dead,
@@ -81,11 +81,11 @@ pub fn probe(path: &Path) -> Probe {
 
 /// 새 연결로 요청 하나를 보내고 답 하나를 받는다. 바깥 `Err` 는 전송의 실패, 안쪽은 데몬이 돌려준 오류다.
 pub fn call(path: &Path, method: &str, params: Value) -> std::io::Result<Result<Value, RpcError>> {
-    let mut stream = UnixStream::connect(path)?;
+    let mut stream = Stream::connect(path)?;
     request(&mut stream, method, params)
 }
 
-fn request(stream: &mut UnixStream, method: &str, params: Value) -> std::io::Result<Result<Value, RpcError>> {
+fn request(stream: &mut Stream, method: &str, params: Value) -> std::io::Result<Result<Value, RpcError>> {
     stream.set_read_timeout(Some(TIMEOUT))?;
     stream.set_write_timeout(Some(TIMEOUT))?;
     let line = json!({ "jsonrpc": "2.0", "id": 1, "method": method, "params": params });
@@ -131,7 +131,7 @@ mod tests {
     /// 쓰기가 EPIPE 로 끊긴 것을 실패로 돌려주면 `status` 가 `busy` 대신 "데몬이 아니다" 로 넘어졌다(moai-uezh).
     #[test]
     fn a_refusal_written_before_the_close_is_read_even_when_the_write_breaks() {
-        let (mut ours, mut theirs) = UnixStream::pair().unwrap();
+        let (mut ours, mut theirs) = Stream::pair().unwrap();
         let refusal = json!({ "jsonrpc": "2.0", "id": null, "error": {
             "code": rpc::code::MOAI, "message": "too many connections to the daemon",
             "data": { "code": crate::fail::code::BUSY, "pid": 7 } } });
@@ -144,7 +144,7 @@ mod tests {
     /// 쓰기가 끊기고 읽을 답도 없으면 끊긴 쓰기가 까닭이다.
     #[test]
     fn a_broken_write_with_nothing_to_read_is_the_error() {
-        let (mut ours, theirs) = UnixStream::pair().unwrap();
+        let (mut ours, theirs) = Stream::pair().unwrap();
         drop(theirs);
         let error = request(&mut ours, "hello", json!({})).unwrap_err();
         assert_eq!(error.kind(), std::io::ErrorKind::BrokenPipe, "{error}");
