@@ -155,6 +155,7 @@ pub(crate) struct Answer {
     pub exit: u8,
     /// 못 읽은 스냅샷 줄 — 읽어 낸 id 가 있으면 그것과 함께. `changes` 가 못 읽은 줄을 지워진 줄로 안 세려고 본다
     /// (moai-wbdh.s7n).
+    #[cfg_attr(all(test, not(unix)), allow(dead_code, reason = "`changes` 만 읽는데, 데몬은 유닉스에만 선다"))]
     pub unread_rows: Vec<Option<String>>,
 }
 
