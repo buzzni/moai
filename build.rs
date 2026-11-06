@@ -49,4 +49,7 @@ fn main() {
     // bins 에만 건다 — 통합 시험(`tests/*.rs`)의 실행 파일에는 안 든다. 단위 시험은 lib 타깃(`src/lib.rs`)에
     // 있어 그 실행 파일에도 안 든다(moai-72qj). `.res` 는 버전 정보(RT_VERSION) 하나뿐이라 시험이 읽을 것이 없다.
     println!("cargo:rustc-link-arg-bins={}", path.display());
+    // 리눅스의 기본 스택 8MiB 에 맞춘다 — Windows 의 기본 1MiB 는 dev 빌드의 큰 프레임에 맨 `moai` 까지 넘겼다
+    // (moai-6ld5.535). 릴리스는 지금 안 넘겨도 같은 값으로 짓는다: 두 플랫폼의 재귀 여유가 달라지지 않게.
+    println!("cargo:rustc-link-arg-bins=/STACK:8388608");
 }
