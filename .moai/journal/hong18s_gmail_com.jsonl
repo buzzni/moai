@@ -197,3 +197,4 @@
 {"ts":"2026-11-06T06:58:43Z","id":"moai-dgcz","kind":"note","by":"Raven","by_email":"hong18s@gmail.com","text":"model: anthropic/opus-5.5 (high — Windows 전송·시험, 이 세션이 직접 했다)"}
 {"ts":"2026-11-06T06:58:43Z","id":"moai-dgcz","kind":"status","by":"Raven","by_email":"hong18s@gmail.com","from":"review","to":"done"}
 {"ts":"2026-11-06T06:58:43Z","id":"moai-0yo3.b6u","kind":"status","by":"Raven","by_email":"hong18s@gmail.com","from":"in_progress","to":"done","note":"14건을 c01a9b5e 로 받고 11번은 LOCALAPPDATA 로 옮겼다. 넘긴 셋(fallback 갈래, //server UNC, 빈 표시 파일)은 드물어 안 고친다. CI 68b909bb 전부 초록."}
+{"ts":"2026-11-06T07:00:30Z","id":"moai-dhr1","kind":"create","by":"Raven","by_email":"hong18s@gmail.com","title":"v0.52.0"}
