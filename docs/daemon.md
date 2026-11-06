@@ -21,7 +21,7 @@ What it is not:
 
 `start` stays in the foreground. There is no background mode, so give the process to systemd or launchd, or end the line with `&`. Once the socket listens, `start` prints one line and then serves:
 
-    daemon listening on /run/user/1000/moai/daemon.socket — pid 4242, moai 0.52.0. moai daemon stop or Ctrl-C stops it
+    daemon listening on /run/user/1000/moai/daemon.socket — pid 4242, moai 1.0.0. moai daemon stop or Ctrl-C stops it
 
 With `--json` that line is `{"started": true, "pid": …, "version": "…", "proto": 1, "socket": "…"}`. A program that launches the daemon can read this line and then connect.
 
@@ -128,7 +128,7 @@ Messages are [JSON-RPC 2.0](https://www.jsonrpc.org/specification). Each request
 ### Check the version with `hello`
 
     {"jsonrpc":"2.0","id":1,"method":"hello","params":{"proto":1}}
-    {"id":1,"jsonrpc":"2.0","result":{"pid":4242,"proto":1,"version":"0.52.0"}}
+    {"id":1,"jsonrpc":"2.0","result":{"pid":4242,"proto":1,"version":"1.0.0"}}
 
 `proto` is the message version the client speaks; this daemon speaks `1`. A client with an older `proto` is answered. A client with a newer one gets error `-32001` with `data` `{code: "unsupported_proto", proto, client_proto, version, pid}`: upgrade the daemon. A `hello` with no integer `proto` is `-32602`.
 
@@ -366,7 +366,7 @@ One case has no tool path yet (backlog `moai-69bs`): if the socket file was remo
 
     printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"hello","params":{"proto":1}}' \
       | socat - UNIX-CONNECT:"$sock"
-    {"id":1,"jsonrpc":"2.0","result":{"pid":4242,"proto":1,"version":"0.52.0"}}
+    {"id":1,"jsonrpc":"2.0","result":{"pid":4242,"proto":1,"version":"1.0.0"}}
 
     moai project add ~/repo
     printf '%s\n' '{"jsonrpc":"2.0","id":2,"method":"ready","params":{"project":"/home/me/repo","limit":3}}' \
