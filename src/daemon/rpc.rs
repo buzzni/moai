@@ -321,7 +321,13 @@ pub fn read_line<R: BufRead>(reader: &mut R) -> std::io::Result<Line> {
     let mut line = Vec::new();
     let mut over = false;
     loop {
-        let buf = reader.fill_buf()?;
+        // 신호에 끊긴 읽기는 다시 읽는다 — 시한을 건 소켓 읽기는 `SA_RESTART` 로도 다시 안 돈다(signal(7)). 넘기면 반쯤
+        // 읽은 요청이 답 없이 끊긴다(리뷰 moai-3hgm.vjv.yqs 6번).
+        let buf = match reader.fill_buf() {
+            Ok(buf) => buf,
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(e) => return Err(e),
+        };
         if buf.is_empty() {
             return Ok(if over {
                 Line::TooLong
@@ -357,6 +363,21 @@ mod tests {
 
     fn call(methods: &Methods, text: &str) -> Value {
         serde_json::from_str(&methods.handle(text.as_bytes()).expect("a reply")).unwrap()
+    }
+
+    #[test]
+    fn a_read_cut_by_a_signal_is_read_again() {
+        struct Cut(bool, &'static [u8]);
+        impl std::io::Read for Cut {
+            fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+                if std::mem::take(&mut self.0) {
+                    return Err(std::io::ErrorKind::Interrupted.into());
+                }
+                std::io::Read::read(&mut self.1, buf)
+            }
+        }
+        let mut reader = std::io::BufReader::new(Cut(true, b"{\"a\":1}\n"));
+        assert_eq!(read_line(&mut reader).unwrap(), Line::Text(b"{\"a\":1}".to_vec()));
     }
 
     fn code_of(reply: &Value) -> i64 {

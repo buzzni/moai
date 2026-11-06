@@ -60,8 +60,10 @@ static SIGINT_CAUGHT: AtomicBool = AtomicBool::new(false);
 static SIGTERM_CAUGHT: AtomicBool = AtomicBool::new(false);
 
 /// Set `signal` to `handler` with SIGINT and SIGTERM masked. `SA_RESTART` keeps the blocking calls of
-/// in-flight requests (reads, writes, `flock`) from failing with `EINTR` while they drain; `poll(2)` is
-/// never restarted on Linux or the BSDs, and the accept loop also wakes every [`TICK`].
+/// in-flight requests that carry no timeout (file reads and writes, `flock`) from failing with `EINTR` while
+/// they drain. Socket calls with a timeout are not restarted on Linux (signal(7)), so `rpc::read_line` and
+/// `write_all` try again themselves. `poll(2)` is never restarted on Linux or the BSDs, and the accept loop
+/// also wakes every [`TICK`].
 ///
 /// # Safety
 /// `handler` is `SIG_DFL`, `SIG_IGN` or an `extern "C" fn(c_int)` that is async-signal-safe.
