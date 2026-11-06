@@ -8,7 +8,11 @@
 //! - **이름을 먼저 차지한 남을 믿지 않는다.** 첫 인스턴스는 `FILE_FLAG_FIRST_PIPE_INSTANCE` 로 세우고, 붙는 쪽은
 //!   pipe 의 주인을 본다 — 이름은 누구나 만들 수 있어서다.
 //! - **받는 인스턴스는 늘 하나 서 있다.** 연결을 넘기기 전에 다음 인스턴스를 세운다. 그래서 `ERROR_PIPE_BUSY` 는
-//!   거의 안 나고, 듣기를 닫은 뒤의 붙기는 `ConnectionRefused` 로 읽힌다.
+//!   거의 안 난다. 그래도 나면 "죽었다" 가 아니라 `ResourceBusy` 다 — `ConnectionRefused` 로 읽으면 `moai ctl ls` 가
+//!   받는 스레드가 잠깐 늦은 산 창의 표시 파일을 지워, 그 창이 끝까지 안 보인다. 인스턴스가 하나도 없으면
+//!   (`ERROR_FILE_NOT_FOUND`) 그때가 `ConnectionRefused` 다.
+//! - **표시 파일이 pipe 를 댄다.** 붙는 쪽은 자리 글로 이름을 다시 짓지 않고 표시 파일을 읽는다 — `C:/x` 와 `C:\x`,
+//!   `RUNNER~1` 과 긴 이름은 한 파일을 가리켜도 해시가 달라서다. 이름은 묶을 때 한 번만 짓는다.
 //! - **절반 닫기는 없다.** pipe 에 `shutdown(SHUT_WR)` 이 없어 [`Stream`] 도 그것을 안 낸다.
 
 use std::ffi::c_void;
@@ -130,12 +134,28 @@ fn user_sid() -> Result<&'static str> {
     }
 }
 
-/// 그 자리의 pipe 이름. 자리 글을 해시해 넣어 `MOAI_CTL_DIR` 이 다른 데몬이 서로 안 만난다.
-pub fn pipe_name(path: &Path) -> Result<String> {
+/// 이 사용자의 pipe 이름 머리.
+fn own_prefix() -> Result<String> {
+    Ok(format!(r"\\.\pipe\moai-{}-", user_sid()?))
+}
+
+/// 묶을 자리의 pipe 이름. 자리 글을 해시해 넣어 `MOAI_CTL_DIR` 이 다른 데몬이 서로 안 만난다.
+fn pipe_name(path: &Path) -> Result<String> {
     // FNV-1a — 이름을 가르는 데만 쓴다. 표준의 `DefaultHasher` 는 판마다 값이 달라도 된다고 적혀 있어 안 쓴다.
     let text = path.to_string_lossy().to_lowercase();
     let hash = text.bytes().fold(0xcbf2_9ce4_8422_2325_u64, |h, b| (h ^ u64::from(b)).wrapping_mul(0x0100_0000_01b3));
-    Ok(format!(r"\\.\pipe\moai-{}-{hash:016x}", user_sid()?))
+    Ok(format!("{}{hash:016x}", own_prefix()?))
+}
+
+/// 표시 파일이 담은 pipe 이름. 이 사용자의 이름이 아니면 `None` 이다 — 이름에 SID 가 들어 주인도 함께 본다.
+pub fn marked_name(path: &Path) -> Result<Option<String>> {
+    let text = match std::fs::read_to_string(path) {
+        Ok(text) => text,
+        // 글이 아닌 파일은 남의 것이다 — 없는 것과 가른다.
+        Err(e) if e.kind() == ErrorKind::InvalidData => return Ok(None),
+        Err(e) => return Err(e),
+    };
+    Ok(text.starts_with(&own_prefix()?).then_some(text))
 }
 
 /// 이 사용자에게만 열린 보안 설명자.
@@ -264,11 +284,11 @@ impl Stream {
         }
     }
 
-    /// 그 자리의 데몬·창에 붙는다. 표시 파일이 없으면 `NotFound`, 있는데 아무도 안 받으면 `ConnectionRefused` 다.
+    /// 그 자리의 데몬·창에 붙는다. 표시 파일이 없으면 `NotFound`, 있는데 아무도 안 받으면 `ConnectionRefused`,
+    /// 서 있는데 받을 인스턴스가 시한까지 안 비면 `ResourceBusy` 다.
     pub fn connect(path: impl AsRef<Path>) -> Result<Stream> {
-        let path = path.as_ref();
-        std::fs::symlink_metadata(path)?;
-        let name = wide(&pipe_name(path)?);
+        let Some(name) = marked_name(path.as_ref())? else { return Err(ErrorKind::ConnectionRefused.into()) };
+        let name = wide(&name);
         let deadline = Instant::now() + BUSY_WAIT;
         let handle = loop {
             match open(&name) {
@@ -277,7 +297,7 @@ impl Stream {
                 Err(ERROR_PIPE_BUSY) => {
                     let left = deadline.saturating_duration_since(Instant::now());
                     if left.is_zero() {
-                        return Err(ErrorKind::ConnectionRefused.into());
+                        return Err(ErrorKind::ResourceBusy.into());
                     }
                     // SAFETY: 이름은 NUL 로 끝난다. 시한이 끝나 돌아와도 위 `open` 이 다시 답한다.
                     unsafe { WaitNamedPipeW(name.as_ptr(), millis(Some(left))) };
@@ -339,9 +359,17 @@ impl Stream {
         }
     }
 
-    /// 건너편이 끊었는가 — 읽을 것이 남았어도 끊긴 것만 "끊겼다" 다.
+    /// 건너편이 끊었는가 — **남은 바이트를 버리며 본다.** pipe 는 읽을 것이 남은 동안 끊김을 안 알려, 안 읽은 바이트
+    /// 하나가 진짜 끊김을 가린다(유닉스의 POLLHUP 는 안 가린다). 부르는 쪽은 요청 한 줄을 읽은 뒤라 더 안 읽는다.
     pub fn hung_up(&self) -> bool {
-        !matches!(self.available(), Ok(Some(_)))
+        let mut unread = [0; 4096];
+        loop {
+            match self.available() {
+                Ok(Some(0)) => return false,
+                Ok(Some(_)) if self.read_some(&mut unread).is_ok_and(|n| n > 0) => {}
+                _ => return true,
+            }
+        }
     }
 
     /// 겹친 입출력 하나를 시한 안에 끝낸다. 시한이 지나면 걷어 내고 `TimedOut` 이다.
@@ -407,7 +435,9 @@ impl Stream {
             true => Some(Duration::ZERO),
             false => *self.shared.write_timeout.lock().unwrap_or_else(PoisonError::into_inner),
         };
-        let len = u32::try_from(buf.len()).unwrap_or(u32::MAX);
+        // 버퍼 하나씩 쓴다 — 유닉스의 쓰기처럼 읽는 쪽이 움직이는 동안은 시한이 쓰기마다 다시 선다. 통째로 넘기면 한
+        // `WriteFile` 이 답 전체를 시한 하나에 묶어, 느리게 읽는 쪽의 큰 답이 도중에 끊긴다.
+        let len = buf.len().min(BUFFER as usize) as u32;
         let handle = self.shared.handle.0;
         // SAFETY: `finish` 가 끝날 때까지 `buf` 가 산다.
         let wrote = self.finish(wait, |o| unsafe { WriteFile(handle, buf.as_ptr(), len, null_mut(), o) });
@@ -542,11 +572,17 @@ impl Listener {
             _ => e,
         })?;
         let armed = Armed::new(first)?;
-        std::fs::OpenOptions::new().write(true).create_new(true).open(path).map_err(|e| match e.kind() {
-            ErrorKind::AlreadyExists => ErrorKind::AddrInUse.into(),
-            _ => e,
-        })?;
-        std::fs::write(path, text)?;
+        let mut marker =
+            std::fs::OpenOptions::new().write(true).create_new(true).open(path).map_err(|e| match e.kind() {
+                ErrorKind::AlreadyExists => ErrorKind::AddrInUse.into(),
+                _ => e,
+            })?;
+        // 못 쓴 빈 파일을 남기지 않는다 — 그것은 제 표시 파일로 안 읽혀 다음 `start` 가 "남의 파일" 로 거절한다.
+        if let Err(e) = marker.write_all(text.as_bytes()) {
+            drop(marker);
+            let _ = std::fs::remove_file(path);
+            return Err(e);
+        }
         Ok(Listener { name, armed: Mutex::new(Some(armed)) })
     }
 

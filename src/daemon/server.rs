@@ -1,4 +1,4 @@
-//! Unix 소켓의 줄 전송 — 줄 하나에 JSON-RPC 메시지 하나.
+//! 로컬 전송([`crate::transport`])의 줄 — 줄 하나에 JSON-RPC 메시지 하나.
 //!
 //! **연결마다 스레드 하나, 그 연결의 요청은 그 스레드에서 차례로 하나씩**(moai-5n6m.x8t). 받는 스레드
 //! (`serve` 를 부른 스레드)는 요청을 돌리지 않고, 연결 스레드는 연결이 끝나면 함께 끝난다 — 스레드를 모아 두고
@@ -179,15 +179,10 @@ pub fn lock(socket: &Path) -> std::io::Result<Option<std::fs::File>> {
     }
 }
 
-/// 이 사용자의 소켓인가 — 종류와 주인. 남의 파일은 지우지도 붙지도 않는다.
-pub fn is_own_socket(path: &Path, meta: &std::fs::Metadata) -> bool {
-    crate::transport::is_own(path, meta)
-}
-
 /// 그 자리의 파일이 아직 `ino` 의 그 소켓일 때만 지운다 — 보고 지우는 사이에 남이 세운 것을 지우지 않는다.
 pub fn remove_if_same(path: &Path, ino: u64) -> std::io::Result<()> {
     match std::fs::symlink_metadata(path) {
-        Ok(meta) if is_own_socket(path, &meta) && crate::transport::identity(&meta) == ino => {
+        Ok(meta) if crate::transport::is_own(path, &meta) && crate::transport::identity(&meta) == ino => {
             std::fs::remove_file(path)
         }
         _ => Ok(()),

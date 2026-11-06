@@ -427,8 +427,9 @@ else:
 
 On Windows the daemon runs the same way and answers the same methods. Only the transport differs: a named pipe instead of a Unix socket.
 
-- `daemon.socket` is still a file in the same directory, but an ordinary one. It holds the pipe's name, `\.\pipe\moai-<your SID>-<hash>`. Its presence means what a socket file means: it goes away on a clean stop, and a killed daemon leaves it behind for the next `moai daemon start` to clear.
+- `daemon.socket` is still a file in the same directory, but an ordinary one. It holds the pipe's name, `\\.\pipe\moai-<your SID>-<hash>`. Its presence means what a socket file means: it goes away on a clean stop, and a killed daemon leaves it behind for the next `moai daemon start` to clear.
 - The pipe is open to your account alone, and remote clients are refused. `moai` also checks that the pipe it reaches belongs to you before it sends anything.
+- Without `MOAI_CTL_DIR` or `XDG_RUNTIME_DIR` the directory is `moai-0` in your `%TEMP%`. moai checks neither its owner nor its access list: the pipe's own access list, not the directory, keeps other users out. Two shells with a different `TEMP` see two directories, and each can run its own daemon, so set `MOAI_CTL_DIR` if yours differ.
 - Ctrl-C and Ctrl-Break stop the daemon the way SIGINT does, and a second one ends the process at once. Closing the console window, logging off and shutting down also start a stop, but Windows allows about five seconds, so a long write can be cut.
 - There is no half-close on a pipe. A client cannot shut down its writing side and still read; keep the pipe open until the answer arrives.
 - No service manager is set up for you. `moai daemon start` stays in the foreground, so run it in a window you keep, or from Task Scheduler at logon.
@@ -437,7 +438,7 @@ Connect from PowerShell like this:
 
 ```powershell
 $socket = (moai daemon status --json | ConvertFrom-Json).socket
-$name = (Get-Content -Raw $socket).Substring(9)   # drop the leading \.\pipe\
+$name = (Get-Content -Raw $socket).Substring(9)   # drop the leading \\.\pipe\
 $pipe = New-Object System.IO.Pipes.NamedPipeClientStream('.', $name, [System.IO.Pipes.PipeDirection]::InOut)
 $pipe.Connect(2000)
 $utf8 = New-Object System.Text.UTF8Encoding($false)
@@ -449,6 +450,6 @@ $reader.ReadLine()
 $pipe.Dispose()
 ```
 
-After `moai update` a running daemon keeps the old binary, which the installer has renamed to `moai.exe.<pid>.old`. Stop it and start it again.
+After `moai update` a running daemon keeps the old binary, which the installer has renamed to `moai.exe.old` (`moai.exe.<pid>.old` when an earlier `.old` is still held). Stop it and start it again.
 
 Decided in: moai-wbdh, moai-ou5y

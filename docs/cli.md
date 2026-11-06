@@ -3738,8 +3738,8 @@ Options:
   same directory as moai ctl's: MOAI_CTL_DIR, else $XDG_RUNTIME_DIR/moai,
   else moai-<uid> in the temporary directory, owned by you alone.
 
-  On Windows start and stop answer unsupported; status says supported is
-  false and exits 0.
+  On Windows the socket is a named pipe open to your account alone, and
+  daemon.socket is a file holding the pipe's name.
 ```
 
 ## `moai daemon start`

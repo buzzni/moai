@@ -204,7 +204,7 @@ pub(crate) struct Polled {
 
 /// 목록과 노트를 읽어 [`Seen`] 을 짓고(락 밖), 기억과 바꿔 끼운 뒤(락 안), 견준다(락 밖).
 pub(crate) fn poll(memory: &Memory, whole: Request, lang: Lang, cursor: Option<&str>) -> Result<Polled, RpcError> {
-    let project = std::fs::canonicalize(&whole.root).unwrap_or_else(|_| whole.root.clone());
+    let project = crate::path::real(&whole.root);
     let root = whole.root.clone();
     let answer = crate::cmd::request::read(whole);
     let lines = match answer.out {
@@ -499,7 +499,7 @@ mod tests {
             assert!(!reset);
             cursor = next;
         }
-        let canon = std::fs::canonicalize(&root).unwrap();
+        let canon = crate::path::real(&root);
         assert_eq!(memory.held(&canon), 2);
         let (_, changed, removed, reset) = ask(&memory, &root, Some(&first));
         assert!(reset && changed.is_empty() && removed.is_empty(), "밀려난 지문이 reset 이 아니다");

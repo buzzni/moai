@@ -151,9 +151,10 @@ pub fn send_at(path: &Path, request: &Request) -> std::io::Result<Reply> {
     let ms = request.deadline_ms.saturating_sub(wire::now_ms()).max(1);
     stream.set_read_timeout(Some(Duration::from_millis(ms)))?;
     stream.set_write_timeout(Some(Duration::from_millis(ms)))?;
-    serde_json::to_writer(&mut stream, request)?;
-    stream.write_all(b"\n")?;
-    let mut line = Vec::new();
+    let mut line = serde_json::to_vec(request)?;
+    line.push(b'\n');
+    stream.write_all(&line)?;
+    line.clear();
     BufReader::new(stream).take(wire::LINE_MAX as u64 + 1).read_until(b'\n', &mut line)?;
     if line.len() > wire::LINE_MAX {
         return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "control reply exceeds 1 MiB"));

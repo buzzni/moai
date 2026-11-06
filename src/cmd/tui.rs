@@ -2651,9 +2651,6 @@ mod tests {
         assert_eq!(said, Vec::<String>::new(), "없는 파일을 나갈 때 댄다");
     }
 
-    /// **편집기가 받을 철자는 리눅스에서도 잰다**(moai-l3pp, 리뷰 moai-j9gv.8oh) — `\\?\` 를 걷고 `/` 로 쓴 `C:/…` 가 MSYS2 를
-    /// 그대로 지나면 그것이고, 아니면 없다(이름만 넘기고 자리를 옮긴다). Windows 의 갈래는 CI 가 짓기만 하므로 그 몸통을
-    /// 여기서 잰다 — 접두어를 안 걷거나, `\` 철자로 재거나, 갈래를 뒤집으면 붉어진다.
     /// UNC 임시 경로는 전체를 넘긴다 — 이름만 넘기면 `cmd.exe` 가 자리를 못 세워 다른 파일을 연다(moai-dgcz).
     #[test]
     fn a_unc_temp_path_goes_whole_and_a_drive_path_does_not() {
@@ -2665,6 +2662,9 @@ mod tests {
         assert_eq!(s(r"\\?\C:\Users\me\Temp\moai-backlog-1-0.md"), None);
     }
 
+    /// **편집기가 받을 철자는 리눅스에서도 잰다**(moai-l3pp, 리뷰 moai-j9gv.8oh) — `\\?\` 를 걷고 `/` 로 쓴 `C:/…` 가 MSYS2 를
+    /// 그대로 지나면 그것이고, 아니면 없다(이름만 넘기고 자리를 옮긴다). Windows 갈래의 몸통을 어느 기계에서나 여기서
+    /// 잰다 — 접두어를 안 걷거나, `\` 철자로 재거나, 갈래를 뒤집으면 붉어진다.
     #[test]
     fn the_editor_spelling_is_slashed_unless_msys2_would_change_it() {
         let s = |p: &str| editor_spelling(std::ffi::OsStr::new(p));

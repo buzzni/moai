@@ -45,7 +45,8 @@ pub enum Probe {
     /// 데몬이 답했다. 이 바이너리가 말하는 `proto` 를 거절한 옛 데몬도 여기다 — 거절에 실린 판으로 선다.
     Running(Hello),
     /// 데몬이 연결 상한에 차서 `hello` 도 못 받았다 — 상한을 넘은 연결의 수명 길(`server::LIFECYCLE`)마저 찼다.
-    /// 거절에 실린 `pid` 를 든다(옛 판은 안 싣는다).
+    /// 거절에 실린 `pid` 를 든다(옛 판은 안 싣는다). Windows 에서 받을 pipe 인스턴스가 시한까지 안 빈 것도 여기다 —
+    /// 그때는 말을 못 나눠 `pid` 가 없다.
     Busy(Option<u32>),
     /// 무언가 받았지만 데몬의 말로 답하지 않았다.
     Foreign(String),
@@ -56,6 +57,7 @@ pub fn probe(path: &Path) -> Probe {
         Ok(stream) => stream,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Probe::Absent,
         Err(e) if e.kind() == std::io::ErrorKind::ConnectionRefused => return Probe::Dead,
+        Err(e) if e.kind() == std::io::ErrorKind::ResourceBusy => return Probe::Busy(None),
         Err(e) => return Probe::Foreign(e.to_string()),
     };
     match request(&mut stream, "hello", json!({ "proto": rpc::PROTO })) {

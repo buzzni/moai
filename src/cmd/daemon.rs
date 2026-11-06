@@ -27,7 +27,7 @@ pub fn run(ctx: &Ctx, cmd: DaemonCmd) -> R<Vec<String>> {
 /// `status --json` 의 꼴. 떠 있지 않으면 `pid`·`version`·`proto`·`same_version` 이 없다 — 없는 것이 답이다.
 #[derive(Serialize)]
 struct Status {
-    /// 이 OS 에 데몬이 있는가. Windows 는 `false` 다.
+    /// 이 OS 에 데몬이 있는가. 유닉스와 Windows 는 `true` 다.
     supported: bool,
     running: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -162,7 +162,7 @@ mod os {
     /// 자리에 선 파일이 제 소켓이 아니면 거절한다 — 지우지도 붙지도 않는다.
     fn own_or_refuse(lang: Lang, path: &Path) -> R<Option<std::fs::Metadata>> {
         match std::fs::symlink_metadata(path) {
-            Ok(meta) if server::is_own_socket(path, &meta) => Ok(Some(meta)),
+            Ok(meta) if crate::transport::is_own(path, &meta) => Ok(Some(meta)),
             Ok(_) => Err(failed(say(lang, "daemon.occupied"), &[("socket", &shown(path))], code::ALREADY_EXISTS)),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
             Err(e) => Err(failed(say(lang, "daemon.no_place"), &[("said", &e.to_string())], code::ERROR)),

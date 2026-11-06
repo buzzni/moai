@@ -489,8 +489,10 @@ fn wait_slot(waiting: &Arc<AtomicUsize>, leave: &mut Option<Leave>) -> bool {
 
 #[cfg(any(unix, windows))]
 fn write_reply(stream: &mut impl Write, reply: &Reply) -> std::io::Result<()> {
-    serde_json::to_writer(&mut *stream, reply)?;
-    stream.write_all(b"\n")
+    // 줄째 한 번에 쓴다 — `to_writer` 는 토큰마다 쓰기를 내고, pipe 의 쓰기 하나는 이벤트를 짓고 기다리고 닫는다.
+    let mut line = serde_json::to_vec(reply)?;
+    line.push(b'\n');
+    stream.write_all(&line)
 }
 
 #[cfg(all(test, unix))]
@@ -923,5 +925,31 @@ mod tests {
         assert_eq!(serde_json::from_str::<Reply>(&line).unwrap().data.unwrap()["state"], "accepted");
         drop(tx);
         owner.join().unwrap();
+    }
+}
+
+#[cfg(all(test, windows))]
+mod windows_tests {
+    use super::*;
+
+    /// 깨우는 바이트는 한 번 깨우고 비워진다 — 남으면 쉬는 동안 걸음마다 깨고, 못 보면 요청이 다음 때까지 기다린다.
+    #[test]
+    fn a_wake_byte_wakes_once() {
+        let (wake, notify) = crate::transport::Stream::pair().unwrap();
+        wake.set_nonblocking(true).unwrap();
+        notify.set_nonblocking(true).unwrap();
+        let (_tx, incoming) = mpsc::channel();
+        let listener = Listener {
+            incoming,
+            wake,
+            path: std::env::temp_dir().join(format!("moai-wake-unused-{}", std::process::id())),
+            stop: Arc::new(AtomicBool::new(false)),
+            book: None,
+            editing: Arc::new(Editing::default()),
+        };
+        assert!(!listener.drain_wake().unwrap(), "아무도 안 깨웠는데 깼다");
+        (&notify).write_all(&[1, 1]).unwrap();
+        assert!(listener.drain_wake().unwrap(), "깨우는 바이트를 못 봤다");
+        assert!(!listener.drain_wake().unwrap(), "비운 바이트가 또 깨웠다");
     }
 }

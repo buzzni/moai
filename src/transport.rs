@@ -11,7 +11,7 @@
 mod pipe;
 
 #[cfg(windows)]
-pub use pipe::{Listener, Stream, pipe_name};
+pub use pipe::{Listener, Stream};
 #[cfg(unix)]
 pub use std::os::unix::net::{UnixListener as Listener, UnixStream as Stream};
 
@@ -71,10 +71,10 @@ pub fn is_own(_path: &Path, meta: &std::fs::Metadata) -> bool {
     meta.file_type().is_socket() && meta.uid() == unsafe { libc::geteuid() }
 }
 
-/// 표시 파일이 그 자리의 pipe 이름을 담았을 때만 제 것이다 — 이름에 이 사용자의 SID 가 들어 주인도 함께 본다.
+/// 표시 파일이 이 사용자의 pipe 이름을 담았을 때만 제 것이다 — 이름에 이 사용자의 SID 가 들어 주인도 함께 본다.
 #[cfg(windows)]
 pub fn is_own(path: &Path, meta: &std::fs::Metadata) -> bool {
-    meta.is_file() && pipe_name(path).is_ok_and(|name| std::fs::read_to_string(path).is_ok_and(|text| text == name))
+    meta.is_file() && pipe::marked_name(path).is_ok_and(|name| name.is_some())
 }
 
 /// 그 자리의 파일이 아직 그 파일인가를 가르는 값 — 보고 지우는 사이에 남이 세운 것을 지우지 않으려고 본다.
@@ -84,9 +84,102 @@ pub fn identity(meta: &std::fs::Metadata) -> u64 {
     meta.ino()
 }
 
-/// 안정된 Rust 에 파일 번호가 없어 만든 시각을 쓴다 — 100ns 단위라 지우고 다시 세운 표시 파일과 안 겹친다.
+/// 안정된 Rust 에 파일 번호가 없어 마지막 쓴 시각을 쓴다 — 표시 파일은 세울 때 한 번만 쓴다. **만든 시각은 못 쓴다**:
+/// NTFS 의 터널링이 지운 이름을 15초 안에 다시 세우면 옛 만든 시각을 물려준다(실기에서 쟀다).
 #[cfg(windows)]
 pub fn identity(meta: &std::fs::Metadata) -> u64 {
     use std::os::windows::fs::MetadataExt;
-    meta.creation_time()
+    meta.last_write_time()
+}
+
+#[cfg(all(test, windows))]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    /// 시험마다 제 자리 — 떨어질 때 지운다.
+    struct Place(PathBuf);
+
+    impl Place {
+        fn new(name: &str) -> Place {
+            let dir = std::env::temp_dir().join(format!("moai-transport-{name}-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&dir);
+            std::fs::create_dir_all(&dir).unwrap();
+            Place(dir)
+        }
+    }
+
+    impl Drop for Place {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    /// 만든 시각은 터널링이 물려줘 이 값이 같았다 — 그러면 보고 지우는 사이에 남이 세운 표시 파일을 지운다.
+    #[test]
+    fn a_marker_put_back_under_the_same_name_is_another_marker() {
+        let place = Place::new("identity");
+        let path = place.0.join("7.sock");
+        std::fs::write(&path, "first").unwrap();
+        let before = identity(&std::fs::symlink_metadata(&path).unwrap());
+        std::thread::sleep(Duration::from_millis(20));
+        std::fs::remove_file(&path).unwrap();
+        std::fs::write(&path, "second").unwrap();
+        assert_ne!(identity(&std::fs::symlink_metadata(&path).unwrap()), before);
+    }
+
+    /// 받는 쪽이 늦은 것은 죽은 것이 아니다 — 죽었다고 읽으면 `moai ctl ls` 가 산 창의 표시 파일을 지운다.
+    #[test]
+    fn a_listener_with_no_free_instance_reads_as_busy_not_dead() {
+        let place = Place::new("busy");
+        let path = place.0.join("daemon.socket");
+        let _listener = Listener::bind(&path).unwrap();
+        let _first = Stream::connect(&path).unwrap();
+        let second = Stream::connect(&path).unwrap_err();
+        assert_eq!(second.kind(), std::io::ErrorKind::ResourceBusy, "{second}");
+    }
+
+    /// 듣기가 사라지면 그때가 "아무도 안 받는다" 다.
+    #[test]
+    fn a_marker_with_no_listener_reads_as_refused() {
+        let place = Place::new("dead");
+        let path = place.0.join("daemon.socket");
+        drop(Listener::bind(&path).unwrap());
+        assert_eq!(Stream::connect(&path).unwrap_err().kind(), std::io::ErrorKind::ConnectionRefused);
+    }
+
+    /// 같은 파일을 다른 철자로 불러도 같은 pipe 다 — 이름을 자리 글에서 다시 지으면 `C:/x` 와 `C:\x` 가 갈린다.
+    #[test]
+    fn the_marker_names_the_pipe_however_the_path_is_spelled() {
+        let place = Place::new("spelling");
+        let path = place.0.join("daemon.socket");
+        let _listener = Listener::bind(&path).unwrap();
+        let other = PathBuf::from(path.display().to_string().replace('\\', "/"));
+        assert!(is_own(&other, &std::fs::symlink_metadata(&other).unwrap()));
+        Stream::connect(&other).unwrap();
+    }
+
+    /// 이 사용자의 pipe 를 대지 않은 파일은 남의 것이다.
+    #[test]
+    fn a_file_that_names_no_pipe_of_ours_is_not_ours() {
+        let place = Place::new("foreign");
+        for (name, bytes) in [("text", &b"not a socket"[..]), ("binary", &[0xff, 0xfe, 0x00][..]), ("empty", &[][..])] {
+            let path = place.0.join(name);
+            std::fs::write(&path, bytes).unwrap();
+            assert!(!is_own(&path, &std::fs::symlink_metadata(&path).unwrap()), "{name}");
+            assert_eq!(Stream::connect(&path).unwrap_err().kind(), std::io::ErrorKind::ConnectionRefused, "{name}");
+        }
+    }
+
+    /// 안 읽은 바이트가 끊김을 가리지 않는다 — 가리면 `--wait` 의 부름이 떠난 뒤에도 자리를 쥔 채 시한까지 간다.
+    #[test]
+    fn a_hang_up_is_seen_past_an_unread_byte() {
+        use std::io::Write as _;
+        let (ours, mut theirs) = Stream::pair().unwrap();
+        assert!(!hung_up(&ours));
+        theirs.write_all(b"unread").unwrap();
+        assert!(!hung_up(&ours), "붙어 있는 쪽을 끊겼다고 읽었다");
+        drop(theirs);
+        assert!(hung_up(&ours));
+    }
 }

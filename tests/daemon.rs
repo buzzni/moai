@@ -25,7 +25,14 @@ impl Fence {
     fn new() -> Fence {
         static NTH: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
         let n = NTH.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let base = if cfg!(unix) { PathBuf::from("/tmp") } else { std::env::temp_dir() };
+        // Windows 는 푼 철자로 선다 — `TEMP` 가 8.3 꼴(CI 러너의 `RUNNER~1`)이면 CLI 는 지금 자리의 그 철자를, 데몬은 푼
+        // 철자를 대어, 두 답을 글자째 견주는 시험이 그 러너에서만 진다.
+        let base = if cfg!(unix) {
+            PathBuf::from("/tmp")
+        } else {
+            let real = std::fs::canonicalize(std::env::temp_dir()).unwrap();
+            PathBuf::from(real.to_string_lossy().trim_start_matches(r"\\?\"))
+        };
         let path = base.join(format!("moai-daemon-{}-{n}", std::process::id()));
         let _ = std::fs::remove_dir_all(&path);
         std::fs::create_dir(&path).unwrap();

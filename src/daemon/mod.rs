@@ -1,11 +1,11 @@
 //! 데몬 — 로컬 읽기·쓰기 API (moai-5n6m, 쓰기는 moai-3hgm).
 //!
-//! - `rpc` 는 JSON-RPC 2.0 **메시지 층**이다. 전송(Unix 소켓의 줄, 나중의 HTTP)을 모르고 `cmd`·`store` 의 어떤
+//! - `rpc` 는 JSON-RPC 2.0 **메시지 층**이다. 전송(소켓이나 pipe 의 줄, 나중의 HTTP)을 모르고 `cmd`·`store` 의 어떤
 //!   타입도 이름 대지 않는다.
-//! - `server` 는 Unix 소켓의 줄 전송이다 — 연결마다 스레드 하나, 그 연결의 요청은 그 스레드에서 하나씩.
+//! - `server` 는 로컬 전송의 줄이다 — 연결마다 스레드 하나, 그 연결의 요청은 그 스레드에서 하나씩.
 //! - `client` 는 붙는 쪽이다 — `moai daemon start·stop·status` 가 떠 있는 데몬을 찾고 멈추는 데 쓴다.
 //!
-//! 명령을 메서드에 묶는 자리는 [`methods`] 하나다. 소켓을 모르는 Windows 에서는 `rpc` 만 서고 아무도 안 불러
+//! 명령을 메서드에 묶는 자리는 [`methods`] 하나다. 유닉스도 Windows 도 아닌 곳에서는 `rpc` 만 서고 아무도 안 불러
 //! dead_code 가 선다 — 그쪽에서만 걷는다.
 
 #[cfg_attr(not(any(unix, windows)), allow(dead_code))]

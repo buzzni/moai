@@ -33484,35 +33484,6 @@ fn web_events_reserve_the_slot_until_a_tab_resumes_or_its_grace_ends() {
     drop(others);
 }
 
-// A stream with no ctl identity to reserve returns its capacity at once.
-#[test]
-#[cfg(not(any(unix, windows)))]
-fn web_events_give_their_slot_back_when_the_tab_goes() {
-    let s = init("web-events-release");
-    let web = serve(s.path());
-    let mut streams = Vec::new();
-    for _ in 0..3 {
-        let mut stream = events(web.port);
-        next_event_stamp(&mut stream);
-        streams.push(stream);
-    }
-    drop(streams);
-    let until = std::time::Instant::now() + std::time::Duration::from_secs(5);
-    loop {
-        let mut stream = dial(web.port);
-        use std::io::{Read as _, Write as _};
-        write!(stream, "GET /api/events HTTP/1.1\r\nHost: 127.0.0.1:{}\r\n\r\n", web.port).unwrap();
-        stream.set_read_timeout(Some(std::time::Duration::from_secs(2))).unwrap();
-        let mut start = [0; 12];
-        stream.read_exact(&mut start).unwrap();
-        if &start == b"HTTP/1.1 200" {
-            break;
-        }
-        assert!(std::time::Instant::now() < until, "closed streams did not return their slots");
-        std::thread::sleep(std::time::Duration::from_millis(100));
-    }
-}
-
 /// 본문 없는 POST 하나 — `Origin` 을 줄 때만 싣는다. 브라우저가 보내는 꼴이다(읽음 표시, moai-ly88).
 fn post(port: u16, path: &str, origin: Option<&str>) -> (u16, String, String) {
     use std::io::{Read as _, Write as _};
