@@ -57,7 +57,7 @@ For systemd, save the following as `~/.config/systemd/user/moai-daemon.service`,
 
 ```ini
 [Unit]
-Description=moai read-only daemon
+Description=moai daemon
 
 [Service]
 ExecStart=/home/me/.local/bin/moai daemon start
@@ -347,7 +347,7 @@ A request that comes in on an open connection after step 1 is not run. It gets `
 
 The accept loop looks at the stop flag every 0.5 second, so the daemon ends even when its own wake-up connection fails.
 
-Ctrl-C (SIGINT) and SIGTERM stop the daemon the same way: it stops accepting, finishes the requests it is running (up to 5 seconds), removes its socket, releases `daemon.lock` and exits 0. So `kill <pid>`, `systemctl stop` and `launchctl stop` end it cleanly. A second signal while it drains ends the process at once and can leave the socket behind; the next `start` clears it. A SIGINT that was ignored when the daemon started, as a script's `moai daemon start &` ignores it, stays ignored, so a Ctrl-C meant for the script does not stop the daemon.
+Ctrl-C (SIGINT) and SIGTERM stop the daemon the same way: the steps above, then it releases `daemon.lock` and exits 0. So `kill <pid>`, `systemctl stop` and `launchctl stop` end it cleanly, and a running write still runs to the end. A service manager kills the daemon after its own stop timeout (90 seconds by default under systemd). A second signal ends the process at once, even in the middle of a write: that write can lose its journal line or leave a temp file, and a socket not removed yet stays behind; the next `start` clears it. A SIGINT that was ignored when the daemon started, as a script's `moai daemon start &` ignores it, stays ignored, so a Ctrl-C meant for the script does not stop the daemon.
 
 One case has no tool path yet (backlog `moai-69bs`): if the socket file was removed while the daemon runs, new clients cannot find it. `moai daemon stop` says "no daemon is running", `status` says the same, and `moai daemon start` waits 5 seconds and fails with "another daemon holds … but does not answer yet", because the daemon still holds `daemon.lock`. A client that is still connected can send `daemon.shutdown` on its open connection. Otherwise end the process by its pid (the `start` line printed it), for example with `kill <pid>`.
 
