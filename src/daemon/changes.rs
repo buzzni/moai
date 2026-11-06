@@ -618,7 +618,9 @@ mod tests {
         let beat = beats.join("sid");
         std::fs::write(&beat, "claude\tStop\n").unwrap();
         let age = |secs| {
-            std::fs::File::open(&beat)
+            std::fs::File::options()
+                .write(true)
+                .open(&beat)
                 .unwrap()
                 .set_modified(std::time::SystemTime::now() - std::time::Duration::from_secs(secs))
                 .unwrap()
