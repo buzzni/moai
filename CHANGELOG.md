@@ -21,6 +21,7 @@ does not tag — see `CONTRIBUTING.md`.
 - `moai update` reports a running daemon with a different version or protocol after a successful update; `--json` then includes `daemon_restart: true`. A rebuild of the same version is not detected. Restart remains under the user or service manager's control. (moai-ou5y.q6t)
 
 ### Fixed
+- `moai ctl` reports `busy`, not that the window is gone, when a window runs out of control client slots just as a request reaches it. (moai-t0ys.0dk)
 - The skill's one-liner that pulls a review's text out of a subagent transcript reads and writes UTF-8 on Windows. It stopped on Korean text under the default code page. (moai-6ld5.ew1)
 - The editor opens the right file when `TEMP` is on a network share on Windows. A jot could be lost when cmd.exe could not start in the share. (moai-dgcz)
 - Windows builds carry an 8 MiB stack, as Linux does. The default 1 MiB overflowed in development builds. (moai-6ld5.535)
