@@ -21,7 +21,7 @@
 //! 만 하면, 둘이 동시에 뜰 때 늦은 쪽이 먼저 뜬 쪽의 새 소켓을 지운다.
 
 use super::rpc::{self, Methods, Prepared, RpcError};
-use crate::transport::{Listener, Stream};
+use crate::transport::{Listener, Stream, armed};
 use serde_json::json;
 use std::io::{BufReader, Write};
 use std::path::{Path, PathBuf};
@@ -447,8 +447,8 @@ fn turn<'w>(methods: &Methods, work: &'w Work, line: &[u8]) -> Turn<'w> {
 /// 상한을 넘은 연결 하나 — 줄 하나만 읽어 [`LIFECYCLE`] 의 메서드면 돌리고, 아니면 `busy` 로 거절하고 닫는다.
 /// 어느 쪽이든 그 연결의 다음 줄은 안 읽는다.
 fn lifecycle(stream: Stream, methods: &Methods, stop: &AtomicBool, path: &Path, work: &Work) {
-    if super::client::armed(stream.set_read_timeout(Some(LIFECYCLE_WAIT))).is_err()
-        || super::client::armed(stream.set_write_timeout(Some(LIFECYCLE_WAIT))).is_err()
+    if armed(stream.set_read_timeout(Some(LIFECYCLE_WAIT))).is_err()
+        || armed(stream.set_write_timeout(Some(LIFECYCLE_WAIT))).is_err()
     {
         return;
     }
@@ -489,7 +489,7 @@ impl std::io::Read for Deadline {
         if left.is_zero() {
             return Err(std::io::ErrorKind::TimedOut.into());
         }
-        super::client::armed(self.stream.set_read_timeout(Some(left)))?;
+        armed(self.stream.set_read_timeout(Some(left)))?;
         self.stream.read(buf)
     }
 }
@@ -502,9 +502,7 @@ fn wake(path: &Path) {
 
 /// 연결 하나 — 줄을 읽고, 돌리고, 답을 쓰고, 다음 줄을 읽는다. 앞 요청의 답을 쓰기 전에는 다음 줄을 안 읽는다.
 fn connection(stream: Stream, methods: &Methods, stop: &AtomicBool, path: &Path, work: &Work) {
-    if super::client::armed(stream.set_read_timeout(Some(IDLE))).is_err()
-        || super::client::armed(stream.set_write_timeout(Some(WRITE))).is_err()
-    {
+    if armed(stream.set_read_timeout(Some(IDLE))).is_err() || armed(stream.set_write_timeout(Some(WRITE))).is_err() {
         return;
     }
     let Ok(read_half) = stream.try_clone() else { return };
@@ -818,7 +816,11 @@ mod tests {
         // 돌아왔을 때 답은 이미 소켓에 있다 — 실제 데몬이라면 여기서 끝나도 받는다.
         #[cfg(unix)]
         // macOS 는 건너편이 떠난 소켓에 `ENOTCONN` 으로 답한다 — 답을 읽는 데는 상관없다.
-        let _ = writing.writer.shutdown(std::net::Shutdown::Write);
+        writing
+            .writer
+            .shutdown(std::net::Shutdown::Write)
+            .or_else(|e| if e.kind() == std::io::ErrorKind::NotConnected { Ok(()) } else { Err(e) })
+            .unwrap();
         assert_eq!(writing.answer().expect("쓰기의 답")["result"], "written");
     }
 
@@ -916,8 +918,7 @@ mod tests {
             let ran = daemon.finished("touch");
             // 데몬은 돌아왔다 — 돈 요청의 답은 이미 소켓에 있어야 한다. 거절은 그 뒤에 쓰일 수도 있으니 기다려 읽는다.
             let wait = if ran { Duration::from_millis(100) } else { Duration::from_secs(10) };
-            // macOS 는 닫힌 소켓의 시한을 거절한다 — 그 소켓의 읽기는 안 막힌다.
-            let _ = idle.reader.get_ref().set_read_timeout(Some(wait));
+            armed(idle.reader.get_ref().set_read_timeout(Some(wait))).unwrap();
             let answer = idle.answer().unwrap_or_else(|| panic!("{round}번째: 막 읽은 요청이 답 없이 닫혔다"));
             match ran {
                 true => assert_eq!(answer["result"], "touched", "{round}번째: {answer}"),

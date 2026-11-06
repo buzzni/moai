@@ -1,7 +1,7 @@
 //! 데몬에 붙는 쪽 — 연결 하나에 요청 하나. `moai daemon start·stop·status` 가 떠 있는 데몬을 찾고 멈추는 데 쓴다.
 
 use super::rpc::{self, RpcError};
-use crate::transport::Stream;
+use crate::transport::{Stream, armed, broken};
 use serde_json::{Value, json};
 use std::io::{BufReader, Write};
 use std::path::Path;
@@ -93,17 +93,9 @@ fn request(stream: &mut Stream, method: &str, params: Value) -> std::io::Result<
     let line = json!({ "jsonrpc": "2.0", "id": 1, "method": method, "params": params });
     // **쓰기가 끊겨도 답을 읽어 본다.** 꽉 찬 데몬은 요청을 읽지 않고 `busy` 한 줄을 쓰고 닫는다 — 그 닫기가 이
     // 쓰기보다 먼저면 쓰기는 EPIPE 로 끊기지만, 그 거절은 이미 받는 버퍼에 와 있다(moai-uezh).
-    // macOS 는 그 닫기와 겹친 쓰기를 ENOTCONN 으로도 끊는다 — 답은 그때도 와 있다(moai-t0ys).
     let cut = match writeln!(stream, "{line}").and_then(|()| stream.flush()) {
         Ok(()) => None,
-        Err(e)
-            if matches!(
-                e.kind(),
-                std::io::ErrorKind::BrokenPipe | std::io::ErrorKind::ConnectionReset | std::io::ErrorKind::NotConnected
-            ) =>
-        {
-            Some(e)
-        }
+        Err(e) if broken(&e) => Some(e),
         Err(e) => return Err(e),
     };
     let mut reader = BufReader::new(&*stream);
@@ -129,18 +121,6 @@ fn request(stream: &mut Stream, method: &str, params: Value) -> std::io::Result<
     }
 }
 
-/// 시한을 건 결과. **macOS 는 건너편이 이미 닫은 소켓의 시한을 `EINVAL` 로 거절한다**(moai-3e4m) — 꽉 찬 데몬이 거절 한 줄을 쓰고
-/// 닫은 뒤에 여기 오면 그 거절을 읽기도 전에 넘어져, `status` 가 `busy` 대신 "데몬이 아니다" 로 답했다. 닫힌 소켓의 읽기와
-/// 쓰기는 안 막히니 시한이 없어도 된다.
-///
-/// 데몬 쪽도 이것을 쓴다(`server::connection`·`lifecycle`) — 안 쓰면 쓰고 곧바로 닫은 요청을 안 읽고 버린다(moai-t0ys).
-pub(super) fn armed(set: std::io::Result<()>) -> std::io::Result<()> {
-    match set {
-        Err(e) if e.kind() == std::io::ErrorKind::InvalidInput => Ok(()),
-        set => set,
-    }
-}
-
 fn bad(why: &str) -> std::io::Error {
     std::io::Error::new(std::io::ErrorKind::InvalidData, why.to_string())
 }
@@ -161,6 +141,14 @@ mod tests {
         drop(theirs);
         let error = request(&mut ours, "hello", json!({ "proto": rpc::PROTO })).unwrap().unwrap_err();
         assert_eq!(error.data.unwrap()["pid"], 7);
+    }
+
+    /// 시한의 거절을 넘기는 것은 macOS 의 닫힌 소켓뿐이다 — 다른 곳에서 넘기면 연결이 말없이 시한 없이 돈다.
+    #[test]
+    fn only_macos_forgives_a_refused_deadline() {
+        use std::io::ErrorKind::{BrokenPipe, InvalidInput};
+        assert_eq!(armed(Err(InvalidInput.into())).is_ok(), cfg!(target_os = "macos"));
+        assert!(armed(Err(BrokenPipe.into())).is_err());
     }
 
     /// 쓰기가 끊기고 읽을 답도 없으면 끊긴 쓰기가 까닭이다.
