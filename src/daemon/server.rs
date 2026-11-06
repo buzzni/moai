@@ -547,7 +547,8 @@ mod tests {
         use std::sync::Barrier;
         let signal = Arc::new(AtomicBool::new(false));
         let flag = Arc::clone(&signal);
-        let dir = std::env::temp_dir().join(format!("moai-signal-drain-{}", std::process::id()));
+        // `/tmp` 아래 짧게 — `TMPDIR` 이 길면 소켓 경로가 108 바이트를 넘어 `bind` 가 넘어진다. [`Daemon`] 과 같은 까닭이다.
+        let dir = PathBuf::from(format!("/tmp/moai-signal-drain-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("socket");
         let bound = bind(&path).unwrap();
