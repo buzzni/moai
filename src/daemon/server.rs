@@ -632,8 +632,8 @@ mod tests {
     impl Daemon {
         fn start() -> Daemon {
             static NTH: Nth = Nth::new(0);
-            let dir =
-                PathBuf::from(format!("/tmp/moai-srv-{}-{}", std::process::id(), NTH.fetch_add(1, Ordering::Relaxed)));
+            let base = if cfg!(unix) { PathBuf::from("/tmp") } else { std::env::temp_dir() };
+            let dir = base.join(format!("moai-srv-{}-{}", std::process::id(), NTH.fetch_add(1, Ordering::Relaxed)));
             let _ = std::fs::remove_dir_all(&dir);
             std::fs::create_dir(&dir).unwrap();
             let finished = Arc::new(Mutex::new(Vec::new()));
