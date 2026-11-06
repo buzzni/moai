@@ -616,6 +616,8 @@ mod tests {
         dir: PathBuf,
         /// 끝까지 돈 처리 함수의 이름.
         finished: Arc<Mutex<Vec<&'static str>>>,
+        /// 이 데몬의 신호 깃발 — 실제 데몬에서 SIGTERM·SIGINT 가 세우는 그 자리다.
+        signal: Arc<AtomicBool>,
         server: Option<std::thread::JoinHandle<std::io::Result<()>>>,
     }
 
@@ -648,8 +650,10 @@ mod tests {
                 rpc::reply(&json!("touched"))
             });
             let bound = bind(&dir.join("s")).unwrap();
-            let server = std::thread::spawn(move || serve_for(bound, methods, SHORT_DRAIN, &AtomicBool::new(false)));
-            Daemon { dir, finished, server: Some(server) }
+            let signal = Arc::new(AtomicBool::new(false));
+            let flag = Arc::clone(&signal);
+            let server = std::thread::spawn(move || serve_for(bound, methods, SHORT_DRAIN, &flag));
+            Daemon { dir, finished, signal, server: Some(server) }
         }
 
         fn socket(&self) -> PathBuf {
@@ -663,6 +667,11 @@ mod tests {
         fn stop(&self) {
             let bye = client::call(&self.socket(), super::super::SHUTDOWN, json!({})).unwrap().unwrap();
             assert_eq!(bye["pid"], std::process::id());
+        }
+
+        /// SIGTERM·SIGINT 가 처리기에서 하는 일 그대로 — 깃발만 세운다.
+        fn signal(&self) {
+            self.signal.store(true, Ordering::Release);
         }
 
         /// 멈추는 데몬이 소켓 파일을 지우기를 기다린다 — 지운 뒤에 문을 닫는다(`serve_for`).
@@ -746,6 +755,16 @@ mod tests {
     /// 데몬은 그 쓰기가 끝나고 **답이 나간 뒤에** 돌아오고, 읽기의 데몬은 시한에 돌아온다(그 읽기는 아직 돈다).
     #[test]
     fn a_write_outlives_the_drain_and_a_read_of_the_same_length_does_not() {
+        writes_outlive_the_drain(Daemon::stop);
+    }
+
+    /// 신호로 멈춰도 같은 차례다 — 처리기는 깃발만 세우고, 멈추는 길은 `daemon.shutdown` 과 하나다(moai-3hgm.vjv).
+    #[test]
+    fn a_signal_lets_a_write_outlive_the_drain_like_the_method_does() {
+        writes_outlive_the_drain(Daemon::signal);
+    }
+
+    fn writes_outlive_the_drain(stop: impl Fn(&Daemon)) {
         let (mut writer, mut reader) = (Daemon::start(), Daemon::start());
         let mut writing = Wire::open(&writer.socket());
         let mut reading = Wire::open(&reader.socket());
@@ -753,8 +772,8 @@ mod tests {
         reading.send(1, "slow_read");
         std::thread::sleep(Duration::from_millis(200));
         let asked = Instant::now();
-        writer.stop();
-        reader.stop();
+        stop(&writer);
+        stop(&reader);
 
         reader.join();
         assert!(!reader.finished("slow_read"), "읽기의 데몬이 그 읽기를 끝까지 기다렸다");

@@ -2040,6 +2040,24 @@ fn opened(pid: u64, file: &std::fs::Metadata) -> bool {
 #[cfg(target_os = "linux")]
 #[test]
 fn a_write_waiting_on_the_lock_when_the_daemon_stops_still_finishes_and_answers() {
+    write_on_the_lock_outlives_the_stop(|bye, pid| {
+        let stopped = bye.call(1, "daemon.shutdown", json!({}));
+        assert_eq!(stopped["result"]["pid"], pid, "{stopped}");
+    });
+}
+
+/// SIGTERM 도 같다 — `systemctl stop` 이 멈추는 길이다. 돌던 쓰기는 끝까지 가고, 데몬은 0 으로 끝난다(moai-3hgm.vjv).
+#[cfg(target_os = "linux")]
+#[test]
+fn a_write_waiting_on_the_lock_when_sigterm_arrives_still_finishes_and_answers() {
+    write_on_the_lock_outlives_the_stop(|_, pid| {
+        // SAFETY: pid 는 이 시험이 방금 띄운 자식이고 신호는 유효하다.
+        assert_eq!(unsafe { libc::kill(pid as libc::pid_t, libc::SIGTERM) }, 0);
+    });
+}
+
+#[cfg(target_os = "linux")]
+fn write_on_the_lock_outlives_the_stop(stop: impl FnOnce(&mut Wire, u64)) {
     use fs2::FileExt;
     let f = Fence::new();
     let root = f.project("proj");
@@ -2068,8 +2086,7 @@ fn a_write_waiting_on_the_lock_when_the_daemon_stops_still_finishes_and_answers(
         std::thread::sleep(Duration::from_millis(5));
     }
 
-    let stopped = bye.call(1, "daemon.shutdown", json!({}));
-    assert_eq!(stopped["result"]["pid"], pid, "{stopped}");
+    stop(&mut bye, pid);
     let asked = std::time::Instant::now();
     while f.socket().exists() {
         assert!(asked.elapsed() < Duration::from_secs(3), "멈추는 데몬이 소켓 파일을 안 지웠다");
