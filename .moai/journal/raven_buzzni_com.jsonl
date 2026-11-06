@@ -12502,3 +12502,7 @@
 {"ts":"2026-11-06T21:10:00Z","id":"moai-2t6v","kind":"create","by":"Raven","by_email":"raven@buzzni.com","title":"v1.0.0 릴리스"}
 {"ts":"2026-11-06T21:10:00Z","id":"moai-xvvf","kind":"create","by":"Raven","by_email":"raven@buzzni.com","title":"판을 1.0.0 으로 올리고 main 에 들인다"}
 {"ts":"2026-11-06T21:10:00Z","id":"moai-xvvf","kind":"status","by":"Raven","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-11-06T21:34:58Z","id":"moai-xvvf","kind":"note","by":"Raven","by_email":"raven@buzzni.com","text":"Next: main 머지 bd556381. Actions run 42297862274 의 tag on merge 를 관리자가 승인하면 v1.0.0 태그·릴리스·Discord 글이 나간다. 그 뒤 빌드를 확인하고 이 줄과 에픽을 닫고, .worktrees/milestone-moai-w3sx 와 milestone/moai-w3sx 가지를 걷는다."}
+{"ts":"2026-11-06T21:34:58Z","id":"moai-xvvf","kind":"note","by":"Raven","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 (medium — 릴리스 절차)"}
+{"ts":"2026-11-06T21:44:25Z","id":"moai-xvvf","kind":"status","by":"Raven","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"v1.0.0 이 나갔다: 태그 bd556381, GitHub 릴리스 파일 7개, release·smoke 성공, Discord 1/1. 받은 aarch64-apple-darwin 판은 체크섬이 맞고 moai 1.0.0 으로 돈다."}
+{"ts":"2026-11-06T21:44:25Z","id":"moai-2t6v","kind":"status","by":"Raven","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"v1.0.0 릴리스를 마쳤다."}
