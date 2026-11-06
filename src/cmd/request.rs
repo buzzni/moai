@@ -83,6 +83,8 @@ pub(crate) struct Answer {
     pub messages: Vec<String>,
     /// 덜 받은 답이다 — CLI 라면 `out` 을 다 낸 뒤 1 로 끝났다.
     pub partial: bool,
+    /// 이 요청이 못 읽은 스냅샷 줄 — `Side::unread_rows` 그대로다.
+    #[cfg_attr(not(unix), allow(dead_code, reason = "읽는 `changes` 는 유닉스에만 선다"))]
     pub unread_rows: Vec<Option<String>>,
 }
 
