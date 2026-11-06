@@ -63,6 +63,25 @@ pub fn hung_up(stream: &Stream) -> bool {
     stream.hung_up()
 }
 
+/// 시한을 건 결과. **macOS 는 건너편이 이미 닫은 소켓의 시한을 `EINVAL` 로 거절한다**(moai-3e4m, moai-t0ys) — 꽉 찬 데몬이 거절 한 줄을 쓰고
+/// 닫은 뒤에 클라이언트가 여기 오면 그 거절을 읽기도 전에 넘어져, `status` 가 `busy` 대신 "데몬이 아니다" 로 답했다. 데몬 쪽은
+/// 쓰고 곧바로 닫은 요청을 안 읽고 버렸다. 닫힌 소켓의 읽기와 쓰기는 안 막히니 시한이 없어도 된다.
+///
+/// **macOS 밖에서는 그대로 낸다.** 거기서 `InvalidInput` 은 0 시한 같은 부른 쪽의 잘못이고, 삼키면 연결이 말없이 시한 없이 돈다.
+pub fn armed(set: std::io::Result<()>) -> std::io::Result<()> {
+    match set {
+        Err(e) if cfg!(target_os = "macos") && e.kind() == std::io::ErrorKind::InvalidInput => Ok(()),
+        set => set,
+    }
+}
+
+/// 쓰기가 끊겼는가 — 건너편이 먼저 닫았다는 말이고, 닫기 전에 쓴 답은 받는 버퍼에 남아 있다. 부른 쪽은 답을 읽어 본 뒤에 판단한다.
+/// macOS 는 그 닫기와 겹친 쓰기를 `EPIPE` 말고 `ENOTCONN` 으로도 끊는다(moai-t0ys).
+pub fn broken(e: &std::io::Error) -> bool {
+    use std::io::ErrorKind::{BrokenPipe, ConnectionReset, NotConnected};
+    matches!(e.kind(), BrokenPipe | ConnectionReset | NotConnected)
+}
+
 /// 그 자리의 것이 이 사용자의 소켓인가 — 종류와 주인. 남의 파일은 지우지도 붙지도 않는다.
 #[cfg(unix)]
 pub fn is_own(_path: &Path, meta: &std::fs::Metadata) -> bool {

@@ -179,7 +179,8 @@ struct Wire {
 impl Wire {
     fn open(path: &Path) -> Wire {
         let stream = Stream::connect(path).unwrap();
-        stream.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
+        // 꽉 찬 데몬은 거절을 쓰고 곧바로 닫는다 — 그 닫기가 먼저면 macOS 는 이 시한을 거절한다.
+        transport::armed(stream.set_read_timeout(Some(Duration::from_secs(10)))).unwrap();
         Wire { reader: BufReader::new(stream.try_clone().unwrap()), writer: stream }
     }
 

@@ -146,16 +146,32 @@ pub fn pick<'a>(windows: &'a [Window], root: Option<&str>, want: Option<&str>) -
 
 #[cfg(any(unix, windows))]
 pub fn send_at(path: &Path, request: &Request) -> std::io::Result<Reply> {
+    exchange(crate::transport::Stream::connect(path)?, request)
+}
+
+/// One request and one reply. **The reply is read even when the write breaks.** A window with no free client slot writes
+/// `busy` and closes without reading (`serve`), and that refusal is still in the receive buffer. Without this a live
+/// window that filled up after `ctl` listed it read as gone (moai-t0ys.0dk).
+#[cfg(any(unix, windows))]
+fn exchange(mut stream: crate::transport::Stream, request: &Request) -> std::io::Result<Reply> {
+    use crate::transport::{armed, broken};
     use std::io::{BufRead, BufReader, Read, Write};
-    let mut stream = crate::transport::Stream::connect(path)?;
     let ms = request.deadline_ms.saturating_sub(wire::now_ms()).max(1);
-    stream.set_read_timeout(Some(Duration::from_millis(ms)))?;
-    stream.set_write_timeout(Some(Duration::from_millis(ms)))?;
+    armed(stream.set_read_timeout(Some(Duration::from_millis(ms))))?;
+    armed(stream.set_write_timeout(Some(Duration::from_millis(ms))))?;
     let mut line = serde_json::to_vec(request)?;
     line.push(b'\n');
-    stream.write_all(&line)?;
+    let cut = match stream.write_all(&line) {
+        Ok(()) => None,
+        Err(e) if broken(&e) => Some(e),
+        Err(e) => return Err(e),
+    };
     line.clear();
-    BufReader::new(stream).take(wire::LINE_MAX as u64 + 1).read_until(b'\n', &mut line)?;
+    let read = BufReader::new(stream).take(wire::LINE_MAX as u64 + 1).read_until(b'\n', &mut line);
+    if let (Some(cut), true) = (cut, line.is_empty()) {
+        return Err(cut);
+    }
+    read?;
     if line.len() > wire::LINE_MAX {
         return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "control reply exceeds 1 MiB"));
     }
@@ -200,6 +216,20 @@ mod tests {
         assert_eq!(pick(&windows, Some("/one"), None).unwrap().id, "b");
         assert_eq!(pick(&windows, Some("/one"), Some("a")).unwrap().id, "a");
         assert_eq!(pick(&windows, None, None).unwrap().id, "c");
+    }
+
+    /// A window with no free client slot writes `busy` and closes without reading the request. That refusal stays
+    /// readable, so a closed socket must not read as a window that is gone (moai-t0ys.0dk).
+    #[test]
+    #[cfg(any(unix, windows))]
+    fn a_refusal_written_before_the_close_is_read() {
+        use std::io::Write;
+        let (ours, mut theirs) = crate::transport::Stream::pair().unwrap();
+        serde_json::to_writer(&mut theirs, &Reply::error("busy", "too many control clients")).unwrap();
+        theirs.write_all(b"\n").unwrap();
+        drop(theirs);
+        let reply = exchange(ours, &wire::request(Verb::Hello, Duration::from_secs(1))).unwrap();
+        assert_eq!(reply.code.as_deref(), Some("busy"));
     }
 
     #[test]

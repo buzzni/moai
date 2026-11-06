@@ -104,7 +104,9 @@ thread_local! {
 #[cfg(unix)]
 fn ctl_never_reaches_the_runners_sockets() {
     use std::os::unix::net::UnixListener;
-    let s = Scratch::new("ctl-xdg");
+    // 소켓을 세우는 자리다 — `CTL_FENCE` 와 같은 까닭으로 `/tmp` 아래 짧게 둔다(macOS 의 상한은 104 바이트다).
+    let s = Scratch(Path::new("/tmp").join(format!("moai-xdg-{}", std::process::id())));
+    std::fs::create_dir(s.path()).unwrap();
     let xdg = s.path().join("moai");
     std::fs::create_dir(&xdg).unwrap();
     let socket = xdg.join("9999.sock");
@@ -260,7 +262,7 @@ fn ctl_lists_and_reads_an_open_explorer() {
     impl Drop for Child {
         fn drop(&mut self) {
             let _ = self.0.kill();
-            let _ = self.0.wait();
+            reap(&mut self.0);
         }
     }
     let mut child = Child(command.spawn().unwrap());
@@ -290,6 +292,7 @@ fn ctl_lists_and_reads_an_open_explorer() {
         std::thread::sleep(Duration::from_millis(30));
     }
     let id = window_id.unwrap_or_else(|| panic!("explorer did not register: {shown}"));
+    keep_reading_pty(&master);
     assert_eq!(id, format!("tui-{}", child.0.id()));
     let out = ok(s.path(), &["ctl", "state", "--json"]);
     let json: serde_json::Value = serde_json::from_str(&out).unwrap();
@@ -351,6 +354,39 @@ fn ctl_lists_and_reads_an_open_explorer() {
     assert!(!socket.exists());
 }
 
+/// 창이 뜬 뒤로도 진짜 터미널처럼 master 를 읽는다 — macOS 의 pty 는 출력 칸이 1KB 남짓이라, 안 읽으면 그리던 탐색기가
+/// `write` 에서 막혀 ctl 에 답을 못 한다(`no_window`, os error 35). 슬레이브가 닫히면 끝난다.
+#[cfg(unix)]
+fn keep_reading_pty(master: &std::fs::File) {
+    use std::io::Read;
+    let mut master = master.try_clone().unwrap();
+    std::thread::spawn(move || {
+        let mut buf = [0; 8192];
+        loop {
+            match master.read(&mut buf) {
+                Ok(0) => return,
+                Ok(_) => {}
+                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                    std::thread::sleep(std::time::Duration::from_millis(5))
+                }
+                Err(_) => return,
+            }
+        }
+    });
+}
+
+/// 죽인 pty 자식을 기다린다 — **시한이 있다.** macOS 는 안 읽은 출력이 pty 에 남으면 master 가 닫힐 때까지 프로세스가 끝나기를
+/// 미룬다. master 는 이 값보다 늦게 떨어져, 막는 `wait` 는 시험을 영영 안 끝냈다(moai-3e4m).
+#[cfg(unix)]
+fn reap(child: &mut std::process::Child) {
+    for _ in 0..40 {
+        if !matches!(child.try_wait(), Ok(None)) {
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+}
+
 #[cfg(unix)]
 struct ProposalPtyChild(std::process::Child);
 
@@ -358,7 +394,7 @@ struct ProposalPtyChild(std::process::Child);
 impl Drop for ProposalPtyChild {
     fn drop(&mut self) {
         let _ = self.0.kill();
-        let _ = self.0.wait();
+        reap(&mut self.0);
     }
 }
 
@@ -422,6 +458,7 @@ fn proposal_pty(name: &str) -> (Scratch, std::fs::File, ProposalPtyChild) {
         }
         let windows = json_of(&ok(scratch.path(), &["ctl", "ls", "--json"]));
         if windows["windows"].as_array().is_some_and(|rows| !rows.is_empty()) {
+            keep_reading_pty(&master);
             return (scratch, master, child);
         }
         std::thread::sleep(Duration::from_millis(30));
@@ -30228,7 +30265,7 @@ fn init_screen_defaults_install_the_hooks_and_skills() {
     impl Drop for Child {
         fn drop(&mut self) {
             let _ = self.0.kill();
-            let _ = self.0.wait();
+            reap(&mut self.0);
         }
     }
     let mut child = Child(command.spawn().unwrap());

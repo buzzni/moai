@@ -264,8 +264,7 @@ fn inherited_tmux_uses_stdout_device_and_skips_queries_without_pictures() {
             },
             0
         );
-        // Tests in this binary spawn children in parallel; a child that inherited the slave would hold off the
-        // master's end of file until it exits.
+        // Tests in this binary spawn children in parallel; keep the pty out of the ones that are not its own.
         for fd in [master, slave] {
             // SAFETY: fd is one of the descriptors openpty just returned.
             unsafe { libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC) };
@@ -291,7 +290,12 @@ fn inherited_tmux_uses_stdout_device_and_skips_queries_without_pictures() {
         }
         let status = cmd.status().unwrap();
         assert!(status.success());
-        drop(cmd);
+        {
+            use std::os::fd::AsRawFd;
+            // `cmd` still holds the slave, so a blocking read here would never see the end.
+            // SAFETY: master is a live descriptor.
+            assert_ne!(unsafe { libc::fcntl(master.as_raw_fd(), libc::F_SETFL, libc::O_NONBLOCK) }, -1);
+        }
         let mut bytes = Vec::new();
         let mut chunk = [0; 4096];
         loop {
@@ -300,6 +304,8 @@ fn inherited_tmux_uses_stdout_device_and_skips_queries_without_pictures() {
                 Ok(n) => bytes.extend_from_slice(&chunk[..n]),
             }
         }
+        // macOS drops unread output when the last slave closes, so read before `cmd` lets go of it.
+        drop(cmd);
         String::from_utf8(bytes).unwrap()
     };
     let other = |_: &str| "/dev/null".to_owned();
