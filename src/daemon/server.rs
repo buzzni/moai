@@ -791,7 +791,8 @@ mod tests {
         assert!(writer.finished("slow_write"), "쓰기가 끝나기 전에 돌아왔다");
         // 돌아왔을 때 답은 이미 소켓에 있다 — 실제 데몬이라면 여기서 끝나도 받는다.
         #[cfg(unix)]
-        writing.writer.shutdown(std::net::Shutdown::Write).unwrap();
+        // macOS 는 건너편이 떠난 소켓에 `ENOTCONN` 으로 답한다 — 답을 읽는 데는 상관없다.
+        let _ = writing.writer.shutdown(std::net::Shutdown::Write);
         assert_eq!(writing.answer().expect("쓰기의 답")["result"], "written");
     }
 

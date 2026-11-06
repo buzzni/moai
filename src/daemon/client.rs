@@ -88,8 +88,8 @@ pub fn call(path: &Path, method: &str, params: Value) -> std::io::Result<Result<
 }
 
 fn request(stream: &mut Stream, method: &str, params: Value) -> std::io::Result<Result<Value, RpcError>> {
-    stream.set_read_timeout(Some(TIMEOUT))?;
-    stream.set_write_timeout(Some(TIMEOUT))?;
+    armed(stream.set_read_timeout(Some(TIMEOUT)))?;
+    armed(stream.set_write_timeout(Some(TIMEOUT)))?;
     let line = json!({ "jsonrpc": "2.0", "id": 1, "method": method, "params": params });
     // **쓰기가 끊겨도 답을 읽어 본다.** 꽉 찬 데몬은 요청을 읽지 않고 `busy` 한 줄을 쓰고 닫는다 — 그 닫기가 이
     // 쓰기보다 먼저면 쓰기는 EPIPE 로 끊기지만, 그 거절은 이미 받는 버퍼에 와 있다(moai-uezh).
@@ -118,6 +118,16 @@ fn request(stream: &mut Stream, method: &str, params: Value) -> std::io::Result<
     match reply.get("result") {
         Some(result) => Ok(Ok(result.clone())),
         None => Err(bad("the answer carries neither result nor error")),
+    }
+}
+
+/// 시한을 건 결과. **macOS 는 건너편이 이미 닫은 소켓의 시한을 `EINVAL` 로 거절한다**(moai-3e4m) — 꽉 찬 데몬이 거절 한 줄을 쓰고
+/// 닫은 뒤에 여기 오면 그 거절을 읽기도 전에 넘어져, `status` 가 `busy` 대신 "데몬이 아니다" 로 답했다. 닫힌 소켓의 읽기와
+/// 쓰기는 안 막히니 시한이 없어도 된다.
+fn armed(set: std::io::Result<()>) -> std::io::Result<()> {
+    match set {
+        Err(e) if e.kind() == std::io::ErrorKind::InvalidInput => Ok(()),
+        set => set,
     }
 }
 
