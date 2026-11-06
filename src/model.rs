@@ -1190,6 +1190,10 @@ pub fn someone(name: &str) -> Actor {
 
 /// 누가 하는가. `--user` → `MOAI_ACTOR` → `git config user.name`+`user.email`.
 ///
+/// **요청은 `MOAI_ACTOR` 를 건너뛴다**(moai-wbdh.sbd, moai-3hgm.k7s) — `request::answer` 가 통에
+/// `Side::ignore_env_actor` 를 세운다. 요청의 `actor` → 그 프로젝트의
+/// git 설정 → 없으면 멈춘다. 데몬의 환경은 그것을 띄운 셸의 것이라 요청을 보낸 쪽이 누구인지 말해 주지 않는다.
+///
 /// 셋 다 없으면 **멈춘다.** 예전에는 `unknown` 으로 적었는데, 그렇게 쌓인 줄은
 /// 나중에 누구도 되짚지 못한다 — 이력이 남는 것이 목적인 파일에 이름 없는 줄을
 /// 채우느니 한 번 물어보는 편이 싸다. 막는 것은 *사람을 부르는 게이트가 아니라*
@@ -1233,6 +1237,9 @@ pub fn actor(flag: Option<&str>, root: &Path) -> Result<Actor, NoActor> {
     if let Some(raw) = flag.map(str::trim) {
         return Actor::parse(raw).ok_or_else(|| malformed("--user", raw));
     }
+    // 요청은 이 프로세스의 환경을 안 읽는다 — 읽으면 데몬을 띄운 사람이 요청마다 저널에 적히고, 읽기의
+    // `ready` 도 그 사람으로 내 것과 남의 것을 가른다. `hook::record_own_picks` 가 같은 까닭으로
+    // `CLAUDE_CODE_SESSION_ID` 를 안 읽는다(moai-3hgm.25e, moai-wbdh.sbd). 통이 없는 CLI 는 그대로다.
     if !crate::side::with(|s| s.ignore_env_actor).unwrap_or(false)
         && let Ok(raw) = std::env::var("MOAI_ACTOR")
         && !raw.trim().is_empty()

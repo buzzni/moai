@@ -8,6 +8,8 @@
 //!   처리 함수에 간다. 모르는 필드는 무시한다 — 새 클라이언트가 옛 데몬을 넘어뜨리지 않게.
 //! - 알림(`id` 없음)은 받되 아무것도 돌리지 않고 답하지 않는다. 배치(배열)는 -32600.
 
+use serde::Serialize;
+use serde_json::value::RawValue;
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
 use std::io::BufRead;
@@ -73,11 +75,34 @@ impl RequestEnv {
     }
 }
 
-pub type Handler = Box<dyn Fn(&RequestEnv, Value) -> Result<Value, RpcError> + Send + Sync>;
+/// 메서드가 돌려주는 결과 — 이미 쓰인 JSON 글 그대로다. `Value` 로 거치면 객체 키가 abc 차례로 바뀌어(`preserve_order`
+/// 가 꺼져 있다) CLI 가 낸 바이트를 잃는다. `RawValue` 는 글을 파싱만 하고 그대로 싣는다(moai-3hgm.whp).
+pub type Reply = Box<RawValue>;
+
+/// 직렬화할 수 있는 값을 [`Reply`] 로 쓴다. 키 차례는 그 값의 직렬화가 정한 차례다.
+pub fn reply(value: &impl Serialize) -> Result<Reply, RpcError> {
+    serde_json::value::to_raw_value(value).map_err(|e| RpcError::new(code::INTERNAL, e.to_string()))
+}
+
+/// 한 줄의 JSON 글을 파싱만 하고 바이트 그대로 [`Reply`] 로 쓴다. JSON 이 아니면 `None`.
+pub fn raw_line(line: &str) -> Option<Reply> {
+    RawValue::from_string(line.to_string()).ok()
+}
+
+pub type Handler = Box<dyn Fn(&RequestEnv, Value) -> Result<Reply, RpcError> + Send + Sync>;
+
+/// 단 메서드 하나 — 처리 함수와, 그것이 트래커를 바꾸는가.
+struct Entry {
+    handler: Handler,
+    /// 쓰기 메서드다. 멈추는 데몬은 돌던 쓰기를 끝까지 기다리고 읽기는 `DRAIN` 까지만 기다린다(사람의 결정 B,
+    /// moai-3hgm). 그 갈림을 전송(`server`)이 알아야 해 메서드를 달 때 받는다 — 이름으로 가리는 표를 따로 두면
+    /// 새 쓰기 메서드가 그 표를 빠뜨려 말없이 읽기로 끊긴다.
+    write: bool,
+}
 
 /// 메서드 이름 → 처리 함수.
 pub struct Methods {
-    table: BTreeMap<String, Handler>,
+    table: BTreeMap<String, Entry>,
 }
 
 impl Default for Methods {
@@ -91,7 +116,7 @@ impl Methods {
     pub fn new() -> Self {
         let mut methods = Self { table: BTreeMap::new() };
         methods.register("hello", hello);
-        methods.register("ping", |_, _| Ok(json!({})));
+        methods.register("ping", |_, _| reply(&json!({})));
         methods
     }
 
@@ -101,46 +126,69 @@ impl Methods {
         self.table.keys().map(String::as_str).collect()
     }
 
+    /// 읽기 메서드를 단다.
     pub fn register(
         &mut self,
         name: &str,
-        handler: impl Fn(&RequestEnv, Value) -> Result<Value, RpcError> + Send + Sync + 'static,
+        handler: impl Fn(&RequestEnv, Value) -> Result<Reply, RpcError> + Send + Sync + 'static,
     ) {
-        self.table.insert(name.to_string(), Box::new(handler));
+        self.table.insert(name.to_string(), Entry { handler: Box::new(handler), write: false });
+    }
+
+    /// 쓰기 메서드를 단다 — 멈추는 데몬이 돌던 이 요청을 시한 없이 끝까지 기다린다([`Entry::write`]).
+    pub fn register_write(
+        &mut self,
+        name: &str,
+        handler: impl Fn(&RequestEnv, Value) -> Result<Reply, RpcError> + Send + Sync + 'static,
+    ) {
+        self.table.insert(name.to_string(), Entry { handler: Box::new(handler), write: true });
     }
 
     /// 줄 하나(끝의 개행은 있어도 없어도 된다)를 처리해 답할 줄을 돌려준다. 알림이면 `None`.
+    #[cfg(test)]
     pub fn handle(&self, line: &[u8]) -> Option<String> {
+        match self.prepare(line) {
+            Prepared::Answered(answer) => answer,
+            Prepared::Call(call) => Some(call.run()),
+        }
+    }
+
+    /// 줄 하나를 파싱해 부를 처리 함수까지 찾는다 — 부르지는 않는다. 둘로 가른 까닭: 전송이 그 사이에서 요청을
+    /// 세어 들인다(`server` 의 `Work::admit`). 쓰기인지는 메서드를 찾아야 알고, 들이지 않은 요청은 처리 함수에
+    /// 닿지 않아야 한다(moai-3hgm.uz0).
+    pub fn prepare(&self, line: &[u8]) -> Prepared<'_> {
         if line.len() > LINE_MAX {
-            return Some(too_long());
+            return Prepared::Answered(Some(too_long()));
         }
         let value: Value = match serde_json::from_slice(line) {
             Ok(value) => value,
             Err(e) => {
-                return Some(failure(&Value::Null, &RpcError::new(code::PARSE_ERROR, format!("parse error: {e}"))));
+                let error = RpcError::new(code::PARSE_ERROR, format!("parse error: {e}"));
+                return Prepared::Answered(Some(failure(&Value::Null, &error)));
             }
         };
-        self.handle_value(value)
+        self.prepare_value(value)
     }
 
-    fn handle_value(&self, value: Value) -> Option<String> {
+    fn prepare_value(&self, value: Value) -> Prepared<'_> {
+        let answered = |id: &Value, error: RpcError| Prepared::Answered(Some(failure(id, &error)));
         let Value::Object(object) = value else {
             let why = if value.is_array() { "batch requests are not supported" } else { "request must be an object" };
-            return Some(failure(&Value::Null, &RpcError::new(code::INVALID_REQUEST, why)));
+            return answered(&Value::Null, RpcError::new(code::INVALID_REQUEST, why));
         };
         // id 는 문자열·숫자·null 만 되고, 없으면 알림이다. 되돌려 줄 수 없는 id 는 null 로 답한다.
         let id = match object.get("id") {
             None => None,
             Some(id @ (Value::String(_) | Value::Number(_) | Value::Null)) => Some(id.clone()),
             Some(_) => {
-                return Some(failure(
+                return answered(
                     &Value::Null,
-                    &RpcError::new(code::INVALID_REQUEST, "id must be a string, number or null"),
-                ));
+                    RpcError::new(code::INVALID_REQUEST, "id must be a string, number or null"),
+                );
             }
         };
         let reply_id = id.clone().unwrap_or(Value::Null);
-        let invalid = |why: &str| Some(failure(&reply_id, &RpcError::new(code::INVALID_REQUEST, why)));
+        let invalid = |why: &str| answered(&reply_id, RpcError::new(code::INVALID_REQUEST, why));
         if object.get("jsonrpc") != Some(&json!("2.0")) {
             return invalid("jsonrpc must be \"2.0\"");
         }
@@ -152,18 +200,64 @@ impl Methods {
             return invalid("params must be an object or an array");
         }
         // 알림: 받았다는 것까지만 — 아무것도 돌리지 않고 답하지 않는다.
-        let id = id?;
-        let Some(handler) = self.table.get(method) else {
-            return Some(failure(&id, &RpcError::new(code::METHOD_NOT_FOUND, format!("method not found: {method}"))));
+        let Some(id) = id else { return Prepared::Answered(None) };
+        let Some(entry) = self.table.get(method) else {
+            return answered(&id, RpcError::new(code::METHOD_NOT_FOUND, format!("method not found: {method}")));
         };
+        Prepared::Call(Call { id, entry, params })
+    }
+}
+
+/// [`Methods::prepare`] 의 결과.
+pub enum Prepared<'a> {
+    /// 처리 함수 없이 정해진 답 — 틀린 요청·없는 메서드·상한을 넘은 줄. `None` 은 알림이라 답하지 않는다.
+    Answered(Option<String>),
+    /// 처리 함수를 부를 요청 — 부르는 것은 [`Call::run`].
+    Call(Call<'a>),
+}
+
+/// 파싱을 마치고 처리 함수를 찾은 요청 하나. 아직 아무것도 돌리지 않았다.
+pub struct Call<'a> {
+    id: Value,
+    entry: &'a Entry,
+    params: Value,
+}
+
+impl Call<'_> {
+    /// 쓰기 메서드를 부르는가([`Methods::register_write`]).
+    pub fn writes(&self) -> bool {
+        self.entry.write
+    }
+
+    /// 처리 함수를 돌려 답할 줄을 쓴다. 처리 함수가 터져도 답한다(`-32603`).
+    pub fn run(self) -> String {
+        let Call { id, entry, params } = self;
         let env = RequestEnv::from_params(&params);
-        let ran = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| handler(&env, params)));
-        Some(match ran {
-            Ok(Ok(result)) => json!({ "jsonrpc": "2.0", "id": id, "result": result }).to_string(),
+        let ran = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| (entry.handler)(&env, params)));
+        match ran {
+            Ok(Ok(result)) => success(&id, &result),
             Ok(Err(e)) => failure(&id, &e),
             Err(_) => failure(&id, &RpcError::new(code::INTERNAL, "internal error")),
-        })
+        }
     }
+
+    /// 돌리지 않고 거절하는 답 — 이 요청의 `id` 를 싣는다.
+    pub fn refuse(&self, error: &RpcError) -> String {
+        failure(&self.id, error)
+    }
+}
+
+/// 성공 답 한 줄. `result` 는 [`Reply`] 의 바이트가 그대로 들어간다(키 차례를 안 바꾼다).
+fn success(id: &Value, result: &RawValue) -> String {
+    #[derive(Serialize)]
+    struct Success<'a> {
+        id: &'a Value,
+        jsonrpc: &'static str,
+        result: &'a RawValue,
+    }
+    // 이 글은 `Value`·`RawValue` 뿐이라 직렬화가 실패할 길이 없다. 그래도 터뜨리지 않고 오류 답으로 바꾼다.
+    serde_json::to_string(&Success { id, jsonrpc: "2.0", result })
+        .unwrap_or_else(|e| failure(id, &RpcError::new(code::INTERNAL, e.to_string())))
 }
 
 fn failure(id: &Value, error: &RpcError) -> String {
@@ -190,7 +284,7 @@ pub fn too_long() -> String {
 /// `hello` — 클라이언트가 `proto` 를 말하고, 데몬은 제 `proto` 와 바이너리 판, 프로세스 번호(`pid`)를 답한다.
 /// `pid` 는 `moai daemon status`·`stop` 이 대는 값이다 — 거절하는 답의 `data` 에도 싣는다.
 /// 옛 `proto` 는 받는다(데몬이 더 새로우면 옛 클라이언트의 말을 알아듣는다). 새 `proto` 는 거절한다.
-fn hello(_: &RequestEnv, params: Value) -> Result<Value, RpcError> {
+fn hello(_: &RequestEnv, params: Value) -> Result<Reply, RpcError> {
     let proto = params
         .get("proto")
         .and_then(Value::as_u64)
@@ -208,7 +302,7 @@ fn hello(_: &RequestEnv, params: Value) -> Result<Value, RpcError> {
         );
         return Err(error);
     }
-    Ok(json!({ "proto": PROTO, "version": env!("CARGO_PKG_VERSION"), "pid": std::process::id() }))
+    reply(&json!({ "proto": PROTO, "version": env!("CARGO_PKG_VERSION"), "pid": std::process::id() }))
 }
 
 /// 줄 읽기의 결과.
@@ -227,7 +321,13 @@ pub fn read_line<R: BufRead>(reader: &mut R) -> std::io::Result<Line> {
     let mut line = Vec::new();
     let mut over = false;
     loop {
-        let buf = reader.fill_buf()?;
+        // 신호에 끊긴 읽기는 다시 읽는다 — 시한을 건 소켓 읽기는 `SA_RESTART` 로도 다시 안 돈다(signal(7)). 넘기면 반쯤
+        // 읽은 요청이 답 없이 끊긴다(리뷰 moai-3hgm.vjv.yqs 6번).
+        let buf = match reader.fill_buf() {
+            Ok(buf) => buf,
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(e) => return Err(e),
+        };
         if buf.is_empty() {
             return Ok(if over {
                 Line::TooLong
@@ -263,6 +363,21 @@ mod tests {
 
     fn call(methods: &Methods, text: &str) -> Value {
         serde_json::from_str(&methods.handle(text.as_bytes()).expect("a reply")).unwrap()
+    }
+
+    #[test]
+    fn a_read_cut_by_a_signal_is_read_again() {
+        struct Cut(bool, &'static [u8]);
+        impl std::io::Read for Cut {
+            fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+                if std::mem::take(&mut self.0) {
+                    return Err(std::io::ErrorKind::Interrupted.into());
+                }
+                std::io::Read::read(&mut self.1, buf)
+            }
+        }
+        let mut reader = std::io::BufReader::new(Cut(true, b"{\"a\":1}\n"));
+        assert_eq!(read_line(&mut reader).unwrap(), Line::Text(b"{\"a\":1}".to_vec()));
     }
 
     fn code_of(reply: &Value) -> i64 {
@@ -349,7 +464,7 @@ mod tests {
         let flag = ran.clone();
         methods.register("touch", move |_, _| {
             flag.store(true, std::sync::atomic::Ordering::SeqCst);
-            Ok(json!(null))
+            reply(&json!(null))
         });
         assert_eq!(methods.handle(br#"{"jsonrpc":"2.0","method":"touch"}"#), None);
         assert!(!ran.load(std::sync::atomic::Ordering::SeqCst));
@@ -389,7 +504,7 @@ mod tests {
     #[test]
     fn the_env_comes_from_params_and_moai_failures_carry_the_cli_code() {
         let mut methods = Methods::new();
-        methods.register("env", |env, _| Ok(json!([env.project, env.actor, env.lang, env.tz])));
+        methods.register("env", |env, _| reply(&json!([env.project, env.actor, env.lang, env.tz])));
         methods.register("gone", |_, _| Err(RpcError::moai("not_found", "no such issue")));
         methods.register("boom", |_, _| panic!("handler bug"));
         let reply = call(

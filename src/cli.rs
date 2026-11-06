@@ -2697,7 +2697,8 @@ pub struct EditArgs {
     pub if_unplanned: bool,
 }
 
-fn expected_day(s: &str) -> Result<String, String> {
+/// `edit --if-start`·`--if-due` 의 값 — 데몬의 `edit` 메서드도 같은 자로 읽는다(moai-3hgm.k7s).
+pub(crate) fn expected_day(s: &str) -> Result<String, String> {
     if s == "none" || crate::model::parse_date(s).is_some() {
         Ok(s.to_string())
     } else {
@@ -2709,8 +2710,11 @@ fn expected_day(s: &str) -> Result<String, String> {
 /// `Issue::shifted` 의 덧셈이 넘친다: 시험 판(overflow-checks)은 쓰기 안에서 넘어지고, 릴리스 판은 돌아 아무도 안 친
 /// 해를 거절문에 댄다. 여섯 자리는 이천칠백 해 남짓이라 손으로 옮길 날은 다 든다.
 fn shift_days() -> clap::builder::RangedI64ValueParser<i64> {
-    clap::value_parser!(i64).range(-999_999..=999_999)
+    clap::value_parser!(i64).range(SHIFT_DAYS)
 }
+
+/// [`shift_days`] 의 폭 — 데몬의 `edit` 메서드가 clap 없이 같은 폭으로 잰다(moai-3hgm.k7s).
+pub(crate) const SHIFT_DAYS: std::ops::RangeInclusive<i64> = -999_999..=999_999;
 
 #[derive(Args, Debug)]
 pub struct DeferArgs {

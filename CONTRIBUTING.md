@@ -205,23 +205,38 @@ know of. The list is not complete:
 Moving that state into a per-call context changes logic, so it is its own epic, with
 the same gates as below. Until it is done, do not build a daemon on this crate.
 
-**The one exception is the crate-internal read entry** (`cmd::request::read`,
-moai-5n6m.m0b). It runs `status`, `ready`, `prime`, `show`, `stats` and `project ls`
-for one request, through the same `cmd::*::run` functions the CLI calls, and is safe to
-call from several threads at once:
+**The one exception is the crate-internal request entries** (`cmd::request::read`,
+moai-5n6m.m0b, and `cmd::request::write`, moai-3hgm.25e). `read` runs `status`, `ready`,
+`prime`, `show`, `stats` and `project ls`, and `write` runs `add` (and the typed `add`s),
+`mv`, `edit`, `note`, `defer`, `rm` and `link`, for one request, through the same
+`cmd::*::run` functions the CLI calls. Both are safe to call from several threads at once:
 
 - It does not move the working directory. The request names its project root, and the
   read path asks `side::cwd()` instead of `std::env::current_dir`. The answer is what
   `moai -C <root> --json <command>` gives when run from that root.
 - The notices, the partial flag and the climbed and unread places of that request go
   into its own `side::Side`, which the entry hangs on the calling thread for the length
-  of the call. `projects::each` hands it to the threads it starts. Without a hung `Side`
-  (the CLI) every one of them goes where it went before, so CLI output is unchanged.
-- The language, the time zone and the actor come with the request. What the request
-  leaves out still comes from the environment and the user config.
+  of the call. So do what a write leaves behind: the chosen exit code (`EXIT`), the
+  carried-row tally (`TALLY`), the missed and noted journal lines (`MISSED`, `NOTED`) and
+  the worktree redirects (`MOVED`). The answer carries the messages the end of `run()`
+  would print, in its order, and the exit code it would choose. `projects::each` hands
+  the `Side` to the threads it starts. Without a hung `Side` (the CLI) every one of them
+  goes where it went before, so CLI output is unchanged.
+- A write request has no stdin and no argv. With a `Side` hung, a `-` in a text field is
+  that text, reading stdin (`add --from -`) is refused at once, a plan file is not read,
+  and `refuse_if_flag_like` does not run (it scans the process arguments).
+- The language, the time zone and the actor come with the request. A language or time
+  zone the request leaves out still comes from the environment and the user config. An
+  actor it leaves out comes from the project's git config only: with a `Side` hung,
+  `model::actor` skips `MOAI_ACTOR` (moai-3hgm.k7s), which belongs to whatever shell
+  started the process, not to the request.
 - The caller makes one call per request and does not start threads of its own that call
   into moai inside it. Anything called outside the entry still uses the process-wide
-  state listed above. The write path (`MOVED`, `TALLY`, `MISSED`, `NOTED`) is not covered.
+  state listed above. The write path still reads `MOAI_NOW` from the process
+  environment. It does not read `MOAI_HERE`: with a `Side` hung, `store::here_wanted`
+  is false (moai-3hgm.puw), so a request to a linked worktree goes to the main
+  checkout's tracker. It records no session pick-ups: the process's
+  `CLAUDE_CODE_SESSION_ID` belongs to whatever shell started it, not to the request.
 
 **How a refactor that must not change behaviour is gated.** The split into library and
 binary merged only after three tools in `scripts/` reported no change. Use them again for

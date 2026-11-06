@@ -100,16 +100,18 @@
     `ready` 의 `others` 가 비고 출력이 바이트째 그대로다. 담당 없는 줄(`-a none`, 담당이 생기기
     전의 옛 줄)은 한 사람 저장소에서도 내 것이 아니라서 `others` 로 가고 규칙 5 에 걸린다
   되돌리려면 이 절과 규칙 5 를 함께 걷는다. 한쪽만 걷으면 글과 훅이 다른 말을 한다.
-- **데몬은 CLI 옆에 서고, 끝에는 CLI 가 데몬을 부른다**(2026-11-04 사용자 결정, `moai-5n6m`·
-  `moai-b0ac`). 서드파티가 붙을 길로 데몬(`moai daemon`, `docs/daemon.md`)을 더했다. 최종 구조는
-  CLI 가 데몬의 클라이언트가 되는 것이지만, 그때까지는 CLI 가 사람이 쓰는 주된 인터페이스다.
-  - **중간 단계에서 CLI 는 최대한 건드리지 않고 기능을 100% 보전한다.** 데몬 일이 CLI 가 타는
-    코드(`store`·`cmd`·`lib`)를 고쳐야 하면 꼭 필요한 만큼만 고치고, CLI 출력이 바이트째 같아야
-    한다. 데몬이 거는 요청의 통(`side`)이 그 꼴이다 — 통이 안 걸린 CLI 는 옛 길을 그대로 탄다
+- **데몬은 CLI 옆에 선다. CLI 는 데몬을 부르지 않는다**(2026-11-06 사용자 결정, `moai-b0ac`). 서드파티가 붙을
+  길로 데몬(`moai daemon`, `docs/daemon.md`)을 더했고, CLI 는 계속 `.moai` 를 직접 읽고 쓴다. CLI 의 안정성이
+  먼저다 — 실행 경로를 하나로 모으는 이득보다 CLI 가 흔들릴 위험이 크다. 2026-11-04 에 "끝에는 CLI 가 데몬의
+  클라이언트가 된다" 로 정했던 것을 이 결정으로 걷었다.
+  - **`moai web` 은 다르다.** 나중에 데몬 위로 옮긴다(`moai-7cuc`)
+  - **CLI 는 최대한 건드리지 않고 기능을 100% 보전한다.** 데몬 일이 CLI 가 타는 코드(`store`·`cmd`·`lib`)를
+    고쳐야 하면 꼭 필요한 만큼만 고치고, CLI 출력이 바이트째 같아야 한다. 데몬이 거는 요청의 통(`side`)이 그
+    꼴이다 — 통이 안 걸린 CLI 는 옛 길을 그대로 탄다
   - 그 고침이 최소인가는 에픽 끝 리뷰의 관점에 든다
-  - CLI 를 데몬의 클라이언트로 바꾸는 것은 데몬이 모든 명령을 CLI 와 같게 낸다는 시험이 선
-    뒤다 — 명령 훑기(`every_cli_command_is_served_or_listed_as_not_served`)와 CLI 견주기
-    (`the_read_methods_answer_as_the_cli_does`, `moai-5n6m.cb9`)가 그 안전망이다
+  - 명령 훑기(`every_cli_command_is_served_or_listed_as_not_served`)와 CLI 견주기
+    (`the_read_methods_answer_as_the_cli_does`, `the_write_methods_write_what_the_cli_writes`)는 남는다 — 서드파티가
+    CLI 와 같은 답을 받는다는 약속을 지킨다
 
 ## 예산
 

@@ -1022,9 +1022,12 @@ const OTHER_AGENT_SESSIONS: [&str; 2] = ["CODEX_THREAD_ID", "ANTIGRAVITY_CONVERS
 /// 세션이 남의 줄을 붙들고 규칙 1 로 막았다). 그 에이전트가 제 셸에 세우는 표([`OTHER_AGENT_SESSIONS`])로 가르고,
 /// 빈 값은 없는 것이다(환경변수의 관례). 물려받은 값이 남는 길은 하나 더 있다 — Claude 세션의 셸에서 띄운 tmux 서버의
 /// 칸이다. 거기서 사람이 친 집기는 그 세션의 것으로 적힌다.
+///
+/// **요청의 통이 걸렸으면 안 적는다**(`crate::side`, moai-3hgm.25e) — 요청은 세션의 셸이 아니다. 데몬의 환경은 그것을
+/// 띄운 셸의 것이라, Claude 세션에서 띄운 데몬이면 그 뒤 모든 요청의 집기가 그 세션의 것으로 적힌다(위 Codex 와 같은 꼴).
 pub(crate) fn record_own_picks(repo: &Repo, ids: &[String]) {
     let other_agent = OTHER_AGENT_SESSIONS.iter().any(|k| std::env::var_os(k).is_some_and(|v| !v.is_empty()));
-    if ids.is_empty() || other_agent {
+    if ids.is_empty() || other_agent || crate::side::hung() {
         return;
     }
     let Some(sid) = std::env::var("CLAUDE_CODE_SESSION_ID").ok().as_deref().and_then(safe_sid_of) else { return };

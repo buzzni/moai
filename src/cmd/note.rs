@@ -84,7 +84,6 @@ pub(crate) fn append(
     text: &str,
     by: &model::Actor,
 ) -> R<JournalEntry> {
-    let entry = JournalEntry::note(id, text, &model::now(), by);
     // **말은 락 밖에서 한 번 푼다**(리뷰 moai-t6z9.bd6 11번, `edit` 이 이미 그 꼴이다).
     // 닫힘 안에서 `ctx.lang()` 을 처음 부르면 그 첫 부름이 사용자 설정을 여는데, 그 자리는
     // `.moai/lock` 을 쥔 채다 — `with_write` 가 `lang` 을 **묻는 길**로 받는 까닭이 그것이라
@@ -96,10 +95,12 @@ pub(crate) fn append(
             if !issues.iter().any(|i| i.id == id) && !reserved.contains(id) {
                 return Err(Fail::not_found(id, lang));
             }
-            Ok((vec![entry.clone()], ()))
+            // **시각은 락을 쥔 뒤에 뜬다**(moai-3hgm.pp2, `mv` 의 리뷰 moai-u5bk.3wq 와 한 자). 밖에서 뜨면 락을 최대
+            // 5초 기다린 노트가 그 사이 옆이 적은 줄보다 이른 도장으로 저널에 서서, 이력의 차례가 쓴 차례와 갈린다.
+            let entry = JournalEntry::note(id, text, &model::now(), by);
+            Ok((vec![entry.clone()], entry))
         },
-    )?;
-    Ok(entry)
+    )
 }
 
 /// 빈 메모는 이력을 더럽히기만 한다. `defer` 의 빈 까닭을 안 적기로 한 것과

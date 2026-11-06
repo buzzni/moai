@@ -11,7 +11,7 @@
 //!
 //!     params: { "project": "<q16 이 푼다>", "cursor": "<이전 답의 cursor>"? }
 //!     result: { "value": { "cursor": "...", "changed": ["<id>", …], "removed": ["<id>", …], "reset": false },
-//!               "messages": [...], "partial": false }
+//!               "exit": 0, "messages": [...], "partial": false }
 //!
 //! - **"전부 읽기" 는 `show` 에 `all: true` 하나만 준 것이다**(같은 `project`, 다른 거르개·쪽 없이). `changes` 가 견주는
 //!   목록이 바로 그것이다 — `reset: true` 를 받으면 클라이언트는 그 목록을 다시 읽고 이 답의 `cursor` 로 이어 간다.
@@ -24,7 +24,7 @@
 //! - `cursor` 는 불투명 글이다 — 안에 데몬 인스턴스의 표식과 견준 스냅샷의 지문이 든다. 못 읽거나, 다른 데몬(다시
 //!   띄운 데몬 포함)의 것이거나, 기억에서 밀려난 지문이면 오류가 아니라 `reset: true` 다. `cursor` 를 안 주면 `reset:
 //!   true` 와 첫 커서를 낸다. `reset` 이면 두 목록은 비었다
-//! - 봉투의 `messages`·`partial` 은 읽기 메서드와 같다 — 목록을 읽다 만난 못 읽는 줄·못 읽은 저널 파일을 CLI 의 말로
+//! - 봉투의 `exit`·`messages`·`partial` 은 읽기 메서드와 같다 — 목록을 읽다 만난 못 읽는 줄·못 읽은 저널 파일을 CLI 의 말로
 //!   대고, CLI 라면 1 로 끝났을 판이면 `partial` 이다. **못 읽은 저널 파일은 `reset` 을 세우지 않는다** — 다시 읽어도
 //!   그 파일은 못 읽으니 `reset` 은 아무것도 되찾지 못한다. 그 파일의 노트는 읽을 수 있게 될 때까지 안 서고, 읽히는
 //!   판에 그 id 가 `changed` 에 선다. 못 읽은 스냅샷 줄의 지문은 앞 판에서 보존한다.
@@ -36,7 +36,7 @@
 //! 그것을 가리키는 커서를 막 내준 참이다. 기억은 프로세스의 것이라 데몬을 다시 띄우면 비고, 옛 커서는 인스턴스
 //! 표식이 달라 `reset` 이다(2026-11-04 사람이 받아들인 대가). 스냅샷에도 저널에도 아무것도 안 쓴다.
 
-use super::rpc::RpcError;
+use super::rpc::{Reply, RpcError};
 use crate::cmd::request::Request;
 use crate::daemon::diff::{Changes, Seen};
 use crate::i18n::Lang;
@@ -186,12 +186,10 @@ fn decode<'c>(cursor: &'c str, instance: &str) -> Option<&'c str> {
 }
 
 /// 메서드 몸통 — `whole` 은 부르는 쪽이 지은 "전부 읽기"(`show` 에 `all: true`)의 요청, `lang` 은 요청의 화면 말이다.
-/// 읽기 메서드와 같은 봉투(`{value, messages, partial}`)로 낸다.
-pub(crate) fn handle(memory: &Memory, whole: Request, lang: Lang, cursor: Option<&str>) -> Result<Value, RpcError> {
+/// 읽기 메서드와 같은 봉투(`{exit, messages, partial, value}`)로 낸다.
+pub(crate) fn handle(memory: &Memory, whole: Request, lang: Lang, cursor: Option<&str>) -> Result<Reply, RpcError> {
     let polled = poll(memory, whole, lang, cursor)?;
-    let value =
-        serde_json::to_value(polled.changes).map_err(|e| RpcError::new(super::rpc::code::INTERNAL, e.to_string()))?;
-    Ok(serde_json::json!({ "value": value, "messages": polled.messages, "partial": polled.partial }))
+    super::read::envelope(&polled.changes, &polled.messages, polled.partial, polled.exit)
 }
 
 /// 한 번의 폴링 — 순수 함수의 답과, 읽다가 곁에 남은 것(CLI 라면 stderr 줄과 종료 코드 1).
@@ -199,6 +197,9 @@ pub(crate) struct Polled {
     pub changes: Changes,
     pub messages: Vec<String>,
     pub partial: bool,
+    /// CLI 에 짝이 없는 메서드라 "CLI 가 고를 코드" 는 목록 읽기(`show --all`)의 것이고, 노트를 못 다 읽었으면 1 이다 —
+    /// 읽기 메서드의 `exit` 와 같은 자(moai-3hgm.k7s).
+    pub exit: u8,
 }
 
 /// 목록과 노트를 읽어 [`Seen`] 을 짓고(락 밖), 기억과 바꿔 끼운 뒤(락 안), 견준다(락 밖).
@@ -242,7 +243,8 @@ pub(crate) fn poll(memory: &Memory, whole: Request, lang: Lang, cursor: Option<&
     let fingerprint = seen.fingerprint();
     memory.swap(&project, asked, &fingerprint, &seen);
     let changes = crate::daemon::diff::changes(old.as_deref(), &seen, encode(&memory.instance, &fingerprint));
-    Ok(Polled { changes, messages, partial: answer.partial || read.partial })
+    let partial = answer.partial || read.partial;
+    Ok(Polled { changes, messages, partial, exit: answer.exit.max(u8::from(partial)) })
 }
 
 /// 저널의 `note` 줄과, 읽다가 곁에 남은 것.
@@ -467,7 +469,8 @@ mod tests {
         assert_eq!((changed, removed, reset), (vec![a], vec![], false));
     }
 
-    /// 옛 도장의 노트도 선다 — 시각의 창이 없다. 락을 오래 기다린 `note`(리뷰의 1)와 병합으로 들어온 노트가 이 꼴이다.
+    /// 옛 도장의 노트도 선다 — 시각의 창이 없다. 시각을 락 밖에서 뜨던 옛 바이너리가 락을 오래 기다린 `note`(리뷰의 1)와
+    /// 병합으로 들어온 노트가 이 꼴이다.
     #[test]
     fn a_note_with_an_old_stamp_is_seen() {
         let (_keep, root) = project("changes-old-note");

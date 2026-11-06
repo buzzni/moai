@@ -38,6 +38,10 @@ pub fn zone(env: &RequestEnv) -> Result<Option<crate::tz::Zone>, RpcError> {
 ///
 /// 걸어 둔 항목에는 이름이 없다(`project ls` 의 이름은 경로에서 파생한 값이라 겹칠 수 있다) — 그래서 **경로로만**
 /// 가린다. 설정은 요청마다 다시 읽는다 — 데몬이 도는 동안 `moai project add` 한 것이 바로 선다.
+///
+/// **돌려주는 자리는 링크를 푼 것이다**(moai-3hgm.k7s) — CLI 의 `-C <자리>` 는 그리로 옮겨 선 뒤 커널이 주는 물리
+/// 경로(`current_dir`)에서 트래커를 찾으므로, 말에 대는 뿌리가 그 철자다. `project add` 는 푼 경로를 적지만 손으로
+/// 고친 설정에는 링크 철자가 설 수 있다 — 그대로 넘기면 같은 요청의 말이 CLI 와 다른 자리를 댄다.
 pub fn resolve(
     env: &RequestEnv,
     lang: crate::i18n::Lang,
@@ -53,11 +57,16 @@ pub fn resolve(
     let Some(dir) = found else {
         return Err(RpcError::moai(code::NOT_REGISTERED, fill(say(lang, "web.not_registered"), &[("path", value)])));
     };
-    match crate::store::spot(&crate::store::Repo::opened_root(dir)) {
+    // **요청이 열 트래커로 잰다** — 데몬의 `MOAI_HERE` 를 안 따른다(리뷰 moai-3hgm.puw 3번). 이 물음은 요청의 통을 걸기
+    // 전이라 `store::here_wanted` 의 가드([`crate::side::hung`])가 안 선다. `Repo::opened_root` 로 물으면 그 셸의
+    // `MOAI_HERE=1` 하나로, 제 `.moai` 없는 딸린 워크트리를 — 요청은 주 체크아웃의 트래커로 옮겨 갈 것을 — 여기서
+    // `not_a_project` 로 거절한다. 옮기는 자는 `Repo::redirect` 의 그것(`worktree::tracker_root`)에서 손잡이만 뺀 것이다.
+    let tracker = crate::worktree::tracker_root(dir).unwrap_or_else(|| dir.clone());
+    match crate::store::spot(&tracker) {
         crate::store::Spot::Absent => {
             Err(RpcError::moai(code::NOT_A_PROJECT, fill(say(lang, "web.not_a_project"), &[("path", value)])))
         }
-        _ => Ok(dir.clone()),
+        _ => Ok(crate::path::canonical(dir).unwrap_or_else(|_| dir.clone())),
     }
 }
 

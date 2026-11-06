@@ -129,7 +129,7 @@ mod os {
 
     /// 남의 `start` 가 자물쇠를 쥔 채 아직 소켓을 안 묶었을 때, 또는 멈추는 데몬이 아직 안 끝났을 때 기다리는 시한.
     const WAIT: Duration = Duration::from_secs(5);
-    /// `stop` 이 데몬이 끝나기를 기다리는 시한 — 데몬은 돌던 요청을 5초까지 기다린다.
+    /// `stop` 이 데몬이 끝나기를 기다리는 시한 — 데몬은 돌던 읽기를 5초까지, 쓰기는 끝까지 기다린다(`server::Work`).
     const STOP_WAIT: Duration = Duration::from_secs(10);
     const POLL: Duration = Duration::from_millis(50);
 
@@ -300,6 +300,8 @@ mod os {
         };
         match client::call(&path, SHUTDOWN, serde_json::json!({})) {
             Ok(Ok(_)) => {}
+            // 붙어 본 뒤 이 부름까지의 틈에 그 데몬이 먼저 멈추기 시작했다 — 끝나기를 아래에서 기다린다.
+            called if already_stopping(&called) => {}
             Ok(Err(e)) => return Err(not_a_daemon(lang, &path, &e.message)),
             Err(e) => return Err(not_a_daemon(lang, &path, &e.to_string())),
         }
@@ -348,5 +350,44 @@ mod os {
             Probe::Foreign(why) => return Err(not_a_daemon(lang, &path, &why)),
         }
         render_status(ctx, &s)
+    }
+
+    /// `stop` 이 보낸 멈추라는 부름이 **이미 멈추는 데몬**에 닿았는가(moai-3hgm.uz0 의 리뷰). 멈추는 데몬은 돌던 요청을
+    /// 기다리기 전에 소켓 파일부터 지우고 문을 닫는다 — 붙어 본(`probe`) 뒤 이 부름까지의 틈에 옆의 `stop` 이 먼저
+    /// 닿았으면 붙기가 "없다"(NotFound)·"안 받는다"(ECONNREFUSED)로 지거나, 붙었어도 `stopping` 으로 거절된다. 그것을
+    /// "데몬이 아니다" 로 읽던 판은 같은 데몬을 멈추던 둘째 `stop` 을 1 로 끝냈다. 잘못 고른 판도 거짓 성공은 안 된다 —
+    /// 부르는 쪽은 자물쇠가 풀리기를 기다리고, 안 풀리면 `timeout` 으로 끝난다.
+    fn already_stopping(called: &std::io::Result<Result<serde_json::Value, rpc::RpcError>>) -> bool {
+        match called {
+            Ok(Ok(_)) => false,
+            Ok(Err(e)) => {
+                e.data.as_ref().and_then(|d| d.get("code")).and_then(serde_json::Value::as_str) == Some(code::STOPPING)
+            }
+            Err(e) => matches!(e.kind(), std::io::ErrorKind::NotFound | std::io::ErrorKind::ConnectionRefused),
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        /// 멈추는 데몬에 닿은 부름만 "이미 멈춘다" 다 — 다른 거절과 다른 전송 실패는 그대로 "데몬이 아니다" 로 간다.
+        #[test]
+        fn only_a_daemon_already_stopping_is_read_as_stopping() {
+            let refused = |data: serde_json::Value| -> std::io::Result<Result<serde_json::Value, rpc::RpcError>> {
+                Ok(Err(rpc::RpcError { code: rpc::code::MOAI, message: "no".into(), data: Some(data) }))
+            };
+            let io = |kind: std::io::ErrorKind| -> std::io::Result<Result<serde_json::Value, rpc::RpcError>> {
+                Err(std::io::Error::from(kind))
+            };
+            assert!(already_stopping(&refused(serde_json::json!({ "code": code::STOPPING, "pid": 1 }))));
+            assert!(already_stopping(&io(std::io::ErrorKind::NotFound)));
+            assert!(already_stopping(&io(std::io::ErrorKind::ConnectionRefused)));
+            assert!(!already_stopping(&refused(serde_json::json!({ "code": code::BUSY }))));
+            assert!(!already_stopping(&Ok(Err(rpc::RpcError::new(rpc::code::INTERNAL, "boom")))));
+            assert!(!already_stopping(&io(std::io::ErrorKind::InvalidData)));
+            assert!(!already_stopping(&io(std::io::ErrorKind::TimedOut)));
+            assert!(!already_stopping(&Ok(Ok(serde_json::json!({ "pid": 1 })))));
+        }
     }
 }

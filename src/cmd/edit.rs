@@ -522,13 +522,13 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
         });
     }
     if let Some(k) = &kept {
-        eprintln!(
+        super::tell(&format!(
             "moai: {}",
             crate::i18n::fill(
                 crate::i18n::say(ctx.lang(), "edit.kept_epic"),
                 &[("id", &edited.id), ("epic", &k.epic), ("parent", &k.parent)],
             )
-        );
+        ));
     }
     if let Some(k) = &kept_milestone {
         milestone_kept_line(&edited.id, k, args.milestone.as_deref().unwrap_or("none"), known_milestone, ctx.lang());
@@ -594,7 +594,7 @@ pub(super) fn milestone_kept_line(id: &str, k: &InheritedMilestone, wrote: &str,
         Way::Pinned => {
             let said =
                 fill(say(lang, "edit.kept_pinned"), &[("id", id), ("stood", &stood), ("at", at), ("lost", &lost)]);
-            return eprintln!("moai: {said}");
+            return super::tell(&format!("moai: {said}"));
         }
         Way::Epic => (
             fill(say(lang, "edit.from_epic"), &[("at", at)]),
@@ -614,7 +614,7 @@ pub(super) fn milestone_kept_line(id: &str, k: &InheritedMilestone, wrote: &str,
         say(lang, "edit.kept_milestone"),
         &[("id", id), ("stood", &stood), ("from", &from), ("lost", &lost), ("verb", verb), ("way", &way)],
     );
-    eprintln!("moai: {said}");
+    super::tell(&format!("moai: {said}"));
 }
 
 /// **말은 거절할 때만 푼다**([`Ctx::lang`]) — `ctx.lang()` 을 인자로 넘기면 그것이 부르는 쪽에서

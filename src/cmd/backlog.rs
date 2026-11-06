@@ -74,13 +74,13 @@ fn say_if_dead(issues: &[Issue], cfg: &crate::config::Config, stone: Option<&str
     let Some(m) = stone else { return };
     if let Some(src) = crate::report::deferred_roots(issues).get(m) {
         let said = crate::i18n::fill(crate::i18n::say(lang, "backlog.milestone_deferred"), &[("id", m), ("src", src)]);
-        eprintln!("moai: {said}");
+        super::tell(&format!("moai: {said}"));
     } else if crate::report::group_states_of(issues, cfg, &[m])
         .get(&(crate::model::Kind::Milestone, m))
         .is_some_and(|col| *col == crate::config::DONE)
     {
         let said = crate::i18n::fill(crate::i18n::say(lang, "backlog.milestone_closed"), &[("id", m)]);
-        eprintln!("moai: {said}");
+        super::tell(&format!("moai: {said}"));
     }
 }
 
@@ -98,7 +98,7 @@ fn say_if_inherited(issues: &[Issue], thought: &Issue, stone: Option<&str>, lang
     let Some(m) = stone else { return };
     let Some(epic) = crate::report::inherited_from(issues, thought, m) else { return };
     let said = crate::i18n::fill(crate::i18n::say(lang, "backlog.milestone_inherited"), &[("id", m), ("epic", epic)]);
-    eprintln!("moai: {said}");
+    super::tell(&format!("moai: {said}"));
 }
 
 /// 펼치기가 에픽에 데려갈 본문 — **`-e <에픽>` 이면 없다**(moai-07v1).
