@@ -63,7 +63,7 @@ impl Manager {
 
     /// 서비스가 셸과 같은 소켓을 찾도록 고정할 디렉터리. launchd 는 셸의 `TMPDIR` 을 안 믿으니 늘 고정하고, systemd 는
     /// 사람이 `MOAI_CTL_DIR` 을 준 때만 고정한다 — 사용자 관리자가 `XDG_RUNTIME_DIR` 을 셸과 똑같이 준다.
-    pub fn pin<'a>(self, dir: &'a Path, env: impl Fn(&str) -> Option<OsString>) -> Option<&'a Path> {
+    pub fn pin(self, dir: &Path, env: impl Fn(&str) -> Option<OsString>) -> Option<&Path> {
         match self {
             Manager::Launchd => Some(dir),
             Manager::Systemd => env("MOAI_CTL_DIR").map(|_| dir),
@@ -424,6 +424,8 @@ mod tests {
         assert!(text.contains(&format!("<key>Label</key><string>{LABEL}</string>")), "{text}");
     }
 
+    // Windows 에서는 `/c` 가 절대 경로가 아니다. 그쪽에는 관리자가 없다.
+    #[cfg(unix)]
     #[test]
     fn the_file_follows_the_config_home_and_a_relative_one_is_ignored() {
         let env = |pairs: &'static [(&'static str, &'static str)]| {

@@ -1279,6 +1279,7 @@
   "update.no_sh": "could not start {program} — {said}",
   "update.running": "running {script} from {url} over {dir}",
   "update.daemon_restart": "daemon {version} (pid {pid}) still runs — restart it with its service manager, or stop and start it if run manually",
+  "update.daemon_restarted": "restarted the daemon service on the new version",
   "update.dry_fetch": "would fetch  {url}",
   "update.dry_run": "would run    {line}",
   "look.not_a_word": "`{value}` in `{key}` is not a word — skipped",

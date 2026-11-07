@@ -84,7 +84,16 @@ pub fn run(ctx: &Ctx, a: UpdateArgs) -> R<Vec<String>> {
     let restart = (code == 0).then(|| daemon_restart(&exe)).flatten();
     #[cfg(not(any(unix, windows)))]
     let restart: Option<(String, u64)> = None;
-    if let Some((version, pid)) = &restart
+    // 다른 판의 데몬을 찾은 때만 더 본다 — 서비스가 없는 사람의 `moai update` 는 관리자를 안 부르고 출력도 그대로다.
+    #[cfg(any(unix, windows))]
+    let restarted = restart.is_some() && restart_service(&exe);
+    #[cfg(not(any(unix, windows)))]
+    let restarted = false;
+    if restarted {
+        if !ctx.json {
+            tell(&format!("moai: {}", crate::i18n::say(lang, "update.daemon_restarted")));
+        }
+    } else if let Some((version, pid)) = &restart
         && !ctx.json
     {
         tell(&format!(
@@ -97,7 +106,9 @@ pub fn run(ctx: &Ctx, a: UpdateArgs) -> R<Vec<String>> {
     }
     if ctx.json {
         let mut result = said(&plan, Some(code));
-        if restart.is_some() {
+        if restarted {
+            result["daemon_restarted"] = true.into();
+        } else if restart.is_some() {
             result["daemon_restart"] = true.into();
         }
         return Ok(vec![result.to_string()]);
@@ -112,6 +123,39 @@ fn daemon_restart(exe: &std::path::Path) -> Option<(String, u64)> {
         return None;
     }
     restart_from_status(&out.stdout)
+}
+
+/// 등록된 서비스를 새 판으로 다시 시작하고 새 판이 답할 때까지 기다린다(moai-upq5.1g6). `moai daemon stop` 으로 하지 않는다 —
+/// 깨끗한 종료는 관리자가 다시 안 띄운다. 등록 상태를 바꾸는 호출은 이 길에 없다. 못 했으면 `false` 이고, 부르는 쪽이 지금까지의
+/// 알림을 낸다.
+#[cfg(any(unix, windows))]
+fn restart_service(exe: &std::path::Path) -> bool {
+    use crate::daemon::service::{Service, run};
+    use std::time::{Duration, Instant};
+    let Some(Some(service)) = Service::native() else {
+        return false;
+    };
+    if !service.restart(exe, &run) {
+        return false;
+    }
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let out = Command::new(exe).args(["daemon", "status", "--json"]).stdin(Stdio::null()).output();
+        if out.is_ok_and(|out| out.status.success() && current_from_status(&out.stdout)) {
+            return true;
+        }
+        if Instant::now() >= deadline {
+            return false;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+}
+
+/// 데몬이 이 바이너리의 판으로 돌고 있는가.
+#[cfg(any(unix, windows, test))]
+fn current_from_status(bytes: &[u8]) -> bool {
+    serde_json::from_slice::<serde_json::Value>(bytes)
+        .is_ok_and(|status| status["running"] == true && status["same_version"] == true)
 }
 
 #[cfg(any(unix, windows, test))]

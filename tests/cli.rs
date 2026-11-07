@@ -32875,6 +32875,126 @@ fn update_probes_the_new_binary_only_after_success() {
     }
 }
 
+/// `moai update` 와 등록된 서비스(moai-upq5.1g6). 가짜 `systemctl` 만 부른다 — 진짜에 닿으면 사람의 서비스를 다시 띄운다.
+///
+/// `unit` 은 서비스 파일의 글(`None` 이면 없음)이고, `<exe>` 는 업데이트하는 바이너리로 채운다. 새 바이너리는 재시작이 일어나면
+/// 같은 판으로 답한다. `answers` 가 거짓이면 다시 시작해도 옛 판 그대로다.
+#[cfg(target_os = "linux")]
+fn update_with_service(
+    unit: Option<&str>,
+    active: i32,
+    restart: i32,
+    answers: bool,
+    args: &[&str],
+) -> (Output, String) {
+    let s = Scratch::new("update-service");
+    let exe = hoisted(s.path());
+    let real = canon(&exe).unwrap();
+    let restarted = s.path().join("restarted");
+    let calls = s.path().join("calls");
+    let fake = s.path().join("fake");
+    std::fs::create_dir_all(&fake).unwrap();
+    let mark = if answers { format!(": > '{}'", restarted.display()) } else { ":".to_string() };
+    write_exe(
+        &fake.join("systemctl"),
+        &format!(
+            "#!/bin/sh\nprintf '%s\\n' \"$*\" >> '{}'\ncase \"$*\" in\n*is-active*) exit {active} ;;\n*restart*) {mark}; exit {restart} ;;\nesac\nexit 0\n",
+            calls.display()
+        ),
+    );
+    let config = s.path().join("xdg");
+    if let Some(unit) = unit {
+        let dir = config.join("systemd/user");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("moai-daemon.service"), unit.replace("<exe>", &real.display().to_string())).unwrap();
+    }
+    let replacement = s.path().join("replacement");
+    std::fs::write(
+        &replacement,
+        format!(
+            "#!/bin/sh\nif [ -e '{}' ]; then same=true; else same=false; fi\nprintf '{{\"running\":true,\"same_version\":%s,\"version\":\"old\",\"pid\":42}}\\n' \"$same\"\n",
+            restarted.display()
+        ),
+    )
+    .unwrap();
+    use std::os::unix::fs::PermissionsExt as _;
+    std::fs::set_permissions(&replacement, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let (url, server) = serving_script(format!("mv '{}' '{}'\nexit 0\n", replacement.display(), real.display()), 1);
+    let path = format!("{}:{}", fake.display(), std::env::var("PATH").unwrap());
+    let env = [
+        ("MOAI_INSTALL_URL", url.as_str()),
+        ("PATH", path.as_str()),
+        ("XDG_CONFIG_HOME", config.to_str().unwrap()),
+        ("MOAI_LANG", "en"),
+    ];
+    let out = update_with(&exe, s.path(), &s.path().join("config.toml"), &env, args);
+    server.join().unwrap();
+    assert_eq!(out.status.code(), Some(0), "종료 코드는 설치 스크립트의 것이다\n{}", text(&out));
+    (out, std::fs::read_to_string(&calls).unwrap_or_default())
+}
+
+#[cfg(target_os = "linux")]
+const OUR_UNIT: &str =
+    "# moai daemon install wrote this file. moai daemon uninstall removes it.\nExecStart=\"<exe>\" daemon start\n";
+
+/// **등록된 서비스가 실행 중이면 새 판으로 다시 시작한다.** 등록 상태를 바꾸는 호출은 없다.
+#[cfg(target_os = "linux")]
+#[test]
+fn update_restarts_the_running_service_it_registered() {
+    if !served() {
+        return;
+    }
+    let (out, calls) = update_with_service(Some(OUR_UNIT), 0, 0, true, &["--json"]);
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v.get("daemon_restarted").and_then(|v| v.as_bool()), Some(true), "{v}");
+    assert_eq!(v.get("daemon_restart"), None, "다시 시작했는데 하라고 알린다 — {v}");
+    assert_eq!(calls, "--user is-active --quiet moai-daemon.service\n--user restart moai-daemon.service\n");
+
+    let (out, _) = update_with_service(Some(OUR_UNIT), 0, 0, true, &[]);
+    assert!(text(&out).contains("restarted the daemon service"), "{}", text(&out));
+    assert!(!text(&out).contains("still running"), "{}", text(&out));
+}
+
+/// **못 하는 자리에서는 지금까지의 알림으로 돌아간다** — 서비스가 없는 사람, 사람이 멈춘 서비스, 손으로 쓴 파일, 다른 바이너리의 파일,
+/// 재시작 실패, 새 판이 답하지 않는 경우. 종료 코드는 어느 쪽이든 그대로다.
+#[cfg(target_os = "linux")]
+#[test]
+fn update_falls_back_to_the_notice_when_it_cannot_restart() {
+    if !served() {
+        return;
+    }
+    let other = OUR_UNIT.replace("<exe>", "/other/moai");
+    let cases: [(&str, Option<&str>, i32, i32, bool, &str); 6] = [
+        ("파일 없음", None, 0, 0, true, ""),
+        ("멈춘 서비스", Some(OUR_UNIT), 3, 0, true, "--user is-active --quiet moai-daemon.service\n"),
+        ("손으로 쓴 파일", Some("ExecStart=\"<exe>\" daemon start\n"), 0, 0, true, ""),
+        ("다른 바이너리", Some(&other), 0, 0, true, ""),
+        (
+            "재시작 실패",
+            Some(OUR_UNIT),
+            0,
+            1,
+            false,
+            "--user is-active --quiet moai-daemon.service\n--user restart moai-daemon.service\n",
+        ),
+        (
+            "새 판이 안 답함",
+            Some(OUR_UNIT),
+            0,
+            0,
+            false,
+            "--user is-active --quiet moai-daemon.service\n--user restart moai-daemon.service\n",
+        ),
+    ];
+    for (name, unit, active, restart, answers, want) in cases {
+        let (out, calls) = update_with_service(unit, active, restart, answers, &["--json"]);
+        let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+        assert_eq!(v.get("daemon_restart").and_then(|v| v.as_bool()), Some(true), "{name}: {v}");
+        assert_eq!(v.get("daemon_restarted"), None, "{name}: {v}");
+        assert_eq!(calls, want, "{name}");
+    }
+}
+
 /// **받을 저장소는 사용자 설정에서 오고 `MOAI_REPO` 가 이긴다. 저장소의 `.moai/config.toml` 은 안 읽는다**
 /// (moai-zsfr.2em, 사람 결정 2026-10-08) — 클론한 저장소가 셸에 흘릴 스크립트를 고르면 안 된다.
 #[cfg(unix)]
