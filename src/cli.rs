@@ -1472,7 +1472,7 @@ pub enum DaemonCmd {
   its connection cap still answers status. service is the service file, when
   one is there: that file is what being registered means.")]
     Status,
-    /// Register the daemon as a service that starts at login, and start it now
+    /// Register the daemon as a login service and start it now
     #[command(after_help = "  moai daemon install          systemd on Linux, launchd on macOS
   moai daemon install --json   {installed, manager, service, exe, running,
                                socket}, and pid, version, same_version once

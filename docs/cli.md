@@ -3718,7 +3718,7 @@ Commands:
   start      Serve in the foreground until `moai daemon stop`
   stop       Ask the running daemon to exit and wait until it has
   status     Whether a daemon runs: pid, version, proto and socket
-  install    Register the daemon as a service that starts at login, and start it now
+  install    Register the daemon as a login service and start it now
   uninstall  Stop the service and remove its file
   help       Print this message or the help of the given subcommand(s)
 
@@ -3834,7 +3834,7 @@ Options:
 ## `moai daemon install`
 
 ```
-Register the daemon as a service that starts at login, and start it now
+Register the daemon as a login service and start it now
 
 Usage: moai daemon install [OPTIONS]
 

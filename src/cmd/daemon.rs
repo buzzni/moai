@@ -465,8 +465,8 @@ mod os {
                 same_version: hello.as_ref().map(Hello::same_as_this),
             });
         }
-        let key = if installed { "daemon.service.installed" } else { "daemon.service.already" };
-        let mut lines = vec![fill(say(lang, key), &[("manager", manager), ("service", &file)])];
+        let head = if installed { say(lang, "daemon.service.installed") } else { say(lang, "daemon.service.already") };
+        let mut lines = vec![fill(head, &[("manager", manager), ("service", &file)])];
         match &hello {
             Some(hello) => {
                 let proto = hello.proto.to_string();
@@ -495,8 +495,8 @@ mod os {
         if ctx.json {
             return super::super::json_line(&Uninstalled { uninstalled, manager, service: &file });
         }
-        let key = if uninstalled { "daemon.service.removed" } else { "daemon.service.none" };
-        Ok(vec![fill(say(lang, key), &[("manager", manager), ("service", &file)])])
+        let head = if uninstalled { say(lang, "daemon.service.removed") } else { say(lang, "daemon.service.none") };
+        Ok(vec![fill(head, &[("manager", manager), ("service", &file)])])
     }
 
     /// `stop` 이 보낸 멈추라는 부름이 **이미 멈추는 데몬**에 닿았는가(moai-3hgm.uz0 의 리뷰). 멈추는 데몬은 돌던 요청을
