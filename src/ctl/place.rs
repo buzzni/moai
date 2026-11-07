@@ -17,11 +17,11 @@ pub fn dir() -> std::io::Result<PathBuf> {
 }
 
 #[cfg(unix)]
-fn uid() -> u32 {
+pub(crate) fn uid() -> u32 {
     unsafe { libc::geteuid() }
 }
 #[cfg(not(unix))]
-fn uid() -> u32 {
+pub(crate) fn uid() -> u32 {
     0
 }
 

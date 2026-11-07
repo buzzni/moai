@@ -96,6 +96,7 @@
         <pre><code>curl -fsSL https://raw.githubusercontent.com/buzzni/moai/main/install.sh \
   | sh -s -- --dir ~/bin --version v0.1.0</code></pre>
       </li>
+      <li>A first install from a terminal also registers the daemon as a service that starts at login (systemd on Linux, launchd on macOS). The CLI does not need it. To skip it, add <code>--no-service</code>. Upgrades never change this.</li>
     </ul>
 
     <h3 id="install-windows">Windows</h3>

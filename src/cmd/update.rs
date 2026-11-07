@@ -84,20 +84,32 @@ pub fn run(ctx: &Ctx, a: UpdateArgs) -> R<Vec<String>> {
     let restart = (code == 0).then(|| daemon_restart(&exe)).flatten();
     #[cfg(not(any(unix, windows)))]
     let restart: Option<(String, u64)> = None;
-    if let Some((version, pid)) = &restart
-        && !ctx.json
-    {
-        tell(&format!(
-            "moai: {}",
-            crate::i18n::fill(
+    // 다른 판의 데몬을 찾은 때만 더 본다 — 서비스가 없는 사람의 `moai update` 는 관리자를 안 부르고 출력도 그대로다.
+    #[cfg(any(unix, windows))]
+    let restarted = if restart.is_some() { restart_service(&exe) } else { ServiceRestart::NotDone };
+    #[cfg(not(any(unix, windows)))]
+    let restarted = ServiceRestart::NotDone;
+    if !ctx.json {
+        let line = match (&restarted, &restart) {
+            (ServiceRestart::Done, _) => Some(crate::i18n::say(lang, "update.daemon_restarted").to_string()),
+            (ServiceRestart::Unanswered, _) => {
+                Some(crate::i18n::say(lang, "update.daemon_restart_pending").to_string())
+            }
+            (ServiceRestart::NotDone, Some((version, pid))) => Some(crate::i18n::fill(
                 crate::i18n::say(lang, "update.daemon_restart"),
                 &[("version", version), ("pid", &pid.to_string())],
-            )
-        ));
+            )),
+            (ServiceRestart::NotDone, None) => None,
+        };
+        if let Some(line) = line {
+            tell(&format!("moai: {line}"));
+        }
     }
     if ctx.json {
         let mut result = said(&plan, Some(code));
-        if restart.is_some() {
+        if matches!(restarted, ServiceRestart::Done) {
+            result["daemon_restarted"] = true.into();
+        } else if restart.is_some() {
             result["daemon_restart"] = true.into();
         }
         return Ok(vec![result.to_string()]);
@@ -105,13 +117,58 @@ pub fn run(ctx: &Ctx, a: UpdateArgs) -> R<Vec<String>> {
     Ok(Vec::new())
 }
 
+/// 새 바이너리에 데몬의 상태를 묻는다.
+#[cfg(any(unix, windows))]
+fn daemon_status(exe: &std::path::Path) -> Option<Vec<u8>> {
+    let out = Command::new(exe).args(["daemon", "status", "--json"]).stdin(Stdio::null()).output().ok()?;
+    out.status.success().then_some(out.stdout)
+}
+
 #[cfg(any(unix, windows))]
 fn daemon_restart(exe: &std::path::Path) -> Option<(String, u64)> {
-    let out = Command::new(exe).args(["daemon", "status", "--json"]).stdin(Stdio::null()).output().ok()?;
-    if !out.status.success() {
-        return None;
+    restart_from_status(&daemon_status(exe)?)
+}
+
+/// 등록된 서비스를 다시 시작해 본 결과.
+#[cfg_attr(not(any(unix, windows)), allow(dead_code))]
+enum ServiceRestart {
+    /// 부르지 않았거나 관리자가 거절했다. 옛 데몬이 그대로일 수 있어 지금까지의 알림을 낸다.
+    NotDone,
+    /// 관리자는 받았는데 시한 안에 새 판이 안 답했다. 옛 데몬은 이미 멈췄을 수 있어 "아직 돈다" 고 말하면 거짓이다.
+    Unanswered,
+    /// 새 판이 답했다.
+    Done,
+}
+
+/// 등록된 서비스를 새 판으로 다시 시작하고 새 판이 답할 때까지 기다린다(moai-upq5.1g6). `moai daemon stop` 으로 하지 않는다 —
+/// 깨끗한 종료는 관리자가 다시 안 띄운다. 등록 상태를 바꾸는 호출은 이 길에 없다.
+#[cfg(any(unix, windows))]
+fn restart_service(exe: &std::path::Path) -> ServiceRestart {
+    use crate::daemon::service::{Service, run};
+    use std::time::{Duration, Instant};
+    let Ok(service) = Service::native() else {
+        return ServiceRestart::NotDone;
+    };
+    if !service.restart(exe, &run) {
+        return ServiceRestart::NotDone;
     }
-    restart_from_status(&out.stdout)
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        if daemon_status(exe).is_some_and(|status| current_from_status(&status)) {
+            return ServiceRestart::Done;
+        }
+        if Instant::now() >= deadline {
+            return ServiceRestart::Unanswered;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+}
+
+/// 데몬이 이 바이너리의 판으로 돌고 있는가.
+#[cfg(any(unix, windows, test))]
+fn current_from_status(bytes: &[u8]) -> bool {
+    serde_json::from_slice::<serde_json::Value>(bytes)
+        .is_ok_and(|status| status["running"] == true && status["same_version"] == true)
 }
 
 #[cfg(any(unix, windows, test))]
@@ -277,7 +334,20 @@ fn said(plan: &crate::update::Plan, code: Option<i32>) -> serde_json::Value {
 
 #[cfg(test)]
 mod daemon_tests {
-    use super::restart_from_status;
+    use super::{current_from_status, restart_from_status};
+
+    #[test]
+    fn the_new_version_answers_only_when_it_runs_and_is_the_same() {
+        assert!(current_from_status(br#"{"running":true,"same_version":true}"#));
+        for status in [
+            &br#"{"running":true,"same_version":false}"#[..],
+            &br#"{"running":false}"#[..],
+            &br#"{"running":true}"#[..],
+            &b"broken"[..],
+        ] {
+            assert!(!current_from_status(status));
+        }
+    }
 
     #[test]
     fn restart_notice_only_for_a_running_different_version() {
