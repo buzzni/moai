@@ -12506,3 +12506,4 @@
 {"ts":"2026-11-06T21:34:58Z","id":"moai-xvvf","kind":"note","by":"Raven","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 (medium — 릴리스 절차)"}
 {"ts":"2026-11-06T21:44:25Z","id":"moai-xvvf","kind":"status","by":"Raven","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"v1.0.0 이 나갔다: 태그 bd556381, GitHub 릴리스 파일 7개, release·smoke 성공, Discord 1/1. 받은 aarch64-apple-darwin 판은 체크섬이 맞고 moai 1.0.0 으로 돈다."}
 {"ts":"2026-11-06T21:44:25Z","id":"moai-2t6v","kind":"status","by":"Raven","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"v1.0.0 릴리스를 마쳤다."}
+{"ts":"2026-11-07T05:48:52Z","id":"moai-00g9","kind":"create","by":"Raven","by_email":"raven@buzzni.com","title":"데몬에 메서드를 더한다 — 설정·위키 읽기와 project·due·archive·read·image"}
