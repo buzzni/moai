@@ -21,9 +21,13 @@
 #
 # 다음 단계는 SBOM 과 서명(attestation)이다. 지금은 checksums 까지다.
 #
+# **첫 설치면 데몬을 서비스로 등록한다**(moai-upq5). 밑의 `register_service` 에 조건이 있다. 설치 경로에 moai 가
+# 이미 있으면 등록 상태를 건드리지 않는다 — `moai update` 가 이 스크립트를 돌리고, 업데이트는 등록 상태를 안 바꾼다.
+#
 #   --version <태그>   받을 판. 없으면 최신 릴리스
 #   --dir <디렉터리>   깔 자리. 없으면 ~/.local/bin
 #   --force            그 자리에 선 남의 moai·링크를 덮는다. 같은 판도 다시 받는다
+#   --no-service       첫 설치 때 데몬을 서비스로 등록하지 않는다 (MOAI_NO_SERVICE=1 도 같다)
 #   --print-target     이 기계의 타깃 이름만 찍고 끝낸다
 set -eu
 
@@ -36,6 +40,7 @@ version=${MOAI_VERSION:-}
 # 셸의 날 오류로 죽는다 — 파이프로 흘러 들어온 사람이 보는 것이 이 스크립트의 말이 아니게 된다.
 dir=${MOAI_INSTALL_DIR:-}
 force=0
+no_service=${MOAI_NO_SERVICE:-}
 print_target=0
 
 say() { printf 'moai: %s\n' "$1"; }
@@ -60,6 +65,10 @@ while [ "$#" -gt 0 ]; do
     force=1
     shift
     ;;
+  --no-service)
+    no_service=1
+    shift
+    ;;
   --print-target)
     print_target=1
     shift
@@ -72,12 +81,16 @@ moai 를 GitHub 릴리스에서 받아 깐다. checksums 로 확인하지 못하
   --version <태그>   받을 판. 없으면 최신 릴리스
   --dir <디렉터리>   깔 자리. 없으면 ~/.local/bin
   --force            그 자리에 선 남의 moai·링크를 덮는다. 같은 판도 다시 받는다
+  --no-service       첫 설치 때 데몬을 서비스로 등록하지 않는다 (MOAI_NO_SERVICE=1 도 같다)
   --print-target     이 기계의 타깃 이름만 찍고 끝낸다
 
 깔 자리에 이 moai 가 이미 서 있으면 --force 없이 판을 올린다. 파이프로 흘려 부를 때는
 인자 앞에 `sh -s --` 를 둔다.
 
   curl -fsSL https://raw.githubusercontent.com/buzzni/moai/main/install.sh | sh -s -- --dir ~/bin
+
+첫 설치면 데몬을 서비스로 등록한다. 표준 출력이 터미널이 아니거나 root 로 깔면 등록하지 않는다.
+업데이트는 등록 상태를 안 바꾼다. 나중에 바꾸려면 moai daemon install, moai daemon uninstall 을 쓴다.
 USAGE
     exit 0
     ;;
@@ -274,6 +287,12 @@ on_path() {
 # 보통 파일로 바꾸고, 링크가 가리키던 것(소스에서 지은 판 따위)은 옛 판 그대로 남는다 —
 # 올린 것은 없고 사람이 걸어 둔 링크만 잃는다. 가리키는 것이 사라진 링크도 같다 — `-e` 는
 # 링크를 따라가 거기서 거짓이 되므로 `-L` 로 따로 본다.
+#
+# **첫 설치인지는 `had` 로 못 가른다** — `--force` 면 `had` 가 비는데 `moai update` 가 그 길로 온다. 그래서 있는지만 따로 본다.
+first=1
+if [ -e "$dir/moai" ] || [ -L "$dir/moai" ]; then
+  first=0
+fi
 had=
 if { [ -e "$dir/moai" ] || [ -L "$dir/moai" ]; } && [ "$force" != 1 ]; then
   [ ! -L "$dir/moai" ] || refuse "$dir/moai 는 다른 자리를 가리키는 링크다"
@@ -364,3 +383,28 @@ else
   say "$dir/moai 에 깔았다 ($version)"
 fi
 on_path "방금 깐 것은"
+
+# **첫 설치면 데몬을 서비스로 등록한다**(moai-upq5, 사람의 결정 2026-11-06). 넷을 다 지나야 부른다.
+#
+# - **표준 출력이 터미널이다.** CI·Docker·다른 제품의 설치 프로그램에 백그라운드 프로세스를 남기지 않는다. 그 자리에서는 **아무
+#   말도 안 한다** — 자동화가 읽는 출력이 등록 기능 전과 바이트째 같아야 한다. 표준 입력은 안 본다. `curl … | sh` 의 표준
+#   입력은 이 스크립트 자체다
+# - **root 가 아니다.** root 로 부르면 root 의 서비스가 되어 moai 를 쓰는 사람의 로그인에서 안 돈다
+# - **깔린 바이너리가 그 명령을 안다.** 이 스크립트는 `main` 에서 오고 `--version` 은 옛 판을 깐다
+# - 등록에 실패해도 설치는 성공이다. CLI 는 데몬 없이 돈다
+register_service() {
+  [ "$first" = 1 ] && [ -z "$no_service" ] || return 0
+  [ -t 1 ] || return 0
+  if [ "$(id -u)" = 0 ]; then
+    say "root 로 깔아서 데몬 서비스는 등록하지 않는다 — moai 를 쓰는 사용자로 moai daemon install 을 실행한다"
+    return 0
+  fi
+  $limit "$dir/moai" daemon install --help </dev/null >/dev/null 2>&1 || return 0
+  # 마감은 물음보다 길다 — 관리자가 데몬을 띄우고, 명령이 그 데몬의 답을 5초까지 기다린다.
+  long=
+  [ -z "$limit" ] || long="timeout -s KILL 30"
+  if ! $long "$dir/moai" daemon install </dev/null; then
+    say "데몬 서비스는 등록하지 못했다 — moai 는 그대로 쓸 수 있다. 나중에 moai daemon install 로 다시 한다"
+  fi
+}
+register_service
