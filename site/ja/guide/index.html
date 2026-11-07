@@ -96,6 +96,7 @@
         <pre><code>curl -fsSL https://raw.githubusercontent.com/buzzni/moai/main/install.sh \
   | sh -s -- --dir ~/bin --version v0.1.0</code></pre>
       </li>
+      <li>端末から初めてインストールすると、デーモンもログイン時に起動するサービスとして登録します(Linux は systemd、macOS は launchd)。CLI はデーモンがなくても動きます。登録しない場合は <code>--no-service</code> を付けます。アップデートではこの状態は変わりません。</li>
     </ul>
 
     <h3 id="install-windows">Windows</h3>
