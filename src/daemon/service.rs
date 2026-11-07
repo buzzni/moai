@@ -20,23 +20,12 @@ const LABEL: &str = "com.buzzni.moai-daemon";
 const MARK: &str = "moai daemon install wrote this file. moai daemon uninstall removes it.";
 
 /// 명령 하나를 돌린다. 성공이면 표준 출력, 실패면 사람에게 보일 한 줄.
-pub type Run<'a> = &'a dyn Fn(&str, &[String]) -> Result<String, String>;
+pub type Run<'a> = &'a dyn Fn(&str, &[&str]) -> Result<String, String>;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Manager {
     Systemd,
     Launchd,
-}
-
-/// 이 OS 의 서비스 관리자. 없으면 등록하지 않는다 — Windows 는 다음 에픽이다(`moai-bq5p`).
-pub fn native() -> Option<Manager> {
-    if cfg!(target_os = "linux") {
-        Some(Manager::Systemd)
-    } else if cfg!(target_os = "macos") {
-        Some(Manager::Launchd)
-    } else {
-        None
-    }
 }
 
 impl Manager {
@@ -135,8 +124,8 @@ fn xml_escape(s: &str) -> String {
 }
 
 /// 줄바꿈이 든 경로는 어느 파일 꼴로도 못 적는다.
-fn writable_text(p: &Path) -> Option<&str> {
-    p.to_str().filter(|s| !s.contains(['\n', '\r']))
+fn writable_text(p: &Path) -> Result<&str, Trouble> {
+    p.to_str().filter(|s| !s.contains(['\n', '\r'])).ok_or_else(|| Trouble::BadPath(p.display().to_string()))
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -145,12 +134,21 @@ pub enum Trouble {
     NotOurs,
     /// moai 의 파일이지만 다른 바이너리를 가리킨다.
     OtherBinary,
-    /// 파일에 적을 수 없는 경로다.
-    BadPath,
+    /// 파일에 적을 수 없는 경로다. 바이너리일 수도, 고정할 디렉터리일 수도 있어 그 경로를 든다.
+    BadPath(String),
     /// 파일을 못 읽거나 못 썼다.
     File(String),
     /// 관리자가 없거나 거절했다.
     Refused(String),
+}
+
+/// 이 기계에서 서비스를 둘 수 없는 까닭.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Unavailable {
+    /// 이 OS 에는 관리자가 없다 — Windows 는 다음 에픽이다(`moai-bq5p`).
+    NoManager,
+    /// 집을 몰라 파일의 경로를 못 정한다.
+    NoHome,
 }
 
 pub struct Service {
@@ -159,10 +157,17 @@ pub struct Service {
 }
 
 impl Service {
-    /// 이 OS 의 서비스. 관리자가 없으면 바깥 `None`, 집을 모르면 안쪽 `None` 이다.
-    pub fn native() -> Option<Option<Service>> {
-        let manager = native()?;
-        Some(manager.file(|k| std::env::var_os(k)).map(|file| Service { manager, file }))
+    /// 이 OS 의 서비스.
+    pub fn native() -> Result<Service, Unavailable> {
+        let manager = if cfg!(target_os = "linux") {
+            Manager::Systemd
+        } else if cfg!(target_os = "macos") {
+            Manager::Launchd
+        } else {
+            return Err(Unavailable::NoManager);
+        };
+        let file = manager.file(|k| std::env::var_os(k)).ok_or(Unavailable::NoHome)?;
+        Ok(Service { manager, file })
     }
 
     /// 서비스 파일이 있는가 — 그것이 곧 등록 상태다.
@@ -182,11 +187,8 @@ impl Service {
 
     /// 등록하고 지금 시작한다. 이번에 파일을 썼으면 `true`, 이미 등록돼 있었으면 `false`.
     pub fn install(&self, exe: &Path, pin: Option<&Path>, run: Run) -> Result<bool, Trouble> {
-        let exe = writable_text(exe).ok_or(Trouble::BadPath)?;
-        let pin = match pin {
-            Some(dir) => Some(writable_text(dir).ok_or(Trouble::BadPath)?),
-            None => None,
-        };
+        let exe = writable_text(exe)?;
+        let pin = pin.map(writable_text).transpose()?;
         let wrote = match self.text()? {
             Some(text) if !text.contains(MARK) => return Err(Trouble::NotOurs),
             Some(text) if !self.manager.names(&text, exe) => return Err(Trouble::OtherBinary),
@@ -224,51 +226,55 @@ impl Service {
     /// `moai update` 가 부른다. **moai 가 쓴 파일이고, 이 바이너리를 가리키고, 지금 실행 중일 때만** 다시 시작한다. 사람이 멈춘
     /// 서비스는 안 띄운다. 등록 상태를 바꾸는 호출은 이 길에 없다.
     pub fn restart(&self, exe: &Path, run: Run) -> bool {
-        let (Some(exe), Ok(Some(text))) = (writable_text(exe), self.text()) else {
+        let (Ok(exe), Ok(Some(text))) = (writable_text(exe), self.text()) else {
             return false;
         };
         if !text.contains(MARK) || !self.manager.names(&text, exe) || !self.active(run) {
             return false;
         }
         let done = match self.manager {
-            Manager::Systemd => run("systemctl", &strings(&["--user", "restart", UNIT])),
-            Manager::Launchd => run("launchctl", &strings(&["kickstart", "-k", &service_target()])),
+            Manager::Systemd => run("systemctl", &["--user", "restart", UNIT]),
+            Manager::Launchd => run("launchctl", &["kickstart", "-k", &service_target()]),
         };
         done.is_ok()
     }
 
     fn active(&self, run: Run) -> bool {
         match self.manager {
-            Manager::Systemd => run("systemctl", &strings(&["--user", "is-active", "--quiet", UNIT])).is_ok(),
-            Manager::Launchd => run("launchctl", &strings(&["print", &service_target()]))
-                .is_ok_and(|said| said.lines().any(|line| line.trim() == "state = running")),
+            Manager::Systemd => run("systemctl", &["--user", "is-active", "--quiet", UNIT]).is_ok(),
+            Manager::Launchd => run("launchctl", &["print", &service_target()]).is_ok_and(|said| runs(&said)),
         }
     }
 
     fn start(&self, run: Run) -> Result<(), String> {
         match self.manager {
             Manager::Systemd => {
-                run("systemctl", &strings(&["--user", "daemon-reload"]))?;
-                run("systemctl", &strings(&["--user", "enable", "--now", UNIT]))?;
+                run("systemctl", &["--user", "daemon-reload"])?;
+                run("systemctl", &["--user", "enable", "--now", UNIT])?;
             }
-            Manager::Launchd => {
-                // 이미 올라간 서비스의 `bootstrap` 은 실패한다.
-                if run("launchctl", &strings(&["print", &service_target()])).is_err() {
+            Manager::Launchd => match run("launchctl", &["print", &service_target()]) {
+                Err(_) => {
                     let file = self.file.to_string_lossy();
-                    run("launchctl", &strings(&["bootstrap", &domain(), &file]))?;
+                    run("launchctl", &["bootstrap", &domain(), &file])?;
                 }
-            }
+                // 이미 올라간 서비스의 `bootstrap` 은 실패한다. 다만 깨끗이 끝난 서비스는 launchd 가 다시 안 띄우니
+                // 여기서 띄운다 — `enable --now` 가 멈춘 서비스를 띄우는 것과 같게.
+                Ok(said) if !runs(&said) => {
+                    run("launchctl", &["kickstart", &service_target()])?;
+                }
+                Ok(_) => {}
+            },
         }
         Ok(())
     }
 
     fn stop(&self, run: Run) -> Result<(), String> {
         match self.manager {
-            Manager::Systemd => run("systemctl", &strings(&["--user", "disable", "--now", UNIT])).map(|_| ()),
+            Manager::Systemd => run("systemctl", &["--user", "disable", "--now", UNIT]).map(|_| ()),
             Manager::Launchd => {
-                if run("launchctl", &strings(&["print", &service_target()])).is_ok() {
+                if run("launchctl", &["print", &service_target()]).is_ok() {
                     let file = self.file.to_string_lossy();
-                    run("launchctl", &strings(&["bootout", &domain(), &file]))?;
+                    run("launchctl", &["bootout", &domain(), &file])?;
                 }
                 Ok(())
             }
@@ -278,7 +284,7 @@ impl Service {
     /// systemd 가 지운 파일을 잊게 한다. 파일을 이미 지운 뒤라 실패해도 등록 상태는 맞다.
     fn reload(&self, run: Run) {
         if self.manager == Manager::Systemd {
-            let _ = run("systemctl", &strings(&["--user", "daemon-reload"]));
+            let _ = run("systemctl", &["--user", "daemon-reload"]);
         }
     }
 
@@ -288,81 +294,69 @@ impl Service {
             std::fs::create_dir_all(parent)?;
         }
         let half = self.file.with_extension(format!("tmp.{}", std::process::id()));
-        std::fs::write(&half, text)?;
-        std::fs::rename(&half, &self.file).inspect_err(|_| {
+        let placed = std::fs::write(&half, text)
+            .and_then(|()| only_the_owner_writes(&half))
+            .and_then(|()| std::fs::rename(&half, &self.file));
+        if placed.is_err() {
             let _ = std::fs::remove_file(&half);
-        })
+        }
+        placed
     }
+}
+
+/// 사람의 umask 를 따르지 않는다 — launchd 는 그룹이나 남이 쓸 수 있는 plist 를 안 읽는다.
+#[cfg(unix)]
+fn only_the_owner_writes(path: &Path) -> std::io::Result<()> {
+    use std::os::unix::fs::PermissionsExt as _;
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o644))
+}
+
+#[cfg(not(unix))]
+fn only_the_owner_writes(_: &Path) -> std::io::Result<()> {
+    Ok(())
+}
+
+/// `launchctl print` 의 답에서 지금 실행 중인가를 읽는다.
+fn runs(said: &str) -> bool {
+    said.lines().any(|line| line.trim() == "state = running")
 }
 
 /// `sudo` 로 불렀는가. 그러면 root 의 서비스가 되어, moai 를 쓰는 사람의 로그인에서 안 돈다.
 pub fn under_sudo(env: impl Fn(&str) -> Option<OsString>) -> bool {
-    euid() == 0 && env("SUDO_USER").is_some_and(|v| !v.is_empty())
+    crate::ctl::place::uid() == 0 && env("SUDO_USER").is_some_and(|v| !v.is_empty())
 }
 
 /// 관리자를 실제로 부른다. 표준 입력은 막는다 — 설치 스크립트의 표준 입력은 스크립트 자체일 수 있다.
-pub fn run(program: &str, args: &[String]) -> Result<String, String> {
+pub fn run(program: &str, args: &[&str]) -> Result<String, String> {
     let out = Command::new(program).args(args).stdin(Stdio::null()).output().map_err(|e| format!("{program}: {e}"))?;
     if out.status.success() {
         return Ok(String::from_utf8_lossy(&out.stdout).into_owned());
     }
     let said = String::from_utf8_lossy(&out.stderr);
-    let first = said.lines().map(str::trim).find(|l| !l.is_empty());
+    // `systemctl enable --now` 는 시작에 실패해도 `Created symlink …` 를 먼저 적는다. 까닭은 그 뒤에 있다.
+    let first = said.lines().map(str::trim).find(|l| !l.is_empty() && !l.starts_with("Created symlink"));
     Err(match first {
         Some(line) => format!("{program}: {line}"),
         None => format!("{program}: {}", out.status),
     })
 }
 
-fn strings(args: &[&str]) -> Vec<String> {
-    args.iter().map(|a| a.to_string()).collect()
-}
-
 fn domain() -> String {
-    format!("gui/{}", euid())
+    format!("gui/{}", crate::ctl::place::uid())
 }
 
 fn service_target() -> String {
     format!("{}/{LABEL}", domain())
 }
 
-#[cfg(unix)]
-fn euid() -> u32 {
-    // SAFETY: geteuid 는 인자가 없고 실패하지 않는다.
-    unsafe { libc::geteuid() }
-}
-
-#[cfg(not(unix))]
-fn euid() -> u32 {
-    1
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::scratch::Scratch;
     use std::cell::RefCell;
 
-    struct Scratch(PathBuf);
-
-    impl Scratch {
-        fn new() -> Scratch {
-            static NTH: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-            let n = NTH.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            let path = std::env::temp_dir().join(format!("moai-service-{}-{n}", std::process::id()));
-            let _ = std::fs::remove_dir_all(&path);
-            std::fs::create_dir_all(&path).unwrap();
-            Scratch(path)
-        }
-
-        fn service(&self, manager: Manager) -> Service {
-            Service { manager, file: self.0.join("user").join("the-service") }
-        }
-    }
-
-    impl Drop for Scratch {
-        fn drop(&mut self) {
-            let _ = std::fs::remove_dir_all(&self.0);
-        }
+    fn service_in(s: &Scratch, manager: Manager) -> Service {
+        Service { manager, file: s.path().join("user").join("the-service") }
     }
 
     /// 부른 명령을 적어 두는 가짜 관리자. `refuse` 에 든 낱말이 줄에 있으면 실패한다.
@@ -377,7 +371,7 @@ mod tests {
             Fake { calls: RefCell::new(Vec::new()), refuse, said: "" }
         }
 
-        fn run(&self, program: &str, args: &[String]) -> Result<String, String> {
+        fn run(&self, program: &str, args: &[&str]) -> Result<String, String> {
             let line = format!("{program} {}", args.join(" "));
             self.calls.borrow_mut().push(line.clone());
             match self.refuse.iter().any(|w| line.contains(w)) {
@@ -461,49 +455,57 @@ mod tests {
 
     #[test]
     fn a_failed_registration_leaves_no_file_and_an_old_one_stays() {
-        let s = Scratch::new();
-        let svc = s.service(Manager::Systemd);
+        let s = Scratch::new("service");
+        let svc = service_in(&s, Manager::Systemd);
         let fake = Fake::new(&["enable"]);
-        let run = |p: &str, a: &[String]| fake.run(p, a);
+        let run = |p: &str, a: &[&str]| fake.run(p, a);
         let got = svc.install(Path::new(EXE), None, &run);
         assert_eq!(got, Err(Trouble::Refused("no".into())));
         assert!(!svc.registered(), "실패했는데 파일이 남았다");
 
         // 전부터 있던 등록은 실패해도 안 지운다 — 관리자가 잠시 안 답했다고 등록을 잃으면 안 된다.
         let ok = Fake::new(&[]);
-        assert_eq!(svc.install(Path::new(EXE), None, &|p: &str, a: &[String]| ok.run(p, a)), Ok(true));
+        assert_eq!(svc.install(Path::new(EXE), None, &|p: &str, a: &[&str]| ok.run(p, a)), Ok(true));
         assert_eq!(svc.install(Path::new(EXE), None, &run), Err(Trouble::Refused("no".into())));
         assert!(svc.registered(), "전부터 있던 등록을 지웠다");
     }
 
     #[test]
     fn launchd_loads_once_and_unloads_only_what_is_loaded() {
-        let s = Scratch::new();
-        let svc = s.service(Manager::Launchd);
+        let s = Scratch::new("service");
+        let svc = service_in(&s, Manager::Launchd);
         let file = svc.file.display().to_string();
         let domain = domain();
 
         let unloaded = Fake::new(&["print"]);
-        assert_eq!(svc.install(Path::new(EXE), None, &|p: &str, a: &[String]| unloaded.run(p, a)), Ok(true));
+        assert_eq!(svc.install(Path::new(EXE), None, &|p: &str, a: &[&str]| unloaded.run(p, a)), Ok(true));
         assert_eq!(
             unloaded.calls(),
             [format!("launchctl print {domain}/{LABEL}"), format!("launchctl bootstrap {domain} {file}")]
         );
 
-        let loaded = Fake::new(&[]);
-        assert_eq!(svc.install(Path::new(EXE), None, &|p: &str, a: &[String]| loaded.run(p, a)), Ok(false));
+        let loaded = Fake { calls: RefCell::default(), refuse: &[], said: "\tstate = running\n" };
+        assert_eq!(svc.install(Path::new(EXE), None, &|p: &str, a: &[&str]| loaded.run(p, a)), Ok(false));
         assert_eq!(loaded.calls(), [format!("launchctl print {domain}/{LABEL}")], "이미 올라간 것을 또 올렸다");
+
+        // 올라가 있어도 멈춰 있으면 지금 띄운다 — `moai daemon stop` 의 깨끗한 종료는 launchd 가 다시 안 띄운다.
+        let stopped = Fake { calls: RefCell::default(), refuse: &[], said: "\tstate = not running\n" };
+        assert_eq!(svc.install(Path::new(EXE), None, &|p: &str, a: &[&str]| stopped.run(p, a)), Ok(false));
+        assert_eq!(
+            stopped.calls(),
+            [format!("launchctl print {domain}/{LABEL}"), format!("launchctl kickstart {domain}/{LABEL}")]
+        );
 
         // 안 올라가 있으면 `bootout` 을 안 부른다 — 부르면 실패해 파일을 못 지운다.
         let gone = Fake::new(&["print"]);
-        assert_eq!(svc.uninstall(&|p: &str, a: &[String]| gone.run(p, a)), Ok(true));
+        assert_eq!(svc.uninstall(&|p: &str, a: &[&str]| gone.run(p, a)), Ok(true));
         assert_eq!(gone.calls(), [format!("launchctl print {domain}/{LABEL}")]);
         assert!(!svc.registered());
 
         let unloaded = Fake::new(&["print"]);
-        assert_eq!(svc.install(Path::new(EXE), None, &|p: &str, a: &[String]| unloaded.run(p, a)), Ok(true));
+        assert_eq!(svc.install(Path::new(EXE), None, &|p: &str, a: &[&str]| unloaded.run(p, a)), Ok(true));
         let loaded = Fake::new(&[]);
-        assert_eq!(svc.uninstall(&|p: &str, a: &[String]| loaded.run(p, a)), Ok(true));
+        assert_eq!(svc.uninstall(&|p: &str, a: &[&str]| loaded.run(p, a)), Ok(true));
         assert_eq!(
             loaded.calls(),
             [format!("launchctl print {domain}/{LABEL}"), format!("launchctl bootout {domain} {file}")]
@@ -512,18 +514,18 @@ mod tests {
 
     #[test]
     fn a_refusal_to_stop_keeps_the_registration() {
-        let s = Scratch::new();
-        let svc = s.service(Manager::Systemd);
+        let s = Scratch::new("service");
+        let svc = service_in(&s, Manager::Systemd);
         let ok = Fake::new(&[]);
-        assert_eq!(svc.install(Path::new(EXE), None, &|p: &str, a: &[String]| ok.run(p, a)), Ok(true));
+        assert_eq!(svc.install(Path::new(EXE), None, &|p: &str, a: &[&str]| ok.run(p, a)), Ok(true));
         let no = Fake::new(&["disable"]);
-        assert_eq!(svc.uninstall(&|p: &str, a: &[String]| no.run(p, a)), Err(Trouble::Refused("no".into())));
+        assert_eq!(svc.uninstall(&|p: &str, a: &[&str]| no.run(p, a)), Err(Trouble::Refused("no".into())));
         assert!(svc.registered(), "멈추지 못했는데 파일을 지웠다");
     }
 
     #[test]
     fn sudo_is_read_only_when_the_effective_user_is_root() {
-        let root = euid() == 0;
+        let root = crate::ctl::place::uid() == 0;
         assert_eq!(under_sudo(|_| Some("me".into())), root);
         assert!(!under_sudo(|_| None));
         assert!(!under_sudo(|_| Some("".into())));
@@ -531,57 +533,82 @@ mod tests {
 
     #[test]
     fn a_path_with_a_line_break_is_refused_before_anything_is_written() {
-        let s = Scratch::new();
-        let svc = s.service(Manager::Systemd);
+        let s = Scratch::new("service");
+        let svc = service_in(&s, Manager::Systemd);
         let fake = Fake::new(&[]);
-        let got = svc.install(Path::new("/bad\npath/moai"), None, &|p: &str, a: &[String]| fake.run(p, a));
-        assert_eq!(got, Err(Trouble::BadPath));
+        let got = svc.install(Path::new("/bad\npath/moai"), None, &|p: &str, a: &[&str]| fake.run(p, a));
+        assert_eq!(got, Err(Trouble::BadPath("/bad\npath/moai".into())));
         assert!(!svc.registered());
         assert!(fake.calls().is_empty());
+
+        // 고칠 곳은 고정할 디렉터리다 — 바이너리를 대면 멀쩡한 경로를 탓한다.
+        let got = svc.install(Path::new(EXE), Some(Path::new("/bad\ndir")), &|p: &str, a: &[&str]| fake.run(p, a));
+        assert_eq!(got, Err(Trouble::BadPath("/bad\ndir".into())));
+        assert!(!svc.registered());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_cause_is_read_past_the_line_about_the_symlink() {
+        let got = run("sh", &["-c", "echo 'Created symlink a -> b.' >&2; echo >&2; echo 'Job failed.' >&2; exit 1"]);
+        assert_eq!(got, Err("sh: Job failed.".to_string()));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_failed_write_leaves_no_half_file() {
+        let s = Scratch::new("service-half");
+        let dir = s.path().join("user");
+        std::fs::create_dir_all(dir.join("the-service")).unwrap();
+        // 옮길 자리가 디렉터리라 `rename` 이 실패한다.
+        let svc = service_in(&s, Manager::Systemd);
+        assert!(svc.write("x").is_err());
+        let left: Vec<_> = std::fs::read_dir(&dir).unwrap().map(|e| e.unwrap().file_name()).collect();
+        assert_eq!(left, ["the-service"], "반쪽 파일이 남았다");
     }
 
     #[test]
     fn restart_needs_our_file_this_binary_and_a_running_service() {
         for manager in [Manager::Systemd, Manager::Launchd] {
-            let s = Scratch::new();
-            let svc = s.service(manager);
+            let s = Scratch::new("service");
+            let svc = service_in(&s, manager);
             let restart_word = if manager == Manager::Systemd { "restart" } else { "kickstart" };
             let running = if manager == Manager::Systemd { "" } else { "\tstate = running\n" };
 
             // 파일이 없으면 관리자를 아예 안 부른다 — 서비스가 없는 사람의 `moai update` 는 그대로다.
             let fake = Fake { calls: RefCell::default(), refuse: &[], said: running };
-            assert!(!svc.restart(Path::new(EXE), &|p: &str, a: &[String]| fake.run(p, a)));
+            assert!(!svc.restart(Path::new(EXE), &|p: &str, a: &[&str]| fake.run(p, a)));
             assert!(fake.calls().is_empty(), "{:?}", fake.calls());
 
             let ok = Fake::new(&["print"]);
-            svc.install(Path::new(EXE), None, &|p: &str, a: &[String]| ok.run(p, a)).unwrap();
+            svc.install(Path::new(EXE), None, &|p: &str, a: &[&str]| ok.run(p, a)).unwrap();
 
             // 실행 중이면 부른다.
             let fake = Fake { calls: RefCell::default(), refuse: &[], said: running };
-            assert!(svc.restart(Path::new(EXE), &|p: &str, a: &[String]| fake.run(p, a)));
+            assert!(svc.restart(Path::new(EXE), &|p: &str, a: &[&str]| fake.run(p, a)));
             assert!(fake.calls().iter().any(|c| c.contains(restart_word)), "{:?}", fake.calls());
 
             // 다른 바이너리면 안 부른다.
             let fake = Fake { calls: RefCell::default(), refuse: &[], said: running };
-            assert!(!svc.restart(Path::new("/other/moai"), &|p: &str, a: &[String]| fake.run(p, a)));
+            assert!(!svc.restart(Path::new("/other/moai"), &|p: &str, a: &[&str]| fake.run(p, a)));
             assert!(fake.calls().is_empty(), "{:?}", fake.calls());
 
             // 사람이 멈춘 서비스는 안 띄운다.
             let stopped_words: &'static [&'static str] = if manager == Manager::Systemd { &["is-active"] } else { &[] };
             let fake = Fake { calls: RefCell::default(), refuse: stopped_words, said: "\tstate = not running\n" };
-            assert!(!svc.restart(Path::new(EXE), &|p: &str, a: &[String]| fake.run(p, a)));
+            assert!(!svc.restart(Path::new(EXE), &|p: &str, a: &[&str]| fake.run(p, a)));
             assert!(!fake.calls().iter().any(|c| c.contains(restart_word)), "{:?}", fake.calls());
 
             // 다시 시작이 실패하면 거짓을 답한다.
             let refused: &'static [&'static str] =
                 if manager == Manager::Systemd { &["restart"] } else { &["kickstart"] };
             let fake = Fake { calls: RefCell::default(), refuse: refused, said: running };
-            assert!(!svc.restart(Path::new(EXE), &|p: &str, a: &[String]| fake.run(p, a)));
+            assert!(!svc.restart(Path::new(EXE), &|p: &str, a: &[&str]| fake.run(p, a)));
 
             // 손으로 쓴 파일이면 안 부른다.
             std::fs::write(&svc.file, format!("ExecStart=\"{EXE}\" daemon start\n<string>{EXE}</string>\n")).unwrap();
             let fake = Fake { calls: RefCell::default(), refuse: &[], said: running };
-            assert!(!svc.restart(Path::new(EXE), &|p: &str, a: &[String]| fake.run(p, a)));
+            assert!(!svc.restart(Path::new(EXE), &|p: &str, a: &[&str]| fake.run(p, a)));
             assert!(fake.calls().is_empty(), "{:?}", fake.calls());
         }
     }

@@ -57,8 +57,8 @@ pub mod code {
     /// 다른 판의 데몬이 이미 떠 있다(moai-5n6m.x8t) — 고칠 길은 `moai daemon stop` 뒤 `start` 다. 같은 판이면 실패가
     /// 아니다(종료 0).
     pub const VERSION_MISMATCH: &str = "version_mismatch";
-    /// 서비스 관리자가 없거나 등록을 거절했다(moai-upq5). `error` 와 가르는 까닭: 설치 스크립트와 받는 쪽이 이것을 보고
-    /// "CLI 는 그대로 쓸 수 있다" 고 읽는다.
+    /// 서비스 관리자가 없거나 등록을 거절했다(moai-upq5). `error` 와 가르는 까닭: 받는 쪽이 이것을 보고 "CLI 는 그대로 쓸 수
+    /// 있다" 고 읽는다.
     pub const SERVICE_FAILED: &str = "service_failed";
 }
 

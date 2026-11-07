@@ -139,7 +139,7 @@ mod os {
 mod os {
     use super::*;
     use crate::daemon::client::{self, Hello, Probe};
-    use crate::daemon::service::{self, Service, Trouble};
+    use crate::daemon::service::{self, Service, Trouble, Unavailable};
     use crate::daemon::{SHUTDOWN, rpc, server};
     use crate::i18n::Lang;
     use std::io::Write as _;
@@ -380,7 +380,7 @@ mod os {
         let path = socket_path(lang)?;
         let meta = own_or_refuse(lang, &path)?;
         let mut s = Status::new(true, Some(shown(&path)));
-        s.service = Service::native().flatten().filter(Service::registered).map(|svc| shown(&svc.file));
+        s.service = Service::native().ok().filter(Service::registered).map(|svc| shown(&svc.file));
         match client::probe(&path) {
             Probe::Running(hello) => {
                 s.running = true;
@@ -399,14 +399,13 @@ mod os {
 
     /// 이 OS 의 서비스. 관리자가 없거나 집을 모르면 등록할 수 없다.
     fn the_service(lang: Lang) -> R<Service> {
-        match Service::native() {
-            Some(Some(svc)) => Ok(svc),
-            Some(None) => Err(failed(say(lang, "daemon.service.no_home"), &[], code::ERROR)),
-            None => Err(failed(say(lang, "daemon.service.unsupported"), &[], code::UNSUPPORTED)),
-        }
+        Service::native().map_err(|why| match why {
+            Unavailable::NoHome => failed(say(lang, "daemon.service.no_home"), &[], code::ERROR),
+            Unavailable::NoManager => failed(say(lang, "daemon.service.unsupported"), &[], code::UNSUPPORTED),
+        })
     }
 
-    fn trouble(lang: Lang, svc: &Service, exe: &str, why: Trouble) -> Fail {
+    fn trouble(lang: Lang, svc: &Service, why: Trouble) -> Fail {
         let file = shown(&svc.file);
         let manager = svc.manager.name();
         match why {
@@ -416,7 +415,11 @@ mod os {
             Trouble::OtherBinary => {
                 failed(say(lang, "daemon.service.other_binary"), &[("service", &file)], code::ALREADY_EXISTS)
             }
-            Trouble::BadPath => failed(say(lang, "daemon.service.bad_path"), &[("exe", exe)], code::BAD_INPUT),
+            Trouble::BadPath(path) => failed(
+                say(lang, "daemon.service.bad_path"),
+                &[("path", &crate::text::one_line(&path))],
+                code::BAD_INPUT,
+            ),
             Trouble::File(said) => {
                 failed(say(lang, "daemon.service.no_file"), &[("service", &file), ("said", &said)], code::ERROR)
             }
@@ -437,9 +440,11 @@ mod os {
         let exe = std::env::current_exe().map_err(|e| Fail::new(e.to_string()))?;
         let exe = crate::path::real(&exe);
         let path = socket_path(lang)?;
-        let pin = path.parent().and_then(|dir| svc.manager.pin(dir, |k| std::env::var_os(k)));
+        // 서비스는 이 셸의 디렉터리에서 돌지 않는다 — 상대 경로를 그대로 적으면 다른 소켓을 본다.
+        let dir = path.parent().and_then(|dir| std::path::absolute(dir).ok());
+        let pin = dir.as_deref().and_then(|dir| svc.manager.pin(dir, |k| std::env::var_os(k)));
         let shown_exe = shown(&exe);
-        let installed = svc.install(&exe, pin, &service::run).map_err(|why| trouble(lang, &svc, &shown_exe, why))?;
+        let installed = svc.install(&exe, pin, &service::run).map_err(|why| trouble(lang, &svc, why))?;
         // 관리자가 띄운 데몬이 답하기를 잠깐 기다린다. 못 붙어도 등록은 성공이다.
         let deadline = Instant::now() + WAIT;
         let hello = loop {
@@ -489,9 +494,14 @@ mod os {
     pub fn uninstall(ctx: &Ctx) -> R<Vec<String>> {
         let lang = ctx.lang();
         let svc = the_service(lang)?;
+        // `install` 과 같은 금이다. sudo 면 root 의 도메인과 집을 보아 "지울 것이 없다" 로 답하거나, launchd 에서는 사람의
+        // plist 만 지우고 올라간 서비스는 그대로 둔다.
+        if service::under_sudo(|k| std::env::var_os(k)) {
+            return Err(failed(say(lang, "daemon.service.sudo_uninstall"), &[], code::REFUSED));
+        }
         let file = shown(&svc.file);
         let manager = svc.manager.name();
-        let uninstalled = svc.uninstall(&service::run).map_err(|why| trouble(lang, &svc, "", why))?;
+        let uninstalled = svc.uninstall(&service::run).map_err(|why| trouble(lang, &svc, why))?;
         if ctx.json {
             return super::super::json_line(&Uninstalled { uninstalled, manager, service: &file });
         }

@@ -20,7 +20,7 @@ does not tag — see `CONTRIBUTING.md`.
 ### Changed
 
 - A first install with `install.sh` from a terminal now registers the daemon as a user service. Nothing is registered, and the output does not change, when standard output is not a terminal; as root it says so in one line. A failed registration does not fail the install. Upgrades never change registration, so upgrading an existing moai does not give it a service. `install.ps1` does not register anything. (moai-upq5.nwr)
-- `moai update` restarts a running service that `moai daemon install` registered for that binary, and `--json` then has `daemon_restarted: true`. Anywhere else it prints the restart notice as before, and without a service nothing changes. (moai-upq5.1g6)
+- `moai update` restarts a running service that `moai daemon install` registered for that binary, and `--json` then has `daemon_restarted: true`. If the new version has not answered after 5 seconds it says so, and `--json` has `daemon_restart: true`. Anywhere else it prints the restart notice as before, and without a service nothing changes. (moai-upq5.1g6)
 
 ## [1.0.0] - 2026-11-06
 

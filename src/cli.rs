@@ -1478,19 +1478,21 @@ pub enum DaemonCmd {
                                socket}, and pid, version, same_version once
                                a daemon answers
 
-  Running it again changes nothing: installed is false. The first install of
-  moai runs this by default; moai update never does. A service file moai did
-  not write is left alone and refused, and so is one that runs another moai
-  (moai daemon uninstall first). Under sudo it is refused, because it would
-  become root's service. Without a service manager it stops with the code
-  service_failed and leaves no file; the CLI does not need the daemon. There
-  is no service on Windows yet: the code is unsupported.")]
+  Running it again keeps the file and starts a stopped service: installed is
+  false. The first install of moai runs this by default; moai update never
+  does. A service file moai did not write is left alone and refused, and so
+  is one that runs another moai (moai daemon uninstall first). Under sudo it
+  is refused, because it would become root's service. Without a service
+  manager it stops with the code service_failed and leaves no file; the CLI
+  does not need the daemon. There is no service on Windows yet: the code is
+  unsupported.")]
     Install,
     /// Stop the service and remove its file
     #[command(after_help = "  --json gives {uninstalled, manager, service}. With no service file,
   uninstalled is false and it still exits 0. A service file moai did not
-  write is left alone and refused. A daemon you started yourself keeps
-  running. moai itself stays.")]
+  write is left alone and refused. Under sudo it is refused, because it would
+  look at root's service. A daemon you started yourself keeps running. moai
+  itself stays.")]
     Uninstall,
 }
 

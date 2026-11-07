@@ -32909,16 +32909,13 @@ fn update_with_service(
         std::fs::write(dir.join("moai-daemon.service"), unit.replace("<exe>", &real.display().to_string())).unwrap();
     }
     let replacement = s.path().join("replacement");
-    std::fs::write(
+    write_exe(
         &replacement,
-        format!(
+        &format!(
             "#!/bin/sh\nif [ -e '{}' ]; then same=true; else same=false; fi\nprintf '{{\"running\":true,\"same_version\":%s,\"version\":\"old\",\"pid\":42}}\\n' \"$same\"\n",
             restarted.display()
         ),
-    )
-    .unwrap();
-    use std::os::unix::fs::PermissionsExt as _;
-    std::fs::set_permissions(&replacement, std::fs::Permissions::from_mode(0o755)).unwrap();
+    );
     let (url, server) = serving_script(format!("mv '{}' '{}'\nexit 0\n", replacement.display(), real.display()), 1);
     let path = format!("{}:{}", fake.display(), std::env::var("PATH").unwrap());
     let env = [
@@ -32952,7 +32949,7 @@ fn update_restarts_the_running_service_it_registered() {
 
     let (out, _) = update_with_service(Some(OUR_UNIT), 0, 0, true, &[]);
     assert!(text(&out).contains("restarted the daemon service"), "{}", text(&out));
-    assert!(!text(&out).contains("still running"), "{}", text(&out));
+    assert!(!text(&out).contains("still runs"), "{}", text(&out));
 }
 
 /// **못 하는 자리에서는 지금까지의 알림으로 돌아간다** — 서비스가 없는 사람, 사람이 멈춘 서비스, 손으로 쓴 파일, 다른 바이너리의 파일,
@@ -32993,6 +32990,13 @@ fn update_falls_back_to_the_notice_when_it_cannot_restart() {
         assert_eq!(v.get("daemon_restarted"), None, "{name}: {v}");
         assert_eq!(calls, want, "{name}");
     }
+
+    // 사람에게 보이는 글은 갈린다 — 관리자가 거절했으면 옛 데몬이 도는 것으로 알리고, 받았는데 새 판이 안 답하면 "아직 돈다" 고 말하지 않는다.
+    let (out, _) = update_with_service(Some(OUR_UNIT), 0, 1, false, &[]);
+    assert!(text(&out).contains("still runs"), "{}", text(&out));
+    let (out, _) = update_with_service(Some(OUR_UNIT), 0, 0, false, &[]);
+    assert!(text(&out).contains("has not answered yet"), "{}", text(&out));
+    assert!(!text(&out).contains("still runs"), "{}", text(&out));
 }
 
 /// **받을 저장소는 사용자 설정에서 오고 `MOAI_REPO` 가 이긴다. 저장소의 `.moai/config.toml` 은 안 읽는다**

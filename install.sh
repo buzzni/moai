@@ -294,7 +294,7 @@ if [ -e "$dir/moai" ] || [ -L "$dir/moai" ]; then
   first=0
 fi
 had=
-if { [ -e "$dir/moai" ] || [ -L "$dir/moai" ]; } && [ "$force" != 1 ]; then
+if [ "$first" = 0 ] && [ "$force" != 1 ]; then
   [ ! -L "$dir/moai" ] || refuse "$dir/moai 는 다른 자리를 가리키는 링크다"
   had=$(ours "$dir/moai") || refuse "$dir/moai 은 이 moai 가 아니다"
 fi
@@ -384,7 +384,7 @@ else
 fi
 on_path "방금 깐 것은"
 
-# **첫 설치면 데몬을 서비스로 등록한다**(moai-upq5, 사람의 결정 2026-11-06). 넷을 다 지나야 부른다.
+# **첫 설치면 데몬을 서비스로 등록한다**(moai-upq5, 사람의 결정 2026-11-06). 빼라고 하지 않았고 아래를 다 지나야 부른다.
 #
 # - **표준 출력이 터미널이다.** CI·Docker·다른 제품의 설치 프로그램에 백그라운드 프로세스를 남기지 않는다. 그 자리에서는 **아무
 #   말도 안 한다** — 자동화가 읽는 출력이 등록 기능 전과 바이트째 같아야 한다. 표준 입력은 안 본다. `curl … | sh` 의 표준

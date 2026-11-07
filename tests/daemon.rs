@@ -2305,6 +2305,37 @@ mod service {
         assert_eq!(std::fs::read_to_string(m.file()).unwrap(), text, "두 번째가 파일을 바꿨다");
     }
 
+    /// 서비스는 이 셸의 디렉터리에서 돌지 않는다 — 상대 경로를 그대로 적으면 다른 소켓을 본다.
+    #[test]
+    fn a_relative_socket_directory_is_written_as_an_absolute_one() {
+        let m = Managed::new(Manager::Idles);
+        let out = m.cmd(&["daemon", "install"]).env("MOAI_CTL_DIR", "rel").output().unwrap();
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        let text = std::fs::read_to_string(m.file()).unwrap();
+        let want = m.0.0.join("rel").display().to_string();
+        assert!(text.contains(&want), "상대 경로를 그대로 적었다\n{text}");
+    }
+
+    /// launchd 는 그룹이 쓸 수 있는 plist 를 안 읽는다 — 사람의 umask 를 따르면 그 자리에서만 등록이 실패한다.
+    #[test]
+    fn the_service_file_ignores_a_loose_umask() {
+        use std::os::unix::fs::PermissionsExt as _;
+        use std::os::unix::process::CommandExt as _;
+        let m = Managed::new(Manager::Starts);
+        let mut cmd = m.cmd(&["daemon", "install", "--json"]);
+        // SAFETY: umask(2) is async-signal-safe, so it may run between fork and exec.
+        unsafe {
+            cmd.pre_exec(|| {
+                libc::umask(0o002);
+                Ok(())
+            });
+        }
+        let out = cmd.output().unwrap();
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        let mode = std::fs::metadata(m.file()).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o644, "{mode:o}");
+    }
+
     #[test]
     fn install_succeeds_when_no_daemon_answers_yet() {
         let m = Managed::new(Manager::Idles);
