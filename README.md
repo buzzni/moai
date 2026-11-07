@@ -115,6 +115,19 @@ curl -fsSL https://raw.githubusercontent.com/buzzni/moai/main/install.sh \
   | sh -s -- --dir ~/bin --version v0.1.0
 ```
 
+A first install from a terminal also registers the [local daemon](docs/daemon.md)
+as a user service that starts when you log in: systemd on Linux, launchd on macOS.
+The CLI does not need it. Skip it with `--no-service` or `MOAI_NO_SERVICE=1`:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/buzzni/moai/main/install.sh | sh -s -- --no-service
+```
+
+Nothing is registered when standard output is not a terminal (CI, Docker builds,
+another program's installer) or when you install as root. If registration fails,
+the install still succeeds. Upgrades never change it: `moai daemon install` and
+`moai daemon uninstall` do that later.
+
 ### Windows
 
 On Windows, `install.ps1` does the same job in PowerShell. Download it, then run
@@ -134,7 +147,7 @@ It follows the same rules as `install.sh` — it checks the zip against
 does not recognise alone unless you pass `-Force`. It installs to
 `%LOCALAPPDATA%\Programs\moai`; pick another directory with `-Dir`, or a
 specific release with `-Version v0.17.0`. It does not edit your `PATH`: when that
-directory is not on it, it says so in one line.
+directory is not on it, it says so in one line. It does not register a service.
 
 The Windows builds are `x86_64-pc-windows-msvc` and `aarch64-pc-windows-msvc`,
 with the C runtime linked in, so they run on a clean machine without the Visual C++ redistributable.
@@ -152,7 +165,8 @@ it with `--dir <the directory of the running moai> --force`, so it upgrades the
 binary you are running wherever you put it. It stops before fetching anything,
 with one line saying what to do instead, for a build from source (cargo built it
 — rebuild), for a binary not named `moai`, for a directory you cannot write, and
-on a machine the releases do not cover.
+on a machine the releases do not cover. A running daemon service that
+`moai daemon install` registered for this binary is restarted on the new version.
 
 On Windows it fetches `install.ps1` instead and runs it with Windows PowerShell
 (`-Dir <that directory> -Force`), and the binary has to be named `moai.exe`.
