@@ -2161,3 +2161,236 @@ fn write_on_the_lock_outlives_the_stop(stop: impl FnOnce(&mut Wire, u64)) {
     assert!(journal.iter().any(|l| l.contains("written while stopping")), "답한 쓰기가 저널에 없다");
     assert!(!journal.iter().any(|l| l.contains("sent after the stop")), "`stopping` 으로 거절한 쓰기가 섰다");
 }
+
+/// `moai daemon install·uninstall` — **가짜 관리자만 있는 PATH 로 돈다**(moai-upq5). 진짜 `systemctl`, `launchctl` 에 닿으면
+/// 시험이 사람의 로그인에 서비스를 남기므로, 이 모듈의 명령은 모두 [`Managed::cmd`] 를 지난다.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+mod service {
+    use super::*;
+
+    const LINUX: bool = cfg!(target_os = "linux");
+    const TOOL: &str = if LINUX { "systemctl" } else { "launchctl" };
+
+    #[derive(Clone, Copy, PartialEq)]
+    enum Manager {
+        /// 등록을 받아 실제 데몬을 띄운다.
+        Starts,
+        /// 등록을 받지만 데몬은 안 뜬다.
+        Idles,
+        /// 등록을 거절한다.
+        Refuses,
+        /// PATH 에 없다.
+        Missing,
+    }
+
+    struct Managed(Fence);
+
+    impl Managed {
+        fn new(manager: Manager) -> Managed {
+            let f = Fence::new();
+            let bin = f.0.join("bin");
+            std::fs::create_dir(&bin).unwrap();
+            if manager != Manager::Missing {
+                let (calls, loaded) = (f.0.join("calls"), f.0.join("loaded"));
+                let (calls, loaded) = (calls.display(), loaded.display());
+                let start = match manager {
+                    Manager::Starts => format!(": > '{loaded}'; '{BIN}' daemon start --json >/dev/null 2>&1 &\nexit 0"),
+                    Manager::Idles => format!(": > '{loaded}'; exit 0"),
+                    _ => "echo 'Failed to connect to bus' >&2; exit 1".to_string(),
+                };
+                let body = format!(
+                    "#!/bin/sh\nprintf '%s\\n' \"$*\" >> '{calls}'\ncase \"$*\" in\n\
+                     *'enable --now'* | bootstrap*)\n{start}\n;;\n\
+                     *'disable --now'* | bootout*)\n'{BIN}' daemon stop >/dev/null 2>&1; /bin/rm -f '{loaded}'; exit 0\n;;\n\
+                     print*)\n[ -e '{loaded}' ]; exit $?\n;;\nesac\nexit 0\n"
+                );
+                // 이 프로세스가 쓴 파일을 바로 띄우면 옆 시험의 fork 와 겹쳐 ETXTBSY 다 — 자식이 옮겨 적게 한다.
+                let source = f.0.join("fake.src");
+                std::fs::write(&source, body).unwrap();
+                let tool = bin.join(TOOL);
+                assert!(Command::new("cp").arg(&source).arg(&tool).status().unwrap().success());
+                assert!(Command::new("chmod").arg("755").arg(&tool).status().unwrap().success());
+            }
+            Managed(f)
+        }
+
+        fn cmd(&self, args: &[&str]) -> Command {
+            let mut cmd = self.0.cmd(args);
+            cmd.env("PATH", self.0.0.join("bin"));
+            cmd
+        }
+
+        fn run(&self, args: &[&str]) -> Output {
+            self.cmd(args).output().unwrap()
+        }
+
+        fn json(&self, args: &[&str]) -> Value {
+            let out = self.run(args);
+            assert!(out.status.success(), "moai {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+            serde_json::from_slice(&out.stdout).unwrap()
+        }
+
+        fn refused(&self, args: &[&str]) -> Value {
+            let out = self.run(args);
+            assert!(
+                !out.status.success(),
+                "moai {args:?} 가 넘어지지 않았다: {}",
+                String::from_utf8_lossy(&out.stdout)
+            );
+            serde_json::from_slice(&out.stderr).unwrap()
+        }
+
+        fn file(&self) -> PathBuf {
+            let home = self.0.0.join("home");
+            match LINUX {
+                true => home.join(".config/systemd/user/moai-daemon.service"),
+                false => home.join("Library/LaunchAgents/com.buzzni.moai-daemon.plist"),
+            }
+        }
+
+        fn calls(&self) -> String {
+            std::fs::read_to_string(self.0.0.join("calls")).unwrap_or_default()
+        }
+
+        fn place(&self, text: &str) {
+            std::fs::create_dir_all(self.file().parent().unwrap()).unwrap();
+            std::fs::write(self.file(), text).unwrap();
+        }
+    }
+
+    impl Drop for Managed {
+        fn drop(&mut self) {
+            let _ = self.0.run(&["daemon", "stop"]);
+        }
+    }
+
+    fn real_bin() -> String {
+        std::fs::canonicalize(BIN).unwrap().display().to_string()
+    }
+
+    #[test]
+    fn install_registers_starts_and_reads_the_same_the_second_time() {
+        let m = Managed::new(Manager::Starts);
+        let first = m.json(&["daemon", "install", "--json"]);
+        assert_eq!(first["installed"], true, "{first}");
+        assert_eq!(first["manager"], if LINUX { "systemd" } else { "launchd" }, "{first}");
+        assert_eq!(first["service"], m.file().display().to_string(), "{first}");
+        assert_eq!(first["exe"], real_bin(), "{first}");
+        assert_eq!(first["running"], true, "{first}");
+        assert_eq!(first["same_version"], true, "{first}");
+        assert!(first["pid"].is_u64(), "{first}");
+
+        let text = std::fs::read_to_string(m.file()).unwrap();
+        assert!(text.contains("moai daemon install wrote this file"), "{text}");
+        assert!(text.contains(&real_bin()), "{text}");
+        // 소켓 디렉터리를 사람이 정했으니(MOAI_CTL_DIR) 서비스도 같은 곳을 본다.
+        assert!(text.contains("MOAI_CTL_DIR"), "{text}");
+        assert!(text.contains(&m.0.0.display().to_string()), "{text}");
+        if LINUX {
+            assert!(
+                m.calls().contains("--user daemon-reload\n--user enable --now moai-daemon.service\n"),
+                "{}",
+                m.calls()
+            );
+        } else {
+            assert!(m.calls().contains("bootstrap gui/"), "{}", m.calls());
+        }
+
+        let status = m.json(&["daemon", "status", "--json"]);
+        assert_eq!(status["service"], m.file().display().to_string(), "{status}");
+        assert_eq!(status["running"], true, "{status}");
+
+        let second = m.json(&["daemon", "install", "--json"]);
+        assert_eq!(second["installed"], false, "두 번째는 이미 등록된 것이다 — {second}");
+        assert_eq!(std::fs::read_to_string(m.file()).unwrap(), text, "두 번째가 파일을 바꿨다");
+    }
+
+    #[test]
+    fn install_succeeds_when_no_daemon_answers_yet() {
+        let m = Managed::new(Manager::Idles);
+        let out = m.run(&["daemon", "install"]);
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        let said = String::from_utf8_lossy(&out.stdout);
+        assert!(said.contains("It starts when you log in"), "{said}");
+        assert!(said.contains("no daemon answers"), "{said}");
+        assert!(m.file().exists());
+    }
+
+    #[test]
+    fn a_file_moai_did_not_write_is_refused_both_ways_and_left_as_it_was() {
+        let m = Managed::new(Manager::Starts);
+        let mine = format!("[Service]\nExecStart={} daemon start\n", real_bin());
+        m.place(&mine);
+        for verb in ["install", "uninstall"] {
+            let err = m.refused(&["daemon", verb, "--json"]);
+            assert_eq!(err["code"], "already_exists", "{verb}: {err}");
+            assert_eq!(std::fs::read_to_string(m.file()).unwrap(), mine, "{verb} 가 사람의 파일을 바꿨다");
+        }
+        assert_eq!(m.calls(), "", "거절했는데 관리자를 불렀다");
+        // 파일이 있으면 등록된 것이다 — 손으로 쓴 것도 그렇다.
+        assert_eq!(m.json(&["daemon", "status", "--json"])["service"], m.file().display().to_string());
+    }
+
+    #[test]
+    fn a_service_of_another_moai_is_not_taken_over() {
+        let m = Managed::new(Manager::Starts);
+        m.json(&["daemon", "install", "--json"]);
+        let other = std::fs::read_to_string(m.file()).unwrap().replace(&real_bin(), "/other/place/moai");
+        m.place(&other);
+        let err = m.refused(&["daemon", "install", "--json"]);
+        assert_eq!(err["code"], "already_exists", "{err}");
+        assert!(err["error"].as_str().is_some_and(|s| s.contains("uninstall")), "고칠 길을 안 댄다 — {err}");
+        assert_eq!(std::fs::read_to_string(m.file()).unwrap(), other);
+    }
+
+    #[test]
+    fn a_refused_registration_leaves_no_file() {
+        let m = Managed::new(Manager::Refuses);
+        let err = m.refused(&["daemon", "install", "--json"]);
+        assert_eq!(err["code"], "service_failed", "{err}");
+        let said = err["error"].as_str().unwrap();
+        assert!(said.contains("Failed to connect to bus"), "관리자의 말을 잃었다 — {said}");
+        assert!(said.contains("The CLI works without the daemon"), "{said}");
+        assert!(!m.file().exists(), "실패했는데 파일이 남아 등록된 것으로 읽힌다");
+        assert_eq!(m.json(&["daemon", "status", "--json"]).get("service"), None);
+    }
+
+    #[test]
+    fn no_service_manager_is_the_same_failure() {
+        let m = Managed::new(Manager::Missing);
+        let err = m.refused(&["daemon", "install", "--json"]);
+        assert_eq!(err["code"], "service_failed", "{err}");
+        assert!(!m.file().exists());
+    }
+
+    #[test]
+    fn uninstall_stops_removes_and_is_quiet_the_second_time() {
+        let m = Managed::new(Manager::Starts);
+        m.json(&["daemon", "install", "--json"]);
+        let gone = m.json(&["daemon", "uninstall", "--json"]);
+        assert_eq!(gone["uninstalled"], true, "{gone}");
+        assert_eq!(gone["service"], m.file().display().to_string(), "{gone}");
+        assert!(!m.file().exists());
+        let status = m.json(&["daemon", "status", "--json"]);
+        assert_eq!(status["running"], false, "서비스를 지웠는데 데몬이 돈다 — {status}");
+        assert_eq!(status.get("service"), None, "{status}");
+
+        let again = m.json(&["daemon", "uninstall", "--json"]);
+        assert_eq!(again["uninstalled"], false, "{again}");
+        let out = m.run(&["daemon", "uninstall"]);
+        assert!(out.status.success());
+        assert!(String::from_utf8_lossy(&out.stdout).contains("to remove"), "{}", String::from_utf8_lossy(&out.stdout));
+    }
+}
+
+/// Windows 의 등록은 다음 에픽이다(`moai-bq5p`). 그때까지 말없이 넘어가지 않고 코드로 멈춘다.
+#[cfg(windows)]
+#[test]
+fn service_registration_is_unsupported_on_windows_for_now() {
+    let f = Fence::new();
+    for verb in ["install", "uninstall"] {
+        let err = f.refused(&["daemon", verb, "--json"]);
+        assert_eq!(err["code"], "unsupported", "{verb}: {err}");
+    }
+    assert_eq!(f.json(&["daemon", "status", "--json"]).get("service"), None);
+}
