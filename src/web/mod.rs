@@ -598,6 +598,7 @@ pub fn answer(req: &Request, site: &Site) -> Response {
         // **페이지의 첫 스크립트다**(moai-whvr) — `<head>` 에서 `defer` 없이 불려 몸이 그려지기 전에 고른 테마를 건다.
         // app.js 는 `defer` 라 그 전에 시스템 색이 한 번 그려진다. CSP 가 인라인을 막아 파일로 낸다.
         "/theme.js" => return page(http::JS, include_str!("dist/theme.js")),
+        "/vendor.js" => return page(http::JS, include_str!("dist/vendor.js")),
         "/app.css" => return page(http::CSS, include_str!("dist/app.css")),
         _ => {}
     }

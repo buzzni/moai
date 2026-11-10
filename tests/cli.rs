@@ -33595,6 +33595,10 @@ fn web_serves_the_page_and_the_boot() {
         ),
         "{head}"
     );
+    let (status, head, _) = get(web.port, "/vendor.js");
+    assert_eq!(status, 200, "{head}");
+    assert!(head.contains("Content-Type: text/javascript"), "{head}");
+    assert!(head.contains("Content-Security-Policy:"), "{head}");
     let (status, head, _) = get(web.port, "/app.js");
     assert_eq!(status, 200, "{head}");
     assert!(head.contains("Content-Type: text/javascript"), "{head}");

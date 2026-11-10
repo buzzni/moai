@@ -114,3 +114,84 @@ and carry it across by hand, then move the commit above. (`95dfed5` is the last 
   (`--start --due --if-unplanned`), so moai counts the days inside its write (moai-vj8w.02c); `gantt-model.ts`
   `shiftPlan`, the copy of moai's `Issue::shifted`, only draws the bar while it moves. Views gained `ViewContext.say` and
   `movePlan`.
+
+## Third-party code in vendor.js
+
+The bundle incorporates the following packages. License comments are retained at the end of vendor.js.
+
+| Package | Version | License |
+| --- | --- | --- |
+| @braintree/sanitize-url | 7.1.2 | MIT |
+| @chevrotain/cst-dts-gen | 13.2.0 | Apache-2.0 |
+| @chevrotain/gast | 13.2.0 | Apache-2.0 |
+| @chevrotain/regexp-to-ast | 13.2.0 | Apache-2.0 |
+| @chevrotain/utils | 13.2.0 | Apache-2.0 |
+| @iconify/utils | 3.1.7 | MIT |
+| @mdit/helper | 1.2.1 | MIT |
+| @mdit/plugin-cjk-friendly | 1.0.0 | MIT |
+| @mdit/plugin-footnote | 1.2.0 | MIT |
+| @mdit/plugin-katex | 1.2.0 | MIT |
+| @mdit/plugin-snippet | 2.0.1 | MIT |
+| @mdit/plugin-tex | 1.3.0 | MIT |
+| @mermaid-js/parser | 2.0.1 | MIT |
+| @upsetjs/venn.js | 2.0.0 | MIT |
+| chevrotain | 13.2.0 | Apache-2.0 |
+| cose-base | 1.0.3 | MIT |
+| cytoscape | 3.34.4 | MIT |
+| cytoscape-cose-bilkent | 4.1.0 | MIT |
+| cytoscape-fcose | 2.2.0 | MIT |
+| d3 | 7.9.2 | ISC |
+| d3-array | 3.2.5 | ISC |
+| d3-axis | 3.0.1 | ISC |
+| d3-brush | 3.0.1 | ISC |
+| d3-chord | 3.0.2 | ISC |
+| d3-color | 3.1.1 | ISC |
+| d3-contour | 4.0.3 | ISC |
+| d3-delaunay | 6.0.6 | ISC |
+| d3-dispatch | 3.0.2 | ISC |
+| d3-drag | 3.0.1 | ISC |
+| d3-dsv | 3.0.2 | ISC |
+| d3-ease | 3.0.2 | BSD-3-Clause |
+| d3-fetch | 3.0.2 | ISC |
+| d3-force | 3.0.1 | ISC |
+| d3-format | 3.1.3 | ISC |
+| d3-geo | 3.1.2 | ISC |
+| d3-hierarchy | 3.1.3 | ISC |
+| d3-interpolate | 3.0.2 | ISC |
+| d3-path | 3.1.1 | ISC |
+| d3-polygon | 3.0.2 | ISC |
+| d3-quadtree | 3.0.2 | ISC |
+| d3-random | 3.0.2 | ISC |
+| d3-sankey | 0.12.3 | BSD-3-Clause |
+| d3-scale | 4.0.3 | ISC |
+| d3-scale-chromatic | 3.1.1 | ISC |
+| d3-selection | 3.0.1 | ISC |
+| d3-shape | 3.2.1 | ISC |
+| d3-time | 3.1.1 | ISC |
+| d3-time-format | 4.1.1 | ISC |
+| d3-timer | 3.0.2 | ISC |
+| d3-transition | 3.0.2 | ISC |
+| d3-zoom | 3.0.1 | ISC |
+| dagre-d3-es | 7.0.14 | MIT |
+| dayjs | 1.11.23 | MIT |
+| dompurify | 3.4.17 | (MPL-2.0 OR Apache-2.0) |
+| elkjs | 0.12.1 | EPL-2.0 OR GPL-3.0-or-later |
+| entities | 8.1.0 | BSD-2-Clause |
+| es-toolkit | 1.53.2 | MIT |
+| get-east-asian-width | 1.7.0 | MIT |
+| katex | 0.19.1 | MIT |
+| khroma | 2.1.0 | MIT (LICENSE) |
+| layout-base | 1.0.2 | MIT |
+| linkify-it | 6.1.0 | MIT |
+| lodash-es | 4.18.1 | MIT |
+| markdown-it | 15.0.3 | MIT |
+| marked | 16.4.2 | MIT |
+| mdurl | 2.1.0 | MIT |
+| mermaid | 12.3.0 | MIT |
+| punycode.js | 2.3.1 | MIT |
+| roughjs | 4.6.6 | MIT |
+| stylis | 4.4.0 | MIT |
+| ts-dedent | 2.3.0 | MIT |
+| uc.micro | 3.0.0 | MIT |
+
+For elkjs we choose EPL-2.0; source: [npm](https://www.npmjs.com/package/elkjs), [repository](https://github.com/kieler/elkjs). khroma declares no package license field; its LICENSE specifies MIT. The Apache-2.0 Chevrotain packages contain no NOTICE file in the installed npm distributions.
