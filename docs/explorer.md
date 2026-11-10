@@ -218,6 +218,26 @@ In both windows the arrows, `Home`/`End` and the page keys move with `Ctrl` or
 
 The list, the board or the gantt you leave on is the one the next run opens with.
 
+## Markdown in the explorer
+
+The detail and wiki panes render issue and wiki markdown in the terminal. Use
+`SPC v r` to see the original text instead. They share the snippet file and path
+rules described in [web markdown](web.md#markdown), including the 32-directive
+and 256 KiB limits and the sensitive-file refusals.
+
+| Written | Explorer display |
+|---|---|
+| Footnote reference and definition (`[^1]`) | A numbered `[1]` reference and a list at the end |
+| Math (`$…$` or `$$…$$`) | The TeX source with its delimiters, styled like code |
+| Fenced `mermaid` | A code block preceded by `▸ mermaid`; the [web page](web.md#markdown) draws the diagram |
+| Snippet (`<<< path#region{lines lang}`) | The directive and the included file or region; a refusal or error appears beside the directive |
+
+The explorer expands snippets in issue detail and wiki pages, but not inside list
+items or code blocks. Inline footnotes (`^[…]`) and CJK-friendly emphasis are
+left as written. `moai show` uses the same footnote, math and Mermaid rendering,
+but leaves snippet directives as text; `--raw` and `--json` keep the original
+body. For pictures, see [pictures in issues and the wiki](images.md).
+
 ## The gantt
 
 Reach for it when you want to see the plan against the calendar: what starts when,
@@ -546,4 +566,4 @@ write there either.
   an email on every write and `git config` had none. The answer holds for this
   run; set `user.name` and `user.email` to stop it asking
 
-Decided in: moai-e9hi moai-724f moai-z46r moai-9nfw moai-47mz moai-irrj moai-ucx8 moai-1hka moai-h2rh moai-gelm moai-m6ni moai-p3r9 moai-o3cb moai-fyul moai-ogaw moai-tllo moai-fc97 moai-jtvp moai-bth3 moai-9tqo moai-wk7i [moai-pxiy](https://github.com/buzzni/moai/pull/43 "external issue") moai-i4hf moai-lj8g moai-ccow moai-d1zn moai-ekg6 moai-uwi9 moai-mkzo moai-i07x moai-zgc1 moai-4km9 moai-4v3h moai-7eeq moai-yigx moai-okdc
+Decided in: moai-e9hi moai-724f moai-z46r moai-9nfw moai-47mz moai-irrj moai-ucx8 moai-1hka moai-h2rh moai-gelm moai-m6ni moai-p3r9 moai-o3cb moai-fyul moai-ogaw moai-tllo moai-fc97 moai-jtvp moai-bth3 moai-9tqo moai-wk7i [moai-pxiy](https://github.com/buzzni/moai/pull/43 "external issue") moai-i4hf moai-lj8g moai-ccow moai-d1zn moai-ekg6 moai-uwi9 moai-mkzo moai-i07x moai-zgc1 moai-4km9 moai-4v3h moai-7eeq moai-yigx moai-okdc moai-z74b
