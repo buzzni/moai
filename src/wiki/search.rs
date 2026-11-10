@@ -191,8 +191,11 @@ fn drawn(heading: &str) -> String {
     use pulldown_cmark::{Event, Parser};
     let mut out = String::new();
     for e in Parser::new_ext(&format!("# {heading}"), crate::markdown::OPTIONS) {
-        if let Event::Text(t) | Event::Code(t) = e {
-            out.push_str(&t);
+        match e {
+            Event::Text(t) | Event::Code(t) => out.push_str(&t),
+            Event::InlineMath(t) => out.push_str(&format!("${t}$")),
+            Event::DisplayMath(t) => out.push_str(&format!("$${t}$$")),
+            _ => {}
         }
     }
     out

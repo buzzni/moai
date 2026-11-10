@@ -138,7 +138,7 @@ pub fn parse_links(src: &str) -> (Vec<Block>, Vec<String>) {
 ///
 /// **마크다운을 읽는 자리가 이것 하나로 연다** — 그리는 [`parse`] 와, 같은 페이지에서 제목·링크·id 를 읽는
 /// `wiki::parse` 다. 옵션이 갈리면 한 페이지가 화면과 목록에서 다른 문서로 읽힌다.
-pub(crate) const OPTIONS: Options = Options::ENABLE_TABLES;
+pub(crate) const OPTIONS: Options = Options::ENABLE_TABLES.union(Options::ENABLE_FOOTNOTES).union(Options::ENABLE_MATH);
 
 /// 이벤트를 받아 블록을 쌓는 자리.
 ///
@@ -146,6 +146,10 @@ pub(crate) const OPTIONS: Options = Options::ENABLE_TABLES;
 /// 여러 곳이 저마다 세게 되고, 반드시 한 곳이 어긋난다.
 #[derive(Default)]
 struct Fold {
+    numbers: std::collections::HashMap<String, usize>,
+    notes: Vec<(usize, Vec<Block>)>,
+    note: Option<(usize, usize)>,
+    display_math: bool,
     image_start: Option<(usize, String)>,
     lone_image: Option<(String, String, String)>,
     out: Vec<Block>,
@@ -183,6 +187,13 @@ struct Fold {
 
 impl Fold {
     fn run(&mut self, events: Parser) -> Vec<Block> {
+        let events: Vec<_> = events.collect();
+        for event in &events {
+            if let Event::FootnoteReference(label) = event {
+                let next = self.numbers.len() + 1;
+                self.numbers.entry(label.to_string()).or_insert(next);
+            }
+        }
         for e in events {
             self.one(e);
         }
@@ -194,6 +205,18 @@ impl Fold {
         let spans = self.take();
         if !spans.is_empty() {
             self.out.push(Block::Para(spans));
+        }
+        if !self.notes.is_empty() {
+            self.notes.sort_by_key(|(number, _)| *number);
+            self.out.push(Block::Rule);
+            for (number, mut blocks) in std::mem::take(&mut self.notes) {
+                let prefix = Span { text: format!("[{number}] "), role: Role::Mark, link: None };
+                match blocks.first_mut() {
+                    Some(Block::Para(spans) | Block::Quote { spans, .. }) => spans.insert(0, prefix),
+                    _ => blocks.insert(0, Block::Para(vec![prefix])),
+                }
+                self.out.extend(blocks);
+            }
         }
         std::mem::take(&mut self.out)
     }
@@ -331,6 +354,16 @@ impl Fold {
                 }
             },
             Event::Code(t) => self.push(&t, Role::Code),
+            Event::InlineMath(t) => self.push(&format!("${t}$"), Role::Code),
+            Event::DisplayMath(t) => {
+                self.display_math = self.spans.is_empty();
+                self.push(&format!("$${t}$$"), Role::Code);
+            }
+            Event::FootnoteReference(label) => {
+                if let Some(n) = self.numbers.get(label.as_ref()).copied() {
+                    self.push(&format!("[{n}]"), Role::Mark);
+                }
+            }
             // **마크다운이 아닌 글도 사라지지 않는다.** CommonMark 는
             // `R<Vec<String>>` 의 `<String>` 을 inline HTML 로 읽는다 — 버리면
             // 본문에서 글자가 조용히 사라진다. 이 저장소 본문에 실제로 있었다.
@@ -355,6 +388,12 @@ impl Fold {
 
     fn start(&mut self, t: Tag) {
         match t {
+            Tag::FootnoteDefinition(label) => {
+                self.close_list();
+                let next = self.numbers.len() + 1;
+                let number = *self.numbers.entry(label.to_string()).or_insert(next);
+                self.note = Some((number, self.out.len()));
+            }
             Tag::Strong => self.strong += 1,
             Tag::Emphasis => self.emphasis += 1,
             // **주소를 들고 있는다.** 본문에서 되짚을 수 없는 것이 주소다 —
@@ -368,6 +407,7 @@ impl Fold {
             // 새 문단은 홀로 선 그림의 후보를 비운다 — 문단 머리에서 시작해 그 문단 끝까지 혼자인 그림만
             // [`Block::Image`] 가 된다(`TagEnd::Paragraph`).
             Tag::Paragraph => {
+                self.display_math = false;
                 self.lone_image = None;
             }
             // **그림도 주소를 남긴다.** 글 가운데 선 그림은 터미널에 뜨지 않으므로 대체글만
@@ -428,6 +468,22 @@ impl Fold {
 
     fn end(&mut self, t: TagEnd) {
         match t {
+            TagEnd::FootnoteDefinition => {
+                self.close_list();
+                if let Some((number, start)) = self.note.take() {
+                    let mut blocks: Vec<_> = self.out.drain(start..).collect();
+                    for block in &mut blocks {
+                        if let Block::Heading { spans, .. } = block {
+                            let mut spans = std::mem::take(spans);
+                            for span in &mut spans {
+                                span.role = Role::Strong;
+                            }
+                            *block = Block::Para(spans);
+                        }
+                    }
+                    self.notes.push((number, blocks));
+                }
+            }
             TagEnd::Strong => self.strong = self.strong.saturating_sub(1),
             TagEnd::Emphasis => self.emphasis = self.emphasis.saturating_sub(1),
             // 주소를 붙인 **뒤에** 링크를 닫는다 — 뒤에 붙인 ` (주소)` 도 그 링크의 칸이다.
@@ -484,6 +540,22 @@ impl Fold {
                     return;
                 }
                 if spans.is_empty() {
+                    return;
+                }
+                if self.display_math
+                    && self.list.is_none()
+                    && spans.len() == 1
+                    && spans[0].role == Role::Code
+                    && spans[0].link.is_none()
+                    && spans[0].text.starts_with("$$")
+                    && spans[0].text.ends_with("$$")
+                    && spans[0].text.len() >= 4
+                {
+                    let tex = &spans[0].text[2..spans[0].text.len() - 2];
+                    let mut lines = vec!["$$".to_string()];
+                    lines.extend(tex.lines().map(str::to_string));
+                    lines.push("$$".to_string());
+                    self.out.push(Block::Code { quote: self.quote_depth(), lang: Some("math".into()), lines });
                     return;
                 }
                 // 목록 안의 문단은 그 줄의 몫이다 — `Item` 이 받아 간다.
@@ -807,7 +879,7 @@ fn lay_one(out: &mut Vec<Vec<Span>>, b: &Block, width: usize, overflow: Overflow
                 flow(out, &marked(&it.spans), &format!("{bar}{pad}{bullet}"), &hang, width, overflow);
             }
         }
-        Block::Code { quote, lines, .. } => {
+        Block::Code { quote, lang, lines } => {
             // 셸에서는 코드를 접지 않는다. 접으면 그 줄이 더는 그 코드가 아니고,
             // 셸은 화면에서만 접어 복사하면 온전하다.
             //
@@ -815,6 +887,14 @@ fn lay_one(out: &mut Vec<Vec<Span>>, b: &Block, width: usize, overflow: Overflow
             // 소프트랩이 없어 안 끊으면 꼬리가 `…` 로 잘려 사라진다. 이음표는 접은
             // 자리를 코드의 진짜 줄바꿈과 가른다 — 코드에서는 줄바꿈도 뜻이다.
             let bar = bars(*quote);
+            if lang.as_deref() == Some("mermaid") {
+                let label = format!("{bar}▸ mermaid");
+                out.push(vec![mark(if overflow == Overflow::Break {
+                    crate::text::clip(&label, width)
+                } else {
+                    label
+                })]);
+            }
             let mut lead = format!("{bar}    ");
             let mut cont = format!("{bar}  {CONTINUED} ");
             // 끊는 표면에서는 `flow` 처럼 **앞머리를 먼저 잘라** 글 자리 두 칸을 남긴다.
@@ -1142,6 +1222,70 @@ mod real {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn footnotes_are_numbered_by_reference_and_keep_blocks() {
+        use super::{Block, Role, parse};
+        let blocks = parse("a[^x] b[^y] c[^x]\n\n[^y]: second\n\n[^x]: first\n\n    - nested\n\n[^z]: unused");
+        let Block::Para(spans) = &blocks[0] else { panic!("missing paragraph: {blocks:?}") };
+        assert_eq!(
+            spans.iter().filter(|s| s.role == Role::Mark).map(|s| s.text.as_str()).collect::<Vec<_>>(),
+            ["[1]", "[2]", "[1]"]
+        );
+        let text = format!("{blocks:?}");
+        assert!(text.find("first").unwrap() < text.find("second").unwrap());
+        assert!(text.find("second").unwrap() < text.find("unused").unwrap());
+        assert!(blocks.iter().any(|b| matches!(b, Block::List { .. })));
+        assert!(blocks.iter().any(|b| matches!(b, Block::Rule)));
+    }
+    #[test]
+    fn math_and_mermaid_preserve_source() {
+        use super::{Block, Role, parse};
+        let blocks = parse("Text $a^2$ and $HOME/$PATH.\n\n$$x + y$$\n\n```mermaid\na-->b\n```");
+        assert!(matches!(&blocks[0], Block::Para(s) if s.iter().any(|s| s.role == Role::Code && s.text == "$a^2$")));
+        assert!(blocks.iter().any(|b| matches!(b, Block::Code { lang: Some(lang), lines, .. } if lang == "math" && lines == &["$$", "x + y", "$$"])));
+        assert!(blocks.iter().any(
+            |b| matches!(b, Block::Code { lang: Some(lang), lines, .. } if lang == "mermaid" && lines == &["a-->b"])
+        ));
+    }
+    #[test]
+    fn footnote_links_keep_their_original_indices_and_headings_are_not_headings() {
+        use super::{Block, Overflow, Role, layout, link_cells, parse_links};
+        let (blocks, dests) = parse_links("[first](a) note[^n]\n\n[^n]: # Hidden\n\n    [inside](b)\n\n[last](c)");
+        assert_eq!(dests, ["a", "b", "c"]);
+        assert!(!blocks.iter().any(|b| matches!(b, Block::Heading { .. })));
+        let lines = layout(&blocks, 80, Overflow::Keep);
+        let cells = link_cells(&lines);
+        assert!(cells.iter().any(|c| c.link == 0));
+        assert!(cells.iter().any(|c| c.link == 1));
+        assert!(cells.iter().any(|c| c.link == 2));
+        assert!(lines.iter().flatten().any(|s| s.role == Role::Mark && s.text.contains("[1]")));
+    }
+    #[test]
+    fn mermaid_has_a_mark_but_other_code_does_not() {
+        use super::{Overflow, Role, layout, parse};
+        let lines = layout(&parse("```mermaid\na-->b\n```\n\n```rust\nlet x = 1;\n```"), 80, Overflow::Keep);
+        assert!(lines.iter().flatten().any(|s| s.role == Role::Mark && s.text.contains("mermaid")));
+        assert!(lines.iter().flatten().any(|s| s.role == Role::Code && s.text == "a-->b"));
+        assert!(!lines.iter().flatten().any(|s| s.role == Role::Mark && s.text.contains("rust")));
+    }
+    #[test]
+    fn ordinary_markdown_keeps_its_existing_blocks() {
+        use super::{Block, Role, Span, parse};
+        let span = |text: &str, role| Span { text: text.into(), role, link: None };
+        assert_eq!(
+            parse("# Heading\n\nPlain **bold** and `code`."),
+            vec![
+                Block::Heading { level: 1, spans: vec![span("Heading", Role::Plain)] },
+                Block::Para(vec![
+                    span("Plain ", Role::Plain),
+                    span("bold", Role::Strong),
+                    span(" and ", Role::Plain),
+                    span("code", Role::Code),
+                    span(".", Role::Plain)
+                ]),
+            ]
+        );
+    }
     use super::*;
 
     fn plain(t: &str) -> Span {
