@@ -11474,6 +11474,17 @@ fn the_body_is_drawn_but_the_raw_text_stays_reachable() {
     );
 }
 
+/// Develop prints this shell expression unchanged; the complete no-color output must stay byte-identical to raw.
+#[test]
+fn show_preserves_shell_dollars_as_on_develop() {
+    let s = init("dollar-baseline");
+    let id = add(s.path(), &["Dollar baseline", "-b", "$HOME/$PATH"]);
+    let drawn = ok(s.path(), &["show", &id]);
+    let raw = ok(s.path(), &["show", &id, "--raw"]);
+    assert_eq!(drawn.as_bytes(), raw.as_bytes(), "develop prints this plain body exactly as raw");
+    assert!(drawn.contains("  $HOME/$PATH\n"));
+}
+
 /// **본문 속 명령은 `moai show` 를 지나도 한 줄로 남는다**(moai-syp8·moai-xtu8).
 ///
 /// 본문은 폭 76에 맞춰 접히는데, 인라인 코드 안의 공백까지 접는 자리로 보면 화면에 찍힌

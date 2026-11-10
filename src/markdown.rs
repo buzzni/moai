@@ -137,7 +137,7 @@ pub fn parse(src: &str) -> Vec<Block> {
 /// 걷지 않는다: 같은 링크가 두 번 적혔으면 둘 다 선다(펴진 줄에 두 번 서기 때문이다).
 pub fn parse_links(src: &str) -> (Vec<Block>, Vec<String>) {
     let mut fold = Fold::default();
-    let blocks = fold.run(src, Parser::new_ext(src, OPTIONS).into_offset_iter());
+    let blocks = fold.run(src, events(src));
     (blocks, fold.dests)
 }
 
@@ -146,6 +146,21 @@ pub fn parse_links(src: &str) -> (Vec<Block>, Vec<String>) {
 /// **마크다운을 읽는 자리가 이것 하나로 연다** — 그리는 [`parse`] 와, 같은 페이지에서 제목·링크·id 를 읽는
 /// `wiki::parse` 다. 옵션이 갈리면 한 페이지가 화면과 목록에서 다른 문서로 읽힌다.
 pub(crate) const OPTIONS: Options = Options::ENABLE_TABLES.union(Options::ENABLE_FOOTNOTES).union(Options::ENABLE_MATH);
+
+/// Apply the web parser's inline-dollar boundary rule before any reader folds the events.
+pub(crate) fn events(src: &str) -> impl Iterator<Item = (Event<'_>, std::ops::Range<usize>)> {
+    Parser::new_ext(src, OPTIONS).into_offset_iter().map(move |(event, range)| {
+        let word = |c: char| c.is_alphanumeric() || c == '_';
+        if matches!(event, Event::InlineMath(_))
+            && (src[..range.start].chars().next_back().is_some_and(word)
+                || src[range.end..].chars().next().is_some_and(word))
+        {
+            (Event::Text(src[range.clone()].into()), range)
+        } else {
+            (event, range)
+        }
+    })
+}
 
 /// 이벤트를 받아 블록을 쌓는 자리.
 ///
@@ -1319,6 +1334,17 @@ mod tests {
         assert!(blocks.iter().any(|b| matches!(b, Block::List { .. })));
         assert!(blocks.iter().any(|b| matches!(b, Block::Rule)));
     }
+    #[test]
+    fn inline_math_uses_web_word_boundaries() {
+        use pulldown_cmark::Event;
+        for source in ["$HOME/$PATH", "a$x$", "$x$b", "한$x$", "$x$_tail"] {
+            assert!(!super::events(source).any(|(event, _)| matches!(event, Event::InlineMath(_))), "{source}");
+        }
+        for source in ["$x$", "($x$)", "say $x$!"] {
+            assert!(super::events(source).any(|(event, _)| matches!(event, Event::InlineMath(_))), "{source}");
+        }
+    }
+
     #[test]
     fn math_and_mermaid_preserve_source() {
         use super::{Block, Role, parse};
