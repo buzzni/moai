@@ -52,7 +52,7 @@ minutes. CI has five jobs: one runs clippy and the tests on the dev profile,
 one works out whether anything outside the docs changed, one builds the crate
 with the `rust-version` written in `Cargo.toml`, one runs clippy and builds the
 tests on Windows without running them, and the last builds the release binary
-and checks it against the 20 MB budget. The first and the last are the checks
+and checks it against the 30 MiB budget. The first and the last are the checks
 that branch protection on `main` requires; the other three are not. The last
 three skip on a pull request that touched documentation alone and show as
 skipped - not failed - and a skipped required check still counts as passing,

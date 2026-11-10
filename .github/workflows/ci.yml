@@ -6,7 +6,7 @@
 #
 # 잡은 여덟이다 — `ci-gate`(fmt·clippy·시험), `changes`(바이너리에 닿는 것이 바뀌었나),
 # `msrv`(`Cargo.toml` 이 적은 판으로 서는가), `windows`(Windows 에서 clippy 와 시험이 서는가),
-# `macos`(macOS 에서 clippy 와 시험이 서는가), `size-budget`(20MB 예산), `web`(페이지의 시험과 번들), `site`(소개 홈페이지가 틀과 글 묶음에서 지은 그대로인가).
+# `macos`(macOS 에서 clippy 와 시험이 서는가), `size-budget`(30MiB 예산), `web`(페이지의 시험과 번들), `site`(소개 홈페이지가 틀과 글 묶음에서 지은 그대로인가).
 # required check 는 `main` 의 보호 규칙이 요구하는 `ci-gate` 와 `size-budget` 둘이고, 나머지 여섯
 # (`changes`·`msrv`·`windows`·`macos`·`web`·`site`)이 required 가 아닌 까닭은 제
 # 머리글에 적는다. 밑의 잡 주석이 "required" 라 하면 이 둘이다 — 보호 규칙이 바뀌면 이 줄과
@@ -566,14 +566,14 @@ jobs:
           path: ${{ env.CACHED_PATHS }}
           key: ${{ steps.cargo-cache.outputs.cache-primary-key }}
 
-  # 20MB 는 이 도구가 지고 가는 예산이다 (CLAUDE.md 의 표). 넘긴 것을 릴리스
+  # 30MiB 는 이 도구가 지고 가는 예산이다 (CLAUDE.md 의 표). 넘긴 것을 릴리스
   # 태그에서 처음 알면 그때는 되돌릴 자리가 없으니 PR 에서 잰다.
   #
   # 이것이 required check 둘 중 나머지 하나다. `name:` 을 바꿀 때 `main` 의 보호 규칙도 함께
   # 고치는 까닭은 `ci-gate` 의 머리글에 있다. `if:` 로 건너뛰면 `skipped` 로 보고하고 보호
   # 규칙은 그것을 통과로 셈한다 — 문서 PR 이 기다리지 않는 까닭은 `changes` 의 머리글에 있다.
   size-budget:
-    # 이름의 "15MB" 는 예산을 20MB 로 올린 뒤에도 그대로 둔다(moai-3cei.bh8.dd8, 2026-11-02) — required
+    # 이름의 "15MB" 는 예산을 20MB(moai-3cei.bh8.dd8, 2026-11-02)·30MiB(moai-lcrd, 2026-11-10)로 올린 뒤에도 그대로 둔다 — required
     # check 의 이름이라 바꾸면 `main` 보호 규칙이 옛 이름을 기다리며 모든 PR 을 막는다. 재는 값은
     # `scripts/check-size.sh` 의 상한이다.
     name: release 바이너리 15MB 예산
@@ -581,7 +581,7 @@ jobs:
     # **`false` 일 때만 건너뛴다** (리뷰 moai-6mk3.lgj). `== 'true'` 로 적으면 `changes` 가
     # 지거나 제한 시간을 넘긴 판에서도 이 잡이 건너뛰어진다 — `if:` 에 상태 함수가 없으면
     # GitHub 이 `success()` 를 덧붙이기 때문이고, 건너뛴 잡은 붉지도 않아 아무도 못 본다 —
-    # 이 잡은 required 라, 잘못 건너뛴 판도 보호 규칙은 20MB 를 잰 것으로 세어 통과시킨다.
+    # 이 잡은 required 라, 잘못 건너뛴 판도 보호 규칙은 30MiB 를 잰 것으로 세어 통과시킨다.
     # 못 잰 판은 도는 쪽으로 세운다는 위의 약속을 잡 경계에서도 지킨다.
     if: ${{ !cancelled() && needs.changes.outputs.code != 'false' }}
     runs-on: ubuntu-latest

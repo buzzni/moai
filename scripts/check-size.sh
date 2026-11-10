@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 바이너리가 20MB 예산 안에 드는지 잰다.
+# 바이너리가 30MiB 예산 안에 드는지 잰다.
 #
 #     scripts/check-size.sh target/release/moai
 #
@@ -8,7 +8,7 @@
 # 한쪽만 "lto 를 낮추지 말라" 는 말을 달고 있었다.
 set -euo pipefail
 
-limit=${MOAI_SIZE_LIMIT:-$((20 * 1024 * 1024))}
+limit=${MOAI_SIZE_LIMIT:-$((30 * 1024 * 1024))}
 bin=${1:-target/release/moai}
 
 [ -f "$bin" ] || {

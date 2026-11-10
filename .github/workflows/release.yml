@@ -2,7 +2,7 @@
 #
 # cargo-dist 를 안 쓰고 손으로 적은 까닭은 고칠 수 있게 하기 위해서다 (사람이
 # 정했다, 2026-09-20). 생성한 워크플로는 손으로 고치면 안 되는데, 여기에는 이
-# 저장소만의 규칙이 둘 있다 — 바이너리 20MB 예산과 설치 스크립트가 checksums
+# 저장소만의 규칙이 둘 있다 — 바이너리 30MiB 예산과 설치 스크립트가 checksums
 # 없이는 안 깔게 하는 것(moai-j54h). 그 둘을 생성물 위에 얹으면 다음 생성이
 # 지운다.
 #
@@ -175,9 +175,9 @@ jobs:
             exit 1
           }
 
-      # 20MB 는 이 도구가 지고 가는 예산이다 (CLAUDE.md 의 표). 넘긴 채로 올리면
+      # 30MiB 는 이 도구가 지고 가는 예산이다 (CLAUDE.md 의 표). 넘긴 채로 올리면
       # 받는 사람 쪽에서야 드러난다. 자는 ci.yml 과 나눠 쓰는 것 하나다.
-      - name: 20MB 예산을 잰다
+      - name: 30MiB 예산을 잰다
         run: scripts/check-size.sh "target/${{ matrix.target }}/release/${{ steps.exe.outputs.name }}"
 
       - name: 꾸린다
