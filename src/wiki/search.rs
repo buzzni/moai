@@ -616,6 +616,7 @@ mod tests {
             "# `moai`의 위키",
             "# 1. Intro",
             "# Ends with \\#",
+            "# Energy $E=mc^2$ and $a_b$",
         ] {
             let title = parse("t", &format!("{line}\n\nx\n"), "moai").title.expect(line);
             assert!(same_words(&heading_text(line), &title), "{line} → {title:?}");

@@ -32,7 +32,8 @@ fn sources() -> String {
     let web = at_root("web");
     let mut paths = Vec::new();
     walk(&web, "panel/", &mut paths);
-    paths.extend(["build.mjs", "i18n-bundles.mjs", "package.json", "package-lock.json", "vendor.mjs"].map(String::from));
+    paths
+        .extend(["build.mjs", "i18n-bundles.mjs", "package.json", "package-lock.json", "vendor.mjs"].map(String::from));
     paths.sort();
     let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
     let mut fold = |bytes: &[u8]| {

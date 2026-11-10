@@ -151,7 +151,8 @@ test('lists: bullets, ordered with start, nested, tight vs loose', () => {
   assert.equal(md('- a\n\n---\n\n- b').root.querySelectorAll('hr').length, 1)
   // A list can interrupt a paragraph.
   assert.equal(md('text\n- a\n- b').root.querySelectorAll('li').length, 2)
-  // A blank line before a nested list keeps the list tight, but two paragraphs never run together.
+  // A blank line inside an item makes the list loose (CommonMark): each paragraph gets its own <p>, and two
+  // paragraphs never run together.
   assert.equal(html('- first\n\n  second\n\n  - sub'), '<ul><li><p>first</p><p>second</p><ul><li>sub</li></ul></li></ul>')
 })
 
@@ -394,7 +395,8 @@ test('entities: named and numeric decode into text, never markup', () => {
   assert.equal(r.root.querySelector('script, b'), null)
   assert.equal(r.root.textContent, '<script>alert(1)</script> <b>x</b>')
   assertSafe(r.root)
-  // Bad numerics and unknown names stay literal; decoding is single-pass.
+  // Numeric references to NUL, a surrogate, past U+10FFFF or a C0 control become U+FFFD (markdown-it); an unknown
+  // name stays literal; decoding is single-pass.
   assert.equal(md('&#0; &#xD800; &#1114112; &#7; &bogus; &amp;lt;').root.textContent, '� � � � &bogus; &lt;')
 })
 
@@ -536,4 +538,15 @@ test('CJK emphasis works next to particles', () => {
   const r = md('**강조**를 **"인용"**이다 *기울임*과')
   assert.deepEqual([...r.root.querySelectorAll('strong')].map(e => e.textContent), ['강조', '"인용"'])
   assert.equal(r.root.querySelector('em').textContent, '기울임')
+})
+
+test('review moai-z74b.t42: list start 0, one task marker per item, empty link text, multi-line heading anchors', () => {
+  assert.equal(md('0. zero\n1. one').root.querySelector('ol').getAttribute('start'), '0')
+  const tasks = md('- [ ] first\n\n  [x] second paragraph\n- # [x] heading')
+  assert.equal(tasks.root.querySelectorAll('span.m-md-task').length, 1)
+  assert.match(tasks.root.textContent, /\[x\] second paragraph/)
+  const empty = md('[](https://example.com/x)')
+  assert.equal(empty.links[0].textContent, 'https://example.com/x')
+  // moai's wiki::Anchors drops the line break of a setext heading; the page must make the same anchor.
+  assert.deepEqual(md('Foo\nbar\n===').headings.map(h => h.anchor), ['foobar'])
 })

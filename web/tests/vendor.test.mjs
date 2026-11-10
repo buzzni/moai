@@ -30,12 +30,19 @@ test('vendor inputs are pinned, licensed and documented', async () => {
   for (const [name, version] of Object.entries({ 'markdown-it':'15.0.3', '@mdit/plugin-footnote':'1.2.0', '@mdit/plugin-cjk-friendly':'1.0.0', '@mdit/plugin-katex':'1.2.0', '@mdit/plugin-snippet':'2.0.1', katex:'0.19.1', mermaid:'12.3.0' })) assert.equal(pkg.dependencies[name], version)
   assert.deepEqual(Object.entries(lock.packages).filter(([p]) => p.endsWith('/katex')).map(([,v]) => v.version), ['0.19.1'])
   const result = await build({ ...vendorBuild, entryPoints: [new URL('panel/vendor/index.ts', base).pathname], absWorkingDir: base.pathname })
-  const names = new Set(Object.keys(result.metafile.inputs).filter(p => p.startsWith('node_modules/')).map(p => { const parts = p.slice(13).split('/'); return parts[0].startsWith('@') ? parts.slice(0, 2).join('/') : parts[0] }))
+  // A package's own directory, by the last node_modules/ in the input path — a copy nested under another package
+  // (d3-sankey's d3-array 2.x) is a package of its own, with its own version and license.
+  const dirs = new Set(Object.keys(result.metafile.inputs).filter(p => p.startsWith('node_modules/')).map(p => {
+    const at = p.lastIndexOf('node_modules/') + 'node_modules/'.length
+    const parts = p.slice(at).split('/')
+    return p.slice(0, at) + (parts[0].startsWith('@') ? parts.slice(0, 2).join('/') : parts[0])
+  }))
   const doc = await readFile(new URL('UPSTREAM.md', base), 'utf8')
   assert.match(await readFile(new URL('node_modules/khroma/license', base), 'utf8'), /MIT License/i)
   const allowed = new Set(['MIT', 'ISC', 'BSD-2-Clause', 'BSD-3-Clause', 'Apache-2.0', '(MPL-2.0 OR Apache-2.0)'])
-  for (const name of names) {
-    const info = JSON.parse(await readFile(new URL(`node_modules/${name}/package.json`, base)))
+  for (const dir of dirs) {
+    const name = dir.slice(dir.lastIndexOf('node_modules/') + 'node_modules/'.length)
+    const info = JSON.parse(await readFile(new URL(`${dir}/package.json`, base)))
     const license = info.license ?? (name === 'khroma' ? 'MIT' : '')
     assert.ok(allowed.has(license) || (name === 'elkjs' && license === 'EPL-2.0 OR GPL-3.0-or-later'), `${name}: unexpected license ${license}`)
     assert.ok(doc.includes(`| ${name} | ${info.version} |`), `${name}: missing from UPSTREAM.md`)

@@ -46,19 +46,32 @@ pub fn sensitive(rel: &str) -> bool {
         || name.contains(".tfstate")
 }
 
+/// A region name as a directive (`<<< x.rs#name`), the endpoint and the markers spell it — letters, digits, `_` and
+/// `-`, at least one. One rule, so the explorer, the web and the server never disagree on which names are regions.
+pub fn is_region_name(name: &str) -> bool {
+    !name.is_empty() && name.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '-')
+}
+
 pub fn resolve(written: &str, from: From<'_>) -> Result<String, Why> {
+    let rel = normal(written, from)?;
+    if sensitive(&rel) { Err(Why::Refused) } else { Ok(rel) }
+}
+
+/// The checkout-relative path `written` names — `..` folded and never above the checkout — before the
+/// sensitive-name rule of [`resolve`]. A wiki page is only the folder a relative path starts from, so the page's own
+/// name is not held to that rule (`docs/.env.example.md` may still include `src/x.rs`); the path it joins still is.
+pub fn normal(written: &str, from: From<'_>) -> Result<String, Why> {
     if written.is_empty() || written.contains(['\\', ':', '%']) || written.chars().any(char::is_control) {
         return Err(Why::Refused);
     }
     let rooted = written.starts_with('/') || written.starts_with("@/");
     let raw = written.strip_prefix("@/").unwrap_or(written).trim_start_matches('/');
-    let mut parts: Vec<&str> = Vec::new();
     if !rooted && let From::Wiki { page_rel } = from {
-        let page = resolve(page_rel, From::Issue)?;
-        // Store the page's components separately because `page` owns their bytes.
+        let page = normal(page_rel, From::Issue)?;
         let parent = page.rsplit_once('/').map_or("", |(p, _)| p);
-        return resolve(&format!("{parent}/{raw}"), From::Issue);
+        return normal(&format!("{parent}/{raw}"), From::Issue);
     }
+    let mut parts: Vec<&str> = Vec::new();
     for part in raw.split('/') {
         match part {
             "" | "." => {}
@@ -69,10 +82,10 @@ pub fn resolve(written: &str, from: From<'_>) -> Result<String, Why> {
         }
     }
     let rel = parts.join("/");
-    if rel.is_empty() || sensitive(&rel) { Err(Why::Refused) } else { Ok(rel) }
+    if rel.is_empty() { Err(Why::Refused) } else { Ok(rel) }
 }
 
-fn read_detail(base: &Path, rel: &str) -> Result<String, DetailWhy> {
+fn read(base: &Path, rel: &str) -> Result<String, DetailWhy> {
     // Revalidate at the I/O boundary, including the actual target of an internal symlink.
     let rel = resolve(rel, From::Issue)?;
     let base = crate::path::canonical(base).map_err(|_| Why::Missing)?;
@@ -97,13 +110,6 @@ fn read_detail(base: &Path, rel: &str) -> Result<String, DetailWhy> {
     String::from_utf8(bytes).map_err(|_| DetailWhy::NotText)
 }
 
-pub fn read(base: &Path, rel: &str) -> Result<String, Why> {
-    read_detail(base, rel).map_err(|e| match e {
-        DetailWhy::Policy(why) => why,
-        DetailWhy::NotText => Why::Missing,
-    })
-}
-
 // Recognize the paired marker styles supported by the snippet plugin.
 fn marker(line: &str) -> Option<(bool, &str, u8)> {
     let s = line.trim();
@@ -117,21 +123,18 @@ fn marker(line: &str) -> Option<(bool, &str, u8)> {
         (x.trim(), 3)
     } else if let Some(x) = s.strip_prefix("#pragma ") {
         (x.trim(), 4)
-    } else if let Some(x) = s.strip_prefix('#') {
-        (x.trim(), 5)
     } else {
-        return None;
+        (s.strip_prefix('#')?.trim(), 5)
     };
     let s = s.strip_prefix('#').unwrap_or(s).trim_start();
     let (end, rest) = if let Some(x) = s.strip_prefix("endregion").or_else(|| s.strip_prefix("EndRegion")) {
         (true, x)
-    } else if let Some(x) = s.strip_prefix("region").or_else(|| s.strip_prefix("Region")) {
-        (false, x)
     } else {
-        return None;
+        (false, s.strip_prefix("region").or_else(|| s.strip_prefix("Region"))?)
     };
     let name = rest.trim();
-    if !name.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '-') {
+    // An end marker may leave its name out (`// #endregion`).
+    if !name.is_empty() && !is_region_name(name) {
         return None;
     }
     Some((end, name, style))
@@ -162,17 +165,20 @@ pub fn region(text: &str, name: &str) -> String {
     }
     result
 }
-impl Context<'_> {
-    pub fn open_detail(&self, written: &str, region_name: Option<&str>) -> Result<Opened, DetailWhy> {
-        let path = resolve(written, self.from)?;
-        let text = read_detail(self.base, &path)?;
-        let text = region_name.map_or(text.clone(), |name| region(&text, name));
-        Ok(Opened { path, text })
+impl<'a> Context<'a> {
+    /// An issue body's directives — paths from the root of the checkout being viewed ([`crate::store::Repo::here`]).
+    pub fn issue(repo: &'a crate::store::Repo) -> Self {
+        Self { base: repo.here(), from: From::Issue }
     }
-    pub fn open(&self, written: &str, region_name: Option<&str>) -> Result<Opened, Why> {
+    /// The file (or its region) a directive names, for both viewers — the web endpoint and the explorer say the
+    /// same refusal for the same path.
+    pub fn open(&self, written: &str, region_name: Option<&str>) -> Result<Opened, DetailWhy> {
         let path = resolve(written, self.from)?;
         let text = read(self.base, &path)?;
-        let text = region_name.map_or(text.clone(), |name| region(&text, name));
+        let text = match region_name {
+            Some(name) => region(&text, name),
+            None => text,
+        };
         Ok(Opened { path, text })
     }
 }
@@ -205,6 +211,10 @@ mod tests {
             assert_eq!(resolve(path, From::Issue).unwrap(), "src/x.rs");
         }
         assert_eq!(resolve("../../src/x.rs", From::Wiki { page_rel: "docs/guide/a.md" }).unwrap(), "src/x.rs");
+        // The page is a folder to start from, not a file to read.
+        assert_eq!(resolve("x.rs", From::Wiki { page_rel: "docs/.env.example.md" }).unwrap(), "docs/x.rs");
+        assert_eq!(resolve(".env", From::Wiki { page_rel: "docs/.env.example.md" }), Err(Why::Refused));
+        assert_eq!(resolve("x.rs", From::Wiki { page_rel: ".git/a.md" }), Err(Why::Refused));
         assert!(resolve(".ENV", From::Issue).is_ok());
     }
     #[test]
@@ -223,10 +233,10 @@ mod tests {
     fn bytes_are_bounded_and_text_only() {
         let root = crate::scratch::Scratch::new("snippet-bytes");
         std::fs::write(root.join("x"), vec![b'x'; MAX_BYTES as usize + 1]).unwrap();
-        assert_eq!(read(root.path(), "x"), Err(Why::TooLarge));
+        assert_eq!(read(root.path(), "x"), Err(Why::TooLarge.into()));
         for bytes in [&b"a\0b"[..], &b"\xff"[..]] {
             std::fs::write(root.join("x"), bytes).unwrap();
-            assert_eq!(read(root.path(), "x"), Err(Why::Missing));
+            assert_eq!(read(root.path(), "x"), Err(DetailWhy::NotText));
         }
     }
     #[cfg(unix)]
@@ -237,11 +247,11 @@ mod tests {
         let outside = crate::scratch::Scratch::new("snippet-outside");
         std::fs::write(outside.join("x"), "secret").unwrap();
         symlink(outside.join("x"), root.join("outside")).unwrap();
-        assert_eq!(read(root.path(), "outside"), Err(Why::Refused));
+        assert_eq!(read(root.path(), "outside"), Err(Why::Refused.into()));
         std::fs::write(root.join(".env"), "secret").unwrap();
         symlink(root.join(".env"), root.join("alias")).unwrap();
-        assert_eq!(read(root.path(), "alias"), Err(Why::Refused));
+        assert_eq!(read(root.path(), "alias"), Err(Why::Refused.into()));
         assert!(std::process::Command::new("mkfifo").arg(root.join("pipe")).status().unwrap().success());
-        assert_eq!(read(root.path(), "pipe"), Err(Why::Missing));
+        assert_eq!(read(root.path(), "pipe"), Err(Why::Missing.into()));
     }
 }

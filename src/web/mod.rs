@@ -652,8 +652,10 @@ pub fn answer(req: &Request, site: &Site) -> Response {
             }
             let Some(path) = path else { return refuse(400, "missing snippet path", code::BAD_INPUT) };
             let page = match page {
+                // The page is only the folder a relative path starts from — the path it joins meets the
+                // sensitive-name rule, the page's own name does not ([`crate::snippet::normal`]).
                 Some(p) if p.ends_with(".md") && !p.starts_with('/') && !p.starts_with("@/") => {
-                    match crate::snippet::resolve(p, crate::snippet::From::Issue) {
+                    match crate::snippet::normal(p, crate::snippet::From::Issue) {
                         Ok(p) => Some(p),
                         Err(_) => return refuse(403, "invalid snippet page", code::REFUSED),
                     }
@@ -661,9 +663,7 @@ pub fn answer(req: &Request, site: &Site) -> Response {
                 Some(_) => return refuse(403, "invalid snippet page", code::REFUSED),
                 None => None,
             };
-            if region.is_some_and(|name| {
-                name.is_empty() || !name.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '-')
-            }) {
+            if region.is_some_and(|name| !crate::snippet::is_region_name(name)) {
                 return refuse(403, "invalid snippet region", code::REFUSED);
             }
             let Some(repo) = crate::store::Repo::find_from(&cwd, || lang).ok().flatten() else {
@@ -672,6 +672,7 @@ pub fn answer(req: &Request, site: &Site) -> Response {
             let from =
                 page.as_deref().map_or(crate::snippet::From::Issue, |page_rel| crate::snippet::From::Wiki { page_rel });
             let context = crate::snippet::Context { base: repo.here(), from };
+            use crate::snippet::{DetailWhy, Why};
             match context.open(path, region) {
                 Ok(opened) => Response::new(
                     200,
@@ -680,9 +681,11 @@ pub fn answer(req: &Request, site: &Site) -> Response {
                         .to_string()
                         .into_bytes(),
                 ),
-                Err(crate::snippet::Why::Refused) => refuse(403, "snippet path refused", code::REFUSED),
-                Err(crate::snippet::Why::Missing) => refuse(404, "snippet not found", code::NOT_FOUND),
-                Err(crate::snippet::Why::TooLarge) => refuse(404, "snippet too large", code::TOO_LARGE),
+                Err(DetailWhy::Policy(Why::Refused)) => refuse(403, "snippet path refused", code::REFUSED),
+                Err(DetailWhy::Policy(Why::Missing)) => refuse(404, "snippet not found", code::NOT_FOUND),
+                Err(DetailWhy::Policy(Why::TooLarge)) => refuse(404, "snippet too large", code::TOO_LARGE),
+                // A file that is there but not text is said as such — the explorer says "file is not text".
+                Err(DetailWhy::NotText) => refuse(404, "snippet is not text", code::NOT_FOUND),
             }
         }
         "/api/image" => {
@@ -1334,6 +1337,16 @@ mod image_tests {
         assert_eq!(call("/api/snippet?path=../x").status, 403);
         assert_eq!(call("/api/snippet?path=.env").status, 403);
         assert_eq!(call("/api/snippet?path=missing").status, 404);
+        std::fs::write(root.join("docs/b.bin"), b"a\0b").unwrap();
+        let binary = call("/api/snippet?path=b.bin&page=docs/page.md");
+        assert_eq!(binary.status, 404);
+        assert!(String::from_utf8_lossy(&binary.body).contains("not text"));
+        assert_eq!(call("/api/snippet?path=a.txt&page=docs/.env.example.md").status, 200);
+        assert_eq!(call("/api/snippet?path=.env&page=docs/.env.example.md").status, 403);
+        // The page must be a checkout-relative markdown page, and a region a plain name.
+        for refused in ["page=docs/page.txt", "page=/docs/page.md", "page=@/docs/page.md", "region=a.b", "region="] {
+            assert_eq!(call(&format!("/api/snippet?path=a.txt&{refused}")).status, 403, "{refused}");
+        }
         assert_eq!(answer(&request("/api/snippet?path=.env", "evil.example"), &site).status, 403);
         assert_eq!(call("/api/snippet?path=x&project=/unregistered").status, 403);
     }

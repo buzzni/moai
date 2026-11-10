@@ -1120,8 +1120,8 @@ mod tests {
         assert_eq!(got, ["foo", "foo-1", "foo-2", "foo-3"]);
     }
 
-    /// **머리글마다 앵커와 줄** — 모든 단, 적힌 차례로. 앵커의 글은 GitHub 이 그리는 글이다: 인라인 코드는 백틱 없이,
-    /// 링크는 글만, 그림의 대체글은 빼고. 코드 블록 안의 `#` 줄은 머리글이 아니고, 줄은 앞의 BOM 을 걷은 본문에서 센다.
+    /// Math keeps its `$` source in the title and the anchor text, and a heading inside a footnote definition is not
+    /// a heading — the same as the terminal and web renderers.
     #[test]
     fn math_keeps_anchor_text_and_footnote_headings_stay_out() {
         let body = "# Title $x$\n\n## Energy $E=mc^2$\n\nText[^n]\n\n[^n]: note\n\n    # Hidden\n";
@@ -1130,6 +1130,8 @@ mod tests {
         assert_eq!(p.headings.iter().map(|h| h.anchor.as_str()).collect::<Vec<_>>(), ["title-x", "energy-emc2"]);
     }
 
+    /// **머리글마다 앵커와 줄** — 모든 단, 적힌 차례로. 앵커의 글은 GitHub 이 그리는 글이다: 인라인 코드는 백틱 없이,
+    /// 링크는 글만, 그림의 대체글은 빼고. 코드 블록 안의 `#` 줄은 머리글이 아니고, 줄은 앞의 BOM 을 걷은 본문에서 센다.
     #[test]
     fn every_heading_gets_an_anchor_and_its_line() {
         let body = "\u{feff}# Glossary\n\nintro\n\n## `Next:` note\n\n```sh\n# not a heading\n```\n\n\

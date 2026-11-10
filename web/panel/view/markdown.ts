@@ -138,7 +138,7 @@ export function snippetRefs(source: string, env?: { page?: string }): SnippetRef
   return refs
 }
 function anchorText(tokens: Token[]): string {
-  return tokens.map(t => t.type === 'text' || t.type === 'code_inline' ? t.content : t.type === 'math_inline' ? `$${t.content}$` : t.type === 'softbreak' || t.type === 'hardbreak' ? ' ' : '').join('')
+  return tokens.map(t => t.type === 'text' || t.type === 'code_inline' ? t.content : t.type === 'math_inline' ? `$${t.content}$` : t.type === 'softbreak' || t.type === 'hardbreak' ? '\n' : '').join('')
 }
 export function renderMarkdown(doc: Document, source: string, options: RenderOptions = {}): Rendered {
   const tokens = parse(source, options.page)
@@ -149,6 +149,7 @@ export function renderMarkdown(doc: Document, source: string, options: RenderOpt
   const root = el(doc, 'div', { class: 'm-md' }), headings: Heading[] = [], seen = new Map<string, number>()
   const stack: Node[] = [root]
   let insideLink = 0, footnotes = false, snippetCount = 0
+  const hrefs: string[] = []
   const parent = () => stack[stack.length - 1]!
   const push = (element: Element) => { parent().appendChild(element); stack.push(element) }
   const pop = () => { if (stack.length > 1) stack.pop() }
@@ -172,8 +173,9 @@ export function renderMarkdown(doc: Document, source: string, options: RenderOpt
           break
         }
         case 'math_inline': math(t, false); break
-        case 'link_open': push(makeLink(ctx, String(t.attrGet('href') ?? ''))); insideLink++; break
-        case 'link_close': pop(); insideLink--; break
+        case 'link_open': { const href = String(t.attrGet('href') ?? ''); hrefs.push(href); push(makeLink(ctx, href)); insideLink++; break }
+        // A link with no text (`[](url)`) shows where it goes rather than standing as an empty, invisible anchor.
+        case 'link_close': { const href = hrefs.pop() ?? ''; if (!parent().hasChildNodes()) parent().appendChild(doc.createTextNode(href)); pop(); insideLink--; break }
         case 'image': {
           const src = String(t.attrGet('src') ?? ''), alt = t.content, resolved = options.resolveImage?.(src)
           if (resolved) parent().appendChild(el(doc, 'img', { class: 'm-md-image', src: resolved, alt, loading: 'lazy' }))
@@ -198,12 +200,13 @@ export function renderMarkdown(doc: Document, source: string, options: RenderOpt
     switch (t.type) {
       case 'inline': {
         const children = t.children ?? []
-        const item = parent().nodeName === 'LI' ? parent() as HTMLElement : parent().parentNode?.nodeName === 'LI' ? parent().parentNode as HTMLElement : null
-        if (item && !item.hasAttribute('data-task-seen') && children[0]?.type === 'text') {
-          item.setAttribute('data-task-seen', '')
+        // Only the start of an item's first paragraph is a task marker: the item itself (tight) or its first <p>
+        // (loose), still empty. A later paragraph, or a heading in the item, that opens with `[x]` stays text.
+        const host = parent()
+        const item = host.nodeName === 'LI' ? host as HTMLElement : host.nodeName === 'P' && host.parentNode?.nodeName === 'LI' && host.parentNode.firstChild === host ? host.parentNode as HTMLElement : null
+        if (item && !host.hasChildNodes() && children[0]?.type === 'text') {
           const match = /^\[([ xX])\][ \t]+(?=\S)/.exec(children[0].content)
-          if (match) { const checked = match[1] !== ' '; item.classList.add('m-md-task-item'); parent().appendChild(el(doc, 'span', { class: 'm-md-task', role: 'checkbox', 'data-checked': String(checked), 'aria-checked': String(checked), 'aria-disabled': 'true' })); parent().appendChild(doc.createTextNode(' ')); children[0].content = children[0].content.slice(match[0].length) }
-          item.removeAttribute('data-task-seen')
+          if (match) { const checked = match[1] !== ' '; item.classList.add('m-md-task-item'); host.appendChild(el(doc, 'span', { class: 'm-md-task', role: 'checkbox', 'data-checked': String(checked), 'aria-checked': String(checked), 'aria-disabled': 'true' })); host.appendChild(doc.createTextNode(' ')); children[0].content = children[0].content.slice(match[0].length) }
         }
         inline(children); break
       }
@@ -240,7 +243,9 @@ export function renderMarkdown(doc: Document, source: string, options: RenderOpt
       default:
         if (t.nesting === 1) {
           const node = el(doc, t.tag as 'div')
-          if (t.type === 'ordered_list_open' && t.attrGet('start')) node.setAttribute('start', String(t.attrGet('start')))
+          // markdown-it gives `start` only when it is not 1 — and it may be 0, so test for presence, not truth.
+          const start = t.type === 'ordered_list_open' ? t.attrGet('start') : null
+          if (start !== null && start !== undefined) node.setAttribute('start', String(start))
           const align = /^text-align:(left|center|right)$/.exec(String(t.attrGet('style') ?? ''))?.[1]
           if (align) node.setAttribute('data-align', align)
           push(node)
