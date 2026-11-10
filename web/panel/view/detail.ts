@@ -52,6 +52,17 @@ export function renderBody(doc: Document, text: string, snippets?: (ref: Snippet
   }
 }
 
+/** History notes share the body renderer, but never fetch snippets or reuse document IDs. */
+function renderNote(doc: Document, text: string): HTMLElement {
+  try {
+    const { root } = renderMarkdown(doc, text, { resolveImage: src => imageUrl(doc, src), literalSnippets: true, headingIds: false, breaks: true })
+    root.classList.add('moai-detail-note')
+    return root
+  } catch {
+    return el(doc, 'span', { class: 'moai-detail-text' }, text)
+  }
+}
+
 /** A titled block; `h3` is the section's name. */
 const section = (doc: Document, title: string, ...content: Array<Node | null>) => el(doc, 'section', {}, el(doc, 'h3', {}, title), ...content)
 
@@ -245,7 +256,7 @@ export const mountDetail: MountPane = (root: HTMLElement, ctx: ViewContext): Pan
     const journal = journalOf(row, copy)
     const history = el(doc, 'ol', { class: 'moai-detail-list moai-detail-timeline' })
     if (journal.length) {
-      for (const line of journal) history.append(el(doc, 'li', { 'data-kind': line.kind }, el(doc, 'span', { class: 'moai-detail-text' }, line.text), line.meta ? el(doc, 'span', { class: 'moai-detail-meta' }, line.meta) : null))
+      for (const line of journal) history.append(el(doc, 'li', { 'data-kind': line.kind }, line.kind === 'note' && !raw ? renderNote(doc, line.text) : el(doc, 'span', { class: 'moai-detail-text' }, line.text), line.meta ? el(doc, 'span', { class: 'moai-detail-meta' }, line.meta) : null))
     } else history.append(el(doc, 'li', { class: 'moai-detail-meta' }, d.noJournal))
     out.push(folded(doc, 'journal', d.journal, open, history))
     const work = workOf(row)
@@ -321,7 +332,7 @@ export const mountDetail: MountPane = (root: HTMLElement, ctx: ViewContext): Pan
   view.addEventListener('click', event => {
     const target = event.target as Element | null
     const link = target?.closest<HTMLAnchorElement>('a.m-md-link[data-kind=anchor]')
-    const body = link?.closest('.moai-detail-body')
+    const body = link?.closest('.m-md')
     if (!link || !body) return
     const anchor = [...body.querySelectorAll<HTMLElement>('[data-anchor]')].find(node => !node.classList.contains('m-md-link') && node.dataset.anchor === link.dataset.anchor)
     if (anchor) { event.preventDefault(); anchor.scrollIntoView({ block: 'nearest' }) }

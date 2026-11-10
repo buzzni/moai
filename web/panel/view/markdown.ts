@@ -21,6 +21,9 @@ export interface RenderOptions {
   snippets?: (ref: SnippetRef) => SnippetState
   page?: string
   snippetLoading?: string
+  literalSnippets?: boolean
+  headingIds?: boolean
+  breaks?: boolean
 }
 
 export interface Rendered {
@@ -183,7 +186,7 @@ export function renderMarkdown(doc: Document, source: string, options: RenderOpt
     for (const t of children) {
       switch (t.type) {
         case 'text': addText(ctx, parent(), t.content, insideLink > 0); break
-        case 'softbreak': parent().appendChild(doc.createTextNode('\n')); break
+        case 'softbreak': parent().appendChild(options.breaks ? el(doc, 'br') : doc.createTextNode('\n')); break
         case 'hardbreak': parent().appendChild(el(doc, 'br')); break
         case 'code_inline': {
           const code = el(doc, 'code', { class: 'm-md-inline-code' }, t.content)
@@ -231,14 +234,14 @@ export function renderMarkdown(doc: Document, source: string, options: RenderOpt
       case 'heading_open': {
         const text = anchorText(tokens[i + 1]?.children ?? []), level = Number(t.tag.slice(1)) as Heading['level']
         if (footnotes) { push(el(doc, 'p')); push(el(doc, 'strong')); break }
-        const anchor = githubAnchor(text, seen); headings.push({ level, text, anchor }); push(el(doc, t.tag as 'h1', { id: `m-md-${anchor}`, 'data-anchor': anchor })); break
+        const anchor = githubAnchor(text, seen); headings.push({ level, text, anchor }); push(el(doc, t.tag as 'h1', { ...(options.headingIds === false ? {} : { id: `m-md-${anchor}` }), 'data-anchor': anchor })); break
       }
       case 'heading_close': if (footnotes) pop(); pop(); break
       case 'paragraph_open': if (!t.hidden) push(el(doc, 'p')); break
       case 'paragraph_close': if (!t.hidden) pop(); break
       case 'fence': case 'code_block': {
         const ref = refOf(t), lang = t.info.trim().split(/[\s{]/)[0] ?? ''
-        if ((t.meta as { invalidSnippet?: boolean } | null)?.invalidSnippet) {
+        if ((options.literalSnippets && (t.meta as { requestedPath?: string } | null)?.requestedPath) || (t.meta as { invalidSnippet?: boolean } | null)?.invalidSnippet) {
           const line = sourceLines[t.map?.[0] ?? -1] ?? ''
           const marker = line.indexOf('<<<')
           parent().appendChild(el(doc, 'p', {}, marker < 0 ? line : line.slice(marker))); break
