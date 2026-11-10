@@ -6,6 +6,7 @@ import { readFile } from 'node:fs/promises'
 import { build } from 'esbuild'
 import { chromium, firefox } from 'playwright'
 import { i18nBundles } from '../i18n-bundles.mjs'
+import { vendorGlobals } from '../vendor.mjs'
 
 const bundle = await build({
   stdin: { contents: `
@@ -22,7 +23,7 @@ const bundle = await build({
     view.render({...initialState(),tab:'gantt'},new IssueIndex(rows, tree));
     window.view = view; window.ready = true;
   `, resolveDir: new URL('..', import.meta.url).pathname, loader: 'ts' },
-  bundle: true, write: false, format: 'iife', plugins: [i18nBundles],
+  bundle: true, write: false, format: 'iife', plugins: [i18nBundles, vendorGlobals],
 })
 const css = await readFile(new URL('../panel/style/gantt.css', import.meta.url), 'utf8')
 const server = createServer((req, res) => {

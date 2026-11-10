@@ -7,7 +7,8 @@ import { JSDOM } from 'jsdom'
 
 const panel = new URL('../panel/', import.meta.url)
 const fixtures = new URL('./fixtures/moai-wiki/', import.meta.url)
-const wiki = await import(new URL('view/wiki.ts', panel))
+const { panelModule } = await import('./moai-panel-modules.mjs')
+const wiki = await panelModule('view/wiki.ts')
 const wikiSource = await readFile(new URL('view/wiki.ts', panel), 'utf8')
 const wikiCss = await readFile(new URL('style/wiki.css', panel), 'utf8')
 const { COPY } = await import(new URL('i18n/index.ts', panel))
@@ -21,6 +22,7 @@ const shows = {
 
 const dom = new JSDOM('<!doctype html><body></body>', { pretendToBeVisual: true })
 const doc = dom.window.document
+globalThis.document = doc
 const press = (node, key, init = {}) => {
   const event = new dom.window.KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...init })
   node.dispatchEvent(event)

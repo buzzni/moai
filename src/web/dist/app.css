@@ -767,6 +767,14 @@ svg.links polygon { fill: var(--link); }
 
 .m-md-image { max-width: 100%; height: auto; }
 
+.m-md-fnref { font-size: .8em; }
+.m-md-footnotes { margin-top: 1em; }
+.m-md-math { overflow-x: auto; }
+.m-md-math-block { display: block; margin: 1em 0; }
+.m-md-math-error, .m-md-snippet-missing { color: var(--muted); }
+.m-md-snippet { white-space: pre-wrap; }
+.m-md-mermaid { margin: 1em 0; }
+
 /*
  * The shell's own parts (view/shell.ts, view/crumbs.ts): the frame fills the panel, the path line, the
  * banners and the result line under it, the panes, and the run's activity floating over their foot. Needs tokens.css and components.css.
