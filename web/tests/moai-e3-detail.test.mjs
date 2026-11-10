@@ -383,18 +383,21 @@ test('pane: an all-todo group has an empty progress bar and a zero accessible va
 
 test('pane: a search keystroke repaints the id and title only; the body and sections stay (se-mzlx)', () => {
   const { root, view } = mount()
-  const row = { ...ROWS[3], body: 'some **body**' }
+  const row = { ...ROWS[3], body: 'some **body**', journal: [{ kind: 'note', text: '**note**' }] }
   const state = stateWith({ value: { id: row.id, row } })
   view.render(state, index)
   const body = root.querySelector('.moai-detail-body')
   const journal = root.querySelector('details[data-fold=journal]')
   const title = root.querySelector('.moai-detail-title')
   assert.ok(body && journal)
+  const note = journal.querySelector('.moai-detail-note')
+  assert.ok(note.querySelector('strong'))
   assert.equal(title.querySelector('mark'), null)
   view.render({ ...state, search: { text: 'Boa', open: true } }, index)
   assert.ok(title.querySelector('mark'), 'the hit is painted')
   assert.equal(root.querySelector('.moai-detail-body'), body)
   assert.equal(root.querySelector('details[data-fold=journal]'), journal)
+  assert.equal(journal.querySelector('.moai-detail-note'), note)
   assert.equal(root.querySelector('.moai-detail-title'), title)
   view.render({ ...state, search: { text: 'Boar', open: true } }, index)
   assert.equal(title.querySelector('mark').textContent, 'Boar')
@@ -427,7 +430,7 @@ test('history and work start expanded, preserve lines and remember a collapsed s
   const state = stateWith({ value: { id: row.id, row } })
   view.render(state, index)
   for (const key of ['journal', 'work']) assert.equal(root.querySelector(`[data-fold=${key}]`).open, true)
-  assert.equal(root.querySelector('[data-fold=journal] .moai-detail-text').textContent, 'first\n  second')
+  assert.ok(root.querySelector('[data-fold=journal] .moai-detail-note br'))
   assert.equal(root.querySelector('[data-fold=work] .moai-detail-text').textContent, 'work\nnext')
   // textContent keeps the break whatever the sheet says; what shows it is pre-wrap on that class, so the sheet is read.
   const detailCss = readFileSync(new URL('../panel/style/detail.css', import.meta.url), 'utf8')
@@ -504,4 +507,60 @@ test('detail retries cancelled and failed snippet requests on the next redraw', 
     view.render(state, null)
     assert.equal(calls, 2)
   }
+})
+
+
+test('history renders notes safely, scopes anchors and never loads note snippets', async () => {
+  let calls = 0
+  const client = { async request() { calls++; return { kind: 'passed', output: { text: 'body snippet' } } } }
+  const { root, view, doc } = mount({ client })
+  const previousDocument = globalThis.document
+  globalThis.document = doc
+  const note = '## Same\n\n**bold**\nnext[^1] $x^2$ [link](https://example.com) ![ok](.moai/images/0123456789abcdef.png)\n\n- item\n- <<< src/b.rs\n\n> <<< c.rs#r\n\n<<< src/a.rs\n\n```mermaid\ngraph TD; A-->B\n```\n\n<img src=x onerror=alert(1)> <script>bad</script> [bad](javascript:alert(1)) ![bad](https://example.com/x.png) ![bad](/etc/passwd)\n\n[^1]: note footnote'
+  const row = { id: 'a', title: 'A', body: '## Same\n\nbody[^1]\n\n[^1]: body footnote', journal: [{kind:'create'}, {kind:'status', from:'todo', to:'in_progress', note:'**x**'}, {kind:'note', text:note}, {kind:'note', text:'## Same\n\nother[^1]\n\n[^1]: other footnote'}], work:['**work**\nnext'] }
+  view.render(stateWith({value:{id:'a',row}}), null)
+  await new Promise(resolve => setTimeout(resolve, 0))
+  assert.equal(calls, 0)
+  const notes = root.querySelectorAll('.moai-detail-note'), first = notes[0]
+  for (const selector of ['strong', 'li', 'sup.m-md-fnref', 'math', 'figure.m-md-mermaid', 'a.m-md-link', 'img.m-md-image', 'br']) assert.ok(first.querySelector(selector), selector)
+  assert.match(first.querySelector('img').getAttribute('src'), /^\/api\/image\?/)
+  assert.equal(first.querySelectorAll('img').length, 1)
+  assert.match(first.textContent, /<script>bad<\/script>/)
+  for (const text of ['<<< src/a.rs', '<<< src/b.rs', '<<< c.rs#r']) assert.ok(first.textContent.includes(text), text)
+  assert.equal(first.querySelector('.m-md-snippet-missing'), null)
+  for (const node of first.querySelectorAll('*')) for (const attr of node.attributes) assert.ok(!/^(href|style|on.*)$/i.test(attr.name), attr.name)
+  assert.match(root.querySelector('[data-kind=status] .moai-detail-text').textContent, /\*\*x\*\*/)
+  assert.ok(root.querySelector('[data-kind=create] .moai-detail-text'))
+  assert.equal(root.querySelector('[data-fold=work] .moai-detail-text').textContent, '**work**\nnext')
+  const ids = [...root.querySelectorAll('[id]')].map(n => n.id)
+  assert.equal(ids.length, new Set(ids).size)
+  for (const md of [root.querySelector('.moai-detail-body'), ...notes]) {
+    let scrolled = false
+    md.querySelector('li[data-anchor="fn:1"]').scrollIntoView = () => { scrolled = true }
+    md.querySelector('a[data-anchor="fn:1"]').click()
+    assert.ok(scrolled)
+  }
+  view.toggleRaw()
+  assert.equal(root.querySelector('[data-kind=note] .moai-detail-text').textContent, note)
+  view.toggleRaw()
+  assert.ok(root.querySelector('.moai-detail-note strong'))
+  const css = readFileSync(new URL('../panel/style/detail.css', import.meta.url), 'utf8')
+  assert.match(css, /\.moai-detail-list > li \{/)
+  assert.doesNotMatch(css, /\.moai-detail-list li \{/)
+  view.render(stateWith({value:{id:'a',row:{...row, body:'<<< src/body.rs'}}}), null)
+  await new Promise(resolve => setTimeout(resolve, 0))
+  assert.equal(calls, 1)
+  if (previousDocument === undefined) delete globalThis.document
+  else globalThis.document = previousDocument
+})
+
+test('history falls back per note when the vendor is unavailable', () => {
+  const previous = globalThis.moaiVendor
+  try {
+    delete globalThis.moaiVendor
+    const {root, view} = mount()
+    const row = {id:'a', title:'A', journal:[{kind:'note', text:'**raw**'}]}
+    view.render(stateWith({value:{id:'a',row}}), null)
+    assert.equal(root.querySelector('[data-kind=note] .moai-detail-text').textContent, '**raw**')
+  } finally { globalThis.moaiVendor = previous }
 })
