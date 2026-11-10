@@ -12,6 +12,17 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+### Added
+
+- The web viewer supports footnotes, MathML math, Mermaid diagrams, CJK-friendly emphasis and file snippets in issue bodies and wiki pages. (moai-z74b)
+- The explorer and `moai show` render numbered footnotes, math source and marked Mermaid code blocks; the explorer also expands snippets in detail and wiki panes. (moai-z74b)
+- `GET /api/snippet` reads a permitted text file or region for the selected checkout, with the shared snippet path and sensitive-file rules. (moai-z74b)
+
+### Changed
+
+- Web issue bodies and wiki pages use markdown-it and CommonMark. Some rendering differs: `***x***` nests emphasis outside strong, and invalid numeric entities become U+FFFD. (moai-z74b)
+- The web page loads third-party markdown and diagram code in `/vendor.js` before its own app bundle. (moai-z74b)
+
 ## [1.0.0] - 2026-11-06
 
 ### Added

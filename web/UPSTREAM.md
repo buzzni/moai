@@ -115,6 +115,8 @@ and carry it across by hand, then move the commit above. (`95dfed5` is the last 
   `shiftPlan`, the copy of moai's `Issue::shifted`, only draws the bar while it moves. Views gained `ViewContext.say` and
   `movePlan`.
 
+- **Markdown (moai-z74b).** The hand-written renderer was replaced by markdown-it token-to-DOM rendering. Third-party code is built into `vendor.js` so the word checks for unsafe markup and inline styles continue to cover moai's own `app.js`; the app, CSS and theme retain their combined 1 MiB budget, while `vendor.js` has a separate 6 MiB budget. Mermaid 12.3.0 was chosen for this release; the release binary size budget remains for the person to set again. See [Third-party code in vendor.js](#third-party-code-in-vendorjs) for the bundled packages and licenses.
+
 ## Third-party code in vendor.js
 
 The bundle incorporates the following packages. License comments are retained at the end of vendor.js.
