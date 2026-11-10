@@ -1278,6 +1278,7 @@
   "update.fetch_failed": "could not fetch {url} — {said}. Nothing was run",
   "update.no_sh": "could not start {program} — {said}",
   "update.running": "running {script} from {url} over {dir}",
+  "update.refresh_projects": "in each project, run `moai skill install` (with `--agent codex` or `--agent antigravity` for those trees) and `moai init` so agents receive this version’s skills and guidance",
   "update.daemon_restart": "daemon {version} (pid {pid}) still runs — restart it with its service manager, or stop and start it if run manually",
   "update.dry_fetch": "would fetch  {url}",
   "update.dry_run": "would run    {line}",
@@ -1955,7 +1956,17 @@
   "page.detail.session": "Session",
   "page.detail.sessionLost": "Signal lost — {agent} {sid} · last signal {event} {minutes} min ago",
   "page.detail.sessionAlive": "Alive — {agent} {sid} · {minutes} min ago",
+  "tui.snippet.missing": "file not found",
+  "tui.snippet.refused": "path refused",
+  "tui.snippet.too_large": "file too large",
+  "tui.snippet.not_text": "file is not text",
   "image.placeholder": "image",
   "image.missing": "image missing",
-  "image.large": "{file}: {bytes} bytes exceeds {limit}; use image compression or a smaller picture"
+  "image.large": "{file}: {bytes} bytes exceeds {limit}; use image compression or a smaller picture",
+  "page.markdown.diagramAlt": "Mermaid diagram",
+  "page.markdown.diagramError": "Diagram could not be rendered",
+  "page.markdown.loading": "Loading snippet",
+  "page.markdown.missing": "Snippet unavailable",
+  "page.markdown.refused": "Snippet refused",
+  "page.markdown.tooLarge": "Snippet too large"
 }

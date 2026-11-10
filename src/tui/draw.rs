@@ -1560,7 +1560,7 @@ impl Laid {
 /// 원문은 적힌 글이지 그린 글이 아니라 링크가 어느 칸인지를 안 잰다(2026-10-04, 일꾼이 정했다 — moai-p61w 노트).
 #[cfg(test)]
 fn wiki_lines(p: &crate::wiki::Page, w: usize, raw: bool, lang: Lang) -> Laid {
-    wiki_lines_in(p, w, raw, lang, None, None)
+    wiki_lines_in(p, w, raw, lang, None, None, None)
 }
 /// [`wiki_lines`] 의 몸 — 그림의 자리표시를 `lang` 의 말로 달고, `image` 가 있으면 그 자리에서 못 찾는 그림을 `없음` 으로 단다.
 fn wiki_lines_in(
@@ -1570,6 +1570,7 @@ fn wiki_lines_in(
     lang: Lang,
     image: Option<&crate::image::Context<'_>>,
     graphics: Option<&mut super::images::Images>,
+    snippet: Option<&crate::snippet::Context<'_>>,
 ) -> Laid {
     let warn = from_anstyle(style::WARN);
     let as_written = |above: usize| p.headings.iter().map(|h| above + h.line).collect();
@@ -1585,7 +1586,7 @@ fn wiki_lines_in(
             Laid::bare(out, heads)
         }
         (Some(body), _) if raw => Laid::bare(body_lines(crate::wiki::unmarked(body), w, true), as_written(0)),
-        (Some(body), _) => laid_body_with(crate::wiki::unmarked(body), w, lang, image, graphics),
+        (Some(body), _) => laid_body_with(crate::wiki::unmarked(body), w, lang, image, graphics, snippet),
         (None, Some(u)) => {
             let said = fill(say(lang, "wiki.body_unread"), &[("said", &crate::view::wiki::unread(lang, p, u))]);
             Laid::bare(wrapped(&format!("! {said}"), w, warn), Vec::new())
@@ -1628,8 +1629,12 @@ fn wiki_page(
                 allowed: &w.dir,
                 from: crate::image::From::Wiki { page_rel: &p.path, wiki_dir: &w.dir },
             });
+            let snippet = w
+                .image_home
+                .as_ref()
+                .map(|base| crate::snippet::Context { base, from: crate::snippet::From::Wiki { page_rel: &p.path } });
             let Laid { lines, heads, links, cells } =
-                wiki_lines_in(p, width, raw, lang, image.as_ref(), Some(graphics));
+                wiki_lines_in(p, width, raw, lang, image.as_ref(), Some(graphics), snippet.as_ref());
             // Same gate as the hyperlink pass used to apply each frame: drawn (not raw), readable, no conflict.
             let images = match (&image, &p.body) {
                 (Some(image), Some(body)) if !raw && !p.conflict => image.links(crate::wiki::unmarked(body)),
@@ -4852,7 +4857,8 @@ fn about<'a>(app: &App, site: &Site, idx: usize, e: &Entry, w: usize) -> Vec<Lin
                     body_lines(body, w, true)
                 } else {
                     let image = site.repo.as_ref().map(crate::image::Context::issue);
-                    laid_body_in(body, w, site.lang, image.as_ref()).lines
+                    let snippet = site.repo.as_ref().map(crate::snippet::Context::issue);
+                    laid_body_with(body, w, site.lang, image.as_ref(), None, snippet.as_ref()).lines
                 }
             }
         };
@@ -5323,10 +5329,19 @@ fn fill_body(app: &mut App, rows: &[Row], w: usize) {
         Some((i, body)) => {
             let site = seat_at.and_then(|(seat, _)| app.site_of_seat(seat));
             let image = site.and_then(|s| s.repo.as_ref()).map(crate::image::Context::issue);
+            let snippet = site.and_then(|s| s.repo.as_ref()).map(crate::snippet::Context::issue);
             let lines = if raw {
                 body_lines(body, w, true)
             } else {
-                laid_body_with(body, w, site.map_or(Lang::En, |s| s.lang), image.as_ref(), Some(&mut graphics)).lines
+                laid_body_with(
+                    body,
+                    w,
+                    site.map_or(Lang::En, |s| s.lang),
+                    image.as_ref(),
+                    Some(&mut graphics),
+                    snippet.as_ref(),
+                )
+                .lines
             };
             let images = match (&image, raw) {
                 (Some(image), false) => image.links(body),
@@ -5418,19 +5433,24 @@ fn laid_body(body: &str, w: usize) -> Laid {
 }
 /// [`laid_body`] 의 몸 — 그림의 자리표시를 `lang` 의 말로 달고, `image` 가 있으면 그 자리에서 못 찾는 그림을 `없음` 으로 단다.
 fn laid_body_in(body: &str, w: usize, lang: Lang, image: Option<&crate::image::Context<'_>>) -> Laid {
-    laid_body_with(body, w, lang, image, None)
+    laid_body_with(body, w, lang, image, None, None)
 }
 /// [`laid_body_in`] that also opens a picture under each image block when `graphics` can draw one ([`expand_images`]) —
-/// from the same parse and layout, so a body is not read twice to place its pictures.
+/// from the same parse and layout, so a body is not read twice to place its pictures. With `snippet` it also reads the
+/// file each `<<<` directive names ([`expand_snippets`]) before laying out, so headings and links count those lines.
 fn laid_body_with(
     body: &str,
     w: usize,
     lang: Lang,
     image: Option<&crate::image::Context<'_>>,
     graphics: Option<&mut super::images::Images>,
+    snippet: Option<&crate::snippet::Context<'_>>,
 ) -> Laid {
     let clean = crate::text::sanitize(body);
     let (mut blocks, links) = crate::markdown::parse_links(&clean);
+    if let Some(context) = snippet {
+        expand_snippets(&mut blocks, context, lang);
+    }
     if let Some(image) = image {
         image.labels(&mut blocks, lang);
     } else {
@@ -5486,6 +5506,86 @@ fn laid_body_with(
         expand_images(&mut out, &blocks, &starts, w, image, graphics);
     }
     out
+}
+
+#[cfg(test)]
+mod snippet_view_tests {
+    use super::*;
+    #[test]
+    fn expands_with_shared_policy_and_keeps_heading_positions() {
+        let root = crate::scratch::Scratch::new("tui-snippet");
+        std::fs::create_dir(root.join("docs")).unwrap();
+        std::fs::write(root.join("binary"), b"bad\0text").unwrap();
+        std::fs::write(root.join("code.rs"), "// #region r\n  one\n  \x1b[31mred\n// #endregion r\n").unwrap();
+        let context =
+            crate::snippet::Context { base: root.path(), from: crate::snippet::From::Wiki { page_rel: "docs/a.md" } };
+        let body = "<<< ../code.rs#r{2 rust}\n\n## Heading\n\n<<< .env\n\n<<< missing\n\n<<< ../binary";
+        let laid = laid_body_with(body, 100, Lang::En, None, None, Some(&context));
+        let text = laid.lines.iter().map(|l| l.to_string()).collect::<Vec<_>>().join("\n");
+        assert!(text.contains("one") && text.contains("red"));
+        assert!(!text.contains('\x1b'));
+        assert!(text.contains("path refused") && text.contains("file not found") && text.contains("file is not text"));
+        assert_eq!(laid.heads.len(), 1);
+        assert!(laid.lines[laid.heads[0]].to_string().contains("Heading"));
+        assert_eq!(laid.heads.len(), laid_body(body, 100).heads.len());
+    }
+    #[test]
+    fn thirty_third_snippet_is_left_written() {
+        let root = crate::scratch::Scratch::new("tui-snippet-limit");
+        std::fs::write(root.join("a"), "expanded").unwrap();
+        let context = crate::snippet::Context { base: root.path(), from: crate::snippet::From::Issue };
+        let body = std::iter::repeat_n("<<< a", 33).collect::<Vec<_>>().join("\n\n");
+        let laid = laid_body_with(&body, 100, Lang::En, None, None, Some(&context));
+        let text = laid.lines.iter().map(|l| l.to_string()).collect::<Vec<_>>().join("\n");
+        assert_eq!(text.matches("expanded").count(), 32);
+        assert_eq!(text.matches("<<< a").count(), 33);
+    }
+}
+
+/// Each snippet directive becomes its `<<<` line (with the refusal beside it when the file cannot be shown) and a code
+/// block of the file or region — at most 32 per body, as on the web; later directives stay as written.
+fn expand_snippets(blocks: &mut Vec<crate::markdown::Block>, context: &crate::snippet::Context<'_>, lang: Lang) {
+    use crate::markdown::{Block, Role, Span};
+    let mut count = 0;
+    let mut out = Vec::new();
+    for block in std::mem::take(blocks) {
+        let Block::Snippet { quote, ref written, ref region, lang: ref language, .. } = block else {
+            out.push(block);
+            continue;
+        };
+        if count >= 32 {
+            out.push(block);
+            continue;
+        }
+        count += 1;
+        let opened = context.open(written, region.as_deref());
+        let label = match &opened {
+            Ok(_) => format!("<<< {written}"),
+            Err(why) => {
+                let said = match why {
+                    crate::snippet::DetailWhy::Policy(crate::snippet::Why::Refused) => say(lang, "tui.snippet.refused"),
+                    crate::snippet::DetailWhy::Policy(crate::snippet::Why::Missing) => say(lang, "tui.snippet.missing"),
+                    crate::snippet::DetailWhy::NotText => say(lang, "tui.snippet.not_text"),
+                    crate::snippet::DetailWhy::Policy(crate::snippet::Why::TooLarge) => {
+                        say(lang, "tui.snippet.too_large")
+                    }
+                };
+                format!("<<< {written} — {said}")
+            }
+        };
+        let spans = vec![Span { text: label, role: Role::Mark, link: None }];
+        out.push(if quote == 0 { Block::Para(spans) } else { Block::Quote { quote, spans } });
+        if let Ok(opened) = opened {
+            let extension = std::path::Path::new(written).extension().and_then(|s| s.to_str()).map(str::to_string);
+            let clean = crate::text::sanitize(&opened.text);
+            out.push(Block::Code {
+                quote,
+                lang: language.clone().or(extension),
+                lines: clean.lines().map(str::to_string).collect(),
+            });
+        }
+    }
+    *blocks = out;
 }
 
 /// Expand only image blocks; remap every heading and link through the same line map. `blocks` and `starts` are the
@@ -13881,7 +13981,7 @@ mod image_placeholder_tests {
         let old_head = plain.heads[1];
         let old_link = plain.cells[0].line;
         let mut images = super::super::images::Images::testing();
-        let laid = laid_body_with(body, 30, Lang::Ko, Some(&context), Some(&mut images));
+        let laid = laid_body_with(body, 30, Lang::Ko, Some(&context), Some(&mut images), None);
         let added = laid.lines.iter().filter(|l| l.to_string().contains(super::super::images::PLACEHOLDER)).count();
         assert!(added > 0);
         assert_eq!(laid.lines.len(), plain.lines.len() + added);
@@ -13935,11 +14035,11 @@ mod image_placeholder_tests {
             body: Some(body.into()),
         };
         let mut images = super::super::images::Images::testing();
-        let drawn = wiki_lines_in(&page, 30, false, Lang::En, Some(&context), Some(&mut images));
+        let drawn = wiki_lines_in(&page, 30, false, Lang::En, Some(&context), Some(&mut images), None);
         assert!(drawn.lines.iter().any(|l| l.to_string().contains(super::super::images::PLACEHOLDER)));
         assert!(drawn.lines[drawn.heads[0]].to_string().contains("After"));
         assert!(drawn.lines[drawn.cells[0].line].to_string().contains("link"));
-        let raw = wiki_lines_in(&page, 30, true, Lang::En, Some(&context), Some(&mut images));
+        let raw = wiki_lines_in(&page, 30, true, Lang::En, Some(&context), Some(&mut images), None);
         assert!(!raw.lines.iter().any(|l| l.to_string().contains(super::super::images::PLACEHOLDER)));
         images.active = false;
     }

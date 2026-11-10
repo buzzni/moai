@@ -457,6 +457,12 @@ the installed guidance explains it. Nothing checks text length or changes existi
 Machine-readable lines keep their format in either mode. JSON includes `detail`,
 `written`, `repo`, `path` and `repo_path` to identify the effective source.
 
+The planted AGENTS block points agents to markdown guidance in the `moai` and
+`moai-wiki` skills; both planning briefs carry the same reminder. The guidance
+explains when footnotes, math, diagrams, snippets and pictures help and what
+terminal surfaces show. Run `moai init` and `moai skill install` in each project
+to refresh the block and skills after an upgrade.
+
 ### One round
 
 1. **Make the supervisor — one per repository.** In one Claude Code session in
@@ -954,7 +960,9 @@ worker's line is written by the supervisor.
 - **`moai status` says the planted skills or hooks differ from this moai's.**
   An older moai planted them — most often after upgrading. Run the line the
   notice names (`moai skill install`, with `--agent codex` or `antigravity`
-  where those trees stand); it also removes what this moai no longer plants
+  where those trees stand); it also removes what this moai no longer plants.
+  A successful human-facing `moai update` reminds you to refresh each project
+  with that command and `moai init`; it does not refresh them itself
 - **`skill install` says a hooks file is not moai's.** It holds hooks someone
   else wrote, and moai will not overwrite them. Merge moai's entries into it by
   hand, or move it aside and install again
@@ -996,7 +1004,7 @@ worker's line is written by the supervisor.
   where an incoming message waits for its person's approval — look at that
   window
 
-Decided in: moai-2w0s moai-hxma moai-0zjo moai-nqdc moai-bl3x moai-gelm moai-tllo moai-mdzx moai-xs2h moai-h8tn moai-snyk moai-u5wr moai-b6cw moai-ew4o moai-dhxm moai-ml0d moai-nas5 moai-kxkw moai-dj4j moai-54yc moai-bkn4 moai-084j moai-keka moai-zynt moai-j9nf moai-jtvp moai-obxm moai-six5 moai-iu73 moai-r0x8 moai-u99i moai-uqf7 moai-p5sz moai-xpa8 moai-9tqo moai-pxui moai-uzhx moai-wk7i moai-jdwk moai-1m21 moai-d1zn moai-xvvr moai-ns7a moai-zgc1 moai-4v3h moai-i26i moai-p9dh moai-5w6i moai-w0zr moai-8rf1
+Decided in: moai-2w0s moai-hxma moai-0zjo moai-nqdc moai-bl3x moai-gelm moai-tllo moai-mdzx moai-xs2h moai-h8tn moai-snyk moai-u5wr moai-b6cw moai-ew4o moai-dhxm moai-ml0d moai-nas5 moai-kxkw moai-dj4j moai-54yc moai-bkn4 moai-084j moai-keka moai-zynt moai-j9nf moai-jtvp moai-obxm moai-six5 moai-iu73 moai-r0x8 moai-u99i moai-uqf7 moai-p5sz moai-xpa8 moai-9tqo moai-pxui moai-uzhx moai-wk7i moai-jdwk moai-1m21 moai-d1zn moai-xvvr moai-ns7a moai-zgc1 moai-4v3h moai-i26i moai-p9dh moai-5w6i moai-w0zr moai-8rf1 moai-1f3p
 
 ## Archive storage
 

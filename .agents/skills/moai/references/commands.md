@@ -189,6 +189,41 @@ This applies to tracker bodies, notes, review closes and reports; commits, wiki,
 conversation follow their own conventions. Nothing checks this — it is how much to write, not a
 rule anything enforces.
 
+### Markdown moai draws
+
+Most bodies and notes need only lists. Use richer markdown when it carries more:
+
+- Footnotes: `claim[^1]` and `[^1]: source` keep sources or asides out of a list.
+  All surfaces number these; inline `^[aside]` is rendered only on the web and
+  stays as written in the explorer and `moai show`.
+- Math: `$x$`, `$$x^2$$`, or a fenced `math` block for formulas. Terminals show
+  TeX source styled as code. Put shell variables and prices such as `$HOME` and
+  `5$` in code spans so they are not mistaken for math.
+- A fenced `` ```mermaid `` block, for example `graph TD; A-->B`, suits flows, states or
+  exchanges a list cannot convey. The web draws it; terminals show code headed
+  `▸ mermaid`. Keep labels short; math in labels remains TeX even on the web.
+- A snippet on its own line, `<<< path#region{1-3 rust}`, shows current checkout
+  text in a body or wiki page; paste fenced code instead to preserve a snapshot.
+  Body paths start at the checkout root, wiki paths at the page folder; `@/` or
+  a leading `/` starts at the checkout root. Without `#region` the whole file is
+  shown; `{1-3}` does not select lines. Up to 32 directives per body and 256 KiB
+  per text file are allowed; sensitive files, `.git` and `.moai` are refused.
+  `moai show` leaves snippets as text; the explorer does so inside lists. Notes
+  never expand snippets. GitHub leaves directives as written.
+- CJK emphasis next to punctuation, such as `**"인용"**이다`, renders on the web;
+  terminals leave its asterisks as written.
+- Pictures suit screen states or visual bugs; keep logs, code and errors as text
+  for search and terminals. `moai image add <file> --to <id>` stores the picture
+  (PNG and JPEG reduced) under `.moai/images/` and appends it to the body; commit
+  it with the tracker. For a
+  wiki page, `moai image add <file> --wiki <slug>` prints a reference relative to
+  that page; paste it there. Only supporting terminals draw pictures.
+
+Web history renders notes as markdown; the explorer and `moai show` print notes
+as written, and pictures in notes appear only in web history. Keep notes readable
+as plain text and machine-readable lines such as `model:` and `Next:` unchanged at
+line start.
+
 ## The five things the hook actually watches
 
 **1. New issues stay inside what you picked up.** The issue in focus is the one you picked up — it has left the

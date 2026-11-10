@@ -767,6 +767,17 @@ svg.links polygon { fill: var(--link); }
 
 .m-md-image { max-width: 100%; height: auto; }
 
+.m-md-fnref { font-size: .8em; }
+.m-md-footnotes { margin-top: 1em; }
+.m-md-math { overflow-x: auto; }
+.m-md-math-block { display: block; margin: 1em 0; }
+.m-md-math-error, .m-md-snippet-missing { color: var(--muted); }
+.m-md-snippet { white-space: pre-wrap; }
+.m-md-mermaid { margin: 1em 0; }
+.m-md-measure { position: fixed; left: -10000px; top: 0; visibility: hidden; font: 16px "trebuchet ms", verdana, arial, sans-serif; }
+.m-md-diagram { max-width: 100%; height: auto; }
+.m-md-diagram-error { color: var(--danger); }
+
 /*
  * The shell's own parts (view/shell.ts, view/crumbs.ts): the frame fills the panel, the path line, the
  * banners and the result line under it, the panes, and the run's activity floating over their foot. Needs tokens.css and components.css.
@@ -1043,16 +1054,16 @@ svg.links polygon { fill: var(--link); }
 .moai-detail-body { overflow-wrap: anywhere; margin-top: 6px; }
 .moai-detail-raw { margin: 6px 0 0; padding: 10px 12px; border-radius: var(--radius-card); background: var(--lane-bg); white-space: pre-wrap; font-family: var(--mono, monospace); font-size: 12px; }
 /* A section's name, and a hairline from it to the right edge: the sections read apart without boxes. */
-.moai-detail h3, .moai-detail summary { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 12px; font-weight: 600; color: var(--text); }
-.moai-detail h3::after, .moai-detail summary::after { content: ""; flex: 1; height: 1px; background: var(--border-soft); }
+.moai-detail > section > h3, .moai-detail > details > summary { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 12px; font-weight: 600; color: var(--text); }
+.moai-detail > section > h3::after, .moai-detail > details > summary::after { content: ""; flex: 1; height: 1px; background: var(--border-soft); }
 .moai-detail summary { cursor: pointer; list-style: none; }
 .moai-detail summary::-webkit-details-marker { display: none; }
 .moai-detail summary::before { content: "\25B8"; color: var(--muted); font-size: 10px; transition: transform .15s; }
 .moai-detail details[open] > summary::before { transform: rotate(90deg); }
 .moai-detail-list { margin: 6px 0 0; padding: 0; list-style: none; }
-.moai-detail-list li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; padding: 3px 0; overflow-wrap: anywhere; }
+.moai-detail-list > li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; padding: 3px 0; overflow-wrap: anywhere; }
 /* An id or a hash, then its words: the words wrap beside it, not under it. */
-.moai-detail-list li:has(> .moai-detail-hash) { display: grid; grid-template-columns: auto minmax(0, 1fr); }
+.moai-detail-list > li:has(> .moai-detail-hash) { display: grid; grid-template-columns: auto minmax(0, 1fr); }
 .moai-detail-hash {
   flex: none; padding: 0 6px; border-radius: var(--radius-card); background: var(--muted-bg); color: var(--muted);
   font: 11px/18px var(--mono, monospace);
@@ -1076,5 +1087,9 @@ svg.links polygon { fill: var(--link); }
 .moai-detail-timeline > li.moai-detail-meta::before { display: none; }
 /* A note or a work record as moai keeps it: its line breaks stand, as `moai show` prints them, and a long word wraps. */
 .moai-detail-text { white-space: pre-wrap; overflow-wrap: anywhere; min-width: 0; }
+
+/* Markdown notes sit on the timeline (their margins and wrapping are .m-md's). A heading in a note stays below the
+   pane's own section names (12px, above): no markdown-sized title or rule inside one history entry. */
+.moai-detail-note :is(h1, h2, h3, h4, h5, h6) { margin: 10px 0 4px; padding-bottom: 0; border-bottom: 0; font-size: 12px; }
 
 [hidden]{display:none!important}

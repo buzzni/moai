@@ -5,12 +5,14 @@ import { test } from 'node:test'
 import { JSDOM } from 'jsdom'
 
 const panel = new URL('../panel/', import.meta.url)
-const { renderMarkdown, githubAnchor } = await import(new URL('view/markdown.ts', panel))
+const { panelModule } = await import('./moai-panel-modules.mjs')
+const { renderMarkdown, githubAnchor, snippetRefs } = await panelModule('view/markdown.ts')
 const sourceText = await readFile(new URL('view/markdown.ts', panel), 'utf8')
 const css = await readFile(new URL('style/markdown.css', panel), 'utf8')
 
 const dom = new JSDOM('<!doctype html><body></body>')
 const doc = dom.window.document
+globalThis.document = doc
 const md = (source, options) => renderMarkdown(doc, source, options)
 const html = (source, options) => md(source, options).root.innerHTML
 
@@ -86,7 +88,7 @@ test('paragraphs, soft and hard breaks, escapes', () => {
 
 test('inline: bold, italic, code, nesting', () => {
   assert.equal(html('**b** __b2__ *i* _i2_'), '<p><strong>b</strong> <strong>b2</strong> <em>i</em> <em>i2</em></p>')
-  assert.equal(html('***both***'), '<p><strong><em>both</em></strong></p>')
+  assert.equal(html('***both***'), '<p><em><strong>both</strong></em></p>')
   assert.equal(html('*a **b** c*'), '<p><em>a <strong>b</strong> c</em></p>')
   assert.equal(html('snake_case_word and 2*3*4'), '<p>snake_case_word and 2<em>3</em>4</p>')
   assert.equal(html('a * b * c'), '<p>a * b * c</p>')
@@ -149,8 +151,9 @@ test('lists: bullets, ordered with start, nested, tight vs loose', () => {
   assert.equal(md('- a\n\n---\n\n- b').root.querySelectorAll('hr').length, 1)
   // A list can interrupt a paragraph.
   assert.equal(md('text\n- a\n- b').root.querySelectorAll('li').length, 2)
-  // A blank line before a nested list keeps the list tight, but two paragraphs never run together.
-  assert.equal(html('- first\n\n  second\n\n  - sub'), '<ul><li>first<p>second</p><ul><li>sub</li></ul></li></ul>')
+  // A blank line inside an item makes the list loose (CommonMark): each paragraph gets its own <p>, and two
+  // paragraphs never run together.
+  assert.equal(html('- first\n\n  second\n\n  - sub'), '<ul><li><p>first</p><p>second</p><ul><li>sub</li></ul></li></ul>')
 })
 
 test('tables: header, body, alignment, escaped pipes, inline content, ragged rows', () => {
@@ -392,8 +395,9 @@ test('entities: named and numeric decode into text, never markup', () => {
   assert.equal(r.root.querySelector('script, b'), null)
   assert.equal(r.root.textContent, '<script>alert(1)</script> <b>x</b>')
   assertSafe(r.root)
-  // Bad numerics and unknown names stay literal; decoding is single-pass.
-  assert.equal(md('&#0; &#xD800; &#1114112; &#7; &bogus; &amp;lt;').root.textContent, '&#0; &#xD800; &#1114112; &#7; &bogus; &lt;')
+  // Numeric references to NUL, a surrogate, past U+10FFFF or a C0 control become U+FFFD (markdown-it); an unknown
+  // name stays literal; decoding is single-pass.
+  assert.equal(md('&#0; &#xD800; &#1114112; &#7; &bogus; &amp;lt;').root.textContent, '� � � � &bogus; &lt;')
 })
 
 test('entities: not decoded in code spans or fences; decoded in link text and destination', () => {
@@ -437,7 +441,7 @@ test('links: reference style, shortcut, collapsed, case-insensitive, definitions
   const src = '[text][Ref] [ref][] [REF] [missing] [x][nope]\n\n[ref]: http://a.test "Title"\n\nafter\n[other]: <b c.md>\n\n```\n[ref]: not-a-def\n```\n[other]'
   const r = md(src, { resolveLink: ext })
   assert.deepEqual(r.links.map((a) => [a.textContent, a.getAttribute('data-href')]), [
-    ['text', 'http://a.test'], ['ref', 'http://a.test'], ['REF', 'http://a.test'], ['other', 'b c.md'],
+    ['text', 'http://a.test'], ['ref', 'http://a.test'], ['REF', 'http://a.test'],
   ])
   assert.ok(!r.root.textContent.includes('http://a.test "Title"'))
   assert.match(r.root.textContent, /\[missing\] \[x\]\[nope\]/)
@@ -484,4 +488,94 @@ test('image paths mirror the server policy and retain the selected project', asy
   assert.equal(new URL(url, 'http://localhost').searchParams.get('project'), '/work/other')
   assert.equal(new URL(imageUrl(doc, '../images/x.png', {page:'docs/lessons/a.md',dir:'docs'}), 'http://localhost').searchParams.get('path'), 'docs/images/x.png')
   for (const src of ['https://x/a.png', '/a.png', 'C:/a.png', '%2e%2e/a.png', '../../x.png', '../.git/x.png', 'x.svg']) assert.equal(imageUrl(doc, src, {page:'docs/a.md',dir:'docs'}), null, src)
+})
+
+test('footnotes, math, CJK and mermaid render safely with stable headings', () => {
+  const r = md('## Energy $E=mc^2$\n\n## Title[^a]\n\n**"인용"**이다\n\nFirst[^a] again[^a] and ^[inline].\n\n[^a]: note <script>x</script>\n\n```mermaid\ngraph TD; A-->B\n```')
+  assert.deepEqual(r.headings.map(h => h.anchor), ['energy-emc2', 'title'])
+  assert.equal(r.root.querySelectorAll('.m-md-fnref').length, 4)
+  assert.ok(r.root.querySelector('.m-md-footnotes [data-anchor="fn:1"]'))
+  assert.ok(r.root.querySelector('math'))
+  assert.ok(r.root.querySelector('strong'))
+  assert.equal(r.root.querySelector('figure.m-md-mermaid pre').textContent, 'graph TD; A-->B\n')
+  assertSafe(r.root)
+})
+
+test('math and snippet content stay text or safe MathML', () => {
+  for (const expression of ['x^2', 'a+b', 'x_1', '\\frac{1}{2}', '\\sqrt{x}', '\\sum_{i=1}^n i', '\\alpha', '\\beta', '\\pi', '\\infty', '\\int_0^1 x', '\\binom{n}{k}', '\\overline{x}', '\\underline{x}', '\\color{red}{x}', '\\text{hello}', '\\left(x\\right)', '\\begin{matrix}a&b\\\\c&d\\end{matrix}', '\\href{javascript:alert(1)}{x}', '\\htmlStyle{color:red}{x}', '\\fcolorbox{red}{blue}{x}', '\\invalidcommand']) {
+    const result = md(`$${expression}$`)
+    assertSafe(result.root)
+  }
+  const ref = { path: '../x.rs', region: 'r' }
+  const result = md('<<< ../x.rs#r{2 rust}', { snippets: got => { assert.deepEqual(got, ref); return { text: '<img onerror=alert(1)>' } } })
+  assert.equal(result.root.querySelector('pre').textContent, '<img onerror=alert(1)>')
+  assertSafe(result.root)
+})
+
+
+test('snippet references keep original paths, deduplicate and stop at 32', () => {
+  const source = Array.from({ length: 33 }, (_, i) => `<<< ../file${i}.rs#part{2 rust}`).join('\n\n')
+  const refs = snippetRefs(source)
+  assert.equal(refs.length, 32)
+  assert.deepEqual(refs[0], { path: '../file0.rs', region: 'part' })
+  assert.equal(snippetRefs('<<< a.rs\n\n<<< a.rs').length, 1)
+  const rendered = md(source, { snippets: () => ({ text: 'ok' }) })
+  assert.equal(rendered.root.querySelectorAll('pre.m-md-snippet').length, 32)
+  assert.match(rendered.root.textContent, /<<< \.\.\/file32\.rs#part\{2 rust\}/)
+})
+
+test('footnote references repeat without becoming headings', () => {
+  const r = md('# Main[^a]\n\n[^a]: first\n\n    # Nested heading\n\nAgain[^a] and ^[inline].')
+  assert.deepEqual(r.headings.map(h => h.anchor), ['main'])
+  const refs = [...r.root.querySelectorAll('.m-md-fnref')]
+  assert.deepEqual(refs.map(e => e.dataset.anchor), ['fnref:1', 'fnref:1:1', 'fnref:2'])
+  assert.ok(r.links.some(a => a.dataset.anchor === 'fn:1'))
+  assert.ok(r.links.some(a => a.dataset.anchor === 'fnref:1'))
+  assertSafe(r.root)
+})
+
+test('CJK emphasis works next to particles', () => {
+  const r = md('**강조**를 **"인용"**이다 *기울임*과')
+  assert.deepEqual([...r.root.querySelectorAll('strong')].map(e => e.textContent), ['강조', '"인용"'])
+  assert.equal(r.root.querySelector('em').textContent, '기울임')
+})
+
+test('review moai-z74b.t42: list start 0, one task marker per item, empty link text, multi-line heading anchors', () => {
+  assert.equal(md('0. zero\n1. one').root.querySelector('ol').getAttribute('start'), '0')
+  const tasks = md('- [ ] first\n\n  [x] second paragraph\n- # [x] heading')
+  assert.equal(tasks.root.querySelectorAll('span.m-md-task').length, 1)
+  assert.match(tasks.root.textContent, /\[x\] second paragraph/)
+  const empty = md('[](https://example.com/x)')
+  assert.equal(empty.links[0].textContent, 'https://example.com/x')
+  // moai's wiki::Anchors drops the line break of a setext heading; the page must make the same anchor.
+  assert.deepEqual(md('Foo\nbar\n===').headings.map(h => h.anchor), ['foobar'])
+})
+
+
+test('snippet regions follow the Rust rule even when plugin metadata drops them', () => {
+  const source = '<<< a.md#한글\n\n<<< a.rs#r{1-3 rust extra}\n\n<<< a.rs#bad!'
+  assert.deepEqual(snippetRefs(source), [{path:'a.md', region:'한글'}, {path:'a.rs', region:'r'}])
+  const seen = []
+  const rendered = md(source, {snippets: ref => { seen.push(ref); return {text: 'selected'} }})
+  assert.deepEqual(seen, [{path:'a.md', region:'한글'}, {path:'a.rs', region:'r'}])
+  assert.match(rendered.root.textContent, /<<< a\.rs#bad!/)
+  assert.equal(md('- <<< a.rs#bad!').root.querySelector('li').textContent, '<<< a.rs#bad!')
+  assert.deepEqual(snippetRefs('<<< a.rs#r{broken'), [])
+  assert.match(md('<<< a.rs#r{broken').root.textContent, /<<< a\.rs#r\{broken/)
+  assert.deepEqual(snippetRefs('> <<< a.md#한글\n\n- <<< a.rs#r{1-3 rust extra}'), [{path:'a.md',region:'한글'}, {path:'a.rs',region:'r'}])
+})
+
+
+test('history options are opt-in and leave default markdown unchanged', () => {
+  const source = '## Same\n\nfirst\nsecond\n\n<<< src/a.rs'
+  const normal = renderMarkdown(doc, source).root
+  assert.equal(normal.querySelector('h2').id, 'm-md-same')
+  assert.equal(normal.querySelector('p br'), null)
+  assert.ok(normal.querySelector('.m-md-snippet-missing'))
+  const note = renderMarkdown(doc, source, { headingIds: false, breaks: true, literalSnippets: true }).root
+  assert.equal(note.querySelector('h2').hasAttribute('id'), false)
+  assert.equal(note.querySelector('h2').dataset.anchor, 'same')
+  assert.ok(note.querySelector('p br'))
+  assert.equal(note.querySelector('.m-md-snippet-missing'), null)
+  assert.match(note.textContent, /<<< src\/a.rs/)
 })

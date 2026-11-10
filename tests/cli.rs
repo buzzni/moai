@@ -11474,6 +11474,17 @@ fn the_body_is_drawn_but_the_raw_text_stays_reachable() {
     );
 }
 
+/// Develop prints this shell expression unchanged; the complete no-color output must stay byte-identical to raw.
+#[test]
+fn show_preserves_shell_dollars_as_on_develop() {
+    let s = init("dollar-baseline");
+    let id = add(s.path(), &["Dollar baseline", "-b", "$HOME/$PATH"]);
+    let drawn = ok(s.path(), &["show", &id]);
+    let raw = ok(s.path(), &["show", &id, "--raw"]);
+    assert_eq!(drawn.as_bytes(), raw.as_bytes(), "develop prints this plain body exactly as raw");
+    assert!(drawn.contains("  $HOME/$PATH\n"));
+}
+
 /// **본문 속 명령은 `moai show` 를 지나도 한 줄로 남는다**(moai-syp8·moai-xtu8).
 ///
 /// 본문은 폭 76에 맞춰 접히는데, 인라인 코드 안의 공백까지 접는 자리로 보면 화면에 찍힌
@@ -32681,6 +32692,47 @@ fn update_runs_install_sh_over_the_running_binary() {
     server.join().unwrap();
 }
 
+#[cfg(unix)]
+#[test]
+fn update_reminds_people_to_refresh_each_project_only_on_success() {
+    if !served() {
+        return;
+    }
+    for (code, json) in [(0, false), (3, false), (0, true)] {
+        let s = Scratch::new("update-project-refresh");
+        let exe = hoisted(s.path());
+        let (url, server) = serving_script(recording_script(&s.path().join("argv"), code), 1);
+        let args: &[&str] = if json { &["--json"] } else { &[] };
+        let out = update_with(&exe, s.path(), &s.path().join("config.toml"), &[("MOAI_INSTALL_URL", &url)], args);
+        server.join().unwrap();
+        assert_eq!(out.status.code(), Some(code), "{}", text(&out));
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        let lines: Vec<_> = stderr.lines().filter(|line| line.contains("moai skill install")).collect();
+        if code == 0 && !json {
+            assert_eq!(lines.len(), 1, "{stderr}");
+            assert!(lines[0].starts_with("moai: ") && lines[0].contains("moai init"), "{stderr}");
+        } else {
+            assert!(lines.is_empty(), "{stderr}");
+        }
+        assert!(!stdout.contains("moai skill install"), "{stdout}");
+        if json {
+            one_json_value(&stdout);
+            let value: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+            let mut keys: Vec<_> = value.as_object().unwrap().keys().map(String::as_str).collect();
+            keys.sort_unstable();
+            assert_eq!(keys, ["code", "command", "dir", "dry_run", "repo", "script"]);
+        }
+    }
+    let refused = staged(&["update"]).output().unwrap();
+    assert!(!refused.status.success());
+    assert!(!String::from_utf8_lossy(&refused.stderr).contains("moai skill install"));
+    let s = Scratch::new("update-project-refresh-dry");
+    let exe = hoisted(s.path());
+    let out = update_with(&exe, s.path(), &s.path().join("config.toml"), &[], &["--dry-run"]);
+    assert!(!String::from_utf8_lossy(&out.stderr).contains("moai skill install"));
+}
+
 /// The installed executable is probed only after a successful installer, and its result reaches update's output.
 #[cfg(unix)]
 #[test]
@@ -33595,6 +33647,10 @@ fn web_serves_the_page_and_the_boot() {
         ),
         "{head}"
     );
+    let (status, head, _) = get(web.port, "/vendor.js");
+    assert_eq!(status, 200, "{head}");
+    assert!(head.contains("Content-Type: text/javascript"), "{head}");
+    assert!(head.contains("Content-Security-Policy:"), "{head}");
     let (status, head, _) = get(web.port, "/app.js");
     assert_eq!(status, 200, "{head}");
     assert!(head.contains("Content-Type: text/javascript"), "{head}");
@@ -34842,6 +34898,18 @@ fn terminal_takeover_clears_a_lost_session_without_a_new_pick() {
     // A later hook can re-establish the holder using the existing pick format, with no snapshot-field addition.
     std::fs::write(&record, format!("{}\t{id}\t1789099924\n", nonce + 1)).unwrap();
     assert_eq!(call(&["show", &id, "--json"])["session"]["state"], "lost");
+}
+
+#[test]
+fn web_serves_snippets_with_shared_path_policy() {
+    let s = init("web-snippets");
+    std::fs::write(s.path().join("example.txt"), "hello snippet").unwrap();
+    let web = serve(s.path());
+    let (status, _, body) = get(web.port, "/api/snippet?path=example.txt");
+    assert_eq!(status, 200);
+    let value: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(value["out"]["text"], "hello snippet");
+    assert_eq!(get(web.port, "/api/snippet?path=.moai/issues.jsonl").0, 403);
 }
 
 #[test]

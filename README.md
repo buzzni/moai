@@ -154,6 +154,11 @@ with one line saying what to do instead, for a build from source (cargo built it
 — rebuild), for a binary not named `moai`, for a directory you cannot write, and
 on a machine the releases do not cover.
 
+After a successful human-facing update, moai reminds you to run `moai skill install`
+(with `--agent codex` or `--agent antigravity` for those trees) and `moai init`
+in each project to refresh agent guidance. It does not run them itself; the exit
+code and `--json` output are unchanged. Dry runs and failures print no reminder.
+
 On Windows it fetches `install.ps1` instead and runs it with Windows PowerShell
 (`-Dir <that directory> -Force`), and the binary has to be named `moai.exe`.
 Windows will not overwrite a running program, so the installer renames the
@@ -622,7 +627,7 @@ recording machine shows — and records it:
 
 | What | Limit |
 | --- | --- |
-| release binary | 20 MB |
+| release binary | 30 MiB |
 | clean build, unloaded machine | 5 minutes |
 
 CI measures the binary on every pull request. Build time is not measured there —

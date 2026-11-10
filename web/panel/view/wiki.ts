@@ -4,10 +4,13 @@
 // shell carry that state across tab switches. Keys go through handleKey(); a keydown listener on the root
 // calls it too unless props.standaloneKeys is false. All text goes in through textContent.
 
+import { loadSnippets, snippetKey, PRIORITY } from '../data/snippet.js'
+import type { Client } from '../data/client.js'
+import { hydrateDiagrams } from './diagram.js'
 import { COPY, fill, type WikiCopy } from "../i18n/index.ts"
 import { banner, button, chip, el, emptyState, listRow, searchBox, type ChipTone } from "./components.ts"
 import { imageUrl } from "./image.ts"
-import { githubAnchor, renderMarkdown, type LinkTarget } from "./markdown.ts"
+import { githubAnchor, renderMarkdown, snippetRefs, type LinkTarget, type SnippetState } from "./markdown.ts"
 import { FORCE_BOTTOM_BELOW } from "./responsive.ts"
 import { createSplit, normalizeRatio } from "./split.ts"
 import type { IssueIndex } from "../data/index.ts"
@@ -402,6 +405,8 @@ export interface WikiState {
 }
 
 export interface WikiViewProps {
+  client?: Client
+  markdownWords?: { diagramAlt: string; diagramError: string; loading: string; missing: string; refused: string; tooLarge: string }
   /** Fetch one page (`moai wiki show <slug> --json`, parsed or not). */
   loadPage: (slug: string) => Promise<unknown>
   /** Rank the pages for a query (`moai wiki search <query> --json`, parsed or not); without it the list is a substring filter. */
@@ -482,6 +487,7 @@ export function createWikiView(doc: Document, props: WikiViewProps): WikiView {
   let listError: string | null = null
   let listLoading = false
   const bodies = new Map<string, string>()
+  let snippets = new Map<string, SnippetState>()
 
   let current: string | null = null
   let page: WikiPage | null = null
@@ -709,6 +715,8 @@ export function createWikiView(doc: Document, props: WikiViewProps): WikiView {
       const known = pages.length ? new Set(pages.map((p) => p.slug)) : undefined
       try {
         const rendered = renderMarkdown(doc, page.body, {
+          page: `/${page.path}`,
+          snippets: ref => snippets.get(snippetKey(ref, page!.path)) ?? { error: props.markdownWords?.loading ?? "Loading" },
           resolveImage: (src) => imageUrl(doc, src, { page: page!.path, dir }),
           resolveLink: (href) => resolveWikiTarget(from, href, known),
           // An id moai found no issue for (exists: false) stays text: there is no row to jump to.
@@ -716,6 +724,7 @@ export function createWikiView(doc: Document, props: WikiViewProps): WikiView {
         })
         rendered.root.classList.add("m-wiki-article")
         scroller.append(rendered.root)
+        void hydrateDiagrams(rendered.root, doc, { alt: props.markdownWords?.diagramAlt ?? "Mermaid diagram", error: props.markdownWords?.diagramError ?? "Diagram could not be rendered" })
         links.push(...rendered.links)
         for (const heading of rendered.headings) {
           const node = rendered.root.querySelector<HTMLElement>(`#${cssEscape("m-md-" + heading.anchor)}`)
@@ -853,7 +862,12 @@ export function createWikiView(doc: Document, props: WikiViewProps): WikiView {
     } catch (reason) {
       error = fill(words.loadFailed, { reason: reason instanceof Error ? reason.message : String(reason) })
     }
+    let loaded = new Map<string, SnippetState>()
+    if (next && typeof next.body === "string" && props.client) {
+      try { loaded = await loadSnippets(props.client, snippetRefs(next.body, { page: `/${next.path}` }), { page: next.path, priority: PRIORITY.wiki, words: props.markdownWords }) } catch { /* renderer reports vendor failure */ }
+    }
     if (token !== request) return // a later open won; this answer is stale
+    snippets = loaded
     pageLoading = false
     page = next
     pageError = error
@@ -1223,6 +1237,8 @@ export const mountWiki: MountPane = (root, ctx): PaneView => {
   let retry = false
   const view = createWikiView(doc, {
     words: copy.wiki,
+    client: ctx.client,
+    markdownWords: copy.markdown,
     loadPage: (slug) => source.page(slug),
     searchPages: source.search ? (query) => source.search!(query) : undefined,
     standaloneKeys: false,

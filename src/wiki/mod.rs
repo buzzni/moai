@@ -13,7 +13,7 @@
 //! **화면 말은 모른다** — 거절과 못 읽은 까닭은 자료로 나가고, 글은 `view` 가 짓는다.
 
 use crate::held::{Fell, Home, Unheld};
-use pulldown_cmark::{Event, HeadingLevel, Parser, Tag, TagEnd};
+use pulldown_cmark::{Event, HeadingLevel, Tag, TagEnd};
 use std::collections::HashMap;
 use std::path::{Component, Path, PathBuf};
 
@@ -708,7 +708,13 @@ pub fn parse(slug: &str, body: &str, prefix: &str) -> Parsed {
             ids(s, &mut out.ids);
         }
     };
-    for (event, range) in Parser::new_ext(body, crate::markdown::OPTIONS).into_offset_iter() {
+    let mut in_footnote = false;
+    for (event, range) in crate::markdown::events(body) {
+        let event = match event {
+            Event::InlineMath(t) => Event::Code(format!("${t}$").into()),
+            Event::DisplayMath(t) => Event::Code(format!("$${t}$$").into()),
+            other => other,
+        };
         match event {
             Event::Text(_) | Event::Code(_) if code_block > 0 => {}
             Event::Text(t) => {
@@ -744,6 +750,9 @@ pub fn parse(slug: &str, body: &str, prefix: &str) -> Parsed {
             other => {
                 collect_ids(&std::mem::take(&mut text), external.as_deref(), &mut out);
                 match other {
+                    Event::Start(Tag::FootnoteDefinition(_)) => in_footnote = true,
+                    Event::End(TagEnd::FootnoteDefinition) => in_footnote = false,
+                    Event::Start(Tag::Heading { .. }) | Event::End(TagEnd::Heading(_)) if in_footnote => {}
                     Event::Start(Tag::CodeBlock(_)) => code_block += 1,
                     Event::End(TagEnd::CodeBlock) => code_block = code_block.saturating_sub(1),
                     Event::Start(Tag::Heading { level, .. }) => {
@@ -822,7 +831,12 @@ pub fn links_in(body: &str) -> Vec<(String, String)> {
     let mut out: Vec<(String, String)> = Vec::new();
     let mut code_block = 0u32;
     let mut link: Option<(String, String)> = None;
-    for event in Parser::new_ext(unmarked(body), crate::markdown::OPTIONS) {
+    for (event, _) in crate::markdown::events(unmarked(body)) {
+        let event = match event {
+            Event::InlineMath(t) => Event::Code(format!("${t}$").into()),
+            Event::DisplayMath(t) => Event::Code(format!("$${t}$$").into()),
+            other => other,
+        };
         match event {
             Event::Start(Tag::CodeBlock(_)) => code_block += 1,
             Event::End(TagEnd::CodeBlock) => code_block = code_block.saturating_sub(1),
@@ -1104,6 +1118,24 @@ mod tests {
         let mut a = Anchors::default();
         let got: Vec<String> = ["Foo", "Foo-1", "Foo", "Foo"].iter().map(|h| a.next(h)).collect();
         assert_eq!(got, ["foo", "foo-1", "foo-2", "foo-3"]);
+    }
+
+    /// Math keeps its `$` source in the title and the anchor text, and a heading inside a footnote definition is not
+    /// a heading — the same as the terminal and web renderers.
+    #[test]
+    fn math_keeps_anchor_text_and_footnote_headings_stay_out() {
+        let body = "# Title $x$\n\n## Energy $E=mc^2$\n\nText[^n]\n\n[^n]: note\n\n    # Hidden\n";
+        let p = parse("a", body, "moai");
+        assert_eq!(p.title.as_deref(), Some("Title $x$"));
+        assert_eq!(p.headings.iter().map(|h| h.anchor.as_str()).collect::<Vec<_>>(), ["title-x", "energy-emc2"]);
+    }
+
+    #[test]
+    fn shell_dollars_remain_text_in_wiki_titles_and_links() {
+        let page = parse("a", "# $HOME/$PATH\n\n[run $HOME/$PATH](b.md)", "moai");
+        assert_eq!(page.title.as_deref(), Some("$HOME/$PATH"));
+        assert_eq!(page.headings[0].anchor, "homepath");
+        assert_eq!(links_in("[run $HOME/$PATH](b.md)"), [("run $HOME/$PATH".into(), "b.md".into())]);
     }
 
     /// **머리글마다 앵커와 줄** — 모든 단, 적힌 차례로. 앵커의 글은 GitHub 이 그리는 글이다: 인라인 코드는 백틱 없이,

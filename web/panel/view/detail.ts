@@ -4,6 +4,8 @@
  * It only draws `state.shown` and the index; closing is the one thing it reports (`intents.closeDetail`).
  * The pure wording lives in view/detail-format.ts.
  */
+import { loadSnippets, snippetKey, PRIORITY } from '../data/snippet.js'
+import { hydrateDiagrams } from './diagram.js'
 import { isInformation } from '../data/client.js'
 import type { IssueIndex, Row } from '../data/index.js'
 import { isUnread } from '../data/read.js'
@@ -27,7 +29,7 @@ import {
   workOf,
 } from './detail-format.ts'
 import { statusGlyph } from './list-model.ts'
-import { renderMarkdown } from './markdown.ts'
+import { snippetRefs, type SnippetRef, type SnippetState, renderMarkdown } from './markdown.ts'
 import { imageUrl } from './image.ts'
 import { firstStatus, spins , lostMark } from './spin.ts'
 import { branchMark } from './branch.ts'
@@ -40,10 +42,25 @@ import { fill } from '../i18n/index.ts'
 type Groups = BoardData['groups']
 
 /** The body as markdown (view/markdown.ts: raw HTML stays text, links are only recorded, never followed). */
-export function renderBody(doc: Document, text: string): HTMLElement {
-  const { root } = renderMarkdown(doc, text, { resolveImage: src => imageUrl(doc, src) })
-  root.classList.add('moai-detail-body')
-  return root
+export function renderBody(doc: Document, text: string, snippets?: (ref: SnippetRef) => SnippetState, loading?: string): HTMLElement {
+  try {
+    const { root } = renderMarkdown(doc, text, { resolveImage: src => imageUrl(doc, src), snippets, snippetLoading: loading })
+    root.classList.add('moai-detail-body')
+    return root
+  } catch {
+    return el(doc, 'pre', { class: 'moai-detail-raw' }, text)
+  }
+}
+
+/** History notes share the body renderer, but never fetch snippets or reuse document IDs. */
+function renderNote(doc: Document, text: string): HTMLElement {
+  try {
+    const { root } = renderMarkdown(doc, text, { resolveImage: src => imageUrl(doc, src), literalSnippets: true, headingIds: false, breaks: true })
+    root.classList.add('moai-detail-note')
+    return root
+  } catch {
+    return el(doc, 'span', { class: 'moai-detail-text' }, text)
+  }
 }
 
 /** A titled block; `h3` is the section's name. */
@@ -96,6 +113,9 @@ export const mountDetail: MountPane = (root: HTMLElement, ctx: ViewContext): Pan
   let heads: { id: HTMLElement; title: HTMLElement; idText: string; titleText: string } | null = null
   /** `SPC v r`: the body as the markdown it was written in. */
   let raw = false
+  let snippetIdentity = ''
+  let snippetResults = new Map<string, SnippetState>()
+  let generation = 0
   let last: { state: State; index: IssueIndex | null } | null = null
 
   function closeButton() {
@@ -178,7 +198,29 @@ export const mountDetail: MountPane = (root: HTMLElement, ctx: ViewContext): Pan
       out.push(section(doc, d.rollup, el(doc, 'div', { class: 'moai-detail-rollup' }, rollup.percent === undefined ? fill(d.rollupText, { done: rollup.done, work: rollup.work }) : fill(d.rollupTextPercent, { done: rollup.done, work: rollup.work, percent: rollup.percent })), bar, rollup.byStatus.length ? legend : null))
     }
     const body = typeof row.body === 'string' ? row.body.trim() : ''
-    if (body) out.push(section(doc, d.body, raw ? el(doc, 'pre', { class: 'moai-detail-body moai-detail-raw' }, body) : renderBody(doc, body)))
+    if (body) {
+      const identity = `${row.id}\u0000${body}`
+      if (identity !== snippetIdentity) {
+        snippetIdentity = identity; snippetResults = new Map(); const token = ++generation
+        if (ctx.client) {
+          try {
+            const refs = snippetRefs(body)
+            if (refs.length) void loadSnippets(ctx.client, refs, { priority: PRIORITY.detail, words: copy.markdown }).then(result => {
+              if (token !== generation) return
+              snippetResults = result
+              // Keep the error visible, but let the next redraw retry any failed or cancelled fetch.
+              if ([...result.values()].some(value => 'error' in value)) { snippetIdentity = ''; drawn = null }
+              const old = view.querySelector<HTMLElement>('.moai-detail-body:not(.moai-detail-raw)')
+              if (!old) return
+              const fresh = renderBody(doc, body, ref => snippetResults.get(snippetKey(ref)) ?? { error: copy.markdown.loading }, copy.markdown.loading)
+              old.replaceWith(fresh)
+              void hydrateDiagrams(fresh, doc, { alt: copy.markdown.diagramAlt, error: copy.markdown.diagramError })
+            })
+          } catch { /* fallback is drawn by renderBody */ }
+        }
+      }
+      out.push(section(doc, d.body, raw ? el(doc, 'pre', { class: 'moai-detail-body moai-detail-raw' }, body) : renderBody(doc, body, ref => snippetResults.get(snippetKey(ref)) ?? { error: copy.markdown.loading }, copy.markdown.loading)))
+    }
     const children = childrenOf(row, index)
     if (children.length) {
       const list = el(doc, 'ul', { class: 'moai-detail-list' })
@@ -214,7 +256,7 @@ export const mountDetail: MountPane = (root: HTMLElement, ctx: ViewContext): Pan
     const journal = journalOf(row, copy)
     const history = el(doc, 'ol', { class: 'moai-detail-list moai-detail-timeline' })
     if (journal.length) {
-      for (const line of journal) history.append(el(doc, 'li', { 'data-kind': line.kind }, el(doc, 'span', { class: 'moai-detail-text' }, line.text), line.meta ? el(doc, 'span', { class: 'moai-detail-meta' }, line.meta) : null))
+      for (const line of journal) history.append(el(doc, 'li', { 'data-kind': line.kind }, line.kind === 'note' && !raw ? renderNote(doc, line.text) : el(doc, 'span', { class: 'moai-detail-text' }, line.text), line.meta ? el(doc, 'span', { class: 'moai-detail-meta' }, line.meta) : null))
     } else history.append(el(doc, 'li', { class: 'moai-detail-meta' }, d.noJournal))
     out.push(folded(doc, 'journal', d.journal, open, history))
     const work = workOf(row)
@@ -253,6 +295,7 @@ export const mountDetail: MountPane = (root: HTMLElement, ctx: ViewContext): Pan
     drawn = { shown: state.shown, index, search: state.search, groups, zone }
     // Another row's detail starts at the top; the same row redrawn (a refresh) keeps its place.
     const id = value?.id ?? null
+    if (id !== shownId) { snippetIdentity = ''; snippetResults = new Map(); generation++ }
     const top = id !== null && id === shownId ? scroller().scrollTop : 0
     shownId = id
     const active = doc.activeElement as HTMLElement | null
@@ -266,6 +309,7 @@ export const mountDetail: MountPane = (root: HTMLElement, ctx: ViewContext): Pan
     else if (loading) children.push(el(doc, 'p', { class: 'moai-detail-loading', role: 'status' }, copy.loading))
     else if (!problem) children.push(emptyState(doc, { title: d.none }))
     view.replaceChildren(...children)
+    void hydrateDiagrams(view, doc, { alt: copy.markdown.diagramAlt, error: copy.markdown.diagramError })
     scroller().scrollTop = top
     if (key !== undefined) view.querySelector<HTMLElement>(`[data-focus="${key}"]`)?.focus({ preventScroll: true })
   }
@@ -284,6 +328,15 @@ export const mountDetail: MountPane = (root: HTMLElement, ctx: ViewContext): Pan
     box.scrollTop = step === -Infinity ? 0 : step === Infinity ? box.scrollHeight : Math.max(0, box.scrollTop + step)
     return true
   }
+
+  view.addEventListener('click', event => {
+    const target = event.target as Element | null
+    const link = target?.closest<HTMLAnchorElement>('a.m-md-link[data-kind=anchor]')
+    const body = link?.closest('.m-md')
+    if (!link || !body) return
+    const anchor = [...body.querySelectorAll<HTMLElement>('[data-anchor]')].find(node => !node.classList.contains('m-md-link') && node.dataset.anchor === link.dataset.anchor)
+    if (anchor) { event.preventDefault(); anchor.scrollIntoView({ block: 'nearest' }) }
+  })
 
   return {
     render,

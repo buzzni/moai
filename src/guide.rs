@@ -651,12 +651,47 @@ const PLAN_EPIC_BODY: &str =
     "why this bundle · the person's decisions · promises · order and the files it shares · review focus";
 const PLAN_MEMBER_EXTRA: &str = "where and how (files, functions, structures) · important contracts and pitfalls";
 
+const MARKDOWN: &str = r#"### Markdown moai draws
+
+Most bodies and notes need only lists. Use richer markdown when it carries more:
+
+- Footnotes: `claim[^1]` and `[^1]: source` keep sources or asides out of a list.
+  All surfaces number these; inline `^[aside]` is rendered only on the web and
+  stays as written in the explorer and `moai show`.
+- Math: `$x$`, `$$x^2$$`, or a fenced `math` block for formulas. Terminals show
+  TeX source styled as code. Put shell variables and prices such as `$HOME` and
+  `5$` in code spans so they are not mistaken for math.
+- A fenced `` ```mermaid `` block, for example `graph TD; A-->B`, suits flows, states or
+  exchanges a list cannot convey. The web draws it; terminals show code headed
+  `▸ mermaid`. Keep labels short; math in labels remains TeX even on the web.
+- A snippet on its own line, `<<< path#region{1-3 rust}`, shows current checkout
+  text in a body or wiki page; paste fenced code instead to preserve a snapshot.
+  Body paths start at the checkout root, wiki paths at the page folder; `@/` or
+  a leading `/` starts at the checkout root. Without `#region` the whole file is
+  shown; `{1-3}` does not select lines. Up to 32 directives per body and 256 KiB
+  per text file are allowed; sensitive files, `.git` and `.moai` are refused.
+  `moai show` leaves snippets as text; the explorer does so inside lists. Notes
+  never expand snippets. GitHub leaves directives as written.
+- CJK emphasis next to punctuation, such as `**"인용"**이다`, renders on the web;
+  terminals leave its asterisks as written.
+- Pictures suit screen states or visual bugs; keep logs, code and errors as text
+  for search and terminals. `moai image add <file> --to <id>` stores the picture
+  (PNG and JPEG reduced) under `.moai/images/` and appends it to the body; commit
+  it with the tracker. For a
+  wiki page, `moai image add <file> --wiki <slug>` prints a reference relative to
+  that page; paste it there. Only supporting terminals draw pictures.
+
+Web history renders notes as markdown; the explorer and `moai show` print notes
+as written, and pictures in notes appear only in web history. Keep notes readable
+as plain text and machine-readable lines such as `model:` and `Next:` unchanged at
+line start."#;
+
 /// 두 계획 브리프의 공통 글. **물음을 어디로 보내는가는 여기 두지 않는다** — 감독의 펼치기는 정하지 못한 설계
 /// 물음을 멤버 본문에 열어 둔 채 일꾼에게 넘기고(그 보고에는 `gap:` 줄이 없다), `moai-plan` 의 초안은 `gap:` 줄로
 /// 돌려준다. 공통 글에 "gap 으로 돌려 달라" 를 두면 감독의 펼치기가 아무도 안 읽는 줄을 낸다.
 fn plan_core() -> String {
     format!(
-        "Read the request, its evidence and enough code and tracker context to ground the split. Write short titles and concrete, actionable bodies with file and function locations, constraints, acceptance tests and review focus. For detailed writing use, for the epic: {PLAN_EPIC_BODY}; for a development member: {DETAILED_BODY}, adding {PLAN_MEMBER_EXTRA} after `what is decided`. Name the epic review section `{REVIEW_FOCUS}` (choose the English or Korean heading). For brief writing give what, where and tests. Classify each member using the difficulty rubric and explain why. Do not ask the person questions.\nKeep the person's decisions and exclusions, storage, concurrency, path security and output contracts, numbers and budgets, member order and review focus. Give entry-point files and functions as navigation hints; line numbers, proposed signatures and types are hints, not contracts. Describe acceptance tests by the failure conditions they must catch, not exhaustive test function names. Under `acceptance (which tests)`, write those failure conditions; test names are optional navigation hints. Make example commands executable with configured column names, the first column, spaces and shell quoting; when unknown use a placeholder such as `<first column>`. Put shared files and order in the epic once; a member's `order and the files it shares` names only its own place and files and points to the epic — do not repeat file lists or explanations in every member."
+        "Read the request, its evidence and enough code and tracker context to ground the split. Write short titles and concrete, actionable bodies with file and function locations, constraints, acceptance tests and review focus. For detailed writing use, for the epic: {PLAN_EPIC_BODY}; for a development member: {DETAILED_BODY}, adding {PLAN_MEMBER_EXTRA} after `what is decided`. Name the epic review section `{REVIEW_FOCUS}` (choose the English or Korean heading). For brief writing give what, where and tests. Classify each member using the difficulty rubric and explain why. Do not ask the person questions.\nKeep the person's decisions and exclusions, storage, concurrency, path security and output contracts, numbers and budgets, member order and review focus. Give entry-point files and functions as navigation hints; line numbers, proposed signatures and types are hints, not contracts. Describe acceptance tests by the failure conditions they must catch, not exhaustive test function names. Under `acceptance (which tests)`, write those failure conditions; test names are optional navigation hints. Make example commands executable with configured column names, the first column, spaces and shell quoting; when unknown use a placeholder such as `<first column>`. Put shared files and order in the epic once; a member's `order and the files it shares` names only its own place and files and points to the epic — do not repeat file lists or explanations in every member.\nBodies are markdown: use footnotes, math, Mermaid, snippets or pictures only where they carry more than a list; the `moai` skill's `references/commands.md` gives the syntax."
     )
 }
 
@@ -1526,6 +1561,8 @@ record what was done and what remains. Keep machine-readable lines `model:`, `Le
 `Report-checked:`, `Review-ready:`, `Regression-of:`, `Summary:`, `Sent:`, `Next:`,
 `report:`, `Model ran:`, `Subagent ran:`, `Unfolded:`, `Decided alone:` and `Plan stopped:`
 in their original format. Do not shorten a reviewer's own words.
+Bodies and wiki pages support footnotes, math, Mermaid, snippets and pictures (`moai image add`), notes
+all but snippets; use them when lists fall short. See `references/commands.md` for syntax and surface limits.
 
 ### The five things the hook watches
 
@@ -1899,6 +1936,8 @@ them, so where they differ the help wins.
 {WRITING}
 
 {DETAIL}
+
+{MARKDOWN}
 
 ## The five things the hook actually watches
 
@@ -2481,6 +2520,10 @@ merged without touching it.
    - a lesson with a `seen_count` over three has outgrown a page. **Ask the person**
      whether it becomes a rule — in CLAUDE.md, in the AGENTS block, a hook or a test.
      Promoting it is the person's decision, never yours
+
+## Markdown for pages
+
+{MARKDOWN}
 
 ## A new page
 
@@ -6228,6 +6271,7 @@ mod tests {
             FORKS,
             WRITING,
             DETAIL,
+            MARKDOWN,
             CTL,
             GROUPS,
             DEFERRING,
@@ -6242,6 +6286,39 @@ mod tests {
             CLOSING,
         ] {
             assert!(reference.contains(piece), "missing reference content: {}", piece.lines().next().unwrap());
+        }
+    }
+
+    #[test]
+    fn markdown_guidance_names_syntax_and_terminal_limits() {
+        let block = agents();
+        for marker in ["footnotes", "math", "Mermaid", "snippets", "moai image add", "references/commands.md"] {
+            assert!(block.contains(marker), "block misses {marker}");
+        }
+        // 노트는 snippet 을 어느 표면에서도 안 편다 — 블록이 노트까지 뭉뚱그려 "snippets" 를 대면 거짓이다.
+        assert!(block.contains("notes\nall but snippets"), "the block must keep snippets out of notes");
+        let parsed = crate::markdown::parse(&reference());
+        assert!(
+            parsed.iter().any(|block| matches!(block,
+                crate::markdown::Block::Heading { spans, .. }
+                    if spans.iter().any(|span| span.text == "The five things the hook actually watches")
+            )),
+            "the heading after markdown guidance must remain a heading"
+        );
+        for surface in [reference(), wiki()] {
+            for marker in [
+                "[^1]",
+                "$$",
+                "```mermaid",
+                "<<< ",
+                "moai image add <file> --to <id>",
+                "--wiki <slug>",
+                "terminals show code",
+                "inline `^[aside]`",
+                "print notes",
+            ] {
+                assert!(surface.contains(marker), "guidance misses {marker}");
+            }
         }
     }
 
@@ -6365,7 +6442,7 @@ mod tests {
     #[test]
     fn both_surfaces_carry_the_same_pieces() {
         let (agents, skill, reference) = (agents(), skill(), reference());
-        for piece in [CHEATSHEET, FORKS, WRITING, DETAIL, CLOSING] {
+        for piece in [CHEATSHEET, FORKS, WRITING, DETAIL, MARKDOWN, CLOSING] {
             assert!(reference.contains(piece), "reference missing {}", piece.lines().next().unwrap());
         }
         // 블록이 없는 저장소(`--guide hook`·`none`)의 세션은 스킬만 읽는다 — 승인 게이트가 없다는 약속과 블록을 받는 길이
@@ -7337,6 +7414,7 @@ stop sending outside work while a release runs",
     fn planning_briefs_keep_decisions_and_contracts_without_prescribing_implementation() {
         let (core, briefs) = (plan_core(), [("draft", plan_brief_draft()), ("backlog", plan_brief())]);
         for contract in [
+            "Bodies are markdown: use footnotes, math, Mermaid, snippets or pictures",
             "person's decisions and exclusions",
             "storage, concurrency, path security and output contracts",
             "numbers and budgets",

@@ -1278,6 +1278,7 @@
   "update.fetch_failed": "{url} 을 못 받았다 — {said}. 아무것도 안 돌렸다",
   "update.no_sh": "{program} 를 못 띄웠다 — {said}",
   "update.running": "{url} 의 {script} 를 {dir} 에 돌린다",
+  "update.refresh_projects": "각 프로젝트에서 `moai skill install` (해당 트리에는 `--agent codex` 또는 `--agent antigravity`)과 `moai init`을 실행해 에이전트가 이 판의 스킬과 안내를 받게 한다",
   "update.daemon_restart": "데몬 {version} (pid {pid})이 아직 실행 중이다 — 서비스 관리자로 다시 시작하거나 직접 띄웠다면 멈추고 다시 띄운다",
   "update.dry_fetch": "받을 것  {url}",
   "update.dry_run": "돌릴 것  {line}",
@@ -1955,7 +1956,17 @@
   "page.detail.session": "세션",
   "page.detail.sessionLost": "세션 신호 끊김 — {agent} {sid} · 마지막 신호 {event} {minutes}분 전",
   "page.detail.sessionAlive": "살아 있다 — {agent} {sid} · {minutes}분 전",
+  "tui.snippet.missing": "파일이 없습니다",
+  "tui.snippet.refused": "허용되지 않은 경로",
+  "tui.snippet.too_large": "파일이 너무 큽니다",
+  "tui.snippet.not_text": "글 파일이 아닙니다",
   "image.placeholder": "그림",
   "image.missing": "그림 없음",
-  "image.large": "{file}: {bytes}바이트가 {limit}바이트를 넘습니다. 압축하거나 작은 그림을 넣으세요"
+  "image.large": "{file}: {bytes}바이트가 {limit}바이트를 넘습니다. 압축하거나 작은 그림을 넣으세요",
+  "page.markdown.diagramAlt": "머메이드 다이어그램",
+  "page.markdown.diagramError": "다이어그램을 그리지 못했습니다",
+  "page.markdown.loading": "snippet 불러오는 중",
+  "page.markdown.missing": "snippet 없음",
+  "page.markdown.refused": "snippet 거절됨",
+  "page.markdown.tooLarge": "snippet이 너무 큽니다"
 }

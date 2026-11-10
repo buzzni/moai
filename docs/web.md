@@ -69,8 +69,9 @@ sort.
 Choosing an issue shows its detail: column, priority, assignee, tags, what blocks
 it, the body, its children, its commits, the wiki about it (the lessons its notes
 point at, the pages that name it, the related sections — as `moai show <id>`
-lists them) and its history. History and work log start expanded and keep the
-line breaks of the text as written. In the list, todo rows have a pale blue
+lists them) and its history. History and work log start expanded. History notes
+render as markdown with their line breaks preserved; status moves and the work log
+remain plain text with their line breaks. In the list, todo rows have a pale blue
 background, in-progress rows pale gold, review rows pale purple and done rows pale
 green. Gantt rows use the same tints; the light blue todo tint is faint enough
 to keep a selected row distinct in either theme, and the selected list row has a
@@ -82,8 +83,61 @@ The board carries those colours on the first line of cards in those four columns
 columns stay plain. The detail starts on the right;
 `SPC o d`, or the position button, moves it right → bottom → left → top. Below
 640px it stays below the list. `SPC v d` hides it, and `SPC v r` switches the body
-between rendered markdown and the raw text.
+and history notes between rendered markdown and the raw text.
 `Enter` on an issue moves the focus to the detail, and `SPC w w` moves it back.
+
+## Markdown
+
+Issue bodies, history notes and wiki pages support CommonMark, tables,
+strikethrough and task lists. Notes preserve soft line breaks; bodies and wiki
+pages use CommonMark line breaks. Snippet directives in history remain as written
+and never fetch files. Creation and status entries remain plain text.
+
+Bodies, notes and wiki pages also support footnotes (`[^1]` with a `[^1]: …`
+definition, or an inline `^[…]`), dollar-delimited math (`$…$` and `$$…$$`), and fenced `math`
+blocks. Math is rendered as MathML with the browser's math fonts. CJK emphasis
+works next to surrounding text, as in `**강조**를`.
+
+A fenced `mermaid` block becomes a diagram. If it cannot be drawn, its source
+and an error remain visible. Mermaid labels containing math show the TeX source.
+`SPC v r` switches the body and history notes, or the wiki page, back to their
+original markdown. Raw HTML is shown as text. Wiki links and anchors can be followed within the wiki; external
+links are displayed without navigating to them. For pictures, see
+[pictures in issues and the wiki](images.md).
+
+To include a text file, put a snippet directive on its own line:
+
+    <<< src/example.rs#example{1-3 rust}
+
+The path is relative to the checkout root in an issue body and to the page's
+folder in a wiki page. `@/` or a leading `/` names the checkout root, not the
+machine's filesystem root. An optional `#region` selects text between matching
+markers, for example `// #region example` and `// #endregion example`; paired
+comment markers such as `#`, `/* … */`, `<!-- … -->`, `::` and `#pragma` are
+also supported. The selected region is dedented and its markers are omitted. If
+its matching markers cannot be found, the whole file is shown. The optional
+`{lines lang}` records a language, but line ranges are not selected or highlighted
+and code is not syntax-highlighted.
+
+The web and explorer use the same file rules. A body can expand at most 32
+snippet directives; later directives stay as written. The web also expands a
+directive inside a list item; the explorer leaves it as text. Each file must be a regular
+UTF-8 text file with no NUL bytes and no more than 256 KiB. Paths that escape the
+checkout, including through a symbolic link, are refused; so are backslashes,
+colons, percent signs and control characters in a path. The following names are
+refused at any depth, including when a symbolic link points to one:
+
+- Any `.git`, `.moai`, `.ssh`, `.aws`, `.azure` or `.kube` path component,
+  and `.docker/config.json`
+- `.env`, `.env.*`, `.npmrc`, `.netrc`, `.git-credentials`, `id_rsa*` and
+  `id_ed25519*`
+- Files ending in `.pem`, `.key` or `.p12`, and names containing `.tfstate`
+
+A missing, refused, oversized or non-text file is reported in place of its
+contents. The browser asks `GET /api/snippet` to read it for the selected
+project; the browser itself does not open local files. See the
+[explorer's markdown support](explorer.md#markdown-in-the-explorer) for what the
+terminal shows.
 
 ## Gantt
 
@@ -469,4 +523,4 @@ lanes.
 The page does not show the stats screen, and what it writes is a Gantt bar's days
 and your read marks.
 
-Decided in: moai-skjr, moai-e9hi, moai-8r2l, moai-0aa7, moai-jshy, moai-d86e.3ud, moai-ijjd, moai-lj8g, moai-ekg6 moai-mkzo moai-i07x moai-zgc1 moai-v5of moai-4v3h moai-7eeq moai-yigx moai-4xmq moai-okdc
+Decided in: moai-skjr, moai-e9hi, moai-8r2l, moai-0aa7, moai-jshy, moai-d86e.3ud, moai-ijjd, moai-lj8g, moai-ekg6 moai-mkzo moai-i07x moai-zgc1 moai-v5of moai-4v3h moai-7eeq moai-yigx moai-4xmq moai-okdc moai-z74b moai-1f3p
