@@ -190,6 +190,8 @@ fn closes(body: &str) -> bool {
             }
             Event::End(_) => depth = depth.saturating_sub(1),
             Event::Text(t) => text.push_str(&t),
+            Event::InlineMath(t) => text.push_str(&format!("${t}$")),
+            Event::DisplayMath(t) => text.push_str(&format!("$${t}$$")),
             _ => {}
         }
     }
@@ -213,6 +215,8 @@ fn check(body: &str) -> Result<(), Refused> {
                 words.clear();
             }
             Event::Text(t) | Event::Code(t) if in_h2 => words.push_str(&t),
+            Event::InlineMath(t) if in_h2 => words.push_str(&format!("${t}$")),
+            Event::DisplayMath(t) if in_h2 => words.push_str(&format!("$${t}$$")),
             Event::End(TagEnd::Heading(_)) => {
                 found |= in_h2 && words.trim().eq_ignore_ascii_case(DO_INSTEAD);
                 in_h2 = false;
