@@ -1,4 +1,4 @@
-<!-- moai:begin v:1.1.0 hash:122925a0 -->
+<!-- moai:begin v:1.1.0 hash:b5aaec02 -->
 ## Issue tracker — moai
 
 This repository's work lives in `.moai/issues.jsonl`.
@@ -47,8 +47,8 @@ record what was done and what remains. Keep machine-readable lines `model:`, `Le
 `Report-checked:`, `Review-ready:`, `Regression-of:`, `Summary:`, `Sent:`, `Next:`,
 `report:`, `Model ran:`, `Subagent ran:`, `Unfolded:`, `Decided alone:` and `Plan stopped:`
 in their original format. Do not shorten a reviewer's own words.
-Bodies, notes and wiki pages support footnotes, math, Mermaid, snippets and pictures (`moai image add`);
-use them when lists fall short. See `references/commands.md` for syntax and surface limits.
+Bodies and wiki pages support footnotes, math, Mermaid, snippets and pictures (`moai image add`), notes
+all but snippets; use them when lists fall short. See `references/commands.md` for syntax and surface limits.
 
 ### The five things the hook watches
 

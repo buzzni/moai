@@ -213,8 +213,9 @@ Most bodies and notes need only lists. Use richer markdown when it carries more:
 - CJK emphasis next to punctuation, such as `**"인용"**이다`, renders on the web;
   terminals leave its asterisks as written.
 - Pictures suit screen states or visual bugs; keep logs, code and errors as text
-  for search and terminals. `moai image add <file> --to <id>` attaches a reduced
-  picture to the body under `.moai/images/`; commit it with the tracker. For a
+  for search and terminals. `moai image add <file> --to <id>` stores the picture
+  (PNG and JPEG reduced) under `.moai/images/` and appends it to the body; commit
+  it with the tracker. For a
   wiki page, `moai image add <file> --wiki <slug>` prints a reference relative to
   that page; paste it there. Only supporting terminals draw pictures.
 
@@ -222,7 +223,6 @@ Web history renders notes as markdown; the explorer and `moai show` print notes
 as written, and pictures in notes appear only in web history. Keep notes readable
 as plain text and machine-readable lines such as `model:` and `Next:` unchanged at
 line start.
-
 
 ## The five things the hook actually watches
 
