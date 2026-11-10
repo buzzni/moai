@@ -237,7 +237,11 @@ export function renderMarkdown(doc: Document, source: string, options: RenderOpt
       case 'paragraph_close': if (!t.hidden) pop(); break
       case 'fence': case 'code_block': {
         const ref = refOf(t), lang = t.info.trim().split(/[\s{]/)[0] ?? ''
-        if ((t.meta as { invalidSnippet?: boolean } | null)?.invalidSnippet) { parent().appendChild(el(doc, 'p', {}, sourceLines[t.map?.[0] ?? -1] ?? '')); break }
+        if ((t.meta as { invalidSnippet?: boolean } | null)?.invalidSnippet) {
+          const line = sourceLines[t.map?.[0] ?? -1] ?? ''
+          const marker = line.indexOf('<<<')
+          parent().appendChild(el(doc, 'p', {}, marker < 0 ? line : line.slice(marker))); break
+        }
         if (ref && ++snippetCount > 32) { parent().appendChild(el(doc, 'p', {}, sourceLines[t.map?.[0] ?? -1] ?? `<<< ${ref.path}`)); break }
         if (ref) {
           const state = options.snippets?.(ref)
