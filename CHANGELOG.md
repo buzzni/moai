@@ -12,6 +12,8 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-11-10
+
 ### Added
 
 - The web viewer supports footnotes, MathML math, Mermaid diagrams, CJK-friendly emphasis and file snippets in issue bodies and wiki pages. (moai-z74b)
