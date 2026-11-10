@@ -221,11 +221,10 @@ The list, the board or the gantt you leave on is the one the next run opens with
 ## Markdown in the explorer
 
 The detail and wiki panes render issue bodies and wiki markdown in the terminal.
-History notes remain as written in the explorer and in `moai show`; the web
-renders notes as markdown. Use
-`SPC v r` to see the original text instead. They share the snippet file and path
-rules described in [web markdown](web.md#markdown), including the 32-directive
-and 256 KiB limits and the sensitive-file refusals.
+Use `SPC v r` to see the original text instead. History notes remain as written
+in the explorer and in `moai show`; the web renders notes as markdown. The panes
+share the snippet file and path rules described in [web markdown](web.md#markdown),
+including the 32-directive and 256 KiB limits and the sensitive-file refusals.
 
 | Written | Explorer display |
 |---|---|

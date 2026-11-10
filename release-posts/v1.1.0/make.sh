@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Rebuild the v1.1.0 pictures: an issue body with math, a Mermaid diagram, footnotes and a snippet in the web detail.
+# Rebuild the v1.1.0 pictures: an issue body with math, a Mermaid diagram, footnotes and a snippet in the web detail,
+# and its history with markdown notes beside a status move.
 # MOAI=<v1.1.0 binary> release-posts/v1.1.0/make.sh   (Playwright from web/node_modules, or NODE_PATH)
 set -euo pipefail
 here=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
