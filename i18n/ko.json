@@ -1957,5 +1957,11 @@
   "page.detail.sessionAlive": "살아 있다 — {agent} {sid} · {minutes}분 전",
   "image.placeholder": "그림",
   "image.missing": "그림 없음",
-  "image.large": "{file}: {bytes}바이트가 {limit}바이트를 넘습니다. 압축하거나 작은 그림을 넣으세요"
+  "image.large": "{file}: {bytes}바이트가 {limit}바이트를 넘습니다. 압축하거나 작은 그림을 넣으세요",
+  "page.markdown.diagramAlt": "머메이드 다이어그램",
+  "page.markdown.diagramError": "다이어그램을 그리지 못했습니다",
+  "page.markdown.loading": "snippet 불러오는 중",
+  "page.markdown.missing": "snippet 없음",
+  "page.markdown.refused": "snippet 거절됨",
+  "page.markdown.tooLarge": "snippet이 너무 큽니다"
 }

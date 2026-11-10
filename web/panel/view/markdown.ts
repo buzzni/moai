@@ -20,6 +20,7 @@ export interface RenderOptions {
   issueIds?: Iterable<string>
   snippets?: (ref: SnippetRef) => SnippetState
   page?: string
+  snippetLoading?: string
 }
 
 export interface Rendered {
@@ -220,7 +221,7 @@ export function renderMarkdown(doc: Document, source: string, options: RenderOpt
         if (ref) {
           const state = options.snippets?.(ref)
           if (state && 'text' in state) parent().appendChild(el(doc, 'pre', { class: 'm-md-code m-md-snippet', 'data-lang': lang, 'data-path': ref.path }, state.text))
-          else parent().appendChild(el(doc, 'p', { class: 'm-md-snippet-missing' }, `${ref.path}: ${state && 'error' in state ? state.error : 'Loading'}`))
+          else parent().appendChild(el(doc, 'p', { class: 'm-md-snippet-missing' }, `${ref.path}: ${state && 'error' in state ? state.error : options.snippetLoading ?? 'Loading'}`))
         } else {
           const pre = el(doc, 'pre', { class: 'm-md-code', ...(lang ? { 'data-lang': lang } : {}) }, lang === 'mermaid' ? t.content : t.content.replace(/\n$/, ''))
           if (lang === 'mermaid') { const figure = el(doc, 'figure', { class: 'm-md-mermaid' }); figure.appendChild(pre); parent().appendChild(figure) } else parent().appendChild(pre)
