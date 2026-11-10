@@ -708,7 +708,13 @@ pub fn parse(slug: &str, body: &str, prefix: &str) -> Parsed {
             ids(s, &mut out.ids);
         }
     };
+    let mut in_footnote = false;
     for (event, range) in Parser::new_ext(body, crate::markdown::OPTIONS).into_offset_iter() {
+        let event = match event {
+            Event::InlineMath(t) => Event::Code(format!("${t}$").into()),
+            Event::DisplayMath(t) => Event::Code(format!("$${t}$$").into()),
+            other => other,
+        };
         match event {
             Event::Text(_) | Event::Code(_) if code_block > 0 => {}
             Event::Text(t) => {
@@ -744,6 +750,9 @@ pub fn parse(slug: &str, body: &str, prefix: &str) -> Parsed {
             other => {
                 collect_ids(&std::mem::take(&mut text), external.as_deref(), &mut out);
                 match other {
+                    Event::Start(Tag::FootnoteDefinition(_)) => in_footnote = true,
+                    Event::End(TagEnd::FootnoteDefinition) => in_footnote = false,
+                    Event::Start(Tag::Heading { .. }) | Event::End(TagEnd::Heading(_)) if in_footnote => {}
                     Event::Start(Tag::CodeBlock(_)) => code_block += 1,
                     Event::End(TagEnd::CodeBlock) => code_block = code_block.saturating_sub(1),
                     Event::Start(Tag::Heading { level, .. }) => {
@@ -823,6 +832,11 @@ pub fn links_in(body: &str) -> Vec<(String, String)> {
     let mut code_block = 0u32;
     let mut link: Option<(String, String)> = None;
     for event in Parser::new_ext(unmarked(body), crate::markdown::OPTIONS) {
+        let event = match event {
+            Event::InlineMath(t) => Event::Code(format!("${t}$").into()),
+            Event::DisplayMath(t) => Event::Code(format!("$${t}$$").into()),
+            other => other,
+        };
         match event {
             Event::Start(Tag::CodeBlock(_)) => code_block += 1,
             Event::End(TagEnd::CodeBlock) => code_block = code_block.saturating_sub(1),
@@ -1108,6 +1122,14 @@ mod tests {
 
     /// **머리글마다 앵커와 줄** — 모든 단, 적힌 차례로. 앵커의 글은 GitHub 이 그리는 글이다: 인라인 코드는 백틱 없이,
     /// 링크는 글만, 그림의 대체글은 빼고. 코드 블록 안의 `#` 줄은 머리글이 아니고, 줄은 앞의 BOM 을 걷은 본문에서 센다.
+    #[test]
+    fn math_keeps_anchor_text_and_footnote_headings_stay_out() {
+        let body = "# Title $x$\n\n## Energy $E=mc^2$\n\nText[^n]\n\n[^n]: note\n\n    # Hidden\n";
+        let p = parse("a", body, "moai");
+        assert_eq!(p.title.as_deref(), Some("Title $x$"));
+        assert_eq!(p.headings.iter().map(|h| h.anchor.as_str()).collect::<Vec<_>>(), ["title-x", "energy-emc2"]);
+    }
+
     #[test]
     fn every_heading_gets_an_anchor_and_its_line() {
         let body = "\u{feff}# Glossary\n\nintro\n\n## `Next:` note\n\n```sh\n# not a heading\n```\n\n\
