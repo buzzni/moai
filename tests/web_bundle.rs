@@ -32,7 +32,7 @@ fn sources() -> String {
     let web = at_root("web");
     let mut paths = Vec::new();
     walk(&web, "panel/", &mut paths);
-    paths.extend(["build.mjs", "i18n-bundles.mjs", "package.json", "package-lock.json"].map(String::from));
+    paths.extend(["build.mjs", "i18n-bundles.mjs", "package.json", "package-lock.json", "vendor.mjs"].map(String::from));
     paths.sort();
     let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
     let mut fold = |bytes: &[u8]| {
@@ -187,4 +187,20 @@ fn the_web_bundle_fits_its_budget() {
     // theme.js 는 첫 그림을 쥐고 선다 — 테마와 키만 들고, 저장소·스토어가 끌려 들어오면 여기서 붉어진다.
     let early = dist("theme.js").len();
     assert!(early <= 2048, "theme.js 가 {early} 바이트 — 첫 그림을 쥐는 스크립트라 상한 2KiB");
+}
+
+#[test]
+fn the_vendor_bundle_is_loaded_in_order_and_fits_its_budget() {
+    let html = dist("index.html");
+    let theme = html.find("src=\"/theme.js\"").unwrap();
+    let vendor = html.find("<script src=\"/vendor.js\" defer></script>").unwrap();
+    let app = html.find("src=\"/app.js\"").unwrap();
+    assert!(theme < vendor && vendor < app);
+    let bytes = dist("vendor.js").len();
+    // 2026-11-10: 5,496,684 bytes with Mermaid 12.3.0.
+    assert!(bytes <= 6 * 1024 * 1024, "vendor.js is {bytes} bytes");
+    let app = dist("app.js");
+    for marker in ["MarkdownIt", "KaTeX parse error"] {
+        assert!(!app.contains(marker), "third-party code leaked into app.js: {marker}");
+    }
 }
