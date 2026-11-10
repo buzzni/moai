@@ -548,6 +548,7 @@ async function start(): Promise<void> {
     index: indexOf,
     activity,
     wiki,
+    client,
     movePlan,
     intents: {
       refresh: () => void refresher.refresh({ fresh: true }),
