@@ -2,6 +2,10 @@
 
 Add a picture to an issue with `moai image add shot.png --to <id>`. The command prints a markdown reference; to put it in a note instead, use `moai note <id> "$(moai image add shot.png)"`. Pass several files together, use `--alt` to supply a description, or `--original` to keep the input bytes. `--json` reports the stored files and warnings.
 
+A picture attached to the issue body with `--to` is available on the web and on
+the terminal surfaces described below. A picture in a note renders only in web
+history; the explorer and `moai show` leave the note as text.
+
 Use `moai image add shot.png --wiki` for a wiki picture. With a nested page, give its slug, for example `--wiki lessons/example`: the printed reference is relative to that page. Paste it into the page yourself.
 
 Issue pictures live under `.moai/images/` in the tracker root, even when added from a linked worktree. Commit them with the tracker. Wiki pictures live under the checkout's `<wiki_dir>/images/` and travel with the wiki branch. Names use the stored content's SHA-256 hash, so the same bytes are reused.
@@ -18,4 +22,4 @@ The explorer draws PNG and JPEG pictures in the detail pane and wiki window in k
 
 Run `moai init` again in an existing repository to add the `**/images/.lock` ignore line for the shelf lock file. Existing repositories can keep working before doing so.
 
-Decided in: moai-7eeq, moai-blkz, moai-zidx
+Decided in: moai-7eeq, moai-blkz, moai-zidx, moai-1f3p

@@ -60,6 +60,11 @@ it to a temporary file and runs it with Windows PowerShell —
 The bypass applies to that one process; your machine's execution policy is not
 changed, and your profile is not loaded.
 
+After a successful human-facing update, moai reminds you to run `moai skill install`
+(with `--agent codex` or `--agent antigravity` for those trees) and `moai init`
+in each project. It does not run them itself; `--json` and the exit code are
+unchanged, and dry runs and failures do not print the reminder.
+
 Windows will not overwrite a running program, so the installer renames the
 running `moai.exe` to `moai.exe.old` and puts the new one in its place. That
 `.old` is removed by the next install.
@@ -193,4 +198,4 @@ It installs nothing on its own and never edits `PATH`. What it does step by step
 and what to check on a real machine, is in `CONTRIBUTING.md` under "Developing on
 Windows".
 
-Decided in: moai-l3mn moai-j9gv moai-uwzg moai-yc8r moai-zgc1 moai-7eeq
+Decided in: moai-l3mn moai-j9gv moai-uwzg moai-yc8r moai-zgc1 moai-7eeq moai-1f3p
