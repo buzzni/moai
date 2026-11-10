@@ -188,9 +188,10 @@ pub(crate) fn same_words(heading: &str, title: &str) -> bool {
 /// 같은 옵션([`crate::markdown::OPTIONS`])으로 `# ` 를 앞에 붙여 읽는다 — 머리글 안의 글은 줄 머리의 `1.`·`-`·`>` 를
 /// 목록·인용으로 안 읽으니, 그냥 읽으면 그 글자가 사라진다.
 fn drawn(heading: &str) -> String {
-    use pulldown_cmark::{Event, Parser};
+    use pulldown_cmark::Event;
     let mut out = String::new();
-    for e in Parser::new_ext(&format!("# {heading}"), crate::markdown::OPTIONS) {
+    let source = format!("# {heading}");
+    for (e, _) in crate::markdown::events(&source) {
         match e {
             Event::Text(t) | Event::Code(t) => out.push_str(&t),
             Event::InlineMath(t) => out.push_str(&format!("${t}$")),
@@ -616,6 +617,7 @@ mod tests {
             "# `moai`의 위키",
             "# 1. Intro",
             "# Ends with \\#",
+            "# Energy $E=mc^2$ and $a_b$",
         ] {
             let title = parse("t", &format!("{line}\n\nx\n"), "moai").title.expect(line);
             assert!(same_words(&heading_text(line), &title), "{line} → {title:?}");

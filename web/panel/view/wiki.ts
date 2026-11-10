@@ -1,12 +1,12 @@
-import { loadSnippets, snippetKey, PRIORITY } from '../data/snippet.js'
-import type { Client } from '../data/client.js'
-import { hydrateDiagrams } from './diagram.js'
 // Wiki tab: the page list on the left, the rendered page on the right (design.md 4.10, tui-analysis.md 10).
 // Standalone: pages come in through setPages(), page bodies through props.loadPage(), and the view keeps its
 // own state (current page, trail, search, selected link, raw toggle) — design.md 1.2. state()/restore() let the
 // shell carry that state across tab switches. Keys go through handleKey(); a keydown listener on the root
 // calls it too unless props.standaloneKeys is false. All text goes in through textContent.
 
+import { loadSnippets, snippetKey, PRIORITY } from '../data/snippet.js'
+import type { Client } from '../data/client.js'
+import { hydrateDiagrams } from './diagram.js'
 import { COPY, fill, type WikiCopy } from "../i18n/index.ts"
 import { banner, button, chip, el, emptyState, listRow, searchBox, type ChipTone } from "./components.ts"
 import { imageUrl } from "./image.ts"

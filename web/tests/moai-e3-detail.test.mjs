@@ -485,3 +485,23 @@ test('detail loads snippets without replacing newer rows and follows footnotes',
   root.querySelector('a[data-anchor="fn:1"]').click()
   assert.ok(scrolled)
 })
+
+
+test('detail retries cancelled and failed snippet requests on the next redraw', async () => {
+  for (const failure of [{kind:'cancelled'}, {kind:'not-started'}, {kind:'moai-error', message:'refused'}]) {
+    let calls = 0
+    const client = { async request() { calls++; return calls === 1 ? failure : {kind:'passed',output:{text:'retried'}} } }
+    const { view, root } = mount({client})
+    const row = {id:'retry',title:'Retry',body:'<<< src/a.rs'}
+    const state = stateWith({value:{id:row.id,row}})
+    view.render(state, null)
+    await new Promise(resolve => setTimeout(resolve, 0))
+    assert.equal(calls, 1)
+    view.render(state, null)
+    await new Promise(resolve => setTimeout(resolve, 0))
+    assert.equal(calls, 2)
+    assert.equal(root.querySelector('pre.m-md-snippet').textContent, 'retried')
+    view.render(state, null)
+    assert.equal(calls, 2)
+  }
+})

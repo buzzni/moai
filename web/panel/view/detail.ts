@@ -1,11 +1,11 @@
-import { loadSnippets, snippetKey, PRIORITY } from '../data/snippet.js'
-import { hydrateDiagrams } from './diagram.js'
 /**
  * The detail pane (design §4.3): the row under the cursor from `show <id>` — head line, labeled fields,
  * blockers, a group's roll-up, the body, commits, the wiki pages about it, and the history (journal) and work log initially expanded, collapsible sections.
  * It only draws `state.shown` and the index; closing is the one thing it reports (`intents.closeDetail`).
  * The pure wording lives in view/detail-format.ts.
  */
+import { loadSnippets, snippetKey, PRIORITY } from '../data/snippet.js'
+import { hydrateDiagrams } from './diagram.js'
 import { isInformation } from '../data/client.js'
 import type { IssueIndex, Row } from '../data/index.js'
 import { isUnread } from '../data/read.js'
@@ -197,6 +197,8 @@ export const mountDetail: MountPane = (root: HTMLElement, ctx: ViewContext): Pan
             if (refs.length) void loadSnippets(ctx.client, refs, { priority: PRIORITY.detail, words: copy.markdown }).then(result => {
               if (token !== generation) return
               snippetResults = result
+              // Keep the error visible, but let the next redraw retry any failed or cancelled fetch.
+              if ([...result.values()].some(value => 'error' in value)) { snippetIdentity = ''; drawn = null }
               const old = view.querySelector<HTMLElement>('.moai-detail-body:not(.moai-detail-raw)')
               if (!old) return
               const fresh = renderBody(doc, body, ref => snippetResults.get(snippetKey(ref)) ?? { error: copy.markdown.loading }, copy.markdown.loading)

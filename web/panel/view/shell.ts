@@ -55,8 +55,9 @@ export interface ShellOptions {
   /** The index of the state's rows; the caller builds it once per read. */
   index(state: State): IssueIndex | null
   activity(): Activity
-  /** The wiki's reads, handed to the wiki pane; without them the wiki tab says it cannot read the wiki. */
+  /** The request queue, handed to the views that read beside the store (snippets in the detail and the wiki). */
   client?: ViewContext["client"]
+  /** The wiki's reads, handed to the wiki pane; without them the wiki tab says it cannot read the wiki. */
   wiki?: WikiSource
   /** The gantt's write of a row's planned days (main.ts, data/plan.ts); without it the bars do not move. */
   movePlan?: ViewContext["movePlan"]

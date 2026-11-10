@@ -139,10 +139,12 @@ The bundle incorporates the following packages. License comments are retained at
 | @upsetjs/venn.js | 2.0.0 | MIT |
 | chevrotain | 13.2.0 | Apache-2.0 |
 | cose-base | 1.0.3 | MIT |
+| cose-base | 2.2.0 | MIT |
 | cytoscape | 3.34.4 | MIT |
 | cytoscape-cose-bilkent | 4.1.0 | MIT |
 | cytoscape-fcose | 2.2.0 | MIT |
 | d3 | 7.9.2 | ISC |
+| d3-array | 2.12.1 | BSD-3-Clause |
 | d3-array | 3.2.5 | ISC |
 | d3-axis | 3.0.1 | ISC |
 | d3-brush | 3.0.1 | ISC |
@@ -160,6 +162,7 @@ The bundle incorporates the following packages. License comments are retained at
 | d3-geo | 3.1.2 | ISC |
 | d3-hierarchy | 3.1.3 | ISC |
 | d3-interpolate | 3.0.2 | ISC |
+| d3-path | 1.0.9 | BSD-3-Clause |
 | d3-path | 3.1.1 | ISC |
 | d3-polygon | 3.0.2 | ISC |
 | d3-quadtree | 3.0.2 | ISC |
@@ -168,6 +171,7 @@ The bundle incorporates the following packages. License comments are retained at
 | d3-scale | 4.0.3 | ISC |
 | d3-scale-chromatic | 3.1.1 | ISC |
 | d3-selection | 3.0.1 | ISC |
+| d3-shape | 1.3.7 | BSD-3-Clause |
 | d3-shape | 3.2.1 | ISC |
 | d3-time | 3.1.1 | ISC |
 | d3-time-format | 4.1.1 | ISC |
@@ -180,10 +184,12 @@ The bundle incorporates the following packages. License comments are retained at
 | elkjs | 0.12.1 | EPL-2.0 OR GPL-3.0-or-later |
 | entities | 8.1.0 | BSD-2-Clause |
 | es-toolkit | 1.53.2 | MIT |
+| internmap | 1.0.1 | ISC |
 | get-east-asian-width | 1.7.0 | MIT |
 | katex | 0.19.1 | MIT |
 | khroma | 2.1.0 | MIT (LICENSE) |
 | layout-base | 1.0.2 | MIT |
+| layout-base | 2.0.1 | MIT |
 | linkify-it | 6.1.0 | MIT |
 | lodash-es | 4.18.1 | MIT |
 | markdown-it | 15.0.3 | MIT |
@@ -196,4 +202,4 @@ The bundle incorporates the following packages. License comments are retained at
 | ts-dedent | 2.3.0 | MIT |
 | uc.micro | 3.0.0 | MIT |
 
-For elkjs we choose EPL-2.0; source: [npm](https://www.npmjs.com/package/elkjs), [repository](https://github.com/kieler/elkjs). khroma declares no package license field; its LICENSE specifies MIT. The Apache-2.0 Chevrotain packages contain no NOTICE file in the installed npm distributions.
+Two versions of cose-base, layout-base, d3-array, d3-path and d3-shape are bundled: cytoscape-fcose carries its own cose-base 2.2.0 and layout-base 2.0.1, and d3-sankey its own d3-array 2.12.1, d3-path 1.0.9, d3-shape 1.3.7 and internmap 1.0.1. For elkjs we choose EPL-2.0; source: [npm](https://www.npmjs.com/package/elkjs), [repository](https://github.com/kieler/elkjs). khroma declares no package license field; its LICENSE specifies MIT. The Apache-2.0 Chevrotain packages contain no NOTICE file in the installed npm distributions.

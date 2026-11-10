@@ -121,11 +121,29 @@ function getParser(): InstanceType<typeof MarkdownIt> {
   return parser
 }
 function parse(source: string, page?: string): Token[] {
-  return getParser().parse(String(source ?? '').replace(/^\uFEFF/, ''), { page })
+  const clean = String(source ?? '').replace(/^\uFEFF/, '')
+  const lines = clean.split(/\r\n?|\n/)
+  const tokens = getParser().parse(clean, { page })
+  for (const token of tokens) {
+    const meta = token.meta as { requestedPath?: string; region?: string; invalidSnippet?: boolean } | null
+    if (!meta?.requestedPath || !token.map) continue
+    const line = lines[token.map[0]] ?? ''
+    const marker = line.indexOf('<<<')
+    if (marker < 0) continue
+    const written = line.slice(marker + 3).trim()
+    const hash = written.indexOf('#'), brace = written.indexOf('{')
+    if (brace >= 0 && !written.endsWith('}')) { meta.invalidSnippet = true; continue }
+    if (hash < 0 || (brace >= 0 && brace < hash)) { meta.region = ''; continue }
+    const region = written.slice(hash + 1, brace < 0 ? undefined : brace)
+    // Rust's is_region_name accepts Unicode alphabetic and numeric characters, '_' and '-'.
+    if (!/^[\p{Alphabetic}\p{Number}_-]+$/u.test(region)) meta.invalidSnippet = true
+    else meta.region = region
+  }
+  return tokens
 }
 function refOf(token: Token): SnippetRef | undefined {
-  const meta = token.meta as { requestedPath?: string, region?: string } | null
-  return meta?.requestedPath ? { path: meta.requestedPath, ...(meta.region ? { region: meta.region } : {}) } : undefined
+  const meta = token.meta as { requestedPath?: string, region?: string, invalidSnippet?: boolean } | null
+  return meta?.requestedPath && !meta.invalidSnippet ? { path: meta.requestedPath, ...(meta.region ? { region: meta.region } : {}) } : undefined
 }
 export function snippetRefs(source: string, env?: { page?: string }): SnippetRef[] {
   const refs: SnippetRef[] = [], seen = new Set<string>()
@@ -138,7 +156,7 @@ export function snippetRefs(source: string, env?: { page?: string }): SnippetRef
   return refs
 }
 function anchorText(tokens: Token[]): string {
-  return tokens.map(t => t.type === 'text' || t.type === 'code_inline' ? t.content : t.type === 'math_inline' ? `$${t.content}$` : t.type === 'softbreak' || t.type === 'hardbreak' ? ' ' : '').join('')
+  return tokens.map(t => t.type === 'text' || t.type === 'code_inline' ? t.content : t.type === 'math_inline' ? `$${t.content}$` : t.type === 'softbreak' || t.type === 'hardbreak' ? '\n' : '').join('')
 }
 export function renderMarkdown(doc: Document, source: string, options: RenderOptions = {}): Rendered {
   const tokens = parse(source, options.page)
@@ -149,6 +167,7 @@ export function renderMarkdown(doc: Document, source: string, options: RenderOpt
   const root = el(doc, 'div', { class: 'm-md' }), headings: Heading[] = [], seen = new Map<string, number>()
   const stack: Node[] = [root]
   let insideLink = 0, footnotes = false, snippetCount = 0
+  const hrefs: string[] = []
   const parent = () => stack[stack.length - 1]!
   const push = (element: Element) => { parent().appendChild(element); stack.push(element) }
   const pop = () => { if (stack.length > 1) stack.pop() }
@@ -172,8 +191,9 @@ export function renderMarkdown(doc: Document, source: string, options: RenderOpt
           break
         }
         case 'math_inline': math(t, false); break
-        case 'link_open': push(makeLink(ctx, String(t.attrGet('href') ?? ''))); insideLink++; break
-        case 'link_close': pop(); insideLink--; break
+        case 'link_open': { const href = String(t.attrGet('href') ?? ''); hrefs.push(href); push(makeLink(ctx, href)); insideLink++; break }
+        // A link with no text (`[](url)`) shows where it goes rather than standing as an empty, invisible anchor.
+        case 'link_close': { const href = hrefs.pop() ?? ''; if (!parent().hasChildNodes()) parent().appendChild(doc.createTextNode(href)); pop(); insideLink--; break }
         case 'image': {
           const src = String(t.attrGet('src') ?? ''), alt = t.content, resolved = options.resolveImage?.(src)
           if (resolved) parent().appendChild(el(doc, 'img', { class: 'm-md-image', src: resolved, alt, loading: 'lazy' }))
@@ -198,12 +218,13 @@ export function renderMarkdown(doc: Document, source: string, options: RenderOpt
     switch (t.type) {
       case 'inline': {
         const children = t.children ?? []
-        const item = parent().nodeName === 'LI' ? parent() as HTMLElement : parent().parentNode?.nodeName === 'LI' ? parent().parentNode as HTMLElement : null
-        if (item && !item.hasAttribute('data-task-seen') && children[0]?.type === 'text') {
-          item.setAttribute('data-task-seen', '')
+        // Only the start of an item's first paragraph is a task marker: the item itself (tight) or its first <p>
+        // (loose), still empty. A later paragraph, or a heading in the item, that opens with `[x]` stays text.
+        const host = parent()
+        const item = host.nodeName === 'LI' ? host as HTMLElement : host.nodeName === 'P' && host.parentNode?.nodeName === 'LI' && host.parentNode.firstChild === host ? host.parentNode as HTMLElement : null
+        if (item && !host.hasChildNodes() && children[0]?.type === 'text') {
           const match = /^\[([ xX])\][ \t]+(?=\S)/.exec(children[0].content)
-          if (match) { const checked = match[1] !== ' '; item.classList.add('m-md-task-item'); parent().appendChild(el(doc, 'span', { class: 'm-md-task', role: 'checkbox', 'data-checked': String(checked), 'aria-checked': String(checked), 'aria-disabled': 'true' })); parent().appendChild(doc.createTextNode(' ')); children[0].content = children[0].content.slice(match[0].length) }
-          item.removeAttribute('data-task-seen')
+          if (match) { const checked = match[1] !== ' '; item.classList.add('m-md-task-item'); host.appendChild(el(doc, 'span', { class: 'm-md-task', role: 'checkbox', 'data-checked': String(checked), 'aria-checked': String(checked), 'aria-disabled': 'true' })); host.appendChild(doc.createTextNode(' ')); children[0].content = children[0].content.slice(match[0].length) }
         }
         inline(children); break
       }
@@ -217,6 +238,11 @@ export function renderMarkdown(doc: Document, source: string, options: RenderOpt
       case 'paragraph_close': if (!t.hidden) pop(); break
       case 'fence': case 'code_block': {
         const ref = refOf(t), lang = t.info.trim().split(/[\s{]/)[0] ?? ''
+        if ((t.meta as { invalidSnippet?: boolean } | null)?.invalidSnippet) {
+          const line = sourceLines[t.map?.[0] ?? -1] ?? ''
+          const marker = line.indexOf('<<<')
+          parent().appendChild(el(doc, 'p', {}, marker < 0 ? line : line.slice(marker))); break
+        }
         if (ref && ++snippetCount > 32) { parent().appendChild(el(doc, 'p', {}, sourceLines[t.map?.[0] ?? -1] ?? `<<< ${ref.path}`)); break }
         if (ref) {
           const state = options.snippets?.(ref)
@@ -240,7 +266,9 @@ export function renderMarkdown(doc: Document, source: string, options: RenderOpt
       default:
         if (t.nesting === 1) {
           const node = el(doc, t.tag as 'div')
-          if (t.type === 'ordered_list_open' && t.attrGet('start')) node.setAttribute('start', String(t.attrGet('start')))
+          // markdown-it gives `start` only when it is not 1 — and it may be 0, so test for presence, not truth.
+          const start = t.type === 'ordered_list_open' ? t.attrGet('start') : null
+          if (start !== null && start !== undefined) node.setAttribute('start', String(start))
           const align = /^text-align:(left|center|right)$/.exec(String(t.attrGet('style') ?? ''))?.[1]
           if (align) node.setAttribute('data-align', align)
           push(node)

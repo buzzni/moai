@@ -4857,10 +4857,7 @@ fn about<'a>(app: &App, site: &Site, idx: usize, e: &Entry, w: usize) -> Vec<Lin
                     body_lines(body, w, true)
                 } else {
                     let image = site.repo.as_ref().map(crate::image::Context::issue);
-                    let snippet = site
-                        .repo
-                        .as_ref()
-                        .map(|repo| crate::snippet::Context { base: repo.here(), from: crate::snippet::From::Issue });
+                    let snippet = site.repo.as_ref().map(crate::snippet::Context::issue);
                     laid_body_with(body, w, site.lang, image.as_ref(), None, snippet.as_ref()).lines
                 }
             }
@@ -5332,9 +5329,7 @@ fn fill_body(app: &mut App, rows: &[Row], w: usize) {
         Some((i, body)) => {
             let site = seat_at.and_then(|(seat, _)| app.site_of_seat(seat));
             let image = site.and_then(|s| s.repo.as_ref()).map(crate::image::Context::issue);
-            let snippet = site
-                .and_then(|s| s.repo.as_ref())
-                .map(|repo| crate::snippet::Context { base: repo.here(), from: crate::snippet::From::Issue });
+            let snippet = site.and_then(|s| s.repo.as_ref()).map(crate::snippet::Context::issue);
             let lines = if raw {
                 body_lines(body, w, true)
             } else {
@@ -5441,7 +5436,8 @@ fn laid_body_in(body: &str, w: usize, lang: Lang, image: Option<&crate::image::C
     laid_body_with(body, w, lang, image, None, None)
 }
 /// [`laid_body_in`] that also opens a picture under each image block when `graphics` can draw one ([`expand_images`]) —
-/// from the same parse and layout, so a body is not read twice to place its pictures.
+/// from the same parse and layout, so a body is not read twice to place its pictures. With `snippet` it also reads the
+/// file each `<<<` directive names ([`expand_snippets`]) before laying out, so headings and links count those lines.
 fn laid_body_with(
     body: &str,
     w: usize,
@@ -5546,6 +5542,8 @@ mod snippet_view_tests {
     }
 }
 
+/// Each snippet directive becomes its `<<<` line (with the refusal beside it when the file cannot be shown) and a code
+/// block of the file or region — at most 32 per body, as on the web; later directives stay as written.
 fn expand_snippets(blocks: &mut Vec<crate::markdown::Block>, context: &crate::snippet::Context<'_>, lang: Lang) {
     use crate::markdown::{Block, Role, Span};
     let mut count = 0;
@@ -5560,7 +5558,7 @@ fn expand_snippets(blocks: &mut Vec<crate::markdown::Block>, context: &crate::sn
             continue;
         }
         count += 1;
-        let opened = context.open_detail(written, region.as_deref());
+        let opened = context.open(written, region.as_deref());
         let label = match &opened {
             Ok(_) => format!("<<< {written}"),
             Err(why) => {

@@ -137,7 +137,7 @@ pub fn parse(src: &str) -> Vec<Block> {
 /// 걷지 않는다: 같은 링크가 두 번 적혔으면 둘 다 선다(펴진 줄에 두 번 서기 때문이다).
 pub fn parse_links(src: &str) -> (Vec<Block>, Vec<String>) {
     let mut fold = Fold::default();
-    let blocks = fold.run(Parser::new_ext(src, OPTIONS));
+    let blocks = fold.run(src, events(src));
     (blocks, fold.dests)
 }
 
@@ -146,6 +146,21 @@ pub fn parse_links(src: &str) -> (Vec<Block>, Vec<String>) {
 /// **마크다운을 읽는 자리가 이것 하나로 연다** — 그리는 [`parse`] 와, 같은 페이지에서 제목·링크·id 를 읽는
 /// `wiki::parse` 다. 옵션이 갈리면 한 페이지가 화면과 목록에서 다른 문서로 읽힌다.
 pub(crate) const OPTIONS: Options = Options::ENABLE_TABLES.union(Options::ENABLE_FOOTNOTES).union(Options::ENABLE_MATH);
+
+/// Apply the web parser's inline-dollar boundary rule before any reader folds the events.
+pub(crate) fn events(src: &str) -> impl Iterator<Item = (Event<'_>, std::ops::Range<usize>)> {
+    Parser::new_ext(src, OPTIONS).into_offset_iter().map(move |(event, range)| {
+        let word = |c: char| c.is_alphanumeric() || c == '_';
+        if matches!(event, Event::InlineMath(_))
+            && (src[..range.start].chars().next_back().is_some_and(word)
+                || src[range.end..].chars().next().is_some_and(word))
+        {
+            (Event::Text(src[range.clone()].into()), range)
+        } else {
+            (event, range)
+        }
+    })
+}
 
 /// 이벤트를 받아 블록을 쌓는 자리.
 ///
@@ -157,7 +172,10 @@ struct Fold {
     notes: Vec<(usize, Vec<Block>)>,
     note: Option<(usize, usize)>,
     display_math: bool,
-    paragraph_break: bool,
+    /// The paragraph being folded, as written — kept only when it starts with a snippet directive (`<<<`). The
+    /// directive is read from the source, not the spans: emphasis would take `__` out of `src/__init__.py`, and two
+    /// directives on consecutive lines are one paragraph to the parser but two blocks to markdown-it.
+    para_src: Option<String>,
     image_start: Option<(usize, String)>,
     lone_image: Option<(String, String, String)>,
     out: Vec<Block>,
@@ -194,15 +212,18 @@ struct Fold {
 }
 
 impl Fold {
-    fn run(&mut self, events: Parser) -> Vec<Block> {
+    fn run<'a>(&mut self, src: &str, events: impl Iterator<Item = (Event<'a>, std::ops::Range<usize>)>) -> Vec<Block> {
         let events: Vec<_> = events.collect();
-        for event in &events {
+        for (event, _) in &events {
             if let Event::FootnoteReference(label) = event {
                 let next = self.numbers.len() + 1;
-                self.numbers.entry(label.to_string()).or_insert(next);
+                self.numbers.entry(note_key(label)).or_insert(next);
             }
         }
-        for e in events {
+        for (e, range) in events {
+            if matches!(e, Event::Start(Tag::Paragraph)) {
+                self.para_src = src.get(range).filter(|s| s.starts_with("<<<")).map(str::to_string);
+            }
             self.one(e);
         }
         // 남은 것을 버리지 않는다. 빠뜨리면 마지막 덩이가 조용히 사라진다.
@@ -368,7 +389,7 @@ impl Fold {
                 self.push(&format!("$${t}$$"), Role::Code);
             }
             Event::FootnoteReference(label) => {
-                if let Some(n) = self.numbers.get(label.as_ref()).copied() {
+                if let Some(n) = self.numbers.get(&note_key(&label)).copied() {
                     self.push(&format!("[{n}]"), Role::Mark);
                 }
             }
@@ -383,7 +404,6 @@ impl Fold {
             // 줄바꿈은 한 칸으로. 문단 안의 줄 나눔은 그리는 쪽이 폭을 보고
             // 다시 접으므로, 여기서 원문의 줄을 지키면 두 번 접힌다.
             Event::SoftBreak | Event::HardBreak => {
-                self.paragraph_break = true;
                 let role = self.role();
                 self.push(" ", role);
             }
@@ -400,7 +420,7 @@ impl Fold {
             Tag::FootnoteDefinition(label) => {
                 self.close_list();
                 let next = self.numbers.len() + 1;
-                let number = *self.numbers.entry(label.to_string()).or_insert(next);
+                let number = *self.numbers.entry(note_key(&label)).or_insert(next);
                 self.note = Some((number, self.out.len()));
             }
             Tag::Strong => self.strong += 1,
@@ -417,7 +437,6 @@ impl Fold {
             // [`Block::Image`] 가 된다(`TagEnd::Paragraph`).
             Tag::Paragraph => {
                 self.display_math = false;
-                self.paragraph_break = false;
                 self.lone_image = None;
             }
             // **그림도 주소를 남긴다.** 글 가운데 선 그림은 터미널에 뜨지 않으므로 대체글만
@@ -542,6 +561,7 @@ impl Fold {
             TagEnd::BlockQuote(_) => self.quote = self.quote.saturating_sub(1),
             TagEnd::Paragraph => {
                 let spans = self.take();
+                let written = self.para_src.take();
                 if let Some((alt, dest, expected)) = self.lone_image.take()
                     && self.list.is_none()
                     && spans.iter().map(|s| s.text.as_str()).collect::<String>() == expected
@@ -553,18 +573,12 @@ impl Fold {
                     return;
                 }
                 if self.list.is_none()
-                    && !self.paragraph_break
-                    && spans.len() == 1
-                    && spans[0].role == Role::Plain
-                    && let Some((written, region, lang)) = snippet_request(&spans[0].text)
+                    && let Some(lines) = written.as_deref().and_then(|src| snippet_lines(src, self.quote_depth()))
                 {
-                    self.out.push(Block::Snippet {
-                        quote: self.quote_depth(),
-                        raw: spans[0].text.clone(),
-                        written,
-                        region,
-                        lang,
-                    });
+                    let quote = self.quote_depth();
+                    for (raw, written, region, lang) in lines {
+                        self.out.push(Block::Snippet { quote, raw, written, region, lang });
+                    }
                     return;
                 }
                 if self.display_math
@@ -842,6 +856,28 @@ pub fn link_cells(lines: &[Vec<Span>]) -> Vec<LinkCell> {
     out
 }
 
+/// A footnote label as the parser matches it — pulldown-cmark finds a definition case-insensitively, so `[^Note]` and
+/// `[^note]:` are one footnote and must get one number.
+fn note_key(label: &str) -> String {
+    label.to_lowercase()
+}
+
+/// Every line of a paragraph as a snippet directive, as markdown-it's snippet rule reads them — `None` unless each
+/// line is one (a directive followed by prose stays prose here). `src` is the paragraph as written: its first line
+/// starts at the directive, and a continuation line still carries the quote's `>` markers, taken off here.
+fn snippet_lines(src: &str, quote: u8) -> Option<Vec<(String, String, Option<String>, Option<String>)>> {
+    src.lines()
+        .map(|line| {
+            let mut line = line.trim();
+            for _ in 0..quote {
+                line = line.strip_prefix('>').map_or(line, str::trim_start);
+            }
+            let (written, region, lang) = snippet_request(line)?;
+            Some((line.to_string(), written, region, lang))
+        })
+        .collect()
+}
+
 fn snippet_request(raw: &str) -> Option<(String, Option<String>, Option<String>)> {
     let rest = raw.strip_prefix("<<<")?.trim();
     let end = rest.find(['#', '{']).unwrap_or(rest.len());
@@ -853,7 +889,7 @@ fn snippet_request(raw: &str) -> Option<(String, Option<String>, Option<String>)
     let (region, tail) = if let Some(after) = tail.strip_prefix('#') {
         let n = after.find('{').unwrap_or(after.len());
         let name = &after[..n];
-        if name.is_empty() || !name.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '-') {
+        if !crate::snippet::is_region_name(name) {
             return None;
         }
         (Some(name.to_string()), &after[n..])
@@ -1299,6 +1335,17 @@ mod tests {
         assert!(blocks.iter().any(|b| matches!(b, Block::Rule)));
     }
     #[test]
+    fn inline_math_uses_web_word_boundaries() {
+        use pulldown_cmark::Event;
+        for source in ["$HOME/$PATH", "a$x$", "$x$b", "한$x$", "$x$_tail"] {
+            assert!(!super::events(source).any(|(event, _)| matches!(event, Event::InlineMath(_))), "{source}");
+        }
+        for source in ["$x$", "($x$)", "say $x$!"] {
+            assert!(super::events(source).any(|(event, _)| matches!(event, Event::InlineMath(_))), "{source}");
+        }
+    }
+
+    #[test]
     fn math_and_mermaid_preserve_source() {
         use super::{Block, Role, parse};
         let blocks = parse("Text $a^2$ and $HOME/$PATH.\n\n$$x + y$$\n\n```mermaid\na-->b\n```");
@@ -1340,6 +1387,47 @@ mod tests {
         assert_eq!(text, source);
         assert!(!parse("- <<< src/x.rs").iter().any(|b| matches!(b, Block::Snippet { .. })));
         assert!(!parse("```\n<<< src/x.rs\n```").iter().any(|b| matches!(b, Block::Snippet { .. })));
+    }
+    #[test]
+    fn snippet_directives_are_read_as_written_one_per_line() {
+        let written = |blocks: &[Block]| {
+            blocks
+                .iter()
+                .filter_map(|b| match b {
+                    Block::Snippet { quote, raw, written, .. } => Some((*quote, raw.clone(), written.clone())),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        };
+        // Emphasis does not take the underscores out of a path.
+        assert_eq!(
+            written(&parse("<<< src/__init__.py")),
+            [(0, "<<< src/__init__.py".into(), "src/__init__.py".into())]
+        );
+        // Consecutive directives are one paragraph to pulldown-cmark, two snippets to markdown-it.
+        assert_eq!(
+            written(&parse("<<< a.rs\n<<< b.rs#r{rust}")),
+            [(0, "<<< a.rs".into(), "a.rs".into()), (0, "<<< b.rs#r{rust}".into(), "b.rs".into())]
+        );
+        assert_eq!(
+            written(&parse("> <<< a.rs\n> <<< b.rs")),
+            [(1, "<<< a.rs".into(), "a.rs".into()), (1, "<<< b.rs".into(), "b.rs".into())]
+        );
+        // A directive followed by prose stays prose.
+        assert!(written(&parse("<<< a.rs\nmore words")).is_empty());
+        let text: String = layout(&parse("<<< a.rs\n<<< b.rs"), 100, Overflow::Keep)
+            .iter()
+            .map(|l| l.iter().map(|s| s.text.as_str()).collect::<String>())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(text.contains("<<< a.rs") && text.contains("<<< b.rs"), "{text}");
+    }
+    #[test]
+    fn a_footnote_label_matches_its_definition_case_insensitively() {
+        let blocks = parse("a[^Note]\n\n[^note]: body");
+        let text = format!("{blocks:?}");
+        assert!(text.contains("\"[1]\"") && text.contains("\"[1] \""), "{text}");
+        assert!(!text.contains("[2]"), "{text}");
     }
     #[test]
     fn ordinary_markdown_keeps_its_existing_blocks() {

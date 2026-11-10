@@ -233,7 +233,7 @@ and 256 KiB limits and the sensitive-file refusals.
 | Snippet (`<<< path#region{lines lang}`) | The directive and the included file or region; a refusal or error appears beside the directive |
 
 The explorer expands snippets in issue detail and wiki pages, but not inside list
-items or code blocks. Inline footnotes (`^[…]`) and CJK-friendly emphasis are
+items or code blocks; the web expands directives in list items. Inline footnotes (`^[…]`) and CJK-friendly emphasis are
 left as written. `moai show` uses the same footnote, math and Mermaid rendering,
 but leaves snippet directives as text; `--raw` and `--json` keep the original
 body. For pictures, see [pictures in issues and the wiki](images.md).
