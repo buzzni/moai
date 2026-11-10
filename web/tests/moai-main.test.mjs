@@ -5,10 +5,12 @@ import { fileURLToPath } from 'node:url'
 import { build } from 'esbuild'
 import { JSDOM } from 'jsdom'
 import { i18nBundles } from '../i18n-bundles.mjs'
+import { vendorGlobals } from '../vendor.mjs'
+import './moai-panel-modules.mjs'
 
 const bundled = await build({
   entryPoints: [fileURLToPath(new URL('../panel/main.ts', import.meta.url))],
-  bundle: true, format: 'iife', platform: 'browser', write: false, plugins: [i18nBundles],
+  bundle: true, format: 'iife', platform: 'browser', write: false, plugins: [i18nBundles, vendorGlobals],
 })
 const code = bundled.outputFiles[0].text
 const boot = {
@@ -78,6 +80,7 @@ async function page(t, { holdFirst = false, holdTree = 0, initialTab, chartFailu
     }
     return { status: 200, ok: true, text: async () => JSON.stringify(body) }
   }
+  dom.window.moaiVendor = globalThis.moaiVendor
   dom.window.eval(code)
   await until(() => trees.length > 0)
   const tab = (id) => dom.window.document.querySelector(`[role=tab][data-tab="${id}"]`)
