@@ -9,7 +9,8 @@
     "test:gantt-browser": "node --test tests/gantt.browser.mjs",
     "test:events-browser": "node --test tests/events.browser.mjs",
     "test:admission-browser": "node --test tests/admission.browser.mjs",
-    "test:hatch-browser": "node --test tests/hatch.browser.mjs"
+    "test:hatch-browser": "node --test tests/hatch.browser.mjs",
+    "test:markdown-browser": "node --test tests/markdown.browser.mjs"
   },
   "devDependencies": {
     "@types/markdown-it": "14.2.0",

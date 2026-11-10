@@ -666,3 +666,28 @@ test('wiki: the view, its warnings and its parse errors speak the words they are
     assert.doesNotMatch(view.el.textContent, /[가-힣]/, `${lang}: no Korean left`)
   }
 })
+
+test('wiki loads snippets once per open before drawing and preserves the written path', async () => {
+  const waits = []
+  const requests = []
+  const client = { request(endpoint) { requests.push(endpoint); const pending = deferred(); waits.push(pending); return pending.promise } }
+  const page = { ...structuredClone(PLAYGROUND), path:'docs/guide/a.md', body:'<<< ../../src/x.rs#r' }
+  const { view } = makeView({ client, loadPage: async () => page })
+  const opening = view.open(page.slug)
+  await tick()
+  assert.equal(requests.length, 1)
+  assert.deepEqual(requests[0].query, {path:'../../src/x.rs',region:'r',page:'docs/guide/a.md'})
+  assert.equal(scroller(view).querySelector('pre.m-md-snippet'), null)
+  waits[0].resolve({kind:'passed', output:{text:'first'}})
+  await opening
+  assert.equal(scroller(view).querySelector('pre.m-md-snippet').textContent, 'first')
+  view.setPages([page], 'docs')
+  assert.equal(requests.length, 1)
+  const again = view.open(page.slug)
+  await tick()
+  assert.equal(requests.length, 2)
+  waits[1].resolve({kind:'passed', output:{text:'second'}})
+  await again
+  assert.equal(scroller(view).querySelector('pre.m-md-snippet').textContent, 'second')
+  view.destroy()
+})

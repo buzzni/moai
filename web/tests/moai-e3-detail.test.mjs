@@ -466,3 +466,22 @@ test('detail falls back to raw text if the markdown vendor is unavailable', () =
     assert.equal(result.textContent, '# <unsafe>')
   } finally { globalThis.moaiVendor = previous }
 })
+
+test('detail loads snippets without replacing newer rows and follows footnotes', async () => {
+  const pending = []
+  const client = { request() { return new Promise(resolve => pending.push(resolve)) } }
+  const { view, root } = mount({ client })
+  const one = {id:'a',title:'A',body:'<<< src/a.rs'}
+  view.render(stateWith({value:{id:'a',row:one}}), null)
+  assert.match(root.textContent, /Loading snippet/)
+  const two = {id:'b',title:'B',body:'Second[^x]\n\n[^x]: Footnote'}
+  view.render(stateWith({value:{id:'b',row:two}}), null)
+  pending[0]({kind:'passed',output:{text:'stale'}})
+  await new Promise(resolve => setTimeout(resolve, 0))
+  assert.doesNotMatch(root.textContent, /stale/)
+  const target = root.querySelector('li[data-anchor="fn:1"]')
+  let scrolled = false
+  target.scrollIntoView = () => { scrolled = true }
+  root.querySelector('a[data-anchor="fn:1"]').click()
+  assert.ok(scrolled)
+})

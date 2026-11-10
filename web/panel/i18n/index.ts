@@ -348,6 +348,7 @@ export interface WikiCopy {
 }
 
 export interface Copy {
+  markdown: { diagramAlt: string; diagramError: string; loading: string; missing: string; refused: string; tooLarge: string }
   ctl: { personOnly: string }
   propose: { title: string; accept: string; decline: string; previous: string; next: string }
   hint: string
