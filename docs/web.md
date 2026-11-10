@@ -115,7 +115,8 @@ its matching markers cannot be found, the whole file is shown. The optional
 and code is not syntax-highlighted.
 
 The web and explorer use the same file rules. A body can expand at most 32
-snippet directives; later directives stay as written. Each file must be a regular
+snippet directives; later directives stay as written. The web also expands a
+directive inside a list item; the explorer leaves it as text. Each file must be a regular
 UTF-8 text file with no NUL bytes and no more than 256 KiB. Paths that escape the
 checkout, including through a symbolic link, are refused; so are backslashes,
 colons, percent signs and control characters in a path. The following names are
