@@ -1278,6 +1278,7 @@
   "update.fetch_failed": "could not fetch {url} — {said}. Nothing was run",
   "update.no_sh": "could not start {program} — {said}",
   "update.running": "running {script} from {url} over {dir}",
+  "update.refresh_projects": "in each project, run `moai skill install` (with `--agent codex` or `--agent antigravity` for those trees) and `moai init` so agents receive this version’s skills and guidance",
   "update.daemon_restart": "daemon {version} (pid {pid}) still runs — restart it with its service manager, or stop and start it if run manually",
   "update.dry_fetch": "would fetch  {url}",
   "update.dry_run": "would run    {line}",

@@ -1278,6 +1278,7 @@
   "update.fetch_failed": "{url} 을 못 받았다 — {said}. 아무것도 안 돌렸다",
   "update.no_sh": "{program} 를 못 띄웠다 — {said}",
   "update.running": "{url} 의 {script} 를 {dir} 에 돌린다",
+  "update.refresh_projects": "각 프로젝트에서 `moai skill install` (해당 트리에는 `--agent codex` 또는 `--agent antigravity`)과 `moai init`을 실행해 에이전트가 이 판의 스킬과 안내를 받게 한다",
   "update.daemon_restart": "데몬 {version} (pid {pid})이 아직 실행 중이다 — 서비스 관리자로 다시 시작하거나 직접 띄웠다면 멈추고 다시 띄운다",
   "update.dry_fetch": "받을 것  {url}",
   "update.dry_run": "돌릴 것  {line}",

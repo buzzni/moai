@@ -32692,6 +32692,47 @@ fn update_runs_install_sh_over_the_running_binary() {
     server.join().unwrap();
 }
 
+#[cfg(unix)]
+#[test]
+fn update_reminds_people_to_refresh_each_project_only_on_success() {
+    if !served() {
+        return;
+    }
+    for (code, json) in [(0, false), (3, false), (0, true)] {
+        let s = Scratch::new("update-project-refresh");
+        let exe = hoisted(s.path());
+        let (url, server) = serving_script(recording_script(&s.path().join("argv"), code), 1);
+        let args: &[&str] = if json { &["--json"] } else { &[] };
+        let out = update_with(&exe, s.path(), &s.path().join("config.toml"), &[("MOAI_INSTALL_URL", &url)], args);
+        server.join().unwrap();
+        assert_eq!(out.status.code(), Some(code), "{}", text(&out));
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        let lines: Vec<_> = stderr.lines().filter(|line| line.contains("moai skill install")).collect();
+        if code == 0 && !json {
+            assert_eq!(lines.len(), 1, "{stderr}");
+            assert!(lines[0].starts_with("moai: ") && lines[0].contains("moai init"), "{stderr}");
+        } else {
+            assert!(lines.is_empty(), "{stderr}");
+        }
+        assert!(!stdout.contains("moai skill install"), "{stdout}");
+        if json {
+            one_json_value(&stdout);
+            let value: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+            let mut keys: Vec<_> = value.as_object().unwrap().keys().map(String::as_str).collect();
+            keys.sort_unstable();
+            assert_eq!(keys, ["code", "command", "dir", "dry_run", "repo", "script"]);
+        }
+    }
+    let refused = staged(&["update"]).output().unwrap();
+    assert!(!refused.status.success());
+    assert!(!String::from_utf8_lossy(&refused.stderr).contains("moai skill install"));
+    let s = Scratch::new("update-project-refresh-dry");
+    let exe = hoisted(s.path());
+    let out = update_with(&exe, s.path(), &s.path().join("config.toml"), &[], &["--dry-run"]);
+    assert!(!String::from_utf8_lossy(&out.stderr).contains("moai skill install"));
+}
+
 /// The installed executable is probed only after a successful installer, and its result reaches update's output.
 #[cfg(unix)]
 #[test]
