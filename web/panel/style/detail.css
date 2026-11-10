@@ -65,7 +65,6 @@
 /* A note or a work record as moai keeps it: its line breaks stand, as `moai show` prints them, and a long word wraps. */
 .moai-detail-text { white-space: pre-wrap; overflow-wrap: anywhere; min-width: 0; }
 
-/* Markdown notes sit on the timeline without inheriting the section heading or row styles. */
-.moai-detail-note { overflow-wrap: anywhere; min-width: 0; }
-.moai-detail-note > :first-child { margin-top: 0; }
-.moai-detail-note > :last-child { margin-bottom: 0; }
+/* Markdown notes sit on the timeline (their margins and wrapping are .m-md's). A heading in a note stays below the
+   pane's own section names (12px, above): no markdown-sized title or rule inside one history entry. */
+.moai-detail-note :is(h1, h2, h3, h4, h5, h6) { margin: 10px 0 4px; padding-bottom: 0; border-bottom: 0; font-size: 12px; }
