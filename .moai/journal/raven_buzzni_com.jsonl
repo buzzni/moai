@@ -12707,3 +12707,4 @@
 {"ts":"2026-11-10T12:16:33Z","id":"moai-z74b.mg2","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
 {"ts":"2026-11-10T12:17:02Z","id":"moai-z74b","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done"}
 {"ts":"2026-11-10T12:17:16Z","id":"moai-z74b","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: the person reviews and releases milestone/moai-0meo; follow-up work is parked in moai-ye91 and moai-3b6e."}
+{"ts":"2026-11-10T12:40:28Z","id":"moai-z74b","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Report-checked: d6695d8f (merge on milestone/moai-0meo; 8 rows done with model lines; lane worktrees gone; supervisor reran fmt, clippy, full cargo test, npm test 601, typecheck, dist rebuild identical; Linux release 20,847,616 B)"}
