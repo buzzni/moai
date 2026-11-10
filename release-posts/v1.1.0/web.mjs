@@ -1,4 +1,5 @@
-// Capture the web issue detail with KaTeX math, a Mermaid diagram, a footnote and a snippet, light and dark.
+// Capture the web issue detail with KaTeX math, a Mermaid diagram, a footnote and a snippet, light and dark,
+// then its history with markdown notes (light).
 // usage: web.mjs <repo> <out dir> <ctl dir> <issue id>   -- MOAI and Playwright (NODE_PATH) come from make.sh.
 import { spawn } from 'node:child_process'
 import { createInterface } from 'node:readline'
