@@ -564,3 +564,18 @@ test('snippet regions follow the Rust rule even when plugin metadata drops them'
   assert.match(md('<<< a.rs#r{broken').root.textContent, /<<< a\.rs#r\{broken/)
   assert.deepEqual(snippetRefs('> <<< a.md#한글\n\n- <<< a.rs#r{1-3 rust extra}'), [{path:'a.md',region:'한글'}, {path:'a.rs',region:'r'}])
 })
+
+
+test('history options are opt-in and leave default markdown unchanged', () => {
+  const source = '## Same\n\nfirst\nsecond\n\n<<< src/a.rs'
+  const normal = renderMarkdown(doc, source).root
+  assert.equal(normal.querySelector('h2').id, 'm-md-same')
+  assert.equal(normal.querySelector('p br'), null)
+  assert.ok(normal.querySelector('.m-md-snippet-missing'))
+  const note = renderMarkdown(doc, source, { headingIds: false, breaks: true, literalSnippets: true }).root
+  assert.equal(note.querySelector('h2').hasAttribute('id'), false)
+  assert.equal(note.querySelector('h2').dataset.anchor, 'same')
+  assert.ok(note.querySelector('p br'))
+  assert.equal(note.querySelector('.m-md-snippet-missing'), null)
+  assert.match(note.textContent, /<<< src\/a.rs/)
+})
