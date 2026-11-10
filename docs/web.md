@@ -102,7 +102,7 @@ links are displayed without navigating to them. For pictures, see
 
 To include a text file, put a snippet directive on its own line:
 
-    <<< src/example.rs#region{1-3 rust}
+    <<< src/example.rs#example{1-3 rust}
 
 The path is relative to the checkout root in an issue body and to the page's
 folder in a wiki page. `@/` or a leading `/` names the checkout root, not the
