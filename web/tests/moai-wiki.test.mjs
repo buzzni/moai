@@ -7,7 +7,8 @@ import { JSDOM } from 'jsdom'
 
 const panel = new URL('../panel/', import.meta.url)
 const fixtures = new URL('./fixtures/moai-wiki/', import.meta.url)
-const wiki = await import(new URL('view/wiki.ts', panel))
+const { panelModule } = await import('./moai-panel-modules.mjs')
+const wiki = await panelModule('view/wiki.ts')
 const wikiSource = await readFile(new URL('view/wiki.ts', panel), 'utf8')
 const wikiCss = await readFile(new URL('style/wiki.css', panel), 'utf8')
 const { COPY } = await import(new URL('i18n/index.ts', panel))
@@ -21,6 +22,7 @@ const shows = {
 
 const dom = new JSDOM('<!doctype html><body></body>', { pretendToBeVisual: true })
 const doc = dom.window.document
+globalThis.document = doc
 const press = (node, key, init = {}) => {
   const event = new dom.window.KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...init })
   node.dispatchEvent(event)
@@ -663,4 +665,29 @@ test('wiki: the view, its warnings and its parse errors speak the words they are
     assert.equal(wiki.parseWikiLs({ dir: 'docs' }, words).error, words.listNoPages)
     assert.doesNotMatch(view.el.textContent, /[가-힣]/, `${lang}: no Korean left`)
   }
+})
+
+test('wiki loads snippets once per open before drawing and preserves the written path', async () => {
+  const waits = []
+  const requests = []
+  const client = { request(endpoint) { requests.push(endpoint); const pending = deferred(); waits.push(pending); return pending.promise } }
+  const page = { ...structuredClone(PLAYGROUND), path:'docs/guide/a.md', body:'<<< ../../src/x.rs#r' }
+  const { view } = makeView({ client, loadPage: async () => page })
+  const opening = view.open(page.slug)
+  await tick()
+  assert.equal(requests.length, 1)
+  assert.deepEqual(requests[0].query, {path:'../../src/x.rs',region:'r',page:'docs/guide/a.md'})
+  assert.equal(scroller(view).querySelector('pre.m-md-snippet'), null)
+  waits[0].resolve({kind:'passed', output:{text:'first'}})
+  await opening
+  assert.equal(scroller(view).querySelector('pre.m-md-snippet').textContent, 'first')
+  view.setPages([page], 'docs')
+  assert.equal(requests.length, 1)
+  const again = view.open(page.slug)
+  await tick()
+  assert.equal(requests.length, 2)
+  waits[1].resolve({kind:'passed', output:{text:'second'}})
+  await again
+  assert.equal(scroller(view).querySelector('pre.m-md-snippet').textContent, 'second')
+  view.destroy()
 })

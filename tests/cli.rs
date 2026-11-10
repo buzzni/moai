@@ -11474,6 +11474,17 @@ fn the_body_is_drawn_but_the_raw_text_stays_reachable() {
     );
 }
 
+/// Develop prints this shell expression unchanged; the complete no-color output must stay byte-identical to raw.
+#[test]
+fn show_preserves_shell_dollars_as_on_develop() {
+    let s = init("dollar-baseline");
+    let id = add(s.path(), &["Dollar baseline", "-b", "$HOME/$PATH"]);
+    let drawn = ok(s.path(), &["show", &id]);
+    let raw = ok(s.path(), &["show", &id, "--raw"]);
+    assert_eq!(drawn.as_bytes(), raw.as_bytes(), "develop prints this plain body exactly as raw");
+    assert!(drawn.contains("  $HOME/$PATH\n"));
+}
+
 /// **본문 속 명령은 `moai show` 를 지나도 한 줄로 남는다**(moai-syp8·moai-xtu8).
 ///
 /// 본문은 폭 76에 맞춰 접히는데, 인라인 코드 안의 공백까지 접는 자리로 보면 화면에 찍힌
@@ -33595,6 +33606,10 @@ fn web_serves_the_page_and_the_boot() {
         ),
         "{head}"
     );
+    let (status, head, _) = get(web.port, "/vendor.js");
+    assert_eq!(status, 200, "{head}");
+    assert!(head.contains("Content-Type: text/javascript"), "{head}");
+    assert!(head.contains("Content-Security-Policy:"), "{head}");
     let (status, head, _) = get(web.port, "/app.js");
     assert_eq!(status, 200, "{head}");
     assert!(head.contains("Content-Type: text/javascript"), "{head}");
@@ -34842,6 +34857,18 @@ fn terminal_takeover_clears_a_lost_session_without_a_new_pick() {
     // A later hook can re-establish the holder using the existing pick format, with no snapshot-field addition.
     std::fs::write(&record, format!("{}\t{id}\t1789099924\n", nonce + 1)).unwrap();
     assert_eq!(call(&["show", &id, "--json"])["session"]["state"], "lost");
+}
+
+#[test]
+fn web_serves_snippets_with_shared_path_policy() {
+    let s = init("web-snippets");
+    std::fs::write(s.path().join("example.txt"), "hello snippet").unwrap();
+    let web = serve(s.path());
+    let (status, _, body) = get(web.port, "/api/snippet?path=example.txt");
+    assert_eq!(status, 200);
+    let value: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(value["out"]["text"], "hello snippet");
+    assert_eq!(get(web.port, "/api/snippet?path=.moai/issues.jsonl").0, 403);
 }
 
 #[test]

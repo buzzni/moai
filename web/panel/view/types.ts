@@ -19,6 +19,7 @@
  *   wiki pane takes its keys through {@link PaneView.handleKey}, where `false` means "not mine" and the key goes
  *   on (the wiki's Esc with nothing left to clear moves the focus to the tab bar).
  */
+import type { Client } from '../data/client.js'
 import type { IssueIndex, Path } from '../data/index.js'
 import type { PlanChange } from '../data/plan.js'
 import type { Copy } from '../i18n/index.js'
@@ -78,6 +79,8 @@ export interface ViewContext {
   layout(): PaneLayout
   /** Move the keyboard focus into a pane: its view's `focus()` when it has one, else the pane's root. */
   focusPane(area: Focus): void
+  /** The request queue the views read through beside the store (snippets, data/snippet.ts); absent in the tests' shell. */
+  client?: Client
   /** The wiki's reads; absent until the data layer gives them (main.ts). */
   wiki?: WikiSource
   /** One line under the banners (the shell's result line): what a gantt move did, or why it did nothing. */

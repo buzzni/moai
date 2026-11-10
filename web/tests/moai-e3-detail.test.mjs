@@ -455,3 +455,53 @@ test('session detail shows recovery verbatim only while lost and omits unknown s
   show(undefined)
   assert.doesNotMatch(root.textContent, /Session/)
 })
+
+test('detail falls back to raw text if the markdown vendor is unavailable', () => {
+  const previous = globalThis.moaiVendor
+  try {
+    delete globalThis.moaiVendor
+    const doc = new JSDOM('<!doctype html>').window.document
+    const result = renderBody(doc, '# <unsafe>')
+    assert.equal(result.className, 'moai-detail-raw')
+    assert.equal(result.textContent, '# <unsafe>')
+  } finally { globalThis.moaiVendor = previous }
+})
+
+test('detail loads snippets without replacing newer rows and follows footnotes', async () => {
+  const pending = []
+  const client = { request() { return new Promise(resolve => pending.push(resolve)) } }
+  const { view, root } = mount({ client })
+  const one = {id:'a',title:'A',body:'<<< src/a.rs'}
+  view.render(stateWith({value:{id:'a',row:one}}), null)
+  assert.match(root.textContent, /Loading snippet/)
+  const two = {id:'b',title:'B',body:'Second[^x]\n\n[^x]: Footnote'}
+  view.render(stateWith({value:{id:'b',row:two}}), null)
+  pending[0]({kind:'passed',output:{text:'stale'}})
+  await new Promise(resolve => setTimeout(resolve, 0))
+  assert.doesNotMatch(root.textContent, /stale/)
+  const target = root.querySelector('li[data-anchor="fn:1"]')
+  let scrolled = false
+  target.scrollIntoView = () => { scrolled = true }
+  root.querySelector('a[data-anchor="fn:1"]').click()
+  assert.ok(scrolled)
+})
+
+
+test('detail retries cancelled and failed snippet requests on the next redraw', async () => {
+  for (const failure of [{kind:'cancelled'}, {kind:'not-started'}, {kind:'moai-error', message:'refused'}]) {
+    let calls = 0
+    const client = { async request() { calls++; return calls === 1 ? failure : {kind:'passed',output:{text:'retried'}} } }
+    const { view, root } = mount({client})
+    const row = {id:'retry',title:'Retry',body:'<<< src/a.rs'}
+    const state = stateWith({value:{id:row.id,row}})
+    view.render(state, null)
+    await new Promise(resolve => setTimeout(resolve, 0))
+    assert.equal(calls, 1)
+    view.render(state, null)
+    await new Promise(resolve => setTimeout(resolve, 0))
+    assert.equal(calls, 2)
+    assert.equal(root.querySelector('pre.m-md-snippet').textContent, 'retried')
+    view.render(state, null)
+    assert.equal(calls, 2)
+  }
+})

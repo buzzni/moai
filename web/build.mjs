@@ -11,6 +11,7 @@ import { build } from 'esbuild'
 import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { i18nBundles, languageCodes, pageWords } from './i18n-bundles.mjs'
+import { vendorGlobals, vendorBuild } from './vendor.mjs'
 
 const root = new URL('./', import.meta.url)
 const dist = new URL('../src/web/dist/', root)
@@ -50,7 +51,7 @@ const byteOrder = (a, b) => Buffer.compare(Buffer.from(a), Buffer.from(b))
 // FNV-1a 64 over (path bytes, 0x00, content bytes, 0x00) for each input in path order — the same fold
 // tests/web_bundle.rs makes, so the test can tell a stale bundle without node.
 async function sources() {
-  const paths = [...(await walk('panel/')), 'build.mjs', 'i18n-bundles.mjs', 'package.json', 'package-lock.json'].sort(byteOrder)
+  const paths = [...(await walk('panel/')), 'build.mjs', 'i18n-bundles.mjs', 'package.json', 'package-lock.json', 'vendor.mjs'].sort(byteOrder)
   let hash = 0xcbf29ce484222325n
   const fold = (bytes) => {
     for (const byte of bytes) hash = ((hash ^ BigInt(byte)) * 0x100000001b3n) & 0xffffffffffffffffn
@@ -93,12 +94,14 @@ const result = await build({
   // A file path, not URL.pathname: that stays percent-encoded, so a checkout under a path with a space or Hangul fails.
   entryPoints: [fileURLToPath(new URL('panel/main.ts', root))],
   banner: { js: BANNER },
-  plugins: [i18nBundles],
+  plugins: [i18nBundles, vendorGlobals],
 })
 // index.html loads it in <head> without `defer`, so it holds the first paint: it imports the theme and the key alone.
 const early = await build({ ...options, entryPoints: [fileURLToPath(new URL('panel/early.ts', root))] })
+const vendor = await build({ ...vendorBuild, entryPoints: [fileURLToPath(new URL('panel/vendor/index.ts', root))] })
 const css = `${await styles()}\n[hidden]{display:none!important}\n`
 await mkdir(dist, { recursive: true })
+await writeFile(new URL('vendor.js', dist), vendor.outputFiles[0].text)
 await writeFile(new URL('app.js', dist), result.outputFiles[0].text)
 await writeFile(new URL('theme.js', dist), early.outputFiles[0].text)
 await writeFile(new URL('app.css', dist), css)

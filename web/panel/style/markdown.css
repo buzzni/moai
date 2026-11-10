@@ -63,3 +63,14 @@
 .m-md-task[data-checked="true"]::before { content: "\2713"; }
 
 .m-md-image { max-width: 100%; height: auto; }
+
+.m-md-fnref { font-size: .8em; }
+.m-md-footnotes { margin-top: 1em; }
+.m-md-math { overflow-x: auto; }
+.m-md-math-block { display: block; margin: 1em 0; }
+.m-md-math-error, .m-md-snippet-missing { color: var(--muted); }
+.m-md-snippet { white-space: pre-wrap; }
+.m-md-mermaid { margin: 1em 0; }
+.m-md-measure { position: fixed; left: -10000px; top: 0; visibility: hidden; font: 16px "trebuchet ms", verdana, arial, sans-serif; }
+.m-md-diagram { max-width: 100%; height: auto; }
+.m-md-diagram-error { color: var(--danger); }

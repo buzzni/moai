@@ -55,6 +55,8 @@ export interface ShellOptions {
   /** The index of the state's rows; the caller builds it once per read. */
   index(state: State): IssueIndex | null
   activity(): Activity
+  /** The request queue, handed to the views that read beside the store (snippets in the detail and the wiki). */
+  client?: ViewContext["client"]
   /** The wiki's reads, handed to the wiki pane; without them the wiki tab says it cannot read the wiki. */
   wiki?: WikiSource
   /** The gantt's write of a row's planned days (main.ts, data/plan.ts); without it the bars do not move. */
@@ -294,7 +296,7 @@ export function mountShell(root: HTMLElement, options: ShellOptions): Shell {
     const view = mainViews[now.tab]
     return view.focus ? view.focus() : mainRoots[now.tab].focus()
   }
-  const ctx: ViewContext = { document: doc, copy, language, intents: viewIntents, layout, focusPane, wiki: options.wiki, say, movePlan: options.movePlan }
+  const ctx: ViewContext = { document: doc, copy, language, intents: viewIntents, layout, focusPane, client: options.client, wiki: options.wiki, say, movePlan: options.movePlan }
   const mainViews: Record<"list" | "board" | "gantt", PaneView> = {
     list: options.panes.list(mainRoots.list, ctx),
     board: options.panes.board(mainRoots.board, ctx),
