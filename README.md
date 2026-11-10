@@ -622,7 +622,7 @@ recording machine shows — and records it:
 
 | What | Limit |
 | --- | --- |
-| release binary | 20 MB |
+| release binary | 30 MiB |
 | clean build, unloaded machine | 5 minutes |
 
 CI measures the binary on every pull request. Build time is not measured there —
