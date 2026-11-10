@@ -220,7 +220,9 @@ The list, the board or the gantt you leave on is the one the next run opens with
 
 ## Markdown in the explorer
 
-The detail and wiki panes render issue and wiki markdown in the terminal. Use
+The detail and wiki panes render issue bodies and wiki markdown in the terminal.
+History notes remain as written in the explorer and in `moai show`; the web
+renders notes as markdown. Use
 `SPC v r` to see the original text instead. They share the snippet file and path
 rules described in [web markdown](web.md#markdown), including the 32-directive
 and 256 KiB limits and the sensitive-file refusals.
@@ -566,4 +568,4 @@ write there either.
   an email on every write and `git config` had none. The answer holds for this
   run; set `user.name` and `user.email` to stop it asking
 
-Decided in: moai-e9hi moai-724f moai-z46r moai-9nfw moai-47mz moai-irrj moai-ucx8 moai-1hka moai-h2rh moai-gelm moai-m6ni moai-p3r9 moai-o3cb moai-fyul moai-ogaw moai-tllo moai-fc97 moai-jtvp moai-bth3 moai-9tqo moai-wk7i [moai-pxiy](https://github.com/buzzni/moai/pull/43 "external issue") moai-i4hf moai-lj8g moai-ccow moai-d1zn moai-ekg6 moai-uwi9 moai-mkzo moai-i07x moai-zgc1 moai-4km9 moai-4v3h moai-7eeq moai-yigx moai-okdc moai-z74b
+Decided in: moai-e9hi moai-724f moai-z46r moai-9nfw moai-47mz moai-irrj moai-ucx8 moai-1hka moai-h2rh moai-gelm moai-m6ni moai-p3r9 moai-o3cb moai-fyul moai-ogaw moai-tllo moai-fc97 moai-jtvp moai-bth3 moai-9tqo moai-wk7i [moai-pxiy](https://github.com/buzzni/moai/pull/43 "external issue") moai-i4hf moai-lj8g moai-ccow moai-d1zn moai-ekg6 moai-uwi9 moai-mkzo moai-i07x moai-zgc1 moai-4km9 moai-4v3h moai-7eeq moai-yigx moai-okdc moai-z74b moai-1f3p
