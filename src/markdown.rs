@@ -91,6 +91,13 @@ pub enum Block {
         alt: String,
         dest: String,
     },
+    Snippet {
+        quote: u8,
+        raw: String,
+        written: String,
+        region: Option<String>,
+        lang: Option<String>,
+    },
     /// 번호는 줄마다 [`Item::marker`] 가 든다 — 블록에 `ordered` 를 또 두면
     /// 둘이 어긋날 수 있고, 어긋나면 어느 쪽이 참인지 정할 길이 없다.
     ///
@@ -150,6 +157,7 @@ struct Fold {
     notes: Vec<(usize, Vec<Block>)>,
     note: Option<(usize, usize)>,
     display_math: bool,
+    paragraph_break: bool,
     image_start: Option<(usize, String)>,
     lone_image: Option<(String, String, String)>,
     out: Vec<Block>,
@@ -375,6 +383,7 @@ impl Fold {
             // 줄바꿈은 한 칸으로. 문단 안의 줄 나눔은 그리는 쪽이 폭을 보고
             // 다시 접으므로, 여기서 원문의 줄을 지키면 두 번 접힌다.
             Event::SoftBreak | Event::HardBreak => {
+                self.paragraph_break = true;
                 let role = self.role();
                 self.push(" ", role);
             }
@@ -408,6 +417,7 @@ impl Fold {
             // [`Block::Image`] 가 된다(`TagEnd::Paragraph`).
             Tag::Paragraph => {
                 self.display_math = false;
+                self.paragraph_break = false;
                 self.lone_image = None;
             }
             // **그림도 주소를 남긴다.** 글 가운데 선 그림은 터미널에 뜨지 않으므로 대체글만
@@ -540,6 +550,21 @@ impl Fold {
                     return;
                 }
                 if spans.is_empty() {
+                    return;
+                }
+                if self.list.is_none()
+                    && !self.paragraph_break
+                    && spans.len() == 1
+                    && spans[0].role == Role::Plain
+                    && let Some((written, region, lang)) = snippet_request(&spans[0].text)
+                {
+                    self.out.push(Block::Snippet {
+                        quote: self.quote_depth(),
+                        raw: spans[0].text.clone(),
+                        written,
+                        region,
+                        lang,
+                    });
                     return;
                 }
                 if self.display_math
@@ -817,6 +842,36 @@ pub fn link_cells(lines: &[Vec<Span>]) -> Vec<LinkCell> {
     out
 }
 
+fn snippet_request(raw: &str) -> Option<(String, Option<String>, Option<String>)> {
+    let rest = raw.strip_prefix("<<<")?.trim();
+    let end = rest.find(['#', '{']).unwrap_or(rest.len());
+    let path = rest[..end].trim();
+    if path.is_empty() {
+        return None;
+    }
+    let tail = &rest[end..];
+    let (region, tail) = if let Some(after) = tail.strip_prefix('#') {
+        let n = after.find('{').unwrap_or(after.len());
+        let name = &after[..n];
+        if name.is_empty() || !name.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '-') {
+            return None;
+        }
+        (Some(name.to_string()), &after[n..])
+    } else {
+        (None, tail)
+    };
+    let lang = if tail.is_empty() {
+        None
+    } else {
+        let content = tail.strip_prefix('{')?.strip_suffix('}')?;
+        content
+            .split_whitespace()
+            .find(|part| !part.chars().all(|c| c.is_ascii_digit() || c == '-' || c == ','))
+            .map(str::to_string)
+    };
+    Some((path.to_string(), region, lang))
+}
+
 fn lay_one(out: &mut Vec<Vec<Span>>, b: &Block, width: usize, overflow: Overflow) {
     match b {
         Block::Heading { level, spans } => {
@@ -858,6 +913,11 @@ fn lay_one(out: &mut Vec<Vec<Span>>, b: &Block, width: usize, overflow: Overflow
             } else {
                 flow(out, &spans, &bars(*quote), &bars(*quote), width, overflow);
             }
+        }
+        Block::Snippet { quote, raw, .. } => {
+            let spans = [Span { text: raw.clone(), role: Role::Plain, link: None }];
+            let bar = bars(*quote);
+            flow(out, &spans, &bar, &bar, width, overflow);
         }
         Block::Para(spans) => flow(out, &marked(spans), "", "", width, overflow),
         Block::Quote { quote, spans } => {
@@ -1208,6 +1268,7 @@ mod real {
                     super::Block::Table { .. } => "표",
                     super::Block::Rule => "줄",
                     super::Block::Image { .. } => "그림",
+                    super::Block::Snippet { .. } => "삽입",
                 };
                 *kinds.entry(k).or_insert(0) += 1;
             }
@@ -1267,6 +1328,18 @@ mod tests {
         assert!(lines.iter().flatten().any(|s| s.role == Role::Mark && s.text.contains("mermaid")));
         assert!(lines.iter().flatten().any(|s| s.role == Role::Code && s.text == "a-->b"));
         assert!(!lines.iter().flatten().any(|s| s.role == Role::Mark && s.text.contains("rust")));
+    }
+    #[test]
+    fn snippet_directives_keep_the_context_free_output_and_ignore_lists_and_code() {
+        let source = "<<< src/x.rs#region{2 rust}";
+        let blocks = parse(source);
+        assert!(
+            matches!(&blocks[0], Block::Snippet { written, region: Some(region), lang: Some(lang), .. } if written == "src/x.rs" && region == "region" && lang == "rust")
+        );
+        let text: String = layout(&blocks, 100, Overflow::Keep).iter().flatten().map(|s| s.text.as_str()).collect();
+        assert_eq!(text, source);
+        assert!(!parse("- <<< src/x.rs").iter().any(|b| matches!(b, Block::Snippet { .. })));
+        assert!(!parse("```\n<<< src/x.rs\n```").iter().any(|b| matches!(b, Block::Snippet { .. })));
     }
     #[test]
     fn ordinary_markdown_keeps_its_existing_blocks() {
