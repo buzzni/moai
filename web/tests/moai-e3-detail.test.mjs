@@ -455,3 +455,14 @@ test('session detail shows recovery verbatim only while lost and omits unknown s
   show(undefined)
   assert.doesNotMatch(root.textContent, /Session/)
 })
+
+test('detail falls back to raw text if the markdown vendor is unavailable', () => {
+  const previous = globalThis.moaiVendor
+  try {
+    delete globalThis.moaiVendor
+    const doc = new JSDOM('<!doctype html>').window.document
+    const result = renderBody(doc, '# <unsafe>')
+    assert.equal(result.className, 'moai-detail-raw')
+    assert.equal(result.textContent, '# <unsafe>')
+  } finally { globalThis.moaiVendor = previous }
+})

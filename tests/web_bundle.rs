@@ -200,7 +200,7 @@ fn the_vendor_bundle_is_loaded_in_order_and_fits_its_budget() {
     // 2026-11-10: 5,496,684 bytes with Mermaid 12.3.0.
     assert!(bytes <= 6 * 1024 * 1024, "vendor.js is {bytes} bytes");
     let app = dist("app.js");
-    for marker in ["MarkdownIt", "KaTeX parse error"] {
+    for marker in ["markdown-it", "KaTeX parse error"] {
         assert!(!app.contains(marker), "third-party code leaked into app.js: {marker}");
     }
 }
