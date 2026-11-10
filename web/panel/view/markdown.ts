@@ -121,11 +121,28 @@ function getParser(): InstanceType<typeof MarkdownIt> {
   return parser
 }
 function parse(source: string, page?: string): Token[] {
-  return getParser().parse(String(source ?? '').replace(/^\uFEFF/, ''), { page })
+  const clean = String(source ?? '').replace(/^\uFEFF/, '')
+  const lines = clean.split(/\r\n?|\n/)
+  const tokens = getParser().parse(clean, { page })
+  for (const token of tokens) {
+    const meta = token.meta as { requestedPath?: string; region?: string; invalidSnippet?: boolean } | null
+    if (!meta?.requestedPath || !token.map) continue
+    const line = lines[token.map[0]] ?? ''
+    const marker = line.indexOf('<<<')
+    if (marker < 0) continue
+    const written = line.slice(marker + 3).trim()
+    const hash = written.indexOf('#'), brace = written.indexOf('{')
+    if (hash < 0 || (brace >= 0 && brace < hash)) { meta.region = ''; continue }
+    const region = written.slice(hash + 1, brace < 0 ? undefined : brace)
+    // Rust's is_region_name accepts Unicode alphabetic and numeric characters, '_' and '-'.
+    if (!/^[\p{Alphabetic}\p{Number}_-]+$/u.test(region)) meta.invalidSnippet = true
+    else meta.region = region
+  }
+  return tokens
 }
 function refOf(token: Token): SnippetRef | undefined {
-  const meta = token.meta as { requestedPath?: string, region?: string } | null
-  return meta?.requestedPath ? { path: meta.requestedPath, ...(meta.region ? { region: meta.region } : {}) } : undefined
+  const meta = token.meta as { requestedPath?: string, region?: string, invalidSnippet?: boolean } | null
+  return meta?.requestedPath && !meta.invalidSnippet ? { path: meta.requestedPath, ...(meta.region ? { region: meta.region } : {}) } : undefined
 }
 export function snippetRefs(source: string, env?: { page?: string }): SnippetRef[] {
   const refs: SnippetRef[] = [], seen = new Set<string>()
@@ -220,6 +237,7 @@ export function renderMarkdown(doc: Document, source: string, options: RenderOpt
       case 'paragraph_close': if (!t.hidden) pop(); break
       case 'fence': case 'code_block': {
         const ref = refOf(t), lang = t.info.trim().split(/[\s{]/)[0] ?? ''
+        if ((t.meta as { invalidSnippet?: boolean } | null)?.invalidSnippet) { parent().appendChild(el(doc, 'p', {}, sourceLines[t.map?.[0] ?? -1] ?? '')); break }
         if (ref && ++snippetCount > 32) { parent().appendChild(el(doc, 'p', {}, sourceLines[t.map?.[0] ?? -1] ?? `<<< ${ref.path}`)); break }
         if (ref) {
           const state = options.snippets?.(ref)

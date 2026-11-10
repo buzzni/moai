@@ -550,3 +550,14 @@ test('review moai-z74b.t42: list start 0, one task marker per item, empty link t
   // moai's wiki::Anchors drops the line break of a setext heading; the page must make the same anchor.
   assert.deepEqual(md('Foo\nbar\n===').headings.map(h => h.anchor), ['foobar'])
 })
+
+
+test('snippet regions follow the Rust rule even when plugin metadata drops them', () => {
+  const source = '<<< a.md#한글\n\n<<< a.rs#r{1-3 rust extra}\n\n<<< a.rs#bad!'
+  assert.deepEqual(snippetRefs(source), [{path:'a.md', region:'한글'}, {path:'a.rs', region:'r'}])
+  const seen = []
+  const rendered = md(source, {snippets: ref => { seen.push(ref); return {text: 'selected'} }})
+  assert.deepEqual(seen, [{path:'a.md', region:'한글'}, {path:'a.rs', region:'r'}])
+  assert.match(rendered.root.textContent, /<<< a\.rs#bad!/)
+  assert.deepEqual(snippetRefs('> <<< a.md#한글\n\n- <<< a.rs#r{1-3 rust extra}'), [{path:'a.md',region:'한글'}, {path:'a.rs',region:'r'}])
+})
