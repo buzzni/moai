@@ -637,6 +637,54 @@ pub fn answer(req: &Request, site: &Site) -> Response {
     // 부른 쪽은 제가 준 것이 먹은 답이라 믿는다([`api::argv`]).
     let bare = || api::none_of(&query).map_err(|bad| refuse(400, &bad.said(lang), code::BAD_INPUT));
     match req.path.as_str() {
+        "/api/snippet" => {
+            let (mut path, mut page, mut region) = (None, None, None);
+            for (key, value) in &query {
+                let slot = match key.as_str() {
+                    "path" => &mut path,
+                    "page" => &mut page,
+                    "region" => &mut region,
+                    _ => return refuse(400, "unknown snippet query", code::BAD_INPUT),
+                };
+                if slot.replace(value.as_str()).is_some() {
+                    return refuse(400, "duplicate snippet query", code::BAD_INPUT);
+                }
+            }
+            let Some(path) = path else { return refuse(400, "missing snippet path", code::BAD_INPUT) };
+            let page = match page {
+                Some(p) if p.ends_with(".md") && !p.starts_with('/') && !p.starts_with("@/") => {
+                    match crate::snippet::resolve(p, crate::snippet::From::Issue) {
+                        Ok(p) => Some(p),
+                        Err(_) => return refuse(403, "invalid snippet page", code::REFUSED),
+                    }
+                }
+                Some(_) => return refuse(403, "invalid snippet page", code::REFUSED),
+                None => None,
+            };
+            if region.is_some_and(|name| {
+                name.is_empty() || !name.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '-')
+            }) {
+                return refuse(403, "invalid snippet region", code::REFUSED);
+            }
+            let Some(repo) = crate::store::Repo::find_from(&cwd, || lang).ok().flatten() else {
+                return refuse(404, "snippet not found", code::NOT_FOUND);
+            };
+            let from =
+                page.as_deref().map_or(crate::snippet::From::Issue, |page_rel| crate::snippet::From::Wiki { page_rel });
+            let context = crate::snippet::Context { base: repo.here(), from };
+            match context.open(path, region) {
+                Ok(opened) => Response::new(
+                    200,
+                    http::JSON,
+                    serde_json::json!({"exit": 0, "out": {"path": opened.path, "text": opened.text}})
+                        .to_string()
+                        .into_bytes(),
+                ),
+                Err(crate::snippet::Why::Refused) => refuse(403, "snippet path refused", code::REFUSED),
+                Err(crate::snippet::Why::Missing) => refuse(404, "snippet not found", code::NOT_FOUND),
+                Err(crate::snippet::Why::TooLarge) => refuse(404, "snippet too large", code::TOO_LARGE),
+            }
+        }
         "/api/image" => {
             let Some((key, path)) = query.first().filter(|_| query.len() == 1) else {
                 return refuse(404, "image not found", code::NOT_FOUND);
@@ -1269,6 +1317,25 @@ mod image_tests {
     fn request(path: &str, host: &str) -> Request {
         http::read(&mut std::io::Cursor::new(format!("GET {path} HTTP/1.1\r\nHost: {host}\r\n\r\n").into_bytes()))
             .unwrap()
+    }
+    #[test]
+    fn snippet_endpoint_enforces_queries_and_returns_an_envelope() {
+        let (root, site) = site();
+        std::fs::write(root.join("docs/a.txt"), "hello").unwrap();
+        let call = |path: &str| answer(&request(path, "localhost"), &site);
+        let ok = call("/api/snippet?path=a.txt&page=docs/page.md");
+        assert_eq!(ok.status, 200);
+        let json: serde_json::Value = serde_json::from_slice(&ok.body).unwrap();
+        assert_eq!(json["out"]["path"], "docs/a.txt");
+        assert_eq!(json["out"]["text"], "hello");
+        for path in ["/api/snippet?path=x&path=y", "/api/snippet?path=x&unknown=y", "/api/snippet"] {
+            assert_eq!(call(path).status, 400);
+        }
+        assert_eq!(call("/api/snippet?path=../x").status, 403);
+        assert_eq!(call("/api/snippet?path=.env").status, 403);
+        assert_eq!(call("/api/snippet?path=missing").status, 404);
+        assert_eq!(answer(&request("/api/snippet?path=.env", "evil.example"), &site).status, 403);
+        assert_eq!(call("/api/snippet?path=x&project=/unregistered").status, 403);
     }
     fn png() -> Vec<u8> {
         crate::image::png(&image::DynamicImage::new_rgb8(2, 2)).unwrap()

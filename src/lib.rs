@@ -38,6 +38,7 @@ pub mod report;
 mod scratch;
 mod side;
 mod skill;
+mod snippet;
 pub mod store;
 pub mod style;
 #[cfg(test)]
