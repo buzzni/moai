@@ -12713,3 +12713,14 @@
 {"ts":"2026-11-10T15:38:22Z","id":"moai-pcga","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"markdown-it 렌더링 확인용 테스트 이슈 (v1.1.0)"}
 {"ts":"2026-11-10T15:47:48Z","id":"moai-pcga","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 (low — 렌더링 확인용 본문 작성)"}
 {"ts":"2026-11-10T15:47:48Z","id":"moai-pcga","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"사람이 웹·탐색기에서 눈으로 확인했다"}
+{"ts":"2026-11-10T15:49:35Z","id":"moai-lcrd","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"바이너리 예산을 30 MiB 로 올린다 (v1.1.0 릴리스 앞)"}
+{"ts":"2026-11-10T15:49:40Z","id":"moai-lcrd","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-11-10T15:50:21Z","id":"moai-lcrd.ida","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"review — 예산 30MiB 고침"}
+{"ts":"2026-11-10T15:50:21Z","id":"moai-lcrd.ida","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-11-10T15:50:44Z","id":"moai-lcrd.ida","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Reviewer (/code-review low, e7ede018):\n> The diff (commit e7ede018) only raises the binary size limit from 20MB to 30MiB. It changes one constant in `scripts/check-size.sh`, `$((30 * 1024 * 1024))`, and updates the comments and docs that state the limit. The arithmetic is right, the `MOAI_SIZE_LIMIT` override still works, and the required check name is deliberately left as it was. No changed hunk has a runtime-correctness bug."}
+{"ts":"2026-11-10T15:50:44Z","id":"moai-lcrd.ida","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 (low — 예산 상수와 글)"}
+{"ts":"2026-11-10T15:50:44Z","id":"moai-lcrd.ida","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"지적 없음, 고칠 것 없다"}
+{"ts":"2026-11-10T15:50:45Z","id":"moai-lcrd","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 (low — 상수 하나와 예산 글)"}
+{"ts":"2026-11-10T15:50:45Z","id":"moai-lcrd","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"milestone/moai-0meo 에 f637468a 로 병합"}
+{"ts":"2026-11-10T15:51:59Z","id":"moai-47ld","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"v1.1.0 릴리스 — 마일스톤 병합·판 올리기·소식"}
+{"ts":"2026-11-10T15:51:59Z","id":"moai-47ld","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
