@@ -132,6 +132,7 @@ function parse(source: string, page?: string): Token[] {
     if (marker < 0) continue
     const written = line.slice(marker + 3).trim()
     const hash = written.indexOf('#'), brace = written.indexOf('{')
+    if (brace >= 0 && !written.endsWith('}')) { meta.invalidSnippet = true; continue }
     if (hash < 0 || (brace >= 0 && brace < hash)) { meta.region = ''; continue }
     const region = written.slice(hash + 1, brace < 0 ? undefined : brace)
     // Rust's is_region_name accepts Unicode alphabetic and numeric characters, '_' and '-'.

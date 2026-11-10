@@ -560,5 +560,7 @@ test('snippet regions follow the Rust rule even when plugin metadata drops them'
   assert.deepEqual(seen, [{path:'a.md', region:'한글'}, {path:'a.rs', region:'r'}])
   assert.match(rendered.root.textContent, /<<< a\.rs#bad!/)
   assert.equal(md('- <<< a.rs#bad!').root.querySelector('li').textContent, '<<< a.rs#bad!')
+  assert.deepEqual(snippetRefs('<<< a.rs#r{broken'), [])
+  assert.match(md('<<< a.rs#r{broken').root.textContent, /<<< a\.rs#r\{broken/)
   assert.deepEqual(snippetRefs('> <<< a.md#한글\n\n- <<< a.rs#r{1-3 rust extra}'), [{path:'a.md',region:'한글'}, {path:'a.rs',region:'r'}])
 })
