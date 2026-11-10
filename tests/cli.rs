@@ -34849,6 +34849,18 @@ fn terminal_takeover_clears_a_lost_session_without_a_new_pick() {
 }
 
 #[test]
+fn web_serves_snippets_with_shared_path_policy() {
+    let s = init("web-snippets");
+    std::fs::write(s.path().join("example.txt"), "hello snippet").unwrap();
+    let web = serve(s.path());
+    let (status, _, body) = get(web.port, "/api/snippet?path=example.txt");
+    assert_eq!(status, 200);
+    let value: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(value["out"]["text"], "hello snippet");
+    assert_eq!(get(web.port, "/api/snippet?path=.moai/issues.jsonl").0, 403);
+}
+
+#[test]
 fn web_serves_binary_images_and_refuses_non_picture_paths() {
     use std::io::{Read as _, Write as _};
     let s = init("web-image-binary");
