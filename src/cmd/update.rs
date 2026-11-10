@@ -95,6 +95,9 @@ pub fn run(ctx: &Ctx, a: UpdateArgs) -> R<Vec<String>> {
             )
         ));
     }
+    if code == 0 && !ctx.json {
+        tell(&format!("moai: {}", crate::i18n::say(lang, "update.refresh_projects")));
+    }
     if ctx.json {
         let mut result = said(&plan, Some(code));
         if restart.is_some() {

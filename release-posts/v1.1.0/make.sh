@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Rebuild the v1.1.0 pictures: an issue body with math, a Mermaid diagram, footnotes and a snippet in the web detail.
+# Rebuild the v1.1.0 pictures: an issue body with math, a Mermaid diagram, footnotes and a snippet in the web detail,
+# and its history with markdown notes beside a status move.
 # MOAI=<v1.1.0 binary> release-posts/v1.1.0/make.sh   (Playwright from web/node_modules, or NODE_PATH)
 set -euo pipefail
 here=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
@@ -22,7 +23,7 @@ export function pick(local: Note, remote: Note): Note {
 TS
 fence='```'
 epic=$(cd "$repo" && "$MOAI" show --type epic --json | jq -r '.[] | select(.title == "Offline sync") | .id')
-id=$(cd "$repo" && TZ=UTC MOAI_LANG=en "$MOAI" add 'Merge rule for concurrent edits' -t feature -e "$epic" \
+id=$(cd "$repo" && TZ=UTC MOAI_LANG=en MOAI_NOW=2026-11-10T12:05:00Z "$MOAI" add 'Merge rule for concurrent edits' -t feature -e "$epic" \
   --user 'Mira Chen (mira@example.com)' --json -b - <<BODY | jq -r .id
 Two devices edit the same note offline. The newer clock wins[^lww], and ties keep the local copy.
 
@@ -50,5 +51,21 @@ The rule lives in one function:
 
 [^lww]: Last-writer-wins, decided by the logical clock.
 BODY
+)
+# Give the history a fixed, fictional review trail for the third picture.
+(cd "$repo" && TZ=UTC MOAI_NOW=2026-11-10T12:10:00Z "$MOAI" mv "$id" in_progress --from todo -m 'Reviewing the merge rule' --user 'Mira Chen (mira@example.com)' >/dev/null)
+(cd "$repo" && TZ=UTC MOAI_NOW=2026-11-10T12:15:00Z "$MOAI" note "$id" --user 'Mira Chen (mira@example.com)' -b - <<'NOTE' >/dev/null
+## Review notes
+
+- Checked `pick` against both device clocks.
+- For $n$ edits, the rule keeps one winner[^1].
+- Equal clocks keep the local copy.
+
+[^1]: The logical clock decides which edit is newer.
+NOTE
+)
+(cd "$repo" && TZ=UTC MOAI_NOW=2026-11-10T12:20:00Z "$MOAI" note "$id" --user 'Mira Chen (mira@example.com)' -b - <<'NOTE' >/dev/null
+**Next:** add a test for equal clocks.
+NOTE
 )
 node "$here/web.mjs" "$repo" "$here/media" "$ctldir" "$id"

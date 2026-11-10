@@ -1,4 +1,5 @@
-// Capture the web issue detail with KaTeX math, a Mermaid diagram, a footnote and a snippet, light and dark.
+// Capture the web issue detail with KaTeX math, a Mermaid diagram, a footnote and a snippet, light and dark,
+// then its history with markdown notes (light).
 // usage: web.mjs <repo> <out dir> <ctl dir> <issue id>   -- MOAI and Playwright (NODE_PATH) come from make.sh.
 import { spawn } from 'node:child_process'
 import { createInterface } from 'node:readline'
@@ -22,7 +23,7 @@ const { url } = JSON.parse(await new Promise((resolve, reject) => {
   server.once('exit', (code) => reject(new Error(`moai web exited ${code}`)))
 }))
 const browser = await chromium.launch()
-async function shoot(scheme, name, scroll) {
+async function shoot(scheme, name, scroll, history = false) {
   const context = await browser.newContext({ viewport: { width: 1400, height: 900 },
     colorScheme: scheme, deviceScaleFactor: 2, timezoneId: 'UTC' })
   const page = await context.newPage()
@@ -37,6 +38,11 @@ async function shoot(scheme, name, scroll) {
     await page.waitForFunction(() => [...document.querySelectorAll('img.m-md-diagram')].every((i) => i.complete && i.naturalWidth > 0))
     await pause(800)
     if (scroll) { await page.getByText(scroll).last().scrollIntoViewIfNeeded(); await pause(600) }
+    if (history) {
+      await page.waitForSelector('.moai-detail-note math', { state: 'attached' })
+      await page.locator('details[data-fold=journal]').evaluate(el => el.scrollIntoView({ block: 'start' }))
+      await pause(600)
+    }
     await page.mouse.move(1398, 898)
     await page.screenshot({ path: path.join(outDir, `${name}.png`) })
   } finally { await context.close() }
@@ -44,6 +50,7 @@ async function shoot(scheme, name, scroll) {
 try {
   await shoot('light', '01-web-markdown-light')
   await shoot('dark', '02-web-markdown-dark', 'Last-writer-wins')
+  await shoot('light', '03-web-history-light', null, true)
 } finally {
   await browser.close()
   server.kill()
