@@ -14,6 +14,16 @@ pub enum Why {
     Missing,
     TooLarge,
 }
+#[derive(Debug, PartialEq)]
+pub enum DetailWhy {
+    Policy(Why),
+    NotText,
+}
+impl std::convert::From<Why> for DetailWhy {
+    fn from(value: Why) -> Self {
+        Self::Policy(value)
+    }
+}
 pub struct Opened {
     pub path: String,
     pub text: String,
@@ -62,7 +72,7 @@ pub fn resolve(written: &str, from: From<'_>) -> Result<String, Why> {
     if rel.is_empty() || sensitive(&rel) { Err(Why::Refused) } else { Ok(rel) }
 }
 
-pub fn read(base: &Path, rel: &str) -> Result<String, Why> {
+fn read_detail(base: &Path, rel: &str) -> Result<String, DetailWhy> {
     // Revalidate at the I/O boundary, including the actual target of an internal symlink.
     let rel = resolve(rel, From::Issue)?;
     let base = crate::path::canonical(base).map_err(|_| Why::Missing)?;
@@ -70,21 +80,28 @@ pub fn read(base: &Path, rel: &str) -> Result<String, Why> {
     let actual = path.strip_prefix(&base).map_err(|_| Why::Refused)?;
     let actual = actual.to_str().ok_or(Why::Refused)?.replace('\\', "/");
     if sensitive(&actual) {
-        return Err(Why::Refused);
+        return Err(Why::Refused.into());
     }
     let file = crate::held::open_inside(&path, &crate::held::Home::of(&base)).map_err(|_| Why::Missing)?;
     if file.metadata().map_err(|_| Why::Missing)?.len() > MAX_BYTES {
-        return Err(Why::TooLarge);
+        return Err(Why::TooLarge.into());
     }
     let mut bytes = Vec::new();
     file.take(MAX_BYTES + 1).read_to_end(&mut bytes).map_err(|_| Why::Missing)?;
     if bytes.len() as u64 > MAX_BYTES {
-        return Err(Why::TooLarge);
+        return Err(Why::TooLarge.into());
     }
     if bytes.contains(&0) {
-        return Err(Why::Missing);
+        return Err(DetailWhy::NotText);
     }
-    String::from_utf8(bytes).map_err(|_| Why::Missing)
+    String::from_utf8(bytes).map_err(|_| DetailWhy::NotText)
+}
+
+pub fn read(base: &Path, rel: &str) -> Result<String, Why> {
+    read_detail(base, rel).map_err(|e| match e {
+        DetailWhy::Policy(why) => why,
+        DetailWhy::NotText => Why::Missing,
+    })
 }
 
 // Recognize the paired marker styles supported by the snippet plugin.
@@ -146,6 +163,12 @@ pub fn region(text: &str, name: &str) -> String {
     result
 }
 impl Context<'_> {
+    pub fn open_detail(&self, written: &str, region_name: Option<&str>) -> Result<Opened, DetailWhy> {
+        let path = resolve(written, self.from)?;
+        let text = read_detail(self.base, &path)?;
+        let text = region_name.map_or(text.clone(), |name| region(&text, name));
+        Ok(Opened { path, text })
+    }
     pub fn open(&self, written: &str, region_name: Option<&str>) -> Result<Opened, Why> {
         let path = resolve(written, self.from)?;
         let text = read(self.base, &path)?;
