@@ -81,12 +81,14 @@ pub fn run(ctx: &Ctx, a: UpdateArgs) -> R<Vec<String>> {
     let code = status.code().unwrap_or(1);
     exit_with(u8::try_from(code).unwrap_or(1));
     #[cfg(any(unix, windows))]
-    let restart = (code == 0).then(|| daemon_restart(&exe)).flatten();
+    let seen = (code == 0).then(|| daemon_restart(&exe)).flatten();
+    #[cfg(any(unix, windows))]
+    let restart = seen.as_ref().map(|seen| seen.old.clone());
     #[cfg(not(any(unix, windows)))]
     let restart: Option<(String, u64)> = None;
     // 다른 판의 데몬을 찾은 때만 더 본다 — 서비스가 없는 사람의 `moai update` 는 관리자를 안 부르고 출력도 그대로다.
     #[cfg(any(unix, windows))]
-    let restarted = if restart.is_some() { restart_service(&exe) } else { ServiceRestart::NotDone };
+    let restarted = seen.as_ref().map_or(ServiceRestart::NotDone, |seen| restart_service(&exe, seen));
     #[cfg(not(any(unix, windows)))]
     let restarted = ServiceRestart::NotDone;
     if !ctx.json {
@@ -120,16 +122,30 @@ pub fn run(ctx: &Ctx, a: UpdateArgs) -> R<Vec<String>> {
     Ok(Vec::new())
 }
 
-/// 새 바이너리에 데몬의 상태를 묻는다.
-#[cfg(any(unix, windows))]
-fn daemon_status(exe: &std::path::Path) -> Option<Vec<u8>> {
-    let out = Command::new(exe).args(["daemon", "status", "--json"]).stdin(Stdio::null()).output().ok()?;
-    out.status.success().then_some(out.stdout)
+/// 새 바이너리가 한 번 한 답 — 옛 데몬(알림용)과, 다시 시작한 뒤 무엇이 답해야 새 판인지.
+#[cfg(any(unix, windows, test))]
+#[derive(Debug, PartialEq)]
+struct Seen {
+    /// 옛 데몬의 판과 pid.
+    old: (String, u64),
+    /// 새 바이너리가 푼 소켓·판·`proto`. 하나라도 못 읽으면 `None` — 확인할 수 없는 재시작은 안 한다.
+    target: Option<Target>,
 }
 
+#[cfg(any(unix, windows, test))]
+#[derive(Debug, PartialEq)]
+struct Target {
+    socket: std::path::PathBuf,
+    version: String,
+    proto: u64,
+}
+
+/// 새 바이너리를 **한 번** 띄워 데몬의 상태를 읽는다. 다시 시작한 뒤의 기다림은 프로세스를 더 띄우지 않는다.
 #[cfg(any(unix, windows))]
-fn daemon_restart(exe: &std::path::Path) -> Option<(String, u64)> {
-    restart_from_status(&daemon_status(exe)?)
+fn daemon_restart(exe: &std::path::Path) -> Option<Seen> {
+    let out = Command::new(exe).args(["daemon", "status", "--json"]).stdin(Stdio::null()).output().ok()?;
+    out.status.success().then_some(())?;
+    seen_from_status(&out.stdout)
 }
 
 /// 등록된 서비스를 다시 시작해 본 결과.
@@ -145,10 +161,16 @@ enum ServiceRestart {
 
 /// 등록된 서비스를 새 판으로 다시 시작하고 새 판이 답할 때까지 기다린다(moai-upq5.1g6). `moai daemon stop` 으로 하지 않는다 —
 /// 깨끗한 종료는 관리자가 다시 안 띄운다. 등록 상태를 바꾸는 호출은 이 길에 없다.
+///
+/// 기다림은 프로세스를 띄우지 않고 `client::probe` 로 새 바이너리가 댄 소켓에 `hello` 를 묻는다(moai-tloc.wt9).
+/// 붙기 한 번이 시한(2초)까지 걸릴 수 있어 5초가 지난 뒤에는 새 붙기를 시작하지 않는다.
 #[cfg(any(unix, windows))]
-fn restart_service(exe: &std::path::Path) -> ServiceRestart {
+fn restart_service(exe: &std::path::Path, seen: &Seen) -> ServiceRestart {
     use crate::daemon::service::{Service, run};
     use std::time::{Duration, Instant};
+    let Some(target) = &seen.target else {
+        return ServiceRestart::NotDone;
+    };
     let Ok(service) = Service::native() else {
         return ServiceRestart::NotDone;
     };
@@ -157,7 +179,9 @@ fn restart_service(exe: &std::path::Path) -> ServiceRestart {
     }
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
-        if daemon_status(exe).is_some_and(|status| current_from_status(&status)) {
+        if let crate::daemon::client::Probe::Running(hello) = crate::daemon::client::probe(&target.socket)
+            && answers(&hello, target)
+        {
             return ServiceRestart::Done;
         }
         if Instant::now() >= deadline {
@@ -167,20 +191,27 @@ fn restart_service(exe: &std::path::Path) -> ServiceRestart {
     }
 }
 
-/// 데몬이 이 바이너리의 판으로 돌고 있는가.
+/// 답한 데몬이 새 바이너리의 판인가 — 판이 같아도 `proto` 가 다르면 아니다.
 #[cfg(any(unix, windows, test))]
-fn current_from_status(bytes: &[u8]) -> bool {
-    serde_json::from_slice::<serde_json::Value>(bytes)
-        .is_ok_and(|status| status["running"] == true && status["same_version"] == true)
+fn answers(hello: &crate::daemon::client::Hello, target: &Target) -> bool {
+    hello.version == target.version && hello.proto == target.proto
 }
 
 #[cfg(any(unix, windows, test))]
-fn restart_from_status(bytes: &[u8]) -> Option<(String, u64)> {
+fn seen_from_status(bytes: &[u8]) -> Option<Seen> {
     let status: serde_json::Value = serde_json::from_slice(bytes).ok()?;
     if status["running"] != true || status["same_version"] != false {
         return None;
     }
-    Some((status["version"].as_str()?.to_owned(), status["pid"].as_u64()?))
+    let old = (status["version"].as_str()?.to_owned(), status["pid"].as_u64()?);
+    let target = (|| {
+        Some(Target {
+            socket: status["socket"].as_str()?.into(),
+            version: status["this_version"].as_str()?.to_owned(),
+            proto: status["this_proto"].as_u64()?,
+        })
+    })();
+    Some(Seen { old, target })
 }
 
 /// 받을 저장소 — **막는 자는 여기 하나다.** `moai update` 가 이것으로 고르고, 탐색기의 새 판 안내
@@ -337,32 +368,43 @@ fn said(plan: &crate::update::Plan, code: Option<i32>) -> serde_json::Value {
 
 #[cfg(test)]
 mod daemon_tests {
-    use super::{current_from_status, restart_from_status};
-
-    #[test]
-    fn the_new_version_answers_only_when_it_runs_and_is_the_same() {
-        assert!(current_from_status(br#"{"running":true,"same_version":true}"#));
-        for status in [
-            &br#"{"running":true,"same_version":false}"#[..],
-            &br#"{"running":false}"#[..],
-            &br#"{"running":true}"#[..],
-            &b"broken"[..],
-        ] {
-            assert!(!current_from_status(status));
-        }
-    }
+    use super::{Seen, Target, answers, seen_from_status};
+    use crate::daemon::client::Hello;
 
     #[test]
     fn restart_notice_only_for_a_running_different_version() {
         let old = br#"{"running":true,"same_version":false,"version":"0.51.0","pid":42}"#;
-        assert_eq!(restart_from_status(old), Some(("0.51.0".into(), 42)));
+        assert_eq!(seen_from_status(old), Some(Seen { old: ("0.51.0".into(), 42), target: None }));
         for status in [
             &br#"{"running":false}"#[..],
             &br#"{"running":true,"same_version":true,"version":"0.51.0","pid":42}"#[..],
             &br#"{"running":true,"same_version":false}"#[..],
             &b"broken"[..],
         ] {
-            assert_eq!(restart_from_status(status), None);
+            assert_eq!(seen_from_status(status), None);
         }
+    }
+
+    #[test]
+    fn the_target_needs_the_socket_and_both_versions() {
+        let full = r#""socket":"/s/d.sock","this_version":"1.2.3","this_proto":1"#;
+        let head = r#"{"running":true,"same_version":false,"version":"0.51.0","pid":42"#;
+        let seen = seen_from_status(format!("{head},{full}}}").as_bytes()).unwrap();
+        assert_eq!(seen.target, Some(Target { socket: "/s/d.sock".into(), version: "1.2.3".into(), proto: 1 }));
+        for missing in [r#""socket""#, r#""this_version""#, r#""this_proto""#] {
+            let kept: Vec<&str> = full.split(',').filter(|part| !part.starts_with(missing)).collect();
+            let seen = seen_from_status(format!("{head},{}}}", kept.join(",")).as_bytes()).unwrap();
+            assert_eq!(seen.target, None, "{missing} is missing");
+            assert_eq!(seen.old, ("0.51.0".into(), 42));
+        }
+    }
+
+    #[test]
+    fn the_answer_counts_only_with_the_same_version_and_proto() {
+        let target = Target { socket: "/s".into(), version: "1.2.3".into(), proto: 2 };
+        let hello = |version: &str, proto| Hello { pid: Some(1), version: version.into(), proto };
+        assert!(answers(&hello("1.2.3", 2), &target));
+        assert!(!answers(&hello("1.2.2", 2), &target), "an old version");
+        assert!(!answers(&hello("1.2.3", 1), &target), "the same version, another proto");
     }
 }

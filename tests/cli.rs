@@ -32927,10 +32927,71 @@ fn update_probes_the_new_binary_only_after_success() {
     }
 }
 
+/// 다시 시작한 뒤 소켓에서 무엇이 답하는가 — 시험이 `hello` 에 답할 소켓을 직접 연다(moai-tloc.wt9).
+#[cfg(target_os = "linux")]
+#[derive(Clone, Copy, PartialEq)]
+enum Serve {
+    /// 다시 시작한 뒤에 새 판(`this_version`)으로 답한다.
+    Fresh,
+    /// 아무것도 답하지 않는다.
+    Nothing,
+    /// 다시 시작한 뒤에도 옛 판으로만 답한다.
+    Old,
+    /// 새 바이너리의 status 가 `socket` 을 안 낸다.
+    NoSocket,
+}
+
+/// `hello` 한 줄에 답하는 시험의 소켓. 떨어지면(패닉이어도) 멈추고 걷는다.
+#[cfg(target_os = "linux")]
+struct HelloServer {
+    stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    thread: Option<std::thread::JoinHandle<()>>,
+}
+
+#[cfg(target_os = "linux")]
+impl HelloServer {
+    fn start(path: &Path, restarted: PathBuf, serve: Serve) -> HelloServer {
+        use std::io::{BufRead as _, Write as _};
+        use std::sync::atomic::Ordering;
+        let listener = std::os::unix::net::UnixListener::bind(path).unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let flag = stop.clone();
+        let thread = std::thread::spawn(move || {
+            while !flag.load(Ordering::SeqCst) {
+                let Ok((stream, _)) = listener.accept() else {
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                    continue;
+                };
+                stream.set_nonblocking(false).unwrap();
+                stream.set_read_timeout(Some(std::time::Duration::from_secs(2))).unwrap();
+                let mut line = String::new();
+                let _ = std::io::BufReader::new(&stream).read_line(&mut line);
+                let version = if serve == Serve::Fresh && restarted.exists() { "9.9.9" } else { "old" };
+                let reply = format!(
+                    "{{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{{\"pid\":7,\"version\":\"{version}\",\"proto\":1}}}}\n"
+                );
+                let _ = (&stream).write_all(reply.as_bytes());
+            }
+        });
+        HelloServer { stop, thread: Some(thread) }
+    }
+}
+
+#[cfg(target_os = "linux")]
+impl Drop for HelloServer {
+    fn drop(&mut self) {
+        self.stop.store(true, std::sync::atomic::Ordering::SeqCst);
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
+    }
+}
+
 /// `moai update` 와 등록된 서비스(moai-upq5.1g6). 가짜 `systemctl` 만 부른다 — 진짜에 닿으면 사람의 서비스를 다시 띄운다.
 ///
 /// `unit` 은 서비스 파일의 글(`None` 이면 없음)이고, `<exe>` 는 업데이트하는 바이너리로 채운다. 새 바이너리는 재시작이 일어나면
-/// 같은 판으로 답한다. `answers` 가 거짓이면 다시 시작해도 옛 판 그대로다.
+/// 같은 판으로 답한다. `answers` 가 거짓이면 다시 시작해도 아무것도 답하지 않는다.
 #[cfg(target_os = "linux")]
 fn update_with_service(
     unit: Option<&str>,
@@ -32939,14 +33000,22 @@ fn update_with_service(
     answers: bool,
     args: &[&str],
 ) -> (Output, String) {
+    update_serving(unit, active, restart, if answers { Serve::Fresh } else { Serve::Nothing }, args)
+}
+
+/// [`update_with_service`] 의 몸. **가짜 새 바이너리는 어느 길에서든 정확히 한 번만 뜬다** — 기다림이 프로세스를 띄우면 붉다.
+#[cfg(target_os = "linux")]
+fn update_serving(unit: Option<&str>, active: i32, restart: i32, serve: Serve, args: &[&str]) -> (Output, String) {
     let s = Scratch::new("update-service");
     let exe = hoisted(s.path());
     let real = canon(&exe).unwrap();
     let restarted = s.path().join("restarted");
     let calls = s.path().join("calls");
+    let spawns = s.path().join("spawns");
+    let socket = s.path().join("d.sock");
     let fake = s.path().join("fake");
     std::fs::create_dir_all(&fake).unwrap();
-    let mark = if answers { format!(": > '{}'", restarted.display()) } else { ":".to_string() };
+    let mark = if serve == Serve::Fresh { format!(": > '{}'", restarted.display()) } else { ":".to_string() };
     write_exe(
         &fake.join("systemctl"),
         &format!(
@@ -32961,11 +33030,14 @@ fn update_with_service(
         std::fs::write(dir.join("moai-daemon.service"), unit.replace("<exe>", &real.display().to_string())).unwrap();
     }
     let replacement = s.path().join("replacement");
+    let socket_key =
+        if serve == Serve::NoSocket { String::new() } else { format!("\"socket\":\"{}\",", socket.display()) };
     write_exe(
         &replacement,
         &format!(
-            "#!/bin/sh\nif [ -e '{}' ]; then same=true; else same=false; fi\nprintf '{{\"running\":true,\"same_version\":%s,\"version\":\"old\",\"pid\":42}}\\n' \"$same\"\n",
-            restarted.display()
+            "#!/bin/sh\nprintf x >> '{}'\nprintf '%s\\n' '{{\"running\":true,\"same_version\":false,\"version\":\"old\",\"pid\":42,{}\"this_version\":\"9.9.9\",\"this_proto\":1}}'\n",
+            spawns.display(),
+            socket_key
         ),
     );
     let (url, server) = serving_script(format!("mv '{}' '{}'\nexit 0\n", replacement.display(), real.display()), 1);
@@ -32976,9 +33048,14 @@ fn update_with_service(
         ("XDG_CONFIG_HOME", config.to_str().unwrap()),
         ("MOAI_LANG", "en"),
     ];
+    let hello = (serve != Serve::Nothing && serve != Serve::NoSocket)
+        .then(|| HelloServer::start(&socket, restarted.clone(), serve));
     let out = update_with(&exe, s.path(), &s.path().join("config.toml"), &env, args);
+    drop(hello);
     server.join().unwrap();
     assert_eq!(out.status.code(), Some(0), "종료 코드는 설치 스크립트의 것이다\n{}", text(&out));
+    let spawned = std::fs::read_to_string(&spawns).unwrap_or_default().len();
+    assert_eq!(spawned, 1, "새 바이너리는 다시 시작 전에 한 번만 뜬다\n{}", text(&out));
     (out, std::fs::read_to_string(&calls).unwrap_or_default())
 }
 
@@ -33049,6 +33126,25 @@ fn update_falls_back_to_the_notice_when_it_cannot_restart() {
     let (out, _) = update_with_service(Some(OUR_UNIT), 0, 0, false, &[]);
     assert!(text(&out).contains("has not answered yet"), "{}", text(&out));
     assert!(!text(&out).contains("still runs"), "{}", text(&out));
+}
+
+/// **옛 판으로만 답하는 것은 새 판이 아니다.** 시한까지 `Done` 이 아니라 `Unanswered` 로 선다.
+/// 새 바이너리의 status 가 `socket` 을 안 대면 관리자를 한 번도 안 부르고 지금까지의 알림이 선다.
+#[cfg(target_os = "linux")]
+#[test]
+fn update_does_not_take_an_old_answer_and_does_not_restart_what_it_cannot_check() {
+    if !served() {
+        return;
+    }
+    let (out, calls) = update_serving(Some(OUR_UNIT), 0, 0, Serve::Old, &[]);
+    assert!(text(&out).contains("has not answered yet"), "{}", text(&out));
+    assert!(!text(&out).contains("restarted the daemon service"), "{}", text(&out));
+    assert_eq!(calls, "--user is-active --quiet moai-daemon.service\n--user restart moai-daemon.service\n");
+
+    let (out, calls) = update_serving(Some(OUR_UNIT), 0, 0, Serve::NoSocket, &["--json"]);
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v.get("daemon_restart").and_then(|v| v.as_bool()), Some(true), "{v}");
+    assert_eq!(calls, "", "확인할 수 없는 재시작을 관리자에게 시켰다");
 }
 
 /// **받을 저장소는 사용자 설정에서 오고 `MOAI_REPO` 가 이긴다. 저장소의 `.moai/config.toml` 은 안 읽는다**
