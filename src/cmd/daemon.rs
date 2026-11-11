@@ -9,6 +9,8 @@
 //!   것(`src/web/run.rs` 의 `exe_of` 가 자식으로 피한 일)을 사람이 알고 다시 띄우게 한다.
 //! - **`stop` 은 메서드다**(`daemon.shutdown`) — 신호가 아니라. 전송과 무관하고 Windows 의 named pipe 에도 그대로 선다.
 //! - **`status` 는 읽기만 한다.** 남은 소켓도 지우지 않는다 — 지우는 것은 `start` 다.
+//! - **`install` 은 서비스 관리자에게 맡길 뿐이다**(`crate::daemon::service`, moai-upq5). 등록한 뒤 붙어 보는 것은 사람에게
+//!   말해 주려는 것이다 — 못 붙어도 등록은 성공이다.
 
 use super::{Ctx, R};
 use crate::cli::DaemonCmd;
@@ -21,6 +23,8 @@ pub fn run(ctx: &Ctx, cmd: DaemonCmd) -> R<Vec<String>> {
         DaemonCmd::Start => os::start(ctx),
         DaemonCmd::Stop => os::stop(ctx),
         DaemonCmd::Status => os::status(ctx),
+        DaemonCmd::Install => os::install(ctx),
+        DaemonCmd::Uninstall => os::uninstall(ctx),
     }
 }
 
@@ -45,6 +49,9 @@ struct Status {
     same_version: Option<bool>,
     this_version: &'static str,
     this_proto: u32,
+    /// 서비스 파일. 있으면 등록된 것이다 — 그 파일이 곧 등록 상태다.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    service: Option<String>,
 }
 
 impl Status {
@@ -60,6 +67,7 @@ impl Status {
             same_version: None,
             this_version: env!("CARGO_PKG_VERSION"),
             this_proto: crate::daemon::rpc::PROTO,
+            service: None,
         }
     }
 }
@@ -90,6 +98,9 @@ fn render_status(ctx: &Ctx, s: &Status) -> R<Vec<String>> {
             lines.push(say(lang, "daemon.stale").to_string());
         }
     }
+    if let Some(service) = &s.service {
+        lines.push(fill(say(lang, "daemon.service.line"), &[("service", service)]));
+    }
     Ok(lines)
 }
 
@@ -110,6 +121,14 @@ mod os {
         Err(failed(say(ctx.lang(), "daemon.unsupported"), &[], code::UNSUPPORTED))
     }
 
+    pub fn install(ctx: &Ctx) -> R<Vec<String>> {
+        Err(failed(say(ctx.lang(), "daemon.service.unsupported"), &[], code::UNSUPPORTED))
+    }
+
+    pub fn uninstall(ctx: &Ctx) -> R<Vec<String>> {
+        Err(failed(say(ctx.lang(), "daemon.service.unsupported"), &[], code::UNSUPPORTED))
+    }
+
     /// 묻는 것은 막지 않는다 — `ctl ls` 가 빈 목록으로 답하듯 "없다" 로 답하고 0 이다.
     pub fn status(ctx: &Ctx) -> R<Vec<String>> {
         render_status(ctx, &Status::new(false, None))
@@ -120,6 +139,7 @@ mod os {
 mod os {
     use super::*;
     use crate::daemon::client::{self, Hello, Probe};
+    use crate::daemon::service::{self, Removed, Service, Trouble, Unavailable, Wrote};
     use crate::daemon::{SHUTDOWN, rpc, server};
     use crate::i18n::Lang;
     use std::io::Write as _;
@@ -148,6 +168,36 @@ mod os {
         #[serde(skip_serializing_if = "Option::is_none")]
         pid: Option<u32>,
         socket: &'a str,
+    }
+
+    #[derive(Serialize)]
+    struct Installed<'a> {
+        /// 이번에 서비스 파일을 썼으면 `true` — 새로 썼든, moai 의 옛 파일을 지금의 글로 다시 썼든. 지금 쓸 글과 같아
+        /// 그대로 두었으면 `false`.
+        installed: bool,
+        manager: &'a str,
+        service: &'a str,
+        exe: &'a str,
+        /// 서비스 관리자가 띄운 데몬이 소켓에서 답했는가 — 다른 데몬이 답하면 `false` 다.
+        running: bool,
+        socket: &'a str,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pid: Option<u32>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        version: Option<&'a str>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        same_version: Option<bool>,
+    }
+
+    #[derive(Serialize)]
+    struct Uninstalled<'a> {
+        uninstalled: bool,
+        manager: &'a str,
+        service: &'a str,
+        /// 관리자가 서비스를 멈췄는가. `uninstalled` 가 `true` 일 때 늘 선다 — `false` 면 등록은 걷었는데 데몬이 아직 돌
+        /// 수 있다(moai-tloc.wnw).
+        #[serde(skip_serializing_if = "Option::is_none")]
+        stopped: Option<bool>,
     }
 
     fn socket_path(lang: Lang) -> R<PathBuf> {
@@ -335,6 +385,7 @@ mod os {
         let path = socket_path(lang)?;
         let meta = own_or_refuse(lang, &path)?;
         let mut s = Status::new(true, Some(shown(&path)));
+        s.service = Service::native().ok().filter(Service::registered).map(|svc| shown(&svc.file));
         match client::probe(&path) {
             Probe::Running(hello) => {
                 s.running = true;
@@ -349,6 +400,206 @@ mod os {
             Probe::Foreign(why) => return Err(not_a_daemon(lang, &path, &why)),
         }
         render_status(ctx, &s)
+    }
+
+    /// 이 OS 의 서비스. 관리자가 없거나 집을 모르면 등록할 수 없다.
+    fn the_service(lang: Lang) -> R<Service> {
+        Service::native().map_err(|why| match why {
+            Unavailable::NoHome => failed(say(lang, "daemon.service.no_home"), &[], code::ERROR),
+            Unavailable::NoManager => failed(say(lang, "daemon.service.unsupported"), &[], code::UNSUPPORTED),
+        })
+    }
+
+    fn trouble(lang: Lang, svc: &Service, why: Trouble) -> Fail {
+        let file = shown(&svc.file);
+        let manager = svc.manager.name();
+        match why {
+            Trouble::NotOurs => {
+                failed(say(lang, "daemon.service.not_ours"), &[("service", &file)], code::ALREADY_EXISTS)
+            }
+            Trouble::OtherBinary => {
+                failed(say(lang, "daemon.service.other_binary"), &[("service", &file)], code::ALREADY_EXISTS)
+            }
+            Trouble::BadPath(path) => failed(
+                say(lang, "daemon.service.bad_path"),
+                &[("path", &crate::text::one_line(&path))],
+                code::BAD_INPUT,
+            ),
+            Trouble::File(said) => {
+                failed(say(lang, "daemon.service.no_file"), &[("service", &file), ("said", &said)], code::ERROR)
+            }
+            Trouble::Refused(said) => failed(
+                say(lang, "daemon.service.failed"),
+                &[("manager", manager), ("said", &crate::text::one_line(&said))],
+                code::SERVICE_FAILED,
+            ),
+        }
+    }
+
+    /// 서비스에 적을 바이너리 경로 — **사람이 치는 경로다**(moai-tloc.gci). PATH 를 차례로 보아 이 바이너리와 같은 파일로
+    /// 풀리는 첫 `moai` 를 풀지 않은 채 쓴다. Homebrew·nix 는 판마다 다른 디렉터리에 깔고 링크만 옮기니, 푼 경로를 적으면
+    /// 패키지 관리자가 옛 판을 지우는 순간 로그인 때 아무것도 안 뜬다. PATH 에 없으면 `..` 만 걷은 지금 경로다 — 링크는 안 푼다.
+    /// 빈 항목과 상대 항목은 건너뛴다: 서비스는 이 셸의 디렉터리에서 돌지 않는다.
+    fn typed_exe(current: &Path, path: Option<std::ffi::OsString>) -> PathBuf {
+        let name = format!("moai{}", std::env::consts::EXE_SUFFIX);
+        if let (Ok(real), Some(path)) = (crate::path::canonical(current), path) {
+            // PATH 를 훑는 걸음은 `cmd::hits_in` 하나다 — 고르는 물음(이 바이너리로 풀리는가)만 여기 것이다.
+            let this = |exe: &Path| {
+                exe.to_str().is_some_and(|s| !s.contains(['\n', '\r']))
+                    && crate::path::canonical(exe).is_ok_and(|p| p == real)
+            };
+            let dirs = std::env::split_paths(&path).filter(|dir| dir.is_absolute());
+            if let Some(exe) = crate::cmd::hits_in(dirs, &name, &[], this).next() {
+                return exe;
+            }
+        }
+        crate::path::lexical(current)
+    }
+
+    /// 소켓에서 답하는 데몬이 서비스 밖의 것인가(리뷰 moai-tsk0 의 452). 답한 pid 가 관리자가 아는 서비스의 pid 와 같을 때만
+    /// 서비스의 것이다 — pid 를 안 대는 데몬도, 서비스가 안 도는 때도 같지 않은 것으로 읽는다. **관리자에 못 닿으면 막지
+    /// 않는다**(리뷰 moai-tloc.pjd 3) — 막으면 고칠 길로 대는 `moai daemon stop` 이 잘 돌던 서비스를 내린다. 그때는 뒤의
+    /// 등록이 관리자의 말로 실패한다. 답이 없으면 관리자를 안 부른다: 서비스가 없는 사람의 `install` 은 지금과 같은 차례로 간다.
+    fn outside(svc: &Service, path: &Path) -> Option<(Option<u32>, String)> {
+        let (pid, version) = match client::probe(path) {
+            Probe::Running(hello) => (hello.pid, hello.version),
+            Probe::Busy(pid) => (pid, "?".to_string()),
+            Probe::Absent | Probe::Dead | Probe::Foreign(_) => return None,
+        };
+        let main = svc.main_pid(&service::run).ok()?;
+        (pid.is_none() || pid != main).then_some((pid, version))
+    }
+
+    pub fn install(ctx: &Ctx) -> R<Vec<String>> {
+        let lang = ctx.lang();
+        // sudo 를 먼저 본다 — HOME 이 없는 sudo 에서 "HOME 이 없다" 보다 고칠 길을 대는 거절이 낫다.
+        if service::under_sudo(|k| std::env::var_os(k)) {
+            return Err(failed(say(lang, "daemon.service.sudo"), &[], code::REFUSED));
+        }
+        let svc = the_service(lang)?;
+        let exe = std::env::current_exe().map_err(|e| Fail::new(e.to_string()))?;
+        let exe = typed_exe(&exe, std::env::var_os("PATH"));
+        let path = socket_path(lang)?;
+        // **서비스 밖에서 돌던 데몬이 있으면 아무것도 안 쓴다.** 등록하면 서비스의 `start` 가 그 데몬을 만나 `already` 로 0
+        // 종료하고, 관리자는 그것을 실패로 안 읽어 서비스가 꺼진 채 남는다 — 그 데몬이 멈추면 다음 로그인까지 아무것도 안 뜬다.
+        if let Some((pid, version)) = outside(&svc, &path) {
+            return Err(failed(
+                say(lang, "daemon.service.outside"),
+                &[("pid", &pid_text(pid)), ("version", &version), ("socket", &shown(&path))],
+                code::ALREADY_EXISTS,
+            ));
+        }
+        // 서비스는 이 셸의 디렉터리에서 돌지 않는다 — 상대 경로를 그대로 적으면 다른 소켓을 본다. 고정할 자리를 못
+        // 지으면 아무것도 안 쓰고 멈춘다: 빼고 쓰면 서비스가 셸과 다른 소켓을 본다(moai-tloc.wnw).
+        let dir = path
+            .parent()
+            .and_then(|dir| std::path::absolute(dir).ok())
+            .ok_or_else(|| trouble(lang, &svc, Trouble::BadPath(path.display().to_string())))?;
+        let shown_exe = shown(&exe);
+        let wrote = svc.install(&exe, &dir, &service::run).map_err(|why| trouble(lang, &svc, why))?;
+        let installed = wrote != Wrote::Same;
+        // 관리자가 띄운 데몬이 답하기를 잠깐 기다린다. 못 붙어도 등록은 성공이다.
+        let deadline = Instant::now() + WAIT;
+        let hello = loop {
+            match client::probe(&path) {
+                Probe::Running(hello) => break Some(hello),
+                _ if Instant::now() >= deadline => break None,
+                _ => std::thread::sleep(POLL),
+            }
+        };
+        // "running" 은 서비스의 데몬이 답했을 때만이다 — 그 사이 누가 `moai daemon start` 를 쳤을 수 있다. 관리자에 못
+        // 닿으면 답만 본다.
+        let stranger = hello
+            .as_ref()
+            .is_some_and(|h| svc.main_pid(&service::run).is_ok_and(|main| main.is_none() || h.pid != main));
+        let (hello, stranger) = match stranger {
+            true => (None, hello),
+            false => (hello, None),
+        };
+        let file = shown(&svc.file);
+        let socket = shown(&path);
+        let manager = svc.manager.name();
+        if ctx.json {
+            return super::super::json_line(&Installed {
+                installed,
+                manager,
+                service: &file,
+                exe: &shown_exe,
+                running: hello.is_some(),
+                socket: &socket,
+                pid: hello.as_ref().and_then(|h| h.pid),
+                version: hello.as_ref().map(|h| h.version.as_str()),
+                same_version: hello.as_ref().map(Hello::same_as_this),
+            });
+        }
+        let head = match wrote {
+            Wrote::New => say(lang, "daemon.service.installed"),
+            Wrote::Rewritten => say(lang, "daemon.service.updated"),
+            Wrote::Same => say(lang, "daemon.service.already"),
+        };
+        let mut lines = vec![fill(head, &[("manager", manager), ("service", &file)])];
+        match &hello {
+            Some(hello) => {
+                let proto = hello.proto.to_string();
+                lines.push(format!(
+                    "  {}",
+                    fill(
+                        say(lang, "daemon.running"),
+                        &[("pid", &pid_text(hello.pid)), ("version", &hello.version), ("proto", &proto)],
+                    )
+                ));
+                if !hello.same_as_this() {
+                    lines.push(fill(say(lang, "daemon.restart"), &[("this", env!("CARGO_PKG_VERSION"))]));
+                }
+            }
+            None => match &stranger {
+                Some(other) => lines.push(fill(
+                    say(lang, "daemon.service.other_answers"),
+                    &[("socket", &socket), ("pid", &pid_text(other.pid)), ("manager", manager)],
+                )),
+                None => lines.push(fill(say(lang, "daemon.service.not_reached"), &[("socket", &socket)])),
+            },
+        }
+        Ok(lines)
+    }
+
+    pub fn uninstall(ctx: &Ctx) -> R<Vec<String>> {
+        let lang = ctx.lang();
+        // `install` 과 같은 금이다. sudo 면 root 의 도메인과 집을 보아 "지울 것이 없다" 로 답하거나, launchd 에서는 사람의
+        // plist 만 지우고 올라간 서비스는 그대로 둔다.
+        if service::under_sudo(|k| std::env::var_os(k)) {
+            return Err(failed(say(lang, "daemon.service.sudo_uninstall"), &[], code::REFUSED));
+        }
+        let svc = the_service(lang)?;
+        let file = shown(&svc.file);
+        let manager = svc.manager.name();
+        let removed = svc.uninstall(&service::run).map_err(|why| trouble(lang, &svc, why))?;
+        let stopped = match &removed {
+            Removed::Nothing => None,
+            Removed::File { stopped } => Some(stopped.is_ok()),
+            Removed::Unloaded => Some(true),
+        };
+        if ctx.json {
+            return super::super::json_line(&Uninstalled {
+                uninstalled: stopped.is_some(),
+                manager,
+                service: &file,
+                stopped,
+            });
+        }
+        let head = match &removed {
+            Removed::Nothing => say(lang, "daemon.service.none"),
+            Removed::File { .. } => say(lang, "daemon.service.removed"),
+            Removed::Unloaded => say(lang, "daemon.service.unloaded"),
+        };
+        let mut lines = vec![fill(head, &[("manager", manager), ("service", &file)])];
+        if let Removed::File { stopped: Err(said) } = &removed {
+            lines.push(fill(
+                say(lang, "daemon.service.not_stopped"),
+                &[("manager", manager), ("said", &crate::text::one_line(said))],
+            ));
+        }
+        Ok(lines)
     }
 
     /// `stop` 이 보낸 멈추라는 부름이 **이미 멈추는 데몬**에 닿았는가(moai-3hgm.uz0 의 리뷰). 멈추는 데몬은 돌던 요청을
@@ -369,6 +620,38 @@ mod os {
     #[cfg(test)]
     mod tests {
         use super::*;
+
+        /// 적는 경로는 사람이 치는 경로다(리뷰 moai-tsk0 의 441) — PATH 에서 이 바이너리로 풀리는 첫 `moai` 를 풀지 않고
+        /// 쓴다. 빈 항목과 상대 항목은 이 셸의 디렉터리라 건너뛴다.
+        #[cfg(unix)]
+        #[test]
+        fn the_written_binary_is_the_moai_on_path_that_is_this_one() {
+            let s = crate::scratch::Scratch::new("typed-exe");
+            let real = s.path().join("Cellar").join("moai");
+            std::fs::create_dir_all(real.parent().unwrap()).unwrap();
+            std::fs::write(&real, "").unwrap();
+            let place = |dir: &str, to: &Path| {
+                let link = s.path().join(dir).join("moai");
+                std::fs::create_dir_all(link.parent().unwrap()).unwrap();
+                std::os::unix::fs::symlink(to, &link).unwrap();
+                link
+            };
+            let other = s.path().join("other-moai");
+            std::fs::write(&other, "").unwrap();
+            let elsewhere = place("elsewhere", &other);
+            let bin = place("bin", &real);
+            let path = std::env::join_paths([
+                "",
+                "rel",
+                elsewhere.parent().unwrap().to_str().unwrap(),
+                bin.parent().unwrap().to_str().unwrap(),
+            ])
+            .unwrap();
+            assert_eq!(typed_exe(&real, Some(path)), bin);
+            assert_eq!(typed_exe(&real, None), real);
+            let dotted = s.path().join("Cellar").join("..").join("Cellar").join("moai");
+            assert_eq!(typed_exe(&dotted, Some("/nowhere".into())), real, "PATH 에 없으면 `..` 만 걷는다");
+        }
 
         /// 멈추는 데몬에 닿은 부름만 "이미 멈춘다" 다 — 다른 거절과 다른 전송 실패는 그대로 "데몬이 아니다" 로 간다.
         #[test]

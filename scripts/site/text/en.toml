@@ -118,6 +118,7 @@ vendors = 'Agents from several vendors'
 [guide.install-unix]
 1 = 'It installs to <code>~/.local/bin</code>. That directory has to be on your <code>PATH</code> for <code>moai</code> to run.'
 2 = 'To install somewhere else or a specific version, add the options after <code>-s --</code>.'
+3 = 'A first install from a terminal also registers the daemon as a service that starts at login (systemd on Linux, launchd on macOS). The CLI does not need it. To skip it, add <code>--no-service</code>. Upgrades never change this.'
 
 [guide.install-windows]
 1 = 'Download the script in PowerShell, then run it as a file.'
