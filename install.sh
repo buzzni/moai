@@ -401,8 +401,16 @@ register_service() {
   fi
   $limit "$dir/moai" daemon install --help </dev/null >/dev/null 2>&1 || return 0
   # 마감은 물음보다 길다 — 관리자가 데몬을 띄우고, 명령이 그 데몬의 답을 5초까지 기다린다.
+  # GNU `timeout` 은 `--foreground` 없이는 자식을 배경 프로세스 그룹에 둔다 — 터미널에 `stty tostop` 이 서 있으면 moai 가
+  # 결과를 찍는 순간 SIGTTOU 로 멈추고, 30초 뒤 KILL 되어 등록은 됐는데 실패로 읽힌다. 그래서 한 번 조용히 물어 받으면
+  # 그 꼴로 감싼다. 못 받으면 예전 꼴이다 — BusyBox 의 `timeout` 은 프로그램을 제 자리에서 exec 하고 손자 프로세스가
+  # 지켜보므로 프로세스 그룹을 안 바꾸고, `--foreground` 가 없는 GNU 는 8.13(2011) 전 판뿐이다.
   long=
-  [ -z "$limit" ] || long="timeout -s KILL 30"
+  if timeout --foreground -s KILL 30 true >/dev/null 2>&1; then
+    long="timeout --foreground -s KILL 30"
+  elif [ -n "$limit" ]; then
+    long="timeout -s KILL 30"
+  fi
   if ! $long "$dir/moai" daemon install </dev/null; then
     say "데몬 서비스는 등록하지 못했다 — moai 는 그대로 쓸 수 있다. 나중에 moai daemon install 로 다시 한다"
   fi

@@ -219,30 +219,11 @@ fn ctl_state_without_a_window_says_no_window() {
 #[cfg(unix)]
 fn ctl_lists_and_reads_an_open_explorer() {
     use std::io::{Read, Write};
-    use std::os::fd::{AsRawFd, FromRawFd};
     use std::os::unix::process::CommandExt;
     use std::time::{Duration, Instant};
 
     let s = init("ctl-pty");
-    let (mut master_fd, mut slave_fd) = (-1, -1);
-    let size = libc::winsize { ws_row: 30, ws_col: 120, ws_xpixel: 0, ws_ypixel: 0 };
-    assert_eq!(
-        unsafe {
-            libc::openpty(
-                &mut master_fd,
-                &mut slave_fd,
-                std::ptr::null_mut(),
-                std::ptr::null_mut::<libc::termios>(),
-                &size as *const _ as *mut _,
-            )
-        },
-        0
-    );
-    let (mut master, slave) = unsafe { (std::fs::File::from_raw_fd(master_fd), std::fs::File::from_raw_fd(slave_fd)) };
-    for fd in [master.as_raw_fd(), slave.as_raw_fd()] {
-        assert_ne!(unsafe { libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC) }, -1);
-    }
-    assert_ne!(unsafe { libc::fcntl(master.as_raw_fd(), libc::F_SETFL, libc::O_NONBLOCK) }, -1);
+    let (mut master, slave) = pty_pair();
     let mut command = staged(&["tui"]);
     command
         .current_dir(s.path())
@@ -387,6 +368,33 @@ fn reap(child: &mut std::process::Child) {
     }
 }
 
+/// pty 한 쌍(master, slave)을 연다 — pty 를 쓰는 시험이 모두 이것으로 연다. 두 fd 에 CLOEXEC 를 걸어 시험 스레드가 띄운 다른
+/// 자식이 물려받지 못하게 하고, master 는 `O_NONBLOCK` 이라 읽기가 시한을 지킬 수 있다(막는 읽기는 slave 를 쥔 손자가 살아
+/// 있으면 EOF 가 안 와 시험을 멈춘다).
+#[cfg(unix)]
+fn pty_pair() -> (std::fs::File, std::fs::File) {
+    use std::os::fd::{AsRawFd, FromRawFd};
+    let (mut master_fd, mut slave_fd) = (-1, -1);
+    let size = libc::winsize { ws_row: 30, ws_col: 120, ws_xpixel: 0, ws_ypixel: 0 };
+    // SAFETY: openpty 가 쓰는 두 fd 와 읽는 크기는 살아 있는 값이며, 이름·설정은 필요 없다.
+    // 설정·크기는 `*mut` 로 넘긴다 — macOS 의 libc 는 둘을 `*mut` 로, 리눅스는 `*const` 로 받고 `*mut` 는 `*const` 로
+    // 저절로 바뀐다(moai-xpa8.f0b). openpty 는 둘을 읽기만 한다.
+    let (termp, winp) = (std::ptr::null_mut::<libc::termios>(), &size as *const libc::winsize as *mut libc::winsize);
+    assert_eq!(
+        unsafe { libc::openpty(&mut master_fd, &mut slave_fd, std::ptr::null_mut(), termp, winp) },
+        0,
+        "{}",
+        std::io::Error::last_os_error()
+    );
+    // SAFETY: openpty 가 만든 fd 를 File 에 한 번씩 넘겨 닫는 일을 맡긴다.
+    let (master, slave) = unsafe { (std::fs::File::from_raw_fd(master_fd), std::fs::File::from_raw_fd(slave_fd)) };
+    for fd in [master.as_raw_fd(), slave.as_raw_fd()] {
+        assert_ne!(unsafe { libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC) }, -1);
+    }
+    assert_ne!(unsafe { libc::fcntl(master.as_raw_fd(), libc::F_SETFL, libc::O_NONBLOCK) }, -1);
+    (master, slave)
+}
+
 #[cfg(unix)]
 struct ProposalPtyChild(std::process::Child);
 
@@ -401,30 +409,11 @@ impl Drop for ProposalPtyChild {
 #[cfg(unix)]
 fn proposal_pty(name: &str) -> (Scratch, std::fs::File, ProposalPtyChild) {
     use std::io::{Read, Write};
-    use std::os::fd::{AsRawFd, FromRawFd};
     use std::os::unix::process::CommandExt;
     use std::time::{Duration, Instant};
 
     let scratch = init(name);
-    let (mut master_fd, mut slave_fd) = (-1, -1);
-    let size = libc::winsize { ws_row: 30, ws_col: 120, ws_xpixel: 0, ws_ypixel: 0 };
-    assert_eq!(
-        unsafe {
-            libc::openpty(
-                &mut master_fd,
-                &mut slave_fd,
-                std::ptr::null_mut(),
-                std::ptr::null_mut::<libc::termios>(),
-                &size as *const _ as *mut _,
-            )
-        },
-        0
-    );
-    let (mut master, slave) = unsafe { (std::fs::File::from_raw_fd(master_fd), std::fs::File::from_raw_fd(slave_fd)) };
-    for fd in [master.as_raw_fd(), slave.as_raw_fd()] {
-        assert_ne!(unsafe { libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC) }, -1);
-    }
-    assert_ne!(unsafe { libc::fcntl(master.as_raw_fd(), libc::F_SETFL, libc::O_NONBLOCK) }, -1);
+    let (mut master, slave) = pty_pair();
     let mut command = staged(&["tui"]);
     command
         .current_dir(scratch.path())
@@ -27645,45 +27634,77 @@ fn shell(dir: &Path, line: &str) -> Output {
 
 /// 표준 출력을 pty 에 물려 돌린다 — `curl … | sh` 를 터미널에서 친 사람의 자리다. 표준 입력은 터미널이 아니다.
 #[cfg(unix)]
-fn on_a_terminal(mut cmd: Command) -> (Option<i32>, String) {
+fn on_a_terminal(cmd: Command) -> (Option<i32>, String) {
+    run_on_terminal(cmd, false)
+}
+
+/// `on_a_terminal` 이되 그 pty 가 제어 터미널이고 `TOSTOP` 이 서 있다(`stty tostop`) — 배경 프로세스 그룹이 터미널에 쓰면
+/// SIGTTOU 로 멈춘다. 표준 입력은 null 이라 제어 터미널은 표준 출력 fd 로 세운다.
+#[cfg(unix)]
+fn on_a_tostop_terminal(cmd: Command) -> (Option<i32>, String) {
+    run_on_terminal(cmd, true)
+}
+
+#[cfg(unix)]
+fn run_on_terminal(mut cmd: Command, tostop: bool) -> (Option<i32>, String) {
     use std::io::Read;
-    use std::os::fd::{AsRawFd, FromRawFd};
-    let (mut master_fd, mut slave_fd) = (-1, -1);
-    let size = libc::winsize { ws_row: 30, ws_col: 120, ws_xpixel: 0, ws_ypixel: 0 };
-    assert_eq!(
+    use std::os::fd::AsRawFd;
+    use std::os::unix::process::CommandExt;
+    use std::time::{Duration, Instant};
+    let (mut master, slave) = pty_pair();
+    if tostop {
+        // SAFETY: slave 는 살아 있는 pty fd 이고 termios 는 tcgetattr 가 채운 값이다. 띄우기 전이라 다른 프로세스가 없다.
         unsafe {
-            libc::openpty(
-                &mut master_fd,
-                &mut slave_fd,
-                std::ptr::null_mut(),
-                std::ptr::null_mut::<libc::termios>(),
-                &size as *const _ as *mut _,
-            )
-        },
-        0
-    );
-    let (mut master, slave) = unsafe { (std::fs::File::from_raw_fd(master_fd), std::fs::File::from_raw_fd(slave_fd)) };
-    for fd in [master.as_raw_fd(), slave.as_raw_fd()] {
-        assert_ne!(unsafe { libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC) }, -1);
+            let mut t: libc::termios = std::mem::zeroed();
+            assert_eq!(libc::tcgetattr(slave.as_raw_fd(), &mut t), 0);
+            t.c_lflag |= libc::TOSTOP;
+            assert_eq!(libc::tcsetattr(slave.as_raw_fd(), libc::TCSANOW, &t), 0);
+            // SAFETY: fork 뒤에는 비동기 신호 안전한 시스템 호출(setsid·ioctl)만 쓴다. 요청의 꼴은 OS 마다 다르다
+            // (`TIOCSCTTY as _`, moai-xpa8.f0b).
+            cmd.pre_exec(|| {
+                if libc::setsid() == -1 || libc::ioctl(1, libc::TIOCSCTTY as _, 0) == -1 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                Ok(())
+            });
+        }
     }
     cmd.stdin(Stdio::null()).stdout(slave.try_clone().unwrap()).stderr(slave);
     let mut child = cmd.spawn().expect("sh 를 실행하지 못했다");
-    // 슬레이브를 쥔 것이 없어져야 master 의 읽기가 끝난다.
+    // Command 도 slave 복사본을 쥔다 — 끝난 프로세스의 pty 를 열어 두지 않는다.
     drop(cmd);
-    // 끝나기를 기다리며 함께 읽는다 — macOS 는 안 읽은 출력이 pty 에 남으면 프로세스가 끝나기를 미룬다.
-    let reader = std::thread::spawn(move || {
-        let mut shown = Vec::new();
-        let mut buf = [0; 4096];
-        while let Ok(n) = master.read(&mut buf) {
-            if n == 0 {
-                break;
+    // 끝나기를 기다리며 함께 읽는다 — macOS 는 안 읽은 출력이 pty 에 남으면 프로세스가 끝나기를 미룬다. EOF 는 기다리지
+    // 않는다: 직계 자식이 남긴 배경 자식이 slave 를 쥐고 있으면 EOF 가 영영 안 온다. install.sh 의 30초 KILL 보다 길다.
+    let deadline = Instant::now() + Duration::from_secs(60);
+    let mut shown = Vec::new();
+    let mut buf = [0; 4096];
+    let mut drain = |master: &mut std::fs::File, shown: &mut Vec<u8>| -> bool {
+        match master.read(&mut buf) {
+            Ok(0) => false,
+            Ok(n) => {
+                shown.extend_from_slice(&buf[..n]);
+                true
             }
-            shown.extend_from_slice(&buf[..n]);
+            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock || e.raw_os_error() == Some(libc::EIO) => false,
+            Err(e) => panic!("PTY: {e}"),
         }
-        String::from_utf8_lossy(&shown).into_owned()
-    });
-    let status = child.wait().unwrap();
-    (status.code(), reader.join().unwrap())
+    };
+    let status = loop {
+        let got = drain(&mut master, &mut shown);
+        if let Some(status) = child.try_wait().unwrap() {
+            while drain(&mut master, &mut shown) {}
+            break status;
+        }
+        if Instant::now() >= deadline {
+            let _ = child.kill();
+            reap(&mut child);
+            panic!("끝나지 않았다\n{}", String::from_utf8_lossy(&shown));
+        }
+        if !got {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    };
+    (status.code(), String::from_utf8_lossy(&shown).into_owned())
 }
 
 /// 받은 인자를 `called` 에 적는 가짜 moai 가 든 릴리스. `help` 가 0 이 아니면 등록 명령을 모르는 옛 판이다.
@@ -27798,6 +27819,60 @@ fn an_install_as_root_says_why_it_did_not_register() {
     assert_eq!(code, Some(0), "{shown}");
     assert!(!called.exists(), "root 인데 불렀다");
     assert!(shown.contains("root") && shown.contains("moai daemon install"), "{shown}");
+}
+
+/// **`stty tostop` 가 선 터미널에서도 등록된다**(moai-tloc.9az). GNU `timeout` 은 `--foreground` 없이는 자식을 배경 프로세스
+/// 그룹에 두어, 결과를 터미널에 찍는 순간 SIGTTOU 로 멈춘다 — 30초 뒤 KILL 되고 등록은 됐는데 "등록하지 못했다" 가 선다.
+/// `timeout` 이 없는 기계(macOS)에서는 아무것도 못 잰다.
+#[cfg(unix)]
+#[test]
+fn a_first_install_on_a_tostop_terminal_still_registers() {
+    let s = Scratch::new("install-tostop");
+    let (base, called) = service_release(&s, 0, 0);
+    let dir = s.path().join("bin");
+    let (code, shown) = on_a_tostop_terminal(install_cmd(&base, &dir, &[]));
+    assert_eq!(code, Some(0), "{shown}");
+    assert_eq!(std::fs::read_to_string(&called).unwrap(), "daemon install --help\ndaemon install\n", "{shown}");
+    assert!(shown.contains("fake registered"), "등록 명령의 말을 삼켰다\n{shown}");
+    assert!(!shown.contains("등록하지 못했다"), "등록하고도 못 했다고 말한다\n{shown}");
+    assert!(dir.join("moai").exists());
+}
+
+/// **`--foreground` 를 모르는 `timeout`(BusyBox)에서도 등록된다** — 물어 보고 안 되면 예전 꼴로 감싼다.
+#[cfg(unix)]
+#[test]
+fn a_timeout_without_foreground_still_registers() {
+    let s = Scratch::new("install-no-foreground");
+    let (base, called) = service_release(&s, 0, 0);
+    let fake = s.path().join("fake");
+    std::fs::create_dir_all(&fake).unwrap();
+    write_exe(&fake.join("timeout"), "#!/bin/sh\n[ \"$1\" = --foreground ] && exit 125\nshift 3\nexec \"$@\"\n");
+    let dir = s.path().join("bin");
+    let mut cmd = install_cmd(&base, &dir, &[]);
+    cmd.env("PATH", format!("{}:{}", fake.display(), std::env::var("PATH").unwrap()));
+    let (code, shown) = on_a_terminal(cmd);
+    assert_eq!(code, Some(0), "{shown}");
+    assert_eq!(std::fs::read_to_string(&called).unwrap(), "daemon install --help\ndaemon install\n", "{shown}");
+    assert!(shown.contains("fake registered") && !shown.contains("등록하지 못했다"), "{shown}");
+    assert!(dir.join("moai").exists());
+}
+
+/// **slave 를 쥔 배경 자식이 남아도 `on_a_terminal` 은 직계 자식이 끝나면 돌아온다** — EOF 를 기다리면 그 자식이 끝나는
+/// 30초 뒤에야 온다.
+#[cfg(unix)]
+#[test]
+fn on_a_terminal_does_not_wait_for_a_background_child_holding_the_pty() {
+    let mut cmd = isolated("sh");
+    cmd.arg("-c").arg("sleep 30 & echo hi");
+    let started = std::time::Instant::now();
+    let (code, shown) = on_a_terminal(cmd);
+    assert_eq!(code, Some(0), "{shown}");
+    assert!(shown.contains("hi"), "{shown}");
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(10),
+        "배경 자식의 EOF 를 기다렸다: {:?}",
+        started.elapsed()
+    );
 }
 
 /// 합계가 맞으면 깐다 — 그리고 그때만 깐다(moai-j54h).
@@ -30385,7 +30460,6 @@ fn init_without_a_terminal_asks_nothing_and_matches_yes() {
 #[test]
 fn init_screen_defaults_install_the_hooks_and_skills() {
     use std::io::{Read, Write};
-    use std::os::fd::{AsRawFd, FromRawFd};
     use std::os::unix::process::CommandExt;
     use std::time::{Duration, Instant};
 
@@ -30395,25 +30469,7 @@ fn init_screen_defaults_install_the_hooks_and_skills() {
     // Claude 의 격리된 PATH 에 git 만 더한다 — 진짜 claude 는 절대 찾지 않는다.
     let git_bin = git(s.path(), &["--exec-path"]);
     std::os::unix::fs::symlink(Path::new(git_bin.trim()).join("git"), c.bin.join("git")).unwrap();
-    let (mut master_fd, mut slave_fd) = (-1, -1);
-    let size = libc::winsize { ws_row: 30, ws_col: 120, ws_xpixel: 0, ws_ypixel: 0 };
-    // SAFETY: openpty 가 쓰는 두 fd 와 읽는 크기는 살아 있는 값이며, 이름·설정은 필요 없다.
-    // 설정·크기는 `*mut` 로 넘긴다 — macOS 의 libc 는 둘을 `*mut` 로, 리눅스는 `*const` 로 받고 `*mut` 는 `*const` 로
-    // 저절로 바뀐다(moai-xpa8.f0b). openpty 는 둘을 읽기만 한다.
-    let (termp, winp) = (std::ptr::null_mut::<libc::termios>(), &size as *const libc::winsize as *mut libc::winsize);
-    assert_eq!(
-        unsafe { libc::openpty(&mut master_fd, &mut slave_fd, std::ptr::null_mut(), termp, winp) },
-        0,
-        "{}",
-        std::io::Error::last_os_error()
-    );
-    // SAFETY: openpty 가 만든 fd 를 File 에 한 번씩 넘겨 닫는 일을 맡긴다.
-    let (mut master, slave) = unsafe { (std::fs::File::from_raw_fd(master_fd), std::fs::File::from_raw_fd(slave_fd)) };
-    // 자식이 master 를 물려받으면 slave 가 닫혀도 EOF 가 안 선다. 읽기는 마감을 지키게 막히지 않는다.
-    for fd in [master.as_raw_fd(), slave.as_raw_fd()] {
-        assert_ne!(unsafe { libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC) }, -1);
-    }
-    assert_ne!(unsafe { libc::fcntl(master.as_raw_fd(), libc::F_SETFL, libc::O_NONBLOCK) }, -1);
+    let (mut master, slave) = pty_pair();
     let mut command = c.command(Path::new(BIN), s.path(), &["init", "argos"], true);
     // tmux 안의 셸이다 — 화면이 `moai-tmux` 칸을 켜 두고, Enter 가 그것을 심는다(moai-3r7l.ocn). Saycode 세션도 tmux 안에서
     // 돌아 둘이 함께 선다 — `moai-saycode` 칸도 켜진다(moai-l244).
