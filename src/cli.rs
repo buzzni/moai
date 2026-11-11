@@ -942,6 +942,8 @@ BACKLOG
         after_help = "  moai daemon start          serve in the foreground until stopped
   moai daemon status         is one running: pid, version, socket
   moai daemon stop           ask the running daemon to exit
+  moai daemon install        register it as a service that starts at login
+  moai daemon uninstall      stop that service and remove it
 
   One daemon serves every project of one user, over a Unix socket that
   speaks JSON-RPC 2.0, one message per line. It sits beside the CLI: the
@@ -1467,8 +1469,31 @@ pub enum DaemonCmd {
   file there that is not your
   socket, an answer that is not a daemon's, or a daemon so full that it
   cannot even answer hello (busy, with its pid) is an error. A daemon at
-  its connection cap still answers status.")]
+  its connection cap still answers status. service is the service file, when
+  one is there: that file is what being registered means.")]
     Status,
+    /// Register the daemon as a login service and start it now
+    #[command(after_help = "  moai daemon install          systemd on Linux, launchd on macOS
+  moai daemon install --json   {installed, manager, service, exe, running,
+                               socket}, and pid, version, same_version once
+                               a daemon answers
+
+  Running it again keeps the file and starts a stopped service: installed is
+  false. The first install of moai runs this by default; moai update never
+  does. A service file moai did not write is left alone and refused, and so
+  is one that runs another moai (moai daemon uninstall first). Under sudo it
+  is refused, because it would become root's service. Without a service
+  manager it stops with the code service_failed and leaves no file; the CLI
+  does not need the daemon. There is no service on Windows yet: the code is
+  unsupported.")]
+    Install,
+    /// Stop the service and remove its file
+    #[command(after_help = "  --json gives {uninstalled, manager, service}. With no service file,
+  uninstalled is false and it still exits 0. A service file moai did not
+  write is left alone and refused. Under sudo it is refused, because it would
+  look at root's service. A daemon you started yourself keeps running. moai
+  itself stays.")]
+    Uninstall,
 }
 
 #[derive(Subcommand, Debug)]

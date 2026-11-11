@@ -27554,7 +27554,8 @@ fn install_cmd(base: &Path, dir: &Path, more: &[&str]) -> Command {
         // 두드리고, 그물이 없는 기계에서만 붉어진다. 최신 판을 재는 시험은 이것을 덮는다.
         .env("MOAI_API_URL", format!("file://{NOWHERE}/latest.json"))
         // 거울에서 깐 사람의 셸에 서 있을 수 있다 — 새면 거절문이 싣는 주소가 사람마다 달라진다.
-        .env_remove("MOAI_REPO");
+        .env_remove("MOAI_REPO")
+        .env_remove("MOAI_NO_SERVICE");
     cmd
 }
 
@@ -27611,11 +27612,17 @@ fn release_name() -> String {
 /// 놓인 자리와 `.tar.gz` 의 경로다.
 #[cfg(unix)]
 fn fake_release(s: &Scratch) -> (PathBuf, PathBuf) {
+    fake_release_of(s, "#!/bin/sh\necho 가짜 moai\n")
+}
+
+/// [`fake_release`] 의 바이너리 몸을 정해서 짓는다.
+#[cfg(unix)]
+fn fake_release_of(s: &Scratch, body: &str) -> (PathBuf, PathBuf) {
     let base = s.path().join("rel");
     let here = base.join("v9.9.9");
     let name = release_name();
     std::fs::create_dir_all(here.join(&name)).unwrap();
-    std::fs::write(here.join(&name).join("moai"), "#!/bin/sh\necho 가짜 moai\n").unwrap();
+    std::fs::write(here.join(&name).join("moai"), body).unwrap();
     // 합계는 `install.sh` 가 쓰는 두 이름 중 있는 것으로 낸다 — macOS 에는
     // `sha256sum` 이 없고, 거기서는 `shasum` 갈래만 돈다. 시험 자리가 한쪽만 알면
     // 그 갈래는 이 저장소가 판을 내는 기계에서 한 번도 안 돌아 본 코드가 된다.
@@ -27634,6 +27641,163 @@ fn fake_release(s: &Scratch) -> (PathBuf, PathBuf) {
 #[cfg(unix)]
 fn shell(dir: &Path, line: &str) -> Output {
     isolated("sh").arg("-c").arg(line).current_dir(dir).output().expect("sh 를 실행하지 못했다")
+}
+
+/// 표준 출력을 pty 에 물려 돌린다 — `curl … | sh` 를 터미널에서 친 사람의 자리다. 표준 입력은 터미널이 아니다.
+#[cfg(unix)]
+fn on_a_terminal(mut cmd: Command) -> (Option<i32>, String) {
+    use std::io::Read;
+    use std::os::fd::{AsRawFd, FromRawFd};
+    let (mut master_fd, mut slave_fd) = (-1, -1);
+    let size = libc::winsize { ws_row: 30, ws_col: 120, ws_xpixel: 0, ws_ypixel: 0 };
+    assert_eq!(
+        unsafe {
+            libc::openpty(
+                &mut master_fd,
+                &mut slave_fd,
+                std::ptr::null_mut(),
+                std::ptr::null_mut::<libc::termios>(),
+                &size as *const _ as *mut _,
+            )
+        },
+        0
+    );
+    let (mut master, slave) = unsafe { (std::fs::File::from_raw_fd(master_fd), std::fs::File::from_raw_fd(slave_fd)) };
+    for fd in [master.as_raw_fd(), slave.as_raw_fd()] {
+        assert_ne!(unsafe { libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC) }, -1);
+    }
+    cmd.stdin(Stdio::null()).stdout(slave.try_clone().unwrap()).stderr(slave);
+    let mut child = cmd.spawn().expect("sh 를 실행하지 못했다");
+    // 슬레이브를 쥔 것이 없어져야 master 의 읽기가 끝난다.
+    drop(cmd);
+    // 끝나기를 기다리며 함께 읽는다 — macOS 는 안 읽은 출력이 pty 에 남으면 프로세스가 끝나기를 미룬다.
+    let reader = std::thread::spawn(move || {
+        let mut shown = Vec::new();
+        let mut buf = [0; 4096];
+        while let Ok(n) = master.read(&mut buf) {
+            if n == 0 {
+                break;
+            }
+            shown.extend_from_slice(&buf[..n]);
+        }
+        String::from_utf8_lossy(&shown).into_owned()
+    });
+    let status = child.wait().unwrap();
+    (status.code(), reader.join().unwrap())
+}
+
+/// 받은 인자를 `called` 에 적는 가짜 moai 가 든 릴리스. `help` 가 0 이 아니면 등록 명령을 모르는 옛 판이다.
+#[cfg(unix)]
+fn service_release(s: &Scratch, help: i32, register: i32) -> (PathBuf, PathBuf) {
+    let called = s.path().join("called");
+    let body = format!(
+        "#!/bin/sh\nprintf '%s\\n' \"$*\" >> '{}'\ncase \"$*\" in\n'daemon install --help') exit {help} ;;\n'daemon install') echo 'fake registered'; exit {register} ;;\nesac\n",
+        called.display()
+    );
+    let (base, _) = fake_release_of(s, &body);
+    (base, called)
+}
+
+/// **터미널에서 친 첫 설치는 서비스를 등록한다**(moai-upq5.nwr, 사람의 결정 2026-11-06).
+#[cfg(unix)]
+#[test]
+fn a_first_install_on_a_terminal_registers_the_service() {
+    let s = Scratch::new("install-service");
+    let (base, called) = service_release(&s, 0, 0);
+    let dir = s.path().join("bin");
+    let (code, shown) = on_a_terminal(install_cmd(&base, &dir, &[]));
+    assert_eq!(code, Some(0), "{shown}");
+    assert_eq!(std::fs::read_to_string(&called).unwrap(), "daemon install --help\ndaemon install\n", "{shown}");
+    assert!(shown.contains("fake registered"), "등록 명령의 말을 삼켰다\n{shown}");
+    assert!(dir.join("moai").exists());
+}
+
+/// **뺄 수 있다** — 옵션과 환경 변수 어느 쪽으로든.
+#[cfg(unix)]
+#[test]
+fn no_service_leaves_the_first_install_without_one() {
+    let s = Scratch::new("install-no-service");
+    let (base, called) = service_release(&s, 0, 0);
+    let (code, shown) = on_a_terminal(install_cmd(&base, &s.path().join("flag"), &["--no-service"]));
+    assert_eq!(code, Some(0), "{shown}");
+    let mut cmd = install_cmd(&base, &s.path().join("env"), &[]);
+    cmd.env("MOAI_NO_SERVICE", "1");
+    let (code, shown) = on_a_terminal(cmd);
+    assert_eq!(code, Some(0), "{shown}");
+    assert!(!called.exists(), "빼라고 했는데 불렀다");
+    assert!(s.path().join("flag/moai").exists() && s.path().join("env/moai").exists());
+}
+
+/// **터미널이 아니면 부르지 않고 아무 말도 안 한다** — 자동화가 읽는 출력이 등록 기능 전과 같아야 한다.
+#[cfg(unix)]
+#[test]
+fn an_install_without_a_terminal_registers_nothing_and_says_nothing_about_it() {
+    let s = Scratch::new("install-no-tty");
+    let (base, called) = service_release(&s, 0, 0);
+    let dir = s.path().join("bin");
+    let out = install(&base, &dir, &[]);
+    assert!(out.status.success(), "{}", text(&out));
+    assert!(!called.exists(), "터미널이 아닌데 불렀다");
+    let said = text(&out);
+    assert!(!said.contains("서비스") && !said.contains("daemon"), "출력이 달라졌다\n{said}");
+}
+
+/// **업데이트는 등록 상태를 안 바꾼다** — 있는 moai 를 올리는 한 줄도, `moai update` 가 도는 `--force` 도 부르지 않는다.
+#[cfg(unix)]
+#[test]
+fn upgrading_never_registers_the_service() {
+    for more in [&[][..], &["--force"][..]] {
+        let s = Scratch::new("install-upgrade-no-service");
+        let (base, called) = service_release(&s, 0, 0);
+        let dir = s.path().join("bin");
+        placed_moai(&dir, "0.1.0", true);
+        let (code, shown) = on_a_terminal(install_cmd(&base, &dir, more));
+        assert_eq!(code, Some(0), "{more:?}\n{shown}");
+        assert!(!called.exists(), "{more:?}: 올리면서 불렀다\n{shown}");
+        assert!(std::fs::read_to_string(dir.join("moai")).unwrap().contains(&*called.to_string_lossy()), "안 갈렸다");
+    }
+}
+
+/// **등록 명령이 없는 옛 판은 조용히 건너뛴다**(`--version`). 없는 명령을 부르면 설치 끝에 clap 의 오류가 선다.
+#[cfg(unix)]
+#[test]
+fn an_older_release_without_the_command_is_skipped_quietly() {
+    let s = Scratch::new("install-old-release");
+    let (base, called) = service_release(&s, 2, 0);
+    let (code, shown) = on_a_terminal(install_cmd(&base, &s.path().join("bin"), &[]));
+    assert_eq!(code, Some(0), "{shown}");
+    assert_eq!(std::fs::read_to_string(&called).unwrap(), "daemon install --help\n");
+    assert!(!shown.contains("등록"), "{shown}");
+}
+
+/// **등록에 실패해도 설치는 성공이다** — CLI 는 데몬 없이 돈다.
+#[cfg(unix)]
+#[test]
+fn a_failed_registration_does_not_fail_the_install() {
+    let s = Scratch::new("install-register-fails");
+    let (base, _) = service_release(&s, 0, 1);
+    let dir = s.path().join("bin");
+    let (code, shown) = on_a_terminal(install_cmd(&base, &dir, &[]));
+    assert_eq!(code, Some(0), "{shown}");
+    assert!(shown.contains("등록하지 못했다"), "{shown}");
+    assert!(dir.join("moai").exists());
+}
+
+/// **root 로 깔면 등록하지 않고 까닭을 말한다** — root 의 서비스는 moai 를 쓰는 사람의 로그인에서 안 돈다.
+#[cfg(unix)]
+#[test]
+fn an_install_as_root_says_why_it_did_not_register() {
+    let s = Scratch::new("install-root");
+    let (base, called) = service_release(&s, 0, 0);
+    let fake = s.path().join("fake");
+    std::fs::create_dir_all(&fake).unwrap();
+    write_exe(&fake.join("id"), "#!/bin/sh\necho 0\n");
+    let mut cmd = install_cmd(&base, &s.path().join("bin"), &[]);
+    cmd.env("PATH", format!("{}:{}", fake.display(), std::env::var("PATH").unwrap()));
+    let (code, shown) = on_a_terminal(cmd);
+    assert_eq!(code, Some(0), "{shown}");
+    assert!(!called.exists(), "root 인데 불렀다");
+    assert!(shown.contains("root") && shown.contains("moai daemon install"), "{shown}");
 }
 
 /// 합계가 맞으면 깐다 — 그리고 그때만 깐다(moai-j54h).
@@ -32761,6 +32925,130 @@ fn update_probes_the_new_binary_only_after_success() {
         assert_eq!(marker.exists(), code == 0);
         assert_eq!(result.get("daemon_restart").and_then(|v| v.as_bool()), (code == 0).then_some(true));
     }
+}
+
+/// `moai update` 와 등록된 서비스(moai-upq5.1g6). 가짜 `systemctl` 만 부른다 — 진짜에 닿으면 사람의 서비스를 다시 띄운다.
+///
+/// `unit` 은 서비스 파일의 글(`None` 이면 없음)이고, `<exe>` 는 업데이트하는 바이너리로 채운다. 새 바이너리는 재시작이 일어나면
+/// 같은 판으로 답한다. `answers` 가 거짓이면 다시 시작해도 옛 판 그대로다.
+#[cfg(target_os = "linux")]
+fn update_with_service(
+    unit: Option<&str>,
+    active: i32,
+    restart: i32,
+    answers: bool,
+    args: &[&str],
+) -> (Output, String) {
+    let s = Scratch::new("update-service");
+    let exe = hoisted(s.path());
+    let real = canon(&exe).unwrap();
+    let restarted = s.path().join("restarted");
+    let calls = s.path().join("calls");
+    let fake = s.path().join("fake");
+    std::fs::create_dir_all(&fake).unwrap();
+    let mark = if answers { format!(": > '{}'", restarted.display()) } else { ":".to_string() };
+    write_exe(
+        &fake.join("systemctl"),
+        &format!(
+            "#!/bin/sh\nprintf '%s\\n' \"$*\" >> '{}'\ncase \"$*\" in\n*is-active*) exit {active} ;;\n*restart*) {mark}; exit {restart} ;;\nesac\nexit 0\n",
+            calls.display()
+        ),
+    );
+    let config = s.path().join("xdg");
+    if let Some(unit) = unit {
+        let dir = config.join("systemd/user");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("moai-daemon.service"), unit.replace("<exe>", &real.display().to_string())).unwrap();
+    }
+    let replacement = s.path().join("replacement");
+    write_exe(
+        &replacement,
+        &format!(
+            "#!/bin/sh\nif [ -e '{}' ]; then same=true; else same=false; fi\nprintf '{{\"running\":true,\"same_version\":%s,\"version\":\"old\",\"pid\":42}}\\n' \"$same\"\n",
+            restarted.display()
+        ),
+    );
+    let (url, server) = serving_script(format!("mv '{}' '{}'\nexit 0\n", replacement.display(), real.display()), 1);
+    let path = format!("{}:{}", fake.display(), std::env::var("PATH").unwrap());
+    let env = [
+        ("MOAI_INSTALL_URL", url.as_str()),
+        ("PATH", path.as_str()),
+        ("XDG_CONFIG_HOME", config.to_str().unwrap()),
+        ("MOAI_LANG", "en"),
+    ];
+    let out = update_with(&exe, s.path(), &s.path().join("config.toml"), &env, args);
+    server.join().unwrap();
+    assert_eq!(out.status.code(), Some(0), "종료 코드는 설치 스크립트의 것이다\n{}", text(&out));
+    (out, std::fs::read_to_string(&calls).unwrap_or_default())
+}
+
+#[cfg(target_os = "linux")]
+const OUR_UNIT: &str =
+    "# moai daemon install wrote this file. moai daemon uninstall removes it.\nExecStart=\"<exe>\" daemon start\n";
+
+/// **등록된 서비스가 실행 중이면 새 판으로 다시 시작한다.** 등록 상태를 바꾸는 호출은 없다.
+#[cfg(target_os = "linux")]
+#[test]
+fn update_restarts_the_running_service_it_registered() {
+    if !served() {
+        return;
+    }
+    let (out, calls) = update_with_service(Some(OUR_UNIT), 0, 0, true, &["--json"]);
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v.get("daemon_restarted").and_then(|v| v.as_bool()), Some(true), "{v}");
+    assert_eq!(v.get("daemon_restart"), None, "다시 시작했는데 하라고 알린다 — {v}");
+    assert_eq!(calls, "--user is-active --quiet moai-daemon.service\n--user restart moai-daemon.service\n");
+
+    let (out, _) = update_with_service(Some(OUR_UNIT), 0, 0, true, &[]);
+    assert!(text(&out).contains("restarted the daemon service"), "{}", text(&out));
+    assert!(!text(&out).contains("still runs"), "{}", text(&out));
+}
+
+/// **못 하는 자리에서는 지금까지의 알림으로 돌아간다** — 서비스가 없는 사람, 사람이 멈춘 서비스, 손으로 쓴 파일, 다른 바이너리의 파일,
+/// 재시작 실패, 새 판이 답하지 않는 경우. 종료 코드는 어느 쪽이든 그대로다.
+#[cfg(target_os = "linux")]
+#[test]
+fn update_falls_back_to_the_notice_when_it_cannot_restart() {
+    if !served() {
+        return;
+    }
+    let other = OUR_UNIT.replace("<exe>", "/other/moai");
+    let cases: [(&str, Option<&str>, i32, i32, bool, &str); 6] = [
+        ("파일 없음", None, 0, 0, true, ""),
+        ("멈춘 서비스", Some(OUR_UNIT), 3, 0, true, "--user is-active --quiet moai-daemon.service\n"),
+        ("손으로 쓴 파일", Some("ExecStart=\"<exe>\" daemon start\n"), 0, 0, true, ""),
+        ("다른 바이너리", Some(&other), 0, 0, true, ""),
+        (
+            "재시작 실패",
+            Some(OUR_UNIT),
+            0,
+            1,
+            false,
+            "--user is-active --quiet moai-daemon.service\n--user restart moai-daemon.service\n",
+        ),
+        (
+            "새 판이 안 답함",
+            Some(OUR_UNIT),
+            0,
+            0,
+            false,
+            "--user is-active --quiet moai-daemon.service\n--user restart moai-daemon.service\n",
+        ),
+    ];
+    for (name, unit, active, restart, answers, want) in cases {
+        let (out, calls) = update_with_service(unit, active, restart, answers, &["--json"]);
+        let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+        assert_eq!(v.get("daemon_restart").and_then(|v| v.as_bool()), Some(true), "{name}: {v}");
+        assert_eq!(v.get("daemon_restarted"), None, "{name}: {v}");
+        assert_eq!(calls, want, "{name}");
+    }
+
+    // 사람에게 보이는 글은 갈린다 — 관리자가 거절했으면 옛 데몬이 도는 것으로 알리고, 받았는데 새 판이 안 답하면 "아직 돈다" 고 말하지 않는다.
+    let (out, _) = update_with_service(Some(OUR_UNIT), 0, 1, false, &[]);
+    assert!(text(&out).contains("still runs"), "{}", text(&out));
+    let (out, _) = update_with_service(Some(OUR_UNIT), 0, 0, false, &[]);
+    assert!(text(&out).contains("has not answered yet"), "{}", text(&out));
+    assert!(!text(&out).contains("still runs"), "{}", text(&out));
 }
 
 /// **받을 저장소는 사용자 설정에서 오고 `MOAI_REPO` 가 이긴다. 저장소의 `.moai/config.toml` 은 안 읽는다**
