@@ -2191,10 +2191,19 @@ mod service {
             let bin = f.0.join("bin");
             std::fs::create_dir(&bin).unwrap();
             if manager != Manager::Missing {
-                let (calls, loaded) = (f.0.join("calls"), f.0.join("loaded"));
-                let (calls, loaded, dir) = (calls.display(), loaded.display(), f.0.display());
+                let (calls, loaded, main) = (f.0.join("calls"), f.0.join("loaded"), f.0.join("mainpid"));
+                let (calls, loaded, main, dir) = (calls.display(), loaded.display(), main.display(), f.0.display());
+                // 띄운 데몬의 pid 를 관리자의 MainPID 로 댄다. `fake-mainpid` 를 두면 그 수를 댄다 — 서비스 밖의 데몬이 답하는 꼴.
+                let pid = format!(
+                    "p=; if [ -e '{dir}/fake-mainpid' ]; then read p < '{dir}/fake-mainpid'; \
+                     elif [ -e '{main}' ]; then read p < '{main}'; fi"
+                );
                 let start = match manager {
-                    Manager::Starts => format!(": > '{loaded}'; '{BIN}' daemon start --json >/dev/null 2>&1 &\nexit 0"),
+                    Manager::Starts => {
+                        format!(
+                            ": > '{loaded}'; '{BIN}' daemon start --json >/dev/null 2>&1 &\necho $! > '{main}'\nexit 0"
+                        )
+                    }
                     Manager::Idles => format!(": > '{loaded}'; exit 0"),
                     _ => "echo 'Failed to connect to bus' >&2; exit 1".to_string(),
                 };
@@ -2209,8 +2218,10 @@ mod service {
                      case \"$*\" in\n\
                      *'enable --now'* | bootstrap*)\n{start}\n;;\n\
                      *' restart '*)\n{restart}\n;;\n\
-                     *'disable --now'* | bootout*)\n'{BIN}' daemon stop >/dev/null 2>&1; /bin/rm -f '{loaded}'; exit 0\n;;\n\
-                     print*)\n[ -e '{loaded}' ]; exit $?\n;;\nesac\nexit 0\n"
+                     *'disable --now'* | bootout*)\n'{BIN}' daemon stop >/dev/null 2>&1; /bin/rm -f '{loaded}' '{main}'; exit 0\n;;\n\
+                     *'show -p MainPID'*)\n{pid}; echo \"${{p:-0}}\"; exit 0\n;;\n\
+                     print*)\n[ -e '{loaded}' ] || exit 1; {pid}; [ -z \"$p\" ] || printf '\\tpid = %s\\n\\tstate = running\\n' \"$p\"; exit 0\n;;\n\
+                     esac\nexit 0\n"
                 );
                 // 이 프로세스가 쓴 파일을 바로 띄우면 옆 시험의 fork 와 겹쳐 ETXTBSY 다 — 자식이 옮겨 적게 한다.
                 let source = f.0.join("fake.src");
@@ -2283,14 +2294,15 @@ mod service {
         assert_eq!(first["installed"], true, "{first}");
         assert_eq!(first["manager"], if LINUX { "systemd" } else { "launchd" }, "{first}");
         assert_eq!(first["service"], m.file().display().to_string(), "{first}");
-        assert_eq!(first["exe"], real_bin(), "{first}");
+        let exe = first["exe"].as_str().unwrap();
+        assert_eq!(std::fs::canonicalize(exe).unwrap().display().to_string(), real_bin(), "{first}");
         assert_eq!(first["running"], true, "{first}");
         assert_eq!(first["same_version"], true, "{first}");
         assert!(first["pid"].is_u64(), "{first}");
 
         let text = std::fs::read_to_string(m.file()).unwrap();
         assert!(text.contains("moai daemon install wrote this file"), "{text}");
-        assert!(text.contains(&real_bin()), "{text}");
+        assert!(text.contains(exe), "{text}");
         // 소켓 디렉터리를 사람이 정했으니(MOAI_CTL_DIR) 서비스도 같은 곳을 본다.
         assert!(text.contains("MOAI_CTL_DIR"), "{text}");
         assert!(text.contains(&m.0.0.display().to_string()), "{text}");
@@ -2374,7 +2386,12 @@ mod service {
     fn a_service_of_another_moai_is_not_taken_over() {
         let m = Managed::new(Manager::Starts);
         m.json(&["daemon", "install", "--json"]);
-        let other = std::fs::read_to_string(m.file()).unwrap().replace(&real_bin(), "/other/place/moai");
+        // 있는 다른 실행 파일이어야 다른 바이너리다 — 사라진 경로를 적은 파일은 다시 쓴다.
+        let elsewhere = m.0.0.join("other").join("moai");
+        std::fs::create_dir_all(elsewhere.parent().unwrap()).unwrap();
+        std::fs::write(&elsewhere, "").unwrap();
+        let other = std::fs::read_to_string(m.file()).unwrap().replace(&real_bin(), &elsewhere.display().to_string());
+        assert!(other.contains(&elsewhere.display().to_string()), "{other}");
         m.place(&other);
         let err = m.refused(&["daemon", "install", "--json"]);
         assert_eq!(err["code"], "already_exists", "{err}");
@@ -2545,6 +2562,79 @@ mod service {
         assert!(m.file().exists());
         let calls = calls_since(&m, before);
         assert!(!calls.iter().any(|c| c.contains("disable") || c.starts_with("bootout")), "{calls:?}");
+    }
+
+    /// 서비스 밖에서 돌던 데몬(리뷰 moai-tsk0 의 452) — 등록하면 서비스의 `start` 가 `already` 로 0 종료해 서비스는 꺼진 채
+    /// 남는데, 확인 고리는 그 데몬의 답을 받아 "running" 이라 말했다. 등록 전에 막고 아무것도 안 쓴다.
+    #[test]
+    fn a_daemon_started_by_hand_is_refused_before_anything_is_written() {
+        let m = Managed::new(Manager::Starts);
+        let (daemon, first) = m.0.start();
+        let pid = first["pid"].as_u64().unwrap();
+        let err = m.refused(&["daemon", "install", "--json"]);
+        assert_eq!(err["code"], "already_exists", "{err}");
+        let said = err["error"].as_str().unwrap();
+        assert!(said.contains(&pid.to_string()) && said.contains("moai daemon stop"), "{said}");
+        assert!(!m.file().exists(), "거절했는데 서비스 파일을 썼다");
+        for word in ["enable", "daemon-reload", "bootstrap", "kickstart"] {
+            assert!(!m.calls().contains(word), "거절했는데 관리자에 {word} 를 불렀다\n{}", m.calls());
+        }
+        drop(daemon);
+
+        let ok = m.json(&["daemon", "install", "--json"]);
+        assert_eq!(ok["running"], true, "{ok}");
+        let main = std::fs::read_to_string(m.0.0.join("mainpid")).unwrap();
+        assert_eq!(ok["pid"].as_u64().map(|p| p.to_string()), Some(main.trim().to_string()), "{ok}");
+    }
+
+    /// 등록 뒤에 답한 것이 서비스의 데몬이 아니면 "running" 이라 말하지 않는다. 등록은 됐으니 0 이다.
+    #[test]
+    fn an_answer_from_another_daemon_is_not_the_service_running() {
+        let m = Managed::new(Manager::Starts);
+        std::fs::write(m.0.0.join("fake-mainpid"), "1\n").unwrap();
+        let got = m.json(&["daemon", "install", "--json"]);
+        assert_eq!(got["running"], false, "{got}");
+        assert!(m.file().exists());
+        m.json(&["daemon", "uninstall", "--json"]);
+        let out = m.run(&["daemon", "install"]);
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        let said = String::from_utf8_lossy(&out.stdout);
+        assert!(said.contains("moai daemon stop"), "{said}");
+    }
+
+    /// 적는 경로는 사람이 치는 경로다(리뷰 moai-tsk0 의 441) — Homebrew 처럼 판마다 디렉터리를 바꾸고 링크만 옮기는 설치에서
+    /// 푼 경로를 적으면, 옛 판을 지우는 순간 로그인 때 아무것도 안 뜬다.
+    #[test]
+    fn install_writes_the_moai_on_path_and_rewrites_a_file_that_names_it_otherwise() {
+        let m = Managed::new(Manager::Idles);
+        let first = m.json(&["daemon", "install", "--json"]);
+        assert_eq!(
+            first["exe"].as_str().map(|e| std::fs::canonicalize(e).unwrap().display().to_string()),
+            Some(real_bin())
+        );
+
+        // 빈 항목(지금 디렉터리)과 상대 항목에도 링크가 있지만 적히는 것은 절대 항목의 것이다.
+        for dir in ["", "rel", "bin"] {
+            let link = m.0.0.join(dir).join("moai");
+            std::fs::create_dir_all(link.parent().unwrap()).unwrap();
+            std::os::unix::fs::symlink(BIN, &link).unwrap();
+        }
+        let typed = m.0.0.join("bin").join("moai").display().to_string();
+        let path = format!(":rel:{}", m.0.0.join("bin").display());
+        let out = m.cmd(&["daemon", "install", "--json"]).env("PATH", &path).output().unwrap();
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        let linked: Value = serde_json::from_slice(&out.stdout).unwrap();
+        assert_eq!(linked["exe"], typed, "{linked}");
+        assert_eq!(linked["installed"], true, "푼 경로를 적은 옛 파일은 링크 경로로 다시 쓴다 — {linked}");
+        let text = std::fs::read_to_string(m.file()).unwrap();
+        assert!(text.contains(&typed), "{text}");
+        assert!(!text.contains(&real_bin()), "{text}");
+
+        // 적힌 바이너리가 사라졌으면 거절하지 않고 이 바이너리로 다시 쓴다.
+        std::fs::remove_file(m.0.0.join("bin").join("moai")).unwrap();
+        let again = m.json(&["daemon", "install", "--json"]);
+        assert_eq!(again["installed"], true, "{again}");
+        assert!(std::fs::read_to_string(m.file()).unwrap().contains(&real_bin()));
     }
 }
 

@@ -436,6 +436,37 @@ mod os {
         }
     }
 
+    /// 서비스에 적을 바이너리 경로 — **사람이 치는 경로다**(moai-tloc.gci). PATH 를 차례로 보아 이 바이너리와 같은 파일로
+    /// 풀리는 첫 `moai` 를 풀지 않은 채 쓴다. Homebrew·nix·mise 는 판마다 다른 디렉터리에 깔고 링크만 옮기니, 푼 경로를 적으면
+    /// 패키지 관리자가 옛 판을 지우는 순간 로그인 때 아무것도 안 뜬다. PATH 에 없으면 `..` 만 걷은 지금 경로다 — 링크는 안 푼다.
+    /// 빈 항목과 상대 항목은 건너뛴다: 서비스는 이 셸의 디렉터리에서 돌지 않는다.
+    fn typed_exe(current: &Path, path: Option<std::ffi::OsString>) -> PathBuf {
+        let name = format!("moai{}", std::env::consts::EXE_SUFFIX);
+        if let (Ok(real), Some(path)) = (crate::path::canonical(current), path) {
+            let found = std::env::split_paths(&path)
+                .filter(|dir| dir.is_absolute())
+                .map(|dir| dir.join(&name))
+                .filter(|exe| exe.to_str().is_some_and(|s| !s.contains(['\n', '\r'])))
+                .find(|exe| crate::path::canonical(exe).is_ok_and(|p| p == real));
+            if let Some(exe) = found {
+                return exe;
+            }
+        }
+        crate::path::lexical(current)
+    }
+
+    /// 소켓에서 답하는 데몬이 서비스 밖의 것인가(리뷰 moai-tsk0 의 452). 답한 pid 가 관리자가 아는 서비스의 pid 와 같을 때만
+    /// 서비스의 것이다 — pid 를 안 대는 데몬도, 관리자가 pid 를 못 대는 때도 같지 않은 것으로 읽는다. 답이 없으면 관리자를 안
+    /// 부른다: 서비스가 없는 사람의 `install` 은 지금과 같은 차례로 간다.
+    fn outside(svc: &Service, path: &Path) -> Option<(Option<u32>, String)> {
+        let (pid, version) = match client::probe(path) {
+            Probe::Running(hello) => (hello.pid, hello.version),
+            Probe::Busy(pid) => (pid, "?".to_string()),
+            Probe::Absent | Probe::Dead | Probe::Foreign(_) => return None,
+        };
+        (pid.is_none() || pid != svc.main_pid(&service::run)).then_some((pid, version))
+    }
+
     pub fn install(ctx: &Ctx) -> R<Vec<String>> {
         let lang = ctx.lang();
         let svc = the_service(lang)?;
@@ -443,8 +474,17 @@ mod os {
             return Err(failed(say(lang, "daemon.service.sudo"), &[], code::REFUSED));
         }
         let exe = std::env::current_exe().map_err(|e| Fail::new(e.to_string()))?;
-        let exe = crate::path::real(&exe);
+        let exe = typed_exe(&exe, std::env::var_os("PATH"));
         let path = socket_path(lang)?;
+        // **서비스 밖에서 돌던 데몬이 있으면 아무것도 안 쓴다.** 등록하면 서비스의 `start` 가 그 데몬을 만나 `already` 로 0
+        // 종료하고, 관리자는 그것을 실패로 안 읽어 서비스가 꺼진 채 남는다 — 그 데몬이 멈추면 다음 로그인까지 아무것도 안 뜬다.
+        if let Some((pid, version)) = outside(&svc, &path) {
+            return Err(failed(
+                say(lang, "daemon.service.outside"),
+                &[("pid", &pid_text(pid)), ("version", &version), ("socket", &shown(&path))],
+                code::ALREADY_EXISTS,
+            ));
+        }
         // 서비스는 이 셸의 디렉터리에서 돌지 않는다 — 상대 경로를 그대로 적으면 다른 소켓을 본다. 고정할 자리를 못
         // 지으면 아무것도 안 쓰고 멈춘다: 빼고 쓰면 서비스가 셸과 다른 소켓을 본다(moai-tloc.wnw).
         let dir = path
@@ -462,6 +502,14 @@ mod os {
                 _ if Instant::now() >= deadline => break None,
                 _ => std::thread::sleep(POLL),
             }
+        };
+        // "running" 은 서비스의 데몬이 답했을 때만이다 — 그 사이 누가 `moai daemon start` 를 쳤을 수 있다. 관리자가 pid 를
+        // 못 대면 답만 본다.
+        let stranger =
+            hello.as_ref().is_some_and(|h| svc.main_pid(&service::run).is_some_and(|main| h.pid != Some(main)));
+        let (hello, stranger) = match stranger {
+            true => (None, hello),
+            false => (hello, None),
         };
         let file = shown(&svc.file);
         let socket = shown(&path);
@@ -499,7 +547,13 @@ mod os {
                     lines.push(fill(say(lang, "daemon.restart"), &[("this", env!("CARGO_PKG_VERSION"))]));
                 }
             }
-            None => lines.push(fill(say(lang, "daemon.service.not_reached"), &[("socket", &socket)])),
+            None => match &stranger {
+                Some(other) => lines.push(fill(
+                    say(lang, "daemon.service.other_answers"),
+                    &[("socket", &socket), ("pid", &pid_text(other.pid)), ("manager", manager)],
+                )),
+                None => lines.push(fill(say(lang, "daemon.service.not_reached"), &[("socket", &socket)])),
+            },
         }
         Ok(lines)
     }
@@ -561,6 +615,38 @@ mod os {
     #[cfg(test)]
     mod tests {
         use super::*;
+
+        /// 적는 경로는 사람이 치는 경로다(리뷰 moai-tsk0 의 441) — PATH 에서 이 바이너리로 풀리는 첫 `moai` 를 풀지 않고
+        /// 쓴다. 빈 항목과 상대 항목은 이 셸의 디렉터리라 건너뛴다.
+        #[cfg(unix)]
+        #[test]
+        fn the_written_binary_is_the_moai_on_path_that_is_this_one() {
+            let s = crate::scratch::Scratch::new("typed-exe");
+            let real = s.path().join("Cellar").join("moai");
+            std::fs::create_dir_all(real.parent().unwrap()).unwrap();
+            std::fs::write(&real, "").unwrap();
+            let place = |dir: &str, to: &Path| {
+                let link = s.path().join(dir).join("moai");
+                std::fs::create_dir_all(link.parent().unwrap()).unwrap();
+                std::os::unix::fs::symlink(to, &link).unwrap();
+                link
+            };
+            let other = s.path().join("other-moai");
+            std::fs::write(&other, "").unwrap();
+            let elsewhere = place("elsewhere", &other);
+            let bin = place("bin", &real);
+            let path = std::env::join_paths([
+                "",
+                "rel",
+                elsewhere.parent().unwrap().to_str().unwrap(),
+                bin.parent().unwrap().to_str().unwrap(),
+            ])
+            .unwrap();
+            assert_eq!(typed_exe(&real, Some(path)), bin);
+            assert_eq!(typed_exe(&real, None), real);
+            let dotted = s.path().join("Cellar").join("..").join("Cellar").join("moai");
+            assert_eq!(typed_exe(&dotted, Some("/nowhere".into())), real, "PATH 에 없으면 `..` 만 걷는다");
+        }
 
         /// 멈추는 데몬에 닿은 부름만 "이미 멈춘다" 다 — 다른 거절과 다른 전송 실패는 그대로 "데몬이 아니다" 로 간다.
         #[test]

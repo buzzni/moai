@@ -3857,10 +3857,14 @@ Options:
   text is kept and a stopped service started (installed is false); a
   different one, say after you moved the socket directory, is rewritten and
   the service restarted (installed is true). The first install of moai runs
-  this by default; moai update never does. A service file moai did not write
-  is left alone and refused, and so is one that runs another moai (moai
-  daemon uninstall first). Under sudo it is refused, because it would become
-  root's service. Without a service
+  this by default; moai update never does. The file names moai by the path
+  you type, the first moai on PATH that is this binary (a package manager's
+  link stays valid across versions); a file whose moai is gone is rewritten.
+  A daemon you started yourself is refused before anything is written: run
+  moai daemon stop first. running is true only when the service's own daemon
+  answers. A service file moai did not write is left alone and refused, and
+  so is one that runs another moai (moai daemon uninstall first). Under sudo
+  it is refused, because it would become root's service. Without a service
   manager it stops with the code service_failed and leaves no file; the CLI
   does not need the daemon. There is no service on Windows yet: the code is
   unsupported.

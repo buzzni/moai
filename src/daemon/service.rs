@@ -6,7 +6,8 @@
 //! - **표지([`MARK`])가 없는 파일은 사람의 것이다.** `docs/daemon.md` 를 보고 같은 자리에 손으로 쓴 unit 일 수 있다.
 //!   덮지도 지우지도 않는다.
 //! - **다른 바이너리를 가리키는 파일도 덮지 않는다.** 한 사용자에 데몬은 하나이고, 어느 설치본이 그것을 맡을지는
-//!   사람이 정한다. 둘째 설치가 첫째의 서비스를 말없이 빼앗으면 안 된다.
+//!   사람이 정한다. 둘째 설치가 첫째의 서비스를 말없이 빼앗으면 안 된다. "같은 바이너리" 는 글자가 아니라 같은 파일로
+//!   풀리는가다([`Points`]) — 파일은 사람이 치는 링크 경로를 적고, `moai update` 는 푼 경로를 넘긴다.
 //! - **moai 의 파일은 지금 쓸 글과 견준다**(moai-tloc.wnw). 같으면 그대로 두고, 다르면(소켓 디렉터리가 바뀌었다) 새
 //!   글로 다시 쓰고 서비스를 다시 시작한다. 견주지 않던 판은 설정을 바꾸고 다시 친 `install` 이 옛 파일을 그대로 두어,
 //!   서비스가 영영 다른 소켓을 봤다. 그래서 그리는 글에는 시각도 pid 도 없다 — 두 번째에도 같은 글이어야 한다.
@@ -78,13 +79,54 @@ impl Manager {
         }
     }
 
-    /// 이 파일이 이 바이너리를 띄우는가.
-    fn names(self, text: &str, exe: &str) -> bool {
+    /// 파일에 적힌 바이너리 경로를 읽는다 — 쓸 때 싼 것을 거꾸로 푼다. 손으로 고쳐 못 읽는 꼴이면 없다.
+    fn recorded(self, text: &str) -> Option<String> {
         match self {
-            Manager::Systemd => text.lines().any(|line| line == exec_line(exe)),
-            Manager::Launchd => text.contains(&program_string(exe)),
+            Manager::Systemd => {
+                let quoted = text.lines().find_map(|line| line.strip_prefix("ExecStart=\""))?;
+                let mut out = String::new();
+                let mut chars = quoted.chars();
+                loop {
+                    match chars.next()? {
+                        '\\' => out.push(chars.next()?),
+                        '"' => break,
+                        '%' => {
+                            if chars.next()? != '%' {
+                                return None;
+                            }
+                            out.push('%');
+                        }
+                        '$' => {
+                            if chars.next()? != '$' {
+                                return None;
+                            }
+                            out.push('$');
+                        }
+                        c => out.push(c),
+                    }
+                }
+                (chars.as_str() == " daemon start").then_some(out)
+            }
+            Manager::Launchd => {
+                let (_, args) = text.split_once("<key>ProgramArguments</key>")?;
+                let (_, first) = args.split_once("<string>")?;
+                let (exe, _) = first.split_once("</string>")?;
+                Some(exe.replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&"))
+            }
         }
     }
+}
+
+/// 파일이 가리키는 바이너리가 이 바이너리인가. 글자가 아니라 **같은 파일로 풀리는가** 로 본다(moai-tloc.gci) — 파일은
+/// 사람이 치는 링크 경로를 적고, `moai update` 는 푼 경로를 넘긴다.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Points {
+    /// 이 바이너리다.
+    This,
+    /// 적힌 경로가 더는 없다 — 끊긴 링크, 패키지 관리자가 지운 판. 그 등록은 아무것도 못 띄운다.
+    Gone,
+    /// 다른 바이너리거나, 적힌 줄을 못 읽는다.
+    Other,
 }
 
 fn exec_line(exe: &str) -> String {
@@ -93,6 +135,21 @@ fn exec_line(exe: &str) -> String {
 
 fn program_string(exe: &str) -> String {
     format!("<string>{}</string>", xml_escape(exe))
+}
+
+/// 파일이 가리키는 바이너리가 `exe` 와 같은 파일인가. 적힌 경로가 없으면 [`Points::Gone`] — 끊긴 링크도 그렇다.
+fn points(manager: Manager, text: &str, exe: &Path) -> Points {
+    let Some(written) = manager.recorded(text).map(PathBuf::from).filter(|p| p.is_absolute()) else {
+        return Points::Other;
+    };
+    match crate::path::canonical(&written) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Points::Gone,
+        Err(_) => Points::Other,
+        Ok(found) => {
+            let this = crate::path::canonical(exe).unwrap_or_else(|_| crate::path::lexical(exe));
+            if found == this { Points::This } else { Points::Other }
+        }
+    }
 }
 
 /// systemd 가 따옴표 안에서 다시 읽는 글자를 싼다. `$` 는 `ExecStart` 에서만 뜻이 있다.
@@ -234,7 +291,10 @@ impl Service {
         let text = self.manager.render(exe, pin);
         let (wrote, old) = match self.text()? {
             Some(old) if !old.contains(MARK) => return Err(Trouble::NotOurs),
-            Some(old) if !self.manager.names(&old, exe) => return Err(Trouble::OtherBinary),
+            // 적힌 바이너리가 사라진 파일은 이미 아무것도 못 띄운다 — 다른 바이너리로 거절하지 않고 이 바이너리로 다시 쓴다.
+            Some(old) if points(self.manager, &old, Path::new(exe)) == Points::Other => {
+                return Err(Trouble::OtherBinary);
+            }
             Some(old) if old == text => (Wrote::Same, None),
             Some(old) => (Wrote::Rewritten, Some(old)),
             None => (Wrote::New, None),
@@ -309,7 +369,7 @@ impl Service {
         let (Ok(exe), Ok(Some(text))) = (writable_text(exe), self.text()) else {
             return false;
         };
-        if !text.contains(MARK) || !self.manager.names(&text, exe) || !self.active(run) {
+        if !text.contains(MARK) || points(self.manager, &text, Path::new(exe)) != Points::This || !self.active(run) {
             return false;
         }
         let done = match self.manager {
@@ -324,6 +384,20 @@ impl Service {
             Manager::Systemd => run("systemctl", &["--user", "is-active", "--quiet", UNIT]).is_ok(),
             Manager::Launchd => self.loaded(run).is_some_and(|said| runs(&said)),
         }
+    }
+
+    /// 관리자가 아는 서비스의 데몬 pid — systemd 의 `MainPID`, launchd `print` 의 `pid = N`. 모르거나 안 돌면 없다.
+    /// 상태를 바꾸지 않는 읽기만 부른다.
+    pub fn main_pid(&self, run: Run) -> Option<u32> {
+        let said = match self.manager {
+            Manager::Systemd => run("systemctl", &["--user", "show", "-p", "MainPID", "--value", UNIT]).ok()?,
+            Manager::Launchd => self.loaded(run)?,
+        };
+        let pid = match self.manager {
+            Manager::Systemd => said.trim(),
+            Manager::Launchd => said.lines().find_map(|line| line.trim().strip_prefix("pid = "))?.trim(),
+        };
+        pid.parse::<u32>().ok().filter(|&pid| pid != 0)
     }
 
     /// launchd 에 이 label 로 올라간 작업이 있으면 `print` 의 답.
@@ -957,49 +1031,152 @@ mod tests {
         assert_eq!(left, ["the-service"], "반쪽 파일이 남았다");
     }
 
+    /// 시험이 바이너리로 쓸 실제 파일. "같은 바이너리" 는 같은 파일로 풀리는가라서 있는 파일이어야 한다.
+    fn binary(s: &Scratch, place: &str) -> PathBuf {
+        let file = s.path().join(place).join("moai");
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        std::fs::write(&file, "").unwrap();
+        file
+    }
+
     #[test]
     fn restart_needs_our_file_this_binary_and_a_running_service() {
         for manager in [Manager::Systemd, Manager::Launchd] {
             let s = Scratch::new("service");
             let svc = service_in(&s, manager);
+            let (this, other) = (binary(&s, "bin"), binary(&s, "other"));
             let restart_word = if manager == Manager::Systemd { "restart" } else { "kickstart" };
             let running = if manager == Manager::Systemd { "" } else { "\tstate = running\n" };
 
             // 파일이 없으면 관리자를 아예 안 부른다 — 서비스가 없는 사람의 `moai update` 는 그대로다.
             let fake = Fake { calls: RefCell::default(), refuse: &[], said: running };
-            assert!(!svc.restart(exe(), &|p: &str, a: &[&str]| fake.run(p, a)));
+            assert!(!svc.restart(&this, &|p: &str, a: &[&str]| fake.run(p, a)));
             assert!(fake.calls().is_empty(), "{:?}", fake.calls());
 
             let ok = Fake::new(&["print"]);
-            svc.install(exe(), pin(), &|p: &str, a: &[&str]| ok.run(p, a)).unwrap();
+            svc.install(&this, pin(), &|p: &str, a: &[&str]| ok.run(p, a)).unwrap();
 
             // 실행 중이면 부른다.
             let fake = Fake { calls: RefCell::default(), refuse: &[], said: running };
-            assert!(svc.restart(exe(), &|p: &str, a: &[&str]| fake.run(p, a)));
+            assert!(svc.restart(&this, &|p: &str, a: &[&str]| fake.run(p, a)));
             assert!(fake.calls().iter().any(|c| c.contains(restart_word)), "{:?}", fake.calls());
 
             // 다른 바이너리면 안 부른다.
             let fake = Fake { calls: RefCell::default(), refuse: &[], said: running };
-            assert!(!svc.restart(Path::new("/other/moai"), &|p: &str, a: &[&str]| fake.run(p, a)));
+            assert!(!svc.restart(&other, &|p: &str, a: &[&str]| fake.run(p, a)));
             assert!(fake.calls().is_empty(), "{:?}", fake.calls());
 
             // 사람이 멈춘 서비스는 안 띄운다.
             let stopped_words: &'static [&'static str] = if manager == Manager::Systemd { &["is-active"] } else { &[] };
             let fake = Fake { calls: RefCell::default(), refuse: stopped_words, said: "\tstate = not running\n" };
-            assert!(!svc.restart(exe(), &|p: &str, a: &[&str]| fake.run(p, a)));
+            assert!(!svc.restart(&this, &|p: &str, a: &[&str]| fake.run(p, a)));
             assert!(!fake.calls().iter().any(|c| c.contains(restart_word)), "{:?}", fake.calls());
 
             // 다시 시작이 실패하면 거짓을 답한다.
             let refused: &'static [&'static str] =
                 if manager == Manager::Systemd { &["restart"] } else { &["kickstart"] };
             let fake = Fake { calls: RefCell::default(), refuse: refused, said: running };
-            assert!(!svc.restart(exe(), &|p: &str, a: &[&str]| fake.run(p, a)));
+            assert!(!svc.restart(&this, &|p: &str, a: &[&str]| fake.run(p, a)));
+
+            // 적힌 바이너리가 사라졌으면 그 등록은 아무것도 못 띄운다 — 관리자를 안 부른다.
+            std::fs::remove_file(&this).unwrap();
+            let fake = Fake { calls: RefCell::default(), refuse: &[], said: running };
+            assert!(!svc.restart(&other, &|p: &str, a: &[&str]| fake.run(p, a)));
+            assert!(fake.calls().is_empty(), "{:?}", fake.calls());
+            std::fs::write(&this, "").unwrap();
 
             // 손으로 쓴 파일이면 안 부른다.
-            std::fs::write(&svc.file, format!("ExecStart=\"{EXE}\" daemon start\n<string>{EXE}</string>\n")).unwrap();
+            let t = this.display();
+            std::fs::write(&svc.file, format!("ExecStart=\"{t}\" daemon start\n<string>{t}</string>\n")).unwrap();
             let fake = Fake { calls: RefCell::default(), refuse: &[], said: running };
-            assert!(!svc.restart(exe(), &|p: &str, a: &[&str]| fake.run(p, a)));
+            assert!(!svc.restart(&this, &|p: &str, a: &[&str]| fake.run(p, a)));
             assert!(fake.calls().is_empty(), "{:?}", fake.calls());
         }
+    }
+
+    /// 적힌 경로를 읽는 것은 쓴 것의 짝이다 — 싼 글자가 든 경로도 같은 경로로 돌아와야 같은 바이너리로 읽힌다.
+    #[test]
+    fn the_written_binary_is_read_back_through_the_escaping() {
+        let weird = "/my dir/50%/$HOME/a\"b\\c/&<x>/moai";
+        for manager in [Manager::Systemd, Manager::Launchd] {
+            let text = manager.render(weird, PIN);
+            assert_eq!(manager.recorded(&text).as_deref(), Some(weird), "{manager:?}\n{text}");
+        }
+        // 손으로 고쳐 못 읽는 꼴은 없다 — 다른 바이너리로 읽혀 덮이지 않는다.
+        assert_eq!(Manager::Systemd.recorded("ExecStart=/usr/bin/moai daemon start\n"), None);
+        assert_eq!(Manager::Systemd.recorded("ExecStart=\"/a%b\" daemon start\n"), None);
+        assert_eq!(Manager::Systemd.recorded("ExecStart=\"/usr/bin/moai\" daemon start --x\n"), None);
+        assert_eq!(Manager::Launchd.recorded("<plist></plist>"), None);
+    }
+
+    /// "같은 바이너리" 는 같은 파일로 풀리는가다(리뷰 moai-tsk0 의 441) — 링크 경로를 적은 파일도, 푼 경로를 적은 옛 파일도
+    /// 이 바이너리로 읽히고, 사라진 경로는 다른 바이너리가 아니다.
+    #[cfg(unix)]
+    #[test]
+    fn the_same_binary_is_the_same_file_not_the_same_spelling() {
+        let s = Scratch::new("service-points");
+        let real = binary(&s, "Cellar/1.2.0/bin");
+        let other = binary(&s, "elsewhere");
+        let link = s.path().join("bin").join("moai");
+        std::fs::create_dir_all(link.parent().unwrap()).unwrap();
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        for manager in [Manager::Systemd, Manager::Launchd] {
+            let text = |exe: &Path| manager.render(exe.to_str().unwrap(), PIN);
+            assert_eq!(points(manager, &text(&link), &real), Points::This, "{manager:?}");
+            assert_eq!(points(manager, &text(&real), &link), Points::This, "{manager:?}");
+            assert_eq!(points(manager, &text(&other), &real), Points::Other, "{manager:?}");
+            assert_eq!(points(manager, &text(Path::new("/gone/moai")), &real), Points::Gone, "{manager:?}");
+            assert_eq!(points(manager, "# no exec line", &real), Points::Other, "{manager:?}");
+        }
+        let dangling = s.path().join("dangling").join("moai");
+        std::fs::create_dir_all(dangling.parent().unwrap()).unwrap();
+        std::os::unix::fs::symlink(s.path().join("nowhere"), &dangling).unwrap();
+        let unit = Manager::Systemd.render(dangling.to_str().unwrap(), PIN);
+        assert_eq!(points(Manager::Systemd, &unit, &real), Points::Gone, "끊긴 링크는 사라진 경로다");
+
+        // update 는 푼 경로를 넘긴다 — 링크 경로를 적은 우리 파일이어도 다시 시작한다.
+        let svc = service_in(&s, Manager::Systemd);
+        let ok = Fake::new(&[]);
+        assert_eq!(svc.install(&link, pin(), &|p: &str, a: &[&str]| ok.run(p, a)), Ok(Wrote::New));
+        assert!(svc.restart(&real, &|p: &str, a: &[&str]| ok.run(p, a)));
+
+        // 푼 경로를 적은 옛 꼴은 이 바이너리로 읽혀 링크 경로로 다시 쓰이고, 사라진 경로를 적은 파일도 다시 쓰인다.
+        let old = Manager::Systemd.render(real.to_str().unwrap(), PIN);
+        std::fs::write(&svc.file, &old).unwrap();
+        assert_eq!(svc.install(&link, pin(), &|p: &str, a: &[&str]| ok.run(p, a)), Ok(Wrote::Rewritten));
+        assert!(std::fs::read_to_string(&svc.file).unwrap().contains(&format!("\"{}\"", link.display())));
+        let gone = Manager::Systemd.render("/gone/moai", PIN);
+        std::fs::write(&svc.file, &gone).unwrap();
+        assert_eq!(svc.install(&link, pin(), &|p: &str, a: &[&str]| ok.run(p, a)), Ok(Wrote::Rewritten));
+
+        // 다른 바이너리와 못 읽는 꼴은 덮지 않는다.
+        let theirs = Manager::Systemd.render(other.to_str().unwrap(), PIN);
+        std::fs::write(&svc.file, &theirs).unwrap();
+        assert_eq!(svc.install(&link, pin(), &|p: &str, a: &[&str]| ok.run(p, a)), Err(Trouble::OtherBinary));
+        assert_eq!(std::fs::read_to_string(&svc.file).unwrap(), theirs);
+        let hand = format!("# {MARK}\n[Service]\nExecStart={} daemon start\n", real.display());
+        std::fs::write(&svc.file, &hand).unwrap();
+        assert_eq!(svc.install(&link, pin(), &|p: &str, a: &[&str]| ok.run(p, a)), Err(Trouble::OtherBinary));
+    }
+
+    #[test]
+    fn the_service_pid_is_read_from_the_manager() {
+        let s = Scratch::new("service");
+        let systemd = service_in(&s, Manager::Systemd);
+        for (said, want) in [("4242\n", Some(4242)), ("0\n", None), ("", None), ("x", None)] {
+            let calls = RefCell::new(Vec::new());
+            let got = systemd.main_pid(&|p: &str, a: &[&str]| {
+                calls.borrow_mut().push(format!("{p} {}", a.join(" ")));
+                Ok(said.to_string())
+            });
+            assert_eq!(got, want, "{said:?}");
+            assert_eq!(*calls.borrow(), ["systemctl --user show -p MainPID --value moai-daemon.service"]);
+        }
+        assert_eq!(systemd.main_pid(&|_: &str, _: &[&str]| Err("no".to_string())), None);
+        let launchd = service_in(&s, Manager::Launchd);
+        let said = "gui/501/com.buzzni.moai-daemon = {\n\tstate = running\n\tpid = 777\n}\n";
+        assert_eq!(launchd.main_pid(&|_: &str, _: &[&str]| Ok(said.to_string())), Some(777));
+        assert_eq!(launchd.main_pid(&|_: &str, _: &[&str]| Ok("\tstate = not running\n".to_string())), None);
+        assert_eq!(launchd.main_pid(&|_: &str, _: &[&str]| Err("Could not find service".to_string())), None);
     }
 }
