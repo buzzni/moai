@@ -12781,3 +12781,4 @@
 {"ts":"2026-11-11T02:40:54Z","id":"moai-47ld","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 (xhigh — 릴리스 진행·리뷰 감독)"}
 {"ts":"2026-11-11T02:40:54Z","id":"moai-47ld","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
 {"ts":"2026-11-11T02:40:55Z","id":"moai-0meo","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done"}
+{"ts":"2026-11-11T02:41:22Z","id":"moai-1f3p","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Report-checked: c9769eb9 — milestone/moai-0meo 에 든 뒤 develop(10be66aa)·main(2a35214b)·v1.1.0 으로 나갔다. lane 워크트리·가지·target 정리 확인."}
