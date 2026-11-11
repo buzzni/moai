@@ -73,7 +73,7 @@ Windows has no registration yet. See [Windows](#windows).
 What moai writes into the file:
 
 - **The socket directory of the shell you ran it from**, as `MOAI_CTL_DIR` (`Environment=` in the unit, `EnvironmentVariables` in the plist), on both managers. A service does not inherit your shell's environment, so this is how the service and your shell find the same socket. To move it, change it in your shell and run `moai daemon install` again.
-- **The `moai` you type**: the first `moai` on your `PATH` that is this binary, written as the path you would type rather than where a link leads. A package manager that installs each version in its own directory and points a link at the current one (Homebrew, nix, mise) keeps working after it removes an old version. Without such a `moai` on `PATH`, it writes the path of the running binary. Empty and relative `PATH` entries are skipped.
+- **The `moai` you type**: the first `moai` on your `PATH` that is this binary, written as the path you would type rather than where a link leads. A package manager that installs each version in its own directory and points a link at the current one (Homebrew, nix) keeps working after it removes an old version. Without such a `moai` on `PATH`, it writes the path of the running binary. Empty and relative `PATH` entries are skipped.
 
 Running it again compares the file with what it would write now. The same text is kept byte for byte, a stopped service is started, and `installed` is `false`. A different text, say after you moved the socket directory, is rewritten and the service restarted, and `installed` is `true`. If that restart fails, the old file is put back. A moai file whose `moai` no longer exists (a removed version, a broken link) is rewritten for this binary too.
 

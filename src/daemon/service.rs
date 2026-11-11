@@ -139,7 +139,8 @@ fn program_string(exe: &str) -> String {
 
 /// 파일이 가리키는 바이너리가 `exe` 와 같은 파일인가. 적힌 경로가 없으면 [`Points::Gone`] — 끊긴 링크도 그렇다.
 fn points(manager: Manager, text: &str, exe: &Path) -> Points {
-    let Some(written) = manager.recorded(text).map(PathBuf::from).filter(|p| p.is_absolute()) else {
+    // `has_root` 다 — 이 판정의 단위 시험은 Windows 에서도 돌고, 그쪽에서 `/home/…` 은 절대 경로가 아니다.
+    let Some(written) = manager.recorded(text).map(PathBuf::from).filter(|p| p.has_root()) else {
         return Points::Other;
     };
     match crate::path::canonical(&written) {
@@ -308,6 +309,8 @@ impl Service {
                 None if wrote == Wrote::New => {
                     let _ = self.stop(run);
                     let _ = std::fs::remove_file(&self.file);
+                    // `enable --now` 은 시작에 실패해도 wants 링크를 먼저 남긴다 — `disable` 마저 실패했으면 `uninstall` 처럼 걷는다.
+                    self.unwant();
                     self.reload(run);
                 }
                 // 전부터 있던 등록은 잃지 않는다 — 옛 글을 그대로 되돌려 쓰고, 관리자도 그 글로 돌려 본다.
@@ -386,18 +389,18 @@ impl Service {
         }
     }
 
-    /// 관리자가 아는 서비스의 데몬 pid — systemd 의 `MainPID`, launchd `print` 의 `pid = N`. 모르거나 안 돌면 없다.
+    /// 관리자가 아는 서비스의 데몬 pid — systemd 의 `MainPID`, launchd `print` 의 `pid = N`. 안 돌면 `Ok(None)`.
+    /// **관리자에 못 닿으면 `Err` 다**(리뷰 moai-tloc.pjd 3) — systemd 사용자 버스가 없는 셸(`su -`, 어떤 SSH)에서 "안 돈다"
+    /// 로 읽으면 서비스의 데몬을 직접 띄운 것으로 오판한다. launchd 의 `print` 실패는 "올라간 작업이 없다" 라 `Ok(None)` 이다.
     /// 상태를 바꾸지 않는 읽기만 부른다.
-    pub fn main_pid(&self, run: Run) -> Option<u32> {
-        let said = match self.manager {
-            Manager::Systemd => run("systemctl", &["--user", "show", "-p", "MainPID", "--value", UNIT]).ok()?,
-            Manager::Launchd => self.loaded(run)?,
-        };
-        let pid = match self.manager {
-            Manager::Systemd => said.trim(),
-            Manager::Launchd => said.lines().find_map(|line| line.trim().strip_prefix("pid = "))?.trim(),
-        };
-        pid.parse::<u32>().ok().filter(|&pid| pid != 0)
+    pub fn main_pid(&self, run: Run) -> Result<Option<u32>, String> {
+        let pid = |said: &str| said.trim().parse::<u32>().ok().filter(|&pid| pid != 0);
+        Ok(match self.manager {
+            Manager::Systemd => pid(&run("systemctl", &["--user", "show", "-p", "MainPID", "--value", UNIT])?),
+            Manager::Launchd => self
+                .loaded(run)
+                .and_then(|said| said.lines().find_map(|line| line.trim().strip_prefix("pid = ")).and_then(pid)),
+        })
     }
 
     /// launchd 에 이 label 로 올라간 작업이 있으면 `print` 의 답.
@@ -409,10 +412,13 @@ impl Service {
         match self.manager {
             Manager::Systemd => {
                 run("systemctl", &["--user", "daemon-reload"])?;
-                run("systemctl", &["--user", "enable", "--now", UNIT])?;
-                // 돌던 서비스에 `enable --now` 는 아무것도 안 한다 — 새 글을 읽히려면 다시 시작해야 한다.
+                // 돌던 서비스에 `enable --now` 는 아무것도 안 한다 — 새 글을 읽히려면 다시 시작해야 한다. `restart` 는 멈춘
+                // 서비스도 띄우니 그때는 `--now` 를 안 붙인다: 붙이면 멈춰 있던 서비스를 띄우자마자 다시 띄운다.
                 if wrote == Wrote::Rewritten {
+                    run("systemctl", &["--user", "enable", UNIT])?;
                     run("systemctl", &["--user", "restart", UNIT])?;
+                } else {
+                    run("systemctl", &["--user", "enable", "--now", UNIT])?;
                 }
             }
             // 파일을 썼으면 같은 label 로 올라가 있는 것은 옛 정의다(다시 쓴 파일의 것이거나, 파일 없이 남은 것). `kickstart`
@@ -462,7 +468,11 @@ impl Service {
     fn resume(&self, run: Run) {
         let _ = match self.manager {
             Manager::Systemd => run("systemctl", &["--user", "enable", "--now", UNIT]),
-            Manager::Launchd => run("launchctl", &["bootstrap", &domain(), &self.file.to_string_lossy()]),
+            // 방금 `bootout` 했다 — 다 내려가기 전에 올리면 `start` 가 기다리는 까닭과 같은 실패로 등록만 남고 꺼진다.
+            Manager::Launchd => {
+                self.wait_unloaded(run);
+                run("launchctl", &["bootstrap", &domain(), &self.file.to_string_lossy()])
+            }
         };
     }
 
@@ -746,7 +756,7 @@ mod tests {
             moved.calls(),
             [
                 "systemctl --user daemon-reload",
-                "systemctl --user enable --now moai-daemon.service",
+                "systemctl --user enable moai-daemon.service",
                 "systemctl --user restart moai-daemon.service"
             ]
         );
@@ -1163,7 +1173,7 @@ mod tests {
     fn the_service_pid_is_read_from_the_manager() {
         let s = Scratch::new("service");
         let systemd = service_in(&s, Manager::Systemd);
-        for (said, want) in [("4242\n", Some(4242)), ("0\n", None), ("", None), ("x", None)] {
+        for (said, want) in [("4242\n", Ok(Some(4242))), ("0\n", Ok(None)), ("", Ok(None)), ("x", Ok(None))] {
             let calls = RefCell::new(Vec::new());
             let got = systemd.main_pid(&|p: &str, a: &[&str]| {
                 calls.borrow_mut().push(format!("{p} {}", a.join(" ")));
@@ -1172,11 +1182,12 @@ mod tests {
             assert_eq!(got, want, "{said:?}");
             assert_eq!(*calls.borrow(), ["systemctl --user show -p MainPID --value moai-daemon.service"]);
         }
-        assert_eq!(systemd.main_pid(&|_: &str, _: &[&str]| Err("no".to_string())), None);
+        // 관리자에 못 닿은 것은 "안 돈다" 가 아니다.
+        assert_eq!(systemd.main_pid(&|_: &str, _: &[&str]| Err("no".to_string())), Err("no".to_string()));
         let launchd = service_in(&s, Manager::Launchd);
         let said = "gui/501/com.buzzni.moai-daemon = {\n\tstate = running\n\tpid = 777\n}\n";
-        assert_eq!(launchd.main_pid(&|_: &str, _: &[&str]| Ok(said.to_string())), Some(777));
-        assert_eq!(launchd.main_pid(&|_: &str, _: &[&str]| Ok("\tstate = not running\n".to_string())), None);
-        assert_eq!(launchd.main_pid(&|_: &str, _: &[&str]| Err("Could not find service".to_string())), None);
+        assert_eq!(launchd.main_pid(&|_: &str, _: &[&str]| Ok(said.to_string())), Ok(Some(777)));
+        assert_eq!(launchd.main_pid(&|_: &str, _: &[&str]| Ok("\tstate = not running\n".to_string())), Ok(None));
+        assert_eq!(launchd.main_pid(&|_: &str, _: &[&str]| Err("Could not find service".to_string())), Ok(None));
     }
 }

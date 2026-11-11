@@ -2522,7 +2522,8 @@ mod service {
             std::os::unix::fs::symlink(m.file(), wants.join("moai-daemon.service")).unwrap();
         }
         let step = if LINUX { "disable" } else { "bootout" };
-        std::fs::write(m.0.0.join(format!("refuse-{step}")), "").unwrap();
+        let refuse = m.0.0.join(format!("refuse-{step}"));
+        std::fs::write(&refuse, "").unwrap();
         let gone = m.json(&["daemon", "uninstall", "--json"]);
         assert_eq!(gone["uninstalled"], true, "{gone}");
         assert_eq!(gone["stopped"], false, "{gone}");
@@ -2534,7 +2535,10 @@ mod service {
             );
         }
 
+        // launchd 에서는 내려가지 않은 작업이 남아, 다시 친 install 이 그것을 내리려 든다 — 그 한 번은 받게 한다.
+        std::fs::remove_file(&refuse).unwrap();
         m.json(&["daemon", "install", "--json"]);
+        std::fs::write(&refuse, "").unwrap();
         let out = m.run(&["daemon", "uninstall"]);
         assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
         let said = String::from_utf8_lossy(&out.stdout);
@@ -2585,6 +2589,21 @@ mod service {
         assert_eq!(ok["running"], true, "{ok}");
         let main = std::fs::read_to_string(m.0.0.join("mainpid")).unwrap();
         assert_eq!(ok["pid"].as_u64().map(|p| p.to_string()), Some(main.trim().to_string()), "{ok}");
+    }
+
+    /// 관리자에 못 닿으면(systemd 사용자 버스가 없는 셸) 답한 데몬을 서비스 밖의 것으로 읽지 않는다(리뷰 moai-tloc.pjd 3) —
+    /// 고칠 길로 대는 `moai daemon stop` 이 잘 돌던 서비스를 내린다.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn an_unreachable_manager_does_not_turn_an_answer_into_a_refusal() {
+        let m = Managed::new(Manager::Starts);
+        let (_daemon, _) = m.0.start();
+        std::fs::write(m.0.0.join("refuse-MainPID"), "").unwrap();
+        let out = m.run(&["daemon", "install", "--json"]);
+        let said = String::from_utf8_lossy(&out.stderr);
+        assert!(!said.contains("you started yourself"), "{said}");
+        assert!(out.status.success(), "{said}");
+        assert!(m.calls().contains("--user show -p MainPID --value moai-daemon.service"), "{}", m.calls());
     }
 
     /// 등록 뒤에 답한 것이 서비스의 데몬이 아니면 "running" 이라 말하지 않는다. 등록은 됐으니 0 이다.

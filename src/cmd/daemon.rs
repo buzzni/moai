@@ -178,7 +178,7 @@ mod os {
         manager: &'a str,
         service: &'a str,
         exe: &'a str,
-        /// 데몬이 소켓에서 답했는가.
+        /// 서비스 관리자가 띄운 데몬이 소켓에서 답했는가 — 다른 데몬이 답하면 `false` 다.
         running: bool,
         socket: &'a str,
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -437,18 +437,19 @@ mod os {
     }
 
     /// 서비스에 적을 바이너리 경로 — **사람이 치는 경로다**(moai-tloc.gci). PATH 를 차례로 보아 이 바이너리와 같은 파일로
-    /// 풀리는 첫 `moai` 를 풀지 않은 채 쓴다. Homebrew·nix·mise 는 판마다 다른 디렉터리에 깔고 링크만 옮기니, 푼 경로를 적으면
+    /// 풀리는 첫 `moai` 를 풀지 않은 채 쓴다. Homebrew·nix 는 판마다 다른 디렉터리에 깔고 링크만 옮기니, 푼 경로를 적으면
     /// 패키지 관리자가 옛 판을 지우는 순간 로그인 때 아무것도 안 뜬다. PATH 에 없으면 `..` 만 걷은 지금 경로다 — 링크는 안 푼다.
     /// 빈 항목과 상대 항목은 건너뛴다: 서비스는 이 셸의 디렉터리에서 돌지 않는다.
     fn typed_exe(current: &Path, path: Option<std::ffi::OsString>) -> PathBuf {
         let name = format!("moai{}", std::env::consts::EXE_SUFFIX);
         if let (Ok(real), Some(path)) = (crate::path::canonical(current), path) {
-            let found = std::env::split_paths(&path)
-                .filter(|dir| dir.is_absolute())
-                .map(|dir| dir.join(&name))
-                .filter(|exe| exe.to_str().is_some_and(|s| !s.contains(['\n', '\r'])))
-                .find(|exe| crate::path::canonical(exe).is_ok_and(|p| p == real));
-            if let Some(exe) = found {
+            // PATH 를 훑는 걸음은 `cmd::hits_in` 하나다 — 고르는 물음(이 바이너리로 풀리는가)만 여기 것이다.
+            let this = |exe: &Path| {
+                exe.to_str().is_some_and(|s| !s.contains(['\n', '\r']))
+                    && crate::path::canonical(exe).is_ok_and(|p| p == real)
+            };
+            let dirs = std::env::split_paths(&path).filter(|dir| dir.is_absolute());
+            if let Some(exe) = crate::cmd::hits_in(dirs, &name, &[], this).next() {
                 return exe;
             }
         }
@@ -456,23 +457,26 @@ mod os {
     }
 
     /// 소켓에서 답하는 데몬이 서비스 밖의 것인가(리뷰 moai-tsk0 의 452). 답한 pid 가 관리자가 아는 서비스의 pid 와 같을 때만
-    /// 서비스의 것이다 — pid 를 안 대는 데몬도, 관리자가 pid 를 못 대는 때도 같지 않은 것으로 읽는다. 답이 없으면 관리자를 안
-    /// 부른다: 서비스가 없는 사람의 `install` 은 지금과 같은 차례로 간다.
+    /// 서비스의 것이다 — pid 를 안 대는 데몬도, 서비스가 안 도는 때도 같지 않은 것으로 읽는다. **관리자에 못 닿으면 막지
+    /// 않는다**(리뷰 moai-tloc.pjd 3) — 막으면 고칠 길로 대는 `moai daemon stop` 이 잘 돌던 서비스를 내린다. 그때는 뒤의
+    /// 등록이 관리자의 말로 실패한다. 답이 없으면 관리자를 안 부른다: 서비스가 없는 사람의 `install` 은 지금과 같은 차례로 간다.
     fn outside(svc: &Service, path: &Path) -> Option<(Option<u32>, String)> {
         let (pid, version) = match client::probe(path) {
             Probe::Running(hello) => (hello.pid, hello.version),
             Probe::Busy(pid) => (pid, "?".to_string()),
             Probe::Absent | Probe::Dead | Probe::Foreign(_) => return None,
         };
-        (pid.is_none() || pid != svc.main_pid(&service::run)).then_some((pid, version))
+        let main = svc.main_pid(&service::run).ok()?;
+        (pid.is_none() || pid != main).then_some((pid, version))
     }
 
     pub fn install(ctx: &Ctx) -> R<Vec<String>> {
         let lang = ctx.lang();
-        let svc = the_service(lang)?;
+        // sudo 를 먼저 본다 — HOME 이 없는 sudo 에서 "HOME 이 없다" 보다 고칠 길을 대는 거절이 낫다.
         if service::under_sudo(|k| std::env::var_os(k)) {
             return Err(failed(say(lang, "daemon.service.sudo"), &[], code::REFUSED));
         }
+        let svc = the_service(lang)?;
         let exe = std::env::current_exe().map_err(|e| Fail::new(e.to_string()))?;
         let exe = typed_exe(&exe, std::env::var_os("PATH"));
         let path = socket_path(lang)?;
@@ -503,10 +507,11 @@ mod os {
                 _ => std::thread::sleep(POLL),
             }
         };
-        // "running" 은 서비스의 데몬이 답했을 때만이다 — 그 사이 누가 `moai daemon start` 를 쳤을 수 있다. 관리자가 pid 를
-        // 못 대면 답만 본다.
-        let stranger =
-            hello.as_ref().is_some_and(|h| svc.main_pid(&service::run).is_some_and(|main| h.pid != Some(main)));
+        // "running" 은 서비스의 데몬이 답했을 때만이다 — 그 사이 누가 `moai daemon start` 를 쳤을 수 있다. 관리자에 못
+        // 닿으면 답만 본다.
+        let stranger = hello
+            .as_ref()
+            .is_some_and(|h| svc.main_pid(&service::run).is_ok_and(|main| main.is_none() || h.pid != main));
         let (hello, stranger) = match stranger {
             true => (None, hello),
             false => (hello, None),
@@ -560,12 +565,12 @@ mod os {
 
     pub fn uninstall(ctx: &Ctx) -> R<Vec<String>> {
         let lang = ctx.lang();
-        let svc = the_service(lang)?;
         // `install` 과 같은 금이다. sudo 면 root 의 도메인과 집을 보아 "지울 것이 없다" 로 답하거나, launchd 에서는 사람의
         // plist 만 지우고 올라간 서비스는 그대로 둔다.
         if service::under_sudo(|k| std::env::var_os(k)) {
             return Err(failed(say(lang, "daemon.service.sudo_uninstall"), &[], code::REFUSED));
         }
+        let svc = the_service(lang)?;
         let file = shown(&svc.file);
         let manager = svc.manager.name();
         let removed = svc.uninstall(&service::run).map_err(|why| trouble(lang, &svc, why))?;

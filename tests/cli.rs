@@ -33145,7 +33145,8 @@ fn update_falls_back_to_the_notice_when_it_cannot_restart() {
     if !served() {
         return;
     }
-    let other = OUR_UNIT.replace("<exe>", "/other/moai");
+    // 있는 다른 실행 파일이어야 "다른 바이너리" 다 — 없는 경로는 사라진 판(`Points::Gone`)으로 읽힌다.
+    let other = OUR_UNIT.replace("<exe>", "/bin/sh");
     let cases: [(&str, Option<&str>, i32, i32, bool, &str); 6] = [
         ("파일 없음", None, 0, 0, true, ""),
         ("멈춘 서비스", Some(OUR_UNIT), 3, 0, true, "--user is-active --quiet moai-daemon.service\n"),
