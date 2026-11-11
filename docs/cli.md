@@ -3851,11 +3851,16 @@ Options:
                                socket}, and pid, version, same_version once
                                a daemon answers
 
-  Running it again keeps the file and starts a stopped service: installed is
-  false. The first install of moai runs this by default; moai update never
-  does. A service file moai did not write is left alone and refused, and so
-  is one that runs another moai (moai daemon uninstall first). Under sudo it
-  is refused, because it would become root's service. Without a service
+  The file records the socket directory of the shell you run it from
+  (MOAI_CTL_DIR), so the service and your shell look at the same socket.
+  Running it again compares the file with what it would write now: the same
+  text is kept and a stopped service started (installed is false); a
+  different one, say after you moved the socket directory, is rewritten and
+  the service restarted (installed is true). The first install of moai runs
+  this by default; moai update never does. A service file moai did not write
+  is left alone and refused, and so is one that runs another moai (moai
+  daemon uninstall first). Under sudo it is refused, because it would become
+  root's service. Without a service
   manager it stops with the code service_failed and leaves no file; the CLI
   does not need the daemon. There is no service on Windows yet: the code is
   unsupported.
@@ -3876,11 +3881,14 @@ Options:
       --user <name (email)>  Who is doing this (from `git config` when absent)
   -h, --help                 Print help
 
-  --json gives {uninstalled, manager, service}. With no service file,
-  uninstalled is false and it still exits 0. A service file moai did not
-  write is left alone and refused. Under sudo it is refused, because it would
-  look at root's service. A daemon you started yourself keeps running. moai
-  itself stays.
+  --json gives {uninstalled, manager, service}, and stopped once something
+  was removed. The file goes even when the service manager refuses to stop
+  the service: stopped is then false, the daemon may still run, and moai
+  daemon stop stops it. On macOS a moai job left loaded without its file is
+  unloaded too. With nothing to remove, uninstalled is false and it still
+  exits 0. A service file moai did not write is left alone and refused.
+  Under sudo it is refused, because it would look at root's service. A
+  daemon you started yourself keeps running. moai itself stays.
 ```
 
 ## `moai hook`

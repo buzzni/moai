@@ -139,7 +139,7 @@ mod os {
 mod os {
     use super::*;
     use crate::daemon::client::{self, Hello, Probe};
-    use crate::daemon::service::{self, Service, Trouble, Unavailable};
+    use crate::daemon::service::{self, Removed, Service, Trouble, Unavailable, Wrote};
     use crate::daemon::{SHUTDOWN, rpc, server};
     use crate::i18n::Lang;
     use std::io::Write as _;
@@ -172,7 +172,8 @@ mod os {
 
     #[derive(Serialize)]
     struct Installed<'a> {
-        /// 이번에 등록했으면 `true`, 이미 등록돼 있었으면 `false`.
+        /// 이번에 서비스 파일을 썼으면 `true` — 새로 썼든, moai 의 옛 파일을 지금의 글로 다시 썼든. 지금 쓸 글과 같아
+        /// 그대로 두었으면 `false`.
         installed: bool,
         manager: &'a str,
         service: &'a str,
@@ -193,6 +194,10 @@ mod os {
         uninstalled: bool,
         manager: &'a str,
         service: &'a str,
+        /// 관리자가 서비스를 멈췄는가. `uninstalled` 가 `true` 일 때 늘 선다 — `false` 면 등록은 걷었는데 데몬이 아직 돌
+        /// 수 있다(moai-tloc.wnw).
+        #[serde(skip_serializing_if = "Option::is_none")]
+        stopped: Option<bool>,
     }
 
     fn socket_path(lang: Lang) -> R<PathBuf> {
@@ -440,11 +445,15 @@ mod os {
         let exe = std::env::current_exe().map_err(|e| Fail::new(e.to_string()))?;
         let exe = crate::path::real(&exe);
         let path = socket_path(lang)?;
-        // 서비스는 이 셸의 디렉터리에서 돌지 않는다 — 상대 경로를 그대로 적으면 다른 소켓을 본다.
-        let dir = path.parent().and_then(|dir| std::path::absolute(dir).ok());
-        let pin = dir.as_deref().and_then(|dir| svc.manager.pin(dir, |k| std::env::var_os(k)));
+        // 서비스는 이 셸의 디렉터리에서 돌지 않는다 — 상대 경로를 그대로 적으면 다른 소켓을 본다. 고정할 자리를 못
+        // 지으면 아무것도 안 쓰고 멈춘다: 빼고 쓰면 서비스가 셸과 다른 소켓을 본다(moai-tloc.wnw).
+        let dir = path
+            .parent()
+            .and_then(|dir| std::path::absolute(dir).ok())
+            .ok_or_else(|| trouble(lang, &svc, Trouble::BadPath(path.display().to_string())))?;
         let shown_exe = shown(&exe);
-        let installed = svc.install(&exe, pin, &service::run).map_err(|why| trouble(lang, &svc, why))?;
+        let wrote = svc.install(&exe, &dir, &service::run).map_err(|why| trouble(lang, &svc, why))?;
+        let installed = wrote != Wrote::Same;
         // 관리자가 띄운 데몬이 답하기를 잠깐 기다린다. 못 붙어도 등록은 성공이다.
         let deadline = Instant::now() + WAIT;
         let hello = loop {
@@ -470,7 +479,11 @@ mod os {
                 same_version: hello.as_ref().map(Hello::same_as_this),
             });
         }
-        let head = if installed { say(lang, "daemon.service.installed") } else { say(lang, "daemon.service.already") };
+        let head = match wrote {
+            Wrote::New => say(lang, "daemon.service.installed"),
+            Wrote::Rewritten => say(lang, "daemon.service.updated"),
+            Wrote::Same => say(lang, "daemon.service.already"),
+        };
         let mut lines = vec![fill(head, &[("manager", manager), ("service", &file)])];
         match &hello {
             Some(hello) => {
@@ -501,12 +514,33 @@ mod os {
         }
         let file = shown(&svc.file);
         let manager = svc.manager.name();
-        let uninstalled = svc.uninstall(&service::run).map_err(|why| trouble(lang, &svc, why))?;
+        let removed = svc.uninstall(&service::run).map_err(|why| trouble(lang, &svc, why))?;
+        let stopped = match &removed {
+            Removed::Nothing => None,
+            Removed::File { stopped } => Some(stopped.is_ok()),
+            Removed::Unloaded => Some(true),
+        };
         if ctx.json {
-            return super::super::json_line(&Uninstalled { uninstalled, manager, service: &file });
+            return super::super::json_line(&Uninstalled {
+                uninstalled: stopped.is_some(),
+                manager,
+                service: &file,
+                stopped,
+            });
         }
-        let head = if uninstalled { say(lang, "daemon.service.removed") } else { say(lang, "daemon.service.none") };
-        Ok(vec![fill(head, &[("manager", manager), ("service", &file)])])
+        let head = match &removed {
+            Removed::Nothing => say(lang, "daemon.service.none"),
+            Removed::File { .. } => say(lang, "daemon.service.removed"),
+            Removed::Unloaded => say(lang, "daemon.service.unloaded"),
+        };
+        let mut lines = vec![fill(head, &[("manager", manager), ("service", &file)])];
+        if let Removed::File { stopped: Err(said) } = &removed {
+            lines.push(fill(
+                say(lang, "daemon.service.not_stopped"),
+                &[("manager", manager), ("said", &crate::text::one_line(said))],
+            ));
+        }
+        Ok(lines)
     }
 
     /// `stop` 이 보낸 멈추라는 부름이 **이미 멈추는 데몬**에 닿았는가(moai-3hgm.uz0 의 리뷰). 멈추는 데몬은 돌던 요청을

@@ -2192,15 +2192,23 @@ mod service {
             std::fs::create_dir(&bin).unwrap();
             if manager != Manager::Missing {
                 let (calls, loaded) = (f.0.join("calls"), f.0.join("loaded"));
-                let (calls, loaded) = (calls.display(), loaded.display());
+                let (calls, loaded, dir) = (calls.display(), loaded.display(), f.0.display());
                 let start = match manager {
                     Manager::Starts => format!(": > '{loaded}'; '{BIN}' daemon start --json >/dev/null 2>&1 &\nexit 0"),
                     Manager::Idles => format!(": > '{loaded}'; exit 0"),
                     _ => "echo 'Failed to connect to bus' >&2; exit 1".to_string(),
                 };
+                let restart = match manager {
+                    Manager::Starts => format!("'{BIN}' daemon stop >/dev/null 2>&1\n{start}"),
+                    _ => "exit 0".to_string(),
+                };
+                // `refuse-<낱말>` 파일을 두면 그 낱말이 든 부름을 거절한다 — 시험이 관리자의 한 걸음만 막는다.
                 let body = format!(
-                    "#!/bin/sh\nprintf '%s\\n' \"$*\" >> '{calls}'\ncase \"$*\" in\n\
+                    "#!/bin/sh\nprintf '%s\\n' \"$*\" >> '{calls}'\n\
+                     for w in \"$@\"; do [ -e '{dir}/refuse-'\"$w\" ] && {{ echo \"refused $w\" >&2; exit 1; }}; done\n\
+                     case \"$*\" in\n\
                      *'enable --now'* | bootstrap*)\n{start}\n;;\n\
+                     *' restart '*)\n{restart}\n;;\n\
                      *'disable --now'* | bootout*)\n'{BIN}' daemon stop >/dev/null 2>&1; /bin/rm -f '{loaded}'; exit 0\n;;\n\
                      print*)\n[ -e '{loaded}' ]; exit $?\n;;\nesac\nexit 0\n"
                 );
@@ -2400,6 +2408,7 @@ mod service {
         m.json(&["daemon", "install", "--json"]);
         let gone = m.json(&["daemon", "uninstall", "--json"]);
         assert_eq!(gone["uninstalled"], true, "{gone}");
+        assert_eq!(gone["stopped"], true, "{gone}");
         assert_eq!(gone["service"], m.file().display().to_string(), "{gone}");
         assert!(!m.file().exists());
         let status = m.json(&["daemon", "status", "--json"]);
@@ -2408,9 +2417,134 @@ mod service {
 
         let again = m.json(&["daemon", "uninstall", "--json"]);
         assert_eq!(again["uninstalled"], false, "{again}");
+        assert_eq!(again.get("stopped"), None, "걷은 것이 없으면 멈춘 것도 없다 — {again}");
         let out = m.run(&["daemon", "uninstall"]);
         assert!(out.status.success());
         assert!(String::from_utf8_lossy(&out.stdout).contains("to remove"), "{}", String::from_utf8_lossy(&out.stdout));
+    }
+
+    /// 이 시험이 지켜보는 관리자의 부름 중 `from` 번째 줄부터.
+    fn calls_since(m: &Managed, from: usize) -> Vec<String> {
+        m.calls().lines().skip(from).map(str::to_string).collect()
+    }
+
+    fn installed_in(m: &Managed, dir: &Path) -> Output {
+        m.cmd(&["daemon", "install", "--json"]).env("MOAI_CTL_DIR", dir).output().unwrap()
+    }
+
+    /// 설정을 바꿔 다시 친 `install`(리뷰 moai-tsk0 의 195) — 옛 파일을 견주지 않던 판은 서비스가 영영 옛 소켓을 봤다.
+    /// 다시 쓰다 실패하면 옛 파일이 그대로 남는다.
+    #[test]
+    fn install_rewrites_a_file_the_shell_moved_away_from_and_keeps_one_it_did_not() {
+        let m = Managed::new(Manager::Idles);
+        let (a, b, c) = (m.0.0.join("a"), m.0.0.join("b"), m.0.0.join("c"));
+        let out = installed_in(&m, &a);
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+
+        let before = m.calls().lines().count();
+        let out = installed_in(&m, &b);
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        let moved: Value = serde_json::from_slice(&out.stdout).unwrap();
+        assert_eq!(moved["installed"], true, "다른 글로 다시 썼으면 이번에 쓴 것이다 — {moved}");
+        let text = std::fs::read_to_string(m.file()).unwrap();
+        assert!(text.contains(&b.display().to_string()), "옮긴 소켓 디렉터리가 안 들었다\n{text}");
+        assert!(!text.contains(&a.display().to_string()), "{text}");
+        let calls = calls_since(&m, before);
+        match LINUX {
+            true => assert!(calls.contains(&"--user restart moai-daemon.service".to_string()), "{calls:?}"),
+            false => {
+                let bootout = calls.iter().position(|c| c.starts_with("bootout gui/")).expect("옛 작업을 안 내렸다");
+                let bootstrap = calls.iter().position(|c| c.starts_with("bootstrap gui/")).expect("새로 안 올렸다");
+                assert!(bootout < bootstrap, "{calls:?}");
+            }
+        }
+
+        let before = m.calls().lines().count();
+        let out = installed_in(&m, &b);
+        let same: Value = serde_json::from_slice(&out.stdout).unwrap();
+        assert_eq!(same["installed"], false, "{same}");
+        assert_eq!(std::fs::read_to_string(m.file()).unwrap(), text, "같은 글인데 파일을 바꿨다");
+        let calls = calls_since(&m, before);
+        assert!(!calls.iter().any(|c| c.contains("restart") || c.starts_with("bootout")), "{calls:?}");
+
+        let step = if LINUX { "restart" } else { "bootstrap" };
+        std::fs::write(m.0.0.join(format!("refuse-{step}")), "").unwrap();
+        let out = installed_in(&m, &c);
+        assert!(!out.status.success());
+        let err: Value = serde_json::from_slice(&out.stderr).unwrap();
+        assert_eq!(err["code"], "service_failed", "{err}");
+        assert_eq!(std::fs::read_to_string(m.file()).unwrap(), text, "실패한 다시 쓰기가 옛 등록을 잃었다");
+    }
+
+    /// systemd 도 셸이 푼 소켓 디렉터리를 적는다(리뷰 moai-tsk0 의 58) — `MOAI_CTL_DIR` 을 안 준 셸이어도.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn systemd_records_the_socket_directory_the_shell_resolved() {
+        let m = Managed::new(Manager::Idles);
+        let run = m.0.0.join("run");
+        let out = m
+            .cmd(&["daemon", "install", "--json"])
+            .env_remove("MOAI_CTL_DIR")
+            .env("XDG_RUNTIME_DIR", &run)
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        let text = std::fs::read_to_string(m.file()).unwrap();
+        let want = format!("Environment=\"MOAI_CTL_DIR={}\"\n", run.join("moai").display());
+        assert!(text.contains(&want), "{want}\n{text}");
+    }
+
+    /// 관리자가 멈추기를 거절해도 등록은 걷는다(리뷰 moai-tsk0 의 220). 데몬이 아직 돌 수 있다는 것을 말한다.
+    #[test]
+    fn uninstall_removes_the_registration_even_when_the_manager_will_not_stop_it() {
+        let m = Managed::new(Manager::Idles);
+        m.json(&["daemon", "install", "--json"]);
+        let wants = m.file().parent().unwrap().join("default.target.wants");
+        if LINUX {
+            std::fs::create_dir_all(&wants).unwrap();
+            std::os::unix::fs::symlink(m.file(), wants.join("moai-daemon.service")).unwrap();
+        }
+        let step = if LINUX { "disable" } else { "bootout" };
+        std::fs::write(m.0.0.join(format!("refuse-{step}")), "").unwrap();
+        let gone = m.json(&["daemon", "uninstall", "--json"]);
+        assert_eq!(gone["uninstalled"], true, "{gone}");
+        assert_eq!(gone["stopped"], false, "{gone}");
+        assert!(!m.file().exists(), "멈추기를 거절했다고 등록을 남겼다");
+        if LINUX {
+            assert!(
+                wants.join("moai-daemon.service").symlink_metadata().is_err(),
+                "우리 유닛을 가리키는 링크가 남았다"
+            );
+        }
+
+        m.json(&["daemon", "install", "--json"]);
+        let out = m.run(&["daemon", "uninstall"]);
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        let said = String::from_utf8_lossy(&out.stdout);
+        assert!(said.contains("removed the"), "{said}");
+        assert!(said.contains("refused") && said.contains("moai daemon stop"), "관리자의 말과 고칠 길이 없다\n{said}");
+    }
+
+    /// 못 지울 자리면 관리자를 부르기 전에 멈춘다(리뷰 moai-tsk0 의 221) — 꺼진 서비스가 등록된 것으로 남지 않게.
+    #[test]
+    fn uninstall_that_cannot_remove_the_file_stops_nothing() {
+        use std::os::unix::fs::PermissionsExt as _;
+        if unsafe { libc::geteuid() } == 0 {
+            return; // root 는 권한이 안 막는다.
+        }
+        let m = Managed::new(Manager::Idles);
+        m.json(&["daemon", "install", "--json"]);
+        let dir = m.file().parent().unwrap().to_path_buf();
+        let before = m.calls().lines().count();
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o500)).unwrap();
+        let out = m.run(&["daemon", "uninstall", "--json"]);
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
+        assert!(!out.status.success());
+        let err: Value = serde_json::from_slice(&out.stderr).unwrap();
+        assert_eq!(err["code"], "error", "{err}");
+        assert!(m.file().exists());
+        let calls = calls_since(&m, before);
+        assert!(!calls.iter().any(|c| c.contains("disable") || c.starts_with("bootout")), "{calls:?}");
     }
 }
 
