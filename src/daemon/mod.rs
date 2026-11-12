@@ -4,6 +4,7 @@
 //!   타입도 이름 대지 않는다.
 //! - `server` 는 로컬 전송의 줄이다 — 연결마다 스레드 하나, 그 연결의 요청은 그 스레드에서 하나씩.
 //! - `client` 는 붙는 쪽이다 — `moai daemon start·stop·status` 가 떠 있는 데몬을 찾고 멈추는 데 쓴다.
+//! - `service` 는 데몬을 서비스 관리자에 맡기는 길이다 — `moai daemon install·uninstall`.
 //!
 //! 명령을 메서드에 묶는 자리는 [`methods`] 하나다. 유닉스도 Windows 도 아닌 곳에서는 `rpc` 만 서고 아무도 안 불러
 //! dead_code 가 선다 — 그쪽에서만 걷는다.
@@ -23,6 +24,8 @@ pub mod project;
 mod read;
 #[cfg(any(unix, windows))]
 pub mod server;
+#[cfg(any(unix, windows))]
+pub mod service;
 #[cfg(any(unix, windows))]
 mod write;
 

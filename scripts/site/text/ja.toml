@@ -113,6 +113,7 @@ vendors = '複数ベンダーのエージェント'
 [guide.install-unix]
 1 = 'インストール先は <code>~/.local/bin</code> です。このディレクトリが <code>PATH</code> に含まれていれば <code>moai</code> で呼び出せます。'
 2 = '別の場所や特定のバージョンでインストールするには、<code>-s --</code> の後にオプションを付けます。'
+3 = '端末から初めてインストールすると、デーモンもログイン時に起動するサービスとして登録します(Linux は systemd、macOS は launchd)。CLI はデーモンがなくても動きます。登録しない場合は <code>--no-service</code> を付けます。アップデートではこの状態は変わりません。'
 
 [guide.install-windows]
 1 = 'PowerShell でスクリプトをダウンロードし、ファイルとして実行します。'
