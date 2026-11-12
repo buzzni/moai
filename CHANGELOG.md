@@ -12,6 +12,8 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-11-12
+
 ### Added
 
 - `moai daemon install` registers the daemon as a user service that starts at login and starts it now: systemd on Linux, launchd on macOS. `moai daemon uninstall` stops it and removes it. The service file is the only record, and `moai daemon status` names it. A file moai did not write is left alone. Windows stops with `unsupported` for now. See `docs/daemon.md`. (moai-upq5.ajg, moai-upq5.ln1)
