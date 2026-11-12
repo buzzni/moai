@@ -45,12 +45,69 @@ There is one daemon per user. A second `start` never runs a second daemon:
 | `pid`, `version`, `proto` | Only while a daemon runs. |
 | `same_version` | Only while a daemon runs. `false` means the daemon has another version number or another `proto` than this `moai`: restart it. Only those two are compared, so a rebuild of the same version number reads as the same (backlog `moai-rz18`). |
 | `this_version`, `this_proto` | The `moai` you ran. |
+| `service` | The service file, only when one is there. See [Run as a user service](#run-as-a-user-service). |
 
 `status` only reads and exits 0 whether or not a daemon runs. Read `running` and `same_version`, not the exit code. It fails (non-zero) when a file at the socket path is not your socket, when the answer is not a daemon's, or when the daemon is so full that it cannot even answer `hello`. The last case is `busy` and the message names the pid.
 
 `start` has the same version rule: it compares the version number and `proto`, so after you rebuild the same version, a running daemon still reads as "the same build" and keeps the old code. Stop it and start it again by hand.
 
 ## Run as a user service
+
+A first install of moai registers the daemon as a user service, so it starts when you log in. Do the same yourself, or undo it, with:
+
+    moai daemon install        register it and start it now
+    moai daemon uninstall      stop it and remove the registration
+    moai daemon status         service names the service file when there is one
+
+The service file is what being registered means. moai keeps no other record of it.
+
+| OS | Service manager | Service file |
+|---|---|---|
+| Linux | systemd user manager | `~/.config/systemd/user/moai-daemon.service` (under `$XDG_CONFIG_HOME` when that is set; if only your shell sets it, systemd does not look there and registration fails, leaving no file) |
+| macOS | launchd user agent | `~/Library/LaunchAgents/com.buzzni.moai-daemon.plist` |
+
+Windows has no registration yet. See [Windows](#windows).
+
+`moai daemon install` starts nothing itself: it hands the daemon to the service manager, then waits up to 5 seconds for the daemon to answer and reports what it found. `running` under `--json` is `true` only when the daemon that answers is the one the service manager started (the same pid). If another daemon answers, `running` is `false` and one line tells you to run `moai daemon stop`, then `moai daemon install` again; registration still succeeded and it exits 0. A daemon that does not answer yet does not fail the command either.
+
+What moai writes into the file:
+
+- **The socket directory of the shell you ran it from**, as `MOAI_CTL_DIR` (`Environment=` in the unit, `EnvironmentVariables` in the plist), on both managers. A service does not inherit your shell's environment, so this is how the service and your shell find the same socket. To move it, change it in your shell and run `moai daemon install` again.
+- **The `moai` you type**: the first `moai` on your `PATH` that is this binary, written as the path you would type rather than where a link leads. A package manager that installs each version in its own directory and points a link at the current one (Homebrew, nix) keeps working after it removes an old version. Without such a `moai` on `PATH`, it writes the path of the running binary. Empty and relative `PATH` entries are skipped.
+
+Running it again compares the file with what it would write now. The same text is kept byte for byte, a stopped service is started, and `installed` is `false`. A different text, say after you moved the socket directory, is rewritten and the service restarted, and `installed` is `true`. If that restart fails, the old file is put back. A moai file whose `moai` no longer exists (a removed version, a broken link) is rewritten for this binary too.
+
+It refuses these and changes nothing:
+
+| Situation | Code |
+|---|---|
+| A file at that path that moai did not write | `already_exists` |
+| A service file that runs another `moai`, one that still exists and is a different file. Run `moai daemon uninstall`, then install from the one you want | `already_exists` |
+| A daemon you started yourself answers at the socket. The service would find the place taken and stay down. Run `moai daemon stop`, then install again | `already_exists` |
+| Running under `sudo`, which would make it root's service | `refused` |
+| No service manager, or it refused. No file is left behind, and the CLI works without the daemon | `service_failed` |
+| Windows | `unsupported` |
+
+`moai daemon uninstall` stops the service and removes its file. The file goes even when the service manager refuses to stop the service: the registration is removed, `--json` says `"stopped": false`, and one line says the daemon may still run and that `moai daemon stop` stops it. `--json` gives `{uninstalled, manager, service}`, with `stopped` whenever `uninstalled` is `true`. If the file cannot be removed (its directory is not writable), it stops nothing and fails with `error`. On macOS a moai job still loaded under moai's label after its file is gone is unloaded too, and `uninstalled` is `true`. With nothing to remove it says so and exits 0. It refuses a file moai did not write, and it refuses to run under `sudo`, which would look at root's service instead of yours (`refused`). A daemon you started yourself keeps running, and `moai` itself stays.
+
+A systemd user service stops when your last session ends unless lingering is on (`loginctl enable-linger`). moai does not turn that on for you.
+
+### When an install registers it
+
+`install.sh` runs `moai daemon install` at the end of a first install, which means no `moai` stood in that directory before, when all of these hold:
+
+- You did not pass `--no-service` or set `MOAI_NO_SERVICE=1`.
+- Standard output is a terminal. CI, Docker builds and other programs' installers get no service, and the install's output does not mention it. `curl … | sh` in a terminal counts as a terminal.
+- You are not root. As root it says so in one line.
+- The release has the command. `--version` can install an older one, which is skipped quietly.
+
+If registration fails, the install still succeeds and says so in one line.
+
+Upgrades never change registration: neither `moai update` nor the install line run over an existing `moai`. Only a first install, `moai daemon install` and `moai daemon uninstall` do. So upgrading an existing moai does not give it a service; run `moai daemon install` if you want one. `install.ps1` does not register anything.
+
+### Write the service file yourself
+
+To keep your own settings, write the file yourself. A file without moai's mark (the comment `moai daemon install wrote this file`) is yours: `moai daemon install` and `moai daemon uninstall` leave it alone, and `moai update` does not restart it.
 
 For systemd, save the following as `~/.config/systemd/user/moai-daemon.service`, replacing the executable path with the absolute path to your installed `moai`:
 
@@ -87,15 +144,15 @@ On macOS, save this as `~/Library/LaunchAgents/com.example.moai-daemon.plist`, r
 
 Load it with `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.example.moai-daemon.plist`. Remove it from the user domain with `launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.example.moai-daemon.plist`.
 
-A service does not inherit your shell's environment, and the socket directory depends on it (see [Where the socket is](#where-the-socket-is)). After the service starts, run `moai daemon status` in a terminal: if it says no daemon is running, check the service status and whether the service chose another directory. Set `MOAI_CTL_DIR` to the same directory for the service (`Environment=` in the unit, `EnvironmentVariables` in the plist) and in your shell.
+A service does not inherit your shell's environment, and the socket directory depends on it (see [Where the socket is](#where-the-socket-is)). A file moai writes records the directory for you; a file you write does not. After the service starts, run `moai daemon status` in a terminal: if it says no daemon is running, check the service status and whether the service chose another directory. Set `MOAI_CTL_DIR` to the same directory for the service (`Environment=` in the unit, `EnvironmentVariables` in the plist) and in your shell.
 
 ## Upgrade the daemon
 
-1. Run `moai update`. On Unix, after a successful installation it checks the newly installed binary's daemon status. If a daemon of another version or protocol still runs, it prints a restart notice to stderr (under `--json`, the `daemon_restart` key below instead). The daemon is not restarted automatically.
-2. Restart it through whatever keeps it running. For the systemd service above, run `systemctl --user restart moai-daemon.service`; for the launchd service above, `launchctl kickstart -k gui/$(id -u)/com.example.moai-daemon`. For a daemon you started yourself, run `moai daemon stop`, then `moai daemon start` again where it ran before. Do not restart a service with `moai daemon stop`: the daemon exits 0, neither service above restarts a clean exit, and a `moai daemon start` typed afterwards runs in your terminal, outside the service.
+1. Run `moai update`. After a successful installation it checks the newly installed binary's daemon status. If a daemon of another version or protocol still runs, and `moai daemon install` registered a service for this binary and that service is running, it restarts the service through the service manager and waits up to 5 seconds for the new version to answer. It waits by asking the daemon's socket for `hello`, without starting more processes. If the new version has not answered by then, it says so. In every other case it prints a restart notice to stderr (under `--json`, the keys below instead) and restarts nothing. A service you stopped stays stopped, and registration never changes.
+2. If you got the notice, restart the daemon through whatever keeps it running. For a service file you wrote from the examples above, run `systemctl --user restart moai-daemon.service`, or `launchctl kickstart -k gui/$(id -u)/com.example.moai-daemon`. For a daemon you started yourself, run `moai daemon stop`, then `moai daemon start` again where it ran before. Do not restart a service with `moai daemon stop`: the daemon exits 0, neither service manager restarts a clean exit, and a `moai daemon start` typed afterwards runs in your terminal, outside the service.
 3. Run `moai daemon status` to check the replacement. A daemon rebuilt with the same version and protocol is indistinguishable from the old build by this check, so restart it manually after such a rebuild.
 
-For `moai update --json`, the result includes `"daemon_restart": true` only when that post-install check identifies a running daemon with a different version or protocol and can read its version and pid. The key is absent on other paths, including a failed update, a failed status check and no running daemon; its absence does not prove that no restart is needed. The update exit status is unchanged by the check.
+For `moai update --json`, the result includes `"daemon_restarted": true` when it restarted the service and the new version answered. It includes `"daemon_restart": true` when the post-install check identifies a running daemon with a different version or protocol, can read its version and pid, and no restart was confirmed. Both keys are absent on other paths, including a failed update, a failed status check and no running daemon; their absence does not prove that no restart is needed. The update exit status is unchanged by any of this.
 
 ## Where the socket is
 
@@ -433,7 +490,7 @@ On Windows the daemon runs the same way and answers the same methods. Only the t
 - Without `MOAI_CTL_DIR` or `XDG_RUNTIME_DIR` the directory is `moai/run` under `%LOCALAPPDATA%`, one place per account. moai checks neither its owner nor its access list: the pipe's own access list, not the directory, keeps other users out.
 - Ctrl-C and Ctrl-Break stop the daemon the way SIGINT does, and a second one ends the process at once. Closing the console window, logging off and shutting down also start a stop, but Windows allows about five seconds, so a long write can be cut.
 - There is no half-close on a pipe. A client cannot shut down its writing side and still read; keep the pipe open until the answer arrives.
-- No service manager is set up for you. `moai daemon start` stays in the foreground, so run it in a window you keep, or from Task Scheduler at logon.
+- No service manager is set up for you, and `moai daemon install` stops with the code `unsupported`. `moai daemon start` stays in the foreground, so run it in a window you keep, or from Task Scheduler at logon.
 
 Connect from PowerShell like this:
 
@@ -453,4 +510,4 @@ $pipe.Dispose()
 
 After `moai update` a running daemon keeps the old binary, which the installer has renamed to `moai.exe.old` (`moai.exe.<pid>.old` when an earlier `.old` is still held). Stop it and start it again.
 
-Decided in: moai-wbdh, moai-ou5y
+Decided in: moai-wbdh, moai-ou5y, moai-upq5, moai-tloc

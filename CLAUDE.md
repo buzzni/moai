@@ -108,6 +108,11 @@
   - **CLI 는 최대한 건드리지 않고 기능을 100% 보전한다.** 데몬 일이 CLI 가 타는 코드(`store`·`cmd`·`lib`)를
     고쳐야 하면 꼭 필요한 만큼만 고치고, CLI 출력이 바이트째 같아야 한다. 데몬이 거는 요청의 통(`side`)이 그
     꼴이다 — 통이 안 걸린 CLI 는 옛 길을 그대로 탄다
+  - **`moai update` 가 등록된 서비스를 다시 시작하는 것은 이 약속의 예외다**(2026-11-11 사용자 결정, PR #85 리뷰
+    `moai-tsk0`, `moai-tloc`). `moai daemon install` 이 이 바이너리로 등록한 서비스가 실행 중일 때만 `moai update` 가 서비스
+    관리자를 불러 다시 시작하고, 새 판이 소켓에서 `hello` 로 답하기를 5초까지 기다린다 — `moai daemon` 밖에서 CLI 가
+    데몬에 묻는 자리는 이 기다림 하나다. 그때만 stderr 의 알림 줄과 `--json` 의 키(`daemon_restarted`)가 달라진다. 서비스가 없거나, 멈췄거나,
+    사람이 쓴 파일이면 출력은 바이트째 그대로다
   - 그 고침이 최소인가는 에픽 끝 리뷰의 관점에 든다
   - 명령 훑기(`every_cli_command_is_served_or_listed_as_not_served`)와 CLI 견주기
     (`the_read_methods_answer_as_the_cli_does`, `the_write_methods_write_what_the_cli_writes`)는 남는다 — 서드파티가
