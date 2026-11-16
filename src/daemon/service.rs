@@ -501,32 +501,13 @@ impl Service {
         }
     }
 
-    /// 임시 파일에 쓰고 옮긴다 — 끊기면 반쪽 파일이 등록 상태로 읽힌다.
-    fn write(&self, text: &str) -> std::io::Result<()> {
+    /// 링크를 보존하며 원자적으로 쓴다. 서비스 권한은 교체 전에 임시 파일에 입힌다.
+    fn write(&self, text: &str) -> Result<(), crate::fail::Fail> {
         if let Some(parent) = self.file.parent() {
-            std::fs::create_dir_all(parent)?;
+            std::fs::create_dir_all(parent).map_err(|e| crate::fail::Fail::new(e.to_string()))?;
         }
-        let half = self.file.with_extension(format!("tmp.{}", std::process::id()));
-        let placed = std::fs::write(&half, text)
-            .and_then(|()| only_the_owner_writes(&half))
-            .and_then(|()| std::fs::rename(&half, &self.file));
-        if placed.is_err() {
-            let _ = std::fs::remove_file(&half);
-        }
-        placed
+        crate::store::write_atomic_service(&self.file, text.as_bytes())
     }
-}
-
-/// 사람의 umask 를 따르지 않는다 — launchd 는 그룹이나 남이 쓸 수 있는 plist 를 안 읽는다.
-#[cfg(unix)]
-fn only_the_owner_writes(path: &Path) -> std::io::Result<()> {
-    use std::os::unix::fs::PermissionsExt as _;
-    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o644))
-}
-
-#[cfg(not(unix))]
-fn only_the_owner_writes(_: &Path) -> std::io::Result<()> {
-    Ok(())
 }
 
 /// `launchctl print` 의 답에서 지금 실행 중인가를 읽는다.
@@ -1034,11 +1015,77 @@ mod tests {
         let s = Scratch::new("service-half");
         let dir = s.path().join("user");
         std::fs::create_dir_all(dir.join("the-service")).unwrap();
-        // 옮길 자리가 디렉터리라 `rename` 이 실패한다.
+        // 옮길 자리가 디렉터리라 쓰기가 실패한다 — 보통 파일이 아닌 자리는 임시 파일을 짓기 전에 거절한다.
         let svc = service_in(&s, Manager::Systemd);
         assert!(svc.write("x").is_err());
         let left: Vec<_> = std::fs::read_dir(&dir).unwrap().map(|e| e.unwrap().file_name()).collect();
         assert_eq!(left, ["the-service"], "반쪽 파일이 남았다");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rewriting_a_link_keeps_it_and_sets_service_permissions() {
+        use std::os::unix::fs::{PermissionsExt as _, symlink};
+        for (manager, old_mode, expected) in [
+            (Manager::Systemd, 0o666, 0o644),
+            (Manager::Launchd, 0o600, 0o600),
+            (Manager::Launchd, 0o000, 0o600),
+            (Manager::Systemd, 0o777, 0o755),
+        ] {
+            let s = Scratch::new("service-link");
+            let svc = service_in(&s, manager);
+            std::fs::create_dir_all(svc.file.parent().unwrap()).unwrap();
+            let target = s.path().join("dotfile");
+            std::fs::write(&target, "old").unwrap();
+            std::fs::set_permissions(&target, std::fs::Permissions::from_mode(old_mode)).unwrap();
+            symlink("../dotfile", &svc.file).unwrap();
+            svc.write("new").unwrap();
+            assert!(svc.file.symlink_metadata().unwrap().file_type().is_symlink());
+            assert_eq!(std::fs::read_link(&svc.file).unwrap(), Path::new("../dotfile"));
+            assert_eq!(std::fs::read_to_string(&target).unwrap(), "new");
+            assert_eq!(std::fs::metadata(&target).unwrap().permissions().mode() & 0o777, expected);
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn install_rewrites_and_restores_a_linked_service_on_manager_failure() {
+        use std::os::unix::fs::symlink;
+        for manager in [Manager::Systemd, Manager::Launchd] {
+            let s = Scratch::new("service-link-install");
+            let svc = service_in(&s, manager);
+            let exe = binary(&s, "bin");
+            std::fs::create_dir_all(svc.file.parent().unwrap()).unwrap();
+            let target = s.path().join("dotfile");
+            let old = manager.render(exe.to_str().unwrap(), "/old/socket");
+            std::fs::write(&target, &old).unwrap();
+            symlink("../dotfile", &svc.file).unwrap();
+            // launchd 쪽은 `print` 도 거절한다 — 가짜가 늘 "올라가 있다" 고 답하면 `bootout` 뒤 `wait_unloaded` 가 부를 때마다
+            // `UNLOAD_WAIT` 를 다 채워, 이 시험 하나가 15초를 잔다.
+            let refusing = Fake::new(if manager == Manager::Systemd { &["enable"] } else { &["print", "bootstrap"] });
+            assert!(matches!(
+                svc.install(&exe, pin(), &|p: &str, a: &[&str]| refusing.run(p, a)),
+                Err(Trouble::Refused(_))
+            ));
+            assert!(svc.file.symlink_metadata().unwrap().file_type().is_symlink());
+            assert_eq!(std::fs::read_to_string(&target).unwrap(), old);
+            let accepting = Fake::new(if manager == Manager::Systemd { &[] } else { &["print"] });
+            assert_eq!(svc.install(&exe, pin(), &|p: &str, a: &[&str]| accepting.run(p, a)), Ok(Wrote::Rewritten));
+            assert!(svc.file.symlink_metadata().unwrap().file_type().is_symlink());
+            assert_eq!(std::fs::read_to_string(&target).unwrap(), manager.render(exe.to_str().unwrap(), PIN));
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_failed_link_write_keeps_the_link() {
+        use std::os::unix::fs::symlink;
+        let s = Scratch::new("service-missing-target");
+        let svc = service_in(&s, Manager::Systemd);
+        std::fs::create_dir_all(svc.file.parent().unwrap()).unwrap();
+        symlink("../missing/file", &svc.file).unwrap();
+        assert!(svc.write("new").is_err());
+        assert_eq!(std::fs::read_link(&svc.file).unwrap(), Path::new("../missing/file"));
     }
 
     /// 시험이 바이너리로 쓸 실제 파일. "같은 바이너리" 는 같은 파일로 풀리는가라서 있는 파일이어야 한다.
