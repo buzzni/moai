@@ -12,6 +12,10 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+### Fixed
+
+- A backlog item saved with `SPC n` in the explorer is marked read for its author, whether saved in the form, returned from an editor, or continued after the identity prompt. (moai-u3uv)
+
 ## [1.2.0] - 2026-11-12
 
 ### Added
