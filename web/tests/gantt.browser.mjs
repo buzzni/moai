@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { createServer } from 'node:http'
-import { readFile } from 'node:fs/promises'
+import { readFile, readdir } from 'node:fs/promises'
 import { build } from 'esbuild'
 import { chromium, firefox } from 'playwright'
 import { i18nBundles } from '../i18n-bundles.mjs'
@@ -25,17 +25,64 @@ const bundle = await build({
   `, resolveDir: new URL('..', import.meta.url).pathname, loader: 'ts' },
   bundle: true, write: false, format: 'iife', plugins: [i18nBundles, vendorGlobals],
 })
-const css = await readFile(new URL('../panel/style/gantt.css', import.meta.url), 'utf8')
+// The shipped cascade, read from the sheets rather than src/web/dist/app.css so an edited sheet is tested without a
+// rebuild: build.mjs's styles() order (tokens, components, the rest by name, detail last — shell.css after gantt.css),
+// closed with its `[hidden]` rule.
+const styleDir = new URL('../panel/style/', import.meta.url)
+const firstSheets = ['tokens.css', 'components.css'], lastSheets = ['detail.css']
+const rank = name => firstSheets.includes(name) ? firstSheets.indexOf(name) : lastSheets.includes(name) ? firstSheets.length + 1 : firstSheets.length
+const sheetNames = (await readdir(styleDir)).filter(name => name.endsWith('.css')).sort((a, b) => rank(a) - rank(b) || a.localeCompare(b))
+const css = `${(await Promise.all(sheetNames.map(name => readFile(new URL(name, styleDir), 'utf8')))).join('\n')}\n[hidden]{display:none!important}\n`
 const server = createServer((req, res) => {
   res.setHeader('Content-Type', req.url === '/app.js' ? 'text/javascript; charset=utf-8' : 'text/html; charset=utf-8')
   res.end(req.url === '/app.js' ? bundle.outputFiles[0].text : `<style>${css}
     body{margin:0} #host{display:flex;width:900px;height:600px} .m-gantt{width:100%;overflow:hidden}
-    </style><div id="host"></div><script src="/app.js"></script>`)
+    </style><div id="host" class="m-pane-main m-pane-gantt" data-pane="gantt"></div><script src="/app.js"></script>`)
 })
 await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
 const url = `http://127.0.0.1:${server.address().port}`
 
 for (const engine of [chromium, firefox]) {
+  test(`${engine.name()}: small panes keep the toolbar and legend reachable`, async t => {
+    const browser = await engine.launch(); t.after(() => browser.close())
+    const page = await browser.newPage(); await page.goto(url); await page.waitForFunction(() => window.ready)
+    const result = await page.evaluate(async () => {
+      const pane = document.querySelector('#host'), toolbar = pane.querySelector('.g-toolbar'), legend = pane.querySelector('.g-legend')
+      pane.style.width = '160px'; pane.style.height = '200px'
+      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+      const initial = { toolbar: toolbar.scrollWidth > toolbar.clientWidth, legend: legend.scrollWidth > legend.clientWidth,
+        zoomWidth: toolbar.querySelector('.g-seg').getBoundingClientRect().width,
+        chartHeight: pane.querySelector('.g-scroll').clientHeight, overflow: getComputedStyle(pane).overflow }
+      toolbar.scrollLeft = toolbar.scrollWidth; legend.scrollLeft = legend.scrollWidth
+      return { ...initial, toolbarEnd: toolbar.scrollLeft + toolbar.clientWidth >= toolbar.scrollWidth - 1,
+        legendEnd: legend.scrollLeft + legend.clientWidth >= legend.scrollWidth - 1 }
+    })
+    assert.equal(result.overflow, 'hidden')
+    assert.ok(result.toolbar && result.legend && result.toolbarEnd && result.legendEnd, JSON.stringify(result))
+    assert.ok(result.zoomWidth > 100 && result.chartHeight > 0, JSON.stringify(result))
+  })
+  test(`${engine.name()}: Gantt scrolls inside its pane while other panes scroll normally`, async t => {
+    const browser = await engine.launch(); t.after(() => browser.close())
+    const page = await browser.newPage(); await page.goto(url); await page.waitForFunction(() => window.ready)
+    const result = await page.evaluate(async () => {
+      const pane = document.querySelector('#host'), scroll = pane.querySelector('.g-scroll')
+      const list = document.createElement('div')
+      list.className = 'm-pane-main'; list.dataset.pane = 'list'
+      list.style.cssText = 'width:100px;height:100px'
+      const content = document.createElement('div'); content.style.height = '300px'; list.append(content)
+      document.body.append(list)
+      scroll.scrollTop = 420; scroll.scrollLeft = 200; list.scrollTop = 100
+      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+      return { paneOverflow: getComputedStyle(pane).overflow, paneTop: pane.scrollTop, paneLeft: pane.scrollLeft,
+        scrollOverflow: getComputedStyle(scroll).overflow, scrollTop: scroll.scrollTop, scrollLeft: scroll.scrollLeft,
+        listOverflow: getComputedStyle(list).overflow, listTop: list.scrollTop }
+    })
+    assert.equal(result.paneOverflow, 'hidden')
+    assert.equal(result.paneTop, 0); assert.equal(result.paneLeft, 0)
+    assert.equal(result.scrollOverflow, 'auto')
+    assert.ok(result.scrollTop > 0 && result.scrollLeft > 0, JSON.stringify(result))
+    assert.equal(result.listOverflow, 'auto'); assert.ok(result.listTop > 0, JSON.stringify(result))
+  })
   for (const zoom of ['day', 'month']) test(`${engine.name()} ${zoom}: widening retains the left date and avoids full draws`, async t => {
     const browser = await engine.launch()
     t.after(() => browser.close())

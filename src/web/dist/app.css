@@ -516,13 +516,16 @@ body.m-resizing:is([data-resize="bottom"], [data-resize="top"]) { cursor: row-re
  * cap, and the column of an actual band by the status glyph in the grid. The colours are tokens that already have
  * their dark values (tokens.css), so this sheet adds none.
  */
-.m-pane-gantt { overflow: hidden; }
+/* Two classes, not one: build.mjs joins shell.css after this sheet, and its `.m-pane-main { overflow: auto }` would win
+ * a tie, so the pane would scroll as a whole around the box that should be the only one to scroll. */
+.m-pane-main.m-pane-gantt { overflow: hidden; }
 .m-pane-gantt:not([hidden]) { display: flex; flex-direction: column; }
 .m-gantt { --link: var(--review); flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
 .m-gantt:focus { outline: 0; }
 
 /* Toolbar. */
-.g-toolbar { flex: none; display: flex; align-items: center; gap: 8px; height: 40px; padding: 0 8px; border-bottom: 1px solid var(--border-soft); }
+.g-toolbar { flex: none; min-width: 0; display: flex; align-items: center; gap: 8px; height: 40px; padding: 0 8px; border-bottom: 1px solid var(--border-soft); overflow-x: auto; }
+.g-toolbar > :not(.g-spacer) { flex-shrink: 0; }
 .g-spacer { flex: 1; }
 .g-seg { display: inline-flex; border: 1px solid var(--border); border-radius: 7px; overflow: hidden; }
 .g-seg button { border: 0; background: transparent; color: var(--muted); font: 500 12px var(--font); height: 26px; padding: 0 10px; cursor: pointer; }
@@ -630,8 +633,8 @@ svg.links polygon { fill: var(--link); }
 .g-empty[hidden] { display: none; }
 
 /* The legend: drawn with the classes of the bars it names. */
-.g-legend { flex: none; display: flex; flex-wrap: wrap; gap: 6px 16px; padding: 8px 10px; border-top: 1px solid var(--border-soft); font-size: 12px; color: var(--muted); }
-.g-key { display: inline-flex; align-items: center; gap: 4px; }
+.g-legend { flex: none; min-width: 0; display: flex; gap: 6px 16px; padding: 8px 10px; border-top: 1px solid var(--border-soft); font-size: 12px; color: var(--muted); overflow-x: auto; }
+.g-key { flex: none; display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
 .g-legend .sw { display: inline-block; position: relative; width: 28px; height: 14px; vertical-align: middle; }
 .g-legend .sw .bar { top: 0; }
 .g-legend .sw .b-act { top: 3px; }
