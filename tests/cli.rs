@@ -217,6 +217,57 @@ fn ctl_state_without_a_window_says_no_window() {
 
 #[test]
 #[cfg(unix)]
+fn ctl_lists_available_windows_and_reports_skipped_sockets() {
+    use std::io::{BufRead, BufReader, Write};
+    use std::os::unix::fs::PermissionsExt;
+    use std::os::unix::net::UnixListener;
+    let s = Scratch::new("ctl-skips");
+    let dir = s.path().join("run");
+    std::fs::create_dir(&dir).unwrap();
+    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let live = UnixListener::bind(dir.join("1.sock")).unwrap();
+    let busy = UnixListener::bind(dir.join("2.sock")).unwrap();
+    let root = s.path().display().to_string();
+    let live_thread = std::thread::spawn(move || {
+        for _ in 0..3 {
+            let (mut stream, _) = live.accept().unwrap();
+            let mut request = String::new();
+            BufReader::new(&stream).read_line(&mut request).unwrap();
+            let reply = serde_json::json!({"ok": true, "data": {"id":"tui-1", "kind":"tui", "pid":1, "version":"test", "proto":1, "root":root, "here":root, "layer":false, "screen":"list", "last_input_ago_ms":0}});
+            writeln!(stream, "{reply}").unwrap();
+        }
+    });
+    let busy_thread = std::thread::spawn(move || {
+        for _ in 0..4 {
+            let (mut stream, _) = busy.accept().unwrap();
+            let mut request = String::new();
+            BufReader::new(&stream).read_line(&mut request).unwrap();
+            writeln!(stream, "{{\"ok\":false,\"code\":\"busy\",\"message\":\"full\"}}").unwrap();
+        }
+    });
+    let run = |args: &[&str]| staged(args).current_dir(s.path()).env("MOAI_CTL_DIR", &dir).output().unwrap();
+    let json = run(&["ctl", "ls", "--all", "--json"]);
+    assert!(json.status.success(), "{}", String::from_utf8_lossy(&json.stderr));
+    let list = json_of(&String::from_utf8_lossy(&json.stdout));
+    assert_eq!(list["windows"][0]["id"], "tui-1");
+    assert_eq!(list["skipped"][0]["socket"], dir.join("2.sock").to_str().unwrap());
+    assert_eq!(list["skipped"][0]["reason"], "busy");
+    assert!(json.stderr.is_empty());
+    let human = run(&["ctl", "ls", "--all"]);
+    assert!(human.status.success());
+    assert!(String::from_utf8_lossy(&human.stdout).contains("tui-1"));
+    assert!(String::from_utf8_lossy(&human.stderr).contains("2.sock (busy)"));
+    for args in [&["ctl", "state", "--json"][..], &["ctl", "state", "-t", "tui-2", "--json"][..]] {
+        let output = run(args);
+        assert!(!output.status.success());
+        assert_eq!(json_of(&String::from_utf8_lossy(&output.stderr))["code"], "busy");
+    }
+    live_thread.join().unwrap();
+    busy_thread.join().unwrap();
+}
+
+#[test]
+#[cfg(unix)]
 fn ctl_lists_and_reads_an_open_explorer() {
     use std::io::{Read, Write};
     use std::os::unix::process::CommandExt;
@@ -337,7 +388,7 @@ fn ctl_lists_and_reads_an_open_explorer() {
 
 /// 뜨는 중인 탐색기를 `ctl ls` 로 찾는다. **소켓은 첫 그림보다 먼저 서고**(`cmd::tui::screen`), 그 사이의 `hello` 는
 /// 답을 못 받는다 — 덜 읽은 pty 에서 첫 그림을 쓰다 막힌 macOS 에서는 더 길다. 그런 창 하나가 있는 목록은
-/// `timeout`·`busy` 로 실패하니(moai-pwxx.kah) 그 둘은 다시 묻고, 다른 실패는 시험을 세운다.
+/// 응답하지 않는 창은 목록에서 빠지므로(moai-pwxx.kah) 창이 보일 때까지 다시 묻는다.
 #[cfg(unix)]
 fn listed_while_starting(dir: &Path, shown: &mut String) -> Option<serde_json::Value> {
     let out = moai(dir, &["ctl", "ls", "--json"]);

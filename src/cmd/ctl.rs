@@ -9,10 +9,20 @@ use std::time::Duration;
 
 pub fn ls(ctx: &Ctx, all: bool) -> R<Vec<String>> {
     let root = if all { None } else { call::current_root(ctx.lang())? };
+    let discovery = call::windows()?;
     let windows: Vec<_> =
-        call::windows()?.into_iter().filter(|w| all || root.as_deref().is_none_or(|r| w.root == r)).collect();
+        discovery.windows.into_iter().filter(|w| all || root.as_deref().is_none_or(|r| w.root == r)).collect();
     if ctx.json {
-        return super::json_line(&serde_json::json!({"windows": windows}));
+        return super::json_line(&serde_json::json!({"windows": windows, "skipped": discovery.skipped}));
+    }
+    if !discovery.skipped.is_empty() {
+        let details = discovery
+            .skipped
+            .iter()
+            .map(|s| format!("{} ({})", s.socket.display(), s.reason))
+            .collect::<Vec<_>>()
+            .join(", ");
+        eprintln!("Skipped windows: {details}");
     }
     let mut lines = vec!["ID  KIND  REPOSITORY  SCREEN  LAST INPUT".into()];
     lines.extend(

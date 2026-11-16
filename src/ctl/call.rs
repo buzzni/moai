@@ -25,23 +25,50 @@ pub struct Window {
     pub socket: PathBuf,
 }
 
+#[derive(Debug, Serialize)]
+pub struct Skipped {
+    pub socket: PathBuf,
+    pub reason: &'static str,
+    #[serde(skip)]
+    code: &'static str,
+}
+
+#[derive(Debug, Default)]
+pub struct Discovery {
+    pub windows: Vec<Window>,
+    pub skipped: Vec<Skipped>,
+}
+
+impl Discovery {
+    fn require_complete(self) -> R<Vec<Window>> {
+        if let Some(skipped) = self.skipped.first() {
+            return Err(Fail::coded(
+                format!("Window at {}: {}; retry control discovery.", skipped.socket.display(), skipped.reason),
+                skipped.code,
+            ));
+        }
+        Ok(self.windows)
+    }
+}
+
 #[cfg(any(unix, windows))]
-pub fn windows() -> R<Vec<Window>> {
-    windows_for_target(None)
+pub fn windows() -> R<Discovery> {
+    let dir = super::place::dir().map_err(|e| Fail::new(e.to_string()))?;
+    windows_in(&dir, None, false)
 }
 
 /// Resolve an explicit window through its PID socket without contacting unrelated windows.
 #[cfg(any(unix, windows))]
 pub fn windows_for_target(target: Option<&str>) -> R<Vec<Window>> {
     let dir = super::place::dir().map_err(|e| Fail::new(e.to_string()))?;
-    windows_in(&dir, target, false)
+    windows_in(&dir, target, false)?.require_complete()
 }
 
 /// Discover a reconnecting tab only when a proposal names its exact window.
 #[cfg(any(unix, windows))]
 pub fn windows_for_proposal(target: Option<&str>) -> R<Vec<Window>> {
     let dir = super::place::dir().map_err(|e| Fail::new(e.to_string()))?;
-    windows_in(&dir, target, true)
+    windows_in(&dir, target, true)?.require_complete()
 }
 
 #[cfg(any(unix, windows))]
@@ -57,9 +84,9 @@ fn target_pid(target: &str) -> Option<u32> {
 }
 
 #[cfg(any(unix, windows))]
-fn windows_in(dir: &Path, target: Option<&str>, proposal: bool) -> R<Vec<Window>> {
+fn windows_in(dir: &Path, target: Option<&str>, proposal: bool) -> R<Discovery> {
     let paths = if let Some(target) = target {
-        let Some(pid) = target_pid(target) else { return Ok(Vec::new()) };
+        let Some(pid) = target_pid(target) else { return Ok(Discovery::default()) };
         vec![dir.join(format!("{pid}.sock"))]
     } else {
         std::fs::read_dir(dir)
@@ -67,7 +94,7 @@ fn windows_in(dir: &Path, target: Option<&str>, proposal: bool) -> R<Vec<Window>
             .map(|entry| entry.map(|entry| entry.path()).map_err(|e| Fail::new(e.to_string())))
             .collect::<R<Vec<_>>>()?
     };
-    let mut windows = Vec::new();
+    let mut result = Discovery::default();
     for path in paths {
         if path.extension().is_none_or(|e| e != "sock") {
             continue;
@@ -91,23 +118,29 @@ fn windows_in(dir: &Path, target: Option<&str>, proposal: bool) -> R<Vec<Window>
                             && target.is_none_or(|id| window.id == id)
                         {
                             window.socket = path.clone();
-                            windows.push(window);
+                            result.windows.push(window);
                         }
                     }
                 }
             }
-            // **A live window that cannot list itself fails discovery** (moai-pwxx.kah). Its refusal carries no id or
-            // repository, so a list without it could pick an older window as this repository's latest, or tell `-t`
-            // that its window does not exist. A window that answers `timeout` (its owner loop did not answer in time)
-            // is as live as a full one.
-            Ok(reply) if reply.code.as_deref() == Some("busy") => return Err(busy(&path)),
-            Ok(reply) if reply.code.as_deref() == Some("timeout") => return Err(silent(&path)),
-            // Windows: every pipe instance stayed taken (`transport::pipe`), the daemon probe's `Busy`.
-            Err(e) if e.kind() == std::io::ErrorKind::ResourceBusy => return Err(busy(&path)),
-            // The read timed out before the window's own `timeout` reply arrived — the same window, not a gone one.
-            Err(e) if matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) => {
-                return Err(silent(&path));
+            Ok(reply) if !reply.ok => {
+                let (reason, code) = match reply.code.as_deref() {
+                    Some("busy") => ("busy", code::BUSY),
+                    Some("person_busy") => ("busy", code::BUSY),
+                    Some("timeout") => ("timeout", code::TIMEOUT),
+                    Some("unsupported") => ("gone", code::UNSUPPORTED),
+                    _ => ("gone", code::GONE),
+                };
+                result.skipped.push(Skipped { socket: path, reason, code });
             }
+            Err(e) if e.kind() == std::io::ErrorKind::ResourceBusy => {
+                result.skipped.push(Skipped { socket: path, reason: "busy", code: code::BUSY });
+            }
+            Err(e) if matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) => {
+                result.skipped.push(Skipped { socket: path, reason: "timeout", code: code::TIMEOUT });
+            }
+            // Foreign pipes and transient marker sharing violations are not our windows.
+            Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {}
             Err(e) if matches!(e.kind(), std::io::ErrorKind::ConnectionRefused | std::io::ErrorKind::NotFound) => {
                 // Recheck the path before removal; never follow or remove a foreign file.
                 if let Ok(now) = std::fs::symlink_metadata(&path)
@@ -117,32 +150,18 @@ fn windows_in(dir: &Path, target: Option<&str>, proposal: bool) -> R<Vec<Window>
                     let _ = std::fs::remove_file(&path);
                 }
             }
-            Err(e) => {
-                return Err(Fail::coded(format!("Could not discover a window at {}: {e}", path.display()), code::GONE));
-            }
+            Err(_) => result.skipped.push(Skipped { socket: path, reason: "gone", code: code::GONE }),
             _ => {}
         }
     }
-    windows.sort_by(|a, b| a.id.cmp(&b.id));
-    Ok(windows)
-}
-
-#[cfg(any(unix, windows))]
-fn busy(path: &Path) -> Fail {
-    Fail::coded(format!("The window at {} is busy; retry control discovery.", path.display()), code::BUSY)
-}
-
-#[cfg(any(unix, windows))]
-fn silent(path: &Path) -> Fail {
-    Fail::coded(
-        format!("The window at {} did not answer in time; retry control discovery.", path.display()),
-        code::TIMEOUT,
-    )
+    result.windows.sort_by(|a, b| a.id.cmp(&b.id));
+    result.skipped.sort_by(|a, b| a.socket.cmp(&b.socket));
+    Ok(result)
 }
 
 #[cfg(not(any(unix, windows)))]
-pub fn windows() -> R<Vec<Window>> {
-    Ok(Vec::new())
+pub fn windows() -> R<Discovery> {
+    Ok(Discovery::default())
 }
 
 #[cfg(not(any(unix, windows)))]
@@ -271,11 +290,26 @@ mod tests {
     fn discovery_reports_busy_and_unreadable_replies() {
         use std::io::Write;
         use std::os::unix::net::UnixListener;
-        let dir = std::env::temp_dir().join(format!("moai-pwxx-discovery-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
+        struct TempDir(PathBuf);
+        impl Drop for TempDir {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_dir_all(&self.0);
+            }
+        }
+        let dir = TempDir(std::env::temp_dir().join(format!("moai-pwxx-{}-{}", std::process::id(), wire::now_ms())));
+        std::fs::create_dir(&dir.0).unwrap();
+        let dir = &dir.0;
         let listener = UnixListener::bind(dir.join("2.sock")).unwrap();
         let owner = std::thread::spawn(move || {
-            for refusal in [Some("busy"), Some("busy"), Some("timeout"), None, Some("silent")] {
+            for refusal in [
+                Some("busy"),
+                Some("busy"),
+                Some("timeout"),
+                None,
+                Some("silent"),
+                Some("person_busy"),
+                Some("unsupported"),
+            ] {
                 let (mut stream, _) = listener.accept().unwrap();
                 match refusal {
                     // A window whose owner loop never answers: hold the connection until the caller gives up.
@@ -290,13 +324,21 @@ mod tests {
                 }
             }
         });
-        assert_eq!(windows_in(&dir, None, false).unwrap_err().code, code::BUSY);
-        assert_eq!(windows_in(&dir, Some("2.7"), false).unwrap_err().code, code::BUSY);
-        assert_eq!(windows_in(&dir, Some("2.7"), false).unwrap_err().code, code::TIMEOUT);
-        assert_eq!(windows_in(&dir, Some("2.7"), false).unwrap_err().code, code::GONE);
-        assert_eq!(windows_in(&dir, None, false).unwrap_err().code, code::TIMEOUT);
+        let listed = windows_in(&dir, None, false).unwrap();
+        assert!(listed.windows.is_empty());
+        assert_eq!(listed.skipped[0].reason, "busy");
+        assert_eq!(listed.skipped[0].socket, dir.join("2.sock"));
+        assert_eq!(listed.require_complete().unwrap_err().code, code::BUSY);
+        assert_eq!(windows_in(&dir, Some("2.7"), false).unwrap().require_complete().unwrap_err().code, code::BUSY);
+        assert_eq!(windows_in(&dir, Some("2.7"), false).unwrap().require_complete().unwrap_err().code, code::TIMEOUT);
+        assert_eq!(windows_in(&dir, Some("2.7"), false).unwrap().require_complete().unwrap_err().code, code::GONE);
+        assert_eq!(windows_in(&dir, None, false).unwrap().require_complete().unwrap_err().code, code::TIMEOUT);
+        assert_eq!(windows_in(&dir, Some("2.7"), false).unwrap().require_complete().unwrap_err().code, code::BUSY);
+        assert_eq!(
+            windows_in(&dir, Some("2.7"), false).unwrap().require_complete().unwrap_err().code,
+            code::UNSUPPORTED
+        );
         owner.join().unwrap();
-        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]
@@ -325,12 +367,12 @@ mod tests {
                 stream.write_all(b"\n").unwrap();
             }
         });
-        assert_eq!(windows_in(&dir, Some("2.7"), false).unwrap()[0].id, "2.7");
-        assert_eq!(windows_in(&dir, Some("2.7"), true).unwrap()[0].id, "2.7");
+        assert_eq!(windows_in(&dir, Some("2.7"), false).unwrap().windows[0].id, "2.7");
+        assert_eq!(windows_in(&dir, Some("2.7"), true).unwrap().windows[0].id, "2.7");
         owner.join().unwrap();
         assert_eq!(slow.accept().unwrap_err().kind(), std::io::ErrorKind::WouldBlock);
         for invalid in ["../1", "tui-../../1", "1", "2.x", "tui-0"] {
-            assert!(windows_in(&dir, Some(invalid), false).unwrap().is_empty());
+            assert!(windows_in(&dir, Some(invalid), false).unwrap().windows.is_empty());
         }
         assert_eq!(target_pid("tui-42"), Some(42));
         std::fs::remove_dir_all(dir).unwrap();
