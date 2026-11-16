@@ -12,6 +12,10 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+### Fixed
+
+- Reinstalling a daemon service through a symbolic link updates its target while preserving the link and existing private permissions; group and other write permissions are removed. (moai-80dx)
+
 ## [1.2.0] - 2026-11-12
 
 ### Added
