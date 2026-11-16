@@ -25,6 +25,7 @@ does not commit and it does not tag — see `CONTRIBUTING.md`.
 - A backlog item saved with `SPC n` in the explorer is marked read for its author, whether saved in the form, returned from an editor, or continued after the identity prompt. (moai-u3uv)
 - Reinstalling a daemon service through a symbolic link updates its target while preserving the link and existing private permissions; group and other write permissions are removed. (moai-80dx)
 - `moai daemon install` refuses with `bad_input` and writes nothing when a relative `MOAI_CTL_DIR` would make the service's socket path too long for a Unix socket once made absolute. Before, it registered a service whose daemon could never start. (moai-fetu)
+- The web Gantt tab keeps chart scrolling inside the chart; in narrow panes the toolbar and legend scroll separately so their contents remain reachable. (moai-95hg)
 
 ## [1.2.0] - 2026-11-12
 
