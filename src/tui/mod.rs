@@ -3767,7 +3767,7 @@ impl App {
         }
     }
 
-    /// **방금 쓴 줄을 쓴 사람의 읽음으로 적는다**(moai-uwi9.0xu) — 제 끌기가 제게 [NEW] 로 돌아오지 않게. 쓰기가 담긴 **뒤에**,
+    /// **방금 쓴 줄을 쓴 사람의 읽음으로 적는다**(moai-uwi9.0xu) — 제 끌기와 담기가 제게 [NEW] 로 돌아오지 않게. 쓰기가 담긴 **뒤에**,
     /// [`App::write`] 가 트래커 락을 놓은 다음에 부른다(리뷰). 그 쓰기의 뒷걸음에서 적던 판은 이 사람의 읽음 파일 락을 기다리는
     /// 동안(5초까지)과 그 파일을 읽고 고쳐 쓰는 동안 `.moai/lock` 을 쥐어 옆 세션의 쓰기를 다 세웠다 — `cmd::edit` 과 같은 까닭이다.
     /// 적는 값은 받은 줄의 도장이고, 더 늦은 읽음은 거꾸로 안 옮긴다([`crate::read_marks::mark_written`]).
@@ -8610,7 +8610,10 @@ impl App {
 /// **담는 곳은 폼이 연 순간 박은 프로젝트다**([`form::Target`]) — 커서도, 층이 그새 다시
 /// 읽힌 것도 상관없다([`App::stand_at`]).
 ///
-/// 되면 폼을 **닫기만 한다.** 다시 읽기·만든 줄에 커서 두기·`✓ 담김 · id` 알림은
+/// 새 줄은 앞 판이 없으므로 무조건 읽음으로 적는다. `write` 가 트래커 락을 놓은 뒤
+/// 방금 들인 줄의 도장으로 적고, 실패하면 담김 알림에 까닭을 붙인다.
+///
+/// 되면 폼을 **닫는다.** 다시 읽기·만든 줄에 커서 두기·`✓ 담김 · id` 알림은
 /// `write` 가 한다(moai-064q) — 여기서 또 하면 한 쓰기에 목록을 두 번 세거나 알림이 둘이
 /// 된다. 안 되면 **아무것도 건드리지 않는다** — 누군지 묻는 중이면 `write` 가 이미 모드를
 /// `Ask` 로 바꿨고, 실패면 폼이 열린 채 까닭이 배너에 선다.
@@ -8629,7 +8632,8 @@ fn save_backlog(app: &mut App) {
         return;
     }
     let kept = say(app.site.lang, "tui.jot.kept");
-    let wrote = app.write(save_backlog, move |issues, cfg, reserved, by, _| {
+    let mut written = None;
+    let wrote = app.write(save_backlog, |issues, cfg, reserved, by, _| {
         // **도장은 락을 쥔 뒤에 뜬다**(moai-3hgm.pp2) — `moai add`·`backlog add` 와 간트의 옮기기([`gantt`])와 같은 자다.
         // 밖에서 뜨면 누구인지 묻고 락을 기다린 동안만큼 이른 `created_at` 과 저널 도장이 선다.
         let at = crate::model::now();
@@ -8638,10 +8642,17 @@ fn save_backlog(app: &mut App) {
         (backlog.assignee, backlog.assignee_email) = by.as_assignee();
         backlog.body = body;
         let (entry, made) = crate::store::admit(issues, cfg, backlog, by)?;
-        Ok((vec![entry], Touched { id: made.id, done: kept }))
+        let touched = Touched { id: made.id.clone(), done: kept };
+        written = Some(made);
+        Ok((vec![entry], touched))
     });
     if wrote.is_some() {
+        // 담긴 것은 참이다 — 폼은 읽음을 적기(그 파일의 락을 5초까지 기다린다) **전에** 닫는다. 열어 둔 채 적다가
+        // 루프가 끝나면 `unsaved` 가 이미 담긴 글을 못 담은 것으로 낸다.
         app.mode = Mode::Browse;
+        if let Some(why) = written.and_then(|row| app.mark_written(&row)) {
+            app.notice.get_or_insert_default().push_str(&format!(" — {why}"));
+        }
     }
 }
 
@@ -16266,6 +16277,62 @@ mod tests {
         type_in(a, title);
     }
 
+    #[test]
+    fn jot_marks_only_the_written_row_read_on_disk() {
+        let (scratch, mut a) = writable("jot-read");
+        let config = scratch.join("user.toml");
+        let root = scratch.path().to_path_buf();
+        a.user_config = Some(config.clone());
+        a.site.me = a.user.clone();
+        a.recount_unread();
+        jotting(&mut a, "A new thought");
+        a.key(ctrl('s'));
+        let made = backlog_in(a.site.repo.as_ref().unwrap()).pop().unwrap();
+        // 파일의 표가 **그 한 줄뿐**이다 — 글 모양(TOML 키의 꼴)이 아니라 읽은 표로 견준다.
+        let marks = crate::read_marks::read(&config, &root, &Default::default());
+        assert_eq!(
+            marks.seen,
+            std::collections::BTreeMap::from([(made.id.clone(), made.updated_at.clone())]),
+            "{:?}",
+            marks.problems
+        );
+        assert!(!a.site.unread.contains(&made.id));
+        assert_eq!(a.notice, Some(format!("✓ 담김 · {}", made.id)));
+    }
+
+    #[test]
+    fn jot_without_user_config_marks_the_row_in_memory() {
+        let (_scratch, mut a) = writable("jot-read-memory");
+        a.site.me = a.user.clone();
+        assert!(a.user_config.is_none());
+        jotting(&mut a, "Memory only");
+        a.key(ctrl('s'));
+        let made = backlog_in(a.site.repo.as_ref().unwrap()).pop().unwrap();
+        assert_eq!(a.site.seen.get(&made.id), Some(&made.updated_at));
+        assert!(!a.site.unread.contains(&made.id));
+    }
+
+    #[test]
+    fn failed_jot_read_mark_keeps_the_saved_row_and_notice() {
+        let (scratch, mut a) = writable("jot-read-fail");
+        let config = scratch.join("user.toml");
+        let sheet = crate::read_marks::place_of(&config, scratch.path()).at;
+        std::fs::create_dir_all(&sheet).unwrap();
+        a.user_config = Some(config);
+        a.site.me = a.user.clone();
+        a.site.seen.insert("prior".into(), "2026-01-01T00:00:00Z".into());
+        jotting(&mut a, "Saved despite read failure");
+        a.key(ctrl('s'));
+        let made = backlog_in(a.site.repo.as_ref().unwrap()).pop().unwrap();
+        assert_eq!(a.mode, Mode::Browse);
+        assert!(a.trouble.is_none(), "{:?}", a.trouble);
+        // 붙은 까닭이 **적다 만난 것**이어야 한다 — 다시 들기의 말(`why.or(reread)`)도 같은 ` — ` 로 붙는다.
+        let lead = say(a.site.lang, "tui.read.unwritten").split("{why}").next().unwrap_or_default().to_string();
+        let notice = a.notice.unwrap();
+        assert!(notice.starts_with(&format!("✓ 담김 · {} — {lead}", made.id)), "{notice}");
+        assert!(a.site.unread.contains(&made.id));
+    }
+
     /// **`n` 은 어디를 보고 있든 같은 빈 폼을 연다** — 목록에서도 상세에서도 에픽 안에서도.
     /// 글을 받는 중이면 `n` 은 글자다. 폼 안의 포커스는 탐색기의 포커스와 따로라, 닫으면
     /// 보던 칸이 그대로 있다.
@@ -16403,11 +16470,18 @@ mod tests {
         if std::fs::File::create(journal.join("probe")).is_ok() {
             return; // root 는 권한을 안 본다
         }
+        let config = scratch.join("user.toml");
+        let sheet = crate::read_marks::place_of(&config, scratch.path()).at;
+        std::fs::create_dir_all(sheet).unwrap();
+        a.user_config = Some(config);
         jotting(&mut a, "한 번만");
         a.key(ctrl('s'));
         assert_eq!(a.mode, Mode::Browse, "담겼는데 폼이 열린 채다 — {:?}", a.trouble);
         assert!(a.trouble.is_none(), "{:?}", a.trouble);
         assert!(a.notice.as_deref().is_some_and(|n| n.contains("이력은 못 남겼다")), "{:?}", a.notice);
+        // 이력의 말 뒤에 읽음의 말이 **제 낱말로** 붙는다 — ` — ` 를 세면 이력의 까닭 글이 든 대시까지 센다.
+        let lead = say(a.site.lang, "tui.read.unwritten").split("{why}").next().unwrap_or_default().to_string();
+        assert!(a.notice.as_deref().is_some_and(|n| n.contains(&format!(" — {lead}"))), "{:?}", a.notice);
         assert_eq!(backlog_in(a.site.repo.as_ref().unwrap()).len(), 1);
     }
 
@@ -16484,6 +16558,14 @@ mod tests {
         let (scratch, mut a) = writable("ask");
         let file = scratch.join(".moai/issues.jsonl");
         let config = scratch.join(".moai/config.toml");
+        let mut other = a.site.issues.iter().find(|i| i.id == "argos-0001").unwrap().clone();
+        other.assignee = Some("레이븐".into());
+        other.assignee_email = Some("raven@example.com".into());
+        std::fs::write(&file, format!("{}\n", serde_json::to_string(&other).unwrap())).unwrap();
+        a.reload();
+        a.user_config = Some(scratch.join("user.toml"));
+        a.site.me = None;
+        a.recount_unread();
         let (before, config_before) =
             (std::fs::read_to_string(&file).unwrap(), std::fs::read_to_string(&config).unwrap());
         a.user = None;
@@ -16536,10 +16618,13 @@ mod tests {
         let journal = repo.journal_of(&made[0].id);
         assert_eq!((journal[0].by.as_str(), journal[0].by_email.as_deref()), ("레이븐", Some("raven@example.com")));
         assert_eq!(a.user.as_deref(), Some("레이븐 (raven@example.com)"));
-        // 받은 사람이 [NEW] 를 가를 사람이기도 하다(moai-j038.vna) — 헤더만 그 사람을 대고 안 읽음은
-        // 띄울 때의 "모름" 에 머물면 방금 담은 제 줄에도 [NEW] 가 안 선다.
+        // 받은 사람이 [NEW] 를 가를 사람이기도 하다(moai-j038.vna): 기존의 다른 줄은 안 읽음으로 남는다.
         assert_eq!(a.site.me.as_deref(), Some("레이븐 (raven@example.com)"));
-        assert!(a.site.unread.contains(&made[0].id), "받은 사람의 새 줄에 [NEW] 가 안 섰다 — {:?}", a.site.unread);
+        assert!(!a.site.unread.contains(&made[0].id), "방금 담은 줄이 안 읽음이다");
+        assert!(a.site.unread.contains("argos-0001"), "받은 사람의 다른 줄이 안 읽음에 없다");
+        let marks = crate::read_marks::read(a.user_config.as_ref().unwrap(), scratch.path(), &Default::default());
+        assert_eq!(marks.seen.len(), 1);
+        assert_eq!(marks.seen.get(&made[0].id), Some(&made[0].updated_at));
         assert_eq!(std::fs::read_to_string(&config).unwrap(), config_before, "받은 것을 설정에 적었다");
 
         // 두 번째 쓰기는 묻지 않는다.
@@ -16554,6 +16639,9 @@ mod tests {
     #[test]
     fn esc_on_the_question_writes_nothing_and_gives_the_form_back() {
         let (scratch, mut a) = writable("ask-esc");
+        let config = scratch.join("user.toml");
+        let sheet = crate::read_marks::place_of(&config, scratch.path()).at;
+        a.user_config = Some(config);
         let file = scratch.join(".moai/issues.jsonl");
         let before = std::fs::read_to_string(&file).unwrap();
         a.user = None;
@@ -16568,6 +16656,7 @@ mod tests {
         assert_eq!(a.mode, form, "적던 폼으로 안 돌아왔다");
         assert_eq!(std::fs::read_to_string(&file).unwrap(), before, "그만뒀는데 썼다");
         assert_eq!(a.user, None, "그만뒀는데 받다 만 이름을 들었다");
+        assert!(!sheet.exists(), "그만뒀는데 읽음 파일을 썼다");
         assert!(!a.quit);
     }
 
@@ -16620,7 +16709,9 @@ mod tests {
     /// 걷고. 담기면 폼은 안 남고 커서와 알림은 `write` 가 한다.
     #[test]
     fn the_edited_text_is_saved_like_the_form() {
-        let (_scratch, mut a) = writable("editor-save");
+        let (scratch, mut a) = writable("editor-save");
+        a.user_config = Some(scratch.join("user.toml"));
+        a.site.me = a.user.clone();
         let edit = ask_editor(&mut a);
         let text = format!("  편집기에서 온 것 \n\n## 설계\n둘째 줄\n{}", edit.text);
         a.edited(edit.into, Ok(text));
@@ -16630,6 +16721,9 @@ mod tests {
         assert_eq!(made.len(), 1, "{made:?}");
         assert_eq!((made[0].title.as_str(), made[0].body.as_deref()), ("편집기에서 온 것", Some("## 설계\n둘째 줄")));
         assert_eq!(made[0].epic, None);
+        let marks = crate::read_marks::read(a.user_config.as_ref().unwrap(), scratch.path(), &Default::default());
+        assert_eq!(marks.seen.get(&made[0].id), Some(&made[0].updated_at));
+        assert!(!a.site.unread.contains(&made[0].id));
         assert_eq!(on(&a), Some(made[0].id.clone()));
         assert_eq!(a.notice, Some(format!("✓ 담김 · {}", made[0].id)));
     }

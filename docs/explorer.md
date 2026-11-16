@@ -500,7 +500,16 @@ read, `SPC m g` every member of the group it is in, and `SPC m a` everything.
 Read marks live in your own config, not in the tracker, so marking changes
 nothing anyone else sees; the CLI side is `moai read`. Editing a row or moving
 its plan marks the new version read only if the previous version was already
-read. An unseen change remains `[NEW]` (moai-uwi9). Outside the explorer,
+read. An unseen change remains `[NEW]` (moai-uwi9). A thought you save with
+`SPC n` is marked read for you as soon as it is saved, including after the editor
+or the identity prompt (moai-u3uv).
+
+Read marks are separate on each machine. On a machine where you have never read
+this project, every row assigned to you can show `[NEW]`. If the explorer did
+not yet know who you are, these marks appear when you answer the identity prompt
+for a write. `SPC m a` marks them all read.
+
+Outside the explorer,
 `moai show --json` (and `moai show <id> --json`) puts `"unread": true` on the same
 rows the explorer marks `[NEW]`; a row that is not unread has no key at all, and
 when moai cannot tell who you are or cannot read your read marks, no row carries it.
@@ -567,4 +576,4 @@ write there either.
   an email on every write and `git config` had none. The answer holds for this
   run; set `user.name` and `user.email` to stop it asking
 
-Decided in: moai-e9hi moai-724f moai-z46r moai-9nfw moai-47mz moai-irrj moai-ucx8 moai-1hka moai-h2rh moai-gelm moai-m6ni moai-p3r9 moai-o3cb moai-fyul moai-ogaw moai-tllo moai-fc97 moai-jtvp moai-bth3 moai-9tqo moai-wk7i [moai-pxiy](https://github.com/buzzni/moai/pull/43 "external issue") moai-i4hf moai-lj8g moai-ccow moai-d1zn moai-ekg6 moai-uwi9 moai-mkzo moai-i07x moai-zgc1 moai-4km9 moai-4v3h moai-7eeq moai-yigx moai-okdc moai-z74b moai-1f3p
+Decided in: moai-e9hi moai-724f moai-z46r moai-9nfw moai-47mz moai-irrj moai-ucx8 moai-1hka moai-h2rh moai-gelm moai-m6ni moai-p3r9 moai-o3cb moai-fyul moai-ogaw moai-tllo moai-fc97 moai-jtvp moai-bth3 moai-9tqo moai-wk7i [moai-pxiy](https://github.com/buzzni/moai/pull/43 "external issue") moai-i4hf moai-lj8g moai-ccow moai-d1zn moai-ekg6 moai-uwi9 moai-mkzo moai-i07x moai-zgc1 moai-4km9 moai-4v3h moai-7eeq moai-yigx moai-okdc moai-z74b moai-1f3p moai-u3uv
