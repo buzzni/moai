@@ -149,7 +149,7 @@ A service does not inherit your shell's environment, and the socket directory de
 
 ## Upgrade the daemon
 
-1. Run `moai update`. After a successful installation it checks the newly installed binary's daemon status. If a daemon of another version or protocol still runs, and `moai daemon install` registered a service for this binary and that service is running, it restarts the service through the service manager and waits up to 5 seconds for the new version to answer. It waits by asking the daemon's socket for `hello`, without starting more processes. If the new version has not answered by then, it says so. In every other case it prints a restart notice to stderr (under `--json`, the keys below instead) and restarts nothing. A service you stopped stays stopped, and registration never changes.
+1. Run `moai update`. After a successful installation it checks the newly installed binary's daemon status. If a daemon of another version or protocol still runs, and `moai daemon install` registered a service for this binary and that service is running, and no `moai daemon install` or `moai daemon uninstall` is running at that moment, it restarts the service through the service manager and waits up to 5 seconds for the new version to answer. It waits by asking the daemon's socket for `hello`, without starting more processes. If the new version has not answered by then, it says so. In every other case it prints a restart notice to stderr (under `--json`, the keys below instead) and restarts nothing. A service you stopped stays stopped, and registration never changes.
 2. If you got the notice, restart the daemon through whatever keeps it running. For a service file you wrote from the examples above, run `systemctl --user restart moai-daemon.service`, or `launchctl kickstart -k gui/$(id -u)/com.example.moai-daemon`. For a daemon you started yourself, run `moai daemon stop`, then `moai daemon start` again where it ran before. Do not restart a service with `moai daemon stop`: the daemon exits 0, neither service manager restarts a clean exit, and a `moai daemon start` typed afterwards runs in your terminal, outside the service.
 3. Run `moai daemon status` to check the replacement. A daemon rebuilt with the same version and protocol is indistinguishable from the old build by this check, so restart it manually after such a rebuild.
 
@@ -511,4 +511,4 @@ $pipe.Dispose()
 
 After `moai update` a running daemon keeps the old binary, which the installer has renamed to `moai.exe.old` (`moai.exe.<pid>.old` when an earlier `.old` is still held). Stop it and start it again.
 
-Decided in: moai-wbdh, moai-ou5y, moai-upq5, moai-tloc, moai-fetu
+Decided in: moai-wbdh, moai-ou5y, moai-upq5, moai-tloc, moai-fetu, moai-kwzp

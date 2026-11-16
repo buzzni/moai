@@ -14,6 +14,7 @@ does not commit and it does not tag — see `CONTRIBUTING.md`.
 
 ### Fixed
 
+- `moai update` skips restarting the daemon service when an install or uninstall holds the service turn, preventing a concurrent uninstall from leaving the daemon running. (moai-kwzp)
 - `moai show` counts a live member once when an older archive copy shares its ID; explicit archive listings still identify the copy for recovery. (moai-b2jt)
 
 - A backlog item saved with `SPC n` in the explorer is marked read for its author, whether saved in the form, returned from an editor, or continued after the identity prompt. (moai-u3uv)
