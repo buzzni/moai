@@ -24,7 +24,7 @@ die() {
 }
 
 # **판을 고르는 자는 `[Unreleased]` 의 절이다**(moai-ug3j, 2026-10-01 사용자 결정).
-# 1.0 전에는 Fixed·Security 만 있으면 patch, Added·Changed·Deprecated·Removed 가 하나라도
+# 1.0 전후 모두 Fixed·Security 만 있으면 patch, Added·Changed·Deprecated·Removed 가 하나라도
 # 있으면 minor 다 — 동작이 바뀌었으면 고친 것이 아니다. AI 든 사람이든 고르는 것은 줄을
 # 어느 절에 넣는가이고, 번호는 여기서 센다. 세션마다 손으로 셈하던 판은 0.1.1 부터
 # 내리 patch 였다 — 그 판들 대부분에 `### Added` 가 있었는데도.
@@ -116,11 +116,8 @@ esac
 have=$("$check" --print) || die "Cargo.toml 의 [package] 에서 version 을 못 읽었다"
 [ -n "$have" ] || die "Cargo.toml 의 [package] 에서 version 을 못 읽었다"
 
-# 위의 규칙은 1.0 전의 것이다. 1.0 뒤에는 Removed 와 동작 변경이 major 일 수 있는데 그
-# 금은 아직 안 그었다 — 그은 척 minor 를 내느니 사람에게 넘긴다.
 case $level in
 auto)
-  [[ $have == 0.* ]] || die "1.0 뒤의 규칙은 아직 안 정했다 — minor · patch · 판을 직접 준다"
   pick
   step
   ;;

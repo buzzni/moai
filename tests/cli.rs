@@ -28591,7 +28591,7 @@ fn bump_with(name: &str, have: &str, unreleased: &str, args: &[&str]) -> (Output
 /// **`auto` 는 `[Unreleased]` 의 절로 판을 고른다**(moai-ug3j.r1y, 2026-10-01 사용자 결정).
 ///
 /// 손으로 셈하던 판은 0.1.1 부터 내리 patch 였다 — 그 판들 대부분에 `### Added` 가 있었는데도.
-/// 1.0 전에는 Fixed·Security 만 있으면 patch, 그 밖의 절이 하나라도 서면 minor 다. **동작
+/// 1.0 전후 모두 Fixed·Security 만 있으면 patch, 그 밖의 절이 하나라도 서면 minor 다. **동작
 /// 변경(Changed)도 minor 다** — 그 하나만 든 판이 patch 로 나가던 자리를 따로 잰다.
 #[cfg(unix)]
 #[test]
@@ -28629,11 +28629,32 @@ fn auto_reads_the_unreleased_sections_to_pick_minor_or_patch() {
     }
 }
 
+/// 1.0 뒤에도 같은 절로 고르며 미리 보기와 실제 올리기가 일치한다 (moai-gq98.0d9).
+#[cfg(unix)]
+#[test]
+fn auto_after_one_uses_the_same_rules() {
+    for (heading, want) in [
+        ("Fixed", "1.2.4"), ("Security", "1.2.4"),
+        ("Added", "1.3.0"), ("Changed", "1.3.0"),
+        ("Deprecated", "1.3.0"), ("Removed", "1.3.0"),
+    ] {
+        let entry = format!("### {heading}\n\n- entry\n\n");
+        let (preview, manifest, log) = bump_with(&format!("next-one-{heading}"), "1.2.3", &entry, &["--next"]);
+        assert!(preview.status.success(), "{heading}: {}", text(&preview));
+        assert_eq!(String::from_utf8_lossy(&preview.stdout).trim(), want);
+        assert!(manifest.contains("version = \"1.2.3\""));
+        assert!(!log.contains("2026-10-01"));
+        let (out, manifest, log) = bump_with(&format!("auto-one-{heading}"), "1.2.3", &entry, &["auto"]);
+        assert!(out.status.success(), "{heading}: {}", text(&out));
+        assert!(manifest.contains(&format!("version = \"{want}\"")));
+        assert!(log.contains(&format!("## [{want}] - 2026-10-01")));
+    }
+}
+
 /// **못 가르는 `[Unreleased]` 는 고르지 않고 멈춘다 — 아무것도 안 움직인 채로.**
 ///
 /// 빈 절은 낼 것이 없다는 뜻이고, 모르는 절은 어느 칸인지 모른다. 어림으로 patch 를 주면
-/// 기능이 든 판이 고친 판으로 나간다. 머리글만 서고 절이 빈 판도 고를 것이 없다. 1.0 뒤의
-/// 금은 아직 안 그었다.
+/// 기능이 든 판이 고친 판으로 나간다. 머리글만 서고 절이 빈 판도 고를 것이 없다.
 #[cfg(unix)]
 #[test]
 fn auto_refuses_what_it_cannot_sort_and_moves_nothing() {
@@ -28641,7 +28662,6 @@ fn auto_refuses_what_it_cannot_sort_and_moves_nothing() {
         ("bump-empty", "0.1.5", "", "비었다"),
         ("bump-loose", "0.1.5", "- 절 밖에 선 줄\n\n", "첫 절 앞의 글만"),
         ("bump-odd", "0.1.5", "### Improved\n\n- 모르는 절\n\n", "Improved"),
-        ("bump-one", "1.2.0", "### Fixed\n\n- 고친 것\n\n", "1.0 뒤"),
     ];
     for (name, have, unreleased, said) in cases {
         let (out, manifest, log) = bump_with(name, have, unreleased, &["auto"]);
@@ -28650,7 +28670,7 @@ fn auto_refuses_what_it_cannot_sort_and_moves_nothing() {
         assert!(manifest.contains(&format!("version = \"{have}\"")), "{name}: 판을 움직였다\n{manifest}");
         assert!(!log.contains("2026-10-01"), "{name}: 판을 열었다\n{log}");
     }
-    // 1.0 뒤에도 손으로 고른 한 칸은 그대로 지나간다 — 막은 것은 고르는 일이지 올리는 일이 아니다.
+    // 1.0 뒤에도 손으로 고른 한 칸을 올릴 수 있다.
     let (out, manifest, _) = bump_with("bump-one-minor", "1.2.0", "", &["minor"]);
     assert!(out.status.success(), "손으로 고른 칸을 막았다\n{}", text(&out));
     assert!(manifest.contains("version = \"1.3.0\""), "{manifest}");

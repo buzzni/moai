@@ -316,14 +316,13 @@ CI 의 잡 이름 `release 바이너리 15MB 예산` 은 required check 라 옛 
     scripts/bump-version.sh --next      고를 판만 찍는다. 아무것도 안 쓴다
     scripts/bump-version.sh auto        판을 올리고 [Unreleased] 를 그 판의 절로 연다
 
-- 1.0 전에는 Fixed·Security 만 있으면 patch, Added·Changed·Deprecated·Removed 가 하나라도
+- 1.0 전후 모두 Fixed·Security 만 있으면 patch, Added·Changed·Deprecated·Removed 가 하나라도
   있으면 minor 다. **동작 변경(Changed)도 minor 다** — 고친 것이 아니다
 - 판단할 것은 CHANGELOG 의 줄을 **어느 절에 넣는가** 하나다. 버그를 고치며 플래그를 더했으면
   Fixed 와 Added 에 나눠 적고, 판은 minor 가 된다
 - 모르는 절과 빈 `[Unreleased]` 앞에서는 고르지 않고 멈춘다. 첫 절 앞의 머리글(0.1.2 처럼
   깨지는 것을 모아 둔 글)은 판을 고르는 데 세지 않으니, 항목은 반드시 절 안에 적는다
-- major 는 스크립트가 올리지 않는다. 1.0 은 사람이 판을 직접 주어 연다. 1.0 뒤의 금은 아직
-  안 그어서 그때는 `auto` 가 멈춘다
+- major 는 스크립트가 올리지 않는다. 사람이 판을 직접 준다 (2026-11-16 결정, `moai-gq98`)
 - 0.1.1~0.1.5 는 이 규칙 전에 손으로 셈한 판이다. `### Added` 가 있었는데도 patch 였다.
   나간 태그는 되돌리지 않는다
 
