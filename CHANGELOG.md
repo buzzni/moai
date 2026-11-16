@@ -14,6 +14,8 @@ does not commit and it does not tag — see `CONTRIBUTING.md`.
 
 ### Fixed
 
+- `moai update` restarts a registered running service even when a different old daemon answers on the shell socket, and keeps the notice for that daemon instead of mistaking it for the service. (moai-s95f)
+
 - `moai update` skips restarting the daemon service when an install or uninstall holds the service turn, preventing a concurrent uninstall from leaving the daemon running. (moai-kwzp)
 - `moai show` counts a live member once when an older archive copy shares its ID; explicit archive listings still identify the copy for recovery. (moai-b2jt)
 
