@@ -432,13 +432,21 @@ pub fn marks(root: &Path) -> R<Vec<(PathBuf, crate::store::Stamp)>> {
 /// Active rows win over stale archive copies when selecting current work — the rule of [`report::with_archive`],
 /// readable and unreadable live ids alike, applied to rows this already owns.
 pub fn context(root: &Path, active: Load) -> R<Load> {
+    Ok(context_apart(root, active)?.0)
+}
+
+/// [`context`] together with the archive copies it set aside — every archived row whose id a live line holds, readable
+/// or not, in archive order. `moai show` judges every surface over the context and keeps the copies only to count
+/// duplicate lines and to open an id that only an unreadable live line holds. The rows are moved, never cloned: the
+/// context is read on every `show`, and the archive can hold tens of thousands of rows.
+pub fn context_apart(root: &Path, active: Load) -> R<(Load, Vec<Issue>)> {
     let mut archived = read(root)?;
     let live: BTreeSet<String> = active.issues.iter().map(|i| i.id.clone()).chain(active.reserved_ids()).collect();
-    archived.issues.retain(|i| !live.contains(&i.id));
+    let copies: Vec<Issue> = archived.issues.extract_if(.., |i| live.contains(&i.id)).collect();
     archived.issues.extend(active.issues);
     archived.issues.sort_by(|a, b| a.id.cmp(&b.id));
     archived.errors.extend(active.errors);
-    Ok(archived)
+    Ok((archived, copies))
 }
 
 /// The active snapshot `active` together with yearly archive files, duplicates kept. The write path reads only

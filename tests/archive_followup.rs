@@ -151,7 +151,7 @@ fn edit_and_show_agree_on_blocker_members_in_each_live_state() {
     }
 }
 
-/// Only the archive copies of an id an unreadable live line holds are set aside. An unreadable line elsewhere
+/// The archive copies of an id a live line holds, readable or not, are set aside. An unreadable line elsewhere
 /// must not change how `show` unfolds an epic whose readable member also has an archive twin.
 #[test]
 fn an_unrelated_unreadable_line_leaves_show_of_an_archive_twin_alone() {
@@ -164,6 +164,55 @@ fn an_unrelated_unreadable_line_leaves_show_of_an_archive_twin_alone() {
     assert!(before.contains("argos-eeee.mmm"), "{before}");
     repo.write(".moai/issues.jsonl", &format!("{live}{}\n", row("argos-zzzz", "future-kind", "todo")));
     assert_eq!(shown(&repo), before);
+}
+
+#[test]
+fn readable_live_member_wins_over_archived_twin_on_show_surfaces() {
+    let repo = Repo::new("readable-twin");
+    let epic = row("argos-eeee", "epic", "todo");
+    let member = row("argos-eeee.mmm", "issue", "todo");
+    let mut blocked = row("argos-xxxx", "issue", "todo");
+    blocked["blocked_by"] = serde_json::json!(["argos-eeee"]);
+    repo.write(".moai/issues.jsonl", &format!("{epic}\n{member}\n{blocked}\n"));
+    repo.write(".moai/archive/2026.jsonl", &format!("{}\n", row("argos-eeee.mmm", "issue", "done")));
+
+    let detail = text(repo.run(&["show", "argos-eeee"]));
+    assert!(detail.contains("0/1"), "{detail}");
+    let detail_json: serde_json::Value =
+        serde_json::from_str(&text(repo.run(&["show", "argos-eeee", "--json"]))).unwrap();
+    assert_eq!(detail_json["members"], serde_json::json!(["argos-eeee.mmm"]));
+    assert_eq!(detail_json["derived_status"], "todo");
+    let plan = text(repo.run(&["show", "argos-eeee", "--as-plan"]));
+    assert_eq!(plan.lines().filter(|l| l.contains("argos-eeee.mmm")).count(), 1, "{plan}");
+    for args in [&["show", "--all"][..], &["show", "--all", "--tree"][..]] {
+        let shown = text(repo.run(args));
+        let line = shown.lines().find(|line| line.contains("argos-eeee") && !line.contains(".mmm")).unwrap();
+        // Counting the archived done copy made the epic `▸` in the list and `1/2` in the tree.
+        assert!(!line.contains('✓') && !line.contains('▸') && !line.contains("1/2"), "{args:?}: {shown}");
+        assert_eq!(shown.lines().filter(|line| line.contains("argos-eeee.mmm")).count(), 1, "{args:?}: {shown}");
+    }
+    let rows: serde_json::Value =
+        serde_json::from_str(&text(repo.run(&["show", "--all", "--archived", "--json"]))).unwrap();
+    let rows = rows.as_array().unwrap();
+    let twins: Vec<_> = rows.iter().filter(|r| r["id"] == "argos-eeee.mmm").collect();
+    assert_eq!(twins.len(), 2, "{rows:?}");
+    assert_eq!(twins.iter().filter(|r| r["archive_copy"] == true && r["archived"] == true).count(), 1);
+    for args in [&["show", "--archived"][..], &["show", "--archived", "--tree"][..]] {
+        let shown = text(repo.run(args));
+        assert!(shown.contains("Archive copies (excluded from counts):"), "{shown}");
+        assert_eq!(shown.lines().filter(|line| line.contains("argos-eeee.mmm")).count(), 2, "{shown}");
+        let epic = shown.lines().find(|line| line.contains("argos-eeee") && !line.contains(".mmm")).unwrap();
+        assert!(!epic.contains("1/2") && !epic.contains('▸'), "{shown}");
+    }
+    assert_eq!(rows.iter().find(|r| r["id"] == "argos-eeee").unwrap()["derived_status"], "todo");
+    let status: serde_json::Value = serde_json::from_slice(&repo.run(&["status", "--json"]).stdout).unwrap();
+    assert_eq!(status["epics"][0]["derived_status"], "todo");
+    let shown = text(repo.run(&["show", "argos-xxxx"]));
+    let edited = text(repo.run(&["edit", "argos-xxxx", "--title", "renamed"]));
+    let line = |out: &str| out.lines().find(|l| l.contains("argos-eeee")).unwrap().to_owned();
+    assert_eq!(line(&shown), line(&edited));
+    let twin = text(repo.run(&["show", "argos-eeee.mmm"]));
+    assert!(twin.to_lowercase().contains("duplicate"), "{twin}");
 }
 
 #[cfg(target_os = "linux")]
