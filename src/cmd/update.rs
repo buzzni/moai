@@ -151,7 +151,8 @@ fn daemon_restart(exe: &std::path::Path) -> Option<Seen> {
 /// 등록된 서비스를 다시 시작해 본 결과.
 #[cfg_attr(not(any(unix, windows)), allow(dead_code))]
 enum ServiceRestart {
-    /// 부르지 않았거나 관리자가 거절했다. 옛 데몬이 그대로일 수 있어 지금까지의 알림을 낸다.
+    /// 부르지 않았거나 관리자가 거절했거나, 셸 소켓의 옛 데몬이 서비스의 pid 와 달랐다(moai-s95f).
+    /// 옛 데몬이 그대로일 수 있어 지금까지의 알림을 낸다.
     NotDone,
     /// 관리자는 받았는데 시한 안에 새 판이 안 답했다. 옛 데몬은 이미 멈췄을 수 있어 "아직 돈다" 고 말하면 거짓이다.
     Unanswered,
@@ -161,6 +162,9 @@ enum ServiceRestart {
 
 /// 등록된 서비스를 새 판으로 다시 시작하고 새 판이 답할 때까지 기다린다(moai-upq5.1g6). `moai daemon stop` 으로 하지 않는다 —
 /// 깨끗한 종료는 관리자가 다시 안 띄운다. 등록 상태를 바꾸는 호출은 이 길에 없다.
+///
+/// **셸 소켓에서 답한 옛 데몬이 서비스의 pid 와 다르면** 서비스는 다시 시작하되 기다리지 않고 `NotDone` 이다(moai-s95f).
+/// pid 를 모르면 예전처럼 기다린다 — 모른다는 것만으로 옛 데몬이 아직 돈다고 말할 수 없다.
 ///
 /// 기다림은 프로세스를 띄우지 않고 `client::probe` 로 새 바이너리가 댄 소켓에 `hello` 를 묻는다(moai-tloc.wt9).
 /// 붙기 한 번이 시한(2초)까지 걸릴 수 있어 5초가 지난 뒤에는 새 붙기를 시작하지 않는다.
@@ -174,7 +178,7 @@ fn restart_service(exe: &std::path::Path, seen: &Seen) -> ServiceRestart {
     let Ok(service) = Service::native() else {
         return ServiceRestart::NotDone;
     };
-    if !service.restart(exe, &run) {
+    if service.restart(exe, seen.old.1, &run) != Some(true) {
         return ServiceRestart::NotDone;
     }
     let deadline = Instant::now() + Duration::from_secs(5);

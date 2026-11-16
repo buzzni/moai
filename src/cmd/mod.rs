@@ -1163,6 +1163,7 @@ pub const OURS: &[&str] = &[
     // `show --json`(목록도 하나도)이 곁들이는 선 마일스톤과 아카이브(moai-wk7i.rmc).
     "derived_milestone",
     "archived",
+    "archive_copy",
     // `edit --json` 이 곁들이는 남은 소속과 날 되돌리기.
     "inherited_epic",
     "inherited_milestone",

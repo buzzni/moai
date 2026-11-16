@@ -2567,11 +2567,10 @@ fn process_nonce() -> u64 {
 /// 파일로 바뀐다. 바꾼 뒤에 입히면 그 사이 잠깐 열려 있으므로 앞에서 한다. 파일이 없던
 /// 처음 쓰기만 umask 를 따른다.
 ///
-/// **권한을 고르는 인자는 두지 않는다.** 한때 권한을 넘기는 `write_atomic_as` 가 곁에 따로 있어
-/// 사용자 설정만 그것을 불렀고, `issues.jsonl` 은 권한 없는 쪽을 불러 풀렸다 (moai-c1s3).
-/// 지키지 않아야 할 쓰기가 없으니 잊을 자리도 없앤다. [`write_atomic_in`] 이 고르는 것은 **임시
-/// 자리뿐**이고 권한은 둘이 한 몸통에서 지킨다 — 임시 자리를 잘못 고르면 찌꺼기가 남지만, 권한을
-/// 잘못 고르면 남이 읽는다. 둘을 같은 무게로 읽고 `write_atomic_as` 를 되살리지 않는다.
+/// 일반 쓰기는 권한을 고르는 인자를 두지 않는다 — 옛 `write_atomic_as` 를 실수로
+/// 빼고 불러 `issues.jsonl` 권한이 풀린 적이 있다(moai-c1s3). 서비스 관리자만 기존
+/// 권한에서 그룹·타인의 쓰기를 걷어야 하여 [`write_atomic_service`] 가 같은 몸통의
+/// 한정된 예외를 쓴다. [`write_atomic_in`] 은 임시 자리만 고르고 기존 권한을 지킨다.
 ///
 /// **뿌리 없는 경로 하나는 옮기지 않는다**(moai-iq7j). `path.parent()` 가 없는 것은 사람이 밟는
 /// 자리가 아니라 부르는 쪽의 실수이고(뿌리 `/` 나 빈 경로), 이 함수는 머지 드라이버도 부른다 —
@@ -2589,7 +2588,14 @@ fn process_nonce() -> u64 {
 /// 파일을 치우고 대상을 안 건드리므로 다시 써도 잃을 것이 없다([`write_atomic_in`] 이 `.moai/` 에서 물러서는
 /// 것과 같은 길이다, [`atomic`]). 링크가 아니면 두 자리가 같아 한 번뿐이다.
 pub(crate) fn write_atomic(path: &Path, bytes: &[u8]) -> R<()> {
-    atomic(path, bytes, None, None)
+    atomic(path, bytes, None, None, false)
+}
+
+/// Service managers require a non-group-writable file, even under a loose umask.
+/// Restrict existing permissions or use 0644 for a new file before replacement;
+/// ordinary writes preserve existing permissions without this service exception.
+pub(crate) fn write_atomic_service(path: &Path, bytes: &[u8]) -> R<()> {
+    atomic(path, bytes, None, None, true)
 }
 
 /// [`write_atomic`] 이되 **링크는 `checkout` 안을 가리킬 때만 따라간다**(moai-4oab, 2026-09-29 사용자
@@ -2602,7 +2608,7 @@ pub(crate) fn write_atomic(path: &Path, bytes: &[u8]) -> R<()> {
 /// 트리)은 이것이 아니라 임시 파일을 `.moai/` 에 짓는 [`write_staged`] 로 쓴다(moai-dj4j.rs4). 스냅샷은 제가 이미
 /// `.moai/` 에 들어 둘이 같다.
 pub(crate) fn write_atomic_inside(path: &Path, bytes: &[u8], checkout: &Path) -> R<()> {
-    atomic(path, bytes, Some(checkout), None)
+    atomic(path, bytes, Some(checkout), None, false)
 }
 
 /// 체크아웃 안의 갈아끼우는 쓰기([`write_atomic_inside`]·[`write_staged`])가 이 자리를 받을지를 **쓰지 않고** 잰다 — 둘
@@ -2615,7 +2621,7 @@ pub(crate) fn measure_inside(path: &Path, checkout: &Path) -> R<()> {
     target_of(path, Some(checkout)).map(drop)
 }
 
-/// [`write_atomic`]·[`write_atomic_inside`]·[`write_atomic_in`] 의 몸통 — 임시 자리를 고르고 물러서는 것이 여기 한
+/// [`write_atomic`]·[`write_atomic_service`]·[`write_atomic_inside`]·[`write_atomic_in`] 의 몸통 — 임시 자리를 고르고 물러서는 것이 여기 한
 /// 벌이다. 차례는 `stage`(받았으면) → 받은 철자 곁 → 가리키는 파일 곁이고, 같은 자리는 한 번만 간다. 실패한 자리는
 /// 임시 파일을 치우고 대상을 안 건드리므로([`replace`]) 다음 자리로 가도 잃을 것이 없다. 다 실패하면 마지막 자리의
 /// 말을 낸다.
@@ -2628,7 +2634,7 @@ pub(crate) fn measure_inside(path: &Path, checkout: &Path) -> R<()> {
 /// 이미 잰 자리인데, 받은 임시 자리만 아무도 안 쟀다. 딸린 워크트리의 `.moai` 는 트래커를 루트로 옮겨 가는 여는 길도 안
 /// 재는 자리라, 받은 저장소가 그것을 밖이나 `.git` 으로 가는 링크로 커밋하면 커밋되는 파일의 임시 파일이 체크아웃 밖에
 /// 서고 쓰다 죽으면 거기 남았다. 그런 자리는 건너뛰고 대상 곁에서 짓는다([`stage_inside`]).
-fn atomic(path: &Path, bytes: &[u8], within: Option<&Path>, stage: Option<&Path>) -> R<()> {
+fn atomic(path: &Path, bytes: &[u8], within: Option<&Path>, stage: Option<&Path>, service: bool) -> R<()> {
     let real = target_of(path, within)?;
     let (near, far) = (parent_of(path, path)?, parent_of(&real, path)?);
     let stage = stage.filter(|dir| within.is_none_or(|root| stage_inside(dir, root)));
@@ -2639,7 +2645,7 @@ fn atomic(path: &Path, bytes: &[u8], within: Option<&Path>, stage: Option<&Path>
             continue;
         }
         tried.push(dir);
-        match replace(&real, bytes, dir) {
+        match replace(&real, bytes, dir, service) {
             Ok(()) => return Ok(()),
             Err(e) => last = Some(e),
         }
@@ -2908,7 +2914,7 @@ fn on_lock(real: &Path, root: &Path) -> bool {
 /// **부르는 쪽은 저장소가 든 파일뿐이라 링크는 `checkout` 안에서만 따른다**([`write_atomic_inside`] 와
 /// 같은 까닭이다).
 pub(crate) fn write_atomic_in(path: &Path, bytes: &[u8], tmp_dir: &Path, checkout: &Path) -> R<()> {
-    atomic(path, bytes, Some(checkout), Some(tmp_dir))
+    atomic(path, bytes, Some(checkout), Some(tmp_dir), false)
 }
 
 /// **커밋되는 파일**을 갈아끼운다 — 임시 파일은 그 체크아웃의 `.moai/` 에 먼저 짓는다(moai-3akx, moai-dj4j.rs4). 대상
@@ -2982,8 +2988,9 @@ fn torn_tail(f: &mut std::fs::File) -> std::io::Result<bool> {
 /// [`atomic`] 이 고른 임시 자리마다 부르는 몸통 — **이미 푼 자리**([`target_of`])를 `tmp_dir` 의 임시
 /// 파일로 갈아끼운다. 푸는 것을 여기 두지 않는 까닭은 한 번만 풀기 위해서다(리뷰) — 두 번 풀면 그 사이에
 /// 링크가 바뀐 경우에 임시 자리와 갈아끼울 자리가 서로 다른 풀이에서 온다.
-fn replace(path: &Path, bytes: &[u8], tmp_dir: &Path) -> R<()> {
+fn replace(path: &Path, bytes: &[u8], tmp_dir: &Path, service: bool) -> R<()> {
     let perms = std::fs::metadata(path).ok().map(|m| m.permissions());
+    let perms = if service { service_permissions(perms) } else { perms };
     // 부모를 묻는 것은 어디서나 한다(없으면 실패) — 그 값을 쓰는 것은 아래 유닉스 fsync 뿐이다.
     #[cfg_attr(not(unix), allow(unused_variables))]
     let dir = parent_of(path, path)?;
@@ -3014,6 +3021,20 @@ fn replace(path: &Path, bytes: &[u8], tmp_dir: &Path) -> R<()> {
         }
     }
     Ok(())
+}
+
+/// 기존 파일은 비공개 권한을 지키면서 그룹·타인의 쓰기를 걷는다. 새 파일은 umask와 무관하게 0644다.
+/// launchd 는 그룹이나 타인이 쓸 수 있는 plist를 안 읽는다.
+#[cfg(unix)]
+fn service_permissions(old: Option<std::fs::Permissions>) -> Option<std::fs::Permissions> {
+    use std::os::unix::fs::PermissionsExt as _;
+    let mode = old.map_or(0o644, |p| (p.mode() & 0o755) | 0o600);
+    Some(std::fs::Permissions::from_mode(mode))
+}
+
+#[cfg(not(unix))]
+fn service_permissions(old: Option<std::fs::Permissions>) -> Option<std::fs::Permissions> {
+    old
 }
 
 /// 임시 파일을 **새로 만들어서만** 연다(`O_CREAT|O_EXCL`, moai-ydm7.976) — 그 이름에 이미 무엇이

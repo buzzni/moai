@@ -3768,9 +3768,12 @@ Options:
   It stays in the foreground, so systemd, launchd or `&` can keep it; there
   is no background mode. The first line comes once the socket listens.
   A second start never runs a second daemon. When the running one is the same
-  version it says so and exits 0 (started is false). When it is another
-  version it names both and stops with the code version_mismatch - restart
-  it through its service manager, or stop and start it if run manually.
+  version it says so and exits 0 (started is false), unless the service that
+  moai daemon install registered started this one: then it stops with the
+  code already_exists, so the service manager sees the failure. When it is
+  another version it names both and stops with the code version_mismatch -
+  restart it through its service manager, or stop and start it if run
+  manually.
 
   A socket left by a daemon that is gone is removed and the daemon starts.
   A file there that is not your socket is left alone and refused. A running
