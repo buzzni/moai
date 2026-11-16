@@ -43,6 +43,24 @@ await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
 const url = `http://127.0.0.1:${server.address().port}`
 
 for (const engine of [chromium, firefox]) {
+  test(`${engine.name()}: small panes keep the toolbar and legend reachable`, async t => {
+    const browser = await engine.launch(); t.after(() => browser.close())
+    const page = await browser.newPage(); await page.goto(url); await page.waitForFunction(() => window.ready)
+    const result = await page.evaluate(async () => {
+      const pane = document.querySelector('#host'), toolbar = pane.querySelector('.g-toolbar'), legend = pane.querySelector('.g-legend')
+      pane.style.width = '160px'; pane.style.height = '200px'
+      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+      const initial = { toolbar: toolbar.scrollWidth > toolbar.clientWidth, legend: legend.scrollWidth > legend.clientWidth,
+        zoomWidth: toolbar.querySelector('.g-seg').getBoundingClientRect().width,
+        chartHeight: pane.querySelector('.g-scroll').clientHeight, overflow: getComputedStyle(pane).overflow }
+      toolbar.scrollLeft = toolbar.scrollWidth; legend.scrollLeft = legend.scrollWidth
+      return { ...initial, toolbarEnd: toolbar.scrollLeft + toolbar.clientWidth >= toolbar.scrollWidth - 1,
+        legendEnd: legend.scrollLeft + legend.clientWidth >= legend.scrollWidth - 1 }
+    })
+    assert.equal(result.overflow, 'hidden')
+    assert.ok(result.toolbar && result.legend && result.toolbarEnd && result.legendEnd, JSON.stringify(result))
+    assert.ok(result.zoomWidth > 100 && result.chartHeight > 0, JSON.stringify(result))
+  })
   test(`${engine.name()}: Gantt scrolls inside its pane while other panes scroll normally`, async t => {
     const browser = await engine.launch(); t.after(() => browser.close())
     const page = await browser.newPage(); await page.goto(url); await page.waitForFunction(() => window.ready)
