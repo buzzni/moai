@@ -61,10 +61,9 @@ pub struct Discovery {
 }
 
 impl Discovery {
-    /// **Selection needs every socket answered** (moai-pwxx.kah). A skipped socket reports no id, repository or last
-    /// input, so a pick among the rest could aim at an older window, and `-t` would read its own window as absent.
-    fn require_complete(self) -> R<Vec<Window>> {
-        let Some(skipped) = self.skipped.first() else { return Ok(self.windows) };
+    /// A directed or proposal request cannot treat its unlisted window as absent.
+    fn check_complete(&self) -> R<()> {
+        let Some(skipped) = self.skipped.first() else { return Ok(()) };
         let what = match skipped.code {
             code::BUSY => "is busy; retry control discovery".to_string(),
             code::TIMEOUT => "did not answer in time; retry control discovery".to_string(),
@@ -76,6 +75,11 @@ impl Discovery {
             },
         };
         Err(Fail::coded(format!("The window at {} {what}.", skipped.socket.display()), skipped.code))
+    }
+
+    fn require_complete(self) -> R<Vec<Window>> {
+        self.check_complete()?;
+        Ok(self.windows)
     }
 }
 
@@ -90,6 +94,17 @@ pub fn windows() -> R<Discovery> {
 pub fn windows_for_target(target: Option<&str>) -> R<Vec<Window>> {
     let dir = super::place::dir().map_err(|e| Fail::new(e.to_string()))?;
     windows_in(&dir, target, false)?.require_complete()
+}
+
+/// Automatic control uses the windows that answered; an explicit target must answer itself.
+#[cfg(any(unix, windows))]
+pub fn windows_for_control(target: Option<&str>) -> R<Discovery> {
+    let dir = super::place::dir().map_err(|e| Fail::new(e.to_string()))?;
+    let discovery = windows_in(&dir, target, false)?;
+    if target.is_some() {
+        discovery.check_complete()?;
+    }
+    Ok(discovery)
 }
 
 /// Discover a reconnecting tab only when a proposal names its exact window.

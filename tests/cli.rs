@@ -228,16 +228,23 @@ fn ctl_lists_available_windows_and_reports_skipped_sockets() {
     let busy = UnixListener::bind(dir.join("2.sock")).unwrap();
     let root = s.path().display().to_string();
     let live_thread = std::thread::spawn(move || {
-        for _ in 0..3 {
+        for _ in 0..6 {
             let (mut stream, _) = live.accept().unwrap();
             let mut request = String::new();
             BufReader::new(&stream).read_line(&mut request).unwrap();
-            let reply = serde_json::json!({"ok": true, "data": {"id":"tui-1", "kind":"tui", "pid":1, "version":"test", "proto":1, "root":root, "here":root, "layer":false, "screen":"list", "last_input_ago_ms":0}});
+            let request: serde_json::Value = serde_json::from_str(&request).unwrap();
+            let data = if request["verb"] == "hello" {
+                serde_json::json!({"id":"tui-1", "kind":"tui", "pid":1, "version":"test", "proto":1, "root":root, "here":root, "layer":false, "screen":"list", "last_input_ago_ms":0})
+            } else {
+                assert_eq!(request["verb"], "state");
+                serde_json::json!({"screen":"list"})
+            };
+            let reply = serde_json::json!({"ok": true, "data": data});
             writeln!(stream, "{reply}").unwrap();
         }
     });
     let busy_thread = std::thread::spawn(move || {
-        for _ in 0..5 {
+        for _ in 0..6 {
             let (mut stream, _) = busy.accept().unwrap();
             let mut request = String::new();
             BufReader::new(&stream).read_line(&mut request).unwrap();
@@ -256,12 +263,17 @@ fn ctl_lists_available_windows_and_reports_skipped_sockets() {
     assert!(human.status.success());
     assert!(String::from_utf8_lossy(&human.stdout).contains("tui-1"));
     assert!(String::from_utf8_lossy(&human.stderr).contains("2.sock (busy)"));
-    // Automatic selection, an explicit target, and the proposal path (`windows_for_proposal`) all refuse to guess.
-    for args in [
-        &["ctl", "state", "--json"][..],
-        &["ctl", "state", "-t", "tui-2", "--json"][..],
-        &["ctl", "answer", "tui-2/1", "--json"][..],
-    ] {
+    let state = run(&["ctl", "state", "--json"]);
+    assert!(state.status.success(), "{}", String::from_utf8_lossy(&state.stderr));
+    let state_json = json_of(&String::from_utf8_lossy(&state.stdout));
+    assert_eq!(state_json["screen"], "list");
+    assert_eq!(state_json["skipped"][0]["reason"], "busy");
+    assert!(state.stderr.is_empty());
+    let state = run(&["ctl", "state"]);
+    assert!(state.status.success());
+    assert!(String::from_utf8_lossy(&state.stderr).contains("2.sock (busy)"));
+    // An explicit target and the proposal path still refuse an unlisted target.
+    for args in [&["ctl", "state", "-t", "tui-2", "--json"][..], &["ctl", "answer", "tui-2/1", "--json"][..]] {
         let output = run(args);
         assert!(!output.status.success());
         assert_eq!(json_of(&String::from_utf8_lossy(&output.stderr))["code"], "busy");
