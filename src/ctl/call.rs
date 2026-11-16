@@ -96,6 +96,9 @@ fn windows_in(dir: &Path, target: Option<&str>, proposal: bool) -> R<Vec<Window>
                     }
                 }
             }
+            Ok(reply) if reply.code.as_deref() == Some("busy") => {
+                return Err(Fail::coded("A window is busy; retry control discovery.", code::BUSY));
+            }
             Err(e) if matches!(e.kind(), std::io::ErrorKind::ConnectionRefused | std::io::ErrorKind::NotFound) => {
                 // Recheck the path before removal; never follow or remove a foreign file.
                 if let Ok(now) = std::fs::symlink_metadata(&path)
@@ -104,6 +107,9 @@ fn windows_in(dir: &Path, target: Option<&str>, proposal: bool) -> R<Vec<Window>
                 {
                     let _ = std::fs::remove_file(&path);
                 }
+            }
+            Err(e) => {
+                return Err(Fail::coded(format!("Could not discover a window at {}: {e}", path.display()), code::GONE));
             }
             _ => {}
         }
@@ -236,6 +242,30 @@ mod tests {
     fn no_window_here_does_not_fall_through_to_another_repository() {
         let windows = vec![window("other", "/two", 1)];
         assert_eq!(pick(&windows, Some("/one"), None).unwrap_err().code, code::NO_WINDOW);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn discovery_reports_busy_and_unreadable_replies() {
+        use std::io::Write;
+        use std::os::unix::net::UnixListener;
+        let dir = std::env::temp_dir().join(format!("moai-pwxx-discovery-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let listener = UnixListener::bind(dir.join("2.sock")).unwrap();
+        let owner = std::thread::spawn(move || {
+            for busy in [true, true, false] {
+                let (mut stream, _) = listener.accept().unwrap();
+                if busy {
+                    serde_json::to_writer(&mut stream, &Reply::error("busy", "too many control clients")).unwrap();
+                    stream.write_all(b"\n").unwrap();
+                }
+            }
+        });
+        assert_eq!(windows_in(&dir, None, false).unwrap_err().code, code::BUSY);
+        assert_eq!(windows_in(&dir, Some("2.7"), false).unwrap_err().code, code::BUSY);
+        assert_eq!(windows_in(&dir, Some("2.7"), false).unwrap_err().code, code::GONE);
+        owner.join().unwrap();
+        std::fs::remove_dir_all(dir).unwrap();
     }
     #[test]
     #[cfg(unix)]
