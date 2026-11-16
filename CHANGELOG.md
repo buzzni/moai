@@ -12,6 +12,8 @@ does not commit and it does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-11-16
+
 ### Added
 
 - `moai ctl ls` and automatic window selection report skipped sockets on stderr, or in a `skipped` array in JSON. (moai-pwxx)
