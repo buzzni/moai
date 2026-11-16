@@ -174,7 +174,7 @@ fn restart_service(exe: &std::path::Path, seen: &Seen) -> ServiceRestart {
     let Ok(service) = Service::native() else {
         return ServiceRestart::NotDone;
     };
-    if !service.restart(exe, seen.old.1, &run) {
+    if service.restart(exe, seen.old.1, &run) != Some(true) {
         return ServiceRestart::NotDone;
     }
     let deadline = Instant::now() + Duration::from_secs(5);

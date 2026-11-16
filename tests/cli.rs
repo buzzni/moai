@@ -33231,15 +33231,14 @@ fn update_falls_back_to_the_notice_when_it_cannot_restart() {
     assert!(!text(&out).contains("still runs"), "{}", text(&out));
 }
 
-/// 셸 소켓의 옛 데몬이 서비스 밖에서 돌면 서비스를 다시 시작하지 않고 그 데몬을 알린다. 관리자가 pid 를 안 대면(`MainPID`
-/// 0) 그 데몬이 서비스의 것인지 모르니 역시 다시 시작하지 않는다.
+/// 셸 소켓의 데몬이 서비스 밖이거나 PID를 모르면 서비스를 재시작하고 옛 데몬을 알린다.
 #[cfg(target_os = "linux")]
 #[test]
 fn update_leaves_a_daemon_outside_the_service_running() {
     if !served() {
         return;
     }
-    let expected = "--user is-active --quiet moai-daemon.service\n--user show -p MainPID --value moai-daemon.service\n";
+    let expected = "--user is-active --quiet moai-daemon.service\n--user show -p MainPID --value moai-daemon.service\n--user restart moai-daemon.service\n";
     for main_pid in [99, 0] {
         let (out, calls) = update_serving_pid(Some(OUR_UNIT), 0, 0, Serve::Old, main_pid, &[]);
         assert!(text(&out).contains("daemon old (pid 42) still runs"), "MainPID {main_pid}: {}", text(&out));
