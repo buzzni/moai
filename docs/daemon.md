@@ -511,4 +511,4 @@ $pipe.Dispose()
 
 After `moai update` a running daemon keeps the old binary, which the installer has renamed to `moai.exe.old` (`moai.exe.<pid>.old` when an earlier `.old` is still held). Stop it and start it again.
 
-Decided in: moai-wbdh, moai-ou5y, moai-upq5, moai-tloc, moai-fetu, moai-kwzp, moai-s95f
+Decided in: moai-wbdh, moai-ou5y, moai-upq5, moai-tloc, moai-fetu, moai-kwzp, moai-s95f, moai-rkre
