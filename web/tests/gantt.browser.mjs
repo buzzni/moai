@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { createServer } from 'node:http'
-import { readFile } from 'node:fs/promises'
+import { readFile, readdir } from 'node:fs/promises'
 import { build } from 'esbuild'
 import { chromium, firefox } from 'playwright'
 import { i18nBundles } from '../i18n-bundles.mjs'
@@ -25,8 +25,14 @@ const bundle = await build({
   `, resolveDir: new URL('..', import.meta.url).pathname, loader: 'ts' },
   bundle: true, write: false, format: 'iife', plugins: [i18nBundles, vendorGlobals],
 })
-// Use the shipped cascade, including shell.css after gantt.css.
-const css = await readFile(new URL('../../src/web/dist/app.css', import.meta.url), 'utf8')
+// The shipped cascade, read from the sheets rather than src/web/dist/app.css so an edited sheet is tested without a
+// rebuild: build.mjs's styles() order (tokens, components, the rest by name, detail last — shell.css after gantt.css),
+// closed with its `[hidden]` rule.
+const styleDir = new URL('../panel/style/', import.meta.url)
+const firstSheets = ['tokens.css', 'components.css'], lastSheets = ['detail.css']
+const rank = name => firstSheets.includes(name) ? firstSheets.indexOf(name) : lastSheets.includes(name) ? firstSheets.length + 1 : firstSheets.length
+const sheetNames = (await readdir(styleDir)).filter(name => name.endsWith('.css')).sort((a, b) => rank(a) - rank(b) || a.localeCompare(b))
+const css = `${(await Promise.all(sheetNames.map(name => readFile(new URL(name, styleDir), 'utf8')))).join('\n')}\n[hidden]{display:none!important}\n`
 const server = createServer((req, res) => {
   res.setHeader('Content-Type', req.url === '/app.js' ? 'text/javascript; charset=utf-8' : 'text/html; charset=utf-8')
   res.end(req.url === '/app.js' ? bundle.outputFiles[0].text : `<style>${css}

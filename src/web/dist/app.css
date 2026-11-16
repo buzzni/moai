@@ -516,6 +516,8 @@ body.m-resizing:is([data-resize="bottom"], [data-resize="top"]) { cursor: row-re
  * cap, and the column of an actual band by the status glyph in the grid. The colours are tokens that already have
  * their dark values (tokens.css), so this sheet adds none.
  */
+/* Two classes, not one: build.mjs joins shell.css after this sheet, and its `.m-pane-main { overflow: auto }` would win
+ * a tie, so the pane would scroll as a whole around the box that should be the only one to scroll. */
 .m-pane-main.m-pane-gantt { overflow: hidden; }
 .m-pane-gantt:not([hidden]) { display: flex; flex-direction: column; }
 .m-gantt { --link: var(--review); flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
