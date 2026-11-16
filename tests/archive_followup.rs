@@ -151,7 +151,7 @@ fn edit_and_show_agree_on_blocker_members_in_each_live_state() {
     }
 }
 
-/// Only the archive copies of an id an unreadable live line holds are set aside. An unreadable line elsewhere
+/// The archive copies of an id a live line holds, readable or not, are set aside. An unreadable line elsewhere
 /// must not change how `show` unfolds an epic whose readable member also has an archive twin.
 #[test]
 fn an_unrelated_unreadable_line_leaves_show_of_an_archive_twin_alone() {
@@ -182,10 +182,13 @@ fn readable_live_member_wins_over_archived_twin_on_show_surfaces() {
         serde_json::from_str(&text(repo.run(&["show", "argos-eeee", "--json"]))).unwrap();
     assert_eq!(detail_json["members"], serde_json::json!(["argos-eeee.mmm"]));
     assert_eq!(detail_json["derived_status"], "todo");
+    let plan = text(repo.run(&["show", "argos-eeee", "--as-plan"]));
+    assert_eq!(plan.lines().filter(|l| l.contains("argos-eeee.mmm")).count(), 1, "{plan}");
     for args in [&["show", "--all", "--archived"][..], &["show", "--all", "--archived", "--tree"][..]] {
         let shown = text(repo.run(args));
         let line = shown.lines().find(|line| line.contains("argos-eeee") && !line.contains(".mmm")).unwrap();
-        assert!(!line.contains('✓'), "{args:?}: {shown}");
+        // Counting the archived done copy made the epic `▸` in the list and `1/2` in the tree.
+        assert!(!line.contains('✓') && !line.contains('▸') && !line.contains("1/2"), "{args:?}: {shown}");
         assert_eq!(shown.lines().filter(|line| line.contains("argos-eeee.mmm")).count(), 1, "{args:?}: {shown}");
     }
     let rows: serde_json::Value =

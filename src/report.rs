@@ -1704,8 +1704,10 @@ pub fn stranded_in(footing: &Footing<'_, '_>, trees: &[Workplace], now: &str) ->
 /// 상세는 뒷줄을 연다(`store::Load::get`). 앞줄을 말없이 가리면 깨진 파일을 보는
 /// 사람이 제 줄이 사라진 줄 알므로, 펼친 자리에서 한 줄로 드러낸다 — `status` 의
 /// `duplicate_id` 와 같은 사실을 그 id 하나에 대해 말하는 것이다(moai-e0ro).
-pub fn duplicate_lines(issues: &[Issue], id: &str) -> Option<usize> {
-    Some(issues.iter().filter(|i| i.id == id).count()).filter(|n| *n > 1)
+///
+/// **줄은 여러 그릇에서 받는다** — `show` 는 산 줄이 가린 아카이브 사본을 문맥과 따로 들고 있다(`archive::context_apart`).
+pub fn duplicate_lines<'a>(issues: impl IntoIterator<Item = &'a Issue>, id: &str) -> Option<usize> {
+    Some(issues.into_iter().filter(|i| i.id == id).count()).filter(|n| *n > 1)
 }
 
 /// `id` 의 직계 자식. 부모는 id 에서 유도되므로 접두 검사면 된다.

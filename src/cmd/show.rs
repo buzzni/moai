@@ -271,13 +271,11 @@ fn listed(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>, keys: &Keys) -> 
     // 산 줄의 id — 읽힌 줄과, 못 읽어도 id 를 대는 줄. 이것 밖의 줄은 아카이브 파일에서만 왔다(`Where::stored`).
     let live: std::collections::BTreeSet<String> =
         active_load.issues.iter().map(|i| i.id.clone()).chain(active_load.reserved_ids()).collect();
-    let active = active_load.issues.clone();
-    let mut load = crate::archive::read_all(&repo.root, active_load)?;
-    // Keep every copy for duplicate diagnostics, but judge all surfaces with the same
-    // live-first context as status and edit. Preserve duplicates within each source.
-    let mut judged: Vec<Issue> = load.issues.iter().filter(|i| !live.contains(&i.id)).cloned().collect();
-    judged.extend(active);
-    judged.sort_by(|a, b| a.id.cmp(&b.id));
+    // Every surface judges the live-first context `status` and `edit` read (`archive::context`): an archive copy of a
+    // live id, readable or not, supplies no member, child or blocker. The copies it set aside are kept apart, moved and
+    // not cloned, only to count duplicate lines and to open an id only an unreadable live line holds. Duplicates within
+    // each source stay.
+    let (load, copies) = crate::archive::context_apart(&repo.root, active_load)?;
     // Only live lines: an archive-file row is never in a list without `archived`, so its unreadable line cannot hide
     // one, and an id-less archive line would otherwise hold back every `removed` until someone mends the archive.
     crate::side::with(|side| {
@@ -315,15 +313,17 @@ fn listed(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>, keys: &Keys) -> 
         }
         // 없는 id 는 **어느 명령에서나 한 낱말이다**([`Fail::not_found`], moai-95g1) — 손으로
         // 같은 글을 지어 두면 `show` 만 옛 말로 남는다(리뷰).
-        let issue = load.get(id).ok_or_else(|| Fail::not_found(id, ctx.lang()))?;
+        // The later row wins, as it did over every copy read (`Load::get`): a live row, else the id's last archive
+        // copy — which the context set aside when only an unreadable live line holds the id.
+        let issue = load
+            .get(id)
+            .or_else(|| copies.iter().rfind(|i| i.id == *id))
+            .ok_or_else(|| Fail::not_found(id, ctx.lang()))?;
         if args.as_plan {
-            return plan(ctx, &judged, issue, args.raw);
+            return plan(ctx, &load.issues, issue, args.raw);
         }
-        return one(ctx, &repo, &load.issues, issue, args.raw, &origin, args.worktree.worktree, &live, &judged, keys);
+        return one(ctx, &repo, &copies, issue, args.raw, &origin, args.worktree.worktree, &live, &load.issues, keys);
     }
-
-    // Lists, filters and tree rollups must judge the same live-first context as the detail view.
-    load.issues = judged;
 
     // **`--raw` 도 조용히 버리지 않는다.** 본문은 하나를 펼칠 때만 나오므로
     // 목록 자리의 `--raw` 는 아무 일도 하지 않는다. 말없이 먹으면 부르는 쪽은
@@ -919,7 +919,7 @@ fn plan(ctx: &Ctx, all: &[Issue], epic: &Issue, raw: bool) -> R<Vec<String>> {
 fn one(
     ctx: &Ctx,
     repo: &Repo,
-    all: &[Issue],
+    copies: &[Issue],
     issue: &Issue,
     raw: bool,
     origin: &crate::worktree::Origin,
@@ -931,8 +931,9 @@ fn one(
     // **`--fields` 가 안 고른 값비싼 키는 짓지 않는다**(리뷰) — 도움말이 "안 고른 키는 셈하지 않는다" 고 대는데
     // 하나를 펼치는 이 길만 저널·`git log`·옆 워크트리·거름망·읽음 파일을 늘 다 읽었다. 사람 화면은 다 쓴다.
     let wants = |any: &[&str]| !ctx.json || any.iter().any(|k| keys.wants(k));
-    // Count duplicate lines over every copy read, archive duplicates included — that is the diagnostic.
-    let twins = report::duplicate_lines(all, &issue.id);
+    // Count duplicate lines over every copy read, the archive copies the context set aside included — that is the
+    // diagnostic.
+    let twins = report::duplicate_lines(judged.iter().chain(copies), &issue.id);
     // Everything else reads the live-first context: an archive copy shadowed by a readable or unreadable
     // live row must not supply members, children or blockers that edit and status do not see.
     let all = judged;
