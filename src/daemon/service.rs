@@ -1015,7 +1015,7 @@ mod tests {
         let s = Scratch::new("service-half");
         let dir = s.path().join("user");
         std::fs::create_dir_all(dir.join("the-service")).unwrap();
-        // 옮길 자리가 디렉터리라 `rename` 이 실패한다.
+        // 옮길 자리가 디렉터리라 쓰기가 실패한다 — 보통 파일이 아닌 자리는 임시 파일을 짓기 전에 거절한다.
         let svc = service_in(&s, Manager::Systemd);
         assert!(svc.write("x").is_err());
         let left: Vec<_> = std::fs::read_dir(&dir).unwrap().map(|e| e.unwrap().file_name()).collect();
@@ -1026,19 +1026,24 @@ mod tests {
     #[test]
     fn rewriting_a_link_keeps_it_and_sets_service_permissions() {
         use std::os::unix::fs::{PermissionsExt as _, symlink};
-        for manager in [Manager::Systemd, Manager::Launchd] {
+        for (manager, old_mode, expected) in [
+            (Manager::Systemd, 0o666, 0o644),
+            (Manager::Launchd, 0o600, 0o600),
+            (Manager::Launchd, 0o000, 0o600),
+            (Manager::Systemd, 0o777, 0o755),
+        ] {
             let s = Scratch::new("service-link");
             let svc = service_in(&s, manager);
             std::fs::create_dir_all(svc.file.parent().unwrap()).unwrap();
             let target = s.path().join("dotfile");
             std::fs::write(&target, "old").unwrap();
-            std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o666)).unwrap();
+            std::fs::set_permissions(&target, std::fs::Permissions::from_mode(old_mode)).unwrap();
             symlink("../dotfile", &svc.file).unwrap();
             svc.write("new").unwrap();
             assert!(svc.file.symlink_metadata().unwrap().file_type().is_symlink());
             assert_eq!(std::fs::read_link(&svc.file).unwrap(), Path::new("../dotfile"));
             assert_eq!(std::fs::read_to_string(&target).unwrap(), "new");
-            assert_eq!(std::fs::metadata(&target).unwrap().permissions().mode() & 0o777, 0o644);
+            assert_eq!(std::fs::metadata(&target).unwrap().permissions().mode() & 0o777, expected);
         }
     }
 
@@ -1055,14 +1060,16 @@ mod tests {
             let old = manager.render(exe.to_str().unwrap(), "/old/socket");
             std::fs::write(&target, &old).unwrap();
             symlink("../dotfile", &svc.file).unwrap();
-            let refusing = Fake::new(if manager == Manager::Systemd { &["enable"] } else { &["bootstrap"] });
+            // launchd 쪽은 `print` 도 거절한다 — 가짜가 늘 "올라가 있다" 고 답하면 `bootout` 뒤 `wait_unloaded` 가 부를 때마다
+            // `UNLOAD_WAIT` 를 다 채워, 이 시험 하나가 15초를 잔다.
+            let refusing = Fake::new(if manager == Manager::Systemd { &["enable"] } else { &["print", "bootstrap"] });
             assert!(matches!(
                 svc.install(&exe, pin(), &|p: &str, a: &[&str]| refusing.run(p, a)),
                 Err(Trouble::Refused(_))
             ));
             assert!(svc.file.symlink_metadata().unwrap().file_type().is_symlink());
             assert_eq!(std::fs::read_to_string(&target).unwrap(), old);
-            let accepting = Fake::new(&[]);
+            let accepting = Fake::new(if manager == Manager::Systemd { &[] } else { &["print"] });
             assert_eq!(svc.install(&exe, pin(), &|p: &str, a: &[&str]| accepting.run(p, a)), Ok(Wrote::Rewritten));
             assert!(svc.file.symlink_metadata().unwrap().file_type().is_symlink());
             assert_eq!(std::fs::read_to_string(&target).unwrap(), manager.render(exe.to_str().unwrap(), PIN));

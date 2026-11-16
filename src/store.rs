@@ -2569,7 +2569,7 @@ fn process_nonce() -> u64 {
 ///
 /// 일반 쓰기는 권한을 고르는 인자를 두지 않는다 — 옛 `write_atomic_as` 를 실수로
 /// 빼고 불러 `issues.jsonl` 권한이 풀린 적이 있다(moai-c1s3). 서비스 관리자만 기존
-/// 권한이나 umask 와 무관하게 0644 가 필요하여 [`write_atomic_service`] 가 같은 몸통의
+/// 권한에서 그룹·타인의 쓰기를 걷어야 하여 [`write_atomic_service`] 가 같은 몸통의
 /// 한정된 예외를 쓴다. [`write_atomic_in`] 은 임시 자리만 고르고 기존 권한을 지킨다.
 ///
 /// **뿌리 없는 경로 하나는 옮기지 않는다**(moai-iq7j). `path.parent()` 가 없는 것은 사람이 밟는
@@ -2592,8 +2592,8 @@ pub(crate) fn write_atomic(path: &Path, bytes: &[u8]) -> R<()> {
 }
 
 /// Service managers require a non-group-writable file, even under a loose umask.
-/// Set 0644 on the temporary file before replacement; ordinary writes still preserve
-/// the existing permissions and never opt into this service-specific exception.
+/// Restrict existing permissions or use 0644 for a new file before replacement;
+/// ordinary writes preserve existing permissions without this service exception.
 pub(crate) fn write_atomic_service(path: &Path, bytes: &[u8]) -> R<()> {
     atomic(path, bytes, None, None, true)
 }
@@ -2621,7 +2621,7 @@ pub(crate) fn measure_inside(path: &Path, checkout: &Path) -> R<()> {
     target_of(path, Some(checkout)).map(drop)
 }
 
-/// [`write_atomic`]·[`write_atomic_inside`]·[`write_atomic_in`] 의 몸통 — 임시 자리를 고르고 물러서는 것이 여기 한
+/// [`write_atomic`]·[`write_atomic_service`]·[`write_atomic_inside`]·[`write_atomic_in`] 의 몸통 — 임시 자리를 고르고 물러서는 것이 여기 한
 /// 벌이다. 차례는 `stage`(받았으면) → 받은 철자 곁 → 가리키는 파일 곁이고, 같은 자리는 한 번만 간다. 실패한 자리는
 /// 임시 파일을 치우고 대상을 안 건드리므로([`replace`]) 다음 자리로 가도 잃을 것이 없다. 다 실패하면 마지막 자리의
 /// 말을 낸다.
@@ -2990,6 +2990,7 @@ fn torn_tail(f: &mut std::fs::File) -> std::io::Result<bool> {
 /// 링크가 바뀐 경우에 임시 자리와 갈아끼울 자리가 서로 다른 풀이에서 온다.
 fn replace(path: &Path, bytes: &[u8], tmp_dir: &Path, service: bool) -> R<()> {
     let perms = std::fs::metadata(path).ok().map(|m| m.permissions());
+    let perms = if service { service_permissions(perms) } else { perms };
     // 부모를 묻는 것은 어디서나 한다(없으면 실패) — 그 값을 쓰는 것은 아래 유닉스 fsync 뿐이다.
     #[cfg_attr(not(unix), allow(unused_variables))]
     let dir = parent_of(path, path)?;
@@ -3002,16 +3003,7 @@ fn replace(path: &Path, bytes: &[u8], tmp_dir: &Path, service: bool) -> R<()> {
         Fail::new(format!("{}: {e}", at.display()))
     };
     let filled = (|| {
-        #[cfg(unix)]
-        if service {
-            use std::os::unix::fs::PermissionsExt as _;
-            f.set_permissions(std::fs::Permissions::from_mode(0o644))?;
-        } else if let Some(p) = perms {
-            f.set_permissions(p)?;
-        }
-        #[cfg(not(unix))]
         if let Some(p) = perms {
-            let _ = service;
             f.set_permissions(p)?;
         }
         f.write_all(bytes)?;
@@ -3029,6 +3021,20 @@ fn replace(path: &Path, bytes: &[u8], tmp_dir: &Path, service: bool) -> R<()> {
         }
     }
     Ok(())
+}
+
+/// 기존 파일은 비공개 권한을 지키면서 그룹·타인의 쓰기를 걷는다. 새 파일은 umask와 무관하게 0644다.
+/// launchd 는 그룹이나 타인이 쓸 수 있는 plist를 안 읽는다.
+#[cfg(unix)]
+fn service_permissions(old: Option<std::fs::Permissions>) -> Option<std::fs::Permissions> {
+    use std::os::unix::fs::PermissionsExt as _;
+    let mode = old.map_or(0o644, |p| (p.mode() & 0o755) | 0o600);
+    Some(std::fs::Permissions::from_mode(mode))
+}
+
+#[cfg(not(unix))]
+fn service_permissions(old: Option<std::fs::Permissions>) -> Option<std::fs::Permissions> {
+    old
 }
 
 /// 임시 파일을 **새로 만들어서만** 연다(`O_CREAT|O_EXCL`, moai-ydm7.976) — 그 이름에 이미 무엇이
