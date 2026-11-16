@@ -14,6 +14,8 @@ does not tag — see `CONTRIBUTING.md`.
 
 ### Fixed
 
+- `moai show` counts a live member once when an older archive copy shares its ID; explicit archive listings still identify the copy for recovery. (moai-b2jt)
+
 - A backlog item saved with `SPC n` in the explorer is marked read for its author, whether saved in the form, returned from an editor, or continued after the identity prompt. (moai-u3uv)
 - Reinstalling a daemon service through a symbolic link updates its target while preserving the link and existing private permissions; group and other write permissions are removed. (moai-80dx)
 
