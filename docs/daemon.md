@@ -84,6 +84,7 @@ It refuses these and changes nothing:
 | A file at that path that moai did not write | `already_exists` |
 | A service file that runs another `moai`, one that still exists and is a different file. Run `moai daemon uninstall`, then install from the one you want | `already_exists` |
 | A daemon you started yourself answers at the socket. The service would find the place taken and stay down. Run `moai daemon stop`, then install again | `already_exists` |
+| A path the file cannot hold: one with a line break, or a socket that would be too long for a Unix socket (107 bytes, 103 on macOS) once its directory is made absolute. A relative `MOAI_CTL_DIR` can pass in your shell and still fail here. Use a shorter socket directory | `bad_input` |
 | Running under `sudo`, which would make it root's service | `refused` |
 | No service manager, or it refused. No file is left behind, and the CLI works without the daemon | `service_failed` |
 | Windows | `unsupported` |
@@ -510,4 +511,4 @@ $pipe.Dispose()
 
 After `moai update` a running daemon keeps the old binary, which the installer has renamed to `moai.exe.old` (`moai.exe.<pid>.old` when an earlier `.old` is still held). Stop it and start it again.
 
-Decided in: moai-wbdh, moai-ou5y, moai-upq5, moai-tloc
+Decided in: moai-wbdh, moai-ou5y, moai-upq5, moai-tloc, moai-fetu
