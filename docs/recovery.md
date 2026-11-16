@@ -380,7 +380,9 @@ and confirm the live version is the one to keep. `moai archive --drop <id>`
 removes its archive copies while preserving the live row, and refuses to delete
 an archive-only row. It also refuses when the archived row is a different issue
 that only shares the ID (another kind or creation time) — compare the two with
-`moai show --archived`; dropping it would erase that issue. For duplicates
+`moai show --archived`; its separate “Archive copies” section identifies the
+archived version and excludes it from counts. In JSON, that row carries
+`archive_copy: true` and `archived: true`. Dropping it would erase that issue. For duplicates
 entirely inside the archive, inspect the source file and keep the version you
 want there.
 
@@ -465,4 +467,4 @@ The state is two text files under version control. `git log -p -- .moai/` shows
 every change anyone made to them, and any commit that had them whole is a
 recovery point.
 
-Decided in: moai-uzhx moai-bth3 moai-r0x8 moai-w30o moai-4v3h
+Decided in: moai-uzhx moai-bth3 moai-r0x8 moai-w30o moai-4v3h moai-b2jt
