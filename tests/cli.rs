@@ -28629,25 +28629,33 @@ fn auto_reads_the_unreleased_sections_to_pick_minor_or_patch() {
     }
 }
 
-/// 1.0 뒤에도 같은 절로 고르며 미리 보기와 실제 올리기가 일치한다 (moai-gq98.0d9).
+/// **1.0 뒤에도 같은 절로 고른다**(2026-11-16 사용자 결정, moai-gq98.0d9). 미리 보기와 실제
+/// 올리기가 같은 판을 낸다. major 는 고르지 않는다 — `Removed` 도 minor 다.
 #[cfg(unix)]
 #[test]
 fn auto_after_one_uses_the_same_rules() {
     for (heading, want) in [
-        ("Fixed", "1.2.4"), ("Security", "1.2.4"),
-        ("Added", "1.3.0"), ("Changed", "1.3.0"),
-        ("Deprecated", "1.3.0"), ("Removed", "1.3.0"),
+        ("Fixed", "1.2.4"),
+        ("Security", "1.2.4"),
+        ("Added", "1.3.0"),
+        ("Changed", "1.3.0"),
+        ("Deprecated", "1.3.0"),
+        ("Removed", "1.3.0"),
     ] {
         let entry = format!("### {heading}\n\n- entry\n\n");
         let (preview, manifest, log) = bump_with(&format!("next-one-{heading}"), "1.2.3", &entry, &["--next"]);
-        assert!(preview.status.success(), "{heading}: {}", text(&preview));
-        assert_eq!(String::from_utf8_lossy(&preview.stdout).trim(), want);
-        assert!(manifest.contains("version = \"1.2.3\""));
-        assert!(!log.contains("2026-10-01"));
+        assert!(preview.status.success(), "{heading}: --next 가 멈췄다\n{}", text(&preview));
+        // `v$(… --next)` 로 받는 자리라 stdout 에는 판 하나만 선다.
+        assert_eq!(String::from_utf8_lossy(&preview.stdout), format!("{want}\n"), "{heading}: 미리 본 판");
+        assert!(manifest.contains("version = \"1.2.3\""), "{heading}: --next 가 판을 움직였다\n{manifest}");
+        assert!(!log.contains("2026-10-01"), "{heading}: --next 가 판을 열었다\n{log}");
         let (out, manifest, log) = bump_with(&format!("auto-one-{heading}"), "1.2.3", &entry, &["auto"]);
-        assert!(out.status.success(), "{heading}: {}", text(&out));
-        assert!(manifest.contains(&format!("version = \"{want}\"")));
-        assert!(log.contains(&format!("## [{want}] - 2026-10-01")));
+        assert!(out.status.success(), "{heading}: auto 가 멈췄다\n{}", text(&out));
+        assert!(manifest.contains(&format!("version = \"{want}\"")), "{heading}: {want} 가 아니다\n{manifest}");
+        assert!(
+            log.contains(&format!("## [Unreleased]\n\n## [{want}] - 2026-10-01\n")),
+            "{heading}: 판을 안 열었다\n{log}"
+        );
     }
 }
 
@@ -28662,6 +28670,9 @@ fn auto_refuses_what_it_cannot_sort_and_moves_nothing() {
         ("bump-empty", "0.1.5", "", "비었다"),
         ("bump-loose", "0.1.5", "- 절 밖에 선 줄\n\n", "첫 절 앞의 글만"),
         ("bump-odd", "0.1.5", "### Improved\n\n- 모르는 절\n\n", "Improved"),
+        // 1.0 뒤에도 못 가르는 것은 멈춘다 — 걷은 것은 1.0 뒤의 멈춤이지 이 멈춤이 아니다.
+        ("bump-one-empty", "1.2.0", "", "비었다"),
+        ("bump-one-odd", "1.2.0", "### Improved\n\n- 모르는 절\n\n", "Improved"),
     ];
     for (name, have, unreleased, said) in cases {
         let (out, manifest, log) = bump_with(name, have, unreleased, &["auto"]);
@@ -28670,25 +28681,23 @@ fn auto_refuses_what_it_cannot_sort_and_moves_nothing() {
         assert!(manifest.contains(&format!("version = \"{have}\"")), "{name}: 판을 움직였다\n{manifest}");
         assert!(!log.contains("2026-10-01"), "{name}: 판을 열었다\n{log}");
     }
-    // 1.0 뒤에도 손으로 고른 한 칸을 올릴 수 있다.
-    let (out, manifest, _) = bump_with("bump-one-minor", "1.2.0", "", &["minor"]);
-    assert!(out.status.success(), "손으로 고른 칸을 막았다\n{}", text(&out));
-    assert!(manifest.contains("version = \"1.3.0\""), "{manifest}");
 }
 
-/// `minor`·`patch` 는 칸만 고르고 번호는 센다. `major` 는 안 받는다 — 1.0 은 사람이 판을
-/// 직접 주어 연다.
+/// `minor`·`patch` 는 칸만 고르고 번호는 센다 — 1.0 전후 모두. `major` 는 안 받는다 — major
+/// 판은 사람이 직접 준다(1.0 도 그렇게 열었다).
 #[cfg(unix)]
 #[test]
 fn a_named_step_counts_from_the_current_version() {
-    for (arg, want) in [("minor", "0.2.0"), ("patch", "0.1.6")] {
-        let (out, manifest, _) = bump_with(&format!("bump-{arg}"), "0.1.5", "", &[arg]);
-        assert!(out.status.success(), "{arg}: 못 올렸다\n{}", text(&out));
-        assert!(manifest.contains(&format!("version = \"{want}\"")), "{arg}: {want} 가 아니다\n{manifest}");
+    for (have, arg, want) in [("0.1.5", "minor", "0.2.0"), ("0.1.5", "patch", "0.1.6"), ("1.2.0", "minor", "1.3.0")] {
+        let (out, manifest, _) = bump_with(&format!("bump-{have}-{arg}"), have, "", &[arg]);
+        assert!(out.status.success(), "{have} {arg}: 못 올렸다\n{}", text(&out));
+        assert!(manifest.contains(&format!("version = \"{want}\"")), "{have} {arg}: {want} 가 아니다\n{manifest}");
     }
-    let (out, manifest, _) = bump_with("bump-major", "0.1.5", "", &["major"]);
-    assert_eq!(out.status.code(), Some(2), "major 를 받았다\n{}", text(&out));
-    assert!(manifest.contains("version = \"0.1.5\""), "{manifest}");
+    for have in ["0.1.5", "1.2.0"] {
+        let (out, manifest, _) = bump_with(&format!("bump-major-{have}"), have, "", &["major"]);
+        assert_eq!(out.status.code(), Some(2), "{have}: major 를 받았다\n{}", text(&out));
+        assert!(manifest.contains(&format!("version = \"{have}\"")), "{have}: {manifest}");
+    }
     // 꼬리 붙은 판에서 한 칸이 무엇인지는 정한 적이 없다.
     let (out, _, _) = bump_with("bump-rc", "0.2.0-rc.1", "", &["patch"]);
     assert_eq!(out.status.code(), Some(2), "꼬리 붙은 판에서 한 칸을 셌다\n{}", text(&out));

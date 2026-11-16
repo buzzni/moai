@@ -3,7 +3,7 @@
 #
 #     scripts/bump-version.sh auto      [Unreleased] 의 절을 읽고 판을 고른다
 #     scripts/bump-version.sh minor     한 칸을 손으로 고른다 (patch 도 같다)
-#     scripts/bump-version.sh 0.2.0     판을 그대로 준다 — 1.0 은 이 길로만 연다
+#     scripts/bump-version.sh 0.2.0     판을 그대로 준다 — major(1.0·2.0 …)는 이 길로만 연다
 #     scripts/bump-version.sh --next    auto 가 고를 판만 찍는다. 아무것도 안 쓴다
 #
 # **커밋도 태그도 하지 않고 파일만 고친다.** 무엇이 바뀌었는지 사람이 보고 커밋하는 자리를
@@ -28,6 +28,11 @@ die() {
 # 있으면 minor 다 — 동작이 바뀌었으면 고친 것이 아니다. AI 든 사람이든 고르는 것은 줄을
 # 어느 절에 넣는가이고, 번호는 여기서 센다. 세션마다 손으로 셈하던 판은 0.1.1 부터
 # 내리 patch 였다 — 그 판들 대부분에 `### Added` 가 있었는데도.
+#
+# **1.0 뒤에도 같은 규칙이다**(2026-11-16 사용자 결정, moai-gq98.0d9). 그 전에는 Removed 와
+# 동작 변경 중 무엇이 깨지는 변경인지를 안 정해 1.0 뒤의 auto 가 멈췄다. 여기는 그것을 가리지
+# 않는다 — Removed 도 minor 로 센다. 깨지는 변경이 든 판에 major 가 필요하면 사람이 판을
+# 직접 준다(`2.0.0`).
 #
 # 모르는 절은 어느 칸인지 못 가르므로 고르지 않고 멈춘다. 어림으로 patch 를 주면 기능이
 # 든 판이 고친 판으로 나간다.
@@ -104,7 +109,7 @@ case $want in
 v*) die "앞의 v 를 빼고 준다 — ${want#v}" ;;
 auto | minor | patch) level=$want ;;
 --next) level=auto next=1 ;;
-major) die "major 는 판을 직접 준다 — 1.0 은 사람이 연다" ;;
+major) die "major 는 판을 직접 준다 — 2.0.0 처럼 사람이 연다" ;;
 *) [[ $want =~ ^[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$ ]] || die "버전 꼴이 아니다 — $want" ;;
 esac
 [ -f "$manifest" ] || die "Cargo.toml 을 못 찾았다 — $manifest"
