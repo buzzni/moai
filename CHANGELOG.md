@@ -6,9 +6,9 @@ All notable changes to this project are documented here. The format follows
 
 `scripts/bump-version.sh auto` moves whatever has accumulated under
 `[Unreleased]` into a new release section and leaves `[Unreleased]` empty for the
-next one. The headings pick the version: before 1.0, `Fixed` and `Security` alone
-make a patch release and anything else a minor one. It does not commit and it
-does not tag — see `CONTRIBUTING.md`.
+next one. The headings pick the version: `Fixed` and `Security` alone make a
+patch release and anything else a minor one; a major version is given by hand. It
+does not commit and it does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
