@@ -217,6 +217,73 @@ fn ctl_state_without_a_window_says_no_window() {
 
 #[test]
 #[cfg(unix)]
+fn ctl_lists_available_windows_and_reports_skipped_sockets() {
+    use std::io::{BufRead, BufReader, Write};
+    use std::os::unix::net::UnixListener;
+    let s = Scratch::new("ctl-skips");
+    // The thread's short `/tmp` fence, which `staged` already names: under a Mac's `/private/var/folders/…` scratch the
+    // socket path passes the 104-byte limit and `bind` fails.
+    let dir = CTL_FENCE.with(|fence| fence.path().to_path_buf());
+    let live = UnixListener::bind(dir.join("1.sock")).unwrap();
+    let busy = UnixListener::bind(dir.join("2.sock")).unwrap();
+    let root = s.path().display().to_string();
+    let live_thread = std::thread::spawn(move || {
+        for _ in 0..6 {
+            let (mut stream, _) = live.accept().unwrap();
+            let mut request = String::new();
+            BufReader::new(&stream).read_line(&mut request).unwrap();
+            let request: serde_json::Value = serde_json::from_str(&request).unwrap();
+            let data = if request["verb"] == "hello" {
+                serde_json::json!({"id":"tui-1", "kind":"tui", "pid":1, "version":"test", "proto":1, "root":root, "here":root, "layer":false, "screen":"list", "last_input_ago_ms":0})
+            } else {
+                assert_eq!(request["verb"], "state");
+                serde_json::json!({"screen":"list"})
+            };
+            let reply = serde_json::json!({"ok": true, "data": data});
+            writeln!(stream, "{reply}").unwrap();
+        }
+    });
+    let busy_thread = std::thread::spawn(move || {
+        for _ in 0..6 {
+            let (mut stream, _) = busy.accept().unwrap();
+            let mut request = String::new();
+            BufReader::new(&stream).read_line(&mut request).unwrap();
+            writeln!(stream, "{{\"ok\":false,\"code\":\"busy\",\"message\":\"full\"}}").unwrap();
+        }
+    });
+    let run = |args: &[&str]| staged(args).current_dir(s.path()).output().unwrap();
+    let json = run(&["ctl", "ls", "--all", "--json"]);
+    assert!(json.status.success(), "{}", String::from_utf8_lossy(&json.stderr));
+    let list = json_of(&String::from_utf8_lossy(&json.stdout));
+    assert_eq!(list["windows"][0]["id"], "tui-1");
+    assert_eq!(list["skipped"][0]["socket"], dir.join("2.sock").to_str().unwrap());
+    assert_eq!(list["skipped"][0]["reason"], "busy");
+    assert!(json.stderr.is_empty());
+    let human = run(&["ctl", "ls", "--all"]);
+    assert!(human.status.success());
+    assert!(String::from_utf8_lossy(&human.stdout).contains("tui-1"));
+    assert!(String::from_utf8_lossy(&human.stderr).contains("2.sock (busy)"));
+    let state = run(&["ctl", "state", "--json"]);
+    assert!(state.status.success(), "{}", String::from_utf8_lossy(&state.stderr));
+    let state_json = json_of(&String::from_utf8_lossy(&state.stdout));
+    assert_eq!(state_json["screen"], "list");
+    assert_eq!(state_json["skipped"][0]["reason"], "busy");
+    assert!(state.stderr.is_empty());
+    let state = run(&["ctl", "state"]);
+    assert!(state.status.success());
+    assert!(String::from_utf8_lossy(&state.stderr).contains("2.sock (busy)"));
+    // An explicit target and the proposal path still refuse an unlisted target.
+    for args in [&["ctl", "state", "-t", "tui-2", "--json"][..], &["ctl", "answer", "tui-2/1", "--json"][..]] {
+        let output = run(args);
+        assert!(!output.status.success());
+        assert_eq!(json_of(&String::from_utf8_lossy(&output.stderr))["code"], "busy");
+    }
+    live_thread.join().unwrap();
+    busy_thread.join().unwrap();
+}
+
+#[test]
+#[cfg(unix)]
 fn ctl_lists_and_reads_an_open_explorer() {
     use std::io::{Read, Write};
     use std::os::unix::process::CommandExt;
@@ -264,6 +331,8 @@ fn ctl_lists_and_reads_an_open_explorer() {
             Err(e) if e.kind() == std::io::ErrorKind::WouldBlock || e.raw_os_error() == Some(libc::EIO) => {}
             Err(e) => panic!("PTY: {e}"),
         }
+        // A window still drawing its first frame answers no `hello`; `ls` lists it under `skipped`, not as a failure
+        // (moai-pwxx.kah), so poll until it shows up in `windows`.
         let out = ok(s.path(), &["ctl", "ls", "--json"]);
         let json: serde_json::Value = serde_json::from_str(&out).unwrap();
         if let Some(id) = json["windows"].as_array().unwrap().first().and_then(|w| w["id"].as_str()) {

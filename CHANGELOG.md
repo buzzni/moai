@@ -12,8 +12,13 @@ does not commit and it does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+### Added
+
+- `moai ctl ls` and automatic window selection report skipped sockets on stderr, or in a `skipped` array in JSON. (moai-pwxx)
+
 ### Fixed
 
+- `moai ctl` reports a full targeted window as busy instead of claiming there is no window. (moai-pwxx)
 - `moai update` skips restarting the daemon service when an install or uninstall holds the service turn, preventing a concurrent uninstall from leaving the daemon running. (moai-kwzp)
 - `moai show` counts a live member once when an older archive copy shares its ID; explicit archive listings still identify the copy for recovery. (moai-b2jt)
 

@@ -9,16 +9,37 @@ use std::time::Duration;
 
 pub fn ls(ctx: &Ctx, all: bool) -> R<Vec<String>> {
     let root = if all { None } else { call::current_root(ctx.lang())? };
+    let discovery = call::windows()?;
     let windows: Vec<_> =
-        call::windows()?.into_iter().filter(|w| all || root.as_deref().is_none_or(|r| w.root == r)).collect();
+        discovery.windows.into_iter().filter(|w| all || root.as_deref().is_none_or(|r| w.root == r)).collect();
     if ctx.json {
-        return super::json_line(&serde_json::json!({"windows": windows}));
+        return super::json_line(&serde_json::json!({"windows": windows, "skipped": discovery.skipped}));
     }
+    warn_skipped(&discovery.skipped);
     let mut lines = vec!["ID  KIND  REPOSITORY  SCREEN  LAST INPUT".into()];
     lines.extend(
         windows.iter().map(|w| format!("{}  {}  {}  {}  {}ms", w.id, w.kind, w.root, w.screen, w.last_input_ago_ms)),
     );
     Ok(lines)
+}
+
+fn warn_skipped(skipped: &[call::Skipped]) {
+    if !skipped.is_empty() {
+        let details =
+            skipped.iter().map(|s| format!("{} ({})", s.socket.display(), s.reason)).collect::<Vec<_>>().join(", ");
+        super::tell(&format!("Skipped windows: {details}"));
+    }
+}
+
+fn control_json(mut data: serde_json::Value, skipped: &[call::Skipped]) -> R<Vec<String>> {
+    if !skipped.is_empty() {
+        if let Some(object) = data.as_object_mut() {
+            object.insert("skipped".into(), serde_json::json!(skipped));
+        } else {
+            data = serde_json::json!({"value": data, "skipped": skipped});
+        }
+    }
+    super::json_line(&data)
 }
 
 pub fn propose(
@@ -198,8 +219,11 @@ pub fn state(ctx: &Ctx, target: Option<&str>, rows: bool) -> R<Vec<String>> {
     }
     #[cfg(any(unix, windows))]
     {
-        let windows = call::windows_for_target(target)?;
-        let window = window_for(ctx, &windows, target)?;
+        let discovery = call::windows_for_control(target)?;
+        if !ctx.json {
+            warn_skipped(&discovery.skipped);
+        }
+        let window = window_for(ctx, &discovery.windows, target)?;
         let reply = call::send(window, &wire::request(wire::Verb::State { rows }, Duration::from_secs(5)))?;
         if !reply.ok {
             return Err(Fail::coded(
@@ -209,7 +233,7 @@ pub fn state(ctx: &Ctx, target: Option<&str>, rows: bool) -> R<Vec<String>> {
         }
         let data = reply.data.unwrap_or(serde_json::Value::Null);
         if ctx.json {
-            return super::json_line(&data);
+            return control_json(data, &discovery.skipped);
         }
         Ok(vec![format!("{}: {}", window.id, data)])
     }
@@ -321,8 +345,11 @@ fn invoke(ctx: &Ctx, target: Option<&str>, verb: wire::Verb, needs_actor: bool) 
     }
     #[cfg(any(unix, windows))]
     {
-        let windows = call::windows_for_target(target)?;
-        let window = window_for(ctx, &windows, target)?;
+        let discovery = call::windows_for_control(target)?;
+        if !ctx.json {
+            warn_skipped(&discovery.skipped);
+        }
+        let window = window_for(ctx, &discovery.windows, target)?;
         let mut request = wire::request(verb, Duration::from_secs(5));
         request.lang = format!("{:?}", ctx.lang()).to_lowercase();
         if needs_actor {
@@ -341,7 +368,7 @@ fn invoke(ctx: &Ctx, target: Option<&str>, verb: wire::Verb, needs_actor: bool) 
         }
         let data = reply.data.unwrap_or(serde_json::Value::Null);
         if ctx.json {
-            return super::json_line(&data);
+            return control_json(data, &discovery.skipped);
         }
         if let wire::Verb::Actions = request.verb {
             return Ok(data["actions"]
