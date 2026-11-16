@@ -482,6 +482,16 @@ mod os {
         let exe = std::env::current_exe().map_err(|e| Fail::new(e.to_string()))?;
         let exe = typed_exe(&exe, std::env::var_os("PATH"));
         let path = socket_path(lang)?;
+        // 서비스는 이 셸의 디렉터리에서 돌지 않는다 — 상대 경로를 그대로 적으면 다른 소켓을 본다. 고정할 자리를 못
+        // 지으면 아무것도 안 쓰고 멈춘다: 빼고 쓰면 서비스가 셸과 다른 소켓을 본다(moai-tloc.wnw).
+        let dir = path
+            .parent()
+            .and_then(|dir| std::path::absolute(dir).ok())
+            .ok_or_else(|| trouble(lang, &svc, Trouble::BadPath(path.display().to_string())))?;
+        // 그 절대 꼴의 소켓도 상한 안이어야 한다 — 상대 경로는 상한 안이어도 절대 꼴이 넘으면 서비스의 데몬이 끝내 못
+        // 묶는다(moai-fetu.gi0). 까닭(너무 길다)을 거절문에 싣는다. 서비스 밖의 데몬을 묻기 전에 본다 — 그 데몬을 멈추고
+        // 다시 치라고 한 뒤에야 이 거절을 내면 헛걸음이다.
+        crate::daemon::socket_in(&dir).map_err(|e| trouble(lang, &svc, Trouble::BadPath(e.to_string())))?;
         // **서비스 밖에서 돌던 데몬이 있으면 아무것도 안 쓴다.** 등록하면 서비스의 `start` 가 그 데몬을 만나 `already` 로 0
         // 종료하고, 관리자는 그것을 실패로 안 읽어 서비스가 꺼진 채 남는다 — 그 데몬이 멈추면 다음 로그인까지 아무것도 안 뜬다.
         if let Some((pid, version)) = outside(&svc, &path) {
@@ -491,15 +501,6 @@ mod os {
                 code::ALREADY_EXISTS,
             ));
         }
-        // 서비스는 이 셸의 디렉터리에서 돌지 않는다 — 상대 경로를 그대로 적으면 다른 소켓을 본다. 고정할 자리를 못
-        // 지으면 아무것도 안 쓰고 멈춘다: 빼고 쓰면 서비스가 셸과 다른 소켓을 본다(moai-tloc.wnw).
-        let dir = path
-            .parent()
-            .and_then(|dir| std::path::absolute(dir).ok())
-            .ok_or_else(|| trouble(lang, &svc, Trouble::BadPath(path.display().to_string())))?;
-        let service_socket = dir.join("daemon.socket");
-        crate::daemon::validate_socket_path(&service_socket)
-            .map_err(|_| trouble(lang, &svc, Trouble::BadPath(service_socket.display().to_string())))?;
         let shown_exe = shown(&exe);
         let wrote = svc.install(&exe, &dir, &service::run).map_err(|why| trouble(lang, &svc, why))?;
         let installed = wrote != Wrote::Same;

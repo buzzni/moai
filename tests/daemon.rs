@@ -2336,6 +2336,8 @@ mod service {
         assert!(text.contains(&want), "상대 경로를 그대로 적었다\n{text}");
     }
 
+    /// 상대 경로는 상한 안이고 서비스에 적을 절대 꼴은 넘는다(moai-fetu.gi0). 자리는 비워 둔다 — 남의 파일을 두면 고치기
+    /// 전의 판도 `not_ours` 로 아무것도 안 써서, 안 썼다는 단언이 헛돈다.
     #[test]
     fn install_rejects_a_relative_directory_whose_absolute_socket_is_too_long() {
         let m = Managed::new(Manager::Idles);
@@ -2344,13 +2346,14 @@ mod service {
         let limit = if cfg!(target_os = "macos") { 104 } else { 108 };
         assert!(relative.len() + "/daemon.socket".len() < limit);
         assert!(socket.as_os_str().len() >= limit);
-        m.place("existing service file");
         let out = m.cmd(&["daemon", "install", "--json"]).env("MOAI_CTL_DIR", &relative).output().unwrap();
         assert!(!out.status.success());
         let err: Value = serde_json::from_slice(&out.stderr).unwrap();
         assert_eq!(err["code"], "bad_input", "{err}");
-        assert!(err["error"].as_str().unwrap().contains(&socket.display().to_string()), "{err}");
-        assert_eq!(std::fs::read_to_string(m.file()).unwrap(), "existing service file");
+        let said = err["error"].as_str().unwrap();
+        assert!(said.contains(&socket.display().to_string()), "{err}");
+        assert!(said.contains("too long"), "까닭을 삼켰다 — {err}");
+        assert!(!m.file().exists(), "서비스 파일을 썼다");
         assert_eq!(m.calls(), "");
     }
 
