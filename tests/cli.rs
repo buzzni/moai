@@ -217,6 +217,73 @@ fn ctl_state_without_a_window_says_no_window() {
 
 #[test]
 #[cfg(unix)]
+fn ctl_lists_available_windows_and_reports_skipped_sockets() {
+    use std::io::{BufRead, BufReader, Write};
+    use std::os::unix::net::UnixListener;
+    let s = Scratch::new("ctl-skips");
+    // The thread's short `/tmp` fence, which `staged` already names: under a Mac's `/private/var/folders/…` scratch the
+    // socket path passes the 104-byte limit and `bind` fails.
+    let dir = CTL_FENCE.with(|fence| fence.path().to_path_buf());
+    let live = UnixListener::bind(dir.join("1.sock")).unwrap();
+    let busy = UnixListener::bind(dir.join("2.sock")).unwrap();
+    let root = s.path().display().to_string();
+    let live_thread = std::thread::spawn(move || {
+        for _ in 0..6 {
+            let (mut stream, _) = live.accept().unwrap();
+            let mut request = String::new();
+            BufReader::new(&stream).read_line(&mut request).unwrap();
+            let request: serde_json::Value = serde_json::from_str(&request).unwrap();
+            let data = if request["verb"] == "hello" {
+                serde_json::json!({"id":"tui-1", "kind":"tui", "pid":1, "version":"test", "proto":1, "root":root, "here":root, "layer":false, "screen":"list", "last_input_ago_ms":0})
+            } else {
+                assert_eq!(request["verb"], "state");
+                serde_json::json!({"screen":"list"})
+            };
+            let reply = serde_json::json!({"ok": true, "data": data});
+            writeln!(stream, "{reply}").unwrap();
+        }
+    });
+    let busy_thread = std::thread::spawn(move || {
+        for _ in 0..6 {
+            let (mut stream, _) = busy.accept().unwrap();
+            let mut request = String::new();
+            BufReader::new(&stream).read_line(&mut request).unwrap();
+            writeln!(stream, "{{\"ok\":false,\"code\":\"busy\",\"message\":\"full\"}}").unwrap();
+        }
+    });
+    let run = |args: &[&str]| staged(args).current_dir(s.path()).output().unwrap();
+    let json = run(&["ctl", "ls", "--all", "--json"]);
+    assert!(json.status.success(), "{}", String::from_utf8_lossy(&json.stderr));
+    let list = json_of(&String::from_utf8_lossy(&json.stdout));
+    assert_eq!(list["windows"][0]["id"], "tui-1");
+    assert_eq!(list["skipped"][0]["socket"], dir.join("2.sock").to_str().unwrap());
+    assert_eq!(list["skipped"][0]["reason"], "busy");
+    assert!(json.stderr.is_empty());
+    let human = run(&["ctl", "ls", "--all"]);
+    assert!(human.status.success());
+    assert!(String::from_utf8_lossy(&human.stdout).contains("tui-1"));
+    assert!(String::from_utf8_lossy(&human.stderr).contains("2.sock (busy)"));
+    let state = run(&["ctl", "state", "--json"]);
+    assert!(state.status.success(), "{}", String::from_utf8_lossy(&state.stderr));
+    let state_json = json_of(&String::from_utf8_lossy(&state.stdout));
+    assert_eq!(state_json["screen"], "list");
+    assert_eq!(state_json["skipped"][0]["reason"], "busy");
+    assert!(state.stderr.is_empty());
+    let state = run(&["ctl", "state"]);
+    assert!(state.status.success());
+    assert!(String::from_utf8_lossy(&state.stderr).contains("2.sock (busy)"));
+    // An explicit target and the proposal path still refuse an unlisted target.
+    for args in [&["ctl", "state", "-t", "tui-2", "--json"][..], &["ctl", "answer", "tui-2/1", "--json"][..]] {
+        let output = run(args);
+        assert!(!output.status.success());
+        assert_eq!(json_of(&String::from_utf8_lossy(&output.stderr))["code"], "busy");
+    }
+    live_thread.join().unwrap();
+    busy_thread.join().unwrap();
+}
+
+#[test]
+#[cfg(unix)]
 fn ctl_lists_and_reads_an_open_explorer() {
     use std::io::{Read, Write};
     use std::os::unix::process::CommandExt;
@@ -264,6 +331,8 @@ fn ctl_lists_and_reads_an_open_explorer() {
             Err(e) if e.kind() == std::io::ErrorKind::WouldBlock || e.raw_os_error() == Some(libc::EIO) => {}
             Err(e) => panic!("PTY: {e}"),
         }
+        // A window still drawing its first frame answers no `hello`; `ls` lists it under `skipped`, not as a failure
+        // (moai-pwxx.kah), so poll until it shows up in `windows`.
         let out = ok(s.path(), &["ctl", "ls", "--json"]);
         let json: serde_json::Value = serde_json::from_str(&out).unwrap();
         if let Some(id) = json["windows"].as_array().unwrap().first().and_then(|w| w["id"].as_str()) {
@@ -28591,7 +28660,7 @@ fn bump_with(name: &str, have: &str, unreleased: &str, args: &[&str]) -> (Output
 /// **`auto` 는 `[Unreleased]` 의 절로 판을 고른다**(moai-ug3j.r1y, 2026-10-01 사용자 결정).
 ///
 /// 손으로 셈하던 판은 0.1.1 부터 내리 patch 였다 — 그 판들 대부분에 `### Added` 가 있었는데도.
-/// 1.0 전에는 Fixed·Security 만 있으면 patch, 그 밖의 절이 하나라도 서면 minor 다. **동작
+/// 1.0 전후 모두 Fixed·Security 만 있으면 patch, 그 밖의 절이 하나라도 서면 minor 다. **동작
 /// 변경(Changed)도 minor 다** — 그 하나만 든 판이 patch 로 나가던 자리를 따로 잰다.
 #[cfg(unix)]
 #[test]
@@ -28629,11 +28698,40 @@ fn auto_reads_the_unreleased_sections_to_pick_minor_or_patch() {
     }
 }
 
+/// **1.0 뒤에도 같은 절로 고른다**(2026-11-16 사용자 결정, moai-gq98.0d9). 미리 보기와 실제
+/// 올리기가 같은 판을 낸다. major 는 고르지 않는다 — `Removed` 도 minor 다.
+#[cfg(unix)]
+#[test]
+fn auto_after_one_uses_the_same_rules() {
+    for (heading, want) in [
+        ("Fixed", "1.2.4"),
+        ("Security", "1.2.4"),
+        ("Added", "1.3.0"),
+        ("Changed", "1.3.0"),
+        ("Deprecated", "1.3.0"),
+        ("Removed", "1.3.0"),
+    ] {
+        let entry = format!("### {heading}\n\n- entry\n\n");
+        let (preview, manifest, log) = bump_with(&format!("next-one-{heading}"), "1.2.3", &entry, &["--next"]);
+        assert!(preview.status.success(), "{heading}: --next 가 멈췄다\n{}", text(&preview));
+        // `v$(… --next)` 로 받는 자리라 stdout 에는 판 하나만 선다.
+        assert_eq!(String::from_utf8_lossy(&preview.stdout), format!("{want}\n"), "{heading}: 미리 본 판");
+        assert!(manifest.contains("version = \"1.2.3\""), "{heading}: --next 가 판을 움직였다\n{manifest}");
+        assert!(!log.contains("2026-10-01"), "{heading}: --next 가 판을 열었다\n{log}");
+        let (out, manifest, log) = bump_with(&format!("auto-one-{heading}"), "1.2.3", &entry, &["auto"]);
+        assert!(out.status.success(), "{heading}: auto 가 멈췄다\n{}", text(&out));
+        assert!(manifest.contains(&format!("version = \"{want}\"")), "{heading}: {want} 가 아니다\n{manifest}");
+        assert!(
+            log.contains(&format!("## [Unreleased]\n\n## [{want}] - 2026-10-01\n")),
+            "{heading}: 판을 안 열었다\n{log}"
+        );
+    }
+}
+
 /// **못 가르는 `[Unreleased]` 는 고르지 않고 멈춘다 — 아무것도 안 움직인 채로.**
 ///
 /// 빈 절은 낼 것이 없다는 뜻이고, 모르는 절은 어느 칸인지 모른다. 어림으로 patch 를 주면
-/// 기능이 든 판이 고친 판으로 나간다. 머리글만 서고 절이 빈 판도 고를 것이 없다. 1.0 뒤의
-/// 금은 아직 안 그었다.
+/// 기능이 든 판이 고친 판으로 나간다. 머리글만 서고 절이 빈 판도 고를 것이 없다.
 #[cfg(unix)]
 #[test]
 fn auto_refuses_what_it_cannot_sort_and_moves_nothing() {
@@ -28641,7 +28739,9 @@ fn auto_refuses_what_it_cannot_sort_and_moves_nothing() {
         ("bump-empty", "0.1.5", "", "비었다"),
         ("bump-loose", "0.1.5", "- 절 밖에 선 줄\n\n", "첫 절 앞의 글만"),
         ("bump-odd", "0.1.5", "### Improved\n\n- 모르는 절\n\n", "Improved"),
-        ("bump-one", "1.2.0", "### Fixed\n\n- 고친 것\n\n", "1.0 뒤"),
+        // 1.0 뒤에도 못 가르는 것은 멈춘다 — 걷은 것은 1.0 뒤의 멈춤이지 이 멈춤이 아니다.
+        ("bump-one-empty", "1.2.0", "", "비었다"),
+        ("bump-one-odd", "1.2.0", "### Improved\n\n- 모르는 절\n\n", "Improved"),
     ];
     for (name, have, unreleased, said) in cases {
         let (out, manifest, log) = bump_with(name, have, unreleased, &["auto"]);
@@ -28650,25 +28750,23 @@ fn auto_refuses_what_it_cannot_sort_and_moves_nothing() {
         assert!(manifest.contains(&format!("version = \"{have}\"")), "{name}: 판을 움직였다\n{manifest}");
         assert!(!log.contains("2026-10-01"), "{name}: 판을 열었다\n{log}");
     }
-    // 1.0 뒤에도 손으로 고른 한 칸은 그대로 지나간다 — 막은 것은 고르는 일이지 올리는 일이 아니다.
-    let (out, manifest, _) = bump_with("bump-one-minor", "1.2.0", "", &["minor"]);
-    assert!(out.status.success(), "손으로 고른 칸을 막았다\n{}", text(&out));
-    assert!(manifest.contains("version = \"1.3.0\""), "{manifest}");
 }
 
-/// `minor`·`patch` 는 칸만 고르고 번호는 센다. `major` 는 안 받는다 — 1.0 은 사람이 판을
-/// 직접 주어 연다.
+/// `minor`·`patch` 는 칸만 고르고 번호는 센다 — 1.0 전후 모두. `major` 는 안 받는다 — major
+/// 판은 사람이 직접 준다(1.0 도 그렇게 열었다).
 #[cfg(unix)]
 #[test]
 fn a_named_step_counts_from_the_current_version() {
-    for (arg, want) in [("minor", "0.2.0"), ("patch", "0.1.6")] {
-        let (out, manifest, _) = bump_with(&format!("bump-{arg}"), "0.1.5", "", &[arg]);
-        assert!(out.status.success(), "{arg}: 못 올렸다\n{}", text(&out));
-        assert!(manifest.contains(&format!("version = \"{want}\"")), "{arg}: {want} 가 아니다\n{manifest}");
+    for (have, arg, want) in [("0.1.5", "minor", "0.2.0"), ("0.1.5", "patch", "0.1.6"), ("1.2.0", "minor", "1.3.0")] {
+        let (out, manifest, _) = bump_with(&format!("bump-{have}-{arg}"), have, "", &[arg]);
+        assert!(out.status.success(), "{have} {arg}: 못 올렸다\n{}", text(&out));
+        assert!(manifest.contains(&format!("version = \"{want}\"")), "{have} {arg}: {want} 가 아니다\n{manifest}");
     }
-    let (out, manifest, _) = bump_with("bump-major", "0.1.5", "", &["major"]);
-    assert_eq!(out.status.code(), Some(2), "major 를 받았다\n{}", text(&out));
-    assert!(manifest.contains("version = \"0.1.5\""), "{manifest}");
+    for have in ["0.1.5", "1.2.0"] {
+        let (out, manifest, _) = bump_with(&format!("bump-major-{have}"), have, "", &["major"]);
+        assert_eq!(out.status.code(), Some(2), "{have}: major 를 받았다\n{}", text(&out));
+        assert!(manifest.contains(&format!("version = \"{have}\"")), "{have}: {manifest}");
+    }
     // 꼬리 붙은 판에서 한 칸이 무엇인지는 정한 적이 없다.
     let (out, _, _) = bump_with("bump-rc", "0.2.0-rc.1", "", &["patch"]);
     assert_eq!(out.status.code(), Some(2), "꼬리 붙은 판에서 한 칸을 셌다\n{}", text(&out));
@@ -33059,9 +33157,23 @@ fn update_with_service(
     update_serving(unit, active, restart, if answers { Serve::Fresh } else { Serve::Nothing }, args)
 }
 
-/// [`update_with_service`] 의 몸. **가짜 새 바이너리는 어느 길에서든 정확히 한 번만 뜬다** — 기다림이 프로세스를 띄우면 붉다.
+/// [`update_serving_pid`] 를 서비스의 `MainPID` 가 옛 데몬의 pid(42)와 같은 채로 부른다.
 #[cfg(target_os = "linux")]
 fn update_serving(unit: Option<&str>, active: i32, restart: i32, serve: Serve, args: &[&str]) -> (Output, String) {
+    update_serving_pid(unit, active, restart, serve, 42, args)
+}
+
+/// [`update_with_service`] 의 몸. 가짜 `systemctl show` 는 `main_pid` 를 대고, 새 바이너리의 status 는 옛 데몬을 pid 42 로
+/// 댄다. **가짜 새 바이너리는 어느 길에서든 정확히 한 번만 뜬다** — 기다림이 프로세스를 띄우면 붉다.
+#[cfg(target_os = "linux")]
+fn update_serving_pid(
+    unit: Option<&str>,
+    active: i32,
+    restart: i32,
+    serve: Serve,
+    main_pid: u32,
+    args: &[&str],
+) -> (Output, String) {
     let s = Scratch::new("update-service");
     let exe = hoisted(s.path());
     let real = canon(&exe).unwrap();
@@ -33075,7 +33187,7 @@ fn update_serving(unit: Option<&str>, active: i32, restart: i32, serve: Serve, a
     write_exe(
         &fake.join("systemctl"),
         &format!(
-            "#!/bin/sh\nprintf '%s\\n' \"$*\" >> '{}'\ncase \"$*\" in\n*is-active*) exit {active} ;;\n*restart*) {mark}; exit {restart} ;;\nesac\nexit 0\n",
+            "#!/bin/sh\nprintf '%s\\n' \"$*\" >> '{}'\ncase \"$*\" in\n*is-active*) exit {active} ;;\n*show*) echo {main_pid}; exit 0 ;;\n*restart*) {mark}; exit {restart} ;;\nesac\nexit 0\n",
             calls.display()
         ),
     );
@@ -33130,7 +33242,10 @@ fn update_restarts_the_running_service_it_registered() {
     let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
     assert_eq!(v.get("daemon_restarted").and_then(|v| v.as_bool()), Some(true), "{v}");
     assert_eq!(v.get("daemon_restart"), None, "다시 시작했는데 하라고 알린다 — {v}");
-    assert_eq!(calls, "--user is-active --quiet moai-daemon.service\n--user restart moai-daemon.service\n");
+    assert_eq!(
+        calls,
+        "--user is-active --quiet moai-daemon.service\n--user show -p MainPID --value moai-daemon.service\n--user restart moai-daemon.service\n"
+    );
 
     let (out, _) = update_with_service(Some(OUR_UNIT), 0, 0, true, &[]);
     assert!(text(&out).contains("restarted the daemon service"), "{}", text(&out));
@@ -33158,7 +33273,7 @@ fn update_falls_back_to_the_notice_when_it_cannot_restart() {
             0,
             1,
             false,
-            "--user is-active --quiet moai-daemon.service\n--user restart moai-daemon.service\n",
+            "--user is-active --quiet moai-daemon.service\n--user show -p MainPID --value moai-daemon.service\n--user restart moai-daemon.service\n",
         ),
         (
             "새 판이 안 답함",
@@ -33166,7 +33281,7 @@ fn update_falls_back_to_the_notice_when_it_cannot_restart() {
             0,
             0,
             false,
-            "--user is-active --quiet moai-daemon.service\n--user restart moai-daemon.service\n",
+            "--user is-active --quiet moai-daemon.service\n--user show -p MainPID --value moai-daemon.service\n--user restart moai-daemon.service\n",
         ),
     ];
     for (name, unit, active, restart, answers, want) in cases {
@@ -33185,6 +33300,43 @@ fn update_falls_back_to_the_notice_when_it_cannot_restart() {
     assert!(!text(&out).contains("still runs"), "{}", text(&out));
 }
 
+/// 셸 소켓의 데몬이 서비스 밖이면 서비스를 재시작하고 옛 데몬을 알린다.
+#[cfg(target_os = "linux")]
+#[test]
+fn update_leaves_a_daemon_outside_the_service_running() {
+    if !served() {
+        return;
+    }
+    let expected = "--user is-active --quiet moai-daemon.service\n--user show -p MainPID --value moai-daemon.service\n--user restart moai-daemon.service\n";
+    {
+        let main_pid = 99;
+        let (out, calls) = update_serving_pid(Some(OUR_UNIT), 0, 0, Serve::Old, main_pid, &[]);
+        assert!(text(&out).contains("daemon old (pid 42) still runs"), "MainPID {main_pid}: {}", text(&out));
+        assert!(!text(&out).contains("has not answered yet"), "MainPID {main_pid}: {}", text(&out));
+        assert_eq!(calls, expected, "MainPID {main_pid}");
+
+        let (out, calls) = update_serving_pid(Some(OUR_UNIT), 0, 0, Serve::Old, main_pid, &["--json"]);
+        let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+        assert_eq!(v.get("daemon_restart").and_then(|v| v.as_bool()), Some(true), "MainPID {main_pid}: {v}");
+        assert_eq!(v.get("daemon_restarted"), None, "MainPID {main_pid}: {v}");
+        assert_eq!(calls, expected, "MainPID {main_pid}");
+    }
+}
+
+/// 관리자가 PID를 대지 못하면 예전처럼 소켓에서 새 판을 기다린다.
+#[cfg(target_os = "linux")]
+#[test]
+fn update_waits_for_the_socket_when_service_pid_is_unknown() {
+    if !served() {
+        return;
+    }
+    let (out, calls) = update_serving_pid(Some(OUR_UNIT), 0, 0, Serve::Fresh, 0, &["--json"]);
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v.get("daemon_restarted").and_then(|v| v.as_bool()), Some(true), "{v}");
+    assert_eq!(v.get("daemon_restart"), None, "{v}");
+    assert!(calls.contains("--user restart moai-daemon.service"), "{calls}");
+}
+
 /// **옛 판으로만 답하는 것은 새 판이 아니다.** 시한까지 `Done` 이 아니라 `Unanswered` 로 선다.
 /// 새 바이너리의 status 가 `socket` 을 안 대면 관리자를 한 번도 안 부르고 지금까지의 알림이 선다.
 #[cfg(target_os = "linux")]
@@ -33196,7 +33348,10 @@ fn update_does_not_take_an_old_answer_and_does_not_restart_what_it_cannot_check(
     let (out, calls) = update_serving(Some(OUR_UNIT), 0, 0, Serve::Old, &[]);
     assert!(text(&out).contains("has not answered yet"), "{}", text(&out));
     assert!(!text(&out).contains("restarted the daemon service"), "{}", text(&out));
-    assert_eq!(calls, "--user is-active --quiet moai-daemon.service\n--user restart moai-daemon.service\n");
+    assert_eq!(
+        calls,
+        "--user is-active --quiet moai-daemon.service\n--user show -p MainPID --value moai-daemon.service\n--user restart moai-daemon.service\n"
+    );
 
     let (out, calls) = update_serving(Some(OUR_UNIT), 0, 0, Serve::NoSocket, &["--json"]);
     let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();

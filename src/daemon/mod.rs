@@ -52,7 +52,14 @@ pub fn methods() -> rpc::Methods {
 /// 이름이 갈려야 두 표면이 서로를 모른다.
 #[cfg(any(unix, windows))]
 pub fn socket_path() -> std::io::Result<std::path::PathBuf> {
-    let path = crate::ctl::place::dir()?.join("daemon.socket");
+    socket_in(&crate::ctl::place::dir()?)
+}
+
+/// `dir` 에 설 데몬 소켓. `install` 이 서비스에 적을 절대 디렉터리도 이 길로 잰다(moai-fetu.gi0) — 이름과 상한이 한
+/// 자리에 있어야 `install` 이 잰 경로와 서비스의 데몬이 묶는 경로가 갈리지 않는다.
+#[cfg(any(unix, windows))]
+pub(crate) fn socket_in(dir: &std::path::Path) -> std::io::Result<std::path::PathBuf> {
+    let path = dir.join("daemon.socket");
     // `sockaddr_un` 의 상한 — `ctl::place::socket` 과 같은 값이다. Windows 의 자리는 표시 파일이라 상한이 없다.
     #[cfg(unix)]
     {
@@ -71,6 +78,18 @@ pub fn socket_path() -> std::io::Result<std::path::PathBuf> {
 #[cfg(all(test, any(unix, windows)))]
 mod tests {
     use clap::CommandFactory as _;
+
+    #[cfg(unix)]
+    #[test]
+    fn socket_path_limit_counts_bytes_and_reserves_the_terminator() {
+        let limit = if cfg!(target_os = "macos") { 104 } else { 108 };
+        let name = "/daemon.socket".len();
+        let socket_in = |dir: String| super::socket_in(std::path::Path::new(&dir));
+        assert_eq!(socket_in("x".repeat(limit - 1 - name)).unwrap().as_os_str().len(), limit - 1);
+        assert!(socket_in("x".repeat(limit - name)).is_err());
+        // 글자로는 상한 안이고 바이트로는 상한에 닿는다.
+        assert!(socket_in("é".repeat((limit - name).div_ceil(2))).is_err());
+    }
 
     /// CLI 에 짝이 없는 메서드 — 데몬이나 API 에만 있는 것.
     const API_ONLY: &[(&str, &str)] = &[

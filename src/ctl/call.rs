@@ -25,23 +25,93 @@ pub struct Window {
     pub socket: PathBuf,
 }
 
+#[derive(Debug, Serialize)]
+pub struct Skipped {
+    /// Written lossily: a socket directory that is not UTF-8 must not panic `ctl ls --json` (`json!` unwraps).
+    #[serde(serialize_with = "lossy")]
+    pub socket: PathBuf,
+    pub reason: &'static str,
+    #[serde(skip)]
+    code: &'static str,
+    /// What made a `gone` socket unreadable, for the selection error only.
+    #[serde(skip)]
+    detail: Option<String>,
+}
+
+impl Skipped {
+    /// The listing names three reasons (`docs/ctl.md`); `code` keeps what a selection needing this socket fails with.
+    fn new(socket: PathBuf, code: &'static str, detail: Option<String>) -> Skipped {
+        let reason = match code {
+            code::BUSY => "busy",
+            code::TIMEOUT => "timeout",
+            _ => "gone",
+        };
+        Skipped { socket, reason, code, detail }
+    }
+}
+
+fn lossy<S: serde::Serializer>(path: &Path, serializer: S) -> Result<S::Ok, S::Error> {
+    serializer.serialize_str(&path.to_string_lossy())
+}
+
+#[derive(Debug, Default)]
+pub struct Discovery {
+    pub windows: Vec<Window>,
+    pub skipped: Vec<Skipped>,
+}
+
+impl Discovery {
+    /// A directed or proposal request cannot treat its unlisted window as absent.
+    fn check_complete(&self) -> R<()> {
+        let Some(skipped) = self.skipped.first() else { return Ok(()) };
+        let what = match skipped.code {
+            code::BUSY => "is busy; retry control discovery".to_string(),
+            code::TIMEOUT => "did not answer in time; retry control discovery".to_string(),
+            // A protocol mismatch does not pass with a retry.
+            code::UNSUPPORTED => "speaks another control protocol; use the moai version that opened it".to_string(),
+            _ => match &skipped.detail {
+                Some(detail) => format!("closed or could not answer ({detail}); retry control discovery"),
+                None => "closed or could not answer; retry control discovery".to_string(),
+            },
+        };
+        Err(Fail::coded(format!("The window at {} {what}.", skipped.socket.display()), skipped.code))
+    }
+
+    fn require_complete(self) -> R<Vec<Window>> {
+        self.check_complete()?;
+        Ok(self.windows)
+    }
+}
+
 #[cfg(any(unix, windows))]
-pub fn windows() -> R<Vec<Window>> {
-    windows_for_target(None)
+pub fn windows() -> R<Discovery> {
+    let dir = super::place::dir().map_err(|e| Fail::new(e.to_string()))?;
+    windows_in(&dir, None, false)
 }
 
 /// Resolve an explicit window through its PID socket without contacting unrelated windows.
 #[cfg(any(unix, windows))]
 pub fn windows_for_target(target: Option<&str>) -> R<Vec<Window>> {
     let dir = super::place::dir().map_err(|e| Fail::new(e.to_string()))?;
-    windows_in(&dir, target, false)
+    windows_in(&dir, target, false)?.require_complete()
+}
+
+/// Automatic control uses the windows that answered; an explicit target must answer itself.
+#[cfg(any(unix, windows))]
+pub fn windows_for_control(target: Option<&str>) -> R<Discovery> {
+    let dir = super::place::dir().map_err(|e| Fail::new(e.to_string()))?;
+    let discovery = windows_in(&dir, target, false)?;
+    if target.is_some() {
+        discovery.check_complete()?;
+    }
+    Ok(discovery)
 }
 
 /// Discover a reconnecting tab only when a proposal names its exact window.
 #[cfg(any(unix, windows))]
 pub fn windows_for_proposal(target: Option<&str>) -> R<Vec<Window>> {
     let dir = super::place::dir().map_err(|e| Fail::new(e.to_string()))?;
-    windows_in(&dir, target, true)
+    windows_in(&dir, target, true)?.require_complete()
 }
 
 #[cfg(any(unix, windows))]
@@ -57,9 +127,9 @@ fn target_pid(target: &str) -> Option<u32> {
 }
 
 #[cfg(any(unix, windows))]
-fn windows_in(dir: &Path, target: Option<&str>, proposal: bool) -> R<Vec<Window>> {
+fn windows_in(dir: &Path, target: Option<&str>, proposal: bool) -> R<Discovery> {
     let paths = if let Some(target) = target {
-        let Some(pid) = target_pid(target) else { return Ok(Vec::new()) };
+        let Some(pid) = target_pid(target) else { return Ok(Discovery::default()) };
         vec![dir.join(format!("{pid}.sock"))]
     } else {
         std::fs::read_dir(dir)
@@ -67,7 +137,7 @@ fn windows_in(dir: &Path, target: Option<&str>, proposal: bool) -> R<Vec<Window>
             .map(|entry| entry.map(|entry| entry.path()).map_err(|e| Fail::new(e.to_string())))
             .collect::<R<Vec<_>>>()?
     };
-    let mut windows = Vec::new();
+    let mut result = Discovery::default();
     for path in paths {
         if path.extension().is_none_or(|e| e != "sock") {
             continue;
@@ -91,11 +161,33 @@ fn windows_in(dir: &Path, target: Option<&str>, proposal: bool) -> R<Vec<Window>
                             && target.is_none_or(|id| window.id == id)
                         {
                             window.socket = path.clone();
-                            windows.push(window);
+                            result.windows.push(window);
                         }
                     }
                 }
             }
+            Ok(reply) => {
+                let (code, detail) = match reply.code.as_deref() {
+                    // A full window and one whose person just left the editor are both live.
+                    Some("busy" | "person_busy") => (code::BUSY, None),
+                    Some("timeout") => (code::TIMEOUT, None),
+                    Some("unsupported") => (code::UNSUPPORTED, None),
+                    other => (code::GONE, Some(format!("replied {}", other.unwrap_or("without a code")))),
+                };
+                result.skipped.push(Skipped::new(path, code, detail));
+            }
+            // Windows: every pipe instance stayed taken (`transport::pipe`), the daemon probe's `Busy`.
+            Err(e) if e.kind() == std::io::ErrorKind::ResourceBusy => {
+                result.skipped.push(Skipped::new(path, code::BUSY, None));
+            }
+            // The read timed out before the window's own `timeout` reply arrived — the same window, not a gone one.
+            Err(e) if matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) => {
+                result.skipped.push(Skipped::new(path, code::TIMEOUT, None));
+            }
+            // Another user's pipe (`transport::pipe` checks the owner) is not our window; a Windows marker pending
+            // deletion also reads as access denied, and its window is already closing. A sharing violation is not this
+            // kind (std leaves it uncategorized) and lists as `gone` below.
+            Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {}
             Err(e) if matches!(e.kind(), std::io::ErrorKind::ConnectionRefused | std::io::ErrorKind::NotFound) => {
                 // Recheck the path before removal; never follow or remove a foreign file.
                 if let Ok(now) = std::fs::symlink_metadata(&path)
@@ -105,16 +197,17 @@ fn windows_in(dir: &Path, target: Option<&str>, proposal: bool) -> R<Vec<Window>
                     let _ = std::fs::remove_file(&path);
                 }
             }
-            _ => {}
+            Err(e) => result.skipped.push(Skipped::new(path, code::GONE, Some(e.to_string()))),
         }
     }
-    windows.sort_by(|a, b| a.id.cmp(&b.id));
-    Ok(windows)
+    result.windows.sort_by(|a, b| a.id.cmp(&b.id));
+    result.skipped.sort_by(|a, b| a.socket.cmp(&b.socket));
+    Ok(result)
 }
 
 #[cfg(not(any(unix, windows)))]
-pub fn windows() -> R<Vec<Window>> {
-    Ok(Vec::new())
+pub fn windows() -> R<Discovery> {
+    Ok(Discovery::default())
 }
 
 #[cfg(not(any(unix, windows)))]
@@ -237,6 +330,83 @@ mod tests {
         let windows = vec![window("other", "/two", 1)];
         assert_eq!(pick(&windows, Some("/one"), None).unwrap_err().code, code::NO_WINDOW);
     }
+
+    #[test]
+    #[cfg(unix)]
+    fn discovery_reports_busy_and_unreadable_replies() {
+        use std::io::Write;
+        use std::os::unix::net::UnixListener;
+        struct TempDir(PathBuf);
+        impl Drop for TempDir {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_dir_all(&self.0);
+            }
+        }
+        let dir = TempDir(std::env::temp_dir().join(format!("moai-pwxx-{}-{}", std::process::id(), wire::now_ms())));
+        std::fs::create_dir(&dir.0).unwrap();
+        let dir = &dir.0;
+        let listener = UnixListener::bind(dir.join("2.sock")).unwrap();
+        let owner = std::thread::spawn(move || {
+            for refusal in [
+                Some("busy"),
+                Some("busy"),
+                Some("timeout"),
+                None,
+                Some("silent"),
+                Some("person_busy"),
+                Some("unsupported"),
+            ] {
+                let (mut stream, _) = listener.accept().unwrap();
+                match refusal {
+                    // A window whose owner loop never answers: hold the connection until the caller gives up.
+                    Some("silent") => {
+                        let _ = std::io::Read::read_to_end(&mut stream, &mut Vec::new());
+                    }
+                    Some(code) => {
+                        serde_json::to_writer(&mut stream, &Reply::error(code, "refused")).unwrap();
+                        stream.write_all(b"\n").unwrap();
+                    }
+                    None => {}
+                }
+            }
+        });
+        let listed = windows_in(dir, None, false).unwrap();
+        assert!(listed.windows.is_empty());
+        assert_eq!(listed.skipped[0].reason, "busy");
+        assert_eq!(listed.skipped[0].socket, dir.join("2.sock"));
+        assert_eq!(listed.require_complete().unwrap_err().code, code::BUSY);
+        assert_eq!(windows_in(dir, Some("2.7"), false).unwrap().require_complete().unwrap_err().code, code::BUSY);
+        assert_eq!(windows_in(dir, Some("2.7"), false).unwrap().require_complete().unwrap_err().code, code::TIMEOUT);
+        let gone = windows_in(dir, Some("2.7"), false).unwrap().require_complete().unwrap_err();
+        assert_eq!(gone.code, code::GONE);
+        // The transport error behind `gone` reaches the person; the old message dropped it.
+        assert!(gone.message.contains("could not answer ("), "{}", gone.message);
+        assert_eq!(windows_in(dir, None, false).unwrap().require_complete().unwrap_err().code, code::TIMEOUT);
+        assert_eq!(windows_in(dir, Some("2.7"), false).unwrap().require_complete().unwrap_err().code, code::BUSY);
+        let other = windows_in(dir, Some("2.7"), false).unwrap();
+        assert_eq!(other.skipped[0].reason, "gone");
+        let other = other.require_complete().unwrap_err();
+        assert_eq!(other.code, code::UNSUPPORTED);
+        // A protocol mismatch does not pass with a retry, so the message does not ask for one.
+        assert!(
+            other.message.contains("another control protocol") && !other.message.contains("retry"),
+            "{}",
+            other.message
+        );
+        owner.join().unwrap();
+    }
+
+    /// `ctl ls --json` builds its reply with `json!`, which unwraps: a socket path that is not UTF-8 must still serialize.
+    #[test]
+    #[cfg(unix)]
+    fn a_skipped_socket_that_is_not_utf8_still_serializes() {
+        use std::os::unix::ffi::OsStrExt;
+        let socket = PathBuf::from(std::ffi::OsStr::from_bytes(b"/run/moai-\xff/2.sock"));
+        let value = serde_json::to_value(Skipped::new(socket, code::BUSY, None)).unwrap();
+        assert_eq!(value["reason"], "busy");
+        assert!(value["socket"].as_str().unwrap().ends_with("/2.sock"));
+    }
+
     #[test]
     #[cfg(unix)]
     fn explicit_targets_skip_unrelated_sockets_and_preserve_proposal_hello() {
@@ -263,12 +433,12 @@ mod tests {
                 stream.write_all(b"\n").unwrap();
             }
         });
-        assert_eq!(windows_in(&dir, Some("2.7"), false).unwrap()[0].id, "2.7");
-        assert_eq!(windows_in(&dir, Some("2.7"), true).unwrap()[0].id, "2.7");
+        assert_eq!(windows_in(&dir, Some("2.7"), false).unwrap().windows[0].id, "2.7");
+        assert_eq!(windows_in(&dir, Some("2.7"), true).unwrap().windows[0].id, "2.7");
         owner.join().unwrap();
         assert_eq!(slow.accept().unwrap_err().kind(), std::io::ErrorKind::WouldBlock);
         for invalid in ["../1", "tui-../../1", "1", "2.x", "tui-0"] {
-            assert!(windows_in(&dir, Some(invalid), false).unwrap().is_empty());
+            assert!(windows_in(&dir, Some(invalid), false).unwrap().windows.is_empty());
         }
         assert_eq!(target_pid("tui-42"), Some(42));
         std::fs::remove_dir_all(dir).unwrap();

@@ -4449,6 +4449,10 @@ mod tests {
         a.user = None;
         a.identify = nobody;
         let before = snapshots(&[&one]);
+        let config = s.join("user/config.toml");
+        a.user_config = Some(config.clone());
+        let one_sheet = crate::read_marks::place_of(&config, &one).at;
+        let one_before = std::fs::read(&one_sheet).ok();
         a.key(key(KeyCode::Down));
         a.hit("SPC n");
         assert_eq!(target(&a), Some(two.clone()));
@@ -4465,6 +4469,20 @@ mod tests {
         a.key(key(KeyCode::Enter));
         assert_eq!(a.mode, Mode::Browse, "{:?}", a.trouble);
         assert_eq!(backlog_at(&two), ["two 의 생각"]);
+        let row = a
+            .site
+            .repo
+            .as_ref()
+            .unwrap()
+            .read()
+            .unwrap()
+            .issues
+            .into_iter()
+            .find(|i| i.title == "two 의 생각")
+            .unwrap();
+        let marks = crate::read_marks::read(&config, &two, &Default::default());
+        assert_eq!(marks.seen.get(&row.id), Some(&row.updated_at));
+        assert_eq!(std::fs::read(&one_sheet).ok(), one_before);
         assert_eq!(snapshots(&[&one]), before, "묻고 이어진 쓰기가 다른 프로젝트에 닿았다");
         assert_eq!(a.here(), Some(two));
     }

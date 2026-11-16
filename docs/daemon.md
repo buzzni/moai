@@ -27,7 +27,7 @@ With `--json` that line is `{"started": true, "pid": …, "version": "…", "pro
 
 There is one daemon per user. A second `start` never runs a second daemon:
 
-- If the running one is the same version (the version number and `proto` match), `start` says so and exits 0 (`started` is `false` under `--json`).
+- If the running one is the same version (the version number and `proto` match), `start` says so and exits 0 (`started` is `false` under `--json`). The exception is a `start` launched by the service that `moai daemon install` registered, which the service manager names by its pid: it exits non-zero with the code `already_exists`, so the manager records a failure instead of a clean exit. If the manager cannot be asked, it exits 0 as above.
 - If the running one is another version, `start` names both versions, exits non-zero with the code `version_mismatch`, and leaves the running daemon alone. A long-running process does not pick up a replaced binary, so a daemon started before `cargo build` or `moai update` keeps answering as the old version. Restart it through its service manager, or stop and start it again if you started it yourself. See [Upgrade the daemon](#upgrade-the-daemon). `stop` works on a daemon of any version.
 - If a daemon died and left its socket, `start` removes the leftover and starts.
 - If a file at the socket path is not a socket of yours, `start` refuses and touches nothing.
@@ -84,6 +84,7 @@ It refuses these and changes nothing:
 | A file at that path that moai did not write | `already_exists` |
 | A service file that runs another `moai`, one that still exists and is a different file. Run `moai daemon uninstall`, then install from the one you want | `already_exists` |
 | A daemon you started yourself answers at the socket. The service would find the place taken and stay down. Run `moai daemon stop`, then install again | `already_exists` |
+| A path the file cannot hold: one with a line break, or a socket that would be too long for a Unix socket (107 bytes, 103 on macOS) once its directory is made absolute. A relative `MOAI_CTL_DIR` can pass in your shell and still fail here. Use a shorter socket directory | `bad_input` |
 | Running under `sudo`, which would make it root's service | `refused` |
 | No service manager, or it refused. No file is left behind, and the CLI works without the daemon | `service_failed` |
 | Windows | `unsupported` |
@@ -148,7 +149,7 @@ A service does not inherit your shell's environment, and the socket directory de
 
 ## Upgrade the daemon
 
-1. Run `moai update`. After a successful installation it checks the newly installed binary's daemon status. If a daemon of another version or protocol still runs, and `moai daemon install` registered a service for this binary and that service is running, it restarts the service through the service manager and waits up to 5 seconds for the new version to answer. It waits by asking the daemon's socket for `hello`, without starting more processes. If the new version has not answered by then, it says so. In every other case it prints a restart notice to stderr (under `--json`, the keys below instead) and restarts nothing. A service you stopped stays stopped, and registration never changes.
+1. Run `moai update`. After a successful installation it checks the newly installed binary's daemon status. If a daemon of another version or protocol still runs, and `moai daemon install` registered a service for this binary and that service is running, and no `moai daemon install` or `moai daemon uninstall` is running at that moment, it restarts the service through the service manager. If the daemon that answered on the shell socket has the service manager's PID, or that PID cannot be read, it waits up to 5 seconds for the new version to answer, asking that socket for `hello` without starting more processes. If the new version has not answered by then, it says so. If the PID is known and differs, it prints a restart notice for the old socket responder: the restarted service may use another socket, and the responder may still need a separate restart. If it cannot restart the service, it prints the notice instead (under `--json`, the keys below). A service you stopped stays stopped, and registration never changes.
 2. If you got the notice, restart the daemon through whatever keeps it running. For a service file you wrote from the examples above, run `systemctl --user restart moai-daemon.service`, or `launchctl kickstart -k gui/$(id -u)/com.example.moai-daemon`. For a daemon you started yourself, run `moai daemon stop`, then `moai daemon start` again where it ran before. Do not restart a service with `moai daemon stop`: the daemon exits 0, neither service manager restarts a clean exit, and a `moai daemon start` typed afterwards runs in your terminal, outside the service.
 3. Run `moai daemon status` to check the replacement. A daemon rebuilt with the same version and protocol is indistinguishable from the old build by this check, so restart it manually after such a rebuild.
 
@@ -510,4 +511,4 @@ $pipe.Dispose()
 
 After `moai update` a running daemon keeps the old binary, which the installer has renamed to `moai.exe.old` (`moai.exe.<pid>.old` when an earlier `.old` is still held). Stop it and start it again.
 
-Decided in: moai-wbdh, moai-ou5y, moai-upq5, moai-tloc
+Decided in: moai-wbdh, moai-ou5y, moai-upq5, moai-tloc, moai-fetu, moai-kwzp, moai-s95f, moai-rkre

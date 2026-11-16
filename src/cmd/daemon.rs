@@ -6,7 +6,9 @@
 //!   셸에서는 `&` 면 된다. 스스로 떨어져 나가는(fork·setsid) 길을 두면 그 길의 오류를 알릴 자리가 없어진다.
 //! - **이미 떠 있으면 둘째를 띄우지 않는다.** 같은 판이면 그렇다고 알리고 0, 다른 판이면 두 판을 대고
 //!   `version_mismatch` 로 멈춘다 — 말없이 갈아 끼우지 않는다. 오래 사는 프로세스와 갈아 끼운 바이너리가 갈리는
-//!   것(`src/web/run.rs` 의 `exe_of` 가 자식으로 피한 일)을 사람이 알고 다시 띄우게 한다.
+//!   것(`src/web/run.rs` 의 `exe_of` 가 자식으로 피한 일)을 사람이 알고 다시 띄우게 한다. 서비스 관리자가 띄운
+//!   `start` 만은 같은 판이어도 `already_exists` 로 멈춘다(moai-rkre) — 0 이면 관리자가 성공으로 읽고 서비스를 꺼진
+//!   채 둔다.
 //! - **`stop` 은 메서드다**(`daemon.shutdown`) — 신호가 아니라. 전송과 무관하고 Windows 의 named pipe 에도 그대로 선다.
 //! - **`status` 는 읽기만 한다.** 남은 소켓도 지우지 않는다 — 지우는 것은 `start` 다.
 //! - **`install` 은 서비스 관리자에게 맡길 뿐이다**(`crate::daemon::service`, moai-upq5). 등록한 뒤 붙어 보는 것은 사람에게
@@ -223,7 +225,16 @@ mod os {
         pid.map_or_else(|| "?".to_string(), |p| p.to_string())
     }
 
-    /// 떠 있는 데몬을 만났다 — 같은 판이면 알리고 0, 다른 판이면 두 판을 대고 멈춘다.
+    /// 이 프로세스를 moai 의 서비스가 띄웠는가 — 관리자가 아는 그 서비스의 pid 가 이 프로세스다. 서비스 파일의 표지가
+    /// 아니라 관리자에 묻는 까닭은 업데이트 전에 등록한 서비스도 알아보려는 것이다. 관리자에 못 닿으면 아니다.
+    fn started_by_service() -> bool {
+        Service::native().is_ok_and(|svc| {
+            svc.registered() && svc.main_pid(&service::run).is_ok_and(|pid| pid == Some(std::process::id()))
+        })
+    }
+
+    /// 떠 있는 데몬을 만났다 — 같은 판이면 알리고 0, 다른 판이면 두 판을 대고 멈춘다. 같은 판이어도 서비스가 띄운
+    /// 이 프로세스면 `already_exists` 로 멈춘다(moai-rkre) — 0 이면 관리자가 성공으로 읽고 서비스를 꺼진 채 둔다.
     fn already(ctx: &Ctx, path: &Path, hello: &Hello) -> R<Vec<String>> {
         let lang = ctx.lang();
         let socket = shown(path);
@@ -232,6 +243,14 @@ mod os {
                 say(lang, "daemon.other_version"),
                 &[("running", &hello.version), ("pid", &pid_text(hello.pid)), ("this", env!("CARGO_PKG_VERSION"))],
                 code::VERSION_MISMATCH,
+            ));
+        }
+        // 관리자를 못 묻거나 다른 PID 면 평소 CLI 의 성공을 그대로 둔다.
+        if started_by_service() {
+            return Err(failed(
+                say(lang, "daemon.already"),
+                &[("pid", &pid_text(hello.pid)), ("version", &hello.version), ("socket", &socket)],
+                code::ALREADY_EXISTS,
             ));
         }
         if ctx.json {
@@ -426,6 +445,8 @@ mod os {
                 code::BAD_INPUT,
             ),
             Trouble::File(said) => {
+                // `said` 는 링크가 가리키는 자리를 댈 수 있다 — 서비스 경로처럼 한 줄로 걷는다.
+                let said = crate::text::one_line(&said);
                 failed(say(lang, "daemon.service.no_file"), &[("service", &file), ("said", &said)], code::ERROR)
             }
             Trouble::Refused(said) => failed(
@@ -480,8 +501,19 @@ mod os {
         let exe = std::env::current_exe().map_err(|e| Fail::new(e.to_string()))?;
         let exe = typed_exe(&exe, std::env::var_os("PATH"));
         let path = socket_path(lang)?;
-        // **서비스 밖에서 돌던 데몬이 있으면 아무것도 안 쓴다.** 등록하면 서비스의 `start` 가 그 데몬을 만나 `already` 로 0
-        // 종료하고, 관리자는 그것을 실패로 안 읽어 서비스가 꺼진 채 남는다 — 그 데몬이 멈추면 다음 로그인까지 아무것도 안 뜬다.
+        // 서비스는 이 셸의 디렉터리에서 돌지 않는다 — 상대 경로를 그대로 적으면 다른 소켓을 본다. 고정할 자리를 못
+        // 지으면 아무것도 안 쓰고 멈춘다: 빼고 쓰면 서비스가 셸과 다른 소켓을 본다(moai-tloc.wnw).
+        let dir = path
+            .parent()
+            .and_then(|dir| std::path::absolute(dir).ok())
+            .ok_or_else(|| trouble(lang, &svc, Trouble::BadPath(path.display().to_string())))?;
+        // 그 절대 꼴의 소켓도 상한 안이어야 한다 — 상대 경로는 상한 안이어도 절대 꼴이 넘으면 서비스의 데몬이 끝내 못
+        // 묶는다(moai-fetu.gi0). 까닭(너무 길다)을 거절문에 싣는다. 서비스 밖의 데몬을 묻기 전에 본다 — 그 데몬을 멈추고
+        // 다시 치라고 한 뒤에야 이 거절을 내면 헛걸음이다.
+        crate::daemon::socket_in(&dir).map_err(|e| trouble(lang, &svc, Trouble::BadPath(e.to_string())))?;
+        // **서비스 밖에서 돌던 데몬이 있으면 아무것도 안 쓴다.** 등록하면 서비스의 `start` 가 그 데몬을 만나
+        // `already_exists` 로 끝나고(moai-rkre), systemd 는 곧 다시 띄우기를 그쳐 서비스가 꺼진 채 남는다 — 그 데몬이
+        // 멈추면 다음 로그인까지 아무것도 안 뜬다.
         if let Some((pid, version)) = outside(&svc, &path) {
             return Err(failed(
                 say(lang, "daemon.service.outside"),
@@ -489,12 +521,6 @@ mod os {
                 code::ALREADY_EXISTS,
             ));
         }
-        // 서비스는 이 셸의 디렉터리에서 돌지 않는다 — 상대 경로를 그대로 적으면 다른 소켓을 본다. 고정할 자리를 못
-        // 지으면 아무것도 안 쓰고 멈춘다: 빼고 쓰면 서비스가 셸과 다른 소켓을 본다(moai-tloc.wnw).
-        let dir = path
-            .parent()
-            .and_then(|dir| std::path::absolute(dir).ok())
-            .ok_or_else(|| trouble(lang, &svc, Trouble::BadPath(path.display().to_string())))?;
         let shown_exe = shown(&exe);
         let wrote = svc.install(&exe, &dir, &service::run).map_err(|why| trouble(lang, &svc, why))?;
         let installed = wrote != Wrote::Same;

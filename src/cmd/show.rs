@@ -269,15 +269,15 @@ fn listed(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>, keys: &Keys) -> 
     let crate::worktree::Gathered { load: active_load, origin, .. } =
         super::gather(ctx, &repo, args.worktree.worktree)?;
     // 산 줄의 id — 읽힌 줄과, 못 읽어도 id 를 대는 줄. 이것 밖의 줄은 아카이브 파일에서만 왔다(`Where::stored`).
-    let opaque = active_load.reserved_ids();
-    let readable: std::collections::BTreeSet<&str> = active_load.issues.iter().map(|i| i.id.as_str()).collect();
-    // Ids only an unreadable live line holds: every row read under one of them is a stale archive copy
-    // (moai-8rf1.hb3). An id with a readable live row keeps its archive twins, as when nothing is unreadable —
-    // judging through `with_archive` dropped those too, so one unrelated unreadable line changed `show <epic>`.
-    let shadowed: std::collections::BTreeSet<String> =
-        opaque.iter().filter(|id| !readable.contains(id.as_str())).cloned().collect();
-    let live: std::collections::BTreeSet<String> = readable.into_iter().map(str::to_string).chain(opaque).collect();
-    let mut load = crate::archive::read_all(&repo.root, active_load)?;
+    let readable: BTreeSet<String> = active_load.issues.iter().map(|i| i.id.clone()).collect();
+    let explicit_archive = args.filter.archived;
+    let live: std::collections::BTreeSet<String> =
+        active_load.issues.iter().map(|i| i.id.clone()).chain(active_load.reserved_ids()).collect();
+    // Every surface judges the live-first context `status` and `edit` read (`archive::context`): an archive copy of a
+    // live id, readable or not, supplies no member, child or blocker. The copies it set aside are kept apart, moved and
+    // not cloned, only to count duplicate lines and to open an id only an unreadable live line holds. Duplicates within
+    // each source stay.
+    let (load, copies) = crate::archive::context_apart(&repo.root, active_load)?;
     // Only live lines: an archive-file row is never in a list without `archived`, so its unreadable line cannot hide
     // one, and an id-less archive line would otherwise hold back every `removed` until someone mends the archive.
     crate::side::with(|side| {
@@ -315,29 +315,17 @@ fn listed(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>, keys: &Keys) -> 
         }
         // 없는 id 는 **어느 명령에서나 한 낱말이다**([`Fail::not_found`], moai-95g1) — 손으로
         // 같은 글을 지어 두면 `show` 만 옛 말로 남는다(리뷰).
-        let issue = load.get(id).ok_or_else(|| Fail::not_found(id, ctx.lang()))?;
+        // The later row wins, as it did over every copy read (`Load::get`): a live row, else the id's last archive
+        // copy — which the context set aside when only an unreadable live line holds the id.
+        let issue = load
+            .get(id)
+            .or_else(|| copies.iter().rfind(|i| i.id == *id))
+            .ok_or_else(|| Fail::not_found(id, ctx.lang()))?;
         if args.as_plan {
             return plan(ctx, &load.issues, issue, args.raw);
         }
-        // Copied only when one is unfolded and some id is shadowed — a list view never reads it.
-        let judged: Option<Vec<Issue>> =
-            (!shadowed.is_empty()).then(|| load.issues.iter().filter(|i| !shadowed.contains(&i.id)).cloned().collect());
-        return one(
-            ctx,
-            &repo,
-            &load.issues,
-            issue,
-            args.raw,
-            &origin,
-            args.worktree.worktree,
-            &live,
-            judged.as_deref().unwrap_or(&load.issues),
-            keys,
-        );
+        return one(ctx, &repo, &copies, issue, args.raw, &origin, args.worktree.worktree, &live, &load.issues, keys);
     }
-
-    // Lists, filters and tree rollups must judge the same live-first context as the detail view.
-    load.issues.retain(|row| !shadowed.contains(&row.id));
 
     // **`--raw` 도 조용히 버리지 않는다.** 본문은 하나를 펼칠 때만 나오므로
     // 목록 자리의 `--raw` 는 아무 일도 하지 않는다. 말없이 먹으면 부르는 쪽은
@@ -486,6 +474,18 @@ fn listed(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>, keys: &Keys) -> 
             Some(why) => hidden_rows.push((at, why)),
         }
     }
+    // Archive twins remain inspectable as a separate diagnostic section. They never enter the
+    // context used for member counts, navigation or rollups; unreadable live IDs stay hidden.
+    let archive_copies: Vec<&Issue> = if explicit_archive {
+        copies
+            .iter()
+            .filter(|i| {
+                readable.contains(&i.id) && wide.matches(i, &now, &wh) && filter.hidden_by(i, &now, &wh).is_none()
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
     let tally = |drawn: &BTreeSet<usize>| {
         let mut h = view::Hidden::default();
         for (at, why) in &hidden_rows {
@@ -563,7 +563,9 @@ fn listed(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>, keys: &Keys) -> 
             .then(|| crate::pulse::read(&repo.root, &load.issues, &repo.config));
         let rows: Vec<Listed> = shown
             .iter()
-            .map(|i| Listed {
+            .map(|i| (i, false))
+            .chain(archive_copies.iter().map(|i| (*i, true)))
+            .map(|(i, archive_copy)| Listed {
                 row: super::Row::of(
                     i,
                     |k| wh.states.get(&k).copied(),
@@ -584,7 +586,12 @@ fn listed(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>, keys: &Keys) -> 
                 // 옛 `work` 가 그 자리에서 거짓을 싣는다.
                 work: work.get(i.id.as_str()).map_or(&[], Vec::as_slice),
                 unread: fresh.contains(i.id.as_str()),
-                derived: Derived::of(&wh, i, &now),
+                archive_copy,
+                derived: if archive_copy {
+                    Derived { archived: true, ..Derived::of(&wh, i, &now) }
+                } else {
+                    Derived::of(&wh, i, &now)
+                },
             })
             .collect();
         return super::json_line(&rows);
@@ -611,9 +618,10 @@ fn listed(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>, keys: &Keys) -> 
             out.push(String::new());
             out.push(n);
         }
+        append_archive_copies(&mut out, &archive_copies, &repo.config, &wh, screen, asked, &load.issues, ctx.lang());
         return Ok(out);
     }
-    Ok(view::list(
+    let mut out = view::list(
         &shown,
         &repo.config,
         tally(&BTreeSet::new()),
@@ -624,7 +632,45 @@ fn listed(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>, keys: &Keys) -> 
         asked,
         &wh,
         screen,
-    ))
+    );
+    append_archive_copies(&mut out, &archive_copies, &repo.config, &wh, screen, asked, &load.issues, ctx.lang());
+    Ok(out)
+}
+
+fn append_archive_copies(
+    out: &mut Vec<String>,
+    copies: &[&Issue],
+    cfg: &crate::config::Config,
+    wh: &crate::query::Where,
+    screen: view::Screen,
+    asked: view::Asked,
+    all: &[Issue],
+    lang: crate::i18n::Lang,
+) {
+    if copies.is_empty() {
+        return;
+    }
+    out.push(String::new());
+    out.push(
+        match lang {
+            crate::i18n::Lang::Ko => "보관 사본 (집계에서 제외):",
+            _ => "Archive copies (excluded from counts):",
+        }
+        .into(),
+    );
+    let rows: Vec<Issue> = copies.iter().map(|i| (*i).clone()).collect();
+    let lines = view::list(
+        &rows,
+        cfg,
+        view::Hidden::default(),
+        0,
+        &report::epic_labels_over(all, &wh.epic, wh.kinds.lend()),
+        asked,
+        wh,
+        screen,
+    );
+    // The section header marks every row; omit the separate list's count summary.
+    out.extend(lines.into_iter().take(rows.len() + 1));
 }
 
 /// `--removed` — `moai rm` 이 지운 이슈를 저널에서 `ts` 차례로 낸다(moai-7dmq). `--since` 가 있으면 그때부터다.
@@ -754,6 +800,8 @@ struct Listed<'a> {
     /// 설 때만 단다(`true`) — `journal_error` 와 같은 약속이라 없는 것이 곧 "안 읽은 줄이 아니다" 다.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     unread: bool,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    archive_copy: bool,
     #[serde(flatten)]
     derived: Derived<'a>,
 }
@@ -933,7 +981,7 @@ fn plan(ctx: &Ctx, all: &[Issue], epic: &Issue, raw: bool) -> R<Vec<String>> {
 fn one(
     ctx: &Ctx,
     repo: &Repo,
-    all: &[Issue],
+    copies: &[Issue],
     issue: &Issue,
     raw: bool,
     origin: &crate::worktree::Origin,
@@ -945,11 +993,11 @@ fn one(
     // **`--fields` 가 안 고른 값비싼 키는 짓지 않는다**(리뷰) — 도움말이 "안 고른 키는 셈하지 않는다" 고 대는데
     // 하나를 펼치는 이 길만 저널·`git log`·옆 워크트리·거름망·읽음 파일을 늘 다 읽었다. 사람 화면은 다 쓴다.
     let wants = |any: &[&str]| !ctx.json || any.iter().any(|k| keys.wants(k));
-    // Count duplicate lines over every copy read, archive duplicates included — that is the diagnostic.
-    let twins = report::duplicate_lines(all, &issue.id);
-    // Everything else reads the judged context: a stale archived copy of an ID an unreadable live row still holds
-    // must not supply a member, a child or a blocker member — `edit` and `status` never read it (moai-8rf1.hb3).
-    // Judging only the blockers left `show <epic>` reporting a done member that `show <blocked issue>` called absent.
+    // Count duplicate lines over every copy read, the archive copies the context set aside included — that is the
+    // diagnostic.
+    let twins = report::duplicate_lines(judged.iter().chain(copies), &issue.id);
+    // Everything else reads the live-first context: an archive copy shadowed by a readable or unreadable
+    // live row must not supply members, children or blockers that edit and status do not see.
     let all = judged;
     let children = report::children_of(all, &issue.id);
     // **이력은 줄이 온 워크트리의 저널에서 읽는다** (`Origin::root`). 스냅샷은
@@ -1346,6 +1394,7 @@ mod tests {
             journal_error: &[],
             // 설 때만 서는 키라 세워서 잰다 — `false` 면 직렬화에서 빠져 이 시험이 그 이름을 못 본다.
             unread: true,
+            archive_copy: true,
             // 셋 다 설 때만 서는 키라 세워서 잰다.
             derived: Derived { derived_milestone: Some("argos-0002"), shelved_by: Some("argos-0003"), archived: true },
         };
