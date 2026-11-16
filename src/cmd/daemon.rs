@@ -234,6 +234,17 @@ mod os {
                 code::VERSION_MISMATCH,
             ));
         }
+        // 기존 등록도 알아본다. 새 서비스 파일에만 표지를 넣으면 업데이트 전에 등록한 서비스는 놓친다.
+        // 관리자를 못 묻거나 다른 PID 면 평소 CLI 의 성공을 그대로 둔다.
+        if crate::daemon::service::Service::native().is_ok_and(|svc| {
+            svc.main_pid(&crate::daemon::service::run).is_ok_and(|pid| pid == Some(std::process::id()))
+        }) {
+            return Err(failed(
+                say(lang, "daemon.already"),
+                &[("pid", &pid_text(hello.pid)), ("version", &hello.version), ("socket", &socket)],
+                code::ALREADY_EXISTS,
+            ));
+        }
         if ctx.json {
             return super::super::json_line(&Started {
                 started: false,

@@ -471,6 +471,45 @@ fn a_second_start_does_not_double_up() {
     assert!(daemon.wait().success());
 }
 
+/// 관리자가 띄운 둘째 프로세스만 실패한다. 오래된 서비스 파일에도 표지는 필요하지 않다.
+#[cfg(target_os = "linux")]
+#[test]
+fn service_start_reports_an_occupied_socket_as_failure() {
+    use std::os::unix::fs::PermissionsExt as _;
+    let f = Fence::new();
+    let (daemon, first) = f.start();
+    let bin = f.0.join("fake-bin");
+    std::fs::create_dir(&bin).unwrap();
+    let systemctl = bin.join("systemctl");
+    let fake = |body: &str| {
+        std::fs::write(&systemctl, format!("#!/bin/sh\n{body}\n")).unwrap();
+        std::fs::set_permissions(&systemctl, std::fs::Permissions::from_mode(0o755)).unwrap();
+    };
+    fake("echo $PPID");
+    for args in [&["daemon", "start"][..], &["daemon", "start", "--json"][..]] {
+        let out = f.cmd(args).env("PATH", &bin).output().unwrap();
+        assert!(!out.status.success(), "{out:?}");
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert!(err.contains("already running"), "{err}");
+        if args.contains(&"--json") {
+            let error: Value = serde_json::from_slice(&out.stderr).unwrap();
+            assert_eq!(error["code"], "already_exists");
+        }
+    }
+    // 다른 PID 와 관리자 오류는 평소 start 출력과 종료 코드를 바꾸지 않는다.
+    for body in ["echo 0", "exit 1"] {
+        fake(body);
+        let out = f.cmd(&["daemon", "start", "--json"]).env("PATH", &bin).output().unwrap();
+        assert!(out.status.success(), "{out:?}");
+        let second: Value = serde_json::from_slice(&out.stdout).unwrap();
+        assert_eq!(second["started"], false);
+        assert_eq!(second["pid"], first["pid"]);
+    }
+    assert_eq!(f.json(&["daemon", "status", "--json"])["pid"], first["pid"]);
+    f.json(&["daemon", "stop", "--json"]);
+    assert!(daemon.wait().success());
+}
+
 #[test]
 fn a_stale_socket_is_cleared_and_the_daemon_starts() {
     let f = Fence::new();
