@@ -33091,6 +33091,18 @@ fn update_with_service(
 /// [`update_with_service`] 의 몸. **가짜 새 바이너리는 어느 길에서든 정확히 한 번만 뜬다** — 기다림이 프로세스를 띄우면 붉다.
 #[cfg(target_os = "linux")]
 fn update_serving(unit: Option<&str>, active: i32, restart: i32, serve: Serve, args: &[&str]) -> (Output, String) {
+    update_serving_pid(unit, active, restart, serve, 42, args)
+}
+
+#[cfg(target_os = "linux")]
+fn update_serving_pid(
+    unit: Option<&str>,
+    active: i32,
+    restart: i32,
+    serve: Serve,
+    main_pid: u32,
+    args: &[&str],
+) -> (Output, String) {
     let s = Scratch::new("update-service");
     let exe = hoisted(s.path());
     let real = canon(&exe).unwrap();
@@ -33104,7 +33116,7 @@ fn update_serving(unit: Option<&str>, active: i32, restart: i32, serve: Serve, a
     write_exe(
         &fake.join("systemctl"),
         &format!(
-            "#!/bin/sh\nprintf '%s\\n' \"$*\" >> '{}'\ncase \"$*\" in\n*is-active*) exit {active} ;;\n*restart*) {mark}; exit {restart} ;;\nesac\nexit 0\n",
+            "#!/bin/sh\nprintf '%s\\n' \"$*\" >> '{}'\ncase \"$*\" in\n*is-active*) exit {active} ;;\n*show*) echo {main_pid}; exit 0 ;;\n*restart*) {mark}; exit {restart} ;;\nesac\nexit 0\n",
             calls.display()
         ),
     );
@@ -33159,7 +33171,10 @@ fn update_restarts_the_running_service_it_registered() {
     let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
     assert_eq!(v.get("daemon_restarted").and_then(|v| v.as_bool()), Some(true), "{v}");
     assert_eq!(v.get("daemon_restart"), None, "다시 시작했는데 하라고 알린다 — {v}");
-    assert_eq!(calls, "--user is-active --quiet moai-daemon.service\n--user restart moai-daemon.service\n");
+    assert_eq!(
+        calls,
+        "--user is-active --quiet moai-daemon.service\n--user show -p MainPID --value moai-daemon.service\n--user restart moai-daemon.service\n"
+    );
 
     let (out, _) = update_with_service(Some(OUR_UNIT), 0, 0, true, &[]);
     assert!(text(&out).contains("restarted the daemon service"), "{}", text(&out));
@@ -33187,7 +33202,7 @@ fn update_falls_back_to_the_notice_when_it_cannot_restart() {
             0,
             1,
             false,
-            "--user is-active --quiet moai-daemon.service\n--user restart moai-daemon.service\n",
+            "--user is-active --quiet moai-daemon.service\n--user show -p MainPID --value moai-daemon.service\n--user restart moai-daemon.service\n",
         ),
         (
             "새 판이 안 답함",
@@ -33195,7 +33210,7 @@ fn update_falls_back_to_the_notice_when_it_cannot_restart() {
             0,
             0,
             false,
-            "--user is-active --quiet moai-daemon.service\n--user restart moai-daemon.service\n",
+            "--user is-active --quiet moai-daemon.service\n--user show -p MainPID --value moai-daemon.service\n--user restart moai-daemon.service\n",
         ),
     ];
     for (name, unit, active, restart, answers, want) in cases {
@@ -33214,6 +33229,26 @@ fn update_falls_back_to_the_notice_when_it_cannot_restart() {
     assert!(!text(&out).contains("still runs"), "{}", text(&out));
 }
 
+/// 셸 소켓의 옛 데몬이 서비스 밖에서 돌면 서비스를 다시 시작하지 않고 그 데몬을 알린다.
+#[cfg(target_os = "linux")]
+#[test]
+fn update_leaves_a_daemon_outside_the_service_running() {
+    if !served() {
+        return;
+    }
+    let expected = "--user is-active --quiet moai-daemon.service\n--user show -p MainPID --value moai-daemon.service\n";
+    let (out, calls) = update_serving_pid(Some(OUR_UNIT), 0, 0, Serve::Old, 99, &[]);
+    assert!(text(&out).contains("daemon old (pid 42) still runs"), "{}", text(&out));
+    assert!(!text(&out).contains("has not answered yet"), "{}", text(&out));
+    assert_eq!(calls, expected);
+
+    let (out, calls) = update_serving_pid(Some(OUR_UNIT), 0, 0, Serve::Old, 99, &["--json"]);
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v.get("daemon_restart").and_then(|v| v.as_bool()), Some(true), "{v}");
+    assert_eq!(v.get("daemon_restarted"), None, "{v}");
+    assert_eq!(calls, expected);
+}
+
 /// **옛 판으로만 답하는 것은 새 판이 아니다.** 시한까지 `Done` 이 아니라 `Unanswered` 로 선다.
 /// 새 바이너리의 status 가 `socket` 을 안 대면 관리자를 한 번도 안 부르고 지금까지의 알림이 선다.
 #[cfg(target_os = "linux")]
@@ -33225,7 +33260,10 @@ fn update_does_not_take_an_old_answer_and_does_not_restart_what_it_cannot_check(
     let (out, calls) = update_serving(Some(OUR_UNIT), 0, 0, Serve::Old, &[]);
     assert!(text(&out).contains("has not answered yet"), "{}", text(&out));
     assert!(!text(&out).contains("restarted the daemon service"), "{}", text(&out));
-    assert_eq!(calls, "--user is-active --quiet moai-daemon.service\n--user restart moai-daemon.service\n");
+    assert_eq!(
+        calls,
+        "--user is-active --quiet moai-daemon.service\n--user show -p MainPID --value moai-daemon.service\n--user restart moai-daemon.service\n"
+    );
 
     let (out, calls) = update_serving(Some(OUR_UNIT), 0, 0, Serve::NoSocket, &["--json"]);
     let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
