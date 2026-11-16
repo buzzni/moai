@@ -18,6 +18,7 @@ does not commit and it does not tag — see `CONTRIBUTING.md`.
 
 ### Fixed
 
+- When the daemon answering on the shell socket is not the registered service's process, `moai update` still restarts the service but no longer waits 5 seconds and reports the restart as unanswered; it keeps the notice that the other daemon still runs. (moai-s95f)
 - `moai ctl` reports a full targeted window as busy instead of claiming there is no window. (moai-pwxx)
 - `moai update` skips restarting the daemon service when an install or uninstall holds the service turn, preventing a concurrent uninstall from leaving the daemon running. (moai-kwzp)
 - `moai show` counts a live member once when an older archive copy shares its ID; explicit archive listings still identify the copy for recovery. (moai-b2jt)

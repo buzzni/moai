@@ -390,21 +390,27 @@ impl Service {
     /// 새 판으로는 다시 시작해야 한다.
     ///
     /// 파일을 읽을 때부터 관리자를 부르고 돌아올 때까지 차례([`Turn`])를 쥔다 — `uninstall` 이 멈춘 뒤·파일을 걷기 전에 끼어
-    /// 서비스를 다시 띄우지 않게(moai-kwzp). **기다리지는 않는다.** 차례가 차 있거나 디렉터리가 없으면 `false` 다 — 멈춘
-    /// `install` 에 update 가 걸리면 안 되고, 알림으로 가면 사람이 다시 시작할 수 있다.
-    pub fn restart(&self, exe: &Path, run: Run) -> bool {
-        let Ok(_turn) = self.try_turn() else { return false };
+    /// 서비스를 다시 띄우지 않게(moai-kwzp). **기다리지는 않는다.** 차례가 차 있거나 디렉터리가 없으면 `None` 이다 — 멈춘
+    /// `install` 에 update 가 걸리면 안 되고, 알림으로 가면 사람이 다시 시작할 수 있다. 위의 문에서 물러서거나 관리자가
+    /// 거절해도 `None` 이다.
+    ///
+    /// 다시 시작했으면 `Some` 이고, 그 값은 셸 소켓에서 답한 옛 데몬(`old_pid`)이 다시 시작하기 전 관리자가 아는 서비스의
+    /// pid 와 다르지 않은가다(moai-s95f). pid 를 모르면 예전처럼 소켓에서 새 판을 기다린다. **pid 는 알림만 가른다** — 다른 데몬이 셸 소켓에서
+    /// 답해도 서비스는 옛 바이너리로 돌고 있으니 다시 시작한다.
+    pub fn restart(&self, exe: &Path, old_pid: u64, run: Run) -> Option<bool> {
+        let Ok(_turn) = self.try_turn() else { return None };
         let (Ok(exe), Ok(Some(text))) = (writable_text(exe), self.text()) else {
-            return false;
+            return None;
         };
         if !text.contains(MARK) || points(self.manager, &text, Path::new(exe)) != Points::This || !self.active(run) {
-            return false;
+            return None;
         }
+        let matches = !matches!(self.main_pid(run), Ok(Some(pid)) if u64::from(pid) != old_pid);
         let done = match self.manager {
             Manager::Systemd => run("systemctl", &["--user", "restart", UNIT]),
             Manager::Launchd => run("launchctl", &["kickstart", "-k", &service_target()]),
         };
-        done.is_ok()
+        done.ok().map(|_| matches)
     }
 
     fn active(&self, run: Run) -> bool {
@@ -1121,6 +1127,20 @@ mod tests {
         file
     }
 
+    /// `once` 를 부르고, 거짓이면서 `asked` 도 거짓이면 2초까지 다시 부른다. 옆 시험이 띄운 자식은 exec 전까지 이 프로세스의
+    /// fd 를 물려받아 차례의 잠금도 그동안 안 풀린다 — 차례가 잠깐 찬 채로 보여 `restart` 가 관리자를 한 번도 안 부르고
+    /// 물러설 수 있다(`cargo test --lib daemon::service` 에서 40번에 5번). 그 물러섬만 다시 부른다.
+    fn settle(mut once: impl FnMut() -> bool, asked: impl Fn() -> bool) -> bool {
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            let got = once();
+            if got || asked() || Instant::now() >= deadline {
+                return got;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
+
     #[test]
     fn restart_needs_our_file_this_binary_and_a_running_service() {
         for manager in [Manager::Systemd, Manager::Launchd] {
@@ -1128,13 +1148,13 @@ mod tests {
             let svc = service_in(&s, manager);
             let (this, other) = (binary(&s, "bin"), binary(&s, "other"));
             let restart_word = if manager == Manager::Systemd { "restart" } else { "kickstart" };
-            let running = if manager == Manager::Systemd { "" } else { "\tstate = running\n" };
+            let running = if manager == Manager::Systemd { "42" } else { "\tstate = running\n\tpid = 42\n" };
 
             // 파일이 없으면 관리자를 아예 안 부른다 — 서비스가 없는 사람의 `moai update` 는 그대로다. 디렉터리는 세워 둔다:
             // 없으면 차례를 못 쥐어 먼저 물러서고, 파일이 없는 길은 안 지난다.
             std::fs::create_dir_all(svc.file.parent().unwrap()).unwrap();
             let fake = Fake { calls: RefCell::default(), refuse: &[], said: running };
-            assert!(!svc.restart(&this, &|p: &str, a: &[&str]| fake.run(p, a)));
+            assert!(svc.restart(&this, 42, &|p: &str, a: &[&str]| fake.run(p, a)).is_none());
             assert!(fake.calls().is_empty(), "{:?}", fake.calls());
 
             let ok = Fake::new(&["print"]);
@@ -1142,30 +1162,30 @@ mod tests {
 
             // 실행 중이면 부른다.
             let fake = Fake { calls: RefCell::default(), refuse: &[], said: running };
-            assert!(svc.restart(&this, &|p: &str, a: &[&str]| fake.run(p, a)));
+            assert!(settle(|| svc.restart(&this, 42, &|p: &str, a: &[&str]| fake.run(p, a)).is_some(), || false));
             assert!(fake.calls().iter().any(|c| c.contains(restart_word)), "{:?}", fake.calls());
 
             // 다른 바이너리면 안 부른다.
             let fake = Fake { calls: RefCell::default(), refuse: &[], said: running };
-            assert!(!svc.restart(&other, &|p: &str, a: &[&str]| fake.run(p, a)));
+            assert!(svc.restart(&other, 42, &|p: &str, a: &[&str]| fake.run(p, a)).is_none());
             assert!(fake.calls().is_empty(), "{:?}", fake.calls());
 
             // 사람이 멈춘 서비스는 안 띄운다.
             let stopped_words: &'static [&'static str] = if manager == Manager::Systemd { &["is-active"] } else { &[] };
             let fake = Fake { calls: RefCell::default(), refuse: stopped_words, said: "\tstate = not running\n" };
-            assert!(!svc.restart(&this, &|p: &str, a: &[&str]| fake.run(p, a)));
+            assert!(svc.restart(&this, 42, &|p: &str, a: &[&str]| fake.run(p, a)).is_none());
             assert!(!fake.calls().iter().any(|c| c.contains(restart_word)), "{:?}", fake.calls());
 
-            // 다시 시작이 실패하면 거짓을 답한다.
+            // 다시 시작이 실패하면 `None` 을 답한다.
             let refused: &'static [&'static str] =
                 if manager == Manager::Systemd { &["restart"] } else { &["kickstart"] };
             let fake = Fake { calls: RefCell::default(), refuse: refused, said: running };
-            assert!(!svc.restart(&this, &|p: &str, a: &[&str]| fake.run(p, a)));
+            assert!(svc.restart(&this, 42, &|p: &str, a: &[&str]| fake.run(p, a)).is_none());
 
             // 적힌 바이너리가 사라졌으면 그 등록은 아무것도 못 띄운다 — 관리자를 안 부른다.
             std::fs::remove_file(&this).unwrap();
             let fake = Fake { calls: RefCell::default(), refuse: &[], said: running };
-            assert!(!svc.restart(&other, &|p: &str, a: &[&str]| fake.run(p, a)));
+            assert!(svc.restart(&other, 42, &|p: &str, a: &[&str]| fake.run(p, a)).is_none());
             assert!(fake.calls().is_empty(), "{:?}", fake.calls());
             std::fs::write(&this, "").unwrap();
 
@@ -1173,8 +1193,92 @@ mod tests {
             let t = this.display();
             std::fs::write(&svc.file, format!("ExecStart=\"{t}\" daemon start\n<string>{t}</string>\n")).unwrap();
             let fake = Fake { calls: RefCell::default(), refuse: &[], said: running };
-            assert!(!svc.restart(&this, &|p: &str, a: &[&str]| fake.run(p, a)));
+            assert!(svc.restart(&this, 42, &|p: &str, a: &[&str]| fake.run(p, a)).is_none());
             assert!(fake.calls().is_empty(), "{:?}", fake.calls());
+        }
+    }
+
+    #[test]
+    fn restart_reports_whether_the_socket_responder_belongs_to_the_service() {
+        for manager in [Manager::Systemd, Manager::Launchd] {
+            let s = Scratch::new("restart-owner");
+            let svc = service_in(&s, manager);
+            let exe = binary(&s, "bin");
+            let installer = Fake::new(&["print"]);
+            svc.install(&exe, pin(), &|p: &str, a: &[&str]| installer.run(p, a)).unwrap();
+            for (pid, fails, expected) in [(42, false, true), (43, false, false), (0, false, true), (42, true, true)] {
+                let calls = RefCell::new(Vec::new());
+                let run = |_: &str, args: &[&str]| {
+                    calls.borrow_mut().push(args.join(" "));
+                    if args.contains(&"show") || args.contains(&"print") {
+                        if fails {
+                            return Err("unavailable".into());
+                        }
+                        return Ok(if manager == Manager::Systemd {
+                            format!("{pid}")
+                        } else {
+                            format!("state = running\npid = {pid}\n")
+                        });
+                    }
+                    Ok(String::new())
+                };
+                let result = RefCell::new(None);
+                let got = settle(
+                    || {
+                        *result.borrow_mut() = svc.restart(&exe, 42, &run);
+                        result.borrow().is_some()
+                    },
+                    || !calls.borrow().is_empty(),
+                );
+                assert_eq!(
+                    *result.borrow(),
+                    if fails && manager == Manager::Launchd { None } else { Some(expected) },
+                    "{manager:?} pid={pid} fails={fails}"
+                );
+                let calls = calls.borrow();
+                // 거절이 pid 를 물은 뒤에 났는가 — 앞의 문(차례·파일·실행 중)에서 물러선 거절은 이 시험이 재는 것이 아니다.
+                // launchd 의 `print` 실패는 "올라간 작업이 없다" 라 `active` 에서 멈춘다.
+                let asked = match manager {
+                    Manager::Systemd => calls.iter().any(|c| c.contains(" show ")),
+                    Manager::Launchd => calls.iter().filter(|c| c.starts_with("print")).count() == 2,
+                };
+                assert_eq!(
+                    asked,
+                    !(fails && manager == Manager::Launchd),
+                    "{manager:?} pid={pid} fails={fails}: {calls:?}"
+                );
+                assert_eq!(calls.iter().any(|c| c.contains("restart") || c.contains("kickstart")), got, "{calls:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn restart_waits_when_the_manager_pid_lookup_fails() {
+        for manager in [Manager::Systemd, Manager::Launchd] {
+            let s = Scratch::new("restart-unknown-pid");
+            let svc = service_in(&s, manager);
+            let exe = binary(&s, "bin");
+            let installer = Fake::new(&["print"]);
+            svc.install(&exe, pin(), &|p: &str, a: &[&str]| installer.run(p, a)).unwrap();
+            let calls = RefCell::new(Vec::new());
+            let run = |_: &str, args: &[&str]| {
+                let mut calls = calls.borrow_mut();
+                calls.push(args.join(" "));
+                if args.contains(&"show") || (args.contains(&"print") && calls.len() == 2) {
+                    return Err("pid unavailable".into());
+                }
+                Ok("state = running\npid = 42\n".into())
+            };
+            let result = RefCell::new(None);
+            assert!(settle(
+                || {
+                    *result.borrow_mut() = svc.restart(&exe, 42, &run);
+                    result.borrow().is_some()
+                },
+                || !calls.borrow().is_empty()
+            ));
+            assert_eq!(*result.borrow(), Some(true), "{manager:?}");
+            assert!(calls.borrow().iter().any(|c| c.contains("restart") || c.contains("kickstart")));
         }
     }
 
@@ -1189,17 +1293,21 @@ mod tests {
             assert!(svc.try_turn().is_err());
             let ok = Fake::new(&["print"]);
             svc.install(&exe, pin(), &|p: &str, a: &[&str]| ok.run(p, a)).unwrap();
-            let running = if manager == Manager::Systemd { "" } else { "\tstate = running\n" };
+            let running = if manager == Manager::Systemd { "42" } else { "\tstate = running\n\tpid = 42\n" };
             let fake = Fake { calls: RefCell::default(), refuse: &[], said: running };
             let turn = svc.turn(false).unwrap();
-            assert!(!svc.restart(&exe, &|p: &str, a: &[&str]| fake.run(p, a)));
+            assert!(svc.restart(&exe, 42, &|p: &str, a: &[&str]| fake.run(p, a)).is_none());
             assert!(fake.calls().is_empty());
             drop(turn);
-            assert!(svc.restart(&exe, &|p: &str, a: &[&str]| {
-                assert!(svc.try_turn().is_err(), "restart must hold the turn during {a:?}");
-                fake.run(p, a)
-            }));
-            assert!(svc.try_turn().is_ok());
+            let once = || {
+                svc.restart(&exe, 42, &|p: &str, a: &[&str]| {
+                    assert!(svc.try_turn().is_err(), "restart must hold the turn during {a:?}");
+                    fake.run(p, a)
+                })
+                .is_some()
+            };
+            assert!(settle(once, || false));
+            assert!(settle(|| svc.try_turn().is_ok(), || false), "restart did not release the turn");
         }
     }
 
@@ -1247,7 +1355,8 @@ mod tests {
         let svc = service_in(&s, Manager::Systemd);
         let ok = Fake::new(&[]);
         assert_eq!(svc.install(&link, pin(), &|p: &str, a: &[&str]| ok.run(p, a)), Ok(Wrote::New));
-        assert!(svc.restart(&real, &|p: &str, a: &[&str]| ok.run(p, a)));
+        let run = |p: &str, a: &[&str]| if a.contains(&"show") { Ok("42".into()) } else { ok.run(p, a) };
+        assert!(settle(|| svc.restart(&real, 42, &run).is_some(), || false));
 
         // 푼 경로를 적은 옛 꼴은 이 바이너리로 읽혀 링크 경로로 다시 쓰이고, 사라진 경로를 적은 파일도 다시 쓰인다.
         let old = Manager::Systemd.render(real.to_str().unwrap(), PIN);
