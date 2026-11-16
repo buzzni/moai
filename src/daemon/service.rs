@@ -385,9 +385,18 @@ impl Service {
         Ok(Removed::Nothing)
     }
 
-    /// Restart a registered, running service for this binary, holding the service turn throughout.
-    /// Return whether the socket responder was its MainPID; an unknown PID is not a match.
-    /// The PID affects the notice only: the service still needs the new binary either way.
+    /// `moai update` 가 부른다. **moai 가 쓴 파일이고, 이 바이너리를 가리키고, 지금 실행 중일 때만** 다시 시작한다. 사람이 멈춘
+    /// 서비스는 안 띄운다. 등록 상태를 바꾸는 호출은 이 길에 없다. 글 전체는 견주지 않는다 — 셸의 환경이 달라 글이 달라도
+    /// 새 판으로는 다시 시작해야 한다.
+    ///
+    /// 파일을 읽을 때부터 관리자를 부르고 돌아올 때까지 차례([`Turn`])를 쥔다 — `uninstall` 이 멈춘 뒤·파일을 걷기 전에 끼어
+    /// 서비스를 다시 띄우지 않게(moai-kwzp). **기다리지는 않는다.** 차례가 차 있거나 디렉터리가 없으면 `None` 이다 — 멈춘
+    /// `install` 에 update 가 걸리면 안 되고, 알림으로 가면 사람이 다시 시작할 수 있다. 위의 문에서 물러서거나 관리자가
+    /// 거절해도 `None` 이다.
+    ///
+    /// 다시 시작했으면 `Some` 이고, 그 값은 셸 소켓에서 답한 옛 데몬(`old_pid`)이 다시 시작하기 전 관리자가 아는 서비스의
+    /// pid 였는가다(moai-s95f). 모르는 pid 는 같지 않은 것으로 읽는다. **pid 는 알림만 가른다** — 다른 데몬이 셸 소켓에서
+    /// 답해도 서비스는 옛 바이너리로 돌고 있으니 다시 시작한다.
     pub fn restart(&self, exe: &Path, old_pid: u64, run: Run) -> Option<bool> {
         let Ok(_turn) = self.try_turn() else { return None };
         let (Ok(exe), Ok(Some(text))) = (writable_text(exe), self.text()) else {
@@ -1145,7 +1154,7 @@ mod tests {
             // 없으면 차례를 못 쥐어 먼저 물러서고, 파일이 없는 길은 안 지난다.
             std::fs::create_dir_all(svc.file.parent().unwrap()).unwrap();
             let fake = Fake { calls: RefCell::default(), refuse: &[], said: running };
-            assert!(!svc.restart(&this, 42, &|p: &str, a: &[&str]| fake.run(p, a)).is_some());
+            assert!(svc.restart(&this, 42, &|p: &str, a: &[&str]| fake.run(p, a)).is_none());
             assert!(fake.calls().is_empty(), "{:?}", fake.calls());
 
             let ok = Fake::new(&["print"]);
@@ -1158,25 +1167,25 @@ mod tests {
 
             // 다른 바이너리면 안 부른다.
             let fake = Fake { calls: RefCell::default(), refuse: &[], said: running };
-            assert!(!svc.restart(&other, 42, &|p: &str, a: &[&str]| fake.run(p, a)).is_some());
+            assert!(svc.restart(&other, 42, &|p: &str, a: &[&str]| fake.run(p, a)).is_none());
             assert!(fake.calls().is_empty(), "{:?}", fake.calls());
 
             // 사람이 멈춘 서비스는 안 띄운다.
             let stopped_words: &'static [&'static str] = if manager == Manager::Systemd { &["is-active"] } else { &[] };
             let fake = Fake { calls: RefCell::default(), refuse: stopped_words, said: "\tstate = not running\n" };
-            assert!(!svc.restart(&this, 42, &|p: &str, a: &[&str]| fake.run(p, a)).is_some());
+            assert!(svc.restart(&this, 42, &|p: &str, a: &[&str]| fake.run(p, a)).is_none());
             assert!(!fake.calls().iter().any(|c| c.contains(restart_word)), "{:?}", fake.calls());
 
-            // 다시 시작이 실패하면 거짓을 답한다.
+            // 다시 시작이 실패하면 `None` 을 답한다.
             let refused: &'static [&'static str] =
                 if manager == Manager::Systemd { &["restart"] } else { &["kickstart"] };
             let fake = Fake { calls: RefCell::default(), refuse: refused, said: running };
-            assert!(!svc.restart(&this, 42, &|p: &str, a: &[&str]| fake.run(p, a)).is_some());
+            assert!(svc.restart(&this, 42, &|p: &str, a: &[&str]| fake.run(p, a)).is_none());
 
             // 적힌 바이너리가 사라졌으면 그 등록은 아무것도 못 띄운다 — 관리자를 안 부른다.
             std::fs::remove_file(&this).unwrap();
             let fake = Fake { calls: RefCell::default(), refuse: &[], said: running };
-            assert!(!svc.restart(&other, 42, &|p: &str, a: &[&str]| fake.run(p, a)).is_some());
+            assert!(svc.restart(&other, 42, &|p: &str, a: &[&str]| fake.run(p, a)).is_none());
             assert!(fake.calls().is_empty(), "{:?}", fake.calls());
             std::fs::write(&this, "").unwrap();
 
@@ -1184,7 +1193,7 @@ mod tests {
             let t = this.display();
             std::fs::write(&svc.file, format!("ExecStart=\"{t}\" daemon start\n<string>{t}</string>\n")).unwrap();
             let fake = Fake { calls: RefCell::default(), refuse: &[], said: running };
-            assert!(!svc.restart(&this, 42, &|p: &str, a: &[&str]| fake.run(p, a)).is_some());
+            assert!(svc.restart(&this, 42, &|p: &str, a: &[&str]| fake.run(p, a)).is_none());
             assert!(fake.calls().is_empty(), "{:?}", fake.calls());
         }
     }
@@ -1258,7 +1267,7 @@ mod tests {
             let running = if manager == Manager::Systemd { "42" } else { "\tstate = running\n\tpid = 42\n" };
             let fake = Fake { calls: RefCell::default(), refuse: &[], said: running };
             let turn = svc.turn(false).unwrap();
-            assert!(!svc.restart(&exe, 42, &|p: &str, a: &[&str]| fake.run(p, a)).is_some());
+            assert!(svc.restart(&exe, 42, &|p: &str, a: &[&str]| fake.run(p, a)).is_none());
             assert!(fake.calls().is_empty());
             drop(turn);
             let once = || {
