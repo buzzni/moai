@@ -265,7 +265,18 @@ impl Service {
     /// 파일이 남는다. `create` 가 아니면 없는 디렉터리를 만들지 않는다(그때는 걷을 것도 없다). 유닉스 밖에서는 잠그지 않는다
     /// — Windows 는 디렉터리를 파일로 못 열고, 그쪽에는 관리자도 없다.
     pub fn turn(&self, create: bool) -> std::io::Result<Turn> {
-        let Some(dir) = self.file.parent() else { return Ok(Turn { _held: None }) };
+        self.lock_turn(create, false)
+    }
+
+    /// 기다리지 않고 같은 차례를 쥔다. update 는 멈춘 install 을 기다리지 않는다.
+    fn try_turn(&self) -> std::io::Result<Turn> {
+        self.lock_turn(false, true)
+    }
+
+    fn lock_turn(&self, create: bool, nonblocking: bool) -> std::io::Result<Turn> {
+        let Some(dir) = self.file.parent() else {
+            return if nonblocking { Err(std::io::ErrorKind::NotFound.into()) } else { Ok(Turn { _held: None }) };
+        };
         if create {
             std::fs::create_dir_all(dir)?;
         }
@@ -273,15 +284,24 @@ impl Service {
         {
             match std::fs::File::open(dir) {
                 Ok(held) => {
-                    fs2::FileExt::lock_exclusive(&held)?;
+                    if nonblocking {
+                        fs2::FileExt::try_lock_exclusive(&held)?;
+                    } else {
+                        fs2::FileExt::lock_exclusive(&held)?;
+                    }
                     Ok(Turn { _held: Some(held) })
                 }
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound && !create => Ok(Turn { _held: None }),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound && !create && !nonblocking => {
+                    Ok(Turn { _held: None })
+                }
                 Err(e) => Err(e),
             }
         }
         #[cfg(not(unix))]
-        Ok(Turn { _held: None })
+        {
+            let _ = nonblocking;
+            Ok(Turn { _held: None })
+        }
     }
 
     /// 등록하고 지금 시작한다. `pin` 은 서비스에 적을 소켓 디렉터리다 — 늘 적는다([`Manager::render`]).
@@ -369,6 +389,7 @@ impl Service {
     /// 서비스는 안 띄운다. 등록 상태를 바꾸는 호출은 이 길에 없다. 글 전체는 견주지 않는다 — 셸의 환경이 달라 글이 달라도
     /// 새 판으로는 다시 시작해야 한다.
     pub fn restart(&self, exe: &Path, run: Run) -> bool {
+        let Ok(_turn) = self.try_turn() else { return false };
         let (Ok(exe), Ok(Some(text))) = (writable_text(exe), self.text()) else {
             return false;
         };
@@ -1148,6 +1169,31 @@ mod tests {
             let fake = Fake { calls: RefCell::default(), refuse: &[], said: running };
             assert!(!svc.restart(&this, &|p: &str, a: &[&str]| fake.run(p, a)));
             assert!(fake.calls().is_empty(), "{:?}", fake.calls());
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn restart_skips_a_busy_turn_and_holds_it_through_the_manager_call() {
+        for manager in [Manager::Systemd, Manager::Launchd] {
+            let s = Scratch::new("service-restart-turn");
+            let svc = service_in(&s, manager);
+            let exe = binary(&s, "bin");
+            // 디렉터리가 없을 때도 잠금 없이 진행하지 않는다 — 곧 install 이 만들 수 있다.
+            assert!(svc.try_turn().is_err());
+            let ok = Fake::new(if manager == Manager::Systemd { &[] } else { &["print"] });
+            svc.install(&exe, pin(), &|p: &str, a: &[&str]| ok.run(p, a)).unwrap();
+            let running = if manager == Manager::Systemd { "" } else { "\tstate = running\n" };
+            let fake = Fake { calls: RefCell::default(), refuse: &[], said: running };
+            let turn = svc.turn(false).unwrap();
+            assert!(!svc.restart(&exe, &|p: &str, a: &[&str]| fake.run(p, a)));
+            assert!(fake.calls().is_empty());
+            drop(turn);
+            assert!(svc.restart(&exe, &|p: &str, a: &[&str]| {
+                assert!(svc.try_turn().is_err(), "restart must hold the turn during {a:?}");
+                fake.run(p, a)
+            }));
+            assert!(svc.try_turn().is_ok());
         }
     }
 
