@@ -57,6 +57,9 @@ impl Fence {
             .env("MOAI_CONFIG", self.0.join("config.toml"))
             .env("MOAI_CTL_DIR", &self.0)
             .env_remove("XDG_RUNTIME_DIR")
+            // 둘째 `start` 는 서비스 관리자에 MainPID 를 묻는다(moai-rkre). 가짜 PATH 를 안 준 시험의 진짜 `systemctl --user`
+            // 가 사람의 사용자 버스에 닿지 않게 그 주소도 걷는다.
+            .env_remove("DBUS_SESSION_BUS_ADDRESS")
             .env_remove("XDG_CONFIG_HOME")
             .env_remove("MOAI_ACTOR")
             // 옮김을 끄는 손잡이도 시험이 준 것만 — 돌리는 셸에서 새면 CLI 쪽 견주기가 워크트리의 제 트래커에 쓴다.
@@ -475,20 +478,28 @@ fn a_second_start_does_not_double_up() {
 #[cfg(target_os = "linux")]
 #[test]
 fn service_start_reports_an_occupied_socket_as_failure() {
-    use std::os::unix::fs::PermissionsExt as _;
     let f = Fence::new();
     let (daemon, first) = f.start();
     let bin = f.0.join("fake-bin");
     std::fs::create_dir(&bin).unwrap();
     let systemctl = bin.join("systemctl");
+    let source = f.0.join("fake.src");
+    // 묻는 것이 그 유닛의 MainPID 가 아니면 관리자 오류로 답한다 — 다른 것을 물어도 지나가는 가짜가 되지 않게.
+    // 이 프로세스가 쓴 파일을 바로 띄우면 옆 시험의 fork 와 겹쳐 ETXTBSY 다 — `service::Managed` 처럼 자식이 옮겨 적는다.
     let fake = |body: &str| {
-        std::fs::write(&systemctl, format!("#!/bin/sh\n{body}\n")).unwrap();
-        std::fs::set_permissions(&systemctl, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::fs::write(
+            &source,
+            format!("#!/bin/sh\n[ \"$*\" = '--user show -p MainPID --value moai-daemon.service' ] || exit 1\n{body}\n"),
+        )
+        .unwrap();
+        assert!(Command::new("cp").arg(&source).arg(&systemctl).status().unwrap().success());
+        assert!(Command::new("chmod").arg("755").arg(&systemctl).status().unwrap().success());
     };
     fake("echo $PPID");
     for args in [&["daemon", "start"][..], &["daemon", "start", "--json"][..]] {
         let out = f.cmd(args).env("PATH", &bin).output().unwrap();
         assert!(!out.status.success(), "{out:?}");
+        assert!(out.stdout.is_empty(), "실패한 start 가 stdout 에 냈다: {out:?}");
         let err = String::from_utf8_lossy(&out.stderr);
         assert!(err.contains("already running"), "{err}");
         if args.contains(&"--json") {

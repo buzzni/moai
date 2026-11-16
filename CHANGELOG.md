@@ -18,6 +18,7 @@ does not commit and it does not tag — see `CONTRIBUTING.md`.
 
 ### Fixed
 
+- A `moai daemon start` launched by the service that `moai daemon install` registered now exits non-zero with `already_exists` when a daemon of the same version already answers at the socket, so systemd and launchd record a failure instead of a clean exit. A `moai daemon start` typed in a shell still says so and exits 0. (moai-rkre)
 - When the daemon answering on the shell socket is not the registered service's process, `moai update` still restarts the service but no longer waits 5 seconds and reports the restart as unanswered; it keeps the notice that the other daemon still runs. (moai-s95f)
 - `moai ctl` reports a full targeted window as busy instead of claiming there is no window. (moai-pwxx)
 - `moai update` skips restarting the daemon service when an install or uninstall holds the service turn, preventing a concurrent uninstall from leaving the daemon running. (moai-kwzp)
