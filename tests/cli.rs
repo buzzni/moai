@@ -219,12 +219,11 @@ fn ctl_state_without_a_window_says_no_window() {
 #[cfg(unix)]
 fn ctl_lists_available_windows_and_reports_skipped_sockets() {
     use std::io::{BufRead, BufReader, Write};
-    use std::os::unix::fs::PermissionsExt;
     use std::os::unix::net::UnixListener;
     let s = Scratch::new("ctl-skips");
-    let dir = s.path().join("run");
-    std::fs::create_dir(&dir).unwrap();
-    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
+    // The thread's short `/tmp` fence, which `staged` already names: under a Mac's `/private/var/folders/…` scratch the
+    // socket path passes the 104-byte limit and `bind` fails.
+    let dir = CTL_FENCE.with(|fence| fence.path().to_path_buf());
     let live = UnixListener::bind(dir.join("1.sock")).unwrap();
     let busy = UnixListener::bind(dir.join("2.sock")).unwrap();
     let root = s.path().display().to_string();
@@ -238,14 +237,14 @@ fn ctl_lists_available_windows_and_reports_skipped_sockets() {
         }
     });
     let busy_thread = std::thread::spawn(move || {
-        for _ in 0..4 {
+        for _ in 0..5 {
             let (mut stream, _) = busy.accept().unwrap();
             let mut request = String::new();
             BufReader::new(&stream).read_line(&mut request).unwrap();
             writeln!(stream, "{{\"ok\":false,\"code\":\"busy\",\"message\":\"full\"}}").unwrap();
         }
     });
-    let run = |args: &[&str]| staged(args).current_dir(s.path()).env("MOAI_CTL_DIR", &dir).output().unwrap();
+    let run = |args: &[&str]| staged(args).current_dir(s.path()).output().unwrap();
     let json = run(&["ctl", "ls", "--all", "--json"]);
     assert!(json.status.success(), "{}", String::from_utf8_lossy(&json.stderr));
     let list = json_of(&String::from_utf8_lossy(&json.stdout));
@@ -257,7 +256,12 @@ fn ctl_lists_available_windows_and_reports_skipped_sockets() {
     assert!(human.status.success());
     assert!(String::from_utf8_lossy(&human.stdout).contains("tui-1"));
     assert!(String::from_utf8_lossy(&human.stderr).contains("2.sock (busy)"));
-    for args in [&["ctl", "state", "--json"][..], &["ctl", "state", "-t", "tui-2", "--json"][..]] {
+    // Automatic selection, an explicit target, and the proposal path (`windows_for_proposal`) all refuse to guess.
+    for args in [
+        &["ctl", "state", "--json"][..],
+        &["ctl", "state", "-t", "tui-2", "--json"][..],
+        &["ctl", "answer", "tui-2/1", "--json"][..],
+    ] {
         let output = run(args);
         assert!(!output.status.success());
         assert_eq!(json_of(&String::from_utf8_lossy(&output.stderr))["code"], "busy");
@@ -315,9 +319,11 @@ fn ctl_lists_and_reads_an_open_explorer() {
             Err(e) if e.kind() == std::io::ErrorKind::WouldBlock || e.raw_os_error() == Some(libc::EIO) => {}
             Err(e) => panic!("PTY: {e}"),
         }
-        if let Some(json) = listed_while_starting(s.path(), &mut shown)
-            && let Some(id) = json["windows"].as_array().unwrap().first().and_then(|w| w["id"].as_str())
-        {
+        // A window still drawing its first frame answers no `hello`; `ls` lists it under `skipped`, not as a failure
+        // (moai-pwxx.kah), so poll until it shows up in `windows`.
+        let out = ok(s.path(), &["ctl", "ls", "--json"]);
+        let json: serde_json::Value = serde_json::from_str(&out).unwrap();
+        if let Some(id) = json["windows"].as_array().unwrap().first().and_then(|w| w["id"].as_str()) {
             window_id = Some(id.to_string());
             break;
         }
@@ -384,21 +390,6 @@ fn ctl_lists_and_reads_an_open_explorer() {
     }
     assert!(child.0.try_wait().unwrap().is_some(), "explorer did not exit after human Ctrl-C");
     assert!(!socket.exists());
-}
-
-/// 뜨는 중인 탐색기를 `ctl ls` 로 찾는다. **소켓은 첫 그림보다 먼저 서고**(`cmd::tui::screen`), 그 사이의 `hello` 는
-/// 답을 못 받는다 — 덜 읽은 pty 에서 첫 그림을 쓰다 막힌 macOS 에서는 더 길다. 그런 창 하나가 있는 목록은
-/// 응답하지 않는 창은 목록에서 빠지므로(moai-pwxx.kah) 창이 보일 때까지 다시 묻는다.
-#[cfg(unix)]
-fn listed_while_starting(dir: &Path, shown: &mut String) -> Option<serde_json::Value> {
-    let out = moai(dir, &["ctl", "ls", "--json"]);
-    if out.status.success() {
-        return Some(json_of(&String::from_utf8_lossy(&out.stdout)));
-    }
-    let error: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
-    assert!(matches!(error["code"].as_str(), Some("timeout" | "busy")), "ctl ls failed: {error}");
-    shown.push_str(&format!("\n[ctl ls: {error}]\n"));
-    None
 }
 
 /// 창이 뜬 뒤로도 진짜 터미널처럼 master 를 읽는다 — macOS 의 pty 는 출력 칸이 1KB 남짓이라, 안 읽으면 그리던 탐색기가
@@ -511,9 +502,8 @@ fn proposal_pty(name: &str) -> (Scratch, std::fs::File, ProposalPtyChild) {
             Err(e) if e.kind() == std::io::ErrorKind::WouldBlock || e.raw_os_error() == Some(libc::EIO) => {}
             Err(e) => panic!("PTY: {e}"),
         }
-        if listed_while_starting(scratch.path(), &mut shown)
-            .is_some_and(|windows| windows["windows"].as_array().is_some_and(|rows| !rows.is_empty()))
-        {
+        let windows = json_of(&ok(scratch.path(), &["ctl", "ls", "--json"]));
+        if windows["windows"].as_array().is_some_and(|rows| !rows.is_empty()) {
             keep_reading_pty(&master);
             return (scratch, master, child);
         }

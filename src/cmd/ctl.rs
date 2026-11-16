@@ -22,7 +22,8 @@ pub fn ls(ctx: &Ctx, all: bool) -> R<Vec<String>> {
             .map(|s| format!("{} ({})", s.socket.display(), s.reason))
             .collect::<Vec<_>>()
             .join(", ");
-        eprintln!("Skipped windows: {details}");
+        // `tell`, not `eprintln!`: a reader that closed stderr must not panic the list away (exit 101).
+        super::tell(&format!("Skipped windows: {details}"));
     }
     let mut lines = vec!["ID  KIND  REPOSITORY  SCREEN  LAST INPUT".into()];
     lines.extend(

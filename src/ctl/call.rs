@@ -27,10 +27,31 @@ pub struct Window {
 
 #[derive(Debug, Serialize)]
 pub struct Skipped {
+    /// Written lossily: a socket directory that is not UTF-8 must not panic `ctl ls --json` (`json!` unwraps).
+    #[serde(serialize_with = "lossy")]
     pub socket: PathBuf,
     pub reason: &'static str,
     #[serde(skip)]
     code: &'static str,
+    /// What made a `gone` socket unreadable, for the selection error only.
+    #[serde(skip)]
+    detail: Option<String>,
+}
+
+impl Skipped {
+    /// The listing names three reasons (`docs/ctl.md`); `code` keeps what a selection needing this socket fails with.
+    fn new(socket: PathBuf, code: &'static str, detail: Option<String>) -> Skipped {
+        let reason = match code {
+            code::BUSY => "busy",
+            code::TIMEOUT => "timeout",
+            _ => "gone",
+        };
+        Skipped { socket, reason, code, detail }
+    }
+}
+
+fn lossy<S: serde::Serializer>(path: &Path, serializer: S) -> Result<S::Ok, S::Error> {
+    serializer.serialize_str(&path.to_string_lossy())
 }
 
 #[derive(Debug, Default)]
@@ -40,14 +61,21 @@ pub struct Discovery {
 }
 
 impl Discovery {
+    /// **Selection needs every socket answered** (moai-pwxx.kah). A skipped socket reports no id, repository or last
+    /// input, so a pick among the rest could aim at an older window, and `-t` would read its own window as absent.
     fn require_complete(self) -> R<Vec<Window>> {
-        if let Some(skipped) = self.skipped.first() {
-            return Err(Fail::coded(
-                format!("Window at {}: {}; retry control discovery.", skipped.socket.display(), skipped.reason),
-                skipped.code,
-            ));
-        }
-        Ok(self.windows)
+        let Some(skipped) = self.skipped.first() else { return Ok(self.windows) };
+        let what = match skipped.code {
+            code::BUSY => "is busy; retry control discovery".to_string(),
+            code::TIMEOUT => "did not answer in time; retry control discovery".to_string(),
+            // A protocol mismatch does not pass with a retry.
+            code::UNSUPPORTED => "speaks another control protocol; use the moai version that opened it".to_string(),
+            _ => match &skipped.detail {
+                Some(detail) => format!("closed or could not answer ({detail}); retry control discovery"),
+                None => "closed or could not answer; retry control discovery".to_string(),
+            },
+        };
+        Err(Fail::coded(format!("The window at {} {what}.", skipped.socket.display()), skipped.code))
     }
 }
 
@@ -123,23 +151,27 @@ fn windows_in(dir: &Path, target: Option<&str>, proposal: bool) -> R<Discovery> 
                     }
                 }
             }
-            Ok(reply) if !reply.ok => {
-                let (reason, code) = match reply.code.as_deref() {
-                    Some("busy") => ("busy", code::BUSY),
-                    Some("person_busy") => ("busy", code::BUSY),
-                    Some("timeout") => ("timeout", code::TIMEOUT),
-                    Some("unsupported") => ("gone", code::UNSUPPORTED),
-                    _ => ("gone", code::GONE),
+            Ok(reply) => {
+                let (code, detail) = match reply.code.as_deref() {
+                    // A full window and one whose person just left the editor are both live.
+                    Some("busy" | "person_busy") => (code::BUSY, None),
+                    Some("timeout") => (code::TIMEOUT, None),
+                    Some("unsupported") => (code::UNSUPPORTED, None),
+                    other => (code::GONE, Some(format!("replied {}", other.unwrap_or("without a code")))),
                 };
-                result.skipped.push(Skipped { socket: path, reason, code });
+                result.skipped.push(Skipped::new(path, code, detail));
             }
+            // Windows: every pipe instance stayed taken (`transport::pipe`), the daemon probe's `Busy`.
             Err(e) if e.kind() == std::io::ErrorKind::ResourceBusy => {
-                result.skipped.push(Skipped { socket: path, reason: "busy", code: code::BUSY });
+                result.skipped.push(Skipped::new(path, code::BUSY, None));
             }
+            // The read timed out before the window's own `timeout` reply arrived — the same window, not a gone one.
             Err(e) if matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) => {
-                result.skipped.push(Skipped { socket: path, reason: "timeout", code: code::TIMEOUT });
+                result.skipped.push(Skipped::new(path, code::TIMEOUT, None));
             }
-            // Foreign pipes and transient marker sharing violations are not our windows.
+            // Another user's pipe (`transport::pipe` checks the owner) is not our window; a Windows marker pending
+            // deletion also reads as access denied, and its window is already closing. A sharing violation is not this
+            // kind (std leaves it uncategorized) and lists as `gone` below.
             Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {}
             Err(e) if matches!(e.kind(), std::io::ErrorKind::ConnectionRefused | std::io::ErrorKind::NotFound) => {
                 // Recheck the path before removal; never follow or remove a foreign file.
@@ -150,8 +182,7 @@ fn windows_in(dir: &Path, target: Option<&str>, proposal: bool) -> R<Discovery> 
                     let _ = std::fs::remove_file(&path);
                 }
             }
-            Err(_) => result.skipped.push(Skipped { socket: path, reason: "gone", code: code::GONE }),
-            _ => {}
+            Err(e) => result.skipped.push(Skipped::new(path, code::GONE, Some(e.to_string()))),
         }
     }
     result.windows.sort_by(|a, b| a.id.cmp(&b.id));
@@ -324,21 +355,41 @@ mod tests {
                 }
             }
         });
-        let listed = windows_in(&dir, None, false).unwrap();
+        let listed = windows_in(dir, None, false).unwrap();
         assert!(listed.windows.is_empty());
         assert_eq!(listed.skipped[0].reason, "busy");
         assert_eq!(listed.skipped[0].socket, dir.join("2.sock"));
         assert_eq!(listed.require_complete().unwrap_err().code, code::BUSY);
-        assert_eq!(windows_in(&dir, Some("2.7"), false).unwrap().require_complete().unwrap_err().code, code::BUSY);
-        assert_eq!(windows_in(&dir, Some("2.7"), false).unwrap().require_complete().unwrap_err().code, code::TIMEOUT);
-        assert_eq!(windows_in(&dir, Some("2.7"), false).unwrap().require_complete().unwrap_err().code, code::GONE);
-        assert_eq!(windows_in(&dir, None, false).unwrap().require_complete().unwrap_err().code, code::TIMEOUT);
-        assert_eq!(windows_in(&dir, Some("2.7"), false).unwrap().require_complete().unwrap_err().code, code::BUSY);
-        assert_eq!(
-            windows_in(&dir, Some("2.7"), false).unwrap().require_complete().unwrap_err().code,
-            code::UNSUPPORTED
+        assert_eq!(windows_in(dir, Some("2.7"), false).unwrap().require_complete().unwrap_err().code, code::BUSY);
+        assert_eq!(windows_in(dir, Some("2.7"), false).unwrap().require_complete().unwrap_err().code, code::TIMEOUT);
+        let gone = windows_in(dir, Some("2.7"), false).unwrap().require_complete().unwrap_err();
+        assert_eq!(gone.code, code::GONE);
+        // The transport error behind `gone` reaches the person; the old message dropped it.
+        assert!(gone.message.contains("could not answer ("), "{}", gone.message);
+        assert_eq!(windows_in(dir, None, false).unwrap().require_complete().unwrap_err().code, code::TIMEOUT);
+        assert_eq!(windows_in(dir, Some("2.7"), false).unwrap().require_complete().unwrap_err().code, code::BUSY);
+        let other = windows_in(dir, Some("2.7"), false).unwrap();
+        assert_eq!(other.skipped[0].reason, "gone");
+        let other = other.require_complete().unwrap_err();
+        assert_eq!(other.code, code::UNSUPPORTED);
+        // A protocol mismatch does not pass with a retry, so the message does not ask for one.
+        assert!(
+            other.message.contains("another control protocol") && !other.message.contains("retry"),
+            "{}",
+            other.message
         );
         owner.join().unwrap();
+    }
+
+    /// `ctl ls --json` builds its reply with `json!`, which unwraps: a socket path that is not UTF-8 must still serialize.
+    #[test]
+    #[cfg(unix)]
+    fn a_skipped_socket_that_is_not_utf8_still_serializes() {
+        use std::os::unix::ffi::OsStrExt;
+        let socket = PathBuf::from(std::ffi::OsStr::from_bytes(b"/run/moai-\xff/2.sock"));
+        let value = serde_json::to_value(Skipped::new(socket, code::BUSY, None)).unwrap();
+        assert_eq!(value["reason"], "busy");
+        assert!(value["socket"].as_str().unwrap().ends_with("/2.sock"));
     }
 
     #[test]
