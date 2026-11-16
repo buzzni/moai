@@ -12,7 +12,9 @@
 //!   글로 다시 쓰고 서비스를 다시 시작한다. 견주지 않던 판은 설정을 바꾸고 다시 친 `install` 이 옛 파일을 그대로 두어,
 //!   서비스가 영영 다른 소켓을 봤다. 그래서 그리는 글에는 시각도 pid 도 없다 — 두 번째에도 같은 글이어야 한다.
 //! - **`install`·`uninstall` 은 줄을 선다.** 서비스 파일이 사는 디렉터리를 잠근다([`Turn`]) — 겹친 둘 중 실패한
-//!   쪽의 롤백이 성공한 쪽의 등록을 걷던 틈이다. 잠금 파일을 따로 두지 않아 남는 것이 없다.
+//!   쪽의 롤백이 성공한 쪽의 등록을 걷던 틈이다. 잠금 파일을 따로 두지 않아 남는 것이 없다. `moai update` 의
+//!   [`Service::restart`] 도 같은 차례를 쥐되 기다리지 않는다 — 차 있으면 다시 시작하지 않고 알림으로 간다(moai-kwzp).
+//!   안 쥐던 판은 `uninstall` 이 멈춘 뒤·파일을 걷기 전에 서비스를 다시 띄웠다.
 //! - **관리자는 PATH 에서 찾는다.** 시험은 가짜 `systemctl`·`launchctl` 만 있는 PATH 로 돌아 사람의 서비스에 닿지 않는다.
 //!
 //! 명령을 부르는 자리는 [`Run`] 하나로 받는다 — launchd 의 글과 차례를 Linux 에서도 잴 수 있게.
@@ -222,7 +224,8 @@ pub enum Removed {
     Unloaded,
 }
 
-/// `install`·`uninstall` 의 차례 — 쥐고 있는 동안 같은 자리의 다른 차례가 기다린다. 놓는 것은 `Drop` 이다.
+/// `install`·`uninstall`·`restart` 의 차례 — 쥐고 있는 동안 같은 자리의 `install`·`uninstall` 은 기다리고, `restart` 는
+/// 기다리지 않고 물러선다. 놓는 것은 `Drop` 이다.
 pub struct Turn {
     _held: Option<std::fs::File>,
 }
@@ -265,7 +268,18 @@ impl Service {
     /// 파일이 남는다. `create` 가 아니면 없는 디렉터리를 만들지 않는다(그때는 걷을 것도 없다). 유닉스 밖에서는 잠그지 않는다
     /// — Windows 는 디렉터리를 파일로 못 열고, 그쪽에는 관리자도 없다.
     pub fn turn(&self, create: bool) -> std::io::Result<Turn> {
-        let Some(dir) = self.file.parent() else { return Ok(Turn { _held: None }) };
+        self.lock_turn(create, false)
+    }
+
+    /// 기다리지 않고 같은 차례를 쥔다. update 는 멈춘 install 을 기다리지 않는다.
+    fn try_turn(&self) -> std::io::Result<Turn> {
+        self.lock_turn(false, true)
+    }
+
+    fn lock_turn(&self, create: bool, nonblocking: bool) -> std::io::Result<Turn> {
+        let Some(dir) = self.file.parent() else {
+            return if nonblocking { Err(std::io::ErrorKind::NotFound.into()) } else { Ok(Turn { _held: None }) };
+        };
         if create {
             std::fs::create_dir_all(dir)?;
         }
@@ -273,10 +287,16 @@ impl Service {
         {
             match std::fs::File::open(dir) {
                 Ok(held) => {
-                    fs2::FileExt::lock_exclusive(&held)?;
+                    if nonblocking {
+                        fs2::FileExt::try_lock_exclusive(&held)?;
+                    } else {
+                        fs2::FileExt::lock_exclusive(&held)?;
+                    }
                     Ok(Turn { _held: Some(held) })
                 }
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound && !create => Ok(Turn { _held: None }),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound && !create && !nonblocking => {
+                    Ok(Turn { _held: None })
+                }
                 Err(e) => Err(e),
             }
         }
@@ -368,7 +388,12 @@ impl Service {
     /// `moai update` 가 부른다. **moai 가 쓴 파일이고, 이 바이너리를 가리키고, 지금 실행 중일 때만** 다시 시작한다. 사람이 멈춘
     /// 서비스는 안 띄운다. 등록 상태를 바꾸는 호출은 이 길에 없다. 글 전체는 견주지 않는다 — 셸의 환경이 달라 글이 달라도
     /// 새 판으로는 다시 시작해야 한다.
+    ///
+    /// 파일을 읽을 때부터 관리자를 부르고 돌아올 때까지 차례([`Turn`])를 쥔다 — `uninstall` 이 멈춘 뒤·파일을 걷기 전에 끼어
+    /// 서비스를 다시 띄우지 않게(moai-kwzp). **기다리지는 않는다.** 차례가 차 있거나 디렉터리가 없으면 `false` 다 — 멈춘
+    /// `install` 에 update 가 걸리면 안 되고, 알림으로 가면 사람이 다시 시작할 수 있다.
     pub fn restart(&self, exe: &Path, run: Run) -> bool {
+        let Ok(_turn) = self.try_turn() else { return false };
         let (Ok(exe), Ok(Some(text))) = (writable_text(exe), self.text()) else {
             return false;
         };
@@ -1105,7 +1130,9 @@ mod tests {
             let restart_word = if manager == Manager::Systemd { "restart" } else { "kickstart" };
             let running = if manager == Manager::Systemd { "" } else { "\tstate = running\n" };
 
-            // 파일이 없으면 관리자를 아예 안 부른다 — 서비스가 없는 사람의 `moai update` 는 그대로다.
+            // 파일이 없으면 관리자를 아예 안 부른다 — 서비스가 없는 사람의 `moai update` 는 그대로다. 디렉터리는 세워 둔다:
+            // 없으면 차례를 못 쥐어 먼저 물러서고, 파일이 없는 길은 안 지난다.
+            std::fs::create_dir_all(svc.file.parent().unwrap()).unwrap();
             let fake = Fake { calls: RefCell::default(), refuse: &[], said: running };
             assert!(!svc.restart(&this, &|p: &str, a: &[&str]| fake.run(p, a)));
             assert!(fake.calls().is_empty(), "{:?}", fake.calls());
@@ -1148,6 +1175,31 @@ mod tests {
             let fake = Fake { calls: RefCell::default(), refuse: &[], said: running };
             assert!(!svc.restart(&this, &|p: &str, a: &[&str]| fake.run(p, a)));
             assert!(fake.calls().is_empty(), "{:?}", fake.calls());
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn restart_skips_a_busy_turn_and_holds_it_through_the_manager_call() {
+        for manager in [Manager::Systemd, Manager::Launchd] {
+            let s = Scratch::new("service-restart-turn");
+            let svc = service_in(&s, manager);
+            let exe = binary(&s, "bin");
+            // 디렉터리가 없을 때도 잠금 없이 진행하지 않는다 — 곧 install 이 만들 수 있다.
+            assert!(svc.try_turn().is_err());
+            let ok = Fake::new(&["print"]);
+            svc.install(&exe, pin(), &|p: &str, a: &[&str]| ok.run(p, a)).unwrap();
+            let running = if manager == Manager::Systemd { "" } else { "\tstate = running\n" };
+            let fake = Fake { calls: RefCell::default(), refuse: &[], said: running };
+            let turn = svc.turn(false).unwrap();
+            assert!(!svc.restart(&exe, &|p: &str, a: &[&str]| fake.run(p, a)));
+            assert!(fake.calls().is_empty());
+            drop(turn);
+            assert!(svc.restart(&exe, &|p: &str, a: &[&str]| {
+                assert!(svc.try_turn().is_err(), "restart must hold the turn during {a:?}");
+                fake.run(p, a)
+            }));
+            assert!(svc.try_turn().is_ok());
         }
     }
 
