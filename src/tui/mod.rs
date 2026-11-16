@@ -8642,16 +8642,17 @@ fn save_backlog(app: &mut App) {
         (backlog.assignee, backlog.assignee_email) = by.as_assignee();
         backlog.body = body;
         let (entry, made) = crate::store::admit(issues, cfg, backlog, by)?;
-        written = Some(made.clone());
-        Ok((vec![entry], Touched { id: made.id, done: kept }))
+        let touched = Touched { id: made.id.clone(), done: kept };
+        written = Some(made);
+        Ok((vec![entry], touched))
     });
     if wrote.is_some() {
-        if let Some(why) = written.and_then(|row| app.mark_written(&row)) {
-            let mut notice = app.notice.take().unwrap_or_default();
-            notice.push_str(&format!(" — {why}"));
-            app.notice = Some(notice);
-        }
+        // 담긴 것은 참이다 — 폼은 읽음을 적기(그 파일의 락을 5초까지 기다린다) **전에** 닫는다. 열어 둔 채 적다가
+        // 루프가 끝나면 `unsaved` 가 이미 담긴 글을 못 담은 것으로 낸다.
         app.mode = Mode::Browse;
+        if let Some(why) = written.and_then(|row| app.mark_written(&row)) {
+            app.notice.get_or_insert_default().push_str(&format!(" — {why}"));
+        }
     }
 }
 
@@ -16287,9 +16288,14 @@ mod tests {
         jotting(&mut a, "A new thought");
         a.key(ctrl('s'));
         let made = backlog_in(a.site.repo.as_ref().unwrap()).pop().unwrap();
-        let sheet = crate::read_marks::place_of(&config, &root).at;
-        let text = std::fs::read_to_string(sheet).unwrap();
-        assert!(text.contains(&format!("{} = \"{}\"", made.id, made.updated_at)), "{text}");
+        // 파일의 표가 **그 한 줄뿐**이다 — 글 모양(TOML 키의 꼴)이 아니라 읽은 표로 견준다.
+        let marks = crate::read_marks::read(&config, &root, &Default::default());
+        assert_eq!(
+            marks.seen,
+            std::collections::BTreeMap::from([(made.id.clone(), made.updated_at.clone())]),
+            "{:?}",
+            marks.problems
+        );
         assert!(!a.site.unread.contains(&made.id));
         assert_eq!(a.notice, Some(format!("✓ 담김 · {}", made.id)));
     }
@@ -16320,8 +16326,10 @@ mod tests {
         let made = backlog_in(a.site.repo.as_ref().unwrap()).pop().unwrap();
         assert_eq!(a.mode, Mode::Browse);
         assert!(a.trouble.is_none(), "{:?}", a.trouble);
+        // 붙은 까닭이 **적다 만난 것**이어야 한다 — 다시 들기의 말(`why.or(reread)`)도 같은 ` — ` 로 붙는다.
+        let lead = say(a.site.lang, "tui.read.unwritten").split("{why}").next().unwrap_or_default().to_string();
         let notice = a.notice.unwrap();
-        assert!(notice.starts_with(&format!("✓ 담김 · {} — ", made.id)), "{notice}");
+        assert!(notice.starts_with(&format!("✓ 담김 · {} — {lead}", made.id)), "{notice}");
         assert!(a.site.unread.contains(&made.id));
     }
 
@@ -16471,7 +16479,9 @@ mod tests {
         assert_eq!(a.mode, Mode::Browse, "담겼는데 폼이 열린 채다 — {:?}", a.trouble);
         assert!(a.trouble.is_none(), "{:?}", a.trouble);
         assert!(a.notice.as_deref().is_some_and(|n| n.contains("이력은 못 남겼다")), "{:?}", a.notice);
-        assert!(a.notice.as_deref().is_some_and(|n| n.matches(" — ").count() >= 2), "{:?}", a.notice);
+        // 이력의 말 뒤에 읽음의 말이 **제 낱말로** 붙는다 — ` — ` 를 세면 이력의 까닭 글이 든 대시까지 센다.
+        let lead = say(a.site.lang, "tui.read.unwritten").split("{why}").next().unwrap_or_default().to_string();
+        assert!(a.notice.as_deref().is_some_and(|n| n.contains(&format!(" — {lead}"))), "{:?}", a.notice);
         assert_eq!(backlog_in(a.site.repo.as_ref().unwrap()).len(), 1);
     }
 
