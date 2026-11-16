@@ -53,7 +53,16 @@ pub fn methods() -> rpc::Methods {
 #[cfg(any(unix, windows))]
 pub fn socket_path() -> std::io::Result<std::path::PathBuf> {
     let path = crate::ctl::place::dir()?.join("daemon.socket");
+    validate_socket_path(&path)?;
+    Ok(path)
+}
+
+/// 서비스에 적을 절대 경로에도 같은 소켓 상한을 적용한다.
+#[cfg(any(unix, windows))]
+pub(crate) fn validate_socket_path(path: &std::path::Path) -> std::io::Result<()> {
     // `sockaddr_un` 의 상한 — `ctl::place::socket` 과 같은 값이다. Windows 의 자리는 표시 파일이라 상한이 없다.
+    #[cfg(windows)]
+    let _ = path;
     #[cfg(unix)]
     {
         use std::os::unix::ffi::OsStrExt;
@@ -65,12 +74,21 @@ pub fn socket_path() -> std::io::Result<std::path::PathBuf> {
             ));
         }
     }
-    Ok(path)
+    Ok(())
 }
 
 #[cfg(all(test, any(unix, windows)))]
 mod tests {
     use clap::CommandFactory as _;
+
+    #[cfg(unix)]
+    #[test]
+    fn socket_path_limit_counts_bytes_and_reserves_the_terminator() {
+        let limit = if cfg!(target_os = "macos") { 104 } else { 108 };
+        assert!(super::validate_socket_path(std::path::Path::new(&"x".repeat(limit - 1))).is_ok());
+        assert!(super::validate_socket_path(std::path::Path::new(&"x".repeat(limit))).is_err());
+        assert!(super::validate_socket_path(std::path::Path::new(&"é".repeat(limit / 2))).is_err());
+    }
 
     /// CLI 에 짝이 없는 메서드 — 데몬이나 API 에만 있는 것.
     const API_ONLY: &[(&str, &str)] = &[

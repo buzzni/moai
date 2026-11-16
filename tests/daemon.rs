@@ -2336,6 +2336,24 @@ mod service {
         assert!(text.contains(&want), "상대 경로를 그대로 적었다\n{text}");
     }
 
+    #[test]
+    fn install_rejects_a_relative_directory_whose_absolute_socket_is_too_long() {
+        let m = Managed::new(Manager::Idles);
+        let relative = "x".repeat(85);
+        let socket = m.0.0.join(&relative).join("daemon.socket");
+        let limit = if cfg!(target_os = "macos") { 104 } else { 108 };
+        assert!(relative.len() + "/daemon.socket".len() < limit);
+        assert!(socket.as_os_str().len() >= limit);
+        m.place("existing service file");
+        let out = m.cmd(&["daemon", "install", "--json"]).env("MOAI_CTL_DIR", &relative).output().unwrap();
+        assert!(!out.status.success());
+        let err: Value = serde_json::from_slice(&out.stderr).unwrap();
+        assert_eq!(err["code"], "bad_input", "{err}");
+        assert!(err["error"].as_str().unwrap().contains(&socket.display().to_string()), "{err}");
+        assert_eq!(std::fs::read_to_string(m.file()).unwrap(), "existing service file");
+        assert_eq!(m.calls(), "");
+    }
+
     /// launchd 는 그룹이 쓸 수 있는 plist 를 안 읽는다 — 사람의 umask 를 따르면 그 자리에서만 등록이 실패한다.
     #[test]
     fn the_service_file_ignores_a_loose_umask() {

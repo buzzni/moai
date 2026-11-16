@@ -497,6 +497,9 @@ mod os {
             .parent()
             .and_then(|dir| std::path::absolute(dir).ok())
             .ok_or_else(|| trouble(lang, &svc, Trouble::BadPath(path.display().to_string())))?;
+        let service_socket = dir.join("daemon.socket");
+        crate::daemon::validate_socket_path(&service_socket)
+            .map_err(|_| trouble(lang, &svc, Trouble::BadPath(service_socket.display().to_string())))?;
         let shown_exe = shown(&exe);
         let wrote = svc.install(&exe, &dir, &service::run).map_err(|why| trouble(lang, &svc, why))?;
         let installed = wrote != Wrote::Same;
