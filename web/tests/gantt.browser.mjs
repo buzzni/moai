@@ -25,17 +25,40 @@ const bundle = await build({
   `, resolveDir: new URL('..', import.meta.url).pathname, loader: 'ts' },
   bundle: true, write: false, format: 'iife', plugins: [i18nBundles, vendorGlobals],
 })
-const css = await readFile(new URL('../panel/style/gantt.css', import.meta.url), 'utf8')
+// Use the shipped cascade, including shell.css after gantt.css.
+const css = await readFile(new URL('../../src/web/dist/app.css', import.meta.url), 'utf8')
 const server = createServer((req, res) => {
   res.setHeader('Content-Type', req.url === '/app.js' ? 'text/javascript; charset=utf-8' : 'text/html; charset=utf-8')
   res.end(req.url === '/app.js' ? bundle.outputFiles[0].text : `<style>${css}
     body{margin:0} #host{display:flex;width:900px;height:600px} .m-gantt{width:100%;overflow:hidden}
-    </style><div id="host"></div><script src="/app.js"></script>`)
+    </style><div id="host" class="m-pane-main m-pane-gantt" data-pane="gantt"></div><script src="/app.js"></script>`)
 })
 await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
 const url = `http://127.0.0.1:${server.address().port}`
 
 for (const engine of [chromium, firefox]) {
+  test(`${engine.name()}: Gantt scrolls inside its pane while other panes scroll normally`, async t => {
+    const browser = await engine.launch(); t.after(() => browser.close())
+    const page = await browser.newPage(); await page.goto(url); await page.waitForFunction(() => window.ready)
+    const result = await page.evaluate(async () => {
+      const pane = document.querySelector('#host'), scroll = pane.querySelector('.g-scroll')
+      const list = document.createElement('div')
+      list.className = 'm-pane-main'; list.dataset.pane = 'list'
+      list.style.cssText = 'width:100px;height:100px'
+      const content = document.createElement('div'); content.style.height = '300px'; list.append(content)
+      document.body.append(list)
+      scroll.scrollTop = 420; scroll.scrollLeft = 200; list.scrollTop = 100
+      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+      return { paneOverflow: getComputedStyle(pane).overflow, paneTop: pane.scrollTop, paneLeft: pane.scrollLeft,
+        scrollOverflow: getComputedStyle(scroll).overflow, scrollTop: scroll.scrollTop, scrollLeft: scroll.scrollLeft,
+        listOverflow: getComputedStyle(list).overflow, listTop: list.scrollTop }
+    })
+    assert.equal(result.paneOverflow, 'hidden')
+    assert.equal(result.paneTop, 0); assert.equal(result.paneLeft, 0)
+    assert.equal(result.scrollOverflow, 'auto')
+    assert.ok(result.scrollTop > 0 && result.scrollLeft > 0, JSON.stringify(result))
+    assert.equal(result.listOverflow, 'auto'); assert.ok(result.listTop > 0, JSON.stringify(result))
+  })
   for (const zoom of ['day', 'month']) test(`${engine.name()} ${zoom}: widening retains the left date and avoids full draws`, async t => {
     const browser = await engine.launch()
     t.after(() => browser.close())
