@@ -96,8 +96,17 @@ fn windows_in(dir: &Path, target: Option<&str>, proposal: bool) -> R<Vec<Window>
                     }
                 }
             }
-            Ok(reply) if reply.code.as_deref() == Some("busy") => {
-                return Err(Fail::coded("A window is busy; retry control discovery.", code::BUSY));
+            // **A live window that cannot list itself fails discovery** (moai-pwxx.kah). Its refusal carries no id or
+            // repository, so a list without it could pick an older window as this repository's latest, or tell `-t`
+            // that its window does not exist. A window that answers `timeout` (its owner loop did not answer in time)
+            // is as live as a full one.
+            Ok(reply) if reply.code.as_deref() == Some("busy") => return Err(busy(&path)),
+            Ok(reply) if reply.code.as_deref() == Some("timeout") => return Err(silent(&path)),
+            // Windows: every pipe instance stayed taken (`transport::pipe`), the daemon probe's `Busy`.
+            Err(e) if e.kind() == std::io::ErrorKind::ResourceBusy => return Err(busy(&path)),
+            // The read timed out before the window's own `timeout` reply arrived — the same window, not a gone one.
+            Err(e) if matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) => {
+                return Err(silent(&path));
             }
             Err(e) if matches!(e.kind(), std::io::ErrorKind::ConnectionRefused | std::io::ErrorKind::NotFound) => {
                 // Recheck the path before removal; never follow or remove a foreign file.
@@ -116,6 +125,19 @@ fn windows_in(dir: &Path, target: Option<&str>, proposal: bool) -> R<Vec<Window>
     }
     windows.sort_by(|a, b| a.id.cmp(&b.id));
     Ok(windows)
+}
+
+#[cfg(any(unix, windows))]
+fn busy(path: &Path) -> Fail {
+    Fail::coded(format!("The window at {} is busy; retry control discovery.", path.display()), code::BUSY)
+}
+
+#[cfg(any(unix, windows))]
+fn silent(path: &Path) -> Fail {
+    Fail::coded(
+        format!("The window at {} did not answer in time; retry control discovery.", path.display()),
+        code::TIMEOUT,
+    )
 }
 
 #[cfg(not(any(unix, windows)))]
@@ -253,20 +275,30 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let listener = UnixListener::bind(dir.join("2.sock")).unwrap();
         let owner = std::thread::spawn(move || {
-            for busy in [true, true, false] {
+            for refusal in [Some("busy"), Some("busy"), Some("timeout"), None, Some("silent")] {
                 let (mut stream, _) = listener.accept().unwrap();
-                if busy {
-                    serde_json::to_writer(&mut stream, &Reply::error("busy", "too many control clients")).unwrap();
-                    stream.write_all(b"\n").unwrap();
+                match refusal {
+                    // A window whose owner loop never answers: hold the connection until the caller gives up.
+                    Some("silent") => {
+                        let _ = std::io::Read::read_to_end(&mut stream, &mut Vec::new());
+                    }
+                    Some(code) => {
+                        serde_json::to_writer(&mut stream, &Reply::error(code, "refused")).unwrap();
+                        stream.write_all(b"\n").unwrap();
+                    }
+                    None => {}
                 }
             }
         });
         assert_eq!(windows_in(&dir, None, false).unwrap_err().code, code::BUSY);
         assert_eq!(windows_in(&dir, Some("2.7"), false).unwrap_err().code, code::BUSY);
+        assert_eq!(windows_in(&dir, Some("2.7"), false).unwrap_err().code, code::TIMEOUT);
         assert_eq!(windows_in(&dir, Some("2.7"), false).unwrap_err().code, code::GONE);
+        assert_eq!(windows_in(&dir, None, false).unwrap_err().code, code::TIMEOUT);
         owner.join().unwrap();
         std::fs::remove_dir_all(dir).unwrap();
     }
+
     #[test]
     #[cfg(unix)]
     fn explicit_targets_skip_unrelated_sockets_and_preserve_proposal_hello() {

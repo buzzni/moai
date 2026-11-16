@@ -264,9 +264,9 @@ fn ctl_lists_and_reads_an_open_explorer() {
             Err(e) if e.kind() == std::io::ErrorKind::WouldBlock || e.raw_os_error() == Some(libc::EIO) => {}
             Err(e) => panic!("PTY: {e}"),
         }
-        let out = ok(s.path(), &["ctl", "ls", "--json"]);
-        let json: serde_json::Value = serde_json::from_str(&out).unwrap();
-        if let Some(id) = json["windows"].as_array().unwrap().first().and_then(|w| w["id"].as_str()) {
+        if let Some(json) = listed_while_starting(s.path(), &mut shown)
+            && let Some(id) = json["windows"].as_array().unwrap().first().and_then(|w| w["id"].as_str())
+        {
             window_id = Some(id.to_string());
             break;
         }
@@ -333,6 +333,21 @@ fn ctl_lists_and_reads_an_open_explorer() {
     }
     assert!(child.0.try_wait().unwrap().is_some(), "explorer did not exit after human Ctrl-C");
     assert!(!socket.exists());
+}
+
+/// 뜨는 중인 탐색기를 `ctl ls` 로 찾는다. **소켓은 첫 그림보다 먼저 서고**(`cmd::tui::screen`), 그 사이의 `hello` 는
+/// 답을 못 받는다 — 덜 읽은 pty 에서 첫 그림을 쓰다 막힌 macOS 에서는 더 길다. 그런 창 하나가 있는 목록은
+/// `timeout`·`busy` 로 실패하니(moai-pwxx.kah) 그 둘은 다시 묻고, 다른 실패는 시험을 세운다.
+#[cfg(unix)]
+fn listed_while_starting(dir: &Path, shown: &mut String) -> Option<serde_json::Value> {
+    let out = moai(dir, &["ctl", "ls", "--json"]);
+    if out.status.success() {
+        return Some(json_of(&String::from_utf8_lossy(&out.stdout)));
+    }
+    let error: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+    assert!(matches!(error["code"].as_str(), Some("timeout" | "busy")), "ctl ls failed: {error}");
+    shown.push_str(&format!("\n[ctl ls: {error}]\n"));
+    None
 }
 
 /// 창이 뜬 뒤로도 진짜 터미널처럼 master 를 읽는다 — macOS 의 pty 는 출력 칸이 1KB 남짓이라, 안 읽으면 그리던 탐색기가
@@ -445,8 +460,9 @@ fn proposal_pty(name: &str) -> (Scratch, std::fs::File, ProposalPtyChild) {
             Err(e) if e.kind() == std::io::ErrorKind::WouldBlock || e.raw_os_error() == Some(libc::EIO) => {}
             Err(e) => panic!("PTY: {e}"),
         }
-        let windows = json_of(&ok(scratch.path(), &["ctl", "ls", "--json"]));
-        if windows["windows"].as_array().is_some_and(|rows| !rows.is_empty()) {
+        if listed_while_starting(scratch.path(), &mut shown)
+            .is_some_and(|windows| windows["windows"].as_array().is_some_and(|rows| !rows.is_empty()))
+        {
             keep_reading_pty(&master);
             return (scratch, master, child);
         }
