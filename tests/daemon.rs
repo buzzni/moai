@@ -57,6 +57,9 @@ impl Fence {
             .env("MOAI_CONFIG", self.0.join("config.toml"))
             .env("MOAI_CTL_DIR", &self.0)
             .env_remove("XDG_RUNTIME_DIR")
+            // 둘째 `start` 는 서비스 관리자에 MainPID 를 묻는다(moai-rkre). 가짜 PATH 를 안 준 시험의 진짜 `systemctl --user`
+            // 가 사람의 사용자 버스에 닿지 않게 그 주소도 걷는다.
+            .env_remove("DBUS_SESSION_BUS_ADDRESS")
             .env_remove("XDG_CONFIG_HOME")
             .env_remove("MOAI_ACTOR")
             // 옮김을 끄는 손잡이도 시험이 준 것만 — 돌리는 셸에서 새면 CLI 쪽 견주기가 워크트리의 제 트래커에 쓴다.
@@ -467,6 +470,68 @@ fn a_second_start_does_not_double_up() {
     assert!(text.status.success());
     assert!(String::from_utf8_lossy(&text.stdout).contains("already running"), "{text:?}");
     assert_eq!(f.json(&["daemon", "status", "--json"])["pid"], pid, "떠 있는 데몬이 바뀌었다");
+    f.json(&["daemon", "stop", "--json"]);
+    assert!(daemon.wait().success());
+}
+
+/// 다른 시험의 fork 와 겹쳐 ETXTBSY 가 나지 않도록 자식이 실행 파일을 쓴다.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn write_fake_tool(source: &Path, tool: &Path, body: &str) {
+    std::fs::write(source, body).unwrap();
+    assert!(Command::new("cp").arg(source).arg(tool).status().unwrap().success());
+    assert!(Command::new("chmod").arg("755").arg(tool).status().unwrap().success());
+}
+
+/// 관리자가 띄운 둘째 프로세스만 실패한다. 오래된 서비스 파일에도 표지는 필요하지 않다.
+#[cfg(target_os = "linux")]
+#[test]
+fn service_start_reports_an_occupied_socket_as_failure() {
+    let f = Fence::new();
+    let (daemon, first) = f.start();
+    let bin = f.0.join("fake-bin");
+    std::fs::create_dir(&bin).unwrap();
+    let systemctl = bin.join("systemctl");
+    let source = f.0.join("fake.src");
+    // 묻는 것이 그 유닛의 MainPID 가 아니면 관리자 오류로 답한다 — 다른 것을 물어도 지나가는 가짜가 되지 않게.
+    // 이 프로세스가 쓴 파일을 바로 띄우면 옆 시험의 fork 와 겹쳐 ETXTBSY 다 — `service::Managed` 처럼 자식이 옮겨 적는다.
+    let fake = |body: &str| {
+        write_fake_tool(
+            &source,
+            &systemctl,
+            &format!(
+                "#!/bin/sh\n[ \"$*\" = '--user show -p MainPID --value moai-daemon.service' ] || exit 1\n{body}\n"
+            ),
+        );
+    };
+    let calls = f.0.join("manager-called");
+    fake(&format!("echo called > '{}'; echo $PPID", calls.display()));
+    let out = f.cmd(&["daemon", "start", "--json"]).env("PATH", &bin).output().unwrap();
+    assert!(out.status.success(), "{out:?}");
+    assert!(!calls.exists(), "등록이 없는데 관리자를 불렀다");
+    let unit = f.0.join("home/.config/systemd/user/moai-daemon.service");
+    std::fs::create_dir_all(unit.parent().unwrap()).unwrap();
+    std::fs::write(&unit, "old service definition").unwrap();
+    for args in [&["daemon", "start"][..], &["daemon", "start", "--json"][..]] {
+        let out = f.cmd(args).env("PATH", &bin).output().unwrap();
+        assert!(!out.status.success(), "{out:?}");
+        assert!(out.stdout.is_empty(), "실패한 start 가 stdout 에 냈다: {out:?}");
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert!(err.contains("already running"), "{err}");
+        if args.contains(&"--json") {
+            let error: Value = serde_json::from_slice(&out.stderr).unwrap();
+            assert_eq!(error["code"], "already_exists");
+        }
+    }
+    // 다른 PID 와 관리자 오류는 평소 start 출력과 종료 코드를 바꾸지 않는다.
+    for body in ["echo 0", "exit 1"] {
+        fake(body);
+        let out = f.cmd(&["daemon", "start", "--json"]).env("PATH", &bin).output().unwrap();
+        assert!(out.status.success(), "{out:?}");
+        let second: Value = serde_json::from_slice(&out.stdout).unwrap();
+        assert_eq!(second["started"], false);
+        assert_eq!(second["pid"], first["pid"]);
+    }
+    assert_eq!(f.json(&["daemon", "status", "--json"])["pid"], first["pid"]);
     f.json(&["daemon", "stop", "--json"]);
     assert!(daemon.wait().success());
 }
@@ -2225,10 +2290,8 @@ mod service {
                 );
                 // 이 프로세스가 쓴 파일을 바로 띄우면 옆 시험의 fork 와 겹쳐 ETXTBSY 다 — 자식이 옮겨 적게 한다.
                 let source = f.0.join("fake.src");
-                std::fs::write(&source, body).unwrap();
                 let tool = bin.join(TOOL);
-                assert!(Command::new("cp").arg(&source).arg(&tool).status().unwrap().success());
-                assert!(Command::new("chmod").arg("755").arg(&tool).status().unwrap().success());
+                write_fake_tool(&source, &tool, &body);
             }
             Managed(f)
         }
