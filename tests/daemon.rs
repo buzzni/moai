@@ -474,6 +474,14 @@ fn a_second_start_does_not_double_up() {
     assert!(daemon.wait().success());
 }
 
+/// 다른 시험의 fork 와 겹쳐 ETXTBSY 가 나지 않도록 자식이 실행 파일을 쓴다.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn write_fake_tool(source: &Path, tool: &Path, body: &str) {
+    std::fs::write(source, body).unwrap();
+    assert!(Command::new("cp").arg(source).arg(tool).status().unwrap().success());
+    assert!(Command::new("chmod").arg("755").arg(tool).status().unwrap().success());
+}
+
 /// 관리자가 띄운 둘째 프로세스만 실패한다. 오래된 서비스 파일에도 표지는 필요하지 않다.
 #[cfg(target_os = "linux")]
 #[test]
@@ -487,15 +495,22 @@ fn service_start_reports_an_occupied_socket_as_failure() {
     // 묻는 것이 그 유닛의 MainPID 가 아니면 관리자 오류로 답한다 — 다른 것을 물어도 지나가는 가짜가 되지 않게.
     // 이 프로세스가 쓴 파일을 바로 띄우면 옆 시험의 fork 와 겹쳐 ETXTBSY 다 — `service::Managed` 처럼 자식이 옮겨 적는다.
     let fake = |body: &str| {
-        std::fs::write(
+        write_fake_tool(
             &source,
-            format!("#!/bin/sh\n[ \"$*\" = '--user show -p MainPID --value moai-daemon.service' ] || exit 1\n{body}\n"),
-        )
-        .unwrap();
-        assert!(Command::new("cp").arg(&source).arg(&systemctl).status().unwrap().success());
-        assert!(Command::new("chmod").arg("755").arg(&systemctl).status().unwrap().success());
+            &systemctl,
+            &format!(
+                "#!/bin/sh\n[ \"$*\" = '--user show -p MainPID --value moai-daemon.service' ] || exit 1\n{body}\n"
+            ),
+        );
     };
-    fake("echo $PPID");
+    let calls = f.0.join("manager-called");
+    fake(&format!("echo called > '{}'; echo $PPID", calls.display()));
+    let out = f.cmd(&["daemon", "start", "--json"]).env("PATH", &bin).output().unwrap();
+    assert!(out.status.success(), "{out:?}");
+    assert!(!calls.exists(), "등록이 없는데 관리자를 불렀다");
+    let unit = f.0.join("home/.config/systemd/user/moai-daemon.service");
+    std::fs::create_dir_all(unit.parent().unwrap()).unwrap();
+    std::fs::write(&unit, "old service definition").unwrap();
     for args in [&["daemon", "start"][..], &["daemon", "start", "--json"][..]] {
         let out = f.cmd(args).env("PATH", &bin).output().unwrap();
         assert!(!out.status.success(), "{out:?}");
@@ -2275,10 +2290,8 @@ mod service {
                 );
                 // 이 프로세스가 쓴 파일을 바로 띄우면 옆 시험의 fork 와 겹쳐 ETXTBSY 다 — 자식이 옮겨 적게 한다.
                 let source = f.0.join("fake.src");
-                std::fs::write(&source, body).unwrap();
                 let tool = bin.join(TOOL);
-                assert!(Command::new("cp").arg(&source).arg(&tool).status().unwrap().success());
-                assert!(Command::new("chmod").arg("755").arg(&tool).status().unwrap().success());
+                write_fake_tool(&source, &tool, &body);
             }
             Managed(f)
         }

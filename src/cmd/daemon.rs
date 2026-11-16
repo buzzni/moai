@@ -228,7 +228,9 @@ mod os {
     /// 이 프로세스를 moai 의 서비스가 띄웠는가 — 관리자가 아는 그 서비스의 pid 가 이 프로세스다. 서비스 파일의 표지가
     /// 아니라 관리자에 묻는 까닭은 업데이트 전에 등록한 서비스도 알아보려는 것이다. 관리자에 못 닿으면 아니다.
     fn started_by_service() -> bool {
-        Service::native().is_ok_and(|svc| svc.main_pid(&service::run).is_ok_and(|pid| pid == Some(std::process::id())))
+        Service::native().is_ok_and(|svc| {
+            svc.registered() && svc.main_pid(&service::run).is_ok_and(|pid| pid == Some(std::process::id()))
+        })
     }
 
     /// 떠 있는 데몬을 만났다 — 같은 판이면 알리고 0, 다른 판이면 두 판을 대고 멈춘다. 같은 판이어도 서비스가 띄운
