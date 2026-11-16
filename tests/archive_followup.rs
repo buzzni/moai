@@ -184,7 +184,7 @@ fn readable_live_member_wins_over_archived_twin_on_show_surfaces() {
     assert_eq!(detail_json["derived_status"], "todo");
     let plan = text(repo.run(&["show", "argos-eeee", "--as-plan"]));
     assert_eq!(plan.lines().filter(|l| l.contains("argos-eeee.mmm")).count(), 1, "{plan}");
-    for args in [&["show", "--all", "--archived"][..], &["show", "--all", "--archived", "--tree"][..]] {
+    for args in [&["show", "--all"][..], &["show", "--all", "--tree"][..]] {
         let shown = text(repo.run(args));
         let line = shown.lines().find(|line| line.contains("argos-eeee") && !line.contains(".mmm")).unwrap();
         // Counting the archived done copy made the epic `▸` in the list and `1/2` in the tree.
@@ -194,7 +194,16 @@ fn readable_live_member_wins_over_archived_twin_on_show_surfaces() {
     let rows: serde_json::Value =
         serde_json::from_str(&text(repo.run(&["show", "--all", "--archived", "--json"]))).unwrap();
     let rows = rows.as_array().unwrap();
-    assert_eq!(rows.iter().filter(|r| r["id"] == "argos-eeee.mmm").count(), 1);
+    let twins: Vec<_> = rows.iter().filter(|r| r["id"] == "argos-eeee.mmm").collect();
+    assert_eq!(twins.len(), 2, "{rows:?}");
+    assert_eq!(twins.iter().filter(|r| r["archive_copy"] == true && r["archived"] == true).count(), 1);
+    for args in [&["show", "--archived"][..], &["show", "--archived", "--tree"][..]] {
+        let shown = text(repo.run(args));
+        assert!(shown.contains("Archive copies (excluded from counts):"), "{shown}");
+        assert_eq!(shown.lines().filter(|line| line.contains("argos-eeee.mmm")).count(), 2, "{shown}");
+        let epic = shown.lines().find(|line| line.contains("argos-eeee") && !line.contains(".mmm")).unwrap();
+        assert!(!epic.contains("1/2") && !epic.contains('▸'), "{shown}");
+    }
     assert_eq!(rows.iter().find(|r| r["id"] == "argos-eeee").unwrap()["derived_status"], "todo");
     let status: serde_json::Value = serde_json::from_slice(&repo.run(&["status", "--json"]).stdout).unwrap();
     assert_eq!(status["epics"][0]["derived_status"], "todo");

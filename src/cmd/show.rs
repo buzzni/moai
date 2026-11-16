@@ -269,6 +269,8 @@ fn listed(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>, keys: &Keys) -> 
     let crate::worktree::Gathered { load: active_load, origin, .. } =
         super::gather(ctx, &repo, args.worktree.worktree)?;
     // 산 줄의 id — 읽힌 줄과, 못 읽어도 id 를 대는 줄. 이것 밖의 줄은 아카이브 파일에서만 왔다(`Where::stored`).
+    let readable: BTreeSet<String> = active_load.issues.iter().map(|i| i.id.clone()).collect();
+    let explicit_archive = args.filter.archived;
     let live: std::collections::BTreeSet<String> =
         active_load.issues.iter().map(|i| i.id.clone()).chain(active_load.reserved_ids()).collect();
     // Every surface judges the live-first context `status` and `edit` read (`archive::context`): an archive copy of a
@@ -472,6 +474,18 @@ fn listed(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>, keys: &Keys) -> 
             Some(why) => hidden_rows.push((at, why)),
         }
     }
+    // Archive twins remain inspectable as a separate diagnostic section. They never enter the
+    // context used for member counts, navigation or rollups; unreadable live IDs stay hidden.
+    let archive_copies: Vec<&Issue> = if explicit_archive {
+        copies
+            .iter()
+            .filter(|i| {
+                readable.contains(&i.id) && wide.matches(i, &now, &wh) && filter.hidden_by(i, &now, &wh).is_none()
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
     let tally = |drawn: &BTreeSet<usize>| {
         let mut h = view::Hidden::default();
         for (at, why) in &hidden_rows {
@@ -549,7 +563,9 @@ fn listed(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>, keys: &Keys) -> 
             .then(|| crate::pulse::read(&repo.root, &load.issues, &repo.config));
         let rows: Vec<Listed> = shown
             .iter()
-            .map(|i| Listed {
+            .map(|i| (i, false))
+            .chain(archive_copies.iter().map(|i| (*i, true)))
+            .map(|(i, archive_copy)| Listed {
                 row: super::Row::of(
                     i,
                     |k| wh.states.get(&k).copied(),
@@ -570,7 +586,12 @@ fn listed(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>, keys: &Keys) -> 
                 // 옛 `work` 가 그 자리에서 거짓을 싣는다.
                 work: work.get(i.id.as_str()).map_or(&[], Vec::as_slice),
                 unread: fresh.contains(i.id.as_str()),
-                derived: Derived::of(&wh, i, &now),
+                archive_copy,
+                derived: if archive_copy {
+                    Derived { archived: true, ..Derived::of(&wh, i, &now) }
+                } else {
+                    Derived::of(&wh, i, &now)
+                },
             })
             .collect();
         return super::json_line(&rows);
@@ -597,9 +618,10 @@ fn listed(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>, keys: &Keys) -> 
             out.push(String::new());
             out.push(n);
         }
+        append_archive_copies(&mut out, &archive_copies, &repo.config, &wh, screen, asked, &load.issues, ctx.lang());
         return Ok(out);
     }
-    Ok(view::list(
+    let mut out = view::list(
         &shown,
         &repo.config,
         tally(&BTreeSet::new()),
@@ -610,7 +632,45 @@ fn listed(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>, keys: &Keys) -> 
         asked,
         &wh,
         screen,
-    ))
+    );
+    append_archive_copies(&mut out, &archive_copies, &repo.config, &wh, screen, asked, &load.issues, ctx.lang());
+    Ok(out)
+}
+
+fn append_archive_copies(
+    out: &mut Vec<String>,
+    copies: &[&Issue],
+    cfg: &crate::config::Config,
+    wh: &crate::query::Where,
+    screen: view::Screen,
+    asked: view::Asked,
+    all: &[Issue],
+    lang: crate::i18n::Lang,
+) {
+    if copies.is_empty() {
+        return;
+    }
+    out.push(String::new());
+    out.push(
+        match lang {
+            crate::i18n::Lang::Ko => "보관 사본 (집계에서 제외):",
+            _ => "Archive copies (excluded from counts):",
+        }
+        .into(),
+    );
+    let rows: Vec<Issue> = copies.iter().map(|i| (*i).clone()).collect();
+    let lines = view::list(
+        &rows,
+        cfg,
+        view::Hidden::default(),
+        0,
+        &report::epic_labels_over(all, &wh.epic, wh.kinds.lend()),
+        asked,
+        wh,
+        screen,
+    );
+    // The section header marks every row; omit the separate list's count summary.
+    out.extend(lines.into_iter().take(rows.len() + 1));
 }
 
 /// `--removed` — `moai rm` 이 지운 이슈를 저널에서 `ts` 차례로 낸다(moai-7dmq). `--since` 가 있으면 그때부터다.
@@ -740,6 +800,8 @@ struct Listed<'a> {
     /// 설 때만 단다(`true`) — `journal_error` 와 같은 약속이라 없는 것이 곧 "안 읽은 줄이 아니다" 다.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     unread: bool,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    archive_copy: bool,
     #[serde(flatten)]
     derived: Derived<'a>,
 }
@@ -1332,6 +1394,7 @@ mod tests {
             journal_error: &[],
             // 설 때만 서는 키라 세워서 잰다 — `false` 면 직렬화에서 빠져 이 시험이 그 이름을 못 본다.
             unread: true,
+            archive_copy: true,
             // 셋 다 설 때만 서는 키라 세워서 잰다.
             derived: Derived { derived_milestone: Some("argos-0002"), shelved_by: Some("argos-0003"), archived: true },
         };
