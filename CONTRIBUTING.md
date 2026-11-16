@@ -540,18 +540,19 @@ closed since the last tag and lists the wiki pages it left behind. It is not a
 gate — nothing waits on it, and a release goes out whatever it finds.
 
 **The changelog picks the number.** `auto` reads the headings under
-`[Unreleased]` that hold entries. Before 1.0, `Fixed` and `Security` alone make a
-patch release, and any `Added`, `Changed`, `Deprecated` or `Removed` makes a minor
-one — a change in behaviour is not a fix. So the call you make is which heading an
-entry goes under, and the script counts the number from there: two people, or two
-agents, releasing the same changelog get the same version. A heading it does not
-know, or an `[Unreleased]` with no entry under a heading, stops it with nothing
-moved. A lead paragraph above the first heading — 0.1.2 gathered its breaking
-changes there — is left out of the count, so every entry goes under a heading
-as well. It never picks a major version — `1.0.0` is given by hand — and
-after 1.0 `auto` stops as well, because which removals and behaviour changes count
-as breaking has not been decided yet. `minor`, `patch` or an explicit version
-still go through where the rule does not fit.
+`[Unreleased]` that hold entries. Before and after 1.0 alike, `Fixed` and
+`Security` alone make a patch release, and any `Added`, `Changed`, `Deprecated`
+or `Removed` makes a minor one — a change in behaviour is not a fix. So the call
+you make is which heading an entry goes under, and the script counts the number
+from there: two people, or two agents, releasing the same changelog get the same
+version. A heading it does not know, or an `[Unreleased]` with no entry under a
+heading, stops it with nothing moved. A lead paragraph above the first heading —
+0.1.2 gathered its breaking changes there — is left out of the count, so every
+entry goes under a heading as well. It never picks a major version and does not
+judge whether a removal or a change in behaviour breaks anything, so a release
+that needs a major version gets it explicitly from a person (moai-gq98.0d9).
+`minor`, `patch` or an explicit version can also be supplied where the rule does
+not fit.
 
 **The tag goes on the merge commit in `main`, not on the tip of `develop`.**
 `main` is what a release is cut from, and a tag on `develop` would build
