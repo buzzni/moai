@@ -33300,7 +33300,7 @@ fn update_falls_back_to_the_notice_when_it_cannot_restart() {
     assert!(!text(&out).contains("still runs"), "{}", text(&out));
 }
 
-/// 셸 소켓의 데몬이 서비스 밖이거나 PID를 모르면 서비스를 재시작하고 옛 데몬을 알린다.
+/// 셸 소켓의 데몬이 서비스 밖이면 서비스를 재시작하고 옛 데몬을 알린다.
 #[cfg(target_os = "linux")]
 #[test]
 fn update_leaves_a_daemon_outside_the_service_running() {
@@ -33308,7 +33308,8 @@ fn update_leaves_a_daemon_outside_the_service_running() {
         return;
     }
     let expected = "--user is-active --quiet moai-daemon.service\n--user show -p MainPID --value moai-daemon.service\n--user restart moai-daemon.service\n";
-    for main_pid in [99, 0] {
+    {
+        let main_pid = 99;
         let (out, calls) = update_serving_pid(Some(OUR_UNIT), 0, 0, Serve::Old, main_pid, &[]);
         assert!(text(&out).contains("daemon old (pid 42) still runs"), "MainPID {main_pid}: {}", text(&out));
         assert!(!text(&out).contains("has not answered yet"), "MainPID {main_pid}: {}", text(&out));
@@ -33320,6 +33321,20 @@ fn update_leaves_a_daemon_outside_the_service_running() {
         assert_eq!(v.get("daemon_restarted"), None, "MainPID {main_pid}: {v}");
         assert_eq!(calls, expected, "MainPID {main_pid}");
     }
+}
+
+/// 관리자가 PID를 대지 못하면 예전처럼 소켓에서 새 판을 기다린다.
+#[cfg(target_os = "linux")]
+#[test]
+fn update_waits_for_the_socket_when_service_pid_is_unknown() {
+    if !served() {
+        return;
+    }
+    let (out, calls) = update_serving_pid(Some(OUR_UNIT), 0, 0, Serve::Fresh, 0, &["--json"]);
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v.get("daemon_restarted").and_then(|v| v.as_bool()), Some(true), "{v}");
+    assert_eq!(v.get("daemon_restart"), None, "{v}");
+    assert!(calls.contains("--user restart moai-daemon.service"), "{calls}");
 }
 
 /// **옛 판으로만 답하는 것은 새 판이 아니다.** 시한까지 `Done` 이 아니라 `Unanswered` 로 선다.

@@ -395,7 +395,7 @@ impl Service {
     /// 거절해도 `None` 이다.
     ///
     /// 다시 시작했으면 `Some` 이고, 그 값은 셸 소켓에서 답한 옛 데몬(`old_pid`)이 다시 시작하기 전 관리자가 아는 서비스의
-    /// pid 였는가다(moai-s95f). 모르는 pid 는 같지 않은 것으로 읽는다. **pid 는 알림만 가른다** — 다른 데몬이 셸 소켓에서
+    /// pid 와 다르지 않은가다(moai-s95f). pid 를 모르면 예전처럼 소켓에서 새 판을 기다린다. **pid 는 알림만 가른다** — 다른 데몬이 셸 소켓에서
     /// 답해도 서비스는 옛 바이너리로 돌고 있으니 다시 시작한다.
     pub fn restart(&self, exe: &Path, old_pid: u64, run: Run) -> Option<bool> {
         let Ok(_turn) = self.try_turn() else { return None };
@@ -405,7 +405,7 @@ impl Service {
         if !text.contains(MARK) || points(self.manager, &text, Path::new(exe)) != Points::This || !self.active(run) {
             return None;
         }
-        let matches = matches!(self.main_pid(run), Ok(Some(pid)) if u64::from(pid) == old_pid);
+        let matches = !matches!(self.main_pid(run), Ok(Some(pid)) if u64::from(pid) != old_pid);
         let done = match self.manager {
             Manager::Systemd => run("systemctl", &["--user", "restart", UNIT]),
             Manager::Launchd => run("launchctl", &["kickstart", "-k", &service_target()]),
@@ -1206,8 +1206,7 @@ mod tests {
             let exe = binary(&s, "bin");
             let installer = Fake::new(&["print"]);
             svc.install(&exe, pin(), &|p: &str, a: &[&str]| installer.run(p, a)).unwrap();
-            for (pid, fails, expected) in [(42, false, true), (43, false, false), (0, false, false), (42, true, false)]
-            {
+            for (pid, fails, expected) in [(42, false, true), (43, false, false), (0, false, true), (42, true, true)] {
                 let calls = RefCell::new(Vec::new());
                 let run = |_: &str, args: &[&str]| {
                     calls.borrow_mut().push(args.join(" "));
@@ -1250,6 +1249,36 @@ mod tests {
                 );
                 assert_eq!(calls.iter().any(|c| c.contains("restart") || c.contains("kickstart")), got, "{calls:?}");
             }
+        }
+    }
+
+    #[test]
+    fn restart_waits_when_the_manager_pid_lookup_fails() {
+        for manager in [Manager::Systemd, Manager::Launchd] {
+            let s = Scratch::new("restart-unknown-pid");
+            let svc = service_in(&s, manager);
+            let exe = binary(&s, "bin");
+            let installer = Fake::new(&["print"]);
+            svc.install(&exe, pin(), &|p: &str, a: &[&str]| installer.run(p, a)).unwrap();
+            let calls = RefCell::new(Vec::new());
+            let run = |_: &str, args: &[&str]| {
+                let mut calls = calls.borrow_mut();
+                calls.push(args.join(" "));
+                if args.contains(&"show") || (args.contains(&"print") && calls.len() == 2) {
+                    return Err("pid unavailable".into());
+                }
+                Ok("state = running\npid = 42\n".into())
+            };
+            let result = RefCell::new(None);
+            assert!(settle(
+                || {
+                    *result.borrow_mut() = svc.restart(&exe, 42, &run);
+                    result.borrow().is_some()
+                },
+                || !calls.borrow().is_empty()
+            ));
+            assert_eq!(*result.borrow(), Some(true), "{manager:?}");
+            assert!(calls.borrow().iter().any(|c| c.contains("restart") || c.contains("kickstart")));
         }
     }
 
