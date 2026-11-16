@@ -14,6 +14,7 @@ does not commit and it does not tag — see `CONTRIBUTING.md`.
 
 ### Fixed
 
+- `moai ctl ls` reports skipped busy or unresponsive windows, and window selection reports the failure instead of treating them as absent. (moai-pwxx)
 - `moai update` skips restarting the daemon service when an install or uninstall holds the service turn, preventing a concurrent uninstall from leaving the daemon running. (moai-kwzp)
 - `moai show` counts a live member once when an older archive copy shares its ID; explicit archive listings still identify the copy for recovery. (moai-b2jt)
 
