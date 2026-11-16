@@ -33088,12 +33088,14 @@ fn update_with_service(
     update_serving(unit, active, restart, if answers { Serve::Fresh } else { Serve::Nothing }, args)
 }
 
-/// [`update_with_service`] 의 몸. **가짜 새 바이너리는 어느 길에서든 정확히 한 번만 뜬다** — 기다림이 프로세스를 띄우면 붉다.
+/// [`update_serving_pid`] 를 서비스의 `MainPID` 가 옛 데몬의 pid(42)와 같은 채로 부른다.
 #[cfg(target_os = "linux")]
 fn update_serving(unit: Option<&str>, active: i32, restart: i32, serve: Serve, args: &[&str]) -> (Output, String) {
     update_serving_pid(unit, active, restart, serve, 42, args)
 }
 
+/// [`update_with_service`] 의 몸. 가짜 `systemctl show` 는 `main_pid` 를 대고, 새 바이너리의 status 는 옛 데몬을 pid 42 로
+/// 댄다. **가짜 새 바이너리는 어느 길에서든 정확히 한 번만 뜬다** — 기다림이 프로세스를 띄우면 붉다.
 #[cfg(target_os = "linux")]
 fn update_serving_pid(
     unit: Option<&str>,
@@ -33229,7 +33231,8 @@ fn update_falls_back_to_the_notice_when_it_cannot_restart() {
     assert!(!text(&out).contains("still runs"), "{}", text(&out));
 }
 
-/// 셸 소켓의 옛 데몬이 서비스 밖에서 돌면 서비스를 다시 시작하지 않고 그 데몬을 알린다.
+/// 셸 소켓의 옛 데몬이 서비스 밖에서 돌면 서비스를 다시 시작하지 않고 그 데몬을 알린다. 관리자가 pid 를 안 대면(`MainPID`
+/// 0) 그 데몬이 서비스의 것인지 모르니 역시 다시 시작하지 않는다.
 #[cfg(target_os = "linux")]
 #[test]
 fn update_leaves_a_daemon_outside_the_service_running() {
@@ -33237,16 +33240,18 @@ fn update_leaves_a_daemon_outside_the_service_running() {
         return;
     }
     let expected = "--user is-active --quiet moai-daemon.service\n--user show -p MainPID --value moai-daemon.service\n";
-    let (out, calls) = update_serving_pid(Some(OUR_UNIT), 0, 0, Serve::Old, 99, &[]);
-    assert!(text(&out).contains("daemon old (pid 42) still runs"), "{}", text(&out));
-    assert!(!text(&out).contains("has not answered yet"), "{}", text(&out));
-    assert_eq!(calls, expected);
+    for main_pid in [99, 0] {
+        let (out, calls) = update_serving_pid(Some(OUR_UNIT), 0, 0, Serve::Old, main_pid, &[]);
+        assert!(text(&out).contains("daemon old (pid 42) still runs"), "MainPID {main_pid}: {}", text(&out));
+        assert!(!text(&out).contains("has not answered yet"), "MainPID {main_pid}: {}", text(&out));
+        assert_eq!(calls, expected, "MainPID {main_pid}");
 
-    let (out, calls) = update_serving_pid(Some(OUR_UNIT), 0, 0, Serve::Old, 99, &["--json"]);
-    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
-    assert_eq!(v.get("daemon_restart").and_then(|v| v.as_bool()), Some(true), "{v}");
-    assert_eq!(v.get("daemon_restarted"), None, "{v}");
-    assert_eq!(calls, expected);
+        let (out, calls) = update_serving_pid(Some(OUR_UNIT), 0, 0, Serve::Old, main_pid, &["--json"]);
+        let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+        assert_eq!(v.get("daemon_restart").and_then(|v| v.as_bool()), Some(true), "MainPID {main_pid}: {v}");
+        assert_eq!(v.get("daemon_restarted"), None, "MainPID {main_pid}: {v}");
+        assert_eq!(calls, expected, "MainPID {main_pid}");
+    }
 }
 
 /// **옛 판으로만 답하는 것은 새 판이 아니다.** 시한까지 `Done` 이 아니라 `Unanswered` 로 선다.
