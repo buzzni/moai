@@ -15,6 +15,7 @@ does not tag — see `CONTRIBUTING.md`.
 ### Fixed
 
 - A backlog item saved with `SPC n` in the explorer is marked read for its author, whether saved in the form, returned from an editor, or continued after the identity prompt. (moai-u3uv)
+- Reinstalling a daemon service through a symbolic link updates its target while preserving the link and existing private permissions; group and other write permissions are removed. (moai-80dx)
 
 ## [1.2.0] - 2026-11-12
 

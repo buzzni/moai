@@ -426,6 +426,8 @@ mod os {
                 code::BAD_INPUT,
             ),
             Trouble::File(said) => {
+                // `said` 는 링크가 가리키는 자리를 댈 수 있다 — 서비스 경로처럼 한 줄로 걷는다.
+                let said = crate::text::one_line(&said);
                 failed(say(lang, "daemon.service.no_file"), &[("service", &file), ("said", &said)], code::ERROR)
             }
             Trouble::Refused(said) => failed(
