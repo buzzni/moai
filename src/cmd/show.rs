@@ -269,15 +269,15 @@ fn listed(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>, keys: &Keys) -> 
     let crate::worktree::Gathered { load: active_load, origin, .. } =
         super::gather(ctx, &repo, args.worktree.worktree)?;
     // 산 줄의 id — 읽힌 줄과, 못 읽어도 id 를 대는 줄. 이것 밖의 줄은 아카이브 파일에서만 왔다(`Where::stored`).
-    let opaque = active_load.reserved_ids();
-    let readable: std::collections::BTreeSet<&str> = active_load.issues.iter().map(|i| i.id.as_str()).collect();
-    // Ids only an unreadable live line holds: every row read under one of them is a stale archive copy
-    // (moai-8rf1.hb3). An id with a readable live row keeps its archive twins, as when nothing is unreadable —
-    // judging through `with_archive` dropped those too, so one unrelated unreadable line changed `show <epic>`.
-    let shadowed: std::collections::BTreeSet<String> =
-        opaque.iter().filter(|id| !readable.contains(id.as_str())).cloned().collect();
-    let live: std::collections::BTreeSet<String> = readable.into_iter().map(str::to_string).chain(opaque).collect();
+    let live: std::collections::BTreeSet<String> =
+        active_load.issues.iter().map(|i| i.id.clone()).chain(active_load.reserved_ids()).collect();
+    let active = active_load.issues.clone();
     let mut load = crate::archive::read_all(&repo.root, active_load)?;
+    // Keep every copy for duplicate diagnostics, but judge all surfaces with the same
+    // live-first context as status and edit. Preserve duplicates within each source.
+    let mut judged: Vec<Issue> = load.issues.iter().filter(|i| !live.contains(&i.id)).cloned().collect();
+    judged.extend(active);
+    judged.sort_by(|a, b| a.id.cmp(&b.id));
     // Only live lines: an archive-file row is never in a list without `archived`, so its unreadable line cannot hide
     // one, and an id-less archive line would otherwise hold back every `removed` until someone mends the archive.
     crate::side::with(|side| {
@@ -317,27 +317,13 @@ fn listed(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>, keys: &Keys) -> 
         // 같은 글을 지어 두면 `show` 만 옛 말로 남는다(리뷰).
         let issue = load.get(id).ok_or_else(|| Fail::not_found(id, ctx.lang()))?;
         if args.as_plan {
-            return plan(ctx, &load.issues, issue, args.raw);
+            return plan(ctx, &judged, issue, args.raw);
         }
-        // Copied only when one is unfolded and some id is shadowed — a list view never reads it.
-        let judged: Option<Vec<Issue>> =
-            (!shadowed.is_empty()).then(|| load.issues.iter().filter(|i| !shadowed.contains(&i.id)).cloned().collect());
-        return one(
-            ctx,
-            &repo,
-            &load.issues,
-            issue,
-            args.raw,
-            &origin,
-            args.worktree.worktree,
-            &live,
-            judged.as_deref().unwrap_or(&load.issues),
-            keys,
-        );
+        return one(ctx, &repo, &load.issues, issue, args.raw, &origin, args.worktree.worktree, &live, &judged, keys);
     }
 
     // Lists, filters and tree rollups must judge the same live-first context as the detail view.
-    load.issues.retain(|row| !shadowed.contains(&row.id));
+    load.issues = judged;
 
     // **`--raw` 도 조용히 버리지 않는다.** 본문은 하나를 펼칠 때만 나오므로
     // 목록 자리의 `--raw` 는 아무 일도 하지 않는다. 말없이 먹으면 부르는 쪽은
@@ -947,9 +933,8 @@ fn one(
     let wants = |any: &[&str]| !ctx.json || any.iter().any(|k| keys.wants(k));
     // Count duplicate lines over every copy read, archive duplicates included — that is the diagnostic.
     let twins = report::duplicate_lines(all, &issue.id);
-    // Everything else reads the judged context: a stale archived copy of an ID an unreadable live row still holds
-    // must not supply a member, a child or a blocker member — `edit` and `status` never read it (moai-8rf1.hb3).
-    // Judging only the blockers left `show <epic>` reporting a done member that `show <blocked issue>` called absent.
+    // Everything else reads the live-first context: an archive copy shadowed by a readable or unreadable
+    // live row must not supply members, children or blockers that edit and status do not see.
     let all = judged;
     let children = report::children_of(all, &issue.id);
     // **이력은 줄이 온 워크트리의 저널에서 읽는다** (`Origin::root`). 스냅샷은

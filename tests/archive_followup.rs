@@ -166,6 +166,43 @@ fn an_unrelated_unreadable_line_leaves_show_of_an_archive_twin_alone() {
     assert_eq!(shown(&repo), before);
 }
 
+#[test]
+fn readable_live_member_wins_over_archived_twin_on_show_surfaces() {
+    let repo = Repo::new("readable-twin");
+    let epic = row("argos-eeee", "epic", "todo");
+    let member = row("argos-eeee.mmm", "issue", "todo");
+    let mut blocked = row("argos-xxxx", "issue", "todo");
+    blocked["blocked_by"] = serde_json::json!(["argos-eeee"]);
+    repo.write(".moai/issues.jsonl", &format!("{epic}\n{member}\n{blocked}\n"));
+    repo.write(".moai/archive/2026.jsonl", &format!("{}\n", row("argos-eeee.mmm", "issue", "done")));
+
+    let detail = text(repo.run(&["show", "argos-eeee"]));
+    assert!(detail.contains("0/1"), "{detail}");
+    let detail_json: serde_json::Value =
+        serde_json::from_str(&text(repo.run(&["show", "argos-eeee", "--json"]))).unwrap();
+    assert_eq!(detail_json["members"], serde_json::json!(["argos-eeee.mmm"]));
+    assert_eq!(detail_json["derived_status"], "todo");
+    for args in [&["show", "--all", "--archived"][..], &["show", "--all", "--archived", "--tree"][..]] {
+        let shown = text(repo.run(args));
+        let line = shown.lines().find(|line| line.contains("argos-eeee") && !line.contains(".mmm")).unwrap();
+        assert!(!line.contains('✓'), "{args:?}: {shown}");
+        assert_eq!(shown.lines().filter(|line| line.contains("argos-eeee.mmm")).count(), 1, "{args:?}: {shown}");
+    }
+    let rows: serde_json::Value =
+        serde_json::from_str(&text(repo.run(&["show", "--all", "--archived", "--json"]))).unwrap();
+    let rows = rows.as_array().unwrap();
+    assert_eq!(rows.iter().filter(|r| r["id"] == "argos-eeee.mmm").count(), 1);
+    assert_eq!(rows.iter().find(|r| r["id"] == "argos-eeee").unwrap()["derived_status"], "todo");
+    let status: serde_json::Value = serde_json::from_slice(&repo.run(&["status", "--json"]).stdout).unwrap();
+    assert_eq!(status["epics"][0]["derived_status"], "todo");
+    let shown = text(repo.run(&["show", "argos-xxxx"]));
+    let edited = text(repo.run(&["edit", "argos-xxxx", "--title", "renamed"]));
+    let line = |out: &str| out.lines().find(|l| l.contains("argos-eeee")).unwrap().to_owned();
+    assert_eq!(line(&shown), line(&edited));
+    let twin = text(repo.run(&["show", "argos-eeee.mmm"]));
+    assert!(twin.to_lowercase().contains("duplicate"), "{twin}");
+}
+
 #[cfg(target_os = "linux")]
 #[test]
 fn due_rejudges_after_waiting_for_the_write_lock() {
