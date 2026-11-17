@@ -1,8 +1,8 @@
-import { filesSource, type Entry, type FileText, type SearchResult, type Checkout, type Change } from '../data/files.ts'
+import { filesSource, changeFingerprint, type Entry, type FileText, type SearchResult, type Checkout, type Change, type ChangeSet, type Mark } from '../data/files.ts'
 import { fileGroup, fileGroupTable, type FileGroupTable } from '../data/file-groups.ts'
 import { el, icon, iconButton, stateLabel } from './components.ts'
 import { createSplit } from './split.ts'
-import { createDiff, diffWords, failureWords, statusMark, type PatchTicket } from './diff.ts'
+import { createDiff, diffWords, failureWords, type PatchTicket } from './diff.ts'
 import { checkoutPatch, patchQueue, PATCH_GROUP } from '../data/changes.ts'
 import { twigParts, TWIG_TEXT } from './list-model.ts'
 import { mountDetail } from './detail.ts'
@@ -16,8 +16,6 @@ const CLASSES = new Set(['comment', 'string', 'number', 'keyword', 'type', 'func
 /** How long a file's patch waits for the cursor to settle before it is asked for. */
 const PATCH_PAUSE_MS = 100
 const join = (parent: string, name: string) => parent === '.' ? name : `${parent}/${name}`
-/** Closed list: only these four letters get a colour; any other letter stays in the muted ink. */
-const MARK_CLASSES = new Set(['M', 'A', 'D', 'R'])
 const KIND_CLASSES = new Set(['directory', 'link', 'source', 'doc', 'data', 'script', 'binary', 'plain'])
 /** Closed list: a received group name never becomes a class by itself. */
 const fileClass = (entry: Entry, table: FileGroupTable | null): string => {
@@ -94,7 +92,8 @@ export function mountFiles(root: HTMLElement, ctx: ViewContext): PaneView {
   let sums = new Map<string, { adds: number; dels: number }>()
   let alive = true, started = false, rootKey: string | undefined, checkouts: Checkout[] = [], changedOnly = false, diffOn = false, detailOn = false
   let groups: FileGroupTable | null = null
-  let changes: Change[] = [], ordinary: Map<string, Entry[]> | null = null, stateNow: State | null = null, indexNow: IssueIndex | null = null
+  /** The checkout's change list as the server last gave it, read whenever this tab stands; the letters and the diff heads come from it. */
+  let changes: Change[] = [], dirMarks = new Map<string, Mark>(), changeFp = '', changeError = '', changeNote = '', held: ChangeSet | null = null, changesPending: { key: string; read: Promise<ChangeSet | null> } | null = null, ordinary: Map<string, Entry[]> | null = null, stateNow: State | null = null, indexNow: IssueIndex | null = null
   let issueShown: State['shown'] = { value: null, loading: false, problem: null }
   let diffEpoch = 0, issueEpoch = 0, changesLoaded = false, painting = 0
   /** Changed-only raised the diff pane itself; any hand on the pane clears this, and leaving turns the pane off only while it stands. */
@@ -129,22 +128,43 @@ export function mountFiles(root: HTMLElement, ctx: ViewContext): PaneView {
   const watchChanged = () => root.dispatchEvent(new doc.defaultView!.Event('moai-file-watch', { bubbles: true }))
   async function switchCheckout(key: string): Promise<void> {
     if (!checkouts.some(c => c.key === key)) return
-    generation++; diffEpoch++; issueEpoch++; clearTimeout(timer); rootKey = key; chosen = ''; cursor = 0; base = '.'; matches = null; changes = []; changesLoaded = false; ordinary = null; changedOnly = false; releaseDiff()
+    generation++; diffEpoch++; issueEpoch++; clearTimeout(timer); rootKey = key; chosen = ''; cursor = 0; base = '.'; matches = null; clearChanges(); ordinary = null; changedOnly = false; releaseDiff()
     directories.clear(); partial.clear(); stamps.clear(); readTimes.clear(); fileStamp = null; fileReadAt = 0; lastFile = null; dropPatches();  expanded.clear(); expanded.add('.'); content.replaceChildren(); contentPath.textContent = ''; diff.clear(); draw(); paintRight()
+    void ensureChanges(key).then(set => { if (set && key === rootKey && !changedOnly) draw(rows[cursor]?.path) })
     try { await load('.'); if (rootKey === key) { draw(); if (diffOn) void showDiff().catch(() => {}) } } catch { message.textContent = words.directoryError; const current = checkouts.find(c => c.current); if (current && current.key !== key) { checkoutSelect.value = current.key; void switchCheckout(current.key) } }
     void readIssue(); watchChanged()
+  }
+  /** What the tree and the diff pane stand on for a checkout whose list is not read yet: nothing, and the note it wrote goes. */
+  function clearChanges(): void {
+    changes = []; dirMarks = new Map(); held = null; changeFp = ''; changeError = ''; changesLoaded = false; changesPending = null
+    if (changeNote && message.textContent === changeNote) message.textContent = ''
+    changeNote = ''
+  }
+  /** Takes an answer in. The note (a read that failed, or stopped at the cap) is written only when the answer changes — never per step. */
+  function applyChanges(set: ChangeSet, fingerprint = changeFingerprint(set)): void {
+    held = set; changes = set.files; dirMarks = new Map(set.dirs); changeError = set.error ?? ''; changeFp = fingerprint; changesLoaded = true
+    const note = set.error ? set.error : set.truncated ? `${set.total} · ${words.truncated}` : ''
+    if (note) { message.textContent = note; changeNote = note }
+    else { if (changeNote && message.textContent === changeNote) message.textContent = ''; changeNote = '' }
+  }
+  /** The checkout's list, read once however many ask at once (open, toggle, diff pane); null for a read that failed or went stale. */
+  function ensureChanges(key: string, background = false): Promise<ChangeSet | null> {
+    if (!source || key !== rootKey) return Promise.resolve(null)
+    if (held) return Promise.resolve(held)
+    if (changesPending?.key === key) return changesPending.read
+    const read: Promise<ChangeSet | null> = source.changes(key, background).then(set => { if (key !== rootKey) return null; applyChanges(set); return set }, () => null)
+      .finally(() => { if (changesPending?.read === read) changesPending = null })
+    changesPending = { key, read }
+    return read
   }
   async function toggleChanged(): Promise<void> {
     if (!source || rootKey === undefined) return
     if (changedOnly && ordinary) { directories.clear(); for (const [k, v] of ordinary) directories.set(k, v); ordinary = null; changedOnly = false; base = ordinaryBase; expanded.clear(); for (const name of ordinaryExpanded) expanded.add(name); cursor = 0; draw(); paintRight(); releaseDiff(); if (diffOn) void showDiff().catch(() => {}); return }
-    const key = rootKey; const result = await source.changes(key).catch(() => null)
+    const key = rootKey; const result = await ensureChanges(key)
     if (key !== rootKey) return
     if (!result) { message.textContent = words.readError; return }
-    if (result.error) message.textContent = result.error
-    else if (result.truncated) message.textContent = `${result.total} · ${words.truncated}`
-    else message.textContent = ''
-    ordinary = new Map(directories); ordinaryExpanded = new Set(expanded); ordinaryBase = base; base = '.'; changesLoaded = true
-    buildChanged(result.files); changedOnly = true; cursor = 0; draw(); paintRight(); watchChanged()
+    ordinary = new Map(directories); ordinaryExpanded = new Set(expanded); ordinaryBase = base; base = '.'
+    buildChanged(changes); changedOnly = true; cursor = 0; draw(); paintRight(); watchChanged()
     if (!diffOn) { autoDiff = true; setDiff(true) } else void showDiff().catch(() => {})
   }
   function buildChanged(next: Change[]): void {
@@ -175,12 +195,11 @@ export function mountFiles(root: HTMLElement, ctx: ViewContext): PaneView {
     if (!background) dropPatches()
     if (!changesLoaded) {
       if (!background) diff.reading()
-      const found = await source.changes(key, background).catch(() => null)
+      const found = await ensureChanges(key, background)
       if (epoch !== diffEpoch || key !== rootKey) return
       if (!found) { if (background) throw new Error('changes'); diff.failed(ctx.copy.failed); return }
-      if (found.error) { message.textContent = found.error; diff.failed(found.error); return }
-      changes = found.files; changesLoaded = true
     }
+    if (changeError) { diff.failed(changeError); return }
     const folder = row.entry.kind === 'dir' || (row.entry.kind === 'link' && row.entry.dir === true && row.entry.openable)
     const under = folder ? `${row.path}/` : null
     diff.list({ files: changes.filter(change => under ? change.path.startsWith(under) : change.path === row.path), truncated: false }, background)
@@ -235,10 +254,12 @@ export function mountFiles(root: HTMLElement, ctx: ViewContext): PaneView {
     const nodes = rows.map((row, index) => {
       const isDir = row.entry.kind === 'dir' || (row.entry.kind === 'link' && row.entry.openable && row.entry.dir === true)
       const change = changedOnly ? changesByPath.get(row.path) : undefined
+      // The letter is the server's: a file's from the list, a directory's from the map. A removed path is a row only in changed-only.
+      const mark: Mark = isDir ? dirMarks.get(row.path) ?? '' : changesByPath.get(row.path)?.mark ?? ''
       // The fold is a span, not a button: the row is the button, and a button inside it would press twice.
       const fold = el(doc, 'span', { class: `m-files-fold${isDir ? ' moai-toggle' : ''}`, 'aria-hidden': 'true' })
       if (isDir) fold.append(icon(doc, 'chevron-right', 12))
-      const label = el(doc, 'span', { class: `m-files-label${change?.status === 'deleted' ? ' m-files-gone' : ''}` })
+      const label = el(doc, 'span', { class: `m-files-label${change?.mark === 'D' ? ' m-files-gone' : ''}` })
       const hit = matchesByPath.get(row.path)
       const offset = row.path.length - row.entry.name.length
       if (hit && hit.start >= offset && hit.end <= row.path.length && hit.end >= hit.start) {
@@ -255,8 +276,8 @@ export function mountFiles(root: HTMLElement, ctx: ViewContext): PaneView {
         meta.push(counts)
       }
       if (!row.entry.openable) meta.push(words.unavailable)
-      const letter = change ? statusMark(change.status) : ''
-      const button = rowNode(row.depth + 1, fileClass(row.entry, groups), index === cursor, fold, label, row.twig, letter, MARK_CLASSES.has(letter) ? `m-mark-${letter}` : '', meta, isDir ? expanded.has(row.path) : undefined)
+      const letter = !changedOnly && mark === 'D' ? '' : mark
+      const button = rowNode(row.depth + 1, fileClass(row.entry, groups), index === cursor, fold, label, row.twig, letter, letter ? `m-mark-${letter}` : '', meta, isDir ? expanded.has(row.path) : undefined)
       button.disabled = !row.entry.openable
       button.addEventListener('click', () => { cursor = index; if (isDir) { generation++; clearTimeout(timer); if (diffOn) void showDiff().catch(() => {}) } if (isDir) { if (expanded.has(row.path)) { expanded.delete(row.path); draw() } else void expand() } else { select(); draw() } })
       button.addEventListener('dblclick', () => { void expand() })
@@ -409,7 +430,8 @@ export function mountFiles(root: HTMLElement, ctx: ViewContext): PaneView {
       const contentShown = !detailOn && !diffOn
       return { key: `files:${rootKey}`, root: rootKey, dirs: changedOnly ? [] : [base, ...rows.filter(row => expanded.has(row.path)).map(row => row.path)].filter(dir => directories.has(dir)).map(path => ({ path, stamp: stamps.get(path) ?? null, readAt: readTimes.get(path) })),
         ...((chosen && (contentShown || diffShown)) ? { file: { path: chosen, stamp: fileStamp, readAt: fileReadAt } } : {}),
-        ...((changedOnly || diffShown) ? { changeKey: `root:${rootKey}`, ...(changesLoaded ? { changeFingerprint: JSON.stringify(changes) } : {}) } : {}) }
+        // Always: the letters stand whether or not changed-only or the diff pane is on. '' until the first read lands, so that answer reads as a change.
+        changeKey: `root:${rootKey}`, changeFingerprint: changesLoaded ? changeFp : '' }
     },
     async refreshFileStamps(watch: FileWatch, dirs: string[], file: boolean, answer?: StampAnswer) {
       const key = rootKey; if (!source || watch.key !== `files:${key}`) return
@@ -437,9 +459,10 @@ export function mountFiles(root: HTMLElement, ctx: ViewContext): PaneView {
     },
     async refreshFileChanges(watch: FileWatch, fingerprint: string) {
       if (watch.key !== `files:${rootKey}`) return
-      const next = JSON.parse(fingerprint) as Change[]; const selected = rows[cursor]?.path
-      changes = next; changesLoaded = true
-      if (changedOnly) { buildChanged(next); draw(selected) }
+      const next = JSON.parse(fingerprint) as ChangeSet; const selected = rows[cursor]?.path
+      applyChanges(next, fingerprint)
+      if (changedOnly) buildChanged(next.files)
+      draw(selected)
       if (diffOn) await showDiff(true)
     },
     filesState() { return { diff: diffOn, detail: detailOn, changed: changedOnly } }, command(action) {

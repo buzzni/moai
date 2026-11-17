@@ -18,7 +18,7 @@ import { openEvents, type Events } from './data/events.js'
 import { createCtl, type Reply as CtlReply } from './ctl.js'
 import { BACKOFF_MS, createRefresher, documentVisibility, POLL_MS } from './data/refresh.js'
 import { createFilesRefresher } from './data/files-refresh.ts'
-import { changesOf } from './data/files.ts'
+import { changeFingerprint, changeSetOf, changesOf } from './data/files.ts'
 import { sortQuery, useVocabulary } from './data/query.js'
 import { orderExpression, useSortVocabulary } from './view/sort-adapter.js'
 import {
@@ -597,6 +597,14 @@ async function start(): Promise<void> {
       const result = await client.request({ path: '/api/changes', query }, { priority: PRIORITY.background, share: false, group: 'files-refresh' })
       if (result.kind !== 'passed' || typeof result.output !== 'object' || result.output === null || !Array.isArray((result.output as { files?: unknown }).files)) throw new Error('changes failed')
       const value = result.output as { files: unknown[]; vcs_error?: unknown }
+      // A checkout's tab stands on the whole answer — the directories' letters, the cap, a checkout git cannot read — so the
+      // fingerprint is the whole of it: a letter that moves alone is a change, and a git-less checkout is one steady answer
+      // (not a failure the step would retry and flag on every round). An issue's pane stands on its files and their errors.
+      if (watch.changeKey.startsWith('root:')) {
+        const set = changeSetOf(value)
+        if (!set) throw new Error('invalid changes')
+        return changeFingerprint(set)
+      }
       if (value.vcs_error) throw new Error('changes unavailable')
       const files = changesOf(value)
       if (!files) throw new Error('invalid changes')

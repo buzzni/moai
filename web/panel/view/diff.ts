@@ -25,9 +25,8 @@ export interface DiffWords {
   terminal: string
 }
 const kinds = new Set(['comment', 'string', 'number', 'keyword', 'type', 'function', 'constant', 'tag', 'attribute', 'heading', 'other'])
-/** Closed list: only these letters take a colour class; any other stays in the muted ink. */
+/** Closed list: the server's letter shows, and takes its colour class, only from here; any other value leaves the chip empty. */
 const MARKS = new Set(['M', 'A', 'D', 'R'])
-export const statusMark = (status: string): string => ({ added: 'A', modified: 'M', deleted: 'D', renamed: 'R', copied: 'C', type_changed: 'T', untracked: '?', conflicted: 'U' } as Record<string, string>)[status] ?? '?'
 /** How long a read may run before its spinner stands: a quick answer never flashes one. */
 export const SPIN_DELAY_MS = 200
 /** A file whose `+n −n` passes this is not fetched until asked: past it the highlighting stops and the page draws for long. */
@@ -269,10 +268,10 @@ export function createDiff(doc: Document, words: DiffWords, onLayout?: (layout: 
       const details = el(doc, 'details', { class: 'm-diff-file', 'data-path': file.path })
       details.open = open.has(file.path) || (defaultOpen && index === 0 && open.size === 0)
       const name = file.old_path && file.old_path !== file.path ? `${file.old_path} → ${file.path}` : file.path
-      const mark = statusMark(file.status)
+      const mark = file.mark !== undefined && MARKS.has(file.mark) ? file.mark : ''
       // Chip, path and counts are text: nothing in the head takes a click, so the summary's own toggle stays the only one.
       details.append(el(doc, 'summary', { class: 'm-diff-head' },
-        el(doc, 'span', { class: `m-diff-chip${MARKS.has(mark) ? ` m-mark-${mark}` : ''}` }, mark),
+        el(doc, 'span', { class: `m-diff-chip${mark ? ` m-mark-${mark}` : ''}` }, mark),
         el(doc, 'span', { class: 'm-diff-path' }, name),
         el(doc, 'span', { class: 'm-diff-counts' }, el(doc, 'span', { class: 'm-count-add' }, `+${file.adds ?? 0}`), el(doc, 'span', { class: 'm-count-del' }, `−${file.dels ?? 0}`))))
       entry.details = details

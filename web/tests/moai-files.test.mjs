@@ -86,7 +86,7 @@ test('checkout changes discard late replies and changed-only includes deleted fi
       if (query.root === '.') await new Promise(resolve => { release = resolve })
       return { kind: 'passed', output: { entries: [entry(query.root === '.' ? 'old' : 'new')], truncated: false } }
     }
-    if (path === '/api/changes') return { kind: 'passed', output: { files: [{ path: 'gone', status: 'deleted', old_path: null, adds: 0, dels: 1, binary: false }] } }
+    if (path === '/api/changes') return { kind: 'passed', output: { files: [{ path: 'gone', status: 'deleted', mark: 'D', old_path: null, adds: 0, dels: 1, binary: false }] } }
     return { kind: 'passed', output: {} }
   }, roots)
   p.view.render(p.state, null); await wait(20)
@@ -128,7 +128,7 @@ test('file detail and diff toggles are independent and narrow panels keep detail
   p.view.command('diff'); assert.ok(p.root.querySelector('.m-files-right > .m-diff'))
   p.view.command('detail'); assert.ok(p.root.querySelector('.m-files-right > .m-split'))
   Object.defineProperty(p.root, 'clientWidth', { configurable: true, value: 400 })
-  p.view.render(p.state, null); assert.ok(p.root.querySelector('.m-files-right > .m-files-issue')); assert.match(p.root.textContent, /collapsed/i); assert.equal(p.view.fileWatch().changeKey, undefined)
+  p.view.render(p.state, null); assert.ok(p.root.querySelector('.m-files-right > .m-files-issue')); assert.match(p.root.textContent, /collapsed/i); assert.equal(p.view.fileWatch().changeKey, 'root:.', 'the list is watched whatever the right pane shows')
   p.view.command('diff'); assert.ok(p.root.querySelector('.m-files-right > .m-files-issue'))
   p.view.command('detail'); assert.ok(p.root.querySelector('.m-files-right > .m-files-content'))
   assert.equal(p.state.detail.visible, true)
@@ -384,21 +384,21 @@ test('a search wraps the hit in the name only and takes it off again, leaving th
   assert.equal(p.root.querySelector('mark'), null); assert.ok(rowsOf(p).every(r => r.querySelector('.m-files-c-mark')))
   p.view.destroy(); p.dom.window.close()
 })
-const changedPage = (files, listing) => page(async ({ path, query }) => {
+const changedPage = (files, listing, extra = {}) => page(async ({ path, query }) => {
   if (path === '/api/files') return { kind: 'passed', output: { entries: listing, stamp: 's', truncated: false } }
-  if (path === '/api/changes') return { kind: 'passed', output: { files } }
+  if (path === '/api/changes') return { kind: 'passed', output: { files, ...extra } }
   return { kind: 'passed', output: { path: query.path, text: '', binary: false, truncated: false, spans: null } }
 })
-const change = (path, status, adds, dels, old = null) => ({ path, status, old_path: old, adds, dels, binary: false })
+const change = (path, status, adds, dels, old = null, mark = '') => ({ path, status, mark, old_path: old, adds, dels, binary: false })
 test('changed-only draws the same branch, the letter in its cell, sums on directories and the old name text', async () => {
   const hostile = '<img src=x onerror=alert(1)>'
-  const p = changedPage([change('src/a.rs', 'modified', 3, 1), change('src/b.rs', 'added', 4, 0), change('src/gone.rs', 'deleted', 0, 9), change('src/new.rs', 'renamed', 0, 0, hostile), change('top.md', 'modified', 1, 1)], [entry('x')])
+  const p = changedPage([change('src/a.rs', 'modified', 3, 1, null, 'M'), change('src/b.rs', 'added', 4, 0, null, 'A'), change('src/gone.rs', 'deleted', 0, 9, null, 'D'), change('src/new.rs', 'renamed', 0, 0, hostile, 'R'), change('top.md', 'modified', 1, 1, null, 'M')], [entry('x')], { dirs: { src: 'M' } })
   p.view.render(p.state, null); await wait(10); p.view.command('changed'); await wait(30)
   const rows = rowsOf(p), by = name => rows.find(r => nameOf(r).startsWith(name))
   assert.deepEqual(rows.map(r => r.querySelector('.m-files-label').firstChild.textContent), ['src', 'a.rs', 'b.rs', 'gone.rs', 'new.rs', 'top.md'])
   assert.deepEqual(rows.map(twigOf), [[], ['tee'], ['tee'], ['tee'], ['end'], []])
   const dir = by('src'); assert.equal(dir.querySelector('.m-files-meta').textContent, '+7 −10'); assert.ok(dir.querySelector('.m-files-faint .m-count-add'))
-  assert.equal(dir.querySelector('.m-files-c-mark').textContent, '')
+  assert.equal(dir.querySelector('.m-files-c-mark').textContent, 'M', 'a directory carries the map\'s letter')
   const a = by('a.rs'); assert.equal(a.querySelector('.m-files-c-mark').textContent, 'M'); assert.ok(a.querySelector('.m-files-c-mark').classList.contains('m-mark-M'))
   assert.equal(a.querySelector('.m-files-meta').textContent, '+3 −1'); assert.ok(a.querySelector('.m-count-add')); assert.ok(a.querySelector('.m-count-del'))
   assert.ok(by('b.rs').querySelector('.m-files-c-mark').classList.contains('m-mark-A'))
@@ -493,4 +493,93 @@ test('a file past 5,000 lines in a checkout offers the fetch alone: no terminal 
   p.root.querySelector('.m-diff-large .m-diff-retry').click(); await wait(150)
   assert.deepEqual(diffs().map(q => q.path), ['huge.rs'])
   p.view.destroy(); p.dom.window.close()
+})
+
+// The letters are the server's (moai-dy7a.eol): the files tab reads the change list whenever it stands.
+const { changeFingerprint, changeSetOf, changesOf } = await panelModule('data/files.ts')
+const letterOf = (p, name) => rowsOf(p).find(r => nameOf(r).startsWith(name))?.querySelector('.m-files-c-mark')
+const mk = (path, mark, status = 'modified', old = null) => ({ path, old_path: old, status, mark, adds: 1, dels: 0, binary: false })
+test('the whole tree takes the list\'s letters, a closed folder the map\'s, and shows nothing for what the server did not mark', async () => {
+  const listing = [entry('src', 'dir'), entry('a.rs'), entry('b.rs'), entry('c.rs'), entry('same.rs'), entry('gone.rs'), entry('odd.rs'), entry('nomark.rs')]
+  const files = [mk('src/x.rs', 'M'), mk('a.rs', 'M'), mk('b.rs', 'A', 'untracked'), mk('c.rs', 'R', 'renamed', 'old.rs'), mk('gone.rs', 'D', 'deleted'), mk('odd.rs', '<b>X</b>'), { ...mk('nomark.rs', undefined), mark: undefined }]
+  const p = changedPage(files, listing, { dirs: { src: 'A', gone: 'D', '/abs': 'M', '../up': 'M', 'a\\b': 'M', odd: 'Z' } }); p.view.render(p.state, null); await wait(30)
+  assert.deepEqual(rowsOf(p).map(r => r.querySelector('.m-files-c-mark').textContent), ['A', 'M', 'A', 'R', '', '', '', ''], 'src closed: the map; a deleted file is no row and gives no letter')
+  assert.ok(letterOf(p, 'src').classList.contains('m-mark-A')); assert.ok(letterOf(p, 'b.rs').classList.contains('m-mark-A')); assert.ok(letterOf(p, 'c.rs').classList.contains('m-mark-R'))
+  assert.equal(letterOf(p, 'gone.rs').textContent, ''); assert.equal(letterOf(p, 'gone.rs').className, 'm-files-c-mark')
+  assert.equal(letterOf(p, 'odd.rs').className, 'm-files-c-mark'); assert.equal(p.root.querySelector('.m-files-tree b'), null)
+  assert.equal(letterOf(p, 'nomark.rs').textContent, '', 'a letter the page has not been given is never made up from the status word')
+  assert.ok(rowsOf(p).every(r => r.children[0].classList.contains('m-files-c-mark')), 'every row keeps its letter cell, so a letter coming late moves no name')
+  p.view.destroy(); p.dom.window.close()
+})
+test('the list is read when the tab opens whatever is on, and its letters arrive without a rebuild of the rows', async () => {
+  let release, reads = 0
+  const p = page(async ({ path, query }) => {
+    if (path === '/api/files') return { kind: 'passed', output: { entries: [entry('a.rs'), entry('b.rs')], stamp: 's', truncated: false } }
+    if (path === '/api/changes') { reads++; await new Promise(resolve => { release = resolve }); return { kind: 'passed', output: { files: [mk('a.rs', 'M')] } } }
+    return { kind: 'passed', output: { path: query.path, text: '', binary: false, truncated: false, spans: null } }
+  })
+  p.view.render(p.state, null); await wait(30)
+  assert.equal(rowsOf(p).length, 2, 'the tree never waits for the list'); assert.equal(reads, 1)
+  const watch = p.view.fileWatch(); assert.equal(watch.changeKey, 'root:.'); assert.equal(watch.changeFingerprint, '', 'not read yet: the first answer must read as a change')
+  release(); await wait(30)
+  assert.equal(letterOf(p, 'a.rs').textContent, 'M'); assert.equal(reads, 1)
+  assert.equal(p.view.fileWatch().changeFingerprint, changeFingerprint(changeSetOf({ files: [mk('a.rs', 'M')] })))
+  p.view.destroy(); p.dom.window.close()
+})
+test('a refresh redraws on a letter that moved alone and a checkout switch drops the old letters', async () => {
+  const roots = [{ key: '.', branch: 'main', main: true, current: true, issue: null }, { key: 'side', branch: 'side', main: false, current: false, issue: null }]
+  const p = page(async ({ path, query }) => {
+    if (path === '/api/files') return { kind: 'passed', output: { entries: [entry('src', 'dir'), entry('a.rs')], stamp: 's', truncated: false } }
+    if (path === '/api/changes') return { kind: 'passed', output: query.root === '.' ? { files: [mk('src/x.rs', 'M')], dirs: { src: 'M' } } : { files: [], dirs: {} } }
+    return { kind: 'passed', output: {} }
+  }, roots)
+  p.view.render(p.state, null); await wait(30)
+  assert.equal(letterOf(p, 'src').textContent, 'M')
+  const watch = p.view.fileWatch(), before = rowsOf(p)[0]
+  await p.view.refreshFileChanges(watch, changeFingerprint(changeSetOf({ files: [mk('src/x.rs', 'M')], dirs: { src: 'A' } })))
+  assert.equal(letterOf(p, 'src').textContent, 'A'); assert.notEqual(rowsOf(p)[0], before)
+  const select = p.root.querySelector('select'); select.value = 'side'; select.dispatchEvent(new p.dom.window.Event('change')); await wait(30)
+  assert.equal(letterOf(p, 'src').textContent, '', 'the other checkout does not inherit the first one\'s letters')
+  await p.view.refreshFileChanges({ ...watch, key: 'files:.' }, changeFingerprint(changeSetOf({ files: [mk('a.rs', 'M')] })))
+  assert.equal(letterOf(p, 'a.rs').textContent, '', 'a late answer for the old checkout is dropped')
+  p.view.destroy(); p.dom.window.close()
+})
+test('a checkout git cannot read stands without letters and says so once; a capped list says it on the whole tree too', async () => {
+  const p = changedPage([], [entry('a.rs')], { vcs_error: { kind: 'unavailable', said: 'version control unavailable' } }); p.view.render(p.state, null); await wait(30)
+  assert.equal(rowsOf(p).length, 1); assert.equal(letterOf(p, 'a.rs').textContent, ''); assert.match(p.root.textContent, /version control unavailable/)
+  p.view.destroy(); p.dom.window.close()
+  const q = changedPage([mk('a.rs', 'M')], [entry('a.rs')], { total: 7000, truncated: true }); q.view.render(q.state, null); await wait(30)
+  assert.match(q.root.textContent, /7000 · Truncated/); assert.equal(letterOf(q, 'a.rs').textContent, 'M')
+  q.view.destroy(); q.dom.window.close()
+})
+test('the change answer keeps only the four letters and the paths a row could be', () => {
+  const set = changeSetOf({ files: [mk('a', 'M'), mk('b', 'Q'), { path: '/abs', status: 'x', adds: 0, dels: 0 }], dirs: { d: 'D', 'd/e': 'q', '..': 'M', 'x//y': 'M', '': 'M' } })
+  assert.deepEqual(set.files.map(f => [f.path, f.mark]), [['a', 'M'], ['b', '']]); assert.deepEqual(set.dirs, [['d', 'D']])
+  assert.equal(changesOf({ files: [] }).length, 0)
+  const same = { files: [mk('a', 'M')] }
+  assert.notEqual(changeFingerprint(changeSetOf({ ...same, dirs: { d: 'M' } })), changeFingerprint(changeSetOf({ ...same, dirs: { d: 'A' } })), 'the map alone moves the fingerprint')
+  assert.equal(changeFingerprint(changeSetOf({ ...same, dirs: { b: 'M', a: 'A' } })), changeFingerprint(changeSetOf({ ...same, dirs: { a: 'A', b: 'M' } })), 'key order does not')
+})
+const { createFilesRefresher } = await import('../panel/data/files-refresh.ts')
+test('the refresher keeps the letters fresh with the tab open and nothing else on: same answer rebuilds nothing, a folder\'s letter alone rebuilds, a hidden tab asks nothing', async () => {
+  let now = 0, shown = true, notify = () => {}, asked = 0, answer = { files: [mk('src/x.rs', 'M')], dirs: { src: 'M' } }
+  const time = { now: () => now, setTimeout: () => 0, clearTimeout() {} }
+  const visible = { shown: () => shown, watch(fn) { notify = fn; return () => {} } }
+  const q = page(async ({ path, query }) => {
+    if (path === '/api/files') return { kind: 'passed', output: { entries: [entry('src', 'dir'), entry('a.rs')], stamp: 's', truncated: false } }
+    if (path === '/api/changes') return { kind: 'passed', output: answer }
+    return { kind: 'passed', output: { path: query.path, text: '', binary: false, truncated: false, spans: null } }
+  })
+  q.view.render(q.state, null); await wait(30)
+  assert.equal(letterOf(q, 'src').textContent, 'M')
+  const refresher = createFilesRefresher({ clock: time, visibility: visible, snapshot: () => q.view.fileWatch(),
+    async stamps() { return { dirs: { '.': 's' }, file: null } },
+    async changes() { asked++; return changeFingerprint(changeSetOf(answer)) },
+    changedStamps: (w, d, f, a) => q.view.refreshFileStamps(w, d, f, a), changedChanges: (w, fp) => q.view.refreshFileChanges(w, fp) })
+  const before = rowsOf(q)
+  now = 5000; await refresher.check(); assert.equal(asked, 1); assert.ok(rowsOf(q).every((r, i) => r === before[i]), 'the same answer rebuilds no row')
+  answer = { files: [mk('src/x.rs', 'M')], dirs: { src: 'A' } }
+  now = 10000; await refresher.check(); assert.equal(asked, 2); assert.equal(letterOf(q, 'src').textContent, 'A', 'a letter that moved alone reads as a change')
+  shown = false; now = 20000; await refresher.check(); assert.equal(asked, 2, 'a hidden tab asks nothing')
+  refresher.stop(); q.view.destroy(); q.dom.window.close()
 })

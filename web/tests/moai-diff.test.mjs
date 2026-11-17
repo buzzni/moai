@@ -223,3 +223,21 @@ test('the patch queue runs two at a time, in the order asked, and skips what is 
   finish.b(); finish.d(); await wait(0)
   assert.deepEqual(started, ['a', 'b', 'd'])
 })
+
+test('a file head\'s chip shows the server\'s letter, in its colour class, and nothing the server did not give (moai-dy7a.eol)', () => {
+  const dom = new JSDOM('<body></body>'); const doc = dom.window.document
+  const view = createDiff(doc, words); doc.body.append(view.el)
+  const head = (path, status, mark) => ({ path, old_path: null, status, ...(mark === undefined ? {} : { mark }), adds: 1, dels: 0, binary: false })
+  view.show({ files: [head('a', 'modified', 'M'), head('b', 'untracked', 'A'), head('c', 'deleted', 'D'), head('d', 'renamed', 'R'), head('e', 'untracked'), head('f', 'modified', '<i>M</i>'), head('g', 'modified', 'Q')], truncated: false })
+  const chips = [...doc.querySelectorAll('.m-diff-chip')]
+  assert.deepEqual(chips.map(c => c.textContent), ['M', 'A', 'D', 'R', '', '', ''], 'no letter is made from the status word: an untracked file with no mark is not "?"')
+  assert.deepEqual(chips.map(c => c.className), ['m-diff-chip m-mark-M', 'm-diff-chip m-mark-A', 'm-diff-chip m-mark-D', 'm-diff-chip m-mark-R', 'm-diff-chip', 'm-diff-chip', 'm-diff-chip'])
+  assert.equal(doc.querySelector('.m-diff-head i'), null)
+  dom.window.close()
+})
+test('the page source holds no status-to-letter table', async () => {
+  const { readFileSync, readdirSync } = await import('node:fs')
+  const dir = new URL('../panel/', import.meta.url)
+  const sources = ['view', 'data'].flatMap(d => readdirSync(new URL(`${d}/`, dir)).filter(f => f.endsWith('.ts')).map(f => readFileSync(new URL(`${d}/${f}`, dir), 'utf8')))
+  for (const text of sources) { assert.doesNotMatch(text, /statusMark/); assert.doesNotMatch(text, /untracked:\s*'/); assert.doesNotMatch(text, /type_changed:\s*'/) }
+})
