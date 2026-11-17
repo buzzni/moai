@@ -156,7 +156,7 @@ test('a file past 5,000 changed lines is asked about first, with its count and t
   assert.deepEqual(p.asked.map(t => t.path), [])
   assert.match(p.text(), /Too large — 5,001 lines/)
   assert.equal(p.doc.querySelector('.m-diff-large b'), null)
-  assert.equal(p.doc.querySelector('.m-diff-large code').textContent, `moai diff moai-1 --scope commits --path 'it'\\''s a <b>dir</b>/x y.rs'`)
+  assert.equal(p.doc.querySelector('.m-diff-large code').textContent, `moai diff moai-1 --scope commits --path='it'\\''s a <b>dir</b>/x y.rs'`)
   p.doc.querySelector('.m-diff-large .m-diff-retry').click()
   assert.deepEqual(p.asked.map(t => t.path), [hostile]); assert.equal(p.doc.querySelector('.m-diff-large'), null)
   // Exactly 5,000 is not past the line: opening it asks.
@@ -173,7 +173,7 @@ test('the terminal line runs as written in a shell: spaces and quotes stay one a
   const path = "dir with space/it's \"odd\" $HOME `x`.rs"
   const line = terminalLine('moai-1', 'working', path, true)
   const args = execFileSync('sh', ['-c', `set -- ${line.slice('moai '.length)}; printf '%s\\n' "$@"`], { encoding: 'utf8' }).split('\n').slice(0, -1)
-  assert.deepEqual(args, ['diff', 'moai-1', '--scope', 'working', '--path', path, '--worktree'])
+  assert.deepEqual(args, ['diff', 'moai-1', '--scope', 'working', `--path=${path}`, '--worktree'])
 })
 test('binary files and files with no line changed are told from their head, never asked', () => {
   const p = pane()
@@ -240,4 +240,39 @@ test('the page source holds no status-to-letter table', async () => {
   const dir = new URL('../panel/', import.meta.url)
   const sources = ['view', 'data'].flatMap(d => readdirSync(new URL(`${d}/`, dir)).filter(f => f.endsWith('.ts')).map(f => readFileSync(new URL(`${d}/${f}`, dir), 'utf8')))
   for (const text of sources) { assert.doesNotMatch(text, /statusMark/); assert.doesNotMatch(text, /untracked:\s*'/); assert.doesNotMatch(text, /type_changed:\s*'/) }
+})
+
+// Epic-end review fixes (moai-dy7a).
+test('the terminal line keeps a path that starts with a dash as the flag\'s value', () => {
+  const args = execFileSync('sh', ['-c', `set -- ${terminalLine('moai-1', 'working', '-x.rs').slice('moai '.length)}; printf '%s\\n' "$@"`], { encoding: 'utf8' }).split('\n').slice(0, -1)
+  assert.deepEqual(args, ['diff', 'moai-1', '--scope', 'working', '--path=-x.rs'])
+})
+test('a refresh that lands on a pane still reading opens the first file, as a first read does', () => {
+  const p = pane()
+  p.view.reading()
+  p.view.list({ files: [head('a'), head('b')], truncated: false }, true)
+  assert.equal(p.doc.querySelector('details[data-path="a"]').open, true)
+  assert.deepEqual(p.asked.map(t => t.path), ['a'])
+  p.dom.window.close()
+})
+test('a refresh that leaves a file with no line changed shows it so, not its old lines', () => {
+  const p = pane()
+  p.view.list({ files: [head('a', 2, 1)], truncated: false })
+  p.asked[0].done(patchOf('a', 'old line')); assert.match(p.text(), /old line/)
+  p.view.list({ files: [head('a', 0, 0)], truncated: false }, true)
+  assert.doesNotMatch(p.text(), /old line/); assert.match(p.text(), /Empty/)
+  assert.equal(p.asked.length, 1, 'nothing to ask for a head that says no line changed')
+  p.dom.window.close()
+})
+test('a pane that moves on stops drawing the large patch it had under way', async () => {
+  const p = pane()
+  p.view.list({ files: [head('a', 1000, 0)], truncated: false })
+  const lines = Array.from({ length: 1000 }, (_, n) => line('add', `row ${n}`))
+  p.asked[0].done({ files: [{ ...head('a', 1000, 0), hunks: [{ old_start: 0, old_len: 0, new_start: 1, new_len: 1000, section: '', lines }] }], truncated: false, highlight: 'full' })
+  const details = p.doc.querySelector('details[data-path="a"]')
+  const drawn = details.querySelectorAll('.m-diff-line').length
+  assert.ok(drawn > 0 && drawn < 1000, `drawn ${drawn} rows in the first turn`)
+  p.view.clear(); await wait(20)
+  assert.equal(details.querySelectorAll('.m-diff-line').length, drawn, 'the dropped file drew no more rows')
+  p.dom.window.close()
 })

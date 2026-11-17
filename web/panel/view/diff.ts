@@ -1,5 +1,5 @@
-import { el, iconButton, stateLabel } from './components.ts'
-import type { Copy } from '../i18n/index.ts'
+import { el, iconButton, paintState, stateLabel } from './components.ts'
+import { fill as fillWords, type Copy } from '../i18n/index.ts'
 
 export type DiffLayout = 'unified' | 'side-by-side'
 export interface DiffLine { kind: 'context' | 'add' | 'delete' | 'raw'; old_no: number | null; new_no: number | null; text: string; spans?: Array<[number, number, string]> | null }
@@ -58,11 +58,12 @@ export function failureWords(copy: Copy, read: { why: 'timeout' | 'cancelled' | 
 }
 /**
  * The terminal line that shows one file of an issue's diff, to paste and run: the path in single quotes, a quote inside
- * it written `'\''`. The id and the scope are the ones the page reads with (the server checked the id; the scope is one
- * of three words), and the path a row of the server's own list.
+ * it written `'\''`, joined to its flag with `=` so a path that starts with `-` stays the flag's value (clap reads
+ * `--path -x` as a flag `-x`). The id and the scope are the ones the page reads with (the server checked the id; the
+ * scope is one of three words), and the path a row of the server's own list.
  */
 export function terminalLine(id: string, scope: string, path: string, worktree = false): string {
-  return `moai diff ${id} --scope ${scope} --path '${path.replace(/'/g, `'\\''`)}'${worktree ? ' --worktree' : ''}`
+  return `moai diff ${id} --scope ${scope} --path='${path.replace(/'/g, `'\\''`)}'${worktree ? ' --worktree' : ''}`
 }
 
 /** Align each contiguous deletion/addition run in the same order as the shared Rust reader. */
@@ -132,10 +133,6 @@ export function createDiff(doc: Document, words: DiffWords, onLayout?: (layout: 
   const slot = el(doc, 'span', { class: 'm-diff-slot' })
   const unifiedButton = iconButton(doc, { icon: 'rows-2', label: stateLabel(words.unified, true, states), pressed: true })
   const sideButton = iconButton(doc, { icon: 'columns-2', label: stateLabel(words.side, false, states), pressed: false })
-  const paintButton = (button: HTMLButtonElement, name: string, on: boolean) => {
-    const label = stateLabel(name, on, states)
-    button.setAttribute('aria-pressed', String(on)); button.setAttribute('aria-label', label); button.title = label
-  }
   const notice = el(doc, 'span', { role: 'status' })
   const body = el(doc, 'div', { class: 'm-diff-body' })
   toolbar.append(el(doc, 'b', {}, states.diff ?? 'diff'), slot, notice, el(doc, 'span', { class: 'm-panehead-sp' }), unifiedButton, sideButton); root.append(toolbar, body)
@@ -150,7 +147,8 @@ export function createDiff(doc: Document, words: DiffWords, onLayout?: (layout: 
   const watch = () => root.dispatchEvent(new doc.defaultView!.Event('moai-file-watch', { bubbles: true }))
   const side = () => layout === 'side-by-side' && width >= 640
 
-  function discard(entry: Entry): void { entry.dead = true; entry.ticket = null; clearTimeout(entry.timer) }
+  /** A dead entry stops everything it had going: its read's answer, its spinner, and a chunked draw still under way. */
+  function discard(entry: Entry): void { entry.dead = true; entry.ticket = null; clearTimeout(entry.timer); entry.version++; entry.details = null }
   function setPane(next: Pane): void {
     for (const entry of entries) discard(entry)
     entries = []
@@ -211,7 +209,7 @@ export function createDiff(doc: Document, words: DiffWords, onLayout?: (layout: 
       const anyway = el(doc, 'button', { type: 'button', class: 'm-diff-retry' }, words.anyway)
       anyway.addEventListener('click', () => { entry.force = true; entry.body = { kind: 'idle' }; fill(entry, null) })
       const line = hooks.command?.(head)
-      details.append(stateRow('m-diff-large', el(doc, 'span', {}, words.large.replace('{n}', changedLines(head).toLocaleString('en-US'))), anyway,
+      details.append(stateRow('m-diff-large', el(doc, 'span', {}, fillWords(words.large, { n: changedLines(head).toLocaleString('en-US') })), anyway,
         ...(line ? [el(doc, 'span', { class: 'm-diff-cmd' }, el(doc, 'span', {}, words.terminal), el(doc, 'code', {}, line))] : [])))
       return
     }
@@ -255,7 +253,7 @@ export function createDiff(doc: Document, words: DiffWords, onLayout?: (layout: 
   function paint(): void {
     // The offsets a refresh kept belong to the files open now; a file opened later starts where the person is.
     const restore = restoreScroll; restoreScroll = null
-    paintButton(unifiedButton, words.unified, layout === 'unified'); paintButton(sideButton, words.side, layout === 'side-by-side')
+    paintState(unifiedButton, words.unified, layout === 'unified', states); paintState(sideButton, words.side, layout === 'side-by-side', states)
     notice.textContent = layout === 'side-by-side' && !side() ? words.narrow : ''
     for (const entry of entries) { clearTimeout(entry.timer); entry.details = null; entry.drawn = null }
     body.replaceChildren(); body.removeAttribute('aria-busy')
@@ -288,36 +286,38 @@ export function createDiff(doc: Document, words: DiffWords, onLayout?: (layout: 
   /**
    * The heads of a list. With `preserve` (a refresh) the open files, the scroll and every patch whose head is the same
    * stay; an open file whose head changed is fetched again quietly, keeping its old lines until the new ones come. The
-   * same list again touches nothing.
+   * same list again touches nothing. A refresh that lands on a pane showing no list (still reading, or failed) has
+   * nothing to keep, so it opens the first file as a first read does.
    */
   function heads(list: DiffList, preserve: boolean, preloaded?: (head: DiffFile) => Body | null): void {
+    const keep = preserve && pane.kind === 'list'
     const same = (entry: Entry, head: DiffFile) => {
       if (entry.key !== headKey(head)) return false
       const given = preloaded?.(head)
       return !given || (given.kind === 'loaded' && entry.body.kind === 'loaded' && given.text === entry.body.text)
     }
-    if (preserve && pane.kind === 'list' && pane.truncated === list.truncated && entries.length === list.files.length && entries.every((entry, i) => same(entry, list.files[i]!))) return
+    if (keep && pane.kind === 'list' /* narrows `pane` */ && pane.truncated === list.truncated && entries.length === list.files.length && entries.every((entry, i) => same(entry, list.files[i]!))) return
     const top = body.scrollTop, left = body.scrollLeft
-    if (preserve) for (const details of body.querySelectorAll<HTMLDetailsElement>('details')) {
+    if (keep) for (const details of body.querySelectorAll<HTMLDetailsElement>('details')) {
       const path = details.dataset.path; if (path) { if (details.open) open.add(path); else open.delete(path) }
     } else open.clear()
-    const old = preserve ? new Map(entries.map(entry => [entry.head.path, entry])) : new Map<string, Entry>()
+    const old = keep ? new Map(entries.map(entry => [entry.head.path, entry])) : new Map<string, Entry>()
     const kept = new Set<Entry>(), again: Entry[] = []
     const next = list.files.map(head => {
       const key = headKey(head), was = old.get(head.path), given = preloaded?.(head) ?? null
       if (was && same(was, head)) { kept.add(was); return was }
       const entry: Entry = { head, key, body: given ?? { kind: 'idle' }, force: was?.force ?? false, ticket: null, dead: false, details: null, drawn: null, version: 0 }
-      // A changed file that was open keeps its old lines on screen until its new patch comes.
-      if (!given && was?.body.kind === 'loaded' && open.has(head.path)) { entry.body = was.body; again.push(entry) }
+      // A changed file that was open keeps its old lines on screen until its new patch comes — only while it still
+      // asks for one: a head now binary, too large or with no line changed is told from the head, not the old lines.
+      if (!given && was?.body.kind === 'loaded' && open.has(head.path) && wanted(entry)) { entry.body = was.body; again.push(entry) }
       return entry
     })
     for (const entry of entries) if (!kept.has(entry)) discard(entry)
     entries = []
-    if (pane.kind !== 'list') setPane({ kind: 'list', truncated: list.truncated })
-    pane = { kind: 'list', truncated: list.truncated }
+    setPane({ kind: 'list', truncated: list.truncated })
     entries = next
-    defaultOpen = !preserve; restoreScroll = preserve ? { top, left } : null
-    paint(); if (preserve) { body.scrollTop = top; body.scrollLeft = left }
+    defaultOpen = !keep; restoreScroll = keep ? { top, left } : null
+    paint(); if (keep) { body.scrollTop = top; body.scrollLeft = left }
     for (const entry of again) if (entry.details?.open && wanted(entry)) request(entry, true)
   }
   const choose = (next: DiffLayout) => { if (layout === next) return; layout = next; onLayout?.(layout); paint() }

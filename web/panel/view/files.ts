@@ -1,6 +1,6 @@
 import { filesSource, changeFingerprint, type Entry, type FileText, type SearchResult, type Checkout, type Change, type ChangeSet, type Mark } from '../data/files.ts'
 import { fileGroup, fileGroupTable, type FileGroupTable } from '../data/file-groups.ts'
-import { el, icon, iconButton, stateLabel } from './components.ts'
+import { el, icon, iconButton, paintState, stateLabel } from './components.ts'
 import { createSplit } from './split.ts'
 import { createDiff, diffWords, failureWords, type PatchTicket } from './diff.ts'
 import { checkoutPatch, patchQueue, PATCH_GROUP } from '../data/changes.ts'
@@ -37,11 +37,6 @@ export function mountFiles(root: HTMLElement, ctx: ViewContext): PaneView {
   const changedButton = iconButton(doc, { icon: 'file-diff', label: stateLabel(words.changed, false, words), pressed: false })
   const diffButton = iconButton(doc, { icon: 'diff', label: stateLabel(words.diff, false, words), pressed: false })
   const detailButton = iconButton(doc, { icon: 'panel-right', label: stateLabel(words.detail, false, words), pressed: false })
-  /** The state is attributes only: a rebuilt button would drop the focus. */
-  const paintToggle = (button: HTMLButtonElement, name: string, on: boolean) => {
-    const label = stateLabel(name, on, words)
-    button.setAttribute('aria-pressed', String(on)); button.setAttribute('aria-label', label); button.title = label
-  }
   const search = el(doc, 'input', { class: 'm-files-search', type: 'search', placeholder: words.search, 'aria-label': words.search })
   const sep = el(doc, 'span', { class: 'm-files-sep', 'aria-hidden': 'true' })
   bar.append(el(doc, 'span', { class: 'm-files-field m-files-checkout' }, icon(doc, 'git-branch'), checkoutSelect), el(doc, 'span', { class: 'm-files-field m-files-find' }, icon(doc, 'search'), search), sep, changedButton, diffButton, detailButton)
@@ -57,7 +52,8 @@ export function mountFiles(root: HTMLElement, ctx: ViewContext): PaneView {
   issueRoot.append(issueHost, issueEmpty)
   const issueView = mountDetail(issueHost, { ...ctx, intents: { ...ctx.intents, closeDetail: () => { detailOn = false; paintRight() } } })
   // A checkout has no issue to name, so no terminal line: the too-large row offers the fetch alone.
-  const diff = createDiff(doc, diffWords(ctx.copy), layout => ctx.intents.dispatch({ type: 'diff-layout', layout }), words, { want: wantPatch, retry: () => void showDiff().catch(() => {}) })
+  // Retry after the checkout's change list said why it failed reads that list again: the one held is the failure.
+  const diff = createDiff(doc, diffWords(ctx.copy), layout => ctx.intents.dispatch({ type: 'diff-layout', layout }), words, { want: wantPatch, retry: () => { if (changeError) { held = null; changesLoaded = false } void showDiff().catch(() => {}) } })
   /** The pane's patch reads: two at a time, all dropped when the cursor or the checkout moves. */
   const patches = patchQueue(2)
   function dropPatches(): void { patches.clear(); ctx.client?.cancelGroup?.(PATCH_GROUP.files) }
@@ -91,9 +87,9 @@ export function mountFiles(root: HTMLElement, ctx: ViewContext): PaneView {
   /** Changed-only: each directory's total of the `+N −M` below it, summed once when the tree is built. */
   let sums = new Map<string, { adds: number; dels: number }>()
   let alive = true, started = false, rootKey: string | undefined, checkouts: Checkout[] = [], changedOnly = false, diffOn = false, detailOn = false
-  let groups: FileGroupTable | null = null
+  let groups: FileGroupTable | null = null, groupsBoot: unknown
   /** The checkout's change list as the server last gave it, read whenever this tab stands; the letters and the diff heads come from it. */
-  let changes: Change[] = [], dirMarks = new Map<string, Mark>(), changeFp = '', changeError = '', changeNote = '', held: ChangeSet | null = null, changesPending: { key: string; read: Promise<ChangeSet | null> } | null = null, ordinary: Map<string, Entry[]> | null = null, stateNow: State | null = null, indexNow: IssueIndex | null = null
+  let changes: Change[] = [], dirMarks = new Map<string, Mark>(), changeFp = '', changeError = '', changeNote = '', held: ChangeSet | null = null, changesPending: { key: string; read: Promise<ChangeSet | null>; background: boolean } | null = null, ordinary: Map<string, Entry[]> | null = null, stateNow: State | null = null, indexNow: IssueIndex | null = null
   let issueShown: State['shown'] = { value: null, loading: false, problem: null }
   let diffEpoch = 0, issueEpoch = 0, changesLoaded = false, painting = 0
   /** Changed-only raised the diff pane itself; any hand on the pane clears this, and leaving turns the pane off only while it stands. */
@@ -107,7 +103,7 @@ export function mountFiles(root: HTMLElement, ctx: ViewContext): PaneView {
     if (parent.children.length !== nodes.length || nodes.some((node, i) => parent.children[i] !== node)) parent.replaceChildren(...nodes)
   }
   function paintRight(): void {
-    paintToggle(diffButton, words.diff, diffOn); paintToggle(detailButton, words.detail, detailOn); paintToggle(changedButton, words.changed, changedOnly)
+    paintState(diffButton, words.diff, diffOn, words); paintState(detailButton, words.detail, detailOn, words); paintState(changedButton, words.changed, changedOnly, words)
     const narrow = root.clientWidth > 0 && root.clientWidth < 640
     if (detailOn && diffOn && !narrow) { place(inner.detail, issueRoot); place(inner.list, diff.el); place(right, inner.el) }
     else if (detailOn) { if (diffOn && narrow) place(right, collapsedNotice, issueRoot); else place(right, issueRoot) }
@@ -147,21 +143,27 @@ export function mountFiles(root: HTMLElement, ctx: ViewContext): PaneView {
     if (note) { message.textContent = note; changeNote = note }
     else { if (changeNote && message.textContent === changeNote) message.textContent = ''; changeNote = '' }
   }
-  /** The checkout's list, read once however many ask at once (open, toggle, diff pane); null for a read that failed or went stale. */
+  /**
+   * The checkout's list, read once however many ask at once (open, toggle, diff pane); null for a read that failed or
+   * went stale. A read the person waits on never rides a refresh's: the refresher cancels its own group whenever its
+   * watch moves, and the toggle would then say the read failed.
+   */
   function ensureChanges(key: string, background = false): Promise<ChangeSet | null> {
     if (!source || key !== rootKey) return Promise.resolve(null)
     if (held) return Promise.resolve(held)
-    if (changesPending?.key === key) return changesPending.read
+    if (changesPending?.key === key && (!changesPending.background || background)) return changesPending.read
     const read: Promise<ChangeSet | null> = source.changes(key, background).then(set => { if (key !== rootKey) return null; applyChanges(set); return set }, () => null)
       .finally(() => { if (changesPending?.read === read) changesPending = null })
-    changesPending = { key, read }
+    changesPending = { key, read, background }
     return read
   }
   async function toggleChanged(): Promise<void> {
     if (!source || rootKey === undefined) return
     if (changedOnly && ordinary) { directories.clear(); for (const [k, v] of ordinary) directories.set(k, v); ordinary = null; changedOnly = false; base = ordinaryBase; expanded.clear(); for (const name of ordinaryExpanded) expanded.add(name); cursor = 0; draw(); paintRight(); releaseDiff(); if (diffOn) void showDiff().catch(() => {}); return }
     const key = rootKey; const result = await ensureChanges(key)
-    if (key !== rootKey) return
+    // A second press while the first waited on the list: the first has entered already, and entering again would keep
+    // the changed tree as the one to come back to.
+    if (key !== rootKey || changedOnly) return
     if (!result) { message.textContent = words.readError; return }
     ordinary = new Map(directories); ordinaryExpanded = new Set(expanded); ordinaryBase = base; base = '.'
     buildChanged(changes); changedOnly = true; cursor = 0; draw(); paintRight(); watchChanged()
@@ -270,7 +272,7 @@ export function mountFiles(root: HTMLElement, ctx: ViewContext): PaneView {
       const meta: Array<Node | string> = []
       const total = changedOnly ? (change ?? (isDir ? sums.get(row.path) : undefined)) : undefined
       if (total) {
-        const adds = 'adds' in total ? total.adds ?? 0 : 0, dels = 'dels' in total ? total.dels ?? 0 : 0
+        const adds = total.adds ?? 0, dels = total.dels ?? 0
         const counts = el(doc, 'span', { class: isDir ? 'm-files-faint' : '' }, '')
         counts.append(el(doc, 'span', { class: 'm-count-add' }, `+${adds}`), doc.createTextNode(' '), el(doc, 'span', { class: 'm-count-del' }, `−${dels}`))
         meta.push(counts)
@@ -331,7 +333,7 @@ export function mountFiles(root: HTMLElement, ctx: ViewContext): PaneView {
     if (diffOn) void showDiff().catch(() => {})
     if (!isFile) return
     chosen = row.path
-    timer = setTimeout(() => { void source.file(row.path, rootKey).then(file => { if (alive && generation === current) paintFile(file) }).catch(() => { if (generation === current) { painting++; content.textContent = words.readError } }) }, 100)
+    timer = setTimeout(() => { void source.file(row.path, rootKey).then(file => { if (alive && generation === current) paintFile(file) }).catch(() => { if (generation === current) { painting++; contentPath.textContent = row.path; content.textContent = words.readError } }) }, 100)
   }
   async function expand(): Promise<void> {
     const row = rows[cursor]; if (!row || !(row.entry.kind === 'dir' || (row.entry.kind === 'link' && row.entry.dir && row.entry.openable))) return
@@ -372,6 +374,9 @@ export function mountFiles(root: HTMLElement, ctx: ViewContext): PaneView {
       message.textContent = `${result.total} ${words.matches}${result.truncated || result.walk_truncated ? ` (${words.truncated})` : ''}${result.ignored_unavailable ? ` (${words.ignoredUnavailable})` : ''}`; draw()
     } catch { message.textContent = words.searchError }
   }
+  // The box stands in the toolbar, so a click reaches it as well as `/`: either way the folds to come back to are the
+  // ones before this search — not a set an older `/` left behind.
+  search.addEventListener('focus', () => { if (!matches) beforeSearch = new Set(expanded) })
   search.addEventListener('input', () => {
     clearTimeout(timer); generation++
     if (!search.value) { generation++; matches = null; expanded.clear(); for (const p of beforeSearch) expanded.add(p); message.textContent = ''; draw(); return }
@@ -379,7 +384,10 @@ export function mountFiles(root: HTMLElement, ctx: ViewContext): PaneView {
   })
   return {
     render(state, index) {
-      stateNow = state; indexNow = index; groups = state.boot ? fileGroupTable((state.boot as { file_groups?: unknown }).file_groups) : null; split.setWidth(root.clientWidth); split.setRatio('right', state.filesRatio)
+      stateNow = state; indexNow = index
+      // The table changes only with the boot: read it once per boot, not on every render.
+      if (state.boot !== groupsBoot) { groupsBoot = state.boot; groups = state.boot ? fileGroupTable((state.boot as { file_groups?: unknown }).file_groups) : null }
+      split.setWidth(root.clientWidth); split.setRatio('right', state.filesRatio)
       inner.setPosition(state.detail.position === 'left' || state.detail.position === 'right' ? 'left' : 'top'); inner.setWidth(root.clientWidth)
       diff.setLayout(state.diffLayout); diff.setWidth(root.clientWidth); paintRight()
       if (!started) { started = true; void source?.checkouts().then(list => { checkouts = [...list].sort((a, b) => Number(b.main) - Number(a.main)); checkoutSelect.replaceChildren(...checkouts.map(c => el(doc, 'option', { value: c.key }, `${c.branch || c.key}${c.branch ? ` (${c.key})` : ''}${c.issue ? ` · ${c.issue}` : ''}`)));

@@ -1,6 +1,6 @@
 /**
  * The file tab's colour group of a name. The table is the server's (`/api/boot` → `file_groups`, built from the TUI's
- * `style::file_style`), so the page keeps no extension list of its own; this only matches the way Rust does.
+ * `style::FILE_GROUPS`), so the page keeps no extension list of its own; this only matches the way Rust does.
  */
 export const FILE_GROUPS = ['source', 'doc', 'data', 'script', 'binary'] as const
 export type FileGroup = typeof FILE_GROUPS[number] | 'plain'

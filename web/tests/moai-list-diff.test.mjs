@@ -279,7 +279,7 @@ test('a file past 5,000 lines is not fetched on opening; its terminal line names
   fake.answer(e => e.path === '/api/changes', listOf('moai-w47s', [head("src/it's big.rs", 5478, 0)])); await wait(10)
   assert.equal(fake.diffs().length, 0)
   assert.match(p.text(), /5,478/)
-  assert.equal(p.doc.querySelector('.m-pane-diff .m-diff-large code').textContent, `moai diff moai-w47s --scope commits --path 'src/it'\\''s big.rs' --worktree`)
+  assert.equal(p.doc.querySelector('.m-pane-diff .m-diff-large code').textContent, `moai diff moai-w47s --scope commits --path='src/it'\\''s big.rs' --worktree`)
   p.doc.querySelector('.m-pane-diff .m-diff-large .m-diff-retry').click(); await wait(10)
   assert.deepEqual(fake.diffs().map(c => c.query.path), ["src/it's big.rs"])
   p.close()
@@ -293,4 +293,38 @@ test('a path that failed the list\'s checks is never drawn, so never asked for',
   assert.equal(p.doc.querySelector('.m-pane-diff img'), null)
   assert.deepEqual(fake.diffs().map(c => c.query.path), ['ok/<img src=x>.rs'])
   p.close()
+})
+
+// Epic-end review fixes (moai-dy7a).
+test('a refresh that came while a read the person waits on was out runs once that read lands', async () => {
+  let hold = false, release; const calls = []
+  const p = setup(async endpoint => {
+    calls.push(endpoint)
+    if (hold && endpoint.path === '/api/changes') { hold = false; await new Promise(resolve => { release = resolve }) }
+    return answer(endpoint.query.id)
+  })
+  p.store.dispatch({ type: 'diff-visible', visible: true }); p.store.dispatch({ type: 'cursor', id: 'one' }); await wait(160)
+  hold = true; p.doc.querySelector('.m-diff-scopes button').click(); await wait(10)
+  const before = calls.filter(c => c.path === '/api/changes').length
+  await p.shell.refreshFileChanges({ key: 'issue:one', dirs: [] }, 'moved')
+  assert.equal(calls.filter(c => c.path === '/api/changes').length, before, 'the refresh waits behind the read the person asked for')
+  release(); await wait(20)
+  assert.equal(calls.filter(c => c.path === '/api/changes').length, before + 1, 'and is owed: it runs once that read lands')
+  p.shell.destroy(); p.dom.window.close()
+})
+test('a scope whose read failed keeps the scope buttons, so another scope is one press away', async () => {
+  const calls = []
+  const p = setup(async endpoint => {
+    calls.push(endpoint)
+    if (endpoint.path === '/api/changes' && endpoint.query.scope === 'branch') return { kind: 'moai-error', message: 'request timed out', code: 'timeout' }
+    return { kind: 'passed', output: { id: endpoint.query.id, scope: endpoint.query.scope ?? 'commits', offers: [{ scope: 'commits', branch: null, owner: null, checkout: null }, { scope: 'branch', branch: 'work', owner: null, checkout: '.' }], files: [], total: 0, truncated: false } }
+  })
+  p.store.dispatch({ type: 'diff-visible', visible: true }); p.store.dispatch({ type: 'cursor', id: 'one' }); await wait(160)
+  p.shell.panes().diff.command('scope-next'); await wait(20)
+  assert.match(p.doc.querySelector('.m-pane-diff').textContent, /Timed out/)
+  const buttons = [...p.doc.querySelectorAll('.m-diff-scopes button')]
+  assert.deepEqual(buttons.map(b => b.getAttribute('aria-pressed')), ['false', 'true'])
+  buttons[0].click(); await wait(20)
+  assert.equal(calls.at(-1).query.scope, 'commits'); assert.doesNotMatch(p.doc.querySelector('.m-pane-diff').textContent, /Timed out/)
+  p.shell.destroy(); p.dom.window.close()
 })

@@ -5,7 +5,7 @@ import { panelModule } from './moai-panel-modules.mjs'
 const { fileGroup, fileGroupTable, extOf } = await panelModule('data/file-groups.ts')
 
 const read = path => readFileSync(new URL(`../panel/${path}`, import.meta.url), 'utf8')
-// The lists of src/style.rs `file_style`, as /api/boot will send them.
+// The lists of src/style.rs `FILE_GROUPS`, as /api/boot will send them.
 const boot = {
   source: { ext: 'rs c h cc cpp hpp go py js mjs cjs ts tsx jsx java kt swift rb php cs scala lua zig hs ml ex exs erl clj dart vue svelte css scss less sql'.split(' '), names: [] },
   doc: { ext: 'md markdown txt rst adoc html htm xml tex org'.split(' '), names: [] },
@@ -15,7 +15,7 @@ const boot = {
 }
 const table = fileGroupTable(boot)
 
-test('names fall into the six groups the way style::file_style does', () => {
+test('names fall into the six groups the way style::file_group does', () => {
   const want = { 'a.rs': 'source', 'a.tsx': 'source', 'a.md': 'doc', 'Cargo.toml': 'data', 'Cargo.lock': 'binary', Makefile: 'script', 'run.sh': 'script', 'X.SVG': 'binary', '.env': 'plain', README: 'plain', 'src/a.rs': 'source', 'a.tar.gz': 'binary', 'a.': 'plain', Dockerfile: 'script' }
   for (const [name, group] of Object.entries(want)) assert.equal(fileGroup(name, table), group, name)
 })

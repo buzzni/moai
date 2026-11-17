@@ -583,3 +583,50 @@ test('the refresher keeps the letters fresh with the tab open and nothing else o
   shown = false; now = 20000; await refresher.check(); assert.equal(asked, 2, 'a hidden tab asks nothing')
   refresher.stop(); q.view.destroy(); q.dom.window.close()
 })
+
+// Epic-end review fixes (moai-dy7a).
+const changeRow = (path, mark = 'M') => ({ path, old_path: null, status: 'modified', mark, adds: 1, dels: 0, binary: false })
+test('a search begun by clicking the box gives back the folds of before it when cleared', async () => {
+  const p = page(async ({ path, query }) => {
+    if (path === '/api/files') return { kind: 'passed', output: { entries: query.dir === '.' ? [entry('dir', 'dir'), entry('other')] : [entry('inside')] } }
+    if (path === '/api/find') return { kind: 'passed', output: { matches: [{ path: 'other', start: 0, end: 5 }], total: 1, truncated: false, walk_truncated: false, ignored_unavailable: false } }
+    if (path === '/api/changes') return { kind: 'passed', output: { scope: 'whole', files: [], total: 0, truncated: false, dirs: {} } }
+    return { kind: 'passed', output: { path: query.path, text: '', binary: false, truncated: false, spans: null } }
+  })
+  p.view.render(p.state, null); await wait(10)
+  p.root.querySelector('[role=treeitem]').click(); await wait(20)
+  assert.match(p.root.querySelector('.m-files-tree').textContent, /inside/)
+  const input = p.root.querySelector('input.m-files-search'); input.focus()
+  input.value = 'other'; input.dispatchEvent(new p.dom.window.Event('input', { bubbles: true })); await wait(250)
+  input.value = ''; input.dispatchEvent(new p.dom.window.Event('input', { bubbles: true }))
+  assert.match(p.root.querySelector('.m-files-tree').textContent, /inside/, 'the folder opened before the search is still open')
+  p.view.destroy(); p.dom.window.close()
+})
+test('Retry after the change list said why it failed reads the list again', async () => {
+  let reads = 0
+  const p = page(async ({ path, query }) => {
+    if (path === '/api/files') return { kind: 'passed', output: { entries: [entry('a.rs')] } }
+    if (path === '/api/changes') { reads++; return { kind: 'passed', output: reads === 1 ? { scope: 'whole', files: [], total: 0, truncated: false, vcs_error: { kind: 'failed', said: 'git broke' } } : { scope: 'whole', files: [changeRow('a.rs')], total: 1, truncated: false, dirs: {} } } }
+    return { kind: 'passed', output: { path: query.path, text: '', binary: false, truncated: false, spans: null } }
+  })
+  p.view.render(p.state, null); await wait(20)
+  p.view.command('diff'); await wait(20)
+  const body = () => p.root.querySelector('.m-diff-body').textContent
+  assert.match(body(), /git broke/)
+  p.root.querySelector('.m-diff-failed .m-diff-retry').click(); await wait(20)
+  assert.equal(reads, 2); assert.doesNotMatch(body(), /git broke/); assert.match(body(), /a\.rs/)
+  p.view.destroy(); p.dom.window.close()
+})
+test('changed-only pressed twice before the list came enters once, and leaving gives back the whole tree', async () => {
+  const p = page(async ({ path, query }) => {
+    if (path === '/api/files') return { kind: 'passed', output: { entries: [entry('a.rs'), entry('plain.txt')] } }
+    if (path === '/api/changes') return { kind: 'passed', output: { scope: 'whole', files: [changeRow('a.rs')], total: 1, truncated: false, dirs: {} } }
+    return { kind: 'passed', output: { path: query.path, text: '', binary: false, truncated: false, spans: null } }
+  })
+  p.view.render(p.state, null); await wait(20)
+  p.view.command('changed'); p.view.command('changed'); await wait(20)
+  assert.doesNotMatch(p.root.querySelector('.m-files-tree').textContent, /plain\.txt/)
+  p.view.command('changed'); await wait(20)
+  assert.match(p.root.querySelector('.m-files-tree').textContent, /plain\.txt/)
+  p.view.destroy(); p.dom.window.close()
+})
