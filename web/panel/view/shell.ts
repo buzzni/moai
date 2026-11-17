@@ -7,6 +7,9 @@
 // The shell reads and dispatches to the store; it does no I/O. Reads and cancels are the caller's
 // (main.ts) and arrive as ShellIntents.
 
+import type { FileWatch, StampAnswer } from "../data/files-refresh.ts"
+import { issueDiff, type IssueDiff, type Scope } from "../data/changes.ts"
+import { createDiff } from "./diff.ts"
 import { aboutFrom } from "../data/about.ts"
 import { isInformation, type Outcome } from "../data/client.ts"
 import type { IssueIndex } from "../data/index.ts"
@@ -87,7 +90,11 @@ export interface Shell {
   setWidth(width: number): void
   layout(): PaneLayout
   /** The views in the panes, for the key router (panel/keys/wiring.ts) to hand its actions to. */
-  panes(): { list: PaneView; board: PaneView; gantt: PaneView; detail: PaneView; wiki: PaneView | null }
+  panes(): { list: PaneView; board: PaneView; gantt: PaneView; detail: PaneView; diff: PaneView; wiki: PaneView | null; files: PaneView | null }
+  fileWatch(): FileWatch | null
+  refreshFileStamps(watch: FileWatch, dirs: string[], file: boolean, answer: StampAnswer): Promise<void>
+  refreshFileChanges(watch: FileWatch, fingerprint: string): Promise<void>
+  trackerChanged(): void
   /** Move the keyboard focus into a pane of the shown tab (its view's focus()). */
   focusPane(area: Focus): void
   /** Move the keyboard focus to the selected tab of the tab bar: the way out of the wiki, whose Tab cycles its links. */
@@ -155,6 +162,8 @@ export function mountShell(root: HTMLElement, options: ShellOptions): Shell {
   })
   const refresh = el(doc, "button", { type: "button", class: "m-refreshed moai-refresh" }, copy.shell.refreshNow)
   refresh.addEventListener("click", () => intents.refresh())
+  const diffToggle = el(doc, "button", { type: "button", class: "m-diff-toggle", "aria-label": copy.files.diff }, copy.files.diff)
+  diffToggle.addEventListener("click", () => store.dispatch({ type: "diff-visible", visible: !store.getState().diff.visible }))
   const visibility = iconButton(doc, { icon: "eye", label: copy.shell.hideDetail, pressed: state.detail.visible })
   visibility.classList.add("moai-detail-toggle")
   visibility.addEventListener("click", () => store.dispatch({ type: "detail-visible", visible: !store.getState().detail.visible }))
@@ -185,10 +194,10 @@ export function mountShell(root: HTMLElement, options: ShellOptions): Shell {
   const actions = el(doc, "div", { class: "m-tabbar-slot" })
   const tabbar = el(doc, "div", { class: "m-tabbar" },
     tabs.el, el(doc, "div", { class: "m-tabbar-spacer" }),
-    el(doc, "div", { class: "m-tabbar-actions" }, refresh, themeButton, visibility, position.el, actions))
+    el(doc, "div", { class: "m-tabbar-actions" }, refresh, themeButton, visibility, diffToggle, position.el, actions))
 
   // ── under the tab bar: toolbar slot, path line, banners, result line ──
-  const toolbar = el(doc, "div", { class: "m-toolbar-slot", hidden: state.tab === "wiki" })
+  const toolbar = el(doc, "div", { class: "m-toolbar-slot", hidden: state.tab === "wiki" || state.tab === "files" })
   // The toolbar is built once and brought to the store's state on every render (its inputs are never rebuilt
   // under the caret or an IME composition); what it does goes back to the store as a `toolbar` action.
   const bar = createToolbar({ doc, copy: copy.toolbar, lang: language as import("../i18n/index.ts").Language }, { dispatch: (action) => store.dispatch({ type: "toolbar", action }) })
@@ -227,13 +236,13 @@ export function mountShell(root: HTMLElement, options: ShellOptions): Shell {
   const notes = el(doc, "div", { class: "m-shell-notes" }, hint, away, slow, notice, error, said, archiveNotice, archiveError, result)
   // The path and banners belong to the list and board; the wiki tab brings its own head. A panel
   // that opens on the wiki tab (the remembered one) starts without it: showTab() only runs on a change of tab.
-  const head = el(doc, "div", { class: "m-shell-head", hidden: state.tab === "wiki" }, crumbs.el, notes)
+  const head = el(doc, "div", { class: "m-shell-head", hidden: state.tab === "wiki" || state.tab === "files" }, crumbs.el, notes)
 
   // ── body: one panel for the list and board (they share the cursor, path and detail), one for the wiki ──
   const split = createSplit(doc, {
     position: state.detail.position,
     ratios: state.detail.ratio,
-    detailVisible: state.detail.visible,
+    detailVisible: state.detail.visible || state.diff.visible,
     labels: { resizer: copy.shell.resizer },
     onRatio: (at, ratio) => store.dispatch({ type: "detail-ratio", position: at, ratio }),
   })
@@ -247,15 +256,63 @@ export function mountShell(root: HTMLElement, options: ShellOptions): Shell {
   split.list.append(mainRoots.list, mainRoots.board, mainRoots.gantt)
   const detailRoot = el(doc, "div", { class: "m-pane-detail", tabindex: -1 })
   split.detail.append(detailRoot)
+  const diffRoot = el(doc, "div", { class: "m-pane-diff", tabindex: -1 })
+  const scopes = el(doc, "div", { class: "m-diff-scopes" })
+  const diffWidget = createDiff(doc, copy.diff, value => store.dispatch({ type: "diff-layout", layout: value }))
+  diffRoot.append(scopes, diffWidget.el)
+  const inside = createSplit(doc, { position: "left", ratios: { left: 0.5, top: 0.5 }, onRatio: (position, ratio) => store.dispatch({ type: "diff-ratio", axis: position === "left" ? "horizontal" : "vertical", ratio: 1 - ratio }) })
+  const foldedDiff = el(doc, "p", { class: "m-diff-collapsed", role: "status" }, copy.files.collapsed)
+  let diffId: string | null = null, diffOverlay = false, issueFileStamp: string | null = null, issueStampPath = '', issueReadAt = 0, selectedScope: Scope | undefined, diffAnswer: IssueDiff | null = null, diffEpoch = 0
+  let diffTimer: ReturnType<typeof setTimeout> | undefined
+  /** Rejects only for a background refresh that failed, so the refresher retries it; a read the person asked for says why on the pane. */
+  function readDiff(id: string, scope?: Scope, background = false): Promise<void> {
+    if (!options.client) return Promise.resolve()
+    const request = ++diffEpoch
+    return issueDiff(options.client, id, scope, store.getState().view.worktree, background).then(answer => {
+      if (request !== diffEpoch || store.getState().cursor !== id || !store.getState().diff.visible) return
+      if (selectedScope !== answer.scope || diffAnswer?.files[0]?.path !== answer.files[0]?.path) issueFileStamp = null
+      const changed = !background || JSON.stringify(diffAnswer) !== JSON.stringify(answer)
+      diffAnswer = answer; issueReadAt = Date.now(); selectedScope = answer.scope ?? undefined
+      if (changed) { diffWidget.show(answer, background); paintScopes() }
+      shell.dispatchEvent(new doc.defaultView!.Event("moai-file-watch", { bubbles: true }))
+    }).catch((error: unknown) => {
+      if (request !== diffEpoch) return
+      // A refresh that failed or was cancelled (the tab hid, the watch moved) leaves the diff it would have replaced.
+      if (background) { issueFileStamp = null; throw error }
+      // An empty answer would read as "no changes in this scope".
+      diffAnswer = null; scopes.replaceChildren(); diffWidget.show({ files: [], truncated: false, vcs_error: { said: copy.failed } })
+    })
+  }
+  function paintScopes(): void {
+    scopes.replaceChildren(...(diffAnswer?.offers ?? []).map(offer => {
+      const button = el(doc, "button", { type: "button", "aria-pressed": String(offer.scope === selectedScope) }, `${offer.scope}${offer.branch ? ` · ${offer.branch}` : ""}${offer.owner ? ` · ${fill(copy.diff.owner, { id: offer.owner })}` : ""}`)
+      button.addEventListener("click", () => { selectedScope = offer.scope; if (diffId) void readDiff(diffId, offer.scope) })
+      return button
+    }))
+  }
+  function diffCommand(action: string): boolean {
+    if (action === "diff-layout") return diffWidget.command("toggle")
+    if (action === "next" || action === "prev" || action === "left" || action === "right") return diffWidget.command(action)
+    if (action === "scope-prev" || action === "scope-next") {
+      const offers = diffAnswer?.offers ?? []; if (!offers.length || !diffId) return false
+      const at = Math.max(0, offers.findIndex(o => o.scope === selectedScope)), step = action === "scope-next" ? 1 : -1
+      const chosen = offers[Math.max(0, Math.min(offers.length - 1, at + step))]!
+      selectedScope = chosen.scope; void readDiff(diffId, chosen.scope); return true
+    }
+    return false
+  }
+  const diffView: PaneView = { render() {}, focus: () => diffWidget.focus(), command: diffCommand }
   // The store's `focus` follows the DOM's: a click or Tab into a pane (not only focusPane) says which pane has
-  // the keys. The reducer ignores a focus that is already the one.
+  // the keys. The reducer ignores a focus that is already the one. The diff pane sits inside the detail side of
+  // the split, so one listener tells the two apart: a listener on each would let the outer one win.
   split.list.addEventListener("focusin", () => store.dispatch({ type: "focus", focus: "list" }))
-  split.detail.addEventListener("focusin", () => store.dispatch({ type: "focus", focus: "detail" }))
+  split.detail.addEventListener("focusin", (event) => store.dispatch({ type: "focus", focus: event.target instanceof doc.defaultView!.Node && diffRoot.contains(event.target) ? "diff" : "detail" }))
   // The work tabs (list, board, gantt) control this one panel; its label follows the tab shown.
-  const work = el(doc, "div", { class: "m-tabpanel", role: "tabpanel", id: panelDomId("list"), hidden: state.tab === "wiki" }, split.el)
+  const work = el(doc, "div", { class: "m-tabpanel", role: "tabpanel", id: panelDomId("list"), hidden: state.tab === "wiki" || state.tab === "files" }, split.el)
   for (const id of ["board", "gantt"] as const) tabs.el.querySelector(`#${tabDomId(id)}`)?.setAttribute("aria-controls", panelDomId("list"))
   const wiki = el(doc, "div", { class: "m-tabpanel m-pane-wiki", role: "tabpanel", id: panelDomId("wiki"), "aria-labelledby": tabDomId("wiki"), tabindex: -1, hidden: state.tab !== "wiki" })
-  const body = el(doc, "div", { class: "m-body" }, work, wiki)
+  const files = el(doc, "div", { class: "m-tabpanel m-pane-files", role: "tabpanel", id: panelDomId("files"), "aria-labelledby": tabDomId("files"), tabindex: -1, hidden: state.tab !== "files" })
+  const body = el(doc, "div", { class: "m-body" }, work, wiki, files)
 
   // The activity stays on every tab (the wiki reads too), floating over the foot of the panes so a read never pushes
   // them (shell.css, se-24ey.14i).
@@ -272,7 +329,8 @@ export function mountShell(root: HTMLElement, options: ShellOptions): Shell {
   const layout = (): PaneLayout => {
     const current = store.getState().detail
     const shown = effectivePosition(width, current.position)
-    return { width, position: shown, detailVisible: current.visible, mainWidth: mainWidth(width, shown, current.visible, split.ratio(shown)) }
+    const visible = current.visible || store.getState().diff.visible
+    return { width, position: shown, detailVisible: current.visible, mainWidth: mainWidth(width, shown, visible, split.ratio(shown)) }
   }
   const viewIntents: ViewIntents = {
     enter: (path, cursor) => store.dispatch(cursor === undefined ? { type: "enter", path } : { type: "enter", path, cursor }),
@@ -291,8 +349,10 @@ export function mountShell(root: HTMLElement, options: ShellOptions): Shell {
   const focusPane = (area: Focus) => {
     store.dispatch({ type: "focus", focus: area })
     const now = store.getState()
+    if (area === "diff") return diffWidget.focus()
     if (area === "detail") return detailView.focus ? detailView.focus() : detailRoot.focus()
     if (now.tab === "wiki") return wikiView?.focus ? wikiView.focus() : wiki.focus()
+    if (now.tab === "files") return filesView?.focus ? filesView.focus() : files.focus()
     const view = mainViews[now.tab]
     return view.focus ? view.focus() : mainRoots[now.tab].focus()
   }
@@ -305,6 +365,7 @@ export function mountShell(root: HTMLElement, options: ShellOptions): Shell {
   }
   const detailView = options.panes.detail(detailRoot, ctx)
   const wikiView = options.panes.wiki?.(wiki, ctx) ?? null
+  const filesView = options.panes.files?.(files, ctx) ?? null
   if (!wikiView) wiki.append(emptyState(doc, { icon: "book-open", title: copy.shell.wikiPlaceholder }))
   // Inside the wiki, Tab cycles the page's links, so a keyboard cannot Tab out of it: an Esc the wiki does not
   // use (no link selected, no search to clear) moves the focus to the tab bar. The key router does that
@@ -312,7 +373,7 @@ export function mountShell(root: HTMLElement, options: ShellOptions): Shell {
   const focusTabs = () => tabs.el.querySelector<HTMLElement>(`#${tabDomId(store.getState().tab)}`)?.focus()
 
   // ── tab switching: each tab keeps its scroll offsets (display:none drops them) ──
-  const containers: Record<Tab, HTMLElement> = { list: mainRoots.list, board: mainRoots.board, gantt: mainRoots.gantt, wiki }
+  const containers: Record<Tab, HTMLElement> = { list: mainRoots.list, board: mainRoots.board, gantt: mainRoots.gantt, wiki, files }
   const saved = new Map<Tab | "detail", Saved>()
   let shownTab: Tab = state.tab
   /** Show `tab`'s panes; returns the offsets to put back once they are drawn. */
@@ -323,9 +384,9 @@ export function mountShell(root: HTMLElement, options: ShellOptions): Shell {
     if (tab === "wiki") saved.set("detail", saveScroll(split.detail))
     containers[leaving].hidden = true
     containers[tab].hidden = false
-    work.hidden = tab === "wiki"
-    head.hidden = tab === "wiki"
-    toolbar.hidden = tab === "wiki"
+    work.hidden = tab === "wiki" || tab === "files"
+    head.hidden = tab === "wiki" || tab === "files"
+    toolbar.hidden = tab === "wiki" || tab === "files"
     shownTab = tab
     const offsets = saved.get(tab) ?? []
     restoreScroll(offsets.slice(0, 1))
@@ -374,7 +435,24 @@ export function mountShell(root: HTMLElement, options: ShellOptions): Shell {
     const detail = current.detail
     if (split.preferred() !== detail.position) split.setPosition(detail.position)
     for (const at of ["right", "bottom", "left", "top"] as const) if (split.ratio(at) !== detail.ratio[at]) split.setRatio(at, detail.ratio[at])
-    split.setDetailVisible(detail.visible)
+    split.setDetailVisible(detail.visible || current.diff.visible)
+    diffToggle.hidden = current.tab === "wiki" || current.tab === "files"
+    diffToggle.setAttribute("aria-pressed", String(current.diff.visible))
+    const horizontal = split.position() === "left" || split.position() === "right"
+    const at = horizontal ? "left" : "top"
+    inside.setPosition(at); inside.setWidth(Infinity); inside.setRatio(at, 1 - (horizontal ? current.diff.horizontal : current.diff.vertical))
+    diffWidget.setLayout(current.diffLayout); diffWidget.setWidth(width)
+    if (current.diff.visible && detail.visible && width >= 480) {
+      // Only a change of layout moves a pane: re-inserting one on every render drops its scroll offsets and the
+      // keyboard focus inside it.
+      if (detailRoot.parentElement !== inside.detail) inside.detail.append(detailRoot)
+      if (diffRoot.parentElement !== inside.list) inside.list.append(diffRoot)
+      if (split.detail.firstElementChild !== inside.el) split.detail.replaceChildren(inside.el)
+    } else if (current.diff.visible && !detail.visible) {
+      if (split.detail.firstElementChild !== diffRoot) split.detail.replaceChildren(diffRoot)
+    } else if (current.diff.visible && detail.visible) {
+      if (split.detail.firstElementChild !== detailRoot || !foldedDiff.isConnected) split.detail.replaceChildren(detailRoot, foldedDiff)
+    } else if (split.detail.firstElementChild !== detailRoot || split.detail.children.length !== 1) split.detail.replaceChildren(detailRoot)
     position.update(split.position(), width)
     shell.dataset.position = split.position()
     const label = detail.visible ? copy.shell.hideDetail : copy.shell.showDetail
@@ -397,6 +475,15 @@ export function mountShell(root: HTMLElement, options: ShellOptions): Shell {
     const left = shownTab
     const putBack = showTab(state.tab)
 
+    const canReadDiff = state.diff.visible && state.tab !== "wiki" && state.tab !== "files"
+    if (!canReadDiff || !state.cursor) {
+      if (diffId !== null) { diffEpoch++; clearTimeout(diffTimer); diffId = null; diffAnswer = null; scopes.replaceChildren(); diffWidget.show({ files: [], truncated: false }) }
+    } else if (state.cursor !== diffId || diffOverlay !== state.view.worktree) {
+      diffOverlay = state.view.worktree; diffId = state.cursor; issueFileStamp = null; selectedScope = undefined; diffAnswer = null; diffEpoch++; clearTimeout(diffTimer)
+      scopes.replaceChildren(); diffWidget.show({ files: [], truncated: false })
+      const id = diffId; diffTimer = setTimeout(() => void readDiff(id), 120)
+    }
+
     const loadedAt = state.board.value?.loadedAt
     const at = loadedAt === undefined ? null : refreshTime(loadedAt, language)
     refresh.textContent = at ? `↻ ${at}` : copy.shell.refreshNow
@@ -415,6 +502,8 @@ export function mountShell(root: HTMLElement, options: ShellOptions): Shell {
 
     if (state.tab === "wiki") {
       wikiView?.render(state, index)
+    } else if (state.tab === "files") {
+      filesView?.render(state, index)
     } else {
       // What moai found and why it refused a filter are the toolbar's to show; it judges neither.
       const found = index && state.search.text.trim() !== "" ? narrow(state, index) : null
@@ -447,9 +536,13 @@ export function mountShell(root: HTMLElement, options: ShellOptions): Shell {
     position.update(split.position(), width)
     shell.dataset.position = split.position()
     const current = store.getState()
+    paintLayout(current)
+    shell.dispatchEvent(new doc.defaultView!.Event("moai-file-watch", { bubbles: true }))
+    if (width < 480 && current.diff.visible && current.detail.visible && current.focus === "diff") store.dispatch({ type: "focus", focus: "list" })
     // The wiki pane lays itself out from the width it is given when it renders (view/wiki.ts mountWiki): a narrow
     // panel stacks its list over the page.
     if (current.tab === "wiki") return wikiView?.render(current, options.index(current))
+    if (current.tab === "files") return filesView?.render(current, options.index(current))
     // The list drops right-hand columns as it narrows; draw it again only when a breakpoint is crossed.
     const now = columnBand(layout().mainWidth)
     if (now === band) return
@@ -486,7 +579,26 @@ export function mountShell(root: HTMLElement, options: ShellOptions): Shell {
     slots: { toolbar, actions },
     setWidth,
     layout,
-    panes: () => ({ list: mainViews.list, board: mainViews.board, gantt: mainViews.gantt, detail: detailView, wiki: wikiView }),
+    panes: () => ({ list: mainViews.list, board: mainViews.board, gantt: mainViews.gantt, detail: detailView, diff: diffView, wiki: wikiView, files: filesView }),
+    fileWatch() {
+      const now = store.getState()
+      if (now.tab === "files") return filesView?.fileWatch?.() ?? { key: "files:pending", dirs: [] }
+      if (!now.diff.visible || (now.detail.visible && width < 480) || now.tab === "wiki" || !diffId || !selectedScope) return null
+      if (selectedScope === "commits") return { key: `issue:${diffId}`, dirs: [] }
+      const offer = diffAnswer?.offers.find(o => o.scope === selectedScope)
+      const path = diffWidget.visiblePath()
+      if (path !== issueStampPath) { issueStampPath = path ?? ''; issueFileStamp = null }
+      return { key: `issue:${diffId}`, dirs: [], ...(offer?.checkout ? { root: offer.checkout } : {}), ...(selectedScope === "working" && path ? { file: { path, stamp: issueFileStamp, readAt: issueReadAt } } : {}), changeKey: JSON.stringify(["issue", diffId, selectedScope, now.view.worktree]) }
+    },
+    async refreshFileStamps(watch, dirs, file, answer) {
+      if (watch.key.startsWith("files:")) await filesView?.refreshFileStamps?.(watch, dirs, file, answer)
+      else if (file && watch.key === `issue:${diffId}` && diffId && selectedScope === "working") { issueFileStamp = answer.file; await readDiff(diffId, selectedScope, true) }
+    },
+    async refreshFileChanges(watch, fingerprint) {
+      if (watch.key.startsWith("files:")) await filesView?.refreshFileChanges?.(watch, fingerprint)
+      else if (watch.key === `issue:${diffId}` && diffId && selectedScope && selectedScope !== "commits") await readDiff(diffId, selectedScope, true)
+    },
+    trackerChanged() { if (diffId && selectedScope && selectedScope !== "working" && !(store.getState().detail.visible && width < 480) && store.getState().diff.visible && store.getState().tab !== "files" && store.getState().tab !== "wiki") readDiff(diffId, selectedScope, true).catch(() => {}) },
     focusPane,
     focusTabs,
     toolbar: bar,
@@ -495,11 +607,13 @@ export function mountShell(root: HTMLElement, options: ShellOptions): Shell {
       observer?.disconnect()
       win?.removeEventListener("resize", onResize)
       split.destroy()
+      inside.destroy(); clearTimeout(diffTimer); diffEpoch++
       mainViews.list.destroy?.()
       mainViews.board.destroy?.()
       mainViews.gantt.destroy?.()
       detailView.destroy?.()
       wikiView?.destroy?.()
+      filesView?.destroy?.()
       bar.destroy()
     },
   }

@@ -117,6 +117,8 @@ and carry it across by hand, then move the commit above. (`95dfed5` is the last 
 
 - **Markdown (moai-z74b).** The hand-written renderer was replaced by markdown-it token-to-DOM rendering. Third-party code is built into `vendor.js` so the word checks for unsafe markup and inline styles continue to cover moai's own `app.js`; the app, CSS and theme retain their combined 1 MiB budget, while `vendor.js` has a separate 6 MiB budget. Mermaid 12.3.0 was chosen for this release; the release binary size budget remains for the person to set again. See [Third-party code in vendor.js](#third-party-code-in-vendorjs) for the bundled packages and licenses.
 
+- **Files and diffs (moai-qm5t).** The standalone interface adds a checkout-aware file tree, file-name search, a changed-file filter, file content and diff panes, and an issue diff pane. `data/files.ts` queries the local server's confined file and change endpoints, while `view/files.ts` and `view/diff.ts` render text and syntax spans using direct DOM nodes. Visible panes refresh based on file stamps and change fingerprints; no new dependencies were introduced.
+
 ## Third-party code in vendor.js
 
 The bundle incorporates the following packages. License comments are retained at the end of vendor.js.

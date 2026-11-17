@@ -17,7 +17,7 @@ import { sortEdit, type Sort, type SortKey } from "../data/query.ts"
 import { withArchive } from "../data/source.ts"
 import { effectiveZone, zoneNames } from "../data/zone.ts"
 import type { Copy } from "../i18n/index.ts"
-import type { ColumnName, State, Store } from "../store.ts"
+import type { ColumnName, Focus, State, Store } from "../store.ts"
 import { statusKeys } from "../view/board-groups.ts"
 import { createHelp, focusHint, type HelpView } from "../view/help.ts"
 import { SHOW_ALL, UP_KEY } from "../view/list-model.ts"
@@ -57,6 +57,7 @@ export function keyContext(state: State, env: ContextEnv): KeyContext {
     tab: state.tab,
     focus: env.mode === "wiki" ? (env.wikiPane === "body" ? "page" : "list") : state.focus,
     detail: state.detail.visible,
+    diff: state.diff.visible,
     detailAt: effectivePosition(env.width, state.detail.position),
     detailAtLocked: effectivePosition(env.width, "left") !== "left",
     raw: env.raw ?? false,
@@ -142,7 +143,7 @@ export function wireKeys(options: KeyWiringOptions): KeyWiring {
     const tab = store.getState().tab
     return tab === "board" ? panes().board : tab === "gantt" ? panes().gantt : panes().list
   }
-  const focused = (): PaneView => (store.getState().focus === "detail" ? panes().detail : main())
+  const focused = (): PaneView => (store.getState().focus === "detail" ? panes().detail : store.getState().focus === "diff" ? panes().diff : main())
   const wikiPaneEl = () => shell.el.querySelector<HTMLElement>(".m-pane-wiki [data-pane]")
 
   function isPromptInput(node: Element | null): boolean {
@@ -167,7 +168,7 @@ export function wireKeys(options: KeyWiringOptions): KeyWiring {
       raw: (onWiki ? panes().wiki?.raw?.() : panes().detail.raw?.()) ?? false,
       statusName: (status) => (copy.stats as Record<string, string>)[status] ?? status,
       readable: options.read !== undefined,
-    }), proposals: options.proposal?.pending() ?? false }
+    }), files: panes().files?.filesState?.(), proposals: options.proposal?.pending() ?? false }
   }
 
   const toolbar = (action: ToolbarAction) => store.dispatch({ type: "toolbar", action })
@@ -268,12 +269,25 @@ export function wireKeys(options: KeyWiringOptions): KeyWiring {
 
   // ── focus moves ──
   function focusTo(side: "next" | "prev" | "left" | "right" | "up" | "down") {
+    if (store.getState().tab === "files") {
+      panes().files?.command?.(`focus.${side}`)
+      return
+    }
     if (store.getState().tab === "wiki") {
       panes().wiki?.command?.(`focus.${side}`)
       return
     }
     const state = store.getState()
-    if (!state.detail.visible) return
+    const diffShown = state.diff.visible && (!state.detail.visible || shell.layout().width >= 480)
+    if (diffShown && (side === "next" || side === "prev")) {
+      const cycle: Array<Focus> = ["list", ...(state.detail.visible ? ["detail" as const] : []), "diff"]
+      const at = cycle.indexOf(state.focus), delta = side === "next" ? 1 : cycle.length - 1
+      shell.focusPane(cycle[(at + delta) % cycle.length]!); return
+    }
+    if (diffShown && !state.detail.visible) { shell.focusPane(state.focus === "list" ? "diff" : "list"); return }
+    if (diffShown && state.focus === "detail" && (side === "right" || side === "down")) { shell.focusPane("diff"); return }
+    if (diffShown && state.focus === "diff" && (side === "left" || side === "up")) { shell.focusPane("detail"); return }
+    if (!state.detail.visible && !diffShown) return
     const at = effectivePosition(shell.layout().width, state.detail.position)
     const toward: Record<typeof side, "list" | "detail"> = {
       next: state.focus === "list" ? "detail" : "list",
@@ -457,6 +471,7 @@ export function wireKeys(options: KeyWiringOptions): KeyWiring {
     "tab.list": tab("list"),
     "tab.board": tab("board"),
     "tab.wiki": tab("wiki"),
+    "tab.files": tab("files"),
     "tab.gantt": tab("gantt"),
     "gantt.left": onMain,
     "gantt.right": onMain,
@@ -467,7 +482,10 @@ export function wireKeys(options: KeyWiringOptions): KeyWiring {
     "view.deferred": () => flip(store.getState(), "hideDeferred"),
     "view.backlog": () => flip(store.getState(), "hideBacklog"),
     "view.archived": () => flip(store.getState(), "showArchived"),
-    "view.worktree": () => flip(store.getState(), "worktree"),
+    "view.worktree": () => { if (store.getState().tab === "files") panes().files?.command?.("checkout"); else flip(store.getState(), "worktree") },
+    "view.diff": () => { if (store.getState().tab === "files") panes().files?.command?.("diff"); else store.dispatch({ type: "diff-visible", visible: !store.getState().diff.visible }) },
+    "view.changed": () => panes().files?.command?.("changed"),
+    "option.side": () => { if (store.getState().tab === "files") panes().files?.command?.("diff-layout"); else panes().diff.command?.("diff-layout") },
     "view.all": () => store.dispatch({ type: "view", view: SHOW_ALL }),
     "view.column": (a) => {
       const state = store.getState()
@@ -477,6 +495,7 @@ export function wireKeys(options: KeyWiringOptions): KeyWiring {
       store.dispatch({ type: "view", view: { hiddenStatuses: hidden.includes(status) ? hidden.filter((s) => s !== status) : [...hidden, status] } })
     },
     "view.detail": () => {
+      if (store.getState().tab === "files") { panes().files?.command?.("detail"); return }
       const state = store.getState()
       store.dispatch({ type: "detail-visible", visible: !state.detail.visible })
       if (state.detail.visible && state.focus === "detail") shell.focusPane("list")
@@ -674,6 +693,14 @@ export function wireKeys(options: KeyWiringOptions): KeyWiring {
             return { handled: true, preventDefault: true }
           }
         }
+        // A browser shortcut (Ctrl-L, Cmd-L) and an IME at work are not the diff's h / l.
+        if (store.getState().focus === "diff" && store.getState().tab !== "files" && router.state().menu === null && router.state().pending.length === 0 && current && !current.ctrlKey && !current.metaKey && !current.altKey && !current.isComposing) {
+          const action = current.key === "h" ? "scope-prev" : current.key === "l" ? "scope-next" : current.key === "H" ? "left" : current.key === "L" ? "right" : current.key === "Tab" ? (current.shiftKey ? "prev" : "next") : null
+          if (action && panes().diff.command?.(action)) return { handled: true, preventDefault: true }
+        }
+        if (store.getState().tab === "files" && router.state().menu === null && router.state().pending.length === 0 && current && panes().files?.handleKey?.(current)) {
+          return { handled: true, preventDefault: true }
+        }
         const result = router.handle(event)
         const path = router.state().menu
         if (path?.length === 2 && path[0] === 'SPC' && path[1] === 's' && !store.getState().toolbar.sortOpen) {
@@ -689,6 +716,10 @@ export function wireKeys(options: KeyWiringOptions): KeyWiring {
     },
   }, {
     intercept(event) {
+      if (!help.isOpen() && store.getState().focus === "diff" && store.getState().tab !== "files" && event.key === "Tab" && router.state().menu === null && panes().diff.command?.(event.shiftKey ? "prev" : "next")) { event.preventDefault(); return true }
+      if (!help.isOpen() && store.getState().tab === "files" && event.key === "Tab" && event.target instanceof doc.defaultView!.Node && shell.el.querySelector(".m-pane-files")?.contains(event.target) && router.state().menu === null && router.state().pending.length === 0 && panes().files?.handleKey?.(event as KeyboardEvent)) {
+        event.preventDefault(); return true
+      }
       if (!help.isOpen()) return false
       if (event.key === "Escape" || event.key === "Esc") {
         event.preventDefault()

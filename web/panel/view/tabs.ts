@@ -5,7 +5,7 @@
 import { el, icon } from "./components.ts"
 import type { IconName } from "./icons.ts"
 
-export type TabId = "board" | "list" | "wiki" | "gantt"
+export type TabId = "board" | "list" | "wiki" | "gantt" | "files"
 
 export interface TabDef {
   id: TabId
@@ -19,6 +19,7 @@ export const TABS: ReadonlyArray<TabDef> = [
   { id: "list", icon: "list-tree", label: "목록" },
   { id: "gantt", icon: "gantt-chart", label: "간트" },
   { id: "wiki", icon: "book-open", label: "위키" },
+  { id: "files", icon: "folder", label: "파일" },
 ]
 
 export const DEFAULT_TAB: TabId = "list"

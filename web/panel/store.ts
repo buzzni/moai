@@ -25,8 +25,8 @@ import { DEFAULT_RATIO, normalizeRatio, normalizeRatios } from './view/split.js'
 
 export type { DetailPosition, Sort, WikiState }
 export { DEFAULT_SORT }
-export type Tab = 'board' | 'list' | 'wiki' | 'gantt'
-export type Focus = 'list' | 'detail'
+export type Tab = 'board' | 'list' | 'wiki' | 'gantt' | 'files'
+export type Focus = 'list' | 'detail' | 'diff'
 /** A list cell (`SPC c`), named as keys/table.ts's `CellField`: `names` is the sticky name line on top. */
 export type ColumnName = 'id' | 'priority' | 'counts' | 'names' | 'tags' | 'epic' | 'assignee' | 'created' | 'updated'
 
@@ -158,6 +158,9 @@ export interface State {
    * store starts from it (the mounted pane keeps its own state across tab switches).
    */
   wiki: WikiState
+  diff: { visible: boolean; horizontal: number; vertical: number }
+  filesRatio: number
+  diffLayout: 'unified' | 'side-by-side'
   /**
    * The projects the header lists and the digits jump to (data/projects.ts headerProjects, moai-o14f): read once from
    * `/api/projects` after the boot. Empty until then, and for good when nothing is registered or the read failed.
@@ -179,6 +182,9 @@ export interface State {
 export interface Remembered {
   tab: Tab
   detail: DetailSettings
+  diff?: { visible: boolean; horizontal: number; vertical: number }
+  filesRatio?: number
+  diffLayout?: 'unified' | 'side-by-side'
   /** The zone picked on this page (`SPC o t`); null when none is. Left out by an older page's settings. */
   zone?: string | null
   /** Light or dark, when one was picked; left out for `system`. */
@@ -248,6 +254,9 @@ export function initialState(): State {
     boot: null,
     matched: { key: '', ids: null, loading: false, problem: null },
     wiki: initialWiki(),
+    diff: { visible: false, horizontal: 0.5, vertical: 0.5 },
+    filesRatio: 0.5,
+    diffLayout: 'unified',
     projects: [],
     zone: null,
     theme: 'system',
@@ -265,6 +274,10 @@ export type Action =
   | { type: 'detail-visible'; visible: boolean }
   | { type: 'detail-position'; position: DetailPosition }
   /** `position` is the one resized — the split reports the position it shows, which a narrow panel forces to the bottom. */
+  | { type: 'diff-layout'; layout: 'unified' | 'side-by-side' }
+  | { type: 'diff-visible'; visible: boolean }
+  | { type: 'diff-ratio'; axis: 'horizontal' | 'vertical'; ratio: number }
+  | { type: 'files-ratio'; ratio: number }
   | { type: 'detail-ratio'; ratio: number; position?: DetailPosition }
   | { type: 'view'; view: Partial<ViewSettings> }
   | { type: 'column'; column: ColumnName; on: boolean }
@@ -356,6 +369,14 @@ export function reduce(state: State, action: Action): State {
       return { ...state, detail: { ...state.detail, visible: action.visible }, focus: action.visible ? state.focus : 'list' }
     case 'detail-position':
       return { ...state, detail: { ...state.detail, position: action.position } }
+    case 'diff-layout':
+      return { ...state, diffLayout: action.layout }
+    case 'diff-visible':
+      return { ...state, diff: { ...state.diff, visible: action.visible }, focus: !action.visible && state.focus === 'diff' ? 'list' : state.focus }
+    case 'diff-ratio':
+      return { ...state, diff: { ...state.diff, [action.axis]: normalizeRatio(action.ratio, action.axis === 'horizontal' ? 'left' : 'top') } }
+    case 'files-ratio':
+      return { ...state, filesRatio: normalizeRatio(action.ratio, 'right') }
     case 'detail-ratio': {
       const position = action.position ?? state.detail.position
       const ratio = { ...state.detail.ratio, [position]: normalizeRatio(action.ratio, position) }
@@ -442,12 +463,15 @@ export function reduce(state: State, action: Action): State {
     case 'theme':
       return state.theme === action.theme ? state : { ...state, theme: action.theme }
     case 'restore': {
-      const { tab, detail, zone, theme } = action.settings
-      if (tab === undefined && detail === undefined && zone === undefined && theme === undefined) return state
+      const { tab, detail, zone, theme, filesRatio, diffLayout, diff } = action.settings
+      if (tab === undefined && detail === undefined && zone === undefined && theme === undefined && filesRatio === undefined && diffLayout === undefined && diff === undefined) return state
       const ratio = detail ? normalizeRatios(detail.ratio) : state.detail.ratio
       return {
         ...state,
         tab: tab ?? state.tab,
+        diff: diff ? { visible: diff.visible === true, horizontal: normalizeRatio(diff.horizontal, 'left'), vertical: normalizeRatio(diff.vertical, 'top') } : state.diff,
+        diffLayout: diffLayout ?? state.diffLayout,
+        filesRatio: filesRatio === undefined ? state.filesRatio : normalizeRatio(filesRatio, 'right'),
         detail: detail ? { visible: detail.visible, position: detail.position, ratio } : state.detail,
         focus: detail && !detail.visible ? 'list' : state.focus,
         zone: zone === undefined ? state.zone : zone,

@@ -19,7 +19,7 @@ pub struct Request {
     pub query: Vec<(String, String)>,
     /// `Host` 머리 — 없으면 `None`. 검사는 [`host_ok`] 가 한다.
     pub host: Option<String>,
-    /// `Origin` 머리 — 없으면 `None`. 쓰는 길 하나(`POST /api/read…`)만 잰다([`origin_ok`]).
+    /// `Origin` 머리 — 없으면 `None`. 쓰는 길(`POST`)은 늘 재고, 파일 읽기 끝점(`/api/file`·`/api/diff` …)은 실렸을 때만 잰다([`origin_ok`]).
     pub origin: Option<String>,
     pub content_length: usize,
     pub content_type: Option<String>,

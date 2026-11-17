@@ -359,7 +359,7 @@ pub fn none_of(query: &[(String, String)]) -> Result<(), Bad> {
 /// `/api/issue/<id>` 의 id — **이슈 id 의 꼴이어야 한다**([`crate::id::is_valid`]). `show` 의 자리는 종류 낱말
 /// (`issue`·`epic`…)도 받아 그 종류의 목록을 내므로, 글자만 재던 판은 `/api/issue/issue` 에 줄 하나 대신 목록을
 /// 돌려주었다. 글자는 id 의 자([`crate::git::id_char`])로 재고, 길이는 [`VALUE_MAX`] 안이다.
-fn issue_id(text: &str) -> Result<(), Bad> {
+pub(super) fn issue_id(text: &str) -> Result<(), Bad> {
     let ok = text.len() <= VALUE_MAX && text.chars().all(crate::git::id_char) && crate::id::is_valid(text);
     ok.then_some(()).ok_or_else(|| Bad::Shape("id".to_string()))
 }

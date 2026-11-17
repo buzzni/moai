@@ -471,7 +471,7 @@ test('menuLayer: root items and layers with titles; state labels; availability h
   assert.equal(view.title, '보기')
   assert.equal(view.waits, true)
   const byKey = Object.fromEntries(view.items.map((i) => [i.key, i]))
-  assert.deepEqual(view.items.map((i) => i.key), ['l', 'b', 'o', 'w', 'a', '1', '2', '3', 'd', 'r'], 'only three numbered columns')
+  assert.deepEqual(view.items.map((i) => i.key), ['l', 'b', 'o', 'D', 'w', 'a', '1', '2', '3', 'd', 'r'], 'only three numbered columns')
   assert.equal(byKey.l.state.label, '[숨김]')
   assert.equal(byKey.b.state.label, '[보임]')
   assert.equal(byKey.l.kind, 'toggle')
@@ -501,7 +501,7 @@ test('menuLayer: root items and layers with titles; state labels; availability h
   // The wiki menu: tabs, raw, the zone picker, windows, help — and the projects when there are some.
   assert.deepEqual(menuLayer('SPC', { mode: 'wiki' }).items.map((i) => i.key), ['g', 'v', 'o', 'w', '?'])
   assert.deepEqual(menuLayer('SPC', { mode: 'wiki', projects: ['a'] }).items.map((i) => i.key), ['p', 'g', 'v', 'o', 'w', '?'])
-  assert.deepEqual(menuLayer('SPC g', { mode: 'wiki' }).items.map((i) => [i.key, i.action]), [['l', 'tab.list'], ['b', 'tab.board'], ['g', 'tab.gantt'], ['w', 'tab.wiki']])
+  assert.deepEqual(menuLayer('SPC g', { mode: 'wiki' }).items.map((i) => [i.key, i.action]), [['l', 'tab.list'], ['b', 'tab.board'], ['g', 'tab.gantt'], ['w', 'tab.wiki'], ['f', 'tab.files']])
 })
 
 test('helpSections: grouped rows, platform keys, availability', () => {
