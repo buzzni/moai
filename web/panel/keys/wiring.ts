@@ -167,7 +167,7 @@ export function wireKeys(options: KeyWiringOptions): KeyWiring {
       raw: (onWiki ? panes().wiki?.raw?.() : panes().detail.raw?.()) ?? false,
       statusName: (status) => (copy.stats as Record<string, string>)[status] ?? status,
       readable: options.read !== undefined,
-    }), proposals: options.proposal?.pending() ?? false }
+    }), files: panes().files?.filesState?.(), proposals: options.proposal?.pending() ?? false }
   }
 
   const toolbar = (action: ToolbarAction) => store.dispatch({ type: "toolbar", action })
@@ -472,7 +472,10 @@ export function wireKeys(options: KeyWiringOptions): KeyWiring {
     "view.deferred": () => flip(store.getState(), "hideDeferred"),
     "view.backlog": () => flip(store.getState(), "hideBacklog"),
     "view.archived": () => flip(store.getState(), "showArchived"),
-    "view.worktree": () => flip(store.getState(), "worktree"),
+    "view.worktree": () => { if (store.getState().tab === "files") panes().files?.command?.("checkout"); else flip(store.getState(), "worktree") },
+    "view.diff": () => panes().files?.command?.("diff"),
+    "view.changed": () => panes().files?.command?.("changed"),
+    "option.side": () => panes().files?.command?.("diff-layout"),
     "view.all": () => store.dispatch({ type: "view", view: SHOW_ALL }),
     "view.column": (a) => {
       const state = store.getState()
@@ -482,6 +485,7 @@ export function wireKeys(options: KeyWiringOptions): KeyWiring {
       store.dispatch({ type: "view", view: { hiddenStatuses: hidden.includes(status) ? hidden.filter((s) => s !== status) : [...hidden, status] } })
     },
     "view.detail": () => {
+      if (store.getState().tab === "files") { panes().files?.command?.("detail"); return }
       const state = store.getState()
       store.dispatch({ type: "detail-visible", visible: !state.detail.visible })
       if (state.detail.visible && state.focus === "detail") shell.focusPane("list")

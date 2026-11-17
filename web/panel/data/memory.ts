@@ -42,6 +42,7 @@ export function normalizeMemory(value: unknown): Remembered {
       position: normalizePosition(detail.position),
       ratio: normalizeRatios(ratio),
     },
+    ...(stored.diffLayout === 'side-by-side' ? { diffLayout: 'side-by-side' as const } : {}),
     ...(typeof stored.filesRatio === 'number' && Number.isFinite(stored.filesRatio) ? { filesRatio: Math.min(0.85, Math.max(0.15, stored.filesRatio)) } : {}),
     // A zone this browser does not know (dropped since, or edited by hand) is no choice: the page falls back silently.
     // No choice is no key, as the page before the picker wrote it.
@@ -54,12 +55,13 @@ export function normalizeMemory(value: unknown): Remembered {
 /** The part of the state that is remembered. */
 export function rememberedOf(state: State): Remembered {
   const { visible, position, ratio } = state.detail
-  return { tab: state.tab, detail: { visible, position, ratio: { ...ratio } }, ...(state.filesRatio !== 0.5 ? { filesRatio: state.filesRatio } : {}), ...(state.zone ? { zone: state.zone } : {}), ...(state.theme !== 'system' ? { theme: state.theme } : {}) }
+  return { tab: state.tab, detail: { visible, position, ratio: { ...ratio } }, ...(state.diffLayout === 'side-by-side' ? { diffLayout: state.diffLayout } : {}), ...(state.filesRatio !== 0.5 ? { filesRatio: state.filesRatio } : {}), ...(state.zone ? { zone: state.zone } : {}), ...(state.theme !== 'system' ? { theme: state.theme } : {}) }
 }
 
 export function sameMemory(a: Remembered, b: Remembered): boolean {
   return (
     a.tab === b.tab &&
+    (a.diffLayout ?? 'unified') === (b.diffLayout ?? 'unified') &&
     (a.filesRatio ?? 0.5) === (b.filesRatio ?? 0.5) &&
     a.detail.visible === b.detail.visible &&
     a.detail.position === b.detail.position &&
@@ -103,6 +105,7 @@ export function patchMemory(stored: unknown, before: Remembered | undefined, now
   }
   detail.ratio = patchLeaves(detail.ratio, before?.detail.ratio, now.detail.ratio)
   out.detail = detail
+  if (!before || before.diffLayout !== now.diffLayout) { if (now.diffLayout === undefined) delete out.diffLayout; else out.diffLayout = now.diffLayout }
   if (!before || before.filesRatio !== now.filesRatio) { if (now.filesRatio === undefined) delete out.filesRatio; else out.filesRatio = now.filesRatio }
   for (const key of ['zone', 'theme'] as const) {
     const value = (settings: Remembered) => key === 'theme' && settings[key] === 'system' ? undefined : settings[key]

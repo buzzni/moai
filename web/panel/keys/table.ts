@@ -64,6 +64,7 @@ export interface KeyContext {
    * when it is given no read-mark writes, so the menu leaves the items out and the help dims them.
    */
   readable?: boolean
+  files?: { diff: boolean; detail: boolean; changed: boolean }
   proposals?: boolean
   /**
    * The numbered projects' names by digit (`1`-`9` and `SPC p 1`-`9`, data/projects.ts numberedNames); a digit past
@@ -97,7 +98,7 @@ export type KeyLabel =
   | "enter" | "leave" | "expand" | "collapse" | "expandAll" | "search" | "clear" | "read" | "help"
   | "filter" | "tab.list" | "tab.board" | "tab.wiki" | "tab.gantt" | "tab.files"
   | "gantt.left" | "gantt.right" | "gantt.zoomIn" | "gantt.zoomOut" | "gantt.today" | "gantt.fit"
-  | "view.deferred" | "view.backlog" | "view.archived" | "view.worktree" | "view.all" | "view.allHelp" | "view.detail" | "view.raw" | "view.rawHelp"
+  | "view.diff" | "view.changed" | "view.checkout" | "option.side" | "view.deferred" | "view.backlog" | "view.archived" | "view.worktree" | "view.all" | "view.allHelp" | "view.detail" | "view.raw" | "view.rawHelp"
   | "sort.edit" | "read.all" | "read.group" | "read.groupHelp" | "proposal.accept" | "proposal.decline" | "proposal.list" | "option.detailAt" | "option.detailAtHelp"
   | "option.timezone" | "option.timezoneHelp" | "project.jumpHelp" | "menu.close" | "menu.up"
   | "prompt.apply" | "prompt.cancel" | "prompt.next" | "prompt.prev" | "prompt.up" | "prompt.down" | "prompt.clear" | "prompt.deleteWord"
@@ -340,10 +341,12 @@ const MENU: ReadonlyArray<Binding> = [
   { action: "view.backlog", keys: ["SPC v b"], label: "view.backlog", group: "view", kind: "toggle", modes: BROWSE_ONLY, state: (c) => shown(c.hidden?.backlog) },
   { action: "view.archived", keys: ["SPC v o"], label: "view.archived", group: "view", kind: "toggle", modes: BROWSE_ONLY, state: (c) => shown(c.hidden?.archived) },
   // The other worktrees' rows over the list, as the TUI's `SPC v w` (se-etwu); on when the page opens.
-  { action: "view.worktree", keys: ["SPC v w"], label: "view.worktree", group: "view", kind: "toggle", modes: BROWSE_ONLY, state: (c) => shown(c.hidden?.worktree) },
+  { action: "view.diff", keys: ["SPC v D"], label: "view.diff", group: "view", modes: BROWSE_ONLY, when: (c) => c.tab === "files", kind: "toggle", state: (c) => shown(!c.files?.diff) },
+  { action: "view.changed", keys: ["SPC v c"], label: "view.changed", group: "view", modes: BROWSE_ONLY, when: (c) => c.tab === "files", kind: "toggle", state: (c) => shown(!c.files?.changed) },
+  { action: "view.worktree", keys: ["SPC v w"], label: (w, c) => w.labels[c.tab === "files" ? "view.checkout" : "view.worktree"], group: "view", kind: "toggle", modes: BROWSE_ONLY, state: (c) => c.tab === "files" ? null : shown(c.hidden?.worktree) },
   { action: "view.all", keys: ["SPC v a"], label: "view.all", helpLabel: "view.allHelp", group: "view", modes: BROWSE_ONLY },
   ...columnBindings,
-  { action: "view.detail", keys: ["SPC v d"], label: "view.detail", group: "view", kind: "toggle", modes: BROWSE_ONLY, state: (c) => shown(!detailShown(c)) },
+  { action: "view.detail", keys: ["SPC v d"], label: "view.detail", group: "view", kind: "toggle", modes: BROWSE_ONLY, state: (c) => shown(c.tab === "files" ? !c.files?.detail : !detailShown(c)) },
   {
     action: "view.raw",
     keys: ["SPC v r"],
@@ -372,10 +375,11 @@ const MENU: ReadonlyArray<Binding> = [
     group: "option",
     kind: "toggle",
     modes: BROWSE_ONLY,
-    when: (c) => detailShown(c) && !c.detailAtLocked,
+    when: (c) => (c.tab === "files" || detailShown(c)) && !c.detailAtLocked,
     state: (c) => detailAt(c),
     verdict: "변경",
   },
+  { action: "option.side", keys: ["SPC o s"], label: "option.side", group: "option", modes: BROWSE_ONLY, when: (c) => c.tab === "files" },
   // The TUI's `SPC o t` (keys.rs `Timezone`): opens the zone picker, it does not cycle. Dates on every tab follow it.
   {
     action: "option.timezone",

@@ -1,4 +1,7 @@
 import type { Client } from './client.js'
+import type { DiffAnswer } from '../view/diff.ts'
+export interface Checkout { key: string; branch: string; main: boolean; milestone: string | null; issue: string | null; current: boolean }
+export interface Change { path: string; old_path: string | null; status: string; adds: number | null; dels: number | null; binary: boolean }
 
 export interface Entry { name: string; kind: 'dir' | 'file' | 'link' | 'other'; size: number; openable: boolean; dir?: boolean; inside?: boolean }
 export interface FileText { path: string; text?: string; binary: boolean; truncated: boolean; spans?: Array<Array<[number, number, string]>> | null }
@@ -11,24 +14,45 @@ async function read(client: Client, path: string, query: Record<string, string>)
 }
 export function filesSource(client: Client) {
   return {
-    async list(dir: string, limit?: number): Promise<{ entries: Entry[]; truncated: boolean }> {
-      const v = await read(client, '/api/files', limit === undefined ? { dir } : { dir, limit: String(limit) })
+    async list(dir: string, limit?: number, root?: string): Promise<{ entries: Entry[]; truncated: boolean }> {
+      const query: Record<string, string> = { dir }; if (limit !== undefined) query.limit = String(limit); if (root !== undefined) query.root = root
+      const v = await read(client, '/api/files', query)
       if (!record(v) || !Array.isArray(v.entries)) throw new Error('invalid directory')
       const entries = v.entries.filter((e): e is Entry => record(e) && typeof e.name === 'string' && e.name !== '.' && e.name !== '..' && !e.name.includes('/') && !e.name.includes('\\') && ['dir', 'file', 'link', 'other'].includes(String(e.kind)) && typeof e.openable === 'boolean' && typeof e.size === 'number')
       return { entries, truncated: v.truncated === true }
     },
-    async file(path: string): Promise<FileText> {
-      const v = await read(client, '/api/file', { path })
+    async file(path: string, root?: string): Promise<FileText> {
+      const v = await read(client, '/api/file', root === undefined ? { path } : { path, root })
       if (!record(v) || typeof v.path !== 'string' || typeof v.binary !== 'boolean' || typeof v.truncated !== 'boolean' || (v.text !== undefined && typeof v.text !== 'string')) throw new Error('invalid file')
       return v as unknown as FileText
     },
-    async search(q: string, dir: string): Promise<SearchResult> {
-      const v = await read(client, '/api/find', { q, dir })
+    async search(q: string, dir: string, root?: string): Promise<SearchResult> {
+      const v = await read(client, '/api/find', root === undefined ? { q, dir } : { q, dir, root })
       if (!record(v) || !Array.isArray(v.matches) || !v.matches.every(m => record(m) && typeof m.path === 'string' && !m.path.startsWith('/') && !m.path.includes('\\') && !m.path.split('/').includes('..') && Number.isInteger(m.start) && Number.isInteger(m.end)) || typeof v.total !== 'number' || typeof v.truncated !== 'boolean' || typeof v.walk_truncated !== 'boolean' || typeof v.ignored_unavailable !== 'boolean') throw new Error('invalid search')
       return v as unknown as SearchResult
     },
-    async ignored(): Promise<string[]> {
-      const v = await read(client, '/api/ignored', {})
+    async checkouts(): Promise<Checkout[]> {
+      const v = await read(client, '/api/checkouts', {})
+      if (!record(v) || !Array.isArray(v.checkouts)) throw new Error('invalid checkouts')
+      return v.checkouts.filter((c): c is Checkout => record(c) && typeof c.key === 'string' && typeof c.branch === 'string' && typeof c.main === 'boolean' && typeof c.current === 'boolean' && (typeof c.issue === 'string' || c.issue === null))
+    },
+    async changes(root: string): Promise<{ files: Change[]; error?: string }> {
+      const v = await read(client, '/api/changes', { root })
+      if (!record(v) || !Array.isArray(v.files)) throw new Error('invalid changes')
+      const files = v.files.filter((c): c is Change => record(c) && typeof c.path === 'string' && !c.path.startsWith('/') && !c.path.includes('\\') && !c.path.split('/').some(p => !p || p === '.' || p === '..') && typeof c.status === 'string')
+      return { files, ...(record(v.vcs_error) && typeof v.vcs_error.said === 'string' ? { error: v.vcs_error.said } : {}) }
+    },
+    async diff(root: string, path: string): Promise<DiffAnswer> {
+      const v = await read(client, '/api/diff', { root, path })
+      if (!record(v) || !Array.isArray(v.files) || typeof v.truncated !== 'boolean' || !v.files.every(f =>
+        record(f) && typeof f.path === 'string' && typeof f.status === 'string' && typeof f.binary === 'boolean' &&
+        (f.hunks === undefined || (Array.isArray(f.hunks) && f.hunks.every(h => record(h) &&
+          typeof h.old_start === 'number' && typeof h.old_len === 'number' && typeof h.new_start === 'number' && typeof h.new_len === 'number' && typeof h.section === 'string' && Array.isArray(h.lines) &&
+          h.lines.every(l => record(l) && ['context', 'add', 'delete', 'raw'].includes(String(l.kind)) && typeof l.text === 'string' && (l.spans == null || Array.isArray(l.spans)))))))) throw new Error('invalid diff')
+      return v as unknown as DiffAnswer
+    },
+    async ignored(root?: string): Promise<string[]> {
+      const v = await read(client, '/api/ignored', root === undefined ? {} : { root })
       return record(v) && Array.isArray(v.dirs) ? v.dirs.filter((d): d is string => typeof d === 'string') : []
     },
   }

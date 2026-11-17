@@ -20,3 +20,6 @@
 .m-files-kind-source { color: var(--text); }
 .m-files-kind-document { color: var(--ok); }
 .m-files-kind-config { color: var(--text-muted); }
+.m-files-toolbar { display: flex; gap: .4rem; align-items: center; }
+.m-files-right, .m-files-issue { min-height: 0; height: 100%; overflow: auto; }
+.m-files-right > .m-split { height: 100%; }

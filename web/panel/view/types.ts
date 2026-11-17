@@ -116,6 +116,7 @@ export interface PaneView {
   toggleRaw?(): void
   /** The body is shown as raw markdown now (the `SPC v r` menu item's state). */
   raw?(): boolean
+  filesState?(): { diff: boolean; detail: boolean; changed: boolean }
   /** The pane's tab was left: save what should come back with it into the store (the wiki's page and trail). */
   leave?(): void
   destroy?(): void

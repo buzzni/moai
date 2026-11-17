@@ -1,6 +1,11 @@
-import { filesSource, type Entry, type FileText, type SearchResult } from '../data/files.ts'
+import { filesSource, type Entry, type FileText, type SearchResult, type Checkout, type Change } from '../data/files.ts'
 import { el } from './components.ts'
 import { createSplit } from './split.ts'
+import { createDiff, statusMark } from './diff.ts'
+import { mountDetail } from './detail.ts'
+import { loadDetail } from '../data/source.ts'
+import type { State } from '../store.ts'
+import type { IssueIndex } from '../data/index.ts'
 import type { PaneView, ViewContext } from './types.ts'
 
 const CLASSES = new Set(['comment', 'string', 'number', 'keyword', 'type', 'function', 'constant', 'tag', 'attribute', 'heading', 'other'])
@@ -22,9 +27,27 @@ export function mountFiles(root: HTMLElement, ctx: ViewContext): PaneView {
   const split = createSplit(doc, { position: 'right', ratios: { right: 0.5 }, onRatio: (position, ratio) => { if (position === 'right') ctx.intents.dispatch({ type: 'files-ratio', ratio }) } })
   const tree = el(doc, 'div', { class: 'm-files-tree', role: 'tree', tabindex: 0 })
   const content = el(doc, 'div', { class: 'm-files-content', tabindex: 0 })
+  const bar = el(doc, 'div', { class: 'm-files-toolbar' })
+  const checkoutSelect = el(doc, 'select', { 'aria-label': words.checkout })
+  const changedButton = el(doc, 'button', { type: 'button' }, words.changed)
+  const diffButton = el(doc, 'button', { type: 'button' }, words.diff)
+  const detailButton = el(doc, 'button', { type: 'button' }, words.detail)
+  bar.append(checkoutSelect, changedButton, diffButton, detailButton)
+  const right = el(doc, 'div', { class: 'm-files-right' })
+  const collapsedNotice = el(doc, 'p', { class: 'm-files-collapsed', role: 'status' }, words.collapsed)
+  const inner = createSplit(doc, { position: 'top' })
+  const issueRoot = el(doc, 'div', { class: 'm-files-issue', tabindex: 0 })
+  const issueHost = el(doc, 'div', {})
+  const issueEmpty = el(doc, 'p', {}, words.noIssue)
+  issueRoot.append(issueHost, issueEmpty)
+  const issueView = mountDetail(issueHost, { ...ctx, intents: { ...ctx.intents, closeDetail: () => { detailOn = false; paintRight() } } })
+  const diff = createDiff(doc, ctx.copy.diff, layout => ctx.intents.dispatch({ type: 'diff-layout', layout }))
+  inner.detail.append(issueRoot); inner.list.append(diff.el)
+  right.append(content); split.detail.append(right)
+
   const search = el(doc, 'input', { class: 'm-files-search', type: 'search', hidden: true, 'aria-label': words.search })
   const message = el(doc, 'div', { class: 'm-files-message', role: 'status' })
-  split.list.append(search, message, tree); split.detail.append(content); root.append(split.el)
+  split.list.append(search, message, tree); root.append(bar, split.el)
   const directories = new Map<string, Entry[]>()
   const expanded = new Set<string>(['.'])
   const partial = new Set<string>()
@@ -32,11 +55,78 @@ export function mountFiles(root: HTMLElement, ctx: ViewContext): PaneView {
   let matches: SearchResult | null = null
   let cursor = 0, chosen = '', base = '.', generation = 0, pendingG = false, timer: ReturnType<typeof setTimeout> | undefined
   let rows: Array<{ path: string; entry: Entry; depth: number }> = []
-  let alive = true, started = false
+  let alive = true, started = false, rootKey: string | undefined, checkouts: Checkout[] = [], changedOnly = false, diffOn = false, detailOn = false
+  let changes: Change[] = [], ordinary: Map<string, Entry[]> | null = null, stateNow: State | null = null, indexNow: IssueIndex | null = null
+  let issueShown: State['shown'] = { value: null, loading: false, problem: null }
+  let diffEpoch = 0, issueEpoch = 0, changesLoaded = false
+  let ordinaryExpanded = new Set<string>(), ordinaryBase = '.'
+  function paintRight(): void {
+    diffButton.setAttribute('aria-pressed', String(diffOn)); detailButton.setAttribute('aria-pressed', String(detailOn)); changedButton.setAttribute('aria-pressed', String(changedOnly))
+    const narrow = root.clientWidth > 0 && root.clientWidth < 640
+    if (detailOn && diffOn && !narrow) { inner.detail.append(issueRoot); inner.list.append(diff.el); right.replaceChildren(inner.el) }
+    else if (detailOn) { if (diffOn && narrow) right.replaceChildren(collapsedNotice, issueRoot); else right.replaceChildren(issueRoot) }
+    else if (diffOn) right.replaceChildren(diff.el)
+    else right.replaceChildren(content)
+    const hasIssue = !!checkouts.find(c => c.key === rootKey)?.issue
+    issueHost.hidden = !hasIssue; issueEmpty.hidden = hasIssue
+    if (stateNow && detailOn && hasIssue) issueView.render({ ...stateNow, shown: issueShown }, indexNow)
+  }
+  async function readIssue(): Promise<void> {
+    const key = rootKey, issue = checkouts.find(c => c.key === key)?.issue, epoch = ++issueEpoch
+    if (!issue || !ctx.client) { issueShown = { value: null, loading: false, problem: null }; paintRight(); return }
+    const loaded = await loadDetail(ctx.client, issue)
+    if (epoch !== issueEpoch || key !== rootKey) return
+    issueShown = loaded.ok ? { value: { id: issue, row: loaded.value }, loading: false, problem: null } : { value: null, loading: false, problem: loaded.outcome }
+    paintRight()
+  }
+  async function switchCheckout(key: string): Promise<void> {
+    if (!checkouts.some(c => c.key === key)) return
+    generation++; diffEpoch++; issueEpoch++; clearTimeout(timer); rootKey = key; chosen = ''; cursor = 0; base = '.'; matches = null; changes = []; changesLoaded = false; ordinary = null; changedOnly = false
+    directories.clear(); partial.clear(); expanded.clear(); expanded.add('.'); content.replaceChildren(); diff.show({ files: [], truncated: false }); draw(); paintRight()
+    try { await load('.'); if (rootKey === key) draw() } catch { message.textContent = words.directoryError; const current = checkouts.find(c => c.current); if (current && current.key !== key) { checkoutSelect.value = current.key; void switchCheckout(current.key) } }
+    void readIssue()
+  }
+  async function toggleChanged(): Promise<void> {
+    if (!source || rootKey === undefined) return
+    if (changedOnly && ordinary) { directories.clear(); for (const [k, v] of ordinary) directories.set(k, v); ordinary = null; changedOnly = false; base = ordinaryBase; expanded.clear(); for (const name of ordinaryExpanded) expanded.add(name); cursor = 0; draw(); paintRight(); return }
+    const key = rootKey; const result = await source.changes(key).catch(() => null)
+    if (key !== rootKey) return
+    if (!result) { message.textContent = words.readError; return }
+    if (result.error) message.textContent = result.error
+    ordinary = new Map(directories); ordinaryExpanded = new Set(expanded); ordinaryBase = base; base = '.'; changes = result.files; changesLoaded = true; directories.clear(); directories.set('.', []); expanded.clear(); expanded.add('.')
+    for (const change of changes) {
+      const parts = change.path.split('/'); if (parts.some(p => !p || p === '.' || p === '..')) continue
+      let dir = '.'
+      parts.forEach((name, i) => {
+        const last = i === parts.length - 1, entries = directories.get(dir) ?? []
+        if (!entries.some(e => e.name === name)) entries.push({ name, kind: last ? 'file' : 'dir', openable: true, size: 0 })
+        directories.set(dir, entries)
+        if (!last) { dir = join(dir, name); if (!directories.has(dir)) directories.set(dir, []); expanded.add(dir) }
+      })
+    }
+    for (const entries of directories.values()) entries.sort((a, b) => Number(b.kind === 'dir') - Number(a.kind === 'dir') || a.name.localeCompare(b.name))
+    changedOnly = true; cursor = 0; draw(); paintRight()
+  }
+  async function showDiff(): Promise<void> {
+    const row = rows[cursor], key = rootKey
+    if (!source || !row || key === undefined) return
+    const epoch = ++diffEpoch
+    try {
+      if (!changesLoaded) { const found = await source.changes(key); if (epoch !== diffEpoch || key !== rootKey) return; if (found.error) { message.textContent = found.error; return } changes = found.files; changesLoaded = true }
+      if (!changes.some(change => change.path === row.path)) { diff.show({ files: [], truncated: false }); return }
+      const result = await source.diff(key, row.path); if (epoch === diffEpoch && key === rootKey) diff.show(result)
+    } catch { if (epoch === diffEpoch) diff.show({ files: [], truncated: false }) }
+  }
+  checkoutSelect.addEventListener('change', () => void switchCheckout(checkoutSelect.value))
+  changedButton.addEventListener('click', () => void toggleChanged())
+  diffButton.addEventListener('click', () => { diffOn = !diffOn; paintRight(); if (diffOn) void showDiff() })
+  detailButton.addEventListener('click', () => { detailOn = !detailOn; paintRight(); if (detailOn) void readIssue() })
   async function load(dir: string, limit?: number): Promise<number> {
     if (!source) return 0
     if (directories.has(dir) && (limit !== undefined || !partial.has(dir))) return 0
-    const result = await source.list(dir, limit)
+    const key = rootKey
+    const result = await source.list(dir, limit, key)
+    if (key !== rootKey) return 0
     directories.set(dir, result.entries)
     if (result.truncated) partial.add(dir); else partial.delete(dir)
     return result.entries.length
@@ -52,6 +142,8 @@ export function mountFiles(root: HTMLElement, ctx: ViewContext): PaneView {
     const nodes = rows.map((row, index) => {
       const isDir = row.entry.kind === 'dir' || (row.entry.kind === 'link' && row.entry.openable && row.entry.dir === true)
       const button = el(doc, 'button', { type: 'button', role: 'treeitem', class: `m-files-row m-files-kind-${fileClass(row.entry)} m-files-depth-${Math.min(row.depth, 12)}`, 'aria-selected': String(index === cursor), ...(isDir ? { 'aria-expanded': String(expanded.has(row.path)) } : {}) }, `${isDir ? (expanded.has(row.path) ? '▾' : '▸') : row.entry.kind === 'link' ? '↗' : '·'} ${row.entry.name}`)
+      const change = changes.find(c => c.path === row.path)
+      if (changedOnly && change) button.append(doc.createTextNode(` ${statusMark(change.status)} +${change.adds ?? 0} −${change.dels ?? 0}`))
       const hit = matches?.matches.find(m => m.path === row.path)
       const offset = row.path.length - row.entry.name.length
       if (hit && hit.start >= offset && hit.end <= row.path.length && hit.end >= hit.start) {
@@ -95,10 +187,11 @@ export function mountFiles(root: HTMLElement, ctx: ViewContext): PaneView {
     }; drawChunk()
   }
   function select(): void {
-    const row = rows[cursor]; const current = ++generation; clearTimeout(timer)
+    const row = rows[cursor]; const current = ++generation; diffEpoch++; clearTimeout(timer)
     if (!row || !(row.entry.kind === 'file' || (row.entry.kind === 'link' && !row.entry.dir && row.entry.openable)) || !source) return
     chosen = row.path
-    timer = setTimeout(() => { void source.file(row.path).then(file => { if (alive && generation === current) paintFile(file) }).catch(() => { if (generation === current) content.textContent = words.readError }) }, 100)
+    if (diffOn) void showDiff()
+    timer = setTimeout(() => { void source.file(row.path, rootKey).then(file => { if (alive && generation === current) paintFile(file) }).catch(() => { if (generation === current) content.textContent = words.readError }) }, 100)
   }
   async function expand(): Promise<void> {
     const row = rows[cursor]; if (!row || !(row.entry.kind === 'dir' || (row.entry.kind === 'link' && row.entry.dir && row.entry.openable))) return
@@ -111,7 +204,7 @@ export function mountFiles(root: HTMLElement, ctx: ViewContext): PaneView {
       for (const row of rows) expanded.delete(row.path)
       draw(); return
     }
-    const ignored = await source.ignored().catch(() => [])
+    const ignored = await source.ignored(rootKey).catch(() => [])
     const pending = [base]; let count = 0
     while (pending.length && count < 5000) {
       const dir = pending.pop()!
@@ -130,7 +223,7 @@ export function mountFiles(root: HTMLElement, ctx: ViewContext): PaneView {
     if (!source || !q) return
     const current = ++generation
     try {
-      const result = await source.search(q, base); if (current !== generation) return
+      const result = await source.search(q, base, rootKey); if (current !== generation) return
       matches = result
       for (const hit of result.matches) {
         const parts = hit.path.split('/'); parts.pop(); let dir = '.'
@@ -145,7 +238,17 @@ export function mountFiles(root: HTMLElement, ctx: ViewContext): PaneView {
     timer = setTimeout(() => void find(search.value), 200)
   })
   return {
-    render(state) { split.setWidth(root.clientWidth); split.setRatio('right', state.filesRatio); if (!started) { started = true; void load('.').then(() => { if (alive) draw() }).catch(() => { message.textContent = words.directoryError }) } }, focus() { tree.focus() },
+    render(state, index) {
+      stateNow = state; indexNow = index; split.setWidth(root.clientWidth); split.setRatio('right', state.filesRatio)
+      inner.setPosition(state.detail.position === 'left' || state.detail.position === 'right' ? 'left' : 'top'); inner.setWidth(root.clientWidth)
+      diff.setLayout(state.diffLayout); diff.setWidth(root.clientWidth); paintRight()
+      if (!started) { started = true; void source?.checkouts().then(list => { checkouts = [...list].sort((a, b) => Number(b.main) - Number(a.main)); checkoutSelect.replaceChildren(...checkouts.map(c => el(doc, 'option', { value: c.key }, `${c.branch || c.key}${c.branch ? ` (${c.key})` : ''}${c.issue ? ` · ${c.issue}` : ''}`)));
+        if (ctx.client) for (const checkout of checkouts) if (checkout.issue) void loadDetail(ctx.client, checkout.issue).then(result => {
+          const option = [...checkoutSelect.options].find(o => o.value === checkout.key)
+          if (option && result.ok && typeof result.value.title === 'string') option.textContent = `${checkout.branch || checkout.key}${checkout.branch ? ` (${checkout.key})` : ''} · ${result.value.title}`
+        })
+        const first = checkouts.find(c => c.current) ?? checkouts[0]; if (first) { checkoutSelect.value = first.key; void switchCheckout(first.key) } }).catch(() => { message.textContent = words.directoryError }) }
+    }, focus() { tree.focus() },
     handleKey(event) {
       if (event.target === search) {
         if (event.key === 'Escape') { search.hidden = true; search.value = ''; expanded.clear(); for (const p of beforeSearch) expanded.add(p); matches = null; message.textContent = ''; draw(); tree.focus(); return true }
@@ -153,6 +256,11 @@ export function mountFiles(root: HTMLElement, ctx: ViewContext): PaneView {
         return false
       }
       const row = rows[cursor]
+      if (event.target instanceof doc.defaultView!.Node && issueRoot.contains(event.target)) return false
+      if (event.target instanceof doc.defaultView!.Node && diff.el.contains(event.target)) {
+        if (event.key === 'Tab') return diff.command(event.shiftKey ? 'prev' : 'next')
+        if (event.key === 'H' || event.key === 'L') return diff.command(event.key === 'H' ? 'left' : 'right')
+      }
       if (event.key === 'Tab') { void expandAll(); return true }
       if (event.key === 'g') { if (pendingG) { cursor = 0; pendingG = false; select(); draw() } else pendingG = true; return true }
       pendingG = false
@@ -170,12 +278,17 @@ export function mountFiles(root: HTMLElement, ctx: ViewContext): PaneView {
       else if ((event.key === 'n' || event.key === 'N') && matches?.matches.length) { const found = rows.map((r, i) => matches?.matches.some(m => m.path === r.path) ? i : -1).filter(i => i >= 0); if (found.length) cursor = event.key === 'n' ? found.find(i => i > cursor) ?? found[0]! : [...found].reverse().find(i => i < cursor) ?? found[found.length - 1]! }
       else return false
       select(); draw(); return true
-    }, command(action) {
+    }, filesState() { return { diff: diffOn, detail: detailOn, changed: changedOnly } }, command(action) {
+      if (action === 'checkout') { checkoutSelect.focus(); checkoutSelect.click(); return true }
+      if (action === 'changed') { void toggleChanged(); return true }
+      if (action === 'diff') { diffButton.click(); return true }
+      if (action === 'detail') { detailButton.click(); return true }
+      if (action === 'diff-layout') { return diff.command('toggle') }
       if (!action.startsWith('focus.')) return false
       const side = action.slice(6)
-      const show = side === 'right' || ((side === 'next' || side === 'prev') && doc.activeElement !== content)
-      if (show) { root.classList.add('m-files-show-content'); content.focus() } else { root.classList.remove('m-files-show-content'); tree.focus() }
+      const show = side === 'right' || ((side === 'next' || side === 'prev') && tree.contains(doc.activeElement))
+      if (show) { root.classList.add('m-files-show-content'); if (detailOn) issueRoot.focus(); else if (diffOn) diff.focus(); else content.focus() } else { root.classList.remove('m-files-show-content'); tree.focus() }
       return true
-    }, destroy() { alive = false; clearTimeout(timer); split.destroy() },
+    }, destroy() { alive = false; clearTimeout(timer); split.destroy(); inner.destroy(); issueView.destroy?.() },
   }
 }

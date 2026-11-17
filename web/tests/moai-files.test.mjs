@@ -1,17 +1,22 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { JSDOM } from 'jsdom'
-import { mountFiles } from '../panel/view/files.ts'
+import { panelModule } from './moai-panel-modules.mjs'
+const { mountFiles } = await panelModule('view/files.ts')
+const { COPY } = await panelModule('i18n/index.ts')
+const { initialState } = await panelModule('store.ts')
 
 const wait = (ms = 0) => new Promise(resolve => setTimeout(resolve, ms))
 const words = { search: 'Find', binary: 'Binary', truncated: 'Truncated', readError: 'Read error', directoryError: 'Directory error', searchError: 'Search error', matches: 'matches', ignoredUnavailable: 'No ignore rules', expansionLimit: 'Limit', unavailable: 'Unavailable' }
 const entry = (name, kind = 'file') => ({ name, kind, openable: true, size: 1 })
-function page(request) {
+function page(request, checkouts = [{ key: '.', branch: '', main: true, current: true, issue: null, milestone: null }]) {
   const dom = new JSDOM('<body><div id="files"></div></body>', { pretendToBeVisual: true })
   const root = dom.window.document.querySelector('#files')
-  const ctx = { document: dom.window.document, copy: { files: words }, client: { request }, intents: { dispatch() {} } }
+  const ctx = { document: dom.window.document, copy: { ...COPY.en, files: { ...COPY.en.files, ...words } }, language: 'en', client: { request }, intents: { dispatch() {}, closeDetail() {} }, layout: () => ({ width: 1000, mainWidth: 600, position: 'right', detailVisible: true }), focusPane() {} }
+  const original = ctx.client.request
+  ctx.client.request = async (endpoint) => endpoint.path === '/api/checkouts' ? { kind: 'passed', output: { checkouts } } : original(endpoint)
   const view = mountFiles(root, ctx)
-  return { dom, root, view, state: { filesRatio: 0.5 } }
+  return { dom, root, view, state: initialState() }
 }
 test('files are fetched on opening and hostile names and content remain text', async () => {
   const calls = []
@@ -69,5 +74,63 @@ test('recursive expansion skips ignored directories and bounds each new listing'
   p.view.handleKey({ key: 'Tab', target: p.root.querySelector('.m-files-tree') }); await wait(30)
   assert.ok(requests.some(([path, query]) => path === '/api/files' && query.dir === 'src' && query.limit === '5000'))
   assert.ok(!requests.some(([path, query]) => path === '/api/files' && query.dir === 'ignored'))
+  p.view.destroy(); p.dom.window.close()
+})
+test('checkout changes discard late replies and changed-only includes deleted files', async () => {
+  let release
+  const calls = []
+  const roots = [{ key: '.', branch: 'main', main: true, current: true, issue: null }, { key: 'side', branch: 'side', main: false, current: false, issue: null }]
+  const p = page(async ({ path, query }) => {
+    calls.push([path, query])
+    if (path === '/api/files') {
+      if (query.root === '.') await new Promise(resolve => { release = resolve })
+      return { kind: 'passed', output: { entries: [entry(query.root === '.' ? 'old' : 'new')], truncated: false } }
+    }
+    if (path === '/api/changes') return { kind: 'passed', output: { files: [{ path: 'gone', status: 'deleted', old_path: null, adds: 0, dels: 1, binary: false }] } }
+    return { kind: 'passed', output: {} }
+  }, roots)
+  p.view.render(p.state, null); await wait(20)
+  const select = p.root.querySelector('select'); select.value = 'side'; select.dispatchEvent(new p.dom.window.Event('change')); await wait(20)
+  release(); await wait(20)
+  assert.match(p.root.textContent, /new/); assert.doesNotMatch(p.root.textContent, /old/)
+  p.view.command('changed'); await wait(20)
+  assert.match(p.root.textContent, /gone/); assert.match(p.root.textContent, / D /); assert.doesNotMatch(p.root.querySelector('.m-files-tree').textContent, /new/)
+  p.view.command('changed'); await wait(20); assert.match(p.root.querySelector('.m-files-tree').textContent, /new/)
+  assert.ok(calls.some(([path, query]) => path === '/api/changes' && query.root === 'side'))
+  p.view.destroy(); p.dom.window.close()
+})
+test('file diff uses the selected checkout and only a listed changed path', async () => {
+  const calls = []
+  const p = page(async ({ path, query }) => {
+    calls.push([path, query])
+    if (path === '/api/files') return { kind: 'passed', output: { entries: [entry('changed'), entry('same')], truncated: false } }
+    if (path === '/api/changes') return { kind: 'passed', output: { files: [{ path: 'changed', status: 'modified', old_path: null, adds: 1, dels: 0, binary: false }] } }
+    if (path === '/api/diff') return { kind: 'passed', output: { files: [{ path: 'changed', status: 'modified', old_path: null, adds: 1, dels: 0, binary: false, hunks: [{ old_start: 0, old_len: 0, new_start: 1, new_len: 1, section: '', lines: [{ kind: 'add', old_no: null, new_no: 1, text: 'new', spans: null }] }] }], truncated: false } }
+    return { kind: 'passed', output: { path: query.path, text: '', binary: false, truncated: false, spans: null } }
+  })
+  p.view.render(p.state, null); await wait(20)
+  p.root.querySelectorAll('[role=treeitem]')[0].click(); p.view.command('diff'); await wait(30)
+  assert.ok(calls.some(([path, query]) => path === '/api/diff' && query.path === 'changed' && query.root === '.'))
+  assert.match(p.root.textContent, /new/)
+  p.root.querySelectorAll('[role=treeitem]')[1].click(); await wait(30)
+  assert.ok(!calls.some(([path, query]) => path === '/api/diff' && query.path === 'same'))
+  p.view.command('detail'); assert.match(p.root.textContent, /No issue/)
+  p.view.destroy(); p.dom.window.close()
+})
+test('file detail and diff toggles are independent and narrow panels keep detail', async () => {
+  const p = page(async ({ path, query }) => {
+    if (path === '/api/files') return { kind: 'passed', output: { entries: [entry('a')], truncated: false } }
+    if (path === '/api/changes') return { kind: 'passed', output: { files: [] } }
+    return { kind: 'passed', output: { path: query?.path, text: '', binary: false, truncated: false, spans: null } }
+  })
+  Object.defineProperty(p.root, 'clientWidth', { configurable: true, value: 1000 })
+  p.view.render(p.state, null); await wait(20)
+  p.view.command('diff'); assert.ok(p.root.querySelector('.m-files-right > .m-diff'))
+  p.view.command('detail'); assert.ok(p.root.querySelector('.m-files-right > .m-split'))
+  Object.defineProperty(p.root, 'clientWidth', { configurable: true, value: 400 })
+  p.view.render(p.state, null); assert.ok(p.root.querySelector('.m-files-right > .m-files-issue')); assert.match(p.root.textContent, /collapsed/i)
+  p.view.command('diff'); assert.ok(p.root.querySelector('.m-files-right > .m-files-issue'))
+  p.view.command('detail'); assert.ok(p.root.querySelector('.m-files-right > .m-files-content'))
+  assert.equal(p.state.detail.visible, true)
   p.view.destroy(); p.dom.window.close()
 })

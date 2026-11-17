@@ -505,6 +505,18 @@ body.m-resizing:is([data-resize="bottom"], [data-resize="top"]) { cursor: row-re
 .m-card-line .m-id, .m-card-line .m-count { font: 12px var(--mono); color: var(--muted); }
 .m-card-title { margin-top: 5px; overflow-wrap: anywhere; }
 
+.m-diff { min-height: 0; height: 100%; display: flex; flex-direction: column; }
+.m-diff-toolbar { display: flex; gap: .5rem; }
+.m-diff-body { overflow: auto; font-family: monospace; }
+.m-diff-file summary { cursor: pointer; white-space: pre; }
+.m-diff-hunk { color: var(--accent); white-space: pre; }
+.m-diff-line { display: flex; min-width: max-content; white-space: pre; }
+.m-diff-add { background: var(--ok-soft); }
+.m-diff-delete { background: var(--danger-soft); }
+.m-diff-no { position: sticky; left: 0; min-width: 4em; text-align: right; padding-right: .5em; background: var(--bg); color: var(--text-muted); }
+.m-diff-sign { min-width: 1em; }
+.m-diff-pairs { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+
 .m-pane-files { min-height: 0; height: 100%; }
 .m-pane-files .m-split { height: 100%; }
 .m-files-tree, .m-files-content { height: 100%; overflow: auto; }
@@ -527,6 +539,9 @@ body.m-resizing:is([data-resize="bottom"], [data-resize="top"]) { cursor: row-re
 .m-files-kind-source { color: var(--text); }
 .m-files-kind-document { color: var(--ok); }
 .m-files-kind-config { color: var(--text-muted); }
+.m-files-toolbar { display: flex; gap: .4rem; align-items: center; }
+.m-files-right, .m-files-issue { min-height: 0; height: 100%; overflow: auto; }
+.m-files-right > .m-split { height: 100%; }
 
 /*
  * The gantt tab (view/gantt.ts): a toolbar, one scroll box holding two columns — the grid (left, sticky, so it never

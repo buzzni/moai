@@ -159,6 +159,7 @@ export interface State {
    */
   wiki: WikiState
   filesRatio: number
+  diffLayout: 'unified' | 'side-by-side'
   /**
    * The projects the header lists and the digits jump to (data/projects.ts headerProjects, moai-o14f): read once from
    * `/api/projects` after the boot. Empty until then, and for good when nothing is registered or the read failed.
@@ -181,6 +182,7 @@ export interface Remembered {
   tab: Tab
   detail: DetailSettings
   filesRatio?: number
+  diffLayout?: 'unified' | 'side-by-side'
   /** The zone picked on this page (`SPC o t`); null when none is. Left out by an older page's settings. */
   zone?: string | null
   /** Light or dark, when one was picked; left out for `system`. */
@@ -251,6 +253,7 @@ export function initialState(): State {
     matched: { key: '', ids: null, loading: false, problem: null },
     wiki: initialWiki(),
     filesRatio: 0.5,
+    diffLayout: 'unified',
     projects: [],
     zone: null,
     theme: 'system',
@@ -268,6 +271,7 @@ export type Action =
   | { type: 'detail-visible'; visible: boolean }
   | { type: 'detail-position'; position: DetailPosition }
   /** `position` is the one resized — the split reports the position it shows, which a narrow panel forces to the bottom. */
+  | { type: 'diff-layout'; layout: 'unified' | 'side-by-side' }
   | { type: 'files-ratio'; ratio: number }
   | { type: 'detail-ratio'; ratio: number; position?: DetailPosition }
   | { type: 'view'; view: Partial<ViewSettings> }
@@ -360,6 +364,8 @@ export function reduce(state: State, action: Action): State {
       return { ...state, detail: { ...state.detail, visible: action.visible }, focus: action.visible ? state.focus : 'list' }
     case 'detail-position':
       return { ...state, detail: { ...state.detail, position: action.position } }
+    case 'diff-layout':
+      return { ...state, diffLayout: action.layout }
     case 'files-ratio':
       return { ...state, filesRatio: normalizeRatio(action.ratio, 'right') }
     case 'detail-ratio': {
@@ -448,12 +454,13 @@ export function reduce(state: State, action: Action): State {
     case 'theme':
       return state.theme === action.theme ? state : { ...state, theme: action.theme }
     case 'restore': {
-      const { tab, detail, zone, theme, filesRatio } = action.settings
-      if (tab === undefined && detail === undefined && zone === undefined && theme === undefined && filesRatio === undefined) return state
+      const { tab, detail, zone, theme, filesRatio, diffLayout } = action.settings
+      if (tab === undefined && detail === undefined && zone === undefined && theme === undefined && filesRatio === undefined && diffLayout === undefined) return state
       const ratio = detail ? normalizeRatios(detail.ratio) : state.detail.ratio
       return {
         ...state,
         tab: tab ?? state.tab,
+        diffLayout: diffLayout ?? state.diffLayout,
         filesRatio: filesRatio === undefined ? state.filesRatio : normalizeRatio(filesRatio, 'right'),
         detail: detail ? { visible: detail.visible, position: detail.position, ratio } : state.detail,
         focus: detail && !detail.visible ? 'list' : state.focus,
