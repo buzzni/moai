@@ -662,3 +662,5 @@ mod tests {
 }
 
 mod vcs;
+
+mod diff;
