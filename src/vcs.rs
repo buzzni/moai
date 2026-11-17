@@ -743,7 +743,8 @@ impl Mark {
             Status::Renamed => Self::Renamed,
         }
     }
-    #[allow(dead_code)] // The TUI's file tree and diff heads print it; the web sends the value itself.
+    #[allow(dead_code)] // Only tests print it yet: the TUI's file tree and diff heads take it up in their own epic, and
+    // the web sends the value itself.
     pub fn letter(self) -> &'static str {
         match self {
             Self::Modified => "M",
@@ -786,7 +787,8 @@ fn ancestors(changes: &Changes) -> std::collections::BTreeSet<String> {
     }
     dirs
 }
-/// The marks of a list and its directories, from facts read beforehand. Pure: the TUI and the web build the same map.
+/// The marks of a list and its directories, from facts read beforehand. Pure, so the TUI — which does not call it yet —
+/// and the web build the same map.
 pub fn marks(changes: &Changes, facts: Option<&DirFacts>) -> Marks {
     let files = changes.files.iter().map(|c| (c.path.clone(), Mark::of(c.status))).collect();
     let dirs = ancestors(changes)
@@ -848,7 +850,8 @@ fn dir_on_disk(root: &Path, dir: &str) -> Option<bool> {
 impl Backend {
     /// The marks of `changes`, a [`Scope::Whole`] list of `root`. Two facts are read for the directories above the
     /// files — one Git call for the base's tree, whatever the count, and the disk without following links — inside
-    /// `budget`. When either cannot be read, the list still gets its marks and the directories stand `M`.
+    /// `budget`. When the tree cannot be read, the list still gets its marks and the directories stand `M`; a directory
+    /// the disk will not answer for stands `M` by itself.
     pub fn marks(self, root: &Path, changes: &Changes, budget: Option<Duration>) -> Marks {
         let candidates = ancestors(changes);
         if candidates.is_empty() {
@@ -868,24 +871,23 @@ impl Backend {
         let left = || deadline.map(|d| d.saturating_duration_since(std::time::Instant::now()));
         // The base `Scope::Whole` compares against: the fork point in a linked worktree, HEAD in the main checkout.
         let Some(rev) = revisions(root, &Scope::Whole, left())?.pop() else { return Err(Error::InvalidRevision) };
+        // A name that is not UTF-8 reached the list through a lossy decode: its text names neither the tree's entry nor
+        // the disk's, so neither fact can be read for it and it stands `M`.
+        let lossy = |d: &str| d.contains(char::REPLACEMENT_CHARACTER);
         let mut not_at_base = candidates.clone();
         // `ls-tree` lists the tree's directories relative to `root`, the same base `--relative` gives the list.
         records(root, &["ls-tree", "-r", "-d", "--name-only", "-z", &rev], left(), |raw| {
-            if let Ok(name) = std::str::from_utf8(raw) {
-                not_at_base.remove(name);
-            }
+            not_at_base.remove(String::from_utf8_lossy(raw).as_ref());
         })?;
+        not_at_base.retain(|d| !lossy(d));
         let mut not_on_disk = std::collections::HashSet::new();
-        for dir in candidates.iter().filter(|d| !not_at_base.contains(*d)) {
+        for dir in candidates.iter().filter(|d| !not_at_base.contains(*d) && !lossy(d)) {
             if deadline.is_some_and(|d| std::time::Instant::now() >= d) {
                 return Err(Error::Timeout);
             }
-            match dir_on_disk(root, dir) {
-                Some(true) => {}
-                Some(false) => {
-                    not_on_disk.insert(dir.clone());
-                }
-                None => return Err(Error::Io(std::io::ErrorKind::Other.into())),
+            // A directory the disk would not answer for (no permission, say) stands `M` alone; the others keep theirs.
+            if dir_on_disk(root, dir) == Some(false) {
+                not_on_disk.insert(dir.clone());
             }
         }
         Ok(DirFacts { not_at_base: not_at_base.into_iter().collect(), not_on_disk })
@@ -1482,5 +1484,59 @@ mod tests {
     fn a_cut_list_says_so_in_its_marks() {
         let changes = Changes { files: vec![change("a/b", Status::Untracked)], total: FILE_LIMIT + 1, truncated: true };
         assert!(marks(&changes, None).truncated);
+    }
+    /// A directory the disk will not open (read permission taken away) stands `M` by itself — the other directories
+    /// keep their `A` and `D`. Run as root the disk opens it anyway, and the marks are the same.
+    #[cfg(unix)]
+    #[test]
+    fn a_directory_the_disk_will_not_open_stands_m_alone() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = crate::scratch::Scratch::new("vcs-marks-locked");
+        let root: &Path = &dir;
+        let git = |args: &[&str]| run_git(root, None, args);
+        git(&["init", "-q"]);
+        for f in ["locked/a", "gone/a"] {
+            fs::create_dir_all(root.join(f).parent().unwrap()).unwrap();
+            fs::write(root.join(f), "a\n").unwrap();
+        }
+        git(&["add", "."]);
+        git(&["commit", "-qm", "base"]);
+        fs::write(root.join("locked/a"), "b\n").unwrap();
+        fs::remove_dir_all(root.join("gone")).unwrap();
+        fs::create_dir(root.join("fresh")).unwrap();
+        fs::write(root.join("fresh/f"), "f\n").unwrap();
+        // Search, no read: git still reaches `locked/a` by name, the directory itself will not open.
+        struct Unlock(std::path::PathBuf);
+        impl Drop for Unlock {
+            fn drop(&mut self) {
+                let _ = fs::set_permissions(&self.0, fs::Permissions::from_mode(0o755));
+            }
+        }
+        let _unlock = Unlock(root.join("locked"));
+        fs::set_permissions(root.join("locked"), fs::Permissions::from_mode(0o311)).unwrap();
+        let c = Backend::Git.changes(root, &Scope::Whole, None).unwrap();
+        let m = Backend::Git.marks(root, &c, None);
+        let got: BTreeMap<_, _> = dirs_of(&m).into_iter().collect();
+        assert_eq!(got, BTreeMap::from([("fresh", "A"), ("gone", "D"), ("locked", "M")]), "{c:?}");
+    }
+    /// A directory whose name is not UTF-8 reaches the list through a lossy decode; neither fact can be read for that
+    /// text, so it stands `M` — never an `A` the base's tree would contradict.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_directory_named_outside_utf8_stands_m() {
+        use std::os::unix::ffi::OsStrExt;
+        let dir = crate::scratch::Scratch::new("vcs-marks-bytes");
+        let root: &Path = &dir;
+        let git = |args: &[&str]| run_git(root, None, args);
+        git(&["init", "-q"]);
+        let odd = root.join(std::ffi::OsStr::from_bytes(b"odd\xff"));
+        fs::create_dir(&odd).unwrap();
+        fs::write(odd.join("a"), "a\n").unwrap();
+        git(&["add", "."]);
+        git(&["commit", "-qm", "base"]);
+        fs::write(odd.join("a"), "b\n").unwrap();
+        let c = Backend::Git.changes(root, &Scope::Whole, None).unwrap();
+        let m = Backend::Git.marks(root, &c, None);
+        assert_eq!(dirs_of(&m), [("odd\u{fffd}", "M")], "{c:?}");
     }
 }

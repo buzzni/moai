@@ -257,7 +257,8 @@ fn answer_inner(path: &str, cwd: &Path, lang: Lang, query: &[(String, String)], 
 /// Kept back from the highlighting's share for turning the answer into text and sending it: a 2 MiB patch answers with
 /// several megabytes, and the connection stops waiting at [`BUDGET`].
 const SEND: Duration = Duration::from_secs(1);
-/// Each file row's mark, from the row it was written from — the fold the TUI uses too (`vcs::Mark`).
+/// Each file row's mark, from the row it was written from — `vcs::Mark`'s fold, which the TUI's own eight letters do
+/// not use yet.
 fn put_marks<'a>(out: &mut Value, changes: impl IntoIterator<Item = &'a crate::vcs::Change>) {
     if let Some(files) = out.get_mut("files").and_then(Value::as_array_mut) {
         for (entry, change) in files.iter_mut().zip(changes) {
@@ -284,9 +285,11 @@ fn add_highlights(answer: &crate::changes::Answer, until: Instant) -> Value {
                 hunks: hunks.clone(),
                 ..Default::default()
             };
+            // A file with nothing to colour (binary, too large, an unknown language) counts on neither side: a reply
+            // whose only finished file was such a one coloured nothing, and says `none`, not `partial`.
             let highlighted = match highlight::diff_until(&file, Some(until)) {
                 Ok(h) => {
-                    done += 1;
+                    done += usize::from(h.is_some());
                     h
                 }
                 Err(highlight::Late) => {
@@ -557,6 +560,9 @@ mod tests {
         assert_eq!(none["highlight"], "none");
         assert_eq!(line(&none, 1)["text"], "let v0 = 0;");
         assert!(line(&none, 0)["spans"].is_null() && line(&none, 1)["spans"].is_null());
+        // A file with nothing to colour finishes nothing: the one after it cut, the answer coloured none.
+        let blind = add_highlights(&answer(vec![file("a.veryunlikely", 3), file("b.rs", 3)]), Instant::now());
+        assert_eq!(blind["highlight"], "none");
         // A highlighter slower than the budget (20 ms a line, 1,000 lines) is cut at the deadline, not waited out.
         let started = Instant::now();
         let cut = add_highlights(

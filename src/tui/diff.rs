@@ -2240,6 +2240,54 @@ mod tests {
         assert!(whole(&c, Some("same.txt"), Some(BUDGET), EN).unchanged);
     }
 
+    /// **A folder and a renamed file read only their own patch and keep every line count** — through `whole()` itself:
+    /// the folder takes its untracked files and the renames across its edge, a renamed file shows the lines it changed,
+    /// by either name.
+    #[test]
+    fn a_folder_and_a_renamed_file_read_their_own_patch() {
+        use crate::git::tests::run_git;
+        let dir = crate::scratch::Scratch::new("tui-diff-narrow");
+        let root: &std::path::Path = &dir;
+        let git = |args: &[&str]| run_git(root, None, args);
+        let body = |tag: &str| (0..20).map(|n| format!("{tag} line {n}\n")).collect::<String>();
+        git(&["init", "-q"]);
+        for f in ["src/a", "src/in-out", "out-in", "top"] {
+            std::fs::create_dir_all(root.join(f).parent().unwrap()).unwrap();
+            std::fs::write(root.join(f), body(f)).unwrap();
+        }
+        git(&["add", "."]);
+        git(&["commit", "-qm", "base"]);
+        std::fs::write(root.join("src/a"), body("src/a").replacen("line 2", "LINE 2", 1)).unwrap();
+        std::fs::write(root.join("top"), "top changed\n").unwrap();
+        git(&["mv", "src/in-out", "moved-out"]);
+        git(&["mv", "out-in", "src/moved-in"]);
+        std::fs::write(root.join("src/moved-in"), body("out-in").replacen("line 5", "LINE 5", 1)).unwrap();
+        std::fs::create_dir(root.join("src/deep")).unwrap();
+        std::fs::write(root.join("src/deep/new"), "untracked below\n").unwrap();
+        let mut c = checkout("/");
+        c.path = root.to_path_buf();
+        let counted = |p: &Part| {
+            let lines = p.file.hunks.iter().flat_map(|h| &h.lines);
+            let adds = lines.clone().filter(|l| l.kind == patch::LineKind::Add).count();
+            (Some(adds), Some(lines.filter(|l| l.kind == patch::LineKind::Delete).count()))
+        };
+        let folder = whole(&c, Some("src/"), Some(BUDGET), EN);
+        assert!(folder.failed.is_none(), "{:?}", folder.failed);
+        let mut shown: Vec<_> = folder.parts.iter().map(|p| p.change.path.as_str()).collect();
+        shown.sort_unstable();
+        assert_eq!(shown, ["moved-out", "src/a", "src/deep/new", "src/moved-in"]);
+        for p in &folder.parts {
+            assert_eq!(counted(p), (p.change.adds, p.change.dels), "{}", p.change.path);
+            assert!(!p.file.hunks.iter().flat_map(|h| &h.lines).any(|l| l.text.contains("top changed")));
+        }
+        for name in ["src/moved-in", "out-in"] {
+            let one = whole(&c, Some(name), Some(BUDGET), EN);
+            assert_eq!(one.parts.len(), 1, "{name}");
+            assert_eq!(one.parts[0].change.path, "src/moved-in");
+            assert_eq!(counted(&one.parts[0]), (Some(1), Some(1)), "{name} read the renamed file as a whole new one");
+        }
+    }
+
     /// **Not a repository is said as that**, through the whole-branch read.
     #[test]
     fn a_folder_outside_git_says_not_a_repository() {

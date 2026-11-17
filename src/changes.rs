@@ -194,6 +194,14 @@ impl Prepared {
         let mut raw = String::new();
         let mut patch_cut = false;
         if offer.scope == Scope::Commits {
+            // The old name rides along only to pair the rename. A commit that touched the old name alone — an edit
+            // before the rename, or the step before it in a chain of renames, which reads as a whole new file — is not
+            // this file's, and its patch would print under `--path` as if it were.
+            let foreign = |text: &str| {
+                path.is_some_and(|p| {
+                    names.as_ref().is_some_and(|n| n.len() > 1) && !diff::parse(text).iter().any(|f| owns(f, p))
+                })
+            };
             for commit in &self.commits {
                 let scope = vcs::Scope::Commits(vec![commit.hash.clone()]);
                 let read = match &names {
@@ -201,7 +209,7 @@ impl Prepared {
                     None => backend.patch(root, &scope, None, remaining()),
                 };
                 match read {
-                    Ok(patch) if !patch.text.is_empty() => {
+                    Ok(patch) if !patch.text.is_empty() && !foreign(&patch.text) => {
                         // A subject is anyone's text; `moai show` sanitizes it before a terminal sees it too.
                         let subject = crate::text::sanitize(&commit.subject);
                         append(&mut raw, &format!("commit {} {subject}\n", commit.hash), &mut patch_cut);
@@ -248,20 +256,18 @@ impl Prepared {
             .files
             .into_iter()
             .map(|change| {
-                let hunks = parsed
-                    .iter()
-                    .filter(|f| {
-                        f.new_path.as_deref() == Some(&change.path)
-                            || (f.new_path.is_none() && f.old_path.as_deref() == Some(&change.path))
-                    })
-                    .flat_map(|f| f.hunks.iter().cloned())
-                    .collect();
+                let hunks =
+                    parsed.iter().filter(|f| owns(f, &change.path)).flat_map(|f| f.hunks.iter().cloned()).collect();
                 File { change, hunks: Some(hunks) }
             })
             .collect();
         answer.patch = raw;
         Ok(answer)
     }
+}
+/// Whether a patch's file section is the list row `path`'s: by its new name, or by its old one when it was deleted.
+fn owns(f: &diff::FileDiff, path: &str) -> bool {
+    f.new_path.as_deref() == Some(path) || (f.new_path.is_none() && f.old_path.as_deref() == Some(path))
 }
 fn append(out: &mut String, text: &str, truncated: &mut bool) {
     let available = PATCH_LIMIT.saturating_sub(out.len());

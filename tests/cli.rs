@@ -36126,6 +36126,35 @@ fn diff_of_one_renamed_file_shows_only_the_lines_it_changed() {
 }
 
 #[test]
+fn diff_of_one_renamed_file_leaves_out_commits_that_touched_only_its_old_name() {
+    let s = Scratch::new("diff-rename-chain");
+    let root = s.path();
+    git(root, &["init", "-q"]);
+    ok(root, &["init", "argos"]);
+    let id = field(&ok(root, &["add", "issue", "--json"]), "id");
+    let text: String = (0..30).map(|n| format!("line {n}\n")).collect();
+    std::fs::write(root.join("a.txt"), &text).unwrap();
+    git(root, &["add", "-A"]);
+    git(root, &["commit", "-qm", "base"]);
+    // An edit under the first name, a rename, then a rename with an edit: each step names the file differently.
+    std::fs::write(root.join("a.txt"), text.replace("line 2\n", "line two\n")).unwrap();
+    git(root, &["commit", "-qam", &format!("feat: edit ({id})")]);
+    git(root, &["mv", "a.txt", "b.txt"]);
+    git(root, &["commit", "-qm", &format!("feat: first rename ({id})")]);
+    git(root, &["mv", "b.txt", "c.txt"]);
+    std::fs::write(root.join("c.txt"), text.replace("line 2\n", "line two\n").replace("line 9\n", "line nine\n"))
+        .unwrap();
+    git(root, &["commit", "-qam", &format!("feat: second rename ({id})")]);
+    let out = ok(root, &["diff", &id, "--scope=commits", "--path=c.txt"]);
+    assert!(out.contains("rename from b.txt") && out.contains("+line nine"), "{out}");
+    // The step before, read by the old name alone, would print as a whole new file.
+    assert!(!out.contains("new file mode") && !out.contains("+line 20"), "{out}");
+    assert!(!out.contains("first rename") && !out.contains("feat: edit"), "{out}");
+    let out = ok(root, &["diff", &id, "--scope=commits", "--path=b.txt"]);
+    assert!(out.contains("rename from a.txt") && !out.contains("feat: edit") && !out.contains("+line two"), "{out}");
+}
+
+#[test]
 fn diff_without_git_repository_returns_one_value_and_a_vcs_error() {
     let s = init("diff-no-git");
     let id = field(&ok(s.path(), &["add", "issue", "--json"]), "id");
