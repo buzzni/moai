@@ -2283,7 +2283,7 @@ fn files_tree(f: &mut Frame, w: &mut super::files::Window, at: Rect, lang: Lang)
 }
 
 /// The checkout in the tree's title (moai-ffk9.211): ` · ⎇ branch`, and with the changed files only
-/// ` · changed only 14` — `14 of 6000` when the list stopped at the read layer's 5,000.
+/// ` · changed files only 14` — `14 of 6000` when the list stopped at the read layer's 5,000.
 fn files_checkout_said(w: &super::files::Window, lang: Lang) -> String {
     use super::files::Listing;
     let mut said = String::new();

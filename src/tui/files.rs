@@ -5082,6 +5082,16 @@ mod tests {
         assert_eq!(a.mode, Mode::Browse);
     }
 
+    /// **The changed files only has one name** (moai-p7nr.vh5) — the menu, the key bar and the tree's title say the
+    /// same words in each language.
+    #[test]
+    fn the_changed_files_only_has_one_name() {
+        for key in ["tui.menu.changed", "tui.act.changed", "tui.files.changed_only"] {
+            assert_eq!(say(Lang::En, key), "changed files only", "{key}");
+            assert_eq!(say(Lang::Ko, key), "바뀐 파일만", "{key}");
+        }
+    }
+
     /// **The detail is the picked checkout's issue**: an epic worktree's epic, not a member; the main checkout none.
     #[test]
     fn the_detail_is_the_checkout_issue() {

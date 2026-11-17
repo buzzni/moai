@@ -930,10 +930,12 @@ pub const BROWSE: &[Bind<Browse>] = {
         // 메뉴 항목이 이긴다.
         row!(Go(Screen::Gantt), Some("SPC g g"), LEADER, Key::plain('g'), Key::plain('g')),
         row!(Go(Screen::Stats), Some("SPC g s"), LEADER, Key::plain('g'), Key::plain('s')),
-        // 위키는 `w`(wiki, moai-o3cb) — 다음 화면은 이렇게 한 줄을 더해 든다(moai-z46r).
-        row!(Go(Screen::Wiki), Some("SPC g w"), LEADER, Key::plain('g'), Key::plain('w')),
         // 파일은 `f`(files, moai-ffk9.rpf). 뿌리의 `SPC f`(거름망)와는 묶음이 달라 안 부딪는다.
         row!(Go(Screen::Files), Some("SPC g f"), LEADER, Key::plain('g'), Key::plain('f')),
+        // 위키는 `w`(wiki, moai-o3cb). **위키가 늘 끝이다**(moai-p7nr.vh5, 2026-11-17 사용자 결정 — "TUI 및 WEB 에서
+        // 순서는 Wiki가 항상 끝이다"): 일을 보는 화면들이 앞에 모이고 손으로 쓴 매뉴얼은 뒤에 선다. 다음 화면은 이 줄
+        // **앞에** 한 줄을 더해 든다(moai-z46r). 표의 차례가 곧 메뉴·키 목록·도움말의 차례다.
+        row!(Go(Screen::Wiki), Some("SPC g w"), LEADER, Key::plain('g'), Key::plain('w')),
         // **보는 것을 켜고 끄는 것은 목록의 열(`SPC c`) 말고 모두 `SPC v`(view) 밑이다**(moai-en4u). 한때 `SPC s`(보기)와
         // `SPC t`(토글)로 갈라 done 은 s·상세 칸은 t 에 있었다 — 둘 다 켜고 끄는 것이라 어느 쪽인지를
         // 외워야 했고, `d` 가 한쪽에서는 done 다른 쪽에서는 상세였다. 어느 줄을 보나(l·a·번호)가
@@ -2660,8 +2662,8 @@ mod tests {
             ("SPC g l", Screen::List),
             ("SPC g b", Screen::Board),
             ("SPC g s", Screen::Stats),
-            ("SPC g w", Screen::Wiki),
             ("SPC g f", Screen::Files),
+            ("SPC g w", Screen::Wiki),
         ] {
             assert_eq!(lookup(BROWSE, &parse_seq(keys).unwrap()), Lookup::Run(Browse::Go(to)), "{keys}");
             assert_eq!(label(BROWSE, Browse::Go(to)), keys);

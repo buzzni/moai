@@ -583,8 +583,8 @@ BACKLOG
     {key:browse.go_list}  list                {key:browse.go_board}  board — described below
     {key:browse.go_gantt}  gantt — the list opened out beside a date axis (see below)
     {key:browse.go_stats}  statistics — the numbers `moai stats` gives, drawn (see below)
-    {key:browse.go_wiki}  wiki — the project's manual pages, read only (see below)
     {key:browse.go_files}  files — the checkout's file tree, read only (see below)
+    {key:browse.go_wiki}  wiki — the project's manual pages, read only (see below)
   View — every toggle except the list columns (SPC c) is here:
     {key:browse.deferred}  deferred         {key:browse.backlog}  backlog        {key:browse.show_all}  show all
     {key:browse.archived}  the archive — done that has sat a while [shown/hidden]; {key:browse.show_all}
