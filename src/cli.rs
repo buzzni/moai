@@ -881,7 +881,9 @@ BACKLOG
   git ignores too; only .git is left out. Directories come first, marked ▸
   folded and ▾ open and ending in /, links show → and where they point (a
   link out of the checkout says so and does not open), and directories git
-  ignores say ignored. The hand is the list's: {key:moves.line_down} and {key:moves.line_up}, {key:moves.top} and {key:moves.bottom} move the
+  ignores say ignored. The levels hang from the list's own tree lines, ├─
+  and └─ under │, here and in the changed files only. The hand is the
+  list's: {key:moves.line_down} and {key:moves.line_up}, {key:moves.top} and {key:moves.bottom} move the
   cursor; {key:moves.half_down}, {key:moves.half_up}, {key:moves.page_down}, {key:moves.page_up} and the wheel scroll the tree and leave
   the cursor; {key:files.expand} or Right opens a directory one level and {key:files.collapse} or Left folds
   it or goes to the row above it; {key:files.expand_all} opens everything below — not into

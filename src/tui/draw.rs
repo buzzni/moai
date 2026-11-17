@@ -2254,8 +2254,14 @@ fn files_tree(f: &mut Frame, w: &mut super::files::Window, at: Rect, lang: Lang)
         .skip(top)
         .take(rows_at.height as usize)
         .map(|r| {
-            let line = if changed { files_changed_row(r, lang) } else { files_row(r, lang) };
-            ListItem::new(fit(if searching { files_found_row(w, r, line) } else { line }, room))
+            let line = if changed {
+                files_changed_row(r, lang)
+            } else if searching {
+                files_found_row(w, r, lang)
+            } else {
+                files_row(r, lang)
+            };
+            ListItem::new(fit(line, room))
         })
         .collect();
     let selected = (n > 0 && (top..top + rows_at.height as usize).contains(&w.cursor)).then(|| w.cursor - top);
@@ -2301,15 +2307,14 @@ fn files_checkout_said(w: &super::files::Window, lang: Lang) -> String {
     said
 }
 
-/// A row of the changed-files tree (moai-ffk9.211): the change's letter at the head (`M`·`A`·`D`·`R`·`?`, as `moai
-/// diff --stat` prints it) and `+N −M` after the name — **the letter says the kind without the colour**. A deleted
-/// file stands dimmed; folders have a blank head and stand open.
+/// A row of the changed-files tree (moai-ffk9.211): the change's letter in the head's first column (`M`·`A`·`D`·`R`·`?`,
+/// as `moai diff --stat` prints it) and `+N −M` after the name — **the letter says the kind without the colour**. A
+/// deleted file stands dimmed; folders have a blank head and stand open. The twig is the full tree's
+/// ([`files_head`]).
 fn files_changed_row(r: &super::files::Row, lang: Lang) -> Line<'static> {
     use super::files::Row;
-    let Row::Entry { change: Some(c), depth, entry, .. } = r else {
-        let mut line = files_row(r, lang);
-        line.spans.insert(0, Span::raw("  "));
-        return line;
+    let Row::Entry { change: Some(c), twig, entry, .. } = r else {
+        return files_row(r, lang);
     };
     let look = match c.status {
         crate::vcs::Status::Added | crate::vcs::Status::Untracked => from_anstyle(style::DIFF_ADD),
@@ -2319,11 +2324,9 @@ fn files_changed_row(r: &super::files::Row, lang: Lang) -> Line<'static> {
     let gone = c.status == crate::vcs::Status::Deleted;
     let name = safe_name(&entry.name);
     let name_look = if gone { dim() } else { from_anstyle(style::file_style(&entry.name)) };
-    let mut spans = vec![
-        Span::styled(format!("{} ", super::diff::letter(c.status)), look),
-        Span::raw(format!("{}  ", "  ".repeat(*depth))),
-        Span::styled(name, name_look),
-    ];
+    let (mut spans, _) =
+        files_head(Span::styled(format!("{} ", super::diff::letter(c.status)), look), None, twig, None);
+    spans.push(Span::styled(name, name_look));
     if let Some(old) = &c.old_path {
         spans.push(Span::styled(format!(" ← {}", safe_name(old)), dim()));
     }
@@ -2371,22 +2374,20 @@ fn files_found_said(w: &super::files::Window, lang: Lang) -> String {
     said
 }
 
-/// A tree row while a search stands (moai-ffk9.rid): a [`super::files::FOUND`] mark heads a found row and a blank the
-/// rest, so the tree keeps its indent; the matching letters of a found name are reversed; a file not found is dimmed
-/// (the mockup's look — the mark, not the dimming, tells them apart). **Nothing is left out.**
-fn files_found_row(w: &super::files::Window, r: &super::files::Row, line: Line<'static>) -> Line<'static> {
+/// A tree row while a search stands (moai-ffk9.rid): a [`super::files::FOUND`] mark stands in the head of a found row
+/// and a blank in the rest, so the tree keeps its indent; the matching letters of a found name are reversed; a file not
+/// found is dimmed (the mockup's look — the mark, not the dimming, tells them apart). **Nothing is left out.**
+fn files_found_row(w: &super::files::Window, r: &super::files::Row, lang: Lang) -> Line<'static> {
     use super::files::{FOUND, Row};
     let hit = match r {
         Row::Entry { path, .. } => w.found_in(path),
         _ => None,
     };
     let mark = if hit.is_some() { Span::styled(FOUND, bold()) } else { Span::raw(" ".repeat(FOUND.len())) };
-    let mut line = line;
-    line.spans.insert(0, mark);
+    // The name starts where the head ends — the head's own width, so the reversed letters never drift from it.
+    let (line, lead) = files_row_at(r, Some(mark), lang);
     match (r, hit) {
-        (Row::Entry { depth, entry, .. }, Some(Some(at))) => {
-            // The mark, the indent and the fold mark come before the name — two columns each.
-            let lead = crate::text::width(FOUND) + 2 * depth + 2;
+        (Row::Entry { entry, .. }, Some(Some(at))) => {
             let from = lead + crate::text::width(&safe_name(&entry.name[..at.start]));
             let to = lead + crate::text::width(&safe_name(&entry.name[..at.end]));
             reversed(line, from, to)
@@ -2398,26 +2399,63 @@ fn files_found_row(w: &super::files::Window, r: &super::files::Row, line: Line<'
     }
 }
 
+/// The head of a tree row, before its name, in the mockup's order (moai-p7nr.xj3): the change mark's two columns, the
+/// search mark when a search stands, the twig, and the fold mark — on a directory alone, right before its name.
+///
+/// **The twig is the issue list's** — [`twig_lead`]'s letters, three columns a level, dimmed as [`row_line`] dims it:
+/// one look for one shape. Gives the spans and their width, the column the name starts at; the search's reversed
+/// letters read that width, so the row and the sum cannot part.
+fn files_head(
+    mark: Span<'static>,
+    found: Option<Span<'static>>,
+    twig: &Twig,
+    fold: Option<&'static str>,
+) -> (Vec<Span<'static>>, usize) {
+    let mut spans = vec![mark];
+    spans.extend(found);
+    if twig.depth() > 0 {
+        spans.push(Span::styled(twig_lead(twig), dim()));
+    }
+    spans.extend(fold.map(Span::raw));
+    let width = spans.iter().map(|s| crate::text::width(&s.content)).sum();
+    (spans, width)
+}
+
+/// The full tree's change mark — two blank columns, the place the change letters stand in.
+fn files_no_mark() -> Span<'static> {
+    Span::raw("  ")
+}
+
 /// One tree row. **Without colour the kinds still part**: a directory has its fold mark and a trailing `/`, a link its
 /// `→` and where it points, the rest stands bare; ignored and unopenable rows carry a word.
 fn files_row(r: &super::files::Row, lang: Lang) -> Line<'static> {
+    files_row_at(r, None, lang).0
+}
+
+/// [`files_row`] with the search mark in its head, and the column its name starts at.
+fn files_row_at(r: &super::files::Row, found: Option<Span<'static>>, lang: Lang) -> (Line<'static>, usize) {
     use super::files::Row;
     use crate::files::Kind;
-    let indent = |depth: usize| "  ".repeat(depth);
+    let head = |twig: &Twig, fold| files_head(files_no_mark(), found.clone(), twig, fold);
     match r {
-        Row::Up => Line::from(vec![
-            Span::styled("..", bold()),
-            Span::styled(format!("  {}", say(lang, "tui.files.up")), dim()),
-        ]),
-        Row::Loading { depth, .. } => {
-            Line::from(Span::styled(format!("{}  {}", indent(*depth), say(lang, "tui.files.reading")), dim()))
+        Row::Up => {
+            let (mut spans, lead) = head(&Twig::default(), None);
+            spans.push(Span::styled("..", bold()));
+            spans.push(Span::styled(format!("  {}", say(lang, "tui.files.up")), dim()));
+            (Line::from(spans), lead)
         }
-        Row::Failed { depth, why, .. } => Line::from(Span::styled(
-            format!("{}  ! {}", indent(*depth), safe_name(&why.said(lang))),
-            from_anstyle(style::WARN),
-        )),
-        Row::Entry { depth, entry, open, ignored, link, .. } => {
-            let fold = if super::files::opens(entry) { if *open { "▾ " } else { "▸ " } } else { "  " };
+        Row::Loading { twig, .. } => {
+            let (mut spans, lead) = head(twig, None);
+            spans.push(Span::styled(say(lang, "tui.files.reading").to_string(), dim()));
+            (Line::from(spans), lead)
+        }
+        Row::Failed { twig, why, .. } => {
+            let (mut spans, lead) = head(twig, None);
+            spans.push(Span::styled(format!("! {}", safe_name(&why.said(lang))), from_anstyle(style::WARN)));
+            (Line::from(spans), lead)
+        }
+        Row::Entry { twig, entry, open, ignored, link, .. } => {
+            let fold = super::files::opens(entry).then_some(if *open { "▾ " } else { "▸ " });
             let name = safe_name(&entry.name);
             let mut tail = Vec::new();
             let (text, look) = match &entry.kind {
@@ -2452,9 +2490,10 @@ fn files_row(r: &super::files::Row, lang: Lang) -> Line<'static> {
             } else {
                 from_anstyle(look)
             };
-            let mut spans = vec![Span::raw(format!("{}{fold}", indent(*depth))), Span::styled(text, look)];
+            let (mut spans, lead) = head(twig, fold);
+            spans.push(Span::styled(text, look));
             spans.extend(tail);
-            Line::from(spans)
+            (Line::from(spans), lead)
         }
     }
 }
@@ -7727,6 +7766,11 @@ pub(super) mod tests {
     /// One file-window row's text, without colour (moai-ffk9.rpf).
     pub(in crate::tui) fn files_row_text(r: &super::super::files::Row) -> String {
         super::files_row(r, Lang::Ko).spans.iter().map(|s| s.content.as_ref()).collect()
+    }
+
+    /// One file-window row as drawn, with its styles (moai-p7nr.xj3).
+    pub(in crate::tui) fn files_row_line(r: &super::super::files::Row) -> Line<'static> {
+        super::files_row(r, Lang::Ko)
     }
 
     pub(in crate::tui) fn files_changed_row_text(r: &super::super::files::Row) -> String {

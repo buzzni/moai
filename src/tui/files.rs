@@ -71,6 +71,7 @@ use super::scroll::{self, Move, Scroll};
 use super::{App, Mode, Row as ListRow, Seat, menu};
 use crate::files::{self, Entry, Jail, Kind, Why};
 use crate::i18n::{Lang, fill, say};
+use crate::nav::Twig;
 use crate::report::changes::Checkout;
 use crate::vcs;
 use ratatui::crossterm::event::KeyEvent;
@@ -1044,7 +1045,8 @@ pub enum Row {
     Entry {
         /// Checkout-relative path — the row's identity.
         path: String,
-        depth: usize,
+        /// Where it hangs in the tree — the list's twig shape (moai-p7nr.xj3); its depth is the row's.
+        twig: Twig,
         entry: Entry,
         /// An opened directory.
         open: bool,
@@ -1055,10 +1057,10 @@ pub enum Row {
         /// How the file changed — only in the changed-files tree (`SPC v c`, moai-ffk9.211).
         change: Option<vcs::Change>,
     },
-    /// The directory `of` is still being read.
-    Loading { depth: usize, of: String },
-    /// The directory `of` could not be read.
-    Failed { depth: usize, of: String, why: Trouble },
+    /// The directory `of` is still being read — the last of that directory's rows.
+    Loading { twig: Twig, of: String },
+    /// The directory `of` could not be read — the last of that directory's rows.
+    Failed { twig: Twig, of: String, why: Trouble },
 }
 
 /// Which row the cursor stands on, by identity.
@@ -1082,7 +1084,7 @@ impl Row {
     fn depth(&self) -> usize {
         match self {
             Row::Up => 0,
-            Row::Entry { depth, .. } | Row::Loading { depth, .. } | Row::Failed { depth, .. } => *depth,
+            Row::Entry { twig, .. } | Row::Loading { twig, .. } | Row::Failed { twig, .. } => twig.depth(),
         }
     }
 }
@@ -1634,7 +1636,7 @@ impl Window {
             Some(acc.clone())
         });
         let ignored = self.here != "." && above.into_iter().any(|p| self.ignored_path(&p));
-        self.flatten(&self.here.clone(), 0, ignored, &mut rows);
+        self.flatten(&self.here.clone(), &[], ignored, &mut rows);
         self.rows = rows;
         if let Some(path) = self.jump_target() {
             self.search.jump = false;
@@ -1652,18 +1654,25 @@ impl Window {
         self.aim();
     }
 
-    fn flatten(&self, dir: &str, depth: usize, ignored: bool, out: &mut Vec<Row>) {
+    /// The rows under `dir`. `kin` is the twig of the directory's own row — empty for the directory the tree stands
+    /// in — and each row under it adds whether a sibling follows it, **known before the row is pushed** so the twig is
+    /// drawn in one pass (moai-p7nr.xj3). A loading or failure row is the directory's only, and so its last, row.
+    fn flatten(&self, dir: &str, kin: &[bool], ignored: bool, out: &mut Vec<Row>) {
+        let twig = |more: bool| Twig::from_kin(kin.iter().copied().chain([more]).collect());
         match self.dirs.get(dir).and_then(|d| d.read.as_ref()) {
-            None => out.push(Row::Loading { depth, of: dir.to_owned() }),
-            Some(Read::Failed(why)) => out.push(Row::Failed { depth, of: dir.to_owned(), why: why.clone() }),
+            None => out.push(Row::Loading { twig: twig(false), of: dir.to_owned() }),
+            Some(Read::Failed(why)) => {
+                out.push(Row::Failed { twig: twig(false), of: dir.to_owned(), why: why.clone() })
+            }
             Some(Read::Listed { entries, links, .. }) => {
-                for e in entries {
+                for (n, e) in entries.iter().enumerate() {
                     let path = child(dir, &e.name);
                     let ignored = ignored || self.ignored_path(&path);
                     let open = opens(e) && self.is_open(&path);
+                    let more = n + 1 < entries.len();
                     out.push(Row::Entry {
                         path: path.clone(),
-                        depth,
+                        twig: twig(more),
                         entry: e.clone(),
                         open,
                         ignored,
@@ -1671,7 +1680,9 @@ impl Window {
                         change: None,
                     });
                     if open {
-                        self.flatten(&path, depth + 1, ignored, out);
+                        let mut below = kin.to_vec();
+                        below.push(more);
+                        self.flatten(&path, &below, ignored, out);
                     }
                 }
             }
@@ -2020,9 +2031,9 @@ impl Window {
     fn rebuild_changed(&mut self) {
         let mut rows = Vec::new();
         match &self.changed.list {
-            Listing::Reading => rows.push(Row::Loading { depth: 0, of: ".".into() }),
+            Listing::Reading => rows.push(Row::Loading { twig: Twig::default(), of: ".".into() }),
             Listing::Failed(why) => {
-                rows.push(Row::Failed { depth: 0, of: ".".into(), why: Trouble::Changes(why.clone()) });
+                rows.push(Row::Failed { twig: Twig::default(), of: ".".into(), why: Trouble::Changes(why.clone()) });
             }
             Listing::Read(list) => {
                 let mut tree: BTreeMap<String, (BTreeSet<String>, Vec<&vcs::Change>)> = BTreeMap::new();
@@ -2035,33 +2046,39 @@ impl Window {
                     }
                     tree.entry(dir).or_default().1.push(c);
                 }
+                // A folder's rows are its folders, then its files — its last row is its last file, or its last
+                // folder when it has none (moai-p7nr.xj3).
                 fn walk(
                     tree: &BTreeMap<String, (BTreeSet<String>, Vec<&vcs::Change>)>,
                     dir: &str,
-                    depth: usize,
+                    kin: &[bool],
                     out: &mut Vec<Row>,
                 ) {
                     let Some((dirs, files)) = tree.get(dir) else { return };
-                    for d in dirs {
+                    let count = dirs.len() + files.len();
+                    let twig = |n: usize| Twig::from_kin(kin.iter().copied().chain([n + 1 < count]).collect());
+                    for (n, d) in dirs.iter().enumerate() {
                         let name = d.rsplit('/').next().unwrap_or(d).to_owned();
                         out.push(Row::Entry {
                             path: d.clone(),
-                            depth,
+                            twig: twig(n),
                             entry: Entry { name, kind: Kind::Dir, size: 0, openable: true },
                             open: true,
                             ignored: false,
                             link: None,
                             change: None,
                         });
-                        walk(tree, d, depth + 1, out);
+                        let mut below = kin.to_vec();
+                        below.push(n + 1 < count);
+                        walk(tree, d, &below, out);
                     }
                     let mut files = files.clone();
                     files.sort_by(|a, b| a.path.cmp(&b.path));
-                    for c in files {
+                    for (n, c) in files.into_iter().enumerate() {
                         let name = c.path.rsplit('/').next().unwrap_or(&c.path).to_owned();
                         out.push(Row::Entry {
                             path: c.path.clone(),
-                            depth,
+                            twig: twig(dirs.len() + n),
                             entry: Entry { name, kind: Kind::File, size: 0, openable: true },
                             open: false,
                             ignored: false,
@@ -2070,7 +2087,7 @@ impl Window {
                         });
                     }
                 }
-                walk(&tree, ".", 0, &mut rows);
+                walk(&tree, ".", &[], &mut rows);
             }
         }
         self.rows = rows;
@@ -3491,7 +3508,7 @@ mod tests {
         // A control character in a name never reaches the terminal raw.
         let line = draw::tests::files_row_text(&Row::Entry {
             path: "a\u{1b}[31mb".into(),
-            depth: 0,
+            twig: Twig::default(),
             entry: Entry { name: "a\u{1b}[31mb".into(), kind: Kind::File, size: 0, openable: false },
             open: false,
             ignored: false,
@@ -4081,14 +4098,24 @@ mod tests {
             .map(|y| (0..buf.area.width).map(|x| buf[(x, y)].symbol()).collect::<String>())
             .collect();
         let y = lines.iter().position(|l| l.contains("x-key.md")).expect("the found row does not stand");
-        // The mark heads the row; the file's blank fold column follows, as on every file row.
-        assert!(lines[y].contains("*   x-key.md"), "no mark: {:?}", lines[y]);
+        // The mark follows the change mark's two columns; a file has no fold column (moai-p7nr.xj3).
+        assert!(lines[y].contains("  * x-key.md"), "no mark: {:?}", lines[y]);
         let readme = lines.iter().find(|l| l.contains("README.md")).unwrap();
         assert!(!readme.contains('*'), "a row not found is marked: {readme:?}");
         let x = lines[y].find("x-key.md").map(|b| crate::text::width(&lines[y][..b]) as u16).unwrap();
         let reversed = |x: u16| buf[(x, y as u16)].modifier.contains(Modifier::REVERSED);
         assert!((x..x + 5).all(reversed), "the matching letters are not reversed");
         assert!(!(x + 5..x + 8).any(reversed), "letters past the match are reversed");
+        // One level down the twig stands between the mark and the name, and the reversed letters move with it.
+        // Off the cursor's row, whose whole line is reversed.
+        let y = lines
+            .iter()
+            .position(|l| l.contains("* └─ x-key.txt") && !l.contains('>'))
+            .expect("no found row under a folder");
+        let x = lines[y].find("x-key.txt").map(|b| crate::text::width(&lines[y][..b]) as u16).unwrap();
+        let reversed = |x: u16| buf[(x, y as u16)].modifier.contains(Modifier::REVERSED);
+        assert!((x..x + 5).all(reversed), "the matching letters under a folder are not reversed: {:?}", lines[y]);
+        assert!(!(x + 5..x + 8).any(reversed) && !reversed(x - 1), "the reversal drifted: {:?}", lines[y]);
         let text = draw::tests::render(&mut a, 100, 24);
         assert!(screen_title(&text).contains("/x-key 3개 맞음"), "{:?}", screen_title(&text));
         // A match in the folder part only marks the row.
@@ -4105,6 +4132,94 @@ mod tests {
 
     fn screen_title(lines: &[String]) -> String {
         lines.iter().find(|l| l.contains("파일 ·")).cloned().unwrap_or_default()
+    }
+
+    /// Each row's text, by its path — `<reading …>` and `<failed …>` for the note rows.
+    fn row_texts(a: &App) -> HashMap<String, String> {
+        names(a).into_iter().zip(window(a).rows().iter().map(draw::tests::files_row_text)).collect()
+    }
+
+    /// **The tree hangs from the list's twig** (moai-p7nr.xj3): a row with a sibling after it is `├─`, the last `└─`,
+    /// an ancestor with siblings after it draws `│` below and the last one a blank; the rows of the directory the tree
+    /// stands in have none. The head keeps two columns for the change mark, the twig comes before the fold mark and a
+    /// file has no fold column. A row being read hangs as its directory's last.
+    #[test]
+    fn the_file_tree_hangs_from_the_lists_twig() {
+        let (s, mut a) = files_app("twig");
+        std::fs::write(s.path().join("src/tui/wiki.rs"), "//! wiki\n").unwrap();
+        a.hit("SPC g f");
+        settle(&mut a);
+        on(&mut a, "src");
+        a.hit("l");
+        settle(&mut a);
+        on(&mut a, "src/tui");
+        a.hit("l");
+        // The read is out: its row hangs as the folder's last.
+        let reading = row_texts(&a);
+        assert_eq!(
+            reading["<reading src/tui>"],
+            format!("  │  └─ {}", say(Lang::Ko, "tui.files.reading")),
+            "{reading:?}"
+        );
+        settle(&mut a);
+        let t = row_texts(&a);
+        assert_eq!(t["src (open)"], "  ▾ src/", "a row at depth 0 has a twig: {t:?}");
+        assert_eq!(t["src/tui (open)"], "  ├─ ▾ tui/", "{t:?}");
+        assert_eq!(t["src/tui/files.rs"], "  │  ├─ files.rs", "{t:?}");
+        assert_eq!(t["src/tui/wiki.rs"], "  │  └─ wiki.rs", "{t:?}");
+        assert_eq!(t["src/main.rs"], "  └─ main.rs", "{t:?}");
+        assert_eq!(t["README.md"], "  README.md", "the change mark's columns are not kept: {t:?}");
+        on(&mut a, "src/tui");
+        a.hit("h");
+        on(&mut a, "src/main.rs");
+        // The twig is the list's look, and it stands on the selected row too.
+        let w = window(&a);
+        let row = w.rows().iter().find(|r| matches!(r, Row::Entry { path, .. } if path == "src/main.rs")).unwrap();
+        let line = draw::tests::files_row_line(row);
+        let twig = line.spans.iter().find(|s| s.content.contains("└─")).expect("no twig span");
+        assert_eq!(twig.style, draw::dim(), "the twig is not dimmed as the list's is");
+        let screen = draw::tests::render(&mut a, 100, 20).join("\n");
+        assert!(screen.contains("└─ main.rs"), "the selected row lost its twig: {screen}");
+        // Stepping into a folder: its rows are depth 0 again.
+        on(&mut a, "src");
+        a.hit("Enter");
+        settle(&mut a);
+        let t = row_texts(&a);
+        assert_eq!(t["src/main.rs"], "  main.rs", "{t:?}");
+        assert_eq!(t[".."], format!("  ..  {}", say(Lang::Ko, "tui.files.up")), "{t:?}");
+    }
+
+    /// **A twig under a last folder** leaves the ancestor's column blank, and a refresh that drops the last file makes
+    /// the one before it the last — the twig is measured on every rebuild, never kept.
+    #[test]
+    fn a_last_folder_draws_no_line_below_and_the_twig_follows_the_disk() {
+        let (s, mut a) = files_app("twig-last");
+        std::fs::create_dir_all(s.path().join("zz/in")).unwrap();
+        std::fs::write(s.path().join("zz/in/a.txt"), "a").unwrap();
+        std::fs::write(s.path().join("zz/in/b.txt"), "b").unwrap();
+        let clock = clocked(&mut a);
+        a.hit("SPC g f");
+        settle(&mut a);
+        // `in` is `zz`'s only row, so its last: the rows below it draw a blank in its column.
+        on(&mut a, "zz");
+        a.hit("l");
+        settle(&mut a);
+        on(&mut a, "zz/in");
+        a.hit("l");
+        settle(&mut a);
+        let t = row_texts(&a);
+        assert_eq!(t["zz/in (open)"], "  └─ ▾ in/", "{t:?}");
+        assert_eq!(t["zz/in/a.txt"], "     ├─ a.txt", "a last folder draws a line below it: {t:?}");
+        assert_eq!(t["zz/in/b.txt"], "     └─ b.txt", "{t:?}");
+        std::fs::remove_file(s.path().join("zz/in/b.txt")).unwrap();
+        look(&mut a, &clock, Duration::from_secs(2));
+        assert!(
+            !names(&a).contains(&"zz/in/b.txt".to_string()),
+            "the refresh did not see the file go: {:?}",
+            names(&a)
+        );
+        let t = row_texts(&a);
+        assert_eq!(t["zz/in/a.txt"], "     └─ a.txt", "a stale twig stands after the last file went: {t:?}");
     }
 
     use ratatui::style::Modifier;
