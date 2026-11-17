@@ -15,6 +15,8 @@ does not commit and it does not tag — see `CONTRIBUTING.md`.
 ### Added
 
 - `moai diff <id>` reads an issue's commit, branch, or working-tree changes as a patch or JSON, with optional file statistics and path selection. (moai-vyu7)
+- The explorer has a file window (`SPC g f`): the checkout's files as a tree beside the file's syntax-coloured text, with a checkout picker, changed-files-only view, search, panning for long lines and automatic refresh. (moai-ffk9)
+- The explorer's list, board and gantt have a diff pane (`SPC v D`) showing an issue's changes in unified or side-by-side form (`SPC o s`), and `moai ctl screen files`, `moai ctl view diff` and new `ctl state` keys reach both. (moai-ffk9)
 
 ## [1.3.0] - 2026-11-16
 
