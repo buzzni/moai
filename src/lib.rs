@@ -660,3 +660,5 @@ mod tests {
         assert!(said[0].contains("/tmp/moai-6ney/side/.moai/journal/b_x_com.jsonl"), "{}", said[0]);
     }
 }
+
+mod vcs;

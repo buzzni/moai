@@ -1207,3 +1207,242 @@ pub(crate) mod tests {
         assert_eq!(table["moai-aaaa.b1c"].len(), 1, "한 제목에 두 번 적은 id 를 두 커밋으로 셌다");
     }
 }
+
+/// Read bounded git output without blocking on a full stderr pipe. A timeout or an
+/// output limit kills the child; reaping happens off-thread so a stuck mount cannot
+/// extend the caller's deadline.
+pub(crate) fn bounded(
+    root: &Path,
+    args: &[&str],
+    limit: usize,
+    budget: Option<std::time::Duration>,
+) -> Option<Result<(Vec<u8>, bool), Error>> {
+    bounded_command(invocation(root, args), limit, budget)
+}
+
+fn bounded_command(
+    mut command: std::process::Command,
+    limit: usize,
+    budget: Option<std::time::Duration>,
+) -> Option<Result<(Vec<u8>, bool), Error>> {
+    use std::io::Read;
+    use std::process::Stdio;
+    use std::sync::mpsc;
+    use std::time::Instant;
+
+    let mut child = match command.stdout(Stdio::piped()).stderr(Stdio::piped()).spawn() {
+        Ok(child) => child,
+        Err(e) => return Some(Err(Error::Spawn(e))),
+    };
+    let mut stdout = child.stdout.take().expect("piped stdout");
+    let mut stderr = child.stderr.take().expect("piped stderr");
+    let (tx, rx) = mpsc::sync_channel(2);
+    let reader = std::thread::Builder::new().spawn(move || {
+        let mut bytes = Vec::new();
+        let result = stdout.by_ref().take(limit.saturating_add(1) as u64).read_to_end(&mut bytes);
+        let _ = tx.send((bytes, result));
+    });
+    let (err_tx, err_rx) = mpsc::sync_channel(1);
+    let errors = std::thread::Builder::new().spawn(move || {
+        let mut bytes = Vec::new();
+        let _ = stderr.by_ref().take(64 * 1024).read_to_end(&mut bytes);
+        // Continue draining after the retained error text reaches its limit.
+        let _ = std::io::copy(&mut stderr, &mut std::io::sink());
+        let _ = err_tx.send(bytes);
+    });
+    if reader.is_err() || errors.is_err() {
+        let _ = child.kill();
+        let _ = std::thread::Builder::new().spawn(move || child.wait());
+        return Some(Err(Error::Failed("could not start git output reader".into())));
+    }
+    let deadline = budget.and_then(|d| Instant::now().checked_add(d));
+    fn receive<T>(rx: &mpsc::Receiver<T>, deadline: Option<Instant>) -> Option<T> {
+        match deadline {
+            Some(end) => rx.recv_timeout(end.saturating_duration_since(Instant::now())).ok(),
+            None => rx.recv().ok(),
+        }
+    }
+    let Some((mut bytes, read)) = receive(&rx, deadline) else {
+        let _ = child.kill();
+        let _ = std::thread::Builder::new().spawn(move || child.wait());
+        return None;
+    };
+    if let Err(e) = read {
+        let _ = child.kill();
+        let _ = std::thread::Builder::new().spawn(move || child.wait());
+        return Some(Err(Error::Stream(e)));
+    }
+    let truncated = bytes.len() > limit;
+    if truncated {
+        bytes.truncate(limit);
+        let _ = child.kill();
+        let _ = std::thread::Builder::new().spawn(move || child.wait());
+        return Some(Ok((bytes, true)));
+    }
+    let status = match deadline {
+        Some(end) => waited(&mut child, end.saturating_duration_since(Instant::now())),
+        None => child.wait().ok(),
+    };
+    let Some(status) = status else {
+        let _ = child.kill();
+        let _ = std::thread::Builder::new().spawn(move || child.wait());
+        return None;
+    };
+    let Some(why) = receive(&err_rx, deadline) else { return None };
+    if !status.success() {
+        return Some(Err(Error::Failed(String::from_utf8_lossy(&why).trim().to_owned())));
+    }
+    Some(Ok((bytes, false)))
+}
+
+#[cfg(test)]
+mod bounded_tests {
+    use super::*;
+
+    #[test]
+    fn limits_output_and_preserves_complete_output() {
+        let root = crate::scratch::base();
+        let (all, cut) = bounded(&root, &["--version"], 4096, None).unwrap().unwrap();
+        assert!(!cut);
+        assert!(all.starts_with(b"git version "));
+        let (prefix, cut) = bounded(&root, &["--version"], 4, None).unwrap().unwrap();
+        assert!(cut);
+        assert_eq!(prefix, b"git ");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn timeout_and_full_stderr_do_not_block() {
+        use std::time::{Duration, Instant};
+        let mut slow = std::process::Command::new("sh");
+        slow.args(["-c", "exec sleep 30"]);
+        let start = Instant::now();
+        assert!(bounded_command(slow, 1024, Some(Duration::from_millis(100))).is_none());
+        assert!(start.elapsed() < Duration::from_secs(3));
+        let mut noisy = std::process::Command::new("sh");
+        noisy.args(["-c", "head -c 200000 /dev/zero >&2; printf done"]);
+        let (bytes, truncated) = bounded_command(noisy, 1024, Some(Duration::from_secs(5))).unwrap().unwrap();
+        assert_eq!(bytes, b"done");
+        assert!(!truncated);
+    }
+
+    #[test]
+    fn reports_git_failure() {
+        let root = crate::scratch::base();
+        assert!(matches!(bounded(&root, &["not-a-real-git-command"], 4096, None), Some(Err(Error::Failed(_)))));
+    }
+}
+
+/// Stream NUL-delimited records while retaining only one unfinished record.
+/// Both pipes are drained concurrently and the caller's deadline covers them.
+pub(crate) fn records_bounded(
+    root: &Path,
+    args: &[&str],
+    budget: Option<std::time::Duration>,
+    mut take: impl FnMut(&[u8]),
+) -> Option<Result<(), Error>> {
+    use std::io::Read;
+    use std::process::Stdio;
+    use std::sync::mpsc;
+    use std::time::Instant;
+    let deadline = budget.and_then(|d| Instant::now().checked_add(d));
+    let mut child = match invocation(root, args).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn() {
+        Ok(c) => c,
+        Err(e) => return Some(Err(Error::Spawn(e))),
+    };
+    let mut stdout = child.stdout.take().expect("piped stdout");
+    let mut stderr = child.stderr.take().expect("piped stderr");
+    let (tx, rx) = mpsc::sync_channel(8);
+    let reader = std::thread::Builder::new().spawn(move || {
+        let mut chunk = [0u8; 16384];
+        loop {
+            match stdout.read(&mut chunk) {
+                Ok(0) => {
+                    let _ = tx.send(Ok(Vec::new()));
+                    break;
+                }
+                Ok(n) => {
+                    if tx.send(Ok(chunk[..n].to_vec())).is_err() {
+                        break;
+                    }
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+                Err(e) => {
+                    let _ = tx.send(Err(e));
+                    break;
+                }
+            }
+        }
+    });
+    let (err_tx, err_rx) = mpsc::sync_channel(1);
+    let errors = std::thread::Builder::new().spawn(move || {
+        let mut bytes = Vec::new();
+        let _ = stderr.by_ref().take(64 * 1024).read_to_end(&mut bytes);
+        let _ = std::io::copy(&mut stderr, &mut std::io::sink());
+        let _ = err_tx.send(bytes);
+    });
+    if reader.is_err() || errors.is_err() {
+        let _ = child.kill();
+        let _ = std::thread::Builder::new().spawn(move || child.wait());
+        return Some(Err(Error::Failed("could not start git output reader".into())));
+    }
+    fn receive<T>(rx: &mpsc::Receiver<T>, deadline: Option<Instant>) -> Option<T> {
+        match deadline {
+            Some(end) => rx.recv_timeout(end.saturating_duration_since(Instant::now())).ok(),
+            None => rx.recv().ok(),
+        }
+    }
+    let mut partial = Vec::new();
+    loop {
+        let Some(message) = receive(&rx, deadline) else {
+            let _ = child.kill();
+            let _ = std::thread::Builder::new().spawn(move || child.wait());
+            return None;
+        };
+        let data = match message {
+            Ok(data) => data,
+            Err(e) => {
+                let _ = child.kill();
+                let _ = std::thread::Builder::new().spawn(move || child.wait());
+                return Some(Err(Error::Stream(e)));
+            }
+        };
+        if data.is_empty() {
+            break;
+        }
+        let mut start = 0;
+        for (i, byte) in data.iter().enumerate() {
+            if *byte == 0 {
+                partial.extend_from_slice(&data[start..i]);
+                take(&partial);
+                partial.clear();
+                start = i + 1;
+            }
+        }
+        partial.extend_from_slice(&data[start..]);
+        if partial.len() > 1024 * 1024 {
+            let _ = child.kill();
+            let _ = std::thread::Builder::new().spawn(move || child.wait());
+            return Some(Err(Error::Failed("git record exceeds 1 MiB".into())));
+        }
+    }
+    if !partial.is_empty() {
+        let _ = child.kill();
+        let _ = std::thread::Builder::new().spawn(move || child.wait());
+        return Some(Err(Error::Failed("incomplete git record".into())));
+    }
+    let status = match deadline {
+        Some(end) => waited(&mut child, end.saturating_duration_since(Instant::now())),
+        None => child.wait().ok(),
+    };
+    let Some(status) = status else {
+        let _ = child.kill();
+        let _ = std::thread::Builder::new().spawn(move || child.wait());
+        return None;
+    };
+    let Some(why) = receive(&err_rx, deadline) else { return None };
+    if !status.success() {
+        return Some(Err(Error::Failed(String::from_utf8_lossy(&why).trim().to_owned())));
+    }
+    Some(Ok(()))
+}
