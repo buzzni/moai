@@ -8,8 +8,8 @@
 // (main.ts) and arrive as ShellIntents.
 
 import type { FileWatch, StampAnswer } from "../data/files-refresh.ts"
-import { issueDiff, type IssueDiff, type Scope } from "../data/changes.ts"
-import { createDiff } from "./diff.ts"
+import { issueChanges, issuePatch, patchQueue, PATCH_GROUP, type IssueChanges, type Offer, type Scope } from "../data/changes.ts"
+import { createDiff, diffWords, failureWords, terminalLine, type PatchTicket } from "./diff.ts"
 import { aboutFrom } from "../data/about.ts"
 import { isInformation, type Outcome } from "../data/client.ts"
 import type { IssueIndex } from "../data/index.ts"
@@ -19,7 +19,7 @@ import { applyTheme, nextTheme, type Theme } from "../data/theme.ts"
 import { fill, type Copy } from "../i18n/index.ts"
 import { detectPlatform } from "../keys/router.ts"
 import { matchKey, toolbarOf, type Focus, type State, type Store, type Tab } from "../store.ts"
-import { button, el, emptyState, icon, iconButton } from "./components.ts"
+import { button, el, emptyState, icon, iconButton, paintState, stateLabel } from "./components.ts"
 import type { IconName } from "./icons.ts"
 import { mountBrand } from "./brand.ts"
 import { allTips, createTips } from "./tips.ts"
@@ -162,7 +162,8 @@ export function mountShell(root: HTMLElement, options: ShellOptions): Shell {
   })
   const refresh = el(doc, "button", { type: "button", class: "m-refreshed moai-refresh" }, copy.shell.refreshNow)
   refresh.addEventListener("click", () => intents.refresh())
-  const diffToggle = el(doc, "button", { type: "button", class: "m-diff-toggle", "aria-label": copy.files.diff }, copy.files.diff)
+  const diffToggle = iconButton(doc, { icon: "diff", label: stateLabel(copy.files.diff, state.diff.visible, copy.files), pressed: state.diff.visible })
+  diffToggle.classList.add("m-diff-toggle")
   diffToggle.addEventListener("click", () => store.dispatch({ type: "diff-visible", visible: !store.getState().diff.visible }))
   const visibility = iconButton(doc, { icon: "eye", label: copy.shell.hideDetail, pressed: state.detail.visible })
   visibility.classList.add("moai-detail-toggle")
@@ -258,35 +259,68 @@ export function mountShell(root: HTMLElement, options: ShellOptions): Shell {
   split.detail.append(detailRoot)
   const diffRoot = el(doc, "div", { class: "m-pane-diff", tabindex: -1 })
   const scopes = el(doc, "div", { class: "m-diff-scopes" })
-  const diffWidget = createDiff(doc, copy.diff, value => store.dispatch({ type: "diff-layout", layout: value }))
-  diffRoot.append(scopes, diffWidget.el)
+  const diffWidget = createDiff(doc, diffWords(copy), value => store.dispatch({ type: "diff-layout", layout: value }), copy.files, {
+    want: wantPatch,
+    retry: () => { if (diffId) void readDiff(diffId, selectedScope) },
+    command: file => diffId && selectedScope ? terminalLine(diffId, selectedScope, file.path, store.getState().view.worktree) : null,
+  })
+  diffWidget.slot.append(scopes); diffRoot.append(diffWidget.el)
   const inside = createSplit(doc, { position: "left", ratios: { left: 0.5, top: 0.5 }, onRatio: (position, ratio) => store.dispatch({ type: "diff-ratio", axis: position === "left" ? "horizontal" : "vertical", ratio: 1 - ratio }) })
   const foldedDiff = el(doc, "p", { class: "m-diff-collapsed", role: "status" }, copy.files.collapsed)
-  let diffId: string | null = null, diffOverlay = false, issueFileStamp: string | null = null, issueStampPath = '', issueReadAt = 0, selectedScope: Scope | undefined, diffAnswer: IssueDiff | null = null, diffEpoch = 0
+  let diffId: string | null = null, diffOverlay = false, issueFileStamp: string | null = null, issueStampPath = '', issueReadAt = 0, selectedScope: Scope | undefined, diffAnswer: IssueChanges | null = null, diffEpoch = 0, loudRead = 0
   let diffTimer: ReturnType<typeof setTimeout> | undefined
+  /** The pane's patch reads: two at a time, dropped together when the pane moves to another issue, scope or overlay. */
+  const patches = patchQueue(2)
+  function dropPatches(): void { patches.clear(); options.client?.cancelGroup?.(PATCH_GROUP.issue) }
+  function wantPatch(ticket: PatchTicket): void {
+    const client = options.client, id = diffId, scope = selectedScope, overlay = store.getState().view.worktree
+    if (!client || !id || !scope) { ticket.failed(copy.failed); return }
+    patches.add({ live: ticket.live, async run() {
+      const read = await issuePatch(client, id, scope, ticket.path, overlay, ticket.quiet)
+      if (read.ok) ticket.done(read.value); else ticket.failed(failureWords(copy, read))
+    } })
+  }
+  /** The scope buttons' offers: the last answer's for this issue, kept past a failed read so another scope stays one click away. */
+  let scopeOffers: Offer[] = []
+  /** A refresh came while a read the person waits on was out: that read may have started before the change, so one more refresh follows it. */
+  let owedRefresh = false
+  function clearScopes(): void { scopeOffers = []; scopes.replaceChildren() }
   /** Rejects only for a background refresh that failed, so the refresher retries it; a read the person asked for says why on the pane. */
   function readDiff(id: string, scope?: Scope, background = false): Promise<void> {
     if (!options.client) return Promise.resolve()
+    // A read the person is waiting on goes first, and a refresh that cut in would leave its spinner. The refresher counts
+    // this refresh as done, though, so it is owed: it runs once that read lands.
+    if (background && loudRead) { owedRefresh = true; return Promise.resolve() }
     const request = ++diffEpoch
-    return issueDiff(options.client, id, scope, store.getState().view.worktree, background).then(answer => {
+    if (!background) { loudRead = request; owedRefresh = false; dropPatches(); diffWidget.reading() }
+    return issueChanges(options.client, id, scope, store.getState().view.worktree, background).then(read => {
+      const loud = loudRead === request
+      if (loud) loudRead = 0
       if (request !== diffEpoch || store.getState().cursor !== id || !store.getState().diff.visible) return
+      if (!read.ok) {
+        // A refresh that failed or was cancelled (the tab hid, the watch moved) leaves the diff it would have replaced.
+        if (background) { issueFileStamp = null; throw new Error(read.why) }
+        // Never an empty list: that would read as "no changes in this scope". The scope buttons stay.
+        diffAnswer = null; paintScopes(); diffWidget.failed(failureWords(copy, read)); return
+      }
+      const answer = read.value
       if (selectedScope !== answer.scope || diffAnswer?.files[0]?.path !== answer.files[0]?.path) issueFileStamp = null
       const changed = !background || JSON.stringify(diffAnswer) !== JSON.stringify(answer)
-      diffAnswer = answer; issueReadAt = Date.now(); selectedScope = answer.scope ?? undefined
-      if (changed) { diffWidget.show(answer, background); paintScopes() }
+      diffAnswer = answer; issueReadAt = Date.now(); selectedScope = answer.scope ?? undefined; scopeOffers = answer.offers
+      if (changed) {
+        // The server's own words for a git it could not use or a scope it could not read, with the retry beside them.
+        if (answer.vcs_error) diffWidget.failed(answer.vcs_error.said)
+        else diffWidget.list({ files: answer.files, truncated: answer.truncated }, background)
+        paintScopes()
+      }
       shell.dispatchEvent(new doc.defaultView!.Event("moai-file-watch", { bubbles: true }))
-    }).catch((error: unknown) => {
-      if (request !== diffEpoch) return
-      // A refresh that failed or was cancelled (the tab hid, the watch moved) leaves the diff it would have replaced.
-      if (background) { issueFileStamp = null; throw error }
-      // An empty answer would read as "no changes in this scope".
-      diffAnswer = null; scopes.replaceChildren(); diffWidget.show({ files: [], truncated: false, vcs_error: { said: copy.failed } })
+      if (loud && owedRefresh) { owedRefresh = false; void readDiff(id, selectedScope, true).catch(() => {}) }
     })
   }
   function paintScopes(): void {
-    scopes.replaceChildren(...(diffAnswer?.offers ?? []).map(offer => {
+    scopes.replaceChildren(...scopeOffers.map(offer => {
       const button = el(doc, "button", { type: "button", "aria-pressed": String(offer.scope === selectedScope) }, `${offer.scope}${offer.branch ? ` · ${offer.branch}` : ""}${offer.owner ? ` · ${fill(copy.diff.owner, { id: offer.owner })}` : ""}`)
-      button.addEventListener("click", () => { selectedScope = offer.scope; if (diffId) void readDiff(diffId, offer.scope) })
+      button.addEventListener("click", () => { selectedScope = offer.scope; if (diffId) void readDiff(diffId, offer.scope).catch(() => {}) })
       return button
     }))
   }
@@ -294,10 +328,10 @@ export function mountShell(root: HTMLElement, options: ShellOptions): Shell {
     if (action === "diff-layout") return diffWidget.command("toggle")
     if (action === "next" || action === "prev" || action === "left" || action === "right") return diffWidget.command(action)
     if (action === "scope-prev" || action === "scope-next") {
-      const offers = diffAnswer?.offers ?? []; if (!offers.length || !diffId) return false
+      const offers = scopeOffers; if (!offers.length || !diffId) return false
       const at = Math.max(0, offers.findIndex(o => o.scope === selectedScope)), step = action === "scope-next" ? 1 : -1
       const chosen = offers[Math.max(0, Math.min(offers.length - 1, at + step))]!
-      selectedScope = chosen.scope; void readDiff(diffId, chosen.scope); return true
+      selectedScope = chosen.scope; void readDiff(diffId, chosen.scope).catch(() => {}); return true
     }
     return false
   }
@@ -437,7 +471,7 @@ export function mountShell(root: HTMLElement, options: ShellOptions): Shell {
     for (const at of ["right", "bottom", "left", "top"] as const) if (split.ratio(at) !== detail.ratio[at]) split.setRatio(at, detail.ratio[at])
     split.setDetailVisible(detail.visible || current.diff.visible)
     diffToggle.hidden = current.tab === "wiki" || current.tab === "files"
-    diffToggle.setAttribute("aria-pressed", String(current.diff.visible))
+    paintState(diffToggle, copy.files.diff, current.diff.visible, copy.files)
     const horizontal = split.position() === "left" || split.position() === "right"
     const at = horizontal ? "left" : "top"
     inside.setPosition(at); inside.setWidth(Infinity); inside.setRatio(at, 1 - (horizontal ? current.diff.horizontal : current.diff.vertical))
@@ -477,11 +511,12 @@ export function mountShell(root: HTMLElement, options: ShellOptions): Shell {
 
     const canReadDiff = state.diff.visible && state.tab !== "wiki" && state.tab !== "files"
     if (!canReadDiff || !state.cursor) {
-      if (diffId !== null) { diffEpoch++; clearTimeout(diffTimer); diffId = null; diffAnswer = null; scopes.replaceChildren(); diffWidget.show({ files: [], truncated: false }) }
+      if (diffId !== null) { diffEpoch++; loudRead = 0; clearTimeout(diffTimer); dropPatches(); diffId = null; diffAnswer = null; clearScopes(); diffWidget.clear() }
     } else if (state.cursor !== diffId || diffOverlay !== state.view.worktree) {
-      diffOverlay = state.view.worktree; diffId = state.cursor; issueFileStamp = null; selectedScope = undefined; diffAnswer = null; diffEpoch++; clearTimeout(diffTimer)
-      scopes.replaceChildren(); diffWidget.show({ files: [], truncated: false })
-      const id = diffId; diffTimer = setTimeout(() => void readDiff(id), 120)
+      diffOverlay = state.view.worktree; diffId = state.cursor; issueFileStamp = null; selectedScope = undefined; diffAnswer = null; diffEpoch++; loudRead = 0; clearTimeout(diffTimer); dropPatches()
+      // Reading, not empty: the pane never says "no changes" for an issue it has not read yet.
+      clearScopes(); diffWidget.reading()
+      const id = diffId; diffTimer = setTimeout(() => void readDiff(id).catch(() => {}), 120)
     }
 
     const loadedAt = state.board.value?.loadedAt
@@ -592,7 +627,11 @@ export function mountShell(root: HTMLElement, options: ShellOptions): Shell {
     },
     async refreshFileStamps(watch, dirs, file, answer) {
       if (watch.key.startsWith("files:")) await filesView?.refreshFileStamps?.(watch, dirs, file, answer)
-      else if (file && watch.key === `issue:${diffId}` && diffId && selectedScope === "working") { issueFileStamp = answer.file; await readDiff(diffId, selectedScope, true) }
+      else if (file && watch.key === `issue:${diffId}` && diffId && selectedScope === "working") {
+        issueFileStamp = answer.file; await readDiff(diffId, selectedScope, true)
+        // The file's text changed on disk; its counts may not have: read the open one again, quietly.
+        if (watch.file?.path) diffWidget.reload(watch.file.path)
+      }
     },
     async refreshFileChanges(watch, fingerprint) {
       if (watch.key.startsWith("files:")) await filesView?.refreshFileChanges?.(watch, fingerprint)
@@ -607,7 +646,7 @@ export function mountShell(root: HTMLElement, options: ShellOptions): Shell {
       observer?.disconnect()
       win?.removeEventListener("resize", onResize)
       split.destroy()
-      inside.destroy(); clearTimeout(diffTimer); diffEpoch++
+      inside.destroy(); clearTimeout(diffTimer); diffEpoch++; dropPatches(); diffWidget.clear()
       mainViews.list.destroy?.()
       mainViews.board.destroy?.()
       mainViews.gantt.destroy?.()

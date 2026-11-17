@@ -223,23 +223,87 @@ pub fn change_mark(mark: crate::vcs::Mark) -> Style {
     }
 }
 
-/// A file's colour by its extension group: source · docs and markup · config and data · scripts · pictures and
-/// binaries · the rest (unpainted).
-pub fn file_style(name: &str) -> Style {
-    let ext = crate::files::ext_of(name).to_ascii_lowercase();
-    match ext.as_str() {
-        "rs" | "c" | "h" | "cc" | "cpp" | "hpp" | "go" | "py" | "js" | "mjs" | "cjs" | "ts" | "tsx" | "jsx"
-        | "java" | "kt" | "swift" | "rb" | "php" | "cs" | "scala" | "lua" | "zig" | "hs" | "ml" | "ex" | "exs"
-        | "erl" | "clj" | "dart" | "vue" | "svelte" | "css" | "scss" | "less" | "sql" => FILE_SOURCE,
-        "md" | "markdown" | "txt" | "rst" | "adoc" | "html" | "htm" | "xml" | "tex" | "org" => FILE_DOC,
-        "toml" | "json" | "jsonl" | "yaml" | "yml" | "ini" | "cfg" | "conf" | "csv" | "tsv" | "env" => FILE_DATA,
-        "sh" | "bash" | "zsh" | "fish" | "ps1" | "bat" | "cmd" => FILE_SCRIPT,
-        "png" | "jpg" | "jpeg" | "gif" | "webp" | "ico" | "bmp" | "svg" | "pdf" | "zip" | "gz" | "tar" | "tgz"
-        | "xz" | "bz2" | "7z" | "so" | "dylib" | "dll" | "exe" | "bin" | "o" | "a" | "wasm" | "woff" | "woff2"
-        | "ttf" | "otf" | "mp4" | "mov" | "mp3" | "wav" | "lock" => FILE_BINARY,
-        _ if matches!(name, "Makefile" | "Dockerfile" | "justfile" | "Justfile") => FILE_SCRIPT,
-        _ => PLAIN,
+/// A file's extension group: source · docs and markup · config and data · scripts · pictures and binaries · the
+/// rest. **One table for both surfaces** (moai-dy7a.w38) — the TUI paints it through [`group_style`] and `moai web`
+/// receives it whole in `/api/boot`'s `file_groups`, so the two never sort one name into two groups.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum FileGroup {
+    Source,
+    Doc,
+    Data,
+    Script,
+    Binary,
+    Plain,
+}
+
+impl FileGroup {
+    /// The word `/api/boot` and the page's class list use (`m-files-kind-<name>`).
+    pub fn name(self) -> &'static str {
+        match self {
+            FileGroup::Source => "source",
+            FileGroup::Doc => "doc",
+            FileGroup::Data => "data",
+            FileGroup::Script => "script",
+            FileGroup::Binary => "binary",
+            FileGroup::Plain => "plain",
+        }
     }
+}
+
+/// The groups with their lower-case extensions and their whole names. An extension is looked up first, across every
+/// group; a whole name only when no extension matched — `Makefile` has none.
+pub const FILE_GROUPS: [(FileGroup, &[&str], &[&str]); 5] = [
+    (
+        FileGroup::Source,
+        &[
+            "rs", "c", "h", "cc", "cpp", "hpp", "go", "py", "js", "mjs", "cjs", "ts", "tsx", "jsx", "java", "kt",
+            "swift", "rb", "php", "cs", "scala", "lua", "zig", "hs", "ml", "ex", "exs", "erl", "clj", "dart", "vue",
+            "svelte", "css", "scss", "less", "sql",
+        ],
+        &[],
+    ),
+    (FileGroup::Doc, &["md", "markdown", "txt", "rst", "adoc", "html", "htm", "xml", "tex", "org"], &[]),
+    (FileGroup::Data, &["toml", "json", "jsonl", "yaml", "yml", "ini", "cfg", "conf", "csv", "tsv", "env"], &[]),
+    (
+        FileGroup::Script,
+        &["sh", "bash", "zsh", "fish", "ps1", "bat", "cmd"],
+        &["Makefile", "Dockerfile", "justfile", "Justfile"],
+    ),
+    (
+        FileGroup::Binary,
+        &[
+            "png", "jpg", "jpeg", "gif", "webp", "ico", "bmp", "svg", "pdf", "zip", "gz", "tar", "tgz", "xz", "bz2",
+            "7z", "so", "dylib", "dll", "exe", "bin", "o", "a", "wasm", "woff", "woff2", "ttf", "otf", "mp4", "mov",
+            "mp3", "wav", "lock",
+        ],
+        &[],
+    ),
+];
+
+/// The group of a file name, by [`FILE_GROUPS`].
+pub fn file_group(name: &str) -> FileGroup {
+    let ext = crate::files::ext_of(name).to_ascii_lowercase();
+    let by_ext = FILE_GROUPS.iter().find(|(_, exts, _)| exts.contains(&ext.as_str()));
+    by_ext
+        .or_else(|| FILE_GROUPS.iter().find(|(_, _, names)| names.contains(&name)))
+        .map_or(FileGroup::Plain, |(group, _, _)| *group)
+}
+
+/// A group's colour in the TUI; the rest stays unpainted.
+pub fn group_style(group: FileGroup) -> Style {
+    match group {
+        FileGroup::Source => FILE_SOURCE,
+        FileGroup::Doc => FILE_DOC,
+        FileGroup::Data => FILE_DATA,
+        FileGroup::Script => FILE_SCRIPT,
+        FileGroup::Binary => FILE_BINARY,
+        FileGroup::Plain => PLAIN,
+    }
+}
+
+/// A file's colour by its extension group.
+pub fn file_style(name: &str) -> Style {
+    group_style(file_group(name))
 }
 
 /// Syntax colours for file text (moai-ffk9.3fd), after the confirmed mockup in 16 colours. **They carry no meaning**

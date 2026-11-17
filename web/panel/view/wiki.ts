@@ -449,7 +449,7 @@ export interface WikiView {
   handleKey(event: KeyboardEvent): boolean
   /**
    * A key-table action by its id (keys/wiring.ts), for what handleKey cannot read off the event: `move.top` reached
-   * by `gg`, the page moves, the `SPC w` / `Ctrl-w` focus moves, a letter a Korean input source turned into a
+   * by `gg`, the page moves, the `SPC x` focus moves, a letter a Korean input source turned into a
    * jamo. True when the view did it; `wiki.clear` with nothing to clear is false.
    */
   command(action: string): boolean

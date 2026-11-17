@@ -1,7 +1,15 @@
 import type { Client } from './client.js'
 import type { DiffAnswer } from '../view/diff.ts'
 export interface Checkout { key: string; branch: string; main: boolean; milestone: string | null; issue: string | null; current: boolean }
-export interface Change { path: string; old_path: string | null; status: string; adds: number | null; dels: number | null; binary: boolean }
+/** The four letters the server folds a change into; anything else stands as '' (no letter, no colour). */
+export type Mark = 'M' | 'A' | 'D' | 'R' | ''
+export interface Change { path: string; old_path: string | null; status: string; mark: Mark; adds: number | null; dels: number | null; binary: boolean }
+/** A checkout's change list as the page holds it: the files, each changed file's ancestor directories' letters, and how far the read got. */
+export interface ChangeSet { files: Change[]; dirs: Array<[string, Mark]>; total: number; truncated: boolean; error?: string }
+const LETTERS = new Set(['M', 'A', 'D', 'R'])
+export const markOf = (v: unknown): Mark => typeof v === 'string' && LETTERS.has(v) ? v as Mark : ''
+/** A path the server named, as the page lets it be compared with a row: relative, forward slashes, no `.`/`..`/empty part. */
+export const safePath = (p: string): boolean => !p.startsWith('/') && !p.includes('\\') && !p.split('/').some(part => !part || part === '.' || part === '..')
 
 export interface Entry { name: string; kind: 'dir' | 'file' | 'link' | 'other'; size: number; openable: boolean; dir?: boolean; inside?: boolean }
 export interface FileText { stamp?: string | null; path: string; text?: string; binary: boolean; truncated: boolean; spans?: Array<Array<[number, number, string]>> | null }
@@ -9,8 +17,18 @@ export interface SearchResult { matches: Array<{ path: string; start: number; en
 const record = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null
 export function changesOf(v: unknown): Change[] | null {
   if (!record(v) || !Array.isArray(v.files)) return null
-  return v.files.filter((c): c is Change => record(c) && typeof c.path === 'string' && !c.path.startsWith('/') && !c.path.includes('\\') && !c.path.split('/').some(p => !p || p === '.' || p === '..') && typeof c.status === 'string' && (c.adds === null || typeof c.adds === 'number') && (c.dels === null || typeof c.dels === 'number'))
+  return v.files.filter((c): c is Change => record(c) && typeof c.path === 'string' && safePath(c.path) && typeof c.status === 'string' && (c.adds === null || typeof c.adds === 'number') && (c.dels === null || typeof c.dels === 'number'))
+    .map(c => ({ ...c, mark: markOf((c as { mark?: unknown }).mark) }))
 }
+/** The answer of `/api/changes?root=`: files, the directories' map (keys sorted, bad keys and letters dropped), the read's reach. Null when it has no list. */
+export function changeSetOf(v: unknown): ChangeSet | null {
+  const files = changesOf(v); if (!files || !record(v)) return null
+  const dirs: Array<[string, Mark]> = []
+  if (record(v.dirs)) for (const key of Object.keys(v.dirs).sort()) { const mark = markOf(v.dirs[key]); if (mark && safePath(key)) dirs.push([key, mark]) }
+  return { files, dirs, total: typeof v.total === 'number' ? v.total : files.length, truncated: v.truncated === true, ...(record(v.vcs_error) && typeof v.vcs_error.said === 'string' ? { error: v.vcs_error.said } : {}) }
+}
+/** One string for one answer: the watcher tells "same" from "changed" by it, so a directory's letter alone moves it. */
+export const changeFingerprint = (set: ChangeSet): string => JSON.stringify(set)
 export function validDiff(v: unknown): v is DiffAnswer {
   if (!record(v) || !Array.isArray(v.files) || typeof v.truncated !== 'boolean') return false
   return v.files.every(f => record(f) && typeof f.path === 'string' && typeof f.status === 'string' && typeof f.binary === 'boolean' &&
@@ -47,16 +65,10 @@ export function filesSource(client: Client) {
       if (!record(v) || !Array.isArray(v.checkouts)) throw new Error('invalid checkouts')
       return v.checkouts.filter((c): c is Checkout => record(c) && typeof c.key === 'string' && typeof c.branch === 'string' && typeof c.main === 'boolean' && typeof c.current === 'boolean' && (typeof c.issue === 'string' || c.issue === null))
     },
-    async changes(root: string, background = false): Promise<{ files: Change[]; total: number; truncated: boolean; error?: string }> {
-      const v = await read(client, '/api/changes', { root }, background)
-      if (!record(v) || !Array.isArray(v.files)) throw new Error('invalid changes')
-      const files = changesOf(v) ?? []
-      return { files, total: typeof v.total === 'number' ? v.total : files.length, truncated: v.truncated === true, ...(record(v.vcs_error) && typeof v.vcs_error.said === 'string' ? { error: v.vcs_error.said } : {}) }
-    },
-    async diff(root: string, path: string, background = false): Promise<DiffAnswer> {
-      const v = await read(client, '/api/diff', { root, path }, background)
-      if (!validDiff(v)) throw new Error('invalid diff')
-      return v as unknown as DiffAnswer
+    async changes(root: string, background = false): Promise<ChangeSet> {
+      const set = changeSetOf(await read(client, '/api/changes', { root }, background))
+      if (!set) throw new Error('invalid changes')
+      return set
     },
     async ignored(root?: string): Promise<string[]> {
       const v = await read(client, '/api/ignored', root === undefined ? {} : { root })

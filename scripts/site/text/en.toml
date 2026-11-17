@@ -184,7 +184,7 @@ vendors = 'Agents from several vendors'
 [guide.web]
 1 = 'moai web — in the browser'
 2 = 'See the list, the kanban board, the Gantt and the wiki on <code>127.0.0.1:6624</code>. Open the browser yourself. Use it to share progress with teammates who are not at home in a terminal.'
-3 = 'The keys are nearly the same as in tui. Only moving between panes uses <code>SPC w</code> instead of <code>Ctrl-w</code>. Statistics are only in tui.'
+3 = 'The keys are nearly the same as in tui. Only moving between panes uses <code>SPC x</code> instead of <code>Ctrl-w</code>. Statistics are only in tui.'
 4 = 'You can drag a Gantt bar to change its dates. Everything else in the tracker is read only.'
 5 = 'If the port is already in use, pick another with <code>--port</code>. <code>--port 0</code> picks a free one.'
 6 = 'Press <code>Ctrl-C</code> to stop it.'
