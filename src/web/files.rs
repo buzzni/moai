@@ -254,8 +254,19 @@ fn answer_inner(path: &str, cwd: &Path, lang: Lang, query: &[(String, String)], 
     }
 }
 
+/// Each file row's mark, from the row it was written from — the fold the TUI uses too (`vcs::Mark`).
+fn put_marks<'a>(out: &mut Value, changes: impl IntoIterator<Item = &'a crate::vcs::Change>) {
+    if let Some(files) = out.get_mut("files").and_then(Value::as_array_mut) {
+        for (entry, change) in files.iter_mut().zip(changes) {
+            if let Some(entry) = entry.as_object_mut() {
+                entry.insert("mark".into(), json!(crate::vcs::Mark::of(change.status)));
+            }
+        }
+    }
+}
 fn add_highlights(answer: &crate::changes::Answer) -> Value {
     let mut out = serde_json::to_value(answer).unwrap_or(Value::Null);
+    put_marks(&mut out, answer.files.iter().map(|f| &f.change));
     if let Some(files) = out.get_mut("files").and_then(Value::as_array_mut) {
         for (entry, source) in files.iter_mut().zip(&answer.files) {
             let Some(hunks) = &source.hunks else { continue };
@@ -322,7 +333,9 @@ fn issue_changes(
             } else if scope.is_none() {
                 json!({"offers":answer.offers,"vcs_error":answer.vcs_error})
             } else {
-                serde_json::to_value(answer).unwrap_or(Value::Null)
+                let mut out = serde_json::to_value(&answer).unwrap_or(Value::Null);
+                put_marks(&mut out, answer.files.iter().map(|f| &f.change));
+                out
             })
         }
         Err(_) => missing(),
@@ -347,7 +360,11 @@ fn checkout_changes(path: &str, checkout: &Checkout, file: Option<&str>, left: &
         return missing();
     }
     if path == "/api/changes" {
-        return ok(json!({"scope":"whole","files":changes.files,"total":changes.total,"truncated":changes.truncated}));
+        // The directories' facts take a share of what is left, never the list's own time: past it they stand `M`.
+        let marks = backend.marks(&checkout.path, &changes, Some(left() / 2));
+        let mut out = json!({"scope":"whole","files":changes.files,"total":changes.total,"truncated":changes.truncated,"dirs":marks.dirs});
+        put_marks(&mut out, &changes.files);
+        return ok(out);
     }
     // A renamed file is read by both names, the old one from the list: the new name alone reads as a whole new file.
     let names: Option<Vec<String>> = file.map(|p| {
@@ -405,5 +422,64 @@ mod tests {
         let line = "😀한a";
         let parts = vec![highlight::Span { kind: highlight::Kind::Keyword, range: 4..7 }];
         assert_eq!(spans(line, &parts), json!([[2, 3, "keyword"]]));
+    }
+
+    fn body(tag: &str) -> String {
+        (0..20).map(|n| format!("let {tag}{n} = {n};\n")).collect()
+    }
+    fn tracker(name: &str) -> crate::scratch::Scratch {
+        let root = crate::scratch::Scratch::new(name);
+        std::fs::create_dir(root.join(".moai")).unwrap();
+        std::fs::write(root.join(".moai/config.toml"), "prefix = \"web\"\n").unwrap();
+        std::fs::write(root.join(".moai/issues.jsonl"), "").unwrap();
+        root
+    }
+    fn get(root: &Path, path: &str, query: &[(&str, &str)]) -> (u16, Value) {
+        let query: Vec<_> = query.iter().map(|(k, v)| ((*k).to_owned(), (*v).to_owned())).collect();
+        let r = answer(path, root, Lang::En, &query);
+        (r.status, serde_json::from_slice(&r.body).unwrap_or(Value::Null))
+    }
+    #[test]
+    fn checkout_answers_carry_marks_for_files_and_directories() {
+        let root = tracker("web-marks");
+        let git = |args: &[&str]| crate::git::tests::run_git(&root, None, args);
+        git(&["init", "-q"]);
+        std::fs::create_dir_all(root.join("grow")).unwrap();
+        std::fs::write(root.join("grow/a.rs"), body("a")).unwrap();
+        std::fs::write(root.join("old.rs"), body("o")).unwrap();
+        git(&["add", "."]);
+        git(&["commit", "-qm", "base"]);
+        std::fs::write(root.join("grow/b.rs"), "let b = 1;\n").unwrap();
+        std::fs::create_dir_all(root.join("fresh/inner")).unwrap();
+        std::fs::write(root.join("fresh/inner/c.rs"), "let c = 1;\n").unwrap();
+        git(&["mv", "old.rs", "renamed.rs"]);
+        std::fs::write(root.join("renamed.rs"), body("o").replacen("o3 = 3", "o3 = 33", 1)).unwrap();
+        let (status, list) = get(&root, "/api/changes", &[]);
+        assert_eq!(status, 200, "{list}");
+        let out = &list["out"];
+        let mark = |p: &str| out["files"].as_array().unwrap().iter().find(|f| f["path"] == p).unwrap()["mark"].clone();
+        assert_eq!(mark("grow/b.rs"), "A");
+        assert_eq!(mark("renamed.rs"), "R");
+        assert_eq!(mark("fresh/inner/c.rs"), "A");
+        assert_eq!(out["dirs"], json!({"fresh":"A","fresh/inner":"A","grow":"M"}));
+        assert!(
+            out["files"].as_array().unwrap().iter().all(|f| matches!(f["mark"].as_str(), Some("M" | "A" | "D" | "R")))
+        );
+        // The same tree reads the same text: the page compares answers as text.
+        assert_eq!(get(&root, "/api/changes", &[]).1.to_string(), list.to_string());
+        // One renamed file's diff carries its mark and only the lines it changed.
+        let (status, diff) = get(&root, "/api/diff", &[("path", "renamed.rs")]);
+        assert_eq!(status, 200, "{diff}");
+        let file = &diff["out"]["files"][0];
+        assert_eq!(file["mark"], "R");
+        let lines: Vec<_> =
+            file["hunks"].as_array().unwrap().iter().flat_map(|h| h["lines"].as_array().unwrap()).collect();
+        let adds = lines.iter().filter(|l| l["kind"] == "add").count();
+        assert_eq!(json!(adds), file["adds"], "{file}");
+        assert!(adds < 5, "the renamed file read as a whole new one");
+        // The gate stays as narrow: only a listed path, by its new name.
+        for refused in ["old.rs", "grow", "../x", "/etc/passwd"] {
+            assert_eq!(get(&root, "/api/diff", &[("path", refused)]).0, 404, "{refused}");
+        }
     }
 }

@@ -36117,7 +36117,8 @@ fn diff_of_one_renamed_file_shows_only_the_lines_it_changed() {
     assert!(out.contains("+line seven") && out.contains("-line 7"), "{out}");
     assert!(!out.contains("+line 20"), "the renamed file read as a whole new one: {out}");
     let json = json_of(&ok(root, &["diff", &id, "--scope=commits", "--path=after.txt", "--json"]));
-    let lines = json["files"][0]["hunks"].as_array().unwrap().iter().flat_map(|h| h["lines"].as_array().unwrap().clone());
+    let lines =
+        json["files"][0]["hunks"].as_array().unwrap().iter().flat_map(|h| h["lines"].as_array().unwrap().clone());
     assert_eq!(lines.filter(|l| l["kind"] == "add").count(), 1);
     assert_eq!(json["files"][0]["adds"], 1);
     // The old name is the list's, never the caller's.
@@ -36215,7 +36216,9 @@ fn web_diff_matches_cli_and_rejects_unlisted_paths() {
     let (status, _, body) = get(web.port, &format!("/api/diff?id={id}&scope=commits"));
     assert_eq!(status, 200, "{body}");
     let mut response = json_of(&body)["out"].clone();
+    // The web adds each file's mark; `moai diff --json` does not carry it.
     for file in response["files"].as_array_mut().unwrap() {
+        assert_eq!(file.as_object_mut().unwrap().remove("mark"), Some(serde_json::json!("A")));
         for hunk in file["hunks"].as_array_mut().unwrap() {
             for line in hunk["lines"].as_array_mut().unwrap() {
                 line.as_object_mut().unwrap().remove("spans");
@@ -36223,6 +36226,7 @@ fn web_diff_matches_cli_and_rejects_unlisted_paths() {
         }
     }
     assert_eq!(response, cli);
+    assert!(cli["files"].as_array().unwrap().iter().all(|f| f.get("mark").is_none()));
     for path in ["--output%3D/tmp/x", "-x", "%3A%28top%29a"] {
         let (status, _, _) = get(web.port, &format!("/api/diff?id={id}&scope=commits&path={path}"));
         assert_eq!(status, 404, "{path}");
