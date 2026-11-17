@@ -46,7 +46,7 @@ registered itself. Only registered projects can be read this way.
 
 Each browser keeps at most three visible tabs on live event streams, and the server at most 32 across every browser. The page stores a random browser id in IndexedDB. A single transaction makes simultaneously opened tabs agree, including over plain HTTP; an existing local-storage id is kept on migration. If IndexedDB is unavailable or does not answer within five seconds, the page falls back to local storage, where simultaneous first tabs may obtain different ids; a page that did reach IndexedDB copies its id there, so later fallbacks in that browser keep it. Pages that cannot keep an id share a single fallback budget. Additional tabs continue updating by polling every two seconds and retry a live connection every 30 seconds. Only tabs with a live stream appear in `moai ctl ls` and receive new suggestions. Hiding or closing a streaming tab reserves its place for its 30-second reconnect grace; afterwards it frees a place; this limit keeps ordinary reads responsive when many tabs are open.
 
-The page has four tabs.
+The page has five tabs.
 
 A visible tab can receive `moai ctl propose` suggestions from another terminal.
 The nonmodal card at the lower right starts with `» Suggestion` (or `» 제안`),
@@ -62,6 +62,7 @@ window](ctl.md#suggest-something-to-the-person) for waits and follow-up actions.
 | **List** | The tree of milestones, [epics](glossary.md#epic) and issues, which you step into and fold. Milestones with unfinished work start open one level; closed milestones start folded. Manual folds survive a reread. | `SPC g l` |
 | **Gantt** | The tree beside a date axis: when each row was planned and when it actually ran | `SPC g g` |
 | **Wiki** | The pages of this wiki: the page list on one side, the page on the other | `SPC g w` |
+| **Files** | Checkout files, their contents, changes and diffs | `SPC g f` |
 
 Click a tab, or use the keys. Switching tabs keeps the list's cursor, filter and
 sort.
@@ -85,6 +86,20 @@ columns stay plain. The detail starts on the right;
 640px it stays below the list. `SPC v d` hides it, and `SPC v r` switches the body
 and history notes between rendered markdown and the raw text.
 `Enter` on an issue moves the focus to the detail, and `SPC w w` moves it back.
+
+## Files and diffs
+
+Open **Files** with `SPC g f`. Select the current or another checkout from the selector, expand directories, and choose a file to view. `/` searches file names within the active directory; ignored directories are skipped, even when searching from within one. Search results expand ancestor directories while keeping sibling nodes visible. Binary files are flagged rather than rendered as text; text reads truncate at 1 MiB and explicitly indicate truncation.
+
+The toolbar toggles changed-only files, the active file's diff, or the linked issue's detail pane. Use `SPC v D` to toggle the diff; the issue list, board, and Gantt views also provide this pane for the selected issue. Choose between commit, branch, or working scopes, and toggle unified or side-by-side layouts within the pane. Narrow panes automatically fall back to unified display. Use `Tab` and `Shift-Tab` to navigate between diff files, and `H` and `L` to scroll horizontally. In Files, navigate with `j`/`k` or arrow keys, fold or expand directories with `h`/`l`, enter a directory or view a file with `Enter`, and go back with `Backspace`.
+
+Visible files and diffs refresh automatically when their stamps or underlying changes update; background tabs suspend file polling. If a refresh fails, the last valid diff is retained and retried. Direct file editing is not supported. File reads are strictly confined to the chosen checkout: `.git` directories and symlinks pointing outside the checkout boundary are rejected. Sensitive files such as `.env` are not hidden; any client able to access a non-loopback server can read them.
+
+## File HTTP reads
+
+The web client issues GET requests subject to existing project, Host, and Origin checks. `root` specifies a checkout key returned by `/api/checkouts`, rather than a filesystem path. `/api/files?dir=&limit=` lists directory contents (optional limit: 1–5000); `/api/file?path=` returns text and syntax spans or a binary flag; `/api/find?dir=&q=` returns up to 500 file-name matches alongside truncation flags; `/api/ignored` enumerates ignored directories; `/api/files-stamp` accepts up to 64 `dir` parameters and one `path` parameter for change stamps. All paths are relative to the checkout. Directory traversals abort after 200,000 entries or when exceeding the request time budget, reporting an incomplete status.
+
+`/api/changes` and `/api/diff` accept either a checkout `root` or an issue `id`, using `scope=commits|branch|working` for issue queries. Issue queries may specify `worktree=1`; requested diff `path` entries must exist in the change list. Responses detail errors and truncation status, bound by a shared ten-second connection deadline across execution steps. Unrecognized and duplicate query parameters are rejected, except for repeated `dir` parameters on `/api/files-stamp`.
 
 ## Markdown
 
@@ -523,4 +538,4 @@ lanes.
 The page does not show the stats screen, and what it writes is a Gantt bar's days
 and your read marks.
 
-Decided in: moai-skjr, moai-e9hi, moai-8r2l, moai-0aa7, moai-jshy, moai-d86e.3ud, moai-ijjd, moai-lj8g, moai-ekg6 moai-mkzo moai-i07x moai-zgc1 moai-v5of moai-4v3h moai-7eeq moai-yigx moai-4xmq moai-okdc moai-z74b moai-1f3p
+Decided in: moai-skjr, moai-e9hi, moai-8r2l, moai-0aa7, moai-jshy, moai-d86e.3ud, moai-ijjd, moai-lj8g, moai-ekg6 moai-mkzo moai-i07x moai-zgc1 moai-v5of moai-4v3h moai-7eeq moai-yigx moai-4xmq moai-okdc moai-z74b moai-1f3p moai-qm5t
