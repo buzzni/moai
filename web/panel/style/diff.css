@@ -6,7 +6,9 @@
 .m-diff-line { display: flex; min-width: max-content; white-space: pre; }
 .m-diff-add { background: var(--ok-soft); }
 .m-diff-delete { background: var(--danger-soft); }
-.m-diff-no { position: sticky; left: 0; min-width: 4em; text-align: right; padding-right: .5em; background: var(--bg); color: var(--text-muted); }
+.m-diff-no { position: sticky; left: 0; min-width: 4em; text-align: right; padding-right: .5em; background: var(--bg); color: var(--muted); }
 .m-diff-sign { min-width: 1em; }
+.m-diff-add .m-diff-no, .m-diff-add .m-diff-sign { color: var(--ok); }
+.m-diff-delete .m-diff-no, .m-diff-delete .m-diff-sign { color: var(--danger); }
 /* Each side is at least as wide as its longest line: a 0 minimum let a long old line paint over the new side. */
 .m-diff-pairs { display: grid; grid-template-columns: repeat(2, minmax(max-content, 1fr)); }

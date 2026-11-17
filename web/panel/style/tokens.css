@@ -24,6 +24,8 @@
   --glint-edge: var(--warn); --glint-core: #F2B01E;
   /* The TUI's branch colour, bright cyan (view/branch.ts). */
   --branch: #0891B2;
+  /* The file tab's source and script colours (the TUI's yellow and bright green; no existing token holds them). */
+  --file-source: #c2410c; --file-script: #4d7c0f;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
@@ -37,6 +39,7 @@
     --card-tint-strength: 28%;
     --glint-edge: var(--warn); --glint-core: #FFE7A3;
     --branch: #22D3EE;
+    --file-source: #fb923c; --file-script: #a3e635;
   }
 }
 :root[data-theme="dark"] {
@@ -50,6 +53,7 @@
   --card-tint-strength: 28%;
   --glint-edge: var(--warn); --glint-core: #FFE7A3;
   --branch: #22D3EE;
+  --file-source: #fb923c; --file-script: #a3e635;
 }
 
 :root {

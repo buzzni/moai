@@ -11,18 +11,24 @@
 .m-files-depth-10 { padding-left: 10.5em; } .m-files-depth-11 { padding-left: 11.5em; } .m-files-depth-12 { padding-left: 12.5em; }
 .m-file-line { display: flex; min-width: max-content; font-family: monospace; white-space: pre; }
 .m-file-number { position: sticky; left: 0; min-width: 4em; text-align: right; padding-right: 1em; background: var(--bg); opacity: .65; }
-.m-syntax-comment { color: var(--ok); } .m-syntax-string { color: var(--warn); } .m-syntax-keyword { color: var(--accent); } .m-syntax-number { color: var(--text-muted); }
+.m-syntax-comment { color: var(--ok); } .m-syntax-string { color: var(--warn); } .m-syntax-keyword { color: var(--accent); } .m-syntax-number { color: var(--muted); }
 .m-pane-files { container: files / inline-size; }
 @container files (max-width: 639px) {
   .m-split-detail, .m-split-resizer { display: none; }
   .m-files-show-content .m-split-list { display: none; }
   .m-files-show-content .m-split-detail { display: block; }
 }
-.m-files-kind-directory { color: var(--accent); }
-.m-files-kind-link { color: var(--warn); }
-.m-files-kind-source { color: var(--text); }
-.m-files-kind-document { color: var(--ok); }
-.m-files-kind-config { color: var(--text-muted); }
+.m-files-kind-directory { color: var(--accent); font-weight: bold; }
+.m-files-kind-link { color: var(--branch); }
+.m-files-kind-source { color: var(--file-source); }
+.m-files-kind-doc { color: var(--review); }
+.m-files-kind-data { color: var(--ok); }
+.m-files-kind-script { color: var(--file-script); }
+.m-files-kind-binary { color: var(--muted); }
+.m-files-kind-plain { color: var(--text); }
+/* Status letters (changed files, diff headers) and the +n / −n counts; shared with diff.css, which is bundled with this sheet. */
+.m-mark-M { color: var(--warn); } .m-mark-A { color: var(--ok); } .m-mark-D { color: var(--danger); } .m-mark-R { color: var(--branch); }
+.m-count-add { color: var(--ok); } .m-count-del { color: var(--danger); }
 .m-files-toolbar { display: flex; gap: .4rem; align-items: center; }
 .m-files-right, .m-files-issue { min-height: 0; height: 100%; overflow: auto; }
 .m-files-right > .m-split { height: 100%; }

@@ -1,4 +1,5 @@
 import { filesSource, type Entry, type FileText, type SearchResult, type Checkout, type Change } from '../data/files.ts'
+import { fileGroup, fileGroupTable, type FileGroupTable } from '../data/file-groups.ts'
 import { el } from './components.ts'
 import { createSplit } from './split.ts'
 import { createDiff, statusMark } from './diff.ts'
@@ -11,14 +12,13 @@ import type { PaneView, ViewContext } from './types.ts'
 
 const CLASSES = new Set(['comment', 'string', 'number', 'keyword', 'type', 'function', 'constant', 'tag', 'attribute', 'heading', 'other'])
 const join = (parent: string, name: string) => parent === '.' ? name : `${parent}/${name}`
-const fileClass = (entry: Entry): string => {
+const KIND_CLASSES = new Set(['directory', 'link', 'source', 'doc', 'data', 'script', 'binary', 'plain'])
+/** Closed list: a received group name never becomes a class by itself. */
+const fileClass = (entry: Entry, table: FileGroupTable | null): string => {
   if (entry.kind === 'dir') return 'directory'
   if (entry.kind === 'link') return 'link'
-  const extension = entry.name.split('.').pop()?.toLowerCase() ?? ''
-  if (['rs', 'js', 'ts', 'tsx', 'jsx', 'py', 'go', 'c', 'h'].includes(extension)) return 'source'
-  if (['md', 'txt', 'rst'].includes(extension)) return 'document'
-  if (['json', 'toml', 'yaml', 'yml', 'ini'].includes(extension)) return 'config'
-  return 'other'
+  const group: string = fileGroup(entry.name, table)
+  return KIND_CLASSES.has(group) ? group : 'plain'
 }
 
 export function mountFiles(root: HTMLElement, ctx: ViewContext): PaneView {
@@ -61,6 +61,7 @@ export function mountFiles(root: HTMLElement, ctx: ViewContext): PaneView {
   let cursor = 0, chosen = '', base = '.', generation = 0, pendingG = false, timer: ReturnType<typeof setTimeout> | undefined
   let rows: Array<{ path: string; entry: Entry; depth: number }> = []
   let alive = true, started = false, rootKey: string | undefined, checkouts: Checkout[] = [], changedOnly = false, diffOn = false, detailOn = false
+  let groups: FileGroupTable | null = null
   let changes: Change[] = [], ordinary: Map<string, Entry[]> | null = null, stateNow: State | null = null, indexNow: IssueIndex | null = null
   let issueShown: State['shown'] = { value: null, loading: false, problem: null }
   let diffEpoch = 0, issueEpoch = 0, changesLoaded = false, painting = 0
@@ -166,7 +167,7 @@ export function mountFiles(root: HTMLElement, ctx: ViewContext): PaneView {
     const matchesByPath = new Map((matches?.matches ?? []).map(match => [match.path, match]))
     const nodes = rows.map((row, index) => {
       const isDir = row.entry.kind === 'dir' || (row.entry.kind === 'link' && row.entry.openable && row.entry.dir === true)
-      const button = el(doc, 'button', { type: 'button', role: 'treeitem', class: `m-files-row m-files-kind-${fileClass(row.entry)} m-files-depth-${Math.min(row.depth, 12)}`, 'aria-selected': String(index === cursor), ...(isDir ? { 'aria-expanded': String(expanded.has(row.path)) } : {}) }, `${isDir ? (expanded.has(row.path) ? '▾' : '▸') : row.entry.kind === 'link' ? '↗' : '·'} ${row.entry.name}`)
+      const button = el(doc, 'button', { type: 'button', role: 'treeitem', class: `m-files-row m-files-kind-${fileClass(row.entry, groups)} m-files-depth-${Math.min(row.depth, 12)}`, 'aria-selected': String(index === cursor), ...(isDir ? { 'aria-expanded': String(expanded.has(row.path)) } : {}) }, `${isDir ? (expanded.has(row.path) ? '▾' : '▸') : row.entry.kind === 'link' ? '↗' : '·'} ${row.entry.name}`)
       const change = changesByPath.get(row.path)
       if (changedOnly && change) button.append(doc.createTextNode(` ${statusMark(change.status)} +${change.adds ?? 0} −${change.dels ?? 0}`))
       const hit = matchesByPath.get(row.path)
@@ -271,7 +272,7 @@ export function mountFiles(root: HTMLElement, ctx: ViewContext): PaneView {
   })
   return {
     render(state, index) {
-      stateNow = state; indexNow = index; split.setWidth(root.clientWidth); split.setRatio('right', state.filesRatio)
+      stateNow = state; indexNow = index; groups = state.boot ? fileGroupTable((state.boot as { file_groups?: unknown }).file_groups) : null; split.setWidth(root.clientWidth); split.setRatio('right', state.filesRatio)
       inner.setPosition(state.detail.position === 'left' || state.detail.position === 'right' ? 'left' : 'top'); inner.setWidth(root.clientWidth)
       diff.setLayout(state.diffLayout); diff.setWidth(root.clientWidth); paintRight()
       if (!started) { started = true; void source?.checkouts().then(list => { checkouts = [...list].sort((a, b) => Number(b.main) - Number(a.main)); checkoutSelect.replaceChildren(...checkouts.map(c => el(doc, 'option', { value: c.key }, `${c.branch || c.key}${c.branch ? ` (${c.key})` : ''}${c.issue ? ` · ${c.issue}` : ''}`)));

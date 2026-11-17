@@ -334,6 +334,8 @@ export interface Boot {
   /** The TUI's zone (`[tui] timezone` as written), the page's first choice of zone (data/zone.ts); null when the TUI
    *  picked none, and when an older server does not send it. */
   timezone: string | null
+  /** The file tab's colour groups (`style::file_style`'s table; data/file-groups.ts reads it); absent from an older server. */
+  file_groups?: unknown
 }
 
 const strings = (value: unknown): value is string[] => Array.isArray(value) && value.every((item) => typeof item === 'string')
