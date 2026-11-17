@@ -14,6 +14,8 @@ does not commit and it does not tag — see `CONTRIBUTING.md`.
 
 ### Added
 
+- The web interface can browse checkout files, search file names, inspect changes, and display issue or file diffs in unified or side-by-side layouts. (moai-qm5t)
+
 - `moai diff <id>` reads an issue's commit, branch, or working-tree changes as a patch or JSON, with optional file statistics and path selection. (moai-vyu7)
 
 ## [1.3.0] - 2026-11-16
