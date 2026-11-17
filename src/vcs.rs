@@ -17,6 +17,7 @@ pub enum Scope {
     Commits(Vec<String>),
     Branch,
     Working,
+    #[allow(dead_code)] // The TUI and web changed-files view will use this scope.
     Whole,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
@@ -82,7 +83,8 @@ fn hex(s: &str) -> bool {
     matches!(s.len(), 40 | 64) && s.bytes().all(|c| c.is_ascii_hexdigit())
 }
 fn valid_path(s: &str) -> bool {
-    !s.is_empty() && Path::new(s).components().all(|c| matches!(c, Component::Normal(n) if n != ".git"))
+    !s.is_empty()
+        && Path::new(s).components().all(|c| matches!(c, Component::Normal(n) if !n.eq_ignore_ascii_case(".git")))
 }
 fn run(root: &Path, args: &[&str], limit: usize, budget: Option<Duration>) -> Result<(Vec<u8>, bool), Error> {
     let mut all = vec!["--no-optional-locks", "--literal-pathspecs", "-c", "core.quotePath=false"];
@@ -152,10 +154,11 @@ fn base(root: &Path, budget: Option<Duration>) -> Result<Option<String>, Error> 
     };
     let refs = text(root, &["for-each-ref", "--format=%(refname) %(objectname)", "refs/heads/milestone/"], budget)?;
     for line in refs.lines() {
-        if let Some((name, hash)) = line.split_once(' ') {
-            if name != current && hex(hash) {
-                candidates.push(hash.to_owned());
-            }
+        if let Some((name, hash)) = line.split_once(' ')
+            && name != current
+            && hex(hash)
+        {
+            candidates.push(hash.to_owned());
         }
     }
     fork_point(root, &candidates, budget)
@@ -243,7 +246,7 @@ fn special_files(root: &Path, budget: Option<Duration>) -> Result<Vec<String>, E
             let entry = entry?;
             let os_name = entry.file_name();
             let Some(name) = os_name.to_str() else { continue };
-            if name == ".git" {
+            if name.eq_ignore_ascii_case(".git") {
                 continue;
             }
             let path = if relative.is_empty() { name.to_owned() } else { format!("{relative}/{name}") };
@@ -280,6 +283,16 @@ fn special_files(_root: &Path, _budget: Option<Duration>) -> Result<Vec<String>,
     Ok(Vec::new())
 }
 
+fn add_numstat(change: &mut Change, adds: &str, dels: &str) {
+    if adds == "-" || dels == "-" {
+        change.binary = true;
+        change.adds = None;
+        change.dels = None;
+    } else if !change.binary {
+        change.adds = adds.parse::<usize>().ok().map(|n| change.adds.unwrap_or(0).saturating_add(n));
+        change.dels = dels.parse::<usize>().ok().map(|n| change.dels.unwrap_or(0).saturating_add(n));
+    }
+}
 impl Backend {
     pub fn changes(self, root: &Path, scope: &Scope, budget: Option<Duration>) -> Result<Changes, Error> {
         let mut found = BTreeMap::<String, Change>::new();
@@ -298,10 +311,20 @@ impl Backend {
                         state = Some((st, Some(item)))
                     }
                     Some((st, old_path)) => {
-                        found.insert(
-                            item.clone(),
-                            Change { path: item, old_path, status: st, adds: None, dels: None, binary: false },
-                        );
+                        found
+                            .entry(item.clone())
+                            .and_modify(|c| {
+                                c.status = st;
+                                c.old_path = old_path.clone();
+                            })
+                            .or_insert(Change {
+                                path: item,
+                                old_path,
+                                status: st,
+                                adds: None,
+                                dels: None,
+                                binary: false,
+                            });
                     }
                 }
             })?;
@@ -312,9 +335,7 @@ impl Backend {
                     if !old_read {
                         rename = Some((a, d, true));
                     } else if let Some(c) = found.get_mut(&item) {
-                        c.binary = a == "-" || d == "-";
-                        c.adds = a.parse().ok();
-                        c.dels = d.parse().ok();
+                        add_numstat(c, &a, &d);
                     }
                 } else {
                     let mut cols = item.splitn(3, '\t');
@@ -322,9 +343,7 @@ impl Backend {
                         if path.is_empty() {
                             rename = Some((a.to_owned(), d.to_owned(), false));
                         } else if let Some(c) = found.get_mut(path) {
-                            c.binary = a == "-" || d == "-";
-                            c.adds = a.parse().ok();
-                            c.dels = d.parse().ok();
+                            add_numstat(c, a, d);
                         }
                     }
                 }
@@ -397,7 +416,16 @@ impl Backend {
                 }
             }
         }
-        Ok(Patch { text: String::from_utf8_lossy(&out).into_owned(), truncated })
+        let mut text = String::from_utf8_lossy(&out).into_owned();
+        if text.len() > PATCH_LIMIT {
+            let mut end = PATCH_LIMIT;
+            while !text.is_char_boundary(end) {
+                end -= 1;
+            }
+            text.truncate(end);
+            truncated = true;
+        }
+        Ok(Patch { text, truncated })
     }
     #[allow(dead_code)] // File search in the TUI and web will consume this.
     pub fn ignored_dirs(self, root: &Path, budget: Option<Duration>) -> Result<Vec<String>, Error> {
@@ -746,6 +774,10 @@ mod tests {
         let p = Backend::Git.patch(root, &Scope::Working, None, None).unwrap();
         assert!(p.truncated);
         assert!(p.text.len() <= PATCH_LIMIT);
+        fs::write(root.join("한글\nname"), vec![0xff; 900_000]).unwrap();
+        let p = Backend::Git.patch(root, &Scope::Working, None, None).unwrap();
+        assert!(p.truncated);
+        assert!(p.text.len() <= PATCH_LIMIT);
     }
     #[test]
     fn root_commit_and_invalid_hash() {
@@ -757,9 +789,16 @@ mod tests {
         git(&["add", "a"]);
         git(&["commit", "-qm", "root"]);
         let h = head(root, None).unwrap();
-        let scope = Scope::Commits(vec![h]);
+        let scope = Scope::Commits(vec![h.clone()]);
         assert!(Backend::Git.patch(root, &scope, None, None).unwrap().text.contains("+hello"));
         assert_eq!(Backend::Git.changes(root, &scope, None).unwrap().files[0].path, "a");
+        fs::write(root.join("a"), "hello\nworld\n").unwrap();
+        git(&["add", "a"]);
+        git(&["commit", "-qm", "second"]);
+        let both = Scope::Commits(vec![h, head(root, None).unwrap()]);
+        let total = Backend::Git.changes(root, &both, None).unwrap();
+        assert_eq!(total.files[0].adds, Some(2));
+        assert_eq!(total.files[0].dels, Some(0));
         assert!(matches!(
             Backend::Git.changes(root, &Scope::Commits(vec!["--help".into()]), None),
             Err(Error::InvalidRevision)

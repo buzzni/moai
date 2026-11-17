@@ -9,6 +9,7 @@ use crate::model::{FUTURE_SLACK_SECS, Issue, Kind, days_since};
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
 
+pub mod changes;
 pub mod gantt;
 pub mod stats;
 
@@ -12009,5 +12010,3 @@ mod tests {
         assert!(!no_epic(&issues), "미루기 하나로 `에픽 없음` 경고가 섰다");
     }
 }
-
-pub mod changes;

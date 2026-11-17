@@ -4359,6 +4359,90 @@ fn shell_arg(p: &std::path::Path) -> String {
     crate::text::shell_word(&p.display().to_string())
 }
 
+/// Stable scope names are shared by the CLI's notice and validation errors.
+pub(crate) fn scope_name(scope: &crate::report::changes::Scope) -> &'static str {
+    match scope {
+        crate::report::changes::Scope::Commits => "commits",
+        crate::report::changes::Scope::Branch => "branch",
+        crate::report::changes::Scope::Working => "working",
+    }
+}
+pub(crate) fn diff_notice(lang: crate::i18n::Lang, answer: &crate::changes::Answer) -> String {
+    if let Some(error) = &answer.vcs_error {
+        return error.said.clone();
+    }
+    let Some(scope) = answer.scope else { return crate::i18n::say(lang, "diff.empty").to_owned() };
+    let mut parts = vec![scope_name(&scope).to_owned()];
+    if let Some(offer) = answer.offers.iter().find(|o| o.scope == scope) {
+        if let Some(branch) = &offer.branch {
+            parts.push(format!("{}: {branch}", crate::i18n::say(lang, "diff.branch")));
+        }
+        if let Some(owner) = &offer.owner {
+            parts.push(format!("{}: {owner}", crate::i18n::say(lang, "diff.owner")));
+        }
+    }
+    if answer.total == 0 {
+        parts.push(crate::i18n::say(lang, "diff.empty").to_owned());
+    }
+    let others = answer.offers.iter().filter(|o| o.scope != scope).map(|o| scope_name(&o.scope)).collect::<Vec<_>>();
+    if !others.is_empty() {
+        parts.push(format!("{}: {}", crate::i18n::say(lang, "diff.other_scopes"), others.join(", ")));
+    }
+    if answer.truncated {
+        parts.push(crate::i18n::say(lang, "diff.truncated").to_owned());
+    }
+    parts.join(" · ")
+}
+pub(crate) fn diff_output(answer: &crate::changes::Answer, stat_only: bool) -> Vec<String> {
+    if stat_only {
+        return answer
+            .files
+            .iter()
+            .map(|f| {
+                let mark = match f.change.status {
+                    crate::vcs::Status::Added => "A",
+                    crate::vcs::Status::Modified => "M",
+                    crate::vcs::Status::Deleted => "D",
+                    crate::vcs::Status::Renamed => "R",
+                    crate::vcs::Status::Copied => "C",
+                    crate::vcs::Status::TypeChanged => "T",
+                    crate::vcs::Status::Untracked => "?",
+                    crate::vcs::Status::Conflicted => "U",
+                };
+                let adds = f.change.adds.map_or_else(|| "-".into(), |n| n.to_string());
+                let dels = f.change.dels.map_or_else(|| "-".into(), |n| n.to_string());
+                format!("{mark} {} +{adds} -{dels}", f.change.path)
+            })
+            .collect();
+    }
+    if answer.patch.is_empty() {
+        return Vec::new();
+    }
+    let body = answer.patch.strip_suffix('\n').unwrap_or(&answer.patch);
+    let mut in_hunk = false;
+    let painted = body
+        .split('\n')
+        .map(|line| {
+            if line.starts_with("diff --git ") || line.starts_with("commit ") {
+                in_hunk = false;
+            }
+            let style = if line.starts_with("@@") {
+                in_hunk = true;
+                crate::style::OTHER
+            } else if in_hunk && line.starts_with('+') {
+                crate::style::DONE
+            } else if in_hunk && line.starts_with('-') {
+                crate::style::ERROR
+            } else {
+                crate::style::PLAIN
+            };
+            crate::style::paint(style, line)
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    vec![painted]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

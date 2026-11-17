@@ -2869,6 +2869,7 @@ fn every_command_speaks_json() {
         vec!["show", "issue", "--json"],
         vec!["show", "epic", "--json"],
         vec!["show", &id, "--json"],
+        vec!["diff", &id, "--json"],
     ] {
         one_json_value(&ok(s.path(), &args));
     }
@@ -9841,6 +9842,7 @@ const JSON_SWEEP: &[&str] = &[
     "ready",
     "prime",
     "show",
+    "diff",
     // 거르개가 고른 줄을 센다(moai-1hka.k16) — 객체 하나를 낸다.
     "stats",
     "archive",
@@ -10663,6 +10665,7 @@ fn every_command_still_speaks_json() {
         vec!["show", "--tree", "--json"],
         vec!["show", "--removed", "--json"],
         vec!["show", &id, "--json"],
+        vec!["diff", &id, "--json"],
         vec!["show", &epic, "--json"],
         vec!["stats", "--json"],
         vec!["archive", "--dry-run", "--json"],
@@ -36031,4 +36034,110 @@ fn supervisor_watch_heads_skip_promote_notes_and_moves() {
     let result = ok(s.path(), &["watch", &backlog, "--since", NOW]);
     let event: serde_json::Value = serde_json::from_str(&result).unwrap();
     assert_eq!(event["head"], format!("{backlog} 진행 중 결정이 필요합니다."));
+}
+
+#[test]
+fn diff_reads_commits_and_worktree_scopes_without_writing() {
+    let s = Scratch::new("diff-scopes");
+    let root = s.path();
+    git(root, &["init", "-q"]);
+    ok(root, &["init", "argos"]);
+    let id = field(&ok(root, &["add", "change", "--json"]), "id");
+    std::fs::write(root.join("tracked"), "first\n").unwrap();
+    git(root, &["add", "-A"]);
+    git(root, &["commit", "-qm", &format!("feat: {id}")]);
+    let json: serde_json::Value = serde_json::from_str(&ok(root, &["diff", &id, "--json"])).unwrap();
+    assert_eq!(json["scope"], "commits");
+    assert!(
+        json["files"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|f| f["path"] == "tracked" && f["hunks"][0]["lines"][0]["text"] == "first")
+    );
+    assert!(json.get("vcs_error").is_none());
+    let out = moai(root, &["diff", &id]);
+    assert!(out.status.success());
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    let stderr = String::from_utf8(out.stderr).unwrap();
+    assert!(stdout.contains("+first") && !stdout.contains("\u{1b}["));
+    assert!(stderr.contains("commits"));
+    let missing = moai(root, &["diff", &id, "--scope", "working", "--json"]);
+    assert!(!missing.status.success());
+    assert_eq!(serde_json::from_slice::<serde_json::Value>(&missing.stderr).unwrap()["code"], "bad_input");
+
+    let epic = field(&ok(root, &["add", "epic", "--type", "epic", "--json"]), "id");
+    let side = root.join("worktree");
+    let branch = format!("worktree-{epic}");
+    git(root, &["worktree", "add", "-qb", &branch, side.to_str().unwrap()]);
+    std::fs::write(side.join("--output=evil"), "new\n").unwrap();
+    let index_name = git(&side, &["rev-parse", "--git-path", "index"]);
+    let index = side.join(index_name.trim());
+    let before = std::fs::read(&index).unwrap();
+    let json: serde_json::Value = serde_json::from_str(&ok(root, &["diff", &epic, "--json"])).unwrap();
+    assert_eq!(json["scope"], "working");
+    assert!(
+        json["files"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|f| f["path"] == "--output=evil" && f["hunks"][0]["lines"][0]["text"] == "new")
+    );
+    let stat: serde_json::Value = serde_json::from_str(&ok(root, &["diff", &epic, "--stat", "--json"])).unwrap();
+    assert!(stat["files"][0].get("hunks").is_none());
+    let bad = moai(root, &["diff", &epic, "--path=--output=bad", "--json"]);
+    assert!(!bad.status.success());
+    assert!(!side.join("bad").exists());
+    assert_eq!(before, std::fs::read(index).unwrap());
+    std::fs::write(side.join("large"), "x".repeat(2 * 1024 * 1024 + 100)).unwrap();
+    let cut: serde_json::Value = serde_json::from_str(&ok(root, &["diff", &epic, "--json"])).unwrap();
+    assert_eq!(cut["truncated"], true);
+    let one: serde_json::Value =
+        serde_json::from_str(&ok(root, &["diff", &epic, "--path=--output=evil", "--json"])).unwrap();
+    assert_eq!(one["total"], 2);
+    assert_eq!(one["files"].as_array().unwrap().len(), 1);
+}
+
+#[test]
+fn diff_without_git_repository_returns_one_value_and_a_vcs_error() {
+    let s = init("diff-no-git");
+    let id = field(&ok(s.path(), &["add", "issue", "--json"]), "id");
+    let value: serde_json::Value = serde_json::from_str(&ok(s.path(), &["diff", &id, "--json"])).unwrap();
+    assert_eq!(value["scope"], serde_json::Value::Null);
+    assert!(value["vcs_error"]["kind"].is_string());
+}
+
+#[test]
+fn diff_member_prefers_own_commits_and_owner_falls_back_to_branch() {
+    let s = Scratch::new("diff-order");
+    let root = s.path();
+    git(root, &["init", "-q"]);
+    ok(root, &["init", "argos"]);
+    let epic = field(&ok(root, &["add", "epic", "--type", "epic", "--json"]), "id");
+    let member = field(&ok(root, &["add", "member", "-e", &epic, "--json"]), "id");
+    ok(root, &["mv", &member, "in_progress"]);
+    git(root, &["add", "-A"]);
+    git(root, &["commit", "-qm", "base"]);
+    let side = root.join("worker");
+    let branch = format!("worktree-{epic}");
+    git(root, &["worktree", "add", "-qb", &branch, side.to_str().unwrap()]);
+    std::fs::write(side.join("committed"), "committed\n").unwrap();
+    git(&side, &["add", "committed"]);
+    git(&side, &["commit", "-qm", &format!("feat: {member}")]);
+    let v: serde_json::Value = serde_json::from_str(&ok(root, &["diff", &epic, "--json"])).unwrap();
+    assert_eq!(v["scope"], "branch");
+    std::fs::write(side.join(".env"), "visible\n").unwrap();
+    let v: serde_json::Value = serde_json::from_str(&ok(root, &["diff", &epic, "--json"])).unwrap();
+    assert_eq!(v["scope"], "working");
+    assert!(
+        v["files"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|f| f["path"] == ".env" && f["hunks"][0]["lines"][0]["text"] == "visible")
+    );
+    let v: serde_json::Value = serde_json::from_str(&ok(root, &["diff", &member, "--json"])).unwrap();
+    assert_eq!(v["scope"], "commits");
+    assert_eq!(v["offers"][0]["owner"], epic);
+    assert!(v["files"].as_array().unwrap().iter().any(|f| f["path"] == "committed"));
 }

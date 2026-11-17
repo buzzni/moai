@@ -1990,5 +1990,16 @@
   "page.markdown.loading": "snippet 불러오는 중",
   "page.markdown.missing": "snippet 없음",
   "page.markdown.refused": "snippet 거절됨",
-  "page.markdown.tooLarge": "snippet이 너무 큽니다"
+  "page.markdown.tooLarge": "snippet이 너무 큽니다",
+  "diff.bad_scope": "이 범위는 없습니다. 고를 범위: {scopes}",
+  "diff.bad_path": "이 범위의 변경 파일에 없는 경로입니다",
+  "diff.empty": "바뀐 것이 없습니다",
+  "diff.truncated": "잘림",
+  "diff.other_scopes": "다른 범위",
+  "diff.branch": "가지",
+  "diff.owner": "임자",
+  "diff.timeout": "Git 응답 시간이 초과됐습니다",
+  "diff.limit": "Git 출력이 한도를 넘었습니다",
+  "diff.invalid_revision": "Git 객체 ID가 올바르지 않습니다",
+  "diff.invalid_path": "경로가 올바르지 않습니다"
 }

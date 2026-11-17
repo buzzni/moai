@@ -1572,6 +1572,57 @@ fn git(root: &Path, args: &[&str]) -> Result<String, Trouble> {
     })
 }
 
+/// All existing checkouts, including milestone worktrees. This reads Git's
+/// administrative files through `on_disk`; it does not start a Git process.
+pub fn checkouts(root: &Path) -> Vec<crate::report::changes::Checkout> {
+    let Some(disk) = on_disk(root) else {
+        return if root.is_dir() {
+            vec![crate::report::changes::Checkout {
+                key: ".".into(),
+                path: real(root),
+                branch: String::new(),
+                main: true,
+                milestone: None,
+            }]
+        } else {
+            Vec::new()
+        };
+    };
+    // The common directory may itself be a bare repository named `.git`.
+    // Its config is the only local indication available without invoking Git.
+    let bare = std::fs::read_to_string(disk.common.join("config")).ok().is_some_and(|text| {
+        let mut core = false;
+        let mut bare = false;
+        for line in text.lines() {
+            let line = line.trim();
+            if line.starts_with('[') {
+                core = line.eq_ignore_ascii_case("[core]");
+            } else if core
+                && let Some((key, value)) = line.split_once('=')
+                && key.trim().eq_ignore_ascii_case("bare")
+            {
+                bare = matches!(value.trim().to_ascii_lowercase().as_str(), "true" | "yes" | "on" | "1");
+            }
+        }
+        bare
+    });
+    let top = if bare { real(&disk.common) } else { main_top(&disk) };
+    disk.all
+        .iter()
+        .filter(|(tree, linked, _)| (*linked || !bare) && root_in(&disk, tree).is_dir())
+        .map(|(tree, linked, _)| {
+            let key = from_top(&top, &tree.path).to_string_lossy().into_owned();
+            crate::report::changes::Checkout {
+                key,
+                path: root_in(&disk, tree),
+                branch: tree.label.clone(),
+                main: !linked,
+                milestone: tree.label.strip_prefix(MILESTONE_BRANCH).filter(|id| !id.is_empty()).map(str::to_owned),
+            }
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2663,57 +2714,6 @@ mod tests {
         assert_eq!(origin.unreadable([Some("m-0001"), Some("m-0001")].into_iter()), [None, Some("m-0001")]);
         assert_eq!(origin.unreadable([None, Some("m-0009")].into_iter()), [None, Some("m-0009")]);
     }
-}
-
-/// All existing checkouts, including milestone worktrees. This reads Git's
-/// administrative files through `on_disk`; it does not start a Git process.
-pub fn checkouts(root: &Path) -> Vec<crate::report::changes::Checkout> {
-    let Some(disk) = on_disk(root) else {
-        return if root.is_dir() {
-            vec![crate::report::changes::Checkout {
-                key: ".".into(),
-                path: real(root),
-                branch: String::new(),
-                main: true,
-                milestone: None,
-            }]
-        } else {
-            Vec::new()
-        };
-    };
-    // The common directory may itself be a bare repository named `.git`.
-    // Its config is the only local indication available without invoking Git.
-    let bare = std::fs::read_to_string(disk.common.join("config")).ok().is_some_and(|text| {
-        let mut core = false;
-        let mut bare = false;
-        for line in text.lines() {
-            let line = line.trim();
-            if line.starts_with('[') {
-                core = line.eq_ignore_ascii_case("[core]");
-            } else if core
-                && let Some((key, value)) = line.split_once('=')
-                && key.trim().eq_ignore_ascii_case("bare")
-            {
-                bare = matches!(value.trim().to_ascii_lowercase().as_str(), "true" | "yes" | "on" | "1");
-            }
-        }
-        bare
-    });
-    let top = if bare { real(&disk.common) } else { main_top(&disk) };
-    disk.all
-        .iter()
-        .filter(|(tree, linked, _)| (*linked || !bare) && root_in(&disk, tree).is_dir())
-        .map(|(tree, linked, _)| {
-            let key = from_top(&top, &tree.path).to_string_lossy().into_owned();
-            crate::report::changes::Checkout {
-                key,
-                path: root_in(&disk, tree),
-                branch: tree.label.clone(),
-                main: !linked,
-                milestone: tree.label.strip_prefix(MILESTONE_BRANCH).filter(|id| !id.is_empty()).map(str::to_owned),
-            }
-        })
-        .collect()
 }
 
 #[cfg(test)]

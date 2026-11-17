@@ -8,11 +8,13 @@
 //! 않다는 것은 `CONTRIBUTING.md` 의 "The library" 에 있다.
 
 mod archive;
+mod changes;
 mod cli;
 mod cmd;
 pub mod config;
 mod ctl;
 mod daemon;
+mod diff;
 mod draft;
 pub mod fail;
 mod git;
@@ -49,6 +51,7 @@ mod tui;
 pub mod tz;
 mod update;
 pub mod user_config;
+mod vcs;
 mod view;
 mod web;
 mod wiki;
@@ -660,7 +663,3 @@ mod tests {
         assert!(said[0].contains("/tmp/moai-6ney/side/.moai/journal/b_x_com.jsonl"), "{}", said[0]);
     }
 }
-
-mod vcs;
-
-mod diff;
