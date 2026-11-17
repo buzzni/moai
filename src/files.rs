@@ -339,6 +339,7 @@ fn walk_limit(
         .filter(|s| !s.is_empty() && start_key != *s && !start_key.strip_prefix(*s).is_some_and(|r| r.starts_with('/')))
         .collect();
     // No link, including an intermediate one, is followed by the walker.
+    #[cfg(unix)]
     let start_path = jail.root.join(&start);
     #[cfg(unix)]
     let _start_handle = open_checked(jail, &start_path, true)?;
