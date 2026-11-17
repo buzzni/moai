@@ -93,6 +93,8 @@ Open **Files** with `SPC g f`. Select the current or another checkout from the s
 
 The toolbar toggles changed-only files, the active file's diff, or the linked issue's detail pane. Use `SPC v D` to toggle the diff; the issue list, board, and Gantt views also provide this pane for the selected issue. Choose between commit, branch, or working scopes, and toggle unified or side-by-side layouts within the pane. Narrow panes automatically fall back to unified display. Use `Tab` and `Shift-Tab` to navigate between diff files, and `H` and `L` to scroll horizontally. In Files, navigate with `j`/`k` or arrow keys, fold or expand directories with `h`/`l`, enter a directory or view a file with `Enter`, and go back with `Backspace`.
 
+Use `SPC v w` to choose a checkout, `SPC v c` to show only changed files, and `SPC o s` to switch the diff layout. Search results can be traversed with `n` and `N`.
+
 Visible files and diffs refresh automatically when their stamps or underlying changes update; background tabs suspend file polling. If a refresh fails, the last valid diff is retained and retried. Direct file editing is not supported. File reads are strictly confined to the chosen checkout: `.git` directories and symlinks pointing outside the checkout boundary are rejected. Sensitive files such as `.env` are not hidden; any client able to access a non-loopback server can read them.
 
 ## File HTTP reads
