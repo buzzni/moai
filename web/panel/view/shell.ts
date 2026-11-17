@@ -7,6 +7,7 @@
 // The shell reads and dispatches to the store; it does no I/O. Reads and cancels are the caller's
 // (main.ts) and arrive as ShellIntents.
 
+import type { FileWatch, StampAnswer } from "../data/files-refresh.ts"
 import { issueDiff, type IssueDiff, type Scope } from "../data/changes.ts"
 import { createDiff } from "./diff.ts"
 import { aboutFrom } from "../data/about.ts"
@@ -90,6 +91,10 @@ export interface Shell {
   layout(): PaneLayout
   /** The views in the panes, for the key router (panel/keys/wiring.ts) to hand its actions to. */
   panes(): { list: PaneView; board: PaneView; gantt: PaneView; detail: PaneView; diff: PaneView; wiki: PaneView | null; files: PaneView | null }
+  fileWatch(): FileWatch | null
+  refreshFileStamps(watch: FileWatch, dirs: string[], file: boolean, answer: StampAnswer): Promise<void>
+  refreshFileChanges(watch: FileWatch, fingerprint: string): Promise<void>
+  trackerChanged(): void
   /** Move the keyboard focus into a pane of the shown tab (its view's focus()). */
   focusPane(area: Focus): void
   /** Move the keyboard focus to the selected tab of the tab bar: the way out of the wiki, whose Tab cycles its links. */
@@ -257,14 +262,18 @@ export function mountShell(root: HTMLElement, options: ShellOptions): Shell {
   diffRoot.append(scopes, diffWidget.el)
   const inside = createSplit(doc, { position: "left", ratios: { left: 0.5, top: 0.5 }, onRatio: (position, ratio) => store.dispatch({ type: "diff-ratio", axis: position === "left" ? "horizontal" : "vertical", ratio: 1 - ratio }) })
   const foldedDiff = el(doc, "p", { class: "m-diff-collapsed", role: "status" }, copy.files.collapsed)
-  let diffId: string | null = null, diffOverlay = false, selectedScope: Scope | undefined, diffAnswer: IssueDiff | null = null, diffEpoch = 0
+  let diffId: string | null = null, diffOverlay = false, issueFileStamp: string | null = null, issueStampPath = '', issueReadAt = 0, selectedScope: Scope | undefined, diffAnswer: IssueDiff | null = null, diffEpoch = 0
   let diffTimer: ReturnType<typeof setTimeout> | undefined
-  function readDiff(id: string, scope?: Scope): void {
+  function readDiff(id: string, scope?: Scope, background = false): void {
     if (!options.client) return
     const request = ++diffEpoch
-    void issueDiff(options.client, id, scope, store.getState().view.worktree).then(answer => {
+    void issueDiff(options.client, id, scope, store.getState().view.worktree, background).then(answer => {
       if (request !== diffEpoch || store.getState().cursor !== id || !store.getState().diff.visible) return
-      diffAnswer = answer; selectedScope = answer.scope ?? undefined; diffWidget.show(answer); paintScopes()
+      if (selectedScope !== answer.scope || diffAnswer?.files[0]?.path !== answer.files[0]?.path) issueFileStamp = null
+      const changed = !background || JSON.stringify(diffAnswer) !== JSON.stringify(answer)
+      diffAnswer = answer; issueReadAt = Date.now(); selectedScope = answer.scope ?? undefined
+      if (changed) { diffWidget.show(answer, background); paintScopes() }
+      shell.dispatchEvent(new doc.defaultView!.Event("moai-file-watch", { bubbles: true }))
     }).catch(() => { if (request === diffEpoch) { diffAnswer = null; scopes.replaceChildren(); diffWidget.show({ files: [], truncated: false }) } })
   }
   function paintScopes(): void {
@@ -460,7 +469,7 @@ export function mountShell(root: HTMLElement, options: ShellOptions): Shell {
     if (!canReadDiff || !state.cursor) {
       if (diffId !== null) { diffEpoch++; clearTimeout(diffTimer); diffId = null; diffAnswer = null; scopes.replaceChildren(); diffWidget.show({ files: [], truncated: false }) }
     } else if (state.cursor !== diffId || diffOverlay !== state.view.worktree) {
-      diffOverlay = state.view.worktree; diffId = state.cursor; selectedScope = undefined; diffAnswer = null; diffEpoch++; clearTimeout(diffTimer)
+      diffOverlay = state.view.worktree; diffId = state.cursor; issueFileStamp = null; selectedScope = undefined; diffAnswer = null; diffEpoch++; clearTimeout(diffTimer)
       scopes.replaceChildren(); diffWidget.show({ files: [], truncated: false })
       const id = diffId; diffTimer = setTimeout(() => readDiff(id), 120)
     }
@@ -518,6 +527,7 @@ export function mountShell(root: HTMLElement, options: ShellOptions): Shell {
     shell.dataset.position = split.position()
     const current = store.getState()
     paintLayout(current)
+    shell.dispatchEvent(new doc.defaultView!.Event("moai-file-watch", { bubbles: true }))
     if (width < 480 && current.diff.visible && current.detail.visible && current.focus === "diff") store.dispatch({ type: "focus", focus: "list" })
     // The wiki pane lays itself out from the width it is given when it renders (view/wiki.ts mountWiki): a narrow
     // panel stacks its list over the page.
@@ -560,6 +570,25 @@ export function mountShell(root: HTMLElement, options: ShellOptions): Shell {
     setWidth,
     layout,
     panes: () => ({ list: mainViews.list, board: mainViews.board, gantt: mainViews.gantt, detail: detailView, diff: diffView, wiki: wikiView, files: filesView }),
+    fileWatch() {
+      const now = store.getState()
+      if (now.tab === "files") return filesView?.fileWatch?.() ?? { key: "files:pending", dirs: [] }
+      if (!now.diff.visible || (now.detail.visible && width < 480) || now.tab === "wiki" || !diffId || !selectedScope) return null
+      if (selectedScope === "commits") return { key: `issue:${diffId}`, dirs: [] }
+      const offer = diffAnswer?.offers.find(o => o.scope === selectedScope)
+      const path = diffWidget.visiblePath()
+      if (path !== issueStampPath) { issueStampPath = path ?? ''; issueFileStamp = null }
+      return { key: `issue:${diffId}`, dirs: [], ...(offer?.checkout ? { root: offer.checkout } : {}), ...(selectedScope === "working" && path ? { file: { path, stamp: issueFileStamp, readAt: issueReadAt } } : {}), changeKey: JSON.stringify(["issue", diffId, selectedScope, now.view.worktree]) }
+    },
+    async refreshFileStamps(watch, dirs, file, answer) {
+      if (watch.key.startsWith("files:")) await filesView?.refreshFileStamps?.(watch, dirs, file)
+      else if (file && watch.key === `issue:${diffId}` && diffId && selectedScope === "working") { issueFileStamp = answer.file; readDiff(diffId, selectedScope, true) }
+    },
+    async refreshFileChanges(watch, fingerprint) {
+      if (watch.key.startsWith("files:")) await filesView?.refreshFileChanges?.(watch, fingerprint)
+      else if (watch.key === `issue:${diffId}` && diffId && selectedScope && selectedScope !== "commits") readDiff(diffId, selectedScope, true)
+    },
+    trackerChanged() { if (diffId && selectedScope && selectedScope !== "working" && !(store.getState().detail.visible && width < 480) && store.getState().diff.visible && store.getState().tab !== "files" && store.getState().tab !== "wiki") readDiff(diffId, selectedScope, true) },
     focusPane,
     focusTabs,
     toolbar: bar,

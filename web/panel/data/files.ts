@@ -4,9 +4,13 @@ export interface Checkout { key: string; branch: string; main: boolean; mileston
 export interface Change { path: string; old_path: string | null; status: string; adds: number | null; dels: number | null; binary: boolean }
 
 export interface Entry { name: string; kind: 'dir' | 'file' | 'link' | 'other'; size: number; openable: boolean; dir?: boolean; inside?: boolean }
-export interface FileText { path: string; text?: string; binary: boolean; truncated: boolean; spans?: Array<Array<[number, number, string]>> | null }
+export interface FileText { stamp?: string | null; path: string; text?: string; binary: boolean; truncated: boolean; spans?: Array<Array<[number, number, string]>> | null }
 export interface SearchResult { matches: Array<{ path: string; start: number; end: number }>; total: number; truncated: boolean; walk_truncated: boolean; ignored_unavailable: boolean }
 const record = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null
+export function changesOf(v: unknown): Change[] | null {
+  if (!record(v) || !Array.isArray(v.files)) return null
+  return v.files.filter((c): c is Change => record(c) && typeof c.path === 'string' && !c.path.startsWith('/') && !c.path.includes('\\') && !c.path.split('/').some(p => !p || p === '.' || p === '..') && typeof c.status === 'string' && (c.adds === null || typeof c.adds === 'number') && (c.dels === null || typeof c.dels === 'number'))
+}
 export function validDiff(v: unknown): v is DiffAnswer {
   if (!record(v) || !Array.isArray(v.files) || typeof v.truncated !== 'boolean') return false
   return v.files.every(f => record(f) && typeof f.path === 'string' && typeof f.status === 'string' && typeof f.binary === 'boolean' &&
@@ -14,22 +18,22 @@ export function validDiff(v: unknown): v is DiffAnswer {
       typeof h.old_start === 'number' && typeof h.old_len === 'number' && typeof h.new_start === 'number' && typeof h.new_len === 'number' && typeof h.section === 'string' && Array.isArray(h.lines) &&
       h.lines.every(l => record(l) && ['context', 'add', 'delete', 'raw'].includes(String(l.kind)) && typeof l.text === 'string' && (l.spans == null || Array.isArray(l.spans)))))))
 }
-async function read(client: Client, path: string, query: Record<string, string>): Promise<unknown> {
-  const result = await client.request({ path, query })
+async function read(client: Client, path: string, query: Record<string, string>, background = false): Promise<unknown> {
+  const result = await client.request({ path, query }, background ? { priority: 3, share: false, group: 'files-refresh' } : undefined)
   if (result.kind !== 'passed') throw new Error(result.kind)
   return result.output
 }
 export function filesSource(client: Client) {
   return {
-    async list(dir: string, limit?: number, root?: string): Promise<{ entries: Entry[]; truncated: boolean }> {
+    async list(dir: string, limit?: number, root?: string, background = false): Promise<{ entries: Entry[]; truncated: boolean; stamp: string | null }> {
       const query: Record<string, string> = { dir }; if (limit !== undefined) query.limit = String(limit); if (root !== undefined) query.root = root
-      const v = await read(client, '/api/files', query)
+      const v = await read(client, '/api/files', query, background)
       if (!record(v) || !Array.isArray(v.entries)) throw new Error('invalid directory')
       const entries = v.entries.filter((e): e is Entry => record(e) && typeof e.name === 'string' && e.name !== '.' && e.name !== '..' && !e.name.includes('/') && !e.name.includes('\\') && ['dir', 'file', 'link', 'other'].includes(String(e.kind)) && typeof e.openable === 'boolean' && typeof e.size === 'number')
-      return { entries, truncated: v.truncated === true }
+      return { entries, truncated: v.truncated === true, stamp: typeof v.stamp === 'string' ? v.stamp : null }
     },
-    async file(path: string, root?: string): Promise<FileText> {
-      const v = await read(client, '/api/file', root === undefined ? { path } : { path, root })
+    async file(path: string, root?: string, background = false): Promise<FileText> {
+      const v = await read(client, '/api/file', root === undefined ? { path } : { path, root }, background)
       if (!record(v) || typeof v.path !== 'string' || typeof v.binary !== 'boolean' || typeof v.truncated !== 'boolean' || (v.text !== undefined && typeof v.text !== 'string')) throw new Error('invalid file')
       return v as unknown as FileText
     },
@@ -43,14 +47,14 @@ export function filesSource(client: Client) {
       if (!record(v) || !Array.isArray(v.checkouts)) throw new Error('invalid checkouts')
       return v.checkouts.filter((c): c is Checkout => record(c) && typeof c.key === 'string' && typeof c.branch === 'string' && typeof c.main === 'boolean' && typeof c.current === 'boolean' && (typeof c.issue === 'string' || c.issue === null))
     },
-    async changes(root: string): Promise<{ files: Change[]; error?: string }> {
-      const v = await read(client, '/api/changes', { root })
+    async changes(root: string, background = false): Promise<{ files: Change[]; total: number; truncated: boolean; error?: string }> {
+      const v = await read(client, '/api/changes', { root }, background)
       if (!record(v) || !Array.isArray(v.files)) throw new Error('invalid changes')
-      const files = v.files.filter((c): c is Change => record(c) && typeof c.path === 'string' && !c.path.startsWith('/') && !c.path.includes('\\') && !c.path.split('/').some(p => !p || p === '.' || p === '..') && typeof c.status === 'string')
-      return { files, ...(record(v.vcs_error) && typeof v.vcs_error.said === 'string' ? { error: v.vcs_error.said } : {}) }
+      const files = changesOf(v) ?? []
+      return { files, total: typeof v.total === 'number' ? v.total : files.length, truncated: v.truncated === true, ...(record(v.vcs_error) && typeof v.vcs_error.said === 'string' ? { error: v.vcs_error.said } : {}) }
     },
-    async diff(root: string, path: string): Promise<DiffAnswer> {
-      const v = await read(client, '/api/diff', { root, path })
+    async diff(root: string, path: string, background = false): Promise<DiffAnswer> {
+      const v = await read(client, '/api/diff', { root, path }, background)
       if (!validDiff(v)) throw new Error('invalid diff')
       return v as unknown as DiffAnswer
     },

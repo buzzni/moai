@@ -4,6 +4,7 @@ import { createSplit } from './split.ts'
 import { createDiff, statusMark } from './diff.ts'
 import { mountDetail } from './detail.ts'
 import { loadDetail } from '../data/source.ts'
+import type { FileWatch } from '../data/files-refresh.ts'
 import type { State } from '../store.ts'
 import type { IssueIndex } from '../data/index.ts'
 import type { PaneView, ViewContext } from './types.ts'
@@ -51,6 +52,10 @@ export function mountFiles(root: HTMLElement, ctx: ViewContext): PaneView {
   const directories = new Map<string, Entry[]>()
   const expanded = new Set<string>(['.'])
   const partial = new Set<string>()
+  const stamps = new Map<string, string | null>()
+  const readTimes = new Map<string, number>()
+  let fileStamp: string | null = null, fileReadAt = 0
+  let lastFile: FileText | null = null, lastDiff = ''
   let beforeSearch = new Set<string>()
   let matches: SearchResult | null = null
   let cursor = 0, chosen = '', base = '.', generation = 0, pendingG = false, timer: ReturnType<typeof setTimeout> | undefined
@@ -79,12 +84,13 @@ export function mountFiles(root: HTMLElement, ctx: ViewContext): PaneView {
     issueShown = loaded.ok ? { value: { id: issue, row: loaded.value }, loading: false, problem: null } : { value: null, loading: false, problem: loaded.outcome }
     paintRight()
   }
+  const watchChanged = () => root.dispatchEvent(new doc.defaultView!.Event('moai-file-watch', { bubbles: true }))
   async function switchCheckout(key: string): Promise<void> {
     if (!checkouts.some(c => c.key === key)) return
     generation++; diffEpoch++; issueEpoch++; clearTimeout(timer); rootKey = key; chosen = ''; cursor = 0; base = '.'; matches = null; changes = []; changesLoaded = false; ordinary = null; changedOnly = false
-    directories.clear(); partial.clear(); expanded.clear(); expanded.add('.'); content.replaceChildren(); diff.show({ files: [], truncated: false }); draw(); paintRight()
+    directories.clear(); partial.clear(); stamps.clear(); readTimes.clear(); fileStamp = null; fileReadAt = 0; lastFile = null; lastDiff = '';  expanded.clear(); expanded.add('.'); content.replaceChildren(); diff.show({ files: [], truncated: false }); draw(); paintRight()
     try { await load('.'); if (rootKey === key) draw() } catch { message.textContent = words.directoryError; const current = checkouts.find(c => c.current); if (current && current.key !== key) { checkoutSelect.value = current.key; void switchCheckout(current.key) } }
-    void readIssue()
+    void readIssue(); watchChanged()
   }
   async function toggleChanged(): Promise<void> {
     if (!source || rootKey === undefined) return
@@ -93,7 +99,13 @@ export function mountFiles(root: HTMLElement, ctx: ViewContext): PaneView {
     if (key !== rootKey) return
     if (!result) { message.textContent = words.readError; return }
     if (result.error) message.textContent = result.error
-    ordinary = new Map(directories); ordinaryExpanded = new Set(expanded); ordinaryBase = base; base = '.'; changes = result.files; changesLoaded = true; directories.clear(); directories.set('.', []); expanded.clear(); expanded.add('.')
+    else if (result.truncated) message.textContent = `${result.total} · ${words.truncated}`
+    else message.textContent = ''
+    ordinary = new Map(directories); ordinaryExpanded = new Set(expanded); ordinaryBase = base; base = '.'; changesLoaded = true
+    buildChanged(result.files); changedOnly = true; cursor = 0; draw(); paintRight(); watchChanged()
+  }
+  function buildChanged(next: Change[]): void {
+    changes = next; directories.clear(); directories.set('.', []); expanded.clear(); expanded.add('.')
     for (const change of changes) {
       const parts = change.path.split('/'); if (parts.some(p => !p || p === '.' || p === '..')) continue
       let dir = '.'
@@ -105,29 +117,28 @@ export function mountFiles(root: HTMLElement, ctx: ViewContext): PaneView {
       })
     }
     for (const entries of directories.values()) entries.sort((a, b) => Number(b.kind === 'dir') - Number(a.kind === 'dir') || a.name.localeCompare(b.name))
-    changedOnly = true; cursor = 0; draw(); paintRight()
   }
-  async function showDiff(): Promise<void> {
+  async function showDiff(background = false): Promise<void> {
     const row = rows[cursor], key = rootKey
     if (!source || !row || key === undefined) return
     const epoch = ++diffEpoch
     try {
       if (!changesLoaded) { const found = await source.changes(key); if (epoch !== diffEpoch || key !== rootKey) return; if (found.error) { message.textContent = found.error; return } changes = found.files; changesLoaded = true }
       if (!changes.some(change => change.path === row.path)) { diff.show({ files: [], truncated: false }); return }
-      const result = await source.diff(key, row.path); if (epoch === diffEpoch && key === rootKey) diff.show(result)
+      const result = await source.diff(key, row.path, background); if (epoch === diffEpoch && key === rootKey) { const next = JSON.stringify(result); if (!background || next !== lastDiff) diff.show(result, background); lastDiff = next }
     } catch { if (epoch === diffEpoch) diff.show({ files: [], truncated: false }) }
   }
   checkoutSelect.addEventListener('change', () => void switchCheckout(checkoutSelect.value))
   changedButton.addEventListener('click', () => void toggleChanged())
-  diffButton.addEventListener('click', () => { diffOn = !diffOn; paintRight(); if (diffOn) void showDiff() })
-  detailButton.addEventListener('click', () => { detailOn = !detailOn; paintRight(); if (detailOn) void readIssue() })
+  diffButton.addEventListener('click', () => { diffOn = !diffOn; paintRight(); if (diffOn) void showDiff(); watchChanged() })
+  detailButton.addEventListener('click', () => { detailOn = !detailOn; paintRight(); if (detailOn) void readIssue(); watchChanged() })
   async function load(dir: string, limit?: number): Promise<number> {
     if (!source) return 0
     if (directories.has(dir) && (limit !== undefined || !partial.has(dir))) return 0
     const key = rootKey
     const result = await source.list(dir, limit, key)
     if (key !== rootKey) return 0
-    directories.set(dir, result.entries)
+    directories.set(dir, result.entries); stamps.set(dir, result.stamp); readTimes.set(dir, Date.now())
     if (result.truncated) partial.add(dir); else partial.delete(dir)
     return result.entries.length
   }
@@ -137,8 +148,10 @@ export function mountFiles(root: HTMLElement, ctx: ViewContext): PaneView {
       if (expanded.has(path)) flatten(path, depth + 1)
     }
   }
-  function draw(): void {
-    rows = []; flatten(base, 0); cursor = Math.max(0, Math.min(cursor, rows.length - 1))
+  function draw(keepPath?: string): void {
+    rows = []; flatten(base, 0)
+    if (keepPath) { const found = rows.findIndex(row => row.path === keepPath); if (found >= 0) cursor = found }
+    cursor = Math.max(0, Math.min(cursor, rows.length - 1))
     const nodes = rows.map((row, index) => {
       const isDir = row.entry.kind === 'dir' || (row.entry.kind === 'link' && row.entry.openable && row.entry.dir === true)
       const button = el(doc, 'button', { type: 'button', role: 'treeitem', class: `m-files-row m-files-kind-${fileClass(row.entry)} m-files-depth-${Math.min(row.depth, 12)}`, 'aria-selected': String(index === cursor), ...(isDir ? { 'aria-expanded': String(expanded.has(row.path)) } : {}) }, `${isDir ? (expanded.has(row.path) ? '▾' : '▸') : row.entry.kind === 'link' ? '↗' : '·'} ${row.entry.name}`)
@@ -163,7 +176,9 @@ export function mountFiles(root: HTMLElement, ctx: ViewContext): PaneView {
     }
     tree.replaceChildren(...nodes)
   }
-  function paintFile(file: FileText): void {
+  function paintFile(file: FileText, preserve = false): void {
+    const top = content.scrollTop, left = content.scrollLeft
+    fileStamp = file.stamp ?? null; fileReadAt = Date.now(); lastFile = file
     content.replaceChildren()
     if (file.binary) { content.textContent = words.binary; return }
     const lines = (file.text ?? '').split('\n'); let index = 0
@@ -183,7 +198,7 @@ export function mountFiles(root: HTMLElement, ctx: ViewContext): PaneView {
       }
       content.append(fragment)
       if (index < lines.length) setTimeout(drawChunk, 0)
-      else if (file.truncated) content.append(el(doc, 'p', {}, words.truncated))
+      else { if (file.truncated) content.append(el(doc, 'p', {}, words.truncated)); if (preserve) { content.scrollTop = top; content.scrollLeft = left } }
     }; drawChunk()
   }
   function select(): void {
@@ -273,12 +288,47 @@ export function mountFiles(root: HTMLElement, ctx: ViewContext): PaneView {
       else if (event.key === 'G') cursor = rows.length - 1
       else if (event.key === 'l' || event.key === 'ArrowRight') { void expand(); return true }
       else if (event.key === 'h' || event.key === 'ArrowLeft') { if (row && expanded.has(row.path)) expanded.delete(row.path); else if (row?.path.includes('/')) { const parent = row.path.slice(0, row.path.lastIndexOf('/')); const i = rows.findIndex(r => r.path === parent); if (i >= 0) cursor = i } }
-      else if (event.key === 'Enter') { if (row && (row.entry.kind === 'dir' || (row.entry.kind === 'link' && row.entry.dir && row.entry.openable))) { base = row.path; expanded.add(base); void load(base).then(draw) } else { root.classList.add('m-files-show-content'); content.focus() } return true }
+      else if (event.key === 'Enter') { if (row && (row.entry.kind === 'dir' || (row.entry.kind === 'link' && row.entry.dir && row.entry.openable))) { base = row.path; expanded.add(base); void load(base).then(() => draw()) } else { root.classList.add('m-files-show-content'); content.focus() } return true }
       else if (event.key === 'Backspace') { if (root.classList.contains('m-files-show-content')) { root.classList.remove('m-files-show-content'); tree.focus(); return true } if (base !== '.') { base = base.includes('/') ? base.slice(0, base.lastIndexOf('/')) : '.'; cursor = 0 } }
       else if ((event.key === 'n' || event.key === 'N') && matches?.matches.length) { const found = rows.map((r, i) => matches?.matches.some(m => m.path === r.path) ? i : -1).filter(i => i >= 0); if (found.length) cursor = event.key === 'n' ? found.find(i => i > cursor) ?? found[0]! : [...found].reverse().find(i => i < cursor) ?? found[found.length - 1]! }
       else return false
       select(); draw(); return true
-    }, filesState() { return { diff: diffOn, detail: detailOn, changed: changedOnly } }, command(action) {
+    },
+    fileWatch() {
+      if (rootKey === undefined) return null
+      const diffShown = diffOn && !(detailOn && root.clientWidth > 0 && root.clientWidth < 640)
+      const contentShown = !detailOn && !diffOn
+      return { key: `files:${rootKey}`, root: rootKey, dirs: changedOnly ? [] : [base, ...rows.filter(row => expanded.has(row.path)).map(row => row.path)].filter(dir => directories.has(dir)).map(path => ({ path, stamp: stamps.get(path) ?? null, readAt: readTimes.get(path) })),
+        ...((chosen && (contentShown || diffShown)) ? { file: { path: chosen, stamp: fileStamp, readAt: fileReadAt } } : {}),
+        ...((changedOnly || diffShown) ? { changeKey: `root:${rootKey}`, ...(changesLoaded ? { changeFingerprint: JSON.stringify(changes) } : {}) } : {}) }
+    },
+    async refreshFileStamps(watch: FileWatch, dirs: string[], file: boolean) {
+      const key = rootKey; if (!source || watch.key !== `files:${key}`) return
+      const selected = rows[cursor]?.path
+      let treeChanged = false
+      for (const dir of dirs) {
+        const limit = partial.has(dir) ? directories.get(dir)?.length : undefined
+        const listed = await source.list(dir, limit || undefined, key, true)
+        if (key !== rootKey || !expanded.has(dir)) continue
+        if (JSON.stringify(directories.get(dir)) !== JSON.stringify(listed.entries)) { directories.set(dir, listed.entries); treeChanged = true }
+        if (listed.truncated) partial.add(dir); else partial.delete(dir)
+        stamps.set(dir, listed.stamp); readTimes.set(dir, Date.now())
+      }
+      if (key !== rootKey) return
+      if (treeChanged && !changedOnly) draw(selected)
+      if (file && chosen && watch.file?.path === chosen) {
+        const path = chosen
+        try { const fresh = await source.file(path, key, true); if (key === rootKey && path === chosen) { const changed = !lastFile || lastFile.path !== fresh.path || lastFile.text !== fresh.text || lastFile.binary !== fresh.binary || lastFile.truncated !== fresh.truncated || JSON.stringify(lastFile.spans) !== JSON.stringify(fresh.spans); if (changed) { paintFile(fresh, true); if (diffOn) void showDiff(true) } else { fileStamp = fresh.stamp ?? null; fileReadAt = Date.now(); lastFile = fresh } } } catch { /* retry on next stamp */ }
+      }
+    },
+    async refreshFileChanges(watch: FileWatch, fingerprint: string) {
+      if (watch.key !== `files:${rootKey}`) return
+      const next = JSON.parse(fingerprint) as Change[]; const selected = rows[cursor]?.path
+      changes = next; changesLoaded = true
+      if (changedOnly) { buildChanged(next); draw(selected) }
+      if (diffOn) await showDiff(true)
+    },
+    filesState() { return { diff: diffOn, detail: detailOn, changed: changedOnly } }, command(action) {
       if (action === 'checkout') { checkoutSelect.focus(); checkoutSelect.click(); return true }
       if (action === 'changed') { void toggleChanged(); return true }
       if (action === 'diff') { diffButton.click(); return true }

@@ -128,9 +128,35 @@ test('file detail and diff toggles are independent and narrow panels keep detail
   p.view.command('diff'); assert.ok(p.root.querySelector('.m-files-right > .m-diff'))
   p.view.command('detail'); assert.ok(p.root.querySelector('.m-files-right > .m-split'))
   Object.defineProperty(p.root, 'clientWidth', { configurable: true, value: 400 })
-  p.view.render(p.state, null); assert.ok(p.root.querySelector('.m-files-right > .m-files-issue')); assert.match(p.root.textContent, /collapsed/i)
+  p.view.render(p.state, null); assert.ok(p.root.querySelector('.m-files-right > .m-files-issue')); assert.match(p.root.textContent, /collapsed/i); assert.equal(p.view.fileWatch().changeKey, undefined)
   p.view.command('diff'); assert.ok(p.root.querySelector('.m-files-right > .m-files-issue'))
   p.view.command('detail'); assert.ok(p.root.querySelector('.m-files-right > .m-files-content'))
   assert.equal(p.state.detail.visible, true)
+  p.view.destroy(); p.dom.window.close()
+})
+test('refreshed directory and file keep the selected path and replace content', async () => {
+  let changed = false
+  const p = page(async ({ path, query }) => {
+    if (path === '/api/files') return { kind: 'passed', output: { entries: changed ? [entry('before'), entry('chosen')] : [entry('chosen')], stamp: changed ? 'dir2' : 'dir1', truncated: false } }
+    if (path === '/api/file') return { kind: 'passed', output: { path: query.path, text: changed ? 'new text' : 'old text', stamp: changed ? 'file2' : 'file1', binary: false, truncated: false, spans: null } }
+    return { kind: 'passed', output: {} }
+  })
+  p.view.render(p.state, null); await wait(20); p.root.querySelector('[role=treeitem]').click(); await wait(120)
+  const watch = p.view.fileWatch(); assert.equal(watch.file.path, 'chosen'); assert.equal(watch.dirs[0].stamp, 'dir1')
+  changed = true; await p.view.refreshFileStamps(watch, ['.'], true); await wait(20)
+  assert.equal(p.root.querySelector('[aria-selected=true]').textContent.trim(), '· chosen')
+  assert.match(p.root.querySelector('.m-files-content').textContent, /new text/)
+  assert.equal(p.view.fileWatch().file.stamp, 'file2')
+  p.view.destroy(); p.dom.window.close()
+})
+test('a precautionary reread with unchanged data leaves the DOM alone', async () => {
+  const p = page(async ({ path, query }) => {
+    if (path === '/api/files') return { kind: 'passed', output: { entries: [entry('a')], stamp: 'same-dir', truncated: false } }
+    return { kind: 'passed', output: { path: query.path, text: 'same', stamp: 'same-file', binary: false, truncated: false, spans: null } }
+  })
+  p.view.render(p.state, null); await wait(20); p.root.querySelector('[role=treeitem]').click(); await wait(130)
+  const row = p.root.querySelector('[role=treeitem]'), lineNode = p.root.querySelector('.m-file-line')
+  await p.view.refreshFileStamps(p.view.fileWatch(), ['.'], true)
+  assert.equal(p.root.querySelector('[role=treeitem]'), row); assert.equal(p.root.querySelector('.m-file-line'), lineNode)
   p.view.destroy(); p.dom.window.close()
 })

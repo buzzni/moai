@@ -31,7 +31,7 @@ test('detail and diff split follows the outer axis and narrow space keeps detail
     const inside = p.doc.querySelector('.m-pane-detail').closest('.m-split')
     assert.equal(inside.dataset.position, position === 'left' || position === 'right' ? 'left' : 'top')
   }
-  p.shell.setWidth(400); assert.ok(p.doc.querySelector('.m-diff-collapsed')); assert.ok(p.doc.querySelector('.m-pane-detail'))
+  p.shell.setWidth(400); assert.ok(p.doc.querySelector('.m-diff-collapsed')); assert.ok(p.doc.querySelector('.m-pane-detail')); assert.equal(p.shell.fileWatch(), null)
   p.store.dispatch({ type: 'detail-visible', visible: false }); assert.ok(p.doc.querySelector('.m-pane-diff')); assert.equal(p.doc.querySelector('.m-diff-collapsed'), null)
   p.shell.destroy(); p.dom.window.close()
 })
@@ -60,4 +60,16 @@ test('ctl toggles diff and reports it', async () => {
   assert.equal((await ctl.run({ verb: 'view', name: 'diff', on: false }, 3, 'token')).ok, true)
   assert.equal(p.store.getState().diff.visible, false)
   keys.destroy(); p.shell.destroy(); p.dom.window.close()
+})
+test('working scope exposes its visible file stamp and commit scope follows tracker changes', async () => {
+  const calls = []; let scope = 'working'
+  const p = setup(async endpoint => {
+    calls.push(endpoint)
+    return { kind: 'passed', output: { id: endpoint.query.id, scope, offers: [{ scope, checkout: 'side', branch: 'work', owner: null }], files: [{ path: 'a.rs', old_path: null, status: 'modified', adds: 1, dels: 1, binary: false, hunks: [] }], truncated: false } }
+  })
+  p.store.dispatch({ type: 'diff-visible', visible: true }); p.store.dispatch({ type: 'cursor', id: 'one' }); await wait(160)
+  const watch = p.shell.fileWatch(); assert.equal(watch.root, 'side'); assert.equal(watch.file.path, 'a.rs'); assert.match(watch.changeKey, /working/)
+  p.store.dispatch({ type: 'diff-visible', visible: false }); scope = 'commits'; p.store.dispatch({ type: 'diff-visible', visible: true }); await wait(160)
+  const before = calls.length; p.shell.trackerChanged(); await wait(20); assert.equal(calls.length, before + 1)
+  p.shell.destroy(); p.dom.window.close()
 })

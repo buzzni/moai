@@ -54,7 +54,7 @@ export function createDiff(doc: Document, words: DiffWords, onLayout?: (layout: 
   toolbar.append(toggle, notice); root.append(toolbar, body)
   let layout: DiffLayout = 'unified', answer: DiffAnswer = { files: [], truncated: false }, width = Infinity
   const open = new Set<string>()
-  let revision = 0
+  let defaultOpen = true, revision = 0, restoreScroll: { top: number; left: number } | null = null
   function paint(): void {
     const version = ++revision
     const side = layout === 'side-by-side' && width >= 640
@@ -64,8 +64,8 @@ export function createDiff(doc: Document, words: DiffWords, onLayout?: (layout: 
     if (answer.vcs_error) { body.textContent = answer.vcs_error.said; return }
     if (!answer.files.length) { body.textContent = words.empty; return }
     answer.files.forEach((file, index) => {
-      const details = el(doc, 'details', { class: 'm-diff-file' })
-      details.open = open.has(file.path) || (index === 0 && open.size === 0)
+      const details = el(doc, 'details', { class: 'm-diff-file', 'data-path': file.path })
+      details.open = open.has(file.path) || (defaultOpen && index === 0 && open.size === 0)
       const name = file.old_path && file.old_path !== file.path ? `${file.old_path} → ${file.path}` : file.path
       details.append(el(doc, 'summary', {}, `${statusMark(file.status)} ${name}  +${file.adds ?? 0} −${file.dels ?? 0}`))
       let built = false
@@ -87,11 +87,12 @@ export function createDiff(doc: Document, words: DiffWords, onLayout?: (layout: 
           const fragment = doc.createDocumentFragment()
           for (const end = Math.min(at + 200, tasks.length); at < end; at++) fragment.append(...tasks[at]!())
           details.append(fragment)
+          if (restoreScroll) { body.scrollTop = restoreScroll.top; body.scrollLeft = restoreScroll.left }
           if (at < tasks.length) setTimeout(chunk, 0)
         }
         chunk()
       }
-      details.addEventListener('toggle', () => { if (details.open) { open.add(file.path); build() } else open.delete(file.path) })
+      details.addEventListener('toggle', () => { if (details.open) { open.add(file.path); build() } else open.delete(file.path); root.dispatchEvent(new doc.defaultView!.Event('moai-file-watch', { bubbles: true })) })
       if (details.open) build()
       body.append(details)
     })
@@ -99,10 +100,18 @@ export function createDiff(doc: Document, words: DiffWords, onLayout?: (layout: 
   }
   toggle.addEventListener('click', () => { layout = layout === 'unified' ? 'side-by-side' : 'unified'; onLayout?.(layout); paint() })
   return {
-    el: root, show(value: DiffAnswer) { answer = value; open.clear(); paint() },
+    el: root, show(value: DiffAnswer, preserve = false) {
+      const top = body.scrollTop, left = body.scrollLeft
+      if (preserve) for (const file of body.querySelectorAll<HTMLDetailsElement>('details')) {
+        const path = file.dataset.path; if (path) { if (file.open) open.add(path); else open.delete(path) }
+      } else open.clear()
+      restoreScroll = preserve ? { top, left } : null
+      defaultOpen = !preserve; answer = value; paint(); if (preserve) { body.scrollTop = top; body.scrollLeft = left }
+    },
     setLayout(value: DiffLayout) { if (layout !== value) { layout = value; paint() } },
     setWidth(value: number) { const changed = (width >= 640) !== (value >= 640); width = value || Infinity; if (changed) paint() },
     focus() { root.focus() },
+    visiblePath(): string | undefined { return body.querySelector<HTMLDetailsElement>('details[open]')?.dataset.path },
     command(action: string): boolean {
       if (action === 'toggle') { toggle.click(); return true }
       if (action === 'left' || action === 'right') { body.scrollLeft += action === 'left' ? -80 : 80; return true }

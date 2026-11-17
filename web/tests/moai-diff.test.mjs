@@ -3,7 +3,7 @@ import { test } from 'node:test'
 import { JSDOM } from 'jsdom'
 import { createDiff, pair } from '../panel/view/diff.ts'
 const line = (kind, text) => ({ kind, text, old_no: kind === 'add' ? null : 1, new_no: kind === 'delete' ? null : 1, spans: null })
-const words = { unified: 'Unified', side: 'Side', narrow: 'Narrow', binary: 'Binary', empty: 'Empty', truncated: 'Truncated' }
+const words = { owner: 'Epic {id} branch', unified: 'Unified', side: 'Side', narrow: 'Narrow', binary: 'Binary', empty: 'Empty', truncated: 'Truncated' }
 test('delete and add runs pair as the shared diff reader does', () => {
   const rows = [line('context', 'c'), line('delete', 'a'), line('delete', 'b'), line('delete', 'c'), line('add', 'x')]
   assert.deepEqual(pair(rows).map(([a, b]) => [a?.text ?? null, b?.text ?? null]), [['c', 'c'], ['a', 'x'], ['b', null], ['c', null]])
@@ -28,5 +28,16 @@ test('side-by-side pairs have independent text and fall back when narrow', () =>
   assert.match(doc.querySelector('summary').textContent, /old.rs → x.rs/)
   assert.deepEqual([...doc.querySelectorAll('.m-diff-pairs .m-diff-line')].map(n => n.textContent.trim()), ['1-old 1', '1+new', '1-old 2', ''])
   view.setWidth(400); assert.equal(doc.querySelector('.m-diff-pairs'), null); assert.match(doc.body.textContent, /Narrow/)
+  dom.window.close()
+})
+test('refresh preserves folded files and scroll positions', () => {
+  const dom = new JSDOM('<body></body>'); const doc = dom.window.document
+  const view = createDiff(doc, words); doc.body.append(view.el)
+  const file = path => ({ path, old_path: null, status: 'modified', adds: 1, dels: 0, binary: false, hunks: [{ old_start: 1, old_len: 1, new_start: 1, new_len: 1, section: '', lines: [line('add', 'new')] }] })
+  const answer = { files: [file('a'), file('b')], truncated: false }; view.show(answer)
+  const details = doc.querySelectorAll('details'); details[0].open = false; details[0].dispatchEvent(new dom.window.Event('toggle'))
+  const body = doc.querySelector('.m-diff-body'); body.scrollTop = 55; body.scrollLeft = 80
+  view.show(answer, true)
+  assert.equal(doc.querySelector('details').open, false); assert.equal(body.scrollTop, 55); assert.equal(body.scrollLeft, 80)
   dom.window.close()
 })
