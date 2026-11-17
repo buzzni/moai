@@ -7,6 +7,8 @@ export interface DiffFile { path: string; old_path: string | null; status: strin
 export interface DiffAnswer { files: DiffFile[]; truncated: boolean; vcs_error?: { said: string } | null }
 export interface DiffWords { unified: string; side: string; narrow: string; binary: string; empty: string; truncated: string }
 const kinds = new Set(['comment', 'string', 'number', 'keyword', 'type', 'function', 'constant', 'tag', 'attribute', 'heading', 'other'])
+/** Closed list: only these letters take a colour class; any other stays in the muted ink. */
+const MARKS = new Set(['M', 'A', 'D', 'R'])
 export const statusMark = (status: string): string => ({ added: 'A', modified: 'M', deleted: 'D', renamed: 'R', copied: 'C', type_changed: 'T', untracked: '?', conflicted: 'U' } as Record<string, string>)[status] ?? '?'
 
 /** Align each contiguous deletion/addition run in the same order as the shared Rust reader. */
@@ -45,9 +47,11 @@ function lineElement(doc: Document, line: DiffLine | null, side?: 'old' | 'new')
     ...(side ? [] : [el(doc, 'span', { class: 'm-diff-no' }, String(line.new_no ?? ''))]),
     el(doc, 'span', { class: 'm-diff-sign' }, sign), textWithSpans(doc, line.text, line.spans))
 }
-export function createDiff(doc: Document, words: DiffWords, onLayout?: (layout: DiffLayout) => void, states: { on: string; off: string } = { on: 'on', off: 'off' }) {
+export function createDiff(doc: Document, words: DiffWords, onLayout?: (layout: DiffLayout) => void, states: { on: string; off: string; diff?: string } = { on: 'on', off: 'off' }) {
   const root = el(doc, 'section', { class: 'm-diff', tabindex: 0 })
-  const toolbar = el(doc, 'div', { class: 'm-diff-toolbar' })
+  const toolbar = el(doc, 'div', { class: 'm-diff-toolbar m-panehead' })
+  /** What the pane is showing: the file tab writes the path here, the list's pane puts its scope buttons here. */
+  const slot = el(doc, 'span', { class: 'm-diff-slot' })
   const unifiedButton = iconButton(doc, { icon: 'rows-2', label: stateLabel(words.unified, true, states), pressed: true })
   const sideButton = iconButton(doc, { icon: 'columns-2', label: stateLabel(words.side, false, states), pressed: false })
   const paintButton = (button: HTMLButtonElement, name: string, on: boolean) => {
@@ -56,7 +60,7 @@ export function createDiff(doc: Document, words: DiffWords, onLayout?: (layout: 
   }
   const notice = el(doc, 'span', { role: 'status' })
   const body = el(doc, 'div', { class: 'm-diff-body' })
-  toolbar.append(unifiedButton, sideButton, notice); root.append(toolbar, body)
+  toolbar.append(el(doc, 'b', {}, states.diff ?? 'diff'), slot, notice, el(doc, 'span', { class: 'm-panehead-sp' }), unifiedButton, sideButton); root.append(toolbar, body)
   let layout: DiffLayout = 'unified', answer: DiffAnswer = { files: [], truncated: false }, width = Infinity
   const open = new Set<string>()
   let defaultOpen = true, revision = 0, restoreScroll: { top: number; left: number } | null = null
@@ -68,17 +72,22 @@ export function createDiff(doc: Document, words: DiffWords, onLayout?: (layout: 
     paintButton(unifiedButton, words.unified, layout === 'unified'); paintButton(sideButton, words.side, layout === 'side-by-side')
     notice.textContent = layout === 'side-by-side' && !side ? words.narrow : ''
     body.replaceChildren()
-    if (answer.vcs_error) { body.textContent = answer.vcs_error.said; return }
-    if (!answer.files.length) { body.textContent = words.empty; return }
+    if (answer.vcs_error) { body.append(el(doc, 'p', { class: 'm-diff-empty' }, answer.vcs_error.said)); return }
+    if (!answer.files.length) { body.append(el(doc, 'p', { class: 'm-diff-empty' }, words.empty)); return }
     answer.files.forEach((file, index) => {
       const details = el(doc, 'details', { class: 'm-diff-file', 'data-path': file.path })
       details.open = open.has(file.path) || (defaultOpen && index === 0 && open.size === 0)
       const name = file.old_path && file.old_path !== file.path ? `${file.old_path} → ${file.path}` : file.path
-      details.append(el(doc, 'summary', {}, `${statusMark(file.status)} ${name}  +${file.adds ?? 0} −${file.dels ?? 0}`))
+      const mark = statusMark(file.status)
+      // Chip, path and counts are text: nothing in the head takes a click, so the summary's own toggle stays the only one.
+      details.append(el(doc, 'summary', { class: 'm-diff-head' },
+        el(doc, 'span', { class: `m-diff-chip${MARKS.has(mark) ? ` m-mark-${mark}` : ''}` }, mark),
+        el(doc, 'span', { class: 'm-diff-path' }, name),
+        el(doc, 'span', { class: 'm-diff-counts' }, el(doc, 'span', { class: 'm-count-add' }, `+${file.adds ?? 0}`), el(doc, 'span', { class: 'm-count-del' }, `−${file.dels ?? 0}`))))
       let built = false
       const build = (scroll: { top: number; left: number } | null) => {
         if (built) return; built = true
-        if (file.binary || !file.hunks?.length) { details.append(el(doc, 'p', {}, file.binary ? words.binary : words.empty)); return }
+        if (file.binary || !file.hunks?.length) { details.append(el(doc, 'p', { class: 'm-diff-empty' }, file.binary ? words.binary : words.empty)); return }
         const tasks: Array<() => Node[]> = []
         for (const hunk of file.hunks) {
           tasks.push(() => [el(doc, 'div', { class: 'm-diff-hunk' }, `@@ -${hunk.old_start},${hunk.old_len} +${hunk.new_start},${hunk.new_len} @@ ${hunk.section}`)])
@@ -103,13 +112,13 @@ export function createDiff(doc: Document, words: DiffWords, onLayout?: (layout: 
       if (details.open) build(restore)
       body.append(details)
     })
-    if (answer.truncated) body.append(el(doc, 'p', {}, words.truncated))
+    if (answer.truncated) body.append(el(doc, 'p', { class: 'm-diff-empty' }, words.truncated))
   }
   const choose = (next: DiffLayout) => { if (layout === next) return; layout = next; onLayout?.(layout); paint() }
   unifiedButton.addEventListener('click', () => choose('unified'))
   sideButton.addEventListener('click', () => choose('side-by-side'))
   return {
-    el: root, show(value: DiffAnswer, preserve = false) {
+    el: root, slot, show(value: DiffAnswer, preserve = false) {
       const top = body.scrollTop, left = body.scrollLeft
       if (preserve) for (const file of body.querySelectorAll<HTMLDetailsElement>('details')) {
         const path = file.dataset.path; if (path) { if (file.open) open.add(path); else open.delete(path) }

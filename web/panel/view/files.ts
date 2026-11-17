@@ -41,8 +41,13 @@ export function mountFiles(root: HTMLElement, ctx: ViewContext): PaneView {
     const label = stateLabel(name, on, words)
     button.setAttribute('aria-pressed', String(on)); button.setAttribute('aria-label', label); button.title = label
   }
-  bar.append(checkoutSelect, changedButton, diffButton, detailButton)
+  const search = el(doc, 'input', { class: 'm-files-search', type: 'search', placeholder: words.search, 'aria-label': words.search })
+  const sep = el(doc, 'span', { class: 'm-files-sep', 'aria-hidden': 'true' })
+  bar.append(el(doc, 'span', { class: 'm-files-field m-files-checkout' }, icon(doc, 'git-branch'), checkoutSelect), el(doc, 'span', { class: 'm-files-field m-files-find' }, icon(doc, 'search'), search), sep, changedButton, diffButton, detailButton)
   const right = el(doc, 'div', { class: 'm-files-right' })
+  /** The content pane's head: the chosen file's path (nothing else: the endpoint tells no language or line count). */
+  const contentPath = el(doc, 'b', {})
+  const contentHead = el(doc, 'div', { class: 'm-panehead m-files-head' }, contentPath)
   const collapsedNotice = el(doc, 'p', { class: 'm-files-collapsed', role: 'status' }, words.collapsed)
   const inner = createSplit(doc, { position: 'top' })
   const issueRoot = el(doc, 'div', { class: 'm-files-issue', tabindex: 0 })
@@ -52,11 +57,10 @@ export function mountFiles(root: HTMLElement, ctx: ViewContext): PaneView {
   const issueView = mountDetail(issueHost, { ...ctx, intents: { ...ctx.intents, closeDetail: () => { detailOn = false; paintRight() } } })
   const diff = createDiff(doc, ctx.copy.diff, layout => ctx.intents.dispatch({ type: 'diff-layout', layout }), words)
   inner.detail.append(issueRoot); inner.list.append(diff.el)
-  right.append(content); split.detail.append(right)
+  right.append(contentHead, content); split.detail.append(right)
 
-  const search = el(doc, 'input', { class: 'm-files-search', type: 'search', hidden: true, 'aria-label': words.search })
   const message = el(doc, 'div', { class: 'm-files-message', role: 'status' })
-  split.list.append(search, message, tree); root.append(bar, split.el)
+  split.list.append(message, tree); root.append(bar, split.el)
   const directories = new Map<string, Entry[]>()
   const expanded = new Set<string>(['.'])
   const partial = new Set<string>()
@@ -91,7 +95,7 @@ export function mountFiles(root: HTMLElement, ctx: ViewContext): PaneView {
     if (detailOn && diffOn && !narrow) { place(inner.detail, issueRoot); place(inner.list, diff.el); place(right, inner.el) }
     else if (detailOn) { if (diffOn && narrow) place(right, collapsedNotice, issueRoot); else place(right, issueRoot) }
     else if (diffOn) place(right, diff.el)
-    else place(right, content)
+    else place(right, contentHead, content)
     const hasIssue = !!checkouts.find(c => c.key === rootKey)?.issue
     issueHost.hidden = !hasIssue; issueEmpty.hidden = hasIssue
     if (stateNow && detailOn && hasIssue) issueView.render({ ...stateNow, shown: issueShown }, indexNow)
@@ -108,7 +112,7 @@ export function mountFiles(root: HTMLElement, ctx: ViewContext): PaneView {
   async function switchCheckout(key: string): Promise<void> {
     if (!checkouts.some(c => c.key === key)) return
     generation++; diffEpoch++; issueEpoch++; clearTimeout(timer); rootKey = key; chosen = ''; cursor = 0; base = '.'; matches = null; changes = []; changesLoaded = false; ordinary = null; changedOnly = false; releaseDiff()
-    directories.clear(); partial.clear(); stamps.clear(); readTimes.clear(); fileStamp = null; fileReadAt = 0; lastFile = null; lastDiff = '';  expanded.clear(); expanded.add('.'); content.replaceChildren(); diff.show({ files: [], truncated: false }); draw(); paintRight()
+    directories.clear(); partial.clear(); stamps.clear(); readTimes.clear(); fileStamp = null; fileReadAt = 0; lastFile = null; lastDiff = '';  expanded.clear(); expanded.add('.'); content.replaceChildren(); contentPath.textContent = ''; diff.show({ files: [], truncated: false }); draw(); paintRight()
     try { await load('.'); if (rootKey === key) draw() } catch { message.textContent = words.directoryError; const current = checkouts.find(c => c.current); if (current && current.key !== key) { checkoutSelect.value = current.key; void switchCheckout(current.key) } }
     void readIssue(); watchChanged()
   }
@@ -142,6 +146,7 @@ export function mountFiles(root: HTMLElement, ctx: ViewContext): PaneView {
   }
   async function showDiff(background = false): Promise<void> {
     const row = rows[cursor], key = rootKey
+    if (row) diff.slot.textContent = row.path
     if (!source || !row || key === undefined) return
     const epoch = ++diffEpoch
     try {
@@ -244,7 +249,7 @@ export function mountFiles(root: HTMLElement, ctx: ViewContext): PaneView {
   function paintFile(file: FileText, preserve = false): void {
     const top = content.scrollTop, left = content.scrollLeft, token = ++painting
     fileStamp = file.stamp ?? null; fileReadAt = Date.now(); lastFile = file
-    content.replaceChildren()
+    content.replaceChildren(); contentPath.textContent = file.path
     if (file.binary) { content.textContent = words.binary; return }
     const lines = (file.text ?? '').split('\n'); let index = 0
     const drawChunk = () => {
@@ -341,8 +346,8 @@ export function mountFiles(root: HTMLElement, ctx: ViewContext): PaneView {
       const target = event.target as HTMLElement | null
       if (target !== search && target && (target.isContentEditable || ['INPUT', 'SELECT', 'TEXTAREA'].includes(target.tagName))) return false
       if (event.target === search) {
-        if (event.key === 'Escape') { search.hidden = true; search.value = ''; expanded.clear(); for (const p of beforeSearch) expanded.add(p); matches = null; message.textContent = ''; draw(); tree.focus(); return true }
-        if (event.key === 'Enter') { search.hidden = true; tree.focus(); return true }
+        if (event.key === 'Escape') { search.value = ''; expanded.clear(); for (const p of beforeSearch) expanded.add(p); matches = null; message.textContent = ''; draw(); tree.focus(); return true }
+        if (event.key === 'Enter') { tree.focus(); return true }
         return false
       }
       const row = rows[cursor]
@@ -356,7 +361,7 @@ export function mountFiles(root: HTMLElement, ctx: ViewContext): PaneView {
       pendingG = false
       if (event.key === 'H' || event.key === 'L') { content.scrollLeft += event.key === 'H' ? -80 : 80; return true }
       if (event.ctrlKey && (event.key === 'd' || event.key === 'u')) { cursor = Math.max(0, Math.min(rows.length - 1, cursor + (event.key === 'd' ? 10 : -10))); moved(); return true }
-      if (event.key === '/') { if (!matches) beforeSearch = new Set(expanded); search.hidden = false; search.focus(); return true }
+      if (event.key === '/') { if (!matches) beforeSearch = new Set(expanded); search.focus(); return true }
       if (event.key === 'Escape' && matches) { search.value = ''; expanded.clear(); for (const p of beforeSearch) expanded.add(p); matches = null; message.textContent = ''; generation++; draw(); return true }
       if (event.key === 'j' || event.key === 'ArrowDown') cursor = Math.min(rows.length - 1, cursor + 1)
       else if (event.key === 'k' || event.key === 'ArrowUp') cursor = Math.max(0, cursor - 1)

@@ -1,14 +1,38 @@
 .m-diff { min-height: 0; height: 100%; display: flex; flex-direction: column; }
-.m-diff-toolbar { display: flex; gap: .5rem; }
-.m-diff-body { overflow: auto; font-family: monospace; }
-.m-diff-file summary { cursor: pointer; white-space: pre; }
-.m-diff-hunk { color: var(--accent); white-space: pre; }
+/* The head is .m-panehead (files.css): `diff`, what is shown, the layout buttons on the right. */
+.m-diff-slot { display: inline-flex; align-items: center; gap: 6px; min-width: 0; overflow: hidden; text-overflow: ellipsis; font: 12px var(--mono); }
+.m-diff-body { flex: 1 1 0; min-height: 0; overflow: auto; font: 12px/20px var(--mono); }
+.m-diff-empty { margin: 0; padding: 8px 12px; font: 12px var(--font); color: var(--muted); }
+/* A file's head: 30px, a faint band. Chip, path and counts are text — the summary's own click is the only one. */
+.m-diff-head { display: flex; align-items: center; gap: 8px; box-sizing: border-box; height: 30px; padding: 0 12px; background: color-mix(in srgb, var(--text) 4%, var(--bg)); border-bottom: 1px solid var(--border-soft); font: 12px var(--mono); white-space: nowrap; cursor: pointer; list-style: none; }
+.m-diff-head::-webkit-details-marker { display: none; }
+.m-diff-head::before { content: "▸"; flex: none; width: 1ch; color: var(--muted); }
+.m-diff-file[open] > .m-diff-head::before { content: "▾"; }
+.m-diff-head:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.m-diff-chip { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 18px; height: 18px; border-radius: 4px; background: color-mix(in srgb, currentColor 14%, var(--bg)); color: var(--muted); font: 700 11px var(--mono); }
+.m-diff-path { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-weight: 600; color: var(--text); }
+.m-diff-counts { display: inline-flex; gap: 6px; flex: none; }
+.m-diff-hunk { min-width: max-content; padding: 0 12px; color: var(--accent); background: color-mix(in srgb, var(--accent) 6%, var(--bg)); white-space: pre; }
 .m-diff-line { display: flex; min-width: max-content; white-space: pre; }
 .m-diff-add { background: var(--ok-soft); }
 .m-diff-delete { background: var(--danger-soft); }
-.m-diff-no { position: sticky; left: 0; min-width: 4em; text-align: right; padding-right: .5em; background: var(--bg); color: var(--muted); }
-.m-diff-sign { min-width: 1em; }
-.m-diff-add .m-diff-no, .m-diff-add .m-diff-sign { color: var(--ok); }
-.m-diff-delete .m-diff-no, .m-diff-delete .m-diff-sign { color: var(--danger); }
+/* The number cell sticks to the left edge when the lines scroll sideways, in the line's own band so no text shows through it. */
+.m-diff-no { position: sticky; left: 0; flex: none; width: 4ch; box-sizing: content-box; text-align: right; padding-right: 6px; background: var(--bg); color: var(--muted); }
+.m-diff-add .m-diff-no { background: var(--ok-soft); color: var(--ok); }
+.m-diff-delete .m-diff-no { background: var(--danger-soft); color: var(--danger); }
+.m-diff-sign { flex: none; width: 2ch; text-align: center; }
+.m-diff-add .m-diff-sign { color: var(--ok); }
+.m-diff-delete .m-diff-sign { color: var(--danger); }
 /* Each side is at least as wide as its longest line: a 0 minimum let a long old line paint over the new side. */
 .m-diff-pairs { display: grid; grid-template-columns: repeat(2, minmax(max-content, 1fr)); }
+/* The list pane's scope buttons: one line of buttons, the pressed one in the Gantt segment's look (gantt.css .g-seg). */
+.m-pane-diff { display: flex; flex-direction: column; min-height: 0; height: 100%; }
+.m-pane-diff > .m-diff { flex: 1 1 0; }
+.m-diff-scopes { display: inline-flex; flex-wrap: nowrap; border: 1px solid var(--border); border-radius: 7px; overflow: hidden; }
+.m-diff-scopes:empty { display: none; }
+.m-diff-scopes button { border: 0; background: transparent; color: var(--muted); font: 500 12px var(--font); height: 22px; padding: 0 8px; cursor: pointer; white-space: nowrap; }
+.m-diff-scopes button + button { border-left: 1px solid var(--border); }
+.m-diff-scopes button:hover { background: var(--hover); color: var(--text); }
+.m-diff-scopes button[aria-pressed="true"] { background: var(--selected); color: var(--text); font-weight: 600; }
+.m-diff-scopes button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.m-diff-collapsed { margin: 0; padding: 8px 12px; font-size: 12px; color: var(--muted); }

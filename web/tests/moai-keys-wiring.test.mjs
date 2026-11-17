@@ -1018,3 +1018,21 @@ test('keys: SPC x x moves the pane on the list and in the wiki, SPC w w no more 
   panel.seq(' ', 'w', 'w')
   assert.equal(pane(), 'body', 'SPC w w moves nothing in the wiki')
 })
+
+test('tab bar: the diff toggle is an icon button whose name and aria-pressed follow the state (click and SPC v D)', () => {
+  const panel = inEpic()
+  const toggle = panel.$('.m-diff-toggle')
+  const name = on => `${en.files.diff} · ${on ? en.files.on : en.files.off}`
+  const check = on => {
+    assert.ok(toggle.classList.contains('m-iconbtn'))
+    assert.equal(panel.state().diff.visible, on)
+    assert.equal(toggle.getAttribute('aria-label'), name(on)); assert.equal(toggle.title, name(on))
+    assert.equal(toggle.getAttribute('aria-pressed'), String(on))
+  }
+  check(false)
+  toggle.click(); check(true)
+  toggle.click(); check(false)
+  panel.seq(' ', 'v', 'D'); check(true)
+  panel.press('Escape')
+  panel.seq(' ', 'v', 'D'); check(false)
+})

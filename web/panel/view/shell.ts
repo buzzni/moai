@@ -260,7 +260,7 @@ export function mountShell(root: HTMLElement, options: ShellOptions): Shell {
   const diffRoot = el(doc, "div", { class: "m-pane-diff", tabindex: -1 })
   const scopes = el(doc, "div", { class: "m-diff-scopes" })
   const diffWidget = createDiff(doc, copy.diff, value => store.dispatch({ type: "diff-layout", layout: value }), copy.files)
-  diffRoot.append(scopes, diffWidget.el)
+  diffWidget.slot.append(scopes); diffRoot.append(diffWidget.el)
   const inside = createSplit(doc, { position: "left", ratios: { left: 0.5, top: 0.5 }, onRatio: (position, ratio) => store.dispatch({ type: "diff-ratio", axis: position === "left" ? "horizontal" : "vertical", ratio: 1 - ratio }) })
   const foldedDiff = el(doc, "p", { class: "m-diff-collapsed", role: "status" }, copy.files.collapsed)
   let diffId: string | null = null, diffOverlay = false, issueFileStamp: string | null = null, issueStampPath = '', issueReadAt = 0, selectedScope: Scope | undefined, diffAnswer: IssueDiff | null = null, diffEpoch = 0
