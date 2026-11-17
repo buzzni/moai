@@ -102,6 +102,16 @@ struct Boot<'a> {
     sort_layers: [&'static str; 3],
     sort_groups: Vec<&'static str>,
     sort_presets: Vec<Preset>,
+    /// 파일 이름의 종류 묶음 — 탐색기의 표([`style::FILE_GROUPS`]) 그대로다(moai-dy7a.w38). 페이지가 제 확장자 표를 두던
+    /// 판은 TUI 와 같은 이름을 다른 묶음으로 칠했다. 묶음 이름은 페이지의 닫힌 클래스 목록과 견준다.
+    file_groups: std::collections::BTreeMap<&'static str, FileGroupWords>,
+}
+
+/// 묶음 하나의 확장자(소문자)와 통이름 — 확장자가 어느 묶음에도 없을 때만 통이름을 본다([`style::file_group`]).
+#[derive(Serialize)]
+struct FileGroupWords {
+    ext: &'static [&'static str],
+    names: &'static [&'static str],
 }
 
 /// `cwd`(자식이 도는 그 자리, [`super::run::Spawner::cwd`])에서 트래커를 찾아 바탕을 짓는다. 못 찾으면 CLI 가 내는
@@ -150,6 +160,10 @@ pub fn boot(cwd: &Path, user: Option<&str>, lang: Lang, registered: &[std::path:
             .into_iter()
             .map(|p| Preset { name: p.name(), order: p.order().to_string(), group: p.group().name() })
             .collect(),
+        file_groups: style::FILE_GROUPS
+            .iter()
+            .map(|(group, ext, names)| (group.name(), FileGroupWords { ext, names }))
+            .collect(),
     };
     serde_json::to_string(&boot).map_err(|e| crate::fail::Fail::new(e.to_string()))
 }
@@ -189,4 +203,57 @@ fn from_user_config() -> (Option<crate::latest::Seen>, Option<String>) {
         crate::latest::held(dir, &crate::latest::url_from(env, &repo))
     });
     (latest, reg.look.timezone)
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::style::{self, FileGroup};
+
+    /// The page's rule (`web/panel/data/file-groups.ts`) over the table the boot sends: an extension in any group
+    /// first, then a whole name, else plain. Run on the serialized table, it must sort every name as the TUI does —
+    /// a table written by hand on either side would drift.
+    #[test]
+    fn the_boot_table_sorts_names_as_the_tui_does() {
+        let table: std::collections::BTreeMap<&str, super::FileGroupWords> =
+            style::FILE_GROUPS.iter().map(|(g, ext, names)| (g.name(), super::FileGroupWords { ext, names })).collect();
+        let json: serde_json::Value = serde_json::to_value(&table).unwrap();
+        let words = |key: &str, field: &str| -> Vec<String> {
+            json[key][field].as_array().unwrap().iter().map(|v| v.as_str().unwrap().to_owned()).collect()
+        };
+        let page = |name: &str| -> &'static str {
+            let ext = crate::files::ext_of(name).to_ascii_lowercase();
+            let keys = ["source", "doc", "data", "script", "binary"];
+            keys.iter()
+                .find(|k| words(k, "ext").iter().any(|e| *e == ext))
+                .or_else(|| keys.iter().find(|k| words(k, "names").iter().any(|n| n == name)))
+                .copied()
+                .unwrap_or("plain")
+        };
+        let mut names: Vec<String> = [
+            "a.rs",
+            "a.tsx",
+            "a.md",
+            "Cargo.toml",
+            "Cargo.lock",
+            "Makefile",
+            "run.sh",
+            "X.SVG",
+            ".env",
+            "README",
+            "a.",
+        ]
+        .map(String::from)
+        .to_vec();
+        for (_, exts, whole) in style::FILE_GROUPS {
+            names.extend(exts.iter().map(|e| format!("f.{e}")));
+            names.extend(whole.iter().map(|n| n.to_string()));
+        }
+        for name in &names {
+            assert_eq!(page(name), style::file_group(name).name(), "{name}");
+        }
+        assert_eq!(style::file_group("X.SVG"), FileGroup::Binary);
+        assert_eq!(style::file_group(".env"), FileGroup::Plain);
+        assert_eq!(style::file_group("Makefile"), FileGroup::Script);
+        assert_eq!(json.as_object().unwrap().len(), 5, "plain is what nothing matched, not a key");
+    }
 }

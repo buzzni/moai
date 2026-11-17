@@ -34283,6 +34283,14 @@ fn web_serves_the_page_and_the_boot() {
     assert_eq!(people["group"], "assignee");
     assert!(people["order"].as_str().unwrap().contains("item=priority,due"));
     assert!(boot["columns"]["backlog"]["name"].is_string(), "{boot}");
+    // moai-dy7a.w38: the explorer's file groups, whole — the page keeps no extension table of its own.
+    let groups = &boot["file_groups"];
+    let keys: Vec<&String> = groups.as_object().expect("file_groups").keys().collect();
+    assert_eq!(keys, ["binary", "data", "doc", "script", "source"], "{groups}");
+    let has = |group: &str, field: &str, word: &str| groups[group][field].as_array().unwrap().iter().any(|w| w == word);
+    assert!(has("source", "ext", "rs") && has("source", "ext", "tsx") && has("doc", "ext", "md"), "{groups}");
+    assert!(has("data", "ext", "toml") && has("binary", "ext", "lock") && has("binary", "ext", "svg"), "{groups}");
+    assert!(has("script", "ext", "sh") && has("script", "names", "Makefile"), "{groups}");
 
     let (status, _, body) = get(web.port, "/api/status");
     assert_eq!(status, 200, "{body}");
