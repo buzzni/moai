@@ -160,7 +160,7 @@ pub fn screen(f: &mut Frame, app: &mut App) {
     // 없으면 격자 없이 접두어 줄 한 줄로 접는다([`menu_line`]). 헤더의 높이(`header_h`)는 위에서 이미 셌다.
     let open_menu =
         // 키 목록 창이 떠 있으면 메뉴는 안 선다 — 그 창이 `SPC h` 를 기다리는 동안에도 열이 SPC 로 선다(`App::help_key`).
-        (matches!(app.mode, Mode::Browse | Mode::Stats(_) | Mode::Wiki(_))
+        (matches!(app.mode, Mode::Browse | Mode::Stats(_) | Mode::Wiki(_) | Mode::Files(_))
             && app.help.is_none()
             && menu::open(&app.chord))
             .then(|| {
@@ -256,6 +256,7 @@ pub fn screen(f: &mut Frame, app: &mut App) {
         menu,
         menu_keys: Vec::new(),
         wiki: None,
+        files: None,
         chart,
     };
     // The detail names the checkout whose journals the follow step watches ([`HistoryCache::moved`]) — none unless it
@@ -289,7 +290,10 @@ pub fn screen(f: &mut Frame, app: &mut App) {
     // 위키 창의 본문은 탐색과 한 원문 토글을 탄다(`App::raw`). 칸 몫은 그 창에서 끈 몫(`App::wiki_width`)이고, 끈 적
     // 없으면 목록·상세의 몫(`App::list_width`)을 따른다(moai-p61w).
     let (raw, share) = (app.raw, app.wiki_width.or(app.list_width));
+    // The file window keeps a share of its own the same way (moai-ffk9.rpf).
+    let files_share = app.files_width.or(app.list_width);
     let mut wiki_at = None;
+    let mut files_at = None;
     let sort_order = matches!(&app.mode, Mode::Sort(_)).then(|| app.common_order());
     let sort_preset = matches!(&app.mode, Mode::Sort(_)).then(|| app.sort.current.preset()).flatten();
     match &mut app.mode {
@@ -301,6 +305,7 @@ pub fn screen(f: &mut Frame, app: &mut App) {
         Mode::Proposals(id) => proposals_window(f, app.proposals.rows(), id.as_deref(), body, lang),
         Mode::Stats(w) => stats_window(f, w, body, lang),
         Mode::Wiki(w) => wiki_at = Some(wiki_window(f, w, body, raw, share, lang, &mut app.images)),
+        Mode::Files(w) => files_at = Some(files_window(f, w, body, files_share, lang)),
         Mode::Ask(ask) => {
             if let Mode::Backlog(form) = ask.back.as_mut() {
                 jot(f, form, body, false, tint, lang);
@@ -314,6 +319,7 @@ pub fn screen(f: &mut Frame, app: &mut App) {
     }
     // 위키 창의 칸 자리 — 마우스가 맞힌다(moai-o3cb). 창이 몸통을 덮으므로 목록·상세의 자리 대신 이것을 읽는다.
     app.drawn.wiki = wiki_at;
+    app.drawn.files = files_at;
     // 메뉴에서 누를 수 있는 칸 — 격자 창과 접두어 줄이 칠한 자리에서 저마다 낸다(moai-m6ni). 다 그린 뒤 한 번 남긴다.
     let mut menu_keys = Vec::new();
     if let Some((_, grid, _)) = &open_menu {
@@ -431,6 +437,10 @@ pub fn screen(f: &mut Frame, app: &mut App) {
         Mode::Wiki(w) => match &open_menu {
             Some((items, grid, waits)) => menu_keys.extend(menu_line(f, app, items, grid, *waits, keys)),
             None => wiki_keys(f, w, keys, app.site.lang),
+        },
+        Mode::Files(w) => match &open_menu {
+            Some((items, grid, waits)) => menu_keys.extend(menu_line(f, app, items, grid, *waits, keys)),
+            None => files_keys(f, w, keys, app.site.lang),
         },
         Mode::Unregister(u) => {
             let ask = Style::new().fg(Color::Black).bg(Color::LightYellow);
@@ -1910,6 +1920,251 @@ fn wiki_keys(f: &mut Frame, w: &super::wiki::Window, at: Rect, lang: Lang) {
     };
     let mut keep = vec![enter];
     keep.extend(rest);
+    bar(f, at, optional, keep);
+}
+
+/// The file window (moai-ffk9.rpf). It covers the list and the detail whole, as [`wiki_window`] does — the tree on the
+/// left, what the cursor stands on at the right. The share (`share`) is the window's own line (`App::files_width`);
+/// until it is dragged it follows the list's, and it splits the way the wiki window does, so the drag
+/// (`mouse.rs`) solves it back with the same [`share_for`].
+///
+/// Gives the panes' places — the mouse hits them on the next event (`mouse::Drawn::files`).
+fn files_window(
+    f: &mut Frame,
+    w: &mut super::files::Window,
+    at: Rect,
+    share: Option<u16>,
+    lang: Lang,
+) -> super::mouse::FilesAt {
+    f.render_widget(Clear, at);
+    // Too narrow for both floors: the tree alone, and the focus goes back to it (the wiki window's rule).
+    let (tree_at, info_at) = if at.width < LIST_MIN_H + DETAIL_MIN_H {
+        (at, None)
+    } else {
+        let floor = (u32::from(LIST_MIN_H) * 100).div_ceil(u32::from(at.width.max(1))).min(100) as u16;
+        let share = share.unwrap_or(LEFT).max(floor);
+        let [a, b] = Layout::horizontal([Constraint::Percentage(share), Constraint::Min(DETAIL_MIN_H)]).areas(at);
+        (a, Some(b))
+    };
+    if info_at.is_none() {
+        w.focus = super::files::Side::Tree;
+    }
+    let rows = files_tree(f, w, tree_at, lang);
+    if let Some(info_at) = info_at {
+        files_info(f, w, info_at, lang);
+    }
+    super::mouse::FilesAt { tree: tree_at, rows, top: w.list.offset(), info: info_at }
+}
+
+/// A name from the disk, safe to draw: a control character becomes `?`, so the name never reaches the terminal raw
+/// and stays tellable from its neighbours (`text::sanitize` would drop it and make two names look alike).
+fn safe_name(s: &str) -> String {
+    s.chars().map(|c| if c.is_control() { '?' } else { c }).collect()
+}
+
+/// The tree pane. Only the rows on screen become items — the rows themselves are kept by the window and rebuilt only
+/// when the tree changes. Gives the place the rows stand in.
+fn files_tree(f: &mut Frame, w: &mut super::files::Window, at: Rect, lang: Lang) -> Rect {
+    use super::files::Side;
+    let focused = w.focus == Side::Tree;
+    let inner_w = at.width.saturating_sub(2) as usize;
+    let project = crate::text::one_line(&w.project);
+    let place = if w.here == "." { format!("{project}/") } else { format!("{project}/{}/", safe_name(&w.here)) };
+    let head = format!(" {} · ", say(lang, "tui.files.title"));
+    let room_for_place = inner_w.saturating_sub(crate::text::width(&head) + 1);
+    let title = format!("{head}{} ", crate::text::clip_front(&place, room_for_place));
+    let block = pane_frame(focused).title(clip(&title, inner_w));
+    let inner = block.inner(at);
+    f.render_widget(block, at);
+    // **At the root a dim line says there is no way up** — the mockup's line, standing where `..` stands one level
+    // down. It is not a row: the cursor never lands on it.
+    let rows_at = if w.here == "." && inner.height > 1 {
+        let said = clip(say(lang, "tui.files.root"), (inner.width as usize).saturating_sub(left_gutter()));
+        f.buffer_mut().set_stringn(inner.x + left_gutter() as u16, inner.y, &said, inner.width as usize, dim());
+        Rect { y: inner.y + 1, height: inner.height - 1, ..inner }
+    } else {
+        inner
+    };
+    let n = w.rows().len();
+    w.list.fit(rows_at.height as usize, n);
+    if !w.adrift {
+        w.list.reveal(w.cursor);
+    }
+    let top = w.list.offset();
+    let room = (rows_at.width as usize).saturating_sub(crate::text::width(CURSOR));
+    let items: Vec<ListItem> = w
+        .rows()
+        .iter()
+        .skip(top)
+        .take(rows_at.height as usize)
+        .map(|r| ListItem::new(fit(files_row(r, lang), room)))
+        .collect();
+    let selected = (n > 0 && (top..top + rows_at.height as usize).contains(&w.cursor)).then(|| w.cursor - top);
+    let mut state = ListState::default().with_selected(selected);
+    let look = if focused { Style::new().add_modifier(Modifier::REVERSED) } else { bold() };
+    f.render_stateful_widget(
+        List::new(items).highlight_style(look).highlight_symbol(CURSOR).highlight_spacing(HighlightSpacing::Always),
+        rows_at,
+        &mut state,
+    );
+    let hint = if focused { String::new() } else { format!(" ({})", keys::said(w.keys.files, keys::Files::FocusNext)) };
+    scroll_mark(f, &w.list, at, &hint, focused, lang);
+    if n == 0 && rows_at.height > 0 {
+        let said = Line::from(Span::styled(say(lang, "tui.files.empty"), dim()));
+        f.render_widget(Paragraph::new(fit(said, room)), Rect { x: rows_at.x + left_gutter() as u16, ..rows_at });
+    }
+    rows_at
+}
+
+/// One tree row. **Without colour the kinds still part**: a directory has its fold mark and a trailing `/`, a link its
+/// `→` and where it points, the rest stands bare; ignored and unopenable rows carry a word.
+fn files_row(r: &super::files::Row, lang: Lang) -> Line<'static> {
+    use super::files::Row;
+    use crate::files::Kind;
+    let indent = |depth: usize| "  ".repeat(depth);
+    match r {
+        Row::Up => Line::from(vec![
+            Span::styled("..", bold()),
+            Span::styled(format!("  {}", say(lang, "tui.files.up")), dim()),
+        ]),
+        Row::Loading { depth, .. } => {
+            Line::from(Span::styled(format!("{}  {}", indent(*depth), say(lang, "tui.files.reading")), dim()))
+        }
+        Row::Failed { depth, why, .. } => Line::from(Span::styled(
+            format!("{}  ! {}", indent(*depth), safe_name(&why.said(lang))),
+            from_anstyle(style::WARN),
+        )),
+        Row::Entry { depth, entry, open, ignored, link, .. } => {
+            let fold = if super::files::opens(entry) { if *open { "▾ " } else { "▸ " } } else { "  " };
+            let name = safe_name(&entry.name);
+            let mut tail = Vec::new();
+            let (text, look) = match &entry.kind {
+                Kind::Dir => (format!("{name}/"), style::FILE_DIR),
+                Kind::Link { dir, inside } => {
+                    let to = if *inside {
+                        let to = link.as_deref().map_or_else(|| "?".to_string(), safe_name);
+                        if *dir { format!("{to}/") } else { to }
+                    } else {
+                        say(lang, "tui.files.outside").to_string()
+                    };
+                    tail.push(Span::styled(
+                        format!(" → {to}"),
+                        if *inside { from_anstyle(style::FILE_LINK) } else { dim() },
+                    ));
+                    (name, if *inside { style::FILE_LINK } else { style::DIM })
+                }
+                Kind::File => (name, style::file_style(&entry.name)),
+                Kind::Other => {
+                    tail.push(Span::styled(format!("  {}", say(lang, "tui.files.special")), dim()));
+                    (name, style::DIM)
+                }
+            };
+            if !entry.openable {
+                tail.push(Span::styled(format!("  {}", say(lang, "tui.files.unreadable_name")), dim()));
+            }
+            if *ignored {
+                tail.push(Span::styled(format!("  {}", say(lang, "tui.files.ignored")), dim()));
+            }
+            let look = if *ignored || !entry.openable {
+                from_anstyle(look).add_modifier(Modifier::DIM)
+            } else {
+                from_anstyle(look)
+            };
+            let mut spans = vec![Span::raw(format!("{}{fold}", indent(*depth))), Span::styled(text, look)];
+            spans.extend(tail);
+            Line::from(spans)
+        }
+    }
+}
+
+/// The right pane — for now what the cursor stands on in a few lines: its name, its kind and size. The file's content
+/// is the next member's (moai-ffk9.3fd).
+fn files_info(f: &mut Frame, w: &super::files::Window, at: Rect, lang: Lang) {
+    use super::files::{Row, Side};
+    use crate::files::Kind;
+    let focused = w.focus == Side::Info;
+    let inner_w = at.width.saturating_sub(2) as usize;
+    let mut lines: Vec<Line> = Vec::new();
+    let title = match w.current() {
+        Some(Row::Entry { path, entry, ignored, link, .. }) => {
+            lines.push(Line::from(Span::styled(safe_name(&entry.name), bold())));
+            let kind = match &entry.kind {
+                Kind::Dir => match w.count(path) {
+                    Some(n) => fill(say(lang, "tui.files.info_dir_count"), &[("n", &n.to_string())]),
+                    None => say(lang, "tui.files.info_dir").to_string(),
+                },
+                Kind::File => fill(say(lang, "tui.files.info_file"), &[("size", &entry.size.to_string())]),
+                Kind::Link { inside: true, .. } => fill(
+                    say(lang, "tui.files.info_link"),
+                    &[("to", &link.as_deref().map_or_else(|| "?".to_string(), safe_name))],
+                ),
+                Kind::Link { inside: false, .. } => say(lang, "tui.files.info_outside").to_string(),
+                Kind::Other => say(lang, "tui.files.info_special").to_string(),
+            };
+            lines.push(Line::from(kind));
+            if !entry.openable {
+                lines.push(Line::from(Span::styled(say(lang, "tui.files.info_unreadable_name"), dim())));
+            }
+            if *ignored {
+                lines.push(Line::from(Span::styled(say(lang, "tui.files.info_ignored"), dim())));
+            }
+            safe_name(path)
+        }
+        Some(Row::Up) => {
+            let up = match w.here.rsplit_once('/') {
+                Some((p, _)) => format!("{}/", safe_name(p)),
+                None => format!("{}/", crate::text::one_line(&w.project)),
+            };
+            lines.push(Line::from(fill(say(lang, "tui.files.info_up"), &[("to", &up)])));
+            "..".to_string()
+        }
+        Some(Row::Loading { of, .. }) => {
+            lines.push(Line::from(Span::styled(say(lang, "tui.files.reading"), dim())));
+            safe_name(of)
+        }
+        Some(Row::Failed { of, why, .. }) => {
+            lines.push(Line::from(Span::styled(safe_name(&why.said(lang)), from_anstyle(style::WARN))));
+            safe_name(of)
+        }
+        None => String::new(),
+    };
+    let block = pane_frame(focused).title(clip(&format!(" {title} "), inner_w));
+    let inner = block.inner(at);
+    f.render_widget(block, at);
+    let lines: Vec<Line> = lines.into_iter().map(|l| fit(l, inner.width as usize)).collect();
+    f.render_widget(Paragraph::new(lines), inner);
+}
+
+/// The file window's key bar — names and words from the window's table ([`keys::FILES`]). **Only keys that act
+/// here**: `Bksp` stands only below the checkout's root, and the tree's keys only while the tree has the focus.
+fn files_keys(f: &mut Frame, w: &super::files::Window, at: Rect, lang: Lang) {
+    use super::files::Side;
+    use super::keys::Files as F;
+    let on_info = w.focus == Side::Info;
+    if !w.chord.held().is_empty() {
+        let next = keys::next_keys(w.keys.files, w.chord.held())
+            .into_iter()
+            .map(|(k, a)| (k, if let F::Step(m) = a { keys::move_word(m, lang) } else { a.what(on_info, lang) }))
+            .collect();
+        return bar(f, at, Vec::new(), vec![waiting(w.chord.held(), next)]);
+    }
+    let hint = |a: F| key(&label(w.keys.files, a), a.what(on_info, lang));
+    let moves = labels(w.keys.files, &[F::Step(Move::LineDown), F::Step(Move::LineUp)]);
+    // The bar takes these from the back and drops the front first when narrow — so `Tab`, then `h`, `l`, then the
+    // moves read left to right in the list's order.
+    let mut optional = Vec::new();
+    let mut keep = Vec::new();
+    if !on_info {
+        optional.extend([hint(F::ExpandAll), hint(F::Collapse), hint(F::Expand)]);
+        keep.push(hint(F::Enter));
+        if w.here != "." {
+            keep.push(hint(F::Leave));
+        }
+    }
+    optional.push(key(&moves, F::Step(Move::LineDown).what(on_info, lang)));
+    keep.push(hint(F::FocusNext));
+    keep.push(hint(F::Close));
+    keep.push(key(&menu::title(&[LEADER.event()]), menu::root(lang)));
     bar(f, at, optional, keep);
 }
 
@@ -6906,6 +7161,11 @@ pub(super) mod tests {
     ///
     /// **`&mut` 다.** 훑는 자리는 프레임을 넘어 살아야 하므로 `screen` 이
     /// App 에 되적는다 — 시험도 진짜 화면과 같은 길을 지난다.
+    /// One file-window row's text, without colour (moai-ffk9.rpf).
+    pub(in crate::tui) fn files_row_text(r: &super::super::files::Row) -> String {
+        super::files_row(r, Lang::Ko).spans.iter().map(|s| s.content.as_ref()).collect()
+    }
+
     pub(in crate::tui) fn render(app: &mut App, w: u16, h: u16) -> Vec<String> {
         lines_of(&render_buf(app, w, h))
     }

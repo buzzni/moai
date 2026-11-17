@@ -190,6 +190,38 @@ pub const CODE: Style = fg(AnsiColor::Cyan);
 pub const P0: Style = fg(AnsiColor::BrightRed).bold();
 pub const P1: Style = fg(AnsiColor::Red);
 
+/// The file window's tree (moai-ffk9.rpf, colours from the confirmed mockup). **The glyphs carry the meaning**: a
+/// directory has its fold mark and a trailing `/`, a link its `→`, an ignored or unopenable row a word — the colours
+/// only help the eye. Extension groups share one colour each, so the table stays small enough to learn.
+pub const FILE_DIR: Style = fg(AnsiColor::BrightBlue).bold();
+pub const FILE_LINK: Style = fg(AnsiColor::Cyan);
+/// Source code — the mockup's orange; the 16-colour yellow is orange on most dark themes.
+pub const FILE_SOURCE: Style = fg(AnsiColor::Yellow);
+pub const FILE_DOC: Style = fg(AnsiColor::Magenta);
+pub const FILE_DATA: Style = fg(AnsiColor::Green);
+pub const FILE_SCRIPT: Style = fg(AnsiColor::BrightGreen);
+/// Pictures, archives, builds and lock files — nothing to read as text.
+pub const FILE_BINARY: Style = DIM;
+
+/// A file's colour by its extension group: source · docs and markup · config and data · scripts · pictures and
+/// binaries · the rest (unpainted).
+pub fn file_style(name: &str) -> Style {
+    let ext = std::path::Path::new(name).extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase();
+    match ext.as_str() {
+        "rs" | "c" | "h" | "cc" | "cpp" | "hpp" | "go" | "py" | "js" | "mjs" | "cjs" | "ts" | "tsx" | "jsx"
+        | "java" | "kt" | "swift" | "rb" | "php" | "cs" | "scala" | "lua" | "zig" | "hs" | "ml" | "ex" | "exs"
+        | "erl" | "clj" | "dart" | "vue" | "svelte" | "css" | "scss" | "less" | "sql" => FILE_SOURCE,
+        "md" | "markdown" | "txt" | "rst" | "adoc" | "html" | "htm" | "xml" | "tex" | "org" => FILE_DOC,
+        "toml" | "json" | "jsonl" | "yaml" | "yml" | "ini" | "cfg" | "conf" | "csv" | "tsv" | "env" => FILE_DATA,
+        "sh" | "bash" | "zsh" | "fish" | "ps1" | "bat" | "cmd" => FILE_SCRIPT,
+        "png" | "jpg" | "jpeg" | "gif" | "webp" | "ico" | "bmp" | "svg" | "pdf" | "zip" | "gz" | "tar" | "tgz"
+        | "xz" | "bz2" | "7z" | "so" | "dylib" | "dll" | "exe" | "bin" | "o" | "a" | "wasm" | "woff" | "woff2"
+        | "ttf" | "otf" | "mp4" | "mov" | "mp3" | "wav" | "lock" => FILE_BINARY,
+        _ if matches!(name, "Makefile" | "Dockerfile" | "justfile" | "Justfile") => FILE_SCRIPT,
+        _ => PLAIN,
+    }
+}
+
 /// 칸 이름 → 글리프. 모르는 칸도 글리프를 갖는다.
 pub fn glyph(status: &str) -> &'static str {
     match status {

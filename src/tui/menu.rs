@@ -125,7 +125,7 @@ fn moves(k: KeyEvent, c: &Ctx) -> bool {
 /// 간트에서 이 한 키가 간트의 표에서 무엇인가 — 탐색의 표보다 먼저 찾는다(moai-l80o). 통계·위키 창은 간트 위에 떠도
 /// 제 표로 받으니 안 찾는다.
 fn gantt_first(c: &Ctx, k: KeyEvent) -> Option<Browse> {
-    if !c.gantt || c.stats || c.wiki {
+    if !c.gantt || c.stats || c.wiki || c.files {
         return None;
     }
     match lookup(c.keys.gantt, &[k]) {
@@ -919,13 +919,21 @@ mod tests {
         let root = entries(&[k(' ')], &inside(), &[]);
         assert!(root.iter().filter(|e| e.key != "g").all(|e| e.state.is_none()), "다른 묶음이 상태를 달았다");
         let screens = entries(&[k(' '), k('g')], &Ctx { board: true, ..inside() }, &[]);
-        assert_eq!(keys_of(&screens), ["l", "b", "g", "s", "w"]);
-        assert_eq!(screens.iter().map(Entry::text).collect::<Vec<_>>(), ["목록", "보드", "간트", "통계", "위키"]);
+        assert_eq!(keys_of(&screens), ["l", "b", "g", "s", "w", "f"]);
+        assert_eq!(
+            screens.iter().map(Entry::text).collect::<Vec<_>>(),
+            ["목록", "보드", "간트", "통계", "위키", "파일"]
+        );
         // 고르면 메뉴를 닫는다 — 토글처럼 열어 두지 않는다.
         assert!(!waits(&[k(' '), k('g')], &inside()), "SPC g 가 Esc 를 기다린다");
-        for (x, to) in
-            [('l', Screen::List), ('b', Screen::Board), ('g', Screen::Gantt), ('s', Screen::Stats), ('w', Screen::Wiki)]
-        {
+        for (x, to) in [
+            ('l', Screen::List),
+            ('b', Screen::Board),
+            ('g', Screen::Gantt),
+            ('s', Screen::Stats),
+            ('w', Screen::Wiki),
+            ('f', Screen::Files),
+        ] {
             let mut ch = Chord::default();
             for y in [' ', 'g'] {
                 feed(&mut ch, &inside(), k(y));

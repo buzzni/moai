@@ -1416,6 +1416,7 @@ impl Doc {
             list_width: look_one(t, LIST_WIDTH, Want::Number, Item::as_integer, &mut problems),
             list_height: look_one(t, LIST_HEIGHT, Want::Number, Item::as_integer, &mut problems),
             wiki_width: look_one(t, WIKI_WIDTH, Want::Number, Item::as_integer, &mut problems),
+            files_width: look_one(t, FILES_WIDTH, Want::Number, Item::as_integer, &mut problems),
             gantt_label: look_one(t, GANTT_LABEL, Want::Number, Item::as_integer, &mut problems),
         };
         // **차례를 못 읽었으면 방향도 버린다**(moai-ys7c) — 둘은 한 벌이다. `sort = 3` 을 없는 키로 넘기고
@@ -1489,6 +1490,7 @@ impl Doc {
         let mut list_width = base.list_width != new.list_width;
         let mut list_height = base.list_height != new.list_height;
         let mut wiki_width = base.wiki_width != new.wiki_width;
+        let mut files_width = base.files_width != new.files_width;
         let mut gantt_label = base.gantt_label != new.gantt_label;
         // **이 세션이 적을 키가 손으로 적은 표 모양이면 그 키만 안 적는다**(moai-j7r3, moai-jr3z) — 무엇을 덮지
         // 않는가는 `set_hue` 와 같은 자다([`plain`]). `sort.by = "title"`·`[tui.sort]`·`sort = { … }` 은 무엇을
@@ -1545,6 +1547,7 @@ impl Doc {
         odd(&[LIST_WIDTH], false, &mut list_width);
         odd(&[LIST_HEIGHT], false, &mut list_height);
         odd(&[WIKI_WIDTH], false, &mut wiki_width);
+        odd(&[FILES_WIDTH], false, &mut files_width);
         odd(&[GANTT_LABEL], false, &mut gantt_label);
         if sort
             && new.layered_order.is_some()
@@ -1624,6 +1627,9 @@ impl Doc {
         }
         if wiki_width {
             changed |= put_value(t, WIKI_WIDTH, new.wiki_width.map(toml_edit::Value::from), &mut left);
+        }
+        if files_width {
+            changed |= put_value(t, FILES_WIDTH, new.files_width.map(toml_edit::Value::from), &mut left);
         }
         if gantt_label {
             changed |= put_value(t, GANTT_LABEL, new.gantt_label.map(toml_edit::Value::from), &mut left);
@@ -1728,6 +1734,8 @@ const LIST_WIDTH: &str = "list_width";
 const LIST_HEIGHT: &str = "list_height";
 /// 위키 창의 페이지 목록이 가져가는 폭의 몫(%) — 창의 칸 사이 선을 끌어 정한다(moai-p61w). 목록·상세의 몫과 따로다.
 const WIKI_WIDTH: &str = "wiki_width";
+/// The file window's tree share (%) — dragged on that window's line (moai-ffk9.rpf), apart from the list's.
+const FILES_WIDTH: &str = "files_width";
 /// 간트(`SPC g g`)의 고정 칸 폭 — 몫이 아니라 **칸 수**다(moai-i4hf.exq). 고정 칸과 날짜 칸 사이 선을 끌어 정한다.
 const GANTT_LABEL: &str = "gantt_label";
 const FIELDS_KNOWN: &str = "fields_known";
@@ -1759,6 +1767,8 @@ const FIELDS_KNOWN: &str = "fields_known";
 /// list_height = 70
 /// # 위키 창의 페이지 목록이 가져가는 몫(%) — 그 창의 선을 끈 적이 있을 때만 선다. 없으면 list_width 를 따른다.
 /// wiki_width = 30
+/// # The file window's tree share (%) — only once its line was dragged. Without it the window follows list_width.
+/// files_width = 35
 /// # 간트의 고정 칸 폭(칸) — 그 나눔 선을 끈 적이 있을 때만 선다.
 /// gantt_label = 48
 ///
@@ -1835,6 +1845,10 @@ pub struct Look {
     /// [`Look::list_width`] 와 **따로다**(2026-10-04 사용자 결정): 위키는 읽는 창이라 본문을 넓게, 탐색기는 목록을 넓게
     /// 둘 수 있다. 끈 적 없으면 안 적히고, 그동안은 위키 창도 `list_width` 를 따른다.
     pub wiki_width: Option<i64>,
+    /// The file window's (`SPC g f`) tree share (%) — dragged on that window's line (moai-ffk9.rpf). Apart from
+    /// [`Look::list_width`] like [`Look::wiki_width`]; unwritten until dragged, and the window follows `list_width`
+    /// meanwhile.
+    pub files_width: Option<i64>,
     /// 간트의 고정 칸 폭(칸) — 나눔 선을 끌어 정한다(moai-i4hf.exq). 몫이 아니라 칸이다: 고정 칸은 줄의 id·제목을
     /// 담는 자리라 창이 넓어져도 같은 폭이어야 날짜 칸이 넓어진다. 끈 적 없으면 안 적힌다.
     pub gantt_label: Option<i64>,
@@ -3916,6 +3930,7 @@ mod tests {
             list_width: Some(40),
             list_height: Some(60),
             wiki_width: Some(30),
+            files_width: Some(35),
             gantt_label: Some(48),
         };
         upd(&path, |doc| doc.merge_look(&Look::default(), &look)).unwrap();
@@ -4508,6 +4523,7 @@ mod tests {
             list_width: None,
             list_height: None,
             wiki_width: None,
+            files_width: None,
             gantt_label: None,
         };
         let a = Look { fields: Some(vec!["id".into(), "assignee".into()]), ..base.clone() };

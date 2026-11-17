@@ -195,7 +195,7 @@ Commands:
   group     Set the explorer grouping
   filter    Apply a filter, or remove the current filter
   find      Search issues in a chosen field
-  screen    Show list, board, gantt, stats, or wiki
+  screen    Show list, board, gantt, stats, wiki, or files
   view      Show or hide a view axis, including column:<name>
   cell      Show or hide a list field
   detail    Show, hide, or place the detail pane
@@ -478,7 +478,7 @@ Options:
 ## `moai ctl screen`
 
 ```
-Show list, board, gantt, stats, or wiki
+Show list, board, gantt, stats, wiki, or files
 
 Usage: moai ctl screen [OPTIONS] <NAME>
 
@@ -3366,6 +3366,7 @@ Order:
     SPC g g  gantt — the list opened out beside a date axis (see below)
     SPC g s  statistics — the numbers `moai stats` gives, drawn (see below)
     SPC g w  wiki — the project's manual pages, read only (see below)
+    SPC g f  files — the checkout's file tree, read only (see below)
   View — every toggle except the list columns (SPC c) is here:
     SPC v l  deferred         SPC v b  backlog        SPC v a  show all
     SPC v o  the archive — done that has sat a while [shown/hidden]; SPC v a
@@ -3408,7 +3409,8 @@ Order:
              and the share the list takes is kept under [tui] as list_width
              and list_height. The wiki window's line drags the same way and
              keeps a share of its own as wiki_width — until it is dragged it
-             splits by list_width. With the SPC menu open, a
+             splits by list_width; the file window's keeps files_width the
+             same way. With the SPC menu open, a
              click on an item is its key — a group goes down a level, a
              toggle keeps the menu open, and Esc and Bksp on the bottom line
              close it or go up — and a click or a roll outside the menu closes
@@ -3649,6 +3651,27 @@ Order:
   the detail as they were. SPC opens the menu over it with the screens and
   SPC v r (raw or rendered). The window is read fresh every time and nothing
   of it is kept.
+
+  SPC g f opens the file window in place of the list and the detail — the
+  files of the checkout you are in, or on the one list (0) of the project of
+  the row under the cursor, as a tree on the left, and on the right what the
+  cursor stands on. It only reads. Every name stands, hidden files and what
+  git ignores too; only .git is left out. Directories come first, marked ▸
+  folded and ▾ open and ending in /, links show → and where they point (a
+  link out of the checkout says so and does not open), and directories git
+  ignores say ignored. The hand is the list's: j and k, gg and G move the
+  cursor; Ctrl-d, Ctrl-u, Ctrl-f, Ctrl-b and the wheel scroll the tree and leave
+  the cursor; l or Right opens a directory one level and h or Left folds
+  it or goes to the row above it; Tab opens everything below — not into
+  links or ignored directories, stopping with a notice after 5,000 entries
+  read — or folds it all back when it is open. l on an ignored directory
+  opens it. Enter steps into a directory, whose first row is .., and on a
+  file goes to the right pane; Ctrl-w w goes back and forth. Bksp steps out,
+  and at the checkout's root nothing goes further up. Reading runs in the
+  background: a directory being read says so and the cursor keeps moving.
+  Esc closes the window, with the cursor, the filter and the detail as
+  they were. SPC opens the menu over it with the screens. The window is read
+  fresh every time.
 
   SPC n opens the jot form anywhere inside a project. It keeps a backlog item
   with no epic. If an editor is there ($VISUAL, $EDITOR, or vi or nano on

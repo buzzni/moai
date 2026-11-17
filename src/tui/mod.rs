@@ -7,6 +7,7 @@ mod archive_days;
 pub mod board;
 pub mod draw;
 pub mod edit;
+mod files;
 pub mod form;
 mod gantt;
 mod help;
@@ -228,6 +229,9 @@ pub enum Mode {
     /// `SPC g w` 가 연 위키 창(moai-o3cb). 통계 창과 같은 덮는 창이다 — 읽기만 하고, 열 때마다 새로 읽고, 설정에 안
     /// 남는다. 상자에 담는 까닭도 같다: 페이지 본문을 통째로 든다.
     Wiki(Box<wiki::Window>),
+    /// `SPC g f` 가 연 파일 창(moai-ffk9.rpf). 위키 창과 같은 덮는 창이다 — 읽기만 하고, 열 때마다 새로 읽는다. 읽기는
+    /// 창이 띄운 실이 한다(`files::Worker`).
+    Files(Box<files::Window>),
 }
 
 /// 걸린 거름망 — 사람이 친 글 그대로와, 그것이 검색(`/`)인지 거름망(`f`)인지(moai-lpzj.i7i).
@@ -1767,6 +1771,11 @@ pub struct App {
     /// 목록·상세의 몫([`App::list_width`])과 **따로다**(2026-10-04 사용자 결정). 끈 적 없으면 `None` 이고 그동안 위키
     /// 창은 `list_width` 를 따른다 — 끌기 전에는 이 에픽 전과 같은 폭이다.
     pub wiki_width: Option<u16>,
+    /// The file window's tree share (%) — dragged on that window's line and kept apart from the list's, as the wiki
+    /// window's is (moai-ffk9.rpf). `None` until dragged; the window follows `list_width` meanwhile.
+    pub files_width: Option<u16>,
+    /// What the file window reads with — the disk, or a test's stand-in (`files::Disk`).
+    pub(crate) files_disk: files::Disk,
     /// 칸 사이 선을 잡고 끄는 중이면 잡은 자리([`mouse::Grab`]). 놓을 때 한 번 설정에 적는다 — 끄는 동안의 칸마다
     /// 적으면 손짓 하나가 파일을 수십 번 다시 쓴다. 놓친 뗌은 다음 마우스 사건이나 다음 키가 대신한다(`App::drop_line`).
     dragging: Option<mouse::Grab>,
@@ -2128,6 +2137,7 @@ impl App {
                         "gantt" => keys::Screen::Gantt,
                         "stats" => keys::Screen::Stats,
                         "wiki" => keys::Screen::Wiki,
+                        "files" => keys::Screen::Files,
                         _ => return Err(bad("unknown screen".into())),
                     };
                     changed = self.ctl_screen() != name;
@@ -2138,6 +2148,12 @@ impl App {
                         return Err(Reply::error(
                             "refused",
                             self.notice.clone().unwrap_or_else(|| "wiki could not open".into()),
+                        ));
+                    }
+                    if name == "files" && !matches!(self.mode, Mode::Files(_)) {
+                        return Err(Reply::error(
+                            "refused",
+                            self.notice.clone().unwrap_or_else(|| "files could not open".into()),
                         ));
                     }
                 }
@@ -2469,6 +2485,7 @@ impl App {
             Mode::Browse => false,
             Mode::Stats(w) => !w.chord.held().is_empty(),
             Mode::Wiki(w) => w.typing.is_some() || w.choose.is_some() || !w.chord.held().is_empty(),
+            Mode::Files(w) => !w.chord.held().is_empty(),
             _ => true,
         }
     }
@@ -2650,6 +2667,7 @@ impl App {
             Screen::Gantt => "gantt",
             Screen::Stats => "stats",
             Screen::Wiki => "wiki",
+            Screen::Files => "files",
         }
     }
 
@@ -2675,6 +2693,7 @@ impl App {
             Mode::Sort(..) => "sort",
             Mode::Stats(..) => "stats",
             Mode::Wiki(..) => "wiki",
+            Mode::Files(..) => "files",
         };
         let filter = match &self.hung {
             Some(Hung::Grep { text, scope }) => {
@@ -2700,6 +2719,7 @@ impl App {
             match &self.mode {
                 Mode::Stats(w) => w.chord.held(),
                 Mode::Wiki(w) => w.chord.held(),
+                Mode::Files(w) => w.chord.held(),
                 _ => self.chord.held(),
             }
         };
@@ -2715,9 +2735,10 @@ impl App {
             "cells": view::Field::ALL.into_iter().filter(|f| self.fields.shows(*f)).map(|f| f.name()).collect::<Vec<_>>(),
             "detail": {"shown": self.detail_open, "at": self.detail_at.name()},
             "panes": {"list_width": self.list_width, "list_height": self.list_height,
-                "wiki_width": self.wiki_width, "gantt_label": self.gantt_label},
+                "wiki_width": self.wiki_width, "files_width": self.files_width, "gantt_label": self.gantt_label},
             "mouse": self.mouse_on, "timezone": self.saved_zone,
             "wiki": if let Mode::Wiki(w) = &self.mode { w.ctl_state() } else { serde_json::Value::Null }, "unread": self.site.unread.len(),
+            "files": if let Mode::Files(w) = &self.mode { w.ctl_state() } else { serde_json::Value::Null },
             "notice": self.notice, "trouble": self.trouble,
             "proposals": self.proposals.rows().iter().map(crate::ctl::proposal::Entry::value).collect::<Vec<_>>(),
         });
@@ -3464,6 +3485,8 @@ impl App {
             list_width: None,
             list_height: None,
             wiki_width: None,
+            files_width: None,
+            files_disk: files::Disk::default(),
             dragging: None,
             offer_aim: hint::Aim::default(),
             completion: None,
@@ -3877,7 +3900,7 @@ impl App {
         let unread = self.unread_journals();
         self.journals_told.retain(|u| unread.contains(u));
         let watching = match &self.mode {
-            Mode::Browse | Mode::Stats(_) => true,
+            Mode::Browse | Mode::Stats(_) | Mode::Files(_) => true,
             Mode::Wiki(w) => w.typing.is_none(),
             _ => false,
         };
@@ -3912,14 +3935,18 @@ impl App {
 
     /// 스레드에서 짓고 있는 다시 읽기가 있는가. 루프가 이 동안은 더 자주 깨어 받는다.
     pub fn loading(&self) -> bool {
-        self.pending.is_some() || self.layer_loading() || self.history.loading()
+        self.pending.is_some() || self.layer_loading() || self.history.loading() || self.reading_files()
     }
 
     /// How long the history read has run, when it is the only background job left — a slow one can be polled less often
     /// (`cmd::tui`'s `history_poll`). `None` while anything else runs: the others keep the fast poll. The clock is the
     /// read's own, so a read that follows another gets its grace too.
     pub fn history_alone(&self) -> Option<std::time::Duration> {
-        let others = self.pending.is_some() || self.layer_loading() || self.reaping() || self.gathering_commits();
+        let others = self.pending.is_some()
+            || self.layer_loading()
+            || self.reaping()
+            || self.gathering_commits()
+            || self.reading_files();
         if others { None } else { self.history.waited() }
     }
 
@@ -4325,6 +4352,7 @@ impl App {
         // 펼친 프로젝트의 줄도 스레드에서 온다(moai-12yx) — 요약과 따로 돈다.
         self.follow_site();
         self.follow_commits();
+        self.follow_files();
         self.follow_latest();
         self.follow_changed |= self.history.poll();
         // **상세가 그린 이력의 저널도 본다**(moai-w7ms 리뷰) — 다시 읽을지는 그리는 자(`draw::fill_history`)가 가르는데,
@@ -4635,7 +4663,8 @@ impl App {
             | Mode::ArchiveDays(_)
             | Mode::Sort(_)
             | Mode::Stats(_)
-            | Mode::Wiki(_) => String::new(),
+            | Mode::Wiki(_)
+            | Mode::Files(_) => String::new(),
         };
         if text.trim().is_empty() {
             self.hung = None;
@@ -4718,7 +4747,8 @@ impl App {
             | Mode::ArchiveDays(_)
             | Mode::Sort(_)
             | Mode::Stats(_)
-            | Mode::Wiki(_) => Raw::default(),
+            | Mode::Wiki(_)
+            | Mode::Files(_) => Raw::default(),
         };
         // **`Filter::build` 를 지난다.** 소문자 접기·태그 정규화·`항목=값` 해석이
         // 전부 거기 있고, 건너뛰면 CLI 와 TUI 가 같은 글을 다르게 읽는다. 거절문도 CLI 와 같은 자가
@@ -5403,6 +5433,7 @@ impl App {
         self.list_width = look.list_width.map(draw::share);
         self.list_height = look.list_height.map(draw::share);
         self.wiki_width = look.wiki_width.map(draw::share);
+        self.files_width = look.files_width.map(draw::share);
         // 간트의 고정 칸 폭은 칸 수다(moai-i4hf.exq) — 0 과 음수는 1 로, 터무니없이 큰 값은 그릴 때 위젯이 창에 맞춘다.
         self.gantt_label = look.gantt_label.map(|w| w.clamp(1, i64::from(u16::MAX)) as u16);
         if let Some(w) = self.gantt_label {
@@ -5467,6 +5498,7 @@ impl App {
             list_width: self.list_width.map(i64::from),
             list_height: self.list_height.map(i64::from),
             wiki_width: self.wiki_width.map(i64::from),
+            files_width: self.files_width.map(i64::from),
             gantt_label: self.gantt_label.map(i64::from),
         }
     }
@@ -7023,15 +7055,20 @@ impl App {
     /// 커서와 링크 자취가 그대로 남고 알림만 선다. 그 창의 페이지는 낡지 않았다: 사람이 다시 읽으라 한 것은 다른 창이다.
     /// 열리면 새 창이 그 자리를 덮는 것은 같다.
     pub(super) fn go(&mut self, to: keys::Screen, rows: &[Row]) {
-        let same =
-            matches!((&self.mode, to), (Mode::Stats(_), keys::Screen::Stats) | (Mode::Wiki(_), keys::Screen::Wiki));
-        let covering = matches!(to, keys::Screen::Stats | keys::Screen::Wiki);
-        if matches!(self.mode, Mode::Stats(_) | Mode::Wiki(_)) && (same || !covering) {
+        let same = matches!(
+            (&self.mode, to),
+            (Mode::Stats(_), keys::Screen::Stats)
+                | (Mode::Wiki(_), keys::Screen::Wiki)
+                | (Mode::Files(_), keys::Screen::Files)
+        );
+        let covering = matches!(to, keys::Screen::Stats | keys::Screen::Wiki | keys::Screen::Files);
+        if matches!(self.mode, Mode::Stats(_) | Mode::Wiki(_) | Mode::Files(_)) && (same || !covering) {
             self.mode = Mode::Browse;
         }
         let layout = match to {
             keys::Screen::Stats => return self.open_stats(),
             keys::Screen::Wiki => return self.open_wiki(),
+            keys::Screen::Files => return self.open_files(),
             keys::Screen::List => view::Layout::List,
             keys::Screen::Board => view::Layout::Board,
             keys::Screen::Gantt => view::Layout::Gantt,
@@ -7549,6 +7586,13 @@ impl App {
             }
             return;
         }
+        // **파일 창도 같은 결이다**(moai-ffk9.rpf).
+        if matches!(self.mode, Mode::Files(_)) {
+            if !self.files_key(k) {
+                self.notice = carried;
+            }
+            return;
+        }
         // 글을 받는 동안에는 이동키가 글자다. 먼저 가로챈다. **`Tab` 도 여기서
         // 멈춘다** — 적다 말고 포커스가 튀면 적던 것을 잃는다.
         if !matches!(self.mode, Mode::Browse) {
@@ -7649,6 +7693,7 @@ impl App {
             B::Step(m) => match &mut self.mode {
                 Mode::Stats(w) => w.scroll.go(m),
                 Mode::Wiki(w) => w.step(m),
+                Mode::Files(w) => w.step(m),
                 _ => self.step(m, rows),
             },
             // **드나드는 키도 포커스를 탄다**(`enabled`). 상세를 읽다가 누른 Enter·←가 목록을
@@ -7883,6 +7928,7 @@ impl App {
             gantt: self.gantt(),
             stats: matches!(self.mode, Mode::Stats(_)),
             wiki: matches!(self.mode, Mode::Wiki(_)),
+            files: matches!(self.mode, Mode::Files(_)),
             head: self.head_at(rows).is_some(),
             board_foldable: self.board_fold_at(rows).is_some(),
             mouse: self.mouse_on,
@@ -8049,7 +8095,8 @@ impl App {
             | Mode::ArchiveDays(_)
             | Mode::Sort(_)
             | Mode::Stats(_)
-            | Mode::Wiki(_) => {
+            | Mode::Wiki(_)
+            | Mode::Files(_) => {
                 return;
             }
         };
@@ -8320,6 +8367,8 @@ impl App {
             Mode::Stats(_) => {}
             // 찾는 칸이 열렸으면 거기 넣는다 — 목록이 그만큼 좁아진다.
             Mode::Wiki(w) => w.paste(s),
+            // No field yet — the search (moai-ffk9.rid) takes it.
+            Mode::Files(_) => {}
         }
     }
 

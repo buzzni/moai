@@ -483,6 +483,8 @@ pub enum Screen {
     Stats,
     /// 프로젝트의 위키(moai-o3cb) — 읽기만 한다(2026-10-04 사용자 결정).
     Wiki,
+    /// The checkout's files (moai-ffk9.rpf) — read only.
+    Files,
 }
 
 impl Screen {
@@ -494,6 +496,7 @@ impl Screen {
             Screen::Gantt => say(lang, "tui.menu.gantt"),
             Screen::Stats => say(lang, "tui.menu.stats"),
             Screen::Wiki => say(lang, "tui.menu.wiki"),
+            Screen::Files => say(lang, "tui.menu.files"),
         }
     }
 
@@ -505,6 +508,7 @@ impl Screen {
             Screen::Gantt => say(lang, "tui.state.gantt"),
             Screen::Stats => say(lang, "tui.state.stats"),
             Screen::Wiki => say(lang, "tui.state.wiki"),
+            Screen::Files => say(lang, "tui.state.files"),
         }
     }
 }
@@ -912,6 +916,8 @@ pub const BROWSE: &[Bind<Browse>] = {
         row!(Go(Screen::Stats), Some("SPC g s"), LEADER, Key::plain('g'), Key::plain('s')),
         // 위키는 `w`(wiki, moai-o3cb) — 다음 화면은 이렇게 한 줄을 더해 든다(moai-z46r).
         row!(Go(Screen::Wiki), Some("SPC g w"), LEADER, Key::plain('g'), Key::plain('w')),
+        // 파일은 `f`(files, moai-ffk9.rpf). 뿌리의 `SPC f`(거름망)와는 묶음이 달라 안 부딪는다.
+        row!(Go(Screen::Files), Some("SPC g f"), LEADER, Key::plain('g'), Key::plain('f')),
         // **보는 것을 켜고 끄는 것은 목록의 열(`SPC c`) 말고 모두 `SPC v`(view) 밑이다**(moai-en4u). 한때 `SPC s`(보기)와
         // `SPC t`(토글)로 갈라 done 은 s·상세 칸은 t 에 있었다 — 둘 다 켜고 끄는 것이라 어느 쪽인지를
         // 외워야 했고, `d` 가 한쪽에서는 done 다른 쪽에서는 상세였다. 어느 줄을 보나(l·a·번호)가
@@ -1077,6 +1083,9 @@ pub struct Ctx {
     /// 위키 창이 떠 있는가(moai-o3cb). 통계 창과 같은 덮는 창이라 메뉴에는 화면 고르기만 서고, 하나가 더 선다 —
     /// 원문·그린 글(`SPC v r`). 창의 본문이 마크다운이라 그 토글이 창 안에서 뜻이 있다.
     pub wiki: bool,
+    /// The file window is up (moai-ffk9.rpf) — a covering window like the wiki's: only the screens, the moves and
+    /// the key list stand in the menu over it.
+    pub files: bool,
     /// 커서가 한눈 보기의 프로젝트 머리줄에 섰는가(moai-oagj.vcj). 보드에서도 그 줄의 `h`·`l`·`Tab` 은 목록과 같이
     /// 접고 편다(사용자 결정) — 칸이 없는 줄이다.
     pub head: bool,
@@ -1119,6 +1128,7 @@ pub struct Keymap {
     pub pick: &'static [Bind<Pick>],
     pub stats: &'static [Bind<Stat>],
     pub wiki: &'static [Bind<Wiki>],
+    pub files: &'static [Bind<Files>],
     pub links: &'static [Bind<Link>],
     pub confirm: &'static [Bind<Confirm>],
 }
@@ -1133,6 +1143,7 @@ impl Default for Keymap {
             pick: PICK,
             stats: STATS,
             wiki: WIKI,
+            files: FILES,
             links: LINKS,
             confirm: CONFIRM,
         }
@@ -1147,6 +1158,8 @@ impl Ctx {
             Screen::Stats
         } else if self.wiki {
             Screen::Wiki
+        } else if self.files {
+            Screen::Files
         } else if self.board {
             Screen::Board
         } else if self.gantt {
@@ -1190,9 +1203,9 @@ impl Browse {
             // **위키 창도 같고, 원문·그린 글 하나가 더 선다**(moai-o3cb) — 창의 본문이 마크다운이다. 아래 상세 칸의
             // 갈래(`!c.detail`)보다 먼저 선다: 상세를 숨긴 사람의 위키 창에서도 그 토글은 본문을 바꾼다.
             // 키 목록(`SPC h`)도 선다(moai-ucyr) — 창 위에 뜨는 창이라 덮인 창을 안 걷는다.
-            Go(_) | Step(_) | Help if c.stats || c.wiki => Ok(()),
+            Go(_) | Step(_) | Help if c.stats || c.wiki || c.files => Ok(()),
             Raw if c.wiki => Ok(()),
-            _ if c.stats || c.wiki => Err(Off::Quiet),
+            _ if c.stats || c.wiki || c.files => Err(Off::Quiet),
             // 간트의 날짜 축은 간트에서만 — 포커스와 상관없다: 상세를 읽다가도 축은 옮긴다(moai-i4hf.27r).
             Gantt(_) if c.gantt => Ok(()),
             Gantt(_) => Err(Off::Quiet),
@@ -1438,6 +1451,7 @@ impl Browse {
             Go(Screen::Gantt) => say(c.lang, "tui.act.gantt"),
             Go(Screen::Stats) => say(c.lang, "tui.act.stats"),
             Go(Screen::Wiki) => say(c.lang, "tui.act.wiki"),
+            Go(Screen::Files) => say(c.lang, "tui.act.files"),
             ClearFilter => say(c.lang, "tui.act.clear_filter"),
             Worktree if c.worktree => say(c.lang, "tui.act.worktree_off"),
             Worktree => say(c.lang, "tui.act.worktree"),
@@ -1814,6 +1828,87 @@ impl Wiki {
             Wiki::Close if picked => say(lang, "tui.wiki.unpick"),
             Wiki::Close if searched => say(lang, "tui.act.clear_filter"),
             Wiki::Close => say(lang, "tui.act.close"),
+        }
+    }
+}
+
+/// The file window (moai-ffk9.rpf) — the issue list's hand on a file tree: moves, open and fold, step in and out,
+/// pane moves, close. **Read only, so no key writes.**
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Files {
+    /// The focused pane — the cursor on the tree. The list's keys ([`moves!`]).
+    Step(Move),
+    /// Step into the directory under the cursor; on a file go to the right pane; on `..` step out.
+    Enter,
+    /// Step out one level. Nothing at the checkout's root.
+    Leave,
+    /// Open the directory one level — `l`·`→`. Nothing on an open one.
+    Expand,
+    /// Fold the open directory, or go to the parent row — `h`·`←`.
+    Collapse,
+    /// Open everything below, or fold it all back — `Tab`.
+    ExpandAll,
+    /// Between the tree and the right pane — `Ctrl-w w`.
+    FocusNext,
+    /// To that pane — `Ctrl-w h` (tree), `Ctrl-w l` (right).
+    Focus(Side),
+    Close,
+}
+
+/// **`q` is not here** — the statistics window's reason ([`STATS`]). The arrows and page keys ignore modifiers, as
+/// on the other windows the menu feeds back into. The keys are the list's ([`BROWSE`]): `Enter`·`Bksp` step in and
+/// out, `l`·`h` open and fold, `Tab` spreads.
+pub const FILES: &[Bind<Files>] = {
+    use Files::*;
+    use KeyCode as C;
+    const MOVES: [Bind<Files>; 14] = moves!(Files::Step, Key::any);
+    &[
+        MOVES[0],
+        MOVES[1],
+        MOVES[2],
+        MOVES[3],
+        MOVES[4],
+        MOVES[5],
+        MOVES[6],
+        MOVES[7],
+        MOVES[8],
+        MOVES[9],
+        MOVES[10],
+        MOVES[11],
+        MOVES[12],
+        MOVES[13],
+        row!(Enter, Some("Enter"), Key::any(C::Enter)),
+        row!(Leave, Some("Bksp"), Key::any(C::Backspace)),
+        row!(Expand, Some("l"), Key::plain('l')),
+        row!(Expand, None, Key::any(C::Right)),
+        row!(Collapse, Some("h"), Key::plain('h')),
+        row!(Collapse, None, Key::any(C::Left)),
+        row!(ExpandAll, Some("Tab"), Key::unshift(C::Tab)),
+        row!(FocusNext, Some("Ctrl-w w"), Key::chord('w'), Key::plain('w')),
+        row!(FocusNext, None, Key::chord('w'), Key::plain('W')),
+        row!(FocusNext, None, Key::chord('w'), Key::chord('w')),
+        row!(Focus(Side::Left), None, Key::chord('w'), Key::plain('h')),
+        row!(Focus(Side::Left), None, Key::chord('w'), Key::chord('h')),
+        row!(Focus(Side::Right), None, Key::chord('w'), Key::plain('l')),
+        row!(Focus(Side::Right), None, Key::chord('w'), Key::chord('l')),
+        row!(Close, Some("Esc"), Key::bare(C::Esc)),
+    ]
+};
+
+impl Files {
+    /// The bar's word. `on_info` is whether the focus is on the right pane.
+    pub fn what(self, on_info: bool, lang: Lang) -> &'static str {
+        match self {
+            Files::Step(_) if on_info => say(lang, "tui.act.scroll"),
+            Files::Step(_) => say(lang, "tui.act.move"),
+            Files::Enter => say(lang, "tui.files.enter"),
+            Files::Leave => say(lang, "tui.files.leave"),
+            Files::Expand => say(lang, "tui.files.expand"),
+            Files::Collapse => say(lang, "tui.files.collapse"),
+            Files::ExpandAll => say(lang, "tui.files.expand_all"),
+            Files::FocusNext | Files::Focus(_) if on_info => say(lang, "tui.files.to_tree"),
+            Files::FocusNext | Files::Focus(_) => say(lang, "tui.files.to_info"),
+            Files::Close => say(lang, "tui.act.close"),
         }
     }
 }
@@ -2380,6 +2475,7 @@ mod tests {
         each("menu", MENU);
         each("stats", STATS);
         each("wiki", WIKI);
+        each("files", FILES);
         each("links", LINKS);
     }
 
@@ -2413,6 +2509,7 @@ mod tests {
             ("SPC g b", Screen::Board),
             ("SPC g s", Screen::Stats),
             ("SPC g w", Screen::Wiki),
+            ("SPC g f", Screen::Files),
         ] {
             assert_eq!(lookup(BROWSE, &parse_seq(keys).unwrap()), Lookup::Run(Browse::Go(to)), "{keys}");
             assert_eq!(label(BROWSE, Browse::Go(to)), keys);
@@ -2488,6 +2585,7 @@ mod tests {
         each("menu", MENU);
         each("stats", STATS);
         each("wiki", WIKI);
+        each("files", FILES);
         each("links", LINKS);
         assert_eq!(label(JOT, Jot::Save), "Ctrl-S");
         assert_eq!(labels(BROWSE, &[Browse::Step(Move::LineDown), Browse::Step(Move::LineUp)]), "j·k");
@@ -2833,6 +2931,8 @@ mod tests {
     const STATISTICS: &str = "SPC g s opens the statistics window";
     /// 위키 창 문단(moai-o3cb).
     const WIKIWIN: &str = "SPC g w opens the wiki window";
+    /// The file window's paragraph (moai-ffk9.rpf).
+    const FILESWIN: &str = "SPC g f opens the file window";
     /// 차례 편집 창(SORTER)을 말하는 문단(moai-r170.x22).
     const SORTEDIT: &str = "SPC s opens the sort window";
 
@@ -2885,6 +2985,7 @@ mod tests {
         ("CONFIRM", &[PICKER, JOTTING]),
         ("STATS", &[STATISTICS]),
         ("WIKI", &[WIKIWIN]),
+        ("FILES", &[FILESWIN]),
         ("SORTER", &[SORTEDIT]),
     ];
 
@@ -2922,7 +3023,7 @@ mod tests {
 
     /// `help` 에서 표마다 제 범위([`SENTENCES`]·[`SECTIONS`])가 안 대는 이름 붙은 키 — `표: 이름`.
     fn missing_in(help: &str) -> Vec<String> {
-        let tables: [(&str, Vec<(&'static str, &'static [Key])>); 13] = [
+        let tables: [(&str, Vec<(&'static str, &'static [Key])>); 14] = [
             ("ANYWHERE", named(ANYWHERE)),
             ("BROWSE", named(BROWSE)),
             ("GANTT", named(GANTT)),
@@ -2934,6 +3035,7 @@ mod tests {
             ("CONFIRM", named(CONFIRM)),
             ("STATS", named(STATS)),
             ("WIKI", named(WIKI)),
+            ("FILES", named(FILES)),
             ("LINKS", named(LINKS)),
             ("SORTER", named(SORTER)),
         ];

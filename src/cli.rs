@@ -583,6 +583,7 @@ BACKLOG
     {key:browse.go_gantt}  gantt — the list opened out beside a date axis (see below)
     {key:browse.go_stats}  statistics — the numbers `moai stats` gives, drawn (see below)
     {key:browse.go_wiki}  wiki — the project's manual pages, read only (see below)
+    {key:browse.go_files}  files — the checkout's file tree, read only (see below)
   View — every toggle except the list columns (SPC c) is here:
     {key:browse.deferred}  deferred         {key:browse.backlog}  backlog        {key:browse.show_all}  show all
     {key:browse.archived}  the archive — done that has sat a while [shown/hidden]; {key:browse.show_all}
@@ -625,7 +626,8 @@ BACKLOG
              and the share the list takes is kept under [tui] as list_width
              and list_height. The wiki window's line drags the same way and
              keeps a share of its own as wiki_width — until it is dragged it
-             splits by list_width. With the SPC menu open, a
+             splits by list_width; the file window's keeps files_width the
+             same way. With the SPC menu open, a
              click on an item is its key — a group goes down a level, a
              toggle keeps the menu open, and {key:menu.close} and {key:menu.up} on the bottom line
              close it or go up — and a click or a roll outside the menu closes
@@ -866,6 +868,27 @@ BACKLOG
   the detail as they were. SPC opens the menu over it with the screens and
   {key:browse.raw} (raw or rendered). The window is read fresh every time and nothing
   of it is kept.
+
+  {key:browse.go_files} opens the file window in place of the list and the detail — the
+  files of the checkout you are in, or on the one list (0) of the project of
+  the row under the cursor, as a tree on the left, and on the right what the
+  cursor stands on. It only reads. Every name stands, hidden files and what
+  git ignores too; only .git is left out. Directories come first, marked ▸
+  folded and ▾ open and ending in /, links show → and where they point (a
+  link out of the checkout says so and does not open), and directories git
+  ignores say ignored. The hand is the list's: {key:moves.line_down} and {key:moves.line_up}, {key:moves.top} and {key:moves.bottom} move the
+  cursor; {key:moves.half_down}, {key:moves.half_up}, {key:moves.page_down}, {key:moves.page_up} and the wheel scroll the tree and leave
+  the cursor; {key:files.expand} or Right opens a directory one level and {key:files.collapse} or Left folds
+  it or goes to the row above it; {key:files.expand_all} opens everything below — not into
+  links or ignored directories, stopping with a notice after 5,000 entries
+  read — or folds it all back when it is open. {key:files.expand} on an ignored directory
+  opens it. {key:files.enter} steps into a directory, whose first row is .., and on a
+  file goes to the right pane; {key:files.focus_next} goes back and forth. {key:files.leave} steps out,
+  and at the checkout's root nothing goes further up. Reading runs in the
+  background: a directory being read says so and the cursor keeps moving.
+  {key:files.close} closes the window, with the cursor, the filter and the detail as
+  they were. SPC opens the menu over it with the screens. The window is read
+  fresh every time.
 
   {key:browse.jot} opens the jot form anywhere inside a project. It keeps a backlog item
   with no epic. If an editor is there ($VISUAL, $EDITOR, or vi or nano on
@@ -1631,7 +1654,7 @@ pub enum CtlCmd {
         #[arg(short = 't', long, help = "Window id from moai ctl ls")]
         target: Option<String>,
     },
-    /// Show list, board, gantt, stats, or wiki
+    /// Show list, board, gantt, stats, wiki, or files
     #[command(after_help = "  Example: moai ctl screen board.")]
     Screen {
         name: String,

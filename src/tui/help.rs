@@ -9,7 +9,7 @@
 //!
 //! **조각이다.** 표와 [`Ctx`] 만 받는다. 연 동안 키를 받고 그리는 것은 든 쪽(`App::help_key`, `draw::help_sheet`)이다.
 
-use super::keys::{Bind, Browse, Ctx, Key, LEADER, Side, Stat, Wiki, move_word, name_of_seq};
+use super::keys::{Bind, Browse, Ctx, Files, Key, LEADER, Side, Stat, Wiki, move_word, name_of_seq};
 use super::scroll::Move;
 use crate::i18n::say;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -317,6 +317,19 @@ pub fn lines(c: &Ctx) -> Vec<Line> {
         })
         .collect();
     section(say(lang, "tui.help.wiki"), rows);
+
+    let rows = once(keys.files, |b| !matches!(b.act, Files::Step(_)))
+        .into_iter()
+        .map(|a| {
+            let what = match a {
+                Files::FocusNext => focus_word(true, None, lang).to_string(),
+                Files::Focus(s) => focus_word(true, Some(s), lang).to_string(),
+                _ => a.what(false, lang).to_string(),
+            };
+            (names(keys.files, a, |_| true), what)
+        })
+        .collect();
+    section(say(lang, "tui.help.files"), rows);
     out
 }
 
@@ -372,8 +385,12 @@ mod tests {
     fn a_held_ctrl_variant_folds_but_a_second_key_of_your_own_stands() {
         let c = ctx();
         let base = lines(&c);
-        // 탐색과 위키 창이 저마다 한 줄씩 — 둘 다 `Ctrl-w Ctrl-w`·`Ctrl-w W` 를 접는다.
-        assert_eq!(keys_of(&base, "next pane"), ["Ctrl-w w", "Ctrl-w w"], "기본 표의 Ctrl 쥔 꼴이 따로 섰다");
+        // 탐색과 위키 창, 파일 창이 저마다 한 줄씩 — 셋 다 `Ctrl-w Ctrl-w`·`Ctrl-w W` 를 접는다.
+        assert_eq!(
+            keys_of(&base, "next pane"),
+            ["Ctrl-w w", "Ctrl-w w", "Ctrl-w w"],
+            "기본 표의 Ctrl 쥔 꼴이 따로 섰다"
+        );
         let (keys, problems) = super::super::keymap::build("[moves]\ntop = [\"g g\", \"g t\"]\n");
         assert_eq!(problems, Vec::new(), "시험의 전제 — 키 파일이 성하다");
         let mine = lines(&Ctx { keys, ..ctx() });

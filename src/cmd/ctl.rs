@@ -298,8 +298,8 @@ fn validate_verb(verb: &wire::Verb) -> R<()> {
         Verb::Find { scope, .. } if crate::query::GrepIn::named(scope).is_none() => {
             return Err(bad("--in must be all, id, title, tag, body, or note"));
         }
-        Verb::Screen { name } if !matches!(name.as_str(), "list" | "board" | "gantt" | "stats" | "wiki") => {
-            return Err(bad("screen must be list, board, gantt, stats, or wiki"));
+        Verb::Screen { name } if !matches!(name.as_str(), "list" | "board" | "gantt" | "stats" | "wiki" | "files") => {
+            return Err(bad("screen must be list, board, gantt, stats, wiki, or files"));
         }
         Verb::Detail { name } if !matches!(name.as_str(), "on" | "off" | "right" | "bottom" | "left" | "top") => {
             return Err(bad("detail must be on, off, right, bottom, left, or top"));
