@@ -19,7 +19,7 @@ import { applyTheme, nextTheme, type Theme } from "../data/theme.ts"
 import { fill, type Copy } from "../i18n/index.ts"
 import { detectPlatform } from "../keys/router.ts"
 import { matchKey, toolbarOf, type Focus, type State, type Store, type Tab } from "../store.ts"
-import { button, el, emptyState, icon, iconButton } from "./components.ts"
+import { button, el, emptyState, icon, iconButton, stateLabel } from "./components.ts"
 import type { IconName } from "./icons.ts"
 import { mountBrand } from "./brand.ts"
 import { allTips, createTips } from "./tips.ts"
@@ -162,7 +162,8 @@ export function mountShell(root: HTMLElement, options: ShellOptions): Shell {
   })
   const refresh = el(doc, "button", { type: "button", class: "m-refreshed moai-refresh" }, copy.shell.refreshNow)
   refresh.addEventListener("click", () => intents.refresh())
-  const diffToggle = el(doc, "button", { type: "button", class: "m-diff-toggle", "aria-label": copy.files.diff }, copy.files.diff)
+  const diffToggle = iconButton(doc, { icon: "diff", label: stateLabel(copy.files.diff, state.diff.visible, copy.files), pressed: state.diff.visible })
+  diffToggle.classList.add("m-diff-toggle")
   diffToggle.addEventListener("click", () => store.dispatch({ type: "diff-visible", visible: !store.getState().diff.visible }))
   const visibility = iconButton(doc, { icon: "eye", label: copy.shell.hideDetail, pressed: state.detail.visible })
   visibility.classList.add("moai-detail-toggle")
@@ -258,7 +259,7 @@ export function mountShell(root: HTMLElement, options: ShellOptions): Shell {
   split.detail.append(detailRoot)
   const diffRoot = el(doc, "div", { class: "m-pane-diff", tabindex: -1 })
   const scopes = el(doc, "div", { class: "m-diff-scopes" })
-  const diffWidget = createDiff(doc, copy.diff, value => store.dispatch({ type: "diff-layout", layout: value }))
+  const diffWidget = createDiff(doc, copy.diff, value => store.dispatch({ type: "diff-layout", layout: value }), copy.files)
   diffRoot.append(scopes, diffWidget.el)
   const inside = createSplit(doc, { position: "left", ratios: { left: 0.5, top: 0.5 }, onRatio: (position, ratio) => store.dispatch({ type: "diff-ratio", axis: position === "left" ? "horizontal" : "vertical", ratio: 1 - ratio }) })
   const foldedDiff = el(doc, "p", { class: "m-diff-collapsed", role: "status" }, copy.files.collapsed)
@@ -437,7 +438,8 @@ export function mountShell(root: HTMLElement, options: ShellOptions): Shell {
     for (const at of ["right", "bottom", "left", "top"] as const) if (split.ratio(at) !== detail.ratio[at]) split.setRatio(at, detail.ratio[at])
     split.setDetailVisible(detail.visible || current.diff.visible)
     diffToggle.hidden = current.tab === "wiki" || current.tab === "files"
-    diffToggle.setAttribute("aria-pressed", String(current.diff.visible))
+    const diffName = stateLabel(copy.files.diff, current.diff.visible, copy.files)
+    diffToggle.setAttribute("aria-pressed", String(current.diff.visible)); diffToggle.setAttribute("aria-label", diffName); diffToggle.title = diffName
     const horizontal = split.position() === "left" || split.position() === "right"
     const at = horizontal ? "left" : "top"
     inside.setPosition(at); inside.setWidth(Infinity); inside.setRatio(at, 1 - (horizontal ? current.diff.horizontal : current.diff.vertical))

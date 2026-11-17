@@ -51,3 +51,19 @@ test('previous from outside file summaries focuses the last file', () => {
   assert.match(doc.activeElement.textContent, /c/)
   dom.window.close()
 })
+test('the layout buttons press the layout in force and a press chooses it', () => {
+  const dom = new JSDOM('<body></body>'); const doc = dom.window.document
+  const chosen = []
+  const view = createDiff(doc, words, layout => chosen.push(layout)); doc.body.append(view.el)
+  const [unified, side] = view.el.querySelectorAll('.m-diff-toolbar button')
+  assert.ok(unified.classList.contains('m-iconbtn') && side.classList.contains('m-iconbtn'))
+  assert.deepEqual([unified, side].map(b => b.getAttribute('aria-pressed')), ['true', 'false'])
+  assert.equal(unified.getAttribute('aria-label'), 'Unified · on'); assert.equal(side.title, 'Side · off')
+  side.click()
+  assert.deepEqual([unified, side].map(b => b.getAttribute('aria-pressed')), ['false', 'true']); assert.deepEqual(chosen, ['side-by-side'])
+  side.click(); assert.deepEqual(chosen, ['side-by-side'])
+  view.setLayout('unified')
+  assert.deepEqual([unified, side].map(b => b.getAttribute('aria-pressed')), ['true', 'false'])
+  assert.equal(view.command('toggle'), true); assert.deepEqual(chosen, ['side-by-side', 'side-by-side'])
+  assert.equal(side.getAttribute('aria-label'), 'Side · on')
+})

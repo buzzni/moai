@@ -1,6 +1,6 @@
 import { filesSource, type Entry, type FileText, type SearchResult, type Checkout, type Change } from '../data/files.ts'
 import { fileGroup, fileGroupTable, type FileGroupTable } from '../data/file-groups.ts'
-import { el } from './components.ts'
+import { el, iconButton, stateLabel } from './components.ts'
 import { createSplit } from './split.ts'
 import { createDiff, statusMark } from './diff.ts'
 import { mountDetail } from './detail.ts'
@@ -30,9 +30,14 @@ export function mountFiles(root: HTMLElement, ctx: ViewContext): PaneView {
   const content = el(doc, 'div', { class: 'm-files-content', tabindex: 0 })
   const bar = el(doc, 'div', { class: 'm-files-toolbar' })
   const checkoutSelect = el(doc, 'select', { 'aria-label': words.checkout })
-  const changedButton = el(doc, 'button', { type: 'button' }, words.changed)
-  const diffButton = el(doc, 'button', { type: 'button' }, words.diff)
-  const detailButton = el(doc, 'button', { type: 'button' }, words.detail)
+  const changedButton = iconButton(doc, { icon: 'file-diff', label: stateLabel(words.changed, false, words), pressed: false })
+  const diffButton = iconButton(doc, { icon: 'diff', label: stateLabel(words.diff, false, words), pressed: false })
+  const detailButton = iconButton(doc, { icon: 'panel-right', label: stateLabel(words.detail, false, words), pressed: false })
+  /** The state is attributes only: a rebuilt button would drop the focus. */
+  const paintToggle = (button: HTMLButtonElement, name: string, on: boolean) => {
+    const label = stateLabel(name, on, words)
+    button.setAttribute('aria-pressed', String(on)); button.setAttribute('aria-label', label); button.title = label
+  }
   bar.append(checkoutSelect, changedButton, diffButton, detailButton)
   const right = el(doc, 'div', { class: 'm-files-right' })
   const collapsedNotice = el(doc, 'p', { class: 'm-files-collapsed', role: 'status' }, words.collapsed)
@@ -42,7 +47,7 @@ export function mountFiles(root: HTMLElement, ctx: ViewContext): PaneView {
   const issueEmpty = el(doc, 'p', {}, words.noIssue)
   issueRoot.append(issueHost, issueEmpty)
   const issueView = mountDetail(issueHost, { ...ctx, intents: { ...ctx.intents, closeDetail: () => { detailOn = false; paintRight() } } })
-  const diff = createDiff(doc, ctx.copy.diff, layout => ctx.intents.dispatch({ type: 'diff-layout', layout }))
+  const diff = createDiff(doc, ctx.copy.diff, layout => ctx.intents.dispatch({ type: 'diff-layout', layout }), words)
   inner.detail.append(issueRoot); inner.list.append(diff.el)
   right.append(content); split.detail.append(right)
 
@@ -76,7 +81,7 @@ export function mountFiles(root: HTMLElement, ctx: ViewContext): PaneView {
     if (parent.children.length !== nodes.length || nodes.some((node, i) => parent.children[i] !== node)) parent.replaceChildren(...nodes)
   }
   function paintRight(): void {
-    diffButton.setAttribute('aria-pressed', String(diffOn)); detailButton.setAttribute('aria-pressed', String(detailOn)); changedButton.setAttribute('aria-pressed', String(changedOnly))
+    paintToggle(diffButton, words.diff, diffOn); paintToggle(detailButton, words.detail, detailOn); paintToggle(changedButton, words.changed, changedOnly)
     const narrow = root.clientWidth > 0 && root.clientWidth < 640
     if (detailOn && diffOn && !narrow) { place(inner.detail, issueRoot); place(inner.list, diff.el); place(right, inner.el) }
     else if (detailOn) { if (diffOn && narrow) place(right, collapsedNotice, issueRoot); else place(right, issueRoot) }

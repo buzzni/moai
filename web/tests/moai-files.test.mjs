@@ -288,3 +288,17 @@ test('changed-only touches neither the list diff pane nor the remembered setting
   assert.equal(JSON.stringify(p.state), before)
   p.view.destroy(); p.dom.window.close()
 })
+test('the three toggles are icon buttons whose name carries the state', async () => {
+  const { p } = autoPage()
+  p.view.render(p.state, null); await wait(20)
+  const buttons = [...p.root.querySelectorAll('.m-files-toolbar button')]
+  assert.equal(buttons.length, 3); assert.ok(buttons.every(b => b.classList.contains('m-iconbtn') && b.querySelector('svg')))
+  const named = () => buttons.map(b => [b.getAttribute('aria-pressed'), b.getAttribute('aria-label'), b.title])
+  for (const [pressed, label, title] of named()) { assert.equal(pressed, 'false'); assert.match(label, / · off$/); assert.equal(title, label) }
+  buttons[2].focus(); buttons[2].click()
+  assert.equal(p.dom.window.document.activeElement, buttons[2])
+  assert.deepEqual(named()[2].slice(0, 2), ['true', 'Detail · on'])
+  buttons[1].click()
+  assert.deepEqual(named()[1].slice(0, 2), ['true', 'Diff · on'])
+  p.view.destroy(); p.dom.window.close()
+})

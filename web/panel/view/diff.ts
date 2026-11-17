@@ -1,4 +1,4 @@
-import { el } from './components.ts'
+import { el, iconButton, stateLabel } from './components.ts'
 
 export type DiffLayout = 'unified' | 'side-by-side'
 export interface DiffLine { kind: 'context' | 'add' | 'delete' | 'raw'; old_no: number | null; new_no: number | null; text: string; spans?: Array<[number, number, string]> | null }
@@ -45,13 +45,18 @@ function lineElement(doc: Document, line: DiffLine | null, side?: 'old' | 'new')
     ...(side ? [] : [el(doc, 'span', { class: 'm-diff-no' }, String(line.new_no ?? ''))]),
     el(doc, 'span', { class: 'm-diff-sign' }, sign), textWithSpans(doc, line.text, line.spans))
 }
-export function createDiff(doc: Document, words: DiffWords, onLayout?: (layout: DiffLayout) => void) {
+export function createDiff(doc: Document, words: DiffWords, onLayout?: (layout: DiffLayout) => void, states: { on: string; off: string } = { on: 'on', off: 'off' }) {
   const root = el(doc, 'section', { class: 'm-diff', tabindex: 0 })
   const toolbar = el(doc, 'div', { class: 'm-diff-toolbar' })
-  const toggle = el(doc, 'button', { type: 'button' })
+  const unifiedButton = iconButton(doc, { icon: 'rows-2', label: stateLabel(words.unified, true, states), pressed: true })
+  const sideButton = iconButton(doc, { icon: 'columns-2', label: stateLabel(words.side, false, states), pressed: false })
+  const paintButton = (button: HTMLButtonElement, name: string, on: boolean) => {
+    const label = stateLabel(name, on, states)
+    button.setAttribute('aria-pressed', String(on)); button.setAttribute('aria-label', label); button.title = label
+  }
   const notice = el(doc, 'span', { role: 'status' })
   const body = el(doc, 'div', { class: 'm-diff-body' })
-  toolbar.append(toggle, notice); root.append(toolbar, body)
+  toolbar.append(unifiedButton, sideButton, notice); root.append(toolbar, body)
   let layout: DiffLayout = 'unified', answer: DiffAnswer = { files: [], truncated: false }, width = Infinity
   const open = new Set<string>()
   let defaultOpen = true, revision = 0, restoreScroll: { top: number; left: number } | null = null
@@ -60,7 +65,7 @@ export function createDiff(doc: Document, words: DiffWords, onLayout?: (layout: 
     // The offsets a refresh kept belong to the files open now; a file opened later starts where the person is.
     const restore = restoreScroll; restoreScroll = null
     const side = layout === 'side-by-side' && width >= 640
-    toggle.textContent = layout === 'side-by-side' ? words.unified : words.side
+    paintButton(unifiedButton, words.unified, layout === 'unified'); paintButton(sideButton, words.side, layout === 'side-by-side')
     notice.textContent = layout === 'side-by-side' && !side ? words.narrow : ''
     body.replaceChildren()
     if (answer.vcs_error) { body.textContent = answer.vcs_error.said; return }
@@ -100,7 +105,9 @@ export function createDiff(doc: Document, words: DiffWords, onLayout?: (layout: 
     })
     if (answer.truncated) body.append(el(doc, 'p', {}, words.truncated))
   }
-  toggle.addEventListener('click', () => { layout = layout === 'unified' ? 'side-by-side' : 'unified'; onLayout?.(layout); paint() })
+  const choose = (next: DiffLayout) => { if (layout === next) return; layout = next; onLayout?.(layout); paint() }
+  unifiedButton.addEventListener('click', () => choose('unified'))
+  sideButton.addEventListener('click', () => choose('side-by-side'))
   return {
     el: root, show(value: DiffAnswer, preserve = false) {
       const top = body.scrollTop, left = body.scrollLeft
@@ -115,7 +122,7 @@ export function createDiff(doc: Document, words: DiffWords, onLayout?: (layout: 
     focus() { root.focus() },
     visiblePath(): string | undefined { return body.querySelector<HTMLDetailsElement>('details[open]')?.dataset.path },
     command(action: string): boolean {
-      if (action === 'toggle') { toggle.click(); return true }
+      if (action === 'toggle') { (layout === 'unified' ? sideButton : unifiedButton).click(); return true }
       if (action === 'left' || action === 'right') { body.scrollLeft += action === 'left' ? -80 : 80; return true }
       if (action === 'next' || action === 'prev') { const files = [...body.querySelectorAll<HTMLElement>('summary')]; const at = files.indexOf(doc.activeElement as HTMLElement); files[at < 0 ? (action === 'next' ? 0 : files.length - 1) : (at + (action === 'next' ? 1 : files.length - 1)) % files.length]?.focus(); return files.length > 0 }
       return false

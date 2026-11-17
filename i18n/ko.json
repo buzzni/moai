@@ -1644,6 +1644,8 @@
   "page.files.changed": "바뀐 파일만",
   "page.files.diff": "diff",
   "page.files.detail": "상세",
+  "page.files.on": "켜짐",
+  "page.files.off": "꺼짐",
   "page.files.noIssue": "이 체크아웃에 연결된 이슈가 없습니다",
   "page.files.search": "파일 찾기",
   "page.files.binary": "바이너리 파일",

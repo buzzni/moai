@@ -42,6 +42,9 @@ export interface IconButtonProps {
   onClick?: (event: MouseEvent) => void
 }
 
+/** A toggle's tooltip and accessible name: `name · on|off`, so the state reads without the colour. */
+export const stateLabel = (name: string, on: boolean, words: { on: string; off: string }): string => `${name} · ${on ? words.on : words.off}`
+
 /** 28x28 icon button (look-and-feel 5.2). */
 export function iconButton(doc: Document, props: IconButtonProps): HTMLButtonElement {
   const button = el(doc, "button", {

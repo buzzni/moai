@@ -1644,6 +1644,8 @@
   "page.files.changed": "Changed files only",
   "page.files.diff": "Diff",
   "page.files.detail": "Detail",
+  "page.files.on": "on",
+  "page.files.off": "off",
   "page.files.noIssue": "No issue is associated with this checkout",
   "page.files.search": "Find files",
   "page.files.binary": "Binary file",
