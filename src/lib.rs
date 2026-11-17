@@ -17,6 +17,7 @@ mod daemon;
 mod diff;
 mod draft;
 pub mod fail;
+mod files;
 mod git;
 mod git_leaks;
 mod guide;
