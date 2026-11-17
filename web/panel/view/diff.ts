@@ -57,6 +57,8 @@ export function createDiff(doc: Document, words: DiffWords, onLayout?: (layout: 
   let defaultOpen = true, revision = 0, restoreScroll: { top: number; left: number } | null = null
   function paint(): void {
     const version = ++revision
+    // The offsets a refresh kept belong to the files open now; a file opened later starts where the person is.
+    const restore = restoreScroll; restoreScroll = null
     const side = layout === 'side-by-side' && width >= 640
     toggle.textContent = layout === 'side-by-side' ? words.unified : words.side
     notice.textContent = layout === 'side-by-side' && !side ? words.narrow : ''
@@ -69,7 +71,7 @@ export function createDiff(doc: Document, words: DiffWords, onLayout?: (layout: 
       const name = file.old_path && file.old_path !== file.path ? `${file.old_path} → ${file.path}` : file.path
       details.append(el(doc, 'summary', {}, `${statusMark(file.status)} ${name}  +${file.adds ?? 0} −${file.dels ?? 0}`))
       let built = false
-      const build = () => {
+      const build = (scroll: { top: number; left: number } | null) => {
         if (built) return; built = true
         if (file.binary || !file.hunks?.length) { details.append(el(doc, 'p', {}, file.binary ? words.binary : words.empty)); return }
         const tasks: Array<() => Node[]> = []
@@ -87,13 +89,13 @@ export function createDiff(doc: Document, words: DiffWords, onLayout?: (layout: 
           const fragment = doc.createDocumentFragment()
           for (const end = Math.min(at + 200, tasks.length); at < end; at++) fragment.append(...tasks[at]!())
           details.append(fragment)
-          if (restoreScroll) { body.scrollTop = restoreScroll.top; body.scrollLeft = restoreScroll.left }
+          if (scroll) { body.scrollTop = scroll.top; body.scrollLeft = scroll.left }
           if (at < tasks.length) setTimeout(chunk, 0)
         }
         chunk()
       }
-      details.addEventListener('toggle', () => { if (details.open) { open.add(file.path); build() } else open.delete(file.path); root.dispatchEvent(new doc.defaultView!.Event('moai-file-watch', { bubbles: true })) })
-      if (details.open) build()
+      details.addEventListener('toggle', () => { if (details.open) { open.add(file.path); build(null) } else open.delete(file.path); root.dispatchEvent(new doc.defaultView!.Event('moai-file-watch', { bubbles: true })) })
+      if (details.open) build(restore)
       body.append(details)
     })
     if (answer.truncated) body.append(el(doc, 'p', {}, words.truncated))

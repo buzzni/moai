@@ -5,10 +5,13 @@ use serde_json::{Value, json};
 use std::{
     collections::HashMap,
     path::Path,
-    time::{Duration, UNIX_EPOCH},
+    time::{Duration, Instant, UNIX_EPOCH},
 };
 
 const BUDGET: Duration = Duration::from_secs(10);
+/// Kept back from [`BUDGET`] for the work: a walk or Git read cut short must still reach the connection, which stops
+/// waiting at the budget itself, so the caller gets the partial answer instead of a timeout.
+const MARGIN: Duration = Duration::from_millis(500);
 fn bad() -> Response {
     refuse(400, "invalid query", code::BAD_INPUT)
 }
@@ -26,7 +29,9 @@ fn stamp(s: files::Stamp) -> String {
     format!("{t}:{}", s.size)
 }
 fn path_ok(p: &str) -> bool {
-    !p.starts_with('/') && p.as_bytes().get(1) != Some(&b':') && !p.contains('\\') && !p.split('/').any(|x| x == "..")
+    // A drive prefix is only a prefix on Windows; `a:b` is an ordinary Unix name the listing shows.
+    let drive = cfg!(windows) && p.as_bytes().get(1) == Some(&b':');
+    !p.starts_with('/') && !drive && !p.contains('\\') && !p.split('/').any(|x| x == "..")
 }
 fn failure(e: files::Why) -> Response {
     match e {
@@ -63,6 +68,7 @@ pub fn answer(path: &str, cwd: &Path, lang: Lang, query: &[(String, String)]) ->
     if ACTIVE.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| (n < 32).then_some(n + 1)).is_err() {
         return refuse(503, "file reader busy", code::BUSY);
     }
+    let started = Instant::now();
     let path = path.to_owned();
     let cwd = cwd.to_owned();
     let query = query.to_vec();
@@ -75,7 +81,7 @@ pub fn answer(path: &str, cwd: &Path, lang: Lang, query: &[(String, String)]) ->
             }
         }
         let _guard = Guard;
-        let _ = tx.send(answer_inner(&path, &cwd, lang, &query));
+        let _ = tx.send(answer_inner(&path, &cwd, lang, &query, started));
     });
     if worker.is_err() {
         ACTIVE.fetch_sub(1, Ordering::SeqCst);
@@ -83,7 +89,9 @@ pub fn answer(path: &str, cwd: &Path, lang: Lang, query: &[(String, String)]) ->
     }
     rx.recv_timeout(BUDGET).unwrap_or_else(|_| refuse(504, "request timed out", code::TIMEOUT))
 }
-fn answer_inner(path: &str, cwd: &Path, lang: Lang, query: &[(String, String)]) -> Response {
+fn answer_inner(path: &str, cwd: &Path, lang: Lang, query: &[(String, String)], started: Instant) -> Response {
+    // One budget for the whole request, as the connection counts it: each step gets what the earlier ones left.
+    let left = || BUDGET.saturating_sub(MARGIN).saturating_sub(started.elapsed());
     let allowed: &[&str] = match path {
         "/api/checkouts" => &[],
         "/api/files" => &["root", "dir", "limit"],
@@ -128,14 +136,14 @@ fn answer_inner(path: &str, cwd: &Path, lang: Lang, query: &[(String, String)]) 
             Some("1") => true,
             _ => return bad(),
         };
-        return issue_changes(path, &repo, lang, get("id").unwrap(), get("scope"), get("path"), overlay);
+        return issue_changes(path, &repo, lang, get("id").unwrap(), get("scope"), get("path"), overlay, &left);
     }
     let Some(chosen) = checkout(&repo, &all, get("root")) else { return missing() };
     if matches!(path, "/api/changes" | "/api/diff") {
         if get("scope").is_some() || get("worktree").is_some() {
             return bad();
         }
-        return checkout_changes(path, chosen, get("path"));
+        return checkout_changes(path, chosen, get("path"), &left);
     }
     let Some(jail) = files::Jail::of(chosen) else { return missing() };
     if path == "/api/files-stamp" {
@@ -196,7 +204,7 @@ fn answer_inner(path: &str, cwd: &Path, lang: Lang, query: &[(String, String)]) 
         }
         "/api/ignored" | "/api/find" => {
             let ignored = match crate::vcs::detect(&chosen.path) {
-                Some(v) => match v.ignored_dirs(&chosen.path, Some(BUDGET)) {
+                Some(v) => match v.ignored_dirs(&chosen.path, Some(left())) {
                     Ok(dirs) => Some(dirs),
                     Err(crate::vcs::Error::Timeout) if path == "/api/ignored" => {
                         return refuse(504, "request timed out", code::TIMEOUT);
@@ -222,7 +230,6 @@ fn answer_inner(path: &str, cwd: &Path, lang: Lang, query: &[(String, String)]) 
                     json!({"matches":[],"total":0,"truncated":false,"walk_truncated":false,"ignored_unavailable":false}),
                 );
             }
-            let start = std::time::Instant::now();
             let mut found = Vec::new();
             let mut total = 0;
             let walked = files::walk_files(&jail, dir, ignored.as_deref().unwrap_or(&[]), |batch| {
@@ -234,11 +241,11 @@ fn answer_inner(path: &str, cwd: &Path, lang: Lang, query: &[(String, String)]) 
                         }
                     }
                 }
-                start.elapsed() < BUDGET
+                !left().is_zero()
             });
             match walked {
                 Ok(w) => ok(
-                    json!({"matches":found,"total":total,"truncated":total>500,"walk_truncated":w.truncated || start.elapsed()>=BUDGET,"ignored_unavailable":ignored.is_none()}),
+                    json!({"matches":found,"total":total,"truncated":total>500,"walk_truncated":w.truncated || left().is_zero(),"ignored_unavailable":ignored.is_none()}),
                 ),
                 Err(e) => failure(e),
             }
@@ -287,6 +294,7 @@ fn issue_changes(
     scope: Option<&str>,
     file: Option<&str>,
     overlay: bool,
+    left: &dyn Fn() -> Duration,
 ) -> Response {
     if super::api::issue_id(id).is_err() {
         return bad();
@@ -303,8 +311,8 @@ fn issue_changes(
     if load.get(id).is_none() {
         return missing();
     }
-    let prepared = crate::changes::offers(repo, &load.issues, id, Some(BUDGET), lang);
-    match prepared.read(scope, file, path == "/api/changes", Some(BUDGET)) {
+    let prepared = crate::changes::offers(repo, &load.issues, id, Some(left()), lang);
+    match prepared.read(scope, file, path == "/api/changes", Some(left())) {
         Ok(answer) => {
             if answer.vcs_error.as_ref().is_some_and(|e| e.kind == "timeout") {
                 return refuse(504, "request timed out", code::TIMEOUT);
@@ -320,14 +328,13 @@ fn issue_changes(
         Err(_) => missing(),
     }
 }
-fn checkout_changes(path: &str, checkout: &Checkout, file: Option<&str>) -> Response {
+fn checkout_changes(path: &str, checkout: &Checkout, file: Option<&str>, left: &dyn Fn() -> Duration) -> Response {
     let Some(backend) = crate::vcs::detect(&checkout.path) else {
         return ok(
             json!({"scope":"whole","files":[],"total":0,"truncated":false,"vcs_error":{"kind":"unavailable","said":"version control unavailable"}}),
         );
     };
-    let started = std::time::Instant::now();
-    let changes = match backend.changes(&checkout.path, &crate::vcs::Scope::Whole, Some(BUDGET)) {
+    let changes = match backend.changes(&checkout.path, &crate::vcs::Scope::Whole, Some(left())) {
         Ok(c) => c,
         Err(crate::vcs::Error::Timeout) => return refuse(504, "request timed out", code::TIMEOUT),
         Err(_) => {
@@ -342,17 +349,12 @@ fn checkout_changes(path: &str, checkout: &Checkout, file: Option<&str>) -> Resp
     if path == "/api/changes" {
         return ok(json!({"scope":"whole","files":changes.files,"total":changes.total,"truncated":changes.truncated}));
     }
-    let patch = match backend.patch_with_changes(
-        &checkout.path,
-        &crate::vcs::Scope::Whole,
-        file,
-        Some(BUDGET.saturating_sub(started.elapsed())),
-        &changes,
-    ) {
-        Ok(p) => p,
-        Err(crate::vcs::Error::Timeout) => return refuse(504, "request timed out", code::TIMEOUT),
-        Err(_) => return missing(),
-    };
+    let patch =
+        match backend.patch_with_changes(&checkout.path, &crate::vcs::Scope::Whole, file, Some(left()), &changes) {
+            Ok(p) => p,
+            Err(crate::vcs::Error::Timeout) => return refuse(504, "request timed out", code::TIMEOUT),
+            Err(_) => return missing(),
+        };
     let parsed = crate::diff::parse(&patch.text);
     let entries = changes
         .files

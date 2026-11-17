@@ -693,7 +693,8 @@ export function wireKeys(options: KeyWiringOptions): KeyWiring {
             return { handled: true, preventDefault: true }
           }
         }
-        if (store.getState().focus === "diff" && store.getState().tab !== "files" && router.state().menu === null && router.state().pending.length === 0 && current) {
+        // A browser shortcut (Ctrl-L, Cmd-L) and an IME at work are not the diff's h / l.
+        if (store.getState().focus === "diff" && store.getState().tab !== "files" && router.state().menu === null && router.state().pending.length === 0 && current && !current.ctrlKey && !current.metaKey && !current.altKey && !current.isComposing) {
           const action = current.key === "h" ? "scope-prev" : current.key === "l" ? "scope-next" : current.key === "H" ? "left" : current.key === "L" ? "right" : current.key === "Tab" ? (current.shiftKey ? "prev" : "next") : null
           if (action && panes().diff.command?.(action)) return { handled: true, preventDefault: true }
         }

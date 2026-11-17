@@ -264,22 +264,29 @@ export function mountShell(root: HTMLElement, options: ShellOptions): Shell {
   const foldedDiff = el(doc, "p", { class: "m-diff-collapsed", role: "status" }, copy.files.collapsed)
   let diffId: string | null = null, diffOverlay = false, issueFileStamp: string | null = null, issueStampPath = '', issueReadAt = 0, selectedScope: Scope | undefined, diffAnswer: IssueDiff | null = null, diffEpoch = 0
   let diffTimer: ReturnType<typeof setTimeout> | undefined
-  function readDiff(id: string, scope?: Scope, background = false): void {
-    if (!options.client) return
+  /** Rejects only for a background refresh that failed, so the refresher retries it; a read the person asked for says why on the pane. */
+  function readDiff(id: string, scope?: Scope, background = false): Promise<void> {
+    if (!options.client) return Promise.resolve()
     const request = ++diffEpoch
-    void issueDiff(options.client, id, scope, store.getState().view.worktree, background).then(answer => {
+    return issueDiff(options.client, id, scope, store.getState().view.worktree, background).then(answer => {
       if (request !== diffEpoch || store.getState().cursor !== id || !store.getState().diff.visible) return
       if (selectedScope !== answer.scope || diffAnswer?.files[0]?.path !== answer.files[0]?.path) issueFileStamp = null
       const changed = !background || JSON.stringify(diffAnswer) !== JSON.stringify(answer)
       diffAnswer = answer; issueReadAt = Date.now(); selectedScope = answer.scope ?? undefined
       if (changed) { diffWidget.show(answer, background); paintScopes() }
       shell.dispatchEvent(new doc.defaultView!.Event("moai-file-watch", { bubbles: true }))
-    }).catch(() => { if (request === diffEpoch) { diffAnswer = null; scopes.replaceChildren(); diffWidget.show({ files: [], truncated: false }) } })
+    }).catch((error: unknown) => {
+      if (request !== diffEpoch) return
+      // A refresh that failed or was cancelled (the tab hid, the watch moved) leaves the diff it would have replaced.
+      if (background) { issueFileStamp = null; throw error }
+      // An empty answer would read as "no changes in this scope".
+      diffAnswer = null; scopes.replaceChildren(); diffWidget.show({ files: [], truncated: false, vcs_error: { said: copy.failed } })
+    })
   }
   function paintScopes(): void {
     scopes.replaceChildren(...(diffAnswer?.offers ?? []).map(offer => {
       const button = el(doc, "button", { type: "button", "aria-pressed": String(offer.scope === selectedScope) }, `${offer.scope}${offer.branch ? ` · ${offer.branch}` : ""}${offer.owner ? ` · ${fill(copy.diff.owner, { id: offer.owner })}` : ""}`)
-      button.addEventListener("click", () => { selectedScope = offer.scope; if (diffId) readDiff(diffId, offer.scope) })
+      button.addEventListener("click", () => { selectedScope = offer.scope; if (diffId) void readDiff(diffId, offer.scope) })
       return button
     }))
   }
@@ -290,16 +297,16 @@ export function mountShell(root: HTMLElement, options: ShellOptions): Shell {
       const offers = diffAnswer?.offers ?? []; if (!offers.length || !diffId) return false
       const at = Math.max(0, offers.findIndex(o => o.scope === selectedScope)), step = action === "scope-next" ? 1 : -1
       const chosen = offers[Math.max(0, Math.min(offers.length - 1, at + step))]!
-      selectedScope = chosen.scope; readDiff(diffId, chosen.scope); return true
+      selectedScope = chosen.scope; void readDiff(diffId, chosen.scope); return true
     }
     return false
   }
   const diffView: PaneView = { render() {}, focus: () => diffWidget.focus(), command: diffCommand }
-  diffRoot.addEventListener("focusin", () => store.dispatch({ type: "focus", focus: "diff" }))
   // The store's `focus` follows the DOM's: a click or Tab into a pane (not only focusPane) says which pane has
-  // the keys. The reducer ignores a focus that is already the one.
+  // the keys. The reducer ignores a focus that is already the one. The diff pane sits inside the detail side of
+  // the split, so one listener tells the two apart: a listener on each would let the outer one win.
   split.list.addEventListener("focusin", () => store.dispatch({ type: "focus", focus: "list" }))
-  split.detail.addEventListener("focusin", () => store.dispatch({ type: "focus", focus: "detail" }))
+  split.detail.addEventListener("focusin", (event) => store.dispatch({ type: "focus", focus: event.target instanceof doc.defaultView!.Node && diffRoot.contains(event.target) ? "diff" : "detail" }))
   // The work tabs (list, board, gantt) control this one panel; its label follows the tab shown.
   const work = el(doc, "div", { class: "m-tabpanel", role: "tabpanel", id: panelDomId("list"), hidden: state.tab === "wiki" || state.tab === "files" }, split.el)
   for (const id of ["board", "gantt"] as const) tabs.el.querySelector(`#${tabDomId(id)}`)?.setAttribute("aria-controls", panelDomId("list"))
@@ -436,7 +443,10 @@ export function mountShell(root: HTMLElement, options: ShellOptions): Shell {
     inside.setPosition(at); inside.setWidth(Infinity); inside.setRatio(at, 1 - (horizontal ? current.diff.horizontal : current.diff.vertical))
     diffWidget.setLayout(current.diffLayout); diffWidget.setWidth(width)
     if (current.diff.visible && detail.visible && width >= 480) {
-      inside.detail.append(detailRoot); inside.list.append(diffRoot)
+      // Only a change of layout moves a pane: re-inserting one on every render drops its scroll offsets and the
+      // keyboard focus inside it.
+      if (detailRoot.parentElement !== inside.detail) inside.detail.append(detailRoot)
+      if (diffRoot.parentElement !== inside.list) inside.list.append(diffRoot)
       if (split.detail.firstElementChild !== inside.el) split.detail.replaceChildren(inside.el)
     } else if (current.diff.visible && !detail.visible) {
       if (split.detail.firstElementChild !== diffRoot) split.detail.replaceChildren(diffRoot)
@@ -471,7 +481,7 @@ export function mountShell(root: HTMLElement, options: ShellOptions): Shell {
     } else if (state.cursor !== diffId || diffOverlay !== state.view.worktree) {
       diffOverlay = state.view.worktree; diffId = state.cursor; issueFileStamp = null; selectedScope = undefined; diffAnswer = null; diffEpoch++; clearTimeout(diffTimer)
       scopes.replaceChildren(); diffWidget.show({ files: [], truncated: false })
-      const id = diffId; diffTimer = setTimeout(() => readDiff(id), 120)
+      const id = diffId; diffTimer = setTimeout(() => void readDiff(id), 120)
     }
 
     const loadedAt = state.board.value?.loadedAt
@@ -581,14 +591,14 @@ export function mountShell(root: HTMLElement, options: ShellOptions): Shell {
       return { key: `issue:${diffId}`, dirs: [], ...(offer?.checkout ? { root: offer.checkout } : {}), ...(selectedScope === "working" && path ? { file: { path, stamp: issueFileStamp, readAt: issueReadAt } } : {}), changeKey: JSON.stringify(["issue", diffId, selectedScope, now.view.worktree]) }
     },
     async refreshFileStamps(watch, dirs, file, answer) {
-      if (watch.key.startsWith("files:")) await filesView?.refreshFileStamps?.(watch, dirs, file)
-      else if (file && watch.key === `issue:${diffId}` && diffId && selectedScope === "working") { issueFileStamp = answer.file; readDiff(diffId, selectedScope, true) }
+      if (watch.key.startsWith("files:")) await filesView?.refreshFileStamps?.(watch, dirs, file, answer)
+      else if (file && watch.key === `issue:${diffId}` && diffId && selectedScope === "working") { issueFileStamp = answer.file; await readDiff(diffId, selectedScope, true) }
     },
     async refreshFileChanges(watch, fingerprint) {
       if (watch.key.startsWith("files:")) await filesView?.refreshFileChanges?.(watch, fingerprint)
-      else if (watch.key === `issue:${diffId}` && diffId && selectedScope && selectedScope !== "commits") readDiff(diffId, selectedScope, true)
+      else if (watch.key === `issue:${diffId}` && diffId && selectedScope && selectedScope !== "commits") await readDiff(diffId, selectedScope, true)
     },
-    trackerChanged() { if (diffId && selectedScope && selectedScope !== "working" && !(store.getState().detail.visible && width < 480) && store.getState().diff.visible && store.getState().tab !== "files" && store.getState().tab !== "wiki") readDiff(diffId, selectedScope, true) },
+    trackerChanged() { if (diffId && selectedScope && selectedScope !== "working" && !(store.getState().detail.visible && width < 480) && store.getState().diff.visible && store.getState().tab !== "files" && store.getState().tab !== "wiki") readDiff(diffId, selectedScope, true).catch(() => {}) },
     focusPane,
     focusTabs,
     toolbar: bar,

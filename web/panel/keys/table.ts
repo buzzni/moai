@@ -168,7 +168,8 @@ const shown = (hidden: boolean | undefined): StateId => (hidden ? "hidden" : "sh
 /** Focus moves: the wiki always has list | page side by side; browse needs the detail and only moves along its axis. */
 function focusWhen(side: "next" | "prev" | "left" | "right" | "up" | "down"): (c: KeyContext) => boolean {
   return (c) => {
-    if (c.mode === "wiki") return side === "next" || side === "prev" || side === "left" || side === "right"
+    // The files tab, like the wiki, is always tree | content side by side, whatever the list's detail does.
+    if (c.mode === "wiki" || c.tab === "files") return side === "next" || side === "prev" || side === "left" || side === "right"
     if (!detailShown(c) && !c.diff) return false
     if (side === "left" || side === "right") return detailAt(c) === "left" || detailAt(c) === "right"
     if (side === "up" || side === "down") return detailAt(c) === "bottom" || detailAt(c) === "top"

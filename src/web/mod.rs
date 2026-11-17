@@ -10,7 +10,8 @@
 //! `moai edit --shift*`(하루 세우기는 `--start --due --if-unplanned`, moai-vj8w.02c)로 트래커에 쓴다 — 쓰기는 CLI 의 그
 //! 길(`store::with_write`)을 그대로 지난다. 그 밖에 트래커를
 //! 바꾸는 길은 여전히 CLI 와 탐색기다. 제어 탭의 답과 마지막 입력도 별도 POST 로 받는다.
-//! POST 는 모두 이 페이지에서 보낸 것만 받는다([`http::origin_ok`]).
+//! POST 는 모두 이 페이지에서 보낸 것만 받는다([`http::origin_ok`]). 파일·변경 읽기(`files::answer`)는 `Origin` 이
+//! 실렸으면 같은 검사로 남의 페이지를 거절한다 — 브라우저는 교차 출처 GET 에도 그것을 싣는다.
 
 pub mod api;
 pub mod boot;
@@ -638,6 +639,7 @@ pub fn answer(req: &Request, site: &Site) -> Response {
     // 부른 쪽은 제가 준 것이 먹은 답이라 믿는다([`api::argv`]).
     let bare = || api::none_of(&query).map_err(|bad| refuse(400, &bad.said(lang), code::BAD_INPUT));
     match req.path.as_str() {
+        // 체크아웃의 바이트를 내는 길이라 남의 페이지가 실은 `Origin` 은 거절한다. `curl` 처럼 없이 오는 것은 받는다.
         "/api/checkouts" | "/api/files" | "/api/file" | "/api/find" | "/api/ignored" | "/api/changes" | "/api/diff"
         | "/api/files-stamp" => {
             if req.origin.is_some() && !http::origin_ok(req.origin.as_deref(), req.host.as_deref()) {
@@ -1394,6 +1396,11 @@ mod image_tests {
         assert_eq!(call("/api/file?path=.env&project=/unregistered").status, 403);
         #[cfg(unix)]
         {
+            // A colon is an ordinary Unix name, not a drive.
+            std::fs::write(root.join("a:b"), "colon").unwrap();
+            assert_eq!(call("/api/file?path=a:b").status, 200);
+            let stamps = call("/api/files-stamp?path=a:b");
+            assert!(serde_json::from_slice::<serde_json::Value>(&stamps.body).unwrap()["out"]["file"].is_string());
             std::os::unix::fs::symlink("/etc", root.join("outside")).unwrap();
             assert_ne!(call("/api/file?path=outside/passwd").status, 200);
             assert_ne!(call("/api/files?dir=outside").status, 200);

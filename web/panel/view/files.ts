@@ -4,7 +4,7 @@ import { createSplit } from './split.ts'
 import { createDiff, statusMark } from './diff.ts'
 import { mountDetail } from './detail.ts'
 import { loadDetail } from '../data/source.ts'
-import type { FileWatch } from '../data/files-refresh.ts'
+import type { FileWatch, StampAnswer } from '../data/files-refresh.ts'
 import type { State } from '../store.ts'
 import type { IssueIndex } from '../data/index.ts'
 import type { PaneView, ViewContext } from './types.ts'
@@ -63,15 +63,19 @@ export function mountFiles(root: HTMLElement, ctx: ViewContext): PaneView {
   let alive = true, started = false, rootKey: string | undefined, checkouts: Checkout[] = [], changedOnly = false, diffOn = false, detailOn = false
   let changes: Change[] = [], ordinary: Map<string, Entry[]> | null = null, stateNow: State | null = null, indexNow: IssueIndex | null = null
   let issueShown: State['shown'] = { value: null, loading: false, problem: null }
-  let diffEpoch = 0, issueEpoch = 0, changesLoaded = false
+  let diffEpoch = 0, issueEpoch = 0, changesLoaded = false, painting = 0
   let ordinaryExpanded = new Set<string>(), ordinaryBase = '.'
+  /** Put `nodes` in `parent` only when they are not already its children: moving a pane drops its scroll and focus. */
+  const place = (parent: HTMLElement, ...nodes: HTMLElement[]) => {
+    if (parent.children.length !== nodes.length || nodes.some((node, i) => parent.children[i] !== node)) parent.replaceChildren(...nodes)
+  }
   function paintRight(): void {
     diffButton.setAttribute('aria-pressed', String(diffOn)); detailButton.setAttribute('aria-pressed', String(detailOn)); changedButton.setAttribute('aria-pressed', String(changedOnly))
     const narrow = root.clientWidth > 0 && root.clientWidth < 640
-    if (detailOn && diffOn && !narrow) { inner.detail.append(issueRoot); inner.list.append(diff.el); right.replaceChildren(inner.el) }
-    else if (detailOn) { if (diffOn && narrow) right.replaceChildren(collapsedNotice, issueRoot); else right.replaceChildren(issueRoot) }
-    else if (diffOn) right.replaceChildren(diff.el)
-    else right.replaceChildren(content)
+    if (detailOn && diffOn && !narrow) { place(inner.detail, issueRoot); place(inner.list, diff.el); place(right, inner.el) }
+    else if (detailOn) { if (diffOn && narrow) place(right, collapsedNotice, issueRoot); else place(right, issueRoot) }
+    else if (diffOn) place(right, diff.el)
+    else place(right, content)
     const hasIssue = !!checkouts.find(c => c.key === rootKey)?.issue
     issueHost.hidden = !hasIssue; issueEmpty.hidden = hasIssue
     if (stateNow && detailOn && hasIssue) issueView.render({ ...stateNow, shown: issueShown }, indexNow)
@@ -126,7 +130,13 @@ export function mountFiles(root: HTMLElement, ctx: ViewContext): PaneView {
       if (!changesLoaded) { const found = await source.changes(key); if (epoch !== diffEpoch || key !== rootKey) return; if (found.error) { message.textContent = found.error; return } changes = found.files; changesLoaded = true }
       if (!changes.some(change => change.path === row.path)) { diff.show({ files: [], truncated: false }); return }
       const result = await source.diff(key, row.path, background); if (epoch === diffEpoch && key === rootKey) { const next = JSON.stringify(result); if (!background || next !== lastDiff) diff.show(result, background); lastDiff = next }
-    } catch { if (epoch === diffEpoch) diff.show({ files: [], truncated: false }) }
+    } catch (error) {
+      if (epoch !== diffEpoch) return
+      // A refresh that failed or was cancelled leaves the diff it would have replaced, and the refresher retries it.
+      if (background) throw error
+      // An empty answer would read as "no changes in this scope".
+      diff.show({ files: [], truncated: false, vcs_error: { said: ctx.copy.failed } })
+    }
   }
   checkoutSelect.addEventListener('change', () => void switchCheckout(checkoutSelect.value))
   changedButton.addEventListener('click', () => void toggleChanged())
@@ -177,13 +187,14 @@ export function mountFiles(root: HTMLElement, ctx: ViewContext): PaneView {
     tree.replaceChildren(...nodes)
   }
   function paintFile(file: FileText, preserve = false): void {
-    const top = content.scrollTop, left = content.scrollLeft
+    const top = content.scrollTop, left = content.scrollLeft, token = ++painting
     fileStamp = file.stamp ?? null; fileReadAt = Date.now(); lastFile = file
     content.replaceChildren()
     if (file.binary) { content.textContent = words.binary; return }
     const lines = (file.text ?? '').split('\n'); let index = 0
     const drawChunk = () => {
-      if (!alive || chosen !== file.path) return
+      // The same path painted again (a refresh, picked twice) starts its own chunks; this run must stop.
+      if (!alive || chosen !== file.path || token !== painting) return
       const fragment = doc.createDocumentFragment()
       for (let end = Math.min(index + 200, lines.length); index < end; index++) {
         const text = lines[index]!, row = el(doc, 'div', { class: 'm-file-line' }), number = el(doc, 'span', { class: 'm-file-number' }, String(index + 1)), code = el(doc, 'span', { class: 'm-file-code' })
@@ -201,12 +212,17 @@ export function mountFiles(root: HTMLElement, ctx: ViewContext): PaneView {
       else { if (file.truncated) content.append(el(doc, 'p', {}, words.truncated)); if (preserve) { content.scrollTop = top; content.scrollLeft = left } }
     }; drawChunk()
   }
+  /** A key moved the cursor: read what it is on and keep its row in sight (nothing focuses the row itself). */
+  function moved(): void {
+    select(); draw()
+    tree.querySelector<HTMLElement>('[aria-selected="true"]')?.scrollIntoView?.({ block: 'nearest' })
+  }
   function select(): void {
     const row = rows[cursor]; const current = ++generation; diffEpoch++; clearTimeout(timer)
     if (!row || !(row.entry.kind === 'file' || (row.entry.kind === 'link' && !row.entry.dir && row.entry.openable)) || !source) return
     chosen = row.path
     if (diffOn) void showDiff()
-    timer = setTimeout(() => { void source.file(row.path, rootKey).then(file => { if (alive && generation === current) paintFile(file) }).catch(() => { if (generation === current) content.textContent = words.readError }) }, 100)
+    timer = setTimeout(() => { void source.file(row.path, rootKey).then(file => { if (alive && generation === current) paintFile(file) }).catch(() => { if (generation === current) { painting++; content.textContent = words.readError } }) }, 100)
   }
   async function expand(): Promise<void> {
     const row = rows[cursor]; if (!row || !(row.entry.kind === 'dir' || (row.entry.kind === 'link' && row.entry.dir && row.entry.openable))) return
@@ -265,6 +281,11 @@ export function mountFiles(root: HTMLElement, ctx: ViewContext): PaneView {
         const first = checkouts.find(c => c.current) ?? checkouts[0]; if (first) { checkoutSelect.value = first.key; void switchCheckout(first.key) } }).catch(() => { message.textContent = words.directoryError }) }
     }, focus() { tree.focus() },
     handleKey(event) {
+      // These keys come before the router's own guards: an IME at work, a browser shortcut (Ctrl-L, Alt-Left) and a
+      // control that takes keys itself (the checkout <select>) are not the tree's. Ctrl-d / Ctrl-u are.
+      if (event.isComposing || event.metaKey || event.altKey || (event.ctrlKey && event.key !== 'd' && event.key !== 'u')) return false
+      const target = event.target as HTMLElement | null
+      if (target !== search && target && (target.isContentEditable || ['INPUT', 'SELECT', 'TEXTAREA'].includes(target.tagName))) return false
       if (event.target === search) {
         if (event.key === 'Escape') { search.hidden = true; search.value = ''; expanded.clear(); for (const p of beforeSearch) expanded.add(p); matches = null; message.textContent = ''; draw(); tree.focus(); return true }
         if (event.key === 'Enter') { search.hidden = true; tree.focus(); return true }
@@ -277,10 +298,10 @@ export function mountFiles(root: HTMLElement, ctx: ViewContext): PaneView {
         if (event.key === 'H' || event.key === 'L') return diff.command(event.key === 'H' ? 'left' : 'right')
       }
       if (event.key === 'Tab') { void expandAll(); return true }
-      if (event.key === 'g') { if (pendingG) { cursor = 0; pendingG = false; select(); draw() } else pendingG = true; return true }
+      if (event.key === 'g') { if (pendingG) { cursor = 0; pendingG = false; moved() } else pendingG = true; return true }
       pendingG = false
       if (event.key === 'H' || event.key === 'L') { content.scrollLeft += event.key === 'H' ? -80 : 80; return true }
-      if (event.ctrlKey && (event.key === 'd' || event.key === 'u')) { cursor = Math.max(0, Math.min(rows.length - 1, cursor + (event.key === 'd' ? 10 : -10))); select(); draw(); return true }
+      if (event.ctrlKey && (event.key === 'd' || event.key === 'u')) { cursor = Math.max(0, Math.min(rows.length - 1, cursor + (event.key === 'd' ? 10 : -10))); moved(); return true }
       if (event.key === '/') { if (!matches) beforeSearch = new Set(expanded); search.hidden = false; search.focus(); return true }
       if (event.key === 'Escape' && matches) { search.value = ''; expanded.clear(); for (const p of beforeSearch) expanded.add(p); matches = null; message.textContent = ''; generation++; draw(); return true }
       if (event.key === 'j' || event.key === 'ArrowDown') cursor = Math.min(rows.length - 1, cursor + 1)
@@ -292,7 +313,7 @@ export function mountFiles(root: HTMLElement, ctx: ViewContext): PaneView {
       else if (event.key === 'Backspace') { if (root.classList.contains('m-files-show-content')) { root.classList.remove('m-files-show-content'); tree.focus(); return true } if (base !== '.') { base = base.includes('/') ? base.slice(0, base.lastIndexOf('/')) : '.'; cursor = 0 } }
       else if ((event.key === 'n' || event.key === 'N') && matches?.matches.length) { const found = rows.map((r, i) => matches?.matches.some(m => m.path === r.path) ? i : -1).filter(i => i >= 0); if (found.length) cursor = event.key === 'n' ? found.find(i => i > cursor) ?? found[0]! : [...found].reverse().find(i => i < cursor) ?? found[found.length - 1]! }
       else return false
-      select(); draw(); return true
+      moved(); return true
     },
     fileWatch() {
       if (rootKey === undefined) return null
@@ -302,11 +323,14 @@ export function mountFiles(root: HTMLElement, ctx: ViewContext): PaneView {
         ...((chosen && (contentShown || diffShown)) ? { file: { path: chosen, stamp: fileStamp, readAt: fileReadAt } } : {}),
         ...((changedOnly || diffShown) ? { changeKey: `root:${rootKey}`, ...(changesLoaded ? { changeFingerprint: JSON.stringify(changes) } : {}) } : {}) }
     },
-    async refreshFileStamps(watch: FileWatch, dirs: string[], file: boolean) {
+    async refreshFileStamps(watch: FileWatch, dirs: string[], file: boolean, answer?: StampAnswer) {
       const key = rootKey; if (!source || watch.key !== `files:${key}`) return
       const selected = rows[cursor]?.path
       let treeChanged = false
       for (const dir of dirs) {
+        // No stamp: the directory is gone or no longer readable. Reading it would fail on every round and hold the
+        // refresh in its back-off; its parent's listing drops it, and a stamp that comes back reads it again.
+        if (answer && answer.dirs[dir] === null) { stamps.set(dir, null); continue }
         const limit = partial.has(dir) ? directories.get(dir)?.length : undefined
         const listed = await source.list(dir, limit || undefined, key, true)
         if (key !== rootKey || !expanded.has(dir)) continue
@@ -318,7 +342,9 @@ export function mountFiles(root: HTMLElement, ctx: ViewContext): PaneView {
       if (treeChanged && !changedOnly) draw(selected)
       if (file && chosen && watch.file?.path === chosen) {
         const path = chosen
-        const fresh = await source.file(path, key, true); if (key === rootKey && path === chosen) { const changed = !lastFile || lastFile.path !== fresh.path || lastFile.text !== fresh.text || lastFile.binary !== fresh.binary || lastFile.truncated !== fresh.truncated || JSON.stringify(lastFile.spans) !== JSON.stringify(fresh.spans); if (changed) { paintFile(fresh, true); if (diffOn) void showDiff(true) } else { fileStamp = fresh.stamp ?? null; fileReadAt = Date.now(); lastFile = fresh } }
+        // The shown file is gone or no longer readable: say so once instead of failing every round.
+        if (answer && answer.file === null) { painting++; fileStamp = null; lastFile = null; content.textContent = words.readError; return }
+        const fresh = await source.file(path, key, true); if (key === rootKey && path === chosen) { const changed = !lastFile || lastFile.path !== fresh.path || lastFile.text !== fresh.text || lastFile.binary !== fresh.binary || lastFile.truncated !== fresh.truncated || JSON.stringify(lastFile.spans) !== JSON.stringify(fresh.spans); if (changed) { paintFile(fresh, true); if (diffOn) await showDiff(true) } else { fileStamp = fresh.stamp ?? null; fileReadAt = Date.now(); lastFile = fresh } }
       }
     },
     async refreshFileChanges(watch: FileWatch, fingerprint: string) {

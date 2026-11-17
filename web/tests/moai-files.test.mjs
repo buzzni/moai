@@ -160,3 +160,47 @@ test('a precautionary reread with unchanged data leaves the DOM alone', async ()
   assert.equal(p.root.querySelector('[role=treeitem]'), row); assert.equal(p.root.querySelector('.m-file-line'), lineNode)
   p.view.destroy(); p.dom.window.close()
 })
+test('a render keeps the content pane where the person left it and a repaint of the same file draws it once', async () => {
+  let reads = 0
+  const text = Array.from({ length: 1000 }, (_, i) => `line ${i}`).join('\n') + '\n'
+  const p = page(async ({ path, query }) => {
+    if (path === '/api/files') return { kind: 'passed', output: { entries: [entry('a.txt')], stamp: '1:1' } }
+    return { kind: 'passed', output: { path: query.path, text: text + (reads++ ? 'more\n' : ''), binary: false, truncated: false, spans: null, stamp: '1:1' } }
+  })
+  p.view.render(p.state, null); await wait(10)
+  p.view.handleKey({ key: 'j', target: p.dom.window.document.body })
+  const content = p.root.querySelector('.m-files-content')
+  for (let n = 0; n < 400 && !content.querySelector('.m-file-line'); n++) await wait(5)
+  // The first paint is still drawing its chunks when the refresh paints the same path again.
+  await p.view.refreshFileStamps(p.view.fileWatch(), [], true, { dirs: {}, file: '2:2' })
+  for (let n = 0; n < 400 && content.querySelectorAll('.m-file-line').length < 1002; n++) await wait(5)
+  await wait(50)
+  assert.equal(content.querySelectorAll('.m-file-line').length, 1002)
+  content.focus(); p.view.render(p.state, null)
+  assert.equal(p.dom.window.document.activeElement, content)
+  p.view.destroy(); p.dom.window.close()
+})
+test('a shown file that vanished is said once instead of failing every refresh', async () => {
+  const p = page(async ({ path, query }) => {
+    if (path === '/api/files') return { kind: 'passed', output: { entries: [entry('gone.txt')], stamp: '1:1' } }
+    if (path === '/api/file' && query.path === 'gone.txt' && p.gone) return { kind: 'refused', status: 404 }
+    return { kind: 'passed', output: { path: query.path, text: 'here', binary: false, truncated: false, spans: null, stamp: '1:1' } }
+  })
+  p.view.render(p.state, null); await wait(10)
+  p.view.handleKey({ key: 'j', target: p.dom.window.document.body }); await wait(150)
+  p.gone = true
+  await p.view.refreshFileStamps(p.view.fileWatch(), ['.'], true, { dirs: { '.': null }, file: null })
+  assert.match(p.root.querySelector('.m-files-content').textContent, /Read error/)
+  assert.equal(p.view.fileWatch().file.stamp, null)
+  p.view.destroy(); p.dom.window.close()
+})
+test('browser shortcuts and the checkout select keep their keys', async () => {
+  const p = page(async ({ path, query }) => path === '/api/files' ? { kind: 'passed', output: { entries: [entry('a'), entry('b')] } } : { kind: 'passed', output: { path: query.path, text: '', binary: false, truncated: false, spans: null } })
+  p.view.render(p.state, null); await wait(10)
+  const body = p.dom.window.document.body
+  assert.equal(p.view.handleKey({ key: 'l', ctrlKey: true, target: body }), false)
+  assert.equal(p.view.handleKey({ key: 'ArrowLeft', altKey: true, target: body }), false)
+  assert.equal(p.view.handleKey({ key: 'ArrowDown', target: p.root.querySelector('select') }), false)
+  assert.equal(p.view.handleKey({ key: 'd', ctrlKey: true, target: body }), true)
+  p.view.destroy(); p.dom.window.close()
+})

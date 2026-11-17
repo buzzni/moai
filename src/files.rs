@@ -548,6 +548,14 @@ fn walk_limit(
                 pending.push(PathBuf::from(&path));
             }
             if files_only && !matches!(entry.kind, Kind::File) {
+                // `take` is the caller's only stop (a time budget): a tree of directories with few files must still
+                // reach it, so it hears from the walk every BATCH entries even when the batch is short.
+                if seen % BATCH == 0 {
+                    if !take(&batch) {
+                        return Ok(Walked { seen, truncated: false });
+                    }
+                    batch.clear();
+                }
                 continue;
             }
             batch.push(path);
@@ -663,6 +671,23 @@ mod tests {
         assert_eq!(batches, 1);
         assert_eq!(result.seen, BATCH);
         assert!(!result.truncated);
+    }
+    #[test]
+    fn a_file_walk_over_directories_still_reaches_its_stop() {
+        let dir = crate::scratch::Scratch::new("files-dirs-stop");
+        let root: &Path = &dir;
+        for n in 0..300 {
+            fs::create_dir(root.join(format!("d{n:03}"))).unwrap();
+        }
+        let mut calls = 0;
+        let result = walk_files(&jail(root), ".", &[], |batch| {
+            assert!(batch.is_empty());
+            calls += 1;
+            false
+        })
+        .unwrap();
+        assert_eq!(calls, 1);
+        assert_eq!(result.seen, BATCH);
     }
     #[test]
     fn text_limit_keeps_utf8_boundaries() {

@@ -73,3 +73,28 @@ test('working scope exposes its visible file stamp and commit scope follows trac
   const before = calls.length; p.shell.trackerChanged(); await wait(20); assert.equal(calls.length, before + 1)
   p.shell.destroy(); p.dom.window.close()
 })
+test('the diff pane holds the keys and keeps its focus across renders', async () => {
+  const p = setup(async () => answer('one')); p.shell.setWidth(1000)
+  p.store.dispatch({ type: 'diff-visible', visible: true }); p.store.dispatch({ type: 'cursor', id: 'one' }); await wait(200)
+  p.shell.focusPane('diff')
+  assert.equal(p.store.getState().focus, 'diff')
+  const focused = p.doc.activeElement
+  assert.ok(p.doc.querySelector('.m-pane-diff').contains(focused))
+  p.store.dispatch({ type: 'view', view: { hideDeferred: true } })
+  assert.equal(p.doc.activeElement, focused)
+  p.store.dispatch({ type: 'detail-visible', visible: false }); p.shell.focusPane('diff')
+  assert.equal(p.store.getState().focus, 'diff')
+  p.shell.destroy(); p.dom.window.close()
+})
+test('a failed background refresh keeps the diff and a failed read says so', async () => {
+  let fail = false
+  const files = [{ path: 'a.rs', old_path: null, status: 'modified', adds: 1, dels: 0, binary: false, hunks: [] }]
+  const p = setup(async endpoint => fail ? { kind: 'cancelled' } : { kind: 'passed', output: { id: endpoint.query.id, scope: 'working', offers: [{ scope: 'working', branch: 'w', owner: null, checkout: '.' }], files, total: 1, truncated: false } })
+  p.store.dispatch({ type: 'diff-visible', visible: true }); p.store.dispatch({ type: 'cursor', id: 'one' }); await wait(200)
+  fail = true
+  await assert.rejects(p.shell.refreshFileChanges(p.shell.fileWatch(), '[]'))
+  assert.match(p.doc.querySelector('.m-pane-diff').textContent, /a\.rs/)
+  p.store.dispatch({ type: 'cursor', id: 'two' }); await wait(200)
+  assert.match(p.doc.querySelector('.m-pane-diff').textContent, new RegExp(copyFor('en').failed))
+  p.shell.destroy(); p.dom.window.close()
+})
