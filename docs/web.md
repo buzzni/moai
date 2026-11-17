@@ -61,8 +61,8 @@ window](ctl.md#suggest-something-to-the-person) for waits and follow-up actions.
 | **Board** | A kanban: one column per status, with backlog and deferred columns and one lane per [milestone](glossary.md#milestone). Closed milestone lanes start folded. Epics are not cards; their members stand in their own columns. Select a lane title to see its milestone detail; use its chevron to fold or open it. | `SPC g b` |
 | **List** | The tree of milestones, [epics](glossary.md#epic) and issues, which you step into and fold. Milestones with unfinished work start open one level; closed milestones start folded. Manual folds survive a reread. | `SPC g l` |
 | **Gantt** | The tree beside a date axis: when each row was planned and when it actually ran | `SPC g g` |
-| **Wiki** | The pages of this wiki: the page list on one side, the page on the other | `SPC g w` |
 | **Files** | Checkout files, their contents, changes and diffs | `SPC g f` |
+| **Wiki** | The pages of this wiki: the page list on one side, the page on the other | `SPC g w` |
 
 Click a tab, or use the keys. Switching tabs keeps the list's cursor, filter and
 sort.
@@ -85,7 +85,7 @@ columns stay plain. The detail starts on the right;
 `SPC o d`, or the position button, moves it right → bottom → left → top. Below
 640px it stays below the list. `SPC v d` hides it, and `SPC v r` switches the body
 and history notes between rendered markdown and the raw text.
-`Enter` on an issue moves the focus to the detail, and `SPC w w` moves it back.
+`Enter` on an issue moves the focus to the detail, and `SPC x x` moves it back.
 
 ## Files and diffs
 
@@ -93,7 +93,7 @@ Open **Files** with `SPC g f`. Select the current or another checkout from the s
 
 The toolbar toggles changed-only files, the active file's diff, or the linked issue's detail pane. Use `SPC v D` to toggle the diff; the issue list, board, and Gantt views also provide this pane for the selected issue. Choose between commit, branch, or working scopes, and toggle unified or side-by-side layouts within the pane. Narrow panes automatically fall back to unified display. Use `Tab` and `Shift-Tab` to navigate between diff files, and `H` and `L` to scroll horizontally. In Files, navigate with `j`/`k` or arrow keys, fold or expand directories with `h`/`l`, enter a directory or view a file with `Enter`, and go back with `Backspace`.
 
-Use `SPC v w` to choose a checkout, `SPC v c` to show only changed files, and `SPC o s` to switch the diff layout. Search results can be traversed with `n` and `N`.
+Use `SPC w` to choose a checkout, `SPC v c` to show only changed files, and `SPC o s` to switch the diff layout. Search results can be traversed with `n` and `N`.
 
 Visible files and diffs refresh automatically when their stamps or underlying changes update; background tabs suspend file polling. If a refresh fails, the last valid diff is retained and retried. Direct file editing is not supported. File reads are strictly confined to the chosen checkout: `.git` directories and symlinks pointing outside the checkout boundary are rejected. Sensitive files such as `.env` are not hidden; any client able to access a non-loopback server can read them.
 
@@ -456,7 +456,7 @@ pressing its key. `?` shows the overlay of every key.
 | `Ctrl-f` `PageDown` / `Ctrl-b` `PageUp` | Page down / up |
 
 A browser keeps some `Ctrl` keys for itself, and `Ctrl-w` closes the tab, so the
-page binds no `Ctrl-w`: `SPC w` moves between panes. Where a browser takes
+page binds no `Ctrl-w`: `SPC x` moves between panes. Where a browser takes
 `Ctrl-f` or `Ctrl-b` first, `PageDown` and `PageUp` do the same. Click the page
 once and the keys reach it.
 
@@ -477,9 +477,10 @@ lanes.
 
 | Key | Does |
 |---|---|
-| `SPC w w` / `SPC w W` | Next / previous pane |
-| `SPC w h` `j` `k` `l` | Pane to the left / below / above / right |
-| `SPC g l` `b` `g` `w` | List / board / Gantt / wiki tab |
+| `SPC x x` / `SPC x X` | Next / previous pane |
+| `SPC x h` `j` `k` `l` | Pane to the left / below / above / right |
+| `SPC w` | Files tab: choose a checkout |
+| `SPC g l` `b` `g` `f` `w` | List / board / Gantt / files / wiki tab |
 | `SPC o d` | Detail position: right → bottom → left → top |
 | `SPC o t` | Pick the time zone dates are drawn in |
 

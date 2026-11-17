@@ -111,7 +111,7 @@ export type KeyLabel =
 export type Label = KeyLabel | ((words: KeyTableCopy, ctx: KeyContext) => string)
 
 /** The SPC layers by their key after SPC. */
-export type LayerId = "a" | "g" | "p" | "v" | "s" | "c" | "m" | "o" | "w"
+export type LayerId = "a" | "g" | "p" | "v" | "s" | "c" | "m" | "o" | "x"
 
 export interface Binding {
   /** Action id the router dispatches (with `args`). The store performs it. */
@@ -319,7 +319,7 @@ const cellBindings: Binding[] = CELLS.map(([key, field]): Binding => ({
 
 const focusMenu = (action: string, key: string, label: KeyLabel, side: Parameters<typeof focusWhen>[0]): Binding => ({
   action,
-  keys: [`SPC w ${key}`],
+  keys: [`SPC x ${key}`],
   label,
   group: "focus",
   // The wiki is list | page side by side: it has no up/down (its help must not list them either).
@@ -337,15 +337,17 @@ const MENU: ReadonlyArray<Binding> = [
   { action: "tab.list", keys: ["SPC g l"], label: "tab.list", group: "tab", modes: BOTH },
   { action: "tab.board", keys: ["SPC g b"], label: "tab.board", group: "tab", modes: BOTH },
   { action: "tab.gantt", keys: ["SPC g g"], label: "tab.gantt", group: "tab", modes: BOTH },
-  { action: "tab.wiki", keys: ["SPC g w"], label: "tab.wiki", group: "tab", modes: BOTH },
+  // The tab strip's order (view/tabs.ts TABS): the wiki is always last, so a new tab goes before it.
   { action: "tab.files", keys: ["SPC g f"], label: "tab.files", group: "tab", modes: BOTH },
+  { action: "tab.wiki", keys: ["SPC g w"], label: "tab.wiki", group: "tab", modes: BOTH },
   { action: "view.deferred", keys: ["SPC v l"], label: "view.deferred", group: "view", kind: "toggle", modes: BROWSE_ONLY, state: (c) => shown(c.hidden?.deferred) },
   { action: "view.backlog", keys: ["SPC v b"], label: "view.backlog", group: "view", kind: "toggle", modes: BROWSE_ONLY, state: (c) => shown(c.hidden?.backlog) },
   { action: "view.archived", keys: ["SPC v o"], label: "view.archived", group: "view", kind: "toggle", modes: BROWSE_ONLY, state: (c) => shown(c.hidden?.archived) },
   // The other worktrees' rows over the list, as the TUI's `SPC v w` (se-etwu); on when the page opens.
   { action: "view.diff", keys: ["SPC v D"], label: "view.diff", group: "view", modes: BROWSE_ONLY, when: (c) => c.tab !== "wiki", kind: "toggle", state: (c) => shown(c.tab === "files" ? !c.files?.diff : !c.diff) },
   { action: "view.changed", keys: ["SPC v c"], label: "view.changed", group: "view", modes: BROWSE_ONLY, when: (c) => c.tab === "files", kind: "toggle", state: (c) => shown(!c.files?.changed) },
-  { action: "view.worktree", keys: ["SPC v w"], label: (w, c) => w.labels[c.tab === "files" ? "view.checkout" : "view.worktree"], group: "view", kind: "toggle", modes: BROWSE_ONLY, state: (c) => c.tab === "files" ? null : shown(c.hidden?.worktree) },
+  // Not on the files tab: the checkout picker is `SPC w` there, and the list under that tab must not change quietly.
+  { action: "view.worktree", keys: ["SPC v w"], label: "view.worktree", group: "view", kind: "toggle", modes: BROWSE_ONLY, when: (c) => c.tab !== "files", state: (c) => shown(c.hidden?.worktree) },
   { action: "view.all", keys: ["SPC v a"], label: "view.all", helpLabel: "view.allHelp", group: "view", modes: BROWSE_ONLY },
   ...columnBindings,
   { action: "view.detail", keys: ["SPC v d"], label: "view.detail", group: "view", kind: "toggle", modes: BROWSE_ONLY, state: (c) => shown(c.tab === "files" ? !c.files?.detail : !detailShown(c)) },
@@ -392,8 +394,12 @@ const MENU: ReadonlyArray<Binding> = [
     modes: BOTH,
     stateText: (c) => c.zone ?? null,
   },
-  focusMenu("focus.next", "w", "focus.next", "next"),
-  focusMenu("focus.prev", "W", "focus.prev", "prev"),
+  // The files tab's checkout picker, as the TUI's file window (`SPC w`). Only there: elsewhere it is hidden and quiet.
+  { action: "files.checkout", keys: ["SPC w"], label: "view.checkout", group: "view", modes: BROWSE_ONLY, when: (c) => c.tab === "files" },
+  // The pane moves: the TUI's Ctrl-w layer, moved under SPC because the browser closes its tab on Ctrl-w. `x` is a
+  // root letter neither surface uses; `x x` (next pane) is the hand the old `w w` was.
+  focusMenu("focus.next", "x", "focus.next", "next"),
+  focusMenu("focus.prev", "X", "focus.prev", "prev"),
   focusMenu("focus.left", "h", "focus.left", "left"),
   focusMenu("focus.down", "j", "focus.down", "down"),
   focusMenu("focus.up", "k", "focus.up", "up"),
@@ -410,7 +416,7 @@ export const LAYERS: ReadonlyArray<Layer> = [
   { prefix: "SPC c", id: "c" },
   { prefix: "SPC m", id: "m" },
   { prefix: "SPC o", id: "o" },
-  { prefix: "SPC w", id: "w" },
+  { prefix: "SPC x", id: "x" },
 ]
 
 /** Keys the router handles itself while the SPC menu is open (menu.rs MENU + the opening key). */
@@ -429,7 +435,7 @@ const PROMPT: ReadonlyArray<Binding> = [
   { action: "prompt.up", keys: ["Up"], label: "prompt.up", group: "prompt" },
   { action: "prompt.down", keys: ["Down"], label: "prompt.down", group: "prompt" },
   { action: "prompt.clear", keys: ["C-u"], label: "prompt.clear", group: "prompt", verdict: "확인" },
-  // Ctrl-w closes the browser tab, so neither the window moves nor the word delete take it: SPC w moves the focus.
+  // Ctrl-w closes the browser tab, so neither the window moves nor the word delete take it: SPC x moves the focus.
   { action: "prompt.deleteWord", keys: ["A-Backspace"], label: "prompt.deleteWord", group: "prompt", verdict: "대체" },
 ]
 
@@ -659,7 +665,7 @@ export function helpSections(
       if (binding.group !== group || binding.help === false) continue
       const keys = binding.helpKeys ? [...binding.helpKeys] : bindingKeys(binding, platform)
       if (keys.length === 0) continue
-      // One row per action: the SPC w and Ctrl-w forms of a focus move share a row.
+      // One row per action: two forms of one action (a key and its macOS-only one) share a row.
       const same = rows.find((r) => r.action === binding.action && JSON.stringify(r.args) === JSON.stringify(binding.args))
       const available = binding.group === "menu" || isAvailable(binding, { ...ctx, mode })
       if (same) {

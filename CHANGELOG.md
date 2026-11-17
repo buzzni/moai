@@ -20,6 +20,10 @@ does not commit and it does not tag — see `CONTRIBUTING.md`.
 - The explorer has a file window (`SPC g f`): the checkout's files as a tree beside the file's syntax-coloured text, with a checkout picker, changed-files-only view, search, panning for long lines and automatic refresh. (moai-ffk9)
 - The explorer's list, board and gantt have a diff pane (`SPC v D`) showing an issue's changes in unified or side-by-side form (`SPC o s`), and `moai ctl screen files`, `moai ctl view diff` and new `ctl state` keys reach both. (moai-ffk9)
 
+### Changed
+
+- The web interface moves between panes with `SPC x x`, `SPC x X` and `SPC x h` `j` `k` `l` instead of `SPC w …`; `SPC w` now chooses the checkout on the Files tab, which stands before the Wiki tab. (moai-dy7a.tzl)
+
 ## [1.3.0] - 2026-11-16
 
 ### Added

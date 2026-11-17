@@ -274,7 +274,7 @@ export interface ZoneCopy {
  * The key table names each binding by a label id; these are the words for them. The English follows moai's own
  * `tui.*` words where the panel shows the same thing as the TUI: the state labels (`tui.state.*`, without the
  * TUI's `●` sort mark) and the root and layer names (`tui.menu.root`, `tui.group.*`), except `SPC g`, which the
- * panel calls Go (`tui.group.screen` is "screen") and `SPC w`, which the TUI has not.
+ * panel calls Go (`tui.group.screen` is "screen") and `SPC x`, which the TUI has not (its pane moves are Ctrl-w).
  */
 export interface KeyTableCopy {
   labels: Record<KeyLabel, string>

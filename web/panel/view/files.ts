@@ -140,6 +140,13 @@ export function mountFiles(root: HTMLElement, ctx: ViewContext): PaneView {
     }
   }
   checkoutSelect.addEventListener('change', () => void switchCheckout(checkoutSelect.value))
+  // `SPC w` puts the focus here, and the select's type-ahead would let the next letter switch the checkout: an old
+  // hand's `SPC w w` (the pane move before `SPC x`), and every worktree branch starts `worktree-`. So no letter
+  // reaches it; choosing is the arrows and Enter, or a click.
+  checkoutSelect.addEventListener('keydown', event => {
+    if (event.ctrlKey || event.metaKey || event.altKey) return
+    if (event.isComposing || event.key === 'Process' || (event.key.length === 1 && event.key !== ' ')) event.preventDefault()
+  })
   changedButton.addEventListener('click', () => void toggleChanged())
   diffButton.addEventListener('click', () => { diffOn = !diffOn; paintRight(); if (diffOn) void showDiff(); watchChanged() })
   detailButton.addEventListener('click', () => { detailOn = !detailOn; paintRight(); if (detailOn) void readIssue(); watchChanged() })

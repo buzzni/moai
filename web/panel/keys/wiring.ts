@@ -482,7 +482,9 @@ export function wireKeys(options: KeyWiringOptions): KeyWiring {
     "view.deferred": () => flip(store.getState(), "hideDeferred"),
     "view.backlog": () => flip(store.getState(), "hideBacklog"),
     "view.archived": () => flip(store.getState(), "showArchived"),
-    "view.worktree": () => { if (store.getState().tab === "files") panes().files?.command?.("checkout"); else flip(store.getState(), "worktree") },
+    // The key table offers `SPC v w` off the files tab only; the check keeps the list under that tab as it is.
+    "view.worktree": () => { if (store.getState().tab !== "files") flip(store.getState(), "worktree") },
+    "files.checkout": () => { if (store.getState().tab === "files") panes().files?.command?.("checkout") },
     "view.diff": () => { if (store.getState().tab === "files") panes().files?.command?.("diff"); else store.dispatch({ type: "diff-visible", visible: !store.getState().diff.visible }) },
     "view.changed": () => panes().files?.command?.("changed"),
     "option.side": () => { if (store.getState().tab === "files") panes().files?.command?.("diff-layout"); else panes().diff.command?.("diff-layout") },

@@ -41,7 +41,7 @@ const wikiSource = () => ({
   },
 })
 
-function boot({ wiki, read, rows = ROWS, tree = treeOf(rows), platform = 'other', sortDefault = createSortDefault() } = {}) {
+function boot({ wiki, read, client, rows = ROWS, tree = treeOf(rows), platform = 'other', sortDefault = createSortDefault() } = {}) {
   const dom = new JSDOM('<!doctype html><html lang="en"><body><div id="moai-app"></div></body></html>', { pretendToBeVisual: true })
   const doc = dom.window.document
   const store = createStore()
@@ -65,6 +65,7 @@ function boot({ wiki, read, rows = ROWS, tree = treeOf(rows), platform = 'other'
       cancel() {},
     },
     wiki,
+    client,
   })
   store.dispatch({ type: 'board-loaded', data: { rows, more: 0, loadedAt: Date.now() } })
   const keys = wireKeys({ document: doc, store, shell, copy: en, platform, read, sortDefault, index: (state) => (state.board.value ? index : null) })
@@ -405,13 +406,13 @@ test('keys: a focus move into the detail lands on the pane, not on Close, so SPC
   const panel = inEpic()
   panel.store.dispatch({ type: 'detail-loaded', data: { id: 'e1.a', row: ROWS[2] } })
   assert.ok(panel.$('.moai-detail [data-focus="close"]'), 'the detail has its Close button')
-  panel.seq(' ', 'w', 'w')
+  panel.seq(' ', 'x', 'x')
   assert.equal(panel.state().focus, 'detail')
   assert.equal(panel.doc.activeElement, panel.$('.m-pane-detail'), 'the pane itself, not its first button')
   const space = panel.press(' ')
   assert.equal(space.defaultPrevented, true, 'SPC is the router\'s: it does not click a button')
   assert.deepEqual(panel.keys.router.state().menu, ['SPC'])
-  panel.seq('w', 'w')
+  panel.seq('x', 'x')
   assert.equal(panel.state().focus, 'list')
   assert.ok(panel.state().shown.value, 'the detail is still shown')
 })
@@ -624,7 +625,7 @@ test('keys: Tab in browse moves the focus unless it runs expandAll on the list (
   const panel = inEpic()
   assert.equal(panel.press('Tab').defaultPrevented, true, 'on the list Tab is expandAll')
   panel.store.dispatch({ type: 'detail-loaded', data: { id: 'e1.a', row: ROWS[2] } })
-  panel.seq(' ', 'w', 'w')
+  panel.seq(' ', 'x', 'x')
   assert.equal(panel.state().focus, 'detail')
   assert.equal(panel.press('Tab').defaultPrevented, false, 'in the detail Tab moves the focus')
   assert.equal(panel.press('Tab', { shiftKey: true }).defaultPrevented, false)
@@ -930,4 +931,90 @@ test('keys: an archived row and an archived group take no mark — not the miles
   panel.seq(' ', 'm', 'g')
   await ticks()
   assert.deepEqual(calls, [['group', 'e1'], ['group', 'e1']])
+})
+
+test('keys: on the files tab SPC w opens the checkout picker, and an old hand\'s SPC w w does not switch the checkout (moai-dy7a.tzl)', async () => {
+  // Every worktree branch starts `worktree-`: a `w` reaching the select's type-ahead would switch the checkout.
+  const checkouts = [
+    { key: '.', branch: 'develop', main: true, current: true, issue: null, milestone: null },
+    { key: '.worktrees/moai-a', branch: 'worktree-moai-a', main: false, current: false, issue: null, milestone: null },
+  ]
+  const asked = []
+  const client = {
+    request: async (endpoint) => {
+      asked.push(endpoint.path)
+      if (endpoint.path === '/api/checkouts') return { kind: 'passed', output: { checkouts } }
+      if (endpoint.path === '/api/files') return { kind: 'passed', output: { entries: [{ name: 'a.rs', kind: 'file', openable: true, size: 1 }] } }
+      return { kind: 'passed', output: { path: endpoint.query?.path ?? '', text: '', binary: false, truncated: false, spans: null } }
+    },
+  }
+  const panel = boot({ client })
+  const worktreeBefore = panel.state().view.worktree
+  panel.seq(' ', 'g', 'f')
+  assert.equal(panel.state().tab, 'files')
+  await ticks(10)
+  const select = panel.$('#m-panel-files select')
+  assert.ok(select, 'the files tab has its checkout picker')
+  assert.equal(select.value, '.')
+  panel.shell.focusPane('list')
+  const space = panel.press(' ', {}, panel.doc.body)
+  assert.equal(space.defaultPrevented, true)
+  panel.press('w', {}, panel.doc.body)
+  assert.equal(panel.doc.activeElement, select, 'SPC w puts the focus on the picker')
+  assert.equal(panel.keys.router.state().menu, null, 'and closes the menu')
+  // The second `w` lands on the focused select: no letter reaches its type-ahead.
+  for (const key of ['w', 'W', 'ㅈ']) assert.equal(panel.press(key, {}, select).defaultPrevented, true, `${key} is kept from the picker`)
+  for (const key of ['ArrowDown', 'Enter', 'Escape', 'Tab', ' ']) assert.equal(panel.press(key, {}, select).defaultPrevented, false, `${key} is the picker's`)
+  assert.equal(panel.press('l', { ctrlKey: true }, select).defaultPrevented, false, 'a browser shortcut goes on')
+  assert.equal(select.value, '.', 'the checkout is the same')
+  // SPC v w on the files tab: hidden and quiet — the overlay under the tab does not flip.
+  panel.shell.focusPane('list')
+  panel.seq(' ', 'v')
+  assert.ok(![...panel.doc.querySelectorAll('.m-wk-key')].some((k) => k.textContent === 'w'), 'no w in the view layer')
+  panel.press('w')
+  assert.equal(panel.state().view.worktree, worktreeBefore)
+  panel.press('Escape')
+  // Off the files tab SPC w does nothing and SPC v w is the overlay again.
+  panel.seq(' ', 'g', 'l')
+  panel.shell.focusPane('list')
+  const focused = panel.doc.activeElement
+  panel.seq(' ', 'w', 'w')
+  assert.equal(panel.doc.activeElement, focused)
+  panel.press('Escape')
+  panel.seq(' ', 'v', 'w')
+  assert.equal(panel.state().view.worktree, !worktreeBefore)
+  assert.ok(asked.includes('/api/checkouts'))
+})
+
+test('keys: SPC x x moves the pane on the list and in the wiki, SPC w w no more (moai-dy7a.tzl)', async () => {
+  const panel = inEpic({ wiki: wikiSource() })
+  panel.store.dispatch({ type: 'detail-loaded', data: { id: 'e1.a', row: ROWS[2] } })
+  panel.seq(' ', 'w', 'w')
+  assert.equal(panel.state().focus, 'list', 'the old keys move nothing')
+  panel.press('Escape')
+  panel.seq(' ', 'x', 'x')
+  assert.equal(panel.state().focus, 'detail')
+  panel.seq(' ', 'x', 'X')
+  assert.equal(panel.state().focus, 'list')
+  // The side keys follow the split axis: the two the layer offers move there and back.
+  const sides = menuLayer('SPC x', panel.keys.context()).items.map((i) => i.key).filter((k) => k !== 'x' && k !== 'X')
+  assert.equal(sides.length, 2)
+  const [back, toward] = sides[0] === 'h' || sides[0] === 'k' ? sides : [...sides].reverse()
+  panel.seq(' ', 'x', toward)
+  assert.equal(panel.state().focus, 'detail')
+  panel.seq(' ', 'x', back)
+  assert.equal(panel.state().focus, 'list')
+  // The wiki: list | page, left and right.
+  panel.seq(' ', 'g', 'w')
+  await ticks()
+  panel.shell.focusPane('list')
+  const pane = () => panel.$('#m-panel-wiki [data-pane]')?.dataset.pane
+  panel.seq(' ', 'x', 'l')
+  assert.equal(pane(), 'body')
+  panel.seq(' ', 'x', 'h')
+  assert.equal(pane(), 'list')
+  panel.seq(' ', 'x', 'x')
+  assert.equal(pane(), 'body')
+  panel.seq(' ', 'w', 'w')
+  assert.equal(pane(), 'body', 'SPC w w moves nothing in the wiki')
 })

@@ -1,4 +1,4 @@
-// Tab shell: the kanban / list / gantt / wiki tab strip (roving tabindex) and the panels they switch.
+// Tab shell: the kanban / list / gantt / files / wiki tab strip (roving tabindex) and the panels they switch.
 // Standalone: it takes props and callbacks and touches only the elements it makes. Where the last tab is
 // remembered (the store, the saved settings) is the caller's business; normalizeTab() cleans what comes back.
 
@@ -14,12 +14,13 @@ export interface TabDef {
   label: string
 }
 
+/** The strip's order, and the order the arrow keys, Home and End walk. The wiki is always last: a new tab goes before it. */
 export const TABS: ReadonlyArray<TabDef> = [
   { id: "board", icon: "kanban", label: "칸반" },
   { id: "list", icon: "list-tree", label: "목록" },
   { id: "gantt", icon: "gantt-chart", label: "간트" },
-  { id: "wiki", icon: "book-open", label: "위키" },
   { id: "files", icon: "folder", label: "파일" },
+  { id: "wiki", icon: "book-open", label: "위키" },
 ]
 
 export const DEFAULT_TAB: TabId = "list"
