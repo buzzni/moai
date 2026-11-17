@@ -36099,6 +36099,62 @@ fn diff_reads_commits_and_worktree_scopes_without_writing() {
 }
 
 #[test]
+fn diff_of_one_renamed_file_shows_only_the_lines_it_changed() {
+    let s = Scratch::new("diff-rename-path");
+    let root = s.path();
+    git(root, &["init", "-q"]);
+    ok(root, &["init", "argos"]);
+    let id = field(&ok(root, &["add", "issue", "--json"]), "id");
+    let text: String = (0..30).map(|n| format!("line {n}\n")).collect();
+    std::fs::write(root.join("before.txt"), &text).unwrap();
+    git(root, &["add", "-A"]);
+    git(root, &["commit", "-qm", "base"]);
+    git(root, &["mv", "before.txt", "after.txt"]);
+    std::fs::write(root.join("after.txt"), text.replace("line 7\n", "line seven\n")).unwrap();
+    git(root, &["commit", "-qam", &format!("feat: {id}")]);
+    let out = ok(root, &["diff", &id, "--scope=commits", "--path=after.txt"]);
+    assert!(out.contains("rename from before.txt"), "{out}");
+    assert!(out.contains("+line seven") && out.contains("-line 7"), "{out}");
+    assert!(!out.contains("+line 20"), "the renamed file read as a whole new one: {out}");
+    let json = json_of(&ok(root, &["diff", &id, "--scope=commits", "--path=after.txt", "--json"]));
+    let lines =
+        json["files"][0]["hunks"].as_array().unwrap().iter().flat_map(|h| h["lines"].as_array().unwrap().clone());
+    assert_eq!(lines.filter(|l| l["kind"] == "add").count(), 1);
+    assert_eq!(json["files"][0]["adds"], 1);
+    // The old name is the list's, never the caller's.
+    assert!(!moai(root, &["diff", &id, "--scope=commits", "--path=before.txt"]).status.success());
+}
+
+#[test]
+fn diff_of_one_renamed_file_leaves_out_commits_that_touched_only_its_old_name() {
+    let s = Scratch::new("diff-rename-chain");
+    let root = s.path();
+    git(root, &["init", "-q"]);
+    ok(root, &["init", "argos"]);
+    let id = field(&ok(root, &["add", "issue", "--json"]), "id");
+    let text: String = (0..30).map(|n| format!("line {n}\n")).collect();
+    std::fs::write(root.join("a.txt"), &text).unwrap();
+    git(root, &["add", "-A"]);
+    git(root, &["commit", "-qm", "base"]);
+    // An edit under the first name, a rename, then a rename with an edit: each step names the file differently.
+    std::fs::write(root.join("a.txt"), text.replace("line 2\n", "line two\n")).unwrap();
+    git(root, &["commit", "-qam", &format!("feat: edit ({id})")]);
+    git(root, &["mv", "a.txt", "b.txt"]);
+    git(root, &["commit", "-qm", &format!("feat: first rename ({id})")]);
+    git(root, &["mv", "b.txt", "c.txt"]);
+    std::fs::write(root.join("c.txt"), text.replace("line 2\n", "line two\n").replace("line 9\n", "line nine\n"))
+        .unwrap();
+    git(root, &["commit", "-qam", &format!("feat: second rename ({id})")]);
+    let out = ok(root, &["diff", &id, "--scope=commits", "--path=c.txt"]);
+    assert!(out.contains("rename from b.txt") && out.contains("+line nine"), "{out}");
+    // The step before, read by the old name alone, would print as a whole new file.
+    assert!(!out.contains("new file mode") && !out.contains("+line 20"), "{out}");
+    assert!(!out.contains("first rename") && !out.contains("feat: edit"), "{out}");
+    let out = ok(root, &["diff", &id, "--scope=commits", "--path=b.txt"]);
+    assert!(out.contains("rename from a.txt") && !out.contains("feat: edit") && !out.contains("+line two"), "{out}");
+}
+
+#[test]
 fn diff_without_git_repository_returns_one_value_and_a_vcs_error() {
     let s = init("diff-no-git");
     let id = field(&ok(s.path(), &["add", "issue", "--json"]), "id");
@@ -36189,7 +36245,11 @@ fn web_diff_matches_cli_and_rejects_unlisted_paths() {
     let (status, _, body) = get(web.port, &format!("/api/diff?id={id}&scope=commits"));
     assert_eq!(status, 200, "{body}");
     let mut response = json_of(&body)["out"].clone();
+    // The web adds the mark and how far highlighting got; `moai diff --json` carries neither.
+    assert_eq!(response.as_object_mut().unwrap().remove("highlight"), Some(serde_json::json!("full")));
+    assert!(cli.get("highlight").is_none());
     for file in response["files"].as_array_mut().unwrap() {
+        assert_eq!(file.as_object_mut().unwrap().remove("mark"), Some(serde_json::json!("A")));
         for hunk in file["hunks"].as_array_mut().unwrap() {
             for line in hunk["lines"].as_array_mut().unwrap() {
                 line.as_object_mut().unwrap().remove("spans");
@@ -36197,6 +36257,20 @@ fn web_diff_matches_cli_and_rejects_unlisted_paths() {
         }
     }
     assert_eq!(response, cli);
+    assert!(cli["files"].as_array().unwrap().iter().all(|f| f.get("mark").is_none()));
+    // Without a scope the list comes whole, in the scope `/api/diff` picks, beside the offers it always gave.
+    let (status, _, body) = get(web.port, &format!("/api/changes?id={id}"));
+    assert_eq!(status, 200, "{body}");
+    let list = json_of(&body)["out"].clone();
+    let (_, _, picked) = get(web.port, &format!("/api/diff?id={id}"));
+    assert_eq!(list["scope"], json_of(&picked)["out"]["scope"]);
+    assert_eq!(list["offers"], cli["offers"]);
+    assert!(list.get("vcs_error").is_some_and(serde_json::Value::is_null), "{list}");
+    assert_eq!(list["total"], 1);
+    assert_eq!(list["truncated"], false);
+    assert_eq!(list["files"][0]["path"], "sample.rs");
+    assert_eq!(list["files"][0]["mark"], "A");
+    assert!(list["files"][0].get("hunks").is_none());
     for path in ["--output%3D/tmp/x", "-x", "%3A%28top%29a"] {
         let (status, _, _) = get(web.port, &format!("/api/diff?id={id}&scope=commits&path={path}"));
         assert_eq!(status, 404, "{path}");

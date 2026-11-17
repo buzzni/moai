@@ -254,8 +254,27 @@ fn answer_inner(path: &str, cwd: &Path, lang: Lang, query: &[(String, String)], 
     }
 }
 
-fn add_highlights(answer: &crate::changes::Answer) -> Value {
+/// Kept back from the highlighting's share for turning the answer into text and sending it: a 2 MiB patch answers with
+/// several megabytes, and the connection stops waiting at [`BUDGET`].
+const SEND: Duration = Duration::from_secs(1);
+/// Each file row's mark, from the row it was written from — `vcs::Mark`'s fold, which the TUI's own eight letters do
+/// not use yet.
+fn put_marks<'a>(out: &mut Value, changes: impl IntoIterator<Item = &'a crate::vcs::Change>) {
+    if let Some(files) = out.get_mut("files").and_then(Value::as_array_mut) {
+        for (entry, change) in files.iter_mut().zip(changes) {
+            if let Some(entry) = entry.as_object_mut() {
+                entry.insert("mark".into(), json!(crate::vcs::Mark::of(change.status)));
+            }
+        }
+    }
+}
+/// The answer as a value, every file marked and highlighted until `until`. Highlighting never holds the answer back:
+/// past the deadline the files left keep their text and hunks with `spans: null`, and `highlight` says how far it got —
+/// `full`, `partial` or `none`, a closed set the page picks its words by.
+fn add_highlights(answer: &crate::changes::Answer, until: Instant) -> Value {
     let mut out = serde_json::to_value(answer).unwrap_or(Value::Null);
+    put_marks(&mut out, answer.files.iter().map(|f| &f.change));
+    let (mut done, mut late) = (0usize, 0usize);
     if let Some(files) = out.get_mut("files").and_then(Value::as_array_mut) {
         for (entry, source) in files.iter_mut().zip(&answer.files) {
             let Some(hunks) = &source.hunks else { continue };
@@ -266,7 +285,18 @@ fn add_highlights(answer: &crate::changes::Answer) -> Value {
                 hunks: hunks.clone(),
                 ..Default::default()
             };
-            let highlighted = highlight::diff(&file);
+            // A file with nothing to colour (binary, too large, an unknown language) counts on neither side: a reply
+            // whose only finished file was such a one coloured nothing, and says `none`, not `partial`.
+            let highlighted = match highlight::diff_until(&file, Some(until)) {
+                Ok(h) => {
+                    done += usize::from(h.is_some());
+                    h
+                }
+                Err(highlight::Late) => {
+                    late += 1;
+                    None
+                }
+            };
             if let Some(rows) = entry.get_mut("hunks").and_then(Value::as_array_mut) {
                 for (hi, hunk) in rows.iter_mut().enumerate() {
                     if let Some(lines) = hunk.get_mut("lines").and_then(Value::as_array_mut) {
@@ -284,7 +314,19 @@ fn add_highlights(answer: &crate::changes::Answer) -> Value {
             }
         }
     }
+    let word = match (done, late) {
+        (_, 0) => "full",
+        (0, _) => "none",
+        _ => "partial",
+    };
+    if let Some(map) = out.as_object_mut() {
+        map.insert("highlight".into(), json!(word));
+    }
     out
+}
+/// When highlighting has to stop: what the request has left, less the time to send the answer.
+fn highlight_until(left: &dyn Fn() -> Duration) -> Instant {
+    Instant::now() + left().saturating_sub(SEND)
 }
 fn issue_changes(
     path: &str,
@@ -317,13 +359,19 @@ fn issue_changes(
             if answer.vcs_error.as_ref().is_some_and(|e| e.kind == "timeout") {
                 return refuse(504, "request timed out", code::TIMEOUT);
             }
-            ok(if path == "/api/diff" {
-                add_highlights(&answer)
-            } else if scope.is_none() {
-                json!({"offers":answer.offers,"vcs_error":answer.vcs_error})
-            } else {
-                serde_json::to_value(answer).unwrap_or(Value::Null)
-            })
+            if path == "/api/diff" {
+                return ok(add_highlights(&answer, highlight_until(left)));
+            }
+            // Without a scope the answer is the list of the scope the reading chose — the one `/api/diff` would
+            // show — so a page draws every file's head from one request before it asks for any patch.
+            let mut out = serde_json::to_value(&answer).unwrap_or(Value::Null);
+            put_marks(&mut out, answer.files.iter().map(|f| &f.change));
+            if scope.is_none()
+                && let Some(map) = out.as_object_mut()
+            {
+                map.entry("vcs_error").or_insert(Value::Null);
+            }
+            ok(out)
         }
         Err(_) => missing(),
     }
@@ -347,14 +395,28 @@ fn checkout_changes(path: &str, checkout: &Checkout, file: Option<&str>, left: &
         return missing();
     }
     if path == "/api/changes" {
-        return ok(json!({"scope":"whole","files":changes.files,"total":changes.total,"truncated":changes.truncated}));
+        // The directories' facts take a share of what is left, never the list's own time: past it they stand `M`.
+        let marks = backend.marks(&checkout.path, &changes, Some(left() / 2));
+        let mut out = json!({"scope":"whole","files":changes.files,"total":changes.total,"truncated":changes.truncated,"dirs":marks.dirs});
+        put_marks(&mut out, &changes.files);
+        return ok(out);
     }
-    let patch =
-        match backend.patch_with_changes(&checkout.path, &crate::vcs::Scope::Whole, file, Some(left()), &changes) {
-            Ok(p) => p,
-            Err(crate::vcs::Error::Timeout) => return refuse(504, "request timed out", code::TIMEOUT),
-            Err(_) => return missing(),
-        };
+    // A renamed file is read by both names, the old one from the list: the new name alone reads as a whole new file.
+    let names: Option<Vec<String>> = file.map(|p| {
+        std::iter::once(p.to_owned())
+            .chain(changes.files.iter().filter(|c| c.path == p).filter_map(|c| c.old_path.clone()))
+            .collect()
+    });
+    let whole = crate::vcs::Scope::Whole;
+    let read = match &names {
+        Some(names) => backend.patch_of(&checkout.path, &whole, names, Some(left()), Some(&changes)),
+        None => backend.patch_with_changes(&checkout.path, &whole, None, Some(left()), &changes),
+    };
+    let patch = match read {
+        Ok(p) => p,
+        Err(crate::vcs::Error::Timeout) => return refuse(504, "request timed out", code::TIMEOUT),
+        Err(_) => return missing(),
+    };
     let parsed = crate::diff::parse(&patch.text);
     let entries = changes
         .files
@@ -382,7 +444,7 @@ fn checkout_changes(path: &str, checkout: &Checkout, file: Option<&str>, left: &
         vcs_error: None,
         patch: String::new(),
     };
-    let mut out = add_highlights(&answer);
+    let mut out = add_highlights(&answer, highlight_until(left));
     out["scope"] = json!("whole");
     ok(out)
 }
@@ -395,5 +457,122 @@ mod tests {
         let line = "😀한a";
         let parts = vec![highlight::Span { kind: highlight::Kind::Keyword, range: 4..7 }];
         assert_eq!(spans(line, &parts), json!([[2, 3, "keyword"]]));
+    }
+
+    fn body(tag: &str) -> String {
+        (0..20).map(|n| format!("let {tag}{n} = {n};\n")).collect()
+    }
+    fn tracker(name: &str) -> crate::scratch::Scratch {
+        let root = crate::scratch::Scratch::new(name);
+        std::fs::create_dir(root.join(".moai")).unwrap();
+        std::fs::write(root.join(".moai/config.toml"), "prefix = \"web\"\n").unwrap();
+        std::fs::write(root.join(".moai/issues.jsonl"), "").unwrap();
+        root
+    }
+    fn get(root: &Path, path: &str, query: &[(&str, &str)]) -> (u16, Value) {
+        let query: Vec<_> = query.iter().map(|(k, v)| ((*k).to_owned(), (*v).to_owned())).collect();
+        let r = answer(path, root, Lang::En, &query);
+        (r.status, serde_json::from_slice(&r.body).unwrap_or(Value::Null))
+    }
+    #[test]
+    fn checkout_answers_carry_marks_for_files_and_directories() {
+        let root = tracker("web-marks");
+        let git = |args: &[&str]| crate::git::tests::run_git(&root, None, args);
+        git(&["init", "-q"]);
+        std::fs::create_dir_all(root.join("grow")).unwrap();
+        std::fs::write(root.join("grow/a.rs"), body("a")).unwrap();
+        std::fs::write(root.join("old.rs"), body("o")).unwrap();
+        git(&["add", "."]);
+        git(&["commit", "-qm", "base"]);
+        std::fs::write(root.join("grow/b.rs"), "let b = 1;\n").unwrap();
+        std::fs::create_dir_all(root.join("fresh/inner")).unwrap();
+        std::fs::write(root.join("fresh/inner/c.rs"), "let c = 1;\n").unwrap();
+        git(&["mv", "old.rs", "renamed.rs"]);
+        std::fs::write(root.join("renamed.rs"), body("o").replacen("o3 = 3", "o3 = 33", 1)).unwrap();
+        let (status, list) = get(&root, "/api/changes", &[]);
+        assert_eq!(status, 200, "{list}");
+        let out = &list["out"];
+        let mark = |p: &str| out["files"].as_array().unwrap().iter().find(|f| f["path"] == p).unwrap()["mark"].clone();
+        assert_eq!(mark("grow/b.rs"), "A");
+        assert_eq!(mark("renamed.rs"), "R");
+        assert_eq!(mark("fresh/inner/c.rs"), "A");
+        assert_eq!(out["dirs"], json!({"fresh":"A","fresh/inner":"A","grow":"M"}));
+        assert!(
+            out["files"].as_array().unwrap().iter().all(|f| matches!(f["mark"].as_str(), Some("M" | "A" | "D" | "R")))
+        );
+        // The same tree reads the same text: the page compares answers as text.
+        assert_eq!(get(&root, "/api/changes", &[]).1.to_string(), list.to_string());
+        // One renamed file's diff carries its mark and only the lines it changed.
+        let (status, diff) = get(&root, "/api/diff", &[("path", "renamed.rs")]);
+        assert_eq!(status, 200, "{diff}");
+        let file = &diff["out"]["files"][0];
+        assert_eq!(file["mark"], "R");
+        assert_eq!(diff["out"]["highlight"], "full");
+        let lines: Vec<_> =
+            file["hunks"].as_array().unwrap().iter().flat_map(|h| h["lines"].as_array().unwrap()).collect();
+        let adds = lines.iter().filter(|l| l["kind"] == "add").count();
+        assert_eq!(json!(adds), file["adds"], "{file}");
+        assert!(adds < 5, "the renamed file read as a whole new one");
+        // The gate stays as narrow: only a listed path, by its new name.
+        for refused in ["old.rs", "grow", "../x", "/etc/passwd"] {
+            assert_eq!(get(&root, "/api/diff", &[("path", refused)]).0, 404, "{refused}");
+        }
+    }
+    #[test]
+    fn highlighting_stops_at_its_deadline_and_says_how_far_it_got() {
+        let patch = |name: &str, n: usize| {
+            let mut p = format!("diff --git a/{name} b/{name}\n--- a/{name}\n+++ b/{name}\n@@ -0,0 +1,{n} @@\n");
+            p.extend((0..n).map(|i| format!("+let v{i} = {i};\n")));
+            p
+        };
+        let file = |name: &str, n: usize| {
+            let hunks = crate::diff::parse(&patch(name, n)).remove(0).hunks;
+            crate::changes::File {
+                change: crate::vcs::Change {
+                    path: name.into(),
+                    old_path: None,
+                    status: crate::vcs::Status::Untracked,
+                    adds: Some(n),
+                    dels: Some(0),
+                    binary: false,
+                },
+                hunks: Some(hunks),
+            }
+        };
+        let answer = |files| crate::changes::Answer {
+            id: String::new(),
+            scope: None,
+            offers: vec![],
+            files,
+            total: 2,
+            truncated: false,
+            vcs_error: None,
+            patch: String::new(),
+        };
+        let line = |v: &Value, f: usize| v["files"][f]["hunks"][0]["lines"][0].clone();
+        let far = Instant::now() + Duration::from_secs(60);
+        let full = add_highlights(&answer(vec![file("a.rs", 3), file("b.rs", 3)]), far);
+        assert_eq!(full["highlight"], "full");
+        assert!(line(&full, 1)["spans"].is_array());
+        assert_eq!(full["files"][0]["mark"], "A");
+        // No time left: every file still has its text and hunks, none has spans.
+        let none = add_highlights(&answer(vec![file("a.rs", 3), file("b.rs", 3)]), Instant::now());
+        assert_eq!(none["highlight"], "none");
+        assert_eq!(line(&none, 1)["text"], "let v0 = 0;");
+        assert!(line(&none, 0)["spans"].is_null() && line(&none, 1)["spans"].is_null());
+        // A file with nothing to colour finishes nothing: the one after it cut, the answer coloured none.
+        let blind = add_highlights(&answer(vec![file("a.veryunlikely", 3), file("b.rs", 3)]), Instant::now());
+        assert_eq!(blind["highlight"], "none");
+        // A highlighter slower than the budget (20 ms a line, 1,000 lines) is cut at the deadline, not waited out.
+        let started = Instant::now();
+        let cut = add_highlights(
+            &answer(vec![file("a.rs", 3), file("slow-highlight.rs", 1000)]),
+            started + Duration::from_millis(200),
+        );
+        assert!(started.elapsed() < Duration::from_secs(2), "{:?}", started.elapsed());
+        assert_eq!(cut["highlight"], "partial");
+        assert!(line(&cut, 0)["spans"].is_array());
+        assert!(line(&cut, 1)["spans"].is_null());
+        assert_eq!(cut["files"][1]["hunks"][0]["lines"].as_array().unwrap().len(), 1000);
     }
 }
