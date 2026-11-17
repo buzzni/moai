@@ -94,7 +94,7 @@ fn run(root: &Path, args: &[&str], limit: usize, budget: Option<Duration>) -> Re
 fn records(root: &Path, args: &[&str], budget: Option<Duration>, take: impl FnMut(&[u8])) -> Result<(), Error> {
     let mut all = vec!["--no-optional-locks", "--literal-pathspecs", "-c", "core.quotePath=false"];
     all.extend_from_slice(args);
-    git::records_bounded(root, &all, budget, take).ok_or(Error::Timeout)?.map_err(Error::Git)
+    git::records_bounded(root, &all, budget, Some(1024 * 1024), take).ok_or(Error::Timeout)?.map_err(Error::Git)
 }
 fn text(root: &Path, args: &[&str], budget: Option<Duration>) -> Result<String, Error> {
     let (b, cut) = run(root, args, LIST_LIMIT, budget)?;
@@ -198,7 +198,11 @@ fn revisions(root: &Path, scope: &Scope, budget: Option<Duration>) -> Result<Vec
             Ok(hashes.clone())
         }
         Scope::Working => Ok(vec![head(root, budget)?]),
-        Scope::Branch | Scope::Whole => Ok(base(root, budget)?.into_iter().collect()),
+        Scope::Branch => Ok(base(root, budget)?.into_iter().collect()),
+        Scope::Whole => Ok(vec![match base(root, budget)? {
+            Some(base) => base,
+            None => head(root, budget)?,
+        }]),
     }
 }
 fn untracked(root: &Path, budget: Option<Duration>) -> Result<Vec<String>, Error> {
@@ -219,12 +223,17 @@ fn special_files(root: &Path, budget: Option<Duration>) -> Result<Vec<String>, E
     use std::ffi::CString;
     use std::os::fd::{AsRawFd, FromRawFd};
     use std::os::unix::ffi::OsStrExt;
-    let ignored = Backend::Git.ignored_dirs(root, budget)?;
+    let deadline = budget.and_then(|d| std::time::Instant::now().checked_add(d));
+    let left = || deadline.map(|d| d.saturating_duration_since(std::time::Instant::now()));
+    let ignored = Backend::Git.ignored_dirs(root, left())?;
     let ignored: std::collections::HashSet<_> = ignored.iter().map(|s| s.trim_end_matches('/')).collect();
     let root_fd = std::fs::File::open(root)?;
     let mut pending = vec![String::new()];
     let mut found = Vec::new();
     'walk: while let Some(relative) = pending.pop() {
+        if deadline.is_some_and(|d| std::time::Instant::now() >= d) {
+            return Err(Error::Timeout);
+        }
         let mut dir = root_fd.try_clone()?;
         for component in Path::new(&relative).components() {
             let Component::Normal(name) = component else { continue 'walk };
@@ -243,10 +252,11 @@ fn special_files(root: &Path, budget: Option<Duration>) -> Result<Vec<String>, E
             // SAFETY: openat returned a new, owned descriptor.
             dir = unsafe { std::fs::File::from_raw_fd(fd) };
         }
-        // /dev/fd names the open descriptor, so a rename cannot redirect this walk.
-        for entry in std::fs::read_dir(format!("/dev/fd/{}", dir.as_raw_fd()))? {
-            let entry = entry?;
-            let os_name = entry.file_name();
+        for entry in crate::files::directory_entries(&dir)? {
+            if deadline.is_some_and(|d| std::time::Instant::now() >= d) {
+                return Err(Error::Timeout);
+            }
+            let os_name = entry.name;
             let Some(name) = os_name.to_str() else { continue };
             if name.eq_ignore_ascii_case(".git") {
                 continue;
@@ -255,10 +265,10 @@ fn special_files(root: &Path, budget: Option<Duration>) -> Result<Vec<String>, E
             if !valid_path(&path) {
                 continue;
             }
-            let kind = entry.file_type()?;
-            if kind.is_dir() && !ignored.contains(path.as_str()) {
+            let kind = entry.mode & libc::S_IFMT;
+            if kind == libc::S_IFDIR && !ignored.contains(path.as_str()) {
                 pending.push(path);
-            } else if !kind.is_dir() && !kind.is_file() && !kind.is_symlink() {
+            } else if kind != libc::S_IFDIR && kind != libc::S_IFREG && kind != libc::S_IFLNK {
                 // check-ignore accepts literal paths after --, but rejects the
                 // global --literal-pathspecs option used by diff commands.
                 let literal = format!("./{path}");
@@ -266,7 +276,7 @@ fn special_files(root: &Path, budget: Option<Duration>) -> Result<Vec<String>, E
                     root,
                     &["--no-optional-locks", "check-ignore", "--quiet", "--", &literal],
                     1024,
-                    budget,
+                    left(),
                 )
                 .ok_or(Error::Timeout)?
                 .map_err(Error::Git);
@@ -295,8 +305,29 @@ fn add_numstat(change: &mut Change, adds: &str, dels: &str) {
         change.dels = dels.parse::<usize>().ok().map(|n| change.dels.unwrap_or(0).saturating_add(n));
     }
 }
+// Filesystem operations can block independently of Git (for example on a dead mount).
+// A timed caller must be released even when such a system call cannot be interrupted.
+fn timed<T: Send + 'static>(
+    budget: Option<Duration>,
+    work: impl FnOnce() -> Result<T, Error> + Send + 'static,
+) -> Result<T, Error> {
+    let Some(budget) = budget else { return work() };
+    let (tx, rx) = std::sync::mpsc::sync_channel(1);
+    std::thread::Builder::new()
+        .spawn(move || {
+            let _ = tx.send(work());
+        })
+        .map_err(Error::Io)?;
+    rx.recv_timeout(budget).map_err(|_| Error::Timeout)?
+}
 impl Backend {
     pub fn changes(self, root: &Path, scope: &Scope, budget: Option<Duration>) -> Result<Changes, Error> {
+        let root = root.to_path_buf();
+        let scope = scope.clone();
+        timed(budget, move || self.changes_inner(&root, &scope, budget))
+    }
+    fn changes_inner(self, root: &Path, scope: &Scope, budget: Option<Duration>) -> Result<Changes, Error> {
+        let deadline = budget.and_then(|d| std::time::Instant::now().checked_add(d));
         let mut found = BTreeMap::<String, Change>::new();
         let revs = revisions(root, scope, budget)?;
         if matches!(scope, Scope::Whole) && revs.is_empty() {
@@ -372,6 +403,9 @@ impl Backend {
         let total = found.len();
         let mut files: Vec<_> = found.into_values().take(FILE_LIMIT).collect();
         for change in files.iter_mut().filter(|c| c.status == Status::Untracked) {
+            if deadline.is_some_and(|d| std::time::Instant::now() >= d) {
+                return Err(Error::Timeout);
+            }
             untracked_counts(root, change);
         }
         Ok(Changes { files, total, truncated: total > FILE_LIMIT })
@@ -383,6 +417,41 @@ impl Backend {
         path: Option<&str>,
         budget: Option<Duration>,
     ) -> Result<Patch, Error> {
+        self.patch_known(root, scope, path, budget, None)
+    }
+    pub fn patch_with_changes(
+        self,
+        root: &Path,
+        scope: &Scope,
+        path: Option<&str>,
+        budget: Option<Duration>,
+        changes: &Changes,
+    ) -> Result<Patch, Error> {
+        let names = changes.files.iter().filter(|c| c.status == Status::Untracked).map(|c| c.path.clone()).collect();
+        self.patch_known(root, scope, path, budget, Some(names))
+    }
+    fn patch_known(
+        self,
+        root: &Path,
+        scope: &Scope,
+        path: Option<&str>,
+        budget: Option<Duration>,
+        known: Option<Vec<String>>,
+    ) -> Result<Patch, Error> {
+        let root = root.to_path_buf();
+        let scope = scope.clone();
+        let path = path.map(str::to_owned);
+        timed(budget, move || self.patch_inner(&root, &scope, path.as_deref(), budget, known))
+    }
+    fn patch_inner(
+        self,
+        root: &Path,
+        scope: &Scope,
+        path: Option<&str>,
+        budget: Option<Duration>,
+        known: Option<Vec<String>>,
+    ) -> Result<Patch, Error> {
+        let deadline = budget.and_then(|d| std::time::Instant::now().checked_add(d));
         if path.is_some_and(|p| !valid_path(p)) {
             return Err(Error::InvalidPath);
         }
@@ -426,7 +495,14 @@ impl Backend {
             }
         }
         if !truncated && matches!(scope, Scope::Working | Scope::Whole) {
-            for name in untracked(root, budget)?.into_iter().filter(|n| path.is_none_or(|p| p == n)) {
+            let names = match known {
+                Some(names) => names,
+                None => untracked(root, budget)?,
+            };
+            for name in names.into_iter().filter(|n| path.is_none_or(|p| p == n)) {
+                if deadline.is_some_and(|d| std::time::Instant::now() >= d) {
+                    return Err(Error::Timeout);
+                }
                 let (data, cut) = untracked_patch(root, &name, PATCH_LIMIT.saturating_sub(out.len()))?;
                 out.extend(data);
                 truncated |= cut;
@@ -455,7 +531,7 @@ impl Backend {
             budget,
             |raw| {
                 let path = String::from_utf8_lossy(raw).into_owned();
-                if dirs.len() < FILE_LIMIT && path.ends_with('/') && valid_path(path.trim_end_matches('/')) {
+                if path.ends_with('/') && valid_path(path.trim_end_matches('/')) {
                     dirs.push(path);
                 }
             },
@@ -731,6 +807,64 @@ mod tests {
         let whole = Backend::Git.changes(&side, &Scope::Whole, None).unwrap();
         assert_eq!(whole.files.iter().map(|c| c.path.as_str()).collect::<Vec<_>>(), ["feature", "working"]);
         assert!(Backend::Git.changes(&main, &Scope::Branch, None).unwrap().files.is_empty());
+    }
+    #[test]
+    fn filesystem_worker_releases_a_timed_caller() {
+        let start = std::time::Instant::now();
+        let result = timed(Some(Duration::from_millis(10)), || {
+            std::thread::sleep(Duration::from_millis(300));
+            Ok(())
+        });
+        assert!(matches!(result, Err(Error::Timeout)));
+        assert!(start.elapsed() < Duration::from_millis(250));
+    }
+    #[test]
+    fn main_whole_includes_working_changes_and_known_patch_paths() {
+        let dir = crate::scratch::Scratch::new("whole-main");
+        let root: &Path = &dir;
+        let git = |args: &[&str]| run_git(root, None, args);
+        git(&["init", "-q"]);
+        fs::write(root.join("tracked"), "old\n").unwrap();
+        git(&["add", "."]);
+        git(&["commit", "-qm", "base"]);
+        fs::write(root.join("tracked"), "new\n").unwrap();
+        fs::write(root.join("new"), "untracked\n").unwrap();
+        let c = Backend::Git.changes(root, &Scope::Whole, None).unwrap();
+        assert_eq!(c.total, 2);
+        fs::write(root.join("appeared-later"), "later\n").unwrap();
+        let patch = Backend::Git.patch_with_changes(root, &Scope::Whole, None, None, &c).unwrap();
+        assert!(patch.text.contains("+new") && patch.text.contains("+untracked"));
+        assert!(!patch.text.contains("appeared-later"));
+        assert!(Backend::Git.patch(root, &Scope::Whole, None, None).unwrap().text.contains("appeared-later"));
+        assert!(matches!(Backend::Git.changes(root, &Scope::Whole, Some(Duration::ZERO)), Err(Error::Timeout)));
+    }
+    #[test]
+    fn ignored_directories_are_not_cut_at_the_changed_file_limit() {
+        let dir = crate::scratch::Scratch::new("ignored-many");
+        let root: &Path = &dir;
+        run_git(root, None, &["init", "-q"]);
+        fs::write(root.join(".gitignore"), "ignored*/\n").unwrap();
+        for n in 0..5001 {
+            let path = root.join(format!("ignored{n:04}"));
+            fs::create_dir(&path).unwrap();
+            fs::write(path.join("file"), "").unwrap();
+        }
+        let dirs = Backend::Git.ignored_dirs(root, None).unwrap();
+        assert_eq!(dirs.len(), 5001);
+        assert!(dirs.iter().any(|d| d == "ignored5000/"));
+    }
+    #[test]
+    fn long_commit_body_does_not_break_commit_selection() {
+        let dir = crate::scratch::Scratch::new("long-commit-body");
+        let root: &Path = &dir;
+        let git = |args: &[&str]| run_git(root, None, args);
+        git(&["init", "-q"]);
+        let message = root.join("message");
+        fs::write(&message, format!("subject\n\n{}\n\nRefs: moai-test123\n", "x".repeat(1024 * 1024 + 100))).unwrap();
+        git(&["commit", "--allow-empty", "-q", "-F", message.to_str().unwrap()]);
+        let rows = git::commits_within(root, "moai-test123", None).unwrap().unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].subject, "subject");
     }
     #[test]
     fn picks_nearest_merge_base() {

@@ -132,6 +132,8 @@ impl Prepared {
         stat_only: bool,
         budget: Option<Duration>,
     ) -> Result<Answer, RequestError> {
+        let started = std::time::Instant::now();
+        let remaining = || budget.map(|d| d.saturating_sub(started.elapsed()));
         let mut answer = self.blank();
         if let Some(error) = &self.error {
             answer.vcs_error = Some(git::Told { kind: error.kind, said: error.said.clone() });
@@ -143,7 +145,7 @@ impl Prepared {
         }
         let mut selected = None;
         for offer in candidates {
-            match self.stat(offer, budget) {
+            match self.stat(offer, remaining()) {
                 Ok(changes) => {
                     let empty = changes.total == 0;
                     if selected.is_none() || !empty {
@@ -189,7 +191,7 @@ impl Prepared {
         if offer.scope == Scope::Commits {
             for commit in &self.commits {
                 let scope = vcs::Scope::Commits(vec![commit.hash.clone()]);
-                match backend.patch(root, &scope, path, budget) {
+                match backend.patch(root, &scope, path, remaining()) {
                     Ok(patch) if !patch.text.is_empty() => {
                         // A subject is anyone's text; `moai show` sanitizes it before a terminal sees it too.
                         let subject = crate::text::sanitize(&commit.subject);
@@ -208,7 +210,7 @@ impl Prepared {
                 }
             }
         } else {
-            match backend.patch(root, &self.vcs_scope(offer.scope), path, budget) {
+            match backend.patch_with_changes(root, &self.vcs_scope(offer.scope), path, remaining(), &changes) {
                 Ok(patch) => {
                     raw = patch.text;
                     patch_cut |= patch.truncated;

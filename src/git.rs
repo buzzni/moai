@@ -788,6 +788,7 @@ pub(crate) fn records_bounded(
     root: &Path,
     args: &[&str],
     budget: Option<std::time::Duration>,
+    record_limit: Option<usize>,
     mut take: impl FnMut(&[u8]),
 ) -> Option<Result<(), Error>> {
     use std::io::Read;
@@ -853,9 +854,9 @@ pub(crate) fn records_bounded(
             }
         }
         partial.extend_from_slice(&data[start..]);
-        if partial.len() > 1024 * 1024 {
+        if record_limit.is_some_and(|limit| partial.len() > limit) {
             abandon(child);
-            return Some(Err(Error::Failed("git record exceeds 1 MiB".into())));
+            return Some(Err(Error::Failed("git record exceeds its limit".into())));
         }
     }
     if !partial.is_empty() {
@@ -942,6 +943,7 @@ pub(crate) fn commits_within(
             "--",
         ],
         budget,
+        None, // Match the existing history reader: a commit body is not a path record.
         |raw| {
             let text = String::from_utf8_lossy(raw);
             if let Some((hash, subject, body)) = records_of(&text)

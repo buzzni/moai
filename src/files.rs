@@ -30,15 +30,15 @@ impl Jail {
         let home = crate::held::Home::of(&root);
         #[cfg(unix)]
         let root_fd = {
-            use std::os::fd::AsRawFd;
-            use std::os::unix::fs::OpenOptionsExt;
+            use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
             let file = std::fs::OpenOptions::new()
                 .read(true)
                 .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC)
                 .open(&root)
                 .ok()?;
-            let opened = crate::path::canonical(format!("/dev/fd/{}", file.as_raw_fd())).ok()?;
-            if opened != root {
+            let opened = file.metadata().ok()?;
+            let named = std::fs::symlink_metadata(&root).ok()?;
+            if opened.dev() != named.dev() || opened.ino() != named.ino() {
                 return None;
             }
             std::sync::Arc::new(file)
@@ -211,13 +211,86 @@ fn open_checked(jail: &Jail, actual: &Path, _directory: bool) -> Result<std::fs:
     })
 }
 #[cfg(unix)]
-fn directory_entries(file: &std::fs::File, _actual: &Path) -> io::Result<std::fs::ReadDir> {
-    use std::os::fd::AsRawFd;
-    std::fs::read_dir(format!("/dev/fd/{}", file.as_raw_fd()))
+pub(crate) struct DirEntry {
+    pub name: std::ffi::OsString,
+    pub mode: libc::mode_t,
+    pub size: u64,
 }
-#[cfg(not(unix))]
-fn directory_entries(_file: &std::fs::File, actual: &Path) -> io::Result<std::fs::ReadDir> {
-    std::fs::read_dir(actual)
+
+/// Read and stat names relative to a held directory, without relying on procfs or fdescfs.
+#[cfg(unix)]
+pub(crate) fn directory_entries(file: &std::fs::File) -> io::Result<Vec<DirEntry>> {
+    use std::ffi::CStr;
+    use std::os::fd::AsRawFd;
+    use std::os::unix::ffi::OsStringExt;
+    // openat creates an independent directory stream; dup would share the read offset.
+    let fd =
+        unsafe { libc::openat(file.as_raw_fd(), c".".as_ptr(), libc::O_RDONLY | libc::O_DIRECTORY | libc::O_CLOEXEC) };
+    if fd < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    let dir = unsafe { libc::fdopendir(fd) };
+    if dir.is_null() {
+        let error = io::Error::last_os_error();
+        unsafe {
+            libc::close(fd);
+        }
+        return Err(error);
+    }
+    struct Stream(*mut libc::DIR);
+    impl Drop for Stream {
+        fn drop(&mut self) {
+            unsafe {
+                libc::closedir(self.0);
+            }
+        }
+    }
+    let stream = Stream(dir);
+    let mut entries = Vec::new();
+    loop {
+        // Clear errno so end-of-directory is distinct from a failed readdir.
+        #[cfg(any(target_os = "linux", target_os = "android"))]
+        unsafe {
+            *libc::__errno_location() = 0;
+        }
+        #[cfg(target_vendor = "apple")]
+        unsafe {
+            *libc::__error() = 0;
+        }
+        // SAFETY: stream owns a valid DIR until it is dropped; readdir's name is copied.
+        let entry = unsafe { libc::readdir(stream.0) };
+        if entry.is_null() {
+            #[cfg(any(target_os = "linux", target_os = "android", target_vendor = "apple"))]
+            {
+                let error = io::Error::last_os_error();
+                if error.raw_os_error().unwrap_or(0) != 0 {
+                    return Err(error);
+                }
+            }
+            break;
+        }
+        let name = unsafe { CStr::from_ptr((*entry).d_name.as_ptr()) };
+        if name.to_bytes() == b"." || name.to_bytes() == b".." {
+            continue;
+        }
+        let mut stat = std::mem::MaybeUninit::<libc::stat>::uninit();
+        let result =
+            unsafe { libc::fstatat(file.as_raw_fd(), name.as_ptr(), stat.as_mut_ptr(), libc::AT_SYMLINK_NOFOLLOW) };
+        if result != 0 {
+            let error = io::Error::last_os_error();
+            if error.kind() == io::ErrorKind::NotFound {
+                continue;
+            }
+            return Err(error);
+        }
+        let stat = unsafe { stat.assume_init() };
+        entries.push(DirEntry {
+            name: std::ffi::OsString::from_vec(name.to_bytes().to_vec()),
+            mode: stat.st_mode,
+            size: stat.st_size.max(0) as u64,
+        });
+    }
+    Ok(entries)
 }
 
 #[cfg(unix)]
@@ -242,12 +315,52 @@ pub fn list(jail: &Jail, dir: &str) -> Result<Listed, Why> {
     }
     let stamp = Stamp::of(&meta);
     #[cfg(unix)]
-    let listing = directory_entries(&handle, &actual).map_err(Why::from)?;
+    let listing = directory_entries(&handle).map_err(Why::from)?;
     #[cfg(not(unix))]
     let listing = std::fs::read_dir(&actual).map_err(Why::from)?;
-    collect_listing(jail, stamp, listing)
+    collect_listing(jail, &actual, stamp, listing)
 }
-fn collect_listing(jail: &Jail, stamp: Stamp, listing: std::fs::ReadDir) -> Result<Listed, Why> {
+#[cfg(unix)]
+fn collect_listing(jail: &Jail, actual: &Path, stamp: Stamp, listing: Vec<DirEntry>) -> Result<Listed, Why> {
+    let mut entries = Vec::new();
+    for entry in listing {
+        let openable = entry.name.to_str().is_some_and(|s| !s.chars().any(char::is_control));
+        let name = entry.name.to_string_lossy().into_owned();
+        if name.eq_ignore_ascii_case(".git") {
+            continue;
+        }
+        let mode = entry.mode & libc::S_IFMT;
+        let kind = if mode == libc::S_IFDIR {
+            Kind::Dir
+        } else if mode == libc::S_IFREG {
+            Kind::File
+        } else if mode == libc::S_IFLNK {
+            let target = crate::held::place(&actual.join(&entry.name), &jail.home)
+                .ok()
+                .and_then(|p| crate::path::canonical(p).ok());
+            let inside =
+                target.as_ref().is_some_and(|p| p.strip_prefix(&jail.root).is_ok_and(|r| !crate::held::into_git(r)));
+            let dir = inside && target.as_ref().is_some_and(|p| inside_dir(jail, p));
+            Kind::Link { dir, inside }
+        } else {
+            Kind::Other
+        };
+        entries.push(Entry { name, kind, size: entry.size, openable });
+    }
+    sort_entries(&mut entries);
+    Ok(Listed { entries, stamp })
+}
+fn sort_entries(entries: &mut [Entry]) {
+    let rank = |k: &Kind| !matches!(k, Kind::Dir | Kind::Link { dir: true, inside: true });
+    entries.sort_by(|a, b| {
+        rank(&a.kind)
+            .cmp(&rank(&b.kind))
+            .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+            .then_with(|| a.name.as_bytes().cmp(b.name.as_bytes()))
+    });
+}
+#[cfg(not(unix))]
+fn collect_listing(jail: &Jail, _actual: &Path, stamp: Stamp, listing: std::fs::ReadDir) -> Result<Listed, Why> {
     let mut entries = Vec::new();
     for entry in listing {
         let entry = entry.map_err(Why::from)?;
@@ -286,15 +399,10 @@ fn collect_listing(jail: &Jail, stamp: Stamp, listing: std::fs::ReadDir) -> Resu
         };
         entries.push(Entry { name, kind, size: meta.len(), openable });
     }
-    let rank = |k: &Kind| !matches!(k, Kind::Dir | Kind::Link { dir: true, inside: true });
-    entries.sort_by(|a, b| {
-        rank(&a.kind)
-            .cmp(&rank(&b.kind))
-            .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
-            .then_with(|| a.name.as_bytes().cmp(b.name.as_bytes()))
-    });
+    sort_entries(&mut entries);
     Ok(Listed { entries, stamp })
 }
+
 pub fn read(jail: &Jail, path: &str) -> Result<Text, Why> {
     let actual = resolve(jail, path)?;
     let file = open_checked(jail, &actual, false)?;
@@ -374,8 +482,8 @@ fn walk_limit(
             let at = jail.root.join(&dir);
             let handle = open_checked(jail, &at, true)?;
             let stamp = Stamp::of(&handle.metadata().map_err(Why::from)?);
-            let listing = directory_entries(&handle, &at).map_err(Why::from)?;
-            collect_listing(jail, stamp, listing)?
+            let listing = directory_entries(&handle).map_err(Why::from)?;
+            collect_listing(jail, &at, stamp, listing)?
         };
         #[cfg(not(unix))]
         let listed = list(jail, &key)?;
