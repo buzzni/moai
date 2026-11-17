@@ -218,40 +218,58 @@ pub fn lines(name: &str, text: &str) -> Option<Vec<Vec<Span>>> {
     let mut parser = Engine::new(set, syntax);
     Some(text.split_inclusive('\n').map(|line| parser.line(line.strip_suffix('\n').unwrap_or(line))).collect())
 }
+/// The deadline passed before a file's highlighting was done ([`diff_until`]).
+#[derive(Debug, PartialEq, Eq)]
+pub struct Late;
 /// Each hunk has separate old and new parsers; context uses the new side.
 pub fn diff(file: &FileDiff) -> Option<Vec<Vec<Vec<Span>>>> {
+    diff_until(file, None).unwrap_or(None)
+}
+/// [`diff`] that stops at `until`, line by line: an answer that waits on it must still leave in time, and a slow machine
+/// can take longer than the budget on one large file. `Ok(None)` is "nothing to highlight" (binary, too large, unknown
+/// language); `Err(Late)` is "out of time".
+pub fn diff_until(file: &FileDiff, until: Option<std::time::Instant>) -> Result<Option<Vec<Vec<Vec<Span>>>>, Late> {
+    let late = || until.is_some_and(|d| std::time::Instant::now() >= d);
     if file.binary || file.hunks.is_empty() {
-        return None;
+        return Ok(None);
     }
     let size = file.hunks.iter().flat_map(|h| &h.lines).fold(0usize, |n, line| n.saturating_add(line.text.len()));
     if size > TEXT_LIMIT {
-        return None;
+        return Ok(None);
     }
-    let name = file.new_path.as_deref().or(file.old_path.as_deref())?;
+    let Some(name) = file.new_path.as_deref().or(file.old_path.as_deref()) else { return Ok(None) };
     let first = file.hunks.iter().flat_map(|h| &h.lines).next().map_or("", |l| l.text.as_str());
     let set = syntaxes();
-    let syntax = syntax(set, name, first)?;
-    Some(
-        file.hunks
-            .iter()
-            .map(|hunk| {
-                let mut old = Engine::new(set, syntax);
-                let mut new = Engine::new(set, syntax);
-                hunk.lines
-                    .iter()
-                    .map(|line| match line.kind {
-                        LineKind::Context => {
-                            let _ = old.line(&line.text);
-                            new.line(&line.text)
-                        }
-                        LineKind::Delete => old.line(&line.text),
-                        LineKind::Add => new.line(&line.text),
-                        LineKind::Raw => Vec::new(),
-                    })
-                    .collect()
-            })
-            .collect(),
-    )
+    let Some(syntax) = syntax(set, name, first) else { return Ok(None) };
+    #[cfg(test)]
+    let slow = name.contains("slow-highlight");
+    let mut out = Vec::with_capacity(file.hunks.len());
+    for hunk in &file.hunks {
+        let mut old = Engine::new(set, syntax);
+        let mut new = Engine::new(set, syntax);
+        let mut rows = Vec::with_capacity(hunk.lines.len());
+        for line in &hunk.lines {
+            if late() {
+                return Err(Late);
+            }
+            // A test stands in a slow machine by the file's name: a flag on the thread would not reach the web's worker.
+            #[cfg(test)]
+            if slow {
+                std::thread::sleep(std::time::Duration::from_millis(20));
+            }
+            rows.push(match line.kind {
+                LineKind::Context => {
+                    let _ = old.line(&line.text);
+                    new.line(&line.text)
+                }
+                LineKind::Delete => old.line(&line.text),
+                LineKind::Add => new.line(&line.text),
+                LineKind::Raw => Vec::new(),
+            });
+        }
+        out.push(rows);
+    }
+    Ok(Some(out))
 }
 
 #[cfg(test)]
@@ -309,6 +327,17 @@ mod tests {
         assert!(got[0][3].iter().any(|s| s.kind == Kind::Comment));
         let let_at = file.hunks[1].lines[1].text.find("let").unwrap();
         assert!(!got[1][1].iter().any(|s| s.kind == Kind::Comment && s.range.contains(&let_at)));
+    }
+    #[test]
+    fn a_deadline_stops_highlighting_and_says_so() {
+        let patch = "diff --git a/a.rs b/a.rs\n--- a/a.rs\n+++ b/a.rs\n@@ -1 +1 @@\n-let old = 1;\n+let new = 2;\n";
+        let file = crate::diff::parse(patch).remove(0);
+        let now = std::time::Instant::now();
+        assert_eq!(diff_until(&file, Some(now)), Err(Late));
+        assert_eq!(diff_until(&file, Some(now + std::time::Duration::from_secs(60))).unwrap(), diff(&file));
+        // Nothing to highlight is not late, whatever the clock says.
+        let unknown = crate::diff::parse(&patch.replace("a.rs", "a.veryunlikely")).remove(0);
+        assert_eq!(diff_until(&unknown, Some(now)), Ok(None));
     }
     #[test]
     fn renamed_and_deleted_files_select_the_right_path() {

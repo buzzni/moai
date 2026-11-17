@@ -36216,7 +36216,9 @@ fn web_diff_matches_cli_and_rejects_unlisted_paths() {
     let (status, _, body) = get(web.port, &format!("/api/diff?id={id}&scope=commits"));
     assert_eq!(status, 200, "{body}");
     let mut response = json_of(&body)["out"].clone();
-    // The web adds each file's mark; `moai diff --json` does not carry it.
+    // The web adds the mark and how far highlighting got; `moai diff --json` carries neither.
+    assert_eq!(response.as_object_mut().unwrap().remove("highlight"), Some(serde_json::json!("full")));
+    assert!(cli.get("highlight").is_none());
     for file in response["files"].as_array_mut().unwrap() {
         assert_eq!(file.as_object_mut().unwrap().remove("mark"), Some(serde_json::json!("A")));
         for hunk in file["hunks"].as_array_mut().unwrap() {
@@ -36227,6 +36229,19 @@ fn web_diff_matches_cli_and_rejects_unlisted_paths() {
     }
     assert_eq!(response, cli);
     assert!(cli["files"].as_array().unwrap().iter().all(|f| f.get("mark").is_none()));
+    // Without a scope the list comes whole, in the scope `/api/diff` picks, beside the offers it always gave.
+    let (status, _, body) = get(web.port, &format!("/api/changes?id={id}"));
+    assert_eq!(status, 200, "{body}");
+    let list = json_of(&body)["out"].clone();
+    let (_, _, picked) = get(web.port, &format!("/api/diff?id={id}"));
+    assert_eq!(list["scope"], json_of(&picked)["out"]["scope"]);
+    assert_eq!(list["offers"], cli["offers"]);
+    assert!(list.get("vcs_error").is_some_and(serde_json::Value::is_null), "{list}");
+    assert_eq!(list["total"], 1);
+    assert_eq!(list["truncated"], false);
+    assert_eq!(list["files"][0]["path"], "sample.rs");
+    assert_eq!(list["files"][0]["mark"], "A");
+    assert!(list["files"][0].get("hunks").is_none());
     for path in ["--output%3D/tmp/x", "-x", "%3A%28top%29a"] {
         let (status, _, _) = get(web.port, &format!("/api/diff?id={id}&scope=commits&path={path}"));
         assert_eq!(status, 404, "{path}");
