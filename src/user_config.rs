@@ -1410,6 +1410,7 @@ impl Doc {
             fields_known: look_words(t, FIELDS_KNOWN, &mut problems),
             detail: look_one(t, DETAIL, Want::Bool, Item::as_bool, &mut problems),
             detail_at: look_one(t, DETAIL_AT, Want::Word, word, &mut problems),
+            diff_layout: look_one(t, DIFF_LAYOUT, Want::Word, word, &mut problems),
             layout: look_one(t, LAYOUT, Want::Word, word, &mut problems),
             timezone: look_one(t, TIMEZONE, Want::Word, word, &mut problems),
             mouse: look_one(t, MOUSE, Want::Bool, Item::as_bool, &mut problems),
@@ -1484,6 +1485,7 @@ impl Doc {
         let mut known = base.fields_known != new.fields_known;
         let mut detail = base.detail != new.detail;
         let mut detail_at = base.detail_at != new.detail_at;
+        let mut diff_layout = base.diff_layout != new.diff_layout;
         let mut layout = base.layout != new.layout;
         let mut timezone = base.timezone != new.timezone;
         let mut mouse = base.mouse != new.mouse;
@@ -1541,6 +1543,7 @@ impl Doc {
         odd(&[FIELDS_KNOWN], true, &mut known);
         odd(&[DETAIL], false, &mut detail);
         odd(&[DETAIL_AT], false, &mut detail_at);
+        odd(&[DIFF_LAYOUT], false, &mut diff_layout);
         odd(&[LAYOUT], false, &mut layout);
         odd(&[TIMEZONE], false, &mut timezone);
         odd(&[MOUSE], false, &mut mouse);
@@ -1609,6 +1612,9 @@ impl Doc {
         }
         if detail_at {
             changed |= put_value(t, DETAIL_AT, new.detail_at.as_deref().map(toml_edit::Value::from), &mut left);
+        }
+        if diff_layout {
+            changed |= put_value(t, DIFF_LAYOUT, new.diff_layout.as_deref().map(toml_edit::Value::from), &mut left);
         }
         if layout {
             changed |= put_value(t, LAYOUT, new.layout.as_deref().map(toml_edit::Value::from), &mut left);
@@ -1720,6 +1726,8 @@ const DETAIL: &str = "detail";
 /// 서는가다. 한 키에 둘을 담으면(`detail = "right"` 로 켬까지) 옛 줄(`detail = true`)이 파싱에서
 /// 떨어져 사람이 끈 상세가 도로 켜진다.
 const DETAIL_AT: &str = "detail_at";
+/// How a diff stands — `unified`·`split` (moai-ffk9.41b, `SPC o s`).
+const DIFF_LAYOUT: &str = "diff_layout";
 /// 목록을 줄로 세우는가 칸반 보드로 세우는가 — `list`·`board`(moai-9nfw). **새 창이 아니라 목록의 배치라**
 /// 보는 사람의 것이고, 그래서 상세의 자리([`DETAIL_AT`])처럼 `[tui]` 에 낱말로 산다.
 const LAYOUT: &str = "layout";
@@ -1752,6 +1760,8 @@ const FIELDS_KNOWN: &str = "fields_known";
 /// show_archived = false
 /// detail = true
 /// detail_at = "right"
+/// # How a diff stands — unified or split (side by side). Only once `SPC o s` was pressed.
+/// diff_layout = "split"
 /// layout = "board"
 /// timezone = "Asia/Seoul"
 /// # 차례 목록 — 있으면 아래 옛 한 쌍을 이긴다. 그 한 쌍은 옛 바이너리가 읽도록 첫 필드를 비춰 함께 적힌다.
@@ -1822,6 +1832,10 @@ pub struct Look {
     /// 있는지는 탐색기가 안다(`tui::view::DetailAt`). 모르는 낱말은 탐색기가 처음값으로 세우고
     /// (`App::apply_look`) 이 줄은 그대로 둔다 — 읽기는 관대하다.
     pub detail_at: Option<String>,
+    /// How a diff stands — `unified`·`split` (moai-ffk9.41b). **A word**, like [`Look::detail_at`]: the explorer knows
+    /// the words (`tui::diff::Layout`), stands unified on one it does not know and leaves the line as it is. The
+    /// explorer writes it only once `SPC o s` was pressed — the session's first look holds what it read.
+    pub diff_layout: Option<String>,
     /// 목록의 배치 — `list`·`board`(moai-9nfw). **낱말로 든다**: 무슨 낱말이 있는지는 탐색기가 안다
     /// (`tui::view::Layout`). 모르는 낱말은 탐색기가 목록으로 세우고 이 줄은 그대로 둔다 — 읽기는 관대하다.
     pub layout: Option<String>,
@@ -3924,6 +3938,7 @@ mod tests {
             fields_known: None,
             detail: Some(false),
             detail_at: Some("bottom".into()),
+            diff_layout: Some("split".into()),
             layout: Some("board".into()),
             timezone: Some("Asia/Seoul".into()),
             mouse: Some(false),
@@ -4517,6 +4532,7 @@ mod tests {
             fields_known: None,
             detail: Some(true),
             detail_at: None,
+            diff_layout: None,
             layout: None,
             timezone: None,
             mouse: None,

@@ -9,7 +9,7 @@
 //!
 //! **조각이다.** 표와 [`Ctx`] 만 받는다. 연 동안 키를 받고 그리는 것은 든 쪽(`App::help_key`, `draw::help_sheet`)이다.
 
-use super::keys::{Bind, Browse, Ctx, Files, Key, LEADER, Side, Stat, Wiki, move_word, name_of_seq};
+use super::keys::{Bind, Browse, Ctx, Diff, Files, Key, LEADER, Side, Stat, Wiki, move_word, name_of_seq};
 use super::scroll::Move;
 use crate::i18n::say;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -330,6 +330,13 @@ pub fn lines(c: &Ctx) -> Vec<Line> {
         })
         .collect();
     section(say(lang, "tui.help.files"), rows);
+
+    // The diff pane's keys while it has the focus (moai-ffk9.41b).
+    let rows = once(keys.diff, |b| !matches!(b.act, Diff::Step(_)))
+        .into_iter()
+        .map(|a| (names(keys.diff, a, |_| true), a.what(lang).to_string()))
+        .collect();
+    section(say(lang, "tui.help.diff"), rows);
     out
 }
 

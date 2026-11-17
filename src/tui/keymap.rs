@@ -20,9 +20,9 @@
 //! **순수하다.** 파일을 읽는 것은 [`load`] 하나고, [`build`] 는 받은 글만 본다 — 시험이 터미널도 파일도 없이 돈다.
 
 use super::keys::{
-    ANYWHERE, BROWSE, Bind, Browse, CONFIRM, Confirm, FILES, Files, GANTT, Key, Keymap, LEADER, LINKS, Link, Lookup,
-    MENU, Menu, Order, PICK, Pick, SORTER, STATS, Screen, Side, Sorter, Stat, WIKI, Wiki, label, lookup, name_of_seq,
-    parse_seq,
+    ANYWHERE, BROWSE, Bind, Browse, CONFIRM, Confirm, DIFF, Diff, FILES, Files, GANTT, Key, Keymap, LEADER, LINKS,
+    Link, Lookup, MENU, Menu, Order, PICK, Pick, SORTER, STATS, Screen, Side, Sorter, Stat, WIKI, Wiki, label, lookup,
+    name_of_seq, parse_seq,
 };
 use super::scroll::Move;
 use crate::i18n::{Lang, fill, say};
@@ -209,6 +209,7 @@ fn shown(want: &str, keys: &Keymap, spc: bool) -> Option<(String, String)> {
         "stats" => of(keys.stats, STATS, &own, spc),
         "wiki" => of(keys.wiki, WIKI, &own, spc),
         "files" => of(keys.files, FILES, &own, spc),
+        "diff" => of(keys.diff, DIFF, &own, spc),
         "links" => of(keys.links, LINKS, &own, spc),
         "confirm" => of(keys.confirm, CONFIRM, &own, spc),
         _ => None,
@@ -285,6 +286,7 @@ pub fn listing(keys: &Keymap) -> Vec<Listed> {
             Section::Stats => of(&mut out, section, keys.stats, STATS, false),
             Section::Wiki => of(&mut out, section, keys.wiki, WIKI, false),
             Section::Files => of(&mut out, section, keys.files, FILES, false),
+            Section::Diff => of(&mut out, section, keys.diff, DIFF, false),
             Section::Links => of(&mut out, section, keys.links, LINKS, false),
             Section::Confirm => of(&mut out, section, keys.confirm, CONFIRM, false),
         }
@@ -352,12 +354,14 @@ enum Section {
     Stats,
     Wiki,
     Files,
+    /// The diff pane's keys while it has the focus (moai-ffk9.41b) — looked up before its owner's table.
+    Diff,
     Links,
     Confirm,
 }
 
 impl Section {
-    const ALL: [Section; 11] = [
+    const ALL: [Section; 12] = [
         Section::Browse,
         Section::Moves,
         Section::Gantt,
@@ -367,6 +371,7 @@ impl Section {
         Section::Stats,
         Section::Wiki,
         Section::Files,
+        Section::Diff,
         Section::Links,
         Section::Confirm,
     ];
@@ -382,6 +387,7 @@ impl Section {
             Section::Stats => "stats",
             Section::Wiki => "wiki",
             Section::Files => "files",
+            Section::Diff => "diff",
             Section::Links => "links",
             Section::Confirm => "confirm",
         }
@@ -418,6 +424,7 @@ impl Section {
             Section::Stats => any(STATS, action),
             Section::Wiki => any(WIKI, action),
             Section::Files => any(FILES, action),
+            Section::Diff => any(DIFF, action),
             Section::Links => any(LINKS, action),
             Section::Confirm => any(CONFIRM, action),
         }
@@ -532,6 +539,7 @@ impl Named for Browse {
             Cell(f) => Name::Own(format!("cell_{}", f.name())),
             Detail => own("detail"),
             DetailAt => own("detail_at"),
+            DiffLayout => own("diff_layout"),
             Timezone => own("timezone"),
             ArchiveDays => own("archive_days"),
             Mouse => own("mouse"),
@@ -633,6 +641,19 @@ impl Named for Files {
             Files::NextFound => own("next_match"),
             Files::PrevFound => own("prev_match"),
             Files::Close => own("close"),
+        }
+    }
+}
+
+impl Named for Diff {
+    fn name(self) -> Name {
+        match self {
+            Diff::Step(m) => Name::Move(m),
+            Diff::NextFile => own("next_file"),
+            Diff::PrevFile => own("prev_file"),
+            Diff::NextScope => own("next_scope"),
+            Diff::PrevScope => own("prev_scope"),
+            Diff::Pan(s) => Name::Own(format!("scroll_{}", side(s))),
         }
     }
 }
@@ -939,6 +960,7 @@ struct Tables {
     stats: Vec<Row<Stat>>,
     wiki: Vec<Row<Wiki>>,
     files: Vec<Row<Files>>,
+    diff: Vec<Row<Diff>>,
     links: Vec<Row<Link>>,
     confirm: Vec<Row<Confirm>>,
 }
@@ -955,6 +977,7 @@ impl Tables {
             stats: apply(STATS, Section::Stats, Key::any, e, live),
             wiki: apply(WIKI, Section::Wiki, Key::any, e, live),
             files: yield_moves(apply(FILES, Section::Files, Key::any, e, live)),
+            diff: yield_moves(apply(DIFF, Section::Diff, Key::any, e, live)),
             links: apply(LINKS, Section::Links, Key::bare, e, live),
             confirm: apply(CONFIRM, Section::Confirm, Key::bare, e, live),
         }
@@ -972,6 +995,7 @@ impl Tables {
         shadows(&self.stats, Section::Stats, &mut out);
         shadows(&self.wiki, Section::Wiki, &mut out);
         shadows(&self.files, Section::Files, &mut out);
+        shadows(&self.diff, Section::Diff, &mut out);
         shadows(&self.links, Section::Links, &mut out);
         shadows(&self.confirm, Section::Confirm, &mut out);
         // Ctrl-C 는 어느 표보다 먼저다 — 그 키를 쓴 줄은 영영 안 듣는다.
@@ -983,6 +1007,7 @@ impl Tables {
         beaten(&self.stats, ctrl_c, "Ctrl-C", &mut out);
         beaten(&self.wiki, ctrl_c, "Ctrl-C", &mut out);
         beaten(&self.files, ctrl_c, "Ctrl-C", &mut out);
+        beaten(&self.diff, ctrl_c, "Ctrl-C", &mut out);
         beaten(&self.links, ctrl_c, "Ctrl-C", &mut out);
         beaten(&self.confirm, ctrl_c, "Ctrl-C", &mut out);
         let spc = |e: KeyEvent| LEADER.matches(e);
@@ -993,6 +1018,7 @@ impl Tables {
         beaten(&self.stats, spc, "SPC", &mut out);
         beaten(&self.wiki, spc, "SPC", &mut out);
         beaten(&self.files, spc, "SPC", &mut out);
+        beaten(&self.diff, spc, "SPC", &mut out);
         beaten(&self.menu, spc, "SPC", &mut out);
         // **SPC 밑의 줄은 메뉴의 규칙을 지난다**(`menu::feed`) — 메뉴가 열린 뒤의 키가 SPC 면 메뉴가 닫히고, 메뉴의
         // 키(Esc·Bksp)면 닫히거나 한 층 오른다. 그 키를 쓴 SPC 밑 줄은 못 누른다. 기본 표에는
@@ -1046,6 +1072,7 @@ impl Tables {
             stats: freeze(self.stats, aimed(STATS, Section::Stats, e, live), STATS),
             wiki: freeze(self.wiki, aimed(WIKI, Section::Wiki, e, live), WIKI),
             files: freeze(self.files, aimed(FILES, Section::Files, e, live), FILES),
+            diff: freeze(self.diff, aimed(DIFF, Section::Diff, e, live), DIFF),
             links: freeze(self.links, aimed(LINKS, Section::Links, e, live), LINKS),
             confirm: freeze(self.confirm, aimed(CONFIRM, Section::Confirm, e, live), CONFIRM),
         }
@@ -1123,15 +1150,19 @@ mod tests {
             each(STATS),
             each(WIKI),
             each(FILES),
+            each(DIFF),
             each(LINKS),
             each(CONFIRM),
         ];
-        assert_eq!(counts, [67, 8, 12, 2, 16, 6, 2, 9, 14, 2, 1]);
+        assert_eq!(counts, [68, 8, 12, 2, 16, 6, 2, 9, 14, 6, 2, 1]);
         // 이동은 다섯 표 모두에서 여덟이 다 선다 — `[moves]` 의 한 줄이 어느 표에서는 없는 동작이면 안 된다.
         fn moves<A: Named>(table: &[Bind<A>]) -> usize {
             names(table).iter().filter(|(n, _)| matches!(n, Name::Move(_))).count()
         }
-        assert_eq!([moves(BROWSE), moves(PICK), moves(STATS), moves(WIKI), moves(FILES), moves(LINKS)], [8; 6]);
+        assert_eq!(
+            [moves(BROWSE), moves(PICK), moves(STATS), moves(WIKI), moves(FILES), moves(DIFF), moves(LINKS)],
+            [8; 7]
+        );
     }
 
     /// 기본 표를 그대로 옮겨 적은 파일 — 이름 있는 동작마다 그 기본 키 전부.
@@ -1162,6 +1193,7 @@ mod tests {
         each(&mut out, "stats", STATS);
         each(&mut out, "wiki", WIKI);
         each(&mut out, "files", FILES);
+        each(&mut out, "diff", DIFF);
         each(&mut out, "links", LINKS);
         each(&mut out, "confirm", CONFIRM);
         out
@@ -1190,6 +1222,7 @@ mod tests {
         same("stats", map.stats, STATS);
         same("wiki", map.wiki, WIKI);
         same("files", map.files, FILES);
+        same("diff", map.diff, DIFF);
         same("links", map.links, LINKS);
         same("confirm", map.confirm, CONFIRM);
     }
@@ -1658,6 +1691,9 @@ mod tests {
         for n in 1..=12 {
             spare.push(format!("Ctrl-F{n}"));
         }
+        for n in 1..=12 {
+            spare.push(format!("Shift-F{n}"));
+        }
         let mut spare = spare.into_iter();
         let mut file = String::new();
         fn each<A: Named>(
@@ -1684,6 +1720,7 @@ mod tests {
         each(&mut file, "stats", STATS, &mut spare);
         each(&mut file, "wiki", WIKI, &mut spare);
         each(&mut file, "files", FILES, &mut spare);
+        each(&mut file, "diff", DIFF, &mut spare);
         each(&mut file, "links", LINKS, &mut spare);
         each(&mut file, "confirm", CONFIRM, &mut spare);
         let (map, problems) = build(&file);
@@ -1705,6 +1742,7 @@ mod tests {
         olds(STATS, &mut old);
         olds(WIKI, &mut old);
         olds(FILES, &mut old);
+        olds(DIFF, &mut old);
         olds(LINKS, &mut old);
         olds(CONFIRM, &mut old);
         let word = |c: Option<char>| c.is_some_and(|c| c.is_alphanumeric() || c == '-');
@@ -1735,7 +1773,7 @@ mod tests {
         let (map, problems) = build(&open);
         assert_eq!(problems, Vec::new());
         assert_eq!(listing(&map), listing(&Keymap::default()));
-        assert_eq!(open.matches(" = ").count(), 139, "틀이 동작을 빠뜨렸다");
+        assert_eq!(open.matches(" = ").count(), 146, "틀이 동작을 빠뜨렸다");
         // 주석 그대로면 아무것도 안 바뀐다.
         assert_eq!(build(&t), (Keymap::default(), Vec::new()));
     }

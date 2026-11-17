@@ -6,6 +6,7 @@
 mod archive_days;
 pub mod board;
 mod columns;
+mod diff;
 pub mod draw;
 pub mod edit;
 mod files;
@@ -1714,6 +1715,10 @@ pub struct App {
     /// 상세를 켜는 일까지 하게 된다. 숨겼을 때 자리가 아예 없다는 판단(moai-ymnu)은 그대로다 —
     /// 이 값은 그때 그리는 쪽이 안 본다. 설정에 남는다.
     pub detail_at: view::DetailAt,
+    /// How every diff on screen stands — unified or side by side, `SPC o s` (moai-ffk9.41b). One value for the file
+    /// window's pane and the list's: the person's way of reading a diff, not a pane's. Kept in `[tui] diff_layout`;
+    /// a pane too narrow for side by side draws unified without touching this.
+    pub diff_layout: diff::Layout,
     /// 목록을 줄로 세우나 칸반 보드로 세우나 — `SPC g l`·`b`(moai-9nfw·moai-z46r). **새 창이 아니라 배치다**: 커서·거름망·
     /// 보기·상세는 둘이 한 벌이고, 이것은 [`App::rows`] 가 무엇을 내고 그림과 이동이 그것을 어디에 세우는가만
     /// 가른다. 한눈 보기에서는 프로젝트마다 머리줄이 서는 보드다(moai-oagj.vcj). 설정에 남는다.
@@ -3473,6 +3478,7 @@ impl App {
             fields: Default::default(),
             detail_open: true,
             detail_at: view::DetailAt::default(),
+            diff_layout: diff::Layout::default(),
             layout: view::Layout::default(),
             chart: moai_gantt::GanttState { fitting: true, ..Default::default() },
             plan_move: None,
@@ -5415,6 +5421,10 @@ impl App {
         if let Some(at) = look.detail_at.as_deref().and_then(view::DetailAt::named) {
             self.detail_at = at;
         }
+        // An unknown word stands unified and the line stays — the detail's place's way.
+        if let Some(l) = look.diff_layout.as_deref().and_then(diff::Layout::parse) {
+            self.diff_layout = l;
+        }
         // 모르는 낱말은 목록 그대로다 — 상세의 자리와 같은 결이다.
         if let Some(l) = look.layout.as_deref().and_then(view::Layout::named)
             && l != self.layout
@@ -5494,6 +5504,7 @@ impl App {
             fields_known: Some(view::Field::ALL.into_iter().map(|f| f.name().to_string()).collect()),
             detail: Some(self.detail_open),
             detail_at: Some(self.detail_at.name().to_string()),
+            diff_layout: Some(self.diff_layout.word().to_string()),
             layout: Some(self.layout.name().to_string()),
             timezone: self.saved_zone.clone(),
             mouse: Some(self.mouse_on),
@@ -6772,6 +6783,12 @@ impl App {
         self.layout == view::Layout::Gantt
     }
 
+    /// Whether a diff pane stands on screen — `SPC o s` stands only then (`keys::Ctx::diff`). **No pane stands one yet**:
+    /// the file window's right pane (moai-ffk9.211) and the list's diff pane (moai-ffk9.cij) answer here when they do.
+    fn diff_shown(&self) -> bool {
+        false
+    }
+
     /// 상세 칸이 지금 서는 자리 — 간트면 간트의 자리(`gantt_detail_at`), 아니면 사람이 고른 자리다(moai-i4hf.sas).
     /// **그리기·마우스·칸 옮기기·키 바가 이 하나를 읽는다** — 한쪽만 간트의 자리를 보면 아래에 선 상세를 `Ctrl-w l` 이
     /// 오른쪽에서 찾는다.
@@ -7841,6 +7858,12 @@ impl App {
                 self.detail_at = self.detail_at.next();
                 self.save_look();
             }
+            // **The setting flips; the panes follow at their next frame** (moai-ffk9.41b) — each keeps the file at
+            // its top in view (`diff::View::frame`). The menu stays open on it, the word changing.
+            B::DiffLayout => {
+                self.diff_layout = self.diff_layout.toggled();
+                self.save_look();
+            }
             // **원하는 값만 바꾼다** — 터미널에 잡기·놓기 글을 내는 것은 루프다(`cmd::tui`). 메뉴는
             // 열린 채로 남아 `[켜짐]`·`[꺼짐]` 이 바로 바뀐다(`Browse::stateful`).
             B::Mouse => {
@@ -7931,6 +7954,8 @@ impl App {
             stats: matches!(self.mode, Mode::Stats(_)),
             wiki: matches!(self.mode, Mode::Wiki(_)),
             files: matches!(self.mode, Mode::Files(_)),
+            diff: self.diff_shown(),
+            diff_split: self.diff_layout == diff::Layout::Split,
             head: self.head_at(rows).is_some(),
             board_foldable: self.board_fold_at(rows).is_some(),
             mouse: self.mouse_on,

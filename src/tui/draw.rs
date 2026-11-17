@@ -2223,6 +2223,41 @@ fn files_content(f: &mut Frame, w: &mut super::files::Window, at: Rect, size: u6
     }
 }
 
+/// The diff pane (moai-ffk9.41b) — the file window's right pane and the list's diff pane draw it alike. The title says
+/// the scopes, whose they are, the file count and the layout; a pane narrower than [`super::diff::SPLIT_MIN`] draws
+/// unified whatever the person chose, and says so. Only the rows on screen are cut ([`super::diff::render`]).
+/// `hint` follows the scroll mark when the pane has no focus — the key that brings it there.
+#[allow(dead_code)] // The file window's pane (moai-ffk9.211) and the list's (moai-ffk9.cij) call it.
+pub(super) fn diff_pane(
+    f: &mut Frame,
+    v: &mut super::diff::View,
+    at: Rect,
+    focused: bool,
+    chosen: super::diff::Layout,
+    hint: &str,
+    lang: Lang,
+) {
+    use super::diff::{self, View};
+    let inner_w = at.width.saturating_sub(2) as usize;
+    let drawn = View::fits(chosen, inner_w);
+    let title = format!(" {} ", diff::title(v, chosen, drawn, lang));
+    let block = pane_frame(focused).title(clip(&title, inner_w));
+    let inner = block.inner(at);
+    f.render_widget(block, at);
+    let (width, height) = (inner.width as usize, inner.height as usize);
+    v.frame(drawn, width, height);
+    if let Some((text, look)) = diff::said(v, lang) {
+        let line = fit(Line::from(Span::styled(safe_name(&text), look)), width);
+        f.buffer_mut().set_line(inner.x, inner.y, &line, inner.width);
+        return;
+    }
+    let Some(l) = v.loaded().cloned() else { return };
+    for (y, line) in diff::render(&l, drawn, width, v.page.offset(), height, v.pan, lang).into_iter().enumerate() {
+        f.buffer_mut().set_line(inner.x, inner.y + y as u16, &line, inner.width);
+    }
+    scroll_mark(f, &v.page, at, if focused { "" } else { hint }, focused, lang);
+}
+
 /// The right pane on anything but a file — what the cursor stands on in a few lines: a directory's kind and entries,
 /// a link's target, why a row is not opened. On `..` it stands empty.
 fn files_info(f: &mut Frame, w: &super::files::Window, at: Rect, lang: Lang) {
@@ -7012,7 +7047,7 @@ fn branch() -> Style {
     from_anstyle(style::BRANCH)
 }
 
-fn dim() -> Style {
+pub(super) fn dim() -> Style {
     Style::new().fg(Color::DarkGray)
 }
 
@@ -7021,7 +7056,7 @@ fn dim() -> Style {
 /// 표를 여기 다시 적지 않는다. 손으로 옮겨 적은 표는 반드시 갈라지고, 실제로
 /// 갈라졌다 — 우선순위 표가 `style` 의 "기본값(p2)은 칠하지 않는다" 를 어기고
 /// p2 를 흐리게 칠해, 죄다 p2 인 저장소에서 그 열 전체가 죽어 있었다.
-fn from_anstyle(s: anstyle::Style) -> Style {
+pub(super) fn from_anstyle(s: anstyle::Style) -> Style {
     let mut out = Style::new();
     if let Some(anstyle::Color::Ansi(c)) = s.get_fg_color() {
         out = out.fg(ansi(c));

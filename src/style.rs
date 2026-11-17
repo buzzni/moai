@@ -203,6 +203,26 @@ pub const FILE_SCRIPT: Style = fg(AnsiColor::BrightGreen);
 /// Pictures, archives, builds and lock files — nothing to read as text.
 pub const FILE_BINARY: Style = DIM;
 
+/// The diff pane (moai-ffk9.41b, the mockup's colours in 16). **Each sits beside a glyph that says the same**: added
+/// and removed colour only the line numbers and the `+`·`-` mark (the text keeps its syntax colours; no background
+/// is painted — in sixteen colours it fights them), the hunk head starts with `@@`.
+pub const DIFF_ADD: Style = fg(AnsiColor::Green);
+pub const DIFF_DEL: Style = fg(AnsiColor::Red);
+pub const DIFF_HUNK: Style = fg(AnsiColor::BrightBlue);
+
+/// The colour of a change kind's letter in a diff's file head (`M`·`A`·`D`·`R`·`?`) — the letter says it.
+pub fn diff_status(status: crate::vcs::Status) -> Style {
+    use crate::vcs::Status as S;
+    match status {
+        S::Added => DIFF_ADD,
+        S::Deleted => DIFF_DEL,
+        S::Modified | S::TypeChanged => fg(AnsiColor::Yellow),
+        S::Renamed | S::Copied => fg(AnsiColor::Cyan),
+        S::Untracked => fg(AnsiColor::Magenta),
+        S::Conflicted => fg(AnsiColor::BrightRed),
+    }
+}
+
 /// A file's colour by its extension group: source · docs and markup · config and data · scripts · pictures and
 /// binaries · the rest (unpainted).
 pub fn file_style(name: &str) -> Style {

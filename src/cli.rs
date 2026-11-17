@@ -611,6 +611,8 @@ BACKLOG
   Options — how this screen draws what stands, not which rows stand:
     {key:browse.detail_at}  detail pane goes right, bottom, left, top — press again to turn
              it. Whether it stands at all is {key:browse.detail}
+    {key:browse.diff_layout}  diff unified or side by side [unified/side by side] — only
+             where a diff stands. The choice is kept as diff_layout
     {key:browse.timezone}  the timezone times are written in. It opens a window with the
              names this machine knows. Type to narrow it down and pick one.
              Stored times stay UTC, and so does --json; a bare day or a
@@ -906,6 +908,24 @@ BACKLOG
   {key:files.close} closes the window, with the cursor, the filter and the detail as
   they were. SPC opens the menu over it with the screens. The window is read
   fresh every time.
+
+  The diff pane shows one scope of changes at a time. Each file starts with a
+  head line — its kind as the letter moai diff --stat prints, its path
+  (old → new for a rename) and +added −removed — then its hunks: @@ and the
+  line numbers, and every line with its old and new number and + for added,
+  - for removed. The numbers and the mark carry the added and removed colours
+  and the text keeps its syntax colours; a file whose language is not known is
+  coloured whole. Binary files, and files whose mode alone changed, show their
+  head and why there are no lines. {key:browse.diff_layout} puts the old and new side by side,
+  paired, in a pane at least 80 columns wide; a narrower one draws unified and
+  its title says so. With the focus on the pane {key:moves.line_down}, {key:moves.line_up}, {key:moves.top}, {key:moves.bottom}, {key:moves.half_down},
+  {key:moves.half_up}, {key:moves.page_down}, {key:moves.page_up} and the wheel scroll it, {key:diff.next_file} and {key:diff.prev_file} jump to the
+  next and previous file, {key:diff.next_scope} and {key:diff.prev_scope} show the next and previous scope, and {key:diff.scroll_left}
+  and {key:diff.scroll_right} scroll the text sideways by half the pane, both halves together —
+  lines do not wrap. The title names the scopes, the one shown in brackets,
+  whose branch it is and how many files; a patch cut at 2 MiB or a list cut at
+  5,000 files says so. Git runs in the background: the pane says it is reading
+  and the cursor keeps moving.
 
   {key:browse.jot} opens the jot form anywhere inside a project. It keeps a backlog item
   with no epic. If an editor is there ($VISUAL, $EDITOR, or vi or nano on
