@@ -32,6 +32,7 @@ export function createFilesRefresher(options: FileRefreshOptions) {
   let timer: unknown = null, stopped = false, running = false, epoch = 0, rotation = 0, quiet = 0, backingOff = false
   let nextChanges = 0, lastKey = '', lastChangeKey = '', lastFingerprint: string | undefined
   const checkedFresh = new Map<string, number>()
+  const checkAgain = new Set<string>()
   function clear(): void { if (timer !== null) clock.clearTimeout(timer); timer = null }
   function schedule(ms: number): void {
     clear(); if (stopped || !visibility.shown() || !options.snapshot()) return
@@ -41,7 +42,7 @@ export function createFilesRefresher(options: FileRefreshOptions) {
     if (running || stopped || !visibility.shown()) return
     const watch = options.snapshot(); if (!watch) return
     const turn = epoch; running = true; let changed = false, failed = false
-    if (watch.key !== lastKey) { lastKey = watch.key; rotation = 0; nextChanges = 0; lastChangeKey = ''; checkedFresh.clear() }
+    if (watch.key !== lastKey) { lastKey = watch.key; rotation = 0; nextChanges = 0; lastChangeKey = ''; checkedFresh.clear(); checkAgain.clear() }
     try {
       const ordered = watch.dirs.length ? [...watch.dirs.slice(rotation), ...watch.dirs.slice(0, rotation)] : []
       const batch = ordered.slice(0, 64); rotation = watch.dirs.length ? (rotation + batch.length) % watch.dirs.length : 0
@@ -52,9 +53,22 @@ export function createFilesRefresher(options: FileRefreshOptions) {
           if (item.readAt === undefined || clock.now() - item.readAt >= 2_000 || checkedFresh.get(item.path) === item.readAt) return false
           checkedFresh.set(item.path, item.readAt); return true
         }
-        const dirs = batch.filter(d => (stamps.dirs[d.path] ?? null) !== d.stamp || fresh(d)).map(d => d.path)
-        const file = watch.file !== undefined && (stamps.file !== watch.file.stamp || fresh(watch.file))
-        if (dirs.length || file) { changed = true; await options.changedStamps(watch, dirs, file, stamps) }
+        const changedDirs = batch.filter(d => (stamps.dirs[d.path] ?? null) !== d.stamp).map(d => d.path)
+        const changedFile = watch.file !== undefined && stamps.file !== watch.file.stamp
+        const dirs = batch.filter(d => changedDirs.includes(d.path) || checkAgain.delete(`dir:${d.path}`) || fresh(d)).map(d => d.path)
+        const file = watch.file !== undefined && (changedFile || checkAgain.delete(`file:${watch.file.path}`) || fresh(watch.file))
+        if (dirs.length || file) {
+          changed = true
+          try { await options.changedStamps(watch, dirs, file, stamps) }
+          catch (error) { for (const path of dirs) checkAgain.add(`dir:${path}`); if (file && watch.file) checkAgain.add(`file:${watch.file.path}`); throw error }
+          const latest = options.snapshot()
+          if (latest?.key === watch.key) {
+            for (const item of latest.dirs) if (dirs.includes(item.path) && item.readAt !== undefined) checkedFresh.set(item.path, item.readAt)
+            if (file && latest.file?.readAt !== undefined) checkedFresh.set(latest.file.path, latest.file.readAt)
+            for (const path of changedDirs) checkAgain.add(`dir:${path}`)
+            if (changedFile && watch.file) checkAgain.add(`file:${watch.file.path}`)
+          }
+        }
       }
       if (watch.changeKey !== lastChangeKey) { lastChangeKey = watch.changeKey ?? ''; nextChanges = 0; lastFingerprint = watch.changeFingerprint }
       if (watch.changeKey && clock.now() >= nextChanges) {

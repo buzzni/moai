@@ -22,7 +22,7 @@ test('one stamp request rotates at most 64 directories and refreshes only change
     async changes() { return '' }, async changedStamps(_watch, dirs, file) { changed.push([dirs, file]); watch.file.stamp = 'new'; dirs.forEach(d => { watch.dirs.find(x => x.path === d).stamp = 'new' }) }, async changedChanges() {} })
   for (let i = 0; i < 4; i++) await refresh.check()
   assert.deepEqual(batches.map(b => b.length), [64, 64, 64, 64]); assert.equal(new Set(batches.flat()).size, 200)
-  assert.deepEqual(changed, [[['d2'], true]])
+  assert.deepEqual(changed, [[['d2'], true], [[], true], [['d2'], false]])
   visible.set(false); await refresh.check(); assert.equal(batches.length, 4)
   visible.set(true); time.advance(0); await flush(); assert.equal(batches.length, 5)
   refresh.stop()
@@ -58,4 +58,21 @@ test('stopping a background group cancels its queued work without cancelling a m
   client.cancelGroup('files-refresh')
   assert.equal((await automatic).kind, 'cancelled'); release(); await busy; assert.equal((await manual).kind, 'passed')
   assert.deepEqual(sent, ['/busy', '/api/files'])
+})
+test('a changed stamp gets one follow-up reread even after a two-second interval', async () => {
+  const time = clock(), visible = visibility(); let applied = 0
+  const watch = { key: 'files:.', dirs: [{ path: '.', stamp: 'old', readAt: 0 }] }
+  const refresh = createFilesRefresher({ clock: time, visibility: visible, snapshot: () => watch,
+    async stamps() { return { dirs: { '.': 'new' }, file: null } }, async changes() { return '' },
+    async changedStamps() { applied++; watch.dirs[0].stamp = 'new'; watch.dirs[0].readAt = time.now() }, async changedChanges() {} })
+  await refresh.check(); time.set(2000); await refresh.check(); time.set(4000); await refresh.check()
+  assert.equal(applied, 2); refresh.stop()
+})
+test('a failed precautionary reread stays pending for the backoff retry', async () => {
+  const time = clock(), visible = visibility(); time.set(1000); let attempts = 0
+  const watch = { key: 'files:.', dirs: [{ path: '.', stamp: 'same', readAt: 500 }] }
+  const refresh = createFilesRefresher({ clock: time, visibility: visible, snapshot: () => watch,
+    async stamps() { return { dirs: { '.': 'same' }, file: null } }, async changes() { return '' },
+    async changedStamps() { attempts++; if (attempts === 1) throw new Error('offline') }, async changedChanges() {} })
+  await refresh.check(); time.set(11000); await refresh.check(); assert.equal(attempts, 2); refresh.stop()
 })

@@ -318,7 +318,7 @@ export function mountFiles(root: HTMLElement, ctx: ViewContext): PaneView {
       if (treeChanged && !changedOnly) draw(selected)
       if (file && chosen && watch.file?.path === chosen) {
         const path = chosen
-        try { const fresh = await source.file(path, key, true); if (key === rootKey && path === chosen) { const changed = !lastFile || lastFile.path !== fresh.path || lastFile.text !== fresh.text || lastFile.binary !== fresh.binary || lastFile.truncated !== fresh.truncated || JSON.stringify(lastFile.spans) !== JSON.stringify(fresh.spans); if (changed) { paintFile(fresh, true); if (diffOn) void showDiff(true) } else { fileStamp = fresh.stamp ?? null; fileReadAt = Date.now(); lastFile = fresh } } } catch { /* retry on next stamp */ }
+        const fresh = await source.file(path, key, true); if (key === rootKey && path === chosen) { const changed = !lastFile || lastFile.path !== fresh.path || lastFile.text !== fresh.text || lastFile.binary !== fresh.binary || lastFile.truncated !== fresh.truncated || JSON.stringify(lastFile.spans) !== JSON.stringify(fresh.spans); if (changed) { paintFile(fresh, true); if (diffOn) void showDiff(true) } else { fileStamp = fresh.stamp ?? null; fileReadAt = Date.now(); lastFile = fresh } }
       }
     },
     async refreshFileChanges(watch: FileWatch, fingerprint: string) {
