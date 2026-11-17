@@ -1305,7 +1305,7 @@ struct Changed {
     raised_diff: bool,
 }
 
-/// The checkout picker — `SPC v w` over the window (moai-ffk9.211). The list is [`Window::places`], read afresh as
+/// The checkout picker — `SPC w` over the window (moai-ffk9.211, moai-p7nr.4gf). The list is [`Window::places`], read afresh as
 /// the picker opens; until it comes the picker says it is reading.
 #[derive(Debug, Clone, Default)]
 pub struct Pick {
@@ -2131,7 +2131,7 @@ impl Window {
         self.aim();
     }
 
-    /// `SPC v w` — open the checkout picker, the list read afresh.
+    /// `SPC w` — open the checkout picker, the list read afresh.
     pub fn open_pick(&mut self) {
         self.ask_places();
         let cursor = self.picked().unwrap_or(0);
@@ -3056,11 +3056,11 @@ impl App {
                 }
                 // **This window's own toggles** (moai-ffk9.211) — the same keys mean the list's on the list; here they
                 // touch neither `App::worktree` nor `App::detail_open`, and nothing is written to the config.
-                Some(act @ (Browse::Worktree | Browse::Changed | Browse::Detail | Browse::Diff)) => {
+                Some(act @ (Browse::Checkout | Browse::Changed | Browse::Detail | Browse::Diff)) => {
                     let Mode::Files(w) = &mut self.mode else { return true };
                     match act {
                         // The picker is a window of its own: the menu closes under it.
-                        Browse::Worktree => {
+                        Browse::Checkout => {
                             w.open_pick();
                             self.chord.clear();
                         }
@@ -3265,7 +3265,7 @@ mod tests {
         let root = menu::entries(a.chord.held(), &ctx, &[]);
         assert_eq!(
             root.iter().map(menu::Entry::text).collect::<Vec<_>>(),
-            ["+화면 [파일]", "+보기", "+옵션", "키 목록"]
+            ["볼 체크아웃", "+화면 [파일]", "+보기", "+옵션", "키 목록"]
         );
         assert_eq!(Browse::Filter.enabled(&ctx), Err(keys::Off::Quiet));
         assert_eq!(Browse::Raw.enabled(&ctx), Err(keys::Off::Quiet));
@@ -4593,9 +4593,9 @@ mod tests {
 
     /// Pick the n-th checkout through the picker, as a person does.
     fn pick(a: &mut App, n: usize) {
-        a.hit("SPC v w");
+        a.hit("SPC w");
         settle(a);
-        assert!(window(a).pick.is_some(), "SPC v w did not open the picker");
+        assert!(window(a).pick.is_some(), "SPC w did not open the picker");
         assert!(!menu::open(&a.chord), "the menu stayed open over the picker");
         a.hit("g g");
         for _ in 0..n {
@@ -4650,7 +4650,7 @@ mod tests {
         assert_eq!(names(&a), ["edit.txt", "new.txt"], "the main checkout's changed files");
         a.hit("SPC v c Esc");
         // The picker, drawn: the milestone worktree says so, the one shown says it is now.
-        a.hit("SPC v w");
+        a.hit("SPC w");
         settle(&mut a);
         let screen = draw::tests::render(&mut a, 140, 24).join("\n");
         assert!(screen.contains("마일스톤") && screen.contains("[지금]") && screen.contains("⎇"), "{screen}");
@@ -5038,6 +5038,48 @@ mod tests {
         assert!(w.diff_on && w.folded, "the premise — the pane folded");
         assert_ne!(w.focus, Side::Info, "the focus stands on the folded pane");
         assert!(a.notice.as_deref().is_some_and(|n| n.contains("접었다")), "the fold went unsaid: {:?}", a.notice);
+    }
+
+    /// **`SPC w` picks the checkout over the file window, and only there** (moai-p7nr.4gf): the root menu of the window
+    /// names it the checkout, `SPC v w` is gone from the window's view menu and pressed there it leaves the list's
+    /// overlay as it was, as does `moai ctl view worktree` — an answer of no change, not a refusal. On the list `SPC w`
+    /// is silent and stands in no menu, and `SPC v w` keeps its meaning.
+    #[test]
+    fn spc_w_picks_the_checkout_and_spc_v_w_stays_the_lists() {
+        use crate::ctl::wire::{self, Verb};
+        use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+        let k = |c: char| KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE);
+        let menu_keys = |a: &App, held: &[KeyEvent]| -> Vec<(String, String)> {
+            let rows = a.rows();
+            menu::entries(held, &a.key_ctx(&rows), &[]).into_iter().map(|e| (e.key, e.what)).collect()
+        };
+        let (_s, mut a) = files_app("spc-w");
+        // On the list: no `w` at the root, `SPC w` does nothing.
+        assert!(!menu_keys(&a, &[k(' ')]).iter().any(|(key, _)| key == "w"), "SPC w stands on the list's menu");
+        let before = (a.worktree, a.mode.clone());
+        a.hit("SPC w");
+        assert_eq!((a.worktree, a.mode.clone()), before, "SPC w did something on the list");
+        assert!(menu_keys(&a, &[k(' '), k('v')]).iter().any(|(key, _)| key == "w"), "the list lost its SPC v w");
+        // Over the window: the root's `w` is the checkout; the view menu has no `w`.
+        a.hit("Esc SPC g f");
+        settle(&mut a);
+        let root = menu_keys(&a, &[k(' ')]);
+        let w = root.iter().find(|(key, _)| key == "w").expect("no SPC w over the window");
+        assert_eq!(w.1, say(Lang::Ko, "tui.menu.checkout"));
+        assert!(!menu_keys(&a, &[k(' '), k('v')]).iter().any(|(key, _)| key == "w"), "SPC v w stands over the window");
+        a.hit("SPC v w Esc");
+        assert!(window(&a).pick.is_none(), "SPC v w opened the picker");
+        assert_eq!(a.worktree, before.0, "SPC v w over the window turned the list's overlay over");
+        let reply =
+            a.ctl(&wire::request(Verb::View { name: "worktree".into(), on: !a.worktree }, Duration::from_secs(5)));
+        assert!(reply.ok, "ctl view worktree was refused over the window: {reply:?}");
+        assert_eq!(a.worktree, before.0, "ctl view worktree over the window turned the list's overlay over");
+        a.hit("SPC w");
+        settle(&mut a);
+        assert!(window(&a).pick.is_some(), "SPC w did not open the picker");
+        assert!(!menu::open(&a.chord), "the menu stayed open over the picker");
+        a.hit("Esc Esc");
+        assert_eq!(a.mode, Mode::Browse);
     }
 
     /// **The detail is the picked checkout's issue**: an epic worktree's epic, not a member; the main checkout none.

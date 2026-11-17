@@ -8049,8 +8049,8 @@ impl App {
             // 이동키가 어디에도 안 닿아 화면이 굳은 것으로 보인다(moai-ymnu).
             // **읽음은 시킬 때만 선다**(사용자 결정) — 커서가 지나갔다고, 상세를 봤다고 서지 않는다.
             B::Read | B::ReadAll | B::ReadGroup => self.mark_read(act, rows),
-            // The file window's own (moai-ffk9.211) — `files_key` takes it there.
-            B::Changed => {}
+            // The file window's own (moai-ffk9.211, moai-p7nr.4gf) — `files_key` takes them there.
+            B::Changed | B::Checkout => {}
             // **The list's diff pane** (moai-ffk9.cij) — the detail's twin: off gives the focus back to the list and
             // lets the read out go. On into a side pane too small for both says so — the detail stays, the diff folds
             // (the person's answer), and the setting is kept on for when there is room.

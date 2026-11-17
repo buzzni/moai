@@ -578,6 +578,7 @@ BACKLOG
     {key:browse.proposal_accept}  accept a suggestion; {key:browse.proposal_decline} declines
     {key:browse.proposals}  open the suggestion list
     {key:browse.pick}  register            {key:browse.unregister}  drop from the list
+    {key:browse.checkout}  the file window's checkout to show (see below)
   Screen — which one stands; the root menu names it, as in [board]:
     {key:browse.go_list}  list                {key:browse.go_board}  board — described below
     {key:browse.go_gantt}  gantt — the list opened out beside a date axis (see below)
@@ -910,7 +911,7 @@ BACKLOG
   title. {key:files.next_match} and {key:files.prev_match} jump to the next and previous file found, round at
   the ends. {key:files.close} ends the search and folds back what it opened — folders you
   opened stay.
-  {key:browse.worktree} over the window picks the checkout it shows: the main checkout
+  {key:browse.checkout} over the window picks the checkout it shows: the main checkout
   first, then the linked worktrees, a milestone's worktree saying so, each
   with its branch and its issue's title, the one shown marked [now]. Only
   the checkouts git lists can be picked, and the picked one is the new root:

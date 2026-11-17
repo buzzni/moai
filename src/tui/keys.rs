@@ -358,6 +358,9 @@ pub enum Browse {
     Go(Screen),
     ClearFilter,
     Worktree,
+    /// The file window's checkout pick — `SPC w` (moai-p7nr.4gf). A window of its own, so no state; over the file
+    /// window alone. Its own action, not `Worktree`'s second meaning: the list's `SPC v w` keeps one meaning.
+    Checkout,
     Raw,
     /// 설정의 n 번째 칸(0부터)을 보이고 숨긴다(moai-fmv5). **칸 이름이 설정에서 오므로 글자가
     /// 아니라 번호로 누른다** — 글자로 두면 설정에 따라 키가 겹친다.
@@ -907,6 +910,11 @@ pub const BROWSE: &[Bind<Browse>] = {
         row!(ProposalDecline, Some("SPC a n"), LEADER, Key::plain('a'), Key::plain('n')),
         row!(Proposals, Some("SPC a l"), LEADER, Key::plain('a'), Key::plain('l')),
         row!(Quit, Some("SPC q"), LEADER, Key::plain('q')),
+        // **The file window picks its checkout with `SPC w`** (moai-p7nr.4gf, 2026-11-17 the person's "SPC v w 가 아닌
+        // SPC w") — a leaf of the root, as `SPC n` and `SPC q` are: it opens a window and is done. Over the file window
+        // alone; elsewhere it is silent and stands in no menu. The list's `SPC v w` (overlay worktrees) is another
+        // action and stays as it was.
+        row!(Checkout, Some("SPC w"), LEADER, Key::plain('w')),
         row!(Pick, Some("SPC p a"), LEADER, Key::plain('p'), Key::plain('a')),
         row!(Unregister, Some("SPC p d"), LEADER, Key::plain('p'), Key::plain('d')),
         // **화면은 `SPC g`(go to)가 고른다**(moai-z46r, 2026-10-04 사용자 결정). 보드는 `SPC v b`, 통계는 `SPC p s` 에
@@ -968,7 +976,7 @@ pub const BROWSE: &[Bind<Browse>] = {
         // beside the rows. Letters keep their case (`SPC s P`'s note).
         row!(Diff, Some("SPC v D"), LEADER, Key::plain('v'), Key::plain('D')),
         row!(Worktree, Some("SPC v w"), LEADER, Key::plain('v'), Key::plain('w')),
-        // Changed files only is `c` (changed) — the file window's alone, beside its checkout pick (`w`).
+        // Changed files only is `c` (changed) — the file window's alone.
         row!(Changed, Some("SPC v c"), LEADER, Key::plain('v'), Key::plain('c')),
         row!(Raw, Some("SPC v r"), LEADER, Key::plain('v'), Key::plain('r')),
         // **정렬은 `SPC s`(sort)다**(moai-en4u) — 옛 `SPC o`(ranger 의 order)는 `s` 를 보기가 쥐고
@@ -1239,9 +1247,11 @@ impl Browse {
             // diff does not (moai-ffk9.41b).
             DiffLayout if c.diff => Ok(()),
             DiffLayout => Err(Off::Quiet),
-            // **Over the file window its own toggles stand** (moai-ffk9.211): the checkout (`SPC v w`), the changed files
-            // only, the right pane's detail and diff, and the detail's place — which splits the two.
-            Worktree | Changed | Detail | Diff | DetailAt if c.files => Ok(()),
+            // **Over the file window its own toggles stand** (moai-ffk9.211): the checkout pick (`SPC w`), the changed
+            // files only, the right pane's detail and diff, and the detail's place — which splits the two. The list's
+            // `SPC v w` does not: it would turn the list's overlay over unseen (moai-p7nr.4gf).
+            Checkout | Changed | Detail | Diff | DetailAt if c.files => Ok(()),
+            Checkout => Err(Off::Quiet),
             // Changed files only is the file window's alone. The diff pane stands on the list, the board and the gantt
             // (moai-ffk9.cij) — below, where the covering windows have not taken it.
             Changed => Err(Off::Quiet),
@@ -1370,7 +1380,7 @@ impl Browse {
             Pick => say(c.lang, "tui.menu.pick"),
             Unregister => say(c.lang, "tui.menu.unregister"),
             Go(s) => s.word(c.lang),
-            Worktree if c.files => say(c.lang, "tui.menu.checkout"),
+            Checkout => say(c.lang, "tui.menu.checkout"),
             Worktree => say(c.lang, "tui.menu.worktree"),
             Raw => say(c.lang, "tui.menu.raw"),
             ShowAll => say(c.lang, "tui.menu.show_all"),
@@ -1392,8 +1402,6 @@ impl Browse {
     /// 칠하면 색 없는 터미널에서 어느 쪽인지 모른다.
     pub fn state(self, c: &Ctx) -> Option<String> {
         match self {
-            // The checkout pick opens a window — it has no state.
-            Browse::Worktree if c.files => None,
             Browse::Detail if c.files => Some(shown(!c.files_detail, c.lang).into()),
             Browse::Diff if c.files => Some(shown(!c.files_diff, c.lang).into()),
             Browse::Diff => Some(shown(!c.diff_open, c.lang).into()),
@@ -1514,7 +1522,7 @@ impl Browse {
             Go(Screen::Wiki) => say(c.lang, "tui.act.wiki"),
             Go(Screen::Files) => say(c.lang, "tui.act.files"),
             ClearFilter => say(c.lang, "tui.act.clear_filter"),
-            Worktree if c.files => say(c.lang, "tui.act.checkout"),
+            Checkout => say(c.lang, "tui.act.checkout"),
             Worktree if c.worktree => say(c.lang, "tui.act.worktree_off"),
             Worktree => say(c.lang, "tui.act.worktree"),
             Raw if c.raw => say(c.lang, "tui.act.rendered"),
