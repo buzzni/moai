@@ -89,7 +89,7 @@ and history notes between rendered markdown and the raw text.
 
 ## Files and diffs
 
-Open **Files** with `SPC g f`. Select the current or another checkout from the selector, expand directories, and choose a file to view. `/` searches file names within the active directory; ignored directories are skipped, even when searching from within one. Search results expand ancestor directories while keeping sibling nodes visible. Binary files are flagged rather than rendered as text; text reads truncate at 1 MiB and explicitly indicate truncation.
+Open **Files** with `SPC g f`. Select the current or another checkout from the selector, expand directories, and choose a file to view. `/` searches file names within the active directory; directories reported as ignored by version control are skipped, even when searching from within one; the search reports when that information is unavailable. Search results expand ancestor directories while keeping sibling nodes visible. Binary files are flagged rather than rendered as text; text reads truncate at 1 MiB and explicitly indicate truncation.
 
 The toolbar toggles changed-only files, the active file's diff, or the linked issue's detail pane. Use `SPC v D` to toggle the diff; the issue list, board, and Gantt views also provide this pane for the selected issue. Choose between commit, branch, or working scopes, and toggle unified or side-by-side layouts within the pane. Narrow panes automatically fall back to unified display. Use `Tab` and `Shift-Tab` to navigate between diff files, and `H` and `L` to scroll horizontally. In Files, navigate with `j`/`k` or arrow keys, fold or expand directories with `h`/`l`, enter a directory or view a file with `Enter`, and go back with `Backspace`.
 
