@@ -11,7 +11,7 @@ pub fn run(ctx: &Ctx, args: DiffArgs) -> R<Vec<String>> {
     if load.get(&args.id).is_none() {
         return Err(Fail::not_found(&args.id, ctx.lang()));
     }
-    let prepared = crate::changes::offers(&repo, &load.issues, &args.id, args.worktree.worktree, None, ctx.lang());
+    let prepared = crate::changes::offers(&repo, &load.issues, &args.id, None, ctx.lang());
     let requested = args.scope.map(|s| match s {
         DiffScope::Commits => Scope::Commits,
         DiffScope::Branch => Scope::Branch,

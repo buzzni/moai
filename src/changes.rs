@@ -4,7 +4,7 @@ use report::changes::{Checkout, Offer, Offered, Scope};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-const PATCH_LIMIT: usize = 2 * 1024 * 1024;
+use vcs::PATCH_LIMIT;
 #[derive(Debug)]
 pub enum RequestError {
     Scope(Vec<Scope>),
@@ -54,16 +54,18 @@ fn told(root: &Path, lang: crate::i18n::Lang, e: vcs::Error) -> git::Told {
     }
 }
 /// Read each checkout and commit table once. The placement decision itself is pure.
+///
+/// Workplaces are always measured: `workplaces` skips them inside a linked worktree unless
+/// overlaying, which made `moai diff` in the epic's own worktree answer "no changes".
 pub fn offers(
     repo: &Repo,
     issues: &[model::Issue],
     id: &str,
-    overlay: bool,
     budget: Option<Duration>,
     lang: crate::i18n::Lang,
 ) -> Prepared {
     let root = repo.here().to_path_buf();
-    let workplaces = worktree::workplaces(repo.here(), overlay);
+    let workplaces = worktree::workplaces(repo.here(), true);
     let checkouts = worktree::checkouts(repo.here());
     let now = model::now();
     let tentative = report::changes::scopes(issues, &repo.config, id, &workplaces, &checkouts, &[], &now);
@@ -189,7 +191,9 @@ impl Prepared {
                 let scope = vcs::Scope::Commits(vec![commit.hash.clone()]);
                 match backend.patch(root, &scope, path, budget) {
                     Ok(patch) if !patch.text.is_empty() => {
-                        append(&mut raw, &format!("commit {} {}\n", commit.hash, commit.subject), &mut patch_cut);
+                        // A subject is anyone's text; `moai show` sanitizes it before a terminal sees it too.
+                        let subject = crate::text::sanitize(&commit.subject);
+                        append(&mut raw, &format!("commit {} {subject}\n", commit.hash), &mut patch_cut);
                         append(&mut raw, &patch.text, &mut patch_cut);
                         patch_cut |= patch.truncated;
                         if patch_cut {

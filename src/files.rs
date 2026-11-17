@@ -257,8 +257,19 @@ fn collect_listing(jail: &Jail, stamp: Stamp, listing: std::fs::ReadDir) -> Resu
         if name.eq_ignore_ascii_case(".git") {
             continue;
         }
-        let ty = entry.file_type().map_err(Why::from)?;
-        let meta = std::fs::symlink_metadata(entry.path()).map_err(Why::from)?;
+        // An entry removed after readdir (a temp+rename, a build output) drops out of the
+        // listing; failing here would report the whole directory as missing and stop a walk.
+        let gone = |e: &io::Error| e.kind() == io::ErrorKind::NotFound;
+        let ty = match entry.file_type() {
+            Ok(ty) => ty,
+            Err(e) if gone(&e) => continue,
+            Err(e) => return Err(Why::Io(e)),
+        };
+        let meta = match std::fs::symlink_metadata(entry.path()) {
+            Ok(meta) => meta,
+            Err(e) if gone(&e) => continue,
+            Err(e) => return Err(Why::Io(e)),
+        };
         let kind = if ty.is_dir() {
             Kind::Dir
         } else if ty.is_file() {

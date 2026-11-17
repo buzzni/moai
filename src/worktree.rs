@@ -1606,7 +1606,9 @@ pub fn checkouts(root: &Path) -> Vec<crate::report::changes::Checkout> {
         }
         bare
     });
-    let top = if bare { real(&disk.common) } else { main_top(&disk) };
+    // Keys are joined with `workplaces` paths, so they are measured from the same `main_top`
+    // even when that main is the bare directory's parent and is itself left out.
+    let top = main_top(&disk);
     disk.all
         .iter()
         .filter(|(tree, linked, _)| (*linked || !bare) && root_in(&disk, tree).is_dir())
@@ -2737,6 +2739,10 @@ mod checkout_tests {
         let got = checkouts(&side);
         assert_eq!(got.len(), 1);
         assert!(!got[0].main);
+        // The scope chooser joins these keys with `workplaces` paths.
+        let places = workplaces(&side, true);
+        assert_eq!(places.len(), 1);
+        assert_eq!(places[0].path.to_string_lossy(), got[0].key);
     }
     #[test]
     fn checkout_list_includes_main_and_milestone_and_skips_missing() {

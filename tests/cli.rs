@@ -36136,6 +36136,9 @@ fn diff_member_prefers_own_commits_and_owner_falls_back_to_branch() {
             .iter()
             .any(|f| f["path"] == ".env" && f["hunks"][0]["lines"][0]["text"] == "visible")
     );
+    // The epic's own worktree is where its work happens; asked from there, the answer is the same.
+    let here: serde_json::Value = serde_json::from_str(&ok(&side, &["diff", &epic, "--json"])).unwrap();
+    assert_eq!(here["scope"], "working");
     let v: serde_json::Value = serde_json::from_str(&ok(root, &["diff", &member, "--json"])).unwrap();
     assert_eq!(v["scope"], "commits");
     assert_eq!(v["offers"][0]["owner"], epic);

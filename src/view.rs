@@ -4411,7 +4411,16 @@ pub(crate) fn diff_output(answer: &crate::changes::Answer, stat_only: bool) -> V
                 };
                 let adds = f.change.adds.map_or_else(|| "-".into(), |n| n.to_string());
                 let dels = f.change.dels.map_or_else(|| "-".into(), |n| n.to_string());
-                format!("{mark} {} +{adds} -{dels}", f.change.path)
+                // `-z` hands names over raw; escape control bytes so a name cannot drive the terminal.
+                let mut path = String::new();
+                for c in f.change.path.chars() {
+                    if c.is_control() {
+                        path.extend(c.escape_default());
+                    } else {
+                        path.push(c);
+                    }
+                }
+                format!("{mark} {path} +{adds} -{dels}")
             })
             .collect();
     }

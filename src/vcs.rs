@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 use std::path::{Component, Path};
 use std::time::Duration;
 
-const PATCH_LIMIT: usize = 2 * 1024 * 1024;
+pub(crate) const PATCH_LIMIT: usize = 2 * 1024 * 1024;
 const FILE_LIMIT: usize = 5_000;
 // Lists need their complete count, even when only the first 5,000 entries are shown.
 const LIST_LIMIT: usize = 128 * 1024 * 1024;
@@ -175,8 +175,10 @@ fn status(s: &str) -> Status {
     }
 }
 fn tracked_args<'a>(scope: &'a Scope, rev: &'a str, current: &'a str, mode: &'a str) -> Vec<&'a str> {
+    // `diff-tree` ignores `--first-parent` and lists a merge against every parent, so a merge
+    // would count the other side's files. `show` honours it, as the patch below does.
     let mut a = if matches!(scope, Scope::Commits(_)) {
-        vec!["diff-tree", "--root", "--no-commit-id", "--first-parent", "-m", "-r"]
+        vec!["show", "--format=", "--no-show-signature", "--first-parent", "-m"]
     } else {
         vec!["diff"]
     };
@@ -314,8 +316,14 @@ impl Backend {
                         found
                             .entry(item.clone())
                             .and_modify(|c| {
-                                c.status = st;
-                                c.old_path = old_path.clone();
+                                // Commits run oldest first: a later edit must not turn the file
+                                // this issue created or renamed back into a plain modification.
+                                let kept = st == Status::Modified
+                                    && matches!(c.status, Status::Added | Status::Renamed | Status::Copied);
+                                if !kept {
+                                    c.status = st;
+                                    c.old_path = old_path.clone();
+                                }
                             })
                             .or_insert(Change {
                                 path: item,
@@ -386,12 +394,23 @@ impl Backend {
         }
         let current = if matches!(scope, Scope::Branch) { head(root, budget)? } else { String::new() };
         for rev in revs {
+            // `log.showSignature` would print verification text into the patch; the user's
+            // `diff.noprefix`/`diff.mnemonicPrefix` would rename the a/ and b/ the parser matches.
             let mut args = if matches!(scope, Scope::Commits(_)) {
-                vec!["show", "--format=", "--root", "--first-parent", "-m"]
+                vec!["show", "--format=", "--no-show-signature", "--root", "--first-parent", "-m"]
             } else {
                 vec!["diff"]
             };
-            args.extend(["--no-ext-diff", "--no-textconv", "--no-color", "--relative", "-M", &rev]);
+            args.extend([
+                "--no-ext-diff",
+                "--no-textconv",
+                "--no-color",
+                "--src-prefix=a/",
+                "--dst-prefix=b/",
+                "--relative",
+                "-M",
+                &rev,
+            ]);
             if matches!(scope, Scope::Branch) {
                 args.push(&current);
             }
@@ -778,6 +797,43 @@ mod tests {
         let p = Backend::Git.patch(root, &Scope::Working, None, None).unwrap();
         assert!(p.truncated);
         assert!(p.text.len() <= PATCH_LIMIT);
+    }
+    #[test]
+    fn merges_use_the_first_parent_and_user_diff_config_keeps_the_prefixes() {
+        let dir = crate::scratch::Scratch::new("vcs-merge");
+        let root: &Path = &dir;
+        let git = |args: &[&str]| run_git(root, None, args);
+        git(&["init", "-q"]);
+        fs::write(root.join("base"), "base\n").unwrap();
+        git(&["add", "."]);
+        git(&["commit", "-qm", "base"]);
+        git(&["checkout", "-qb", "side"]);
+        fs::write(root.join("side"), "side\n").unwrap();
+        git(&["add", "."]);
+        git(&["commit", "-qm", "side"]);
+        git(&["checkout", "-q", "-"]);
+        fs::write(root.join("main"), "main\n").unwrap();
+        git(&["add", "."]);
+        git(&["commit", "-qm", "main"]);
+        git(&["merge", "-q", "--no-ff", "side", "-m", "merge"]);
+        let merge = Scope::Commits(vec![head(root, None).unwrap()]);
+        let listed = Backend::Git.changes(root, &merge, None).unwrap();
+        assert_eq!(listed.files.iter().map(|c| c.path.as_str()).collect::<Vec<_>>(), ["side"]);
+        assert_eq!(listed.files[0].adds, Some(1));
+        // An added file that a later commit edits is still the file this range added.
+        let added = head(root, None).unwrap();
+        fs::write(root.join("side"), "side\nmore\n").unwrap();
+        git(&["commit", "-qam", "edit"]);
+        let both = Scope::Commits(vec![added, head(root, None).unwrap()]);
+        let side = Backend::Git.changes(root, &both, None).unwrap();
+        assert_eq!(side.files[0].status, Status::Added);
+        git(&["config", "diff.mnemonicPrefix", "true"]);
+        git(&["config", "diff.noprefix", "true"]);
+        fs::write(root.join("base"), "changed\n").unwrap();
+        let patch = Backend::Git.patch(root, &Scope::Working, None, None).unwrap();
+        let parsed = crate::diff::parse(&patch.text);
+        assert_eq!(parsed[0].new_path.as_deref(), Some("base"), "{}", patch.text);
+        assert_eq!(parsed[0].hunks.len(), 1);
     }
     #[test]
     fn root_commit_and_invalid_hash() {
