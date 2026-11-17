@@ -5,6 +5,7 @@
 
 mod archive_days;
 pub mod board;
+mod columns;
 pub mod draw;
 pub mod edit;
 mod files;

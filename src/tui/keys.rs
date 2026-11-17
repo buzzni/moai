@@ -1852,6 +1852,9 @@ pub enum Files {
     FocusNext,
     /// To that pane — `Ctrl-w h` (tree), `Ctrl-w l` (right).
     Focus(Side),
+    /// Scroll the right pane's text sideways by half the pane — `H`·`L` (moai-ffk9.3fd). Only there: the tree has
+    /// nothing to scroll sideways. The gantt's `H`·`L` live in its own table ([`GANTT`]) and stay as they are.
+    Pan(Side),
     Close,
 }
 
@@ -1891,6 +1894,8 @@ pub const FILES: &[Bind<Files>] = {
         row!(Focus(Side::Left), None, Key::chord('w'), Key::chord('h')),
         row!(Focus(Side::Right), None, Key::chord('w'), Key::plain('l')),
         row!(Focus(Side::Right), None, Key::chord('w'), Key::chord('l')),
+        row!(Pan(Side::Left), Some("H"), Key::plain('H')),
+        row!(Pan(Side::Right), Some("L"), Key::plain('L')),
         row!(Close, Some("Esc"), Key::bare(C::Esc)),
     ]
 };
@@ -1908,6 +1913,7 @@ impl Files {
             Files::ExpandAll => say(lang, "tui.files.expand_all"),
             Files::FocusNext | Files::Focus(_) if on_info => say(lang, "tui.files.to_tree"),
             Files::FocusNext | Files::Focus(_) => say(lang, "tui.files.to_info"),
+            Files::Pan(_) => say(lang, "tui.files.pan"),
             Files::Close => say(lang, "tui.act.close"),
         }
     }

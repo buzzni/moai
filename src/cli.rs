@@ -884,8 +884,14 @@ BACKLOG
   read — or folds it all back when it is open. {key:files.expand} on an ignored directory
   opens it. {key:files.enter} steps into a directory, whose first row is .., and on a
   file goes to the right pane; {key:files.focus_next} goes back and forth. {key:files.leave} steps out,
-  and at the checkout's root nothing goes further up. Reading runs in the
-  background: a directory being read says so and the cursor keeps moving.
+  and at the checkout's root nothing goes further up. The right pane shows the
+  file under the cursor with its line numbers, coloured by its syntax once that
+  is ready; a file past 1 MiB shows its first MiB and says how large it is, and
+  one that is not text says so with its size. With the focus there the moves and
+  the wheel scroll the text, and {key:files.scroll_left} and {key:files.scroll_right} scroll it sideways by half
+  the pane, as does the sideways wheel — lines do not wrap, and ‹ and › say
+  there is more to either side. Reading runs in the background: a directory or
+  a file being read says so and the cursor keeps moving.
   {key:files.close} closes the window, with the cursor, the filter and the detail as
   they were. SPC opens the menu over it with the screens. The window is read
   fresh every time.

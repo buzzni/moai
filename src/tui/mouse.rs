@@ -186,7 +186,7 @@ impl App {
             self.run(super::keys::Browse::Proposals, &[]);
             return;
         }
-        // **가로 휠은 간트의 날짜 축만 받는다**(moai-i4hf.exq) — 가로 휠이 없는 마우스를 위해 Shift+휠도 가로다. 다른
+        // **가로 휠은 간트의 날짜 축과 파일 창의 내용 칸만 받는다**(moai-i4hf.exq, moai-ffk9.3fd) — 가로 휠이 없는 마우스를 위해 Shift+휠도 가로다. 다른
         // 자리에서는 가로로 구를 것이 없어 버린다. 한 번에 한 칸 — 축의 한 칸은 확대에 따라 한 시간~한 주다.
         // **Shift+휠이 가로인 것은 간트 위에서만이다** — 목록·상세·통계 창·위키 창에서는 이 에픽 전처럼 세로로 구른다. 어디서나
         // 가로로 읽으면 Shift 를 쥔 휠이 그 창들에서 아무 일도 안 한다.
@@ -257,7 +257,7 @@ impl App {
             return self.wiki_pointer(kind, wheel, at);
         }
         if matches!(self.mode, Mode::Files(_)) {
-            return self.files_pointer(kind, wheel, at);
+            return self.files_pointer(kind, wheel, sideways, at);
         }
         if self.mode != Mode::Browse {
             return;
@@ -362,7 +362,10 @@ impl App {
     /// row, the cursor there**; the wheel scrolls the pane under the pointer and moves neither the focus nor the
     /// cursor. Dragging the line between the panes resizes them, keeping the window's own share
     /// (`App::files_width`), written once on release ([`App::drop_line`]).
-    fn files_pointer(&mut self, kind: MouseEventKind, wheel: Option<isize>, at: Position) {
+    ///
+    /// The sideways wheel scrolls the right pane's text sideways (moai-ffk9.3fd) — [`super::files::PAN_WHEEL`] cells a
+    /// notch; over the tree it does nothing.
+    fn files_pointer(&mut self, kind: MouseEventKind, wheel: Option<isize>, sideways: Option<isize>, at: Position) {
         use super::files::Side;
         if let (MouseEventKind::Drag(MouseButton::Left), Some(grab)) = (kind, self.dragging) {
             return self.drag_to(grab, at);
@@ -384,6 +387,16 @@ impl App {
         } else {
             return;
         };
+        if let Some(by) = sideways {
+            if on == Side::Info {
+                self.acted();
+                if let Mode::Files(w) = &mut self.mode {
+                    w.chord.clear();
+                    w.right.pan_by(by * super::files::PAN_WHEEL as isize);
+                }
+            }
+            return;
+        }
         if !pressed && wheel.is_none() {
             return;
         }

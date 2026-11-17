@@ -1951,7 +1951,13 @@ fn files_window(
     }
     let rows = files_tree(f, w, tree_at, lang);
     if let Some(info_at) = info_at {
-        files_info(f, w, info_at, lang);
+        match w.current() {
+            Some(super::files::Row::Entry { entry, .. }) if super::files::reads(entry) => {
+                let size = entry.size;
+                files_content(f, w, info_at, size, lang);
+            }
+            _ => files_info(f, w, info_at, lang),
+        }
     }
     super::mouse::FilesAt { tree: tree_at, rows, top: w.list.offset(), info: info_at }
 }
@@ -2077,8 +2083,85 @@ fn files_row(r: &super::files::Row, lang: Lang) -> Line<'static> {
     }
 }
 
-/// The right pane — for now what the cursor stands on in a few lines: its name, its kind and size. The file's content
-/// is the next member's (moai-ffk9.3fd).
+/// The right pane on a file (moai-ffk9.3fd) — its text with line numbers, or why there is none.
+///
+/// **Only the lines on screen are cut**, and only their cells on screen ([`super::columns::cut`]); the lines' widths
+/// were measured once on the reader thread. The line numbers do not scroll sideways: a `‹` beside them says text is
+/// hidden to the left, a `›` at the pane's end that a line goes on. The sideways scroll is held in cells and stops
+/// where the widest line ends (`files::Right::pan_end`).
+fn files_content(f: &mut Frame, w: &mut super::files::Window, at: Rect, size: u64, lang: Lang) {
+    use super::files::{Shown, Side};
+    let focused = w.focus == Side::Info;
+    let inner_w = at.width.saturating_sub(2) as usize;
+    let path = w.current_path().map(safe_name).unwrap_or_default();
+    let title = match &w.right.shown {
+        Shown::Text(c) => {
+            format!(" {path} · {} ", fill(say(lang, "tui.files.lines"), &[("n", &c.lines.len().to_string())]))
+        }
+        _ => format!(" {path} "),
+    };
+    let block = pane_frame(focused).title(clip(&title, inner_w));
+    let inner = block.inner(at);
+    f.render_widget(block, at);
+    let (width, height) = (inner.width as usize, inner.height as usize);
+    let right = &mut w.right;
+    let said = |f: &mut Frame, text: String, look: Style| {
+        let line = fit(Line::from(Span::styled(text, look)), width);
+        f.buffer_mut().set_line(inner.x, inner.y, &line, inner.width);
+    };
+    match &right.shown {
+        Shown::Text(c) => {
+            let c = c.clone();
+            let n = c.lines.len();
+            let len = n + usize::from(c.truncated);
+            right.page.fit(height, len);
+            let digits = n.max(1).to_string().len();
+            let room = width.saturating_sub(digits + 1);
+            right.room = room;
+            right.pan = right.pan.min(c.widest.saturating_sub(room));
+            let (top, pan) = (right.page.offset(), right.pan);
+            for (y, i) in (top..len).take(height).enumerate() {
+                let y = inner.y + y as u16;
+                if i == n {
+                    let cut = fill(say(lang, "tui.files.truncated"), &[("size", &c.size.to_string())]);
+                    let line = fit(Line::from(Span::styled(format!("{} {cut}", " ".repeat(digits)), dim())), width);
+                    f.buffer_mut().set_line(inner.x, y, &line, inner.width);
+                    continue;
+                }
+                let wide = c.widths[i] as usize;
+                let more = wide > pan + room;
+                let paint: Vec<_> =
+                    c.paint(i).iter().map(|s| (s.range.clone(), from_anstyle(style::syntax(s.kind)))).collect();
+                let mut spans = vec![
+                    Span::styled(format!("{:>digits$}", i + 1), dim()),
+                    Span::styled(if pan > 0 && wide > 0 { "‹" } else { " " }, dim()),
+                ];
+                let text_room = if more { room.saturating_sub(1) } else { room };
+                spans.extend(super::columns::cut(c.line(i), &paint, Style::default(), pan, text_room));
+                if more && room > 0 {
+                    spans.push(Span::styled("›", dim()));
+                }
+                f.buffer_mut().set_line(inner.x, y, &Line::from(spans), inner.width);
+            }
+            let hint = if focused {
+                String::new()
+            } else {
+                format!(" ({})", keys::said(w.keys.files, keys::Files::FocusNext))
+            };
+            scroll_mark(f, &w.right.page, at, &hint, focused, lang);
+        }
+        Shown::Reading { said: true, .. } => said(f, say(lang, "tui.files.reading").to_string(), dim()),
+        // A read that answers within a step never shows its line — the pane stays blank that long.
+        Shown::Reading { .. } | Shown::Nothing => {}
+        Shown::Failed { why: super::files::Trouble::NotText, .. } => {
+            said(f, fill(say(lang, "tui.files.not_text"), &[("size", &size.to_string())]), dim());
+        }
+        Shown::Failed { why, .. } => said(f, safe_name(&why.said(lang)), from_anstyle(style::WARN)),
+    }
+}
+
+/// The right pane on anything but a file — what the cursor stands on in a few lines: a directory's kind and entries,
+/// a link's target, why a row is not opened. On `..` it stands empty.
 fn files_info(f: &mut Frame, w: &super::files::Window, at: Rect, lang: Lang) {
     use super::files::{Row, Side};
     use crate::files::Kind;
@@ -2110,14 +2193,7 @@ fn files_info(f: &mut Frame, w: &super::files::Window, at: Rect, lang: Lang) {
             }
             safe_name(path)
         }
-        Some(Row::Up) => {
-            let up = match w.here.rsplit_once('/') {
-                Some((p, _)) => format!("{}/", safe_name(p)),
-                None => format!("{}/", crate::text::one_line(&w.project)),
-            };
-            lines.push(Line::from(fill(say(lang, "tui.files.info_up"), &[("to", &up)])));
-            "..".to_string()
-        }
+        Some(Row::Up) => "..".to_string(),
         Some(Row::Loading { of, .. }) => {
             lines.push(Line::from(Span::styled(say(lang, "tui.files.reading"), dim())));
             safe_name(of)
@@ -2162,6 +2238,10 @@ fn files_keys(f: &mut Frame, w: &super::files::Window, at: Rect, lang: Lang) {
         }
     }
     optional.push(key(&moves, F::Step(Move::LineDown).what(on_info, lang)));
+    if on_info {
+        let pan = labels(w.keys.files, &[F::Pan(keys::Side::Left), F::Pan(keys::Side::Right)]);
+        optional.push(key(&pan, F::Pan(keys::Side::Left).what(on_info, lang)));
+    }
     keep.push(hint(F::FocusNext));
     keep.push(hint(F::Close));
     keep.push(key(&menu::title(&[LEADER.event()]), menu::root(lang)));

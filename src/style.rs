@@ -222,6 +222,25 @@ pub fn file_style(name: &str) -> Style {
     }
 }
 
+/// Syntax colours for file text (moai-ffk9.3fd), after the confirmed mockup in 16 colours. **They carry no meaning**
+/// — the text reads the same without them — so no glyph stands beside them. Comments are grey and italic, so they
+/// fall back even on a terminal that draws no italic.
+pub fn syntax(kind: crate::highlight::Kind) -> Style {
+    use crate::highlight::Kind as K;
+    match kind {
+        K::Comment => fg(AnsiColor::BrightBlack).italic(),
+        K::String => fg(AnsiColor::BrightCyan),
+        K::Number | K::Constant => fg(AnsiColor::BrightBlue),
+        K::Keyword => fg(AnsiColor::BrightRed),
+        K::Type => fg(AnsiColor::Yellow),
+        K::Function => fg(AnsiColor::BrightMagenta),
+        K::Tag => fg(AnsiColor::Green),
+        K::Attribute => fg(AnsiColor::Cyan),
+        K::Heading => fg(AnsiColor::BrightBlue).bold(),
+        K::Other => PLAIN,
+    }
+}
+
 /// 칸 이름 → 글리프. 모르는 칸도 글리프를 갖는다.
 pub fn glyph(status: &str) -> &'static str {
     match status {
