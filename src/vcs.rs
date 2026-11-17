@@ -177,7 +177,7 @@ fn tracked_args<'a>(scope: &'a Scope, rev: &'a str, current: &'a str, mode: &'a 
     } else {
         vec!["diff"]
     };
-    a.extend(["--no-ext-diff", "--no-textconv", "--no-color", "-M", mode, "-z", rev]);
+    a.extend(["--no-ext-diff", "--no-textconv", "--no-color", "--relative", "-M", mode, "-z", rev]);
     if matches!(scope, Scope::Branch) {
         a.push(current);
     }
@@ -372,7 +372,7 @@ impl Backend {
             } else {
                 vec!["diff"]
             };
-            args.extend(["--no-ext-diff", "--no-textconv", "--no-color", "-M", &rev]);
+            args.extend(["--no-ext-diff", "--no-textconv", "--no-color", "--relative", "-M", &rev]);
             if matches!(scope, Scope::Branch) {
                 args.push(&current);
             }
@@ -638,6 +638,26 @@ mod tests {
         assert!(!p.text.contains("SECRET OUTSIDE"));
         assert!(p.text.contains("link"));
         assert!(p.text.contains("non-regular file"));
+    }
+    #[test]
+    fn a_project_inside_a_checkout_only_reports_its_own_relative_paths() {
+        let dir = crate::scratch::Scratch::new("vcs-subdir");
+        let root: &Path = &dir;
+        let git = |args: &[&str]| run_git(root, None, args);
+        git(&["init", "-q"]);
+        fs::create_dir(root.join("sub")).unwrap();
+        fs::write(root.join("sub/a"), "old\n").unwrap();
+        fs::write(root.join("outside"), "old\n").unwrap();
+        git(&["add", "."]);
+        git(&["commit", "-qm", "base"]);
+        fs::write(root.join("sub/a"), "new\n").unwrap();
+        fs::write(root.join("outside"), "new\n").unwrap();
+        let sub = root.join("sub");
+        let changes = Backend::Git.changes(&sub, &Scope::Working, None).unwrap();
+        assert_eq!(changes.files.iter().map(|c| c.path.as_str()).collect::<Vec<_>>(), ["a"]);
+        let patch = Backend::Git.patch(&sub, &Scope::Working, None, None).unwrap();
+        assert!(patch.text.contains("a/a"));
+        assert!(!patch.text.contains("outside"));
     }
     #[test]
     fn branch_and_whole_use_the_nearest_milestone_base() {
