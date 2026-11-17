@@ -2284,30 +2284,36 @@ fn files_tree(f: &mut Frame, w: &mut super::files::Window, at: Rect, lang: Lang)
 
 /// The checkout in the tree's title (moai-ffk9.211): ` · ⎇ branch`, and with the changed files only
 /// ` · changed files only 14` — `14 of 6000` when the list stopped at the read layer's 5,000; over the whole tree a cut
-/// list says its marks stop there.
+/// list says its marks stop there, and one that could not be read says why there are none.
 fn files_checkout_said(w: &super::files::Window, lang: Lang) -> String {
     use super::files::Listing;
     let mut said = String::new();
     if !w.checkout.branch.is_empty() {
         said.push_str(&format!(" · {} {}", style::BRANCH_GLYPH, safe_name(&crate::text::one_line(&w.checkout.branch))));
     }
-    let cut = |c: &crate::vcs::Changes| {
-        fill(say(lang, "tui.files.found_more"), &[("shown", &c.files.len().to_string()), ("n", &c.total.to_string())])
+    let cut = |key: &'static str, c: &crate::vcs::Changes| {
+        fill(say(lang, key), &[("shown", &c.files.len().to_string()), ("n", &c.total.to_string())])
     };
     if w.changed_only() {
         let count = match w.listing() {
-            Listing::Read(c) if c.list.truncated => format!(" {}", cut(&c.list)),
+            Listing::Read(c) if c.list.truncated => format!(" {}", cut("tui.files.found_more", &c.list)),
             Listing::Read(c) => format!(" {}", c.list.files.len()),
             _ => String::new(),
         };
         said.push_str(&format!(" · {}{count}", say(lang, "tui.files.changed_only")));
-    } else if let Listing::Read(c) = w.listing()
-        && c.list.truncated
-    {
-        // **A cut list says so over the whole tree too** (moai-p7nr.c67): a row past the cut has no mark, and that is
-        // "not known", not "unchanged".
-        let (shown, n) = (c.list.files.len().to_string(), c.list.total.to_string());
-        said.push_str(&format!(" · {}", fill(say(lang, "tui.files.marks_cut"), &[("shown", &shown), ("n", &n)])));
+    } else {
+        // **A row with no mark says "unchanged" only when the list is whole** (moai-p7nr.c67) — over a cut list or one
+        // that could not be read the title says so: a missing mark there is "not known".
+        match w.listing() {
+            Listing::Read(c) if c.list.truncated => {
+                said.push_str(&format!(" · {}", cut("tui.files.marks_cut", &c.list)));
+            }
+            Listing::Failed(why) => said.push_str(&format!(
+                " · {}",
+                fill(say(lang, "tui.files.marks_failed"), &[("why", &safe_name(&crate::text::one_line(why)))])
+            )),
+            _ => {}
+        }
     }
     said
 }

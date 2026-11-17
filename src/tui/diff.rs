@@ -24,7 +24,8 @@
 //!
 //! **Colour never says it alone.** `+`·`-` and the number columns carry the added and removed colours, the change kind
 //! is a letter (`M`·`A`·`D`·`R`, the file tree's own), and the text keeps its syntax colours; no line background is
-//! painted — in sixteen colours it fights the syntax colours. A file the highlighter does not know takes the added or removed colour whole.
+//! painted — in sixteen colours it fights the syntax colours. A file the highlighter does not know takes the added or
+//! removed colour whole.
 //!
 //! **Foreign text** — paths, hunk sections, lines — goes through [`columns::cut`], which never lets a control character
 //! reach the terminal.

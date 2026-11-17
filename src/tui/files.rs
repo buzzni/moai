@@ -1078,7 +1078,8 @@ pub enum Row {
         /// Its change mark — the file's, or the directory's rolled up (moai-p7nr.c67). Looked up when the rows are
         /// built, never while they are drawn.
         mark: Option<vcs::Mark>,
-        /// A directory's lines added and removed below it — only in the changed-files tree; binary files add none.
+        /// A directory's lines added and removed below it — only in the changed-files tree, and only when some file
+        /// below has its lines counted; binary files add none.
         sum: Option<(usize, usize)>,
     },
     /// The directory `of` is still being read — the last of that directory's rows.
@@ -1743,7 +1744,9 @@ impl Window {
     /// marks rather than wait.
     fn mark_of(&self, path: &str, dir: bool) -> Option<vcs::Mark> {
         let Listing::Read(c) = &self.changed.list else { return None };
-        if dir { c.marks.dirs.get(path) } else { c.marks.files.get(path) }.copied()
+        // A directory git lists as one path — a submodule — has no files below it in the list, so no rolled-up mark:
+        // its own entry is its mark.
+        if dir { c.marks.dirs.get(path).or_else(|| c.marks.files.get(path)) } else { c.marks.files.get(path) }.copied()
     }
 
     /// Put the cursor on a row and bring the tree back to it.
@@ -2028,8 +2031,14 @@ impl Window {
 
     /// `SPC v D` over the window — a hand on the pane, so the changed files only no longer takes it down.
     pub fn toggle_diff(&mut self) {
-        self.changed.raised_diff = false;
+        self.claim_diff();
         self.set_diff(!self.diff_on);
+    }
+
+    /// The pane is the person's from now on — `moai ctl view diff` asking for the state it already has is a hand on it
+    /// too, so the changed files only leaves it as it is when turned off.
+    pub fn claim_diff(&mut self) {
+        self.changed.raised_diff = false;
     }
 
     /// Stand the diff pane up or take it down. Standing, it reads what the cursor is on — unless it has no room
@@ -2118,7 +2127,9 @@ impl Window {
                     for part in c.path.split('/').collect::<Vec<_>>().split_last().map_or(&[][..], |(_, d)| d) {
                         let next = child(&dir, part);
                         tree.entry(dir).or_default().0.insert(next.clone());
-                        if !c.binary {
+                        // Only counted lines add up: a folder of binary files (or of files whose lines were not
+                        // counted) has no sum, never a `+0 −0` that reads as "nothing changed below".
+                        if !c.binary && (c.adds.is_some() || c.dels.is_some()) {
                             let sum = sums.entry(next.clone()).or_default();
                             *sum = (sum.0 + c.adds.unwrap_or(0), sum.1 + c.dels.unwrap_or(0));
                         }
@@ -2149,7 +2160,7 @@ impl Window {
                             link: None,
                             change: None,
                             mark: b.marks.dirs.get(d.as_str()).copied(),
-                            sum: Some(b.sums.get(d.as_str()).copied().unwrap_or_default()),
+                            sum: b.sums.get(d.as_str()).copied(),
                         });
                         let mut below = kin.to_vec();
                         below.push(n + 1 < count);
@@ -2402,6 +2413,10 @@ impl Window {
                         let held = matches!(self.changed.list, Listing::Read(_));
                         let same = match (&got, &self.changed.list) {
                             (Ok(new), Listing::Read(old)) => new == old.as_ref(),
+                            // The same failure again is nothing new — the list is read in the whole tree too
+                            // (moai-p7nr.c67), so a checkout git cannot read would otherwise build and paint the
+                            // tree at every look and keep the pace at its shortest.
+                            (Err(new), Listing::Failed(old)) => new == old,
                             // A refresh that failed keeps the list held; the next look tries again, without a word.
                             (Err(_), _) => refresh && held,
                             _ => false,
@@ -5012,12 +5027,18 @@ mod tests {
         let (s, mut a) = files_app("marks");
         std::fs::create_dir_all(s.path().join("src/new")).unwrap();
         std::fs::write(s.path().join("src/new/x.rs"), "x").unwrap();
+        // A submodule: a directory on the disk that git lists as one path.
+        std::fs::create_dir_all(s.path().join("sub")).unwrap();
+        std::fs::write(s.path().join("sub/inner.rs"), "x").unwrap();
         let list = marked(
             vec![
                 renamed("README.md", "OLD.md"),
                 change("src/main.rs", Status::Modified),
                 change("src/new/x.rs", Status::Untracked),
                 change("src/tui/gone.rs", Status::Deleted),
+                // Listed deleted, yet a file stands there again: the row stands, without a `D`.
+                change("src/tui/files.rs", Status::Deleted),
+                change("sub", Status::Modified),
                 change("target/debug/out", Status::Modified),
             ],
             &[("src/new", Mark::Added)],
@@ -5028,6 +5049,7 @@ mod tests {
         let t = row_texts(&a);
         assert_eq!(t["src"], "M ▸ src/", "a folded directory has no rolled-up mark: {t:?}");
         assert_eq!(t["README.md"], "R README.md", "{t:?}");
+        assert_eq!(t["sub"], "M ▸ sub/", "a directory git lists as one path has no mark: {t:?}");
         assert_eq!(t[".env"], "  .env", "an unchanged row is marked: {t:?}");
         assert!(t["target"].starts_with("  ▸ target/"), "an ignored row is marked: {t:?}");
         on(&mut a, "src");
@@ -5039,7 +5061,7 @@ mod tests {
         let t = row_texts(&a);
         assert_eq!(t["src/new"], "A ├─ ▸ new/", "a new directory is not A: {t:?}");
         assert_eq!(t["src/tui (open)"], "M ├─ ▾ tui/", "a directory that lost a file is not M: {t:?}");
-        assert_eq!(t["src/tui/files.rs"], "  │  └─ files.rs", "{t:?}");
+        assert_eq!(t["src/tui/files.rs"], "  │  └─ files.rs", "a row on the disk is marked deleted: {t:?}");
         assert_eq!(t["src/main.rs"], "M └─ main.rs", "{t:?}");
         assert!(!t.keys().any(|p| p.contains("gone.rs")), "a deleted file stands in the whole tree: {t:?}");
         // The letters' colours are the palette's — the same function the diff heads read.
@@ -5064,8 +5086,9 @@ mod tests {
                 change("src/old/y.rs", Status::Deleted),
                 change("README.md", Status::Conflicted),
                 vcs::Change { binary: true, adds: None, dels: None, ..change("src/pic.png", Status::Copied) },
+                vcs::Change { binary: true, adds: None, dels: None, ..change("img/logo.png", Status::Added) },
             ],
-            &[("src/new", Mark::Added), ("src/old", Mark::Deleted)],
+            &[("src/new", Mark::Added), ("src/old", Mark::Deleted), ("img", Mark::Added)],
         );
         a.files_disk = std::mem::take(&mut a.files_disk).marking(move |_, _| Ok(list.clone()));
         a.hit("SPC g f");
@@ -5076,6 +5099,9 @@ mod tests {
         assert_eq!(
             text,
             [
+                // Binary files alone: no sum, never `+0 −0`.
+                "A ▾ img/",
+                &format!("A └─ logo.png  {}", say(Lang::Ko, "tui.files.binary")),
                 "M ▾ src/ +6 −2",
                 "A ├─ ▾ new/ +3 −1",
                 "A │  └─ x.rs +3 −1",
@@ -5132,6 +5158,13 @@ mod tests {
         settle(&mut a);
         assert_eq!(row_texts(&a)["README.md"], "  README.md", "a failed list marked the tree");
         assert!(names(&a).contains(&"src".to_string()), "a failed list took the tree down: {:?}", names(&a));
+        // A row with no mark is "not known" then, and the title says so; the same failure again builds nothing.
+        let title = screen_title(&draw::tests::render(&mut a, 160, 20));
+        let said = fill(say(Lang::Ko, "tui.files.marks_failed"), &[("why", "git is gone")]);
+        assert!(title.contains(&said), "a failed list goes unsaid: {title}");
+        let before = asked.load(Ordering::SeqCst);
+        assert!(!look(&mut a, &t, Duration::from_secs(11)), "the same failure built the rows again");
+        assert!(asked.load(Ordering::SeqCst) > before, "the refresh stopped reading the list");
         // Cut at the limit: the whole tree's title says the marks stop.
         let files = vec![change("README.md", Status::Modified)];
         let cut = ChangeList {
@@ -5213,6 +5246,14 @@ mod tests {
         assert!(reply.ok, "{reply:?}");
         a.hit("SPC v c Esc");
         assert!(window(&a).diff_on, "ctl's on was taken down");
+        // Asked for the state it already has, the pane is the asker's all the same.
+        a.hit("SPC v D Esc");
+        a.hit("SPC v c Esc");
+        settle(&mut a);
+        let reply = a.ctl(&wire::request(Verb::View { name: "diff".into(), on: true }, Duration::from_secs(5)));
+        assert!(reply.ok, "{reply:?}");
+        a.hit("SPC v c Esc");
+        assert!(window(&a).diff_on, "ctl's on over the pane the mode stood up was taken down");
         // Nothing leaks: the list's panes and the config stand as they were; a new window remembers nothing.
         assert_eq!((a.diff_open, a.detail_open, window(&a).detail_on), (list.0, list.1, false), "a list pane moved");
         assert_eq!(std::fs::read_to_string(&user).unwrap(), "[tui]\nmouse = true\n", "the config was written");

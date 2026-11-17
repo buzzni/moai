@@ -1439,6 +1439,7 @@
   "tui.files.no_match": "맞는 파일 없음",
   "tui.files.changed_only": "바뀐 파일만",
   "tui.files.marks_cut": "바뀐 {n}개 중 {shown}개만 표식",
+  "tui.files.marks_failed": "변경 표식 없음 — {why}",
   "tui.files.no_changes": "(변경 없음)",
   "tui.files.binary": "바이너리",
   "tui.files.no_issue": "이 체크아웃은 이슈에 매이지 않았다.",

@@ -2233,13 +2233,12 @@ impl App {
                         return Ok(());
                     }
                     changed = was != *on;
-                    if changed {
-                        if let (B::Diff, Mode::Files(w)) = (act, &mut self.mode) {
-                            w.toggle_diff();
-                        } else {
-                            let rows = self.rows();
-                            self.run(act, &rows);
-                        }
+                    if let (B::Diff, Mode::Files(w)) = (act, &mut self.mode) {
+                        // Asked for the state it has, the pane is still the asker's (moai-p7nr.sw0).
+                        if changed { w.toggle_diff() } else { w.claim_diff() }
+                    } else if changed {
+                        let rows = self.rows();
+                        self.run(act, &rows);
                     }
                 }
                 Verb::Cell { name, on } => {

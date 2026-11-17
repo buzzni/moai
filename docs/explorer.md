@@ -244,7 +244,8 @@ edits, stages, or commits anything. `Esc` closes it and the list is restored as 
   when collapsed, and displays `A` or `D` only when it is new or removed as a whole. Rows ignored by git and rows
   without changes leave the column blank, and deleted paths are omitted from the full tree. The
   marks update continuously from disk while the window is open; while the list is being read, the column remains
-  blank, and if truncated at the 5,000-change limit, the title reflects it.
+  blank, and if truncated at the 5,000-change limit, the title reflects it. When the list cannot be read at all,
+  the title says there are no marks and why.
 - **The hand is the list's.** `j`/`k` and `gg`/`G` move the cursor; `Ctrl-d`/`Ctrl-u`,
   `Ctrl-f`/`Ctrl-b`, and the mouse wheel scroll the tree without moving the cursor; `l`
   expands a directory by one level, and `h` collapses it or moves to the parent row above. `Enter`
