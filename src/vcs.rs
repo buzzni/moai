@@ -433,7 +433,7 @@ impl Backend {
         path: Option<&str>,
         budget: Option<Duration>,
     ) -> Result<Patch, Error> {
-        self.patch_known(root, scope, path.map(|p| vec![p.to_owned()]), budget, None)
+        self.patch_known(root, scope, path.map(|p| vec![p.to_owned()]), budget, None, true)
     }
     pub fn patch_with_changes(
         self,
@@ -443,12 +443,16 @@ impl Backend {
         budget: Option<Duration>,
         changes: &Changes,
     ) -> Result<Patch, Error> {
-        self.patch_known(root, scope, path.map(|p| vec![p.to_owned()]), budget, Some(untracked_of(changes)))
+        self.patch_known(root, scope, path.map(|p| vec![p.to_owned()]), budget, Some(untracked_of(changes)), true)
     }
     /// The patch of some files and folders only — a folder is named with its trailing `/` and takes every file below
     /// it, untracked ones too. Give a renamed file by both of its names: Git narrows to the pathspec before it looks
     /// for renames, so the new name alone reads as a whole new file. `changes`, when given, names the untracked files
     /// as [`Backend::patch_with_changes`] does. An empty list is refused rather than read as "everything".
+    ///
+    /// A folder narrowed with rows that hold no rename is read without rename detection: past `diff.renameLimit` the
+    /// whole-scope list skips inexact renames, and the narrowed read, with fewer candidates, would pair a deleted and
+    /// an added file the list shows apart — their hunks would no longer match the rows.
     pub fn patch_of(
         self,
         root: &Path,
@@ -460,7 +464,10 @@ impl Backend {
         if paths.is_empty() {
             return Err(Error::InvalidPath);
         }
-        self.patch_known(root, scope, Some(paths.to_vec()), budget, changes.map(untracked_of))
+        let folder = paths.iter().any(|p| p.ends_with('/'));
+        let renames = !folder
+            || changes.is_none_or(|c| c.files.iter().any(|f| matches!(f.status, Status::Renamed | Status::Copied)));
+        self.patch_known(root, scope, Some(paths.to_vec()), budget, changes.map(untracked_of), renames)
     }
     fn patch_known(
         self,
@@ -469,10 +476,11 @@ impl Backend {
         paths: Option<Vec<String>>,
         budget: Option<Duration>,
         known: Option<Vec<String>>,
+        renames: bool,
     ) -> Result<Patch, Error> {
         let root = root.to_path_buf();
         let scope = scope.clone();
-        timed(budget, move || self.patch_inner(&root, &scope, paths.as_deref(), budget, known))
+        timed(budget, move || self.patch_inner(&root, &scope, paths.as_deref(), budget, known, renames))
     }
     fn patch_inner(
         self,
@@ -481,6 +489,7 @@ impl Backend {
         paths: Option<&[String]>,
         budget: Option<Duration>,
         known: Option<Vec<String>>,
+        renames: bool,
     ) -> Result<Patch, Error> {
         let deadline = budget.and_then(|d| std::time::Instant::now().checked_add(d));
         // A folder is checked without its one trailing slash; every name — an old name from the list too — is
@@ -513,7 +522,7 @@ impl Backend {
                 "--src-prefix=a/",
                 "--dst-prefix=b/",
                 "--relative",
-                "-M",
+                if renames || narrow.is_none() { "-M" } else { "--no-renames" },
                 &rev,
             ]);
             if matches!(scope, Scope::Branch) {
@@ -1455,6 +1464,35 @@ mod tests {
         assert!(!fell.text.contains("untracked outside"), "the untracked files still follow the names");
         for c in &rows.files {
             assert_eq!(hunks_of(&fell.text, &c.path), hunks_of(&got.text, &c.path), "{}", c.path);
+        }
+    }
+    #[test]
+    fn a_folder_pairs_no_rename_its_list_did_not() {
+        let dir = crate::scratch::Scratch::new("vcs-folder-rename-limit");
+        let root: &Path = &dir;
+        let git = |args: &[&str]| run_git(root, None, args);
+        git(&["init", "-q"]);
+        fs::create_dir(root.join("src")).unwrap();
+        fs::write(root.join("src/x"), body("x")).unwrap();
+        fs::write(root.join("out"), body("out")).unwrap();
+        git(&["add", "."]);
+        git(&["commit", "-qm", "base"]);
+        // Two inexact pairs are past a limit of one: the whole list skips them. The folder alone has one pair.
+        git(&["config", "diff.renameLimit", "1"]);
+        for (from, to, tag) in [("src/x", "src/y", "x"), ("out", "out2", "out")] {
+            fs::remove_file(root.join(from)).unwrap();
+            fs::write(root.join(to), body(tag).replacen("line 4", "LINE 4", 1)).unwrap();
+        }
+        git(&["add", "-A"]);
+        let list = Backend::Git.changes(root, &Scope::Whole, None).unwrap();
+        let mut rows = list.clone();
+        rows.files.retain(|c| c.path.starts_with("src/"));
+        assert!(rows.files.iter().all(|c| !matches!(c.status, Status::Renamed)), "{rows:?}");
+        let got = Backend::Git.patch_of(root, &Scope::Whole, &["src/".to_owned()], None, Some(&rows)).unwrap();
+        let whole = Backend::Git.patch_with_changes(root, &Scope::Whole, None, None, &list).unwrap();
+        for c in &rows.files {
+            assert_eq!(hunks_of(&got.text, &c.path), hunks_of(&whole.text, &c.path), "{}: {}", c.path, got.text);
+            assert_eq!(counted(&hunks_of(&got.text, &c.path)), (c.adds.unwrap(), c.dels.unwrap()), "{}", c.path);
         }
     }
     #[test]
