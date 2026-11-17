@@ -752,8 +752,7 @@ impl Mark {
             Status::Renamed => Self::Renamed,
         }
     }
-    #[allow(dead_code)] // Only tests print it yet: the TUI's file tree and diff heads take it up in their own epic, and
-    // the web sends the value itself.
+    /// The letter the TUI's file tree and diff heads print (moai-p7nr.c67); the web sends the value itself.
     pub fn letter(self) -> &'static str {
         match self {
             Self::Modified => "M",

@@ -1438,6 +1438,7 @@
   "tui.files.index_stopped": "the search index stopped at {n} entries — what lies past them is not searched",
   "tui.files.no_match": "no file matches",
   "tui.files.changed_only": "changed files only",
+  "tui.files.marks_cut": "marks for {shown} of {n} changes",
   "tui.files.no_changes": "(no changes)",
   "tui.files.binary": "binary",
   "tui.files.no_issue": "This checkout is not tied to an issue.",

@@ -883,8 +883,13 @@ BACKLOG
   folded and ▾ open and ending in /, links show → and where they point (a
   link out of the checkout says so and does not open), and directories git
   ignores say ignored. The levels hang from the list's own tree lines, ├─
-  and └─ under │, here and in the changed files only. The hand is the
-  list's: {key:moves.line_down} and {key:moves.line_up}, {key:moves.top} and {key:moves.bottom} move the
+  and └─ under │, here and in the changed files only. Each row's first
+  column is its change against the checkout's base: M=changed, A=added
+  (untracked too), D=deleted, R=renamed. Directories are M=changed for any
+  change below, A=added or D=deleted only when new or gone as a whole. Deleted
+  paths stand only in the changed files only; while the list is read the
+  column is blank, and a list cut at 5,000 says so in the title. The hand is
+  the list's: {key:moves.line_down} and {key:moves.line_up}, {key:moves.top} and {key:moves.bottom} move the
   cursor; {key:moves.half_down}, {key:moves.half_up}, {key:moves.page_down}, {key:moves.page_up} and the wheel scroll the tree and leave
   the cursor; {key:files.expand} or Right opens a directory one level and {key:files.collapse} or Left folds
   it or goes to the row above it; {key:files.expand_all} opens everything below — not into
@@ -920,8 +925,9 @@ BACKLOG
   to the main one and says so. {key:browse.changed} shows the changed files only — what
   changed on the checkout's branch since it forked, uncommitted and untracked
   files with it (on the main checkout, what is not committed) — as a tree with
-  every folder open, each file headed by the letter moai diff --stat prints for
-  its kind and followed by +added −removed; deleted files stand dimmed.
+  every folder open, each row headed by its mark, a file followed by
+  +added −removed and a folder by the sum below it; deleted files stand
+  dimmed and struck through.
   It stands the diff pane up when the pane is down. Pressed again it gives
   the tree back with the folders and the cursor as they were, and takes down
   the diff pane only if it stood it up and you left the pane alone. The
@@ -947,7 +953,7 @@ BACKLOG
   (diff). {key:browse.focus_next} goes round the panes that stand.
 
   The diff pane shows one scope of changes at a time. Each file starts with a
-  head line — its kind as the letter moai diff --stat prints, its path
+  head line — its kind as the file tree's mark (M/A/D/R), its path
   (old → new for a rename) and +added −removed — then its hunks: @@ and the
   line numbers, and every line with its old and new number and + for added,
   - for removed. The numbers and the mark carry the added and removed colours

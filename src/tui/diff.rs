@@ -23,8 +23,8 @@
 //! line's end.
 //!
 //! **Colour never says it alone.** `+`·`-` and the number columns carry the added and removed colours, the change kind
-//! is a letter (`M`·`A`·`D`·`R`·`?`), and the text keeps its syntax colours; no line background is painted — in sixteen
-//! colours it fights the syntax colours. A file the highlighter does not know takes the added or removed colour whole.
+//! is a letter (`M`·`A`·`D`·`R`, the file tree's own), and the text keeps its syntax colours; no line background is
+//! painted — in sixteen colours it fights the syntax colours. A file the highlighter does not know takes the added or removed colour whole.
 //!
 //! **Foreign text** — paths, hunk sections, lines — goes through [`columns::cut`], which never lets a control character
 //! reach the terminal.
@@ -1281,20 +1281,6 @@ fn mark(kind: LineKind) -> &'static str {
     }
 }
 
-/// The change kind's letter — the CLI's (`moai diff --stat`).
-pub fn letter(status: Status) -> &'static str {
-    match status {
-        Status::Added => "A",
-        Status::Modified => "M",
-        Status::Deleted => "D",
-        Status::Renamed => "R",
-        Status::Copied => "C",
-        Status::TypeChanged => "T",
-        Status::Untracked => "?",
-        Status::Conflicted => "U",
-    }
-}
-
 /// Spans cut to `room` cells, `…` where they stop short — for the heads, which do not scroll sideways.
 fn clipped(spans: Vec<(String, Style)>, room: usize) -> Vec<Span<'static>> {
     let whole: usize = spans.iter().map(|(t, _)| columns::width(t)).sum();
@@ -1399,9 +1385,11 @@ pub fn render(
             Row::File(i) => {
                 let part = &l.parts[i as usize];
                 let c = &part.change;
+                let mark = crate::vcs::Mark::of(c.status);
                 let head = super::draw::from_anstyle(style::HEAD);
                 let mut spans = vec![
-                    (letter(c.status).to_string(), super::draw::from_anstyle(style::diff_status(c.status)).patch(head)),
+                    // The tree's own mark — four letters, one colour per letter (moai-p7nr.c67).
+                    (mark.letter().to_string(), super::draw::from_anstyle(style::change_mark(mark)).patch(head)),
                     (" ".into(), Style::default()),
                 ];
                 match (&c.old_path, c.status) {
@@ -1568,6 +1556,33 @@ mod tests {
         let lines = &l.parts[0].file.hunks[0].lines;
         assert_eq!((lines[1].old_no, lines[1].new_no), (Some(11), None));
         assert_eq!((lines[4].old_no, lines[4].new_no), (None, Some(11)));
+    }
+
+    /// **A file head carries the file tree's mark** (moai-p7nr.c67): git's eight kinds fold into `M`·`A`·`D`·`R` with
+    /// the tree's colours — an untracked or copied file is `A` in green, a type change or a conflict `M` in yellow, a
+    /// rename `R` in cyan, a deletion `D` in red. No `?`, `C`, `T` or `U` stands in the pane.
+    #[test]
+    fn a_file_head_carries_the_trees_mark_and_its_colour() {
+        let patch = "diff --git a/src/a.rs b/src/a.rs\n--- a/src/a.rs\n+++ b/src/a.rs\n@@ -1 +1 @@\n-a\n+b\n";
+        for (status, letter, colour) in [
+            (Status::Untracked, "A", Color::Green),
+            (Status::Copied, "A", Color::Green),
+            (Status::Added, "A", Color::Green),
+            (Status::TypeChanged, "M", Color::Yellow),
+            (Status::Conflicted, "M", Color::Yellow),
+            (Status::Modified, "M", Color::Yellow),
+            (Status::Renamed, "R", Color::Cyan),
+            (Status::Deleted, "D", Color::Red),
+        ] {
+            let mut l = loaded(patch);
+            l.parts[0].change.status = status;
+            let lines = render(&l, Layout::Unified, 60, 0, 1, 0, EN);
+            let head = &texts(&lines)[0];
+            assert!(head.starts_with(&format!("{letter} ")), "{status:?} heads {head:?}");
+            assert_eq!(style_at(&lines[0], 0).fg, Some(colour), "{status:?}'s colour");
+            let tree = super::super::draw::from_anstyle(style::change_mark(vcs::Mark::of(status))).fg;
+            assert_eq!(style_at(&lines[0], 0).fg, tree, "{status:?} parts from the tree's colour");
+        }
     }
 
     /// **A rename stands `old → new`; a binary file has a head and a reason, no lines.**

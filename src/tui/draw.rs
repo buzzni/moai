@@ -2283,49 +2283,50 @@ fn files_tree(f: &mut Frame, w: &mut super::files::Window, at: Rect, lang: Lang)
 }
 
 /// The checkout in the tree's title (moai-ffk9.211): ` · ⎇ branch`, and with the changed files only
-/// ` · changed files only 14` — `14 of 6000` when the list stopped at the read layer's 5,000.
+/// ` · changed files only 14` — `14 of 6000` when the list stopped at the read layer's 5,000; over the whole tree a cut
+/// list says its marks stop there.
 fn files_checkout_said(w: &super::files::Window, lang: Lang) -> String {
     use super::files::Listing;
     let mut said = String::new();
     if !w.checkout.branch.is_empty() {
         said.push_str(&format!(" · {} {}", style::BRANCH_GLYPH, safe_name(&crate::text::one_line(&w.checkout.branch))));
     }
+    let cut = |c: &crate::vcs::Changes| {
+        fill(say(lang, "tui.files.found_more"), &[("shown", &c.files.len().to_string()), ("n", &c.total.to_string())])
+    };
     if w.changed_only() {
         let count = match w.listing() {
-            Listing::Read(c) if c.truncated => format!(
-                " {}",
-                fill(
-                    say(lang, "tui.files.found_more"),
-                    &[("shown", &c.files.len().to_string()), ("n", &c.total.to_string())]
-                )
-            ),
-            Listing::Read(c) => format!(" {}", c.files.len()),
+            Listing::Read(c) if c.list.truncated => format!(" {}", cut(&c.list)),
+            Listing::Read(c) => format!(" {}", c.list.files.len()),
             _ => String::new(),
         };
         said.push_str(&format!(" · {}{count}", say(lang, "tui.files.changed_only")));
+    } else if let Listing::Read(c) = w.listing()
+        && c.list.truncated
+    {
+        // **A cut list says so over the whole tree too** (moai-p7nr.c67): a row past the cut has no mark, and that is
+        // "not known", not "unchanged".
+        let (shown, n) = (c.list.files.len().to_string(), c.list.total.to_string());
+        said.push_str(&format!(" · {}", fill(say(lang, "tui.files.marks_cut"), &[("shown", &shown), ("n", &n)])));
     }
     said
 }
 
-/// A row of the changed-files tree (moai-ffk9.211): the change's letter in the head's first column (`M`·`A`·`D`·`R`·`?`,
-/// as `moai diff --stat` prints it) and `+N −M` after the name — **the letter says the kind without the colour**. A
-/// deleted file stands dimmed; folders have a blank head and stand open. The twig is the full tree's
-/// ([`files_head`]).
+/// A row of the changed-files tree (moai-ffk9.211): the change mark in the head's first column (`M`·`A`·`D`·`R`, the
+/// whole tree's and the diff heads', moai-p7nr.c67) and `+N −M` after the name — **the letter says the kind without
+/// the colour**. A deleted file stands dimmed and struck through; folders carry their rolled-up mark and the sum
+/// below them, and stand open. The twig is the full tree's ([`files_head`]).
 fn files_changed_row(r: &super::files::Row, lang: Lang) -> Line<'static> {
     use super::files::Row;
-    let Row::Entry { change: Some(c), twig, entry, .. } = r else {
+    let Row::Entry { change: Some(c), twig, entry, mark, .. } = r else {
         return files_row(r, lang);
-    };
-    let look = match c.status {
-        crate::vcs::Status::Added | crate::vcs::Status::Untracked => from_anstyle(style::DIFF_ADD),
-        crate::vcs::Status::Deleted => from_anstyle(style::DIFF_DEL),
-        _ => from_anstyle(style::WARN),
     };
     let gone = c.status == crate::vcs::Status::Deleted;
     let name = safe_name(&entry.name);
-    let name_look = if gone { dim() } else { from_anstyle(style::file_style(&entry.name)) };
-    let (mut spans, _) =
-        files_head(Span::styled(format!("{} ", super::diff::letter(c.status)), look), None, twig, None);
+    // A terminal that cannot strike through keeps the dimming and the `D`.
+    let name_look =
+        if gone { dim().add_modifier(Modifier::CROSSED_OUT) } else { from_anstyle(style::file_style(&entry.name)) };
+    let (mut spans, _) = files_head(files_mark(*mark), None, twig, None);
     spans.push(Span::styled(name, name_look));
     if let Some(old) = &c.old_path {
         spans.push(Span::styled(format!(" ← {}", safe_name(old)), dim()));
@@ -2421,9 +2422,14 @@ fn files_head(
     (spans, width)
 }
 
-/// The full tree's change mark — two blank columns, the place the change letters stand in.
-fn files_no_mark() -> Span<'static> {
-    Span::raw("  ")
+/// A row's change mark (moai-p7nr.c67) — its letter and a blank, or two blanks without one: **always two columns**, so
+/// a name never moves when the list comes and the search's reversed letters stay on it. The letter says the kind
+/// without the colour; the colour is [`style::change_mark`]'s, the diff pane's file heads' too.
+fn files_mark(mark: Option<crate::vcs::Mark>) -> Span<'static> {
+    match mark {
+        Some(m) => Span::styled(format!("{} ", m.letter()), from_anstyle(style::change_mark(m))),
+        None => Span::raw("  "),
+    }
 }
 
 /// One tree row. **Without colour the kinds still part**: a directory has its fold mark and a trailing `/`, a link its
@@ -2436,7 +2442,7 @@ fn files_row(r: &super::files::Row, lang: Lang) -> Line<'static> {
 fn files_row_at(r: &super::files::Row, found: Option<Span<'static>>, lang: Lang) -> (Line<'static>, usize) {
     use super::files::Row;
     use crate::files::Kind;
-    let head = |twig: &Twig, fold| files_head(files_no_mark(), found.clone(), twig, fold);
+    let head = |twig: &Twig, fold| files_head(files_mark(None), found.clone(), twig, fold);
     match r {
         Row::Up => {
             let (mut spans, lead) = head(&Twig::default(), None);
@@ -2454,7 +2460,7 @@ fn files_row_at(r: &super::files::Row, found: Option<Span<'static>>, lang: Lang)
             spans.push(Span::styled(format!("! {}", safe_name(&why.said(lang))), from_anstyle(style::WARN)));
             (Line::from(spans), lead)
         }
-        Row::Entry { twig, entry, open, ignored, link, .. } => {
+        Row::Entry { twig, entry, open, ignored, link, mark, sum, .. } => {
             let fold = super::files::opens(entry).then_some(if *open { "▾ " } else { "▸ " });
             let name = safe_name(&entry.name);
             let mut tail = Vec::new();
@@ -2485,12 +2491,16 @@ fn files_row_at(r: &super::files::Row, found: Option<Span<'static>>, lang: Lang)
             if *ignored {
                 tail.push(Span::styled(format!("  {}", say(lang, "tui.files.ignored")), dim()));
             }
+            // A folder of the changed tree sums the files below it, dimmed — the mockup's (moai-p7nr.c67).
+            if let Some((adds, dels)) = sum {
+                tail.push(Span::styled(format!(" +{adds} −{dels}"), dim()));
+            }
             let look = if *ignored || !entry.openable {
                 from_anstyle(look).add_modifier(Modifier::DIM)
             } else {
                 from_anstyle(look)
             };
-            let (mut spans, lead) = head(twig, fold);
+            let (mut spans, lead) = files_head(files_mark(*mark), found.clone(), twig, fold);
             spans.push(Span::styled(text, look));
             spans.extend(tail);
             (Line::from(spans), lead)
@@ -7771,6 +7781,10 @@ pub(super) mod tests {
     /// One file-window row as drawn, with its styles (moai-p7nr.xj3).
     pub(in crate::tui) fn files_row_line(r: &super::super::files::Row) -> Line<'static> {
         super::files_row(r, Lang::Ko)
+    }
+
+    pub(in crate::tui) fn files_changed_row_line(r: &super::super::files::Row) -> Line<'static> {
+        super::files_changed_row(r, Lang::Ko)
     }
 
     pub(in crate::tui) fn files_changed_row_text(r: &super::super::files::Row) -> String {
