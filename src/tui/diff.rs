@@ -120,7 +120,6 @@ pub enum Source {
     Checkout { checkout: Checkout, path: Option<String> },
     /// An issue's scopes as `moai diff <id>` reads them (the list). `repo` names the project — on the one list each
     /// project is its own repository. The issues are the explorer's, handed over as they are.
-    #[allow(dead_code)] // The list's diff pane (moai-ffk9.cij) stands it up; the file window reads checkouts only.
     Issue { repo: Repo, issues: Arc<Vec<Issue>>, id: String },
 }
 
@@ -507,6 +506,24 @@ fn whole(checkout: &Checkout, path: Option<&str>, budget: Option<Duration>, lang
     }
 }
 
+/// A measured answer from a patch text, every file modified, with these scopes — for the owners' tests (the list's
+/// pane, moai-ffk9.cij), which stand in their own reader.
+#[cfg(test)]
+pub(super) fn sample(patch: &str, scope: Option<Scope>, offers: Vec<Offer>, lang: Lang) -> Loaded {
+    let parts: Vec<Part> = patch::parse(patch)
+        .into_iter()
+        .map(|f| {
+            let path = f.new_path.clone().or_else(|| f.old_path.clone()).unwrap_or_default();
+            let change =
+                Change { path, old_path: None, status: Status::Modified, adds: None, dels: None, binary: false };
+            Part::new(change, f)
+        })
+        .collect();
+    let mut l = Loaded { total: parts.len(), parts, scope, offers, ..Loaded::default() };
+    l.measure(lang);
+    l
+}
+
 /// What the job threads say.
 enum Reply {
     Loaded {
@@ -726,7 +743,6 @@ impl std::fmt::Debug for View {
 
 impl View {
     /// A pane reading with git.
-    #[allow(dead_code)] // The list's diff pane (moai-ffk9.cij); the file window reads through its `files::Disk`.
     pub fn new(lang: Lang) -> View {
         View::with(Arc::new(read), Arc::new(highlight::diff), lang)
     }
@@ -746,6 +762,12 @@ impl View {
             kept: VecDeque::new(),
             work: Shared(Arc::new(Mutex::new(Work::new(read, paint, lang)))),
         }
+    }
+
+    /// The words the reads after this one say their notes and failures in — the list's pane is built before the
+    /// session's language is known (`cmd::tui` sets it after the `App`).
+    pub fn set_lang(&mut self, lang: Lang) {
+        self.work.with(|w| w.lang = lang);
     }
 
     /// The subject now shown.
@@ -780,7 +802,7 @@ impl View {
     }
 
     /// Read the shown subject again — the pane coming back on. The scroll stays.
-    #[allow(dead_code)] // The refresh (moai-ffk9.15v) and the list's pane (moai-ffk9.cij) call it.
+    #[allow(dead_code)] // The refresh (moai-ffk9.15v) calls it.
     pub fn reread(&mut self) {
         self.ask();
     }

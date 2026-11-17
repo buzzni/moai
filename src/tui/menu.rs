@@ -487,7 +487,8 @@ mod tests {
         // **`d` 는 done 이 아니다**(moai-h6z3·moai-mxvn) — done 은 제 글자를 안 갖고 번호가 세고,
         // 비운 그 글자는 상세 칸이 받았다. 한때 `d` 와 `3` 이 같은 설정을 켜고 꺼 이 목록에
         // `done [숨김]` 이 두 줄 섰다.
-        assert_eq!(keys_of(&items), ["l", "b", "o", "a", "1", "2", "3", "d", "w", "r"]);
+        // `D` is the list's diff pane (moai-ffk9.cij), the detail's twin — the epic's addition to this menu.
+        assert_eq!(keys_of(&items), ["l", "b", "o", "a", "1", "2", "3", "d", "D", "w", "r"]);
         let text: Vec<String> = items.iter().map(Entry::text).collect();
         assert_eq!(
             text[..7],
@@ -700,7 +701,7 @@ mod tests {
         feed(&mut ch, &c, k('v'));
         assert_eq!(title(ch.held()), "SPC v");
         // 어느 줄을 보나가 먼저, 화면의 꼴이 뒤다. 번호 칸은 설정의 칸 수만큼 선다 — 여기는 0.
-        assert_eq!(keys_of(&entries(ch.held(), &c, &[])), ["l", "b", "o", "a", "d", "w", "r"]);
+        assert_eq!(keys_of(&entries(ch.held(), &c, &[])), ["l", "b", "o", "a", "d", "D", "w", "r"]);
         feed(&mut ch, &c, k('x'));
         assert_eq!(title(ch.held()), "SPC v", "하위 층의 모르는 키가 메뉴를 옮겼다");
         feed(&mut ch, &c, KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE));
@@ -867,7 +868,12 @@ mod tests {
         assert_eq!(keys_of(&entries(&[k(' '), k('p')], &detail, &[])), ["a"], "상세 포커스에서 해제가 섰다");
         // 층에서도 상세 칸은 있다 — 숨기기(`d`)와 원문(`r`)은 서고, 줄을 가리는 것과 워크트리 겹쳐
         // 보기(`w`)는 빠진다. 보드는 화면 고르기로 옮겼다(`SPC g b`, moai-z46r).
-        assert_eq!(keys_of(&entries(&[k(' '), k('v')], &layer(), &[])), ["d", "r"], "층에서 워크트리나 줄 보기가 섰다");
+        // The diff pane (`D`, moai-ffk9.cij) stands there too — it reads the cursor row's project.
+        assert_eq!(
+            keys_of(&entries(&[k(' '), k('v')], &layer(), &[])),
+            ["d", "D", "r"],
+            "층에서 워크트리나 줄 보기가 섰다"
+        );
 
         let mut ch = Chord::default();
         for x in [' ', 'v', 'w'] {
@@ -899,7 +905,7 @@ mod tests {
         assert_eq!(states(Ctx { detail: false, ..inside() }), ["[숨김]", "[꺼짐]"]);
         assert_eq!(
             keys_of(&entries(&[k(' '), k('v')], &Ctx { detail: false, ..inside() }, &[])),
-            ["l", "b", "o", "a", "d", "w"]
+            ["l", "b", "o", "a", "d", "D", "w"]
         );
     }
 

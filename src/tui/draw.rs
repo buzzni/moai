@@ -201,13 +201,27 @@ pub fn screen(f: &mut Frame, app: &mut App) {
     ])
     .areas(area);
     let (left, right) = split_body(body, app);
+    // **The side pane parts between the detail and the list's diff pane** (moai-ffk9.cij) — by the one rule the file
+    // window's right pane uses ([`side_split`]): the detail first, the axis its place's, the diff folding when the two
+    // do not fit. With the diff off the detail takes the side pane whole: the frame before that epic.
+    let sides = right.map_or_else(Sides::default, |r| {
+        side_split(r, app.detail_side(), app.detail_open, app.diff_open, app.diff_share().map(|d| 100 - d))
+    });
+    app.diff_folded = app.diff_open && sides.diff.is_none();
     // **안 선 칸에는 포커스가 못 선다**(리뷰, moai-l7e2). 세로로 접힌 상세는 `detail_open` 이 켜진
     // 채로 자리가 없다 — 그대로 두면 `Ctrl-w w` 가 안 그려진 칸으로 가고, 거기서 ↑↓ 는 보이지 않는
     // 글을 굴려 목록이 멈춘 것처럼 보인다. 숨긴 상세가 포커스를 안 받는 것(`App::apply_look`)과 같은
-    // 자고, 접는 판단은 자리를 아는 쪽(여기)만 할 수 있어 그린 뒤에 되돌린다.
-    if right.is_none() {
+    // 자고, 접는 판단은 자리를 아는 쪽(여기)만 할 수 있어 그린 뒤에 되돌린다. A folded diff gives it back the same
+    // way (moai-ffk9.cij).
+    if right.is_none()
+        || (app.focus == Pane::Detail && sides.detail.is_none())
+        || (app.focus == Pane::Diff && sides.diff.is_none())
+    {
         app.focus = Pane::Explorer;
     }
+    // The pane reads what the cursor stands on — only while it stands; under a covering window it lets go.
+    let covered = matches!(app.mode, Mode::Stats(_) | Mode::Wiki(_) | Mode::Files(_));
+    app.aim_diff(&rows, sides.diff.is_some() && !covered);
 
     // 헤더의 빛(`with_projects`)은 버퍼로 못 읽는다 — 빛줄기는 제 글자를 안 남긴다.
     // 들고 있다가 아래에서 스피너와 함께 센다.
@@ -250,7 +264,9 @@ pub fn screen(f: &mut Frame, app: &mut App) {
         rows: rows_at,
         // 위에서 목록이 그린 그대로의 자리다 — 다음 휠이 `App::list` 를 옮겨도 누르기는 이 화면으로 맞힌다.
         top: app.list.offset(),
-        detail: right,
+        detail: sides.detail,
+        side: right,
+        diff: sides.diff,
         cards,
         columns,
         menu,
@@ -262,8 +278,14 @@ pub fn screen(f: &mut Frame, app: &mut App) {
     // The detail names the checkout whose journals the follow step watches ([`HistoryCache::moved`]) — none unless it
     // draws a row's history in this frame, so a hidden detail leaves nothing to stat.
     app.history.watched = None;
-    if let Some(right) = right {
-        detail(f, app, right, &rows);
+    if let Some(at) = sides.detail {
+        detail(f, app, at, &rows);
+    }
+    if let Some(at) = sides.diff {
+        // The key that brings the focus there, beside the scroll mark — the detail's hint.
+        let hint = format!(" ({})", said(app.keys.browse, Browse::FocusNext));
+        let (focused, layout, lang) = (app.focus == Pane::Diff, app.diff_layout, app.site.lang);
+        diff_pane(f, &mut app.diff, at, focused, layout, &hint, lang);
     }
     // 폼은 목록과 상세 자리를 **통째로** 덮는다. 가장자리를 비워 뒤를 비치게 해 봤더니
     // 뒤 칸의 테두리와 커서(`>`)가 폼의 테두리에 겹쳐 어느 선이 어느 칸인지 안 읽혔다.
@@ -2026,6 +2048,18 @@ pub(super) fn side_split(
     }
 }
 
+/// The diff's share (%) of the side pane `side` when it takes `diff` cells of it on that axis — [`side_split`] solved
+/// back, for the line between the detail and the diff the mouse drags (moai-ffk9.cij). The floors are pulled in
+/// first, as [`share_for`] does: a share no frame draws must not reach the config.
+pub(super) fn diff_share_for(side: Rect, vertical: bool, diff: u16) -> u16 {
+    let (len, least) = if vertical { (side.height, DETAIL_MIN_V) } else { (side.width, DETAIL_MIN_H) };
+    let len32 = u32::from(len.max(1));
+    let detail = u32::from(len.saturating_sub(diff))
+        .clamp(u32::from(least), len32.saturating_sub(u32::from(least)).max(u32::from(least)));
+    let detail_share = (detail * 200 + len32) / (2 * len32);
+    share(100 - i64::from(detail_share.min(100)))
+}
+
 /// [`side_split`]'s answer.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(super) struct Sides {
@@ -3472,8 +3506,12 @@ fn unchecked_said(lang: Lang, kind: crate::latest::Trouble) -> &'static str {
 /// 그때는 상세가 더 클 수도 있다. 어느 몫이든 목록의 바닥([`LIST_MIN_H`]·[`LIST_MIN_V`])은 지킨다: 몫을 그만큼
 /// 올려 그린다. 상세의 바닥은 `Constraint::Min` 이 지키고, 둘이 다 안 들어가는 좁은 몸통에서는 상세의 바닥이 먼저다.
 /// 끈 선이 이 가르기를 거꾸로 푸는 자리는 [`share_for`] 다 — 두 바닥을 거기서도 같이 본다.
+///
+/// **The side pane is the detail's and the list's diff pane's** (moai-ffk9.cij) — it stands when either is on, at the
+/// detail's place and share, and [`side_split`] parts it between the two. With the diff off the answer is the one
+/// before that epic, letter for letter.
 fn split_body(body: Rect, app: &App) -> (Rect, Option<Rect>) {
-    if !app.detail_open {
+    if !app.detail_open && !app.diff_open {
         return (body, None);
     }
     let at = app.detail_side();

@@ -591,7 +591,8 @@ BACKLOG
     SPC v 1  first column of the config [shown/hidden] — the next ones count up
              done has no letter of its own: the column that holds it does
     {key:browse.detail}  detail pane [shown/hidden]
-    {key:browse.diff}  diff pane [shown/hidden] — over the file window, its right pane
+    {key:browse.diff}  diff pane [shown/hidden] — beside the detail (see below), and over
+             the file window its right pane
     {key:browse.worktree}  overlay worktrees [on/off]
     {key:browse.changed}  changed files only [on/off] — the file window's (see below)
     {key:browse.raw}  raw or rendered
@@ -930,6 +931,16 @@ BACKLOG
   {key:files.close} closes the window, with the cursor, the filter and the detail as
   they were. SPC opens the menu over it with the screens and those keys. The
   window is read fresh every time.
+
+  On the list, the board and the gantt {key:browse.diff} stands a diff pane beside the
+  detail: what the cursor's issue, epic or milestone changes, the scopes moai
+  diff <id> reads, in its order. It takes the detail's place: with the detail
+  shown the detail stands first, above it or left of it as {key:browse.detail_at} places
+  the detail, and with the detail hidden the diff takes that place whole.
+  Where the two do not fit the diff folds and the detail stays. Drag the
+  line between them to share the place; the share is kept in the config
+  (diff_width side by side, diff_height stacked), as is the pane itself
+  (diff). {key:browse.focus_next} goes round the panes that stand.
 
   The diff pane shows one scope of changes at a time. Each file starts with a
   head line — its kind as the letter moai diff --stat prints, its path

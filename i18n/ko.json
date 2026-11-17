@@ -450,6 +450,7 @@
   "tui.jot.newline": "줄 나누기",
   "tui.pane.list": "목록",
   "tui.pane.detail": "상세",
+  "tui.pane.diff": "diff",
   "tui.pane.board": "보드",
   "tui.pane.gantt": "간트",
   "tui.board.backlog": "백로그",

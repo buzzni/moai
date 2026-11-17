@@ -1104,6 +1104,10 @@ pub struct Ctx {
     /// A diff pane stands on screen (moai-ffk9.41b) — `SPC o s` stands only then. The file window's right pane and the
     /// list's diff pane set it (members .211 and .cij).
     pub diff: bool,
+    /// The list's diff pane is on (moai-ffk9.cij) — `SPC v D`'s menu word, folded or not.
+    pub diff_open: bool,
+    /// The list's diff pane stands — on and not folded. The panes' moves stand with it, also with the detail hidden.
+    pub list_diff: bool,
     /// The person's diff layout is side by side — the menu line's word.
     pub diff_split: bool,
     /// The file window's own toggles (moai-ffk9.211) — its menu lines' states: the detail, the diff, the changed
@@ -1238,8 +1242,9 @@ impl Browse {
             // **Over the file window its own toggles stand** (moai-ffk9.211): the checkout (`SPC v w`), the changed files
             // only, the right pane's detail and diff, and the detail's place — which splits the two.
             Worktree | Changed | Detail | Diff | DetailAt if c.files => Ok(()),
-            // Changed files only is the file window's alone. The diff pane over the list is moai-ffk9.cij's.
-            Changed | Diff => Err(Off::Quiet),
+            // Changed files only is the file window's alone. The diff pane stands on the list, the board and the gantt
+            // (moai-ffk9.cij) — below, where the covering windows have not taken it.
+            Changed => Err(Off::Quiet),
             Go(_) | Step(_) | Help if c.stats || c.wiki || c.files => Ok(()),
             Raw if c.wiki => Ok(()),
             _ if c.stats || c.wiki || c.files => Err(Off::Quiet),
@@ -1316,7 +1321,11 @@ impl Browse {
             // 믿는다. `raw` 는 설정에 안 남으니 미리 켜 둘 값어치도 없다.
             // **자리 고르기도 상세가 서 있을 때만이다**(moai-e7r3) — 숨긴 칸의 자리를 돌리면 아무
             // 일도 안 일어난 채 메뉴 줄의 낱말만 바뀐다. 켜는 것은 `SPC v d` 고, 그 줄은 여기 없다.
-            FocusNext | FocusPrev | Focus(_) | Raw | DetailAt if !c.detail => Err(Off::Quiet),
+            //
+            // **The list's diff pane is a pane too** (moai-ffk9.cij): with the detail hidden and the diff on, the focus
+            // still has two panes to go between, and the detail's place still places the diff (`draw::side_split`).
+            Raw if !c.detail => Err(Off::Quiet),
+            FocusNext | FocusPrev | Focus(_) | DetailAt if !c.detail && !c.list_diff => Err(Off::Quiet),
             // **이웃은 가른 축에만 있다**(리뷰, moai-x7pa) — 상세가 위나 아래에 서면 `Ctrl-w h`·`l`
             // 이, 왼쪽이나 오른쪽에 서면 `Ctrl-w j`·`k` 가 제자리다(`Pane::step`, vim 그대로).
             // 어느 자리에서든 칸을 도는 것은 `Ctrl-w w`(`FocusNext`)고 그 줄은 그대로 선다.
@@ -1386,7 +1395,8 @@ impl Browse {
             // The checkout pick opens a window — it has no state.
             Browse::Worktree if c.files => None,
             Browse::Detail if c.files => Some(shown(!c.files_detail, c.lang).into()),
-            Browse::Diff => Some(shown(!c.files_diff, c.lang).into()),
+            Browse::Diff if c.files => Some(shown(!c.files_diff, c.lang).into()),
+            Browse::Diff => Some(shown(!c.diff_open, c.lang).into()),
             Browse::Changed if c.files_changed => Some(say(c.lang, "tui.state.on").into()),
             Browse::Changed => Some(say(c.lang, "tui.state.off").into()),
             Browse::Worktree if c.worktree => Some(say(c.lang, "tui.state.on").into()),

@@ -450,6 +450,7 @@
   "tui.jot.newline": "new line",
   "tui.pane.list": "list",
   "tui.pane.detail": "detail",
+  "tui.pane.diff": "diff",
   "tui.pane.board": "board",
   "tui.pane.gantt": "gantt",
   "tui.board.backlog": "backlog",

@@ -46,6 +46,11 @@ pub struct Drawn {
     pub top: usize,
     /// 상세 칸 — 테두리까지. 숨겼거나 접혀 안 섰으면 없다(`draw::split_body`).
     pub detail: Option<Rect>,
+    /// The side pane — the detail's and the list's diff pane's together (moai-ffk9.cij). The line between it and
+    /// the list moves the list's share; with the diff off it is [`Drawn::detail`].
+    pub side: Option<Rect>,
+    /// The list's diff pane — with its border. Off or folded, none.
+    pub diff: Option<Rect>,
     /// 보드의 카드가 보이는 자리와 그 줄(`App::rows` 의 첨자)(moai-9nfw). 목록으로 세웠으면 비었다 — 그때는
     /// [`Drawn::rows`] 가 줄 자리다.
     pub cards: Vec<(Rect, usize)>,
@@ -109,6 +114,9 @@ enum Divider {
     Wiki,
     /// The file window's (`App::files_width`, moai-ffk9.rpf).
     Files,
+    /// Between the detail and the list's diff pane (`App::diff_width`·`App::diff_height`, moai-ffk9.cij) — the
+    /// list's share does not move.
+    Side,
 }
 
 /// 잡은 선(moai-irrj.mhr) — 끄는 동안 `App::dragging` 이 든다.
@@ -264,6 +272,15 @@ impl App {
             return self.files_pointer(kind, wheel, sideways, at);
         }
         if self.mode != Mode::Browse {
+            return;
+        }
+        // **The sideways wheel over the list's diff pane scrolls its text sideways** (moai-ffk9.cij) — the file pane's
+        // rule; the pane stands outside the chart.
+        if let Some(by) = sideways
+            && self.drawn.diff.is_some_and(|r| r.contains(at))
+        {
+            self.acted();
+            self.diff.pan_by(by * super::diff::PAN_WHEEL as isize);
             return;
         }
         // **간트가 먼저 받는다**(moai-i4hf.exq) — 막대·날짜 머리·나눔 선은 목록의 줄 자리 위에 선다. 목록·상세 사이 선은
@@ -451,7 +468,9 @@ impl App {
     /// 그 자리에 선 칸. 누르기와 휠이 같은 자로 가른다 — 두 칸은 겹치지 않는다(`draw::split_body`).
     fn pane_at(&self, at: Position) -> Option<Pane> {
         let d = &self.drawn;
-        if d.detail.is_some_and(|r| r.contains(at)) {
+        if d.diff.is_some_and(|r| r.contains(at)) {
+            Some(Pane::Diff)
+        } else if d.detail.is_some_and(|r| r.contains(at)) {
             Some(Pane::Detail)
         } else if d.list.contains(at) {
             Some(Pane::Explorer)
@@ -495,9 +514,28 @@ impl App {
     /// 앞에 선 칸(왼쪽·위)의 끝 테두리와 뒤에 선 칸의 첫 테두리, 둘 다 잡힌다 — 한 칸짜리 줄만 받으면 손이
     /// 한 칸 어긋날 때마다 그 칸을 누른 것이 된다. 상세가 위아래에 서면 그 줄은 칸의 제목 줄이기도 하다.
     /// 두 칸은 사이 없이 맞닿으므로(`draw::split_body`) 뒤 칸의 첫 테두리는 앞 칸이 끝난 바로 다음 칸이다.
+    ///
+    /// **Two lines can stand side by side** (moai-ffk9.cij): the list's and, inside the side pane, the one between the
+    /// detail and the diff. Each takes its own two border cells — the detail is at least [`super::draw`]'s floor wide,
+    /// so the four never overlap — and the grab holds which one it took to the end, so the side line never moves the
+    /// list's share.
     fn grab_at(&self, at: Position) -> Option<Grab> {
         let d = &self.drawn;
-        let detail = d.detail?;
+        let vertical = self.detail_side().vertical();
+        if let (Some(detail), Some(_), Some(side)) = (d.detail, d.diff, d.side) {
+            let (p, end, was) = if vertical {
+                (at.y, detail.bottom(), self.diff_height)
+            } else {
+                (at.x, detail.right(), self.diff_width)
+            };
+            if let Some(line) = end.checked_sub(1)
+                && side.contains(at)
+                && (p == line || p == end)
+            {
+                return Some(Grab { from: p, line, was, on: Divider::Side });
+            }
+        }
+        let detail = d.side.or(d.detail)?;
         let front = if self.detail_side().first() { detail } else { d.list };
         let (p, end, was) = if self.detail_side().vertical() {
             (at.y, front.bottom(), self.list_height)
@@ -547,6 +585,25 @@ impl App {
                 (body, super::view::DetailAt::Right)
             }
             Divider::Explorer => (self.drawn.body, self.detail_side()),
+            Divider::Side => {
+                let Some(side) = self.drawn.side else { return };
+                let vertical = self.detail_side().vertical();
+                let (start, len, p) = if vertical { (side.y, side.height, at.y) } else { (side.x, side.width, at.x) };
+                if len == 0 {
+                    return;
+                }
+                let share = if p == grab.from {
+                    grab.was
+                } else {
+                    let line = (i32::from(grab.line) + i32::from(p) - i32::from(grab.from))
+                        .clamp(i32::from(start), i32::from(start) + i32::from(len) - 1);
+                    // The detail stands first — the line is its last border cell; the diff takes the rest.
+                    let detail = (line - i32::from(start) + 1) as u16;
+                    Some(super::draw::diff_share_for(side, vertical, len - detail))
+                };
+                let which = if vertical { "diff_height" } else { "diff_width" };
+                return self.set_share(which, share.map(i64::from));
+            }
         };
         let vertical = side.vertical();
         let (start, len, p) = if vertical { (body.y, body.height, at.y) } else { (body.x, body.width, at.x) };
@@ -564,6 +621,7 @@ impl App {
             Some(super::draw::share_for(body, side, list))
         };
         let which = match (grab.on, vertical) {
+            (Divider::Side, _) => unreachable!("the side line returned above"),
             (Divider::Wiki, _) => "wiki_width",
             (Divider::Files, _) => "files_width",
             (Divider::Explorer, true) => "list_height",
@@ -580,6 +638,8 @@ impl App {
             "list_height" => self.list_height = share,
             "wiki_width" => self.wiki_width = share,
             "files_width" => self.files_width = share,
+            "diff_width" => self.diff_width = share,
+            "diff_height" => self.diff_height = share,
             _ => {}
         }
     }
@@ -609,6 +669,7 @@ impl App {
     fn wheel(&mut self, at: Position, by: isize) {
         match self.pane_at(at) {
             Some(Pane::Detail) => self.detail.by(by),
+            Some(Pane::Diff) => self.diff.roll(by),
             Some(Pane::Explorer) => self.roll(|s| s.by(by)),
             None => {}
         }
