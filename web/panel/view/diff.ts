@@ -117,7 +117,7 @@ export function createDiff(doc: Document, words: DiffWords, onLayout?: (layout: 
     command(action: string): boolean {
       if (action === 'toggle') { toggle.click(); return true }
       if (action === 'left' || action === 'right') { body.scrollLeft += action === 'left' ? -80 : 80; return true }
-      if (action === 'next' || action === 'prev') { const files = [...body.querySelectorAll<HTMLElement>('summary')]; const at = files.indexOf(doc.activeElement as HTMLElement); files[(at + (action === 'next' ? 1 : files.length - 1)) % files.length]?.focus(); return files.length > 0 }
+      if (action === 'next' || action === 'prev') { const files = [...body.querySelectorAll<HTMLElement>('summary')]; const at = files.indexOf(doc.activeElement as HTMLElement); files[at < 0 ? (action === 'next' ? 0 : files.length - 1) : (at + (action === 'next' ? 1 : files.length - 1)) % files.length]?.focus(); return files.length > 0 }
       return false
     },
   }

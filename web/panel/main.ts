@@ -693,7 +693,7 @@ async function start(): Promise<void> {
   // `resumable`), so neither is lost to the gap before the resumed stream's hello.
   void (async () => {
     browserId = await loadBrowserId()
-    events = openEvents({ url: eventUrl, onStamp: (at) => { observeTracker(at); void refresher.saw(at) }, onUp: () => refresher.pause(),
+    events = openEvents({ url: eventUrl, onStamp: (at) => { observeTracker(at); return refresher.saw(at) }, onUp: () => refresher.pause(),
       onDown: () => { refresher.resume() }, onVisible: () => { void refresher.check(); seen() },
       onHello: (hello) => { proposals.clear(); tab = { id: hello.tab, token: hello.token }; seen(false) },
       onCtl: ({ seq, request }) => {

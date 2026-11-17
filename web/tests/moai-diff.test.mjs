@@ -41,3 +41,13 @@ test('refresh preserves folded files and scroll positions', () => {
   assert.equal(doc.querySelector('details').open, false); assert.equal(body.scrollTop, 55); assert.equal(body.scrollLeft, 80)
   dom.window.close()
 })
+
+test('previous from outside file summaries focuses the last file', () => {
+  const dom = new JSDOM('<body></body>'); const doc = dom.window.document
+  const view = createDiff(doc, words); doc.body.append(view.el)
+  const file = path => ({ path, old_path: null, status: 'modified', adds: 0, dels: 0, binary: false, hunks: [] })
+  view.show({ files: [file('a'), file('b'), file('c')], truncated: false })
+  view.focus(); assert.equal(view.command('prev'), true)
+  assert.match(doc.activeElement.textContent, /c/)
+  dom.window.close()
+})

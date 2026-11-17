@@ -162,12 +162,14 @@ export function mountFiles(root: HTMLElement, ctx: ViewContext): PaneView {
     rows = []; flatten(base, 0)
     if (keepPath) { const found = rows.findIndex(row => row.path === keepPath); if (found >= 0) cursor = found }
     cursor = Math.max(0, Math.min(cursor, rows.length - 1))
+    const changesByPath = new Map(changes.map(change => [change.path, change]))
+    const matchesByPath = new Map((matches?.matches ?? []).map(match => [match.path, match]))
     const nodes = rows.map((row, index) => {
       const isDir = row.entry.kind === 'dir' || (row.entry.kind === 'link' && row.entry.openable && row.entry.dir === true)
       const button = el(doc, 'button', { type: 'button', role: 'treeitem', class: `m-files-row m-files-kind-${fileClass(row.entry)} m-files-depth-${Math.min(row.depth, 12)}`, 'aria-selected': String(index === cursor), ...(isDir ? { 'aria-expanded': String(expanded.has(row.path)) } : {}) }, `${isDir ? (expanded.has(row.path) ? '▾' : '▸') : row.entry.kind === 'link' ? '↗' : '·'} ${row.entry.name}`)
-      const change = changes.find(c => c.path === row.path)
+      const change = changesByPath.get(row.path)
       if (changedOnly && change) button.append(doc.createTextNode(` ${statusMark(change.status)} +${change.adds ?? 0} −${change.dels ?? 0}`))
-      const hit = matches?.matches.find(m => m.path === row.path)
+      const hit = matchesByPath.get(row.path)
       const offset = row.path.length - row.entry.name.length
       if (hit && hit.start >= offset && hit.end <= row.path.length && hit.end >= hit.start) {
         const prefix = isDir ? (expanded.has(row.path) ? '▾' : '▸') : row.entry.kind === 'link' ? '↗' : '·'
@@ -221,8 +223,7 @@ export function mountFiles(root: HTMLElement, ctx: ViewContext): PaneView {
     const row = rows[cursor]; const current = ++generation; diffEpoch++; clearTimeout(timer)
     if (!row || !(row.entry.kind === 'file' || (row.entry.kind === 'link' && !row.entry.dir && row.entry.openable)) || !source) return
     chosen = row.path
-    if (diffOn) void showDiff()
-    timer = setTimeout(() => { void source.file(row.path, rootKey).then(file => { if (alive && generation === current) paintFile(file) }).catch(() => { if (generation === current) { painting++; content.textContent = words.readError } }) }, 100)
+    timer = setTimeout(() => { if (diffOn) void showDiff(); void source.file(row.path, rootKey).then(file => { if (alive && generation === current) paintFile(file) }).catch(() => { if (generation === current) { painting++; content.textContent = words.readError } }) }, 100)
   }
   async function expand(): Promise<void> {
     const row = rows[cursor]; if (!row || !(row.entry.kind === 'dir' || (row.entry.kind === 'link' && row.entry.dir && row.entry.openable))) return
