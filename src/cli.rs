@@ -921,8 +921,9 @@ BACKLOG
   files with it (on the main checkout, what is not committed) — as a tree with
   every folder open, each file headed by the letter moai diff --stat prints for
   its kind and followed by +added −removed; deleted files stand dimmed.
-  Pressed again it gives the tree back with the folders and the cursor as
-  they were. The
+  It stands the diff pane up when the pane is down. Pressed again it gives
+  the tree back with the folders and the cursor as they were, and takes down
+  the diff pane only if it stood it up and you left the pane alone. The
   right pane shows the file's text; {key:browse.diff} shows its diff instead (on a
   folder, every changed file below it) and {key:browse.detail} the checkout's issue — an
   epic worktree's epic, a milestone worktree's milestone. With both on the

@@ -1299,6 +1299,10 @@ struct Changed {
     /// The cursor and the tree's scroll before it was turned on — turning it off stands there again unless the file
     /// the cursor stood on in the changed tree stands in the whole one.
     before: Option<(At, usize)>,
+    /// Turning it on stood the diff pane up (moai-p7nr.sw0) — turning it off takes the pane down again. A hand on the
+    /// pane in between (`SPC v D`, `moai ctl view diff`) drops it: the pane is the person's from then on. The window's
+    /// own, like the pane: never in the config, gone with the window.
+    raised_diff: bool,
 }
 
 /// The checkout picker — `SPC v w` over the window (moai-ffk9.211). The list is [`Window::places`], read afresh as
@@ -1466,7 +1470,14 @@ impl Window {
             places: None,
             places_id: 0,
             pick: None,
-            changed: Changed { on: false, list: Listing::Reading, id: 0, refreshing: false, before: None },
+            changed: Changed {
+                on: false,
+                list: Listing::Reading,
+                id: 0,
+                refreshing: false,
+                before: None,
+                raised_diff: false,
+            },
             detail_on: false,
             diff_on: false,
             diff,
@@ -1969,10 +1980,17 @@ impl Window {
         self.diff.show(source);
     }
 
-    /// `SPC v D` over the window.
+    /// `SPC v D` over the window — a hand on the pane, so the changed files only no longer takes it down.
     pub fn toggle_diff(&mut self) {
-        self.diff_on = !self.diff_on;
-        if self.diff_on {
+        self.changed.raised_diff = false;
+        self.set_diff(!self.diff_on);
+    }
+
+    /// Stand the diff pane up or take it down. Standing, it reads what the cursor is on — unless it has no room
+    /// ([`Window::aim_diff`]).
+    fn set_diff(&mut self, on: bool) {
+        self.diff_on = on;
+        if on {
             self.aim_diff();
         } else {
             self.diff.close();
@@ -1997,12 +2015,17 @@ impl Window {
         &self.changed.list
     }
 
-    /// `SPC v c` — the changed files only, or the whole tree again as it was.
+    /// `SPC v c` — the changed files only, or the whole tree again as it was. Turned on it stands the diff pane up
+    /// when it is down, and turned off it takes down only the pane it stood up (moai-p7nr.sw0).
     pub fn toggle_changed(&mut self) {
         if self.changed.on {
             let at = self.at.clone();
             let before = self.changed.before.take();
             self.changed.on = false;
+            // Down before the tree is built again, so the right pane goes back to the file's text there.
+            if std::mem::take(&mut self.changed.raised_diff) {
+                self.set_diff(false);
+            }
             self.at = at.clone();
             self.rebuild();
             // The file the cursor stood on stands in the whole tree: the cursor stays on it. Else back to where it was.
@@ -2024,6 +2047,11 @@ impl Window {
         self.adrift = false;
         self.ask_changes(false);
         self.rebuild();
+        // Aimed once the cursor stands on the changed tree's rows, never on the path it left.
+        if !self.diff_on {
+            self.changed.raised_diff = true;
+            self.set_diff(true);
+        }
     }
 
     /// The changed-files tree: every changed path with its folders, always open — folders first, then by name, as the
@@ -3036,11 +3064,17 @@ impl App {
                             w.open_pick();
                             self.chord.clear();
                         }
-                        Browse::Changed => w.toggle_changed(),
                         Browse::Detail => w.toggle_detail(),
                         _ => {
-                            w.toggle_diff();
-                            if w.diff_on && w.folded {
+                            let was = w.diff_on;
+                            if act == Browse::Changed {
+                                w.toggle_changed();
+                            } else {
+                                w.toggle_diff();
+                            }
+                            // A pane stood up — by hand or by the changed files only — that folds under the detail
+                            // says so.
+                            if !was && w.diff_on && w.folded {
                                 let detail = keys::said(self.keys.browse, Browse::Detail);
                                 self.notice =
                                     Some(fill(say(self.site.lang, "tui.files.diff_folded"), &[("detail", &detail)]));
@@ -4722,7 +4756,9 @@ mod tests {
         assert!(text[3].starts_with("D ") && text[4].starts_with("M ") && text[5].starts_with("? "), "{text:?}");
         let title = screen_title(&draw::tests::render(&mut a, 120, 20));
         assert!(title.contains("바뀐 파일만 4"), "{title}");
-        // A deleted file has no text — the pane says so in a plain word and reads nothing (moai-ffk9.9m0).
+        // A deleted file has no text — the pane says so in a plain word and reads nothing (moai-ffk9.9m0). The diff the
+        // changed files only stood up (moai-p7nr.sw0) goes down by hand first.
+        a.hit("SPC v D Esc");
         on(&mut a, "src/old.rs");
         settle(&mut a);
         assert!(matches!(shown(&a), Shown::Nothing), "the pane read a deleted file: {:?}", shown(&a));
@@ -4885,6 +4921,123 @@ mod tests {
         // On the list the same keys keep their meaning.
         a.hit("Esc SPC v d Esc");
         assert_ne!(a.detail_open, before.0, "SPC v d on the list lost its meaning");
+    }
+
+    /// **The changed files only stands the diff pane up and takes down only its own** (moai-p7nr.sw0): turned on it
+    /// stands the pane and reads the cursor's file in the changed tree; turned off it takes the pane down and the text
+    /// comes back. A pane up by hand before stays; a hand on the pane in between — `SPC v D` or `moai ctl view diff` —
+    /// keeps the person's value. Nothing reaches the list or the config, and closing the window forgets it.
+    #[test]
+    fn the_changed_files_only_stands_the_diff_up_and_takes_down_only_its_own() {
+        use crate::ctl::wire::{self, Verb};
+        let (s, mut a) = files_app("changed-diff");
+        let user = s.path().join("user.toml");
+        std::fs::write(&user, "[tui]\nmouse = true\n").unwrap();
+        a.user_config = Some(user.clone());
+        let asked = Arc::new(Mutex::new(Vec::new()));
+        let log = asked.clone();
+        a.files_disk = std::mem::take(&mut a.files_disk)
+            .changing(|_, _| {
+                let files =
+                    vec![change("README.md", vcs::Status::Modified), change("src/main.rs", vcs::Status::Modified)];
+                Ok(vcs::Changes { total: files.len(), files, truncated: false })
+            })
+            .diffing(move |src, _, _, _| {
+                if let diff::Source::Checkout { path, .. } = src {
+                    log.lock().unwrap().push(path.clone().unwrap_or_default());
+                }
+                diff::Loaded::default()
+            });
+        let _t = clocked(&mut a);
+        let list = (a.diff_open, a.detail_open);
+        standing_on(&mut a, "README.md");
+        draw::tests::render(&mut a, 160, 40);
+        // On: the pane stands and reads the cursor's file of the changed tree.
+        a.hit("SPC v c Esc");
+        settle(&mut a);
+        assert!(window(&a).diff_stands(), "the diff pane did not stand");
+        assert_eq!(asked.lock().unwrap().last().map(String::as_str), Some("README.md"), "the diff read nothing");
+        a.hit("SPC v");
+        let menu = draw::tests::render(&mut a, 160, 40);
+        a.hit("Esc");
+        let row = menu.iter().find(|l| l.contains(say(Lang::Ko, "tui.menu.diff"))).expect("no diff row in the menu");
+        assert!(row.contains(say(Lang::Ko, "tui.state.shown")), "the menu says the pane is down: {row}");
+        // Off: the pane it stood up goes and the file's text comes back.
+        a.hit("SPC v c Esc");
+        settle(&mut a);
+        assert!(!window(&a).diff_on, "the pane it stood up stayed");
+        assert!(matches!(shown(&a), Shown::Text(_)), "the text did not come back: {:?}", shown(&a));
+        // A pane up by hand before stays.
+        a.hit("SPC v D c Esc");
+        settle(&mut a);
+        a.hit("SPC v c Esc");
+        assert!(window(&a).diff_on, "a pane up by hand was taken down");
+        // Up by the mode, down by hand: it stays down; down and up again by hand: it stays up.
+        a.hit("SPC v D Esc");
+        a.hit("SPC v c D Esc");
+        a.hit("SPC v c Esc");
+        assert!(!window(&a).diff_on, "the hand's off was turned over");
+        a.hit("SPC v c D D Esc");
+        a.hit("SPC v c Esc");
+        assert!(window(&a).diff_on, "the hand's on was taken down");
+        // `moai ctl view diff off` is a hand too.
+        a.hit("SPC v D Esc");
+        a.hit("SPC v c Esc");
+        settle(&mut a);
+        let reply = a.ctl(&wire::request(Verb::View { name: "diff".into(), on: false }, Duration::from_secs(5)));
+        assert!(reply.ok, "{reply:?}");
+        let reply = a.ctl(&wire::request(Verb::View { name: "diff".into(), on: true }, Duration::from_secs(5)));
+        assert!(reply.ok, "{reply:?}");
+        a.hit("SPC v c Esc");
+        assert!(window(&a).diff_on, "ctl's on was taken down");
+        // Nothing leaks: the list's panes and the config stand as they were; a new window remembers nothing.
+        assert_eq!((a.diff_open, a.detail_open, window(&a).detail_on), (list.0, list.1, false), "a list pane moved");
+        assert_eq!(std::fs::read_to_string(&user).unwrap(), "[tui]\nmouse = true\n", "the config was written");
+        a.hit("SPC v D c Esc");
+        a.hit("Esc SPC g f");
+        settle(&mut a);
+        a.hit("SPC v c c Esc");
+        assert!(!window(&a).diff_on, "the window kept the mode's pane past closing");
+    }
+
+    /// **No room, no read**: turned on in a window too narrow for a right pane, the changed files only reads no diff;
+    /// over a detail with no room for both, the pane folds and says so, and the focus stays on the tree.
+    #[test]
+    fn the_changed_files_only_reads_no_diff_it_cannot_show() {
+        let (_s, mut a) = files_app("changed-narrow");
+        let asked = Arc::new(Mutex::new(Vec::new()));
+        let log = asked.clone();
+        a.files_disk = std::mem::take(&mut a.files_disk)
+            .changing(|_, _| {
+                let files = vec![change("README.md", vcs::Status::Modified)];
+                Ok(vcs::Changes { total: files.len(), files, truncated: false })
+            })
+            .diffing(move |src, _, _, _| {
+                if let diff::Source::Checkout { path, .. } = src {
+                    log.lock().unwrap().push(path.clone().unwrap_or_default());
+                }
+                diff::Loaded::default()
+            });
+        let _t = clocked(&mut a);
+        standing_on(&mut a, "README.md");
+        draw::tests::render(&mut a, 16, 40);
+        a.hit("SPC v c Esc");
+        settle(&mut a);
+        draw::tests::render(&mut a, 16, 40);
+        settle(&mut a);
+        assert!(window(&a).diff_on, "the pane was not turned on");
+        assert!(asked.lock().unwrap().is_empty(), "a diff with no room ran git: {:?}", asked.lock().unwrap());
+        a.hit("SPC v c Esc");
+        // Over the detail, 30 columns: the diff folds — and says so.
+        a.hit("SPC v d Esc");
+        draw::tests::render(&mut a, 30, 40);
+        a.notice = None;
+        a.hit("SPC v c Esc");
+        draw::tests::render(&mut a, 30, 40);
+        let w = window(&a);
+        assert!(w.diff_on && w.folded, "the premise — the pane folded");
+        assert_ne!(w.focus, Side::Info, "the focus stands on the folded pane");
+        assert!(a.notice.as_deref().is_some_and(|n| n.contains("접었다")), "the fold went unsaid: {:?}", a.notice);
     }
 
     /// **The detail is the picked checkout's issue**: an epic worktree's epic, not a member; the main checkout none.
