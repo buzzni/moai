@@ -40,17 +40,29 @@
 //! never read. The last few files read are kept ([`KEPT`]) and stand at once when the cursor comes back, while the
 //! reader checks their stamp and reads again only a file that changed. Long lines do not wrap — the pane scrolls
 //! sideways (`H`·`L`, the sideways wheel) and the line numbers stay put.
+//!
+//! **`/` finds files and hides nothing** (moai-ffk9.rid). It matches the path below the tree's root, case aside
+//! ([`files::matches`]), against an index walked once per root on a thread of its own ([`Worker::walk`]) — the ignored
+//! directories asked for first and skipped, `.git` and links never entered, at most the read layer's 200,000 entries.
+//! The answers stand as the walk comes in. Each file found gets its folders opened, so it stands as a row, its name's
+//! matching letters reversed and a [`FOUND`] mark at the head of the row; every other row stays where it was. At most
+//! [`FOUND_LIMIT`] are opened — the shallow ones first, so one deep folder cannot crowd out what sits near the root —
+//! and the title says how many there are. The folders are read [`SEARCH_READS`] at a time, the one `n` aims at first,
+//! so a hand's `l` is not stuck behind five hundred reads. Ending the search folds back what it opened and leaves
+//! what the hand opened.
 
-use super::keys::{self, Browse, LEADER, Side as Toward};
+use super::input::Input;
+use super::keys::{self, Browse, LEADER, Lookup, PROMPT, Prompt, Side as Toward};
 use super::scroll::{self, Move, Scroll};
 use super::{App, Mode, Row as ListRow, Seat, menu};
 use crate::files::{self, Entry, Jail, Kind, Why};
 use crate::i18n::{fill, say};
 use crate::report::changes::Checkout;
 use ratatui::crossterm::event::KeyEvent;
-use std::collections::{BTreeMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::ops::Range;
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering as Atomic};
 use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
@@ -75,11 +87,23 @@ const SAY_READING_AFTER: Duration = Duration::from_millis(60);
 /// Columns one notch of the sideways wheel scrolls the right pane.
 pub(super) const PAN_WHEEL: usize = 4;
 
+/// Files one search opens to and marks at most — past it the title gives the whole count (moai-ffk9.rid).
+pub(super) const FOUND_LIMIT: usize = 500;
+
+/// Folders the search has out on the reader at once — the rest wait their turn, so a folder the hand opens is read
+/// after at most this many.
+pub(super) const SEARCH_READS: usize = 16;
+
+/// The mark at the head of a found file's row — colour never says it alone.
+pub const FOUND: &str = "* ";
+
 type ListFn = dyn Fn(&Jail, &str) -> Result<files::Listed, Why> + Send + Sync;
 type IgnoredFn = dyn Fn(&Path) -> Option<Vec<String>> + Send + Sync;
 type ReadFn = dyn Fn(&Jail, &str) -> Result<files::Text, Why> + Send + Sync;
 type StampFn = dyn Fn(&Jail, &str) -> Option<files::Stamp> + Send + Sync;
 type PaintFn = dyn Fn(&str, &str) -> Option<Vec<Vec<crate::highlight::Span>>> + Send + Sync;
+type WalkFn =
+    dyn Fn(&Jail, &str, &[String], &mut dyn FnMut(&[String]) -> bool) -> Result<files::Walked, Why> + Send + Sync;
 
 /// What the window reads with — the real disk, or a stand-in a test puts in (a slow reader, a failing git).
 #[derive(Clone)]
@@ -89,6 +113,7 @@ pub struct Disk {
     read: Arc<ReadFn>,
     stamp: Arc<StampFn>,
     paint: Arc<PaintFn>,
+    walk: Arc<WalkFn>,
 }
 
 impl Default for Disk {
@@ -99,6 +124,9 @@ impl Default for Disk {
             read: Arc::new(files::read),
             stamp: Arc::new(files::stamp),
             paint: Arc::new(crate::highlight::lines),
+            walk: Arc::new(|jail: &Jail, dir: &str, skip: &[String], take: &mut dyn FnMut(&[String]) -> bool| {
+                files::walk(jail, dir, skip, take)
+            }),
         }
     }
 }
@@ -133,6 +161,22 @@ impl Disk {
         paint: impl Fn(&str, &str) -> Option<Vec<Vec<crate::highlight::Span>>> + Send + Sync + 'static,
     ) -> Disk {
         Disk { paint: Arc::new(paint), ..self }
+    }
+
+    /// The same disk with the search's walk replaced — a test slows it down or counts it.
+    pub(super) fn walking(
+        self,
+        walk: impl Fn(&Jail, &str, &[String], &mut dyn FnMut(&[String]) -> bool) -> Result<files::Walked, Why>
+        + Send
+        + Sync
+        + 'static,
+    ) -> Disk {
+        Disk { walk: Arc::new(walk), ..self }
+    }
+
+    /// The same disk with the ignored list replaced — a test counts how often it is asked.
+    pub(super) fn ignoring(self, ignored: impl Fn(&Path) -> Option<Vec<String>> + Send + Sync + 'static) -> Disk {
+        Disk { ignored: Arc::new(ignored), ..self }
     }
 }
 
@@ -246,6 +290,55 @@ enum Reply {
     Painted {
         path: String,
     },
+    /// The search index's ignored list came — or git gave none and nothing is skipped (`known` false).
+    Ignoring {
+        id: u64,
+        known: bool,
+    },
+    /// One batch of the search index's walk.
+    Walked {
+        id: u64,
+        paths: Vec<Indexed>,
+    },
+    /// The walk ended: at the read layer's limit (`truncated`, after `seen` entries), or it could not start.
+    WalkDone {
+        id: u64,
+        seen: usize,
+        truncated: bool,
+        failed: Option<Trouble>,
+    },
+}
+
+/// One path of the search index, folded on the walker so the loop only compares.
+#[derive(Debug, Clone)]
+struct Indexed {
+    /// Checkout-relative — a row's identity.
+    path: String,
+    /// The path below the index's root, lower-cased the way [`files::matches`] folds it — a char at a time.
+    folded: String,
+    /// Folders between the root and it — the found are ordered shallow first.
+    depth: u16,
+}
+
+impl Indexed {
+    fn of(root: &str, path: &str) -> Indexed {
+        let rel = below(root, path);
+        Indexed {
+            path: path.to_owned(),
+            folded: rel.chars().flat_map(char::to_lowercase).collect(),
+            depth: u16::try_from(rel.matches('/').count()).unwrap_or(u16::MAX),
+        }
+    }
+}
+
+/// A path as it reads below `root` — the whole of it at the checkout's root.
+fn below<'a>(root: &str, path: &'a str) -> &'a str {
+    if root == "." { path } else { path.strip_prefix(root).and_then(|t| t.strip_prefix('/')).unwrap_or(path) }
+}
+
+/// Whether `path` lies strictly inside the folder `dir`.
+fn inside(path: &str, dir: &str) -> bool {
+    dir == "." && path != "." || path.strip_prefix(dir).is_some_and(|t| t.starts_with('/'))
 }
 
 /// A file to read — with the stamp of the copy the window keeps, if any: the reader then only checks it.
@@ -358,6 +451,21 @@ struct Worker {
     /// The file reader — its own thread, so a spread on the lister does not hold up the file under the cursor.
     looks: Sender<Look>,
     reader: Option<std::thread::JoinHandle<()>>,
+    /// The search index's walk — a thread per index, so a walk of 200,000 entries holds up neither the lister (the
+    /// found files' folders are read there) nor the reader. Its stop flag ends it between batches.
+    walker: Option<std::thread::JoinHandle<()>>,
+    stop: Option<Arc<AtomicBool>>,
+    /// What a walker is started with: where replies go, the disk and the checkout.
+    outgoing: Sender<Reply>,
+    disk: Disk,
+    checkout: Checkout,
+}
+
+impl Drop for Worker {
+    /// The window is gone — a walk still running stops at its next batch.
+    fn drop(&mut self) {
+        self.stop_walk();
+    }
 }
 
 /// A worker thread died: raise its panic on the loop, as the reread and commit threads do (`App::follow_commits`)
@@ -374,6 +482,12 @@ fn child(dir: &str, name: &str) -> String {
 
 fn parent_of(path: &str) -> &str {
     path.rsplit_once('/').map_or(".", |(p, _)| p)
+}
+
+/// The folders strictly between the tree's root `here` and `path`, nearest the root first.
+fn ancestors<'a>(here: &str, path: &'a str) -> impl Iterator<Item = &'a str> {
+    let here = here.to_owned();
+    path.match_indices('/').map(move |(i, _)| &path[..i]).filter(move |d| inside(d, &here))
 }
 
 /// The answer to one read, with the text of each link in it.
@@ -402,6 +516,7 @@ impl Worker {
     fn start(checkout: &Checkout, disk: &Disk) -> Worker {
         let (requests, incoming) = mpsc::channel::<Request>();
         let (outgoing, replies) = mpsc::channel();
+        let walking = outgoing.clone();
         let (looks, asked) = mpsc::channel::<Look>();
         let (reading, out, at) = (disk.clone(), outgoing.clone(), checkout.clone());
         let reader = std::thread::spawn(move || {
@@ -461,7 +576,62 @@ impl Worker {
         let ignored = std::thread::spawn(move || {
             let _ = told.send(ask(&root));
         });
-        Worker { requests, replies, lister: Some(lister), ignored: Some((heard, ignored)), looks, reader: Some(reader) }
+        Worker {
+            requests,
+            replies,
+            lister: Some(lister),
+            ignored: Some((heard, ignored)),
+            looks,
+            reader: Some(reader),
+            walker: None,
+            stop: None,
+            outgoing: walking,
+            disk: disk.clone(),
+            checkout: checkout.clone(),
+        }
+    }
+
+    /// Stop the walk running, if any — its later replies carry an old id and are dropped.
+    fn stop_walk(&mut self) {
+        if let Some(stop) = self.stop.take() {
+            stop.store(true, Atomic::Relaxed);
+        }
+    }
+
+    /// Walk `root` for the search index `id`: ask for the ignored list (once per index, never per key), then walk
+    /// skipping it, sending the paths in batches. The walk before is told to stop.
+    fn walk(&mut self, id: u64, root: String) {
+        self.stop_walk();
+        // A walker that already ended may have died — raise it before its handle is replaced.
+        if let Some(h) = self.walker.take_if(|h| h.is_finished()) {
+            rethrow(h);
+        }
+        let stop = Arc::new(AtomicBool::new(false));
+        self.stop = Some(stop.clone());
+        let (disk, at, out) = (self.disk.clone(), self.checkout.clone(), self.outgoing.clone());
+        self.walker = Some(std::thread::spawn(move || {
+            let Some(jail) = Jail::of(&at) else {
+                let failed = Some(Trouble::Missing);
+                let _ = out.send(Reply::WalkDone { id, seen: 0, truncated: false, failed });
+                return;
+            };
+            let skip = (disk.ignored)(&at.path);
+            if stop.load(Atomic::Relaxed) || out.send(Reply::Ignoring { id, known: skip.is_some() }).is_err() {
+                return;
+            }
+            let skip = skip.unwrap_or_default();
+            let mut take = |batch: &[String]| {
+                !stop.load(Atomic::Relaxed)
+                    && out
+                        .send(Reply::Walked { id, paths: batch.iter().map(|p| Indexed::of(&root, p)).collect() })
+                        .is_ok()
+            };
+            let done = match (disk.walk)(&jail, &root, &skip, &mut take) {
+                Ok(w) => Reply::WalkDone { id, seen: w.seen, truncated: w.truncated, failed: None },
+                Err(why) => Reply::WalkDone { id, seen: 0, truncated: false, failed: Some(Trouble::of(&why)) },
+            };
+            let _ = out.send(done);
+        }));
     }
 
     fn look(&self, l: Look) {
@@ -476,8 +646,9 @@ impl Worker {
 
     fn reply(&mut self) -> Option<Reply> {
         // The lister and the reader share the reply channel, so one's death shows as a finished thread, not a
-        // disconnect. Neither ends on its own while the window stands — only by a panic, raised here.
-        for slot in [&mut self.lister, &mut self.reader] {
+        // disconnect. Neither ends on its own while the window stands — only by a panic, raised here. A walker does end
+        // on its own; joining it then raises nothing.
+        for slot in [&mut self.lister, &mut self.reader, &mut self.walker] {
             if slot.as_ref().is_some_and(std::thread::JoinHandle::is_finished)
                 && let Some(h) = slot.take()
             {
@@ -694,6 +865,66 @@ pub fn reads(e: &Entry) -> bool {
     e.openable && matches!(e.kind, Kind::File | Kind::Link { dir: false, inside: true })
 }
 
+/// The search index: what one walk of the tree's root gave (moai-ffk9.rid).
+#[derive(Debug, Clone)]
+struct Index {
+    /// The walk it is — replies of another are dropped.
+    id: u64,
+    /// The folder walked — the tree's root when it began. Another root walks again.
+    root: String,
+    /// Shared, not copied, when the window is cloned ([`Shared`]'s reason) — it holds up to 200,000 paths.
+    entries: Arc<Vec<Indexed>>,
+    walking: bool,
+    /// Whether git named the ignored directories — `None` while asking. `Some(false)`: nothing is skipped.
+    skipping: Option<bool>,
+    failed: Option<Trouble>,
+}
+
+/// The search: the hung query, the index and what it found, and the folders it opened to show them.
+#[derive(Debug, Clone, Default)]
+struct Search {
+    /// The hung query — trimmed, never blank.
+    query: Option<String>,
+    index: Option<Index>,
+    /// What stands opened and marked, by (depth below the root, path) — shallow first, at most [`FOUND_LIMIT`].
+    found: BTreeSet<(u16, String)>,
+    /// All the index matched — more than `found` holds past the limit.
+    total: usize,
+    /// Files the index named that their folder, once read, did not hold — left out without a word.
+    gone: HashSet<String>,
+    /// Folders the search opened — ending it folds them back. One the hand folds leaves this set and is the hand's.
+    opened: BTreeSet<String>,
+    /// Found files whose folders were already queued — each file is aimed once per query.
+    aimed: HashSet<String>,
+    /// Folders waiting to be read, at most [`SEARCH_READS`] out at once.
+    queue: VecDeque<String>,
+    /// The cursor goes to the first file found once its row stands — set when the query changes, dropped when the hand
+    /// moves the cursor.
+    jump: bool,
+}
+
+/// The search field being typed in (`/`) — the wiki window's `Typing`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Typing {
+    pub input: Input,
+    /// The search hung before the field opened — `Esc` goes back to it.
+    was: Option<String>,
+    /// The row the cursor stood on — `Esc` puts it back there.
+    from: At,
+}
+
+/// Keep `key` among the found when it is one of the [`FOUND_LIMIT`] first.
+fn admit(found: &mut BTreeSet<(u16, String)>, depth: u16, path: &str) {
+    if found.len() >= FOUND_LIMIT {
+        match found.last() {
+            Some((d, p)) if (depth, path) < (*d, p.as_str()) => {}
+            _ => return,
+        }
+        found.pop_last();
+    }
+    found.insert((depth, path.to_owned()));
+}
+
 /// What one step of the loop brought.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub(super) struct Polled {
@@ -703,6 +934,8 @@ pub(super) struct Polled {
     pub stopped: Option<usize>,
     /// The right pane changed — no row did.
     pub painted: bool,
+    /// The search index stopped at the read layer's limit after this many entries.
+    pub indexed: Option<usize>,
 }
 
 /// The window's state.
@@ -739,6 +972,10 @@ pub struct Window {
     stepped: Vec<String>,
     /// The right pane (moai-ffk9.3fd).
     pub right: Right,
+    /// The `/` search (moai-ffk9.rid).
+    search: Search,
+    /// The search field, while it is typed in.
+    pub typing: Option<Typing>,
 }
 
 impl std::fmt::Debug for Window {
@@ -783,6 +1020,8 @@ impl Window {
             spread: None,
             stepped: Vec::new(),
             right: Right::default(),
+            search: Search::default(),
+            typing: None,
         };
         w.open(".");
         w.rebuild();
@@ -831,6 +1070,7 @@ impl Window {
     /// Something is still out: a directory read, the ignored list, a spread.
     pub fn waiting(&self) -> bool {
         self.spread.is_some()
+            || self.search.index.as_ref().is_some_and(|i| i.walking)
             || self.ignored == Ignored::Waiting
             || self.dirs.values().any(|d| d.read.is_none())
             || self.right.busy()
@@ -915,6 +1155,9 @@ impl Window {
             return;
         }
         self.dirs.retain(|p, _| !holds(p));
+        // What the search opened in there is folded — opened again, by the hand, it is the hand's.
+        self.search.opened.retain(|p| !holds(p));
+        self.search.queue.retain(|p| !holds(p));
         // A spread whose root went is over; one still running keeps out of what was folded under it.
         match &mut self.spread {
             Some(s) if holds(&s.root) => self.spread = None,
@@ -941,6 +1184,10 @@ impl Window {
         let ignored = self.here != "." && above.into_iter().any(|p| self.ignored_path(&p));
         self.flatten(&self.here.clone(), 0, ignored, &mut rows);
         self.rows = rows;
+        if let Some(path) = self.jump_target() {
+            self.search.jump = false;
+            self.at = At::Path(path);
+        }
         match self.rows.iter().position(|r| r.at() == self.at) {
             Some(i) => self.cursor = i,
             None => {
@@ -981,6 +1228,7 @@ impl Window {
     /// Put the cursor on a row and bring the tree back to it.
     pub(super) fn move_to(&mut self, at: usize) {
         self.adrift = false;
+        self.search.jump = false;
         self.cursor = at.min(self.rows.len().saturating_sub(1));
         if let Some(r) = self.rows.get(self.cursor) {
             self.at = r.at();
@@ -1112,6 +1360,7 @@ impl Window {
                 self.rebuild();
                 self.list.rewind();
                 self.move_to(1);
+                self.reroot();
             }
             Row::Entry { .. } => self.focus = Side::Info,
             _ => {}
@@ -1133,6 +1382,7 @@ impl Window {
         self.at = At::Path(was);
         self.adrift = false;
         self.rebuild();
+        self.reroot();
     }
 
     fn focus_next(&mut self) {
@@ -1161,6 +1411,7 @@ impl Window {
                         && d.generation == generation
                     {
                         d.read = Some(read);
+                        self.drop_gone(&path);
                         out.changed = true;
                     }
                 }
@@ -1176,7 +1427,8 @@ impl Window {
                         continue;
                     }
                     let generation = self.next_generation();
-                    self.dirs.insert(path, Dir { generation, read: Some(read) });
+                    self.dirs.insert(path.clone(), Dir { generation, read: Some(read) });
+                    self.drop_gone(&path);
                     out.changed = true;
                 }
                 Reply::SpreadDone { id, read, stopped } => {
@@ -1215,7 +1467,33 @@ impl Window {
                     out.painted |= self.right.shown.path() == Some(path.as_str());
                     self.read_done(&path);
                 }
+                Reply::Ignoring { id, known } => {
+                    if let Some(i) = self.search.index.as_mut().filter(|i| i.id == id) {
+                        i.skipping = Some(known);
+                        out.changed = true;
+                    }
+                }
+                Reply::Walked { id, paths } => {
+                    if self.search.index.as_ref().is_some_and(|i| i.id == id) {
+                        self.indexed(paths);
+                        out.changed = true;
+                    }
+                }
+                Reply::WalkDone { id, seen, truncated, failed } => {
+                    if let Some(i) = self.search.index.as_mut().filter(|i| i.id == id) {
+                        i.walking = false;
+                        i.failed = failed;
+                        out.changed = true;
+                        if truncated {
+                            out.indexed = Some(seen);
+                        }
+                    }
+                }
             }
+        }
+        // The answers may have freed a slot for the search's folders.
+        if out.changed {
+            self.pump();
         }
         if let Shown::Reading { since, said: said @ false, .. } = &mut self.right.shown
             && since.elapsed() >= SAY_READING_AFTER
@@ -1229,10 +1507,330 @@ impl Window {
         out
     }
 
+    // ---- the search (moai-ffk9.rid) ----
+
+    /// The query the tree is marked with — the text being typed, else the hung search. Blank is none.
+    pub fn query(&self) -> Option<&str> {
+        let q = match &self.typing {
+            Some(t) => Some(t.input.text()),
+            None => self.search.query.as_deref(),
+        };
+        q.map(str::trim).filter(|q| !q.is_empty())
+    }
+
+    /// A search is hung and not being typed — `Esc` ends it before it closes the window, and `n`·`N` jump.
+    pub fn searched(&self) -> bool {
+        self.typing.is_none() && self.search.query.is_some()
+    }
+
+    /// Files opened and marked, and all the index matched.
+    pub fn found_count(&self) -> (usize, usize) {
+        (self.search.found.len(), self.search.total)
+    }
+
+    /// Entries indexed so far while the walk runs — `None` once it ended or before any search.
+    pub fn indexing(&self) -> Option<usize> {
+        self.search.index.as_ref().filter(|i| i.walking).map(|i| i.entries.len())
+    }
+
+    /// Git gave no ignored list for the index — nothing is skipped, and the title says so.
+    pub fn unskipped(&self) -> bool {
+        self.search.index.as_ref().is_some_and(|i| i.skipping == Some(false))
+    }
+
+    /// Why the index could not be walked.
+    pub fn index_failed(&self) -> Option<&Trouble> {
+        self.search.index.as_ref().and_then(|i| i.failed.as_ref())
+    }
+
+    /// Whether the row of `path` is a file found — and the matching bytes of its name, when the match reaches into the
+    /// name (a match only in the folders above marks the row and paints nothing).
+    pub fn found_in(&self, path: &str) -> Option<Option<Range<usize>>> {
+        let q = self.query()?;
+        let rel = below(&self.here, path);
+        let depth = u16::try_from(rel.matches('/').count()).unwrap_or(u16::MAX);
+        if !self.search.found.contains(&(depth, path.to_owned())) {
+            return None;
+        }
+        let name_at = rel.rfind('/').map_or(0, |i| i + 1);
+        let Some(r) = files::matches(q, rel) else { return Some(None) };
+        let from = r.start.max(name_at);
+        Some((from < r.end).then(|| from - name_at..r.end - name_at))
+    }
+
+    /// `/` — open the search field, with the hung search in it to change (the wiki window's way). The first search on
+    /// a root walks its index.
+    fn start_search(&mut self) {
+        let was = self.search.query.clone();
+        let input = Input::new(was.as_deref().unwrap_or_default());
+        self.typing = Some(Typing { input, was, from: self.at.clone() });
+        self.ensure_index();
+    }
+
+    /// Walk the tree's root for the index unless it already is.
+    fn ensure_index(&mut self) {
+        if self.search.index.as_ref().is_some_and(|i| i.root == self.here) {
+            return;
+        }
+        let id = self.next_generation();
+        let root = self.here.clone();
+        self.worker.with(|w| w.walk(id, root.clone()));
+        self.search.gone.clear();
+        self.search.index =
+            Some(Index { id, root, entries: Arc::new(Vec::new()), walking: true, skipping: None, failed: None });
+    }
+
+    /// The tree's root changed: an index of the old root is dropped — walked again at once when a search stands.
+    fn reroot(&mut self) {
+        if self.search.index.as_ref().is_none_or(|i| i.root == self.here) {
+            return;
+        }
+        self.worker.with(Worker::stop_walk);
+        self.search.index = None;
+        if self.query().is_some() {
+            self.ensure_index();
+            self.refind(false);
+        }
+    }
+
+    /// A key in the search field: the field takes it and the marks follow as typed; `Enter` hangs it, `Esc` goes back
+    /// to the search before and puts the cursor back.
+    fn type_key(&mut self, k: KeyEvent) {
+        let Some(t) = &mut self.typing else { return };
+        let was = t.input.text().to_owned();
+        if t.input.key(k) {
+            // A key that only moved the field's cursor finds nothing new.
+            if t.input.text() != was {
+                self.refind(true);
+            }
+            return;
+        }
+        match keys::lookup(PROMPT, &[k]) {
+            Lookup::Run(Prompt::Apply) => {
+                let text = t.input.text().trim().to_string();
+                self.typing = None;
+                // What it found is what the field found — nothing to find again.
+                if text.is_empty() {
+                    self.clear_search();
+                } else {
+                    self.search.query = Some(text);
+                }
+            }
+            Lookup::Run(Prompt::Cancel) => {
+                let (was, from) = (t.was.take(), t.from.clone());
+                self.typing = None;
+                self.search.query = was;
+                self.refind(false);
+                self.at = from;
+                self.rebuild();
+            }
+            _ => {}
+        }
+    }
+
+    /// Paste — into the search field when it is open, else nowhere.
+    pub(super) fn paste(&mut self, s: &str) {
+        if let Some(t) = &mut self.typing {
+            t.input.paste(s);
+            self.refind(true);
+        }
+    }
+
+    /// `Esc` over a hung search — the marks go and what the search opened folds back.
+    fn clear_search(&mut self) {
+        self.search.query = None;
+        self.search.jump = false;
+        self.refind(false);
+    }
+
+    /// Match the query over the whole index afresh — when it changed. Folders opened for files no longer found fold
+    /// back; the new ones are queued. `jump` sends the cursor to the first found.
+    fn refind(&mut self, jump: bool) {
+        let needle = self.query().map(str::to_lowercase);
+        let s = &mut self.search;
+        s.found.clear();
+        s.total = 0;
+        s.aimed.clear();
+        s.queue.clear();
+        if let (Some(needle), Some(index)) = (&needle, &s.index) {
+            for e in index.entries.iter().filter(|e| e.folded.contains(needle.as_str())) {
+                if !s.gone.contains(&e.path) {
+                    s.total += 1;
+                    admit(&mut s.found, e.depth, &e.path);
+                }
+            }
+        }
+        s.jump = jump && needle.is_some();
+        let keep: HashSet<String> = self
+            .search
+            .found
+            .iter()
+            .flat_map(|(_, p)| ancestors(&self.here, p).map(str::to_owned).collect::<Vec<_>>())
+            .collect();
+        self.unwind(&keep);
+        self.aim_found();
+        self.pump();
+        self.rebuild();
+    }
+
+    /// A batch of the walk: into the index, and matched at once when a search stands — the answers grow as it walks.
+    fn indexed(&mut self, paths: Vec<Indexed>) {
+        let needle = self.query().map(str::to_lowercase);
+        let s = &mut self.search;
+        let Some(index) = s.index.as_mut() else { return };
+        if let Some(needle) = &needle {
+            for e in paths.iter().filter(|e| e.folded.contains(needle.as_str())) {
+                s.total += 1;
+                admit(&mut s.found, e.depth, &e.path);
+            }
+        }
+        Arc::make_mut(&mut index.entries).extend(paths);
+        if needle.is_some() {
+            self.aim_found();
+        }
+    }
+
+    /// Queue the folders of the found files not aimed at yet, nearest the root first. A file whose folder is already
+    /// read is checked against it at once ([`Window::drop_gone`]) — no reply will come for that folder.
+    fn aim_found(&mut self) {
+        let here = self.here.clone();
+        let s = &mut self.search;
+        let mut read = BTreeSet::new();
+        for (_, path) in &s.found {
+            if s.aimed.insert(path.clone()) {
+                s.queue.extend(ancestors(&here, path).filter(|d| !self.dirs.contains_key(*d)).map(str::to_owned));
+                let parent = parent_of(path);
+                if self.dirs.get(parent).is_some_and(|d| d.read.is_some()) {
+                    read.insert(parent.to_owned());
+                }
+            }
+        }
+        for dir in read {
+            self.drop_gone(&dir);
+        }
+    }
+
+    /// Send the queued folders while fewer than [`SEARCH_READS`] of the search's are out.
+    fn pump(&mut self) {
+        let out =
+            |w: &Window| w.search.opened.iter().filter(|d| w.dirs.get(*d).is_some_and(|x| x.read.is_none())).count();
+        let mut n = out(self);
+        while n < SEARCH_READS {
+            let Some(d) = self.search.queue.pop_front() else { break };
+            if self.dirs.contains_key(&d) {
+                continue;
+            }
+            self.ask(&d);
+            self.search.opened.insert(d);
+            n += 1;
+        }
+    }
+
+    /// Fold back what the search opened, but `keep` — deepest first, so the cursor climbs to the folder that stays.
+    /// A folder holding one the hand opened stays open: folding it would hide the hand's.
+    fn unwind(&mut self, keep: &HashSet<String>) {
+        let mut going: Vec<String> = self.search.opened.iter().filter(|d| !keep.contains(*d)).cloned().collect();
+        going.sort_by_key(|d| std::cmp::Reverse(d.matches('/').count()));
+        for d in going {
+            if !self.search.opened.contains(&d) {
+                continue;
+            }
+            if self.dirs.keys().any(|p| inside(p, &d) && !self.search.opened.contains(p)) {
+                continue;
+            }
+            let climbs = match &self.at {
+                At::Path(p) => inside(p, &d),
+                At::Note(p) => *p == d || inside(p, &d),
+                At::Up => false,
+            };
+            if climbs {
+                self.at = At::Path(d.clone());
+            }
+            self.close(&d);
+        }
+    }
+
+    /// A folder was read: the found files the index put in it that it does not hold are left out without a word —
+    /// the index and the tree were read at different times.
+    fn drop_gone(&mut self, dir: &str) {
+        if self.search.found.is_empty() {
+            return;
+        }
+        let Some(Read::Listed { entries, .. }) = self.dirs.get(dir).and_then(|d| d.read.as_ref()) else { return };
+        let names: HashSet<&str> = entries.iter().map(|e| e.name.as_str()).collect();
+        let gone: Vec<(u16, String)> = self
+            .search
+            .found
+            .iter()
+            .filter(|(_, p)| parent_of(p) == dir && p.rsplit('/').next().is_some_and(|n| !names.contains(n)))
+            .cloned()
+            .collect();
+        for key in gone {
+            self.search.found.remove(&key);
+            self.search.total = self.search.total.saturating_sub(1);
+            self.search.gone.insert(key.1);
+        }
+    }
+
+    /// Where a pending jump lands — the first found, in the found order, whose row stands.
+    fn jump_target(&self) -> Option<String> {
+        if !self.search.jump {
+            return None;
+        }
+        let rank: HashMap<&str, usize> =
+            self.search.found.iter().enumerate().map(|(i, (_, p))| (p.as_str(), i)).collect();
+        self.rows
+            .iter()
+            .filter_map(|r| match r {
+                Row::Entry { path, .. } => rank.get(path.as_str()).map(|&i| (i, path)),
+                _ => None,
+            })
+            .min()
+            .map(|(_, p)| p.clone())
+    }
+
+    /// `n`·`N` — to the next or the previous found row in the tree's order, round at the ends. With none standing yet,
+    /// the first found is aimed at: its folders go to the front of the queue and the cursor lands when it stands.
+    pub fn jump_found(&mut self, back: bool) {
+        if !self.searched() || self.search.found.is_empty() {
+            return;
+        }
+        let found: HashSet<&str> = self.search.found.iter().map(|(_, p)| p.as_str()).collect();
+        let at: Vec<usize> = self
+            .rows
+            .iter()
+            .enumerate()
+            .filter(|(_, r)| matches!(r, Row::Entry { path, .. } if found.contains(path.as_str())))
+            .map(|(i, _)| i)
+            .collect();
+        let to = if back {
+            at.iter().rev().find(|&&i| i < self.cursor).or(at.last())
+        } else {
+            at.iter().find(|&&i| i > self.cursor).or(at.first())
+        };
+        match to.copied() {
+            Some(i) => self.move_to(i),
+            None => {
+                let first = self.search.found.first().map(|(_, p)| p.clone());
+                if let Some(first) = first {
+                    let ahead: Vec<String> = ancestors(&self.here, &first).map(str::to_owned).collect();
+                    self.search.queue.retain(|d| !ahead.contains(d));
+                    for d in ahead.into_iter().rev() {
+                        self.search.queue.push_front(d);
+                    }
+                    self.search.jump = true;
+                    self.pump();
+                    self.rebuild();
+                }
+            }
+        }
+    }
+
     pub(super) fn ctl_state(&self) -> serde_json::Value {
         serde_json::json!({
             "checkout": self.checkout.path, "here": self.here, "cursor": self.current_path(),
             "focus": if self.focus == Side::Tree { "tree" } else { "info" },
+            "search": self.search.query,
         })
     }
 }
@@ -1282,6 +1880,9 @@ impl App {
                 &[("n", &n.to_string()), ("expand", &expand)],
             ));
         }
+        if let Some(n) = got.indexed {
+            self.notice = Some(fill(say(self.site.lang, "tui.files.index_stopped"), &[("n", &n.to_string())]));
+        }
     }
 
     /// One key on the window. **Closing only goes back to browsing** — the window touched nothing behind it.
@@ -1292,6 +1893,13 @@ impl App {
     /// Answers **whether this key clears the notice** — the wiki window's rule: a key that only touched the menu and
     /// a pending prefix do not, the window's keys, a screen pick and an unknown key do.
     pub(super) fn files_key(&mut self, k: KeyEvent) -> bool {
+        // **While the search field is open it comes first** — the moves and SPC are letters (the wiki window's way).
+        if let Mode::Files(w) = &mut self.mode
+            && w.typing.is_some()
+        {
+            w.type_key(k);
+            return true;
+        }
         if menu::open(&self.chord) || LEADER.matches(k) {
             if let Mode::Files(w) = &mut self.mode {
                 w.chord.clear();
@@ -1343,6 +1951,11 @@ impl App {
             Some(F::Pan(_)) => {}
             Some(F::FocusNext) => w.focus_next(),
             Some(F::Focus(side)) => w.focus = if side == Toward::Left { Side::Tree } else { Side::Info },
+            Some(F::Search) => w.start_search(),
+            Some(F::NextFound) => w.jump_found(false),
+            Some(F::PrevFound) => w.jump_found(true),
+            // A hung search ends first, the window after — the list's `Esc` that clears the filter before it leaves.
+            Some(F::Close) if w.searched() => w.clear_search(),
             Some(F::Close) => self.mode = Mode::Browse,
             None => {
                 let idle = w.chord.held().is_empty();
@@ -2218,5 +2831,421 @@ mod tests {
         roll(&mut a, MouseEventKind::ScrollLeft, info.x + 3, info.y + 2);
         assert_eq!(window(&a).right.pan, 0);
         assert_eq!(window(&a).focus, Side::Tree, "the wheel moved the focus");
+    }
+
+    // ---- the search (moai-ffk9.rid) ----
+
+    /// Type text into whatever field is open — a key per letter.
+    fn typed(a: &mut App, text: &str) {
+        use ratatui::crossterm::event::{KeyCode, KeyModifiers};
+        for c in text.chars() {
+            a.key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE));
+        }
+    }
+
+    /// The paths of the entry rows, in order.
+    fn paths(a: &App) -> Vec<String> {
+        window(a)
+            .rows()
+            .iter()
+            .filter_map(|r| if let Row::Entry { path, .. } = r { Some(path.clone()) } else { None })
+            .collect()
+    }
+
+    /// Hang a search for `q` and take every answer.
+    fn search(a: &mut App, q: &str) {
+        a.hit("/");
+        typed(a, q);
+        a.hit("Enter");
+        settle(a);
+    }
+
+    fn found(a: &App) -> Vec<String> {
+        let w = window(a);
+        paths(a).into_iter().filter(|p| w.found_in(p).is_some()).collect()
+    }
+
+    /// **A deep file stands and no row goes**: three folded levels down, the match opens its folders and the cursor
+    /// lands on it; every row that stood before stands after.
+    #[test]
+    fn a_search_opens_the_folders_to_a_deep_file_and_hides_no_row() {
+        let (s, mut a) = files_app("search-deep");
+        std::fs::create_dir_all(s.path().join("deep/er/est")).unwrap();
+        std::fs::write(s.path().join("deep/er/est/needle.txt"), "x").unwrap();
+        a.hit("SPC g f");
+        settle(&mut a);
+        on(&mut a, "src");
+        a.hit("l");
+        settle(&mut a);
+        let before = paths(&a);
+        assert!(!before.contains(&"deep/er".to_string()), "the premise — deep is folded");
+        search(&mut a, "needle");
+        let after = paths(&a);
+        for p in &before {
+            assert!(after.contains(p), "{p} left the tree: {after:?}");
+        }
+        for p in ["deep/er", "deep/er/est", "deep/er/est/needle.txt"] {
+            assert!(after.contains(&p.to_string()), "{p} does not stand: {after:?}");
+        }
+        assert_eq!(window(&a).current_path(), Some("deep/er/est/needle.txt"), "the cursor is not on the file found");
+        assert_eq!(window(&a).found_count(), (1, 1));
+    }
+
+    /// **The match is a piece of the path, case aside**: `TUI/Dr` finds `src/tui/draw.rs`; a blank query finds nothing;
+    /// nothing inside `.git` is found.
+    #[test]
+    fn the_search_matches_the_path_case_aside_and_never_inside_git() {
+        let (s, mut a) = files_app("search-match");
+        std::fs::write(s.path().join("src/tui/draw.rs"), "x").unwrap();
+        std::fs::write(s.path().join(".git/needle"), "x").unwrap();
+        a.hit("SPC g f");
+        settle(&mut a);
+        search(&mut a, "TUI/Dr");
+        assert_eq!(found(&a), ["src/tui/draw.rs"]);
+        a.hit("Esc");
+        search(&mut a, "   ");
+        assert_eq!((window(&a).query(), window(&a).found_count()), (None, (0, 0)), "a blank query found something");
+        assert!(matches!(a.mode, Mode::Files(_)), "Enter on a blank field closed the window");
+        search(&mut a, "needle");
+        assert_eq!(window(&a).found_count(), (0, 0), "a file inside .git was found");
+        assert!(!paths(&a).iter().any(|p| p.contains(".git")));
+    }
+
+    /// **The mark is text, not colour**: without colour a found row reads `* name` and the rest have no mark; the
+    /// matching letters of the name are reversed and the others are not; a match only in the folders above marks the
+    /// row and paints nothing; a Hangul name is cut at its letters.
+    #[test]
+    fn a_found_row_is_marked_in_text_and_its_letters_reversed() {
+        let (s, mut a) = files_app("search-mark");
+        for d in ["j1", "j2"] {
+            std::fs::create_dir_all(s.path().join(d)).unwrap();
+            std::fs::write(s.path().join(d).join("x-key.txt"), "x").unwrap();
+        }
+        std::fs::write(s.path().join("x-key.md"), "x").unwrap();
+        std::fs::write(s.path().join("한글파일.txt"), "x").unwrap();
+        a.hit("SPC g f");
+        settle(&mut a);
+        search(&mut a, "x-key");
+        a.hit("n");
+        assert_ne!(window(&a).current_path(), Some("x-key.md"), "the premise — the cursor is off the row checked");
+        let buf = draw::tests::render_buf(&mut a, 100, 24);
+        // Cell by cell, so a column is a cell; the title is read from the text drawing.
+        let lines: Vec<String> = (0..buf.area.height)
+            .map(|y| (0..buf.area.width).map(|x| buf[(x, y)].symbol()).collect::<String>())
+            .collect();
+        let y = lines.iter().position(|l| l.contains("x-key.md")).expect("the found row does not stand");
+        // The mark heads the row; the file's blank fold column follows, as on every file row.
+        assert!(lines[y].contains("*   x-key.md"), "no mark: {:?}", lines[y]);
+        let readme = lines.iter().find(|l| l.contains("README.md")).unwrap();
+        assert!(!readme.contains('*'), "a row not found is marked: {readme:?}");
+        let x = lines[y].find("x-key.md").map(|b| crate::text::width(&lines[y][..b]) as u16).unwrap();
+        let reversed = |x: u16| buf[(x, y as u16)].modifier.contains(Modifier::REVERSED);
+        assert!((x..x + 5).all(reversed), "the matching letters are not reversed");
+        assert!(!(x + 5..x + 8).any(reversed), "letters past the match are reversed");
+        let text = draw::tests::render(&mut a, 100, 24);
+        assert!(screen_title(&text).contains("/x-key 3개 맞음"), "{:?}", screen_title(&text));
+        // A match in the folder part only marks the row.
+        a.hit("Esc");
+        search(&mut a, "j1/");
+        assert_eq!(window(&a).found_in("j1/x-key.txt"), Some(None));
+        assert_eq!(window(&a).found_in("j1"), None, "the folder itself is found");
+        a.hit("Esc");
+        search(&mut a, "글파");
+        let at = window(&a).found_in("한글파일.txt").expect("the Hangul name is not found");
+        assert_eq!(at, Some("한".len().."한글파".len()));
+        let _ = draw::tests::render(&mut a, 100, 24);
+    }
+
+    fn screen_title(lines: &[String]) -> String {
+        lines.iter().find(|l| l.contains("파일 ·")).cloned().unwrap_or_default()
+    }
+
+    use ratatui::style::Modifier;
+
+    /// **Typing never waits on the walk, and `Esc` answers while it runs** — the title says the index is being walked.
+    #[test]
+    fn typing_never_waits_on_a_slow_walk() {
+        let (_s, mut a) = files_app("search-slow");
+        let disk = std::mem::take(&mut a.files_disk);
+        a.files_disk = disk.walking(|jail, dir, skip, take| {
+            std::thread::sleep(Duration::from_secs(2));
+            files::walk(jail, dir, skip, take)
+        });
+        a.hit("SPC g f");
+        settle(&mut a);
+        let began = Instant::now();
+        a.hit("/");
+        typed(&mut a, "main");
+        a.follow_files();
+        assert!(began.elapsed() < Duration::from_millis(500), "a key waited on the walk: {:?}", began.elapsed());
+        assert!(a.loading(), "the loop is not told to take the walk");
+        let screen = draw::tests::render(&mut a, 100, 20).join("\n");
+        assert!(screen.contains("/main 0개 맞음 · 색인 0"), "{screen}");
+        a.hit("Esc");
+        assert!(window(&a).typing.is_none() && window(&a).query().is_none(), "Esc did not answer while walking");
+        a.hit("Esc");
+        assert_eq!(a.mode, Mode::Browse, "the second Esc did not close the window");
+        assert!(began.elapsed() < Duration::from_millis(1500), "Esc waited on the walk: {:?}", began.elapsed());
+    }
+
+    /// **At most 500 open, shallow first, and the title gives the whole count**; typing more narrows it.
+    #[test]
+    fn the_found_are_cut_at_five_hundred_shallow_first() {
+        let (s, mut a) = files_app("search-limit");
+        std::fs::create_dir_all(s.path().join("deep")).unwrap();
+        for n in 0..600 {
+            std::fs::write(s.path().join(format!("deep/hit{n:03}.txt")), "").unwrap();
+        }
+        std::fs::write(s.path().join("hit-top.txt"), "").unwrap();
+        a.hit("SPC g f");
+        settle(&mut a);
+        search(&mut a, "hit");
+        assert_eq!(window(&a).found_count(), (FOUND_LIMIT, 601));
+        assert!(window(&a).found_in("hit-top.txt").is_some(), "the file at the root was crowded out");
+        assert_eq!(found(&a).len(), FOUND_LIMIT, "more than the limit are marked");
+        let lines = draw::tests::render(&mut a, 120, 20);
+        assert!(screen_title(&lines).contains("601개 중 500개"), "{:?}", screen_title(&lines));
+        a.hit("Esc");
+        search(&mut a, "hit-");
+        assert_eq!(window(&a).found_count(), (1, 1), "typing more did not narrow");
+    }
+
+    /// **The ignored directories are skipped by the search and still stand**; stepped into, one is searched; without
+    /// git nothing is skipped and the title says so; the ignored list is asked once per index, never per key.
+    #[test]
+    fn the_search_skips_ignored_directories_unless_stepped_into() {
+        let (_s, mut a) = files_app("search-ignored");
+        let asked = Arc::new(AtomicUsize::new(0));
+        let n = asked.clone();
+        let disk = std::mem::take(&mut a.files_disk);
+        a.files_disk = disk.ignoring(move |_| {
+            n.fetch_add(1, Ordering::SeqCst);
+            Some(vec!["target/".to_string()])
+        });
+        a.hit("SPC g f");
+        settle(&mut a);
+        let opened = asked.load(Ordering::SeqCst);
+        search(&mut a, "out");
+        assert_eq!(window(&a).found_count(), (0, 0), "a file inside the ignored target/ was found");
+        assert!(paths(&a).contains(&"target".to_string()), "the ignored row left the tree");
+        assert_eq!(asked.load(Ordering::SeqCst), opened + 1, "the ignored list was asked per key");
+        a.hit("Esc");
+        search(&mut a, "debug");
+        assert_eq!(asked.load(Ordering::SeqCst), opened + 1, "the same root asked again");
+        a.hit("Esc");
+        on(&mut a, "target");
+        a.hit("Enter");
+        settle(&mut a);
+        search(&mut a, "out");
+        assert_eq!(found(&a), ["target/debug/out"], "inside target/ the search found nothing");
+        assert_eq!(asked.load(Ordering::SeqCst), opened + 2);
+        // Without git: nothing skipped, and the title says it.
+        a.hit("Esc Esc");
+        a.files_disk = Disk::with(files::list, |_| None);
+        a.hit("SPC g f");
+        settle(&mut a);
+        search(&mut a, "out");
+        assert_eq!(found(&a), ["target/debug/out"], "without git the search failed");
+        let lines = draw::tests::render(&mut a, 120, 20);
+        assert!(screen_title(&lines).contains("건너뛰는 것 없음"), "{:?}", screen_title(&lines));
+    }
+
+    /// **`n`·`N` go round the found rows in the tree's order** — the cursor lands only on rows found.
+    #[test]
+    fn n_and_shift_n_go_round_the_found_rows() {
+        let (s, mut a) = files_app("search-jump");
+        for d in ["j1", "j2"] {
+            std::fs::create_dir_all(s.path().join(d)).unwrap();
+            std::fs::write(s.path().join(d).join("x-key.txt"), "x").unwrap();
+        }
+        std::fs::write(s.path().join("x-key.md"), "x").unwrap();
+        a.hit("SPC g f");
+        settle(&mut a);
+        search(&mut a, "x-key");
+        let at = |a: &App| window(a).current_path().map(str::to_owned);
+        assert_eq!(at(&a).as_deref(), Some("x-key.md"), "the cursor is not on the first found (the shallowest)");
+        let mut went = Vec::new();
+        for _ in 0..3 {
+            a.hit("n");
+            went.push(at(&a).unwrap());
+        }
+        assert_eq!(went, ["j1/x-key.txt", "j2/x-key.txt", "x-key.md"], "n did not go round");
+        a.hit("N");
+        assert_eq!(at(&a).as_deref(), Some("j2/x-key.txt"), "N did not go back");
+        a.hit("g g N");
+        assert_eq!(at(&a).as_deref(), Some("x-key.md"), "N from the top did not go round to the last");
+    }
+
+    /// **Ending the search folds back what it opened and leaves what the hand opened** — `Esc` ends it before it closes
+    /// the window; a folder the search opened that the hand folded and opened again is the hand's.
+    #[test]
+    fn esc_ends_the_search_first_and_folds_only_what_it_opened() {
+        let (s, mut a) = files_app("search-esc");
+        for d in ["j1", "j2", "j3"] {
+            std::fs::create_dir_all(s.path().join(d)).unwrap();
+            std::fs::write(s.path().join(d).join("x-key.txt"), "x").unwrap();
+        }
+        a.hit("SPC g f");
+        settle(&mut a);
+        on(&mut a, "j3");
+        a.hit("l");
+        settle(&mut a);
+        search(&mut a, "x-key");
+        on(&mut a, "j1");
+        a.hit("h l");
+        settle(&mut a);
+        let w = window(&a);
+        assert!(w.is_open("j1") && w.is_open("j2") && w.is_open("j3"), "the premise");
+        on(&mut a, "j2/x-key.txt");
+        a.hit("Esc");
+        let w = window(&a);
+        assert!(matches!(a.mode, Mode::Files(_)), "one Esc closed the window over a search");
+        assert!(!w.is_open("j2"), "the folder the search opened is still open");
+        assert!(w.is_open("j1") && w.is_open("j3"), "a folder the hand opened was folded");
+        assert_eq!(w.current_path(), Some("j2"), "the cursor did not climb to the folder that folded");
+        assert!(w.found_in("j1/x-key.txt").is_none(), "the marks stayed");
+        a.hit("Esc");
+        assert_eq!(a.mode, Mode::Browse);
+    }
+
+    /// **`Esc` in the field drops what was typed** and goes back to the search before, the cursor where it stood.
+    #[test]
+    fn esc_in_the_field_goes_back_to_the_search_before() {
+        let (s, mut a) = files_app("search-cancel");
+        std::fs::write(s.path().join("x-key.md"), "x").unwrap();
+        a.hit("SPC g f");
+        settle(&mut a);
+        search(&mut a, "x-key");
+        on(&mut a, "README.md");
+        a.hit("/");
+        assert_eq!(window(&a).typing.as_ref().map(|t| t.input.text()), Some("x-key"), "the field is not the search");
+        typed(&mut a, "zzz");
+        settle(&mut a);
+        assert_eq!(window(&a).found_count(), (0, 0));
+        a.hit("Esc");
+        settle(&mut a);
+        let w = window(&a);
+        assert_eq!((w.query(), w.found_count()), (Some("x-key"), (1, 1)));
+        assert_eq!(w.current_path(), Some("README.md"), "the cursor did not come back");
+    }
+
+    /// **A new root walks a new index** — stepped into a folder, the search does not answer from the old root's.
+    #[test]
+    fn a_stale_index_is_not_searched_after_stepping_in() {
+        let (s, mut a) = files_app("search-root");
+        std::fs::create_dir_all(s.path().join("other")).unwrap();
+        std::fs::write(s.path().join("other/readme.txt"), "x").unwrap();
+        a.hit("SPC g f");
+        settle(&mut a);
+        search(&mut a, "main");
+        assert_eq!(found(&a), ["src/main.rs"]);
+        a.hit("Esc");
+        on(&mut a, "other");
+        a.hit("Enter");
+        settle(&mut a);
+        search(&mut a, "readme");
+        assert_eq!(found(&a), ["other/readme.txt"], "the old root's index answered");
+        assert_eq!(window(&a).found_count(), (1, 1));
+        // A search hung while stepping walks again for the new root.
+        a.hit("Bksp");
+        settle(&mut a);
+        assert_eq!(window(&a).found_count(), (2, 2), "stepping out did not walk the root again");
+    }
+
+    /// **A file the index named but its folder does not hold is left out without a word.**
+    #[test]
+    fn a_file_gone_since_the_walk_is_left_out() {
+        let (s, mut a) = files_app("search-gone");
+        std::fs::create_dir_all(s.path().join("ghost")).unwrap();
+        let disk = std::mem::take(&mut a.files_disk);
+        a.files_disk = disk.walking(|_, _, _, take| {
+            let _ = take(&["ghost".to_string(), "ghost/nothere.txt".to_string()]);
+            Ok(files::Walked { seen: 2, truncated: false })
+        });
+        a.hit("SPC g f");
+        settle(&mut a);
+        search(&mut a, "nothere");
+        assert_eq!(window(&a).found_count(), (0, 0));
+        assert!(a.notice.is_none(), "{:?}", a.notice);
+    }
+
+    /// **The index stops at the read layer's limit and says so.**
+    #[test]
+    fn an_index_at_its_limit_says_so() {
+        let (_s, mut a) = files_app("search-cut");
+        let disk = std::mem::take(&mut a.files_disk);
+        a.files_disk = disk.walking(|_, _, _, take| {
+            let _ = take(&["README.md".to_string()]);
+            Ok(files::Walked { seen: 200_000, truncated: true })
+        });
+        a.hit("SPC g f");
+        settle(&mut a);
+        search(&mut a, "read");
+        let notice = a.notice.clone().unwrap_or_default();
+        assert!(notice.contains("200000"), "{notice:?}");
+        assert_eq!(found(&a), ["README.md"]);
+    }
+
+    /// **The search's folders go out a few at a time** — not five hundred reads at once on the reader.
+    #[test]
+    fn the_search_reads_its_folders_a_few_at_a_time() {
+        let (s, mut a) = files_app("search-pump");
+        for n in 0..40 {
+            std::fs::create_dir_all(s.path().join(format!("d{n:02}"))).unwrap();
+            std::fs::write(s.path().join(format!("d{n:02}/hit.txt")), "").unwrap();
+        }
+        a.hit("SPC g f");
+        settle(&mut a);
+        let disk = std::mem::take(&mut a.files_disk);
+        // The window is open; the next one reads its folders slowly.
+        a.hit("Esc");
+        a.files_disk = Disk::with(
+            |jail, path| {
+                if path.starts_with('d') {
+                    std::thread::sleep(Duration::from_millis(20));
+                }
+                files::list(jail, path)
+            },
+            |_| Some(Vec::new()),
+        );
+        drop(disk);
+        a.hit("SPC g f");
+        settle(&mut a);
+        a.hit("/");
+        typed(&mut a, "hit");
+        // The index comes in a batch or two; take it and look at what is out.
+        let began = Instant::now();
+        while window(&a).found_count().1 < 40 {
+            assert!(began.elapsed() < Duration::from_secs(10), "the index never came");
+            a.follow_files();
+            let w = window(&a);
+            let out = w.search.opened.iter().filter(|d| w.dirs.get(*d).is_some_and(|x| x.read.is_none())).count();
+            assert!(out <= SEARCH_READS, "{out} folders out at once");
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        a.hit("Enter");
+        settle(&mut a);
+        assert_eq!(found(&a).len(), 40);
+    }
+
+    /// **The field lets the mouse go and takes a paste**; the hung search keeps the mouse.
+    #[test]
+    fn the_field_lets_the_mouse_go_and_takes_a_paste() {
+        let (_s, mut a) = files_app("search-mouse");
+        a.hit("SPC g f");
+        settle(&mut a);
+        a.hit("/");
+        assert!(!a.wants_mouse(), "the field holds the mouse");
+        a.paste("mai");
+        typed(&mut a, "n");
+        a.hit("Enter");
+        settle(&mut a);
+        assert!(a.wants_mouse());
+        assert_eq!(window(&a).query(), Some("main"));
+        a.paste("x");
+        assert_eq!(window(&a).query(), Some("main"), "a paste with no field changed the search");
+        let lines = draw::tests::render(&mut a, 120, 20);
+        let bar = lines.last().unwrap();
+        assert!(bar.contains("n·N 다음/이전") && bar.contains("Esc 찾기 끝"), "{bar:?}");
     }
 }

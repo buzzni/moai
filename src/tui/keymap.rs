@@ -629,6 +629,9 @@ impl Named for Files {
             Files::FocusNext => own("focus_next"),
             Files::Focus(s) => Name::Own(format!("focus_{}", side(s))),
             Files::Pan(s) => Name::Own(format!("scroll_{}", side(s))),
+            Files::Search => own("search"),
+            Files::NextFound => own("next_match"),
+            Files::PrevFound => own("prev_match"),
             Files::Close => own("close"),
         }
     }
@@ -908,6 +911,24 @@ fn freeze<A: Copy + 'static>(rows: Vec<Row<A>>, touched: bool, default: &'static
     Box::leak(binds.into_boxed_slice())
 }
 
+/// **The file window's own default keys win over the person's `[moves]` lines there** (moai-ffk9.rid) — the gantt's
+/// rule ([`Tables::gantt_over_browse`], moai-l80o): an upgrade must not drop a line the person wrote. `n`·`N` came to
+/// the file window after `keys.toml` could already move with `n` — `moai keys --help` gives `line_down = "n"` as its
+/// example — and blaming that line would drop it from every window. It lives everywhere else; in the file window the
+/// window's key answers and the person's move row is left out there. A key the person gave the window itself
+/// (`[files]`) still clashes as before.
+fn yield_moves<A: Named>(mut rows: Vec<Row<A>>) -> Vec<Row<A>> {
+    let own = |r: &Row<A>| r.from.is_none() && !matches!(r.act.name(), Name::Move(_));
+    let overlap = |a: &Row<A>, b: &Row<A>| a.seq.iter().zip(b.pressed()).all(|(k, e)| k.matches(e));
+    let defaults: Vec<Row<A>> = rows.iter().filter(|r| own(r)).cloned().collect();
+    rows.retain(|r| {
+        r.from.is_none()
+            || !matches!(r.act.name(), Name::Move(_))
+            || !defaults.iter().any(|d| overlap(d, r) || overlap(r, d))
+    });
+    rows
+}
+
 /// 짓는 중의 표 전부.
 struct Tables {
     browse: Vec<Row<Browse>>,
@@ -933,7 +954,7 @@ impl Tables {
             pick: apply(PICK, Section::Picker, Key::bare, e, live),
             stats: apply(STATS, Section::Stats, Key::any, e, live),
             wiki: apply(WIKI, Section::Wiki, Key::any, e, live),
-            files: apply(FILES, Section::Files, Key::any, e, live),
+            files: yield_moves(apply(FILES, Section::Files, Key::any, e, live)),
             links: apply(LINKS, Section::Links, Key::bare, e, live),
             confirm: apply(CONFIRM, Section::Confirm, Key::bare, e, live),
         }
@@ -1105,7 +1126,7 @@ mod tests {
             each(LINKS),
             each(CONFIRM),
         ];
-        assert_eq!(counts, [67, 8, 12, 2, 16, 6, 2, 9, 11, 2, 1]);
+        assert_eq!(counts, [67, 8, 12, 2, 16, 6, 2, 9, 14, 2, 1]);
         // 이동은 다섯 표 모두에서 여덟이 다 선다 — `[moves]` 의 한 줄이 어느 표에서는 없는 동작이면 안 된다.
         fn moves<A: Named>(table: &[Bind<A>]) -> usize {
             names(table).iter().filter(|(n, _)| matches!(n, Name::Move(_))).count()
@@ -1322,6 +1343,20 @@ mod tests {
         // 한 줄 안의 겹침도 확실한 탓이다 — 옆 줄을 버려도 안 풀린다.
         let (_, problems) = build("[browse]\nquit = [\"x\", \"x y\"]\njot = \"1\"\n");
         assert_eq!(whys(&problems), [("browse.quit", &clash("x", "browse.quit")), ("browse.jot", &clash("1", "1"))]);
+    }
+
+    /// **A `[moves]` line on `n` is not dropped by the file window's `n`** (moai-ffk9.rid) — it moves everywhere else and
+    /// the window's own key answers there; a `[files]` line on a window key still clashes.
+    #[test]
+    fn a_move_on_the_file_windows_key_yields_there_and_lives_elsewhere() {
+        let (map, problems) = build("[moves]\nline_down = [\"n\", \"Down\"]\n");
+        assert!(problems.is_empty(), "{problems:?}");
+        assert_eq!(run(map.browse, "n"), Lookup::Run(Browse::Step(Move::LineDown)));
+        assert_eq!(run(map.wiki, "n"), Lookup::Run(Wiki::Step(Move::LineDown)));
+        assert_eq!(run(map.files, "n"), Lookup::Run(Files::NextFound));
+        assert_eq!(run(map.files, "Down"), Lookup::Run(Files::Step(Move::LineDown)));
+        let (_, problems) = build("[files]\nsearch = \"n\"\n");
+        assert_eq!(whys(&problems), [("files.search", &clash("n", "files.next_match"))]);
     }
 
     /// **이동은 다섯 표가 함께 쓴다** — `[moves]` 의 한 줄이 탐색·고르기·통계·위키·링크 모두를 바꾼다.
@@ -1700,7 +1735,7 @@ mod tests {
         let (map, problems) = build(&open);
         assert_eq!(problems, Vec::new());
         assert_eq!(listing(&map), listing(&Keymap::default()));
-        assert_eq!(open.matches(" = ").count(), 136, "틀이 동작을 빠뜨렸다");
+        assert_eq!(open.matches(" = ").count(), 139, "틀이 동작을 빠뜨렸다");
         // 주석 그대로면 아무것도 안 바뀐다.
         assert_eq!(build(&t), (Keymap::default(), Vec::new()));
     }

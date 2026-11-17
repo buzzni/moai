@@ -2486,7 +2486,7 @@ impl App {
             Mode::Browse => false,
             Mode::Stats(w) => !w.chord.held().is_empty(),
             Mode::Wiki(w) => w.typing.is_some() || w.choose.is_some() || !w.chord.held().is_empty(),
-            Mode::Files(w) => !w.chord.held().is_empty(),
+            Mode::Files(w) => w.typing.is_some() || !w.chord.held().is_empty(),
             _ => true,
         }
     }
@@ -3901,8 +3901,9 @@ impl App {
         let unread = self.unread_journals();
         self.journals_told.retain(|u| unread.contains(u));
         let watching = match &self.mode {
-            Mode::Browse | Mode::Stats(_) | Mode::Files(_) => true,
+            Mode::Browse | Mode::Stats(_) => true,
             Mode::Wiki(w) => w.typing.is_none(),
+            Mode::Files(w) => w.typing.is_none(),
             _ => false,
         };
         if self.notice.is_some() || !watching {
@@ -8368,8 +8369,8 @@ impl App {
             Mode::Stats(_) => {}
             // 찾는 칸이 열렸으면 거기 넣는다 — 목록이 그만큼 좁아진다.
             Mode::Wiki(w) => w.paste(s),
-            // No field yet — the search (moai-ffk9.rid) takes it.
-            Mode::Files(_) => {}
+            // Into the search field when it is open (moai-ffk9.rid), else nowhere.
+            Mode::Files(w) => w.paste(s),
         }
     }
 

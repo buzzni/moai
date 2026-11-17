@@ -1977,8 +1977,11 @@ fn files_tree(f: &mut Frame, w: &mut super::files::Window, at: Rect, lang: Lang)
     let project = crate::text::one_line(&w.project);
     let place = if w.here == "." { format!("{project}/") } else { format!("{project}/{}/", safe_name(&w.here)) };
     let head = format!(" {} · ", say(lang, "tui.files.title"));
-    let room_for_place = inner_w.saturating_sub(crate::text::width(&head) + 1);
-    let title = format!("{head}{} ", crate::text::clip_front(&place, room_for_place));
+    // **The search stands in the title and gets its room before the place** (the wiki window's reason): without it
+    // nothing on screen says why folders opened and rows are marked.
+    let found = files_found_said(w, lang);
+    let room_for_place = inner_w.saturating_sub(crate::text::width(&head) + crate::text::width(&found) + 1);
+    let title = format!("{head}{}{found} ", crate::text::clip_front(&place, room_for_place));
     let block = pane_frame(focused).title(clip(&title, inner_w));
     let inner = block.inner(at);
     f.render_widget(block, at);
@@ -1998,12 +2001,16 @@ fn files_tree(f: &mut Frame, w: &mut super::files::Window, at: Rect, lang: Lang)
     }
     let top = w.list.offset();
     let room = (rows_at.width as usize).saturating_sub(crate::text::width(CURSOR));
+    let searching = w.query().is_some();
     let items: Vec<ListItem> = w
         .rows()
         .iter()
         .skip(top)
         .take(rows_at.height as usize)
-        .map(|r| ListItem::new(fit(files_row(r, lang), room)))
+        .map(|r| {
+            let line = files_row(r, lang);
+            ListItem::new(fit(if searching { files_found_row(w, r, line) } else { line }, room))
+        })
         .collect();
     let selected = (n > 0 && (top..top + rows_at.height as usize).contains(&w.cursor)).then(|| w.cursor - top);
     let mut state = ListState::default().with_selected(selected);
@@ -2020,6 +2027,62 @@ fn files_tree(f: &mut Frame, w: &mut super::files::Window, at: Rect, lang: Lang)
         f.render_widget(Paragraph::new(fit(said, room)), Rect { x: rows_at.x + left_gutter() as u16, ..rows_at });
     }
     rows_at
+}
+
+/// The search in the tree's title (moai-ffk9.rid): ` · /query 3 found`, past the limit `500 of 1234`, while the index
+/// is walked `indexing 1200`, and a word when git named nothing to skip or the walk could not start.
+fn files_found_said(w: &super::files::Window, lang: Lang) -> String {
+    // The field open with nothing typed yet still tells how far the index got.
+    let mut said = match w.query() {
+        Some(q) => {
+            let (shown, total) = w.found_count();
+            let count = if total > shown {
+                fill(say(lang, "tui.files.found_more"), &[("shown", &shown.to_string()), ("n", &total.to_string())])
+            } else {
+                fill(say(lang, "tui.files.found"), &[("n", &total.to_string())])
+            };
+            format!(" · /{} {count}", safe_name(&crate::text::one_line(q)))
+        }
+        None if w.typing.is_some() => String::new(),
+        None => return String::new(),
+    };
+    if let Some(n) = w.indexing() {
+        said.push_str(&format!(" · {}", fill(say(lang, "tui.files.indexing"), &[("n", &n.to_string())])));
+    }
+    if w.unskipped() {
+        said.push_str(&format!(" · {}", say(lang, "tui.files.unskipped")));
+    }
+    if let Some(why) = w.index_failed() {
+        said.push_str(&format!(" · {}", fill(say(lang, "tui.files.index_failed"), &[("why", &why.said(lang))])));
+    }
+    said
+}
+
+/// A tree row while a search stands (moai-ffk9.rid): a [`super::files::FOUND`] mark heads a found row and a blank the
+/// rest, so the tree keeps its indent; the matching letters of a found name are reversed; a file not found is dimmed
+/// (the mockup's look — the mark, not the dimming, tells them apart). **Nothing is left out.**
+fn files_found_row(w: &super::files::Window, r: &super::files::Row, line: Line<'static>) -> Line<'static> {
+    use super::files::{FOUND, Row};
+    let hit = match r {
+        Row::Entry { path, .. } => w.found_in(path),
+        _ => None,
+    };
+    let mark = if hit.is_some() { Span::styled(FOUND, bold()) } else { Span::raw(" ".repeat(FOUND.len())) };
+    let mut line = line;
+    line.spans.insert(0, mark);
+    match (r, hit) {
+        (Row::Entry { depth, entry, .. }, Some(Some(at))) => {
+            // The mark, the indent and the fold mark come before the name — two columns each.
+            let lead = crate::text::width(FOUND) + 2 * depth + 2;
+            let from = lead + crate::text::width(&safe_name(&entry.name[..at.start]));
+            let to = lead + crate::text::width(&safe_name(&entry.name[..at.end]));
+            reversed(line, from, to)
+        }
+        (Row::Entry { entry, .. }, None) if !matches!(entry.kind, crate::files::Kind::Dir) => {
+            line.patch_style(Style::new().add_modifier(Modifier::DIM))
+        }
+        _ => line,
+    }
 }
 
 /// One tree row. **Without colour the kinds still part**: a directory has its fold mark and a trailing `/`, a link its
@@ -2216,6 +2279,13 @@ fn files_info(f: &mut Frame, w: &super::files::Window, at: Rect, lang: Lang) {
 fn files_keys(f: &mut Frame, w: &super::files::Window, at: Rect, lang: Lang) {
     use super::files::Side;
     use super::keys::Files as F;
+    // **While typing the field stands** — with a word when nothing matched and the index is done (the text is kept).
+    if let Some(t) = &w.typing {
+        let none = (w.query().is_some() && w.found_count().1 == 0 && w.indexing().is_none())
+            .then(|| say(lang, "tui.files.no_match").to_string());
+        let help = prompt_help(say(lang, "tui.prompt.hang"), lang);
+        return prompt(f, at, say(lang, "tui.files.search"), &t.input, none, &help);
+    }
     let on_info = w.focus == Side::Info;
     if !w.chord.held().is_empty() {
         let next = keys::next_keys(w.keys.files, w.chord.held())
@@ -2242,8 +2312,20 @@ fn files_keys(f: &mut Frame, w: &super::files::Window, at: Rect, lang: Lang) {
         let pan = labels(w.keys.files, &[F::Pan(keys::Side::Left), F::Pan(keys::Side::Right)]);
         optional.push(key(&pan, F::Pan(keys::Side::Left).what(on_info, lang)));
     }
+    // A hung search: `n`·`N` jump and `Esc` ends it (the mockup's bar); otherwise `/` opens one.
+    let searched = w.searched();
+    if searched {
+        let jump = labels(w.keys.files, &[F::NextFound, F::PrevFound]);
+        keep.push(key(&jump, say(lang, "tui.files.next_prev_found")));
+    } else {
+        optional.push(hint(F::Search));
+    }
     keep.push(hint(F::FocusNext));
-    keep.push(hint(F::Close));
+    if searched {
+        keep.push(key(&label(w.keys.files, F::Close), say(lang, "tui.files.end_search")));
+    } else {
+        keep.push(hint(F::Close));
+    }
     keep.push(key(&menu::title(&[LEADER.event()]), menu::root(lang)));
     bar(f, at, optional, keep);
 }

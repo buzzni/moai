@@ -892,6 +892,17 @@ BACKLOG
   the pane, as does the sideways wheel — lines do not wrap, and ‹ and › say
   there is more to either side. Reading runs in the background: a directory or
   a file being read says so and the cursor keeps moving.
+  {key:files.search} finds files below the tree's root by a piece of their path, case
+  aside, as you type; Enter keeps the search and Esc drops what was typed.
+  Nothing is hidden: the folders down to each file found open, the file's row
+  is marked at its head with an asterisk and its matching letters reversed,
+  and every other row stays. Directories git ignores are not searched unless
+  you step into one first; .git and links are never entered. The first search
+  on a root indexes it in the background and the title says how far it got.
+  Up to 500 files open, the shallow ones first, with the whole count in the
+  title. {key:files.next_match} and {key:files.prev_match} jump to the next and previous file found, round at
+  the ends. {key:files.close} ends the search and folds back what it opened — folders you
+  opened stay.
   {key:files.close} closes the window, with the cursor, the filter and the detail as
   they were. SPC opens the menu over it with the screens. The window is read
   fresh every time.

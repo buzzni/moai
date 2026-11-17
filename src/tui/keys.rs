@@ -1855,6 +1855,12 @@ pub enum Files {
     /// Scroll the right pane's text sideways by half the pane — `H`·`L` (moai-ffk9.3fd). Only there: the tree has
     /// nothing to scroll sideways. The gantt's `H`·`L` live in its own table ([`GANTT`]) and stay as they are.
     Pan(Side),
+    /// Open the search field — `/` (moai-ffk9.rid). It finds files below the tree's root and opens the folders to them;
+    /// nothing is hidden.
+    Search,
+    /// To the next or the previous file found, in the tree's order, round at the ends — `n`·`N`. Only this window's.
+    NextFound,
+    PrevFound,
     Close,
 }
 
@@ -1896,6 +1902,9 @@ pub const FILES: &[Bind<Files>] = {
         row!(Focus(Side::Right), None, Key::chord('w'), Key::chord('l')),
         row!(Pan(Side::Left), Some("H"), Key::plain('H')),
         row!(Pan(Side::Right), Some("L"), Key::plain('L')),
+        row!(Search, Some("/"), Key::plain('/')),
+        row!(NextFound, Some("n"), Key::plain('n')),
+        row!(PrevFound, Some("N"), Key::plain('N')),
         row!(Close, Some("Esc"), Key::bare(C::Esc)),
     ]
 };
@@ -1914,6 +1923,9 @@ impl Files {
             Files::FocusNext | Files::Focus(_) if on_info => say(lang, "tui.files.to_tree"),
             Files::FocusNext | Files::Focus(_) => say(lang, "tui.files.to_info"),
             Files::Pan(_) => say(lang, "tui.files.pan"),
+            Files::Search => say(lang, "tui.files.search_act"),
+            Files::NextFound => say(lang, "tui.files.next_found"),
+            Files::PrevFound => say(lang, "tui.files.prev_found"),
             Files::Close => say(lang, "tui.act.close"),
         }
     }
@@ -3121,7 +3133,7 @@ mod tests {
         every(k).contains(&Lookup::Pending)
     }
 
-    fn every(k: &[KeyEvent]) -> [Lookup<()>; 13] {
+    fn every(k: &[KeyEvent]) -> [Lookup<()>; 14] {
         [
             bare(lookup(ANYWHERE, k)),
             bare(lookup(MENU, k)),
@@ -3134,6 +3146,7 @@ mod tests {
             bare(lookup(CONFIRM, k)),
             bare(lookup(STATS, k)),
             bare(lookup(WIKI, k)),
+            bare(lookup(FILES, k)),
             bare(lookup(LINKS, k)),
             bare(lookup(SORTER, k)),
         ]
