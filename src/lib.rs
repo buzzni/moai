@@ -21,6 +21,7 @@ mod files;
 mod git;
 mod git_leaks;
 mod guide;
+mod highlight;
 pub mod held;
 mod hook;
 pub mod i18n;
