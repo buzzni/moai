@@ -325,7 +325,6 @@ pub fn parse(text: &str) -> Vec<FileDiff> {
     files
 }
 /// Align runs of removed and added lines by their positions within the run.
-#[allow(dead_code)] // The TUI and web side-by-side views consume this.
 pub fn pair(hunk: &Hunk) -> Vec<(Option<&Line>, Option<&Line>)> {
     let mut out = Vec::new();
     let mut i = 0;

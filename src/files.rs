@@ -1,5 +1,4 @@
 //! Filesystem access for the upcoming TUI and web file views.
-#![allow(dead_code)] // The TUI and web epics will consume this module.
 
 use crate::report::changes::Checkout;
 use std::io::{self, Read};

@@ -1,5 +1,4 @@
 //! Syntax classes for file and hunk text. Rendering chooses the actual colours.
-#![allow(dead_code)] // The TUI and web epics will consume this module.
 
 use crate::diff::{FileDiff, LineKind};
 use std::cell::Cell;

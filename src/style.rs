@@ -226,7 +226,7 @@ pub fn diff_status(status: crate::vcs::Status) -> Style {
 /// A file's colour by its extension group: source · docs and markup · config and data · scripts · pictures and
 /// binaries · the rest (unpainted).
 pub fn file_style(name: &str) -> Style {
-    let ext = std::path::Path::new(name).extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase();
+    let ext = crate::files::ext_of(name).to_ascii_lowercase();
     match ext.as_str() {
         "rs" | "c" | "h" | "cc" | "cpp" | "hpp" | "go" | "py" | "js" | "mjs" | "cjs" | "ts" | "tsx" | "jsx"
         | "java" | "kt" | "swift" | "rb" | "php" | "cs" | "scala" | "lua" | "zig" | "hs" | "ml" | "ex" | "exs"
