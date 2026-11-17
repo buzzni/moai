@@ -3361,12 +3361,13 @@ Order:
     SPC a y  accept a suggestion; SPC a n declines
     SPC a l  open the suggestion list
     SPC p a  register            SPC p d  drop from the list
+    SPC w  the file window's checkout to show (see below)
   Screen — which one stands; the root menu names it, as in [board]:
     SPC g l  list                SPC g b  board — described below
     SPC g g  gantt — the list opened out beside a date axis (see below)
     SPC g s  statistics — the numbers `moai stats` gives, drawn (see below)
-    SPC g w  wiki — the project's manual pages, read only (see below)
     SPC g f  files — the checkout's file tree, read only (see below)
+    SPC g w  wiki — the project's manual pages, read only (see below)
   View — every toggle except the list columns (SPC c) is here:
     SPC v l  deferred         SPC v b  backlog        SPC v a  show all
     SPC v o  the archive — done that has sat a while [shown/hidden]; SPC v a
@@ -3664,7 +3665,14 @@ Order:
   git ignores too; only .git is left out. Directories come first, marked ▸
   folded and ▾ open and ending in /, links show → and where they point (a
   link out of the checkout says so and does not open), and directories git
-  ignores say ignored. The hand is the list's: j and k, gg and G move the
+  ignores say ignored. The levels hang from the list's own tree lines, ├─
+  and └─ under │, here and in the changed files only. Each row's first
+  column is its change against the checkout's base: M=changed, A=added
+  (untracked too), D=deleted, R=renamed. Directories are M=changed for any
+  change below, A=added or D=deleted only when new or gone as a whole. Deleted
+  paths stand only in the changed files only; while the list is read the
+  column is blank, and a list cut at 5,000 says so in the title. The hand is
+  the list's: j and k, gg and G move the
   cursor; Ctrl-d, Ctrl-u, Ctrl-f, Ctrl-b and the wheel scroll the tree and leave
   the cursor; l or Right opens a directory one level and h or Left folds
   it or goes to the row above it; Tab opens everything below — not into
@@ -3691,7 +3699,7 @@ Order:
   title. n and N jump to the next and previous file found, round at
   the ends. Esc ends the search and folds back what it opened — folders you
   opened stay.
-  SPC v w over the window picks the checkout it shows: the main checkout
+  SPC w over the window picks the checkout it shows: the main checkout
   first, then the linked worktrees, a milestone's worktree saying so, each
   with its branch and its issue's title, the one shown marked [now]. Only
   the checkouts git lists can be picked, and the picked one is the new root:
@@ -3700,10 +3708,12 @@ Order:
   to the main one and says so. SPC v c shows the changed files only — what
   changed on the checkout's branch since it forked, uncommitted and untracked
   files with it (on the main checkout, what is not committed) — as a tree with
-  every folder open, each file headed by the letter moai diff --stat prints for
-  its kind and followed by +added −removed; deleted files stand dimmed.
-  Pressed again it gives the tree back with the folders and the cursor as
-  they were. The
+  every folder open, each row headed by its mark, a file followed by
+  +added −removed and a folder by the sum below it; deleted files stand
+  dimmed and struck through.
+  It stands the diff pane up when the pane is down. Pressed again it gives
+  the tree back with the folders and the cursor as they were, and takes down
+  the diff pane only if it stood it up and you left the pane alone. The
   right pane shows the file's text; SPC v D shows its diff instead (on a
   folder, every changed file below it) and SPC v d the checkout's issue — an
   epic worktree's epic, a milestone worktree's milestone. With both on the
@@ -3726,7 +3736,7 @@ Order:
   (diff). Ctrl-w w goes round the panes that stand.
 
   The diff pane shows one scope of changes at a time. Each file starts with a
-  head line — its kind as the letter moai diff --stat prints, its path
+  head line — its kind as the file tree's mark (M/A/D/R), its path
   (old → new for a rename) and +added −removed — then its hunks: @@ and the
   line numbers, and every line with its old and new number and + for added,
   - for removed. The numbers and the mark carry the added and removed colours

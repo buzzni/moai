@@ -210,16 +210,16 @@ pub const DIFF_ADD: Style = fg(AnsiColor::Green);
 pub const DIFF_DEL: Style = fg(AnsiColor::Red);
 pub const DIFF_HUNK: Style = fg(AnsiColor::BrightBlue);
 
-/// The colour of a change kind's letter in a diff's file head (`M`·`A`·`D`·`R`·`?`) — the letter says it.
-pub fn diff_status(status: crate::vcs::Status) -> Style {
-    use crate::vcs::Status as S;
-    match status {
-        S::Added => DIFF_ADD,
-        S::Deleted => DIFF_DEL,
-        S::Modified | S::TypeChanged => fg(AnsiColor::Yellow),
-        S::Renamed | S::Copied => fg(AnsiColor::Cyan),
-        S::Untracked => fg(AnsiColor::Magenta),
-        S::Conflicted => fg(AnsiColor::BrightRed),
+/// The colour of a change mark (moai-p7nr.c67, the person's palette "안 A") — the file tree's first column and the
+/// diff pane's file heads alike, so one file never stands in two colours. **The letter says the kind**; the colour only
+/// helps the eye. Added and deleted are the diff lines' own colours.
+pub fn change_mark(mark: crate::vcs::Mark) -> Style {
+    use crate::vcs::Mark as M;
+    match mark {
+        M::Modified => fg(AnsiColor::Yellow),
+        M::Added => DIFF_ADD,
+        M::Deleted => DIFF_DEL,
+        M::Renamed => fg(AnsiColor::Cyan),
     }
 }
 

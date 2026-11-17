@@ -204,6 +204,13 @@ struct Tree<'a> {
 pub struct Twig(Vec<bool>);
 
 impl Twig {
+    /// 층마다의 값을 받아 짓는다 — 지금 디렉터리의 줄부터 이 줄까지, "그 층의 줄 뒤에 형제가 더
+    /// 있는가". 이슈 목록 밖의 트리(파일 창, moai-p7nr.xj3)가 목록과 같은 가지를 그리려고 쓴다. 빈
+    /// 값은 깊이 0 이다.
+    pub fn from_kin(kin: Vec<bool>) -> Twig {
+        Twig(kin)
+    }
+
     /// 몇 층 밑인가. 0 이면 지금 디렉터리의 줄이다.
     pub fn depth(&self) -> usize {
         self.0.len().saturating_sub(1)
