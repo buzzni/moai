@@ -42,6 +42,9 @@ export function normalizeMemory(value: unknown): Remembered {
       position: normalizePosition(detail.position),
       ratio: normalizeRatios(ratio),
     },
+    ...(isRecord(stored.diff) ? { diff: { visible: stored.diff.visible === true, horizontal: typeof stored.diff.horizontal === 'number' && Number.isFinite(stored.diff.horizontal) ? Math.min(0.85, Math.max(0.15, stored.diff.horizontal)) : 0.5, vertical: typeof stored.diff.vertical === 'number' && Number.isFinite(stored.diff.vertical) ? Math.min(0.85, Math.max(0.15, stored.diff.vertical)) : 0.5 } } : {}),
+    ...(stored.diffLayout === 'side-by-side' ? { diffLayout: 'side-by-side' as const } : {}),
+    ...(typeof stored.filesRatio === 'number' && Number.isFinite(stored.filesRatio) ? { filesRatio: Math.min(0.85, Math.max(0.15, stored.filesRatio)) } : {}),
     // A zone this browser does not know (dropped since, or edited by hand) is no choice: the page falls back silently.
     // No choice is no key, as the page before the picker wrote it.
     ...(validZone(stored.zone) ? { zone: validZone(stored.zone) } : {}),
@@ -53,12 +56,15 @@ export function normalizeMemory(value: unknown): Remembered {
 /** The part of the state that is remembered. */
 export function rememberedOf(state: State): Remembered {
   const { visible, position, ratio } = state.detail
-  return { tab: state.tab, detail: { visible, position, ratio: { ...ratio } }, ...(state.zone ? { zone: state.zone } : {}), ...(state.theme !== 'system' ? { theme: state.theme } : {}) }
+  return { tab: state.tab, detail: { visible, position, ratio: { ...ratio } }, ...(state.diff.visible || state.diff.horizontal !== 0.5 || state.diff.vertical !== 0.5 ? { diff: { ...state.diff } } : {}), ...(state.diffLayout === 'side-by-side' ? { diffLayout: state.diffLayout } : {}), ...(state.filesRatio !== 0.5 ? { filesRatio: state.filesRatio } : {}), ...(state.zone ? { zone: state.zone } : {}), ...(state.theme !== 'system' ? { theme: state.theme } : {}) }
 }
 
 export function sameMemory(a: Remembered, b: Remembered): boolean {
   return (
     a.tab === b.tab &&
+    sameValue(a.diff ?? { visible: false, horizontal: 0.5, vertical: 0.5 }, b.diff ?? { visible: false, horizontal: 0.5, vertical: 0.5 }) &&
+    (a.diffLayout ?? 'unified') === (b.diffLayout ?? 'unified') &&
+    (a.filesRatio ?? 0.5) === (b.filesRatio ?? 0.5) &&
     a.detail.visible === b.detail.visible &&
     a.detail.position === b.detail.position &&
     a.detail.ratio.right === b.detail.ratio.right &&
@@ -101,6 +107,9 @@ export function patchMemory(stored: unknown, before: Remembered | undefined, now
   }
   detail.ratio = patchLeaves(detail.ratio, before?.detail.ratio, now.detail.ratio)
   out.detail = detail
+  if (!before || !sameValue(before.diff, now.diff)) { if (now.diff === undefined) delete out.diff; else out.diff = patchLeaves(out.diff, before?.diff, now.diff) }
+  if (!before || before.diffLayout !== now.diffLayout) { if (now.diffLayout === undefined) delete out.diffLayout; else out.diffLayout = now.diffLayout }
+  if (!before || before.filesRatio !== now.filesRatio) { if (now.filesRatio === undefined) delete out.filesRatio; else out.filesRatio = now.filesRatio }
   for (const key of ['zone', 'theme'] as const) {
     const value = (settings: Remembered) => key === 'theme' && settings[key] === 'system' ? undefined : settings[key]
     if (before && value(before) === value(now)) continue

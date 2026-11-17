@@ -187,7 +187,7 @@ function boot(storage, { rows = ROWS, indexOf = null } = {}) {
 test('shell: tabs switch the pane shown and the choice is remembered', () => {
   const storage = fakeStorage()
   const panel = boot(storage)
-  assert.deepEqual([...panel.doc.querySelectorAll('[role="tab"]')].map((tab) => tab.textContent), ['Board', 'List', 'Gantt', 'Wiki'])
+  assert.deepEqual([...panel.doc.querySelectorAll('[role="tab"]')].map((tab) => tab.textContent), ['Board', 'List', 'Gantt', 'Wiki', 'Files'])
   assert.equal(panel.tab('list').getAttribute('aria-selected'), 'true')
   assert.equal(panel.$('.m-pane-main[data-pane="list"]').hidden, false)
   assert.equal(panel.$('.m-pane-main[data-pane="board"]').hidden, true)

@@ -20,7 +20,7 @@
 /** One endpoint of `moai web` and its query (src/web/api.rs PROFILES). */
 export interface Endpoint {
   path: string
-  query?: Readonly<Record<string, string>>
+  query?: Readonly<Record<string, string | readonly string[]>>
   /** `POST` for a write — a read mark or a plan (src/web/api.rs `write_argv_of`); a read is a `GET`. */
   method?: 'GET' | 'POST'
 }
@@ -80,11 +80,13 @@ export interface RequestState {
   priority: number
   phase: Phase
   share: boolean
+  group?: string
   /** Whether Cancel (`cancelAll`) ends it: a read mark's write and the one-time projects read are not Cancel's to stop. */
   cancellable: boolean
 }
 
 export interface RequestOptions {
+  group?: string
   priority?: number
   /** A read that must not be handed someone else's answer. */
   share?: boolean
@@ -161,7 +163,9 @@ export function answerOf(outcome: Outcome): unknown {
 /** The URL of an endpoint: its query in name order, so one read is one key. */
 export function urlOf(endpoint: Endpoint): string {
   const query = Object.entries(endpoint.query ?? {}).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
-  return query.length ? `${endpoint.path}?${new URLSearchParams(query).toString()}` : endpoint.path
+  const params = new URLSearchParams()
+  for (const [key, value] of query) for (const item of typeof value === 'string' ? [value] : value) params.append(key, item)
+  return query.length ? `${endpoint.path}?${params.toString()}` : endpoint.path
 }
 
 /** The queue's key for an endpoint — its URL, a write's marked as one. */
@@ -182,6 +186,7 @@ export interface Client {
   request(endpoint: Endpoint, options?: RequestOptions): Promise<Outcome>
   /** Cancels a queued request at once, or aborts a running one. */
   cancel(key: string): void
+  cancelGroup(group: string): void
   /**
    * Cancels every cancellable request (reads; not a write, nor one asked with `cancellable: false`), queued and running, in one step. Cancelling them key by key would free a running one's
    * slot first, and the queue would start the next waiting read — sent to the server — before its own turn came.
@@ -278,7 +283,7 @@ export function createClient(fetcher: Fetch, options: ClientOptions = {}): Clien
       const entry: Pending = {
         key, url, method, path: endpoint.path, priority, phase: 'queued',
         seq: seq++, promise, resolve, abort: new AbortController(), share, epoch,
-        cancellable: requestOptions.cancellable ?? method === 'GET',
+        cancellable: requestOptions.cancellable ?? method === 'GET', group: requestOptions.group,
       }
       pending.push(entry)
       notify()
@@ -292,6 +297,12 @@ export function createClient(fetcher: Fetch, options: ClientOptions = {}): Clien
         // waiting now.
         settle(entry, { kind: 'cancelled' })
       }
+    },
+    cancelGroup(group) {
+      const all = pending.filter((entry) => entry.group === group)
+      for (const entry of all) pending.splice(pending.indexOf(entry), 1)
+      for (const entry of all) { entry.abort.abort(); entry.resolve({ kind: 'cancelled' }) }
+      if (all.length) { notify(); pump() }
     },
     cancelAll() {
       const all = pending.filter((entry) => entry.cancellable)
@@ -307,7 +318,7 @@ export function createClient(fetcher: Fetch, options: ClientOptions = {}): Clien
       }
     },
     requests() {
-      return pending.map(({ key, path, priority, phase, share, cancellable }) => ({ key, path, priority, phase, share, cancellable }))
+      return pending.map(({ key, path, priority, phase, share, cancellable, group }) => ({ key, path, priority, phase, share, cancellable, ...(group ? { group } : {}) }))
     },
     subscribe(listener) {
       listeners.add(listener)

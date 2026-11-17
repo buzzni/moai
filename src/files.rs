@@ -433,10 +433,40 @@ pub fn read(jail: &Jail, path: &str) -> Result<Text, Why> {
 pub fn stamp(jail: &Jail, path: &str) -> Option<Stamp> {
     let actual = resolve(jail, path).ok()?;
     #[cfg(unix)]
-    let meta = open_checked(jail, &actual, false).ok()?.metadata().ok()?;
+    {
+        use std::ffi::CString;
+        use std::os::fd::AsRawFd;
+        use std::os::unix::ffi::OsStrExt;
+        let relative = actual.strip_prefix(&jail.root).ok()?;
+        if relative.as_os_str().is_empty() {
+            return jail.root_fd.metadata().ok().map(|m| Stamp::of(&m));
+        }
+        let parent = actual.parent()?;
+        let directory = open_checked(jail, parent, true).ok()?;
+        let name = CString::new(actual.file_name()?.as_bytes()).ok()?;
+        let mut raw = std::mem::MaybeUninit::<libc::stat>::uninit();
+        // A replacement symlink must not be followed after the confinement check.
+        if unsafe { libc::fstatat(directory.as_raw_fd(), name.as_ptr(), raw.as_mut_ptr(), libc::AT_SYMLINK_NOFOLLOW) }
+            != 0
+        {
+            return None;
+        }
+        let raw = unsafe { raw.assume_init() };
+        let kind = raw.st_mode & libc::S_IFMT;
+        if kind != libc::S_IFREG && kind != libc::S_IFDIR {
+            return None;
+        }
+        let modified = u64::try_from(raw.st_mtime).ok().and_then(|seconds| {
+            let nanos = u32::try_from(raw.st_mtime_nsec).ok()?;
+            std::time::UNIX_EPOCH.checked_add(std::time::Duration::new(seconds, nanos))
+        });
+        Some(Stamp { modified, size: raw.st_size.max(0) as u64 })
+    }
     #[cfg(not(unix))]
-    let meta = std::fs::metadata(actual).ok()?;
-    (meta.is_file() || meta.is_dir()).then(|| Stamp::of(&meta))
+    {
+        let meta = std::fs::metadata(actual).ok()?;
+        (meta.is_file() || meta.is_dir()).then(|| Stamp::of(&meta))
+    }
 }
 /// The text a link holds, read without following it. Only the parent is resolved, so a link
 /// pointing outside the jail is still described; the text is foreign and may hold anything.
@@ -477,13 +507,23 @@ pub fn link_text(jail: &Jail, path: &str) -> Result<String, Why> {
 }
 /// Walk in bounded batches. Returning false from `take` stops immediately.
 pub fn walk(jail: &Jail, dir: &str, skip: &[String], mut take: impl FnMut(&[String]) -> bool) -> Result<Walked, Why> {
-    walk_limit(jail, dir, skip, WALK_LIMIT, &mut take)
+    walk_limit(jail, dir, skip, WALK_LIMIT, false, &mut take)
+}
+/// Walk only regular file names while counting all visited entries against the limit.
+pub fn walk_files(
+    jail: &Jail,
+    dir: &str,
+    skip: &[String],
+    mut take: impl FnMut(&[String]) -> bool,
+) -> Result<Walked, Why> {
+    walk_limit(jail, dir, skip, WALK_LIMIT, true, &mut take)
 }
 fn walk_limit(
     jail: &Jail,
     dir: &str,
     skip: &[String],
     limit: usize,
+    files_only: bool,
     take: &mut impl FnMut(&[String]) -> bool,
 ) -> Result<Walked, Why> {
     let start = normal(dir)?;
@@ -542,6 +582,17 @@ fn walk_limit(
             seen += 1;
             if entry.openable && matches!(entry.kind, Kind::Dir) {
                 pending.push(PathBuf::from(&path));
+            }
+            if files_only && !matches!(entry.kind, Kind::File) {
+                // `take` is the caller's only stop (a time budget): a tree of directories with few files must still
+                // reach it, so it hears from the walk every BATCH entries even when the batch is short.
+                if seen % BATCH == 0 {
+                    if !take(&batch) {
+                        return Ok(Walked { seen, truncated: false });
+                    }
+                    batch.clear();
+                }
+                continue;
             }
             batch.push(path);
             if batch.len() == BATCH {
@@ -656,6 +707,23 @@ mod tests {
         assert_eq!(batches, 1);
         assert_eq!(result.seen, BATCH);
         assert!(!result.truncated);
+    }
+    #[test]
+    fn a_file_walk_over_directories_still_reaches_its_stop() {
+        let dir = crate::scratch::Scratch::new("files-dirs-stop");
+        let root: &Path = &dir;
+        for n in 0..300 {
+            fs::create_dir(root.join(format!("d{n:03}"))).unwrap();
+        }
+        let mut calls = 0;
+        let result = walk_files(&jail(root), ".", &[], |batch| {
+            assert!(batch.is_empty());
+            calls += 1;
+            false
+        })
+        .unwrap();
+        assert_eq!(calls, 1);
+        assert_eq!(result.seen, BATCH);
     }
     #[test]
     fn text_limit_keeps_utf8_boundaries() {
@@ -795,6 +863,15 @@ mod tests {
         assert!(paths.contains(&"target2/x".to_owned()));
         assert!(paths.contains(&"a/target/x".to_owned()));
         assert!(!paths.iter().any(|p| p.contains(".git")));
+        let mut only_files = Vec::new();
+        walk_files(&j, ".", &skip, |batch| {
+            only_files.extend_from_slice(batch);
+            true
+        })
+        .unwrap();
+        assert!(only_files.contains(&"target2/x".to_owned()));
+        assert!(!only_files.contains(&"target2".to_owned()));
+        assert_eq!(stamp(&j, "target2/x"), Some(Stamp::of(&fs::metadata(root.join("target2/x")).unwrap())));
         let mut inside = Vec::new();
         walk(&j, "target", &skip, |b| {
             inside.extend_from_slice(b);
@@ -803,7 +880,7 @@ mod tests {
         .unwrap();
         assert!(inside.contains(&"target/deep/x".to_owned()));
         let mut limited = Vec::new();
-        let result = walk_limit(&j, ".", &[], 3, &mut |b| {
+        let result = walk_limit(&j, ".", &[], 3, false, &mut |b| {
             limited.extend_from_slice(b);
             true
         })

@@ -505,6 +505,48 @@ body.m-resizing:is([data-resize="bottom"], [data-resize="top"]) { cursor: row-re
 .m-card-line .m-id, .m-card-line .m-count { font: 12px var(--mono); color: var(--muted); }
 .m-card-title { margin-top: 5px; overflow-wrap: anywhere; }
 
+.m-diff { min-height: 0; height: 100%; display: flex; flex-direction: column; }
+.m-diff-toolbar { display: flex; gap: .5rem; }
+.m-diff-body { overflow: auto; font-family: monospace; }
+.m-diff-file summary { cursor: pointer; white-space: pre; }
+.m-diff-hunk { color: var(--accent); white-space: pre; }
+.m-diff-line { display: flex; min-width: max-content; white-space: pre; }
+.m-diff-add { background: var(--ok-soft); }
+.m-diff-delete { background: var(--danger-soft); }
+.m-diff-no { position: sticky; left: 0; min-width: 4em; text-align: right; padding-right: .5em; background: var(--bg); color: var(--text-muted); }
+.m-diff-sign { min-width: 1em; }
+/* Each side is at least as wide as its longest line: a 0 minimum let a long old line paint over the new side. */
+.m-diff-pairs { display: grid; grid-template-columns: repeat(2, minmax(max-content, 1fr)); }
+
+.m-pane-files { min-height: 0; height: 100%; }
+.m-pane-files .m-split { height: 100%; }
+.m-files-tree, .m-files-content { height: 100%; overflow: auto; }
+.m-files-row { display: block; width: 100%; border: 0; text-align: left; color: inherit; background: transparent; white-space: nowrap; }
+.m-files-row[aria-selected="true"] { background: var(--selected); }
+.m-files-row:disabled { opacity: .5; }
+/* One step per level up to the cap view/files.ts draws: a shared indent from depth 4 drew a child level with its parent. */
+.m-files-depth-1 { padding-left: 1.5em; } .m-files-depth-2 { padding-left: 2.5em; } .m-files-depth-3 { padding-left: 3.5em; }
+.m-files-depth-4 { padding-left: 4.5em; } .m-files-depth-5 { padding-left: 5.5em; } .m-files-depth-6 { padding-left: 6.5em; }
+.m-files-depth-7 { padding-left: 7.5em; } .m-files-depth-8 { padding-left: 8.5em; } .m-files-depth-9 { padding-left: 9.5em; }
+.m-files-depth-10 { padding-left: 10.5em; } .m-files-depth-11 { padding-left: 11.5em; } .m-files-depth-12 { padding-left: 12.5em; }
+.m-file-line { display: flex; min-width: max-content; font-family: monospace; white-space: pre; }
+.m-file-number { position: sticky; left: 0; min-width: 4em; text-align: right; padding-right: 1em; background: var(--bg); opacity: .65; }
+.m-syntax-comment { color: var(--ok); } .m-syntax-string { color: var(--warn); } .m-syntax-keyword { color: var(--accent); } .m-syntax-number { color: var(--text-muted); }
+.m-pane-files { container: files / inline-size; }
+@container files (max-width: 639px) {
+  .m-split-detail, .m-split-resizer { display: none; }
+  .m-files-show-content .m-split-list { display: none; }
+  .m-files-show-content .m-split-detail { display: block; }
+}
+.m-files-kind-directory { color: var(--accent); }
+.m-files-kind-link { color: var(--warn); }
+.m-files-kind-source { color: var(--text); }
+.m-files-kind-document { color: var(--ok); }
+.m-files-kind-config { color: var(--text-muted); }
+.m-files-toolbar { display: flex; gap: .4rem; align-items: center; }
+.m-files-right, .m-files-issue { min-height: 0; height: 100%; overflow: auto; }
+.m-files-right > .m-split { height: 100%; }
+
 /*
  * The gantt tab (view/gantt.ts): a toolbar, one scroll box holding two columns — the grid (left, sticky, so it never
  * moves sideways) and the dates — and a legend. Ported from the mockup the person confirmed
