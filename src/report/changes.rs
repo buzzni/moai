@@ -74,7 +74,8 @@ pub fn scopes(
     now: &str,
 ) -> Offered {
     let Some(issue) = issues.iter().rev().find(|i| i.id == id) else { return Offered::default() };
-    let places = report::places(issues, cfg, workplaces, now);
+    let footing = report::Footing::of(issues, cfg);
+    let places = report::places_in(&footing, workplaces, now);
     let at = match places.get(id) {
         Some(Place::At(trees)) => {
             trees.iter().find_map(|w| checkouts.iter().find(|c| w.path.to_string_lossy() == c.key))
