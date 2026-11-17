@@ -1,0 +1,17 @@
+{
+  "exit": 0,
+  "out": {
+    "dir": "docs",
+    "entries": [
+      {
+        "dir": false,
+        "inside": false,
+        "kind": "file",
+        "name": "example.txt",
+        "openable": true,
+        "size": 8
+      }
+    ],
+    "stamp": "STAMP"
+  }
+}

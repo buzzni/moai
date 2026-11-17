@@ -36144,3 +36144,61 @@ fn diff_member_prefers_own_commits_and_owner_falls_back_to_branch() {
     assert_eq!(v["offers"][0]["owner"], epic);
     assert!(v["files"].as_array().unwrap().iter().any(|f| f["path"] == "committed"));
 }
+
+#[test]
+fn web_diff_matches_cli_and_rejects_unlisted_paths() {
+    let s = Scratch::new("web-diff-parity");
+    let root = s.path();
+    git(root, &["init", "-q"]);
+    ok(root, &["init", "argos"]);
+    let id = field(&ok(root, &["add", "issue", "--json"]), "id");
+    git(root, &["add", "-A"]);
+    git(root, &["commit", "-qm", "base"]);
+    std::fs::write(root.join("sample.rs"), "let text = \"한글\";\n").unwrap();
+    git(root, &["add", "sample.rs"]);
+    git(root, &["commit", "-qm", &format!("feat: {id}")]);
+    std::fs::write(root.join(".gitignore"), "ignored/\n").unwrap();
+    std::fs::create_dir(root.join("ignored")).unwrap();
+    std::fs::create_dir(root.join("needle-folder")).unwrap();
+    std::fs::write(root.join("ignored/needle.txt"), "hidden from search").unwrap();
+    let cli = json_of(&ok(root, &["diff", &id, "--scope=commits", "--json"]));
+    let web = serve(root);
+    for endpoint in [
+        "/api/checkouts",
+        "/api/files",
+        "/api/file?path=sample.rs",
+        "/api/find?q=sample",
+        "/api/ignored",
+        "/api/changes?root=.",
+        "/api/files-stamp?dir=.&path=sample.rs",
+    ] {
+        let (status, _, body) = get(web.port, endpoint);
+        assert_eq!(status, 200, "{endpoint}: {body}");
+        assert_eq!(json_of(&body)["exit"], 0, "{endpoint}: {body}");
+    }
+    let (_, _, body) = get(web.port, "/api/find?q=needle");
+    assert!(json_of(&body)["out"]["matches"].as_array().unwrap().is_empty());
+    let (_, _, body) = get(web.port, "/api/ignored");
+    assert!(
+        json_of(&body)["out"]["dirs"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|v| v.as_str().is_some_and(|v| v.trim_end_matches('/') == "ignored"))
+    );
+    let (status, _, body) = get(web.port, &format!("/api/diff?id={id}&scope=commits"));
+    assert_eq!(status, 200, "{body}");
+    let mut response = json_of(&body)["out"].clone();
+    for file in response["files"].as_array_mut().unwrap() {
+        for hunk in file["hunks"].as_array_mut().unwrap() {
+            for line in hunk["lines"].as_array_mut().unwrap() {
+                line.as_object_mut().unwrap().remove("spans");
+            }
+        }
+    }
+    assert_eq!(response, cli);
+    for path in ["--output%3D/tmp/x", "-x", "%3A%28top%29a"] {
+        let (status, _, _) = get(web.port, &format!("/api/diff?id={id}&scope=commits&path={path}"));
+        assert_eq!(status, 404, "{path}");
+    }
+}

@@ -15,6 +15,7 @@
 pub mod api;
 pub mod boot;
 pub mod ctl;
+pub mod files;
 pub mod http;
 pub mod run;
 
@@ -637,6 +638,13 @@ pub fn answer(req: &Request, site: &Site) -> Response {
     // 부른 쪽은 제가 준 것이 먹은 답이라 믿는다([`api::argv`]).
     let bare = || api::none_of(&query).map_err(|bad| refuse(400, &bad.said(lang), code::BAD_INPUT));
     match req.path.as_str() {
+        "/api/checkouts" | "/api/files" | "/api/file" | "/api/find" | "/api/ignored" | "/api/changes" | "/api/diff"
+        | "/api/files-stamp" => {
+            if req.origin.is_some() && !http::origin_ok(req.origin.as_deref(), req.host.as_deref()) {
+                return refuse(403, say(lang, "web.foreign_origin"), code::FORBIDDEN_ORIGIN);
+            }
+            files::answer(&req.path, &cwd, lang, &query)
+        }
         "/api/snippet" => {
             let (mut path, mut page, mut region) = (None, None, None);
             for (key, value) in &query {
@@ -1349,6 +1357,95 @@ mod image_tests {
         }
         assert_eq!(answer(&request("/api/snippet?path=.env", "evil.example"), &site).status, 403);
         assert_eq!(call("/api/snippet?path=x&project=/unregistered").status, 403);
+    }
+    #[test]
+    fn file_endpoints_confine_paths_and_validate_queries() {
+        let (root, site) = site();
+        std::fs::write(root.join(".env"), "secret").unwrap();
+        std::fs::write(root.join("docs/a.rs"), "let x = \"한글\";\n").unwrap();
+        let call = |path: &str| answer(&request(path, "localhost"), &site);
+        let read = call("/api/file?path=.env");
+        assert_eq!(read.status, 200);
+        assert_eq!(serde_json::from_slice::<serde_json::Value>(&read.body).unwrap()["out"]["text"], "secret");
+        for path in ["../x", "%2e%2e/x", "/etc/passwd", ".git/config", "a%5cb"] {
+            assert_eq!(call(&format!("/api/file?path={path}")).status, 403, "{path}");
+        }
+        for query in ["path=x&path=y", "path=x&rev=HEAD", "path=", "root=..&path=x"] {
+            assert_ne!(call(&format!("/api/file?{query}")).status, 200, "{query}");
+        }
+        let too_many = format!("/api/files-stamp?{}", vec!["dir=."; 65].join("&"));
+        assert_eq!(call(&too_many).status, 400);
+        let foreign = http::read(&mut std::io::Cursor::new(
+            b"GET /api/file?path=.env HTTP/1.1\r\nHost: localhost\r\nOrigin: http://evil.example\r\n\r\n",
+        ))
+        .unwrap();
+        assert_eq!(answer(&foreign, &site).status, 403);
+        let stamps = call("/api/files-stamp?dir=../outside&dir=.git&path=../outside");
+        let body: serde_json::Value = serde_json::from_slice(&stamps.body).unwrap();
+        assert_eq!(body["out"]["dirs"]["../outside"], serde_json::Value::Null);
+        assert_eq!(body["out"]["dirs"][".git"], serde_json::Value::Null);
+        assert_eq!(body["out"]["file"], serde_json::Value::Null);
+        assert_eq!(answer(&request("/api/file?path=.env", "evil.example"), &site).status, 403);
+        assert_eq!(call("/api/file?path=.env&project=/unregistered").status, 403);
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink("/etc", root.join("outside")).unwrap();
+            assert_ne!(call("/api/file?path=outside/passwd").status, 200);
+            assert_ne!(call("/api/files?dir=outside").status, 200);
+        }
+    }
+    #[test]
+    fn file_endpoint_fixtures_match_responses() {
+        let (root, site) = site();
+        std::fs::write(root.join("docs/example.txt"), "example\n").unwrap();
+        let fixtures = [
+            ("checkouts", "/api/checkouts"),
+            ("files", "/api/files?dir=docs"),
+            ("file", "/api/file?path=docs/example.txt"),
+            ("find", "/api/find?q=example"),
+            ("ignored", "/api/ignored"),
+            ("changes", "/api/changes?root=."),
+            ("diff", "/api/diff?root=."),
+            ("files-stamp", "/api/files-stamp?dir=docs&path=docs/example.txt"),
+        ];
+        for (name, path) in fixtures {
+            let response = answer(&request(path, "localhost"), &site);
+            assert_eq!(response.status, 200, "{path}");
+            let mut value: serde_json::Value = serde_json::from_slice(&response.body).unwrap();
+            fn normalize(v: &mut serde_json::Value) {
+                match v {
+                    serde_json::Value::Object(map) => {
+                        for (key, value) in map {
+                            if key == "stamp" {
+                                *value = serde_json::json!("STAMP");
+                            } else {
+                                normalize(value);
+                            }
+                        }
+                    }
+                    serde_json::Value::Array(items) => {
+                        for item in items {
+                            normalize(item);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            normalize(&mut value);
+            if name == "files-stamp" {
+                value["out"]["dirs"]["docs"] = serde_json::json!("STAMP");
+                value["out"]["file"] = serde_json::json!("STAMP");
+            }
+            let text = format!("{}\n", serde_json::to_string_pretty(&value).unwrap());
+            let file = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("web/tests/fixtures/files")
+                .join(format!("{name}.json"));
+            if std::env::var_os("MOAI_UPDATE_FILE_FIXTURES").is_some() {
+                std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+                std::fs::write(&file, &text).unwrap();
+            }
+            assert_eq!(std::fs::read_to_string(&file).unwrap(), text, "{name}");
+        }
     }
     fn png() -> Vec<u8> {
         crate::image::png(&image::DynamicImage::new_rgb8(2, 2)).unwrap()
