@@ -2,6 +2,7 @@
 #![allow(dead_code)] // The TUI and web epics will consume this module.
 
 use crate::diff::{FileDiff, LineKind};
+use std::cell::Cell;
 use std::ops::Range;
 use std::path::Path;
 use std::sync::OnceLock;
@@ -9,6 +10,31 @@ use syntect::parsing::{ParseState, Scope, ScopeStack, SyntaxReference, SyntaxSet
 
 const TEXT_LIMIT: usize = 256 * 1024;
 const LINE_LIMIT: usize = 4096;
+
+thread_local! {
+    /// Set while this thread runs the parser under `catch_unwind` ([`Engine::line`]).
+    static CATCHING: Cell<bool> = const { Cell::new(false) };
+    /// A test makes the parser panic, to see the catch and the hooks around it (`tripping`).
+    #[cfg(test)]
+    static TRIP: Cell<bool> = const { Cell::new(false) };
+}
+
+/// Whether a panic on this thread now is a parser panic this module catches — the line then stands as plain text and
+/// the program goes on. **A panic hook that puts the terminal back must let it pass** (`cmd::tui::modes_off_on_panic`,
+/// review moai-vyu7.nsy 9): the hook runs before `catch_unwind` catches, so a hook that does not ask restores the
+/// terminal under an explorer that keeps drawing.
+pub fn catching() -> bool {
+    CATCHING.with(Cell::get)
+}
+
+/// Run `f` with the parser panicking on every line — the caught path, made reachable for a test.
+#[cfg(test)]
+pub fn tripping<T>(f: impl FnOnce() -> T) -> T {
+    let was = TRIP.with(|t| t.replace(true));
+    let out = f();
+    TRIP.with(|t| t.set(was));
+    out
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -121,7 +147,9 @@ impl<'a> Engine<'a> {
         }
         let before_state = self.state.clone();
         let before_stack = self.stack.clone();
+        let was = CATCHING.with(|c| c.replace(true));
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| self.try_line(text)));
+        CATCHING.with(|c| c.set(was));
         match result {
             Ok(Some(spans)) => spans,
             _ => {
@@ -133,6 +161,10 @@ impl<'a> Engine<'a> {
     }
     fn try_line(&mut self, text: &str) -> Option<Vec<Span>> {
         // Newline grammars expect the delimiter, while ranges belong to the visible line.
+        #[cfg(test)]
+        if TRIP.with(Cell::get) {
+            panic!("the parser fell over (highlight::tripping)");
+        }
         let mut input = String::with_capacity(text.len() + 1);
         input.push_str(text);
         input.push('\n');
@@ -296,5 +328,13 @@ mod tests {
             crate::diff::parse("diff --git a/a.rs b/a.rs\n--- a/a.rs\n+++ b/a.rs\n@@ -0,0 +1 @@\n+x\n").remove(0);
         file.hunks[0].lines[0].text = "a".repeat(TEXT_LIMIT + 1);
         assert!(diff(&file).is_none());
+    }
+    /// **A parser panic is caught and says so while it unwinds** — the line stands plain, and `catching` is true only
+    /// inside the catch (the TUI's panic hook asks it, `cmd::tui`).
+    #[test]
+    fn a_parser_panic_is_caught_as_plain_text() {
+        let rows = tripping(|| lines("a.rs", "let a = 1;\nlet b = 2;\n"));
+        assert_eq!(rows, Some(vec![Vec::new(), Vec::new()]));
+        assert!(!catching(), "the flag outlived the catch");
     }
 }
