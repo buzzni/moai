@@ -16,6 +16,9 @@ thread_local! {
     /// A test makes the parser panic, to see the catch and the hooks around it (`tripping`).
     #[cfg(test)]
     static TRIP: Cell<bool> = const { Cell::new(false) };
+    /// What `catching` said at each tripped panic, all together — `None` until one fell (`tripped_while_catching`).
+    #[cfg(test)]
+    static TRIPPED: Cell<Option<bool>> = const { Cell::new(None) };
 }
 
 /// Whether a panic on this thread now is a parser panic this module catches — the line then stands as plain text and
@@ -33,6 +36,13 @@ pub fn tripping<T>(f: impl FnOnce() -> T) -> T {
     let out = f();
     TRIP.with(|t| t.set(was));
     out
+}
+
+/// Whether `catching` was true at every panic `tripping` made on this thread since the last ask — `None` when none
+/// fell. Asking clears it.
+#[cfg(test)]
+fn tripped_while_catching() -> Option<bool> {
+    TRIPPED.with(|t| t.take())
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
@@ -162,6 +172,7 @@ impl<'a> Engine<'a> {
         // Newline grammars expect the delimiter, while ranges belong to the visible line.
         #[cfg(test)]
         if TRIP.with(Cell::get) {
+            TRIPPED.with(|t| t.set(Some(t.get().unwrap_or(true) && catching())));
             panic!("the parser fell over (highlight::tripping)");
         }
         let mut input = String::with_capacity(text.len() + 1);
@@ -332,8 +343,10 @@ mod tests {
     /// inside the catch (the TUI's panic hook asks it, `cmd::tui`).
     #[test]
     fn a_parser_panic_is_caught_as_plain_text() {
+        let _ = tripped_while_catching();
         let rows = tripping(|| lines("a.rs", "let a = 1;\nlet b = 2;\n"));
         assert_eq!(rows, Some(vec![Vec::new(), Vec::new()]));
+        assert_eq!(tripped_while_catching(), Some(true), "the parser fell over while the flag was down");
         assert!(!catching(), "the flag outlived the catch");
     }
 }

@@ -17941,6 +17941,31 @@ mod tests {
             assert_eq!(a.ctl_state(false)["focus"], "diff");
         }
 
+        /// **The bar names the diff's own keys while the pane has the focus** (moai-ffk9.9m0) — files, scopes, sideways
+        /// and the layout, and at 80 columns the pane's own three and the way out still stand.
+        #[test]
+        fn the_bar_names_the_diff_keys_while_the_pane_has_the_focus() {
+            let (_s, mut a) = opened("diff-bar");
+            with_reader(&mut a);
+            a.hit("SPC v D Esc");
+            go_to(&mut a, "argos-0001");
+            settle(&mut a);
+            let bar = |a: &mut App, w| draw::tests::render(a, w, 60).last().cloned().unwrap_or_default();
+            let ours = ["Tab·Shift-Tab files", "h·l scopes", "H·L sideways", "SPC o s diff layout"];
+            let list = bar(&mut a, 160);
+            assert!(ours.iter().all(|k| !list.contains(k)), "the list's focus named the diff's keys: {list:?}");
+            a.focus = Pane::Diff;
+            let wide = bar(&mut a, 160);
+            for k in ours {
+                assert!(wide.contains(k), "{k:?} is not on the bar: {wide:?}");
+            }
+            let narrow = bar(&mut a, 80);
+            assert_eq!(a.focus, Pane::Diff, "the premise — the pane stands at 80 columns");
+            for k in [&ours[..3], &["Ctrl-w w", "SPC menu"]].concat() {
+                assert!(narrow.contains(k), "{k:?} is not on the 80-column bar: {narrow:?}");
+            }
+        }
+
         /// **On the gantt `L` belongs to the pane that has the focus** — the diff scrolls sideways with it, the chart
         /// moves without it.
         #[test]

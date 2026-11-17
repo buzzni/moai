@@ -1198,6 +1198,17 @@ pub fn reads(e: &Entry) -> bool {
     e.openable && matches!(e.kind, Kind::File | Kind::Link { dir: false, inside: true })
 }
 
+/// Whether the right pane reads this row's text — an entry it [`reads`], unless the changed tree lists it as deleted:
+/// that file is not on this checkout, so the pane says so in a word instead of failing on the read (moai-ffk9.9m0).
+pub fn shows_text(r: &Row) -> bool {
+    matches!(r, Row::Entry { entry, change, .. } if reads(entry) && !deleted(change.as_ref()))
+}
+
+/// The changed tree lists this file as deleted on the checkout.
+pub fn deleted(change: Option<&vcs::Change>) -> bool {
+    change.is_some_and(|c| c.status == vcs::Status::Deleted)
+}
+
 /// The search index: what one walk of the tree's root gave (moai-ffk9.rid).
 #[derive(Debug, Clone)]
 struct Index {
@@ -1384,6 +1395,9 @@ pub struct Window {
     /// Both are on and the right pane is too small for two — the detail stands alone and the diff folds (the
     /// person's answer). Set by the last frame; the toggles keep their values.
     pub folded: bool,
+    /// The window is too narrow for any right pane — the tree stands alone, and the diff, on or not, is not drawn.
+    /// Set by the last frame, like `folded`.
+    narrow: bool,
     refresh: Refresh,
 }
 
@@ -1456,6 +1470,7 @@ impl Window {
             diff,
             detail: Scroll::default(),
             folded: false,
+            narrow: false,
             refresh: Refresh { pace: Pace::new(now), sweep: None, from: None, git: Pace::new(now) },
         };
         w.open(".");
@@ -1513,7 +1528,7 @@ impl Window {
     fn aim(&mut self) {
         self.aim_diff();
         let path = match self.current() {
-            Some(Row::Entry { path, entry, .. }) if reads(entry) => path.clone(),
+            Some(r @ Row::Entry { path, .. }) if shows_text(r) => path.clone(),
             _ => {
                 self.right.wanted = None;
                 if !matches!(self.right.shown, Shown::Nothing) {
@@ -1888,16 +1903,17 @@ impl Window {
         }
     }
 
-    /// Whether the right pane shows the diff now — on, and not folded under the detail.
+    /// Whether the right pane shows the diff now — on, not folded under the detail, and a right pane stands at all.
     pub fn diff_stands(&self) -> bool {
-        self.diff_on && !self.folded
+        self.diff_on && !self.folded && !self.narrow
     }
 
-    /// The frame measured whether the diff folds under the detail (`draw::files_window`). A fold lets the diff's read
+    /// The frame measured whether the diff folds under the detail, and whether any right pane stands
+    /// (`draw::files_window`). **A diff that is not drawn reads nothing** — a fold or a window too narrow lets its read
     /// go; room again aims it at the cursor.
-    pub(super) fn set_folded(&mut self, folded: bool) {
-        if self.folded != folded {
-            self.folded = folded;
+    pub(super) fn set_room(&mut self, folded: bool, narrow: bool) {
+        if (self.folded, self.narrow) != (folded, narrow) {
+            (self.folded, self.narrow) = (folded, narrow);
             self.aim_diff();
         }
     }
@@ -1923,8 +1939,9 @@ impl Window {
     }
 
     /// The diff pane follows the cursor: a file's changes, a folder's (every changed file below it), nothing on `..`
-    /// or a note row. Off, or folded under the detail, it holds nothing and reads nothing — the list's pane's rule
-    /// (`App::aim_diff`): no `git` runs for a pane no one sees. It reads again once it stands ([`Window::set_folded`]).
+    /// or a note row. Off, folded under the detail, or with no room for a right pane, it holds nothing and reads
+    /// nothing — the list's pane's rule (`App::aim_diff`): no `git` runs for a pane no one sees. It reads again once it
+    /// stands ([`Window::set_room`]).
     fn aim_diff(&mut self) {
         if !self.diff_stands() {
             if self.diff.source().is_some() {
@@ -3753,6 +3770,34 @@ mod tests {
         assert!(screen.contains("H·L 가로"), "{screen}");
     }
 
+    /// **With the diff's focus the bar names the diff's keys** (moai-ffk9.9m0), as it names the text's `H`·`L` — files,
+    /// scopes, sideways and the layout; at 80 columns the pane's own three and the way out still stand.
+    #[test]
+    fn the_bar_names_the_diff_keys_while_the_diff_has_the_focus() {
+        let (_s, mut a) = files_app("bar-diff");
+        a.files_disk = std::mem::take(&mut a.files_disk).diffing(|_, _, _, _| diff::Loaded::default());
+        standing_on(&mut a, "README.md");
+        a.hit("SPC v D Esc");
+        settle(&mut a);
+        a.hit("Ctrl-w w");
+        assert_eq!(window(&a).focus, Side::Info);
+        let bar = |a: &mut App, w| draw::tests::render(a, w, 20).last().cloned().unwrap_or_default();
+        let ours = ["Tab·Shift-Tab 파일", "h·l 범위", "H·L 가로", "SPC o s diff 배치"];
+        let wide = bar(&mut a, 160);
+        for k in ours {
+            assert!(wide.contains(k), "{k:?} is not on the bar: {wide:?}");
+        }
+        let narrow = bar(&mut a, 80);
+        assert_eq!(window(&a).focus, Side::Info, "the premise — the diff stands at 80 columns");
+        for k in [&ours[..3], &["Ctrl-w w", "SPC 메뉴"]].concat() {
+            assert!(narrow.contains(k), "{k:?} is not on the 80-column bar: {narrow:?}");
+        }
+        // The tree's focus names none of them.
+        a.hit("Ctrl-w w");
+        let tree = bar(&mut a, 160);
+        assert!(ours.iter().all(|k| !tree.contains(k)), "the tree's focus named the diff's keys: {tree:?}");
+    }
+
     /// **One read at a time, the newest only**: with every read slow, a hundred `j` never wait on one, and after them
     /// the reader read twice — the one running and the last one wanted. The pane stands on the cursor's file.
     #[test]
@@ -4562,10 +4607,29 @@ mod tests {
         assert!(text[3].starts_with("D ") && text[4].starts_with("M ") && text[5].starts_with("? "), "{text:?}");
         let title = screen_title(&draw::tests::render(&mut a, 120, 20));
         assert!(title.contains("바뀐 파일만 4"), "{title}");
-        // A deleted file has no text — the pane says so in a line, and nothing falls over.
+        // A deleted file has no text — the pane says so in a plain word and reads nothing (moai-ffk9.9m0).
         on(&mut a, "src/old.rs");
         settle(&mut a);
-        assert!(matches!(shown(&a), Shown::Failed { why: Trouble::Missing, .. }), "{:?}", shown(&a));
+        assert!(matches!(shown(&a), Shown::Nothing), "the pane read a deleted file: {:?}", shown(&a));
+        let (lines, buf, info) = pane(&mut a, 120, 20);
+        assert!(lines.iter().any(|l| l.contains("이 체크아웃에서 지운 파일 — SPC v D")), "{lines:?}");
+        let warn = draw::from_anstyle(crate::style::WARN).fg;
+        let said = (info.y + 1..info.bottom() - 1)
+            .flat_map(|y| (info.x + 1..info.right() - 1).map(move |x| (x, y)))
+            .filter(|&(x, y)| buf[(x, y)].symbol() != " ")
+            .all(|(x, y)| buf[(x, y)].fg != warn.unwrap_or_default());
+        assert!(said, "the deleted file is told of in a failure's colour: {lines:?}");
+        // The row stands dimmed in the tree.
+        let rows = draw::tests::render_buf(&mut a, 120, 20);
+        let tree = a.drawn.files.clone().unwrap().tree;
+        let dimmed = (tree.y..tree.bottom()).any(|y| {
+            let cells: Vec<_> = (tree.x..tree.right()).map(|x| &rows[(x, y)]).collect();
+            cells.windows(6).any(|w| {
+                w.iter().map(|c| c.symbol()).collect::<String>() == "old.rs"
+                    && w.iter().all(|c| c.fg == ratatui::style::Color::DarkGray)
+            })
+        });
+        assert!(dimmed, "the deleted file's row is not dimmed");
         // Back: the open folders and the cursor as they were — the cursor stood on a file not in the changed tree.
         a.hit("SPC v c Esc");
         settle(&mut a);
@@ -4844,6 +4908,37 @@ mod tests {
         settle(&mut a);
         assert!(window(&a).folded && window(&a).diff_on);
         assert!(asked.lock().unwrap().is_empty(), "a folded diff ran git: {:?}", asked.lock().unwrap());
+        draw::tests::render(&mut a, 160, 40);
+        settle(&mut a);
+        assert_eq!(*asked.lock().unwrap(), ["src/"], "the diff did not read once it stood");
+    }
+
+    /// **A diff with no right pane to stand in reads nothing** — a window too narrow for any right pane draws the tree
+    /// alone, so the cursor moving over files starts no `git` though the diff is on; room again reads the cursor's file.
+    #[test]
+    fn a_diff_too_narrow_to_stand_reads_nothing_until_it_stands() {
+        let (_s, mut a) = files_app("diff-narrow");
+        let asked = Arc::new(Mutex::new(Vec::new()));
+        let log = asked.clone();
+        a.files_disk = std::mem::take(&mut a.files_disk).diffing(move |src, _, _, _| {
+            if let diff::Source::Checkout { path, .. } = src {
+                log.lock().unwrap().push(path.clone().unwrap_or_default());
+            }
+            diff::Loaded::default()
+        });
+        let _t = clocked(&mut a);
+        standing_on(&mut a, "README.md");
+        // 16 columns: no right pane stands, only the tree.
+        draw::tests::render(&mut a, 16, 40);
+        assert!(a.drawn.files.as_ref().is_some_and(|d| d.info.is_none()), "the premise — a right pane stood");
+        a.hit("SPC v D Esc");
+        settle(&mut a);
+        on(&mut a, "src");
+        settle(&mut a);
+        draw::tests::render(&mut a, 16, 40);
+        settle(&mut a);
+        assert!(window(&a).diff_on && !window(&a).diff_stands());
+        assert!(asked.lock().unwrap().is_empty(), "a diff no one sees ran git: {:?}", asked.lock().unwrap());
         draw::tests::render(&mut a, 160, 40);
         settle(&mut a);
         assert_eq!(*asked.lock().unwrap(), ["src/"], "the diff did not read once it stood");

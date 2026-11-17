@@ -2089,7 +2089,7 @@ fn files_window(
 ) -> super::mouse::FilesAt {
     f.render_widget(Clear, at);
     let FilesPrep { tree: tree_at, info: info_at, sides, folded, detail, titles, layout } = prep;
-    w.set_folded(folded);
+    w.set_room(folded, info_at.is_none());
     if info_at.is_none() {
         w.focus = super::files::Side::Tree;
     }
@@ -2098,7 +2098,7 @@ fn files_window(
     if let Some(info_at) = info_at {
         if sides == Sides::default() {
             match w.current() {
-                Some(super::files::Row::Entry { entry, .. }) if super::files::reads(entry) => {
+                Some(r @ super::files::Row::Entry { entry, .. }) if super::files::shows_text(r) => {
                     let size = entry.size;
                     files_content(f, w, info_at, size, lang);
                 }
@@ -2579,7 +2579,7 @@ fn files_info(f: &mut Frame, w: &super::files::Window, at: Rect, lang: Lang) {
     let inner_w = at.width.saturating_sub(2) as usize;
     let mut lines: Vec<Line> = Vec::new();
     let title = match w.current() {
-        Some(Row::Entry { path, entry, ignored, link, .. }) => {
+        Some(Row::Entry { path, entry, ignored, link, change, .. }) => {
             lines.push(Line::from(Span::styled(safe_name(&entry.name), bold())));
             let kind = match &entry.kind {
                 Kind::Dir => match w.count(path) {
@@ -2594,7 +2594,17 @@ fn files_info(f: &mut Frame, w: &super::files::Window, at: Rect, lang: Lang) {
                 Kind::Link { inside: false, .. } => say(lang, "tui.files.info_outside").to_string(),
                 Kind::Other => say(lang, "tui.files.info_special").to_string(),
             };
-            lines.push(Line::from(kind));
+            // **A file deleted on this checkout is told of, plainly** (moai-ffk9.9m0) — the changed tree expects it, so
+            // it is a word, not a failure's colour, and its diff is one key away.
+            if super::files::deleted(change.as_ref()) {
+                let diff = keys::said(w.keys.browse, keys::Browse::Diff);
+                lines.push(Line::from(Span::styled(
+                    fill(say(lang, "tui.files.info_deleted"), &[("diff", &diff)]),
+                    dim(),
+                )));
+            } else {
+                lines.push(Line::from(kind));
+            }
             if !entry.openable {
                 lines.push(Line::from(Span::styled(say(lang, "tui.files.info_unreadable_name"), dim())));
             }
@@ -2665,7 +2675,9 @@ fn files_keys(f: &mut Frame, w: &super::files::Window, at: Rect, lang: Lang) {
         }
     }
     optional.push(key(&moves, F::Step(Move::LineDown).what(on_info, lang)));
-    if w.focus == Side::Info {
+    if w.focus == Side::Info && w.diff_stands() {
+        optional.extend(diff_hints(&w.keys, lang).iter().map(|(k, what)| key(k, what)));
+    } else if w.focus == Side::Info {
         let pan = labels(w.keys.files, &[F::Pan(keys::Side::Left), F::Pan(keys::Side::Right)]);
         optional.push(key(&pan, F::Pan(keys::Side::Left).what(on_info, lang)));
     }
@@ -6863,9 +6875,30 @@ fn fkeys(f: &mut Frame, app: &App, rows: &[Row], at: Rect, unnumbered: bool) {
             .collect();
         return bar(f, at, Vec::new(), vec![waiting(app.chord.held(), next)]);
     }
-    let (optional, keep) = browse_hints(app, &c, unnumbered);
+    let (mut optional, keep) = browse_hints(app, &c, unnumbered);
+    // **The list's diff pane names its own keys while it has the focus** (moai-ffk9.9m0) — just ahead of `Ctrl-w w`,
+    // so the moves drop before them and the way out of the pane stays.
+    if app.focus == Pane::Diff && c.diff {
+        let focus = labels(app.keys.browse, &[Browse::FocusNext]);
+        let at = optional.iter().position(|(k, _)| *k == focus).unwrap_or(optional.len());
+        optional.splice(at..at, diff_hints(&app.keys, c.lang));
+    }
     let spans = |v: Vec<(String, &str)>| v.iter().map(|(k, what)| key(k, what)).collect();
     bar(f, at, spans(optional), spans(keep));
+}
+
+/// The diff pane's own keys for the bar while it has the focus (moai-ffk9.9m0) — the file window's and the list's:
+/// files, scopes and sideways from its table ([`keys::DIFF`]), as [`files_keys`] names the text pane's `H`·`L`, and the
+/// layout. In the bar's order: it takes them from the back, so the layout drops first when narrow — the `SPC` menu
+/// names it too, and nothing else names the rest.
+fn diff_hints(k: &keys::Keymap, lang: Lang) -> Vec<Hint> {
+    use keys::{Diff as D, Side};
+    vec![
+        (label(k.browse, Browse::DiffLayout), say(lang, "tui.act.diff_layout")),
+        (labels(k.diff, &[D::Pan(Side::Left), D::Pan(Side::Right)]), D::Pan(Side::Left).what(lang)),
+        (labels(k.diff, &[D::PrevScope, D::NextScope]), say(lang, "tui.diff.bar_scopes")),
+        (labels(k.diff, &[D::NextFile, D::PrevFile]), say(lang, "tui.diff.bar_files")),
+    ]
 }
 
 /// 바의 한 칸 — `(키 이름, 낱말)`.
