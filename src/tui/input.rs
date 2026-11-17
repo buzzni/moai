@@ -656,7 +656,7 @@ mod tests {
     /// 보고 [`components_know_neither_the_terminal_nor_the_store`] 가 훑는다 — 새
     /// 파일이 조각이 아니면 이유를 적어 여기 더한다. 목록을 조각 쪽으로 두면 새 조각이
     /// 목록에 안 올라 조용히 안 훑인다.
-    const NOT_COMPONENTS: [(&str, &str); 16] = [
+    const NOT_COMPONENTS: [(&str, &str); 17] = [
         ("mod.rs", "App — 저장소(Repo)를 들고 키를 칸에 나눈다"),
         ("gantt.rs", "간트 배치 — App·Site 의 펼침을 고치고, 저장소의 줄(crate::model)을 위젯의 줄(GanttRow)로 옮긴다"),
         (
@@ -686,6 +686,7 @@ mod tests {
             "mouse.rs",
             "마우스 — App 의 포커스·커서·굴린 자리를 옮기고, 끈 칸의 몫을 사용자 설정에 적는다(App::save_look)",
         ),
+        ("pace.rs", "자동 갱신의 걸음 — 시계(std::time)를 읽어 다음 걸음까지 쉴 때를 잰다"),
         ("register.rs", "등록·해제 — 디렉터리를 읽고(fs) 사용자 설정을 쓴다. 창의 상태와 키는 조각 picker.rs 가 든다"),
         (
             "stats.rs",

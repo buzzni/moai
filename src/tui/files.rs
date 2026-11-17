@@ -50,10 +50,23 @@
 //! and the title says how many there are. The folders are read [`SEARCH_READS`] at a time, the one `n` aims at first,
 //! so a hand's `l` is not stuck behind five hundred reads. Ending the search folds back what it opened and leaves
 //! what the hand opened.
+//!
+//! **It refreshes itself, measuring only what is seen** (moai-ffk9.15v). At the refresh's pace ([`super::pace`]) the
+//! lister takes the stamp of every open folder the tree shows — [`SWEEP_LIMIT`] at most per look, the rest on the next
+//! ones in turn — and reads again only those whose stamp moved; the reader checks the file the text pane shows. The
+//! sweep goes in [`SWEEP_PIECE`]-folder pieces and lets the person's reads go first between them. A folder read again
+//! is merged by path: the open folders, the cursor and the scroll stay; a folder gone leaves the tree without a word.
+//! While the changed files stand (`SPC v c`) their list is asked of git again at its own pace, and the diff pane reads
+//! itself again ([`diff::View::refresh`]); the window's git runs one at a time behind one gate ([`Disk::gated`]), so a
+//! refresh and the person's read never run two gits together. A stamp is taken before what it stamps is read, and one
+//! within [`RACY`] of the read is not trusted — the next look reads it again (git's "racy" rule): two changes inside one
+//! tick of the file system's clock leave the stamp alone. Nothing of it wakes the loop early or says a word, and a
+//! look that found nothing draws nothing.
 
 use super::diff;
 use super::input::Input;
 use super::keys::{self, Browse, LEADER, Lookup, PROMPT, Prompt, Side as Toward};
+use super::pace::{self, Clock, Pace};
 use super::scroll::{self, Move, Scroll};
 use super::{App, Mode, Row as ListRow, Seat, menu};
 use crate::files::{self, Entry, Jail, Kind, Why};
@@ -67,6 +80,7 @@ use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering as Atomic};
 use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
 use std::sync::{Arc, Mutex, OnceLock};
+use std::time::SystemTime;
 use std::time::{Duration, Instant};
 
 /// New entries one `Tab` may read before it stops and says so.
@@ -99,6 +113,43 @@ pub(super) const SEARCH_READS: usize = 16;
 /// The mark at the head of a found file's row — colour never says it alone.
 pub const FOUND: &str = "* ";
 
+/// Folders one refresh look stamps at most — more open, the next looks go on from where it stopped (moai-ffk9.15v).
+pub(super) const SWEEP_LIMIT: usize = 2_000;
+
+/// Folders the sweep stamps between two looks at the person's requests — a folder the hand opens waits for this many
+/// stamps at most, not for the whole sweep.
+const SWEEP_PIECE: usize = 32;
+
+/// A stamp this close to the moment it was taken is not trusted: the file system's clock ticks in seconds on some
+/// disks, and a second change inside the tick leaves the stamp as it was. Such a folder or file is read again on the
+/// next look.
+const RACY: Duration = Duration::from_secs(2);
+
+/// Whether a stamp taken now may still hide a change ([`RACY`]).
+fn racy(stamp: &files::Stamp) -> bool {
+    stamp.modified.is_some_and(|m| SystemTime::now().duration_since(m).map_or(true, |d| d < RACY))
+}
+
+/// Two folder listings alike — the entries and the links' text.
+fn same_entries(a: &[Entry], b: &[Entry]) -> bool {
+    a.len() == b.len()
+        && a.iter()
+            .zip(b)
+            .all(|(x, y)| x.name == y.name && x.kind == y.kind && x.size == y.size && x.openable == y.openable)
+}
+
+/// The folders one sweep stamps: all of them while they are few, else [`SWEEP_LIMIT`] going on after `after` and round
+/// the end — so every open folder is stamped within a few looks. Gives them and where the next look goes on.
+fn turn(open: &[&str], after: Option<&str>, limit: usize) -> (Vec<String>, Option<String>) {
+    if open.len() <= limit {
+        return (open.iter().map(|p| (*p).to_owned()).collect(), None);
+    }
+    let start = after.map_or(0, |a| open.partition_point(|p| *p <= a));
+    let picked: Vec<String> = (0..limit).map(|k| open[(start + k) % open.len()].to_owned()).collect();
+    let next = picked.last().cloned();
+    (picked, next)
+}
+
 type ListFn = dyn Fn(&Jail, &str) -> Result<files::Listed, Why> + Send + Sync;
 type IgnoredFn = dyn Fn(&Path) -> Option<Vec<String>> + Send + Sync;
 type ReadFn = dyn Fn(&Jail, &str) -> Result<files::Text, Why> + Send + Sync;
@@ -108,6 +159,7 @@ type WalkFn =
     dyn Fn(&Jail, &str, &[String], &mut dyn FnMut(&[String]) -> bool) -> Result<files::Walked, Why> + Send + Sync;
 type PlacesFn = dyn Fn(&Path) -> Places + Send + Sync;
 type ChangesFn = dyn Fn(&Checkout, Lang) -> Result<vcs::Changes, String> + Send + Sync;
+type DiffReadFn = diff::ReadFn;
 
 /// How long the changed-files list may take — git's budget, as the diff pane's ([`diff::BUDGET`]).
 const CHANGES_BUDGET: Duration = diff::BUDGET;
@@ -151,8 +203,37 @@ pub struct Disk {
     walk: Arc<WalkFn>,
     places: Arc<PlacesFn>,
     changes: Arc<ChangesFn>,
-    diff_read: Arc<diff::ReadFn>,
+    diff_read: Arc<DiffReadFn>,
     diff_paint: Arc<diff::PaintFn>,
+    /// What time it is — the refresh's pace and the sweep's measure (moai-ffk9.15v).
+    clock: Clock,
+}
+
+impl Disk {
+    /// The same disk with its git calls — the changed-files list and the diff pane's read — behind one gate of their
+    /// own (moai-ffk9.15v): a refresh's `git` and the person's never run together, the later one waits on its thread.
+    /// Each window takes its own gate; the loop never waits on it.
+    fn gated(&self) -> Disk {
+        let gate = Arc::new(Mutex::new(()));
+        let (changes, g) = (self.changes.clone(), gate.clone());
+        let (read, h) = (self.diff_read.clone(), gate);
+        Disk {
+            changes: Arc::new(move |c: &Checkout, lang: Lang| {
+                let _held = g.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                changes(c, lang)
+            }),
+            diff_read: Arc::new(
+                move |s: &diff::Source,
+                      scope: Option<crate::report::changes::Scope>,
+                      budget: Option<Duration>,
+                      lang| {
+                    let _held = h.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                    read(s, scope, budget, lang)
+                },
+            ),
+            ..self.clone()
+        }
+    }
 }
 
 impl Default for Disk {
@@ -170,6 +251,7 @@ impl Default for Disk {
             changes: Arc::new(changes),
             diff_read: Arc::new(diff::read),
             diff_paint: Arc::new(crate::highlight::diff),
+            clock: pace::real(),
         }
     }
 }
@@ -264,6 +346,16 @@ impl Disk {
     pub(super) fn ignoring(self, ignored: impl Fn(&Path) -> Option<Vec<String>> + Send + Sync + 'static) -> Disk {
         Disk { ignored: Arc::new(ignored), ..self }
     }
+
+    /// The same disk with its stamp taker replaced — a test counts the stamps or moves them.
+    pub(super) fn stamping(self, stamp: impl Fn(&Jail, &str) -> Option<files::Stamp> + Send + Sync + 'static) -> Disk {
+        Disk { stamp: Arc::new(stamp), ..self }
+    }
+
+    /// The same disk on a hand-moved clock.
+    pub(super) fn clocking(self, clock: Clock) -> Disk {
+        Disk { clock, ..self }
+    }
 }
 
 /// The pane holding the focus. The tree is always on the left.
@@ -331,6 +423,8 @@ enum Read {
         entries: Vec<Entry>,
         stamp: files::Stamp,
         links: BTreeMap<String, String>,
+        /// The stamp was too fresh to trust ([`RACY`]) — the refresh reads the folder again whatever its stamp says.
+        racy: bool,
     },
     Failed(Trouble),
 }
@@ -354,6 +448,19 @@ enum Request {
         root: String,
         skip: HashSet<String>,
     },
+    /// A refresh look (moai-ffk9.15v): stamp these folders and read again the ones that moved.
+    Sweep(Sweep),
+}
+
+/// A refresh look on the lister — taken in pieces of [`SWEEP_PIECE`], the person's requests going first between them.
+struct Sweep {
+    id: u64,
+    /// Each open folder with the generation it was read under, its stamp then and whether that stamp was too fresh.
+    dirs: VecDeque<(String, u64, files::Stamp, bool)>,
+    /// The folders read again so far.
+    listed: Vec<(String, u64, Read)>,
+    /// The time spent stamping and reading — not the time it waited for the person's reads.
+    took: Duration,
 }
 
 enum Reply {
@@ -403,13 +510,20 @@ enum Reply {
         id: u64,
         places: Places,
     },
-    /// The checkout's changed files (moai-ffk9.211).
+    /// The checkout's changed files (moai-ffk9.211), and how long git took (moai-ffk9.15v).
     Changes {
         id: u64,
         got: Result<vcs::Changes, String>,
+        took: Duration,
     },
     /// A read found the checkout's root gone — a worktree removed while the window stood.
     Gone,
+    /// A refresh look ended: the folders that moved, read again (moai-ffk9.15v).
+    Swept {
+        id: u64,
+        listed: Vec<(String, u64, Read)>,
+        took: Duration,
+    },
 }
 
 /// One path of the search index, folded on the walker so the loop only compares.
@@ -444,11 +558,14 @@ fn inside(path: &str, dir: &str) -> bool {
     dir == "." && path != "." || path.strip_prefix(dir).is_some_and(|t| t.starts_with('/'))
 }
 
-/// A file to read — with the stamp of the copy the window keeps, if any: the reader then only checks it.
+/// A file to read — with the copy the window keeps, if any: the reader then only checks its stamp (the refresh reads
+/// again a copy whose stamp was too fresh to trust, [`RACY`]).
 #[derive(Debug, Clone)]
 struct Look {
     path: String,
-    known: Option<files::Stamp>,
+    was: Option<Arc<Content>>,
+    /// The refresh's look at the text shown (moai-ffk9.15v) — coloured before it is sent, so it never flashes plain.
+    refresh: bool,
 }
 
 enum Got {
@@ -475,6 +592,8 @@ pub struct Content {
     /// The whole file's size; past the read layer's limit only its head was read (`truncated`).
     pub size: u64,
     pub truncated: bool,
+    /// The stamp was too fresh to trust when read ([`RACY`]) — the reader clears it once a later read finds the same.
+    racy: AtomicBool,
     /// The colouring, set once by the reader after the plain text stood. `Some(None)`: the highlighter has none for
     /// this file (unknown kind, past its limit) and the text stays plain.
     pub paint: OnceLock<Option<Vec<Vec<crate::highlight::Span>>>>,
@@ -495,6 +614,7 @@ impl Content {
             .map(|r| u32::try_from(super::columns::width(&t.text[r.clone()])).unwrap_or(u32::MAX))
             .collect();
         let widest = widths.iter().copied().max().unwrap_or(0) as usize;
+        let fresh = racy(&t.stamp);
         Content {
             path,
             stamp: t.stamp,
@@ -504,6 +624,7 @@ impl Content {
             widest,
             size: t.size,
             truncated: t.truncated,
+            racy: AtomicBool::new(fresh),
             paint: OnceLock::new(),
         }
     }
@@ -522,22 +643,44 @@ impl Content {
 /// Read one file on the reader thread: check a kept copy's stamp, else read it, send the plain text, colour it and
 /// say so. Gives `false` once the window is gone.
 fn look(disk: &Disk, jail: Option<&Jail>, l: Look, out: &Sender<Reply>) -> bool {
-    let Look { path, known } = l;
+    let Look { path, was, refresh } = l;
     let Some(jail) = jail else {
         return out.send(Reply::Opened { path, got: Got::Failed(Trouble::Missing) }).is_ok();
     };
-    if let Some(known) = known
-        && (disk.stamp)(jail, &path).as_ref() == Some(&known)
+    // A stamp too fresh to trust is read again by the refresh's look; the cursor coming back trusts it — the refresh
+    // looks at it on its next step anyway.
+    if let Some(was) = &was
+        && !(refresh && was.racy.load(Atomic::Relaxed))
+        && (disk.stamp)(jail, &path).as_ref() == Some(&was.stamp)
     {
         return out.send(Reply::Opened { path, got: Got::Same }).is_ok();
     }
     match (disk.read)(jail, &path) {
         Ok(t) => {
+            // The same text: a fresh stamp read again, or a file only touched — nothing to draw, nothing to colour.
+            if let Some(was) = was.as_ref().filter(|w| w.text == t.text && w.truncated == t.truncated) {
+                if was.stamp == t.stamp {
+                    was.racy.store(racy(&t.stamp), Atomic::Relaxed);
+                    return out.send(Reply::Opened { path, got: Got::Same }).is_ok();
+                }
+                let c = Content::of(path.clone(), t);
+                if let Some(p) = was.paint.get() {
+                    let _ = c.paint.set(p.clone());
+                }
+                let c = Arc::new(c);
+                return out.send(Reply::Opened { path: path.clone(), got: Got::Text(c) }).is_ok()
+                    && out.send(Reply::Painted { path }).is_ok();
+            }
             let c = Arc::new(Content::of(path.clone(), t));
+            if refresh {
+                let _ = c.paint.set((disk.paint)(&path, &c.text));
+            }
             if out.send(Reply::Opened { path: path.clone(), got: Got::Text(c.clone()) }).is_err() {
                 return false;
             }
-            let _ = c.paint.set((disk.paint)(&path, &c.text));
+            if !refresh {
+                let _ = c.paint.set((disk.paint)(&path, &c.text));
+            }
             out.send(Reply::Painted { path }).is_ok()
         }
         Err(why) => out.send(Reply::Opened { path, got: Got::Failed(Trouble::of(&why)) }).is_ok(),
@@ -606,7 +749,8 @@ fn read_dir(list: &ListFn, jail: Option<&Jail>, path: &str) -> Read {
                 .filter(|e| matches!(e.kind, Kind::Link { .. }) && e.openable)
                 .filter_map(|e| files::link_text(jail, &child(path, &e.name)).ok().map(|t| (e.name.clone(), t)))
                 .collect();
-            Read::Listed { entries: listed.entries, stamp: listed.stamp, links }
+            let racy = racy(&listed.stamp);
+            Read::Listed { entries: listed.entries, stamp: listed.stamp, links, racy }
         }
         Err(why) => Read::Failed(Trouble::of(&why)),
     }
@@ -633,11 +777,59 @@ impl Worker {
             }
         });
         let list = disk.list.clone();
+        let (stamp, clock) = (disk.stamp.clone(), disk.clock.clone());
         let at = checkout.clone();
         let lister = std::thread::spawn(move || {
             let jail = Jail::of(&at);
-            while let Ok(request) = incoming.recv() {
+            // Requests taken while a sweep was cut short — they go before the rest of it.
+            let mut backlog: VecDeque<Request> = VecDeque::new();
+            loop {
+                let request = match backlog.pop_front() {
+                    Some(r) => r,
+                    None => match incoming.recv() {
+                        Ok(r) => r,
+                        Err(_) => return,
+                    },
+                };
                 match request {
+                    Request::Sweep(mut sweep) => {
+                        let began = clock();
+                        for _ in 0..SWEEP_PIECE {
+                            let Some((path, generation, known, fresh)) = sweep.dirs.pop_front() else { break };
+                            // Stamped first, read after: a change between the two shows on the next look.
+                            let now = jail.as_ref().and_then(|j| stamp(j, &path));
+                            if !fresh && now.as_ref() == Some(&known) {
+                                continue;
+                            }
+                            let read = read_dir(&*list, jail.as_ref(), &path);
+                            if path == "."
+                                && matches!(read, Read::Failed(Trouble::Missing))
+                                && !at.path.is_dir()
+                                && outgoing.send(Reply::Gone).is_err()
+                            {
+                                return;
+                            }
+                            sweep.listed.push((path, generation, read));
+                        }
+                        sweep.took += clock().saturating_duration_since(began);
+                        if sweep.dirs.is_empty() {
+                            let Sweep { id, listed, took, .. } = sweep;
+                            if outgoing.send(Reply::Swept { id, listed, took }).is_err() {
+                                return;
+                            }
+                            continue;
+                        }
+                        // **The person's reads go first** — what came in while this piece ran is read before the next.
+                        // The window gone, the sweep ends here.
+                        loop {
+                            match incoming.try_recv() {
+                                Ok(r) => backlog.push_back(r),
+                                Err(TryRecvError::Empty) => break,
+                                Err(TryRecvError::Disconnected) => return,
+                            }
+                        }
+                        backlog.push_back(Request::Sweep(sweep));
+                    }
                     Request::List { path, generation } => {
                         let read = read_dir(&*list, jail.as_ref(), &path);
                         // A missing folder in a checkout that is itself gone: the window goes back to the main one.
@@ -715,8 +907,12 @@ impl Worker {
     /// List the checkout's changed files.
     fn changes(&mut self, id: u64, lang: Lang) {
         let (read, out, at) = (self.disk.changes.clone(), self.outgoing.clone(), self.checkout.clone());
+        let clock = self.disk.clock.clone();
         self.probes.push(std::thread::spawn(move || {
-            let _ = out.send(Reply::Changes { id, got: read(&at, lang) });
+            let began = clock();
+            let got = read(&at, lang);
+            let took = clock().saturating_duration_since(began);
+            let _ = out.send(Reply::Changes { id, got, took });
         }));
     }
 
@@ -945,6 +1141,8 @@ pub struct Right {
     pub(super) room: usize,
     /// The read out — one at a time.
     running: Option<String>,
+    /// The read out is the refresh's look at the text shown (moai-ffk9.15v) — alone, it does not wake the loop.
+    refreshing: bool,
     /// What the cursor wants read after it, the newest only.
     wanted: Option<Look>,
     /// Lately read texts, the newest first, at most [`KEPT`].
@@ -959,6 +1157,7 @@ impl Default for Right {
             pan: 0,
             room: 0,
             running: None,
+            refreshing: false,
             wanted: None,
             kept: VecDeque::new(),
         }
@@ -993,9 +1192,11 @@ impl Right {
         Some(c)
     }
 
-    /// Whether a read is out or due — the loop wakes fast to take it.
+    /// Whether a read is out or due — the loop wakes fast to take it. The refresh's look alone does not count; a want
+    /// waiting behind it does.
     fn busy(&self) -> bool {
-        self.running.is_some() || matches!(self.shown, Shown::Reading { said: false, .. })
+        (self.running.is_some() && (!self.refreshing || self.wanted.is_some()))
+            || matches!(self.shown, Shown::Reading { said: false, .. })
     }
 }
 
@@ -1018,6 +1219,9 @@ struct Index {
     /// Whether git named the ignored directories — `None` while asking. `Some(false)`: nothing is skipped.
     skipping: Option<bool>,
     failed: Option<Trouble>,
+    /// The refresh read a folder again since the walk (moai-ffk9.15v) — the next search walks afresh. What the search
+    /// found stays as it is till then.
+    stale: bool,
 }
 
 /// The search: the hung query, the index and what it found, and the folders it opened to show them.
@@ -1084,6 +1288,9 @@ struct Changed {
     list: Listing,
     /// The read out — a reply of another is dropped.
     id: u64,
+    /// The read out is the refresh's (moai-ffk9.15v): it does not wake the loop, a failure keeps the list held, and the
+    /// same list draws nothing.
+    refreshing: bool,
     /// The cursor and the tree's scroll before it was turned on — turning it off stands there again unless the file
     /// the cursor stood on in the changed tree stands in the whole one.
     before: Option<(At, usize)>,
@@ -1110,6 +1317,16 @@ pub(super) struct Polled {
     pub indexed: Option<usize>,
     /// The checkout was gone and the window went back to the main one — its key, for the notice.
     pub gone: Option<String>,
+}
+
+/// The automatic refresh's state (moai-ffk9.15v): the stamp sweep's pace and the one out, where the next sweep goes on,
+/// and the changed-files list's pace — git's own, counted apart.
+#[derive(Debug, Clone)]
+struct Refresh {
+    pace: Pace,
+    sweep: Option<u64>,
+    from: Option<String>,
+    git: Pace,
 }
 
 /// The window's state.
@@ -1175,6 +1392,7 @@ pub struct Window {
     /// Both are on and the right pane is too small for two — the detail stands alone and the diff folds (the
     /// person's answer). Set by the last frame; the toggles keep their values.
     pub folded: bool,
+    refresh: Refresh,
 }
 
 impl std::fmt::Debug for Window {
@@ -1207,9 +1425,11 @@ impl Window {
         seat: Seat,
         lang: Lang,
     ) -> Window {
+        let disk = &disk.gated();
         let worker = Shared(Arc::new(Mutex::new(Worker::start(&checkout, disk))));
         let opened_at = checkout.path.clone();
-        let diff = diff::View::with(disk.diff_read.clone(), disk.diff_paint.clone(), lang);
+        let diff = diff::View::with(disk.diff_read.clone(), disk.diff_paint.clone(), lang).clocked(disk.clock.clone());
+        let now = (disk.clock)();
         let mut w = Window {
             project,
             checkout,
@@ -1238,17 +1458,18 @@ impl Window {
             places: None,
             places_id: 0,
             pick: None,
-            changed: Changed { on: false, list: Listing::Reading, id: 0, before: None },
+            changed: Changed { on: false, list: Listing::Reading, id: 0, refreshing: false, before: None },
             detail_on: false,
             diff_on: false,
             diff,
             detail: Scroll::default(),
             folded: false,
+            refresh: Refresh { pace: Pace::new(now), sweep: None, from: None, git: Pace::new(now) },
         };
         w.open(".");
         w.rebuild();
         w.ask_places();
-        w.ask_changes();
+        w.ask_changes(false);
         w
     }
 
@@ -1278,15 +1499,6 @@ impl Window {
         }
     }
 
-    /// The stamp a directory was read under — the refresh member compares it (moai-ffk9.15v).
-    #[allow(dead_code)] // moai-ffk9.15v reads it.
-    pub fn stamp(&self, path: &str) -> Option<&files::Stamp> {
-        match self.dirs.get(path)?.read.as_ref()? {
-            Read::Listed { stamp, .. } => Some(stamp),
-            Read::Failed(_) => None,
-        }
-    }
-
     pub fn is_open(&self, path: &str) -> bool {
         self.dirs.contains_key(path)
     }
@@ -1294,7 +1506,7 @@ impl Window {
     /// Something is still out: a directory read, the ignored list, a spread.
     pub fn waiting(&self) -> bool {
         self.places_id != 0
-            || self.changed.id != 0
+            || (self.changed.id != 0 && !self.changed.refreshing)
             || self.diff.busy()
             || self.spread.is_some()
             || self.search.index.as_ref().is_some_and(|i| i.walking)
@@ -1326,13 +1538,13 @@ impl Window {
         self.right.page.rewind();
         self.right.pan = 0;
         let kept = self.right.kept(&path);
-        let known = kept.as_ref().map(|c| c.stamp.clone());
-        self.right.shown = match kept {
-            Some(c) => Shown::Text(c),
+        self.right.shown = match &kept {
+            Some(c) => Shown::Text(c.clone()),
             None => Shown::Reading { path: path.clone(), since: Instant::now(), said: false },
         };
         // The file being read now needs no second read — its answer lands on the pane.
-        self.right.wanted = (self.right.running.as_deref() != Some(path.as_str())).then_some(Look { path, known });
+        self.right.wanted =
+            (self.right.running.as_deref() != Some(path.as_str())).then_some(Look { path, was: kept, refresh: false });
         self.send_look();
     }
 
@@ -1343,6 +1555,7 @@ impl Window {
         }
         let Some(l) = self.right.wanted.take() else { return };
         self.right.running = Some(l.path.clone());
+        self.right.refreshing = l.refresh;
         self.worker.with(|w| w.look(l));
     }
 
@@ -1350,6 +1563,7 @@ impl Window {
     fn read_done(&mut self, path: &str) {
         if self.right.running.as_deref() == Some(path) {
             self.right.running = None;
+            self.right.refreshing = false;
         }
         self.send_look();
     }
@@ -1697,10 +1911,12 @@ impl Window {
         self.worker.with(|w| w.places(id, here));
     }
 
-    /// List the checkout's changed files afresh — the list on screen stays while it reads.
-    fn ask_changes(&mut self) {
+    /// List the checkout's changed files afresh — the list on screen stays while it reads. `refresh`: the refresh asks
+    /// (moai-ffk9.15v), not the person.
+    fn ask_changes(&mut self, refresh: bool) {
         let id = self.next_generation();
         self.changed.id = id;
+        self.changed.refreshing = refresh;
         let lang = self.lang;
         self.worker.with(|w| w.changes(id, lang));
     }
@@ -1773,7 +1989,7 @@ impl Window {
         self.typing = None;
         self.list.rewind();
         self.adrift = false;
-        self.ask_changes();
+        self.ask_changes(false);
         self.rebuild();
     }
 
@@ -1909,7 +2125,7 @@ impl Window {
         self.diff.close();
         self.detail.rewind();
         self.open(".");
-        self.ask_changes();
+        self.ask_changes(false);
         self.rebuild();
     }
 
@@ -1970,7 +2186,19 @@ impl Window {
                 }
                 Reply::Opened { path, got } => {
                     let here = self.right.shown.path() == Some(path.as_str());
+                    let refresh = self.right.refreshing && self.right.running.as_deref() == Some(path.as_str());
                     match got {
+                        // The refresh could not read a file it read before (the disk stalled, a permission): the text
+                        // stands and the next look tries again, without a word.
+                        Got::Failed(Trouble::Io(_)) if refresh => self.read_done(&path),
+                        Got::Text(c) if refresh => {
+                            self.right.keep(c.clone());
+                            if here {
+                                self.right.shown = Shown::Text(c);
+                                self.refresh.pace.wake();
+                                out.painted = true;
+                            }
+                        }
                         Got::Same => self.read_done(&path),
                         // The text stands; the read goes on to its colour. A late answer for a file the cursor left is
                         // only kept.
@@ -2039,18 +2267,45 @@ impl Window {
                         out.painted = true;
                     }
                 }
-                Reply::Changes { id, got } => {
+                Reply::Changes { id, got, took } => {
                     if id == self.changed.id {
                         self.changed.id = 0;
-                        self.changed.list = match got {
-                            Ok(c) => Listing::Read(Arc::new(c)),
-                            Err(why) => Listing::Failed(why),
+                        let refresh = std::mem::take(&mut self.changed.refreshing);
+                        let held = matches!(self.changed.list, Listing::Read(_));
+                        let same = match (&got, &self.changed.list) {
+                            (Ok(new), Listing::Read(old)) => diff::same_changes(new, old),
+                            // A refresh that failed keeps the list held; the next look tries again, without a word.
+                            (Err(_), _) => refresh && held,
+                            _ => false,
                         };
-                        out.changed |= self.changed.on;
-                        out.painted = true;
+                        if refresh {
+                            self.refresh.git.done((self.disk.clock)(), took, !same);
+                        }
+                        if !same {
+                            self.changed.list = match got {
+                                Ok(c) => Listing::Read(Arc::new(c)),
+                                Err(why) => Listing::Failed(why),
+                            };
+                            out.changed |= self.changed.on;
+                            out.painted = true;
+                        }
                     }
                 }
                 Reply::Gone => gone = true,
+                Reply::Swept { id, listed, took } => {
+                    if self.refresh.sweep != Some(id) {
+                        continue;
+                    }
+                    self.refresh.sweep = None;
+                    let moved = self.merge(listed);
+                    self.refresh.pace.done((self.disk.clock)(), took, moved);
+                    if moved {
+                        out.changed = true;
+                        if let Some(i) = self.search.index.as_mut() {
+                            i.stale = true;
+                        }
+                    }
+                }
             }
         }
         // The checkout was removed while the window stood: back to the main one, with a word.
@@ -2075,7 +2330,163 @@ impl Window {
         if out.changed {
             self.rebuild();
         }
+        self.refresh_step();
         out
+    }
+
+    // ---- the automatic refresh (moai-ffk9.15v) ----
+
+    /// A key on the window — the refresh goes back to its shortest rest.
+    pub(super) fn wake(&mut self) {
+        self.refresh.pace.wake();
+        self.refresh.git.wake();
+        self.diff.wake();
+    }
+
+    /// A refresh look is out — the sweep, the text's, the changed list's or the diff's.
+    #[cfg(test)]
+    pub(super) fn refreshing(&self) -> bool {
+        self.refresh.sweep.is_some()
+            || self.right.refreshing
+            || (self.changed.id != 0 && self.changed.refreshing)
+            || self.diff.refreshing()
+    }
+
+    /// Whether the text pane stands — neither the detail nor the diff over it.
+    fn text_shown(&self) -> bool {
+        !self.detail_on && !self.diff_on
+    }
+
+    /// One step of the refresh: a stamp sweep when due and none is out, the changed-files list while it stands, the diff
+    /// pane's own. Only what is seen is measured, and the git calls take turns.
+    fn refresh_step(&mut self) {
+        let now = (self.disk.clock)();
+        if self.refresh.sweep.is_none() && self.refresh.pace.due(now) {
+            self.sweep(now);
+        }
+        if self.changed.on && self.changed.id == 0 && self.diff.idle() && self.refresh.git.due(now) {
+            self.ask_changes(true);
+        }
+        if self.diff_stands() {
+            self.diff.refresh(self.changed.id == 0);
+        }
+    }
+
+    /// Send a sweep of the open folders the tree shows — the one stood in and every open one below it, read and not
+    /// failed — and look at the file the text pane shows.
+    fn sweep(&mut self, now: Instant) {
+        let here = self.here.clone();
+        let open: Vec<&str> = if self.changed.on {
+            Vec::new()
+        } else {
+            self.dirs
+                .iter()
+                .filter(|(p, d)| (**p == here || inside(p, &here)) && matches!(d.read, Some(Read::Listed { .. })))
+                .map(|(p, _)| p.as_str())
+                .collect()
+        };
+        let (take, next) = turn(&open, self.refresh.from.as_deref(), SWEEP_LIMIT);
+        self.refresh.from = next;
+        let dirs: VecDeque<_> = take
+            .into_iter()
+            .filter_map(|p| match self.dirs.get(&p) {
+                Some(Dir { generation, read: Some(Read::Listed { stamp, racy, .. }) }) => {
+                    Some((p, *generation, stamp.clone(), *racy))
+                }
+                _ => None,
+            })
+            .collect();
+        if dirs.is_empty() {
+            self.refresh.pace.done(now, Duration::ZERO, false);
+        } else {
+            let id = self.next_generation();
+            self.refresh.sweep = Some(id);
+            self.worker.with(|w| w.send(Request::Sweep(Sweep { id, dirs, listed: Vec::new(), took: Duration::ZERO })));
+        }
+        // The file the text shows — on the reader, when the person has nothing out there.
+        if let Shown::Text(c) = &self.right.shown
+            && self.text_shown()
+            && self.right.running.is_none()
+            && self.right.wanted.is_none()
+        {
+            self.right.wanted = Some(Look { path: c.path.clone(), was: Some(c.clone()), refresh: true });
+            self.send_look();
+        }
+    }
+
+    /// Take a sweep's folders in: each still open under the generation it was stamped at takes its new entries — by
+    /// path, so the open folders below, the cursor and the scroll stay. A folder gone leaves the tree; one that could
+    /// not be read keeps what it held. Gives whether a row changed.
+    fn merge(&mut self, listed: Vec<(String, u64, Read)>) -> bool {
+        let mut moved = false;
+        for (path, generation, read) in listed {
+            // Folded, refolded or read again by the hand since: the answer is old.
+            let Some(d) = self.dirs.get_mut(&path).filter(|d| d.generation == generation && d.read.is_some()) else {
+                continue;
+            };
+            match read {
+                Read::Failed(Trouble::Missing) => {
+                    self.forget(&path);
+                    moved = true;
+                }
+                Read::Failed(_) => {}
+                new @ Read::Listed { .. } => {
+                    let same = match (&d.read, &new) {
+                        (
+                            Some(Read::Listed { entries: a, links: x, .. }),
+                            Read::Listed { entries: b, links: y, .. },
+                        ) => same_entries(a, b) && x == y,
+                        _ => false,
+                    };
+                    // The same entries: only the stamp is new — nothing to draw.
+                    d.read = Some(new);
+                    if !same {
+                        self.prune(&path);
+                        self.drop_gone(&path);
+                        moved = true;
+                    }
+                }
+            }
+        }
+        moved
+    }
+
+    /// A folder read again: the open folders it no longer holds are forgotten.
+    fn prune(&mut self, dir: &str) {
+        let Some(Read::Listed { entries, .. }) = self.dirs.get(dir).and_then(|d| d.read.as_ref()) else { return };
+        let still: HashSet<&str> = entries.iter().filter(|e| opens(e)).map(|e| e.name.as_str()).collect();
+        // Only the keys below `dir` are looked at — a look that read two thousand folders must not scan every open one
+        // for each.
+        let below = if dir == "." { String::new() } else { format!("{dir}/") };
+        let gone: Vec<String> = self
+            .dirs
+            .range::<str, _>((std::ops::Bound::Included(below.as_str()), std::ops::Bound::Unbounded))
+            .map(|(k, _)| k)
+            .take_while(|k| k.starts_with(&below))
+            .filter(|k| *k != "." && parent_of(k) == dir && k.rsplit('/').next().is_some_and(|n| !still.contains(n)))
+            .cloned()
+            .collect();
+        for g in gone {
+            self.forget(&g);
+        }
+    }
+
+    /// A folder is gone: it and what was open below it fold away. Standing in it, the tree steps out to the folder
+    /// above, the cursor where it was in that folder.
+    fn forget(&mut self, dir: &str) {
+        if dir == "." {
+            return;
+        }
+        let holds = |p: &str| p == dir || inside(p, dir);
+        self.stepped.retain(|p| !holds(p));
+        if holds(&self.here) {
+            self.here = parent_of(dir).to_owned();
+            self.open(&self.here.clone());
+            self.at = At::Path(dir.to_owned());
+            self.close(dir);
+            return self.reroot();
+        }
+        self.close(dir);
     }
 
     // ---- the search (moai-ffk9.rid) ----
@@ -2139,6 +2550,11 @@ impl Window {
         let was = self.search.query.clone();
         let input = Input::new(was.as_deref().unwrap_or_default());
         self.typing = Some(Typing { input, was, from: self.at.clone() });
+        // The refresh read folders again since the walk: this search walks afresh (moai-ffk9.15v).
+        if self.search.index.as_ref().is_some_and(|i| i.stale) {
+            self.worker.with(Worker::stop_walk);
+            self.search.index = None;
+        }
         self.ensure_index();
     }
 
@@ -2151,8 +2567,15 @@ impl Window {
         let root = self.here.clone();
         self.worker.with(|w| w.walk(id, root.clone()));
         self.search.gone.clear();
-        self.search.index =
-            Some(Index { id, root, entries: Arc::new(Vec::new()), walking: true, skipping: None, failed: None });
+        self.search.index = Some(Index {
+            id,
+            root,
+            entries: Arc::new(Vec::new()),
+            walking: true,
+            skipping: None,
+            failed: None,
+            stale: false,
+        });
     }
 
     /// The tree's root changed: an index of the old root is dropped — walked again at once when a search stands.
@@ -2507,6 +2930,10 @@ impl App {
     /// Answers **whether this key clears the notice** — the wiki window's rule: a key that only touched the menu and
     /// a pending prefix do not, the window's keys, a screen pick and an unknown key do.
     pub(super) fn files_key(&mut self, k: KeyEvent) -> bool {
+        // A key on the window: the refresh goes back to its shortest rest (moai-ffk9.15v).
+        if let Mode::Files(w) = &mut self.mode {
+            w.wake();
+        }
         // **While the search field is open it comes first** — the moves and SPC are letters (the wiki window's way).
         if let Mode::Files(w) = &mut self.mode
             && w.typing.is_some()
@@ -4379,6 +4806,476 @@ mod tests {
         settle(&mut a);
         assert_eq!(*asked.lock().unwrap(), ["README.md", "src/"]);
         assert!(a.key_ctx(&a.rows()).diff, "SPC o s does not stand over the window's diff");
+    }
+
+    // ---- the automatic refresh (moai-ffk9.15v) ----
+
+    fn hand_clock() -> (Arc<Mutex<Instant>>, Clock) {
+        let t = Arc::new(Mutex::new(Instant::now()));
+        let c = t.clone();
+        (t, Arc::new(move || *c.lock().unwrap()))
+    }
+
+    fn later(t: &Mutex<Instant>, by: Duration) {
+        *t.lock().unwrap() += by;
+    }
+
+    /// Move the clock by `by` and take the refresh look that may be due to its end — as the loop's ordinary steps do.
+    /// Gives whether any step said the screen changed.
+    fn look(a: &mut App, t: &Mutex<Instant>, by: Duration) -> bool {
+        later(t, by);
+        let mut changed = false;
+        let began = Instant::now();
+        loop {
+            a.follow_changed = false;
+            a.follow_files();
+            changed |= a.follow_changed;
+            if !window(a).refreshing() && !a.reading_files() {
+                return changed;
+            }
+            assert!(began.elapsed() < Duration::from_secs(60), "the refresh kept running — {:?}", a.mode);
+            std::thread::sleep(Duration::from_millis(2));
+        }
+    }
+
+    fn clocked(a: &mut App) -> Arc<Mutex<Instant>> {
+        let (t, clock) = hand_clock();
+        a.files_disk = std::mem::take(&mut a.files_disk).clocking(clock);
+        t
+    }
+
+    /// **An open folder shows what came and what went after a look — the place stays.** The open folders stay open, a
+    /// file above the cursor does not move it, and when its file goes the cursor takes the row that came to its place.
+    /// Nothing is read before the rest is over.
+    #[test]
+    fn an_open_folder_follows_the_disk_and_the_place_stays() {
+        let (s, mut a) = files_app("refresh-tree");
+        let t = clocked(&mut a);
+        standing_on(&mut a, "src");
+        a.hit("l");
+        settle(&mut a);
+        on(&mut a, "src/tui");
+        a.hit("l");
+        settle(&mut a);
+        on(&mut a, "src/main.rs");
+        std::fs::write(s.path().join("src/aaa.rs"), "").unwrap();
+        std::fs::write(s.path().join("src/tui/new.rs"), "").unwrap();
+        look(&mut a, &t, Duration::from_millis(1900));
+        assert!(!names(&a).contains(&"src/aaa.rs".to_string()), "a look before its rest");
+        assert!(look(&mut a, &t, Duration::from_millis(100)), "the look said nothing changed");
+        let rows = names(&a);
+        for want in ["src (open)", "src/tui (open)", "src/tui/new.rs", "src/aaa.rs", "src/main.rs"] {
+            assert!(rows.contains(&want.to_string()), "{want} missing: {rows:?}");
+        }
+        assert_eq!(window(&a).current_path(), Some("src/main.rs"), "a file above moved the cursor");
+        // The cursor's file goes: the row after it takes its place.
+        std::fs::remove_file(s.path().join("src/main.rs")).unwrap();
+        look(&mut a, &t, Duration::from_secs(2));
+        assert!(!names(&a).contains(&"src/main.rs".to_string()));
+        assert!(window(&a).cursor < window(&a).rows().len(), "the cursor points past the rows");
+        assert_eq!(window(&a).current_path(), Some("target"), "the cursor did not take the next row");
+        // A folder gone leaves the tree without a word.
+        std::fs::remove_dir_all(s.path().join("src/tui")).unwrap();
+        look(&mut a, &t, Duration::from_secs(2));
+        assert!(!names(&a).iter().any(|n| n.starts_with("src/tui")), "{:?}", names(&a));
+        assert!(!window(&a).is_open("src/tui") && a.notice.is_none());
+    }
+
+    /// **Standing in a folder that goes, the tree steps out to the folder above.**
+    #[test]
+    fn a_folder_stood_in_that_goes_steps_out() {
+        let (s, mut a) = files_app("refresh-here");
+        let t = clocked(&mut a);
+        standing_on(&mut a, "src");
+        a.hit("Enter");
+        settle(&mut a);
+        on(&mut a, "src/tui");
+        a.hit("Enter");
+        settle(&mut a);
+        assert_eq!(here(&a), "src/tui");
+        std::fs::remove_dir_all(s.path().join("src/tui")).unwrap();
+        // The folder stood in is stamped first; its parent's look takes the row away.
+        look(&mut a, &t, Duration::from_secs(2));
+        look(&mut a, &t, Duration::from_secs(2));
+        assert_eq!(here(&a), "src", "the tree stayed in a folder that went");
+        assert_eq!(names(&a), ["..", "src/main.rs"]);
+    }
+
+    /// **A hung search keeps what it found through a look; the next search walks afresh** — the index is only marked
+    /// old, never walked again by the refresh.
+    #[test]
+    fn a_hung_search_stays_and_the_next_one_walks_afresh() {
+        let (s, mut a) = files_app("refresh-search");
+        let t = clocked(&mut a);
+        let walks = Arc::new(AtomicUsize::new(0));
+        let w = walks.clone();
+        a.files_disk = std::mem::take(&mut a.files_disk).walking(move |jail, dir, skip, take| {
+            w.fetch_add(1, Ordering::SeqCst);
+            files::walk(jail, dir, skip, take)
+        });
+        a.hit("SPC g f");
+        settle(&mut a);
+        search(&mut a, "main");
+        assert_eq!(found(&a), ["src/main.rs"]);
+        std::fs::write(s.path().join("main2.txt"), "").unwrap();
+        look(&mut a, &t, Duration::from_secs(2));
+        assert!(paths(&a).contains(&"main2.txt".to_string()), "the look did not read the root again");
+        assert_eq!(found(&a), ["src/main.rs"], "the look changed what the search found");
+        assert_eq!(walks.load(Ordering::SeqCst), 1, "the refresh walked the index");
+        a.hit("/");
+        a.hit("Enter");
+        settle(&mut a);
+        assert_eq!(walks.load(Ordering::SeqCst), 2, "the next search did not walk afresh");
+        assert_eq!(found(&a), ["src/main.rs", "main2.txt"]);
+    }
+
+    /// **The text pane reads a changed file again and keeps its scroll**; a shorter file is drawn to its end.
+    #[test]
+    fn the_text_follows_its_file_and_keeps_its_scroll() {
+        let (s, mut a) = files_app("refresh-text");
+        let t = clocked(&mut a);
+        let long: String = (0..100).map(|i| format!("line {i}\n")).collect();
+        std::fs::write(s.path().join("README.md"), &long).unwrap();
+        standing_on(&mut a, "README.md");
+        pane(&mut a, 100, 20);
+        a.hit("Enter");
+        a.hit("j j j j j j j j j j");
+        assert_eq!(window(&a).right.page.offset(), 10);
+        std::fs::write(s.path().join("README.md"), format!("changed\n{long}")).unwrap();
+        assert!(look(&mut a, &t, Duration::from_secs(2)), "the change did not draw");
+        assert!(matches!(shown(&a), Shown::Text(c) if c.text.starts_with("changed")), "{:?}", shown(&a));
+        assert_eq!(window(&a).right.page.offset(), 10, "the scroll went back to the top");
+        assert!(pane(&mut a, 100, 20).0[0].contains("line 9"), "the text drawn is not where the scroll stood");
+        std::fs::write(s.path().join("README.md"), "short\n").unwrap();
+        look(&mut a, &t, Duration::from_secs(2));
+        assert!(pane(&mut a, 100, 20).0[0].ends_with("short"), "a shorter file was not pulled to its end");
+    }
+
+    /// **A slow look rests ten times its length, counted from its end**; a closed window and a folded folder are not
+    /// measured.
+    #[test]
+    fn a_slow_look_rests_ten_times_and_nothing_unseen_is_measured() {
+        let (_s, mut a) = files_app("refresh-slow");
+        let (t, clock) = hand_clock();
+        let log = Arc::new(Mutex::new(Vec::new()));
+        let (l, tt) = (log.clone(), t.clone());
+        a.files_disk = std::mem::take(&mut a.files_disk).clocking(clock).stamping(move |jail, path| {
+            l.lock().unwrap().push(path.to_owned());
+            if path == "." {
+                later(&tt, Duration::from_secs(3));
+            }
+            files::stamp(jail, path)
+        });
+        standing_on(&mut a, "src");
+        a.hit("l");
+        settle(&mut a);
+        a.hit("h");
+        look(&mut a, &t, Duration::from_secs(2));
+        assert_eq!(*log.lock().unwrap(), ["."], "a folded folder was stamped");
+        // The look took 3 s and ended at 5 s: the next is due at 35 s, not at 32 s (counted from its start).
+        look(&mut a, &t, Duration::from_secs(29));
+        assert_eq!(log.lock().unwrap().len(), 1, "a 3 s look rested less than 30 s");
+        look(&mut a, &t, Duration::from_secs(1));
+        assert_eq!(log.lock().unwrap().len(), 2, "the look after the rest did not come");
+        a.hit("Esc");
+        later(&t, Duration::from_secs(600));
+        a.follow_files();
+        std::thread::sleep(Duration::from_millis(50));
+        a.follow_files();
+        assert_eq!(log.lock().unwrap().len(), 2, "a closed window was measured");
+    }
+
+    /// The test window over a root of `n` folders, each empty, with a stamp taker that logs and waits `slow` per folder.
+    /// The root's stamp moves on every look — its folder is read again each time and found the same.
+    fn wide_app(name: &str, n: usize, slow: Duration) -> (Scratch, App, Arc<Mutex<Instant>>, Arc<Mutex<Vec<String>>>) {
+        let (s, mut a) = files_app(name);
+        let (t, clock) = hand_clock();
+        let log = Arc::new(Mutex::new(Vec::new()));
+        let l = log.clone();
+        let moves = AtomicUsize::new(1);
+        a.files_disk = Disk::with(
+            move |_, path| {
+                if path == "." {
+                    return Ok(listed((0..n).map(|i| entry(&format!("d{i:04}"), Kind::Dir)).collect()));
+                }
+                Ok(listed(Vec::new()))
+            },
+            |_| Some(Vec::new()),
+        )
+        .clocking(clock)
+        .stamping(move |_, path| {
+            l.lock().unwrap().push(path.to_owned());
+            if path != "." {
+                std::thread::sleep(slow);
+                return Some(files::Stamp { modified: None, size: 0 });
+            }
+            Some(files::Stamp { modified: None, size: moves.fetch_add(1, Ordering::SeqCst) as u64 })
+        });
+        a.hit("SPC g f");
+        settle(&mut a);
+        (s, a, t, log)
+    }
+
+    fn open_all(a: &mut App, n: usize) {
+        let Mode::Files(w) = &mut a.mode else { panic!("no window") };
+        for i in 0..n {
+            w.open(&format!("d{i:04}"));
+        }
+        settle(a);
+    }
+
+    /// **A look stamps at most 2,000 folders**; the next looks go on from there, so all are stamped in turn.
+    #[test]
+    fn a_look_stamps_two_thousand_folders_at_most_and_goes_round() {
+        let (_s, mut a, t, log) = wide_app("refresh-many", 5_000, Duration::ZERO);
+        open_all(&mut a, 5_000);
+        let mut seen = HashSet::new();
+        for _ in 0..3 {
+            log.lock().unwrap().clear();
+            assert!(!look(&mut a, &t, Duration::from_secs(10)), "a look that found nothing changed the screen");
+            let got = log.lock().unwrap().clone();
+            assert!(!got.is_empty() && got.len() <= SWEEP_LIMIT, "one look stamped {} folders", got.len());
+            seen.extend(got);
+        }
+        assert_eq!(seen.len(), 5_001, "three looks did not go round every open folder");
+    }
+
+    /// **The person's read goes first** — a folder opened while a long look runs is read after a piece of it, not at its
+    /// end; and the keys never wait.
+    #[test]
+    fn the_persons_read_goes_before_the_look() {
+        let (_s, mut a, t, _log) = wide_app("refresh-yield", 1_000, Duration::from_millis(5));
+        open_all(&mut a, 400);
+        later(&t, Duration::from_secs(2));
+        a.follow_files();
+        assert!(window(&a).refreshing(), "no look started");
+        assert!(!a.loading(), "a look alone wakes the loop fast");
+        on(&mut a, "d0900");
+        let began = Instant::now();
+        a.hit("l j k");
+        assert!(began.elapsed() < Duration::from_millis(200), "a key waited on the look");
+        while window(&a).count("d0900").is_none() {
+            a.follow_files();
+            assert!(began.elapsed() < Duration::from_secs(10), "the folder was never read");
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        assert!(began.elapsed() < Duration::from_millis(1_000), "the read waited {:?} on the look", began.elapsed());
+        assert!(window(&a).refreshing(), "the look ended before the read — the test proves nothing");
+    }
+
+    /// **An answer for a folder folded while the look ran is dropped** — it stays folded, and opening it again reads it.
+    /// **The stamp is the one taken before the read**: a change right after a read shows on the next look.
+    #[test]
+    fn a_folded_folder_stays_folded_and_a_change_after_the_read_is_not_lost() {
+        let (_s, mut a) = files_app("refresh-fold");
+        let (t, clock) = hand_clock();
+        let names_in = Arc::new(Mutex::new(vec!["a.rs".to_string()]));
+        let stamp = |n: usize| files::Stamp { modified: None, size: n as u64 };
+        let (held, slow) = (names_in.clone(), Arc::new(AtomicBool::new(false)));
+        let (n2, s2) = (names_in.clone(), slow.clone());
+        a.files_disk = Disk::with(
+            move |_, path| {
+                if path == "." {
+                    return Ok(listed(vec![entry("src", Kind::Dir)]));
+                }
+                let mut held = held.lock().unwrap();
+                let entries = held.iter().map(|n| entry(n, Kind::File)).collect();
+                let read = files::Listed { entries, stamp: stamp(held.len()) };
+                // A file comes right after the first read: the stamp kept must be the one taken before it.
+                if held.len() == 1 {
+                    held.push("b.rs".into());
+                }
+                Ok(read)
+            },
+            |_| Some(Vec::new()),
+        )
+        .clocking(clock)
+        .stamping(move |_, path| {
+            if path == "src" && s2.load(Ordering::SeqCst) {
+                std::thread::sleep(Duration::from_millis(300));
+            }
+            Some(stamp(if path == "." { 0 } else { n2.lock().unwrap().len() }))
+        });
+        standing_on(&mut a, "src");
+        a.hit("l");
+        settle(&mut a);
+        assert_eq!(names(&a), ["src (open)", "src/a.rs"]);
+        look(&mut a, &t, Duration::from_secs(2));
+        assert_eq!(names(&a), ["src (open)", "src/a.rs", "src/b.rs"], "the change after the read was lost");
+        // Folded while its look is out: the answer lands nowhere.
+        names_in.lock().unwrap().push("c.rs".into());
+        slow.store(true, Ordering::SeqCst);
+        later(&t, Duration::from_secs(2));
+        a.follow_files();
+        assert!(window(&a).refreshing());
+        on(&mut a, "src");
+        a.hit("h");
+        look(&mut a, &t, Duration::ZERO);
+        assert_eq!(names(&a), ["src"], "a folded folder opened again with the look's answer");
+        a.hit("l");
+        settle(&mut a);
+        assert!(names(&a).contains(&"src/c.rs".to_string()), "{:?}", names(&a));
+    }
+
+    /// **Quiet looks rest longer, up to 10 s; a key on the window brings the rest back to 2 s.** Nothing found draws
+    /// nothing.
+    #[test]
+    fn quiet_looks_slow_down_and_a_key_speeds_them_up() {
+        let (_s, mut a, t, log) = wide_app("refresh-quiet", 3, Duration::ZERO);
+        let looks = |log: &Mutex<Vec<String>>| log.lock().unwrap().iter().filter(|p| *p == ".").count();
+        for by in [2, 4, 8, 10, 10] {
+            assert!(!look(&mut a, &t, Duration::from_secs(by)), "a look that found nothing drew");
+        }
+        assert_eq!(looks(&log), 5);
+        look(&mut a, &t, Duration::from_secs(2));
+        assert_eq!(looks(&log), 5, "the rest stayed at 2 s after quiet looks");
+        look(&mut a, &t, Duration::from_secs(7));
+        assert_eq!(looks(&log), 5, "the rest did not grow to 10 s");
+        a.hit("j");
+        look(&mut a, &t, Duration::ZERO);
+        assert_eq!(looks(&log), 6, "a key left the rest at 10 s");
+    }
+
+    /// **The changed files follow the worktree** — a file changed shows after a look; the same list draws nothing; a
+    /// git that fails keeps the list and says nothing.
+    #[test]
+    fn the_changed_files_follow_the_worktree_quietly() {
+        let (_s, mut a) = files_app("refresh-changed");
+        let t = clocked(&mut a);
+        let list = Arc::new(Mutex::new(vec![change("README.md", vcs::Status::Modified)]));
+        let fail = Arc::new(AtomicBool::new(false));
+        let (l, f) = (list.clone(), fail.clone());
+        a.files_disk = std::mem::take(&mut a.files_disk).changing(move |_, _| {
+            if f.load(Ordering::SeqCst) {
+                return Err("git broke".into());
+            }
+            let files = l.lock().unwrap().clone();
+            Ok(vcs::Changes { total: files.len(), files, truncated: false })
+        });
+        standing_on(&mut a, "README.md");
+        a.hit("SPC v c Esc");
+        settle(&mut a);
+        assert_eq!(names(&a), ["README.md"]);
+        list.lock().unwrap().push(change("src/main.rs", vcs::Status::Modified));
+        assert!(look(&mut a, &t, Duration::from_secs(2)), "the new change did not draw");
+        assert_eq!(names(&a), ["src (open)", "src/main.rs", "README.md"]);
+        assert_eq!(window(&a).current_path(), Some("README.md"), "the cursor left its file");
+        assert!(!look(&mut a, &t, Duration::from_secs(2)), "the same list drew");
+        fail.store(true, Ordering::SeqCst);
+        assert!(!look(&mut a, &t, Duration::from_secs(10)), "a failing git drew");
+        assert_eq!(names(&a), ["src (open)", "src/main.rs", "README.md"], "a failing git took the list");
+        assert!(a.notice.is_none(), "a failing git said so: {:?}", a.notice);
+    }
+
+    /// **The diff pane reads itself again** while it stands — and not once it is off.
+    #[test]
+    fn the_windows_diff_follows_and_stops_when_off() {
+        let (_s, mut a) = files_app("refresh-diff");
+        let t = clocked(&mut a);
+        let head = "diff --git a/README.md b/README.md\n--- a/README.md\n+++ b/README.md\n";
+        let patch = Arc::new(Mutex::new(format!("{head}@@ -1 +1 @@\n-a\n+b\n")));
+        let calls = Arc::new(AtomicUsize::new(0));
+        let (p, n) = (patch.clone(), calls.clone());
+        a.files_disk = std::mem::take(&mut a.files_disk).diffing(move |_, _, _, lang| {
+            n.fetch_add(1, Ordering::SeqCst);
+            diff::sample(&p.lock().unwrap(), None, Vec::new(), lang)
+        });
+        standing_on(&mut a, "README.md");
+        a.hit("SPC v D Esc");
+        settle(&mut a);
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        *patch.lock().unwrap() = format!("{head}@@ -1 +1,2 @@\n-a\n+b\n+c\n");
+        assert!(look(&mut a, &t, Duration::from_secs(2)), "the changed diff did not draw");
+        assert_eq!(window(&a).diff.loaded().map(|l| l.len(diff::Layout::Unified)), Some(5));
+        a.hit("SPC v D Esc");
+        let at = calls.load(Ordering::SeqCst);
+        look(&mut a, &t, Duration::from_secs(60));
+        assert_eq!(calls.load(Ordering::SeqCst), at, "the diff turned off was read again");
+    }
+
+    /// **The window's gits never run two at once** — the refresh's and the person's take turns, and the keys never
+    /// wait on either.
+    #[test]
+    fn the_windows_gits_take_turns() {
+        let (_s, mut a) = files_app("refresh-gate");
+        let t = clocked(&mut a);
+        let (out, most) = (Arc::new(AtomicUsize::new(0)), Arc::new(AtomicUsize::new(0)));
+        let run = {
+            let (out, most) = (out.clone(), most.clone());
+            move || {
+                let n = out.fetch_add(1, Ordering::SeqCst) + 1;
+                most.fetch_max(n, Ordering::SeqCst);
+                std::thread::sleep(Duration::from_millis(30));
+                out.fetch_sub(1, Ordering::SeqCst);
+            }
+        };
+        let (r1, r2) = (run.clone(), run);
+        let flip = Arc::new(AtomicUsize::new(0));
+        let (f1, f2) = (flip.clone(), flip);
+        a.files_disk = std::mem::take(&mut a.files_disk)
+            .changing(move |_, _| {
+                r1();
+                // A list that changes every time, so every look has something to do.
+                let n = f1.fetch_add(1, Ordering::SeqCst);
+                let mut files =
+                    vec![change("README.md", vcs::Status::Modified), change("src/main.rs", vcs::Status::Added)];
+                files[0].adds = Some(n);
+                Ok(vcs::Changes { total: files.len(), files, truncated: false })
+            })
+            .diffing(move |_, _, _, lang| {
+                r2();
+                let n = f2.load(Ordering::SeqCst);
+                diff::sample(
+                    &format!("diff --git a/x b/x\n--- a/x\n+++ b/x\n@@ -1 +1 @@\n-a\n+{n}\n"),
+                    None,
+                    Vec::new(),
+                    lang,
+                )
+            });
+        standing_on(&mut a, "README.md");
+        a.hit("SPC v c Esc SPC v D Esc");
+        settle(&mut a);
+        for i in 0..6 {
+            later(&t, Duration::from_secs(10));
+            a.follow_files();
+            let began = Instant::now();
+            on(&mut a, if i % 2 == 0 { "src/main.rs" } else { "README.md" });
+            assert!(began.elapsed() < Duration::from_millis(100), "a move waited on git");
+            look(&mut a, &t, Duration::ZERO);
+            settle(&mut a);
+        }
+        assert_eq!(most.load(Ordering::SeqCst), 1, "two gits ran at once");
+    }
+
+    /// **The refresh never writes git's index** — a `git add` beside it never finds `index.lock`, and the index is
+    /// byte for byte what it was.
+    #[test]
+    fn the_refresh_leaves_the_git_index_alone() {
+        let s = Scratch::new("tui-files-refresh-git");
+        let root = s.path().to_path_buf();
+        git(&root, &["init", "-q"]);
+        std::fs::write(root.join("a.txt"), "one\n").unwrap();
+        git(&root, &["add", "."]);
+        git(&root, &["commit", "-qm", "base"]);
+        std::fs::write(root.join("a.txt"), "two\n").unwrap();
+        let index = root.join(".git/index");
+        let stamp = |p: &Path| (std::fs::read(p).unwrap(), std::fs::metadata(p).unwrap().modified().unwrap());
+        let before = stamp(&index);
+        let mut a = App::new(Vec::new(), cfg(), NavPath::new());
+        a.site.repo = Some(crate::store::Repo::at(root.clone(), cfg()));
+        let (t, clock) = hand_clock();
+        a.files_disk = Disk::default().clocking(clock);
+        standing_on(&mut a, "a.txt");
+        a.hit("SPC v c Esc SPC v D Esc");
+        settle(&mut a);
+        for i in 0..3 {
+            std::fs::write(root.join("a.txt"), format!("two\n{i}\n")).unwrap();
+            look(&mut a, &t, Duration::from_secs(10));
+            assert!(!root.join(".git/index.lock").exists(), "a look left index.lock");
+        }
+        assert!(stamp(&index) == before, "the refresh wrote the index");
+        std::fs::write(root.join("b.txt"), "b\n").unwrap();
+        git(&root, &["add", "b.txt"]);
     }
 
     /// **The side-pane rule, one function for the file window and the list's diff pane** (`draw::side_split`): alone,

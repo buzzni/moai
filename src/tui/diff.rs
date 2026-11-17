@@ -28,9 +28,19 @@
 //!
 //! **Foreign text** — paths, hunk sections, lines — goes through [`columns::cut`], which never lets a control character
 //! reach the terminal.
+//!
+//! **It refreshes itself** (moai-ffk9.15v, [`View::refresh`]): while a subject stands and nothing else is out, the pane
+//! reads it again at the refresh's pace ([`super::pace`]) — a checkout's whole branch every time, an issue's only while
+//! its working tree is shown (`working`, or no scope yet); its `commits` and `branch` scopes move only with a `HEAD`,
+//! and the owner says so ([`View::moved`]) when the commit table comes again. The job compares the new answer with the
+//! one shown and says "the same" without colouring anything, so a look that found nothing redraws nothing. A changed
+//! answer is coloured before it is sent — the text never flashes plain — and stands where the scroll was: the same
+//! file at the same row, the next file at that place when it went. A refresh that fails leaves the last answer standing
+//! and tries again on the next step, without a word.
 
 use super::columns;
 use super::keys::{self, Side as Toward};
+use super::pace::{self, Clock, Pace};
 use super::scroll::{Move, Scroll};
 use crate::diff::{self as patch, FileDiff, FileKind, LineKind};
 use crate::highlight;
@@ -150,6 +160,8 @@ type WantId = (String, Option<Scope>);
 struct Want {
     id: WantId,
     source: Source,
+    /// A refresh: the answer shown now — the job compares with it and says [`Reply::Same`] when nothing changed.
+    was: Option<Arc<Loaded>>,
 }
 
 /// Why there is nothing to show — the read layer's kinds (`git::Told`): `no_git`, `not_a_repo`, `timeout`,
@@ -530,11 +542,14 @@ enum Reply {
         serial: u64,
         id: WantId,
         loaded: Arc<Loaded>,
+        /// How long the read took — the refresh rests ten times that.
+        took: Duration,
+        refresh: bool,
     },
+    /// A refresh found what is shown — nothing to colour, nothing to draw.
+    Same { serial: u64, id: WantId, took: Duration },
     /// One more file got its colours.
-    Painted {
-        serial: u64,
-    },
+    Painted { serial: u64 },
 }
 
 /// A read out.
@@ -609,17 +624,44 @@ impl Work {
         let serial = self.serial;
         let (out, read, paint, current, lang) =
             (self.out.clone(), self.read.clone(), self.paint.clone(), self.current.clone(), self.lang);
-        let (source, id) = (want.source.clone(), want.id.clone());
+        let (source, id, was) = (want.source.clone(), want.id.clone(), want.was.clone());
         let handle = std::thread::spawn(move || {
+            let began = Instant::now();
             let mut loaded = read(&source, id.1, Some(BUDGET), lang);
             loaded.measure(lang);
+            let took = began.elapsed();
+            let wanted = || current.lock().unwrap_or_else(std::sync::PoisonError::into_inner).as_ref() == Some(&id);
+            if let Some(was) = &was {
+                if same(&loaded, was) {
+                    let _ = out.send(Reply::Same { serial, id: id.clone(), took });
+                    return;
+                }
+                // A refresh colours before it sends — the changed text never stands plain for a step. A file that did
+                // not change takes the colours it had.
+                for part in &loaded.parts {
+                    if !wanted() {
+                        return;
+                    }
+                    let old = was
+                        .parts
+                        .iter()
+                        .find(|o| same_change(&o.change, &part.change) && same_file(&o.file, &part.file));
+                    let _ = part.paint.set(match old.and_then(|o| o.paint.get()) {
+                        Some(p) => p.clone(),
+                        None => paint(&part.file),
+                    });
+                }
+                let _ =
+                    out.send(Reply::Loaded { serial, id: id.clone(), loaded: Arc::new(loaded), took, refresh: true });
+                return;
+            }
             let loaded = Arc::new(loaded);
-            if out.send(Reply::Loaded { serial, id: id.clone(), loaded: loaded.clone() }).is_err() {
+            if out.send(Reply::Loaded { serial, id: id.clone(), loaded: loaded.clone(), took, refresh: false }).is_err()
+            {
                 return;
             }
             for part in &loaded.parts {
-                let wanted = current.lock().unwrap_or_else(std::sync::PoisonError::into_inner).as_ref() == Some(&id);
-                if !wanted {
+                if !wanted() {
                     return;
                 }
                 let _ = part.paint.set(paint(&part.file));
@@ -643,20 +685,21 @@ impl Work {
 
     /// Take the answers, reap the threads that ended, start the next read. Gives the answers for the current serials
     /// and whether colour came.
-    fn take(&mut self) -> (Vec<(WantId, Arc<Loaded>)>, bool) {
+    fn take(&mut self) -> (Vec<Answer>, bool) {
         let ended = self.running.as_ref().is_some_and(|j| j.handle.is_finished());
         let mut got = Vec::new();
         let mut painted = false;
         while let Ok(reply) = self.replies.try_recv() {
             match reply {
-                Reply::Loaded { serial, .. } | Reply::Painted { serial } if serial <= self.floor => {}
-                Reply::Loaded { serial, id, loaded } => {
-                    if self.running.as_ref().is_some_and(|j| j.serial == serial)
-                        && let Some(job) = self.running.take()
-                    {
-                        self.after.push(job.handle);
-                    }
-                    got.push((id, loaded));
+                Reply::Loaded { serial, .. } | Reply::Same { serial, .. } | Reply::Painted { serial }
+                    if serial <= self.floor => {}
+                Reply::Loaded { serial, id, loaded, took, refresh } => {
+                    self.answered(serial);
+                    got.push(Answer { id, loaded: Some(loaded), took, refresh });
+                }
+                Reply::Same { serial, id, took } => {
+                    self.answered(serial);
+                    got.push(Answer { id, loaded: None, took, refresh: true });
                 }
                 Reply::Painted { .. } => painted = true,
             }
@@ -684,9 +727,88 @@ impl Work {
         (got, painted)
     }
 
-    fn busy(&self) -> bool {
-        self.running.is_some() || self.wanted.is_some() || !self.after.is_empty()
+    /// The job of `serial` answered — its thread goes on colouring, or ends, among the ones reaped later.
+    fn answered(&mut self, serial: u64) {
+        if self.running.as_ref().is_some_and(|j| j.serial == serial)
+            && let Some(job) = self.running.take()
+        {
+            self.after.push(job.handle);
+        }
     }
+
+    /// Whether the loop should wake fast — **a refresh running alone does not count**: its answer is taken on the
+    /// loop's ordinary step (moai-ffk9.15v). A want waiting behind it does.
+    fn busy(&self) -> bool {
+        self.running.as_ref().is_some_and(|j| j.want.was.is_none()) || self.wanted.is_some() || !self.after.is_empty()
+    }
+
+    /// Nothing read or wanted — a refresh may start.
+    fn idle(&self) -> bool {
+        self.running.is_none() && self.wanted.is_none()
+    }
+}
+
+/// One answer as [`View::follow`] takes it. `loaded` is `None` when a refresh found what is shown.
+struct Answer {
+    id: WantId,
+    loaded: Option<Arc<Loaded>>,
+    took: Duration,
+    refresh: bool,
+}
+
+/// Two changes alike — path, kind and counts (the list's own words, moai-ffk9.15v).
+pub(super) fn same_change(a: &Change, b: &Change) -> bool {
+    a.path == b.path
+        && a.old_path == b.old_path
+        && a.status == b.status
+        && a.adds == b.adds
+        && a.dels == b.dels
+        && a.binary == b.binary
+}
+
+/// Two changed-file lists alike.
+pub(super) fn same_changes(a: &vcs::Changes, b: &vcs::Changes) -> bool {
+    a.total == b.total
+        && a.truncated == b.truncated
+        && a.files.len() == b.files.len()
+        && a.files.iter().zip(&b.files).all(|(x, y)| same_change(x, y))
+}
+
+fn same_file(a: &FileDiff, b: &FileDiff) -> bool {
+    a.old_path == b.old_path
+        && a.new_path == b.new_path
+        && a.kind == b.kind
+        && a.binary == b.binary
+        && a.hunks.len() == b.hunks.len()
+        && a.hunks.iter().zip(&b.hunks).all(|(x, y)| {
+            (x.old_start, x.old_len, x.new_start, x.new_len) == (y.old_start, y.old_len, y.new_start, y.new_len)
+                && x.section == y.section
+                && x.lines.len() == y.lines.len()
+                && x.lines.iter().zip(&y.lines).all(|(l, m)| {
+                    l.kind == m.kind
+                        && l.old_no == m.old_no
+                        && l.new_no == m.new_no
+                        && l.no_newline == m.no_newline
+                        && l.text == m.text
+                })
+        })
+}
+
+/// Two answers alike — what the pane would draw and the scopes it offers.
+fn same(a: &Loaded, b: &Loaded) -> bool {
+    a.scope == b.scope
+        && a.total == b.total
+        && a.list_cut == b.list_cut
+        && a.patch_cut == b.patch_cut
+        && a.failed == b.failed
+        && a.unchanged == b.unchanged
+        && a.offers.len() == b.offers.len()
+        && a.offers
+            .iter()
+            .zip(&b.offers)
+            .all(|(x, y)| x.scope == y.scope && x.checkout == y.checkout && x.branch == y.branch && x.owner == y.owner)
+        && a.parts.len() == b.parts.len()
+        && a.parts.iter().zip(&b.parts).all(|(x, y)| same_change(&x.change, &y.change) && same_file(&x.file, &y.file))
 }
 
 /// The threads as the pane holds them — shared, not copied: a window holding the pane is cloned behind the suggestion
@@ -733,6 +855,13 @@ pub struct View {
     drawn: Layout,
     kept: VecDeque<(WantId, Arc<Loaded>)>,
     work: Shared,
+    // ---- the refresh (moai-ffk9.15v) ----
+    clock: Clock,
+    pace: Pace,
+    /// The refresh out, by the want it reads again — its answer is compared, not just stood.
+    refreshing: Option<WantId>,
+    /// The `HEAD` moved while something was out — read again once it is in.
+    moved: bool,
 }
 
 impl std::fmt::Debug for View {
@@ -761,7 +890,18 @@ impl View {
             drawn: Layout::Unified,
             kept: VecDeque::new(),
             work: Shared(Arc::new(Mutex::new(Work::new(read, paint, lang)))),
+            pace: Pace::new(Instant::now()),
+            clock: pace::real(),
+            refreshing: None,
+            moved: false,
         }
+    }
+
+    /// The same pane on another clock — a test moves time by hand.
+    pub fn clocked(mut self, clock: Clock) -> View {
+        self.pace = Pace::new(clock());
+        self.clock = clock;
+        self
     }
 
     /// The words the reads after this one say their notes and failures in — the list's pane is built before the
@@ -782,7 +922,7 @@ impl View {
 
     fn want(&self) -> Option<Want> {
         let source = self.source.clone()?;
-        Some(Want { id: (source.key(), self.chosen), source })
+        Some(Want { id: (source.key(), self.chosen), source, was: None })
     }
 
     /// Show the changes of this subject — the owner calls it as its cursor lands. **The same subject again does
@@ -801,23 +941,94 @@ impl View {
         self.ask();
     }
 
-    /// Read the shown subject again — the pane coming back on. The scroll stays.
-    #[allow(dead_code)] // The refresh (moai-ffk9.15v) calls it.
-    pub fn reread(&mut self) {
-        self.ask();
-    }
-
     /// The pane is off: let go of the read out (its answer is never shown) and of the subject. Nothing waits.
     pub fn close(&mut self) {
         self.source = None;
         self.chosen = None;
         self.shown = Shown::Nothing;
         self.work.with(Work::drop_all);
+        self.restart();
     }
 
     fn rewind(&mut self) {
         self.page.rewind();
         self.pan = 0;
+    }
+
+    /// The hand asked for something: the refresh starts over from now, and a refresh out is answered as a plain read.
+    fn restart(&mut self) {
+        self.refreshing = None;
+        self.moved = false;
+        self.pace = Pace::new((self.clock)());
+    }
+
+    /// **The refresh step** — the owner calls it on each step of its loop while the pane stands; `may` is false while
+    /// the owner runs a `git` of its own, so two never run at once. A look is due at the pace's rest after the last one;
+    /// nothing is read while another read is out (the person's first), while nothing stands yet, or — on an issue's
+    /// `commits` and `branch` scopes — until the `HEAD` moved ([`View::moved`]).
+    pub fn refresh(&mut self, may: bool) {
+        let Some(mut want) = self.want() else { return };
+        let Shown::Loaded(shown) = &self.shown else { return };
+        if !may || self.refreshing.is_some() || !self.work.with(|w| w.idle()) {
+            return;
+        }
+        let ticks = match &want.source {
+            Source::Checkout { .. } => true,
+            Source::Issue { .. } => matches!(self.at, None | Some(Scope::Working)),
+        };
+        if !self.moved && !(ticks && self.pace.due((self.clock)())) {
+            return;
+        }
+        self.moved = false;
+        want.was = Some(shown.clone());
+        self.refreshing = Some(want.id.clone());
+        self.work.with(|w| w.ask(want));
+    }
+
+    /// The `HEAD` moved — new commits, a merge (the owner learns it from the commit table coming again). An issue's
+    /// `commits` and `branch` scopes are read again at the next step.
+    pub fn moved(&mut self) {
+        if self.source.is_some() {
+            self.moved = true;
+        }
+    }
+
+    /// A key on the pane's screen — the refresh goes back to its shortest rest.
+    pub fn wake(&mut self) {
+        self.pace.wake();
+    }
+
+    /// A refresh is out — for the tests.
+    #[cfg(test)]
+    pub fn refreshing(&self) -> bool {
+        self.refreshing.is_some()
+    }
+
+    /// A changed answer for what is shown: it stands where the scroll was — the same file at the same row of it, or,
+    /// when that file went, the file that came to its place. Lines added above do not push the reading away.
+    fn restand(&mut self, l: Arc<Loaded>) {
+        let layout = self.drawn;
+        let top = self.page.offset();
+        let to = self.loaded().and_then(|old| {
+            let i = old.part_of(*old.rows(layout).get(top)?)?;
+            let within = top - *old.heads(layout).get(i)?;
+            let heads = l.heads(layout);
+            match l.parts.iter().position(|p| p.change.path == old.parts[i].change.path) {
+                Some(j) => {
+                    let end = heads.get(j + 1).copied().unwrap_or(l.len(layout));
+                    Some(heads[j] + within.min(end.saturating_sub(heads[j] + 1)))
+                }
+                None => heads.get(i.min(heads.len().saturating_sub(1))).copied(),
+            }
+        });
+        self.stand(l);
+        if let Some(to) = to
+            && to != top
+        {
+            // Measured again by the next frame — the old length must not cut the new place.
+            self.page.rewind();
+            self.page.by(to as isize);
+        }
     }
 
     /// Ask for what the pane wants: a kept answer stands at once, and a fresh read goes out either way.
@@ -830,6 +1041,7 @@ impl View {
             });
             return;
         };
+        self.restart();
         let kept = self.kept.iter().find(|(id, _)| *id == want.id).map(|(_, l)| l.clone());
         match kept {
             Some(l) => self.stand(l),
@@ -863,9 +1075,32 @@ impl View {
         }
         let (got, painted) = self.work.with(Work::take);
         let now = self.want().map(|w| w.id);
-        for (id, loaded) in got {
-            self.keep(id.clone(), loaded.clone());
-            if Some(&id) == now.as_ref() {
+        for Answer { id, loaded, took, refresh } in got {
+            let current = Some(&id) == now.as_ref();
+            // The refresh this pane sent — compared, not just stood.
+            let mine = refresh && current && self.refreshing.as_ref() == Some(&id);
+            if mine {
+                self.refreshing = None;
+            }
+            let Some(loaded) = loaded else {
+                if mine {
+                    self.pace.done((self.clock)(), took, false);
+                }
+                continue;
+            };
+            if mine {
+                // A refresh that failed leaves the last answer standing, without a word; the next step tries again.
+                let kept = loaded.failed.is_some() && self.loaded().is_some_and(|l| l.failed.is_none());
+                self.pace.done((self.clock)(), took, !kept);
+                if !kept {
+                    self.keep(id, loaded.clone());
+                    self.restand(loaded);
+                    changed = true;
+                }
+                continue;
+            }
+            self.keep(id, loaded.clone());
+            if current {
                 // Never rewinds — a reread of the same scope keeps the scroll; the next frame clamps it.
                 self.stand(loaded);
                 changed = true;
@@ -874,9 +1109,14 @@ impl View {
         changed | painted
     }
 
-    /// Whether a read or colouring is out — the loop wakes fast to take it.
+    /// Whether a read or colouring is out — the loop wakes fast to take it. A refresh out alone is not ([`Work::busy`]).
     pub fn busy(&self) -> bool {
         matches!(self.shown, Shown::Reading { said: false, .. }) || self.work.with(|w| w.busy())
+    }
+
+    /// Nothing read or wanted, a refresh included — the owner's own git may start.
+    pub fn idle(&self) -> bool {
+        self.work.with(|w| w.idle())
     }
 
     /// The answer shown, if any.
@@ -1443,6 +1683,194 @@ mod tests {
         assert!(row(4).contains("11    -one"), "{}", row(4));
         assert_eq!(chosen, Layout::Split);
         assert_eq!(v.drawn, Layout::Unified);
+    }
+
+    // ---- the refresh (moai-ffk9.15v) ----
+
+    /// A clock the test moves by hand, and the move.
+    fn hand_clock() -> (Arc<Mutex<Instant>>, Clock) {
+        let t = Arc::new(Mutex::new(Instant::now()));
+        let c = t.clone();
+        (t, Arc::new(move || *c.lock().unwrap()))
+    }
+
+    fn later(t: &Mutex<Instant>, by: Duration) {
+        *t.lock().unwrap() += by;
+    }
+
+    /// One refresh step after `by`, taken to its end — what the owner's loop does on its ordinary steps. Gives whether
+    /// any step said the pane changed.
+    fn look(v: &mut View, t: &Mutex<Instant>, by: Duration) -> bool {
+        later(t, by);
+        let mut changed = false;
+        v.refresh(true);
+        let began = Instant::now();
+        loop {
+            changed |= v.follow();
+            if !v.refreshing() && !v.busy() {
+                return changed;
+            }
+            assert!(began.elapsed() < Duration::from_secs(30), "the refresh kept running");
+            std::thread::sleep(Duration::from_millis(1));
+        }
+    }
+
+    /// A reader answering what `patch` holds now, counting its calls.
+    fn reading(patch: Arc<Mutex<String>>, calls: Arc<AtomicUsize>) -> Arc<ReadFn> {
+        Arc::new(move |_: &Source, scope, _, _| {
+            calls.fetch_add(1, Ordering::SeqCst);
+            let mut l = loaded(&patch.lock().unwrap());
+            l.scope = scope;
+            l
+        })
+    }
+
+    fn file_patch(name: &str, lines: usize) -> String {
+        let body: String = (0..lines).map(|i| format!("+{name} line {i}\n")).collect();
+        format!("diff --git a/{name} b/{name}\n--- a/{name}\n+++ b/{name}\n@@ -0,0 +1,{lines} @@\n{body}")
+    }
+
+    /// **A refresh that finds the same reads once, colours nothing and says nothing changed**; one that finds a change
+    /// stands it coloured, at once.
+    #[test]
+    fn a_refresh_that_finds_the_same_draws_nothing_and_a_change_stands_coloured() {
+        let (t, clock) = hand_clock();
+        let patch = Arc::new(Mutex::new(file_patch("a.rs", 3)));
+        let (calls, paints) = (Arc::new(AtomicUsize::new(0)), Arc::new(AtomicUsize::new(0)));
+        let p = paints.clone();
+        let paint: Arc<PaintFn> = Arc::new(move |_: &FileDiff| {
+            p.fetch_add(1, Ordering::SeqCst);
+            None
+        });
+        let mut v = View::with(reading(patch.clone(), calls.clone()), paint, EN).clocked(clock);
+        v.show(source("a.rs"));
+        settle(&mut v);
+        let first = v.loaded().unwrap().clone();
+        let painted = paints.load(Ordering::SeqCst);
+        assert!(!look(&mut v, &t, Duration::from_millis(1500)), "a look before its rest changed the pane");
+        assert_eq!(calls.load(Ordering::SeqCst), 1, "the refresh did not wait 2 s");
+        later(&t, Duration::from_millis(600));
+        v.refresh(true);
+        assert!(v.refreshing() && !v.busy(), "a refresh alone wakes the loop fast");
+        assert!(!look(&mut v, &t, Duration::ZERO), "a refresh that found the same changed the pane");
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+        assert!(Arc::ptr_eq(v.loaded().unwrap(), &first), "the same answer replaced the one shown");
+        assert_eq!(paints.load(Ordering::SeqCst), painted, "the same answer was coloured again");
+        *patch.lock().unwrap() = file_patch("a.rs", 5);
+        assert!(look(&mut v, &t, Duration::from_secs(10)), "the change did not stand");
+        let l = v.loaded().unwrap();
+        assert_eq!(l.len(Layout::Unified), 7);
+        assert!(l.parts.iter().all(|p| p.paint.get().is_some()), "the changed answer stood before its colour");
+    }
+
+    /// **The scroll stays on what it showed**: lines added to the file above push its head down and the reading follows;
+    /// the file read gone, the one that came to its place stands at the top.
+    #[test]
+    fn a_changed_answer_keeps_the_scroll_on_its_file() {
+        let (t, clock) = hand_clock();
+        let both =
+            |a: usize, b: usize, c: usize| file_patch("a.rs", a) + &file_patch("b.rs", b) + &file_patch("c.rs", c);
+        let patch = Arc::new(Mutex::new(both(3, 20, 4)));
+        let mut v = View::with(reading(patch.clone(), Arc::default()), Arc::new(|_| None), EN).clocked(clock);
+        v.show(Some(Source::Checkout { checkout: checkout("/w/a"), path: Some("src/".into()) }));
+        settle(&mut v);
+        v.frame(Layout::Unified, 100, 5);
+        // a.rs: head, hunk, 3 lines = rows 0..5; b.rs starts at 5. Stand on b's 4th row.
+        v.roll(8);
+        assert_eq!(v.page.offset(), 8);
+        *patch.lock().unwrap() = both(10, 20, 4);
+        look(&mut v, &t, Duration::from_secs(2));
+        v.frame(Layout::Unified, 100, 5);
+        assert_eq!(v.page.offset(), 15, "the scroll did not follow b.rs down");
+        // b.rs went: c.rs, which came to its place, stands at the top.
+        *patch.lock().unwrap() = file_patch("a.rs", 10) + &file_patch("c.rs", 4);
+        look(&mut v, &t, Duration::from_secs(2));
+        v.frame(Layout::Unified, 100, 5);
+        assert_eq!(v.page.offset(), 12, "the next file did not take the gone one's place");
+        let l = v.loaded().unwrap();
+        assert_eq!(l.parts[1].change.path, "c.rs");
+    }
+
+    /// **A refresh that fails leaves the answer standing** and the next tries again; nothing is said.
+    #[test]
+    fn a_refresh_that_fails_keeps_the_last_answer() {
+        let (t, clock) = hand_clock();
+        let fail = Arc::new(AtomicBool::new(false));
+        let calls = Arc::new(AtomicUsize::new(0));
+        let (f, n) = (fail.clone(), calls.clone());
+        let read: Arc<ReadFn> = Arc::new(move |_: &Source, _, _, _| {
+            n.fetch_add(1, Ordering::SeqCst);
+            if f.load(Ordering::SeqCst) { Loaded::failed("timeout", "git took too long".into()) } else { loaded(PATCH) }
+        });
+        let mut v = View::with(read, Arc::new(|_| None), EN).clocked(clock);
+        v.show(source("src/a.rs"));
+        settle(&mut v);
+        fail.store(true, Ordering::SeqCst);
+        assert!(!look(&mut v, &t, Duration::from_secs(2)), "a failed refresh changed the pane");
+        assert!(v.loaded().is_some_and(|l| l.failed.is_none()), "the failure took the answer's place");
+        look(&mut v, &t, Duration::from_secs(10));
+        assert_eq!(calls.load(Ordering::SeqCst), 3, "the next step did not try again");
+    }
+
+    /// **An issue's `commits` and `branch` scopes are read again only when the `HEAD` moved**; its working tree at the
+    /// pace. A slow read rests ten times its length.
+    #[test]
+    fn an_issue_reads_its_commits_again_only_when_the_head_moved() {
+        let offer = |scope| Offer { scope, checkout: None, branch: None, owner: None };
+        let (t, clock) = hand_clock();
+        let calls = Arc::new(AtomicUsize::new(0));
+        let n = calls.clone();
+        let read: Arc<ReadFn> = Arc::new(move |_: &Source, scope, _, _| {
+            n.fetch_add(1, Ordering::SeqCst);
+            let mut l = loaded(PATCH);
+            l.offers = vec![offer(Scope::Commits), offer(Scope::Working)];
+            l.scope = Some(scope.unwrap_or(Scope::Commits));
+            l
+        });
+        let repo = Repo::at(PathBuf::from("/w/a"), crate::config::Config::parse("prefix = \"argos\"\n").unwrap());
+        let mut v = View::with(read, Arc::new(|_| None), EN).clocked(clock);
+        v.show(Some(Source::Issue { repo, issues: Arc::new(Vec::new()), id: "argos-0001".into() }));
+        settle(&mut v);
+        for _ in 0..10 {
+            look(&mut v, &t, Duration::from_secs(30));
+        }
+        assert_eq!(calls.load(Ordering::SeqCst), 1, "the commits scope ran git on every step");
+        v.moved();
+        look(&mut v, &t, Duration::ZERO);
+        assert_eq!(calls.load(Ordering::SeqCst), 2, "a HEAD that moved did not read the commits again");
+        // The working tree is read at the pace.
+        v.key(keys::Diff::NextScope);
+        settle(&mut v);
+        let at = calls.load(Ordering::SeqCst);
+        look(&mut v, &t, Duration::from_secs(2));
+        assert_eq!(calls.load(Ordering::SeqCst), at + 1, "the working tree was not read again");
+    }
+
+    /// **A refresh waits for what the person asked, and starts none while the owner's git runs (`may`)**; closing the
+    /// pane stops it.
+    #[test]
+    fn the_refresh_yields_and_stops_with_the_pane() {
+        let (t, clock) = hand_clock();
+        let (hold, calls) = (Arc::new(AtomicBool::new(false)), Arc::new(AtomicUsize::new(0)));
+        let mut v = View::with(counting(hold.clone(), calls.clone()), Arc::new(|_| None), EN).clocked(clock);
+        v.show(source("a.rs"));
+        settle(&mut v);
+        later(&t, Duration::from_secs(5));
+        v.refresh(false);
+        assert!(!v.refreshing(), "a refresh started beside the owner's git");
+        hold.store(true, Ordering::SeqCst);
+        v.show(source("b.rs"));
+        later(&t, Duration::from_secs(5));
+        v.refresh(true);
+        assert!(!v.refreshing(), "a refresh started while the person's read was out");
+        hold.store(false, Ordering::SeqCst);
+        settle(&mut v);
+        let at = calls.load(Ordering::SeqCst);
+        v.close();
+        later(&t, Duration::from_secs(60));
+        v.refresh(true);
+        v.follow();
+        assert_eq!(calls.load(Ordering::SeqCst), at, "a closed pane read again");
     }
 
     /// A view standing on one answer, with no thread behind it.

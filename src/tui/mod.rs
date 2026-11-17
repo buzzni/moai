@@ -23,6 +23,7 @@ pub mod keys;
 pub mod layer;
 pub mod menu;
 mod mouse;
+mod pace;
 pub mod picker;
 pub mod register;
 pub mod scroll;
@@ -4451,6 +4452,9 @@ impl App {
         self.follow_files();
         // The list's diff pane takes its read's answer and colours (moai-ffk9.cij) — nothing while it is closed.
         self.follow_changed |= self.diff.follow();
+        // …and reads itself again at the refresh's pace (moai-ffk9.15v) — never while the commit table's git runs.
+        let gathering = self.gathering_commits();
+        self.diff.refresh(!gathering);
         self.follow_latest();
         self.follow_changed |= self.history.poll();
         // **상세가 그린 이력의 저널도 본다**(moai-w7ms 리뷰) — 다시 읽을지는 그리는 자(`draw::fill_history`)가 가르는데,
@@ -4631,6 +4635,9 @@ impl App {
                 Ok(table) => {
                     self.follow_changed = true;
                     self.commits_job = None;
+                    // The table comes again when a `HEAD` moved: the diff pane's `commits` and `branch` scopes read
+                    // again (moai-ffk9.15v).
+                    self.diff.moved();
                     // **뿌리마다 덮는다.** `commit_tables` 는 이번에 git 이 답을 안 준 뿌리를
                     // 통째로 빼고 오므로(`.ok()`), 받은 것을 그대로 넣으면 한 번 어긋난 걸음에
                     // 옛 표가 사라져 커밋 칸이 말없이 빈다 — 다음 표는 표식이 움직여야 온다.
@@ -7751,6 +7758,8 @@ impl App {
         // 이동한 키도 그 닫는 몫으로 도로 세운다(moai-y8v2, 아래 `act.moves()`).
         let carried = self.notice.take();
         let in_menu = menu::open(&self.chord);
+        // A key on the screen: the diff pane's refresh goes back to its shortest rest (moai-ffk9.15v).
+        self.diff.wake();
         // **키가 오면 끌기는 끝났다**(리뷰, moai-irrj) — 뗌을 놓치는 터미널이 있어(창 밖에서 떼면 안 알린다), 그 뒤로 키만
         // 쓰다 끝내면 끈 몫이 화면에만 서고 다음 실행에서 사라진다. 끝내는 키(Ctrl-C)보다 먼저 적는다. 알림을 걷은 **뒤에**
         // 부른다 — 적다가 진 까닭(`App::save_look`)이 이 키에 걷히면 사람이 못 본다.
@@ -17678,6 +17687,55 @@ mod tests {
 
         fn mouse(a: &mut App, kind: MouseEventKind, column: u16, row: u16) {
             a.mouse(MouseEvent { kind, column, row, modifiers: KeyModifiers::NONE });
+        }
+
+        /// **The list's pane reads itself again** (moai-ffk9.15v): an issue's branch never on the pace — only once the
+        /// commit table comes again (a `HEAD` moved) — and its working tree at the pace.
+        #[test]
+        fn the_lists_pane_reads_again_when_the_head_moved_and_its_working_tree_at_the_pace() {
+            let (_s, mut a) = opened("diff-refresh");
+            let calls = Arc::new(AtomicUsize::new(0));
+            let t = Arc::new(std::sync::Mutex::new(Instant::now()));
+            let c = t.clone();
+            a.diff = diff::View::with(reader(Arc::new(AtomicBool::new(false)), calls.clone()), Arc::new(|_| None), EN)
+                .clocked(Arc::new(move || *c.lock().unwrap()));
+            a.hit("SPC v D");
+            go_to(&mut a, "argos-0001");
+            settle(&mut a);
+            let began = Instant::now();
+            while a.gathering_commits() || !a.diff.idle() {
+                a.follow();
+                assert!(began.elapsed() < Duration::from_secs(30), "the commit table never came");
+                std::thread::sleep(Duration::from_millis(2));
+            }
+            assert_eq!(a.diff.offers().1, Some(Scope::Branch));
+            let wait_for = |a: &mut App, n: usize| {
+                let began = Instant::now();
+                while calls.load(Ordering::SeqCst) < n {
+                    a.follow();
+                    assert!(began.elapsed() < Duration::from_secs(30), "the pane was not read again");
+                    std::thread::sleep(Duration::from_millis(2));
+                }
+            };
+            let n = calls.load(Ordering::SeqCst);
+            for _ in 0..5 {
+                *t.lock().unwrap() += Duration::from_secs(30);
+                a.follow();
+                std::thread::sleep(Duration::from_millis(5));
+                a.follow();
+            }
+            assert_eq!(calls.load(Ordering::SeqCst), n, "the branch scope ran git on the pace");
+            // The commit table comes again: the branch is read again.
+            let (tx, rx) = std::sync::mpsc::channel();
+            tx.send(Default::default()).unwrap();
+            a.commits_job = Some((rx, std::thread::spawn(|| {})));
+            wait_for(&mut a, n + 1);
+            // The working tree: at the pace.
+            a.diff.key(keys::Diff::NextScope);
+            settle(&mut a);
+            let m = calls.load(Ordering::SeqCst);
+            *t.lock().unwrap() += Duration::from_secs(2);
+            wait_for(&mut a, m + 1);
         }
 
         /// **The side pane parts by the detail's place** — the detail first (left or above), the diff after it on the
