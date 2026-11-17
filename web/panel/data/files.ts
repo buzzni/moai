@@ -53,11 +53,6 @@ export function filesSource(client: Client) {
       const files = changesOf(v) ?? []
       return { files, total: typeof v.total === 'number' ? v.total : files.length, truncated: v.truncated === true, ...(record(v.vcs_error) && typeof v.vcs_error.said === 'string' ? { error: v.vcs_error.said } : {}) }
     },
-    async diff(root: string, path: string, background = false): Promise<DiffAnswer> {
-      const v = await read(client, '/api/diff', { root, path }, background)
-      if (!validDiff(v)) throw new Error('invalid diff')
-      return v as unknown as DiffAnswer
-    },
     async ignored(root?: string): Promise<string[]> {
       const v = await read(client, '/api/ignored', root === undefined ? {} : { root })
       return record(v) && Array.isArray(v.dirs) ? v.dirs.filter((d): d is string => typeof d === 'string') : []

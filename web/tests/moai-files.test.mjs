@@ -109,7 +109,7 @@ test('file diff uses the selected checkout and only a listed changed path', asyn
     return { kind: 'passed', output: { path: query.path, text: '', binary: false, truncated: false, spans: null } }
   })
   p.view.render(p.state, null); await wait(20)
-  p.root.querySelectorAll('[role=treeitem]')[0].click(); p.view.command('diff'); await wait(30)
+  p.root.querySelectorAll('[role=treeitem]')[0].click(); p.view.command('diff'); await wait(150)
   assert.ok(calls.some(([path, query]) => path === '/api/diff' && query.path === 'changed' && query.root === '.'))
   assert.match(p.root.textContent, /new/)
   p.root.querySelectorAll('[role=treeitem]')[1].click(); await wait(30)
@@ -427,4 +427,70 @@ test('the tree styles share the list row and drop the indent classes', async () 
   const css = readFileSync(new URL('../panel/style/files.css', import.meta.url), 'utf8'), view = readFileSync(new URL('../panel/view/files.ts', import.meta.url), 'utf8')
   assert.doesNotMatch(css, /m-files-depth/); assert.doesNotMatch(view, /m-files-depth/)
   assert.match(css, /var\(--moai-row-h\)/); assert.match(view, /twigParts/); assert.match(view, /TWIG_TEXT/)
+})
+
+// The files tab's diff in two steps (moai-dy7a.lb0): heads from the change list it holds, a directory row heading the
+// changed files under it, each patch when its file opens.
+function diffPage(changes, { hold = () => false } = {}) {
+  const calls = [], held = []
+  const p = page(async ({ path, query }) => {
+    calls.push([path, query])
+    if (path === '/api/files') return { kind: 'passed', output: { entries: [entry('x')], truncated: false } }
+    if (path === '/api/changes') return { kind: 'passed', output: { files: changes(query.root) } }
+    if (path === '/api/diff') {
+      const answer = { kind: 'passed', output: { files: [{ ...change(query.path, 'modified', 1, 0), hunks: [{ old_start: 0, old_len: 0, new_start: 1, new_len: 1, section: '', lines: [{ kind: 'add', old_no: null, new_no: 1, text: `${query.root}:${query.path}`, spans: null }] }] }], truncated: false, highlight: 'full' } }
+      if (hold(query)) return new Promise(resolve => held.push(() => resolve(answer)))
+      return answer
+    }
+    return { kind: 'passed', output: { path: query.path, text: '', binary: false, truncated: false, spans: null } }
+  }, roots2)
+  Object.defineProperty(p.root, 'clientWidth', { configurable: true, value: 1000 })
+  return { p, calls, held, diffs: () => calls.filter(([path]) => path === '/api/diff').map(([, q]) => q), pane: () => p.root.querySelector('.m-diff-body').textContent }
+}
+const key = (p, k) => p.view.handleKey(new p.dom.window.KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true }))
+test('a directory row heads the changed files under it, from the list it holds, and asks only the open one', async () => {
+  const { p, calls, diffs, pane } = diffPage(() => [change('src/a.rs', 'modified', 3, 1), change('src/deep/b.rs', 'added', 4, 0), change('top.md', 'modified', 1, 1)])
+  p.view.render(p.state, null); await wait(20)
+  p.view.command('changed'); await wait(10)
+  assert.equal(rowsOf(p)[0].querySelector('.m-files-label').textContent, 'src')
+  assert.deepEqual([...p.root.querySelectorAll('.m-diff summary .m-diff-path')].map(n => n.textContent), ['src/a.rs', 'src/deep/b.rs'])
+  assert.doesNotMatch(pane(), new RegExp(COPY.en.diff.empty))
+  await wait(150)
+  assert.equal(calls.filter(([path]) => path === '/api/changes').length, 1, 'the heads came from the list it held')
+  assert.deepEqual(diffs(), [{ root: '.', path: 'src/a.rs' }])
+  assert.match(pane(), /\.:src\/a\.rs/)
+  p.view.destroy(); p.dom.window.close()
+})
+test('a file the checkout did not change says no changes; a held j asks no patch on the way', async () => {
+  const { p, diffs, pane } = diffPage(() => [change('src/a.rs', 'modified', 1, 0), change('src/b.rs', 'modified', 1, 0), change('src/c.rs', 'modified', 1, 0), change('src/d.rs', 'modified', 1, 0)])
+  p.view.render(p.state, null); await wait(20)
+  p.view.command('changed'); await wait(10); key(p, 'j'); key(p, 'j'); key(p, 'j'); key(p, 'j'); await wait(150)
+  assert.deepEqual(diffs().map(q => q.path), ['src/d.rs'])
+  assert.match(pane(), /src\/d\.rs/)
+  p.view.command('changed'); await wait(150)
+  assert.equal(rowsOf(p)[0].querySelector('.m-files-label').textContent, 'x')
+  assert.equal(p.view.filesState().diff, false); p.view.command('diff'); await wait(150)
+  assert.match(pane(), new RegExp(COPY.en.diff.empty)); assert.deepEqual(diffs().map(q => q.path), ['src/d.rs'])
+  p.view.destroy(); p.dom.window.close()
+})
+test('a patch of the checkout left behind never lands on the one chosen', async () => {
+  const { p, held, pane } = diffPage(root => [change('a.rs', 'modified', 1, 0)], { hold: query => query.root === '.' })
+  p.view.render(p.state, null); await wait(20)
+  p.view.command('changed'); await wait(150)
+  assert.equal(held.length, 1)
+  const select = p.root.querySelector('select'); select.value = 'side'; select.dispatchEvent(new p.dom.window.Event('change')); await wait(30)
+  p.view.command('changed'); await wait(150)
+  held[0](); await wait(10)
+  assert.match(pane(), /side:a\.rs/); assert.doesNotMatch(pane(), /\.:a\.rs/)
+  p.view.destroy(); p.dom.window.close()
+})
+test('a file past 5,000 lines in a checkout offers the fetch alone: no terminal line, no request until asked', async () => {
+  const { p, diffs } = diffPage(() => [change('huge.rs', 'added', 9000, 0)])
+  p.view.render(p.state, null); await wait(20)
+  p.view.command('changed'); await wait(150)
+  assert.deepEqual(diffs(), []); assert.match(p.root.querySelector('.m-diff-large').textContent, /9,000/)
+  assert.equal(p.root.querySelector('.m-diff-large code'), null)
+  p.root.querySelector('.m-diff-large .m-diff-retry').click(); await wait(150)
+  assert.deepEqual(diffs().map(q => q.path), ['huge.rs'])
+  p.view.destroy(); p.dom.window.close()
 })

@@ -2,7 +2,8 @@ import { filesSource, type Entry, type FileText, type SearchResult, type Checkou
 import { fileGroup, fileGroupTable, type FileGroupTable } from '../data/file-groups.ts'
 import { el, icon, iconButton, stateLabel } from './components.ts'
 import { createSplit } from './split.ts'
-import { createDiff, statusMark } from './diff.ts'
+import { createDiff, diffWords, failureWords, statusMark, type PatchTicket } from './diff.ts'
+import { checkoutPatch, patchQueue, PATCH_GROUP } from '../data/changes.ts'
 import { twigParts, TWIG_TEXT } from './list-model.ts'
 import { mountDetail } from './detail.ts'
 import { loadDetail } from '../data/source.ts'
@@ -12,6 +13,8 @@ import type { IssueIndex } from '../data/index.ts'
 import type { PaneView, ViewContext } from './types.ts'
 
 const CLASSES = new Set(['comment', 'string', 'number', 'keyword', 'type', 'function', 'constant', 'tag', 'attribute', 'heading', 'other'])
+/** How long a file's patch waits for the cursor to settle before it is asked for. */
+const PATCH_PAUSE_MS = 100
 const join = (parent: string, name: string) => parent === '.' ? name : `${parent}/${name}`
 /** Closed list: only these four letters get a colour; any other letter stays in the muted ink. */
 const MARK_CLASSES = new Set(['M', 'A', 'D', 'R'])
@@ -55,7 +58,22 @@ export function mountFiles(root: HTMLElement, ctx: ViewContext): PaneView {
   const issueEmpty = el(doc, 'p', {}, words.noIssue)
   issueRoot.append(issueHost, issueEmpty)
   const issueView = mountDetail(issueHost, { ...ctx, intents: { ...ctx.intents, closeDetail: () => { detailOn = false; paintRight() } } })
-  const diff = createDiff(doc, ctx.copy.diff, layout => ctx.intents.dispatch({ type: 'diff-layout', layout }), words)
+  // A checkout has no issue to name, so no terminal line: the too-large row offers the fetch alone.
+  const diff = createDiff(doc, diffWords(ctx.copy), layout => ctx.intents.dispatch({ type: 'diff-layout', layout }), words, { want: wantPatch, retry: () => void showDiff().catch(() => {}) })
+  /** The pane's patch reads: two at a time, all dropped when the cursor or the checkout moves. */
+  const patches = patchQueue(2)
+  function dropPatches(): void { patches.clear(); ctx.client?.cancelGroup?.(PATCH_GROUP.files) }
+  function wantPatch(ticket: PatchTicket): void {
+    const client = ctx.client, key = rootKey
+    if (!client || key === undefined) { ticket.failed(ctx.copy.failed); return }
+    const job = { live: () => ticket.live() && key === rootKey, async run() {
+      const read = await checkoutPatch(client, key, ticket.path, ticket.quiet)
+      if (key !== rootKey) return
+      if (read.ok) ticket.done(read.value); else ticket.failed(failureWords(ctx.copy, read))
+    } }
+    // A patch asked as the cursor passes waits a moment first: one the cursor moved past by then is never sent.
+    if (ticket.quiet) patches.add(job); else setTimeout(() => { if (job.live()) patches.add(job) }, PATCH_PAUSE_MS)
+  }
   inner.detail.append(issueRoot); inner.list.append(diff.el)
   right.append(contentHead, content); split.detail.append(right)
 
@@ -67,7 +85,7 @@ export function mountFiles(root: HTMLElement, ctx: ViewContext): PaneView {
   const stamps = new Map<string, string | null>()
   const readTimes = new Map<string, number>()
   let fileStamp: string | null = null, fileReadAt = 0
-  let lastFile: FileText | null = null, lastDiff = ''
+  let lastFile: FileText | null = null
   let beforeSearch = new Set<string>()
   let matches: SearchResult | null = null
   let cursor = 0, chosen = '', base = '.', generation = 0, pendingG = false, timer: ReturnType<typeof setTimeout> | undefined
@@ -81,7 +99,7 @@ export function mountFiles(root: HTMLElement, ctx: ViewContext): PaneView {
   let diffEpoch = 0, issueEpoch = 0, changesLoaded = false, painting = 0
   /** Changed-only raised the diff pane itself; any hand on the pane clears this, and leaving turns the pane off only while it stands. */
   let autoDiff = false
-  function setDiff(on: boolean): void { diffOn = on; paintRight(); if (on) void showDiff(); watchChanged() }
+  function setDiff(on: boolean): void { diffOn = on; paintRight(); if (on) void showDiff().catch(() => {}); else { diffEpoch++; dropPatches(); diff.clear() } watchChanged() }
   /** Leaving changed-only: undo what entering did, and only that. */
   function releaseDiff(): void { if (autoDiff) { autoDiff = false; if (diffOn) setDiff(false) } }
   let ordinaryExpanded = new Set<string>(), ordinaryBase = '.'
@@ -112,13 +130,13 @@ export function mountFiles(root: HTMLElement, ctx: ViewContext): PaneView {
   async function switchCheckout(key: string): Promise<void> {
     if (!checkouts.some(c => c.key === key)) return
     generation++; diffEpoch++; issueEpoch++; clearTimeout(timer); rootKey = key; chosen = ''; cursor = 0; base = '.'; matches = null; changes = []; changesLoaded = false; ordinary = null; changedOnly = false; releaseDiff()
-    directories.clear(); partial.clear(); stamps.clear(); readTimes.clear(); fileStamp = null; fileReadAt = 0; lastFile = null; lastDiff = '';  expanded.clear(); expanded.add('.'); content.replaceChildren(); contentPath.textContent = ''; diff.show({ files: [], truncated: false }); draw(); paintRight()
-    try { await load('.'); if (rootKey === key) draw() } catch { message.textContent = words.directoryError; const current = checkouts.find(c => c.current); if (current && current.key !== key) { checkoutSelect.value = current.key; void switchCheckout(current.key) } }
+    directories.clear(); partial.clear(); stamps.clear(); readTimes.clear(); fileStamp = null; fileReadAt = 0; lastFile = null; dropPatches();  expanded.clear(); expanded.add('.'); content.replaceChildren(); contentPath.textContent = ''; diff.clear(); draw(); paintRight()
+    try { await load('.'); if (rootKey === key) { draw(); if (diffOn) void showDiff().catch(() => {}) } } catch { message.textContent = words.directoryError; const current = checkouts.find(c => c.current); if (current && current.key !== key) { checkoutSelect.value = current.key; void switchCheckout(current.key) } }
     void readIssue(); watchChanged()
   }
   async function toggleChanged(): Promise<void> {
     if (!source || rootKey === undefined) return
-    if (changedOnly && ordinary) { directories.clear(); for (const [k, v] of ordinary) directories.set(k, v); ordinary = null; changedOnly = false; base = ordinaryBase; expanded.clear(); for (const name of ordinaryExpanded) expanded.add(name); cursor = 0; draw(); paintRight(); releaseDiff(); return }
+    if (changedOnly && ordinary) { directories.clear(); for (const [k, v] of ordinary) directories.set(k, v); ordinary = null; changedOnly = false; base = ordinaryBase; expanded.clear(); for (const name of ordinaryExpanded) expanded.add(name); cursor = 0; draw(); paintRight(); releaseDiff(); if (diffOn) void showDiff().catch(() => {}); return }
     const key = rootKey; const result = await source.changes(key).catch(() => null)
     if (key !== rootKey) return
     if (!result) { message.textContent = words.readError; return }
@@ -127,7 +145,7 @@ export function mountFiles(root: HTMLElement, ctx: ViewContext): PaneView {
     else message.textContent = ''
     ordinary = new Map(directories); ordinaryExpanded = new Set(expanded); ordinaryBase = base; base = '.'; changesLoaded = true
     buildChanged(result.files); changedOnly = true; cursor = 0; draw(); paintRight(); watchChanged()
-    if (!diffOn) { autoDiff = true; setDiff(true) }
+    if (!diffOn) { autoDiff = true; setDiff(true) } else void showDiff().catch(() => {})
   }
   function buildChanged(next: Change[]): void {
     changes = next; directories.clear(); directories.set('.', []); expanded.clear(); expanded.add('.'); sums = new Map()
@@ -144,22 +162,28 @@ export function mountFiles(root: HTMLElement, ctx: ViewContext): PaneView {
     }
     for (const entries of directories.values()) entries.sort((a, b) => Number(b.kind === 'dir') - Number(a.kind === 'dir') || a.name.localeCompare(b.name))
   }
+  /**
+   * The cursor's row in the diff pane, in two steps as the list pane's: the heads come from the checkout's change list
+   * (read once, then kept by the refresh), each patch when its file opens. A file row heads itself; a directory row
+   * heads the changed files under it; anything else changed nothing. Rejects only for a refresh that failed.
+   */
   async function showDiff(background = false): Promise<void> {
     const row = rows[cursor], key = rootKey
     if (row) diff.slot.textContent = row.path
     if (!source || !row || key === undefined) return
     const epoch = ++diffEpoch
-    try {
-      if (!changesLoaded) { const found = await source.changes(key); if (epoch !== diffEpoch || key !== rootKey) return; if (found.error) { message.textContent = found.error; return } changes = found.files; changesLoaded = true }
-      if (!changes.some(change => change.path === row.path)) { diff.show({ files: [], truncated: false }); return }
-      const result = await source.diff(key, row.path, background); if (epoch === diffEpoch && key === rootKey) { const next = JSON.stringify(result); if (!background || next !== lastDiff) diff.show(result, background); lastDiff = next }
-    } catch (error) {
-      if (epoch !== diffEpoch) return
-      // A refresh that failed or was cancelled leaves the diff it would have replaced, and the refresher retries it.
-      if (background) throw error
-      // An empty answer would read as "no changes in this scope".
-      diff.show({ files: [], truncated: false, vcs_error: { said: ctx.copy.failed } })
+    if (!background) dropPatches()
+    if (!changesLoaded) {
+      if (!background) diff.reading()
+      const found = await source.changes(key, background).catch(() => null)
+      if (epoch !== diffEpoch || key !== rootKey) return
+      if (!found) { if (background) throw new Error('changes'); diff.failed(ctx.copy.failed); return }
+      if (found.error) { message.textContent = found.error; diff.failed(found.error); return }
+      changes = found.files; changesLoaded = true
     }
+    const folder = row.entry.kind === 'dir' || (row.entry.kind === 'link' && row.entry.dir === true && row.entry.openable)
+    const under = folder ? `${row.path}/` : null
+    diff.list({ files: changes.filter(change => under ? change.path.startsWith(under) : change.path === row.path), truncated: false }, background)
   }
   checkoutSelect.addEventListener('change', () => void switchCheckout(checkoutSelect.value))
   // `SPC w` puts the focus here, and the select's type-ahead would let the next letter switch the checkout: an old
@@ -234,7 +258,7 @@ export function mountFiles(root: HTMLElement, ctx: ViewContext): PaneView {
       const letter = change ? statusMark(change.status) : ''
       const button = rowNode(row.depth + 1, fileClass(row.entry, groups), index === cursor, fold, label, row.twig, letter, MARK_CLASSES.has(letter) ? `m-mark-${letter}` : '', meta, isDir ? expanded.has(row.path) : undefined)
       button.disabled = !row.entry.openable
-      button.addEventListener('click', () => { cursor = index; if (isDir) { generation++; clearTimeout(timer) } if (isDir) { if (expanded.has(row.path)) { expanded.delete(row.path); draw() } else void expand() } else { select(); draw() } })
+      button.addEventListener('click', () => { cursor = index; if (isDir) { generation++; clearTimeout(timer); if (diffOn) void showDiff().catch(() => {}) } if (isDir) { if (expanded.has(row.path)) { expanded.delete(row.path); draw() } else void expand() } else { select(); draw() } })
       button.addEventListener('dblclick', () => { void expand() })
       return button
     })
@@ -279,9 +303,14 @@ export function mountFiles(root: HTMLElement, ctx: ViewContext): PaneView {
   }
   function select(): void {
     const row = rows[cursor]; const current = ++generation; diffEpoch++; clearTimeout(timer)
-    if (!row || !(row.entry.kind === 'file' || (row.entry.kind === 'link' && !row.entry.dir && row.entry.openable)) || !source) return
+    if (!row || !source) return
+    // The diff pane follows every row: a directory heads the changed files under it.
+    const isFile = row.entry.kind === 'file' || (row.entry.kind === 'link' && !row.entry.dir && row.entry.openable)
+    // The heads come from the change list the page holds; the patches wait a moment (wantPatch), so a held `j` asks for none.
+    if (diffOn) void showDiff().catch(() => {})
+    if (!isFile) return
     chosen = row.path
-    timer = setTimeout(() => { if (diffOn) void showDiff(); void source.file(row.path, rootKey).then(file => { if (alive && generation === current) paintFile(file) }).catch(() => { if (generation === current) { painting++; content.textContent = words.readError } }) }, 100)
+    timer = setTimeout(() => { void source.file(row.path, rootKey).then(file => { if (alive && generation === current) paintFile(file) }).catch(() => { if (generation === current) { painting++; content.textContent = words.readError } }) }, 100)
   }
   async function expand(): Promise<void> {
     const row = rows[cursor]; if (!row || !(row.entry.kind === 'dir' || (row.entry.kind === 'link' && row.entry.dir && row.entry.openable))) return
@@ -403,7 +432,7 @@ export function mountFiles(root: HTMLElement, ctx: ViewContext): PaneView {
         const path = chosen
         // The shown file is gone or no longer readable: say so once instead of failing every round.
         if (answer && answer.file === null) { painting++; fileStamp = null; lastFile = null; content.textContent = words.readError; return }
-        const fresh = await source.file(path, key, true); if (key === rootKey && path === chosen) { const changed = !lastFile || lastFile.path !== fresh.path || lastFile.text !== fresh.text || lastFile.binary !== fresh.binary || lastFile.truncated !== fresh.truncated || JSON.stringify(lastFile.spans) !== JSON.stringify(fresh.spans); if (changed) { paintFile(fresh, true); if (diffOn) await showDiff(true) } else { fileStamp = fresh.stamp ?? null; fileReadAt = Date.now(); lastFile = fresh } }
+        const fresh = await source.file(path, key, true); if (key === rootKey && path === chosen) { const changed = !lastFile || lastFile.path !== fresh.path || lastFile.text !== fresh.text || lastFile.binary !== fresh.binary || lastFile.truncated !== fresh.truncated || JSON.stringify(lastFile.spans) !== JSON.stringify(fresh.spans); if (changed) { paintFile(fresh, true); if (diffOn) { await showDiff(true); diff.reload(path) } } else { fileStamp = fresh.stamp ?? null; fileReadAt = Date.now(); lastFile = fresh } }
       }
     },
     async refreshFileChanges(watch: FileWatch, fingerprint: string) {
@@ -424,6 +453,6 @@ export function mountFiles(root: HTMLElement, ctx: ViewContext): PaneView {
       const show = side === 'right' || ((side === 'next' || side === 'prev') && tree.contains(doc.activeElement))
       if (show) { root.classList.add('m-files-show-content'); if (detailOn) issueRoot.focus(); else if (diffOn) diff.focus(); else content.focus() } else { root.classList.remove('m-files-show-content'); tree.focus() }
       return true
-    }, destroy() { alive = false; clearTimeout(timer); split.destroy(); inner.destroy(); issueView.destroy?.() },
+    }, destroy() { alive = false; clearTimeout(timer); diffEpoch++; dropPatches(); diff.clear(); split.destroy(); inner.destroy(); issueView.destroy?.() },
   }
 }
