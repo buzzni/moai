@@ -423,8 +423,9 @@ fn issue(
 }
 
 /// A checkout's whole branch, narrowed to `path`. The list is read whole (it names the kind and the counts, and
-/// whether the file changed at all); the patch only for that file — or, for a renamed one, whole: git finds a rename
-/// only when both names are in the pathspec.
+/// whether the file changed at all); the patch only for that file or folder — a renamed file by both its names, since
+/// git finds a rename only when both are in the pathspec, and a folder with the other names of the renames that cross
+/// its edge (`vcs::Backend::patch_of`, moai-sgzk).
 fn whole(checkout: &Checkout, path: Option<&str>, budget: Option<Duration>, lang: Lang) -> Loaded {
     let root = checkout.path.as_path();
     let started = Instant::now();
@@ -443,9 +444,9 @@ fn whole(checkout: &Checkout, path: Option<&str>, budget: Option<Duration>, lang
     };
     let list_cut = changes.truncated;
     let total = changes.total;
-    let mut ask = None;
-    // A folder takes every file below it, by either name. Its patch is read whole and cut to those files after: a
-    // folder pathspec would leave out the untracked files below it (`vcs` matches those by their whole name).
+    let mut ask: Vec<String> = Vec::new();
+    // A folder takes every file below it, by either name; the pathspec names the folder and the other side of each
+    // rename across its edge. A file takes its rows by either name, and the pathspec both names of each.
     let folder = path.and_then(|p| p.strip_suffix('/'));
     let below = |p: &str, dir: &str| p.strip_prefix(dir).is_some_and(|t| t.starts_with('/'));
     if let Some(dir) = folder {
@@ -453,16 +454,26 @@ fn whole(checkout: &Checkout, path: Option<&str>, budget: Option<Duration>, lang
         if changes.files.is_empty() {
             return Loaded { unchanged: true, total, ..Loaded::default() };
         }
+        ask.push(format!("{dir}/"));
+        for c in &changes.files {
+            ask.extend(std::iter::once(&c.path).chain(&c.old_path).filter(|n| !below(n, dir)).cloned());
+        }
     } else if let Some(p) = path {
         changes.files.retain(|c| c.path == p || c.old_path.as_deref() == Some(p));
         if changes.files.is_empty() {
             return Loaded { unchanged: true, total, ..Loaded::default() };
         }
-        if !changes.files.iter().any(|c| matches!(c.status, Status::Renamed | Status::Copied)) {
-            ask = Some(p);
+        ask.push(p.to_owned());
+        for c in &changes.files {
+            ask.extend(std::iter::once(&c.path).chain(&c.old_path).filter(|n| n.as_str() != p).cloned());
         }
     }
-    let got = match backend.patch_with_changes(root, &vcs::Scope::Whole, ask, left(), &changes) {
+    let got = if ask.is_empty() {
+        backend.patch_with_changes(root, &vcs::Scope::Whole, None, left(), &changes)
+    } else {
+        backend.patch_of(root, &vcs::Scope::Whole, &ask, left(), Some(&changes))
+    };
+    let got = match got {
         Ok(p) => p,
         Err(e) => {
             let f = told(root, lang, e);
@@ -2227,6 +2238,54 @@ mod tests {
         git(&["add", "same.txt"]);
         git(&["commit", "-qm", "same"]);
         assert!(whole(&c, Some("same.txt"), Some(BUDGET), EN).unchanged);
+    }
+
+    /// **A folder and a renamed file read only their own patch and keep every line count** — through `whole()` itself:
+    /// the folder takes its untracked files and the renames across its edge, a renamed file shows the lines it changed,
+    /// by either name.
+    #[test]
+    fn a_folder_and_a_renamed_file_read_their_own_patch() {
+        use crate::git::tests::run_git;
+        let dir = crate::scratch::Scratch::new("tui-diff-narrow");
+        let root: &std::path::Path = &dir;
+        let git = |args: &[&str]| run_git(root, None, args);
+        let body = |tag: &str| (0..20).map(|n| format!("{tag} line {n}\n")).collect::<String>();
+        git(&["init", "-q"]);
+        for f in ["src/a", "src/in-out", "out-in", "top"] {
+            std::fs::create_dir_all(root.join(f).parent().unwrap()).unwrap();
+            std::fs::write(root.join(f), body(f)).unwrap();
+        }
+        git(&["add", "."]);
+        git(&["commit", "-qm", "base"]);
+        std::fs::write(root.join("src/a"), body("src/a").replacen("line 2", "LINE 2", 1)).unwrap();
+        std::fs::write(root.join("top"), "top changed\n").unwrap();
+        git(&["mv", "src/in-out", "moved-out"]);
+        git(&["mv", "out-in", "src/moved-in"]);
+        std::fs::write(root.join("src/moved-in"), body("out-in").replacen("line 5", "LINE 5", 1)).unwrap();
+        std::fs::create_dir(root.join("src/deep")).unwrap();
+        std::fs::write(root.join("src/deep/new"), "untracked below\n").unwrap();
+        let mut c = checkout("/");
+        c.path = root.to_path_buf();
+        let counted = |p: &Part| {
+            let lines = p.file.hunks.iter().flat_map(|h| &h.lines);
+            let adds = lines.clone().filter(|l| l.kind == patch::LineKind::Add).count();
+            (Some(adds), Some(lines.filter(|l| l.kind == patch::LineKind::Delete).count()))
+        };
+        let folder = whole(&c, Some("src/"), Some(BUDGET), EN);
+        assert!(folder.failed.is_none(), "{:?}", folder.failed);
+        let mut shown: Vec<_> = folder.parts.iter().map(|p| p.change.path.as_str()).collect();
+        shown.sort_unstable();
+        assert_eq!(shown, ["moved-out", "src/a", "src/deep/new", "src/moved-in"]);
+        for p in &folder.parts {
+            assert_eq!(counted(p), (p.change.adds, p.change.dels), "{}", p.change.path);
+            assert!(!p.file.hunks.iter().flat_map(|h| &h.lines).any(|l| l.text.contains("top changed")));
+        }
+        for name in ["src/moved-in", "out-in"] {
+            let one = whole(&c, Some(name), Some(BUDGET), EN);
+            assert_eq!(one.parts.len(), 1, "{name}");
+            assert_eq!(one.parts[0].change.path, "src/moved-in");
+            assert_eq!(counted(&one.parts[0]), (Some(1), Some(1)), "{name} read the renamed file as a whole new one");
+        }
     }
 
     /// **Not a repository is said as that**, through the whole-branch read.

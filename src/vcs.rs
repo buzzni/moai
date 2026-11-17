@@ -305,6 +305,22 @@ fn add_numstat(change: &mut Change, adds: &str, dels: &str) {
         change.dels = dels.parse::<usize>().ok().map(|n| change.dels.unwrap_or(0).saturating_add(n));
     }
 }
+fn untracked_of(changes: &Changes) -> Vec<String> {
+    changes.files.iter().filter(|c| c.status == Status::Untracked).map(|c| c.path.clone()).collect()
+}
+/// How many bytes of names one patch read may put on Git's command line. Windows caps a whole command line at 32,767
+/// characters; this leaves room for the rest of the arguments and the root's path.
+pub(crate) const PATHSPEC_LIMIT: usize = 16 * 1024;
+fn past_pathspec_limit(paths: &[String]) -> bool {
+    paths.iter().fold(0usize, |n, p| n.saturating_add(p.len() + 1)) > PATHSPEC_LIMIT
+}
+/// Whether the pathspec `spec` — a file, or a folder with its trailing `/` — takes `name`.
+fn covers(spec: &str, name: &str) -> bool {
+    match spec.strip_suffix('/') {
+        Some(dir) => name.strip_prefix(dir).is_some_and(|t| t.starts_with('/')),
+        None => spec == name,
+    }
+}
 // Filesystem operations can block independently of Git (for example on a dead mount).
 // A timed caller must be released even when such a system call cannot be interrupted.
 fn timed<T: Send + 'static>(
@@ -417,7 +433,7 @@ impl Backend {
         path: Option<&str>,
         budget: Option<Duration>,
     ) -> Result<Patch, Error> {
-        self.patch_known(root, scope, path, budget, None)
+        self.patch_known(root, scope, path.map(|p| vec![p.to_owned()]), budget, None, true)
     }
     pub fn patch_with_changes(
         self,
@@ -427,34 +443,63 @@ impl Backend {
         budget: Option<Duration>,
         changes: &Changes,
     ) -> Result<Patch, Error> {
-        let names = changes.files.iter().filter(|c| c.status == Status::Untracked).map(|c| c.path.clone()).collect();
-        self.patch_known(root, scope, path, budget, Some(names))
+        self.patch_known(root, scope, path.map(|p| vec![p.to_owned()]), budget, Some(untracked_of(changes)), true)
+    }
+    /// The patch of some files and folders only — a folder is named with its trailing `/` and takes every file below
+    /// it, untracked ones too. Give a renamed file by both of its names: Git narrows to the pathspec before it looks
+    /// for renames, so the new name alone reads as a whole new file. `changes`, when given, names the untracked files
+    /// as [`Backend::patch_with_changes`] does. An empty list is refused rather than read as "everything".
+    ///
+    /// A folder narrowed with rows that hold no rename is read without rename detection: past `diff.renameLimit` the
+    /// whole-scope list skips inexact renames, and the narrowed read, with fewer candidates, would pair a deleted and
+    /// an added file the list shows apart — their hunks would no longer match the rows.
+    pub fn patch_of(
+        self,
+        root: &Path,
+        scope: &Scope,
+        paths: &[String],
+        budget: Option<Duration>,
+        changes: Option<&Changes>,
+    ) -> Result<Patch, Error> {
+        if paths.is_empty() {
+            return Err(Error::InvalidPath);
+        }
+        let folder = paths.iter().any(|p| p.ends_with('/'));
+        let renames = !folder
+            || changes.is_none_or(|c| c.files.iter().any(|f| matches!(f.status, Status::Renamed | Status::Copied)));
+        self.patch_known(root, scope, Some(paths.to_vec()), budget, changes.map(untracked_of), renames)
     }
     fn patch_known(
         self,
         root: &Path,
         scope: &Scope,
-        path: Option<&str>,
+        paths: Option<Vec<String>>,
         budget: Option<Duration>,
         known: Option<Vec<String>>,
+        renames: bool,
     ) -> Result<Patch, Error> {
         let root = root.to_path_buf();
         let scope = scope.clone();
-        let path = path.map(str::to_owned);
-        timed(budget, move || self.patch_inner(&root, &scope, path.as_deref(), budget, known))
+        timed(budget, move || self.patch_inner(&root, &scope, paths.as_deref(), budget, known, renames))
     }
     fn patch_inner(
         self,
         root: &Path,
         scope: &Scope,
-        path: Option<&str>,
+        paths: Option<&[String]>,
         budget: Option<Duration>,
         known: Option<Vec<String>>,
+        renames: bool,
     ) -> Result<Patch, Error> {
         let deadline = budget.and_then(|d| std::time::Instant::now().checked_add(d));
-        if path.is_some_and(|p| !valid_path(p)) {
+        // A folder is checked without its one trailing slash; every name — an old name from the list too — is
+        // someone's text and reaches Git only as a literal pathspec after `--`.
+        if paths.is_some_and(|ps| ps.iter().any(|p| !valid_path(p.strip_suffix('/').unwrap_or(p)))) {
             return Err(Error::InvalidPath);
         }
+        // Past the limit the names do not go on the command line: the scope is read whole and the callers keep their
+        // files' hunks, as they did before. A slow answer is better than a wrong one.
+        let narrow = paths.filter(|ps| !past_pathspec_limit(ps));
         let mut out = Vec::new();
         let mut truncated = false;
         let revs = revisions(root, scope, budget)?;
@@ -477,15 +522,15 @@ impl Backend {
                 "--src-prefix=a/",
                 "--dst-prefix=b/",
                 "--relative",
-                "-M",
+                if renames || narrow.is_none() { "-M" } else { "--no-renames" },
                 &rev,
             ]);
             if matches!(scope, Scope::Branch) {
                 args.push(&current);
             }
             args.push("--");
-            if let Some(p) = path {
-                args.push(p);
+            if let Some(ps) = narrow {
+                args.extend(ps.iter().map(String::as_str));
             }
             let (data, cut) = run(root, &args, PATCH_LIMIT.saturating_sub(out.len()), budget)?;
             out.extend(data);
@@ -499,7 +544,7 @@ impl Backend {
                 Some(names) => names,
                 None => untracked(root, budget)?,
             };
-            for name in names.into_iter().filter(|n| path.is_none_or(|p| p == n)) {
+            for name in names.into_iter().filter(|n| paths.is_none_or(|ps| ps.iter().any(|p| covers(p, n)))) {
                 if deadline.is_some_and(|d| std::time::Instant::now() >= d) {
                     return Err(Error::Timeout);
                 }
@@ -683,6 +728,179 @@ fn untracked_patch(root: &Path, name: &str, limit: usize) -> Result<(Vec<u8>, bo
         }
     }
     Ok((out, cut || too_long))
+}
+
+/// The four letters a screen puts in a changed path's first column. Git's eight kinds fold into them: copied and
+/// untracked are new files, type-changed and conflicted are changed ones.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize)]
+pub enum Mark {
+    #[serde(rename = "M")]
+    Modified,
+    #[serde(rename = "A")]
+    Added,
+    #[serde(rename = "D")]
+    Deleted,
+    #[serde(rename = "R")]
+    Renamed,
+}
+impl Mark {
+    pub fn of(status: Status) -> Self {
+        match status {
+            Status::Modified | Status::TypeChanged | Status::Conflicted => Self::Modified,
+            Status::Added | Status::Untracked | Status::Copied => Self::Added,
+            Status::Deleted => Self::Deleted,
+            Status::Renamed => Self::Renamed,
+        }
+    }
+    #[allow(dead_code)] // Only tests print it yet: the TUI's file tree and diff heads take it up in their own epic, and
+    // the web sends the value itself.
+    pub fn letter(self) -> &'static str {
+        match self {
+            Self::Modified => "M",
+            Self::Added => "A",
+            Self::Deleted => "D",
+            Self::Renamed => "R",
+        }
+    }
+}
+/// Every changed file's mark and every ancestor directory's, read once for a whole list. A directory stands `A` when
+/// the base's tree does not have it, `D` when the base has it and the disk does not, and `M` otherwise.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Marks {
+    pub files: BTreeMap<String, Mark>,
+    pub dirs: BTreeMap<String, Mark>,
+    /// The list was cut at its limit: the directories above the files left out carry no mark, which means "unknown",
+    /// not "unchanged".
+    pub truncated: bool,
+}
+/// What the directories are, read beside the list. `None` when it could not be read — the directories then stand `M`:
+/// saying less is cheaper than saying something false.
+#[derive(Debug, Clone, Default)]
+pub struct DirFacts {
+    /// Candidates the base's tree does not hold.
+    pub not_at_base: std::collections::HashSet<String>,
+    /// Candidates the checkout's disk does not hold as a directory (a link in a directory's place counts as missing).
+    pub not_on_disk: std::collections::HashSet<String>,
+}
+/// The directories above each changed file's path — never above a renamed file's old path — deepest last.
+fn ancestors(changes: &Changes) -> std::collections::BTreeSet<String> {
+    let mut dirs = std::collections::BTreeSet::new();
+    for change in &changes.files {
+        let mut at = change.path.as_str();
+        while let Some(i) = at.rfind('/') {
+            at = &at[..i];
+            if at.is_empty() || !dirs.insert(at.to_owned()) {
+                break;
+            }
+        }
+    }
+    dirs
+}
+/// The marks of a list and its directories, from facts read beforehand. Pure, so the TUI — which does not call it yet —
+/// and the web build the same map.
+pub fn marks(changes: &Changes, facts: Option<&DirFacts>) -> Marks {
+    let files = changes.files.iter().map(|c| (c.path.clone(), Mark::of(c.status))).collect();
+    let dirs = ancestors(changes)
+        .into_iter()
+        .map(|dir| {
+            let mark = match facts {
+                Some(f) if f.not_at_base.contains(&dir) => Mark::Added,
+                Some(f) if f.not_on_disk.contains(&dir) => Mark::Deleted,
+                _ => Mark::Modified,
+            };
+            (dir, mark)
+        })
+        .collect();
+    Marks { files, dirs, truncated: changes.truncated }
+}
+/// Whether `dir` (relative, `/`-separated) stands under `root` as a directory, every component opened without following
+/// a link. `None` when the disk would not say.
+#[cfg(unix)]
+fn dir_on_disk(root: &Path, dir: &str) -> Option<bool> {
+    use std::ffi::CString;
+    use std::os::fd::{AsRawFd, FromRawFd};
+    use std::os::unix::ffi::OsStrExt;
+    let mut at = std::fs::File::open(root).ok()?;
+    for component in Path::new(dir).components() {
+        let Component::Normal(part) = component else { return Some(false) };
+        let part = CString::new(part.as_bytes()).ok()?;
+        // SAFETY: `part` is NUL-terminated and `at` owns a live directory descriptor.
+        let fd = unsafe {
+            libc::openat(
+                at.as_raw_fd(),
+                part.as_ptr(),
+                libc::O_RDONLY | libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC,
+            )
+        };
+        if fd < 0 {
+            let e = std::io::Error::last_os_error().raw_os_error();
+            return matches!(e, Some(libc::ENOENT | libc::ENOTDIR | libc::ELOOP)).then_some(false);
+        }
+        // SAFETY: openat returned a new, owned descriptor.
+        at = unsafe { std::fs::File::from_raw_fd(fd) };
+    }
+    Some(true)
+}
+#[cfg(not(unix))]
+fn dir_on_disk(root: &Path, dir: &str) -> Option<bool> {
+    let mut at = root.to_path_buf();
+    for component in Path::new(dir).components() {
+        let Component::Normal(part) = component else { return Some(false) };
+        at.push(part);
+        match std::fs::symlink_metadata(&at) {
+            Ok(m) if m.is_dir() && !m.file_type().is_symlink() => {}
+            Ok(_) => return Some(false),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Some(false),
+            Err(_) => return None,
+        }
+    }
+    Some(true)
+}
+impl Backend {
+    /// The marks of `changes`, a [`Scope::Whole`] list of `root`. Two facts are read for the directories above the
+    /// files — one Git call for the base's tree, whatever the count, and the disk without following links — inside
+    /// `budget`. When the tree cannot be read, the list still gets its marks and the directories stand `M`; a directory
+    /// the disk will not answer for stands `M` by itself.
+    pub fn marks(self, root: &Path, changes: &Changes, budget: Option<Duration>) -> Marks {
+        let candidates = ancestors(changes);
+        if candidates.is_empty() {
+            return marks(changes, None);
+        }
+        let owned = root.to_path_buf();
+        let facts = timed(budget, move || self.dir_facts(&owned, candidates, budget)).ok();
+        marks(changes, facts.as_ref())
+    }
+    fn dir_facts(
+        self,
+        root: &Path,
+        candidates: std::collections::BTreeSet<String>,
+        budget: Option<Duration>,
+    ) -> Result<DirFacts, Error> {
+        let deadline = budget.and_then(|d| std::time::Instant::now().checked_add(d));
+        let left = || deadline.map(|d| d.saturating_duration_since(std::time::Instant::now()));
+        // The base `Scope::Whole` compares against: the fork point in a linked worktree, HEAD in the main checkout.
+        let Some(rev) = revisions(root, &Scope::Whole, left())?.pop() else { return Err(Error::InvalidRevision) };
+        // A name that is not UTF-8 reached the list through a lossy decode: its text names neither the tree's entry nor
+        // the disk's, so neither fact can be read for it and it stands `M`.
+        let lossy = |d: &str| d.contains(char::REPLACEMENT_CHARACTER);
+        let mut not_at_base = candidates.clone();
+        // `ls-tree` lists the tree's directories relative to `root`, the same base `--relative` gives the list.
+        records(root, &["ls-tree", "-r", "-d", "--name-only", "-z", &rev], left(), |raw| {
+            not_at_base.remove(String::from_utf8_lossy(raw).as_ref());
+        })?;
+        not_at_base.retain(|d| !lossy(d));
+        let mut not_on_disk = std::collections::HashSet::new();
+        for dir in candidates.iter().filter(|d| !not_at_base.contains(*d) && !lossy(d)) {
+            if deadline.is_some_and(|d| std::time::Instant::now() >= d) {
+                return Err(Error::Timeout);
+            }
+            // A directory the disk would not answer for (no permission, say) stands `M` alone; the others keep theirs.
+            if dir_on_disk(root, dir) == Some(false) {
+                not_on_disk.insert(dir.clone());
+            }
+        }
+        Ok(DirFacts { not_at_base: not_at_base.into_iter().collect(), not_on_disk })
+    }
 }
 
 #[cfg(test)]
@@ -993,5 +1211,370 @@ mod tests {
             Backend::Git.changes(root, &Scope::Commits(vec!["--help".into()]), None),
             Err(Error::InvalidRevision)
         ));
+    }
+
+    fn change(path: &str, status: Status) -> Change {
+        Change { path: path.into(), old_path: None, status, adds: None, dels: None, binary: false }
+    }
+    fn dirs_of(m: &Marks) -> Vec<(&str, &str)> {
+        m.dirs.iter().map(|(d, k)| (d.as_str(), k.letter())).collect()
+    }
+    #[test]
+    fn eight_kinds_fold_into_four_letters() {
+        use Status::*;
+        let folded: Vec<_> = [Modified, TypeChanged, Conflicted, Added, Untracked, Copied, Deleted, Renamed]
+            .into_iter()
+            .map(|s| Mark::of(s).letter())
+            .collect();
+        assert_eq!(folded, ["M", "M", "M", "A", "A", "A", "D", "R"]);
+        assert_eq!(serde_json::to_value(Mark::Renamed).unwrap(), "R");
+    }
+    #[test]
+    fn directories_take_the_facts_and_fall_back_to_m() {
+        let mut moved = change("new/deep/file", Status::Renamed);
+        moved.old_path = Some("old/file".into());
+        let changes = Changes {
+            files: vec![change("kept/edited", Status::Modified), moved, change("gone/x", Status::Deleted)],
+            total: 3,
+            truncated: false,
+        };
+        let facts = DirFacts {
+            not_at_base: ["new".into(), "new/deep".into()].into_iter().collect(),
+            not_on_disk: ["gone".into()].into_iter().collect(),
+        };
+        let m = marks(&changes, Some(&facts));
+        assert_eq!(m.files["new/deep/file"], Mark::Renamed);
+        assert_eq!(dirs_of(&m), [("gone", "D"), ("kept", "M"), ("new", "A"), ("new/deep", "A")]);
+        // The old name's directory is not a candidate.
+        assert!(!m.dirs.contains_key("old"));
+        // Facts that could not be read never make an `A` or a `D` up.
+        let blind = marks(&changes, None);
+        assert!(blind.dirs.values().all(|k| *k == Mark::Modified));
+        assert_eq!(blind.files.len(), 3);
+    }
+    #[test]
+    fn directory_marks_read_the_base_tree_and_the_disk() {
+        let dir = crate::scratch::Scratch::new("vcs-marks");
+        let root: &Path = &dir;
+        let git = |args: &[&str]| run_git(root, None, args);
+        git(&["init", "-q"]);
+        for f in ["grow/a", "shrink/a", "shrink/b", "gone/a", "gone/sub/b", "leftover/a", "move/a", "lnk/a"] {
+            fs::create_dir_all(root.join(f).parent().unwrap()).unwrap();
+            fs::write(root.join(f), format!("{f}\none\ntwo\nthree\n")).unwrap();
+        }
+        fs::write(root.join(".gitignore"), "*.log\n").unwrap();
+        git(&["add", "."]);
+        git(&["commit", "-qm", "base"]);
+        fs::write(root.join("grow/new"), "new\n").unwrap();
+        fs::remove_file(root.join("shrink/b")).unwrap();
+        fs::remove_dir_all(root.join("gone")).unwrap();
+        fs::remove_file(root.join("leftover/a")).unwrap();
+        fs::write(root.join("leftover/x.log"), "ignored\n").unwrap();
+        fs::create_dir_all(root.join("fresh/inner")).unwrap();
+        fs::write(root.join("fresh/inner/f"), "f\n").unwrap();
+        fs::create_dir_all(root.join("-x\ny")).unwrap();
+        fs::write(root.join("-x\ny/f"), "f\n").unwrap();
+        fs::create_dir(root.join("to")).unwrap();
+        git(&["mv", "move/a", "to/a"]);
+        // A link where a directory stood is read as no directory, never followed out of the checkout.
+        let outside = crate::scratch::Scratch::new("vcs-marks-outside");
+        fs::remove_dir_all(root.join("lnk")).unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&*outside, root.join("lnk")).unwrap();
+        let c = Backend::Git.changes(root, &Scope::Whole, None).unwrap();
+        let m = Backend::Git.marks(root, &c, None);
+        assert_eq!(m.files["to/a"], Mark::Renamed, "{c:?}");
+        assert_eq!(m.files["fresh/inner/f"], Mark::Added);
+        let got: BTreeMap<_, _> = dirs_of(&m).into_iter().collect();
+        assert_eq!(got["grow"], "M", "a directory that only gained a file is not new");
+        assert_eq!(got["shrink"], "M", "a directory that lost one file is not gone");
+        assert_eq!(got["gone"], "D");
+        assert_eq!(got["gone/sub"], "D");
+        assert_eq!(got["leftover"], "M", "ignored leftovers keep the directory on disk");
+        assert_eq!(got["fresh"], "A");
+        assert_eq!(got["fresh/inner"], "A");
+        assert_eq!(got["-x\ny"], "A");
+        assert_eq!(got["to"], "A");
+        assert!(!got.contains_key("move"));
+        #[cfg(unix)]
+        assert_eq!(got["lnk"], "D");
+        assert!(!m.truncated);
+        // Without the facts — here, no time left — the list keeps its marks and the directories stand `M`.
+        let blind = Backend::Git.marks(root, &c, Some(Duration::ZERO));
+        assert_eq!(blind.files, m.files);
+        assert!(blind.dirs.values().all(|k| *k == Mark::Modified));
+    }
+    #[test]
+    fn directory_marks_compare_against_the_fork_point_and_the_project() {
+        let dir = crate::scratch::Scratch::new("vcs-marks-branch");
+        let main = dir.join("main");
+        let side = dir.join("side");
+        fs::create_dir_all(main.join("proj/old")).unwrap();
+        let git = |root: &Path, args: &[&str]| run_git(root, None, args);
+        git(&main, &["init", "-q"]);
+        fs::write(main.join("proj/old/a"), "a\n").unwrap();
+        git(&main, &["add", "."]);
+        git(&main, &["commit", "-qm", "base"]);
+        git(&main, &["branch", "milestone/m1"]);
+        git(&main, &["worktree", "add", "-qb", "feature", side.to_str().unwrap(), "milestone/m1"]);
+        fs::create_dir_all(side.join("proj/made")).unwrap();
+        fs::write(side.join("proj/made/b"), "b\n").unwrap();
+        fs::write(side.join("proj/old/c"), "c\n").unwrap();
+        git(&side, &["add", "."]);
+        git(&side, &["commit", "-qm", "feature"]);
+        // Committed on the branch: HEAD has the directory, the fork point does not.
+        let c = Backend::Git.changes(&side, &Scope::Whole, None).unwrap();
+        let m = Backend::Git.marks(&side, &c, None);
+        assert_eq!(dirs_of(&m), [("proj", "M"), ("proj/made", "A"), ("proj/old", "M")]);
+        // A project inside the checkout reads relative paths on both sides.
+        let sub = side.join("proj");
+        let c = Backend::Git.changes(&sub, &Scope::Whole, None).unwrap();
+        let m = Backend::Git.marks(&sub, &c, None);
+        assert_eq!(dirs_of(&m), [("made", "A"), ("old", "M")]);
+        // The main checkout has no fork point and compares against HEAD.
+        fs::create_dir(main.join("proj/new")).unwrap();
+        fs::write(main.join("proj/new/x"), "x\n").unwrap();
+        let c = Backend::Git.changes(&main, &Scope::Whole, None).unwrap();
+        let m = Backend::Git.marks(&main, &c, None);
+        assert_eq!(dirs_of(&m), [("proj", "M"), ("proj/new", "A")]);
+    }
+    /// The hunks of `name` in a patch: by its new name, or by its old one when it was deleted.
+    fn hunks_of(text: &str, name: &str) -> Vec<crate::diff::Hunk> {
+        crate::diff::parse(text)
+            .into_iter()
+            .filter(|f| {
+                f.new_path.as_deref() == Some(name) || (f.new_path.is_none() && f.old_path.as_deref() == Some(name))
+            })
+            .flat_map(|f| f.hunks)
+            .collect()
+    }
+    fn counted(hunks: &[crate::diff::Hunk]) -> (usize, usize) {
+        use crate::diff::LineKind;
+        let lines = hunks.iter().flat_map(|h| &h.lines);
+        let adds = lines.clone().filter(|l| l.kind == LineKind::Add).count();
+        (adds, lines.filter(|l| l.kind == LineKind::Delete).count())
+    }
+    fn body(tag: &str) -> String {
+        (0..20).map(|n| format!("{tag} line {n}\n")).collect()
+    }
+    #[test]
+    fn one_renamed_file_reads_by_both_names_in_every_scope() {
+        let dir = crate::scratch::Scratch::new("vcs-rename-one");
+        let main = dir.join("main");
+        let side = dir.join("side");
+        fs::create_dir(&main).unwrap();
+        let git = |root: &Path, args: &[&str]| run_git(root, None, args);
+        git(&main, &["init", "-q"]);
+        fs::write(main.join("-old\nname"), body("a")).unwrap();
+        fs::write(main.join("other"), "other\n").unwrap();
+        git(&main, &["add", "."]);
+        git(&main, &["commit", "-qm", "base"]);
+        git(&main, &["branch", "milestone/m1"]);
+        git(&main, &["worktree", "add", "-qb", "feature", side.to_str().unwrap(), "milestone/m1"]);
+        // One commit renames, the next edits three lines under the new name.
+        git(&side, &["mv", "--", "-old\nname", "new"]);
+        git(&side, &["commit", "-qm", "rename"]);
+        let renamed = head(&side, None).unwrap();
+        fs::write(side.join("new"), body("a").replacen("a line 3", "b line 3", 1).replacen("a line 9", "b 9", 1))
+            .unwrap();
+        fs::write(side.join("other"), "changed\n").unwrap();
+        git(&side, &["commit", "-qam", "edit"]);
+        let edited = head(&side, None).unwrap();
+        let names = vec!["new".to_owned(), "-old\nname".to_owned()];
+        let scopes = [
+            Scope::Commits(vec![renamed.clone(), edited.clone()]),
+            Scope::Branch,
+            Scope::Whole,
+            Scope::Commits(vec![edited.clone()]),
+        ];
+        for scope in &scopes {
+            let list = Backend::Git.changes(&side, scope, None).unwrap();
+            let row = list.files.iter().find(|c| c.path == "new").unwrap();
+            let got = Backend::Git.patch_of(&side, scope, &names, None, Some(&list)).unwrap();
+            let whole = Backend::Git.patch(&side, scope, None, None).unwrap();
+            let hunks = hunks_of(&got.text, "new");
+            assert_eq!(hunks, hunks_of(&whole.text, "new"), "{scope:?}");
+            assert_eq!(Some(counted(&hunks).0), row.adds, "{scope:?}");
+            assert_eq!(Some(counted(&hunks).1), row.dels, "{scope:?}");
+            assert!(counted(&hunks).0 < 5, "{scope:?} read the renamed file as a whole new one: {}", got.text);
+            assert!(!got.text.contains("changed"), "{scope:?} read the whole scope");
+        }
+        // A commit at a time, as `moai diff` reads a commit range: both names on each still give each its hunks.
+        let first = Backend::Git.patch_of(&side, &Scope::Commits(vec![renamed]), &names, None, None).unwrap();
+        assert!(first.text.contains("rename from"), "{}", first.text);
+        let second = Backend::Git.patch_of(&side, &Scope::Commits(vec![edited]), &names, None, None).unwrap();
+        assert_eq!(counted(&hunks_of(&second.text, "new")), (2, 2));
+        // Working tree: an unstaged rename stays a deleted file and an untracked one; staged, both names find it.
+        git(&side, &["mv", "new", "newer"]);
+        fs::write(side.join("newer"), body("a")).unwrap();
+        let list = Backend::Git.changes(&side, &Scope::Working, None).unwrap();
+        let row = list.files.iter().find(|c| c.path == "newer").unwrap();
+        assert_eq!(row.status, Status::Renamed);
+        let names = vec!["newer".to_owned(), "new".to_owned()];
+        let got = Backend::Git.patch_of(&side, &Scope::Working, &names, None, Some(&list)).unwrap();
+        assert_eq!(counted(&hunks_of(&got.text, "newer")), (row.adds.unwrap(), row.dels.unwrap()));
+    }
+    #[test]
+    fn a_folder_reads_its_files_untracked_and_crossing_renames_only() {
+        let dir = crate::scratch::Scratch::new("vcs-folder");
+        let root: &Path = &dir;
+        let git = |args: &[&str]| run_git(root, None, args);
+        git(&["init", "-q"]);
+        for f in ["src/a", "src/in-out", "out-in", "src2/x", "top"] {
+            fs::create_dir_all(root.join(f).parent().unwrap()).unwrap();
+            fs::write(root.join(f), body(f)).unwrap();
+        }
+        git(&["add", "."]);
+        git(&["commit", "-qm", "base"]);
+        fs::write(root.join("src/a"), body("src/a").replacen("line 2", "LINE 2", 1)).unwrap();
+        fs::write(root.join("src2/x"), "next door\n").unwrap();
+        fs::write(root.join("top"), "top changed\n").unwrap();
+        git(&["mv", "src/in-out", "moved-out"]);
+        git(&["mv", "out-in", "src/moved-in"]);
+        fs::create_dir(root.join("src/deep")).unwrap();
+        fs::write(root.join("src/deep/new"), "untracked below\n").unwrap();
+        fs::write(root.join("src2/new"), "untracked next door\n").unwrap();
+        fs::write(root.join("loose"), "untracked outside\n").unwrap();
+        let list = Backend::Git.changes(root, &Scope::Whole, None).unwrap();
+        let below = |p: &str| p.strip_prefix("src").is_some_and(|t| t.starts_with('/'));
+        let mut rows = list.clone();
+        rows.files.retain(|c| below(&c.path) || c.old_path.as_deref().is_some_and(below));
+        let mut ask = vec!["src/".to_owned()];
+        for c in &rows.files {
+            ask.extend(std::iter::once(&c.path).chain(&c.old_path).filter(|n| !below(n)).cloned());
+        }
+        assert_eq!(ask, ["src/", "moved-out", "out-in"]);
+        let got = Backend::Git.patch_of(root, &Scope::Whole, &ask, None, Some(&rows)).unwrap();
+        let whole = Backend::Git.patch_with_changes(root, &Scope::Whole, None, None, &list).unwrap();
+        for c in &rows.files {
+            assert_eq!(hunks_of(&got.text, &c.path), hunks_of(&whole.text, &c.path), "{}", c.path);
+            assert_eq!(counted(&hunks_of(&got.text, &c.path)), (c.adds.unwrap(), c.dels.unwrap()), "{}", c.path);
+        }
+        assert!(got.text.contains("untracked below"));
+        for outside in ["next door", "untracked next door", "untracked outside", "top changed"] {
+            assert!(!got.text.contains(outside), "{outside} is not in src/");
+        }
+        // Past the limit the names stay off the command line: the scope is read whole, still the same hunks.
+        let many: Vec<String> =
+            ask.iter().cloned().chain((0..PATHSPEC_LIMIT / 8).map(|n| format!("x{n:06}"))).collect();
+        assert!(past_pathspec_limit(&many));
+        assert!(!past_pathspec_limit(&ask));
+        let fell = Backend::Git.patch_of(root, &Scope::Whole, &many, None, Some(&rows)).unwrap();
+        assert!(fell.text.contains("top changed"), "past the limit the scope is read whole");
+        assert!(!fell.text.contains("untracked outside"), "the untracked files still follow the names");
+        for c in &rows.files {
+            assert_eq!(hunks_of(&fell.text, &c.path), hunks_of(&got.text, &c.path), "{}", c.path);
+        }
+    }
+    #[test]
+    fn a_folder_pairs_no_rename_its_list_did_not() {
+        let dir = crate::scratch::Scratch::new("vcs-folder-rename-limit");
+        let root: &Path = &dir;
+        let git = |args: &[&str]| run_git(root, None, args);
+        git(&["init", "-q"]);
+        fs::create_dir(root.join("src")).unwrap();
+        fs::write(root.join("src/x"), body("x")).unwrap();
+        fs::write(root.join("out"), body("out")).unwrap();
+        git(&["add", "."]);
+        git(&["commit", "-qm", "base"]);
+        // Two inexact pairs are past a limit of one: the whole list skips them. The folder alone has one pair.
+        git(&["config", "diff.renameLimit", "1"]);
+        for (from, to, tag) in [("src/x", "src/y", "x"), ("out", "out2", "out")] {
+            fs::remove_file(root.join(from)).unwrap();
+            fs::write(root.join(to), body(tag).replacen("line 4", "LINE 4", 1)).unwrap();
+        }
+        git(&["add", "-A"]);
+        let list = Backend::Git.changes(root, &Scope::Whole, None).unwrap();
+        let mut rows = list.clone();
+        rows.files.retain(|c| c.path.starts_with("src/"));
+        assert!(rows.files.iter().all(|c| !matches!(c.status, Status::Renamed)), "{rows:?}");
+        let got = Backend::Git.patch_of(root, &Scope::Whole, &["src/".to_owned()], None, Some(&rows)).unwrap();
+        let whole = Backend::Git.patch_with_changes(root, &Scope::Whole, None, None, &list).unwrap();
+        for c in &rows.files {
+            assert_eq!(hunks_of(&got.text, &c.path), hunks_of(&whole.text, &c.path), "{}: {}", c.path, got.text);
+            assert_eq!(counted(&hunks_of(&got.text, &c.path)), (c.adds.unwrap(), c.dels.unwrap()), "{}", c.path);
+        }
+    }
+    #[test]
+    fn names_reach_git_only_as_literal_paths() {
+        let dir = crate::scratch::Scratch::new("vcs-names");
+        let root: &Path = &dir;
+        let git = |args: &[&str]| run_git(root, None, args);
+        git(&["init", "-q"]);
+        fs::write(root.join("a"), "a\n").unwrap();
+        git(&["add", "."]);
+        git(&["commit", "-qm", "base"]);
+        fs::write(root.join("a"), "b\n").unwrap();
+        for bad in ["../x", ".git/config", "", "/abs", "a/../../x", "/"] {
+            let names = vec!["a".to_owned(), bad.to_owned()];
+            assert!(
+                matches!(Backend::Git.patch_of(root, &Scope::Working, &names, None, None), Err(Error::InvalidPath)),
+                "{bad:?}"
+            );
+        }
+        assert!(matches!(Backend::Git.patch_of(root, &Scope::Working, &[], None, None), Err(Error::InvalidPath)));
+        let names = vec!["a".to_owned(), "--output=evil".to_owned(), ":(top)a".to_owned()];
+        let got = Backend::Git.patch_of(root, &Scope::Working, &names, None, None).unwrap();
+        assert!(got.text.contains("+b"));
+        assert!(!root.join("evil").exists());
+    }
+    #[test]
+    fn a_cut_list_says_so_in_its_marks() {
+        let changes = Changes { files: vec![change("a/b", Status::Untracked)], total: FILE_LIMIT + 1, truncated: true };
+        assert!(marks(&changes, None).truncated);
+    }
+    /// A directory the disk will not open (read permission taken away) stands `M` by itself — the other directories
+    /// keep their `A` and `D`. Run as root the disk opens it anyway, and the marks are the same.
+    #[cfg(unix)]
+    #[test]
+    fn a_directory_the_disk_will_not_open_stands_m_alone() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = crate::scratch::Scratch::new("vcs-marks-locked");
+        let root: &Path = &dir;
+        let git = |args: &[&str]| run_git(root, None, args);
+        git(&["init", "-q"]);
+        for f in ["locked/a", "gone/a"] {
+            fs::create_dir_all(root.join(f).parent().unwrap()).unwrap();
+            fs::write(root.join(f), "a\n").unwrap();
+        }
+        git(&["add", "."]);
+        git(&["commit", "-qm", "base"]);
+        fs::write(root.join("locked/a"), "b\n").unwrap();
+        fs::remove_dir_all(root.join("gone")).unwrap();
+        fs::create_dir(root.join("fresh")).unwrap();
+        fs::write(root.join("fresh/f"), "f\n").unwrap();
+        // Search, no read: git still reaches `locked/a` by name, the directory itself will not open.
+        struct Unlock(std::path::PathBuf);
+        impl Drop for Unlock {
+            fn drop(&mut self) {
+                let _ = fs::set_permissions(&self.0, fs::Permissions::from_mode(0o755));
+            }
+        }
+        let _unlock = Unlock(root.join("locked"));
+        fs::set_permissions(root.join("locked"), fs::Permissions::from_mode(0o311)).unwrap();
+        let c = Backend::Git.changes(root, &Scope::Whole, None).unwrap();
+        let m = Backend::Git.marks(root, &c, None);
+        let got: BTreeMap<_, _> = dirs_of(&m).into_iter().collect();
+        assert_eq!(got, BTreeMap::from([("fresh", "A"), ("gone", "D"), ("locked", "M")]), "{c:?}");
+    }
+    /// A directory whose name is not UTF-8 reaches the list through a lossy decode; neither fact can be read for that
+    /// text, so it stands `M` — never an `A` the base's tree would contradict.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_directory_named_outside_utf8_stands_m() {
+        use std::os::unix::ffi::OsStrExt;
+        let dir = crate::scratch::Scratch::new("vcs-marks-bytes");
+        let root: &Path = &dir;
+        let git = |args: &[&str]| run_git(root, None, args);
+        git(&["init", "-q"]);
+        let odd = root.join(std::ffi::OsStr::from_bytes(b"odd\xff"));
+        fs::create_dir(&odd).unwrap();
+        fs::write(odd.join("a"), "a\n").unwrap();
+        git(&["add", "."]);
+        git(&["commit", "-qm", "base"]);
+        fs::write(odd.join("a"), "b\n").unwrap();
+        let c = Backend::Git.changes(root, &Scope::Whole, None).unwrap();
+        let m = Backend::Git.marks(root, &c, None);
+        assert_eq!(dirs_of(&m), [("odd\u{fffd}", "M")], "{c:?}");
     }
 }
