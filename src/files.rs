@@ -1,5 +1,4 @@
 //! Filesystem access for the upcoming TUI and web file views.
-#![allow(dead_code)] // The TUI and web epics will consume this module.
 
 use crate::report::changes::Checkout;
 use std::io::{self, Read};
@@ -59,6 +58,7 @@ pub enum Why {
     NotFile,
     NotDirectory,
     NotText,
+    #[allow(dead_code)] // Keep the underlying error for the TUI reader.
     Io(io::Error),
 }
 impl From<io::Error> for Why {
@@ -104,6 +104,7 @@ pub struct Text {
 }
 #[derive(Debug, Clone, Copy)]
 pub struct Walked {
+    #[allow(dead_code)] // The TUI walker reports its visited count.
     pub seen: usize,
     pub truncated: bool,
 }
@@ -470,6 +471,7 @@ pub fn stamp(jail: &Jail, path: &str) -> Option<Stamp> {
     }
 }
 /// Walk in bounded batches. Returning false from `take` stops immediately.
+#[allow(dead_code)] // The TUI consumes the general walker.
 pub fn walk(jail: &Jail, dir: &str, skip: &[String], mut take: impl FnMut(&[String]) -> bool) -> Result<Walked, Why> {
     walk_limit(jail, dir, skip, WALK_LIMIT, false, &mut take)
 }
@@ -591,6 +593,7 @@ pub fn matches(query: &str, path: &str) -> Option<Range<usize>> {
     let last = ranges.iter().rev().find(|r| r.0 < end)?;
     Some(first.2..last.3)
 }
+#[allow(dead_code)] // The TUI consumes the file extension helper.
 pub fn ext_of(name: &str) -> &str {
     Path::new(name).extension().and_then(|s| s.to_str()).unwrap_or("")
 }
