@@ -925,10 +925,10 @@ mod tests {
         let root = entries(&[k(' ')], &inside(), &[]);
         assert!(root.iter().filter(|e| e.key != "g").all(|e| e.state.is_none()), "다른 묶음이 상태를 달았다");
         let screens = entries(&[k(' '), k('g')], &Ctx { board: true, ..inside() }, &[]);
-        assert_eq!(keys_of(&screens), ["l", "b", "g", "s", "w", "f"]);
+        assert_eq!(keys_of(&screens), ["l", "b", "g", "s", "f", "w"]);
         assert_eq!(
             screens.iter().map(Entry::text).collect::<Vec<_>>(),
-            ["목록", "보드", "간트", "통계", "위키", "파일"]
+            ["목록", "보드", "간트", "통계", "파일", "위키"]
         );
         // 고르면 메뉴를 닫는다 — 토글처럼 열어 두지 않는다.
         assert!(!waits(&[k(' '), k('g')], &inside()), "SPC g 가 Esc 를 기다린다");

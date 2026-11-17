@@ -17,7 +17,7 @@ does not commit and it does not tag — see `CONTRIBUTING.md`.
 - The web interface can browse checkout files, search file names, inspect changes, and display issue or file diffs in unified or side-by-side layouts. (moai-qm5t)
 
 - `moai diff <id>` reads an issue's commit, branch, or working-tree changes as a patch or JSON, with optional file statistics and path selection. (moai-vyu7)
-- The explorer has a file window (`SPC g f`): the checkout's files as a tree beside the file's syntax-coloured text, with a checkout picker, changed-files-only view, search, panning for long lines and automatic refresh. (moai-ffk9)
+- The explorer has a file window (`SPC g f`): the checkout's files as a tree drawn with the issue list's lines, each row headed by its change mark (`M`·`A`·`D`·`R`), beside the file's syntax-coloured text, with a checkout picker (`SPC w`), a changed-files-only view that brings up the diff pane, search, panning for long lines and automatic refresh. (moai-ffk9, moai-p7nr)
 - The explorer's list, board and gantt have a diff pane (`SPC v D`) showing an issue's changes in unified or side-by-side form (`SPC o s`), and `moai ctl screen files`, `moai ctl view diff` and new `ctl state` keys reach both. (moai-ffk9)
 
 ## [1.3.0] - 2026-11-16

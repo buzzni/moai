@@ -181,6 +181,8 @@ remain readable; if both keys exist, `hide_backlog` wins.
   counts the project you are in, and only what passes the filter when one is set.
   `b` switches between weeks and days and `Esc` goes back to where you were.
   Nothing of it is kept; it counts afresh each time it opens
+- **`SPC g f` — the file window.** The checkout's files as a tree, with the file under
+  the cursor on the right, read only — see [the file window](#the-file-window) below
 - **`SPC g w` — the wiki.** The pages `moai wiki ls` lists, read only: the pages
   on the left with the home page first, the page under the cursor on the right.
   On the overview it reads the project of the row under the cursor. The wheel,
@@ -209,10 +211,10 @@ remain readable; if both keys exist, `hide_backlog` wins.
   `SPC v r` shows the page as written, where no link is marked for `Tab`. It
   reads the pages afresh each time it opens and writes none of them — a page is
   a file you edit and commit
-- **`SPC g f` — the file window.** The checkout's files as a tree, with the file under
-  the cursor on the right, read only — see [the file window](#the-file-window) below
 
-Over any of these windows, `SPC g s`, `SPC g w` and `SPC g f` read afresh. When the window you are
+The wiki always stands last in the menu; any screen added later goes before it.
+
+Over any of these windows, `SPC g s`, `SPC g f` and `SPC g w` read afresh. When the window you are
 in cannot be read again it closes and a notice says why; when the other one
 cannot be opened, the one you are in stays as it was and only the notice stands.
 In all of them the arrows, `Home`/`End` and the page keys move with `Ctrl` or
@@ -231,6 +233,19 @@ edits, stages, or commits anything. `Esc` closes it and the list is restored as 
   is excluded. Directories appear first, marked `▸` when folded and `▾` when open, ending with
   `/`; a symlink displays `→` and its target, and links leaving the checkout boundary indicate
   that fact and do not open. A directory ignored by git displays `ignored`.
+- **The levels hang from the list's tree lines.** A row with a sibling after it starts with `├─`,
+  the last row of its directory with `└─`, and `│` runs down beside the rows below a directory
+  that has more siblings after it — using the same thin lines, width, and dim colour as the issue list.
+  Rows directly under the current directory have no line; stepping into a directory with `Enter` starts
+  the hierarchy again from that level. The fold mark comes after the tree line, immediately before a directory's name.
+- **The first column marks what changed** against the checkout's base: `M` for modified, `A` for added
+  (including untracked and copied files), `D` for deleted, and `R` for renamed — conveying status clearly without relying
+  solely on colours (yellow, green, red, cyan). A directory displays `M` when any item beneath it has changed, even
+  when collapsed, and displays `A` or `D` only when it is new or removed as a whole. Rows ignored by git and rows
+  without changes leave the column blank, and deleted paths are omitted from the full tree. The
+  marks update continuously from disk while the window is open; while the list is being read, the column remains
+  blank, and if truncated at the 5,000-change limit, the title reflects it. When the list cannot be read at all,
+  the title says there are no marks and why.
 - **The hand is the list's.** `j`/`k` and `gg`/`G` move the cursor; `Ctrl-d`/`Ctrl-u`,
   `Ctrl-f`/`Ctrl-b`, and the mouse wheel scroll the tree without moving the cursor; `l`
   expands a directory by one level, and `h` collapses it or moves to the parent row above. `Enter`
@@ -254,16 +269,22 @@ edits, stages, or commits anything. `Esc` closes it and the list is restored as 
   non-text files indicate binary status and file size. When focused, movement keys
   and the wheel scroll the text, and `H`/`L` (or horizontal scrolling) pan the view by half the
   pane width. Lines never wrap: `‹` and `›` indicate additional content overflowing either side.
-- **`SPC v w` picks the checkout.** The main checkout appears first, followed by linked
-  worktrees — milestone worktrees are labeled accordingly — each displaying its branch and associated issue
+- **`SPC w` picks the checkout.** The main checkout appears first, followed by linked
+  worktrees — with milestone worktrees labeled accordingly — each displaying its branch and associated issue
   title, with the active one marked `[now]`. Only checkouts listed by git are selectable, and
   the chosen checkout becomes the root: parent directories are not accessible. If a worktree is removed while
   the window is open, the view falls back to the main checkout with a notification.
+  Over the file window, `SPC v w` is inactive, leaving the issue list's worktree overlay unchanged.
+  In [`keys.toml`](#change-the-keys), this action is configured as `checkout` under `[browse]`; elsewhere, `SPC w` is silent.
 - **`SPC v c` shows changed files only** — changes on the checkout branch since
   forking, including uncommitted and untracked files (on the main checkout, all uncommitted
-  modifications). The tree expands all containing folders, with each file prefixed by its
-  `moai diff --stat` status character and suffixed with `+added −removed`; deleted
-  files appear dimmed. Toggling it again restores the previous tree view.
+  modifications). The tree expands all containing folders, with each row prefixed by its
+  mark; each file is suffixed with `+added −removed`, and each folder displays the dimmed sum of changes below it.
+  Deleted files and wholly deleted folders appear here marked `D`, with deleted names dimmed and
+  struck through. The tree uses the same guide lines as the full view. Enabling this mode automatically reveals
+  the diff pane if hidden; toggling it off restores the previous tree view and hides
+  the diff pane only if this toggle opened it and the pane was not manually toggled since
+  (`SPC v D` or `moai ctl view diff`).
 - **`SPC v d` and `SPC v D` fill the right pane.** `SPC v D` displays file diffs
   instead of file text (on a folder, all changed files within it), and `SPC v d` displays the
   checkout's associated issue: the epic for an epic worktree, or the milestone for a milestone worktree. With
@@ -297,8 +318,8 @@ active panes, and dragging the divider adjusts the allocated space.
 - **One scope at a time.** The title lists available scopes with the active scope bracketed,
   along with branch ownership and file counts. When the pane is focused, `l` advances to the next scope and `h` returns to the previous
   scope.
-- **Files.** Each file entry begins with a header line — displaying its status character from
-  `moai diff --stat`, file path (`old → new` for renames), and `+added −removed` — followed by its diff hunks.
+- **Files.** Each file entry begins with a header line — displaying its mark, the file
+  tree's matching letter and colour, file path (`old → new` for renames), and `+added −removed` — followed by its diff hunks.
   `Tab` and `Shift-Tab` navigate to the next and previous files. Binary files and
   file-mode changes display their header line accompanied by an explanatory note.
 - **Lines.** Each diff line displays its old and new line numbers, prefixed with `+` for additions and `-` for deletions.

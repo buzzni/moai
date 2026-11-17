@@ -752,8 +752,7 @@ impl Mark {
             Status::Renamed => Self::Renamed,
         }
     }
-    #[allow(dead_code)] // Only tests print it yet: the TUI's file tree and diff heads take it up in their own epic, and
-    // the web sends the value itself.
+    /// The letter the TUI's file tree and diff heads print (moai-p7nr.c67); the web sends the value itself.
     pub fn letter(self) -> &'static str {
         match self {
             Self::Modified => "M",
@@ -796,8 +795,8 @@ fn ancestors(changes: &Changes) -> std::collections::BTreeSet<String> {
     }
     dirs
 }
-/// The marks of a list and its directories, from facts read beforehand. Pure, so the TUI — which does not call it yet —
-/// and the web build the same map.
+/// The marks of a list and its directories, from facts read beforehand. Pure, so the TUI's file window and the web
+/// build the same map ([`Backend::marks`] reads the facts for both).
 pub fn marks(changes: &Changes, facts: Option<&DirFacts>) -> Marks {
     let files = changes.files.iter().map(|c| (c.path.clone(), Mark::of(c.status))).collect();
     let dirs = ancestors(changes)
