@@ -225,98 +225,98 @@ The list, the board or the gantt you leave on is the one the next run opens with
 `SPC g f` covers the list and the detail with the files of the checkout you are
 in — or, on the all-projects list, of the project under the cursor. The tree is
 on the left and what the cursor stands on is on the right. It only reads: no key
-edits, stages or commits anything. `Esc` closes it and the list is as you left it.
+edits, stages, or commits anything. `Esc` closes it and the list is restored as you left it.
 
-- **Every name stands.** Hidden files and what git ignores are listed; only `.git`
-  is left out. Directories come first, marked `▸` folded and `▾` open and ending in
-  `/`; a link shows `→` and where it points, and one that leaves the checkout says
-  so and does not open. A directory git ignores says `ignored`
-- **The hand is the list's.** `j`/`k` and `gg`/`G` move, `Ctrl-d`/`Ctrl-u`,
-  `Ctrl-f`/`Ctrl-b` and the wheel scroll the tree without moving the cursor, `l`
-  opens a directory one level and `h` folds it or goes to the row above. `Enter`
-  steps into a directory, whose first row is `..`, and on a file puts the focus on
-  the right pane; `Bksp` steps out. At the checkout's root nothing goes further up
-- **`Tab` spreads.** It opens everything below a directory, or folds it all back when
-  it is open. It does not go into links or ignored directories (`l` on an ignored
-  directory opens it), and it stops with a notice after 5,000 entries read
-- **`/` finds, and hides nothing.** It matches a piece of the path, case aside, as you
-  type. The folders down to each file found open, the file's row is marked `*` at
-  its head with the matching letters reversed, and every other row stays. `Enter`
-  keeps the search and `Esc` drops what was typed; `n` and `N` jump to the next and
-  previous file found, round at the ends. A second `Esc` ends the search and folds
-  back what it opened — folders you opened yourself stay. Ignored directories are
-  not searched unless you step into one first, and `.git` and links are never
-  entered. The first search on a root indexes it in the background and the title
-  says how far it got; up to 500 files open, the shallow ones first, with the whole
-  count in the title
-- **The content pane** shows the file with line numbers, coloured by its syntax once
-  that is ready. A file past 1 MiB shows its first MiB and says how large it is;
-  one that is not text says so with its size. With the focus there the movement keys
-  and the wheel scroll the text, and `H`/`L` (or a sideways wheel) pan it by half the
-  pane. Lines never wrap: `‹` and `›` say there is more to either side
-- **`SPC v w` picks the checkout.** The main checkout comes first, then the linked
-  worktrees — a milestone's worktree says so — each with its branch and its issue's
-  title, the one shown marked `[now]`. Only checkouts git lists can be picked, and
-  the one you pick becomes the root: nothing above it stands. If it is removed while
-  the window is open, the window goes back to the main checkout and says so
-- **`SPC v c` shows changed files only** — what changed on the checkout's branch since
-  it forked, with uncommitted and untracked files (on the main checkout, what is not
-  committed). The tree opens every folder, and each file is headed by the letter
-  `moai diff --stat` prints for its kind and followed by `+added −removed`; deleted
-  files stand dimmed. Pressed again it gives back the tree as it was
-- **`SPC v d` and `SPC v D` fill the right pane.** `SPC v D` shows the file's diff
-  instead of its text (on a folder, every changed file below it), and `SPC v d` the
-  checkout's issue: an epic worktree's epic, a milestone worktree's milestone. With
-  both on, the detail stands first — above the diff or left of it as `SPC o d` places
-  the detail — and where the two do not fit the diff folds and the detail stays.
-  `Ctrl-w w` goes round the panes that stand. These toggles belong to the window:
-  the list's detail and your config are not touched
-- **It refreshes itself.** The open folders, the shown file, the changed-file list and
-  the diff are re-read in the background — every two seconds when something moves,
-  backing off to ten when nothing does, and never closer than ten times the last read's
-  duration. The cursor and the scroll stay where they are
-- **Nothing waits on the disk.** Reading directories and files, colouring, searching and
-  git all run in the background; the cursor keeps moving and the pane says it is
-  reading. File names and text are shown with control characters made harmless
+- **Every name stands.** Hidden files and files ignored by git are listed; only `.git`
+  is excluded. Directories appear first, marked `▸` when folded and `▾` when open, ending with
+  `/`; a symlink displays `→` and its target, and links leaving the checkout boundary indicate
+  that fact and do not open. A directory ignored by git displays `ignored`.
+- **The hand is the list's.** `j`/`k` and `gg`/`G` move the cursor; `Ctrl-d`/`Ctrl-u`,
+  `Ctrl-f`/`Ctrl-b`, and the mouse wheel scroll the tree without moving the cursor; `l`
+  expands a directory by one level, and `h` collapses it or moves to the parent row above. `Enter`
+  steps into a directory (whose first entry is `..`), or focuses the right pane when on a file;
+  `Bksp` steps out. At the checkout root, navigation does not step further up.
+- **`Tab` spreads.** It expands all descendants below a directory, or collapses them all back
+  when already open. It does not traverse symlinks or ignored directories (`l` on an ignored
+  directory opens it directly), and it stops with a notice after reading 5,000 entries.
+- **`/` finds, and hides nothing.** It matches path substrings case-insensitively as you
+  type. Folders down to each matched file expand, the file row displays `*` at its
+  head with matched characters highlighted in reverse video, and all other rows remain visible. `Enter`
+  confirms the search and `Esc` clears the typed query; `n` and `N` jump to the next and
+  previous matched files, wrapping at the boundaries. A second `Esc` exits the search and collapses
+  auto-opened folders — directories you opened manually remain open. Ignored directories are
+  not searched unless stepped into first, and `.git` and symlinks are never
+  entered. The initial search on a root indexes it in the background while the title
+  indicates progress; up to 500 files are expanded (shallowest first), with the total match
+  count shown in the title.
+- **The content pane** displays the file with line numbers, highlighted by syntax once
+  analysis completes. Files exceeding 1 MiB display their initial 1 MiB along with their total size;
+  non-text files indicate binary status and file size. When focused, movement keys
+  and the wheel scroll the text, and `H`/`L` (or horizontal scrolling) pan the view by half the
+  pane width. Lines never wrap: `‹` and `›` indicate additional content overflowing either side.
+- **`SPC v w` picks the checkout.** The main checkout appears first, followed by linked
+  worktrees — milestone worktrees are labeled accordingly — each displaying its branch and associated issue
+  title, with the active one marked `[now]`. Only checkouts listed by git are selectable, and
+  the chosen checkout becomes the root: parent directories are not accessible. If a worktree is removed while
+  the window is open, the view falls back to the main checkout with a notification.
+- **`SPC v c` shows changed files only** — changes on the checkout branch since
+  forking, including uncommitted and untracked files (on the main checkout, all uncommitted
+  modifications). The tree expands all containing folders, with each file prefixed by its
+  `moai diff --stat` status character and suffixed with `+added −removed`; deleted
+  files appear dimmed. Toggling it again restores the previous tree view.
+- **`SPC v d` and `SPC v D` fill the right pane.** `SPC v D` displays file diffs
+  instead of file text (on a folder, all changed files within it), and `SPC v d` displays the
+  checkout's associated issue: the epic for an epic worktree, or the milestone for a milestone worktree. With
+  both active, detail takes precedence — placed above or to the left of the diff as configured by `SPC o d` —
+  and when space is insufficient, the diff collapses while detail remains visible.
+  `Ctrl-w w` cycles through active panes. These toggles are scoped to the file window:
+  the list view's detail state and user configurations remain untouched.
+- **It refreshes itself.** Open folders, the active file, changed-file lists, and
+  diffs reload in the background — checking every two seconds when changes occur,
+  backing off to ten seconds when idle, and throttled to at least ten times the duration of the prior read.
+  Cursor and scroll positions are preserved.
+- **Nothing waits on the disk.** Reading directories and files, syntax highlighting, searching, and
+  git interactions all execute asynchronously in the background; the cursor moves without interruption while the pane displays loading state.
+  File names and contents are rendered with control characters sanitized.
 
-With the mouse, a click puts the focus on a pane and the cursor on a row, and the
-wheel scrolls the pane under it. Dragging the line between the tree and the right
-pane resizes them. The share the tree takes is kept as `files_width` — until you drag
-it, the window splits like the list.
+Using the mouse, clicking focuses a pane and places the cursor on a row, while the
+wheel scrolls the hovered pane. Dragging the divider between the tree and the right
+pane resizes them. The width allocated to the tree persists as `files_width` — until adjusted,
+the window adopts the split ratio of the main list.
 
 ## The diff pane
 
-On the list, the board and the gantt, `SPC v D` stands a diff pane beside the
-detail: what the cursor's issue, epic or milestone changes, read through the same
-scopes and in the same order as `moai diff <id>`. It uses the detail's place — with
-the detail shown, the detail stands first (above the diff or left of it as `SPC o d`
-places the detail); with the detail hidden, the diff takes the whole place. Where the
-two do not fit, the diff folds and the detail stays. `Ctrl-w w` goes round the panes
-that stand, and dragging the line between them shares the place.
+On the list, board, and gantt views, `SPC v D` opens a diff pane adjacent to
+the detail pane: displaying modifications for the selected issue, epic, or milestone, evaluated across the same
+scopes and ordering as `moai diff <id>`. It occupies the detail pane's allocated area — when
+detail is visible, detail takes precedence (placed above or to the left of the diff as configured by `SPC o d`);
+with detail hidden, the diff occupies the entire space. When space is
+insufficient, the diff collapses while detail stays open. `Ctrl-w w` cycles between
+active panes, and dragging the divider adjusts the allocated space.
 
-- **One scope at a time.** The title names the scopes, the one shown in brackets,
-  whose branch it is and how many files. `l` shows the next scope and `h` the previous
-  one while the focus is on the pane
-- **Files.** Each file starts with a head line — its kind as the letter `moai diff --stat`
-  prints, its path (`old → new` for a rename) and `+added −removed` — then its hunks.
-  `Tab` and `Shift-Tab` jump to the next and previous file. Binary files and
-  mode-only changes show their head and say why there are no lines
-- **Lines.** Every line has its old and new number and `+` for added, `-` for removed.
-  The numbers and the mark carry the added and removed colours and the text keeps its
-  syntax colours, so a colour never stands alone
-- **`SPC o s` puts the old and new side by side**, paired, when the pane is at least 80
-  columns wide; a narrower one draws unified and its title says so. The choice is kept
-  as `diff_layout`, and one setting serves every diff pane, the file window's included
-- **Scrolling.** `j`/`k`, `gg`/`G`, `Ctrl-d`/`Ctrl-u`, `Ctrl-f`/`Ctrl-b` and the wheel
-  scroll; `H`/`L` and the sideways wheel pan both halves together. Lines never wrap.
-  A patch cut at 2 MiB or a list cut at 5,000 files says so
-- **It reads in the background** — the pane says it is reading and the cursor keeps
-  moving — and it refreshes itself like the file window, keeping the file you were on
+- **One scope at a time.** The title lists available scopes with the active scope bracketed,
+  along with branch ownership and file counts. When the pane is focused, `l` advances to the next scope and `h` returns to the previous
+  scope.
+- **Files.** Each file entry begins with a header line — displaying its status character from
+  `moai diff --stat`, file path (`old → new` for renames), and `+added −removed` — followed by its diff hunks.
+  `Tab` and `Shift-Tab` navigate to the next and previous files. Binary files and
+  file-mode changes display their header line accompanied by an explanatory note.
+- **Lines.** Each diff line displays its old and new line numbers, prefixed with `+` for additions and `-` for deletions.
+  Line numbers and diff markers reflect addition and deletion styling while code retains its
+  syntax highlighting, ensuring semantic markers remain distinct.
+- **`SPC o s` puts the old and new side by side**, aligned in pairs, when the pane width is at least 80
+  columns; narrower panes render unified diffs and annotate the title accordingly. This layout preference persists
+  as `diff_layout`, and one setting serves all diff panes, including the file window.
+- **Scrolling.** `j`/`k`, `gg`/`G`, `Ctrl-d`/`Ctrl-u`, `Ctrl-f`/`Ctrl-b`, and the mouse wheel
+  scroll the view; `H`/`L` and horizontal wheel input pan both panes in unison. Lines never wrap.
+  Patches truncated at 2 MiB or file lists truncated at 5,000 entries display truncation notices.
+- **It reads in the background** — the pane indicates ongoing reads while the cursor remains
+  responsive — and refreshes automatically matching the file window's behavior, retaining current file selection.
 
-The pane and its shares are kept in your user config: `[tui] diff` (shown or not),
-`diff_width` (the diff's share when side by side) and `diff_height` (when stacked).
-`files_width` and `diff_layout` are kept the same way. None is written until you
-press or drag something; unknown keys in the table are left alone.
+The pane layout and dimensions persist in user configuration: `[tui] diff` (visibility state),
+`diff_width` (diff allocation in side-by-side splits), and `diff_height` (in stacked splits).
+`files_width` and `diff_layout` are stored under the same table. Preferences are written only
+upon explicit keystroke or drag operations; unrecognized configuration keys remain preserved.
 
 ## Markdown in the explorer
 
