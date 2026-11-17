@@ -1990,5 +1990,16 @@
   "page.markdown.loading": "Loading snippet",
   "page.markdown.missing": "Snippet unavailable",
   "page.markdown.refused": "Snippet refused",
-  "page.markdown.tooLarge": "Snippet too large"
+  "page.markdown.tooLarge": "Snippet too large",
+  "diff.bad_scope": "Scope unavailable; available: {scopes}",
+  "diff.bad_path": "Path is not in this scope’s changed files",
+  "diff.empty": "No changes",
+  "diff.truncated": "truncated",
+  "diff.other_scopes": "other scopes",
+  "diff.branch": "branch",
+  "diff.owner": "owner",
+  "diff.timeout": "Git timed out",
+  "diff.limit": "Git output exceeded the limit",
+  "diff.invalid_revision": "Invalid Git object ID",
+  "diff.invalid_path": "Invalid path"
 }

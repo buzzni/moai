@@ -29,6 +29,7 @@ Commands:
   prime         A short markdown page - what you hold and what comes next
   add           Create an issue
   show          Open one, or list them
+  diff          Show an issue's changes
   stats         Count them - spread, flow, lead and cycle time, AI work
   archive       Move eligible closed rows into yearly archive files
   mv            Move the status
@@ -1169,6 +1170,32 @@ Order and paging:
       jq -r '.[] | .derived_epic // "none"' | sort | uniq -c
     moai show --archived --json | duckdb -c "SELECT kind, count(*)
       FROM read_json('/dev/stdin', columns = {kind: 'VARCHAR'}) GROUP BY 1"
+```
+
+## `moai diff`
+
+```
+Show an issue's changes
+
+Usage: moai diff [OPTIONS] <ID>
+
+Arguments:
+  <ID>  Issue, epic or milestone ID
+
+Options:
+      --scope <SCOPE>        Scope [possible values: commits, branch, working]
+      --stat                 Show file statistics instead of the patch
+      --path <PATH>          Show only this exact checkout-relative file
+      --worktree             Also overlay other worktrees (no file changes)
+      --json                 Machine-readable output. Every human line goes away
+      --no-color             Turn colour off (same as `--color never`)
+      --color <how>          auto|always|never (auto by default, off when piped)
+  -C, --dir <path>           Run in this directory (same as `git -C`)
+      --user <name (email)>  Who is doing this (from `git config` when absent)
+  -h, --help                 Print help
+
+  moai diff moai-1234 --scope working
+  moai diff moai-1234 --stat --json
 ```
 
 ## `moai stats`

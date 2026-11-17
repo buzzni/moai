@@ -727,6 +727,235 @@ fn records_of(record: &str) -> Option<(&str, &str, &str)> {
     sane.then_some((hash, subject, if fields.next().is_some() { "" } else { body }))
 }
 
+/// Read bounded git output without blocking on a full stderr pipe. A timeout or an
+/// output limit kills the child; reaping happens off-thread so a stuck mount cannot
+/// extend the caller's deadline.
+pub(crate) fn bounded(
+    root: &Path,
+    args: &[&str],
+    limit: usize,
+    budget: Option<std::time::Duration>,
+) -> Option<Result<(Vec<u8>, bool), Error>> {
+    bounded_command(invocation(root, args), limit, budget)
+}
+
+fn bounded_command(
+    mut command: std::process::Command,
+    limit: usize,
+    budget: Option<std::time::Duration>,
+) -> Option<Result<(Vec<u8>, bool), Error>> {
+    use std::io::Read;
+    use std::process::Stdio;
+    use std::time::Instant;
+
+    let mut child = match command.stdout(Stdio::piped()).stderr(Stdio::piped()).spawn() {
+        Ok(child) => child,
+        Err(e) => return Some(Err(Error::Spawn(e))),
+    };
+    let mut stdout = child.stdout.take().expect("piped stdout");
+    let stderr = child.stderr.take().expect("piped stderr");
+    let (tx, rx) = std::sync::mpsc::sync_channel(2);
+    let reader = std::thread::Builder::new().spawn(move || {
+        let mut bytes = Vec::new();
+        let result = stdout.by_ref().take(limit.saturating_add(1) as u64).read_to_end(&mut bytes);
+        let _ = tx.send((bytes, result));
+    });
+    let errors = drain_errors(stderr);
+    let (Ok(_), Some(errors)) = (reader, errors) else {
+        abandon(child);
+        return Some(Err(Error::Failed("could not start git output reader".into())));
+    };
+    let deadline = budget.and_then(|d| Instant::now().checked_add(d));
+    let Some((mut bytes, read)) = receive(&rx, deadline) else {
+        abandon(child);
+        return None;
+    };
+    if let Err(e) = read {
+        abandon(child);
+        return Some(Err(Error::Stream(e)));
+    }
+    if bytes.len() > limit {
+        bytes.truncate(limit);
+        abandon(child);
+        return Some(Ok((bytes, true)));
+    }
+    Some(concluded(child, &errors, deadline)?.map(|()| (bytes, false)))
+}
+
+/// Stream NUL-delimited records while retaining only one unfinished record.
+/// Both pipes are drained concurrently and the caller's deadline covers them.
+pub(crate) fn records_bounded(
+    root: &Path,
+    args: &[&str],
+    budget: Option<std::time::Duration>,
+    record_limit: Option<usize>,
+    mut take: impl FnMut(&[u8]),
+) -> Option<Result<(), Error>> {
+    use std::io::Read;
+    use std::process::Stdio;
+    use std::time::Instant;
+    let deadline = budget.and_then(|d| Instant::now().checked_add(d));
+    let mut child = match invocation(root, args).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn() {
+        Ok(c) => c,
+        Err(e) => return Some(Err(Error::Spawn(e))),
+    };
+    let mut stdout = child.stdout.take().expect("piped stdout");
+    let stderr = child.stderr.take().expect("piped stderr");
+    let (tx, rx) = std::sync::mpsc::sync_channel(8);
+    let reader = std::thread::Builder::new().spawn(move || {
+        let mut chunk = [0u8; 16384];
+        loop {
+            match stdout.read(&mut chunk) {
+                Ok(0) => {
+                    let _ = tx.send(Ok(Vec::new()));
+                    break;
+                }
+                Ok(n) => {
+                    if tx.send(Ok(chunk[..n].to_vec())).is_err() {
+                        break;
+                    }
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+                Err(e) => {
+                    let _ = tx.send(Err(e));
+                    break;
+                }
+            }
+        }
+    });
+    let errors = drain_errors(stderr);
+    let (Ok(_), Some(errors)) = (reader, errors) else {
+        abandon(child);
+        return Some(Err(Error::Failed("could not start git output reader".into())));
+    };
+    let mut partial = Vec::new();
+    loop {
+        let Some(message) = receive(&rx, deadline) else {
+            abandon(child);
+            return None;
+        };
+        let data = match message {
+            Ok(data) => data,
+            Err(e) => {
+                abandon(child);
+                return Some(Err(Error::Stream(e)));
+            }
+        };
+        if data.is_empty() {
+            break;
+        }
+        let mut start = 0;
+        for (i, byte) in data.iter().enumerate() {
+            if *byte == 0 {
+                partial.extend_from_slice(&data[start..i]);
+                take(&partial);
+                partial.clear();
+                start = i + 1;
+            }
+        }
+        partial.extend_from_slice(&data[start..]);
+        if record_limit.is_some_and(|limit| partial.len() > limit) {
+            abandon(child);
+            return Some(Err(Error::Failed("git record exceeds its limit".into())));
+        }
+    }
+    if !partial.is_empty() {
+        abandon(child);
+        return Some(Err(Error::Failed("incomplete git record".into())));
+    }
+    concluded(child, &errors, deadline)
+}
+
+/// Kill a child nobody waits for any more and reap it off-thread — a process stuck on a dead
+/// mount may outlive SIGKILL for a while, and waiting here would stretch the caller's deadline.
+fn abandon(mut child: std::process::Child) {
+    let _ = child.kill();
+    let _ = std::thread::Builder::new().spawn(move || child.wait());
+}
+
+/// One message before `deadline`, or whenever it comes when there is none.
+fn receive<T>(rx: &std::sync::mpsc::Receiver<T>, deadline: Option<std::time::Instant>) -> Option<T> {
+    match deadline {
+        Some(end) => rx.recv_timeout(end.saturating_duration_since(std::time::Instant::now())).ok(),
+        None => rx.recv().ok(),
+    }
+}
+
+/// Keep the first 64 KiB of stderr and keep draining the rest on another thread, so git never
+/// blocks on a full error pipe while stdout is read. `None` when the thread cannot start.
+fn drain_errors(mut stderr: std::process::ChildStderr) -> Option<std::sync::mpsc::Receiver<Vec<u8>>> {
+    use std::io::Read;
+    let (tx, rx) = std::sync::mpsc::sync_channel(1);
+    std::thread::Builder::new()
+        .spawn(move || {
+            let mut bytes = Vec::new();
+            let _ = stderr.by_ref().take(64 * 1024).read_to_end(&mut bytes);
+            let _ = std::io::copy(&mut stderr, &mut std::io::sink());
+            let _ = tx.send(bytes);
+        })
+        .ok()?;
+    Some(rx)
+}
+
+/// After stdout is done: the exit status and the retained stderr within `deadline`. A non-zero
+/// exit is a failure carrying that stderr; running out of time is `None`.
+fn concluded(
+    mut child: std::process::Child,
+    errors: &std::sync::mpsc::Receiver<Vec<u8>>,
+    deadline: Option<std::time::Instant>,
+) -> Option<Result<(), Error>> {
+    let status = match deadline {
+        Some(end) => waited(&mut child, end.saturating_duration_since(std::time::Instant::now())),
+        None => child.wait().ok(),
+    };
+    let Some(status) = status else {
+        abandon(child);
+        return None;
+    };
+    let why = receive(errors, deadline)?;
+    if !status.success() {
+        return Some(Err(Error::Failed(String::from_utf8_lossy(&why).trim().to_owned())));
+    }
+    Some(Ok(()))
+}
+
+/// The change views need the same commit selection as `table`, with an optional
+/// deadline because they can be called from a background UI request.
+pub(crate) fn commits_within(
+    root: &Path,
+    id: &str,
+    budget: Option<std::time::Duration>,
+) -> Option<Result<Vec<Commit>, Error>> {
+    let format = format_arg();
+    let known = std::collections::HashSet::from([id]);
+    let mut found = Vec::new();
+    let result = records_bounded(
+        root,
+        &[
+            "--no-optional-locks",
+            "log",
+            "--ignore-missing",
+            "-z",
+            "--no-show-signature",
+            &format,
+            "HEAD",
+            "main-worktree/HEAD",
+            "--",
+        ],
+        budget,
+        None, // Match the existing history reader: a commit body is not a path record.
+        |raw| {
+            let text = String::from_utf8_lossy(raw);
+            if let Some((hash, subject, body)) = records_of(&text)
+                && !named_in(subject, body, &known).is_empty()
+            {
+                found.push(commit_of(hash, subject));
+            }
+        },
+    )?;
+    Some(result.map(|()| found))
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
@@ -1205,5 +1434,43 @@ pub(crate) mod tests {
             "날짜가 거꾸로 선 커밋 밑을 못 봤다"
         );
         assert_eq!(table["moai-aaaa.b1c"].len(), 1, "한 제목에 두 번 적은 id 를 두 커밋으로 셌다");
+    }
+}
+
+#[cfg(test)]
+mod bounded_tests {
+    use super::*;
+
+    #[test]
+    fn limits_output_and_preserves_complete_output() {
+        let root = crate::scratch::base();
+        let (all, cut) = bounded(&root, &["--version"], 4096, None).unwrap().unwrap();
+        assert!(!cut);
+        assert!(all.starts_with(b"git version "));
+        let (prefix, cut) = bounded(&root, &["--version"], 4, None).unwrap().unwrap();
+        assert!(cut);
+        assert_eq!(prefix, b"git ");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn timeout_and_full_stderr_do_not_block() {
+        use std::time::{Duration, Instant};
+        let mut slow = std::process::Command::new("sh");
+        slow.args(["-c", "exec sleep 30"]);
+        let start = Instant::now();
+        assert!(bounded_command(slow, 1024, Some(Duration::from_millis(100))).is_none());
+        assert!(start.elapsed() < Duration::from_secs(3));
+        let mut noisy = std::process::Command::new("sh");
+        noisy.args(["-c", "head -c 200000 /dev/zero >&2; printf done"]);
+        let (bytes, truncated) = bounded_command(noisy, 1024, Some(Duration::from_secs(5))).unwrap().unwrap();
+        assert_eq!(bytes, b"done");
+        assert!(!truncated);
+    }
+
+    #[test]
+    fn reports_git_failure() {
+        let root = crate::scratch::base();
+        assert!(matches!(bounded(&root, &["not-a-real-git-command"], 4096, None), Some(Err(Error::Failed(_)))));
     }
 }

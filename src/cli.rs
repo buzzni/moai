@@ -314,6 +314,9 @@ reads as a flag — put it after `--` (`moai add -- -x`)."
     /// Open one, or list them
     #[command(after_help = SHOW_LIST)]
     Show(ShowArgs),
+    /// Show an issue's changes
+    #[command(after_help = "  moai diff moai-1234 --scope working\n  moai diff moai-1234 --stat --json")]
+    Diff(DiffArgs),
     /// Count them - spread, flow, lead and cycle time, AI work
     #[command(after_help = STATS_HELP)]
     Stats(StatsArgs),
@@ -2434,6 +2437,29 @@ pub enum AxisArg {
 pub enum BucketArg {
     Day,
     Week,
+}
+
+#[derive(Args, Debug)]
+pub struct DiffArgs {
+    /// Issue, epic or milestone ID
+    pub id: String,
+    /// Scope
+    #[arg(long, value_enum)]
+    pub scope: Option<DiffScope>,
+    /// Show file statistics instead of the patch
+    #[arg(long)]
+    pub stat: bool,
+    /// Show only this exact checkout-relative file
+    #[arg(long)]
+    pub path: Option<String>,
+    #[command(flatten)]
+    pub worktree: WorktreeArg,
+}
+#[derive(clap::ValueEnum, Debug, Clone, Copy)]
+pub enum DiffScope {
+    Commits,
+    Branch,
+    Working,
 }
 
 #[derive(Args, Debug)]
