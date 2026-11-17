@@ -6783,10 +6783,10 @@ impl App {
         self.layout == view::Layout::Gantt
     }
 
-    /// Whether a diff pane stands on screen — `SPC o s` stands only then (`keys::Ctx::diff`). **No pane stands one yet**:
-    /// the file window's right pane (moai-ffk9.211) and the list's diff pane (moai-ffk9.cij) answer here when they do.
+    /// Whether a diff pane stands on screen — `SPC o s` stands only then (`keys::Ctx::diff`): the file window's right
+    /// pane with its diff on (moai-ffk9.211). The list's diff pane (moai-ffk9.cij) answers here too when it stands.
     fn diff_shown(&self) -> bool {
-        false
+        matches!(&self.mode, Mode::Files(w) if w.diff_on)
     }
 
     /// 상세 칸이 지금 서는 자리 — 간트면 간트의 자리(`gantt_detail_at`), 아니면 사람이 고른 자리다(moai-i4hf.sas).
@@ -7843,6 +7843,8 @@ impl App {
             // 이동키가 어디에도 안 닿아 화면이 굳은 것으로 보인다(moai-ymnu).
             // **읽음은 시킬 때만 선다**(사용자 결정) — 커서가 지나갔다고, 상세를 봤다고 서지 않는다.
             B::Read | B::ReadAll | B::ReadGroup => self.mark_read(act, rows),
+            // The file window's own (moai-ffk9.211) — `files_key` takes them there; the list's diff pane is moai-ffk9.cij's.
+            B::Diff | B::Changed => {}
             B::Detail => {
                 self.detail_open = !self.detail_open;
                 if !self.detail_open {
@@ -7956,6 +7958,9 @@ impl App {
             files: matches!(self.mode, Mode::Files(_)),
             diff: self.diff_shown(),
             diff_split: self.diff_layout == diff::Layout::Split,
+            files_detail: matches!(&self.mode, Mode::Files(w) if w.detail_on),
+            files_diff: matches!(&self.mode, Mode::Files(w) if w.diff_on),
+            files_changed: matches!(&self.mode, Mode::Files(w) if w.changed_only()),
             head: self.head_at(rows).is_some(),
             board_foldable: self.board_fold_at(rows).is_some(),
             mouse: self.mouse_on,

@@ -591,7 +591,9 @@ BACKLOG
     SPC v 1  first column of the config [shown/hidden] — the next ones count up
              done has no letter of its own: the column that holds it does
     {key:browse.detail}  detail pane [shown/hidden]
+    {key:browse.diff}  diff pane [shown/hidden] — over the file window, its right pane
     {key:browse.worktree}  overlay worktrees [on/off]
+    {key:browse.changed}  changed files only [on/off] — the file window's (see below)
     {key:browse.raw}  raw or rendered
   Sorts and columns call priority, created, updated and assignee by the same
   letter — only title ({key:browse.sort_title}) and tag ({key:browse.cell_tags}) split one letter:
@@ -905,9 +907,29 @@ BACKLOG
   title. {key:files.next_match} and {key:files.prev_match} jump to the next and previous file found, round at
   the ends. {key:files.close} ends the search and folds back what it opened — folders you
   opened stay.
+  {key:browse.worktree} over the window picks the checkout it shows: the main checkout
+  first, then the linked worktrees, a milestone's worktree saying so, each
+  with its branch and its issue's title, the one shown marked [now]. Only
+  the checkouts git lists can be picked, and the picked one is the new root:
+  nothing above it stands, a worktree made outside the repository included.
+  If the checkout is removed while the window stands, the window goes back
+  to the main one and says so. {key:browse.changed} shows the changed files only — what
+  changed on the checkout's branch since it forked, uncommitted and untracked
+  files with it (on the main checkout, what is not committed) — as a tree with
+  every folder open, each file headed by the letter moai diff --stat prints for
+  its kind and followed by +added −removed; deleted files stand dimmed.
+  Pressed again it gives the tree back with the folders and the cursor as
+  they were. The
+  right pane shows the file's text; {key:browse.diff} shows its diff instead (on a
+  folder, every changed file below it) and {key:browse.detail} the checkout's issue — an
+  epic worktree's epic, a milestone worktree's milestone. With both on the
+  detail stands first, above the diff or left of it as {key:browse.detail_at} places
+  the detail; where the two do not fit, the diff folds and the detail
+  stays. {key:files.focus_next} goes round the panes that stand. These toggles are the
+  window's own: the list's detail and the config are not touched.
   {key:files.close} closes the window, with the cursor, the filter and the detail as
-  they were. SPC opens the menu over it with the screens. The window is read
-  fresh every time.
+  they were. SPC opens the menu over it with the screens and those keys. The
+  window is read fresh every time.
 
   The diff pane shows one scope of changes at a time. Each file starts with a
   head line — its kind as the letter moai diff --stat prints, its path

@@ -292,6 +292,9 @@ pub fn screen(f: &mut Frame, app: &mut App) {
     let (raw, share) = (app.raw, app.wiki_width.or(app.list_width));
     // The file window keeps a share of its own the same way (moai-ffk9.rpf).
     let files_share = app.files_width.or(app.list_width);
+    // **The file window's detail is laid out before the window is borrowed** (moai-ffk9.211) — it reads the issue
+    // through the list's caches (`detail_body`), which borrow the whole `App`.
+    let files_prep = files_prep(app, body, files_share);
     let mut wiki_at = None;
     let mut files_at = None;
     let sort_order = matches!(&app.mode, Mode::Sort(_)).then(|| app.common_order());
@@ -305,7 +308,7 @@ pub fn screen(f: &mut Frame, app: &mut App) {
         Mode::Proposals(id) => proposals_window(f, app.proposals.rows(), id.as_deref(), body, lang),
         Mode::Stats(w) => stats_window(f, w, body, lang),
         Mode::Wiki(w) => wiki_at = Some(wiki_window(f, w, body, raw, share, lang, &mut app.images)),
-        Mode::Files(w) => files_at = Some(files_window(f, w, body, files_share, lang)),
+        Mode::Files(w) => files_at = files_prep.map(|p| files_window(f, w, body, p, lang)),
         Mode::Ask(ask) => {
             if let Mode::Backlog(form) = ask.back.as_mut() {
                 jot(f, form, body, false, tint, lang);
@@ -1923,22 +1926,28 @@ fn wiki_keys(f: &mut Frame, w: &super::wiki::Window, at: Rect, lang: Lang) {
     bar(f, at, optional, keep);
 }
 
-/// The file window (moai-ffk9.rpf). It covers the list and the detail whole, as [`wiki_window`] does — the tree on the
-/// left, what the cursor stands on at the right. The share (`share`) is the window's own line (`App::files_width`);
-/// until it is dragged it follows the list's, and it splits the way the wiki window does, so the drag
-/// (`mouse.rs`) solves it back with the same [`share_for`].
-///
-/// Gives the panes' places — the mouse hits them on the next event (`mouse::Drawn::files`).
-fn files_window(
-    f: &mut Frame,
-    w: &mut super::files::Window,
-    at: Rect,
-    share: Option<u16>,
-    lang: Lang,
-) -> super::mouse::FilesAt {
-    f.render_widget(Clear, at);
+/// The file window's panes as one frame lays them out (moai-ffk9.211) — measured before the window is drawn, so the
+/// detail's lines can be read at their width first.
+pub(super) struct FilesPrep {
+    tree: Rect,
+    /// The right side whole — `None` when too narrow to stand.
+    info: Option<Rect>,
+    sides: Sides,
+    /// Both are on and the right side cannot hold two — the detail stands alone.
+    folded: bool,
+    /// The detail's lines, when it stands.
+    detail: Option<Vec<Line<'static>>>,
+    /// The picker's issue titles, row by row, while it is open.
+    titles: Vec<Option<String>>,
+    layout: super::diff::Layout,
+}
+
+/// Lay the file window out and read what its detail says.
+fn files_prep(app: &mut App, at: Rect, share: Option<u16>) -> Option<FilesPrep> {
+    let Mode::Files(w) = &app.mode else { return None };
+    let (detail_on, diff_on, picking) = (w.detail_on, w.diff_on, w.pick.is_some());
     // Too narrow for both floors: the tree alone, and the focus goes back to it (the wiki window's rule).
-    let (tree_at, info_at) = if at.width < LIST_MIN_H + DETAIL_MIN_H {
+    let (tree, info) = if at.width < LIST_MIN_H + DETAIL_MIN_H {
         (at, None)
     } else {
         let floor = (u32::from(LIST_MIN_H) * 100).div_ceil(u32::from(at.width.max(1))).min(100) as u16;
@@ -1946,20 +1955,217 @@ fn files_window(
         let [a, b] = Layout::horizontal([Constraint::Percentage(share), Constraint::Min(DETAIL_MIN_H)]).areas(at);
         (a, Some(b))
     };
+    let place = app.detail_side();
+    let sides = info.map(|i| side_split(i, place, detail_on, diff_on, None)).unwrap_or_default();
+    let folded = detail_on && info.is_some_and(|i| side_split(i, place, true, true, None).folded);
+    let detail = sides.detail.map(|r| {
+        let width = detail_frame(false).inner(r).width as usize;
+        files_detail(app, width)
+    });
+    let titles = if picking { app.files_pick_titles() } else { Vec::new() };
+    Some(FilesPrep { tree, info, sides, folded, detail, titles, layout: app.diff_layout })
+}
+
+/// The detail of the file window's checkout (moai-ffk9.211): its issue drawn as the list draws a row, or one line —
+/// reading the checkouts, or no issue holds this checkout (the main one).
+fn files_detail(app: &mut App, width: usize) -> Vec<Line<'static>> {
+    let lang = app.site.lang;
+    let Some((seat, at)) = app.files_issue() else {
+        let reading = matches!(&app.mode, Mode::Files(w) if w.places.is_none());
+        let said = if reading { say(lang, "tui.files.reading") } else { say(lang, "tui.files.no_issue") };
+        return vec![Line::from(Span::styled(said, dim()))];
+    };
+    let Some(site) = app.site_of_seat(seat) else { return Vec::new() };
+    let entry = if site.index.is_dir(&site.issues, at) {
+        crate::nav::Entry::Dir { seg: site.index.seg_of(&site.issues, at), at: Some(at) }
+    } else {
+        crate::nav::Entry::Leaf { at }
+    };
+    detail_body(app, Some(Row::Item(seat, entry, crate::nav::Twig::default())), width)
+}
+
+/// The detail's frame — the list's: a border and the cursor's gutter on both sides.
+fn detail_frame(focused: bool) -> Block<'static> {
+    pane_frame(focused).padding(Padding::horizontal(left_gutter() as u16))
+}
+
+/// Where the side panes stand in `at` — **one rule for the file window's right pane and the list's diff pane**
+/// (moai-ffk9.211, moai-ffk9.cij call it):
+///
+/// - **The detail comes first**: above, or on the left, of the diff
+/// - **The axis follows the detail's place** (`SPC o d`): placed top or bottom, the two stack; left or right, they
+///   stand side by side
+/// - Alone, either takes `at` whole
+/// - **When both cannot stand, the detail stays and the diff folds** (the person's answer) — `folded` says so, and the
+///   toggles keep their values. The floors are the detail's ([`DETAIL_MIN_V`]·[`DETAIL_MIN_H`]) for each
+///
+/// `share` is the detail's percentage of the two (half when `None`), pulled in so both floors hold.
+pub(super) fn side_split(
+    at: Rect,
+    place: super::view::DetailAt,
+    detail: bool,
+    diff: bool,
+    share: Option<u16>,
+) -> Sides {
+    match (detail, diff) {
+        (false, false) => Sides::default(),
+        (true, false) => Sides { detail: Some(at), ..Sides::default() },
+        (false, true) => Sides { diff: Some(at), ..Sides::default() },
+        (true, true) => {
+            let vertical = place.vertical();
+            let (len, least) = if vertical { (at.height, DETAIL_MIN_V) } else { (at.width, DETAIL_MIN_H) };
+            if len < 2 * least {
+                return Sides { detail: Some(at), diff: None, folded: true };
+            }
+            let floor = (u32::from(least) * 100).div_ceil(u32::from(len)).min(50) as u16;
+            let share = share.unwrap_or(50).clamp(floor, 100 - floor);
+            let hold = [Constraint::Percentage(share), Constraint::Min(least)];
+            let [a, b] = if vertical { Layout::vertical(hold).areas(at) } else { Layout::horizontal(hold).areas(at) };
+            Sides { detail: Some(a), diff: Some(b), folded: false }
+        }
+    }
+}
+
+/// [`side_split`]'s answer.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(super) struct Sides {
+    pub detail: Option<Rect>,
+    pub diff: Option<Rect>,
+    pub folded: bool,
+}
+
+/// The file window (moai-ffk9.rpf). It covers the list and the detail whole, as [`wiki_window`] does — the tree on the
+/// left, what the cursor stands on at the right. The share (`share`) is the window's own line (`App::files_width`);
+/// until it is dragged it follows the list's, and it splits the way the wiki window does, so the drag
+/// (`mouse.rs`) solves it back with the same [`share_for`].
+///
+/// **The right side is the window's toggles' (moai-ffk9.211)**: the file's text with both off, its diff (`SPC v D`), the
+/// checkout's issue (`SPC v d`), or both — split by [`side_split`].
+///
+/// Gives the panes' places — the mouse hits them on the next event (`mouse::Drawn::files`).
+fn files_window(
+    f: &mut Frame,
+    w: &mut super::files::Window,
+    at: Rect,
+    prep: FilesPrep,
+    lang: Lang,
+) -> super::mouse::FilesAt {
+    f.render_widget(Clear, at);
+    let FilesPrep { tree: tree_at, info: info_at, sides, folded, detail, titles, layout } = prep;
+    w.folded = folded;
     if info_at.is_none() {
         w.focus = super::files::Side::Tree;
     }
+    w.keep_focus();
     let rows = files_tree(f, w, tree_at, lang);
     if let Some(info_at) = info_at {
-        match w.current() {
-            Some(super::files::Row::Entry { entry, .. }) if super::files::reads(entry) => {
-                let size = entry.size;
-                files_content(f, w, info_at, size, lang);
+        if sides == Sides::default() {
+            match w.current() {
+                Some(super::files::Row::Entry { entry, .. }) if super::files::reads(entry) => {
+                    let size = entry.size;
+                    files_content(f, w, info_at, size, lang);
+                }
+                _ => files_info(f, w, info_at, lang),
             }
-            _ => files_info(f, w, info_at, lang),
+        }
+        if let Some(r) = sides.detail {
+            files_detail_pane(f, w, r, detail.unwrap_or_default(), lang);
+        }
+        if let Some(r) = sides.diff {
+            let focused = w.focus == super::files::Side::Info;
+            let hint = format!(" ({})", keys::said(w.keys.files, keys::Files::FocusNext));
+            diff_pane(f, &mut w.diff, r, focused, layout, &hint, lang);
         }
     }
-    super::mouse::FilesAt { tree: tree_at, rows, top: w.list.offset(), info: info_at }
+    if w.pick.is_some() {
+        files_pick(f, w, at, &titles, lang);
+    }
+    super::mouse::FilesAt {
+        tree: tree_at,
+        rows,
+        top: w.list.offset(),
+        info: info_at,
+        detail: sides.detail.filter(|_| info_at.is_some()),
+        diff: sides.diff.filter(|_| info_at.is_some()),
+    }
+}
+
+/// The file window's detail (moai-ffk9.211) — the lines [`files_detail`] read, scrolled by the window's own scroll.
+fn files_detail_pane(f: &mut Frame, w: &mut super::files::Window, at: Rect, lines: Vec<Line<'static>>, lang: Lang) {
+    let focused = w.focus == super::files::Side::Detail;
+    let block = detail_frame(focused);
+    let inner = block.inner(at);
+    w.detail.fit(inner.height as usize, lines.len());
+    let inner_w = at.width.saturating_sub(2) as usize;
+    let title = format!(" {} ", say(lang, "tui.files.detail_title"));
+    f.render_widget(block.title(clip(&title, inner_w)), at);
+    let hint = if focused { String::new() } else { format!(" ({})", keys::said(w.keys.files, keys::Files::FocusNext)) };
+    scroll_mark(f, &w.detail, at, &hint, focused, lang);
+    let lines: Vec<Line> = lines.into_iter().map(|l| fit(l, inner.width as usize)).collect();
+    let top = u16::try_from(w.detail.offset()).unwrap_or(u16::MAX);
+    f.render_widget(Paragraph::new(lines).scroll((top, 0)), inner);
+}
+
+/// The checkout picker over the file window (`SPC v w`, moai-ffk9.211) — the mockup's box: each checkout's mark (`⎇`
+/// for a linked worktree), its key, its branch and its issue's title, the milestone worktree with the word, and the
+/// one standing now with a word too. The main checkout is the first row.
+fn files_pick(f: &mut Frame, w: &mut super::files::Window, at: Rect, titles: &[Option<String>], lang: Lang) {
+    let width = at.width.min(96);
+    let n = w.places.as_ref().map_or(1, |p| p.checkouts.len().max(1));
+    let height = (n as u16 + 2).min(at.height);
+    let area =
+        Rect { x: at.x + (at.width - width) / 2, y: at.y + (at.height.saturating_sub(height)) / 3, width, height };
+    f.render_widget(Clear, area);
+    let title = format!(" {} ", say(lang, "tui.files.pick_title"));
+    let block = pane_frame(true).title(clip(&title, width.saturating_sub(2) as usize));
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+    let room = (inner.width as usize).saturating_sub(crate::text::width(CURSOR));
+    let Some(places) = w.places.as_ref() else {
+        let said = Line::from(Span::styled(say(lang, "tui.files.reading"), dim()));
+        f.render_widget(Paragraph::new(fit(said, inner.width as usize)), inner);
+        return;
+    };
+    let now = places.checkouts.iter().position(|c| c.path == w.checkout.path);
+    let keyw = places.checkouts.iter().map(|c| crate::text::width(&safe_name(&c.key))).max().unwrap_or(1).min(28);
+    let branchw = places.checkouts.iter().map(|c| crate::text::width(&safe_name(&c.branch))).max().unwrap_or(1).min(28);
+    let items: Vec<ListItem> = places
+        .checkouts
+        .iter()
+        .enumerate()
+        .map(|(i, c)| {
+            let mark = if c.main { "  " } else { "⎇ " };
+            let key = if c.main { say(lang, "tui.files.pick_main").to_string() } else { safe_name(&c.key) };
+            let mut spans = vec![
+                Span::raw(mark),
+                Span::styled(format!("{:<keyw$}  ", clip(&key, keyw)), bold()),
+                Span::styled(format!("{:<branchw$}  ", clip(&safe_name(&c.branch), branchw)), branch()),
+            ];
+            if c.milestone.is_some() {
+                spans.push(Span::styled(format!("{} ", say(lang, "tui.files.pick_milestone")), dim()));
+            }
+            if let Some(Some(t)) = titles.get(i) {
+                spans.push(Span::raw(safe_name(&crate::text::one_line(t))));
+            }
+            if Some(i) == now {
+                spans.push(Span::styled(format!("  {}", say(lang, "tui.files.pick_now")), dim()));
+            }
+            ListItem::new(fit(Line::from(spans), room))
+        })
+        .collect();
+    let Some(p) = w.pick.as_mut() else { return };
+    p.cursor = p.cursor.min(places.checkouts.len().saturating_sub(1));
+    p.list.fit(inner.height as usize, places.checkouts.len());
+    p.list.reveal(p.cursor);
+    let top = p.list.offset();
+    let items: Vec<ListItem> = items.into_iter().skip(top).collect();
+    let mut state = ListState::default().with_selected(Some(p.cursor - top));
+    let look = Style::new().add_modifier(Modifier::REVERSED);
+    f.render_stateful_widget(
+        List::new(items).highlight_style(look).highlight_symbol(CURSOR).highlight_spacing(HighlightSpacing::Always),
+        inner,
+        &mut state,
+    );
 }
 
 /// A name from the disk, safe to draw: a control character becomes `?`, so the name never reaches the terminal raw
@@ -1978,8 +2184,9 @@ fn files_tree(f: &mut Frame, w: &mut super::files::Window, at: Rect, lang: Lang)
     let place = if w.here == "." { format!("{project}/") } else { format!("{project}/{}/", safe_name(&w.here)) };
     let head = format!(" {} · ", say(lang, "tui.files.title"));
     // **The search stands in the title and gets its room before the place** (the wiki window's reason): without it
-    // nothing on screen says why folders opened and rows are marked.
-    let found = files_found_said(w, lang);
+    // nothing on screen says why folders opened and rows are marked. So do the checkout's branch and the changed files
+    // only with their count (moai-ffk9.211) — they say which tree this is.
+    let found = format!("{}{}", files_checkout_said(w, lang), files_found_said(w, lang));
     let room_for_place = inner_w.saturating_sub(crate::text::width(&head) + crate::text::width(&found) + 1);
     let title = format!("{head}{}{found} ", crate::text::clip_front(&place, room_for_place));
     let block = pane_frame(focused).title(clip(&title, inner_w));
@@ -2001,14 +2208,15 @@ fn files_tree(f: &mut Frame, w: &mut super::files::Window, at: Rect, lang: Lang)
     }
     let top = w.list.offset();
     let room = (rows_at.width as usize).saturating_sub(crate::text::width(CURSOR));
-    let searching = w.query().is_some();
+    let changed = w.changed_only();
+    let searching = w.query().is_some() && !changed;
     let items: Vec<ListItem> = w
         .rows()
         .iter()
         .skip(top)
         .take(rows_at.height as usize)
         .map(|r| {
-            let line = files_row(r, lang);
+            let line = if changed { files_changed_row(r, lang) } else { files_row(r, lang) };
             ListItem::new(fit(if searching { files_found_row(w, r, line) } else { line }, room))
         })
         .collect();
@@ -2023,15 +2231,82 @@ fn files_tree(f: &mut Frame, w: &mut super::files::Window, at: Rect, lang: Lang)
     let hint = if focused { String::new() } else { format!(" ({})", keys::said(w.keys.files, keys::Files::FocusNext)) };
     scroll_mark(f, &w.list, at, &hint, focused, lang);
     if n == 0 && rows_at.height > 0 {
-        let said = Line::from(Span::styled(say(lang, "tui.files.empty"), dim()));
+        let empty = if changed { say(lang, "tui.files.no_changes") } else { say(lang, "tui.files.empty") };
+        let said = Line::from(Span::styled(empty, dim()));
         f.render_widget(Paragraph::new(fit(said, room)), Rect { x: rows_at.x + left_gutter() as u16, ..rows_at });
     }
     rows_at
 }
 
+/// The checkout in the tree's title (moai-ffk9.211): ` · ⎇ branch`, and with the changed files only
+/// ` · changed only 14` — `14 of 6000` when the list stopped at the read layer's 5,000.
+fn files_checkout_said(w: &super::files::Window, lang: Lang) -> String {
+    use super::files::Listing;
+    let mut said = String::new();
+    if !w.checkout.branch.is_empty() {
+        said.push_str(&format!(" · {} {}", style::BRANCH_GLYPH, safe_name(&crate::text::one_line(&w.checkout.branch))));
+    }
+    if w.changed_only() {
+        let count = match w.listing() {
+            Listing::Read(c) if c.truncated => format!(
+                " {}",
+                fill(
+                    say(lang, "tui.files.found_more"),
+                    &[("shown", &c.files.len().to_string()), ("n", &c.total.to_string())]
+                )
+            ),
+            Listing::Read(c) => format!(" {}", c.files.len()),
+            _ => String::new(),
+        };
+        said.push_str(&format!(" · {}{count}", say(lang, "tui.files.changed_only")));
+    }
+    said
+}
+
+/// A row of the changed-files tree (moai-ffk9.211): the change's letter at the head (`M`·`A`·`D`·`R`·`?`, as `moai
+/// diff --stat` prints it) and `+N −M` after the name — **the letter says the kind without the colour**. A deleted
+/// file stands dimmed; folders have a blank head and stand open.
+fn files_changed_row(r: &super::files::Row, lang: Lang) -> Line<'static> {
+    use super::files::Row;
+    let Row::Entry { change: Some(c), depth, entry, .. } = r else {
+        let mut line = files_row(r, lang);
+        line.spans.insert(0, Span::raw("  "));
+        return line;
+    };
+    let look = match c.status {
+        crate::vcs::Status::Added | crate::vcs::Status::Untracked => from_anstyle(style::DIFF_ADD),
+        crate::vcs::Status::Deleted => from_anstyle(style::DIFF_DEL),
+        _ => from_anstyle(style::WARN),
+    };
+    let gone = c.status == crate::vcs::Status::Deleted;
+    let name = safe_name(&entry.name);
+    let name_look = if gone { dim() } else { from_anstyle(style::file_style(&entry.name)) };
+    let mut spans = vec![
+        Span::styled(format!("{} ", super::diff::letter(c.status)), look),
+        Span::raw(format!("{}  ", "  ".repeat(*depth))),
+        Span::styled(name, name_look),
+    ];
+    if let Some(old) = &c.old_path {
+        spans.push(Span::styled(format!(" ← {}", safe_name(old)), dim()));
+    }
+    if c.binary {
+        spans.push(Span::styled(format!("  {}", say(lang, "tui.files.binary")), dim()));
+    } else if c.adds.is_some() || c.dels.is_some() {
+        spans.push(Span::raw(" "));
+        spans.push(Span::styled(format!("+{}", c.adds.unwrap_or(0)), from_anstyle(style::DIFF_ADD)));
+        spans.push(Span::raw(" "));
+        spans.push(Span::styled(format!("−{}", c.dels.unwrap_or(0)), from_anstyle(style::DIFF_DEL)));
+    }
+    Line::from(spans)
+}
+
 /// The search in the tree's title (moai-ffk9.rid): ` · /query 3 found`, past the limit `500 of 1234`, while the index
 /// is walked `indexing 1200`, and a word when git named nothing to skip or the walk could not start.
 fn files_found_said(w: &super::files::Window, lang: Lang) -> String {
+    // The search waits under the changed tree — it says nothing there.
+    if w.changed_only() {
+        return String::new();
+    }
     // The field open with nothing typed yet still tells how far the index got.
     let mut said = match w.query() {
         Some(q) => {
@@ -2227,7 +2502,6 @@ fn files_content(f: &mut Frame, w: &mut super::files::Window, at: Rect, size: u6
 /// the scopes, whose they are, the file count and the layout; a pane narrower than [`super::diff::SPLIT_MIN`] draws
 /// unified whatever the person chose, and says so. Only the rows on screen are cut ([`super::diff::render`]).
 /// `hint` follows the scroll mark when the pane has no focus — the key that brings it there.
-#[allow(dead_code)] // The file window's pane (moai-ffk9.211) and the list's (moai-ffk9.cij) call it.
 pub(super) fn diff_pane(
     f: &mut Frame,
     v: &mut super::diff::View,
@@ -2321,7 +2595,17 @@ fn files_keys(f: &mut Frame, w: &super::files::Window, at: Rect, lang: Lang) {
         let help = prompt_help(say(lang, "tui.prompt.hang"), lang);
         return prompt(f, at, say(lang, "tui.files.search"), &t.input, none, &help);
     }
-    let on_info = w.focus == Side::Info;
+    // **The checkout picker's keys while it is open** (moai-ffk9.211) — the window's moves, `Enter` picks, `Esc` closes.
+    if w.pick.is_some() && w.chord.held().is_empty() {
+        let moves = labels(w.keys.files, &[F::Step(Move::LineDown), F::Step(Move::LineUp)]);
+        let optional = vec![key(&moves, say(lang, "tui.act.move"))];
+        let keep = vec![
+            key(&label(w.keys.files, F::Enter), say(lang, "tui.files.pick_enter")),
+            key(&label(w.keys.files, F::Close), say(lang, "tui.act.close")),
+        ];
+        return bar(f, at, optional, keep);
+    }
+    let on_info = w.focus != Side::Tree;
     if !w.chord.held().is_empty() {
         let next = keys::next_keys(w.keys.files, w.chord.held())
             .into_iter()
@@ -2343,7 +2627,7 @@ fn files_keys(f: &mut Frame, w: &super::files::Window, at: Rect, lang: Lang) {
         }
     }
     optional.push(key(&moves, F::Step(Move::LineDown).what(on_info, lang)));
-    if on_info {
+    if w.focus == Side::Info {
         let pan = labels(w.keys.files, &[F::Pan(keys::Side::Left), F::Pan(keys::Side::Right)]);
         optional.push(key(&pan, F::Pan(keys::Side::Left).what(on_info, lang)));
     }
@@ -4740,57 +5024,7 @@ fn detail(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) {
     // 줄을 먼저 세야 한다. 자리 계산은 그래도 블록에 맡긴다.
     let block = frame(app, Pane::Detail).padding(Padding::horizontal(left_gutter() as u16));
     let inner = block.inner(at);
-
-    // **본문은 그리기 전에 편다**(moai-fauw) — 아래의 [`about`] 은 `&App` 만 빌려 제자리에
-    // 들 수가 없고, 안 펴 두면 프레임마다 같은 본문을 다시 판다(`markdown::parse` + `layout`).
-    // 아픈 쪽은 유휴가 아니라 `j` 를 누르고 있을 때다: 키 반복마다 다시 그리고, 그때마다 다시
-    // 편다. 재 본 값은 release·100x40 에서 본문 4KB 한 프레임 1.5ms, 50KB 11ms 다.
-    fill_body(app, rows, inner.width as usize);
-    // **걸린 노트 줄도 그리기 전에 편다**(리뷰 moai-wcy8.rbj) — 본문과 같은 까닭이고, 노트는 본문보다 크다.
-    fill_note_hits(app, rows, inner.width as usize);
-    // **Wiki 토막도 그리기 전에 짓는다**(moai-xp7l.vyw) — 위키를 읽고 순위를 매기는 값이라 프레임마다 못 한다.
-    fill_wiki(app, rows);
-    // **이력·작업 기록도 그리기 전에 편다** — 저널은 옆 스레드가 읽고, 편 줄은 본문과 같은 까닭으로 든다.
-    fill_history(app, rows, inner.width as usize);
-
-    let lines = match app.current_of(rows) {
-        // **빈 층은 할 일을 댄다**(moai-r8kl). 등록이 0 인 채 `.moai` 밖에서 띄운 자리다 — "없다"
-        // 만 서면 밖에서 부른 실수가 멀쩡한 빈 목록으로 읽힌다.
-        None if app.on_layer() => {
-            let lang = app.site.lang;
-            let mut out = vec![Line::from(Span::styled(say(lang, "tui.layer.no_projects"), bold())), Line::from("")];
-            let how = fill(say(lang, "tui.layer.how_to_register"), &[("key", &said(app.keys.browse, Browse::Pick))]);
-            out.extend(wrapped(&how, inner.width as usize, dim()));
-            out
-        }
-        None => vec![Line::from(Span::styled(say(app.site.lang, "tui.detail.none"), dim()))],
-        // `..` 은 디렉터리에만 선다(moai-i784) — 뿌리에서 층으로 가던 갈래는 걷었으므로
-        // 이 줄이 가는 데는 한 곳뿐이다.
-        Some(Row::Up) => vec![Line::from(Span::styled(say(app.site.lang, "tui.detail.up"), dim()))],
-        Some(Row::Project(at)) => place_about(app, at, inner.width as usize),
-        // 상세도 **커서가 선 줄의 프로젝트**로 읽는다(moai-eyre).
-        Some(Row::Item(seat, e, _)) => {
-            // 빠진 프로젝트의 줄에는 댈 것이 없다(moai-m59y) — 갈음한 목록의 남의 이슈를
-            // 그 줄의 상세로 내놓지 않는다. 테두리는 그대로 서고 안이 빈다: 그 줄은 다음
-            // 프레임에 사라진다.
-            match app.site_of_seat(seat) {
-                None => Vec::new(),
-                Some(site) => match e.at() {
-                    // 넘친 첨자는 [`about`] 이 제 자리에서 비운다 — 막음을 두 벌로 적지 않는다.
-                    Some(idx) => about(app, site, idx, &e, inner.width as usize),
-                    // 바구니는 제 줄이 없다. 밑에 무엇이 있는지만 센다.
-                    None => {
-                        let mut out = vec![
-                            Line::from(Span::styled(site.index.label(&site.issues, &e, site.lang), bold())),
-                            Line::from(""),
-                        ];
-                        out.extend(rollup(app, site, &e, inner.width as usize));
-                        out
-                    }
-                },
-            }
-        }
-    };
+    let lines = detail_body(app, app.current_of(rows), inner.width as usize);
 
     // **줄 수를 우리가 안다.** `Wrap` 을 켜면 위젯이 줄을 더 늘려 우리가 센
     // 수와 화면의 수가 어긋나고, 그러면 굴릴 것이 남았다는 표시도 굴린 자리도
@@ -4821,6 +5055,63 @@ fn detail(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) {
     // 줄 수가 u16 을 넘는 본문이면 거기서 멈춘다 — 넘겨 접으면 첫 줄로 튄다.
     let top = u16::try_from(app.detail.offset()).unwrap_or(u16::MAX);
     f.render_widget(Paragraph::new(lines).scroll((top, 0)), inner);
+}
+
+/// The detail's lines for one row — the list's cursor row, or the row the file window's detail stands on
+/// (moai-ffk9.211). **Which row is an argument**, so both draw the same lines from the same caches; the list's detail
+/// is drawn letter for letter as before.
+fn detail_body(app: &mut App, cur: Option<Row>, w: usize) -> Vec<Line<'static>> {
+    let cur = cur.as_ref();
+    // **본문은 그리기 전에 편다**(moai-fauw) — 아래의 [`about`] 은 `&App` 만 빌려 제자리에
+    // 들 수가 없고, 안 펴 두면 프레임마다 같은 본문을 다시 판다(`markdown::parse` + `layout`).
+    // 아픈 쪽은 유휴가 아니라 `j` 를 누르고 있을 때다: 키 반복마다 다시 그리고, 그때마다 다시
+    // 편다. 재 본 값은 release·100x40 에서 본문 4KB 한 프레임 1.5ms, 50KB 11ms 다.
+    fill_body(app, cur, w);
+    // **걸린 노트 줄도 그리기 전에 편다**(리뷰 moai-wcy8.rbj) — 본문과 같은 까닭이고, 노트는 본문보다 크다.
+    fill_note_hits(app, cur, w);
+    // **Wiki 토막도 그리기 전에 짓는다**(moai-xp7l.vyw) — 위키를 읽고 순위를 매기는 값이라 프레임마다 못 한다.
+    fill_wiki(app, cur);
+    // **이력·작업 기록도 그리기 전에 편다** — 저널은 옆 스레드가 읽고, 편 줄은 본문과 같은 까닭으로 든다.
+    fill_history(app, cur, w);
+
+    match cur.cloned() {
+        // **빈 층은 할 일을 댄다**(moai-r8kl). 등록이 0 인 채 `.moai` 밖에서 띄운 자리다 — "없다"
+        // 만 서면 밖에서 부른 실수가 멀쩡한 빈 목록으로 읽힌다.
+        None if app.on_layer() => {
+            let lang = app.site.lang;
+            let mut out = vec![Line::from(Span::styled(say(lang, "tui.layer.no_projects"), bold())), Line::from("")];
+            let how = fill(say(lang, "tui.layer.how_to_register"), &[("key", &said(app.keys.browse, Browse::Pick))]);
+            out.extend(wrapped(&how, w, dim()));
+            out
+        }
+        None => vec![Line::from(Span::styled(say(app.site.lang, "tui.detail.none"), dim()))],
+        // `..` 은 디렉터리에만 선다(moai-i784) — 뿌리에서 층으로 가던 갈래는 걷었으므로
+        // 이 줄이 가는 데는 한 곳뿐이다.
+        Some(Row::Up) => vec![Line::from(Span::styled(say(app.site.lang, "tui.detail.up"), dim()))],
+        Some(Row::Project(at)) => place_about(app, at, w),
+        // 상세도 **커서가 선 줄의 프로젝트**로 읽는다(moai-eyre).
+        Some(Row::Item(seat, e, _)) => {
+            // 빠진 프로젝트의 줄에는 댈 것이 없다(moai-m59y) — 갈음한 목록의 남의 이슈를
+            // 그 줄의 상세로 내놓지 않는다. 테두리는 그대로 서고 안이 빈다: 그 줄은 다음
+            // 프레임에 사라진다.
+            match app.site_of_seat(seat) {
+                None => Vec::new(),
+                Some(site) => match e.at() {
+                    // 넘친 첨자는 [`about`] 이 제 자리에서 비운다 — 막음을 두 벌로 적지 않는다.
+                    Some(idx) => about(app, site, idx, &e, w),
+                    // 바구니는 제 줄이 없다. 밑에 무엇이 있는지만 센다.
+                    None => {
+                        let mut out = vec![
+                            Line::from(Span::styled(site.index.label(&site.issues, &e, site.lang), bold())),
+                            Line::from(""),
+                        ];
+                        out.extend(rollup(app, site, &e, w));
+                        out
+                    }
+                },
+            }
+        }
+    }
 }
 
 /// 빛줄기가 지나간 뒤 다시 들어오기까지 쉬는 칸 수. 쉬지 않으면 띠가 끝에 닿자마자 앞에서
@@ -5543,9 +5834,9 @@ fn hung(stamp: &str, lead: usize, text: &str, w: usize) -> Vec<Line<'static>> {
 /// **다시 읽을 때는 지난 표식의 자리를 잰다** — 디렉터리의 표식이 새 저널 파일을 알아챈다. `App::follow` 가 노트의
 /// 저널을 재는 것과 같은 자다. 저널 디렉터리를 다시 훑는 것(`Repo::journal_marks`)은 무언가 움직였을 때뿐이다 —
 /// 프레임마다 훑으면 물레가 도는 동안 120ms 마다 디렉터리를 읽고 이름마다 자리를 푼다.
-fn fill_history(app: &mut App, rows: &[Row], w: usize) {
+fn fill_history(app: &mut App, cur: Option<&Row>, w: usize) {
     app.history.poll();
-    let Some(Row::Item(seat, e, _)) = app.current_of(rows) else { return };
+    let Some(Row::Item(seat, e, _)) = cur.cloned() else { return };
     let Some(site) = app.site_of_seat(seat) else { return };
     let Some(i) = e.at().and_then(|at| site.issues.get(at)) else { return };
     let Some(repo) = site.repo.as_ref() else { return };
@@ -5638,8 +5929,8 @@ struct WikiLine {
 
 /// 커서가 선 줄의 [`WikiAbout`] 를 짓는다 — 든 것이 그 줄에 맞으면([`WikiAbout::fits`]) 그대로다. 위키는 체크아웃마다
 /// 한 번 읽는다([`App::wiki_pages`]). 못 읽은 위키는 빈 토막이다 — CLI 상세의 사람 화면과 같다.
-fn fill_wiki(app: &mut App, rows: &[Row]) {
-    let Some(Row::Item(seat, e, _)) = app.current_of(rows) else { return };
+fn fill_wiki(app: &mut App, cur: Option<&Row>) {
+    let Some(Row::Item(seat, e, _)) = cur.cloned() else { return };
     let Some(at) = e.at() else { return };
     // 먼저 위키를 들인다 — 읽은 페이지를 `App` 에 넣는 동안은 줄을 빌려 둘 수 없다.
     let read = {
@@ -5759,8 +6050,8 @@ impl Body {
 /// **`RefCell` 로 숨기지 않는다**(moai-fauw 가 정한 자리) — 다시 펴는 때가 코드에서 보여야
 /// 한다. 커서가 선 줄이 본문 있는 이슈가 아니면 든 것을 **버린다**: 상세에 안 서는 본문을
 /// 쥐고 있을 까닭이 없고, 버려도 다음에 그 줄로 돌아가면 한 프레임에 다시 편다.
-fn fill_body(app: &mut App, rows: &[Row], w: usize) {
-    let seat_at = match app.current_of(rows) {
+fn fill_body(app: &mut App, cur: Option<&Row>, w: usize) {
+    let seat_at = match cur.cloned() {
         Some(Row::Item(seat, e, _)) => e.at().map(|at| (seat, at)),
         // `..` 과 프로젝트 머리줄에는 본문이 없다.
         Some(Row::Up | Row::Project(_)) | None => None,
@@ -5840,8 +6131,8 @@ fn note_hit_lines(texts: &[String], q: &str, w: usize) -> Vec<Line<'static>> {
 
 /// 상세에 설 "걸린 노트" 절을 **그리기 전에** 펴 둔다([`NoteHits`]) — [`fill_body`] 와 같은 자리, 같은
 /// 까닭이다. 검색이 노트를 안 보거나 커서가 이슈 줄에 없으면 든 것을 버린다.
-fn fill_note_hits(app: &mut App, rows: &[Row], w: usize) {
-    let seat_at = match app.current_of(rows) {
+fn fill_note_hits(app: &mut App, cur: Option<&Row>, w: usize) {
+    let seat_at = match cur.cloned() {
         Some(Row::Item(seat, e, _)) => e.at().map(|at| (seat, at)),
         Some(Row::Up | Row::Project(_)) | None => None,
     };
@@ -7363,6 +7654,10 @@ pub(super) mod tests {
         super::files_row(r, Lang::Ko).spans.iter().map(|s| s.content.as_ref()).collect()
     }
 
+    pub(in crate::tui) fn files_changed_row_text(r: &super::super::files::Row) -> String {
+        super::files_changed_row(r, Lang::Ko).spans.iter().map(|s| s.content.as_ref()).collect()
+    }
+
     pub(in crate::tui) fn render(app: &mut App, w: u16, h: u16) -> Vec<String> {
         lines_of(&render_buf(app, w, h))
     }
@@ -7758,7 +8053,8 @@ pub(super) mod tests {
         bytes.push_str(&line("둘째 노트", "2026-10-28T10:01:00Z"));
         std::fs::write(&path, &bytes).unwrap();
         // 다시 읽기를 띄우는 그 프레임 — 든 이력이 그대로 선다.
-        fill_history(&mut a, &rows, 120);
+        let cur = a.current_of(&rows);
+        fill_history(&mut a, cur.as_ref(), 120);
         assert!(a.history.loading(), "the write did not start a fresh read");
         let text: String =
             about(&a, &a.site, idx, &e, 120).iter().flat_map(|l| &l.spans).map(|s| s.content.as_ref()).collect();
@@ -7833,7 +8129,10 @@ pub(super) mod tests {
     fn wait_history(a: &mut App, rows: &[Row]) {
         let until = std::time::Instant::now() + std::time::Duration::from_secs(5);
         loop {
-            fill_history(a, rows, 120);
+            {
+                let cur = a.current_of(rows);
+                fill_history(a, cur.as_ref(), 120)
+            };
             if !a.history.loading() {
                 return;
             }

@@ -51,13 +51,15 @@
 //! so a hand's `l` is not stuck behind five hundred reads. Ending the search folds back what it opened and leaves
 //! what the hand opened.
 
+use super::diff;
 use super::input::Input;
 use super::keys::{self, Browse, LEADER, Lookup, PROMPT, Prompt, Side as Toward};
 use super::scroll::{self, Move, Scroll};
 use super::{App, Mode, Row as ListRow, Seat, menu};
 use crate::files::{self, Entry, Jail, Kind, Why};
-use crate::i18n::{fill, say};
+use crate::i18n::{Lang, fill, say};
 use crate::report::changes::Checkout;
+use crate::vcs;
 use ratatui::crossterm::event::KeyEvent;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::ops::Range;
@@ -104,6 +106,39 @@ type StampFn = dyn Fn(&Jail, &str) -> Option<files::Stamp> + Send + Sync;
 type PaintFn = dyn Fn(&str, &str) -> Option<Vec<Vec<crate::highlight::Span>>> + Send + Sync;
 type WalkFn =
     dyn Fn(&Jail, &str, &[String], &mut dyn FnMut(&[String]) -> bool) -> Result<files::Walked, Why> + Send + Sync;
+type PlacesFn = dyn Fn(&Path) -> Places + Send + Sync;
+type ChangesFn = dyn Fn(&Checkout, Lang) -> Result<vcs::Changes, String> + Send + Sync;
+
+/// How long the changed-files list may take — git's budget, as the diff pane's ([`diff::BUDGET`]).
+const CHANGES_BUDGET: Duration = diff::BUDGET;
+
+/// The checkouts the picker offers (moai-ffk9.211) and the worktree marks the detail's issue is found by
+/// (`report::changes::issue_of`) — read on a thread: both read git's files.
+#[derive(Debug, Clone, Default)]
+pub struct Places {
+    /// `worktree::checkouts` — the main checkout first, then the linked ones, the milestone worktrees among them.
+    /// **Only these can be picked**: there is no way to hand the window a path of one's own.
+    pub checkouts: Vec<Checkout>,
+    pub workplaces: Vec<crate::report::Workplace>,
+    /// Which of them the window was opened on — measured on the thread (the paths are compared resolved).
+    pub here: Option<usize>,
+}
+
+/// Read the places for the checkout at `here`: its main checkout's list, and which one `here` is.
+fn places(here: &Path) -> Places {
+    let checkouts = crate::worktree::checkouts(here);
+    let real = crate::path::canonical(here).ok();
+    let at = checkouts.iter().position(|c| Some(&c.path) == real.as_ref() || c.path == here);
+    Places { workplaces: crate::worktree::workplaces(here, true), checkouts, here: at }
+}
+
+/// The changed files of a checkout's whole branch — fork point to the working tree, untracked ones with it. The
+/// main checkout has no fork point and gives what is not committed (`vcs::Scope::Whole`).
+fn changes(c: &Checkout, lang: Lang) -> Result<vcs::Changes, String> {
+    let root = c.path.as_path();
+    let Some(git) = vcs::detect(root) else { return Err(say(lang, "tui.diff.why.not_a_repo").to_string()) };
+    git.changes(root, &vcs::Scope::Whole, Some(CHANGES_BUDGET)).map_err(|e| diff::told(root, lang, e).said)
+}
 
 /// What the window reads with — the real disk, or a stand-in a test puts in (a slow reader, a failing git).
 #[derive(Clone)]
@@ -114,6 +149,10 @@ pub struct Disk {
     stamp: Arc<StampFn>,
     paint: Arc<PaintFn>,
     walk: Arc<WalkFn>,
+    places: Arc<PlacesFn>,
+    changes: Arc<ChangesFn>,
+    diff_read: Arc<diff::ReadFn>,
+    diff_paint: Arc<diff::PaintFn>,
 }
 
 impl Default for Disk {
@@ -127,6 +166,10 @@ impl Default for Disk {
             walk: Arc::new(|jail: &Jail, dir: &str, skip: &[String], take: &mut dyn FnMut(&[String]) -> bool| {
                 files::walk(jail, dir, skip, take)
             }),
+            places: Arc::new(places),
+            changes: Arc::new(changes),
+            diff_read: Arc::new(diff::read),
+            diff_paint: Arc::new(crate::highlight::diff),
         }
     }
 }
@@ -144,7 +187,50 @@ impl Disk {
         list: impl Fn(&Jail, &str) -> Result<files::Listed, Why> + Send + Sync + 'static,
         ignored: impl Fn(&Path) -> Option<Vec<String>> + Send + Sync + 'static,
     ) -> Disk {
-        Disk { list: Arc::new(list), ignored: Arc::new(ignored), ..Disk::default() }
+        // No git behind a test's checkout: it is the only one, and nothing in it changed — the tests that read either
+        // put their own in ([`Disk::placing`], [`Disk::changing`]).
+        let places = |root: &Path| Places {
+            checkouts: vec![Checkout {
+                key: ".".into(),
+                path: root.to_path_buf(),
+                branch: "main".into(),
+                main: true,
+                milestone: None,
+            }],
+            workplaces: Vec::new(),
+            here: Some(0),
+        };
+        Disk {
+            list: Arc::new(list),
+            ignored: Arc::new(ignored),
+            places: Arc::new(places),
+            changes: Arc::new(|_: &Checkout, _: Lang| Ok(vcs::Changes::default())),
+            ..Disk::default()
+        }
+    }
+
+    /// The same disk with the checkout list replaced.
+    pub(super) fn placing(self, places: impl Fn(&Path) -> Places + Send + Sync + 'static) -> Disk {
+        Disk { places: Arc::new(places), ..self }
+    }
+
+    /// The same disk with the changed-files list replaced — a test slows it down or names what changed.
+    pub(super) fn changing(
+        self,
+        changes: impl Fn(&Checkout, Lang) -> Result<vcs::Changes, String> + Send + Sync + 'static,
+    ) -> Disk {
+        Disk { changes: Arc::new(changes), ..self }
+    }
+
+    /// The same disk with the diff pane's reader replaced.
+    pub(super) fn diffing(
+        self,
+        read: impl Fn(&diff::Source, Option<crate::report::changes::Scope>, Option<Duration>, Lang) -> diff::Loaded
+        + Send
+        + Sync
+        + 'static,
+    ) -> Disk {
+        Disk { diff_read: Arc::new(read), diff_paint: Arc::new(|_: &crate::diff::FileDiff| None), ..self }
     }
 
     /// The same disk with its file reader replaced.
@@ -186,8 +272,10 @@ pub enum Side {
     /// The file tree. **The window starts here.**
     #[default]
     Tree,
-    /// The right pane — what the cursor stands on.
+    /// The right pane — what the cursor stands on: the file's text, or its diff while `SPC v D` is on.
     Info,
+    /// The checkout's issue (moai-ffk9.211) — above or left of the diff while both are on.
+    Detail,
 }
 
 /// Why a directory could not be read — kept as the cause, so the row is said in the screen's language when drawn.
@@ -202,6 +290,8 @@ pub enum Trouble {
     NotText,
     /// The system's own words for an I/O error.
     Io(String),
+    /// Git could not list the changed files — its words (moai-ffk9.211).
+    Changes(String),
 }
 
 impl Trouble {
@@ -227,6 +317,7 @@ impl Trouble {
             Trouble::NotDirectory => say(lang, "tui.files.why.not_directory").to_string(),
             Trouble::NotText => say(lang, "tui.files.why.not_text").to_string(),
             Trouble::Io(d) => format!("{} — {d}", say(lang, "tui.files.why.io")),
+            Trouble::Changes(d) => crate::text::one_line(d),
         }
     }
 }
@@ -307,6 +398,18 @@ enum Reply {
         truncated: bool,
         failed: Option<Trouble>,
     },
+    /// The checkouts to pick from (moai-ffk9.211).
+    Places {
+        id: u64,
+        places: Places,
+    },
+    /// The checkout's changed files (moai-ffk9.211).
+    Changes {
+        id: u64,
+        got: Result<vcs::Changes, String>,
+    },
+    /// A read found the checkout's root gone — a worktree removed while the window stood.
+    Gone,
 }
 
 /// One path of the search index, folded on the walker so the loop only compares.
@@ -459,6 +562,8 @@ struct Worker {
     outgoing: Sender<Reply>,
     disk: Disk,
     checkout: Checkout,
+    /// One-off reads — the checkout list, the changed files — each on a thread of its own, reaped as they end.
+    probes: Vec<std::thread::JoinHandle<()>>,
 }
 
 impl Drop for Worker {
@@ -535,6 +640,13 @@ impl Worker {
                 match request {
                     Request::List { path, generation } => {
                         let read = read_dir(&*list, jail.as_ref(), &path);
+                        // A missing folder in a checkout that is itself gone: the window goes back to the main one.
+                        if matches!(read, Read::Failed(Trouble::Missing))
+                            && !at.path.is_dir()
+                            && outgoing.send(Reply::Gone).is_err()
+                        {
+                            return;
+                        }
                         if outgoing.send(Reply::Listed { path, generation, read }).is_err() {
                             return;
                         }
@@ -588,7 +700,24 @@ impl Worker {
             outgoing: walking,
             disk: disk.clone(),
             checkout: checkout.clone(),
+            probes: Vec::new(),
         }
+    }
+
+    /// Read the checkouts to pick from, for the window opened at `here`.
+    fn places(&mut self, id: u64, here: std::path::PathBuf) {
+        let (read, out) = (self.disk.places.clone(), self.outgoing.clone());
+        self.probes.push(std::thread::spawn(move || {
+            let _ = out.send(Reply::Places { id, places: read(&here) });
+        }));
+    }
+
+    /// List the checkout's changed files.
+    fn changes(&mut self, id: u64, lang: Lang) {
+        let (read, out, at) = (self.disk.changes.clone(), self.outgoing.clone(), self.checkout.clone());
+        self.probes.push(std::thread::spawn(move || {
+            let _ = out.send(Reply::Changes { id, got: read(&at, lang) });
+        }));
     }
 
     /// Stop the walk running, if any — its later replies carry an old id and are dropped.
@@ -653,6 +782,15 @@ impl Worker {
                 && let Some(h) = slot.take()
             {
                 rethrow(h);
+            }
+        }
+        // A one-off read ends on its own once it sent; joining raises its panic if it died before.
+        let mut i = 0;
+        while i < self.probes.len() {
+            if self.probes[i].is_finished() {
+                rethrow(self.probes.swap_remove(i));
+            } else {
+                i += 1;
             }
         }
         self.replies.try_recv().ok()
@@ -726,6 +864,8 @@ pub enum Row {
         ignored: bool,
         /// What a link holds, when it could be read.
         link: Option<String>,
+        /// How the file changed — only in the changed-files tree (`SPC v c`, moai-ffk9.211).
+        change: Option<vcs::Change>,
     },
     /// The directory `of` is still being read.
     Loading { depth: usize, of: String },
@@ -925,6 +1065,38 @@ fn admit(found: &mut BTreeSet<(u16, String)>, depth: u16, path: &str) {
     found.insert((depth, path.to_owned()));
 }
 
+/// The changed-files list as the window holds it (moai-ffk9.211).
+#[derive(Debug, Clone)]
+pub enum Listing {
+    Reading,
+    Read(Arc<vcs::Changes>),
+    Failed(String),
+}
+
+/// "Changed files only" — `SPC v c` (moai-ffk9.211). **The tree beneath is left as it was**: the folders the hand
+/// opened, the place stepped into and the search stay in [`Window`] and stand again when it is turned off. The changed
+/// tree is built from the list's paths alone — no folder is read, and a deleted file has none to read.
+#[derive(Debug, Clone)]
+struct Changed {
+    on: bool,
+    /// The list — read when the window opens, when this is turned on and when the checkout is picked. Kept while a
+    /// new read is out, so turning it on again does not blank the tree.
+    list: Listing,
+    /// The read out — a reply of another is dropped.
+    id: u64,
+    /// The cursor and the tree's scroll before it was turned on — turning it off stands there again unless the file
+    /// the cursor stood on in the changed tree stands in the whole one.
+    before: Option<(At, usize)>,
+}
+
+/// The checkout picker — `SPC v w` over the window (moai-ffk9.211). The list is [`Window::places`], read afresh as
+/// the picker opens; until it comes the picker says it is reading.
+#[derive(Debug, Clone, Default)]
+pub struct Pick {
+    pub cursor: usize,
+    pub list: Scroll,
+}
+
 /// What one step of the loop brought.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub(super) struct Polled {
@@ -936,6 +1108,8 @@ pub(super) struct Polled {
     pub painted: bool,
     /// The search index stopped at the read layer's limit after this many entries.
     pub indexed: Option<usize>,
+    /// The checkout was gone and the window went back to the main one — its key, for the notice.
+    pub gone: Option<String>,
 }
 
 /// The window's state.
@@ -976,6 +1150,31 @@ pub struct Window {
     search: Search,
     /// The search field, while it is typed in.
     pub typing: Option<Typing>,
+    // ---- moai-ffk9.211 ----
+    /// What the window reads with — kept to start a worker for another checkout.
+    disk: Disk,
+    lang: Lang,
+    /// Whose issues the detail reads — the project the window opened on (`App::site_of_seat`).
+    pub seat: Seat,
+    /// Where the window was opened — the checkout list is read from there, whichever checkout is picked since.
+    opened_at: std::path::PathBuf,
+    /// The checkouts and the worktree marks — `None` until the first read came.
+    pub places: Option<Places>,
+    /// The checkout list read out, if any.
+    places_id: u64,
+    /// The checkout picker, while open.
+    pub pick: Option<Pick>,
+    changed: Changed,
+    /// The right pane's detail and diff (`SPC v d`·`SPC v D` over the window). **The window's own**: the list's
+    /// detail and diff settings are not touched, nothing is kept in the config, and closing the window forgets them.
+    pub detail_on: bool,
+    pub diff_on: bool,
+    pub diff: diff::View,
+    /// The detail's scroll.
+    pub detail: Scroll,
+    /// Both are on and the right pane is too small for two — the detail stands alone and the diff folds (the
+    /// person's answer). Set by the last frame; the toggles keep their values.
+    pub folded: bool,
 }
 
 impl std::fmt::Debug for Window {
@@ -985,6 +1184,7 @@ impl std::fmt::Debug for Window {
             .field("here", &self.here)
             .field("at", &self.at)
             .field("rows", &self.rows.len())
+            .field("checkout", &self.checkout.key)
             .finish()
     }
 }
@@ -999,8 +1199,17 @@ impl PartialEq for Window {
 impl Eq for Window {}
 
 impl Window {
-    pub(super) fn new(project: String, checkout: Checkout, keys: keys::Keymap, disk: &Disk) -> Window {
+    pub(super) fn new(
+        project: String,
+        checkout: Checkout,
+        keys: keys::Keymap,
+        disk: &Disk,
+        seat: Seat,
+        lang: Lang,
+    ) -> Window {
         let worker = Shared(Arc::new(Mutex::new(Worker::start(&checkout, disk))));
+        let opened_at = checkout.path.clone();
+        let diff = diff::View::with(disk.diff_read.clone(), disk.diff_paint.clone(), lang);
         let mut w = Window {
             project,
             checkout,
@@ -1022,9 +1231,24 @@ impl Window {
             right: Right::default(),
             search: Search::default(),
             typing: None,
+            disk: disk.clone(),
+            lang,
+            seat,
+            opened_at,
+            places: None,
+            places_id: 0,
+            pick: None,
+            changed: Changed { on: false, list: Listing::Reading, id: 0, before: None },
+            detail_on: false,
+            diff_on: false,
+            diff,
+            detail: Scroll::default(),
+            folded: false,
         };
         w.open(".");
         w.rebuild();
+        w.ask_places();
+        w.ask_changes();
         w
     }
 
@@ -1069,7 +1293,10 @@ impl Window {
 
     /// Something is still out: a directory read, the ignored list, a spread.
     pub fn waiting(&self) -> bool {
-        self.spread.is_some()
+        self.places_id != 0
+            || self.changed.id != 0
+            || self.diff.busy()
+            || self.spread.is_some()
             || self.search.index.as_ref().is_some_and(|i| i.walking)
             || self.ignored == Ignored::Waiting
             || self.dirs.values().any(|d| d.read.is_none())
@@ -1080,6 +1307,7 @@ impl Window {
     /// [`Window::rebuild`]). The same file stays as it is, scroll and all; another file stands at its top and left
     /// edge, a kept copy at once, and is asked for.
     fn aim(&mut self) {
+        self.aim_diff();
         let path = match self.current() {
             Some(Row::Entry { path, entry, .. }) if reads(entry) => path.clone(),
             _ => {
@@ -1173,6 +1401,9 @@ impl Window {
     /// Rebuild the rows from the tree and put the cursor back on the row it stood on. When that row went, the
     /// cursor keeps its index — the next row — and takes that row's identity.
     fn rebuild(&mut self) {
+        if self.changed.on {
+            return self.rebuild_changed();
+        }
         let mut rows = Vec::new();
         if self.here != "." {
             rows.push(Row::Up);
@@ -1216,6 +1447,7 @@ impl Window {
                         open,
                         ignored,
                         link: links.get(&e.name).cloned(),
+                        change: None,
                     });
                     if open {
                         self.flatten(&path, depth + 1, ignored, out);
@@ -1249,12 +1481,17 @@ impl Window {
                 let len = self.rows.len();
                 self.move_to(scroll::cursor(m, self.cursor, || len));
             }
+            Side::Info if self.diff_stands() => self.diff.key(keys::Diff::Step(m)),
             Side::Info => self.right.page.go(m),
+            Side::Detail => self.detail.go(m),
         }
     }
 
     /// `H`·`L` — scroll the text sideways by half the pane.
     pub fn pan(&mut self, toward: Toward) {
+        if self.diff_stands() {
+            return self.diff.key(keys::Diff::Pan(toward));
+        }
         let half = (self.right.room / 2).max(1) as isize;
         self.right.pan_by(if toward == Toward::Left { -half } else { half });
     }
@@ -1267,13 +1504,29 @@ impl Window {
             self.list.by(by);
             self.adrift |= self.list.offset() != was;
         }
-        if on == Side::Info {
-            self.right.page.by(by);
+        match on {
+            Side::Info if self.diff_stands() => self.diff.roll(by),
+            Side::Info => self.right.page.by(by),
+            Side::Detail => self.detail.by(by),
+            Side::Tree => {}
+        }
+    }
+
+    /// The sideways wheel over the right pane — the diff's text or the file's.
+    pub(super) fn pan_wheel(&mut self, by: isize) {
+        if self.diff_stands() {
+            self.diff.pan_by(by * diff::PAN_WHEEL as isize);
+        } else {
+            self.right.pan_by(by * PAN_WHEEL as isize);
         }
     }
 
     /// `l` — open the directory under the cursor one level. An open one, a file and `..` do nothing.
     pub fn expand(&mut self) {
+        // The changed tree stands open whole — it has nothing folded and reads no folder.
+        if self.changed.on {
+            return;
+        }
         if let Some(Row::Entry { path, entry, open: false, .. }) = self.current()
             && opens(entry)
         {
@@ -1287,7 +1540,9 @@ impl Window {
     /// directory stepped into). At the top of the checkout's root nothing happens.
     pub fn collapse(&mut self) {
         let Some(row) = self.current() else { return };
-        if let Row::Entry { path, open: true, .. } = row {
+        if let Row::Entry { path, open: true, .. } = row
+            && !self.changed.on
+        {
             let path = path.clone();
             self.close(&path);
             return self.rebuild();
@@ -1308,6 +1563,9 @@ impl Window {
 
     /// `Tab` — open everything below the directory under the cursor, or fold it all back when it is open.
     pub fn spread(&mut self) {
+        if self.changed.on {
+            return;
+        }
         let Some(Row::Entry { path, entry, open, .. }) = self.current() else { return };
         if !opens(entry) {
             return;
@@ -1347,6 +1605,13 @@ impl Window {
     /// go to the right pane on anything else, step out on `..`.
     pub fn enter(&mut self) {
         let Some(row) = self.current() else { return };
+        // The changed tree is not stepped into — its folders all stand open; a file still goes to the right pane.
+        if self.changed.on {
+            if matches!(row, Row::Entry { entry, .. } if !matches!(entry.kind, Kind::Dir)) {
+                self.focus = Side::Info;
+            }
+            return;
+        }
         match row {
             Row::Up => self.leave(),
             Row::Entry { path, entry, .. } if opens(entry) => {
@@ -1369,7 +1634,7 @@ impl Window {
 
     /// `Bksp` — step out one level, the cursor on the directory left. At the checkout's root nothing happens.
     pub fn leave(&mut self) {
-        if self.here == "." {
+        if self.here == "." || self.changed.on {
             return;
         }
         let was = std::mem::take(&mut self.here);
@@ -1385,16 +1650,279 @@ impl Window {
         self.reroot();
     }
 
+    /// The panes that stand, in the order `Ctrl-w w` goes round: the tree, the detail when on, then the file's text or
+    /// its diff — the diff not while it is folded, the text not while the detail stands alone.
+    pub fn panes(&self) -> Vec<Side> {
+        let mut out = vec![Side::Tree];
+        if self.detail_on {
+            out.push(Side::Detail);
+        }
+        if !self.detail_on || (self.diff_on && !self.folded) {
+            out.push(Side::Info);
+        }
+        out
+    }
+
     fn focus_next(&mut self) {
-        self.focus = match self.focus {
-            Side::Tree => Side::Info,
-            Side::Info => Side::Tree,
+        let panes = self.panes();
+        let at = panes.iter().position(|p| *p == self.focus).unwrap_or(0);
+        self.focus = panes[(at + 1) % panes.len()];
+    }
+
+    /// `Ctrl-w h`·`l` — the tree, or the first pane right of it.
+    fn focus_toward(&mut self, toward: Toward) {
+        let panes = self.panes();
+        self.focus = if toward == Toward::Left { Side::Tree } else { panes.get(1).copied().unwrap_or(Side::Tree) };
+    }
+
+    /// A pane that went (a toggle, a fold) does not keep the focus — the tree takes it.
+    pub(super) fn keep_focus(&mut self) {
+        if !self.panes().contains(&self.focus) {
+            self.focus = Side::Tree;
+        }
+    }
+
+    /// Whether the right pane shows the diff now — on, and not folded under the detail.
+    pub fn diff_stands(&self) -> bool {
+        self.diff_on && !self.folded
+    }
+
+    // ---- the checkout, the changed files, the detail and the diff (moai-ffk9.211) ----
+
+    /// Read the checkout list afresh — at the window's opening and as the picker opens.
+    fn ask_places(&mut self) {
+        let id = self.next_generation();
+        self.places_id = id;
+        let here = self.opened_at.clone();
+        self.worker.with(|w| w.places(id, here));
+    }
+
+    /// List the checkout's changed files afresh — the list on screen stays while it reads.
+    fn ask_changes(&mut self) {
+        let id = self.next_generation();
+        self.changed.id = id;
+        let lang = self.lang;
+        self.worker.with(|w| w.changes(id, lang));
+    }
+
+    /// The diff pane follows the cursor: a file's changes, a folder's (every changed file below it), nothing on `..`
+    /// or a note row. Off, it holds nothing and reads nothing.
+    fn aim_diff(&mut self) {
+        if !self.diff_on {
+            return;
+        }
+        let path = match self.current() {
+            Some(Row::Entry { path, entry, .. }) if matches!(entry.kind, Kind::Dir) => Some(format!("{path}/")),
+            Some(Row::Entry { path, .. }) => Some(path.clone()),
+            _ => None,
         };
+        let source = path.map(|path| diff::Source::Checkout { checkout: self.checkout.clone(), path: Some(path) });
+        self.diff.show(source);
+    }
+
+    /// `SPC v D` over the window.
+    pub fn toggle_diff(&mut self) {
+        self.diff_on = !self.diff_on;
+        if self.diff_on {
+            self.aim_diff();
+        } else {
+            self.diff.close();
+        }
+        self.keep_focus();
+    }
+
+    /// `SPC v d` over the window.
+    pub fn toggle_detail(&mut self) {
+        self.detail_on = !self.detail_on;
+        self.detail.rewind();
+        self.keep_focus();
+    }
+
+    /// Whether the tree stands in the changed files only.
+    pub fn changed_only(&self) -> bool {
+        self.changed.on
+    }
+
+    /// The changed-files list.
+    pub fn listing(&self) -> &Listing {
+        &self.changed.list
+    }
+
+    /// `SPC v c` — the changed files only, or the whole tree again as it was.
+    pub fn toggle_changed(&mut self) {
+        if self.changed.on {
+            let at = self.at.clone();
+            let before = self.changed.before.take();
+            self.changed.on = false;
+            self.at = at.clone();
+            self.rebuild();
+            // The file the cursor stood on stands in the whole tree: the cursor stays on it. Else back to where it was.
+            if self.rows.iter().all(|r| r.at() != at)
+                && let Some((was, top)) = before
+            {
+                self.at = was;
+                self.rebuild();
+                self.list.rewind();
+                self.list.by(top as isize);
+            }
+            self.adrift = false;
+            return;
+        }
+        self.changed.before = Some((self.at.clone(), self.list.offset()));
+        self.changed.on = true;
+        self.typing = None;
+        self.list.rewind();
+        self.adrift = false;
+        self.ask_changes();
+        self.rebuild();
+    }
+
+    /// The changed-files tree: every changed path with its folders, always open — folders first, then by name, as the
+    /// read layer orders a folder.
+    fn rebuild_changed(&mut self) {
+        let mut rows = Vec::new();
+        match &self.changed.list {
+            Listing::Reading => rows.push(Row::Loading { depth: 0, of: ".".into() }),
+            Listing::Failed(why) => {
+                rows.push(Row::Failed { depth: 0, of: ".".into(), why: Trouble::Changes(why.clone()) });
+            }
+            Listing::Read(list) => {
+                let mut tree: BTreeMap<String, (BTreeSet<String>, Vec<&vcs::Change>)> = BTreeMap::new();
+                for c in &list.files {
+                    let mut dir = ".".to_string();
+                    for part in c.path.split('/').collect::<Vec<_>>().split_last().map_or(&[][..], |(_, d)| d) {
+                        let next = child(&dir, part);
+                        tree.entry(dir).or_default().0.insert(next.clone());
+                        dir = next;
+                    }
+                    tree.entry(dir).or_default().1.push(c);
+                }
+                fn walk(
+                    tree: &BTreeMap<String, (BTreeSet<String>, Vec<&vcs::Change>)>,
+                    dir: &str,
+                    depth: usize,
+                    out: &mut Vec<Row>,
+                ) {
+                    let Some((dirs, files)) = tree.get(dir) else { return };
+                    for d in dirs {
+                        let name = d.rsplit('/').next().unwrap_or(d).to_owned();
+                        out.push(Row::Entry {
+                            path: d.clone(),
+                            depth,
+                            entry: Entry { name, kind: Kind::Dir, size: 0, openable: true },
+                            open: true,
+                            ignored: false,
+                            link: None,
+                            change: None,
+                        });
+                        walk(tree, d, depth + 1, out);
+                    }
+                    let mut files = files.clone();
+                    files.sort_by(|a, b| a.path.cmp(&b.path));
+                    for c in files {
+                        let name = c.path.rsplit('/').next().unwrap_or(&c.path).to_owned();
+                        out.push(Row::Entry {
+                            path: c.path.clone(),
+                            depth,
+                            entry: Entry { name, kind: Kind::File, size: 0, openable: true },
+                            open: false,
+                            ignored: false,
+                            link: None,
+                            change: Some(c.clone()),
+                        });
+                    }
+                }
+                walk(&tree, ".", 0, &mut rows);
+            }
+        }
+        self.rows = rows;
+        match self.rows.iter().position(|r| r.at() == self.at) {
+            Some(i) => self.cursor = i,
+            None => {
+                self.cursor = self.cursor.min(self.rows.len().saturating_sub(1));
+                if let Some(r) = self.rows.get(self.cursor) {
+                    self.at = r.at();
+                }
+            }
+        }
+        self.aim();
+    }
+
+    /// `SPC v w` — open the checkout picker, the list read afresh.
+    pub fn open_pick(&mut self) {
+        self.ask_places();
+        let cursor = self.picked().unwrap_or(0);
+        self.pick = Some(Pick { cursor, list: Scroll::default() });
+    }
+
+    /// Which checkout of the list the window shows — by path.
+    pub fn picked(&self) -> Option<usize> {
+        self.places.as_ref()?.checkouts.iter().position(|c| c.path == self.checkout.path)
+    }
+
+    /// A key on the picker: the moves, `Enter` picks, `Esc` closes. Everything else is quiet.
+    fn pick_key(&mut self, act: Option<keys::Files>) {
+        use keys::Files as F;
+        let n = self.places.as_ref().map_or(0, |p| p.checkouts.len());
+        let Some(p) = self.pick.as_mut() else { return };
+        match act {
+            Some(F::Step(m)) => p.cursor = scroll::cursor(m, p.cursor, || n),
+            Some(F::Enter) => {
+                let to = self.places.as_ref().and_then(|l| l.checkouts.get(p.cursor)).cloned();
+                self.pick = None;
+                if let Some(to) = to {
+                    self.switch(to);
+                }
+            }
+            Some(F::Close) => self.pick = None,
+            _ => {}
+        }
+    }
+
+    /// Stand on another checkout. **Everything of the one before goes**: the tree, the cursor, the search and its
+    /// index, the text and the diff held, and the reads out — a new worker answers on a new channel, so a late answer
+    /// of the old one is never even read. The jail is the new checkout's root: a worktree made outside the repository
+    /// (`../x`) is its own root, not "outside". The toggles and the focus stay.
+    pub fn switch(&mut self, to: Checkout) {
+        if to.path == self.checkout.path {
+            self.checkout = to;
+            return;
+        }
+        self.worker = Shared(Arc::new(Mutex::new(Worker::start(&to, &self.disk))));
+        self.checkout = to;
+        self.dirs.clear();
+        self.here = ".".into();
+        self.at = At::Up;
+        self.cursor = 0;
+        self.list = Scroll::default();
+        self.adrift = false;
+        self.chord.clear();
+        self.ignored = Ignored::Waiting;
+        self.spread = None;
+        self.stepped.clear();
+        self.right = Right::default();
+        self.search = Search::default();
+        self.typing = None;
+        self.changed.list = Listing::Reading;
+        self.changed.before = None;
+        self.places_id = 0;
+        self.diff.close();
+        self.detail.rewind();
+        self.open(".");
+        self.ask_changes();
+        self.rebuild();
+    }
+
+    /// The main checkout of the list — where the window goes back to when the one it stood on was removed.
+    fn main_checkout(&self) -> Option<Checkout> {
+        self.places.as_ref()?.checkouts.iter().find(|c| c.main).cloned()
     }
 
     /// Take what came back. Rebuilds the rows once, after all of it.
     pub(super) fn poll(&mut self) -> Polled {
         let mut out = Polled::default();
+        let mut gone = false;
+        out.painted |= self.diff.follow();
         if let Some(got) = self.worker.with(Worker::ignored) {
             self.ignored = match got {
                 Some(dirs) => Ignored::Known(dirs.iter().map(|d| d.trim_end_matches('/').to_owned()).collect()),
@@ -1489,7 +2017,50 @@ impl Window {
                         }
                     }
                 }
+                Reply::Places { id, places } => {
+                    if id == self.places_id {
+                        self.places_id = 0;
+                        // The checkout standing takes its key, branch and kind from the list: a picked one is a row of
+                        // it already; the one the window opened on was found by the thread, its path compared resolved.
+                        let standing = places.checkouts.iter().find(|c| c.path == self.checkout.path).or_else(|| {
+                            (self.checkout.path == self.opened_at)
+                                .then(|| places.here.and_then(|i| places.checkouts.get(i)))
+                                .flatten()
+                        });
+                        if let Some(c) = standing {
+                            self.checkout = c.clone();
+                            self.aim_diff();
+                        }
+                        if let Some(p) = self.pick.as_mut() {
+                            let at = places.checkouts.iter().position(|c| c.path == self.checkout.path);
+                            p.cursor = at.unwrap_or(0);
+                        }
+                        self.places = Some(places);
+                        out.painted = true;
+                    }
+                }
+                Reply::Changes { id, got } => {
+                    if id == self.changed.id {
+                        self.changed.id = 0;
+                        self.changed.list = match got {
+                            Ok(c) => Listing::Read(Arc::new(c)),
+                            Err(why) => Listing::Failed(why),
+                        };
+                        out.changed |= self.changed.on;
+                        out.painted = true;
+                    }
+                }
+                Reply::Gone => gone = true,
             }
+        }
+        // The checkout was removed while the window stood: back to the main one, with a word.
+        if gone
+            && !self.checkout.main
+            && let Some(main) = self.main_checkout()
+        {
+            out.gone = Some(self.checkout.key.clone());
+            self.switch(main);
+            return out;
         }
         // The answers may have freed a slot for the search's folders.
         if out.changed {
@@ -1520,7 +2091,7 @@ impl Window {
 
     /// A search is hung and not being typed — `Esc` ends it before it closes the window, and `n`·`N` jump.
     pub fn searched(&self) -> bool {
-        self.typing.is_none() && self.search.query.is_some()
+        self.typing.is_none() && self.search.query.is_some() && !self.changed.on
     }
 
     /// Files opened and marked, and all the index matched.
@@ -1561,6 +2132,10 @@ impl Window {
     /// `/` — open the search field, with the hung search in it to change (the wiki window's way). The first search on
     /// a root walks its index.
     fn start_search(&mut self) {
+        // The changed tree is short and its own; the search is the whole tree's and waits under it.
+        if self.changed.on {
+            return;
+        }
         let was = self.search.query.clone();
         let input = Input::new(was.as_deref().unwrap_or_default());
         self.typing = Some(Typing { input, was, from: self.at.clone() });
@@ -1827,10 +2402,17 @@ impl Window {
     }
 
     pub(super) fn ctl_state(&self) -> serde_json::Value {
+        let focus = match self.focus {
+            Side::Tree => "tree",
+            Side::Info => "info",
+            Side::Detail => "detail",
+        };
         serde_json::json!({
             "checkout": self.checkout.path, "here": self.here, "cursor": self.current_path(),
-            "focus": if self.focus == Side::Tree { "tree" } else { "info" },
+            "focus": focus,
             "search": self.search.query,
+            "branch": self.checkout.branch, "changed_only": self.changed.on,
+            "detail": self.detail_on, "diff": self.diff_on,
         })
     }
 }
@@ -1840,12 +2422,12 @@ impl App {
     /// row under the cursor. With neither a notice says why and nothing opens.
     pub(super) fn open_files(&mut self) {
         let lang = self.site.lang;
-        let (project, path) = if !self.on_layer() {
+        let (project, path, seat) = if !self.on_layer() {
             let Some(repo) = self.site.repo.as_ref() else {
                 self.notice = Some(say(lang, "tui.files.no_project").to_string());
                 return;
             };
-            (self.project_name(), repo.here().to_path_buf())
+            (self.project_name(), repo.here().to_path_buf(), Seat::Here)
         } else {
             let at = match self.current() {
                 Some(ListRow::Project(at)) | Some(ListRow::Item(Seat::Place(at), ..)) => at,
@@ -1855,12 +2437,13 @@ impl App {
                 }
             };
             let Some(place) = self.layer.as_ref().and_then(|l| l.places.get(at)) else { return };
-            (place.name.clone(), place.path.clone())
+            (place.name.clone(), place.path.clone(), Seat::Place(at))
         };
-        // The key and the branch are the checkout picker's (moai-ffk9.211); finding them reads git's files, and the
-        // loop does not read.
+        // The key, the branch and whether it is the main checkout come with the checkout list, read on a thread
+        // (moai-ffk9.211) — finding them reads git's files, and the loop does not read.
         let checkout = Checkout { key: ".".into(), path, branch: String::new(), main: true, milestone: None };
-        self.mode = Mode::Files(Box::new(Window::new(project, checkout, self.keys, &self.files_disk)));
+        let w = Window::new(project, checkout, self.keys, &self.files_disk, seat, lang);
+        self.mode = Mode::Files(Box::new(w));
     }
 
     /// The window is waiting on its threads — the loop wakes fast to take the answer (`App::loading`).
@@ -1883,6 +2466,37 @@ impl App {
         if let Some(n) = got.indexed {
             self.notice = Some(fill(say(self.site.lang, "tui.files.index_stopped"), &[("n", &n.to_string())]));
         }
+        if let Some(key) = got.gone {
+            self.notice = Some(fill(say(self.site.lang, "tui.files.checkout_gone"), &[("key", &key)]));
+        }
+    }
+
+    /// The issue the file window's detail shows (moai-ffk9.211) — the picked checkout's, as `moai diff` finds it
+    /// (`report::changes::issue_of`): an epic worktree's epic, a milestone worktree's milestone, a worktree marked by
+    /// one row that row. `None` while the checkout list is read, and for a checkout no issue holds (the main one).
+    /// The row index is the last of that id — the load's rule.
+    pub(super) fn files_issue(&self) -> Option<(Seat, usize)> {
+        let Mode::Files(w) = &self.mode else { return None };
+        let places = w.places.as_ref()?;
+        let site = self.site_of_seat(w.seat)?;
+        let issue = crate::report::changes::issue_of(&site.issues, &w.checkout, &places.workplaces)?;
+        let at = site.issues.iter().rposition(|i| i.id == issue.id)?;
+        Some((w.seat, at))
+    }
+
+    /// The picker's rows' issue titles — each checkout's issue, as the detail finds it.
+    pub(super) fn files_pick_titles(&self) -> Vec<Option<String>> {
+        let Mode::Files(w) = &self.mode else { return Vec::new() };
+        let Some(places) = w.places.as_ref() else { return Vec::new() };
+        let site = self.site_of_seat(w.seat);
+        places
+            .checkouts
+            .iter()
+            .map(|c| {
+                let issues = site.map_or(&[][..], |s| &s.issues[..]);
+                crate::report::changes::issue_of(issues, c, &places.workplaces).map(|i| i.title.clone())
+            })
+            .collect()
     }
 
     /// One key on the window. **Closing only goes back to browsing** — the window touched nothing behind it.
@@ -1898,6 +2512,14 @@ impl App {
             && w.typing.is_some()
         {
             w.type_key(k);
+            return true;
+        }
+        // **The checkout picker comes next while open** — the window's moves, `Enter` to pick, `Esc` to close it.
+        if let Mode::Files(w) = &mut self.mode
+            && w.pick.is_some()
+        {
+            let act = w.chord.feed(self.keys.files, k);
+            w.pick_key(act);
             return true;
         }
         if menu::open(&self.chord) || LEADER.matches(k) {
@@ -1934,11 +2556,50 @@ impl App {
                     self.run(act, &rows);
                     true
                 }
+                // **This window's own toggles** (moai-ffk9.211) — the same keys mean the list's on the list; here they
+                // touch neither `App::worktree` nor `App::detail_open`, and nothing is written to the config.
+                Some(act @ (Browse::Worktree | Browse::Changed | Browse::Detail | Browse::Diff)) => {
+                    let Mode::Files(w) = &mut self.mode else { return true };
+                    match act {
+                        // The picker is a window of its own: the menu closes under it.
+                        Browse::Worktree => {
+                            w.open_pick();
+                            self.chord.clear();
+                        }
+                        Browse::Changed => w.toggle_changed(),
+                        Browse::Detail => w.toggle_detail(),
+                        _ => {
+                            w.toggle_diff();
+                            if w.diff_on && w.folded {
+                                let detail = keys::said(self.keys.browse, Browse::Detail);
+                                self.notice =
+                                    Some(fill(say(self.site.lang, "tui.files.diff_folded"), &[("detail", &detail)]));
+                            }
+                        }
+                    }
+                    true
+                }
+                // The detail's place and the diff layout are the person's, over the window as on the list.
+                Some(act @ (Browse::DetailAt | Browse::DiffLayout)) => {
+                    self.run(act, &rows);
+                    true
+                }
                 _ => false,
             };
         }
         let Mode::Files(w) = &mut self.mode else { return false };
         use keys::Files as F;
+        // **The diff pane's keys first while it has the focus** (moai-ffk9.41b's rule): `Tab`·`Shift-Tab` go from file
+        // to file, `h`·`l` from scope to scope. The moves stay the window's — `gg` is a prefix there.
+        if w.focus == Side::Info
+            && w.diff_stands()
+            && w.chord.held().is_empty()
+            && let Lookup::Run(act) = keys::lookup(self.keys.diff, &[k])
+            && !matches!(act, keys::Diff::Step(_))
+        {
+            w.diff.key(act);
+            return true;
+        }
         match w.chord.feed(self.keys.files, k) {
             Some(F::Step(m)) => w.step(m),
             Some(F::Enter) if w.focus == Side::Tree => w.enter(),
@@ -1950,7 +2611,7 @@ impl App {
             Some(F::Pan(toward)) if w.focus == Side::Info => w.pan(toward),
             Some(F::Pan(_)) => {}
             Some(F::FocusNext) => w.focus_next(),
-            Some(F::Focus(side)) => w.focus = if side == Toward::Left { Side::Tree } else { Side::Info },
+            Some(F::Focus(side)) => w.focus_toward(side),
             Some(F::Search) => w.start_search(),
             Some(F::NextFound) => w.jump_found(false),
             Some(F::PrevFound) => w.jump_found(true),
@@ -2085,8 +2746,9 @@ mod tests {
         );
     }
 
-    /// The screens over the window: `SPC g l` closes it onto the list; the menu over it holds only the screen group and
-    /// the key list, and a move key closing the menu moves the tree's cursor.
+    /// The screens over the window: `SPC g l` closes it onto the list; the menu over it holds the screen group, the
+    /// window's own view toggles and options (moai-ffk9.211) and the key list — nothing of the list's — and a move key
+    /// closing the menu moves the tree's cursor.
     #[test]
     fn spc_over_the_window_opens_only_the_screens() {
         use super::super::{keys::Screen, menu, view::Layout};
@@ -2097,7 +2759,10 @@ mod tests {
         let ctx = a.key_ctx(&a.rows());
         assert_eq!(ctx.screen(), Screen::Files);
         let root = menu::entries(a.chord.held(), &ctx, &[]);
-        assert_eq!(root.iter().map(menu::Entry::text).collect::<Vec<_>>(), ["+화면 [파일]", "키 목록"]);
+        assert_eq!(
+            root.iter().map(menu::Entry::text).collect::<Vec<_>>(),
+            ["+화면 [파일]", "+보기", "+옵션", "키 목록"]
+        );
         assert_eq!(Browse::Filter.enabled(&ctx), Err(keys::Off::Quiet));
         assert_eq!(Browse::Raw.enabled(&ctx), Err(keys::Off::Quiet));
         a.hit("j");
@@ -2378,6 +3043,7 @@ mod tests {
             open: false,
             ignored: false,
             link: None,
+            change: None,
         });
         assert!(!line.chars().any(char::is_control), "{line:?}");
     }
@@ -3247,5 +3913,512 @@ mod tests {
         let lines = draw::tests::render(&mut a, 120, 20);
         let bar = lines.last().unwrap();
         assert!(bar.contains("n·N 다음/이전") && bar.contains("Esc 찾기 끝"), "{bar:?}");
+    }
+
+    // ---- the checkout, the changed files, the detail and the diff (moai-ffk9.211) ----
+
+    fn git(dir: &Path, args: &[&str]) {
+        crate::git::tests::run_git(dir, None, args);
+    }
+
+    fn change(path: &str, status: vcs::Status) -> vcs::Change {
+        vcs::Change { path: path.into(), old_path: None, status, adds: Some(3), dels: Some(1), binary: false }
+    }
+
+    /// A checkout made of these files, beside the test's main one.
+    fn other_checkout(s: &Scratch, name: &str, files: &[&str]) -> Checkout {
+        let root = s.path().join(name);
+        for f in files {
+            let p = root.join(f);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(p, format!("{f}\n")).unwrap();
+        }
+        Checkout {
+            key: format!(".worktrees/{name}"),
+            path: root,
+            branch: format!("worktree-{name}"),
+            main: false,
+            milestone: None,
+        }
+    }
+
+    /// The main checkout and these, as the checkout list — with the worktree marks given.
+    fn placing(a: &mut App, s: &Scratch, others: Vec<Checkout>, workplaces: Vec<crate::report::Workplace>) {
+        let main = Checkout {
+            key: ".".into(),
+            path: s.path().to_path_buf(),
+            branch: "main".into(),
+            main: true,
+            milestone: None,
+        };
+        let mut checkouts = vec![main];
+        checkouts.extend(others);
+        let disk = std::mem::take(&mut a.files_disk);
+        a.files_disk = disk.placing(move |_| Places {
+            checkouts: checkouts.clone(),
+            workplaces: workplaces.clone(),
+            here: Some(0),
+        });
+    }
+
+    /// Pick the n-th checkout through the picker, as a person does.
+    fn pick(a: &mut App, n: usize) {
+        a.hit("SPC v w");
+        settle(a);
+        assert!(window(a).pick.is_some(), "SPC v w did not open the picker");
+        assert!(!menu::open(&a.chord), "the menu stayed open over the picker");
+        a.hit("g g");
+        for _ in 0..n {
+            a.hit("j");
+        }
+        a.hit("Enter");
+        settle(a);
+    }
+
+    /// **The picker lists what git lists, the main checkout first and the milestone worktree with its word**; picking
+    /// a worktree made outside the repository stands its files as the tree's root — not "outside" — and `..`, `Bksp`
+    /// and `h` stop there. Read through the real checkout list and the real changed-files list.
+    #[test]
+    fn the_picker_offers_what_git_lists_and_the_pick_is_the_new_root() {
+        let s = Scratch::new("tui-files-pick-git");
+        let main = s.path().join("main");
+        std::fs::create_dir_all(&main).unwrap();
+        git(&main, &["init", "-q"]);
+        std::fs::write(main.join(".gitignore"), ".worktrees/\n").unwrap();
+        std::fs::write(main.join("keep.txt"), "keep\n").unwrap();
+        std::fs::write(main.join("edit.txt"), "old\n").unwrap();
+        std::fs::write(main.join("gone.txt"), "gone\n").unwrap();
+        git(&main, &["add", "."]);
+        git(&main, &["commit", "-qm", "base"]);
+        git(&main, &["worktree", "add", "-q", ".worktrees/milestone-m1", "-b", "milestone/m1"]);
+        let outside = s.path().join("outside");
+        git(&main, &["worktree", "add", "-q", outside.to_str().unwrap(), "-b", "feat"]);
+        std::fs::write(outside.join("feat.txt"), "feat\n").unwrap();
+        git(&outside, &["add", "."]);
+        git(&outside, &["commit", "-qm", "feat"]);
+        std::fs::remove_file(outside.join("gone.txt")).unwrap();
+        std::fs::write(main.join("edit.txt"), "new\n").unwrap();
+        std::fs::write(main.join("new.txt"), "new\n").unwrap();
+
+        let mut a = App::new(Vec::new(), cfg(), NavPath::new());
+        a.site.repo = Some(crate::store::Repo::at(main.clone(), cfg()));
+        a.files_disk = Disk::with(files::list, |_| None).placing(places).changing(changes);
+        a.hit("SPC g f");
+        settle(&mut a);
+        let listed = window(&a).places.clone().expect("the checkout list did not come");
+        assert!(listed.checkouts[0].main, "the main checkout is not the first row: {:?}", listed.checkouts);
+        assert_eq!(listed.checkouts.len(), 3, "{:?}", listed.checkouts);
+        let milestone = listed.checkouts.iter().position(|c| c.milestone.is_some()).expect("no milestone worktree");
+        let out = listed.checkouts.iter().position(|c| c.branch == "feat").expect("no outside worktree");
+        assert!(
+            window(&a).checkout.main && !window(&a).checkout.branch.is_empty(),
+            "the window did not take its checkout's name"
+        );
+        // On the main checkout the changed files are what is not committed — no fork point is no failure.
+        a.hit("SPC v c Esc");
+        settle(&mut a);
+        assert_eq!(names(&a), ["edit.txt", "new.txt"], "the main checkout's changed files");
+        a.hit("SPC v c Esc");
+        // The picker, drawn: the milestone worktree says so, the one shown says it is now.
+        a.hit("SPC v w");
+        settle(&mut a);
+        let screen = draw::tests::render(&mut a, 140, 24).join("\n");
+        assert!(screen.contains("마일스톤") && screen.contains("[지금]") && screen.contains("⎇"), "{screen}");
+        a.hit("Esc");
+        assert!(window(&a).pick.is_none(), "Esc did not close the picker");
+        pick(&mut a, milestone);
+        assert!(window(&a).checkout.milestone.is_some());
+        pick(&mut a, out);
+        let w = window(&a);
+        assert_eq!(w.checkout.branch, "feat");
+        assert!(names(&a).contains(&"feat.txt".to_string()), "the tree is not the picked checkout's: {:?}", names(&a));
+        assert!(
+            !names(&a).iter().any(|n| n.starts_with("<failed")),
+            "the outside worktree was refused: {:?}",
+            names(&a)
+        );
+        // Its root has no way further up.
+        a.hit("Bksp h");
+        assert_eq!(here(&a), ".");
+        assert!(!window(&a).rows().iter().any(|r| matches!(r, Row::Up)));
+        // Its changed files: the commit and the deletion — not what did not change.
+        a.hit("SPC v c Esc");
+        settle(&mut a);
+        assert_eq!(names(&a), ["feat.txt", "gone.txt"]);
+        let rows: Vec<String> = window(&a).rows().iter().map(draw::tests::files_changed_row_text).collect();
+        assert!(rows[0].starts_with("A ") && rows[1].starts_with("D "), "no kind letter without the colour: {rows:?}");
+    }
+
+    /// **Picking another checkout drops everything of the one before** — a folder answer, a file's text and a diff
+    /// that come late for the old checkout never stand on the new one.
+    #[test]
+    fn a_late_answer_of_the_checkout_before_never_stands() {
+        let (s, mut a) = files_app("pick-stale");
+        let b = other_checkout(&s, "b", &["b.txt", "lib/x.rs"]);
+        placing(&mut a, &s, vec![b], Vec::new());
+        let disk = std::mem::take(&mut a.files_disk);
+        a.files_disk = Disk {
+            list: Arc::new(|jail: &Jail, path: &str| {
+                if path == "src" {
+                    std::thread::sleep(Duration::from_millis(400));
+                }
+                files::list(jail, path)
+            }),
+            ..disk
+        }
+        .reading(|jail, path| {
+            if path == "README.md" {
+                std::thread::sleep(Duration::from_millis(400));
+            }
+            files::read(jail, path)
+        })
+        .diffing(|src, _, _, _| {
+            let diff::Source::Checkout { path, .. } = src else { return diff::Loaded::default() };
+            if path.as_deref() == Some("README.md") {
+                std::thread::sleep(Duration::from_millis(400));
+            }
+            diff::Loaded::default()
+        });
+        a.hit("SPC g f");
+        settle(&mut a);
+        a.hit("SPC v D Esc");
+        on(&mut a, "README.md");
+        on(&mut a, "src");
+        a.hit("l");
+        pick(&mut a, 1);
+        std::thread::sleep(Duration::from_millis(500));
+        settle(&mut a);
+        assert_eq!(names(&a), ["lib", "b.txt"], "the old checkout's rows stand on the new one");
+        assert!(window(&a).right.shown.path().is_none_or(|p| p != "README.md"), "the old file's text stands");
+        let source = window(&a).diff.source().map(|s| format!("{s:?}")).unwrap_or_default();
+        assert!(!source.contains("README.md"), "the old file's diff stands: {source}");
+    }
+
+    /// **The changed files only**: only what changed stands, with its folders open, a deleted and an untracked file
+    /// among them; turned off, the tree, its open folders and the cursor are as they were.
+    #[test]
+    fn changed_only_shows_the_changes_and_gives_the_tree_back() {
+        let (_s, mut a) = files_app("changed");
+        let disk = std::mem::take(&mut a.files_disk);
+        a.files_disk = disk.changing(|_, _| {
+            let files = vec![
+                change("README.md", vcs::Status::Modified),
+                change("src/tui/files.rs", vcs::Status::Added),
+                change("src/old.rs", vcs::Status::Deleted),
+                change("new.txt", vcs::Status::Untracked),
+            ];
+            Ok(vcs::Changes { total: files.len(), files, truncated: false })
+        });
+        standing_on(&mut a, "src");
+        a.hit("l");
+        settle(&mut a);
+        on(&mut a, "src/main.rs");
+        let before = (names(&a), window(&a).cursor);
+        a.hit("SPC v c Esc");
+        settle(&mut a);
+        assert_eq!(
+            names(&a),
+            ["src (open)", "src/tui (open)", "src/tui/files.rs", "src/old.rs", "README.md", "new.txt"],
+            "the changed tree"
+        );
+        let text: Vec<String> = window(&a).rows().iter().map(draw::tests::files_changed_row_text).collect();
+        assert!(text[2].starts_with("A ") && text[2].contains("+3 −1"), "{text:?}");
+        assert!(text[3].starts_with("D ") && text[4].starts_with("M ") && text[5].starts_with("? "), "{text:?}");
+        let title = screen_title(&draw::tests::render(&mut a, 120, 20));
+        assert!(title.contains("바뀐 파일만 4"), "{title}");
+        // A deleted file has no text — the pane says so in a line, and nothing falls over.
+        on(&mut a, "src/old.rs");
+        settle(&mut a);
+        assert!(matches!(shown(&a), Shown::Failed { why: Trouble::Missing, .. }), "{:?}", shown(&a));
+        // Back: the open folders and the cursor as they were — the cursor stood on a file not in the changed tree.
+        a.hit("SPC v c Esc");
+        settle(&mut a);
+        assert_eq!((names(&a), window(&a).cursor), before, "the tree did not come back as it was");
+        // A file standing in both keeps the cursor.
+        a.hit("SPC v c Esc");
+        settle(&mut a);
+        on(&mut a, "README.md");
+        a.hit("SPC v c Esc");
+        assert_eq!(window(&a).current_path(), Some("README.md"));
+    }
+
+    /// Nothing changed: one line says so.
+    #[test]
+    fn no_changes_says_so() {
+        let (_s, mut a) = files_app("changed-none");
+        a.hit("SPC g f SPC v c Esc");
+        settle(&mut a);
+        assert!(names(&a).is_empty());
+        let screen = draw::tests::render(&mut a, 100, 20).join("\n");
+        assert!(screen.contains("(변경 없음)"), "{screen}");
+    }
+
+    /// **The cursor never waits on the changed files** — a slow git leaves `j` moving.
+    #[test]
+    fn a_slow_changed_list_never_holds_the_cursor() {
+        let (_s, mut a) = files_app("changed-slow");
+        let disk = std::mem::take(&mut a.files_disk);
+        a.files_disk = disk.changing(|_, _| {
+            std::thread::sleep(Duration::from_millis(1500));
+            Ok(vcs::Changes::default())
+        });
+        a.hit("SPC g f");
+        let began = Instant::now();
+        a.hit("SPC v c Esc j j k");
+        assert!(began.elapsed() < Duration::from_millis(500), "the keys waited on git: {:?}", began.elapsed());
+        assert!(matches!(window(&a).rows(), [Row::Loading { .. }]), "{:?}", names(&a));
+        settle(&mut a);
+    }
+
+    /// The right side's four ways (the member's table), by the panes drawn.
+    fn sides(a: &mut App, w: u16, h: u16) -> (bool, bool, bool) {
+        draw::tests::render(a, w, h);
+        let d = a.drawn.files.clone().expect("the window did not draw");
+        (d.detail.is_some(), d.diff.is_some(), d.info.is_some())
+    }
+
+    /// **The right pane is the table**: the text with both off, the diff alone, the detail alone, both — the detail
+    /// first (above or left) on the axis of the detail's place, for each of the four places.
+    #[test]
+    fn the_right_side_follows_the_two_toggles_and_the_detail_place() {
+        use super::super::view::DetailAt;
+        let (_s, mut a) = files_app("sides");
+        a.files_disk = std::mem::take(&mut a.files_disk).diffing(|_, _, _, _| diff::Loaded::default());
+        standing_on(&mut a, "README.md");
+        assert_eq!(sides(&mut a, 160, 40), (false, false, true));
+        assert_eq!(pane(&mut a, 160, 40).0[0], "1 # hi", "both off is the file's text");
+        a.hit("SPC v D Esc");
+        assert_eq!(sides(&mut a, 160, 40), (false, true, true));
+        let screen = draw::tests::render(&mut a, 160, 40).join("\n");
+        assert!(screen.contains(" diff · "), "the diff pane's title: {screen}");
+        a.hit("SPC v D d Esc");
+        assert_eq!(sides(&mut a, 160, 40), (true, false, true));
+        let screen = draw::tests::render(&mut a, 160, 40).join("\n");
+        assert!(screen.contains("이 체크아웃은 이슈에 매이지 않았다"), "{screen}");
+        a.hit("SPC v D Esc");
+        for place in DetailAt::ALL {
+            a.detail_at = place;
+            draw::tests::render(&mut a, 160, 40);
+            let d = a.drawn.files.clone().unwrap();
+            let (detail, diff) = (d.detail.unwrap(), d.diff.unwrap());
+            if place.vertical() {
+                assert!(
+                    detail.y < diff.y && detail.x == diff.x,
+                    "{place:?}: the detail is not above: {detail:?} {diff:?}"
+                );
+            } else {
+                assert!(
+                    detail.x < diff.x && detail.y == diff.y,
+                    "{place:?}: the detail is not left: {detail:?} {diff:?}"
+                );
+            }
+        }
+        // `Ctrl-w w` goes round the three.
+        a.detail_at = DetailAt::Right;
+        let mut seen = Vec::new();
+        for _ in 0..3 {
+            a.hit("Ctrl-w w");
+            seen.push(window(&a).focus);
+        }
+        assert_eq!(seen, [Side::Detail, Side::Info, Side::Tree]);
+    }
+
+    /// **Too small for both: the detail stays and the diff folds** — the toggles keep their values, the focus does not
+    /// stay on the folded pane, and turning the diff on there says why it does not show.
+    #[test]
+    fn too_small_for_both_folds_the_diff_and_keeps_the_detail() {
+        let (_s, mut a) = files_app("fold");
+        a.files_disk = std::mem::take(&mut a.files_disk).diffing(|_, _, _, _| diff::Loaded::default());
+        standing_on(&mut a, "README.md");
+        a.hit("SPC v d D Esc");
+        draw::tests::render(&mut a, 160, 40);
+        a.hit("Ctrl-w l Ctrl-w w");
+        assert_eq!(window(&a).focus, Side::Info);
+        // 30 columns: the right side has fewer than the two floors.
+        assert_eq!(sides(&mut a, 30, 40), (true, false, true), "the diff stood, or the detail folded");
+        let w = window(&a);
+        assert!(w.detail_on && w.diff_on && w.folded, "a toggle changed");
+        assert_ne!(w.focus, Side::Info, "the focus stayed on the folded diff");
+        a.hit("SPC v D D Esc");
+        assert!(a.notice.as_deref().is_some_and(|n| n.contains("접었다")), "{:?}", a.notice);
+        // Room again: both stand.
+        assert_eq!(sides(&mut a, 160, 40), (true, true, true));
+    }
+
+    /// **The window's toggles are its own**: `SPC v d`, `SPC v D` and `SPC v c` over it touch neither the list's detail
+    /// nor the config, and closing the window forgets them.
+    #[test]
+    fn the_window_toggles_leave_the_list_and_the_config_alone() {
+        let (s, mut a) = files_app("toggles");
+        let user = s.path().join("user.toml");
+        std::fs::write(&user, "[tui]\nmouse = true\n").unwrap();
+        a.user_config = Some(user.clone());
+        let before = (a.detail_open, a.worktree, a.diff_layout);
+        a.hit("SPC g f");
+        settle(&mut a);
+        a.hit("SPC v d D c Esc");
+        settle(&mut a);
+        let w = window(&a);
+        assert!(w.detail_on && w.diff_on && w.changed_only());
+        assert_eq!((a.detail_open, a.worktree, a.diff_layout), before, "a list setting moved");
+        assert_eq!(std::fs::read_to_string(&user).unwrap(), "[tui]\nmouse = true\n", "the config was written");
+        a.hit("Esc");
+        assert_eq!(a.mode, Mode::Browse);
+        a.hit("SPC g f");
+        let w = window(&a);
+        assert!(!w.detail_on && !w.diff_on && !w.changed_only(), "the window kept its toggles");
+        // On the list the same keys keep their meaning.
+        a.hit("Esc SPC v d Esc");
+        assert_ne!(a.detail_open, before.0, "SPC v d on the list lost its meaning");
+    }
+
+    /// **The detail is the picked checkout's issue**: an epic worktree's epic, not a member; the main checkout none.
+    #[test]
+    fn the_detail_is_the_checkout_issue() {
+        let (s, mut a) = files_app("detail");
+        let epic = Issue::new(
+            "argos-0002".into(),
+            "파일 화면 에픽".into(),
+            IssueKind::Epic,
+            Status::new("in_progress"),
+            "2026-09-01T00:00:00Z",
+        );
+        let mut member = Issue::new(
+            "argos-0003".into(),
+            "멤버 일".into(),
+            IssueKind::Issue,
+            Status::new("in_progress"),
+            "2026-09-01T00:00:00Z",
+        );
+        member.epic = Some("argos-0002".into());
+        let mut issues = a.site.issues.clone();
+        issues.extend([epic, member]);
+        let mut b = App::new(issues, cfg(), NavPath::new());
+        b.site.repo = a.site.repo.take();
+        b.files_disk = std::mem::take(&mut a.files_disk);
+        let mut a = b;
+        let wt = other_checkout(&s, "moai-epic", &["e.txt"]);
+        let workplace = crate::report::Workplace {
+            path: ".worktrees/moai-epic".into(),
+            branch: "worktree-moai-epic".into(),
+            names: ["argos-0002".to_string()].into_iter().collect(),
+            marked: ["argos-0003".to_string()].into_iter().collect(),
+            broken: false,
+        };
+        placing(&mut a, &s, vec![wt], vec![workplace]);
+        a.hit("SPC g f");
+        settle(&mut a);
+        a.hit("SPC v d Esc");
+        let detail = |a: &mut App| {
+            let buf = draw::tests::render_buf(a, 160, 40);
+            let r = a.drawn.files.clone().and_then(|d| d.detail).expect("no detail");
+            (r.y..r.bottom())
+                .map(|y| {
+                    let mut line = String::new();
+                    let mut skip = 0usize;
+                    for x in r.x..r.right() {
+                        if skip > 0 {
+                            skip -= 1;
+                            continue;
+                        }
+                        let sym = buf[(x, y)].symbol();
+                        line.push_str(sym);
+                        skip = crate::text::width(sym).saturating_sub(1);
+                    }
+                    line
+                })
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+        let text = detail(&mut a);
+        assert!(text.contains("이 체크아웃은 이슈에 매이지 않았다") && !text.contains("argos-"), "{text}");
+        pick(&mut a, 1);
+        let text = detail(&mut a);
+        let head: Vec<&str> = text.lines().skip(1).take(3).collect();
+        assert!(head.iter().any(|l| l.contains("argos-0002")), "the epic does not head the detail: {text}");
+        assert!(!head.iter().any(|l| l.contains("argos-0003")), "a member heads the detail: {text}");
+    }
+
+    /// **A worktree removed while the window stands**: the next read finds it gone, and the window goes back to the
+    /// main checkout with a word.
+    #[test]
+    fn a_removed_worktree_goes_back_to_the_main_checkout() {
+        let (s, mut a) = files_app("gone");
+        let b = other_checkout(&s, "gone-wt", &["d/x.txt"]);
+        let root = b.path.clone();
+        placing(&mut a, &s, vec![b], Vec::new());
+        a.hit("SPC g f");
+        settle(&mut a);
+        pick(&mut a, 1);
+        assert_eq!(names(&a), ["d"]);
+        std::fs::remove_dir_all(&root).unwrap();
+        on(&mut a, "d");
+        a.hit("l");
+        settle(&mut a);
+        assert!(window(&a).checkout.main, "the window stayed on the removed worktree");
+        assert!(names(&a).contains(&"README.md".to_string()), "{:?}", names(&a));
+        assert!(a.notice.as_deref().is_some_and(|n| n.contains("gone-wt")), "{:?}", a.notice);
+    }
+
+    /// The diff pane follows the cursor through the window: a file's path, a folder's with a `/`.
+    #[test]
+    fn the_diff_follows_the_cursor_onto_files_and_folders() {
+        let (_s, mut a) = files_app("diff-aim");
+        let asked = Arc::new(Mutex::new(Vec::new()));
+        let log = asked.clone();
+        a.files_disk = std::mem::take(&mut a.files_disk).diffing(move |src, _, _, _| {
+            if let diff::Source::Checkout { path, .. } = src {
+                log.lock().unwrap().push(path.clone().unwrap_or_default());
+            }
+            diff::Loaded::default()
+        });
+        standing_on(&mut a, "README.md");
+        a.hit("SPC v D Esc");
+        settle(&mut a);
+        on(&mut a, "src");
+        settle(&mut a);
+        assert_eq!(*asked.lock().unwrap(), ["README.md", "src/"]);
+        assert!(a.key_ctx(&a.rows()).diff, "SPC o s does not stand over the window's diff");
+    }
+
+    /// **The side-pane rule, one function for the file window and the list's diff pane** (`draw::side_split`): alone,
+    /// either takes the room whole; both — the detail first, stacked when its place is top or bottom and side by side
+    /// when left or right; too small for the two floors, the detail stays whole and the diff folds.
+    #[test]
+    fn the_side_rule_puts_the_detail_first_and_folds_the_diff_when_small() {
+        use super::super::view::DetailAt;
+        use draw::{Sides, side_split};
+        use ratatui::layout::Rect;
+        let at = Rect::new(10, 5, 100, 40);
+        assert_eq!(side_split(at, DetailAt::Right, false, false, None), Sides::default());
+        assert_eq!(side_split(at, DetailAt::Right, true, false, None).detail, Some(at));
+        assert_eq!(side_split(at, DetailAt::Top, false, true, None).diff, Some(at));
+        for place in DetailAt::ALL {
+            let s = side_split(at, place, true, true, None);
+            let (d, f) = (s.detail.unwrap(), s.diff.unwrap());
+            assert!(!s.folded);
+            if place.vertical() {
+                assert_eq!((d.x, d.width, f.x, f.width), (at.x, at.width, at.x, at.width), "{place:?}");
+                assert_eq!((d.y, d.bottom(), f.bottom()), (at.y, f.y, at.bottom()), "{place:?}");
+            } else {
+                assert_eq!((d.y, d.height, f.y, f.height), (at.y, at.height, at.y, at.height), "{place:?}");
+                assert_eq!((d.x, d.right(), f.right()), (at.x, f.x, at.right()), "{place:?}");
+            }
+        }
+        // A share is the detail's, pulled in so the diff keeps its floor.
+        let s = side_split(at, DetailAt::Right, true, true, Some(99));
+        assert!(s.diff.unwrap().width >= 10, "{s:?}");
+        // Too small for both: the detail whole, the diff folded.
+        let narrow = Rect::new(0, 0, 19, 40);
+        assert_eq!(
+            side_split(narrow, DetailAt::Left, true, true, None),
+            Sides { detail: Some(narrow), diff: None, folded: true }
+        );
+        let low = Rect::new(0, 0, 100, 11);
+        assert_eq!(
+            side_split(low, DetailAt::Bottom, true, true, None),
+            Sides { detail: Some(low), diff: None, folded: true }
+        );
+        assert!(!side_split(Rect::new(0, 0, 100, 12), DetailAt::Bottom, true, true, None).folded);
     }
 }

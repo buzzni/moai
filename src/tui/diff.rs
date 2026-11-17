@@ -28,7 +28,6 @@
 //!
 //! **Foreign text** — paths, hunk sections, lines — goes through [`columns::cut`], which never lets a control character
 //! reach the terminal.
-#![allow(dead_code)] // Members 5 (file window) and 6 (list pane) stand it on screen; until then only tests reach it.
 
 use super::columns;
 use super::keys::{self, Side as Toward};
@@ -116,10 +115,12 @@ impl Layout {
 #[derive(Clone)]
 pub enum Source {
     /// A checkout's whole branch — its fork point to the working tree, untracked files with it — narrowed to one file
-    /// when `path` is given (the file window).
+    /// when `path` is given (the file window). **A `path` ending in `/` names a directory** (moai-ffk9.211): the pane
+    /// then holds every changed file below it — the file window's cursor standing on a folder.
     Checkout { checkout: Checkout, path: Option<String> },
     /// An issue's scopes as `moai diff <id>` reads them (the list). `repo` names the project — on the one list each
     /// project is its own repository. The issues are the explorer's, handed over as they are.
+    #[allow(dead_code)] // The list's diff pane (moai-ffk9.cij) stands it up; the file window reads checkouts only.
     Issue { repo: Repo, issues: Arc<Vec<Issue>>, id: String },
 }
 
@@ -181,6 +182,7 @@ impl Part {
     }
 
     /// Whether the colouring came (with or without colours).
+    #[cfg(test)]
     pub fn painted(&self) -> bool {
         self.paint.get().is_some()
     }
@@ -329,7 +331,7 @@ pub type ReadFn = dyn Fn(&Source, Option<Scope>, Option<Duration>, Lang) -> Load
 pub type PaintFn = dyn Fn(&FileDiff) -> Option<Vec<Vec<Vec<highlight::Span>>>> + Send + Sync;
 
 /// The read layer's error as the pane says it — `changes::told`'s mapping, for the reads this file makes itself.
-fn told(root: &std::path::Path, lang: Lang, e: vcs::Error) -> Failed {
+pub(super) fn told(root: &std::path::Path, lang: Lang, e: vcs::Error) -> Failed {
     let words = |kind: &'static str, key: &'static str| Failed { kind, said: say(lang, key).to_owned() };
     match e {
         vcs::Error::Git(e) => {
@@ -443,7 +445,16 @@ fn whole(checkout: &Checkout, path: Option<&str>, budget: Option<Duration>, lang
     let list_cut = changes.truncated;
     let total = changes.total;
     let mut ask = None;
-    if let Some(p) = path {
+    // A folder takes every file below it, by either name. Its patch is read whole and cut to those files after: a
+    // folder pathspec would leave out the untracked files below it (`vcs` matches those by their whole name).
+    let folder = path.and_then(|p| p.strip_suffix('/'));
+    let below = |p: &str, dir: &str| p.strip_prefix(dir).is_some_and(|t| t.starts_with('/'));
+    if let Some(dir) = folder {
+        changes.files.retain(|c| below(&c.path, dir) || c.old_path.as_deref().is_some_and(|o| below(o, dir)));
+        if changes.files.is_empty() {
+            return Loaded { unchanged: true, total, ..Loaded::default() };
+        }
+    } else if let Some(p) = path {
         changes.files.retain(|c| c.path == p || c.old_path.as_deref() == Some(p));
         if changes.files.is_empty() {
             return Loaded { unchanged: true, total, ..Loaded::default() };
@@ -464,7 +475,7 @@ fn whole(checkout: &Checkout, path: Option<&str>, budget: Option<Duration>, lang
         text.truncate(text.rfind('\n').map_or(0, |i| i + 1));
     }
     let parsed = patch::parse(&text);
-    let parts = changes
+    let parts: Vec<Part> = changes
         .files
         .into_iter()
         .map(|change| {
@@ -480,8 +491,15 @@ fn whole(checkout: &Checkout, path: Option<&str>, budget: Option<Duration>, lang
             Part::new(change, file)
         })
         .collect();
+    let shown = parts.len();
     Loaded {
-        total: if path.is_some() { 1 } else { total },
+        total: if folder.is_some() {
+            shown
+        } else if path.is_some() {
+            1
+        } else {
+            total
+        },
         list_cut: path.is_none() && list_cut,
         patch_cut: got.truncated,
         parts,
@@ -708,6 +726,7 @@ impl std::fmt::Debug for View {
 
 impl View {
     /// A pane reading with git.
+    #[allow(dead_code)] // The list's diff pane (moai-ffk9.cij); the file window reads through its `files::Disk`.
     pub fn new(lang: Lang) -> View {
         View::with(Arc::new(read), Arc::new(highlight::diff), lang)
     }
@@ -761,6 +780,7 @@ impl View {
     }
 
     /// Read the shown subject again — the pane coming back on. The scroll stays.
+    #[allow(dead_code)] // The refresh (moai-ffk9.15v) and the list's pane (moai-ffk9.cij) call it.
     pub fn reread(&mut self) {
         self.ask();
     }

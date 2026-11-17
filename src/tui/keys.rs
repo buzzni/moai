@@ -384,8 +384,13 @@ pub enum Browse {
     SortEdit,
     /// 목록 줄의 열 하나를 켜고 끈다(moai-g7p8).
     Cell(super::view::Field),
-    /// 오른쪽 상세 칸을 보이고 숨긴다(moai-ymnu).
+    /// 오른쪽 상세 칸을 보이고 숨긴다(moai-ymnu). Over the file window, its right pane's detail (moai-ffk9.211).
     Detail,
+    /// The diff pane — `SPC v D` (moai-ffk9.211). Over the file window it puts the file's diff in the right pane; the
+    /// window's own, kept nowhere.
+    Diff,
+    /// The file window's changed files only — `SPC v c` (moai-ffk9.211). It stands only there.
+    Changed,
     /// 상세 칸이 서는 자리를 다음으로 돌린다 — `SPC o d`(moai-e7r3). **보이나 마나와 따로다**:
     /// 켜고 끄는 것은 [`Browse::Detail`](`SPC v d`)이고 이것은 보일 때 어디에 서는가다.
     DetailAt,
@@ -959,7 +964,12 @@ pub const BROWSE: &[Bind<Browse>] = {
         // 결정). 옛 `p`(pane)는 그 둘이 한 칸을 두고 글자가 갈려, 하나를 아는 사람이 다른 하나를
         // 못 짚었다. `d` 가 빈 것은 done 이 제 글자를 내놓은 뒤다(moai-h6z3) — 그 자리를 이것이 받는다.
         row!(Detail, Some("SPC v d"), LEADER, Key::plain('v'), Key::plain('d')),
+        // **The diff is `D`, the detail's letter raised** (moai-ffk9, the person's "SPC v D") — both are what stands
+        // beside the rows. Letters keep their case (`SPC s P`'s note).
+        row!(Diff, Some("SPC v D"), LEADER, Key::plain('v'), Key::plain('D')),
         row!(Worktree, Some("SPC v w"), LEADER, Key::plain('v'), Key::plain('w')),
+        // Changed files only is `c` (changed) — the file window's alone, beside its checkout pick (`w`).
+        row!(Changed, Some("SPC v c"), LEADER, Key::plain('v'), Key::plain('c')),
         row!(Raw, Some("SPC v r"), LEADER, Key::plain('v'), Key::plain('r')),
         // **정렬은 `SPC s`(sort)다**(moai-en4u) — 옛 `SPC o`(ranger 의 order)는 `s` 를 보기가 쥐고
         // 있어 밀려난 자리였다. 글자는 열(`SPC c`)과 같다: p·c·u·a 가 두 묶음에서 같은 것을 가리킨다.
@@ -1096,6 +1106,11 @@ pub struct Ctx {
     pub diff: bool,
     /// The person's diff layout is side by side — the menu line's word.
     pub diff_split: bool,
+    /// The file window's own toggles (moai-ffk9.211) — its menu lines' states: the detail, the diff, the changed
+    /// files only. The list's are [`Ctx::detail`] and the like.
+    pub files_detail: bool,
+    pub files_diff: bool,
+    pub files_changed: bool,
     /// 커서가 한눈 보기의 프로젝트 머리줄에 섰는가(moai-oagj.vcj). 보드에서도 그 줄의 `h`·`l`·`Tab` 은 목록과 같이
     /// 접고 편다(사용자 결정) — 칸이 없는 줄이다.
     pub head: bool,
@@ -1220,6 +1235,11 @@ impl Browse {
             // diff does not (moai-ffk9.41b).
             DiffLayout if c.diff => Ok(()),
             DiffLayout => Err(Off::Quiet),
+            // **Over the file window its own toggles stand** (moai-ffk9.211): the checkout (`SPC v w`), the changed files
+            // only, the right pane's detail and diff, and the detail's place — which splits the two.
+            Worktree | Changed | Detail | Diff | DetailAt if c.files => Ok(()),
+            // Changed files only is the file window's alone. The diff pane over the list is moai-ffk9.cij's.
+            Changed | Diff => Err(Off::Quiet),
             Go(_) | Step(_) | Help if c.stats || c.wiki || c.files => Ok(()),
             Raw if c.wiki => Ok(()),
             _ if c.stats || c.wiki || c.files => Err(Off::Quiet),
@@ -1341,10 +1361,13 @@ impl Browse {
             Pick => say(c.lang, "tui.menu.pick"),
             Unregister => say(c.lang, "tui.menu.unregister"),
             Go(s) => s.word(c.lang),
+            Worktree if c.files => say(c.lang, "tui.menu.checkout"),
             Worktree => say(c.lang, "tui.menu.worktree"),
             Raw => say(c.lang, "tui.menu.raw"),
             ShowAll => say(c.lang, "tui.menu.show_all"),
             Detail => say(c.lang, "tui.menu.detail"),
+            Diff => say(c.lang, "tui.menu.diff"),
+            Changed => say(c.lang, "tui.menu.changed"),
             Read => say(c.lang, "tui.menu.read"),
             ReadAll => say(c.lang, "tui.menu.read_all"),
             ReadGroup => say(c.lang, "tui.menu.read_group"),
@@ -1360,6 +1383,12 @@ impl Browse {
     /// 칠하면 색 없는 터미널에서 어느 쪽인지 모른다.
     pub fn state(self, c: &Ctx) -> Option<String> {
         match self {
+            // The checkout pick opens a window — it has no state.
+            Browse::Worktree if c.files => None,
+            Browse::Detail if c.files => Some(shown(!c.files_detail, c.lang).into()),
+            Browse::Diff => Some(shown(!c.files_diff, c.lang).into()),
+            Browse::Changed if c.files_changed => Some(say(c.lang, "tui.state.on").into()),
+            Browse::Changed => Some(say(c.lang, "tui.state.off").into()),
             Browse::Worktree if c.worktree => Some(say(c.lang, "tui.state.on").into()),
             Browse::Worktree => Some(say(c.lang, "tui.state.off").into()),
             Browse::Raw if c.raw => Some(say(c.lang, "tui.state.raw").into()),
@@ -1422,6 +1451,8 @@ impl Browse {
                 | SortAdd(_)
                 | Cell(_)
                 | Detail
+                | Diff
+                | Changed
                 | DetailAt
                 | DiffLayout
                 | ArchiveDays
@@ -1473,6 +1504,7 @@ impl Browse {
             Go(Screen::Wiki) => say(c.lang, "tui.act.wiki"),
             Go(Screen::Files) => say(c.lang, "tui.act.files"),
             ClearFilter => say(c.lang, "tui.act.clear_filter"),
+            Worktree if c.files => say(c.lang, "tui.act.checkout"),
             Worktree if c.worktree => say(c.lang, "tui.act.worktree_off"),
             Worktree => say(c.lang, "tui.act.worktree"),
             Raw if c.raw => say(c.lang, "tui.act.rendered"),
@@ -1489,6 +1521,8 @@ impl Browse {
             SortEdit => say(c.lang, "tui.act.sort_edit"),
             Cell(_) => say(c.lang, "tui.act.cell"),
             Detail => say(c.lang, "tui.act.detail"),
+            Diff => say(c.lang, "tui.act.diff"),
+            Changed => say(c.lang, "tui.act.changed"),
             DetailAt => say(c.lang, "tui.act.detail_at"),
             DiffLayout => say(c.lang, "tui.act.diff_layout"),
             Timezone => say(c.lang, "tui.act.timezone"),

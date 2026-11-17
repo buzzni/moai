@@ -95,6 +95,9 @@ pub struct FilesAt {
     pub top: usize,
     /// The right pane — with its border. None when too narrow to stand.
     pub info: Option<Rect>,
+    /// The detail and the diff when the right side is theirs (moai-ffk9.211) — each with its border.
+    pub detail: Option<Rect>,
+    pub diff: Option<Rect>,
 }
 
 /// Which dividing line a drag holds — each moves a share of its own.
@@ -372,6 +375,10 @@ impl App {
             return self.drag_to(grab, at);
         }
         let Some(d) = self.drawn.files.as_ref() else { return };
+        // The checkout picker stands over the panes — the mouse leaves them alone while it is open (moai-ffk9.211).
+        if matches!(&self.mode, Mode::Files(w) if w.pick.is_some()) {
+            return;
+        }
         let pressed = matches!(kind, MouseEventKind::Down(MouseButton::Left));
         if pressed && let Some(grab) = self.files_grab_at(d, at) {
             self.acted();
@@ -381,7 +388,9 @@ impl App {
             self.dragging = Some(grab);
             return;
         }
-        let on = if d.info.is_some_and(|r| r.contains(at)) {
+        let on = if d.detail.is_some_and(|r| r.contains(at)) {
+            Side::Detail
+        } else if d.info.is_some_and(|r| r.contains(at)) {
             Side::Info
         } else if d.tree.contains(at) {
             Side::Tree
@@ -393,7 +402,7 @@ impl App {
                 self.acted();
                 if let Mode::Files(w) = &mut self.mode {
                     w.chord.clear();
-                    w.right.pan_by(by * super::files::PAN_WHEEL as isize);
+                    w.pan_wheel(by);
                 }
             }
             return;
