@@ -94,7 +94,7 @@ test('checkout changes discard late replies and changed-only includes deleted fi
   release(); await wait(20)
   assert.match(p.root.textContent, /new/); assert.doesNotMatch(p.root.textContent, /old/)
   p.view.command('changed'); await wait(20)
-  assert.match(p.root.textContent, /gone/); assert.match(p.root.textContent, / D /); assert.doesNotMatch(p.root.querySelector('.m-files-tree').textContent, /new/)
+  assert.match(p.root.textContent, /gone/); assert.equal(p.root.querySelector('.m-files-c-mark').textContent, 'D'); assert.doesNotMatch(p.root.querySelector('.m-files-tree').textContent, /new/)
   p.view.command('changed'); await wait(20); assert.match(p.root.querySelector('.m-files-tree').textContent, /new/)
   assert.ok(calls.some(([path, query]) => path === '/api/changes' && query.root === 'side'))
   p.view.destroy(); p.dom.window.close()
@@ -144,7 +144,7 @@ test('refreshed directory and file keep the selected path and replace content', 
   p.view.render(p.state, null); await wait(20); p.root.querySelector('[role=treeitem]').click(); await wait(120)
   const watch = p.view.fileWatch(); assert.equal(watch.file.path, 'chosen'); assert.equal(watch.dirs[0].stamp, 'dir1')
   changed = true; await p.view.refreshFileStamps(watch, ['.'], true); await wait(20)
-  assert.equal(p.root.querySelector('[aria-selected=true]').textContent.trim(), '· chosen')
+  assert.equal(p.root.querySelector('[aria-selected=true] .m-files-label').textContent, 'chosen')
   assert.match(p.root.querySelector('.m-files-content').textContent, /new text/)
   assert.equal(p.view.fileWatch().file.stamp, 'file2')
   p.view.destroy(); p.dom.window.close()
@@ -301,4 +301,130 @@ test('the three toggles are icon buttons whose name carries the state', async ()
   buttons[1].click()
   assert.deepEqual(named()[1].slice(0, 2), ['true', 'Diff · on'])
   p.view.destroy(); p.dom.window.close()
+})
+
+// ---- the tree rows are the list's rows (moai-dy7a.vc8) ----
+const tree = { '.': [entry('a', 'dir'), entry('z')], a: [entry('b', 'dir'), entry('c')], 'a/b': [entry('d')] }
+const treeRequest = (calls = []) => async ({ path, query }) => {
+  calls.push([path, query])
+  if (path === '/api/files') return { kind: 'passed', output: { entries: tree[query.dir] ?? [], stamp: 's', truncated: false } }
+  return { kind: 'passed', output: { path: query.path, text: '', binary: false, truncated: false, spans: null } }
+}
+const rowsOf = p => [...p.root.querySelectorAll('[role=treeitem]')]
+const twigOf = row => [...row.querySelectorAll('.moai-tw')].map(t => t.dataset.tw)
+const nameOf = row => row.querySelector('.m-files-label').textContent
+const press = (p, key) => p.view.handleKey(new p.dom.window.KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }))
+async function opened() {
+  const calls = []
+  const p = page(treeRequest(calls)); p.view.render(p.state, null); await wait(10)
+  rowsOf(p)[0].click(); await wait(10); rowsOf(p)[1].click(); await wait(10)
+  return { p, calls }
+}
+test('file rows are the list row and carry a branch per level', async () => {
+  const { p } = await opened()
+  const rows = rowsOf(p)
+  assert.deepEqual(rows.map(nameOf), ['a', 'b', 'd', 'c', 'z'])
+  assert.deepEqual(rows.map(twigOf), [[], ['tee'], ['pipe', 'end'], ['end'], []])
+  assert.deepEqual(rows.map(r => r.getAttribute('aria-level')), ['1', '2', '3', '2', '1'])
+  assert.deepEqual(rows.map(r => r.querySelectorAll('.moai-tw').length), rows.map(r => Number(r.getAttribute('aria-level')) - 1))
+  assert.ok(rows.every(r => r.classList.contains('m-row') && !/m-files-depth-/.test(r.className)))
+  assert.ok(rows.every(r => r.querySelector('.moai-twig') === null || r.querySelector('.moai-twig').getAttribute('aria-hidden') === 'true'))
+  p.view.destroy(); p.dom.window.close()
+})
+test('a row always has the mark cell and the fold slot, so every name starts in one place', async () => {
+  const { p } = await opened()
+  for (const row of rowsOf(p)) {
+    assert.ok(row.children[0].classList.contains('m-files-c-mark')); assert.equal(row.children[0].textContent, '')
+    const name = row.children[1]; assert.ok(name.classList.contains('m-files-name'))
+    const parts = row.querySelectorAll('.moai-tw').length
+    assert.equal([...name.children].filter(c => !c.classList.contains('moai-twig'))[0].classList.contains('m-files-fold'), true)
+    assert.equal(name.querySelector('.moai-twig') ? 1 : 0, parts ? 1 : 0)
+  }
+  const [dir, , , , file] = rowsOf(p)
+  assert.ok(dir.querySelector('.m-files-fold svg')); assert.equal(file.querySelector('.m-files-fold svg'), null)
+  assert.equal(p.root.querySelector('.m-files-tree button button'), null)
+  p.view.destroy(); p.dom.window.close()
+})
+test('going into a directory starts the branch again from nothing, and a ".." row has none', async () => {
+  const { p } = await opened()
+  rowsOf(p)[0].click(); await wait(10); p.view.handleKey({ key: 'Enter', target: p.root.querySelector('.m-files-tree') }); await wait(20)
+  const rows = rowsOf(p)
+  assert.equal(nameOf(rows[0]), '↰ ..'); assert.deepEqual(twigOf(rows[0]), [])
+  const names = rows.map(nameOf); assert.ok(names.includes('b'))
+  assert.deepEqual(twigOf(rows[names.indexOf('b')]), [])
+  p.view.destroy(); p.dom.window.close()
+})
+test('clicks and keys do what they did: pick, fold once, move the cursor, refuse a closed row', async () => {
+  const calls = []
+  const p = page(async req => req.path === '/api/files' ? { kind: 'passed', output: { entries: req.query.dir === '.' ? [entry('a', 'dir'), entry('x'), { name: 'locked', kind: 'file', openable: false, size: 1 }] : [entry('in')], stamp: 's', truncated: false } } : (calls.push(req.path), { kind: 'passed', output: { path: req.query.path, text: 'hi', binary: false, truncated: false, spans: null } }))
+  p.view.render(p.state, null); await wait(10)
+  const dirRow = rowsOf(p)[0]
+  dirRow.querySelector('.m-files-fold').click(); await wait(10)
+  assert.equal(rowsOf(p)[0].getAttribute('aria-expanded'), 'true'); assert.deepEqual(rowsOf(p).map(nameOf), ['a', 'in', 'x', 'locked'])
+  rowsOf(p)[0].querySelector('.m-files-fold').click(); await wait(10)
+  assert.equal(rowsOf(p)[0].getAttribute('aria-expanded'), 'false'); assert.deepEqual(rowsOf(p).map(nameOf), ['a', 'x', 'locked'])
+  press(p, 'j'); assert.equal(rowsOf(p)[1].getAttribute('aria-selected'), 'true'); assert.equal(rowsOf(p)[0].getAttribute('aria-selected'), 'false')
+  const locked = rowsOf(p)[2]; assert.equal(locked.disabled, true); assert.equal(locked.querySelector('.m-files-meta').textContent, 'Unavailable')
+  await wait(130); const reads = calls.length; locked.click(); await wait(130); assert.equal(calls.length, reads); assert.equal(rowsOf(p)[2].getAttribute('aria-selected'), 'false')
+  rowsOf(p)[1].click(); await wait(150); assert.equal(rowsOf(p)[1].getAttribute('aria-selected'), 'true'); assert.equal(calls.length, reads + 1)
+  p.view.destroy(); p.dom.window.close()
+})
+test('a search wraps the hit in the name only and takes it off again, leaving the branch and the mark cell', async () => {
+  const p = page(async ({ path, query }) => {
+    if (path === '/api/files') return { kind: 'passed', output: { entries: query.dir === '.' ? [entry('dir', 'dir'), entry('other')] : [entry('needle')] } }
+    if (path === '/api/find') return { kind: 'passed', output: { matches: [{ path: 'dir/needle', start: 4, end: 10 }], total: 1, truncated: false, walk_truncated: false, ignored_unavailable: false } }
+    return { kind: 'passed', output: { path: query.path, text: '', binary: false, truncated: false, spans: null } }
+  })
+  p.view.render(p.state, null); await wait(10); press(p, '/')
+  const input = p.root.querySelector('input'); input.value = 'needle'; input.dispatchEvent(new p.dom.window.Event('input', { bubbles: true })); await wait(250)
+  const hit = rowsOf(p).find(r => nameOf(r) === 'needle')
+  assert.equal(hit.querySelector('mark').parentNode, hit.querySelector('.m-files-label')); assert.deepEqual(twigOf(hit), ['end'])
+  assert.ok(hit.querySelector('.m-files-c-mark')); assert.ok(hit.querySelector('.m-files-fold'))
+  p.view.handleKey({ key: 'Escape', target: input })
+  assert.equal(p.root.querySelector('mark'), null); assert.ok(rowsOf(p).every(r => r.querySelector('.m-files-c-mark')))
+  p.view.destroy(); p.dom.window.close()
+})
+const changedPage = (files, listing) => page(async ({ path, query }) => {
+  if (path === '/api/files') return { kind: 'passed', output: { entries: listing, stamp: 's', truncated: false } }
+  if (path === '/api/changes') return { kind: 'passed', output: { files } }
+  return { kind: 'passed', output: { path: query.path, text: '', binary: false, truncated: false, spans: null } }
+})
+const change = (path, status, adds, dels, old = null) => ({ path, status, old_path: old, adds, dels, binary: false })
+test('changed-only draws the same branch, the letter in its cell, sums on directories and the old name text', async () => {
+  const hostile = '<img src=x onerror=alert(1)>'
+  const p = changedPage([change('src/a.rs', 'modified', 3, 1), change('src/b.rs', 'added', 4, 0), change('src/gone.rs', 'deleted', 0, 9), change('src/new.rs', 'renamed', 0, 0, hostile), change('top.md', 'modified', 1, 1)], [entry('x')])
+  p.view.render(p.state, null); await wait(10); p.view.command('changed'); await wait(30)
+  const rows = rowsOf(p), by = name => rows.find(r => nameOf(r).startsWith(name))
+  assert.deepEqual(rows.map(r => r.querySelector('.m-files-label').firstChild.textContent), ['src', 'a.rs', 'b.rs', 'gone.rs', 'new.rs', 'top.md'])
+  assert.deepEqual(rows.map(twigOf), [[], ['tee'], ['tee'], ['tee'], ['end'], []])
+  const dir = by('src'); assert.equal(dir.querySelector('.m-files-meta').textContent, '+7 −10'); assert.ok(dir.querySelector('.m-files-faint .m-count-add'))
+  assert.equal(dir.querySelector('.m-files-c-mark').textContent, '')
+  const a = by('a.rs'); assert.equal(a.querySelector('.m-files-c-mark').textContent, 'M'); assert.ok(a.querySelector('.m-files-c-mark').classList.contains('m-mark-M'))
+  assert.equal(a.querySelector('.m-files-meta').textContent, '+3 −1'); assert.ok(a.querySelector('.m-count-add')); assert.ok(a.querySelector('.m-count-del'))
+  assert.ok(by('b.rs').querySelector('.m-files-c-mark').classList.contains('m-mark-A'))
+  const gone = by('gone.rs'); assert.ok(gone.querySelector('.m-files-label').classList.contains('m-files-gone')); assert.ok(gone.querySelector('.m-files-c-mark').classList.contains('m-mark-D'))
+  const renamed = by('new.rs'); assert.ok(renamed.querySelector('.m-mark-R')); assert.equal(renamed.querySelector('.m-files-from').textContent, ` ← ${hostile}`)
+  assert.equal(p.root.querySelector('img'), null); assert.equal(p.root.querySelector('.m-files-tree button button'), null)
+  assert.ok(rows.every(r => r.children[0].classList.contains('m-files-c-mark')))
+  p.view.destroy(); p.dom.window.close()
+})
+test('hostile names never become classes or attributes of the row', async () => {
+  const p = page(async ({ path, query }) => ({ kind: 'passed', output: path === '/api/files' ? { entries: [entry('x" onclick="bad'), entry('"><b>b</b>.rs')] } : { path: query.path, text: '', binary: false, truncated: false, spans: null } }))
+  p.view.render(p.state, null); await wait(10)
+  for (const row of rowsOf(p)) { assert.equal(row.getAttribute('onclick'), null); assert.equal(row.querySelector('b'), null); assert.ok(row.className.split(' ').every(c => /^[\w-]+$/.test(c))) }
+  p.view.destroy(); p.dom.window.close()
+})
+test('a refresh that finds the same tree keeps the row nodes and the cursor row', async () => {
+  const { p } = await opened()
+  press(p, 'j'); const before = rowsOf(p), at = before.findIndex(r => r.getAttribute('aria-selected') === 'true')
+  await p.view.refreshFileStamps(p.view.fileWatch(), ['.', 'a', 'a/b'], true); await wait(20)
+  const after = rowsOf(p); assert.deepEqual(after.map(nameOf), before.map(nameOf)); assert.equal(after[at].getAttribute('aria-selected'), 'true')
+  assert.ok(before.every((r, i) => r === after[i]))
+  p.view.destroy(); p.dom.window.close()
+})
+test('the tree styles share the list row and drop the indent classes', async () => {
+  const { readFileSync } = await import('node:fs')
+  const css = readFileSync(new URL('../panel/style/files.css', import.meta.url), 'utf8'), view = readFileSync(new URL('../panel/view/files.ts', import.meta.url), 'utf8')
+  assert.doesNotMatch(css, /m-files-depth/); assert.doesNotMatch(view, /m-files-depth/)
+  assert.match(css, /var\(--moai-row-h\)/); assert.match(view, /twigParts/); assert.match(view, /TWIG_TEXT/)
 })

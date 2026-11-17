@@ -69,6 +69,8 @@
   --radius: var(--saycode-radius, 10px);
   --radius-xs: 6px;
   --radius-card: 3px;
+  /* A dense row: the list tab (list.css) and the files tab tree draw their rows this tall. */
+  --moai-row-h: 24px;
   --font: var(--saycode-font, Inter, Pretendard, system-ui, -apple-system, "Segoe UI", sans-serif);
   --mono: "SF Mono", "JetBrains Mono", "Fira Code", ui-monospace, Menlo, monospace;
 

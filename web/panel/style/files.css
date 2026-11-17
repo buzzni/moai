@@ -1,14 +1,20 @@
 .m-pane-files { min-height: 0; height: 100%; }
 .m-pane-files .m-split { height: 100%; }
 .m-files-tree, .m-files-content { height: 100%; overflow: auto; }
-.m-files-row { display: block; width: 100%; border: 0; text-align: left; color: inherit; background: transparent; white-space: nowrap; }
-.m-files-row[aria-selected="true"] { background: var(--selected); }
+/* A tree row is the list's row (components.css .m-row) at the list's height and selection band, drawn from the same
+   tokens: --moai-row-h (tokens.css, as list.css) and --accent. The row stays a button; its fold is a span, so nothing nests. */
+.m-files-row { width: 100%; border: 0; text-align: left; font: inherit; background: transparent; }
+.m-files-tree > .m-row { height: var(--moai-row-h); }
+.m-files-tree > .m-row[aria-selected="true"]::before { width: 4px; background: var(--accent); border-radius: 0 2px 2px 0; }
 .m-files-row:disabled { opacity: .5; }
-/* One step per level up to the cap view/files.ts draws: a shared indent from depth 4 drew a child level with its parent. */
-.m-files-depth-1 { padding-left: 1.5em; } .m-files-depth-2 { padding-left: 2.5em; } .m-files-depth-3 { padding-left: 3.5em; }
-.m-files-depth-4 { padding-left: 4.5em; } .m-files-depth-5 { padding-left: 5.5em; } .m-files-depth-6 { padding-left: 6.5em; }
-.m-files-depth-7 { padding-left: 7.5em; } .m-files-depth-8 { padding-left: 8.5em; } .m-files-depth-9 { padding-left: 9.5em; }
-.m-files-depth-10 { padding-left: 10.5em; } .m-files-depth-11 { padding-left: 11.5em; } .m-files-depth-12 { padding-left: 12.5em; }
+.m-files-tree > .m-row > .m-files-name { align-self: stretch; line-height: var(--moai-row-h); }
+/* Always there, empty or not, so the names start in one column; the letter's colour is a .m-mark-* class. */
+.m-files-c-mark { flex: none; width: 1.5ch; text-align: center; font: 600 12px var(--mono); color: var(--muted); }
+.m-files-fold { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 16px; height: 16px; vertical-align: middle; }
+.m-files-fold.moai-toggle { pointer-events: none; }
+.m-files-row[aria-expanded="true"] .moai-toggle .m-icon { transform: rotate(90deg); }
+.m-files-gone { color: var(--muted); text-decoration: line-through; }
+.m-files-from, .m-files-faint { opacity: .6; }
 .m-file-line { display: flex; min-width: max-content; font-family: monospace; white-space: pre; }
 .m-file-number { position: sticky; left: 0; min-width: 4em; text-align: right; padding-right: 1em; background: var(--bg); opacity: .65; }
 .m-syntax-comment { color: var(--ok); } .m-syntax-string { color: var(--warn); } .m-syntax-keyword { color: var(--accent); } .m-syntax-number { color: var(--muted); }

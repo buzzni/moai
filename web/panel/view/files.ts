@@ -1,8 +1,9 @@
 import { filesSource, type Entry, type FileText, type SearchResult, type Checkout, type Change } from '../data/files.ts'
 import { fileGroup, fileGroupTable, type FileGroupTable } from '../data/file-groups.ts'
-import { el, iconButton, stateLabel } from './components.ts'
+import { el, icon, iconButton, stateLabel } from './components.ts'
 import { createSplit } from './split.ts'
 import { createDiff, statusMark } from './diff.ts'
+import { twigParts, TWIG_TEXT } from './list-model.ts'
 import { mountDetail } from './detail.ts'
 import { loadDetail } from '../data/source.ts'
 import type { FileWatch, StampAnswer } from '../data/files-refresh.ts'
@@ -12,6 +13,8 @@ import type { PaneView, ViewContext } from './types.ts'
 
 const CLASSES = new Set(['comment', 'string', 'number', 'keyword', 'type', 'function', 'constant', 'tag', 'attribute', 'heading', 'other'])
 const join = (parent: string, name: string) => parent === '.' ? name : `${parent}/${name}`
+/** Closed list: only these four letters get a colour; any other letter stays in the muted ink. */
+const MARK_CLASSES = new Set(['M', 'A', 'D', 'R'])
 const KIND_CLASSES = new Set(['directory', 'link', 'source', 'doc', 'data', 'script', 'binary', 'plain'])
 /** Closed list: a received group name never becomes a class by itself. */
 const fileClass = (entry: Entry, table: FileGroupTable | null): string => {
@@ -64,7 +67,9 @@ export function mountFiles(root: HTMLElement, ctx: ViewContext): PaneView {
   let beforeSearch = new Set<string>()
   let matches: SearchResult | null = null
   let cursor = 0, chosen = '', base = '.', generation = 0, pendingG = false, timer: ReturnType<typeof setTimeout> | undefined
-  let rows: Array<{ path: string; entry: Entry; depth: number }> = []
+  let rows: Array<{ path: string; entry: Entry; depth: number; twig: boolean[] }> = []
+  /** Changed-only: each directory's total of the `+N −M` below it, summed once when the tree is built. */
+  let sums = new Map<string, { adds: number; dels: number }>()
   let alive = true, started = false, rootKey: string | undefined, checkouts: Checkout[] = [], changedOnly = false, diffOn = false, detailOn = false
   let groups: FileGroupTable | null = null
   let changes: Change[] = [], ordinary: Map<string, Entry[]> | null = null, stateNow: State | null = null, indexNow: IssueIndex | null = null
@@ -121,11 +126,12 @@ export function mountFiles(root: HTMLElement, ctx: ViewContext): PaneView {
     if (!diffOn) { autoDiff = true; setDiff(true) }
   }
   function buildChanged(next: Change[]): void {
-    changes = next; directories.clear(); directories.set('.', []); expanded.clear(); expanded.add('.')
+    changes = next; directories.clear(); directories.set('.', []); expanded.clear(); expanded.add('.'); sums = new Map()
     for (const change of changes) {
       const parts = change.path.split('/'); if (parts.some(p => !p || p === '.' || p === '..')) continue
       let dir = '.'
       parts.forEach((name, i) => {
+        if (i < parts.length - 1) { const at = join(dir, name), sum = sums.get(at) ?? { adds: 0, dels: 0 }; sum.adds += change.adds ?? 0; sum.dels += change.dels ?? 0; sums.set(at, sum) }
         const last = i === parts.length - 1, entries = directories.get(dir) ?? []
         if (!entries.some(e => e.name === name)) entries.push({ name, kind: last ? 'file' : 'dir', openable: true, size: 0 })
         directories.set(dir, entries)
@@ -171,37 +177,65 @@ export function mountFiles(root: HTMLElement, ctx: ViewContext): PaneView {
     if (result.truncated) partial.add(dir); else partial.delete(dir)
     return result.entries.length
   }
-  function flatten(dir: string, depth: number): void {
-    for (const entry of directories.get(dir) ?? []) {
-      const path = join(dir, entry.name); rows.push({ path, entry, depth })
-      if (expanded.has(path)) flatten(path, depth + 1)
-    }
+  /** `kin` is the row's parent's twig; each row adds whether a sibling follows it, which is what list-model's twigParts reads. */
+  function flatten(dir: string, depth: number, kin: boolean[]): void {
+    const entries = directories.get(dir) ?? []
+    entries.forEach((entry, i) => {
+      const path = join(dir, entry.name), twig = [...kin, i < entries.length - 1]; rows.push({ path, entry, depth, twig })
+      if (expanded.has(path)) flatten(path, depth + 1, twig)
+    })
+  }
+  /** One row: [mark cell][name cell: twig, fold, name][meta]. Everything others wrote goes in as text nodes. */
+  function rowNode(level: number, kind: string, selected: boolean, fold: HTMLElement, label: HTMLElement, twig: boolean[], mark: string, markClass: string, meta: Array<Node | string>, expandedState?: boolean): HTMLButtonElement {
+    const node = el(doc, 'button', { type: 'button', role: 'treeitem', class: 'm-row m-files-row', 'aria-level': level, 'aria-selected': String(selected), ...(expandedState === undefined ? {} : { 'aria-expanded': String(expandedState) }) })
+    const twigNode = el(doc, 'span', { class: 'moai-twig', 'aria-hidden': 'true' })
+    for (const part of twigParts(twig)) twigNode.append(el(doc, 'span', { class: 'moai-tw', 'data-tw': part }, TWIG_TEXT[part]))
+    const name = el(doc, 'span', { class: `m-row-title m-files-name m-files-kind-${kind}` })
+    if (twigNode.childNodes.length) name.append(twigNode)
+    name.append(fold, label)
+    node.append(el(doc, 'span', { class: `m-files-c-mark${markClass ? ` ${markClass}` : ''}` }, mark), name)
+    const metaNode = el(doc, 'span', { class: 'm-row-meta m-files-meta' }); metaNode.append(...meta); node.append(metaNode)
+    return node
   }
   function draw(keepPath?: string): void {
-    rows = []; flatten(base, 0)
+    rows = []; flatten(base, 0, [])
     if (keepPath) { const found = rows.findIndex(row => row.path === keepPath); if (found >= 0) cursor = found }
     cursor = Math.max(0, Math.min(cursor, rows.length - 1))
     const changesByPath = new Map(changes.map(change => [change.path, change]))
     const matchesByPath = new Map((matches?.matches ?? []).map(match => [match.path, match]))
     const nodes = rows.map((row, index) => {
       const isDir = row.entry.kind === 'dir' || (row.entry.kind === 'link' && row.entry.openable && row.entry.dir === true)
-      const button = el(doc, 'button', { type: 'button', role: 'treeitem', class: `m-files-row m-files-kind-${fileClass(row.entry, groups)} m-files-depth-${Math.min(row.depth, 12)}`, 'aria-selected': String(index === cursor), ...(isDir ? { 'aria-expanded': String(expanded.has(row.path)) } : {}) }, `${isDir ? (expanded.has(row.path) ? '▾' : '▸') : row.entry.kind === 'link' ? '↗' : '·'} ${row.entry.name}`)
-      const change = changesByPath.get(row.path)
-      if (changedOnly && change) button.append(doc.createTextNode(` ${statusMark(change.status)} +${change.adds ?? 0} −${change.dels ?? 0}`))
+      const change = changedOnly ? changesByPath.get(row.path) : undefined
+      // The fold is a span, not a button: the row is the button, and a button inside it would press twice.
+      const fold = el(doc, 'span', { class: `m-files-fold${isDir ? ' moai-toggle' : ''}`, 'aria-hidden': 'true' })
+      if (isDir) fold.append(icon(doc, 'chevron-right', 12))
+      const label = el(doc, 'span', { class: `m-files-label${change?.status === 'deleted' ? ' m-files-gone' : ''}` })
       const hit = matchesByPath.get(row.path)
       const offset = row.path.length - row.entry.name.length
       if (hit && hit.start >= offset && hit.end <= row.path.length && hit.end >= hit.start) {
-        const prefix = isDir ? (expanded.has(row.path) ? '▾' : '▸') : row.entry.kind === 'link' ? '↗' : '·'
-        button.replaceChildren(doc.createTextNode(`${prefix} ${row.entry.name.slice(0, hit.start - offset)}`), el(doc, 'mark', {}, row.entry.name.slice(hit.start - offset, hit.end - offset)), doc.createTextNode(row.entry.name.slice(hit.end - offset)))
+        label.append(doc.createTextNode(row.entry.name.slice(0, hit.start - offset)), el(doc, 'mark', {}, row.entry.name.slice(hit.start - offset, hit.end - offset)), doc.createTextNode(row.entry.name.slice(hit.end - offset)))
+      } else label.append(doc.createTextNode(row.entry.name))
+      if (row.entry.kind === 'link') label.prepend(doc.createTextNode('↗ '))
+      if (change && typeof change.old_path === 'string' && change.old_path) label.append(el(doc, 'span', { class: 'm-files-from' }, ` ← ${change.old_path}`))
+      const meta: Array<Node | string> = []
+      const total = changedOnly ? (change ?? (isDir ? sums.get(row.path) : undefined)) : undefined
+      if (total) {
+        const adds = 'adds' in total ? total.adds ?? 0 : 0, dels = 'dels' in total ? total.dels ?? 0 : 0
+        const counts = el(doc, 'span', { class: isDir ? 'm-files-faint' : '' }, '')
+        counts.append(el(doc, 'span', { class: 'm-count-add' }, `+${adds}`), doc.createTextNode(' '), el(doc, 'span', { class: 'm-count-del' }, `−${dels}`))
+        meta.push(counts)
       }
-      if (!row.entry.openable) button.append(doc.createTextNode(` (${words.unavailable})`))
+      if (!row.entry.openable) meta.push(words.unavailable)
+      const letter = change ? statusMark(change.status) : ''
+      const button = rowNode(row.depth + 1, fileClass(row.entry, groups), index === cursor, fold, label, row.twig, letter, MARK_CLASSES.has(letter) ? `m-mark-${letter}` : '', meta, isDir ? expanded.has(row.path) : undefined)
       button.disabled = !row.entry.openable
       button.addEventListener('click', () => { cursor = index; if (isDir) { generation++; clearTimeout(timer) } if (isDir) { if (expanded.has(row.path)) { expanded.delete(row.path); draw() } else void expand() } else { select(); draw() } })
       button.addEventListener('dblclick', () => { void expand() })
       return button
     })
     if (base !== '.') {
-      const up = el(doc, 'button', { type: 'button', role: 'treeitem', class: 'm-files-row' }, '↰ ..')
+      const fold = el(doc, 'span', { class: 'm-files-fold', 'aria-hidden': 'true' })
+      const up = rowNode(1, 'plain', false, fold, el(doc, 'span', { class: 'm-files-label' }, '↰ ..'), [], '', '', [])
       up.addEventListener('click', () => { base = base.includes('/') ? base.slice(0, base.lastIndexOf('/')) : '.'; cursor = 0; draw() })
       nodes.unshift(up)
     }
