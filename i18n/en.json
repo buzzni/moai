@@ -1526,6 +1526,7 @@
   "page.failed": "The read failed.",
   "page.unreadable": "The answer could not be read.",
   "page.said": "moai said:",
+  "page.diff.owner": "Epic {id} branch",
   "page.diff.unified": "Unified",
   "page.diff.side": "Side by side",
   "page.diff.narrow": "Side-by-side needs more room",

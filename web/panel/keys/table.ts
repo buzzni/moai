@@ -44,7 +44,7 @@ export interface KeyContext {
   /** Selected tab. */
   tab?: "list" | "board" | "wiki" | "gantt" | "files"
   /** Focused pane. Browse: 'list' | 'detail'. Wiki: 'list' | 'page'. */
-  focus?: "list" | "detail" | "page"
+  focus?: "list" | "detail" | "diff" | "page"
   /** Detail pane shown (SPC v d). Default true. */
   detail?: boolean
   detailAt?: "right" | "top" | "left" | "bottom"
@@ -64,6 +64,7 @@ export interface KeyContext {
    * when it is given no read-mark writes, so the menu leaves the items out and the help dims them.
    */
   readable?: boolean
+  diff?: boolean
   files?: { diff: boolean; detail: boolean; changed: boolean }
   proposals?: boolean
   /**
@@ -168,7 +169,7 @@ const shown = (hidden: boolean | undefined): StateId => (hidden ? "hidden" : "sh
 function focusWhen(side: "next" | "prev" | "left" | "right" | "up" | "down"): (c: KeyContext) => boolean {
   return (c) => {
     if (c.mode === "wiki") return side === "next" || side === "prev" || side === "left" || side === "right"
-    if (!detailShown(c)) return false
+    if (!detailShown(c) && !c.diff) return false
     if (side === "left" || side === "right") return detailAt(c) === "left" || detailAt(c) === "right"
     if (side === "up" || side === "down") return detailAt(c) === "bottom" || detailAt(c) === "top"
     return true
@@ -341,7 +342,7 @@ const MENU: ReadonlyArray<Binding> = [
   { action: "view.backlog", keys: ["SPC v b"], label: "view.backlog", group: "view", kind: "toggle", modes: BROWSE_ONLY, state: (c) => shown(c.hidden?.backlog) },
   { action: "view.archived", keys: ["SPC v o"], label: "view.archived", group: "view", kind: "toggle", modes: BROWSE_ONLY, state: (c) => shown(c.hidden?.archived) },
   // The other worktrees' rows over the list, as the TUI's `SPC v w` (se-etwu); on when the page opens.
-  { action: "view.diff", keys: ["SPC v D"], label: "view.diff", group: "view", modes: BROWSE_ONLY, when: (c) => c.tab === "files", kind: "toggle", state: (c) => shown(!c.files?.diff) },
+  { action: "view.diff", keys: ["SPC v D"], label: "view.diff", group: "view", modes: BROWSE_ONLY, when: (c) => c.tab !== "wiki", kind: "toggle", state: (c) => shown(c.tab === "files" ? !c.files?.diff : !c.diff) },
   { action: "view.changed", keys: ["SPC v c"], label: "view.changed", group: "view", modes: BROWSE_ONLY, when: (c) => c.tab === "files", kind: "toggle", state: (c) => shown(!c.files?.changed) },
   { action: "view.worktree", keys: ["SPC v w"], label: (w, c) => w.labels[c.tab === "files" ? "view.checkout" : "view.worktree"], group: "view", kind: "toggle", modes: BROWSE_ONLY, state: (c) => c.tab === "files" ? null : shown(c.hidden?.worktree) },
   { action: "view.all", keys: ["SPC v a"], label: "view.all", helpLabel: "view.allHelp", group: "view", modes: BROWSE_ONLY },
@@ -375,11 +376,11 @@ const MENU: ReadonlyArray<Binding> = [
     group: "option",
     kind: "toggle",
     modes: BROWSE_ONLY,
-    when: (c) => (c.tab === "files" || detailShown(c)) && !c.detailAtLocked,
+    when: (c) => (c.tab === "files" || c.diff === true || detailShown(c)) && !c.detailAtLocked,
     state: (c) => detailAt(c),
     verdict: "변경",
   },
-  { action: "option.side", keys: ["SPC o s"], label: "option.side", group: "option", modes: BROWSE_ONLY, when: (c) => c.tab === "files" },
+  { action: "option.side", keys: ["SPC o s"], label: "option.side", group: "option", modes: BROWSE_ONLY, when: (c) => c.tab === "files" || c.diff === true },
   // The TUI's `SPC o t` (keys.rs `Timezone`): opens the zone picker, it does not cycle. Dates on every tab follow it.
   {
     action: "option.timezone",

@@ -7,6 +7,8 @@
 // The shell reads and dispatches to the store; it does no I/O. Reads and cancels are the caller's
 // (main.ts) and arrive as ShellIntents.
 
+import { issueDiff, type IssueDiff, type Scope } from "../data/changes.ts"
+import { createDiff } from "./diff.ts"
 import { aboutFrom } from "../data/about.ts"
 import { isInformation, type Outcome } from "../data/client.ts"
 import type { IssueIndex } from "../data/index.ts"
@@ -87,7 +89,7 @@ export interface Shell {
   setWidth(width: number): void
   layout(): PaneLayout
   /** The views in the panes, for the key router (panel/keys/wiring.ts) to hand its actions to. */
-  panes(): { list: PaneView; board: PaneView; gantt: PaneView; detail: PaneView; wiki: PaneView | null; files: PaneView | null }
+  panes(): { list: PaneView; board: PaneView; gantt: PaneView; detail: PaneView; diff: PaneView; wiki: PaneView | null; files: PaneView | null }
   /** Move the keyboard focus into a pane of the shown tab (its view's focus()). */
   focusPane(area: Focus): void
   /** Move the keyboard focus to the selected tab of the tab bar: the way out of the wiki, whose Tab cycles its links. */
@@ -155,6 +157,8 @@ export function mountShell(root: HTMLElement, options: ShellOptions): Shell {
   })
   const refresh = el(doc, "button", { type: "button", class: "m-refreshed moai-refresh" }, copy.shell.refreshNow)
   refresh.addEventListener("click", () => intents.refresh())
+  const diffToggle = el(doc, "button", { type: "button", class: "m-diff-toggle", "aria-label": copy.files.diff }, copy.files.diff)
+  diffToggle.addEventListener("click", () => store.dispatch({ type: "diff-visible", visible: !store.getState().diff.visible }))
   const visibility = iconButton(doc, { icon: "eye", label: copy.shell.hideDetail, pressed: state.detail.visible })
   visibility.classList.add("moai-detail-toggle")
   visibility.addEventListener("click", () => store.dispatch({ type: "detail-visible", visible: !store.getState().detail.visible }))
@@ -185,7 +189,7 @@ export function mountShell(root: HTMLElement, options: ShellOptions): Shell {
   const actions = el(doc, "div", { class: "m-tabbar-slot" })
   const tabbar = el(doc, "div", { class: "m-tabbar" },
     tabs.el, el(doc, "div", { class: "m-tabbar-spacer" }),
-    el(doc, "div", { class: "m-tabbar-actions" }, refresh, themeButton, visibility, position.el, actions))
+    el(doc, "div", { class: "m-tabbar-actions" }, refresh, themeButton, visibility, diffToggle, position.el, actions))
 
   // ── under the tab bar: toolbar slot, path line, banners, result line ──
   const toolbar = el(doc, "div", { class: "m-toolbar-slot", hidden: state.tab === "wiki" || state.tab === "files" })
@@ -233,7 +237,7 @@ export function mountShell(root: HTMLElement, options: ShellOptions): Shell {
   const split = createSplit(doc, {
     position: state.detail.position,
     ratios: state.detail.ratio,
-    detailVisible: state.detail.visible,
+    detailVisible: state.detail.visible || state.diff.visible,
     labels: { resizer: copy.shell.resizer },
     onRatio: (at, ratio) => store.dispatch({ type: "detail-ratio", position: at, ratio }),
   })
@@ -247,6 +251,42 @@ export function mountShell(root: HTMLElement, options: ShellOptions): Shell {
   split.list.append(mainRoots.list, mainRoots.board, mainRoots.gantt)
   const detailRoot = el(doc, "div", { class: "m-pane-detail", tabindex: -1 })
   split.detail.append(detailRoot)
+  const diffRoot = el(doc, "div", { class: "m-pane-diff", tabindex: -1 })
+  const scopes = el(doc, "div", { class: "m-diff-scopes" })
+  const diffWidget = createDiff(doc, copy.diff, value => store.dispatch({ type: "diff-layout", layout: value }))
+  diffRoot.append(scopes, diffWidget.el)
+  const inside = createSplit(doc, { position: "left", ratios: { left: 0.5, top: 0.5 }, onRatio: (position, ratio) => store.dispatch({ type: "diff-ratio", axis: position === "left" ? "horizontal" : "vertical", ratio: 1 - ratio }) })
+  const foldedDiff = el(doc, "p", { class: "m-diff-collapsed", role: "status" }, copy.files.collapsed)
+  let diffId: string | null = null, diffOverlay = false, selectedScope: Scope | undefined, diffAnswer: IssueDiff | null = null, diffEpoch = 0
+  let diffTimer: ReturnType<typeof setTimeout> | undefined
+  function readDiff(id: string, scope?: Scope): void {
+    if (!options.client) return
+    const request = ++diffEpoch
+    void issueDiff(options.client, id, scope, store.getState().view.worktree).then(answer => {
+      if (request !== diffEpoch || store.getState().cursor !== id || !store.getState().diff.visible) return
+      diffAnswer = answer; selectedScope = answer.scope ?? undefined; diffWidget.show(answer); paintScopes()
+    }).catch(() => { if (request === diffEpoch) { diffAnswer = null; scopes.replaceChildren(); diffWidget.show({ files: [], truncated: false }) } })
+  }
+  function paintScopes(): void {
+    scopes.replaceChildren(...(diffAnswer?.offers ?? []).map(offer => {
+      const button = el(doc, "button", { type: "button", "aria-pressed": String(offer.scope === selectedScope) }, `${offer.scope}${offer.branch ? ` · ${offer.branch}` : ""}${offer.owner ? ` · ${fill(copy.diff.owner, { id: offer.owner })}` : ""}`)
+      button.addEventListener("click", () => { selectedScope = offer.scope; if (diffId) readDiff(diffId, offer.scope) })
+      return button
+    }))
+  }
+  function diffCommand(action: string): boolean {
+    if (action === "diff-layout") return diffWidget.command("toggle")
+    if (action === "next" || action === "prev" || action === "left" || action === "right") return diffWidget.command(action)
+    if (action === "scope-prev" || action === "scope-next") {
+      const offers = diffAnswer?.offers ?? []; if (!offers.length || !diffId) return false
+      const at = Math.max(0, offers.findIndex(o => o.scope === selectedScope)), step = action === "scope-next" ? 1 : -1
+      const chosen = offers[Math.max(0, Math.min(offers.length - 1, at + step))]!
+      selectedScope = chosen.scope; readDiff(diffId, chosen.scope); return true
+    }
+    return false
+  }
+  const diffView: PaneView = { render() {}, focus: () => diffWidget.focus(), command: diffCommand }
+  diffRoot.addEventListener("focusin", () => store.dispatch({ type: "focus", focus: "diff" }))
   // The store's `focus` follows the DOM's: a click or Tab into a pane (not only focusPane) says which pane has
   // the keys. The reducer ignores a focus that is already the one.
   split.list.addEventListener("focusin", () => store.dispatch({ type: "focus", focus: "list" }))
@@ -273,7 +313,8 @@ export function mountShell(root: HTMLElement, options: ShellOptions): Shell {
   const layout = (): PaneLayout => {
     const current = store.getState().detail
     const shown = effectivePosition(width, current.position)
-    return { width, position: shown, detailVisible: current.visible, mainWidth: mainWidth(width, shown, current.visible, split.ratio(shown)) }
+    const visible = current.visible || store.getState().diff.visible
+    return { width, position: shown, detailVisible: current.visible, mainWidth: mainWidth(width, shown, visible, split.ratio(shown)) }
   }
   const viewIntents: ViewIntents = {
     enter: (path, cursor) => store.dispatch(cursor === undefined ? { type: "enter", path } : { type: "enter", path, cursor }),
@@ -292,6 +333,7 @@ export function mountShell(root: HTMLElement, options: ShellOptions): Shell {
   const focusPane = (area: Focus) => {
     store.dispatch({ type: "focus", focus: area })
     const now = store.getState()
+    if (area === "diff") return diffWidget.focus()
     if (area === "detail") return detailView.focus ? detailView.focus() : detailRoot.focus()
     if (now.tab === "wiki") return wikiView?.focus ? wikiView.focus() : wiki.focus()
     if (now.tab === "files") return filesView?.focus ? filesView.focus() : files.focus()
@@ -377,7 +419,21 @@ export function mountShell(root: HTMLElement, options: ShellOptions): Shell {
     const detail = current.detail
     if (split.preferred() !== detail.position) split.setPosition(detail.position)
     for (const at of ["right", "bottom", "left", "top"] as const) if (split.ratio(at) !== detail.ratio[at]) split.setRatio(at, detail.ratio[at])
-    split.setDetailVisible(detail.visible)
+    split.setDetailVisible(detail.visible || current.diff.visible)
+    diffToggle.hidden = current.tab === "wiki" || current.tab === "files"
+    diffToggle.setAttribute("aria-pressed", String(current.diff.visible))
+    const horizontal = split.position() === "left" || split.position() === "right"
+    const at = horizontal ? "left" : "top"
+    inside.setPosition(at); inside.setWidth(Infinity); inside.setRatio(at, 1 - (horizontal ? current.diff.horizontal : current.diff.vertical))
+    diffWidget.setLayout(current.diffLayout); diffWidget.setWidth(width)
+    if (current.diff.visible && detail.visible && width >= 480) {
+      inside.detail.append(detailRoot); inside.list.append(diffRoot)
+      if (split.detail.firstElementChild !== inside.el) split.detail.replaceChildren(inside.el)
+    } else if (current.diff.visible && !detail.visible) {
+      if (split.detail.firstElementChild !== diffRoot) split.detail.replaceChildren(diffRoot)
+    } else if (current.diff.visible && detail.visible) {
+      if (split.detail.firstElementChild !== detailRoot || !foldedDiff.isConnected) split.detail.replaceChildren(detailRoot, foldedDiff)
+    } else if (split.detail.firstElementChild !== detailRoot || split.detail.children.length !== 1) split.detail.replaceChildren(detailRoot)
     position.update(split.position(), width)
     shell.dataset.position = split.position()
     const label = detail.visible ? copy.shell.hideDetail : copy.shell.showDetail
@@ -399,6 +455,15 @@ export function mountShell(root: HTMLElement, options: ShellOptions): Shell {
     work.setAttribute("aria-labelledby", tabDomId(state.tab === "board" || state.tab === "gantt" ? state.tab : "list"))
     const left = shownTab
     const putBack = showTab(state.tab)
+
+    const canReadDiff = state.diff.visible && state.tab !== "wiki" && state.tab !== "files"
+    if (!canReadDiff || !state.cursor) {
+      if (diffId !== null) { diffEpoch++; clearTimeout(diffTimer); diffId = null; diffAnswer = null; scopes.replaceChildren(); diffWidget.show({ files: [], truncated: false }) }
+    } else if (state.cursor !== diffId || diffOverlay !== state.view.worktree) {
+      diffOverlay = state.view.worktree; diffId = state.cursor; selectedScope = undefined; diffAnswer = null; diffEpoch++; clearTimeout(diffTimer)
+      scopes.replaceChildren(); diffWidget.show({ files: [], truncated: false })
+      const id = diffId; diffTimer = setTimeout(() => readDiff(id), 120)
+    }
 
     const loadedAt = state.board.value?.loadedAt
     const at = loadedAt === undefined ? null : refreshTime(loadedAt, language)
@@ -452,6 +517,8 @@ export function mountShell(root: HTMLElement, options: ShellOptions): Shell {
     position.update(split.position(), width)
     shell.dataset.position = split.position()
     const current = store.getState()
+    paintLayout(current)
+    if (width < 480 && current.diff.visible && current.detail.visible && current.focus === "diff") store.dispatch({ type: "focus", focus: "list" })
     // The wiki pane lays itself out from the width it is given when it renders (view/wiki.ts mountWiki): a narrow
     // panel stacks its list over the page.
     if (current.tab === "wiki") return wikiView?.render(current, options.index(current))
@@ -492,7 +559,7 @@ export function mountShell(root: HTMLElement, options: ShellOptions): Shell {
     slots: { toolbar, actions },
     setWidth,
     layout,
-    panes: () => ({ list: mainViews.list, board: mainViews.board, gantt: mainViews.gantt, detail: detailView, wiki: wikiView, files: filesView }),
+    panes: () => ({ list: mainViews.list, board: mainViews.board, gantt: mainViews.gantt, detail: detailView, diff: diffView, wiki: wikiView, files: filesView }),
     focusPane,
     focusTabs,
     toolbar: bar,
@@ -501,6 +568,7 @@ export function mountShell(root: HTMLElement, options: ShellOptions): Shell {
       observer?.disconnect()
       win?.removeEventListener("resize", onResize)
       split.destroy()
+      inside.destroy(); clearTimeout(diffTimer); diffEpoch++
       mainViews.list.destroy?.()
       mainViews.board.destroy?.()
       mainViews.gantt.destroy?.()

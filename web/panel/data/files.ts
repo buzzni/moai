@@ -7,6 +7,13 @@ export interface Entry { name: string; kind: 'dir' | 'file' | 'link' | 'other'; 
 export interface FileText { path: string; text?: string; binary: boolean; truncated: boolean; spans?: Array<Array<[number, number, string]>> | null }
 export interface SearchResult { matches: Array<{ path: string; start: number; end: number }>; total: number; truncated: boolean; walk_truncated: boolean; ignored_unavailable: boolean }
 const record = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null
+export function validDiff(v: unknown): v is DiffAnswer {
+  if (!record(v) || !Array.isArray(v.files) || typeof v.truncated !== 'boolean') return false
+  return v.files.every(f => record(f) && typeof f.path === 'string' && typeof f.status === 'string' && typeof f.binary === 'boolean' &&
+    (f.hunks === undefined || (Array.isArray(f.hunks) && f.hunks.every(h => record(h) &&
+      typeof h.old_start === 'number' && typeof h.old_len === 'number' && typeof h.new_start === 'number' && typeof h.new_len === 'number' && typeof h.section === 'string' && Array.isArray(h.lines) &&
+      h.lines.every(l => record(l) && ['context', 'add', 'delete', 'raw'].includes(String(l.kind)) && typeof l.text === 'string' && (l.spans == null || Array.isArray(l.spans)))))))
+}
 async function read(client: Client, path: string, query: Record<string, string>): Promise<unknown> {
   const result = await client.request({ path, query })
   if (result.kind !== 'passed') throw new Error(result.kind)
@@ -44,11 +51,7 @@ export function filesSource(client: Client) {
     },
     async diff(root: string, path: string): Promise<DiffAnswer> {
       const v = await read(client, '/api/diff', { root, path })
-      if (!record(v) || !Array.isArray(v.files) || typeof v.truncated !== 'boolean' || !v.files.every(f =>
-        record(f) && typeof f.path === 'string' && typeof f.status === 'string' && typeof f.binary === 'boolean' &&
-        (f.hunks === undefined || (Array.isArray(f.hunks) && f.hunks.every(h => record(h) &&
-          typeof h.old_start === 'number' && typeof h.old_len === 'number' && typeof h.new_start === 'number' && typeof h.new_len === 'number' && typeof h.section === 'string' && Array.isArray(h.lines) &&
-          h.lines.every(l => record(l) && ['context', 'add', 'delete', 'raw'].includes(String(l.kind)) && typeof l.text === 'string' && (l.spans == null || Array.isArray(l.spans)))))))) throw new Error('invalid diff')
+      if (!validDiff(v)) throw new Error('invalid diff')
       return v as unknown as DiffAnswer
     },
     async ignored(root?: string): Promise<string[]> {

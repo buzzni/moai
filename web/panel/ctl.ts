@@ -90,6 +90,7 @@ export function createCtl(options: CtlOptions) {
         archived: s.view.showArchived, worktree: s.view.worktree },
       cells: Object.entries(s.columns).filter(([, on]) => on).map(([name]) => name),
       detail: { shown: s.detail.visible, at: s.detail.position },
+      diff: { shown: s.diff.visible },
       panes: { list_width: Math.round((1 - s.detail.ratio[s.detail.position]) * 100),
         list_height: Math.round((1 - s.detail.ratio[s.detail.position]) * 100),
         gantt_grid: shell.panes().gantt.gridWidth?.() ?? null },
@@ -229,6 +230,7 @@ export function createCtl(options: CtlOptions) {
         if (name === 'deferred') store.dispatch({ type: 'view', view: { hideDeferred: !request.on } })
         else if (name === 'backlog') store.dispatch({ type: 'view', view: { hideBacklog: !request.on } })
         else if (name === 'archived') store.dispatch({ type: 'view', view: { showArchived: request.on } })
+        else if (name === 'diff') store.dispatch({ type: 'diff-visible', visible: request.on })
         else if (name === 'worktree') store.dispatch({ type: 'view', view: { worktree: request.on } })
         else if (name === 'raw') {
           const pane = s.tab === 'wiki' ? shell.panes().wiki : shell.panes().detail

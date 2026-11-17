@@ -1526,6 +1526,7 @@
   "page.failed": "읽지 못했습니다.",
   "page.unreadable": "답을 읽지 못했습니다.",
   "page.said": "moai 가 한 말:",
+  "page.diff.owner": "에픽 {id}의 가지",
   "page.diff.unified": "통합 보기",
   "page.diff.side": "나란히 보기",
   "page.diff.narrow": "나란히 볼 공간이 부족합니다",

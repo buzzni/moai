@@ -58,7 +58,7 @@ export function createDiff(doc: Document, words: DiffWords, onLayout?: (layout: 
   function paint(): void {
     const version = ++revision
     const side = layout === 'side-by-side' && width >= 640
-    toggle.textContent = side ? words.unified : words.side
+    toggle.textContent = layout === 'side-by-side' ? words.unified : words.side
     notice.textContent = layout === 'side-by-side' && !side ? words.narrow : ''
     body.replaceChildren()
     if (answer.vcs_error) { body.textContent = answer.vcs_error.said; return }
