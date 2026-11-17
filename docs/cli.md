@@ -195,7 +195,7 @@ Commands:
   group     Set the explorer grouping
   filter    Apply a filter, or remove the current filter
   find      Search issues in a chosen field
-  screen    Show list, board, gantt, stats, or wiki
+  screen    Show list, board, gantt, stats, wiki, or files
   view      Show or hide a view axis, including column:<name>
   cell      Show or hide a list field
   detail    Show, hide, or place the detail pane
@@ -478,7 +478,7 @@ Options:
 ## `moai ctl screen`
 
 ```
-Show list, board, gantt, stats, or wiki
+Show list, board, gantt, stats, wiki, or files
 
 Usage: moai ctl screen [OPTIONS] <NAME>
 
@@ -3366,6 +3366,7 @@ Order:
     SPC g g  gantt — the list opened out beside a date axis (see below)
     SPC g s  statistics — the numbers `moai stats` gives, drawn (see below)
     SPC g w  wiki — the project's manual pages, read only (see below)
+    SPC g f  files — the checkout's file tree, read only (see below)
   View — every toggle except the list columns (SPC c) is here:
     SPC v l  deferred         SPC v b  backlog        SPC v a  show all
     SPC v o  the archive — done that has sat a while [shown/hidden]; SPC v a
@@ -3373,7 +3374,10 @@ Order:
     SPC v 1  first column of the config [shown/hidden] — the next ones count up
              done has no letter of its own: the column that holds it does
     SPC v d  detail pane [shown/hidden]
+    SPC v D  diff pane [shown/hidden] — beside the detail (see below), and over
+             the file window its right pane
     SPC v w  overlay worktrees [on/off]
+    SPC v c  changed files only [on/off] — the file window's (see below)
     SPC v r  raw or rendered
   Sorts and columns call priority, created, updated and assignee by the same
   letter — only title (SPC s t) and tag (SPC c t) split one letter:
@@ -3393,6 +3397,8 @@ Order:
   Options — how this screen draws what stands, not which rows stand:
     SPC o d  detail pane goes right, bottom, left, top — press again to turn
              it. Whether it stands at all is SPC v d
+    SPC o s  diff unified or side by side [unified/side by side] — only
+             where a diff stands. The choice is kept as diff_layout
     SPC o t  the timezone times are written in. It opens a window with the
              names this machine knows. Type to narrow it down and pick one.
              Stored times stay UTC, and so does --json; a bare day or a
@@ -3408,7 +3414,8 @@ Order:
              and the share the list takes is kept under [tui] as list_width
              and list_height. The wiki window's line drags the same way and
              keeps a share of its own as wiki_width — until it is dragged it
-             splits by list_width. With the SPC menu open, a
+             splits by list_width; the file window's keeps files_width the
+             same way. With the SPC menu open, a
              click on an item is its key — a group goes down a level, a
              toggle keeps the menu open, and Esc and Bksp on the bottom line
              close it or go up — and a click or a roll outside the menu closes
@@ -3649,6 +3656,92 @@ Order:
   the detail as they were. SPC opens the menu over it with the screens and
   SPC v r (raw or rendered). The window is read fresh every time and nothing
   of it is kept.
+
+  SPC g f opens the file window in place of the list and the detail — the
+  files of the checkout you are in, or on the one list (0) of the project of
+  the row under the cursor, as a tree on the left, and on the right what the
+  cursor stands on. It only reads. Every name stands, hidden files and what
+  git ignores too; only .git is left out. Directories come first, marked ▸
+  folded and ▾ open and ending in /, links show → and where they point (a
+  link out of the checkout says so and does not open), and directories git
+  ignores say ignored. The hand is the list's: j and k, gg and G move the
+  cursor; Ctrl-d, Ctrl-u, Ctrl-f, Ctrl-b and the wheel scroll the tree and leave
+  the cursor; l or Right opens a directory one level and h or Left folds
+  it or goes to the row above it; Tab opens everything below — not into
+  links or ignored directories, stopping with a notice after 5,000 entries
+  read — or folds it all back when it is open. l on an ignored directory
+  opens it. Enter steps into a directory, whose first row is .., and on a
+  file goes to the right pane; Ctrl-w w goes back and forth. Bksp steps out,
+  and at the checkout's root nothing goes further up. The right pane shows the
+  file under the cursor with its line numbers, coloured by its syntax once that
+  is ready; a file past 1 MiB shows its first MiB and says how large it is, and
+  one that is not text says so with its size. With the focus there the moves and
+  the wheel scroll the text, and H and L scroll it sideways by half
+  the pane, as does the sideways wheel — lines do not wrap, and ‹ and › say
+  there is more to either side. Reading runs in the background: a directory or
+  a file being read says so and the cursor keeps moving.
+  / finds files below the tree's root by a piece of their path, case
+  aside, as you type; Enter keeps the search and Esc drops what was typed.
+  Nothing is hidden: the folders down to each file found open, the file's row
+  is marked at its head with an asterisk and its matching letters reversed,
+  and every other row stays. Directories git ignores are not searched unless
+  you step into one first; .git and links are never entered. The first search
+  on a root indexes it in the background and the title says how far it got.
+  Up to 500 files open, the shallow ones first, with the whole count in the
+  title. n and N jump to the next and previous file found, round at
+  the ends. Esc ends the search and folds back what it opened — folders you
+  opened stay.
+  SPC v w over the window picks the checkout it shows: the main checkout
+  first, then the linked worktrees, a milestone's worktree saying so, each
+  with its branch and its issue's title, the one shown marked [now]. Only
+  the checkouts git lists can be picked, and the picked one is the new root:
+  nothing above it stands, a worktree made outside the repository included.
+  If the checkout is removed while the window stands, the window goes back
+  to the main one and says so. SPC v c shows the changed files only — what
+  changed on the checkout's branch since it forked, uncommitted and untracked
+  files with it (on the main checkout, what is not committed) — as a tree with
+  every folder open, each file headed by the letter moai diff --stat prints for
+  its kind and followed by +added −removed; deleted files stand dimmed.
+  Pressed again it gives the tree back with the folders and the cursor as
+  they were. The
+  right pane shows the file's text; SPC v D shows its diff instead (on a
+  folder, every changed file below it) and SPC v d the checkout's issue — an
+  epic worktree's epic, a milestone worktree's milestone. With both on the
+  detail stands first, above the diff or left of it as SPC o d places
+  the detail; where the two do not fit, the diff folds and the detail
+  stays. Ctrl-w w goes round the panes that stand. These toggles are the
+  window's own: the list's detail and the config are not touched.
+  Esc closes the window, with the cursor, the filter and the detail as
+  they were. SPC opens the menu over it with the screens and those keys. The
+  window is read fresh every time.
+
+  On the list, the board and the gantt SPC v D stands a diff pane beside the
+  detail: what the cursor's issue, epic or milestone changes, the scopes moai
+  diff <id> reads, in its order. It takes the detail's place: with the detail
+  shown the detail stands first, above it or left of it as SPC o d places
+  the detail, and with the detail hidden the diff takes that place whole.
+  Where the two do not fit the diff folds and the detail stays. Drag the
+  line between them to share the place; the share is kept in the config
+  (diff_width side by side, diff_height stacked), as is the pane itself
+  (diff). Ctrl-w w goes round the panes that stand.
+
+  The diff pane shows one scope of changes at a time. Each file starts with a
+  head line — its kind as the letter moai diff --stat prints, its path
+  (old → new for a rename) and +added −removed — then its hunks: @@ and the
+  line numbers, and every line with its old and new number and + for added,
+  - for removed. The numbers and the mark carry the added and removed colours
+  and the text keeps its syntax colours; a file whose language is not known is
+  coloured whole. Binary files, and files whose mode alone changed, show their
+  head and why there are no lines. SPC o s puts the old and new side by side,
+  paired, in a pane at least 80 columns wide; a narrower one draws unified and
+  its title says so. With the focus on the pane j, k, gg, G, Ctrl-d,
+  Ctrl-u, Ctrl-f, Ctrl-b and the wheel scroll it, Tab and Shift-Tab jump to the
+  next and previous file, l and h show the next and previous scope, and H
+  and L scroll the text sideways by half the pane, both halves together —
+  lines do not wrap. The title names the scopes, the one shown in brackets,
+  whose branch it is and how many files; a patch cut at 2 MiB or a list cut at
+  5,000 files says so. Git runs in the background: the pane says it is reading
+  and the cursor keeps moving.
 
   SPC n opens the jot form anywhere inside a project. It keeps a backlog item
   with no epic. If an editor is there ($VISUAL, $EDITOR, or vi or nano on

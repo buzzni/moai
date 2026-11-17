@@ -190,6 +190,77 @@ pub const CODE: Style = fg(AnsiColor::Cyan);
 pub const P0: Style = fg(AnsiColor::BrightRed).bold();
 pub const P1: Style = fg(AnsiColor::Red);
 
+/// The file window's tree (moai-ffk9.rpf, colours from the confirmed mockup). **The glyphs carry the meaning**: a
+/// directory has its fold mark and a trailing `/`, a link its `→`, an ignored or unopenable row a word — the colours
+/// only help the eye. Extension groups share one colour each, so the table stays small enough to learn.
+pub const FILE_DIR: Style = fg(AnsiColor::BrightBlue).bold();
+pub const FILE_LINK: Style = fg(AnsiColor::Cyan);
+/// Source code — the mockup's orange; the 16-colour yellow is orange on most dark themes.
+pub const FILE_SOURCE: Style = fg(AnsiColor::Yellow);
+pub const FILE_DOC: Style = fg(AnsiColor::Magenta);
+pub const FILE_DATA: Style = fg(AnsiColor::Green);
+pub const FILE_SCRIPT: Style = fg(AnsiColor::BrightGreen);
+/// Pictures, archives, builds and lock files — nothing to read as text.
+pub const FILE_BINARY: Style = DIM;
+
+/// The diff pane (moai-ffk9.41b, the mockup's colours in 16). **Each sits beside a glyph that says the same**: added
+/// and removed colour only the line numbers and the `+`·`-` mark (the text keeps its syntax colours; no background
+/// is painted — in sixteen colours it fights them), the hunk head starts with `@@`.
+pub const DIFF_ADD: Style = fg(AnsiColor::Green);
+pub const DIFF_DEL: Style = fg(AnsiColor::Red);
+pub const DIFF_HUNK: Style = fg(AnsiColor::BrightBlue);
+
+/// The colour of a change kind's letter in a diff's file head (`M`·`A`·`D`·`R`·`?`) — the letter says it.
+pub fn diff_status(status: crate::vcs::Status) -> Style {
+    use crate::vcs::Status as S;
+    match status {
+        S::Added => DIFF_ADD,
+        S::Deleted => DIFF_DEL,
+        S::Modified | S::TypeChanged => fg(AnsiColor::Yellow),
+        S::Renamed | S::Copied => fg(AnsiColor::Cyan),
+        S::Untracked => fg(AnsiColor::Magenta),
+        S::Conflicted => fg(AnsiColor::BrightRed),
+    }
+}
+
+/// A file's colour by its extension group: source · docs and markup · config and data · scripts · pictures and
+/// binaries · the rest (unpainted).
+pub fn file_style(name: &str) -> Style {
+    let ext = crate::files::ext_of(name).to_ascii_lowercase();
+    match ext.as_str() {
+        "rs" | "c" | "h" | "cc" | "cpp" | "hpp" | "go" | "py" | "js" | "mjs" | "cjs" | "ts" | "tsx" | "jsx"
+        | "java" | "kt" | "swift" | "rb" | "php" | "cs" | "scala" | "lua" | "zig" | "hs" | "ml" | "ex" | "exs"
+        | "erl" | "clj" | "dart" | "vue" | "svelte" | "css" | "scss" | "less" | "sql" => FILE_SOURCE,
+        "md" | "markdown" | "txt" | "rst" | "adoc" | "html" | "htm" | "xml" | "tex" | "org" => FILE_DOC,
+        "toml" | "json" | "jsonl" | "yaml" | "yml" | "ini" | "cfg" | "conf" | "csv" | "tsv" | "env" => FILE_DATA,
+        "sh" | "bash" | "zsh" | "fish" | "ps1" | "bat" | "cmd" => FILE_SCRIPT,
+        "png" | "jpg" | "jpeg" | "gif" | "webp" | "ico" | "bmp" | "svg" | "pdf" | "zip" | "gz" | "tar" | "tgz"
+        | "xz" | "bz2" | "7z" | "so" | "dylib" | "dll" | "exe" | "bin" | "o" | "a" | "wasm" | "woff" | "woff2"
+        | "ttf" | "otf" | "mp4" | "mov" | "mp3" | "wav" | "lock" => FILE_BINARY,
+        _ if matches!(name, "Makefile" | "Dockerfile" | "justfile" | "Justfile") => FILE_SCRIPT,
+        _ => PLAIN,
+    }
+}
+
+/// Syntax colours for file text (moai-ffk9.3fd), after the confirmed mockup in 16 colours. **They carry no meaning**
+/// — the text reads the same without them — so no glyph stands beside them. Comments are grey and italic, so they
+/// fall back even on a terminal that draws no italic.
+pub fn syntax(kind: crate::highlight::Kind) -> Style {
+    use crate::highlight::Kind as K;
+    match kind {
+        K::Comment => fg(AnsiColor::BrightBlack).italic(),
+        K::String => fg(AnsiColor::BrightCyan),
+        K::Number | K::Constant => fg(AnsiColor::BrightBlue),
+        K::Keyword => fg(AnsiColor::BrightRed),
+        K::Type => fg(AnsiColor::Yellow),
+        K::Function => fg(AnsiColor::BrightMagenta),
+        K::Tag => fg(AnsiColor::Green),
+        K::Attribute => fg(AnsiColor::Cyan),
+        K::Heading => fg(AnsiColor::BrightBlue).bold(),
+        K::Other => PLAIN,
+    }
+}
+
 /// 칸 이름 → 글리프. 모르는 칸도 글리프를 갖는다.
 pub fn glyph(status: &str) -> &'static str {
     match status {

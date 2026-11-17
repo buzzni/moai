@@ -32,7 +32,7 @@ pub enum Status {
     Untracked,
     Conflicted,
 }
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct Change {
     pub path: String,
     pub old_path: Option<String>,
@@ -41,7 +41,7 @@ pub struct Change {
     pub dels: Option<usize>,
     pub binary: bool,
 }
-#[derive(Debug, Clone, Default, serde::Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
 pub struct Changes {
     pub files: Vec<Change>,
     pub total: usize,

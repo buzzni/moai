@@ -384,11 +384,19 @@ pub enum Browse {
     SortEdit,
     /// 목록 줄의 열 하나를 켜고 끈다(moai-g7p8).
     Cell(super::view::Field),
-    /// 오른쪽 상세 칸을 보이고 숨긴다(moai-ymnu).
+    /// 오른쪽 상세 칸을 보이고 숨긴다(moai-ymnu). Over the file window, its right pane's detail (moai-ffk9.211).
     Detail,
+    /// The diff pane — `SPC v D` (moai-ffk9.211). Over the file window it puts the file's diff in the right pane; the
+    /// window's own, kept nowhere.
+    Diff,
+    /// The file window's changed files only — `SPC v c` (moai-ffk9.211). It stands only there.
+    Changed,
     /// 상세 칸이 서는 자리를 다음으로 돌린다 — `SPC o d`(moai-e7r3). **보이나 마나와 따로다**:
     /// 켜고 끄는 것은 [`Browse::Detail`](`SPC v d`)이고 이것은 보일 때 어디에 서는가다.
     DetailAt,
+    /// Unified ↔ side-by-side for every diff on screen — `SPC o s` (moai-ffk9.41b). Kept in `[tui] diff_layout`. It
+    /// stands only where a diff does ([`Ctx::diff`]): pressed anywhere else it would change nothing to be seen.
+    DiffLayout,
     /// 시간대 고르는 창을 연다 — `SPC o t`(moai-3oz2). **돌리지 않고 창을 연다**: 이 기계의
     /// tzdb 는 이름을 천 개 넘게 들어, 눌러 돌리는 길로는 고를 수가 없다.
     Timezone,
@@ -483,6 +491,8 @@ pub enum Screen {
     Stats,
     /// 프로젝트의 위키(moai-o3cb) — 읽기만 한다(2026-10-04 사용자 결정).
     Wiki,
+    /// The checkout's files (moai-ffk9.rpf) — read only.
+    Files,
 }
 
 impl Screen {
@@ -494,6 +504,7 @@ impl Screen {
             Screen::Gantt => say(lang, "tui.menu.gantt"),
             Screen::Stats => say(lang, "tui.menu.stats"),
             Screen::Wiki => say(lang, "tui.menu.wiki"),
+            Screen::Files => say(lang, "tui.menu.files"),
         }
     }
 
@@ -505,6 +516,7 @@ impl Screen {
             Screen::Gantt => say(lang, "tui.state.gantt"),
             Screen::Stats => say(lang, "tui.state.stats"),
             Screen::Wiki => say(lang, "tui.state.wiki"),
+            Screen::Files => say(lang, "tui.state.files"),
         }
     }
 }
@@ -912,6 +924,8 @@ pub const BROWSE: &[Bind<Browse>] = {
         row!(Go(Screen::Stats), Some("SPC g s"), LEADER, Key::plain('g'), Key::plain('s')),
         // 위키는 `w`(wiki, moai-o3cb) — 다음 화면은 이렇게 한 줄을 더해 든다(moai-z46r).
         row!(Go(Screen::Wiki), Some("SPC g w"), LEADER, Key::plain('g'), Key::plain('w')),
+        // 파일은 `f`(files, moai-ffk9.rpf). 뿌리의 `SPC f`(거름망)와는 묶음이 달라 안 부딪는다.
+        row!(Go(Screen::Files), Some("SPC g f"), LEADER, Key::plain('g'), Key::plain('f')),
         // **보는 것을 켜고 끄는 것은 목록의 열(`SPC c`) 말고 모두 `SPC v`(view) 밑이다**(moai-en4u). 한때 `SPC s`(보기)와
         // `SPC t`(토글)로 갈라 done 은 s·상세 칸은 t 에 있었다 — 둘 다 켜고 끄는 것이라 어느 쪽인지를
         // 외워야 했고, `d` 가 한쪽에서는 done 다른 쪽에서는 상세였다. 어느 줄을 보나(l·a·번호)가
@@ -950,7 +964,12 @@ pub const BROWSE: &[Bind<Browse>] = {
         // 결정). 옛 `p`(pane)는 그 둘이 한 칸을 두고 글자가 갈려, 하나를 아는 사람이 다른 하나를
         // 못 짚었다. `d` 가 빈 것은 done 이 제 글자를 내놓은 뒤다(moai-h6z3) — 그 자리를 이것이 받는다.
         row!(Detail, Some("SPC v d"), LEADER, Key::plain('v'), Key::plain('d')),
+        // **The diff is `D`, the detail's letter raised** (moai-ffk9, the person's "SPC v D") — both are what stands
+        // beside the rows. Letters keep their case (`SPC s P`'s note).
+        row!(Diff, Some("SPC v D"), LEADER, Key::plain('v'), Key::plain('D')),
         row!(Worktree, Some("SPC v w"), LEADER, Key::plain('v'), Key::plain('w')),
+        // Changed files only is `c` (changed) — the file window's alone, beside its checkout pick (`w`).
+        row!(Changed, Some("SPC v c"), LEADER, Key::plain('v'), Key::plain('c')),
         row!(Raw, Some("SPC v r"), LEADER, Key::plain('v'), Key::plain('r')),
         // **정렬은 `SPC s`(sort)다**(moai-en4u) — 옛 `SPC o`(ranger 의 order)는 `s` 를 보기가 쥐고
         // 있어 밀려난 자리였다. 글자는 열(`SPC c`)과 같다: p·c·u·a 가 두 묶음에서 같은 것을 가리킨다.
@@ -1004,6 +1023,8 @@ pub const BROWSE: &[Bind<Browse>] = {
         // **어느 것도 이슈를 안 건드린다** — 설정에만 적히고 화면만 바꾼다. 설정이 이미 쓴 줄을
         // 바꾸면 그건 설정이 아니라 마이그레이션이다.
         row!(DetailAt, Some("SPC o d"), LEADER, Key::plain('o'), Key::plain('d')),
+        // **How a diff is laid out is how the shown is drawn** — the `SPC o` yardstick above (moai-ffk9.41b).
+        row!(DiffLayout, Some("SPC o s"), LEADER, Key::plain('o'), Key::plain('s')),
         row!(Timezone, Some("SPC o t"), LEADER, Key::plain('o'), Key::plain('t')),
         // **마우스도 여기다** — 이슈도 줄도 안 건드리고 이 사람 화면을 어떻게 다루는가만 바꾼다(위의 자).
         row!(Mouse, Some("SPC o m"), LEADER, Key::plain('o'), Key::plain('m')),
@@ -1077,6 +1098,23 @@ pub struct Ctx {
     /// 위키 창이 떠 있는가(moai-o3cb). 통계 창과 같은 덮는 창이라 메뉴에는 화면 고르기만 서고, 하나가 더 선다 —
     /// 원문·그린 글(`SPC v r`). 창의 본문이 마크다운이라 그 토글이 창 안에서 뜻이 있다.
     pub wiki: bool,
+    /// The file window is up (moai-ffk9.rpf) — a covering window like the wiki's: only the screens, the moves and
+    /// the key list stand in the menu over it.
+    pub files: bool,
+    /// A diff pane stands on screen (moai-ffk9.41b) — `SPC o s` stands only then. The file window's right pane and the
+    /// list's diff pane set it (members .211 and .cij).
+    pub diff: bool,
+    /// The list's diff pane is on (moai-ffk9.cij) — `SPC v D`'s menu word, folded or not.
+    pub diff_open: bool,
+    /// The list's diff pane stands — on and not folded. The panes' moves stand with it, also with the detail hidden.
+    pub list_diff: bool,
+    /// The person's diff layout is side by side — the menu line's word.
+    pub diff_split: bool,
+    /// The file window's own toggles (moai-ffk9.211) — its menu lines' states: the detail, the diff, the changed
+    /// files only. The list's are [`Ctx::detail`] and the like.
+    pub files_detail: bool,
+    pub files_diff: bool,
+    pub files_changed: bool,
     /// 커서가 한눈 보기의 프로젝트 머리줄에 섰는가(moai-oagj.vcj). 보드에서도 그 줄의 `h`·`l`·`Tab` 은 목록과 같이
     /// 접고 편다(사용자 결정) — 칸이 없는 줄이다.
     pub head: bool,
@@ -1119,6 +1157,9 @@ pub struct Keymap {
     pub pick: &'static [Bind<Pick>],
     pub stats: &'static [Bind<Stat>],
     pub wiki: &'static [Bind<Wiki>],
+    pub files: &'static [Bind<Files>],
+    /// The diff pane's table, while it has the focus (moai-ffk9.41b) — [`DIFF`].
+    pub diff: &'static [Bind<Diff>],
     pub links: &'static [Bind<Link>],
     pub confirm: &'static [Bind<Confirm>],
 }
@@ -1133,6 +1174,8 @@ impl Default for Keymap {
             pick: PICK,
             stats: STATS,
             wiki: WIKI,
+            files: FILES,
+            diff: DIFF,
             links: LINKS,
             confirm: CONFIRM,
         }
@@ -1147,6 +1190,8 @@ impl Ctx {
             Screen::Stats
         } else if self.wiki {
             Screen::Wiki
+        } else if self.files {
+            Screen::Files
         } else if self.board {
             Screen::Board
         } else if self.gantt {
@@ -1190,9 +1235,19 @@ impl Browse {
             // **위키 창도 같고, 원문·그린 글 하나가 더 선다**(moai-o3cb) — 창의 본문이 마크다운이다. 아래 상세 칸의
             // 갈래(`!c.detail`)보다 먼저 선다: 상세를 숨긴 사람의 위키 창에서도 그 토글은 본문을 바꾼다.
             // 키 목록(`SPC h`)도 선다(moai-ucyr) — 창 위에 뜨는 창이라 덮인 창을 안 걷는다.
-            Go(_) | Step(_) | Help if c.stats || c.wiki => Ok(()),
+            // The diff layout stands wherever a diff does — over the file window too (its right pane), and nowhere a
+            // diff does not (moai-ffk9.41b).
+            DiffLayout if c.diff => Ok(()),
+            DiffLayout => Err(Off::Quiet),
+            // **Over the file window its own toggles stand** (moai-ffk9.211): the checkout (`SPC v w`), the changed files
+            // only, the right pane's detail and diff, and the detail's place — which splits the two.
+            Worktree | Changed | Detail | Diff | DetailAt if c.files => Ok(()),
+            // Changed files only is the file window's alone. The diff pane stands on the list, the board and the gantt
+            // (moai-ffk9.cij) — below, where the covering windows have not taken it.
+            Changed => Err(Off::Quiet),
+            Go(_) | Step(_) | Help if c.stats || c.wiki || c.files => Ok(()),
             Raw if c.wiki => Ok(()),
-            _ if c.stats || c.wiki => Err(Off::Quiet),
+            _ if c.stats || c.wiki || c.files => Err(Off::Quiet),
             // 간트의 날짜 축은 간트에서만 — 포커스와 상관없다: 상세를 읽다가도 축은 옮긴다(moai-i4hf.27r).
             Gantt(_) if c.gantt => Ok(()),
             Gantt(_) => Err(Off::Quiet),
@@ -1266,7 +1321,11 @@ impl Browse {
             // 믿는다. `raw` 는 설정에 안 남으니 미리 켜 둘 값어치도 없다.
             // **자리 고르기도 상세가 서 있을 때만이다**(moai-e7r3) — 숨긴 칸의 자리를 돌리면 아무
             // 일도 안 일어난 채 메뉴 줄의 낱말만 바뀐다. 켜는 것은 `SPC v d` 고, 그 줄은 여기 없다.
-            FocusNext | FocusPrev | Focus(_) | Raw | DetailAt if !c.detail => Err(Off::Quiet),
+            //
+            // **The list's diff pane is a pane too** (moai-ffk9.cij): with the detail hidden and the diff on, the focus
+            // still has two panes to go between, and the detail's place still places the diff (`draw::side_split`).
+            Raw if !c.detail => Err(Off::Quiet),
+            FocusNext | FocusPrev | Focus(_) | DetailAt if !c.detail && !c.list_diff => Err(Off::Quiet),
             // **이웃은 가른 축에만 있다**(리뷰, moai-x7pa) — 상세가 위나 아래에 서면 `Ctrl-w h`·`l`
             // 이, 왼쪽이나 오른쪽에 서면 `Ctrl-w j`·`k` 가 제자리다(`Pane::step`, vim 그대로).
             // 어느 자리에서든 칸을 도는 것은 `Ctrl-w w`(`FocusNext`)고 그 줄은 그대로 선다.
@@ -1311,10 +1370,13 @@ impl Browse {
             Pick => say(c.lang, "tui.menu.pick"),
             Unregister => say(c.lang, "tui.menu.unregister"),
             Go(s) => s.word(c.lang),
+            Worktree if c.files => say(c.lang, "tui.menu.checkout"),
             Worktree => say(c.lang, "tui.menu.worktree"),
             Raw => say(c.lang, "tui.menu.raw"),
             ShowAll => say(c.lang, "tui.menu.show_all"),
             Detail => say(c.lang, "tui.menu.detail"),
+            Diff => say(c.lang, "tui.menu.diff"),
+            Changed => say(c.lang, "tui.menu.changed"),
             Read => say(c.lang, "tui.menu.read"),
             ReadAll => say(c.lang, "tui.menu.read_all"),
             ReadGroup => say(c.lang, "tui.menu.read_group"),
@@ -1330,6 +1392,13 @@ impl Browse {
     /// 칠하면 색 없는 터미널에서 어느 쪽인지 모른다.
     pub fn state(self, c: &Ctx) -> Option<String> {
         match self {
+            // The checkout pick opens a window — it has no state.
+            Browse::Worktree if c.files => None,
+            Browse::Detail if c.files => Some(shown(!c.files_detail, c.lang).into()),
+            Browse::Diff if c.files => Some(shown(!c.files_diff, c.lang).into()),
+            Browse::Diff => Some(shown(!c.diff_open, c.lang).into()),
+            Browse::Changed if c.files_changed => Some(say(c.lang, "tui.state.on").into()),
+            Browse::Changed => Some(say(c.lang, "tui.state.off").into()),
             Browse::Worktree if c.worktree => Some(say(c.lang, "tui.state.on").into()),
             Browse::Worktree => Some(say(c.lang, "tui.state.off").into()),
             Browse::Raw if c.raw => Some(say(c.lang, "tui.state.raw").into()),
@@ -1361,6 +1430,8 @@ impl Browse {
             // **지금 자리를 낱말로 댄다** — 색도 글리프도 안 쓴다. 돌리는 키라 다음이 무엇인지는
             // 눌러 보면 되고, 지금이 어디인지는 읽혀야 한다.
             Browse::DetailAt => Some(c.detail_at.word(c.lang).into()),
+            Browse::DiffLayout if c.diff_split => Some(say(c.lang, "tui.diff.split").into()),
+            Browse::DiffLayout => Some(say(c.lang, "tui.diff.unified").into()),
             Browse::Mouse if c.mouse => Some(say(c.lang, "tui.state.on").into()),
             Browse::Mouse => Some(say(c.lang, "tui.state.off").into()),
             _ => None,
@@ -1390,7 +1461,10 @@ impl Browse {
                 | SortAdd(_)
                 | Cell(_)
                 | Detail
+                | Diff
+                | Changed
                 | DetailAt
+                | DiffLayout
                 | ArchiveDays
                 | Mouse
         )
@@ -1438,7 +1512,9 @@ impl Browse {
             Go(Screen::Gantt) => say(c.lang, "tui.act.gantt"),
             Go(Screen::Stats) => say(c.lang, "tui.act.stats"),
             Go(Screen::Wiki) => say(c.lang, "tui.act.wiki"),
+            Go(Screen::Files) => say(c.lang, "tui.act.files"),
             ClearFilter => say(c.lang, "tui.act.clear_filter"),
+            Worktree if c.files => say(c.lang, "tui.act.checkout"),
             Worktree if c.worktree => say(c.lang, "tui.act.worktree_off"),
             Worktree => say(c.lang, "tui.act.worktree"),
             Raw if c.raw => say(c.lang, "tui.act.rendered"),
@@ -1455,7 +1531,10 @@ impl Browse {
             SortEdit => say(c.lang, "tui.act.sort_edit"),
             Cell(_) => say(c.lang, "tui.act.cell"),
             Detail => say(c.lang, "tui.act.detail"),
+            Diff => say(c.lang, "tui.act.diff"),
+            Changed => say(c.lang, "tui.act.changed"),
             DetailAt => say(c.lang, "tui.act.detail_at"),
+            DiffLayout => say(c.lang, "tui.act.diff_layout"),
             Timezone => say(c.lang, "tui.act.timezone"),
             ArchiveDays => say(c.lang, "tui.act.archive_days"),
             Mouse => say(c.lang, "tui.act.mouse"),
@@ -1814,6 +1893,165 @@ impl Wiki {
             Wiki::Close if picked => say(lang, "tui.wiki.unpick"),
             Wiki::Close if searched => say(lang, "tui.act.clear_filter"),
             Wiki::Close => say(lang, "tui.act.close"),
+        }
+    }
+}
+
+/// The file window (moai-ffk9.rpf) — the issue list's hand on a file tree: moves, open and fold, step in and out,
+/// pane moves, close. **Read only, so no key writes.**
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Files {
+    /// The focused pane — the cursor on the tree. The list's keys ([`moves!`]).
+    Step(Move),
+    /// Step into the directory under the cursor; on a file go to the right pane; on `..` step out.
+    Enter,
+    /// Step out one level. Nothing at the checkout's root.
+    Leave,
+    /// Open the directory one level — `l`·`→`. Nothing on an open one.
+    Expand,
+    /// Fold the open directory, or go to the parent row — `h`·`←`.
+    Collapse,
+    /// Open everything below, or fold it all back — `Tab`.
+    ExpandAll,
+    /// Between the tree and the right pane — `Ctrl-w w`.
+    FocusNext,
+    /// To that pane — `Ctrl-w h` (tree), `Ctrl-w l` (right).
+    Focus(Side),
+    /// Scroll the right pane's text sideways by half the pane — `H`·`L` (moai-ffk9.3fd). Only there: the tree has
+    /// nothing to scroll sideways. The gantt's `H`·`L` live in its own table ([`GANTT`]) and stay as they are.
+    Pan(Side),
+    /// Open the search field — `/` (moai-ffk9.rid). It finds files below the tree's root and opens the folders to them;
+    /// nothing is hidden.
+    Search,
+    /// To the next or the previous file found, in the tree's order, round at the ends — `n`·`N`. Only this window's.
+    NextFound,
+    PrevFound,
+    Close,
+}
+
+/// **`q` is not here** — the statistics window's reason ([`STATS`]). The arrows and page keys ignore modifiers, as
+/// on the other windows the menu feeds back into. The keys are the list's ([`BROWSE`]): `Enter`·`Bksp` step in and
+/// out, `l`·`h` open and fold, `Tab` spreads.
+pub const FILES: &[Bind<Files>] = {
+    use Files::*;
+    use KeyCode as C;
+    const MOVES: [Bind<Files>; 14] = moves!(Files::Step, Key::any);
+    &[
+        MOVES[0],
+        MOVES[1],
+        MOVES[2],
+        MOVES[3],
+        MOVES[4],
+        MOVES[5],
+        MOVES[6],
+        MOVES[7],
+        MOVES[8],
+        MOVES[9],
+        MOVES[10],
+        MOVES[11],
+        MOVES[12],
+        MOVES[13],
+        row!(Enter, Some("Enter"), Key::any(C::Enter)),
+        row!(Leave, Some("Bksp"), Key::any(C::Backspace)),
+        row!(Expand, Some("l"), Key::plain('l')),
+        row!(Expand, None, Key::any(C::Right)),
+        row!(Collapse, Some("h"), Key::plain('h')),
+        row!(Collapse, None, Key::any(C::Left)),
+        row!(ExpandAll, Some("Tab"), Key::unshift(C::Tab)),
+        row!(FocusNext, Some("Ctrl-w w"), Key::chord('w'), Key::plain('w')),
+        row!(FocusNext, None, Key::chord('w'), Key::plain('W')),
+        row!(FocusNext, None, Key::chord('w'), Key::chord('w')),
+        row!(Focus(Side::Left), None, Key::chord('w'), Key::plain('h')),
+        row!(Focus(Side::Left), None, Key::chord('w'), Key::chord('h')),
+        row!(Focus(Side::Right), None, Key::chord('w'), Key::plain('l')),
+        row!(Focus(Side::Right), None, Key::chord('w'), Key::chord('l')),
+        row!(Pan(Side::Left), Some("H"), Key::plain('H')),
+        row!(Pan(Side::Right), Some("L"), Key::plain('L')),
+        row!(Search, Some("/"), Key::plain('/')),
+        row!(NextFound, Some("n"), Key::plain('n')),
+        row!(PrevFound, Some("N"), Key::plain('N')),
+        row!(Close, Some("Esc"), Key::bare(C::Esc)),
+    ]
+};
+
+impl Files {
+    /// The bar's word. `on_info` is whether the focus is on the right pane.
+    pub fn what(self, on_info: bool, lang: Lang) -> &'static str {
+        match self {
+            Files::Step(_) if on_info => say(lang, "tui.act.scroll"),
+            Files::Step(_) => say(lang, "tui.act.move"),
+            Files::Enter => say(lang, "tui.files.enter"),
+            Files::Leave => say(lang, "tui.files.leave"),
+            Files::Expand => say(lang, "tui.files.expand"),
+            Files::Collapse => say(lang, "tui.files.collapse"),
+            Files::ExpandAll => say(lang, "tui.files.expand_all"),
+            Files::FocusNext | Files::Focus(_) if on_info => say(lang, "tui.files.to_tree"),
+            Files::FocusNext | Files::Focus(_) => say(lang, "tui.files.to_info"),
+            Files::Pan(_) => say(lang, "tui.files.pan"),
+            Files::Search => say(lang, "tui.files.search_act"),
+            Files::NextFound => say(lang, "tui.files.next_found"),
+            Files::PrevFound => say(lang, "tui.files.prev_found"),
+            Files::Close => say(lang, "tui.act.close"),
+        }
+    }
+}
+
+/// The diff pane's keys (moai-ffk9.41b) — **only while the pane has the focus**: the owner (the file window, the list)
+/// looks this table up first and its own after, so `Tab`, `h`·`l` and `H`·`L` keep their meaning everywhere else (the
+/// tree's spread and fold, the gantt's shift). Read only, so no key writes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Diff {
+    /// Scroll the lines — the list's moves.
+    Step(Move),
+    /// The next or the previous file's head to the top — `Tab`·`Shift-Tab`.
+    NextFile,
+    PrevFile,
+    /// The scope after or before — `l`·`h`. **Not `L`·`H`**: letters keep their case (`SPC s P`'s note), and those
+    /// scroll sideways.
+    NextScope,
+    PrevScope,
+    /// Scroll the text sideways by half the pane — `H`·`L`, the file pane's keys.
+    Pan(Side),
+}
+
+pub const DIFF: &[Bind<Diff>] = {
+    use Diff::*;
+    use KeyCode as C;
+    const MOVES: [Bind<Diff>; 14] = moves!(Diff::Step, Key::any);
+    &[
+        MOVES[0],
+        MOVES[1],
+        MOVES[2],
+        MOVES[3],
+        MOVES[4],
+        MOVES[5],
+        MOVES[6],
+        MOVES[7],
+        MOVES[8],
+        MOVES[9],
+        MOVES[10],
+        MOVES[11],
+        MOVES[12],
+        MOVES[13],
+        row!(NextFile, Some("Tab"), Key::unshift(C::Tab)),
+        row!(PrevFile, Some("Shift-Tab"), Key::shift(C::Tab)),
+        row!(PrevScope, Some("h"), Key::plain('h')),
+        row!(NextScope, Some("l"), Key::plain('l')),
+        row!(Pan(Side::Left), Some("H"), Key::plain('H')),
+        row!(Pan(Side::Right), Some("L"), Key::plain('L')),
+    ]
+};
+
+impl Diff {
+    /// The bar's word.
+    pub fn what(self, lang: Lang) -> &'static str {
+        match self {
+            Diff::Step(_) => say(lang, "tui.act.scroll"),
+            Diff::NextFile => say(lang, "tui.diff.next_file"),
+            Diff::PrevFile => say(lang, "tui.diff.prev_file"),
+            Diff::NextScope => say(lang, "tui.diff.next_scope"),
+            Diff::PrevScope => say(lang, "tui.diff.prev_scope"),
+            Diff::Pan(_) => say(lang, "tui.files.pan"),
         }
     }
 }
@@ -2380,6 +2618,8 @@ mod tests {
         each("menu", MENU);
         each("stats", STATS);
         each("wiki", WIKI);
+        each("files", FILES);
+        each("diff", DIFF);
         each("links", LINKS);
     }
 
@@ -2413,6 +2653,7 @@ mod tests {
             ("SPC g b", Screen::Board),
             ("SPC g s", Screen::Stats),
             ("SPC g w", Screen::Wiki),
+            ("SPC g f", Screen::Files),
         ] {
             assert_eq!(lookup(BROWSE, &parse_seq(keys).unwrap()), Lookup::Run(Browse::Go(to)), "{keys}");
             assert_eq!(label(BROWSE, Browse::Go(to)), keys);
@@ -2488,6 +2729,8 @@ mod tests {
         each("menu", MENU);
         each("stats", STATS);
         each("wiki", WIKI);
+        each("files", FILES);
+        each("diff", DIFF);
         each("links", LINKS);
         assert_eq!(label(JOT, Jot::Save), "Ctrl-S");
         assert_eq!(labels(BROWSE, &[Browse::Step(Move::LineDown), Browse::Step(Move::LineUp)]), "j·k");
@@ -2833,6 +3076,10 @@ mod tests {
     const STATISTICS: &str = "SPC g s opens the statistics window";
     /// 위키 창 문단(moai-o3cb).
     const WIKIWIN: &str = "SPC g w opens the wiki window";
+    /// The file window's paragraph (moai-ffk9.rpf).
+    const FILESWIN: &str = "SPC g f opens the file window";
+    /// The diff pane's paragraph (moai-ffk9.41b).
+    const DIFFPANE: &str = "The diff pane shows one scope";
     /// 차례 편집 창(SORTER)을 말하는 문단(moai-r170.x22).
     const SORTEDIT: &str = "SPC s opens the sort window";
 
@@ -2885,6 +3132,8 @@ mod tests {
         ("CONFIRM", &[PICKER, JOTTING]),
         ("STATS", &[STATISTICS]),
         ("WIKI", &[WIKIWIN]),
+        ("FILES", &[FILESWIN]),
+        ("DIFF", &[DIFFPANE]),
         ("SORTER", &[SORTEDIT]),
     ];
 
@@ -2922,7 +3171,7 @@ mod tests {
 
     /// `help` 에서 표마다 제 범위([`SENTENCES`]·[`SECTIONS`])가 안 대는 이름 붙은 키 — `표: 이름`.
     fn missing_in(help: &str) -> Vec<String> {
-        let tables: [(&str, Vec<(&'static str, &'static [Key])>); 13] = [
+        let tables: [(&str, Vec<(&'static str, &'static [Key])>); 15] = [
             ("ANYWHERE", named(ANYWHERE)),
             ("BROWSE", named(BROWSE)),
             ("GANTT", named(GANTT)),
@@ -2934,6 +3183,8 @@ mod tests {
             ("CONFIRM", named(CONFIRM)),
             ("STATS", named(STATS)),
             ("WIKI", named(WIKI)),
+            ("FILES", named(FILES)),
+            ("DIFF", named(DIFF)),
             ("LINKS", named(LINKS)),
             ("SORTER", named(SORTER)),
         ];
@@ -3013,7 +3264,7 @@ mod tests {
         every(k).contains(&Lookup::Pending)
     }
 
-    fn every(k: &[KeyEvent]) -> [Lookup<()>; 13] {
+    fn every(k: &[KeyEvent]) -> [Lookup<()>; 15] {
         [
             bare(lookup(ANYWHERE, k)),
             bare(lookup(MENU, k)),
@@ -3026,6 +3277,8 @@ mod tests {
             bare(lookup(CONFIRM, k)),
             bare(lookup(STATS, k)),
             bare(lookup(WIKI, k)),
+            bare(lookup(FILES, k)),
+            bare(lookup(DIFF, k)),
             bare(lookup(LINKS, k)),
             bare(lookup(SORTER, k)),
         ]
@@ -3174,7 +3427,9 @@ mod tests {
             vec![sp, ch('o'), ch('c')],
             vec![sp, ch('o'), ch('u')],
             vec![sp, ch('o'), ch('a')],
-            vec![sp, ch('o'), ch('s')],
+            // `SPC o s` is back with a meaning of its own — the diff layout, chosen by the person for the file window
+            // and diff pane epic (moai-ffk9, "기획의 SPC 묶음"). Like `SPC o t`, an old hand gets a menu line saying
+            // what it toggles, not a silent sort.
         ] {
             assert_eq!(lookup(BROWSE, &old), Lookup::Unknown, "옛 키 {} 가 산다", super::super::menu::title(&old));
         }

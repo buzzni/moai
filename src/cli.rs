@@ -583,6 +583,7 @@ BACKLOG
     {key:browse.go_gantt}  gantt — the list opened out beside a date axis (see below)
     {key:browse.go_stats}  statistics — the numbers `moai stats` gives, drawn (see below)
     {key:browse.go_wiki}  wiki — the project's manual pages, read only (see below)
+    {key:browse.go_files}  files — the checkout's file tree, read only (see below)
   View — every toggle except the list columns (SPC c) is here:
     {key:browse.deferred}  deferred         {key:browse.backlog}  backlog        {key:browse.show_all}  show all
     {key:browse.archived}  the archive — done that has sat a while [shown/hidden]; {key:browse.show_all}
@@ -590,7 +591,10 @@ BACKLOG
     SPC v 1  first column of the config [shown/hidden] — the next ones count up
              done has no letter of its own: the column that holds it does
     {key:browse.detail}  detail pane [shown/hidden]
+    {key:browse.diff}  diff pane [shown/hidden] — beside the detail (see below), and over
+             the file window its right pane
     {key:browse.worktree}  overlay worktrees [on/off]
+    {key:browse.changed}  changed files only [on/off] — the file window's (see below)
     {key:browse.raw}  raw or rendered
   Sorts and columns call priority, created, updated and assignee by the same
   letter — only title ({key:browse.sort_title}) and tag ({key:browse.cell_tags}) split one letter:
@@ -610,6 +614,8 @@ BACKLOG
   Options — how this screen draws what stands, not which rows stand:
     {key:browse.detail_at}  detail pane goes right, bottom, left, top — press again to turn
              it. Whether it stands at all is {key:browse.detail}
+    {key:browse.diff_layout}  diff unified or side by side [unified/side by side] — only
+             where a diff stands. The choice is kept as diff_layout
     {key:browse.timezone}  the timezone times are written in. It opens a window with the
              names this machine knows. Type to narrow it down and pick one.
              Stored times stay UTC, and so does --json; a bare day or a
@@ -625,7 +631,8 @@ BACKLOG
              and the share the list takes is kept under [tui] as list_width
              and list_height. The wiki window's line drags the same way and
              keeps a share of its own as wiki_width — until it is dragged it
-             splits by list_width. With the SPC menu open, a
+             splits by list_width; the file window's keeps files_width the
+             same way. With the SPC menu open, a
              click on an item is its key — a group goes down a level, a
              toggle keeps the menu open, and {key:menu.close} and {key:menu.up} on the bottom line
              close it or go up — and a click or a roll outside the menu closes
@@ -866,6 +873,92 @@ BACKLOG
   the detail as they were. SPC opens the menu over it with the screens and
   {key:browse.raw} (raw or rendered). The window is read fresh every time and nothing
   of it is kept.
+
+  {key:browse.go_files} opens the file window in place of the list and the detail — the
+  files of the checkout you are in, or on the one list (0) of the project of
+  the row under the cursor, as a tree on the left, and on the right what the
+  cursor stands on. It only reads. Every name stands, hidden files and what
+  git ignores too; only .git is left out. Directories come first, marked ▸
+  folded and ▾ open and ending in /, links show → and where they point (a
+  link out of the checkout says so and does not open), and directories git
+  ignores say ignored. The hand is the list's: {key:moves.line_down} and {key:moves.line_up}, {key:moves.top} and {key:moves.bottom} move the
+  cursor; {key:moves.half_down}, {key:moves.half_up}, {key:moves.page_down}, {key:moves.page_up} and the wheel scroll the tree and leave
+  the cursor; {key:files.expand} or Right opens a directory one level and {key:files.collapse} or Left folds
+  it or goes to the row above it; {key:files.expand_all} opens everything below — not into
+  links or ignored directories, stopping with a notice after 5,000 entries
+  read — or folds it all back when it is open. {key:files.expand} on an ignored directory
+  opens it. {key:files.enter} steps into a directory, whose first row is .., and on a
+  file goes to the right pane; {key:files.focus_next} goes back and forth. {key:files.leave} steps out,
+  and at the checkout's root nothing goes further up. The right pane shows the
+  file under the cursor with its line numbers, coloured by its syntax once that
+  is ready; a file past 1 MiB shows its first MiB and says how large it is, and
+  one that is not text says so with its size. With the focus there the moves and
+  the wheel scroll the text, and {key:files.scroll_left} and {key:files.scroll_right} scroll it sideways by half
+  the pane, as does the sideways wheel — lines do not wrap, and ‹ and › say
+  there is more to either side. Reading runs in the background: a directory or
+  a file being read says so and the cursor keeps moving.
+  {key:files.search} finds files below the tree's root by a piece of their path, case
+  aside, as you type; Enter keeps the search and Esc drops what was typed.
+  Nothing is hidden: the folders down to each file found open, the file's row
+  is marked at its head with an asterisk and its matching letters reversed,
+  and every other row stays. Directories git ignores are not searched unless
+  you step into one first; .git and links are never entered. The first search
+  on a root indexes it in the background and the title says how far it got.
+  Up to 500 files open, the shallow ones first, with the whole count in the
+  title. {key:files.next_match} and {key:files.prev_match} jump to the next and previous file found, round at
+  the ends. {key:files.close} ends the search and folds back what it opened — folders you
+  opened stay.
+  {key:browse.worktree} over the window picks the checkout it shows: the main checkout
+  first, then the linked worktrees, a milestone's worktree saying so, each
+  with its branch and its issue's title, the one shown marked [now]. Only
+  the checkouts git lists can be picked, and the picked one is the new root:
+  nothing above it stands, a worktree made outside the repository included.
+  If the checkout is removed while the window stands, the window goes back
+  to the main one and says so. {key:browse.changed} shows the changed files only — what
+  changed on the checkout's branch since it forked, uncommitted and untracked
+  files with it (on the main checkout, what is not committed) — as a tree with
+  every folder open, each file headed by the letter moai diff --stat prints for
+  its kind and followed by +added −removed; deleted files stand dimmed.
+  Pressed again it gives the tree back with the folders and the cursor as
+  they were. The
+  right pane shows the file's text; {key:browse.diff} shows its diff instead (on a
+  folder, every changed file below it) and {key:browse.detail} the checkout's issue — an
+  epic worktree's epic, a milestone worktree's milestone. With both on the
+  detail stands first, above the diff or left of it as {key:browse.detail_at} places
+  the detail; where the two do not fit, the diff folds and the detail
+  stays. {key:files.focus_next} goes round the panes that stand. These toggles are the
+  window's own: the list's detail and the config are not touched.
+  {key:files.close} closes the window, with the cursor, the filter and the detail as
+  they were. SPC opens the menu over it with the screens and those keys. The
+  window is read fresh every time.
+
+  On the list, the board and the gantt {key:browse.diff} stands a diff pane beside the
+  detail: what the cursor's issue, epic or milestone changes, the scopes moai
+  diff <id> reads, in its order. It takes the detail's place: with the detail
+  shown the detail stands first, above it or left of it as {key:browse.detail_at} places
+  the detail, and with the detail hidden the diff takes that place whole.
+  Where the two do not fit the diff folds and the detail stays. Drag the
+  line between them to share the place; the share is kept in the config
+  (diff_width side by side, diff_height stacked), as is the pane itself
+  (diff). {key:browse.focus_next} goes round the panes that stand.
+
+  The diff pane shows one scope of changes at a time. Each file starts with a
+  head line — its kind as the letter moai diff --stat prints, its path
+  (old → new for a rename) and +added −removed — then its hunks: @@ and the
+  line numbers, and every line with its old and new number and + for added,
+  - for removed. The numbers and the mark carry the added and removed colours
+  and the text keeps its syntax colours; a file whose language is not known is
+  coloured whole. Binary files, and files whose mode alone changed, show their
+  head and why there are no lines. {key:browse.diff_layout} puts the old and new side by side,
+  paired, in a pane at least 80 columns wide; a narrower one draws unified and
+  its title says so. With the focus on the pane {key:moves.line_down}, {key:moves.line_up}, {key:moves.top}, {key:moves.bottom}, {key:moves.half_down},
+  {key:moves.half_up}, {key:moves.page_down}, {key:moves.page_up} and the wheel scroll it, {key:diff.next_file} and {key:diff.prev_file} jump to the
+  next and previous file, {key:diff.next_scope} and {key:diff.prev_scope} show the next and previous scope, and {key:diff.scroll_left}
+  and {key:diff.scroll_right} scroll the text sideways by half the pane, both halves together —
+  lines do not wrap. The title names the scopes, the one shown in brackets,
+  whose branch it is and how many files; a patch cut at 2 MiB or a list cut at
+  5,000 files says so. Git runs in the background: the pane says it is reading
+  and the cursor keeps moving.
 
   {key:browse.jot} opens the jot form anywhere inside a project. It keeps a backlog item
   with no epic. If an editor is there ($VISUAL, $EDITOR, or vi or nano on
@@ -1631,7 +1724,7 @@ pub enum CtlCmd {
         #[arg(short = 't', long, help = "Window id from moai ctl ls")]
         target: Option<String>,
     },
-    /// Show list, board, gantt, stats, or wiki
+    /// Show list, board, gantt, stats, wiki, or files
     #[command(after_help = "  Example: moai ctl screen board.")]
     Screen {
         name: String,

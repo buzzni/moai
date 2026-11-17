@@ -58,7 +58,6 @@ pub enum Why {
     NotFile,
     NotDirectory,
     NotText,
-    #[allow(dead_code)] // Keep the underlying error for the TUI reader.
     Io(io::Error),
 }
 impl From<io::Error> for Why {
@@ -83,7 +82,7 @@ pub enum Kind {
     Link { dir: bool, inside: bool },
     Other,
 }
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Entry {
     pub name: String,
     pub kind: Kind,
@@ -104,7 +103,6 @@ pub struct Text {
 }
 #[derive(Debug, Clone, Copy)]
 pub struct Walked {
-    #[allow(dead_code)] // The TUI walker reports its visited count.
     pub seen: usize,
     pub truncated: bool,
 }
@@ -470,8 +468,44 @@ pub fn stamp(jail: &Jail, path: &str) -> Option<Stamp> {
         (meta.is_file() || meta.is_dir()).then(|| Stamp::of(&meta))
     }
 }
+/// The text a link holds, read without following it. Only the parent is resolved, so a link
+/// pointing outside the jail is still described; the text is foreign and may hold anything.
+pub fn link_text(jail: &Jail, path: &str) -> Result<String, Why> {
+    let rel = normal(path)?;
+    let name = rel.file_name().ok_or(Why::Outside)?.to_owned();
+    let parent = rel.parent().map(key_of).filter(|p| !p.is_empty()).unwrap_or_else(|| ".".to_owned());
+    let actual = resolve(jail, &parent)?;
+    #[cfg(unix)]
+    {
+        use std::os::fd::AsRawFd;
+        use std::os::unix::ffi::{OsStrExt, OsStringExt};
+        let dir = open_checked(jail, &actual, true)?;
+        let name = std::ffi::CString::new(name.as_bytes()).map_err(|_| Why::Outside)?;
+        let mut buf = vec![0u8; 4096];
+        // SAFETY: dir is a live directory handle, name is NUL-terminated and buf is writable for its length.
+        let n = unsafe { libc::readlinkat(dir.as_raw_fd(), name.as_ptr(), buf.as_mut_ptr().cast(), buf.len()) };
+        if n < 0 {
+            let e = io::Error::last_os_error();
+            if e.raw_os_error() == Some(libc::EINVAL) {
+                return Err(Why::NotFile);
+            }
+            return Err(Why::from(e));
+        }
+        buf.truncate(n as usize);
+        Ok(std::ffi::OsString::from_vec(buf).to_string_lossy().into_owned())
+    }
+    #[cfg(not(unix))]
+    {
+        let at = actual.join(&name);
+        match std::fs::symlink_metadata(&at) {
+            Ok(m) if m.file_type().is_symlink() => {}
+            Ok(_) => return Err(Why::NotFile),
+            Err(e) => return Err(Why::from(e)),
+        }
+        Ok(std::fs::read_link(&at).map_err(Why::from)?.to_string_lossy().into_owned())
+    }
+}
 /// Walk in bounded batches. Returning false from `take` stops immediately.
-#[allow(dead_code)] // The TUI consumes the general walker.
 pub fn walk(jail: &Jail, dir: &str, skip: &[String], mut take: impl FnMut(&[String]) -> bool) -> Result<Walked, Why> {
     walk_limit(jail, dir, skip, WALK_LIMIT, false, &mut take)
 }
@@ -593,7 +627,6 @@ pub fn matches(query: &str, path: &str) -> Option<Range<usize>> {
     let last = ranges.iter().rev().find(|r| r.0 < end)?;
     Some(first.2..last.3)
 }
-#[allow(dead_code)] // The TUI consumes the file extension helper.
 pub fn ext_of(name: &str) -> &str {
     Path::new(name).extension().and_then(|s| s.to_str()).unwrap_or("")
 }
